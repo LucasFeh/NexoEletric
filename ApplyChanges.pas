@@ -1,0 +1,863 @@
+{ ..................................................................................................................... }
+{ .  AltiumPCBMirror - ApplyChanges.pas                                                                               . }
+{ .                                                                                                                   . }
+{ .  Le PCBMirror\changes.js (ao lado do .PcbDoc ABERTO) e aplica as mudancas na placa:                               . }
+{ .    comp_move | track_edit | track_add | track_del | via_edit | via_add | via_del | arc_edit | arc_add | arc_del   . }
+{ .                                                                                                                   . }
+{ .  Seguranca:                                                                                                       . }
+{ .    - Toda edicao/remocao exige campos orig_* (copiados do board.js). O objeto real so e alterado se casar         . }
+{ .      com o original (tolerancia 0.001 mm) - protege contra placa dessincronizada do espelho.                      . }
+{ .    - Tudo roda dentro de PCBServer.PreProcess/PostProcess: UM unico undo desfaz a aplicacao inteira.              . }
+{ .    - Relatorio detalhado em PCBMirror\apply-report.txt.                                                           . }
+{ .                                                                                                                   . }
+{ .  CONTRATO DE COORDENADAS: mm, Y para cima, relativo a origem da placa - identico ao board.js / PCB List.          . }
+{ .                                                                                                                   . }
+{ .  Como executar: DXP >> Run Script >> ApplyChanges  (com o .PcbDoc aberto e focado)                                . }
+{ ..................................................................................................................... }
+
+const
+  OUT_SUBDIR = 'PCBMirror';
+  TOL_MM = 0.001;
+
+var
+  Board: IPCB_Board;
+  Report: TStringList;
+  OkCount, FailCount: Integer;
+
+{ ..................................................................................................................... }
+{ .                                          Parsing de JSON plano por linha                                          . }
+{ ..................................................................................................................... }
+
+// Converte string com ponto decimal (e expoente opcional) em Double, sem depender de locale
+function StrToFloatDot(s: String): Double;
+var
+  i, ExpV: Integer;
+  Neg, NegExp, InFrac, InExp: Boolean;
+  IntPart, FracInt, FracDiv: Double;
+begin
+  IntPart := 0;
+  FracInt := 0;
+  FracDiv := 1;
+  ExpV := 0;
+  Neg := False;
+  NegExp := False;
+  InFrac := False;
+  InExp := False;
+
+  s := Trim(s);
+  for i := 1 to Length(s) do
+  begin
+    case Ord(s[i]) of
+      43: ; // '+'
+      45: // '-'
+        begin
+          if InExp then
+            NegExp := True
+          else
+            Neg := True;
+        end;
+      46: // '.'
+        InFrac := True;
+      69, 101: // 'E', 'e'
+        InExp := True;
+      48 .. 57: // digitos
+        begin
+          if InExp then
+            ExpV := ExpV * 10 + (Ord(s[i]) - 48)
+          else if InFrac then
+          begin
+            FracDiv := FracDiv * 10;
+            FracInt := FracInt * 10 + (Ord(s[i]) - 48);
+          end
+          else
+            IntPart := IntPart * 10 + (Ord(s[i]) - 48);
+        end;
+    end;
+  end;
+
+  Result := IntPart + FracInt / FracDiv;
+  if Neg then
+    Result := -Result;
+  if InExp then
+  begin
+    for i := 1 to ExpV do
+    begin
+      if NegExp then
+        Result := Result / 10
+      else
+        Result := Result * 10;
+    end;
+  end;
+end;
+
+// Retorna o valor bruto de "Key": na linha ('' se ausente). Strings voltam sem aspas e com escapes resolvidos.
+function JGet(Line, Key: String): String;
+var
+  p, l: Integer;
+  Hex: String;
+begin
+  Result := '';
+  p := Pos('"' + Key + '":', Line);
+  if p = 0 then
+    Exit;
+  p := p + Length(Key) + 3;
+  l := Length(Line);
+  while (p <= l) and (Line[p] = ' ') do
+    p := p + 1;
+  if p > l then
+    Exit;
+
+  if Line[p] = '"' then
+  begin
+    p := p + 1;
+    while p <= l do
+    begin
+      if Line[p] = '\' then
+      begin
+        p := p + 1;
+        if p > l then
+          break;
+        case Ord(Line[p]) of
+          110: // n
+            Result := Result + #10;
+          116: // t
+            Result := Result + #9;
+          117: // uXXXX
+            begin
+              Hex := Copy(Line, p + 1, 4);
+              Result := Result + Chr(StrToInt('$' + Hex));
+              p := p + 4;
+            end;
+        else
+          Result := Result + Line[p];
+        end;
+      end
+      else if Line[p] = '"' then
+        break
+      else
+        Result := Result + Line[p];
+      p := p + 1;
+    end;
+  end
+  else
+  begin
+    while (p <= l) and (Line[p] <> ',') and (Line[p] <> '}') do
+    begin
+      Result := Result + Line[p];
+      p := p + 1;
+    end;
+    Result := Trim(Result);
+  end;
+end;
+
+function JHas(Line, Key: String): Boolean;
+begin
+  Result := Pos('"' + Key + '":', Line) <> 0;
+end;
+
+function JNum(Line, Key: String): Double;
+begin
+  Result := StrToFloatDot(JGet(Line, Key));
+end;
+
+{ ..................................................................................................................... }
+{ .                                        Conversoes e comparacoes de geometria                                      . }
+{ ..................................................................................................................... }
+
+// mm relativo a origem -> coordenada interna absoluta
+function MMX(v: Double): Integer;
+begin
+  Result := MMsToCoord(v) + Board.XOrigin;
+end;
+
+function MMY(v: Double): Integer;
+begin
+  Result := MMsToCoord(v) + Board.YOrigin;
+end;
+
+// coordenada interna absoluta -> mm relativo a origem
+function XMM(v: Integer): Double;
+begin
+  Result := CoordToMMs(v - Board.XOrigin);
+end;
+
+function YMM(v: Integer): Double;
+begin
+  Result := CoordToMMs(v - Board.YOrigin);
+end;
+
+function NearMM(a, b: Double): Boolean;
+begin
+  Result := Abs(a - b) <= TOL_MM;
+end;
+
+function NearAngle(a, b: Double): Boolean;
+var
+  d: Double;
+begin
+  d := Abs(a - b);
+  while d >= 360 do
+    d := d - 360;
+  if d > 180 then
+    d := 360 - d;
+  Result := d <= 0.01;
+end;
+
+function LayerFromName(Name: String): TLayer;
+begin
+  Result := 0;
+  if Name = 'Top' then
+    Result := eTopLayer
+  else if Name = 'Bottom' then
+    Result := eBottomLayer
+  else if Name = 'TopOverlay' then
+    Result := eTopOverlay
+  else if Name = 'BottomOverlay' then
+    Result := eBottomOverlay
+  else if Name = 'Multi' then
+    Result := eMultiLayer
+  else if Name = 'Mech1' then
+    Result := eMechanical1
+  else if Name = 'KeepOut' then
+    Result := eKeepOutLayer;
+end;
+
+function LayerNameOf(L: TLayer): String;
+begin
+  if L = eTopLayer then
+    Result := 'Top'
+  else if L = eBottomLayer then
+    Result := 'Bottom'
+  else if L = eTopOverlay then
+    Result := 'TopOverlay'
+  else if L = eBottomOverlay then
+    Result := 'BottomOverlay'
+  else if L = eMultiLayer then
+    Result := 'Multi'
+  else if L = eMechanical1 then
+    Result := 'Mech1'
+  else if L = eKeepOutLayer then
+    Result := 'KeepOut'
+  else
+    Result := 'L' + IntToStr(L);
+end;
+
+{ ..................................................................................................................... }
+{ .                                            Localizacao de objetos reais                                           . }
+{ ..................................................................................................................... }
+
+function FindComponent(Ref: String): IPCB_Component;
+var
+  Iter, Prim: TObject;
+begin
+  Result := nil;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(eComponentObject));
+  Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+  Iter.AddFilter_Method(eProcessAll);
+  Prim := Iter.FirstPCBObject;
+  while Prim <> nil do
+  begin
+    if Prim.Name.Text = Ref then
+    begin
+      Result := Prim;
+      break;
+    end;
+    Prim := Iter.NextPCBObject;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+end;
+
+function FindNet(Name: String): IPCB_Net;
+var
+  Iter, Prim: TObject;
+begin
+  Result := nil;
+  if Name = '' then
+    Exit;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(eNetObject));
+  Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+  Iter.AddFilter_Method(eProcessAll);
+  Prim := Iter.FirstPCBObject;
+  while Prim <> nil do
+  begin
+    if Prim.Name = Name then
+    begin
+      Result := Prim;
+      break;
+    end;
+    Prim := Iter.NextPCBObject;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+end;
+
+// Trilha cujo (x1,y1)-(x2,y2)/largura/camada casam com os orig_* (qualquer direcao)
+function FindTrack(L: TLayer; X1, Y1, X2, Y2, W: Double): IPCB_Track;
+var
+  Iter, Prim: TObject;
+  ax1, ay1, ax2, ay2: Double;
+  DirectHit, ReverseHit: Boolean;
+begin
+  Result := nil;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(eTrackObject));
+  Iter.AddFilter_LayerSet(MkSet(L));
+  Iter.AddFilter_Method(eProcessAll);
+  Prim := Iter.FirstPCBObject;
+  while Prim <> nil do
+  begin
+    ax1 := XMM(Prim.X1);
+    ay1 := YMM(Prim.Y1);
+    ax2 := XMM(Prim.X2);
+    ay2 := YMM(Prim.Y2);
+    DirectHit := NearMM(ax1, X1) and NearMM(ay1, Y1) and NearMM(ax2, X2) and NearMM(ay2, Y2);
+    ReverseHit := NearMM(ax1, X2) and NearMM(ay1, Y2) and NearMM(ax2, X1) and NearMM(ay2, Y1);
+    if (DirectHit or ReverseHit) and NearMM(CoordToMMs(Prim.Width), W) then
+    begin
+      Result := Prim;
+      break;
+    end;
+    Prim := Iter.NextPCBObject;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+end;
+
+function FindVia(x, Y: Double): IPCB_Via;
+var
+  Iter, Prim: TObject;
+begin
+  Result := nil;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(eViaObject));
+  Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+  Iter.AddFilter_Method(eProcessAll);
+  Prim := Iter.FirstPCBObject;
+  while Prim <> nil do
+  begin
+    if NearMM(XMM(Prim.x), x) and NearMM(YMM(Prim.y), Y) then
+    begin
+      Result := Prim;
+      break;
+    end;
+    Prim := Iter.NextPCBObject;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+end;
+
+function FindArc(L: TLayer; cx, cy, r, sa, ea: Double): IPCB_Arc;
+var
+  Iter, Prim: TObject;
+begin
+  Result := nil;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(eArcObject));
+  Iter.AddFilter_LayerSet(MkSet(L));
+  Iter.AddFilter_Method(eProcessAll);
+  Prim := Iter.FirstPCBObject;
+  while Prim <> nil do
+  begin
+    if NearMM(XMM(Prim.XCenter), cx) and NearMM(YMM(Prim.YCenter), cy) and
+      NearMM(CoordToMMs(Prim.Radius), r) and NearAngle(Prim.StartAngle, sa) and
+      NearAngle(Prim.EndAngle, ea) then
+    begin
+      Result := Prim;
+      break;
+    end;
+    Prim := Iter.NextPCBObject;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+end;
+
+{ ..................................................................................................................... }
+{ .                                                Relatorio                                                          . }
+{ ..................................................................................................................... }
+
+procedure LogOk(Msg: String);
+begin
+  OkCount := OkCount + 1;
+  Report.Add('[OK]    ' + Msg);
+end;
+
+procedure LogFail(Msg: String);
+begin
+  FailCount := FailCount + 1;
+  Report.Add('[FALHA] ' + Msg);
+end;
+
+{ ..................................................................................................................... }
+{ .                                            Aplicacao de cada operacao                                             . }
+{ ..................................................................................................................... }
+
+procedure DoCompMove(Line: String);
+var
+  Ref, LayerStr, OrigLayerStr: String;
+  Comp: IPCB_Component;
+  NewLayer: TLayer;
+begin
+  Ref := JGet(Line, 'ref');
+  Comp := FindComponent(Ref);
+  if Comp = nil then
+  begin
+    LogFail('comp_move ' + Ref + ': componente nao encontrado');
+    Exit;
+  end;
+
+  if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y') and JHas(Line, 'orig_rot') and JHas(Line, 'orig_layer')) then
+  begin
+    LogFail('comp_move ' + Ref + ': faltam campos orig_* (copie do board.js)');
+    Exit;
+  end;
+
+  OrigLayerStr := JGet(Line, 'orig_layer');
+  if not (NearMM(XMM(Comp.x), JNum(Line, 'orig_x')) and NearMM(YMM(Comp.y), JNum(Line, 'orig_y')) and
+    NearAngle(Comp.Rotation, JNum(Line, 'orig_rot')) and (LayerNameOf(Comp.Layer) = OrigLayerStr)) then
+  begin
+    LogFail('comp_move ' + Ref + ': estado atual da placa nao casa com orig_* (re-exporte o espelho)');
+    Exit;
+  end;
+
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+
+  if JHas(Line, 'layer') then
+  begin
+    LayerStr := JGet(Line, 'layer');
+    NewLayer := LayerFromName(LayerStr);
+    if ((NewLayer = eTopLayer) or (NewLayer = eBottomLayer)) and (NewLayer <> Comp.Layer) then
+      Comp.Layer := NewLayer;
+  end;
+
+  if JHas(Line, 'rot') then
+    Comp.Rotation := JNum(Line, 'rot');
+
+  Comp.MoveToXY(MMX(JNum(Line, 'x')), MMY(JNum(Line, 'y')));
+
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Comp.GraphicallyInvalidate;
+
+  LogOk('comp_move ' + Ref + ' -> x=' + JGet(Line, 'x') + ' y=' + JGet(Line, 'y') + ' rot=' + JGet(Line, 'rot'));
+end;
+
+function RequireTrackOrig(Line, What: String): IPCB_Track;
+var
+  L: TLayer;
+begin
+  Result := nil;
+  if not (JHas(Line, 'orig_x1') and JHas(Line, 'orig_y1') and JHas(Line, 'orig_x2') and
+    JHas(Line, 'orig_y2') and JHas(Line, 'orig_w') and JHas(Line, 'orig_layer')) then
+  begin
+    LogFail(What + ': faltam campos orig_* (copie do board.js)');
+    Exit;
+  end;
+  L := LayerFromName(JGet(Line, 'orig_layer'));
+  if L = 0 then
+  begin
+    LogFail(What + ': orig_layer invalida "' + JGet(Line, 'orig_layer') + '"');
+    Exit;
+  end;
+  Result := FindTrack(L, JNum(Line, 'orig_x1'), JNum(Line, 'orig_y1'), JNum(Line, 'orig_x2'),
+    JNum(Line, 'orig_y2'), JNum(Line, 'orig_w'));
+  if Result = nil then
+    LogFail(What + ': trilha original nao encontrada na placa (re-exporte o espelho)');
+end;
+
+procedure DoTrackEdit(Line: String);
+var
+  Track: IPCB_Track;
+  What: String;
+  L: TLayer;
+  Net: IPCB_Net;
+begin
+  What := 'track_edit ' + JGet(Line, 'id');
+  Track := RequireTrackOrig(Line, What);
+  if Track = nil then
+    Exit;
+
+  PCBServer.SendMessageToRobots(Track.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if JHas(Line, 'x1') then
+    Track.X1 := MMX(JNum(Line, 'x1'));
+  if JHas(Line, 'y1') then
+    Track.Y1 := MMY(JNum(Line, 'y1'));
+  if JHas(Line, 'x2') then
+    Track.X2 := MMX(JNum(Line, 'x2'));
+  if JHas(Line, 'y2') then
+    Track.Y2 := MMY(JNum(Line, 'y2'));
+  if JHas(Line, 'w') then
+    Track.Width := MMsToCoord(JNum(Line, 'w'));
+  if JHas(Line, 'layer') then
+  begin
+    L := LayerFromName(JGet(Line, 'layer'));
+    if (L = eTopLayer) or (L = eBottomLayer) then
+      Track.Layer := L;
+  end;
+  if JHas(Line, 'net') then
+  begin
+    Net := FindNet(JGet(Line, 'net'));
+    if Net <> nil then
+      Track.Net := Net;
+  end;
+  PCBServer.SendMessageToRobots(Track.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Track.GraphicallyInvalidate;
+  LogOk(What);
+end;
+
+procedure DoTrackAdd(Line: String);
+var
+  Track: IPCB_Track;
+  L: TLayer;
+  Net: IPCB_Net;
+  NetStr: String;
+begin
+  L := LayerFromName(JGet(Line, 'layer'));
+  if (L <> eTopLayer) and (L <> eBottomLayer) then
+  begin
+    LogFail('track_add: camada invalida "' + JGet(Line, 'layer') + '" (use Top ou Bottom)');
+    Exit;
+  end;
+  if not (JHas(Line, 'x1') and JHas(Line, 'y1') and JHas(Line, 'x2') and JHas(Line, 'y2') and JHas(Line, 'w')) then
+  begin
+    LogFail('track_add: faltam campos x1/y1/x2/y2/w');
+    Exit;
+  end;
+
+  Track := PCBServer.PCBObjectFactory(eTrackObject, eNoDimension, eCreate_Default);
+  Track.X1 := MMX(JNum(Line, 'x1'));
+  Track.Y1 := MMY(JNum(Line, 'y1'));
+  Track.X2 := MMX(JNum(Line, 'x2'));
+  Track.Y2 := MMY(JNum(Line, 'y2'));
+  Track.Width := MMsToCoord(JNum(Line, 'w'));
+  Track.Layer := L;
+
+  NetStr := JGet(Line, 'net');
+  if NetStr <> '' then
+  begin
+    Net := FindNet(NetStr);
+    if Net <> nil then
+      Track.Net := Net
+    else
+      Report.Add('[AVISO] track_add: net "' + NetStr + '" nao existe na placa - trilha criada sem net');
+  end;
+
+  Board.AddPCBObject(Track);
+  PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Track.I_ObjectAddress);
+  LogOk('track_add ' + JGet(Line, 'layer') + ' (' + JGet(Line, 'x1') + ',' + JGet(Line, 'y1') + ')-(' +
+    JGet(Line, 'x2') + ',' + JGet(Line, 'y2') + ') w=' + JGet(Line, 'w'));
+end;
+
+procedure DoTrackDel(Line: String);
+var
+  Track: IPCB_Track;
+  What: String;
+begin
+  What := 'track_del ' + JGet(Line, 'id');
+  Track := RequireTrackOrig(Line, What);
+  if Track = nil then
+    Exit;
+  Board.RemovePCBObject(Track);
+  LogOk(What);
+end;
+
+function RequireViaOrig(Line, What: String): IPCB_Via;
+begin
+  Result := nil;
+  if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y')) then
+  begin
+    LogFail(What + ': faltam campos orig_x/orig_y (copie do board.js)');
+    Exit;
+  end;
+  Result := FindVia(JNum(Line, 'orig_x'), JNum(Line, 'orig_y'));
+  if Result = nil then
+    LogFail(What + ': via original nao encontrada na placa (re-exporte o espelho)');
+end;
+
+procedure DoViaEdit(Line: String);
+var
+  Via: IPCB_Via;
+  What: String;
+begin
+  What := 'via_edit ' + JGet(Line, 'id');
+  Via := RequireViaOrig(Line, What);
+  if Via = nil then
+    Exit;
+
+  PCBServer.SendMessageToRobots(Via.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if JHas(Line, 'x') then
+    Via.x := MMX(JNum(Line, 'x'));
+  if JHas(Line, 'y') then
+    Via.y := MMY(JNum(Line, 'y'));
+  if JHas(Line, 'size') then
+    Via.Size := MMsToCoord(JNum(Line, 'size'));
+  if JHas(Line, 'drill') then
+    Via.HoleSize := MMsToCoord(JNum(Line, 'drill'));
+  PCBServer.SendMessageToRobots(Via.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Via.GraphicallyInvalidate;
+  LogOk(What);
+end;
+
+procedure DoViaAdd(Line: String);
+var
+  Via: IPCB_Via;
+  Net: IPCB_Net;
+  NetStr: String;
+  LFrom, LTo: TLayer;
+begin
+  if not (JHas(Line, 'x') and JHas(Line, 'y') and JHas(Line, 'size') and JHas(Line, 'drill')) then
+  begin
+    LogFail('via_add: faltam campos x/y/size/drill');
+    Exit;
+  end;
+
+  Via := PCBServer.PCBObjectFactory(eViaObject, eNoDimension, eCreate_Default);
+  Via.x := MMX(JNum(Line, 'x'));
+  Via.y := MMY(JNum(Line, 'y'));
+  Via.Size := MMsToCoord(JNum(Line, 'size'));
+  Via.HoleSize := MMsToCoord(JNum(Line, 'drill'));
+
+  LFrom := eTopLayer;
+  LTo := eBottomLayer;
+  if JHas(Line, 'from') then
+    LFrom := LayerFromName(JGet(Line, 'from'));
+  if JHas(Line, 'to') then
+    LTo := LayerFromName(JGet(Line, 'to'));
+  Via.LowLayer := LFrom;
+  Via.HighLayer := LTo;
+
+  NetStr := JGet(Line, 'net');
+  if NetStr <> '' then
+  begin
+    Net := FindNet(NetStr);
+    if Net <> nil then
+      Via.Net := Net
+    else
+      Report.Add('[AVISO] via_add: net "' + NetStr + '" nao existe na placa - via criada sem net');
+  end;
+
+  Board.AddPCBObject(Via);
+  PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Via.I_ObjectAddress);
+  LogOk('via_add (' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ') size=' + JGet(Line, 'size') +
+    ' drill=' + JGet(Line, 'drill'));
+end;
+
+procedure DoViaDel(Line: String);
+var
+  Via: IPCB_Via;
+  What: String;
+begin
+  What := 'via_del ' + JGet(Line, 'id');
+  Via := RequireViaOrig(Line, What);
+  if Via = nil then
+    Exit;
+  Board.RemovePCBObject(Via);
+  LogOk(What);
+end;
+
+function RequireArcOrig(Line, What: String): IPCB_Arc;
+var
+  L: TLayer;
+begin
+  Result := nil;
+  if not (JHas(Line, 'orig_cx') and JHas(Line, 'orig_cy') and JHas(Line, 'orig_r') and
+    JHas(Line, 'orig_sa') and JHas(Line, 'orig_ea') and JHas(Line, 'orig_layer')) then
+  begin
+    LogFail(What + ': faltam campos orig_* (copie do board.js)');
+    Exit;
+  end;
+  L := LayerFromName(JGet(Line, 'orig_layer'));
+  if L = 0 then
+  begin
+    LogFail(What + ': orig_layer invalida "' + JGet(Line, 'orig_layer') + '"');
+    Exit;
+  end;
+  Result := FindArc(L, JNum(Line, 'orig_cx'), JNum(Line, 'orig_cy'), JNum(Line, 'orig_r'),
+    JNum(Line, 'orig_sa'), JNum(Line, 'orig_ea'));
+  if Result = nil then
+    LogFail(What + ': arco original nao encontrado na placa (re-exporte o espelho)');
+end;
+
+procedure DoArcEdit(Line: String);
+var
+  Arc: IPCB_Arc;
+  What: String;
+  L: TLayer;
+begin
+  What := 'arc_edit ' + JGet(Line, 'id');
+  Arc := RequireArcOrig(Line, What);
+  if Arc = nil then
+    Exit;
+
+  PCBServer.SendMessageToRobots(Arc.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if JHas(Line, 'cx') then
+    Arc.XCenter := MMX(JNum(Line, 'cx'));
+  if JHas(Line, 'cy') then
+    Arc.YCenter := MMY(JNum(Line, 'cy'));
+  if JHas(Line, 'r') then
+    Arc.Radius := MMsToCoord(JNum(Line, 'r'));
+  if JHas(Line, 'sa') then
+    Arc.StartAngle := JNum(Line, 'sa');
+  if JHas(Line, 'ea') then
+    Arc.EndAngle := JNum(Line, 'ea');
+  if JHas(Line, 'w') then
+    Arc.LineWidth := MMsToCoord(JNum(Line, 'w'));
+  if JHas(Line, 'layer') then
+  begin
+    L := LayerFromName(JGet(Line, 'layer'));
+    if (L = eTopLayer) or (L = eBottomLayer) then
+      Arc.Layer := L;
+  end;
+  PCBServer.SendMessageToRobots(Arc.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Arc.GraphicallyInvalidate;
+  LogOk(What);
+end;
+
+procedure DoArcAdd(Line: String);
+var
+  Arc: IPCB_Arc;
+  L: TLayer;
+  Net: IPCB_Net;
+  NetStr: String;
+begin
+  L := LayerFromName(JGet(Line, 'layer'));
+  if (L <> eTopLayer) and (L <> eBottomLayer) then
+  begin
+    LogFail('arc_add: camada invalida "' + JGet(Line, 'layer') + '" (use Top ou Bottom)');
+    Exit;
+  end;
+  if not (JHas(Line, 'cx') and JHas(Line, 'cy') and JHas(Line, 'r') and JHas(Line, 'sa') and
+    JHas(Line, 'ea') and JHas(Line, 'w')) then
+  begin
+    LogFail('arc_add: faltam campos cx/cy/r/sa/ea/w');
+    Exit;
+  end;
+
+  Arc := PCBServer.PCBObjectFactory(eArcObject, eNoDimension, eCreate_Default);
+  Arc.XCenter := MMX(JNum(Line, 'cx'));
+  Arc.YCenter := MMY(JNum(Line, 'cy'));
+  Arc.Radius := MMsToCoord(JNum(Line, 'r'));
+  Arc.StartAngle := JNum(Line, 'sa');
+  Arc.EndAngle := JNum(Line, 'ea');
+  Arc.LineWidth := MMsToCoord(JNum(Line, 'w'));
+  Arc.Layer := L;
+
+  NetStr := JGet(Line, 'net');
+  if NetStr <> '' then
+  begin
+    Net := FindNet(NetStr);
+    if Net <> nil then
+      Arc.Net := Net
+    else
+      Report.Add('[AVISO] arc_add: net "' + NetStr + '" nao existe na placa - arco criado sem net');
+  end;
+
+  Board.AddPCBObject(Arc);
+  PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Arc.I_ObjectAddress);
+  LogOk('arc_add ' + JGet(Line, 'layer') + ' c=(' + JGet(Line, 'cx') + ',' + JGet(Line, 'cy') + ') r=' + JGet(Line, 'r'));
+end;
+
+procedure DoArcDel(Line: String);
+var
+  Arc: IPCB_Arc;
+  What: String;
+begin
+  What := 'arc_del ' + JGet(Line, 'id');
+  Arc := RequireArcOrig(Line, What);
+  if Arc = nil then
+    Exit;
+  Board.RemovePCBObject(Arc);
+  LogOk(What);
+end;
+
+{ ..................................................................................................................... }
+{ .                                                Rotina principal                                                   . }
+{ ..................................................................................................................... }
+
+procedure ApplyChanges;
+var
+  OutDir, ChangesFile, Line, Op: String;
+  Src: TStringList;
+  i, Recognized: Integer;
+begin
+  Board := PCBServer.GetCurrentPCBBoard;
+  if Board = nil then
+  begin
+    ShowMessage('Nenhum documento PCB aberto/focado. Abra o .PcbDoc e rode novamente.');
+    Exit;
+  end;
+
+  OutDir := ExtractFilePath(Board.FileName) + OUT_SUBDIR;
+  ChangesFile := OutDir + '\changes.js';
+  if not FileExists(ChangesFile) then
+  begin
+    ShowMessage('Arquivo de mudancas nao encontrado:' + #13#10 + ChangesFile + #13#10#13#10 +
+      'Rode primeiro o ExportBoard e edite o changes.js.');
+    Exit;
+  end;
+
+  Report := TStringList.Create;
+  Report.Add('AltiumPCBMirror - relatorio de aplicacao');
+  Report.Add('Placa: ' + Board.FileName);
+  Report.Add('Data:  ' + DateTimeToStr(Now));
+  Report.Add('');
+  OkCount := 0;
+  FailCount := 0;
+  Recognized := 0;
+
+  Src := TStringList.Create;
+  Src.LoadFromFile(ChangesFile);
+
+  PCBServer.PreProcess;
+
+  for i := 0 to Src.Count - 1 do
+  begin
+    Line := Trim(Src[i]);
+    if Pos('//', Line) = 1 then
+      continue;
+    if not JHas(Line, 'op') then
+      continue;
+
+    Recognized := Recognized + 1;
+    Op := JGet(Line, 'op');
+
+    if Op = 'comp_move' then
+      DoCompMove(Line)
+    else if Op = 'track_edit' then
+      DoTrackEdit(Line)
+    else if Op = 'track_add' then
+      DoTrackAdd(Line)
+    else if Op = 'track_del' then
+      DoTrackDel(Line)
+    else if Op = 'via_edit' then
+      DoViaEdit(Line)
+    else if Op = 'via_add' then
+      DoViaAdd(Line)
+    else if Op = 'via_del' then
+      DoViaDel(Line)
+    else if Op = 'arc_edit' then
+      DoArcEdit(Line)
+    else if Op = 'arc_add' then
+      DoArcAdd(Line)
+    else if Op = 'arc_del' then
+      DoArcDel(Line)
+    else
+      LogFail('operacao desconhecida: "' + Op + '"');
+  end;
+
+  PCBServer.PostProcess;
+
+  Client.SendMessage('PCB:Zoom', 'Action=Redraw', 255, Client.CurrentView);
+
+  Report.Add('');
+  Report.Add('Mudancas reconhecidas: ' + IntToStr(Recognized));
+  Report.Add('Aplicadas com sucesso: ' + IntToStr(OkCount));
+  Report.Add('Falhas:                ' + IntToStr(FailCount));
+  Report.SaveToFile(OutDir + '\apply-report.txt');
+
+  ShowMessage('Aplicacao concluida.' + #13#10#13#10 +
+    'Reconhecidas: ' + IntToStr(Recognized) + #13#10 +
+    'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + #13#10#13#10 +
+    'Relatorio: ' + OutDir + '\apply-report.txt' + #13#10#13#10 +
+    'IMPORTANTE: confira o resultado, rode o DRC do Altium e re-execute o ExportBoard para atualizar o espelho.');
+
+  Src.Free;
+  Report.Free;
+end;
+
