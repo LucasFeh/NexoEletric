@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>AltiumPCBMirror — Hub</title>
+<style>
+  :root{ --bg:#1b1b1b; --panel:#242424; --panel2:#2d2d2d; --border:#3a3a3a;
+    --fg:#d8d8d8; --fg-dim:#9a9a9a; --accent:#4fc3f7; --ok:#00e676; --warn:#ffd54f; --err:#ff5252; }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%; overflow:hidden;}
+  body{background:var(--bg); color:var(--fg); font:13px/1.45 "Segoe UI",sans-serif;}
+  #header{display:flex; align-items:center; gap:10px; height:44px; padding:0 12px;
+    background:var(--panel); border-bottom:1px solid var(--border);}
+  #header h1{font-size:14px; font-weight:600; color:var(--accent); white-space:nowrap;}
+  #tabs{display:flex; gap:4px; margin-left:14px;}
+  .tab{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-bottom:none;
+    border-radius:4px 4px 0 0; padding:6px 16px; cursor:pointer; font-size:12px;}
+  .tab.active{background:#0d47a1; color:#fff; border-color:var(--accent);}
+  #curproj{margin-left:auto; color:var(--fg-dim); font-size:12px;}
+  .view{display:none; height:calc(100% - 44px);}
+  .view.active{display:block;}
+  iframe{width:100%; height:100%; border:0; background:var(--bg);}
+  /* Projetos */
+  #view-projects{overflow:auto; padding:18px;}
+  #cards{display:flex; flex-wrap:wrap; gap:14px;}
+  .card{width:290px; background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:12px;}
+  .card h3{font-size:14px; color:#fff; margin-bottom:6px; display:flex; gap:8px; align-items:center;}
+  .badge{font-size:10px; background:#6a1b9a; color:#fff; border-radius:3px; padding:1px 6px;}
+  .steps{display:flex; gap:4px; margin:8px 0;}
+  .step{flex:1; text-align:center; font-size:10px; padding:3px 0; border-radius:3px;
+    background:var(--panel2); color:var(--fg-dim); border:1px solid var(--border);}
+  .step.done{background:#1b5e20; color:#c8e6c9; border-color:#2e7d32;}
+  .step.cur{background:#0d47a1; color:#fff; border-color:var(--accent);}
+  .card .info{color:var(--fg-dim); font-size:11px; min-height:32px; white-space:pre-line;}
+  .card .actions{display:flex; gap:6px; margin-top:8px;}
+  button{background:var(--panel2); color:var(--fg); border:1px solid var(--border);
+    border-radius:3px; padding:4px 10px; font-size:12px; cursor:pointer;}
+  button:hover{border-color:var(--accent); color:#fff;}
+  #howto{margin-top:22px; color:var(--fg-dim); font-size:12px; max-width:760px; line-height:1.7;}
+  #howto b{color:var(--fg);}
+  /* Libs */
+  #view-libs{display:none; height:calc(100% - 44px);}
+  #view-libs.active{display:flex;}
+  #libleft{width:290px; min-width:290px; background:var(--panel); border-right:1px solid var(--border);
+    display:flex; flex-direction:column;}
+  #libsearch{margin:8px; background:var(--panel2); border:1px solid var(--border); color:var(--fg);
+    border-radius:3px; padding:5px 8px;}
+  #liblist{flex:1; overflow:auto;}
+  .libitem{padding:5px 10px; cursor:pointer; border-left:3px solid transparent; font-size:12px;}
+  .libitem:hover{background:#333;}
+  .libitem.sel{background:#0d47a1; color:#fff;}
+  .libitem .miss{color:var(--err); font-size:10px;}
+  #libmain{flex:1; display:flex; flex-direction:column; min-width:0;}
+  #libwarn{padding:6px 12px; color:var(--warn); font-size:11px; border-bottom:1px solid var(--border);
+    max-height:76px; overflow:auto; white-space:pre-line;}
+  #libcanvases{flex:1; display:flex; min-height:0;}
+  .libcv{flex:1; position:relative; border-right:1px solid var(--border);}
+  .libcv canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
+  .libcv .cvtitle{position:absolute; top:6px; left:10px; z-index:2; font-size:11px; color:var(--fg-dim);}
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>AltiumPCBMirror — Hub</h1>
+  <div id="tabs">
+    <div class="tab active" data-v="projects">Projetos</div>
+    <div class="tab" data-v="sch">Esquema</div>
+    <div class="tab" data-v="pcb">PCB</div>
+    <div class="tab" data-v="libs">Libs</div>
+  </div>
+  <span id="curproj">nenhum projeto aberto</span>
+</div>
+
+<div id="view-projects" class="view active">
+  <div id="cards"></div>
+  <div id="howto">
+    <b>Fluxo projeto novo:</b> 1) rode <b>ExportLibs</b> no Altium (espelha suas bibliotecas) ·
+    2) peça o projeto à IA (ela cria <b>Projects\&lt;nome&gt;\schematic.js</b>) · 3) confira aqui na vista
+    <b>Esquema</b> · 4) no Altium: crie um .PrjPcb com o mesmo nome e rode <b>BuildSchematic</b> ·
+    5) Compile + <b>Design » Update PCB</b> (ECO) · 6) rode <b>ExportBoard</b>, a IA roteia no
+    <b>changes.js</b>, confira na vista <b>PCB</b> · 7) rode <b>ApplyChanges</b> + DRC.
+  </div>
+</div>
+
+<div id="view-sch" class="view"><iframe id="schframe" src="about:blank"></iframe></div>
+<div id="view-pcb" class="view"><iframe id="pcbframe" src="about:blank"></iframe></div>
+
+<div id="view-libs" class="view">
+  <div id="libleft">
+    <input id="libsearch" placeholder="buscar símbolo ou footprint...">
+    <div id="liblist"></div>
+  </div>
+  <div id="libmain">
+    <div id="libwarn"></div>
+    <div id="libcanvases">
+      <div class="libcv"><span class="cvtitle" id="symtitle">símbolo</span><canvas id="cvsym"></canvas></div>
+      <div class="libcv"><span class="cvtitle" id="fptitle">footprint</span><canvas id="cvfp"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<script src="hub-core.js"></script>
+<script src="hub-draw.js"></script>
+<script src="projects.js"></script>
+<script src="hub-ui.js"></script>
+</body>
+</html>
