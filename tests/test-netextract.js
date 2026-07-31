@@ -54,4 +54,19 @@ const cross = (withJ) => Core.extractNets({ format:'schmirror-v2', project:'t', 
 assert.strictEqual(cross(false).nets.length, 2, 'cruzamento sem junction deve dar 2 nets');
 assert.strictEqual(cross(true).nets.length, 1, 'junction deve unir as 2 nets');
 
+// power solto gera aviso (netlabel solta ja avisava; power deve ser simetrico)
+const loosePw = Core.extractNets({ format:'schmirror-v2', project:'t', units:'mil', items:[
+  { t:'sheet', name:'m', size:'A4' },
+  { t:'power', sheet:'m', net:'GND', style:'GndPower', x:5000, y:5000, rot:0 }
+]}, lib);
+assert.ok(loosePw.warnings.some(w => w.includes('solto')), 'power solto deve avisar');
+
+// parte invalida de simbolo conhecido: mensagem deve citar a parte, nao "desconhecido"
+const badPart = Core.extractNets({ format:'schmirror-v2', project:'t', units:'mil', items:[
+  { t:'sheet', name:'m', size:'A4' },
+  { t:'comp', sheet:'m', ref:'R1', sym:'RES', part:2, x:1000, y:1000, rot:0, mirror:false, footprint:'R0805' }
+]}, lib);
+assert.ok(badPart.warnings.some(w => w.includes('parte 2')), 'parte invalida deve citar a parte');
+assert.ok(!badPart.warnings.some(w => w.includes('desconhecido')), 'nao deve dizer desconhecido');
+
 console.log('test-netextract OK');

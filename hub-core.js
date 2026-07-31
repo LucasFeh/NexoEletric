@@ -252,7 +252,13 @@ function extractNets(schematicOrModel, schlib){
     });
     s.comps.forEach(c => {
       const pins = compPinsWorld(c, schlib);
-      if (!pins) { warnings.push(`${c.ref}: símbolo "${c.sym}" desconhecido — pinos ignorados na extração`); return; }
+      if (!pins) {
+        const symKnown = symbolOf(schlib, c.sym);
+        warnings.push(symKnown
+          ? `${c.ref}: parte ${c.part || 1} não existe no símbolo "${c.sym}" — pinos ignorados na extração`
+          : `${c.ref}: símbolo "${c.sym}" desconhecido — pinos ignorados na extração`);
+        return;
+      }
       pins.forEach(p => {
         const n = nodeAt(si, p.x, p.y);
         pinRecs.push({ ref:c.ref, num:p.num, node:n });
@@ -261,7 +267,7 @@ function extractNets(schematicOrModel, schlib){
     });
     s.junctions.forEach(j => attach.push({ si, x:j.x, y:j.y, node:nodeAt(si, j.x, j.y), kind:'junction' }));
     s.netlabels.forEach(l => { const n = nodeAt(si, l.x, l.y); labelRecs.push({ net:l.net, node:n, x:l.x, y:l.y }); attach.push({ si, x:l.x, y:l.y, node:n, kind:'label' }); });
-    s.powers.forEach(p => { const n = nodeAt(si, p.x, p.y); powerRecs.push({ net:p.net, node:n }); attach.push({ si, x:p.x, y:p.y, node:n, kind:'power' }); });
+    s.powers.forEach(p => { const n = nodeAt(si, p.x, p.y); powerRecs.push({ net:p.net, node:n, x:p.x, y:p.y }); attach.push({ si, x:p.x, y:p.y, node:n, kind:'power' }); });
   });
 
   /* conexoes em T: ponto de conexao sobre o interior de um segmento */
@@ -322,6 +328,11 @@ function extractNets(schematicOrModel, schlib){
     const r = find(rec.node), g = groups[r];
     if (!segRoots.has(r) && (!g || !g.pins.length))
       warnings.push(`netlabel "${rec.net}" solta em (${rec.x},${rec.y})`);
+  }
+  for (const rec of powerRecs) {
+    const r = find(rec.node), g = groups[r];
+    if (!segRoots.has(r) && (!g || !g.pins.length))
+      warnings.push(`power "${rec.net}" solto em (${rec.x},${rec.y})`);
   }
   nets.sort((a, b) => natural(a.name, b.name));
 
