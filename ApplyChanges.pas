@@ -9,7 +9,7 @@
 { .    - Toda edicao/remocao exige campos orig_* (copiados do board.js). O objeto real so e alterado se casar         . }
 { .      com o original (tolerancia 0.001 mm) - protege contra placa dessincronizada do espelho.                      . }
 { .    - Tudo roda dentro de PCBServer.PreProcess/PostProcess: UM unico undo desfaz a aplicacao inteira.              . }
-{ .    - Relatorio detalhado em PCBMirror\apply-report.txt.                                                           . }
+{ .    - Relatorio detalhado em Projects\<nome>\apply-report.txt.                                                     . }
 { .                                                                                                                   . }
 { .  CONTRATO DE COORDENADAS: mm, Y para cima, relativo a origem da placa - identico ao board.js / PCB List.          . }
 { .                                                                                                                   . }
