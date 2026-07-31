@@ -108,17 +108,23 @@ layer, rotação), silk (linhas/arcos), `bbox`. Corpos 3D excluídos (maior part
 Mesmo schema para esquema autorado (IA) e espelhado (`ExportProject`):
 
 ```js
-var schematic = { header: {project, sheetsize, units:"mil"}, sheets: [ {
-  name: "folha1",
-  components: [ {ref:"R1", sym:"RES", part:1, x:4000, y:3200, rot:0, mirror:false,
-                 footprint:"R0805", comment:"10k"} ],
-  wires:      [ {pts:[[4000,3300],[4000,3600],[4400,3600]]} ],
-  netlabels:  [ {net:"VCC_5V", x:4000, y:3600, rot:0} ],
-  powerports: [ {net:"GND", style:"PowerGround", x:4400, y:3000, rot:180} ],
-  junctions:  [ {x:4400,y:3600} ],
-  texts:      [ {s:"Fonte 5V", x:3800, y:4000, h:10} ]
-} ] };
+var schematic = {
+"format":"schmirror-v2",
+"project":"_DemoKit",
+"generated":"...",
+"units":"mil",
+"items":[
+{"t":"sheet","name":"main","size":"A4"},
+{"t":"comp","sheet":"main","ref":"R1","sym":"RES","part":1,"x":2400,"y":3400,"rot":0,"mirror":false,"footprint":"R0805","comment":"330R"},
+{"t":"wire","sheet":"main","pts":[[1400,3100],[1800,3100],[1800,3400],[2200,3400]]},
+{"t":"netlabel","sheet":"main","net":"VCC","x":1800,"y":3400,"rot":0},
+{"t":"power","sheet":"main","net":"GND","style":"GndPower","x":1600,"y":3000,"rot":270},
+{"t":"junction","sheet":"main","x":1800,"y":3100},
+{"t":"text","sheet":"main","s":"Fonte 5V","x":3800,"y":4000,"h":10}
+]};
 ```
+
+Um item JSON plano por linha (parser DelphiScript lê linha a linha, como no changes.js); `pts` é a única exceção de aninhamento, sempre numa linha só.
 
 - `sym` referencia o símbolo em `schlib.js`; `footprint` é **obrigatório** em todo
   componente (com link na lib: confirma; sem link: a IA escolhe da `pcblib.js`).
@@ -128,8 +134,7 @@ var schematic = { header: {project, sheetsize, units:"mil"}, sheets: [ {
 
 ### 5.4 `changes.js` — nova operação `outline_set`
 
-Polígono (segmentos linha/arco) que redefine `Board.BoardOutline` — para a IA dar
-forma/tamanho à placa nova após o ECO. Todo o resto do formato v1 permanece.
+Polígono fechado de vértices (`pts`, apenas linhas no v2; contorno com arcos: desenhe no Altium) que redefine `Board.BoardOutline` — para a IA dar forma/tamanho à placa nova após o ECO. Exemplo: `{"op":"outline_set","pts":[[0,0],[80,0],[80,60],[0,60]],"note":"placa 80x60"}`. Todo o resto do formato v1 permanece.
 
 ### 5.5 `projects.js`
 
