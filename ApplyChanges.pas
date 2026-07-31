@@ -1,8 +1,9 @@
 { ..................................................................................................................... }
 { .  AltiumPCBMirror - ApplyChanges.pas                                                                               . }
 { .                                                                                                                   . }
-{ .  Le PCBMirror\changes.js (ao lado do .PcbDoc ABERTO) e aplica as mudancas na placa:                               . }
-{ .    comp_move | track_edit | track_add | track_del | via_edit | via_add | via_del | arc_edit | arc_add | arc_del   . }
+{ .  Le Projects\<nome do projeto>\changes.js e aplica as mudancas na placa:                                          . }
+{ .    comp_move | track_edit | track_add | track_del | via_edit | via_add | via_del | arc_edit | arc_add |           . }
+{ .    arc_del | outline_set                                                                                          . }
 { .                                                                                                                   . }
 { .  Seguranca:                                                                                                       . }
 { .    - Toda edicao/remocao exige campos orig_* (copiados do board.js). O objeto real so e alterado se casar         . }
@@ -16,7 +17,8 @@
 { ..................................................................................................................... }
 
 const
-  OUT_SUBDIR = 'PCBMirror';
+  SCRIPT_HOME = 'Z:\AltiumPCBMirror';
+  PROJECTS_DIR = 'Z:\AltiumPCBMirror\Projects';
   TOL_MM = 0.001;
 
 var
@@ -158,6 +160,242 @@ end;
 function JNum(Line, Key: String): Double;
 begin
   Result := StrToFloatDot(JGet(Line, Key));
+end;
+
+function JB(v: Boolean): String;
+begin
+  if v then
+    Result := 'true'
+  else
+    Result := 'false';
+end;
+
+function JS(v: String): String;
+var
+  i: Integer;
+  c: String;
+begin
+  Result := '"';
+  for i := 1 to Length(v) do
+  begin
+    c := v[i];
+    case Ord(v[i]) of
+      34: // "
+        Result := Result + '\"';
+      92: // \
+        Result := Result + '\\';
+      8:
+        Result := Result + '\b';
+      9:
+        Result := Result + '\t';
+      10:
+        Result := Result + '\n';
+      12:
+        Result := Result + '\f';
+      13:
+        Result := Result + '\r';
+    else
+      begin
+        if (Ord(v[i]) < 32) or (Ord(v[i]) > 125) then
+          Result := Result + '\u' + IntToHex(Ord(v[i]), 4)
+        else
+          Result := Result + c;
+      end;
+    end;
+  end;
+  Result := Result + '"';
+end;
+
+{ ======================= PROJ-HELPERS (workspace central) ======================= }
+
+// nome do arquivo sem pasta e sem extensao
+function BaseName(Path: String): String;
+var
+  s: String;
+  p: Integer;
+begin
+  s := ExtractFileName(Path);
+  p := Length(s);
+  while (p > 0) and (s[p] <> '.') do
+    p := p - 1;
+  if p > 1 then
+    s := Copy(s, 1, p - 1);
+  Result := s;
+end;
+
+// StrToInt sem excecao (0 se invalido)
+function SafeStrToInt(s: String): Integer;
+var
+  i: Integer;
+begin
+  Result := 0;
+  s := Trim(s);
+  if s = '' then
+    Exit;
+  for i := 1 to Length(s) do
+  begin
+    if (Ord(s[i]) < 48) or (Ord(s[i]) > 57) then
+    begin
+      Result := 0;
+      Exit;
+    end;
+    Result := Result * 10 + (Ord(s[i]) - 48);
+  end;
+end;
+
+// preenche Dirs com os nomes das subpastas de Projects\
+procedure ListProjectDirs(Dirs: TStringList);
+var
+  SR: TSearchRec;
+  r: Integer;
+begin
+  Dirs.Clear;
+  r := FindFirst(PROJECTS_DIR + '\*', faDirectory, SR);
+  while r = 0 do
+  begin
+    if ((SR.Attr and faDirectory) <> 0) and (SR.Name <> '.') and (SR.Name <> '..') then
+      Dirs.Add(SR.Name);
+    r := FindNext(SR);
+  end;
+  FindClose(SR);
+end;
+
+// nome do projeto focado no Workspace ('' se nenhum / Free Documents)
+function FocusedProjectName: String;
+var
+  WS: IWorkspace;
+  Prj: IProject;
+begin
+  Result := '';
+  WS := GetWorkspace;
+  if WS = nil then
+    Exit;
+  Prj := WS.DM_FocusedProject;
+  if Prj = nil then
+    Exit;
+  Result := BaseName(Prj.DM_ProjectFileName);
+  if Result = 'Free Documents' then
+    Result := '';
+end;
+
+// Casa WantedName com uma pasta de Projects\ (case-insensitive).
+// Nao achou: CreateIfMissing cria; senao pergunta com lista numerada. '' = cancelado.
+function ResolveProjectDir(WantedName: String; CreateIfMissing: Boolean): String;
+var
+  Dirs: TStringList;
+  i, Choice: Integer;
+  ListStr, Answer: String;
+begin
+  Result := '';
+  ForceDirectories(PROJECTS_DIR);
+  Dirs := TStringList.Create;
+  ListProjectDirs(Dirs);
+  Dirs.Sort;
+  if WantedName <> '' then
+    for i := 0 to Dirs.Count - 1 do
+      if AnsiCompareText(Dirs[i], WantedName) = 0 then
+      begin
+        Result := PROJECTS_DIR + '\' + Dirs[i];
+        Dirs.Free;
+        Exit;
+      end;
+  if CreateIfMissing and (WantedName <> '') then
+  begin
+    Result := PROJECTS_DIR + '\' + WantedName;
+    ForceDirectories(Result);
+    Dirs.Free;
+    Exit;
+  end;
+  if Dirs.Count = 0 then
+  begin
+    ShowMessage('Nenhum projeto em ' + PROJECTS_DIR + '.' + #13#10 +
+      'Rode um export ou peca um projeto novo a IA primeiro.');
+    Dirs.Free;
+    Exit;
+  end;
+  ListStr := 'Projeto "' + WantedName + '" nao encontrado em Projects\.' + #13#10 +
+    'Digite o NUMERO do projeto a usar:' + #13#10;
+  for i := 0 to Dirs.Count - 1 do
+    ListStr := ListStr + IntToStr(i + 1) + ' = ' + Dirs[i] + #13#10;
+  Answer := InputBox('AltiumPCBMirror', ListStr, '1');
+  Choice := SafeStrToInt(Answer);
+  if (Choice >= 1) and (Choice <= Dirs.Count) then
+    Result := PROJECTS_DIR + '\' + Dirs[Choice - 1];
+  Dirs.Free;
+end;
+
+// Regenera o indice projects.js varrendo Projects\
+procedure RegenerateProjectsIndex;
+var
+  Dirs, Ou: TStringList;
+  i: Integer;
+  d, line: String;
+begin
+  Dirs := TStringList.Create;
+  ListProjectDirs(Dirs);
+  Dirs.Sort;
+  Ou := TStringList.Create;
+  Ou.Add('var projects = [');
+  for i := 0 to Dirs.Count - 1 do
+  begin
+    d := PROJECTS_DIR + '\' + Dirs[i];
+    line := '{"name":' + JS(Dirs[i]) +
+      ',"files":{"schematic":' + JB(FileExists(d + '\schematic.js')) +
+      ',"board":' + JB(FileExists(d + '\board.js')) +
+      ',"changes":' + JB(FileExists(d + '\changes.js')) +
+      ',"buildreport":' + JB(FileExists(d + '\build-report.txt')) +
+      ',"applyreport":' + JB(FileExists(d + '\apply-report.txt')) + '}' +
+      ',"indexed":' + JS(DateTimeToStr(Now)) + '}';
+    if i < Dirs.Count - 1 then
+      line := line + ',';
+    Ou.Add(line);
+  end;
+  Ou.Add('];');
+  Ou.SaveToFile(SCRIPT_HOME + '\projects.js');
+  Ou.Free;
+  Dirs.Free;
+end;
+{ ===================== fim PROJ-HELPERS ===================== }
+
+// Extrai "pts":[[x,y],[x,y],...] da linha -> TStringList de 'x|y' (strings numericas)
+function ParsePts(Line: String): TStringList;
+var
+  p, i, Depth: Integer;
+  Body, Cur, c: String;
+begin
+  Result := TStringList.Create;
+  p := Pos('"pts":[', Line);
+  if p = 0 then
+    Exit;
+  i := p + 7;
+  Depth := 1;
+  Body := '';
+  while (i <= Length(Line)) and (Depth > 0) do
+  begin
+    c := Line[i];
+    if c = '[' then
+      Depth := Depth + 1
+    else if c = ']' then
+      Depth := Depth - 1;
+    if Depth > 0 then
+      Body := Body + c;
+    i := i + 1;
+  end;
+  Cur := '';
+  for i := 1 to Length(Body) do
+  begin
+    c := Body[i];
+    if c = '[' then
+      Cur := ''
+    else if c = ']' then
+    begin
+      p := Pos(',', Cur);
+      if p > 0 then
+        Result.Add(Copy(Cur, 1, p - 1) + '|' + Copy(Cur, p + 1, 255));
+    end
+    else if c <> ' ' then
+      Cur := Cur + c;
+  end;
 end;
 
 { ..................................................................................................................... }
@@ -766,13 +1004,57 @@ begin
   LogOk(What);
 end;
 
+procedure DoOutlineSet(Line: String);
+var
+  Pts: TStringList;
+  i, p: Integer;
+  BO: TObject;
+  Seg: TPolySegment;
+  x, y: Double;
+begin
+  Pts := ParsePts(Line);
+  if Pts.Count < 3 then
+  begin
+    LogFail('outline_set: pts precisa de pelo menos 3 vertices [[x,y],...]');
+    Pts.Free;
+    Exit;
+  end;
+  if not ConfirmNoYes('outline_set: substituir o CONTORNO DA PLACA por um poligono de ' +
+    IntToStr(Pts.Count) + ' vertices?') then
+  begin
+    LogFail('outline_set: cancelado pelo usuario');
+    Pts.Free;
+    Exit;
+  end;
+  BO := Board.BoardOutline;
+  PCBServer.SendMessageToRobots(BO.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  BO.Invalidate;
+  BO.PointCount := Pts.Count;
+  for i := 0 to Pts.Count - 1 do
+  begin
+    p := Pos('|', Pts[i]);
+    x := StrToFloatDot(Copy(Pts[i], 1, p - 1));
+    y := StrToFloatDot(Copy(Pts[i], p + 1, 255));
+    Seg := BO.Segments[i];
+    Seg.Kind := ePolySegmentLine;
+    Seg.vx := MMX(x);
+    Seg.vy := MMY(y);
+    BO.Segments[i] := Seg;
+  end;
+  BO.Rebuild;
+  BO.Validate;
+  PCBServer.SendMessageToRobots(BO.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  LogOk('outline_set: contorno redefinido com ' + IntToStr(Pts.Count) + ' vertices');
+  Pts.Free;
+end;
+
 { ..................................................................................................................... }
 { .                                                Rotina principal                                                   . }
 { ..................................................................................................................... }
 
 procedure ApplyChanges;
 var
-  OutDir, ChangesFile, Line, Op: String;
+  OutDir, ChangesFile, Line, Op, ProjName: String;
   Src: TStringList;
   i, Recognized: Integer;
 begin
@@ -783,12 +1065,17 @@ begin
     Exit;
   end;
 
-  OutDir := ExtractFilePath(Board.FileName) + OUT_SUBDIR;
+  ProjName := FocusedProjectName;
+  if ProjName = '' then
+    ProjName := BaseName(Board.FileName);
+  OutDir := ResolveProjectDir(ProjName, False);
+  if OutDir = '' then
+    Exit;
   ChangesFile := OutDir + '\changes.js';
   if not FileExists(ChangesFile) then
   begin
     ShowMessage('Arquivo de mudancas nao encontrado:' + #13#10 + ChangesFile + #13#10#13#10 +
-      'Rode primeiro o ExportBoard e edite o changes.js.');
+      'Rode primeiro o ExportBoard e peca as mudancas a IA.');
     Exit;
   end;
 
@@ -837,6 +1124,8 @@ begin
       DoArcAdd(Line)
     else if Op = 'arc_del' then
       DoArcDel(Line)
+    else if Op = 'outline_set' then
+      DoOutlineSet(Line)
     else
       LogFail('operacao desconhecida: "' + Op + '"');
   end;
@@ -850,6 +1139,8 @@ begin
   Report.Add('Aplicadas com sucesso: ' + IntToStr(OkCount));
   Report.Add('Falhas:                ' + IntToStr(FailCount));
   Report.SaveToFile(OutDir + '\apply-report.txt');
+
+  RegenerateProjectsIndex;
 
   ShowMessage('Aplicacao concluida.' + #13#10#13#10 +
     'Reconhecidas: ' + IntToStr(Recognized) + #13#10 +
