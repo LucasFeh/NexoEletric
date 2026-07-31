@@ -872,6 +872,8 @@ begin
     Report.SaveToFile(ProjDir + '\build-report.txt');
     ShowMessage('Validacao falhou com ' + IntToStr(ErrCount) + ' erro(s) - nada foi criado.' + #13#10 +
       'Veja ' + ProjDir + '\build-report.txt');
+    if PcbFpNames <> nil then
+      PcbFpNames.Free;
     Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free;
     Exit;
   end;
