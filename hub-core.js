@@ -156,6 +156,182 @@ function applyPcbChanges(board, changes){
   return model;
 }
 
+/* ============ Esquema: libs, transform e extracao de nets (preview) ============ */
+
+function symbolOf(schlib, name){
+  return ((schlib && schlib.symbols) || []).find(s => s.name === name) || null;
+}
+function partOf(sym, part){
+  if (!sym || !sym.parts || !sym.parts.length) return null;
+  return sym.parts.find(p => p.part === (part || 1)) || null;
+}
+function footprintOf(pcblib, name){
+  return ((pcblib && pcblib.footprints) || []).find(f => f.name === name) || null;
+}
+/* ponta quente do pino (onde o fio conecta), em coords locais do simbolo */
+function pinHot(pin){
+  const d = ORIENT_DIR[((pin.orient % 360) + 360) % 360] || [1, 0];
+  return { x: pin.x + d[0]*pin.len, y: pin.y + d[1]*pin.len };
+}
+/* transform local->mundo de um componente: espelha X, rotaciona anti-horario, translada */
+function compTransform(comp){
+  const rot = (((comp.rot || 0) % 360) + 360) % 360;
+  const cos = Math.cos(rot * Math.PI/180), sin = Math.sin(rot * Math.PI/180);
+  const mx = comp.mirror ? -1 : 1;
+  return {
+    map(x, y){ const lx = x*mx, ly = y; return { x: comp.x + lx*cos - ly*sin, y: comp.y + lx*sin + ly*cos }; },
+    ang(a){ return ((((comp.mirror ? 180 - a : a) + rot) % 360) + 360) % 360; }
+  };
+}
+/* pontas quentes de todos os pinos do componente, em coords da folha; null se simbolo desconhecido */
+function compPinsWorld(comp, schlib){
+  const sym = symbolOf(schlib, comp.sym); if (!sym) return null;
+  const part = partOf(sym, comp.part);    if (!part) return null;
+  const tf = compTransform(comp);
+  return (part.pins || []).map(p => {
+    const h = pinHot(p), w = tf.map(h.x, h.y);
+    return { num: p.num, name: p.name, x: w.x, y: w.y };
+  });
+}
+
+/* agrupa a lista plana "items" em folhas */
+function buildSchModel(schematic){
+  const model = { project: (schematic && schematic.project) || '', units: (schematic && schematic.units) || 'mil', sheets: [] };
+  const byName = {};
+  for (const it of ((schematic && schematic.items) || [])) {
+    if (it.t === 'sheet') {
+      if (byName[it.name]) continue;
+      const s = { name: it.name, size: it.size || 'A4', comps:[], wires:[], netlabels:[], powers:[], junctions:[], texts:[] };
+      model.sheets.push(s); byName[it.name] = s;
+      continue;
+    }
+    let s = byName[it.sheet];
+    if (!s) {
+      s = { name: it.sheet || 'main', size:'A4', comps:[], wires:[], netlabels:[], powers:[], junctions:[], texts:[] };
+      model.sheets.push(s); byName[s.name] = s;
+    }
+    if      (it.t === 'comp')     s.comps.push(it);
+    else if (it.t === 'wire')     s.wires.push(it);
+    else if (it.t === 'netlabel') s.netlabels.push(it);
+    else if (it.t === 'power')    s.powers.push(it);
+    else if (it.t === 'junction') s.junctions.push(it);
+    else if (it.t === 'text')     s.texts.push(it);
+  }
+  return model;
+}
+
+/* Extracao de nets (PREVIEW - a verdade e o compilador do Altium).
+   Regras: pontos coincidentes conectam; ponto de conexao (extremo de fio, pino,
+   junction, ancora de rotulo/power) SOBRE um segmento conecta (T); cruzamento sem
+   ponto de conexao NAO conecta; netlabel funde grupos por nome; power funde por
+   nome globalmente. Nome automatico: Net<ref>_<pino> do menor pino. */
+function extractNets(schematicOrModel, schlib){
+  const model = schematicOrModel.sheets ? schematicOrModel : buildSchModel(schematicOrModel);
+  const warnings = [];
+  const parent = [];
+  const mk = () => { parent.push(parent.length); return parent.length - 1; };
+  const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const uni = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[b] = a; };
+
+  const nodeMap = {};
+  const key = (si, x, y) => si + '|' + Math.round(x*2) + '|' + Math.round(y*2);
+  const nodeAt = (si, x, y) => { const k = key(si, x, y); if (!(k in nodeMap)) nodeMap[k] = mk(); return nodeMap[k]; };
+
+  const segs = [], attach = [], pinRecs = [], labelRecs = [], powerRecs = [];
+  const wireNet = model.sheets.map(s => s.wires.map(() => ''));
+
+  model.sheets.forEach((s, si) => {
+    s.wires.forEach((w, wi) => {
+      const pts = w.pts || [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const nA = nodeAt(si, pts[i][0], pts[i][1]), nB = nodeAt(si, pts[i+1][0], pts[i+1][1]);
+        uni(nA, nB);
+        segs.push({ si, wi, x1:pts[i][0], y1:pts[i][1], x2:pts[i+1][0], y2:pts[i+1][1], node:nA });
+      }
+      pts.forEach(p => attach.push({ si, x:p[0], y:p[1], node:nodeAt(si, p[0], p[1]), kind:'wend' }));
+    });
+    s.comps.forEach(c => {
+      const pins = compPinsWorld(c, schlib);
+      if (!pins) { warnings.push(`${c.ref}: símbolo "${c.sym}" desconhecido — pinos ignorados na extração`); return; }
+      pins.forEach(p => {
+        const n = nodeAt(si, p.x, p.y);
+        pinRecs.push({ ref:c.ref, num:p.num, node:n });
+        attach.push({ si, x:p.x, y:p.y, node:n, kind:'pin' });
+      });
+    });
+    s.junctions.forEach(j => attach.push({ si, x:j.x, y:j.y, node:nodeAt(si, j.x, j.y), kind:'junction' }));
+    s.netlabels.forEach(l => { const n = nodeAt(si, l.x, l.y); labelRecs.push({ net:l.net, node:n, x:l.x, y:l.y }); attach.push({ si, x:l.x, y:l.y, node:n, kind:'label' }); });
+    s.powers.forEach(p => { const n = nodeAt(si, p.x, p.y); powerRecs.push({ net:p.net, node:n }); attach.push({ si, x:p.x, y:p.y, node:n, kind:'power' }); });
+  });
+
+  /* conexoes em T: ponto de conexao sobre o interior de um segmento */
+  const autoJunctions = [];
+  for (const a of attach) {
+    for (const g of segs) {
+      if (g.si !== a.si) continue;
+      if ((near(a.x,g.x1,STOL) && near(a.y,g.y1,STOL)) || (near(a.x,g.x2,STOL) && near(a.y,g.y2,STOL))) continue;
+      if (distSeg(a.x, a.y, g.x1, g.y1, g.x2, g.y2) <= STOL) {
+        uni(a.node, g.node);
+        if (a.kind === 'pin' || a.kind === 'wend' || a.kind === 'junction')
+          autoJunctions.push({ sheet:a.si, x:a.x, y:a.y });
+      }
+    }
+  }
+
+  /* fusao por nome (netlabel e power) */
+  const nameRoot = {};
+  for (const rec of labelRecs.concat(powerRecs)) {
+    const r = find(rec.node);
+    if (rec.net in nameRoot) uni(nameRoot[rec.net], r); else nameRoot[rec.net] = r;
+  }
+
+  /* agrupamento e nomeacao */
+  const groups = {};
+  const gof = n => { const r = find(n); if (!groups[r]) groups[r] = { names:new Set(), pins:[] }; return groups[r]; };
+  for (const rec of labelRecs) gof(rec.node).names.add(rec.net);
+  for (const rec of powerRecs) gof(rec.node).names.add(rec.net);
+  for (const rec of pinRecs)   gof(rec.node).pins.push(rec.ref + '-' + rec.num);
+  for (const g of segs) gof(g.node);
+  const segRoots = new Set(segs.map(g => find(g.node)));
+
+  const natural = (a, b) => String(a).localeCompare(String(b), undefined, { numeric:true, sensitivity:'base' });
+  const netByRoot = {}, nets = [];
+  for (const r in groups) {
+    const g = groups[r];
+    const names = [...g.names].sort(natural);
+    let name = '', auto = false;
+    if (names.length > 1) warnings.push('nomes de net conflitantes no mesmo grupo: ' + names.join(', '));
+    if (names.length) name = names[0];
+    else if (g.pins.length) {
+      const ps = g.pins.slice().sort(natural);
+      name = 'Net' + ps[0].replace('-', '_'); auto = true;
+    }
+    netByRoot[r] = name;
+    /* net so entra na lista se: tem rotulo/power (e algum fio ou pino), ou tem >= 2 pinos.
+       Pino solto sem fio NAO vira net (equivale a NetlistSinglePinNets=0 do Altium). */
+    if (names.length) {
+      if (g.pins.length || segRoots.has(+r))
+        nets.push({ name, pins: g.pins.slice().sort(natural), auto: false });
+    } else if (g.pins.length >= 2) {
+      nets.push({ name, pins: g.pins.slice().sort(natural), auto: true });
+    }
+    if (!name && !g.pins.length && segRoots.has(+r))
+      warnings.push('fio sem conexão (nenhum pino ou rótulo)');
+  }
+  for (const rec of labelRecs) {
+    const r = find(rec.node), g = groups[r];
+    if (!segRoots.has(r) && (!g || !g.pins.length))
+      warnings.push(`netlabel "${rec.net}" solta em (${rec.x},${rec.y})`);
+  }
+  nets.sort((a, b) => natural(a.name, b.name));
+
+  const pinNet = {};
+  for (const rec of pinRecs) { const nm = netByRoot[find(rec.node)]; if (nm) pinNet[rec.ref + '-' + rec.num] = nm; }
+  for (const g of segs) { const nm = netByRoot[find(g.node)]; if (nm) wireNet[g.si][g.wi] = nm; }
+
+  return { nets, pinNet, wireNet, autoJunctions, warnings };
+}
+
 /* ============ status do projeto na esteira ============ */
 
 function deriveStatus(entry, loaded){
@@ -168,5 +344,7 @@ function deriveStatus(entry, loaded){
 }
 
 return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, ORIENT_DIR,
+         symbolOf, partOf, footprintOf, pinHot, compTransform, compPinsWorld,
+         buildSchModel, extractNets,
          applyPcbChanges, deriveStatus };
 });
