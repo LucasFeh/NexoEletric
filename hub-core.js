@@ -332,6 +332,56 @@ function extractNets(schematicOrModel, schlib){
   return { nets, pinNet, wireNet, autoJunctions, warnings };
 }
 
+/* ============ validacao do schematic.js contra as libs espelhadas ============ */
+
+function validateSchematic(schematic, schlib, pcblib){
+  const errors = [], warnings = [];
+  if (!schematic || schematic.format !== 'schmirror-v2') warnings.push('format esperado "schmirror-v2"');
+  if (!schematic || !schematic.project) errors.push('header: falta "project"');
+  const model = buildSchModel(schematic || {});
+  if (!model.sheets.length) errors.push('nenhuma folha ({"t":"sheet",...})');
+  const seen = {};
+  for (const s of model.sheets) {
+    for (const c of s.comps) {
+      const where = `comp ${c.ref || '?'}`;
+      if (!c.ref) { errors.push('comp sem "ref"'); continue; }
+      const k = c.ref + '/' + (c.part || 1);
+      if (seen[k]) errors.push(`${where}: ref duplicado (parte ${c.part || 1})`);
+      seen[k] = true;
+      if (!isNum(c.x) || !isNum(c.y)) { errors.push(`${where}: faltam x/y`); continue; }
+      const rot = (((c.rot || 0) % 360) + 360) % 360;
+      if (![0, 90, 180, 270].includes(rot)) errors.push(`${where}: rot deve ser 0/90/180/270`);
+      const sym = symbolOf(schlib, c.sym);
+      if (!sym) { errors.push(`${where}: símbolo "${c.sym}" não existe na schlib`); continue; }
+      const part = partOf(sym, c.part);
+      if (!part) errors.push(`${where}: parte ${c.part || 1} não existe em "${c.sym}"`);
+      if (!c.footprint) errors.push(`${where}: falta "footprint" (obrigatório em todo componente)`);
+      else {
+        const fp = footprintOf(pcblib, c.footprint);
+        if (!fp) errors.push(`${where}: footprint "${c.footprint}" não existe na pcblib`);
+        else if (part) {
+          const padNames = new Set((fp.pads || []).map(p => String(p.name)));
+          for (const p of (part.pins || []))
+            if (!padNames.has(String(p.num)))
+              warnings.push(`${where}: pino "${p.num}" sem pad correspondente no footprint ${c.footprint}`);
+        }
+        const cur = (sym.footprints || []).find(f => f.current);
+        if (cur && cur.name !== c.footprint)
+          warnings.push(`${where}: footprint ${c.footprint} difere do modelo da lib (${cur.name})`);
+      }
+      if ((c.x % 100) || (c.y % 100)) warnings.push(`${where}: fora da grade de 100 mil`);
+    }
+    for (const w of s.wires) {
+      if (!Array.isArray(w.pts) || w.pts.length < 2) { errors.push(`wire na folha ${s.name}: pts precisa de >= 2 pontos`); continue; }
+      for (const p of w.pts)
+        if ((p[0] % 100) || (p[1] % 100)) { warnings.push(`wire na folha ${s.name}: vértice (${p[0]},${p[1]}) fora da grade de 100 mil`); break; }
+    }
+    for (const l of s.netlabels) if (!l.net) errors.push(`netlabel sem "net" na folha ${s.name}`);
+    for (const p of s.powers)    if (!p.net) errors.push(`power sem "net" na folha ${s.name}`);
+  }
+  return { errors, warnings };
+}
+
 /* ============ status do projeto na esteira ============ */
 
 function deriveStatus(entry, loaded){
@@ -345,6 +395,6 @@ function deriveStatus(entry, loaded){
 
 return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, ORIENT_DIR,
          symbolOf, partOf, footprintOf, pinHot, compTransform, compPinsWorld,
-         buildSchModel, extractNets,
+         buildSchModel, extractNets, validateSchematic,
          applyPcbChanges, deriveStatus };
 });
