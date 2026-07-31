@@ -3775,8 +3775,8 @@ var
   WS: IWorkspace;
   Prj: IProject;
   ProjDir, ProjFolder, SchFile, Line, T, SheetName, TargetPath: String;
-  Src, Syms, Fps, Refs, SheetNames, SheetSizes, Pts: TStringList;
-  i, si, ErrCount: Integer;
+  Src, Syms, Fps, Refs, SheetNames, SheetSizes, Pts, ItemSheets: TStringList;
+  i, si, ErrCount, PartId: Integer;
   ServerDoc: IServerDocument;
   SchDoc: ISch_Document;
 begin
@@ -3825,6 +3825,9 @@ begin
   Refs := TStringList.Create;  Refs.Sorted := True;  Refs.Duplicates := dupAccept;
   SheetNames := TStringList.Create;
   SheetSizes := TStringList.Create;
+  ItemSheets := TStringList.Create;
+  ItemSheets.Sorted := True;
+  ItemSheets.Duplicates := dupIgnore;
 
   for i := 0 to Src.Count - 1 do
   begin
@@ -3832,6 +3835,8 @@ begin
     if not JHas(Line, 't') then
       continue;
     T := JGet(Line, 't');
+    if T <> 'sheet' then
+      ItemSheets.Add(JGet(Line, 'sheet'));
     if T = 'sheet' then
     begin
       SheetNames.Add(JGet(Line, 'name'));
@@ -3857,7 +3862,12 @@ begin
       end;
       Syms.Add(JGet(Line, 'sym'));
       Fps.Add(JGet(Line, 'footprint'));
-      Refs.Add(UpperCase(JGet(Line, 'ref')) + '/' + IntToStr(Round(JNum(Line, 'part'))));
+      PartId := 1;
+      if JHas(Line, 'part') then
+        PartId := Round(JNum(Line, 'part'));
+      if PartId < 1 then
+        PartId := 1;
+      Refs.Add(UpperCase(JGet(Line, 'ref')) + '/' + IntToStr(PartId));
     end
     else if T = 'wire' then
     begin
@@ -3884,6 +3894,12 @@ begin
     Report.Add('[ERRO] nenhuma folha ({"t":"sheet",...}) no schematic.js');
     ErrCount := ErrCount + 1;
   end;
+  for i := 0 to ItemSheets.Count - 1 do
+    if SheetNames.IndexOf(ItemSheets[i]) < 0 then
+    begin
+      Report.Add('[ERRO] item com "sheet":"' + ItemSheets[i] + '" sem folha declarada');
+      ErrCount := ErrCount + 1;
+    end;
   for i := 1 to Refs.Count - 1 do
     if Refs[i] = Refs[i - 1] then
     begin
@@ -3895,7 +3911,7 @@ begin
   begin
     ShowMessage('Nao consegui abrir a SchLib:' + #13#10 + SCHLIB_FILE + #13#10 +
       'Abra a biblioteca no Altium e rode de novo.');
-    Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free;
+    Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free; ItemSheets.Free;
     Exit;
   end;
   for i := 0 to Syms.Count - 1 do
@@ -3925,7 +3941,7 @@ begin
       'Veja ' + ProjDir + '\build-report.txt');
     if PcbFpNames <> nil then
       PcbFpNames.Free;
-    Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free;
+    Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free; ItemSheets.Free;
     Exit;
   end;
   Report.Add('Validacao OK (' + IntToStr(SheetNames.Count) + ' folha(s)).');
@@ -4003,7 +4019,7 @@ begin
     'PROXIMOS PASSOS: salve o projeto, rode Project >> Compile,' + #13#10 +
     'e depois Design >> Update PCB (ECO) para levar tudo a placa.');
 
-  Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free;
+  Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free; ItemSheets.Free;
   if PcbFpNames <> nil then
     PcbFpNames.Free;
 end;
