@@ -85,6 +85,14 @@ begin
     Result := 270;
 end;
 
+procedure AddItem(Section: TStringList; Line: String);
+begin
+  if Section.Count > 0 then
+    Section.Add(',' + Line)
+  else
+    Section.Add(Line);
+end;
+
 { ======================= PROJ-HELPERS (workspace central) ======================= }
 
 // nome do arquivo sem pasta e sem extensao
