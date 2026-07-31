@@ -1,10 +1,9 @@
 { ..................................................................................................................... }
 { .  AltiumPCBMirror - ExportBoard.pas                                                                                . }
 { .                                                                                                                   . }
-{ .  Exporta a PCB ABERTA no Altium Designer para uma pasta "PCBMirror\" ao lado do .PcbDoc:                          . }
+{ .  Exporta a PCB ABERTA no Altium Designer para "Projects\<nome do projeto>\":                                      . }
 { .    - board.js       : espelho completo e fiel da placa (componentes, pads, trilhas, arcos, vias, silk, contorno)  . }
 { .    - changes.js     : arquivo de mudancas (criado vazio apenas se nao existir - NUNCA sobrescrito)                . }
-{ .    - viewer.html    : visualizador (copiado de SCRIPT_HOME)                                                       . }
 { .    - AI-GUIDE.md    : guia para a sessao de IA (copiado de SCRIPT_HOME)                                           . }
 { .    - pcb-list.csv   : snapshot tipo "PCB List" (TSV: Designator/Footprint/Comment/Layer/X/Y/Rotation)             . }
 { .                                                                                                                   . }
@@ -17,11 +16,9 @@
 { ..................................................................................................................... }
 
 const
-  // Pasta onde este script e o viewer.html estao instalados.
-  // AJUSTE AQUI se instalar o projeto em outro lugar.
+  // Pasta onde este script esta instalado. AJUSTE AQUI se instalar em outro lugar.
   SCRIPT_HOME = 'Z:\AltiumPCBMirror';
-
-  OUT_SUBDIR = 'PCBMirror';
+  PROJECTS_DIR = 'Z:\AltiumPCBMirror\Projects';
   FORMAT_ID = 'pcbmirror-v1';
 
 var
@@ -143,6 +140,157 @@ begin
   else
     Section.Add(Line);
 end;
+
+{ ======================= PROJ-HELPERS (workspace central) ======================= }
+
+// nome do arquivo sem pasta e sem extensao
+function BaseName(Path: String): String;
+var
+  s: String;
+  p: Integer;
+begin
+  s := ExtractFileName(Path);
+  p := Length(s);
+  while (p > 0) and (s[p] <> '.') do
+    p := p - 1;
+  if p > 1 then
+    s := Copy(s, 1, p - 1);
+  Result := s;
+end;
+
+// StrToInt sem excecao (0 se invalido)
+function SafeStrToInt(s: String): Integer;
+var
+  i: Integer;
+begin
+  Result := 0;
+  s := Trim(s);
+  if s = '' then
+    Exit;
+  for i := 1 to Length(s) do
+  begin
+    if (Ord(s[i]) < 48) or (Ord(s[i]) > 57) then
+    begin
+      Result := 0;
+      Exit;
+    end;
+    Result := Result * 10 + (Ord(s[i]) - 48);
+  end;
+end;
+
+// preenche Dirs com os nomes das subpastas de Projects\
+procedure ListProjectDirs(Dirs: TStringList);
+var
+  SR: TSearchRec;
+  r: Integer;
+begin
+  Dirs.Clear;
+  r := FindFirst(PROJECTS_DIR + '\*', faDirectory, SR);
+  while r = 0 do
+  begin
+    if ((SR.Attr and faDirectory) <> 0) and (SR.Name <> '.') and (SR.Name <> '..') then
+      Dirs.Add(SR.Name);
+    r := FindNext(SR);
+  end;
+  FindClose(SR);
+end;
+
+// nome do projeto focado no Workspace ('' se nenhum / Free Documents)
+function FocusedProjectName: String;
+var
+  WS: IWorkspace;
+  Prj: IProject;
+begin
+  Result := '';
+  WS := GetWorkspace;
+  if WS = nil then
+    Exit;
+  Prj := WS.DM_FocusedProject;
+  if Prj = nil then
+    Exit;
+  Result := BaseName(Prj.DM_ProjectFileName);
+  if Result = 'Free Documents' then
+    Result := '';
+end;
+
+// Casa WantedName com uma pasta de Projects\ (case-insensitive).
+// Nao achou: CreateIfMissing cria; senao pergunta com lista numerada. '' = cancelado.
+function ResolveProjectDir(WantedName: String; CreateIfMissing: Boolean): String;
+var
+  Dirs: TStringList;
+  i, Choice: Integer;
+  ListStr, Answer: String;
+begin
+  Result := '';
+  ForceDirectories(PROJECTS_DIR);
+  Dirs := TStringList.Create;
+  ListProjectDirs(Dirs);
+  Dirs.Sort;
+  if WantedName <> '' then
+    for i := 0 to Dirs.Count - 1 do
+      if AnsiCompareText(Dirs[i], WantedName) = 0 then
+      begin
+        Result := PROJECTS_DIR + '\' + Dirs[i];
+        Dirs.Free;
+        Exit;
+      end;
+  if CreateIfMissing and (WantedName <> '') then
+  begin
+    Result := PROJECTS_DIR + '\' + WantedName;
+    ForceDirectories(Result);
+    Dirs.Free;
+    Exit;
+  end;
+  if Dirs.Count = 0 then
+  begin
+    ShowMessage('Nenhum projeto em ' + PROJECTS_DIR + '.' + #13#10 +
+      'Rode um export ou peca um projeto novo a IA primeiro.');
+    Dirs.Free;
+    Exit;
+  end;
+  ListStr := 'Projeto "' + WantedName + '" nao encontrado em Projects\.' + #13#10 +
+    'Digite o NUMERO do projeto a usar:' + #13#10;
+  for i := 0 to Dirs.Count - 1 do
+    ListStr := ListStr + IntToStr(i + 1) + ' = ' + Dirs[i] + #13#10;
+  Answer := InputBox('AltiumPCBMirror', ListStr, '1');
+  Choice := SafeStrToInt(Answer);
+  if (Choice >= 1) and (Choice <= Dirs.Count) then
+    Result := PROJECTS_DIR + '\' + Dirs[Choice - 1];
+  Dirs.Free;
+end;
+
+// Regenera o indice projects.js varrendo Projects\
+procedure RegenerateProjectsIndex;
+var
+  Dirs, Ou: TStringList;
+  i: Integer;
+  d, line: String;
+begin
+  Dirs := TStringList.Create;
+  ListProjectDirs(Dirs);
+  Dirs.Sort;
+  Ou := TStringList.Create;
+  Ou.Add('var projects = [');
+  for i := 0 to Dirs.Count - 1 do
+  begin
+    d := PROJECTS_DIR + '\' + Dirs[i];
+    line := '{"name":' + JS(Dirs[i]) +
+      ',"files":{"schematic":' + JB(FileExists(d + '\schematic.js')) +
+      ',"board":' + JB(FileExists(d + '\board.js')) +
+      ',"changes":' + JB(FileExists(d + '\changes.js')) +
+      ',"buildreport":' + JB(FileExists(d + '\build-report.txt')) +
+      ',"applyreport":' + JB(FileExists(d + '\apply-report.txt')) + '}' +
+      ',"indexed":' + JS(DateTimeToStr(Now)) + '}';
+    if i < Dirs.Count - 1 then
+      line := line + ',';
+    Ou.Add(line);
+  end;
+  Ou.Add('];');
+  Ou.SaveToFile(SCRIPT_HOME + '\projects.js');
+  Ou.Free;
+  Dirs.Free;
+end;
+{ ===================== fim PROJ-HELPERS ===================== }
 
 { ..................................................................................................................... }
 { .                                            Serializacao de primitivas                                             . }
@@ -466,31 +614,6 @@ end;
 { .                                              Utilitarios de arquivo                                               . }
 { ..................................................................................................................... }
 
-function LoadTextFile(Filename: String): String;
-var
-  sl: TStringList;
-begin
-  Result := '';
-  if not FileExists(Filename) then
-    Exit;
-  sl := TStringList.Create;
-  sl.LoadFromFile(Filename);
-  Result := sl.Text;
-  sl.Free;
-end;
-
-procedure CopyTextFile(Src, Dst: String);
-var
-  sl: TStringList;
-begin
-  if not FileExists(Src) then
-    Exit;
-  sl := TStringList.Create;
-  sl.LoadFromFile(Src);
-  sl.SaveToFile(Dst);
-  sl.Free;
-end;
-
 // Exporta o contorno de cada region-filha de um poligono despejado
 procedure Iter2PolyRegions(Poly: TObject; RegionL: TStringList; var RegionIdx: Integer);
 var
@@ -524,12 +647,12 @@ end;
 procedure ExportBoard;
 var
   OutDir: String;
+  ProjName: String;
   Iter, Prim: TObject;
   CompL, FreePadL, TrackL, ArcL, ViaL, TextL, SilkL, RegionL, CsvL, OutL: TStringList;
   CompIdx, PadIdx, TrackIdx, ArcIdx, ViaIdx, TextIdx, SilkIdx, RegionIdx: Integer;
   i: Integer;
   s, Id: String;
-  Missing: String;
 begin
   Board := PCBServer.GetCurrentPCBBoard;
   if Board = nil then
@@ -538,12 +661,12 @@ begin
     Exit;
   end;
 
-  OutDir := ExtractFilePath(Board.FileName) + OUT_SUBDIR;
-  if (not DirectoryExists(OutDir)) and (not ForceDirectories(OutDir)) then
-  begin
-    ShowMessage('Nao foi possivel criar a pasta de saida: ' + OutDir);
+  ProjName := FocusedProjectName;
+  if ProjName = '' then
+    ProjName := BaseName(Board.FileName);
+  OutDir := ResolveProjectDir(ProjName, True);
+  if OutDir = '' then
     Exit;
-  end;
 
   Nets := TStringList.Create;
   Nets.Sorted := True;
@@ -754,25 +877,14 @@ begin
   // ------------------------------------------------------------------ pcb-list.csv
   CsvL.SaveToFile(OutDir + '\pcb-list.csv');
 
-  // ------------------------------------------------------------------ viewer + guia
-  Missing := '';
-  if FileExists(SCRIPT_HOME + '\viewer.html') then
-    CopyTextFile(SCRIPT_HOME + '\viewer.html', OutDir + '\viewer.html')
-  else
-    Missing := Missing + ' viewer.html';
-  if FileExists(SCRIPT_HOME + '\AI-GUIDE.md') then
-    CopyTextFile(SCRIPT_HOME + '\AI-GUIDE.md', OutDir + '\AI-GUIDE.md')
-  else
-    Missing := Missing + ' AI-GUIDE.md';
+  RegenerateProjectsIndex;
 
   s := 'Exportacao concluida em:' + #13#10 + OutDir + #13#10#13#10 +
     'Componentes: ' + IntToStr(CompIdx) + #13#10 +
     'Trilhas: ' + IntToStr(TrackIdx) + '   Arcos: ' + IntToStr(ArcIdx) + '   Vias: ' + IntToStr(ViaIdx) + #13#10 +
     'Silk: ' + IntToStr(SilkIdx) + '   Textos: ' + IntToStr(TextIdx) + '   Regioes: ' + IntToStr(RegionIdx) + #13#10 +
-    'Pads livres: ' + IntToStr(PadIdx);
-  if Missing <> '' then
-    s := s + #13#10#13#10 + 'AVISO: nao encontrei em ' + SCRIPT_HOME + ':' + Missing +
-      #13#10 + 'Ajuste a constante SCRIPT_HOME no ExportBoard.pas.';
+    'Pads livres: ' + IntToStr(PadIdx) + #13#10#13#10 +
+    'Confira no hub.html (vista PCB).';
   ShowMessage(s);
 
   CompL.Free;
