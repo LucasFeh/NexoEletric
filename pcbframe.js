@@ -14,6 +14,7 @@ const CH = (typeof changes !== 'undefined' && Array.isArray(changes)) ? changes 
 
 const MM2MIL = 1/0.0254;
 const isNum = HubCore.isNum, distSeg = HubCore.distSeg;
+const near = HubCore.near, nearAng = HubCore.nearAng;
 
 /* modelo efetivo (board + changes) — motor unico, testado em tests/test-apply.js */
 const model = HubCore.applyPcbChanges(B, CH);

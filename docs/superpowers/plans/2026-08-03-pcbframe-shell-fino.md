@@ -194,6 +194,7 @@ const header = `/* AltiumPCBMirror v2 - pcbframe.js — vista PCB (le globals: p
 const glue = `
 const MM2MIL = 1/0.0254;
 const isNum = HubCore.isNum, distSeg = HubCore.distSeg;
+const near = HubCore.near, nearAng = HubCore.nearAng;
 
 /* modelo efetivo (board + changes) — motor unico, testado em tests/test-apply.js */
 const model = HubCore.applyPcbChanges(B, CH);
@@ -227,7 +228,7 @@ Expected: sem saída (exit 0).
 Run (cada um com o resultado esperado):
 - `grep -c "function buildModel" pcbframe.js` → `0`
 - `grep -c "não existe no board.js" pcbframe.js` → `0` (mensagens do motor só existem no hub-core.js)
-- `grep -c "applyPcbChanges" pcbframe.js` → `1`
+- `grep -c "applyPcbChanges" pcbframe.js` → `2` (1 menção no comentário de cabeçalho + 1 chamada real)
 - `grep -c "FONTDATA" pcbframe.js` → deve ser ≥ 2 (a definição e os usos `glyphFor`/`drawStrokeText`)
 - `grep -c "function distSeg" pcbframe.js` → `0`
 
