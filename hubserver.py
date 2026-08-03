@@ -53,7 +53,10 @@ def _watcher():
     prev = _snapshot()
     while True:
         time.sleep(WATCH_INTERVAL)
-        cur = _snapshot()
+        try:
+            cur = _snapshot()
+        except Exception:
+            continue
         if cur != prev:
             prev = cur
             with _version_lock:
@@ -93,6 +96,8 @@ def events():
 
 
 def _serve(path):
+    if any(seg.startswith('.') for seg in path.replace('\\', '/').split('/')):
+        abort(404)
     full = safe_join(ROOT, path)
     if full is None or not os.path.isfile(full):
         abort(404)

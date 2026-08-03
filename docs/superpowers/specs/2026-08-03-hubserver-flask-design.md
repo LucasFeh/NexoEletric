@@ -23,7 +23,7 @@ e recarrega o browser sozinho quando um export grava arquivos.
 | Rota | Comportamento |
 |---|---|
 | `/` | serve o conteúdo de `hub.html` diretamente (com a injeção de HTML abaixo; sem redirect) |
-| `/<path>` | serve qualquer arquivo do workspace (send_from_directory — sem traversal), UTF-8, com `Cache-Control: no-store` (dados `.js` sempre frescos) |
+| `/<path>` | serve qualquer arquivo do workspace (safe_join — sem traversal; segmentos iniciados por `.` retornam 404; `.html` injetado via Response), UTF-8, com `Cache-Control: no-store` (dados `.js` sempre frescos) |
 | `/__events` | SSE (`text/event-stream`): emite `event: change` quando o watcher detecta mudança; heartbeat (comentário) a cada ~15 s para manter a conexão viva |
 | `/__live.js` | script gerado pelo servidor: abre `EventSource('/__events')` e faz `location.reload()` ao receber `change`; reconecta sozinho se o servidor cair/voltar |
 
