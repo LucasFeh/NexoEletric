@@ -54,10 +54,10 @@ Z:\AltiumPCBMirror\
 ├── ApplyChanges.pas         Projects\<nome>\changes.js -> PCB aberta
 ├── hub.html                 interface única (Projetos, Esquema, PCB, Libs)
 ├── schframe.html            vista Esquema (carregada em iframe pelo hub)
-├── pcbframe.html            vista PCB (viewer v1 + loader por projeto, em iframe)
-├── hub-core.js              lógica pura (parsing, validação, extração de nets, apply)
+├── pcbframe.html            vista PCB (shell fino, em iframe pelo hub)
+├── pcbframe.js              lógica da vista PCB (renderer, painéis, PCB List, CSV)
+├── hub-core.js              lógica pura (parsing, validação, nets, motor único de changes)
 ├── hub-draw.js              renderers canvas compartilhados (símbolo, footprint, PCB)
-├── viewer.html              visualizador PCB standalone (usado por example\ e fonte do pcbframe)
 ├── projects.js              índice do histórico de projetos
 ├── AI-GUIDE.md              contrato/manual para a sessão de IA
 ├── Libs\
@@ -97,7 +97,7 @@ com 4 vistas:
   `Libs\schlib.js`: símbolos, fios, junctions, net labels, power ports, designator/comment.
   Zoom/pan, cursor em mil, clique numa net destaca ela na folha inteira (com os pinos
   membros). Painel lateral com a lista de componentes e a validação do esquema.
-- **PCB** — a vista do `viewer.html` v1 integrada, lendo `Projects\<nome>\board.js` e
+- **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
   `changes.js`: render fiel, fantasma tracejado das posições originais, lista de mudanças
   com validação, tabela PCB List pós-mudança e exportação para CSV.
 - **Libs** — navegador das bibliotecas espelhadas: busca por nome/descrição, símbolo

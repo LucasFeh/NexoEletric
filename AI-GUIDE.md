@@ -208,7 +208,7 @@ var changes = [
 1. Leia `board.js` (cabeçalho, `stats`, `board.bbox`, depois os objetos relevantes).
 2. Planeje as mudanças; copie os `orig_*` exatos do `board.js`.
 3. Escreva `changes.js` (uma linha por mudança, com `note` explicando cada uma).
-4. Peça ao usuário para conferir no `hub.html` (vista **PCB**, ou `viewer.html` do
-   `example\`) — ele valida `orig_*`, mostra o diff e a tabela PCB List pós-mudanças.
+4. Peça ao usuário para conferir no `hub.html` (vista **PCB**) — ele valida `orig_*`,
+   mostra o diff e a tabela PCB List pós-mudanças.
 5. O usuário roda `ApplyChanges` no Altium e depois o DRC. O relatório fica em
    `Projects\<nome>\apply-report.txt`; se algo falhar, corrija e repita.
