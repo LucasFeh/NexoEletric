@@ -69,7 +69,7 @@ Z:\AltiumPCBMirror\
 │       ├── board.js         espelho da PCB (após o ECO)
 │       ├── changes.js       mudanças de PCB pendentes/aplicadas
 │       └── build-report.txt / apply-report.txt
-├── tests\                   testes node (load.js, test-apply.js, test-netextract.js, test-validate.js)
+├── tests\                   testes node (load.js, test-apply.js, test-geom.js, test-netextract.js, test-validate.js)
 └── example\                 placa sintética standalone do viewer v1 (intocada)
 ```
 
