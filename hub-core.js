@@ -156,7 +156,7 @@ function applyPcbChanges(board, changes){
   return model;
 }
 
-/* ---- preview de comp movido: transform p/ primitivas do dono (vista PCB) ---- */
+/* ---- preview de comp movido (vista PCB); model = retorno de applyPcbChanges ---- */
 function compDelta(m){
   const dr = m.eff.rot - m.src.rot;
   const flip = m.eff.layer !== m.src.layer;

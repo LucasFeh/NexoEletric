@@ -29,4 +29,14 @@ assert.strictEqual(Core.effLayerForOwner(moved, 'R1', 'TopOverlay'), 'BottomOver
 assert.strictEqual(Core.effLayerForOwner(moved, 'R1', 'Multi'), 'Multi');
 assert.strictEqual(Core.effLayerForOwner(still, 'R1', 'TopOverlay'), 'TopOverlay');
 
+// rotacao pura sem flip: xfPoint nao inverte X local; xfAngle soma direto
+const rotOnly = Core.applyPcbChanges(board, [{ op:'comp_move', ref:'R1',
+  x:10, y:20, rot:90, layer:'Top', orig_x:10, orig_y:20, orig_rot:0, orig_layer:'Top' }]);
+const d2 = Core.compDelta(rotOnly.compByRef['R1']);
+assert.strictEqual(d2.flip, false);
+const p2 = Core.xfPoint(d2, 11, 20);            // (1,0) rot90 -> (0,1)
+assert.ok(Math.abs(p2.x - 10) < 1e-9, 'x esperado 10, veio ' + p2.x);
+assert.ok(Math.abs(p2.y - 21) < 1e-9, 'y esperado 21, veio ' + p2.y);
+assert.strictEqual(Core.xfAngle(d2, 30), 120);
+
 console.log('test-geom OK');
