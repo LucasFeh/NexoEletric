@@ -156,6 +156,33 @@ function applyPcbChanges(board, changes){
   return model;
 }
 
+/* ---- preview de comp movido: transform p/ primitivas do dono (vista PCB) ---- */
+function compDelta(m){
+  const dr = m.eff.rot - m.src.rot;
+  const flip = m.eff.layer !== m.src.layer;
+  return { ox:m.src.x, oy:m.src.y, nx:m.eff.x, ny:m.eff.y, dr, flip,
+           cos:Math.cos(dr*Math.PI/180), sin:Math.sin(dr*Math.PI/180) };
+}
+function xfPoint(d, x, y){
+  let lx = x - d.ox, ly = y - d.oy;
+  if (d.flip) lx = -lx;
+  return { x: d.nx + lx*d.cos - ly*d.sin, y: d.ny + lx*d.sin + ly*d.cos };
+}
+function xfAngle(d, ang){ return d.flip ? (180 - ang + d.dr) : (ang + d.dr); }
+function ownerDelta(model, ref){
+  if (!ref) return null;
+  const m = model.compByRef[ref];
+  if (!m || !m.changed) return null;
+  return compDelta(m);
+}
+function effLayerForOwner(model, ref, layer){
+  const m = ref ? model.compByRef[ref] : null;
+  if (!m || !m.changed) return layer;
+  if (m.eff.layer === m.src.layer) return layer;
+  const map = { Top:'Bottom', Bottom:'Top', TopOverlay:'BottomOverlay', BottomOverlay:'TopOverlay' };
+  return map[layer] || layer;
+}
+
 /* ============ Esquema: libs, transform e extracao de nets (preview) ============ */
 
 function symbolOf(schlib, name){
@@ -407,5 +434,6 @@ function deriveStatus(entry, loaded){
 return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, ORIENT_DIR,
          symbolOf, partOf, footprintOf, pinHot, compTransform, compPinsWorld,
          buildSchModel, extractNets, validateSchematic,
-         applyPcbChanges, deriveStatus };
+         applyPcbChanges, deriveStatus,
+         compDelta, xfPoint, xfAngle, ownerDelta, effLayerForOwner };
 });
