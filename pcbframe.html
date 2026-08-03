@@ -193,7 +193,7 @@ const FONTDATA = {"0":{"l":[[[0.428571,-1.047619],[0.52381,-1.047619],[0.619048,
 /* ============================== modelo efetivo (board + changes) ============================== */
 
 const model = { comps:[], compByRef:{}, tracks:[], arcs:[], vias:[], added:[],
-                validation:[], changeItems:[] };
+                validation:[], changeItems:[], outline:null };
 
 function near(a,b,t){ return Math.abs(a-b) <= (t||TOL); }
 function nearAng(a,b){ let d=Math.abs(a-b)%360; if(d>180) d=360-d; return d<=TOL_ANG; }
@@ -303,6 +303,18 @@ function buildModel(){
         model.added.push(m); item.target=m;
         break;
       }
+      case 'outline_set': {
+        if (!Array.isArray(ch.pts) || ch.pts.length<3 ||
+            ch.pts.some(p=>!Array.isArray(p)||!isNum(p[0])||!isNum(p[1])))
+          return bad('pts deve ser [[x,y],...] com >= 3 vértices');
+        const segs=[];
+        for (let i=0;i<ch.pts.length;i++){
+          const a=ch.pts[i], b=ch.pts[(i+1)%ch.pts.length];
+          segs.push({kind:'line',x1:a[0],y1:a[1],x2:b[0],y2:b[1]});
+        }
+        model.outline=segs;
+        break;
+      }
       default:
         bad(`operação desconhecida "${ch.op}"`);
     }
@@ -384,7 +396,7 @@ function lcolor(layer){ return LAYER_COLORS[layer] || '#888888'; }
 function outlinePath(){
   ctx.beginPath();
   let started=false;
-  for (const s of (B.board.outline||[])) {
+  for (const s of (model.outline || B.board.outline || [])) {
     if (s.kind==='line') {
       if (!started){ ctx.moveTo(s.x1,s.y1); started=true; }
       ctx.lineTo(s.x1,s.y1); ctx.lineTo(s.x2,s.y2);
@@ -869,6 +881,7 @@ function chLabel(ch){
     case 'arc_edit': return `editar arco ${ch.id}`;
     case 'arc_add': return `novo arco ${ch.layer}`;
     case 'arc_del': return `remover arco ${ch.id}`;
+    case 'outline_set': return `novo contorno da placa (${Array.isArray(ch.pts)?ch.pts.length:'?'} vértices)`;
     default: return `?? ${ch.op}`;
   }
 }
