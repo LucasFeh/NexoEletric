@@ -60,6 +60,7 @@ Z:\AltiumPCBMirror\
 ├── hub-draw.js              renderers canvas compartilhados (símbolo, footprint, PCB)
 ├── projects.js              índice do histórico de projetos
 ├── AI-GUIDE.md              contrato/manual para a sessão de IA
+├── hubserver.py             servidor local opcional (Flask; tempo real na rede)
 ├── Libs\
 │   ├── schlib.js            espelho da biblioteca de esquema (símbolos)
 │   └── pcblib.js            espelho da biblioteca de footprints
@@ -103,6 +104,20 @@ com 4 vistas:
 - **Libs** — navegador das bibliotecas espelhadas: busca por nome/descrição, símbolo
   desenhado lado a lado com o footprint associado, aviso destacado nos símbolos sem
   footprint na lib.
+
+## Servidor local com tempo real (opcional)
+
+O hub continua abrindo por **duplo clique**, sem servidor. Se quiser ver os exports em
+**tempo real** (inclusive de outra máquina da rede local), rode na raiz do workspace:
+
+    python hubserver.py
+
+- Abra `http://127.0.0.1:8000` — ou `http://<IP-desta-máquina>:8000` de outro PC da
+  rede (o servidor imprime as duas URLs ao subir; o Windows pode pedir liberação de
+  firewall na primeira vez).
+- Rodou um **Export** no Altium → a página aberta recarrega sozinha em ~1 s.
+- `--port N` muda a porta. Requer Python 3 + Flask (`pip install flask`). O servidor
+  não altera nenhum arquivo do hub.
 
 ## Fluxo projeto novo do zero
 
