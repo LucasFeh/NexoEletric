@@ -147,8 +147,11 @@ redes no total — verificado 1:1 contra o extrator do hub e revisado por painel
 adversarial de 4 lentes (13 agentes; 9 achados corrigidos ou documentados).
 
 Conectividade por net labels em stubs curtos a partir da ponta quente de cada pino
-(folha única "SCH - Leitor V2", tamanho A3); séries curtas (divisor, terminador+jumper)
-com fio direto. Wires calculados programaticamente na ponta quente exata (símbolos com
+(folha única "SCH - Leitor V2", tamanho **A4** — 11500×7600 mil no padrão do Altium);
+séries curtas (divisor, terminador+jumper) com fio direto. O layout é verificado por
+script (`layout-check`): tudo dentro da A4 com margem de 300 mil e **zero colisões**
+entre corpos de símbolo e textos. A documentação na folha ficou em 4 linhas (título +
+3 faixas no rodapé, acima do carimbo) — o detalhamento completo vive nesta spec. Wires calculados programaticamente na ponta quente exata (símbolos com
 pinos fora da grade de 100 mil — ex. MAX485 — seguem o precedente do v1: coordenada
 exata, não arredondada).
 
@@ -168,7 +171,8 @@ exata, não arredondada).
 1. Gerar `Projects\TCMS_Reader_V2\schematic.js` (gerador node com validação) +
    entrada em `projects.js`.
 2. Conferir no hub, vista **Esquema**.
-3. Altium: criar `TCMS_Reader_V2.PrjPcb`, rodar **BuildSchematic**, Compile +
-   **Design » Update PCB** (ECO).
-4. **ExportBoard** → IA posiciona/roteia em `changes.js` (contorno 80×80, furos nas
-   laterais, conectores na borda) → **ApplyChanges** + DRC.
+3. Altium: com o `.PrjPcb` e um `.SchDoc` (pode ser a folha em branco do template)
+   no projeto, rodar **ApplyProject** → escolher `TCMS_Reader_V2` → escolher em qual
+   esquemático despejar. Depois Compile + **Design » Update PCB** (ECO).
+4. **ExportPcb** → IA posiciona/roteia em `changes.js` (contorno 80×80, furos nas
+   laterais, conectores na borda) → **ApplyProject** com a PCB focada + DRC.

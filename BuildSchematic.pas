@@ -623,6 +623,31 @@ end;
 
 { ------------------------------- colocacao de objetos ------------------------------- }
 
+// Acha na folha um componente ja colocado, pelo designador + parte (nil = nao existe).
+// E o mesmo casamento que o SCH List usa: designador + numero da parte.
+function FindCompInDoc(SchDoc: ISch_Document; Ref: String; PartId: Integer): TObject;
+var
+  Iter: TObject;
+  C: TObject;
+begin
+  Result := nil;
+  Iter := SchDoc.SchIterator_Create;
+  if Iter = nil then
+    Exit;
+  Iter.AddFilter_ObjectSet(MkSet(eSchComponent));
+  C := Iter.FirstSchObject;
+  while C <> nil do
+  begin
+    if (AnsiCompareText(C.Designator.Text, Ref) = 0) and (C.CurrentPartID = PartId) then
+    begin
+      Result := C;
+      break;
+    end;
+    C := Iter.NextSchObject;
+  end;
+  SchDoc.SchIterator_Destroy(Iter);
+end;
+
 procedure RegisterObj(SchDoc: ISch_Document; Obj: TObject);
 begin
   SchDoc.RegisterSchObjectInContainer(Obj);
@@ -678,6 +703,17 @@ var
   PartId: Integer;
 begin
   Ref := JGet(Line, 'ref');
+  PartId := 1;
+  if JHas(Line, 'part') then
+    PartId := Round(JNum(Line, 'part'));
+  if PartId < 1 then
+    PartId := 1;
+  // ja existe na folha (re-despejo): nao duplica, so a passada 2b reposiciona
+  if FindCompInDoc(SchDoc, Ref, PartId) <> nil then
+  begin
+    LogOk('comp ' + Ref + '/' + IntToStr(PartId) + ' ja existia - sera reposicionado');
+    Exit;
+  end;
   LibComp := FindLibSymbol(JGet(Line, 'sym'));
   if LibComp = nil then
   begin
@@ -690,22 +726,124 @@ begin
     LogFail('comp ' + Ref + ': Replicate falhou');
     Exit;
   end;
-  PartId := 1;
-  if JHas(Line, 'part') then
-    PartId := Round(JNum(Line, 'part'));
-  if PartId < 1 then
-    PartId := 1;
+  // Aqui so entra a parte e o designador: posicao/orientacao/espelho ficam para a
+  // passada 2b (PositionComp), depois que o simbolo ja esta na folha.
   NewComp.CurrentPartID := PartId;
-  NewComp.Location := Point(MilsToCoord(JNum(Line, 'x')), MilsToCoord(JNum(Line, 'y')));
-  NewComp.Orientation := RotToOrient(Round(JNum(Line, 'rot')));
-  if JGet(Line, 'mirror') = 'true' then
-    NewComp.IsMirrored := True;
   NewComp.Designator.Text := Ref;
   if JHas(Line, 'comment') then
     NewComp.Comment.Text := JGet(Line, 'comment');
   RegisterObj(SchDoc, NewComp);
   SetFootprint(NewComp, JGet(Line, 'footprint'), Ref);
   LogOk('comp ' + Ref + ' (' + JGet(Line, 'sym') + ' / ' + JGet(Line, 'footprint') + ')');
+end;
+
+// Passada 2b: aplica posicao/orientacao/espelho no componente ja colocado.
+// A posicao vem POR ULTIMO de proposito: no engine do Altium, mexer em
+// Orientation/IsMirrored depois do Location desloca o componente.
+procedure PositionComp(SchDoc: ISch_Document; Line: String);
+var
+  C: TObject;
+  Ref: String;
+  PartId: Integer;
+begin
+  Ref := JGet(Line, 'ref');
+  PartId := 1;
+  if JHas(Line, 'part') then
+    PartId := Round(JNum(Line, 'part'));
+  if PartId < 1 then
+    PartId := 1;
+  C := FindCompInDoc(SchDoc, Ref, PartId);
+  if C = nil then
+  begin
+    LogFail('posicao ' + Ref + '/' + IntToStr(PartId) + ': componente nao esta na folha');
+    Exit;
+  end;
+  SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
+    SCHM_BeginModify, c_NoEventData);
+  C.Orientation := RotToOrient(Round(JNum(Line, 'rot')));
+  C.IsMirrored := (JGet(Line, 'mirror') = 'true');
+  C.Location := Point(MilsToCoord(JNum(Line, 'x')), MilsToCoord(JNum(Line, 'y')));
+  SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
+    SCHM_EndModify, c_NoEventData);
+  LogOk('posicao ' + Ref + '/' + IntToStr(PartId) + ' -> ' +
+    JGet(Line, 'x') + ',' + JGet(Line, 'y') + ' rot ' + JGet(Line, 'rot'));
+end;
+
+// Janela com os .SchDoc do projeto focado; devolve o caminho escolhido ('' = cancelou)
+function PickProjectSchDoc(Prj: IProject; SheetName: String): String;
+var
+  F: TForm;
+  LB: TListBox;
+  BOk, BCan: TButton;
+  Lbl: TLabel;
+  Paths: TStringList;
+  Doc: IDocument;
+  i, res: Integer;
+begin
+  Result := '';
+  Paths := TStringList.Create;
+  for i := 0 to Prj.DM_LogicalDocumentCount - 1 do
+  begin
+    Doc := Prj.DM_LogicalDocuments(i);
+    if Doc = nil then
+      continue;
+    if AnsiCompareText(Doc.DM_DocumentKind, 'SCH') = 0 then
+      Paths.Add(Doc.DM_FullPath);
+  end;
+  if Paths.Count = 0 then
+  begin
+    ShowMessage('O projeto nao tem nenhum .SchDoc.' + #13#10 +
+      'Crie uma folha de esquema (File >> New >> Schematic), salve no projeto e rode de novo.');
+    Paths.Free;
+    Exit;
+  end;
+  if Paths.Count = 1 then
+  begin
+    Result := Paths[0];
+    Paths.Free;
+    Exit;
+  end;
+
+  F := TForm.Create(nil);
+  F.Caption := 'AltiumPCBMirror - onde despejar "' + SheetName + '"';
+  F.Width := 620;
+  F.Height := 360;
+  Lbl := TLabel.Create(F);
+  Lbl.Parent := F;
+  Lbl.Left := 12;
+  Lbl.Top := 12;
+  Lbl.Width := 580;
+  Lbl.Caption := 'Escolha o esquematico do projeto que vai receber "' + SheetName + '":';
+  LB := TListBox.Create(F);
+  LB.Parent := F;
+  LB.Left := 12;
+  LB.Top := 36;
+  LB.Width := 580;
+  LB.Height := 228;
+  for i := 0 to Paths.Count - 1 do
+    LB.Items.Add(Paths[i]);
+  LB.ItemIndex := 0;
+  BOk := TButton.Create(F);
+  BOk.Parent := F;
+  BOk.Caption := 'Despejar aqui';
+  BOk.Left := 384;
+  BOk.Top := 276;
+  BOk.Width := 110;
+  BOk.Height := 28;
+  BOk.ModalResult := 1;
+  BCan := TButton.Create(F);
+  BCan.Parent := F;
+  BCan.Caption := 'Cancelar';
+  BCan.Left := 502;
+  BCan.Top := 276;
+  BCan.Width := 90;
+  BCan.Height := 28;
+  BCan.ModalResult := 2;
+  res := F.ShowModal;
+  if (res = 1) and (LB.ItemIndex >= 0) then
+    Result := Paths[LB.ItemIndex];
+  F.Free;
+  Paths.Free;
 end;
 
 procedure PlaceWire(SchDoc: ISch_Document; Line: String);
@@ -993,34 +1131,40 @@ begin
   Report.Add('Validacao OK (' + IntToStr(SheetNames.Count) + ' folha(s)).');
   Report.Add('');
 
-  { ---------------- PASSO 2: criacao, folha a folha ---------------- }
+  { ---------------- PASSO 2: despejo folha a folha ----------------
+    O usuario escolhe um .SchDoc JA EXISTENTE do projeto (o carimbo/template dele
+    e preservado). Dentro da folha o despejo e em duas passadas:
+      2a) coloca os simbolos (ou reaproveita o que ja tem o mesmo designador/parte)
+      2b) so entao aplica posicao/orientacao/espelho de cada um, conforme o .js
+    Aplicar a posicao no fim evita o deslocamento que a mudanca de Orientation
+    provoca quando ela vem depois do Location. }
   for si := 0 to SheetNames.Count - 1 do
   begin
     SheetName := SheetNames[si];
-    TargetPath := ProjFolder + SheetName + '.SchDoc';
-    if FileExists(TargetPath) then
-      if not ConfirmNoYes('Ja existe:' + #13#10 + TargetPath + #13#10#13#10 + 'SOBRESCREVER esta folha?') then
-      begin
-        LogFail('folha ' + SheetName + ': ja existe e o usuario nao quis sobrescrever');
-        continue;
-      end;
+    TargetPath := PickProjectSchDoc(Prj, SheetName);
+    if TargetPath = '' then
+    begin
+      LogFail('folha ' + SheetName + ': nenhum .SchDoc escolhido');
+      continue;
+    end;
 
-    ServerDoc := CreateNewDocumentFromDocumentKind('SCH');
+    ServerDoc := Client.OpenDocument('SCH', TargetPath);
     if ServerDoc = nil then
     begin
-      LogFail('folha ' + SheetName + ': CreateNewDocumentFromDocumentKind falhou');
+      LogFail('folha ' + SheetName + ': nao consegui abrir ' + TargetPath);
       continue;
     end;
     Client.ShowDocument(ServerDoc);
     SchDoc := SchServer.GetCurrentSchDocument;
     if SchDoc = nil then
     begin
-      LogFail('folha ' + SheetName + ': documento novo nao ficou focado');
+      LogFail('folha ' + SheetName + ': documento nao ficou focado');
       continue;
     end;
     SchDoc.SheetStyle := SheetStyleFromName(SheetSizes[si]);
 
     SchServer.ProcessControl.PreProcess(SchDoc, '');
+    // 2a) simbolos e demais objetos
     for i := 0 to Src.Count - 1 do
     begin
       Line := Trim(Src[i]);
@@ -1042,16 +1186,23 @@ begin
       else if T = 'text' then
         PlaceText(SchDoc, Line);
     end;
+    // 2b) posiciona cada componente pelo designador/parte do .js
+    for i := 0 to Src.Count - 1 do
+    begin
+      Line := Trim(Src[i]);
+      if not JHas(Line, 't') then
+        continue;
+      if (JGet(Line, 'sheet') <> SheetName) or (JGet(Line, 't') <> 'comp') then
+        continue;
+      PositionComp(SchDoc, Line);
+    end;
     SchServer.ProcessControl.PostProcess(SchDoc, '');
     SchDoc.GraphicallyInvalidate;
 
-    if not ServerDoc.DoSafeChangeFileNameAndSave(TargetPath, 'SCH') then
-    begin
-      LogFail('folha ' + SheetName + ': falha ao salvar em ' + TargetPath);
-      continue;
-    end;
-    Prj.DM_AddSourceDocument(TargetPath);
-    LogOk('folha ' + SheetName + ' criada e adicionada ao projeto: ' + TargetPath);
+    if not ServerDoc.DoFileSave('SCH') then
+      LogFail('folha ' + SheetName + ': falha ao salvar ' + TargetPath)
+    else
+      LogOk('folha ' + SheetName + ' despejada em: ' + TargetPath);
   end;
 
   Report.Add('');
@@ -1059,10 +1210,10 @@ begin
   Report.SaveToFile(ProjDir + '\build-report.txt');
   RegenerateProjectsIndex(ExtractFileName(ProjDir));
 
-  ShowMessage('BuildSchematic concluido.' + #13#10 +
+  ShowMessage('Esquema despejado.' + #13#10 +
     'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + #13#10#13#10 +
     'Relatorio: ' + ProjDir + '\build-report.txt' + #13#10#13#10 +
-    'PROXIMOS PASSOS: salve o projeto, rode Project >> Compile,' + #13#10 +
+    'PROXIMOS PASSOS: salve (Ctrl+S), rode Project >> Compile,' + #13#10 +
     'e depois Design >> Update PCB (ECO) para levar tudo a placa.');
 
   Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free; ItemSheets.Free;
