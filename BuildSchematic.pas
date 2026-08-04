@@ -469,6 +469,7 @@ begin
       ',"files":{"schematic":' + JB(FileExists(d + '\schematic.js')) +
       ',"board":' + JB(FileExists(d + '\board.js')) +
       ',"changes":' + JB(FileExists(d + '\changes.js')) +
+      ',"annotations":' + JB(FileExists(d + '\annotations.js')) +
       ',"buildreport":' + JB(FileExists(d + '\build-report.txt')) +
       ',"applyreport":' + JB(FileExists(d + '\apply-report.txt')) + '}' +
       ',"indexed":' + JS(DateTimeToStr(Now)) + '}';

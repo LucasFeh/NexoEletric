@@ -399,6 +399,7 @@ begin
       ',"files":{"schematic":' + JB(FileExists(d + '\schematic.js')) +
       ',"board":' + JB(FileExists(d + '\board.js')) +
       ',"changes":' + JB(FileExists(d + '\changes.js')) +
+      ',"annotations":' + JB(FileExists(d + '\annotations.js')) +
       ',"buildreport":' + JB(FileExists(d + '\build-report.txt')) +
       ',"applyreport":' + JB(FileExists(d + '\apply-report.txt')) + '}' +
       ',"indexed":' + JS(DateTimeToStr(Now)) + '}';
@@ -993,6 +994,17 @@ begin
     OutL.Add('var changes = [');
     OutL.Add('];');
     OutL.SaveToFile(OutDir + '\changes.js');
+  end;
+
+  // ------------------------------------------------------------------ annotations.js (apenas se nao existir)
+  if not FileExists(OutDir + '\annotations.js') then
+  begin
+    OutL.Clear;
+    OutL.Add('// AltiumPCBMirror - sinalizadores do usuario para a IA. Um objeto JSON por linha.');
+    OutL.Add('// A IA le, corrige via changes.js e marca status resolved + reply. Consulte AI-GUIDE.md Parte C.');
+    OutL.Add('var annotations = [');
+    OutL.Add('];');
+    OutL.SaveToFile(OutDir + '\annotations.js');
   end;
 
   // ------------------------------------------------------------------ pcb-list.csv
