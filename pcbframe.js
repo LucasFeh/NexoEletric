@@ -681,13 +681,89 @@ function draw(){
 
   drawSelection();
   drawAnnotations();
+  if (tool === 'track' && trackChain && hoverW){
+    ctx.save();
+    ctx.strokeStyle = lcolor(document.getElementById('activelayer').value);
+    ctx.globalAlpha = 0.6; ctx.setLineDash([0.5, 0.35]);
+    strokeSeg(trackChain.last.x, trackChain.last.y, hoverW.x, hoverW.y, +document.getElementById('trackw').value || 0.3);
+    ctx.restore();
+  }
 }
 
 /* ============================== interação ============================== */
 
 let dragging=false, dragMoved=false, lastX=0, lastY=0;
 let objDrag = null; /* { m, startW, base, moved } */
-let tool = 'select'; let setTool = t => { tool = t; };
+/* ------- ferramentas Trilha e Via ------- */
+let tool = 'select';
+let trackChain = null;   /* { last:{x,y}, net } */
+let hoverW = null;       /* posicao do mouse em mundo, p/ rubber-band */
+let viaPending = null;
+
+function setTool(t){
+  tool = t;
+  trackChain = null; viaPending = null;
+  document.getElementById('viaform').style.display = 'none';
+  for (const [id, name] of [['toolSelect','select'],['toolTrack','track'],['toolVia','via']])
+    document.getElementById(id).classList.toggle('active', tool === name);
+  cv.style.cursor = tool === 'select' ? 'crosshair' : 'copy';
+  draw();
+}
+document.getElementById('toolSelect').addEventListener('click', () => setTool('select'));
+document.getElementById('toolTrack').addEventListener('click', () => setTool('track'));
+document.getElementById('toolVia').addEventListener('click', () => setTool('via'));
+
+function padSnap(w){   /* centro de pad proximo (prioridade sobre a grade) */
+  const tolp = 8 / view.scale;
+  for (const m of model.comps){
+    const d = m.changed ? compDelta(m) : null;
+    for (const p of m.src.pads){
+      let px = p.x, py = p.y;
+      if (d){ const q = xfPoint(d, p.x, p.y); px = q.x; py = q.y; }
+      if (Math.hypot(w.x - px, w.y - py) <= Math.max(p.w, p.h) / 2 + tolp)
+        return { x:r4(px), y:r4(py), net:p.net || '' };
+    }
+  }
+  return null;
+}
+function toolPoint(w, ev){
+  const ps = padSnap(w);
+  if (ps) return ps;
+  return { x:r4(snapVal(w.x, ev)), y:r4(snapVal(w.y, ev)), net:'' };
+}
+function trackClick(w, ev){
+  const p = toolPoint(w, ev);
+  if (!trackChain){ trackChain = { last:p, net:p.net }; draw(); return; }
+  const c = { op:'track_add', layer:document.getElementById('activelayer').value,
+              x1:trackChain.last.x, y1:trackChain.last.y, x2:p.x, y2:p.y,
+              w:+document.getElementById('trackw').value || 0.3, note:'desenhada no hub' };
+  const net = trackChain.net || p.net;
+  if (net) c.net = net;
+  CH.push(c);
+  trackChain = { last:p, net:net };
+  commit();
+}
+function viaClick(w, ev){
+  viaPending = toolPoint(w, ev);
+  document.getElementById('vianet').value = viaPending.net || '';
+  document.getElementById('viaform').style.display = 'block';
+  document.getElementById('viasize').focus();
+}
+document.getElementById('viaok').addEventListener('click', () => {
+  if (!viaPending) return;
+  const c = { op:'via_add', x:viaPending.x, y:viaPending.y,
+              size:+document.getElementById('viasize').value || 0.6,
+              drill:+document.getElementById('viadrill').value || 0.3, note:'via adicionada no hub' };
+  const net = document.getElementById('vianet').value.trim();
+  if (net) c.net = net;
+  document.getElementById('viaform').style.display = 'none';
+  viaPending = null;
+  CH.push(c);
+  commit();
+});
+document.getElementById('viacancel').addEventListener('click', () => {
+  document.getElementById('viaform').style.display = 'none'; viaPending = null;
+});
 cv.addEventListener('mousedown', e => {
   dragging = false; dragMoved = false; lastX = e.offsetX; lastY = e.offsetY;
   if (annTool || tool !== 'select' || e.button !== 0){ dragging = true; return; }
@@ -711,10 +787,12 @@ window.addEventListener('mouseup', e => {
 });
 cv.addEventListener('mousemove', e=>{
   const w = screenToWorld(e.offsetX, e.offsetY);
+  hoverW = w;
   document.getElementById('sx').textContent = w.x.toFixed(4);
   document.getElementById('sy').textContent = w.y.toFixed(4);
   document.getElementById('sxm').textContent = (w.x*MM2MIL).toFixed(2);
   document.getElementById('sym').textContent = (w.y*MM2MIL).toFixed(2);
+  if (tool === 'track' && trackChain) draw();
   if (objDrag){
     const d = objDrag, m = d.m, dx = w.x - d.startW.x, dy = w.y - d.startW.y;
     if (Math.abs(dx) + Math.abs(dy) > 0.01 || d.moved){
@@ -754,12 +832,15 @@ cv.addEventListener('wheel', e=>{
 cv.addEventListener('click', e=>{
   if (dragMoved) return;
   if (annTool){ openAnnForm(screenToWorld(e.offsetX, e.offsetY)); return; }
+  if (tool === 'track'){ trackClick(screenToWorld(e.offsetX, e.offsetY), e); return; }
+  if (tool === 'via'){ viaClick(screenToWorld(e.offsetX, e.offsetY), e); return; }
   const w = screenToWorld(e.offsetX, e.offsetY);
   selected = hitTest(w.x, w.y);
   showInfo(selected);
   syncTableSel();
   draw();
 });
+cv.addEventListener('contextmenu', e => { e.preventDefault(); if (trackChain){ trackChain = null; draw(); } });
 
 function hitTest(x,y){
   for (const a of ANN){
@@ -1023,6 +1104,7 @@ window.addEventListener('keydown',e=>{
   else if (k==='d'){ show.ghost=!show.ghost; document.getElementById('btnGhost').classList.toggle('active'); draw(); }
   else if (k==='h') toggleHelp();
   else if (k==='n') setAnnTool(!annTool);
+  else if (k === 't') setTool(tool === 'track' ? 'select' : 'track');
   else if (e.key === 'Delete') deleteSelected();
 });
 
@@ -1032,6 +1114,7 @@ document.getElementById('meta').textContent =
   `${B.source||''} · exportado ${B.generated||'?'} · ${(B.components||[]).length} comps, ` +
   `${(B.tracks||[]).length} trilhas, ${(B.vias||[]).length} vias · ${CH.length} mudanças`;
 
+document.getElementById('netlist-dl').innerHTML = (B.nets || []).map(n => '<option value="' + n + '">').join('');
 buildLayerPanel();
 buildChangePanel();
 buildAnnPanel();

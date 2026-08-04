@@ -23,7 +23,15 @@
   button:hover{border-color:var(--accent); color:#fff;}
   button.active{background:#0d47a1; border-color:var(--accent); color:#fff;}
 
-  #main{display:flex; height:calc(100% - 42px);}
+  #main{display:flex; height:calc(100% - 76px);}
+
+  #toolbar{display:flex; align-items:center; gap:8px; height:34px; padding:0 12px;
+    background:var(--panel); border-bottom:1px solid var(--border); font-size:12px;}
+  #toolbar .sep{width:1px; height:18px; background:var(--border);}
+  #toolbar label{color:var(--fg-dim); display:flex; align-items:center; gap:4px;}
+  #toolbar input[type=number]{width:60px; background:var(--panel2); color:var(--fg);
+    border:1px solid var(--border); border-radius:3px; padding:2px 4px;}
+  #toolbar select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px;}
 
   #left{width:240px; min-width:240px; background:var(--panel); border-right:1px solid var(--border);
     display:flex; flex-direction:column; overflow-y:auto;}
@@ -102,6 +110,15 @@
   <button id="btnHelp"  title="Ajuda (H)">?</button>
 </div>
 
+<div id="toolbar">
+  <button id="toolSelect" class="active" title="Selecionar/arrastar (Esc)">Selecionar</button>
+  <button id="toolTrack" title="Desenhar trilhas (T)">Trilha</button>
+  <button id="toolVia" title="Adicionar via">Via</button>
+  <span class="sep"></span>
+  <label>W <input id="trackw" type="number" step="0.05" min="0.05" value="0.3" title="largura da trilha (mm)"></label>
+  <label>Camada <select id="activelayer"><option>Top</option><option>Bottom</option></select></label>
+</div>
+
 <div id="main">
   <aside id="left">
     <div class="section" id="layersec"><h2>Camadas</h2></div>
@@ -151,6 +168,25 @@
           <span style="flex:1"></span>
           <button id="annok">OK</button>
           <button id="anncancel">Cancelar</button>
+        </div>
+      </div>
+      <div id="viaform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
+           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:220px;">
+        <div style="display:flex; gap:6px; margin-bottom:6px;">
+          <label style="flex:1">size <input id="viasize" type="number" step="0.05" min="0.1" value="0.6"
+            style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
+                   border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px;"></label>
+          <label style="flex:1">drill <input id="viadrill" type="number" step="0.05" min="0.05" value="0.3"
+            style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
+                   border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px;"></label>
+        </div>
+        <input id="vianet" list="netlist-dl" placeholder="net (opcional)"
+          style="width:100%; margin-bottom:6px; background:var(--panel); color:var(--fg); border:1px solid var(--border);
+                 border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px;">
+        <datalist id="netlist-dl"></datalist>
+        <div style="display:flex; gap:6px; justify-content:flex-end;">
+          <button id="viaok">OK</button>
+          <button id="viacancel">Cancelar</button>
         </div>
       </div>
     </div>
