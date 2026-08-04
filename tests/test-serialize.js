@@ -32,7 +32,7 @@ assert.ok(Core.serializeChanges([{ op:'via_add', x:1, y:1, size:0.6, drill:0.3, 
 /* escapa nao-ASCII como \uXXXX */
 const acc = Core.serializeChanges([{ op:'via_add', x:1, y:1, size:0.6, drill:0.3, note:'via de coração' }]);
 assert.ok(acc.text.includes('\\u'));
-assert.ok(!/[~-￿]/.test(acc.text));
+assert.ok(!/[\u007e-\uffff]/.test(acc.text));
 
 /* ---- serializeSchematic: round-trip com a fixture demo ---- */
 const sch = loadVar('Projects/_DemoKit/schematic.js', 'schematic');

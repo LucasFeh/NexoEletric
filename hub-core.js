@@ -454,7 +454,7 @@ function validateSchematic(schematic, schlib, pcblib){
 
 /* escapa >= U+007E como \uXXXX (mesma convencao do JS() dos scripts .pas, que escapa > 125) */
 function jline(obj){
-  return JSON.stringify(obj).replace(/[~-￿]/g,
+  return JSON.stringify(obj).replace(/[\u007e-\uffff]/g,
     c => '\\u' + ('000' + c.charCodeAt(0).toString(16)).slice(-4));
 }
 function badStr(s){ return typeof s === 'string' && s.indexOf('":') >= 0; }
