@@ -127,6 +127,10 @@ Fluxo idêntico ao v1: personalizar a PCB depois que o ECO trouxe componentes e 
 de um projeto que já tinha PCB). Único ajuste: os arquivos vivem em
 **`D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects\<nome>\`** (não mais ao lado do `.PcbDoc`).
 
+> **Dois escritores:** o usuário também edita `changes.js` pelo hub. Releia o arquivo
+> antes de cada edição e preserve as linhas dele. E leia os sinalizadores
+> (`annotations.js`, Parte C) antes de posicionar/rotear.
+
 ### Regras absolutas
 
 1. **NUNCA edite `board.js`** — ele é o espelho exportado (verdade da placa). Só leitura.
@@ -225,3 +229,41 @@ var changes = [
    mostra o diff e a tabela PCB List pós-mudanças.
 5. O usuário roda `ApplyChanges` no Altium e depois o DRC. O relatório fica em
    `Projects\<nome>\apply-report.txt`; se algo falhar, corrija e repita.
+
+---
+
+## Parte C — Sinalizadores (`annotations.js`)
+
+O usuário marca problemas direto no hub (vista PCB ou Esquema) com bandeirinhas
+coloridas; elas ficam em `Projects\<nome>\annotations.js` (um objeto JSON por linha):
+
+```js
+var annotations = [
+{"id":"n1","view":"pcb","x":12.5,"y":8.3,"layer":"Top","severity":"err","msg":"trilha muito proxima","ref":"","status":"open","created":"2026-08-04 10:00","reply":""},
+{"id":"n2","view":"sch","sheet":"main","x":2400,"y":3400,"severity":"warn","msg":"conferir pull-up","ref":"R3","status":"resolved","created":"2026-08-04 10:05","reply":"trocado para 10k"},
+];
+```
+
+| Campo | Significado |
+|---|---|
+| `id` | estável (`n1`, `n2`…) — nunca reutilize nem renumere |
+| `view` | `pcb` (x/y em **mm**, `layer`) ou `sch` (x/y em **mil**, `sheet`) |
+| `severity` | `err` (vermelho) / `warn` (amarelo) / `info` (azul) |
+| `msg` | texto do usuário descrevendo o problema |
+| `ref` | opcional: componente âncora |
+| `status` | `open` → `resolved` |
+| `reply` | sua resposta ao resolver |
+
+### Contrato (OBRIGATÓRIO para a sessão de IA)
+
+1. **Antes de qualquer trabalho de PCB/esquema num projeto, leia
+   `Projects\<nome>\annotations.js`** (se existir). Sinalizadores `open` são
+   pendências do usuário para você.
+2. Para cada um: corrija via `changes.js` (cada change com `note` referenciando o id,
+   ex.: `"note":"n1: trilha afastada 0.4mm"`), depois mude `status` para `"resolved"`
+   e escreva em `reply` o que foi feito.
+3. **Nunca apague nem reescreva** sinalizadores do usuário — só altere `status`/`reply`.
+   Quem apaga/reabre é o usuário, pelo hub.
+4. **Dois escritores**: `changes.js`, `schematic.js` e `annotations.js` são editados
+   por você **e** pelo usuário (pelo hub). Sempre **releia o arquivo antes de editar**
+   e preserve as linhas existentes — nunca regenere do zero sem pedido explícito.

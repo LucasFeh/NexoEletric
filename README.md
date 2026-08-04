@@ -82,6 +82,7 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 │       ├── schematic.js     esquema (autorado pela IA ou espelhado do Altium)
 │       ├── board.js         espelho da PCB (após o ECO)
 │       ├── changes.js       mudanças de PCB pendentes/aplicadas
+│       ├── annotations.js   sinalizadores do usuário para a IA (bandeiras no hub)
 │       └── build-report.txt / apply-report.txt
 ├── tests\                   testes node (load.js, test-apply.js, test-geom.js, test-netextract.js, test-validate.js)
 └── example\                 placa sintética standalone do viewer v1 (intocada)
@@ -131,6 +132,10 @@ O hub continua abrindo por **duplo clique**, sem servidor. Se quiser ver os expo
 - Rodou um **Export** no Altium → a página aberta recarrega sozinha em ~1 s.
 - `--port N` muda a porta. Requer Python 3 + Flask (`pip install flask`). O servidor
   não altera nenhum arquivo do hub.
+- Com o servidor rodando, o hub também **salva** arquivos direto no workspace
+  (`POST /api/save`, restrito a `Projects\<nome>\{changes,schematic,annotations}.js`,
+  escrita atômica). Sem servidor, os botões de salvar baixam o arquivo para você
+  substituir manualmente.
 
 ## Fluxo projeto novo do zero
 
@@ -177,6 +182,16 @@ esquema do zero, veja [AI-GUIDE.md](AI-GUIDE.md), Parte A.
 
 Polígonos/planos, regiões, keepouts, textos e regras são exportados para **visualização**,
 mas não são editáveis nesta versão. Furos de fixação/NPTH aparecem em `freepads`.
+
+## Sinalizadores (usuário → IA)
+
+Nas vistas **PCB** e **Esquema**, o botão **⚑ Sinalizar** (tecla `N`) deixa você marcar
+problemas direto no desenho — ex.: bandeira vermelha "trilha muito próxima". As marcações
+ficam em `Projects\<nome>\annotations.js` e a IA é obrigada (AI-GUIDE.md, Parte C) a
+lê-las antes de trabalhar no projeto, corrigir via `changes.js` e responder marcando cada
+uma como resolvida. Resolvidas aparecem esmaecidas com a resposta; você pode reabrir (↺)
+ou apagar (✕). Severidades: vermelho (erro), amarelo (atenção), azul (nota). O export do
+Altium cria o arquivo vazio uma única vez e nunca o sobrescreve.
 
 ## Limitações e avisos
 
