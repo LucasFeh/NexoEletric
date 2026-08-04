@@ -519,6 +519,8 @@ function serializeSchematic(sch){
   if (!sch || typeof sch !== 'object') return { text:null, errors:[{ idx:-1, msg:'schematic ausente' }] };
   const errors = [];
   if (!sch.project) errors.push({ idx:-1, msg:'header: falta "project"' });
+  for (const k of Object.keys(sch)) if (k !== 'items' && badStr(sch[k]))
+    errors.push({ idx:-1, msg:`header: campo "${k}" nao pode conter a sequencia aspas-dois-pontos` });
   const items = Array.isArray(sch.items) ? sch.items : [];
   checkFields(items, it => SCH_ITEM_REQUIRED[it.t], it => it.t || '?', errors);
   items.forEach((it, i) => {

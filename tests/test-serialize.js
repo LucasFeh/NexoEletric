@@ -49,6 +49,8 @@ assert.strictEqual(sbad.text, null);
 assert.ok(sbad.errors.some(e => /footprint/.test(e.msg)));
 /* recusa wire com pts curto */
 assert.ok(Core.serializeSchematic({ project:'X', items:[{ t:'wire', sheet:'main', pts:[[0,0]] }] }).errors.length);
+/* recusa ": no cabecalho */
+assert.ok(Core.serializeSchematic({ project:'X', generated:'a": b', items:[] }).errors.length);
 
 /* ---- serializeAnnotations ---- */
 const anns = [
