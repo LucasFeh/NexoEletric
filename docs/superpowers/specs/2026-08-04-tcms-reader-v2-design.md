@@ -27,9 +27,13 @@ componentes MFG do v1 (SN65HVD75, MAX3051, SM712) não existem no espelho e por 
 - **ESP32 DEV KIT** (30 pinos, footprint `ESP32-DEVKITV1_BOARD`): programação e
   monitor pela USB do próprio devkit.
 - **RS-485 / Modbus RTU**: MAX485CPA (DIP8, 5 V) na UART2. RO (5 V) chega ao ESP32
-  por divisor resistivo 1k/2k2; DI/DE aceitam 3V3 direto. DE+R̄Ē juntos no IO4 com
-  pull-down 10k (placa nasce ouvindo). Terminador 120 Ω em série com jumper J1 entre
-  A e B; TVS bidirecional em A e em B.
+  por divisor resistivo 1k/2k (≤3,33 V mesmo com rail em 5,0 V); DI/DE aceitam 3V3
+  direto. DE+R̄Ē juntos no IO4 com pull-down 10k (placa nasce ouvindo). Terminador
+  120 Ω em série com jumper J1 entre A e B; TVS bidirecional 12 V (SM712/SMBJ12CA)
+  em A e em B. **Nota assumida**: a rede 5V interna fica em ~4,6 V (pós-diodo), abaixo
+  dos 4,75 V mínimos do MAX485 — funciona na prática (igual v1), e a v2.1 elimina
+  isso trocando para transceiver 3V3 quando entrar na lib. Sem bias de fail-safe na
+  placa: fechar J1 apenas em barramento com mestre polarizado.
 - **CAN (reservado)**: TWAI no IO25/IO26 levado ao header CN5 (2x3) junto com
   3V3/GND/CANH/CANL — espeta-se um módulo transceiver (ex. SN65HVD230) até o CI
   entrar na lib + ExportLibs. CANH/CANL do borne já têm TVS e terminador 120 Ω com
@@ -39,17 +43,24 @@ componentes MFG do v1 (SN65HVD75, MAX3051, SM712) não existem no espelho e por 
   VEXT/GND-EXT (3,0–5,5 V) — isolação galvânica e nível automático (3V3 ou 5V).
   Pull-ups externos 4k7 chaveados por J3.
 - **UART TTL 3V3**: UART1 — TX=IO27 no borne (pino 10) e no MAX3232; RX=IO34
-  selecionado por J5 (3 pinos): ou borne TTL (pino 9) ou RS-232.
+  selecionado por J5 (3 pinos): ou borne TTL (pino 9, com **1k em série — R12** contra
+  sinal 5 V) ou RS-232. Pull-up 100k (R14) no nó RX1 para a UART não flutuar com J5
+  aberto (IO34 não tem pull interno).
 - **RS-232**: MAX3232 (3V3) + DB9 fêmea (CN6): pino 3 do DB9 → R1IN, T1OUT → pino 2,
-  pino 5 = GND (cabo direto de PC funciona).
+  pino 5 = GND (cabo direto de PC funciona). T2IN aterrado (entrada CMOS não pode
+  flutuar); loops de null-handshake na placa: 7-8 e 1+4+6 (flow control do PC sempre
+  satisfeito).
 - **SPI 3V3**: header 2x3 CN4 com VSPI (SCK=IO18, MISO=IO19, MOSI=IO23, CS=IO5) +
   3V3/GND. Sem componente extra.
-- **1-Wire**: IO32 no borne (pino 11) com pull-up 4k7 chaveado por J4.
+- **1-Wire**: IO32 no borne (pino 11) com pull-up 4k7 chaveado por J4 e **100R em
+  série (R13)** entre o borne e o IO32 (limita transiente de barramento 5 V; o
+  pull-up fica do lado do borne).
 - **Ethernet (módulo)**: borne CN7 (MSTB 8 vias) para módulo W5500 — compartilha o
   VSPI (SCK/MISO/MOSI) com CS dedicado IO33, INT no IO35 (input-only, perfeito para
   interrupção) e RST no IO14. RJ45/magnetics ficam no próprio módulo.
 - **Alimentação**: USB do devkit OU borne CN2 (5 V) com Schottky D1 anti-inversão no
-  VIN; 100 µF eletrolítico + LED verde de power no 3V3.
+  VIN; 100 µF eletrolítico no nó 5V (pós-D1); LED verde de power no 3V3. O pino 2 do
+  CN1 é SAÍDA (~4,6 V) — não injetar 5 V por ali (contorna o D1).
 - **Fixação**: 4× `Parafuso Aterrado` (furo aterrado) nas laterais da placa.
 
 ## Pinout do borne principal CN1 (MSTB 2,5/12, passo 5.08)
@@ -96,14 +107,17 @@ IO15, VP(IO36), VN(IO39), EN.
 | IC3 | MAX3232 | SOIC NARROW | MAX3232 3V3 |
 | IC4 | ISO 1540D | ISO1540D | ISO1540 |
 | D1 | DIODO [ Schottky ] PTH | DO-201AD-COMPACT | 1N5822 |
-| D2-D5 | DIODO [ SUPRESSOR DE TRANSIENTE BIDIRECIONAL ] SMD | SOD-323 | TVS bidirecional (A, B, CANH, CANL) |
+| D2-D5 | DIODO [ SUPRESSOR DE TRANSIENTE BIDIRECIONAL ] SMD | SOD-323 | TVS bidir 12V standoff — SM712/SMBJ12CA (A, B, CANH, CANL) |
 | LED1 | LED | LED 5MM - GREEN | POWER |
 | R1, R2 | RES [ SMD ] | RES 1206 | 120R 1% (terminadores) |
 | R3 | RES [ SMD ] | RES 0805 | 1k (divisor RO) |
-| R4 | RES [ SMD ] | RES 0805 | 2k2 (divisor RO) |
+| R4 | RES [ SMD ] | RES 0805 | 2k (divisor RO) |
 | R5 | RES [ SMD ] | RES 0805 | 10k (DE pull-down) |
 | R6-R10 | RES [ SMD ] | RES 0805 | 4k7 (I2C ×4, 1-Wire) |
 | R11 | RES [ SMD ] | RES 0805 | 1k (LED) |
+| R12 | RES [ SMD ] | RES 0805 | 1k série RX-TTL |
+| R13 | RES [ SMD ] | RES 0805 | 100R série 1-WIRE |
+| R14 | RES [ SMD ] | RES 0805 | 100k pull-up RX1 |
 | C1-C8 | CAP [  SMD  ] | CAP 0805 | 100nF |
 | C9 | CAP EL [  PTH  ] | CAP EL 3mm L15 D8 | 100uF/16V |
 | CN1 | CONECTOR PADRÃO (parts 1-12) | CONE MSTBH 2,5/ 12 GF | BARRAMENTOS |
@@ -126,8 +140,11 @@ Crosscheck pinos↔pads já feito via extração das libs: todos os pares acima 
 GND · 5v · 3v3 (convenção do v1, power ports) · 485_A/485_B/485_TX/485_RX/485_RO/
 485_DIR · CANH/CANL/CAN_TX/CAN_RX · SDA/SCL (lado ESP32) · SDA_EXT/SCL_EXT/VEXT/
 GND_EXT (domínio isolado — GND_EXT **nunca** encosta em GND) · TTL_TX/TTL_RX/RX1 ·
-RS232_RXIN/RS232_TXOUT · 1WIRE · SPI_SCK/SPI_MISO/SPI_MOSI/SPI_CS · VIN_EXT ·
-nós dos capacitores do MAX3232.
+RS232_RX/RS232_RXIN/RS232_TXOUT · 1WIRE (lado borne) / 1W_MCU (lado IO32) ·
+SPI_SCK/SPI_MISO/SPI_MOSI/SPI_CS · ETH_CS/ETH_INT/ETH_RST · VIN_EXT · nós dos
+capacitores do MAX3232. Todas com netlabel explícito (RX1 e 485_RO inclusive), 49
+redes no total — verificado 1:1 contra o extrator do hub e revisado por painel
+adversarial de 4 lentes (13 agentes; 9 achados corrigidos ou documentados).
 
 Conectividade por net labels em stubs curtos a partir da ponta quente de cada pino
 (folha única "SCH - Leitor V2", tamanho A3); séries curtas (divisor, terminador+jumper)
