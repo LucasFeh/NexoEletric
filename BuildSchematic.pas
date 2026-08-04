@@ -808,12 +808,13 @@ begin
   for i := 0 to Lst.Count - 1 do
   begin
     Obj := Lst.Objects[i];
+    // so RemoveSchObject: a constante SCHM_PrimitiveDeRegistration nao existe
+    // neste engine (a de registro existe) e derruba o script em execucao.
     SchDoc.RemoveSchObject(Obj);
-    SchServer.RobotManager.SendMessage(SchDoc.I_ObjectAddress, c_BroadCast,
-      SCHM_PrimitiveDeRegistration, Obj.I_ObjectAddress);
     n := n + 1;
   end;
   Lst.Free;
+  SchDoc.GraphicallyInvalidate;
   LogOk('limpeza: ' + IntToStr(n) + ' objetos removidos da folha');
 end;
 
