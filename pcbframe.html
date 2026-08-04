@@ -82,6 +82,11 @@
   td.chg{background:rgba(255,224,130,.18); color:var(--chg);}
   tbody tr.moved td:first-child{color:var(--chg);}
 
+  #proprows label{display:flex; align-items:center; gap:6px; margin:3px 0; font-size:12px; color:var(--fg-dim);}
+  #proprows label span{width:80px;}
+  #proprows input, #proprows select{flex:1; background:var(--panel); color:var(--fg);
+    border:1px solid var(--border); border-radius:3px; padding:3px 5px; font-size:12px; min-width:0;}
+
   #help{position:absolute; inset:30px; background:rgba(20,20,20,.96); border:1px solid var(--border);
     border-radius:6px; padding:24px 30px; overflow:auto; display:none; z-index:10;}
   #help h2{color:var(--accent); margin-bottom:10px;}
@@ -187,6 +192,15 @@
         <div style="display:flex; gap:6px; justify-content:flex-end;">
           <button id="viaok">OK</button>
           <button id="viacancel">Cancelar</button>
+        </div>
+      </div>
+      <div id="propform" style="display:none; position:absolute; top:10px; right:10px; z-index:16;
+           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:250px;">
+        <div id="proptitle" style="color:var(--accent); font-size:12px; margin-bottom:6px;"></div>
+        <div id="proprows"></div>
+        <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:6px;">
+          <button id="propok">OK</button>
+          <button id="propcancel">Cancelar</button>
         </div>
       </div>
     </div>

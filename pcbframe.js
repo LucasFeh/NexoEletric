@@ -523,8 +523,8 @@ function drawTextItem(t){
     if (d.flip) mirror=!mirror; }
   let txt=t.text||'';
   const ownerComp = t.owner ? model.compByRef[t.owner] : null;
-  if (t.designator && ownerComp) txt = ownerComp.src.ref;
-  if (t.comment && ownerComp) txt = ownerComp.src.comment || txt;
+  if (t.designator && ownerComp) txt = ownerComp.eff.designator || ownerComp.src.ref;
+  if (t.comment && ownerComp) txt = (ownerComp.eff.comment !== undefined ? ownerComp.eff.comment : (ownerComp.src.comment || txt));
   if (!txt) return;
   drawStrokeText(txt, x, y, t.h||1, rot, mirror, lcolor(layer), layerAlpha(layer));
 }
@@ -764,6 +764,106 @@ document.getElementById('viaok').addEventListener('click', () => {
 document.getElementById('viacancel').addEventListener('click', () => {
   document.getElementById('viaform').style.display = 'none'; viaPending = null;
 });
+
+/* ------- propriedades (duplo clique) ------- */
+let propTarget = null;
+function escAttr(v){ return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+function propRow(key, label, value, type){
+  return `<label><span>${label}</span><input data-k="${key}" type="${type || 'number'}" step="any" value="${escAttr(value)}"></label>`;
+}
+function propSelect(key, label, value, opts){
+  return `<label><span>${label}</span><select data-k="${key}">` +
+    opts.map(o => `<option${o === value ? ' selected' : ''}>${o}</option>`).join('') + '</select></label>';
+}
+function openProps(m){
+  propTarget = m;
+  const rows = document.getElementById('proprows');
+  const title = document.getElementById('proptitle');
+  const e = m.eff;
+  if (m.kind === 'comp'){
+    title.textContent = 'Componente ' + m.src.ref;
+    rows.innerHTML = propRow('designator', 'designator', e.designator || m.src.ref, 'text') +
+      propRow('comment', 'comment', (e.comment !== undefined ? e.comment : (m.src.comment || '')), 'text') +
+      propRow('x', 'x (mm)', e.x) + propRow('y', 'y (mm)', e.y) + propRow('rot', 'rot (°)', e.rot) +
+      propSelect('layer', 'camada', e.layer, ['Top', 'Bottom']);
+  } else if (m.kind === 'track'){
+    title.textContent = 'Trilha ' + (m.added ? e.id : m.src.id);
+    rows.innerHTML = propRow('x1','x1',e.x1) + propRow('y1','y1',e.y1) + propRow('x2','x2',e.x2) +
+      propRow('y2','y2',e.y2) + propRow('w','largura',e.w) + propSelect('layer','camada',e.layer,['Top','Bottom']) +
+      propRow('net','net',e.net || '','text');
+  } else if (m.kind === 'via'){
+    title.textContent = 'Via ' + (m.added ? e.id : m.src.id);
+    rows.innerHTML = propRow('x','x',e.x) + propRow('y','y',e.y) + propRow('size','size',e.size) + propRow('drill','drill',e.drill);
+  } else if (m.kind === 'arc'){
+    title.textContent = 'Arco ' + (m.added ? e.id : m.src.id);
+    rows.innerHTML = propRow('cx','cx',e.cx) + propRow('cy','cy',e.cy) + propRow('r','raio',e.r) +
+      propRow('sa','âng. inicial',e.sa) + propRow('ea','âng. final',e.ea) + propRow('w','largura',e.w) +
+      propSelect('layer','camada',e.layer,['Top','Bottom']);
+  } else if (m.kind === 'text' && !m.src.designator && !m.src.comment){
+    title.textContent = 'Texto ' + m.src.id;
+    rows.innerHTML = propRow('text','texto',e.text || '','text') + propRow('x','x (centro)',e.x) +
+      propRow('y','y (centro)',e.y) + propRow('h','altura',e.h || 1) + propRow('rot','rot (°)',e.rot || 0);
+  } else if (m.kind === 'text' && m.src.designator){
+    title.textContent = 'Designator de ' + m.src.owner;
+    rows.innerHTML = propRow('x','x (centro)',e.x) + propRow('y','y (centro)',e.y) +
+      propRow('h','altura',e.h || 1) + propRow('rot','rot (°)',e.rot || 0);
+  } else return;   /* comment de componente: posicao nao editavel (sem op) */
+  document.getElementById('propform').style.display = 'block';
+}
+function propValues(){
+  const out = {};
+  document.querySelectorAll('#proprows [data-k]').forEach(el => { out[el.dataset.k] = el.value; });
+  return out;
+}
+document.getElementById('propok').addEventListener('click', () => {
+  const m = propTarget, v = propValues();
+  document.getElementById('propform').style.display = 'none';
+  if (!m) return;
+  const num = k => +v[k];
+  if (m.kind === 'comp'){
+    m.eff.x = num('x'); m.eff.y = num('y'); m.eff.rot = num('rot'); m.eff.layer = v.layer;
+    commitCompMove(m);                                   /* ja faz commit() */
+    const newDes = v.designator.trim().replace(/"/g, "'");
+    const newCom = v.comment.replace(/"/g, "'");
+    const desChanged = newDes && newDes !== m.src.ref, comChanged = newCom !== (m.src.comment || '');
+    let c = CH.find(c => c.op === 'comp_attr' && c.ref === m.src.ref);
+    if (!desChanged && !comChanged){ if (c){ CH.splice(CH.indexOf(c), 1); commit(); } }
+    else {
+      if (!c){ c = { op:'comp_attr', ref:m.src.ref, orig_designator:m.src.ref, orig_comment:(m.src.comment || ''), note:'atributos no hub' }; CH.push(c); }
+      if (desChanged) c.designator = newDes; else delete c.designator;
+      c.comment = newCom;
+      commit();
+    }
+  } else if (m.kind === 'track'){
+    upsertEdit(m, 'track_edit', { x1:r4(num('x1')), y1:r4(num('y1')), x2:r4(num('x2')), y2:r4(num('y2')),
+      w:num('w'), layer:v.layer, ...(v.net.trim() ? { net:v.net.trim() } : {}) }, ['x1','y1','x2','y2','w','layer']);
+  } else if (m.kind === 'via'){
+    upsertEdit(m, 'via_edit', { x:r4(num('x')), y:r4(num('y')), size:num('size'), drill:num('drill') }, ['x','y']);
+  } else if (m.kind === 'arc'){
+    upsertEdit(m, 'arc_edit', { cx:r4(num('cx')), cy:r4(num('cy')), r:num('r'), sa:num('sa'), ea:num('ea'),
+      w:num('w'), layer:v.layer }, ['cx','cy','r','sa','ea','layer']);
+  } else if (m.kind === 'text' && !m.src.designator && !m.src.comment){
+    let c = CH.find(c => c.op === 'text_edit' && c.id === m.src.id);
+    if (!c){ c = { op:'text_edit', id:m.src.id, orig_x:m.src.x, orig_y:m.src.y, orig_text:m.src.text, orig_layer:m.src.layer, note:'texto no hub' }; CH.push(c); }
+    c.text = v.text.replace(/"/g, "'"); c.x = r4(num('x')); c.y = r4(num('y')); c.h = num('h'); c.rot = num('rot');
+    commit();
+  } else if (m.kind === 'text' && m.src.designator){
+    let c = CH.find(c => c.op === 'designator_move' && c.ref === m.src.owner);
+    if (!c){ c = { op:'designator_move', ref:m.src.owner, orig_x:m.src.x, orig_y:m.src.y, note:'designator no hub' }; CH.push(c); }
+    c.x = r4(num('x')); c.y = r4(num('y')); c.h = num('h'); c.rot = num('rot');
+    commit();
+  }
+  propTarget = null;
+});
+document.getElementById('propcancel').addEventListener('click', () => {
+  document.getElementById('propform').style.display = 'none'; propTarget = null; reapply();
+});
+cv.addEventListener('dblclick', e => {
+  if (tool !== 'select' || annTool) return;
+  const w = screenToWorld(e.offsetX, e.offsetY);
+  const h = hitTest(w.x, w.y);
+  if (h && h.kind !== 'pad' && h.kind !== 'ann') openProps(h);
+});
 cv.addEventListener('mousedown', e => {
   dragging = false; dragMoved = false; lastX = e.offsetX; lastY = e.offsetY;
   if (annTool || tool !== 'select' || e.button !== 0){ dragging = true; return; }
@@ -869,6 +969,15 @@ function hitTest(x,y){
   for (const m of model.arcs){ if (m.deleted) continue;
     const e=m.eff;
     if (Math.abs(Math.hypot(x-e.cx,y-e.cy)-e.r) <= e.w/2+tol*0.5) return m; }
+  for (const m of model.texts){
+    const e = m.eff, oc = m.src.owner ? model.compByRef[m.src.owner] : null;
+    let txt = e.text || '';
+    if (m.src.designator && oc) txt = oc.eff.designator || oc.src.ref;
+    if (m.src.comment && oc) txt = (oc.eff.comment !== undefined ? oc.eff.comment : (oc.src.comment || txt));
+    if (!txt || !show.layers[e.layer]) continue;
+    const hw = textWidth(txt, e.h || 1) / 2, hh = (e.h || 1) / 2;   /* bbox sem rotacao (aproximacao) */
+    if (x >= e.x - hw - tol && x <= e.x + hw + tol && y >= e.y - hh - tol && y <= e.y + hh + tol) return m;
+  }
   /* componentes por bbox */
   for (const m of model.comps){
     const b=m.src.bbox; if (!b) continue;
@@ -894,6 +1003,7 @@ function hoverLabel(m){
   if (m.kind==='via') return `${m.eff.id||'via nova'} ${m.eff.net?'· '+m.eff.net:''}`;
   if (m.kind==='arc') return `${m.eff.id||'arco novo'} ${m.eff.net?'· '+m.eff.net:''}`;
   if (m.kind==='ann') return `⚑ ${m.ann.id}: ${m.ann.msg}`;
+  if (m.kind==='text') return m.src.designator ? `designator ${m.src.owner}` : (m.src.comment ? `comment ${m.src.owner}` : `texto ${m.src.id}`);
   return '';
 }
 function showInfo(m){
@@ -943,6 +1053,7 @@ function zoomToObj(m){
 function chLabel(ch){
   switch(ch.op){
     case 'comp_move': return `mover ${ch.ref} → (${fmt(ch.x)}, ${fmt(ch.y)}) rot ${fmt(ch.rot)}${ch.layer?' '+ch.layer:''}`;
+    case 'comp_attr': return `atributos ${ch.ref}${ch.designator ? ` → ${ch.designator}` : ''}${typeof ch.comment === 'string' ? ` (${ch.comment})` : ''}`;
     case 'track_edit': return `editar trilha ${ch.id}`;
     case 'track_add': return `nova trilha ${ch.layer} (${fmt(ch.x1)},${fmt(ch.y1)})–(${fmt(ch.x2)},${fmt(ch.y2)})`;
     case 'track_del': return `remover trilha ${ch.id}`;
@@ -1015,7 +1126,8 @@ function natCmp(a,b){
 function tableRows(){
   const f=(document.getElementById('filter').value||'').toLowerCase();
   let rows = model.comps.map(m=>({
-    m, ref:m.src.ref, footprint:m.src.footprint, comment:m.src.comment,
+    m, ref:(m.eff.designator || m.src.ref), footprint:m.src.footprint,
+    comment:(m.eff.comment !== undefined ? m.eff.comment : m.src.comment),
     layer:m.eff.layer, x:m.eff.x, y:m.eff.y, rot:m.eff.rot
   }));
   if (f) rows=rows.filter(r=> (r.ref+' '+r.footprint+' '+r.comment).toLowerCase().includes(f));
@@ -1032,9 +1144,10 @@ function renderTable(){
   for (const r of tableRows()){
     const tr=document.createElement('tr');
     if (r.m===selected) tr.className='sel';
-    if (r.m.changed) tr.classList.add('moved');
+    if (r.m.changed || r.m.attrChanged) tr.classList.add('moved');
     const cells=[
-      ['ref',r.ref,false],['footprint',r.footprint,false],['comment',r.comment,false],
+      ['ref',r.ref, r.m.attrChanged && r.m.eff.designator],['footprint',r.footprint,false],
+      ['comment',r.comment, r.m.attrChanged && r.m.eff.comment !== undefined],
       ['layer',r.layer, r.m.changed && r.m.eff.layer!==r.m.src.layer],
       ['x',r.x.toFixed(4), r.m.changed && !near(r.m.eff.x,r.m.src.x)],
       ['y',r.y.toFixed(4), r.m.changed && !near(r.m.eff.y,r.m.src.y)],
