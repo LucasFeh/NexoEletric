@@ -3,7 +3,7 @@
 { .                                                                                                                   . }
 { .  Le Projects\<nome do projeto>\changes.js e aplica as mudancas na placa:                                          . }
 { .    comp_move | track_edit | track_add | track_del | via_edit | via_add | via_del | arc_edit | arc_add |           . }
-{ .    arc_del | text_edit | outline_set                                                                              . }
+{ .    arc_del | text_edit | designator_move | outline_set                                                            . }
 { .                                                                                                                   . }
 { .  Seguranca:                                                                                                       . }
 { .    - Toda edicao/remocao exige campos orig_* (copiados do board.js). O objeto real so e alterado se casar         . }
@@ -737,6 +737,36 @@ begin
   Board.BoardIterator_Destroy(Iter);
 end;
 
+// Texto livre (nao designator/comment de footprint) cujo CENTRO do bounding box e o
+// conteudo casam com os orig_* do board.js (o x/y exportado e o centro do bounding box)
+function FindFreeText(L: TLayer; X, Y: Double; Txt: String): IPCB_Text;
+var
+  Iter, Prim: TObject;
+  cx, cy: Double;
+begin
+  Result := nil;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(eTextObject));
+  Iter.AddFilter_LayerSet(MkSet(L));
+  Iter.AddFilter_Method(eProcessAll);
+  Prim := Iter.FirstPCBObject;
+  while Prim <> nil do
+  begin
+    if (not Prim.IsDesignator) and (not Prim.IsComment) and (Prim.Text = Txt) then
+    begin
+      cx := (XMM(Prim.BoundingRectangleForSelection.Left) + XMM(Prim.BoundingRectangleForSelection.Right)) / 2;
+      cy := (YMM(Prim.BoundingRectangleForSelection.Bottom) + YMM(Prim.BoundingRectangleForSelection.Top)) / 2;
+      if NearMM(cx, X) and NearMM(cy, Y) then
+      begin
+        Result := Prim;
+        break;
+      end;
+    end;
+    Prim := Iter.NextPCBObject;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+end;
+
 { ..................................................................................................................... }
 { .                                                Relatorio                                                          . }
 { ..................................................................................................................... }
@@ -1134,6 +1164,114 @@ begin
   LogOk(What);
 end;
 
+// text_edit: altera texto livre (silk/topo). x/y do contrato = CENTRO do bounding box,
+// igual ao board.js: aplica texto/altura/rot primeiro, mede o bounding box NOVO e
+// desloca a ancora para o centro cair exatamente em x/y - centralizacao exata
+// independente da largura do texto (1 vs 10).
+procedure DoTextEdit(Line: String);
+var
+  Txt: IPCB_Text;
+  What: String;
+  L: TLayer;
+  cx, cy: Double;
+begin
+  What := 'text_edit ' + JGet(Line, 'id');
+  if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y') and JHas(Line, 'orig_text') and
+    JHas(Line, 'orig_layer')) then
+  begin
+    LogFail(What + ': faltam campos orig_x/orig_y/orig_text/orig_layer (copie do board.js)');
+    Exit;
+  end;
+  L := LayerFromName(JGet(Line, 'orig_layer'));
+  if L = 0 then
+  begin
+    LogFail(What + ': orig_layer invalida "' + JGet(Line, 'orig_layer') + '"');
+    Exit;
+  end;
+  Txt := FindFreeText(L, JNum(Line, 'orig_x'), JNum(Line, 'orig_y'), JGet(Line, 'orig_text'));
+  if Txt = nil then
+  begin
+    LogFail(What + ': texto original nao encontrado na placa (re-exporte o espelho)');
+    Exit;
+  end;
+
+  PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if JHas(Line, 'text') then
+    Txt.Text := JGet(Line, 'text');
+  if JHas(Line, 'h') then
+    Txt.Size := MMsToCoord(JNum(Line, 'h'));
+  if JHas(Line, 'rot') then
+    Txt.Rotation := JNum(Line, 'rot');
+  if JHas(Line, 'x') or JHas(Line, 'y') then
+  begin
+    cx := (XMM(Txt.BoundingRectangleForSelection.Left) + XMM(Txt.BoundingRectangleForSelection.Right)) / 2;
+    cy := (YMM(Txt.BoundingRectangleForSelection.Bottom) + YMM(Txt.BoundingRectangleForSelection.Top)) / 2;
+    if JHas(Line, 'x') then
+      Txt.XLocation := Txt.XLocation + MMsToCoord(JNum(Line, 'x') - cx);
+    if JHas(Line, 'y') then
+      Txt.YLocation := Txt.YLocation + MMsToCoord(JNum(Line, 'y') - cy);
+  end;
+  PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Txt.GraphicallyInvalidate;
+  LogOk(What + ' -> texto=' + Txt.Text + ' centro=(' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')');
+end;
+
+// designator_move: reposiciona o texto do designator de um componente (ref). x/y do
+// contrato = CENTRO do bounding box (igual ao item designator:true de board.js >> texts).
+// Poe o autoposition do nome em Manual e desloca a ancora pela medida real do bounding
+// box, entao a centralizacao independe da largura do texto.
+procedure DoDesignatorMove(Line: String);
+var
+  Comp: IPCB_Component;
+  Nm: IPCB_Text;
+  What, Ref: String;
+  cx, cy: Double;
+begin
+  Ref := JGet(Line, 'ref');
+  What := 'designator_move ' + Ref;
+  if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y')) then
+  begin
+    LogFail(What + ': faltam campos orig_x/orig_y (copie do item do designator em board.js >> texts)');
+    Exit;
+  end;
+  Comp := FindComponent(Ref);
+  if Comp = nil then
+  begin
+    LogFail(What + ': componente nao encontrado');
+    Exit;
+  end;
+  Nm := Comp.Name;
+  cx := (XMM(Nm.BoundingRectangleForSelection.Left) + XMM(Nm.BoundingRectangleForSelection.Right)) / 2;
+  cy := (YMM(Nm.BoundingRectangleForSelection.Bottom) + YMM(Nm.BoundingRectangleForSelection.Top)) / 2;
+  if not (NearMM(cx, JNum(Line, 'orig_x')) and NearMM(cy, JNum(Line, 'orig_y'))) then
+  begin
+    LogFail(What + ': designator atual nao casa com orig_* (re-exporte o espelho)');
+    Exit;
+  end;
+
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  Comp.ChangeNameAutoposition(eAutoPos_Manual);
+  PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if JHas(Line, 'h') then
+    Nm.Size := MMsToCoord(JNum(Line, 'h'));
+  if JHas(Line, 'rot') then
+    Nm.Rotation := JNum(Line, 'rot');
+  if JHas(Line, 'x') or JHas(Line, 'y') then
+  begin
+    cx := (XMM(Nm.BoundingRectangleForSelection.Left) + XMM(Nm.BoundingRectangleForSelection.Right)) / 2;
+    cy := (YMM(Nm.BoundingRectangleForSelection.Bottom) + YMM(Nm.BoundingRectangleForSelection.Top)) / 2;
+    if JHas(Line, 'x') then
+      Nm.XLocation := Nm.XLocation + MMsToCoord(JNum(Line, 'x') - cx);
+    if JHas(Line, 'y') then
+      Nm.YLocation := Nm.YLocation + MMsToCoord(JNum(Line, 'y') - cy);
+  end;
+  PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Nm.GraphicallyInvalidate;
+  Comp.GraphicallyInvalidate;
+  LogOk(What + ' -> centro=(' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')');
+end;
+
 procedure DoOutlineSet(Line: String);
 var
   Pts: TStringList;
@@ -1252,6 +1390,10 @@ begin
       DoArcAdd(Line)
     else if Op = 'arc_del' then
       DoArcDel(Line)
+    else if Op = 'text_edit' then
+      DoTextEdit(Line)
+    else if Op = 'designator_move' then
+      DoDesignatorMove(Line)
     else if Op = 'outline_set' then
       DoOutlineSet(Line)
     else

@@ -31,7 +31,7 @@ const ORIENT_DIR = { 0:[1,0], 90:[0,1], 180:[-1,0], 270:[0,-1] };
 function applyPcbChanges(board, changes){
   const B = board || {};
   const CH = Array.isArray(changes) ? changes : [];
-  const model = { comps:[], compByRef:{}, tracks:[], arcs:[], vias:[], added:[],
+  const model = { comps:[], compByRef:{}, tracks:[], arcs:[], vias:[], texts:[], added:[],
                   validation:[], changeItems:[],
                   outline:((B.board && B.board.outline) || []).slice(), outlineChanged:false };
   for (const c of (B.components || [])) {
@@ -42,6 +42,7 @@ function applyPcbChanges(board, changes){
   for (const t of (B.tracks || [])) { const m = { kind:'track', src:t, eff:{...t}, changed:false, deleted:false }; model.tracks.push(m); byId[t.id] = m; }
   for (const a of (B.arcs  || [])) { const m = { kind:'arc',   src:a, eff:{...a}, changed:false, deleted:false }; model.arcs.push(m);  byId[a.id] = m; }
   for (const v of (B.vias  || [])) { const m = { kind:'via',   src:v, eff:{...v}, changed:false, deleted:false }; model.vias.push(m);  byId[v.id] = m; }
+  for (const x of (B.texts || [])) { const m = { kind:'text',  src:x, eff:{...x}, changed:false }; model.texts.push(m); byId[x.id] = m; }
 
   let addSeq = 0;
   CH.forEach((ch, idx) => {
@@ -135,6 +136,35 @@ function applyPcbChanges(board, changes){
         if (ch.layer!=='Top' && ch.layer!=='Bottom') return bad('layer deve ser Top ou Bottom');
         const m = { kind:'arc', src:null, eff:{ id:'new-a'+(++addSeq), ...ch }, changed:false, added:true };
         model.added.push(m); item.target = m;
+        break;
+      }
+      case 'text_edit': {
+        let m = ch.id ? byId[ch.id] : null;
+        if (m && m.kind!=='text') m = null;
+        if (!m) return bad(`texto id "${ch.id}" não existe no board.js`);
+        item.target = m;
+        if (!isNum(ch.orig_x)||!isNum(ch.orig_y)||!ch.orig_layer||typeof ch.orig_text!=='string')
+          return bad('faltam orig_x/orig_y/orig_text/orig_layer (copie do board.js)');
+        const s = m.src;
+        if (s.designator || s.comment)
+          return bad('só textos livres podem ser editados (este pertence a um componente)');
+        if (!near(ch.orig_x,s.x)||!near(ch.orig_y,s.y)||ch.orig_layer!==s.layer||ch.orig_text!==s.text)
+          warn('orig_* não confere com o board.js — espelho pode estar desatualizado');
+        if (typeof ch.text==='string') m.eff.text = ch.text;
+        for (const k of ['x','y','h','rot']) if (isNum(ch[k])) m.eff[k] = ch[k];
+        m.changed = true;
+        break;
+      }
+      case 'designator_move': {
+        const m = model.texts.find(t => t.src.designator && t.src.owner === ch.ref);
+        if (!m) return bad(`designator do componente "${ch.ref}" não existe no board.js`);
+        item.target = m;
+        if (!isNum(ch.orig_x)||!isNum(ch.orig_y))
+          return bad('faltam orig_x/orig_y (copie do item do designator em board.js » texts)');
+        if (!near(ch.orig_x,m.src.x)||!near(ch.orig_y,m.src.y))
+          warn('orig_* não confere com o board.js — espelho pode estar desatualizado');
+        for (const k of ['x','y','h','rot']) if (isNum(ch[k])) m.eff[k] = ch[k];
+        m.changed = true;
         break;
       }
       case 'outline_set': {

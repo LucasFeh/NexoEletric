@@ -299,6 +299,25 @@ function drawTextItem(t){
   drawStrokeText(txt, x, y, t.h||1, rot, mirror, lcolor(layer), layerAlpha(layer));
 }
 
+function drawTextObj(m){
+  /* texto do modelo efetivo; se mudou, fantasma do original + seta ate o novo centro */
+  if (m.changed && show.ghost){
+    let gt = m.src.text||'';
+    const oc = m.src.owner ? model.compByRef[m.src.owner] : null;
+    if (m.src.designator && oc) gt = oc.src.ref;
+    if (m.src.comment && oc) gt = oc.src.comment || gt;
+    if (gt){
+      drawStrokeText(gt, m.src.x, m.src.y, m.src.h||1, m.src.rot||0, m.src.mirror,
+                     lcolor(m.src.layer), 0.25*layerAlpha(m.src.layer));
+      ctx.save();
+      ctx.beginPath(); ctx.moveTo(m.src.x,m.src.y); ctx.lineTo(m.eff.x,m.eff.y);
+      ctx.globalAlpha=0.7; ctx.strokeStyle=COLOR_CHGARROW; ctx.lineWidth=0.06; ctx.stroke();
+      ctx.restore();
+    }
+  }
+  drawTextItem(m.eff);
+}
+
 function drawRegion(g){
   if (!show.layers[g.layer]) return;
   if (!g.points || g.points.length<3) return;
@@ -404,7 +423,7 @@ function draw(){
 
   /* silkscreen + textos */
   for (const s of (B.silk||[])) drawSilkItem(s);
-  for (const t of (B.texts||[])) drawTextItem(t);
+  for (const m of model.texts) drawTextObj(m);
 
   /* contorno */
   outlinePath();
@@ -544,6 +563,7 @@ function zoomToObj(m){
   else if (m.kind==='via'){ x=m.eff.x; y=m.eff.y; r=m.eff.size*8+2; }
   else if (m.kind==='arc'){ x=m.eff.cx; y=m.eff.cy; r=m.eff.r*2.6+2; }
   else if (m.kind==='pad'){ x=m.x; y=m.y; r=Math.max(m.pad.w,m.pad.h)*8+1; }
+  else if (m.kind==='text'){ x=m.eff.x; y=m.eff.y; r=(m.eff.h||1)*8+2; }
   else return;
   view.cx=x; view.cy=y;
   view.scale=Math.min(CW,CHH)/Math.max(r,0.5);
@@ -559,6 +579,8 @@ function chLabel(ch){
     case 'via_add': return `nova via (${fmt(ch.x)}, ${fmt(ch.y)})`;
     case 'via_del': return `remover via ${ch.id}`;
     case 'arc_edit': return `editar arco ${ch.id}`;
+    case 'text_edit': return `editar texto ${ch.id}${typeof ch.text==='string'?` → "${ch.text}"`:''} (${fmt(ch.x)}, ${fmt(ch.y)})`;
+    case 'designator_move': return `designator ${ch.ref} → (${fmt(ch.x)}, ${fmt(ch.y)})`;
     case 'arc_add': return `novo arco ${ch.layer}`;
     case 'arc_del': return `remover arco ${ch.id}`;
     case 'outline_set': return `novo contorno da placa (${Array.isArray(ch.pts)?ch.pts.length:'?'} vértices)`;

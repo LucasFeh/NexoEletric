@@ -165,6 +165,8 @@ var changes = [
 {"op":"arc_edit","id":"a1","r":2.5,"orig_cx":33,"orig_cy":22,"orig_r":2,"orig_sa":0,"orig_ea":90,"orig_layer":"Top"},
 {"op":"arc_add","layer":"Top","cx":33,"cy":22,"r":3,"sa":0,"ea":90,"w":0.3,"net":""},
 {"op":"arc_del","id":"a2","orig_cx":5,"orig_cy":5,"orig_r":1,"orig_sa":0,"orig_ea":360,"orig_layer":"Bottom"},
+{"op":"text_edit","id":"x7","text":"27","x":116,"y":34.869675,"orig_x":116.245225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"numero do canal 27 centralizado"},
+{"op":"designator_move","ref":"F27","x":116,"y":38.47149,"orig_x":115.942435,"orig_y":38.47149,"note":"designator dentro da celula"},
 {"op":"outline_set","pts":[[0,0],[80,0],[80,60],[0,60]],"note":"placa 80x60"},
 ];
 ```
@@ -183,10 +185,21 @@ var changes = [
 | `arc_edit` | `id`, `orig_cx`,`orig_cy`,`orig_r`,`orig_sa`,`orig_ea`,`orig_layer` | `cx`,`cy`,`r`,`sa`,`ea`,`w`,`layer`,`note` |
 | `arc_add` | `layer`, `cx`,`cy`,`r`,`sa`,`ea`,`w` | `net`, `note` |
 | `arc_del` | `id`, `orig_cx..orig_ea`, `orig_layer` | `note` |
+| `text_edit` | `id`, `orig_x`, `orig_y`, `orig_text`, `orig_layer` | `text`, `x`, `y`, `h`, `rot`, `note` |
+| `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
 | `outline_set` | `pts` (`[[x,y],...]` ≥3, polígono **fechado**, só linhas) | `note` |
 
 - `size` = diâmetro do anel da via; `drill` = diâmetro do furo (`drill < size`).
 - `sa`/`ea` = ângulos inicial/final do arco em graus, anti-horário a partir de +X.
+- `text_edit` vale só para **textos livres** (`designator:false` e `comment:false` no
+  `board.js`); designator/comment pertencem ao componente. `x`/`y` são o **centro do
+  bounding box** (mesma convenção do `board.js » texts`): o ApplyChanges aplica
+  `text`/`h`/`rot` primeiro, mede o bounding box novo no Altium e desloca a âncora para o
+  centro cair exatamente em `x`/`y` — o texto fica centralizado independente da largura.
+- `designator_move` reposiciona o **designator de um componente** (item `designator:true`
+  em `board.js » texts`; ache-o pelo `owner` = ref). Mesma convenção de centro do
+  `text_edit`; os `orig_x`/`orig_y` vêm desse item. O script põe o autoposition do nome em
+  Manual antes de mover (senão o Altium re-ancora sozinho).
 - `net`: use um nome existente em `board.js » nets` (net inexistente gera aviso e objeto sem net).
 - `outline_set` **substitui inteiro** o `Board.BoardOutline` pelo polígono de `pts`; só
   aceita segmentos de linha (contorno com arcos: desenhe no Altium). O `ApplyChanges`
