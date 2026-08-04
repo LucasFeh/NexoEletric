@@ -12,6 +12,10 @@ const nets  = HubCore.extractNets(model, SLIB);
 const val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
 let sheetIdx = 0, selNet = '', selComp = null;
 const showState = { grid:true };
+const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
+  ? annotations.map(a => ({ ...a })) : [];
+const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
+let annTool = false, annDirty = false, annPending = null;
 
 document.getElementById('meta').textContent =
   `${schematic.project} · ${model.sheets.length} folha(s) · ${nets.nets.length} nets`;
@@ -83,6 +87,22 @@ function drawWorld(ctx, cam){
   for (const l of s.netlabels) D.drawNetLabel(ctx, l, selNet === l.net ? D.SCH.hl : undefined);
   for (const p of s.powers)    D.drawPowerPort(ctx, p, selNet === p.net ? D.SCH.hl : undefined);
   for (const t of s.texts)     D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, D.SCH.text, 'left');
+
+  /* sinalizadores da folha ativa */
+  for (const a of ANN){
+    if (a.view !== 'sch' || a.sheet !== s.name) continue;
+    const c = ANN_COLORS[a.severity] || ANN_COLORS.info;
+    const sz = 16 / cam.scale;
+    ctx.save();
+    ctx.globalAlpha = a.status === 'resolved' ? 0.45 : 1;
+    ctx.strokeStyle = c; ctx.fillStyle = c;
+    ctx.lineWidth = 2.5 / cam.scale; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x, a.y + sz * 1.6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x, a.y + sz * 1.6); ctx.lineTo(a.x + sz * 1.1, a.y + sz * 1.25);
+    ctx.lineTo(a.x, a.y + sz * 0.9); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(a.x, a.y, 3 / cam.scale, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
 }
 const cam = D.mkCamera(document.getElementById('cv'), drawWorld, {
   bg:'#3a3a34',
@@ -95,6 +115,7 @@ const cam = D.mkCamera(document.getElementById('cv'), drawWorld, {
                             : h.kind === 'wire' ? (nets.wireNet[sheetIdx][h.wi] || 'fio') : h.ref) : '';
   },
   onClick: w => {
+    if (annTool){ openAnnForm(w); return; }
     const h = hitTest(w.x, w.y);
     if (!h) { setNet(''); setComp(null); return; }
     if (h.kind === 'pin')  { setComp(h.ref); setNet(nets.pinNet[h.ref + '-' + h.num] || ''); }
@@ -126,6 +147,95 @@ function hitTest(x, y){
   }
   return null;
 }
+
+/* ------- sinalizadores ------- */
+function setAnnDirty(v){
+  annDirty = v;
+  const b = document.getElementById('btnAnnSave');
+  b.classList.toggle('active', v);
+  b.textContent = v ? 'Salvar sinaliz. *' : 'Salvar sinaliz.';
+}
+function setAnnTool(v){
+  annTool = v;
+  document.getElementById('btnAnn').classList.toggle('active', v);
+  document.getElementById('cv').style.cursor = v ? 'copy' : 'crosshair';
+  if (!v) hideAnnForm();
+}
+function hideAnnForm(){ document.getElementById('annform').style.display = 'none'; annPending = null; }
+function openAnnForm(w){
+  annPending = { x: Math.round(w.x), y: Math.round(w.y) };
+  document.getElementById('anntext').value = '';
+  document.getElementById('annform').style.display = 'block';
+  document.getElementById('anntext').focus();
+}
+function annNextId(){
+  let mx = 0;
+  for (const a of ANN){ const n = parseInt(String(a.id || '').replace(/^n/, ''), 10); if (isFinite(n) && n > mx) mx = n; }
+  return 'n' + (mx + 1);
+}
+function nowStr(){
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function annChanged(){ setAnnDirty(true); buildAnnPanel(); cam.draw(); }
+function buildAnnPanel(){
+  const list = document.getElementById('annlist');
+  const mine = ANN.filter(a => a.view === 'sch');
+  document.getElementById('anncount').textContent = mine.length;
+  list.innerHTML = mine.length ? '' : '<div style="color:var(--fg-dim)">nenhum — use ⚑ Sinalizar</div>';
+  for (const a of mine){
+    const div = document.createElement('div');
+    div.className = 'annitem ' + a.severity + (a.status === 'resolved' ? ' resolved' : '');
+    const x = document.createElement('span');
+    x.className = 'annx'; x.textContent = '✕'; x.title = 'apagar';
+    x.addEventListener('click', ev => { ev.stopPropagation(); ANN.splice(ANN.indexOf(a), 1); annChanged(); });
+    div.appendChild(x);
+    div.appendChild(document.createTextNode(
+      `${a.id} [${a.sheet}]: ${a.msg}` + (a.status === 'resolved' ? (a.reply ? ` ✓ ${a.reply}` : ' ✓') : '')));
+    div.addEventListener('click', () => {
+      const si = model.sheets.findIndex(sh => sh.name === a.sheet);
+      if (si >= 0 && si !== sheetIdx){ sheetIdx = si; document.getElementById('sheetsel').value = si; }
+      cam.fit({ x1: a.x - 900, y1: a.y - 900, x2: a.x + 900, y2: a.y + 900 });
+    });
+    list.appendChild(div);
+  }
+}
+document.getElementById('annok').addEventListener('click', () => {
+  const msg = document.getElementById('anntext').value.trim().replace(/"/g, "'");
+  if (!msg || !annPending) return;
+  ANN.push({ id: annNextId(), view: 'sch', sheet: model.sheets[sheetIdx].name,
+             x: annPending.x, y: annPending.y, severity: document.getElementById('annsev').value,
+             msg, ref: '', status: 'open', created: nowStr(), reply: '' });
+  hideAnnForm(); annChanged();
+});
+document.getElementById('anncancel').addEventListener('click', hideAnnForm);
+async function saveAnnotations(){
+  const out = HubCore.serializeAnnotations(ANN);
+  if (!out.text){ alert('Sinalizadores inválidos:\n' + out.errors.map(e => e.msg).join('\n')); return; }
+  const rel = 'Projects/' + SCH_P + '/annotations.js';
+  try {
+    const r = await HubIO.saveFile(rel, out.text);
+    setAnnDirty(false);
+    document.getElementById('shover').textContent =
+      r.mode === 'server' ? '✓ sinalizadores salvos' : '↓ arquivo baixado — substitua ' + rel;
+  } catch (err) {
+    if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
+      HubIO.download('annotations.js', out.text);
+  }
+}
+document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
+document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  const k = e.key.toLowerCase();
+  if (k === 'n') setAnnTool(!annTool);
+  else if (e.key === 'Escape') setAnnTool(false);
+});
+window.__hubOnChange = function(){
+  if (!annDirty){ location.reload(); return; }
+  document.getElementById('shover').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
+};
+window.addEventListener('beforeunload', e => { if (annDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- paineis ---------- */
 function setNet(n){ selNet = n; buildNetList(); cam.draw(); }
@@ -186,7 +296,7 @@ document.getElementById('btnGrid').addEventListener('click', e => {
   showState.grid = !showState.grid; e.target.classList.toggle('active'); cam.draw();
 });
 
-buildSheetSel(); buildCompTable(); buildNetList(); buildValList();
+buildSheetSel(); buildCompTable(); buildNetList(); buildValList(); buildAnnPanel();
 cam.resize(); cam.fit(sheetBBox());
 
 })();

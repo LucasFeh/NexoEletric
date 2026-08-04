@@ -34,6 +34,14 @@
   .netitem.sel{background:#0d47a1; color:#fff;}
   .valitem.err{border-left-color:var(--err);}
   .valitem.warn{border-left-color:var(--warn);}
+  .annitem{padding:3px 6px; margin:2px 0; border-radius:3px; background:var(--panel2);
+    cursor:pointer; font-size:11px; border-left:3px solid transparent;}
+  .annitem.err{border-left-color:var(--err);}
+  .annitem.warn{border-left-color:var(--warn);}
+  .annitem.info{border-left-color:var(--accent);}
+  .annitem.resolved{opacity:.5;}
+  .annitem .annx{float:right; color:var(--fg-dim); padding:0 4px; cursor:pointer;}
+  .annitem .annx:hover{color:var(--err);}
   #status{height:24px; display:flex; gap:16px; align-items:center; padding:0 10px;
     background:var(--panel); border-top:1px solid var(--border);
     font:12px Consolas,monospace; color:var(--fg-dim);}
@@ -48,15 +56,35 @@
   <select id="sheetsel"></select>
   <button id="btnFit">Fit</button>
   <button id="btnGrid" class="active">Grade</button>
+  <button id="btnAnn" title="Sinalizar problema para a IA (N)">⚑ Sinalizar</button>
+  <button id="btnAnnSave" title="Salvar sinalizadores">Salvar sinaliz.</button>
   <span class="meta" id="meta"></span>
 </div>
 <div id="main">
-  <div id="cvwrap"><canvas id="cv"></canvas><div id="fatal"></div></div>
+  <div id="cvwrap"><canvas id="cv"></canvas><div id="fatal"></div>
+    <div id="annform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
+         background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
+      <textarea id="anntext" rows="2" placeholder="problema (ex: trilha muito proxima)"
+        style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
+               border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px; resize:vertical;"></textarea>
+      <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
+        <select id="annsev" style="background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px;">
+          <option value="err">vermelho (erro)</option>
+          <option value="warn">amarelo (atenção)</option>
+          <option value="info">azul (nota)</option>
+        </select>
+        <span style="flex:1"></span>
+        <button id="annok">OK</button>
+        <button id="anncancel">Cancelar</button>
+      </div>
+    </div>
+  </div>
   <aside id="side">
     <div class="sec"><h2>Componentes</h2>
       <table id="comptable"><thead><tr><th>Ref</th><th>Símbolo</th><th>Footprint</th><th>Comment</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="sec"><h2>Nets (<span id="netcount">0</span>)</h2><div id="netlist"></div></div>
+    <div class="sec"><h2>Sinalizadores (<span id="anncount">0</span>)</h2><div id="annlist"></div></div>
     <div class="sec"><h2>Validação</h2><div id="vallist"></div></div>
   </aside>
 </div>
@@ -71,6 +99,7 @@
 <script>
   var SCH_P = new URLSearchParams(location.search).get('p') || '_DemoKit';
   document.write('<script src="Projects/' + SCH_P + '/schematic.js"><\/script>');
+  document.write('<script src="Projects/' + SCH_P + '/annotations.js"><\/script>');
 </script>
 <script src="hub-io.js"></script>
 <script src="schframe.js"></script>
