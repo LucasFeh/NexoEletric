@@ -1275,6 +1275,41 @@ begin
   LogOk(What + ' -> centro=(' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')');
 end;
 
+procedure DoCompAttr(Line: String);
+var
+  Ref: String;
+  Comp: IPCB_Component;
+begin
+  Ref := JGet(Line, 'ref');
+  Comp := FindComponent(Ref);
+  if Comp = nil then
+  begin
+    LogFail('comp_attr ' + Ref + ': componente nao encontrado');
+    Exit;
+  end;
+  if not (JHas(Line, 'orig_designator') and JHas(Line, 'orig_comment')) then
+  begin
+    LogFail('comp_attr ' + Ref + ': faltam orig_designator/orig_comment (copie do board.js)');
+    Exit;
+  end;
+  if (Comp.Name.Text <> JGet(Line, 'orig_designator')) or (Comp.Comment.Text <> JGet(Line, 'orig_comment')) then
+  begin
+    LogFail('comp_attr ' + Ref + ': designator/comment atuais nao casam com orig_* (re-exporte o espelho)');
+    Exit;
+  end;
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if JHas(Line, 'designator') then
+  begin
+    if JGet(Line, 'designator') <> '' then
+      Comp.Name.Text := JGet(Line, 'designator');
+  end;
+  if JHas(Line, 'comment') then
+    Comp.Comment.Text := JGet(Line, 'comment');
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Comp.GraphicallyInvalidate;
+  LogOk('comp_attr ' + Ref + ' -> designator=' + JGet(Line, 'designator') + ' comment=' + JGet(Line, 'comment'));
+end;
+
 procedure DoOutlineSet(Line: String);
 var
   Pts: TStringList;
@@ -1328,7 +1363,7 @@ end;
 procedure ApplyChangesInto(OutDir: String);
 var
   ChangesFile, Line, Op: String;
-  Src: TStringList;
+  Src, AttrLines: TStringList;
   i, Recognized: Integer;
 begin
   Board := PCBServer.GetCurrentPCBBoard;
@@ -1358,6 +1393,7 @@ begin
   Recognized := 0;
 
   Src := TStringList.Create;
+  AttrLines := TStringList.Create;
   Src.LoadFromFile(ChangesFile);
 
   PCBServer.PreProcess;
@@ -1399,9 +1435,15 @@ begin
       DoDesignatorMove(Line)
     else if Op = 'outline_set' then
       DoOutlineSet(Line)
+    else if Op = 'comp_attr' then
+      AttrLines.Add(Line)   // renames por ultimo: FindComponent casa por Name.Text
     else
       LogFail('operacao desconhecida: "' + Op + '"');
   end;
+
+  // comp_attr aplicado por ultimo (renomear designator cedo quebraria refs das ops seguintes)
+  for i := 0 to AttrLines.Count - 1 do
+    DoCompAttr(AttrLines[i]);
 
   PCBServer.PostProcess;
 
@@ -1421,6 +1463,7 @@ begin
     'Relatorio: ' + OutDir + '\apply-report.txt' + #13#10#13#10 +
     'IMPORTANTE: confira o resultado, rode o DRC do Altium e re-execute o ExportPcb para atualizar o espelho.');
 
+  AttrLines.Free;
   Src.Free;
   Report.Free;
 end;
