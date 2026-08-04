@@ -267,10 +267,13 @@ begin
             DirectoryExists(d);
 end;
 
-// valor de "name":"..." numa linha do projects.js ('' se a linha nao tiver)
+// valor de "name":"..." numa linha do projects.js ('' se a linha nao tiver).
+// DESFAZ os escapes \uXXXX gravados por JS(): sem isso um projeto com acento
+// (ex. "Cartao" com til) nunca casa com a pasta e some do indice na regravacao.
 function NameFieldOf(Line: String): String;
 var
   p, l: Integer;
+  Hex: String;
 begin
   Result := '';
   p := Pos('"name":"', Line);
@@ -280,7 +283,28 @@ begin
   l := Length(Line);
   while (p <= l) and (Line[p] <> '"') do
   begin
-    Result := Result + Line[p];
+    if Line[p] = '\' then
+    begin
+      p := p + 1;
+      if p > l then
+        break;
+      case Ord(Line[p]) of
+        110:
+          Result := Result + #10;
+        116:
+          Result := Result + #9;
+        117:
+          begin
+            Hex := Copy(Line, p + 1, 4);
+            Result := Result + Chr(StrToInt('$' + Hex));
+            p := p + 4;
+          end;
+      else
+        Result := Result + Line[p];
+      end;
+    end
+    else
+      Result := Result + Line[p];
     p := p + 1;
   end;
 end;
