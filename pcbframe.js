@@ -11,6 +11,10 @@ if (typeof pcbmirror === 'undefined') {
 }
 const B = pcbmirror;
 const CH = (typeof changes !== 'undefined' && Array.isArray(changes)) ? changes : [];
+const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
+  ? annotations.map(a => ({ ...a })) : [];
+const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
+let setAnnDirty = () => {};
 
 const MM2MIL = 1/0.0254;
 const isNum = HubCore.isNum, distSeg = HubCore.distSeg;
@@ -385,6 +389,23 @@ function drawSelection(){
   ctx.restore();
 }
 
+function drawAnnotations(){
+  for (const a of ANN){
+    if (a.view !== 'pcb') continue;
+    const c = ANN_COLORS[a.severity] || ANN_COLORS.info;
+    const s = 14 / view.scale;                      /* tamanho ~constante em px */
+    ctx.save();
+    ctx.globalAlpha = a.status === 'resolved' ? 0.45 : 1;
+    ctx.strokeStyle = c; ctx.fillStyle = c;
+    ctx.lineWidth = 2.2 / view.scale; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x, a.y + s * 1.6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x, a.y + s * 1.6); ctx.lineTo(a.x + s * 1.1, a.y + s * 1.25);
+    ctx.lineTo(a.x, a.y + s * 0.9); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(a.x, a.y, 2.5 / view.scale, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+}
+
 function draw(){
   ctx.setTransform(1,0,0,1,0,0);
   ctx.fillStyle='#000000';
@@ -433,6 +454,7 @@ function draw(){
   if (true) for (const m of model.comps) drawCompOverlay(m);
 
   drawSelection();
+  drawAnnotations();
 }
 
 /* ============================== interação ============================== */
@@ -479,6 +501,10 @@ cv.addEventListener('click', e=>{
 });
 
 function hitTest(x,y){
+  for (const a of ANN){
+    if (a.view === 'pcb' && Math.hypot(x - a.x, y - a.y) <= 12 / view.scale)
+      return { kind:'ann', ann:a };
+  }
   const tol = 6/view.scale;
   /* pads primeiro (mais especificos) */
   for (const m of model.comps){
@@ -525,6 +551,7 @@ function hoverLabel(m){
   if (m.kind==='track') return `${m.eff.id||'trilha nova'} ${m.eff.net?'· '+m.eff.net:''}`;
   if (m.kind==='via') return `${m.eff.id||'via nova'} ${m.eff.net?'· '+m.eff.net:''}`;
   if (m.kind==='arc') return `${m.eff.id||'arco novo'} ${m.eff.net?'· '+m.eff.net:''}`;
+  if (m.kind==='ann') return `⚑ ${m.ann.id}: ${m.ann.msg}`;
   return '';
 }
 function showInfo(m){
@@ -532,6 +559,7 @@ function showInfo(m){
   if (!m){ el.textContent='— clique em um objeto —'; return; }
   let obj;
   if (m.kind==='pad') obj={ tipo:'pad', comp:m.comp.src.ref, ...m.pad };
+  else if (m.kind==='ann') obj={ tipo:'sinalizador', ...m.ann };
   else obj={ tipo:m.kind, ...(m.eff||{}), ...(m.added?{ADICIONADO:true}:{}),
              ...(m.deleted?{REMOVIDO:true}:{}),
              ...(m.changed&&m.src?{original:m.src}:{}) };
@@ -564,6 +592,7 @@ function zoomToObj(m){
   else if (m.kind==='arc'){ x=m.eff.cx; y=m.eff.cy; r=m.eff.r*2.6+2; }
   else if (m.kind==='pad'){ x=m.x; y=m.y; r=Math.max(m.pad.w,m.pad.h)*8+1; }
   else if (m.kind==='text'){ x=m.eff.x; y=m.eff.y; r=(m.eff.h||1)*8+2; }
+  else if (m.kind==='ann'){ x=m.ann.x; y=m.ann.y; r=8; }
   else return;
   view.cx=x; view.cy=y;
   view.scale=Math.min(CW,CHH)/Math.max(r,0.5);
@@ -608,6 +637,32 @@ function buildChangePanel(){
     val.appendChild(div);
   }
 }
+function buildAnnPanel(){
+  const list = document.getElementById('annlist');
+  const mine = ANN.filter(a => a.view === 'pcb');
+  document.getElementById('anncount').textContent = mine.length;
+  list.innerHTML = mine.length ? '' : '<div style="color:var(--fg-dim)">nenhum — use a ferramenta Sinalizar</div>';
+  for (const a of mine){
+    const div = document.createElement('div');
+    div.className = 'annitem ' + a.severity + (a.status === 'resolved' ? ' resolved' : '');
+    const x = document.createElement('span');
+    x.className = 'annx'; x.textContent = '✕'; x.title = 'apagar sinalizador';
+    x.addEventListener('click', ev => { ev.stopPropagation(); annDelete(a); });
+    div.appendChild(x);
+    div.appendChild(document.createTextNode(
+      `${a.id}: ${a.msg}` + (a.status === 'resolved' ? (a.reply ? ` ✓ ${a.reply}` : ' ✓') : '')));
+    if (a.status === 'resolved'){
+      const rb = document.createElement('span');
+      rb.className = 'annx'; rb.textContent = '↺'; rb.title = 'reabrir';
+      rb.addEventListener('click', ev => { ev.stopPropagation(); a.status = 'open'; a.reply = ''; annChanged(); });
+      div.appendChild(rb);
+    }
+    div.addEventListener('click', () => { selected = { kind:'ann', ann:a }; showInfo(selected); zoomToObj(selected); });
+    list.appendChild(div);
+  }
+}
+function annDelete(a){ ANN.splice(ANN.indexOf(a), 1); annChanged(); }
+function annChanged(){ setAnnDirty(true); buildAnnPanel(); draw(); }
 
 /* ============================== PCB List (tabela) ============================== */
 
@@ -712,6 +767,7 @@ document.getElementById('meta').textContent =
 
 buildLayerPanel();
 buildChangePanel();
+buildAnnPanel();
 renderTable();
 resize();
 fitBoard();

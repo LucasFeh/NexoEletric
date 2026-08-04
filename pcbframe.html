@@ -38,6 +38,15 @@
   .changeitem.ok{border-left-color:var(--ok);}
   .changeitem.warn,.valitem.warn{border-left-color:var(--warn);}
   .changeitem.err,.valitem.err{border-left-color:var(--err);}
+  .annitem{padding:4px 6px; margin:2px 0; border-radius:3px; background:var(--panel2);
+    cursor:pointer; font-size:12px; border-left:3px solid transparent; word-break:break-word;}
+  .annitem:hover{background:#383838;}
+  .annitem.err{border-left-color:var(--err);}
+  .annitem.warn{border-left-color:var(--warn);}
+  .annitem.info{border-left-color:var(--accent);}
+  .annitem.resolved{opacity:.5;}
+  .annitem .annx{float:right; color:var(--fg-dim); padding:0 4px; cursor:pointer;}
+  .annitem .annx:hover{color:var(--err);}
   #infopanel{font-family:Consolas,monospace; font-size:11px; white-space:pre-wrap; word-break:break-all; color:#bde0bd;}
 
   #center{flex:1; display:flex; flex-direction:column; min-width:0;}
@@ -95,6 +104,7 @@
     <div class="section" id="layersec"><h2>Camadas</h2></div>
     <div class="section"><h2>Mudanças (<span id="chcount">0</span>)</h2><div id="changelist"></div></div>
     <div class="section"><h2>Validação</h2><div id="vallist"></div></div>
+    <div class="section"><h2>Sinalizadores (<span id="anncount">0</span>)</h2><div id="annlist"></div></div>
     <div class="section"><h2>Objeto selecionado</h2><div id="infopanel">— clique em um objeto —</div></div>
   </aside>
 
@@ -156,9 +166,11 @@
   if (PCB_P) {
     document.write('<script src="Projects/' + PCB_P + '/board.js"><\/script>');
     document.write('<script src="Projects/' + PCB_P + '/changes.js"><\/script>');
+    document.write('<script src="Projects/' + PCB_P + '/annotations.js"><\/script>');
   } else {
     document.write('<script src="board.js"><\/script>');
     document.write('<script src="changes.js"><\/script>');
+    document.write('<script src="annotations.js"><\/script>');
   }
 </script>
 <script src="hub-core.js"></script>
