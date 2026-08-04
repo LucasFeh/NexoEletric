@@ -14,8 +14,9 @@
 
 const
   // AJUSTE AQUI se as bibliotecas mudarem de lugar.
-  SCRIPT_HOME = 'Z:\AltiumPCBMirror';
-  OUT_DIR = 'Z:\AltiumPCBMirror\Libs';
+  // Caminho como visto do PC que RODA o Altium (workspace fica no LUCAS-PC).
+  SCRIPT_HOME = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror';
+  OUT_DIR = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Libs';
   SCHLIB_FILE = 'Z:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib';
   PCBLIB_FILE = 'Z:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE FOOTPRINT.PcbLib';
 

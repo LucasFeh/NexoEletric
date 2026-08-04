@@ -7,7 +7,7 @@ o esquema, transferindo-o para o Altium como `.SchDoc` verdadeiro (nets extraíd
 compilador do Altium) — ou apenas personalizar a PCB de um projeto existente (posição de
 componentes, trilhas, vias, arcos, contorno), sempre **aplicando de volta** na placa real,
 nas mesmas coordenadas do PCB List / Properties do Altium. Tudo fica visível e conferível
-num hub HTML único, com histórico local em `Z:\AltiumPCBMirror\Projects\`.
+num hub HTML único, com histórico local em `D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects\`.
 
 Baseado (como referência de API) no
 [InteractiveHTMLBOM4Altium2](https://github.com/lukaszmoskwa/InteractiveHTMLBOM4Altium2)
@@ -30,9 +30,13 @@ transformados**; só a projeção de tela do hub inverte Y.
 
 ## Instalação
 
-1. Copie esta pasta para o seu PC — ela é o **workspace central** (ex.: `Z:\AltiumPCBMirror`).
-2. Se o caminho for diferente de `Z:\AltiumPCBMirror`, ajuste a constante `SCRIPT_HOME`
-   (e `PROJECTS_DIR`, quando existir) no início de cada um dos 5 scripts `.pas`
+1. Copie esta pasta para o seu PC — ela é o **workspace central** (ex.: `D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror`).
+2. Ajuste a constante `SCRIPT_HOME` (e `PROJECTS_DIR`/`OUT_DIR`, quando existir) no
+   início de cada um dos 5 scripts `.pas`. **Importante:** use o caminho como visto
+   do PC que **roda o Altium** — se o workspace fica em outra máquina da rede,
+   a constante deve ser o UNC do compartilhamento (ex.:
+   `\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror`), nunca um caminho
+   local que só existe na máquina do workspace
    (`ExportLibs.pas`, `ExportProject.pas`, `BuildSchematic.pas`, `ExportBoard.pas`,
    `ApplyChanges.pas`).
 3. Em `ExportLibs.pas` (e também em `BuildSchematic.pas`), ajuste `SCHLIB_FILE` e
@@ -54,7 +58,7 @@ transformados**; só a projeção de tela do hub inverte Y.
 ## Estrutura do workspace
 
 ```
-Z:\AltiumPCBMirror\
+D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 ├── AltiumPCBMirror.PrjScr   projeto de script (5 documentos)
 ├── ExportLibs.pas           [ExportLibs]   bibliotecas do usuário -> Libs\
 ├── ExportProject.pas        [ExportSch]    esquema do projeto aberto -> Projects\<nome>\schematic.js

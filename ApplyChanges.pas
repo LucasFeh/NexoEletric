@@ -17,8 +17,10 @@
 { ..................................................................................................................... }
 
 const
-  SCRIPT_HOME = 'Z:\AltiumPCBMirror';
-  PROJECTS_DIR = 'Z:\AltiumPCBMirror\Projects';
+  // Caminho como visto do PC que RODA o Altium (workspace fica no LUCAS-PC).
+  // Se o nome nao resolver na sua rede, troque LUCAS-PC pelo IP da maquina.
+  SCRIPT_HOME = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror';
+  PROJECTS_DIR = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects';
   TOL_MM = 0.001;
 
 var

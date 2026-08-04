@@ -1,7 +1,7 @@
 # AI-GUIDE — Como trabalhar neste workspace (contrato para a sessão de IA)
 
 Você está com um Claude Code aberto no **workspace central do AltiumPCBMirror**
-(normalmente `Z:\AltiumPCBMirror` — confirme com o usuário se for outro caminho). Ele
+(normalmente `D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror` — confirme com o usuário se for outro caminho). Ele
 concentra as bibliotecas espelhadas (`Libs\`), o histórico de projetos
 (`Projects\<nome>\`) e o `hub.html`; não é mais uma pasta que existe só ao lado de um
 `.PcbDoc`. Depois que você edita os arquivos aqui, um script dentro do Altium aplica suas
@@ -125,7 +125,7 @@ Um item JSON **plano** por linha (o parser DelphiScript lê linha a linha, como 
 
 Fluxo idêntico ao v1: personalizar a PCB depois que o ECO trouxe componentes e nets (ou
 de um projeto que já tinha PCB). Único ajuste: os arquivos vivem em
-**`Z:\AltiumPCBMirror\Projects\<nome>\`** (não mais ao lado do `.PcbDoc`).
+**`D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects\<nome>\`** (não mais ao lado do `.PcbDoc`).
 
 ### Regras absolutas
 

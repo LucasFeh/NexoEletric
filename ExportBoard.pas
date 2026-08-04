@@ -17,8 +17,9 @@
 
 const
   // Pasta onde este script esta instalado. AJUSTE AQUI se instalar em outro lugar.
-  SCRIPT_HOME = 'Z:\AltiumPCBMirror';
-  PROJECTS_DIR = 'Z:\AltiumPCBMirror\Projects';
+  // Caminho como visto do PC que RODA o Altium (workspace fica no LUCAS-PC).
+  SCRIPT_HOME = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror';
+  PROJECTS_DIR = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects';
   FORMAT_ID = 'pcbmirror-v1';
 
 var
