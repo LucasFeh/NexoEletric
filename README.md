@@ -115,6 +115,7 @@ com 4 vistas:
 - **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
   `changes.js`: render fiel, fantasma tracejado das posições originais, lista de mudanças
   com validação, tabela PCB List pós-mudança e exportação para CSV.
+  A vista PCB agora **edita**: arrastar move objetos, `T` desenha trilhas, duplo clique abre propriedades (inclusive designator/comment), `Ctrl+Z` desfaz e **Salvar changes** grava o `changes.js` — com aviso se a IA tiver gravado o arquivo em paralelo.
 - **Libs** — navegador das bibliotecas espelhadas: busca por nome/descrição, símbolo
   desenhado lado a lado com o footprint associado, aviso destacado nos símbolos sem
   footprint na lib.
@@ -179,6 +180,7 @@ esquema do zero, veja [AI-GUIDE.md](AI-GUIDE.md), Parte A.
 | Via (furo metalizado) | `via_edit`, `via_add`, `via_del` |
 | Arco de cobre | `arc_edit`, `arc_add`, `arc_del` |
 | Contorno da placa | `outline_set` (substitui o `Board.BoardOutline` por um polígono fechado de vértices; pede confirmação do usuário no apply) |
+| Designator/Comment (texto) | comp_attr (editar pelo duplo clique no hub) |
 
 Polígonos/planos, regiões, keepouts, textos e regras são exportados para **visualização**,
 mas não são editáveis nesta versão. Furos de fixação/NPTH aparecem em `freepads`.

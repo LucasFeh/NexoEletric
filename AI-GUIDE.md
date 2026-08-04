@@ -127,7 +127,7 @@ Fluxo idêntico ao v1: personalizar a PCB depois que o ECO trouxe componentes e 
 de um projeto que já tinha PCB). Único ajuste: os arquivos vivem em
 **`D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects\<nome>\`** (não mais ao lado do `.PcbDoc`).
 
-> **Dois escritores:** o usuário também edita `changes.js` (hoje manualmente; a edição pelo hub chega nas próximas fases). Releia o arquivo
+> **Dois escritores:** o usuário também edita `changes.js` (pelo hub — vista PCB — ou manualmente). Releia o arquivo
 > antes de cada edição e preserve as linhas dele. E leia os sinalizadores
 > (`annotations.js`, Parte C) antes de posicionar/rotear.
 
@@ -192,7 +192,9 @@ var changes = [
 | `text_edit` | `id`, `orig_x`, `orig_y`, `orig_text`, `orig_layer` | `text`, `x`, `y`, `h`, `rot`, `note` |
 | `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
 | `outline_set` | `pts` (`[[x,y],...]` ≥3, polígono **fechado**, só linhas) | `note` |
+| `comp_attr` | `ref`, `orig_designator`, `orig_comment` | `designator` (novo texto), `comment` (novo texto), `note` |
 
+- `comp_attr` — aplicado **por último** pelo ApplyChanges (renomear cedo quebraria os `ref` das ops seguintes); renomear na PCB dessincroniza do esquema — o ECO vai acusar.
 - `size` = diâmetro do anel da via; `drill` = diâmetro do furo (`drill < size`).
 - `sa`/`ea` = ângulos inicial/final do arco em graus, anti-horário a partir de +X.
 - `text_edit` vale só para **textos livres** (`designator:false` e `comment:false` no
@@ -266,5 +268,5 @@ var annotations = [
 3. **Nunca apague nem reescreva** sinalizadores do usuário — só altere `status`/`reply`.
    Quem apaga/reabre é o usuário, pelo hub.
 4. **Dois escritores**: `changes.js`, `schematic.js` e `annotations.js` são editados
-   por você **e** pelo usuário (sinalizadores pelo hub; os demais, manualmente por enquanto). Sempre **releia o arquivo antes de editar**
+   por você **e** pelo usuário (sinalizadores e changes.js pelo hub; schematic.js manualmente por enquanto). Sempre **releia o arquivo antes de editar**
    e preserve as linhas existentes — nunca regenere do zero sem pedido explícito.
