@@ -127,7 +127,7 @@ Fluxo idêntico ao v1: personalizar a PCB depois que o ECO trouxe componentes e 
 de um projeto que já tinha PCB). Único ajuste: os arquivos vivem em
 **`D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects\<nome>\`** (não mais ao lado do `.PcbDoc`).
 
-> **Dois escritores:** o usuário também edita `changes.js` pelo hub. Releia o arquivo
+> **Dois escritores:** o usuário também edita `changes.js` (hoje manualmente; a edição pelo hub chega nas próximas fases). Releia o arquivo
 > antes de cada edição e preserve as linhas dele. E leia os sinalizadores
 > (`annotations.js`, Parte C) antes de posicionar/rotear.
 
@@ -252,6 +252,7 @@ var annotations = [
 | `msg` | texto do usuário descrevendo o problema |
 | `ref` | opcional: componente âncora |
 | `status` | `open` → `resolved` |
+| `created` | data/hora da criação (`YYYY-MM-DD HH:MM`, preenchido pelo hub) |
 | `reply` | sua resposta ao resolver |
 
 ### Contrato (OBRIGATÓRIO para a sessão de IA)
@@ -265,5 +266,5 @@ var annotations = [
 3. **Nunca apague nem reescreva** sinalizadores do usuário — só altere `status`/`reply`.
    Quem apaga/reabre é o usuário, pelo hub.
 4. **Dois escritores**: `changes.js`, `schematic.js` e `annotations.js` são editados
-   por você **e** pelo usuário (pelo hub). Sempre **releia o arquivo antes de editar**
+   por você **e** pelo usuário (sinalizadores pelo hub; os demais, manualmente por enquanto). Sempre **releia o arquivo antes de editar**
    e preserve as linhas existentes — nunca regenere do zero sem pedido explícito.
