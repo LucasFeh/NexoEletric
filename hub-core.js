@@ -450,6 +450,112 @@ function validateSchematic(schematic, schlib, pcblib){
   return { errors, warnings };
 }
 
+/* ============ serializacao (formato um-objeto-JSON-por-linha dos parsers .pas) ============ */
+
+/* escapa >= U+007E como \uXXXX (mesma convencao do JS() dos scripts .pas, que escapa > 125) */
+function jline(obj){
+  return JSON.stringify(obj).replace(/[~-￿]/g,
+    c => '\\u' + ('000' + c.charCodeAt(0).toString(16)).slice(-4));
+}
+function badStr(s){ return typeof s === 'string' && s.indexOf('":') >= 0; }
+
+const CH_REQUIRED = {
+  comp_move:       { num:['x','y','orig_x','orig_y','orig_rot'], str:['ref','orig_layer'] },
+  track_edit:      { num:['orig_x1','orig_y1','orig_x2','orig_y2','orig_w'], str:['id','orig_layer'] },
+  track_add:       { num:['x1','y1','x2','y2','w'], str:['layer'] },
+  track_del:       { num:['orig_x1','orig_y1','orig_x2','orig_y2','orig_w'], str:['id','orig_layer'] },
+  via_edit:        { num:['orig_x','orig_y'], str:['id'] },
+  via_add:         { num:['x','y','size','drill'], str:[] },
+  via_del:         { num:['orig_x','orig_y'], str:['id'] },
+  arc_edit:        { num:['orig_cx','orig_cy','orig_r','orig_sa','orig_ea'], str:['id','orig_layer'] },
+  arc_add:         { num:['cx','cy','r','sa','ea','w'], str:['layer'] },
+  arc_del:         { num:['orig_cx','orig_cy','orig_r','orig_sa','orig_ea'], str:['id','orig_layer'] },
+  text_edit:       { num:['orig_x','orig_y'], str:['id','orig_text','orig_layer'] },
+  designator_move: { num:['orig_x','orig_y'], str:['ref'] },
+  outline_set:     { num:[], str:[] },
+};
+
+function checkFields(objs, reqOf, kindOf, errors){
+  objs.forEach((o, i) => {
+    const req = reqOf(o);
+    if (!req){ errors.push({ idx:i, msg:`${kindOf(o)}: tipo desconhecido` }); return; }
+    for (const k of req.num) if (!isNum(o[k])) errors.push({ idx:i, msg:`${kindOf(o)}: campo "${k}" ausente/invalido` });
+    for (const k of req.str) if (typeof o[k] !== 'string' || !o[k]) errors.push({ idx:i, msg:`${kindOf(o)}: campo "${k}" ausente` });
+    for (const k in o) if (badStr(o[k])) errors.push({ idx:i, msg:`${kindOf(o)}: texto em "${k}" nao pode conter a sequencia aspas-dois-pontos` });
+  });
+}
+
+function serializeChanges(changes){
+  const list = Array.isArray(changes) ? changes : [];
+  const errors = [];
+  checkFields(list, ch => CH_REQUIRED[ch.op], ch => ch.op || '?', errors);
+  list.forEach((ch, i) => {
+    if (ch.op === 'outline_set' && (!Array.isArray(ch.pts) || ch.pts.length < 3 ||
+        ch.pts.some(p => !Array.isArray(p) || !isNum(p[0]) || !isNum(p[1]))))
+      errors.push({ idx:i, msg:'outline_set: pts deve ser [[x,y],...] com >= 3 vertices' });
+    if (ch.op === 'track_add' && ch.w <= 0) errors.push({ idx:i, msg:'track_add: w deve ser > 0' });
+    if (ch.op === 'via_add' && ch.drill >= ch.size) errors.push({ idx:i, msg:'via_add: drill deve ser < size' });
+  });
+  if (errors.length) return { text:null, errors };
+  const L = ['// AltiumPCBMirror - arquivo de mudancas.',
+             '// Edite ESTE arquivo (nunca o board.js). Um objeto JSON por linha. Consulte AI-GUIDE.md.',
+             'var changes = ['];
+  for (const ch of list) L.push(jline(ch) + ',');
+  L.push('];');
+  return { text: L.join('\n') + '\n', errors: [] };
+}
+
+const SCH_ITEM_REQUIRED = {
+  sheet:    { num:[], str:['name','size'] },
+  comp:     { num:['x','y'], str:['sheet','ref','sym','footprint'] },
+  wire:     { num:[], str:['sheet'] },
+  netlabel: { num:['x','y'], str:['sheet','net'] },
+  power:    { num:['x','y'], str:['sheet','net','style'] },
+  junction: { num:['x','y'], str:['sheet'] },
+  text:     { num:['x','y'], str:['sheet','s'] },
+};
+
+function serializeSchematic(sch){
+  if (!sch || typeof sch !== 'object') return { text:null, errors:[{ idx:-1, msg:'schematic ausente' }] };
+  const errors = [];
+  if (!sch.project) errors.push({ idx:-1, msg:'header: falta "project"' });
+  const items = Array.isArray(sch.items) ? sch.items : [];
+  checkFields(items, it => SCH_ITEM_REQUIRED[it.t], it => it.t || '?', errors);
+  items.forEach((it, i) => {
+    if (it.t === 'wire' && (!Array.isArray(it.pts) || it.pts.length < 2))
+      errors.push({ idx:i, msg:'wire: pts precisa de >= 2 pontos' });
+    if (it.t === 'comp' && it.rot != null && ![0, 90, 180, 270].includes((((it.rot % 360) + 360) % 360)))
+      errors.push({ idx:i, msg:'comp: rot deve ser 0/90/180/270' });
+  });
+  if (errors.length) return { text:null, errors };
+  const L = ['var schematic = {'];
+  for (const k of Object.keys(sch)) if (k !== 'items') L.push(JSON.stringify(k) + ':' + jline(sch[k]) + ',');
+  L.push('"items":[');
+  for (const it of items) L.push(jline(it) + ',');
+  L.push(']};');
+  return { text: L.join('\n') + '\n', errors: [] };
+}
+
+const ANN_REQUIRED = { num:['x','y'], str:['id','severity','msg'] };
+
+function serializeAnnotations(list){
+  const anns = Array.isArray(list) ? list : [];
+  const errors = [];
+  checkFields(anns, () => ANN_REQUIRED, a => a.id || 'sinalizador', errors);
+  anns.forEach((a, i) => {
+    if (a.view !== 'pcb' && a.view !== 'sch') errors.push({ idx:i, msg:`${a.id || '?'}: view deve ser "pcb" ou "sch"` });
+    if (a.view === 'sch' && (typeof a.sheet !== 'string' || !a.sheet)) errors.push({ idx:i, msg:`${a.id || '?'}: falta "sheet"` });
+    if (!['err','warn','info'].includes(a.severity)) errors.push({ idx:i, msg:`${a.id || '?'}: severity deve ser err/warn/info` });
+  });
+  if (errors.length) return { text:null, errors };
+  const L = ['// AltiumPCBMirror - sinalizadores do usuario para a IA. Um objeto JSON por linha.',
+             '// A IA le, corrige via changes.js e marca status resolved + reply. Consulte AI-GUIDE.md Parte C.',
+             'var annotations = ['];
+  for (const a of anns) L.push(jline(a) + ',');
+  L.push('];');
+  return { text: L.join('\n') + '\n', errors: [] };
+}
+
 /* ============ status do projeto na esteira ============ */
 
 function deriveStatus(entry, loaded){
@@ -465,5 +571,6 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, ORIENT_DIR,
          symbolOf, partOf, footprintOf, pinHot, compTransform, compPinsWorld,
          buildSchModel, extractNets, validateSchematic,
          applyPcbChanges, deriveStatus,
+         serializeChanges, serializeSchematic, serializeAnnotations,
          compDelta, xfPoint, xfAngle, ownerDelta, effLayerForOwner };
 });
