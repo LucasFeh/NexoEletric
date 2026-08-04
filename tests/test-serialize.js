@@ -25,6 +25,12 @@ const bad = Core.serializeChanges([{ op:'comp_move', ref:'R1', orig_x:1, orig_y:
 assert.strictEqual(bad.text, null);
 assert.ok(bad.errors.some(e => /"x"/.test(e.msg)));
 
+/* comp_attr: serializa ok; recusa sem orig_comment e sem nada a alterar */
+const cat = Core.serializeChanges([{ op:'comp_attr', ref:'D1', designator:'D9', orig_designator:'D1', orig_comment:'' }]);
+assert.strictEqual(cat.errors.length, 0);
+assert.ok(Core.serializeChanges([{ op:'comp_attr', ref:'D1', designator:'D9', orig_designator:'D1' }]).errors.length);
+assert.ok(Core.serializeChanges([{ op:'comp_attr', ref:'D1', orig_designator:'D1', orig_comment:'' }]).errors.length);
+
 /* recusa op desconhecida e a sequencia proibida ": */
 assert.ok(Core.serializeChanges([{ op:'zzz' }]).errors.length);
 assert.ok(Core.serializeChanges([{ op:'via_add', x:1, y:1, size:0.6, drill:0.3, note:'a": b' }]).errors.length);

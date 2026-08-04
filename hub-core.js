@@ -35,7 +35,7 @@ function applyPcbChanges(board, changes){
                   validation:[], changeItems:[],
                   outline:((B.board && B.board.outline) || []).slice(), outlineChanged:false };
   for (const c of (B.components || [])) {
-    const m = { kind:'comp', src:c, eff:{ x:c.x, y:c.y, rot:c.rot, layer:c.layer }, changed:false };
+    const m = { kind:'comp', src:c, eff:{ x:c.x, y:c.y, rot:c.rot, layer:c.layer }, changed:false, attrChanged:false };
     model.comps.push(m); model.compByRef[c.ref] = m;
   }
   const byId = {};
@@ -65,6 +65,22 @@ function applyPcbChanges(board, changes){
         if (isNum(ch.rot)) m.eff.rot = ch.rot;
         if (ch.layer) m.eff.layer = ch.layer;
         m.changed = !(near(m.eff.x,m.src.x)&&near(m.eff.y,m.src.y)&&nearAng(m.eff.rot,m.src.rot)&&m.eff.layer===m.src.layer);
+        break;
+      }
+      case 'comp_attr': {
+        // Nota de design: no motor JS a ordem não importa — compByRef é chaveado pelo ref do board.js
+        // e as demais ops também procuram pelo ref do board; só o .pas precisa aplicar renames por último.
+        const m = model.compByRef[ch.ref];
+        if (!m) return bad(`componente "${ch.ref}" não existe no board.js`);
+        item.target = m;
+        if (typeof ch.orig_designator !== 'string' || typeof ch.orig_comment !== 'string')
+          return bad('faltam orig_designator/orig_comment (copie do board.js)');
+        if (ch.orig_designator !== m.src.ref || ch.orig_comment !== (m.src.comment || ''))
+          warn('orig_* não confere com o board.js — espelho pode estar desatualizado');
+        if (typeof ch.designator === 'string' && ch.designator) m.eff.designator = ch.designator;
+        if (typeof ch.comment === 'string') m.eff.comment = ch.comment;
+        m.attrChanged = (m.eff.designator !== undefined && m.eff.designator !== m.src.ref) ||
+                        (m.eff.comment !== undefined && m.eff.comment !== (m.src.comment || ''));
         break;
       }
       case 'track_edit': case 'track_del': {
@@ -461,6 +477,7 @@ function badStr(s){ return typeof s === 'string' && s.indexOf('":') >= 0; }
 
 const CH_REQUIRED = {
   comp_move:       { num:['x','y','orig_x','orig_y','orig_rot'], str:['ref','orig_layer'] },
+  comp_attr:       { num:[], str:['ref','orig_designator'] },
   track_edit:      { num:['orig_x1','orig_y1','orig_x2','orig_y2','orig_w'], str:['id','orig_layer'] },
   track_add:       { num:['x1','y1','x2','y2','w'], str:['layer'] },
   track_del:       { num:['orig_x1','orig_y1','orig_x2','orig_y2','orig_w'], str:['id','orig_layer'] },
@@ -495,6 +512,11 @@ function serializeChanges(changes){
       errors.push({ idx:i, msg:'outline_set: pts deve ser [[x,y],...] com >= 3 vertices' });
     if (ch.op === 'track_add' && ch.w <= 0) errors.push({ idx:i, msg:'track_add: w deve ser > 0' });
     if (ch.op === 'via_add' && ch.drill >= ch.size) errors.push({ idx:i, msg:'via_add: drill deve ser < size' });
+    if (ch.op === 'comp_attr'){
+      if (typeof ch.orig_comment !== 'string') errors.push({ idx:i, msg:'comp_attr: campo "orig_comment" ausente' });
+      if (!(typeof ch.designator === 'string' && ch.designator) && typeof ch.comment !== 'string')
+        errors.push({ idx:i, msg:'comp_attr: nada a alterar (informe designator e/ou comment)' });
+    }
   });
   if (errors.length) return { text:null, errors };
   const L = ['// AltiumPCBMirror - arquivo de mudancas.',

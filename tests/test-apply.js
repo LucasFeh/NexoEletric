@@ -67,6 +67,28 @@ const dm2 = Core.applyPcbChanges(tb, [
 ]);
 assert.ok(dm2.validation.some(v => v.level === 'err'), 'ref sem designator e erro');
 
+// comp_attr: edita texto de designator/comment; travas por string
+const ca = Core.applyPcbChanges(board, [
+  { op:'comp_attr', ref:'D1', designator:'D9', comment:'LED azul', orig_designator:'D1', orig_comment: (board.components.find(c=>c.ref==='D1').comment || '') },
+]);
+assert.strictEqual(ca.validation.filter(v => v.level === 'err').length, 0);
+assert.strictEqual(ca.compByRef['D1'].eff.designator, 'D9');
+assert.strictEqual(ca.compByRef['D1'].eff.comment, 'LED azul');
+assert.ok(ca.compByRef['D1'].attrChanged, 'attrChanged deve marcar');
+assert.ok(!ca.compByRef['D1'].changed, 'changed continua puramente posicional');
+const ca2 = Core.applyPcbChanges(board, [
+  { op:'comp_attr', ref:'D1', designator:'D9', orig_designator:'ERRADO', orig_comment:'' },
+]);
+assert.ok(ca2.validation.some(v => v.level === 'warn'), 'orig divergente e warn');
+const ca3 = Core.applyPcbChanges(board, [
+  { op:'comp_attr', ref:'Z9', designator:'A1', orig_designator:'Z9', orig_comment:'' },
+]);
+assert.ok(ca3.validation.some(v => v.level === 'err'), 'ref inexistente e erro');
+const ca4 = Core.applyPcbChanges(board, [
+  { op:'comp_attr', ref:'D1', designator:'D9' },
+]);
+assert.ok(ca4.validation.some(v => v.level === 'err'), 'sem orig_* e erro');
+
 // example v1 continua compativel
 const exb = loadVar('example/board.js', 'pcbmirror');
 const exc = loadVar('example/changes.js', 'changes');
