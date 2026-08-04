@@ -73,22 +73,107 @@ async function saveAnnotations(){
 }
 document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
 document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
+document.getElementById('btnChSave').addEventListener('click', saveChanges);
 
 /* reload escopado do hubserver + aviso ao fechar com trabalho nao salvo */
 window.__hubOnChange = function(){
-  if (!annDirty){ location.reload(); return; }
+  if (!annDirty && !chDirty){ location.reload(); return; }
   staleWorkspace = true;
   document.getElementById('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
 };
-window.__hubAnnDirty = function(){ return annDirty; };
-window.addEventListener('beforeunload', e => { if (annDirty){ e.preventDefault(); e.returnValue = ''; } });
+window.__hubDirty = function(){ return annDirty || chDirty; };
+window.addEventListener('beforeunload', e => { if (annDirty || chDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 const MM2MIL = 1/0.0254;
 const isNum = HubCore.isNum, distSeg = HubCore.distSeg;
 const near = HubCore.near, nearAng = HubCore.nearAng;
 
 /* modelo efetivo (board + changes) — motor unico, testado em tests/test-apply.js */
-const model = HubCore.applyPcbChanges(B, CH);
+let model = HubCore.applyPcbChanges(B, CH);
+
+/* ------- infra de edicao: reapply, undo/redo, dirty, salvar ------- */
+let chDirty = false;
+const undoStack = [JSON.stringify(CH)], redoStack = [];
+function r4(v){ return +v.toFixed(4); }
+
+function selKey(m){
+  if (!m) return null;
+  if (m.kind === 'ann') return { kind:'ann', id:m.ann.id };
+  if (m.kind === 'pad') return { kind:'pad', ref:m.comp.src.ref, name:m.pad.name };
+  if (m.kind === 'comp') return { kind:'comp', ref:m.src.ref };
+  return { kind:m.kind, id:(m.added ? m.eff.id : m.src.id), added:!!m.added };
+}
+function findBySelKey(k){
+  if (!k) return null;
+  if (k.kind === 'ann'){ const a = ANN.find(x => x.id === k.id); return a ? { kind:'ann', ann:a } : null; }
+  if (k.kind === 'comp') return model.compByRef[k.ref] || null;
+  if (k.kind === 'pad'){
+    const c = model.compByRef[k.ref]; if (!c) return null;
+    const p = c.src.pads.find(p => p.name === k.name);
+    return p ? { kind:'pad', pad:p, comp:c, x:p.x, y:p.y } : null;
+  }
+  if (k.added) return model.added.find(m => m.kind === k.kind && m.eff.id === k.id) || null;
+  const pool = { track:model.tracks, via:model.vias, arc:model.arcs, text:model.texts }[k.kind] || [];
+  return pool.find(m => m.src.id === k.id) || null;
+}
+
+function reapply(){
+  const k = selKey(selected);
+  model = HubCore.applyPcbChanges(B, CH);
+  selected = findBySelKey(k);
+  buildChangePanel();
+  renderTable();
+  showInfo(selected);
+  draw();
+}
+function setChDirty(v){
+  chDirty = v;
+  const b = document.getElementById('btnChSave');
+  b.classList.toggle('active', v);
+  b.textContent = v ? 'Salvar changes *' : 'Salvar changes';
+}
+function commit(){
+  undoStack.push(JSON.stringify(CH));
+  if (undoStack.length > 60) undoStack.shift();
+  redoStack.length = 0;
+  setChDirty(true);
+  reapply();
+}
+function restoreCH(json){
+  CH.length = 0;
+  for (const c of JSON.parse(json)) CH.push(c);
+  setChDirty(true);
+  reapply();
+}
+function undo(){ if (undoStack.length < 2) return; redoStack.push(undoStack.pop()); restoreCH(undoStack[undoStack.length - 1]); }
+function redo(){ if (!redoStack.length) return; const s = redoStack.pop(); undoStack.push(s); restoreCH(s); }
+
+/* dois escritores: snapshot do changes.js em disco para detectar a IA gravando em paralelo */
+let chDiskSnapshot = null;
+const CH_REL = PCB_P ? 'Projects/' + PCB_P + '/changes.js' : 'changes.js';
+(async () => { if (HubIO.canPost) try { chDiskSnapshot = await HubIO.fetchText(CH_REL); } catch (e) {} })();
+
+async function saveChanges(){
+  const out = HubCore.serializeChanges(CH);
+  if (!out.text){ alert('Mudanças inválidas:\n' + out.errors.map(e => e.msg).join('\n')); return; }
+  if (HubIO.canPost && chDiskSnapshot !== null){
+    try {
+      const cur = await HubIO.fetchText(CH_REL);
+      if (cur !== chDiskSnapshot &&
+          !confirm('changes.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?')) return;
+    } catch (e) {}
+  }
+  const msg = document.getElementById('annmsg');
+  try {
+    const r = await HubIO.saveFile(CH_REL, out.text);
+    setChDirty(false);
+    chDiskSnapshot = out.text;
+    msg.textContent = r.mode === 'server' ? '✓ changes.js salvo' : '↓ arquivo baixado — substitua ' + CH_REL;
+  } catch (err) {
+    if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
+      HubIO.download('changes.js', out.text);
+  }
+}
 
 /* transformacao de preview p/ primitivas de componente movido (HubCore) */
 const compDelta = HubCore.compDelta, xfPoint = HubCore.xfPoint, xfAngle = HubCore.xfAngle;
@@ -687,8 +772,8 @@ function chLabel(ch){
 function fmt(v){ return isNum(v) ? (+v.toFixed(4)).toString() : '—'; }
 function buildChangePanel(){
   document.getElementById('chcount').textContent = CH.length;
-  const list=document.getElementById('changelist');
-  if (!CH.length){ list.innerHTML='<div style="color:var(--fg-dim)">nenhuma — edite changes.js</div>'; }
+  const list = document.getElementById('changelist');
+  list.innerHTML = CH.length ? '' : '<div style="color:var(--fg-dim)">nenhuma — edite na tela ou no changes.js</div>';
   for (const item of model.changeItems){
     const div=document.createElement('div');
     div.className='changeitem '+item.status;
@@ -697,7 +782,7 @@ function buildChangePanel(){
     list.appendChild(div);
   }
   const val=document.getElementById('vallist');
-  if (!model.validation.length){ val.innerHTML='<div style="color:var(--ok)">✓ sem problemas</div>'; }
+  val.innerHTML = model.validation.length ? '' : '<div style="color:var(--ok)">✓ sem problemas</div>';
   for (const v of model.validation){
     const div=document.createElement('div'); div.className='valitem '+v.level;
     div.textContent=v.msg;
@@ -821,6 +906,8 @@ window.addEventListener('keydown',e=>{
   if (e.key === 'Escape') { setAnnTool(false); return; }
   if (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.tagName==='SELECT') return;
   const k=e.key.toLowerCase();
+  if (e.ctrlKey && k === 'z'){ e.preventDefault(); undo(); return; }
+  if (e.ctrlKey && k === 'y'){ e.preventDefault(); redo(); return; }
   if (k==='f'){ fitBoard(); updateZoomLabel(); draw(); }
   else if (k==='v') toggleFlip();
   else if (k==='g'){ show.grid=!show.grid; document.getElementById('btnGrid').classList.toggle('active'); draw(); }

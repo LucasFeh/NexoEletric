@@ -238,7 +238,7 @@ window.__hubOnChange = function(){
   staleWorkspace = true;
   document.getElementById('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
 };
-window.__hubAnnDirty = function(){ return annDirty; };
+window.__hubDirty = function(){ return annDirty; };
 window.addEventListener('beforeunload', e => { if (annDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- paineis ---------- */

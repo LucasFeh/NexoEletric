@@ -29,5 +29,12 @@ async function saveFile(relPath, content){
   return { mode: 'server' };
 }
 
-root.HubIO = { canPost, saveFile, download };
+async function fetchText(relPath){
+  if (!canPost) throw new Error('sem servidor');
+  const r = await fetch('/' + relPath, { cache: 'no-store' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.text();
+}
+
+root.HubIO = { canPost, saveFile, download, fetchText };
 })(typeof self !== 'undefined' ? self : this);

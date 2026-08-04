@@ -178,7 +178,7 @@ document.getElementById('libsearch').addEventListener('input', buildLibList);
 window.__hubOnChange = function () {
   let dirty = false;
   document.querySelectorAll('iframe').forEach(f => {
-    try { if (f.contentWindow && f.contentWindow.__hubAnnDirty && f.contentWindow.__hubAnnDirty()) dirty = true; } catch (e) {}
+    try { if (f.contentWindow && f.contentWindow.__hubDirty && f.contentWindow.__hubDirty()) dirty = true; } catch (e) {}
   });
   if (!dirty) { location.reload(); return; }
   let b = document.getElementById('stalebanner');
