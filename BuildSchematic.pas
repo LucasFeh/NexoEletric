@@ -743,8 +743,8 @@ end;
 procedure PositionComp(SchDoc: ISch_Document; Line: String);
 var
   C: TObject;
-  Ref: String;
-  PartId: Integer;
+  Ref, Lidos: String;
+  PartId, TX, TY: Integer;
 begin
   Ref := JGet(Line, 'ref');
   PartId := 1;
@@ -758,18 +758,40 @@ begin
     LogFail('posicao ' + Ref + '/' + IntToStr(PartId) + ': componente nao esta na folha');
     Exit;
   end;
+  TX := MilsToCoord(JNum(Line, 'x'));
+  TY := MilsToCoord(JNum(Line, 'y'));
   SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
     SCHM_BeginModify, c_NoEventData);
   C.Orientation := RotToOrient(Round(JNum(Line, 'rot')));
   C.IsMirrored := (JGet(Line, 'mirror') = 'true');
-  // COMPONENTE SE MOVE COM MoveToXY. Atribuir Location := Point(...) funciona para
-  // fio/rotulo/power/texto, mas NAO move o simbolo (ele fica na origem da folha).
-  C.MoveToXY(MilsToCoord(JNum(Line, 'x')), MilsToCoord(JNum(Line, 'y')));
+  // Tentativas COM LEITURA DE VOLTA: o relatorio passa a dizer onde o componente
+  // REALMENTE ficou, em vez de so repetir o que foi pedido.
+  C.Location := Point(TX, TY);
+  Lidos := 'Location=' + IntToStr(C.Location.X) + ',' + IntToStr(C.Location.Y);
+  if (C.Location.X <> TX) or (C.Location.Y <> TY) then
+  begin
+    C.MoveToXY(TX, TY);
+    Lidos := Lidos + ' | MoveToXY=' + IntToStr(C.Location.X) + ',' + IntToStr(C.Location.Y);
+  end;
+  // Location/MoveToXY podem mover so a ancora e deixar as primitivas do simbolo
+  // na origem. MoveByXY move ancora + primitivas: zera e move relativo.
+  try
+    C.Location := Point(0, 0);
+    C.MoveByXY(TX, TY);
+    Lidos := Lidos + ' | MoveByXY=' + IntToStr(C.Location.X) + ',' + IntToStr(C.Location.Y);
+  except
+    C.Location := Point(TX, TY);
+    Lidos := Lidos + ' | MoveByXY indisponivel';
+  end;
   SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
     SCHM_EndModify, c_NoEventData);
   C.GraphicallyInvalidate;
-  LogOk('posicao ' + Ref + '/' + IntToStr(PartId) + ' -> ' +
-    JGet(Line, 'x') + ',' + JGet(Line, 'y') + ' rot ' + JGet(Line, 'rot'));
+  if (C.Location.X = TX) and (C.Location.Y = TY) then
+    LogOk('posicao ' + Ref + '/' + IntToStr(PartId) + ' -> ' +
+      JGet(Line, 'x') + ',' + JGet(Line, 'y') + ' rot ' + JGet(Line, 'rot'))
+  else
+    LogFail('posicao ' + Ref + '/' + IntToStr(PartId) + ': pedido ' +
+      IntToStr(TX) + ',' + IntToStr(TY) + ' mas ficou ' + Lidos);
 end;
 
 // Confirmacao digitada (usa so primitivas provadas neste engine)
