@@ -175,6 +175,80 @@ async function saveChanges(){
   }
 }
 
+/* ------- snap e commits de edicao ------- */
+function gridStep(){
+  const steps = [0.1, 0.5, 1, 5, 10, 25, 50];
+  for (const s of steps){ if (s * view.scale >= 12) return s; }
+  return 50;
+}
+function snapVal(v, ev){ const g = gridStep(); return (ev && ev.ctrlKey) ? v : Math.round(v / g) * g; }
+
+function sameCompPos(c, s){
+  return near(c.x, s.x) && near(c.y, s.y) && nearAng(c.rot, s.rot) && c.layer === s.layer;
+}
+function commitCompMove(m){
+  const e = m.eff, s = m.src;
+  let c = CH.find(c => c.op === 'comp_move' && c.ref === s.ref);
+  if (sameCompPos(e, s)){                       /* voltou ao original: remove a change */
+    if (c) CH.splice(CH.indexOf(c), 1);
+    commit(); return;
+  }
+  if (!c){
+    c = { op:'comp_move', ref:s.ref, x:0, y:0, rot:s.rot, layer:s.layer,
+          orig_x:s.x, orig_y:s.y, orig_rot:s.rot, orig_layer:s.layer, note:'editado no hub' };
+    CH.push(c);
+  }
+  c.x = r4(e.x); c.y = r4(e.y); c.rot = r4(e.rot); c.layer = e.layer;
+  commit();
+}
+function upsertEdit(m, op, patch, origFields){
+  if (m.added){                                  /* objeto do editor: edita a propria linha *_add */
+    const item = model.changeItems.find(it => it.target === m);
+    if (item) Object.assign(item.ch, patch);
+    commit(); return;
+  }
+  let c = CH.find(c => c.op === op && c.id === m.src.id);
+  if (!c){
+    c = { op, id:m.src.id, note:'editado no hub' };
+    for (const k of origFields) c['orig_' + k] = m.src[k];
+    CH.push(c);
+  }
+  Object.assign(c, patch);
+  commit();
+}
+function commitTrackEdit(m){
+  const e = m.eff;
+  upsertEdit(m, 'track_edit', { x1:r4(e.x1), y1:r4(e.y1), x2:r4(e.x2), y2:r4(e.y2) },
+             ['x1','y1','x2','y2','w','layer']);
+}
+function commitViaEdit(m){
+  const e = m.eff;
+  upsertEdit(m, 'via_edit', { x:r4(e.x), y:r4(e.y) }, ['x','y']);
+}
+function commitArcEdit(m){
+  const e = m.eff;
+  upsertEdit(m, 'arc_edit', { cx:r4(e.cx), cy:r4(e.cy) }, ['cx','cy','r','sa','ea','layer']);
+}
+function deleteSelected(){
+  const m = selected;
+  if (!m || m.kind === 'pad' || m.kind === 'ann' || m.kind === 'comp' || m.kind === 'text') return;
+  if (m.added){
+    const item = model.changeItems.find(it => it.target === m);
+    if (item) CH.splice(item.idx, 1);
+  } else {
+    const iEdit = CH.findIndex(c => c.op === m.kind + '_edit' && c.id === m.src.id);
+    if (iEdit >= 0) CH.splice(iEdit, 1);
+    const s = m.src, del = { op:m.kind + '_del', id:s.id, note:'removido no hub' };
+    if (m.kind === 'track'){ del.orig_x1=s.x1; del.orig_y1=s.y1; del.orig_x2=s.x2; del.orig_y2=s.y2; del.orig_w=s.w; del.orig_layer=s.layer; }
+    else if (m.kind === 'via'){ del.orig_x=s.x; del.orig_y=s.y; }
+    else if (m.kind === 'arc'){ del.orig_cx=s.cx; del.orig_cy=s.cy; del.orig_r=s.r; del.orig_sa=s.sa; del.orig_ea=s.ea; del.orig_layer=s.layer; }
+    else return;
+    CH.push(del);
+  }
+  selected = null;
+  commit();
+}
+
 /* transformacao de preview p/ primitivas de componente movido (HubCore) */
 const compDelta = HubCore.compDelta, xfPoint = HubCore.xfPoint, xfAngle = HubCore.xfAngle;
 const ownerDelta = (ref) => HubCore.ownerDelta(model, ref);
@@ -612,14 +686,48 @@ function draw(){
 /* ============================== interação ============================== */
 
 let dragging=false, dragMoved=false, lastX=0, lastY=0;
-cv.addEventListener('mousedown', e=>{ dragging=true; dragMoved=false; lastX=e.offsetX; lastY=e.offsetY; });
-window.addEventListener('mouseup', e=>{ dragging=false; });
+let objDrag = null; /* { m, startW, base, moved } */
+let tool = 'select'; let setTool = t => { tool = t; };
+cv.addEventListener('mousedown', e => {
+  dragging = false; dragMoved = false; lastX = e.offsetX; lastY = e.offsetY;
+  if (annTool || tool !== 'select' || e.button !== 0){ dragging = true; return; }
+  const w = screenToWorld(e.offsetX, e.offsetY);
+  const h = hitTest(w.x, w.y);
+  if (h && ['comp','track','via','arc'].includes(h.kind) && !h.deleted){
+    objDrag = { m:h, startW:w, base:JSON.parse(JSON.stringify(h.eff)), moved:false };
+  } else dragging = true;
+});
+window.addEventListener('mouseup', e => {
+  dragging = false;
+  if (objDrag){
+    const d = objDrag; objDrag = null;
+    if (d.moved){
+      if (d.m.kind === 'comp') commitCompMove(d.m);
+      else if (d.m.kind === 'track') commitTrackEdit(d.m);
+      else if (d.m.kind === 'via') commitViaEdit(d.m);
+      else if (d.m.kind === 'arc') commitArcEdit(d.m);
+    }
+  }
+});
 cv.addEventListener('mousemove', e=>{
   const w = screenToWorld(e.offsetX, e.offsetY);
   document.getElementById('sx').textContent = w.x.toFixed(4);
   document.getElementById('sy').textContent = w.y.toFixed(4);
   document.getElementById('sxm').textContent = (w.x*MM2MIL).toFixed(2);
   document.getElementById('sym').textContent = (w.y*MM2MIL).toFixed(2);
+  if (objDrag){
+    const d = objDrag, m = d.m, dx = w.x - d.startW.x, dy = w.y - d.startW.y;
+    if (Math.abs(dx) + Math.abs(dy) > 0.01 || d.moved){
+      d.moved = true; dragMoved = true;
+      if (m.kind === 'comp'){ m.eff.x = snapVal(d.base.x + dx, e); m.eff.y = snapVal(d.base.y + dy, e); m.changed = true; }
+      else if (m.kind === 'track'){ const sx = snapVal(d.base.x1 + dx, e) - d.base.x1, sy = snapVal(d.base.y1 + dy, e) - d.base.y1;
+        m.eff.x1 = d.base.x1 + sx; m.eff.y1 = d.base.y1 + sy; m.eff.x2 = d.base.x2 + sx; m.eff.y2 = d.base.y2 + sy; m.changed = true; }
+      else if (m.kind === 'via'){ m.eff.x = snapVal(d.base.x + dx, e); m.eff.y = snapVal(d.base.y + dy, e); m.changed = true; }
+      else if (m.kind === 'arc'){ m.eff.cx = snapVal(d.base.cx + dx, e); m.eff.cy = snapVal(d.base.cy + dy, e); m.changed = true; }
+      draw();
+    }
+    return;
+  }
   if (dragging){
     const fx = view.flip ? -1 : 1;
     view.cx -= (e.offsetX-lastX)/(view.scale*fx);
@@ -903,7 +1011,8 @@ function toggleHelp(){ helpEl.style.display = helpEl.style.display==='block'?'no
 document.getElementById('btnHelp').addEventListener('click',toggleHelp);
 helpEl.addEventListener('click',toggleHelp);
 window.addEventListener('keydown',e=>{
-  if (e.key === 'Escape') { setAnnTool(false); return; }
+  if (e.key === 'Escape') { if (objDrag){ objDrag = null; reapply(); } setAnnTool(false); setTool('select'); return; }
+  if (e.key === ' ' && objDrag && objDrag.m.kind === 'comp'){ e.preventDefault(); objDrag.m.eff.rot = (objDrag.m.eff.rot + 90) % 360; objDrag.moved = true; dragMoved = true; draw(); return; }
   if (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.tagName==='SELECT') return;
   const k=e.key.toLowerCase();
   if (e.ctrlKey && k === 'z'){ e.preventDefault(); undo(); return; }
@@ -914,6 +1023,7 @@ window.addEventListener('keydown',e=>{
   else if (k==='d'){ show.ghost=!show.ghost; document.getElementById('btnGhost').classList.toggle('active'); draw(); }
   else if (k==='h') toggleHelp();
   else if (k==='n') setAnnTool(!annTool);
+  else if (e.key === 'Delete') deleteSelected();
 });
 
 /* ============================== init ============================== */
