@@ -39,19 +39,28 @@ transformados**; só a projeção de tela do hub inverte Y.
    `PCBLIB_FILE` para o caminho real da sua `.SchLib`/`.PcbLib` (por padrão apontam para
    `Z:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\`).
 4. No Altium: **DXP » Run Script » Browse** e selecione `AltiumPCBMirror.PrjScr`
-   (ou adicione o projeto de script ao seu workspace). Ele já traz os **5 scripts**:
-   `ExportLibs`, `ExportProject`, `BuildSchematic`, `ExportBoard`, `ApplyChanges`.
+   (ou adicione o projeto de script ao seu workspace). O menu mostra **4 comandos**:
+
+   | Comando | O que faz |
+   |---|---|
+   | **ExportSch** | esquema do projeto focado → `Projects\<nome>\schematic.js` |
+   | **ExportPcb** | PCB focada → `Projects\<nome>\board.js` + `pcb-list.csv` |
+   | **ApplyProject** | pergunta qual projeto de `Projects\` usar e aplica no projeto Altium atual: cria os `.SchDoc` (se tem `schematic.js`) ou aplica as mudanças na PCB focada (se tem `changes.js`) |
+   | **ExportLibs** | suas bibliotecas → `Libs\schlib.js` / `Libs\pcblib.js` |
+
+   As rotinas auxiliares recebem parâmetro de propósito, para não poluírem o menu
+   (o *Run Script* só lista procedimentos sem parâmetros).
 
 ## Estrutura do workspace
 
 ```
 Z:\AltiumPCBMirror\
 ├── AltiumPCBMirror.PrjScr   projeto de script (5 documentos)
-├── ExportLibs.pas           bibliotecas do usuário -> Libs\
-├── ExportProject.pas        esquema do projeto aberto -> Projects\<nome>\schematic.js
-├── BuildSchematic.pas       Projects\<nome>\schematic.js -> .SchDoc reais no Altium
-├── ExportBoard.pas          PCB aberta -> Projects\<nome>\
-├── ApplyChanges.pas         Projects\<nome>\changes.js -> PCB aberta
+├── ExportLibs.pas           [ExportLibs]   bibliotecas do usuário -> Libs\
+├── ExportProject.pas        [ExportSch]    esquema do projeto aberto -> Projects\<nome>\schematic.js
+├── BuildSchematic.pas       (unidade auxiliar: schematic.js -> .SchDoc, chamada por ApplyProject)
+├── ExportBoard.pas          [ExportPcb]    PCB aberta -> Projects\<nome>\
+├── ApplyChanges.pas         [ApplyProject] menu de projetos -> esquema/PCB no projeto atual
 ├── hub.html                 interface única (Projetos, Esquema, PCB, Libs)
 ├── schframe.html            vista Esquema (carregada em iframe pelo hub)
 ├── pcbframe.html            vista PCB (shell fino, em iframe pelo hub)

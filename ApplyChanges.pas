@@ -25,6 +25,7 @@ var
   Board: IPCB_Board;
   Report: TStringList;
   OkCount, FailCount: Integer;
+  ScanInfo: String; // diagnostico do ultimo ListProjectDirs (aparece nos dialogos)
 
 { ..................................................................................................................... }
 { .                                          Parsing de JSON plano por linha                                          . }
@@ -243,25 +244,96 @@ begin
   end;
 end;
 
-// preenche Dirs com os nomes das subpastas de Projects\
+// true se Projects\<Name> e uma pasta de projeto. Usa FileExists (primitiva provada
+// neste engine); DirectoryExists entra so como reforco.
+function ProjectDirExists(Name: String): Boolean;
+var
+  d: String;
+begin
+  d := PROJECTS_DIR + '\' + Name;
+  Result := FileExists(d + '\schematic.js') or FileExists(d + '\board.js') or
+            FileExists(d + '\changes.js') or FileExists(d + '\pcb-list.csv') or
+            FileExists(d + '\build-report.txt') or FileExists(d + '\apply-report.txt') or
+            DirectoryExists(d);
+end;
+
+// valor de "name":"..." numa linha do projects.js ('' se a linha nao tiver)
+function NameFieldOf(Line: String): String;
+var
+  p, l: Integer;
+begin
+  Result := '';
+  p := Pos('"name":"', Line);
+  if p = 0 then
+    Exit;
+  p := p + 8;
+  l := Length(Line);
+  while (p <= l) and (Line[p] <> '"') do
+  begin
+    Result := Result + Line[p];
+    p := p + 1;
+  end;
+end;
+
+procedure AddDirUnique(Dirs: TStringList; Name: String);
+var
+  i: Integer;
+begin
+  if Name = '' then
+    Exit;
+  for i := 0 to Dirs.Count - 1 do
+    if AnsiCompareText(Dirs[i], Name) = 0 then
+      Exit;
+  Dirs.Add(Name);
+end;
+
+// Lista as pastas de Projects\.
+// scan-v4: NAO depende de enumeracao (FindFirst nao lista pastas neste engine).
+// Fonte primaria = nomes do proprio projects.js, cada um confirmado com FileExists;
+// a varredura entra so como bonus, para achar pasta que ainda nao esta no indice.
 procedure ListProjectDirs(Dirs: TStringList);
 var
+  Src: TStringList;
   SR: TSearchRec;
-  r: Integer;
+  i, r, nIdx, nScan: Integer;
+  nm: String;
 begin
   Dirs.Clear;
-  r := FindFirst(PROJECTS_DIR + '\*', faDirectory, SR);
+  nIdx := 0;
+  if FileExists(SCRIPT_HOME + '\projects.js') then
+  begin
+    Src := TStringList.Create;
+    Src.LoadFromFile(SCRIPT_HOME + '\projects.js');
+    for i := 0 to Src.Count - 1 do
+    begin
+      nm := NameFieldOf(Src[i]);
+      if (nm <> '') and ProjectDirExists(nm) then
+      begin
+        AddDirUnique(Dirs, nm);
+        nIdx := nIdx + 1;
+      end;
+    end;
+    Src.Free;
+  end;
+  nScan := 0;
+  r := FindFirst(PROJECTS_DIR + '\*', faAnyFile, SR);
   while r = 0 do
   begin
-    if ((SR.Attr and faDirectory) <> 0) and (SR.Name <> '.') and (SR.Name <> '..') then
-      Dirs.Add(SR.Name);
+    if (SR.Name <> '.') and (SR.Name <> '..') and ProjectDirExists(SR.Name) then
+    begin
+      AddDirUnique(Dirs, SR.Name);
+      nScan := nScan + 1;
+    end;
     r := FindNext(SR);
   end;
   FindClose(SR);
+  Dirs.Sort;
+  ScanInfo := 'scan-v4 indice=' + IntToStr(nIdx) + ' varredura=' + IntToStr(nScan) +
+    ' total=' + IntToStr(Dirs.Count);
 end;
 
 // nome do projeto focado no Workspace ('' se nenhum / Free Documents)
-function FocusedProjectName: String;
+function FocusedProjectName(Dummy: Integer): String;
 var
   WS: IWorkspace;
   Prj: IProject;
@@ -288,6 +360,12 @@ var
 begin
   Result := '';
   ForceDirectories(PROJECTS_DIR);
+  // caminho rapido: casa pelo nome sem depender de listagem
+  if (WantedName <> '') and ProjectDirExists(WantedName) then
+  begin
+    Result := PROJECTS_DIR + '\' + WantedName;
+    Exit;
+  end;
   Dirs := TStringList.Create;
   ListProjectDirs(Dirs);
   Dirs.Sort;
@@ -308,8 +386,19 @@ begin
   end;
   if Dirs.Count = 0 then
   begin
-    ShowMessage('Nenhum projeto em ' + PROJECTS_DIR + '.' + #13#10 +
-      'Rode um export ou peca um projeto novo a IA primeiro.');
+    Answer := Trim(InputBox('AltiumPCBMirror',
+      'Nao consegui listar as pastas de ' + PROJECTS_DIR + '.' + #13#10 +
+      '[' + ScanInfo + ']' + #13#10 +
+      'Digite o NOME da pasta do projeto (ou cancele):', WantedName));
+    if Answer = '' then
+    begin
+      Dirs.Free;
+      Exit;
+    end;
+    if ProjectDirExists(Answer) then
+      Result := PROJECTS_DIR + '\' + Answer
+    else
+      ShowMessage('Nao achei ' + PROJECTS_DIR + '\' + Answer);
     Dirs.Free;
     Exit;
   end;
@@ -325,7 +414,7 @@ begin
 end;
 
 // Regenera o indice projects.js varrendo Projects\
-procedure RegenerateProjectsIndex;
+procedure RegenerateProjectsIndex(EnsureName: String);
 var
   Dirs, Ou: TStringList;
   i: Integer;
@@ -333,7 +422,14 @@ var
 begin
   Dirs := TStringList.Create;
   ListProjectDirs(Dirs);
+  if (EnsureName <> '') and ProjectDirExists(EnsureName) then
+    AddDirUnique(Dirs, EnsureName);
   Dirs.Sort;
+  if Dirs.Count = 0 then
+  begin
+    Dirs.Free; // nada confirmado - preserva o indice atual em vez de zera-lo
+    Exit;
+  end;
   Ou := TStringList.Create;
   Ou.Add('var projects = [');
   for i := 0 to Dirs.Count - 1 do
@@ -1052,9 +1148,11 @@ end;
 { .                                                Rotina principal                                                   . }
 { ..................................................................................................................... }
 
-procedure ApplyChanges;
+// Aplica <OutDir>\changes.js na PCB focada.
+// Tem parametro de proposito: some do menu Run Script (chamada por ApplyProject).
+procedure ApplyChangesInto(OutDir: String);
 var
-  OutDir, ChangesFile, Line, Op, ProjName: String;
+  ChangesFile, Line, Op: String;
   Src: TStringList;
   i, Recognized: Integer;
 begin
@@ -1065,17 +1163,13 @@ begin
     Exit;
   end;
 
-  ProjName := FocusedProjectName;
-  if ProjName = '' then
-    ProjName := BaseName(Board.FileName);
-  OutDir := ResolveProjectDir(ProjName, False);
   if OutDir = '' then
     Exit;
   ChangesFile := OutDir + '\changes.js';
   if not FileExists(ChangesFile) then
   begin
     ShowMessage('Arquivo de mudancas nao encontrado:' + #13#10 + ChangesFile + #13#10#13#10 +
-      'Rode primeiro o ExportBoard e peca as mudancas a IA.');
+      'Rode primeiro o ExportPcb e peca as mudancas a IA.');
     Exit;
   end;
 
@@ -1140,15 +1234,94 @@ begin
   Report.Add('Falhas:                ' + IntToStr(FailCount));
   Report.SaveToFile(OutDir + '\apply-report.txt');
 
-  RegenerateProjectsIndex;
+  RegenerateProjectsIndex(ExtractFileName(OutDir));
 
   ShowMessage('Aplicacao concluida.' + #13#10#13#10 +
     'Reconhecidas: ' + IntToStr(Recognized) + #13#10 +
     'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + #13#10#13#10 +
     'Relatorio: ' + OutDir + '\apply-report.txt' + #13#10#13#10 +
-    'IMPORTANTE: confira o resultado, rode o DRC do Altium e re-execute o ExportBoard para atualizar o espelho.');
+    'IMPORTANTE: confira o resultado, rode o DRC do Altium e re-execute o ExportPcb para atualizar o espelho.');
 
   Src.Free;
   Report.Free;
+end;
+
+{ ---------------------------------------------------------------------------- }
+{  ApplyProject - unica entrada do menu para trazer um projeto do espelho para  }
+{  o projeto Altium atual. Pergunta qual pasta de Projects\ usar e aplica o que }
+{  faz sentido no momento: esquema (cria os .SchDoc) ou PCB (aplica changes.js).}
+{ ---------------------------------------------------------------------------- }
+
+procedure ApplyProject;
+var
+  Dirs: TStringList;
+  i, Choice: Integer;
+  ListStr, Answer, Tag, Nome, Dir: String;
+  HasSch, HasChg, PcbFocada: Boolean;
+begin
+  ForceDirectories(PROJECTS_DIR);
+  Dirs := TStringList.Create;
+  ListProjectDirs(Dirs);
+  if Dirs.Count = 0 then
+  begin
+    ShowMessage('Nenhum projeto em ' + PROJECTS_DIR + '.' + #13#10 +
+      '[' + ScanInfo + ']' + #13#10 +
+      'Peca um projeto novo a IA ou rode ExportSch/ExportPcb primeiro.');
+    Dirs.Free;
+    Exit;
+  end;
+
+  ListStr := 'Qual projeto de Projects\ aplicar no projeto Altium atual?' + #13#10#13#10;
+  for i := 0 to Dirs.Count - 1 do
+  begin
+    Nome := Dirs[i];
+    Tag := '';
+    if FileExists(PROJECTS_DIR + '\' + Nome + '\schematic.js') then
+      Tag := Tag + ' [esquema]';
+    if FileExists(PROJECTS_DIR + '\' + Nome + '\changes.js') then
+      Tag := Tag + ' [PCB]';
+    ListStr := ListStr + IntToStr(i + 1) + ' = ' + Nome + Tag + #13#10;
+  end;
+  ListStr := ListStr + #13#10 + 'Digite o NUMERO:';
+
+  Answer := InputBox('AltiumPCBMirror - aplicar projeto', ListStr, '1');
+  Choice := SafeStrToInt(Answer);
+  if (Choice < 1) or (Choice > Dirs.Count) then
+  begin
+    Dirs.Free;
+    Exit;
+  end;
+  Nome := Dirs[Choice - 1];
+  Dirs.Free;
+  Dir := PROJECTS_DIR + '\' + Nome;
+
+  HasSch := FileExists(Dir + '\schematic.js');
+  HasChg := FileExists(Dir + '\changes.js');
+  PcbFocada := False;
+  if PCBServer <> nil then
+    PcbFocada := PCBServer.GetCurrentPCBBoard <> nil;
+
+  // PCB focada + mudancas prontas: aplica na placa
+  if PcbFocada and HasChg then
+  begin
+    ApplyChangesInto(Dir);
+    Exit;
+  end;
+
+  // senao, materializa o esquema (etapa 1 de um projeto novo)
+  if HasSch then
+  begin
+    BuildSchematicInto(Dir);
+    ShowMessage('Esquema de "' + Nome + '" gerado no projeto atual.' + #13#10#13#10 +
+      'Proximos passos no Altium:' + #13#10 +
+      '1) Project >> Compile PCB Project' + #13#10 +
+      '2) Design >> Update PCB Document (ECO) >> Execute Changes' + #13#10 +
+      '3) foque o .PcbDoc e rode ExportPcb (gera board.js para a IA)' + #13#10 +
+      '4) com o changes.js pronto, rode ApplyProject de novo com a PCB focada.');
+    Exit;
+  end;
+
+  ShowMessage('A pasta ' + Dir + ' nao tem schematic.js nem changes.js.' + #13#10 +
+    'Peca o projeto a IA primeiro.');
 end;
 

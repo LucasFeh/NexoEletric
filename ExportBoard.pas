@@ -23,6 +23,7 @@ const
 
 var
   Board: IPCB_Board;
+  ScanInfo: String; // diagnostico do ultimo ListProjectDirs (aparece nos dialogos)
   Nets: TStringList;
 
 { ..................................................................................................................... }
@@ -178,25 +179,96 @@ begin
   end;
 end;
 
-// preenche Dirs com os nomes das subpastas de Projects\
+// true se Projects\<Name> e uma pasta de projeto. Usa FileExists (primitiva provada
+// neste engine); DirectoryExists entra so como reforco.
+function ProjectDirExists(Name: String): Boolean;
+var
+  d: String;
+begin
+  d := PROJECTS_DIR + '\' + Name;
+  Result := FileExists(d + '\schematic.js') or FileExists(d + '\board.js') or
+            FileExists(d + '\changes.js') or FileExists(d + '\pcb-list.csv') or
+            FileExists(d + '\build-report.txt') or FileExists(d + '\apply-report.txt') or
+            DirectoryExists(d);
+end;
+
+// valor de "name":"..." numa linha do projects.js ('' se a linha nao tiver)
+function NameFieldOf(Line: String): String;
+var
+  p, l: Integer;
+begin
+  Result := '';
+  p := Pos('"name":"', Line);
+  if p = 0 then
+    Exit;
+  p := p + 8;
+  l := Length(Line);
+  while (p <= l) and (Line[p] <> '"') do
+  begin
+    Result := Result + Line[p];
+    p := p + 1;
+  end;
+end;
+
+procedure AddDirUnique(Dirs: TStringList; Name: String);
+var
+  i: Integer;
+begin
+  if Name = '' then
+    Exit;
+  for i := 0 to Dirs.Count - 1 do
+    if AnsiCompareText(Dirs[i], Name) = 0 then
+      Exit;
+  Dirs.Add(Name);
+end;
+
+// Lista as pastas de Projects\.
+// scan-v4: NAO depende de enumeracao (FindFirst nao lista pastas neste engine).
+// Fonte primaria = nomes do proprio projects.js, cada um confirmado com FileExists;
+// a varredura entra so como bonus, para achar pasta que ainda nao esta no indice.
 procedure ListProjectDirs(Dirs: TStringList);
 var
+  Src: TStringList;
   SR: TSearchRec;
-  r: Integer;
+  i, r, nIdx, nScan: Integer;
+  nm: String;
 begin
   Dirs.Clear;
-  r := FindFirst(PROJECTS_DIR + '\*', faDirectory, SR);
+  nIdx := 0;
+  if FileExists(SCRIPT_HOME + '\projects.js') then
+  begin
+    Src := TStringList.Create;
+    Src.LoadFromFile(SCRIPT_HOME + '\projects.js');
+    for i := 0 to Src.Count - 1 do
+    begin
+      nm := NameFieldOf(Src[i]);
+      if (nm <> '') and ProjectDirExists(nm) then
+      begin
+        AddDirUnique(Dirs, nm);
+        nIdx := nIdx + 1;
+      end;
+    end;
+    Src.Free;
+  end;
+  nScan := 0;
+  r := FindFirst(PROJECTS_DIR + '\*', faAnyFile, SR);
   while r = 0 do
   begin
-    if ((SR.Attr and faDirectory) <> 0) and (SR.Name <> '.') and (SR.Name <> '..') then
-      Dirs.Add(SR.Name);
+    if (SR.Name <> '.') and (SR.Name <> '..') and ProjectDirExists(SR.Name) then
+    begin
+      AddDirUnique(Dirs, SR.Name);
+      nScan := nScan + 1;
+    end;
     r := FindNext(SR);
   end;
   FindClose(SR);
+  Dirs.Sort;
+  ScanInfo := 'scan-v4 indice=' + IntToStr(nIdx) + ' varredura=' + IntToStr(nScan) +
+    ' total=' + IntToStr(Dirs.Count);
 end;
 
 // nome do projeto focado no Workspace ('' se nenhum / Free Documents)
-function FocusedProjectName: String;
+function FocusedProjectName(Dummy: Integer): String;
 var
   WS: IWorkspace;
   Prj: IProject;
@@ -223,6 +295,12 @@ var
 begin
   Result := '';
   ForceDirectories(PROJECTS_DIR);
+  // caminho rapido: casa pelo nome sem depender de listagem
+  if (WantedName <> '') and ProjectDirExists(WantedName) then
+  begin
+    Result := PROJECTS_DIR + '\' + WantedName;
+    Exit;
+  end;
   Dirs := TStringList.Create;
   ListProjectDirs(Dirs);
   Dirs.Sort;
@@ -243,8 +321,19 @@ begin
   end;
   if Dirs.Count = 0 then
   begin
-    ShowMessage('Nenhum projeto em ' + PROJECTS_DIR + '.' + #13#10 +
-      'Rode um export ou peca um projeto novo a IA primeiro.');
+    Answer := Trim(InputBox('AltiumPCBMirror',
+      'Nao consegui listar as pastas de ' + PROJECTS_DIR + '.' + #13#10 +
+      '[' + ScanInfo + ']' + #13#10 +
+      'Digite o NOME da pasta do projeto (ou cancele):', WantedName));
+    if Answer = '' then
+    begin
+      Dirs.Free;
+      Exit;
+    end;
+    if ProjectDirExists(Answer) then
+      Result := PROJECTS_DIR + '\' + Answer
+    else
+      ShowMessage('Nao achei ' + PROJECTS_DIR + '\' + Answer);
     Dirs.Free;
     Exit;
   end;
@@ -260,7 +349,7 @@ begin
 end;
 
 // Regenera o indice projects.js varrendo Projects\
-procedure RegenerateProjectsIndex;
+procedure RegenerateProjectsIndex(EnsureName: String);
 var
   Dirs, Ou: TStringList;
   i: Integer;
@@ -268,7 +357,14 @@ var
 begin
   Dirs := TStringList.Create;
   ListProjectDirs(Dirs);
+  if (EnsureName <> '') and ProjectDirExists(EnsureName) then
+    AddDirUnique(Dirs, EnsureName);
   Dirs.Sort;
+  if Dirs.Count = 0 then
+  begin
+    Dirs.Free; // nada confirmado - preserva o indice atual em vez de zera-lo
+    Exit;
+  end;
   Ou := TStringList.Create;
   Ou.Add('var projects = [');
   for i := 0 to Dirs.Count - 1 do
@@ -644,7 +740,7 @@ end;
 { .                                                Rotina principal                                                   . }
 { ..................................................................................................................... }
 
-procedure ExportBoard;
+procedure ExportPcb;
 var
   OutDir: String;
   ProjName: String;
@@ -661,7 +757,7 @@ begin
     Exit;
   end;
 
-  ProjName := FocusedProjectName;
+  ProjName := FocusedProjectName(0);
   if ProjName = '' then
     ProjName := BaseName(Board.FileName);
   OutDir := ResolveProjectDir(ProjName, True);
@@ -877,7 +973,7 @@ begin
   // ------------------------------------------------------------------ pcb-list.csv
   CsvL.SaveToFile(OutDir + '\pcb-list.csv');
 
-  RegenerateProjectsIndex;
+  RegenerateProjectsIndex(ProjName);
 
   s := 'Exportacao concluida em:' + #13#10 + OutDir + #13#10#13#10 +
     'Componentes: ' + IntToStr(CompIdx) + #13#10 +
