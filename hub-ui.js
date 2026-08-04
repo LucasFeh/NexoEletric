@@ -174,6 +174,23 @@ function showFootprint(fp){
 }
 document.getElementById('libsearch').addEventListener('input', buildLibList);
 
+/* ---------- reload escopado do hubserver (nao perde trabalho nao salvo nos iframes) ---------- */
+window.__hubOnChange = function () {
+  let dirty = false;
+  document.querySelectorAll('iframe').forEach(f => {
+    try { if (f.contentWindow && f.contentWindow.__hubAnnDirty && f.contentWindow.__hubAnnDirty()) dirty = true; } catch (e) {}
+  });
+  if (!dirty) { location.reload(); return; }
+  let b = document.getElementById('stalebanner');
+  if (!b) {
+    b = document.createElement('div');
+    b.id = 'stalebanner';
+    b.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:99; background:#5d4037; color:#ffe0b2; padding:6px 14px; font-size:13px; text-align:center;';
+    document.body.appendChild(b);
+  }
+  b.textContent = '⚠ o workspace mudou no disco — há sinalizadores não salvos numa vista; salve-os e recarregue (F5)';
+};
+
 /* ---------- init ---------- */
 buildCards();
 

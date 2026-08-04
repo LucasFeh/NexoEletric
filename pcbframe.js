@@ -15,7 +15,7 @@ const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
 /* ------- ferramenta Sinalizar + persistencia ------- */
-let annTool = false, annDirty = false, annPending = null;
+let annTool = false, annDirty = false, annPending = null, staleWorkspace = false;
 
 function setAnnDirty(v){
   annDirty = v;
@@ -56,14 +56,16 @@ document.getElementById('annok').addEventListener('click', () => {
 document.getElementById('anncancel').addEventListener('click', hideAnnForm);
 
 async function saveAnnotations(){
+  if (staleWorkspace && !confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o annotations.js do disco. Continuar?')) return;
   const out = HubCore.serializeAnnotations(ANN);
   if (!out.text){ alert('Sinalizadores inválidos:\n' + out.errors.map(e => e.msg).join('\n')); return; }
   const rel = PCB_P ? 'Projects/' + PCB_P + '/annotations.js' : 'annotations.js';
-  const sh = document.getElementById('shover');
+  const msg = document.getElementById('annmsg');
   try {
     const r = await HubIO.saveFile(rel, out.text);
     setAnnDirty(false);
-    sh.textContent = r.mode === 'server' ? '✓ sinalizadores salvos' : '↓ arquivo baixado — substitua ' + rel;
+    staleWorkspace = false;
+    msg.textContent = r.mode === 'server' ? '✓ sinalizadores salvos' : '↓ arquivo baixado — substitua ' + rel;
   } catch (err) {
     if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
       HubIO.download('annotations.js', out.text);
@@ -75,8 +77,10 @@ document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations)
 /* reload escopado do hubserver + aviso ao fechar com trabalho nao salvo */
 window.__hubOnChange = function(){
   if (!annDirty){ location.reload(); return; }
-  document.getElementById('shover').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
+  staleWorkspace = true;
+  document.getElementById('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
 };
+window.__hubAnnDirty = function(){ return annDirty; };
 window.addEventListener('beforeunload', e => { if (annDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 const MM2MIL = 1/0.0254;
@@ -814,6 +818,7 @@ function toggleHelp(){ helpEl.style.display = helpEl.style.display==='block'?'no
 document.getElementById('btnHelp').addEventListener('click',toggleHelp);
 helpEl.addEventListener('click',toggleHelp);
 window.addEventListener('keydown',e=>{
+  if (e.key === 'Escape') { setAnnTool(false); return; }
   if (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.tagName==='SELECT') return;
   const k=e.key.toLowerCase();
   if (k==='f'){ fitBoard(); updateZoomLabel(); draw(); }
@@ -822,7 +827,6 @@ window.addEventListener('keydown',e=>{
   else if (k==='d'){ show.ghost=!show.ghost; document.getElementById('btnGhost').classList.toggle('active'); draw(); }
   else if (k==='h') toggleHelp();
   else if (k==='n') setAnnTool(!annTool);
-  else if (e.key==='Escape') setAnnTool(false);
 });
 
 /* ============================== init ============================== */

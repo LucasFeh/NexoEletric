@@ -15,7 +15,7 @@ const showState = { grid:true };
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
-let annTool = false, annDirty = false, annPending = null;
+let annTool = false, annDirty = false, annPending = null, staleWorkspace = false;
 
 document.getElementById('meta').textContent =
   `${schematic.project} · ${model.sheets.length} folha(s) · ${nets.nets.length} nets`;
@@ -210,13 +210,15 @@ document.getElementById('annok').addEventListener('click', () => {
 });
 document.getElementById('anncancel').addEventListener('click', hideAnnForm);
 async function saveAnnotations(){
+  if (staleWorkspace && !confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o annotations.js do disco. Continuar?')) return;
   const out = HubCore.serializeAnnotations(ANN);
   if (!out.text){ alert('Sinalizadores inválidos:\n' + out.errors.map(e => e.msg).join('\n')); return; }
   const rel = 'Projects/' + SCH_P + '/annotations.js';
   try {
     const r = await HubIO.saveFile(rel, out.text);
     setAnnDirty(false);
-    document.getElementById('shover').textContent =
+    staleWorkspace = false;
+    document.getElementById('annmsg').textContent =
       r.mode === 'server' ? '✓ sinalizadores salvos' : '↓ arquivo baixado — substitua ' + rel;
   } catch (err) {
     if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
@@ -226,15 +228,17 @@ async function saveAnnotations(){
 document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
 document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
 window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { setAnnTool(false); return; }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
   const k = e.key.toLowerCase();
   if (k === 'n') setAnnTool(!annTool);
-  else if (e.key === 'Escape') setAnnTool(false);
 });
 window.__hubOnChange = function(){
   if (!annDirty){ location.reload(); return; }
-  document.getElementById('shover').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
+  staleWorkspace = true;
+  document.getElementById('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
 };
+window.__hubAnnDirty = function(){ return annDirty; };
 window.addEventListener('beforeunload', e => { if (annDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- paineis ---------- */
