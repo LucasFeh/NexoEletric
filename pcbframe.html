@@ -95,6 +95,8 @@
   <button id="btnFlip"  title="Ver pelo lado de baixo, como View &gt;&gt; Flip Board (V)">Vista: Top</button>
   <button id="btnGrid"  class="active" title="Grade (G)">Grade</button>
   <button id="btnGhost" class="active" title="Mostrar original das mudancas (D)">Diff</button>
+  <button id="btnAnn"     title="Sinalizar problema para a IA (N)">⚑ Sinalizar</button>
+  <button id="btnAnnSave" title="Salvar sinalizadores (annotations.js)">Salvar sinaliz.</button>
   <button id="btnCsv"   title="Baixar PCB List pos-mudancas (TSV)">CSV PCB List</button>
   <button id="btnHelp"  title="Ajuda (H)">?</button>
 </div>
@@ -134,6 +136,22 @@
         <p style="margin-top:14px">Feche com <kbd>H</kbd> ou clicando aqui.</p>
       </div>
       <div id="fatal"></div>
+      <div id="annform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
+           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
+        <textarea id="anntext" rows="2" placeholder="problema (ex: trilha muito proxima)"
+          style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
+                 border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px; resize:vertical;"></textarea>
+        <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
+          <select id="annsev" style="background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px;">
+            <option value="err">vermelho (erro)</option>
+            <option value="warn">amarelo (atenção)</option>
+            <option value="info">azul (nota)</option>
+          </select>
+          <span style="flex:1"></span>
+          <button id="annok">OK</button>
+          <button id="anncancel">Cancelar</button>
+        </div>
+      </div>
     </div>
     <div id="statusbar">
       <span>X: <b id="sx">—</b>  Y: <b id="sy">—</b> mm</span>

@@ -14,7 +14,70 @@ const CH = (typeof changes !== 'undefined' && Array.isArray(changes)) ? changes 
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
-let setAnnDirty = () => {};
+/* ------- ferramenta Sinalizar + persistencia ------- */
+let annTool = false, annDirty = false, annPending = null;
+
+function setAnnDirty(v){
+  annDirty = v;
+  const b = document.getElementById('btnAnnSave');
+  b.classList.toggle('active', v);
+  b.textContent = v ? 'Salvar sinaliz. *' : 'Salvar sinaliz.';
+}
+function setAnnTool(v){
+  annTool = v;
+  document.getElementById('btnAnn').classList.toggle('active', v);
+  cv.style.cursor = v ? 'copy' : 'crosshair';
+  if (!v) hideAnnForm();
+}
+function hideAnnForm(){ document.getElementById('annform').style.display = 'none'; annPending = null; }
+function openAnnForm(w){
+  annPending = { x: +w.x.toFixed(4), y: +w.y.toFixed(4) };
+  document.getElementById('anntext').value = '';
+  document.getElementById('annform').style.display = 'block';
+  document.getElementById('anntext').focus();
+}
+function annNextId(){
+  let mx = 0;
+  for (const a of ANN){ const n = parseInt(String(a.id || '').replace(/^n/, ''), 10); if (isFinite(n) && n > mx) mx = n; }
+  return 'n' + (mx + 1);
+}
+function nowStr(){
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+document.getElementById('annok').addEventListener('click', () => {
+  const msg = document.getElementById('anntext').value.trim().replace(/"/g, "'");
+  if (!msg || !annPending) return;
+  ANN.push({ id: annNextId(), view: 'pcb', x: annPending.x, y: annPending.y,
+             layer: view.flip ? 'Bottom' : 'Top', severity: document.getElementById('annsev').value,
+             msg, ref: '', status: 'open', created: nowStr(), reply: '' });
+  hideAnnForm(); annChanged();
+});
+document.getElementById('anncancel').addEventListener('click', hideAnnForm);
+
+async function saveAnnotations(){
+  const out = HubCore.serializeAnnotations(ANN);
+  if (!out.text){ alert('Sinalizadores inválidos:\n' + out.errors.map(e => e.msg).join('\n')); return; }
+  const rel = PCB_P ? 'Projects/' + PCB_P + '/annotations.js' : 'annotations.js';
+  const sh = document.getElementById('shover');
+  try {
+    const r = await HubIO.saveFile(rel, out.text);
+    setAnnDirty(false);
+    sh.textContent = r.mode === 'server' ? '✓ sinalizadores salvos' : '↓ arquivo baixado — substitua ' + rel;
+  } catch (err) {
+    if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
+      HubIO.download('annotations.js', out.text);
+  }
+}
+document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
+document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
+
+/* reload escopado do hubserver + aviso ao fechar com trabalho nao salvo */
+window.__hubOnChange = function(){
+  if (!annDirty){ location.reload(); return; }
+  document.getElementById('shover').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
+};
+window.addEventListener('beforeunload', e => { if (annDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 const MM2MIL = 1/0.0254;
 const isNum = HubCore.isNum, distSeg = HubCore.distSeg;
@@ -493,6 +556,7 @@ cv.addEventListener('wheel', e=>{
 }, {passive:false});
 cv.addEventListener('click', e=>{
   if (dragMoved) return;
+  if (annTool){ openAnnForm(screenToWorld(e.offsetX, e.offsetY)); return; }
   const w = screenToWorld(e.offsetX, e.offsetY);
   selected = hitTest(w.x, w.y);
   showInfo(selected);
@@ -750,13 +814,15 @@ function toggleHelp(){ helpEl.style.display = helpEl.style.display==='block'?'no
 document.getElementById('btnHelp').addEventListener('click',toggleHelp);
 helpEl.addEventListener('click',toggleHelp);
 window.addEventListener('keydown',e=>{
-  if (e.target.tagName==='INPUT') return;
+  if (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.tagName==='SELECT') return;
   const k=e.key.toLowerCase();
   if (k==='f'){ fitBoard(); updateZoomLabel(); draw(); }
   else if (k==='v') toggleFlip();
   else if (k==='g'){ show.grid=!show.grid; document.getElementById('btnGrid').classList.toggle('active'); draw(); }
   else if (k==='d'){ show.ghost=!show.ghost; document.getElementById('btnGhost').classList.toggle('active'); draw(); }
   else if (k==='h') toggleHelp();
+  else if (k==='n') setAnnTool(!annTool);
+  else if (e.key==='Escape') setAnnTool(false);
 });
 
 /* ============================== init ============================== */
