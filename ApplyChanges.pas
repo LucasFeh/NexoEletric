@@ -3,7 +3,7 @@
 { .                                                                                                                   . }
 { .  Le Projects\<nome do projeto>\changes.js e aplica as mudancas na placa:                                          . }
 { .    comp_move | track_edit | track_add | track_del | via_edit | via_add | via_del | arc_edit | arc_add |           . }
-{ .    arc_del | outline_set                                                                                          . }
+{ .    arc_del | text_edit | outline_set                                                                              . }
 { .                                                                                                                   . }
 { .  Seguranca:                                                                                                       . }
 { .    - Toda edicao/remocao exige campos orig_* (copiados do board.js). O objeto real so e alterado se casar         . }
