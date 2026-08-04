@@ -142,9 +142,12 @@ def api_save():
     if full is None or not os.path.isdir(os.path.dirname(full)):
         return {'ok': False, 'error': 'projeto inexistente'}, 404
     tmp = full + '.tmp'
-    with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
-        f.write(str(data['content']))
-    os.replace(tmp, full)
+    try:
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(str(data['content']))
+        os.replace(tmp, full)
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
     return {'ok': True}
 
 
