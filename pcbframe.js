@@ -24,6 +24,7 @@ function setAnnDirty(v){
   b.textContent = v ? 'Salvar sinaliz. *' : 'Salvar sinaliz.';
 }
 function setAnnTool(v){
+  if (v) setTool('select');
   annTool = v;
   document.getElementById('btnAnn').classList.toggle('active', v);
   cv.style.cursor = v ? 'copy' : 'crosshair';
@@ -153,25 +154,38 @@ let chDiskSnapshot = null;
 const CH_REL = PCB_P ? 'Projects/' + PCB_P + '/changes.js' : 'changes.js';
 (async () => { if (HubIO.canPost) try { chDiskSnapshot = await HubIO.fetchText(CH_REL); } catch (e) {} })();
 
+/* preserva comentarios // que a IA (ou o usuario) escreveu a mao no changes.js em disco;
+   a serializacao normal so conhece o array CH, entao essas linhas seriam perdidas no save do hub */
+function extraCommentLines(diskText){
+  if (!diskText) return [];
+  const out = [];
+  for (const ln of diskText.split('\n')){
+    const t = ln.trim();
+    if (t.indexOf('//') === 0 && t.indexOf('// AltiumPCBMirror') !== 0 && t.indexOf('// Edite ESTE arquivo') !== 0) out.push(ln);
+  }
+  return out;
+}
 async function saveChanges(){
+  if (staleWorkspace && !confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o changes.js do disco. Continuar?')) return;
   const out = HubCore.serializeChanges(CH);
   if (!out.text){ alert('Mudanças inválidas:\n' + out.errors.map(e => e.msg).join('\n')); return; }
-  if (HubIO.canPost && chDiskSnapshot !== null){
-    try {
-      const cur = await HubIO.fetchText(CH_REL);
-      if (cur !== chDiskSnapshot &&
-          !confirm('changes.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?')) return;
-    } catch (e) {}
+  let cur = null;
+  if (HubIO.canPost){
+    try { cur = await HubIO.fetchText(CH_REL); } catch (e) {}
+    if (cur !== null && (chDiskSnapshot === null || cur !== chDiskSnapshot) &&
+        !confirm('changes.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?')) return;
   }
+  const extra = extraCommentLines(cur !== null ? cur : chDiskSnapshot);
+  const text = extra.length ? out.text.replace('var changes = [', extra.join('\n') + '\nvar changes = [') : out.text;
   const msg = document.getElementById('annmsg');
   try {
-    const r = await HubIO.saveFile(CH_REL, out.text);
+    const r = await HubIO.saveFile(CH_REL, text);
     setChDirty(false);
-    chDiskSnapshot = out.text;
+    chDiskSnapshot = text;
     msg.textContent = r.mode === 'server' ? '✓ changes.js salvo' : '↓ arquivo baixado — substitua ' + CH_REL;
   } catch (err) {
     if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
-      HubIO.download('changes.js', out.text);
+      HubIO.download('changes.js', text);
   }
 }
 
@@ -701,6 +715,7 @@ let hoverW = null;       /* posicao do mouse em mundo, p/ rubber-band */
 let viaPending = null;
 
 function setTool(t){
+  if (t !== 'select' && annTool) setAnnTool(false);
   tool = t;
   trackChain = null; viaPending = null;
   document.getElementById('viaform').style.display = 'none';
@@ -974,9 +989,13 @@ function hitTest(x,y){
     let txt = e.text || '';
     if (m.src.designator && oc) txt = oc.eff.designator || oc.src.ref;
     if (m.src.comment && oc) txt = (oc.eff.comment !== undefined ? oc.eff.comment : (oc.src.comment || txt));
-    if (!txt || !show.layers[e.layer]) continue;
+    const d = ownerDelta(m.src.owner);
+    let tx = e.x, ty = e.y;
+    if (d){ const q = xfPoint(d, e.x, e.y); tx = q.x; ty = q.y; }
+    const tlayer = d ? effLayerForOwner(m.src.owner, e.layer) : e.layer;
+    if (!txt || !show.layers[tlayer]) continue;
     const hw = textWidth(txt, e.h || 1) / 2, hh = (e.h || 1) / 2;   /* bbox sem rotacao (aproximacao) */
-    if (x >= e.x - hw - tol && x <= e.x + hw + tol && y >= e.y - hh - tol && y <= e.y + hh + tol) return m;
+    if (x >= tx - hw - tol && x <= tx + hw + tol && y >= ty - hh - tol && y <= ty + hh + tol) return m;
   }
   /* componentes por bbox */
   for (const m of model.comps){
@@ -1205,7 +1224,11 @@ function toggleHelp(){ helpEl.style.display = helpEl.style.display==='block'?'no
 document.getElementById('btnHelp').addEventListener('click',toggleHelp);
 helpEl.addEventListener('click',toggleHelp);
 window.addEventListener('keydown',e=>{
-  if (e.key === 'Escape') { if (objDrag){ objDrag = null; reapply(); } setAnnTool(false); setTool('select'); return; }
+  if (e.key === 'Escape') {
+    const pf = document.getElementById('propform');
+    if (pf && pf.style.display === 'block'){ pf.style.display = 'none'; propTarget = null; reapply(); return; }
+    if (objDrag){ objDrag = null; reapply(); } setAnnTool(false); setTool('select'); return;
+  }
   if (e.key === ' ' && objDrag && objDrag.m.kind === 'comp'){ e.preventDefault(); objDrag.m.eff.rot = (objDrag.m.eff.rot + 90) % 360; objDrag.moved = true; dragMoved = true; draw(); return; }
   if (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.tagName==='SELECT') return;
   const k=e.key.toLowerCase();

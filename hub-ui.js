@@ -188,7 +188,7 @@ window.__hubOnChange = function () {
     b.style.cssText = 'position:fixed; top:0; left:0; right:0; z-index:99; background:#5d4037; color:#ffe0b2; padding:6px 14px; font-size:13px; text-align:center;';
     document.body.appendChild(b);
   }
-  b.textContent = '⚠ o workspace mudou no disco — há sinalizadores não salvos numa vista; salve-os e recarregue (F5)';
+  b.textContent = '⚠ o workspace mudou no disco — há edições não salvas numa vista; salve-as e recarregue (F5)';
 };
 
 /* ---------- init ---------- */

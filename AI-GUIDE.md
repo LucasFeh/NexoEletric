@@ -130,6 +130,7 @@ de um projeto que já tinha PCB). Único ajuste: os arquivos vivem em
 > **Dois escritores:** o usuário também edita `changes.js` (pelo hub — vista PCB — ou manualmente). Releia o arquivo
 > antes de cada edição e preserve as linhas dele. E leia os sinalizadores
 > (`annotations.js`, Parte C) antes de posicionar/rotear.
+> Ao salvar pelo hub, comentários // do arquivo são preservados mas movidos para cima do array — prefira registrar o racional no campo note de cada change.
 
 ### Regras absolutas
 
