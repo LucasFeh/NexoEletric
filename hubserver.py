@@ -10,7 +10,7 @@ import socket
 import threading
 import time
 
-from flask import Flask, Response, abort, send_from_directory
+from flask import Flask, Response, abort, request, send_from_directory
 from werkzeug.utils import safe_join
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -24,7 +24,11 @@ _version_lock = threading.Lock()
 LIVE_JS = b"""/* hubserver: auto-reload via SSE (injetado; nao existe como arquivo) */
 (function(){
   var es = new EventSource('/__events');
-  es.addEventListener('change', function(){ location.reload(); });
+  es.addEventListener('change', function(){
+    /* paginas de edicao definem __hubOnChange p/ nao perder trabalho nao salvo */
+    if (window.__hubOnChange) { window.__hubOnChange(); return; }
+    location.reload();
+  });
   /* EventSource reconecta sozinho se o servidor cair/voltar */
 })();
 """
@@ -119,6 +123,29 @@ def index():
 @app.route('/<path:path>')
 def files(path):
     return _serve(path)
+
+
+SAVE_BASENAMES = ('changes.js', 'schematic.js', 'annotations.js')
+
+
+@app.route('/api/save', methods=['POST'])
+def api_save():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or 'path' not in data or 'content' not in data:
+        return {'ok': False, 'error': 'JSON {path, content} obrigatorio'}, 400
+    parts = [seg for seg in str(data['path']).replace('\\', '/').split('/') if seg]
+    if any(seg.startswith('.') for seg in parts):
+        return {'ok': False, 'error': 'path invalido'}, 403
+    if len(parts) != 3 or parts[0] != 'Projects' or parts[2] not in SAVE_BASENAMES:
+        return {'ok': False, 'error': 'so Projects/<nome>/{changes,schematic,annotations}.js'}, 403
+    full = safe_join(ROOT, *parts)
+    if full is None or not os.path.isdir(os.path.dirname(full)):
+        return {'ok': False, 'error': 'projeto inexistente'}, 404
+    tmp = full + '.tmp'
+    with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(str(data['content']))
+    os.replace(tmp, full)
+    return {'ok': True}
 
 
 def _lan_ip():
