@@ -11,7 +11,9 @@ serigrafia descritiva e todos os jumpers documentados. Projeto novo em
 
 Decisões do usuário: CAN com pinos reservados + header para módulo (transceiver entra
 na lib depois); extras RS-232 (DB9), SPI 3V3, 1-Wire e I2C isolado (ISO1540); entrada
-genérica em borne Phoenix MSTB 12 vias; placa 80×80 mm.
+genérica em borne Phoenix MSTB 12 vias; placa 80×80 mm. Adição posterior: **Ethernet
+via módulo W5500 (SPI) no CN7** — RMII/LAN8720 foi descartado porque tomaria os pinos
+já usados pelos outros barramentos (IO19/21/22/25/26/27 + strap IO0).
 
 ## Restrição de contrato
 
@@ -43,6 +45,9 @@ componentes MFG do v1 (SN65HVD75, MAX3051, SM712) não existem no espelho e por 
 - **SPI 3V3**: header 2x3 CN4 com VSPI (SCK=IO18, MISO=IO19, MOSI=IO23, CS=IO5) +
   3V3/GND. Sem componente extra.
 - **1-Wire**: IO32 no borne (pino 11) com pull-up 4k7 chaveado por J4.
+- **Ethernet (módulo)**: borne CN7 (MSTB 8 vias) para módulo W5500 — compartilha o
+  VSPI (SCK/MISO/MOSI) com CS dedicado IO33, INT no IO35 (input-only, perfeito para
+  interrupção) e RST no IO14. RJ45/magnetics ficam no próprio módulo.
 - **Alimentação**: USB do devkit OU borne CN2 (5 V) com Schottky D1 anti-inversão no
   VIN; 100 µF eletrolítico + LED verde de power no 3V3.
 - **Fixação**: 4× `Parafuso Aterrado` (furo aterrado) nas laterais da placa.
@@ -61,7 +66,8 @@ componentes MFG do v1 (SN65HVD75, MAX3051, SM712) não existem no espelho e por 
 Demais conectores: CN2 = [1: +5V, 2: GND]; CN3 = [1: VEXT, 2: SDA, 3: SCL,
 4: GND-EXT] (domínio isolado!); CN4 SPI = [1: SCK, 2: CS, 3: MISO, 4: 3V3, 5: MOSI,
 6: GND]; CN5 CAN = [1: CAN-TX, 2: CAN-RX, 3: 3V3, 4: GND, 5: CANH, 6: CANL];
-CN6 = DB9 fêmea RS-232.
+CN6 = DB9 fêmea RS-232; CN7 ETHERNET (módulo W5500) = [1: 3V3, 2: GND, 3: SCK,
+4: MISO, 5: MOSI, 6: CS (IO33), 7: INT (IO35), 8: RST (IO14)].
 
 ## Jumpers (tudo isso vira texto no esquema e serigrafia na PCB)
 
@@ -77,8 +83,9 @@ CN6 = DB9 fêmea RS-232.
 
 IO16=RX2 (485, pós-divisor) · IO17=TX2 (485 DI) · IO4=DE/R̄Ē · IO25=CAN-TX ·
 IO26=CAN-RX · IO21=SDA · IO22=SCL · IO27=TX1 (TTL/RS-232) · IO34=RX1 (via J5) ·
-IO32=1-WIRE · IO18/IO19/IO23/IO5=SPI · VIN=nó 5V · Livres p/ expansão: IO2, IO3,
-IO1, IO12, IO13, IO14, IO15, IO33, IO35, VP(IO36), VN(IO39), EN.
+IO32=1-WIRE · IO18/IO19/IO23/IO5=SPI · IO33=CS Ethernet · IO35=INT Ethernet ·
+IO14=RST Ethernet · VIN=nó 5V · Livres p/ expansão: IO1, IO2, IO3, IO12, IO13,
+IO15, VP(IO36), VN(IO39), EN.
 
 ## BOM (símbolo da lib → footprint)
 
@@ -105,6 +112,7 @@ IO1, IO12, IO13, IO14, IO15, IO33, IO35, VP(IO36), VN(IO39), EN.
 | CN4 | CONECTOR PADRÃO (parts 1-6) | CONECTOR HEADER 6 VIAS VERTICAL - 2 ROWS | SPI 3V3 |
 | CN5 | CONECTOR PADRÃO (parts 1-6) | CONECTOR HEADER 6 VIAS VERTICAL - 2 ROWS | MODULO CAN |
 | CN6 | DB9 | DB9 PCI | RS-232 |
+| CN7 | CONECTOR PADRÃO (parts 1-8) | CONE MSTBH 2,5/ 8 GF | MODULO ETHERNET W5500 |
 | J1-J4 | Jumper 2 Vias | JUMPER 2 VIAS PTH | ver tabela de jumpers |
 | J5 | Jumper 3q | JUMPER_3VIAS | RX1: TTL ou RS-232 |
 | MH1-MH4 | Parafuso Aterrado | Furo GND | fixação lateral |
