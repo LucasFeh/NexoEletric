@@ -30,7 +30,7 @@ Duas frentes de trabalho, normalmente nesta ordem para um projeto novo:
   índice (mesmo shape da fixture `_DemoKit`):
 
   ```js
-  {"name":"<nome>","files":{"schematic":true,"board":false,"changes":false,"buildreport":false,"applyreport":false},"indexed":"<data/hora ou nota>"}
+  {"name":"<nome>","files":{"schematic":true,"board":false,"changes":false,"annotations":false,"buildreport":false,"applyreport":false},"indexed":"<data/hora ou nota>"}
   ```
 
   `files.schematic:true` e todos os outros `false` até os scripts do Altium gerarem
