@@ -244,6 +244,16 @@ begin
   end;
 end;
 
+// Confirmacao digitada (o ApplyChanges chamava ConfirmNoYes sem nunca defini-la,
+// o que estouraria no outline_set). Usa so primitivas provadas neste engine.
+function ConfirmNoYes(Msg: String): Boolean;
+var
+  s: String;
+begin
+  s := Trim(InputBox('AltiumPCBMirror', Msg + #13#10#13#10 + 'Digite SIM para confirmar:', ''));
+  Result := (AnsiCompareText(s, 'SIM') = 0);
+end;
+
 // true se Projects\<Name> e uma pasta de projeto. Usa FileExists (primitiva provada
 // neste engine); DirectoryExists entra so como reforco.
 function ProjectDirExists(Name: String): Boolean;
@@ -1252,11 +1262,77 @@ end;
 {  faz sentido no momento: esquema (cria os .SchDoc) ou PCB (aplica changes.js).}
 { ---------------------------------------------------------------------------- }
 
+// Janela com a lista de projetos de Projects\ (selecao por clique).
+// Retorna o nome escolhido; '' se o usuario cancelar.
+function PickProjectName(Dirs: TStringList): String;
+var
+  F: TForm;
+  LB: TListBox;
+  BOk, BCan: TButton;
+  Lbl: TLabel;
+  i, res: Integer;
+  Nome, Tag: String;
+begin
+  Result := '';
+  F := TForm.Create(nil);
+  F.Caption := 'AltiumPCBMirror - escolha o projeto';
+  F.Width := 460;
+  F.Height := 400;
+
+  Lbl := TLabel.Create(F);
+  Lbl.Parent := F;
+  Lbl.Left := 12;
+  Lbl.Top := 12;
+  Lbl.Width := 420;
+  Lbl.Caption := 'Qual projeto de Projects\ aplicar no projeto Altium atual?';
+
+  LB := TListBox.Create(F);
+  LB.Parent := F;
+  LB.Left := 12;
+  LB.Top := 36;
+  LB.Width := 420;
+  LB.Height := 268;
+  for i := 0 to Dirs.Count - 1 do
+  begin
+    Nome := Dirs[i];
+    Tag := '';
+    if FileExists(PROJECTS_DIR + '\' + Nome + '\schematic.js') then
+      Tag := Tag + '   [esquema]';
+    if FileExists(PROJECTS_DIR + '\' + Nome + '\changes.js') then
+      Tag := Tag + '   [PCB]';
+    LB.Items.Add(Nome + Tag);
+  end;
+  if LB.Items.Count > 0 then
+    LB.ItemIndex := 0;
+
+  BOk := TButton.Create(F);
+  BOk.Parent := F;
+  BOk.Caption := 'Aplicar';
+  BOk.Left := 244;
+  BOk.Top := 316;
+  BOk.Width := 90;
+  BOk.Height := 28;
+  BOk.ModalResult := 1;  // mrOk
+
+  BCan := TButton.Create(F);
+  BCan.Parent := F;
+  BCan.Caption := 'Cancelar';
+  BCan.Left := 342;
+  BCan.Top := 316;
+  BCan.Width := 90;
+  BCan.Height := 28;
+  BCan.ModalResult := 2;  // mrCancel
+
+  res := F.ShowModal;
+  if (res = 1) and (LB.ItemIndex >= 0) and (LB.ItemIndex < Dirs.Count) then
+    Result := Dirs[LB.ItemIndex];
+  F.Free;
+end;
+
 procedure ApplyProject;
 var
   Dirs: TStringList;
-  i, Choice: Integer;
-  ListStr, Answer, Tag, Nome, Dir: String;
+  Nome, Dir: String;
   HasSch, HasChg, PcbFocada: Boolean;
 begin
   ForceDirectories(PROJECTS_DIR);
@@ -1271,28 +1347,10 @@ begin
     Exit;
   end;
 
-  ListStr := 'Qual projeto de Projects\ aplicar no projeto Altium atual?' + #13#10#13#10;
-  for i := 0 to Dirs.Count - 1 do
-  begin
-    Nome := Dirs[i];
-    Tag := '';
-    if FileExists(PROJECTS_DIR + '\' + Nome + '\schematic.js') then
-      Tag := Tag + ' [esquema]';
-    if FileExists(PROJECTS_DIR + '\' + Nome + '\changes.js') then
-      Tag := Tag + ' [PCB]';
-    ListStr := ListStr + IntToStr(i + 1) + ' = ' + Nome + Tag + #13#10;
-  end;
-  ListStr := ListStr + #13#10 + 'Digite o NUMERO:';
-
-  Answer := InputBox('AltiumPCBMirror - aplicar projeto', ListStr, '1');
-  Choice := SafeStrToInt(Answer);
-  if (Choice < 1) or (Choice > Dirs.Count) then
-  begin
-    Dirs.Free;
-    Exit;
-  end;
-  Nome := Dirs[Choice - 1];
+  Nome := PickProjectName(Dirs);
   Dirs.Free;
+  if Nome = '' then
+    Exit;
   Dir := PROJECTS_DIR + '\' + Nome;
 
   HasSch := FileExists(Dir + '\schematic.js');

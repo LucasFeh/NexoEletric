@@ -762,11 +762,59 @@ begin
     SCHM_BeginModify, c_NoEventData);
   C.Orientation := RotToOrient(Round(JNum(Line, 'rot')));
   C.IsMirrored := (JGet(Line, 'mirror') = 'true');
-  C.Location := Point(MilsToCoord(JNum(Line, 'x')), MilsToCoord(JNum(Line, 'y')));
+  // COMPONENTE SE MOVE COM MoveToXY. Atribuir Location := Point(...) funciona para
+  // fio/rotulo/power/texto, mas NAO move o simbolo (ele fica na origem da folha).
+  C.MoveToXY(MilsToCoord(JNum(Line, 'x')), MilsToCoord(JNum(Line, 'y')));
   SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
     SCHM_EndModify, c_NoEventData);
+  C.GraphicallyInvalidate;
   LogOk('posicao ' + Ref + '/' + IntToStr(PartId) + ' -> ' +
     JGet(Line, 'x') + ',' + JGet(Line, 'y') + ' rot ' + JGet(Line, 'rot'));
+end;
+
+// Confirmacao digitada (usa so primitivas provadas neste engine)
+function ConfirmTypedYes(Msg: String): Boolean;
+var
+  s: String;
+begin
+  s := Trim(InputBox('AltiumPCBMirror', Msg + #13#10#13#10 + 'Digite SIM para confirmar:', ''));
+  Result := (AnsiCompareText(s, 'SIM') = 0);
+end;
+
+// Remove da folha os objetos que este script cria (componentes, fios, rotulos,
+// power ports, junctions e textos). O template/carimbo da folha NAO e tocado.
+// Serve para re-despejar sem duplicar o que ja foi despejado antes.
+procedure ClearDumpedObjects(SchDoc: ISch_Document);
+var
+  Iter, Obj: TObject;
+  Lst: TStringList;
+  i, n: Integer;
+begin
+  Lst := TStringList.Create;
+  Iter := SchDoc.SchIterator_Create;
+  if Iter <> nil then
+  begin
+    Iter.AddFilter_ObjectSet(MkSet(eSchComponent, eWire, eNetLabel, ePowerObject,
+      eJunction, eLabel));
+    Obj := Iter.FirstSchObject;
+    while Obj <> nil do
+    begin
+      Lst.AddObject('x', Obj);
+      Obj := Iter.NextSchObject;
+    end;
+    SchDoc.SchIterator_Destroy(Iter);
+  end;
+  n := 0;
+  for i := 0 to Lst.Count - 1 do
+  begin
+    Obj := Lst.Objects[i];
+    SchDoc.RemoveSchObject(Obj);
+    SchServer.RobotManager.SendMessage(SchDoc.I_ObjectAddress, c_BroadCast,
+      SCHM_PrimitiveDeRegistration, Obj.I_ObjectAddress);
+    n := n + 1;
+  end;
+  Lst.Free;
+  LogOk('limpeza: ' + IntToStr(n) + ' objetos removidos da folha');
 end;
 
 // Janela com os .SchDoc do projeto focado; devolve o caminho escolhido ('' = cancelou)
@@ -1164,6 +1212,10 @@ begin
     SchDoc.SheetStyle := SheetStyleFromName(SheetSizes[si]);
 
     SchServer.ProcessControl.PreProcess(SchDoc, '');
+    if ConfirmTypedYes('Limpar o conteudo ja despejado nesta folha antes?' + #13#10 +
+      '(componentes, fios, rotulos, power ports e textos - o carimbo/template fica)' + #13#10 +
+      'Responda SIM se voce ja despejou este projeto aqui antes.') then
+      ClearDumpedObjects(SchDoc);
     // 2a) simbolos e demais objetos
     for i := 0 to Src.Count - 1 do
     begin
