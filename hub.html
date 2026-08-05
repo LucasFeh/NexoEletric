@@ -2,106 +2,815 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AltiumPCBMirror — Hub</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <style>
-  :root{ --bg:#1b1b1b; --panel:#242424; --panel2:#2d2d2d; --border:#3a3a3a;
-    --fg:#d8d8d8; --fg-dim:#9a9a9a; --accent:#4fc3f7; --ok:#00e676; --warn:#ffd54f; --err:#ff5252; }
-  *{box-sizing:border-box; margin:0; padding:0;}
-  html,body{height:100%; overflow:hidden;}
-  body{background:var(--bg); color:var(--fg); font:13px/1.45 "Segoe UI",sans-serif;}
-  #header{display:flex; align-items:center; gap:10px; height:44px; padding:0 12px;
-    background:var(--panel); border-bottom:1px solid var(--border);}
-  #header h1{font-size:14px; font-weight:600; color:var(--accent); white-space:nowrap;}
-  #tabs{display:flex; gap:4px; margin-left:14px;}
-  .tab{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-bottom:none;
-    border-radius:4px 4px 0 0; padding:6px 16px; cursor:pointer; font-size:12px;}
-  .tab.active{background:#0d47a1; color:#fff; border-color:var(--accent);}
-  #curproj{margin-left:auto; color:var(--fg-dim); font-size:12px;}
-  .view{display:none; height:calc(100% - 44px);}
-  .view.active{display:block;}
-  iframe{width:100%; height:100%; border:0; background:var(--bg);}
-  /* Projetos */
-  #view-projects{overflow:auto; padding:18px;}
-  #cards{display:flex; flex-wrap:wrap; gap:14px;}
-  .card{width:290px; background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:12px;}
-  .card h3{font-size:14px; color:#fff; margin-bottom:6px; display:flex; gap:8px; align-items:center;}
-  .badge{font-size:10px; background:#6a1b9a; color:#fff; border-radius:3px; padding:1px 6px;}
-  .steps{display:flex; gap:4px; margin:8px 0;}
-  .step{flex:1; text-align:center; font-size:10px; padding:3px 0; border-radius:3px;
-    background:var(--panel2); color:var(--fg-dim); border:1px solid var(--border);}
-  .step.done{background:#1b5e20; color:#c8e6c9; border-color:#2e7d32;}
-  .step.cur{background:#0d47a1; color:#fff; border-color:var(--accent);}
-  .card .info{color:var(--fg-dim); font-size:11px; min-height:32px; white-space:pre-line;}
-  .card .actions{display:flex; gap:6px; margin-top:8px;}
-  button{background:var(--panel2); color:var(--fg); border:1px solid var(--border);
-    border-radius:3px; padding:4px 10px; font-size:12px; cursor:pointer;}
-  button:hover{border-color:var(--accent); color:#fff;}
-  #howto{margin-top:22px; color:var(--fg-dim); font-size:12px; max-width:760px; line-height:1.7;}
-  #howto b{color:var(--fg);}
-  /* Libs */
-  #view-libs{display:none; height:calc(100% - 44px);}
-  #view-libs.active{display:flex;}
-  #libleft{width:290px; min-width:290px; background:var(--panel); border-right:1px solid var(--border);
-    display:flex; flex-direction:column;}
-  #libsearch{margin:8px; background:var(--panel2); border:1px solid var(--border); color:var(--fg);
-    border-radius:3px; padding:5px 8px;}
-  #liblist{flex:1; overflow:auto;}
-  .libitem{padding:5px 10px; cursor:pointer; border-left:3px solid transparent; font-size:12px;}
-  .libitem:hover{background:#333;}
-  .libitem.sel{background:#0d47a1; color:#fff;}
-  .libitem .miss{color:var(--err); font-size:10px;}
-  #libmain{flex:1; display:flex; flex-direction:column; min-width:0;}
-  #libwarn{padding:6px 12px; color:var(--warn); font-size:11px; border-bottom:1px solid var(--border);
-    max-height:76px; overflow:auto; white-space:pre-line;}
-  #libcanvases{flex:1; display:flex; min-height:0;}
-  .libcv{flex:1; position:relative; border-right:1px solid var(--border);}
-  .libcv canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
-  .libcv .cvtitle{position:absolute; top:6px; left:10px; z-index:2; font-size:11px; color:var(--fg-dim);}
+/* ═══════════════════════════════════════════════════════════════════
+   1. TOKENS — única fonte de verdade de cor, espaço, raio e sombra.
+   Nunca escreva um hex fora deste bloco.
+   ═══════════════════════════════════════════════════════════════ */
+:root {
+  --bg:        #0f0f11;   /* fundo da página */
+  --surface:   #1a1a1d;   /* cards, menus, inputs, painéis */
+  --surface-2: #161619;   /* painel lateral, faixas */
+  --sunken:    #0b0b0d;   /* rodapé, viewport do canvas */
+  --text:      #f2f2f3;
+  --text-2:    #a8a8ae;   /* texto secundário */
+  --text-3:    #7a7a80;   /* metadados, rótulos */
+  --text-4:    #57575d;   /* numeração, texto desligado */
+  --line:      rgba(242,242,243,0.14);
+  --line-soft: rgba(242,242,243,0.08);
+  --hi:        #d8d8dd;   /* destaque = branco-cinza, nunca cor */
+
+  /* Cor carrega STATUS e nada mais. */
+  --ok:    #4bbf7b;   /* online, etapa concluída, sucesso */
+  --warn:  #d6a75a;   /* pendente, aviso de DRC */
+  --err:   #e0555a;   /* offline, erro, sem esquema */
+  --idle:  #4a4a50;   /* inativo, não iniciado */
+
+  --font: "Inter", system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --sp-1: 3px; --sp-2: 6px; --sp-3: 8px; --sp-4: 11px; --sp-6: 17px; --sp-8: 22px;
+  --r-sm: 5px; --r-md: 8px; --r-lg: 14px;
+  --shadow-menu: 0 0 0 1px #3a3a40, 0 16px 40px rgba(0,0,0,0.65); /* sombra = escuridão ambiente, não cor */
+
+  --surface-3: #17171a;  /* topo do gradiente do header */
+  --edge:      #2a2a2e;  /* borda interna de tag, card e viewport */
+  --scroll:    #34343a;  /* polegar da barra de rolagem */
+  --dot-idle:  #3a3a40;  /* ponto de etapa não iniciada */
+  --scrim:     rgba(11,11,13,0.55);
+
+  --page-min: 1040px;      /* abaixo disso a página rola na horizontal */
+  --aside-w: 330px;        /* painel de detalhe do componente */
+  --picker-w: 420px;       /* seletor de projeto */
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
+body { font: 400 15px/1.55 var(--font); }
+h1,h2,h3,h4 { font-weight: 500; letter-spacing: -0.015em; margin: 0; line-height: 1.15; }
+button, input { font: inherit; color: inherit; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--hi); outline-offset: 2px; }
+::selection { background: rgba(242,242,243,0.22); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 8px; border: 3px solid var(--bg); }
+::-webkit-scrollbar-track { background: transparent; }
+.mono { font-family: var(--mono); }
+.num  { font-variant-numeric: tabular-nums; }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 2. Casca ─────────────────────────────────────────────────── */
+#app {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;   /* header · projeto · abas · main · fluxo */
+  grid-template-columns: minmax(var(--page-min), 1fr);
+  overflow-x: auto; overflow-y: hidden;          /* só a página rola na horizontal */
+}
+
+/* ── 3. Botões ────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer; font-size: 14px; line-height: 1.2;
+  background: transparent; border: 1px solid transparent;
+  padding: var(--sp-2) var(--sp-4); border-radius: var(--r-md);
+}
+.btn svg { display: block; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { color: var(--hi); border-color: var(--hi); }          /* contornado, nunca preenchido */
+.btn-primary:hover { background: rgba(242,242,243,0.10); }
+.btn-primary:active { background: rgba(242,242,243,0.18); }
+.btn-secondary { border-color: var(--line); }
+.btn-secondary:hover { background: rgba(242,242,243,0.07); }
+.btn-secondary:active { background: rgba(242,242,243,0.13); }
+.btn-ghost { color: var(--hi); padding-inline: var(--sp-1); }
+.btn-ghost:hover { background: rgba(242,242,243,0.08); }
+.btn-icon { width: 34px; height: 34px; padding: 0; }
+.btn-sm { font-size: 12px; padding: 4px 10px; }
+
+.tag {
+  display: inline-flex; align-items: center; font-size: 11px;
+  padding: 3px 9px; border-radius: var(--r-sm);
+  background: var(--edge); color: var(--text);
+}
+.tag-outline { background: transparent; border: 1px solid var(--hi); color: var(--hi); }
+
+.input {
+  width: 100%; min-height: 34px; padding: 6px 10px; font-size: 14px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-md); caret-color: var(--hi);
+}
+.input:hover { border-color: rgba(242,242,243,0.30); }
+.input:focus-visible { border-color: var(--hi); outline-offset: 0; }
+
+/* ── 4. Header ────────────────────────────────────────────────── */
+header {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 18px;
+  background: linear-gradient(180deg, var(--surface-3), var(--bg));
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.brand { display: flex; align-items: baseline; gap: 8px; flex: none; }
+.brand b { font-weight: 500; font-size: 15px; }
+.brand span { font-size: 11px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-3); }
+.header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+.server { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); margin-right: 4px; }
+
+/* ── 5. Seletor de projeto ────────────────────────────────────── */
+.picker { position: relative; flex: 1 1 var(--picker-w); min-width: 0; max-width: var(--picker-w); }
+.picker-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: left; cursor: pointer;
+  padding: 7px 11px; border-radius: var(--r-md);
+  background: var(--surface); border: 1px solid var(--line);
+}
+.picker-trigger[aria-expanded="true"] { border-color: var(--hi); }
+.picker-trigger .left { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.picker-catcher { position: fixed; inset: 0; z-index: 30; }   /* fecha ao clicar fora */
+.picker-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; width: 100%; z-index: 40;
+  background: var(--surface); border-radius: var(--r-md);
+  box-shadow: var(--shadow-menu); overflow: hidden;
+}
+.picker-search { padding: 8px; box-shadow: inset 0 -1px 0 var(--line); }
+.picker-list { max-height: 340px; overflow-y: auto; padding: 6px; }
+.picker-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: left; cursor: pointer;
+  border: 0; background: transparent; border-radius: var(--r-sm); padding: 7px 9px;
+}
+.picker-item:hover, .picker-item.active { background: rgba(242,242,243,0.09); }
+.picker-item .nm { font-size: 13px; }
+.picker-item .sub { font-size: 11px; color: var(--text-3); }
+.picker-item .dots { display: flex; gap: 3px; flex: none; }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dot-sm { width: 5px; height: 5px; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
+.dot.err { background: var(--err); } .dot.idle { background: var(--dot-idle); }
+.dot.now { background: var(--text); box-shadow: 0 0 0 2px rgba(242,242,243,0.22); }
+
+/* ── 6. Barra do projeto + pipeline ───────────────────────────── */
+.projbar { display: flex; align-items: center; gap: 24px; padding: 14px 18px 12px; }
+.projbar .id { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.projbar .id .row { display: flex; align-items: center; gap: 9px; }
+.projbar h4 { font-size: 19px; max-width: 380px; }
+.projbar .path { font-size: 11px; color: var(--text-3); max-width: 380px; }
+.pipeline { display: flex; align-items: center; flex: none; padding: 0 4px; }
+.stage {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px 5px 9px; border-radius: var(--r-sm);
+  font-size: 12px; white-space: nowrap; color: var(--text-4);
+}
+.stage .mark { width: 6px; height: 6px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px var(--idle); }
+.stage.done { color: var(--text-2); }
+.stage.done .mark { background: var(--ok); box-shadow: none; }
+.stage.now { color: var(--text); box-shadow: inset 0 0 0 1px var(--hi); background: rgba(242,242,243,0.08); }
+.stage.now .mark { background: var(--text); box-shadow: 0 0 0 3px rgba(242,242,243,0.22); }
+.projbar .actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
+.pending { font-size: 12px; color: var(--warn); }
+
+/* ── 7. Abas ──────────────────────────────────────────────────── */
+.tabs {
+  display: flex; align-items: center; gap: 4px; padding: 0 18px;
+  box-shadow: inset 0 -1px 0 var(--line);
+}
+.tab {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  border: 0; background: transparent; color: var(--text-3);
+  font-size: 13px; padding: 9px 12px 10px;
+}
+.tab:hover { color: var(--text-2); }
+.tab[aria-selected="true"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--hi); }
+.tab .n { font-size: 10px; padding: 1px 5px; border-radius: var(--r-sm); background: rgba(242,242,243,0.07); color: var(--text-3); }
+.tab[aria-selected="true"] .n { background: rgba(242,242,243,0.16); color: var(--text); }
+.aggr { margin-left: auto; display: flex; gap: 16px; font-size: 11px; color: var(--text-3); padding-bottom: 8px; }
+.aggr b { font-weight: 400; color: var(--text-2); }
+
+/* ── 8. Main ──────────────────────────────────────────────────── */
+main { overflow: hidden; min-height: 0; }
+.pane { height: 100%; min-height: 0; display: none; }
+.pane.on { display: block; }
+.scroll { overflow-y: auto; min-height: 0; }
+
+/* canvas (Esquema / PCB) */
+.canvas-wrap { height: 100%; display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.canvas-bar { display: flex; align-items: center; gap: 8px; padding: 8px 18px; }
+.canvas-bar .ttl { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.canvas-bar .meta { font-size: 11px; color: var(--text-4); }
+.canvas-bar .right { margin-left: auto; display: flex; gap: 6px; }
+.viewport {
+  position: relative; margin: 0 18px 18px; border-radius: var(--r-md); overflow: hidden; min-height: 0;
+  background: var(--sunken) radial-gradient(circle at 1px 1px, rgba(242,242,243,0.10) 1px, transparent 0) 0 0 / 22px 22px;
+  box-shadow: inset 0 0 0 1px var(--edge);
+}
+.zoom { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 4px; }
+.zoom .btn { width: 28px; height: 28px; background: var(--surface); }
+.zoom .lv { margin-left: 6px; font-size: 11px; color: var(--text-4); }
+.empty { display: grid; place-items: center; padding: 40px; text-align: center; }
+.empty p { max-width: 380px; font-size: 13px; color: var(--text-2); margin: 10px 0 0; }
+
+/* tabelas */
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+thead th {
+  text-align: left; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-3); font-weight: 400; padding: var(--sp-2); border-bottom: 1px solid var(--line);
+}
+tbody td { padding: var(--sp-2); border-bottom: 1px solid var(--line-soft); }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: rgba(242,242,243,0.04); }
+tbody tr[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow: inset 2px 0 0 var(--hi); }
+.r { text-align: right; }
+
+/* componentes: tabela + detalhe */
+.comp-grid { height: 100%; display: grid; grid-template-columns: minmax(0,1fr) var(--aside-w); min-height: 0; }
+.comp-left { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.comp-bar { display: flex; align-items: center; gap: 10px; padding: 10px 18px; }
+.comp-bar .input { max-width: 380px; }
+.comp-bar .count { font-size: 11px; color: var(--text-3); }
+aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2); box-shadow: inset 1px 0 0 var(--line); min-height: 0; }
+.kicker { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
+.det-head { display: flex; align-items: baseline; gap: 8px; margin-top: 3px; }
+.det-head .d { font-size: 22px; font-weight: 500; }
+.det-head .v { font-size: 14px; color: var(--text-2); }
+.kv { display: flex; align-items: baseline; gap: 10px; font-size: 12px; padding: 3px 0; }
+.kv .k { width: 88px; flex: none; color: var(--text-3); }
+.kv .v { word-break: break-word; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+
+/* cards de footprint */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap: 10px; padding: 14px 18px 18px; }
+.card { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border-radius: var(--r-md); background: var(--surface); box-shadow: 0 0 0 1px var(--edge); }
+.card .t { font-size: 15px; font-weight: 500; }
+.card .b { font-size: 12px; color: var(--text-2); flex: 1; margin: 0; }
+.card .m { display: flex; font-size: 11px; color: var(--text-3); }
+.card .m span:last-child { margin-left: auto; }
+
+/* histórico */
+.hist { padding: 14px 18px 18px; max-width: 760px; }
+.hist-row { display: grid; grid-template-columns: 108px 18px 1fr; gap: 10px; align-items: start; padding: 9px 0; border-bottom: 1px solid var(--line-soft); }
+.hist-row .when { font-size: 11px; color: var(--text-3); padding-top: 2px; }
+.hist-row .dot { margin-top: 6px; }
+.hist-row .t { font-size: 13px; }
+.hist-row .d { font-size: 11px; color: var(--text-3); word-break: break-all; }
+
+/* ── 9. Rodapé do fluxo ───────────────────────────────────────── */
+footer { display: flex; align-items: center; gap: 10px; padding: 8px 18px; background: var(--sunken); box-shadow: inset 0 1px 0 var(--line); }
+footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-4); flex: none; }
+.flow { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.step { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: default; border: 0; background: transparent; color: var(--text-3); font-size: 11px; padding: 3px 8px; border-radius: var(--r-sm); }
+.step .n { color: var(--text-4); }
+.step.now { background: rgba(242,242,243,0.10); color: var(--text); }
+
+/* ── 10. Overlays ─────────────────────────────────────────────── */
+.backdrop { position: fixed; inset: 0; z-index: 60; display: grid; background: var(--scrim); }
+.backdrop.center { place-items: center; padding: 18px; }
+.backdrop.anchor-tr { align-items: start; justify-items: end; padding: 74px 18px; }
+.dialog { width: min(620px,100%); display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-6); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-menu); }
+.dialog h3 { font-size: 20px; }
+.menu { width: 300px; padding: 6px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-menu); }
+.menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left; cursor: pointer; border: 0; background: transparent; border-radius: var(--r-sm); padding: 7px 9px; }
+.menu button:hover { background: rgba(242,242,243,0.09); }
+.menu .l { font-size: 13px; }
+.menu .c { font-size: 11px; color: var(--text-3); }
+.toast { position: fixed; left: 50%; bottom: 54px; transform: translateX(-50%); z-index: 80; display: none; align-items: center; gap: 9px; padding: 9px 14px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-menu); font-size: 13px; }
+.toast.on { display: flex; }
 </style>
 </head>
 <body>
-<div id="header">
-  <h1>AltiumPCBMirror — Hub</h1>
-  <div id="tabs">
-    <div class="tab active" data-v="projects">Projetos</div>
-    <div class="tab" data-v="sch">Esquema</div>
-    <div class="tab" data-v="pcb">PCB</div>
-    <div class="tab" data-v="libs">Libs</div>
-  </div>
-  <span id="curproj">nenhum projeto aberto</span>
-</div>
+<div id="app">
+  <header>
+    <div class="brand"><b>AltiumPCBMirror</b><span>hub</span></div>
 
-<div id="view-projects" class="view active">
-  <div id="cards"></div>
-  <div id="howto">
-    <b>Fluxo projeto novo:</b> 1) rode <b>ExportLibs</b> no Altium (espelha suas bibliotecas) ·
-    2) peça o projeto à IA (ela cria <b>Projects\&lt;nome&gt;\schematic.js</b>) · 3) confira aqui na vista
-    <b>Esquema</b> · 4) no Altium: crie um .PrjPcb com o mesmo nome e rode <b>BuildSchematic</b> ·
-    5) Compile + <b>Design » Update PCB</b> (ECO) · 6) rode <b>ExportBoard</b>, a IA roteia no
-    <b>changes.js</b>, confira na vista <b>PCB</b> · 7) rode <b>ApplyChanges</b> + DRC.
-  </div>
-</div>
-
-<div id="view-sch" class="view"><iframe id="schframe" src="about:blank"></iframe></div>
-<div id="view-pcb" class="view"><iframe id="pcbframe" src="about:blank"></iframe></div>
-
-<div id="view-libs" class="view">
-  <div id="libleft">
-    <input id="libsearch" placeholder="buscar símbolo ou footprint...">
-    <div id="liblist"></div>
-  </div>
-  <div id="libmain">
-    <div id="libwarn"></div>
-    <div id="libcanvases">
-      <div class="libcv"><span class="cvtitle" id="symtitle">símbolo</span><canvas id="cvsym"></canvas></div>
-      <div class="libcv"><span class="cvtitle" id="fptitle">footprint</span><canvas id="cvfp"></canvas></div>
+    <div class="picker">
+      <button class="picker-trigger" id="pickerBtn" aria-expanded="false" aria-haspopup="listbox">
+        <span class="left"><span class="dot" id="projDot"></span><span class="trunc" id="projName">—</span></span>
+        <span class="left" style="flex:none">
+          <span style="font-size:11px;color:var(--text-3)" id="projCount"></span>
+          <svg width="12" height="12" viewBox="0 0 256 256" fill="currentColor" style="opacity:.6"><path d="M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80A8 8 0 0 1 48 88h160a8 8 0 0 1 5.66 13.66z"/></svg>
+        </span>
+      </button>
+      <div id="pickerCatcher" class="picker-catcher" hidden></div>
+      <div id="pickerPanel" class="picker-panel" hidden role="listbox">
+        <div class="picker-search"><input class="input" id="pickerSearch" type="text" placeholder="Buscar projeto…" autocomplete="off"></div>
+        <div class="picker-list" id="pickerList"></div>
+      </div>
     </div>
-  </div>
+
+    <div class="header-right">
+      <span class="server"><span class="dot dot-sm" id="serverDot"></span><span id="serverLabel">sem servidor</span></span>
+      <button class="btn btn-secondary" data-run="ExportLibs">ExportLibs</button>
+      <button class="btn btn-secondary btn-icon" data-run="Rescan" title="Reindexar projetos">
+        <svg width="15" height="15" viewBox="0 0 256 256" fill="currentColor"><path d="M240 56v48a8 8 0 0 1-8 8h-48a8 8 0 0 1 0-16h28.69L182.06 73.37A79.56 79.56 0 0 0 70 61.94a8 8 0 1 1-11.18-11.44A96 96 0 0 1 193.37 62L224 92.66V56a8 8 0 0 1 16 0zM186.06 182.63A79.56 79.56 0 0 1 74 171.2L62.63 160H88a8 8 0 0 0 0-16H24a8 8 0 0 0-8 8v48a8 8 0 0 0 16 0v-36.69L62.63 194a96 96 0 0 0 134.61 0 8 8 0 0 0-11.18-11.44z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <section class="projbar">
+    <div class="id">
+      <div class="row"><h4 class="trunc" id="pName">—</h4><span id="pBadges"></span></div>
+      <div class="path mono trunc" id="pPath"></div>
+    </div>
+    <div class="pipeline" id="pipeline"></div>
+    <div class="actions">
+      <span class="pending" id="pending" hidden></span>
+      <button class="btn btn-primary" id="btnNext">—</button>
+      <button class="btn btn-secondary btn-icon" id="btnActions" title="Todas as ações">
+        <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor"><path d="M144 128a16 16 0 1 1-16-16 16 16 0 0 1 16 16zm-16-52a16 16 0 1 0-16-16 16 16 0 0 0 16 16zm0 104a16 16 0 1 0 16 16 16 16 0 0 0-16-16z"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+
+  <main>
+    <!-- Esquema / PCB compartilham a mesma casca -->
+    <div class="pane" data-pane="esquema"></div>
+    <div class="pane" data-pane="pcb"></div>
+
+    <div class="pane" data-pane="comp">
+      <div class="comp-grid">
+        <div class="comp-left">
+          <div class="comp-bar">
+            <input class="input" id="compSearch" type="text" placeholder="Filtrar por designator, valor, footprint ou net…">
+            <span class="count" id="compCount"></span>
+            <button class="btn btn-ghost btn-sm" style="margin-left:auto" id="btnBom">Exportar BOM</button>
+          </div>
+          <div class="scroll" style="padding:0 6px 18px 18px">
+            <table>
+              <thead><tr>
+                <th style="width:78px">Desig.</th><th style="width:108px">Valor</th>
+                <th>Footprint</th><th style="width:130px">Library</th><th class="r" style="width:62px">Pins</th>
+              </tr></thead>
+              <tbody id="compRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <aside id="compDetail"></aside>
+      </div>
+    </div>
+
+    <div class="pane" data-pane="nets">
+      <div class="scroll" style="height:100%;padding:10px 18px 18px">
+        <table>
+          <thead><tr><th>Net</th><th style="width:140px">Classe</th><th class="r" style="width:80px">Nós</th><th class="r" style="width:100px">Trilhas</th><th class="r" style="width:100px">Largura</th></tr></thead>
+          <tbody id="netRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="pane" data-pane="fp"><div class="scroll" style="height:100%"><div class="cards" id="fpCards"></div></div></div>
+    <div class="pane" data-pane="hist"><div class="scroll" style="height:100%"><div class="hist" id="histRows"></div></div></div>
+  </main>
+
+  <footer>
+    <span class="lbl">fluxo</span>
+    <div class="flow" id="flow"></div>
+    <button class="btn btn-ghost" style="font-size:11px;flex:none" id="btnFlow">Ver detalhes</button>
+  </footer>
 </div>
 
-<script src="hub-core.js"></script>
-<script src="hub-draw.js"></script>
-<script src="projects.js"></script>
-<script src="hub-ui.js"></script>
+<div class="toast" id="toast"><span class="dot dot-sm" id="toastDot"></span><span id="toastMsg"></span></div>
+<div id="overlay"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   DADOS
+   Em produção: GET /api/index.json e GET /api/project/<id>.json.
+   O bloco DEMO abaixo é só fallback para abrir o arquivo sem servidor.
+   ═══════════════════════════════════════════════════════════════ */
+const DEMO_INDEX = { projects: [
+  { id:'demokit', name:'_DemoKit', path:'Projects\\_DemoKit', demo:true, noSchematic:false, stages:[1,1,1,0], pending:3, stats:{sheets:1,comps:4,nets:3,tracks:7,vias:0} },
+  { id:'mid', name:'MID - DI261897 - Cartão Allen Bradley 1492 - IFM40D24', path:'Projects\\MID_DI261897', stages:[1,1,1,1], pending:48, stats:{sheets:3,comps:166,nets:92,tracks:1413,vias:185} },
+  { id:'tcms', name:'TCMS_Reader', path:'Projects\\TCMS_Reader', stages:[1,2,0,0], pending:0, stats:{sheets:1,comps:17,nets:9,tracks:148,vias:8} },
+  { id:'tcms2', name:'TCMS_Reader_V2', path:'Projects\\TCMS_Reader_V2', stages:[2,0,0,0], pending:0, stats:{sheets:1,comps:81,nets:49,tracks:0,vias:0} },
+  { id:'psu', name:'PSU_Bench_v3', path:'Projects\\PSU_Bench_v3', noSchematic:true, stages:[0,0,0,0], pending:0, stats:{sheets:0,comps:0,nets:0,tracks:0,vias:0} },
+]};
+
+const DEMO_DETAIL = {
+  components: [
+    { des:'U1', value:'STM32F103C8T6', footprint:'LQFP-48_7x7mm_P0.5mm', lib:'MCU_ST_STM32F1', pins:48, layer:'Top', pos:'48.26, 31.75 mm', rot:'0°', nets:['VDD','GND','SWDIO','SWCLK'] },
+    { des:'U2', value:'SN65HVD230', footprint:'SOIC-8_3.9x4.9mm_P1.27mm', lib:'Interface_CAN', pins:8, layer:'Top', pos:'62.10, 40.20 mm', rot:'90°', nets:['CANH','CANL','VDD','GND'] },
+    { des:'C1', value:'100nF', footprint:'C_0402_1005Metric', lib:'Capacitor_SMD', pins:2, layer:'Top', pos:'44.50, 28.10 mm', rot:'0°', nets:['VDD','GND'] },
+    { des:'R2', value:'120R', footprint:'R_0603_1608Metric', lib:'Resistor_SMD', pins:2, layer:'Top', pos:'68.00, 42.50 mm', rot:'90°', nets:['CANH','CANL'] },
+    { des:'Y1', value:'8MHz', footprint:'Crystal_SMD_3225-4Pin', lib:'Crystal', pins:4, layer:'Top', pos:'54.00, 22.00 mm', rot:'0°', nets:['OSC_IN','OSC_OUT','GND'] },
+    { des:'J2', value:'Phoenix 3P', footprint:'TerminalBlock_5.08mm_3P', lib:'Connector_Phoenix', pins:3, layer:'Top', pos:'8.00, 30.00 mm', rot:'270°', nets:['CANH','CANL','GND'] },
+  ],
+  nets: [
+    { name:'GND', cls:'Power', nodes:34, tracks:96, width:'0.5 mm' },
+    { name:'VDD', cls:'Power', nodes:18, tracks:41, width:'0.4 mm' },
+    { name:'CANH', cls:'Differential', nodes:4, tracks:9, width:'0.25 mm' },
+    { name:'CANL', cls:'Differential', nodes:4, tracks:9, width:'0.25 mm' },
+    { name:'SWDIO', cls:'Signal', nodes:2, tracks:4, width:'0.2 mm' },
+  ],
+  footprints: [
+    { name:'C_0402_1005Metric', lib:'Capacitor_SMD', desc:'Capacitor SMD 0402', usage:'18 componentes', pads:'2 pads' },
+    { name:'LQFP-48_7x7mm_P0.5mm', lib:'Package_QFP', desc:'LQFP 48 pinos, passo 0.5 mm', usage:'1 componente', pads:'48 pads' },
+    { name:'TerminalBlock_5.08mm_3P', lib:'Connector_Phoenix', desc:'Bloco de terminais 3 posições', usage:'1 componente', pads:'3 pads' },
+  ],
+  history: [
+    { when:'hoje 14:32', kind:'ok', title:'ExportBoard concluído', detail:'board.js atualizado · 81 comps, 49 nets' },
+    { when:'hoje 14:28', kind:'run', title:'BuildSchematic executado pela IA', detail:'Projects\\TCMS_Reader_V2\\schematic.js' },
+    { when:'ontem 18:50', kind:'warn', title:'DRC: 2 avisos', detail:'Clearance CANH↔GND 0.18 mm < 0.20 mm' },
+  ],
+};
+
+const API = {
+  async index() {
+    try {
+      const r = await fetch('/api/index.json'); if (!r.ok) throw 0;
+      S.serverOk = true;
+      return await r.json();
+    } catch { S.demoMode = true; S.serverOk = false; return DEMO_INDEX; }
+  },
+  async detail(id) { try { const r = await fetch('/api/project/' + encodeURIComponent(id) + '.json'); if (!r.ok) throw 0; return await r.json(); } catch { return DEMO_DETAIL; } },
+  /* Execução: POST devolve { runId }; o log chega por SSE. */
+  async run(project, action, onLine) {
+    const r = await fetch('/api/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ project, action }) });
+    if (!r.ok) throw new Error('falha ao iniciar ' + action);
+    const { runId } = await r.json();
+    return new Promise((res, rej) => {
+      const es = new EventSource('/api/run/' + runId + '/stream');
+      es.onmessage = e => onLine && onLine(e.data);
+      es.addEventListener('done', () => { es.close(); res(); });
+      es.addEventListener('error', e => { es.close(); rej(new Error(e.data || 'erro')); });
+    });
+  },
+};
+
+/* ═══ CONSTANTES ═══════════════════════════════════════════════ */
+const STAGES = ['esquema','eco','roteada','aplicada'];
+/* Próximo passo: uma tabela explícita, indexada pelo nº de etapas concluídas.
+   'flow' aponta o passo do rodapé; 'run:false' = passo manual no Altium ou
+   pedido à IA — o botão abre a explicação em vez de executar um script.   */
+const STEP = {
+  none:  { label: 'Pedir schematic.js',     flow: 1, run: false },
+  0:     { label: 'BuildSchematic',         flow: 3, run: true  },
+  1:     { label: 'Compile + Update PCB',   flow: 4, run: false },
+  2:     { label: 'ExportBoard',            flow: 5, run: true  },
+  3:     { label: 'ApplyChanges',           flow: 6, run: true  },
+  4:     { label: 'DRC',                    flow: 6, run: true  },
+};
+const TABS = [
+  { id:'esquema', label:'Esquema' }, { id:'pcb', label:'PCB' },
+  { id:'comp', label:'Componentes', count:d=>d.components.length },
+  { id:'nets', label:'Nets', count:d=>d.nets.length },
+  { id:'fp', label:'Footprints', count:d=>d.footprints.length },
+  { id:'hist', label:'Histórico' },
+];
+const FLOW = [
+  ['1','ExportLibs','Rode no Altium para espelhar suas bibliotecas.'],
+  ['2','Pedir schematic.js','Peça à IA — ela cria Projects\\<nome>\\schematic.js.'],
+  ['3','Conferir no Esquema','Revise a vista Esquema aqui no hub.'],
+  ['4','BuildSchematic','No Altium: crie um .PrjPcb com o mesmo nome e rode BuildSchematic.'],
+  ['5','Compile + Update PCB','Design » Update PCB (ECO) para levar o esquema à placa.'],
+  ['6','ExportBoard','A IA roteia em changes.js; confira na vista PCB.'],
+  ['7','ApplyChanges','Aplique as mudanças e rode o DRC.'],
+];
+const ACTIONS = [
+  ['ExportLibs','node scripts/export-libs.js'],
+  ['BuildSchematic','node scripts/build-schematic.js'],
+  ['ExportBoard','node scripts/export-board.js'],
+  ['ApplyChanges','node scripts/apply-changes.js'],
+  ['DRC','node scripts/drc.js'],
+  ['Rescan','node scripts/scan.js'],
+];
+
+/* ═══ ESTADO ═══════════════════════════════════════════════════
+   Nada de estado duplicado: pipeline, próxima ação, contadores e
+   listas filtradas são sempre DERIVADOS destes campos.            */
+const S = {
+  projects: [], detail: null,
+  projId: null, tab: 'esquema', selDes: null,
+  q: '', compQ: '', pickerOpen: false, pickerIdx: 0,
+  demoMode: false, serverOk: false,
+};
+
+const $ = s => document.querySelector(s);
+const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
+const proj = () => S.projects.find(p => p.id === S.projId) || S.projects[0];
+const filteredProjects = () => { const q = S.q.trim().toLowerCase(); return S.projects.filter(x => !q || x.name.toLowerCase().includes(q)); };
+const stepOf = p => p.noSchematic ? STEP.none : STEP[p.stages.filter(v => v === 1).length];
+const statusOf = p => p.noSchematic ? 'err' : (p.pending > 0 ? 'warn' : 'ok');
+
+/* ═══ RENDER ═══════════════════════════════════════════════════ */
+function renderHeader() {
+  const p = proj();
+  $('#projName').textContent = p.name;
+  $('#projDot').className = 'dot ' + statusOf(p);
+  $('#projCount').textContent = S.projects.length + ' projetos' + (S.demoMode ? ' (demo)' : '');
+  $('#pickerBtn').setAttribute('aria-expanded', String(S.pickerOpen));
+  $('#pickerPanel').hidden = !S.pickerOpen;
+  $('#pickerCatcher').hidden = !S.pickerOpen;
+
+  $('#serverDot').className = 'dot dot-sm ' + (S.serverOk ? 'ok' : 'err');
+  $('#serverLabel').textContent = location.protocol.startsWith('http') ? location.host : 'sem servidor';
+
+  const list = $('#pickerList'); list.textContent = '';
+  filteredProjects().forEach((x, i) => {
+    const b = el('button', 'picker-item' + (i === S.pickerIdx ? ' active' : ''));
+    b.setAttribute('role', 'option');
+    if (x.id === S.projId) b.setAttribute('aria-current', 'true');
+    const left = el('div');
+    left.append(el('div', 'nm trunc', x.name),
+      el('div', 'sub', x.noSchematic ? 'sem esquema' : x.stats.comps + ' comps · ' + x.stats.nets + ' nets'));
+    const dots = el('div', 'dots');
+    x.stages.forEach(v => dots.append(el('span', 'dot dot-sm ' + (v === 1 ? 'ok' : v === 2 ? 'now' : 'idle'))));
+    b.append(left, dots);
+    b.onclick = () => selectProject(x.id);
+    list.append(b);
+  });
+}
+
+function renderProjBar() {
+  const p = proj();
+  $('#pName').textContent = p.name;
+  $('#pPath').textContent = p.path;
+  const badges = $('#pBadges'); badges.textContent = '';
+  if (p.demo) badges.append(el('span', 'tag tag-outline', 'demo'));
+  if (p.noSchematic) badges.append(el('span', 'tag', 'sem esquema'));
+
+  const pipe = $('#pipeline'); pipe.textContent = '';
+  p.stages.forEach((v, i) => {
+    const s = el('span', 'stage' + (v === 1 ? ' done' : v === 2 ? ' now' : ''));
+    s.append(el('span', 'mark'), el('span', null, STAGES[i]));
+    pipe.append(s);
+  });
+
+  const pend = $('#pending');
+  pend.hidden = !p.pending; pend.textContent = p.pending + ' mudanças pendentes';
+  const step = stepOf(p);
+  $('#btnNext').textContent = step.label;
+  $('#btnNext').title = step.run ? 'Executa agora' : 'Passo manual — ver detalhes do fluxo';
+
+  const flow = $('#flow'); flow.textContent = '';
+  FLOW.forEach(([n, label, hint], i) => {
+    const b = el('button', 'step' + (i === step.flow ? ' now' : ''));
+    b.title = hint; b.append(el('span', 'n num', n), el('span', null, label));
+    flow.append(b);
+  });
+}
+
+function renderTabs() {
+  const d = S.detail, nav = $('#tabs'); nav.textContent = '';
+  TABS.forEach(t => {
+    const b = el('button', 'tab'); b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(t.id === S.tab));
+    b.append(el('span', null, t.label));
+    if (t.count && d) b.append(el('span', 'n num', String(t.count(d))));
+    b.onclick = () => { S.tab = t.id; syncURL(); renderTabs(); renderPanes(); };
+    nav.append(b);
+  });
+  const st = proj().stats, aggr = el('div', 'aggr');
+  [['comps',st.comps],['nets',st.nets],['trilhas',st.tracks],['vias',st.vias]].forEach(([l,v]) => {
+    const s = el('span'); s.append(el('b', 'num', String(v)), document.createTextNode(' ' + l)); aggr.append(s);
+  });
+  nav.append(aggr);
+}
+
+function canvasPane(kind) {
+  const p = proj(), d = S.detail;
+  const empty = kind === 'esquema' ? p.noSchematic : (p.stats.tracks === 0 && p.stages[2] === 0);
+  const wrap = el('div', 'canvas-wrap');
+  const bar = el('div', 'canvas-bar');
+  bar.append(el('span', 'ttl', kind === 'pcb' ? 'vista pcb' : 'vista esquema'),
+    el('span', 'meta', kind === 'pcb'
+      ? p.stats.tracks + ' trilhas · ' + p.stats.vias + ' vias · 2 layers'
+      : p.stats.sheets + ' folha(s) · ' + p.stats.comps + ' comps · ' + p.stats.nets + ' nets'));
+  const right = el('div', 'right');
+  ['Ajustar','Camadas'].forEach(l => right.append(el('button', 'btn btn-secondary btn-sm', l)));
+  right.append(el('button', 'btn btn-ghost btn-sm', 'Abrir em nova aba'));
+  bar.append(right); wrap.append(bar);
+
+  if (empty) {
+    const e = el('div', 'empty'), inner = el('div');
+    inner.append(el('span', 'tag', kind === 'esquema' ? 'sem esquema' : 'sem roteamento'));
+    inner.append(el('p', null, kind === 'esquema'
+      ? 'Este projeto ainda não tem schematic.js. Peça à IA para gerá-lo e ele aparece aqui.'
+      : 'A placa ainda não foi roteada. Rode ExportBoard e a IA escreve changes.js.'));
+    e.append(inner); wrap.append(e);
+  } else {
+    const vp = el('div', 'viewport');
+    /* ►►► PONTO DE MONTAGEM DO RENDERER EXISTENTE ◄◄◄
+       Substitua a linha abaixo pela chamada do renderer atual do projeto:
+         renderSchematic(vp, d.schematic)   ou   renderBoard(vp, d.board)
+       O contêiner já tem grid de fundo, borda e recorte corretos.        */
+    const slot = el('div', 'empty');
+    const note = el('div');
+    note.style.cssText = 'font-size:12px;color:var(--text-3);text-align:center;line-height:1.9';
+    note.innerHTML = '<span class="mono">' + (kind === 'pcb' ? 'renderBoard(vp, d.board)' : 'renderSchematic(vp, d.schematic)') +
+      '</span><br>monte aqui o renderer que o projeto já usa';
+    slot.append(note);
+    vp.append(slot);
+    const zoom = el('div', 'zoom');
+    ['−','+'].forEach(l => zoom.append(el('button', 'btn btn-secondary btn-icon', l)));
+    zoom.append(el('span', 'lv num', '100%'));
+    vp.append(zoom); wrap.append(vp);
+  }
+  return wrap;
+}
+
+function renderComponents() {
+  const d = S.detail, q = S.compQ.trim().toLowerCase();
+  const rows = d.components.filter(c => !q ||
+    (c.des + ' ' + c.value + ' ' + c.footprint + ' ' + c.nets.join(' ')).toLowerCase().includes(q));
+  $('#compCount').textContent = rows.length + ' de ' + d.components.length;
+
+  const tb = $('#compRows'); tb.textContent = '';
+  rows.forEach(c => {
+    const tr = el('tr');
+    tr.setAttribute('aria-selected', String(c.des === S.selDes));
+    [['des','mono'],['value',''],['footprint',''],['lib',''],['pins','r num']].forEach(([k, cls]) => {
+      const td = el('td', cls, String(c[k]));
+      if (k === 'footprint') td.style.color = 'var(--text-2)';
+      if (k === 'lib') { td.style.color = 'var(--text-3)'; td.style.fontSize = '12px'; }
+      tr.append(td);
+    });
+    tr.onclick = () => { S.selDes = c.des; renderComponents(); };
+    tb.append(tr);
+  });
+
+  const a = $('#compDetail'); a.textContent = '';
+  const c = d.components.find(x => x.des === S.selDes);
+  if (!c) { const p = el('p', null, 'Selecione um componente na tabela para ver footprint, pinos e nets.');
+    p.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:18px'; a.append(p); return; }
+  a.append(el('div', 'kicker', 'componente'));
+  const h = el('div', 'det-head'); h.append(el('span', 'd', c.des), el('span', 'v', c.value)); a.append(h);
+  const kvs = el('div'); kvs.style.marginTop = '12px';
+  [['Footprint',c.footprint],['Library',c.lib],['Pins',c.pins],['Layer',c.layer],['Posição',c.pos],['Rotação',c.rot]]
+    .forEach(([k, v]) => { const r = el('div','kv'); r.append(el('span','k',k), el('span','v',String(v))); kvs.append(r); });
+  a.append(kvs);
+  a.append(el('div', 'kicker', 'nets'));
+  const chips = el('div', 'chips'); chips.style.marginTop = '6px';
+  c.nets.forEach(n => chips.append(el('span', 'tag mono', n)));
+  a.append(chips);
+  const acts = el('div'); acts.style.cssText = 'display:flex;gap:6px;margin-top:14px';
+  ['Ver no esquema','Ver no PCB'].forEach((l, i) => {
+    const b = el('button', 'btn btn-secondary btn-sm', l);
+    b.style.flex = '1';
+    b.onclick = () => { S.tab = i ? 'pcb' : 'esquema'; renderTabs(); renderPanes(); };
+    acts.append(b);
+  });
+  a.append(acts);
+}
+
+function renderPanes() {
+  const d = S.detail;
+  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.dataset.pane === S.tab));
+  if (S.tab === 'esquema' || S.tab === 'pcb') {
+    const pane = document.querySelector('.pane[data-pane="' + S.tab + '"]');
+    pane.textContent = ''; pane.append(canvasPane(S.tab)); return;
+  }
+  if (S.tab === 'comp') return renderComponents();
+  if (S.tab === 'nets') {
+    const tb = $('#netRows'); tb.textContent = '';
+    d.nets.forEach(n => {
+      const tr = el('tr'); tr.style.cursor = 'default';
+      const nm = el('td', 'mono', n.name); nm.style.color = 'var(--hi)';
+      tr.append(nm, el('td', null, n.cls), el('td', 'r num', String(n.nodes)),
+        el('td', 'r num', String(n.tracks)), el('td', 'r', n.width));
+      tb.append(tr);
+    });
+  }
+  if (S.tab === 'fp') {
+    const g = $('#fpCards'); g.textContent = '';
+    d.footprints.forEach(f => {
+      const c = el('div', 'card');
+      c.append(el('div', 'kicker', f.lib), el('div', 't mono', f.name), el('p', 'b', f.desc));
+      const m = el('div', 'm'); m.append(el('span', null, f.usage), el('span', null, f.pads));
+      c.append(m); g.append(c);
+    });
+  }
+  if (S.tab === 'hist') {
+    const h = $('#histRows'); h.textContent = '';
+    d.history.forEach(x => {
+      const r = el('div', 'hist-row');
+      const kind = x.kind === 'warn' ? 'warn' : x.kind === 'run' ? 'idle' : 'ok';
+      const txt = el('div');
+      txt.append(el('div', 't', x.title), el('div', 'd mono', x.detail));
+      r.append(el('div', 'when num', x.when), el('span', 'dot ' + kind), txt);
+      h.append(r);
+    });
+  }
+}
+
+function renderAll() { renderHeader(); renderProjBar(); renderTabs(); renderPanes(); }
+
+/* ═══ AÇÕES E OVERLAYS ═════════════════════════════════════════ */
+let toastTimer;
+function toast(msg, kind) {
+  $('#toastMsg').textContent = msg;
+  $('#toastDot').className = 'dot dot-sm ' + (kind || 'ok');
+  $('#toast').classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('#toast').classList.remove('on'), 2800);
+}
+
+async function runAction(action) {
+  toast(action + ' em execução…', 'warn');
+  try { await API.run(S.projId, action, () => {}); toast(action + ' concluído', 'ok'); await loadProject(S.projId); }
+  catch (e) { toast(action + ' falhou: ' + e.message, 'err'); }
+}
+
+function closeOverlay() { $('#overlay').textContent = ''; }
+function openActionsMenu() {
+  const bd = el('div', 'backdrop anchor-tr'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
+  const m = el('div', 'menu');
+  ACTIONS.forEach(([label, cmd]) => {
+    const b = el('button'); b.append(el('span', 'l', label), el('span', 'c mono', cmd));
+    b.onclick = () => { closeOverlay(); runAction(label); };
+    m.append(b);
+  });
+  bd.append(m); $('#overlay').append(bd);
+}
+function openFlowDialog() {
+  const bd = el('div', 'backdrop center'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
+  const d = el('div', 'dialog'); d.append(el('h3', null, 'Fluxo de um projeto novo'));
+  FLOW.forEach(([n, label, hint]) => {
+    const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:20px 1fr;gap:10px';
+    const t = el('div'); t.append(el('div', null, label), el('div', null, hint));
+    t.lastChild.style.cssText = 'font-size:12px;color:var(--text-2)';
+    const num = el('span', 'num', n); num.style.cssText = 'font-size:12px;color:var(--text-3)';
+    row.append(num, t); d.append(row);
+  });
+  const act = el('div'); act.style.cssText = 'display:flex;justify-content:flex-end;margin-top:6px';
+  const close = el('button', 'btn btn-primary', 'Fechar'); close.onclick = closeOverlay;
+  act.append(close); d.append(act); bd.append(d); $('#overlay').append(bd);
+}
+
+/* ═══ NAVEGAÇÃO / PERSISTÊNCIA ════════════════════════════════ */
+function syncURL() { location.hash = S.projId + '/' + S.tab; localStorage.setItem('altiumhub.project', S.projId); }
+function readURL() {
+  const [id, tab] = (location.hash.replace(/^#/, '') || '').split('/');
+  return { id: id || localStorage.getItem('altiumhub.project'), tab: TABS.some(t => t.id === tab) ? tab : null };
+}
+async function loadProject(id) {
+  S.projId = id; S.detail = await API.detail(id);
+  S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
+  renderAll();
+}
+function selectProject(id) { S.pickerOpen = false; S.q = ''; $('#pickerSearch').value = ''; syncURL(); loadProject(id); }
+
+function scrollPickerActiveIntoView() {
+  const active = $('#pickerList').children[S.pickerIdx];
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+function openPicker() {
+  S.pickerOpen = true;
+  const items = filteredProjects();
+  const idx = items.findIndex(x => x.id === S.projId);
+  S.pickerIdx = idx >= 0 ? idx : 0;
+  renderHeader();
+  $('#pickerSearch').focus();
+  scrollPickerActiveIntoView();
+}
+function movePickerIdx(delta) {
+  const items = filteredProjects();
+  if (!items.length) return;
+  S.pickerIdx = (S.pickerIdx + delta + items.length) % items.length;
+  renderHeader();
+  scrollPickerActiveIntoView();
+}
+
+/* ═══ EVENTOS ══════════════════════════════════════════════════ */
+$('#pickerBtn').onclick = () => { if (S.pickerOpen) { S.pickerOpen = false; renderHeader(); } else { openPicker(); } };
+$('#pickerCatcher').onclick = () => { S.pickerOpen = false; renderHeader(); };
+$('#pickerSearch').oninput = e => { S.q = e.target.value; S.pickerIdx = 0; renderHeader(); $('#pickerSearch').focus(); };
+$('#pickerSearch').addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); movePickerIdx(1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); movePickerIdx(-1); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    const x = filteredProjects()[S.pickerIdx];
+    if (x) selectProject(x.id);
+  }
+});
+$('#compSearch').oninput = e => { S.compQ = e.target.value; renderComponents(); };
+$('#btnNext').onclick = () => { const s = stepOf(proj()); s.run ? runAction(s.label) : openFlowDialog(); };
+$('#btnActions').onclick = openActionsMenu;
+$('#btnFlow').onclick = openFlowDialog;
+$('#btnBom').onclick = () => toast('BOM exportada para ' + proj().path + '\\bom.csv', 'ok');
+document.querySelectorAll('[data-run]').forEach(b => b.onclick = () => runAction(b.dataset.run));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { S.pickerOpen = false; closeOverlay(); renderHeader(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault(); openPicker();
+  }
+});
+
+/* ═══ BOOT ═════════════════════════════════════════════════════ */
+(async function init() {
+  const idx = await API.index();
+  S.projects = idx.projects;
+  const url = readURL();
+  if (url.tab) S.tab = url.tab;
+  const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;
+  await loadProject(id);
+  syncURL();
+})();
+</script>
 </body>
 </html>
