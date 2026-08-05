@@ -36,6 +36,8 @@ Duas frentes de trabalho, normalmente nesta ordem para um projeto novo:
   `files.schematic:true` e todos os outros `false` até os scripts do Altium gerarem
   `board.js`/`changes.js`/os relatórios (eles regeneram `projects.js` sozinhos depois).
 
+**Dois escritores:** o usuário também edita o `schematic.js` pelo hub (vista Esquema). Releia o arquivo antes de cada edição e preserve as linhas dele; após edições, o BuildSchematic deve rodar com limpeza da folha para refletir removidos/alterados.
+
 ### Coordenadas (idêntico ao Altium Sch)
 
 - Unidade: **mil** (1/1000"). Pinos e fios sempre em inteiros, na grade de **100 mil**.
@@ -269,5 +271,5 @@ var annotations = [
 3. **Nunca apague nem reescreva** sinalizadores do usuário — só altere `status`/`reply`.
    Quem apaga/reabre é o usuário, pelo hub.
 4. **Dois escritores**: `changes.js`, `schematic.js` e `annotations.js` são editados
-   por você **e** pelo usuário (sinalizadores e changes.js pelo hub; schematic.js manualmente por enquanto). Sempre **releia o arquivo antes de editar**
+   por você **e** pelo usuário (sinalizadores, changes.js e schematic.js pelo hub). Sempre **releia o arquivo antes de editar**
    e preserve as linhas existentes — nunca regenere do zero sem pedido explícito.

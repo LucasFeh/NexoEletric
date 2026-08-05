@@ -112,6 +112,7 @@ com 4 vistas:
   `Libs\schlib.js`: símbolos, fios, junctions, net labels, power ports, designator/comment.
   Zoom/pan, cursor em mil, clique numa net destaca ela na folha inteira (com os pinos
   membros). Painel lateral com a lista de componentes e a validação do esquema.
+  A vista Esquema agora **edita**: `+ Componente` abre o picker das libs (símbolo + footprint lado a lado, ref sugerido), `W` desenha fios com snap na ponta quente dos pinos, Label/Power/Junção/Texto por clique, arrastar move com grade de 100 mil, duplo clique abre propriedades, `Ctrl+Z` desfaz e **Salvar esquema** grava o `schematic.js`. Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com limpeza da folha** (confirmação SIM).
 - **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
   `changes.js`: render fiel, fantasma tracejado das posições originais, lista de mudanças
   com validação, tabela PCB List pós-mudança e exportação para CSV.
@@ -164,9 +165,8 @@ O hub continua abrindo por **duplo clique**, sem servidor. Se quiser ver os expo
    **PCB** mostram os espelhos atuais.
 3. Editar a PCB segue exatamente o fluxo v1 (veja "O que é editável" abaixo): a IA edita
    `changes.js`, você confere no hub, roda **ApplyChanges** e depois o DRC.
-4. Editar um esquema **existente** não é suportado nesta versão — o espelho é só leitura
-   (round-trip de edição de esquema fica para a v3). Para mudar o esquema, edite no Altium
-   e rode `ExportProject` de novo para atualizar o espelho.
+4. Editar o esquema pelo hub grava o `schematic.js`; para levar ao Altium, rode
+   **BuildSchematic com limpeza da folha** (re-despejo completo — o rebuild incremental fica para uma fase futura). A alternativa segue válida: editar no Altium e re-exportar.
 
 ## O que é editável
 
