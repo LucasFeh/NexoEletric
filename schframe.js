@@ -7,15 +7,91 @@ if (typeof schematic === 'undefined') { fatal('schematic.js não encontrado para
 const SLIB = typeof schlib  !== 'undefined' ? schlib  : { symbols:[] };
 const PLIB = typeof pcblib  !== 'undefined' ? pcblib  : { footprints:[] };
 
-const model = HubCore.buildSchModel(schematic);
-const nets  = HubCore.extractNets(model, SLIB);
-const val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
+let model = HubCore.buildSchModel(schematic);
+let nets  = HubCore.extractNets(model, SLIB);
+let val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
 let sheetIdx = 0, selNet = '', selComp = null;
 const showState = { grid:true };
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
 let annTool = false, annDirty = false, annPending = null, staleWorkspace = false;
+
+/* ------- infra de edicao ------- */
+let selItem = null;                     /* { kind:'comp|wire|netlabel|power|junction|text', item } */
+let schDirty = false, schDiskSnapshot = null;
+let schTool = 'select';
+const undoStack = [JSON.stringify(schematic.items)], redoStack = [];
+function snap100(v){ return Math.round(v / 100) * 100; }
+
+function updateMeta(){
+  document.getElementById('meta').textContent =
+    `${schematic.project} · ${model.sheets.length} folha(s) · ${nets.nets.length} nets`;
+}
+function reapply(){
+  model = HubCore.buildSchModel(schematic);
+  nets  = HubCore.extractNets(model, SLIB);
+  val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
+  if (sheetIdx >= model.sheets.length) sheetIdx = 0;
+  buildCompTable(); buildNetList(); buildValList(); updateMeta();
+  cam.draw();
+}
+function setSchDirty(v){
+  schDirty = v;
+  const b = document.getElementById('btnSchSave');
+  b.classList.toggle('active', v);
+  b.textContent = v ? 'Salvar esquema *' : 'Salvar esquema';
+}
+function commit(){
+  undoStack.push(JSON.stringify(schematic.items));
+  if (undoStack.length > 60) undoStack.shift();
+  redoStack.length = 0;
+  setSchDirty(true);
+  reapply();
+}
+function restoreItems(json){
+  schematic.items.length = 0;
+  for (const it of JSON.parse(json)) schematic.items.push(it);
+  selItem = null; selComp = null;
+  setSchDirty(true);
+  reapply();
+}
+function undo(){ if (undoStack.length < 2) return; redoStack.push(undoStack.pop()); restoreItems(undoStack[undoStack.length - 1]); }
+function redo(){ if (!redoStack.length) return; const s = redoStack.pop(); undoStack.push(s); restoreItems(s); }
+function setSchTool(t){
+  schTool = t;
+  document.getElementById('toolSelect').classList.toggle('active', t === 'select');
+  document.getElementById('cv').style.cursor = t === 'select' ? 'crosshair' : 'copy';
+}
+document.getElementById('toolSelect').addEventListener('click', () => setSchTool('select'));
+
+const SCH_REL = 'Projects/' + SCH_P + '/schematic.js';
+(async () => { if (HubIO.canPost) try { schDiskSnapshot = await HubIO.fetchText(SCH_REL); } catch (e) {} })();
+
+async function saveSchematic(){
+  if (staleWorkspace && !confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o schematic.js do disco. Continuar?')) return;
+  const out = HubCore.serializeSchematic(schematic);
+  if (!out.text){ alert('Esquema inválido:\n' + out.errors.map(e => e.msg).join('\n')); return; }
+  if (HubIO.canPost){
+    try {
+      const cur = await HubIO.fetchText(SCH_REL);
+      if ((schDiskSnapshot === null || cur !== schDiskSnapshot) &&
+          !confirm('schematic.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?')) return;
+    } catch (e) {}
+  }
+  const msg = document.getElementById('annmsg');
+  try {
+    const r = await HubIO.saveFile(SCH_REL, out.text);
+    setSchDirty(false);
+    staleWorkspace = false;
+    schDiskSnapshot = out.text;
+    msg.textContent = r.mode === 'server' ? '✓ schematic.js salvo' : '↓ arquivo baixado — substitua ' + SCH_REL;
+  } catch (err) {
+    if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
+      HubIO.download('schematic.js', out.text);
+  }
+}
+document.getElementById('btnSchSave').addEventListener('click', saveSchematic);
 
 document.getElementById('meta').textContent =
   `${schematic.project} · ${model.sheets.length} folha(s) · ${nets.nets.length} nets`;
@@ -231,15 +307,17 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') { setAnnTool(false); return; }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
   const k = e.key.toLowerCase();
+  if (e.ctrlKey && k === 'z'){ e.preventDefault(); undo(); return; }
+  if (e.ctrlKey && k === 'y'){ e.preventDefault(); redo(); return; }
   if (k === 'n') setAnnTool(!annTool);
 });
 window.__hubOnChange = function(){
-  if (!annDirty){ location.reload(); return; }
+  if (!annDirty && !schDirty){ location.reload(); return; }
   staleWorkspace = true;
   document.getElementById('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
 };
-window.__hubDirty = function(){ return annDirty; };
-window.addEventListener('beforeunload', e => { if (annDirty){ e.preventDefault(); e.returnValue = ''; } });
+window.__hubDirty = function(){ return annDirty || schDirty; };
+window.addEventListener('beforeunload', e => { if (annDirty || schDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- paineis ---------- */
 function setNet(n){ selNet = n; buildNetList(); cam.draw(); }
