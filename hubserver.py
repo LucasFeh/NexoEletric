@@ -5,7 +5,9 @@ Uso: python hubserver.py [--port 8000]
 Aditivo: nao altera nenhum arquivo do hub; abrir hub.html por duplo clique segue igual.
 """
 import argparse
+import json
 import os
+import re
 import socket
 import threading
 import time
@@ -149,6 +151,258 @@ def api_save():
     except OSError as e:
         return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
     return {'ok': True}
+
+
+_PROJ_CACHE = {}
+
+
+def load_var_file(path):
+    """Le um arquivo 'var X = ...;' e devolve o valor (os arquivos sao JSON gerado)."""
+    with open(path, encoding='utf-8', errors='replace') as f:
+        s = f.read()
+    s = re.sub(r'^\s*//[^\n]*\n', '', s, flags=re.M)
+    s = s[s.find('=') + 1:].strip().rstrip(';').strip()
+    s = re.sub(r',\s*([\]}])', r'\1', s)
+    return json.loads(s)
+
+
+def _proj_id(name):
+    slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    return slug or 'proj'
+
+
+def _mtime(path):
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return 0
+
+
+def _count_ops(changes):
+    return sum(1 for c in changes if isinstance(c, dict) and c.get('op'))
+
+
+def build_index(root):
+    projects = []
+    pdir = os.path.join(root, 'Projects')
+    names = sorted(d for d in os.listdir(pdir) if os.path.isdir(os.path.join(pdir, d))) if os.path.isdir(pdir) else []
+    for name in names:
+        d = os.path.join(pdir, name)
+        has_sch = os.path.isfile(os.path.join(d, 'schematic.js'))
+        has_board = os.path.isfile(os.path.join(d, 'board.js'))
+        board = None
+        if has_board:
+            try:
+                board = load_var_file(os.path.join(d, 'board.js'))
+            except Exception:
+                board = None
+        stats = {'sheets': 0, 'comps': 0, 'nets': 0, 'tracks': 0, 'vias': 0}
+        if board:
+            stats['comps'] = len(board.get('components', []))
+            stats['nets'] = len(board.get('nets', []))
+            stats['tracks'] = len(board.get('tracks', []))
+            stats['vias'] = len(board.get('vias', []))
+        if has_sch and not board:
+            try:
+                sch = load_var_file(os.path.join(d, 'schematic.js'))
+                items = sch.get('items', [])
+                stats['sheets'] = sum(1 for i in items if i.get('t') == 'sheet')
+                stats['comps'] = sum(1 for i in items if i.get('t') == 'comp')
+            except Exception:
+                pass
+        elif has_sch:
+            try:
+                sch = load_var_file(os.path.join(d, 'schematic.js'))
+                stats['sheets'] = sum(1 for i in sch.get('items', []) if i.get('t') == 'sheet')
+            except Exception:
+                pass
+        pending = 0
+        ch_path = os.path.join(d, 'changes.js')
+        applied_at = _mtime(os.path.join(d, 'apply-report.txt'))
+        if os.path.isfile(ch_path) and _mtime(ch_path) > applied_at:
+            try:
+                pending = _count_ops(load_var_file(ch_path))
+            except Exception:
+                pending = 0
+        done = [has_sch or has_board, has_board, stats['tracks'] > 0, applied_at > 0 and applied_at >= _mtime(ch_path)]
+        stages = [1 if v else 0 for v in done]
+        for i, v in enumerate(stages):
+            if not v:
+                stages[i] = 2
+                break
+        projects.append({
+            'id': _proj_id(name), 'name': name, 'path': 'Projects\\' + name,
+            'demo': name.startswith('_'), 'noSchematic': not has_sch,
+            'stages': stages, 'pending': pending, 'stats': stats,
+        })
+    _PROJ_CACHE.clear()
+    for p in projects:
+        _PROJ_CACHE[p['id']] = p['name']
+    return {'generatedAt': time.strftime('%Y-%m-%dT%H:%M:%S'), 'projects': projects}
+
+
+def _fmt_when(ts):
+    return time.strftime('%Y-%m-%d %H:%M', time.localtime(ts)) if ts else ''
+
+
+def build_detail(root, proj_id):
+    if proj_id not in _PROJ_CACHE:
+        build_index(root)
+    name = _PROJ_CACHE.get(proj_id)
+    if not name:
+        return None
+    d = os.path.join(root, 'Projects', name)
+    board = sch = None
+    try:
+        board = load_var_file(os.path.join(d, 'board.js'))
+    except Exception:
+        pass
+    try:
+        sch = load_var_file(os.path.join(d, 'schematic.js'))
+    except Exception:
+        pass
+    try:
+        fplib = load_var_file(os.path.join(root, 'Libs', 'pcblib.js'))
+        fp_by_name = {f.get('name'): f for f in fplib.get('footprints', [])}
+    except Exception:
+        fp_by_name = {}
+
+    components = []
+    if board:
+        for c in board.get('components', []):
+            nets = sorted({p.get('net') for p in c.get('pads', []) if p.get('net')})
+            components.append({
+                'des': c.get('ref', ''), 'value': c.get('comment', ''),
+                'footprint': c.get('footprint', ''), 'lib': '',
+                'pins': len(c.get('pads', [])), 'layer': c.get('layer', ''),
+                'pos': '%.2f, %.2f mm' % (c.get('x', 0), c.get('y', 0)),
+                'rot': '%g°' % c.get('rot', 0), 'nets': nets,
+            })
+    elif sch:
+        for it in sch.get('items', []):
+            if it.get('t') != 'comp':
+                continue
+            fp = fp_by_name.get(it.get('footprint', ''), {})
+            components.append({
+                'des': it.get('ref', ''), 'value': it.get('comment', ''),
+                'footprint': it.get('footprint', ''), 'lib': '',
+                'pins': len(fp.get('pads', [])), 'layer': '',
+                'pos': '%g, %g mil' % (it.get('x', 0), it.get('y', 0)),
+                'rot': '%g°' % it.get('rot', 0), 'nets': [],
+            })
+
+    nets = []
+    if board:
+        pads_by_net, tracks_by_net, widths = {}, {}, {}
+        for c in board.get('components', []):
+            for p in c.get('pads', []):
+                if p.get('net'):
+                    pads_by_net[p['net']] = pads_by_net.get(p['net'], 0) + 1
+        for t in board.get('tracks', []):
+            if t.get('net'):
+                tracks_by_net[t['net']] = tracks_by_net.get(t['net'], 0) + 1
+                widths.setdefault(t['net'], t.get('w', 0))
+        for n in board.get('nets', []):
+            nets.append({'name': n, 'cls': '—', 'nodes': pads_by_net.get(n, 0),
+                         'tracks': tracks_by_net.get(n, 0),
+                         'width': ('%g mm' % widths[n]) if n in widths else '—'})
+
+    fp_usage = {}
+    for c in components:
+        if c['footprint']:
+            fp_usage[c['footprint']] = fp_usage.get(c['footprint'], 0) + 1
+    footprints = []
+    for fname, count in sorted(fp_usage.items()):
+        f = fp_by_name.get(fname, {})
+        footprints.append({'name': fname, 'lib': 'pcblib',
+                           'desc': f.get('desc', f.get('description', '')) or '—',
+                           'usage': '%d componente%s' % (count, 's' if count != 1 else ''),
+                           'pads': '%d pads' % len(f.get('pads', []))})
+
+    history = []
+    hist_path = os.path.join(d, 'history.jsonl')
+    if os.path.isfile(hist_path):
+        with open(hist_path, encoding='utf-8', errors='replace') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        history.append(json.loads(line))
+                    except Exception:
+                        pass
+    for fname, title in [('apply-report.txt', 'ApplyChanges executado'),
+                         ('build-report.txt', 'BuildSchematic executado')]:
+        ts = _mtime(os.path.join(d, fname))
+        if ts:
+            history.append({'when': _fmt_when(ts), 'kind': 'ok', 'title': title,
+                            'detail': 'Projects\\' + name + '\\' + fname, 'ts': ts})
+    if board and board.get('generated'):
+        history.append({'when': str(board['generated']), 'kind': 'ok',
+                        'title': 'ExportBoard concluído', 'detail': 'board.js atualizado', 'ts': _mtime(os.path.join(d, 'board.js'))})
+    if sch and sch.get('generated'):
+        history.append({'when': str(sch['generated']), 'kind': 'ok',
+                        'title': 'schematic.js atualizado', 'detail': 'Projects\\' + name + '\\schematic.js', 'ts': _mtime(os.path.join(d, 'schematic.js'))})
+    history.sort(key=lambda h: h.get('ts', 0), reverse=True)
+    for h in history:
+        h.pop('ts', None)
+
+    return {'name': name, 'components': components, 'nets': nets, 'footprints': footprints,
+            'history': history, 'schematic': sch or {}, 'board': board or {}}
+
+
+RUN_ACTIONS = ('ExportLibs', 'BuildSchematic', 'ExportBoard', 'ApplyChanges', 'DRC', 'Rescan')
+ALTIUM_HINT = {
+    'ExportLibs': 'No Altium: DXP » Run Script » ExportLibs',
+    'BuildSchematic': 'No Altium: DXP » Run Script » ApplyProject (cria os .SchDoc)',
+    'ExportBoard': 'No Altium: DXP » Run Script » ExportPcb',
+    'ApplyChanges': 'No Altium: DXP » Run Script » ApplyProject',
+    'DRC': 'No Altium: Tools » Design Rule Check',
+}
+_runs = {}
+
+
+@app.route('/api/index.json')
+def api_index():
+    return build_index(ROOT)
+
+
+@app.route('/api/project/<proj_id>.json')
+def api_project(proj_id):
+    det = build_detail(ROOT, proj_id)
+    if det is None:
+        return {'error': 'projeto desconhecido'}, 404
+    return det
+
+
+@app.route('/api/run', methods=['POST'])
+def api_run():
+    data = request.get_json(silent=True) or {}
+    action = data.get('action')
+    if action not in RUN_ACTIONS:
+        return {'ok': False, 'error': 'acao desconhecida'}, 400
+    if action != 'Rescan':
+        return {'ok': False, 'error': 'esta acao roda dentro do Altium', 'hint': ALTIUM_HINT[action]}, 400
+    run_id = 'r_%04x' % (int(time.time() * 1000) & 0xffff)
+    _runs[run_id] = data.get('project') or ''
+    return {'runId': run_id}, 202
+
+
+@app.route('/api/run/<run_id>/stream')
+def api_run_stream(run_id):
+    if run_id not in _runs:
+        abort(404)
+
+    def stream():
+        yield 'data: reindexando Projects...\n\n'
+        try:
+            idx = build_index(ROOT)
+            yield 'data: %d projetos indexados\n\n' % len(idx['projects'])
+            yield 'event: done\ndata: {"ok":true}\n\n'
+        except Exception as e:
+            yield 'event: error\ndata: %s\n\n' % json.dumps(str(e))
+        _runs.pop(run_id, None)
+
+    return Response(stream(), mimetype='text/event-stream')
 
 
 def _lan_ip():
