@@ -6,6 +6,7 @@
 <title>AltiumPCBMirror — Hub</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<script src="hub-core.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    1. TOKENS — única fonte de verdade de cor, espaço, raio e sombra.
@@ -363,6 +364,48 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
     </div>
 
     <div class="pane" data-pane="fp"><div class="scroll" style="height:100%"><div class="cards" id="fpCards"></div></div></div>
+
+    <div class="pane" data-pane="neoden">
+      <div class="comp-grid">
+        <div class="comp-left">
+          <div class="comp-bar" style="flex-wrap:wrap; gap:8px 10px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">referência
+              <select id="ndRef" class="input" style="width:130px;min-height:30px"></select></label>
+            <button class="btn btn-secondary btn-sm" id="ndSee">Ver no PCB</button>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">máquina X
+              <input id="ndOffX" class="input mono" type="number" step="any" value="0" style="width:90px;min-height:30px"></label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">Y
+              <input id="ndOffY" class="input mono" type="number" step="any" value="0" style="width:90px;min-height:30px"></label>
+            <span class="count" id="ndCount"></span>
+            <button class="btn btn-primary btn-sm" style="margin-left:auto" id="ndTop">Baixar TopLayer</button>
+            <button class="btn btn-secondary btn-sm" id="ndBottom">Baixar BottomLayer</button>
+          </div>
+          <div class="comp-bar" style="padding-top:0">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">rotação
+              <input id="ndRotAng" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px" title="ângulo CCW (graus)"></label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">em torno de
+              <input id="ndRotOx" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px">
+              <input id="ndRotOy" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px"></label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">mover dx/dy após N
+              <input id="ndMvDx" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px">
+              <input id="ndMvDy" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px">
+              <input id="ndMvN" class="input mono" type="number" step="1" value="0" style="width:56px;min-height:30px" title="índices > N movem (0 = todos menos a referência), igual ao -m do script"></label>
+          </div>
+          <div class="scroll" style="padding:0 6px 18px 18px">
+            <table>
+              <thead><tr>
+                <th style="width:78px">Desig.</th><th>Footprint</th><th class="r" style="width:96px">Mid X</th>
+                <th class="r" style="width:96px">Mid Y</th><th style="width:56px">Lado</th>
+                <th class="r" style="width:56px">Rot</th><th style="width:120px">Comment</th>
+              </tr></thead>
+              <tbody id="ndRows"></tbody>
+            </table>
+          </div>
+        </div>
+        <aside id="ndAside"></aside>
+      </div>
+    </div>
+
     <div class="pane" data-pane="hist"><div class="scroll" style="height:100%"><div class="hist" id="histRows"></div></div></div>
   </main>
 
@@ -459,6 +502,7 @@ const TABS = [
   { id:'comp', label:'Componentes', count:d=>d.components.length },
   { id:'nets', label:'Nets', count:d=>d.nets.length },
   { id:'fp', label:'Footprints', count:d=>d.footprints.length },
+  { id:'neoden', label:'Neoden' },
   { id:'hist', label:'Histórico' },
 ];
 const FLOW = [
@@ -488,10 +532,12 @@ const S = {
   projId: null, tab: 'esquema', selDes: null,
   q: '', compQ: '', pickerOpen: false, pickerIdx: 0,
   demoMode: false, serverOk: false,
+  neoden: { refDes: null },
 };
 
 const $ = s => document.querySelector(s);
 const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
+const sanitizeName = s => String(s).replace(/[\\/:*?"<>|]/g, '_');
 const proj = () => S.projects.find(p => p.id === S.projId) || S.projects[0] || null;
 const filteredProjects = () => { const q = S.q.trim().toLowerCase(); return S.projects.filter(x => !q || x.name.toLowerCase().includes(q)); };
 const stepOf = p => p.stages[0] === 1 ? STEP[p.stages.filter(v => v === 1).length] : STEP.none;
@@ -664,6 +710,75 @@ function renderComponents() {
   a.append(acts);
 }
 
+function neodenOpts() {
+  return {
+    refDes: S.neoden.refDes,
+    off: { x: +$('#ndOffX').value || 0, y: +$('#ndOffY').value || 0 },
+    rot: (+$('#ndRotAng').value ? { ox: +$('#ndRotOx').value || 0, oy: +$('#ndRotOy').value || 0, angle: +$('#ndRotAng').value } : null),
+    move: ((+$('#ndMvDx').value || +$('#ndMvDy').value) ? { dx: +$('#ndMvDx').value || 0, dy: +$('#ndMvDy').value || 0, n: +$('#ndMvN').value || 0 } : null),
+  };
+}
+
+function renderNeoden() {
+  const comps = (S.detail.board && S.detail.board.components) || [];
+  const pane = document.querySelector('.pane[data-pane="neoden"]');
+  const grid = pane.querySelector('.comp-grid');
+  let empty = pane.querySelector('.empty');
+  if (!comps.length) {
+    grid.style.display = 'none';
+    if (!empty) {
+      empty = el('div', 'empty'); const inner = el('div');
+      inner.append(el('span', 'tag', 'sem board.js'));
+      inner.append(el('p', null, 'Rode ExportPcb no Altium para gerar as coordenadas.'));
+      empty.append(inner); pane.append(empty);
+    }
+    empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  grid.style.display = '';
+
+  const refs = comps.map(c => c.ref);
+  if (!refs.includes(S.neoden.refDes)) S.neoden.refDes = refs[0];
+  const selEl = $('#ndRef'); selEl.textContent = '';
+  refs.forEach(r => { const o = document.createElement('option'); o.value = r; o.textContent = r; selEl.append(o); });
+  selEl.value = S.neoden.refDes;
+
+  const opts = neodenOpts();
+  const res = HubCore.neodenTransform(comps, opts);
+  const tb = $('#ndRows'); tb.textContent = '';
+  if (res.error) {
+    $('#ndCount').textContent = res.error;
+  } else {
+    res.rows.forEach(r => {
+      const tr = el('tr');
+      tr.append(el('td', 'mono', r.des));
+      const fp = el('td', null, r.footprint); fp.style.color = 'var(--text-2)'; tr.append(fp);
+      tr.append(el('td', 'r num', r.x.toFixed(2)));
+      tr.append(el('td', 'r num', r.y.toFixed(2)));
+      tr.append(el('td', null, r.layer));
+      tr.append(el('td', 'r num', String(r.rot)));
+      tr.append(el('td', null, r.comment));
+      tb.append(tr);
+    });
+    $('#ndCount').textContent = res.rows.length + ' componentes · referência ' + S.neoden.refDes + ' = (' + opts.off.x + ', ' + opts.off.y + ')';
+  }
+
+  const aside = $('#ndAside'); aside.textContent = '';
+  aside.append(el('div', 'kicker', 'neoden'));
+  const kvs = el('div'); kvs.style.marginTop = '12px';
+  [
+    ['relativo', 'referência ' + (S.neoden.refDes || '—')],
+    ['rotação', opts.rot ? (opts.rot.angle + '° em torno de (' + opts.rot.ox + ', ' + opts.rot.oy + ')') : 'nenhuma'],
+    ['offset', '(' + opts.off.x + ', ' + opts.off.y + ') mm'],
+    ['mover', opts.move ? ('dx ' + opts.move.dx + ' / dy ' + opts.move.dy + ' após índice ' + opts.move.n) : 'nenhum'],
+  ].forEach(([k, v]) => { const row = el('div', 'kv'); row.append(el('span', 'k', k), el('span', 'v', v)); kvs.append(row); });
+  aside.append(kvs);
+  const note = el('p', null, 'Mid X/Y = centro do bbox de cobre; ponto 0 da placa visível na aba PCB (origem).');
+  note.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:14px';
+  aside.append(note);
+}
+
 function renderPanes() {
   const d = S.detail;
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.dataset.pane === S.tab));
@@ -696,6 +811,7 @@ function renderPanes() {
       c.append(m); g.append(c);
     });
   }
+  if (S.tab === 'neoden') return renderNeoden();
   if (S.tab === 'hist') {
     const h = $('#histRows'); h.textContent = '';
     d.history.forEach(x => {
@@ -748,6 +864,20 @@ function exportBom() {
   toast(rows.length + ' linha(s) exportadas para bom.csv', 'ok');
 }
 
+function neodenDownload(side) {
+  const comps = (S.detail.board && S.detail.board.components) || [];
+  if (!comps.length) return;
+  const res = HubCore.neodenTransform(comps, neodenOpts());
+  if (res.error) { toast(res.error, 'err'); return; }
+  const csv = HubCore.neodenCsv(res.rows, side);
+  const name = sanitizeName(proj().name) + '-NEODEN-' + side + 'Layer.csv';
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  URL.revokeObjectURL(a.href);
+  toast(name + ' baixado', 'ok');
+}
+
 function closeOverlay() { $('#overlay').textContent = ''; }
 function openActionsMenu() {
   const bd = el('div', 'backdrop anchor-tr'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
@@ -785,6 +915,7 @@ async function loadProject(id) {
   if (!det) { toast('detalhe do projeto indisponível — tente Reindexar', 'err'); return; }
   S.projId = id; S.detail = det;
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
+  S.neoden.refDes = null;
   syncURL();
   renderAll();
 }
@@ -847,10 +978,26 @@ $('#pickerSearch').addEventListener('keydown', e => {
   }
 });
 $('#compSearch').oninput = e => { S.compQ = e.target.value; renderComponents(); };
-$('#btnNext').onclick = () => { const s = stepOf(proj()); s.run ? runAction(s.label) : openFlowDialog(); };
+$('#btnNext').onclick = () => { const p = proj(); if (!p) return; const s = stepOf(p); s.run ? runAction(s.label) : openFlowDialog(); };
 $('#btnActions').onclick = openActionsMenu;
 $('#btnFlow').onclick = openFlowDialog;
 $('#btnBom').onclick = exportBom;
+['ndOffX','ndOffY','ndRotAng','ndRotOx','ndRotOy','ndMvDx','ndMvDy','ndMvN'].forEach(id => {
+  $('#' + id).addEventListener('input', renderNeoden);
+  $('#' + id).addEventListener('change', renderNeoden);
+});
+$('#ndRef').onchange = () => { S.neoden.refDes = $('#ndRef').value; renderNeoden(); };
+$('#ndSee').onclick = () => {
+  S.tab = 'pcb'; syncURL(); renderTabs(); renderPanes();
+  const pane = document.querySelector('.pane[data-pane="pcb"]');
+  const frame = pane && pane.querySelector('iframe');
+  if (!frame) return;
+  const sel = () => { try { frame.contentWindow.__hubSelectComp(S.neoden.refDes); } catch (e) {} };
+  try { frame.contentWindow.__hubSelectComp(S.neoden.refDes); }
+  catch (e) { frame.onload = sel; }
+};
+$('#ndTop').onclick = () => neodenDownload('Top');
+$('#ndBottom').onclick = () => neodenDownload('Bottom');
 document.querySelectorAll('[data-run]').forEach(b => b.onclick = () => runAction(b.dataset.run));
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { S.pickerOpen = false; closeOverlay(); renderHeader(); }
