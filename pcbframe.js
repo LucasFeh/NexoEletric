@@ -83,6 +83,7 @@ window.__hubOnChange = function(){
   document.getElementById('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
 };
 window.__hubDirty = function(){ return annDirty || chDirty; };
+window.__hubSelectComp = function(ref){ const m = model.compByRef[ref]; if (m){ selected = m; showInfo(m); syncTableSel(); zoomToObj(m); } };
 window.addEventListener('beforeunload', e => { if (annDirty || chDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 const MM2MIL = 1/0.0254;

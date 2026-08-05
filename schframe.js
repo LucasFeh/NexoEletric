@@ -706,6 +706,7 @@ window.__hubOnChange = function(){
   document.getElementById('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
 };
 window.__hubDirty = function(){ return annDirty || schDirty; };
+window.__hubSelectComp = function(ref){ setComp(ref); const s = model.sheets[sheetIdx]; const c = s && s.comps.find(c => c.ref === ref); if (c) cam.fit({ x1:c.x-800, y1:c.y-800, x2:c.x+800, y2:c.y+800 }); };
 window.addEventListener('beforeunload', e => { if (annDirty || schDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- paineis ---------- */
