@@ -182,6 +182,7 @@ async function saveChanges(){
     const r = await HubIO.saveFile(CH_REL, text);
     setChDirty(false);
     chDiskSnapshot = text;
+    staleWorkspace = false;
     msg.textContent = r.mode === 'server' ? '✓ changes.js salvo' : '↓ arquivo baixado — substitua ' + CH_REL;
   } catch (err) {
     if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
@@ -831,6 +832,9 @@ function propValues(){
   return out;
 }
 document.getElementById('propok').addEventListener('click', () => {
+  const badField = Array.from(document.querySelectorAll('#proprows input[type=number]'))
+    .find(el => el.value.trim() === '' || !isFinite(+el.value));
+  if (badField){ alert('Valor numérico inválido no campo "' + badField.dataset.k + '"'); return; }
   const m = propTarget, v = propValues();
   document.getElementById('propform').style.display = 'none';
   if (!m) return;

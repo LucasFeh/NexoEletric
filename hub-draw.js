@@ -163,14 +163,22 @@ function mkCamera(canvas, drawWorld, opts){
     draw();
   }
   function toWorld(sx, sy){ return { x:(sx-W/2)/cam.scale + cam.cx, y:(H/2-sy)/cam.scale + cam.cy }; }
-  let dragging = false, lx = 0, ly = 0, moved = false;
-  canvas.addEventListener('mousedown', e => { dragging = true; moved = false; lx = e.offsetX; ly = e.offsetY; });
-  window.addEventListener('mouseup', () => { dragging = false; });
+  let dragging = false, lx = 0, ly = 0, moved = false, claimed = false;
+  canvas.addEventListener('mousedown', e => {
+    dragging = true; moved = false; lx = e.offsetX; ly = e.offsetY;
+    claimed = !!(opts && opts.onDragStart && opts.onDragStart(toWorld(e.offsetX, e.offsetY), e));
+  });
+  window.addEventListener('mouseup', () => {
+    if (dragging && claimed && opts && opts.onDragEnd) opts.onDragEnd(moved);
+    dragging = false; claimed = false;
+  });
   canvas.addEventListener('mousemove', e => {
     if (opts && opts.onMove) opts.onMove(toWorld(e.offsetX, e.offsetY), e);
     if (!dragging) return;
+    moved = true;
+    if (claimed){ if (opts && opts.onDrag) opts.onDrag(toWorld(e.offsetX, e.offsetY), e); return; }
     cam.cx -= (e.offsetX-lx)/cam.scale; cam.cy += (e.offsetY-ly)/cam.scale;
-    lx = e.offsetX; ly = e.offsetY; moved = true; draw();
+    lx = e.offsetX; ly = e.offsetY; draw();
   });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
