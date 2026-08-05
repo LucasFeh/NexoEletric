@@ -19,6 +19,7 @@ let annTool = false, annDirty = false, annPending = null, staleWorkspace = false
 
 /* ------- infra de edicao ------- */
 let selItem = null;                     /* { kind:'comp|wire|netlabel|power|junction|text', item } */
+let dragState = null;                   /* { kind, item, start:{x,y}, base } — arrasto em curso */
 let schDirty = false, schDiskSnapshot = null;
 let schTool = 'select';
 const undoStack = [JSON.stringify(schematic.items)], redoStack = [];
@@ -179,6 +180,20 @@ function drawWorld(ctx, cam){
     ctx.beginPath(); ctx.arc(a.x, a.y, 3 / cam.scale, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
+
+  if (selItem && selItem.kind !== 'comp'){
+    const it = selItem.item;
+    ctx.save();
+    ctx.strokeStyle = D.SCH.hl; ctx.setLineDash([20, 14]); ctx.lineWidth = 16 / cam.scale;
+    if (selItem.kind === 'wire'){
+      ctx.beginPath();
+      (it.pts || []).forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(it.x - 80, it.y - 80, 160, 160);
+    }
+    ctx.restore();
+  }
 }
 const cam = D.mkCamera(document.getElementById('cv'), drawWorld, {
   bg:'#3a3a34',
@@ -197,6 +212,35 @@ const cam = D.mkCamera(document.getElementById('cv'), drawWorld, {
     if (h.kind === 'pin')  { setComp(h.ref); setNet(nets.pinNet[h.ref + '-' + h.num] || ''); }
     if (h.kind === 'wire') setNet(nets.wireNet[sheetIdx][h.wi] || '');
     if (h.kind === 'comp') { setComp(h.ref); setNet(''); }
+    selItem = h && h.kind !== 'pin' ? { kind:h.kind, item:h.item } : (h && h.kind === 'pin' ? { kind:'comp', item:h.item } : null);
+    cam.draw();
+  },
+  onDragStart: w => {
+    if (annTool || schTool !== 'select') return false;
+    const h = hitTest(w.x, w.y);
+    if (!h || h.kind === 'pin') return false;
+    const it = h.item;
+    dragState = { kind:h.kind, item:it, start:w,
+                  base: h.kind === 'wire' ? it.pts.map(p => [p[0], p[1]]) : { x:it.x, y:it.y } };
+    selItem = { kind:h.kind, item:it };
+    if (h.kind === 'comp'){ selComp = it.ref; buildCompTable(); }
+    return true;
+  },
+  onDrag: w => {
+    if (!dragState) return;
+    const d = dragState, dx = w.x - d.start.x, dy = w.y - d.start.y;
+    if (d.kind === 'wire'){
+      const sx = snap100(d.base[0][0] + dx) - d.base[0][0], sy = snap100(d.base[0][1] + dy) - d.base[0][1];
+      d.item.pts = d.base.map(p => [p[0] + sx, p[1] + sy]);
+    } else {
+      d.item.x = snap100(d.base.x + dx);
+      d.item.y = snap100(d.base.y + dy);
+    }
+    cam.draw();
+  },
+  onDragEnd: moved => {
+    const d = dragState; dragState = null;
+    if (d && moved) commit();
   }
 });
 
@@ -206,20 +250,31 @@ function hitTest(x, y){
   for (const c of s.comps) {
     const pins = HubCore.compPinsWorld(c, SLIB) || [];
     for (const p of pins)
-      if (Math.hypot(x - p.x, y - p.y) <= Math.max(tol, 30)) return { kind:'pin', ref:c.ref, num:p.num };
+      if (Math.hypot(x - p.x, y - p.y) <= Math.max(tol, 30)) return { kind:'pin', ref:c.ref, num:p.num, item:c };
   }
+  for (const j of s.junctions)
+    if (Math.hypot(x - j.x, y - j.y) <= Math.max(tol, 35)) return { kind:'junction', item:j };
+  for (const l of s.netlabels)
+    if (x >= l.x - 20 && x <= l.x + Math.max((l.net || '').length * 40, 120) && y >= l.y - 20 && y <= l.y + 80)
+      return { kind:'netlabel', item:l };
+  for (const p of s.powers)
+    if (Math.hypot(x - p.x, y - p.y) <= Math.max(tol, 140)) return { kind:'power', item:p };
+  for (const t of s.texts)
+    if (x >= t.x - 20 && x <= t.x + Math.max((t.s || '').length * (t.h || 10) * 4, 120) &&
+        y >= t.y - (t.h || 10) * 4 && y <= t.y + (t.h || 10) * 4)
+      return { kind:'text', item:t };
   for (let wi = 0; wi < s.wires.length; wi++) {
     const pts = s.wires[wi].pts || [];
     for (let i = 0; i < pts.length - 1; i++)
       if (HubCore.distSeg(x, y, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1]) <= Math.max(tol, 20))
-        return { kind:'wire', wi };
+        return { kind:'wire', wi, item:s.wires[wi] };
   }
   for (const c of s.comps) {
     const sym = HubCore.symbolOf(SLIB, c.sym);
     const part = HubCore.partOf(sym, c.part);
     const bb = part ? D.symBBox(part) : { x1:-100, y1:-100, x2:100, y2:100 };
     const r = Math.max(bb.x2 - bb.x1, bb.y2 - bb.y1) / 2 + 50;
-    if (Math.hypot(x - c.x, y - c.y) <= r) return { kind:'comp', ref:c.ref };
+    if (Math.hypot(x - c.x, y - c.y) <= r) return { kind:'comp', ref:c.ref, item:c };
   }
   return null;
 }
@@ -304,11 +359,36 @@ async function saveAnnotations(){
 document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
 document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
 window.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { setAnnTool(false); return; }
+  if (e.key === 'Escape') {
+    if (dragState){
+      const d = dragState; dragState = null;
+      if (d.kind === 'wire') d.item.pts = d.base.map(p => [p[0], p[1]]);
+      else { d.item.x = d.base.x; d.item.y = d.base.y; }
+      cam.draw(); return;
+    }
+    selItem = null; setSchTool('select');
+    setAnnTool(false); return;
+  }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
   const k = e.key.toLowerCase();
   if (e.ctrlKey && k === 'z'){ e.preventDefault(); undo(); return; }
   if (e.ctrlKey && k === 'y'){ e.preventDefault(); redo(); return; }
+  if (e.key === 'Delete' && selItem){
+    const i = schematic.items.indexOf(selItem.item);
+    if (i >= 0){ schematic.items.splice(i, 1); selItem = null; selComp = null; commit(); }
+    return;
+  }
+  if (e.key === ' ' && selItem && selItem.kind === 'comp'){
+    e.preventDefault();
+    selItem.item.rot = (((selItem.item.rot || 0) + 90) % 360);
+    if (dragState) cam.draw(); else commit();
+    return;
+  }
+  if (k === 'x' && selItem && selItem.kind === 'comp'){
+    selItem.item.mirror = !selItem.item.mirror;
+    if (dragState) cam.draw(); else commit();
+    return;
+  }
   if (k === 'n') setAnnTool(!annTool);
 });
 window.__hubOnChange = function(){
