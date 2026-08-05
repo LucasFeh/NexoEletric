@@ -256,6 +256,81 @@ function setSchTool(t){
 }
 document.getElementById('cv').addEventListener('contextmenu', e => { e.preventDefault(); if (wireDraw) endWire(); });
 
+/* ------- propriedades (duplo clique) ------- */
+let propItem = null;
+function escAttr(v){ return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+function sRow(key, label, value, type){
+  return `<label><span>${label}</span><input data-k="${key}" type="${type || 'text'}" value="${escAttr(value)}"${type === 'number' ? ' step="any"' : ''}></label>`;
+}
+function sSelect(key, label, value, opts){
+  return `<label><span>${label}</span><select data-k="${key}">` +
+    opts.map(o => `<option${String(o) === String(value) ? ' selected' : ''}>${o}</option>`).join('') + '</select></label>';
+}
+function openSchProps(h){
+  propItem = h;
+  const it = h.item, rows = document.getElementById('schpropsrows');
+  const title = document.getElementById('schpropstitle');
+  if (h.kind === 'comp'){
+    title.textContent = 'Componente ' + it.ref;
+    const sym = HubCore.symbolOf(SLIB, it.sym);
+    const pc = sym ? (sym.partcount || (sym.parts || []).length || 1) : 1;
+    document.getElementById('fplist-dl').innerHTML =
+      (PLIB.footprints || []).map(f => '<option value="' + escAttr(f.name) + '">').join('');
+    rows.innerHTML = sRow('ref', 'ref', it.ref) + sRow('comment', 'comment', it.comment || '') +
+      `<label><span>footprint</span><input data-k="footprint" list="fplist-dl" value="${escAttr(it.footprint || '')}"></label>` +
+      (pc > 1 ? sSelect('part', 'parte', it.part || 1, Array.from({ length:pc }, (_, i) => i + 1)) : '') +
+      sRow('x', 'x (mil)', it.x, 'number') + sRow('y', 'y (mil)', it.y, 'number') +
+      sSelect('rot', 'rot', ((it.rot || 0) % 360 + 360) % 360, [0, 90, 180, 270]) +
+      sSelect('mirror', 'espelhado', it.mirror ? 'sim' : 'não', ['não', 'sim']);
+  } else if (h.kind === 'netlabel'){
+    title.textContent = 'Net label';
+    rows.innerHTML = sRow('net', 'net', it.net || '') + sSelect('rot', 'rot', it.rot || 0, [0, 90, 180, 270]);
+  } else if (h.kind === 'power'){
+    title.textContent = 'Power port';
+    rows.innerHTML = sRow('net', 'net', it.net || '') +
+      sSelect('style', 'estilo', it.style || 'Bar', ['Bar','Circle','Arrow','Wave','GndPower','GndSignal','GndEarth']) +
+      sSelect('rot', 'rot', it.rot || 0, [0, 90, 180, 270]);
+  } else if (h.kind === 'text'){
+    title.textContent = 'Texto';
+    rows.innerHTML = sRow('s', 'texto', it.s || '') + sRow('h', 'altura', it.h || 10, 'number');
+  } else return;
+  document.getElementById('schprops').style.display = 'block';
+}
+document.getElementById('schpropsok').addEventListener('click', () => {
+  const h = propItem; if (!h) return;
+  const it = h.item, v = {};
+  document.querySelectorAll('#schpropsrows [data-k]').forEach(el => { v[el.dataset.k] = el.value; });
+  document.getElementById('schprops').style.display = 'none';
+  const clean = s => String(s).trim().replace(/"/g, "'");
+  if (h.kind === 'comp'){
+    const nref = clean(v.ref);
+    if (!nref){ alert('ref não pode ficar vazio.'); propItem = null; return; }
+    it.ref = nref;
+    it.comment = clean(v.comment); if (!it.comment) delete it.comment;
+    it.footprint = clean(v.footprint);
+    if (v.part !== undefined){ const p = +v.part; if (p !== 1) it.part = p; else delete it.part; }
+    const nx = +v.x, ny = +v.y;
+    if (isFinite(nx)) it.x = snap100(nx);
+    if (isFinite(ny)) it.y = snap100(ny);
+    it.rot = +v.rot;
+    if (v.mirror === 'sim') it.mirror = true; else delete it.mirror;
+    selComp = it.ref;
+  } else if (h.kind === 'netlabel'){ it.net = clean(v.net); it.rot = +v.rot; }
+  else if (h.kind === 'power'){ it.net = clean(v.net); it.style = v.style; it.rot = +v.rot; }
+  else if (h.kind === 'text'){ it.s = clean(v.s); const nh = +v.h; if (isFinite(nh) && nh > 0) it.h = nh; }
+  propItem = null;
+  commit();
+});
+document.getElementById('schpropscancel').addEventListener('click', () => {
+  document.getElementById('schprops').style.display = 'none'; propItem = null;
+});
+document.getElementById('cv').addEventListener('dblclick', () => {
+  if (annTool || schTool !== 'select' || placing || wireDraw || !hoverW) return;
+  const h = hitTest(hoverW.x, hoverW.y);
+  if (h && h.kind !== 'pin' && h.kind !== 'wire' && h.kind !== 'junction') openSchProps(h);
+  else if (h && h.kind === 'pin') openSchProps({ kind:'comp', item:h.item });
+});
+
 const SCH_REL = 'Projects/' + SCH_P + '/schematic.js';
 (async () => { if (HubIO.canPost) try { schDiskSnapshot = await HubIO.fetchText(SCH_REL); } catch (e) {} })();
 
@@ -584,6 +659,7 @@ document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!an
 document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (document.getElementById('schprops').style.display === 'block'){ document.getElementById('schprops').style.display = 'none'; propItem = null; return; }
     if (wireDraw){ wireDraw = null; cam.draw(); return; }
     if (document.getElementById('pickform').style.display === 'block'){ closePicker(); return; }
     if (placing){ placing = null; document.getElementById('cv').style.cursor = 'crosshair'; cam.draw(); return; }
