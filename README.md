@@ -118,8 +118,11 @@ Casca única com:
   botão de próxima ação derivado dela (um clique, sem escolher nada).
 - **Abas**: Esquema, PCB (os mesmos `schframe.html`/`pcbframe.html` de sempre, com edição
   completa), Componentes (tabela filtrável + painel de detalhe + exportar BOM), Nets,
-  Footprints e Histórico (linha do tempo a partir de `build-report.txt`/`apply-report.txt`/
-  datas de `board.js`/`schematic.js`, mais um `history.jsonl` opcional por projeto).
+  Footprints, Neoden (CSV Neoden 4 direto do espelho — componente de referência + coordenadas
+  de máquina, rotação opcional, move-pós-N; prévia ao vivo, download `<nome>-NEODEN-<lado>.csv`,
+  Mid X/Y = centro do bbox de cobre) e Histórico (linha do tempo a partir de `build-report.txt`/
+  `apply-report.txt`/datas de `board.js`/`schematic.js`, mais um `history.jsonl` opcional por
+  projeto).
 - **Ações** — menu **⋮** com os 5 comandos do Altium documentados (comando real embaixo do
   rótulo, copiável). Só **Rescan** executa de fato (reindexa `Projects\` no servidor); os
   demais (`ExportLibs`, `BuildSchematic`, `ExportBoard`, `ApplyChanges`, `DRC`) continuam
