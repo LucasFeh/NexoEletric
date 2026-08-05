@@ -448,11 +448,11 @@ const STAGES = ['esquema','eco','roteada','aplicada'];
    pedido à IA — o botão abre a explicação em vez de executar um script.   */
 const STEP = {
   none:  { label: 'Pedir schematic.js',     flow: 1, run: false },
-  0:     { label: 'BuildSchematic',         flow: 3, run: true  },
+  0:     { label: 'BuildSchematic',         flow: 3, run: false },
   1:     { label: 'Compile + Update PCB',   flow: 4, run: false },
-  2:     { label: 'ExportBoard',            flow: 5, run: true  },
-  3:     { label: 'ApplyChanges',           flow: 6, run: true  },
-  4:     { label: 'DRC',                    flow: 6, run: true  },
+  2:     { label: 'ExportBoard',            flow: 5, run: false },
+  3:     { label: 'ApplyChanges',           flow: 6, run: false },
+  4:     { label: 'DRC',                    flow: 6, run: false },
 };
 const TABS = [
   { id:'esquema', label:'Esquema' }, { id:'pcb', label:'PCB' },
@@ -471,13 +471,14 @@ const FLOW = [
   ['7','ApplyChanges','Aplique as mudanças e rode o DRC.'],
 ];
 const ACTIONS = [
-  ['ExportLibs','node scripts/export-libs.js'],
-  ['BuildSchematic','node scripts/build-schematic.js'],
-  ['ExportBoard','node scripts/export-board.js'],
-  ['ApplyChanges','node scripts/apply-changes.js'],
-  ['DRC','node scripts/drc.js'],
-  ['Rescan','node scripts/scan.js'],
+  ['ExportLibs',     'no Altium: DXP » Run Script » ExportLibs'],
+  ['BuildSchematic', 'no Altium: DXP » Run Script » ApplyProject'],
+  ['ExportBoard',    'no Altium: DXP » Run Script » ExportPcb'],
+  ['ApplyChanges',   'no Altium: DXP » Run Script » ApplyProject'],
+  ['DRC',            'no Altium: Tools » Design Rule Check'],
+  ['Rescan',         'reindexa Projects\\ agora (servidor)'],
 ];
+const RUNNABLE = new Set(['Rescan']);
 
 /* ═══ ESTADO ═══════════════════════════════════════════════════
    Nada de estado duplicado: pipeline, próxima ação, contadores e
@@ -710,9 +711,12 @@ function toast(msg, kind) {
 }
 
 async function runAction(action) {
+  if (!RUNNABLE.has(action)) { openFlowDialog(); return; }
+  if (S.demoMode) { toast('sem servidor — rode python hubserver.py', 'err'); return; }
   toast(action + ' em execução…', 'warn');
-  try { await API.run(S.projId, action, () => {}); toast(action + ' concluído', 'ok'); await loadProject(S.projId); }
-  catch (e) { toast(action + ' falhou: ' + e.message, 'err'); }
+  const lines = [];
+  try { await API.run(S.projId, action, line => lines.push(line)); toast(action + ' concluído', 'ok'); await loadProject(S.projId); }
+  catch (e) { toast(action + ' falhou: ' + e.message, 'err'); alert(lines.join('\n') || e.message); }
 }
 
 function closeOverlay() { $('#overlay').textContent = ''; }
