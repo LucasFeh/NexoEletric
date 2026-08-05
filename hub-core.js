@@ -633,7 +633,7 @@ function neodenCsv(rows, side){
     L.push([clean(r.des), clean(r.footprint), r.x.toFixed(2) + 'mm', r.y.toFixed(2) + 'mm',
             'T', clean(r.rot), clean(r.comment)].join(','));
   }
-  return L.join('\n') + '\n';
+  return L.join('\r\n') + '\r\n';
 }
 
 /* ============ status do projeto na esteira ============ */

@@ -119,7 +119,8 @@ Casca única com:
 - **Abas**: Esquema, PCB (os mesmos `schframe.html`/`pcbframe.html` de sempre, com edição
   completa), Componentes (tabela filtrável + painel de detalhe + exportar BOM), Nets,
   Footprints, Neoden (CSV Neoden 4 direto do espelho — componente de referência + coordenadas
-  de máquina, rotação opcional, move-pós-N; prévia ao vivo, download `<nome>-NEODEN-<lado>.csv`,
+  de máquina, rotação opcional, move-pós-N; prévia ao vivo, download `<nome>-NEODEN-TopLayer.csv` /
+  `-BottomLayer.csv`,
   Mid X/Y = centro do bbox de cobre) e Histórico (linha do tempo a partir de `build-report.txt`/
   `apply-report.txt`/datas de `board.js`/`schematic.js`, mais um `history.jsonl` opcional por
   projeto).

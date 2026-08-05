@@ -32,11 +32,11 @@ C4,CAP_0805,88.13mm,61.39mm,T,0,1uF-16V
 
 ## Interface (aba Neoden no hub v2)
 
-- **Referência**: seletor com busca sobre os designators (default: primeiro componente do board). Botão `Ver no PCB` usa o hook `__hubSelectComp` existente (destaca na vista fiel, onde o ponto "0" já é desenhado).
+- **Referência**: seletor de designators (um `<select>` com type-ahead nativo) (default: primeiro componente do board). Botão `Ver no PCB` usa o hook `__hubSelectComp` existente (destaca na vista fiel, onde o ponto "0" já é desenhado).
 - **Coordenadas de máquina** da referência: campos X/Y (mm) — o offset (`-o`).
 - **Rotação** (opcional): ponto `ox,oy` (default 0,0) + ângulo.
-- **Move pós-N** (opcional): `dx`, `dy`, `n` (default n=1 = pula a referência).
-- **Lado**: Top / Bottom / Ambos (default Ambos, como o script sem `-s`).
+- **Move pós-N** (opcional): `dx`, `dy`, `n` (default 0 — índices > n movem; 0 = todos menos a referência, semântica idêntica ao `-m` do script).
+- **Lado**: a prévia mostra os dois lados (coluna Lado); o download é por lado, pelos dois botões (como o script sem `-s`).
 - **Prévia**: tabela com as linhas TRANSFORMADAS (Designator, Footprint, Mid X, Mid Y, Layer, Rotation, Comment), atualizada ao vivo — é a conferência numérica; a visual é a aba PCB.
 - Botões `Baixar TopLayer` / `Baixar BottomLayer` (ou um `Baixar` por lado conforme seleção).
 

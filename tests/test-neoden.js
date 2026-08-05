@@ -49,7 +49,8 @@ assert.strictEqual(t5.rows[0].x, 10);
 
 /* CSV: header + linha vazia + filtro por lado + formato NN.NNmm + Layer literal T + virgula vira _ */
 const csv = Core.neodenCsv(t2.rows, 'Top');
-const lines = csv.trim().split('\n');
+assert.ok(csv.indexOf('\r\n') >= 0, 'CSV usa CRLF');
+const lines = csv.trim().split(/\r?\n/);
 assert.strictEqual(lines[0], 'Designator,Footprint,Mid X,Mid Y,Layer,Rotation,Comment');
 assert.strictEqual(lines[1], ',,,,,,');
 assert.strictEqual(lines[2], 'U1,LQFP48,100.00mm,140.00mm,T,0,MCU');
