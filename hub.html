@@ -614,10 +614,15 @@ function canvasPane(kind) {
   return wrap;
 }
 
-function renderComponents() {
+function filteredComponents() {
   const d = S.detail, q = S.compQ.trim().toLowerCase();
-  const rows = d.components.filter(c => !q ||
+  return d.components.filter(c => !q ||
     (c.des + ' ' + c.value + ' ' + c.footprint + ' ' + c.nets.join(' ')).toLowerCase().includes(q));
+}
+
+function renderComponents() {
+  const d = S.detail;
+  const rows = filteredComponents();
   $('#compCount').textContent = rows.length + ' de ' + d.components.length;
 
   const tb = $('#compRows'); tb.textContent = '';
@@ -689,7 +694,7 @@ function renderPanes() {
     const h = $('#histRows'); h.textContent = '';
     d.history.forEach(x => {
       const r = el('div', 'hist-row');
-      const kind = x.kind === 'warn' ? 'warn' : x.kind === 'run' ? 'idle' : 'ok';
+      const kind = x.kind === 'warn' ? 'warn' : x.kind === 'err' ? 'err' : x.kind === 'run' ? 'idle' : 'ok';
       const txt = el('div');
       txt.append(el('div', 't', x.title), el('div', 'd mono', x.detail));
       r.append(el('div', 'when num', x.when), el('span', 'dot ' + kind), txt);
@@ -717,6 +722,17 @@ async function runAction(action) {
   const lines = [];
   try { await API.run(S.projId, action, line => lines.push(line)); toast(action + ' concluído', 'ok'); await loadProject(S.projId); }
   catch (e) { toast(action + ' falhou: ' + e.message, 'err'); alert(lines.join('\n') || e.message); }
+}
+
+function exportBom() {
+  const rows = filteredComponents();
+  const lines = ['Designator\tValor\tFootprint\tPins'];
+  rows.forEach(c => lines.push([c.des, c.value, c.footprint, c.pins].join('\t')));
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/tab-separated-values' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'bom.csv'; a.click();
+  URL.revokeObjectURL(a.href);
+  toast(rows.length + ' linha(s) exportadas para bom.csv', 'ok');
 }
 
 function closeOverlay() { $('#overlay').textContent = ''; }
@@ -796,7 +812,7 @@ $('#compSearch').oninput = e => { S.compQ = e.target.value; renderComponents(); 
 $('#btnNext').onclick = () => { const s = stepOf(proj()); s.run ? runAction(s.label) : openFlowDialog(); };
 $('#btnActions').onclick = openActionsMenu;
 $('#btnFlow').onclick = openFlowDialog;
-$('#btnBom').onclick = () => toast('BOM exportada para ' + proj().path + '\\bom.csv', 'ok');
+$('#btnBom').onclick = exportBom;
 document.querySelectorAll('[data-run]').forEach(b => b.onclick = () => runAction(b.dataset.run));
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { S.pickerOpen = false; closeOverlay(); renderHeader(); }
