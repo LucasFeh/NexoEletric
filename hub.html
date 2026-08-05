@@ -494,7 +494,7 @@ const $ = s => document.querySelector(s);
 const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
 const proj = () => S.projects.find(p => p.id === S.projId) || S.projects[0];
 const filteredProjects = () => { const q = S.q.trim().toLowerCase(); return S.projects.filter(x => !q || x.name.toLowerCase().includes(q)); };
-const stepOf = p => p.noSchematic ? STEP.none : STEP[p.stages.filter(v => v === 1).length];
+const stepOf = p => p.stages[0] === 1 ? STEP[p.stages.filter(v => v === 1).length] : STEP.none;
 const statusOf = p => p.noSchematic ? 'err' : (p.pending > 0 ? 'warn' : 'ok');
 
 /* ═══ RENDER ═══════════════════════════════════════════════════ */
