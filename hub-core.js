@@ -580,6 +580,62 @@ function serializeAnnotations(list){
   return { text: L.join('\n') + '\n', errors: [] };
 }
 
+/* ============ Neoden 4: pick-and-place (paridade com neodenAltium.py) ============ */
+
+function neodenMid(c){
+  const b = c.bbox;
+  if (b && isNum(b.x1) && isNum(b.y1) && isNum(b.x2) && isNum(b.y2))
+    return { x: (b.x1 + b.x2) / 2, y: (b.y1 + b.y2) / 2 };
+  return { x: c.x, y: c.y };
+}
+function neodenRotatePt(ox, oy, px, py, angle){
+  const a = angle * Math.PI / 180;
+  return { x: ox + Math.cos(a) * (px - ox) - Math.sin(a) * (py - oy),
+           y: oy + Math.sin(a) * (px - ox) + Math.cos(a) * (py - oy) };
+}
+function neodenTransform(components, opts){
+  const o = opts || {};
+  const comps = (components || []).slice();
+  let ordered = comps;
+  if (o.refDes){
+    const ref = comps.find(c => c.ref === o.refDes);
+    if (!ref) return { rows: null, error: `referência "${o.refDes}" não existe no board.js` };
+    ordered = [ref].concat(comps.filter(c => c !== ref));
+  }
+  const rows = ordered.map(c => {
+    const m = neodenMid(c);
+    return { des: c.ref, footprint: c.footprint || '', x: m.x, y: m.y,
+             layer: c.layer, rot: c.rot || 0, comment: c.comment || '' };
+  });
+  if (o.refDes){                                       /* -r: relativo à referência */
+    const rx = rows[0].x, ry = rows[0].y;
+    for (const r of rows){ r.x -= rx; r.y -= ry; }
+  }
+  if (o.rot && isNum(o.rot.angle) && o.rot.angle){     /* -a ox oy ang */
+    for (const r of rows){
+      const q = neodenRotatePt(o.rot.ox || 0, o.rot.oy || 0, r.x, r.y, o.rot.angle);
+      r.x = q.x; r.y = q.y;
+    }
+  }
+  if (o.off && (isNum(o.off.x) || isNum(o.off.y))){    /* -o x y */
+    for (const r of rows){ r.x += o.off.x || 0; r.y += o.off.y || 0; }
+  }
+  if (o.move && isNum(o.move.n) && (isNum(o.move.dx) || isNum(o.move.dy))){  /* -m dx dy n */
+    rows.forEach((r, i) => { if (i > o.move.n){ r.x += o.move.dx || 0; r.y += o.move.dy || 0; } });
+  }
+  return { rows, error: null };
+}
+function neodenCsv(rows, side){
+  const clean = v => String(v).replace(/,/g, '_');
+  const L = ['Designator,Footprint,Mid X,Mid Y,Layer,Rotation,Comment', ',,,,,,'];
+  for (const r of (rows || [])){
+    if (r.layer !== side) continue;
+    L.push([clean(r.des), clean(r.footprint), r.x.toFixed(2) + 'mm', r.y.toFixed(2) + 'mm',
+            'T', clean(r.rot), clean(r.comment)].join(','));
+  }
+  return L.join('\n') + '\n';
+}
+
 /* ============ status do projeto na esteira ============ */
 
 function deriveStatus(entry, loaded){
@@ -596,5 +652,6 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, ORIENT_DIR,
          buildSchModel, extractNets, validateSchematic,
          applyPcbChanges, deriveStatus,
          serializeChanges, serializeSchematic, serializeAnnotations,
-         compDelta, xfPoint, xfAngle, ownerDelta, effLayerForOwner };
+         compDelta, xfPoint, xfAngle, ownerDelta, effLayerForOwner,
+         neodenTransform, neodenCsv };
 });
