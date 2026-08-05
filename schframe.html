@@ -70,6 +70,11 @@
 <div id="schtoolbar">
   <button id="toolSelect" class="active" title="Selecionar/mover (Esc)">Selecionar</button>
   <button id="toolComp" title="Adicionar componente das libs (C)">+ Componente</button>
+  <button id="toolWire" title="Desenhar fio (W); botão direito/Esc encerra">Fio</button>
+  <button id="toolLabel" title="Net label">Label</button>
+  <button id="toolPower" title="Power port">Power</button>
+  <button id="toolJunction" title="Junção">Junção</button>
+  <button id="toolText" title="Texto">Texto</button>
   <span class="sep"></span>
   <button id="btnSchSave" title="Salvar schematic.js">Salvar esquema</button>
 </div>
@@ -111,6 +116,21 @@
       <div style="display:flex; gap:6px; justify-content:flex-end;">
         <button id="pickok">Posicionar</button>
         <button id="pickcancel">Cancelar</button>
+      </div>
+    </div>
+    <div id="schform" style="display:none; position:absolute; top:10px; right:10px; z-index:16;
+         background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:220px;">
+      <div id="schformtitle" style="color:var(--accent); font-size:12px; margin-bottom:6px;"></div>
+      <input id="schformtext" placeholder="" style="width:100%; background:var(--panel); color:var(--fg);
+             border:1px solid var(--border); border-radius:3px; padding:4px; margin-bottom:6px;">
+      <select id="schformstyle" style="display:none; width:100%; background:var(--panel); color:var(--fg);
+             border:1px solid var(--border); border-radius:3px; padding:3px; margin-bottom:6px;">
+        <option>Bar</option><option>Circle</option><option>Arrow</option><option>Wave</option>
+        <option>GndPower</option><option>GndSignal</option><option>GndEarth</option>
+      </select>
+      <div style="display:flex; gap:6px; justify-content:flex-end;">
+        <button id="schformok">Posicionar</button>
+        <button id="schformcancel">Cancelar</button>
       </div>
     </div>
   </div>

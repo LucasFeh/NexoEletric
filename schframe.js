@@ -59,11 +59,6 @@ function restoreItems(json){
 }
 function undo(){ if (undoStack.length < 2) return; redoStack.push(undoStack.pop()); restoreItems(undoStack[undoStack.length - 1]); }
 function redo(){ if (!redoStack.length) return; const s = redoStack.pop(); undoStack.push(s); restoreItems(s); }
-function setSchTool(t){
-  schTool = t;
-  document.getElementById('toolSelect').classList.toggle('active', t === 'select');
-  document.getElementById('cv').style.cursor = t === 'select' ? 'crosshair' : 'copy';
-}
 document.getElementById('toolSelect').addEventListener('click', () => setSchTool('select'));
 
 /* ------- adicionar componente (picker) ------- */
@@ -179,6 +174,87 @@ function placeComp(w){
   placing.ref = m ? m[1] + (+m[2] + 1) : placing.ref + '2';
   commit();
 }
+
+/* ------- fio / label / power / juncao / texto ------- */
+let wireDraw = null;          /* { pts:[[x,y],...] } */
+let placeKind = null;         /* 'netlabel'|'power'|'text' apos OK do schform */
+let placeData = null;
+
+function hotSnap(w){
+  const s = model.sheets[sheetIdx];
+  for (const c of s.comps){
+    const pins = HubCore.compPinsWorld(c, SLIB) || [];
+    for (const p of pins)
+      if (Math.hypot(w.x - p.x, w.y - p.y) <= 60) return { x:p.x, y:p.y, hot:true };
+  }
+  return null;
+}
+function wirePoint(w){
+  const hs = hotSnap(w);
+  if (hs) return [hs.x, hs.y];
+  const gx = snap100(w.x), gy = snap100(w.y);
+  if (!wireDraw || !wireDraw.pts.length) return [gx, gy];
+  const last = wireDraw.pts[wireDraw.pts.length - 1];
+  /* ortogonal: segue o eixo dominante a partir do ultimo ponto */
+  return (Math.abs(gx - last[0]) >= Math.abs(gy - last[1])) ? [gx, last[1]] : [last[0], gy];
+}
+function endWire(){
+  if (wireDraw && wireDraw.pts.length >= 2){
+    schematic.items.push({ t:'wire', sheet:model.sheets[sheetIdx].name, pts:wireDraw.pts });
+    wireDraw = null;
+    commit();
+  } else { wireDraw = null; cam.draw(); }
+}
+function openSchForm(kind){
+  placeKind = null; placeData = null;
+  const f = document.getElementById('schform');
+  document.getElementById('schformtitle').textContent =
+    kind === 'netlabel' ? 'Net label' : kind === 'power' ? 'Power port' : 'Texto';
+  document.getElementById('schformtext').placeholder = kind === 'text' ? 'texto' : 'nome da net (ex: GND)';
+  document.getElementById('schformtext').value = '';
+  document.getElementById('schformstyle').style.display = kind === 'power' ? 'block' : 'none';
+  f.style.display = 'block';
+  f.dataset.kind = kind;
+  document.getElementById('schformtext').focus();
+}
+document.getElementById('schformok').addEventListener('click', () => {
+  const f = document.getElementById('schform');
+  const v = document.getElementById('schformtext').value.trim().replace(/"/g, "'");
+  if (!v) return;
+  placeKind = f.dataset.kind;
+  placeData = { v, style:document.getElementById('schformstyle').value };
+  f.style.display = 'none';
+  document.getElementById('cv').style.cursor = 'copy';
+});
+document.getElementById('schformcancel').addEventListener('click', () => {
+  document.getElementById('schform').style.display = 'none'; setSchTool('select');
+});
+function placeAt(w){
+  const sheet = model.sheets[sheetIdx].name;
+  const x = snap100(w.x), y = snap100(w.y);
+  if (placeKind === 'netlabel') schematic.items.push({ t:'netlabel', sheet, net:placeData.v, x, y, rot:0 });
+  else if (placeKind === 'power') schematic.items.push({ t:'power', sheet, net:placeData.v, style:placeData.style, x, y, rot:0 });
+  else if (placeKind === 'text') schematic.items.push({ t:'text', sheet, s:placeData.v, x, y, h:10 });
+  commit();
+}
+for (const [id, kind] of [['toolWire','wire'], ['toolLabel','netlabel'], ['toolPower','power'],
+                          ['toolJunction','junction'], ['toolText','text']])
+  document.getElementById(id).addEventListener('click', () => {
+    setSchTool(kind);
+    if (kind === 'netlabel' || kind === 'power' || kind === 'text') openSchForm(kind);
+  });
+
+function setSchTool(t){
+  schTool = t;
+  wireDraw = null; placeKind = null; placeData = null;
+  document.getElementById('schform').style.display = 'none';
+  for (const [id, name] of [['toolSelect','select'], ['toolWire','wire'], ['toolLabel','netlabel'],
+                            ['toolPower','power'], ['toolJunction','junction'], ['toolText','text']])
+    document.getElementById(id).classList.toggle('active', schTool === name);
+  document.getElementById('cv').style.cursor = t === 'select' ? 'crosshair' : 'copy';
+  cam.draw();
+}
+document.getElementById('cv').addEventListener('contextmenu', e => { e.preventDefault(); if (wireDraw) endWire(); });
 
 const SCH_REL = 'Projects/' + SCH_P + '/schematic.js';
 (async () => { if (HubIO.canPost) try { schDiskSnapshot = await HubIO.fetchText(SCH_REL); } catch (e) {} })();
@@ -323,11 +399,25 @@ function drawWorld(ctx, cam){
       ctx.restore();
     }
   }
+
+  /* fio em desenho (rubber-band) */
+  if (wireDraw && wireDraw.pts.length && hoverW){
+    ctx.save();
+    ctx.strokeStyle = D.SCH.wire; ctx.globalAlpha = 0.7; ctx.setLineDash([30, 20]);
+    ctx.lineWidth = 8; ctx.lineCap = 'round';
+    ctx.beginPath();
+    wireDraw.pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    const np = wirePoint(hoverW);
+    ctx.lineTo(np[0], np[1]);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 const cam = D.mkCamera(document.getElementById('cv'), drawWorld, {
   bg:'#3a3a34',
   onMove: w => {
     hoverW = w; if (placing) cam.draw();
+    if (wireDraw) cam.draw();
     document.getElementById('sx').textContent = w.x.toFixed(0);
     document.getElementById('sy').textContent = w.y.toFixed(0);
     const h = hitTest(w.x, w.y);
@@ -338,6 +428,9 @@ const cam = D.mkCamera(document.getElementById('cv'), drawWorld, {
   onClick: w => {
     if (annTool){ openAnnForm(w); return; }
     if (placing){ placeComp(w); return; }
+    if (schTool === 'wire'){ if (!wireDraw) wireDraw = { pts:[] }; wireDraw.pts.push(wirePoint(w)); cam.draw(); return; }
+    if (schTool === 'junction'){ schematic.items.push({ t:'junction', sheet:model.sheets[sheetIdx].name, x:snap100(w.x), y:snap100(w.y) }); commit(); return; }
+    if ((schTool === 'netlabel' || schTool === 'power' || schTool === 'text') && placeKind){ placeAt(w); return; }
     const h = hitTest(w.x, w.y);
     if (!h) { setNet(''); setComp(null); return; }
     if (h.kind === 'pin')  { setComp(h.ref); setNet(nets.pinNet[h.ref + '-' + h.num] || ''); }
@@ -491,6 +584,7 @@ document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!an
 document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (wireDraw){ wireDraw = null; cam.draw(); return; }
     if (document.getElementById('pickform').style.display === 'block'){ closePicker(); return; }
     if (placing){ placing = null; document.getElementById('cv').style.cursor = 'crosshair'; cam.draw(); return; }
     if (dragState){
@@ -514,6 +608,7 @@ window.addEventListener('keydown', e => {
   if (e.key === ' ' && placing){ e.preventDefault(); placing.rot = (placing.rot + 90) % 360; cam.draw(); return; }
   if (k === 'x' && placing){ placing.mirror = !placing.mirror; cam.draw(); return; }
   if (k === 'c' && !placing){ openPicker(); return; }
+  if (k === 'w') setSchTool(schTool === 'wire' ? 'select' : 'wire');
   if (e.key === ' ' && selItem && selItem.kind === 'comp'){
     e.preventDefault();
     selItem.item.rot = (((selItem.item.rot || 0) + 90) % 360);
