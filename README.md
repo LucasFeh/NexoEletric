@@ -65,15 +65,16 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 ├── BuildSchematic.pas       (unidade auxiliar: schematic.js -> .SchDoc, chamada por ApplyProject)
 ├── ExportBoard.pas          [ExportPcb]    PCB aberta -> Projects\<nome>\
 ├── ApplyChanges.pas         [ApplyProject] menu de projetos -> esquema/PCB no projeto atual
-├── hub.html                 interface única (Projetos, Esquema, PCB, Libs)
-├── schframe.html            vista Esquema (carregada em iframe pelo hub)
-├── pcbframe.html            vista PCB (shell fino, em iframe pelo hub)
+├── hub.html                 hub v2 (Projetos, Esquema, PCB, Componentes, Nets, Footprints, Histórico) — servido por hubserver.py; sem servidor abre em modo demonstração
+├── hub-classic.html         hub clássico (Projetos, Esquema, PCB, Libs) — abre por duplo clique, 100% file://
+├── schframe.html            vista Esquema (em iframe por hub.html e hub-classic.html)
+├── pcbframe.html            vista PCB (shell fino, em iframe por hub.html e hub-classic.html)
 ├── pcbframe.js              lógica da vista PCB (renderer, painéis, PCB List, CSV)
 ├── hub-core.js              lógica pura (parsing, validação, nets, motor único de changes)
 ├── hub-draw.js              renderers canvas compartilhados (símbolo, footprint, PCB)
-├── projects.js              índice do histórico de projetos
+├── projects.js              índice do histórico de projetos (usado pelo hub-classic.html)
 ├── AI-GUIDE.md              contrato/manual para a sessão de IA
-├── hubserver.py             servidor local opcional (Flask; tempo real na rede)
+├── hubserver.py             servidor local opcional (Flask; API do hub v2 — índice/detalhe/Rescan — e recarregamento automático)
 ├── Libs\
 │   ├── schlib.js            espelho da biblioteca de esquema (símbolos)
 │   └── pcblib.js            espelho da biblioteca de footprints
@@ -100,38 +101,71 @@ Projetos com nome iniciando `_` (ex.: `_DemoKit`) são demos — o hub mostra o 
 | **ExportBoard** | Espelha a PCB aberta/focada para `Projects\<nome>\board.js` (+ `changes.js` vazio se ainda não existir — **nunca sobrescrito** em re-exports — + `pcb-list.csv`) e atualiza `projects.js`. | idem ExportProject |
 | **ApplyChanges** | Aplica `Projects\<nome>\changes.js` na PCB aberta/focada: trava por campos `orig_*` (tolerância 0,001 mm), tudo dentro de **uma única operação de undo**, agora com suporte a `outline_set`. Relatório em `Projects\<nome>\apply-report.txt`. | casa pelo nome; sem casamento, pergunta com lista numerada |
 
-## hub.html
+## hub.html (v2) e hub-classic.html
 
-Arquivo único autocontido na raiz do workspace — abre com **duplo clique, sem internet** —
-com 4 vistas:
+Duas interfaces sobre os mesmos dados, com o mesmo motor de renderização/edição
+(`hub-core.js`, `hub-draw.js` e as vistas Esquema/PCB em iframe). Use a que preferir —
+nenhuma altera os arquivos de forma diferente da outra.
+
+### hub.html — hub v2 (recomendado, servido por `hubserver.py`)
+
+Casca única com:
+
+- **Seletor de projeto** — combobox no header (`Ctrl/Cmd+K` abre de qualquer aba, busca
+  por nome, fecha ao clicar fora ou `Esc`); projeto e aba atuais sobrevivem ao reload
+  (hash da URL + `localStorage`).
+- **Barra do projeto** — esteira de pipeline **esquema → eco → roteada → aplicada** e um
+  botão de próxima ação derivado dela (um clique, sem escolher nada).
+- **Abas**: Esquema, PCB (os mesmos `schframe.html`/`pcbframe.html` de sempre, com edição
+  completa), Componentes (tabela filtrável + painel de detalhe + exportar BOM), Nets,
+  Footprints e Histórico (linha do tempo a partir de `build-report.txt`/`apply-report.txt`/
+  datas de `board.js`/`schematic.js`, mais um `history.jsonl` opcional por projeto).
+- **Ações** — menu **⋮** com os 5 comandos do Altium documentados (comando real embaixo do
+  rótulo, copiável). Só **Rescan** executa de fato (reindexa `Projects\` no servidor); os
+  demais (`ExportLibs`, `BuildSchematic`, `ExportBoard`, `ApplyChanges`, `DRC`) continuam
+  **passos manuais no Altium** — o hub só explica o passo, nunca finge executá-lo.
+- **Sem servidor**, `hub.html` abre em **modo demonstração** (projetos fictícios, selo
+  "demo" no seletor) — dados reais exigem `python hubserver.py` rodando (veja abaixo).
+
+### hub-classic.html — hub v1 (Projetos, Esquema, PCB, Libs)
+
+A interface anterior, preservada tal como era: **duplo clique, 100% `file://`**, sem
+precisar de servidor.
 
 - **Projetos** (inicial) — histórico lido de `projects.js`: um card por projeto, com esteira
   de status **esquema → eco → roteada → aplicada**, datas, contagens (componentes, nets,
   folhas) e atalhos para abrir nas vistas Esquema/PCB. Projetos `_*` levam o selo DEMO.
+- **Libs** — navegador das bibliotecas espelhadas (só no clássico; o hub v2 não tem esta
+  vista): busca por nome/descrição, símbolo desenhado lado a lado com o footprint
+  associado, aviso destacado nos símbolos sem footprint na lib.
+
+### Esquema e PCB — vistas compartilhadas pelos dois hubs
+
 - **Esquema** — renderiza `Projects\<nome>\schematic.js` com os gráficos reais de
   `Libs\schlib.js`: símbolos, fios, junctions, net labels, power ports, designator/comment.
   Zoom/pan, cursor em mil, clique numa net destaca ela na folha inteira (com os pinos
   membros). Painel lateral com a lista de componentes e a validação do esquema.
-  A vista Esquema agora **edita**: `+ Componente` abre o picker das libs (símbolo + footprint lado a lado, ref sugerido), `W` desenha fios com snap na ponta quente dos pinos, Label/Power/Junção/Texto por clique, arrastar move com grade de 100 mil, duplo clique abre propriedades, `Ctrl+Z` desfaz e **Salvar esquema** grava o `schematic.js`. Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com limpeza da folha** (confirmação SIM).
+  A vista Esquema **edita**: `+ Componente` abre o picker das libs (símbolo + footprint lado a lado, ref sugerido), `W` desenha fios com snap na ponta quente dos pinos, Label/Power/Junção/Texto por clique, arrastar move com grade de 100 mil, duplo clique abre propriedades, `Ctrl+Z` desfaz e **Salvar esquema** grava o `schematic.js`. Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com limpeza da folha** (confirmação SIM).
 - **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
   `changes.js`: render fiel, fantasma tracejado das posições originais, lista de mudanças
   com validação, tabela PCB List pós-mudança e exportação para CSV.
-  A vista PCB agora **edita**: arrastar move objetos, `T` desenha trilhas, duplo clique abre propriedades (inclusive designator/comment), `Ctrl+Z` desfaz e **Salvar changes** grava o `changes.js` — com aviso se a IA tiver gravado o arquivo em paralelo.
-- **Libs** — navegador das bibliotecas espelhadas: busca por nome/descrição, símbolo
-  desenhado lado a lado com o footprint associado, aviso destacado nos símbolos sem
-  footprint na lib.
+  A vista PCB **edita**: arrastar move objetos, `T` desenha trilhas, duplo clique abre propriedades (inclusive designator/comment), `Ctrl+Z` desfaz e **Salvar changes** grava o `changes.js` — com aviso se a IA tiver gravado o arquivo em paralelo.
 
 ## Servidor local com tempo real (opcional)
 
-O hub continua abrindo por **duplo clique**, sem servidor. Se quiser ver os exports em
-**tempo real** (inclusive de outra máquina da rede local), rode na raiz do workspace:
+`hub-classic.html` continua abrindo por **duplo clique**, sem servidor, como sempre.
+`hub.html` (v2) também abre por duplo clique, mas sem servidor fica em **modo
+demonstração** — para ver os projetos reais (e em **tempo real**, inclusive de outra
+máquina da rede local), rode na raiz do workspace:
 
     python hubserver.py
 
-- Abra `http://127.0.0.1:8000` — ou `http://<IP-desta-máquina>:8000` de outro PC da
-  rede (o servidor imprime as duas URLs ao subir; o Windows pode pedir liberação de
-  firewall na primeira vez).
-- Rodou um **Export** no Altium → a página aberta recarrega sozinha em ~1 s.
+- Abra `http://127.0.0.1:8000` (serve `hub.html`; `hub-classic.html` fica em
+  `http://127.0.0.1:8000/hub-classic.html`) — ou `http://<IP-desta-máquina>:8000` de
+  outro PC da rede (o servidor imprime as URLs ao subir; o Windows pode pedir liberação
+  de firewall na primeira vez).
+- Rodou um **Export** no Altium → a página aberta recarrega sozinha em ~1 s (ambos os
+  hubs).
 - `--port N` muda a porta. Requer Python 3 + Flask (`pip install flask`). O servidor
   não altera nenhum arquivo do hub.
 - Com o servidor rodando, o hub também **salva** arquivos direto no workspace

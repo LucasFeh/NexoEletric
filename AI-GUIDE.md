@@ -7,6 +7,11 @@ concentra as bibliotecas espelhadas (`Libs\`), o histórico de projetos
 `.PcbDoc`. Depois que você edita os arquivos aqui, um script dentro do Altium aplica suas
 mudanças no projeto real.
 
+O hub novo (combobox de projeto, pipeline, abas) é servido por `hubserver.py`
+(`python hubserver.py`); o hub clássico (Projetos/Esquema/PCB/Libs, duplo clique) continua
+em `hub-classic.html`. As referências a "`hub.html`, vista Esquema/PCB" neste documento
+continuam válidas nos dois — as vistas são os mesmos `schframe.html`/`pcbframe.html`.
+
 Duas frentes de trabalho, normalmente nesta ordem para um projeto novo:
 
 - **Parte A — Esquema** (`schematic.js`): montar um projeto do zero (ou entender um
