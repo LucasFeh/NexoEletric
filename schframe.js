@@ -245,6 +245,7 @@ for (const [id, kind] of [['toolWire','wire'], ['toolLabel','netlabel'], ['toolP
   });
 
 function setSchTool(t){
+  if (t !== 'select' && annTool) setAnnTool(false);
   schTool = t;
   wireDraw = null; placeKind = null; placeData = null;
   document.getElementById('schform').style.display = 'none';
@@ -586,6 +587,7 @@ function setAnnDirty(v){
   b.textContent = v ? 'Salvar sinaliz. *' : 'Salvar sinaliz.';
 }
 function setAnnTool(v){
+  if (v){ setSchTool('select'); placing = null; }
   annTool = v;
   document.getElementById('btnAnn').classList.toggle('active', v);
   document.getElementById('cv').style.cursor = v ? 'copy' : 'crosshair';
@@ -715,7 +717,11 @@ function buildCompTable(){
   for (const s of model.sheets) for (const c of s.comps) {
     const tr = document.createElement('tr');
     if (c.ref === selComp) tr.className = 'sel';
-    tr.innerHTML = `<td>${c.ref}</td><td>${c.sym}</td><td>${c.footprint || '—'}</td><td>${c.comment || ''}</td>`;
+    for (const v of [c.ref, c.sym, c.footprint || '—', c.comment || '']) {
+      const td = document.createElement('td');
+      td.textContent = v;
+      tr.appendChild(td);
+    }
     tr.addEventListener('click', () => {
       selComp = c.ref; buildCompTable();
       cam.fit({ x1:c.x-800, y1:c.y-800, x2:c.x+800, y2:c.y+800 });
