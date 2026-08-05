@@ -66,6 +66,120 @@ function setSchTool(t){
 }
 document.getElementById('toolSelect').addEventListener('click', () => setSchTool('select'));
 
+/* ------- adicionar componente (picker) ------- */
+let pickSym = null, placing = null, hoverW = null;
+
+function refPrefixOf(name){
+  const m = String(name || '').match(/^[A-Za-z]+/);
+  return m ? m[0].toUpperCase() : 'U';
+}
+function allComps(){ const out = []; for (const s of model.sheets) for (const c of s.comps) out.push(c); return out; }
+function nextRef(symName){
+  const comps = allComps();
+  const same = comps.filter(c => c.sym === symName);
+  let prefix = same.length ? refPrefixOf(same[0].ref) : refPrefixOf(symName).slice(0, 1);
+  let mx = 0;
+  for (const c of comps){
+    const m = String(c.ref).match(/^([A-Za-z]+)(\d+)$/);
+    if (m && m[1].toUpperCase() === prefix && +m[2] > mx) mx = +m[2];
+  }
+  return prefix + (mx + 1);
+}
+function buildPickList(){
+  const q = document.getElementById('picksearch').value.trim().toLowerCase();
+  const list = document.getElementById('picklist');
+  list.innerHTML = '';
+  const syms = (SLIB.symbols || []).filter(s =>
+    !q || s.name.toLowerCase().includes(q) || String(s.description || '').toLowerCase().includes(q)).slice(0, 60);
+  for (const s of syms){
+    const div = document.createElement('div');
+    div.className = 'pickitem' + (pickSym === s ? ' sel' : '');
+    div.textContent = s.name + (s.description ? ' — ' + s.description : '');
+    div.addEventListener('click', () => selectPickSym(s));
+    list.appendChild(div);
+  }
+  if (!syms.length) list.innerHTML = '<div style="color:var(--fg-dim); font-size:11px;">nada encontrado</div>';
+}
+function selectPickSym(s){
+  pickSym = s;
+  buildPickList();
+  const fps = document.getElementById('pickfp');
+  fps.innerHTML = '';
+  const names = new Set();
+  for (const f of (s.footprints || [])) if (f.name) names.add(f.name);
+  for (const f of (PLIB.footprints || [])) names.add(f.name);
+  const cur = (s.footprints || []).find(f => f.current);
+  for (const n of names){
+    const o = document.createElement('option');
+    o.textContent = n;
+    if (cur && n === cur.name) o.selected = true;
+    fps.appendChild(o);
+  }
+  const parts = document.getElementById('pickpart');
+  parts.innerHTML = '';
+  const pc = s.partcount || (s.parts || []).length || 1;
+  for (let i = 1; i <= pc; i++){ const o = document.createElement('option'); o.textContent = i; parts.appendChild(o); }
+  document.getElementById('pickref').value = nextRef(s.name);
+  drawPickPreview();
+}
+function drawPickPreview(){
+  const pcv = document.getElementById('pickpreview');
+  const pctx = pcv.getContext('2d');
+  pctx.setTransform(1, 0, 0, 1, 0, 0);
+  pctx.fillStyle = '#fffef2';
+  pctx.fillRect(0, 0, pcv.width, pcv.height);
+  if (!pickSym) return;
+  const part = HubCore.partOf(pickSym, +document.getElementById('pickpart').value || 1);
+  if (part){
+    const bb = D.symBBox(part);
+    const sc = Math.min((pcv.width/2 - 16) / Math.max(bb.x2 - bb.x1, 1), (pcv.height - 16) / Math.max(bb.y2 - bb.y1, 1));
+    pctx.setTransform(sc, 0, 0, -sc, pcv.width/4 - (bb.x1 + bb.x2)/2 * sc, pcv.height/2 + (bb.y1 + bb.y2)/2 * sc);
+    D.drawSymbolPart(pctx, part, { showPinNums:false });
+  }
+  const fp = HubCore.footprintOf(PLIB, document.getElementById('pickfp').value);
+  if (fp && fp.bbox){
+    const fb = fp.bbox;
+    const sc = Math.min((pcv.width/2 - 16) / Math.max(fb.x2 - fb.x1, 0.5), (pcv.height - 16) / Math.max(fb.y2 - fb.y1, 0.5));
+    pctx.setTransform(sc, 0, 0, -sc, pcv.width*3/4 - (fb.x1 + fb.x2)/2 * sc, pcv.height/2 + (fb.y1 + fb.y2)/2 * sc);
+    pctx.fillStyle = '#1b1b1b';
+    pctx.fillRect(fb.x1 - 2, fb.y1 - 2, (fb.x2 - fb.x1) + 4, (fb.y2 - fb.y1) + 4);
+    D.drawFootprint(pctx, fp, { showPadNames:false });
+  }
+}
+function openPicker(){
+  document.getElementById('pickform').style.display = 'block';
+  buildPickList();
+  document.getElementById('picksearch').focus();
+}
+function closePicker(){ document.getElementById('pickform').style.display = 'none'; }
+document.getElementById('picksearch').addEventListener('input', buildPickList);
+document.getElementById('pickfp').addEventListener('change', drawPickPreview);
+document.getElementById('pickpart').addEventListener('change', drawPickPreview);
+document.getElementById('toolComp').addEventListener('click', openPicker);
+document.getElementById('pickcancel').addEventListener('click', closePicker);
+document.getElementById('pickok').addEventListener('click', () => {
+  if (!pickSym) return;
+  const ref = document.getElementById('pickref').value.trim();
+  if (!ref){ alert('Informe o ref.'); return; }
+  placing = { sym:pickSym.name, part:+document.getElementById('pickpart').value || 1,
+              footprint:document.getElementById('pickfp').value, ref,
+              comment:document.getElementById('pickcomment').value.trim().replace(/"/g, "'"),
+              rot:0, mirror:false };
+  closePicker();
+  document.getElementById('cv').style.cursor = 'copy';
+});
+function placeComp(w){
+  const c = { t:'comp', sheet:model.sheets[sheetIdx].name, ref:placing.ref, sym:placing.sym,
+              x:snap100(w.x), y:snap100(w.y), rot:placing.rot, footprint:placing.footprint };
+  if (placing.part !== 1) c.part = placing.part;
+  if (placing.mirror) c.mirror = true;
+  if (placing.comment) c.comment = placing.comment;
+  schematic.items.push(c);
+  const m = placing.ref.match(/^([A-Za-z]+)(\d+)$/);
+  placing.ref = m ? m[1] + (+m[2] + 1) : placing.ref + '2';
+  commit();
+}
+
 const SCH_REL = 'Projects/' + SCH_P + '/schematic.js';
 (async () => { if (HubIO.canPost) try { schDiskSnapshot = await HubIO.fetchText(SCH_REL); } catch (e) {} })();
 
@@ -194,10 +308,26 @@ function drawWorld(ctx, cam){
     }
     ctx.restore();
   }
+
+  /* ghost do componente em colocacao */
+  if (placing && hoverW){
+    const sym = HubCore.symbolOf(SLIB, placing.sym);
+    const part = HubCore.partOf(sym, placing.part);
+    if (part){
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.translate(snap100(hoverW.x), snap100(hoverW.y));
+      ctx.rotate((placing.rot % 360) * Math.PI / 180);
+      if (placing.mirror) ctx.scale(-1, 1);
+      D.drawSymbolPart(ctx, part, {});
+      ctx.restore();
+    }
+  }
 }
 const cam = D.mkCamera(document.getElementById('cv'), drawWorld, {
   bg:'#3a3a34',
   onMove: w => {
+    hoverW = w; if (placing) cam.draw();
     document.getElementById('sx').textContent = w.x.toFixed(0);
     document.getElementById('sy').textContent = w.y.toFixed(0);
     const h = hitTest(w.x, w.y);
@@ -207,6 +337,7 @@ const cam = D.mkCamera(document.getElementById('cv'), drawWorld, {
   },
   onClick: w => {
     if (annTool){ openAnnForm(w); return; }
+    if (placing){ placeComp(w); return; }
     const h = hitTest(w.x, w.y);
     if (!h) { setNet(''); setComp(null); return; }
     if (h.kind === 'pin')  { setComp(h.ref); setNet(nets.pinNet[h.ref + '-' + h.num] || ''); }
@@ -360,6 +491,8 @@ document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!an
 document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (document.getElementById('pickform').style.display === 'block'){ closePicker(); return; }
+    if (placing){ placing = null; document.getElementById('cv').style.cursor = 'crosshair'; cam.draw(); return; }
     if (dragState){
       const d = dragState; dragState = null;
       if (d.kind === 'wire') d.item.pts = d.base.map(p => [p[0], p[1]]);
@@ -378,6 +511,9 @@ window.addEventListener('keydown', e => {
     if (i >= 0){ schematic.items.splice(i, 1); selItem = null; selComp = null; commit(); }
     return;
   }
+  if (e.key === ' ' && placing){ e.preventDefault(); placing.rot = (placing.rot + 90) % 360; cam.draw(); return; }
+  if (k === 'x' && placing){ placing.mirror = !placing.mirror; cam.draw(); return; }
+  if (k === 'c' && !placing){ openPicker(); return; }
   if (e.key === ' ' && selItem && selItem.kind === 'comp'){
     e.preventDefault();
     selItem.item.rot = (((selItem.item.rot || 0) + 90) % 360);
