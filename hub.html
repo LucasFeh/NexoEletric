@@ -500,8 +500,8 @@ const statusOf = p => p.noSchematic ? 'err' : (p.pending > 0 ? 'warn' : 'ok');
 /* ═══ RENDER ═══════════════════════════════════════════════════ */
 function renderHeader() {
   const p = proj();
-  $('#projName').textContent = p.name;
-  $('#projDot').className = 'dot ' + statusOf(p);
+  $('#projName').textContent = p ? p.name : 'nenhum projeto';
+  $('#projDot').className = 'dot ' + (p ? statusOf(p) : 'err');
   $('#projCount').textContent = S.projects.length + ' projetos' + (S.demoMode ? ' (demo)' : '');
   $('#pickerBtn').setAttribute('aria-expanded', String(S.pickerOpen));
   $('#pickerPanel').hidden = !S.pickerOpen;
@@ -730,7 +730,9 @@ async function runAction(action) {
     await API.run(S.projId, action, line => lines.push(line));
     toast(action + ' concluído', 'ok');
     const idx = await API.index(); S.projects = idx.projects;
-    await loadProject(S.projId);
+    if (!S.projects.length) { toast('nenhum projeto encontrado em Projects\\', 'warn'); return; }
+    const id = S.projects.some(p => p.id === S.projId) ? S.projId : S.projects[0].id;
+    await loadProject(id);
   }
   catch (e) { toast(action + ' falhou: ' + e.message, 'err'); alert(lines.join('\n') || e.message); }
 }
@@ -783,6 +785,7 @@ async function loadProject(id) {
   if (!det) { toast('detalhe do projeto indisponível — tente Reindexar', 'err'); return; }
   S.projId = id; S.detail = det;
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
+  syncURL();
   renderAll();
 }
 function selectProject(id) {
@@ -793,7 +796,7 @@ function selectProject(id) {
   });
   if (dirty && !confirm('Há edições não salvas nas vistas Esquema/PCB — trocar de projeto e descartá-las?')) return;
   S.q = ''; $('#pickerSearch').value = '';
-  S.projId = id; syncURL(); loadProject(id);
+  loadProject(id);
 }
 
 /* reload escopado do hubserver: se algum iframe (esquema/pcb) tem edição não
@@ -876,7 +879,6 @@ document.addEventListener('keydown', e => {
   if (url.tab) S.tab = url.tab;
   const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;
   await loadProject(id);
-  syncURL();
 })();
 </script>
 </body>
