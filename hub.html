@@ -426,7 +426,7 @@ const API = {
       return await r.json();
     } catch { S.demoMode = true; S.serverOk = false; return DEMO_INDEX; }
   },
-  async detail(id) { try { const r = await fetch('/api/project/' + encodeURIComponent(id) + '.json'); if (!r.ok) throw 0; return await r.json(); } catch { return DEMO_DETAIL; } },
+  async detail(id) { try { const r = await fetch('/api/project/' + encodeURIComponent(id) + '.json'); if (!r.ok) throw 0; return await r.json(); } catch { if (S.demoMode) return DEMO_DETAIL; return null; } },
   /* Execução: POST devolve { runId }; o log chega por SSE. */
   async run(project, action, onLine) {
     const r = await fetch('/api/run', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ project, action }) });
@@ -492,7 +492,7 @@ const S = {
 
 const $ = s => document.querySelector(s);
 const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
-const proj = () => S.projects.find(p => p.id === S.projId) || S.projects[0];
+const proj = () => S.projects.find(p => p.id === S.projId) || S.projects[0] || null;
 const filteredProjects = () => { const q = S.q.trim().toLowerCase(); return S.projects.filter(x => !q || x.name.toLowerCase().includes(q)); };
 const stepOf = p => p.stages[0] === 1 ? STEP[p.stages.filter(v => v === 1).length] : STEP.none;
 const statusOf = p => p.noSchematic ? 'err' : (p.pending > 0 ? 'warn' : 'ok');
@@ -726,7 +726,12 @@ async function runAction(action) {
   if (S.demoMode) { toast('sem servidor — rode python hubserver.py', 'err'); return; }
   toast(action + ' em execução…', 'warn');
   const lines = [];
-  try { await API.run(S.projId, action, line => lines.push(line)); toast(action + ' concluído', 'ok'); await loadProject(S.projId); }
+  try {
+    await API.run(S.projId, action, line => lines.push(line));
+    toast(action + ' concluído', 'ok');
+    const idx = await API.index(); S.projects = idx.projects;
+    await loadProject(S.projId);
+  }
   catch (e) { toast(action + ' falhou: ' + e.message, 'err'); alert(lines.join('\n') || e.message); }
 }
 
@@ -774,11 +779,22 @@ function readURL() {
   return { id: id || localStorage.getItem('altiumhub.project'), tab: TABS.some(t => t.id === tab) ? tab : null };
 }
 async function loadProject(id) {
-  S.projId = id; S.detail = await API.detail(id);
+  const det = await API.detail(id);
+  if (!det) { toast('detalhe do projeto indisponível — tente Reindexar', 'err'); return; }
+  S.projId = id; S.detail = det;
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
   renderAll();
 }
-function selectProject(id) { S.pickerOpen = false; S.q = ''; $('#pickerSearch').value = ''; syncURL(); loadProject(id); }
+function selectProject(id) {
+  S.pickerOpen = false; renderHeader();
+  let dirty = false;
+  document.querySelectorAll('iframe').forEach(f => {
+    try { if (f.contentWindow && f.contentWindow.__hubDirty && f.contentWindow.__hubDirty()) dirty = true; } catch (e) {}
+  });
+  if (dirty && !confirm('Há edições não salvas nas vistas Esquema/PCB — trocar de projeto e descartá-las?')) return;
+  S.q = ''; $('#pickerSearch').value = '';
+  S.projId = id; syncURL(); loadProject(id);
+}
 
 /* reload escopado do hubserver: se algum iframe (esquema/pcb) tem edição não
    salva, avisa e nao mexe em nada; senao recarrega so os DADOS (sem reload
@@ -844,6 +860,18 @@ document.addEventListener('keydown', e => {
 (async function init() {
   const idx = await API.index();
   S.projects = idx.projects;
+  if (!S.projects.length) {
+    $('#projName').textContent = 'nenhum projeto';
+    $('#projCount').textContent = '0 projetos';
+    $('#pName').textContent = '—';
+    const pane = document.querySelector('.pane[data-pane="esquema"]');
+    pane.classList.add('on');
+    const e = el('div', 'empty'), inner = el('div');
+    inner.append(el('span', 'tag', 'sem projetos'));
+    inner.append(el('p', null, 'Nenhum projeto em Projects\\ — rode ExportProject ou ExportBoard no Altium e clique em Reindexar.'));
+    e.append(inner); pane.append(e);
+    return;
+  }
   const url = readURL();
   if (url.tab) S.tab = url.tab;
   const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;
