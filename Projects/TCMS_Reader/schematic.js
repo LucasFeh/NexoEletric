@@ -1,7 +1,7 @@
 var schematic = {
 "format":"schmirror-v2",
 "project":"TCMS_Reader",
-"generated":"03/08/2026 10:04:25",
+"generated":"06/08/2026 08:38:10",
 "units":"mil",
 "items":[
 {"t":"sheet","name":"SCH - Leitor","size":"A4"}

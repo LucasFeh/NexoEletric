@@ -1,6 +1,6 @@
 var pcblib = {
 "format":"pcblib-v2",
-"generated":"03/08/2026 10:01:53",
+"generated":"06/08/2026 08:39:47",
 "source":"Z:\\Biblioteca\\ALTIUM LIBRARY ------ LUCAS\\BIBLIOTECA DE FOOTPRINT.PcbLib",
 "units":"mm",
 "footprints":[

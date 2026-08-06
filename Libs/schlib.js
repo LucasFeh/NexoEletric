@@ -1,6 +1,6 @@
 var schlib = {
 "format":"schlib-v2",
-"generated":"03/08/2026 10:02:05",
+"generated":"06/08/2026 08:39:59",
 "source":"Z:\\Biblioteca\\ALTIUM LIBRARY ------ LUCAS\\BIBLIOTECA DE ESQUEMA.SchLib",
 "units":"mil",
 "symbols":[

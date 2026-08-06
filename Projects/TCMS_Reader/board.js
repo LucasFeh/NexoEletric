@@ -1,6 +1,6 @@
 var pcbmirror = {
 "format":"pcbmirror-v1",
-"generated":"03/08/2026 10:00:04",
+"generated":"06/08/2026 08:40:50",
 "source":"\\\\192.168.15.31\\Equipamentos\\EQUIPAMENTOS ATUALIZADOS\\TCMS\\TCMS\\Leitor de rede\\TCMS_Reader\\PCB - Leitor.PcbDoc",
 "units":"mm",
 "axis":"y-up",
