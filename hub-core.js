@@ -582,11 +582,16 @@ function serializeAnnotations(list){
 
 /* ============ Neoden 4: pick-and-place (paridade com neodenAltium.py) ============ */
 
-function neodenMid(c){
+/* Mid X/Y sai da origem do componente (Comp.x/Comp.y = Location X/Y do Altium), nao do
+   centro do bbox de cobre: o bbox gira junto com o componente, entao o desvio
+   origem->centro cai em eixos diferentes conforme a rotacao e sobra como erro depois de
+   subtrair a referencia (dois JUMPER_3VIAS a 0 e 270 graus erravam 0.127mm em X e Y). */
+function neodenPos(c){
+  if (isNum(c.x) && isNum(c.y)) return { x: c.x, y: c.y };
   const b = c.bbox;
   if (b && isNum(b.x1) && isNum(b.y1) && isNum(b.x2) && isNum(b.y2))
     return { x: (b.x1 + b.x2) / 2, y: (b.y1 + b.y2) / 2 };
-  return { x: c.x, y: c.y };
+  return { x: 0, y: 0 };
 }
 function neodenRotatePt(ox, oy, px, py, angle){
   const a = angle * Math.PI / 180;
@@ -603,7 +608,7 @@ function neodenTransform(components, opts){
     ordered = [ref].concat(comps.filter(c => c !== ref));
   }
   const rows = ordered.map(c => {
-    const m = neodenMid(c);
+    const m = neodenPos(c);
     return { des: c.ref, footprint: c.footprint || '', x: m.x, y: m.y,
              layer: c.layer, rot: c.rot || 0, comment: c.comment || '' };
   });

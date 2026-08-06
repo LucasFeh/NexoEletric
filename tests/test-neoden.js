@@ -21,6 +21,23 @@ assert.strictEqual(t1.rows[1].y, -20);
 assert.strictEqual(t1.rows[2].x, 20);               /* R1 sem bbox: usa x,y */
 assert.strictEqual(t1.rows[2].y, 20);
 
+/* Mid X/Y = origem do componente (Location X/Y do Altium), nunca o centro do bbox
+   de cobre: o bbox gira junto com o componente, entao o desvio origem->bbox cai em
+   eixos diferentes conforme a rotacao e nao se cancela ao subtrair a referencia.
+   Caso real do TCMS_Reader: J2 (rot 270) e J8 (rot 0), mesmo footprint JUMPER_3VIAS,
+   bbox 0.127mm (5 mil) fora da origem -> erro de (-0.127, -0.127) em J8. */
+const jum = [
+  { ref:'J2', comment:'', footprint:'JUMPER_3VIAS', layer:'Top', x:31.75,  y:49.276, rot:270,
+    bbox:{ x1:30.75,  y1:48.403, x2:32.75,  y2:50.403 } },   /* mid = (31.750, 49.403) */
+  { ref:'J8', comment:'', footprint:'JUMPER_3VIAS', layer:'Top', x:88.011, y:41.91,  rot:0,
+    bbox:{ x1:86.884, y1:40.910, x2:88.884, y2:42.910 } },   /* mid = (87.884, 41.910) */
+];
+const tj = Core.neodenTransform(jum, { refDes:'J2', off:{ x:31.75, y:49.276 } });
+assert.ok(Math.abs(tj.rows[0].x - 31.75)  < 1e-9, 'J2 = coordenada de maquina informada');
+assert.ok(Math.abs(tj.rows[0].y - 49.276) < 1e-9);
+assert.ok(Math.abs(tj.rows[1].x - 88.011) < 1e-9, 'J8 X deve casar com o Altium (88.011), nao 87.884');
+assert.ok(Math.abs(tj.rows[1].y - 41.91)  < 1e-9, 'J8 Y deve casar com o Altium (41.91), nao 41.783');
+
 /* offset de maquina (paridade com -o 100 140) */
 const t2 = Core.neodenTransform(comps, { refDes:'U1', off:{ x:100, y:140 } });
 assert.strictEqual(t2.rows[0].x, 100);

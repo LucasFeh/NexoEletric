@@ -13,6 +13,8 @@
    Nunca escreva um hex fora deste bloco.
    ═══════════════════════════════════════════════════════════════ */
 :root {
+  color-scheme: dark;     /* lista aberta do select e setas do input number vêm escuras */
+
   --bg:        #0f0f11;   /* fundo da página */
   --surface:   #1a1a1d;   /* cards, menus, inputs, painéis */
   --surface-2: #161619;   /* painel lateral, faixas */
@@ -53,7 +55,9 @@
 html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
 body { font: 400 15px/1.55 var(--font); }
 h1,h2,h3,h4 { font-weight: 500; letter-spacing: -0.015em; margin: 0; line-height: 1.15; }
-button, input { font: inherit; color: inherit; }
+/* select e textarea tambem entram aqui: controles de formulario nao herdam font/color,
+   e sem isso o select fica com o preto do UA em cima do fundo escuro do .input */
+button, input, select, textarea { font: inherit; color: inherit; }
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--hi); outline-offset: 2px; }
 ::selection { background: rgba(242,242,243,0.22); }
@@ -774,7 +778,7 @@ function renderNeoden() {
     ['mover', opts.move ? ('dx ' + opts.move.dx + ' / dy ' + opts.move.dy + ' após índice ' + opts.move.n) : 'nenhum'],
   ].forEach(([k, v]) => { const row = el('div', 'kv'); row.append(el('span', 'k', k), el('span', 'v', v)); kvs.append(row); });
   aside.append(kvs);
-  const note = el('p', null, 'Mid X/Y = centro do bbox de cobre; ponto 0 da placa visível na aba PCB (origem).');
+  const note = el('p', null, 'Mid X/Y = origem do componente (Location X/Y do Altium); ponto 0 da placa visível na aba PCB (origem).');
   note.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:14px';
   aside.append(note);
 }
