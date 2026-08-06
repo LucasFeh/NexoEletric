@@ -197,7 +197,7 @@ var changes = [
 | `arc_edit` | `id`, `orig_cx`,`orig_cy`,`orig_r`,`orig_sa`,`orig_ea`,`orig_layer` | `cx`,`cy`,`r`,`sa`,`ea`,`w`,`layer`,`note` |
 | `arc_add` | `layer`, `cx`,`cy`,`r`,`sa`,`ea`,`w` | `net`, `note` |
 | `arc_del` | `id`, `orig_cx..orig_ea`, `orig_layer` | `note` |
-| `text_edit` | `id`, `orig_x`, `orig_y`, `orig_text`, `orig_layer` | `text`, `x`, `y`, `h`, `rot`, `note` |
+| `text_edit` | `id`, `orig_x`, `orig_y`, `orig_text`, `orig_layer` | `text`, `x`, `y`, `h`, `w`, `rot`, `note` |
 | `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
 | `outline_set` | `pts` (`[[x,y],...]` ≥3, polígono **fechado**, só linhas) | `note` |
 | `comp_attr` | `ref`, `orig_designator`, `orig_comment` | `designator` (novo texto), `comment` (novo texto), `note` |
@@ -208,8 +208,9 @@ var changes = [
 - `text_edit` vale só para **textos livres** (`designator:false` e `comment:false` no
   `board.js`); designator/comment pertencem ao componente. `x`/`y` são o **centro do
   bounding box** (mesma convenção do `board.js » texts`): o ApplyChanges aplica
-  `text`/`h`/`rot` primeiro, mede o bounding box novo no Altium e desloca a âncora para o
+  `text`/`h`/`w`/`rot` primeiro, mede o bounding box novo no Altium e desloca a âncora para o
   centro cair exatamente em `x`/`y` — o texto fica centralizado independente da largura.
+  `h` = altura da fonte em mm; `w` = espessura do traço (stroke) em mm.
 - `designator_move` reposiciona o **designator de um componente** (item `designator:true`
   em `board.js » texts`; ache-o pelo `owner` = ref). Mesma convenção de centro do
   `text_edit`; os `orig_x`/`orig_y` vêm desse item. O script põe o autoposition do nome em

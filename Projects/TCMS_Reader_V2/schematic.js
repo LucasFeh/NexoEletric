@@ -387,8 +387,9 @@ var schematic = {
 {"t":"power","sheet":"SCH - Leitor V2","x":5750,"y":5000,"rot":180,"net":"GND","style":"GndPower"},
 {"t":"wire","sheet":"SCH - Leitor V2","pts":[[6550,5000],[6450,5000]]},
 {"t":"power","sheet":"SCH - Leitor V2","x":6450,"y":5000,"rot":180,"net":"GND","style":"GndPower"},
-{"t":"text","sheet":"SCH - Leitor V2","x":600,"y":7250,"s":"TCMS_READER_V2 - LEITOR UNIVERSAL DE BARRAMENTOS (ESP32) - placa 80x80mm","h":12},
-{"t":"text","sheet":"SCH - Leitor V2","x":4200,"y":1430,"s":"CN1: 1 GND | 2 5V-OUT | 3 3V3-OUT | 4 485A | 5 485B | 6 GND | 7 CANH | 8 CANL | 9 RX-TTL | 10 TX-TTL | 11 1WIRE | 12 GND","h":10},
-{"t":"text","sheet":"SCH - Leitor V2","x":600,"y":1300,"s":"JUMPERS: J1/J2 = terminador 120R (485/CAN) | J3 = pull-ups I2C ext | J4 = pull-up 1WIRE | J5 = RX1: 1-2 TTL / 2-3 RS-232 | aberto = sem","h":10},
-{"t":"text","sheet":"SCH - Leitor V2","x":600,"y":1170,"s":"CN2 5V IN | CN3 I2C ISOLADO (VEXT/GND-EXT do alvo) | CN4 SPI | CN5 modulo CAN | CN6 RS-232 | CN7 ETHERNET W5500 | borne = 3V3 (RX-TTL 1k, 1WIRE 100R)","h":10},
+{"t":"text","sheet":"SCH - Leitor V2","x":600,"y":7250,"s":"TCMS_READER_V2 - LEITOR UNIVERSAL DE BARRAMENTOS (ESP32)","h":12},
+{"t":"text","sheet":"SCH - Leitor V2","x":600,"y":7100,"s":"placa 80x80mm","h":10},
+{"t":"text","sheet":"SCH - Leitor V2","x":600,"y":1300,"s":"CN1: 1 GND | 2 5V-OUT | 3 3V3-OUT | 4 485A | 5 485B | 6 GND | 7 CANH | 8 CANL | 9 RX-TTL | 10 TX-TTL | 11 1WIRE | 12 GND","h":10},
+{"t":"text","sheet":"SCH - Leitor V2","x":600,"y":1100,"s":"JUMPERS: J1/J2 = terminador 120R (485/CAN) | J3 = pull-ups I2C ext | J4 = pull-up 1WIRE | J5 = RX1: 1-2 TTL / 2-3 RS-232 | aberto = sem","h":10},
+{"t":"text","sheet":"SCH - Leitor V2","x":600,"y":900,"s":"CN2 5V IN | CN3 I2C ISOLADO (VEXT/GND-EXT do alvo) | CN4 SPI | CN5 modulo CAN | CN6 RS-232 | CN7 ETHERNET W5500 | borne = 3V3 (RX-TTL 1k, 1WIRE 100R)","h":10},
 ]};

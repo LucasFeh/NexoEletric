@@ -1,80 +1,74 @@
 // AltiumPCBMirror - arquivo de mudancas.
 // Edite ESTE arquivo (nunca o board.js). Um objeto JSON por linha. Consulte AI-GUIDE.md.
 //
-// Numeracao dos canais no TopOverlay: os 32 textos livres (todos "1", h=2) viram os
-// numeros 1..32, CENTRO na coluna do LED (x = 20 + k*19.2) e altura h=0.9 para o numero
-// caber dentro do quadrado da celula (a borda esquerda fica a so 1.25mm da coluna do LED;
-// com h=2 um numero de 2 digitos estourava a borda).
-// Fileiras: cima = canais 1-11; meio = 17-22 + 12-16; baixo = 23-24 + 25-32 (coluna 3 vazia).
+// IMPORTANTE: rode com o ApplyChanges.pas ATUAL (recarregue o .PrjScr no Altium).
+// O apply de 04/08 14:01 tinha um bug: escrever XLocation em texto e ignorado pelo
+// engine - trocou texto/altura mas NAO moveu nada (o relatorio ecoava o alvo).
+// Corrigido: estilo e movimento em ciclos separados + MoveByXY + relatorio mede o
+// centro real de volta e acusa falha se nao chegar no alvo.
 //
-// Designators F1..F32: padronizados no ponto da fileira de baixo (que ja estava certa):
-// centro em (coluna do LED, topo do quadrado - 0.46), dentro da marcacao, ao lado do
-// porta-fusivel e acima do LED. Topos: 82.931 / 60.931 / 38.931 -> y 82.47149 / 60.47149 / 38.47149.
+// LOTE A (este arquivo) - "mesmo design da secao 1" (gabarito ajustado a mao pelo
+// usuario no Altium, espelho de 14:22):
+//  (a) 32 numeros de canal: fonte h=2, stroke w=0.2, na posicao do gabarito
+//      (1 digito: centro na coluna do LED, y = topo da celula - 3.245; 2 digitos:
+//      +0.9mm a direita para a borda esquerda alinhar com os de 1 digito e nao
+//      estourar a borda da celula).
+//  (b) 16 fusiveis girados 180 (rot 90 -> 270, ancora vai para o outro pad, que cai
+//      na MESMA posicao - nenhuma trilha muda). O DRC vai acusar troca de net nos
+//      pinos desses 16 (fusivel e simetrico; pin swap no esquema ou ignorar).
+// LOTE B (depois de aplicar e rodar ExportPcb): recentralizar os 32 designators
+// F1..F32 no padrao do gabarito (o giro arrasta o designator dos 16 junto).
 var changes = [
-// --- numeros dos canais ---
-{"op":"text_edit","id":"x31","text":"1","x":20,"y":78.869675,"h":0.9,"orig_x":20.037225,"orig_y":78.361675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 1 - h 0.9 para caber no quadrado - recentraliza na coluna do LD1"},
-{"op":"text_edit","id":"x33","text":"2","x":39.2,"y":78.869675,"h":0.9,"orig_x":39.214225,"orig_y":78.615675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 2 - h 0.9 para caber no quadrado - recentraliza na coluna do LD2"},
-{"op":"text_edit","id":"x32","text":"3","x":58.4,"y":78.869675,"h":0.9,"orig_x":58.645225,"orig_y":78.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 3 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x30","text":"4","x":77.6,"y":78.869675,"h":0.9,"orig_x":77.845225,"orig_y":78.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 4 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x29","text":"5","x":96.8,"y":78.869675,"h":0.9,"orig_x":97.045225,"orig_y":78.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 5 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x28","text":"6","x":116,"y":78.869675,"h":0.9,"orig_x":116.245225,"orig_y":78.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 6 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x27","text":"7","x":135.2,"y":78.869675,"h":0.9,"orig_x":135.445225,"orig_y":78.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 7 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x26","text":"8","x":154.4,"y":78.869675,"h":0.9,"orig_x":154.645225,"orig_y":78.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 8 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x25","text":"9","x":173.6,"y":78.869675,"h":0.9,"orig_x":173.845225,"orig_y":78.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 9 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x24","text":"10","x":192.8,"y":78.869675,"h":0.9,"orig_x":193.045225,"orig_y":78.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 10 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x23","text":"11","x":212,"y":78.869675,"h":0.9,"orig_x":212.245225,"orig_y":78.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 11 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x16","text":"12","x":135.2,"y":56.869675,"h":0.9,"orig_x":135.445225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 12 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x15","text":"13","x":154.4,"y":56.869675,"h":0.9,"orig_x":154.645225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 13 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x14","text":"14","x":173.6,"y":56.869675,"h":0.9,"orig_x":173.845225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 14 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x13","text":"15","x":192.8,"y":56.869675,"h":0.9,"orig_x":193.045225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 15 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x12","text":"16","x":212,"y":56.869675,"h":0.9,"orig_x":212.245225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 16 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x22","text":"17","x":20,"y":56.869675,"h":0.9,"orig_x":20.245225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 17 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x21","text":"18","x":39.2,"y":56.869675,"h":0.9,"orig_x":39.445225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 18 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x20","text":"19","x":58.4,"y":56.869675,"h":0.9,"orig_x":58.645225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 19 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x19","text":"20","x":77.6,"y":56.869675,"h":0.9,"orig_x":77.845225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 20 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x18","text":"21","x":96.8,"y":56.869675,"h":0.9,"orig_x":97.045225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 21 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x17","text":"22","x":116,"y":56.869675,"h":0.9,"orig_x":116.245225,"orig_y":56.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 22 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x11","text":"23","x":20,"y":34.869675,"h":0.9,"orig_x":20.245225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 23 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x10","text":"24","x":39.2,"y":34.869675,"h":0.9,"orig_x":39.445225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 24 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x9","text":"25","x":77.6,"y":34.869675,"h":0.9,"orig_x":77.845225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 25 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x8","text":"26","x":96.8,"y":34.869675,"h":0.9,"orig_x":97.045225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 26 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x7","text":"27","x":116,"y":34.869675,"h":0.9,"orig_x":116.245225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 27 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x6","text":"28","x":135.2,"y":34.869675,"h":0.9,"orig_x":135.445225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 28 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x5","text":"29","x":154.4,"y":34.869675,"h":0.9,"orig_x":154.645225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 29 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x4","text":"30","x":173.6,"y":34.869675,"h":0.9,"orig_x":173.845225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 30 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x3","text":"31","x":192.8,"y":34.869675,"h":0.9,"orig_x":193.045225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 31 - h 0.9 para caber no quadrado"},
-{"op":"text_edit","id":"x2","text":"32","x":212,"y":34.869675,"h":0.9,"orig_x":212.245225,"orig_y":34.869675,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 32 - h 0.9 para caber no quadrado"},
-// --- designators dos fusiveis ---
-{"op":"designator_move","ref":"F1","x":20,"y":82.47149,"orig_x":20.821115,"orig_y":82.85249,"note":"designator F1 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F2","x":39.2,"y":82.47149,"orig_x":40.005,"orig_y":82.804,"note":"designator F2 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F3","x":58.4,"y":82.47149,"orig_x":58.801,"orig_y":82.55,"note":"designator F3 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F4","x":77.6,"y":82.47149,"orig_x":77.978,"orig_y":82.931,"note":"designator F4 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F5","x":96.8,"y":82.47149,"orig_x":97.028,"orig_y":82.804,"note":"designator F5 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F6","x":116,"y":82.47149,"orig_x":116.205,"orig_y":82.55,"note":"designator F6 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F7","x":135.2,"y":82.47149,"orig_x":135.509,"orig_y":82.931,"note":"designator F7 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F8","x":154.4,"y":82.47149,"orig_x":154.686,"orig_y":82.677,"note":"designator F8 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F9","x":173.6,"y":82.47149,"orig_x":173.99,"orig_y":82.296,"note":"designator F9 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F10","x":192.8,"y":82.47149,"orig_x":193.04,"orig_y":82.677,"note":"designator F10 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F11","x":212,"y":82.47149,"orig_x":212.344,"orig_y":82.677,"note":"designator F11 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F12","x":135.2,"y":60.47149,"orig_x":135.382,"orig_y":60.579,"note":"designator F12 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F13","x":154.4,"y":60.47149,"orig_x":154.686,"orig_y":60.579,"note":"designator F13 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F14","x":173.6,"y":60.47149,"orig_x":173.863,"orig_y":60.706,"note":"designator F14 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F15","x":192.8,"y":60.47149,"orig_x":193.04,"orig_y":60.706,"note":"designator F15 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F16","x":212,"y":60.47149,"orig_x":212.02492,"orig_y":60.34469,"note":"designator F16 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F17","x":20,"y":60.47149,"orig_x":20.45812,"orig_y":60.34469,"note":"designator F17 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F18","x":39.2,"y":60.47149,"orig_x":39.497,"orig_y":60.198,"note":"designator F18 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F19","x":58.4,"y":60.47149,"orig_x":58.928,"orig_y":60.579,"note":"designator F19 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F20","x":77.6,"y":60.47149,"orig_x":77.978,"orig_y":60.579,"note":"designator F20 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F21","x":96.8,"y":60.47149,"orig_x":97.155,"orig_y":60.452,"note":"designator F21 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F22","x":116,"y":60.47149,"orig_x":116.332,"orig_y":60.452,"note":"designator F22 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F23","x":20,"y":38.47149,"orig_x":20.398635,"orig_y":38.47149,"note":"designator F23 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F24","x":39.2,"y":38.47149,"orig_x":39.599635,"orig_y":38.47149,"note":"designator F24 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F25","x":77.6,"y":38.47149,"orig_x":77.99174,"orig_y":38.47149,"note":"designator F25 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F26","x":96.8,"y":38.47149,"orig_x":96.743235,"orig_y":38.47149,"note":"designator F26 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F27","x":116,"y":38.47149,"orig_x":115.942435,"orig_y":38.47149,"note":"designator F27 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F28","x":135.2,"y":38.47149,"orig_x":135.14143,"orig_y":38.47149,"note":"designator F28 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F29","x":154.4,"y":38.47149,"orig_x":154.79804,"orig_y":38.47149,"note":"designator F29 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F30","x":173.6,"y":38.47149,"orig_x":173.99765,"orig_y":38.47149,"note":"designator F30 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F31","x":192.8,"y":38.47149,"orig_x":192.786,"orig_y":38.481,"note":"designator F31 dentro do quadrado, faixa acima do LED"},
-{"op":"designator_move","ref":"F32","x":212,"y":38.47149,"orig_x":212.217,"orig_y":38.481,"note":"designator F32 dentro do quadrado, faixa acima do LED"},
+// --- numeros: fileira de cima (canais 1-11, y alvo 79.68568) ---
+{"op":"text_edit","id":"x64","text":"1","x":20,"y":79.68568,"h":2,"w":0.2,"orig_x":19.964225,"orig_y":79.68568,"orig_text":"1","orig_layer":"TopOverlay","note":"canal 1 - gabarito normalizado (snap na coluna do LED)"},
+{"op":"text_edit","id":"x63","text":"2","x":39.2,"y":79.68568,"h":2,"w":0.2,"orig_x":39.214225,"orig_y":78.615675,"orig_text":"2","orig_layer":"TopOverlay","note":"canal 2 - design da secao 1"},
+{"op":"text_edit","id":"x62","text":"3","x":58.4,"y":79.68568,"h":2,"w":0.2,"orig_x":58.645225,"orig_y":78.869675,"orig_text":"3","orig_layer":"TopOverlay","note":"canal 3 - design da secao 1"},
+{"op":"text_edit","id":"x61","text":"4","x":77.6,"y":79.68568,"h":2,"w":0.2,"orig_x":77.845225,"orig_y":78.869675,"orig_text":"4","orig_layer":"TopOverlay","note":"canal 4 - design da secao 1"},
+{"op":"text_edit","id":"x60","text":"5","x":96.8,"y":79.68568,"h":2,"w":0.2,"orig_x":97.045225,"orig_y":78.869675,"orig_text":"5","orig_layer":"TopOverlay","note":"canal 5 - design da secao 1"},
+{"op":"text_edit","id":"x59","text":"6","x":116,"y":79.68568,"h":2,"w":0.2,"orig_x":116.245225,"orig_y":78.869675,"orig_text":"6","orig_layer":"TopOverlay","note":"canal 6 - design da secao 1"},
+{"op":"text_edit","id":"x58","text":"7","x":135.2,"y":79.68568,"h":2,"w":0.2,"orig_x":135.445225,"orig_y":78.869675,"orig_text":"7","orig_layer":"TopOverlay","note":"canal 7 - design da secao 1"},
+{"op":"text_edit","id":"x57","text":"8","x":154.4,"y":79.68568,"h":2,"w":0.2,"orig_x":154.645225,"orig_y":78.869675,"orig_text":"8","orig_layer":"TopOverlay","note":"canal 8 - design da secao 1"},
+{"op":"text_edit","id":"x56","text":"9","x":173.6,"y":79.68568,"h":2,"w":0.2,"orig_x":173.845225,"orig_y":78.869675,"orig_text":"9","orig_layer":"TopOverlay","note":"canal 9 - design da secao 1"},
+{"op":"text_edit","id":"x55","text":"10","x":193.7,"y":79.68568,"h":2,"w":0.2,"orig_x":193.045225,"orig_y":78.869675,"orig_text":"10","orig_layer":"TopOverlay","note":"canal 10 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x54","text":"11","x":212.9,"y":79.68568,"h":2,"w":0.2,"orig_x":212.245225,"orig_y":78.869675,"orig_text":"11","orig_layer":"TopOverlay","note":"canal 11 - design da secao 1 - 2 digitos +0.9"},
+// --- numeros: fileira do meio (canais 12-22, y alvo 57.68568) ---
+{"op":"text_edit","id":"x53","text":"12","x":136.1,"y":57.68568,"h":2,"w":0.2,"orig_x":135.445225,"orig_y":56.869675,"orig_text":"12","orig_layer":"TopOverlay","note":"canal 12 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x52","text":"13","x":155.3,"y":57.68568,"h":2,"w":0.2,"orig_x":154.645225,"orig_y":56.869675,"orig_text":"13","orig_layer":"TopOverlay","note":"canal 13 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x51","text":"14","x":174.5,"y":57.68568,"h":2,"w":0.2,"orig_x":173.845225,"orig_y":56.869675,"orig_text":"14","orig_layer":"TopOverlay","note":"canal 14 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x50","text":"15","x":193.7,"y":57.68568,"h":2,"w":0.2,"orig_x":193.045225,"orig_y":56.869675,"orig_text":"15","orig_layer":"TopOverlay","note":"canal 15 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x49","text":"16","x":212.9,"y":57.68568,"h":2,"w":0.2,"orig_x":212.245225,"orig_y":56.869675,"orig_text":"16","orig_layer":"TopOverlay","note":"canal 16 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x48","text":"17","x":20.9,"y":57.68568,"h":2,"w":0.2,"orig_x":20.245225,"orig_y":56.869675,"orig_text":"17","orig_layer":"TopOverlay","note":"canal 17 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x47","text":"18","x":40.1,"y":57.68568,"h":2,"w":0.2,"orig_x":39.445225,"orig_y":56.869675,"orig_text":"18","orig_layer":"TopOverlay","note":"canal 18 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x46","text":"19","x":59.3,"y":57.68568,"h":2,"w":0.2,"orig_x":58.645225,"orig_y":56.869675,"orig_text":"19","orig_layer":"TopOverlay","note":"canal 19 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x45","text":"20","x":78.5,"y":57.68568,"h":2,"w":0.2,"orig_x":77.845225,"orig_y":56.869675,"orig_text":"20","orig_layer":"TopOverlay","note":"canal 20 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x44","text":"21","x":97.7,"y":57.68568,"h":2,"w":0.2,"orig_x":97.045225,"orig_y":56.869675,"orig_text":"21","orig_layer":"TopOverlay","note":"canal 21 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x43","text":"22","x":116.9,"y":57.68568,"h":2,"w":0.2,"orig_x":116.245225,"orig_y":56.869675,"orig_text":"22","orig_layer":"TopOverlay","note":"canal 22 - design da secao 1 - 2 digitos +0.9"},
+// --- numeros: fileira de baixo (canais 23-32, y alvo 35.68568; coluna 3 vazia) ---
+{"op":"text_edit","id":"x42","text":"23","x":20.9,"y":35.68568,"h":2,"w":0.2,"orig_x":20.245225,"orig_y":34.869675,"orig_text":"23","orig_layer":"TopOverlay","note":"canal 23 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x41","text":"24","x":40.1,"y":35.68568,"h":2,"w":0.2,"orig_x":39.445225,"orig_y":34.869675,"orig_text":"24","orig_layer":"TopOverlay","note":"canal 24 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x40","text":"25","x":78.5,"y":35.68568,"h":2,"w":0.2,"orig_x":77.845225,"orig_y":34.869675,"orig_text":"25","orig_layer":"TopOverlay","note":"canal 25 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x39","text":"26","x":97.7,"y":35.68568,"h":2,"w":0.2,"orig_x":97.045225,"orig_y":34.869675,"orig_text":"26","orig_layer":"TopOverlay","note":"canal 26 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x38","text":"27","x":116.9,"y":35.68568,"h":2,"w":0.2,"orig_x":116.245225,"orig_y":34.869675,"orig_text":"27","orig_layer":"TopOverlay","note":"canal 27 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x37","text":"28","x":136.1,"y":35.68568,"h":2,"w":0.2,"orig_x":135.445225,"orig_y":34.869675,"orig_text":"28","orig_layer":"TopOverlay","note":"canal 28 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x36","text":"29","x":155.3,"y":35.68568,"h":2,"w":0.2,"orig_x":154.645225,"orig_y":34.869675,"orig_text":"29","orig_layer":"TopOverlay","note":"canal 29 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x35","text":"30","x":174.5,"y":35.68568,"h":2,"w":0.2,"orig_x":173.845225,"orig_y":34.869675,"orig_text":"30","orig_layer":"TopOverlay","note":"canal 30 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x34","text":"31","x":193.7,"y":35.68568,"h":2,"w":0.2,"orig_x":193.045225,"orig_y":34.869675,"orig_text":"31","orig_layer":"TopOverlay","note":"canal 31 - design da secao 1 - 2 digitos +0.9"},
+{"op":"text_edit","id":"x33","text":"32","x":212.9,"y":35.68568,"h":2,"w":0.2,"orig_x":212.245225,"orig_y":34.869675,"orig_text":"32","orig_layer":"TopOverlay","note":"canal 32 - design da secao 1 - 2 digitos +0.9"},
+// --- fusiveis girados 180 graus (design da secao 1: rot 270, ancora col+13.588) ---
+{"op":"comp_move","ref":"F4","x":91.188,"y":75.797,"rot":270,"orig_x":83.188,"orig_y":75.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F5","x":110.388,"y":75.797,"rot":270,"orig_x":102.388,"orig_y":75.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F6","x":129.588,"y":75.797,"rot":270,"orig_x":121.588,"orig_y":75.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F10","x":206.388,"y":75.797,"rot":270,"orig_x":198.388,"orig_y":75.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F11","x":225.588,"y":75.797,"rot":270,"orig_x":217.588,"orig_y":75.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F12","x":148.788,"y":53.797,"rot":270,"orig_x":140.788,"orig_y":53.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F15","x":206.388,"y":53.797,"rot":270,"orig_x":198.388,"orig_y":53.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F16","x":225.588,"y":53.797,"rot":270,"orig_x":217.588,"orig_y":53.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F20","x":91.188,"y":53.797,"rot":270,"orig_x":83.188,"orig_y":53.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F21","x":110.388,"y":53.797,"rot":270,"orig_x":102.388,"orig_y":53.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F22","x":129.588,"y":53.797,"rot":270,"orig_x":121.588,"orig_y":53.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F26","x":110.388,"y":31.797,"rot":270,"orig_x":102.388,"orig_y":31.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F27","x":129.588,"y":31.797,"rot":270,"orig_x":121.588,"orig_y":31.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F28","x":148.788,"y":31.797,"rot":270,"orig_x":140.788,"orig_y":31.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F31","x":206.388,"y":31.797,"rot":270,"orig_x":198.388,"orig_y":31.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
+{"op":"comp_move","ref":"F32","x":225.588,"y":31.797,"rot":270,"orig_x":217.588,"orig_y":31.797,"orig_rot":90,"orig_layer":"Top","note":"gira 180 igual secao 1 - pads nas mesmas posicoes"},
 ];

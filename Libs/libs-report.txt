@@ -1,5 +1,5 @@
 AltiumPCBMirror - relatorio das bibliotecas
-Data: 03/08/2026 10:02:05
+Data: 06/08/2026 08:39:59
 Simbolos: 402   Footprints: 629
 
 Simbolos SEM footprint valido na PcbLib (177):

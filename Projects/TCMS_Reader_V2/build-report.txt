@@ -1,11 +1,11 @@
 AltiumPCBMirror - BuildSchematic
 Projeto: \\192.168.15.31\Equipamentos\EQUIPAMENTOS ATUALIZADOS\TCMS_Reader2\TCMS_Reader_V2.PrjPcb
-Fonte:   Z:\AltiumPCBMirror\Projects\TCMS_Reader_V2\schematic.js
-Data:    04/08/2026 11:59:52
+Fonte:   \\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects\TCMS_Reader_V2\schematic.js
+Data:    05/08/2026 17:30:43
 
 Validacao OK (1 folha(s)).
 
-[OK]    limpeza: 1017 objetos removidos da folha
+[OK]    limpeza: 1018 objetos removidos da folha
 [OK]    comp IC1/1 ja existia - sera reposicionado
 [OK]    comp IC2/1 ja existia - sera reposicionado
 [OK]    comp R3/1 ja existia - sera reposicionado
@@ -388,7 +388,8 @@ Validacao OK (1 folha(s)).
 [OK]    power GND
 [OK]    wire com 2 pontos
 [OK]    power GND
-[OK]    text "TCMS_READER_V2 - LEITOR UNIVERSAL DE BARRAMENTOS (ESP32) - placa 80x80mm"
+[OK]    text "TCMS_READER_V2 - LEITOR UNIVERSAL DE BARRAMENTOS (ESP32)"
+[OK]    text "placa 80x80mm"
 [OK]    text "CN1: 1 GND | 2 5V-OUT | 3 3V3-OUT | 4 485A | 5 485B | 6 GND | 7 CANH | 8 CANL | 9 RX-TTL | 10 TX-TTL | 11 1WIRE | 12 GND"
 [OK]    text "JUMPERS: J1/J2 = terminador 120R (485/CAN) | J3 = pull-ups I2C ext | J4 = pull-up 1WIRE | J5 = RX1: 1-2 TTL / 2-3 RS-232 | aberto = sem"
 [OK]    text "CN2 5V IN | CN3 I2C ISOLADO (VEXT/GND-EXT do alvo) | CN4 SPI | CN5 modulo CAN | CN6 RS-232 | CN7 ETHERNET W5500 | borne = 3V3 (RX-TTL 1k, 1WIRE 100R)"
@@ -475,4 +476,4 @@ Validacao OK (1 folha(s)).
 [OK]    posicao MH4/1 -> 6800,5000 rot 0
 [OK]    folha SCH - Leitor V2 despejada em: \\192.168.15.31\Equipamentos\EQUIPAMENTOS ATUALIZADOS\TCMS_Reader2\ESQUEMATICO\ESQUEMA_1.SchDoc
 
-OK: 469   Falhas: 0
+OK: 470   Falhas: 0

@@ -512,13 +512,14 @@ function textWidth(txt,h){
   for (const c of txt){ if (c===' '){ w+=0.5*h; continue; } const g=glyphFor(c); w += (g? g.w:0.9)*h; }
   return w;
 }
-function drawStrokeText(txt, x, y, h, rot, mirror, color, alpha){
+function drawStrokeText(txt, x, y, h, rot, mirror, color, alpha, w){
   ctx.save();
   ctx.translate(x,y);
   ctx.rotate(rot*Math.PI/180);
   if (mirror) ctx.scale(-1,1);
   ctx.strokeStyle=color; ctx.globalAlpha=alpha!=null?alpha:1;
-  ctx.lineWidth=h*0.13; ctx.lineCap='round'; ctx.lineJoin='round';
+  /* w = espessura do traco (stroke) em mm, como no Altium; sem w cai no padrao antigo */
+  ctx.lineWidth=(w>0? w : h*0.13); ctx.lineCap='round'; ctx.lineJoin='round';
   let cx0 = -textWidth(txt,h)/2;
   const baseY = -h*0.5;
   for (const c of txt){
@@ -551,7 +552,7 @@ function drawTextItem(t){
   if (t.designator && ownerComp) txt = ownerComp.eff.designator || ownerComp.src.ref;
   if (t.comment && ownerComp) txt = (ownerComp.eff.comment !== undefined ? ownerComp.eff.comment : (ownerComp.src.comment || txt));
   if (!txt) return;
-  drawStrokeText(txt, x, y, t.h||1, rot, mirror, lcolor(layer), layerAlpha(layer));
+  drawStrokeText(txt, x, y, t.h||1, rot, mirror, lcolor(layer), layerAlpha(layer), t.w);
 }
 
 function drawTextObj(m){

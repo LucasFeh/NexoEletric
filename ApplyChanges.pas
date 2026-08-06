@@ -1176,7 +1176,7 @@ var
   Txt: IPCB_Text;
   What: String;
   L: TLayer;
-  cx, cy: Double;
+  cx, cy, dx, dy: Double;
 begin
   What := 'text_edit ' + JGet(Line, 'id');
   if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y') and JHas(Line, 'orig_text') and
@@ -1198,25 +1198,48 @@ begin
     Exit;
   end;
 
+  // 1) Estilo num ciclo proprio: o engine so recalcula o bounding box no EndModify.
+  //    (Medir e ajustar a ancora no MESMO ciclo devolvia o box velho e o ajuste de
+  //    XLocation era descartado - os textos nunca saiam do lugar.)
   PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
   if JHas(Line, 'text') then
     Txt.Text := JGet(Line, 'text');
   if JHas(Line, 'h') then
     Txt.Size := MMsToCoord(JNum(Line, 'h'));
+  if JHas(Line, 'w') then
+    Txt.Width := MMsToCoord(JNum(Line, 'w'));
   if JHas(Line, 'rot') then
     Txt.Rotation := JNum(Line, 'rot');
+  PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Txt.GraphicallyInvalidate;
+
+  // 2) Centraliza com MoveByXY (escrever XLocation em texto e ignorado neste engine;
+  //    MoveByXY e da mesma familia do MoveToXY comprovado no comp_move).
   if JHas(Line, 'x') or JHas(Line, 'y') then
   begin
     cx := (XMM(Txt.BoundingRectangleForSelection.Left) + XMM(Txt.BoundingRectangleForSelection.Right)) / 2;
     cy := (YMM(Txt.BoundingRectangleForSelection.Bottom) + YMM(Txt.BoundingRectangleForSelection.Top)) / 2;
+    dx := 0;
+    dy := 0;
     if JHas(Line, 'x') then
-      Txt.XLocation := Txt.XLocation + MMsToCoord(JNum(Line, 'x') - cx);
+      dx := JNum(Line, 'x') - cx;
     if JHas(Line, 'y') then
-      Txt.YLocation := Txt.YLocation + MMsToCoord(JNum(Line, 'y') - cy);
+      dy := JNum(Line, 'y') - cy;
+    PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+    Txt.MoveByXY(MMsToCoord(dx), MMsToCoord(dy));
+    PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+    Txt.GraphicallyInvalidate;
   end;
-  PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
-  Txt.GraphicallyInvalidate;
-  LogOk(What + ' -> texto=' + Txt.Text + ' centro=(' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')');
+
+  // 3) Relatorio honesto: mede o centro DEPOIS de tudo e confere com o alvo.
+  cx := (XMM(Txt.BoundingRectangleForSelection.Left) + XMM(Txt.BoundingRectangleForSelection.Right)) / 2;
+  cy := (YMM(Txt.BoundingRectangleForSelection.Bottom) + YMM(Txt.BoundingRectangleForSelection.Top)) / 2;
+  if (JHas(Line, 'x') and (Abs(cx - JNum(Line, 'x')) > 0.01)) or
+     (JHas(Line, 'y') and (Abs(cy - JNum(Line, 'y')) > 0.01)) then
+    LogFail(What + ': centro medido (' + FloatToStr(cx) + ',' + FloatToStr(cy) +
+      ') nao chegou no alvo (' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')')
+  else
+    LogOk(What + ' -> texto=' + Txt.Text + ' centro medido=(' + FloatToStr(cx) + ',' + FloatToStr(cy) + ')');
 end;
 
 // designator_move: reposiciona o texto do designator de um componente (ref). x/y do
@@ -1228,7 +1251,7 @@ var
   Comp: IPCB_Component;
   Nm: IPCB_Text;
   What, Ref: String;
-  cx, cy: Double;
+  cx, cy, dx, dy: Double;
 begin
   Ref := JGet(Line, 'ref');
   What := 'designator_move ' + Ref;
@@ -1252,27 +1275,50 @@ begin
     Exit;
   end;
 
+  // Autoposition Manual num ciclo proprio (senao o Altium re-ancora sozinho).
   PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
   Comp.ChangeNameAutoposition(eAutoPos_Manual);
-  PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
-  if JHas(Line, 'h') then
-    Nm.Size := MMsToCoord(JNum(Line, 'h'));
-  if JHas(Line, 'rot') then
-    Nm.Rotation := JNum(Line, 'rot');
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+
+  // Estilo num ciclo proprio (bounding box so recalcula no EndModify - ver DoTextEdit).
+  if JHas(Line, 'h') or JHas(Line, 'rot') then
+  begin
+    PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+    if JHas(Line, 'h') then
+      Nm.Size := MMsToCoord(JNum(Line, 'h'));
+    if JHas(Line, 'rot') then
+      Nm.Rotation := JNum(Line, 'rot');
+    PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+    Nm.GraphicallyInvalidate;
+  end;
+
+  // Move com MoveByXY (escrever XLocation em texto e ignorado neste engine).
   if JHas(Line, 'x') or JHas(Line, 'y') then
   begin
     cx := (XMM(Nm.BoundingRectangleForSelection.Left) + XMM(Nm.BoundingRectangleForSelection.Right)) / 2;
     cy := (YMM(Nm.BoundingRectangleForSelection.Bottom) + YMM(Nm.BoundingRectangleForSelection.Top)) / 2;
+    dx := 0;
+    dy := 0;
     if JHas(Line, 'x') then
-      Nm.XLocation := Nm.XLocation + MMsToCoord(JNum(Line, 'x') - cx);
+      dx := JNum(Line, 'x') - cx;
     if JHas(Line, 'y') then
-      Nm.YLocation := Nm.YLocation + MMsToCoord(JNum(Line, 'y') - cy);
+      dy := JNum(Line, 'y') - cy;
+    PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+    Nm.MoveByXY(MMsToCoord(dx), MMsToCoord(dy));
+    PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+    Nm.GraphicallyInvalidate;
   end;
-  PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
-  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
-  Nm.GraphicallyInvalidate;
   Comp.GraphicallyInvalidate;
-  LogOk(What + ' -> centro=(' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')');
+
+  // Relatorio honesto: centro medido apos as mudancas.
+  cx := (XMM(Nm.BoundingRectangleForSelection.Left) + XMM(Nm.BoundingRectangleForSelection.Right)) / 2;
+  cy := (YMM(Nm.BoundingRectangleForSelection.Bottom) + YMM(Nm.BoundingRectangleForSelection.Top)) / 2;
+  if (JHas(Line, 'x') and (Abs(cx - JNum(Line, 'x')) > 0.01)) or
+     (JHas(Line, 'y') and (Abs(cy - JNum(Line, 'y')) > 0.01)) then
+    LogFail(What + ': centro medido (' + FloatToStr(cx) + ',' + FloatToStr(cy) +
+      ') nao chegou no alvo (' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')')
+  else
+    LogOk(What + ' -> centro medido=(' + FloatToStr(cx) + ',' + FloatToStr(cy) + ')');
 end;
 
 procedure DoCompAttr(Line: String);

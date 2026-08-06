@@ -167,7 +167,7 @@ function applyPcbChanges(board, changes){
         if (!near(ch.orig_x,s.x)||!near(ch.orig_y,s.y)||ch.orig_layer!==s.layer||ch.orig_text!==s.text)
           warn('orig_* não confere com o board.js — espelho pode estar desatualizado');
         if (typeof ch.text==='string') m.eff.text = ch.text;
-        for (const k of ['x','y','h','rot']) if (isNum(ch[k])) m.eff[k] = ch[k];
+        for (const k of ['x','y','h','rot','w']) if (isNum(ch[k])) m.eff[k] = ch[k];
         m.changed = true;
         break;
       }
