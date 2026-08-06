@@ -769,8 +769,9 @@ end;
 procedure PositionComp(SchDoc: ISch_Document; Line: String);
 var
   C: TObject;
-  Ref, Lidos: String;
-  PartId, TX, TY: Integer;
+  Ref, Metodo: String;
+  PartId, TX, TY, BL, BR, BB, BT, Tol: Integer;
+  TemBBox, Descolado: Boolean;
 begin
   Ref := JGet(Line, 'ref');
   PartId := 1;
@@ -790,34 +791,90 @@ begin
     SCHM_BeginModify, c_NoEventData);
   C.Orientation := RotToOrient(Round(JNum(Line, 'rot')));
   C.IsMirrored := (JGet(Line, 'mirror') = 'true');
-  // Tentativas COM LEITURA DE VOLTA: o relatorio passa a dizer onde o componente
-  // REALMENTE ficou, em vez de so repetir o que foi pedido.
-  C.Location := Point(TX, TY);
-  Lidos := 'Location=' + IntToStr(C.Location.X) + ',' + IntToStr(C.Location.Y);
+
+  // NUNCA atribuir C.Location := Point(...) num COMPONENTE: isso mexe na ancora
+  // sem mover as primitivas do simbolo, e a leitura de volta passa a mentir
+  // (a ancora diz o valor certo enquanto o desenho ficou noutro lugar).
+  //
+  // Medido no .SchDoc real deste projeto: a versao que chamava C.MoveToXY(alvo)
+  // deixou os 81 componentes em alvo + (2920,4300) mil - constante, erro zero -
+  // enquanto net labels e power ports (que usam Location) ficaram exatos.
+  // Isto e, MoveToXY aqui se comporta como movimento RELATIVO: somou o alvo a
+  // posicao onde os simbolos ja estavam. Entao movemos por DELTA MEDIDO.
+  // Ordem: primeiro a semantica DOCUMENTADA (MoveToXY absoluto), depois a que a
+  // medicao sugere (MoveToXY como deslocamento), depois MoveByXY protegido - ele
+  // pode simplesmente nao existir neste engine. Cada passo so dispara se o
+  // anterior nao acertou e o delta e sempre RELIDO, entao a escada converge
+  // qualquer que seja a semantica real e nunca soma coordenada como se fosse
+  // deslocamento. Rodar duas vezes nao mexe na segunda (idempotente).
+  Metodo := 'ja estava';
   if (C.Location.X <> TX) or (C.Location.Y <> TY) then
   begin
     C.MoveToXY(TX, TY);
-    Lidos := Lidos + ' | MoveToXY=' + IntToStr(C.Location.X) + ',' + IntToStr(C.Location.Y);
+    Metodo := 'MoveToXY absoluto';
   end;
-  // Location/MoveToXY podem mover so a ancora e deixar as primitivas do simbolo
-  // na origem. MoveByXY move ancora + primitivas: zera e move relativo.
-  try
-    C.Location := Point(0, 0);
-    C.MoveByXY(TX, TY);
-    Lidos := Lidos + ' | MoveByXY=' + IntToStr(C.Location.X) + ',' + IntToStr(C.Location.Y);
-  except
-    C.Location := Point(TX, TY);
-    Lidos := Lidos + ' | MoveByXY indisponivel';
+  if (C.Location.X <> TX) or (C.Location.Y <> TY) then
+  begin
+    C.MoveToXY(TX - C.Location.X, TY - C.Location.Y);
+    Metodo := 'MoveToXY delta';
   end;
+  if (C.Location.X <> TX) or (C.Location.Y <> TY) then
+  begin
+    try
+      C.MoveByXY(TX - C.Location.X, TY - C.Location.Y);
+      Metodo := 'MoveByXY delta';
+    except
+      Metodo := 'MoveByXY indisponivel';
+    end;
+  end;
+
   SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
     SCHM_EndModify, c_NoEventData);
   C.GraphicallyInvalidate;
-  if (C.Location.X = TX) and (C.Location.Y = TY) then
-    LogOk('posicao ' + Ref + '/' + IntToStr(PartId) + ' -> ' +
-      JGet(Line, 'x') + ',' + JGet(Line, 'y') + ' rot ' + JGet(Line, 'rot'))
-  else
+
+  // CONFERENCIA GEOMETRICA. Comparar so C.Location com o alvo e verificacao
+  // circular: e a mesma propriedade que acabamos de escrever. Foi assim que 81
+  // componentes desenhados FORA da folha A4 sairam como [OK] - a ancora lia o
+  // alvo enquanto o desenho estava (2920,4300) mil dali (medido no .SchDoc).
+  // A ancora de um simbolo sao tem que cair DENTRO da caixa dele; se nao cair,
+  // ancora e desenho estao descolados e nenhum delta conserta - so refazer.
+  TemBBox := True;
+  BL := 0; BR := 0; BB := 0; BT := 0;
+  try
+    BL := C.BoundingRectangle_Full.Left;
+    BR := C.BoundingRectangle_Full.Right;
+    BB := C.BoundingRectangle_Full.Bottom;
+    BT := C.BoundingRectangle_Full.Top;
+  except
+    TemBBox := False;
+  end;
+  Descolado := False;
+  if TemBBox then
+  begin
+    Tol := MilsToCoord(200);
+    Descolado := (C.Location.X < BL - Tol) or (C.Location.X > BR + Tol) or
+                 (C.Location.Y < BB - Tol) or (C.Location.Y > BT + Tol);
+  end;
+
+  if (C.Location.X <> TX) or (C.Location.Y <> TY) then
     LogFail('posicao ' + Ref + '/' + IntToStr(PartId) + ': pedido ' +
-      IntToStr(TX) + ',' + IntToStr(TY) + ' mas ficou ' + Lidos);
+      IntToStr(TX) + ',' + IntToStr(TY) + ' mas ficou ' +
+      IntToStr(C.Location.X) + ',' + IntToStr(C.Location.Y) +
+      ' (ultimo metodo: ' + Metodo + ')')
+  else if Descolado then
+    LogFail('posicao ' + Ref + '/' + IntToStr(PartId) + ': ancora em ' +
+      JGet(Line, 'x') + ',' + JGet(Line, 'y') + ' mas o DESENHO esta fora dela ' +
+      '(caixa ' + IntToStr(BL) + ',' + IntToStr(BB) + ' a ' + IntToStr(BR) + ',' +
+      IntToStr(BT) + ') - componente descolado por despejo antigo; apague a folha ' +
+      '(Ctrl+A, Delete) e redespeje')
+  else
+  begin
+    if not TemBBox then
+      Metodo := Metodo + ', bbox nao verificavel';
+    LogOk('posicao ' + Ref + '/' + IntToStr(PartId) + ' -> ' +
+      JGet(Line, 'x') + ',' + JGet(Line, 'y') + ' rot ' + JGet(Line, 'rot') +
+      ' [' + Metodo + ']');
+  end;
 end;
 
 // Confirmacao digitada (usa so primitivas provadas neste engine)
@@ -829,41 +886,91 @@ begin
   Result := (AnsiCompareText(s, 'SIM') = 0);
 end;
 
-// Remove da folha os objetos que este script cria (componentes, fios, rotulos,
-// power ports, junctions e textos). O template/carimbo da folha NAO e tocado.
-// Serve para re-despejar sem duplicar o que ja foi despejado antes.
-procedure ClearDumpedObjects(SchDoc: ISch_Document);
+// Conta o que ainda esta na folha dos tipos que este script despeja.
+// Componente NAO entra: ele e reaproveitado pelo designador/parte (PlaceComp),
+// para preservar o UniqueID de que o ECO depende - apagar e recriar faria a PCB
+// perder o casamento com os componentes ja posicionados.
+// O carimbo tambem nao entra: os rotulos dele pertencem ao template (OwnerIndex
+// do objeto de template), e o iterador de documento so devolve o nivel de cima.
+function CountDumpedObjects(SchDoc: ISch_Document): Integer;
 var
   Iter, Obj: TObject;
-  Lst: TStringList;
-  i, n: Integer;
 begin
-  Lst := TStringList.Create;
+  Result := 0;
   Iter := SchDoc.SchIterator_Create;
-  if Iter <> nil then
+  if Iter = nil then
+    Exit;
+  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, eJunction));
+  Obj := Iter.FirstSchObject;
+  while Obj <> nil do
   begin
-    Iter.AddFilter_ObjectSet(MkSet(eSchComponent, eWire, eNetLabel, ePowerObject,
-      eJunction, eLabel));
-    Obj := Iter.FirstSchObject;
-    while Obj <> nil do
-    begin
-      Lst.AddObject('x', Obj);
-      Obj := Iter.NextSchObject;
-    end;
-    SchDoc.SchIterator_Destroy(Iter);
+    Result := Result + 1;
+    Obj := Iter.NextSchObject;
   end;
-  n := 0;
-  for i := 0 to Lst.Count - 1 do
+  SchDoc.SchIterator_Destroy(Iter);
+end;
+
+// Remove da folha os objetos que este script cria (fios, rotulos, power ports,
+// junctions e textos). O template/carimbo da folha NAO e tocado.
+// Serve para re-despejar sem duplicar o que ja foi despejado antes.
+//
+// POR QUE A VERSAO ANTERIOR REMOVIA ZERO (medido: "sobraram 631 de 631",
+// depois 937 de 937, depois 1243 de 1243 - crescendo 306 por run, que e um
+// despejo inteiro):
+//
+//  1) Ela guardava os objetos num TStringList (Lst.AddObject / Lst.Objects[i]).
+//     Objeto de esquema em DelphiScript e uma INTERFACE (ISch_*); o slot
+//     Objects[] e um TObject da RTL do host. O round-trip pelo slot descarta a
+//     referencia, e RemoveSchObject recebe lixo e vira no-op silencioso.
+//     Todo exemplo oficial da Altium que coleta antes de apagar usa
+//     TInterfaceList - mas esse tipo nao esta na lista de classes garantidas do
+//     DelphiScript, entao aqui nao usamos container NENHUM.
+//  2) Ela nunca avisava o servidor. Quem notifica a REMOCAO e a MESMA mensagem
+//     do cadastro, SCHM_PrimitiveRegistration - nao existe (e nunca existiu)
+//     SCHM_PrimitiveDeRegistration na API de esquema; a tabela SCHM_ vai de 0 a
+//     14 sem lacuna. O comentario antigo aqui acertou o sintoma e errou a
+//     conclusao: nao havia o que contornar.
+//
+// Este e o idioma oficial (DeleteSchObjects.pas, (c) Altium Limited): avanca o
+// iterador ANTES de remover (o objeto sai do banco mas continua em memoria, por
+// isso I_ObjectAddress ainda vale na linha seguinte), remove, e so entao avisa.
+// UMA passada - o laco de 12 da versao anterior era sintoma, nao solucao.
+// PreProcess/PostProcess ficam com o chamador; nao aninhar outro par aqui.
+procedure ClearDumpedObjects(SchDoc: ISch_Document);
+var
+  Iter, Obj, Prox: TObject;
+  Antes, Restam: Integer;
+begin
+  Antes := CountDumpedObjects(SchDoc);
+  if Antes = 0 then
   begin
-    Obj := Lst.Objects[i];
-    // so RemoveSchObject: a constante SCHM_PrimitiveDeRegistration nao existe
-    // neste engine (a de registro existe) e derruba o script em execucao.
+    LogOk('limpeza: folha ja estava limpa');
+    Exit;
+  end;
+  Iter := SchDoc.SchIterator_Create;
+  if Iter = nil then
+  begin
+    LogFail('limpeza: SchIterator_Create devolveu nil - nada removido');
+    Exit;
+  end;
+  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, eJunction));
+  Obj := Iter.FirstSchObject;
+  while Obj <> nil do
+  begin
+    Prox := Iter.NextSchObject;
     SchDoc.RemoveSchObject(Obj);
-    n := n + 1;
+    SchServer.RobotManager.SendMessage(SchDoc.I_ObjectAddress, c_BroadCast,
+      SCHM_PrimitiveRegistration, Obj.I_ObjectAddress);
+    Obj := Prox;
   end;
-  Lst.Free;
+  SchDoc.SchIterator_Destroy(Iter);
   SchDoc.GraphicallyInvalidate;
-  LogOk('limpeza: ' + IntToStr(n) + ' objetos removidos da folha');
+  Restam := CountDumpedObjects(SchDoc);
+  if Restam = 0 then
+    LogOk('limpeza: folha zerada - ' + IntToStr(Antes) + ' objetos removidos')
+  else
+    LogFail('limpeza: sobraram ' + IntToStr(Restam) + ' de ' + IntToStr(Antes) +
+      ' objetos - o despejo seria duplicado');
 end;
 
 // Janela com os .SchDoc do projeto focado; devolve o caminho escolhido ('' = cancelou)
@@ -1032,17 +1139,52 @@ begin
   LogOk('junction');
 end;
 
+// O carimbo/template da folha tambem e feito de eLabel (DESEN., VERIF., =Revisao,
+// =Arquivo, ...) e o iterador de documento ALCANCA esses rotulos - medido: a folha
+// "vazia" ainda devolvia 26. Por isso eLabel ficou de fora da limpeza: apagar por
+// tipo levaria o carimbo junto. Em troca, o texto do despejo e IDEMPOTENTE - se ja
+// existe um rotulo com o mesmo conteudo na mesma posicao, nao cria outro.
+function FindLabelAt(SchDoc: ISch_Document; Txt: String; X, Y: Integer): TObject;
+var
+  Iter, L: TObject;
+begin
+  Result := nil;
+  Iter := SchDoc.SchIterator_Create;
+  if Iter = nil then
+    Exit;
+  Iter.AddFilter_ObjectSet(MkSet(eLabel));
+  L := Iter.FirstSchObject;
+  while L <> nil do
+  begin
+    if (L.Text = Txt) and (L.Location.X = X) and (L.Location.Y = Y) then
+    begin
+      Result := L;
+      break;
+    end;
+    L := Iter.NextSchObject;
+  end;
+  SchDoc.SchIterator_Destroy(Iter);
+end;
+
 procedure PlaceText(SchDoc: ISch_Document; Line: String);
 var
   L: TObject;
+  TX, TY: Integer;
 begin
+  TX := MilsToCoord(JNum(Line, 'x'));
+  TY := MilsToCoord(JNum(Line, 'y'));
+  if FindLabelAt(SchDoc, JGet(Line, 's'), TX, TY) <> nil then
+  begin
+    LogOk('text "' + JGet(Line, 's') + '" ja existia - mantido');
+    Exit;
+  end;
   L := SchServer.SchObjectFactory(eLabel, eCreate_GlobalCopy);
   if L = nil then
   begin
     LogFail('text: factory falhou');
     Exit;
   end;
-  L.Location := Point(MilsToCoord(JNum(Line, 'x')), MilsToCoord(JNum(Line, 'y')));
+  L.Location := Point(TX, TY);
   L.Text := JGet(Line, 's');
   RegisterObj(SchDoc, L);
   LogOk('text "' + JGet(Line, 's') + '"');
@@ -1056,9 +1198,9 @@ procedure BuildSchematicInto(ProjDir: String);
 var
   WS: IWorkspace;
   Prj: IProject;
-  ProjFolder, SchFile, Line, T, SheetName, TargetPath: String;
+  ProjFolder, SchFile, Line, T, SheetName, TargetPath, SalvouTxt: String;
   Src, Syms, Fps, Refs, SheetNames, SheetSizes, Pts, ItemSheets: TStringList;
-  i, si, ErrCount, PartId: Integer;
+  i, si, ErrCount, PartId, Restantes, AntesSave, DepoisSave: Integer;
   ServerDoc: IServerDocument;
   SchDoc: ISch_Document;
 begin
@@ -1262,9 +1404,28 @@ begin
 
     SchServer.ProcessControl.PreProcess(SchDoc, '');
     if ConfirmTypedYes('Limpar o conteudo ja despejado nesta folha antes?' + #13#10 +
-      '(componentes, fios, rotulos, power ports e textos - o carimbo/template fica)' + #13#10 +
+      '(fios, rotulos, power ports, junctions e textos - o carimbo/template fica;' + #13#10 +
+      'os componentes sao reaproveitados pelo designador, nao sao apagados)' + #13#10 +
       'Responda SIM se voce ja despejou este projeto aqui antes.') then
-      ClearDumpedObjects(SchDoc);
+      ClearDumpedObjects(SchDoc)
+    else
+      LogOk('limpeza: pulada a pedido do usuario');
+
+    // TRAVA ANTI-DUPLICACAO: despejar em cima do que ja esta na folha foi
+    // exatamente o que produziu 2 e depois 3 copias sobrepostas de cada fio,
+    // net label e power port. Se a folha nao esta zerada, NAO despeja - aborta
+    // esta folha e diz o que fazer. Vale tanto para limpeza que falhou quanto
+    // para o usuario que respondeu NAO sem a folha estar vazia.
+    Restantes := CountDumpedObjects(SchDoc);
+    if Restantes > 0 then
+    begin
+      LogFail('folha ' + SheetName + ': DESPEJO ABORTADO - ainda ha ' +
+        IntToStr(Restantes) + ' objetos na folha (fios/rotulos/power/junctions/textos). ' +
+        'Despejar agora criaria copias sobrepostas. No Altium: Ctrl+A, Delete, e rode de novo.');
+      SchServer.ProcessControl.PostProcess(SchDoc, '');
+      continue;
+    end;
+
     // 2a) simbolos e demais objetos
     for i := 0 to Src.Count - 1 do
     begin
@@ -1300,10 +1461,51 @@ begin
     SchServer.ProcessControl.PostProcess(SchDoc, '');
     SchDoc.GraphicallyInvalidate;
 
-    if not ServerDoc.DoFileSave('SCH') then
-      LogFail('folha ' + SheetName + ': falha ao salvar ' + TargetPath)
+    // SAVE. O que estava aqui era 'DoFileSave('SCH')', e isso passava um
+    // DOCUMENT KIND onde a API espera um FILTRO de gravacao - por isso devolvia
+    // True sem escrever byte nenhum. Medido: tres runs logaram sucesso e o
+    // arquivo em disco (e o History do Altium) ficaram parados no dia 04/08.
+    // Filtro correto do .SchDoc binario padrao e a string VAZIA. Alem disso o
+    // servidor so grava documento marcado como sujo - dai o SetModified.
+    // Nada disso e assumido: o resultado e conferido pela DATA DO ARQUIVO, e
+    // quando nao da para provar, o relatorio manda dar Ctrl+S em vez de mentir.
+    // (O ApplyChanges, que funciona, nunca salva sozinho: deixa o Ctrl+S pro
+    // usuario. Aqui o save e melhor-esforco COM prova.)
+    AntesSave := -1;
+    DepoisSave := -2;
+    try
+      AntesSave := FileAge(TargetPath);
+    except
+      AntesSave := -1;
+    end;
+    try
+      ServerDoc.SetModified(True);
+    except
+      // engine sem SetModified: segue para o save mesmo assim
+    end;
+    SalvouTxt := 'False';
+    try
+      if ServerDoc.DoFileSave('') then
+        SalvouTxt := 'True';
+    except
+      SalvouTxt := 'excecao';
+    end;
+    try
+      DepoisSave := FileAge(TargetPath);
+    except
+      DepoisSave := -2;
+    end;
+
+    if (AntesSave <> -1) and (DepoisSave <> -2) and (DepoisSave <> AntesSave) then
+      LogOk('folha ' + SheetName + ' despejada e GRAVADA em: ' + TargetPath)
+    else if (AntesSave <> -1) and (DepoisSave = AntesSave) then
+      LogFail('folha ' + SheetName + ': o arquivo NAO mudou em disco (' + TargetPath +
+        ') - DoFileSave devolveu ' + SalvouTxt +
+        '. O despejo esta so na memoria: de Ctrl+S no Altium para gravar.')
     else
-      LogOk('folha ' + SheetName + ' despejada em: ' + TargetPath);
+      LogFail('folha ' + SheetName + ': nao consegui PROVAR a gravacao de ' + TargetPath +
+        ' (DoFileSave devolveu ' + SalvouTxt +
+        ', data do arquivo nao verificavel) - de Ctrl+S no Altium por seguranca.');
   end;
 
   Report.Add('');

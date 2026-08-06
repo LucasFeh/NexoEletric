@@ -41,7 +41,7 @@ Duas frentes de trabalho, normalmente nesta ordem para um projeto novo:
   `files.schematic:true` e todos os outros `false` até os scripts do Altium gerarem
   `board.js`/`changes.js`/os relatórios (eles regeneram `projects.js` sozinhos depois).
 
-**Dois escritores:** o usuário também edita o `schematic.js` pelo hub (vista Esquema). Releia o arquivo antes de cada edição e preserve as linhas dele; após edições, o BuildSchematic deve rodar com limpeza da folha para refletir removidos/alterados.
+**Dois escritores:** o usuário também edita o `schematic.js` pelo hub (vista Esquema). Releia o arquivo antes de cada edição e preserve as linhas dele; após edições, o BuildSchematic deve rodar com limpeza da folha para refletir removidos/alterados. A limpeza apaga fios, rótulos, power ports, junções e textos — **componentes não**: eles são reaproveitados pelo designador/parte para preservar o `UniqueID` que o ECO usa. Componente apagado do `schematic.js` continua na folha e precisa ser removido à mão no Altium.
 
 ### Coordenadas (idêntico ao Altium Sch)
 
