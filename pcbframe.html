@@ -27,10 +27,13 @@
 
   #main{display:flex; height:calc(100% - 76px);}
 
-  /* lean: embutido em outra vista (aba Neoden do hub) — so barra de ferramentas + canvas.
-     A edicao continua funcionando, so somem os paineis que duplicam o que o hub ja mostra. */
-  body.lean #header, body.lean #left, body.lean #right{display:none;}
+  /* lean: embutido em outra vista (aba Neoden do hub) — so barra de ferramentas + canvas,
+     e sem o botao Editar: la a vista e de consulta e a edicao nunca destrava. */
+  body.lean #header, body.lean #left, body.lean #right, body.lean #btnEdit{display:none;}
   body.lean #main{height:calc(100% - 34px);}
+
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button:disabled:hover{border-color:var(--border); color:var(--fg);}
 
   #toolbar{display:flex; align-items:center; gap:8px; height:34px; padding:0 12px;
     background:var(--panel); border-bottom:1px solid var(--border); font-size:12px;}
@@ -123,6 +126,8 @@
 </div>
 
 <div id="toolbar">
+  <button id="btnEdit" title="Destravar edicao (E)">Editar</button>
+  <span class="sep"></span>
   <button id="toolSelect" class="active" title="Selecionar/arrastar (Esc)">Selecionar</button>
   <button id="toolTrack" title="Desenhar trilhas (T)">Trilha</button>
   <button id="toolVia" title="Adicionar via">Via</button>

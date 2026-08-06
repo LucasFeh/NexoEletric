@@ -14,6 +14,14 @@ const CH = (typeof changes !== 'undefined' && Array.isArray(changes)) ? changes 
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
+/* ------- travamento de edicao -------
+   A vista abre em LEITURA. Editar exige clicar em "Editar" na barra de ferramentas.
+   lean=1 (placa embutida na aba Neoden do hub) nunca libera: la a vista e so consulta.
+   O bloqueio fica nos pontos de ENTRADA (ferramentas, arrasto, duplo clique, teclado),
+   nao no commit — assim nada chega a ser mexido na tela para depois ser recusado. */
+const LEAN = new URLSearchParams(location.search).has('lean');
+let editOn = false;
+
 /* ------- ferramenta Sinalizar + persistencia ------- */
 let annTool = false, annDirty = false, annPending = null, staleWorkspace = false;
 
@@ -24,6 +32,7 @@ function setAnnDirty(v){
   b.textContent = v ? 'Salvar sinaliz. *' : 'Salvar sinaliz.';
 }
 function setAnnTool(v){
+  if (v && !editOn) return;
   if (v) setTool('select');
   annTool = v;
   document.getElementById('btnAnn').classList.toggle('active', v);
@@ -717,6 +726,7 @@ let hoverW = null;       /* posicao do mouse em mundo, p/ rubber-band */
 let viaPending = null;
 
 function setTool(t){
+  if (t !== 'select' && !editOn) return;
   if (t !== 'select' && annTool) setAnnTool(false);
   tool = t;
   trackChain = null; viaPending = null;
@@ -729,6 +739,28 @@ function setTool(t){
 document.getElementById('toolSelect').addEventListener('click', () => setTool('select'));
 document.getElementById('toolTrack').addEventListener('click', () => setTool('track'));
 document.getElementById('toolVia').addEventListener('click', () => setTool('via'));
+
+/* liga/desliga o modo edicao e reflete o estado em tudo que edita */
+function setEdit(v){
+  editOn = !!v && !LEAN;
+  if (!editOn){
+    if (tool !== 'select') setTool('select');
+    if (annTool) setAnnTool(false);
+    objDrag = null;                 /* trancar no meio de um arrasto nao pode virar commit */
+  }
+  const b = document.getElementById('btnEdit');
+  if (b){
+    b.classList.toggle('active', editOn);
+    b.textContent = editOn ? 'Editando' : 'Editar';
+    b.title = editOn ? 'Voltar para leitura' : 'Destravar edicao (trilha, via, arrasto, sinalizar)';
+  }
+  /* os Salvar ficam de fora de proposito: a trava e para NAO deixar alterar, e travar de
+     volta com alteracoes pendentes nao pode impedir de grava-las. */
+  for (const id of ['toolTrack','toolVia','btnAnn'])
+    { const x = document.getElementById(id); if (x) x.disabled = !editOn; }
+  draw();
+}
+{ const b = document.getElementById('btnEdit'); if (b) b.addEventListener('click', () => setEdit(!editOn)); }
 
 function padSnap(w){   /* centro de pad proximo (prioridade sobre a grade) */
   const tolp = 8 / view.scale;
@@ -879,14 +911,14 @@ document.getElementById('propcancel').addEventListener('click', () => {
   document.getElementById('propform').style.display = 'none'; propTarget = null; reapply();
 });
 cv.addEventListener('dblclick', e => {
-  if (tool !== 'select' || annTool) return;
+  if (!editOn || tool !== 'select' || annTool) return;
   const w = screenToWorld(e.offsetX, e.offsetY);
   const h = hitTest(w.x, w.y);
   if (h && h.kind !== 'pad' && h.kind !== 'ann') openProps(h);
 });
 cv.addEventListener('mousedown', e => {
   dragging = false; dragMoved = false; lastX = e.offsetX; lastY = e.offsetY;
-  if (annTool || tool !== 'select' || e.button !== 0){ dragging = true; return; }
+  if (!editOn || annTool || tool !== 'select' || e.button !== 0){ dragging = true; return; }
   const w = screenToWorld(e.offsetX, e.offsetY);
   const h = hitTest(w.x, w.y);
   if (h && ['comp','track','via','arc'].includes(h.kind) && !h.deleted){
@@ -1131,14 +1163,14 @@ function buildAnnPanel(){
     if (a.status === 'resolved'){
       const rb = document.createElement('span');
       rb.className = 'annx'; rb.textContent = '↺'; rb.title = 'reabrir';
-      rb.addEventListener('click', ev => { ev.stopPropagation(); a.status = 'open'; a.reply = ''; annChanged(); });
+      rb.addEventListener('click', ev => { ev.stopPropagation(); if (!editOn) return; a.status = 'open'; a.reply = ''; annChanged(); });
       div.appendChild(rb);
     }
     div.addEventListener('click', () => { selected = { kind:'ann', ann:a }; showInfo(selected); zoomToObj(selected); });
     list.appendChild(div);
   }
 }
-function annDelete(a){ ANN.splice(ANN.indexOf(a), 1); annChanged(); }
+function annDelete(a){ if (!editOn) return; ANN.splice(ANN.indexOf(a), 1); annChanged(); }
 function annChanged(){ setAnnDirty(true); buildAnnPanel(); draw(); }
 
 /* ============================== PCB List (tabela) ============================== */
@@ -1237,8 +1269,9 @@ window.addEventListener('keydown',e=>{
   if (e.key === ' ' && objDrag && objDrag.m.kind === 'comp'){ e.preventDefault(); objDrag.m.eff.rot = (objDrag.m.eff.rot + 90) % 360; objDrag.moved = true; dragMoved = true; draw(); return; }
   if (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.tagName==='SELECT') return;
   const k=e.key.toLowerCase();
-  if (e.ctrlKey && k === 'z'){ e.preventDefault(); undo(); return; }
-  if (e.ctrlKey && k === 'y'){ e.preventDefault(); redo(); return; }
+  if (e.ctrlKey && k === 'z'){ e.preventDefault(); if (editOn) undo(); return; }
+  if (e.ctrlKey && k === 'y'){ e.preventDefault(); if (editOn) redo(); return; }
+  if (k === 'e'){ setEdit(!editOn); return; }
   if (k==='f'){ fitBoard(); updateZoomLabel(); draw(); }
   else if (k==='v') toggleFlip();
   else if (k==='g'){ show.grid=!show.grid; document.getElementById('btnGrid').classList.toggle('active'); draw(); }
@@ -1246,7 +1279,7 @@ window.addEventListener('keydown',e=>{
   else if (k==='h') toggleHelp();
   else if (k==='n') setAnnTool(!annTool);
   else if (k === 't') setTool(tool === 'track' ? 'select' : 'track');
-  else if (e.key === 'Delete') deleteSelected();
+  else if (e.key === 'Delete'){ if (editOn) deleteSelected(); }
 });
 
 /* ============================== init ============================== */
@@ -1263,6 +1296,7 @@ renderTable();
 resize();
 fitBoard();
 updateZoomLabel();
+setEdit(false);   /* abre travado; tambem ja desabilita as ferramentas de edicao */
 draw();
 
 })();

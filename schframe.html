@@ -15,6 +15,8 @@
   #schtoolbar{display:flex; align-items:center; gap:8px; height:32px; padding:0 10px;
     background:var(--panel); border-bottom:1px solid var(--border); font-size:12px;}
   #schtoolbar .sep{width:1px; height:16px; background:var(--border);}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button:disabled:hover{border-color:var(--border);}
   button{background:var(--panel2); color:var(--fg); border:1px solid var(--border);
     border-radius:3px; padding:3px 10px; font-size:12px; cursor:pointer;}
   button:hover{border-color:var(--accent);}
@@ -72,6 +74,8 @@
   <span class="meta" id="meta"></span>
 </div>
 <div id="schtoolbar">
+  <button id="btnEdit" title="Destravar edicao (E)">Editar</button>
+  <span class="sep"></span>
   <button id="toolSelect" class="active" title="Selecionar/mover (Esc)">Selecionar</button>
   <button id="toolComp" title="Adicionar componente das libs (C)">+ Componente</button>
   <button id="toolWire" title="Desenhar fio (W); botão direito/Esc encerra">Fio</button>

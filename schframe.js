@@ -17,6 +17,12 @@ const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
 let annTool = false, annDirty = false, annPending = null, staleWorkspace = false;
 
+/* ------- travamento de edicao -------
+   Abre em LEITURA; editar exige clicar em "Editar". Igual ao pcbframe: o bloqueio fica
+   nos pontos de ENTRADA (ferramentas, picker, arrasto, duplo clique, teclado), nunca no
+   commit — nada chega a ser mexido na tela para depois ser recusado. */
+let editOn = false;
+
 /* ------- infra de edicao ------- */
 let selItem = null;                     /* { kind:'comp|wire|netlabel|power|junction|text', item } */
 let dragState = null;                   /* { kind, item, start:{x,y}, base } — arrasto em curso */
@@ -142,6 +148,7 @@ function drawPickPreview(){
   }
 }
 function openPicker(){
+  if (!editOn) return;
   document.getElementById('pickform').style.display = 'block';
   buildPickList();
   document.getElementById('picksearch').focus();
@@ -245,6 +252,7 @@ for (const [id, kind] of [['toolWire','wire'], ['toolLabel','netlabel'], ['toolP
   });
 
 function setSchTool(t){
+  if (t !== 'select' && !editOn) return;
   if (t !== 'select' && annTool) setAnnTool(false);
   schTool = t;
   wireDraw = null; placeKind = null; placeData = null;
@@ -255,6 +263,26 @@ function setSchTool(t){
   document.getElementById('cv').style.cursor = t === 'select' ? 'crosshair' : 'copy';
   cam.draw();
 }
+/* liga/desliga o modo edicao e reflete o estado em tudo que edita */
+function setEdit(v){
+  editOn = !!v;
+  if (!editOn){
+    if (schTool !== 'select') setSchTool('select');
+    if (annTool) setAnnTool(false);
+    placing = null; wireDraw = null; dragState = null; closePicker();
+  }
+  const b = document.getElementById('btnEdit');
+  b.classList.toggle('active', editOn);
+  b.textContent = editOn ? 'Editando' : 'Editar';
+  b.title = editOn ? 'Voltar para leitura' : 'Destravar edicao (componente, fio, label, arrasto)';
+  /* os Salvar ficam de fora de proposito: a trava e para NAO deixar alterar, e travar de
+     volta com alteracoes pendentes nao pode impedir de grava-las. */
+  for (const id of ['toolComp','toolWire','toolLabel','toolPower','toolJunction','toolText','btnAnn'])
+    document.getElementById(id).disabled = !editOn;
+  cam.draw();
+}
+document.getElementById('btnEdit').addEventListener('click', () => setEdit(!editOn));
+
 document.getElementById('cv').addEventListener('contextmenu', e => { e.preventDefault(); if (wireDraw) endWire(); });
 
 /* ------- propriedades (duplo clique) ------- */
@@ -326,7 +354,7 @@ document.getElementById('schpropscancel').addEventListener('click', () => {
   document.getElementById('schprops').style.display = 'none'; propItem = null;
 });
 document.getElementById('cv').addEventListener('dblclick', () => {
-  if (annTool || schTool !== 'select' || placing || wireDraw || !hoverW) return;
+  if (!editOn || annTool || schTool !== 'select' || placing || wireDraw || !hoverW) return;
   const h = hitTest(hoverW.x, hoverW.y);
   if (h && h.kind !== 'pin' && h.kind !== 'wire' && h.kind !== 'junction') openSchProps(h);
   else if (h && h.kind === 'pin') openSchProps({ kind:'comp', item:h.item });
@@ -516,7 +544,7 @@ const cam = D.mkCamera(document.getElementById('cv'), drawWorld, {
     cam.draw();
   },
   onDragStart: w => {
-    if (annTool || schTool !== 'select') return false;
+    if (!editOn || annTool || schTool !== 'select') return false;
     const h = hitTest(w.x, w.y);
     if (!h || h.kind === 'pin') return false;
     const it = h.item;
@@ -587,6 +615,7 @@ function setAnnDirty(v){
   b.textContent = v ? 'Salvar sinaliz. *' : 'Salvar sinaliz.';
 }
 function setAnnTool(v){
+  if (v && !editOn) return;
   if (v){ setSchTool('select'); placing = null; }
   annTool = v;
   document.getElementById('btnAnn').classList.toggle('active', v);
@@ -620,7 +649,7 @@ function buildAnnPanel(){
     div.className = 'annitem ' + a.severity + (a.status === 'resolved' ? ' resolved' : '');
     const x = document.createElement('span');
     x.className = 'annx'; x.textContent = '✕'; x.title = 'apagar';
-    x.addEventListener('click', ev => { ev.stopPropagation(); ANN.splice(ANN.indexOf(a), 1); annChanged(); });
+    x.addEventListener('click', ev => { ev.stopPropagation(); if (!editOn) return; ANN.splice(ANN.indexOf(a), 1); annChanged(); });
     div.appendChild(x);
     div.appendChild(document.createTextNode(
       `${a.id} [${a.sheet}]: ${a.msg}` + (a.status === 'resolved' ? (a.reply ? ` ✓ ${a.reply}` : ' ✓') : '')));
@@ -676,9 +705,10 @@ window.addEventListener('keydown', e => {
   }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
   const k = e.key.toLowerCase();
-  if (e.ctrlKey && k === 'z'){ e.preventDefault(); undo(); return; }
-  if (e.ctrlKey && k === 'y'){ e.preventDefault(); redo(); return; }
-  if (e.key === 'Delete' && selItem){
+  if (e.ctrlKey && k === 'z'){ e.preventDefault(); if (editOn) undo(); return; }
+  if (e.ctrlKey && k === 'y'){ e.preventDefault(); if (editOn) redo(); return; }
+  if (k === 'e'){ setEdit(!editOn); return; }
+  if (e.key === 'Delete' && selItem && editOn){
     const i = schematic.items.indexOf(selItem.item);
     if (i >= 0){ schematic.items.splice(i, 1); selItem = null; selComp = null; commit(); }
     return;
@@ -689,11 +719,13 @@ window.addEventListener('keydown', e => {
   if (k === 'w') setSchTool(schTool === 'wire' ? 'select' : 'wire');
   if (e.key === ' ' && selItem && selItem.kind === 'comp'){
     e.preventDefault();
+    if (!editOn) return;
     selItem.item.rot = (((selItem.item.rot || 0) + 90) % 360);
     if (dragState) cam.draw(); else commit();
     return;
   }
   if (k === 'x' && selItem && selItem.kind === 'comp'){
+    if (!editOn) return;
     selItem.item.mirror = !selItem.item.mirror;
     if (dragState) cam.draw(); else commit();
     return;
@@ -774,5 +806,6 @@ document.getElementById('btnGrid').addEventListener('click', e => {
 
 buildSheetSel(); buildCompTable(); buildNetList(); buildValList(); buildAnnPanel();
 cam.resize(); cam.fit(sheetBBox());
+setEdit(false);   /* abre travado; tambem ja desabilita as ferramentas de edicao */
 
 })();

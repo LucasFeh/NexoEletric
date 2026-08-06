@@ -152,11 +152,18 @@ precisar de servidor.
   `Libs\schlib.js`: símbolos, fios, junctions, net labels, power ports, designator/comment.
   Zoom/pan, cursor em mil, clique numa net destaca ela na folha inteira (com os pinos
   membros). Painel lateral com a lista de componentes e a validação do esquema.
-  A vista Esquema **edita**: `+ Componente` abre o picker das libs (símbolo + footprint lado a lado, ref sugerido), `W` desenha fios com snap na ponta quente dos pinos, Label/Power/Junção/Texto por clique, arrastar move com grade de 100 mil, duplo clique abre propriedades, `Ctrl+Z` desfaz e **Salvar esquema** grava o `schematic.js`. Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com limpeza da folha** (confirmação SIM).
+  A vista Esquema **edita depois de destravar** — as duas vistas abrem em leitura e só
+  aceitam alteração depois do botão **Editar** (`E`), que libera ferramentas, arrasto,
+  duplo clique, Delete e Ctrl+Z; os **Salvar** ficam sempre disponíveis, para nunca prender
+  o que já foi alterado. Destravada: `+ Componente` abre o picker das libs (símbolo + footprint lado a lado, ref sugerido), `W` desenha fios com snap na ponta quente dos pinos, Label/Power/Junção/Texto por clique, arrastar move com grade de 100 mil, duplo clique abre propriedades, `Ctrl+Z` desfaz e **Salvar esquema** grava o `schematic.js`. Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com limpeza da folha** (confirmação SIM).
 - **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
   `changes.js`: render fiel, fantasma tracejado das posições originais, lista de mudanças
   com validação, tabela PCB List pós-mudança e exportação para CSV.
-  A vista PCB **edita**: arrastar move objetos, `T` desenha trilhas, duplo clique abre propriedades (inclusive designator/comment), `Ctrl+Z` desfaz e **Salvar changes** grava o `changes.js` — com aviso se a IA tiver gravado o arquivo em paralelo.
+  A vista PCB **edita depois de destravar** (botão **Editar**, `E` — igual à do Esquema):
+  arrastar move objetos, `T` desenha trilhas, duplo clique abre propriedades (inclusive
+  designator/comment), `Ctrl+Z` desfaz e **Salvar changes** grava o `changes.js` — com aviso
+  se a IA tiver gravado o arquivo em paralelo. A mesma vista embutida na aba Neoden
+  (`?lean=1`) é só de consulta: lá o botão Editar não aparece e a trava não abre.
 
 ## Servidor local com tempo real (opcional)
 
