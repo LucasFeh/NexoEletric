@@ -27,6 +27,11 @@
 
   #main{display:flex; height:calc(100% - 76px);}
 
+  /* lean: embutido em outra vista (aba Neoden do hub) — so barra de ferramentas + canvas.
+     A edicao continua funcionando, so somem os paineis que duplicam o que o hub ja mostra. */
+  body.lean #header, body.lean #left, body.lean #right{display:none;}
+  body.lean #main{height:calc(100% - 34px);}
+
   #toolbar{display:flex; align-items:center; gap:8px; height:34px; padding:0 12px;
     background:var(--panel); border-bottom:1px solid var(--border); font-size:12px;}
   #toolbar .sep{width:1px; height:18px; background:var(--border);}
@@ -240,7 +245,9 @@
 </div>
 
 <script>
-  var PCB_P = new URLSearchParams(location.search).get('p');
+  var PCB_Q = new URLSearchParams(location.search);
+  var PCB_P = PCB_Q.get('p');
+  if (PCB_Q.has('lean')) document.body.classList.add('lean');
   if (PCB_P) {
     document.write('<script src="Projects/' + PCB_P + '/board.js"><\/script>');
     document.write('<script src="Projects/' + PCB_P + '/changes.js"><\/script>');

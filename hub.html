@@ -236,6 +236,21 @@ tbody tr[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow:
 .comp-bar { display: flex; align-items: center; gap: 10px; padding: 10px 18px; }
 .comp-bar .input { max-width: 380px; }
 .comp-bar .count { font-size: 11px; color: var(--text-3); }
+
+/* neoden: lista · placa · opções */
+.nd-grid { height: 100%; display: grid; min-height: 0;
+  grid-template-columns: minmax(330px, 1fr) minmax(280px, 0.85fr) var(--aside-w); }
+.nd-view { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.nd-view .viewport { margin: 0 12px 18px; }
+.nd-fields { display: grid; grid-template-columns: 92px 1fr; gap: 6px 8px; align-items: center; margin-top: 8px; }
+.nd-fields .k { font-size: 12px; color: var(--text-3); }
+.nd-fields .input { min-height: 30px; }
+.nd-fields .input[readonly] { background: var(--sunken); color: var(--text-2); }
+.nd-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; cursor: pointer; }
+.nd-check input { width: 15px; height: 15px; accent-color: var(--hi); }
+.nd-check input:disabled { cursor: default; }
+.nd-hint { margin: 4px 0 0; font-size: 11px; color: var(--text-4); }
+.nd-sep { height: 1px; margin: 16px 0 12px; background: var(--line); }
 aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2); box-shadow: inset 1px 0 0 var(--line); min-height: 0; }
 .kicker { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
 .det-head { display: flex; align-items: baseline; gap: 8px; margin-top: 3px; }
@@ -370,43 +385,61 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
     <div class="pane" data-pane="fp"><div class="scroll" style="height:100%"><div class="cards" id="fpCards"></div></div></div>
 
     <div class="pane" data-pane="neoden">
-      <div class="comp-grid">
+      <div class="nd-grid">
         <div class="comp-left">
-          <div class="comp-bar" style="flex-wrap:wrap; gap:8px 10px;">
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">referência
-              <select id="ndRef" class="input" style="width:130px;min-height:30px"></select></label>
-            <button class="btn btn-secondary btn-sm" id="ndSee">Ver no PCB</button>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">máquina X
-              <input id="ndOffX" class="input mono" type="number" step="any" value="0" style="width:90px;min-height:30px"></label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">Y
-              <input id="ndOffY" class="input mono" type="number" step="any" value="0" style="width:90px;min-height:30px"></label>
+          <div class="comp-bar">
+            <input id="ndSearch" class="input" placeholder="buscar designador, footprint ou comment">
             <span class="count" id="ndCount"></span>
             <button class="btn btn-primary btn-sm" style="margin-left:auto" id="ndTop">Baixar TopLayer</button>
             <button class="btn btn-secondary btn-sm" id="ndBottom">Baixar BottomLayer</button>
           </div>
-          <div class="comp-bar" style="padding-top:0">
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">rotação
-              <input id="ndRotAng" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px" title="ângulo CCW (graus)"></label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">em torno de
-              <input id="ndRotOx" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px">
-              <input id="ndRotOy" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px"></label>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-3)">mover dx/dy após N
-              <input id="ndMvDx" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px">
-              <input id="ndMvDy" class="input mono" type="number" step="any" value="0" style="width:70px;min-height:30px">
-              <input id="ndMvN" class="input mono" type="number" step="1" value="0" style="width:56px;min-height:30px" title="índices > N movem (0 = todos menos a referência), igual ao -m do script"></label>
-          </div>
           <div class="scroll" style="padding:0 6px 18px 18px">
             <table>
               <thead><tr>
-                <th style="width:78px">Desig.</th><th>Footprint</th><th class="r" style="width:96px">Mid X</th>
-                <th class="r" style="width:96px">Mid Y</th><th style="width:56px">Lado</th>
-                <th class="r" style="width:56px">Rot</th><th style="width:120px">Comment</th>
+                <th class="r" style="width:40px" title="índice de exportação — é este o N do &quot;mover após N&quot;">#</th>
+                <th style="width:78px">Desig.</th><th>Footprint</th><th class="r" style="width:92px">Mid X</th>
+                <th class="r" style="width:92px">Mid Y</th><th style="width:56px">Lado</th>
+                <th class="r" style="width:52px">Rot</th>
               </tr></thead>
               <tbody id="ndRows"></tbody>
             </table>
           </div>
         </div>
-        <aside id="ndAside"></aside>
+
+        <div class="nd-view">
+          <div class="canvas-bar">
+            <span class="ttl">placa</span><span class="meta" id="ndViewMeta"></span>
+            <div class="right"><button class="btn btn-ghost btn-sm" id="ndSee">Abrir aba PCB</button></div>
+          </div>
+          <div class="viewport" id="ndViewport"></div>
+        </div>
+
+        <aside id="ndAside">
+          <div class="kicker">componente</div>
+          <div class="det-head"><span class="d" id="ndSelDes">—</span><span class="v" id="ndSelFp"></span></div>
+
+          <label class="nd-check"><input type="checkbox" id="ndIsRef"> definir como referência</label>
+          <p class="nd-hint" id="ndRefHint"></p>
+
+          <div class="nd-fields">
+            <span class="k">máquina X</span><input id="ndPosX" class="input mono" type="number" step="any" value="0">
+            <span class="k">máquina Y</span><input id="ndPosY" class="input mono" type="number" step="any" value="0">
+          </div>
+
+          <div class="nd-sep"></div>
+          <div class="kicker">opções</div>
+          <div class="nd-fields">
+            <span class="k">rotação</span><input id="ndRotAng" class="input mono" type="number" step="any" value="0" title="ângulo CCW (graus)">
+            <span class="k">em torno de X</span><input id="ndRotOx" class="input mono" type="number" step="any" value="0">
+            <span class="k">em torno de Y</span><input id="ndRotOy" class="input mono" type="number" step="any" value="0">
+            <span class="k">mover dx</span><input id="ndMvDx" class="input mono" type="number" step="any" value="0">
+            <span class="k">mover dy</span><input id="ndMvDy" class="input mono" type="number" step="any" value="0">
+            <span class="k">após N</span><input id="ndMvN" class="input mono" type="number" step="1" value="0" title="índices > N movem (0 = todos menos a referência), igual ao -m do script">
+          </div>
+
+          <p class="nd-hint" id="ndSumm" style="margin-top:14px"></p>
+          <p class="nd-hint">Mid X/Y = origem do componente (Location X/Y do Altium); ponto 0 da placa visível na aba PCB.</p>
+        </aside>
       </div>
     </div>
 
@@ -536,7 +569,10 @@ const S = {
   projId: null, tab: 'esquema', selDes: null,
   q: '', compQ: '', pickerOpen: false, pickerIdx: 0,
   demoMode: false, serverOk: false,
-  neoden: { refDes: null },
+  /* off = coordenada de maquina DA REFERENCIA. Fica no estado (e nao lido do DOM como
+     rotacao/mover) porque o mesmo par de campos mostra a posicao calculada quando o
+     selecionado nao e a referencia — o input deixa de ser fonte da verdade. */
+  neoden: { refDes: null, selDes: null, q: '', off: { x: 0, y: 0 } },
 };
 
 const $ = s => document.querySelector(s);
@@ -717,16 +753,40 @@ function renderComponents() {
 function neodenOpts() {
   return {
     refDes: S.neoden.refDes,
-    off: { x: +$('#ndOffX').value || 0, y: +$('#ndOffY').value || 0 },
+    off: { x: S.neoden.off.x, y: S.neoden.off.y },
     rot: (+$('#ndRotAng').value ? { ox: +$('#ndRotOx').value || 0, oy: +$('#ndRotOy').value || 0, angle: +$('#ndRotAng').value } : null),
     move: ((+$('#ndMvDx').value || +$('#ndMvDy').value) ? { dx: +$('#ndMvDx').value || 0, dy: +$('#ndMvDy').value || 0, n: +$('#ndMvN').value || 0 } : null),
   };
 }
 
+/* nao pisa no campo que o usuario esta digitando — renderNeoden roda a cada tecla */
+function ndSetVal(sel, v) { const e = $(sel); if (document.activeElement !== e) e.value = v; }
+
+/* a placa embutida: mesmo pcbframe das abas, em modo lean, criado so quando a aba abre */
+function ndFrame() {
+  const vp = $('#ndViewport');
+  if (vp.dataset.proj !== S.projId) { vp.textContent = ''; vp.dataset.proj = S.projId; }
+  let f = vp.querySelector('iframe');
+  if (!f) {
+    f = document.createElement('iframe');
+    f.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent';
+    f.src = 'pcbframe.html?p=' + encodeURIComponent(proj().name) + '&lean=1';
+    vp.append(f);
+  }
+  return f;
+}
+/* marca + da zoom no componente dentro da placa (__hubSelectComp ja faz os dois) */
+function ndSelectOnBoard(ref) {
+  if (!ref) return;
+  const f = ndFrame();
+  const go = () => { try { f.contentWindow.__hubSelectComp(ref); } catch (e) {} };
+  try { f.contentWindow.__hubSelectComp(ref); } catch (e) { f.onload = go; }
+}
+
 function renderNeoden() {
   const comps = (S.detail.board && S.detail.board.components) || [];
   const pane = document.querySelector('.pane[data-pane="neoden"]');
-  const grid = pane.querySelector('.comp-grid');
+  const grid = pane.querySelector('.nd-grid');
   let empty = pane.querySelector('.empty');
   if (!comps.length) {
     grid.style.display = 'none';
@@ -741,46 +801,68 @@ function renderNeoden() {
   }
   if (empty) empty.style.display = 'none';
   grid.style.display = '';
+  ndFrame();   /* so cria; o zoom sai do clique, nunca de um render solto */
 
   const refs = comps.map(c => c.ref);
   if (!refs.includes(S.neoden.refDes)) S.neoden.refDes = refs[0];
-  const selEl = $('#ndRef'); selEl.textContent = '';
-  refs.forEach(r => { const o = document.createElement('option'); o.value = r; o.textContent = r; selEl.append(o); });
-  selEl.value = S.neoden.refDes;
+  if (!refs.includes(S.neoden.selDes)) S.neoden.selDes = S.neoden.refDes;
 
   const opts = neodenOpts();
   const res = HubCore.neodenTransform(comps, opts);
   const tb = $('#ndRows'); tb.textContent = '';
-  if (res.error) {
-    $('#ndCount').textContent = res.error;
-  } else {
-    res.rows.forEach(r => {
-      const tr = el('tr');
-      tr.append(el('td', 'mono', r.des));
-      const fp = el('td', null, r.footprint); fp.style.color = 'var(--text-2)'; tr.append(fp);
-      tr.append(el('td', 'r num', r.x.toFixed(2)));
-      tr.append(el('td', 'r num', r.y.toFixed(2)));
-      tr.append(el('td', null, r.layer));
-      tr.append(el('td', 'r num', String(r.rot)));
-      tr.append(el('td', null, r.comment));
-      tb.append(tr);
-    });
-    $('#ndCount').textContent = res.rows.length + ' componentes · referência ' + S.neoden.refDes + ' = (' + opts.off.x + ', ' + opts.off.y + ')';
-  }
+  if (res.error) { $('#ndCount').textContent = res.error; renderNeodenAside(null, opts); return; }
 
-  const aside = $('#ndAside'); aside.textContent = '';
-  aside.append(el('div', 'kicker', 'neoden'));
-  const kvs = el('div'); kvs.style.marginTop = '12px';
-  [
-    ['relativo', 'referência ' + (S.neoden.refDes || '—')],
-    ['rotação', opts.rot ? (opts.rot.angle + '° em torno de (' + opts.rot.ox + ', ' + opts.rot.oy + ')') : 'nenhuma'],
-    ['offset', '(' + opts.off.x + ', ' + opts.off.y + ') mm'],
-    ['mover', opts.move ? ('dx ' + opts.move.dx + ' / dy ' + opts.move.dy + ' após índice ' + opts.move.n) : 'nenhum'],
-  ].forEach(([k, v]) => { const row = el('div', 'kv'); row.append(el('span', 'k', k), el('span', 'v', v)); kvs.append(row); });
-  aside.append(kvs);
-  const note = el('p', null, 'Mid X/Y = origem do componente (Location X/Y do Altium); ponto 0 da placa visível na aba PCB (origem).');
-  note.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:14px';
-  aside.append(note);
+  /* o indice e o da ordem de exportacao (referencia primeiro) e nao muda com a busca —
+     e ele que o "mover apos N" usa, entao filtrar a vista nao pode renumerar nada. */
+  const q = S.neoden.q.trim().toLowerCase();
+  const shown = res.rows
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => !q || (r.des + ' ' + r.footprint + ' ' + r.comment + ' ' + r.layer).toLowerCase().includes(q));
+
+  shown.forEach(({ r, i }) => {
+    const tr = el('tr');
+    tr.setAttribute('aria-selected', String(r.des === S.neoden.selDes));
+    const idx = el('td', 'r num', String(i)); idx.style.color = 'var(--text-4)'; tr.append(idx);
+    const des = el('td', 'mono', r.des);
+    if (r.des === S.neoden.refDes) des.textContent = r.des + ' ★';
+    tr.append(des);
+    const fp = el('td', null, r.footprint); fp.style.color = 'var(--text-2)'; tr.append(fp);
+    tr.append(el('td', 'r num', r.x.toFixed(2)));
+    tr.append(el('td', 'r num', r.y.toFixed(2)));
+    tr.append(el('td', null, r.layer));
+    tr.append(el('td', 'r num', String(r.rot)));
+    tr.onclick = () => { S.neoden.selDes = r.des; renderNeoden(); ndSelectOnBoard(r.des); };
+    tb.append(tr);
+  });
+
+  $('#ndCount').textContent = (q ? shown.length + ' de ' + res.rows.length : res.rows.length + ' componentes')
+    + ' · referência ' + S.neoden.refDes + ' = (' + opts.off.x + ', ' + opts.off.y + ')';
+  $('#ndViewMeta').textContent = S.neoden.selDes ? 'selecionado ' + S.neoden.selDes : 'clique numa linha';
+
+  renderNeodenAside(res.rows.find(r => r.des === S.neoden.selDes) || null, opts);
+}
+
+function renderNeodenAside(row, opts) {
+  const isRef = !!row && row.des === S.neoden.refDes;
+  $('#ndSelDes').textContent = row ? row.des : '—';
+  $('#ndSelFp').textContent = row ? row.footprint : '';
+
+  const chk = $('#ndIsRef');
+  chk.checked = isRef;
+  chk.disabled = !row || isRef;          /* troca-se de referência marcando outro componente */
+  $('#ndRefHint').textContent = !row ? ''
+    : isRef ? 'É a referência: digite abaixo onde ela está na máquina.'
+            : 'Marque para tornar ' + row.des + ' a referência.';
+
+  const px = $('#ndPosX'), py = $('#ndPosY');
+  px.readOnly = py.readOnly = !isRef;
+  if (!row) { px.value = py.value = ''; return; }
+  ndSetVal('#ndPosX', isRef ? S.neoden.off.x : row.x.toFixed(3));
+  ndSetVal('#ndPosY', isRef ? S.neoden.off.y : row.y.toFixed(3));
+
+  $('#ndSumm').textContent =
+    (opts.rot ? 'rotação ' + opts.rot.angle + '° em torno de (' + opts.rot.ox + ', ' + opts.rot.oy + ')' : 'sem rotação')
+    + ' · ' + (opts.move ? 'mover dx ' + opts.move.dx + ' / dy ' + opts.move.dy + ' após índice ' + opts.move.n : 'sem mover');
 }
 
 function renderPanes() {
@@ -919,7 +1001,8 @@ async function loadProject(id) {
   if (!det) { toast('detalhe do projeto indisponível — tente Reindexar', 'err'); return; }
   S.projId = id; S.detail = det;
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
-  S.neoden.refDes = null;
+  S.neoden = { refDes: null, selDes: null, q: '', off: { x: 0, y: 0 } };
+  $('#ndSearch').value = '';
   syncURL();
   renderAll();
 }
@@ -986,18 +1069,28 @@ $('#btnNext').onclick = () => { const p = proj(); if (!p) return; const s = step
 $('#btnActions').onclick = openActionsMenu;
 $('#btnFlow').onclick = openFlowDialog;
 $('#btnBom').onclick = exportBom;
-['ndOffX','ndOffY','ndRotAng','ndRotOx','ndRotOy','ndMvDx','ndMvDy','ndMvN'].forEach(id => {
+['ndRotAng','ndRotOx','ndRotOy','ndMvDx','ndMvDy','ndMvN'].forEach(id => {
   $('#' + id).addEventListener('input', renderNeoden);
   $('#' + id).addEventListener('change', renderNeoden);
 });
-$('#ndRef').onchange = () => { S.neoden.refDes = $('#ndRef').value; renderNeoden(); };
+$('#ndSearch').oninput = e => { S.neoden.q = e.target.value; renderNeoden(); };
+/* X/Y so sao editaveis na referencia, entao o que se digita aqui e sempre o offset dela */
+['ndPosX','ndPosY'].forEach(id => $('#' + id).addEventListener('input', () => {
+  S.neoden.off = { x: +$('#ndPosX').value || 0, y: +$('#ndPosY').value || 0 };
+  renderNeoden();
+}));
+$('#ndIsRef').onchange = () => {
+  if (!$('#ndIsRef').checked) return;              /* desmarcar nao faz sentido: sempre ha uma referencia */
+  S.neoden.refDes = S.neoden.selDes;
+  renderNeoden(); ndSelectOnBoard(S.neoden.refDes);
+};
 $('#ndSee').onclick = () => {
   S.tab = 'pcb'; syncURL(); renderTabs(); renderPanes();
   const pane = document.querySelector('.pane[data-pane="pcb"]');
   const frame = pane && pane.querySelector('iframe');
   if (!frame) return;
-  const sel = () => { try { frame.contentWindow.__hubSelectComp(S.neoden.refDes); } catch (e) {} };
-  try { frame.contentWindow.__hubSelectComp(S.neoden.refDes); }
+  const sel = () => { try { frame.contentWindow.__hubSelectComp(S.neoden.selDes); } catch (e) {} };
+  try { frame.contentWindow.__hubSelectComp(S.neoden.selDes); }
   catch (e) { frame.onload = sel; }
 };
 $('#ndTop').onclick = () => neodenDownload('Top');

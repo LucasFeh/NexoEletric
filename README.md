@@ -118,9 +118,12 @@ Casca única com:
   botão de próxima ação derivado dela (um clique, sem escolher nada).
 - **Abas**: Esquema, PCB (os mesmos `schframe.html`/`pcbframe.html` de sempre, com edição
   completa), Componentes (tabela filtrável + painel de detalhe + exportar BOM), Nets,
-  Footprints, Neoden (CSV Neoden 4 direto do espelho — componente de referência + coordenadas
-  de máquina, rotação opcional, move-pós-N; prévia ao vivo, download `<nome>-NEODEN-TopLayer.csv` /
-  `-BottomLayer.csv`,
+  Footprints, Neoden (CSV Neoden 4 direto do espelho, em três colunas: lista com busca ·
+  a placa ao vivo · opções. Clicar numa linha marca e dá zoom no componente dentro da placa;
+  o menu lateral traz o checkbox "definir como referência", as coordenadas de máquina —
+  editáveis na referência, calculadas nos demais — mais rotação e move-pós-N. A coluna `#`
+  é o índice de exportação e não é renumerado pela busca, que filtra só a vista: o CSV sai
+  sempre completo. Download `<nome>-NEODEN-TopLayer.csv` / `-BottomLayer.csv`,
   Mid X/Y = origem do componente, igual ao Location X/Y do Altium) e Histórico (linha do tempo a partir de `build-report.txt`/
   `apply-report.txt`/datas de `board.js`/`schematic.js`, mais um `history.jsonl` opcional por
   projeto).
