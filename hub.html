@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <script src="hub-core.js"></script>
+<script src="hub-draw.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    1. TOKENS — única fonte de verdade de cor, espaço, raio e sombra.
@@ -45,6 +46,7 @@
   --scroll:    #34343a;  /* polegar da barra de rolagem */
   --dot-idle:  #3a3a40;  /* ponto de etapa não iniciada */
   --scrim:     rgba(11,11,13,0.55);
+  --sheet:     #fffef2;  /* folha do Altium — o preview do simbolo mantem a cor real da lib */
 
   --page-min: 1040px;      /* abaixo disso a página rola na horizontal */
   --aside-w: 330px;        /* painel de detalhe do componente */
@@ -269,6 +271,49 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .card .m { display: flex; font-size: 11px; color: var(--text-3); }
 .card .m span:last-child { margin-left: auto; }
 
+/* biblioteca: lista · previews · detalhe */
+.lib-grid { height: 100%; display: grid; min-height: 0;
+  grid-template-columns: minmax(300px, 0.95fr) minmax(320px, 1.25fr) var(--aside-w); }
+.lib-left { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; }
+.lib-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px 7px 18px; }
+.lib-bar .input { min-width: 0; }
+.lib-sum { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0 18px 9px; font-size: 11px; color: var(--text-4); }
+.lib-sum b { font-weight: 400; color: var(--text-2); }
+.lib-list { padding: 0 6px 18px 12px; }
+.lib-head { padding: 13px 8px 4px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-4); }
+.lib-row { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; cursor: pointer;
+  border: 0; background: transparent; color: inherit; border-radius: var(--r-sm); padding: 5px 8px; }
+.lib-row:hover { background: rgba(242,242,243,0.05); }
+.lib-row[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow: inset 2px 0 0 var(--hi); }
+.lib-row .nm { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-row .nm.gone { color: var(--err); }
+.lib-row .mt { flex: none; font-size: 11px; color: var(--text-4); }
+.lib-row .pill { flex: none; font-size: 10px; padding: 1px 5px; border-radius: var(--r-sm);
+  background: rgba(242,242,243,0.07); color: var(--text-3); }
+.lib-row .pill.warn { color: var(--warn); }
+button.tag { border: 0; cursor: pointer; }
+button.tag:hover { background: rgba(242,242,243,0.20); }
+button.tag.gone { color: var(--err); }
+
+/* segmentado (tudo · símbolos · footprints · ausentes) */
+.seg { display: flex; gap: 2px; flex: none; padding: 2px; border-radius: var(--r-md);
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge); }
+.seg button { cursor: pointer; border: 0; background: transparent; color: var(--text-3);
+  font-size: 12px; padding: 4px 9px; border-radius: var(--r-sm); }
+.seg button:hover { color: var(--text-2); }
+.seg button[aria-pressed="true"] { background: rgba(242,242,243,0.12); color: var(--text); }
+.seg button .n { font-variant-numeric: tabular-nums; color: var(--text-4); margin-left: 4px; }
+
+.lib-view { display: grid; grid-template-rows: auto minmax(0,1fr) auto minmax(0,1fr); min-height: 0; }
+.lib-view .canvas-bar { padding: 8px 12px 6px; }
+.lib-view .viewport { margin: 0 12px 12px; }
+.viewport.sheet { background: var(--sheet); }   /* símbolo: mesma folha clara do Altium */
+.viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.viewport .hint { position: absolute; inset: 0; display: grid; place-items: center; padding: 18px;
+  text-align: center; font-size: 12px; color: var(--text-4); pointer-events: none; }
+.viewport.sheet .hint { color: var(--text-4); mix-blend-mode: luminosity; }
+select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto; }
+
 /* histórico */
 .hist { padding: 14px 18px 18px; max-width: 760px; }
 .hist-row { display: grid; grid-template-columns: 108px 18px 1fr; gap: 10px; align-items: start; padding: 9px 0; border-bottom: 1px solid var(--line-soft); }
@@ -383,6 +428,31 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
     </div>
 
     <div class="pane" data-pane="fp"><div class="scroll" style="height:100%"><div class="cards" id="fpCards"></div></div></div>
+
+    <div class="pane" data-pane="lib">
+      <div class="lib-grid">
+        <div class="lib-left">
+          <div class="lib-bar">
+            <input class="input" id="libSearch" type="text" placeholder="Buscar na biblioteca…">
+            <div class="seg" id="libKind"></div>
+          </div>
+          <div class="lib-sum" id="libSum"></div>
+          <div class="scroll lib-list" id="libList"></div>
+        </div>
+
+        <div class="lib-view">
+          <div class="canvas-bar">
+            <span class="ttl">símbolo</span><span class="meta" id="libSymMeta"></span>
+            <div class="right"><select class="input" id="libPart" title="parte do símbolo" hidden></select></div>
+          </div>
+          <div class="viewport sheet" id="libSymVp"><canvas id="libSymCv"></canvas><div class="hint" id="libSymHint"></div></div>
+          <div class="canvas-bar"><span class="ttl">footprint</span><span class="meta" id="libFpMeta"></span></div>
+          <div class="viewport" id="libFpVp"><canvas id="libFpCv"></canvas><div class="hint" id="libFpHint"></div></div>
+        </div>
+
+        <aside id="libDetail"></aside>
+      </div>
+    </div>
 
     <div class="pane" data-pane="neoden">
       <div class="nd-grid">
@@ -539,6 +609,8 @@ const TABS = [
   { id:'comp', label:'Componentes', count:d=>d.components.length },
   { id:'nets', label:'Nets', count:d=>d.nets.length },
   { id:'fp', label:'Footprints', count:d=>d.footprints.length },
+  /* Biblioteca nao depende do projeto: o contador vem das libs, nao do detalhe. */
+  { id:'lib', label:'Biblioteca', count:()=> LIB.ready ? LIB.syms.length + LIB.fps.length : '…' },
   { id:'neoden', label:'Neoden' },
   { id:'hist', label:'Histórico' },
 ];
@@ -573,6 +645,8 @@ const S = {
      rotacao/mover) porque o mesmo par de campos mostra a posicao calculada quando o
      selecionado nao e a referencia — o input deixa de ser fonte da verdade. */
   neoden: { refDes: null, selDes: null, q: '', off: { x: 0, y: 0 } },
+  /* sel = { k:'sym'|'fp'|'gone-sym'|'gone-fp', name }; fpShown troca so o preview de baixo */
+  lib: { q: '', kind: 'all', sel: null, part: 1, fpShown: null },
 };
 
 const $ = s => document.querySelector(s);
@@ -865,6 +939,371 @@ function renderNeodenAside(row, opts) {
     + ' · ' + (opts.move ? 'mover dx ' + opts.move.dx + ' / dy ' + opts.move.dy + ' após índice ' + opts.move.n : 'sem mover');
 }
 
+/* ═══ BIBLIOTECA ═══════════════════════════════════════════════
+   Le Libs\schlib.js e Libs\pcblib.js direto por <script>: funciona servido pelo
+   hubserver e tambem abrindo hub.html por duplo clique (file://), igual ao hub
+   antigo. Alem de listar a lib inteira, cruza com o schematic.js do projeto
+   aberto — e esse cruzamento que expoe o buraco: ExportProject grava so o NOME
+   do simbolo (LibReference), quem tem a geometria e a schlib; se o componente
+   veio de outra biblioteca o nome nao resolve, o hub nao desenha o corpo e a
+   folha sai diferente da do Altium. Esses aparecem como "ausentes".          */
+const LIB = { ready: false, loading: null, syms: [], fps: [], symBy: new Map(), fpBy: new Map(), src: {}, gen: {} };
+let libCamSym = null, libCamFp = null, libDrawSym = null, libDrawFp = null, libUse = null, libUseFor = null;
+
+/* "var X = ..." via <script>: e assim que os arquivos da lib sao gerados */
+function loadVarScript(src, name) {
+  return new Promise(resolve => {
+    window[name] = undefined;
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload  = () => { const v = window[name]; window[name] = undefined; s.remove(); resolve(v); };
+    s.onerror = () => { s.remove(); resolve(undefined); };
+    document.head.appendChild(s);
+  });
+}
+function loadLibs() {
+  if (LIB.ready) return Promise.resolve();
+  if (LIB.loading) return LIB.loading;
+  LIB.loading = Promise.all([loadVarScript('Libs/schlib.js', 'schlib'), loadVarScript('Libs/pcblib.js', 'pcblib')])
+    .then(([s, p]) => {
+      LIB.syms = (s && s.symbols) || [];
+      LIB.fps  = (p && p.footprints) || [];
+      LIB.symBy = new Map(LIB.syms.map(x => [x.name, x]));
+      LIB.fpBy  = new Map(LIB.fps.map(x => [x.name, x]));
+      LIB.src = { sym: (s && s.source) || '—', fp: (p && p.source) || '—' };
+      LIB.gen = { sym: (s && s.generated) || '—', fp: (p && p.generated) || '—' };
+      LIB.ready = true;
+      LIB.loading = null;
+    });
+  return LIB.loading;
+}
+
+/* o que o esquema DESTE projeto referencia, por nome de simbolo e de footprint */
+function libUsage() {
+  if (libUseFor === S.projId && libUse) return libUse;
+  const items = (S.detail && S.detail.schematic && S.detail.schematic.items) || [];
+  const sym = new Map(), fp = new Map();
+  const push = (m, k, ref) => { if (!k) return; if (!m.has(k)) m.set(k, []); m.get(k).push(ref || '?'); };
+  for (const it of items) if (it.t === 'comp') { push(sym, it.sym, it.ref); push(fp, it.footprint, it.ref); }
+  libUse = { sym, fp }; libUseFor = S.projId;
+  return libUse;
+}
+
+/* nomes parecidos: ajuda a achar o simbolo certo quando o esquema aponta p/ um que nao existe */
+function libSuggest(name, pool) {
+  const toks = s => new Set(String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean));
+  const a = toks(name);
+  if (!a.size) return [];
+  const out = [];
+  for (const n of pool) {
+    const b = toks(n);
+    let inter = 0;
+    a.forEach(t => { if (b.has(t)) inter++; });
+    const score = inter / (a.size + b.size - inter);
+    if (score > 0.2) out.push({ n, score });
+  }
+  return out.sort((x, y) => y.score - x.score).slice(0, 6).map(x => x.n);
+}
+
+function libCams() {
+  if (libCamSym) return;
+  const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  libCamSym = HubDraw.mkCamera($('#libSymCv'), ctx => { if (libDrawSym) HubDraw.drawSymbolPart(ctx, libDrawSym); }, { bg: tok('--sheet') });
+  libCamFp  = HubDraw.mkCamera($('#libFpCv'),  ctx => { if (libDrawFp)  HubDraw.drawFootprint(ctx, libDrawFp); },  { bg: tok('--sunken') });
+}
+/* o pane so tem tamanho depois de visivel, entao resize() antes de qualquer fit() */
+function libFit(cam, bb) {
+  cam.resize();
+  if (bb && cam.cam) cam.fit(bb, 1.35); else cam.draw();
+}
+
+function selectLib(kind, name) {
+  S.lib.sel = { k: kind, name };
+  S.lib.part = 1;
+  S.lib.fpShown = null;
+  renderLib();
+}
+function libShowFp(name) { S.lib.fpShown = name; renderLib(); }
+
+function gotoSchComp(ref) {
+  S.tab = 'esquema'; S.selDes = ref; syncURL(); renderTabs(); renderPanes();
+  const frame = document.querySelector('.pane[data-pane="esquema"] iframe');
+  if (!frame) return;
+  const go = () => { try { frame.contentWindow.__hubSelectComp(ref); } catch (e) {} };
+  try { frame.contentWindow.__hubSelectComp(ref); } catch (e) { frame.onload = go; }
+}
+
+function chip(txt, cls, onClick) {
+  const b = el('button', 'tag' + (cls ? ' ' + cls : ''), txt);
+  b.onclick = onClick;
+  return b;
+}
+function kvRow(box, k, v) {
+  const r = el('div', 'kv'); r.append(el('span', 'k', k), el('span', 'v', String(v))); box.append(r);
+}
+function fpBBoxSize(f) {
+  const b = f.bbox;
+  return b ? (b.x2 - b.x1).toFixed(2) + ' × ' + (b.y2 - b.y1).toFixed(2) + ' mm' : '—';
+}
+
+function renderLib() {
+  if (!LIB.ready) {
+    $('#libList').textContent = '';
+    $('#libSum').textContent = 'carregando Libs\\schlib.js e Libs\\pcblib.js…';
+    loadLibs().then(() => { renderTabs(); if (S.tab === 'lib') renderLib(); });
+    return;
+  }
+  libCams();
+
+  const u = libUsage();
+  const goneSym = [...u.sym.keys()].filter(n => !LIB.symBy.has(n)).sort();
+  const goneFp  = [...u.fp.keys()].filter(n => !LIB.fpBy.has(n)).sort();
+  const noFp    = LIB.syms.filter(s => !(s.footprints || []).some(f => f.incurrentlib));
+
+  /* filtro */
+  const q = S.lib.q.trim().toLowerCase();
+  const hit = (n, d) => !q || (n + ' ' + (d || '')).toLowerCase().includes(q);
+  const kind = S.lib.kind;
+  const syms = (kind === 'all' || kind === 'sym') ? LIB.syms.filter(s => hit(s.name, s.description)) : [];
+  const fps  = (kind === 'all' || kind === 'fp')  ? LIB.fps.filter(f => hit(f.name, f.description))  : [];
+  const gone = (kind === 'all' || kind === 'gone')
+    ? goneSym.filter(hit).map(n => ['gone-sym', n]).concat(goneFp.filter(hit).map(n => ['gone-fp', n])) : [];
+
+  /* segmentado */
+  const seg = $('#libKind'); seg.textContent = '';
+  [['all', 'Tudo', LIB.syms.length + LIB.fps.length], ['sym', 'Símbolos', LIB.syms.length],
+   ['fp', 'Footprints', LIB.fps.length], ['gone', 'Ausentes', goneSym.length + goneFp.length]]
+    .forEach(([k, label, n]) => {
+      const b = el('button', null, label);
+      b.setAttribute('aria-pressed', String(kind === k));
+      b.append(el('span', 'n', String(n)));
+      b.onclick = () => { S.lib.kind = k; renderLib(); };
+      seg.append(b);
+    });
+
+  /* resumo */
+  const sum = $('#libSum'); sum.textContent = '';
+  const stat = (n, label, tone) => {
+    const s = el('span'); const b = el('b', null, String(n));
+    if (tone) b.style.color = 'var(--' + tone + ')';
+    s.append(b, document.createTextNode(' ' + label)); sum.append(s);
+  };
+  stat(LIB.syms.length, 'símbolos'); stat(LIB.fps.length, 'footprints');
+  stat(noFp.length, 'sem footprint', noFp.length ? 'warn' : null);
+  stat(goneSym.length + goneFp.length, 'ausentes no projeto', (goneSym.length + goneFp.length) ? 'err' : null);
+  sum.title = 'schlib: ' + LIB.src.sym + '  (' + LIB.gen.sym + ')\npcblib: ' + LIB.src.fp + '  (' + LIB.gen.fp + ')';
+
+  /* lista */
+  const list = $('#libList'); list.textContent = '';
+  const frag = document.createDocumentFragment();
+  const head = t => frag.append(el('div', 'lib-head', t));
+  const row = (k, name, meta, o) => {
+    const b = el('button', 'lib-row');
+    b.setAttribute('aria-selected', String(!!S.lib.sel && S.lib.sel.k === k && S.lib.sel.name === name));
+    b.title = name;
+    b.append(el('span', 'nm' + (o && o.gone ? ' gone' : ''), name));
+    if (o && o.use) b.append(el('span', 'pill', o.use + '×'));
+    if (o && o.warn) b.append(el('span', 'pill warn', o.warn));
+    b.append(el('span', 'mt', meta || ''));
+    b.onclick = () => selectLib(k, name);
+    frag.append(b);
+  };
+
+  if (gone.length) {
+    head('ausentes na biblioteca (' + gone.length + ')');
+    gone.forEach(([k, n]) => row(k, n, k === 'gone-sym' ? 'símbolo' : 'footprint',
+      { gone: true, use: (k === 'gone-sym' ? u.sym.get(n) : u.fp.get(n)).length }));
+  }
+  if (syms.length) {
+    head('símbolos (' + syms.length + (q || kind !== 'all' ? ' de ' + LIB.syms.length : '') + ')');
+    syms.forEach(s => {
+      const part = HubCore.partOf(s, 1);
+      const used = u.sym.get(s.name);
+      row('sym', s.name, ((part && part.pins.length) || 0) + 'p',
+        { use: used && used.length, warn: (s.footprints || []).some(f => f.incurrentlib) ? null : 'sem fp' });
+    });
+  }
+  if (fps.length) {
+    head('footprints (' + fps.length + (q || kind !== 'all' ? ' de ' + LIB.fps.length : '') + ')');
+    fps.forEach(f => {
+      const used = u.fp.get(f.name);
+      row('fp', f.name, (f.pads || []).length + ' pads', { use: used && used.length });
+    });
+  }
+  if (!frag.childNodes.length) {
+    const e = el('div', 'lib-head', q ? 'nada com "' + S.lib.q + '"' : 'nada aqui');
+    frag.append(e);
+  }
+  list.append(frag);
+
+  renderLibPreview(u, goneSym, goneFp);
+}
+
+function renderLibPreview(u, goneSym, goneFp) {
+  const sel = S.lib.sel;
+  const aside = $('#libDetail'); aside.textContent = '';
+  const partSel = $('#libPart'); partSel.hidden = true;
+  libDrawSym = null; libDrawFp = null;
+  $('#libSymHint').textContent = ''; $('#libFpHint').textContent = '';
+  let symBB = null, fpBB = null, fpName = null;
+
+  if (!sel) {
+    $('#libSymMeta').textContent = '—'; $('#libFpMeta').textContent = '—';
+    $('#libSymHint').textContent = 'escolha um item na lista';
+    $('#libFpHint').textContent = '';
+    libFit(libCamSym, null); libFit(libCamFp, null);
+    const p = el('p', null, 'Todos os símbolos da SchLib e footprints da PcbLib espelhados por ExportLibs. '
+      + 'Os marcados como ausentes são referenciados pelo esquema deste projeto mas não existem no espelho — '
+      + 'é por isso que o corpo deles não aparece na aba Esquema.');
+    p.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:18px';
+    aside.append(p);
+    return;
+  }
+
+  const head = (kicker, name) => {
+    aside.append(el('div', 'kicker', kicker));
+    const h = el('div', 'det-head'); const d = el('span', 'd', name);
+    d.style.cssText = 'font-size:16px;word-break:break-word;line-height:1.3';
+    h.append(d); aside.append(h);
+  };
+
+  if (sel.k === 'sym') {
+    const s = LIB.symBy.get(sel.name);
+    if (!s) { S.lib.sel = null; return renderLibPreview(u, goneSym, goneFp); }
+    const nparts = s.partcount || (s.parts || []).length || 1;
+    const part = HubCore.partOf(s, S.lib.part) || (s.parts || [])[0] || { pins: [], graphics: [] };
+    libDrawSym = part; symBB = HubDraw.symBBox(part);
+    $('#libSymMeta').textContent = s.name + ' · ' + (part.pins || []).length + ' pinos'
+      + (nparts > 1 ? ' · parte ' + S.lib.part + '/' + nparts : '');
+    $('#libSymHint').textContent = (part.graphics || []).length ? '' : 'símbolo sem geometria na schlib';
+
+    if (nparts > 1) {
+      partSel.hidden = false; partSel.textContent = '';
+      for (let i = 1; i <= nparts; i++) {
+        const o = document.createElement('option');
+        o.value = String(i); o.textContent = 'parte ' + i + '/' + nparts;
+        if (i === S.lib.part) o.selected = true;
+        partSel.append(o);
+      }
+    }
+
+    const models = s.footprints || [];
+    fpName = S.lib.fpShown || (models.find(f => f.current) || models[0] || {}).name || null;
+
+    head('símbolo da schlib', s.name);
+    if (s.description) { const p = el('p', null, s.description); p.style.cssText = 'font-size:12px;color:var(--text-2);margin:6px 0 0'; aside.append(p); }
+    const kvs = el('div'); kvs.style.marginTop = '12px';
+    kvRow(kvs, 'Partes', nparts);
+    kvRow(kvs, 'Pinos', (part.pins || []).length);
+    kvRow(kvs, 'Gráficos', (part.graphics || []).length);
+    kvRow(kvs, 'Modelos', models.length);
+    aside.append(kvs);
+
+    aside.append(el('div', 'kicker', 'footprints associados'));
+    const chips = el('div', 'chips'); chips.style.margin = '6px 0 14px';
+    if (!models.length) {
+      const p = el('p', null, 'nenhum modelo PCB no símbolo'); p.style.cssText = 'font-size:12px;color:var(--warn);margin:6px 0 14px'; aside.append(p);
+    } else {
+      models.forEach(m => {
+        const ok = LIB.fpBy.has(m.name);
+        const c = chip(m.name + (m.current ? ' ✓' : ''), 'mono' + (ok ? '' : ' gone'), () => ok ? libShowFp(m.name) : selectLib('gone-fp', m.name));
+        c.title = ok ? (m.current ? 'modelo atual — clique para ver' : 'clique para ver')
+                     : 'esse footprint não está na pcblib espelhada';
+        if (m.name === fpName) c.style.boxShadow = 'inset 0 0 0 1px var(--hi)';
+        chips.append(c);
+      });
+      aside.append(chips);
+    }
+    libAsideUsage(aside, u.sym.get(s.name));
+
+  } else if (sel.k === 'fp') {
+    const f = LIB.fpBy.get(sel.name);
+    if (!f) { S.lib.sel = null; return renderLibPreview(u, goneSym, goneFp); }
+    fpName = f.name;
+    $('#libSymMeta').textContent = '—';
+    $('#libSymHint').textContent = 'nenhum símbolo selecionado';
+
+    head('footprint da pcblib', f.name);
+    if (f.description) { const p = el('p', null, f.description); p.style.cssText = 'font-size:12px;color:var(--text-2);margin:6px 0 0'; aside.append(p); }
+    const pads = f.pads || [];
+    const th = pads.filter(p => p.type === 'th').length;
+    const kvs = el('div'); kvs.style.marginTop = '12px';
+    kvRow(kvs, 'Pads', pads.length + (pads.length ? ' (' + (pads.length - th) + ' smd · ' + th + ' th)' : ''));
+    kvRow(kvs, 'Tamanho', fpBBoxSize(f));
+    kvRow(kvs, 'Silk', (f.silk || []).length + ' elementos');
+    aside.append(kvs);
+
+    const owners = LIB.syms.filter(s => (s.footprints || []).some(m => m.name === f.name));
+    aside.append(el('div', 'kicker', 'símbolos que usam'));
+    if (!owners.length) {
+      const p = el('p', null, 'nenhum símbolo da schlib aponta para este footprint');
+      p.style.cssText = 'font-size:12px;color:var(--text-3);margin:6px 0 14px'; aside.append(p);
+    } else {
+      const box = el('div', 'chips'); box.style.margin = '6px 0 14px';
+      owners.slice(0, 24).forEach(s => box.append(chip(s.name, null, () => selectLib('sym', s.name))));
+      if (owners.length > 24) box.append(el('span', 'tag', '+' + (owners.length - 24)));
+      aside.append(box);
+    }
+    libAsideUsage(aside, u.fp.get(f.name));
+
+  } else {
+    /* ausente: o esquema referencia, o espelho nao tem */
+    const isSym = sel.k === 'gone-sym';
+    $('#libSymMeta').textContent = isSym ? sel.name + ' — ausente' : '—';
+    $('#libSymHint').textContent = isSym ? 'sem geometria: o hub não desenha o corpo deste componente'
+                                         : 'nenhum símbolo selecionado';
+    if (!isSym) fpName = sel.name;
+
+    head('ausente na biblioteca', sel.name);
+    const p = el('p', null, isSym
+      ? 'O esquema deste projeto usa este símbolo, mas ele não está em Libs\\schlib.js. '
+        + 'ExportLibs espelha uma única SchLib — se o componente veio de outra biblioteca, o nome não resolve '
+        + 'e a aba Esquema desenha só os pinos, sem o corpo. Rode ExportLibs com a biblioteca de origem, '
+        + 'ou aponte o componente para um símbolo equivalente que já esteja na lib.'
+      : 'O esquema aponta para este footprint, mas ele não está em Libs\\pcblib.js. '
+        + 'O ECO no Altium vai falhar nesse componente até a PcbLib de origem ser espelhada.');
+    p.style.cssText = 'font-size:12px;color:var(--text-2);margin:8px 0 14px';
+    aside.append(p);
+
+    const near = libSuggest(sel.name, isSym ? LIB.symBy.keys() : LIB.fpBy.keys());
+    if (near.length) {
+      aside.append(el('div', 'kicker', 'parecidos na lib'));
+      const box = el('div', 'chips'); box.style.margin = '6px 0 14px';
+      near.forEach(n => box.append(chip(n, null, () => selectLib(isSym ? 'sym' : 'fp', n))));
+      aside.append(box);
+    }
+    libAsideUsage(aside, (isSym ? u.sym : u.fp).get(sel.name));
+  }
+
+  /* preview de baixo: o footprint escolhido (do simbolo) ou o proprio selecionado */
+  const fp = fpName ? LIB.fpBy.get(fpName) : null;
+  libDrawFp = fp || null;
+  fpBB = fp ? fp.bbox : null;
+  $('#libFpMeta').textContent = fp ? fp.name + ' · ' + (fp.pads || []).length + ' pads'
+    : (fpName ? fpName + ' — ausente na pcblib' : '—');
+  if (!fp) $('#libFpHint').textContent = fpName ? 'footprint fora da pcblib espelhada' : 'sem footprint associado';
+
+  libFit(libCamSym, symBB);
+  libFit(libCamFp, fpBB);
+}
+
+function libAsideUsage(aside, refs) {
+  aside.append(el('div', 'kicker', 'uso no projeto'));
+  if (!refs || !refs.length) {
+    const p = el('p', null, (S.detail && S.detail.schematic && S.detail.schematic.items)
+      ? 'não usado no esquema deste projeto' : 'este projeto não tem schematic.js');
+    p.style.cssText = 'font-size:12px;color:var(--text-3);margin:6px 0 0';
+    aside.append(p);
+    return;
+  }
+  const p = el('p', null, refs.length + ' componente' + (refs.length > 1 ? 's' : ''));
+  p.style.cssText = 'font-size:12px;color:var(--text-2);margin:6px 0 6px';
+  aside.append(p);
+  const box = el('div', 'chips');
+  [...refs].sort().forEach(r => box.append(chip(r, 'mono', () => gotoSchComp(r))));
+  aside.append(box);
+}
+
 function renderPanes() {
   const d = S.detail;
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.dataset.pane === S.tab));
@@ -897,6 +1336,7 @@ function renderPanes() {
       c.append(m); g.append(c);
     });
   }
+  if (S.tab === 'lib') return renderLib();
   if (S.tab === 'neoden') return renderNeoden();
   if (S.tab === 'hist') {
     const h = $('#histRows'); h.textContent = '';
@@ -1002,6 +1442,8 @@ async function loadProject(id) {
   S.projId = id; S.detail = det;
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
   S.neoden = { refDes: null, selDes: null, q: '', off: { x: 0, y: 0 } };
+  libUse = null; libUseFor = null;        /* o cruzamento com a lib e por projeto */
+  S.lib.sel = null; S.lib.fpShown = null;
   $('#ndSearch').value = '';
   syncURL();
   renderAll();
@@ -1065,6 +1507,8 @@ $('#pickerSearch').addEventListener('keydown', e => {
   }
 });
 $('#compSearch').oninput = e => { S.compQ = e.target.value; renderComponents(); };
+$('#libSearch').oninput = e => { S.lib.q = e.target.value; renderLib(); };
+$('#libPart').onchange = e => { S.lib.part = +e.target.value || 1; S.lib.fpShown = null; renderLib(); };
 $('#btnNext').onclick = () => { const p = proj(); if (!p) return; const s = stepOf(p); s.run ? runAction(s.label) : openFlowDialog(); };
 $('#btnActions').onclick = openActionsMenu;
 $('#btnFlow').onclick = openFlowDialog;

@@ -1,7 +1,7 @@
 var schematic = {
 "format":"schmirror-v2",
 "project":"PESDA - DI241790",
-"generated":"07/08/2026 15:09:48",
+"generated":"10/08/2026 08:39:59",
 "units":"mil",
 "items":[
 {"t":"sheet","name":"SCH - DI241790","size":"A4"}

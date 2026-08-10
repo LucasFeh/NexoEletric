@@ -1,0 +1,6 @@
+Designator	Footprint	Comment	Layer	X_mm	Y_mm	Rotation
+CN1	BARRA DO SENSOR DE VIBRAÇAO IIM	Conector	Top	0.327	2.463	0
+CI1	IIM-42351	IIM-42351	Top	-0.028	8.636	0
+C1	1206 capacitor	0.1uF	Bottom	3.75	8.419	90
+C3	1206 capacitor	10nF	Bottom	-5.87	8.382	90
+C2	1206 capacitor	2.2uF	Bottom	6.65	8.419	90
