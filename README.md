@@ -72,6 +72,8 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 ├── pcbframe.js              lógica da vista PCB (renderer, painéis, PCB List, CSV)
 ├── hub-core.js              lógica pura (parsing, validação, nets, motor único de changes)
 ├── hub-draw.js              renderers canvas compartilhados (símbolo, footprint, PCB)
+├── hub-font.js              fonte vetorial da serigrafia como geometria pura (canvas e SVG)
+├── hub-laser.js             gerador da arte para gravação a laser (SVG para o LightBurn)
 ├── projects.js              índice do histórico de projetos (usado pelo hub-classic.html)
 ├── AI-GUIDE.md              contrato/manual para a sessão de IA
 ├── hubserver.py             servidor local opcional (Flask; API do hub v2 — índice/detalhe/Rescan — e recarregamento automático)
@@ -122,9 +124,16 @@ Casca única com:
   a placa ao vivo · opções. Clicar numa linha marca e dá zoom no componente dentro da placa;
   o menu lateral traz o checkbox "definir como referência", as coordenadas de máquina —
   editáveis na referência, calculadas nos demais — mais rotação e move-pós-N. A coluna `#`
-  é o índice de exportação e não é renumerado pela busca, que filtra só a vista: o CSV sai
-  sempre completo. Download `<nome>-NEODEN-TopLayer.csv` / `-BottomLayer.csv`,
-  Mid X/Y = origem do componente, igual ao Location X/Y do Altium) e Histórico (linha do tempo a partir de `build-report.txt`/
+  é o índice de exportação e não é renumerado pela busca, que filtra só a vista.
+  A Neoden só coloca SMD, então a coluna `Tipo` classifica cada componente pelos pads do
+  `board.js` (**SMD** · **PTH** · **MISTO**) e dá pra tirar do CSV: botão **Excluir PTH**,
+  filtro por tipo + checkbox do cabeçalho para desmarcar todos os visíveis de uma vez,
+  shift+clique para intervalos, e **Restaurar** para desfazer. Excluído fica riscado na
+  lista, some do CSV e não conta no `#` — então o "mover após N" segue certo. A escolha
+  é lembrada por projeto; a referência nunca sai (se ela for PTH, a barra avisa).
+  Download `<nome>-NEODEN-TopLayer.csv` / `-BottomLayer.csv`,
+  Mid X/Y = origem do componente, igual ao Location X/Y do Altium), **Laser** (arte vetorial
+  da placa para gravar no LightBurn — detalhes abaixo) e Histórico (linha do tempo a partir de `build-report.txt`/
   `apply-report.txt`/datas de `board.js`/`schematic.js`, mais um `history.jsonl` opcional por
   projeto).
 - **Ações** — menu **⋮** com os 5 comandos do Altium documentados (comando real embaixo do
@@ -164,6 +173,81 @@ precisar de servidor.
   designator/comment), `Ctrl+Z` desfaz e **Salvar changes** grava o `changes.js` — com aviso
   se a IA tiver gravado o arquivo em paralelo. A mesma vista embutida na aba Neoden
   (`?lean=1`) é só de consulta: lá o botão Editar não aparece e a trava não abre.
+
+### Laser — arte para o LightBurn
+
+A aba **Laser** gera o SVG 1:1 da placa para gravação a laser (tinta + ablação, ou fotolito),
+a partir do `board.js`. Três colunas: opções · prévia ao vivo · resumo e download.
+
+**O cobre sai unido, e isso não é detalhe.** A doc do LightBurn (*Fill Mode*) diz que formas
+que se sobrepõem parcialmente na mesma camada de preenchimento **não gravam a área comum** —
+e nenhuma das opções de ordem (*Fill All Shapes at Once* / *Groups* / *Individually*) muda
+isso. Emitir as primitivas cruas abriria um buraco em cada junção trilha/pad. Por isso o
+gerador rasteriza tudo, traça o contorno da união (marching squares) e emite **uma**
+geometria por camada. É também o que faz o negativo e a expansão saírem de graça.
+
+A união ignora o **sentido** de cada polígono, e isso importa: o `board.js` traz as regiões
+majoritariamente no sentido horário, e as formas construídas pelo gerador são anti-horárias.
+Sem normalizar, a regra de preenchimento cancela uma contra a outra e abre cunhas brancas na
+junção da trilha com o pad.
+
+**Camadas — você monta a lista.** O LightBurn separa por **cor**, com o valor exato da
+paleta (C00…C29), e cada cor vira uma camada com velocidade e potência próprias. No painel
+da direita cada linha é uma camada: escolhe o `Cxx`, escolhe **que geometria** ela carrega,
+dá nome, duplica (⧉) ou remove (✕).
+
+| Geometria | O que é |
+|---|---|
+| retirada do cobre (preenchimento) | a área a gravar — no negativo é tudo que **não** é cobre |
+| contorno do cobre (limpeza) | o traço em volta de cada ilha de cobre, para a passada de limpeza |
+| furos | um círculo no **diâmetro real da broca** em cada furo, para furar |
+| serigrafia | o silkscreen |
+| borda da placa (corte) | o contorno, para soltar a placa |
+
+Lista inicial: C00 retirada · C04 limpeza das trilhas · C05 limpeza da retirada · C03 furos ·
+C01 serigrafia · C02 remoção da placa. **Duplicar** a mesma geometria em duas camadas é como
+se faz duas passadas com parâmetros diferentes — o botão sempre escolhe um `Cxx` livre,
+porque duas linhas no mesmo índice se fundem numa camada só no LightBurn.
+
+A camada de furos é independente da opção **Furos** do cobre: dá para não subtrair o furo da
+máscara (*pad cheio*) e ainda assim ter a camada para furar.
+
+A lista fica salva por projeto, e **restaurar padrão** volta ao começo.
+
+> **Configuração de corte pronta no arquivo:** SVG **não** carrega velocidade/potência/modo —
+> o LightBurn casa a cor com a camada e usa os parâmetros que já estiverem lá. Para o arquivo
+> vir configurado é preciso o formato nativo `.lbrn`, que é XML e guarda `<CutSetting>` por
+> `CutIndex`. Ainda não implementado.
+
+**Opções**
+
+- **Lado** Top/Bottom. Trocar para Bottom já sugere **espelhar** (o cobre precisa gravar do
+  lado certo), e o checkbox continua editável — máquina que grava por baixo do vidro não quer.
+- **Inverter (negativo)** — queima tudo que **não** é cobre; é o modo de placa pintada.
+- **Furos** — *furo real* (padrão), *marca de centro* (ø 0,3 mm: uma covinha que centra a broca
+  sem comer o anel) ou *pad cheio*. No *furo real* a forma é fiel ao `board.js`: `drillshape`
+  `rect`/`oblong` viram furo retangular/oblongo de `drillw × drill`, girados por `holerot`
+  (sem `holerot`, o furo herda a rotação do pad) — as mesmas regras que a vista PCB usa. Pad
+  SMD nunca é furado.
+- **Expansão** — compensa o kerf do laser e a sobre-corrosão: cresce o cobre e encolhe a marca
+  de furo na mesma medida.
+- **Resolução** — passo do traçado, padrão 0,025 mm (uma ordem de grandeza abaixo do spot do
+  laser). A prévia usa um passo mais grosso para responder ao vivo e diz quando faz isso; o
+  arquivo sai sempre no valor escolhido. Placa muito grande faz o gerador ceder resolução
+  sozinho, com aviso, em vez de estourar a memória.
+
+As escolhas ficam por projeto em `localStorage`. Nome do arquivo:
+`<projeto>-LASER-<lado>[-negativo][-espelhado].svg`.
+
+**Avisos que a aba dá**
+
+- **mudanças pendentes** — a arte sai do `board.js` cru, o `changes.js` não entra. Rode
+  ApplyChanges e ExportPcb antes de gravar.
+- **negativo sem grupo de cobre** — geraria um retângulo cheio (geometria perfeitamente
+  válida) e o laser queimaria a placa inteira. A aba bloqueia o download.
+
+Contorno com canto em arco é achatado e encadeado junto com as linhas — placa de canto
+arredondado recorta certo, inclusive no negativo.
 
 ## Servidor local com tempo real (opcional)
 

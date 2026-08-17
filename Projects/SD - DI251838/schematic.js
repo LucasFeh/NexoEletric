@@ -40,13 +40,13 @@ var schematic = {
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"EN","x":6403.55,"y":6444.496,"rot":0}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO34","x":6403.55,"y":6344.496,"rot":0}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO35","x":6403.55,"y":6244.496,"rot":0}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"C2","sym":"CAP [  SMD  ]","part":1,"x":5734.334,"y":6794.496,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"C2","sym":"CAP [SMD]","part":1,"x":5734.334,"y":6794.496,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"3V3","style":"Bar","x":5734.334,"y":7094.177,"rot":90}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":5734.334,"y":6644.177,"rot":270}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":5354.334,"y":6614.177,"rot":270}
 ,{"t":"power","sheet":"SCH - DI251881","net":"3V3","style":"Bar","x":5354.334,"y":7424.177,"rot":90}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"R4","sym":"RES [ SMD ]","part":1,"x":6024.334,"y":6794.496,"rot":90,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"C4","sym":"CAP [  SMD  ]","part":1,"x":6024.334,"y":6294.496,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"R4","sym":"RES [SMD]","part":1,"x":6024.334,"y":6794.496,"rot":90,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"C4","sym":"CAP [SMD]","part":1,"x":6024.334,"y":6294.496,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":6024.334,"y":6144.496,"rot":270}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO32","x":7846.386,"y":5124.177,"rot":90}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO33","x":7946.386,"y":5124.177,"rot":90}
@@ -60,7 +60,7 @@ var schematic = {
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO2","x":8846.386,"y":5124.177,"rot":90}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO0","x":8946.386,"y":5124.177,"rot":90}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO4","x":9046.386,"y":5124.177,"rot":90}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"R6","sym":"RES [ SMD ]","part":1,"x":8846.386,"y":4874.177,"rot":270,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"R6","sym":"RES [SMD]","part":1,"x":8846.386,"y":4874.177,"rot":270,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":8846.386,"y":4624.177,"rot":270}
 ,{"t":"comp","sheet":"SCH - DI251881","ref":"R3","sym":"Res SMD 1206","part":1,"x":10569.221,"y":6724.496,"rot":0,"mirror":false,"footprint":"RES 0805","comment":"10k"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"3V3","style":"Bar","x":10884.334,"y":6974.177,"rot":90}
@@ -73,15 +73,15 @@ var schematic = {
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO8","x":10244.334,"y":6424.496,"rot":0}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO7","x":10244.334,"y":6324.496,"rot":0}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO20","x":10204.334,"y":6224.496,"rot":0}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"R5","sym":"RES [ SMD ]","part":1,"x":10914.334,"y":6524.177,"rot":180,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"R5","sym":"RES [SMD]","part":1,"x":10914.334,"y":6524.177,"rot":180,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"3V3","style":"Bar","x":11264.334,"y":6854.177,"rot":90}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"R7","sym":"RES [ SMD ]","part":1,"x":9194.334,"y":4874.177,"rot":90,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"R7","sym":"RES [SMD]","part":1,"x":9194.334,"y":4874.177,"rot":90,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"3V3","style":"Bar","x":9504.334,"y":4944.177,"rot":90}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"C3","sym":"CAP [  SMD  ]","part":1,"x":5354.334,"y":6764.177,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"R1","sym":"RES [ SMD ]","part":1,"x":4044.177,"y":7460.081,"rot":270,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"R2","sym":"RES [ SMD ]","part":1,"x":4044.177,"y":6920.081,"rot":270,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"C3","sym":"CAP [SMD]","part":1,"x":5354.334,"y":6764.177,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"R1","sym":"RES [SMD]","part":1,"x":4044.177,"y":7460.081,"rot":270,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"R2","sym":"RES [SMD]","part":1,"x":4044.177,"y":6920.081,"rot":270,"mirror":false,"footprint":"RES 0805","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":4044.177,"y":6570,"rot":270}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"C1","sym":"CAP [  SMD  ]","part":1,"x":4494.177,"y":6960.081,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"C1","sym":"CAP [SMD]","part":1,"x":4494.177,"y":6960.081,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"SENSOR_VP","x":4104.177,"y":7210.081,"rot":0}
 ,{"t":"power","sheet":"SCH - DI251881","net":"3V3","style":"Bar","x":1069.689,"y":2056.694,"rot":0}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"EN","x":936.772,"y":2256.694,"rot":0}
@@ -91,30 +91,30 @@ var schematic = {
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"3V3","x":926.772,"y":2056.694,"rot":0}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"GND","x":876.772,"y":1656.694,"rot":0}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO0","x":936.772,"y":1256.694,"rot":0}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":1,"x":636.618,"y":2256.694,"rot":0,"mirror":false,"footprint":"Barra Prog Atmega","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":2,"x":636.618,"y":2056.694,"rot":0,"mirror":false,"footprint":"Barra Prog Atmega","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":3,"x":636.618,"y":1856.694,"rot":0,"mirror":false,"footprint":"Barra Prog Atmega","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":4,"x":636.618,"y":1656.694,"rot":0,"mirror":false,"footprint":"Barra Prog Atmega","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":5,"x":636.618,"y":1456.694,"rot":0,"mirror":false,"footprint":"Barra Prog Atmega","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":6,"x":636.618,"y":1256.694,"rot":0,"mirror":false,"footprint":"Barra Prog Atmega","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CI1","sym":"TP4056 - MODULE","part":1,"x":1301.655,"y":6994.098,"rot":0,"mirror":false,"footprint":"Modulo - TP4056","comment":"TP4056-1A - modulo"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONE PADRAO","part":1,"x":636.618,"y":2256.694,"rot":0,"mirror":false,"footprint":"CONE BARRA PROG ATMEGA","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONE PADRAO","part":2,"x":636.618,"y":2056.694,"rot":0,"mirror":false,"footprint":"CONE BARRA PROG ATMEGA","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONE PADRAO","part":3,"x":636.618,"y":1856.694,"rot":0,"mirror":false,"footprint":"CONE BARRA PROG ATMEGA","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONE PADRAO","part":4,"x":636.618,"y":1656.694,"rot":0,"mirror":false,"footprint":"CONE BARRA PROG ATMEGA","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONE PADRAO","part":5,"x":636.618,"y":1456.694,"rot":0,"mirror":false,"footprint":"CONE BARRA PROG ATMEGA","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN4","sym":"CONE PADRAO","part":6,"x":636.618,"y":1256.694,"rot":0,"mirror":false,"footprint":"CONE BARRA PROG ATMEGA","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CI1","sym":"TP4056 - MODULE","part":1,"x":1301.655,"y":6994.098,"rot":0,"mirror":false,"footprint":"MODULO - TP4056","comment":"TP4056-1A - modulo"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"3V3","style":"Bar","x":2740,"y":6030,"rot":90}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"C6","sym":"CAP [  SMD  ]","part":1,"x":2256.223,"y":5327.01,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"C6","sym":"CAP [SMD]","part":1,"x":2256.223,"y":5327.01,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":2256.223,"y":5177.01,"rot":270}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":1566.223,"y":5167.01,"rot":270}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":636.223,"y":5167.01,"rot":270}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"C5","sym":"CAP [  SMD  ]","part":1,"x":636.223,"y":5497.01,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"C7","sym":"CAP [  SMD  ]","part":1,"x":2736.223,"y":5337.01,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"C5","sym":"CAP [SMD]","part":1,"x":636.223,"y":5497.01,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"C7","sym":"CAP [SMD]","part":1,"x":2736.223,"y":5337.01,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":2736.223,"y":5187.01,"rot":270}
 ,{"t":"comp","sheet":"SCH - DI251881","ref":"CI2","sym":"NCP700B","part":1,"x":1206.223,"y":5977.01,"rot":0,"mirror":false,"footprint":"ncp700B","comment":"NCP700B"}
 ,{"t":"comp","sheet":"SCH - DI251881","ref":"CI5","sym":"MODULO - HX711","part":1,"x":2192.52,"y":3990,"rot":0,"mirror":false,"footprint":"MODULO - HX711","comment":"HX711 - MODULO"}
 ,{"t":"comp","sheet":"SCH - DI251881","ref":"CI4","sym":"XGZP6847D","part":1,"x":5400,"y":4530,"rot":0,"mirror":false,"footprint":"XGZP6847D","comment":"XGZP6847D001MPG"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"_GND","style":"GndSignal","x":707.083,"y":4105.12,"rot":0}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN3","sym":"CONECTOR PADR\u00C3O","part":2,"x":2480,"y":6480,"rot":0,"mirror":true,"footprint":"AKZ700/2 - 5.08","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN3","sym":"CONECTOR PADR\u00C3O","part":1,"x":1910,"y":6944.098,"rot":0,"mirror":true,"footprint":"AKZ700/2 - 5.08","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN3","sym":"CONE PADRAO","part":2,"x":2480,"y":6480,"rot":0,"mirror":true,"footprint":"AKZ700/2 - 5.08","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN3","sym":"CONE PADRAO","part":1,"x":1910,"y":6944.098,"rot":0,"mirror":true,"footprint":"AKZ700/2 - 5.08","comment":"34"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":748.032,"y":6850.397,"rot":270}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN2","sym":"CONECTOR PADR\u00C3O","part":2,"x":670,"y":7250,"rot":180,"mirror":true,"footprint":"AKZ700/2 - 5.08","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN2","sym":"CONECTOR PADR\u00C3O","part":1,"x":660,"y":7444.098,"rot":180,"mirror":true,"footprint":"AKZ700/2 - 5.08","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN2","sym":"CONE PADRAO","part":2,"x":670,"y":7250,"rot":180,"mirror":true,"footprint":"AKZ700/2 - 5.08","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN2","sym":"CONE PADRAO","part":1,"x":660,"y":7444.098,"rot":180,"mirror":true,"footprint":"AKZ700/2 - 5.08","comment":"34"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"VBAT+","style":"Bar","x":2110,"y":7600,"rot":90}
 ,{"t":"power","sheet":"SCH - DI251881","net":"_GND","style":"GndSignal","x":2370,"y":7310,"rot":270}
 ,{"t":"power","sheet":"SCH - DI251881","net":"VBAT+","style":"Bar","x":663.063,"y":4299.219,"rot":0}
@@ -122,17 +122,17 @@ var schematic = {
 ,{"t":"power","sheet":"SCH - DI251881","net":"VOUT+","style":"Bar","x":2350,"y":6610,"rot":90}
 ,{"t":"power","sheet":"SCH - DI251881","net":"VOUT+","style":"Bar","x":640,"y":6010,"rot":90}
 ,{"t":"power","sheet":"SCH - DI251881","net":"VOUT+","style":"Bar","x":4044.177,"y":7710.081,"rot":90}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":4,"x":1540,"y":3890,"rot":180,"mirror":true,"footprint":"CONE MSTBV 5.08/4P GF","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":3,"x":1540,"y":4040,"rot":180,"mirror":true,"footprint":"CONE MSTBV 5.08/4P GF","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":2,"x":1540,"y":4180,"rot":180,"mirror":true,"footprint":"CONE MSTBV 5.08/4P GF","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":1,"x":1540,"y":4310,"rot":180,"mirror":true,"footprint":"CONE MSTBV 5.08/4P GF","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN1","sym":"CONE PADRAO","part":4,"x":1540,"y":3890,"rot":180,"mirror":true,"footprint":"CONE MSTBV 5.08/4P GF","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN1","sym":"CONE PADRAO","part":3,"x":1540,"y":4040,"rot":180,"mirror":true,"footprint":"CONE MSTBV 5.08/4P GF","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN1","sym":"CONE PADRAO","part":2,"x":1540,"y":4180,"rot":180,"mirror":true,"footprint":"CONE MSTBV 5.08/4P GF","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN1","sym":"CONE PADRAO","part":1,"x":1540,"y":4310,"rot":180,"mirror":true,"footprint":"CONE MSTBV 5.08/4P GF","comment":"34"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"3V3","style":"Bar","x":3150,"y":4450,"rot":90}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":3160,"y":3470,"rot":270}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO32","x":2930,"y":3800,"rot":0}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO33","x":2930,"y":4040,"rot":0}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":4680,"y":4030,"rot":270}
 ,{"t":"power","sheet":"SCH - DI251881","net":"3V3","style":"Bar","x":6280,"y":4870,"rot":90}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"C8","sym":"CAP [  SMD  ]","part":1,"x":6280,"y":4250,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"C8","sym":"CAP [SMD]","part":1,"x":6280,"y":4250,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
 ,{"t":"power","sheet":"SCH - DI251881","net":"GND","style":"GndPower","x":6280,"y":4010,"rot":270}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO21","x":5910,"y":4530,"rot":0}
 ,{"t":"netlabel","sheet":"SCH - DI251881","net":"IO22","x":4720,"y":4670,"rot":0}
@@ -232,6 +232,6 @@ var schematic = {
 ,{"t":"wire","sheet":"SCH - DI251881","pts":[[6280,4100],[6280,4010]]}
 ,{"t":"wire","sheet":"SCH - DI251881","pts":[[5850,4530],[6100,4530]]}
 ,{"t":"wire","sheet":"SCH - DI251881","pts":[[4950,4670],[4720,4670]]}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN5","sym":"CONECTOR PADR\u00C3O","part":2,"x":510.233,"y":4105.12,"rot":180,"mirror":true,"footprint":"Cone 10.16","comment":"34"}
-,{"t":"comp","sheet":"SCH - DI251881","ref":"CN5","sym":"CONECTOR PADR\u00C3O","part":1,"x":500.233,"y":4299.219,"rot":180,"mirror":true,"footprint":"Cone 10.16","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN5","sym":"CONE PADRAO","part":2,"x":510.233,"y":4105.12,"rot":180,"mirror":true,"footprint":"CONE 10.16","comment":"34"}
+,{"t":"comp","sheet":"SCH - DI251881","ref":"CN5","sym":"CONE PADRAO","part":1,"x":500.233,"y":4299.219,"rot":180,"mirror":true,"footprint":"CONE 10.16","comment":"34"}
 ]};

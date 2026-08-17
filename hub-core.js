@@ -593,6 +593,20 @@ function neodenPos(c){
     return { x: (b.x1 + b.x2) / 2, y: (b.y1 + b.y2) / 2 };
   return { x: 0, y: 0 };
 }
+/* Tipo de montagem: sai do pads[].type do board.js ("th"/"smd"), nunca do nome do
+   footprint. A Neoden 4 so coloca SMD — PTH na lista trava a maquina. "misto" (pads
+   dos dois tipos) e categoria propria e NAO conta como pth: e o modulo que assenta em
+   pads SMD com furo de header junto (MD4/ESP32-H2 do VDCB-DI251879), colocavel. Sem
+   pads, ou tipo desconhecido, da "?": nao da pra afirmar, entao fica fora de qualquer
+   exclusao em lote em vez de virar um chute silencioso. */
+function neodenKind(c){
+  const pads = (c && c.pads) || [];
+  const th = pads.some(p => p.type === 'th'), smd = pads.some(p => p.type === 'smd');
+  if (th && smd) return 'misto';
+  if (th) return 'pth';
+  if (smd) return 'smd';
+  return '?';
+}
 function neodenRotatePt(ox, oy, px, py, angle){
   const a = angle * Math.PI / 180;
   return { x: ox + Math.cos(a) * (px - ox) - Math.sin(a) * (py - oy),
@@ -607,11 +621,19 @@ function neodenTransform(components, opts){
     if (!ref) return { rows: null, error: `referência "${o.refDes}" não existe no board.js` };
     ordered = [ref].concat(comps.filter(c => c !== ref));
   }
+  const ex = new Set(o.exclude || []);
+  ex.delete(o.refDes);        /* a referência é a origem do mapeamento: nunca sai da lista */
   const rows = ordered.map(c => {
     const m = neodenPos(c);
     return { des: c.ref, footprint: c.footprint || '', x: m.x, y: m.y,
-             layer: c.layer, rot: c.rot || 0, comment: c.comment || '' };
+             layer: c.layer, rot: c.rot || 0, comment: c.comment || '',
+             kind: neodenKind(c), excluded: ex.has(c.ref), idx: null };
   });
+  /* idx = índice de exportação, contado SÓ nos incluídos — é o mesmo número no "#" da
+     tabela, no campo "mover após N" e na linha do CSV. Se a exclusão ficasse fora do
+     pipeline, tirar 32 PTH deslocaria o corte do painel em 32 posições. */
+  let k = 0;
+  for (const r of rows) if (!r.excluded) r.idx = k++;
   if (o.refDes){                                       /* -r: relativo à referência */
     const rx = rows[0].x, ry = rows[0].y;
     for (const r of rows){ r.x -= rx; r.y -= ry; }
@@ -626,7 +648,7 @@ function neodenTransform(components, opts){
     for (const r of rows){ r.x += o.off.x || 0; r.y += o.off.y || 0; }
   }
   if (o.move && isNum(o.move.n) && (isNum(o.move.dx) || isNum(o.move.dy))){  /* -m dx dy n */
-    rows.forEach((r, i) => { if (i > o.move.n){ r.x += o.move.dx || 0; r.y += o.move.dy || 0; } });
+    for (const r of rows) if (r.idx !== null && r.idx > o.move.n){ r.x += o.move.dx || 0; r.y += o.move.dy || 0; }
   }
   return { rows, error: null };
 }
@@ -634,7 +656,7 @@ function neodenCsv(rows, side){
   const clean = v => String(v).replace(/,/g, '_');
   const L = ['Designator,Footprint,Mid X,Mid Y,Layer,Rotation,Comment', ',,,,,,'];
   for (const r of (rows || [])){
-    if (r.layer !== side) continue;
+    if (r.excluded || r.layer !== side) continue;
     L.push([clean(r.des), clean(r.footprint), r.x.toFixed(2) + 'mm', r.y.toFixed(2) + 'mm',
             'T', clean(r.rot), clean(r.comment)].join(','));
   }
@@ -658,5 +680,5 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, ORIENT_DIR,
          applyPcbChanges, deriveStatus,
          serializeChanges, serializeSchematic, serializeAnnotations,
          compDelta, xfPoint, xfAngle, ownerDelta, effLayerForOwner,
-         neodenTransform, neodenCsv };
+         neodenTransform, neodenCsv, neodenKind };
 });

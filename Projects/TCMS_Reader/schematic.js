@@ -43,8 +43,8 @@ var schematic = {
 ,{"t":"power","sheet":"SCH - Leitor","net":"VCC_CAN","style":"Bar","x":6680,"y":3530,"rot":90}
 ,{"t":"power","sheet":"SCH - Leitor","net":"VCC_485","style":"Bar","x":6660,"y":5220,"rot":90}
 ,{"t":"comp","sheet":"SCH - Leitor","ref":"IC3","sym":"ESP32-DEVKITC-32D","part":1,"x":3790,"y":4320,"rot":0,"mirror":false,"footprint":"MODULE_ESP32-DEVKITV1","comment":"ESP32-DEVKITC-32D"}
-,{"t":"comp","sheet":"SCH - Leitor","ref":"J1","sym":"Jumper 3q","part":1,"x":3940,"y":6120,"rot":270,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
-,{"t":"comp","sheet":"SCH - Leitor","ref":"J2","sym":"Jumper 3q","part":1,"x":4900,"y":6120,"rot":270,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
+,{"t":"comp","sheet":"SCH - Leitor","ref":"J1","sym":"JUMPER 3Q","part":1,"x":3940,"y":6120,"rot":270,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
+,{"t":"comp","sheet":"SCH - Leitor","ref":"J2","sym":"JUMPER 3Q","part":1,"x":4900,"y":6120,"rot":270,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
 ,{"t":"power","sheet":"SCH - Leitor","net":"VCC_485","style":"Bar","x":5260,"y":6170,"rot":90}
 ,{"t":"power","sheet":"SCH - Leitor","net":"VCC_CAN","style":"Bar","x":4350,"y":6190,"rot":90}
 ,{"t":"power","sheet":"SCH - Leitor","net":"3v3","style":"Bar","x":2950,"y":5120,"rot":90}
@@ -53,10 +53,10 @@ var schematic = {
 ,{"t":"power","sheet":"SCH - Leitor","net":"3v3","style":"Bar","x":3940,"y":5840,"rot":270}
 ,{"t":"power","sheet":"SCH - Leitor","net":"3v3","style":"Bar","x":4900,"y":5840,"rot":270}
 ,{"t":"power","sheet":"SCH - Leitor","net":"5v","style":"Bar","x":4900,"y":6390,"rot":90}
-,{"t":"comp","sheet":"SCH - Leitor","ref":"J5","sym":"Jumper 3q","part":1,"x":8430,"y":5250,"rot":90,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
-,{"t":"comp","sheet":"SCH - Leitor","ref":"J6","sym":"Jumper 3q","part":1,"x":8430,"y":4360,"rot":90,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
-,{"t":"comp","sheet":"SCH - Leitor","ref":"J7","sym":"Jumper 3q","part":1,"x":8510,"y":3600,"rot":90,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
-,{"t":"comp","sheet":"SCH - Leitor","ref":"J8","sym":"Jumper 3q","part":1,"x":8510,"y":2600,"rot":90,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
+,{"t":"comp","sheet":"SCH - Leitor","ref":"J5","sym":"JUMPER 3Q","part":1,"x":8430,"y":5250,"rot":90,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
+,{"t":"comp","sheet":"SCH - Leitor","ref":"J6","sym":"JUMPER 3Q","part":1,"x":8430,"y":4360,"rot":90,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
+,{"t":"comp","sheet":"SCH - Leitor","ref":"J7","sym":"JUMPER 3Q","part":1,"x":8510,"y":3600,"rot":90,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
+,{"t":"comp","sheet":"SCH - Leitor","ref":"J8","sym":"JUMPER 3Q","part":1,"x":8510,"y":2600,"rot":90,"mirror":false,"footprint":"JUMPER_3VIAS","comment":"Jumper de 3 pinos"}
 ,{"t":"wire","sheet":"SCH - Leitor","pts":[[6520,4510],[6680,4510],[6680,4340]]}
 ,{"t":"wire","sheet":"SCH - Leitor","pts":[[7210,4830],[7090,4830],[7090,4790]]}
 ,{"t":"wire","sheet":"SCH - Leitor","pts":[[7680,4900],[7830,4900],[7830,5250]]}

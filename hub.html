@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <script src="hub-core.js"></script>
 <script src="hub-draw.js"></script>
+<script src="hub-font.js"></script>
+<script src="hub-laser.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    1. TOKENS — única fonte de verdade de cor, espaço, raio e sombra.
@@ -253,6 +255,42 @@ tbody tr[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow:
 .nd-check input:disabled { cursor: default; }
 .nd-hint { margin: 4px 0 0; font-size: 11px; color: var(--text-4); }
 .nd-sep { height: 1px; margin: 16px 0 12px; background: var(--line); }
+/* laser: opções · prévia · resumo. Reusa .nd-fields/.nd-check/.nd-hint/.nd-sep. */
+.lz-grid { height: 100%; display: grid; min-height: 0;
+  grid-template-columns: var(--aside-w) minmax(300px, 1fr) var(--aside-w); }
+.lz-opts { overflow: auto; padding: 14px 16px 24px; border-right: 1px solid var(--line); }
+.lz-view { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+.lz-view .viewport { margin: 0 12px 18px; background: #f4f4f2; }
+.lz-seg { display: flex; gap: 6px; margin-top: 8px; }
+.lz-seg .btn { flex: 1; }
+.lz-seg .btn.on { background: var(--hi); color: #10120f; border-color: var(--hi); }
+.lz-layer { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 8px; color: var(--text-2); }
+.lz-swatch { width: 11px; height: 11px; border-radius: 2px; border: 1px solid var(--line); flex: none; }
+.lz-warn { margin-top: 10px; padding: 8px 10px; border-radius: var(--r-sm);
+  background: rgba(214,167,90,0.12); color: var(--warn); font-size: 11px; line-height: 1.5; }
+/* editor de camadas: cada linha e uma camada do LightBurn; dá para repetir a mesma
+   geometria em camadas diferentes (duas passadas de limpeza, por exemplo) */
+.lz-lrow { display: grid; grid-template-columns: 12px 58px 1fr 24px 24px;
+  gap: 4px 6px; align-items: center; margin-top: 8px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--line); }
+.lz-lrow .input { min-height: 26px; font-size: 11px; padding: 2px 4px; }
+.lz-lrow .lz-lname { grid-column: 2 / -1; }
+.lz-lrow .btn { padding: 0; min-height: 24px; font-size: 12px; line-height: 1; }
+.lz-num { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px;
+  font-size: 12px; margin-top: 8px; }
+.lz-num .k { color: var(--text-3); }
+.lz-num .v { font-variant-numeric: tabular-nums; color: var(--text-1); }
+/* neoden: tipo de montagem + exclusao da lista (a Neoden so coloca SMD) */
+.nd-grid .comp-bar { flex-wrap: wrap; row-gap: 6px; }
+.nd-grid .comp-bar .input { max-width: 240px; }
+.nd-kind { display: inline-flex; font-size: 10px; letter-spacing: 0.04em;
+  padding: 2px 6px; border-radius: var(--r-sm); background: var(--edge); color: var(--text-2); }
+.nd-kind.pth { background: rgba(224,85,90,0.15); color: var(--err); }
+.nd-kind.misto { background: rgba(214,167,90,0.15); color: var(--warn); }
+.nd-inc { width: 15px; height: 15px; accent-color: var(--hi); vertical-align: middle; }
+.nd-inc:disabled { opacity: 0.4; cursor: default; }
+td.nd-c { cursor: default; }
+tbody tr.nd-off td:not(.nd-c) { text-decoration: line-through; opacity: 0.42; }
 aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2); box-shadow: inset 1px 0 0 var(--line); min-height: 0; }
 .kicker { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
 .det-head { display: flex; align-items: baseline; gap: 8px; margin-top: 3px; }
@@ -311,7 +349,6 @@ button.tag.gone { color: var(--err); }
 .viewport canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .viewport .hint { position: absolute; inset: 0; display: grid; place-items: center; padding: 18px;
   text-align: center; font-size: 12px; color: var(--text-4); pointer-events: none; }
-.viewport.sheet .hint { color: var(--text-4); mix-blend-mode: luminosity; }
 select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto; }
 
 /* histórico */
@@ -459,17 +496,30 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
         <div class="comp-left">
           <div class="comp-bar">
             <input id="ndSearch" class="input" placeholder="buscar designador, footprint ou comment">
+            <select id="ndKind" class="input" style="max-width:132px" title="filtrar por tipo de montagem">
+              <option value="">todos</option>
+              <option value="smd">só SMD</option>
+              <option value="pth">só PTH</option>
+              <option value="misto">só misto</option>
+              <option value="off">só excluídos</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" id="ndDropPth" title="tira da lista todo componente 100% furado (não mexe em misto)">Excluir PTH</button>
+            <button class="btn btn-ghost btn-sm" id="ndRestore" title="reinclui tudo que foi excluído">Restaurar</button>
             <span class="count" id="ndCount"></span>
+            <span class="count" id="ndWarn" style="color:var(--warn)"></span>
             <button class="btn btn-primary btn-sm" style="margin-left:auto" id="ndTop">Baixar TopLayer</button>
             <button class="btn btn-secondary btn-sm" id="ndBottom">Baixar BottomLayer</button>
           </div>
           <div class="scroll" style="padding:0 6px 18px 18px">
             <table>
               <thead><tr>
+                <th style="width:30px"><input type="checkbox" class="nd-inc" id="ndAll" title="marcar/desmarcar todos os visíveis no filtro"></th>
                 <th class="r" style="width:40px" title="índice de exportação — é este o N do &quot;mover após N&quot;">#</th>
-                <th style="width:78px">Desig.</th><th>Footprint</th><th class="r" style="width:92px">Mid X</th>
-                <th class="r" style="width:92px">Mid Y</th><th style="width:56px">Lado</th>
-                <th class="r" style="width:52px">Rot</th>
+                <th style="width:78px">Desig.</th><th>Footprint</th>
+                <th style="width:56px" title="tipo de montagem, lido dos pads do board.js">Tipo</th>
+                <th class="r" style="width:82px">Mid X</th>
+                <th class="r" style="width:82px">Mid Y</th><th style="width:56px">Lado</th>
+                <th class="r" style="width:46px">Rot</th>
               </tr></thead>
               <tbody id="ndRows"></tbody>
             </table>
@@ -491,6 +541,9 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
           <label class="nd-check"><input type="checkbox" id="ndIsRef"> definir como referência</label>
           <p class="nd-hint" id="ndRefHint"></p>
 
+          <label class="nd-check"><input type="checkbox" id="ndInc"> incluir no CSV</label>
+          <p class="nd-hint" id="ndIncHint"></p>
+
           <div class="nd-fields">
             <span class="k">máquina X</span><input id="ndPosX" class="input mono" type="number" step="any" value="0">
             <span class="k">máquina Y</span><input id="ndPosY" class="input mono" type="number" step="any" value="0">
@@ -509,6 +562,95 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
 
           <p class="nd-hint" id="ndSumm" style="margin-top:14px"></p>
           <p class="nd-hint">Mid X/Y = origem do componente (Location X/Y do Altium); ponto 0 da placa visível na aba PCB.</p>
+        </aside>
+      </div>
+    </div>
+
+    <div class="pane" data-pane="laser">
+      <div class="lz-grid">
+        <aside class="lz-opts">
+          <div class="kicker">lado da placa</div>
+          <div class="lz-seg">
+            <button class="btn btn-ghost btn-sm" data-lz-side="Top">Top</button>
+            <button class="btn btn-ghost btn-sm" data-lz-side="Bottom">Bottom</button>
+          </div>
+
+          <div class="nd-sep"></div>
+          <div class="kicker">o que aparece</div>
+          <div class="lz-seg">
+            <button class="btn btn-ghost btn-sm" id="lzPreCobre" title="cobre + contorno = 2 camadas no LightBurn">Cobre</button>
+            <button class="btn btn-ghost btn-sm" id="lzPreSilk" title="serigrafia + contorno = 2 camadas no LightBurn">Serigrafia</button>
+          </div>
+          <label class="nd-check"><input type="checkbox" data-lz-show="tracks"> trilhas, arcos e regiões</label>
+          <label class="nd-check"><input type="checkbox" data-lz-show="pads"> pads</label>
+          <label class="nd-check"><input type="checkbox" data-lz-show="vias"> vias</label>
+          <label class="nd-check"><input type="checkbox" data-lz-show="silk"> serigrafia</label>
+          <label class="nd-check"><input type="checkbox" data-lz-show="texts"> textos da serigrafia</label>
+          <label class="nd-check"><input type="checkbox" data-lz-show="outline"> contorno da placa</label>
+
+          <div class="nd-sep"></div>
+          <div class="kicker">arte</div>
+          <label class="nd-check"><input type="checkbox" id="lzInvert"> inverter (negativo)</label>
+          <p class="nd-hint">negativo = queima tudo que <b>não</b> é cobre; é o que se usa com placa pintada.</p>
+          <label class="nd-check"><input type="checkbox" id="lzMirror"> espelhar</label>
+          <p class="nd-hint" id="lzMirrorHint"></p>
+
+          <div class="nd-sep"></div>
+          <div class="kicker">furos</div>
+          <div class="nd-fields">
+            <span class="k">no pad</span>
+            <select id="lzHoles" class="input">
+              <option value="drill">furo real (fiel à placa)</option>
+              <option value="mark">marca de centro</option>
+              <option value="none">pad cheio</option>
+            </select>
+            <span class="k">marca ø</span>
+            <input id="lzMarkD" class="input mono" type="number" step="0.05" min="0" title="mm">
+          </div>
+
+          <div class="nd-sep"></div>
+          <div class="kicker">ajuste fino</div>
+          <div class="nd-fields">
+            <span class="k">expansão</span>
+            <input id="lzExpand" class="input mono" type="number" step="0.01" min="0" title="mm — compensa kerf do laser e sobre-corrosão">
+            <span class="k">resolução</span>
+            <input id="lzRes" class="input mono" type="number" step="0.005" min="0.005" title="mm/px do traçado">
+            <span class="k">margem</span>
+            <input id="lzMargin" class="input mono" type="number" step="0.5" min="0" title="mm de folga ao redor da placa">
+            <span class="k">serigrafia</span>
+            <select id="lzSilkMode" class="input">
+              <option value="line">centerline (Line)</option>
+              <option value="fill">largura real (Fill)</option>
+            </select>
+          </div>
+          <p class="nd-hint">a expansão cresce o cobre e encolhe a marca de furo, na mesma medida.</p>
+        </aside>
+
+        <div class="lz-view">
+          <div class="canvas-bar">
+            <span class="ttl">prévia</span><span class="meta" id="lzViewMeta"></span>
+            <div class="right"><button class="btn btn-ghost btn-sm" id="lzFit">Enquadrar</button></div>
+          </div>
+          <div class="viewport" id="lzVp"><canvas id="lzCv"></canvas><div class="hint" id="lzHint"></div></div>
+        </div>
+
+        <aside id="lzSide">
+          <div class="kicker">camadas do arquivo</div>
+          <div id="lzLayerRows"></div>
+          <button class="btn btn-ghost btn-sm" id="lzAddLayer" style="width:100%;margin-top:10px">+ adicionar camada</button>
+          <button class="btn btn-ghost btn-sm" id="lzResetLayers" style="width:100%;margin-top:6px">restaurar padrão</button>
+          <p class="nd-hint">o LightBurn separa por <b>cor</b>: cada linha vira uma camada com
+            velocidade e potência próprias. Repetir a mesma geometria em duas camadas (⧉) dá
+            duas passadas com parâmetros diferentes.</p>
+
+          <div class="nd-sep"></div>
+          <div class="kicker">arquivo</div>
+          <div class="lz-num" id="lzStats"></div>
+          <div id="lzWarn"></div>
+
+          <button class="btn btn-primary" id="lzDl" style="width:100%;margin-top:16px">Baixar SVG</button>
+          <p class="nd-hint" id="lzName"></p>
+          <p class="nd-hint" style="margin-top:12px">no LightBurn: <b>File » Import</b>, e confira que o tamanho bateu com o mm da placa.</p>
         </aside>
       </div>
     </div>
@@ -612,6 +754,7 @@ const TABS = [
   /* Biblioteca nao depende do projeto: o contador vem das libs, nao do detalhe. */
   { id:'lib', label:'Biblioteca', count:()=> LIB.ready ? LIB.syms.length + LIB.fps.length : '…' },
   { id:'neoden', label:'Neoden' },
+  { id:'laser', label:'Laser' },
   { id:'hist', label:'Histórico' },
 ];
 const FLOW = [
@@ -644,7 +787,9 @@ const S = {
   /* off = coordenada de maquina DA REFERENCIA. Fica no estado (e nao lido do DOM como
      rotacao/mover) porque o mesmo par de campos mostra a posicao calculada quando o
      selecionado nao e a referencia — o input deixa de ser fonte da verdade. */
-  neoden: { refDes: null, selDes: null, q: '', off: { x: 0, y: 0 } },
+  neoden: { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: new Set() },
+  /* opcoes da arte a laser; o formato e o de HubLaser.defaults(), persistido por projeto */
+  laser: HubLaser.defaults(),
   /* sel = { k:'sym'|'fp'|'gone-sym'|'gone-fp', name }; fpShown troca so o preview de baixo */
   lib: { q: '', kind: 'all', sel: null, part: 1, fpShown: null },
 };
@@ -824,9 +969,45 @@ function renderComponents() {
   a.append(acts);
 }
 
+/* exclusao guardada por projeto: excluir os 38 PTH do MID-DI261897 uma vez, nao todo dia */
+const ndExclKey = id => 'altiumhub.neoden.excl.' + id;
+function ndLoadExcl(id) {
+  try { return new Set(JSON.parse(localStorage.getItem(ndExclKey(id))) || []); }
+  catch (e) { return new Set(); }
+}
+function ndSaveExcl() {
+  const k = ndExclKey(S.projId);
+  if (S.neoden.excluded.size) localStorage.setItem(k, JSON.stringify([...S.neoden.excluded]));
+  else localStorage.removeItem(k);
+}
+/* unico caminho de escrita da exclusao; devolve quantos mudaram de fato (a referencia
+   nunca sai, entao "excluir PTH" pode mexer em menos do que casou o filtro) */
+function ndSetExcluded(designators, off) {
+  let n = 0;
+  designators.forEach(d => {
+    if (d === S.neoden.refDes) return;
+    if (S.neoden.excluded.has(d) !== off) n++;
+    if (off) S.neoden.excluded.add(d); else S.neoden.excluded.delete(d);
+  });
+  ndSaveExcl(); renderNeoden();
+  return n;
+}
+let ndAnchor = null;                     /* ultimo designator clicado, para o shift+clique */
+function ndToggle(des, shownDes, shift) {
+  const off = !S.neoden.excluded.has(des);
+  let targets = [des];
+  if (shift && ndAnchor && ndAnchor !== des) {
+    const a = shownDes.indexOf(ndAnchor), b = shownDes.indexOf(des);
+    if (a >= 0 && b >= 0) targets = shownDes.slice(Math.min(a, b), Math.max(a, b) + 1);
+  }
+  ndAnchor = des;
+  ndSetExcluded(targets, off);
+}
+
 function neodenOpts() {
   return {
     refDes: S.neoden.refDes,
+    exclude: [...(S.neoden.excluded || [])],
     off: { x: S.neoden.off.x, y: S.neoden.off.y },
     rot: (+$('#ndRotAng').value ? { ox: +$('#ndRotOx').value || 0, oy: +$('#ndRotOy').value || 0, angle: +$('#ndRotAng').value } : null),
     move: ((+$('#ndMvDx').value || +$('#ndMvDy').value) ? { dx: +$('#ndMvDx').value || 0, dy: +$('#ndMvDy').value || 0, n: +$('#ndMvN').value || 0 } : null),
@@ -886,21 +1067,39 @@ function renderNeoden() {
   const tb = $('#ndRows'); tb.textContent = '';
   if (res.error) { $('#ndCount').textContent = res.error; renderNeodenAside(null, opts); return; }
 
-  /* o indice e o da ordem de exportacao (referencia primeiro) e nao muda com a busca —
-     e ele que o "mover apos N" usa, entao filtrar a vista nao pode renumerar nada. */
+  /* r.idx e o indice de exportacao, ja contado so sobre os incluidos pelo hub-core —
+     e o mesmo numero do "mover apos N" e da linha do CSV. Filtrar a vista nao renumera. */
   const q = S.neoden.q.trim().toLowerCase();
-  const shown = res.rows
-    .map((r, i) => ({ r, i }))
-    .filter(({ r }) => !q || (r.des + ' ' + r.footprint + ' ' + r.comment + ' ' + r.layer).toLowerCase().includes(q));
+  const kf = S.neoden.kind;
+  const shown = res.rows.filter(r =>
+    (!q || (r.des + ' ' + r.footprint + ' ' + r.comment + ' ' + r.layer).toLowerCase().includes(q)) &&
+    (!kf || (kf === 'off' ? r.excluded : r.kind === kf)));
+  const shownDes = shown.map(r => r.des);
 
-  shown.forEach(({ r, i }) => {
+  shown.forEach(r => {
     const tr = el('tr');
+    if (r.excluded) tr.classList.add('nd-off');
     tr.setAttribute('aria-selected', String(r.des === S.neoden.selDes));
-    const idx = el('td', 'r num', String(i)); idx.style.color = 'var(--text-4)'; tr.append(idx);
+
+    const cell = el('td', 'nd-c');
+    const box = el('input', 'nd-inc');
+    box.type = 'checkbox';
+    box.checked = !r.excluded;
+    box.disabled = r.des === S.neoden.refDes;
+    box.title = box.disabled ? 'a referência sempre vai no CSV' : 'shift+clique seleciona o intervalo';
+    box.onclick = e => { e.stopPropagation(); ndToggle(r.des, shownDes, e.shiftKey); };
+    cell.onclick = e => e.stopPropagation();
+    cell.append(box); tr.append(cell);
+
+    const idx = el('td', 'r num', r.idx === null ? '—' : String(r.idx));
+    idx.style.color = 'var(--text-4)'; tr.append(idx);
     const des = el('td', 'mono', r.des);
     if (r.des === S.neoden.refDes) des.textContent = r.des + ' ★';
     tr.append(des);
     const fp = el('td', null, r.footprint); fp.style.color = 'var(--text-2)'; tr.append(fp);
+    const kd = el('td');
+    if (r.kind !== '?') kd.append(el('span', 'nd-kind ' + r.kind, r.kind.toUpperCase()));
+    tr.append(kd);
     tr.append(el('td', 'r num', r.x.toFixed(2)));
     tr.append(el('td', 'r num', r.y.toFixed(2)));
     tr.append(el('td', null, r.layer));
@@ -909,8 +1108,29 @@ function renderNeoden() {
     tb.append(tr);
   });
 
-  $('#ndCount').textContent = (q ? shown.length + ' de ' + res.rows.length : res.rows.length + ' componentes')
+  /* o checkbox do cabecalho age sobre os VISIVEIS: filtrar PTH e desmarcar ele
+     e o "selecionar varios de uma vez". A referencia fica de fora dos dois lados. */
+  const alt = shown.filter(r => r.des !== S.neoden.refDes);
+  const on = alt.filter(r => !r.excluded).length;
+  const all = $('#ndAll');
+  all.disabled = !alt.length;
+  all.checked = !!alt.length && on === alt.length;
+  all.indeterminate = on > 0 && on < alt.length;
+  all.onclick = () => ndSetExcluded(alt.map(r => r.des), !all.checked);
+
+  const total = res.rows.length, off = res.rows.filter(r => r.excluded).length;
+  $('#ndCount').textContent =
+    (shown.length !== total ? shown.length + ' visíveis · ' : '')
+    + (total - off) + ' no CSV' + (off ? ' · ' + off + ' excluídos' : '') + ' de ' + total
     + ' · referência ' + S.neoden.refDes + ' = (' + opts.off.x + ', ' + opts.off.y + ')';
+
+  /* a referencia e imune a exclusao: se ela mesma for PTH, o CSV sai com um PTH dentro */
+  const refKind = (res.rows.find(r => r.des === S.neoden.refDes) || {}).kind;
+  $('#ndWarn').textContent = refKind === 'pth'
+    ? '⚠ a referência ' + S.neoden.refDes + ' é PTH e sempre vai no CSV — escolha uma referência SMD'
+    : '';
+  $('#ndRestore').disabled = !off;
+  $('#ndDropPth').disabled = !res.rows.some(r => r.kind === 'pth' && !r.excluded && r.des !== S.neoden.refDes);
   $('#ndViewMeta').textContent = S.neoden.selDes ? 'selecionado ' + S.neoden.selDes : 'clique numa linha';
 
   renderNeodenAside(res.rows.find(r => r.des === S.neoden.selDes) || null, opts);
@@ -927,6 +1147,16 @@ function renderNeodenAside(row, opts) {
   $('#ndRefHint').textContent = !row ? ''
     : isRef ? 'É a referência: digite abaixo onde ela está na máquina.'
             : 'Marque para tornar ' + row.des + ' a referência.';
+
+  const inc = $('#ndInc');
+  inc.checked = !!row && !row.excluded;
+  inc.disabled = !row || isRef;
+  $('#ndIncHint').textContent = !row ? ''
+    : isRef ? 'A referência sempre vai no CSV.'
+    : row.kind === 'pth' ? 'PTH — a Neoden não coloca; desmarque.'
+    : row.kind === 'misto' ? 'Misto (pads SMD + furos) — confira se a máquina coloca.'
+    : row.kind === '?' ? 'Sem pads no board.js — tipo indefinido.'
+    : '';
 
   const px = $('#ndPosX'), py = $('#ndPosY');
   px.readOnly = py.readOnly = !isRef;
@@ -1338,6 +1568,7 @@ function renderPanes() {
   }
   if (S.tab === 'lib') return renderLib();
   if (S.tab === 'neoden') return renderNeoden();
+  if (S.tab === 'laser') return renderLaser();
   if (S.tab === 'hist') {
     const h = $('#histRows'); h.textContent = '';
     d.history.forEach(x => {
@@ -1349,6 +1580,293 @@ function renderPanes() {
       h.append(r);
     });
   }
+}
+
+/* ═══ LASER — arte para o LightBurn ════════════════════════════
+   Toda a geometria vem do hub-laser.js; aqui só há estado de UI, desenho e download.
+   A prévia usa HubLaser.place — a MESMA transformação do arquivo — então o que se vê
+   é o que sai, inclusive espelho e negativo. */
+const lzBoard = () => (S.detail && S.detail.board) || null;
+const lzKey = id => 'altiumhub.laser.' + id;
+
+function lzLoad(id) {
+  const d = HubLaser.defaults();
+  try {
+    const raw = JSON.parse(localStorage.getItem(lzKey(id)) || 'null');
+    if (raw && typeof raw === 'object') {
+      /* só as chaves que HubLaser conhece hoje: opção gravada por versão antiga
+         (ex.: o toggle "regions", hoje dentro de "tracks") não volta como chave morta */
+      const base = HubLaser.defaults().show, show = {};
+      for (const k of Object.keys(base))
+        show[k] = raw.show && (k in raw.show) ? !!raw.show[k] : base[k];
+      Object.assign(d, raw);
+      d.show = show;
+      /* camadas gravadas: só as com fonte que ainda existe, e índice dentro da paleta */
+      const ids = new Set(HubLaser.SOURCES.map(s => s.id));
+      d.layers = Array.isArray(raw.layers)
+        ? raw.layers.filter(l => l && ids.has(l.src)).map(l => ({
+            src: l.src,
+            ci: Math.max(0, Math.min(HubLaser.PALETTE.length - 1, l.ci | 0)),
+            name: String(l.name || ''),
+          }))
+        : null;
+      if (!d.layers || !d.layers.length) d.layers = null;
+    }
+  } catch (e) {}
+  return d;
+}
+function lzSave() {
+  if (!S.projId) return;
+  try { localStorage.setItem(lzKey(S.projId), JSON.stringify(S.laser)); } catch (e) {}
+}
+
+let lzCam = null, lzArt = null, lzTimer = null, lzFitKey = '';
+
+/* A prévia cede resolução para responder ao vivo; o ARQUIVO sai sempre no res escolhido.
+   Muda só o passo do traçado — forma, espelho e negativo são idênticos. */
+const LZ_PREVIEW_PX = 4e6;
+function lzPreviewOpts() {
+  const o = Object.assign({}, S.laser), B = lzBoard();
+  const bb = B && B.board && B.board.bbox;
+  if (bb) {
+    const px = ((bb.x2 - bb.x1)/o.res + 1) * ((bb.y2 - bb.y1)/o.res + 1);
+    if (px > LZ_PREVIEW_PX) o.res = o.res * Math.sqrt(px / LZ_PREVIEW_PX);
+  }
+  return o;
+}
+
+const lzLayers = () => (S.laser.layers && S.laser.layers.length)
+  ? S.laser.layers : HubLaser.defaultLayers();
+
+function lzDraw(ctx) {
+  if (!lzArt) return;
+  const T = HubLaser.place(lzArt, lzArt.opts);
+  const P = (x, y) => { const p = T(x, y); return [p[0], -p[1]]; };   /* SVG é Y p/ baixo */
+  const trace = (rings, close) => {
+    ctx.beginPath();
+    for (const r of rings) {
+      r.forEach((q, i) => { const p = P(q[0], q[1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); });
+      if (close) ctx.closePath();
+    }
+  };
+  const px = 1 / (lzCam ? lzCam.cam.scale : 1);
+  /* percorre as MESMAS camadas que o arquivo vai ter, na mesma ordem e com as mesmas
+     cores — a prévia não é uma aproximação do resultado, é o resultado */
+  for (const lay of lzLayers()) {
+    const g = HubLaser.geomFor(lzArt, lay.src);
+    const hex = HubLaser.ci2hex(lay.ci);
+    if (g.rings && g.rings.length) {
+      trace(g.rings, true);
+      if (g.fill) { ctx.fillStyle = hex; ctx.fill('evenodd'); }
+      else { ctx.strokeStyle = hex; ctx.lineWidth = Math.max(0.08, px); ctx.stroke(); }
+    }
+    if (g.lines && g.lines.length) {
+      trace(g.lines, false);
+      ctx.strokeStyle = hex; ctx.lineWidth = Math.max(0.12, 1.5*px); ctx.stroke();
+    }
+    if (g.prims && g.prims.length) {
+      ctx.strokeStyle = hex; ctx.lineWidth = Math.max(0.08, px);
+      ctx.beginPath();
+      for (const pr of g.prims) {
+        if (pr.k === 'disc') {
+          const c = P(pr.x, pr.y);
+          ctx.moveTo(c[0] + pr.r, c[1]); ctx.arc(c[0], c[1], pr.r, 0, 2*Math.PI);
+        } else {
+          for (const poly of HubLaser.primPolys(pr, 0, lzArt.opts.res/4)) {
+            poly.forEach((q, i) => { const p = P(q[0], q[1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); });
+            ctx.closePath();
+          }
+        }
+      }
+      ctx.stroke();
+    }
+  }
+}
+
+/* ── editor de camadas ── */
+function lzLayerSet(i, patch, quiet) {
+  const L = lzLayers().map((l, k) => k === i ? Object.assign({}, l, patch) : l);
+  S.laser.layers = L; lzSave();
+  if (quiet) return;                    /* nome é rótulo: não mexe na geometria */
+  lzRenderLayers(); lzCompute();
+}
+function lzLayerDup(i) {
+  const L = lzLayers().slice();
+  /* índice LIVRE, não o seguinte: cair num Cxx já usado funde as duas no LightBurn,
+     que é exatamente o que duplicar quer evitar */
+  const nova = Object.assign({}, L[i], { ci: HubLaser.freeCi(L),
+                                         name: (L[i].name || L[i].src) + ' (2)' });
+  L.splice(i + 1, 0, nova);
+  S.laser.layers = L; lzSave(); lzRenderLayers(); lzCompute();
+}
+function lzLayerDel(i) {
+  const L = lzLayers().slice(); L.splice(i, 1);
+  S.laser.layers = L; lzSave(); lzRenderLayers(); lzCompute();
+}
+function lzLayerAdd() {
+  const L = lzLayers().slice();
+  L.push({ src:'copperEdge', ci:HubLaser.freeCi(L), name:'nova camada' });
+  S.laser.layers = L; lzSave(); lzRenderLayers(); lzCompute();
+}
+
+function lzRenderLayers() {
+  const box = $('#lzLayerRows'); box.textContent = '';
+  const L = lzLayers();
+  L.forEach((lay, i) => {
+    const row = el('div', 'lz-lrow');
+    const sw = el('span', 'lz-swatch'); sw.style.background = HubLaser.ci2hex(lay.ci);
+    const ci = el('select', 'input');
+    ci.title = 'camada do LightBurn (a cor é o que ele usa para separar)';
+    HubLaser.PALETTE.forEach((hex, n) => {
+      const op = el('option', null, HubLaser.ciName(n)); op.value = n; ci.append(op);
+    });
+    ci.value = lay.ci;
+    ci.onchange = () => lzLayerSet(i, { ci: +ci.value });
+
+    const src = el('select', 'input');
+    src.title = 'que geometria esta camada carrega';
+    HubLaser.SOURCES.forEach(s => {
+      const op = el('option', null, s.label); op.value = s.id; src.append(op);
+    });
+    src.value = lay.src;
+    src.onchange = () => lzLayerSet(i, { src: src.value });
+
+    const dup = el('button', 'btn btn-ghost btn-sm', '⧉');
+    dup.title = 'duplicar — mesma geometria noutra camada, para uma segunda passada';
+    dup.onclick = () => lzLayerDup(i);
+    const del = el('button', 'btn btn-ghost btn-sm', '✕');
+    del.title = 'remover esta camada';
+    del.onclick = () => lzLayerDel(i);
+
+    const nm = el('input', 'input lz-lname');
+    nm.value = lay.name || ''; nm.placeholder = 'nome da camada';
+    nm.oninput = () => lzLayerSet(i, { name: nm.value }, true);
+
+    row.append(sw, ci, src, dup, del, nm);
+    box.append(row);
+  });
+}
+
+function lzEnsureCam() {
+  if (lzCam) return;
+  lzCam = HubDraw.mkCamera($('#lzCv'), ctx => lzDraw(ctx), { bg: '#f4f4f2' });
+  lzCam.resize();
+}
+
+function lzCompute() {
+  const B = lzBoard();
+  if (!B) return;
+  lzEnsureCam();
+  const po = lzPreviewOpts();
+  const t0 = (window.performance || Date).now();
+  lzArt = HubLaser.art(B, po);
+  const ms = Math.round((window.performance || Date).now() - t0);
+  const s = lzArt.size;
+  const key = s.w.toFixed(3) + 'x' + s.h.toFixed(3);
+  lzCam.resize();
+  if (key !== lzFitKey) { lzCam.fit({ x1:0, y1:-s.h, x2:s.w, y2:0 }, 1.08); lzFitKey = key; }
+  else lzCam.draw();
+  const cedeu = po.res > S.laser.res * 1.001;
+  $('#lzViewMeta').textContent = s.w.toFixed(1) + ' × ' + s.h.toFixed(1) + ' mm · ' + ms + ' ms' +
+    (cedeu ? ' · prévia a ' + po.res.toFixed(3) + ' mm/px' : '');
+  $('#lzHint').textContent = cedeu
+    ? 'prévia mais grossa para responder ao vivo — o arquivo sai a ' + S.laser.res + ' mm/px'
+    : '';
+  lzRenderSide(po);
+}
+function lzSchedule() {
+  $('#lzViewMeta').textContent = 'calculando…';
+  clearTimeout(lzTimer);
+  lzTimer = setTimeout(lzCompute, 260);
+}
+
+function lzRenderSide(po) {
+  const st = $('#lzStats'); st.textContent = '';
+  const linha = (k, v) => { st.append(el('span', 'k', k), el('span', 'v', v)); };
+  linha('tamanho', lzArt.size.w.toFixed(2) + ' × ' + lzArt.size.h.toFixed(2) + ' mm');
+  linha('anéis', String(lzArt.stats.rings));
+  linha('pontos', String(lzArt.stats.points));
+  linha('resolução', S.laser.res + ' mm/px');
+  linha('furos', String((lzArt.drills || []).length));
+  const vivas = lzLayers().filter(l => {
+    const g = HubLaser.geomFor(lzArt, l.src);
+    return (g.rings || []).length || (g.lines || []).length || (g.prims || []).length;
+  });
+  linha('camadas', vivas.length + ' de ' + lzLayers().length);
+  linha('SVG aprox.', Math.max(1, Math.round(lzArt.stats.points * 17 / 1024)) + ' KB');
+
+  const W = $('#lzWarn'); W.textContent = '';
+  const avisos = HubLaser.checkOpts(S.laser).concat(lzArt.warnings);
+  const p = proj();
+  if (p && p.pending > 0)
+    avisos.unshift(p.pending + ' mudança(s) pendente(s) em changes.js — a arte NÃO as inclui; ' +
+                   'rode ApplyChanges e ExportPcb antes de gravar.');
+  for (const a of avisos) W.append(el('div', 'lz-warn', a));
+
+  $('#lzName').textContent = p ? HubLaser.filename(p.name, S.laser) : '';
+}
+
+/* não pisa no campo que está sendo digitado — o render roda a cada tecla */
+function lzSyncControls() {
+  const o = S.laser;
+  document.querySelectorAll('[data-lz-side]').forEach(b =>
+    b.classList.toggle('on', b.dataset.lzSide === o.side));
+  document.querySelectorAll('[data-lz-show]').forEach(c =>
+    c.checked = !!o.show[c.dataset.lzShow]);
+  $('#lzInvert').checked = !!o.invert;
+  $('#lzMirror').checked = !!o.mirror;
+  $('#lzMirrorHint').textContent = o.side === 'Bottom'
+    ? (o.mirror ? 'bottom espelhado: o cobre grava do lado certo.'
+                : 'bottom SEM espelho — a placa vai sair invertida.')
+    : (o.mirror ? 'top espelhado: só use se sua máquina grava por baixo.' : '');
+  const set = (id, v) => { const n = $(id); if (document.activeElement !== n) n.value = v; };
+  set('#lzHoles', o.holes); set('#lzMarkD', o.markD); set('#lzExpand', o.expand);
+  set('#lzRes', o.res); set('#lzMargin', o.margin); set('#lzSilkMode', o.silkMode);
+  $('#lzMarkD').disabled = o.holes !== 'mark';
+}
+
+function renderLaser() {
+  const pane = document.querySelector('.pane[data-pane="laser"]');
+  const grid = pane.querySelector('.lz-grid');
+  let empty = pane.querySelector('.empty');
+  if (!lzBoard()) {
+    grid.style.display = 'none';
+    if (!empty) {
+      empty = el('div', 'empty'); const inner = el('div');
+      inner.append(el('span', 'tag', 'sem board.js'));
+      inner.append(el('p', null, 'Rode ExportPcb no Altium para gerar a geometria da placa.'));
+      empty.append(inner); pane.append(empty);
+    }
+    empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  grid.style.display = '';
+  lzSyncControls();
+  lzRenderLayers();
+  lzSchedule();
+}
+
+function lzSet(patch) { Object.assign(S.laser, patch); lzSave(); renderLaser(); }
+
+function lzDownload() {
+  const B = lzBoard();
+  if (!B) return toast('sem board.js — rode ExportPcb no Altium', 'err');
+  const o = Object.assign({}, S.laser, { layers: lzLayers() });
+  const bloqueio = HubLaser.checkOpts(o)[0];
+  if (bloqueio) return toast(bloqueio, 'warn');
+  const r = HubLaser.exportSvg(B, o);
+  const temAlgo = o.layers.some(l => {
+    const g = HubLaser.geomFor(r.art, l.src);
+    return (g.rings || []).length || (g.lines || []).length || (g.prims || []).length;
+  });
+  if (!temAlgo) return toast('nenhuma camada tem geometria nesta face — nada a baixar', 'warn');
+  const name = HubLaser.filename(proj().name, o);
+  const blob = new Blob([r.svg], { type: 'image/svg+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  URL.revokeObjectURL(a.href);
+  toast(name + ' baixado (' + (r.svg.length/1024).toFixed(0) + ' KB)', 'ok');
 }
 
 function renderAll() { renderHeader(); renderProjBar(); renderTabs(); renderPanes(); }
@@ -1395,6 +1913,9 @@ function neodenDownload(side) {
   if (!comps.length) return;
   const res = HubCore.neodenTransform(comps, neodenOpts());
   if (res.error) { toast(res.error, 'err'); return; }
+  if (!res.rows.some(r => !r.excluded && r.layer === side)) {
+    toast('nenhum componente incluído no lado ' + side + ' — nada a baixar', 'warn'); return;
+  }
   const csv = HubCore.neodenCsv(res.rows, side);
   const name = sanitizeName(proj().name) + '-NEODEN-' + side + 'Layer.csv';
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -1441,10 +1962,12 @@ async function loadProject(id) {
   if (!det) { toast('detalhe do projeto indisponível — tente Reindexar', 'err'); return; }
   S.projId = id; S.detail = det;
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
-  S.neoden = { refDes: null, selDes: null, q: '', off: { x: 0, y: 0 } };
+  S.neoden = { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: ndLoadExcl(id) };
+  ndAnchor = null;
+  S.laser = lzLoad(id); lzArt = null; lzFitKey = '';   /* a arte e as opcoes sao por projeto */
   libUse = null; libUseFor = null;        /* o cruzamento com a lib e por projeto */
   S.lib.sel = null; S.lib.fpShown = null;
-  $('#ndSearch').value = '';
+  $('#ndSearch').value = ''; $('#ndKind').value = '';
   syncURL();
   renderAll();
 }
@@ -1518,6 +2041,39 @@ $('#btnBom').onclick = exportBom;
   $('#' + id).addEventListener('change', renderNeoden);
 });
 $('#ndSearch').oninput = e => { S.neoden.q = e.target.value; renderNeoden(); };
+
+/* ── laser ── */
+document.querySelectorAll('[data-lz-side]').forEach(b => b.onclick = () => {
+  /* trocar de lado re-sugere o espelho: bottom precisa dele, top nao. Continua editavel. */
+  lzSet({ side: b.dataset.lzSide, mirror: HubLaser.autoMirror(b.dataset.lzSide) });
+});
+document.querySelectorAll('[data-lz-show]').forEach(c => c.onchange = () => {
+  const show = Object.assign({}, S.laser.show);
+  show[c.dataset.lzShow] = c.checked;
+  lzSet({ show });
+});
+$('#lzPreCobre').onclick = () => lzSet({ show: { tracks:true, pads:true, vias:true,
+                                                silk:false, texts:false, outline:true } });
+$('#lzPreSilk').onclick  = () => lzSet({ show: { tracks:false, pads:false, vias:false,
+                                                silk:true, texts:true, outline:true } });
+$('#lzInvert').onchange = e => lzSet({ invert: e.target.checked });
+$('#lzMirror').onchange = e => lzSet({ mirror: e.target.checked });
+$('#lzHoles').onchange = e => lzSet({ holes: e.target.value });
+$('#lzSilkMode').onchange = e => lzSet({ silkMode: e.target.value });
+[['#lzMarkD','markD',0], ['#lzExpand','expand',0], ['#lzRes','res',0.005], ['#lzMargin','margin',0]]
+  .forEach(([sel, key, min]) => $(sel).addEventListener('input', e => {
+    const v = parseFloat(e.target.value);
+    if (!isFinite(v) || v < min) return;      /* campo a meio de digitacao nao vira estado */
+    lzSet({ [key]: v });
+  }));
+$('#lzFit').onclick = () => {
+  if (!lzArt || !lzCam) return;
+  lzCam.resize();
+  lzCam.fit({ x1:0, y1:-lzArt.size.h, x2:lzArt.size.w, y2:0 }, 1.08);
+};
+$('#lzAddLayer').onclick = lzLayerAdd;
+$('#lzResetLayers').onclick = () => { S.laser.layers = null; lzSave(); renderLaser(); };
+$('#lzDl').onclick = lzDownload;
 /* X/Y so sao editaveis na referencia, entao o que se digita aqui e sempre o offset dela */
 ['ndPosX','ndPosY'].forEach(id => $('#' + id).addEventListener('input', () => {
   S.neoden.off = { x: +$('#ndPosX').value || 0, y: +$('#ndPosY').value || 0 };
@@ -1536,6 +2092,21 @@ $('#ndSee').onclick = () => {
   const sel = () => { try { frame.contentWindow.__hubSelectComp(S.neoden.selDes); } catch (e) {} };
   try { frame.contentWindow.__hubSelectComp(S.neoden.selDes); }
   catch (e) { frame.onload = sel; }
+};
+$('#ndKind').onchange = e => { S.neoden.kind = e.target.value; renderNeoden(); };
+$('#ndInc').onchange = () => {
+  if (S.neoden.selDes) ndSetExcluded([S.neoden.selDes], !$('#ndInc').checked);
+};
+$('#ndDropPth').onclick = () => {
+  const comps = (S.detail.board && S.detail.board.components) || [];
+  const pth = comps.filter(c => HubCore.neodenKind(c) === 'pth').map(c => c.ref);
+  const n = ndSetExcluded(pth, true);
+  toast(n ? n + ' componente(s) PTH fora da lista' : 'nenhum PTH a excluir', n ? 'ok' : 'warn');
+};
+$('#ndRestore').onclick = () => {
+  const n = S.neoden.excluded.size;
+  S.neoden.excluded.clear(); ndSaveExcl(); renderNeoden();
+  toast(n + ' componente(s) de volta na lista', 'ok');
 };
 $('#ndTop').onclick = () => neodenDownload('Top');
 $('#ndBottom').onclick = () => neodenDownload('Bottom');

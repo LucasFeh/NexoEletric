@@ -35,15 +35,15 @@ var schematic = {
 ,{"t":"text","sheet":"SCH - DI251879","s":"/","x":8314.498,"y":688.032,"h":10}
 ,{"t":"text","sheet":"SCH - DI251879","s":"=Arquivo","x":7298.194,"y":883.701,"h":10}
 ,{"t":"comp","sheet":"SCH - DI251879","ref":"T2","sym":"BD238","part":1,"x":4266.932,"y":5784.255,"rot":0,"mirror":false,"footprint":"SOT-23 (RED PAD)","comment":"FMMT555"}
-,{"t":"comp","sheet":"SCH - DI251879","ref":"R10","sym":"RES [ SMD ]","part":1,"x":3970.081,"y":4738.191,"rot":270,"mirror":false,"footprint":"RES 1206","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
-,{"t":"comp","sheet":"SCH - DI251879","ref":"R9","sym":"RES [ SMD ]","part":1,"x":3694.49,"y":5683.074,"rot":270,"mirror":false,"footprint":"RES 1206","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
-,{"t":"comp","sheet":"SCH - DI251879","ref":"DZ1","sym":"DIODO [ ZENER ] SMD","part":1,"x":3970.081,"y":5214.334,"rot":90,"mirror":false,"footprint":"DO-214AC","comment":"MMSZ5232BHE3"}
+,{"t":"comp","sheet":"SCH - DI251879","ref":"R10","sym":"RES [SMD]","part":1,"x":3970.081,"y":4738.191,"rot":270,"mirror":false,"footprint":"RES 1206","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251879","ref":"R9","sym":"RES [SMD]","part":1,"x":3694.49,"y":5683.074,"rot":270,"mirror":false,"footprint":"RES 1206","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251879","ref":"DZ1","sym":"DIODO ZENER [SMD]","part":1,"x":3970.081,"y":5214.334,"rot":90,"mirror":false,"footprint":"DO-214AC","comment":"MMSZ5232BHE3"}
 ,{"t":"comp","sheet":"SCH - DI251879","ref":"T1","sym":"BD238","part":1,"x":5114.963,"y":5884.255,"rot":90,"mirror":false,"footprint":"SOT223","comment":"FZT955"}
 ,{"t":"comp","sheet":"SCH - DI251879","ref":"T3","sym":"BD238","part":1,"x":5014.963,"y":5311.814,"rot":0,"mirror":false,"footprint":"SOT-23 (RED PAD)","comment":"FMMT555"}
-,{"t":"comp","sheet":"SCH - DI251879","ref":"R11","sym":"RES [ SMD ]","part":1,"x":4631.892,"y":5311.814,"rot":180,"mirror":false,"footprint":"RES 1206","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
-,{"t":"comp","sheet":"SCH - DI251879","ref":"R13","sym":"RES [ SMD ]","part":1,"x":5114.963,"y":4731.892,"rot":270,"mirror":false,"footprint":"RES 1206","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251879","ref":"R11","sym":"RES [SMD]","part":1,"x":4631.892,"y":5311.814,"rot":180,"mirror":false,"footprint":"RES 1206","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251879","ref":"R13","sym":"RES [SMD]","part":1,"x":5114.963,"y":4731.892,"rot":270,"mirror":false,"footprint":"RES 1206","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
 ,{"t":"netlabel","sheet":"SCH - DI251879","net":"INPUT","x":4366.932,"y":6217.326,"rot":0}
-,{"t":"comp","sheet":"SCH - DI251879","ref":"R12","sym":"RES [ SMD ]","part":1,"x":4366.932,"y":4731.892,"rot":270,"mirror":false,"footprint":"RES 2512 [ 6432 ]","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251879","ref":"R12","sym":"RES [SMD]","part":1,"x":4366.932,"y":4731.892,"rot":270,"mirror":false,"footprint":"RES 2512 [6432]","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
 ,{"t":"power","sheet":"SCH - DI251879","net":"0V","style":"GndSignal","x":5114.963,"y":4470.081,"rot":270}
 ,{"t":"netlabel","sheet":"SCH - DI251879","net":"OUTPUT","x":5314.963,"y":5984.255,"rot":0}
 ,{"t":"comp","sheet":"SCH - DI251879","ref":"CI2","sym":"ee5d3dbbf13c6f2750ebff6c1e687a4","part":1,"x":1192.128,"y":7374.807,"rot":0,"mirror":false,"footprint":"FP-MSE-16-05-08-1871-MFG","comment":"LTC7138HMSE#PBF"}
@@ -72,7 +72,7 @@ var schematic = {
 ,{"t":"power","sheet":"SCH - DI251879","net":"0V","style":"GndSignal","x":3188.978,"y":3460.446,"rot":270}
 ,{"t":"power","sheet":"SCH - DI251879","net":"PVin","style":"Bar","x":2028.978,"y":4500.446,"rot":90}
 ,{"t":"comp","sheet":"SCH - DI251879","ref":"D1","sym":"SMCJ33A","part":1,"x":7104.647,"y":7404.331,"rot":90,"mirror":false,"footprint":"DO-214AB","comment":"SMCJ5A"}
-,{"t":"comp","sheet":"SCH - DI251879","ref":"VDR1","sym":"Varistor","part":1,"x":7854.647,"y":7374.331,"rot":90,"mirror":false,"footprint":"VDR 7mm ENTRE PADS","comment":"4VCA 0.8J"}
+,{"t":"comp","sheet":"SCH - DI251879","ref":"VDR1","sym":"VARISTOR","part":1,"x":7854.647,"y":7374.331,"rot":90,"mirror":false,"footprint":"VDR 7mm ENTRE PADS","comment":"4VCA 0.8J"}
 ,{"t":"power","sheet":"SCH - DI251879","net":"0V","style":"GndSignal","x":6829.454,"y":7007.878,"rot":270}
 ,{"t":"netlabel","sheet":"SCH - DI251879","net":"0V","x":7574.647,"y":7007.878,"rot":0}
 ,{"t":"power","sheet":"SCH - DI251879","net":"5Vltc","style":"Bar","x":6239.454,"y":7787.878,"rot":90}
@@ -96,8 +96,8 @@ var schematic = {
 ,{"t":"netlabel","sheet":"SCH - DI251879","net":"SCL","x":3087.718,"y":2084.491,"rot":0}
 ,{"t":"comp","sheet":"SCH - DI251879","ref":"T4","sym":"SQJ431AEP-T1_GE3","part":1,"x":4757.483,"y":7516.54,"rot":90,"mirror":true,"footprint":"SQJ402EPT1","comment":"SQJ431AEP-T1_GE3"}
 ,{"t":"comp","sheet":"SCH - DI251879","ref":"D4","sym":"SZMMSZ5240BT1G","part":1,"x":5272.444,"y":7565.358,"rot":270,"mirror":false,"footprint":"SOD3716X135N","comment":"SZMMSZ5240BT1G"}
-,{"t":"comp","sheet":"SCH - DI251879","ref":"R14","sym":"RES [ SMD ]","part":1,"x":4757.483,"y":7151.579,"rot":270,"mirror":false,"footprint":"1206 resistor","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
-,{"t":"comp","sheet":"SCH - DI251879","ref":"R15","sym":"RES [ SMD ]","part":1,"x":4996.853,"y":6718.508,"rot":270,"mirror":false,"footprint":"1206 resistor","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251879","ref":"R14","sym":"RES [SMD]","part":1,"x":4757.483,"y":7151.579,"rot":270,"mirror":false,"footprint":"1206 resistor","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
+,{"t":"comp","sheet":"SCH - DI251879","ref":"R15","sym":"RES [SMD]","part":1,"x":4996.853,"y":6718.508,"rot":270,"mirror":false,"footprint":"1206 resistor","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
 ,{"t":"power","sheet":"SCH - DI251879","net":"0V","style":"GndSignal","x":4996.853,"y":6568.508,"rot":270}
 ,{"t":"power","sheet":"SCH - DI251879","net":"PVin","style":"Bar","x":4327.561,"y":7755.91,"rot":90}
 ,{"t":"power","sheet":"SCH - DI251879","net":"Vin","style":"Bar","x":5472.444,"y":7786.54,"rot":90}
