@@ -39,16 +39,42 @@ const SOURCES = [
   { id:'board',      label:'borda da placa (corte)',            mode:'line' },
 ];
 
-/* Lista inicial. Nada aqui e fixo: a aba deixa somar, duplicar e trocar a cor de cada
-   uma, entao rodar duas passadas de limpeza e so ter duas linhas `copperEdge`. */
+/* Parametros de corte de uma camada. `type` e o MODO: 'Scan' = preencher, 'Cut' = linha.
+   frequency em kHz e qPulse em ns, como aparecem na UI do LightBurn para fibra/MOPA;
+   a conversao para a unidade do arquivo acontece na emissao, num lugar so. */
+function cutDefaults(){
+  return { type:'Cut', speed:100, maxPower:100, frequency:40, numPasses:1, qPulse:200,
+           bidir:false, crossHatch:false, angle:0, interval:0.01 };
+}
+const cutOf = (o) => Object.assign(cutDefaults(), o || {});
+
+/* Parametros efetivos de uma camada. Sem `type` explicito o modo vem da FONTE: uma
+   camada de preenchimento sem configuracao tem que preencher, nao virar contorno. */
+function layerCut(lay){
+  const src = SOURCES.find(s => s.id === (lay && lay.src));
+  const base = cutDefaults();
+  if (src && src.mode === 'fill') base.type = 'Scan';
+  return Object.assign(base, (lay && lay.cut) || {});
+}
+
+/* Perfis da bancada. `retirada de cobre` aparece em DUAS camadas de proposito: sao duas
+   passadas do mesmo preenchimento, e camadas separadas deixam ajustar uma sem a outra. */
+const CUT_FUROS   = { type:'Cut',  speed:100,  maxPower:100, frequency:40, numPasses:20, qPulse:200 };
+const CUT_COBRE   = { type:'Scan', speed:1000, maxPower:85,  frequency:35, numPasses:1,  qPulse:200,
+                      bidir:true, crossHatch:true, angle:45, interval:0.05 };
+const CUT_BORDA   = { type:'Cut',  speed:100,  maxPower:100, frequency:40, numPasses:20, qPulse:200 };
+const CUT_LIMPEZA = { type:'Scan', speed:100,  maxPower:20,  frequency:20, numPasses:1,  qPulse:200,
+                      bidir:true };
+
+/* Lista inicial. Nada aqui e fixo: a aba deixa somar, duplicar, trocar a cor, o modo e
+   cada parametro. */
 function defaultLayers(){
   return [
-    { src:'fill',       ci:0, name:'retirada do cobre' },
-    { src:'copperEdge', ci:4, name:'limpeza das trilhas' },
-    { src:'copperEdge', ci:5, name:'limpeza da retirada do cobre' },
-    { src:'drills',     ci:3, name:'furos' },
-    { src:'silk',       ci:1, name:'serigrafia' },
-    { src:'board',      ci:2, name:'remoção da placa' },
+    { src:'drills',     ci:0, name:'furos',                        cut:cutOf(CUT_FUROS)   },
+    { src:'fill',       ci:1, name:'retirada de cobre',            cut:cutOf(CUT_COBRE)   },
+    { src:'board',      ci:2, name:'borda da placa (corte)',       cut:cutOf(CUT_BORDA)   },
+    { src:'fill',       ci:3, name:'retirada de cobre (2ª passada)', cut:cutOf(CUT_COBRE) },
+    { src:'copperEdge', ci:4, name:'contorno do cobre (limpeza)',  cut:cutOf(CUT_LIMPEZA) },
   ];
 }
 
@@ -725,12 +751,19 @@ function svg(art, opts){
     const g = geomFor(art, lay.src);
     if (geomEmpty(g)) continue;                    /* camada sem geometria nao vira grupo */
     const hex = ci2hex(lay.ci);
+    const cut = layerCut(lay);
+    /* quem decide preencher ou contornar e o MODO da camada, nao a fonte de geometria:
+       a bancada e que escolhe, e e ela que sabe o que a maquina vai fazer */
+    const preenche = cut.type === 'Scan';
     const head = '<g id="' + ciName(lay.ci) + '-' + String(lay.src) +
                  '" data-lb-layer="' + ciName(lay.ci) + '"' +
+                 ' data-lb-mode="' + (preenche ? 'preencher' : 'linha') + '"' +
+                 ' data-lb-cut="' + cut.speed + 'mm/s ' + cut.maxPower + '% ' +
+                   cut.frequency + 'kHz ' + cut.numPasses + 'x qpulse' + cut.qPulse + '"' +
                  ' data-lb-name="' + String(lay.name || lay.src).replace(/"/g, '') + '">';
     const body = [];
     if (g.rings && g.rings.length)
-      body.push(g.fill
+      body.push(preenche
         ? '<path fill="' + hex + '" fill-rule="evenodd" stroke="none" d="' + pathD(g.rings, T, true) + '"/>'
         : '<path fill="none" stroke="' + hex + '" stroke-width="0.1" d="' + pathD(g.rings, T, true) + '"/>');
     if (g.lines && g.lines.length)
@@ -742,6 +775,112 @@ function svg(art, opts){
   }
 
   L.push('</svg>');
+  return L.join('\n');
+}
+
+/* ═══════════════ .lbrn — formato nativo, com os parametros dentro ═══════════════
+   Esquema conferido campo a campo contra um arquivo real de MOPA 60W
+   (Color_Test_60W_MOPA.lbrn2, AppVersion 1.4.00):
+     - `frequency` e em Hz  (o arquivo traz 10000..500000; a UI mostra kHz)
+     - `QPulseWidth` e em ns
+     - booleano e 1/0  (`crossHatch Value="1"`)
+     - `numPasses`/`bidir` NAO aparecem la: o LightBurn omite quando estao no padrao,
+       entao aqui tambem so saem quando diferem, para nao inventar campo.
+   O LightBurn usa Y para CIMA - ao contrario do SVG, aqui Y nao inverte. */
+
+function placeLbrn(art, opts){
+  const o = norm(opts), bb = art.bbox;
+  return (x, y) => [ o.mirror ? bb.x2 - x : x - bb.x1, y - bb.y1 ];
+}
+
+const xmlEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const V = (k, v) => '      <' + k + ' Value="' + v + '"/>';
+const bit = b => b ? '1' : '0';
+
+function cutSettingXml(lay){
+  const c = layerCut(lay), L = [];
+  L.push('    <CutSetting type="' + (c.type === 'Scan' ? 'Scan' : 'Cut') + '">');
+  L.push(V('index', lay.ci | 0));
+  L.push(V('name', xmlEsc(lay.name || ciName(lay.ci))));
+  /* uma potencia so na UI = sem rampa: min = max */
+  L.push(V('minPower', c.maxPower));
+  L.push(V('maxPower', c.maxPower));
+  L.push(V('speed', c.speed));
+  L.push(V('frequency', Math.round(c.frequency * 1000)));      /* kHz -> Hz */
+  L.push(V('QPulseWidth', c.qPulse));
+  if (c.numPasses !== 1) L.push(V('numPasses', c.numPasses));
+  if (c.type === 'Scan'){
+    L.push(V('interval', c.interval));
+    L.push(V('angle', c.angle));
+    L.push(V('crossHatch', bit(c.crossHatch)));
+    if (c.bidir) L.push(V('bidir', bit(true)));
+  }
+  L.push(V('priority', lay.ci | 0));
+  L.push('    </CutSetting>');
+  return L.join('\n');
+}
+
+/* Path na forma CONDENSADA, que e a que FormatVersion="1" le:
+     <VertList>V<x> <y>c0x1c1x1V...</VertList>
+     <PrimList>L0 1L1 2...L<n-1> 0</PrimList>
+   `c0x1c1x1` sao os marcadores de "sem bezier" que o arquivo de referencia poe em todo
+   vertice de linha; `L<a> <b>` liga dois vertices, e o ultimo fecha no zero.
+
+   Emitir a forma legada (<V vx>/<P T=>) dentro de FormatVersion="1" produz um arquivo que
+   abre com as camadas certas e NENHUMA geometria - foi o que aconteceu na primeira versao.
+   Coordenadas absolutas, entao a XForm e a identidade. */
+function pathShape(rings, T, ci){
+  const L = [];
+  for (const r of rings){
+    if (!r || r.length < 2) continue;
+    /* o anel ja fecha repetindo o primeiro ponto; aqui quem fecha e a ultima primitiva */
+    const pts = (r.length > 2 && r[0][0] === r[r.length-1][0] && r[0][1] === r[r.length-1][1])
+      ? r.slice(0, -1) : r.slice();
+    if (pts.length < 2) continue;
+    const vs = [], ps = [];
+    for (let i = 0; i < pts.length; i++){
+      const p = T(pts[i][0], pts[i][1]);
+      vs.push('V' + fmt(p[0]) + ' ' + fmt(p[1]) + 'c0x1c1x1');
+      ps.push('L' + i + ' ' + ((i + 1) % pts.length));
+    }
+    L.push('    <Shape Type="Path" CutIndex="' + ci + '">');
+    L.push('      <XForm>1 0 0 1 0 0</XForm>');
+    L.push('      <VertList>' + vs.join('') + '</VertList>');
+    L.push('      <PrimList>' + ps.join('') + '</PrimList>');
+    L.push('    </Shape>');
+  }
+  return L;
+}
+
+function lbrn(art, opts){
+  const o = norm(opts), T = placeLbrn(art, o);
+  const layers = (o.layers && o.layers.length) ? o.layers : defaultLayers();
+  const L = [];
+  L.push('<?xml version="1.0" encoding="UTF-8"?>');
+  L.push('<LightBurnProject AppVersion="1.4.00" FormatVersion="1" MaterialHeight="0" ' +
+         'MirrorX="False" MirrorY="False">');
+  L.push('  <!-- AltiumPCBMirror - ' + o.side + ', ' +
+         (o.invert ? 'negativo' : 'positivo') + (o.mirror ? ', espelhado' : '') +
+         ', res ' + o.res + ' mm/px -->');
+
+  for (const lay of layers){
+    if (geomEmpty(geomFor(art, lay.src))) continue;
+    L.push(cutSettingXml(lay));
+  }
+  for (const lay of layers){
+    const g = geomFor(art, lay.src);
+    if (geomEmpty(g)) continue;
+    const ci = lay.ci | 0;
+    if (g.rings && g.rings.length) L.push.apply(L, pathShape(g.rings, T, ci));
+    if (g.lines && g.lines.length) L.push.apply(L, pathShape(g.lines, T, ci));
+    /* furo tambem como Path: o arquivo de referencia so tem Rect e Text, entao os
+       atributos de Ellipse seriam palpite - e palpite aqui ja custou um arquivo vazio */
+    for (const pr of (g.prims || []))
+      for (const poly of primPolys(pr, 0, o.res/4))
+        L.push.apply(L, pathShape([poly], T, ci));
+  }
+  L.push('</LightBurnProject>');
   return L.join('\n');
 }
 
@@ -763,10 +902,11 @@ function checkOpts(opts){
 }
 
 const sane = s => String(s).replace(/[\\/:*?"<>|]/g, '_');
-function filename(projName, opts){
+function filename(projName, opts, ext){
   const o = norm(opts);
   return sane(projName || 'placa') + '-LASER-' + o.side +
-         (o.invert ? '-negativo' : '') + (o.mirror ? '-espelhado' : '') + '.svg';
+         (o.invert ? '-negativo' : '') + (o.mirror ? '-espelhado' : '') +
+         '.' + (ext || 'svg');
 }
 
 function exportSvg(board, opts){
@@ -777,5 +917,6 @@ function exportSvg(board, opts){
 return { LB, defaults, collect, arcPts, chainSegments,
          primPolys, union, contours, simplify,
          art, place, svg, exportSvg, filename, autoMirror, checkOpts,
-         PALETTE, SOURCES, defaultLayers, geomFor, ci2hex, ciName, freeCi };
+         PALETTE, SOURCES, defaultLayers, geomFor, ci2hex, ciName, freeCi,
+         cutDefaults, cutOf, layerCut, lbrn, placeLbrn };
 });

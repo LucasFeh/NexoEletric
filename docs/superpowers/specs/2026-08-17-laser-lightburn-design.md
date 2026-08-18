@@ -90,14 +90,77 @@ Furo circular sai como `<circle>`, não poligonizado: é menor e o LightBurn imp
 elipse de verdade. A cor vai em **cada elemento**, nunca num grupo em volta — atributo
 herdado de grupo é ponto fraco de importador, e a cor é o que define a camada.
 
-### Configuração de corte embutida
+### Configuração de corte embutida: o `.lbrn`
 
-SVG **não** carrega velocidade/potência/modo: o LightBurn casa cor→camada e aplica o que já
-estiver na biblioteca dele. Para o arquivo vir configurado é preciso o formato nativo
-`.lbrn`, XML que guarda `<CutSetting>` por `CutIndex`, com
-`<Shape Type="Path" CutIndex="n">` + `<V vx vy/>` + `<P T="L" p0 p1/>`; o `.lbrn2` é o mesmo
-com a forma condensada. Fica para quando os parâmetros de bancada estiverem definidos — a
-lista de camadas já é onde eles vão pendurar.
+SVG não carrega velocidade/potência/modo — o LightBurn casa cor→camada e aplica o que já
+estiver na biblioteca dele. O formato nativo `.lbrn` carrega, e o esquema foi conferido
+campo a campo contra um arquivo real de MOPA 60 W (`Color_Test_60W_MOPA.lbrn2`,
+AppVersion 1.4.00), não contra documentação — o LightBurn não publica o schema.
+
+O que o arquivo real provou:
+
+| | |
+|---|---|
+| `frequency` | em **Hz** (10000…500000 no arquivo); a aba trabalha em kHz e converte na emissão |
+| `QPulseWidth` | em ns, presente em 25 dos 26 perfis — é o campo de fibra/MOPA |
+| booleanos | `1`/`0`, como `crossHatch Value="1"` |
+| raiz | `<LightBurnProject AppVersion="1.4.00" FormatVersion="1" MaterialHeight="0" MirrorX="False" MirrorY="False">` |
+| `numPasses`, `bidir` | **não aparecem** — o LightBurn omite quando estão no padrão |
+
+Por isso o gerador também só escreve `numPasses` e `bidir` quando diferem do padrão: não
+inventa campo que a referência não mostrou. Esses dois nomes vêm de um `prefs.ini` real do
+LightBurn, não do arquivo de referência — são os únicos dois não confirmados na fonte
+primária, e valem uma conferência na primeira abertura.
+
+Uma potência só na aba vira `minPower = maxPower` (sem rampa) — a UI da bancada informou um
+número, e inventar uma rampa seria decidir por ela.
+
+**Y não inverte no `.lbrn`.** O LightBurn usa Y para cima, igual ao contrato da PCB; só o
+SVG é Y para baixo. São duas colocações distintas (`place` e `placeLbrn`), e um teste trava
+que o topo da placa vira o maior `vy`, e não o menor.
+
+### A forma tem que ser a condensada
+
+Primeira versão emitiu `<V vx>`/`<P T=>` (o formato legado, documentado por terceiros) mas
+declarou `FormatVersion="1"`, copiado da referência. Resultado na bancada: **o arquivo abre
+com as camadas configuradas e nenhuma geometria** — o usuário ainda tinha que importar o SVG
+por dentro.
+
+O arquivo de referência responde por que: tem **50 `VertList`/`PrimList` e zero `<V vx=` ou
+`<P T=`**. Em `FormatVersion="1"` a forma é a condensada, e a legada é ignorada em silêncio.
+
+Sintaxe, tirada da referência:
+
+```
+<VertList>V<x> <y>c0x1c1x1V<x> <y>c0x1c1x1...</VertList>
+<PrimList>L0 1L1 2...L<n-1> 0</PrimList>
+```
+
+`c0x1c1x1` são os marcadores de "sem bezier" que a referência põe em todo vértice de linha;
+`L<a> <b>` liga dois vértices e o último fecha no zero. Um teste trava que nenhuma das duas
+tags legadas volte a aparecer.
+
+**Furo também sai como Path.** `Type="Ellipse"` seria mais elegante e menor, mas a
+referência só tem `Rect` e `Text` — os atributos de Ellipse seriam palpite, e palpite aqui
+já custou um arquivo vazio. Círculo poligonizado no caminho já provado vale mais.
+
+Custo: 485 KB para a TCMS_Reader, contra 223 KB do SVG (e 905 KB que o formato legado dava).
+
+### Abrir direto no LightBurn
+
+O navegador não lança aplicativo. Quem abre é o `hubserver.py`, com `os.startfile` sobre o
+arquivo que acabou de gravar em `Laser\`. Consequência honesta, dita na UI e no README: o
+LightBurn abre na **máquina do servidor** — acessando o hub de outro PC da rede, abre lá.
+
+O endpoint `POST /api/laser-open` só aceita `127.0.0.1`. O servidor escuta em `0.0.0.0`
+(está no README, é recurso), e um endpoint que lança aplicativo não pode ficar exposto à
+LAN. Além disso só grava dentro de `Laser\` e só aceita `.lbrn`/`.lbrn2`.
+
+**O erro que apareceu primeiro não era o endpoint.** Ele responde `ok:true` de localhost.
+O `hubserver.py` roda com `debug=False` e não recarrega sozinho: um servidor que já estava
+no ar antes da rota existir devolve 404, e o cliente tentava ler JSON de uma página de erro
+HTML — mensagem inútil. O tratamento agora separa os casos (`file://`, servidor mudo, 404
+de rota nova, resposta não-JSON, erro do servidor) e nomeia o reinício.
 
 ## Fonte dos dados: `board.js` cru
 

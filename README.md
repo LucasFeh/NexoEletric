@@ -204,20 +204,57 @@ dá nome, duplica (⧉) ou remove (✕).
 | serigrafia | o silkscreen |
 | borda da placa (corte) | o contorno, para soltar a placa |
 
-Lista inicial: C00 retirada · C04 limpeza das trilhas · C05 limpeza da retirada · C03 furos ·
-C01 serigrafia · C02 remoção da placa. **Duplicar** a mesma geometria em duas camadas é como
-se faz duas passadas com parâmetros diferentes — o botão sempre escolhe um `Cxx` livre,
-porque duas linhas no mesmo índice se fundem numa camada só no LightBurn.
+Lista inicial, com os parâmetros de bancada já preenchidos:
+
+| | Geometria | Modo | Velocidade | Potência | Freq. | Passagens | Q-pulse | Extras |
+|---|---|---|---|---|---|---|---|---|
+| **C00** | furos | linha | 100 mm/s | 100% | 40 kHz | 20 | 200 ns | |
+| **C01** | retirada de cobre | preencher | 1000 mm/s | 85% | 35 kHz | 1 | 200 ns | bidir · cruzada · 45° · intervalo 0,05 |
+| **C02** | borda da placa (corte) | linha | 100 mm/s | 100% | 40 kHz | 20 | 200 ns | |
+| **C03** | retirada de cobre (2ª passada) | preencher | 1000 mm/s | 85% | 35 kHz | 1 | 200 ns | bidir · cruzada · 45° · intervalo 0,05 |
+| **C04** | contorno do cobre (limpeza) | preencher | 100 mm/s | 20% | 20 kHz | 1 | 200 ns | bidir |
+
+C01 e C03 carregam a mesma geometria de propósito: são duas passadas do mesmo
+preenchimento, em camadas separadas para dar para ajustar uma sem mexer na outra. O ⚙ de
+cada linha abre os parâmetros; ⧉ duplica (sempre num `Cxx` livre, porque duas linhas no
+mesmo índice se fundem numa camada só no LightBurn).
+
+O **modo** é quem decide preencher ou contornar, tanto no arquivo quanto na prévia — não a
+geometria que a camada carrega.
 
 A camada de furos é independente da opção **Furos** do cobre: dá para não subtrair o furo da
 máscara (*pad cheio*) e ainda assim ter a camada para furar.
 
 A lista fica salva por projeto, e **restaurar padrão** volta ao começo.
 
-> **Configuração de corte pronta no arquivo:** SVG **não** carrega velocidade/potência/modo —
-> o LightBurn casa a cor com a camada e usa os parâmetros que já estiverem lá. Para o arquivo
-> vir configurado é preciso o formato nativo `.lbrn`, que é XML e guarda `<CutSetting>` por
-> `CutIndex`. Ainda não implementado.
+**Três formas de levar para a máquina:**
+
+| Botão | O que faz |
+|---|---|
+| **Baixar .lbrn2** | formato nativo, **com geometria e parâmetros dentro** — abre pronto |
+| **Abrir no LightBurn** | grava em `Laser\` e manda o Windows abrir com o app associado |
+| Baixar SVG | só a geometria; o LightBurn casa pela cor e usa os parâmetros que já tiver |
+
+O `.lbrn2` traz um `<CutSetting>` por camada e as formas junto. O esquema foi conferido
+campo a campo contra um arquivo real de MOPA 60 W: `frequency` vai em **Hz** (a aba mostra
+kHz e converte), `QPulseWidth` em ns, booleanos como `1`/`0`, e o LightBurn usa **Y para
+cima** — ao contrário do SVG, aqui o Y não inverte. Uma potência só na aba vira
+`minPower = maxPower`, ou seja, sem rampa.
+
+As formas usam a lista **condensada** (`<VertList>`/`<PrimList>`), que é a que
+`FormatVersion="1"` lê. O formato legado (`<V vx>`/`<P T=>`) dentro de `FormatVersion="1"`
+gera um arquivo que abre com as camadas certas e **nenhuma geometria**.
+
+> **Se "Abrir no LightBurn" der erro de rota inexistente:** o `hubserver.py` roda com
+> `debug=False` e não recarrega sozinho. Pare e suba de novo depois de atualizar o projeto.
+
+O SVG continua levando os parâmetros em `data-lb-mode` e `data-lb-cut`, para conferência.
+
+> **Abrir direto abre na máquina do servidor.** O navegador não lança aplicativo, então quem
+> abre é o `hubserver.py` — se você acessa o hub de outro PC da rede, o LightBurn abre no PC
+> do servidor, não no seu. Por isso o endpoint só aceita chamada de `localhost`: o servidor
+> escuta na rede toda, e lançar aplicativo não pode ficar exposto à LAN. De outro PC, use
+> **Baixar .lbrn**.
 
 **Opções**
 

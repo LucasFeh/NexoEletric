@@ -367,7 +367,7 @@ const cxPos = num(dCopper).filter((_, i) => i % 2 === 0);
 assert.ok(approx((Math.min(...cxPos) + Math.max(...cxPos))/2, 12, 0.05));
 
 /* ── espelho: x inverte, y fica, area preservada ── */
-const svgMir = Laser.svg(aPos, Object.assign({}, aPos.opts, { mirror:true }));
+const svgMir = Laser.svg(aPos, Object.assign({}, aPos.opts, { mirror:true, layers:DUAS }));
 const dMir = svgMir.match(/fill="#000000"[^>]*d="([^"]+)"/)[1];
 const cxMir = num(dMir).filter((_, i) => i % 2 === 0);
 assert.ok(approx((Math.min(...cxMir) + Math.max(...cxMir))/2, 12, 0.05),
@@ -378,12 +378,14 @@ const aOff = Laser.art(bOff, { side:'Top', res:0.02, margin:2, holes:'none' });
 const xOf = s => { const d = s.match(/fill="#000000"[^>]*d="([^"]+)"/)[1];
                    const v = num(d).filter((_, i) => i % 2 === 0);
                    return (Math.min(...v) + Math.max(...v))/2; };
-assert.ok(approx(xOf(Laser.svg(aOff, aOff.opts)), 6, 0.05), 'sem espelho: x = 4 + margem 2');
-assert.ok(approx(xOf(Laser.svg(aOff, Object.assign({}, aOff.opts, { mirror:true }))), 18, 0.05),
+assert.ok(approx(xOf(Laser.svg(aOff, Object.assign({}, aOff.opts, { layers:DUAS }))), 6, 0.05), "sem espelho: x = 4 + margem 2");
+assert.ok(approx(xOf(Laser.svg(aOff, Object.assign({}, aOff.opts, { mirror:true, layers:DUAS }))), 18, 0.05),
           'com espelho: x = 24 - 6');
 
 /* ── serigrafia sai na C01, tracada quando e centerline ── */
-const svgSilk = Laser.svg(sLine, sLine.opts);
+/* a serigrafia nao esta na lista padrao da bancada; entra quando o usuario a adiciona */
+const svgSilk = Laser.svg(sLine, Object.assign({}, sLine.opts, {
+  layers:[ { src:'silk', ci:1, name:'serigrafia', cut:{ type:'Cut' } } ] }));
 assert.ok(svgSilk.includes('stroke="#0000FF"'), 'serigrafia em C01');
 
 /* ── exportSvg + nome do arquivo ── */
@@ -457,6 +459,7 @@ assert.strictEqual(cut(1).numPasses, 1);
 assert.strictEqual(cut(1).bidir, true);
 assert.strictEqual(cut(1).crossHatch, true);
 assert.strictEqual(cut(1).angle, 45);
+assert.strictEqual(cut(1).interval, 0.05, 'precisao da retirada de cobre = 0,05 mm');
 assert.deepStrictEqual(cut(3), cut(1), 'a segunda passada usa os mesmos parametros');
 
 assert.strictEqual(cut(2).type, 'Cut');          /* borda */
@@ -487,7 +490,7 @@ assert.ok(/stroke="#FF0000"/.test(svgModo) && /fill="none"/.test(svgModo),
 assert.strictEqual(Laser.freeCi([]), 0);
 assert.strictEqual(Laser.freeCi([{ ci:0 }]), 1);
 assert.strictEqual(Laser.freeCi([{ ci:0 }, { ci:1 }, { ci:3 }]), 2, 'usa o primeiro buraco');
-assert.strictEqual(Laser.freeCi(LD), 6, 'a lista padrao usa 0..5');
+assert.strictEqual(Laser.freeCi(LD), 5, 'a lista padrao usa C00..C04');
 /* lista cheia: nao inventa indice fora da paleta */
 const cheia = Array.from({ length:30 }, (_, i) => ({ ci:i }));
 assert.ok(Laser.freeCi(cheia) >= 0 && Laser.freeCi(cheia) < 30);
@@ -535,6 +538,95 @@ assert.ok(/data-lb-layer="C04"/.test(svgL), 'cada grupo diz a que camada pertenc
 const svgVazio = Laser.svg(aL, Object.assign({}, aL.opts, { layers:[
   { src:'silk', ci:1, name:'serigrafia' }, { src:'fill', ci:0, name:'retirada' } ] }));
 assert.strictEqual((svgVazio.match(/<g /g) || []).length, 1);
+
+/* ═══════════════ .lbrn: formato nativo, com os parametros dentro ═══════════════
+   Esquema conferido contra um arquivo real de MOPA 60W (Color_Test_60W_MOPA.lbrn2):
+   frequency em Hz, QPulseWidth em ns, booleanos como 1/0. */
+
+const LAYS = [
+  { src:'drills',     ci:0, name:'furos',
+    cut:{ type:'Cut',  speed:100,  maxPower:100, frequency:40, numPasses:20, qPulse:200 } },
+  { src:'fill',       ci:1, name:'retirada de cobre',
+    cut:{ type:'Scan', speed:1000, maxPower:85,  frequency:35, numPasses:1,  qPulse:200,
+          bidir:true, crossHatch:true, angle:45, interval:0.01 } },
+  { src:'board',      ci:2, name:'borda' ,
+    cut:{ type:'Cut',  speed:100,  maxPower:100, frequency:40, numPasses:20, qPulse:200 } },
+];
+const lb = Laser.lbrn(aL, Object.assign({}, aL.opts, { layers:LAYS }));
+
+assert.ok(lb.startsWith('<?xml version="1.0" encoding="UTF-8"?>'), 'cabecalho XML');
+assert.ok(/<LightBurnProject [^>]*FormatVersion="1"/.test(lb), 'raiz LightBurnProject');
+assert.ok(/MirrorX="False"/.test(lb) && /MirrorY="False"/.test(lb));
+
+/* uma CutSetting por camada, com o indice = Cxx */
+assert.strictEqual((lb.match(/<CutSetting /g) || []).length, 3);
+assert.ok(/<CutSetting type="Cut">[\s\S]*?<index Value="0"\/>/.test(lb),  'C00 furos = Cut');
+assert.ok(/<CutSetting type="Scan">[\s\S]*?<index Value="1"\/>/.test(lb), 'C01 cobre = Scan');
+
+const bloco = ci => lb.match(new RegExp('<CutSetting[^>]*>(?:(?!</CutSetting>)[\\s\\S])*?' +
+                                        '<index Value="' + ci + '"\\/>[\\s\\S]*?</CutSetting>'))[0];
+const val = (b, k) => { const m = b.match(new RegExp('<' + k + ' Value="([^"]+)"')); return m && m[1]; };
+
+const b0 = bloco(0), b1 = bloco(1);
+assert.strictEqual(val(b0, 'name'), 'furos');
+assert.strictEqual(val(b0, 'speed'), '100');
+assert.strictEqual(val(b0, 'maxPower'), '100');
+assert.strictEqual(val(b0, 'frequency'), '40000', 'kHz da UI vira Hz no arquivo');
+assert.strictEqual(val(b0, 'QPulseWidth'), '200');
+assert.strictEqual(val(b0, 'numPasses'), '20');
+
+assert.strictEqual(val(b1, 'speed'), '1000');
+assert.strictEqual(val(b1, 'maxPower'), '85');
+assert.strictEqual(val(b1, 'frequency'), '35000');
+assert.strictEqual(val(b1, 'crossHatch'), '1', 'booleano vira 1/0');
+assert.strictEqual(val(b1, 'bidir'), '1');
+assert.strictEqual(val(b1, 'angle'), '45');
+assert.strictEqual(val(b1, 'interval'), '0.01');
+/* sem rampa: uma potencia so na UI vira minPower = maxPower */
+assert.strictEqual(val(b1, 'minPower'), val(b1, 'maxPower'));
+
+/* ── FORMA CONDENSADA: e a unica que o FormatVersion="1" le ──
+   O arquivo de referencia (.lbrn2) tem 50 VertList/PrimList e ZERO "<V vx=" ou "<P T=".
+   Emitir o formato legado dentro de FormatVersion="1" gera um arquivo que abre com as
+   camadas certas e NENHUMA geometria. */
+assert.ok(/<Shape Type="Path" CutIndex="1">/.test(lb), 'preenchimento como Path na C01');
+assert.ok(/<VertList>/.test(lb) && /<PrimList>/.test(lb), 'lista condensada');
+assert.ok(!/<V vx=/.test(lb), 'nao pode sair vertice no formato legado');
+assert.ok(!/<P T=/.test(lb), 'nao pode sair primitiva no formato legado');
+assert.ok(/<XForm>1 0 0 1 0 0<\/XForm>/.test(lb), 'coordenadas absolutas, XForm identidade');
+
+/* sintaxe do VertList: V<x> <y> e os marcadores de "sem bezier" */
+const vl = lb.match(/<VertList>([^<]*)<\/VertList>/)[1];
+assert.ok(/^V-?[\d.]+ -?[\d.]+c0x1c1x1V/.test(vl), 'VertList mal formado: ' + vl.slice(0, 60));
+
+/* PrimList liga os vertices em sequencia e FECHA o laco no primeiro */
+const pl = lb.match(/<PrimList>([^<]*)<\/PrimList>/)[1];
+const nv = (vl.match(/V-?[\d.]+ /g) || []).length;
+assert.ok(/^L0 1L1 2/.test(pl), 'PrimList mal formado: ' + pl.slice(0, 40));
+assert.ok(pl.endsWith('L' + (nv - 1) + ' 0'), 'o ultimo segmento fecha no vertice 0');
+
+/* o furo tambem sai como Path: Ellipse nao esta no arquivo de referencia, e nao da para
+   confirmar o atributo. Poligono no caminho ja provado vale mais que elegancia. */
+assert.ok(/<Shape Type="Path" CutIndex="0">/.test(lb), 'furo sai como Path, na C00');
+assert.ok(!/Type="Ellipse"/.test(lb));
+
+/* ── Y NAO inverte no .lbrn: o LightBurn usa Y para cima, o SVG para baixo ── */
+const lbY = Laser.lbrn(aPos, Object.assign({}, aPos.opts, { layers:[
+  { src:'board', ci:2, name:'borda', cut:{ type:'Cut' } } ] }));
+const vert = s => [...s.matchAll(/V(-?[\d.]+) (-?[\d.]+)c/g)].map(m => [+m[1], +m[2]]);
+const ys = vert(lbY).map(p => p[1]);
+assert.ok(approx(Math.max(...ys), 22, 0.01), 'topo da placa (y=20) vira 22, e nao 2');
+assert.ok(approx(Math.min(...ys), 2, 0.01), 'base da placa (y=0) vira 2');
+
+/* espelho continua valendo em X */
+const lbM = Laser.lbrn(aOff, Object.assign({}, aOff.opts, { mirror:true, layers:[
+  { src:'fill', ci:1, name:'cobre', cut:{ type:'Scan' } } ] }));
+const xs2 = vert(lbM).map(p => p[0]);
+assert.ok(approx((Math.min(...xs2) + Math.max(...xs2))/2, 18, 0.06), 'espelhado: x = 24 - 6');
+
+/* nome do arquivo */
+assert.strictEqual(Laser.filename('TCMS_Reader', { side:'Top' }, 'lbrn2'),
+                   'TCMS_Reader-LASER-Top.lbrn2');
 
 /* ── espelho e auto-marcado ao escolher Bottom, mas continua editavel ── */
 assert.strictEqual(Laser.defaults().mirror, false);

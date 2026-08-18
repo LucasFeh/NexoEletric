@@ -153,6 +153,47 @@ def api_save():
     return {'ok': True}
 
 
+LASER_DIR = 'Laser'
+
+
+@app.route('/api/laser-open', methods=['POST'])
+def api_laser_open():
+    """Grava o .lbrn em Laser\\ e manda o Windows abrir com o app associado.
+
+    O navegador nao lanca aplicativo, entao quem abre e o servidor. Consequencia
+    honesta: o LightBurn abre na MAQUINA DO SERVIDOR. Acessando o hub de outro PC da
+    rede, o arquivo abre la, nao no seu.
+
+    So aceita de localhost: o servidor escuta na rede toda (0.0.0.0), e um endpoint
+    que lanca aplicativo nao pode ficar exposto ao resto da LAN.
+    """
+    if request.remote_addr not in ('127.0.0.1', '::1', 'localhost'):
+        return {'ok': False,
+                'error': 'abrir direto so funciona no PC do servidor; use "Baixar .lbrn"'}, 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or 'name' not in data or 'content' not in data:
+        return {'ok': False, 'error': 'JSON {name, content} obrigatorio'}, 400
+    name = os.path.basename(str(data['name']))
+    if not name.endswith(('.lbrn', '.lbrn2')) or name.startswith('.'):
+        return {'ok': False, 'error': 'so .lbrn/.lbrn2'}, 403
+    outdir = os.path.join(ROOT, LASER_DIR)
+    try:
+        os.makedirs(outdir, exist_ok=True)
+        full = os.path.join(outdir, name)
+        with open(full, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(str(data['content']))
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
+    try:
+        os.startfile(full)                      # Windows: abre com o app associado
+    except AttributeError:
+        return {'ok': False, 'error': 'abrir direto so no Windows; o arquivo ficou em '
+                                      + os.path.join(LASER_DIR, name)}, 501
+    except OSError as e:
+        return {'ok': False, 'error': 'arquivo gravado, mas nada associado a .lbrn: %s' % e}, 500
+    return {'ok': True, 'path': os.path.join(LASER_DIR, name)}
+
+
 _PROJ_CACHE = {}
 
 

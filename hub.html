@@ -270,12 +270,22 @@ tbody tr[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow:
   background: rgba(214,167,90,0.12); color: var(--warn); font-size: 11px; line-height: 1.5; }
 /* editor de camadas: cada linha e uma camada do LightBurn; dá para repetir a mesma
    geometria em camadas diferentes (duas passadas de limpeza, por exemplo) */
-.lz-lrow { display: grid; grid-template-columns: 12px 58px 1fr 24px 24px;
-  gap: 4px 6px; align-items: center; margin-top: 8px; padding-bottom: 8px;
+.lz-lrow { display: grid; grid-template-columns: 12px 56px 1fr 22px 22px 22px;
+  gap: 4px 5px; align-items: center; margin-top: 8px; padding-bottom: 8px;
   border-bottom: 1px solid var(--line); }
 .lz-lrow .input { min-height: 26px; font-size: 11px; padding: 2px 4px; }
 .lz-lrow .lz-lname { grid-column: 2 / -1; }
 .lz-lrow .btn { padding: 0; min-height: 24px; font-size: 12px; line-height: 1; }
+.lz-lcut { grid-column: 1 / -1; margin-top: 6px; padding: 8px 10px;
+  background: var(--sunken); border-radius: var(--r-sm);
+  display: grid; grid-template-columns: 1fr 66px; gap: 5px 8px; align-items: center; }
+.lz-lcut .k { font-size: 11px; color: var(--text-3); }
+.lz-lcut .input { min-height: 24px; font-size: 11px; padding: 2px 4px; }
+.lz-lcut .chk { grid-column: 1 / -1; display: flex; align-items: center; gap: 7px;
+  font-size: 11px; color: var(--text-2); cursor: pointer; }
+.lz-lcut .chk input { width: 13px; height: 13px; accent-color: var(--hi); }
+.lz-cutsum { grid-column: 2 / -1; font-size: 10px; color: var(--text-4);
+  font-variant-numeric: tabular-nums; }
 .lz-num { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px;
   font-size: 12px; margin-top: 8px; }
 .lz-num .k { color: var(--text-3); }
@@ -648,7 +658,9 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
           <div class="lz-num" id="lzStats"></div>
           <div id="lzWarn"></div>
 
-          <button class="btn btn-primary" id="lzDl" style="width:100%;margin-top:16px">Baixar SVG</button>
+          <button class="btn btn-primary" id="lzDlLbrn" style="width:100%;margin-top:16px">Baixar .lbrn2 (com os parâmetros)</button>
+          <button class="btn btn-secondary" id="lzOpen" style="width:100%;margin-top:6px">Abrir no LightBurn</button>
+          <button class="btn btn-ghost btn-sm" id="lzDl" style="width:100%;margin-top:6px">Baixar SVG</button>
           <p class="nd-hint" id="lzName"></p>
           <p class="nd-hint" style="margin-top:12px">no LightBurn: <b>File » Import</b>, e confira que o tamanho bateu com o mm da placa.</p>
         </aside>
@@ -1608,6 +1620,9 @@ function lzLoad(id) {
             src: l.src,
             ci: Math.max(0, Math.min(HubLaser.PALETTE.length - 1, l.ci | 0)),
             name: String(l.name || ''),
+            /* parâmetros de corte: completa com os padrões, para versão antiga não
+               entrar com campo faltando e virar 0 de velocidade na máquina */
+            cut: HubLaser.layerCut(l),
           }))
         : null;
       if (!d.layers || !d.layers.length) d.layers = null;
@@ -1655,9 +1670,11 @@ function lzDraw(ctx) {
   for (const lay of lzLayers()) {
     const g = HubLaser.geomFor(lzArt, lay.src);
     const hex = HubLaser.ci2hex(lay.ci);
+    /* quem decide preencher ou contornar é o MODO da camada — igual à emissão */
+    const preenche = HubLaser.layerCut(lay).type === 'Scan';
     if (g.rings && g.rings.length) {
       trace(g.rings, true);
-      if (g.fill) { ctx.fillStyle = hex; ctx.fill('evenodd'); }
+      if (preenche) { ctx.fillStyle = hex; ctx.fill('evenodd'); }
       else { ctx.strokeStyle = hex; ctx.lineWidth = Math.max(0.08, px); ctx.stroke(); }
     }
     if (g.lines && g.lines.length) {
@@ -1709,6 +1726,58 @@ function lzLayerAdd() {
   S.laser.layers = L; lzSave(); lzRenderLayers(); lzCompute();
 }
 
+/* qual linha está com os parâmetros de corte abertos (só uma por vez) */
+let lzOpenRow = -1;   /* id="lzOpen" e o botao; nome distinto evita confusao */
+
+function lzCutSet(i, patch) {
+  const L = lzLayers().map((l, k) => k === i
+    ? Object.assign({}, l, { cut: Object.assign(HubLaser.layerCut(l), patch) }) : l);
+  S.laser.layers = L; lzSave();
+  lzRenderLayers();
+  lzCompute();                    /* o modo muda preencher/contornar, então a prévia muda */
+}
+
+/* painel de parâmetros de uma camada: é o que o .lbrn vai carregar */
+function lzCutPanel(lay, i) {
+  const c = HubLaser.layerCut(lay);
+  const box = el('div', 'lz-lcut');
+  const num = (rot, key, step, title) => {
+    box.append(el('span', 'k', rot));
+    const inp = el('input', 'input mono'); inp.type = 'number'; inp.step = step || 'any';
+    inp.value = c[key]; if (title) inp.title = title;
+    inp.onchange = () => { const v = parseFloat(inp.value); if (isFinite(v)) lzCutSet(i, { [key]: v }); };
+    box.append(inp);
+  };
+  const chk = (rot, key) => {
+    const lab = el('label', 'chk');
+    const inp = el('input'); inp.type = 'checkbox'; inp.checked = !!c[key];
+    inp.onchange = () => lzCutSet(i, { [key]: inp.checked });
+    lab.append(inp, el('span', null, rot)); box.append(lab);
+  };
+
+  box.append(el('span', 'k', 'modo'));
+  const modo = el('select', 'input');
+  [['Scan', 'preencher'], ['Cut', 'linha']].forEach(([v, t]) => {
+    const op = el('option', null, t); op.value = v; modo.append(op);
+  });
+  modo.value = c.type;
+  modo.onchange = () => lzCutSet(i, { type: modo.value });
+  box.append(modo);
+
+  num('velocidade', 'speed', '1', 'mm/s');
+  num('potência %', 'maxPower', '1');
+  num('frequência', 'frequency', '1', 'kHz');
+  num('passagens', 'numPasses', '1', 'passagens globais');
+  num('q pulse', 'qPulse', '1', 'largura do Q-pulse, ns');
+  if (c.type === 'Scan') {
+    num('intervalo', 'interval', '0.005', 'mm entre linhas do preenchimento');
+    num('ângulo', 'angle', '1', 'ângulo de varrimento');
+    chk('preenchimento bidirecional', 'bidir');
+    chk('hachadura cruzada', 'crossHatch');
+  }
+  return box;
+}
+
 function lzRenderLayers() {
   const box = $('#lzLayerRows'); box.textContent = '';
   const L = lzLayers();
@@ -1731,9 +1800,9 @@ function lzRenderLayers() {
     src.value = lay.src;
     src.onchange = () => lzLayerSet(i, { src: src.value });
 
-    const dup = el('button', 'btn btn-ghost btn-sm', '⧉');
-    dup.title = 'duplicar — mesma geometria noutra camada, para uma segunda passada';
-    dup.onclick = () => lzLayerDup(i);
+    const cfg = el('button', 'btn btn-ghost btn-sm', '⚙');
+    cfg.title = 'parâmetros de corte desta camada';
+    cfg.onclick = () => { lzOpenRow = (lzOpenRow === i ? -1 : i); lzRenderLayers(); };
     const del = el('button', 'btn btn-ghost btn-sm', '✕');
     del.title = 'remover esta camada';
     del.onclick = () => lzLayerDel(i);
@@ -1742,7 +1811,18 @@ function lzRenderLayers() {
     nm.value = lay.name || ''; nm.placeholder = 'nome da camada';
     nm.oninput = () => lzLayerSet(i, { name: nm.value }, true);
 
-    row.append(sw, ci, src, dup, del, nm);
+    const dup = el('button', 'btn btn-ghost btn-sm', '⧉');
+    dup.title = 'duplicar — mesma geometria noutra camada, para uma segunda passada';
+    dup.onclick = () => lzLayerDup(i);
+
+    /* resumo dos parâmetros, sempre visível: é o que a máquina vai fazer */
+    const c = HubLaser.layerCut(lay);
+    const sum = el('span', 'lz-cutsum',
+      (c.type === 'Scan' ? 'preencher' : 'linha') + ' · ' + c.speed + ' mm/s · ' +
+      c.maxPower + '% · ' + c.frequency + ' kHz · ' + c.numPasses + '×');
+
+    row.append(sw, ci, src, cfg, dup, del, nm, sum);
+    if (lzOpenRow === i) row.append(lzCutPanel(lay, i));
     box.append(row);
   });
 }
@@ -1849,24 +1929,61 @@ function renderLaser() {
 
 function lzSet(patch) { Object.assign(S.laser, patch); lzSave(); renderLaser(); }
 
-function lzDownload() {
+/* gera a arte e o texto do arquivo; devolve null (com toast) se não há o que gerar */
+function lzGerar(fmt) {
   const B = lzBoard();
-  if (!B) return toast('sem board.js — rode ExportPcb no Altium', 'err');
+  if (!B) { toast('sem board.js — rode ExportPcb no Altium', 'err'); return null; }
   const o = Object.assign({}, S.laser, { layers: lzLayers() });
   const bloqueio = HubLaser.checkOpts(o)[0];
-  if (bloqueio) return toast(bloqueio, 'warn');
-  const r = HubLaser.exportSvg(B, o);
+  if (bloqueio) { toast(bloqueio, 'warn'); return null; }
+  const art = HubLaser.art(B, o);
   const temAlgo = o.layers.some(l => {
-    const g = HubLaser.geomFor(r.art, l.src);
+    const g = HubLaser.geomFor(art, l.src);
     return (g.rings || []).length || (g.lines || []).length || (g.prims || []).length;
   });
-  if (!temAlgo) return toast('nenhuma camada tem geometria nesta face — nada a baixar', 'warn');
-  const name = HubLaser.filename(proj().name, o);
-  const blob = new Blob([r.svg], { type: 'image/svg+xml' });
+  if (!temAlgo) { toast('nenhuma camada tem geometria nesta face — nada a baixar', 'warn'); return null; }
+  const texto = fmt === 'lbrn2' ? HubLaser.lbrn(art, art.opts) : HubLaser.svg(art, art.opts);
+  return { texto, nome: HubLaser.filename(proj().name, o, fmt),
+           mime: fmt === 'lbrn2' ? 'application/xml' : 'image/svg+xml' };
+}
+
+function lzBaixar(fmt) {
+  const r = lzGerar(fmt);
+  if (!r) return;
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  a.href = URL.createObjectURL(new Blob([r.texto], { type: r.mime }));
+  a.download = r.nome; a.click();
   URL.revokeObjectURL(a.href);
-  toast(name + ' baixado (' + (r.svg.length/1024).toFixed(0) + ' KB)', 'ok');
+  toast(r.nome + ' baixado (' + (r.texto.length/1024).toFixed(0) + ' KB)', 'ok');
+}
+const lzDownload = () => lzBaixar('svg');
+
+/* Abrir direto: o navegador não lança aplicativo, então quem abre é o hubserver, com
+   a associação de arquivo do Windows. Abre na MÁQUINA DO SERVIDOR — se você está
+   acessando o hub de outro PC, o LightBurn vai abrir lá, não aqui. */
+async function lzAbrirNoLightBurn() {
+  const r = lzGerar('lbrn2');
+  if (!r) return;
+  if (!location.protocol.startsWith('http'))
+    return toast('abrir direto precisa do hub servido por hubserver.py, não por file://', 'warn');
+  let resp;
+  try {
+    resp = await fetch('/api/laser-open', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: r.nome, content: r.texto }),
+    });
+  } catch (e) {
+    return toast('servidor não respondeu: ' + e.message, 'err');
+  }
+  /* 404 aqui quase sempre é servidor antigo: hubserver.py roda com debug=False, então
+     não recarrega sozinho quando a rota é nova. Dizer isso poupa meia hora. */
+  if (resp.status === 404)
+    return toast('rota /api/laser-open não existe neste servidor — reinicie o hubserver.py', 'err');
+  let j = null;
+  try { j = await resp.json(); } catch (e) {}
+  if (!j) return toast('resposta inesperada do servidor (HTTP ' + resp.status + ')', 'err');
+  if (!j.ok) return toast(j.error || ('não foi possível abrir (HTTP ' + resp.status + ')'), 'err');
+  toast('aberto no LightBurn (na máquina do servidor): ' + j.path, 'ok');
 }
 
 function renderAll() { renderHeader(); renderProjBar(); renderTabs(); renderPanes(); }
@@ -2074,6 +2191,8 @@ $('#lzFit').onclick = () => {
 $('#lzAddLayer').onclick = lzLayerAdd;
 $('#lzResetLayers').onclick = () => { S.laser.layers = null; lzSave(); renderLaser(); };
 $('#lzDl').onclick = lzDownload;
+$('#lzDlLbrn').onclick = () => lzBaixar('lbrn2');
+$('#lzOpen').onclick = lzAbrirNoLightBurn;
 /* X/Y so sao editaveis na referencia, entao o que se digita aqui e sempre o offset dela */
 ['ndPosX','ndPosY'].forEach(id => $('#' + id).addEventListener('input', () => {
   S.neoden.off = { x: +$('#ndPosX').value || 0, y: +$('#ndPosY').value || 0 };
