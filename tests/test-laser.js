@@ -431,49 +431,78 @@ assert.strictEqual(Laser.PALETTE[3],  '#00E000');   /* C03 verde */
 
 /* fontes de geometria disponiveis para uma camada */
 assert.deepStrictEqual(Laser.SOURCES.map(s => s.id).sort(),
-                       ['board', 'copperEdge', 'drills', 'fill', 'silk']);
+                       ['board', 'copperEdge', 'drills', 'fill', 'padEdge', 'silk']);
 
-/* a lista padrao e exatamente a da bancada: C00 furos, C01 e C03 retirada de cobre
-   (duas passadas), C02 corte da borda, C04 limpeza do contorno */
+/* A lista padrao e a sequencia da bancada, e a ordem dos Cxx E a ordem de execucao
+   (o `priority` sai do indice). Repare que a "3a passada" roda ANTES da "2a": e o
+   processo do usuario, nao engano de digitacao. */
 const LD = Laser.defaultLayers();
-assert.deepStrictEqual(LD.map(l => l.ci), [0, 1, 2, 3, 4]);
+assert.deepStrictEqual(LD.map(l => l.ci), [0, 1, 2, 3, 4, 5, 6]);
 assert.deepStrictEqual(LD.map(l => l.src),
-  ['drills', 'fill', 'board', 'fill', 'copperEdge']);
-assert.strictEqual(LD.filter(l => l.src === 'fill').length, 2,
-                   'duas passadas de retirada de cobre, em camadas separadas');
+  ['drills', 'fill', 'board', 'fill', 'fill', 'copperEdge', 'padEdge']);
+assert.strictEqual(LD.filter(l => l.src === 'fill').length, 3,
+                   'tres passadas de retirada de cobre, em camadas separadas');
 
-/* cada camada carrega os parametros de corte da bancada */
 const cut = i => LD[i].cut;
-assert.strictEqual(cut(0).type, 'Cut');          /* furos */
-assert.strictEqual(cut(0).speed, 100);
-assert.strictEqual(cut(0).maxPower, 100);
-assert.strictEqual(cut(0).frequency, 40);        /* kHz na UI */
-assert.strictEqual(cut(0).numPasses, 20);
-assert.strictEqual(cut(0).qPulse, 200);
 
-assert.strictEqual(cut(1).type, 'Scan');         /* retirada de cobre = preenchimento */
-assert.strictEqual(cut(1).speed, 1000);
-assert.strictEqual(cut(1).maxPower, 85);
-assert.strictEqual(cut(1).frequency, 35);
-assert.strictEqual(cut(1).numPasses, 1);
-assert.strictEqual(cut(1).bidir, true);
+/* C00 furos - modo corte */
+assert.strictEqual(cut(0).type, 'Cut');
+assert.strictEqual(cut(0).speed, 80);
+assert.strictEqual(cut(0).maxPower, 95);
+assert.strictEqual(cut(0).globalPasses, 16, 'furos: 16 passagens GLOBAIS');
+assert.strictEqual(cut(0).frequency, 40, 'nao pedido: mantem 40 kHz');
+assert.strictEqual(cut(0).qPulse, 200, 'nao pedido: mantem 200 ns');
+
+/* C01 retirada de cobre, 1a passada */
+assert.strictEqual(cut(1).type, 'Scan');
+assert.strictEqual(cut(1).maxPower, 55);
+assert.strictEqual(cut(1).frequency, 45);
+assert.strictEqual(cut(1).qPulse, 200);
 assert.strictEqual(cut(1).crossHatch, true);
-assert.strictEqual(cut(1).angle, 45);
-assert.strictEqual(cut(1).interval, 0.05, 'precisao da retirada de cobre = 0,05 mm');
-assert.deepStrictEqual(cut(3), cut(1), 'a segunda passada usa os mesmos parametros');
+assert.strictEqual(cut(1).speed, 1000, 'nao pedido: mantem 1000 mm/s');
+assert.strictEqual(cut(1).globalPasses, 1, 'nao pedido: mantem 1');
+assert.strictEqual(cut(1).bidir, true, 'nao pedido: mantem bidirecional');
+assert.strictEqual(cut(1).angle, 45, 'nao pedido: mantem 45 graus');
+assert.strictEqual(cut(1).interval, 0.05, 'nao pedido: mantem 0,05 mm');
 
-assert.strictEqual(cut(2).type, 'Cut');          /* borda */
+/* C02 corte da borda - nao foi pedida mudanca, fica como estava */
+assert.strictEqual(cut(2).type, 'Cut');
+assert.strictEqual(cut(2).speed, 100);
 assert.strictEqual(cut(2).maxPower, 100);
-assert.strictEqual(cut(2).numPasses, 20);
 assert.strictEqual(cut(2).frequency, 40);
+assert.strictEqual(cut(2).globalPasses, 20);
 
-assert.strictEqual(cut(4).type, 'Scan');         /* limpeza: modo preencher */
-assert.strictEqual(cut(4).speed, 100);
-assert.strictEqual(cut(4).maxPower, 20);
-assert.strictEqual(cut(4).frequency, 20);
-assert.strictEqual(cut(4).numPasses, 1);
-assert.strictEqual(cut(4).qPulse, 200);
-assert.strictEqual(cut(4).bidir, true);
+/* C03 retirada de cobre (limpeza), 3a passada: SO a potencia muda */
+assert.strictEqual(cut(3).maxPower, 20);
+assert.deepStrictEqual(Object.assign({}, cut(3), { maxPower: cut(1).maxPower }), cut(1),
+                       'a 3a passada so difere da 1a na potencia');
+
+/* C04 retirada de cobre, 2a passada: identica a 1a */
+assert.deepStrictEqual(cut(4), cut(1), 'a 2a passada usa os mesmos parametros da 1a');
+
+/* C05 contorno do cobre (limpeza) */
+assert.strictEqual(cut(5).type, 'Scan');
+assert.strictEqual(cut(5).speed, 1000);
+assert.strictEqual(cut(5).maxPower, 20);
+assert.strictEqual(cut(5).frequency, 45);
+assert.strictEqual(cut(5).qPulse, 200);
+assert.strictEqual(cut(5).crossHatch, true);
+assert.strictEqual(cut(5).angle, 45);
+assert.strictEqual(cut(5).globalPasses, 1, 'nao pedido: mantem 1');
+assert.strictEqual(cut(5).bidir, true, 'nao pedido: mantem bidirecional');
+
+/* C06 destaque das bordas de pad e via (depois da tinta UV): mesma config da limpeza */
+assert.deepStrictEqual(cut(6), cut(5), 'usa a configuracao da limpeza do contorno');
+assert.strictEqual(LD[6].src, 'padEdge');
+
+/* configs salvas antes do rename: numPasses (nome antigo do campo da bancada) migra para
+   globalPasses ao ler - o valor sempre significou passagens globais, so o nome estava errado */
+assert.strictEqual(Laser.cutOf({ numPasses: 20 }).globalPasses, 20);
+assert.strictEqual(Laser.cutOf({ numPasses: 20 }).numPasses, undefined,
+                   'o nome antigo nao sobrevive - senao viraria numPasses no arquivo de novo');
+assert.strictEqual(Laser.layerCut({ src: 'drills', cut: { numPasses: 7 } }).globalPasses, 7);
+assert.strictEqual(Laser.cutOf({ globalPasses: 3, numPasses: 2 }).globalPasses, 3,
+                   'valor explicito ganha do legado');
 
 /* o MODO manda no traco: Scan sai preenchido, Cut sai so contornado. Antes quem decidia
    era a fonte de geometria, o que ignorava a escolha da bancada. */
@@ -485,12 +514,38 @@ assert.ok(/fill="#D0D000"/.test(svgModo), 'camada em modo preencher sai com fill
 assert.ok(/stroke="#FF0000"/.test(svgModo) && /fill="none"/.test(svgModo),
           'camada em modo linha sai so com stroke');
 
+/* ── contorno SO de pads e vias: a camada de destaque depois da tinta UV ──
+   Mesma configuracao da limpeza do contorno, mas ignorando trilha e regiao: o que se
+   quer expor e o anel do pad e da via, nao a trilha inteira. */
+const bPV = board({
+  tracks:[ { id:'t1', layer:'Top', x1:2, y1:2, x2:12, y2:2, w:1 } ],
+  components:[ { id:'c1', ref:'J1', layer:'Top', x:15, y:15, pads:[
+    { id:'c1p1', layer:'Top', type:'smd', shape:'circle', x:15, y:15, w:2, h:2, rot:0 } ] } ],
+  vias:[ { id:'v1', x:6, y:10, size:2, drill:0 } ],
+});
+const aPV = Laser.art(bPV, { side:'Top', res:0.02 });
+assert.strictEqual(aPV.copperEdge.length, 3, 'trilha + pad + via');
+assert.strictEqual(aPV.padEdge.length, 2, 'so o pad e a via - a trilha fica de fora');
+const areaPV = aPV.padEdge.map(ringArea).sort((a, b) => a - b);
+assert.ok(approx(areaPV[0], Math.PI, Math.PI*0.02) && approx(areaPV[1], Math.PI, Math.PI*0.02),
+          'cada um e um disco de raio 1: ' + areaPV);
+
+/* a fonte existe na lista de escolhas da aba */
+assert.ok(Laser.SOURCES.some(s => s.id === 'padEdge'), 'padEdge disponivel como fonte');
+assert.ok(Laser.geomFor(aPV, 'padEdge').rings.length === 2);
+
+/* pad e via furados: o contorno segue o cobre COM o furo ja descontado */
+const aPVf = Laser.art(board({ vias:[ { id:'v1', x:10, y:10, size:2, drill:1 } ] }),
+                       { side:'Top', res:0.02, holes:'drill' });
+assert.strictEqual(aPVf.padEdge.length, 2, 'anel externo da via + o furo');
+assert.ok(aPVf.padEdge.some(r => ringArea(r) < 0), 'o furo entra como buraco');
+
 /* ── indice livre: duas camadas no mesmo Cxx se FUNDEM no LightBurn, entao somar ou
       duplicar tem que cair sempre num indice que ninguem esta usando ── */
 assert.strictEqual(Laser.freeCi([]), 0);
 assert.strictEqual(Laser.freeCi([{ ci:0 }]), 1);
 assert.strictEqual(Laser.freeCi([{ ci:0 }, { ci:1 }, { ci:3 }]), 2, 'usa o primeiro buraco');
-assert.strictEqual(Laser.freeCi(LD), 5, 'a lista padrao usa C00..C04');
+assert.strictEqual(Laser.freeCi(LD), 7, 'a lista padrao usa C00..C06');
 /* lista cheia: nao inventa indice fora da paleta */
 const cheia = Array.from({ length:30 }, (_, i) => ({ ci:i }));
 assert.ok(Laser.freeCi(cheia) >= 0 && Laser.freeCi(cheia) < 30);
@@ -545,17 +600,19 @@ assert.strictEqual((svgVazio.match(/<g /g) || []).length, 1);
 
 const LAYS = [
   { src:'drills',     ci:0, name:'furos',
-    cut:{ type:'Cut',  speed:100,  maxPower:100, frequency:40, numPasses:20, qPulse:200 } },
+    cut:{ type:'Cut',  speed:100,  maxPower:100, frequency:40, globalPasses:20, qPulse:200 } },
   { src:'fill',       ci:1, name:'retirada de cobre',
-    cut:{ type:'Scan', speed:1000, maxPower:85,  frequency:35, numPasses:1,  qPulse:200,
+    cut:{ type:'Scan', speed:1000, maxPower:85,  frequency:35, globalPasses:1,  qPulse:200,
           bidir:true, crossHatch:true, angle:45, interval:0.01 } },
   { src:'board',      ci:2, name:'borda' ,
-    cut:{ type:'Cut',  speed:100,  maxPower:100, frequency:40, numPasses:20, qPulse:200 } },
+    cut:{ type:'Cut',  speed:100,  maxPower:100, frequency:40, globalPasses:20, qPulse:200 } },
 ];
 const lb = Laser.lbrn(aL, Object.assign({}, aL.opts, { layers:LAYS }));
 
 assert.ok(lb.startsWith('<?xml version="1.0" encoding="UTF-8"?>'), 'cabecalho XML');
 assert.ok(/<LightBurnProject [^>]*FormatVersion="1"/.test(lb), 'raiz LightBurnProject');
+assert.ok(/AppVersion="1.6.00"/.test(lb),
+          'globalRepeat e campo da era 1.5+ - o cabecalho nao pode dizer 1.4.00');
 assert.ok(/MirrorX="False"/.test(lb) && /MirrorY="False"/.test(lb));
 
 /* uma CutSetting por camada, com o indice = Cxx */
@@ -573,7 +630,11 @@ assert.strictEqual(val(b0, 'speed'), '100');
 assert.strictEqual(val(b0, 'maxPower'), '100');
 assert.strictEqual(val(b0, 'frequency'), '40000', 'kHz da UI vira Hz no arquivo');
 assert.strictEqual(val(b0, 'QPulseWidth'), '200');
-assert.strictEqual(val(b0, 'numPasses'), '20');
+/* "passagens globais" da bancada = <globalRepeat> no galvo (nome conferido nas strings do
+   binario LightBurn 1.6.04). <numPasses> e o "Numero de Passagens" DA SUB-CAMADA - 20 ali
+   fazia o LightBurn carregar 20 no campo errado. */
+assert.strictEqual(val(b0, 'globalRepeat'), '20');
+assert.strictEqual(val(b0, 'numPasses'), null, 'numPasses nao pode voltar a sair');
 
 assert.strictEqual(val(b1, 'speed'), '1000');
 assert.strictEqual(val(b1, 'maxPower'), '85');

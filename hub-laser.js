@@ -34,6 +34,7 @@ const LB = { copper:PALETTE[0], silk:PALETTE[1], outline:PALETTE[2] };
 const SOURCES = [
   { id:'fill',       label:'retirada do cobre (preenchimento)', mode:'fill' },
   { id:'copperEdge', label:'contorno do cobre (limpeza)',       mode:'line' },
+  { id:'padEdge',    label:'contorno só de pads e vias',        mode:'line' },
   { id:'drills',     label:'furos (diâmetro real da broca)',    mode:'line' },
   { id:'silk',       label:'serigrafia',                        mode:'auto' },
   { id:'board',      label:'borda da placa (corte)',            mode:'line' },
@@ -41,12 +42,24 @@ const SOURCES = [
 
 /* Parametros de corte de uma camada. `type` e o MODO: 'Scan' = preencher, 'Cut' = linha.
    frequency em kHz e qPulse em ns, como aparecem na UI do LightBurn para fibra/MOPA;
-   a conversao para a unidade do arquivo acontece na emissao, num lugar so. */
+   a conversao para a unidade do arquivo acontece na emissao, num lugar so.
+   `globalPasses` = "Passagens Globais" da UI galvo (repete a camada inteira N vezes);
+   nao confundir com o "Numero de Passagens" da sub-camada, que a bancada nao usa. */
 function cutDefaults(){
-  return { type:'Cut', speed:100, maxPower:100, frequency:40, numPasses:1, qPulse:200,
+  return { type:'Cut', speed:100, maxPower:100, frequency:40, globalPasses:1, qPulse:200,
            bidir:false, crossHatch:false, angle:0, interval:0.01 };
 }
-const cutOf = (o) => Object.assign(cutDefaults(), o || {});
+/* Ate 2026-08 o campo se chamava numPasses - e saia como <numPasses>, que no galvo e o
+   campo DA SUB-CAMADA, nao o global. Configs salvas com o nome antigo migram na leitura;
+   o valor sempre significou passagens globais, so o nome estava errado. */
+function migrateCut(o){
+  if (!o || o.numPasses == null) return o;
+  const m = Object.assign({}, o);
+  if (m.globalPasses == null) m.globalPasses = m.numPasses;
+  delete m.numPasses;
+  return m;
+}
+const cutOf = (o) => Object.assign(cutDefaults(), migrateCut(o) || {});
 
 /* Parametros efetivos de uma camada. Sem `type` explicito o modo vem da FONTE: uma
    camada de preenchimento sem configuracao tem que preencher, nao virar contorno. */
@@ -54,27 +67,35 @@ function layerCut(lay){
   const src = SOURCES.find(s => s.id === (lay && lay.src));
   const base = cutDefaults();
   if (src && src.mode === 'fill') base.type = 'Scan';
-  return Object.assign(base, (lay && lay.cut) || {});
+  return Object.assign(base, migrateCut((lay && lay.cut) || {}));
 }
 
-/* Perfis da bancada. `retirada de cobre` aparece em DUAS camadas de proposito: sao duas
-   passadas do mesmo preenchimento, e camadas separadas deixam ajustar uma sem a outra. */
-const CUT_FUROS   = { type:'Cut',  speed:100,  maxPower:100, frequency:40, numPasses:20, qPulse:200 };
-const CUT_COBRE   = { type:'Scan', speed:1000, maxPower:85,  frequency:35, numPasses:1,  qPulse:200,
-                      bidir:true, crossHatch:true, angle:45, interval:0.05 };
-const CUT_BORDA   = { type:'Cut',  speed:100,  maxPower:100, frequency:40, numPasses:20, qPulse:200 };
-const CUT_LIMPEZA = { type:'Scan', speed:100,  maxPower:20,  frequency:20, numPasses:1,  qPulse:200,
-                      bidir:true };
+/* Perfis da bancada (2026-08-18). A retirada de cobre aparece em TRES camadas de
+   proposito: sao tres passadas do mesmo preenchimento, separadas para dar para ajustar
+   uma sem mexer nas outras. As duas cheias usam CUT_COBRE; a de limpeza so baixa a
+   potencia, e por isso deriva de CUT_COBRE em vez de repetir os numeros. */
+const CUT_FUROS    = { type:'Cut',  speed:80,   maxPower:95, frequency:40, globalPasses:16, qPulse:200 };
+const CUT_COBRE    = { type:'Scan', speed:1000, maxPower:55, frequency:45, globalPasses:1,  qPulse:200,
+                       bidir:true, crossHatch:true, angle:45, interval:0.05 };
+const CUT_COBRE_LV = Object.assign({}, CUT_COBRE, { maxPower:20 });   /* so a potencia muda */
+const CUT_BORDA    = { type:'Cut',  speed:100,  maxPower:100, frequency:40, globalPasses:20, qPulse:200 };
+const CUT_CONTORNO = { type:'Scan', speed:1000, maxPower:20, frequency:45, globalPasses:1,  qPulse:200,
+                       bidir:true, crossHatch:true, angle:45 };
 
-/* Lista inicial. Nada aqui e fixo: a aba deixa somar, duplicar, trocar a cor, o modo e
-   cada parametro. */
+/* Lista inicial, NA ORDEM DE EXECUCAO da bancada - o `priority` do .lbrn2 sai do indice,
+   entao a ordem aqui e a ordem em que a maquina roda. A "3a passada" vir antes da "2a" e
+   o processo do usuario, nao engano.
+   Nada disto e fixo: a aba deixa somar, duplicar, remover e mexer em cada parametro. */
 function defaultLayers(){
   return [
-    { src:'drills',     ci:0, name:'furos',                        cut:cutOf(CUT_FUROS)   },
-    { src:'fill',       ci:1, name:'retirada de cobre',            cut:cutOf(CUT_COBRE)   },
-    { src:'board',      ci:2, name:'borda da placa (corte)',       cut:cutOf(CUT_BORDA)   },
-    { src:'fill',       ci:3, name:'retirada de cobre (2ª passada)', cut:cutOf(CUT_COBRE) },
-    { src:'copperEdge', ci:4, name:'contorno do cobre (limpeza)',  cut:cutOf(CUT_LIMPEZA) },
+    { src:'drills',     ci:0, name:'furos',                            cut:cutOf(CUT_FUROS)    },
+    { src:'fill',       ci:1, name:'retirada de cobre (1ª passada)',   cut:cutOf(CUT_COBRE)    },
+    { src:'board',      ci:2, name:'corte da borda',                    cut:cutOf(CUT_BORDA)    },
+    { src:'fill',       ci:3, name:'retirada de cobre (limpeza, 3ª passada)', cut:cutOf(CUT_COBRE_LV) },
+    { src:'fill',       ci:4, name:'retirada de cobre (2ª passada)',   cut:cutOf(CUT_COBRE)    },
+    { src:'copperEdge', ci:5, name:'contorno do cobre (limpeza)',      cut:cutOf(CUT_CONTORNO) },
+    /* depois de pintar com tinta UV: expoe a borda do pad e da via, sem tocar na trilha */
+    { src:'padEdge',    ci:6, name:'bordas de pads e vias (pós tinta UV)', cut:cutOf(CUT_CONTORNO) },
   ];
 }
 
@@ -209,6 +230,9 @@ function chainSegments(segs){
 function collect(board, opts){
   const o = norm(opts), side = o.side, ov = side + 'Overlay';
   const warnings = [], copper = [], holes = [], silk = [], drills = [];
+  /* pads e vias tambem em separado: a camada de destaque pos-tinta-UV expoe o anel do
+     pad e da via, e nao pode arrastar a trilha junto */
+  const padVia = [];
   const B = board || {};
 
   /* trilhas, arcos e regioes sao o mesmo grupo: e tudo cobre roteado, e separar o plano
@@ -226,7 +250,8 @@ function collect(board, opts){
   if (o.show.pads){
     const eat = p => {
       if (!padOnSide(p, side)) return;
-      copper.push(padPrim(p, warnings));
+      const pp = padPrim(p, warnings);
+      copper.push(pp); padVia.push(pp);
       const hp = holePrim(o, p, padIsTH(p));
       if (hp) holes.push(hp);
       const dp = drillPrim(p, padIsTH(p));
@@ -237,7 +262,8 @@ function collect(board, opts){
   }
   if (o.show.vias)
     for (const v of B.vias || []){
-      copper.push({ k:'disc', x:v.x, y:v.y, r:(v.size||0)/2 });
+      const vp = { k:'disc', x:v.x, y:v.y, r:(v.size||0)/2 };
+      copper.push(vp); padVia.push(vp);
       const hp = holePrim(o, v, true);          /* via e sempre furo passante */
       if (hp) holes.push(hp);
       const dp = drillPrim(v, true);
@@ -284,7 +310,7 @@ function collect(board, opts){
     : [];
 
   const bb = (B.board && B.board.bbox) || null;
-  return { copper, holes, drills, silk, outline,
+  return { copper, padVia, holes, drills, silk, outline,
            bbox: bb ? { x1:bb.x1, y1:bb.y1, x2:bb.x2, y2:bb.y2 } : null,
            warnings, opts:o };
 }
@@ -639,6 +665,26 @@ function art(board, opts){
   for (let i = 0; i < gc.cov.length; i++) gc.cov[i] = Math.min(gc.cov[i], gm.cov[i]);
   const copperEdge = ringsOf(gc, o.res);
 
+  /* Contorno so de pads e vias, mesmo caminho do cobre (recorte pela placa e furo ja
+     descontado). So roda quando alguma camada pede: e mais uma rasterizacao inteira. */
+  let padEdge = [];
+  const querPadEdge = !o.layers || o.layers.some(l => l && l.src === 'padEdge');
+  if (querPadEdge && c.padVia.length){
+    const gp = makeGrid(region, o.res, 2);
+    const pPolys = [];
+    for (const pr of c.padVia) pPolys.push.apply(pPolys, primPolys(pr, e, tol()));
+    rasterPolys(gp, pPolys);
+    if (c.holes.length){
+      const gph = makeGrid(region, o.res, 2);
+      const hp2 = [];
+      for (const pr of c.holes) hp2.push.apply(hp2, primPolys(pr, -e, tol()));
+      rasterPolys(gph, hp2);
+      for (let i = 0; i < gp.cov.length; i++){ const v = gp.cov[i] - gph.cov[i]; gp.cov[i] = v < 0 ? 0 : v; }
+    }
+    for (let i = 0; i < gp.cov.length; i++) gp.cov[i] = Math.min(gp.cov[i], gm.cov[i]);
+    padEdge = ringsOf(gp, o.res);
+  }
+
   /* Negativo = placa MENOS cobre, do MESMO bitmap - e essa a razao de ter rasterizado. */
   let copper = copperEdge;
   if (o.invert){
@@ -662,7 +708,7 @@ function art(board, opts){
 
   const pts = a => (a || []).reduce((s, r) => s + r.length, 0);
   return {
-    copper, copperEdge, drills:c.drills, silk, silkLines, outline:c.outline,
+    copper, copperEdge, padEdge, drills:c.drills, silk, silkLines, outline:c.outline,
     bbox: region, size:{ w:region.x2-region.x1, h:region.y2-region.y1 },
     warnings, opts:o,
     stats:{ rings: copper.length + (silk ? silk.length : 0),
@@ -703,6 +749,7 @@ function pathD(rings, T, close){
 function geomFor(art, src){
   if (src === 'fill')       return { rings:art.copper || [], fill:true };
   if (src === 'copperEdge') return { rings:art.copperEdge || [] };
+  if (src === 'padEdge')    return { rings:art.padEdge || [] };
   if (src === 'drills')     return { prims:art.drills || [] };
   if (src === 'board')      return { lines:art.outline || [] };
   if (src === 'silk'){
@@ -759,7 +806,7 @@ function svg(art, opts){
                  '" data-lb-layer="' + ciName(lay.ci) + '"' +
                  ' data-lb-mode="' + (preenche ? 'preencher' : 'linha') + '"' +
                  ' data-lb-cut="' + cut.speed + 'mm/s ' + cut.maxPower + '% ' +
-                   cut.frequency + 'kHz ' + cut.numPasses + 'x qpulse' + cut.qPulse + '"' +
+                   cut.frequency + 'kHz ' + cut.globalPasses + 'x qpulse' + cut.qPulse + '"' +
                  ' data-lb-name="' + String(lay.name || lay.src).replace(/"/g, '') + '">';
     const body = [];
     if (g.rings && g.rings.length)
@@ -784,8 +831,12 @@ function svg(art, opts){
      - `frequency` e em Hz  (o arquivo traz 10000..500000; a UI mostra kHz)
      - `QPulseWidth` e em ns
      - booleano e 1/0  (`crossHatch Value="1"`)
-     - `numPasses`/`bidir` NAO aparecem la: o LightBurn omite quando estao no padrao,
+     - `globalRepeat`/`bidir` NAO aparecem la: o LightBurn omite quando estao no padrao,
        entao aqui tambem so saem quando diferem, para nao inventar campo.
+     - as passagens da bancada saem como `globalRepeat` (= "Passagens Globais" da UI
+       galvo; nome conferido nas strings do binario LightBurn 1.6.04, junto dos outros
+       campos de CutSetting). `numPasses` existe mas e o "Numero de Passagens" DA
+       SUB-CAMADA: 20 ali carregava o campo errado na bancada.
    O LightBurn usa Y para CIMA - ao contrario do SVG, aqui Y nao inverte. */
 
 function placeLbrn(art, opts){
@@ -809,7 +860,7 @@ function cutSettingXml(lay){
   L.push(V('speed', c.speed));
   L.push(V('frequency', Math.round(c.frequency * 1000)));      /* kHz -> Hz */
   L.push(V('QPulseWidth', c.qPulse));
-  if (c.numPasses !== 1) L.push(V('numPasses', c.numPasses));
+  if (c.globalPasses !== 1) L.push(V('globalRepeat', c.globalPasses));
   if (c.type === 'Scan'){
     L.push(V('interval', c.interval));
     L.push(V('angle', c.angle));
@@ -858,7 +909,9 @@ function lbrn(art, opts){
   const layers = (o.layers && o.layers.length) ? o.layers : defaultLayers();
   const L = [];
   L.push('<?xml version="1.0" encoding="UTF-8"?>');
-  L.push('<LightBurnProject AppVersion="1.4.00" FormatVersion="1" MaterialHeight="0" ' +
+  /* AppVersion 1.6.00: globalRepeat e campo da era 1.5+, e arquivos 1.6 reais usam o
+     mesmo FormatVersion="1" condensado - dizer 1.4.00 com um campo de 1.5+ seria mentira */
+  L.push('<LightBurnProject AppVersion="1.6.00" FormatVersion="1" MaterialHeight="0" ' +
          'MirrorX="False" MirrorY="False">');
   L.push('  <!-- AltiumPCBMirror - ' + o.side + ', ' +
          (o.invert ? 'negativo' : 'positivo') + (o.mirror ? ', espelhado' : '') +

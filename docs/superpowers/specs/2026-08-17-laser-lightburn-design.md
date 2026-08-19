@@ -69,6 +69,7 @@ placa. Então a arte expõe **fontes de geometria** e o usuário monta a lista:
 |---|---|---|
 | `fill` | a área a gravar (no negativo, tudo que não é cobre) | Fill |
 | `copperEdge` | contorno de cada ilha de cobre | Line |
+| `padEdge` | contorno só de pad e via, sem trilha nem região | Line |
 | `drills` | círculo no diâmetro real da broca, por furo | Line |
 | `silk` | serigrafia | Line/Fill |
 | `board` | contorno da placa | Line |
@@ -83,6 +84,13 @@ tem que ser o primeiro livre, e não o seguinte.
 `copperEdge` segue o **cobre** nos dois modos, não o preenchimento: no negativo o `fill`
 inverte, mas a borda que a limpeza precisa tratar continua sendo a do traço. Por isso `art()`
 traça o cobre recortado **antes** de inverter, e só inverte o bitmap depois.
+
+`padEdge` existe para o passo depois da tinta UV: expor o anel do pad e da via para poder
+soldar, **sem tocar nas trilhas**. Sai do mesmo caminho do `copperEdge` (recorte pela placa,
+furo já descontado), mas a partir de um conjunto só com pads e vias — por isso `collect()`
+devolve `padVia` separado de `copper`, em vez de a emissão tentar adivinhar depois o que era
+pad dentro de uma união já feita. É uma rasterização inteira a mais, então só roda quando
+alguma camada pede.
 
 `drills` é independente da opção `holes`: subtrair o furo da máscara e ter uma camada para
 furar são coisas ortogonais — dá para querer o pad cheio na máscara e ainda assim a furação.
@@ -107,10 +115,20 @@ O que o arquivo real provou:
 | raiz | `<LightBurnProject AppVersion="1.4.00" FormatVersion="1" MaterialHeight="0" MirrorX="False" MirrorY="False">` |
 | `numPasses`, `bidir` | **não aparecem** — o LightBurn omite quando estão no padrão |
 
-Por isso o gerador também só escreve `numPasses` e `bidir` quando diferem do padrão: não
-inventa campo que a referência não mostrou. Esses dois nomes vêm de um `prefs.ini` real do
-LightBurn, não do arquivo de referência — são os únicos dois não confirmados na fonte
-primária, e valem uma conferência na primeira abertura.
+Por isso o gerador também só escreve os campos de passagem e `bidir` quando diferem do
+padrão: não inventa campo que a referência não mostrou.
+
+**Adendo (2026-08-18) — passagens são `globalRepeat`, não `numPasses`.** Na bancada o
+arquivo chegava com 20 em "Número de Passagens" (campo da **sub-camada**) em vez de 20
+"Passagens Globais". No galvo são dois campos distintos: `numPasses` é o da sub-camada e
+o global é `<globalRepeat Value="N"/>`, no nível do `CutSetting`. O nome foi conferido
+nas strings do binário do LightBurn 1.6.04 (release oficial no GitHub), onde
+`globalRepeat` aparece na mesma tabela dos demais campos de `CutSetting` (`usePen`,
+`hide`, `doOutput`, `priority`…) — nenhum arquivo público tinha o campo preenchido para
+copiar. Junto com isso o cabeçalho passou a dizer `AppVersion="1.6.00"`: `globalRepeat` é
+campo da era 1.5+, e os arquivos 1.6 reais usam o mesmo `FormatVersion="1"` condensado. O
+parâmetro da bancada se chama `globalPasses`; configs salvas com o nome antigo
+(`numPasses`) migram na leitura.
 
 Uma potência só na aba vira `minPower = maxPower` (sem rampa) — a UI da bancada informou um
 número, e inventar uma rampa seria decidir por ela.

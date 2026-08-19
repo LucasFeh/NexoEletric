@@ -1767,7 +1767,8 @@ function lzCutPanel(lay, i) {
   num('velocidade', 'speed', '1', 'mm/s');
   num('potência %', 'maxPower', '1');
   num('frequência', 'frequency', '1', 'kHz');
-  num('passagens', 'numPasses', '1', 'passagens globais');
+  num('passagens globais', 'globalPasses', '1',
+      'repete a camada inteira N vezes (globalRepeat do LightBurn galvo)');
   num('q pulse', 'qPulse', '1', 'largura do Q-pulse, ns');
   if (c.type === 'Scan') {
     num('intervalo', 'interval', '0.005', 'mm entre linhas do preenchimento');
@@ -1819,7 +1820,7 @@ function lzRenderLayers() {
     const c = HubLaser.layerCut(lay);
     const sum = el('span', 'lz-cutsum',
       (c.type === 'Scan' ? 'preencher' : 'linha') + ' · ' + c.speed + ' mm/s · ' +
-      c.maxPower + '% · ' + c.frequency + ' kHz · ' + c.numPasses + '×');
+      c.maxPower + '% · ' + c.frequency + ' kHz · ' + c.globalPasses + '×');
 
     row.append(sw, ci, src, cfg, dup, del, nm, sum);
     if (lzOpenRow === i) row.append(lzCutPanel(lay, i));
