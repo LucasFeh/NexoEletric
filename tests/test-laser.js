@@ -447,9 +447,9 @@ const cut = i => LD[i].cut;
 
 /* C00 furos - modo corte */
 assert.strictEqual(cut(0).type, 'Cut');
-assert.strictEqual(cut(0).speed, 80);
-assert.strictEqual(cut(0).maxPower, 95);
-assert.strictEqual(cut(0).globalPasses, 16, 'furos: 16 passagens GLOBAIS');
+assert.strictEqual(cut(0).speed, 100);
+assert.strictEqual(cut(0).maxPower, 100);
+assert.strictEqual(cut(0).globalPasses, 20, 'furos: 20 passagens GLOBAIS');
 assert.strictEqual(cut(0).frequency, 40, 'nao pedido: mantem 40 kHz');
 assert.strictEqual(cut(0).qPulse, 200, 'nao pedido: mantem 200 ns');
 

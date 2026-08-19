@@ -74,7 +74,7 @@ function layerCut(lay){
    proposito: sao tres passadas do mesmo preenchimento, separadas para dar para ajustar
    uma sem mexer nas outras. As duas cheias usam CUT_COBRE; a de limpeza so baixa a
    potencia, e por isso deriva de CUT_COBRE em vez de repetir os numeros. */
-const CUT_FUROS    = { type:'Cut',  speed:80,   maxPower:95, frequency:40, globalPasses:16, qPulse:200 };
+const CUT_FUROS    = { type:'Cut',  speed:100,  maxPower:100, frequency:40, globalPasses:20, qPulse:200 };
 const CUT_COBRE    = { type:'Scan', speed:1000, maxPower:55, frequency:45, globalPasses:1,  qPulse:200,
                        bidir:true, crossHatch:true, angle:45, interval:0.05 };
 const CUT_COBRE_LV = Object.assign({}, CUT_COBRE, { maxPower:20 });   /* so a potencia muda */

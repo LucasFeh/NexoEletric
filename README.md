@@ -210,7 +210,7 @@ Lista inicial, **na ordem de execução** da bancada (o `priority` do `.lbrn2` s
 
 | | Geometria | Modo | Vel. | Pot. | Freq. | Glob. | Q-pulse | Extras |
 |---|---|---|---|---|---|---|---|---|
-| **C00** | furos | linha | 80 | 95% | 40 kHz | 16 | 200 ns | |
+| **C00** | furos | linha | 100 | 100% | 40 kHz | 20 | 200 ns | |
 | **C01** | retirada de cobre (1ª passada) | preencher | 1000 | 55% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
 | **C02** | corte da borda | linha | 100 | 100% | 40 kHz | 20 | 200 ns | |
 | **C03** | retirada de cobre (limpeza, 3ª passada) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
