@@ -437,11 +437,11 @@ assert.deepStrictEqual(Laser.SOURCES.map(s => s.id).sort(),
    (o `priority` sai do indice). Repare que a "3a passada" roda ANTES da "2a": e o
    processo do usuario, nao engano de digitacao. */
 const LD = Laser.defaultLayers();
-assert.deepStrictEqual(LD.map(l => l.ci), [0, 1, 2, 3, 4, 5, 6]);
+assert.deepStrictEqual(LD.map(l => l.ci), [0, 1, 2, 3, 4, 5, 6, 7]);
 assert.deepStrictEqual(LD.map(l => l.src),
-  ['drills', 'fill', 'board', 'fill', 'fill', 'copperEdge', 'padEdge']);
-assert.strictEqual(LD.filter(l => l.src === 'fill').length, 3,
-                   'tres passadas de retirada de cobre, em camadas separadas');
+  ['drills', 'fill', 'board', 'fill', 'fill', 'copperEdge', 'fill', 'padEdge']);
+assert.strictEqual(LD.filter(l => l.src === 'fill').length, 4,
+                   'quatro passadas de retirada de cobre, em camadas separadas');
 
 const cut = i => LD[i].cut;
 
@@ -491,9 +491,14 @@ assert.strictEqual(cut(5).angle, 45);
 assert.strictEqual(cut(5).globalPasses, 1, 'nao pedido: mantem 1');
 assert.strictEqual(cut(5).bidir, true, 'nao pedido: mantem bidirecional');
 
-/* C06 destaque das bordas de pad e via (depois da tinta UV): mesma config da limpeza */
-assert.deepStrictEqual(cut(6), cut(5), 'usa a configuracao da limpeza do contorno');
-assert.strictEqual(LD[6].src, 'padEdge');
+/* C06 mais uma limpeza de retirada de cobre, DEPOIS do contorno */
+assert.strictEqual(LD[6].src, 'fill');
+assert.deepStrictEqual(cut(6), cut(3), 'mesma configuracao da limpeza de retirada');
+assert.strictEqual(LD[5].src, 'copperEdge', 'entra logo apos o contorno do cobre');
+
+/* C07 destaque das bordas de pad e via (depois da tinta UV) */
+assert.strictEqual(LD[7].src, 'padEdge');
+assert.deepStrictEqual(cut(7), cut(5), 'usa a configuracao da limpeza do contorno');
 
 /* configs salvas antes do rename: numPasses (nome antigo do campo da bancada) migra para
    globalPasses ao ler - o valor sempre significou passagens globais, so o nome estava errado */
@@ -545,7 +550,7 @@ assert.ok(aPVf.padEdge.some(r => ringArea(r) < 0), 'o furo entra como buraco');
 assert.strictEqual(Laser.freeCi([]), 0);
 assert.strictEqual(Laser.freeCi([{ ci:0 }]), 1);
 assert.strictEqual(Laser.freeCi([{ ci:0 }, { ci:1 }, { ci:3 }]), 2, 'usa o primeiro buraco');
-assert.strictEqual(Laser.freeCi(LD), 7, 'a lista padrao usa C00..C06');
+assert.strictEqual(Laser.freeCi(LD), 8, 'a lista padrao usa C00..C07');
 /* lista cheia: nao inventa indice fora da paleta */
 const cheia = Array.from({ length:30 }, (_, i) => ({ ci:i }));
 assert.ok(Laser.freeCi(cheia) >= 0 && Laser.freeCi(cheia) < 30);

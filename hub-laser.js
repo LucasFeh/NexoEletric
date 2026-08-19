@@ -94,8 +94,11 @@ function defaultLayers(){
     { src:'fill',       ci:3, name:'retirada de cobre (limpeza, 3ª passada)', cut:cutOf(CUT_COBRE_LV) },
     { src:'fill',       ci:4, name:'retirada de cobre (2ª passada)',   cut:cutOf(CUT_COBRE)    },
     { src:'copperEdge', ci:5, name:'contorno do cobre (limpeza)',      cut:cutOf(CUT_CONTORNO) },
+    /* mais uma limpeza de retirada DEPOIS do contorno; mesmo nome da C03 de proposito -
+       e a mesma operacao repetida, e o Cxx e que distingue as duas linhas */
+    { src:'fill',       ci:6, name:'retirada de cobre (limpeza, 3ª passada)', cut:cutOf(CUT_COBRE_LV) },
     /* depois de pintar com tinta UV: expoe a borda do pad e da via, sem tocar na trilha */
-    { src:'padEdge',    ci:6, name:'bordas de pads e vias (pós tinta UV)', cut:cutOf(CUT_CONTORNO) },
+    { src:'padEdge',    ci:7, name:'bordas de pads e vias (pós tinta UV)', cut:cutOf(CUT_CONTORNO) },
   ];
 }
 

@@ -216,14 +216,16 @@ Lista inicial, **na ordem de execução** da bancada (o `priority` do `.lbrn2` s
 | **C03** | retirada de cobre (limpeza, 3ª passada) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
 | **C04** | retirada de cobre (2ª passada) | preencher | 1000 | 55% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
 | **C05** | contorno do cobre (limpeza) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,01 |
-| **C06** | bordas de pads e vias (pós tinta UV) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,01 |
+| **C06** | retirada de cobre (limpeza, 3ª passada) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
+| **C07** | bordas de pads e vias (pós tinta UV) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,01 |
 
 A **3ª passada roda antes da 2ª** — é a sequência da bancada, não engano de digitação.
 
-C01, C03 e C04 carregam a mesma geometria de propósito: são três passadas do mesmo
-preenchimento, em camadas separadas para dar para ajustar uma sem mexer nas outras.
+C01, C03, C04 e C06 carregam a mesma geometria de propósito: são quatro passadas do mesmo
+preenchimento, em camadas separadas para dar para ajustar uma sem mexer nas outras. C03 e
+C06 têm o mesmo nome porque são a mesma operação repetida — o `Cxx` é que distingue as duas.
 
-**C06** existe para o passo depois da tinta UV: expõe o anel do pad e da via **sem tocar
+**C07** existe para o passo depois da tinta UV: expõe o anel do pad e da via **sem tocar
 nas trilhas**, para poder soldar. É a fonte `contorno só de pads e vias` — mesma
 configuração da limpeza do contorno, mas ignorando trilha e região.
 
