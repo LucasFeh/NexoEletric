@@ -257,7 +257,14 @@ tbody tr[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow:
 .nd-sep { height: 1px; margin: 16px 0 12px; background: var(--line); }
 /* laser: opções · prévia · resumo. Reusa .nd-fields/.nd-check/.nd-hint/.nd-sep. */
 .lz-grid { height: 100%; display: grid; min-height: 0;
-  grid-template-columns: var(--aside-w) minmax(300px, 1fr) var(--aside-w); }
+  grid-template-columns: var(--lz-l, var(--aside-w)) 6px minmax(240px, 1fr)
+                         6px var(--lz-r, var(--aside-w)); }
+.lz-grid > * { min-width: 0; }        /* sem isto o conteudo trava o encolhimento da coluna */
+/* divisoria arrastavel: 6px de alvo com um traco fino no meio, que acende ao pegar */
+.lz-split { cursor: col-resize; position: relative; touch-action: none; }
+.lz-split::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%;
+  width: 2px; transform: translateX(-50%); background: transparent; transition: background .12s; }
+.lz-split:hover::after, .lz-split.on::after { background: var(--hi); }
 .lz-opts { overflow: auto; padding: 14px 16px 24px; border-right: 1px solid var(--line); }
 .lz-view { display: grid; grid-template-rows: auto 1fr; min-height: 0; }
 .lz-view .viewport { margin: 0 12px 18px; background: #f4f4f2; }
@@ -636,6 +643,8 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
           <p class="nd-hint">a expansão cresce o cobre e encolhe a marca de furo, na mesma medida.</p>
         </aside>
 
+        <div class="lz-split" data-lz-split="l" title="arraste para redimensionar · duplo clique fecha/abre"></div>
+
         <div class="lz-view">
           <div class="canvas-bar">
             <span class="ttl">prévia</span><span class="meta" id="lzViewMeta"></span>
@@ -643,6 +652,8 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
           </div>
           <div class="viewport" id="lzVp"><canvas id="lzCv"></canvas></div>
         </div>
+
+        <div class="lz-split" data-lz-split="r" title="arraste para redimensionar · duplo clique fecha/abre"></div>
 
         <aside id="lzSide">
           <div class="kicker">camadas do arquivo</div>
@@ -1642,6 +1653,61 @@ function lzSave() {
 
 let lzCam = null, lzArt = null, lzTimer = null, lzFitKey = '';
 
+/* ── divisorias: quem decide quanto cada coluna leva e a bancada ──
+   Largura fica no NAVEGADOR e nao no projeto: e preferencia de tela, e trocar de placa nao
+   pode mexer nela. Arrastar ate o fim FECHA o painel (duplo clique devolve) - meia dúzia de
+   pixels de painel nao serve para nada, entao abaixo de LZ_SNAP ele fecha de vez. */
+const LZ_PANES = 'altiumhub.laser.panes';
+const LZ_ASIDE = parseInt(getComputedStyle(document.documentElement)
+                   .getPropertyValue('--aside-w'), 10) || 330;
+const LZ_SNAP = 90, LZ_VIEW_MIN = 240;
+let lzPanes = { l: LZ_ASIDE, r: LZ_ASIDE };
+try {
+  const raw = JSON.parse(localStorage.getItem(LZ_PANES) || 'null');
+  const num = (v, d) => (typeof v === 'number' && isFinite(v) && v >= 0) ? v : d;
+  if (raw && typeof raw === 'object') lzPanes = { l: num(raw.l, LZ_ASIDE), r: num(raw.r, LZ_ASIDE) };
+} catch (e) {}
+
+let lzPaneRaf = 0;
+function lzApplyPanes() {
+  const g = document.querySelector('.lz-grid');
+  if (!g) return;
+  g.style.setProperty('--lz-l', lzPanes.l + 'px');
+  g.style.setProperty('--lz-r', lzPanes.r + 'px');
+  /* fechado e fechado: com width 0 o padding do aside ainda deixaria uma tira de 36 px */
+  $('.lz-opts').style.display = lzPanes.l ? '' : 'none';
+  $('#lzSide').style.display  = lzPanes.r ? '' : 'none';
+  /* a previa mudou de tamanho - o canvas precisa redesenhar, mas so uma vez por quadro */
+  if (lzCam && !lzPaneRaf) lzPaneRaf = requestAnimationFrame(() => { lzPaneRaf = 0; lzCam.resize(); });
+}
+function lzSavePanes() {
+  try { localStorage.setItem(LZ_PANES, JSON.stringify(lzPanes)); } catch (e) {}
+}
+function lzSplitDrag(sp, e) {
+  const lado = sp.dataset.lzSplit, outro = lado === 'l' ? 'r' : 'l';
+  const total = sp.parentNode.getBoundingClientRect().width;
+  const x0 = e.clientX, w0 = lzPanes[lado];
+  const teto = Math.max(0, total - LZ_VIEW_MIN - 12 - lzPanes[outro]);
+  sp.classList.add('on');
+  sp.setPointerCapture(e.pointerId);
+  const move = ev => {
+    const w = w0 + (ev.clientX - x0) * (lado === 'l' ? 1 : -1);
+    lzPanes[lado] = w < LZ_SNAP ? 0 : Math.min(w, teto);
+    lzApplyPanes();
+  };
+  const up = () => {
+    sp.classList.remove('on');
+    sp.removeEventListener('pointermove', move);
+    sp.removeEventListener('pointerup', up);
+    sp.removeEventListener('pointercancel', up);
+    lzSavePanes();
+  };
+  sp.addEventListener('pointermove', move);
+  sp.addEventListener('pointerup', up);
+  sp.addEventListener('pointercancel', up);
+  e.preventDefault();
+}
+
 /* A prévia cede resolução para responder ao vivo; o ARQUIVO sai sempre no res escolhido.
    Muda só o passo do traçado — forma, espelho e negativo são idênticos. */
 const LZ_PREVIEW_PX = 4e6;
@@ -1928,6 +1994,7 @@ function renderLaser() {
   }
   if (empty) empty.style.display = 'none';
   grid.style.display = '';
+  lzApplyPanes();
   lzSyncControls();
   lzRenderLayers();
   lzSchedule();
@@ -2194,6 +2261,15 @@ $('#lzFit').onclick = () => {
   lzCam.resize();
   lzCam.fit({ x1:0, y1:-lzArt.size.h, x2:lzArt.size.w, y2:0 }, 1.08);
 };
+document.querySelectorAll('[data-lz-split]').forEach(sp => {
+  sp.addEventListener('pointerdown', e => lzSplitDrag(sp, e));
+  /* duplo clique fecha/abre sem ter que arrastar ate o fim */
+  sp.addEventListener('dblclick', () => {
+    const lado = sp.dataset.lzSplit;
+    lzPanes[lado] = lzPanes[lado] ? 0 : LZ_ASIDE;
+    lzApplyPanes(); lzSavePanes();
+  });
+});
 $('#lzAddLayer').onclick = lzLayerAdd;
 $('#lzResetLayers').onclick = () => { S.laser.layers = null; lzSave(); renderLaser(); };
 $('#lzDl').onclick = lzDownload;

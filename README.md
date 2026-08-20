@@ -177,7 +177,9 @@ precisar de servidor.
 ### Laser — arte para o LightBurn
 
 A aba **Laser** gera o SVG 1:1 da placa para gravação a laser (tinta + ablação, ou fotolito),
-a partir do `board.js`. Três colunas: opções · prévia ao vivo · resumo e download.
+a partir do `board.js`. Três colunas: opções · prévia ao vivo · resumo e download. As
+divisórias são arrastáveis — puxe até o fim (ou dê duplo clique) para fechar uma lateral e
+dar a largura toda à prévia, ou o contrário. A largura fica no navegador, não no projeto.
 
 **O cobre sai unido, e isso não é detalhe.** A doc do LightBurn (*Fill Mode*) diz que formas
 que se sobrepõem parcialmente na mesma camada de preenchimento **não gravam a área comum** —

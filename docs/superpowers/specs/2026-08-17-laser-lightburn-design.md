@@ -345,7 +345,11 @@ precisa dele como geometria pura. Sem a extração seriam duas cópias do mesmo 
 
 ## Interface (aba Laser)
 
-Três colunas, no molde da aba Neoden:
+Três colunas, no molde da aba Neoden, separadas por **divisórias arrastáveis** (`.lz-split`).
+Puxar até o fim fecha a lateral — abaixo de 90 px ela fecha de vez, porque meia dúzia de
+pixels de painel não serve para nada, e fechada vira `display:none`, senão o `padding` do
+`aside` deixaria uma tira de 36 px. A largura vai para o `localStorage` **do navegador** e
+não do projeto: é preferência de tela, e trocar de placa não pode mexer nela.
 
 - **esquerda — opções**: lado (Top/Bottom), presets **Cobre** / **Serigrafia**, checkboxes
   dos grupos, `inverter arte (negativo)`, `espelhar`, select de furo + diâmetro da marca,
