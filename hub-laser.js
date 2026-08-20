@@ -38,6 +38,7 @@ const SOURCES = [
   { id:'drills',     label:'furos (diâmetro real da broca)',    mode:'line' },
   { id:'silk',       label:'serigrafia',                        mode:'auto' },
   { id:'board',      label:'borda da placa (corte)',            mode:'line' },
+  { id:'mount',      label:'furos de fixação (recorte da placa)',   mode:'line' },
 ];
 
 /* Parametros de corte de uma camada. `type` e o MODO: 'Scan' = preencher, 'Cut' = linha.
@@ -75,7 +76,7 @@ function layerCut(lay){
    uma sem mexer nas outras. As duas cheias usam CUT_COBRE; a de limpeza so baixa a
    potencia, e por isso deriva de CUT_COBRE em vez de repetir os numeros. */
 const CUT_FUROS    = { type:'Cut',  speed:100,  maxPower:100, frequency:40, globalPasses:20, qPulse:200 };
-const CUT_COBRE    = { type:'Scan', speed:1000, maxPower:55, frequency:45, globalPasses:1,  qPulse:200,
+const CUT_COBRE    = { type:'Scan', speed:1000, maxPower:75, frequency:45, globalPasses:1,  qPulse:200,
                        bidir:true, crossHatch:true, angle:45, interval:0.05 };
 const CUT_COBRE_LV = Object.assign({}, CUT_COBRE, { maxPower:20 });   /* so a potencia muda */
 const CUT_BORDA    = { type:'Cut',  speed:100,  maxPower:100, frequency:40, globalPasses:20, qPulse:200 };
@@ -91,14 +92,17 @@ function defaultLayers(){
     { src:'drills',     ci:0, name:'furos',                            cut:cutOf(CUT_FUROS)    },
     { src:'fill',       ci:1, name:'retirada de cobre (1ª passada)',   cut:cutOf(CUT_COBRE)    },
     { src:'board',      ci:2, name:'corte da borda',                    cut:cutOf(CUT_BORDA)    },
-    { src:'fill',       ci:3, name:'retirada de cobre (limpeza, 3ª passada)', cut:cutOf(CUT_COBRE_LV) },
-    { src:'fill',       ci:4, name:'retirada de cobre (2ª passada)',   cut:cutOf(CUT_COBRE)    },
-    { src:'copperEdge', ci:5, name:'contorno do cobre (limpeza)',      cut:cutOf(CUT_CONTORNO) },
-    /* mais uma limpeza de retirada DEPOIS do contorno; mesmo nome da C03 de proposito -
+    /* o furo de fixacao e a MESMA operacao da borda - cortar a placa fora - so que num
+       circulo interno; por isso vem logo depois e com o corte da borda, nao com o dos furos */
+    { src:'mount',      ci:3, name:'furo de fixação',                 cut:cutOf(CUT_BORDA)    },
+    { src:'fill',       ci:4, name:'retirada de cobre (limpeza, 3ª passada)', cut:cutOf(CUT_COBRE_LV) },
+    { src:'fill',       ci:5, name:'retirada de cobre (2ª passada)',   cut:cutOf(CUT_COBRE)    },
+    { src:'copperEdge', ci:6, name:'contorno do cobre (limpeza)',      cut:cutOf(CUT_CONTORNO) },
+    /* mais uma limpeza de retirada DEPOIS do contorno; mesmo nome da C04 de proposito -
        e a mesma operacao repetida, e o Cxx e que distingue as duas linhas */
-    { src:'fill',       ci:6, name:'retirada de cobre (limpeza, 3ª passada)', cut:cutOf(CUT_COBRE_LV) },
+    { src:'fill',       ci:7, name:'retirada de cobre (limpeza, 3ª passada)', cut:cutOf(CUT_COBRE_LV) },
     /* depois de pintar com tinta UV: expoe a borda do pad e da via, sem tocar na trilha */
-    { src:'padEdge',    ci:7, name:'bordas de pads e vias (pós tinta UV)', cut:cutOf(CUT_CONTORNO) },
+    { src:'padEdge',    ci:8, name:'bordas de pads e vias (pós tinta UV)', cut:cutOf(CUT_CONTORNO) },
   ];
 }
 
@@ -108,6 +112,52 @@ function freeCi(layers){
   const usadas = new Set((layers || []).map(l => l && (l.ci | 0)));
   for (let i = 0; i < PALETTE.length; i++) if (!usadas.has(i)) return i;
   return PALETTE.length - 1;
+}
+
+/* Bancada que ja tem a lista de camadas salva nao ganharia a camada nova - e o furo
+   continuaria sem sair, so que agora por outro motivo. Ela entra logo DEPOIS do corte da
+   borda e herda o corte DELE: e a mesma operacao (cortar a placa fora), num circulo
+   interno em vez do perimetro. O `ci` e a ordem de execucao na maquina, entao quem estava
+   acima do corte sobe um indice - do contrario o furo sairia antes da borda. */
+function withMountLayer(layers){
+  const L = (layers || []).slice();
+  if (!L.length || L.some(l => l && l.src === 'mount')) return layers;
+  const i = L.map(l => l && l.src).lastIndexOf('board');
+  if (i < 0) return layers;                          /* sem corte de borda nao ha onde ancorar */
+  const base = L[i].ci | 0;
+  if (L.some(l => (l.ci | 0) >= PALETTE.length - 1)) return layers;   /* sem folga para subir */
+  const out = L.map(l => (l.ci | 0) > base ? Object.assign({}, l, { ci: (l.ci | 0) + 1 }) : l);
+  out.splice(i + 1, 0, { src:'mount', ci:base + 1, name:'furo de fixação', cut:layerCut(L[i]) });
+  return out;
+}
+
+/* Furo de fixacao = BOARD CUTOUT. E o que o Altium chama de recorte da placa, e e assim que
+   o furo de fixacao e feito: um furo de VERDADE no contorno, nao um pad e nao um desenho em
+   camada mecanica. O contorno ja vem achatado do Altium - o furo ø3,2 da prototipo sai com
+   37 pontos, um circulo de verdade - entao aqui nao ha arco a resolver.
+
+   A REGIAO DA PROPRIA PLACA vem junto e precisa cair fora: o Altium marca a "Layer Stack
+   Region" com o mesmo IsBoardCutout do recorte, entao ela chega como um contorno do tamanho
+   exato da placa. Corta-la refaria a borda e, pior, a mascara e par-impar - um laco identico
+   ao contorno cancelaria a placa inteira. Quem cobre os DOIS eixos de ponta a ponta e a
+   placa; um rasgo que atravessa so um eixo continua sendo furo.
+
+   Exportada porque a vista PCB desenha os mesmos furos: a regra de o que e furo tem que
+   existir num lugar so, senao a tela mostra uma coisa e o laser corta outra. */
+function boardCutouts(board){
+  const B = board || {}, bb = (B.board && B.board.bbox) || null, out = [];
+  for (const k of B.cutouts || []){
+    const pts = ((k && k.points) || []).map(q => [q[0], q[1]]);
+    if (pts.length < 3) continue;
+    const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]);
+    const x1 = Math.min.apply(null, xs), x2 = Math.max.apply(null, xs);
+    const y1 = Math.min.apply(null, ys), y2 = Math.max.apply(null, ys);
+    if (bb && x1 <= bb.x1 + CHAIN_TOL && x2 >= bb.x2 - CHAIN_TOL &&
+              y1 <= bb.y1 + CHAIN_TOL && y2 >= bb.y2 - CHAIN_TOL) continue;
+    out.push((pts[0][0] === pts[pts.length-1][0] && pts[0][1] === pts[pts.length-1][1])
+             ? pts : pts.concat([pts[0].slice()]));
+  }
+  return out;
 }
 
 const ARC_TOL = 0.01;      /* mm - flecha maxima ao achatar arco em segmentos */
@@ -124,6 +174,16 @@ function defaults(){
     expand:0, res:0.025, margin:2, silkMode:'line',
   };
 }
+/* O padrao da BANCADA, que nao e o mesmo da biblioteca. `defaults()` entrega arte POSITIVA:
+   e a geometria crua da placa, e e a linha de base que os testes de area travam. A bancada
+   trabalha com placa pintada, onde a arte que se usa e a NEGATIVA - queima tudo que nao e
+   cobre. Quem abre a aba num projeto novo tem que ver o modo da bancada ja escolhido, em vez
+   de marcar a caixa toda vez; projeto ja configurado continua mandando, inclusive para
+   desmarcar. Mora aqui, e nao na aba, para ficar sob teste. */
+function benchDefaults(){
+  return Object.assign(defaults(), { invert:true });
+}
+
 function norm(o){
   const d = defaults(), r = Object.assign(d, o || {});
   r.show = Object.assign(defaults().show, (o && o.show) || {});
@@ -313,7 +373,10 @@ function collect(board, opts){
     : [];
 
   const bb = (B.board && B.board.bbox) || null;
-  return { copper, padVia, holes, drills, silk, outline,
+
+  const mounts = boardCutouts(B);
+
+  return { copper, padVia, holes, drills, silk, outline, mounts,
            bbox: bb ? { x1:bb.x1, y1:bb.y1, x2:bb.x2, y2:bb.y2 } : null,
            warnings, opts:o };
 }
@@ -646,8 +709,11 @@ function art(board, opts){
     maskPolys.push([[bb.x1,bb.y1],[bb.x2,bb.y1],[bb.x2,bb.y2],[bb.x1,bb.y2]]);
   }
 
+  /* O recorte e um furo NA PLACA, entao entra na mascara - que ja e par-impar exatamente
+     para um laco interno virar buraco. Sem isso o negativo queimaria o miolo do furo de
+     fixacao e o cobre continuaria entrando por baixo dele. */
   const gm = makeGrid(region, o.res, 2);
-  rasterPolys(gm, maskPolys, true);
+  rasterPolys(gm, maskPolys.concat(c.mounts.filter(r => r.length > 3)), true);
 
   /* cobre, com furos subtraidos e expand aplicado */
   const e = Math.max(0, o.expand || 0);
@@ -711,7 +777,8 @@ function art(board, opts){
 
   const pts = a => (a || []).reduce((s, r) => s + r.length, 0);
   return {
-    copper, copperEdge, padEdge, drills:c.drills, silk, silkLines, outline:c.outline,
+    copper, copperEdge, padEdge, drills:c.drills, mounts:c.mounts, silk, silkLines,
+    outline:c.outline,
     bbox: region, size:{ w:region.x2-region.x1, h:region.y2-region.y1 },
     warnings, opts:o,
     stats:{ rings: copper.length + (silk ? silk.length : 0),
@@ -754,6 +821,7 @@ function geomFor(art, src){
   if (src === 'copperEdge') return { rings:art.copperEdge || [] };
   if (src === 'padEdge')    return { rings:art.padEdge || [] };
   if (src === 'drills')     return { prims:art.drills || [] };
+  if (src === 'mount')      return { rings:art.mounts || [] };
   if (src === 'board')      return { lines:art.outline || [] };
   if (src === 'silk'){
     if (art.silk && art.silk.length) return { rings:art.silk, fill:true };
@@ -974,5 +1042,6 @@ return { LB, defaults, collect, arcPts, chainSegments,
          primPolys, union, contours, simplify,
          art, place, svg, exportSvg, filename, autoMirror, checkOpts,
          PALETTE, SOURCES, defaultLayers, geomFor, ci2hex, ciName, freeCi,
-         cutDefaults, cutOf, layerCut, lbrn, placeLbrn };
+         cutDefaults, benchDefaults, cutOf, layerCut, withMountLayer, boardCutouts,
+         lbrn, placeLbrn };
 });

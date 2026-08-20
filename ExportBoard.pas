@@ -694,6 +694,32 @@ begin
   Result := s;
 end;
 
+// Recorte da placa (Board Cutout): furo de fixacao, janela, rasgo. Como a region de cobre,
+// o contorno ja vem achatado pelo Altium - um furo redondo sai como poligono de ~37 pontos.
+// Sem "net": recorte e ausencia de material, nao tem ligacao eletrica.
+function CutoutJSON(RegionPrim: TObject; Id: String): String;
+var
+  s: String;
+  contour: IPCB_Contour;
+  k: Integer;
+begin
+  s := '{"id":' + JS(Id);
+  s := s + ',"layer":' + JS(LayerNameOf(RegionPrim.Layer));
+  // `layer` e `incomp` ficam no JSON porque sao o que sobra para separar um Board Cutout de
+  // um recorte de poligono: o API desta versao nao expoe IsBoardCutout nem o nome do Kind.
+  s := s + ',"incomp":' + JB(RegionPrim.InComponent);
+  s := s + ',"points":[';
+  contour := RegionPrim.GetMainContour();
+  for k := 0 to contour.Count - 1 do
+  begin
+    if k > 0 then
+      s := s + ',';
+    s := s + '[' + CX(contour.GetState_PointX(k)) + ',' + CY(contour.GetState_PointY(k)) + ']';
+  end;
+  s := s + ']}';
+  Result := s;
+end;
+
 { ..................................................................................................................... }
 { .                                                Contorno da placa                                                  . }
 { ..................................................................................................................... }
@@ -771,8 +797,8 @@ var
   OutDir: String;
   ProjName: String;
   Iter, Prim: TObject;
-  CompL, FreePadL, TrackL, ArcL, ViaL, TextL, SilkL, RegionL, CsvL, OutL: TStringList;
-  CompIdx, PadIdx, TrackIdx, ArcIdx, ViaIdx, TextIdx, SilkIdx, RegionIdx: Integer;
+  CompL, FreePadL, TrackL, ArcL, ViaL, TextL, SilkL, RegionL, CutoutL, CsvL, OutL: TStringList;
+  CompIdx, PadIdx, TrackIdx, ArcIdx, ViaIdx, TextIdx, SilkIdx, RegionIdx, CutoutIdx: Integer;
   i: Integer;
   s, Id: String;
 begin
@@ -802,6 +828,7 @@ begin
   TextL := TStringList.Create;
   SilkL := TStringList.Create;
   RegionL := TStringList.Create;
+  CutoutL := TStringList.Create;
   CsvL := TStringList.Create;
 
   CompIdx := 0;
@@ -812,6 +839,7 @@ begin
   TextIdx := 0;
   SilkIdx := 0;
   RegionIdx := 0;
+  CutoutIdx := 0;
 
   // ------------------------------------------------------------------ componentes
   CsvL.Add('Designator' + #9 + 'Footprint' + #9 + 'Comment' + #9 + 'Layer' + #9 + 'X_mm' + #9 + 'Y_mm' + #9 + 'Rotation');
@@ -901,10 +929,21 @@ begin
         end;
       eRegionObject:
         begin
+          // Region que NAO e de cobre e recorte: Board Cutout (o furo de fixacao), recorte de
+          // poligono, cavidade. O Kind() e o unico discriminador que serve aqui - a camada nao
+          // serve (o API reporta o Board Cutout na Multi, nao na Keep-Out, apesar de
+          // LAYER=KEEPOUT no arquivo) e IPCB_Region.IsBoardCutout nao existe neste PCB API.
+          // Este laco JA via os recortes: ontem a placa tinha 66 regions e exportou 62, e a
+          // diferenca eram exatamente os 4 furos caindo fora do teste de cobre abaixo.
           if (Prim.Kind() = eRegionKind_Copper) and (not Prim.InPolygon()) then
           begin
             RegionIdx := RegionIdx + 1;
             AddItem(RegionL, ContourJSON(Prim, 'g' + IntToStr(RegionIdx), NetNameOf(Prim)));
+          end
+          else if Prim.Kind() <> eRegionKind_Copper then
+          begin
+            CutoutIdx := CutoutIdx + 1;
+            AddItem(CutoutL, CutoutJSON(Prim, 'k' + IntToStr(CutoutIdx)));
           end;
         end;
       ePolyObject:
@@ -978,9 +1017,14 @@ begin
   OutL.AddStrings(RegionL);
   OutL.Add('],');
 
+  OutL.Add('"cutouts":[');
+  OutL.AddStrings(CutoutL);
+  OutL.Add('],');
+
   OutL.Add('"stats":{"components":' + IntToStr(CompIdx) + ',"freepads":' + IntToStr(PadIdx) +
     ',"tracks":' + IntToStr(TrackIdx) + ',"arcs":' + IntToStr(ArcIdx) + ',"vias":' + IntToStr(ViaIdx) +
-    ',"texts":' + IntToStr(TextIdx) + ',"silk":' + IntToStr(SilkIdx) + ',"regions":' + IntToStr(RegionIdx) + '}');
+    ',"texts":' + IntToStr(TextIdx) + ',"silk":' + IntToStr(SilkIdx) + ',"regions":' + IntToStr(RegionIdx) +
+    ',"cutouts":' + IntToStr(CutoutIdx) + '}');
   OutL.Add('};');
 
   OutL.SaveToFile(OutDir + '\board.js');
@@ -1028,6 +1072,7 @@ begin
   TextL.Free;
   SilkL.Free;
   RegionL.Free;
+  CutoutL.Free;
   CsvL.Free;
   OutL.Free;
   Nets.Free;

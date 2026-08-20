@@ -229,7 +229,10 @@ var changes = [
   após `comp_move`, cada pad gira/translada junto com o componente em torno de `x,y`).
 - Vias novas: conecte camadas com trilha chegando na mesma coordenada da via.
 - Não deixe trilhas órfãs: remova com `track_del` o que ficou sem função.
-- Furos de fixação e NPTH estão em `freepads` — não coloque cobre em cima.
+- Furo de fixação costuma ser **recorte da placa** (*Board Cutout* do Altium) e está em
+  `cutouts`: é buraco no contorno, não pad. O maior deles é a região da própria placa (cobre
+  o bbox inteiro) e não é furo. Furo NPTH feito como pad está em `freepads`. Nos dois casos,
+  não coloque cobre em cima.
 
 ### Fluxo de trabalho recomendado
 

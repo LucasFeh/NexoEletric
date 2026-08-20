@@ -204,6 +204,7 @@ dá nome, duplica (⧉) ou remove (✕).
 | furos | um círculo no **diâmetro real da broca** em cada furo, para furar |
 | serigrafia | o silkscreen |
 | borda da placa (corte) | o contorno, para soltar a placa |
+| furos de fixação (recorte da placa) | os *Board Cutout* do Altium — furo de verdade no contorno |
 
 Lista inicial, **na ordem de execução** da bancada (o `priority` do `.lbrn2` sai do
 índice, então a ordem das camadas é a ordem em que a máquina roda):
@@ -211,21 +212,27 @@ Lista inicial, **na ordem de execução** da bancada (o `priority` do `.lbrn2` s
 | | Geometria | Modo | Vel. | Pot. | Freq. | Glob. | Q-pulse | Extras |
 |---|---|---|---|---|---|---|---|---|
 | **C00** | furos | linha | 100 | 100% | 40 kHz | 20 | 200 ns | |
-| **C01** | retirada de cobre (1ª passada) | preencher | 1000 | 55% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
+| **C01** | retirada de cobre (1ª passada) | preencher | 1000 | 75% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
 | **C02** | corte da borda | linha | 100 | 100% | 40 kHz | 20 | 200 ns | |
-| **C03** | retirada de cobre (limpeza, 3ª passada) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
-| **C04** | retirada de cobre (2ª passada) | preencher | 1000 | 55% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
-| **C05** | contorno do cobre (limpeza) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,01 |
-| **C06** | retirada de cobre (limpeza, 3ª passada) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
-| **C07** | bordas de pads e vias (pós tinta UV) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,01 |
+| **C03** | furo de fixação | linha | 100 | 100% | 40 kHz | 20 | 200 ns | |
+| **C04** | retirada de cobre (limpeza, 3ª passada) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
+| **C05** | retirada de cobre (2ª passada) | preencher | 1000 | 75% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
+| **C06** | contorno do cobre (limpeza) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,01 |
+| **C07** | retirada de cobre (limpeza, 3ª passada) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,05 |
+| **C08** | bordas de pads e vias (pós tinta UV) | preencher | 1000 | 20% | 45 kHz | 1 | 200 ns | bidir · cruzada · 45° · int. 0,01 |
 
 A **3ª passada roda antes da 2ª** — é a sequência da bancada, não engano de digitação.
 
-C01, C03, C04 e C06 carregam a mesma geometria de propósito: são quatro passadas do mesmo
-preenchimento, em camadas separadas para dar para ajustar uma sem mexer nas outras. C03 e
-C06 têm o mesmo nome porque são a mesma operação repetida — o `Cxx` é que distingue as duas.
+C01, C04, C05 e C07 carregam a mesma geometria de propósito: são quatro passadas do mesmo
+preenchimento, em camadas separadas para dar para ajustar uma sem mexer nas outras. C04 e
+C07 têm o mesmo nome porque são a mesma operação repetida — o `Cxx` é que distingue as duas.
 
-**C07** existe para o passo depois da tinta UV: expõe o anel do pad e da via **sem tocar
+**C03** corta os furos de fixação com **a mesma configuração da C02**: recorte de placa é a
+mesma operação da borda — atravessar o FR4 — só que num círculo interno, e por isso roda
+logo depois dela. A geometria vem dos *Board Cutout* do `board.js`; placa sem recorte não
+gera a camada.
+
+**C08** existe para o passo depois da tinta UV: expõe o anel do pad e da via **sem tocar
 nas trilhas**, para poder soldar. É a fonte `contorno só de pads e vias` — mesma
 configuração da limpeza do contorno, mas ignorando trilha e região.
 
@@ -273,7 +280,7 @@ O SVG continua levando os parâmetros em `data-lb-mode` e `data-lb-cut`, para co
 
 - **Lado** Top/Bottom. Trocar para Bottom já sugere **espelhar** (o cobre precisa gravar do
   lado certo), e o checkbox continua editável — máquina que grava por baixo do vidro não quer.
-- **Inverter (negativo)** — queima tudo que **não** é cobre; é o modo de placa pintada.
+- **Inverter (negativo)** — **ligado por padrão**; queima tudo que **não** é cobre; é o modo de placa pintada.
 - **Furos** — *furo real* (padrão), *marca de centro* (ø 0,3 mm: uma covinha que centra a broca
   sem comer o anel) ou *pad cheio*. No *furo real* a forma é fiel ao `board.js`: `drillshape`
   `rect`/`oblong` viram furo retangular/oblongo de `drillw × drill`, girados por `holerot`
@@ -365,7 +372,9 @@ esquema do zero, veja [AI-GUIDE.md](AI-GUIDE.md), Parte A.
 | Designator/Comment (texto) | comp_attr (editar pelo duplo clique no hub) |
 
 Polígonos/planos, regiões, keepouts, textos e regras são exportados para **visualização**,
-mas não são editáveis nesta versão. Furos de fixação/NPTH aparecem em `freepads`.
+mas não são editáveis nesta versão. Furo de fixação feito como **recorte da placa** (*Board
+Cutout*) aparece em `cutouts` — sai como furo de verdade na vista PCB e na arte a laser;
+furo NPTH feito como pad aparece em `freepads`.
 
 ## Sinalizadores (usuário → IA)
 

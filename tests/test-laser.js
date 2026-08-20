@@ -431,15 +431,15 @@ assert.strictEqual(Laser.PALETTE[3],  '#00E000');   /* C03 verde */
 
 /* fontes de geometria disponiveis para uma camada */
 assert.deepStrictEqual(Laser.SOURCES.map(s => s.id).sort(),
-                       ['board', 'copperEdge', 'drills', 'fill', 'padEdge', 'silk']);
+                       ['board', 'copperEdge', 'drills', 'fill', 'mount', 'padEdge', 'silk']);
 
 /* A lista padrao e a sequencia da bancada, e a ordem dos Cxx E a ordem de execucao
    (o `priority` sai do indice). Repare que a "3a passada" roda ANTES da "2a": e o
    processo do usuario, nao engano de digitacao. */
 const LD = Laser.defaultLayers();
-assert.deepStrictEqual(LD.map(l => l.ci), [0, 1, 2, 3, 4, 5, 6, 7]);
+assert.deepStrictEqual(LD.map(l => l.ci), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
 assert.deepStrictEqual(LD.map(l => l.src),
-  ['drills', 'fill', 'board', 'fill', 'fill', 'copperEdge', 'fill', 'padEdge']);
+  ['drills', 'fill', 'board', 'mount', 'fill', 'fill', 'copperEdge', 'fill', 'padEdge']);
 assert.strictEqual(LD.filter(l => l.src === 'fill').length, 4,
                    'quatro passadas de retirada de cobre, em camadas separadas');
 
@@ -455,7 +455,7 @@ assert.strictEqual(cut(0).qPulse, 200, 'nao pedido: mantem 200 ns');
 
 /* C01 retirada de cobre, 1a passada */
 assert.strictEqual(cut(1).type, 'Scan');
-assert.strictEqual(cut(1).maxPower, 55);
+assert.strictEqual(cut(1).maxPower, 75);
 assert.strictEqual(cut(1).frequency, 45);
 assert.strictEqual(cut(1).qPulse, 200);
 assert.strictEqual(cut(1).crossHatch, true);
@@ -472,33 +472,38 @@ assert.strictEqual(cut(2).maxPower, 100);
 assert.strictEqual(cut(2).frequency, 40);
 assert.strictEqual(cut(2).globalPasses, 20);
 
-/* C03 retirada de cobre (limpeza), 3a passada: SO a potencia muda */
-assert.strictEqual(cut(3).maxPower, 20);
-assert.deepStrictEqual(Object.assign({}, cut(3), { maxPower: cut(1).maxPower }), cut(1),
+/* C03 furo de fixacao - o recorte da placa e a MESMA operacao da borda, num circulo
+   interno, entao roda logo depois dela e com os mesmos parametros */
+assert.strictEqual(LD[3].src, 'mount');
+assert.deepStrictEqual(cut(3), cut(2), 'furo de fixacao usa a configuracao do corte da borda');
+
+/* C04 retirada de cobre (limpeza), 3a passada: SO a potencia muda */
+assert.strictEqual(cut(4).maxPower, 20);
+assert.deepStrictEqual(Object.assign({}, cut(4), { maxPower: cut(1).maxPower }), cut(1),
                        'a 3a passada so difere da 1a na potencia');
 
-/* C04 retirada de cobre, 2a passada: identica a 1a */
-assert.deepStrictEqual(cut(4), cut(1), 'a 2a passada usa os mesmos parametros da 1a');
+/* C05 retirada de cobre, 2a passada: identica a 1a */
+assert.deepStrictEqual(cut(5), cut(1), 'a 2a passada usa os mesmos parametros da 1a');
 
-/* C05 contorno do cobre (limpeza) */
-assert.strictEqual(cut(5).type, 'Scan');
-assert.strictEqual(cut(5).speed, 1000);
-assert.strictEqual(cut(5).maxPower, 20);
-assert.strictEqual(cut(5).frequency, 45);
-assert.strictEqual(cut(5).qPulse, 200);
-assert.strictEqual(cut(5).crossHatch, true);
-assert.strictEqual(cut(5).angle, 45);
-assert.strictEqual(cut(5).globalPasses, 1, 'nao pedido: mantem 1');
-assert.strictEqual(cut(5).bidir, true, 'nao pedido: mantem bidirecional');
+/* C06 contorno do cobre (limpeza) */
+assert.strictEqual(cut(6).type, 'Scan');
+assert.strictEqual(cut(6).speed, 1000);
+assert.strictEqual(cut(6).maxPower, 20);
+assert.strictEqual(cut(6).frequency, 45);
+assert.strictEqual(cut(6).qPulse, 200);
+assert.strictEqual(cut(6).crossHatch, true);
+assert.strictEqual(cut(6).angle, 45);
+assert.strictEqual(cut(6).globalPasses, 1, 'nao pedido: mantem 1');
+assert.strictEqual(cut(6).bidir, true, 'nao pedido: mantem bidirecional');
 
-/* C06 mais uma limpeza de retirada de cobre, DEPOIS do contorno */
-assert.strictEqual(LD[6].src, 'fill');
-assert.deepStrictEqual(cut(6), cut(3), 'mesma configuracao da limpeza de retirada');
-assert.strictEqual(LD[5].src, 'copperEdge', 'entra logo apos o contorno do cobre');
+/* C07 mais uma limpeza de retirada de cobre, DEPOIS do contorno */
+assert.strictEqual(LD[7].src, 'fill');
+assert.deepStrictEqual(cut(7), cut(4), 'mesma configuracao da limpeza de retirada');
+assert.strictEqual(LD[6].src, 'copperEdge', 'entra logo apos o contorno do cobre');
 
-/* C07 destaque das bordas de pad e via (depois da tinta UV) */
-assert.strictEqual(LD[7].src, 'padEdge');
-assert.deepStrictEqual(cut(7), cut(5), 'usa a configuracao da limpeza do contorno');
+/* C08 destaque das bordas de pad e via (depois da tinta UV) */
+assert.strictEqual(LD[8].src, 'padEdge');
+assert.deepStrictEqual(cut(8), cut(6), 'usa a configuracao da limpeza do contorno');
 
 /* configs salvas antes do rename: numPasses (nome antigo do campo da bancada) migra para
    globalPasses ao ler - o valor sempre significou passagens globais, so o nome estava errado */
@@ -550,7 +555,7 @@ assert.ok(aPVf.padEdge.some(r => ringArea(r) < 0), 'o furo entra como buraco');
 assert.strictEqual(Laser.freeCi([]), 0);
 assert.strictEqual(Laser.freeCi([{ ci:0 }]), 1);
 assert.strictEqual(Laser.freeCi([{ ci:0 }, { ci:1 }, { ci:3 }]), 2, 'usa o primeiro buraco');
-assert.strictEqual(Laser.freeCi(LD), 8, 'a lista padrao usa C00..C07');
+assert.strictEqual(Laser.freeCi(LD), 9, 'a lista padrao usa C00..C08');
 /* lista cheia: nao inventa indice fora da paleta */
 const cheia = Array.from({ length:30 }, (_, i) => ({ ci:i }));
 assert.ok(Laser.freeCi(cheia) >= 0 && Laser.freeCi(cheia) < 30);
@@ -694,10 +699,147 @@ assert.ok(approx((Math.min(...xs2) + Math.max(...xs2))/2, 18, 0.06), 'espelhado:
 assert.strictEqual(Laser.filename('TCMS_Reader', { side:'Top' }, 'lbrn2'),
                    'TCMS_Reader-LASER-Top.lbrn2');
 
+/* ── o padrao da BANCADA nao e o da biblioteca ──
+   defaults() e a arte positiva - geometria crua, e a linha de base destes testes. A aba abre
+   em negativo, que e o modo de placa pintada. Fora o `invert`, sao a mesma coisa. */
+assert.strictEqual(Laser.defaults().invert, false);
+assert.strictEqual(Laser.benchDefaults().invert, true);
+assert.deepStrictEqual(Object.assign(Laser.benchDefaults(), { invert:false }), Laser.defaults());
+
 /* ── espelho e auto-marcado ao escolher Bottom, mas continua editavel ── */
 assert.strictEqual(Laser.defaults().mirror, false);
 assert.strictEqual(Laser.autoMirror('Bottom'), true);
 assert.strictEqual(Laser.autoMirror('Top'), false);
+
+/* ═══════════════ furos de fixação (recorte da placa) ═══════════════
+   O furo de fixacao e um BOARD CUTOUT do Altium: Region com IsBoardCutout, desenhada na
+   Keep-Out. Nao e pad e nao e desenho em camada mecanica. O contorno ja vem achatado do
+   Altium - o furo ø3,2 da prototipo sai com 37 pontos - entao aqui nao ha arco a resolver.
+   Ate 2026-08-20 o ExportBoard.pas nao exportava recorte nenhum: o iterador so olhava
+   Top/Bottom/Overlay/Multi, e o recorte fica na Keep-Out. */
+
+const circ = (cx, cy, r, n) => {
+  const p = [];
+  for (let i = 0; i <= n; i++){ const a = 2*Math.PI*i/n;
+    p.push([cx + r*Math.cos(a), cy + r*Math.sin(a)]); }
+  return p;                                        /* ja fecha: o ultimo ponto e o primeiro */
+};
+const cutout = (cx, cy, r) => ({ id:'k', layer:'KeepOut', points:circ(cx, cy, r, 36) });
+
+const cMount = Laser.collect(board({ cutouts:[ cutout(5, 5, 1.6), cutout(15, 15, 1.6) ] }),
+                             { side:'Top' });
+assert.strictEqual(cMount.mounts.length, 2);
+assert.ok(approx(ringArea(cMount.mounts[0]), Math.PI*1.6*1.6, 0.05), 'area do furo ø3,2');
+
+/* o anel tem que fechar exato: laco aberto o LightBurn corta como linha solta */
+const anel = cMount.mounts[0];
+assert.deepStrictEqual(anel[0], anel[anel.length - 1]);
+
+/* recorte que o Altium mandou SEM repetir o primeiro ponto fecha aqui */
+const aberto = circ(10, 10, 2, 36).slice(0, -1);
+const cAb = Laser.collect(board({ cutouts:[ { id:'k1', layer:'KeepOut', points:aberto } ] }),
+                          { side:'Top' }).mounts[0];
+assert.deepStrictEqual(cAb[0], cAb[cAb.length - 1]);
+assert.strictEqual(cAb.length, aberto.length + 1);
+
+/* A REGIAO DA PROPRIA PLACA vem no mesmo `cutouts[]` (o Altium marca a Layer Stack Region
+   com o mesmo IsBoardCutout) e nao pode virar furo: cortar aquilo refaz a borda, e a mascara
+   e par-impar - um laco igual ao contorno cancelaria a placa inteira. */
+const bPlaca = board({ cutouts:[
+  { id:'k1', layer:'Multi', points:[[0,0],[20,0],[20,20],[0,20]] },   /* a placa toda */
+  cutout(10, 10, 2),
+] });
+assert.strictEqual(Laser.collect(bPlaca, { side:'Top' }).mounts.length, 1, 'so o furo sobra');
+/* e sem aviso: a regiao da placa vem sempre, aviso que aparece sempre ninguem le */
+assert.deepStrictEqual(Laser.collect(bPlaca, { side:'Top' }).warnings, []);
+/* a placa continua inteira: o negativo tem que dar 400 menos o furo, e nao zero */
+const artPlaca = Laser.art(bPlaca, { side:'Top', res:0.05, invert:true, margin:0 });
+assert.ok(approx(artPlaca.copper.reduce((s, r) => s + ringArea(r), 0), 400 - Math.PI*4, 1),
+          'a regiao da placa nao pode cancelar a mascara');
+
+/* rasgo que atravessa a placa num eixo so continua sendo furo */
+assert.strictEqual(Laser.collect(board({ cutouts:[
+  { id:'k1', layer:'Multi', points:[[0,9],[20,9],[20,11],[0,11]] } ] }),
+  { side:'Top' }).mounts.length, 1);
+
+/* recorte degenerado (menos de 3 pontos) nao vira camada */
+assert.strictEqual(Laser.collect(board({ cutouts:[ { id:'k1', points:[[1,1],[2,2]] } ] }),
+                                 { side:'Top' }).mounts.length, 0);
+
+/* ── a camada padrao: logo depois do corte da borda, com a MESMA configuracao ── */
+const DL = Laser.defaultLayers();
+const iB = DL.findIndex(l => l.src === 'board');
+const iM = DL.findIndex(l => l.src === 'mount');
+assert.ok(iB >= 0 && iM === iB + 1, 'furo de fixação vem logo depois do corte da borda');
+assert.strictEqual(DL[iM].name, 'furo de fixação');
+assert.deepStrictEqual(Laser.layerCut(DL[iM]), Laser.layerCut(DL[iB]),
+                       'mesma configuracao de corte da borda');
+/* o ci e a ordem de execucao na maquina: indice repetido funde duas camadas numa so */
+assert.strictEqual(new Set(DL.map(l => l.ci)).size, DL.length);
+assert.deepStrictEqual(DL.map(l => l.ci), DL.map((l, i) => i));
+
+/* ── o recorte e um FURO NA PLACA, e nao so uma camada de corte ── */
+const bCut = board({ cutouts:[ cutout(10, 10, 2) ],
+                     tracks:[ { id:'t1', layer:'Top', x1:2, y1:10, x2:18, y2:10, w:3 } ] });
+
+/* no negativo o miolo do furo nao pode ser queimado: placa menos o recorte */
+const artNeg = Laser.art(board({ cutouts:[ cutout(10, 10, 2) ] }),
+                       { side:'Top', res:0.05, invert:true, margin:0 });
+const areaNeg = artNeg.copper.reduce((s, r) => s + ringArea(r), 0);
+assert.ok(approx(areaNeg, 400 - Math.PI*4, 1), 'negativo = placa menos o recorte: ' + areaNeg);
+
+/* e o cobre que passa por cima do furo e recortado junto - a trilha cruza o furo inteiro */
+const artFuro = Laser.art(bCut, { side:'Top', res:0.05, margin:0 });
+const semRecorte = Laser.art(board({ tracks:bCut.tracks }), { side:'Top', res:0.05, margin:0 });
+const areaCu = a => a.copper.reduce((s, r) => s + ringArea(r), 0);
+assert.ok(areaCu(semRecorte) - areaCu(artFuro) > 8,
+          'a trilha perde a area do furo: ' + areaCu(semRecorte) + ' -> ' + areaCu(artFuro));
+
+/* ── emissao ── */
+assert.strictEqual(artFuro.mounts.length, 1);
+assert.strictEqual(Laser.geomFor(artFuro, 'mount').rings.length, 1);
+
+const svgMnt = Laser.svg(artFuro, Object.assign({}, artFuro.opts, { layers:DL }));
+assert.ok(/data-lb-name="furo de fixação"/.test(svgMnt), 'a camada sai no SVG');
+/* modo Cut: sai como traco fechado, nao preenchido - o laser corta o circulo */
+const grupo = svgMnt.match(/<g id="C03-mount"[^>]*>(.*?)<\/g>/);
+assert.ok(grupo, 'grupo da camada no SVG');
+assert.ok(/data-lb-mode="linha"/.test(svgMnt.match(/<g id="C03-mount"[^>]*>/)[0]));
+assert.ok(/fill="none"/.test(grupo[1]) && / Z"/.test(grupo[1]), 'anel fechado, sem preenchimento');
+
+const lbMnt = Laser.lbrn(artFuro, Object.assign({}, artFuro.opts, { layers:DL }));
+assert.ok(/<name Value="furo de fixação"/.test(lbMnt), 'CutSetting da camada saiu');
+assert.ok(new RegExp('<Shape Type="Path" CutIndex="' + DL[iM].ci + '">').test(lbMnt),
+          'a geometria saiu no CutIndex da camada');
+
+/* placa sem recorte nao ganha grupo vazio no arquivo */
+const aSem = Laser.art(board({ tracks:bCut.tracks }), { side:'Top', res:0.1 });
+assert.strictEqual(aSem.mounts.length, 0);
+assert.ok(!/data-lb-name="furo de fixação"/.test(
+  Laser.svg(aSem, Object.assign({}, aSem.opts, { layers:DL }))));
+
+/* ── config de bancada ja salva ganha a camada nova, com o corte que ELA usa ── */
+const salvo = [
+  { src:'drills', ci:0, name:'furos',          cut:Laser.cutOf({ speed:80 }) },
+  { src:'board',  ci:2, name:'corte da borda', cut:Laser.cutOf({ speed:70, globalPasses:25 }) },
+  { src:'fill',   ci:3, name:'limpeza',        cut:Laser.cutOf({ type:'Scan' }) },
+];
+const mig = Laser.withMountLayer(salvo);
+const jM = mig.findIndex(l => l.src === 'mount');
+assert.strictEqual(jM, 2, 'entra logo depois do corte da borda');
+assert.strictEqual(mig[jM].name, 'furo de fixação');
+assert.strictEqual(mig[jM].cut.speed, 70);
+assert.strictEqual(mig[jM].cut.globalPasses, 25);
+/* o ci e a ordem de execucao: o furo fica logo acima do corte, e quem estava acima sobe */
+assert.strictEqual(mig[jM].ci, 3);
+assert.strictEqual(mig[3].src, 'fill');
+assert.strictEqual(mig[3].ci, 4);
+assert.strictEqual(new Set(mig.map(l => l.ci)).size, mig.length, 'ci sem repetido');
+/* rodar de novo nao duplica, e lista sem corte de borda fica intacta */
+assert.deepStrictEqual(Laser.withMountLayer(mig), mig);
+const semBorda = salvo.filter(l => l.src !== 'board');
+assert.deepStrictEqual(Laser.withMountLayer(semBorda), semBorda);
+
 
 /* ═══════════════ placa real ═══════════════
    A TCMS_Reader tem contorno chanfrado, pads Multi, vias e regioes - e onde as

@@ -335,6 +335,11 @@ function layerAlpha(layer){
 }
 function lcolor(layer){ return LAYER_COLORS[layer] || '#888888'; }
 
+/* O contorno inclui os RECORTES da placa (Board Cutout: furo de fixacao, janela, rasgo),
+   como sub-caminhos proprios. Quem preenche este path usa par-impar, para o recorte sair
+   como buraco de verdade em vez de ser pintado por cima - e o traco do contorno passa a
+   contornar o furo tambem, que e o que o torna visivel sobre o fundo.
+   A regra de o que e recorte mora no hub-laser.js: a tela nao pode discordar do laser. */
 function outlinePath(){
   ctx.beginPath();
   let started=false;
@@ -348,6 +353,11 @@ function outlinePath(){
     }
   }
   if (started) ctx.closePath();
+  for (const r of HubLaser.boardCutouts(B)) {
+    ctx.moveTo(r[0][0], r[0][1]);
+    for (let i=1; i<r.length; i++) ctx.lineTo(r[i][0], r[i][1]);
+    ctx.closePath();
+  }
 }
 
 function drawGrid(){
@@ -650,7 +660,7 @@ function draw(){
 
   /* placa */
   outlinePath();
-  ctx.fillStyle=COLOR_BOARD; ctx.fill();
+  ctx.fillStyle=COLOR_BOARD; ctx.fill('evenodd');   /* par-impar: o recorte vira buraco */
   drawGrid();
 
   /* zonas de cobre */

@@ -73,6 +73,7 @@ placa. Então a arte expõe **fontes de geometria** e o usuário monta a lista:
 | `drills` | círculo no diâmetro real da broca, por furo | Line |
 | `silk` | serigrafia | Line/Fill |
 | `board` | contorno da placa | Line |
+| `mount` | recorte da placa (furo de fixação) | Line |
 
 Uma camada é `{ src, ci, name }`. **A mesma `src` pode aparecer em várias camadas** — é
 assim que se pedem duas passadas de limpeza com parâmetros diferentes.
@@ -218,6 +219,7 @@ recorte: preencher todas é o correto.
 | `silk[]` | `layer === lado+'Overlay'` | `line` → cápsula · `arc` → cadeia de cápsulas |
 | `texts[]` | `layer === lado+'Overlay'` | polilinhas da fonte vetorial |
 | `board.outline[]` | sempre | `line` e `arc` → polilinhas encadeadas em laços → camada C02, **nunca** entra no cobre |
+| `cutouts[]` | sempre | contorno já achatado → laço fechado → camada de furo de fixação **e** furo na máscara da placa |
 
 **O contorno tem arco, e isso foi descoberto no dado real.** Duas placas do repo
 (`SD - DI251838`, `VDCB - DI251879`) têm o contorno com cantos em `kind:'arc'` — a segunda é
@@ -329,6 +331,7 @@ Mora no `hub-laser.js`, e não na aba, para ficar sob teste.
 | `pcbframe.js` | passa a desenhar texto em cima do `HubFont` em vez de ter cópia própria |
 | `pcbframe.html`, `hub.html` | `<script src="hub-font.js">` / `hub-laser.js` |
 | `hub.html` | aba **Laser**: opções · prévia · exportar |
+| `pcbframe.js` | o contorno passa a incluir os recortes, preenchidos com par-ímpar — furo aparece como furo na vista PCB |
 | `tests/test-laser.js` (novo) | ver abaixo |
 | `README.md` | a aba nova na lista do hub v2 |
 
@@ -413,6 +416,84 @@ PRNG com aritmética de 32 bits (`Math.imul`).
 **E cuidado com a placa de teste.** Todo o desenvolvimento foi verificado na TCMS_Reader —
 a única placa do repo cujas regiões (só 2) são anti-horárias. Ela não podia expor o bug.
 Verificação de geometria tem que varrer o repo inteiro, não uma placa preferida.
+
+## Adendo (2026-08-20) — furo de fixação: era o exportador, não o gerador
+
+O furo de fixação nunca saiu na arte, e a causa estava **antes** do `hub-laser.js`: no
+`board.js`. No Altium ele é um **Board Cutout** — uma `Region` com `IsBoardCutout`,
+desenhada na **Keep-Out** — e o `ExportBoard.pas` descartava isso duas vezes:
+
+1. o iterador principal filtra `MkSet(eTopLayer, eBottomLayer, eTopOverlay, eBottomOverlay,
+   eMultiLayer)`, e o recorte está na Keep-Out: nem chegava ao laço;
+2. mesmo chegando, o ramo de `eRegionObject` só aceitava `Kind() = eRegionKind_Copper` — e
+   o recorte **atende** esse teste (o Altium grava `KIND=0` com `ISBOARDCUTOUT=TRUE` à parte),
+   então teria virado *cobre a gravar*, o oposto exato de um furo.
+
+Nenhum `board.js` do repositório tinha uma linha de recorte, então o sintoma era mudo: a
+arte saía "certa", só sem os furos.
+
+### O discriminador é o `Kind`, e o laço certo já existia
+
+Duas tentativas erradas antes da boa, e as duas ensinam algo:
+
+1. **`IPCB_Region.IsBoardCutout` não existe neste PCB API.** O script nem compila
+   (*"Undeclared identifier"*). E `try/except` **não protege**: DelphiScript resolve membro
+   na **compilação**, não em execução — blindar o acesso foi inútil por construção.
+2. **A camada não serve como teste.** O arquivo grava `LAYER=KEEPOUT`, mas o mesmo registro
+   começa com `V7_LAYER=MULTILAYER` — e é esse que o API reporta. Procurar por
+   `Layer = eKeepOutLayer` devolveu **zero**.
+
+O que resolveu foi contar registros em vez de supor: com os pours despejados a
+`prototipo` tinha **66** regions no `.PcbDoc` e exportou **62**; sem os pours, **4** e
+exportou **0**. Nos dois casos a diferença é exatamente 4 — os furos. Ou seja: **o laço
+principal sempre enxergou os recortes**; eles caíam fora do `Kind() = eRegionKind_Copper`
+e nenhum outro ramo os pegava. Não faltava iterador, faltava um `else`.
+
+Então o teste é `Kind() <> eRegionKind_Copper`, dentro do ramo `eRegionObject` que já
+existia. Isso também pega recorte de polígono e cavidade, que **não** são furo na placa;
+por isso cada entrada de `cutouts[]` leva `layer` e `incomp`, que é o que este API dá de
+graça para apertar a regra contra dado real em vez de contra suposição.
+
+**O contorno já vem achatado.** `GetMainContour()` devolve o polígono resolvido: o furo
+ø3,2 da `prototipo` sai com **37 pontos** e área 8,068 mm² — o mesmo número que o painel de
+propriedades do Altium mostra. Não há arco a resolver do lado do gerador.
+
+### A região da própria placa vem no mesmo `cutouts[]`
+
+`Kind() <> eRegionKind_Copper` traz **cinco** recortes na `prototipo`, não quatro: o quinto
+é um retângulo de 60 × 61,52 mm — a placa inteira. É a *Layer Stack Region*, que o Altium
+marca com o mesmo `ISBOARDCUTOUT=TRUE` do recorte de verdade.
+
+Deixar passar seria grave em dois níveis: o laser refaria a borda, e a máscara é par-ímpar
+— um laço idêntico ao contorno **cancelaria a placa inteira**, produzindo geometria
+perfeita e completamente errada, que é a mesma classe de erro que o `checkOpts` já vigia.
+
+O critério é geométrico e não depende de API: **quem cobre os dois eixos de ponta a ponta é
+a placa**. Um rasgo que atravessa a placa num eixo só continua sendo furo. Sem aviso na
+tela: a região da placa vem em toda placa, e aviso que aparece sempre ninguém lê.
+
+A regra mora em `HubLaser.boardCutouts(board)`, **exportada**, porque a vista PCB desenha os
+mesmos furos — o `pcbframe.js` chama a mesma função. Duas cópias da regra dariam uma tela
+que discorda do que a máquina corta.
+
+**É furo, e não só uma camada de corte.** O recorte entra na **máscara da placa**, que já usa
+par-ímpar exatamente para um laço interno virar buraco. Sem isso o negativo queimaria o
+miolo do furo e o cobre continuaria entrando por baixo dele.
+
+**A camada roda logo depois do corte da borda, com a configuração dele** (C03, herdando a
+C02): recorte é a mesma operação da borda — atravessar o FR4 — num círculo interno.
+Como o `ci` é a ordem de execução, a lista padrão inteira desceu um índice a partir daí.
+Bancada com lista já salva em `localStorage` não ganharia a camada nova — e o furo
+continuaria sem sair, agora por outro motivo — então `withMountLayer()` insere a camada na
+leitura, herdando o corte da borda **daquela** configuração e subindo o `ci` de quem estava
+acima. Mora no `hub-laser.js`, e não na aba, para ficar sob teste.
+
+**O que NÃO serve como fonte.** Duas alternativas foram descartadas contra o dado real:
+*pad livre sem net* (as 12 placas do repo têm `freepads` **todos com net** — são pads
+elétricos avulsos, e cortar um destruiria a placa) e *círculo em camada mecânica* (cinco
+placas desenham o furo também em Mech1, mas é só desenho por cima do recorte — e na
+`VDCB - DI251879` o Mech1 traz o próprio contorno redondo ø72 da placa, que viraria um
+"furo" do tamanho da peça).
 
 ## Fora de escopo
 

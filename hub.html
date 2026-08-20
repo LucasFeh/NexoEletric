@@ -641,7 +641,7 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
             <span class="ttl">prévia</span><span class="meta" id="lzViewMeta"></span>
             <div class="right"><button class="btn btn-ghost btn-sm" id="lzFit">Enquadrar</button></div>
           </div>
-          <div class="viewport" id="lzVp"><canvas id="lzCv"></canvas><div class="hint" id="lzHint"></div></div>
+          <div class="viewport" id="lzVp"><canvas id="lzCv"></canvas></div>
         </div>
 
         <aside id="lzSide">
@@ -1602,7 +1602,9 @@ const lzBoard = () => (S.detail && S.detail.board) || null;
 const lzKey = id => 'altiumhub.laser.' + id;
 
 function lzLoad(id) {
-  const d = HubLaser.defaults();
+  /* benchDefaults, e nao defaults: a aba abre no modo da bancada (negativo), nao na arte
+     positiva crua da biblioteca. O que estiver salvo no projeto ganha dos dois. */
+  const d = HubLaser.benchDefaults();
   try {
     const raw = JSON.parse(localStorage.getItem(lzKey(id)) || 'null');
     if (raw && typeof raw === 'object') {
@@ -1625,6 +1627,9 @@ function lzLoad(id) {
             cut: HubLaser.layerCut(l),
           }))
         : null;
+      /* lista salva antes de 2026-08-20 nao tem a camada de furo de fixação - sem isto o
+         recorte da placa continuaria sem sair, agora por causa da config gravada */
+      if (d.layers && d.layers.length) d.layers = HubLaser.withMountLayer(d.layers);
       if (!d.layers || !d.layers.length) d.layers = null;
     }
   } catch (e) {}
@@ -1847,12 +1852,11 @@ function lzCompute() {
   lzCam.resize();
   if (key !== lzFitKey) { lzCam.fit({ x1:0, y1:-s.h, x2:s.w, y2:0 }, 1.08); lzFitKey = key; }
   else lzCam.draw();
+  /* quando a previa cede resolucao, quem avisa e a barra de titulo ("previa a X mm/px") -
+     o aviso grande por cima do desenho atrapalhava mais do que informava */
   const cedeu = po.res > S.laser.res * 1.001;
   $('#lzViewMeta').textContent = s.w.toFixed(1) + ' × ' + s.h.toFixed(1) + ' mm · ' + ms + ' ms' +
     (cedeu ? ' · prévia a ' + po.res.toFixed(3) + ' mm/px' : '');
-  $('#lzHint').textContent = cedeu
-    ? 'prévia mais grossa para responder ao vivo — o arquivo sai a ' + S.laser.res + ' mm/px'
-    : '';
   lzRenderSide(po);
 }
 function lzSchedule() {
@@ -1869,6 +1873,7 @@ function lzRenderSide(po) {
   linha('pontos', String(lzArt.stats.points));
   linha('resolução', S.laser.res + ' mm/px');
   linha('furos', String((lzArt.drills || []).length));
+  linha('furos de fixação', String((lzArt.mounts || []).length));
   const vivas = lzLayers().filter(l => {
     const g = HubLaser.geomFor(lzArt, l.src);
     return (g.rings || []).length || (g.lines || []).length || (g.prims || []).length;
