@@ -568,6 +568,10 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
 
           <div class="nd-sep"></div>
           <div class="kicker">opções</div>
+
+          <label class="nd-check"><input type="checkbox" id="ndGroup" checked> agrupar por tipo e tamanho</label>
+          <p class="nd-hint">Junta os componentes de mesma classe e mesmo package (todos os R 1206, depois os R 0805, depois os C…) para a máquina não trocar de bico a cada peça. A referência fica sempre na primeira linha.</p>
+
           <div class="nd-fields">
             <span class="k">rotação</span><input id="ndRotAng" class="input mono" type="number" step="any" value="0" title="ângulo CCW (graus)">
             <span class="k">em torno de X</span><input id="ndRotOx" class="input mono" type="number" step="any" value="0">
@@ -810,7 +814,7 @@ const S = {
   /* off = coordenada de maquina DA REFERENCIA. Fica no estado (e nao lido do DOM como
      rotacao/mover) porque o mesmo par de campos mostra a posicao calculada quando o
      selecionado nao e a referencia — o input deixa de ser fonte da verdade. */
-  neoden: { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: new Set() },
+  neoden: { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: new Set(), group: true },
   /* opcoes da arte a laser; o formato e o de HubLaser.defaults(), persistido por projeto */
   laser: HubLaser.defaults(),
   /* sel = { k:'sym'|'fp'|'gone-sym'|'gone-fp', name }; fpShown troca so o preview de baixo */
@@ -998,6 +1002,14 @@ function ndLoadExcl(id) {
   try { return new Set(JSON.parse(localStorage.getItem(ndExclKey(id))) || []); }
   catch (e) { return new Set(); }
 }
+/* agrupar por tipo+tamanho: ligado por padrao, e a escolha fica por projeto igual a
+   exclusao. So grava quando difere do padrao, para nao encher o localStorage. */
+const ndGroupKey = id => 'altiumhub.neoden.group.' + id;
+function ndLoadGroup(id) { return localStorage.getItem(ndGroupKey(id)) !== '0'; }
+function ndSaveGroup() {
+  const k = ndGroupKey(S.projId);
+  if (S.neoden.group) localStorage.removeItem(k); else localStorage.setItem(k, '0');
+}
 function ndSaveExcl() {
   const k = ndExclKey(S.projId);
   if (S.neoden.excluded.size) localStorage.setItem(k, JSON.stringify([...S.neoden.excluded]));
@@ -1030,6 +1042,7 @@ function ndToggle(des, shownDes, shift) {
 function neodenOpts() {
   return {
     refDes: S.neoden.refDes,
+    group: !!S.neoden.group,
     exclude: [...(S.neoden.excluded || [])],
     off: { x: S.neoden.off.x, y: S.neoden.off.y },
     rot: (+$('#ndRotAng').value ? { ox: +$('#ndRotOx').value || 0, oy: +$('#ndRotOy').value || 0, angle: +$('#ndRotAng').value } : null),
@@ -1080,6 +1093,7 @@ function renderNeoden() {
   if (empty) empty.style.display = 'none';
   grid.style.display = '';
   ndFrame();   /* so cria; o zoom sai do clique, nunca de um render solto */
+  $('#ndGroup').checked = !!S.neoden.group;
 
   const refs = comps.map(c => c.ref);
   if (!refs.includes(S.neoden.refDes)) S.neoden.refDes = refs[0];
@@ -2152,7 +2166,7 @@ async function loadProject(id) {
   if (!det) { toast('detalhe do projeto indisponível — tente Reindexar', 'err'); return; }
   S.projId = id; S.detail = det;
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
-  S.neoden = { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: ndLoadExcl(id) };
+  S.neoden = { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: ndLoadExcl(id), group: ndLoadGroup(id) };
   ndAnchor = null;
   S.laser = lzLoad(id); lzArt = null; lzFitKey = '';   /* a arte e as opcoes sao por projeto */
   libUse = null; libUseFor = null;        /* o cruzamento com a lib e por projeto */
@@ -2231,6 +2245,7 @@ $('#btnBom').onclick = exportBom;
   $('#' + id).addEventListener('change', renderNeoden);
 });
 $('#ndSearch').oninput = e => { S.neoden.q = e.target.value; renderNeoden(); };
+$('#ndGroup').onchange = e => { S.neoden.group = e.target.checked; ndSaveGroup(); renderNeoden(); };
 
 /* ── laser ── */
 document.querySelectorAll('[data-lz-side]').forEach(b => b.onclick = () => {

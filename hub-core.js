@@ -607,6 +607,48 @@ function neodenKind(c){
   if (smd) return 'smd';
   return '?';
 }
+/* Ordem das classes na bancada; o que nao esta aqui vai depois, em ordem alfabetica. */
+const NEODEN_CLASS_ORDER = ['R', 'C', 'L', 'D'];
+/* Package = o codigo imperial achado no nome do footprint. E o que junta "RES 1206" com
+   "1206 resistor" (96 e 35 ocorrencias no acervo, mesmo componente fisico). Sem codigo,
+   a chave e o proprio nome — footprints identicos continuam juntos, e so eles. */
+function neodenPkg(fp){
+  const m = /(?:^|\D)(0201|0402|0603|0805|1206|1210|2010|2512)(?:\D|$)/.exec(String(fp || ''));
+  return m ? m[1] : String(fp || '');
+}
+/* Prefixo de letras INTEIRO: CN1 e conector, nao capacitor. Cortar na primeira letra
+   poria os conectores no meio dos capacitores e partiria o bloco em dois. */
+function neodenClass(des){
+  const m = /^[A-Za-z]+/.exec(String(des || ''));
+  return m ? m[0].toUpperCase() : '';
+}
+/* Numero do designator, para R2 vir antes de R10 dentro do grupo. Sem numero da -1 e o
+   desempate cai na string, que e sempre determinista. */
+function neodenSeq(des){
+  const m = /^[A-Za-z]+(\d+)/.exec(String(des || ''));
+  return m ? parseInt(m[1], 10) : -1;
+}
+function neodenGroupKey(row){
+  const cls = neodenClass(row.des);
+  const rank = NEODEN_CLASS_ORDER.indexOf(cls);
+  return { rank: rank < 0 ? NEODEN_CLASS_ORDER.length : rank, cls: cls,
+           pkg: neodenPkg(row.footprint), num: neodenSeq(row.des), des: String(row.des || '') };
+}
+const cmpStr = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+/* Devolve uma lista nova, agrupada. `pinned` (a referencia) fica de fora da ordenacao e
+   volta na primeira posicao. Os codigos imperiais tem 4 digitos, entao a ordem
+   alfabetica ja e a ordem de tamanho (0402 < 0603 < 0805 < 1206 < 2512) e os nomes
+   nao-imperiais caem depois deles, porque digito vem antes de letra. */
+function neodenGroupSort(rows, pinned){
+  const rest = pinned ? rows.filter(r => r !== pinned) : rows.slice();
+  const keys = new Map(rest.map(r => [r, neodenGroupKey(r)]));
+  rest.sort((a, b) => {
+    const ka = keys.get(a), kb = keys.get(b);
+    return ka.rank - kb.rank || cmpStr(ka.cls, kb.cls) || cmpStr(ka.pkg, kb.pkg)
+        || ka.num - kb.num || cmpStr(ka.des, kb.des);
+  });
+  return pinned ? [pinned].concat(rest) : rest;
+}
 function neodenRotatePt(ox, oy, px, py, angle){
   const a = angle * Math.PI / 180;
   return { x: ox + Math.cos(a) * (px - ox) - Math.sin(a) * (py - oy),
@@ -623,19 +665,23 @@ function neodenTransform(components, opts){
   }
   const ex = new Set(o.exclude || []);
   ex.delete(o.refDes);        /* a referência é a origem do mapeamento: nunca sai da lista */
-  const rows = ordered.map(c => {
+  let rows = ordered.map(c => {
     const m = neodenPos(c);
     return { des: c.ref, footprint: c.footprint || '', x: m.x, y: m.y,
              layer: c.layer, rot: c.rot || 0, comment: c.comment || '',
              kind: neodenKind(c), excluded: ex.has(c.ref), idx: null };
   });
+  /* Capturada ANTES de ordenar: a partir daqui a referencia e esta linha, nunca rows[0] —
+     com agrupamento ela deixa de ser a linha 0 da lista ordenada. */
+  const refRow = o.refDes ? rows[0] : null;
+  if (o.group) rows = neodenGroupSort(rows, refRow);
   /* idx = índice de exportação, contado SÓ nos incluídos — é o mesmo número no "#" da
      tabela, no campo "mover após N" e na linha do CSV. Se a exclusão ficasse fora do
      pipeline, tirar 32 PTH deslocaria o corte do painel em 32 posições. */
   let k = 0;
   for (const r of rows) if (!r.excluded) r.idx = k++;
   if (o.refDes){                                       /* -r: relativo à referência */
-    const rx = rows[0].x, ry = rows[0].y;
+    const rx = refRow.x, ry = refRow.y;
     for (const r of rows){ r.x -= rx; r.y -= ry; }
   }
   if (o.rot && isNum(o.rot.angle) && o.rot.angle){     /* -a ox oy ang */

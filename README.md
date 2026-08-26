@@ -131,6 +131,13 @@ Casca única com:
   shift+clique para intervalos, e **Restaurar** para desfazer. Excluído fica riscado na
   lista, some do CSV e não conta no `#` — então o "mover após N" segue certo. A escolha
   é lembrada por projeto; a referência nunca sai (se ela for PTH, a barra avisa).
+  **Agrupar por tipo e tamanho** (ligado por padrão, lembrado por projeto) reordena o CSV
+  para a máquina não trocar de bico a cada peça: junta o que tem a mesma classe e o mesmo
+  package — todos os R 1206, depois os R 0805, depois os C, na ordem R · C · L · D · resto.
+  A classe sai do prefixo do designator, não do nome do footprint, então `RES 1206` e
+  `1206 resistor` caem no mesmo grupo, e `CN1` não vai parar no meio dos capacitores. A
+  referência fica sempre na primeira linha, fora do agrupamento. Medido no acervo:
+  119 → 78 trocas de bico (34% menos); no `PRJ-UR-DI261924`, 41 → 20 em 97 peças.
   Download `<nome>-NEODEN-TopLayer.csv` / `-BottomLayer.csv`,
   Mid X/Y = origem do componente, igual ao Location X/Y do Altium), **Laser** (arte vetorial
   da placa para gravar no LightBurn — detalhes abaixo) e Histórico (linha do tempo a partir de `build-report.txt`/

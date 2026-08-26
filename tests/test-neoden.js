@@ -141,4 +141,86 @@ const bc = Core.neodenTransform(comps, { refDes:'U1' });
 assert.ok(bc.rows.every(r => r.excluded === false));
 bc.rows.forEach((r, i) => assert.strictEqual(r.idx, i));
 
+/* ══ agrupamento por classe+package: menos troca de bico na Neoden ══════════════ */
+
+/* Nomes de footprint do acervo real, deliberadamente inconsistentes: "RES 1206" e
+   "1206 resistor" sao o mesmo componente fisico (96 e 35 ocorrencias em Projects/).
+   Agrupar pela string crua os separaria — por isso a classe sai do designator. */
+const mix = [
+  { ref:'C2', footprint:'CAP 0805',      comment:'', layer:'Top', x:0, y:0, rot:0 },
+  { ref:'R1', footprint:'RES 1206',      comment:'', layer:'Top', x:1, y:0, rot:0 },
+  { ref:'C1', footprint:'CAP 1206',      comment:'', layer:'Top', x:2, y:0, rot:0 },
+  { ref:'R2', footprint:'1206 resistor', comment:'', layer:'Top', x:3, y:0, rot:0 },
+  { ref:'R3', footprint:'RES 0805',      comment:'', layer:'Top', x:4, y:0, rot:0 },
+];
+const g1 = Core.neodenTransform(mix, { group:true });
+assert.strictEqual(g1.error, null);
+assert.deepStrictEqual(g1.rows.map(r => r.des), ['R3', 'R1', 'R2', 'C2', 'C1'],
+  'R antes de C; 0805 antes de 1206 dentro da classe; "RES 1206" e "1206 resistor" no mesmo grupo');
+
+/* A classe e o prefixo de letras INTEIRO do designator: CN e conector, nao capacitor.
+   Com prefixo de uma letra so, o CN1 cai como "C" e parte o bloco dos capacitores em
+   dois — duas trocas de bico onde deveria haver uma. */
+const pref = [
+  { ref:'C1',  footprint:'CAP 1206',       comment:'', layer:'Top', x:0, y:0, rot:0 },
+  { ref:'CN1', footprint:'BARRA 4P',       comment:'', layer:'Top', x:1, y:0, rot:0 },
+  { ref:'C2',  footprint:'CAP EL SMD 4MM', comment:'', layer:'Top', x:2, y:0, rot:0 },
+];
+assert.deepStrictEqual(Core.neodenTransform(pref, { group:true }).rows.map(r => r.des),
+  ['C1', 'C2', 'CN1'], 'o conector nao pode partir o bloco dos capacitores');
+
+/* Dentro do grupo, designator em ordem NATURAL: R2 antes de R10. A ordem alfabetica
+   daria R1, R10, R2 e a lista deixaria de casar com a placa na conferencia. */
+const nat = [
+  { ref:'R10', footprint:'RES 1206', comment:'', layer:'Top', x:0, y:0, rot:0 },
+  { ref:'R2',  footprint:'RES 1206', comment:'', layer:'Top', x:1, y:0, rot:0 },
+  { ref:'R1',  footprint:'RES 1206', comment:'', layer:'Top', x:2, y:0, rot:0 },
+];
+assert.deepStrictEqual(Core.neodenTransform(nat, { group:true }).rows.map(r => r.des),
+  ['R1', 'R2', 'R10'], 'designator em ordem natural dentro do grupo');
+
+/* A referencia fica FIXA na linha 1, fora do agrupamento: e a origem do mapeamento e o
+   primeiro componente que o operador localiza na maquina.
+   REGRESSAO: o relativo lia rows[0] assumindo que a referencia estava ali. Com a
+   ordenacao a referencia sai da posicao 0, e sem tratar isso TODAS as coordenadas
+   passariam a ser relativas a outro componente — sem erro, sem aviso, so a placa errada. */
+const anc = [
+  { ref:'R1', footprint:'RES 1206', comment:'', layer:'Top', x:10, y:10, rot:0 },
+  { ref:'U9', footprint:'SOT-23',   comment:'', layer:'Top', x:50, y:50, rot:0 },
+  { ref:'R2', footprint:'RES 1206', comment:'', layer:'Top', x:20, y:10, rot:0 },
+];
+const g4 = Core.neodenTransform(anc, { group:true, refDes:'U9' });
+const anch = d => g4.rows.find(r => r.des === d);
+assert.deepStrictEqual(g4.rows.map(r => r.des), ['U9', 'R1', 'R2'],
+  'a referencia nao entra no agrupamento — fica na linha 1');
+assert.strictEqual(g4.rows[0].x, 0);
+assert.strictEqual(g4.rows[0].y, 0);
+assert.strictEqual(anch('R1').x, -40, 'relativo sai da REFERENCIA, nao da linha 0 pos-ordenacao');
+assert.strictEqual(anch('R1').y, -40);
+assert.strictEqual(anch('R2').x, -30);
+
+/* Travas de regressao (nao dirigiram codigo novo — o idx ja e atribuido depois da
+   ordenacao — mas prendem a interacao entre agrupar, excluir e mover-apos-N). */
+
+/* o "#" e o corte do painel contam na ordem NOVA, e o excluido continua sem indice */
+const gi = [
+  { ref:'R2', footprint:'RES 1206', comment:'', layer:'Top', x:0, y:0, rot:0, pads:[{ type:'smd' }] },
+  { ref:'J1', footprint:'HDR2X5',   comment:'', layer:'Top', x:1, y:0, rot:0, pads:[{ type:'th'  }] },
+  { ref:'R1', footprint:'RES 1206', comment:'', layer:'Top', x:2, y:0, rot:0, pads:[{ type:'smd' }] },
+];
+const g5 = Core.neodenTransform(gi, { group:true, exclude:['J1'], move:{ dx:100, dy:0, n:0 } });
+const gd = d => g5.rows.find(r => r.des === d);
+assert.deepStrictEqual(g5.rows.map(r => r.des), ['R1', 'R2', 'J1']);
+assert.strictEqual(gd('R1').idx, 0);
+assert.strictEqual(gd('R2').idx, 1);
+assert.strictEqual(gd('J1').idx, null, 'excluido nao recebe indice, mesmo agrupado');
+assert.strictEqual(gd('R1').x, 2,   'idx 0 nao passa do corte');
+assert.strictEqual(gd('R2').x, 100, 'idx 1 passa do corte e move');
+
+/* sem a flag, a ordem e byte-identica a de hoje — e o que protege quem nao ligar a opcao */
+assert.deepStrictEqual(Core.neodenTransform(mix, {}).rows.map(r => r.des),
+  mix.map(c => c.ref), 'sem group:true, ordem original do board.js');
+assert.deepStrictEqual(Core.neodenTransform(mix, { refDes:'C1' }).rows.map(r => r.des),
+  ['C1', 'C2', 'R1', 'R2', 'R3'], 'sem group:true, so a referencia sobe para a linha 1');
+
 console.log('test-neoden OK');
