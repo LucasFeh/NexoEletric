@@ -640,9 +640,11 @@ function montaBom(){
   document.getElementById('vazio').style.display = vis.length ? 'none' : '';
   contas();
 }
-/* Enquadra a camera de um lado nas peças pedidas. Mesma folga do zoomToObj da vista PCB
-   (a peça ocupa ~1/1,6 da tela), para quem usa as duas telas ver a mesma coisa. */
-function enquadraLado(c, lista){
+/* Onde a camera de um lado teria que estar para mostrar as peças pedidas. DEVOLVE o alvo em
+   vez de aplica-lo: entre o de agora e este e que a transicao acontece. Mesma folga do
+   zoomToObj da vista PCB (a peça ocupa ~1/1,6 da tela), para quem usa as duas telas ver a
+   mesma coisa. */
+function alvoDoLado(c, lista){
   var x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, achou = false;
   lista.forEach(function (i){
     var cp = D.comps[i];
@@ -651,11 +653,85 @@ function enquadraLado(c, lista){
     x1 = Math.min(x1, cp.bb[0]); y1 = Math.min(y1, cp.bb[1]);
     x2 = Math.max(x2, cp.bb[2]); y2 = Math.max(y2, cp.bb[3]);
   });
-  if (!achou) return;
+  if (!achou) return null;
   var W = c.cv.clientWidth || 1, H = c.cv.clientHeight || 1;
   var r = Math.max(x2 - x1, y2 - y1) * 1.6 + 2;
-  c.cx = (x1 + x2) / 2; c.cy = (y1 + y2) / 2;
-  c.esc = Math.min(W, H) / Math.max(r, 0.5);
+  return { cx:(x1 + x2) / 2, cy:(y1 + y2) / 2, esc: Math.min(W, H) / Math.max(r, 0.5) };
+}
+function poeCam(c, a){ c.cx = a.cx; c.cy = a.cy; c.esc = a.esc; }
+
+/* ── a transicao ──
+   Curva de Van Wijk & Nuij (2003), a mesma do d3.interpolateZoom. Interpolar centro e zoom
+   em linha reta passaria o mundo inteiro voando de lado na tela; esta curva AFASTA a camera
+   na medida da distancia a percorrer - pulo curto quase nao tira o zoom, pulo longo abre a
+   placa antes de descer no destino. E o que deixa o olho seguir o caminho de D1 ate D2 em
+   vez de perder a referencia num corte seco.
+
+   w e o tamanho do campo de visao em mm (min(largura,altura) da tela dividido pela escala);
+   e nele que a curva trabalha, e nao na escala. */
+var RHO = 1.4142135623730951, RHO2 = 2, RHO4 = 4;
+function caminho(x0, y0, w0, x1, y1, w1){
+  var dx = x1 - x0, dy = y1 - y0, d2 = dx*dx + dy*dy, S, em;
+  if (d2 < 1e-12){
+    /* mesmo ponto: so o zoom muda, e ele anda em passo geometrico */
+    S = Math.abs(Math.log(w1 / w0)) / RHO;
+    em = function (t){ return [x0, y0, w0 * Math.pow(w1 / w0, t)]; };
+  } else {
+    var d1 = Math.sqrt(d2),
+        b0 = (w1*w1 - w0*w0 + RHO4*d2) / (2*w0*RHO2*d1),
+        b1 = (w1*w1 - w0*w0 - RHO4*d2) / (2*w1*RHO2*d1),
+        r0 = Math.log(Math.sqrt(b0*b0 + 1) - b0),
+        r1 = Math.log(Math.sqrt(b1*b1 + 1) - b1);
+    S = (r1 - r0) / RHO;
+    em = function (t){
+      var s = t * S, ch0 = Math.cosh(r0);
+      var u = w0 / (RHO2 * d1) * (ch0 * Math.tanh(RHO*s + r0) - Math.sinh(r0));
+      return [x0 + u*dx, y0 + u*dy, w0 * ch0 / Math.cosh(RHO*s + r0)];
+    };
+  }
+  return { em: em, dur: Math.abs(S) * 420 };
+}
+
+/* Quem pediu para nao animar, nao anima: a preferencia do sistema vale mais que o efeito. */
+function semAnimacao(){
+  try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+  catch (e) { return false; }
+}
+
+var anim = null;   /* o laço compara com este objeto: uma escolha nova assume o comando */
+function animaAte(pares){
+  var partes = [], dur = 0, ok = true;
+  pares.forEach(function (p){
+    var c = p.c, V = Math.min(c.cv.clientWidth || 1, c.cv.clientHeight || 1);
+    var w0 = V / c.esc, w1 = V / p.alvo.esc;
+    if (!(w0 > 0) || !(w1 > 0)){ ok = false; return; }
+    var cam = caminho(c.cx, c.cy, w0, p.alvo.cx, p.alvo.cy, w1);
+    dur = Math.max(dur, cam.dur);
+    partes.push({ c:c, V:V, cam:cam });
+  });
+  var poe = function (t){
+    partes.forEach(function (p){
+      var v = p.cam.em(t);
+      p.c.cx = v[0]; p.c.cy = v[1]; p.c.esc = p.V / v[2];
+    });
+    pinta();
+  };
+  if (!ok || !partes.length || semAnimacao()){
+    pares.forEach(function (p){ poeCam(p.c, p.alvo); });
+    anim = null; pinta(); return;
+  }
+  dur = Math.min(700, Math.max(180, dur));
+  var meu = anim = {}, t0 = null;
+  requestAnimationFrame(function passo(ts){
+    if (meu !== anim) return;                    /* outra escolha assumiu o comando */
+    /* sem relogio de quadro (host que nao passa o timestamp) a transicao acaba no primeiro
+       passo, em vez de girar sem avançar */
+    if (typeof ts !== 'number'){ poe(1); anim = null; return; }
+    if (t0 === null) t0 = ts;
+    var t = Math.min(1, (ts - t0) / dur);
+    poe(t);
+    if (t < 1) requestAnimationFrame(passo); else anim = null;
+  });
 }
 /* Leva a camera ate as peças, e leva a TELA junto: peça do verso poe a vista no verso, peça
    da frente poe na frente. E o lado de MONTAGEM que manda, mesmo num passante que aparece nos
@@ -672,8 +748,16 @@ function enquadra(lista){
   if (quais.length === 1) aplicaLayout(quais[0] === '0' ? 'f' : 'b');
   else if (quais.length > 1 && layoutAtual !== 'lr') aplicaLayout('lr');
   requestAnimationFrame(function (){
-    cams.forEach(function (c){ if (c) enquadraLado(c, lista); });
-    pinta();
+    var pares = [];
+    cams.forEach(function (c){
+      if (!c) return;
+      var alvo = alvoDoLado(c, lista);
+      if (!alvo) return;
+      /* camera escondida nao tem de onde sair: entra ja no lugar, e a transicao seria um
+         desenho que ninguem ve */
+      if (!c.cv.clientWidth) poeCam(c, alvo); else pares.push({ c:c, alvo:alvo });
+    });
+    if (pares.length) animaAte(pares); else pinta();
   });
 }
 
@@ -682,6 +766,11 @@ function enquadra(lista){
    da mao de quem clicou. foco mira num alvo mais estreito que o realce (o designador
    exato que se digitou, dentro de um grupo inteiro aceso). */
 function escolhe(k, refs, rolar, mover, foco){
+  /* qualquer escolha explicita desarma o tiro pendente do filtro. Sem isto, digitar "R" e
+     clicar numa peça dentro dos 350 ms fazia o timer atropelar a escolha um terço de segundo
+     depois - e ainda mover a camera, quebrando a promessa de que clicar no desenho nao mexe
+     na vista. */
+  paraFiltro();
   selKey = k; realce = refs || [];
   var tb = document.getElementById('linhas');
   [].forEach.call(tb.children, function (tr){
@@ -703,6 +792,10 @@ function escolheComp(i, mover){
     escolhe('c' + c.ref, [i], true, mover);
   }
 }
+
+/* o tiro pendente do filtro vive fora do inicia() para que qualquer escolha o desarme */
+var fTimer = 0;
+function paraFiltro(){ if (fTimer) { clearTimeout(fTimer); fTimer = 0; } }
 
 /* O filtro tambem guia: digitar um designador leva ate ele. O designador EXATO ganha do
    primeiro da lista - quem escreve "D1" quer o D1, e nao o grupo em que ele caiu. */
@@ -778,6 +871,7 @@ function liga(c){
      todo pan terminaria como clique e trocaria a peça selecionada no fim do arrasto. */
   var arr = false, px = 0, py = 0, ox = 0, oy = 0;
   c.cv.addEventListener('pointerdown', function (ev){
+    anim = null;                 /* a mao manda: quem pegou a placa interrompe a viagem */
     arr = true; px = ox = ev.clientX; py = oy = ev.clientY;
     c.cv.setPointerCapture(ev.pointerId);
   });
@@ -798,6 +892,7 @@ function liga(c){
   });
   c.cv.addEventListener('wheel', function (ev){
     ev.preventDefault();
+    anim = null;
     var r = c.cv.getBoundingClientRect();
     var antes = c.mundo(ev.clientX - r.left, ev.clientY - r.top);
     /* deltaMode: 0 = pixel (Chrome), 1 = linha (Firefox, ~3 por entalhe), 2 = pagina.
@@ -905,18 +1000,22 @@ function inicia(){
     lado = lado === 'dir' ? 'esq' : 'dir';
     aplicaLateral(); salvaUI(); relayout();
   };
-  var fTimer = 0, fCampo = document.getElementById('filtro');
+  var fCampo = document.getElementById('filtro');
   fCampo.oninput = function (e){
     filtro = e.target.value; montaBom();
     /* espera a digitacao parar: mirar a cada tecla faria a placa pular de "D" para "D1" */
-    clearTimeout(fTimer);
-    fTimer = setTimeout(focoDoFiltro, 350);
+    paraFiltro();
+    fTimer = setTimeout(function (){ fTimer = 0; focoDoFiltro(); }, 350);
   };
   fCampo.onkeydown = function (ev){
     if (ev.key !== 'Enter') return;
-    clearTimeout(fTimer);
+    paraFiltro();
     focoDoFiltro();
   };
+  /* a caixa tem que mostrar o estado RESTAURADO, e nao o que estava no HTML: gerada
+     desligada e ligada na bancada, ela reabria desmarcada com a guiada ligada - e o primeiro
+     clique so remarcava a caixa, sem desligar nada */
+  document.getElementById('cbGuiada').checked = guiada;
   document.getElementById('cbGuiada').onclick = function (){
     guiada = !!document.getElementById('cbGuiada').checked;
     salvaUI();

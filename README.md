@@ -454,6 +454,14 @@ lado de **montagem** que manda, mesmo num passante que aparece nos dois — é d
 ela vai ser soldada. Só quando a escolha mistura as duas faces é que as duas ficam na tela,
 porque aí não há uma face certa.
 
+A troca é **animada**: de uma peça para outra a câmera **afasta, viaja e volta a aproximar**.
+A curva é a de Van Wijk & Nuij (a mesma do `d3.interpolateZoom`), e ela afasta **na medida da
+distância**: entre vizinhas o campo de visão mal sobe (6 → 7,2 → 6 mm), e de um canto ao outro
+da placa ele abre até 161 mm antes de descer no destino — é o que deixa o olho seguir o caminho
+em vez de perder a referência num corte seco. Dura de 180 a 700 ms, conforme o percurso.
+Pegar a placa na mão (arrastar ou usar a roda) interrompe a viagem, e quem tem
+`prefers-reduced-motion` no sistema recebe o salto direto, sem animação.
+
 Clicar **no desenho** nunca move a câmera, mesmo com a visão guiada ligada: quem clicou ali já
 está olhando para o lugar certo, e dar zoom seria arrancar a vista da mão dele.
 

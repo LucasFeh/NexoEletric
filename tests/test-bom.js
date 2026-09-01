@@ -33,6 +33,8 @@ const B = board({
       { id:'p3', name:'1', layer:'Multi', type:'th', shape:'circle', x:5, y:15, w:1.8, h:1.8,
         rot:0, drill:0.9, drillshape:'circle' },
     ]),
+    /* no canto oposto da mesma face: e o par distante que a transicao guiada percorre */
+    comp('C1', 'Top', '100n', 'CAP 0805', 17, 17),
   ],
   silk: [{ id:'s1', layer:'TopOverlay', kind:'line', x1:1, y1:1, x2:9, y2:1, w:0.2 },
          { id:'s2', layer:'BottomOverlay', kind:'arc', cx:5, cy:15, r:1, sa:0, ea:180, w:0.2 }],
@@ -56,13 +58,13 @@ assert.strictEqual(Bom.ladoDe('Mid1'), null);
 assert.strictEqual(m.tracks.length, 1, 'a trilha de camada interna nao entra');
 
 /* ═══════════════ agrupamento ═══════════════ */
-assert.strictEqual(m.stats.comps, 3);
-assert.strictEqual(m.stats.frente, 2);
+assert.strictEqual(m.stats.comps, 4);
+assert.strictEqual(m.stats.frente, 3);
 assert.strictEqual(m.stats.verso, 1);
-assert.strictEqual(m.groups.length, 2, '10k/RES 0805 junta R1 e R10; 1k e outro grupo');
+assert.strictEqual(m.groups.length, 3, '10k/RES 0805 junta R1 e R10; 1k e 100n sao outros');
 
 /* R2 antes de R10: ordem natural, senao a bancada procura na sequencia errada */
-assert.deepStrictEqual(m.comps.map(c => c.ref), ['R1', 'R2', 'R10']);
+assert.deepStrictEqual(m.comps.map(c => c.ref), ['C1', 'R1', 'R2', 'R10']);
 const g10k = m.groups.find(g => g.val === '10k');
 assert.strictEqual(g10k.qty, 2);
 assert.deepStrictEqual(g10k.refs.map(i => m.comps[i].ref), ['R1', 'R10']);
@@ -282,7 +284,10 @@ function montaAmbiente(){
     set textContent(v){ this._txt = v; if (v === '') this.children.length = 0; },
     style:{ display:'', props:{}, setProperty(k, v){ this.props[k] = v; } },
     dataset:{}, children:[], width:400, height:300,
-    clientWidth:400, clientHeight:300,
+    /* canvas dentro de pai display:none mede zero no navegador - sem isso o teste desenharia
+       a face escondida e mediria a câmera errada */
+    get clientWidth(){ return (this._pai && this._pai.classes.has('oculta')) ? 0 : 400; },
+    get clientHeight(){ return (this._pai && this._pai.classes.has('oculta')) ? 0 : 300; },
     classes:new Set(),
     get classList(){
       const self = this;
@@ -349,10 +354,13 @@ function montaAmbiente(){
   /* setTimeout guardado, e nao real: o filtro so mira depois que a digitacao para, e o
      teste precisa decidir a hora de "parar" */
   const pendentes = [];
+  /* relógio de quadro: sem ele a transição guiada terminaria no primeiro passo e o teste
+     nunca veria o caminho - que é justamente o que precisa ser conferido */
+  let relogio = 0;
   const janela = {
     devicePixelRatio: 1,
     addEventListener(){},
-    requestAnimationFrame(fn){ fn(); },
+    requestAnimationFrame(fn){ relogio += 16; fn(relogio); },
     confirm(){ return true; },
     setTimeout(fn){ pendentes.push(fn); return pendentes.length; },
     clearTimeout(id){ if (id) pendentes[id - 1] = null; },
@@ -538,19 +546,53 @@ function montaAmbiente(){
   linhaDe('R2').onclick();
   assert.ok(oculto('cv0') && !oculto('cv1'), 'peça do verso -> só o verso na tela');
 
-  /* ── o ícone único das faces ── */
+  /* ── a transição ──
+     Ir de uma peça a outra tem que AFASTAR no caminho: o campo de visão cresce no meio e volta
+     a fechar no destino. Em escala, isso é o zoom passar por um mínimo menor que as duas
+     pontas. É o que deixa o olho seguir de R1 até C1 em vez de perder a referência. */
+  const zoomFinal = () => Math.abs(amb.escalas[amb.escalas.length - 1]);
+  linhaDe('R1').onclick();                       /* grupo 10k, no canto de baixo à esquerda */
+  const zoomR1 = zoomFinal();
+  amb.escalas.length = 0;
+  linhaDe('C1').onclick();                       /* 100n, no canto oposto da mesma face */
+  const zoomC1 = zoomFinal();
+  const minimo = amb.escalas.reduce((m, v) => Math.min(m, Math.abs(v)), Infinity);
+  assert.ok(amb.escalas.length > 8,
+            'a transição desenha vários quadros, e não um salto: ' + amb.escalas.length);
+  assert.ok(minimo < Math.min(zoomR1, zoomC1) * 0.8,
+            'tem que afastar no caminho: mínimo ' + minimo.toFixed(1) +
+            ' contra pontas ' + zoomR1.toFixed(1) + '/' + zoomC1.toFixed(1));
+  /* e termina exatamente no alvo, sem sobra */
+  const alvoC1 = 300 / (2 * 1.6 + 2);            /* bbox de 2 mm, mesma folga do zoomToObj */
+  assert.ok(Math.abs(zoomC1 - alvoC1) < 0.01,
+            'a transição para no enquadramento certo: ' + zoomC1.toFixed(2) + ' x ' + alvoC1.toFixed(2));
+
+  /* pegar a placa na mão interrompe a viagem */
+  linhaDe('R1').onclick();
+  amb.escalas.length = 0;
+  (amb.elems.cv0.ouvintes.pointerdown || []).forEach(fn =>
+    fn({ clientX:10, clientY:10, pointerId:1, preventDefault(){} }));
+  const depoisDoToque = amb.escalas.length;
+  janela.requestAnimationFrame(() => {});       /* deixa passar um quadro */
+  assert.strictEqual(amb.escalas.length, depoisDoToque,
+                     'a transição para quando a mão pega a placa');
+
+  /* ── o ícone único das faces ──
+     Por invariante, e nao por estado absoluto: a ordem dos blocos acima muda qual face esta
+     na tela, e um teste preso a ela quebra por motivo errado. */
   const bf = amb.elems.btFace;
-  assert.ok(bf.classList.contains('verso'), 'no verso, o ícone mostra o verso');
-  bf.onclick();
-  assert.ok(!oculto('cv0') && oculto('cv1'), 'o ícone troca para a frente');
-  assert.ok(!bf.classList.contains('verso'), 'e o desenho dele acompanha');
-  bf.onclick();
-  assert.ok(oculto('cv0') && !oculto('cv1'), 'e troca de volta');
-  /* de "as duas" ele volta para a última face usada, e nao para a frente sempre */
+  const noVerso = () => oculto('cv0') && !oculto('cv1');
+  const naFrente = () => !oculto('cv0') && oculto('cv1');
   amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'lr').onclick();
   assert.ok(!oculto('cv0') && !oculto('cv1'), 'as duas na tela');
   bf.onclick();
-  assert.ok(oculto('cv0') && !oculto('cv1'), 'volta para o verso, que foi a última face');
+  assert.ok(noVerso() || naFrente(), 'de "as duas", o ícone leva a uma face só');
+  assert.strictEqual(bf.classList.contains('verso'), noVerso(),
+                     'o desenho do ícone mostra a face que está na tela');
+  const eraVerso = noVerso();
+  bf.onclick();
+  assert.strictEqual(noVerso(), !eraVerso, 'clicar troca para a outra face');
+  assert.strictEqual(bf.classList.contains('verso'), noVerso(), 'e o desenho acompanha');
   amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'lr').onclick();
 
   /* o filtro também guia: "R10" e um designador exato */
@@ -566,6 +608,20 @@ function montaAmbiente(){
   amb.escalas.length = 0;
   amb.elems.filtro.onkeydown({ key:'Enter' });
   assert.ok(amb.escalas.length, 'Enter mira na hora');
+  /* escolher a mão DEPOIS de digitar desarma o tiro pendente: sem isso, digitar "R" e clicar
+     numa peça fazia o filtro atropelar a escolha 350 ms depois, e ainda mexer na câmera */
+  amb.elems.filtro.oninput({ target:{ value:'R' } });
+  linhaDe('R2').onclick();
+  const selDepois = amb.elems.linhas.children
+    .filter(tr => tr.getAttribute('aria-selected') === 'true').map(tr => tr.dataset.k);
+  amb.escalas.length = 0;
+  correTimers();
+  assert.strictEqual(amb.escalas.length, 0, 'o tiro do filtro não pode disparar depois da escolha');
+  assert.deepStrictEqual(amb.elems.linhas.children
+    .filter(tr => tr.getAttribute('aria-selected') === 'true').map(tr => tr.dataset.k), selDepois,
+    'e não pode trocar a linha escolhida');
+  amb.elems.filtro.oninput({ target:{ value:'' } });
+
   /* e com a guiada desligada o filtro só filtra */
   cbG.checked = false; cbG.onclick();
   amb.elems.filtro.oninput({ target:{ value:'R1' } });
@@ -574,6 +630,35 @@ function montaAmbiente(){
   assert.strictEqual(amb.escalas.length, 0, 'desligada, o filtro não mexe na câmera');
   amb.elems.filtro.oninput({ target:{ value:'' } });
   cbG.checked = true; cbG.onclick();
+
+  /* ── reabrir o arquivo com a guiada LIGADA na sessão anterior ──
+     A caixa da gaveta tem que abrir marcada. Antes ela vinha do HTML (gerado desligado) e
+     mentia sobre o estado real, e o primeiro clique só remarcava a caixa sem desligar nada. */
+  {
+    const amb2 = montaAmbiente();
+    const cofre = { 'altiumbom.PlacaTeste.ui': JSON.stringify({ lado:'dir', w:0, guiada:true }) };
+    const janela2 = Object.assign({}, janela, {
+      localStorage: { getItem: k => (k in cofre ? cofre[k] : null),
+                      setItem: (k, v) => { cofre[k] = v; } },
+    });
+    const r2 = rodar(amb2.doc, janela2, janela2.localStorage, janela2.requestAnimationFrame,
+                     janela2.confirm, 1, janela2.setTimeout, janela2.clearTimeout);
+    r2.boot();
+    assert.strictEqual(amb2.elems.cbGuiada.checked, true,
+                       'a caixa abre marcada quando a sessão anterior deixou a guiada ligada');
+    /* e um clique só desliga de verdade: escolher na lista deixa de mover a câmera */
+    amb2.elems.cbGuiada.checked = false;
+    amb2.elems.cbGuiada.onclick();
+    const linha2 = ref => amb2.elems.linhas.children.find(tr =>
+      tr.children[5] && tr.children[5].textContent.indexOf(ref) >= 0);
+    amb2.escalas.length = 0;
+    linha2('R1').onclick();
+    const antes2 = amb2.escalas.slice();
+    amb2.escalas.length = 0;
+    linha2('C1').onclick();
+    assert.deepStrictEqual(amb2.escalas, antes2,
+                           'um clique na caixa desliga a guiada de verdade');
+  }
 
   /* no layout "so a lista" nao ha o que dividir */
   amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'bom').onclick();
