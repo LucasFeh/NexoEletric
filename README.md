@@ -427,8 +427,7 @@ O que a página gerada faz:
 |---|---|
 | **ícone das faces** | **um só** para frente e verso: clicar troca de uma para a outra, e o desenho mostra a que está na tela — dois botões para um par que se exclui gastavam o dobro da barra para dizer a mesma coisa |
 | **as duas** e **só a lista** | os outros dois layouts. O verso sai espelhado em X, que é a placa virada na mão e não vista através |
-| **Pads · Silk · Refs** | as três que se mexem o tempo todo ficam na barra; **Refs** separa o designador do resto da serigrafia |
-| **ícone de ajustes** | abre uma gaveta lateral com **Trilhas**, **Planos**, **Furos**, a **visão guiada** e a escolha entre **Agrupado** e **Por peça** — o que se acerta uma vez e não se mexe mais sai da barra |
+| **ícone de ajustes** | abre a gaveta lateral, onde mora **todo o resto**: as camadas (Pads, Serigrafia, Designadores, Trilhas, Planos, Furos), a **visão guiada**, a escolha entre **Agrupado** e **Por peça** e o **tema escuro** |
 | **Agrupado / Por peça** | uma linha por compra, ou uma linha por designador — que é como se confere a placa peça a peça |
 | **clique na linha** | acende todas as peças daquele grupo, nos dois lados |
 | **clique na peça** | seleciona a linha e rola até ela |
@@ -471,6 +470,11 @@ gaveta da própria página (para ligar e desligar na bancada, gravado no navegad
 O **visto** é gravado pela identidade do grupo (valor + footprint), e não pelo índice dele: pelo
 índice, regerar o BOM depois de acrescentar um componente reordenaria a lista e os vistos
 passariam a apontar para outra peça, sem nada na tela dizendo que trocaram de dono.
+
+Na barra de cima fica **só o que muda a vista** — cinco botões: as três opções de layout, o lado
+da lista e a gaveta. Ajuste é ajuste: acerta-se uma vez e não se mexe mais, então não precisa
+ocupar a barra o dia inteiro. Na gaveta as camadas ficam todas na mesma seção e com o mesmo
+gesto — caixa de marcar.
 
 O agrupamento é por **comment + footprint**, e **não** por lado: quem compra quer uma linha por
 peça, e a etiqueta de lado na coluna de designadores já diz onde cada uma cai. A ordem dos

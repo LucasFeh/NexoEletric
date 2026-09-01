@@ -326,13 +326,8 @@ function montaAmbiente(){
     querySelectorAll(sel){
       if (sel === '[data-ver]')
         return (elems.__ver = elems.__ver || ['pads','silk','refs','tracks','regions','drills']
-          .map(k => {
-            const e = mk('b');
-            e.dataset.ver = k;
-            /* na pagina real, trilhas/planos/furos sao CAIXAS na gaveta e o resto e botao */
-            if (k === 'tracks' || k === 'regions' || k === 'drills') e.type = 'checkbox';
-            return e;
-          }));
+          /* todas as camadas moram na gaveta agora, e todas sao caixa de marcar */
+          .map(k => { const e = mk('b'); e.dataset.ver = k; e.type = 'checkbox'; return e; }));
       if (sel === '[data-layout]')
         return (elems.__layout = elems.__layout ||
                 ['lr','bom'].map(k => { const e = mk('b'); e.dataset.layout = k; return e; }));
@@ -706,12 +701,18 @@ function montaAmbiente(){
             'nao pode sobrar bot\u00e3o separado de frente/verso');
   /* trilhas, planos, furos e o modo da lista sairam da barra e foram para a gaveta */
   const barra = hn.match(/<div class="tools">[\s\S]*?<\/div><\/header>/)[0];
-  ['tracks','regions','drills'].forEach(k =>
+  const CAMADAS = ['pads','silk','refs','tracks','regions','drills'];
+  CAMADAS.forEach(k =>
     assert.ok(barra.indexOf('data-ver="' + k + '"') < 0, k + ' nao pode estar na barra de cima'));
   assert.ok(barra.indexOf('data-modo=') < 0, 'o modo da lista saiu da barra');
+  assert.ok(barra.indexOf('id="escuro"') < 0, 'o tema saiu da barra');
+  /* sobra na barra so o que muda a VISTA: as tres de layout, o lado da lista e a gaveta */
+  assert.strictEqual((barra.match(/<button/g) || []).length, 5,
+                     'a barra tem que ficar com cinco bot\u00f5es: ' + (barra.match(/<button/g) || []).length);
   const gaveta = hn.match(/<aside id="gaveta">[\s\S]*?<\/aside>/)[0];
-  ['tracks','regions','drills'].forEach(k =>
+  CAMADAS.forEach(k =>
     assert.ok(gaveta.includes('type="checkbox" data-ver="' + k + '"'), k + ' tem que ser caixa na gaveta'));
+  assert.ok(gaveta.includes('id="escuro"'), 'o tema tem que estar na gaveta');
   assert.ok(gaveta.includes('data-modo="grupo"') && gaveta.includes('data-modo="peca"'));
   /* e o modal proprio, com Sim e Nao */
   assert.ok(hn.includes('id="modalSim"') && hn.includes('id="modalNao"'), 'o modal tem Sim e N\u00e3o');

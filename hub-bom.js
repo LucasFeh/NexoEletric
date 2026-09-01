@@ -1021,11 +1021,8 @@ function inicia(){
     salvaUI();
     if (guiada) enquadra(realce);   /* liga e ja mostra onde esta o que estava selecionado */
   };
-  document.getElementById('escuro').onclick = function (){
-    document.body.classList.toggle('escuro');
-    document.getElementById('escuro').setAttribute('aria-pressed',
-      String(document.body.classList.contains('escuro')));
-  };
+  var cbEscuro = document.getElementById('escuro');
+  cbEscuro.onclick = function (){ document.body.classList.toggle('escuro', !!cbEscuro.checked); };
   document.getElementById('limpar').onclick = function (){
     pergunta('Limpar vistos', 'Isso desmarca tudo que j\u00e1 foi montado nesta placa. Continuar?',
              function (){ feitos = {}; salvaFeitos(); montaBom(); });
@@ -1093,10 +1090,6 @@ function html(m, meta){
   L.push(icone('data-layout', 'lr', 'Frente e verso', SVG.ambos, o.layout === 'lr'));
   L.push(icone('data-layout', 'bom', 'Só a lista', SVG.lista, o.layout === 'bom'));
   L.push('<span class="sep"></span>');
-  L.push(botao('data-ver', 'pads', 'Pads', o.pads));
-  L.push(botao('data-ver', 'silk', 'Silk', o.silk));
-  L.push(botao('data-ver', 'refs', 'Refs', o.refs));
-  L.push('<span class="sep"></span>');
   /* icone de layout: dois paineis, o estreito e a lista. Clicar troca o lado, e o proprio
      icone espelha junto - assim ele mostra o que vai acontecer, e nao um rotulo a decorar */
   L.push('<button class="t ic" id="ladoLista" title="trocar o lado da lista">' +
@@ -1104,7 +1097,6 @@ function html(m, meta){
          '<rect x="0.6" y="0.6" width="12.8" height="12.8" rx="2"/>' +
          '<rect class="f" x="15.4" y="0.6" width="5" height="12.8" rx="1.5"/>' +
          '</svg></button>');
-  L.push('<button class="t" id="escuro" aria-pressed="' + (o.dark ? 'true' : 'false') + '">Escuro</button>');
   L.push('<button class="t ic" id="btGaveta" title="mais opções">' + SVG.ajustes + '</button>');
   L.push('</div></header>');
   L.push('<main><div id="placas">');
@@ -1130,6 +1122,9 @@ function html(m, meta){
          '<div class="gv-cab"><h2>Opções</h2>' +
          '<button class="t" id="gavetaFecha" title="fechar">✕</button></div>' +
          '<div class="gv-tit">camadas</div>' +
+         check('pads', 'Pads', o.pads) +
+         check('silk', 'Serigrafia', o.silk) +
+         check('refs', 'Designadores', o.refs) +
          check('tracks', 'Trilhas', o.tracks) +
          check('regions', 'Planos', o.regions) +
          check('drills', 'Furos', o.drills) +
@@ -1142,7 +1137,11 @@ function html(m, meta){
          '<div class="gv-seg">' +
          botao('data-modo', 'grupo', 'Agrupado', true) +
          botao('data-modo', 'peca', 'Por peça', false) +
-         '</div></aside>');
+         '</div>' +
+         '<div class="gv-tit">aparência</div>' +
+         '<label class="gv-item"><input type="checkbox" id="escuro"' +
+         (o.dark ? ' checked' : '') + '>Tema escuro</label>' +
+         '</aside>');
 
   L.push('<div id="modalBg"><div class="modal" role="dialog" aria-modal="true">' +
          '<h2 id="modalTit"></h2><p id="modalTxt"></p>' +
