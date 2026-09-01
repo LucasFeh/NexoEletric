@@ -289,6 +289,21 @@ O SVG continua levando os parâmetros em `data-lb-mode` e `data-lb-cut`, para co
 
 - **Lado** Top/Bottom. Trocar para Bottom já sugere **espelhar** (o cobre precisa gravar do
   lado certo), e o checkbox continua editável — máquina que grava por baixo do vidro não quer.
+- **As duas faces no mesmo arquivo** — o `.lbrn2` (e o SVG) sai com Top **e** Bottom lado a
+  lado: a face aberta na aba primeiro, a outra ao lado, separada pela margem. Assim o operador
+  grava uma face, vira a placa e grava a outra **sem trocar de arquivo**. A prévia mostra as
+  duas, na posição em que vão cair no LightBurn.
+
+  Cada face leva **as suas próprias camadas**: a segunda entra nos `Cxx` seguintes aos da
+  primeira e ganha o nome da face no fim (`furos · Bottom`). É de propósito — se as duas
+  dividissem o mesmo `Cxx`, mandar gravar “furos” dispararia nas **duas posições de uma vez**,
+  e a face que ainda não foi virada sairia gravada errada. Com a lista padrão são 18 camadas
+  (C00…C17); passando de 15 por face não cabe nos 30 `Cxx` do LightBurn, e a aba avisa e
+  bloqueia o download.
+
+  O **espelho** é o que separa as duas: a face aberta sai exatamente como está na prévia e a
+  outra sai espelhada em relação a ela — o par certo (uma espelhada, uma não), respeitando o
+  que você marcou.
 - **Inverter (negativo)** — **ligado por padrão**; queima tudo que **não** é cobre; é o modo de placa pintada.
 - **Furos** — *furo real* (padrão), *marca de centro* (ø 0,3 mm: uma covinha que centra a broca
   sem comer o anel) ou *pad cheio*. No *furo real* a forma é fiel ao `board.js`: `drillshape`
@@ -303,7 +318,8 @@ O SVG continua levando os parâmetros em `data-lb-mode` e `data-lb-cut`, para co
   sozinho, com aviso, em vez de estourar a memória.
 
 As escolhas ficam por projeto em `localStorage`. Nome do arquivo:
-`<projeto>-LASER-<lado>[-negativo][-espelhado].svg`.
+`<projeto>-LASER-<lado>[-negativo][-espelhado].svg` — com as duas faces o lado vira
+`Top+Bottom` e o sufixo de espelho sai, porque aí ele é por face.
 
 **Avisos que a aba dá**
 
@@ -311,6 +327,8 @@ As escolhas ficam por projeto em `localStorage`. Nome do arquivo:
   ApplyChanges e ExportPcb antes de gravar.
 - **negativo sem grupo de cobre** — geraria um retângulo cheio (geometria perfeitamente
   válida) e o laser queimaria a placa inteira. A aba bloqueia o download.
+- **as duas faces não cabem** — a lista passa de 15 camadas por face e não há `Cxx` para
+  dar um a cada uma. A aba bloqueia o download.
 
 Contorno com canto em arco é achatado e encadeado junto com as linhas — placa de canto
 arredondado recorta certo, inclusive no negativo.

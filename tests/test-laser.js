@@ -699,6 +699,71 @@ assert.ok(approx((Math.min(...xs2) + Math.max(...xs2))/2, 18, 0.06), 'espelhado:
 assert.strictEqual(Laser.filename('TCMS_Reader', { side:'Top' }, 'lbrn2'),
                    'TCMS_Reader-LASER-Top.lbrn2');
 
+/* ═══════════════ as duas faces no mesmo arquivo ═══════════════
+   A bancada grava um lado, vira a placa e grava o outro - sem trocar de arquivo. */
+
+const bDois = board({ tracks:[
+  { id:'t1', layer:'Top',    x1:2, y1:2,  x2:8,  y2:2,  w:0.5 },
+  { id:'t2', layer:'Bottom', x1:2, y1:14, x2:16, y2:14, w:0.8 },
+] });
+const DOIS = [ { src:'fill',  ci:0, name:'cobre', cut:{ type:'Scan' } },
+               { src:'board', ci:2, name:'borda', cut:{ type:'Cut'  } } ];
+const oDois = { side:'Top', mirror:false, bothSides:true, res:0.1, margin:2, layers:DOIS };
+const fs2 = Laser.faces(bDois, oDois);
+
+assert.deepStrictEqual(fs2.map(f => f.side), ['Top', 'Bottom'], 'a face aberta vem primeiro');
+/* a face aberta fica onde estava; a outra entra ao lado, separada pela margem */
+assert.strictEqual(fs2[0].dx, 0);
+assert.ok(approx(fs2[1].dx, fs2[0].art.size.w + 2), 'a segunda face entra depois da margem');
+
+/* o espelho e o que separa as duas: a aberta sai como esta na previa, a outra ao contrario */
+assert.strictEqual(fs2[0].art.opts.mirror, false);
+assert.strictEqual(fs2[1].art.opts.mirror, true);
+const fsB = Laser.faces(bDois, Object.assign({}, oDois, { side:'Bottom', mirror:true }));
+assert.deepStrictEqual(fsB.map(f => f.art.opts.mirror), [true, false],
+                       'a escolha do usuario vale para a face aberta, e a outra inverte');
+
+/* Cxx PROPRIO por face: dividir o indice faria "gravar furos" disparar nas DUAS posicoes
+   de uma vez, e a face que ainda nao foi virada sairia gravada errada */
+assert.deepStrictEqual(fs2[0].layers.map(l => l.ci), [0, 2]);
+assert.deepStrictEqual(fs2[1].layers.map(l => l.ci), [3, 5], 'a segunda face entra depois');
+assert.strictEqual(fs2[1].layers[0].name, 'cobre \u00B7 Bottom', 'o nome diz de que face e');
+assert.strictEqual(new Set(fs2.flatMap(f => f.layers.map(l => l.ci))).size, 4, 'ci sem repetido');
+
+const lb2 = Laser.lbrnFaces(fs2);
+assert.strictEqual((lb2.match(/<CutSetting /g) || []).length, 4, 'duas camadas por face');
+assert.ok(/<index Value="5"\/>/.test(lb2), 'a borda da segunda face vai para a C05');
+assert.ok(/<Shape Type="Path" CutIndex="5">/.test(lb2), 'e a geometria dela vai junto');
+/* uma face nao pode cair em cima da outra */
+const xDois = [...lb2.matchAll(/V(-?[\d.]+) (-?[\d.]+)c/g)].map(m => +m[1]);
+assert.ok(Math.max(...xDois) > fs2[0].art.size.w, 'a segunda face sai deslocada em X');
+const sv2 = Laser.svgFaces(fs2);
+assert.ok(approx(+sv2.match(/width="([\d.]+)mm"/)[1],
+                 fs2[1].dx + fs2[1].art.size.w), 'o SVG cresce para caber as duas');
+
+/* uma face so continua saindo pelo mesmo caminho - e igual ao que ja saia */
+const oUma = Object.assign({}, oDois, { bothSides:false });
+const fs1 = Laser.faces(bDois, oUma), aUma = Laser.art(bDois, oUma);
+assert.strictEqual(fs1.length, 1);
+assert.strictEqual(Laser.lbrnFaces(fs1), Laser.lbrn(aUma, aUma.opts));
+assert.strictEqual(Laser.svgFaces(fs1), Laser.svg(aUma, aUma.opts));
+
+/* nome do arquivo: o que ele tem que dizer e que as duas estao la dentro */
+assert.strictEqual(Laser.filename('TCMS_Reader', { side:'Bottom', bothSides:true }, 'lbrn2'),
+                   'TCMS_Reader-LASER-Bottom+Top.lbrn2');
+
+/* a lista padrao (C00..C08) cabe duas vezes; 16 camadas por face nao cabem nos 30 Cxx */
+assert.deepStrictEqual(Laser.checkOpts({ bothSides:true }), []);
+const muitas = [];
+for (let i = 0; i < 16; i++) muitas.push({ src:'fill', ci:i, name:'x' + i });
+assert.ok(/32 camadas/.test(Laser.checkOpts({ bothSides:true, layers:muitas })[0] || ''),
+          'sem Cxx para as duas faces, a aba tem que bloquear');
+
+/* ci ocupado = MAIOR indice + 1: linha repetida ou buraco no meio nao pode embaralhar
+   a ordem de execucao da segunda face */
+assert.strictEqual(Laser.ciSpan([{ ci:0 }, { ci:0 }, { ci:7 }]), 8);
+
+
 /* ── o padrao da BANCADA nao e o da biblioteca ──
    defaults() e a arte positiva - geometria crua, e a linha de base destes testes. A aba abre
    em negativo, que e o modo de placa pintada. Fora o `invert`, sao a mesma coisa. */

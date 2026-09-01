@@ -166,6 +166,8 @@ const CHAIN_TOL = 1e-3;    /* mm - mesma tolerancia do resto do projeto */
 function defaults(){
   return {
     side:'Top', invert:false, mirror:false,
+    /* as duas faces no MESMO arquivo: a aberta na aba primeiro, a outra ao lado */
+    bothSides:false,
     /* tracks cobre trilhas + arcos + regioes/planos: e tudo cobre roteado */
     show:{ tracks:true, pads:true, vias:true, silk:false, texts:false, outline:true },
     /* padrao = furo real: e o que parece a placa. A marca de centro continua disponivel
@@ -791,9 +793,11 @@ function art(board, opts){
 /* board (mm, Y p/ cima) -> SVG (mm, Y p/ baixo, origem no canto da area util).
    Exportado porque a previa da aba usa EXATAMENTE esta transformacao: o que se ve
    na tela e o que sai no arquivo, nao uma aproximacao. */
-function place(art, opts){
-  const o = norm(opts), bb = art.bbox;
-  return (x, y) => [ o.mirror ? bb.x2 - x : x - bb.x1, bb.y2 - y ];
+/* `dx` desloca a face em X: e o que poe as duas faces lado a lado no mesmo arquivo sem
+   uma cair em cima da outra. Com uma face so ele e zero, e nada muda. */
+function place(art, opts, dx){
+  const o = norm(opts), bb = art.bbox, ox = dx || 0;
+  return (x, y) => [ ox + (o.mirror ? bb.x2 - x : x - bb.x1), bb.y2 - y ];
 }
 
 const fmt = v => {
@@ -850,21 +854,30 @@ function drillSvg(prims, T, tol, hex){
   return out;
 }
 
-function svg(art, opts){
-  const o = norm(opts), T = place(art, o), s = art.size;
-  const layers = (o.layers && o.layers.length) ? o.layers : defaultLayers();
-  const L = [];
-  L.push('<svg xmlns="http://www.w3.org/2000/svg" version="1.1" ' +
-         'width="' + fmt(s.w) + 'mm" height="' + fmt(s.h) + 'mm" ' +
-         'viewBox="0 0 ' + fmt(s.w) + ' ' + fmt(s.h) + '">');
-  L.push('<!-- AltiumPCBMirror - arte para LightBurn. 1 unidade = 1 mm.' +
-         ' lado=' + o.side +
-         ' arte=' + (o.invert ? 'negativo' : 'positivo') +
-         ' espelho=' + (o.mirror ? 'sim' : 'nao') +
-         ' furo=' + o.holes + (o.holes === 'mark' ? '(' + o.markD + 'mm)' : '') +
-         ' expand=' + o.expand + 'mm res=' + o.res + 'mm/px -->');
-  L.push('<!-- camadas: ' + layers.map(l => ciName(l.ci) + '=' + (l.name || l.src)).join(' | ') + ' -->');
+/* Abertura do arquivo. O width em mm tem que bater com o viewBox - e o que garante a
+   escala 1:1 na importacao. */
+const svgOpen = (w, h) =>
+  '<svg xmlns="http://www.w3.org/2000/svg" version="1.1" ' +
+  'width="' + fmt(w) + 'mm" height="' + fmt(h) + 'mm" ' +
+  'viewBox="0 0 ' + fmt(w) + ' ' + fmt(h) + '">';
 
+/* Cabecalho de UMA face - sai uma vez por face, porque lado, espelho e negativo sao de
+   cada uma, e nao do arquivo. */
+const svgHead = o =>
+  '<!-- AltiumPCBMirror - arte para LightBurn. 1 unidade = 1 mm.' +
+  ' lado=' + o.side +
+  ' arte=' + (o.invert ? 'negativo' : 'positivo') +
+  ' espelho=' + (o.mirror ? 'sim' : 'nao') +
+  ' furo=' + o.holes + (o.holes === 'mark' ? '(' + o.markD + 'mm)' : '') +
+  ' expand=' + o.expand + 'mm res=' + o.res + 'mm/px -->';
+
+const svgLayerList = layers =>
+  '<!-- camadas: ' + layers.map(l => ciName(l.ci) + '=' + (l.name || l.src)).join(' | ') + ' -->';
+
+/* Os grupos de UMA face. Fora da montagem do arquivo porque o arquivo das duas faces e
+   isto duas vezes, com outra transformacao e outras camadas. */
+function svgGroups(art, layers, T, o){
+  const L = [];
   for (const lay of layers){
     const g = geomFor(art, lay.src);
     if (geomEmpty(g)) continue;                    /* camada sem geometria nao vira grupo */
@@ -891,10 +904,31 @@ function svg(art, opts){
       body.push(drillSvg(g.prims, T, o.res/4, hex).join(''));
     L.push(head + body.join('') + '</g>');
   }
+  return L;
+}
 
+/* O arquivo, com as faces em fila. Uma face so e a fila de tamanho 1 - `svg` passa por
+   aqui tambem, para nao existir um emissor para cada caso. */
+function svgFaces(fs){
+  const s = facesSize(fs), L = [svgOpen(s.w, s.h)];
+  for (const f of fs){
+    L.push(svgHead(f.art.opts));
+    L.push(svgLayerList(f.layers));
+    L.push.apply(L, svgGroups(f.art, f.layers, place(f.art, f.art.opts, f.dx), f.art.opts));
+  }
   L.push('</svg>');
   return L.join('\n');
 }
+
+/* A aba passa a lista de camadas por fora das opcoes da arte, entao quem manda sao as
+   opcoes DESTA chamada - por isso a arte entra na face com elas trocadas. */
+function oneFace(art, opts){
+  const o = norm(opts);
+  return { side:o.side, dx:0, art:Object.assign({}, art, { opts:o }),
+           layers:(o.layers && o.layers.length) ? o.layers : defaultLayers() };
+}
+
+function svg(art, opts){ return svgFaces([oneFace(art, opts)]); }
 
 /* ═══════════════ .lbrn — formato nativo, com os parametros dentro ═══════════════
    Esquema conferido campo a campo contra um arquivo real de MOPA 60W
@@ -910,9 +944,9 @@ function svg(art, opts){
        SUB-CAMADA: 20 ali carregava o campo errado na bancada.
    O LightBurn usa Y para CIMA - ao contrario do SVG, aqui Y nao inverte. */
 
-function placeLbrn(art, opts){
-  const o = norm(opts), bb = art.bbox;
-  return (x, y) => [ o.mirror ? bb.x2 - x : x - bb.x1, y - bb.y1 ];
+function placeLbrn(art, opts, dx){
+  const o = norm(opts), bb = art.bbox, ox = dx || 0;
+  return (x, y) => [ ox + (o.mirror ? bb.x2 - x : x - bb.x1), y - bb.y1 ];
 }
 
 const xmlEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -975,23 +1009,17 @@ function pathShape(rings, T, ci){
   return L;
 }
 
-function lbrn(art, opts){
-  const o = norm(opts), T = placeLbrn(art, o);
-  const layers = (o.layers && o.layers.length) ? o.layers : defaultLayers();
+function lbrnCuts(art, layers){
   const L = [];
-  L.push('<?xml version="1.0" encoding="UTF-8"?>');
-  /* AppVersion 1.6.00: globalRepeat e campo da era 1.5+, e arquivos 1.6 reais usam o
-     mesmo FormatVersion="1" condensado - dizer 1.4.00 com um campo de 1.5+ seria mentira */
-  L.push('<LightBurnProject AppVersion="1.6.00" FormatVersion="1" MaterialHeight="0" ' +
-         'MirrorX="False" MirrorY="False">');
-  L.push('  <!-- AltiumPCBMirror - ' + o.side + ', ' +
-         (o.invert ? 'negativo' : 'positivo') + (o.mirror ? ', espelhado' : '') +
-         ', res ' + o.res + ' mm/px -->');
-
   for (const lay of layers){
     if (geomEmpty(geomFor(art, lay.src))) continue;
     L.push(cutSettingXml(lay));
   }
+  return L;
+}
+
+function lbrnShapes(art, layers, T, o){
+  const L = [];
   for (const lay of layers){
     const g = geomFor(art, lay.src);
     if (geomEmpty(g)) continue;
@@ -1004,12 +1032,106 @@ function lbrn(art, opts){
       for (const poly of primPolys(pr, 0, o.res/4))
         L.push.apply(L, pathShape([poly], T, ci));
   }
+  return L;
+}
+
+/* Todas as CutSettings antes de qualquer forma - e a ordem do arquivo de referencia, e com
+   duas faces continua sendo: primeiro as camadas das duas, depois a geometria das duas. */
+function lbrnFaces(fs){
+  const L = [];
+  L.push('<?xml version="1.0" encoding="UTF-8"?>');
+  /* AppVersion 1.6.00: globalRepeat e campo da era 1.5+, e arquivos 1.6 reais usam o
+     mesmo FormatVersion="1" condensado - dizer 1.4.00 com um campo de 1.5+ seria mentira */
+  L.push('<LightBurnProject AppVersion="1.6.00" FormatVersion="1" MaterialHeight="0" ' +
+         'MirrorX="False" MirrorY="False">');
+  for (const f of fs){
+    const o = f.art.opts;
+    L.push('  <!-- AltiumPCBMirror - ' + o.side + ', ' +
+           (o.invert ? 'negativo' : 'positivo') + (o.mirror ? ', espelhado' : '') +
+           ', res ' + o.res + ' mm/px -->');
+  }
+  for (const f of fs) L.push.apply(L, lbrnCuts(f.art, f.layers));
+  for (const f of fs)
+    L.push.apply(L, lbrnShapes(f.art, f.layers,
+                               placeLbrn(f.art, f.art.opts, f.dx), f.art.opts));
   L.push('</LightBurnProject>');
   return L.join('\n');
 }
 
+function lbrn(art, opts){ return lbrnFaces([oneFace(art, opts)]); }
+
 /* o bottom precisa sair espelhado para gravar do lado certo do cobre */
 const autoMirror = side => side === 'Bottom';
+
+/* ═══════════════ as duas faces no mesmo arquivo ═══════════════
+   A bancada grava um lado, vira a placa e grava o outro. Com um arquivo por face o operador
+   troca de ARQUIVO no meio do processo; com as duas dentro, so troca de camada.
+
+   Cada face leva CutSettings PROPRIOS - e por isso a lista de camadas dobra. Se as duas
+   dividissem o mesmo Cxx, mandar gravar "furos" dispararia nas DUAS posicoes de uma vez, e
+   a face que ainda nao foi virada sairia gravada errada.
+
+   Posicao: a face aberta na aba fica na esquerda e a outra ao lado, separada por `margin`
+   (cada arte ja carrega a sua propria margem, entao a folga real e o dobro dela mais essa).
+
+   Espelho: e o que separa as duas faces. A face aberta sai exatamente como esta na previa e
+   a outra sai espelhada em relacao a ela - preserva a escolha do usuario em vez de forcar
+   autoMirror, e continua dando o par certo (uma espelhada, uma nao). */
+const otherSide = s => (s === 'Bottom' ? 'Top' : 'Bottom');
+
+function sideOpts(o, side){
+  return Object.assign({}, o, { side, bothSides:false,
+                                mirror: side === o.side ? !!o.mirror : !o.mirror });
+}
+
+/* Quantos Cxx a lista ocupa. E o MAIOR indice + 1, e nao a contagem de linhas: duas linhas
+   podem estar no mesmo Cxx (fundem no LightBurn) e um Cxx pode ficar vago no meio - nos
+   dois casos somar a contagem embaralharia a ordem de execucao. */
+function ciSpan(layers){
+  return (layers || []).reduce((m, l) => Math.max(m, ((l && l.ci) | 0) + 1), 0);
+}
+
+/* O `ci` E a ordem de execucao, entao a segunda face entra INTEIRA depois da primeira - que
+   e quando a placa ja foi virada. O nome ganha a face porque, no LightBurn, duas camadas
+   chamadas "furos" nao dizem qual e qual. */
+function sideLayers(layers, base, side){
+  return (layers || []).map(l => Object.assign({}, l, {
+    ci: (l.ci | 0) + base,
+    name: String((l && (l.name || l.src)) || '') + ' · ' + side,
+  }));
+}
+
+/* As faces que o arquivo vai ter: arte, deslocamento em X e camadas de cada uma. Com
+   `bothSides` desligado e uma face so - a previa e a emissao passam por aqui nos dois
+   casos, e e o que impede previa e arquivo de divergirem. */
+function faces(board, opts){
+  const o = norm(opts);
+  const base = (o.layers && o.layers.length) ? o.layers : defaultLayers();
+  const lados = o.bothSides ? [o.side, otherSide(o.side)] : [o.side];
+  const out = [];
+  let dx = 0, ci = 0;
+  for (const side of lados){
+    const a = art(board, sideOpts(o, side));
+    out.push({ side, art:a, dx, layers: o.bothSides ? sideLayers(base, ci, side) : base });
+    dx += a.size.w + (o.margin || 0);
+    ci += ciSpan(base);
+  }
+  return out;
+}
+
+/* area util do arquivo inteiro: as faces em fila, alinhadas pelo topo */
+function facesSize(fs){
+  const last = (fs || [])[(fs || []).length - 1];
+  return { w: last ? last.dx + last.art.size.w : 0,
+           h: (fs || []).reduce((m, f) => Math.max(m, f.art.size.h), 0) };
+}
+
+/* "sem contorno fechado" sem dizer em qual face nao ajuda ninguem */
+function facesWarnings(fs){
+  const varias = (fs || []).length > 1;
+  return (fs || []).reduce((a, f) =>
+    a.concat((f.art.warnings || []).map(w => varias ? f.side + ': ' + w : w)), []);
+}
 
 /* Combinacoes que produzem geometria VALIDA mas fisicamente errada - por isso a checagem
    olha as opcoes, e nao o que saiu: negativo sem grupo de cobre gera um retangulo cheio,
@@ -1022,14 +1144,27 @@ function checkOpts(opts){
   else if (o.invert && !COPPER_GROUPS.some(k => o.show[k]))
     out.push('negativo sem nenhum grupo de cobre marcado: a arte vira a placa inteira ' +
              'preenchida e o laser queimaria a placa toda. Marque trilhas/pads/vias/regioes.');
+  /* as duas faces so cabem se cada uma tiver o seu Cxx - dividir indice faria a maquina
+     disparar nas duas posicoes na mesma passada */
+  if (o.bothSides){
+    const n = ciSpan((o.layers && o.layers.length) ? o.layers : defaultLayers()) * 2;
+    if (n > PALETTE.length)
+      out.push('as duas faces no mesmo arquivo precisam de ' + n + ' camadas, e o LightBurn ' +
+               'só tem ' + PALETTE.length + ' (C00…' + ciName(PALETTE.length - 1) + '). ' +
+               'Tire camadas da lista ou gere uma face por vez.');
+  }
   return out;
 }
 
 const sane = s => String(s).replace(/[\\/:*?"<>|]/g, '_');
 function filename(projName, opts, ext){
   const o = norm(opts);
-  return sane(projName || 'placa') + '-LASER-' + o.side +
-         (o.invert ? '-negativo' : '') + (o.mirror ? '-espelhado' : '') +
+  /* com as duas faces o espelho e POR FACE (uma sim, outra nao), entao o sufixo de espelho
+     nao diria nada - o que o nome tem que dizer e que as duas estao la dentro */
+  const lado = o.bothSides ? o.side + '+' + otherSide(o.side) : o.side;
+  return sane(projName || 'placa') + '-LASER-' + lado +
+         (o.invert ? '-negativo' : '') +
+         (!o.bothSides && o.mirror ? '-espelhado' : '') +
          '.' + (ext || 'svg');
 }
 
@@ -1041,7 +1176,9 @@ function exportSvg(board, opts){
 return { LB, defaults, collect, arcPts, chainSegments,
          primPolys, union, contours, simplify,
          art, place, svg, exportSvg, filename, autoMirror, checkOpts,
-         PALETTE, SOURCES, defaultLayers, geomFor, ci2hex, ciName, freeCi,
+         PALETTE, SOURCES, defaultLayers, geomFor, geomEmpty, ci2hex, ciName, freeCi,
          cutDefaults, benchDefaults, cutOf, layerCut, withMountLayer, boardCutouts,
-         lbrn, placeLbrn };
+         lbrn, placeLbrn,
+         faces, facesSize, facesWarnings, svgFaces, lbrnFaces,
+         otherSide, sideOpts, sideLayers, ciSpan };
 });

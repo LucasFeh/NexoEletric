@@ -595,6 +595,8 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
             <button class="btn btn-ghost btn-sm" data-lz-side="Top">Top</button>
             <button class="btn btn-ghost btn-sm" data-lz-side="Bottom">Bottom</button>
           </div>
+          <label class="nd-check"><input type="checkbox" id="lzBoth"> as duas faces no mesmo arquivo</label>
+          <p class="nd-hint" id="lzBothHint"></p>
 
           <div class="nd-sep"></div>
           <div class="kicker">o que aparece</div>
@@ -1665,7 +1667,9 @@ function lzSave() {
   try { localStorage.setItem(lzKey(S.projId), JSON.stringify(S.laser)); } catch (e) {}
 }
 
-let lzCam = null, lzArt = null, lzTimer = null, lzFitKey = '';
+/* lzFaces = as faces que o arquivo vai ter: uma, ou as duas com `bothSides`. A primeira e
+   sempre a face aberta na aba, que e a que os controles editam. */
+let lzCam = null, lzFaces = [], lzTimer = null, lzFitKey = '';
 
 /* ── divisorias: quem decide quanto cada coluna leva e a bancada ──
    Largura fica no NAVEGADOR e nao no projeto: e preferencia de tela, e trocar de placa nao
@@ -1728,9 +1732,12 @@ const LZ_PREVIEW_PX = 4e6;
 function lzPreviewOpts() {
   const o = Object.assign({}, S.laser), B = lzBoard();
   const bb = B && B.board && B.board.bbox;
+  /* o teto é por face: com as duas ligadas a prévia rasteriza duas vezes, então ele cai
+     pela metade para o custo de responder ao vivo não dobrar */
+  const teto = LZ_PREVIEW_PX / (o.bothSides ? 2 : 1);
   if (bb) {
     const px = ((bb.x2 - bb.x1)/o.res + 1) * ((bb.y2 - bb.y1)/o.res + 1);
-    if (px > LZ_PREVIEW_PX) o.res = o.res * Math.sqrt(px / LZ_PREVIEW_PX);
+    if (px > teto) o.res = o.res * Math.sqrt(px / teto);
   }
   return o;
 }
@@ -1739,8 +1746,13 @@ const lzLayers = () => (S.laser.layers && S.laser.layers.length)
   ? S.laser.layers : HubLaser.defaultLayers();
 
 function lzDraw(ctx) {
-  if (!lzArt) return;
-  const T = HubLaser.place(lzArt, lzArt.opts);
+  for (const f of lzFaces) lzDrawFace(ctx, f);
+}
+
+/* Uma face, com o MESMO deslocamento que o arquivo usa: com as duas ligadas, onde elas
+   aparecem lado a lado na prévia é onde vão cair no LightBurn. */
+function lzDrawFace(ctx, f) {
+  const T = HubLaser.place(f.art, f.art.opts, f.dx);
   const P = (x, y) => { const p = T(x, y); return [p[0], -p[1]]; };   /* SVG é Y p/ baixo */
   const trace = (rings, close) => {
     ctx.beginPath();
@@ -1752,8 +1764,8 @@ function lzDraw(ctx) {
   const px = 1 / (lzCam ? lzCam.cam.scale : 1);
   /* percorre as MESMAS camadas que o arquivo vai ter, na mesma ordem e com as mesmas
      cores — a prévia não é uma aproximação do resultado, é o resultado */
-  for (const lay of lzLayers()) {
-    const g = HubLaser.geomFor(lzArt, lay.src);
+  for (const lay of f.layers) {
+    const g = HubLaser.geomFor(f.art, lay.src);
     const hex = HubLaser.ci2hex(lay.ci);
     /* quem decide preencher ou contornar é o MODO da camada — igual à emissão */
     const preenche = HubLaser.layerCut(lay).type === 'Scan';
@@ -1774,7 +1786,7 @@ function lzDraw(ctx) {
           const c = P(pr.x, pr.y);
           ctx.moveTo(c[0] + pr.r, c[1]); ctx.arc(c[0], c[1], pr.r, 0, 2*Math.PI);
         } else {
-          for (const poly of HubLaser.primPolys(pr, 0, lzArt.opts.res/4)) {
+          for (const poly of HubLaser.primPolys(pr, 0, f.art.opts.res/4)) {
             poly.forEach((q, i) => { const p = P(q[0], q[1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); });
             ctx.closePath();
           }
@@ -1925,9 +1937,9 @@ function lzCompute() {
   lzEnsureCam();
   const po = lzPreviewOpts();
   const t0 = (window.performance || Date).now();
-  lzArt = HubLaser.art(B, po);
+  lzFaces = HubLaser.faces(B, Object.assign({}, po, { layers: lzLayers() }));
   const ms = Math.round((window.performance || Date).now() - t0);
-  const s = lzArt.size;
+  const s = HubLaser.facesSize(lzFaces);
   const key = s.w.toFixed(3) + 'x' + s.h.toFixed(3);
   lzCam.resize();
   if (key !== lzFitKey) { lzCam.fit({ x1:0, y1:-s.h, x2:s.w, y2:0 }, 1.08); lzFitKey = key; }
@@ -1948,21 +1960,24 @@ function lzSchedule() {
 function lzRenderSide(po) {
   const st = $('#lzStats'); st.textContent = '';
   const linha = (k, v) => { st.append(el('span', 'k', k), el('span', 'v', v)); };
-  linha('tamanho', lzArt.size.w.toFixed(2) + ' × ' + lzArt.size.h.toFixed(2) + ' mm');
-  linha('anéis', String(lzArt.stats.rings));
-  linha('pontos', String(lzArt.stats.points));
+  /* os números são do ARQUIVO, e não da face aberta: com as duas dentro, o dobro de
+     anéis e de camadas é o que vai sair */
+  const soma = get => lzFaces.reduce((a, f) => a + get(f), 0);
+  const tam = HubLaser.facesSize(lzFaces), pontos = soma(f => f.art.stats.points);
+  linha('tamanho', tam.w.toFixed(2) + ' × ' + tam.h.toFixed(2) + ' mm');
+  if (lzFaces.length > 1) linha('faces', lzFaces.map(f => f.side).join(' + '));
+  linha('anéis', String(soma(f => f.art.stats.rings)));
+  linha('pontos', String(pontos));
   linha('resolução', S.laser.res + ' mm/px');
-  linha('furos', String((lzArt.drills || []).length));
-  linha('furos de fixação', String((lzArt.mounts || []).length));
-  const vivas = lzLayers().filter(l => {
-    const g = HubLaser.geomFor(lzArt, l.src);
-    return (g.rings || []).length || (g.lines || []).length || (g.prims || []).length;
-  });
-  linha('camadas', vivas.length + ' de ' + lzLayers().length);
-  linha('SVG aprox.', Math.max(1, Math.round(lzArt.stats.points * 17 / 1024)) + ' KB');
+  linha('furos', String(soma(f => (f.art.drills || []).length)));
+  linha('furos de fixação', String(soma(f => (f.art.mounts || []).length)));
+  const vivas = soma(f =>
+    f.layers.filter(l => !HubLaser.geomEmpty(HubLaser.geomFor(f.art, l.src))).length);
+  linha('camadas', vivas + ' de ' + soma(f => f.layers.length));
+  linha('SVG aprox.', Math.max(1, Math.round(pontos * 17 / 1024)) + ' KB');
 
   const W = $('#lzWarn'); W.textContent = '';
-  const avisos = HubLaser.checkOpts(S.laser).concat(lzArt.warnings);
+  const avisos = HubLaser.checkOpts(S.laser).concat(HubLaser.facesWarnings(lzFaces));
   const p = proj();
   if (p && p.pending > 0)
     avisos.unshift(p.pending + ' mudança(s) pendente(s) em changes.js — a arte NÃO as inclui; ' +
@@ -1979,6 +1994,12 @@ function lzSyncControls() {
     b.classList.toggle('on', b.dataset.lzSide === o.side));
   document.querySelectorAll('[data-lz-show]').forEach(c =>
     c.checked = !!o.show[c.dataset.lzShow]);
+  $('#lzBoth').checked = !!o.bothSides;
+  $('#lzBothHint').textContent = o.bothSides
+    ? o.side + ' primeiro e ' + HubLaser.otherSide(o.side) + ' ao lado, cada face com as ' +
+      'suas camadas: grave uma, vire a placa e grave a outra sem trocar de arquivo. ' +
+      'A outra face sai espelhada em relação a esta.'
+    : '';
   $('#lzInvert').checked = !!o.invert;
   $('#lzMirror').checked = !!o.mirror;
   $('#lzMirrorHint').textContent = o.side === 'Bottom'
@@ -2023,13 +2044,16 @@ function lzGerar(fmt) {
   const o = Object.assign({}, S.laser, { layers: lzLayers() });
   const bloqueio = HubLaser.checkOpts(o)[0];
   if (bloqueio) { toast(bloqueio, 'warn'); return null; }
-  const art = HubLaser.art(B, o);
-  const temAlgo = o.layers.some(l => {
-    const g = HubLaser.geomFor(art, l.src);
-    return (g.rings || []).length || (g.lines || []).length || (g.prims || []).length;
-  });
-  if (!temAlgo) { toast('nenhuma camada tem geometria nesta face — nada a baixar', 'warn'); return null; }
-  const texto = fmt === 'lbrn2' ? HubLaser.lbrn(art, art.opts) : HubLaser.svg(art, art.opts);
+  /* o MESMO caminho da prévia: uma face, ou as duas lado a lado */
+  const fs = HubLaser.faces(B, o);
+  const temAlgo = fs.some(f =>
+    f.layers.some(l => !HubLaser.geomEmpty(HubLaser.geomFor(f.art, l.src))));
+  if (!temAlgo) {
+    toast('nenhuma camada tem geometria ' + (fs.length > 1 ? 'nas duas faces' : 'nesta face') +
+          ' — nada a baixar', 'warn');
+    return null;
+  }
+  const texto = fmt === 'lbrn2' ? HubLaser.lbrnFaces(fs) : HubLaser.svgFaces(fs);
   return { texto, nome: HubLaser.filename(proj().name, o, fmt),
            mime: fmt === 'lbrn2' ? 'application/xml' : 'image/svg+xml' };
 }
@@ -2168,7 +2192,7 @@ async function loadProject(id) {
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
   S.neoden = { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: ndLoadExcl(id), group: ndLoadGroup(id) };
   ndAnchor = null;
-  S.laser = lzLoad(id); lzArt = null; lzFitKey = '';   /* a arte e as opcoes sao por projeto */
+  S.laser = lzLoad(id); lzFaces = []; lzFitKey = '';   /* a arte e as opcoes sao por projeto */
   libUse = null; libUseFor = null;        /* o cruzamento com a lib e por projeto */
   S.lib.sel = null; S.lib.fpShown = null;
   $('#ndSearch').value = ''; $('#ndKind').value = '';
@@ -2261,6 +2285,7 @@ $('#lzPreCobre').onclick = () => lzSet({ show: { tracks:true, pads:true, vias:tr
                                                 silk:false, texts:false, outline:true } });
 $('#lzPreSilk').onclick  = () => lzSet({ show: { tracks:false, pads:false, vias:false,
                                                 silk:true, texts:true, outline:true } });
+$('#lzBoth').onchange = e => lzSet({ bothSides: e.target.checked });
 $('#lzInvert').onchange = e => lzSet({ invert: e.target.checked });
 $('#lzMirror').onchange = e => lzSet({ mirror: e.target.checked });
 $('#lzHoles').onchange = e => lzSet({ holes: e.target.value });
@@ -2272,9 +2297,10 @@ $('#lzSilkMode').onchange = e => lzSet({ silkMode: e.target.value });
     lzSet({ [key]: v });
   }));
 $('#lzFit').onclick = () => {
-  if (!lzArt || !lzCam) return;
+  if (!lzFaces.length || !lzCam) return;
+  const s = HubLaser.facesSize(lzFaces);
   lzCam.resize();
-  lzCam.fit({ x1:0, y1:-lzArt.size.h, x2:lzArt.size.w, y2:0 }, 1.08);
+  lzCam.fit({ x1:0, y1:-s.h, x2:s.w, y2:0 }, 1.08);
 };
 document.querySelectorAll('[data-lz-split]').forEach(sp => {
   sp.addEventListener('pointerdown', e => lzSplitDrag(sp, e));
