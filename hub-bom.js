@@ -307,6 +307,24 @@ button.ic.esq svg{transform:scaleX(-1)}
 .gv-item{display:flex;align-items:center;gap:9px;padding:5px 0;cursor:pointer;font-size:13px}
 .gv-item input{accent-color:var(--hi);width:15px;height:15px;cursor:pointer}
 .gv-nota{margin:4px 0 0;font-size:11.5px;line-height:1.4;color:var(--fg2)}
+.gv-ajuda{font-size:11.5px;line-height:1.9;color:var(--fg2)}
+.gv-ajuda kbd{font:inherit;font-size:10.5px;padding:1px 5px;border:1px solid var(--linha);
+  border-bottom-width:2px;border-radius:4px;background:var(--bg);color:var(--fg)}
+/* menu do clique direito rapido, no ponto onde se clicou */
+#menu3{position:fixed;z-index:25;display:none;min-width:158px;padding:4px;
+  background:var(--pane);border:1px solid var(--linha);border-radius:8px;
+  box-shadow:0 10px 30px rgba(0,0,0,.28)}
+#menu3.on{display:block}
+#menu3 button{display:block;width:100%;text-align:left;font:inherit;font-size:12.5px;
+  padding:6px 10px;border:0;border-radius:5px;background:none;color:var(--fg);cursor:pointer}
+#menu3 button:hover{background:color-mix(in srgb,var(--hi) 16%,transparent)}
+#menu3 button.pai{display:flex;justify-content:space-between;align-items:center}
+#menu3 button.pai span{color:var(--fg2);font-size:11px;transition:transform .12s}
+#menu3 button.pai[aria-expanded="true"] span{transform:rotate(90deg)}
+/* o submenu abre DENTRO do menu, e nao flutuando ao lado: um painel que se desdobra nao
+   depende de saber para que lado ha espaco na tela, e funciona igual no toque */
+#sub3{display:none;margin:2px 0 0 8px;padding-left:6px;border-left:1px solid var(--linha)}
+#sub3.on{display:block}
 .gv-seg{display:flex;gap:6px}
 .gv-seg button{flex:1}
 
@@ -333,6 +351,17 @@ button.t.primario{background:var(--hi);border-color:var(--hi);color:#fff}
 .cv canvas{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
 .cv .lbl{position:absolute;top:6px;left:8px;font-size:11px;color:var(--fg2);
   background:var(--pane);padding:1px 6px;border-radius:5px;opacity:.9;pointer-events:none}
+/* o quadradinho que troca 2D<->3D, no canto de cada vista */
+.cv .d3{position:absolute;top:6px;right:6px;width:26px;height:22px;padding:0;
+  font:600 10px/1 "Segoe UI",system-ui,sans-serif;letter-spacing:.02em;
+  border:1px solid var(--linha);border-radius:5px;background:var(--pane);color:var(--fg2);
+  cursor:pointer;opacity:.92}
+.cv .d3:hover{color:var(--fg);border-color:var(--hi)}
+#placas.tres-d .cv{display:none}
+#placas.tres-d .cv3{display:block}
+.cv3{display:none}
+.cv3 canvas{cursor:grab}
+.cv3 canvas:active{cursor:grabbing}
 #bom{flex:0 0 var(--bomw,420px);min-width:200px;background:var(--pane);
   border-left:1px solid var(--linha);display:flex;flex-direction:column;min-height:0}
 main.esq #bom{border-left:0;border-right:1px solid var(--linha)}
@@ -437,15 +466,22 @@ function novaCam(cv, lado){
 }
 function ajusta(c){
   var b = bbox(), m = 2;
-  var W = c.cv.clientWidth || 1, H = c.cv.clientHeight || 1;
+  var W = c.cv.clientWidth, H = c.cv.clientHeight;
+  /* Canvas dentro de pai display:none mede ZERO, e enquadrar nesse estado gravava uma escala
+     de lixo (1/(largura+4)) que sobrevivia depois. Era o que fazia sair do 3D devolver as
+     duas telas 2D com a placa em menos de um pixel: com a vista 3D aberta as 2D estao
+     escondidas, e tanto o resize da janela quanto o aplicaLayout da visao guiada chamavam
+     este ajuste nelas. Sem tamanho nao ha enquadramento possivel - a camera anterior, que
+     estava certa, e o melhor que se tem. */
+  if (!W || !H) return;
   var w = (b.x2 - b.x1) + m*2, h = (b.y2 - b.y1) + m*2;
   c.esc = Math.min(W / w, H / h) || 1;
   c.cx = (b.x1 + b.x2) / 2; c.cy = (b.y1 + b.y2) / 2;
 }
 function redim(){
-  cams.forEach(function (c){
-    if (!c) return;
-    var dpr = window.devicePixelRatio || 1;
+  var dpr = window.devicePixelRatio || 1;
+  cams.concat([v3]).forEach(function (c){
+    if (!c || !c.cv) return;
     c.dpr = dpr;
     c.cv.width = Math.max(1, Math.round(c.cv.clientWidth * dpr));
     c.cv.height = Math.max(1, Math.round(c.cv.clientHeight * dpr));
@@ -577,7 +613,446 @@ function desenha(c){
   }
   ctx.restore();
 }
-function pinta(){ cams.forEach(desenha); }
+function pinta(){ if (v3.on) desenha3(); else cams.forEach(desenha); }
+
+/* ═══════════════ vista 3D ═══════════════
+   Sem biblioteca nenhuma, e nao por teimosia: uma PCB e 2,5D - tudo mora em TRES alturas
+   (cobre do verso, substrato, cobre da frente). Com isso o algoritmo do pintor resolve a
+   oclusao inteira sem z-buffer: desenha-se a parede, depois a face que se ve, depois o cobre
+   dela. Nao ha o que se intersectar, entao nao ha o que ordenar por triangulo.
+
+   Projecao ORTOGRAFICA: numa placa plana a perspectiva quase nao acrescenta e custa exatidao
+   de medida - o que se quer aqui e reconhecer a peça, nao simular uma foto.
+
+   ESP e a espessura: o board.js nao traz esse dado, entao vale o 1,6 mm de FR4 padrao. */
+var ESP = 1.6;
+var v3 = { on:false, yaw:-0.55, pitch:0.95, esc:1, cx:0, cy:0, cv:null, lado:0,
+           piv:null };   /* piv = ponto do mundo em torno do qual se gira, enquanto se segura */
+
+/* verde de mascara, metal exposto nos pads: e o que a placa e de verdade, e a trilha sob a
+   mascara aparece como o relevo mais claro que ela realmente tem */
+var C3 = { topo:'#176a32', parede:'#0d4a22', trilha:'#23833f',
+           metal:'#d7d9de', silk:'#f4f4f4', furo:'#08120b' };
+
+/* de que lado se esta olhando: pitch positivo ve a frente, negativo ve o verso */
+function ladoV3(){ return v3.pitch >= 0 ? 0 : 1; }
+
+/* mundo (mm, Z para cima) -> plano projetado (mm). Gira em torno de Z e inclina. */
+function pr3(x, y, z){
+  var ca = Math.cos(v3.yaw), sa = Math.sin(v3.yaw);
+  var X = x*ca - y*sa, Y = x*sa + y*ca;
+  return [X, Y*Math.sin(v3.pitch) + z*Math.cos(v3.pitch)];
+}
+function tela3(ctx, W, H, p){
+  return [W/2 + (p[0] - v3.cx) * v3.esc, H/2 - (p[1] - v3.cy) * v3.esc];
+}
+/* px do canvas -> plano projetado (mm) */
+function planoDe(cv, ev){
+  var r = cv.getBoundingClientRect();
+  var W = cv.clientWidth || 1, H = cv.clientHeight || 1;
+  return [ (ev.clientX - r.left - W/2) / v3.esc + v3.cx,
+           -(ev.clientY - r.top - H/2) / v3.esc + v3.cy ];
+}
+/* plano projetado -> mundo, no plano MEDIO da placa (z = 0).
+   A projecao e ortografica, entao um ponto da tela e uma reta no espaço; escolher z = 0 da o
+   ponto sobre a placa, que e o que a pessoa esta mirando quando aponta para ela. */
+function mundo3(p){
+  var sp = Math.sin(v3.pitch);
+  if (Math.abs(sp) < 0.05) return null;       /* de lado a placa vira uma linha: nao ha ponto */
+  var X = p[0], Y = p[1] / sp;
+  var ca = Math.cos(v3.yaw), sa = Math.sin(v3.yaw);
+  return [ X*ca + Y*sa, -X*sa + Y*ca ];       /* gira de volta por -yaw */
+}
+
+/* enquadra a placa inteira na vista 3D, com a caixa JA projetada - girada, a placa ocupa
+   outro retangulo na tela, e enquadrar pela caixa do mundo deixaria sobra dos dois lados */
+function ajusta3(){
+  var b = bbox(), x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  [b.x1, b.x2].forEach(function (x){
+    [b.y1, b.y2].forEach(function (y){
+      [-ESP/2, ESP/2].forEach(function (z){
+        var p = pr3(x, y, z);
+        x1 = Math.min(x1, p[0]); y1 = Math.min(y1, p[1]);
+        x2 = Math.max(x2, p[0]); y2 = Math.max(y2, p[1]);
+      });
+    });
+  });
+  var cv = v3.cv, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) return;                    /* mesmo motivo do ajusta() das vistas 2D */
+  v3.cx = (x1 + x2) / 2; v3.cy = (y1 + y2) / 2;
+  v3.esc = Math.min(W / (x2 - x1 + 4), H / (y2 - y1 + 4)) || 1;
+}
+
+function poly3(ctx, W, H, pts, z){
+  ctx.beginPath();
+  for (var i = 0; i < pts.length; i++){
+    var p = tela3(ctx, W, H, pr3(pts[i][0], pts[i][1], z));
+    if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]);
+  }
+}
+/* Traco em LOTE, agrupado por espessura.
+
+   O caro aqui nao e a conta da projecao, e a chamada: um beginPath/stroke por segmento dava
+   8.746 tracos so de serigrafia na maior placa do acervo, a cada quadro da orbita. Como a
+   espessura e o unico atributo que muda entre eles, um caminho por espessura resolve - viram
+   meia duzia de chamadas, com o mesmo desenho na tela. Traco nao tem regra de preenchimento,
+   entao juntar segmentos num caminho so nao muda o resultado (ao contrario do fill, onde o
+   sentido do poligono importa - por isso o preenchimento continua um a um). */
+function lote(){ return { por:{}, n:0 }; }
+function poeLinha(L, a, b, z, larg){
+  var k = larg.toFixed(3);
+  (L.por[k] = L.por[k] || []).push([a, b, z]);
+  L.n++;
+}
+function traçaLote(ctx, W, H, L, cor){
+  ctx.strokeStyle = cor;
+  for (var k in L.por){
+    var segs = L.por[k];
+    ctx.lineWidth = Math.max(0.8, parseFloat(k) * v3.esc);
+    ctx.beginPath();
+    for (var i = 0; i < segs.length; i++){
+      var p = tela3(ctx, W, H, pr3(segs[i][0][0], segs[i][0][1], segs[i][2]));
+      var q = tela3(ctx, W, H, pr3(segs[i][1][0], segs[i][1][1], segs[i][2]));
+      ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]);
+    }
+    ctx.stroke();
+  }
+}
+
+function desenha3(){
+  var cv = v3.cv;
+  if (!cv || !cv.clientWidth) return;
+  var ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  var dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  W = W / dpr; H = H / dpr;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+  var L = ladoV3(), zf = L ? -ESP/2 : ESP/2;      /* a face que se ve */
+  var zt = -zf;                                    /* a de tras */
+
+  /* 1. as paredes do FR4 - a espessura que faz a placa parecer uma placa */
+  D.outline.forEach(function (loop){
+    for (var i = 0; i + 1 < loop.length; i++){
+      var a = loop[i], b = loop[i+1];
+      var p1 = tela3(ctx, W, H, pr3(a[0], a[1], -ESP/2)),
+          p2 = tela3(ctx, W, H, pr3(b[0], b[1], -ESP/2)),
+          p3 = tela3(ctx, W, H, pr3(b[0], b[1],  ESP/2)),
+          p4 = tela3(ctx, W, H, pr3(a[0], a[1],  ESP/2));
+      ctx.beginPath();
+      ctx.moveTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]);
+      ctx.lineTo(p3[0], p3[1]); ctx.lineTo(p4[0], p4[1]); ctx.closePath();
+      ctx.fillStyle = C3.parede; ctx.fill();
+    }
+  });
+
+  /* 2. a face de cima, com os recortes vazados (par-impar, como no 2D) */
+  ctx.beginPath();
+  D.outline.forEach(function (loop){
+    for (var i = 0; i < loop.length; i++){
+      var p = tela3(ctx, W, H, pr3(loop[i][0], loop[i][1], zf));
+      if (i) ctx.lineTo(p[0], p[1]); else ctx.moveTo(p[0], p[1]);
+    }
+    ctx.closePath();
+  });
+  ctx.fillStyle = C3.topo; ctx.fill('evenodd');
+
+  /* 3. o cobre daquela face. Plano e trilha ficam SOB a mascara - por isso saem em verde
+     mais claro, que e como aparecem na placa de verdade; pad e via sao metal exposto. */
+  if (mostra.regions) D.regions.forEach(function (g){
+    if (g.s !== L) return;
+    poly3(ctx, W, H, g.p, zf); ctx.closePath();
+    ctx.fillStyle = C3.trilha; ctx.fill();
+  });
+  if (mostra.tracks){
+    var lt = lote();
+    D.tracks.forEach(function (t){
+      if (t.s !== L) return;
+      if (t.k === 'a'){
+        var pa = arco3(t.x, t.y, t.r, t.a, t.b);
+        for (var i = 0; i + 1 < pa.length; i++) poeLinha(lt, pa[i], pa[i+1], zf, t.w);
+        return;
+      }
+      poeLinha(lt, t.p[0], t.p[1], zf, t.w);
+    });
+    traçaLote(ctx, W, H, lt, C3.trilha);
+  }
+  if (mostra.pads){
+    D.pads.forEach(function (p){
+      if (p.s !== -1 && p.s !== L) return;
+      ctx.fillStyle = C3.metal;
+      p.p.forEach(function (poly){ poly3(ctx, W, H, poly, zf); ctx.closePath(); ctx.fill(); });
+    });
+    D.vias.forEach(function (v){
+      poly3(ctx, W, H, circ3(v.x, v.y, v.r), zf); ctx.closePath();
+      ctx.fillStyle = C3.metal; ctx.fill();
+    });
+    if (mostra.drills){
+      D.pads.forEach(function (p){
+        if (!p.h || (p.s !== -1 && p.s !== L)) return;
+        ctx.fillStyle = C3.furo;
+        p.h.forEach(function (poly){ poly3(ctx, W, H, poly, zf); ctx.closePath(); ctx.fill(); });
+      });
+      D.vias.forEach(function (v){
+        if (!(v.d > 0)) return;
+        poly3(ctx, W, H, circ3(v.x, v.y, v.d), zf); ctx.closePath();
+        ctx.fillStyle = C3.furo; ctx.fill();
+      });
+    }
+  }
+
+  /* 4. serigrafia */
+  if (mostra.silk){
+    var ls = lote();
+    D.silk.forEach(function (sk){
+      if (sk.s !== L || (sk.d && !mostra.refs)) return;
+      var pts = sk.k === 'a' ? arco3(sk.x, sk.y, sk.r, sk.a, sk.b) : sk.p;
+      for (var i = 0; i + 1 < pts.length; i++) poeLinha(ls, pts[i], pts[i+1], zf, sk.w);
+    });
+    traçaLote(ctx, W, H, ls, C3.silk);
+  }
+
+  /* 5. o realce, por cima de tudo */
+  if (realce.length){
+    realce.forEach(function (i){
+      var cp = D.comps[i];
+      if (!cp || !cp.bb || (cp.s !== L && !cp.t)) return;
+      poly3(ctx, W, H, [[cp.bb[0],cp.bb[1]],[cp.bb[2],cp.bb[1]],
+                        [cp.bb[2],cp.bb[3]],[cp.bb[0],cp.bb[3]]], zf);
+      ctx.closePath();
+      ctx.fillStyle = D.cores.alvo; ctx.globalAlpha = 0.4; ctx.fill();
+      ctx.globalAlpha = 1; ctx.strokeStyle = D.cores.alvo;
+      ctx.lineWidth = 1.5; ctx.stroke();
+    });
+  }
+  /* 6. a esfera com a cruz, no ponto em torno do qual se esta girando. Fica em PIXEIS, e nao
+     em mm: e um instrumento da tela, e tem que ter o mesmo tamanho perto ou longe. */
+  if (v3.piv){
+    var g = tela3(ctx, W, H, pr3(v3.piv[0], v3.piv[1], 0)), R = 26;
+    ctx.save();
+    ctx.strokeStyle = '#eaeaea'; ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(g[0], g[1], R, 0, 6.2831853); ctx.fill(); ctx.stroke();
+    /* duas elipses dao o volume de esfera - por scale, e nao por ctx.ellipse, que nem todo
+       host de canvas implementa */
+    [[1, 0.38], [0.38, 1]].forEach(function (e){
+      ctx.save(); ctx.translate(g[0], g[1]); ctx.scale(e[0], e[1]);
+      ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.2831853); ctx.stroke(); ctx.restore();
+    });
+    ctx.beginPath();
+    ctx.moveTo(g[0] - R - 7, g[1]); ctx.lineTo(g[0] + R + 7, g[1]);
+    ctx.moveTo(g[0], g[1] - R - 7); ctx.lineTo(g[0], g[1] + R + 7);
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+/* Arco -> polilinha. A pagina recebe arco como centro/raio/angulos, e em 3D um arco no plano
+   da placa vira uma elipse na tela - ctx.arc nao serve. Sao 390 arcos de serigrafia no acervo
+   (metade deles no PRJ-UR-DI261924), entao descarta-los deixava a placa visivelmente
+   diferente da vista 2D. O passo segue o zoom, como no circ3. */
+function arco3(cx, cy, r, sa, ea){
+  var a0 = sa * Math.PI/180, a1 = ea * Math.PI/180;
+  while (a1 <= a0) a1 += 6.2831853;
+  var n = Math.max(4, Math.min(64, Math.round((a1 - a0) * r * v3.esc / 3)));
+  var out = [];
+  for (var i = 0; i <= n; i++){
+    var a = a0 + (a1 - a0) * i / n;
+    out.push([cx + r*Math.cos(a), cy + r*Math.sin(a)]);
+  }
+  return out;
+}
+/* circulo achatado, so para via e furo: o resto ja chega em poligono do gerador */
+function circ3(cx, cy, r){
+  var n = Math.max(8, Math.min(28, Math.round(r * v3.esc))), out = [];
+  for (var i = 0; i <= n; i++){
+    var a = i / n * 6.2831853;
+    out.push([cx + r*Math.cos(a), cy + r*Math.sin(a)]);
+  }
+  return out;
+}
+
+/* Recoloca a camera para que o PIVO continue no mesmo pixel depois de girar. E a mesma conta
+   do zoom ancorado no cursor: projeta o ponto com os angulos novos e desloca o centro pela
+   diferenca. Sem isto, girar afastaria a placa do cursor e a pessoa perderia o que mirava. */
+function ancoraPivo(cv, telaPiv){
+  if (!v3.piv) return;
+  var W = cv.clientWidth || 1, H = cv.clientHeight || 1;
+  var p = pr3(v3.piv[0], v3.piv[1], 0);
+  v3.cx = p[0] - (telaPiv[0] - W/2) / v3.esc;
+  v3.cy = p[1] + (telaPiv[1] - H/2) / v3.esc;
+}
+
+/* Navegacao no molde do Altium: o botao ESQUERDO move a vista, o DIREITO gira - e gira em
+   torno do ponto onde se clicou, marcado por uma esfera com uma cruz enquanto se segura.
+   Girar sempre pelo centro da placa obriga a reenquadrar a cada volta; girando pelo ponto que
+   se esta olhando, o que interessa fica parado na tela. */
+function ligaV3(){
+  var cv = v3.cv, modo = null, px = 0, py = 0, ox = 0, oy = 0, telaPiv = [0, 0];
+  cv.addEventListener('contextmenu', function (ev){ ev.preventDefault(); });
+  cv.addEventListener('pointerdown', function (ev){
+    anim = null;
+    fechaMenu3();
+    px = ox = ev.clientX; py = oy = ev.clientY;
+    cv.setPointerCapture(ev.pointerId);
+    if (ev.button === 2){
+      modo = 'girar';
+      var r = cv.getBoundingClientRect();
+      telaPiv = [ev.clientX - r.left, ev.clientY - r.top];
+      /* De perfil nao existe ponto da placa sob o cursor. Fingir que existe (usando o centro
+         dela) fazia a esfera aparecer longe do cursor e, no primeiro pixel de arrasto, a
+         ancora arrastava a placa inteira para debaixo do clique. Sem pivo, gira-se sem
+         ancorar - que e o comportamento honesto. */
+      v3.piv = mundo3(planoDe(cv, ev));
+      desenha3();
+    } else {
+      modo = 'mover';
+    }
+    if (ev.preventDefault) ev.preventDefault();
+  });
+  cv.addEventListener('pointermove', function (ev){
+    if (!modo) return;
+    var dx = ev.clientX - px, dy = ev.clientY - py;
+    if (modo === 'mover'){
+      v3.cx -= dx / v3.esc; v3.cy += dy / v3.esc;
+    } else {
+      v3.yaw += dx * 0.01;
+      /* o pitch atravessa o zero e mostra o VERSO: e o gesto de virar a placa na mao */
+      /* o limite e o proprio topo (pi/2): menos que isso e a pose de origem ficaria fora do
+         alcance do arrasto, e o primeiro movimento depois de centralizar daria um tranco */
+      v3.pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, v3.pitch - dy * 0.01));
+      if (v3.piv) ancoraPivo(cv, telaPiv);
+    }
+    px = ev.clientX; py = ev.clientY;
+    desenha3();
+  });
+  var solta = function (ev){
+    /* direito SEM arrasto e um clique, e clique abre menu - o mesmo gesto do Altium. O
+       limiar mede ate onde o botao desceu, e nao ate o ultimo movimento. */
+    var clique = modo === 'girar' && ev && ev.clientX != null &&
+                 Math.abs(ev.clientX - ox) <= 4 && Math.abs(ev.clientY - oy) <= 4;
+    modo = null; v3.piv = null;
+    if (clique) abreMenu3(ev.clientX, ev.clientY);
+    desenha3();
+  };
+  cv.addEventListener('pointerup', solta);
+  cv.addEventListener('pointercancel', solta);
+  cv.addEventListener('wheel', function (ev){
+    ev.preventDefault();
+    anim = null;
+    /* amplia no CURSOR, como as vistas 2D fazem: o ponto sob o ponteiro nao sai do lugar */
+    var antes = planoDe(cv, ev);
+    var dy = ev.deltaY * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 400 : 1);
+    v3.esc *= Math.exp(-dy * 0.0016);
+    var dep = planoDe(cv, ev);
+    /* so ancora se a conta fechar: um evento sem coordenada levaria NaN para o centro da
+       camera, e dali em diante a placa simplesmente nao apareceria mais */
+    var ax = antes[0] - dep[0], ay = antes[1] - dep[1];
+    if (isFinite(ax) && isFinite(ay)){ v3.cx += ax; v3.cy += ay; }
+    desenha3();
+  }, { passive:false });
+}
+
+/* Centralizar e virar a face: as duas coisas que se faz o tempo todo olhando uma placa em
+   3D, e que sem atalho viram um passeio ate a barra.
+
+   Centralizar RECOLOCA a placa, e nao so reenquadra: depois de tombar a vista, reenquadrar no
+   angulo tombado devolve a placa torta no meio da tela, que nao e "centralizar" para quem
+   pediu. Ela volta reta e de frente - a mesma pose da vista 2D, so que em 3D. A FACE e
+   preservada: quem esta conferindo o verso nao quer ser jogado para a frente; para trocar de
+   face existe o Ctrl+F e o "Espelhar" do menu. */
+/* A pose de origem: placa reta, virada para cima, centrada e enquadrada. E onde a vista 3D
+   ABRE e para onde o "Centralizar" volta - abrir de esguelha ja obrigava a centralizar antes
+   de olhar qualquer coisa. */
+function pose3(){
+  v3.yaw = 0;
+  v3.pitch = v3.pitch < 0 ? -Math.PI/2 : Math.PI/2;
+  ajusta3();
+}
+function centra3(){ pose3(); desenha3(); }
+/* Poe a placa numa pose de bancada: gira em torno da propria normal para o angulo pedido,
+   mantendo a face e a inclinacao. Reenquadra porque, girada, ela ocupa outro retangulo. */
+function posiciona3(graus){
+  v3.yaw = graus * Math.PI / 180;
+  ajusta3(); desenha3();
+}
+/* Onde o centro da placa cai na tela, e como recoloca-lo num pixel dado.
+
+   pr3() gira em torno de (0,0) do MUNDO, e o board.js entrega coordenadas relativas a origem
+   da placa - que fica longe do centro dela (86 mm no TCMS_Reader). Entao qualquer mudanca de
+   angulo faz a placa ORBITAR em vez de girar no lugar. Todo comando que mexe no angulo tem
+   que reenquadrar (ajusta3) ou reancorar por aqui; foi o que faltou no "Virar 360". */
+function telaCentro3(){
+  var cv = v3.cv, W = cv.clientWidth || 1, H = cv.clientHeight || 1;
+  var b = bbox(), p = pr3((b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2, 0);
+  return [W/2 + (p[0] - v3.cx) * v3.esc, H/2 - (p[1] - v3.cy) * v3.esc];
+}
+function ancoraCentro3(sx, sy){
+  var cv = v3.cv, W = cv.clientWidth || 1, H = cv.clientHeight || 1;
+  var b = bbox(), p = pr3((b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2, 0);
+  v3.cx = p[0] - (sx - W/2) / v3.esc;
+  v3.cy = p[1] + (sy - H/2) / v3.esc;
+}
+
+/* Trocar de face NAO pode mover a placa na tela.
+
+   O sinal do pitch e a face, mas inverte-lo espelha o eixo Y da projecao: uma placa centrada
+   em Y = 40 mm pula para -40, ou seja o dobro da distancia ate o centro. Quem apertou Ctrl+F
+   queria ver o outro lado do que estava olhando, e nao caçar a placa de novo. Entao aqui se
+   guarda onde o centro dela estava na TELA e se recoloca a camera para ele cair no mesmo
+   pixel - a mesma conta da ancora do pivo e da roda. */
+function viraFace3(){
+  var onde = telaCentro3();
+  v3.pitch = -v3.pitch;
+  ancoraCentro3(onde[0], onde[1]);
+  desenha3();
+}
+/* Uma volta completa, com aceleracao e freio: sem a suavizacao a placa "pula" no fechamento
+   da volta, que e justamente onde o olho esta esperando o encaixe. */
+function gira360(){
+  var y0 = v3.yaw, dur = 1500, t0 = null, meu = anim = {};
+  /* a placa tem que girar NO LUGAR: sem reancorar o centro a cada quadro ela orbita a origem
+     do mundo e some da tela em boa parte da volta */
+  var onde = telaCentro3();
+  var poe = function (yaw){ v3.yaw = yaw; ancoraCentro3(onde[0], onde[1]); desenha3(); };
+  requestAnimationFrame(function passo(ts){
+    if (meu !== anim) return;
+    if (typeof ts !== 'number'){ anim = null; poe(y0); return; }
+    if (t0 === null) t0 = ts;
+    var t = Math.min(1, (ts - t0) / dur);
+    var e = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2;
+    poe(y0 + e * 6.2831853);
+    if (t < 1) requestAnimationFrame(passo);
+    else { anim = null; poe(y0); }                   /* mesmo angulo, numero pequeno */
+  });
+}
+
+function abreMenu3(x, y){
+  var m = document.getElementById('menu3');
+  m.style.left = x + 'px'; m.style.top = y + 'px';
+  m.classList.add('on');
+}
+function fechaMenu3(){
+  document.getElementById('menu3').classList.remove('on');
+  /* o submenu fecha junto: reabrir o menu com ele ja desdobrado esconde os itens de cima */
+  var sub = document.getElementById('sub3');
+  if (sub) sub.classList.remove('on');
+  var pai = document.querySelector('[data-m3="pos"]');
+  if (pai) pai.setAttribute('aria-expanded', 'false');
+}
+
+function poe3D(on){
+  v3.on = !!on;
+  document.getElementById('placas').classList.toggle('tres-d', v3.on);
+  requestAnimationFrame(function (){
+    redim();
+    if (v3.on) pose3();     /* abre reta e centrada, e nao no angulo em que ficou da ultima vez */
+    pinta();
+  });
+}
 
 /* ── BOM ──
    Duas vistas sobre os MESMOS dados: agrupada (uma linha por compra) e por peça (uma linha
@@ -647,10 +1122,23 @@ function montaBom(){
    mesma coisa. */
 function alvoDoLado(c, lista){
   var x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity, achou = false;
+  var tresD = c === v3, L = tresD ? ladoV3() : c.lado;
   lista.forEach(function (i){
     var cp = D.comps[i];
-    if (!cp || !cp.bb || (cp.s !== c.lado && !cp.t)) return;
+    if (!cp || !cp.bb || (cp.s !== L && !cp.t)) return;
     achou = true;
+    /* em 3D a caixa da peça e a PROJETADA: a mesma peça ocupa outro retangulo na tela
+       conforme o angulo, e mirar pela caixa do mundo erraria o alvo */
+    if (tresD){
+      var z = L ? -ESP/2 : ESP/2;
+      [[cp.bb[0],cp.bb[1]],[cp.bb[2],cp.bb[1]],[cp.bb[2],cp.bb[3]],[cp.bb[0],cp.bb[3]]]
+        .forEach(function (q){
+          var p = pr3(q[0], q[1], z);
+          x1 = Math.min(x1, p[0]); y1 = Math.min(y1, p[1]);
+          x2 = Math.max(x2, p[0]); y2 = Math.max(y2, p[1]);
+        });
+      return;
+    }
     x1 = Math.min(x1, cp.bb[0]); y1 = Math.min(y1, cp.bb[1]);
     x2 = Math.max(x2, cp.bb[2]); y2 = Math.max(y2, cp.bb[3]);
   });
@@ -746,11 +1234,20 @@ function enquadra(lista){
   var faces = {};
   lista.forEach(function (i){ var c = D.comps[i]; if (c) faces[c.s] = 1; });
   var quais = Object.keys(faces);
-  if (quais.length === 1) aplicaLayout(quais[0] === '0' ? 'f' : 'b');
+  if (v3.on){
+    /* em 3D a "tela" e uma so: se a peça esta na face escondida, vira a placa - senao o
+       alvoDoLado nao acha nada, o realce tambem e descartado, e escolher na lista pareceria
+       nao fazer nada */
+    var precisa = quais.length === 1 ? (quais[0] === '0' ? 0 : 1) : null;
+    if (precisa !== null && precisa !== ladoV3() && !lista.some(function (i){
+      return D.comps[i] && D.comps[i].t;         /* passante ja aparece dos dois lados */
+    })) viraFace3();
+  }
+  else if (quais.length === 1) aplicaLayout(quais[0] === '0' ? 'f' : 'b');
   else if (quais.length > 1 && layoutAtual !== 'lr') aplicaLayout('lr');
   requestAnimationFrame(function (){
     var pares = [];
-    cams.forEach(function (c){
+    (v3.on ? [v3] : cams).forEach(function (c){
       if (!c) return;
       var alvo = alvoDoLado(c, lista);
       if (!alvo) return;
@@ -951,16 +1448,62 @@ function inicia(){
   document.getElementById('gavetaFecha').onclick = function (){ abreGaveta(false); };
   gvBg.onclick = function (){ abreGaveta(false); };
   document.addEventListener('keydown', function (ev){
-    if (ev.key !== 'Escape') return;
-    if (document.getElementById('modalBg').classList.contains('on')) fechaModal();
-    else abreGaveta(false);
+    if (ev.key === 'Escape'){
+      if (document.getElementById('modalBg').classList.contains('on')) fechaModal();
+      else { fechaMenu3(); abreGaveta(false); }
+      return;
+    }
+    if (!v3.on) return;
+    /* quem esta digitando no filtro nao esta dando atalho: "c" ali e a letra c */
+    var t = ev.target && ev.target.tagName;
+    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT') return;
+    if ((ev.key === 'f' || ev.key === 'F') && (ev.ctrlKey || ev.metaKey)){
+      if (ev.preventDefault) ev.preventDefault();   /* Ctrl+F e a busca do navegador */
+      fechaMenu3(); viraFace3();
+      return;
+    }
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if (ev.key === 'c' || ev.key === 'C'){ fechaMenu3(); centra3(); }
   });
   [].forEach.call(document.querySelectorAll('[data-layout]'), function (b){
-    b.onclick = function (){ aplicaLayout(b.dataset.layout); };
+    b.onclick = function (){
+      if (v3.on) poe3D(false);
+      aplicaLayout(b.dataset.layout);
+    };
   });
   document.getElementById('btFace').onclick = function (){
+    if (v3.on) poe3D(false);      /* escolher um layout 2D sai do 3D */
     aplicaLayout(layoutAtual === 'f' ? 'b' : layoutAtual === 'b' ? 'f' : faceAtual);
   };
+  v3.cv = document.getElementById('cv3');
+  ligaV3();
+  /* o quadradinho da frente entra pelo lado de cima; o do verso, olhando por baixo */
+  document.getElementById('d3f').onclick = function (){ v3.pitch = Math.abs(v3.pitch); poe3D(true); };
+  document.getElementById('d3b').onclick = function (){ v3.pitch = -Math.abs(v3.pitch); poe3D(true); };
+  document.getElementById('d3off').onclick = function (){ poe3D(false); };
+  [].forEach.call(document.querySelectorAll('[data-m3]'), function (b){
+    b.onclick = function (){
+      var k = b.dataset.m3;
+      if (k === 'pos'){                       /* so desdobra: nao e uma acao */
+        var sub = document.getElementById('sub3');
+        var abriu = !sub.classList.contains('on');
+        sub.classList.toggle('on', abriu);
+        b.setAttribute('aria-expanded', String(abriu));
+        return;
+      }
+      fechaMenu3();
+      if (k === 'girar') gira360();
+      else if (k === 'centrar') centra3();
+      else if (k === 'esp') viraFace3();      /* mesmo gesto do Ctrl+F: nao tira do lugar */
+      else posiciona3(parseInt(k.slice(1), 10));
+    };
+  });
+  /* clicar em qualquer outro lugar fecha o menu, como todo menu de contexto faz */
+  document.addEventListener('pointerdown', function (ev){
+    var m = document.getElementById('menu3');
+    if (m.classList.contains('on') && ev.target !== m && !(ev.target && ev.target.dataset &&
+        ev.target.dataset.m3)) fechaMenu3();
+  });
   [].forEach.call(document.querySelectorAll('[data-modo]'), function (b){
     b.setAttribute('aria-pressed', String(b.dataset.modo === modo));
     b.onclick = function (){
@@ -1062,6 +1605,8 @@ function html(m, meta){
     (on ? 'true' : 'false') + '">' + svg + '</button>';
   /* na gaveta a opcao vira caixa de marcar de verdade: e o gesto de uma lista de ajustes,
      nao o de uma barra de ferramentas */
+  const d3bt = id =>
+    '<button class="d3" id="' + id + '" title="ver a placa em 3D">3D</button>';
   const check = (val, rot, on) =>
     '<label class="gv-item"><input type="checkbox" data-ver="' + val + '"' +
     (on ? ' checked' : '') + '>' + rot + '</label>';
@@ -1101,8 +1646,13 @@ function html(m, meta){
   L.push('<button class="t ic" id="btGaveta" title="mais opções">' + SVG.ajustes + '</button>');
   L.push('</div></header>');
   L.push('<main><div id="placas">');
-  L.push('<div class="cv"><span class="lbl">Frente</span><canvas id="cv0"></canvas></div>');
-  L.push('<div class="cv"><span class="lbl">Verso</span><canvas id="cv1"></canvas></div>');
+  L.push('<div class="cv"><span class="lbl">Frente</span>' + d3bt('d3f') + '<canvas id="cv0"></canvas></div>');
+  L.push('<div class="cv"><span class="lbl">Verso</span>' + d3bt('d3b') + '<canvas id="cv1"></canvas></div>');
+  /* a vista 3D e UMA so: em tres dimensoes nao ha "canvas da frente" e "canvas do verso",
+     ha uma placa que se gira */
+  L.push('<div class="cv cv3"><span class="lbl">3D — arraste move · botão direito gira</span>' +
+         '<button class="d3" id="d3off" title="voltar para 2D">2D</button>' +
+         '<canvas id="cv3"></canvas></div>');
   L.push('</div>');
   L.push('<div id="hsplit" title="arraste para redimensionar a lista"></div>');
   /* a busca e o "limpar" moram COM a lista: e nela que se procura, e atravessar a tela ate
@@ -1143,11 +1693,30 @@ function html(m, meta){
          botao('data-modo', 'grupo', 'Agrupado', true) +
          botao('data-modo', 'peca', 'Por peça', false) +
          '</div>' +
+         '<div class="gv-tit">atalhos da vista 3D</div>' +
+         '<div class="gv-ajuda">' +
+         '<div><kbd>C</kbd> centralizar a placa</div>' +
+         '<div><kbd>Ctrl</kbd>+<kbd>F</kbd> virar a face</div>' +
+         '<div>arrastar: mover a vista</div>' +
+         '<div>botão direito: girar pelo ponto clicado</div>' +
+         '<div>clique direito rápido: menu (posicionar, centralizar)</div>' +
+         '<div>roda: aproximar</div>' +
+         '</div>' +
          '<div class="gv-tit">aparência</div>' +
          '<label class="gv-item"><input type="checkbox" id="escuro"' +
          (o.dark ? ' checked' : '') + '>Tema escuro</label>' +
          '</aside>');
 
+  L.push('<div id="menu3">' +
+         '<button data-m3="girar">Virar 360°</button>' +
+         '<button data-m3="centrar">Centralizar</button>' +
+         '<button data-m3="pos" class="pai">Posicionar<span>▸</span></button>' +
+         '<div id="sub3">' +
+         '<button data-m3="p90">90°</button>' +
+         '<button data-m3="p180">180°</button>' +
+         '<button data-m3="p270">270°</button>' +
+         '<button data-m3="esp">Espelhar</button>' +
+         '</div></div>');
   L.push('<div id="modalBg"><div class="modal" role="dialog" aria-modal="true">' +
          '<h2 id="modalTit"></h2><p id="modalTxt"></p>' +
          '<div class="acoes"><button class="t" id="modalNao">Não</button>' +

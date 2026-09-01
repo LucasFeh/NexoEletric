@@ -35,6 +35,9 @@ const B = board({
     ]),
     /* no canto oposto da mesma face: e o par distante que a transicao guiada percorre */
     comp('C1', 'Top', '100n', 'CAP 0805', 17, 17),
+    /* SMD so do verso, sem pad passante: e a peça que so existe na face escondida, e o unico
+       caso em que a guiada em 3D precisa VIRAR a placa para mostra-la */
+    comp('C2', 'Bottom', '22u', 'CAP 1206', 16, 4),
   ],
   silk: [{ id:'s1', layer:'TopOverlay', kind:'line', x1:1, y1:1, x2:9, y2:1, w:0.2 },
          { id:'s2', layer:'BottomOverlay', kind:'arc', cx:5, cy:15, r:1, sa:0, ea:180, w:0.2 }],
@@ -58,13 +61,13 @@ assert.strictEqual(Bom.ladoDe('Mid1'), null);
 assert.strictEqual(m.tracks.length, 1, 'a trilha de camada interna nao entra');
 
 /* ═══════════════ agrupamento ═══════════════ */
-assert.strictEqual(m.stats.comps, 4);
+assert.strictEqual(m.stats.comps, 5);
 assert.strictEqual(m.stats.frente, 3);
-assert.strictEqual(m.stats.verso, 1);
-assert.strictEqual(m.groups.length, 3, '10k/RES 0805 junta R1 e R10; 1k e 100n sao outros');
+assert.strictEqual(m.stats.verso, 2);
+assert.strictEqual(m.groups.length, 4, '10k/RES 0805 junta R1 e R10; o resto e um por grupo');
 
 /* R2 antes de R10: ordem natural, senao a bancada procura na sequencia errada */
-assert.deepStrictEqual(m.comps.map(c => c.ref), ['C1', 'R1', 'R2', 'R10']);
+assert.deepStrictEqual(m.comps.map(c => c.ref), ['C1', 'C2', 'R1', 'R2', 'R10']);
 const g10k = m.groups.find(g => g.val === '10k');
 assert.strictEqual(g10k.qty, 2);
 assert.deepStrictEqual(g10k.refs.map(i => m.comps[i].ref), ['R1', 'R10']);
@@ -268,12 +271,18 @@ if (fs.existsSync(path.join(__dirname, '..', 'Projects', 'TCMS_Reader', 'board.j
 function montaAmbiente(){
   const ops = [];
   const ctx = {};
-  ['setTransform','clearRect','save','restore','translate','beginPath','moveTo',
+  ['setTransform','save','restore','translate','beginPath','moveTo',
    'lineTo','closePath','fill','stroke','arc','fillRect','strokeRect']
     .forEach(k => { ctx[k] = function(){ ops.push(k); }; });
+  /* clearRect abre cada quadro: e o gancho para medir onde a placa esta DURANTE a animação */
+  const amb = { aoLimpar: null };
+  ctx.clearRect = function(){ ops.push('clearRect'); if (amb.aoLimpar) amb.aoLimpar(); };
   /* a escala do desenho e o único sinal daqui de que a câmera mudou de zoom */
-  const escalas = [];
+  const escalas = [], cores = [];
   ctx.scale = function (sx, sy){ ops.push('scale'); escalas.push(sy); };
+  /* a cor diz O QUE foi desenhado - e o único jeito, daqui, de separar substrato de cobre */
+  ctx.fill = function (){ ops.push('fill'); cores.push(ctx.fillStyle); };
+  ctx.stroke = function (){ ops.push('stroke'); cores.push(ctx.strokeStyle); };
   const elems = {};
   /* textContent = '' limpa os filhos, como no DOM de verdade - sem isso a tabela
      acumularia as linhas de cada montaBom e o teste mediria lixo */
@@ -285,9 +294,16 @@ function montaAmbiente(){
     style:{ display:'', props:{}, setProperty(k, v){ this.props[k] = v; } },
     dataset:{}, children:[], width:400, height:300,
     /* canvas dentro de pai display:none mede zero no navegador - sem isso o teste desenharia
-       a face escondida e mediria a câmera errada */
-    get clientWidth(){ return (this._pai && this._pai.classes.has('oculta')) ? 0 : 400; },
-    get clientHeight(){ return (this._pai && this._pai.classes.has('oculta')) ? 0 : 300; },
+       a face escondida e mediria a câmera errada. Vale para os dois jeitos de esconder: a
+       classe 'oculta' de um layout de uma face só, e a regra #placas.tres-d .cv que apaga as
+       duas vistas 2D enquanto o 3D está aberto. */
+    escondido(){
+      if (this._pai && this._pai.classes.has('oculta')) return true;
+      return (this.id === 'cv0' || this.id === 'cv1') &&
+             !!(elems.placas && elems.placas.classes.has('tres-d'));
+    },
+    get clientWidth(){ return this.escondido() ? 0 : 400; },
+    get clientHeight(){ return this.escondido() ? 0 : 300; },
     classes:new Set(),
     get classList(){
       const self = this;
@@ -314,6 +330,8 @@ function montaAmbiente(){
   const doc = {
     getElementById(id){ return (elems[id] = elems[id] || mk(id)); },
     querySelector(sel){
+      if (sel === '[data-m3="pos"]')
+        return doc.querySelectorAll('[data-m3]').find(b => b.dataset.m3 === 'pos');
       if (!elems['@' + sel]) {
         const e = mk(sel);
         /* uma janela de 1000 px: com 400 o piso da lista satura e o teste nao mede nada */
@@ -334,12 +352,23 @@ function montaAmbiente(){
       if (sel === '[data-modo]')
         return (elems.__modo = elems.__modo ||
                 ['grupo','peca'].map(k => { const e = mk('b'); e.dataset.modo = k; return e; }));
+      if (sel === '[data-m3]')
+        return (elems.__m3 = elems.__m3 ||
+                ['girar','centrar','pos','p90','p180','p270','esp']
+                  .map(k => { const e = mk('b'); e.dataset.m3 = k; return e; }));
       return [];
     },
-    addEventListener(ev, fn){ if (ev === 'DOMContentLoaded') doc.__boot = fn; },
+    /* guarda TODO ouvinte de documento: os atalhos e o fecha-menu moram nele */
+    ouvintes:{},
+    addEventListener(ev, fn){
+      if (ev === 'DOMContentLoaded') doc.__boot = fn;
+      (doc.ouvintes[ev] = doc.ouvintes[ev] || []).push(fn);
+    },
+    dispara(ev, arg){ (doc.ouvintes[ev] || []).forEach(fn => fn(arg)); },
     body: mk('body'),
   };
-  return { ops, doc, elems, escalas };
+  amb.ops = ops; amb.doc = doc; amb.elems = elems; amb.escalas = escalas; amb.cores = cores;
+  return amb;
 }
 
 {
@@ -354,7 +383,9 @@ function montaAmbiente(){
   let relogio = 0;
   const janela = {
     devicePixelRatio: 1,
-    addEventListener(){},
+    ouvintes: {},
+    addEventListener(ev, fn){ (janela.ouvintes[ev] = janela.ouvintes[ev] || []).push(fn); },
+    dispara(ev, arg){ (janela.ouvintes[ev] || []).forEach(fn => fn(arg)); },
     requestAnimationFrame(fn){ relogio += 16; fn(relogio); },
     confirm(){ return true; },
     setTimeout(fn){ pendentes.push(fn); return pendentes.length; },
@@ -369,7 +400,10 @@ function montaAmbiente(){
   /* o srcdoc da previa tem origem opaca e o localStorage LANCA - o runtime tem que aguentar */
   const rodar = new Function('document', 'window', 'localStorage', 'requestAnimationFrame',
                              'confirm', 'devicePixelRatio', 'setTimeout', 'clearTimeout',
-                             blocos[0] + ';' + blocos[1] + '; return { boot: document.__boot };');
+                             blocos[0] + ';' + blocos[1] +
+                             '; return { boot: document.__boot, v3: function(){ return v3; },' +
+                             '   pr3: function (a,b,c){ return pr3(a,b,c); }, ladoV3: ladoV3,' +
+                             '   cams0: function(){ return cams[0]; } };');
   const r = rodar(amb.doc, janela, janela.localStorage, janela.requestAnimationFrame,
                   janela.confirm, 1, janela.setTimeout, janela.clearTimeout);
   assert.ok(typeof r.boot === 'function', 'o runtime registra o boot no DOMContentLoaded');
@@ -659,6 +693,329 @@ function montaAmbiente(){
                            'um clique na caixa desliga a guiada de verdade');
   }
 
+  /* ── a vista 3D ──
+     A placa é 2,5D: tudo mora em três alturas, e por isso o pintor resolve a oclusão sem
+     z-buffer. O que dá para conferir daqui é a projeção (exata) e o que foi desenhado (pela
+     cor de cada preenchimento). */
+  {
+    const v3 = r.v3(), cams0 = r.cams0;
+    /* clicar na linha ja selecionada desfaz a seleção - limpar antes evita esse tropeco */
+    const escolheNada = () => {
+      const sel = amb.elems.linhas.children.find(tr => tr.getAttribute('aria-selected') === 'true');
+      if (sel) sel.onclick();
+    };
+    const perto = (a, b) => Math.abs(a - b) < 1e-9;
+    /* onde o centro da placa cai na tela, pela mesma conta que o desenho usa */
+    const centroNaTela = () => {
+      const b = m.bbox;
+      const p = r.pr3((b.x1 + b.x2) / 2, (b.y1 + b.y2) / 2, 0);
+      const W = amb.elems.cv3.clientWidth, H = amb.elems.cv3.clientHeight;
+      return [W/2 + (p[0] - v3.cx) * v3.esc, H/2 - (p[1] - v3.cy) * v3.esc];
+    };
+    const noMeio = (msg) => {
+      const c = centroNaTela();
+      const W = amb.elems.cv3.clientWidth, H = amb.elems.cv3.clientHeight;
+      assert.ok(Math.abs(c[0] - W/2) < 1e-9 && Math.abs(c[1] - H/2) < 1e-9,
+                msg + ': ' + c.map(v => v.toFixed(2)).join(', '));
+    };
+
+    /* de cima (pitch 90°) a projeção é a identidade em XY e a espessura desaparece */
+    v3.yaw = 0; v3.pitch = Math.PI / 2;
+    assert.ok(perto(r.pr3(10, 20, 0)[0], 10) && perto(r.pr3(10, 20, 0)[1], 20),
+              'de cima, a projeção é o próprio XY');
+    assert.ok(perto(r.pr3(0, 0, 0.8)[1], 0), 'e a espessura não aparece');
+    /* de lado (pitch 0) o Y desaparece e quem manda é a espessura */
+    v3.pitch = 0;
+    assert.ok(perto(r.pr3(0, 10, 0)[1], 0), 'de lado, o Y some');
+    assert.ok(perto(r.pr3(0, 0, 0.8)[1], 0.8), 'e a espessura vira a altura na tela');
+    /* girar troca os eixos */
+    v3.yaw = Math.PI / 2; v3.pitch = Math.PI / 2;
+    assert.ok(perto(r.pr3(10, 0, 0)[1], 10), 'yaw de 90° leva o X para o Y');
+    /* o sinal do pitch é o lado que se vê */
+    v3.pitch = 0.9;  assert.strictEqual(r.ladoV3(), 0, 'olhando de cima, vê-se a frente');
+    v3.pitch = -0.9; assert.strictEqual(r.ladoV3(), 1, 'olhando de baixo, vê-se o verso');
+
+    /* o quadradinho liga o 3D e desenha a placa */
+    amb.ops.length = 0; amb.cores.length = 0;
+    amb.elems.d3f.onclick();
+    assert.ok(v3.on, 'o quadradinho liga o 3D');
+    assert.ok(amb.elems.placas.classList.contains('tres-d'), 'e a área troca de vista');
+    assert.strictEqual(r.ladoV3(), 0, 'o quadradinho da frente entra por cima');
+    /* e ABRE na pose de origem: reta, virada para cima e centrada - abrir de esguelha
+       obrigaria a centralizar antes de olhar qualquer coisa */
+    assert.strictEqual(v3.yaw, 0, 'o 3D abre com a placa reta');
+    assert.ok(perto(Math.abs(v3.pitch), Math.PI/2), 'e virada para cima');
+    noMeio('o 3D abre com a placa centrada');
+    assert.ok(amb.ops.filter(o => o === 'fill').length > 10, 'desenhou o substrato e o cobre');
+    /* parede, face e metal têm que aparecer: é o que faz a placa parecer uma placa */
+    assert.ok(amb.cores.includes('#0d4a22'), 'a parede do FR4 (a espessura)');
+    assert.ok(amb.cores.includes('#176a32'), 'a face de cima');
+    assert.ok(amb.cores.includes('#d7d9de'), 'o metal dos pads');
+    assert.ok(v3.esc > 0 && isFinite(v3.cx) && isFinite(v3.cy), 'enquadrou a placa');
+
+    /* ── navegação no molde do Altium: esquerdo move, direito gira ── */
+    const d3 = (ev, arg) => (amb.elems.cv3.ouvintes[ev] || []).forEach(f => f(arg));
+    /* onde o pivô está na tela, pela mesma conta que o desenho usa */
+    const telaDoPivo = () => {
+      const p = r.pr3(v3.piv[0], v3.piv[1], 0);
+      const W = amb.elems.cv3.clientWidth, H = amb.elems.cv3.clientHeight;
+      return [W/2 + (p[0] - v3.cx) * v3.esc, H/2 - (p[1] - v3.cy) * v3.esc];
+    };
+
+    /* o ESQUERDO move a vista, e não gira */
+    const cx0 = v3.cx, yaw0 = v3.yaw, pitch0 = v3.pitch;
+    d3('pointerdown', { button:0, clientX:0, clientY:0, pointerId:1, preventDefault(){} });
+    d3('pointermove', { clientX:40, clientY:25 });
+    assert.ok(Math.abs(v3.cx - cx0) > 1e-9, 'o botão esquerdo move a vista');
+    assert.strictEqual(v3.yaw, yaw0, 'e não gira');
+    assert.strictEqual(v3.pitch, pitch0);
+    d3('pointerup', {});
+    assert.strictEqual(v3.piv, null, 'mover não acende pivô nenhum');
+
+    /* o DIREITO gira em torno do ponto clicado, e marca o pivô na tela */
+    amb.cores.length = 0;
+    d3('pointerdown', { button:2, clientX:120, clientY:90, pointerId:1, preventDefault(){} });
+    assert.ok(v3.piv, 'o botão direito fixa um pivô');
+    const nasceu = telaDoPivo();
+    assert.ok(Math.abs(nasceu[0] - 120) < 0.01 && Math.abs(nasceu[1] - 90) < 0.01,
+              'o pivô nasce exatamente sob o cursor: ' + nasceu.map(v => v.toFixed(2)).join(', '));
+    assert.ok(amb.cores.includes('#eaeaea'), 'a esfera com a cruz aparece enquanto se segura');
+
+    const yaw1 = v3.yaw;
+    d3('pointermove', { clientX:180, clientY:60 });
+    assert.ok(Math.abs(v3.yaw - yaw1) > 0.1, 'arrastar com o direito gira');
+    const depois = telaDoPivo();
+    /* ESTE é o ponto do exercício: girar em torno do que se está olhando. Se o pivô sair do
+       lugar, a placa foge do cursor e a pessoa perde o que mirava. */
+    assert.ok(Math.abs(depois[0] - 120) < 0.01 && Math.abs(depois[1] - 90) < 0.01,
+              'o pivô fica parado no mesmo pixel enquanto gira: ' +
+              depois.map(v => v.toFixed(2)).join(', '));
+
+    /* passar do plano vira a placa e mostra o verso */
+    d3('pointermove', { clientX:180, clientY:460 });
+    assert.strictEqual(r.ladoV3(), 1, 'arrastar para baixo vira a placa e mostra o verso');
+    d3('pointerup', {});
+    assert.strictEqual(v3.piv, null, 'soltando, a esfera some');
+    amb.cores.length = 0;
+    d3('wheel', { deltaY:0, deltaMode:0, clientX:100, clientY:80, preventDefault(){} });
+    assert.ok(!amb.cores.includes('#eaeaea'), 'e não volta a ser desenhada');
+    /* evento sem coordenada nao pode levar NaN para a camera - dali em diante a placa
+       simplesmente sumiria */
+    d3('wheel', { deltaY:-100, deltaMode:0, preventDefault(){} });
+    assert.ok(isFinite(v3.cx) && isFinite(v3.cy), 'a camera sobrevive a um evento capenga');
+
+    /* a roda amplia ancorada no cursor: o ponto sob o ponteiro não sai do lugar */
+    v3.pitch = 0.9;
+    const soltaWheel = { deltaY:-200, deltaMode:0, clientX:150, clientY:110, preventDefault(){} };
+    const noCursor = () => {
+      const W = amb.elems.cv3.clientWidth, H = amb.elems.cv3.clientHeight;
+      return [(150 - W/2) / v3.esc + v3.cx, -(110 - H/2) / v3.esc + v3.cy];
+    };
+    const esc0 = v3.esc, alvo = noCursor();
+    d3('wheel', soltaWheel);
+    const alvo2 = noCursor();
+    assert.ok(v3.esc > esc0, 'a roda aproxima');
+    assert.ok(Math.abs(alvo2[0] - alvo[0]) < 1e-9 && Math.abs(alvo2[1] - alvo[1]) < 1e-9,
+              'e o ponto sob o cursor fica onde estava');
+
+    /* ── atalhos e menu do clique direito ── */
+    /* ── C: a placa volta CENTRADA e RETA, e não só reenquadrada no ângulo torto ── */
+    amb.elems.d3off.onclick(); amb.elems.d3f.onclick();
+    /* tomba a vista de todo jeito: gira e arrasta para longe */
+    d3('pointerdown', { button:2, clientX:100, clientY:80, pointerId:1, preventDefault(){} });
+    d3('pointermove', { clientX:190, clientY:40 });
+    d3('pointerup', { clientX:190, clientY:40 });
+    d3('pointerdown', { button:0, clientX:0, clientY:0, pointerId:1, preventDefault(){} });
+    d3('pointermove', { clientX:90, clientY:70 });
+    d3('pointerup', { clientX:90, clientY:70 });
+    assert.ok(Math.abs(v3.yaw) > 0.1, 'a vista ficou torta');
+    const foraDoCentro = centroNaTela();
+    assert.ok(Math.abs(foraDoCentro[0] - 200) > 1, 'e fora do centro');
+
+    amb.doc.dispara('keydown', { key:'c', target:{ tagName:'BODY' } });
+    assert.strictEqual(v3.yaw, 0, 'C põe a placa reta');
+    assert.ok(Math.abs(Math.abs(v3.pitch) - Math.PI/2) < 1e-9, 'e virada para cima, como no 2D');
+    const W3 = amb.elems.cv3.clientWidth, H3 = amb.elems.cv3.clientHeight;
+    noMeio('e o centro da placa cai no centro da tela');
+    /* a FACE é preservada: quem confere o verso não pode ser jogado para a frente */
+    const face = r.ladoV3();
+    amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' }, preventDefault(){} });
+    amb.doc.dispara('keydown', { key:'c', target:{ tagName:'BODY' } });
+    assert.strictEqual(r.ladoV3(), face ? 0 : 1, 'centralizar não troca a face');
+    amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' }, preventDefault(){} });
+
+    /* ── Ctrl+F vira a face SEM tirar a placa do lugar ──
+       Inverter a inclinação espelha o eixo Y da projeção: sem recolocar a câmera, uma placa
+       centrada em Y = 40 mm saltaria para -40. Quem virou queria o outro lado do que estava
+       olhando, e não caçar a placa de novo. */
+    d3('pointerdown', { button:0, clientX:0, clientY:0, pointerId:1, preventDefault(){} });
+    d3('pointermove', { clientX:70, clientY:-45 });     /* sai do centro de propósito */
+    d3('pointerup', { clientX:70, clientY:-45 });
+    d3('wheel', { deltaY:-120, deltaMode:0, clientX:150, clientY:110, preventDefault(){} });
+    const ondeEstava = centroNaTela(), escAntes = v3.esc;
+    const antesLado = r.ladoV3();
+    let barrou = false;
+    amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' },
+                                 preventDefault(){ barrou = true; } });
+    assert.strictEqual(r.ladoV3(), antesLado ? 0 : 1, 'Ctrl+F vira a face');
+    assert.ok(barrou, 'e impede a busca do navegador');
+    const ondeFicou = centroNaTela();
+    assert.ok(Math.abs(ondeFicou[0] - ondeEstava[0]) < 1e-9 &&
+              Math.abs(ondeFicou[1] - ondeEstava[1]) < 1e-9,
+              'e a placa fica exatamente onde estava: ' +
+              ondeEstava.map(v => v.toFixed(2)).join(', ') + ' -> ' +
+              ondeFicou.map(v => v.toFixed(2)).join(', '));
+    assert.strictEqual(v3.esc, escAntes, 'e no mesmo zoom');
+    amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' },
+                                 preventDefault(){} });
+
+    /* digitando no filtro, letra e letra: nao pode virar atalho */
+    const cxAntes = v3.cx;
+    d3('pointerdown', { button:0, clientX:0, clientY:0, pointerId:1, preventDefault(){} });
+    d3('pointermove', { clientX:70, clientY:0 });
+    d3('pointerup', { clientX:70, clientY:0 });
+    amb.doc.dispara('keydown', { key:'c', target:{ tagName:'INPUT' } });
+    assert.ok(Math.abs(v3.cx - cxAntes) > 1e-9, 'C dentro de um campo não centraliza');
+
+    /* clique direito RÁPIDO abre o menu no ponto clicado */
+    const menu = amb.elems.menu3;
+    d3('pointerdown', { button:2, clientX:200, clientY:140, pointerId:1, preventDefault(){} });
+    d3('pointerup', { clientX:202, clientY:141 });
+    assert.ok(menu.classList.contains('on'), 'o clique direito rápido abre o menu');
+    assert.strictEqual(menu.style.left, '202px', 'no ponto clicado');
+    assert.strictEqual(menu.style.top, '141px');
+    /* arrastar com o direito gira, e NÃO abre menu */
+    menu.classList.remove('on');
+    d3('pointerdown', { button:2, clientX:200, clientY:140, pointerId:1, preventDefault(){} });
+    d3('pointermove', { clientX:260, clientY:140 });
+    d3('pointerup', { clientX:260, clientY:140 });
+    assert.ok(!menu.classList.contains('on'), 'arrastar não abre menu');
+
+    /* os dois itens do menu */
+    const item = k => amb.doc.querySelectorAll('[data-m3]').find(b => b.dataset.m3 === k);
+    d3('pointerdown', { button:0, clientX:0, clientY:0, pointerId:1, preventDefault(){} });
+    d3('pointermove', { clientX:80, clientY:60 });
+    d3('pointerup', { clientX:80, clientY:60 });
+    item('centrar').onclick();
+    /* por invariante: depois de girar, o enquadramento certo NÃO e mais o de antes - o que
+       tem que valer e que centralizar leve sempre ao MESMO lugar, saindo de onde for */
+    const centrado = [v3.cx, v3.cy, v3.esc];
+    d3('pointerdown', { button:0, clientX:0, clientY:0, pointerId:1, preventDefault(){} });
+    d3('pointermove', { clientX:-55, clientY:40 });
+    d3('pointerup', { clientX:-55, clientY:40 });
+    assert.ok(Math.abs(v3.cx - centrado[0]) > 1e-9, 'saiu do lugar de novo');
+    item('centrar').onclick();
+    assert.deepStrictEqual([v3.cx, v3.cy, v3.esc], centrado,
+                           '"Centralizar" leva sempre ao mesmo enquadramento');
+    /* ── o submenu "Posicionar" ── */
+    const sub = amb.elems.sub3, pai = item('pos');
+    assert.ok(!sub.classList.contains('on'), 'o submenu comeca fechado');
+    pai.onclick();
+    assert.ok(sub.classList.contains('on'), '"Posicionar" desdobra');
+    assert.strictEqual(pai.getAttribute('aria-expanded'), 'true');
+    pai.onclick();
+    assert.ok(!sub.classList.contains('on'), 'e dobra de volta');
+
+    /* cada pose e um angulo ABSOLUTO em torno da normal da placa, e reenquadra */
+    [['p90', 90], ['p180', 180], ['p270', 270]].forEach(([k, g]) => {
+      item(k).onclick();
+      assert.ok(Math.abs(v3.yaw - g * Math.PI / 180) < 1e-9, k + ' poe a placa em ' + g + ' graus');
+      const c = centroNaTela();
+      assert.ok(Math.abs(c[0] - W3/2) < 1e-9 && Math.abs(c[1] - H3/2) < 1e-9,
+                'e ela continua centrada em ' + g + ' graus');
+      assert.ok(!amb.elems.menu3.classList.contains('on'), 'e o menu fecha ao escolher');
+    });
+    /* "Espelhar" troca a face, e mantem a placa centrada */
+    const faceAntes = r.ladoV3(), ondeEsp = centroNaTela();
+    item('esp').onclick();
+    assert.strictEqual(r.ladoV3(), faceAntes ? 0 : 1, '"Espelhar" vira a face');
+    const depoisEsp = centroNaTela();
+    assert.ok(Math.abs(depoisEsp[0] - ondeEsp[0]) < 1e-9 &&
+              Math.abs(depoisEsp[1] - ondeEsp[1]) < 1e-9,
+              '"Espelhar" e o mesmo gesto do Ctrl+F: nao tira a placa do lugar');
+    item('esp').onclick();
+
+    const yawAntes = v3.yaw;
+    amb.ops.length = 0;
+    item('girar').onclick();
+    assert.ok(amb.ops.filter(o => o === 'clearRect').length > 20,
+              '"Virar 360" desenha a volta, quadro a quadro');
+    assert.ok(Math.abs(v3.yaw - yawAntes) < 1e-9,
+              'e termina no mesmo ângulo em que começou: ' + (v3.yaw - yawAntes));
+
+    /* ── REGRESSÃO: sair do 3D não pode devolver as telas 2D com a câmera destruída ──
+       Com o 3D aberto as duas vistas 2D estão em display:none e medem zero. Enquadrar um
+       canvas sem tamanho gravava esc = 1/(largura+4), e a placa voltava com menos de um pixel. */
+    amb.elems.d3off.onclick();
+    /* parte de um enquadramento limpo: o bloco acima passeou pelo 3D e pelas duas faces, e a
+       regressão tem que medir o que ELA faz, e nao o que sobrou dali */
+    amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'lr').onclick();
+    const escBom = cams0().esc;
+    assert.ok(escBom > 1, 'a câmera 2D está sã antes: ' + escBom);
+    amb.elems.d3f.onclick();
+    janela.dispara('resize');                     /* o caminho que envenenava */
+    amb.elems.d3off.onclick();
+    assert.strictEqual(cams0().esc, escBom,
+                       'voltar do 3D devolve a câmera 2D intacta: ' + cams0().esc);
+    /* e o outro caminho: a visão guiada chama aplicaLayout de dentro do 3D */
+    amb.elems.d3f.onclick();
+    linhaDe('R1').onclick();
+    amb.elems.d3off.onclick();
+    assert.strictEqual(cams0().esc, escBom, 'nem pela visão guiada');
+    amb.elems.d3f.onclick();
+
+    /* ── REGRESSÃO: "Virar 360" gira NO LUGAR ──
+       pr3 gira em torno de (0,0) do mundo, e o board.js entrega coordenadas longe da origem:
+       sem reancorar, a placa orbita e some da tela em boa parte da volta. */
+    const centros = [];
+    amb.aoLimpar = () => centros.push(centroNaTela());
+    amb.doc.querySelectorAll('[data-m3]').find(b => b.dataset.m3 === 'girar').onclick();
+    amb.aoLimpar = null;
+    assert.ok(centros.length > 20, 'a volta desenhou vários quadros: ' + centros.length);
+    const desvio = centros.reduce((mx, c) =>
+      Math.max(mx, Math.abs(c[0] - W3/2), Math.abs(c[1] - H3/2)), 0);
+    assert.ok(desvio < 1e-6,
+              'a placa gira no lugar, sem orbitar: desvio máximo ' + desvio.toFixed(3) + ' px');
+
+    /* ── REGRESSÃO: de perfil não se inventa pivô ──
+       Com |sin(pitch)| pequeno não existe ponto da placa sob o cursor. Fingir que existe punha
+       a esfera longe do clique e teleportava a vista no primeiro pixel de arrasto. */
+    v3.pitch = 0.01;
+    const cxPerfil = v3.cx;
+    d3('pointerdown', { button:2, clientX:30, clientY:20, pointerId:1, preventDefault(){} });
+    assert.strictEqual(v3.piv, null, 'de perfil não há pivô');
+    d3('pointermove', { clientX:34, clientY:20 });
+    assert.strictEqual(v3.cx, cxPerfil, 'e a vista não é teleportada');
+    d3('pointerup', { clientX:34, clientY:20 });
+    amb.elems.d3off.onclick(); amb.elems.d3f.onclick();
+
+    /* ── REGRESSÃO: em 3D a guiada vira a placa para achar a peça do outro lado ── */
+    assert.strictEqual(r.ladoV3(), 0, 'olhando a frente');
+    /* a guiada tem que estar ligada: e ela quem leva a câmera até a peça */
+    if (!amb.elems.cbGuiada.checked){ amb.elems.cbGuiada.checked = true; amb.elems.cbGuiada.onclick(); }
+    escolheNada();                                /* limpa a seleção, para o clique não desfazer */
+    amb.cores.length = 0;
+    linhaDe('C2').onclick();                      /* C2 só existe no verso */
+    assert.strictEqual(r.ladoV3(), 1, 'a guiada vira a placa para a face da peça');
+    assert.ok(amb.cores.includes('#25d07d'), 'e a peça acende');
+
+    /* o realce continua valendo em 3D */
+    amb.cores.length = 0;
+    linhaDe('R2').onclick();                      /* R2 é do verso, e o verso está à vista */
+    assert.ok(amb.cores.includes('#25d07d'), 'a peça escolhida acende também em 3D');
+
+    /* escolher um layout 2D sai do 3D - não dá para estar nos dois */
+    amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'lr').onclick();
+    assert.ok(!v3.on, 'escolher um layout 2D sai do 3D');
+    assert.ok(!amb.elems.placas.classList.contains('tres-d'));
+    /* e o quadradinho do verso entra por baixo */
+    v3.pitch = 0.9;
+    amb.elems.d3b.onclick();
+    assert.strictEqual(r.ladoV3(), 1, 'o quadradinho do verso entra olhando por baixo');
+    amb.elems.d3off.onclick();
+    assert.ok(!v3.on, 'o "2D" volta');
+  }
+
   /* no layout "so a lista" nao ha o que dividir */
   amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'bom').onclick();
   assert.ok(sp.classList.contains('oculta'), 'sem desenho, a divisoria some');
@@ -688,6 +1045,21 @@ function montaAmbiente(){
   const hn = Bom.html(mn, { proj:'n' });
   assert.ok(hn.includes('data-modo="peca"'), 'a pagina tem o bot\u00e3o da vista por peça');
   assert.ok(hn.includes('id="hsplit"'), 'a divis\u00f3ria da lista');
+  /* o quadradinho "3D" em cada vista, e a vista 3D, que \u00e9 uma s\u00f3 */
+  ['d3f','d3b','d3off'].forEach(k =>
+    assert.ok(hn.includes('id="' + k + '"'), 'falta o bot\u00e3o ' + k));
+  assert.ok(hn.includes('id="cv3"'), 'o canvas do 3D');
+  assert.ok(/contextmenu/.test(hn), 'o menu do bot\u00e3o direito tem que ser impedido sobre o 3D');
+  assert.ok(hn.includes('id="menu3"'), 'o menu do clique direito');
+  ['girar','centrar','pos','p90','p180','p270','esp'].forEach(k =>
+    assert.ok(hn.includes('data-m3="' + k + '"'), 'falta o item ' + k + ' no menu'));
+  assert.ok(hn.includes('id="sub3"'), 'o submenu de posicionar');
+  /* a ajuda dos atalhos mora na gaveta, junto do resto dos ajustes */
+  const gav = hn.match(/<aside id="gaveta">[\s\S]*?<\/aside>/)[0];
+  assert.ok(gav.includes('atalhos da vista 3D'), 'a se\u00e7\u00e3o de atalhos');
+  assert.ok(gav.includes('<kbd>C</kbd>') && gav.includes('<kbd>Ctrl</kbd>'),
+            'os atalhos escritos com as teclas');
+  assert.ok((hn.match(/<canvas /g) || []).length === 3, 'dois canvas 2D e um 3D');
   /* a busca e o limpar moram COM a lista, e nao na barra de cima */
   assert.ok(/<div class="bom-bar">[\s\S]*?id="filtro"[\s\S]*?id="limpar"[\s\S]*?<\/div>/.test(hn),
             'filtro e limpar ficam colados na lista');

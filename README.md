@@ -482,6 +482,69 @@ peça, e a etiqueta de lado na coluna de designadores já diz onde cada uma cai.
 grupos segue o primeiro designador, em ordem natural (`R2` antes de `R10`), que é a ordem em que
 a bancada procura. Camada interna não entra — quem monta não alcança ela.
 
+**Vista 3D.** Um quadradinho **3D** no canto de cada vista troca as duas telas 2D por uma
+única tela da placa em três dimensões — substrato com espessura, cobre, pads, furos e
+serigrafia. A vista **abre na pose de origem** — placa reta, virada para cima, centrada e enquadrada, a
+mesma pose para onde o **Centralizar** volta. Abrir de esguelha obrigava a centralizar antes de
+olhar qualquer coisa.
+
+A navegação é a do Altium: o **botão esquerdo move** a vista, o **direito gira** — e gira em
+torno do ponto onde se clicou, marcado por uma **esfera com uma cruz** enquanto se segura.
+Girar sempre pelo centro da placa obriga a reenquadrar a cada volta; girando pelo ponto que se
+está olhando, o que interessa fica **parado no mesmo pixel**. Passar do plano vira a placa e
+mostra o verso; a roda aproxima, ancorada no cursor; o **2D** volta. (Sem modelo 3D dos
+componentes por enquanto — só a placa montada.)
+
+Um **clique direito rápido** — sem arrastar — abre um menu no ponto clicado, com **Virar 360°**
+(uma volta completa, com aceleração e freio, para a placa não “pular” no fechamento),
+**Centralizar** e **Posicionar** → 90°, 180°, 270° e **Espelhar**. As poses são ângulos
+**absolutos** em torno da normal da placa, e reenquadram — girada, ela ocupa outro retângulo na
+tela. O submenu **desdobra dentro** do menu em vez de flutuar ao lado: um painel que se abre
+não precisa adivinhar para que lado há espaço, e funciona igual no toque.
+
+**Centralizar recoloca a placa, e não só reenquadra.** Depois de tombar a vista, reenquadrar no
+ângulo tombado devolve a placa torta no meio da tela, que não é “centralizar” para quem pediu.
+Ela volta **reta e de frente** — a mesma pose da vista 2D, só que em 3D. A **face é preservada**:
+quem está conferindo o verso não quer ser jogado para a frente; para trocar de face existem o
+<kbd>Ctrl</kbd>+<kbd>F</kbd> e o **Espelhar**. Pelo teclado: <kbd>C</kbd> centraliza e <kbd>Ctrl</kbd>+<kbd>F</kbd> vira a
+face **sem tirar a placa do lugar** — e impede a busca do navegador. Virar exige recolocar a
+câmera: o sinal da inclinação é a face, mas invertê-lo espelha o eixo Y da projeção, e uma placa
+centrada em Y = 40 mm saltaria para −40. Quem virou queria o outro lado **do que estava
+olhando**, e não caçar a placa de novo. O **Espelhar** do menu é o mesmo gesto. As teclas são ignoradas enquanto se digita
+num campo: no filtro, “c” é a letra c. A lista de atalhos fica na **gaveta**, junto do resto
+dos ajustes.
+
+Feita **sem biblioteca nenhuma**, e não por teimosia: a página tem que abrir sozinha, em
+qualquer pasta, sem internet. E dá para fazer porque uma PCB é **2,5D** — tudo mora em três
+alturas (cobre do verso, substrato, cobre da frente), então o **algoritmo do pintor** resolve a
+oclusão inteira sem z-buffer: desenha-se a parede, depois a face que se vê, depois o cobre
+dela. Não há o que se intersectar, então não há o que ordenar por triângulo.
+
+A projeção é **ortográfica**: numa placa plana a perspectiva quase não acrescenta e custa
+exatidão de medida — o que se quer aqui é reconhecer a peça, não simular uma foto. O
+**sinal** da inclinação é o lado que se vê, e por isso virar a placa é um gesto só. Nada é
+espelhado: as coordenadas giram de verdade, então o verso em 3D é a placa virada na mão — ao
+contrário da vista **Verso** 2D, que é espelhada de propósito.
+
+As cores são as da placa real: verde de máscara no substrato, verde mais claro na trilha e no
+plano (que ficam **sob** a máscara, e por isso aparecem como relevo), metal exposto nos pads e
+vias, branco na serigrafia. A espessura é 1,6 mm — o `board.js` não traz esse dado, então vale
+o FR4 padrão.
+
+> **O traço sai em lote, agrupado por espessura.** O caro não é a conta da projeção, é a
+> chamada: um `stroke` por segmento dava **8.746 traços só de serigrafia** por quadro no
+> `PRJ-UR-DI261924`, e a órbita redesenha a cada movimento do ponteiro. Como a espessura é o
+> único atributo que muda entre eles, um caminho por espessura resolve: os 10.307 traços de
+> silk e trilha viraram **17 chamadas**, com o mesmo desenho na tela. Traço não tem regra de
+> preenchimento, então juntar segmentos num caminho só não muda o resultado — ao contrário do
+> `fill`, onde o sentido do polígono importa, e por isso o preenchimento continua um a um.
+> Sobram 3,0 ms de geometria por quadro na maior placa do acervo.
+
+Arco de serigrafia e de cobre entram achatados em polilinha: em 3D um arco no plano da placa
+vira uma **elipse** na tela, e o `ctx.arc` não serve. São **626 arcos de serigrafia** no acervo
+(236 só no `MID - DI261897`), então descartá-los deixava a placa visívelmente diferente da
+vista 2D.
+
 A divisória entre as opções e a prévia é **arrastável**, igual às da aba Laser — puxe até o
 fim (ou dê duplo clique) para fechar a lateral e dar a largura toda à prévia, e duplo clique
 de novo para devolver. A largura fica no navegador, não no projeto: é preferência de tela, e
