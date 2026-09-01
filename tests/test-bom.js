@@ -266,14 +266,25 @@ function montaAmbiente(){
     _txt:'',
     get textContent(){ return this._txt; },
     set textContent(v){ this._txt = v; if (v === '') this.children.length = 0; },
-    style:{ display:'' }, dataset:{}, children:[], width:400, height:300,
+    style:{ display:'', props:{}, setProperty(k, v){ this.props[k] = v; } },
+    dataset:{}, children:[], width:400, height:300,
     clientWidth:400, clientHeight:300,
-    classList:{ toggle(){}, contains(){ return false; }, add(){}, remove(){} },
+    classes:new Set(),
+    get classList(){
+      const self = this;
+      return {
+        toggle(k, v){ const on = v === undefined ? !self.classes.has(k) : !!v;
+                      if (on) self.classes.add(k); else self.classes.delete(k); },
+        contains(k){ return self.classes.has(k); },
+        add(k){ self.classes.add(k); }, remove(k){ self.classes.delete(k); },
+      };
+    },
     appendChild(c){ this.children.push(c); return c; },
     append(...cs){ cs.forEach(c => this.children.push(c)); },
     setAttribute(k, v){ this[k] = v; }, getAttribute(k){ return this[k]; },
     ouvintes: {},
     addEventListener(ev, fn){ (this.ouvintes[ev] = this.ouvintes[ev] || []).push(fn); },
+    removeEventListener(ev, fn){ this.ouvintes[ev] = (this.ouvintes[ev] || []).filter(f => f !== fn); },
     scrollIntoView(){}, focus(){}, setPointerCapture(){}, releasePointerCapture(){},
     getBoundingClientRect(){ return { left:0, top:0, width:400, height:300 }; },
     getContext(){ return ctx; },
@@ -281,12 +292,22 @@ function montaAmbiente(){
   });
   const doc = {
     getElementById(id){ return (elems[id] = elems[id] || mk(id)); },
+    querySelector(sel){
+      if (!elems['@' + sel]) {
+        const e = mk(sel);
+        /* uma janela de 1000 px: com 400 o piso da lista satura e o teste nao mede nada */
+        if (sel === 'main') e.getBoundingClientRect = () => ({ left:0, top:0, width:1000, height:600 });
+        elems['@' + sel] = e;
+      }
+      return elems['@' + sel];
+    },
     createElement(t){ return mk(t); },
     querySelectorAll(sel){
       if (sel === '[data-ver]')
         return ['pads','silk','refs','tracks','regions'].map(k => { const e = mk('b'); e.dataset.ver = k; return e; });
       if (sel === '[data-layout]')
-        return ['f','b','lr','bom'].map(k => { const e = mk('b'); e.dataset.layout = k; return e; });
+        return (elems.__layout = elems.__layout ||
+                ['f','b','lr','bom'].map(k => { const e = mk('b'); e.dataset.layout = k; return e; }));
       if (sel === '[data-modo]')
         return (elems.__modo = elems.__modo ||
                 ['grupo','peca'].map(k => { const e = mk('b'); e.dataset.modo = k; return e; }));
@@ -364,6 +385,53 @@ function montaAmbiente(){
   assert.strictEqual(
     amb.elems.linhas.children.filter(tr => tr.getAttribute('aria-selected') === 'true').length,
     antes, 'o pan nao pode trocar a sele\u00e7\u00e3o no fim do arrasto');
+
+  /* ── a lateral da lista ── largura e lado, os dois na mão de quem monta */
+  const mn = amb.doc.querySelector('main'), botLado = amb.elems.ladoLista;
+  /* a largura inicial sai da janela: 42% de 1000 */
+  assert.strictEqual(mn.style.props['--bomw'], '420px',
+                     'largura inicial sai da janela: ' + mn.style.props['--bomw']);
+  assert.ok(!mn.classList.contains('esq'), 'a lista comeca a direita');
+
+  botLado.onclick();
+  assert.ok(mn.classList.contains('esq'), 'o icone troca o lado da lista');
+  assert.ok(botLado.classList.contains('esq'), 'e o proprio icone espelha junto');
+  botLado.onclick();
+  assert.ok(!mn.classList.contains('esq'), 'e volta');
+
+  /* arrastar a divisoria: com a lista a DIREITA, puxar para a esquerda aumenta a lista */
+  const sp = amb.elems.hsplit;
+  const dispSp = (ev, x) => (sp.ouvintes[ev] || []).forEach(fn =>
+    fn({ clientX:x, clientY:0, pointerId:1, preventDefault(){} }));
+  dispSp('pointerdown', 300);
+  dispSp('pointermove', 200);
+  assert.strictEqual(mn.style.props['--bomw'], '520px',
+                     'lista a direita cresce ao arrastar para a esquerda: ' + mn.style.props['--bomw']);
+  /* o teto guarda 240 px de desenho mais os 6 da divisoria: 1000 - 246 = 754 */
+  dispSp('pointermove', -5000);
+  assert.strictEqual(mn.style.props['--bomw'], '754px', 'o teto nao deixa o desenho sumir');
+  dispSp('pointerup', 0);
+  /* e o piso nao deixa a lista sumir */
+  dispSp('pointerdown', 0);
+  dispSp('pointermove', 5000);
+  assert.strictEqual(mn.style.props['--bomw'], '200px', 'o piso nao deixa a lista sumir');
+  dispSp('pointermove', 400);
+  assert.strictEqual(mn.style.props['--bomw'], '354px', 'arrastar para a direita encolhe a lista');
+  dispSp('pointerup', 0);
+
+  /* com a lista na ESQUERDA o gesto inverte, e continua sendo o mesmo movimento da mao */
+  botLado.onclick();
+  dispSp('pointerdown', 0);
+  dispSp('pointermove', 100);
+  assert.strictEqual(mn.style.props['--bomw'], '454px',
+                     'lista a esquerda cresce ao arrastar para a direita: ' + mn.style.props['--bomw']);
+  dispSp('pointerup', 0);
+
+  /* no layout "so a lista" nao ha o que dividir */
+  amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'bom').onclick();
+  assert.ok(sp.classList.contains('oculta'), 'sem desenho, a divisoria some');
+  amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'lr').onclick();
+  assert.ok(!sp.classList.contains('oculta'), 'e volta com o desenho');
 }
 
 /* ═══════════════ net no modelo ═══════════════
@@ -384,6 +452,9 @@ function montaAmbiente(){
   assert.strictEqual(mn.vias[0].n, 'GND');
   const hn = Bom.html(mn, { proj:'n' });
   assert.ok(hn.includes('data-modo="peca"'), 'a pagina tem o bot\u00e3o da vista por peça');
+  assert.ok(hn.includes('id="hsplit"'), 'a divis\u00f3ria da lista');
+  assert.ok(hn.includes('id="ladoLista"'), 'o \u00edcone que troca o lado');
+  assert.ok(/main\.esq\{flex-direction:row-reverse\}/.test(hn), 'o CSS que inverte a ordem');
   assert.ok(/netSel/.test(hn), 'o runtime carrega o realce de net');
 }
 

@@ -433,6 +433,8 @@ O que a página gerada faz:
 | **clique num pad** | acende **a net inteira** (pads, trilhas, planos e vias) e seleciona o dono do pad — é por onde se segue um sinal na bancada |
 | **visto por linha** | fica no `localStorage` do navegador de quem monta; o rodapé conta quantas peças já foram |
 | **filtro** | casa contra valor, footprint e designadores |
+| **divisória da lista** | arraste para dar mais espaço ao desenho ou à lista |
+| **ícone de layout** | joga a lista para o outro lado da tela — o próprio ícone espelha junto |
 | **tema escuro** | e zoom/pan com roda e arraste em cada lado |
 
 O **visto** é gravado pela identidade do grupo (valor + footprint), e não pelo índice dele: pelo
@@ -451,7 +453,8 @@ trocar de placa não pode mexer nela. As duas abas usam a **mesma** implementaç
 
 A **prévia** na aba é o arquivo inteiro num `iframe` com `srcdoc`: o que se vê é literalmente o
 que vai ser salvo. Uma consequência esperada: dentro do `srcdoc` a origem é opaca, então o
-`localStorage` do visto **não** persiste na prévia — no arquivo salvo, sim.
+`localStorage` **não** persiste na prévia — nem o visto, nem o lado e a largura da lista. No
+arquivo salvo, sim: cada um que abre o BOM guarda a sua preferência de tela.
 
 **Salvar**
 
