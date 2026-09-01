@@ -495,8 +495,7 @@ está olhando, o que interessa fica **parado no mesmo pixel**. Passar do plano v
 mostra o verso; a roda aproxima, ancorada no cursor; o **2D** volta. (Sem modelo 3D dos
 componentes por enquanto — só a placa montada.)
 
-Um **clique direito rápido** — sem arrastar — abre um menu no ponto clicado, com **Virar 360°**
-(uma volta completa, com aceleração e freio, para a placa não “pular” no fechamento),
+Um **clique direito rápido** — sem arrastar — abre um menu no ponto clicado, com
 **Centralizar** e **Posicionar** → 90°, 180°, 270° e **Espelhar**. As poses são ângulos
 **absolutos** em torno da normal da placa, e reenquadram — girada, ela ocupa outro retângulo na
 tela. O submenu **desdobra dentro** do menu em vez de flutuar ao lado: um painel que se abre
@@ -507,10 +506,16 @@ não precisa adivinhar para que lado há espaço, e funciona igual no toque.
 Ela volta **reta e de frente** — a mesma pose da vista 2D, só que em 3D. A **face é preservada**:
 quem está conferindo o verso não quer ser jogado para a frente; para trocar de face existem o
 <kbd>Ctrl</kbd>+<kbd>F</kbd> e o **Espelhar**. Pelo teclado: <kbd>C</kbd> centraliza e <kbd>Ctrl</kbd>+<kbd>F</kbd> vira a
-face **sem tirar a placa do lugar** — e impede a busca do navegador. Virar exige recolocar a
-câmera: o sinal da inclinação é a face, mas invertê-lo espelha o eixo Y da projeção, e uma placa
-centrada em Y = 40 mm saltaria para −40. Quem virou queria o outro lado **do que estava
-olhando**, e não caçar a placa de novo. O **Espelhar** do menu é o mesmo gesto. As teclas são ignoradas enquanto se digita
+face **sem tirar a placa do lugar** — e impede a busca do navegador. O **Espelhar** do menu é o
+mesmo gesto.
+
+Virar é **dois movimentos, e não um**: a placa troca de face **e dá meia volta**, como a mão faz
+ao virá-la sobre a bancada. Só inverter a inclinação espelharia o eixo **Y**; com a meia volta
+junto, o espelho cai no **X** — a mesma convenção da vista **Verso** 2D. Sem isso, a mesma placa
+apareceria espelhada de um jeito no 2D e de outro no 3D.
+
+E virar exige **recolocar a câmera**: sem isso uma placa centrada em Y = 40 mm saltaria para
+−40. Quem virou queria o outro lado **do que estava olhando**, e não caçar a placa de novo. As teclas são ignoradas enquanto se digita
 num campo: no filtro, “c” é a letra c. A lista de atalhos fica na **gaveta**, junto do resto
 dos ajustes.
 

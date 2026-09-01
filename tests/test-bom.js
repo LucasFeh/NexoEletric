@@ -354,7 +354,7 @@ function montaAmbiente(){
                 ['grupo','peca'].map(k => { const e = mk('b'); e.dataset.modo = k; return e; }));
       if (sel === '[data-m3]')
         return (elems.__m3 = elems.__m3 ||
-                ['girar','centrar','pos','p90','p180','p270','esp']
+                ['centrar','pos','p90','p180','p270','esp']
                   .map(k => { const e = mk('b'); e.dataset.m3 = k; return e; }));
       return [];
     },
@@ -819,6 +819,17 @@ function montaAmbiente(){
               'e o ponto sob o cursor fica onde estava');
 
     /* ── atalhos e menu do clique direito ── */
+    /* ── virar a face espelha em X, e não em Y ──
+       É a mesma convenção da vista "Verso" 2D. Só inverter a inclinação espelharia o Y, e a
+       mesma placa apareceria espelhada de um jeito no 2D e de outro no 3D. */
+    amb.elems.d3off.onclick(); amb.elems.d3f.onclick();     /* pose de origem */
+    const antesX = r.pr3(30, 10, 0), antesY = r.pr3(10, 30, 0);
+    amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' }, preventDefault(){} });
+    const depoisX = r.pr3(30, 10, 0), depoisY = r.pr3(10, 30, 0);
+    assert.ok(Math.abs(depoisX[0] + antesX[0]) < 1e-9, 'o X inverte de sinal');
+    assert.ok(Math.abs(depoisY[1] - antesY[1]) < 1e-9, 'e o Y não');
+    amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' }, preventDefault(){} });
+
     /* ── C: a placa volta CENTRADA e RETA, e não só reenquadrada no ângulo torto ── */
     amb.elems.d3off.onclick(); amb.elems.d3f.onclick();
     /* tomba a vista de todo jeito: gira e arrasta para longe */
@@ -853,12 +864,14 @@ function montaAmbiente(){
     d3('pointerup', { clientX:70, clientY:-45 });
     d3('wheel', { deltaY:-120, deltaMode:0, clientX:150, clientY:110, preventDefault(){} });
     const ondeEstava = centroNaTela(), escAntes = v3.esc;
-    const antesLado = r.ladoV3();
+    const antesLado = r.ladoV3(), yawAntesF = v3.yaw;
     let barrou = false;
     amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' },
                                  preventDefault(){ barrou = true; } });
     assert.strictEqual(r.ladoV3(), antesLado ? 0 : 1, 'Ctrl+F vira a face');
     assert.ok(barrou, 'e impede a busca do navegador');
+    assert.ok(Math.abs(((v3.yaw - yawAntesF) % (2*Math.PI) + 2*Math.PI) % (2*Math.PI) - Math.PI) < 1e-9,
+              'e dá meia volta junto, como a mão faz ao virar a placa');
     const ondeFicou = centroNaTela();
     assert.ok(Math.abs(ondeFicou[0] - ondeEstava[0]) < 1e-9 &&
               Math.abs(ondeFicou[1] - ondeEstava[1]) < 1e-9,
@@ -935,14 +948,6 @@ function montaAmbiente(){
               '"Espelhar" e o mesmo gesto do Ctrl+F: nao tira a placa do lugar');
     item('esp').onclick();
 
-    const yawAntes = v3.yaw;
-    amb.ops.length = 0;
-    item('girar').onclick();
-    assert.ok(amb.ops.filter(o => o === 'clearRect').length > 20,
-              '"Virar 360" desenha a volta, quadro a quadro');
-    assert.ok(Math.abs(v3.yaw - yawAntes) < 1e-9,
-              'e termina no mesmo ângulo em que começou: ' + (v3.yaw - yawAntes));
-
     /* ── REGRESSÃO: sair do 3D não pode devolver as telas 2D com a câmera destruída ──
        Com o 3D aberto as duas vistas 2D estão em display:none e medem zero. Enquadrar um
        canvas sem tamanho gravava esc = 1/(largura+4), e a placa voltava com menos de um pixel. */
@@ -963,19 +968,6 @@ function montaAmbiente(){
     amb.elems.d3off.onclick();
     assert.strictEqual(cams0().esc, escBom, 'nem pela visão guiada');
     amb.elems.d3f.onclick();
-
-    /* ── REGRESSÃO: "Virar 360" gira NO LUGAR ──
-       pr3 gira em torno de (0,0) do mundo, e o board.js entrega coordenadas longe da origem:
-       sem reancorar, a placa orbita e some da tela em boa parte da volta. */
-    const centros = [];
-    amb.aoLimpar = () => centros.push(centroNaTela());
-    amb.doc.querySelectorAll('[data-m3]').find(b => b.dataset.m3 === 'girar').onclick();
-    amb.aoLimpar = null;
-    assert.ok(centros.length > 20, 'a volta desenhou vários quadros: ' + centros.length);
-    const desvio = centros.reduce((mx, c) =>
-      Math.max(mx, Math.abs(c[0] - W3/2), Math.abs(c[1] - H3/2)), 0);
-    assert.ok(desvio < 1e-6,
-              'a placa gira no lugar, sem orbitar: desvio máximo ' + desvio.toFixed(3) + ' px');
 
     /* ── REGRESSÃO: de perfil não se inventa pivô ──
        Com |sin(pitch)| pequeno não existe ponto da placa sob o cursor. Fingir que existe punha
@@ -1051,8 +1043,9 @@ function montaAmbiente(){
   assert.ok(hn.includes('id="cv3"'), 'o canvas do 3D');
   assert.ok(/contextmenu/.test(hn), 'o menu do bot\u00e3o direito tem que ser impedido sobre o 3D');
   assert.ok(hn.includes('id="menu3"'), 'o menu do clique direito');
-  ['girar','centrar','pos','p90','p180','p270','esp'].forEach(k =>
+  ['centrar','pos','p90','p180','p270','esp'].forEach(k =>
     assert.ok(hn.includes('data-m3="' + k + '"'), 'falta o item ' + k + ' no menu'));
+  assert.ok(!hn.includes('data-m3="girar"'), 'o "Virar 360" saiu do menu');
   assert.ok(hn.includes('id="sub3"'), 'o submenu de posicionar');
   /* a ajuda dos atalhos mora na gaveta, junto do resto dos ajustes */
   const gav = hn.match(/<aside id="gaveta">[\s\S]*?<\/aside>/)[0];

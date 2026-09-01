@@ -1006,30 +1006,15 @@ function ancoraCentro3(sx, sy){
    pixel - a mesma conta da ancora do pivo e da roda. */
 function viraFace3(){
   var onde = telaCentro3();
+  /* Virar a placa e DOIS movimentos, e nao um: ela troca de face e da meia volta, como a mao
+     faz ao virar uma placa sobre a bancada. So inverter a inclinacao espelharia o eixo Y; com
+     a meia volta junto, o espelho cai no X - que e a mesma convencao da vista "Verso" 2D.
+     Sem isso, a mesma placa aparecia espelhada de um jeito no 2D e de outro no 3D. */
   v3.pitch = -v3.pitch;
+  v3.yaw += Math.PI;
   ancoraCentro3(onde[0], onde[1]);
   desenha3();
 }
-/* Uma volta completa, com aceleracao e freio: sem a suavizacao a placa "pula" no fechamento
-   da volta, que e justamente onde o olho esta esperando o encaixe. */
-function gira360(){
-  var y0 = v3.yaw, dur = 1500, t0 = null, meu = anim = {};
-  /* a placa tem que girar NO LUGAR: sem reancorar o centro a cada quadro ela orbita a origem
-     do mundo e some da tela em boa parte da volta */
-  var onde = telaCentro3();
-  var poe = function (yaw){ v3.yaw = yaw; ancoraCentro3(onde[0], onde[1]); desenha3(); };
-  requestAnimationFrame(function passo(ts){
-    if (meu !== anim) return;
-    if (typeof ts !== 'number'){ anim = null; poe(y0); return; }
-    if (t0 === null) t0 = ts;
-    var t = Math.min(1, (ts - t0) / dur);
-    var e = t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2) / 2;
-    poe(y0 + e * 6.2831853);
-    if (t < 1) requestAnimationFrame(passo);
-    else { anim = null; poe(y0); }                   /* mesmo angulo, numero pequeno */
-  });
-}
-
 function abreMenu3(x, y){
   var m = document.getElementById('menu3');
   m.style.left = x + 'px'; m.style.top = y + 'px';
@@ -1492,8 +1477,7 @@ function inicia(){
         return;
       }
       fechaMenu3();
-      if (k === 'girar') gira360();
-      else if (k === 'centrar') centra3();
+      if (k === 'centrar') centra3();
       else if (k === 'esp') viraFace3();      /* mesmo gesto do Ctrl+F: nao tira do lugar */
       else posiciona3(parseInt(k.slice(1), 10));
     };
@@ -1708,7 +1692,6 @@ function html(m, meta){
          '</aside>');
 
   L.push('<div id="menu3">' +
-         '<button data-m3="girar">Virar 360°</button>' +
          '<button data-m3="centrar">Centralizar</button>' +
          '<button data-m3="pos" class="pai">Posicionar<span>▸</span></button>' +
          '<div id="sub3">' +
