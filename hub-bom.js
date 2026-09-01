@@ -348,6 +348,7 @@ tbody tr:hover{background:color-mix(in srgb,var(--hi) 10%,transparent)}
 tbody tr[aria-selected="true"]{background:color-mix(in srgb,var(--hi) 20%,transparent)}
 tbody tr.feito td:not(.cx){opacity:.45;text-decoration:line-through}
 td.q,td.n{text-align:right;font-variant-numeric:tabular-nums;color:var(--fg2)}
+td.n{width:30px;padding-right:4px;opacity:.65}
 td.refs{font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-word}
 td.cx{width:26px;text-align:center}
 .lado{display:inline-block;font-size:10px;padding:0 5px;border-radius:4px;border:1px solid var(--linha);
@@ -612,6 +613,7 @@ function montaBom(){
     if (feitos[r.k]) tr.className = 'feito';
     var td = function (cls, txt){ var e = document.createElement('td'); if (cls) e.className = cls;
                                   e.textContent = txt; tr.appendChild(e); return e; };
+    td('n', String(++n));
     var cx = td('cx', '');
     var box = document.createElement('input');
     box.type = 'checkbox'; box.checked = !!feitos[r.k];
@@ -621,11 +623,10 @@ function montaBom(){
       salvaFeitos(); tr.className = box.checked ? 'feito' : ''; contas();
     };
     cx.appendChild(box);
-    td('n', String(++n));
     td('q', String(r.qtd));
-    td('v', r.val || '—');
-    td('f', r.fp || '—');
     var refs = td('refs', r.refs.join(', '));
+    td('f', r.fp || '—');
+    td('v', r.val || '—');
     var lados = {};
     r.lados.forEach(function (s){ lados[s] = 1; });
     Object.keys(lados).sort().forEach(function (s){
@@ -1110,8 +1111,12 @@ function html(m, meta){
   L.push('<div class="bom-bar">' +
          '<input type="search" id="filtro" placeholder="filtrar…">' +
          '<button class="t" id="limpar">Limpar vistos</button></div>');
+  /* O # fica na PONTA, do outro lado do visto: encostado na Qtd, dois números seguidos e
+     alinhados à direita eram lidos como um so. E os designadores vem primeiro entre os tres
+     campos, porque e por eles que se procura a peça na placa - o comentário e o que menos
+     serve de busca. */
   L.push('<div id="bomRolo"><table><thead><tr>' +
-         '<th></th><th>#</th><th>Qtd</th><th>Comentário</th><th>Footprint</th><th>Designadores</th>' +
+         '<th>#</th><th></th><th>Qtd</th><th>Designadores</th><th>Footprint</th><th>Comentário</th>' +
          '</tr></thead><tbody id="linhas"></tbody></table>' +
          '<div id="vazio" style="display:none">nada com esse filtro</div></div>');
   L.push('</div>');

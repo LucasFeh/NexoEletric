@@ -375,6 +375,10 @@ function montaAmbiente(){
   assert.ok(typeof r.boot === 'function', 'o runtime registra o boot no DOMContentLoaded');
   r.boot();                                   /* e aqui a pagina abre */
 
+  /* colunas da lista: 0 = #, 1 = visto, 2 = Qtd, 3 = Designadores, 4 = Footprint,
+     5 = Comentário. O # ficou na ponta para nao ser lido junto com a Qtd. */
+  const COL_REFS = 3, COL_VISTO = 1;
+
   const conta = k => amb.ops.filter(o => o === k).length;
   assert.ok(conta('fill') > 0, 'desenhou pad/regiao');
   assert.ok(conta('stroke') > 0, 'desenhou contorno/silk');
@@ -486,7 +490,7 @@ function montaAmbiente(){
 
   /* ── o modal proprio, no lugar do confirm do navegador ── */
   const primeira = () => amb.elems.linhas.children[0];
-  const caixaDaLinha = tr => tr.children[0].children[0];
+  const caixaDaLinha = tr => tr.children[COL_VISTO].children[0];
   caixaDaLinha(primeira()).checked = true;
   caixaDaLinha(primeira()).onclick({ stopPropagation(){} });
   assert.strictEqual(primeira().className, 'feito', 'marcou a linha como montada');
@@ -508,7 +512,7 @@ function montaAmbiente(){
      Desligada, escolher na lista NÃO pode mexer a câmera; ligada, ela vai até a peça. */
   /* o único sinal daqui de que a câmera mudou e a escala aplicada no ctx a cada desenho */
   const linhaDe = ref => amb.elems.linhas.children.find(tr =>
-    tr.children[5] && tr.children[5].textContent.indexOf(ref) >= 0);
+    tr.children[COL_REFS] && tr.children[COL_REFS].textContent.indexOf(ref) >= 0);
 
   const oculto = cv => amb.elems[cv].parentNode.classList.contains('oculta');
   /* pinta() desenha as duas câmeras; a que interessa e a de MAIOR zoom, que e a enquadrada */
@@ -645,7 +649,7 @@ function montaAmbiente(){
     amb2.elems.cbGuiada.checked = false;
     amb2.elems.cbGuiada.onclick();
     const linha2 = ref => amb2.elems.linhas.children.find(tr =>
-      tr.children[5] && tr.children[5].textContent.indexOf(ref) >= 0);
+      tr.children[COL_REFS] && tr.children[COL_REFS].textContent.indexOf(ref) >= 0);
     amb2.escalas.length = 0;
     linha2('R1').onclick();
     const antes2 = amb2.escalas.slice();
@@ -688,6 +692,9 @@ function montaAmbiente(){
   assert.ok(/<div class="bom-bar">[\s\S]*?id="filtro"[\s\S]*?id="limpar"[\s\S]*?<\/div>/.test(hn),
             'filtro e limpar ficam colados na lista');
   assert.ok(/<div id="bomRolo"><table>/.test(hn), 'so a tabela rola, a barra fica parada');
+  /* o # na ponta, longe da Qtd - dois n\u00fameros seguidos alinhados \u00e0 direita viravam um so */
+  assert.ok(hn.includes('<th>#</th><th></th><th>Qtd</th><th>Designadores</th><th>Footprint</th><th>Coment\u00e1rio</th>'),
+            'a ordem das colunas da lista');
   /* os layouts sao icones, e nao rotulos */
   ['lr','bom'].forEach(k =>
     assert.ok(new RegExp('data-layout="' + k + '"[^>]*><svg').test(hn), 'layout ' + k + ' sem icone'));

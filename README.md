@@ -429,6 +429,7 @@ O que a página gerada faz:
 | **as duas** e **só a lista** | os outros dois layouts. O verso sai espelhado em X, que é a placa virada na mão e não vista através |
 | **ícone de ajustes** | abre a gaveta lateral, onde mora **todo o resto**: as camadas (Pads, Serigrafia, Designadores, Trilhas, Planos, Furos), a **visão guiada**, a escolha entre **Agrupado** e **Por peça** e o **tema escuro** |
 | **Agrupado / Por peça** | uma linha por compra, ou uma linha por designador — que é como se confere a placa peça a peça |
+| **colunas** | **#** · visto · **Qtd** · **Designadores** · Footprint · Comentário. O **#** fica na ponta, do outro lado do visto: encostado na Qtd, dois números seguidos e alinhados à direita eram lidos como um só. Os designadores vêm primeiro entre os três campos, porque é por eles que se procura a peça na placa |
 | **clique na linha** | acende todas as peças daquele grupo, nos dois lados |
 | **clique na peça** | seleciona a linha e rola até ela |
 | **clique num pad** | acende **a net inteira** (pads, trilhas, planos e vias) e seleciona o dono do pad — é por onde se segue um sinal na bancada |
