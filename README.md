@@ -425,14 +425,16 @@ O que a página gerada faz:
 
 | | |
 |---|---|
-| **Frente / Verso / Ambos / Só a lista** | o verso sai espelhado em X — é a placa virada na mão, não vista através |
-| **Pads · Silk · Refs · Trilhas · Planos** | liga e desliga cada camada; **Refs** separa o designador do resto da serigrafia |
+| **quatro ícones de layout** | só a frente, só o verso, as duas, ou só a lista — o verso sai espelhado em X, que é a placa virada na mão e não vista através |
+| **Pads · Silk · Refs** | as três que se mexem o tempo todo ficam na barra; **Refs** separa o designador do resto da serigrafia |
+| **ícone de ajustes** | abre uma gaveta lateral com **Trilhas**, **Planos**, **Furos** e a escolha entre **Agrupado** e **Por peça** — o que se acerta uma vez e não se mexe mais sai da barra |
 | **Agrupado / Por peça** | uma linha por compra, ou uma linha por designador — que é como se confere a placa peça a peça |
 | **clique na linha** | acende todas as peças daquele grupo, nos dois lados |
 | **clique na peça** | seleciona a linha e rola até ela |
 | **clique num pad** | acende **a net inteira** (pads, trilhas, planos e vias) e seleciona o dono do pad — é por onde se segue um sinal na bancada |
 | **visto por linha** | fica no `localStorage` do navegador de quem monta; o rodapé conta quantas peças já foram |
-| **filtro** | casa contra valor, footprint e designadores |
+| **filtro** | mora **junto da lista**, logo acima dela, e casa contra valor, footprint e designadores |
+| **Limpar vistos** | ao lado do filtro, e pergunta num modal da própria página (Sim/Não), não na caixa do navegador |
 | **divisória da lista** | arraste para dar mais espaço ao desenho ou à lista |
 | **ícone de layout** | joga a lista para o outro lado da tela — o próprio ícone espelha junto |
 | **tema escuro** | e zoom/pan com roda e arraste em cada lado |

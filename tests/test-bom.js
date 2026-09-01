@@ -304,7 +304,14 @@ function montaAmbiente(){
     createElement(t){ return mk(t); },
     querySelectorAll(sel){
       if (sel === '[data-ver]')
-        return ['pads','silk','refs','tracks','regions'].map(k => { const e = mk('b'); e.dataset.ver = k; return e; });
+        return (elems.__ver = elems.__ver || ['pads','silk','refs','tracks','regions','drills']
+          .map(k => {
+            const e = mk('b');
+            e.dataset.ver = k;
+            /* na pagina real, trilhas/planos/furos sao CAIXAS na gaveta e o resto e botao */
+            if (k === 'tracks' || k === 'regions' || k === 'drills') e.type = 'checkbox';
+            return e;
+          }));
       if (sel === '[data-layout]')
         return (elems.__layout = elems.__layout ||
                 ['f','b','lr','bom'].map(k => { const e = mk('b'); e.dataset.layout = k; return e; }));
@@ -427,11 +434,55 @@ function montaAmbiente(){
                      'lista a esquerda cresce ao arrastar para a direita: ' + mn.style.props['--bomw']);
   dispSp('pointerup', 0);
 
+  /* ── a gaveta ── */
+  const gv = amb.elems.gaveta, gvBg = amb.elems.gavetaBg;
+  assert.ok(!gv.classList.contains('on'), 'a gaveta comeca fechada');
+  amb.elems.btGaveta.onclick();
+  assert.ok(gv.classList.contains('on') && gvBg.classList.contains('on'), 'o icone abre a gaveta');
+  gvBg.onclick();
+  assert.ok(!gv.classList.contains('on'), 'clicar fora fecha');
+  amb.elems.btGaveta.onclick();
+  amb.elems.gavetaFecha.onclick();
+  assert.ok(!gv.classList.contains('on'), 'o X fecha');
+
+  /* a caixa da gaveta liga a camada de verdade: com trilha o desenho traça mais */
+  const cbT = amb.doc.querySelectorAll('[data-ver]').find(b => b.dataset.ver === 'tracks');
+  assert.strictEqual(cbT.type, 'checkbox', 'trilhas e caixa, nao botao');
+  amb.ops.length = 0; cbT.checked = true; cbT.onclick();
+  const comTrilha = amb.ops.filter(o => o === 'stroke').length;
+  amb.ops.length = 0; cbT.checked = false; cbT.onclick();
+  const semTrilha = amb.ops.filter(o => o === 'stroke').length;
+  assert.ok(comTrilha > semTrilha,
+            'a caixa liga a camada: ' + comTrilha + ' contra ' + semTrilha + ' tracos');
+
+  /* ── o modal proprio, no lugar do confirm do navegador ── */
+  const primeira = () => amb.elems.linhas.children[0];
+  const caixaDaLinha = tr => tr.children[0].children[0];
+  caixaDaLinha(primeira()).checked = true;
+  caixaDaLinha(primeira()).onclick({ stopPropagation(){} });
+  assert.strictEqual(primeira().className, 'feito', 'marcou a linha como montada');
+
+  amb.elems.limpar.onclick();
+  assert.ok(amb.elems.modalBg.classList.contains('on'), '"Limpar vistos" abre o modal');
+  assert.ok(amb.elems.modalTit.textContent.length > 0 && amb.elems.modalTxt.textContent.length > 0,
+            'o modal diz o que vai acontecer');
+  amb.elems.modalNao.onclick();
+  assert.ok(!amb.elems.modalBg.classList.contains('on'), '"Nao" fecha');
+  assert.strictEqual(primeira().className, 'feito', 'e nao apaga nada');
+
+  amb.elems.limpar.onclick();
+  amb.elems.modalSim.onclick();
+  assert.ok(!amb.elems.modalBg.classList.contains('on'), '"Sim" fecha');
+  assert.strictEqual(primeira().className, '', '"Sim" desmarca tudo');
+
   /* no layout "so a lista" nao ha o que dividir */
   amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'bom').onclick();
   assert.ok(sp.classList.contains('oculta'), 'sem desenho, a divisoria some');
   amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'lr').onclick();
   assert.ok(!sp.classList.contains('oculta'), 'e volta com o desenho');
+  /* e a lista deixa de ter largura fixa quando e a unica coisa na tela */
+  assert.ok(/#placas\.só-bom~#bom\{flex:1 1 auto\}/.test(Bom.html(m, { proj:'x' })),
+            'no "so a lista" o painel toma a tela toda');
 }
 
 /* ═══════════════ net no modelo ═══════════════
@@ -453,6 +504,26 @@ function montaAmbiente(){
   const hn = Bom.html(mn, { proj:'n' });
   assert.ok(hn.includes('data-modo="peca"'), 'a pagina tem o bot\u00e3o da vista por peça');
   assert.ok(hn.includes('id="hsplit"'), 'a divis\u00f3ria da lista');
+  /* a busca e o limpar moram COM a lista, e nao na barra de cima */
+  assert.ok(/<div class="bom-bar">[\s\S]*?id="filtro"[\s\S]*?id="limpar"[\s\S]*?<\/div>/.test(hn),
+            'filtro e limpar ficam colados na lista');
+  assert.ok(/<div id="bomRolo"><table>/.test(hn), 'so a tabela rola, a barra fica parada');
+  /* os quatro layouts sao icones, e nao rotulos */
+  ['f','b','lr','bom'].forEach(k =>
+    assert.ok(new RegExp('data-layout="' + k + '"[^>]*><svg').test(hn), 'layout ' + k + ' sem icone'));
+  /* trilhas, planos, furos e o modo da lista sairam da barra e foram para a gaveta */
+  const barra = hn.match(/<div class="tools">[\s\S]*?<\/div><\/header>/)[0];
+  ['tracks','regions','drills'].forEach(k =>
+    assert.ok(barra.indexOf('data-ver="' + k + '"') < 0, k + ' nao pode estar na barra de cima'));
+  assert.ok(barra.indexOf('data-modo=') < 0, 'o modo da lista saiu da barra');
+  const gaveta = hn.match(/<aside id="gaveta">[\s\S]*?<\/aside>/)[0];
+  ['tracks','regions','drills'].forEach(k =>
+    assert.ok(gaveta.includes('type="checkbox" data-ver="' + k + '"'), k + ' tem que ser caixa na gaveta'));
+  assert.ok(gaveta.includes('data-modo="grupo"') && gaveta.includes('data-modo="peca"'));
+  /* e o modal proprio, com Sim e Nao */
+  assert.ok(hn.includes('id="modalSim"') && hn.includes('id="modalNao"'), 'o modal tem Sim e N\u00e3o');
+  assert.ok(!/[^.]confirm\(/.test(hn.replace(/\/\*[\s\S]*?\*\//g, '')),
+            'nada de confirm() do navegador');
   assert.ok(hn.includes('id="ladoLista"'), 'o \u00edcone que troca o lado');
   assert.ok(/main\.esq\{flex-direction:row-reverse\}/.test(hn), 'o CSS que inverte a ordem');
   assert.ok(/netSel/.test(hn), 'o runtime carrega o realce de net');
