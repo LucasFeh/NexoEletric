@@ -434,7 +434,7 @@ O que a página gerada faz:
 | **clique na peça** | seleciona a linha e rola até ela |
 | **clique num pad** | acende **a net inteira** (pads, trilhas, planos e vias) e seleciona o dono do pad — é por onde se segue um sinal na bancada |
 | **visto por linha** | fica no `localStorage` do navegador de quem monta; o rodapé conta quantas peças já foram |
-| **tamanho da fonte** | três modos na gaveta — **pequena** (o de sempre), **média** e **grande**. Tudo sai de uma medida só: cabeçalho, designadores, etiqueta de lado e o respiro das linhas derivam dela, então a lista cresce inteira em vez de ficar um pedaço grande ao lado de outro miúdo |
+| **tamanho da fonte** | um **A** ao lado do “Limpar vistos” que cicla entre **pequena** (a de sempre), **média** e **grande** — o próprio A cresce a cada clique, então o botão mostra o tamanho em vez de nomeá-lo. Tudo sai de uma medida só: cabeçalho, designadores, etiqueta de lado e o respiro das linhas derivam dela por , então a lista cresce inteira em vez de ficar um pedaço grande ao lado de outro miúdo |
 | **filtro** | mora **junto da lista**, logo acima dela, e casa contra valor, footprint e designadores |
 | **Limpar vistos** | ao lado do filtro, e pergunta num modal da própria página (Sim/Não), não na caixa do navegador |
 | **divisória da lista** | arraste para dar mais espaço ao desenho ou à lista |

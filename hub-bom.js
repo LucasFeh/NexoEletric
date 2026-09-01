@@ -344,6 +344,10 @@ button.t.primario{background:var(--hi);border-color:var(--hi);color:#fff}
 .bom-bar{flex:none;display:flex;gap:6px;align-items:center;padding:8px;
   background:var(--pane);border-bottom:1px solid var(--linha)}
 .bom-bar input[type=search]{flex:1;width:auto;min-width:0}
+.bom-bar .fte{flex:none;width:30px;font-weight:700;line-height:1;padding:4px 0;text-align:center}
+.bom-bar .fte[data-fonte="p"]{font-size:10px}
+.bom-bar .fte[data-fonte="m"]{font-size:12.5px}
+.bom-bar .fte[data-fonte="g"]{font-size:15px}
 #bomRolo{flex:1;overflow:auto;min-height:0}
 .cv{position:relative;flex:1 1 0;min-width:0;background:var(--pane);border:1px solid var(--linha);
   border-radius:8px;overflow:hidden}
@@ -430,16 +434,16 @@ function salvaUI(){
   } catch (e) {}
 }
 
-/* O tamanho aplicado na LISTA e nos botoes de uma vez. Os botoes saem daqui, e nao do HTML
-   emitido: gravado "grande" e reaberto, o painel mostraria "Pequena" marcada com a lista grande
-   - foi exatamente o que aconteceu com a caixa da visao guiada. */
+/* O tamanho aplicado na LISTA e no proprio botao de uma vez. O botao sai daqui, e nao do HTML
+   emitido: gravado "grande" e reaberto, ele mostraria o A pequeno com a lista grande - foi
+   exatamente o que aconteceu com a caixa da visao guiada. */
+var NOME_FTE = { p:'pequena', m:'m\u00e9dia', g:'grande' };
 function aplicaFonte(){
-  var bom = document.getElementById('bom');
+  var bom = document.getElementById('bom'), bt = document.getElementById('btFonte');
   bom.classList.toggle('f-m', fonte === 'm');
   bom.classList.toggle('f-g', fonte === 'g');
-  [].forEach.call(document.querySelectorAll('[data-fte]'), function (b){
-    b.setAttribute('aria-pressed', String(b.dataset.fte === fonte));
-  });
+  bt.setAttribute('data-fonte', fonte);
+  bt.title = 'fonte da lista: ' + NOME_FTE[fonte] + ' \u2014 clique para trocar';
 }
 
 /* teto e piso da lista: nem ela nem o desenho podem sumir por arrasto */
@@ -1509,9 +1513,11 @@ function inicia(){
     if (m.classList.contains('on') && ev.target !== m && !(ev.target && ev.target.dataset &&
         ev.target.dataset.m3)) fechaMenu3();
   });
-  [].forEach.call(document.querySelectorAll('[data-fte]'), function (b){
-    b.onclick = function (){ fonte = b.dataset.fte; aplicaFonte(); salvaUI(); };
-  });
+  document.getElementById('btFonte').onclick = function (){
+    /* cicla nos tres: um botao so, e o gesto e sempre o mesmo */
+    fonte = fonte === 'p' ? 'm' : fonte === 'm' ? 'g' : 'p';
+    aplicaFonte(); salvaUI();
+  };
   [].forEach.call(document.querySelectorAll('[data-modo]'), function (b){
     b.setAttribute('aria-pressed', String(b.dataset.modo === modo));
     b.onclick = function (){
@@ -1669,7 +1675,10 @@ function html(m, meta){
   L.push('<div id="bom">');
   L.push('<div class="bom-bar">' +
          '<input type="search" id="filtro" placeholder="filtrar…">' +
-         '<button class="t" id="limpar">Limpar vistos</button></div>');
+         '<button class="t" id="limpar">Limpar vistos</button>' +
+         /* o proprio A cresce a cada clique: o botao MOSTRA o tamanho em que a lista esta,
+            em vez de nomea-lo - e o rotulo estaria sempre um passo atras do que se ve */
+         '<button class="t fte" id="btFonte" data-fonte="p">A</button></div>');
   /* O # fica na PONTA, do outro lado do visto: encostado na Qtd, dois números seguidos e
      alinhados à direita eram lidos como um so. E os designadores vem primeiro entre os tres
      campos, porque e por eles que se procura a peça na placa - o comentário e o que menos
@@ -1702,12 +1711,7 @@ function html(m, meta){
          botao('data-modo', 'grupo', 'Agrupado', true) +
          botao('data-modo', 'peca', 'Por peça', false) +
          '</div>' +
-         '<div class="gv-tit">tamanho da fonte</div>' +
-         '<div class="gv-seg">' +
-         botao('data-fte', 'p', 'Pequena', true) +
-         botao('data-fte', 'm', 'Média', false) +
-         botao('data-fte', 'g', 'Grande', false) +
-         '</div>' +
+
          '<div class="gv-tit">atalhos da vista 3D</div>' +
          '<div class="gv-ajuda">' +
          '<div><kbd>C</kbd> centralizar a placa</div>' +
