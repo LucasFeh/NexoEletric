@@ -72,6 +72,13 @@ const misto = Bom.model(board({ components: [
 assert.strictEqual(misto.groups.length, 1, 'mesma peça em faces diferentes e uma compra so');
 assert.strictEqual(misto.groups[0].qty, 2);
 
+/* A chave do grupo separa valor de footprint por um caractere que nao aparece em nome:
+   com espaco, val="A B"/fp="C" cairia no mesmo grupo que val="A"/fp="B C". */
+const colide = Bom.model(board({ components: [
+  Object.assign(comp("X1", "Top", "A B", "C", 3, 3)),
+  Object.assign(comp("X2", "Top", "A", "B C", 6, 3)) ] }), {});
+assert.strictEqual(colide.groups.length, 2, "valor e footprint diferentes nao podem virar um grupo so");
+
 /* todo componente aponta para o seu grupo, e o grupo aponta de volta */
 m.comps.forEach((c, i) => assert.ok(m.groups[c.g].refs.indexOf(i) >= 0, c.ref));
 
@@ -195,6 +202,10 @@ assert.ok(/id="linhas"/.test(h), 'o corpo da tabela do BOM');
 assert.ok(!/<script[^>]+src=/.test(h), 'nao pode referenciar script externo');
 assert.ok(!/<link[^>]+href=/.test(h), 'nao pode referenciar css externo');
 assert.ok(!/https?:\/\//.test(h.replace(/https?:\/\/www\.w3\.org[^"']*/g, '')), 'nada de URL externa');
+/* nenhum caractere de controle cru no arquivo: um NUL perdido faz o git tratar o fonte como
+   BINARIO e o diff some da revisao - foi o que aconteceu com o proprio hub-bom.js */
+const controle = h.match(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g);
+assert.strictEqual(controle, null, 'caractere de controle cru na pagina: ' + JSON.stringify(controle));
 
 /* o JSON nao pode fechar a tag que o contem */
 const hEvil = Bom.html(Bom.model(board({ components:[comp('R1', 'Top', '</script><b>x', 'F', 5, 5)] }), {}),
@@ -255,9 +266,12 @@ if (fs.existsSync(path.join(__dirname, '..', 'Projects', 'TCMS_Reader', 'board.j
 function montaAmbiente(){
   const ops = [];
   const ctx = {};
-  ['setTransform','clearRect','save','restore','translate','scale','beginPath','moveTo',
+  ['setTransform','clearRect','save','restore','translate','beginPath','moveTo',
    'lineTo','closePath','fill','stroke','arc','fillRect','strokeRect']
     .forEach(k => { ctx[k] = function(){ ops.push(k); }; });
+  /* a escala do desenho e o único sinal daqui de que a câmera mudou de zoom */
+  const escalas = [];
+  ctx.scale = function (sx, sy){ ops.push('scale'); escalas.push(sy); };
   const elems = {};
   /* textContent = '' limpa os filhos, como no DOM de verdade - sem isso a tabela
      acumularia as linhas de cada montaBom e o teste mediria lixo */
@@ -288,7 +302,9 @@ function montaAmbiente(){
     scrollIntoView(){}, focus(){}, setPointerCapture(){}, releasePointerCapture(){},
     getBoundingClientRect(){ return { left:0, top:0, width:400, height:300 }; },
     getContext(){ return ctx; },
-    get parentNode(){ return mk('pai'); },
+    /* o mesmo pai sempre: com um novo a cada acesso, a classe que o aplicaLayout poe nele
+       se perderia e o teste nao teria como ver o layout */
+    get parentNode(){ return (this._pai = this._pai || mk('pai')); },
   });
   const doc = {
     getElementById(id){ return (elems[id] = elems[id] || mk(id)); },
@@ -314,7 +330,7 @@ function montaAmbiente(){
           }));
       if (sel === '[data-layout]')
         return (elems.__layout = elems.__layout ||
-                ['f','b','lr','bom'].map(k => { const e = mk('b'); e.dataset.layout = k; return e; }));
+                ['lr','bom'].map(k => { const e = mk('b'); e.dataset.layout = k; return e; }));
       if (sel === '[data-modo]')
         return (elems.__modo = elems.__modo ||
                 ['grupo','peca'].map(k => { const e = mk('b'); e.dataset.modo = k; return e; }));
@@ -323,26 +339,36 @@ function montaAmbiente(){
     addEventListener(ev, fn){ if (ev === 'DOMContentLoaded') doc.__boot = fn; },
     body: mk('body'),
   };
-  return { ops, doc, elems };
+  return { ops, doc, elems, escalas };
 }
 
 {
   const html = Bom.html(m, { proj: 'PlacaTeste' });
   const blocos = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(x => x[1]);
   const amb = montaAmbiente();
+  /* setTimeout guardado, e nao real: o filtro so mira depois que a digitacao para, e o
+     teste precisa decidir a hora de "parar" */
+  const pendentes = [];
   const janela = {
     devicePixelRatio: 1,
     addEventListener(){},
     requestAnimationFrame(fn){ fn(); },
     confirm(){ return true; },
+    setTimeout(fn){ pendentes.push(fn); return pendentes.length; },
+    clearTimeout(id){ if (id) pendentes[id - 1] = null; },
     localStorage: { getItem(){ return null; }, setItem(){ throw new Error('origem opaca'); } },
+  };
+  const correTimers = () => {
+    const fs = pendentes.filter(Boolean);
+    pendentes.length = 0;
+    fs.forEach(fn => fn());
   };
   /* o srcdoc da previa tem origem opaca e o localStorage LANCA - o runtime tem que aguentar */
   const rodar = new Function('document', 'window', 'localStorage', 'requestAnimationFrame',
-                             'confirm', 'devicePixelRatio',
+                             'confirm', 'devicePixelRatio', 'setTimeout', 'clearTimeout',
                              blocos[0] + ';' + blocos[1] + '; return { boot: document.__boot };');
   const r = rodar(amb.doc, janela, janela.localStorage, janela.requestAnimationFrame,
-                  janela.confirm, 1);
+                  janela.confirm, 1, janela.setTimeout, janela.clearTimeout);
   assert.ok(typeof r.boot === 'function', 'o runtime registra o boot no DOMContentLoaded');
   r.boot();                                   /* e aqui a pagina abre */
 
@@ -475,6 +501,80 @@ function montaAmbiente(){
   assert.ok(!amb.elems.modalBg.classList.contains('on'), '"Sim" fecha');
   assert.strictEqual(primeira().className, '', '"Sim" desmarca tudo');
 
+  /* ── visão guiada ──
+     Desligada, escolher na lista NÃO pode mexer a câmera; ligada, ela vai até a peça. */
+  /* o único sinal daqui de que a câmera mudou e a escala aplicada no ctx a cada desenho */
+  const linhaDe = ref => amb.elems.linhas.children.find(tr =>
+    tr.children[5] && tr.children[5].textContent.indexOf(ref) >= 0);
+
+  const oculto = cv => amb.elems[cv].parentNode.classList.contains('oculta');
+  /* pinta() desenha as duas câmeras; a que interessa e a de MAIOR zoom, que e a enquadrada */
+  const maiorZoom = a => a.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+
+  /* guiada DESLIGADA (o padrao): escolher na lista nao pode mover a câmera nem trocar a vista.
+     Sao linhas DIFERENTES de proposito - clicar duas vezes na mesma so desfaz a seleção. */
+  amb.escalas.length = 0;
+  linhaDe('R1').onclick();
+  const semGuia = maiorZoom(amb.escalas);
+  amb.escalas.length = 0;
+  linhaDe('R2').onclick();
+  assert.strictEqual(maiorZoom(amb.escalas), semGuia, 'sem visão guiada a câmera fica onde estava');
+  assert.ok(!oculto('cv0') && !oculto('cv1'), 'e as duas faces continuam na tela');
+
+  /* liga pela gaveta com nada selecionado, para o próprio ligar nao enquadrar */
+  linhaDe('R2').onclick();                       /* desfaz a seleção */
+  const cbG = amb.elems.cbGuiada;
+  cbG.checked = true; cbG.onclick();
+
+  /* peça da FRENTE (R1/R10 sao Top): a vista vai para a frente, e nao para as duas */
+  amb.escalas.length = 0;
+  linhaDe('R1').onclick();
+  assert.ok(amb.escalas.length, 'redesenhou ao guiar');
+  assert.ok(!oculto('cv0') && oculto('cv1'), 'peça do topo -> só a frente na tela');
+  assert.ok(maiorZoom(amb.escalas) > semGuia,
+            'guiada dá zoom na peça: ' + maiorZoom(amb.escalas) + ' contra ' + semGuia);
+
+  /* peça do VERSO (R2 e Bottom): a vista vira para o verso */
+  linhaDe('R2').onclick();
+  assert.ok(oculto('cv0') && !oculto('cv1'), 'peça do verso -> só o verso na tela');
+
+  /* ── o ícone único das faces ── */
+  const bf = amb.elems.btFace;
+  assert.ok(bf.classList.contains('verso'), 'no verso, o ícone mostra o verso');
+  bf.onclick();
+  assert.ok(!oculto('cv0') && oculto('cv1'), 'o ícone troca para a frente');
+  assert.ok(!bf.classList.contains('verso'), 'e o desenho dele acompanha');
+  bf.onclick();
+  assert.ok(oculto('cv0') && !oculto('cv1'), 'e troca de volta');
+  /* de "as duas" ele volta para a última face usada, e nao para a frente sempre */
+  amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'lr').onclick();
+  assert.ok(!oculto('cv0') && !oculto('cv1'), 'as duas na tela');
+  bf.onclick();
+  assert.ok(oculto('cv0') && !oculto('cv1'), 'volta para o verso, que foi a última face');
+  amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'lr').onclick();
+
+  /* o filtro também guia: "R10" e um designador exato */
+  amb.elems.filtro.value = 'R10';
+  amb.elems.filtro.oninput({ target:{ value:'R10' } });
+  amb.escalas.length = 0;
+  correTimers();                       /* a digitação "parou" */
+  assert.ok(amb.escalas.length, 'o filtro mira sozinho quando a digitação para');
+  assert.ok(amb.elems.linhas.children.some(tr => tr.getAttribute('aria-selected') === 'true'),
+            'e deixa a linha selecionada');
+  /* Enter não espera o tempo */
+  amb.elems.filtro.oninput({ target:{ value:'R2' } });
+  amb.escalas.length = 0;
+  amb.elems.filtro.onkeydown({ key:'Enter' });
+  assert.ok(amb.escalas.length, 'Enter mira na hora');
+  /* e com a guiada desligada o filtro só filtra */
+  cbG.checked = false; cbG.onclick();
+  amb.elems.filtro.oninput({ target:{ value:'R1' } });
+  amb.escalas.length = 0;
+  amb.elems.filtro.onkeydown({ key:'Enter' });
+  assert.strictEqual(amb.escalas.length, 0, 'desligada, o filtro não mexe na câmera');
+  amb.elems.filtro.oninput({ target:{ value:'' } });
+  cbG.checked = true; cbG.onclick();
+
   /* no layout "so a lista" nao ha o que dividir */
   amb.doc.querySelectorAll('[data-layout]').find(b => b.dataset.layout === 'bom').onclick();
   assert.ok(sp.classList.contains('oculta'), 'sem desenho, a divisoria some');
@@ -508,9 +608,17 @@ function montaAmbiente(){
   assert.ok(/<div class="bom-bar">[\s\S]*?id="filtro"[\s\S]*?id="limpar"[\s\S]*?<\/div>/.test(hn),
             'filtro e limpar ficam colados na lista');
   assert.ok(/<div id="bomRolo"><table>/.test(hn), 'so a tabela rola, a barra fica parada');
-  /* os quatro layouts sao icones, e nao rotulos */
-  ['f','b','lr','bom'].forEach(k =>
+  /* os layouts sao icones, e nao rotulos */
+  ['lr','bom'].forEach(k =>
     assert.ok(new RegExp('data-layout="' + k + '"[^>]*><svg').test(hn), 'layout ' + k + ' sem icone'));
+  /* as duas faces cabem num icone so, com os dois desenhos dentro e o CSS mostrando um */
+  assert.ok(/id="btFace"/.test(hn), 'o \u00edcone das faces');
+  const face = hn.match(/<button class="t ic face"[\s\S]*?<\/button>/)[0];
+  assert.ok(face.includes('class="sv-f"') && face.includes('class="sv-b"'),
+            'os dois desenhos saem no HTML');
+  assert.ok(hn.includes('.face .sv-b,.face.verso .sv-f{display:none}'), 'e o CSS mostra s\u00f3 um');
+  assert.ok(!/data-layout="f"/.test(hn) && !/data-layout="b"/.test(hn),
+            'nao pode sobrar bot\u00e3o separado de frente/verso');
   /* trilhas, planos, furos e o modo da lista sairam da barra e foram para a gaveta */
   const barra = hn.match(/<div class="tools">[\s\S]*?<\/div><\/header>/)[0];
   ['tracks','regions','drills'].forEach(k =>

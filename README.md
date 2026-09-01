@@ -425,9 +425,10 @@ O que a página gerada faz:
 
 | | |
 |---|---|
-| **quatro ícones de layout** | só a frente, só o verso, as duas, ou só a lista — o verso sai espelhado em X, que é a placa virada na mão e não vista através |
+| **ícone das faces** | **um só** para frente e verso: clicar troca de uma para a outra, e o desenho mostra a que está na tela — dois botões para um par que se exclui gastavam o dobro da barra para dizer a mesma coisa |
+| **as duas** e **só a lista** | os outros dois layouts. O verso sai espelhado em X, que é a placa virada na mão e não vista através |
 | **Pads · Silk · Refs** | as três que se mexem o tempo todo ficam na barra; **Refs** separa o designador do resto da serigrafia |
-| **ícone de ajustes** | abre uma gaveta lateral com **Trilhas**, **Planos**, **Furos** e a escolha entre **Agrupado** e **Por peça** — o que se acerta uma vez e não se mexe mais sai da barra |
+| **ícone de ajustes** | abre uma gaveta lateral com **Trilhas**, **Planos**, **Furos**, a **visão guiada** e a escolha entre **Agrupado** e **Por peça** — o que se acerta uma vez e não se mexe mais sai da barra |
 | **Agrupado / Por peça** | uma linha por compra, ou uma linha por designador — que é como se confere a placa peça a peça |
 | **clique na linha** | acende todas as peças daquele grupo, nos dois lados |
 | **clique na peça** | seleciona a linha e rola até ela |
@@ -438,6 +439,26 @@ O que a página gerada faz:
 | **divisória da lista** | arraste para dar mais espaço ao desenho ou à lista |
 | **ícone de layout** | joga a lista para o outro lado da tela — o próprio ícone espelha junto |
 | **tema escuro** | e zoom/pan com roda e arraste em cada lado |
+
+**Visão guiada** (opção, desligada por padrão). Ligada, escolher uma linha **leva a câmera até a
+peça e dá zoom** — a mesma interação que a aba Neoden tem na vista PCB, e com a mesma folga do
+`zoomToObj` (a peça ocupa cerca de 1/1,6 da tela), para quem usa as duas telas ver a mesma
+coisa. Medido no `PRJ-UR-DI261924`: um D6 de 3,15 mm num painel de 168 mm sai de 1,8× para
+42,7× — 24 vezes mais perto.
+
+O **filtro também guia**: digitar um designador (“D1”) mira nele, ao dar **Enter** ou 350 ms
+depois que a digitação para — mirar a cada tecla faria a placa pular de “D” para “D1”. O
+designador **exato** ganha do primeiro da lista: quem escreve “D1” quer o D1, e não o grupo em
+que ele caiu. E a tela vai junto: peça do **verso** põe a vista no verso, peça da **frente** põe na frente. É o
+lado de **montagem** que manda, mesmo num passante que aparece nos dois — é daquele lado que
+ela vai ser soldada. Só quando a escolha mistura as duas faces é que as duas ficam na tela,
+porque aí não há uma face certa.
+
+Clicar **no desenho** nunca move a câmera, mesmo com a visão guiada ligada: quem clicou ali já
+está olhando para o lugar certo, e dar zoom seria arrancar a vista da mão dele.
+
+A opção está nos dois lugares: na aba **BOM** do hub (o estado em que a página nasce) e na
+gaveta da própria página (para ligar e desligar na bancada, gravado no navegador de quem monta).
 
 O **visto** é gravado pela identidade do grupo (valor + footprint), e não pelo índice dele: pelo
 índice, regerar o BOM depois de acrescentar um componente reordenaria a lista e os vistos
