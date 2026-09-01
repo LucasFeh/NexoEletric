@@ -129,6 +129,10 @@ def files(path):
 
 SAVE_BASENAMES = ('changes.js', 'schematic.js', 'annotations.js')
 
+# Libs/ e propriedade do ExportLibs.pas, que sobrescreve schlib.js/pcblib.js inteiros - por
+# isso a substituicao mora em arquivo SEPARADO, o unico de Libs/ que o browser pode gravar.
+SAVE_LIB_FILES = ('lib-subs.js',)
+
 
 @app.route('/api/save', methods=['POST'])
 def api_save():
@@ -138,11 +142,14 @@ def api_save():
     parts = [seg for seg in str(data['path']).replace('\\', '/').split('/') if seg]
     if any(seg.startswith('.') for seg in parts):
         return {'ok': False, 'error': 'path invalido'}, 403
-    if len(parts) != 3 or parts[0] != 'Projects' or parts[2] not in SAVE_BASENAMES:
-        return {'ok': False, 'error': 'so Projects/<nome>/{changes,schematic,annotations}.js'}, 403
+    ok_proj = len(parts) == 3 and parts[0] == 'Projects' and parts[2] in SAVE_BASENAMES
+    ok_lib = len(parts) == 2 and parts[0] == 'Libs' and parts[1] in SAVE_LIB_FILES
+    if not (ok_proj or ok_lib):
+        return {'ok': False,
+                'error': 'so Projects/<nome>/{changes,schematic,annotations}.js ou Libs/lib-subs.js'}, 403
     full = safe_join(ROOT, *parts)
     if full is None or not os.path.isdir(os.path.dirname(full)):
-        return {'ok': False, 'error': 'projeto inexistente'}, 404
+        return {'ok': False, 'error': 'pasta inexistente'}, 404
     tmp = full + '.tmp'
     try:
         with open(tmp, 'w', encoding='utf-8', newline='\n') as f:

@@ -10,6 +10,9 @@
 <script src="hub-draw.js"></script>
 <script src="hub-font.js"></script>
 <script src="hub-laser.js"></script>
+<!-- gravação (POST /api/save, com queda para download em file://) — a aba Biblioteca
+     escreve Libs/lib-subs.js por aqui -->
+<script src="hub-io.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    1. TOKENS — única fonte de verdade de cor, espaço, raio e sombra.
@@ -1216,7 +1219,8 @@ function renderNeodenAside(row, opts) {
    do simbolo (LibReference), quem tem a geometria e a schlib; se o componente
    veio de outra biblioteca o nome nao resolve, o hub nao desenha o corpo e a
    folha sai diferente da do Altium. Esses aparecem como "ausentes".          */
-const LIB = { ready: false, loading: null, syms: [], fps: [], symBy: new Map(), fpBy: new Map(), src: {}, gen: {} };
+const LIB = { ready: false, loading: null, syms: [], fps: [], symBy: new Map(), fpBy: new Map(),
+              src: {}, gen: {}, rename: null, subs: [] };
 let libCamSym = null, libCamFp = null, libDrawSym = null, libDrawFp = null, libUse = null, libUseFor = null;
 
 /* "var X = ..." via <script>: e assim que os arquivos da lib sao gerados */
@@ -1233,14 +1237,23 @@ function loadVarScript(src, name) {
 function loadLibs() {
   if (LIB.ready) return Promise.resolve();
   if (LIB.loading) return LIB.loading;
-  LIB.loading = Promise.all([loadVarScript('Libs/schlib.js', 'schlib'), loadVarScript('Libs/pcblib.js', 'pcblib')])
-    .then(([s, p]) => {
+  /* rename-map e lib-subs sao as tabelas de apelido do resolvedor de nomes. lib-subs pode
+     nao existir ainda (nenhuma substituicao escolhida): loadVarScript devolve undefined no
+     404 e o resolvedor segue sem o passo de escolha, em vez de quebrar a aba. */
+  LIB.loading = Promise.all([loadVarScript('Libs/schlib.js', 'schlib'),
+                             loadVarScript('Libs/pcblib.js', 'pcblib'),
+                             loadVarScript('Libs/rename-map.js', 'renameMap'),
+                             loadVarScript('Libs/lib-subs.js', 'libSubs')])
+    .then(([s, p, rm, subs]) => {
       LIB.syms = (s && s.symbols) || [];
       LIB.fps  = (p && p.footprints) || [];
       LIB.symBy = new Map(LIB.syms.map(x => [x.name, x]));
       LIB.fpBy  = new Map(LIB.fps.map(x => [x.name, x]));
       LIB.src = { sym: (s && s.source) || '—', fp: (p && p.source) || '—' };
       LIB.gen = { sym: (s && s.generated) || '—', fp: (p && p.generated) || '—' };
+      LIB.rename = rm || null;
+      LIB.subs = Array.isArray(subs) ? subs : [];
+      HubCore.setLibTables(LIB.rename, LIB.subs);
       LIB.ready = true;
       LIB.loading = null;
     });
@@ -1256,6 +1269,59 @@ function libUsage() {
   for (const it of items) if (it.t === 'comp') { push(sym, it.sym, it.ref); push(fp, it.footprint, it.ref); }
   libUse = { sym, fp }; libUseFor = S.projId;
   return libUse;
+}
+
+/* Uma porta so para as duas listas da aba. A resolucao (exato -> apelido -> chave) mora no
+   HubCore, entao a aba Biblioteca e a folha do Esquema concordam sobre o que existe - antes
+   a aba decidia "ausente" pelo Map cru enquanto o schframe ja desenhava o corpo. */
+const libResolve = (kind, n) => HubCore.resolveLib(kind === 'sym' ? LIB.syms : LIB.fps, n, kind);
+
+/* A substituicao e da BIBLIOTECA, nao do projeto: o mesmo "Cap Eletrolitico" aparece em
+   quatro projetos, e perguntar quatro vezes so cria quatro respostas diferentes. Por isso
+   grava em Libs/lib-subs.js — arquivo separado porque o ExportLibs sobrescreve schlib.js e
+   pcblib.js inteiros e levaria a escolha junto. */
+async function libSetSub(kind, from, to) {
+  /* O arquivo e da LAN inteira: outra aba, ou outro PC, pode ter gravado depois desta
+     pagina carregar (LIB.subs so e lido no loadLibs). Reescrever a partir da memoria
+     apagaria essas escolhas em silencio, entao le o disco primeiro - mesmo cuidado que o
+     pcbframe toma antes de sobrescrever o changes.js. */
+  let base = LIB.subs || [];
+  try {
+    const txt = await HubIO.fetchText('Libs/lib-subs.js');
+    const lido = new Function(txt + ';return typeof libSubs !== "undefined" ? libSubs : null;')();
+    if (Array.isArray(lido)) base = lido;
+  } catch (e) { /* sem servidor, ou arquivo ainda inexistente: vale o que esta em memoria */ }
+  const list = base.filter(r => !(r && r.kind === kind && r.from === from));
+  if (to) list.push({ kind, from, to, when: new Date().toLocaleString('pt-BR') });
+  const ser = HubCore.serializeLibSubs(list);
+  if (!ser.text) return toast(ser.errors[0].msg, 'err');
+  let modo;
+  try {
+    modo = (await HubIO.saveFile('Libs/lib-subs.js', ser.text)).mode;
+  } catch (e) {
+    return toast('não foi possível gravar Libs\\lib-subs.js — ' + e.message, 'err');
+  }
+  LIB.subs = list;
+  HubCore.setLibTables(LIB.rename, LIB.subs);
+  libUse = null; libUseFor = null;          /* a contagem de uso foi calculada com o mapa velho */
+  /* a selecao FICA no item ausente de proposito: o painel dele passa a mostrar "substituto
+     em uso" e o desfazer, que e a confirmacao do que acabou de acontecer - pular para o item
+     escolhido esconderia justamente isso */
+  renderLib();
+  /* A folha ja desenhada continua com o simbolo velho ate o iframe recarregar. Mas recarregar
+     por cima de edicao nao salva a perde, entao vale a mesma regra do __hubOnChange: com a
+     vista suja, avisa em vez de recarregar. */
+  const frame = document.querySelector('.pane[data-pane="esquema"] iframe');
+  let sujo = false;
+  try {
+    sujo = !!(frame && frame.contentWindow && frame.contentWindow.__hubDirty
+              && frame.contentWindow.__hubDirty());
+  } catch (e) {}
+  if (frame && !sujo) frame.src = frame.src;
+  toast(modo === 'download'
+    ? 'sem servidor: baixe lib-subs.js e ponha em Libs\\ para a troca valer'
+    : sujo ? 'gravado, mas a vista Esquema tem edição não salva — recarregue-a depois de salvar'
+    : (to ? from + ' → ' + to : 'substituição de ' + from + ' desfeita'), 'ok');
 }
 
 /* nomes parecidos: ajuda a achar o simbolo certo quando o esquema aponta p/ um que nao existe */
@@ -1325,8 +1391,21 @@ function renderLib() {
   libCams();
 
   const u = libUsage();
-  const goneSym = [...u.sym.keys()].filter(n => !LIB.symBy.has(n)).sort();
-  const goneFp  = [...u.fp.keys()].filter(n => !LIB.fpBy.has(n)).sort();
+  /* "ausente" e o que o RESOLVEDOR nao resolve, e nao o que falta por nome exato: um
+     "CAP [  SMD  ]" que casa com "CAP [SMD]" nao e ausente — o hub desenha o corpo dele.
+     Empate de chave conta como ausente de proposito (os 4 pares de footprint tipo
+     "SOIC 8"/"SOIC - 8"): quem desempata e uma pessoa, escolhendo o substituto. */
+  const goneSym = [...u.sym.keys()].filter(n => !(libResolve('sym', n) || {}).item).sort();
+  const goneFp  = [...u.fp.keys()].filter(n => !(libResolve('fp', n)  || {}).item).sort();
+  /* o que so casou por apelido: e a prova visivel da sincronizacao e o lugar de conferir
+     se algum apelido casou errado */
+  const apelidos = [];
+  for (const [k, m] of [['sym', u.sym], ['fp', u.fp]])
+    for (const n of m.keys()) {
+      const r = libResolve(k, n);
+      if (r && r.item && r.how !== 'exato') apelidos.push({ k, from: n, to: r.name, how: r.how });
+    }
+  apelidos.sort((a, b) => a.from.localeCompare(b.from));
   const noFp    = LIB.syms.filter(s => !(s.footprints || []).some(f => f.incurrentlib));
 
   /* filtro */
@@ -1337,11 +1416,13 @@ function renderLib() {
   const fps  = (kind === 'all' || kind === 'fp')  ? LIB.fps.filter(f => hit(f.name, f.description))  : [];
   const gone = (kind === 'all' || kind === 'gone')
     ? goneSym.filter(hit).map(n => ['gone-sym', n]).concat(goneFp.filter(hit).map(n => ['gone-fp', n])) : [];
+  const alias = (kind === 'all' || kind === 'alias') ? apelidos.filter(a => hit(a.from + ' ' + a.to)) : [];
 
   /* segmentado */
   const seg = $('#libKind'); seg.textContent = '';
   [['all', 'Tudo', LIB.syms.length + LIB.fps.length], ['sym', 'Símbolos', LIB.syms.length],
-   ['fp', 'Footprints', LIB.fps.length], ['gone', 'Ausentes', goneSym.length + goneFp.length]]
+   ['fp', 'Footprints', LIB.fps.length], ['alias', 'Apelidos', apelidos.length],
+   ['gone', 'Ausentes', goneSym.length + goneFp.length]]
     .forEach(([k, label, n]) => {
       const b = el('button', null, label);
       b.setAttribute('aria-pressed', String(kind === k));
@@ -1359,6 +1440,7 @@ function renderLib() {
   };
   stat(LIB.syms.length, 'símbolos'); stat(LIB.fps.length, 'footprints');
   stat(noFp.length, 'sem footprint', noFp.length ? 'warn' : null);
+  stat(apelidos.length, 'por apelido');
   stat(goneSym.length + goneFp.length, 'ausentes no projeto', (goneSym.length + goneFp.length) ? 'err' : null);
   sum.title = 'schlib: ' + LIB.src.sym + '  (' + LIB.gen.sym + ')\npcblib: ' + LIB.src.fp + '  (' + LIB.gen.fp + ')';
 
@@ -1374,7 +1456,7 @@ function renderLib() {
     if (o && o.use) b.append(el('span', 'pill', o.use + '×'));
     if (o && o.warn) b.append(el('span', 'pill warn', o.warn));
     b.append(el('span', 'mt', meta || ''));
-    b.onclick = () => selectLib(k, name);
+    b.onclick = (o && o.on) || (() => selectLib(k, name));
     frag.append(b);
   };
 
@@ -1382,6 +1464,18 @@ function renderLib() {
     head('ausentes na biblioteca (' + gone.length + ')');
     gone.forEach(([k, n]) => row(k, n, k === 'gone-sym' ? 'símbolo' : 'footprint',
       { gone: true, use: (k === 'gone-sym' ? u.sym.get(n) : u.fp.get(n)).length }));
+  }
+  if (alias.length) {
+    head('resolvidos por apelido (' + alias.length + ')');
+    const COMO = { rename: 'renomeado', chave: 'só difere espaço/acento', escolha: 'substituto escolhido' };
+    /* a linha de uma ESCOLHA leva de volta ao painel do nome original, que e o unico lugar
+       com o "desfazer" - mandar para o item escolhido deixaria a substituicao sem nenhum
+       caminho de remocao depois que ela para de aparecer em "Ausentes" */
+    alias.forEach(a => row('alias', a.from, COMO[a.how] || a.how,
+      { use: ((a.k === 'sym' ? u.sym : u.fp).get(a.from) || []).length,
+        warn: '→ ' + a.to,
+        on: () => selectLib(a.how === 'escolha' ? 'gone-' + a.k : a.k,
+                            a.how === 'escolha' ? a.from : a.to) }));
   }
   if (syms.length) {
     head('símbolos (' + syms.length + (q || kind !== 'all' ? ' de ' + LIB.syms.length : '') + ')');
@@ -1474,9 +1568,16 @@ function renderLibPreview(u, goneSym, goneFp) {
       const p = el('p', null, 'nenhum modelo PCB no símbolo'); p.style.cssText = 'font-size:12px;color:var(--warn);margin:6px 0 14px'; aside.append(p);
     } else {
       models.forEach(m => {
-        const ok = LIB.fpBy.has(m.name);
-        const c = chip(m.name + (m.current ? ' ✓' : ''), 'mono' + (ok ? '' : ' gone'), () => ok ? libShowFp(m.name) : selectLib('gone-fp', m.name));
-        c.title = ok ? (m.current ? 'modelo atual — clique para ver' : 'clique para ver')
+        /* pelo RESOLVEDOR, e nao pelo Map cru: o modelo do simbolo guarda o nome de antes
+           do rename ("SOT223") e a pcblib tem o de depois ("SOT-223"). Com o Map cru a chip
+           saia vermelha de "ausente" enquanto o preview logo abaixo desenhava o footprint
+           certo - a mesma tela dizendo as duas coisas. */
+        const r = libResolve('fp', m.name);
+        const ok = !!(r && r.item);
+        const alvo = ok ? r.name : m.name;
+        const c = chip(m.name + (m.current ? ' ✓' : ''), 'mono' + (ok ? '' : ' gone'), () => ok ? libShowFp(alvo) : selectLib('gone-fp', m.name));
+        c.title = ok ? (r.how === 'exato' ? (m.current ? 'modelo atual — clique para ver' : 'clique para ver')
+                                          : 'resolvido por apelido → ' + r.name)
                      : 'esse footprint não está na pcblib espelhada';
         if (m.name === fpName) c.style.boxShadow = 'inset 0 0 0 1px var(--hi)';
         chips.append(c);
@@ -1502,7 +1603,12 @@ function renderLibPreview(u, goneSym, goneFp) {
     kvRow(kvs, 'Silk', (f.silk || []).length + ' elementos');
     aside.append(kvs);
 
-    const owners = LIB.syms.filter(s => (s.footprints || []).some(m => m.name === f.name));
+    /* compara o ITEM resolvido, nao a string: o simbolo aponta para o nome de antes do
+       rename e a comparacao crua dizia "nenhum simbolo aponta para este footprint" */
+    const owners = LIB.syms.filter(s => (s.footprints || []).some(m => {
+      const r = libResolve('fp', m.name);
+      return r && r.item === f;
+    }));
     aside.append(el('div', 'kicker', 'símbolos que usam'));
     if (!owners.length) {
       const p = el('p', null, 'nenhum símbolo da schlib aponta para este footprint');
@@ -1534,18 +1640,64 @@ function renderLibPreview(u, goneSym, goneFp) {
     p.style.cssText = 'font-size:12px;color:var(--text-2);margin:8px 0 14px';
     aside.append(p);
 
-    const near = libSuggest(sel.name, isSym ? LIB.symBy.keys() : LIB.fpBy.keys());
-    if (near.length) {
-      aside.append(el('div', 'kicker', 'parecidos na lib'));
-      const box = el('div', 'chips'); box.style.margin = '6px 0 14px';
-      near.forEach(n => box.append(chip(n, null, () => selectLib(isSym ? 'sym' : 'fp', n))));
+    /* ── substituto ──────────────────────────────────────────────────────────────
+       O gerador de candidatos e o mesmo de sempre, mas a chip deixou de so navegar: agora
+       ela GRAVA a escolha, e a partir dai o resolvedor entrega o simbolo escolhido no lugar
+       do ausente em todas as telas. O projeto no Altium nao muda — a troca vale para o
+       espelho, e o schematic.js continua com o nome original, que e o contrato com o
+       BuildSchematic e o que torna a escolha reversivel. */
+    const kk = isSym ? 'sym' : 'fp';
+    const atual = (LIB.subs || []).find(r => r && r.kind === kk && r.from === sel.name);
+    const nota = txt => {
+      const q = el('p', null, txt);
+      q.style.cssText = 'font-size:12px;color:var(--text-3);margin:6px 0 14px';
+      aside.append(q);
+    };
+    if (atual) {
+      aside.append(el('div', 'kicker', 'substituto em uso'));
+      const box = el('div', 'chips'); box.style.margin = '6px 0 0';
+      box.append(chip(atual.to, null, () => selectLib(kk, atual.to)));
+      box.append(chip('desfazer', 'gone', () => libSetSub(kk, sel.name, null)));
       aside.append(box);
+      nota('o hub usa "' + atual.to + '" no lugar de "' + sel.name + '"'
+           + (atual.when ? ' — escolhido em ' + atual.when : '') + '. '
+           + 'Vale para todos os projetos; o esquema no Altium não muda.');
+      /* a escolha ganha do nome exato de proposito, mas se o original REAPARECEU na lib
+         (um ExportLibs novo, por exemplo) ela passa a esconder o item de verdade - e o
+         painel tem que dizer isso, senao a substituicao vira uma sombra permanente */
+      const voltou = (isSym ? LIB.symBy : LIB.fpBy).has(sel.name);
+      if (voltou) {
+        const w = el('p', null, '"' + sel.name + '" voltou a existir na biblioteca — '
+          + 'a substituição continua valendo e está escondendo o item real. Desfaça para usar o original.');
+        w.style.cssText = 'font-size:12px;color:var(--warn);margin:0 0 14px';
+        aside.append(w);
+      }
+    } else {
+      const amb = libResolve(kk, sel.name);
+      const empate = (amb && amb.how === 'ambiguo') ? amb.cands : [];
+      const near = empate.length ? empate
+                                 : libSuggest(sel.name, isSym ? LIB.symBy.keys() : LIB.fpBy.keys());
+      if (near.length) {
+        aside.append(el('div', 'kicker', empate.length ? 'a chave empatou entre' : 'parecidos na lib'));
+        if (empate.length)
+          nota('os nomes só diferem em espaço ou pontuação, então o hub não escolhe sozinho — '
+               + 'pôr o footprint errado na placa é pior que não resolver.');
+        const box = el('div', 'chips');
+        box.style.cssText = 'margin:6px 0 14px;flex-direction:column;align-items:stretch';
+        near.forEach(n => {
+          const linha = el('div', 'chips');
+          linha.append(chip(n, null, () => selectLib(kk, n)));
+          linha.append(chip('usar este', 'tag-outline', () => libSetSub(kk, sel.name, n)));
+          box.append(linha);
+        });
+        aside.append(box);
+      }
     }
     libAsideUsage(aside, (isSym ? u.sym : u.fp).get(sel.name));
   }
 
   /* preview de baixo: o footprint escolhido (do simbolo) ou o proprio selecionado */
-  const fp = fpName ? LIB.fpBy.get(fpName) : null;
+  const fp = fpName ? ((libResolve('fp', fpName) || {}).item || null) : null;
   libDrawFp = fp || null;
   fpBB = fp ? fp.bbox : null;
   $('#libFpMeta').textContent = fp ? fp.name + ' · ' + (fp.pads || []).length + ' pads'
@@ -2188,13 +2340,17 @@ function readURL() {
 async function loadProject(id) {
   const det = await API.detail(id);
   if (!det) { toast('detalhe do projeto indisponível — tente Reindexar', 'err'); return; }
+  /* recarga do MESMO projeto (o SSE do hubserver dispara uma a cada gravacao, inclusive a
+     de Libs/lib-subs.js) nao pode zerar a selecao da aba Biblioteca: apagaria justamente o
+     painel de "substituto em uso"/desfazer um segundo depois de aparecer */
+  const trocouProjeto = S.projId !== id;
   S.projId = id; S.detail = det;
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
   S.neoden = { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: ndLoadExcl(id), group: ndLoadGroup(id) };
   ndAnchor = null;
   S.laser = lzLoad(id); lzFaces = []; lzFitKey = '';   /* a arte e as opcoes sao por projeto */
   libUse = null; libUseFor = null;        /* o cruzamento com a lib e por projeto */
-  S.lib.sel = null; S.lib.fpShown = null;
+  if (trocouProjeto) { S.lib.sel = null; S.lib.fpShown = null; }
   $('#ndSearch').value = ''; $('#ndKind').value = '';
   syncURL();
   renderAll();

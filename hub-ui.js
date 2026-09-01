@@ -22,8 +22,13 @@ function loadLibs(){
   if (libsLoading) return libsLoading;
   libsLoading = Promise.all([
     loadVarScript('Libs/schlib.js', 'schlib'),
-    loadVarScript('Libs/pcblib.js', 'pcblib')
-  ]).then(([s, p]) => { schlibData = s || { symbols:[] }; pcblibData = p || { footprints:[] }; });
+    loadVarScript('Libs/pcblib.js', 'pcblib'),
+    loadVarScript('Libs/rename-map.js', 'renameMap'),
+    loadVarScript('Libs/lib-subs.js', 'libSubs')
+  ]).then(([s, p, rm, subs]) => {
+    schlibData = s || { symbols:[] }; pcblibData = p || { footprints:[] };
+    HubCore.setLibTables(rm, subs);
+  });
   return libsLoading;
 }
 

@@ -79,7 +79,9 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 ├── hubserver.py             servidor local opcional (Flask; API do hub v2 — índice/detalhe/Rescan — e recarregamento automático)
 ├── Libs\
 │   ├── schlib.js            espelho da biblioteca de esquema (símbolos)
-│   └── pcblib.js            espelho da biblioteca de footprints
+│   ├── pcblib.js            espelho da biblioteca de footprints
+│   ├── rename-map.js        o que o RenameLibs padronizou (antigo → novo) — tabela de apelido
+│   └── lib-subs.js          substituições escolhidas na aba Biblioteca
 ├── Projects\
 │   └── <nome>\              um por projeto = histórico local
 │       ├── schematic.js     esquema (autorado pela IA ou espelhado do Altium)
@@ -332,6 +334,72 @@ As escolhas ficam por projeto em `localStorage`. Nome do arquivo:
 
 Contorno com canto em arco é achatado e encadeado junto com as linhas — placa de canto
 arredondado recorta certo, inclusive no negativo.
+
+
+### Nomes de biblioteca — apelidos e substitutos
+
+O espelho e a `.SchLib`/`.PcbLib` mestras falam **vocabulários diferentes**. O `RenameLibs`
+padronizou 152 símbolos e 170 footprints, mas o resultado foi aplicado **só ao espelho** — a
+biblioteca de verdade continua com os nomes antigos, que são justamente os que os projetos
+exportados referenciam (`CAP [  SMD  ]` contra `CAP [SMD]`). Projeto escrito **depois** do
+rename referencia o nome novo. Os dois vocabulários estão em uso ao mesmo tempo.
+
+Casar por igualdade exata condenava metade a "ausente" — e ausente não é um aviso: o símbolo
+vira um **quadrado vermelho sem pinos** na folha, o componente é **pulado inteiro** na extração
+de nets (net faltando, sem dizer nada) e a validação **aborta** o resto das checagens dele.
+
+Agora existe **um resolvedor só**, em `hub-core.js`, por onde passam a aba Biblioteca, a folha
+do Esquema, a extração de nets, a validação e o hub clássico. A cascata, em ordem de autoridade:
+
+| Passo | Como | `how` |
+|---|---|---|
+| 1 | substituição escolhida por uma pessoa (`Libs\lib-subs.js`) | `escolha` |
+| 2 | nome exato | `exato` |
+| 3 | `Libs\rename-map.js`, **um salto só**, nos dois sentidos | `rename` |
+| 4 | chave normalizada, **só** quando aponta para um único item | `chave` |
+
+A chave normalizada é a **`NormKey` do `RenameLibs.pas` portada literalmente** — maiúscula,
+acento dobrado por faixa de byte Latin-1, só `A-Z0-9`. É porte literal de propósito: se JS e
+Pascal discordarem do que é "o mesmo nome", a discordância só aparece na bancada.
+
+O passo 3 dá **um salto só** porque no `rename-map` `INDUTOR MODO COMUM` é nome novo de uma
+entrada **e** nome antigo de outra — encadear seguiria para o item errado.
+
+O passo 4 **se recusa a chutar**. Na PcbLib real a chave junta `SOIC 8` com `SOIC - 8`,
+`TO-220AB` com `TO–220AB` (travessão), e mais dois pares. Pôr o footprint errado na placa é
+pior que não resolver, então empate vira **ambíguo** e cai no fluxo de substituição, que é onde
+uma pessoa decide. Nos símbolos a chave não colide (404 nomes, 404 chaves).
+
+**O que isso recupera**, medido no acervo: 86 ocorrências de símbolo e 14 de footprint que
+apareciam como ausentes. No `LM555 astável`, a aba Biblioteca sai de **4 ausentes para 1**.
+
+O segmento **Apelidos** lista tudo que casou por apelido (`referenciado → nome na lib`, e
+por quê) — é onde se confere se algum apelido casou errado.
+
+**Escolher um substituto.** No painel de um item ausente, cada "parecido na lib" ganhou um
+botão **usar este**: a escolha vai para `Libs\lib-subs.js` e, daí em diante, o resolvedor
+entrega o símbolo escolhido no lugar do ausente em todas as telas. **Desfazer** está no mesmo
+lugar. Três decisões de projeto:
+
+- **É da biblioteca, não do projeto.** O mesmo `Cap Eletrolitico` aparece em quatro projetos;
+  perguntar quatro vezes só cria quatro respostas diferentes.
+- **O `schematic.js` não muda.** Ele é o contrato com o `BuildSchematic`; manter o nome
+  original preserva a rastreabilidade e deixa a escolha reversível. O projeto no Altium
+  também não muda — a troca vale para o espelho.
+- **Arquivo separado.** O `ExportLibs` sobrescreve `schlib.js`/`pcblib.js` **inteiros**;
+  guardar a escolha dentro deles a apagaria no próximo export.
+
+O formato de `lib-subs.js` é um objeto JSON **plano por linha**, com chaves fixas e não-ASCII
+em `\uXXXX` — exatamente o que o `JGet` dos `.pas` consegue ler e o que o `TStringList` do
+Delphi não corrompe. Em `file://` (sem servidor) a gravação degrada para **download**, igual
+ao botão "Salvar changes".
+
+> **O espelho não tem tudo que a lib mestra tem.** Conferído direto na `.SchLib`/`.PcbLib` de
+> `Y:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\`: a lib real tem **404 símbolos** e o espelho
+> 401 — faltam `NE555`, `MC33072P_1` e `STWD100YNYWY3F`. Nome nenhum resolve isso: só rodar
+> **ExportLibs** de novo traz a geometria. E note que esse `ExportLibs` vai reescrever o
+> espelho com os nomes **reais** (os antigos) — o resolvedor cobre os dois sentidos, então
+> nada quebra quando isso acontecer.
 
 ## Servidor local com tempo real (opcional)
 

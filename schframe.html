@@ -170,6 +170,10 @@
 <script src="hub-draw.js"></script>
 <script src="Libs/schlib.js"></script>
 <script src="Libs/pcblib.js"></script>
+<!-- tabelas de apelido do resolvedor de nomes; ausentes, o resolvedor so perde os passos
+     de rename e de substituicao (o 404 no console e esperado antes da primeira escolha) -->
+<script src="Libs/rename-map.js"></script>
+<script src="Libs/lib-subs.js"></script>
 <script>
   var SCH_P = new URLSearchParams(location.search).get('p') || '_DemoKit';
   document.write('<script src="Projects/' + SCH_P + '/schematic.js"><\/script>');

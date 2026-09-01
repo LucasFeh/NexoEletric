@@ -6,6 +6,10 @@ const fatal = m => { const f = document.getElementById('fatal'); f.style.display
 if (typeof schematic === 'undefined') { fatal('schematic.js não encontrado para o projeto "' + SCH_P + '".'); return; }
 const SLIB = typeof schlib  !== 'undefined' ? schlib  : { symbols:[] };
 const PLIB = typeof pcblib  !== 'undefined' ? pcblib  : { footprints:[] };
+/* antes de qualquer symbolOf: sem as tabelas o resolvedor casa so por nome exato e por
+   chave, e metade dos componentes viraria quadrado vermelho na folha */
+HubCore.setLibTables(typeof renameMap !== 'undefined' ? renameMap : null,
+                     typeof libSubs   !== 'undefined' ? libSubs   : null);
 
 let model = HubCore.buildSchModel(schematic);
 let nets  = HubCore.extractNets(model, SLIB);

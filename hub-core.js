@@ -231,15 +231,162 @@ function effLayerForOwner(model, ref, layer){
 
 /* ============ Esquema: libs, transform e extracao de nets (preview) ============ */
 
+/* ══════════ resolucao de nome de biblioteca ══════════
+   O espelho e a biblioteca mestra do Altium falam vocabularios diferentes. O RenameLibs
+   padronizou 152 simbolos e 170 footprints, mas so no ESPELHO: a .SchLib/.PcbLib de
+   verdade continua com os nomes antigos, que sao justamente os que os projetos exportados
+   referenciam ("CAP [  SMD  ]" contra "CAP [SMD]"). Projeto escrito DEPOIS do rename
+   referencia o nome novo. Os dois vocabularios estao em uso ao mesmo tempo, entao casar
+   por igualdade exata condena metade a "ausente" - e ausente aqui nao e um aviso: o
+   simbolo vira um quadrado vermelho sem pinos na folha, o componente e pulado inteiro na
+   extracao de nets (produzindo net faltando sem dizer nada) e a validacao aborta o resto
+   das checagens daquele componente.
+
+   A cascata, em ordem de autoridade:
+     1. substituicao escolhida por uma pessoa (Libs/lib-subs.js) - decisao explicita
+     2. nome exato
+     3. rename-map, UM salto so, nos dois sentidos (antigo->novo e novo->antigo)
+     4. chave normalizada, e SO quando ela aponta para um unico item
+
+   O passo 3 e um salto so de proposito: no rename-map "INDUTOR MODO COMUM" e nome novo de
+   uma entrada e nome antigo de outra, e encadear seguiria para o item errado.
+
+   O passo 4 se recusa a chutar. Na PcbLib real a chave normalizada junta "SOIC 8" com
+   "SOIC - 8", "TO-220AB" com "TO\u2013220AB" (travessao), "CAP EL 2mm L11.5 D5" com o mesmo
+   nome de dois espacos e "CONE-TE-1-5745967-0" com "CONE - TE - 1-5745967-0" - 4 pares.
+   Escolher um dos dois no chute poe o footprint errado na placa; empate vira `ambiguo` e
+   cai no fluxo de substituicao manual, que e onde uma pessoa decide. Nos simbolos a chave
+   nao colide (404 nomes, 404 chaves), entao la o passo 4 sempre decide sozinho. */
+
+/* Porte literal da NormKey do RenameLibs.pas:37-56, para JS e Pascal concordarem sobre o
+   que e "o mesmo nome". Ela dobra acento por FAIXA DE BYTE Latin-1 (nao por Unicode), e o
+   UpCase do Delphi so mexe em a-z ASCII - por isso a minuscula acentuada e pega pelas
+   faixas 224-252 e nao por toUpperCase(). Nao troque por NFD+strip: o resultado diverge em
+   'sz' (223) e 'y' com trema (255), que a NormKey NAO trata. */
+function normKey(s){
+  const t = String(s == null ? '' : s);
+  let r = '';
+  for (let i = 0; i < t.length; i++){
+    let c = t.charAt(i);
+    if (c >= 'a' && c <= 'z') c = c.toUpperCase();
+    const o = c.charCodeAt(0);
+    if      ((o >= 192 && o <= 198) || (o >= 224 && o <= 230)) c = 'A';
+    else if (o === 199 || o === 231)                           c = 'C';
+    else if ((o >= 200 && o <= 203) || (o >= 232 && o <= 235)) c = 'E';
+    else if ((o >= 204 && o <= 207) || (o >= 236 && o <= 239)) c = 'I';
+    else if (o === 209 || o === 241)                           c = 'N';
+    else if ((o >= 210 && o <= 216) || (o >= 242 && o <= 248)) c = 'O';
+    else if ((o >= 217 && o <= 220) || (o >= 249 && o <= 252)) c = 'U';
+    if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) r += c;
+  }
+  return r;
+}
+
+/* Indice por nome e por chave, montado UMA vez por lista (a lib tem 401 simbolos e 618
+   footprints, e o find() linear de antes rodava por componente desenhado). A chave guarda
+   TODOS os candidatos - quem decide se um empate pode ser usado e o resolvedor, nao aqui. */
+const LIB_IDX = (typeof WeakMap === 'function') ? new WeakMap() : null;
+function libIndex(list){
+  const arr = list || [];
+  if (LIB_IDX && LIB_IDX.has(arr)) return LIB_IDX.get(arr);
+  const byName = new Map(), byKey = new Map();
+  for (const it of arr){
+    if (!it || typeof it.name !== 'string') continue;
+    if (!byName.has(it.name)) byName.set(it.name, it);
+    const k = normKey(it.name);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(it);
+  }
+  const idx = { byName, byKey };
+  if (LIB_IDX) LIB_IDX.set(arr, idx);
+  return idx;
+}
+
+/* Tabelas de apelido, que valem para o espelho inteiro e nao para uma chamada: por isso
+   moram no modulo e nao viajam em cada symbolOf(). `setLibTables` e chamada uma vez, depois
+   que Libs/rename-map.js e Libs/lib-subs.js carregam; sem elas o resolvedor ainda funciona,
+   so perde os passos 1 e 3. */
+function emptyTables(){
+  return { sym:{ subs:{}, fwd:{}, bwd:{} }, fp:{ subs:{}, fwd:{}, bwd:{} } };
+}
+let LIB_TABLES = emptyTables();
+
+function setLibTables(renameMap, libSubs){
+  const t = emptyTables();
+  /* `mergeSym`/`mergeFp` entram junto: sao os itens que o RenameLibs julgou REDUNDANTES -
+     sairam do espelho e viraram ZZ-OBSOLETO na lib do Altium, mas continuam com o nome
+     antigo nos projetos ja exportados. Sem eles, "TO-263-5" e "NMAXXXXSC" ficam ausentes
+     mesmo com "DDPAK-5" e "NMA0515SC" vivos no espelho e o proprio mapa dizendo que um
+     virou o outro - e a chave normalizada nao junta os dois (TO2635 x DDPAK5). */
+  const par = [['sym', ['symRename', 'mergeSym']], ['fp', ['fpRename', 'mergeFp']]];
+  for (const [kind, campos] of par){
+    for (const campo of campos){
+      const m = (renameMap && renameMap[campo]) || {};
+      for (const antigo of Object.keys(m)){
+        const novo = m[antigo];
+        if (typeof novo !== 'string' || !novo) continue;
+        if (!(antigo in t[kind].fwd)) t[kind].fwd[antigo] = novo;
+        /* o sentido inverso e uma LISTA: dois nomes antigos podem levar ao mesmo novo, e
+           um novo com dois antigos VIVOS na lib e ambiguo, nao um palpite */
+        (t[kind].bwd[novo] = t[kind].bwd[novo] || []).push(antigo);
+      }
+    }
+  }
+  for (const r of (libSubs || [])){
+    if (!r || !r.from || !r.to) continue;
+    const kind = r.kind === 'fp' ? 'fp' : 'sym';
+    t[kind].subs[r.from] = r.to;
+  }
+  LIB_TABLES = t;
+  return t;
+}
+const libTables = () => LIB_TABLES;
+
+/* Devolve { item, name, how, cands } ou null. `how`: 'escolha' | 'exato' | 'rename' |
+   'chave' | 'ambiguo'. Em 'ambiguo' o item vem null de proposito - quem chama tem que
+   tratar como nao resolvido e oferecer a escolha, nunca desempatar sozinho. */
+function resolveLib(list, name, kind, tables){
+  const nm = String(name == null ? '' : name);
+  if (!nm) return null;
+  const t = (tables || LIB_TABLES)[kind === 'fp' ? 'fp' : 'sym'] || { subs:{}, fwd:{}, bwd:{} };
+  const idx = libIndex(list);
+  const hit = (n, how) => ({ item: idx.byName.get(n), name: n, how });
+
+  const escolhido = t.subs[nm];
+  if (escolhido && idx.byName.has(escolhido)) return hit(escolhido, 'escolha');
+  if (idx.byName.has(nm)) return hit(nm, 'exato');
+
+  const novo = t.fwd[nm];
+  if (novo && idx.byName.has(novo)) return hit(novo, 'rename');
+  const antigos = (t.bwd[nm] || []).filter(a => idx.byName.has(a));
+  if (antigos.length === 1) return hit(antigos[0], 'rename');
+  if (antigos.length > 1) return { item:null, name:null, how:'ambiguo', cands:antigos };
+
+  const cand = idx.byKey.get(normKey(nm)) || [];
+  if (cand.length === 1) return hit(cand[0].name, 'chave');
+  if (cand.length > 1) return { item:null, name:null, how:'ambiguo', cands:cand.map(x => x.name) };
+  return null;
+}
+
+const resolveSym = (schlib, name, tables) =>
+  resolveLib((schlib && schlib.symbols) || [], name, 'sym', tables);
+const resolveFp = (pcblib, name, tables) =>
+  resolveLib((pcblib && pcblib.footprints) || [], name, 'fp', tables);
+
+/* Fachada historica: todo o resto do sistema (desenho da folha, hit-test, extracao de
+   nets, validacao, hub classico) chama por aqui, entao resolver AQUI DENTRO e o que faz os
+   quatro passos valerem em todas as telas de uma vez. */
 function symbolOf(schlib, name){
-  return ((schlib && schlib.symbols) || []).find(s => s.name === name) || null;
+  const r = resolveSym(schlib, name);
+  return (r && r.item) || null;
 }
 function partOf(sym, part){
   if (!sym || !sym.parts || !sym.parts.length) return null;
   return sym.parts.find(p => p.part === (part || 1)) || null;
 }
 function footprintOf(pcblib, name){
-  return ((pcblib && pcblib.footprints) || []).find(f => f.name === name) || null;
+  const r = resolveFp(pcblib, name);
+  return (r && r.item) || null;
 }
 /* ponta quente do pino (onde o fio conecta), em coords locais do simbolo */
 function pinHot(pin){
@@ -449,8 +596,12 @@ function validateSchematic(schematic, schlib, pcblib){
             if (!padNames.has(String(p.num)))
               warnings.push(`${where}: pino "${p.num}" sem pad correspondente no footprint ${c.footprint}`);
         }
+        /* compara o footprint RESOLVIDO, e nao a string: o modelo do simbolo no espelho
+           carrega o nome novo e o projeto carrega o antigo, e comparar cru dispararia o
+           aviso em massa para o mesmo footprint fisico */
         const cur = (sym.footprints || []).find(f => f.current);
-        if (cur && cur.name !== c.footprint)
+        const curR = cur ? resolveFp(pcblib, cur.name) : null;
+        if (cur && (curR && curR.item ? curR.item !== fp : cur.name !== c.footprint))
           warnings.push(`${where}: footprint ${c.footprint} difere do modelo da lib (${cur.name})`);
       }
       if ((c.x % 100) || (c.y % 100)) warnings.push(`${where}: fora da grade de 100 mil`);
@@ -523,6 +674,37 @@ function serializeChanges(changes){
              '// Edite ESTE arquivo (nunca o board.js). Um objeto JSON por linha. Consulte AI-GUIDE.md.',
              'var changes = ['];
   for (const ch of list) L.push(jline(ch) + ',');
+  L.push('];');
+  return { text: L.join('\n') + '\n', errors: [] };
+}
+
+/* Libs/lib-subs.js: as substituicoes escolhidas na aba Biblioteca.
+   Um registro JSON PLANO por linha e chaves fixas, porque e assim que os .pas leem
+   (o JGet procura '"chave":' literal dentro da linha); nao-ASCII sai como \uXXXX pelo
+   mesmo motivo - o TStringList do Delphi le ANSI e corromperia acento cru.
+   `key` viaja junto para o lado Pascal nao precisar reimplementar a NormKey. */
+function serializeLibSubs(subs){
+  const list = Array.isArray(subs) ? subs : [];
+  const errors = [], seen = {}, out = [];
+  list.forEach((r, i) => {
+    const o = r || {}, kind = o.kind === 'fp' ? 'fp' : 'sym';
+    if (typeof o.from !== 'string' || !o.from) return errors.push({ idx:i, msg:'substituicao sem "from"' });
+    if (typeof o.to !== 'string' || !o.to)     return errors.push({ idx:i, msg:'substituicao sem "to"' });
+    if (o.from === o.to) return errors.push({ idx:i, msg:`substituicao de "${o.from}" para ela mesma` });
+    const k = kind + '\u0000' + o.from;
+    /* dois destinos para o mesmo nome nao e conflito de merge, e escolha perdida: a ultima
+       venceria em silencio e a pessoa nunca saberia qual das duas valeu */
+    if (seen[k]) return errors.push({ idx:i, msg:`duas substituicoes para "${o.from}"` });
+    seen[k] = true;
+    out.push({ kind, from:o.from, key:normKey(o.from), to:o.to,
+               when: typeof o.when === 'string' ? o.when : '' });
+  });
+  if (errors.length) return { text:null, errors };
+  const L = ['// AltiumPCBMirror - substituicoes de biblioteca escolhidas na aba Biblioteca.',
+             '// "from" = nome que o projeto referencia e a lib nao tem; "to" = nome que existe na lib.',
+             '// "key" = NormKey(from), a mesma do RenameLibs.pas, para JS e Pascal concordarem.',
+             'var libSubs = ['];
+  for (const r of out) L.push(jline(r) + ',');
   L.push('];');
   return { text: L.join('\n') + '\n', errors: [] };
 }
@@ -722,9 +904,10 @@ function deriveStatus(entry, loaded){
 
 return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, ORIENT_DIR,
          symbolOf, partOf, footprintOf, pinHot, compTransform, compPinsWorld,
+         normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp,
          buildSchModel, extractNets, validateSchematic,
          applyPcbChanges, deriveStatus,
-         serializeChanges, serializeSchematic, serializeAnnotations,
+         serializeChanges, serializeSchematic, serializeAnnotations, serializeLibSubs,
          compDelta, xfPoint, xfAngle, ownerDelta, effLayerForOwner,
          neodenTransform, neodenCsv, neodenKind };
 });
