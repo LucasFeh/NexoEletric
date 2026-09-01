@@ -10,6 +10,7 @@
 <script src="hub-draw.js"></script>
 <script src="hub-font.js"></script>
 <script src="hub-laser.js"></script>
+<script src="hub-bom.js"></script>
 <!-- gravação (POST /api/save, com queda para download em file://) — a aba Biblioteca
      escreve Libs/lib-subs.js por aqui -->
 <script src="hub-io.js"></script>
@@ -258,6 +259,16 @@ tbody tr[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow:
 .nd-check input:disabled { cursor: default; }
 .nd-hint { margin: 4px 0 0; font-size: 11px; color: var(--text-4); }
 .nd-sep { height: 1px; margin: 16px 0 12px; background: var(--line); }
+/* bom: opções + configuração à esquerda, prévia viva à direita. A prévia é o ARQUIVO,
+   num iframe com srcdoc — o que se vê é literalmente o que vai ser salvo. */
+.bom-grid { height: 100%; display: grid; min-height: 0;
+  grid-template-columns: var(--aside-w) minmax(320px, 1fr); }
+.bom-opts { padding: 14px 16px; overflow: auto; border-right: 1px solid var(--line); }
+.bom-view { display: flex; flex-direction: column; min-width: 0; }
+.bom-view iframe { flex: 1; width: 100%; border: 0; background: var(--sunken); }
+.bom-path { font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  word-break: break-all; margin: 4px 0 0; }
+
 /* laser: opções · prévia · resumo. Reusa .nd-fields/.nd-check/.nd-hint/.nd-sep. */
 .lz-grid { height: 100%; display: grid; min-height: 0;
   grid-template-columns: var(--lz-l, var(--aside-w)) 6px minmax(240px, 1fr)
@@ -687,6 +698,64 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
       </div>
     </div>
 
+    <div class="pane" data-pane="bom">
+      <div class="bom-grid">
+        <aside class="bom-opts">
+          <div class="kicker">o que a página mostra ao abrir</div>
+          <label class="nd-check"><input type="checkbox" data-bom-ver="pads"> pads</label>
+          <label class="nd-check"><input type="checkbox" data-bom-ver="silk"> serigrafia</label>
+          <label class="nd-check"><input type="checkbox" data-bom-ver="refs"> designadores</label>
+          <label class="nd-check"><input type="checkbox" data-bom-ver="tracks"> trilhas</label>
+          <label class="nd-check"><input type="checkbox" data-bom-ver="regions"> planos</label>
+          <label class="nd-check"><input type="checkbox" data-bom-ver="drills"> furos</label>
+          <label class="nd-check"><input type="checkbox" data-bom-ver="dark"> tema escuro</label>
+          <p class="nd-hint">tudo continua alternável dentro da própria página; isto é só o
+            estado em que ela abre.</p>
+
+          <div class="nd-sep"></div>
+          <div class="kicker">cabeçalho</div>
+          <div class="nd-fields">
+            <span class="k">layout</span>
+            <select id="bomLayout" class="input">
+              <option value="lr">frente e verso</option>
+              <option value="f">só a frente</option>
+              <option value="b">só o verso</option>
+              <option value="bom">só a lista</option>
+            </select>
+            <span class="k">empresa</span>
+            <input id="bomEmpresa" class="input" type="text">
+            <span class="k">revisão</span>
+            <input id="bomRev" class="input" type="text">
+          </div>
+
+          <div class="nd-sep"></div>
+          <div class="kicker">pasta padrão do BOM</div>
+          <input id="bomDir" class="input mono" type="text" style="width:100%"
+                 placeholder="D:\\Documentos\\BOM" title="pasta no disco do PC que roda o hubserver">
+          <button class="btn btn-ghost btn-sm" id="bomDirSave" style="width:100%;margin-top:6px">Gravar pasta padrão</button>
+          <p class="nd-hint">é o disco do <b>servidor</b>: acessando o hub de outro PC da rede,
+            o arquivo é salvo lá, não aqui. De outra máquina, use <b>Baixar</b>.</p>
+
+          <div class="nd-sep"></div>
+          <div class="kicker">arquivo</div>
+          <div class="lz-num" id="bomStats"></div>
+          <div id="bomWarn"></div>
+          <button class="btn btn-primary" id="bomSalvar" style="width:100%;margin-top:16px">Salvar na pasta padrão</button>
+          <button class="btn btn-secondary" id="bomSalvarComo" style="width:100%;margin-top:6px">Salvar como…</button>
+          <button class="btn btn-ghost btn-sm" id="bomBaixar" style="width:100%;margin-top:6px">Baixar</button>
+          <p class="nd-hint bom-path" id="bomNome"></p>
+        </aside>
+
+        <div class="bom-view">
+          <div class="canvas-bar">
+            <span class="ttl">prévia</span><span class="meta" id="bomMeta"></span>
+            <div class="right"><button class="btn btn-ghost btn-sm" id="bomAbrir">Abrir numa aba</button></div>
+          </div>
+          <iframe id="bomFrame" title="prévia do BOM"></iframe>
+        </div>
+      </div>
+    </div>
+
     <div class="pane" data-pane="hist"><div class="scroll" style="height:100%"><div class="hist" id="histRows"></div></div></div>
   </main>
 
@@ -787,6 +856,7 @@ const TABS = [
   { id:'lib', label:'Biblioteca', count:()=> LIB.ready ? LIB.syms.length + LIB.fps.length : '…' },
   { id:'neoden', label:'Neoden' },
   { id:'laser', label:'Laser' },
+  { id:'bom', label:'BOM' },
   { id:'hist', label:'Histórico' },
 ];
 const FLOW = [
@@ -822,6 +892,9 @@ const S = {
   neoden: { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: new Set(), group: true },
   /* opcoes da arte a laser; o formato e o de HubLaser.defaults(), persistido por projeto */
   laser: HubLaser.defaults(),
+  /* opcoes do BOM interativo (por projeto) e a config da maquina (do servidor) */
+  bom: HubBom.defaults(),
+  bomCfg: { bomDir: '' },
   /* sel = { k:'sym'|'fp'|'gone-sym'|'gone-fp', name }; fpShown troca so o preview de baixo */
   lib: { q: '', kind: 'all', sel: null, part: 1, fpShown: null },
 };
@@ -1760,6 +1833,7 @@ function renderPanes() {
   if (S.tab === 'lib') return renderLib();
   if (S.tab === 'neoden') return renderNeoden();
   if (S.tab === 'laser') return renderLaser();
+  if (S.tab === 'bom') return renderBom();
   if (S.tab === 'hist') {
     const h = $('#histRows'); h.textContent = '';
     d.history.forEach(x => {
@@ -1777,7 +1851,8 @@ function renderPanes() {
    Toda a geometria vem do hub-laser.js; aqui só há estado de UI, desenho e download.
    A prévia usa HubLaser.place — a MESMA transformação do arquivo — então o que se vê
    é o que sai, inclusive espelho e negativo. */
-const lzBoard = () => (S.detail && S.detail.board) || null;
+/* mesma armadilha do bomBoard: 'board' vem {} quando nao ha board.js */
+const lzBoard = () => { const b = S.detail && S.detail.board; return temBoard(b) ? b : null; };
 const lzKey = id => 'altiumhub.laser.' + id;
 
 function lzLoad(id) {
@@ -2249,6 +2324,231 @@ async function lzAbrirNoLightBurn() {
   toast('aberto no LightBurn (na máquina do servidor): ' + j.path, 'ok');
 }
 
+/* ═══ BOM — página interativa para montar a placa ══════════════
+   Sai do MESMO board.js que a vista PCB desenha, entao nao ha um segundo caminho de
+   extracao para divergir. Toda a geometria e a montagem do arquivo moram no hub-bom.js;
+   aqui so ha estado de UI, previa e gravacao.
+
+   A previa e um iframe com srcdoc do arquivo INTEIRO - o que se ve e literalmente o que vai
+   ser salvo, e nao uma aproximacao. Consequencia esperada: dentro do srcdoc a origem e
+   opaca, entao o localStorage do "visto" nao persiste NA PREVIA; no arquivo salvo, sim. */
+const bomKey = id => 'altiumhub.bom.' + id;
+
+function bomLoad(id) {
+  const d = HubBom.defaults();
+  try {
+    const raw = JSON.parse(localStorage.getItem(bomKey(id)) || 'null');
+    if (raw && typeof raw === 'object') {
+      /* so as chaves que o HubBom conhece hoje: opcao gravada por versao antiga nao volta
+         como chave morta (mesma regra do lzLoad) */
+      for (const k of Object.keys(d)) if (k in raw) d[k] = raw[k];
+    }
+  } catch (e) {}
+  return d;
+}
+function bomSave() {
+  if (!S.projId) return;
+  try { localStorage.setItem(bomKey(S.projId), JSON.stringify(S.bom)); } catch (e) {}
+}
+/* o servidor devolve 'board': {} para projeto sem board.js, e {} e VERDADEIRO em JS - sem
+   olhar o conteudo, a aba passava direto pelo estado vazio e deixava salvar um BOM de uma
+   placa que nao existe */
+const temBoard = b => !!(b && (b.board || (b.components || []).length));
+const bomBoard = () => { const b = S.detail && S.detail.board; return temBoard(b) ? b : null; };
+
+let bomTimer = null, bomFeito = null;      /* bomFeito = { html, model, warnings } */
+let bomDirServidor = '';                   /* ultimo valor que veio do servidor, p/ nao pisar no digitado */
+
+function bomGerar() {
+  const B = bomBoard();
+  if (!B) return null;
+  const p = proj();
+  return HubBom.gerar(B, S.bom, { proj: (p && p.name) || 'placa', generated: B.generated || '' });
+}
+
+function bomCompute() {
+  const t0 = (window.performance || Date).now();
+  const r = bomGerar();
+  if (!r) return;
+  bomFeito = r;
+  const ms = Math.round((window.performance || Date).now() - t0);
+  $('#bomFrame').srcdoc = r.html;
+
+  const st = $('#bomStats'); st.textContent = '';
+  const linha = (k, v) => { st.append(el('span', 'k', k), el('span', 'v', v)); };
+  const s = r.model.stats;
+  linha('componentes', String(s.comps));
+  linha('grupos', String(s.grupos));
+  linha('frente / verso', s.frente + ' / ' + s.verso);
+  linha('pads', String(s.pads));
+  linha('tamanho', (r.html.length / 1024).toFixed(0) + ' KB');
+  $('#bomMeta').textContent = s.comps + ' comps · ' + (r.html.length/1024).toFixed(0) + ' KB · ' + ms + ' ms';
+
+  const W = $('#bomWarn'); W.textContent = '';
+  const avisos = (r.warnings || []).slice();
+  const p = proj();
+  if (p && p.pending > 0)
+    avisos.unshift(p.pending + ' mudança(s) pendente(s) em changes.js — o BOM sai do board.js cru; '
+                 + 'rode ApplyChanges e ExportPcb antes de usar na bancada.');
+  for (const a of avisos) W.append(el('div', 'lz-warn', a));
+
+  $('#bomNome').textContent = HubBom.filename((p && p.name) || 'placa')
+    + (S.bomCfg.bomDir ? '  →  ' + S.bomCfg.bomDir : '  →  (sem pasta padrão)');
+}
+function bomSchedule() {
+  $('#bomMeta').textContent = 'gerando…';
+  clearTimeout(bomTimer);
+  bomTimer = setTimeout(bomCompute, 260);
+}
+
+function renderBom() {
+  const pane = document.querySelector('.pane[data-pane="bom"]');
+  const grid = pane.querySelector('.bom-grid');
+  let empty = pane.querySelector('.empty');
+  if (!bomBoard()) {
+    grid.style.display = 'none';
+    if (!empty) {
+      empty = el('div', 'empty'); const inner = el('div');
+      inner.append(el('span', 'tag', 'sem board.js'));
+      inner.append(el('p', null, 'Rode ExportPcb no Altium para gerar a geometria da placa.'));
+      empty.append(inner); pane.append(empty);
+    }
+    empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  grid.style.display = '';
+  bomSyncControls();
+  bomSchedule();
+}
+
+function bomSyncControls() {
+  const o = S.bom;
+  document.querySelectorAll('[data-bom-ver]').forEach(c => c.checked = !!o[c.dataset.bomVer]);
+  const set = (id, v) => { const n = $(id); if (document.activeElement !== n) n.value = v; };
+  set('#bomLayout', o.layout); set('#bomEmpresa', o.empresa || ''); set('#bomRev', o.revisao || '');
+  /* a pasta so e reescrita quando ainda esta como o servidor mandou: qualquer re-render
+     (marcar uma caixa, por exemplo) apagaria um caminho digitado e ainda nao gravado */
+  const dir = $('#bomDir');
+  if (dir.value === '' || dir.value === bomDirServidor) dir.value = S.bomCfg.bomDir || '';
+  bomDirServidor = S.bomCfg.bomDir || '';
+}
+function bomSet(patch) { Object.assign(S.bom, patch); bomSave(); renderBom(); }
+
+/* ── configuração da máquina (pasta padrão) — mora no servidor, não no navegador:
+   o caminho e do disco do SERVIDOR, e no localStorage cada PC da LAN teria a sua versao de
+   um caminho que so o servidor usa. */
+async function bomCfgLoad() {
+  if (!location.protocol.startsWith('http')) return;
+  try {
+    const r = await fetch('/api/config');
+    if (!r.ok) return;
+    const j = await r.json();
+    if (j && j.ok && j.config) S.bomCfg = Object.assign({ bomDir: '' }, j.config);
+  } catch (e) {}
+}
+async function bomCfgSave(dir) {
+  if (!location.protocol.startsWith('http'))
+    return toast('a pasta padrão precisa do hub servido por hubserver.py', 'warn');
+  let resp;
+  try {
+    resp = await fetch('/api/config', { method:'POST', headers:{ 'Content-Type':'application/json' },
+                                        body: JSON.stringify({ bomDir: dir }) });
+  } catch (e) { return toast('servidor não respondeu: ' + e.message, 'err'); }
+  if (resp.status === 404)
+    return toast('rota /api/config não existe neste servidor — reinicie o hubserver.py', 'err');
+  let j = null; try { j = await resp.json(); } catch (e) {}
+  if (!j || !j.ok) return toast((j && j.error) || ('não foi possível gravar (HTTP ' + resp.status + ')'), 'err');
+  S.bomCfg = Object.assign({ bomDir: '' }, j.config);
+  bomCompute();
+  toast(S.bomCfg.bomDir ? 'pasta padrão: ' + S.bomCfg.bomDir : 'pasta padrão limpa', 'ok');
+}
+
+/* ── gravar ── */
+async function bomSalvar(dir, nome) {
+  const r = bomFeito || bomGerar();
+  if (!r) return toast('sem board.js — rode ExportPcb no Altium', 'err');
+  if (!location.protocol.startsWith('http'))
+    return toast('salvar em pasta precisa do hub servido por hubserver.py, não por file:// — use Baixar', 'warn');
+  if (!dir && !S.bomCfg.bomDir)
+    return toast('sem pasta padrão configurada — use "Salvar como…"', 'warn');
+  const p = proj();
+  const body = { name: nome || HubBom.filename((p && p.name) || 'placa'), content: r.html };
+  if (dir) body.dir = dir;
+  let resp;
+  try {
+    resp = await fetch('/api/bom-save', { method:'POST', headers:{ 'Content-Type':'application/json' },
+                                          body: JSON.stringify(body) });
+  } catch (e) { return toast('servidor não respondeu: ' + e.message, 'err'); }
+  if (resp.status === 404)
+    return toast('rota /api/bom-save não existe neste servidor — reinicie o hubserver.py', 'err');
+  let j = null; try { j = await resp.json(); } catch (e) {}
+  if (!j) { toast('resposta inesperada do servidor (HTTP ' + resp.status + ')', 'err'); return false; }
+  if (!j.ok) { toast(j.error || ('não foi possível salvar (HTTP ' + resp.status + ')'), 'err'); return false; }
+  toast('salvo em ' + j.path, 'ok');
+  return true;
+}
+
+function bomBaixar() {
+  const r = bomFeito || bomGerar();
+  if (!r) return toast('sem board.js — rode ExportPcb no Altium', 'err');
+  const p = proj();
+  const nome = HubBom.filename((p && p.name) || 'placa');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([r.html], { type: 'text/html' }));
+  a.download = nome; a.click();
+  URL.revokeObjectURL(a.href);
+  toast(nome + ' baixado (' + (r.html.length/1024).toFixed(0) + ' KB)', 'ok');
+}
+
+function bomAbrir() {
+  const r = bomFeito || bomGerar();
+  if (!r) return toast('sem board.js — rode ExportPcb no Altium', 'err');
+  const u = URL.createObjectURL(new Blob([r.html], { type: 'text/html' }));
+  window.open(u, '_blank');
+  /* nao revoga na hora: a aba nova ainda vai buscar o blob */
+  setTimeout(() => URL.revokeObjectURL(u), 60000);
+}
+
+/* "Salvar como" com pasta E nome, mais a opção de adotar a pasta como padrão — e a
+   mesma caixa que serve de área de mapeamento para quem prefere configurar na hora. */
+function openBomSaveAs() {
+  const p = proj();
+  const bd = el('div', 'backdrop center'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
+  const d = el('div', 'dialog'); d.append(el('h3', null, 'Salvar BOM como'));
+  const f = el('div', 'nd-fields'); f.style.margin = '4px 0 2px';
+  const pasta = el('input', 'input mono'); pasta.type = 'text';
+  pasta.value = S.bomCfg.bomDir || ''; pasta.placeholder = 'D:\\Documentos\\BOM';
+  const arq = el('input', 'input mono'); arq.type = 'text';
+  arq.value = HubBom.filename((p && p.name) || 'placa');
+  f.append(el('span', 'k', 'pasta'), pasta, el('span', 'k', 'arquivo'), arq);
+  d.append(f);
+  const lab = el('label', 'nd-check');
+  const padrao = document.createElement('input'); padrao.type = 'checkbox';
+  lab.append(padrao, document.createTextNode(' usar esta pasta como padrão daqui em diante'));
+  d.append(lab);
+  const hint = el('p', 'nd-hint', 'a pasta é no disco do PC que roda o hubserver. Ela é criada se '
+    + 'a pasta acima dela já existir; senão o hub avisa em vez de criar a árvore toda.');
+  d.append(hint);
+  const act = el('div'); act.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:6px';
+  const cancel = el('button', 'btn btn-ghost', 'Cancelar'); cancel.onclick = closeOverlay;
+  const ok = el('button', 'btn btn-primary', 'Salvar');
+  ok.onclick = async () => {
+    const dir = pasta.value.trim(), nome = arq.value.trim();
+    if (!dir) return toast('informe a pasta', 'warn');
+    /* .html e nao .htm: e o que o servidor aceita, e recusar aqui evita fechar o dialogo
+       para levar um 403 depois */
+    if (!/\.html$/i.test(nome)) return toast('o arquivo tem que terminar em .html', 'warn');
+    closeOverlay();
+    /* a pasta padrao so muda DEPOIS de a gravacao dar certo: adotar um caminho que nem
+       aceitou o arquivo deixaria o botao "Salvar" apontando para o lugar errado */
+    if (!(await bomSalvar(dir, nome))) return;
+    if (padrao.checked) await bomCfgSave(dir);
+  };
+  act.append(cancel, ok); d.append(act); bd.append(d); $('#overlay').append(bd);
+  pasta.focus();
+}
+
 function renderAll() { renderHeader(); renderProjBar(); renderTabs(); renderPanes(); }
 
 /* ═══ AÇÕES E OVERLAYS ═════════════════════════════════════════ */
@@ -2349,6 +2649,7 @@ async function loadProject(id) {
   S.neoden = { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: ndLoadExcl(id), group: ndLoadGroup(id) };
   ndAnchor = null;
   S.laser = lzLoad(id); lzFaces = []; lzFitKey = '';   /* a arte e as opcoes sao por projeto */
+  S.bom = bomLoad(id); bomFeito = null;               /* idem o BOM */
   libUse = null; libUseFor = null;        /* o cruzamento com a lib e por projeto */
   if (trocouProjeto) { S.lib.sel = null; S.lib.fpShown = null; }
   $('#ndSearch').value = ''; $('#ndKind').value = '';
@@ -2426,6 +2727,21 @@ $('#btnBom').onclick = exportBom;
 });
 $('#ndSearch').oninput = e => { S.neoden.q = e.target.value; renderNeoden(); };
 $('#ndGroup').onchange = e => { S.neoden.group = e.target.checked; ndSaveGroup(); renderNeoden(); };
+
+/* ── bom ── */
+document.querySelectorAll('[data-bom-ver]').forEach(c => c.onchange = () => {
+  bomSet({ [c.dataset.bomVer]: c.checked });
+});
+$('#bomLayout').onchange = e => bomSet({ layout: e.target.value });
+['#bomEmpresa', '#bomRev'].forEach(sel => $(sel).addEventListener('input', () => {
+  S.bom.empresa = $('#bomEmpresa').value; S.bom.revisao = $('#bomRev').value;
+  bomSave(); bomSchedule();
+}));
+$('#bomDirSave').onclick = () => bomCfgSave($('#bomDir').value.trim());
+$('#bomSalvar').onclick = () => bomSalvar(null, null);
+$('#bomSalvarComo').onclick = openBomSaveAs;
+$('#bomBaixar').onclick = bomBaixar;
+$('#bomAbrir').onclick = bomAbrir;
 
 /* ── laser ── */
 document.querySelectorAll('[data-lz-side]').forEach(b => b.onclick = () => {
@@ -2532,6 +2848,9 @@ document.addEventListener('keydown', e => {
     e.append(inner); pane.append(e);
     return;
   }
+  /* a pasta padrao do BOM e da MAQUINA, nao do projeto: carrega uma vez, antes da primeira
+     tela, para o rodape do painel ja dizer para onde "Salvar" vai escrever */
+  await bomCfgLoad();
   const url = readURL();
   if (url.tab) S.tab = url.tab;
   const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;

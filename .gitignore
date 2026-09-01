@@ -1,3 +1,5 @@
 apply-report.txt
 __pycache__/
 Laser/
+# config da MAQUINA (pasta padrao do BOM): caminho local, nao do projeto
+hub-config.json

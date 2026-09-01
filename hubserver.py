@@ -174,7 +174,7 @@ def api_laser_open():
     So aceita de localhost: o servidor escuta na rede toda (0.0.0.0), e um endpoint
     que lanca aplicativo nao pode ficar exposto ao resto da LAN.
     """
-    if request.remote_addr not in ('127.0.0.1', '::1', 'localhost'):
+    if not _is_local(request):
         return {'ok': False,
                 'error': 'abrir direto so funciona no PC do servidor; use "Baixar .lbrn"'}, 403
     data = request.get_json(silent=True)
@@ -199,6 +199,120 @@ def api_laser_open():
     except OSError as e:
         return {'ok': False, 'error': 'arquivo gravado, mas nada associado a .lbrn: %s' % e}, 500
     return {'ok': True, 'path': os.path.join(LASER_DIR, name)}
+
+
+# ─────────────────────────── configuracao do hub ───────────────────────────
+# Um arquivo so, na raiz, com o punhado de coisas que sao da MAQUINA e nao do projeto -
+# hoje so a pasta padrao do BOM. Nao vai para o localStorage porque o caminho e do disco do
+# SERVIDOR: gravado no browser, cada PC da LAN teria a sua versao de um caminho que so o
+# servidor usa.
+CONFIG_FILE = 'hub-config.json'
+CONFIG_KEYS = ('bomDir',)
+LOCAL_ADDRS = ('127.0.0.1', '::1', 'localhost')
+
+
+def _is_local(req):
+    """A chamada partiu do PROPRIO PC do servidor?
+
+    Nao basta olhar 127.0.0.1: o banner imprime tambem a URL de LAN (e e ela que fica
+    favoritada, porque e a mesma que funciona no tablet da bancada). Aberta no proprio PC,
+    ela chega com o IP da maquina como remote_addr e cairia no 403. Comparar com os enderecos
+    da propria maquina resolve sem afrouxar nada: o remote_addr e o IP real do outro lado do
+    TCP, e o de outra maquina da LAN nunca e um dos nossos.
+    """
+    addr = req.remote_addr
+    if addr in LOCAL_ADDRS:
+        return True
+    try:
+        return addr in set(socket.gethostbyname_ex(socket.gethostname())[2])
+    except OSError:
+        return False
+
+
+def _config_read():
+    """Config invalida vira config VAZIA, nunca erro: um hub-config.json com `[]` dentro
+    derrubaria com 500 ate a rota que serve para consertar o problema."""
+    try:
+        with open(os.path.join(ROOT, CONFIG_FILE), encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: data[k] for k in CONFIG_KEYS if isinstance(data.get(k), str)}
+
+
+@app.route('/api/config', methods=['GET'])
+def api_config_get():
+    return {'ok': True, 'config': _config_read()}
+
+
+@app.route('/api/config', methods=['POST'])
+def api_config_set():
+    """Grava hub-config.json. So de localhost: bomDir aponta para o disco do servidor, e
+    quem escolhe onde o servidor escreve tem que estar sentado nele."""
+    if not _is_local(request):
+        return {'ok': False, 'error': 'a configuracao so muda no PC do servidor'}, 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return {'ok': False, 'error': 'JSON obrigatorio'}, 400
+    cfg = _config_read()
+    for k in CONFIG_KEYS:
+        if k in data:
+            if not isinstance(data[k], str):
+                return {'ok': False, 'error': '%s tem que ser texto' % k}, 400
+            cfg[k] = data[k].strip()
+    full = os.path.join(ROOT, CONFIG_FILE)
+    tmp = full + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, full)
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao gravar a configuracao: %s' % e}, 500
+    return {'ok': True, 'config': cfg}
+
+
+@app.route('/api/bom-save', methods=['POST'])
+def api_bom_save():
+    """Grava o BOM em qualquer pasta do disco do SERVIDOR.
+
+    E o unico endpoint que escreve fora do workspace, entao carrega as mesmas travas do
+    laser-open e mais uma: so de localhost (o servidor escuta 0.0.0.0 e escrever no disco
+    nao pode ficar exposto a LAN), so .html, so nome de arquivo (nada de subpasta vinda do
+    cliente) e a pasta tem que existir - ou, no maximo, ser criavel DENTRO de uma que ja
+    existe. Sem isso um caminho digitado errado cria uma arvore inteira em silencio.
+    """
+    if not _is_local(request):
+        return {'ok': False, 'error': 'salvar em pasta so funciona no PC do servidor; '
+                                      'use "Baixar" de outra maquina'}, 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or 'name' not in data or 'content' not in data:
+        return {'ok': False, 'error': 'JSON {name, content, dir?} obrigatorio'}, 400
+    name = os.path.basename(str(data['name']))
+    if not name.lower().endswith('.html') or name.startswith('.'):
+        return {'ok': False, 'error': 'so .html'}, 403
+    d = str(data.get('dir') or _config_read().get('bomDir') or '').strip().strip('"')
+    if not d:
+        return {'ok': False, 'error': 'sem pasta padrao configurada - use "Salvar como"'}, 400
+    d = os.path.abspath(os.path.expanduser(d))
+    if not os.path.isdir(d):
+        pai = os.path.dirname(d)
+        if not os.path.isdir(pai):
+            return {'ok': False, 'error': 'a pasta nao existe e a de cima tambem nao: ' + d}, 400
+        try:
+            os.mkdir(d)
+        except OSError as e:
+            return {'ok': False, 'error': 'nao consegui criar a pasta: %s' % e}, 500
+    full = os.path.join(d, name)
+    tmp = full + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(str(data['content']))
+        os.replace(tmp, full)
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
+    return {'ok': True, 'path': full}
 
 
 _PROJ_CACHE = {}

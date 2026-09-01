@@ -74,6 +74,7 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 ├── hub-draw.js              renderers canvas compartilhados (símbolo, footprint, PCB)
 ├── hub-font.js              fonte vetorial da serigrafia como geometria pura (canvas e SVG)
 ├── hub-laser.js             gerador da arte para gravação a laser (SVG para o LightBurn)
+├── hub-bom.js               gerador do BOM interativo (uma página HTML autossuficiente)
 ├── projects.js              índice do histórico de projetos (usado pelo hub-classic.html)
 ├── AI-GUIDE.md              contrato/manual para a sessão de IA
 ├── hubserver.py             servidor local opcional (Flask; API do hub v2 — índice/detalhe/Rescan — e recarregamento automático)
@@ -400,6 +401,73 @@ ao botão "Salvar changes".
 > **ExportLibs** de novo traz a geometria. E note que esse `ExportLibs` vai reescrever o
 > espelho com os nomes **reais** (os antigos) — o resolvedor cobre os dois sentidos, então
 > nada quebra quando isso acontecer.
+
+
+### BOM — página interativa para montar a placa
+
+A aba **BOM** gera **uma página HTML autossuficiente** com a placa desenhada dos dois lados e a
+lista de componentes ao lado. É para a bancada: clicar numa linha acende as peças no desenho,
+clicar numa peça acha a linha, e o **visto** de cada linha fica salvo no navegador de quem
+monta. Mesma ideia do [InteractiveHtmlBom](https://github.com/openscopeproject/InteractiveHtmlBom),
+com uma diferença que importa: **não precisa de plugin novo no Altium** — sai do mesmo
+`board.js` que o `ExportPcb` já gera e que a vista PCB desenha, então não há um segundo caminho
+de extração para divergir do primeiro.
+
+**A geometria sai achatada, e isso é de propósito.** O arquivo tem que abrir sozinho, em
+qualquer pasta, sem internet e sem os `.js` do espelho ao lado. Então a página **não** carrega
+`hub-font.js` nem `hub-laser.js`: ela recebe a geometria já resolvida — pad virou polígono
+(pelo `HubLaser.padPrim`/`primPolys`, que já resolve círculo, oval, roundrect, octógono e o furo
+com `drillshape`/`holerot`) e texto virou polilinha (pelo `HubFont`) — e só precisa saber
+preencher polígono e traçar linha. É o que mantém **uma** implementação de forma de pad e **uma**
+de fonte no projeto, as que já estão sob teste, em vez de abrir uma terceira dentro do template.
+
+O que a página gerada faz:
+
+| | |
+|---|---|
+| **Frente / Verso / Ambos / Só a lista** | o verso sai espelhado em X — é a placa virada na mão, não vista através |
+| **Pads · Silk · Refs · Trilhas · Planos** | liga e desliga cada camada; **Refs** separa o designador do resto da serigrafia |
+| **Agrupado / Por peça** | uma linha por compra, ou uma linha por designador — que é como se confere a placa peça a peça |
+| **clique na linha** | acende todas as peças daquele grupo, nos dois lados |
+| **clique na peça** | seleciona a linha e rola até ela |
+| **clique num pad** | acende **a net inteira** (pads, trilhas, planos e vias) e seleciona o dono do pad — é por onde se segue um sinal na bancada |
+| **visto por linha** | fica no `localStorage` do navegador de quem monta; o rodapé conta quantas peças já foram |
+| **filtro** | casa contra valor, footprint e designadores |
+| **tema escuro** | e zoom/pan com roda e arraste em cada lado |
+
+O **visto** é gravado pela identidade do grupo (valor + footprint), e não pelo índice dele: pelo
+índice, regerar o BOM depois de acrescentar um componente reordenaria a lista e os vistos
+passariam a apontar para outra peça, sem nada na tela dizendo que trocaram de dono.
+
+O agrupamento é por **comment + footprint**, e **não** por lado: quem compra quer uma linha por
+peça, e a etiqueta de lado na coluna de designadores já diz onde cada uma cai. A ordem dos
+grupos segue o primeiro designador, em ordem natural (`R2` antes de `R10`), que é a ordem em que
+a bancada procura. Camada interna não entra — quem monta não alcança ela.
+
+A **prévia** na aba é o arquivo inteiro num `iframe` com `srcdoc`: o que se vê é literalmente o
+que vai ser salvo. Uma consequência esperada: dentro do `srcdoc` a origem é opaca, então o
+`localStorage` do visto **não** persiste na prévia — no arquivo salvo, sim.
+
+**Salvar**
+
+| Botão | O que faz |
+|---|---|
+| **Salvar na pasta padrão** | grava direto na pasta configurada, no disco do **servidor** |
+| **Salvar como…** | escolhe pasta e nome, com a opção de adotar aquela pasta como padrão |
+| Baixar | download pelo navegador — é o caminho de quem acessa o hub de outro PC |
+
+A **pasta padrão** é configurada na própria aba e fica em `hub-config.json`, na raiz, gravado
+pelo servidor. Ela **não** vai para o `localStorage` porque o caminho é do disco do
+**servidor**: guardado no navegador, cada PC da LAN teria a sua versão de um caminho que só o
+servidor usa. Por isso também o arquivo está no `.gitignore` — é configuração de máquina, como
+as letras de drive dos `.pas`.
+
+> **Salvar em pasta escreve no PC do servidor.** `/api/bom-save` e `/api/config` são as duas
+> únicas rotas que escrevem fora do workspace, e por isso só aceitam chamada de **localhost**:
+> o `hubserver.py` escuta na rede toda, e escolher onde ele escreve tem que ser decisão de quem
+> está sentado nele. De outra máquina o botão responde 403 e o caminho é **Baixar**. A rota só
+> aceita `.html`, só nome de arquivo (nada de subpasta vinda do cliente) e cria **no máximo um
+> nível** de pasta — um caminho digitado errado avisa em vez de criar uma árvore inteira.
 
 ## Servidor local com tempo real (opcional)
 

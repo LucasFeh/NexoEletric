@@ -1174,7 +1174,9 @@ function exportSvg(board, opts){
 }
 
 return { LB, defaults, collect, arcPts, chainSegments,
-         primPolys, union, contours, simplify,
+         /* padPrim/drillPrim saem para o hub-bom.js: a forma de pad e a do furo ficam
+            resolvidas num lugar so, e e este, que ja esta sob teste */
+         primPolys, padPrim, drillPrim, union, contours, simplify,
          art, place, svg, exportSvg, filename, autoMirror, checkOpts,
          PALETTE, SOURCES, defaultLayers, geomFor, geomEmpty, ci2hex, ciName, freeCi,
          cutDefaults, benchDefaults, cutOf, layerCut, withMountLayer, boardCutouts,
