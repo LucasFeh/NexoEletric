@@ -352,6 +352,9 @@ function montaAmbiente(){
       if (sel === '[data-modo]')
         return (elems.__modo = elems.__modo ||
                 ['grupo','peca'].map(k => { const e = mk('b'); e.dataset.modo = k; return e; }));
+      if (sel === '[data-fte]')
+        return (elems.__fte = elems.__fte ||
+                ['p','m','g'].map(k => { const e = mk('b'); e.dataset.fte = k; return e; }));
       if (sel === '[data-m3]')
         return (elems.__m3 = elems.__m3 ||
                 ['centrar','pos','p90','p180','p270','esp']
@@ -500,6 +503,23 @@ function montaAmbiente(){
   assert.strictEqual(mn.style.props['--bomw'], '454px',
                      'lista a esquerda cresce ao arrastar para a direita: ' + mn.style.props['--bomw']);
   dispSp('pointerup', 0);
+
+  /* ── os três tamanhos da lista ──
+     O tamanho de sempre é o "pequena": ligar a página não pode mudar o que já estava bom. */
+  const bom = amb.elems.bom;
+  const btF = k => amb.doc.querySelectorAll('[data-fte]').find(b => b.dataset.fte === k);
+  const marcado = () => amb.doc.querySelectorAll('[data-fte]')
+    .filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.fte);
+  assert.deepStrictEqual(marcado(), ['p'], 'abre no tamanho de sempre');
+  assert.ok(!bom.classList.contains('f-m') && !bom.classList.contains('f-g'),
+            'e sem classe nenhuma: o pequeno é o padrão do CSS');
+  btF('g').onclick();
+  assert.ok(bom.classList.contains('f-g') && !bom.classList.contains('f-m'), 'grande');
+  assert.deepStrictEqual(marcado(), ['g'], 'e só um botão marcado por vez');
+  btF('m').onclick();
+  assert.ok(bom.classList.contains('f-m') && !bom.classList.contains('f-g'), 'média');
+  btF('p').onclick();
+  assert.ok(!bom.classList.contains('f-m') && !bom.classList.contains('f-g'), 'e volta ao pequeno');
 
   /* ── a gaveta ── */
   const gv = amb.elems.gaveta, gvBg = amb.elems.gavetaBg;
@@ -669,7 +689,8 @@ function montaAmbiente(){
      mentia sobre o estado real, e o primeiro clique só remarcava a caixa sem desligar nada. */
   {
     const amb2 = montaAmbiente();
-    const cofre = { 'altiumbom.PlacaTeste.ui': JSON.stringify({ lado:'dir', w:0, guiada:true }) };
+    const cofre = { 'altiumbom.PlacaTeste.ui':
+      JSON.stringify({ lado:'dir', w:0, guiada:true, fonte:'g' }) };
     const janela2 = Object.assign({}, janela, {
       localStorage: { getItem: k => (k in cofre ? cofre[k] : null),
                       setItem: (k, v) => { cofre[k] = v; } },
@@ -679,6 +700,12 @@ function montaAmbiente(){
     r2.boot();
     assert.strictEqual(amb2.elems.cbGuiada.checked, true,
                        'a caixa abre marcada quando a sessão anterior deixou a guiada ligada');
+    /* mesma armadilha, outro controle: o tamanho gravado tem que valer NA LISTA e aparecer
+       no botão - marcar "Pequena" com a lista grande seria mentir sobre o estado */
+    assert.ok(amb2.elems.bom.classList.contains('f-g'), 'a lista abre no tamanho gravado');
+    assert.deepStrictEqual(amb2.doc.querySelectorAll('[data-fte]')
+      .filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.fte), ['g'],
+      'e o botão marcado é o do tamanho gravado');
     /* e um clique só desliga de verdade: escolher na lista deixa de mover a câmera */
     amb2.elems.cbGuiada.checked = false;
     amb2.elems.cbGuiada.onclick();
@@ -1050,6 +1077,13 @@ function montaAmbiente(){
   /* a ajuda dos atalhos mora na gaveta, junto do resto dos ajustes */
   const gav = hn.match(/<aside id="gaveta">[\s\S]*?<\/aside>/)[0];
   assert.ok(gav.includes('atalhos da vista 3D'), 'a se\u00e7\u00e3o de atalhos');
+  ['p','m','g'].forEach(k =>
+    assert.ok(gav.includes('data-fte="' + k + '"'), 'falta o tamanho ' + k));
+  assert.ok(/data-fte="p" aria-pressed="true"/.test(gav), 'abre marcado no tamanho de sempre');
+  /* o tamanho sai de UMA medida: cabe\u00e7alho, designadores e etiqueta derivam dela */
+  ['th{', 'td.refs{', '.lado{'].forEach(sel =>
+    assert.ok(new RegExp(sel.replace(/[.{]/g, '\\$&') + '[^}]*calc\\(var\\(--fte\\)').test(hn),
+              sel + ' tem que derivar da medida base'));
   assert.ok(gav.includes('<kbd>C</kbd>') && gav.includes('<kbd>Ctrl</kbd>'),
             'os atalhos escritos com as teclas');
   assert.ok((hn.match(/<canvas /g) || []).length === 3, 'dois canvas 2D e um 3D');

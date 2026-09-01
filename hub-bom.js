@@ -368,19 +368,26 @@ main.esq #bom{border-left:0;border-right:1px solid var(--linha)}
 /* sem desenho na tela a lista deixa de ter largura fixa e toma tudo - senao ela ficaria
    presa nos 420 px com o resto da janela vazio */
 #placas.só-bom~#bom{flex:1 1 auto}
-table{border-collapse:collapse;width:100%;font-size:12px}
-th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--linha);vertical-align:top}
+/* O tamanho da lista sai de UMA medida: as colunas menores (cabeçalho, designadores, a
+   etiqueta de lado) e o respiro das linhas derivam dela. Assim os tres modos mudam a lista
+   inteira em proporcao, em vez de deixar um pedaço grande ao lado de outro miudo. */
+#bom{--fte:12px;--resp:5px}
+#bom.f-m{--fte:13.5px;--resp:7px}
+#bom.f-g{--fte:15.5px;--resp:10px}
+table{border-collapse:collapse;width:100%;font-size:var(--fte)}
+th,td{text-align:left;padding:var(--resp) 8px;border-bottom:1px solid var(--linha);vertical-align:top}
 th{position:sticky;top:0;background:var(--pane);z-index:1;font-weight:600;color:var(--fg2);
-  font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  font-size:calc(var(--fte) - 1px);text-transform:uppercase;letter-spacing:.04em}
 tbody tr{cursor:pointer}
 tbody tr:hover{background:color-mix(in srgb,var(--hi) 10%,transparent)}
 tbody tr[aria-selected="true"]{background:color-mix(in srgb,var(--hi) 20%,transparent)}
 tbody tr.feito td:not(.cx){opacity:.45;text-decoration:line-through}
 td.q,td.n{text-align:right;font-variant-numeric:tabular-nums;color:var(--fg2)}
 td.n{width:30px;padding-right:4px;opacity:.65}
-td.refs{font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-word}
+td.refs{font-family:ui-monospace,Consolas,monospace;font-size:calc(var(--fte) - 1px);
+  word-break:break-word}
 td.cx{width:26px;text-align:center}
-.lado{display:inline-block;font-size:10px;padding:0 5px;border-radius:4px;border:1px solid var(--linha);
+.lado{display:inline-block;font-size:calc(var(--fte) - 2px);padding:0 5px;border-radius:4px;border:1px solid var(--linha);
   color:var(--fg2);margin-left:5px}
 #vazio{padding:20px;color:var(--fg2)}
 `;
@@ -393,6 +400,7 @@ const JS = `
    (uma so) e para o clique no desenho. selKey e so quem esta com a linha marcada. */
 var cams = [null, null], realce = [], selKey = '', netSel = '';
 var modo = 'grupo', filtro = '', feitos = {}, guiada = !!D.guiada, layoutAtual = D.layout;
+var fonte = 'p';   /* p | m | g - o tamanho de sempre e o 'p'; os outros dois crescem */
 /* a ultima face escolhida: e para onde o icone volta quando se esta em "as duas" ou "so a
    lista", em vez de assumir a frente sempre */
 var faceAtual = D.layout === 'b' ? 'b' : 'f';
@@ -412,13 +420,26 @@ try {
     lado = ui.lado === 'esq' ? 'esq' : 'dir';
     largLista = (typeof ui.w === 'number' && ui.w > 0) ? ui.w : 0;
     if (typeof ui.guiada === 'boolean') guiada = ui.guiada;
+    if (ui.fonte === 'p' || ui.fonte === 'm' || ui.fonte === 'g') fonte = ui.fonte;
   }
 } catch (e) {}
 function salvaUI(){
   try {
     localStorage.setItem(CHAVE + '.ui',
-      JSON.stringify({ lado:lado, w:largLista, guiada:guiada }));
+      JSON.stringify({ lado:lado, w:largLista, guiada:guiada, fonte:fonte }));
   } catch (e) {}
+}
+
+/* O tamanho aplicado na LISTA e nos botoes de uma vez. Os botoes saem daqui, e nao do HTML
+   emitido: gravado "grande" e reaberto, o painel mostraria "Pequena" marcada com a lista grande
+   - foi exatamente o que aconteceu com a caixa da visao guiada. */
+function aplicaFonte(){
+  var bom = document.getElementById('bom');
+  bom.classList.toggle('f-m', fonte === 'm');
+  bom.classList.toggle('f-g', fonte === 'g');
+  [].forEach.call(document.querySelectorAll('[data-fte]'), function (b){
+    b.setAttribute('aria-pressed', String(b.dataset.fte === fonte));
+  });
 }
 
 /* teto e piso da lista: nem ela nem o desenho podem sumir por arrasto */
@@ -1488,6 +1509,9 @@ function inicia(){
     if (m.classList.contains('on') && ev.target !== m && !(ev.target && ev.target.dataset &&
         ev.target.dataset.m3)) fechaMenu3();
   });
+  [].forEach.call(document.querySelectorAll('[data-fte]'), function (b){
+    b.onclick = function (){ fonte = b.dataset.fte; aplicaFonte(); salvaUI(); };
+  });
   [].forEach.call(document.querySelectorAll('[data-modo]'), function (b){
     b.setAttribute('aria-pressed', String(b.dataset.modo === modo));
     b.onclick = function (){
@@ -1560,6 +1584,7 @@ function inicia(){
     redim(); cams.forEach(function (c){ if (c) ajusta(c); }); pinta();
   });
   montaBom();
+  aplicaFonte();
   aplicaLateral();
   aplicaLayout(D.layout);
 }
@@ -1676,6 +1701,12 @@ function html(m, meta){
          '<div class="gv-seg">' +
          botao('data-modo', 'grupo', 'Agrupado', true) +
          botao('data-modo', 'peca', 'Por peça', false) +
+         '</div>' +
+         '<div class="gv-tit">tamanho da fonte</div>' +
+         '<div class="gv-seg">' +
+         botao('data-fte', 'p', 'Pequena', true) +
+         botao('data-fte', 'm', 'Média', false) +
+         botao('data-fte', 'g', 'Grande', false) +
          '</div>' +
          '<div class="gv-tit">atalhos da vista 3D</div>' +
          '<div class="gv-ajuda">' +
