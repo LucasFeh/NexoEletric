@@ -444,6 +444,11 @@ peça, e a etiqueta de lado na coluna de designadores já diz onde cada uma cai.
 grupos segue o primeiro designador, em ordem natural (`R2` antes de `R10`), que é a ordem em que
 a bancada procura. Camada interna não entra — quem monta não alcança ela.
 
+A divisória entre as opções e a prévia é **arrastável**, igual às da aba Laser — puxe até o
+fim (ou dê duplo clique) para fechar a lateral e dar a largura toda à prévia, e duplo clique
+de novo para devolver. A largura fica no navegador, não no projeto: é preferência de tela, e
+trocar de placa não pode mexer nela. As duas abas usam a **mesma** implementação de divisória.
+
 A **prévia** na aba é o arquivo inteiro num `iframe` com `srcdoc`: o que se vê é literalmente o
 que vai ser salvo. Uma consequência esperada: dentro do `srcdoc` a origem é opaca, então o
 `localStorage` do visto **não** persiste na prévia — no arquivo salvo, sim.
