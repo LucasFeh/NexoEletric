@@ -26,6 +26,10 @@ import sch_leitor as L  # noqa: E402
 LIB = L.LIB_PADRAO
 DMB = r'Y:\EQUIPAMENTOS_REVISADOS\DMB - DI231765 - DISPLAY ASCII PARA MARCAÇÃO DE BOBINAS\PCB E SCH'
 REV = r'Y:\EQUIPAMENTOS_REVISADOS'
+# folha antiga (Altium 6): chaves em MAIÚSCULAS no binário — antes o leitor via 0 componentes
+ANTIGO = r'Y:\EQUIPAMENTOS ATUALIZADOS\GERADORES DE PULSOS PDM\GP-DI92120-22C9E600HPF - UNIGAL\PROJETO PCB E SCH\Gerador De Pulsos 600\SCH Gerador 600.SchDoc'
+# folha em formato ASCII (exportada do EasyEDA)
+ASCII = r'Y:\EQUIPAMENTOS ATUALIZADOS\SMVT - DI221660 - SISTEMA DE MONITORAMENTO DE VIBRAÇÃO E TEMPERATURA\SMTV-DI221661\SCH e PCB\Sensor grande\VERSAO 1.0\REFS\Sheet_1_2022-05-27.schdoc'
 TOL = 0.01
 NUM = (int, float)
 
@@ -360,6 +364,30 @@ def test_schdoc():
 
 
 # ─── (c) .IntLib ──────────────────────────────────────────────────────────────
+def test_formatos_antigos():
+    """(e) folha antiga com chaves em maiúsculas e (f) folha ASCII: os dois têm que dar
+    componentes com pinos, e o antigo tem que trazer o LibReference certo"""
+    if os.path.isfile(ANTIGO):
+        comps = L.le_schdoc(ANTIGO)
+        com_pinos = [c for c in comps if c['pins']]
+        print('  (e) %s: %d componentes, %d com pinos' % (os.path.basename(ANTIGO), len(comps), len(com_pinos)))
+        assert len(com_pinos) >= 30, 'a folha antiga tem 41 componentes e 100 pinos'
+        assert any(c['ref'] == 'Sensor HP' for c in comps), 'LIBREFERENCE em maiusculas nao virou LibReference'
+        assert all(isinstance(p['x'], NUM) and p['len'] > 0 for c in comps for p in c['pins'])
+    else:
+        print('  (e) PULADO (nao alcancei %s)' % ANTIGO)
+    if os.path.isfile(ASCII):
+        comps = L.le_schdoc(ASCII)
+        com_pinos = [c for c in comps if c['pins']]
+        print('  (f) %s: %d componentes, %d com pinos' % (os.path.basename(ASCII), len(comps), len(com_pinos)))
+        assert com_pinos, 'a folha ASCII tem componentes com pinos'
+    else:
+        print('  (f) PULADO (nao alcancei %s)' % ASCII)
+    # canonização é identidade nos nomes de hoje e cobre os numerados
+    d = L._canon({'LOCATION.X': '1', 'Location.Y': '2', 'X12_FRAC': '3', 'SIZE2': '9', 'FONTNAME2': 'Arial', 'Cor': 'x'})
+    assert list(d.keys()) == ['Location.X', 'Location.Y', 'X12_Frac', 'Size2', 'FontName2', 'Cor'], list(d.keys())
+
+
 def test_intlib():
     alvo = None
     for dp, dn, fn in os.walk(REV):
@@ -422,6 +450,7 @@ def main():
         test_schdoc()
     else:
         print('  (b) PULADO (nao alcancei %s)' % DMB)
+    test_formatos_antigos()
     if os.path.isdir(REV):
         test_intlib()
     else:

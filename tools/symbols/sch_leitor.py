@@ -61,6 +61,47 @@ GEOMETRIA = {'2', '3', '4', '5', '6', '7', '8', '10', '11', '12', '13', '14'}
 BARRA = chr(0xAF)          # 0xAF no binario: negacao em cima da letra anterior
 SOBRELINHA = chr(0x305)    # como a API do Altium devolve o mesmo sinal
 
+# ─── chaves dos registros ─────────────────────────────────────────────────────
+# Arquivos antigos (Altium 6/DXP: "SCH Gerador 600.SchDoc") e o formato ASCII gravam as
+# chaves em MAIÚSCULAS ("LIBREFERENCE", "LOCATION.X"); os de hoje, em CamelCase. O leitor
+# fala CamelCase, então toda chave passa por aqui — nos arquivos novos é identidade.
+_CANON_NOMES = (
+    'RECORD', 'HEADER', 'Weight', 'MinorVersion', 'UniqueID', 'OwnerIndex', 'OwnerPartId',
+    'OwnerPartDisplayMode', 'IndexInSheet', 'IsNotAccesible', 'Location.X', 'Location.Y',
+    'Location.X_Frac', 'Location.Y_Frac', 'Corner.X', 'Corner.Y', 'Corner.X_Frac',
+    'Corner.Y_Frac', 'Radius', 'Radius_Frac', 'SecondaryRadius', 'SecondaryRadius_Frac',
+    'StartAngle', 'EndAngle', 'LineWidth', 'IsSolid', 'LocationCount', 'Text', 'Orientation',
+    'FontID', 'Justification', 'IsMirrored', 'Color', 'AreaColor', 'Transparent',
+    'LibReference', 'ComponentDescription', 'CurrentPartId', 'PartCount', 'DisplayModeCount',
+    'DisplayMode', 'AllPinCount', 'DesignItemId', 'SourceLibraryName', 'LibraryPath',
+    'PinConglomerate', 'PinLength', 'PinLength_Frac', 'Electrical', 'Name', 'Designator',
+    'Description', 'FontIdCount', 'ModelName', 'ModelType', 'IsCurrent', 'IsHidden',
+    'ReadOnlyState', 'SwapIDPart', 'Symbol', 'ScaleFactor', 'FormalType', 'KeyCount',
+)
+_CANON = {n.upper(): n for n in _CANON_NOMES}
+_CANON_PREFIXO = {'X': 'X', 'Y': 'Y', 'SIZE': 'Size', 'FONTNAME': 'FontName', 'ROTATION': 'Rotation',
+                  'UNDERLINE': 'Underline', 'BOLD': 'Bold', 'ITALIC': 'Italic', 'LIBREF': 'LibRef',
+                  'COMPDESCR': 'CompDescr', 'PARTCOUNT': 'PartCount', 'SECTIONKEY': 'SectionKey'}
+_CANON_RX = re.compile(r'^(X|Y|SIZE|FONTNAME|ROTATION|UNDERLINE|BOLD|ITALIC|LIBREF|COMPDESCR|PARTCOUNT|SECTIONKEY)(\d+)(_FRAC)?$')
+
+
+def _canon(d):
+    """chaves em qualquer caixa -> as CamelCase que o resto do módulo procura"""
+    fora = OrderedDict()
+    for k, v in d.items():
+        K = k.upper()
+        c = _CANON.get(K)
+        if c is None:
+            m = _CANON_RX.match(K)
+            c = (_CANON_PREFIXO[m.group(1)] + m.group(2) + ('_Frac' if m.group(3) else '')) if m else k
+        fora[c] = v
+    return fora
+
+
+def _texto(pl):
+    """registro de texto -> OrderedDict com as chaves canônicas"""
+    return _canon(SB.le_texto(pl))
+
 
 # ─── números ──────────────────────────────────────────────────────────────────
 def _int(v, padrao=0):
@@ -263,7 +304,7 @@ def _modo_zero(d):
 
 
 def _simbolo(regs, fontes, pinfrac, com_footprints, pcblib_names, avisos, extras=True):
-    cab = SB.le_texto(regs[0][1])
+    cab = _texto(regs[0][1])
     nome = cab.get('LibReference', '')
     partcount = max(1, _int(cab.get('PartCount'), 2) - 1)      # o arquivo grava partes+1
     pinos, graficos, fps = [], [], []
@@ -282,7 +323,7 @@ def _simbolo(regs, fontes, pinfrac, com_footprints, pcblib_names, avisos, extras
                 pinos.append((p['ownerpartid'], pino_binario(p, pinfrac.get(ordinal))))
             ordinal += 1
             continue
-        d = SB.le_texto(pl)
+        d = _texto(pl)
         r = d.get('RECORD')
         if r == '45':
             if com_footprints and (d.get('ModelType') or '').upper() == 'PCBLIB':
@@ -332,7 +373,7 @@ def le_schlib(fonte, com_footprints=True, pcblib_names=None, extras=True):
     o, source = _abre(fonte)
     avisos = []
     try:
-        cab = SB.le_texto(SB.desmonta(o.openstream('FileHeader').read())[0][1])
+        cab = _texto(SB.desmonta(o.openstream('FileHeader').read())[0][1])
         fontes = le_fontes(cab)
         if pcblib_names:
             pcblib_names = {str(n).lower() for n in pcblib_names}
@@ -346,7 +387,7 @@ def le_schlib(fonte, com_footprints=True, pcblib_names=None, extras=True):
             except ValueError as e:
                 avisos.append('%s: Data ilegível (%s)' % (onde, e))
                 continue
-            if not regs or regs[0][0] != SB.TEXTO or SB.le_texto(regs[0][1]).get('RECORD') != '1':
+            if not regs or regs[0][0] != SB.TEXTO or _texto(regs[0][1]).get('RECORD') != '1':
                 continue
             pinfrac = {}
             if o.exists(onde + '/PinFrac'):
@@ -470,23 +511,39 @@ def localiza(pins, graphics, x0, y0, rot, mirror):
     return npins, ngr
 
 
+def _registros_schdoc(caminho):
+    """a lista de registros da folha (cabeçalho no índice 0), venha ela do OLE2 ou do
+    formato ASCII ("Schematic Capture Ascii File": uma linha |CHAVE=valor|... por registro,
+    que o EasyEDA e o próprio Altium exportam). Nos dois, `OwnerIndex` conta a partir do
+    registro seguinte ao cabeçalho."""
+    import olefile
+    if olefile.isOleFile(caminho):
+        o = olefile.OleFileIO(caminho)
+        try:
+            regs = SB.desmonta(o.openstream('FileHeader').read())
+        finally:
+            o.close()
+        return [_texto(pl) if t == SB.TEXTO else None for t, pl in regs]
+    with open(caminho, 'rb') as f:
+        bruto = f.read()
+    if b'Schematic Capture Ascii File' not in bruto[:300]:
+        raise ValueError('nem OLE2 nem ASCII do Altium')
+    return [_texto(l.rstrip(b'\r')) for l in bruto.split(b'\n') if l.strip()]
+
+
 def le_schdoc(caminho):
     """componentes colocados numa folha, já em coordenadas LOCAIS do símbolo.
 
     Uma entrada por (componente, parte) que tem geometria — o Altium só grava na folha a
     parte colocada, então normalmente é uma. Só o modo de exibição 0, como no espelho."""
-    import olefile
-    o = olefile.OleFileIO(caminho)
-    try:
-        regs = SB.desmonta(o.openstream('FileHeader').read())
-    finally:
-        o.close()
-    txt = [SB.le_texto(pl) if t == SB.TEXTO else None for t, pl in regs]
+    txt = _registros_schdoc(caminho)
     filhos = {}
     for j, d in enumerate(txt):
         if d is not None and 'OwnerIndex' in d:
             filhos.setdefault(_int(d['OwnerIndex'], -2) + 1, []).append(d)
-    fontes = le_fontes(txt[0]) if txt and txt[0] else {}
+    # as fontes da folha moram no RECORD=31 (o cabeçalho, índice 0, só tem HEADER/Weight)
+    folha = next((d for d in txt if d is not None and d.get('RECORD') == '31'), None)
+    fontes = le_fontes(folha) if folha else {}
     fora = []
     for i, d in enumerate(txt):
         if d is None or d.get('RECORD') != '1' or i == 0:
