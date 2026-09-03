@@ -908,6 +908,12 @@ def api_bom_link(proj_id):
             'trocado': trocado}
 
 
+# ─────────────────── biblioteca de símbolos (tools/symbols) ───────────────────
+sys.path.insert(0, os.path.join(ROOT, 'tools', 'symbols'))
+import symserver                     # noqa: E402
+symserver.registra(app, ROOT)
+
+
 def _lan_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
