@@ -185,10 +185,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #app {
   height: 100vh;
   display: grid;
-  /* header · projeto · abas · sub-abas · main · fluxo. A fileira de sub-abas some (hidden)
-     nas abas sem filhas; por isso main e footer ficam PRESOS às suas linhas — sem isso, com
-     ela visível (PCB, Biblioteca) as sub-abas herdavam o 1fr e a vista encolhia a nada, e
-     com ela oculta o rodapé é que subia para o 1fr. */
+  /* header · projeto · abas · sub-abas · main · fluxo: SEIS filhos, seis linhas — com cinco
+     declaradas, a fileira de sub-abas ficava com o 1fr e o main caía no auto (a altura do
+     próprio conteúdo), engordando as sub-abas até 432 px com a busca vazia. A fileira some
+     (hidden) nas abas sem filhas; por isso main e footer ficam PRESOS às suas linhas — sem
+     isso, com ela visível (PCB, Biblioteca) as sub-abas herdavam o 1fr e a vista encolhia a
+     nada, e com ela oculta o rodapé é que subia para o 1fr. */
   grid-template-rows: auto auto auto auto 1fr auto;
   grid-template-columns: minmax(var(--page-min), 1fr);
   overflow-x: auto; overflow-y: hidden;          /* só a página rola na horizontal */
