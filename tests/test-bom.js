@@ -344,8 +344,9 @@ function montaAmbiente(){
     querySelectorAll(sel){
       if (sel === '[data-ver]')
         return (elems.__ver = elems.__ver || ['pads','silk','refs','tracks','regions','drills']
-          /* todas as camadas moram na gaveta agora, e todas sao caixa de marcar */
-          .map(k => { const e = mk('b'); e.dataset.ver = k; e.type = 'checkbox'; return e; }));
+          /* trilhas e botao na barra de cima; as outras camadas sao caixa de marcar na gaveta */
+          .map(k => { const e = mk('b'); e.dataset.ver = k;
+                      if (k !== 'tracks') e.type = 'checkbox'; return e; }));
       if (sel === '[data-layout]')
         return (elems.__layout = elems.__layout ||
                 ['lr','bom'].map(k => { const e = mk('b'); e.dataset.layout = k; return e; }));
@@ -530,15 +531,21 @@ function montaAmbiente(){
   amb.elems.gavetaFecha.onclick();
   assert.ok(!gv.classList.contains('on'), 'o X fecha');
 
-  /* a caixa da gaveta liga a camada de verdade: com trilha o desenho traça mais */
-  const cbT = amb.doc.querySelectorAll('[data-ver]').find(b => b.dataset.ver === 'tracks');
-  assert.strictEqual(cbT.type, 'checkbox', 'trilhas e caixa, nao botao');
-  amb.ops.length = 0; cbT.checked = true; cbT.onclick();
+  /* Trilhas e botao da BARRA (a unica camada que se mexe na bancada) e liga a camada de
+     verdade: com trilha o desenho traça mais. As outras continuam caixa na gaveta. */
+  const acha = k => amb.doc.querySelectorAll('[data-ver]').find(b => b.dataset.ver === k);
+  const btT = acha('tracks');
+  assert.notStrictEqual(btT.type, 'checkbox', 'trilhas e botao da barra, e nao caixa da gaveta');
+  assert.strictEqual(acha('drills').type, 'checkbox', 'as outras camadas continuam caixas');
+  assert.strictEqual(btT.getAttribute('aria-pressed'), 'false', 'e abre apagado');
+  amb.ops.length = 0; btT.onclick();
   const comTrilha = amb.ops.filter(o => o === 'stroke').length;
-  amb.ops.length = 0; cbT.checked = false; cbT.onclick();
+  assert.strictEqual(btT.getAttribute('aria-pressed'), 'true', 'clicar acende o botao');
+  amb.ops.length = 0; btT.onclick();
   const semTrilha = amb.ops.filter(o => o === 'stroke').length;
+  assert.strictEqual(btT.getAttribute('aria-pressed'), 'false', 'e clicar de novo apaga');
   assert.ok(comTrilha > semTrilha,
-            'a caixa liga a camada: ' + comTrilha + ' contra ' + semTrilha + ' tracos');
+            'o botao liga a camada: ' + comTrilha + ' contra ' + semTrilha + ' tracos');
 
   /* ── o modal proprio, no lugar do confirm do navegador ── */
   const primeira = () => amb.elems.linhas.children[0];
@@ -1106,19 +1113,23 @@ function montaAmbiente(){
   assert.ok(hn.includes('.face .sv-b,.face.verso .sv-f{display:none}'), 'e o CSS mostra s\u00f3 um');
   assert.ok(!/data-layout="f"/.test(hn) && !/data-layout="b"/.test(hn),
             'nao pode sobrar bot\u00e3o separado de frente/verso');
-  /* trilhas, planos, furos e o modo da lista sairam da barra e foram para a gaveta */
+  /* planos, furos e o modo da lista moram na gaveta; TRILHAS fica na barra - e a unica
+     camada que se liga e desliga na bancada, para ver por onde o sinal anda antes de soldar */
   const barra = hn.match(/<div class="tools">[\s\S]*?<\/div><\/header>/)[0];
-  const CAMADAS = ['pads','silk','refs','tracks','regions','drills'];
-  CAMADAS.forEach(k =>
+  const NA_GAVETA = ['pads','silk','refs','regions','drills'];
+  NA_GAVETA.forEach(k =>
     assert.ok(barra.indexOf('data-ver="' + k + '"') < 0, k + ' nao pode estar na barra de cima'));
+  assert.ok(/data-ver="tracks"[^>]*><svg/.test(barra), 'trilhas tem que ser \u00edcone na barra');
   assert.ok(barra.indexOf('data-modo=') < 0, 'o modo da lista saiu da barra');
   assert.ok(barra.indexOf('id="escuro"') < 0, 'o tema saiu da barra');
-  /* sobra na barra so o que muda a VISTA: as tres de layout, o lado da lista e a gaveta */
-  assert.strictEqual((barra.match(/<button/g) || []).length, 5,
-                     'a barra tem que ficar com cinco bot\u00f5es: ' + (barra.match(/<button/g) || []).length);
+  /* sobra na barra so o que muda a VISTA: as tres de layout, as trilhas, o lado da lista e
+     a gaveta */
+  assert.strictEqual((barra.match(/<button/g) || []).length, 6,
+                     'a barra tem que ficar com seis bot\u00f5es: ' + (barra.match(/<button/g) || []).length);
   const gaveta = hn.match(/<aside id="gaveta">[\s\S]*?<\/aside>/)[0];
-  CAMADAS.forEach(k =>
+  NA_GAVETA.forEach(k =>
     assert.ok(gaveta.includes('type="checkbox" data-ver="' + k + '"'), k + ' tem que ser caixa na gaveta'));
+  assert.ok(gaveta.indexOf('data-ver="tracks"') < 0, 'trilhas saiu da gaveta - agora e da barra');
   assert.ok(gaveta.includes('id="escuro"'), 'o tema tem que estar na gaveta');
   assert.ok(gaveta.includes('data-modo="grupo"') && gaveta.includes('data-modo="peca"'));
   /* e o modal proprio, com Sim e Nao */

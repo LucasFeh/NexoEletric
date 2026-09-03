@@ -44,6 +44,10 @@ const SVG = {
   lista:  '<svg viewBox="0 0 21 14" width="21" height="14" aria-hidden="true">' +
           '<line x1="2" y1="3" x2="19" y2="3"/><line x1="2" y1="7" x2="19" y2="7"/>' +
           '<line x1="2" y1="11" x2="19" y2="11"/></svg>',
+  trilhas:'<svg viewBox="0 0 21 14" width="21" height="14" aria-hidden="true">' +
+          '<path d="M1.4 4.6H6.2L9.4 1.4H19.6"/>' +
+          '<path d="M1.4 11.4H8.2L11.4 8.2H19.6"/>' +
+          '<circle class="f" cx="15.4" cy="8.2" r="1.7"/></svg>',
   ajustes:'<svg viewBox="0 0 21 14" width="21" height="14" aria-hidden="true">' +
           '<line x1="2" y1="4" x2="19" y2="4"/><line x1="2" y1="10" x2="19" y2="10"/>' +
           '<circle class="f" cx="7" cy="4" r="2.2"/><circle class="f" cx="14" cy="10" r="2.2"/></svg>',
@@ -1556,8 +1560,8 @@ function inicia(){
   cams[0] = novaCam(document.getElementById('cv0'), 0);
   cams[1] = novaCam(document.getElementById('cv1'), 1);
   cams.forEach(liga);
-  /* a mesma opcao aparece como botao na barra e como caixa na gaveta - o estado e um so, e
-     quem le/escreve muda conforme o elemento */
+  /* a mesma opcao serve de botao na barra (trilhas) e de caixa na gaveta (as outras camadas):
+     o estado e um so, e quem le/escreve muda conforme o elemento */
   [].forEach.call(document.querySelectorAll('[data-ver]'), function (b){
     var k = b.dataset.ver, caixa = b.type === 'checkbox';
     if (caixa) b.checked = !!mostra[k];
@@ -1774,6 +1778,12 @@ function html(m, meta){
   L.push(icone('data-layout', 'lr', 'Frente e verso', SVG.ambos, o.layout === 'lr'));
   L.push(icone('data-layout', 'bom', 'Só a lista', SVG.lista, o.layout === 'bom'));
   L.push('<span class="sep"></span>');
+  /* Trilhas e a unica camada que se liga e desliga NA bancada - para ver por onde o sinal
+     anda antes de soldar - entao ela mora na barra, e nao na gaveta com o que se ajusta uma
+     vez e nao se mexe mais. A barrinha antes e depois a separa dos tres layouts: encostada
+     neles, um botao que fica aceso seria lido como um quarto jeito de mostrar a placa. */
+  L.push(icone('data-ver', 'tracks', 'Trilhas', SVG.trilhas, o.tracks));
+  L.push('<span class="sep"></span>');
   /* icone de layout: dois paineis, o estreito e a lista. Clicar troca o lado, e o proprio
      icone espelha junto - assim ele mostra o que vai acontecer, e nao um rotulo a decorar */
   L.push('<button class="t ic" id="ladoLista" title="trocar o lado da lista">' +
@@ -1821,7 +1831,6 @@ function html(m, meta){
          check('pads', 'Pads', o.pads) +
          check('silk', 'Serigrafia', o.silk) +
          check('refs', 'Designadores', o.refs) +
-         check('tracks', 'Trilhas', o.tracks) +
          check('regions', 'Planos', o.regions) +
          check('drills', 'Furos', o.drills) +
          '<div class="gv-tit">navegação</div>' +
