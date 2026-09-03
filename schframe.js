@@ -1158,6 +1158,39 @@ let pane0 = 'comps';
 try { pane0 = localStorage.getItem('schframe.pane') || 'comps'; } catch (e) {}
 showPane(pane0 === 'cfg' ? 'cfg' : 'comps');
 
+/* ------- divisoria do painel -------
+   Mesmo gesto das abas Laser e BOM do hub: arrastar redimensiona, soltar perto da borda
+   fecha, duplo clique fecha/abre. A largura fica lembrada nesta maquina. O canvas nao
+   precisa de aviso: o mkCamera observa o proprio elemento e redesenha quando ele muda. */
+const SIDE_W = 330, SIDE_SNAP = 90, SIDE_VIEW_MIN = 240;   /* os mesmos limites do hub */
+let sideW = SIDE_W;
+try { const v = localStorage.getItem('schframe.sideW'); if (v !== null && isFinite(+v)) sideW = Math.max(0, +v); } catch (e) {}
+function aplicaSide(){
+  document.documentElement.style.setProperty('--side-w', sideW + 'px');
+  $('side').style.display = sideW ? '' : 'none';
+}
+function salvaSide(){ try { localStorage.setItem('schframe.sideW', String(sideW)); } catch (e) {} }
+aplicaSide();
+(function(){
+  const sp = $('split');
+  sp.addEventListener('pointerdown', e => {
+    const total = $('main').getBoundingClientRect().width;
+    const teto = Math.max(SIDE_SNAP, total - SIDE_VIEW_MIN - 6);
+    const x0 = e.clientX, w0 = sideW;
+    sp.classList.add('on');
+    sp.setPointerCapture(e.pointerId);
+    const move = ev => { const w = w0 + (ev.clientX - x0); sideW = w < SIDE_SNAP ? 0 : Math.min(w, teto); aplicaSide(); };
+    const up = () => {
+      sp.classList.remove('on');
+      sp.removeEventListener('pointermove', move); sp.removeEventListener('pointerup', up); sp.removeEventListener('pointercancel', up);
+      salvaSide();
+    };
+    sp.addEventListener('pointermove', move); sp.addEventListener('pointerup', up); sp.addEventListener('pointercancel', up);
+    e.preventDefault();
+  });
+  sp.addEventListener('dblclick', () => { sideW = sideW ? 0 : SIDE_W; aplicaSide(); salvaSide(); });
+})();
+
 $('btnFit').addEventListener('click', () => cam.fit(sheetBBox()));
 $('btnGrid').addEventListener('click', () => {
   showState.grid = !showState.grid; $('btnGrid').classList.toggle('active', showState.grid); cam.draw();
