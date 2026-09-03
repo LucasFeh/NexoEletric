@@ -22,3 +22,9 @@ tools/almox/relatorio.txt
 
 # NAO ignorar Libs/almox-parts.json: e o livro-razao rotulo -> part number.
 # Ele e gerado, mas guarda estado; perder o arquivo renumera o almoxarifado.
+
+# estado da bancada do BOM, escrito pelo hubserver dentro de Projects/<nome>/:
+# os vistos do que ja foi montado e as opcoes com que a aba gerou o link. E de
+# quem esta montando a placa, e muda a cada peça marcada -- nao e do projeto.
+bom-vistos.json
+bom-opts.json
