@@ -51,6 +51,7 @@ const DICT = {
   'tab.pcb.placa':   'Placa',
   'tab.lib.sch':     'Sch Lib',
   'tab.lib.fp':      'Footprint Lib',
+  'tab.lib.sym':     'Símbolos',
 
   /* biblioteca: acervo (espelho do Altium ou almoxarifado) */
   'lib.acervo':      'acervo',
@@ -239,6 +240,7 @@ const DICT = {
   'tab.pcb.placa':   'Board',
   'tab.lib.sch':     'Sch Lib',
   'tab.lib.fp':      'Footprint Lib',
+  'tab.lib.sym':     'Symbols',
 
   'lib.acervo':      'source',
   'lib.loading':     'loading the library…',
