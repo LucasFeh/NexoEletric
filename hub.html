@@ -183,10 +183,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #app {
   height: 100vh;
   display: grid;
-  grid-template-rows: auto auto auto 1fr auto;   /* header · projeto · abas · main · fluxo */
+  /* header · projeto · abas · sub-abas · main · fluxo. A fileira de sub-abas some (hidden)
+     nas abas sem filhas; por isso main e footer ficam PRESOS às suas linhas — sem isso, com
+     ela visível (PCB, Biblioteca) as sub-abas herdavam o 1fr e a vista encolhia a nada, e
+     com ela oculta o rodapé é que subia para o 1fr. */
+  grid-template-rows: auto auto auto auto 1fr auto;
   grid-template-columns: minmax(var(--page-min), 1fr);
   overflow-x: auto; overflow-y: hidden;          /* só a página rola na horizontal */
 }
+#app > main { grid-row: 5; }
+#app > footer { grid-row: 6; }
 
 /* ── 3. Botões ────────────────────────────────────────────────── */
 .btn {
