@@ -17,7 +17,7 @@ arquivo, confira de quem ele é. **Se o arquivo não é seu, não edite: peça.*
 | `../APM-page` | `agente/page` | a casca do hub: `hub.html`, `hub-core.js`, `hub-ui.js`, `hub-io.js`, `hub-i18n.js` | 8004 |
 | `../APM-bom` | `agente/bom-almox` | `hub-bom.js`, `Libs/almox-*.js`, `tools/almox/**`, `hubserver.py` | 8001 |
 | `../APM-laser` | `agente/laser` | `hub-laser.js`, `hub-draw.js`, `hub-font.js` | 8002 |
-| `../APM-frames` | `agente/frames` | `pcbframe.js`, `pcbframe.html`, `schframe.js`, `schframe.html` | 8003 |
+| `../APM-frames` | `agente/frames` | `pcbframe.js`, `pcbframe.html`, `schframe.js`, `schframe.html`, `hub-dialog.js` | 8003 |
 
 Suba o servidor sempre na porta do seu worktree: `python hubserver.py --port 800X`.
 Quatro agentes na 8000 é a colisão mais boba e mais frequente deste projeto.
@@ -46,6 +46,17 @@ encosta nele. Ele é do `agente/page`, junto com `hub-core.js`, `hub-ui.js`,
 - **README**: é do principal. Escreva a sua seção num commit separado e isolado,
   só do README. Conflito em commit isolado se resolve em segundos; misturado com
   código, não.
+
+## Nunca `alert()`, `confirm()` ou `prompt()`
+
+O diálogo do navegador chega em inglês, com a cara do sistema, e trava a aba. Toda
+pergunta ou aviso é um **modal no tema da página**; todo resultado ("salvo",
+"3 componentes colocados") é uma **notificação no canto superior direito**, por cima
+de tudo. Nas vistas (`schframe`, `pcbframe`) a peça é `hub-dialog.js`:
+`await HubDialog.confirm(texto, {title, ok, danger})`, `await HubDialog.alert(...)`
+e `HubDialog.toast(texto, 'ok'|'warn'|'err'|'info', ms)`. O hub tem o próprio
+`toast()` e o `#overlay`; o painel BOM tem o `pergunta()` dele. Se o seu painel ainda
+não tem, carregue o `hub-dialog.js` em vez de escrever outro.
 
 ## Nunca versione saída gerada
 
