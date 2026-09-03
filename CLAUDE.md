@@ -11,31 +11,41 @@ workspace** — e sobre vários agentes fazendo isso ao mesmo tempo sem se atrop
 Cada agente roda no seu próprio worktree, num branch próprio. Antes de editar um
 arquivo, confira de quem ele é. **Se o arquivo não é seu, não edite: peça.**
 
-| worktree | branch | dono dos arquivos | porta do hub |
+| worktree | branch | dono dos arquivos | porta |
 |---|---|---|---|
-| `AltiumPCBMirror` (principal) | `neoden-ordem-por-bico` | árbitro: `hub.html`, `hub-core.js`, `hub-i18n.js`, `README.md`, `.gitignore`, `*.pas` | 8000 |
+| `AltiumPCBMirror` (principal) | `neoden-ordem-por-bico` | integrador: `*.pas`, `README.md`, `AI-GUIDE.md`, `CLAUDE.md`, `.gitignore` | 8000 |
+| `../APM-page` | `agente/page` | a casca do hub: `hub.html`, `hub-core.js`, `hub-ui.js`, `hub-io.js`, `hub-i18n.js` | 8004 |
 | `../APM-bom` | `agente/bom-almox` | `hub-bom.js`, `Libs/almox-*.js`, `tools/almox/**`, `hubserver.py` | 8001 |
 | `../APM-laser` | `agente/laser` | `hub-laser.js`, `hub-draw.js`, `hub-font.js` | 8002 |
 | `../APM-frames` | `agente/frames` | `pcbframe.js`, `pcbframe.html`, `schframe.js`, `schframe.html` | 8003 |
 
 Suba o servidor sempre na porta do seu worktree: `python hubserver.py --port 800X`.
-Três agentes na 8000 é a colisão mais boba e mais frequente deste projeto.
+Quatro agentes na 8000 é a colisão mais boba e mais frequente deste projeto.
 
-## Os três arquivos-gargalo
+O **principal não escreve código de painel**. Ele integra: faz o merge dos branches
+de agente, cuida da documentação e dos scripts que rodam dentro do Altium (`*.pas`).
 
-`hub.html` (216 KB, ~3200 linhas de script inline), `hub-i18n.js` e `README.md`
-são tocados por qualquer mudança de UI. São do **principal**. Para não fazer fila
-neles, siga a regra que também é a melhor arquitetura:
+## A casca do hub é de um dono só
 
-- **Código novo não entra no script inline do `hub.html`.** Vai no seu próprio
-  `hub-<subsistema>.js`. O que você precisa no `hub.html` deve caber em três
+`hub.html` tem 216 KB e ~3200 linhas de script inline; qualquer mudança de UI
+encosta nele. Ele é do `agente/page`, junto com `hub-core.js`, `hub-ui.js`,
+`hub-io.js` e `hub-i18n.js`. Para que ninguém faça fila, vale a regra que também
+é a melhor arquitetura:
+
+- **Código novo de painel não entra no script inline do `hub.html`.** Vai no seu
+  próprio `hub-<subsistema>.js`. O que você precisa da casca deve caber em três
   linhas: uma `<script src>`, um `<div>` container e um bloco de CSS.
-- Precisa de mais que isso? Descreva a mudança e peça ao principal. Não edite.
+- Precisa disso? **Peça ao `agente/page`** — não edite. Diga o id do container, o
+  nome do arquivo e onde na aba ele entra. Precisa de mais que três linhas? É
+  sinal de que a lógica devia estar no seu `.js`, não na casca.
+- `agente/page`: você é dono da casca, não dos painéis. Não mexa em `hub-bom.js`,
+  `hub-laser.js` nem nos frames — se a casca precisa de algo deles, peça.
 - **Rótulo novo de UI**: os painéis Laser/BOM/Neoden/Biblioteca são pt-BR e os
   rótulos vivem dentro do `.js` de cada painel — resolva lá. `hub-i18n.js` é só a
-  casca (cabeçalho, abas, rodapé, config) e é do principal.
-- **README**: escreva a sua seção num commit separado e isolado, só do README.
-  Conflito em commit isolado se resolve em segundos; misturado com código, não.
+  casca (cabeçalho, abas, rodapé, config) e é do `agente/page`.
+- **README**: é do principal. Escreva a sua seção num commit separado e isolado,
+  só do README. Conflito em commit isolado se resolve em segundos; misturado com
+  código, não.
 
 ## Nunca versione saída gerada
 
