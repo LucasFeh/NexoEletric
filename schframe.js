@@ -243,7 +243,7 @@ window.addEventListener('contextmenu', e => { if (panning){ e.preventDefault(); 
 window.addEventListener('mousemove', e => { if (mouse) leftMove(e); });
 window.addEventListener('mouseup', e => {
   if (e.button === 0){ leftUp(e); return; }
-  cv.style.cursor = annTool ? 'copy' : 'crosshair';
+  cv.style.cursor = annTool ? 'copy' : 'default';
   if (e.button !== 2) panning = false;      /* o direito espera o contextmenu para zerar */
 });
 window.addEventListener('blur', () => {
@@ -276,7 +276,13 @@ function leftMove(e){
   d.moved = true;
   if (d.mode === 'move'){ applyMove(d.base, snap100(dx), snap100(dy)); cam.draw(); }
   else if (d.mode === 'box'){ boxRect = { x1:d.start.x, y1:d.start.y, x2:w.x, y2:w.y }; cam.draw(); }
+  else if (!editOn && !d.avisou){
+    /* arrastar travado nao pode ser silencio: e a diferenca entre "nao funciona" e "esta em leitura" */
+    d.avisou = true;
+    $('annmsg').textContent = AVISO_LEITURA;
+  }
 }
+const AVISO_LEITURA = 'só leitura — tecle E ou clique no lápis (Configurações) para mover';
 function leftUp(){
   const d = mouse; if (!d) return;
   mouse = null;
@@ -335,6 +341,10 @@ function setEdit(v){
   b.classList.toggle('active', editOn);
   b.title = editOn ? 'Editando — clique para voltar à leitura (E)' : 'Editar: mover componentes e fios (E)';
   $('edithint').textContent = editOn ? 'editando: arraste o que estiver selecionado' : 'só leitura — o lápis destrava';
+  const sm = $('smode');
+  sm.textContent = editOn ? 'editando' : 'leitura · E edita';
+  sm.classList.toggle('edit', editOn);
+  if (editOn && $('annmsg').textContent === AVISO_LEITURA) $('annmsg').textContent = '';
   /* o Salvar fica de fora de proposito: a trava e para NAO deixar alterar, e travar de
      volta com alteracoes pendentes nao pode impedir de grava-las. */
   $('btnAdd').disabled = $('btnAnn').disabled = !editOn;
@@ -946,7 +956,7 @@ const cam = D.mkCamera(cv, drawWorld, {
     $('shover').textContent =
       h ? (h.kind === 'pin' ? `${h.ref}-${h.num} · ${nets.pinNet[h.ref + '-' + h.num] || 'sem net'}`
                             : h.kind === 'wire' ? (nets.wireNet[sheetIdx][h.wi] || 'fio') : describe(h.item)) : '';
-    cv.style.cursor = annTool ? 'copy' : (editOn && h ? 'move' : 'crosshair');
+    cv.style.cursor = annTool ? 'copy' : 'default';   /* seta normal; so o pan (agarrando) e o sinalizador mudam */
   }
 });
 
@@ -990,7 +1000,7 @@ function setAnnTool(v){
   if (v && !editOn) return;
   annTool = v;
   $('btnAnn').classList.toggle('active', v);
-  cv.style.cursor = v ? 'copy' : 'crosshair';
+  cv.style.cursor = v ? 'copy' : 'default';
   if (!v) hideAnnForm();
 }
 function hideAnnForm(){ $('annform').style.display = 'none'; annPending = null; }

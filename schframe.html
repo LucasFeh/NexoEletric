@@ -43,7 +43,7 @@
   #split::after{content:''; position:absolute; top:0; bottom:0; left:50%; width:2px;
     transform:translateX(-50%); background:transparent; transition:background .12s;}
   #split:hover::after, #split.on::after{background:var(--accent);}
-  canvas#cv{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair;}
+  canvas#cv{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:default;}
 
   /* ── painel lateral (esquerda): duas sub-abas, Componentes e Configurações ── */
   /* a largura vem da variavel que a divisoria escreve; fechado (0) o painel some inteiro */
@@ -100,6 +100,10 @@
     background:var(--panel); border-top:1px solid var(--border);
     font:12px Consolas,monospace; color:var(--fg-dim);}
   #status b{color:var(--fg); font-weight:normal;}
+  /* o modo fica sempre a vista, independente da sub-aba aberta: e ele que explica por que
+     um arrasto nao moveu nada */
+  #smode{padding:1px 7px; border-radius:3px; background:var(--panel2); color:var(--fg-dim);}
+  #smode.edit{background:#0d47a1; color:#fff;}
   #fatal{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     color:var(--err); font-size:14px; text-align:center; padding:30px; background:var(--bg); z-index:5;}
 
@@ -328,6 +332,7 @@
   </div>
 </div>
 <div id="status">
+  <span id="smode" title="E alterna entre leitura e edição; o lápis fica em Configurações"></span>
   <span>X: <b id="sx">—</b> Y: <b id="sy">—</b> mil</span>
   <span id="shover"></span>
   <span id="ssel"></span>
