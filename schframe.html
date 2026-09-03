@@ -3,30 +3,39 @@
 <head>
 <meta charset="utf-8">
 <title>AltiumPCBMirror — Esquema</title>
+<!-- a mesma fonte do hub: o modal "Adicionar componentes" copia a aba Biblioteca e tem que
+     parecer a mesma tela; se a rede nao responder, cai no system-ui sem quebrar nada -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <style>
   :root{ --bg:#1b1b1b; --panel:#242424; --panel2:#2d2d2d; --border:#3a3a3a;
-    --fg:#d8d8d8; --fg-dim:#9a9a9a; --accent:#4fc3f7; --warn:#ffd54f; --err:#ff5252; --ok:#00e676; }
+    --fg:#d8d8d8; --fg-dim:#9a9a9a; --accent:#4fc3f7; --warn:#ffd54f; --err:#ff5252; --ok:#00e676;
+    --sel:#2979ff; }
   *{box-sizing:border-box; margin:0; padding:0;}
   html,body{height:100%; overflow:hidden;}
   body{background:var(--bg); color:var(--fg); font:13px/1.45 "Segoe UI",sans-serif; display:flex; flex-direction:column;}
-  #bar{display:flex; align-items:center; gap:8px; height:36px; padding:0 10px;
-    background:var(--panel); border-bottom:1px solid var(--border);}
-  #bar .meta{color:var(--fg-dim); font-size:12px;}
-  #schtoolbar{display:flex; align-items:center; gap:8px; height:32px; padding:0 10px;
-    background:var(--panel); border-bottom:1px solid var(--border); font-size:12px;}
-  #schtoolbar .sep{width:1px; height:16px; background:var(--border);}
-  button:disabled{opacity:.4; cursor:not-allowed;}
-  button:disabled:hover{border-color:var(--border);}
   button{background:var(--panel2); color:var(--fg); border:1px solid var(--border);
     border-radius:3px; padding:3px 10px; font-size:12px; cursor:pointer;}
   button:hover{border-color:var(--accent);}
   button.active{background:#0d47a1; color:#fff;}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  button:disabled:hover{border-color:var(--border);}
   select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;}
+
   #main{flex:1; display:flex; min-height:0;}
-  #cvwrap{flex:1; position:relative;}
-  canvas{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair;}
-  #side{width:330px; min-width:280px; background:var(--panel); border-left:1px solid var(--border);
-    overflow-y:auto;}
+  #cvwrap{flex:1; position:relative; min-width:0;}
+  canvas#cv{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair;}
+
+  /* ── painel lateral (esquerda): duas sub-abas, Componentes e Configurações ── */
+  #side{width:330px; min-width:280px; background:var(--panel); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; min-height:0;}
+  .subtabs{display:flex; border-bottom:1px solid var(--border); padding:0 6px; flex:none;}
+  .subtab{flex:1; background:transparent; border:0; border-radius:0; color:var(--fg-dim);
+    padding:9px 6px 8px; font-size:12px; letter-spacing:.02em;}
+  .subtab:hover{color:var(--fg);}
+  .subtab[aria-selected="true"]{color:var(--fg); box-shadow:inset 0 -2px 0 var(--accent);}
+  .pane{display:none; flex:1; min-height:0; overflow-y:auto;}
+  .pane.on{display:block;}
   .sec{padding:8px 10px; border-bottom:1px solid var(--border);}
   .sec h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); margin-bottom:6px;}
   table{border-collapse:collapse; width:100%; font-size:11px;}
@@ -47,10 +56,21 @@
   .annitem.resolved{opacity:.5;}
   .annitem .annx{float:right; color:var(--fg-dim); padding:0 4px; cursor:pointer;}
   .annitem .annx:hover{color:var(--err);}
-  .pickitem{padding:3px 6px; margin:1px 0; border-radius:3px; background:var(--panel2);
-    cursor:pointer; font-size:11px;}
-  .pickitem:hover{background:#383838;}
-  .pickitem.sel{background:#0d47a1; color:#fff;}
+
+  /* configurações: icones de vista, edicao e arquivo */
+  .cfg .row{display:flex; gap:6px; align-items:center; flex-wrap:wrap;}
+  .cfg select{width:100%;}
+  .ibtn{width:32px; height:32px; padding:0; display:inline-flex; align-items:center; justify-content:center; flex:none;}
+  .ibtn svg{width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;}
+  .wide{width:100%; text-align:left; padding:6px 10px; display:flex; align-items:center; gap:8px; margin-top:6px;}
+  .wide:first-child{margin-top:0;}
+  .wide .n{margin-left:auto; color:var(--fg-dim); font-size:11px;}
+  .wide.active .n{color:#cfe0ff;}
+  .hint{font-size:11px; color:var(--fg-dim); margin-top:6px; line-height:1.4;}
+  .meta{color:var(--fg-dim); font-size:12px;}
+  kbd{font:11px Consolas,monospace; background:var(--panel2); border:1px solid var(--border);
+    border-radius:3px; padding:0 4px; color:var(--fg);}
+
   #schpropsrows label{display:flex; align-items:center; gap:6px; margin:3px 0; font-size:12px; color:var(--fg-dim);}
   #schpropsrows label span{width:80px;}
   #schpropsrows input, #schpropsrows select{flex:1; background:var(--panel); color:var(--fg);
@@ -61,33 +81,201 @@
   #status b{color:var(--fg); font-weight:normal;}
   #fatal{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     color:var(--err); font-size:14px; text-align:center; padding:30px; background:var(--bg); z-index:5;}
+
+  /* ═══ modal "Adicionar componentes" ═══════════════════════════════════════════
+     E a aba Biblioteca do hub, de proposito: mesma busca, mesmo seletor de acervo, mesma
+     lista e os mesmos previews — so que a ficha da direita virou a LISTA do que vai para o
+     esquema. Os tokens e as classes abaixo sao copia dos do hub.html (tema Grafite escuro),
+     escopados no modal para nao mexer no resto da vista. Se a casca do hub mudar de
+     tokens, este bloco e o lugar para acompanhar. */
+  #addmodal{ position:fixed; inset:0; z-index:50; display:none; align-items:center; justify-content:center;
+    --font:"Inter", system-ui, -apple-system, sans-serif;
+    --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sp-1:3px; --sp-2:6px; --sp-3:8px; --sp-4:11px;
+    --r-sm:5px; --r-md:8px; --r-lg:14px;
+    --bg:#0f0f11; --surface:#1a1a1d; --surface-2:#161619; --sunken:#0b0b0d;
+    --text:#f2f2f3; --text-2:#a8a8ae; --text-3:#7a7a80; --text-4:#57575d;
+    --hi:#d8d8dd; --tint:242,242,243; --edge:#2a2a2e; --scroll:#34343a;
+    --line:rgba(var(--tint),0.14); --line-soft:rgba(var(--tint),0.08); --sheet:#fffef2;
+    --ok:#4bbf7b; --warn:#d6a75a; --err:#e0555a; --warn-soft:rgba(214,167,90,0.12);
+    --on-hi:#10120f; --scrim:rgba(11,11,13,0.62);
+    --shadow-menu:0 0 0 1px rgba(var(--tint),0.16), 0 16px 40px rgba(0,0,0,0.65);
+    --aside-w:330px;
+    background:var(--scrim); color:var(--text); font:400 13px/1.5 var(--font); }
+  #addmodal.on{display:flex;}
+  #addmodal [hidden]{display:none !important;}
+  #addmodal button, #addmodal input, #addmodal select{font:inherit; color:inherit;}
+  #addmodal :focus{outline:none;}
+  #addmodal :focus-visible{outline:2px solid var(--hi); outline-offset:2px;}
+  #addmodal ::-webkit-scrollbar{width:10px; height:10px;}
+  #addmodal ::-webkit-scrollbar-thumb{background:var(--scroll); border-radius:8px; border:3px solid var(--bg);}
+  #addmodal ::-webkit-scrollbar-track{background:transparent;}
+  .modal-box{ width:min(1380px, 96vw); height:min(860px, 92vh); background:var(--bg); border-radius:var(--r-lg);
+    box-shadow:var(--shadow-menu); display:grid; grid-template-rows:auto 1fr; overflow:hidden; }
+  .modal-head{ display:flex; align-items:center; gap:12px; padding:12px 18px; box-shadow:inset 0 -1px 0 var(--line); }
+  .modal-head h2{font-size:15px; font-weight:500; letter-spacing:-0.015em;}
+  .modal-head .meta{font-size:11px; color:var(--text-3);}
+  .modal-head .x{margin-left:auto;}
+
+  #addmodal .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;
+    font-size:14px; line-height:1.2; background:transparent; border:1px solid transparent;
+    padding:var(--sp-2) var(--sp-4); border-radius:var(--r-md); }
+  #addmodal .btn:disabled{opacity:0.45; cursor:not-allowed;}
+  #addmodal .btn-primary{color:var(--hi); border-color:var(--hi);}
+  #addmodal .btn-primary:hover:not(:disabled){background:rgba(var(--tint),0.10);}
+  #addmodal .btn-secondary{border-color:var(--line);}
+  #addmodal .btn-secondary:hover:not(:disabled){background:rgba(var(--tint),0.07);}
+  #addmodal .btn-ghost{color:var(--hi); padding-inline:var(--sp-1);}
+  #addmodal .btn-ghost:hover{background:rgba(var(--tint),0.08);}
+  #addmodal .btn-icon{width:34px; height:34px; padding:0;}
+  #addmodal .btn-sm{font-size:12px; padding:4px 10px;}
+  #addmodal .input{ width:100%; min-height:34px; padding:6px 10px; font-size:14px; background:var(--surface);
+    border:1px solid var(--line); border-radius:var(--r-md); caret-color:var(--hi); }
+  #addmodal .input:hover{border-color:rgba(var(--tint),0.30);}
+  #addmodal .input:focus-visible{border-color:var(--hi); outline-offset:0;}
+  #addmodal select.input{min-height:28px; padding:2px 6px; font-size:12px; width:auto;}
+  #addmodal .seg{display:flex; gap:2px; flex:none; padding:2px; border-radius:var(--r-md);
+    background:var(--surface); box-shadow:inset 0 0 0 1px var(--edge);}
+  #addmodal .seg button{cursor:pointer; border:0; background:transparent; color:var(--text-3);
+    font-size:12px; padding:4px 9px; border-radius:var(--r-sm);}
+  #addmodal .seg button:hover{color:var(--text-2);}
+  #addmodal .seg button[aria-pressed="true"]{background:rgba(var(--tint),0.12); color:var(--text);}
+  #addmodal .seg button .n{font-variant-numeric:tabular-nums; color:var(--text-4); margin-left:4px;}
+
+  .lib-grid{ height:100%; display:grid; min-height:0;
+    grid-template-columns:minmax(300px, 0.95fr) minmax(320px, 1.25fr) var(--aside-w); }
+  .lib-left{display:grid; grid-template-rows:auto auto 1fr; min-height:0;}
+  .lib-bar{display:flex; align-items:center; gap:8px; padding:10px 12px 7px 18px;}
+  .lib-bar .input{min-width:0;}
+  .lib-bar select.input{max-width:200px; flex:none;}
+  .lib-sum{display:flex; flex-wrap:wrap; gap:4px 14px; padding:0 18px 9px; font-size:11px; color:var(--text-4);}
+  .lib-sum b{font-weight:400; color:var(--text-2);}
+  .lib-list{overflow-y:auto; min-height:0; padding:0 6px 18px 12px;}
+  .lib-head{padding:13px 8px 4px; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-4);}
+  .lib-row{display:flex; align-items:center; gap:7px; width:100%; text-align:left; cursor:pointer;
+    border:0; background:transparent; color:inherit; border-radius:var(--r-sm); padding:5px 8px;}
+  .lib-row:hover{background:rgba(var(--tint),0.05);}
+  .lib-row[aria-selected="true"]{background:rgba(var(--tint),0.09); box-shadow:inset 2px 0 0 var(--hi);}
+  .lib-row .nm{flex:1 1 auto; min-width:0; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .lib-row .mt{flex:none; font-size:11px; color:var(--text-4);}
+  .lib-row .pill{flex:none; font-size:10px; padding:1px 5px; border-radius:var(--r-sm);
+    background:rgba(var(--tint),0.07); color:var(--text-3);}
+  .lib-row .pill.warn{color:var(--warn);}
+
+  .lib-view{display:grid; grid-template-rows:auto minmax(0,1fr) auto minmax(0,1fr) auto; min-height:0; min-width:0;}
+  .canvas-bar{display:flex; align-items:center; gap:8px; padding:8px 12px 6px;}
+  .canvas-bar .ttl{font-size:11px; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-3);}
+  .canvas-bar .meta{font-size:11px; color:var(--text-4); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .canvas-bar .right{margin-left:auto; display:flex; gap:6px;}
+  .viewport{ position:relative; margin:0 12px 12px; border-radius:var(--r-md); overflow:hidden; min-height:0;
+    background:var(--sunken) radial-gradient(circle at 1px 1px, rgba(var(--tint),0.10) 1px, transparent 0) 0 0 / 22px 22px;
+    box-shadow:inset 0 0 0 1px var(--edge); }
+  .viewport.sheet{background:var(--sheet);}
+  .viewport canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
+  .viewport .hint{position:absolute; inset:0; display:grid; place-items:center; padding:18px;
+    text-align:center; font-size:12px; color:var(--text-4); pointer-events:none;}
+  .viewport.sheet .hint{color:#8a8a6a;}
+  .alx-box{display:grid; grid-template-rows:auto minmax(0,1fr); min-height:0; margin:0 12px 12px;
+    border-radius:var(--r-md); box-shadow:inset 0 0 0 1px var(--edge); background:var(--surface);}
+  .alx-bar{display:flex; align-items:center; gap:8px; padding:8px 10px;}
+  .alx-bar .input{min-height:26px; font-size:12px;}
+  .alx-bar .count{margin-left:auto; font-size:11px; color:var(--text-4); white-space:nowrap;}
+  .alx-list{overflow:auto; padding:0 4px 8px;}
+  .alx-row{display:grid; grid-template-columns:30px 1fr auto auto; gap:8px; align-items:center;
+    width:100%; text-align:left; cursor:pointer; border:0; background:transparent; color:inherit;
+    border-radius:var(--r-sm); padding:5px 7px;}
+  .alx-row:hover{background:rgba(var(--tint),0.05);}
+  .alx-row[aria-selected="true"]{background:rgba(var(--tint),0.10); box-shadow:inset 2px 0 0 var(--hi);}
+  .alx-row .ix{font-size:10px; color:var(--text-4); font-variant-numeric:tabular-nums; text-align:right;}
+  .alx-row .lb{min-width:0; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .alx-row .lb i{font-style:normal; font-size:9px; letter-spacing:.06em; text-transform:uppercase;
+    margin-left:6px; padding:0 4px; border-radius:3px; background:var(--warn-soft); color:var(--warn);}
+  .alx-row .pk{font-size:10px; color:var(--text-4); white-space:nowrap;}
+  .alx-row .qt{font-size:11px; font-variant-numeric:tabular-nums; color:var(--ok); min-width:46px; text-align:right;}
+  .alx-row .qt.zero{color:var(--text-4);}
+  .alx-empty{padding:18px; text-align:center; font-size:12px; color:var(--text-4);}
+
+  /* a faixa de escolha: footprint, parte, quantidade, comment e o botao Adicionar */
+  .add-cfg{display:grid; grid-template-columns:1fr auto; gap:6px 8px; padding:0 12px 12px; align-items:end;}
+  .add-cfg label{display:flex; flex-direction:column; gap:3px; font-size:10px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--text-3); min-width:0;}
+  .add-cfg label .input{width:100%; min-height:30px; font-size:12px; padding:4px 8px;}
+  .add-cfg .l2{grid-column:1 / -1; display:grid; grid-template-columns:auto 72px 1fr; gap:8px; align-items:end;}
+  .add-cfg .l2 label[hidden]{display:none;}
+
+  /* a lista do que vai para o esquema — onde a aba Biblioteca poe a ficha do componente */
+  #addmodal aside{overflow:hidden; padding:12px 18px 14px; background:var(--surface-2);
+    box-shadow:inset 1px 0 0 var(--line); min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr) auto;}
+  .kicker{font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:var(--text-3);}
+  .det-head{display:flex; align-items:baseline; gap:8px; margin-top:3px;}
+  .det-head .d{font-size:16px; font-weight:500;}
+  .det-head .v{font-size:12px; color:var(--text-2); margin-left:auto;}
+  .cart{overflow-y:auto; min-height:0; margin-top:10px;}
+  .cart-row{display:grid; grid-template-columns:1fr auto auto auto; gap:2px 6px; align-items:center;
+    padding:7px 0; border-bottom:1px solid var(--line-soft);}
+  .cart-row .t{font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .cart-row .t b{font-weight:500;}
+  .cart-row .s{grid-column:1 / -1; font-size:11px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .cart-row .s .w{color:var(--warn);}
+  .cart-row .btn{min-height:22px; padding:0 7px; font-size:12px; border-radius:var(--r-sm);}
+  .cart-empty{font-size:12px; color:var(--text-3); margin-top:18px; line-height:1.55;}
+  .cart-foot{display:flex; gap:8px; align-items:center; padding-top:12px; box-shadow:inset 0 1px 0 var(--line); margin-top:8px;}
+  .cart-foot .btn-primary{margin-left:auto;}
 </style>
 </head>
 <body>
-<div id="bar">
-  <b style="color:var(--accent); font-size:13px;">Esquema</b>
-  <select id="sheetsel"></select>
-  <button id="btnFit">Fit</button>
-  <button id="btnGrid" class="active">Grade</button>
-  <button id="btnAnn" title="Sinalizar problema para a IA (N)">⚑ Sinalizar</button>
-  <button id="btnAnnSave" title="Salvar sinalizadores">Salvar sinaliz.</button>
-  <span class="meta" id="meta"></span>
-</div>
-<div id="schtoolbar">
-  <button id="btnEdit" title="Destravar edicao (E)">Editar</button>
-  <span class="sep"></span>
-  <button id="toolSelect" class="active" title="Selecionar/mover (Esc)">Selecionar</button>
-  <button id="toolComp" title="Adicionar componente das libs (C)">+ Componente</button>
-  <button id="toolCesta" title="Lista de componentes a colocar (L)">Lista <span id="toolCestaN"></span></button>
-  <button id="toolWire" title="Desenhar fio (W); botão direito/Esc encerra">Fio</button>
-  <button id="toolLabel" title="Net label">Label</button>
-  <button id="toolPower" title="Power port">Power</button>
-  <button id="toolJunction" title="Junção">Junção</button>
-  <button id="toolText" title="Texto">Texto</button>
-  <span class="sep"></span>
-  <button id="btnSchSave" title="Salvar schematic.js">Salvar esquema</button>
-</div>
 <div id="main">
+  <aside id="side">
+    <div class="subtabs" role="tablist">
+      <button class="subtab" role="tab" data-pane="comps" aria-selected="true">Componentes</button>
+      <button class="subtab" role="tab" data-pane="cfg" aria-selected="false">Configurações</button>
+    </div>
+
+    <div class="pane on" id="pane-comps">
+      <div class="sec"><h2>Componentes (<span id="compcount">0</span>)</h2>
+        <table id="comptable"><thead><tr><th>Ref</th><th>Símbolo</th><th>Footprint</th><th>Comment</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="sec"><h2>Nets (<span id="netcount">0</span>)</h2><div id="netlist"></div></div>
+      <div class="sec"><h2>Sinalizadores (<span id="anncount">0</span>)</h2><div id="annlist"></div></div>
+      <div class="sec"><h2>Validação</h2><div id="vallist"></div></div>
+    </div>
+
+    <div class="pane cfg" id="pane-cfg">
+      <div class="sec">
+        <h2>Folha</h2>
+        <select id="sheetsel"></select>
+        <div class="meta" id="meta" style="margin-top:6px;"></div>
+      </div>
+      <div class="sec">
+        <h2>Vista</h2>
+        <div class="row">
+          <button class="ibtn" id="btnFit" title="Centralizar a folha na tela">
+            <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <button class="ibtn active" id="btnGrid" title="Mostrar/ocultar a grade de 100 mil">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
+          <button class="ibtn" id="btnEdit" title="Editar: mover componentes e fios (E)">
+            <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+          <span class="hint" id="edithint" style="margin:0 0 0 4px; flex:1;"></span>
+        </div>
+      </div>
+      <div class="sec">
+        <h2>Edição</h2>
+        <button class="wide" id="btnAdd" title="Escolher componentes das bibliotecas e jogar no esquema (C)">
+          <span>+ Adicionar componentes</span><span class="n" id="addBtnN"></span></button>
+        <button class="wide" id="btnAnn" title="Sinalizar um problema para a IA (N)"><span>⚑ Sinalizar</span></button>
+        <div class="hint">Clique seleciona, arraste move; arraste no vazio para selecionar vários.
+          <kbd>Shift</kbd> soma à seleção, <kbd>Del</kbd> apaga, <kbd>Espaço</kbd> gira, <kbd>X</kbd> espelha,
+          <kbd>Ctrl+Z</kbd> desfaz. Botão direito arrasta a tela.</div>
+      </div>
+      <div class="sec">
+        <h2>Arquivo</h2>
+        <button class="wide" id="btnSave" title="Grava schematic.js e annotations.js (o que estiver alterado)">
+          <span id="btnSaveLbl">Salvar</span></button>
+        <div class="hint" id="savehint"></div>
+      </div>
+    </div>
+  </aside>
+
   <div id="cvwrap"><canvas id="cv"></canvas><div id="fatal"></div>
     <div id="annform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
          background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
@@ -105,67 +293,6 @@
         <button id="anncancel">Cancelar</button>
       </div>
     </div>
-    <!-- lista de compras: junta (simbolo, parte, footprint) e joga tudo na folha de uma vez -->
-    <div id="cesta" style="display:none; position:absolute; top:10px; right:10px; z-index:16;
-         background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:340px;">
-      <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
-        <b style="font-size:12px;">lista de componentes</b>
-        <span id="cestainfo" style="font-size:11px; color:var(--fg-dim); margin-left:auto;"></span>
-      </div>
-      <div id="cestalist" style="max-height:300px; overflow-y:auto; margin-bottom:6px;"></div>
-      <div style="display:flex; gap:6px; justify-content:flex-end;">
-        <button id="cestalimpa">Limpar</button>
-        <button id="cestacolocar">Jogar no esquema</button>
-        <button id="cestafechar">Fechar</button>
-      </div>
-    </div>
-
-    <div id="pickform" style="display:none; position:absolute; top:10px; left:10px; z-index:16;
-         background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:430px;">
-      <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
-        <label style="flex:1; font-size:11px; color:var(--fg-dim);">acervo
-          <select id="picksrc" style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;"></select></label>
-        <span id="picksrcinfo" style="font-size:11px; color:var(--fg-dim); white-space:nowrap;"></span>
-      </div>
-      <input id="picksearch" placeholder="buscar símbolo, valor, MPN ou código Mouser" style="width:100%; background:var(--panel);
-             color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:4px; margin-bottom:6px;">
-      <div id="picklist" style="max-height:140px; overflow-y:auto; margin-bottom:6px;"></div>
-      <canvas id="pickpreview" width="414" height="150" style="width:100%; height:150px; background:#fffef2;
-              border:1px solid var(--border); border-radius:3px; margin-bottom:6px;"></canvas>
-      <div style="display:flex; gap:6px; margin-bottom:6px;">
-        <label style="flex:1; font-size:11px; color:var(--fg-dim);">footprint
-          <select id="pickfp" style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;"></select></label>
-        <label style="width:80px; font-size:11px; color:var(--fg-dim);">ref
-          <input id="pickref" style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;"></label>
-        <label style="width:60px; font-size:11px; color:var(--fg-dim);">parte
-          <select id="pickpart" style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;"></select></label>
-      </div>
-      <input id="pickcomment" placeholder="comment (opcional, ex: 10k)" style="width:100%; background:var(--panel);
-             color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:4px; margin-bottom:6px;">
-      <div style="display:flex; gap:6px; justify-content:flex-end; align-items:center;">
-        <label style="font-size:11px; color:var(--fg-dim); margin-right:auto;">qtd
-          <input id="pickqtd" type="number" min="1" max="99" value="1" style="width:46px; background:var(--panel);
-                 color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;"></label>
-        <button id="pickadd" title="junta na lista sem colocar na folha ainda">+ Lista</button>
-        <button id="pickok">Posicionar</button>
-        <button id="pickcancel">Cancelar</button>
-      </div>
-    </div>
-    <div id="schform" style="display:none; position:absolute; top:10px; right:10px; z-index:16;
-         background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:220px;">
-      <div id="schformtitle" style="color:var(--accent); font-size:12px; margin-bottom:6px;"></div>
-      <input id="schformtext" placeholder="" style="width:100%; background:var(--panel); color:var(--fg);
-             border:1px solid var(--border); border-radius:3px; padding:4px; margin-bottom:6px;">
-      <select id="schformstyle" style="display:none; width:100%; background:var(--panel); color:var(--fg);
-             border:1px solid var(--border); border-radius:3px; padding:3px; margin-bottom:6px;">
-        <option>Bar</option><option>Circle</option><option>Arrow</option><option>Wave</option>
-        <option>GndPower</option><option>GndSignal</option><option>GndEarth</option>
-      </select>
-      <div style="display:flex; gap:6px; justify-content:flex-end;">
-        <button id="schformok">Posicionar</button>
-        <button id="schformcancel">Cancelar</button>
-      </div>
-    </div>
     <div id="schprops" style="display:none; position:absolute; top:10px; right:10px; z-index:17;
          background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:250px;">
       <div id="schpropstitle" style="color:var(--accent); font-size:12px; margin-bottom:6px;"></div>
@@ -177,25 +304,81 @@
       <datalist id="fplist-dl"></datalist>
     </div>
   </div>
-  <aside id="side">
-    <div class="sec"><h2>Componentes</h2>
-      <table id="comptable"><thead><tr><th>Ref</th><th>Símbolo</th><th>Footprint</th><th>Comment</th></tr></thead><tbody></tbody></table>
-    </div>
-    <div class="sec"><h2>Nets (<span id="netcount">0</span>)</h2><div id="netlist"></div></div>
-    <div class="sec"><h2>Sinalizadores (<span id="anncount">0</span>)</h2><div id="annlist"></div></div>
-    <div class="sec"><h2>Validação</h2><div id="vallist"></div></div>
-  </aside>
 </div>
 <div id="status">
   <span>X: <b id="sx">—</b> Y: <b id="sy">—</b> mil</span>
   <span id="shover"></span>
-  <span id="annmsg" style="color:var(--warn);"></span>
+  <span id="ssel"></span>
+  <span id="annmsg" style="color:var(--warn); margin-left:auto;"></span>
 </div>
+
+<!-- ═══ Adicionar componentes ═══ -->
+<div id="addmodal">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="addTitle">
+    <div class="modal-head">
+      <h2 id="addTitle">Adicionar componentes</h2>
+      <span class="meta">escolha à esquerda, confira no meio, junte na lista à direita — <b>Finalizar</b> joga tudo na folha</span>
+      <button class="btn btn-ghost btn-icon x" id="addClose" title="Fechar (Esc) — a lista fica guardada">✕</button>
+    </div>
+    <div class="lib-grid">
+      <div class="lib-left">
+        <div class="lib-bar">
+          <input class="input" id="addSearch" type="text" placeholder="Buscar na biblioteca…">
+          <select class="input" id="addSrc" title="qual acervo a lista mostra"></select>
+        </div>
+        <div class="lib-sum" id="addSum"></div>
+        <div class="lib-list" id="addList"></div>
+      </div>
+
+      <div class="lib-view">
+        <div class="canvas-bar">
+          <span class="ttl">símbolo</span><span class="meta" id="addSymMeta">—</span>
+        </div>
+        <div class="viewport sheet"><canvas id="addSymCv"></canvas><div class="hint" id="addSymHint"></div></div>
+        <div class="canvas-bar">
+          <span class="ttl" id="addBotTtl">footprint</span>
+          <span class="meta" id="addBotMeta"></span>
+          <div class="right"><div class="seg" id="addBotSeg" hidden></div></div>
+        </div>
+        <div class="viewport" id="addFpVp"><canvas id="addFpCv"></canvas><div class="hint" id="addFpHint"></div></div>
+        <div class="alx-box" id="addValBox" hidden>
+          <div class="alx-bar">
+            <input class="input" id="addValSearch" type="text" placeholder="filtrar valor, MPN ou código Mouser…">
+            <span class="count" id="addValCount"></span>
+          </div>
+          <div class="alx-list" id="addValList"></div>
+        </div>
+        <div class="add-cfg" id="addCfg">
+          <label>footprint<select class="input" id="addFp"></select></label>
+          <button class="btn btn-primary" id="addOk" title="junta na lista à direita">Adicionar</button>
+          <div class="l2">
+            <label id="addPartLab" hidden>parte<select class="input" id="addPart"></select></label>
+            <label>qtd<input class="input" id="addQtd" type="number" min="1" max="99" value="1"></label>
+            <label>comment<input class="input" id="addComment" placeholder="opcional, ex: 10k"></label>
+          </div>
+        </div>
+      </div>
+
+      <aside>
+        <div>
+          <div class="kicker">lista para o esquema</div>
+          <div class="det-head"><span class="d">Componentes</span><span class="v" id="cartInfo"></span></div>
+        </div>
+        <div class="cart" id="cartList"></div>
+        <div class="cart-foot">
+          <button class="btn btn-secondary btn-sm" id="cartClear">Limpar</button>
+          <button class="btn btn-primary" id="cartDone">Finalizar</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+</div>
+
 <script src="hub-core.js"></script>
 <script src="hub-draw.js"></script>
 <script src="Libs/schlib.js"></script>
 <script src="Libs/pcblib.js"></script>
-<!-- acervos do almoxarifado: o picker escolhe de qual biblioteca vem o simbolo -->
+<!-- acervos do almoxarifado: o modal escolhe de qual biblioteca vem o simbolo -->
 <script src="Libs/almox-basicos.js"></script>
 <script src="Libs/almox-especiais.js"></script>
 <script src="Libs/almox-index.js"></script>
