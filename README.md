@@ -201,8 +201,9 @@ precisar de servidor.
 - **Esquema** — renderiza `Projects\<nome>\schematic.js` com os gráficos reais de
   `Libs\schlib.js`: símbolos, fios, junctions, net labels, power ports, designator/comment.
   Zoom com a roda, **botão direito arrasta a tela**, cursor em mil, clique numa net destaca
-  ela na folha inteira (com os pinos membros). O painel da esquerda tem duas sub-abas:
-  **Componentes** (lista, nets, sinalizadores e validação) e **Configurações** (folha,
+  ela na folha inteira (com os pinos membros). O painel da esquerda é redimensionável pela
+  divisória (duplo clique fecha/abre, como nas abas Laser e BOM) e tem duas sub-abas no
+  rodapé: **Componentes** (lista, nets, sinalizadores e validação) e **Configurações** (folha,
   centralizar, grade, o lápis de edição, Adicionar componentes, Sinalizar e um único
   **Salvar**, que grava `schematic.js` e `annotations.js` conforme o que estiver alterado —
   e fica sempre disponível, para nunca prender o que já foi alterado).
