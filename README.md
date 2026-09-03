@@ -447,6 +447,51 @@ ao botão "Salvar changes".
 > nada quebra quando isso acontecer.
 
 
+### Biblioteca » Símbolos — editar o símbolo e gravar na SchLib do Altium
+
+A sub-aba **Símbolos** (ao lado de Footprints) é um editor de símbolos de esquema sobre o
+espelho do Altium. A lista e a busca são as mesmas da sub-aba Sch Lib; o meio é um canvas de
+edição com ferramentas (selecionar/mover, linha, retângulo, polilinha, polígono, arco, elipse,
+texto, pino, girar/espelhar, desfazer/refazer, grade e snap) e, embaixo, a **Biblioteca de
+símbolos**: um acervo só de desenhos — sem valor, sem descrição, sem footprint — para trocar o
+corpo de um componente com um clique ("Aplicar ao símbolo"). Quando a contagem de pinos bate,
+a pinagem original (número, nome e tipo) é preservada: o que muda é o desenho. O painel
+inteiro vive em `hub-symed.js`; a casca só tem a sub-aba e o container.
+
+**Salvar** grava em dois lugares de uma vez: `Libs/schlib.js` (o espelho que o hub desenha) e,
+com a caixa *Altium* marcada, a SchLib real em `Y:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\`,
+escrita direto pelo Python (a mesma técnica do almoxarifado: `cfbf.py` + `schlib_bin.py`),
+com backup automático em `Backup-hub\` ao lado do arquivo e conferência por releitura. Se a
+biblioteca estiver aberta no Altium, a gravação na SchLib é recusada com aviso — feche-a e
+salve de novo. Os pinos vão para a grade de 10 mil; todos os outros componentes da biblioteca
+saem byte a byte iguais. O aside avisa quando a ponta quente de um pino está fora da grade de
+100 mil — é o caso de vários símbolos antigos, e é por isso que o fio não encosta no Altium.
+
+A Biblioteca de símbolos vive em `Libs/symbols-lib.js` (versionado — é estado curado, não
+saída). Quem a alimenta é:
+
+```bash
+python tools/symbols/extrair.py                 # varre as fontes de tools/symbols/config.json
+python tools/symbols/extrair.py --limite 20     # amostra, para experimentar
+```
+
+que percorre a biblioteca antiga e todos os projetos de `Y:\EQUIPAMENTOS ATUALIZADOS` e
+`Y:\EQUIPAMENTOS_REVISADOS` (`.SchLib`, `.SchDoc` e as `.SchLib` embutidas em `.IntLib`),
+extrai só a geometria, deduplica por impressão digital e **mescla**: o que já está cadastrado é
+ignorado (só ganha `usos`/`aliases`), nomes e ids existentes nunca mudam — renomear e excluir é
+pelo hub. Até 4 pinos vira símbolo genérico com nome básico por heurística de forma (Resistor,
+Capacitor polarizado, Diodo zener…); o resto é CI e leva o nome do próprio componente
+(`SN74LVC244AQPWRQ1`). A primeira varredura (2026-09-03) leu 517 arquivos e reduziu 168.768
+ocorrências a 841 símbolos. O relatório fica em `tools/symbols/relatorio.txt`; o mesmo botão
+existe na API (`POST /api/symbols/extract`, log por SSE).
+
+O leitor Python (`tools/symbols/sch_leitor.py`) também regera o espelho inteiro sem abrir o
+Altium — `python tools/symbols/sch_leitor.py --espelho` — e é provado contra o `schlib.js`
+que o `ExportLibs.pas` gerou (`tests/test_sch_leitor.py`: 401/401 símbolos idênticos).
+Atenção: a SchLib real ainda tem os nomes **antigos** (o `RenameLibs` não rodou nela), então o
+espelho regerado volta a esses nomes; o Salvar do editor resolve o nome antigo pelo
+`rename-map.js` sozinho.
+
 ### BOM — página interativa para montar a placa
 
 A aba **BOM** gera **uma página HTML autossuficiente** com a placa desenhada dos dois lados e a
