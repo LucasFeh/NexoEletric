@@ -200,12 +200,24 @@ precisar de servidor.
 
 - **Esquema** — renderiza `Projects\<nome>\schematic.js` com os gráficos reais de
   `Libs\schlib.js`: símbolos, fios, junctions, net labels, power ports, designator/comment.
-  Zoom/pan, cursor em mil, clique numa net destaca ela na folha inteira (com os pinos
-  membros). Painel lateral com a lista de componentes e a validação do esquema.
-  A vista Esquema **edita depois de destravar** — as duas vistas abrem em leitura e só
-  aceitam alteração depois do botão **Editar** (`E`), que libera ferramentas, arrasto,
-  duplo clique, Delete e Ctrl+Z; os **Salvar** ficam sempre disponíveis, para nunca prender
-  o que já foi alterado. Destravada: `+ Componente` abre o picker das libs (símbolo + footprint lado a lado, ref sugerido), `W` desenha fios com snap na ponta quente dos pinos, Label/Power/Junção/Texto por clique, arrastar move com grade de 100 mil, duplo clique abre propriedades, `Ctrl+Z` desfaz e **Salvar esquema** grava o `schematic.js`. Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com limpeza da folha** (confirmação SIM).
+  Zoom com a roda, **botão direito arrasta a tela**, cursor em mil, clique numa net destaca
+  ela na folha inteira (com os pinos membros). O painel da esquerda tem duas sub-abas:
+  **Componentes** (lista, nets, sinalizadores e validação) e **Configurações** (folha,
+  centralizar, grade, o lápis de edição, Adicionar componentes, Sinalizar e um único
+  **Salvar**, que grava `schematic.js` e `annotations.js` conforme o que estiver alterado —
+  e fica sempre disponível, para nunca prender o que já foi alterado).
+  A vista abre em leitura; o **lápis** (`E`) destrava a edição, que é **mover**: clique
+  seleciona (o item fica azul, com bordinhas), arrastar no vazio seleciona vários
+  (esquerda→direita só quem couber inteiro; direita→esquerda quem encostar), `Shift` soma à
+  seleção, e o arrasto move **só o que estiver selecionado**, com grade de 100 mil. `Del`
+  apaga, `Espaço` gira, `X` espelha, `Ctrl+A` seleciona a folha, `Ctrl+Z` desfaz e duplo
+  clique abre as propriedades. **Adicionar componentes** (`C`) abre um modal igual à aba
+  Biblioteca (busca, seletor de acervo, preview do símbolo, lista de valores do almoxarifado
+  ou footprint); cada **Adicionar** junta o item numa lista à direita e **Finalizar** coloca
+  tudo na folha ativa, em grade, já selecionado para arrastar. Fio, label, power port,
+  junção e texto não se desenham pelo hub: quem os escreve é a IA, no `schematic.js`
+  ([AI-GUIDE.md](AI-GUIDE.md), Parte A). Para o Altium refletir edições numa folha já
+  construída, rode o **BuildSchematic com limpeza da folha** (confirmação SIM).
 - **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
   `changes.js`: render fiel, fantasma tracejado das posições originais, lista de mudanças
   com validação, tabela PCB List pós-mudança e exportação para CSV.
