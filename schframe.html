@@ -24,16 +24,25 @@
 
   #main{flex:1; display:flex; min-height:0;}
   #cvwrap{flex:1; position:relative; min-width:0;}
+  /* divisoria arrastavel entre o painel e a folha: a mesma peca das abas Laser e BOM do hub
+     (6 px de alvo com um traco fino no meio, que acende ao pegar; duplo clique fecha/abre) */
+  #split{flex:0 0 6px; cursor:col-resize; position:relative; touch-action:none; background:var(--panel);
+    border-right:1px solid var(--border);}
+  #split::after{content:''; position:absolute; top:0; bottom:0; left:50%; width:2px;
+    transform:translateX(-50%); background:transparent; transition:background .12s;}
+  #split:hover::after, #split.on::after{background:var(--accent);}
   canvas#cv{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair;}
 
   /* ── painel lateral (esquerda): duas sub-abas, Componentes e Configurações ── */
-  #side{width:330px; min-width:280px; background:var(--panel); border-right:1px solid var(--border);
-    display:flex; flex-direction:column; min-height:0;}
-  .subtabs{display:flex; border-bottom:1px solid var(--border); padding:0 6px; flex:none;}
+  /* a largura vem da variavel que a divisoria escreve; fechado (0) o painel some inteiro */
+  #side{width:var(--side-w, 330px); min-width:0; flex:none; background:var(--panel);
+    display:flex; flex-direction:column; min-height:0; overflow:hidden;}
+  /* as sub-abas ficam no RODAPE do painel: o indicador sobe para a borda de cima */
+  .subtabs{display:flex; border-top:1px solid var(--border); padding:0 6px; flex:none; margin-top:auto;}
   .subtab{flex:1; background:transparent; border:0; border-radius:0; color:var(--fg-dim);
-    padding:9px 6px 8px; font-size:12px; letter-spacing:.02em;}
+    padding:8px 6px 9px; font-size:12px; letter-spacing:.02em; white-space:nowrap;}
   .subtab:hover{color:var(--fg);}
-  .subtab[aria-selected="true"]{color:var(--fg); box-shadow:inset 0 -2px 0 var(--accent);}
+  .subtab[aria-selected="true"]{color:var(--fg); box-shadow:inset 0 2px 0 var(--accent);}
   .pane{display:none; flex:1; min-height:0; overflow-y:auto;}
   .pane.on{display:block;}
   .sec{padding:8px 10px; border-bottom:1px solid var(--border);}
@@ -226,11 +235,6 @@
 <body>
 <div id="main">
   <aside id="side">
-    <div class="subtabs" role="tablist">
-      <button class="subtab" role="tab" data-pane="comps" aria-selected="true">Componentes</button>
-      <button class="subtab" role="tab" data-pane="cfg" aria-selected="false">Configurações</button>
-    </div>
-
     <div class="pane on" id="pane-comps">
       <div class="sec"><h2>Componentes (<span id="compcount">0</span>)</h2>
         <table id="comptable"><thead><tr><th>Ref</th><th>Símbolo</th><th>Footprint</th><th>Comment</th></tr></thead><tbody></tbody></table>
@@ -274,7 +278,13 @@
         <div class="hint" id="savehint"></div>
       </div>
     </div>
+
+    <div class="subtabs" role="tablist">
+      <button class="subtab" role="tab" data-pane="comps" aria-selected="true">Componentes</button>
+      <button class="subtab" role="tab" data-pane="cfg" aria-selected="false">Configurações</button>
+    </div>
   </aside>
+  <div id="split" title="arraste para redimensionar · duplo clique fecha/abre"></div>
 
   <div id="cvwrap"><canvas id="cv"></canvas><div id="fatal"></div>
     <div id="annform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
