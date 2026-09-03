@@ -1266,16 +1266,48 @@ function ancoraCentro3(sx, sy){
    queria ver o outro lado do que estava olhando, e nao caçar a placa de novo. Entao aqui se
    guarda onde o centro dela estava na TELA e se recoloca a camera para ele cair no mesmo
    pixel - a mesma conta da ancora do pivo e da roda. */
-function viraFace3(){
-  var onde = telaCentro3();
-  /* Virar a placa e DOIS movimentos, e nao um: ela troca de face e da meia volta, como a mao
-     faz ao virar uma placa sobre a bancada. So inverter a inclinacao espelharia o eixo Y; com
-     a meia volta junto, o espelho cai no X - que e a mesma convencao da vista "Verso" 2D.
-     Sem isso, a mesma placa aparecia espelhada de um jeito no 2D e de outro no 3D. */
-  v3.pitch = -v3.pitch;
-  v3.yaw += Math.PI;
-  ancoraCentro3(onde[0], onde[1]);
-  desenha3();
+/* Virar a placa e DOIS movimentos, e nao um: ela troca de face e da meia volta, como a mao
+   faz ao virar uma placa sobre a bancada. So inverter a inclinacao espelharia o eixo Y; com a
+   meia volta junto, o espelho cai no X - que e a mesma convencao da vista "Verso" 2D. Sem
+   isso, a mesma placa aparecia espelhada de um jeito no 2D e de outro no 3D.
+
+   E ela VIRA na tela, em vez de trocar de imagem entre dois quadros: a inclinacao caminha de
+   +p ate -p passando pelo ZERO, que e a placa de perfil - o mesmo caminho que o arrasto com o
+   botao direito percorre na mao. E no perfil, quando ela e uma linha de 1,6 mm na tela, que a
+   meia volta entra: ali ela nao se ve, e o giro em torno da normal - que seria um rodopio
+   estranho no meio da virada - nao aparece.
+
+   Chamar com anima=false pula tudo isso: a visao guiada vira a face e ja manda a camera
+   viajar ate a peça, e duas animacoes disputando o mesmo comando deixariam a placa parada no
+   meio da virada. */
+function viraFace3(anima){
+  var onde = telaCentro3(), p0 = v3.pitch;
+  /* a placa fica onde estava a CADA quadro: pr3 gira em torno da origem do mundo, entao sem
+     reancorar ela sairia orbitando pela tela enquanto tomba */
+  var poe = function (pit){
+    v3.pitch = pit;
+    ancoraCentro3(onde[0], onde[1]);
+    desenha3();
+  };
+  /* de perfil nao ha o que tombar, e quem pediu para nao animar nao anima */
+  if (anima === false || !p0 || semAnimacao()){
+    v3.yaw += Math.PI;
+    poe(-p0);
+    return;
+  }
+  var meu = anim = {}, t0 = null, meia = false;
+  requestAnimationFrame(function passo(ts){
+    if (meu !== anim) return;        /* a mao manda: quem pegou a placa interrompe a virada */
+    /* host sem relogio de quadro: acaba de uma vez, em vez de girar sem avançar */
+    var t = typeof ts !== 'number' ? 1
+          : t0 === null ? (t0 = ts, 0) : Math.min(1, (ts - t0) / 480);
+    var e = t < 0.5 ? 2*t*t : 1 - 2*(1-t)*(1-t);
+    if (!meia && e >= 0.5){ meia = true; v3.yaw += Math.PI; }
+    poe(p0 - 2*p0*e);
+    if (t < 1) return requestAnimationFrame(passo);
+    if (!meia) v3.yaw += Math.PI;
+    anim = null;
+  });
 }
 function abreMenu3(x, y){
   var m = document.getElementById('menu3');
@@ -1492,7 +1524,7 @@ function enquadra(lista){
     var precisa = quais.length === 1 ? (quais[0] === '0' ? 0 : 1) : null;
     if (precisa !== null && precisa !== ladoV3() && !lista.some(function (i){
       return D.comps[i] && D.comps[i].t;         /* passante ja aparece dos dois lados */
-    })) viraFace3();
+    })) viraFace3(false);   /* a viagem da camera vem logo em seguida, e o comando e um so */
   }
   else if (quais.length === 1) aplicaLayout(quais[0] === '0' ? 'f' : 'b');
   else if (quais.length > 1 && layoutAtual !== 'lr') aplicaLayout('lr');

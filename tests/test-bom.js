@@ -1003,8 +1003,27 @@ function montaAmbiente(){
               ondeEstava.map(v => v.toFixed(2)).join(', ') + ' -> ' +
               ondeFicou.map(v => v.toFixed(2)).join(', '));
     assert.strictEqual(v3.esc, escAntes, 'e no mesmo zoom');
+
+    /* ── e vira ANIMADA: a placa tomba ate o perfil e continua ──
+       O gancho do clearRect mede a inclinação DURANTE a virada; sem ele o teste so veria o
+       estado final, que e o mesmo de quando ela trocava de imagem num quadro so. */
+    const inclina = [];
+    amb.aoLimpar = () => inclina.push(v3.pitch);
+    const pAntes = v3.pitch, yawAntes2 = v3.yaw;
     amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' },
                                  preventDefault(){} });
+    amb.aoLimpar = null;
+    assert.ok(inclina.length > 8, 'a virada desenha varios quadros: ' + inclina.length);
+    assert.ok(Math.min.apply(null, inclina.map(Math.abs)) < Math.abs(pAntes) * 0.1,
+              'e passa pelo perfil, que e onde a placa troca de face');
+    assert.ok(Math.abs(v3.pitch + pAntes) < 1e-9, 'terminando exatamente na face oposta');
+    assert.ok(Math.abs(((v3.yaw - yawAntes2) % (2*Math.PI) + 2*Math.PI) % (2*Math.PI) - Math.PI) < 1e-9,
+              'com a meia volta dada uma vez so');
+    /* a placa continua onde estava: reancorada a cada quadro, e nao so no fim */
+    const depoisDaVirada = centroNaTela();
+    assert.ok(Math.abs(depoisDaVirada[0] - ondeEstava[0]) < 1e-9 &&
+              Math.abs(depoisDaVirada[1] - ondeEstava[1]) < 1e-9,
+              'e no mesmo pixel do comeco ao fim');
 
     /* digitando no filtro, letra e letra: nao pode virar atalho */
     const cxAntes = v3.cx;
