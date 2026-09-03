@@ -26,11 +26,18 @@ const COR = {
   0: { pad:'#ff5252', silk:'#ffe14d', trilha:'#c0392b', regiao:'#7a2620' },  /* frente */
   1: { pad:'#4d7cff', silk:'#c9c04d', trilha:'#2c4bb0', regiao:'#22306e' },  /* verso  */
   th:'#c9c9c9', furo:'#0d0d0d', borda:'#e8e8ea', alvo:'#25d07d', net:'#ff9d2e',
+  /* verde do que JA FOI MONTADO. Mais fundo que o `alvo` de proposito: o realce e o alvo de
+     agora (uma peça, e ja passa), e tem que ganhar da tinta do que ficou para tras. */
+  feito:'#1db954',
+  /* o disco do tique de montado: claro para se ler tanto sobre a placa escura do 2D quanto
+     sobre o verde da mascara na vista 3D */
+  selo:'#f6faf7',
 };
 
 /* Icones da barra. Sao poucos tracos de proposito: a 21x14 px o que se le e a SILHUETA -
    uma placa com a peça em cima (frente), a mesma tracejada com a peça do outro lado (verso),
-   duas placas (as duas faces), tres linhas (a lista) e os cursores (ajustes). */
+   duas placas (as duas faces), tres linhas (a lista), duas trilhas com uma via (o cobre) e os
+   cursores (ajustes). */
 const SVG = {
   frente: '<svg viewBox="0 0 21 14" width="21" height="14" aria-hidden="true">' +
           '<rect x="0.6" y="0.6" width="19.8" height="12.8" rx="2"/>' +
@@ -502,6 +509,20 @@ function salvaFeitos(op){
     });
 }
 
+/* Esta peça esta montada? O visto e por GRUPO ou por PEÇA conforme a vista aberta, e as duas
+   granularidades convivem no mesmo mapa - mesmo critério do contas(). Somar as duas aqui
+   pintaria de verde peça que a lista aberta mostra desmarcada. */
+function feitoComp(i){
+  var c = D.comps[i];
+  if (!c) return false;
+  if (modo !== 'grupo') return !!feitos['c' + c.ref];
+  var g = D.groups[c.g];
+  return !!(g && feitos['g' + g.k]);
+}
+/* nada marcado, nada a marcar: o laço da marca nao entra no caminho de quem esta so olhando
+   a placa, e sao dois por quadro (a tinta e o tique) vezes duas faces */
+function temFeitos(){ for (var k in feitos) if (feitos[k]) return true; return false; }
+
 /* Traz o que mudou no servidor. board.js novo (outro ExportPcb) recarrega a pagina: o
    desenho e a lista ficariam velhos, e isso nao da para remendar por partes. */
 function sincroniza(){
@@ -513,7 +534,7 @@ function sincroniza(){
       semAviso();
       if (D.boardRev && j.boardRev && j.boardRev !== D.boardRev){ location.reload(); return; }
       if (j.rev === revVistos) return;
-      if (absorve(j.vistos, j.rev)) montaBom();
+      if (absorve(j.vistos, j.rev)) vistoMudou();
     })
     .catch(function (){ avisaRede('servidor fora do ar - os vistos nao estao sendo salvos'); });
 }
@@ -648,6 +669,57 @@ function preencheTodos(ctx, polys, cor){
   for (var i = 0; i < polys.length; i++){ traco(ctx, polys[i]); ctx.closePath(); ctx.fill(); }
 }
 
+/* mundo -> pixel do canvas, na camera de um lado. E o inverso do c.mundo, e sai em pixel de
+   DISPOSITIVO (o mesmo em que o desenho da placa acontece). */
+function telaDe(c, x, y){
+  var k = c.esc * c.dpr;
+  return [c.cv.width/2 + (x - c.cx) * (c.lado ? -k : k), c.cv.height/2 - (y - c.cy) * k];
+}
+/* O "confere" de quem ja montou a peça: disco claro com o tique verde. O disco e claro de
+   proposito - em cima do verde da placa da vista 3D um tique verde sozinho desaparece, e o
+   que tem que se ler de longe e "essa ja esta pronta". */
+function confere(ctx, x, y, R){
+  ctx.save();
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.fillStyle = D.cores.selo;
+  ctx.beginPath(); ctx.arc(x, y, R, 0, 6.2831853); ctx.fill();
+  ctx.strokeStyle = D.cores.feito; ctx.lineWidth = Math.max(0.9, R * 0.2); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x - R*0.46, y + R*0.02);
+  ctx.lineTo(x - R*0.10, y + R*0.40);
+  ctx.lineTo(x + R*0.48, y - R*0.38);
+  ctx.strokeStyle = D.cores.feito; ctx.lineWidth = Math.max(1.3, R * 0.32); ctx.stroke();
+  ctx.restore();
+}
+/* A marca de montado e instrumento de TELA, como a esfera do pivo da vista 3D: escrita em
+   milimetros ela sairia espelhada no verso, de cabeça para baixo (o Y do canvas aponta para o
+   outro lado) e mudaria de tamanho a cada zoom. Por isso quem chama entrega a projecao
+   pronta: proj leva mundo -> pixel, ppmm e quantos pixels vale um milimetro ali, fy o quanto
+   aquela projecao achata a vertical (1 no 2D) e k quantos pixels tem um pixel de CSS - e
+   nele que o teto e o piso do tamanho estao escritos. */
+function marcaFeitos(ctx, L, proj, ppmm, fy, k){
+  D.comps.forEach(function (cp, i){
+    if ((cp.s !== L && !cp.t) || !feitoComp(i)) return;
+    var bw = cp.bb ? cp.bb[2] - cp.bb[0] : 1.6, bh = cp.bb ? cp.bb[3] - cp.bb[1] : 1.6;
+    var p = proj(cp.bb ? (cp.bb[0] + cp.bb[2]) / 2 : cp.x,
+                 cp.bb ? (cp.bb[1] + cp.bb[3]) / 2 : cp.y);
+    /* o raio acompanha a peça, com teto e piso: sem teto um conector ganharia um disco do
+       tamanho dele, e sem piso a placa inteira na tela nao mostraria marca nenhuma */
+    confere(ctx, p[0], p[1],
+            Math.max(3.2*k, Math.min(8.5*k, 0.34 * Math.min(bw, bh * fy) * ppmm)));
+  });
+}
+/* a mancha verde do que ja foi montado, no sistema da PLACA (bbox em mm): e a unica parte da
+   marca que pertence ao desenho, e nao a tela */
+function tintaFeitos(ctx, L, quadro){
+  ctx.fillStyle = D.cores.feito; ctx.globalAlpha = 0.24;
+  D.comps.forEach(function (cp, i){
+    if (!cp.bb || (cp.s !== L && !cp.t) || !feitoComp(i)) return;
+    quadro(cp.bb);
+  });
+  ctx.globalAlpha = 1;
+}
+
 function desenha(c){
   /* canvas dentro de um pai display:none tem largura zero - desenhar nele e trabalho jogado
      fora, e com a visao guiada mostrando uma face por vez isso vale metade do desenho */
@@ -708,6 +780,13 @@ function desenha(c){
     ctx.stroke();
   });
 
+  /* O que ja foi montado fica verde na placa: quem esta na bancada acha em UM olhar o que
+     falta, sem varrer a lista peça por peça. Entra antes da net e do realce - e o estado do
+     que ja passou, e nao o alvo de agora. */
+  if (temFeitos()) tintaFeitos(ctx, L, function (bb){
+    ctx.fillRect(bb[0], bb[1], bb[2]-bb[0], bb[3]-bb[1]);
+  });
+
   /* a net acesa vem antes do realce de peça: e contexto (por onde o sinal anda), enquanto o
      realce e o alvo. Acende o cobre inteiro daquela net, inclusive o que esta sob a peça. */
   if (netSel){
@@ -743,6 +822,10 @@ function desenha(c){
     });
   }
   ctx.restore();
+  /* o tique vem depois do restore, e por isso depois de tudo: e o unico desenho que tem que
+     continuar legivel mesmo com a peça selecionada acesa por cima */
+  if (temFeitos())
+    marcaFeitos(ctx, L, function (x, y){ return telaDe(c, x, y); }, c.esc * c.dpr, 1, c.dpr);
 }
 function pinta(){ if (v3.on) desenha3(); else cams.forEach(desenha); }
 
@@ -946,7 +1029,13 @@ function desenha3(){
     traçaLote(ctx, W, H, ls, C3.silk);
   }
 
-  /* 5. o realce, por cima de tudo */
+  /* 5. o que ja foi montado, no mesmo verde da vista 2D e antes do realce - estado, e nao alvo */
+  if (temFeitos()) tintaFeitos(ctx, L, function (bb){
+    poly3(ctx, W, H, [[bb[0],bb[1]],[bb[2],bb[1]],[bb[2],bb[3]],[bb[0],bb[3]]], zf);
+    ctx.closePath(); ctx.fill();
+  });
+
+  /* 6. o realce, por cima de tudo */
   if (realce.length){
     realce.forEach(function (i){
       var cp = D.comps[i];
@@ -959,7 +1048,13 @@ function desenha3(){
       ctx.lineWidth = 1.5; ctx.stroke();
     });
   }
-  /* 6. a esfera com a cruz, no ponto em torno do qual se esta girando. Fica em PIXEIS, e nao
+  /* 7. o tique de montado - depois do realce, pelo mesmo motivo do 2D. O tela3 ja devolve
+     pixel de CSS (o ctx foi escalado pelo dpr aqui em cima), e a projecao achata a vertical
+     pelo seno da inclinacao: de lado, um disco do tamanho da peça nao caberia nela. */
+  if (temFeitos())
+    marcaFeitos(ctx, L, function (x, y){ return tela3(ctx, W, H, pr3(x, y, zf)); },
+                v3.esc, Math.max(0.2, Math.abs(Math.sin(v3.pitch))), 1);
+  /* 8. a esfera com a cruz, no ponto em torno do qual se esta girando. Fica em PIXEIS, e nao
      em mm: e um instrumento da tela, e tem que ter o mesmo tamanho perto ou longe. */
   if (v3.piv){
     var g = tela3(ctx, W, H, pr3(v3.piv[0], v3.piv[1], 0)), R = 26;
@@ -1219,6 +1314,7 @@ function montaBom(){
       ev.stopPropagation();
       if (box.checked) feitos[r.k] = 1; else delete feitos[r.k];
       salvaFeitos(); tr.className = box.checked ? 'feito' : ''; contas();
+      pinta();          /* o verde e o tique na placa sao este visto, do outro lado da tela */
     };
     cx.appendChild(box);
     td('q', String(r.qtd));
@@ -1239,6 +1335,9 @@ function montaBom(){
   document.getElementById('vazio').style.display = vis.length ? 'none' : '';
   contas();
 }
+/* A lista e o desenho mostram o MESMO visto, em duas linguagens: mexeu num, redesenha o
+   outro. O filtro fica de fora de proposito - ele muda a lista, e nao o que esta montado. */
+function vistoMudou(){ montaBom(); pinta(); }
 /* Onde a camera de um lado teria que estar para mostrar as peças pedidas. DEVOLVE o alvo em
    vez de aplica-lo: entre o de agora e este e que a transicao acontece. Mesma folga do
    zoomToObj da vista PCB (a peça ocupa ~1/1,6 da tela), para quem usa as duas telas ver a
@@ -1647,7 +1746,8 @@ function inicia(){
       });
       /* a linha selecionada nao existe na outra vista: quem continua valendo e o REALCE */
       selKey = '';
-      montaBom();
+      /* e o verde da placa muda junto: o visto de um grupo nao e o visto de cada peça dele */
+      vistoMudou();
     };
   });
   var sp = document.getElementById('hsplit');
@@ -1703,7 +1803,7 @@ function inicia(){
   cbEscuro.onclick = function (){ document.body.classList.toggle('escuro', !!cbEscuro.checked); };
   document.getElementById('limpar').onclick = function (){
     pergunta('Limpar vistos', 'Isso desmarca tudo que j\u00e1 foi montado nesta placa. Continuar?',
-             function (){ feitos = {}; salvaFeitos({ limpar: true }); montaBom(); });
+             function (){ feitos = {}; salvaFeitos({ limpar: true }); vistoMudou(); });
   };
   window.addEventListener('resize', function (){
     aplicaLateral();

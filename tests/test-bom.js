@@ -283,6 +283,11 @@ function montaAmbiente(){
   /* a cor diz O QUE foi desenhado - e o único jeito, daqui, de separar substrato de cobre */
   ctx.fill = function (){ ops.push('fill'); cores.push(ctx.fillStyle); };
   ctx.stroke = function (){ ops.push('stroke'); cores.push(ctx.strokeStyle); };
+  /* o arco guarda ONDE e DE QUE COR: o tique de montado e o único desenho em pixel de tela,
+     e e por aqui que o teste confere que ele caiu em cima da peça certa. A cor separa o disco
+     do tique dos outros arcos do desenho (silk, trilha em arco, via). */
+  const arcos = [];
+  ctx.arc = function (x, y, r){ ops.push('arc'); arcos.push([x, y, r, ctx.fillStyle]); };
   const elems = {};
   /* textContent = '' limpa os filhos, como no DOM de verdade - sem isso a tabela
      acumularia as linhas de cada montaBom e o teste mediria lixo */
@@ -369,6 +374,7 @@ function montaAmbiente(){
     body: mk('body'),
   };
   amb.ops = ops; amb.doc = doc; amb.elems = elems; amb.escalas = escalas; amb.cores = cores;
+  amb.arcos = arcos;
   return amb;
 }
 
@@ -404,7 +410,8 @@ function montaAmbiente(){
                              blocos[0] + ';' + blocos[1] +
                              '; return { boot: document.__boot, v3: function(){ return v3; },' +
                              '   pr3: function (a,b,c){ return pr3(a,b,c); }, ladoV3: ladoV3,' +
-                             '   cams0: function(){ return cams[0]; } };');
+                             '   cams0: function(){ return cams[0]; },' +
+                             '   cams1: function(){ return cams[1]; } };');
   const r = rodar(amb.doc, janela, janela.localStorage, janela.requestAnimationFrame,
                   janela.confirm, 1, janela.setTimeout, janela.clearTimeout);
   assert.ok(typeof r.boot === 'function', 'o runtime registra o boot no DOMContentLoaded');
@@ -547,12 +554,59 @@ function montaAmbiente(){
   assert.ok(comTrilha > semTrilha,
             'o botao liga a camada: ' + comTrilha + ' contra ' + semTrilha + ' tracos');
 
-  /* ── o modal proprio, no lugar do confirm do navegador ── */
+  /* ── o visto pinta a PLACA, e nao so a linha ──
+     Quem monta olha o desenho: a peça marcada fica verde e ganha o tique de conferida. Sem
+     isto o visto era um estado que existia numa das duas telas so. */
   const primeira = () => amb.elems.linhas.children[0];
   const caixaDaLinha = tr => tr.children[COL_VISTO].children[0];
-  caixaDaLinha(primeira()).checked = true;
-  caixaDaLinha(primeira()).onclick({ stopPropagation(){} });
+  const marca = v => { const cx = caixaDaLinha(primeira()); cx.checked = v;
+                       amb.cores.length = 0; cx.onclick({ stopPropagation(){} }); };
+  marca(true);
   assert.strictEqual(primeira().className, 'feito', 'marcou a linha como montada');
+  assert.ok(amb.cores.includes(Bom.COR.feito), 'a peça montada sai no verde de montado');
+  marca(false);
+  assert.ok(!amb.cores.includes(Bom.COR.feito), 'desmarcar apaga o verde na hora');
+  marca(true);
+
+  /* o visto e por GRUPO ou por PEÇA: trocar a granularidade troca o que a placa mostra
+     verde, senao o desenho contaria uma historia que a lista aberta nao conta */
+  const botaoModo = k => amb.doc.querySelectorAll('[data-modo]').find(b => b.dataset.modo === k);
+  amb.cores.length = 0; botaoModo('peca').onclick();
+  assert.ok(!amb.cores.includes(Bom.COR.feito), 'visto de grupo nao pinta a lista por peça');
+  amb.cores.length = 0; botaoModo('grupo').onclick();
+  assert.ok(amb.cores.includes(Bom.COR.feito), 'e o verde volta ao reagrupar');
+
+  /* ── e o tique cai EM CIMA da peça ──
+     A placa entra limpa: um visto ja marcado poria o tique de outra peça na conta.
+     A marca sai do sistema da placa: escrita em milimetros ela viria espelhada no verso e de
+     cabeça para baixo. Quem confere isso aqui e o caminho de VOLTA - o mesmo c.mundo() que o
+     clique usa: o centro do disco, desfeito pela camera, tem que dar a peça de novo. */
+  marca(false);
+  const marcaDaLinha = ref => {
+    const tr = amb.elems.linhas.children.find(t =>
+      t.children[COL_REFS] && t.children[COL_REFS].textContent.indexOf(ref) >= 0);
+    const cx = caixaDaLinha(tr);
+    amb.arcos.length = 0; cx.checked = true; cx.onclick({ stopPropagation(){} });
+    const arcs = amb.arcos.filter(a => a[3] === Bom.COR.selo);
+    cx.checked = false; cx.onclick({ stopPropagation(){} });
+    return arcs;
+  };
+  const emCima = (p, x, y) => Math.abs(p.x - x) < 0.05 && Math.abs(p.y - y) < 0.05;
+  const noTopo = marcaDaLinha('R1');            /* grupo do R1 com o R10, os dois na frente */
+  assert.strictEqual(noTopo.length, 2, 'o visto do grupo poe um tique em cada peça dele');
+  const ondeCaiu = noTopo.map(a => r.cams0().mundo(a[0], a[1]));
+  assert.ok(ondeCaiu.some(q => emCima(q, 5, 5)) && ondeCaiu.some(q => emCima(q, 9, 5)),
+            'cada tique no centro da sua peça: ' + JSON.stringify(ondeCaiu));
+  assert.ok(noTopo.every(a => a[2] >= 3 && a[2] <= 9),
+            'com raio de instrumento de tela, e nao de peça: ' + noTopo.map(a => a[2]));
+  /* o verso e espelhado em X: em milimetros a marca cairia do outro lado da placa */
+  const soNoVerso = marcaDaLinha('C2');        /* SMD do verso, sem pad passante */
+  assert.strictEqual(soNoVerso.length, 1, 'peça de uma face so ganha um tique so');
+  assert.ok(emCima(r.cams1().mundo(soNoVerso[0][0], soNoVerso[0][1]), 16, 4),
+            'o tique do verso acompanha o espelho da camera de baixo');
+  marca(true);                     /* e volta marcada, que e como o teste do modal segue */
+
+  /* ── o modal proprio, no lugar do confirm do navegador ── */
 
   amb.elems.limpar.onclick();
   assert.ok(amb.elems.modalBg.classList.contains('on'), '"Limpar vistos" abre o modal');
