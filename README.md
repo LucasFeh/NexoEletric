@@ -152,12 +152,9 @@ Casca única com:
   com **Configurações**; ele abre o modal, com três abas laterais. O cabeçalho ficou só
   com a marca, o seletor de projeto e o estado do servidor: `ExportLibs`, `Reindexar` e o
   **⋮** da barra do projeto, que viviam soltos ali, entraram para o modal.
-  - **Projeto** (a primeira) — o projeto aberto, a **pasta padrão do BOM** e a exclusão.
-    A pasta é a mesma que estava no painel da aba BOM; **Selecionar…** abre o diálogo de
-    pastas do Windows **no PC que roda o hubserver** (o navegador não sabe caminho
-    absoluto, então quem abre a janela é o servidor — `POST /api/pick-dir`, só de
-    localhost, igual ao `laser-open`). A janela às vezes abre atrás do navegador; de
-    outro PC da rede, digite o caminho à mão. **Excluir projeto** fica atrás da **senha
+  - **Projeto** (a primeira) — o projeto aberto e a exclusão. (A **pasta padrão do BOM**
+    morava aqui; saiu quando o BOM virou link e deixou de existir arquivo para pôr em
+    pasta alguma — veja *BOM* mais abaixo.) **Excluir projeto** fica atrás da **senha
     mestre** (conferida no servidor; o browser só a transporta — veja `MASTER_PASSWORD`
     em `hubserver.py`, ou a variável de ambiente `ALTIUMHUB_MASTER`). A pasta não é
     apagada: vai inteira para `Trash\<nome>-<data>` no mesmo workspace, some do hub na
@@ -590,32 +587,71 @@ fim (ou dê duplo clique) para fechar a lateral e dar a largura toda à prévia,
 de novo para devolver. A largura fica no navegador, não no projeto: é preferência de tela, e
 trocar de placa não pode mexer nela. As duas abas usam a **mesma** implementação de divisória.
 
-A **prévia** na aba é o arquivo inteiro num `iframe` com `srcdoc`: o que se vê é literalmente o
-que vai ser salvo. Uma consequência esperada: dentro do `srcdoc` a origem é opaca, então o
-`localStorage` **não** persiste na prévia — nem o visto, nem o lado e a largura da lista. No
-arquivo salvo, sim: cada um que abre o BOM guarda a sua preferência de tela.
+A **prévia** na aba é a página inteira num `iframe` com `srcdoc`: o que se vê é
+literalmente o que quem abrir o link vai ver. Uma diferença esperada: a prévia roda **sem
+servidor** (o gerador recebe `api` vazio), então nela o visto fica no `localStorage` em vez
+de ir para a bancada, e não persiste — dentro do `srcdoc` a origem é opaca. É prévia, não é
+a folha de montagem.
 
-**Salvar**
+**Link**
+
+O BOM **não é um arquivo que se baixa**. Cada projeto tem uma URL fixa:
+
+    http://<servidor>:<porta>/bom/<id-do-projeto>
 
 | Botão | O que faz |
 |---|---|
-| **Salvar na pasta padrão** | grava direto na pasta configurada, no disco do **servidor** |
-| **Salvar como…** | escolhe pasta e nome, com a opção de adotar aquela pasta como padrão |
-| Baixar | download pelo navegador — é o caminho de quem acessa o hub de outro PC |
+| **Copiar link** | grava as opções da aba e copia a URL do BOM deste projeto |
+| Abrir numa aba | abre a mesma URL — o que se vê é o que quem recebeu o link vê |
 
-A **pasta padrão** é configurada em **Configurações › Projeto** (era um campo desta aba) e
-fica em `hub-config.json`, na raiz, gravado
-pelo servidor. Ela **não** vai para o `localStorage` porque o caminho é do disco do
-**servidor**: guardado no navegador, cada PC da LAN teria a sua versão de um caminho que só o
-servidor usa. Por isso também o arquivo está no `.gitignore` — é configuração de máquina, como
-as letras de drive dos `.pas`.
+`/bom/<id>` não devolve um BOM gravado: devolve um **bootstrap** de duas mil letras que
+carrega o `hub-bom.js` atual, o `board.js` do projeto e o estado da bancada, e monta o
+documento no navegador de quem abriu. Não existe cópia velha em lugar nenhum — é daí que
+vem a propriedade que se queria: melhorar o gerador melhora o BOM de **todos** os projetos
+no mesmo instante, sem regerar nada e sem reenviar link para ninguém.
 
-> **Salvar em pasta escreve no PC do servidor.** `/api/bom-save` e `/api/config` são as duas
-> únicas rotas que escrevem fora do workspace, e por isso só aceitam chamada de **localhost**:
-> o `hubserver.py` escuta na rede toda, e escolher onde ele escreve tem que ser decisão de quem
-> está sentado nele. De outra máquina o botão responde 403 e o caminho é **Baixar**. A rota só
-> aceita `.html`, só nome de arquivo (nada de subpasta vinda do cliente) e cria **no máximo um
-> nível** de pasta — um caminho digitado errado avisa em vez de criar uma árvore inteira.
+A ordem dos `<script>` do bootstrap não é cosmética. No browser o `hub-bom.js` lê
+`root.HubFont` e `root.HubLaser`, e fora do CommonJS ninguém resolve isso sozinho: com a
+ordem errada a página abre morta, com `reading 'padPrim'` no console. O `test_hubapi.py`
+cobra a ordem.
+
+O preço é depender do servidor no ar, e foi uma troca deliberada: o link tem que abrir do
+tablet da bancada, de qualquer máquina da rede, e amanhã de um servidor de verdade — nada
+disso um arquivo na pasta de Downloads de alguém faz.
+
+> **O link tem que abrir de outra máquina.** Quem abre o hub em `127.0.0.1` copiaria um
+> endereço que só funciona no próprio PC, e o ponto do link é justamente abrir no tablet:
+> `GET /api/bom/<id>/link` troca o localhost pelo IP da rede. Se o `Host:` do request já é
+> um nome de rede — o dia em que isso virar um servidor de verdade — fica como veio, porque
+> o próprio `Host:` é a melhor pista de como se chega ali. E a cópia passa pelo
+> `textarea` + `execCommand` e não só pelo `navigator.clipboard`: este último só existe em
+> contexto seguro, e o hub aberto por `http://192.168.x.x` **não** é um.
+
+**Os vistos são compartilhados.** Quem monta está no tablet e quem confere está no PC; a
+lista só serve para dois se os dois virem a mesma coisa. O que já foi montado fica em
+`Projects\<nome>\bom-vistos.json`, e a página busca de volta a cada quatro segundos (e ao
+voltar para a aba):
+
+- O que sobe é um **delta** (`{set:{chave:bool}}`), nunca o mapa inteiro — duas pessoas
+  marcando peças diferentes ao mesmo tempo se somam, em vez de a última apagar o trabalho
+  da outra. Desmarcar **apaga** a entrada: o arquivo guarda o que foi feito, e só.
+- O `rev` que a página compara é **hash do conteúdo**, não `mtime`. Dois vistos marcados no
+  mesmo milissegundo saem com o mesmo `st_mtime_ns` no NTFS, e a outra máquina perderia o
+  segundo — que é exatamente o caso de duas pessoas na mesma placa.
+- `bom-vistos.json` e `bom-opts.json` ficam **fora** do watcher (`_snapshot`). Dentro dele,
+  cada visto marcado dispararia o SSE e recarregaria a página de todo mundo — no meio da
+  montagem, que é quando ninguém pode perder a tela de vista.
+- Servidor fora do ar **aparece na tela**. Silêncio faria a bancada marcar no vazio.
+- `POST /api/bom/<id>/vistos` **não** é só-localhost, ao contrário do `laser-open`: quem
+  marca é o tablet. Ele escreve um arquivo só, dentro da pasta do projeto, e a pasta vem do
+  slug do índice — nada de caminho vindo do cliente.
+
+As **opções** com que a aba gerou (tema, lados, o que aparece) vão para
+`Projects\<nome>\bom-opts.json` quando se copia o link, e o link abre com elas. Se essa
+gravação falhar, o link ainda sai — no padrão: opção é conforto, link é o que se pediu.
+
+Aberto de `file://`, sem servidor, o gerador ainda produz a página autocontida de sempre, e
+nela o visto volta para o `localStorage` do navegador.
 
 ## Servidor local com tempo real (opcional)
 
