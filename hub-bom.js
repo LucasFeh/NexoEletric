@@ -1280,33 +1280,57 @@ function ancoraCentro3(sx, sy){
    Chamar com anima=false pula tudo isso: a visao guiada vira a face e ja manda a camera
    viajar ate a peça, e duas animacoes disputando o mesmo comando deixariam a placa parada no
    meio da virada. */
+var VIRA_MS = 300;      /* uma meia volta. Rapida o bastante para nao virar espera, longa o
+                           bastante para se ver a placa passar de perfil */
+var vira = null;        /* a virada em andamento, para o proximo Ctrl+F saber que ha uma */
+
 function viraFace3(anima){
-  var onde = telaCentro3(), p0 = v3.pitch;
-  /* a placa fica onde estava a CADA quadro: pr3 gira em torno da origem do mundo, entao sem
-     reancorar ela sairia orbitando pela tela enquanto tomba */
-  var poe = function (pit){
-    v3.pitch = pit;
-    ancoraCentro3(onde[0], onde[1]);
-    desenha3();
-  };
+  var p0 = v3.pitch;
   /* de perfil nao ha o que tombar, e quem pediu para nao animar nao anima */
   if (anima === false || !p0 || semAnimacao()){
-    v3.yaw += Math.PI;
-    poe(-p0);
+    var ja = telaCentro3();
+    v3.yaw += Math.PI; v3.pitch = -p0;
+    ancoraCentro3(ja[0], ja[1]);
+    desenha3();
     return;
   }
-  var meu = anim = {}, t0 = null, meia = false;
+  /* Ctrl+F no meio de uma virada EMENDA outra meia volta, em vez de virar dali. Virar do
+     ponto em que ela esta ia ficando cada vez menor - dois toques seguidos deixavam a placa
+     balançando de perfil, sem nunca completar a volta. Assim ela roda enquanto se aperta.
+     O teto e para a tecla repetida (segurar o Ctrl+F dispara dezenas): a placa acompanha a
+     mao e para logo depois, em vez de girar sozinha por quinze segundos. */
+  if (vira && vira.meu === anim){
+    vira.restam = Math.min(vira.restam + 1, 3);
+    return;
+  }
+  /* a placa fica onde estava a CADA quadro: pr3 gira em torno da origem do mundo, entao sem
+     reancorar ela sairia orbitando pela tela enquanto tomba */
+  var onde = telaCentro3();
+  var meu = anim = {}, t0 = null, meia = false, de = p0;
+  vira = { meu:meu, restam:0 };
   requestAnimationFrame(function passo(ts){
-    if (meu !== anim) return;        /* a mao manda: quem pegou a placa interrompe a virada */
+    /* a mao manda: quem pegou a placa interrompe a virada. So limpa o vira se ele ainda for
+       DESTE laço - senao um quadro atrasado apagaria a virada que ja comecou depois */
+    if (meu !== anim){ if (vira && vira.meu === meu) vira = null; return; }
     /* host sem relogio de quadro: acaba de uma vez, em vez de girar sem avançar */
     var t = typeof ts !== 'number' ? 1
-          : t0 === null ? (t0 = ts, 0) : Math.min(1, (ts - t0) / 480);
+          : t0 === null ? (t0 = ts, 0) : Math.min(1, (ts - t0) / VIRA_MS);
     var e = t < 0.5 ? 2*t*t : 1 - 2*(1-t)*(1-t);
     if (!meia && e >= 0.5){ meia = true; v3.yaw += Math.PI; }
-    poe(p0 - 2*p0*e);
+    v3.pitch = de - 2*de*e;
+    ancoraCentro3(onde[0], onde[1]);
+    desenha3();
     if (t < 1) return requestAnimationFrame(passo);
     if (!meia) v3.yaw += Math.PI;
-    anim = null;
+    if (vira.restam > 0){
+      vira.restam--;
+      de = v3.pitch; meia = false;
+      /* o tempo que passou do fim da meia volta entra na proxima, em vez de se perder: sem
+         isso cada emenda comia um quadro parado e a rotacao andava aos trancos */
+      t0 = typeof ts === 'number' ? ts - Math.max(0, (ts - t0) - VIRA_MS) : null;
+      return requestAnimationFrame(passo);
+    }
+    vira = null; anim = null;
   });
 }
 function abreMenu3(x, y){

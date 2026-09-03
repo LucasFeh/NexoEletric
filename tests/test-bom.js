@@ -1025,6 +1025,31 @@ function montaAmbiente(){
               Math.abs(depoisDaVirada[1] - ondeEstava[1]) < 1e-9,
               'e no mesmo pixel do comeco ao fim');
 
+    /* ── Ctrl+F NO MEIO da virada emenda outra meia volta ──
+       Virar do ponto em que ela esta deixava cada toque menor que o anterior, e dois seguidos
+       paravam a placa de perfil. Aqui o segundo toque sai de dentro do proprio desenho, que e
+       o unico jeito de apertar durante a animação com o relogio de quadro do teste. */
+    const antesEmenda = v3.pitch, yawEmenda = v3.yaw;
+    let emendou = false, quadros = 0;
+    amb.aoLimpar = () => {
+      quadros++;
+      if (!emendou && Math.abs(v3.pitch) < Math.abs(antesEmenda) * 0.5){
+        emendou = true;
+        amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' },
+                                     preventDefault(){} });
+      }
+    };
+    amb.doc.dispara('keydown', { key:'f', ctrlKey:true, target:{ tagName:'BODY' },
+                                 preventDefault(){} });
+    amb.aoLimpar = null;
+    assert.ok(emendou, 'o teste apertou de novo durante a virada');
+    assert.ok(Math.abs(v3.pitch - antesEmenda) < 1e-9,
+              'duas meias voltas completas devolvem a inclinação de origem: ' +
+              v3.pitch.toFixed(4) + ' contra ' + antesEmenda.toFixed(4));
+    assert.ok(Math.abs(((v3.yaw - yawEmenda) % (2*Math.PI) + 2*Math.PI) % (2*Math.PI)) < 1e-9,
+              'com as duas meias voltas dadas, e nao uma');
+    assert.ok(quadros > 16, 'e desenhando as duas: ' + quadros + ' quadros');
+
     /* digitando no filtro, letra e letra: nao pode virar atalho */
     const cxAntes = v3.cx;
     d3('pointerdown', { button:0, clientX:0, clientY:0, pointerId:1, preventDefault(){} });
