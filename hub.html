@@ -499,25 +499,49 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
   background: rgba(var(--tint),0.07); color: var(--text-3); }
 .lib-row .pill.warn { color: var(--warn); }
 
-/* editor de símbolos (hub-symed.js): a mesma casca de três colunas da Biblioteca; o meio
-   empilha barra · canvas · rodapé · paleta da biblioteca de símbolos. Só a casca mora aqui —
-   a lógica e os rótulos estão no .js. */
+/* editor de símbolos (hub-symed.js): lista do espelho · editor · ferramentas + ficha, com
+   divisórias arrastáveis como as abas Laser e BOM. O meio empilha barra · canvas · rodapé ·
+   paleta da biblioteca de símbolos. Só a casca mora aqui — a lógica e os rótulos estão no .js. */
 .symed { height: 100%; min-height: 0; }
-.symed-mid { display: grid; grid-template-rows: auto minmax(0,1fr) auto auto auto; min-height: 0; }
-.symed-mid .canvas-bar { padding: 8px 12px 6px; flex-wrap: wrap; row-gap: 6px; }
+.symed-grid { display: grid; height: 100%; min-height: 0;
+  grid-template-columns: var(--symed-l, var(--aside-w)) 6px minmax(240px, 1fr)
+                         6px var(--symed-r, var(--aside-w)); }
+.symed-grid > * { min-width: 0; }     /* sem isto o conteudo trava o encolhimento da coluna */
+/* cada filho preso ao seu trilho: o mkSplits fecha uma coluna com display:none e, sem isto, o
+   auto-placement puxava os irmãos um trilho para a esquerda — o meio caía nos 6 px da divisória */
+.symed-grid > .lib-left { grid-column: 1; } .symed-grid > [data-split="l"] { grid-column: 2; }
+.symed-grid > .symed-mid { grid-column: 3; } .symed-grid > [data-split="r"] { grid-column: 4; }
+.symed-grid > aside { grid-column: 5; }
+.symed-grid > .lib-left { grid-template-rows: auto auto auto 1fr; }
+/* a coluna começa em 330 px: busca e segmentado não cabem lado a lado, então o segmentado desce */
+.symed-grid .lib-bar { flex-wrap: wrap; row-gap: 6px; }
+.symed-grid .lib-bar .input { flex: 1 1 140px; }
+.symed-kicker { padding: 0 18px 4px; }
+/* minmax(0,1fr) na coluna: sem isto o trilho cresce até o conteúdo mais largo e o canvas
+   vaza por cima do aside */
+.symed-mid { display: grid; grid-template-columns: minmax(0,1fr); grid-template-rows: auto minmax(0,1fr) auto auto auto; min-height: 0; }
+.symed-mid .canvas-bar { padding: 8px 12px 6px; }
 .symed-mid .viewport { margin: 0 12px 4px; }
-.symed-name { color: var(--text-2); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.symed-tools button { padding: 4px 7px; }
-.symed-tools button .n { font-size: 9px; margin-left: 3px; }
+.symed-name { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .symed-foot { display: flex; align-items: center; gap: 12px; padding: 0 12px 6px; font-size: 11px;
   color: var(--text-4); font-variant-numeric: tabular-nums; min-height: 22px; }
 .symed-foot .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-.symed-foot .seg button { padding: 3px 7px; font-size: 11px; }
-.symed-libbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px 4px; box-shadow: inset 0 1px 0 var(--line); }
+/* caixa de ferramentas: botões-ícone de 30 px, cinco por linha, no topo do aside */
+.symed-toolbox { margin: 0 0 12px; }
+.symed-tb { display: grid; grid-template-columns: repeat(5, 30px); gap: 4px; margin-top: 6px; }
+.symed-ib { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text-3); }
+.symed-ib:hover { color: var(--text); border-color: rgba(var(--tint),0.35); }
+.symed-ib[aria-pressed="true"] { color: var(--hi); border-color: var(--hi); background: rgba(var(--tint),0.12); }
+.symed-ib:disabled { opacity: 0.4; cursor: not-allowed; }
+.symed-ib svg { display: block; }
+/* a barra quebra linha: com as colunas ajustáveis o meio pode ficar estreito, e uma barra que
+   vaza por baixo do aside deixa os botões inalcançáveis */
+.symed-libbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 6px 12px 4px; box-shadow: inset 0 1px 0 var(--line); }
 .symed-libbar .kicker { white-space: nowrap; }
 .symed-libbar .input { flex: 1 1 160px; min-width: 120px; max-width: 260px; min-height: 26px; font-size: 12px; }
 .symed-libbar .count { font-size: 11px; color: var(--text-4); white-space: nowrap; }
-.symed-libbar .right { margin-left: auto; display: flex; gap: 6px; }
+.symed-libbar .right { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; }
 .symed-libbar .btn { white-space: nowrap; }
 /* a paleta cresce até 190px e rola; vazia (lib ainda não gerada) ocupa só a frase */
 .symed-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px,1fr)); gap: 6px;
@@ -545,6 +569,11 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .symed-save input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--hi); }
 .symed-status { font-size: 11px; color: var(--text-4); min-height: 14px; line-height: 1.45; word-break: break-word; }
 .symed-status.err { color: var(--err); } .symed-status.ok { color: var(--ok); }
+/* as perguntas do editor (descartar? excluir? nome?) no mesmo .dialog da casca */
+.symed-dlg { width: min(460px,100%); }
+.symed-dlg p { margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.symed-dlg label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-3); }
+.symed-dlg .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
 
 /* ── biblioteca do almoxarifado ────────────────────────────────
    O que muda em relação ao espelho da SchLib: o painel de baixo deixa de ser o
@@ -3030,7 +3059,7 @@ function renderPanes() {
       c.append(m); g.append(c);
     });
   }
-  if (S.tab === 'libsym') return HubSymEd.render({ root: $('#symed'), t, toast, onSaved: libInvalida, lang: HubI18n.lang });
+  if (S.tab === 'libsym') return HubSymEd.render({ root: $('#symed'), t, toast, onSaved: libInvalida, lang: HubI18n.lang, splits: mkSplits });
   if (S.tab === 'lib' || S.tab === 'libfp') return renderLib();
   if (S.tab === 'neoden') return renderNeoden();
   if (S.tab === 'laser') return renderLaser();

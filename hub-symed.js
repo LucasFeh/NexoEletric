@@ -1,12 +1,19 @@
 /* AltiumPCBMirror v2 - hub-symed.js — editor de símbolos (sub-aba Símbolos da Biblioteca).
 
-   Três colunas, como a sub-aba Sch Lib: a lista do espelho à esquerda, o editor no meio e a
-   ficha à direita. O meio empilha o canvas com as ferramentas e, embaixo, a Biblioteca de
+   Três colunas com divisórias arrastáveis (o mkSplits da casca, como nas abas Laser e BOM):
+   a lista do espelho do Altium à esquerda, o editor no meio e, à direita, a caixa de
+   ferramentas em ícones e a ficha. O meio empilha o canvas e, embaixo, a Biblioteca de
    símbolos (Libs/symbols-lib.js) — corpos genéricos e de CI que se aplicam ao símbolo aberto
    com um clique, porque o que mais se quer aqui é TROCAR O DESENHO sem mexer na pinagem.
 
+   Mouse igual ao da vista Esquema: o esquerdo seleciona (Shift acrescenta), arrasta os
+   selecionados ou, em área vazia, desenha a caixa de seleção; direito e meio arrastam a
+   tela; a roda dá zoom. A seleção é uma lista de {kind, idx} e vai para o undo junto com a
+   geometria. Nada de confirm()/prompt(): as perguntas são modais no tema do hub.
+
    Contrato com a casca (hub.html): render(opts) pode ser chamado toda vez que a sub-aba
-   aparece — o DOM nasce uma vez e só é atualizado; dirty() diz se há edição não salva.
+   aparece — o DOM nasce uma vez e só é atualizado; dirty() diz se há edição não salva;
+   opts.splits é o mkSplits da casca (sem ele o painel abre igual, só sem arrasto).
    As funções puras (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol,
    applyLibSymbol, nextPinNum...) ficam em `pure` para tests/test-symed.js rodar em Node —
    por isso nada de DOM fora de função.
@@ -253,37 +260,124 @@ function nextPinNum(pins) {
   return String(m + 1);
 }
 
+/* ── seleção múltipla: caixa de cada item e quem cabe numa caixa de seleção ── */
+
+function ptsBox(pts) {
+  let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
+  for (const p of pts) { if (p[0] < x1) x1 = p[0]; if (p[0] > x2) x2 = p[0]; if (p[1] < y1) y1 = p[1]; if (p[1] > y2) y2 = p[1]; }
+  return x1 > x2 ? { x1: 0, y1: 0, x2: 0, y2: 0 } : { x1, y1, x2, y2 };
+}
+/* caixa de cada item em mil — é o que a caixa de seleção compara e o que ganha as bordinhas */
+function itemBBox(it) {
+  if (it.g == null) { const h = pinHot(it); return ptsBox([[it.x, it.y], [h.x, h.y]]); }
+  switch (it.g) {
+    case 'line': case 'rect': return ptsBox([[it.x1, it.y1], [it.x2, it.y2]]);
+    case 'arc': {
+      /* só o pedaço desenhado: as pontas e os eixos que o arco cruza */
+      const sa = it.sa || 0, ea = it.ea == null ? 360 : it.ea, r = Math.abs(it.r || 0);
+      const P = a => [it.cx + r * Math.cos(a * Math.PI / 180), it.cy + r * Math.sin(a * Math.PI / 180)];
+      const pts = [P(sa), P(ea)];
+      for (const a of [0, 90, 180, 270]) if (angleIn(a, sa, ea)) pts.push(P(a));
+      return ptsBox(pts);
+    }
+    case 'ellipse': return ptsBox([[it.cx - it.rx, it.cy - it.ry], [it.cx + it.rx, it.cy + it.ry]]);
+    case 'poly': case 'polyline': return ptsBox(it.pts || []);
+    case 'label': return labelBox(it);
+  }
+  return ptsBox([[it.x || 0, it.y || 0]]);
+}
+const bbInside = (a, r) => a.x1 >= r.x1 && a.x2 <= r.x2 && a.y1 >= r.y1 && a.y2 <= r.y2;
+const bbTouch  = (a, r) => a.x1 <= r.x2 && a.x2 >= r.x1 && a.y1 <= r.y2 && a.y2 >= r.y1;
+/* quem a caixa pega: `inteiro` = só quem cabe todo (esquerda→direita), senão quem encosta
+   (direita→esquerda) — a mesma regra do Altium e da vista Esquema. rect pode vir invertido. */
+function itemsInBox(part, rect, inteiro) {
+  const n = { x1: Math.min(rect.x1, rect.x2), y1: Math.min(rect.y1, rect.y2), x2: Math.max(rect.x1, rect.x2), y2: Math.max(rect.y1, rect.y2) };
+  const out = [];
+  (part.pins || []).forEach((p, i) => { const b = itemBBox(p); if (inteiro ? bbInside(b, n) : bbTouch(b, n)) out.push({ kind: 'pin', idx: i }); });
+  (part.graphics || []).forEach((g, i) => { const b = itemBBox(g); if (inteiro ? bbInside(b, n) : bbTouch(b, n)) out.push({ kind: 'g', idx: i }); });
+  return out;
+}
+const selHasIn = (sel, kind, idx) => (sel || []).some(s => s.kind === kind && s.idx === idx);
+/* move os itens de `sel`; pinos podem levar um delta próprio (o passo de pino é outro) */
+function moveItems(part, sel, dx, dy, pdx, pdy) {
+  const px = pdx == null ? dx : pdx, py = pdy == null ? dy : pdy;
+  return {
+    pins: (part.pins || []).map((p, i) => selHasIn(sel, 'pin', i) ? moveItem(p, px, py) : clone(p)),
+    graphics: (part.graphics || []).map((g, i) => selHasIn(sel, 'g', i) ? moveItem(g, dx, dy) : clone(g)),
+  };
+}
+function deleteItems(part, sel) {
+  return {
+    pins: (part.pins || []).filter((p, i) => !selHasIn(sel, 'pin', i)).map(clone),
+    graphics: (part.graphics || []).filter((g, i) => !selHasIn(sel, 'g', i)).map(clone),
+  };
+}
+/* cópias entram no fim (os índices de quem já estava não mudam) e viram a nova seleção;
+   pino copiado ganha o próximo número livre — dois pinos "1" não servem para nada */
+function duplicateItems(part, sel, dx, dy, pdx, pdy) {
+  const px = pdx == null ? dx : pdx, py = pdy == null ? dy : pdy;
+  const pins = (part.pins || []).map(clone), graphics = (part.graphics || []).map(clone), selection = [];
+  (part.pins || []).forEach((p, i) => { if (!selHasIn(sel, 'pin', i)) return; const c = moveItem(p, px, py); c.num = nextPinNum(pins); selection.push({ kind: 'pin', idx: pins.length }); pins.push(c); });
+  (part.graphics || []).forEach((g, i) => { if (!selHasIn(sel, 'g', i)) return; selection.push({ kind: 'g', idx: graphics.length }); graphics.push(moveItem(g, dx, dy)); });
+  return { part: { pins, graphics }, selection };
+}
+
 const pure = { snap, pinHot, pinSnapOf, pinsOffGrid, segDist, pointInPoly, angleIn, labelBox, hitTest, hitGraphic,
                moveItem, moveVertex, rotateAll, mirrorAll, bbox, serializeSymbol, applyLibSymbol, nextPinNum,
-               cleanPin, cleanGraphic, normW, normArc, mil10, PIN_TYPES, WIDTHS };
+               cleanPin, cleanGraphic, normW, normArc, mil10, PIN_TYPES, WIDTHS,
+               itemBBox, itemsInBox, moveItems, deleteItems, duplicateItems };
 
 /* ═══════════════════════ estado do painel (fora do DOM) ═══════════════════════ */
 
 const SNAPS = [10, 25, 50, 100];
 const SEP = String.fromCharCode(1);   /* separador das chaves de "o que mudou" — nunca aparece num nome */
+/* ícones: traços simples em SVG inline (16×16, currentColor) — sem emoji nem fonte de ícone.
+   'M…' = path; c:cx,cy,r = círculo; e:cx,cy,rx,ry = elipse; r:x,y,w,h = retângulo; '|' separa */
+const ICONS = {
+  select: 'M3 2 L3 12.5 L6.2 9.8 L8.4 14 L10.4 13 L8.2 8.8 L12.2 8.4 Z',
+  line: 'M3 13 L13 3',
+  rect: 'r:2.5,3.5,11,9',
+  polyline: 'M2 12 L6 4 L10 10 L14 3',
+  poly: 'M8 2 L14 6.5 L11.7 13.5 L4.3 13.5 L2 6.5 Z',
+  arc: 'M3 13 A10 10 0 0 1 13 3',
+  ellipse: 'e:8,8,6.5,4.5',
+  label: 'M3 3.5 H13 M8 3.5 V13',
+  pin: 'M2 8 H10|c:12,8,2',
+  delete: 'M3 4.5 H13 M6.5 4.5 V3 H9.5 V4.5 M4.5 4.5 L5.2 13.5 H10.8 L11.5 4.5 M7 7 V11 M9 7 V11',
+  undo: 'M3 7 H10 A3.5 3.5 0 0 1 10 14 H7 M6 4 L3 7 L6 10',
+  redo: 'M13 7 H6 A3.5 3.5 0 0 0 6 14 H9 M10 4 L13 7 L10 10',
+  rotate: 'M13 8 A5 5 0 1 1 10.5 3.7 M10.5 1.2 V3.7 H13',
+  mirror: 'M8 2 V14 M6 5 L2 8 L6 11 M10 5 L14 8 L10 11',
+  fit: 'M2 6 V2 H6 M10 2 H14 V6 M14 10 V14 H10 M6 14 H2 V10',
+  grid: 'M5.5 2 V14 M10.5 2 V14 M2 5.5 H14 M2 10.5 H14',
+};
 const TOOLS = [
-  ['select', 'Sel', 'V', 'selecionar / mover (V, Esc)'],
-  ['line', 'Lin', 'L', 'linha (L)'],
-  ['rect', 'Ret', 'R', 'retângulo (R)'],
-  ['polyline', 'Pol', 'P', 'polilinha (P) — duplo clique, botão direito ou Enter fecha'],
-  ['poly', 'Plg', 'G', 'polígono (G) — duplo clique, botão direito ou Enter fecha'],
-  ['arc', 'Arc', 'A', 'arco / círculo (A): centro, depois raio; sa/ea na ficha'],
-  ['ellipse', 'Eli', 'E', 'elipse (E): centro, depois canto'],
-  ['label', 'Txt', 'T', 'texto (T)'],
-  ['pin', 'Pin', 'N', 'pino (N) — R gira durante a colocação'],
-  ['delete', 'Exc', 'Del', 'excluir o que clicar (Delete apaga a seleção)'],
+  ['select', 'Selecionar (V, Esc) — arrastar move; em área vazia desenha a caixa de seleção'],
+  ['line', 'Linha (L)'],
+  ['rect', 'Retângulo (R)'],
+  ['polyline', 'Polilinha (P) — duplo clique, botão direito ou Enter fecha'],
+  ['poly', 'Polígono (G) — duplo clique, botão direito ou Enter fecha'],
+  ['arc', 'Arco / círculo (A): centro, depois raio; sa/ea na ficha'],
+  ['ellipse', 'Elipse (E): centro, depois canto'],
+  ['label', 'Texto (T)'],
+  ['pin', 'Pino (N) — R gira durante a colocação'],
+  ['delete', 'Excluir o que clicar (Delete apaga a seleção)'],
 ];
+/* selection: lista de {kind:'pin'|'g', idx} — vai inteira para o undo, então nada de Set */
 const ST = {
-  sel: null, part: 1, tool: 'select', selection: null, undo: [], redo: [], draft: null, dirty: false,
+  sel: null, part: 1, tool: 'select', selection: [], undo: [], redo: [], draft: null, dirty: false,
   q: '', kind: 'all', libQ: '', libSel: null,
   snap: 100, grid: true, draw: null, mouse: null, pinRot: 0, note: '', fitPending: false,
-  drag: null, saved: new Set(),   /* salvos nesta sessão; "modificado" = salvo ou o aberto com edição */
-  saving: false,                  /* POST /save em voo: o botão fica travado mesmo que a ficha seja refeita */
+  saved: new Set(),   /* salvos nesta sessão; "modificado" = salvo ou o aberto com edição */
+  saving: false,      /* POST /save em voo: o botão fica travado mesmo que a ficha seja refeita */
+  cam: null,          /* o {scale,cx,cy} da câmera, para quem quer conferir o pan por fora */
+  box: null,          /* caixa de seleção em curso (mundo) */
+  gesto: null,        /* gesto do botão esquerdo em curso */
 };
 /* schlibErro / symlibMissing: carga que falhou fica como null (não como lista vazia) para o
    próximo render() tentar de novo — senão um 404 vira "0 símbolos" até o F5 */
 const DATA = { schlib: null, symlib: null, loading: null, libLoading: null, bust: 0, schlibErro: '', symlibMissing: false };
-let O = null;      /* opts do último render: root, toast, onSaved... */
+let O = null;      /* opts do último render: root, toast, onSaved, splits... */
 let UI = null;     /* nós do DOM criados uma vez */
 let CAM = null;
 
@@ -348,17 +442,28 @@ function curPart() {
   if (!p.pins) p.pins = []; if (!p.graphics) p.graphics = [];
   return p;
 }
-function selItem() {
-  const p = curPart(), s = ST.selection; if (!p || !s) return null;
-  return s.kind === 'pin' ? (p.pins[s.idx] || null) : (p.graphics[s.idx] || null);
+const selKey = s => s.kind + ':' + s.idx;
+const selHas = h => selHasIn(ST.selection, h.kind, h.idx);
+function selAdd(h) { if (!selHas(h)) ST.selection.push({ kind: h.kind, idx: h.idx }); }
+function selDel(h) { ST.selection = ST.selection.filter(s => !(s.kind === h.kind && s.idx === h.idx)); }
+function selClear() { ST.selection = []; }
+function itemOf(p, s) { return s.kind === 'pin' ? (p.pins[s.idx] || null) : (p.graphics[s.idx] || null); }
+/* a seleção com os itens de verdade; entradas que apontam para fora (item apagado) caem */
+function selItems() {
+  const p = curPart(); if (!p) return [];
+  return ST.selection.map(s => ({ kind: s.kind, idx: s.idx, item: itemOf(p, s) })).filter(x => x.item);
 }
-function setItem(item) {
-  const p = curPart(), s = ST.selection; if (!p || !s) return;
+const selOnly = () => (ST.selection.length === 1 ? ST.selection[0] : null);
+function selItem() { const l = selItems(); return l.length === 1 ? l[0].item : null; }
+function setItem(s, item) {
+  const p = curPart(); if (!p || !s) return;
   if (s.kind === 'pin') p.pins[s.idx] = item; else p.graphics[s.idx] = item;
 }
-/* a descrição entra no snapshot porque a ficha a edita pelo mesmo undo dos gráficos */
+function pruneSel() { const p = curPart(); ST.selection = p ? ST.selection.filter(s => itemOf(p, s)) : []; }
+/* a descrição entra no snapshot porque a ficha a edita pelo mesmo undo dos gráficos; a
+   seleção também — desfazer um Delete devolve os itens já marcados */
 const snapshot = () => ({ part: ST.part, parts: clone(ST.draft.parts), selection: clone(ST.selection), description: ST.draft.description });
-function restore(sn) { ST.draft.parts = sn.parts; ST.part = sn.part; ST.selection = sn.selection; ST.draft.description = sn.description; }
+function restore(sn) { ST.draft.parts = sn.parts; ST.part = sn.part; ST.selection = sn.selection || []; ST.draft.description = sn.description; pruneSel(); }
 function pushUndo() {
   if (!ST.draft) return;
   ST.undo.push(snapshot()); if (ST.undo.length > 200) ST.undo.shift();
@@ -371,28 +476,135 @@ function undo() { if (!ST.undo.length) return; ST.redo.push(snapshot()); restore
 function redo() { if (!ST.redo.length) return; ST.undo.push(snapshot()); restore(ST.redo.pop()); touched(); afterEdit(); }
 function afterEdit() { refreshBar(); refreshAside(); redraw(); }
 
-function openSymbol(name, force) {
+async function openSymbol(name, force) {
   if (ST.sel === name && ST.draft) return;
-  if (ST.dirty && !force && !confirm('Há edição não salva em "' + ST.sel + '". Descartar e abrir "' + name + '"?')) return;
+  if (ST.dirty && !force) {
+    const ok = await confirmar('Há edição não salva em "' + ST.sel + '". Descartar e abrir "' + name + '"?', { title: 'Descartar edição?', ok: 'Descartar', danger: true });
+    if (!ok) return;
+  }
   const s = symByName(name);
   ST.sel = name; ST.draft = s ? clone(s) : null; ST.part = 1;
-  ST.undo = []; ST.redo = []; ST.dirty = false; ST.selection = null; ST.draw = null; ST.note = '';
+  ST.undo = []; ST.redo = []; ST.dirty = false; ST.selection = []; ST.draw = null; ST.note = '';
   ST.fitPending = true;
   refreshAll(); fitSeNecessario();
 }
+
+/* ═══════════════════════ modais no tema do hub ═══════════════════════
+   confirm()/prompt() do navegador chegam em inglês e travam a aba. Aqui é o mesmo backdrop +
+   dialog da casca (#overlay), que devolve Promise; ao fechar sai só o próprio backdrop —
+   esvaziar o #overlay inteiro derrubaria um menu da casca que estivesse aberto por baixo. */
+let modal = null;
+function abreModal(o) {
+  const rootEl = document.getElementById('overlay') || document.body;
+  /* um de cada vez: um segundo pedido com o diálogo aberto (só chega por código) sai como
+     "cancelar" em vez de empilhar dois backdrops que um Esc derrubaria juntos */
+  if (modal && modal.isConnected) return Promise.resolve(o.input ? null : false);
+  return new Promise(resolve => {
+    const antes = document.activeElement;
+    const bd = el('div', 'backdrop center');
+    const d = el('div', 'dialog symed-dlg');
+    d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true');
+    d.append(el('h3', null, o.title));
+    if (o.msg) d.append(el('p', null, o.msg));
+    let inp = null;
+    if (o.input) {
+      const lab = el('label', null, o.input.label);
+      inp = el('input', 'input'); inp.type = 'text'; inp.value = o.input.valor || '';
+      lab.append(inp); d.append(lab);
+    }
+    const act = el('div', 'acts');
+    const bc = el('button', 'btn btn-ghost', o.cancel || 'Cancelar'); bc.type = 'button';
+    const bo = el('button', 'btn ' + (o.danger ? 'btn-danger' : 'btn-primary'), o.ok || 'OK'); bo.type = 'button';
+    act.append(bc, bo); d.append(act); bd.append(d);
+    const nada = inp ? null : false;
+    let feito = false, mo = null;
+    const fecha = v => {
+      if (feito) return; feito = true;
+      document.removeEventListener('keydown', tecla, true);
+      if (mo) mo.disconnect();
+      bd.remove(); modal = null;
+      if (antes && typeof antes.focus === 'function') try { antes.focus(); } catch (e) {}
+      resolve(v);
+    };
+    const confirma = () => fecha(inp ? inp.value : true);
+    /* em captura, parando também os ouvintes irmãos: o Esc não pode chegar ao Esc da casca (que
+       esvazia o #overlay) nem ao do editor. Enter em cima do Cancelar cancela — quem chegou lá
+       por Tab e apertou Enter quis o botão, não o OK. E o Tab roda só dentro do diálogo: atrás
+       do backdrop os botões da página continuam vivos para o teclado */
+    const foco = () => [inp, bc, bo].filter(Boolean);
+    const tecla = e => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); fecha(nada); }
+      else if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); if (document.activeElement === bc) fecha(nada); else confirma(); }
+      else if (e.key === 'Tab') {
+        const f = foco(), n = f.length, i = f.indexOf(document.activeElement);
+        e.preventDefault(); e.stopImmediatePropagation();
+        f[i < 0 ? (e.shiftKey ? n - 1 : 0) : (i + (e.shiftKey ? n - 1 : 1)) % n].focus();
+      }
+    };
+    bc.onclick = () => fecha(nada);
+    bo.onclick = confirma;
+    bd.onclick = e => { if (e.target === bd) fecha(nada); };
+    document.addEventListener('keydown', tecla, true);
+    /* se a casca esvaziar o #overlay por fora (menu da marca, Esc dela), a promessa não fica pendurada */
+    if (typeof MutationObserver === 'function') { mo = new MutationObserver(() => { if (!bd.isConnected) fecha(nada); }); mo.observe(rootEl, { childList: true }); }
+    rootEl.append(bd); modal = bd;
+    (inp || bo).focus(); if (inp) inp.select();
+  });
+}
+async function confirmar(msg, o) { o = o || {}; return !!(await abreModal({ title: o.title || 'Confirmar', msg, ok: o.ok, danger: o.danger })); }
+async function pedirTexto(title, label, valor) { const v = await abreModal({ title, input: { label, valor }, ok: 'OK' }); return v == null ? null : v; }
 
 /* ═══════════════════════ DOM ═══════════════════════ */
 
 const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
 const btn = (cls, txt, on, title) => { const b = el('button', 'btn ' + cls, txt); b.type = 'button'; b.onclick = on; if (title) b.title = title; return b; };
 const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const SVG = 'http://www.w3.org/2000/svg';
+function icon(spec) {
+  const s = document.createElementNS(SVG, 'svg');
+  [['viewBox', '0 0 16 16'], ['width', '16'], ['height', '16'], ['fill', 'none'], ['stroke', 'currentColor'],
+   ['stroke-width', '1.6'], ['stroke-linecap', 'round'], ['stroke-linejoin', 'round'], ['aria-hidden', 'true']].forEach(([k, v]) => s.setAttribute(k, v));
+  for (const part of spec.split('|')) {
+    const m = part.match(/^([cer]):(.+)$/);
+    let n;
+    if (!m) { n = document.createElementNS(SVG, 'path'); n.setAttribute('d', part); }
+    else {
+      const v = m[2].split(',');
+      if (m[1] === 'c') { n = document.createElementNS(SVG, 'circle'); n.setAttribute('cx', v[0]); n.setAttribute('cy', v[1]); n.setAttribute('r', v[2]); }
+      else if (m[1] === 'e') { n = document.createElementNS(SVG, 'ellipse'); n.setAttribute('cx', v[0]); n.setAttribute('cy', v[1]); n.setAttribute('rx', v[2]); n.setAttribute('ry', v[3]); }
+      else { n = document.createElementNS(SVG, 'rect'); n.setAttribute('x', v[0]); n.setAttribute('y', v[1]); n.setAttribute('width', v[2]); n.setAttribute('height', v[3]); }
+    }
+    s.append(n);
+  }
+  return s;
+}
+const ibtn = (ic, title, on) => { const b = el('button', 'symed-ib'); b.type = 'button'; b.title = title; b.append(icon(ICONS[ic])); b.onclick = on; return b; };
+
+/* a caixa de ferramentas mora no topo da ficha (aside) e nasce uma vez: a ficha é refeita a
+   cada seleção, mas só reencaixa este nó */
+function buildToolbox() {
+  const box = el('div', 'symed-toolbox');
+  box.append(el('div', 'kicker', 'ferramentas'));
+  UI.tools = el('div', 'symed-tb');
+  TOOLS.forEach(([id, title]) => { const b = ibtn(id, title, () => setTool(id)); b.dataset.tool = id; UI.tools.append(b); });
+  UI.acts = el('div', 'symed-tb');
+  UI.bUndo = ibtn('undo', 'Desfazer (Ctrl+Z)', undo);
+  UI.bRedo = ibtn('redo', 'Refazer (Ctrl+Y)', redo);
+  UI.bRot = ibtn('rotate', 'Girar tudo 90° anti-horário (Ctrl+R)', girarTudo);
+  UI.bMir = ibtn('mirror', 'Espelhar tudo em X (Ctrl+M)', espelharTudo);
+  UI.bFit = ibtn('fit', 'Enquadrar o símbolo (F)', () => fit());
+  UI.bGrid = ibtn('grid', 'Grade', () => { ST.grid = !ST.grid; refreshBar(); redraw(); });
+  UI.acts.append(UI.bUndo, UI.bRedo, UI.bRot, UI.bMir, UI.bFit, UI.bGrid);
+  box.append(UI.tools, UI.acts);
+  return box;
+}
 
 function build(rootEl) {
   UI = { root: rootEl };
   rootEl.textContent = '';
-  const grid = el('div', 'lib-grid symed-grid');
+  const grid = el('div', 'symed-grid');
 
-  /* ── esquerda: busca · recorte · resumo · lista ── */
+  /* ── esquerda: busca · recorte · kicker · resumo · lista ── */
   const left = el('div', 'lib-left');
   const bar = el('div', 'lib-bar');
   UI.q = el('input', 'input'); UI.q.type = 'text'; UI.q.placeholder = 'Buscar símbolo…'; UI.q.value = ST.q;
@@ -401,49 +613,34 @@ function build(rootEl) {
   bar.append(UI.q, UI.seg);
   UI.sum = el('div', 'lib-sum');
   UI.list = el('div', 'scroll lib-list');
-  left.append(bar, UI.sum, UI.list);
+  left.append(bar, el('div', 'kicker symed-kicker', 'componentes do espelho do Altium'), UI.sum, UI.list);
+
+  const split = lado => { const s = el('div', 'split'); s.dataset.split = lado; s.title = 'arraste para redimensionar · duplo clique fecha/abre'; return s; };
 
   /* ── meio: barra · canvas · rodapé · biblioteca de símbolos ── */
   const mid = el('div', 'symed-mid');
   const cb = el('div', 'canvas-bar');
   UI.name = el('span', 'meta symed-name', '—');
   UI.partSel = el('select', 'input'); UI.partSel.hidden = true; UI.partSel.title = 'parte do símbolo';
-  UI.partSel.onchange = () => { ST.part = parseInt(UI.partSel.value, 10) || 1; ST.selection = null; ST.draw = null; ST.fitPending = true; refreshAll(); fitSeNecessario(); };
-  UI.tools = el('div', 'seg symed-tools');
-  TOOLS.forEach(([id, rot, key, title]) => {
-    const b = el('button', null, rot); b.type = 'button'; b.title = title; b.dataset.tool = id;
-    b.append(el('span', 'n', key));
-    b.onclick = () => setTool(id);
-    UI.tools.append(b);
-  });
-  cb.append(el('span', 'ttl', 'editor'), UI.name, UI.partSel, UI.tools);
+  UI.partSel.onchange = () => { ST.part = parseInt(UI.partSel.value, 10) || 1; ST.selection = []; ST.draw = null; ST.fitPending = true; refreshAll(); fitSeNecessario(); };
+  cb.append(el('span', 'ttl', 'editor'), UI.name, UI.partSel);
 
   UI.vp = el('div', 'viewport sheet symed-vp');
   UI.cv = el('canvas');
   UI.hint = el('div', 'hint');
   UI.vp.append(UI.cv, UI.hint);
-  UI.cv.addEventListener('contextmenu', e => { e.preventDefault(); if (ST.draw) finishDraw(); });
+  hookMouse();
   UI.cv.addEventListener('dblclick', e => { e.preventDefault(); if (ST.draw) { descartaJitter(); finishDraw(); } });
 
   const foot = el('div', 'symed-foot');
   UI.coord = el('span', null, 'x — · y — mil');
   UI.status2 = el('span', null, '');
-  /* as ações que valem para o símbolo inteiro moram no rodapé, para a barra de cima
-     caber numa linha só com as ferramentas */
   const fr = el('div', 'right');
-  const acts = el('div', 'seg');
-  const act = (rot, on, title) => { const b = el('button', null, rot); b.type = 'button'; b.title = title; b.onclick = on; acts.append(b); return b; };
-  UI.bUndo = act('↶', undo, 'desfazer (Ctrl+Z)');
-  UI.bRedo = act('↷', redo, 'refazer (Ctrl+Y)');
-  act('⟲ 90°', girarTudo, 'girar tudo 90° anti-horário (Ctrl+R)');
-  act('⇄', espelharTudo, 'espelhar tudo em X (Ctrl+M)');
-  act('ajustar', () => fit(), 'enquadrar o símbolo (F)');
-  UI.bGrid = act('grade', () => { ST.grid = !ST.grid; refreshBar(); redraw(); }, 'mostrar / esconder a grade');
   fr.append(el('span', null, 'snap'));
   UI.snapSel = el('select', 'input');
   SNAPS.forEach(s => { const o = el('option', null, s + ' mil'); o.value = String(s); if (s === ST.snap) o.selected = true; UI.snapSel.append(o); });
   UI.snapSel.onchange = () => { ST.snap = parseInt(UI.snapSel.value, 10) || 100; refreshBar(); };
-  fr.append(UI.snapSel, acts);
+  fr.append(UI.snapSel);
   foot.append(UI.coord, UI.status2, fr);
 
   const lb = el('div', 'symed-libbar');
@@ -460,16 +657,24 @@ function build(rootEl) {
   UI.tiles = el('div', 'symed-tiles');
   mid.append(cb, UI.vp, foot, lb, UI.tiles);
 
-  /* ── direita: ficha ── */
+  /* ── direita: ferramentas + ficha ── */
   UI.aside = el('aside', 'symed-aside');
+  UI.toolbox = buildToolbox();
 
-  grid.append(left, mid, UI.aside);
+  grid.append(left, split('l'), mid, split('r'), UI.aside);
   rootEl.append(grid);
 
-  CAM = HubDraw.mkCamera(UI.cv, drawWorld, {
-    bg: tok('--sheet') || HubDraw.SCH.sheet,
-    onDragStart: dragStart, onDrag: dragMove, onDragEnd: dragEnd, onClick: click, onMove: move,
-  });
+  /* a câmera só depois dos ouvintes de captura do mouse (hookMouse): o esquerdo tem de parar
+     antes de chegar ao arrasto dela */
+  CAM = HubDraw.mkCamera(UI.cv, drawWorld, { bg: tok('--sheet') || HubDraw.SCH.sheet, onMove: move });
+  ST.cam = CAM.cam;
+  /* divisórias como nas abas Laser e BOM: o mkSplits da casca lê o DOM na criação, por isso
+     só agora. Sem a casca (render solto) o painel abre igual, só sem arrasto. */
+  UI.splits = (O && typeof O.splits === 'function') ? O.splits({
+    key: 'altiumhub.symed.panes', grid: '.symed-grid',
+    lados: { l: { v: '--symed-l', sel: '.symed-grid > .lib-left' }, r: { v: '--symed-r', sel: '.symed-grid > aside' } },
+    onResize: () => { if (CAM) CAM.resize(); },
+  }) : null;
   /* miniaturas só quando aparecem: 400 canvases de uma vez travam a aba */
   UI.io = typeof IntersectionObserver === 'function'
     ? new IntersectionObserver(ents => ents.forEach(e => { if (e.isIntersecting) drawTile(e.target); }), { root: UI.tiles })
@@ -528,6 +733,10 @@ function refreshList() {
   UI.list.append(frag);
 }
 
+function cursorPadrao() {
+  if (!UI) return;
+  UI.cv.style.cursor = !ST.draft ? 'default' : ST.tool === 'select' ? 'default' : ST.tool === 'delete' ? 'pointer' : 'crosshair';
+}
 function refreshBar() {
   if (!UI) return;
   const d = ST.draft, p = curPart();
@@ -540,10 +749,12 @@ function refreshBar() {
   }
   UI.tools.querySelectorAll('button').forEach(b => { b.setAttribute('aria-pressed', String(b.dataset.tool === ST.tool)); b.disabled = !d; });
   UI.bUndo.disabled = !ST.undo.length; UI.bRedo.disabled = !ST.redo.length;
+  UI.bRot.disabled = UI.bMir.disabled = UI.bFit.disabled = !d;
   UI.bGrid.setAttribute('aria-pressed', String(ST.grid));
+  UI.bGrid.title = 'Grade (' + (ST.grid ? 'ligada' : 'desligada') + ')';
   UI.hint.textContent = !DATA.schlib ? (DATA.schlibErro || 'carregando o espelho…') : !d ? 'escolha um símbolo na lista'
     : (!p.graphics.length && !p.pins.length ? 'parte vazia — desenhe, ou aplique um corpo da biblioteca' : '');
-  UI.cv.style.cursor = !d ? 'default' : ST.tool === 'select' ? 'default' : ST.tool === 'delete' ? 'pointer' : 'crosshair';
+  if (!panning) cursorPadrao();
   UI.status2.textContent = ST.draw ? drawHint() : (ST.tool === 'pin' ? 'pino a ' + ST.pinRot + '° — R gira' : '');
 }
 function drawHint() {
@@ -559,6 +770,7 @@ function drawHint() {
 function refreshAside() {
   if (!UI) return;
   const a = UI.aside; a.textContent = '';
+  a.append(UI.toolbox);
   const d = ST.draft;
   const p = el('p'); p.style.cssText = 'font-size:12px;color:var(--text-3);margin:6px 0 12px;line-height:1.5';
   if (!d) {
@@ -599,16 +811,21 @@ function refreshAside() {
     + ' — ao salvar vai arredondado (o Altium só guarda 10 mil no pino)'));
   if (ST.note) a.append(el('div', 'symed-note', ST.note));
 
-  /* seleção */
+  /* seleção: um item mostra os campos; vários, só o que vale para o grupo */
   a.append(el('div', 'kicker', 'seleção'));
-  const it = selItem();
-  if (!it) { const q = el('p', null, 'clique num pino ou gráfico do canvas'); q.style.cssText = 'font-size:12px;color:var(--text-4);margin:6px 0 10px'; a.append(q); }
-  else a.append(fieldsFor(it));
-
-  const acts = el('div', 'symed-acts');
-  acts.append(btn('btn-secondary btn-sm', 'Desfazer', undo), btn('btn-secondary btn-sm', 'Refazer', redo));
-  if (it) acts.append(btn('btn-secondary btn-sm', 'Excluir item', deleteSelection));
-  a.append(acts);
+  const itens = selItems(), it = itens.length === 1 ? itens[0].item : null;
+  if (it) a.append(fieldsFor(it));
+  else {
+    const q = el('p', null, itens.length ? itens.length + ' itens selecionados — Delete apaga, setas empurram, Ctrl+D duplica'
+                                        : 'clique num pino ou gráfico do canvas; arraste em área vazia para a caixa de seleção');
+    q.style.cssText = 'font-size:12px;color:var(--text-4);margin:6px 0 10px;line-height:1.45'; a.append(q);
+  }
+  if (itens.length) {
+    const acts = el('div', 'symed-acts');
+    acts.append(btn('btn-secondary btn-sm', 'Duplicar', duplicarSelecao, 'Ctrl+D — cópia deslocada um passo'),
+                btn('btn-secondary btn-sm', itens.length > 1 ? 'Excluir ' + itens.length + ' itens' : 'Excluir item', deleteSelection, 'Delete'));
+    a.append(acts);
+  }
 
   /* salvar */
   const sv = el('div', 'symed-save');
@@ -629,7 +846,15 @@ function setStatus(msg, kind) { UI.statusMsg = msg; UI.statusKind = kind || ''; 
 /* campos editáveis do item selecionado; cada mudança passa pelo undo */
 function fieldsFor(it) {
   const box = el('div', 'symed-fields');
-  const apply = fn => { pushUndo(); const o = clone(selItem()); fn(o); setItem(o); touched(); refreshBar(); refreshAside(); redraw(); };
+  /* o alvo é o item desta ficha, fixado na construção: o change do <input> só dispara no blur,
+     e um mousedown no canvas já trocou a seleção antes disso — resolver por selOnly() na hora
+     mandaria a edição para o item recém-clicado */
+  const alvo = selOnly();
+  const apply = fn => {
+    const p = curPart();
+    if (!alvo || !p || itemOf(p, alvo) !== it) return;
+    pushUndo(); const o = clone(it); fn(o); setItem(alvo, o); touched(); refreshBar(); refreshAside(); redraw();
+  };
   const F = (rot, val, on, o) => {
     const l = el('label', null, rot);
     let inp;
@@ -789,26 +1014,47 @@ function drawWorld(ctx, cam) {
       HubDraw.worldText(ctx, pin.name, pin.x - d[0]*15, pin.y - d[1]*15, 45, vert ? 90 : 0, HubDraw.SCH.body, align);
     }
   }
-  const it = selItem();
-  if (it) drawHL(ctx, it, px);
+  const itens = selItems();
+  for (const s of itens) drawHL(ctx, s.item, px);
+  drawSel(ctx, itens, px);
   if (ST.draw) drawRubber(ctx, px);
 }
+/* o item marcado, retraçado na cor de destaque — fino: quem diz "selecionado" são as
+   bordinhas do drawSel, o traço só mostra qual forma é */
 function drawHL(ctx, it, px) {
   const hl = HubDraw.SCH.hl;
   ctx.save();
   if (it.g == null) {
     const h = pinHot(it);
-    ctx.strokeStyle = hl; ctx.lineWidth = 4 + 5 * px; ctx.lineCap = 'round';
+    ctx.strokeStyle = hl; ctx.lineWidth = 2 + 2 * px; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(it.x, it.y); ctx.lineTo(h.x, h.y); ctx.stroke();
-    ctx.fillStyle = hl; ctx.beginPath(); ctx.arc(it.x, it.y, 5 * px, 0, 2*Math.PI); ctx.fill();
-  } else if (it.g === 'label') {
-    const b = labelBox(it);
-    ctx.strokeStyle = hl; ctx.lineWidth = 1.5 * px; ctx.setLineDash([6*px, 4*px]);
-    ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
-  } else {
-    const g = clone(it); g.w = (g.w || 6) + 5 * px; g.solid = false;
+  } else if (it.g !== 'label') {
+    const g = clone(it); g.solid = false;          /* mesma largura, só a cor muda */
     HubDraw.drawSymbolPart(ctx, { graphics: [g] }, { stroke: hl });
-    if (g.pts) { ctx.fillStyle = hl; g.pts.forEach(pt => { ctx.beginPath(); ctx.rect(pt[0] - 4*px, pt[1] - 4*px, 8*px, 8*px); ctx.fill(); }); }
+  }
+  ctx.restore();
+}
+/* as bordinhas, como na vista Esquema: caixa tracejada com alças nos cantos em cada item
+   marcado (nas polilinhas, também em cada vértice) e a caixa de seleção enquanto é arrastada */
+function drawSel(ctx, itens, px) {
+  const hl = HubDraw.SCH.hl, hs = 3.5 * px, m = 6 * px;
+  ctx.save();
+  for (const s of itens) {
+    const bb = itemBBox(s.item);
+    const x = bb.x1 - m, y = bb.y1 - m, w = (bb.x2 - bb.x1) + 2*m, h = (bb.y2 - bb.y1) + 2*m;
+    ctx.strokeStyle = hl; ctx.lineWidth = 1.5 * px; ctx.setLineDash([6 * px, 4 * px]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+    ctx.fillStyle = hl;
+    for (const [cx, cy] of [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) ctx.fillRect(cx - hs, cy - hs, 2*hs, 2*hs);
+    if (s.item.pts) for (const p of s.item.pts) ctx.fillRect(p[0] - hs, p[1] - hs, 2*hs, 2*hs);
+  }
+  if (ST.box) {
+    const r = ST.box;
+    ctx.fillStyle = 'rgba(255,140,0,0.10)'; ctx.strokeStyle = hl; ctx.lineWidth = px;
+    if (r.x2 < r.x1) ctx.setLineDash([5 * px, 4 * px]);     /* direita→esquerda: "quem encosta" */
+    ctx.fillRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
+    ctx.strokeRect(r.x1, r.y1, r.x2 - r.x1, r.y2 - r.y1);
   }
   ctx.restore();
 }
@@ -829,75 +1075,160 @@ function drawRubber(ctx, px) {
   ctx.restore();
 }
 
-/* ═══════════════════════ mouse ═══════════════════════ */
+/* ═══════════════════════ mouse: esquerdo seleciona e move, direito arrasta a tela ═══════════════════════
+   O mkCamera (hub-draw.js) arrasta a tela com QUALQUER botão e não sabe de seleção. Em vez
+   de mexer nele — e mudar junto o PCB, as previews da Biblioteca e o laser —, os eventos do
+   botão esquerdo são interceptados aqui: ouvintes de CAPTURA, registrados ANTES da câmera
+   existir, que param o evento ali (stopImmediatePropagation). O direito e o do meio passam
+   direto e viram o pan de sempre; a roda continua sendo o zoom da câmera. É a mesma receita
+   da vista Esquema (schframe.js). */
+let lastDown = null;        /* o que o último mousedown acertou, para o Shift+clique saber se tira */
+let swallowClick = false;   /* o click que fecha um arrasto não é um clique */
+let panning = false;
+let rightDown = null;       /* onde o direito desceu: parado fecha a polilinha, arrastado só pana */
+let windowHooked = false;
 
 const stepFor = kind => kind === 'pin' ? pinSnapOf(ST.snap) : ST.snap;
 const snapPt = (w, kind) => { const s = stepFor(kind); return { x: snap(w.x, s), y: snap(w.y, s) }; };
 const tol = () => Math.max(8, 8 / (CAM ? CAM.cam.scale : 1));
+function worldOf(e) { const r = UI.cv.getBoundingClientRect(); return CAM.toWorld(e.clientX - r.left, e.clientY - r.top); }
 
-function dragStart(w) {
-  if (!ST.draft || ST.tool !== 'select') return false;
-  const p = curPart();
-  const h = hitTest(p, w.x, w.y, tol());
-  if (!h) return false;
-  ST.selection = { kind: h.kind, idx: h.idx };
-  const item = selItem();
-  ST.drag = { start: w, orig: clone(item), vertex: h.vertex, snap: snapshot() };
-  refreshAside(); redraw();
-  return true;
+function hookMouse() {
+  const cv = UI.cv;
+  cv.addEventListener('mousedown', e => {
+    if (e.button !== 0) { panning = true; rightDown = { x: e.clientX, y: e.clientY }; cv.style.cursor = 'grabbing'; return; }
+    e.stopImmediatePropagation();
+    leftDown(e);
+  }, true);
+  cv.addEventListener('click', e => { e.stopImmediatePropagation(); leftClick(e); }, true);
+  cv.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    /* clique direito parado (< 3 px) fecha o que está sendo desenhado; arrasto direito foi pan */
+    if (ST.draw && rightDown && Math.hypot(e.clientX - rightDown.x, e.clientY - rightDown.y) < 3) finishDraw();
+    rightDown = null; panning = false; cursorPadrao();
+  });
+  if (windowHooked) return;
+  windowHooked = true;
+  window.addEventListener('mousedown', () => { panning = false; }, true);
+  /* soltar o direito fora do canvas dispararia o menu do navegador em cima do painel */
+  window.addEventListener('contextmenu', e => { if (panning) { e.preventDefault(); panning = false; cursorPadrao(); } });
+  window.addEventListener('mousemove', e => { if (ST.gesto) leftMove(e); });
+  window.addEventListener('mouseup', e => {
+    if (e.button === 0) { leftUp(e); return; }
+    if (e.button !== 2) { panning = false; cursorPadrao(); }   /* o direito espera o contextmenu para zerar */
+  });
+  window.addEventListener('blur', () => {
+    const d = ST.gesto; if (!d) return;
+    if (d.mode === 'move') applyMove(d.base, 0, 0, 0, 0);
+    ST.gesto = null; ST.box = null; redraw();
+  });
 }
-function dragMove(w) {
-  const d = ST.drag; if (!d) return;
-  if (d.vertex != null) {
-    const s = snapPt(w, 'g');
-    setItem(moveVertex(d.orig, d.vertex, s.x, s.y));
-  } else {
-    const st = stepFor(ST.selection.kind);
-    setItem(moveItem(d.orig, snap(w.x - d.start.x, st), snap(w.y - d.start.y, st)));
+/* posição de partida de cada item selecionado: o arrasto é sempre "base + delta", nunca
+   acumulado, para o snap não andar sozinho */
+function baseOf() { return selItems().map(s => ({ kind: s.kind, idx: s.idx, orig: clone(s.item) })); }
+function applyMove(base, dx, dy, pdx, pdy) {
+  for (const b of base) setItem(b, moveItem(b.orig, b.kind === 'pin' ? pdx : dx, b.kind === 'pin' ? pdy : dy));
+}
+function leftDown(e) {
+  swallowClick = false; lastDown = null;
+  /* campo da ficha ainda com foco: o change dele só sairia no blur, depois de a seleção mudar
+     aqui — força o blur agora para a edição cair no item que estava marcado */
+  const ae = document.activeElement;
+  if (ae && UI.aside.contains(ae)) ae.blur();
+  if (!ST.draft || !CAM) return;
+  const w = worldOf(e);
+  if (ST.tool !== 'select') { ST.gesto = { mode: 'none', start: w, moved: false }; return; }
+  const p = curPart(), h = hitTest(p, w.x, w.y, tol());
+  if (!h) {
+    ST.gesto = { mode: 'box', start: w, moved: false, shift: e.shiftKey };
+    lastDown = null;
+    return;
   }
-  redraw();
+  const wasSel = selHas(h);
+  if (!wasSel) { if (!e.shiftKey) selClear(); selAdd(h); }
+  lastDown = { key: selKey(h), wasSel, hit: h };
+  /* vértice de polilinha/polígono só anda sozinho quando o item já estava marcado, sozinho */
+  const vertex = (h.vertex != null && wasSel && ST.selection.length === 1) ? h.vertex : null;
+  ST.gesto = { mode: 'move', start: w, moved: false, base: baseOf(), vertex, alvo: { kind: h.kind, idx: h.idx }, snap: snapshot() };
+  refreshAside(); redraw();
 }
-function dragEnd(moved) {
-  const d = ST.drag; ST.drag = null; if (!d) return;
-  if (!moved) return;
-  ST.undo.push(d.snap); ST.redo.length = 0; touched();
-  afterEdit();
+function leftMove(e) {
+  const d = ST.gesto, w = worldOf(e);
+  const dx = w.x - d.start.x, dy = w.y - d.start.y;
+  if (!d.moved && Math.hypot(dx, dy) * CAM.cam.scale < 3) return;   /* 3 px de folga: clique não vira arrasto */
+  d.moved = true;
+  if (d.mode === 'move') {
+    if (d.vertex != null) { const s = snapPt(w, 'g'); setItem(d.alvo, moveVertex(d.base[0].orig, d.vertex, s.x, s.y)); }
+    else { const g = stepFor('g'), pn = stepFor('pin'); applyMove(d.base, snap(dx, g), snap(dy, g), snap(dx, pn), snap(dy, pn)); }
+    redraw();
+  } else if (d.mode === 'box') { ST.box = { x1: d.start.x, y1: d.start.y, x2: w.x, y2: w.y }; redraw(); }
 }
-function move(w) {
-  ST.mouse = ST.draw ? snapPt(w, ST.draw.tool === 'pin' ? 'pin' : 'g') : w;
-  if (UI) { const s = snapPt(w, ST.tool === 'pin' ? 'pin' : 'g'); UI.coord.textContent = 'x ' + s.x + ' · y ' + s.y + ' mil'; }
-  if (ST.draw) redraw();
+function leftUp() {
+  const d = ST.gesto; if (!d) return;
+  ST.gesto = null;
+  swallowClick = d.moved;
+  if (d.mode === 'move' && d.moved) {
+    /* arrasto que voltou para a mesma grade não é mudança — não entra no undo */
+    const p = curPart();
+    const mudou = d.base.some(b => JSON.stringify(itemOf(p, b)) !== JSON.stringify(b.orig));
+    if (mudou) { ST.undo.push(d.snap); ST.redo.length = 0; touched(); afterEdit(); } else redraw();
+    return;
+  }
+  if (d.mode === 'box' && d.moved && ST.box) {
+    const r = ST.box; ST.box = null;
+    /* esquerda→direita pega só quem cabe inteiro; direita→esquerda pega quem encosta (como no Altium) */
+    if (!d.shift) selClear();
+    for (const h of itemsInBox(curPart(), r, r.x2 >= r.x1)) selAdd(h);
+    refreshAside(); redraw();
+    return;
+  }
+  ST.box = null; redraw();
 }
-function click(w, e) {
-  if (!ST.draft) return;
-  const p = curPart();
+function leftClick(e) {
+  if (swallowClick) { swallowClick = false; return; }
+  if (!ST.draft || !CAM) return;
+  const w = worldOf(e), p = curPart();
   if (ST.tool === 'select') {
-    const h = hitTest(p, w.x, w.y, tol());
-    ST.selection = h ? { kind: h.kind, idx: h.idx } : null;
+    /* vale o que o mousedown acertou: refazer o hitTest no mouseup, um ou dois px adiante,
+       erraria um traço fino e desmarcaria o que o mousedown acabou de marcar */
+    const h = lastDown ? lastDown.hit : null;
+    if (!h) { if (!e.shiftKey) selClear(); refreshAside(); redraw(); return; }
+    /* Shift em cima de quem já estava marcado tira da seleção */
+    if (e.shiftKey && lastDown && lastDown.key === selKey(h) && lastDown.wasSel) selDel(h);
     refreshAside(); redraw();
     return;
   }
   if (ST.tool === 'delete') {
     const h = hitTest(p, w.x, w.y, tol());
     if (!h) return;
-    ST.selection = { kind: h.kind, idx: h.idx };
+    ST.selection = [{ kind: h.kind, idx: h.idx }];
     deleteSelection();
     return;
   }
+  colocar(w, e);
+}
+function move(w) {
+  ST.mouse = ST.draw ? snapPt(w, ST.draw.tool === 'pin' ? 'pin' : 'g') : w;
+  if (UI) { const s = snapPt(w, ST.tool === 'pin' ? 'pin' : 'g'); UI.coord.textContent = 'x ' + s.x + ' · y ' + s.y + ' mil'; }
+  if (ST.draw) redraw();
+}
+/* ferramentas de desenho: o clique põe o ponto */
+async function colocar(w, e) {
+  const p = curPart();
   const s = snapPt(w, ST.tool === 'pin' ? 'pin' : 'g');
   if (ST.tool === 'pin') {
     pushUndo();
     p.pins.push({ num: nextPinNum(p.pins), name: '', x: s.x, y: s.y, len: 100, orient: ST.pinRot, type: 'Passive' });
-    ST.selection = { kind: 'pin', idx: p.pins.length - 1 };
+    ST.selection = [{ kind: 'pin', idx: p.pins.length - 1 }];
     touched(); afterEdit();
     return;
   }
   if (ST.tool === 'label') {
-    const txt = prompt('Texto do rótulo', '');
-    if (txt == null || !txt.trim()) return;
+    const txt = await pedirTexto('Texto', 'Texto do rótulo', '');
+    if (txt == null || !txt.trim() || curPart() !== p) return;
     pushUndo();
     p.graphics.push({ g: 'label', x: s.x, y: s.y, text: txt.trim(), rot: 0, size: 10 });
-    ST.selection = { kind: 'g', idx: p.graphics.length - 1 };
+    ST.selection = [{ kind: 'g', idx: p.graphics.length - 1 }];
     touched(); afterEdit();
     return;
   }
@@ -939,7 +1270,7 @@ function finishDraw() {
   if (!g) { refreshBar(); redraw(); return; }
   pushUndo();
   p.graphics.push(g);
-  ST.selection = { kind: 'g', idx: p.graphics.length - 1 };
+  ST.selection = [{ kind: 'g', idx: p.graphics.length - 1 }];
   touched(); afterEdit();
 }
 function cancelDraw() { if (ST.draw) { ST.draw = null; refreshBar(); redraw(); } }
@@ -948,10 +1279,18 @@ function setTool(id) { ST.tool = id; cancelDraw(); refreshBar(); }
 /* ═══════════════════════ ações ═══════════════════════ */
 
 function deleteSelection() {
-  const p = curPart(), s = ST.selection; if (!p || !s) return;
+  const p = curPart(); if (!p || !ST.selection.length) return;
   pushUndo();
-  (s.kind === 'pin' ? p.pins : p.graphics).splice(s.idx, 1);
-  ST.selection = null; touched(); afterEdit();
+  Object.assign(p, deleteItems(p, ST.selection));
+  selClear(); touched(); afterEdit();
+}
+function duplicarSelecao() {
+  const p = curPart(); if (!p || !ST.selection.length) return;
+  pushUndo();
+  const g = stepFor('g'), pn = stepFor('pin');
+  const r = duplicateItems(p, ST.selection, g, 0 - g, pn, 0 - pn);
+  Object.assign(p, r.part); ST.selection = r.selection;
+  touched(); afterEdit();
 }
 function girarTudo() {
   const p = curPart(); if (!p) return;
@@ -962,9 +1301,9 @@ function espelharTudo() {
   pushUndo(); Object.assign(p, mirrorAll(p)); touched(); afterEdit();
 }
 function nudge(dx, dy) {
-  const it = selItem(); if (!it) return;
-  const st = stepFor(ST.selection.kind);
-  pushUndo(); setItem(moveItem(it, dx * st, dy * st)); touched(); afterEdit();
+  const p = curPart(); if (!p || !ST.selection.length) return;
+  const g = stepFor('g'), pn = stepFor('pin');
+  pushUndo(); Object.assign(p, moveItems(p, ST.selection, dx * g, dy * g, dx * pn, dy * pn)); touched(); afterEdit();
 }
 
 async function salvar() {
@@ -1015,13 +1354,13 @@ function aplicarLib() {
   pushUndo();
   const r = applyLibSymbol(p, s);
   p.pins = r.part.pins; p.graphics = r.part.graphics;
-  ST.note = r.note; ST.selection = null; touched(); afterEdit(); fit();
+  ST.note = r.note; ST.selection = []; touched(); afterEdit(); fit();
 }
 async function adicionarCorpo() {
   const p = curPart(); if (!p || semServidor()) return;
   if (!p.pins.length && !p.graphics.length) { O.toast('a parte está vazia — nada para guardar', 'warn'); return; }
   const sugerido = ST.draft.name.replace(/\[\s*(SMD|PTH)\s*\]/gi, '').replace(/\s+/g, ' ').trim();
-  const name = prompt('Nome do corpo na biblioteca de símbolos', sugerido);
+  const name = await pedirTexto('Guardar corpo na biblioteca', 'Nome do corpo na biblioteca de símbolos', sugerido);
   if (name == null || !name.trim()) return;
   const sym = serializeSymbol({ name, parts: [p] }).parts[0];
   const { status, j } = await api('lib', { op: 'add', symbol: { name: name.trim(), kind: sym.pins.length <= 4 ? 'generico' : 'ci', pins: sym.pins, graphics: sym.graphics } });
@@ -1036,7 +1375,7 @@ async function adicionarCorpo() {
 }
 async function renomearLib() {
   const s = libById(ST.libSel); if (!s || semServidor()) return;
-  const name = prompt('Novo nome', s.name);
+  const name = await pedirTexto('Renomear', 'Novo nome', s.name);
   if (name == null || !name.trim() || name.trim() === s.name) return;
   const { status, j } = await api('lib', { op: 'rename', id: s.id, name: name.trim() });
   if (j && j.ok) { s.name = (j.symbol && j.symbol.name) || name.trim(); libKey = ''; refreshLib(); O.toast('renomeado', 'ok'); return; }
@@ -1044,7 +1383,8 @@ async function renomearLib() {
 }
 async function excluirLib() {
   const s = libById(ST.libSel); if (!s || semServidor()) return;
-  if (!confirm('Excluir "' + s.name + '" da biblioteca de símbolos? Se a extração o encontrar de novo, ele volta.')) return;
+  const ok = await confirmar('Excluir "' + s.name + '" da biblioteca de símbolos? Se a extração o encontrar de novo, ele volta.', { title: 'Excluir da biblioteca', ok: 'Excluir', danger: true });
+  if (!ok) return;
   const { status, j } = await api('lib', { op: 'delete', id: s.id });
   if (j && j.ok) { DATA.symlib.symbols = libSyms().filter(x => x.id !== s.id); ST.libSel = null; refreshLib(); O.toast('excluído', 'ok'); return; }
   O.toast((j && j.error) || ('não excluiu (HTTP ' + status + ')'), 'err');
@@ -1054,7 +1394,7 @@ async function excluirLib() {
 
 function ativo() { return !!(UI && UI.root.isConnected && UI.root.offsetParent !== null); }
 function onKey(e) {
-  if (!ativo()) return;
+  if (!ativo() || modal) return;
   const tg = e.target, tag = tg && tg.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (tg && tg.isContentEditable)) return;
   const k = e.key, K = k.toLowerCase(), ctrl = e.ctrlKey || e.metaKey;
@@ -1063,12 +1403,13 @@ function onKey(e) {
   /* sem símbolo aberto o Ctrl+R continua sendo o reload do navegador */
   if (ctrl && K === 'r' && ST.draft) { e.preventDefault(); girarTudo(); return; }
   if (ctrl && K === 'm' && ST.draft) { e.preventDefault(); espelharTudo(); return; }
+  if (ctrl && K === 'd' && ST.draft) { e.preventDefault(); duplicarSelecao(); return; }
   if (ctrl) return;
-  if (k === 'Escape') { if (ST.draw) cancelDraw(); else if (ST.tool !== 'select') setTool('select'); else { ST.selection = null; refreshAside(); redraw(); } return; }
+  if (k === 'Escape') { if (ST.draw) cancelDraw(); else if (ST.tool !== 'select') setTool('select'); else { selClear(); refreshAside(); redraw(); } return; }
   if (k === 'Enter') { if (ST.draw) { e.preventDefault(); finishDraw(); } return; }
-  if (k === 'Delete' || k === 'Backspace') { if (ST.selection) { e.preventDefault(); deleteSelection(); } return; }
+  if (k === 'Delete' || k === 'Backspace') { if (ST.selection.length) { e.preventDefault(); deleteSelection(); } return; }
   if (k.indexOf('Arrow') === 0) {
-    if (!ST.selection) return;
+    if (!ST.selection.length) return;
     e.preventDefault();
     const m = e.shiftKey ? 10 : 1;
     nudge(k === 'ArrowLeft' ? -m : k === 'ArrowRight' ? m : 0, k === 'ArrowDown' ? -m : k === 'ArrowUp' ? m : 0);
@@ -1090,14 +1431,20 @@ function render(opts) {
   if (!DATA.schlib && !DATA.loading) loadSchlib().then(() => { listKey = ''; refreshAll(); if (ST.sel && !ST.draft) openSymbol(ST.sel, true); });
   if (!DATA.symlib && !DATA.libLoading) loadSymlib().then(() => { libKey = ''; refreshLib(); });
   /* a casca chama render() por troca de idioma, mudança no disco, goTab… se o usuário está
-     digitando na ficha, refazer a aside apagaria o que ainda não passou pelo onchange */
-  const digitando = UI.aside.contains(document.activeElement);
+     digitando na ficha, refazer a aside apagaria o que ainda não passou pelo onchange. Um
+     botão da toolbox com foco não conta: aí a ficha pode e deve acompanhar a seleção */
+  const ae = document.activeElement;
+  const digitando = !!ae && UI.aside.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
   refreshList(); refreshBar(); if (!digitando) refreshAside(); refreshLib();
-  /* o pane acabou de ganhar tamanho: o canvas precisa medir antes de enquadrar */
+  /* as larguras guardadas das colunas, depois o canvas mede e enquadra */
+  if (UI.splits) UI.splits.aplica();
   CAM.resize();
   fitSeNecessario();
 }
 const dirty = () => !!ST.dirty;
+/* ações sem DOM (afterEdit se cala sem UI) — é por aqui que o teste em Node prova que a
+   seleção sobrevive a apagar e desfazer */
+const actions = { deleteSelection, duplicarSelecao, undo, redo, nudge, pushUndo };
 
-return { render, dirty, pure, state: ST };
+return { render, dirty, pure, state: ST, actions, cam: () => (CAM ? CAM.cam : null), confirmar, pedirTexto };
 });

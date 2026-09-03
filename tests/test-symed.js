@@ -213,4 +213,93 @@ assert.strictEqual(P.nextPinNum([{ num: '1' }, { num: '3' }]), '4');
 assert.strictEqual(P.nextPinNum([{ num: 'A1' }, { num: '2' }, { num: ' 7 ' }]), '8', 'A1 não conta; espaço em volta é tolerado');
 assert.strictEqual(P.nextPinNum([{ num: 'K' }]), '1');
 
-console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum)');
+/* ── seleção múltipla: caixa de cada item e quem cai na caixa de seleção ── */
+{
+  assert.deepStrictEqual(P.itemBBox(part.pins[0]), { x1: -200, y1: 0, x2: -100, y2: 0 }, 'pino: do corpo à ponta quente');
+  assert.deepStrictEqual(P.itemBBox(part.graphics[0]), { x1: -100, y1: -40, x2: 100, y2: 40 });
+  const a = P.itemBBox(part.graphics[2]);   /* arco 0–90 em (0,-300) r100: só o quadrante */
+  assert.ok(Math.abs(a.x1 - 0) < 1e-6 && Math.abs(a.x2 - 100) < 1e-6 && Math.abs(a.y1 + 300) < 1e-6 && Math.abs(a.y2 + 200) < 1e-6, JSON.stringify(a));
+  const c = P.itemBBox({ g: 'arc', cx: 10, cy: 10, r: 5, sa: 0, ea: 360 });
+  assert.deepStrictEqual([c.x1, c.y1, c.x2, c.y2].map(Math.round), [5, 5, 15, 15], 'círculo inteiro: cx±r');
+  assert.deepStrictEqual(P.itemBBox(part.graphics[4]), { x1: -500, y1: -500, x2: -400, y2: -400 });
+  /* esquerda→direita só pega quem cabe inteiro: o retângulo; os pinos vazam */
+  assert.deepStrictEqual(P.itemsInBox(part, { x1: -150, y1: 50, x2: 150, y2: -50 }, true), [{ kind: 'g', idx: 0 }]);
+  /* direita→esquerda pega quem encosta: os dois pinos e o retângulo */
+  assert.deepStrictEqual(P.itemsInBox(part, { x1: 150, y1: 50, x2: -150, y2: -50 }, false),
+    [{ kind: 'pin', idx: 0 }, { kind: 'pin', idx: 1 }, { kind: 'g', idx: 0 }]);
+  assert.deepStrictEqual(P.itemsInBox(part, { x1: -50, y1: 190, x2: 50, y2: 210 }, false), [{ kind: 'g', idx: 1 }], 'a linha só por encostar');
+  assert.deepStrictEqual(P.itemsInBox(part, { x1: -50, y1: 190, x2: 50, y2: 210 }, true), [], 'a linha inteira não cabe');
+  assert.deepStrictEqual(P.itemsInBox(part, { x1: 900, y1: 900, x2: 1000, y2: 1000 }, false), [], 'longe de tudo');
+}
+
+/* ── mover vários: só quem está na seleção anda; pino com o passo dele ── */
+{
+  const sel = [{ kind: 'pin', idx: 0 }, { kind: 'g', idx: 0 }, { kind: 'g', idx: 4 }];
+  const m = P.moveItems(part, sel, 25, -25, 100, -100);
+  assert.deepStrictEqual([m.pins[0].x, m.pins[0].y], [0, -100], 'pino andou o passo de pino');
+  assert.deepStrictEqual([m.pins[1].x, m.pins[1].y], [100, 0], 'pino fora da seleção ficou');
+  assert.deepStrictEqual([m.graphics[0].x1, m.graphics[0].y1], [-75, -65]);
+  assert.deepStrictEqual(m.graphics[4].pts[0], [-475, -525]);
+  assert.deepStrictEqual(m.graphics[1], part.graphics[1], 'linha fora da seleção ficou');
+  assert.strictEqual(part.pins[0].x, -100, 'original intacto');
+  const m2 = P.moveItems(part, sel, 10, 10);
+  assert.deepStrictEqual([m2.pins[0].x, m2.pins[0].y], [-90, 10], 'sem passo de pino, vale o mesmo delta');
+}
+
+/* ── apagar e duplicar: índices de quem fica não mudam; cópia vira a nova seleção ── */
+{
+  const d = P.deleteItems(part, [{ kind: 'pin', idx: 0 }, { kind: 'g', idx: 1 }, { kind: 'g', idx: 3 }]);
+  assert.deepStrictEqual(d.pins.map(p => p.num), ['2']);
+  assert.deepStrictEqual(d.graphics.map(g => g.g), ['rect', 'arc', 'polyline']);
+  assert.strictEqual(part.pins.length, 2, 'original intacto');
+  const r = P.duplicateItems(part, [{ kind: 'pin', idx: 0 }, { kind: 'g', idx: 0 }], 100, -100, 100, -100);
+  assert.strictEqual(r.part.pins.length, 3); assert.strictEqual(r.part.graphics.length, 6);
+  assert.deepStrictEqual(r.selection, [{ kind: 'pin', idx: 2 }, { kind: 'g', idx: 5 }], 'a seleção passa a ser as cópias');
+  assert.deepStrictEqual([r.part.pins[2].x, r.part.pins[2].y, r.part.pins[2].num], [0, -100, '3'], 'pino copiado ganha número livre');
+  assert.deepStrictEqual([r.part.graphics[5].x1, r.part.graphics[5].y1], [0, -140]);
+  assert.deepStrictEqual(r.part.graphics[0], part.graphics[0], 'o original fica onde estava');
+}
+
+/* ── a seleção sobrevive a apagar e desfazer (as ações rodam sem DOM) ── */
+{
+  const S = M.state, A = M.actions;
+  const clone = o => JSON.parse(JSON.stringify(o));
+  S.draft = { name: 'T', parts: [Object.assign({ part: 1 }, clone(part))] }; S.part = 1; S.undo = []; S.redo = [];
+  S.selection = [{ kind: 'pin', idx: 0 }, { kind: 'g', idx: 1 }];
+  const antes = clone(S.draft.parts[0]);
+  A.deleteSelection();
+  assert.strictEqual(S.draft.parts[0].pins.length, 1); assert.strictEqual(S.draft.parts[0].graphics.length, 4);
+  assert.deepStrictEqual(S.selection, [], 'apagou: nada marcado');
+  assert.strictEqual(M.dirty(), true);
+  A.undo();
+  assert.deepStrictEqual(S.draft.parts[0], antes, 'desfazer devolve a geometria');
+  assert.deepStrictEqual(S.selection, [{ kind: 'pin', idx: 0 }, { kind: 'g', idx: 1 }], 'e devolve a seleção');
+  A.redo();
+  assert.strictEqual(S.draft.parts[0].pins.length, 1);
+  assert.deepStrictEqual(S.selection, [], 'refazer volta ao estado apagado');
+  A.undo();
+  /* duplicar: seleção passa às cópias; desfazer volta à seleção de antes */
+  A.duplicarSelecao();
+  assert.strictEqual(S.draft.parts[0].pins.length, 3); assert.strictEqual(S.draft.parts[0].graphics.length, 6);
+  assert.deepStrictEqual(S.selection, [{ kind: 'pin', idx: 2 }, { kind: 'g', idx: 5 }]);
+  A.undo();
+  assert.deepStrictEqual(S.draft.parts[0], antes);
+  assert.deepStrictEqual(S.selection, [{ kind: 'pin', idx: 0 }, { kind: 'g', idx: 1 }]);
+  /* empurrar com as setas: um passo de snap (100) para os dois, pino inclusive */
+  S.snap = 100; A.nudge(1, 0);
+  assert.strictEqual(S.draft.parts[0].pins[0].x, 0); assert.strictEqual(S.draft.parts[0].graphics[1].x1, -200);
+  assert.strictEqual(S.draft.parts[0].pins[1].x, 100, 'quem não estava marcado não andou');
+  A.undo();
+  assert.deepStrictEqual(S.draft.parts[0], antes);
+  /* seleção apontando para item que já não existe cai fora ao restaurar */
+  S.selection = [{ kind: 'g', idx: 99 }]; A.pushUndo(); A.undo();
+  assert.deepStrictEqual(S.selection, []);
+  S.draft = null; S.selection = []; S.undo = []; S.redo = []; S.dirty = false;
+}
+
+/* ── os modais existem como função (o navegador prova o resto) ── */
+assert.strictEqual(typeof M.confirmar, 'function');
+assert.strictEqual(typeof M.pedirTexto, 'function');
+assert.strictEqual(M.cam(), null, 'sem canvas não há câmera');
+
+console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum, itemsInBox, moveItems, duplicateItems, seleção × apagar/desfazer)');
