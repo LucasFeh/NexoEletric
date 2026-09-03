@@ -13,7 +13,9 @@ O que foi apurado na biblioteca real e manda no que está escrito aqui:
                        Aqui também, para o registro sair como o Altium escreveria.
   fração              `X=-23|X_Frac=-62206` = -236.2206 mil: o inteiro trunca para o
                        zero e a fração carrega o MESMO sinal (4.783 casos, nenhum de
-                       sinal trocado). Pino binário não tem fração — vai para 10 mil.
+                       sinal trocado). O pino binário só tem o inteiro; a fração dele
+                       mora no stream PinFrac do storage (abaixo) — é assim que a lib
+                       guarda pino a 2 mm (78,74 mil) ou a 10 mm (393,701 mil).
   IndexInSheet         posição 0-based do filho entre TODOS os filhos, pinos inclusive;
                        o designador e o Comment (que ficam no fim) levam -1.
   OwnerIndex           posicional: `45` aponta para o `44`, `46`/`48` para o `45`, pelo
@@ -37,12 +39,24 @@ O que foi apurado na biblioteca real e manda no que está escrito aqui:
                        retângulos); linhas/arcos/polilinhas 16711680; rótulos 8388608.
                        Ao regravar, o componente mantém as cores que já tinha por tipo —
                        inclusive a AUSÊNCIA de cor, que é preto (0) e não "sem paleta".
-  PinFrac/PinTextData  removidos do componente editado — o Altium regenera. Os dos
+  PinFrac              regravado, não descartado: `|HEADER=PinFrac|Weight=N` + N
+                       registros binários `D0` + string pascal do ORDINAL do pino +
+                       uint32 + zlib de 3 int32 (xfrac, yfrac, lenfrac em 1/100000 da
+                       unidade, com sinal — a mesma conta da `_unidade`). É ESPARSO:
+                       Weight conta entradas, não pinos (AD711KN tem 5 pinos, Weight=1,
+                       ordinal 4). O ordinal é a posição do pino entre TODOS os registros
+                       binários de pino do Data, 0-based, contando também os de modo de
+                       exibição > 0 — é como o `sch_leitor._simbolo` conta; a lib não tem
+                       nenhum desses, mas se tiver ele fica e leva a fração antiga junto.
+                       Sem pino com fração o stream não existe, como em 347 dos 404.
+  PinTextData/WideText removidos do componente editado — o Altium regenera. Os dos
                        outros componentes ficam.
   fração das coords    o leitor entrega 3 casas (as da API) e o patch regrava a partir
                        delas: 1 em 4 coordenadas com _Frac volta com a 4ª casa mudada
-                       (<= 0,0005 mil). Só o Data do componente editado; e nada no hub ou
-                       no Altium enxerga 1/20000 da grade.
+                       (<= 0,0005 mil); no PinFrac idem — 649 valores da lib têm 4ª casa,
+                       e a menor fração (1/100000) vira zero. Só o Data e o PinFrac do
+                       componente editado; e nada no hub ou no Altium enxerga 1/20000 da
+                       grade.
   Weight               do FileHeader é a contagem de registros (+1) e NÃO é validado pelo
                        Altium (o escritor do almoxarifado grava outra coisa e abre). Fica
                        como está, por instrução — o índice LibRef/CompDescr/PartCount é
@@ -56,7 +70,9 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
+import zlib
 from collections import OrderedDict
 from datetime import datetime
 
@@ -68,12 +84,14 @@ sys.path.insert(0, BASE)
 import cfbf                                            # noqa: E402
 import schlib_bin as SB                                # noqa: E402
 from schlib_escritor import _uid                       # noqa: E402
+import sch_leitor                                      # noqa: E402
 
 # registros que são desenho/pino e saem do Data para dar lugar à geometria nova (o 3 e
 # os modos de exibição > 0 ficam: veja _e_geometria)
 GEOMETRIA = {'2', '3', '4', '5', '6', '7', '8', '10', '11', '12', '13', '14'}
-# streams do componente que dependem da lista de pinos antiga
-DEPENDEM_DOS_PINOS = ('PinFrac', 'PinTextData', 'PinWideText')
+# streams do componente que descrevem os pinos antigos e que ninguém regrava (o
+# PinFrac também depende deles, mas esse o `aplica` reescreve)
+DEPENDEM_DOS_PINOS = ('PinTextData', 'PinWideText')
 # w em mil -> LineWidth do Altium (0=Smallest .. 3=Large)
 LARGURA = {4: 0, 10: 1, 20: 2, 30: 3}
 TIPOS = ['Input', 'IO', 'Output', 'OpenCollector', 'Passive', 'HiZ', 'OpenEmitter', 'Power']
@@ -141,7 +159,8 @@ def _largura(w):
 
 
 def _mil10(v):
-    """coordenada de pino: o registro binário só tem inteiros de 10 mil"""
+    """coordenada na grade de 10 mil (utilitário; o pino não passa mais por aqui — a
+    fração dele vai para o PinFrac)"""
     return SB.mil(float(v)) * SB.UNIDADE
 
 
@@ -278,10 +297,14 @@ def _bytes_pino(s):
 
 
 def _pino_registro(pin, parte, antigo, altos):
-    """pin schlib-v2 -> (tipo, payload) binário; `antigo` é o dict do pino de mesmo número
-    que estava no arquivo (o que o hub não sabe editar vem dele)"""
-    p = SB.pino(pin.get('num', ''), pin.get('name', ''), float(pin.get('x', 0)), float(pin.get('y', 0)),
-                float(pin.get('len', 100)), _int(pin.get('orient')), pin.get('type', 'Passive'), parte)
+    """pin schlib-v2 -> ((tipo, payload) binário, (xfrac, yfrac, lenfrac)); `antigo` é o
+    dict do pino de mesmo número que estava no arquivo (o que o hub não sabe editar vem
+    dele). O binário leva o inteiro TRUNCADO (o `SB.pino` arredonda, por isso a conta é
+    refeita aqui com a `_unidade`) e a fração vai para o PinFrac."""
+    x, y, comp = (float(pin.get(k, d) or 0) for k, d in (('x', 0), ('y', 0), ('len', 100)))
+    p = SB.pino(pin.get('num', ''), pin.get('name', ''), x, y, comp,
+                _int(pin.get('orient')), pin.get('type', 'Passive'), parte)
+    (p['x'], xf), (p['y'], yf), (p['comprimento'], lf) = _unidade(x), _unidade(y), _unidade(comp)
     p['nome'] = _bytes_pino(pin.get('name', ''))
     p['designador'] = _bytes_pino(pin.get('num', ''))
     rot = p['conglomerado'] & 3
@@ -291,7 +314,29 @@ def _pino_registro(pin, parte, antigo, altos):
         p['conglomerado'] = rot | (antigo['conglomerado'] & CONG_ALTOS)
     else:
         p['conglomerado'] = rot | altos
-    return (SB.BINARIO, SB.escreve_pino(p))
+    return (SB.BINARIO, SB.escreve_pino(p)), (xf, yf, lf)
+
+
+def monta_pinfrac(entradas):
+    """{ordinal: (xfrac, yfrac, lenfrac)} -> bytes do stream PinFrac, no formato apurado
+    no cabeçalho do módulo (o `sch_leitor._le_pinfrac` é o inverso). Sem entradas, None:
+    o stream não é gravado. O ordinal vai como string pascal (1 byte de tamanho + os
+    dígitos): conferido na lib real até 2 dígitos (maior ordinal 29); 3 dígitos seguem
+    a mesma regra, mas ninguém viu o Altium escrever um."""
+    entradas = {k: v for k, v in entradas.items() if any(v)}
+    if not entradas:
+        return None
+    regs = [(SB.TEXTO, SB.escreve_texto(OrderedDict([('HEADER', 'PinFrac'), ('Weight', len(entradas))])))]
+    for ordinal in sorted(entradas):
+        s = str(ordinal).encode('ascii')
+        z = zlib.compress(struct.pack('<iii', *entradas[ordinal]))
+        regs.append((SB.BINARIO, b'\xd0' + bytes([len(s)]) + s + struct.pack('<I', len(z)) + z))
+    return SB.monta(regs)
+
+
+def _e_pino(tipo, pl):
+    """registro binário de pino — o que o leitor conta no ordinal do PinFrac"""
+    return tipo == SB.BINARIO and pl[:1] == b'\x02'
 
 
 # ─── rótulos antigos ──────────────────────────────────────────────────────────
@@ -455,12 +500,15 @@ def _paleta(regs):
 
 
 def simbolo_para_registros(sym_parts, cab, nome='', inicio=0, paleta=None, pinos_antigos=None,
-                           avisos=None, rotulos_antigos=None):
-    """parts schlib-v2 -> (registros de geometria, cab). Pinos binários (arredondados a
-    10 mil) e gráficos texto, por parte, com IndexInSheet sequencial a partir de `inicio`
-    (a posição entre os filhos do componente onde eles vão entrar). `rotulos_antigos`
-    (lista de `rotulo_antigo`) é consumida: cada label casa no máximo um."""
+                           avisos=None, rotulos_antigos=None, fracs=None):
+    """parts schlib-v2 -> (registros de geometria, cab). Pinos binários e gráficos texto,
+    por parte, com IndexInSheet sequencial a partir de `inicio` (a posição entre os
+    filhos do componente onde eles vão entrar). `rotulos_antigos` (lista de
+    `rotulo_antigo`) é consumida: cada label casa no máximo um. `fracs` (dict) recebe
+    posição-na-lista -> (xfrac, yfrac, lenfrac) de cada pino que tem fração — quem monta
+    o PinFrac é o `aplica`, porque o ordinal só existe depois do Data inteiro."""
     avisos = avisos if avisos is not None else []
+    fracs = fracs if fracs is not None else {}
     paleta = paleta or {}
     pinos_antigos = pinos_antigos or {}
     rotulos_antigos = list(rotulos_antigos or [])
@@ -472,13 +520,13 @@ def simbolo_para_registros(sym_parts, cab, nome='', inicio=0, paleta=None, pinos
     for n, parte in enumerate(sym_parts or []):
         pid = _int(parte.get('part'), n + 1) or (n + 1)
         for j, pin in enumerate(parte.get('pins') or []):
-            for k in ('x', 'y', 'len'):
-                v = float(pin.get(k, 0) or 0)
-                if abs(v - _mil10(v)) > 1e-6:
-                    avisos.append('pino %s: %s=%s arredondado para %d mil' % (pin.get('num'), k, v, _mil10(v)))
             num = str(pin.get('num', ''))
-            antigo = pinos_antigos.get((pid, num)) or pinos_antigos.get((0, num)) or                 next((p for (_o, n), p in pinos_antigos.items() if n == num), None)
-            fora.append(_pino_registro(pin, pid, antigo, altos))
+            antigo = pinos_antigos.get((pid, num)) or pinos_antigos.get((0, num)) or \
+                next((p for (_o, n), p in pinos_antigos.items() if n == num), None)
+            reg, frac = _pino_registro(pin, pid, antigo, altos)
+            if any(frac):
+                fracs[len(fora)] = frac
+            fora.append(reg)
             idx += 1
         for j, g in enumerate(parte.get('graphics') or []):
             antigo = _casa_rotulo(rotulos_antigos, g) if g.get('g') == 'label' else None
@@ -519,7 +567,9 @@ def aplica(lib, sym):
 
     Mantém, na ordem, tudo que não é desenho: RECORD=1 (com AllPinCount/PartCount
     atualizados), designador (34), parâmetros (41) e o bloco de modelos (44/45/46/48) com
-    os OwnerIndex remapeados. A geometria nova entra onde a antiga começava."""
+    os OwnerIndex remapeados. A geometria nova entra onde a antiga começava. O PinFrac
+    é refeito a partir das frações dos pinos novos (e das antigas dos pinos de modo de
+    exibição > 0, que ficam)."""
     avisos = []
     nome = sym.get('name', '')
     st = acha(lib, nome)
@@ -542,9 +592,17 @@ def aplica(lib, sym):
     pinos_antigos = {}
     rotulos_antigos = []
     onde = None              # posição (entre os filhos) onde a geometria começava
+    # o PinFrac antigo é indexado pelo ordinal do pino no Data antigo — ordinal que conta
+    # TODO registro binário de pino, legível ou não, de qualquer modo de exibição
+    frac_antigo = sch_leitor._le_pinfrac(lib.comps[st]['PinFrac'], avisos, st) if lib.comps[st].get('PinFrac') else {}
+    ordinal_antigo = {}      # indice_antigo -> ordinal, só dos pinos que ficam
+    ordinal = 0
     for i, (tipo, pl) in enumerate(regs):
         if i == 0:
             continue
+        if _e_pino(tipo, pl):
+            ordinal_antigo[i] = ordinal
+            ordinal += 1
         if _e_geometria(tipo, pl, avisos):
             if onde is None:
                 onde = len(mantidos)
@@ -572,7 +630,9 @@ def aplica(lib, sym):
     # 2. a geometria nova (pode acrescentar uma fonte ao FileHeader)
     cab_antes = SB.escreve_texto(lib.cab)
     paleta = _paleta(regs[1:])
-    novos, _ = simbolo_para_registros(parts, lib.cab, nome, onde, paleta, pinos_antigos, avisos, rotulos_antigos)
+    fracs = {}               # posição em `novos` -> (xfrac, yfrac, lenfrac)
+    novos, _ = simbolo_para_registros(parts, lib.cab, nome, onde, paleta, pinos_antigos, avisos,
+                                      rotulos_antigos, fracs)
 
     # 3. cabeçalho do componente
     npinos = sum(len(p.get('pins') or []) for p in parts)
@@ -587,15 +647,20 @@ def aplica(lib, sym):
     # 4. remonta: mantidos antes, geometria, mantidos depois; índice antigo -> novo
     saida = [(SB.TEXTO, SB.escreve_texto(cabc))]
     mapa = {0: 0}
+    frac_saida = {}          # posição em `saida` -> (xfrac, yfrac, lenfrac)
     fila = mantidos[:onde] + [None] * len(novos) + mantidos[onde:]
     k_novo = 0
     for pos, item in enumerate(fila):
         if item is None:
+            if k_novo in fracs:
+                frac_saida[len(saida)] = fracs[k_novo]
             saida.append(novos[k_novo])
             k_novo += 1
             continue
         i, tipo, pl = item
         mapa[i] = len(saida)
+        if i in ordinal_antigo and ordinal_antigo[i] in frac_antigo:
+            frac_saida[len(saida)] = frac_antigo[ordinal_antigo[i]]
         if tipo == SB.TEXTO and pos >= onde + len(novos):
             d = SB.le_texto(pl)
             if 'IndexInSheet' in d and _int(d['IndexInSheet'], -1) >= 0:
@@ -616,7 +681,23 @@ def aplica(lib, sym):
             avisos.append('RECORD=%s apontava para o registro %d, que saiu' % (d.get('RECORD'), velho))
     lib.comps[st]['Data'] = SB.monta(saida)
 
-    # 5. os streams que descrevem os pinos antigos não servem mais; o Altium regenera
+    # 5. o PinFrac, pelo ordinal de cada pino no Data que acabou de ser montado — a
+    #    mesma contagem do leitor: todo registro binário de pino, na ordem gravada
+    entradas = {}
+    ordinal = 0
+    for j, (tipo, pl) in enumerate(saida):
+        if not _e_pino(tipo, pl):
+            continue
+        if j in frac_saida:
+            entradas[ordinal] = frac_saida[j]
+        ordinal += 1
+    pinfrac = monta_pinfrac(entradas)
+    if pinfrac is not None:
+        lib.comps[st]['PinFrac'] = pinfrac
+    elif 'PinFrac' in lib.comps[st]:
+        del lib.comps[st]['PinFrac']
+        avisos.append('PinFrac de "%s" removido: nenhum pino com fração' % nome)
+    # os streams que descrevem os pinos antigos não servem mais; o Altium regenera
     for s in DEPENDEM_DOS_PINOS:
         if s in lib.comps[st]:
             del lib.comps[st][s]
@@ -742,16 +823,16 @@ def _texto_lido(s):
 
 
 def esperado(sym):
-    """o que o leitor tem que devolver depois do patch: pinos arredondados a 10 mil,
-    nome de pino pelo cp1252, defaults do leitor (size 10, rot 0, sa 0, ea 360) e a
-    largura na tabela do Altium"""
+    """o que o leitor tem que devolver depois do patch: coordenadas de pino nas 3 casas
+    da API (a fração vai e volta pelo PinFrac), nome de pino pelo cp1252, defaults do
+    leitor (size 10, rot 0, sa 0, ea 360) e a largura na tabela do Altium"""
     parts = []
     for p in sym.get('parts') or []:
         pins = []
         for q in p.get('pins') or []:
             q = dict(q)
             for k in ('x', 'y', 'len'):
-                q[k] = _mil10(q.get(k, 0) or 0)
+                q[k] = round(float(q.get(k, 0) or 0), 3)
             q['orient'] = _int(q.get('orient')) % 360
             q['type'] = q.get('type') if q.get('type') in TIPOS else 'Passive'
             for k in ('num', 'name'):
@@ -817,7 +898,6 @@ def compara(esperado_parts, lido_parts):
 
 def verifica(bruto, sym):
     """relê a lib (bytes) com o sch_leitor e compara o componente com o que foi pedido"""
-    import sch_leitor
     lido = sch_leitor.le_schlib(bruto, com_footprints=False)
     nome = sym.get('name', '')
     alvo = None

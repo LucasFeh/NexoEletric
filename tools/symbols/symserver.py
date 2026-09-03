@@ -17,8 +17,10 @@ Aqui só o HTTP e três decisões de arquivo:
                            aberta no Altium → 423), o hub já mostra o novo e a resposta traz
                            `espelho:true, altium:false`: o usuário sabe que o Altium ficou atrás.
                            Por isso o pedido é validado por inteiro ANTES de encostar no espelho,
-                           e os pinos vão para o espelho já arredondados a 10 mil — é o que o
-                           registro binário da SchLib comporta; espelho e Altium não divergem.
+                           e os pinos vão para o espelho nas 3 casas da API do Altium (o
+                           schlib_patch leva a fração para o PinFrac da SchLib) — espelho e
+                           Altium dizem o mesmo até 0,001 mil, e a grade métrica (2 mm =
+                           78,74 mil) sobrevive ao save.
   nome antigo              o espelho saiu do RenameLibs e a SchLib real ainda tem os nomes de
                            antes. Quando o nome novo não está na SchLib, o save tenta o antigo
                            pelo Libs/rename-map.js (symRename ao contrário).
@@ -202,23 +204,20 @@ def _valida_parts(parts):
 
 
 def _partes(parts):
-    """-> (partes, avisos): só part/pins/graphics, numeradas, com x/y/len dos pinos em
-    múltiplos de 10 mil — o pino binário da SchLib não guarda mais fino que isso, e o
-    espelho tem que dizer o mesmo que o Altium. O aviso é por pino que mudou."""
-    fora, avisos = [], []
+    """só part/pins/graphics, numeradas, com x/y/len dos pinos em 3 casas — as que a API
+    do Altium (e o leitor) devolvem; a 4ª casa cairia na releitura de qualquer jeito, e
+    assim espelho e SchLib dizem exatamente o mesmo número."""
+    fora = []
     for i, p in enumerate(parts):
         pins = []
         for q in p['pins']:
             q = OrderedDict(q)
             for k in ('x', 'y', 'len'):
-                v = P._mil10(q[k])
-                if abs(v - q[k]) > 1e-6:
-                    avisos.append('pino %s: %s=%s arredondado para %d mil' % (q.get('num'), k, q[k], v))
-                q[k] = v
+                q[k] = L._n(round(float(q[k]), 3))
             pins.append(q)
         fora.append(OrderedDict([('part', int(p.get('part') or i + 1)), ('pins', pins),
                                  ('graphics', p['graphics'])]))
-    return fora, avisos
+    return fora
 
 
 # ─── o espelho, linha a linha ─────────────────────────────────────────────────
@@ -311,7 +310,7 @@ def api_save():
         return _erro(erro, 400)
     desc = data.get('description') if isinstance(data.get('description'), str) else None
     altium = bool(data.get('altium'))
-    partes, avisos = _partes(parts)
+    partes = _partes(parts)
 
     with _lock_espelho:
         caminho = os.path.join(ROOT, ESPELHO)
@@ -326,7 +325,7 @@ def api_save():
     if sym is None:
         return _erro('símbolo "%s" não está no espelho Libs/schlib.js' % nome, 404)
 
-    resp = {'ok': True, 'espelho': True, 'altium': False, 'backup': None, 'avisos': avisos}
+    resp = {'ok': True, 'espelho': True, 'altium': False, 'backup': None, 'avisos': []}
     if not altium:
         return resp
     alvo = {'name': nome, 'parts': sym['parts']}
@@ -336,11 +335,11 @@ def api_save():
         with _lock_schlib:
             r = _patch_altium(_config(), alvo)
     except P.LibOcupada as e:
-        return _erro(str(e), 423, espelho=True, altium=False, backup=None, avisos=avisos)
+        return _erro(str(e), 423, espelho=True, altium=False, backup=None, avisos=[])
     except Exception as e:                                          # noqa: BLE001
         return _erro('espelho gravado, mas a SchLib não: %s' % e, 500,
-                     espelho=True, altium=False, backup=None, avisos=avisos)
-    resp.update(altium=True, backup=r.get('backup'), avisos=avisos + (r.get('avisos') or []),
+                     espelho=True, altium=False, backup=None, avisos=[])
+    resp.update(altium=True, backup=r.get('backup'), avisos=r.get('avisos') or [],
                 storage=r.get('storage'), verificado=bool(r.get('verificado')),
                 nomeAltium=r.get('nomeAltium') or nome)
     return resp

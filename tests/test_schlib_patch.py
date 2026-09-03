@@ -6,8 +6,15 @@
 Copia a lib local (D:) para um tmp e prova, nessa ordem:
   (1) regravar `RES [ SMD ]` com a geometria que o leitor acabou de ler devolve o mesmo
       símbolo; TODOS os outros streams saem byte a byte iguais; o FileHeader não muda.
-  (2) geometria alterada (retângulo maior + um pino) num componente com PinFrac: a
-      releitura reflete, AllPinCount acompanha, o PinFrac some SÓ dele.
+  (2) grade métrica — a fração do pino vai para o PinFrac e volta: (a) RES [ SMD ] com um
+      pino a 2 mm / 5 mm / 1,5 mm (-78,74 / 196,85 / 59,055 mil) e o outro redondo relê
+      igual, o PinFrac nasce esparso (Weight = pinos com fração, o redondo sem entrada) e
+      o `sch_leitor._le_pinfrac` decodifica o que foi escrito; (b) AD210BN, EE-SX4330 e
+      AD711KN, que JÁ têm PinFrac, regravados com a geometria lida voltam com as mesmas
+      frações por pino (4ª casa à parte: o leitor entrega 3); (c) coordenada negativa com
+      fração (-236,221) volta igual; e geometria alterada (retângulo maior + um pino em
+      y=5) num componente com PinFrac: a releitura reflete, AllPinCount acompanha, o
+      PinFrac dele ganha a entrada do pino novo e o dos outros não muda.
   (3) componente cujo storage não é o LibReference (nome > 31 chars, via SectionKeys).
   (4) nome inexistente é erro claro.
   (5) o backup existe e é idêntico ao original.
@@ -84,6 +91,26 @@ def registro1(caminho, storage):
     return SB.le_texto(SB.desmonta(streams(caminho)[storage + '/Data'])[0][1])
 
 
+def pinfrac(caminho, storage):
+    """o PinFrac do storage, de dois jeitos: {ordinal: tripla} cru e {(parte, num): tripla}
+    juntando com a ordem dos pinos no Data — é a segunda que sobrevive à regravação, porque
+    o patch escreve as partes em ordem (1, 2, 3) e a lib tem componente gravado 3, 2, 1"""
+    st = streams(caminho)
+    cru = L._le_pinfrac(st[storage + '/PinFrac'], [], storage) if (storage + '/PinFrac') in st else {}
+    por_pino, ordinal = {}, 0
+    for t, pl in SB.desmonta(st[storage + '/Data']):
+        if t == SB.BINARIO and pl[:1] == b'\x02':
+            q = SB.le_pino(pl)
+            por_pino[(q['ownerpartid'], q['designador'].decode('cp1252'))] = cru.get(ordinal, (0, 0, 0))
+            ordinal += 1
+    return cru, por_pino
+
+
+def frac_perto(a, b):
+    """a 4ª casa pode mudar (o leitor entrega 3 casas): até 5/100000 da unidade, mesmo sinal"""
+    return all(abs(x - y) <= 5 and (x == 0 or y == 0 or (x > 0) == (y > 0)) for x, y in zip(a, b))
+
+
 def main(origem=None):
     origem = origem or LOCAL
     try:
@@ -137,9 +164,68 @@ def main(origem=None):
         assert os.path.dirname(r['backup']) == bk_dir
         print('  (1) RES [ SMD ] regravado igual; %d outros streams intactos; backup ok' % (len(antes) - 1))
 
-        # ── (2) geometria alterada num componente com PinFrac ───────────────
+        # ── (2a) grade métrica: pino a 2 mm / 5 mm / 1,5 mm no RES, o outro redondo ──
+        assert all(q[k] % 10 == 0 for q in res['parts'][0]['pins'] for k in ('x', 'y', 'len')), 'o RES da lib devia ser redondo'
+        metrico = copy.deepcopy(res)
+        metrico['parts'][0]['pins'][0].update(x=-78.74, y=196.85, len=59.055)
+        antes_m = streams(lib)
+        r = P.patch(lib, metrico, bk_dir)
+        assert r['verificado'] and not any('arredond' in a for a in r['avisos']), r
+        outros_iguais(antes_m, streams(lib), [st])
+        pr = simbolo(lib, 'RES [ SMD ]')['parts'][0]['pins']
+        assert all(abs(pr[0][k] - v) <= 0.001 for k, v in (('x', -78.74), ('y', 196.85), ('len', 59.055))), pr[0]
+        assert (pr[1]['x'], pr[1]['y'], pr[1]['len']) == tuple(res['parts'][0]['pins'][1][k] for k in ('x', 'y', 'len'))
+        cru, por_pino = pinfrac(lib, st)
+        assert cru == {0: (-87400, 68500, 90550)}, cru             # só o pino com fração; truncado, com sinal
+        assert SB.le_texto(SB.desmonta(streams(lib)[st + '/PinFrac'])[0][1]) == {'HEADER': 'PinFrac', 'Weight': '1'}
+        pinos = [SB.le_pino(pl) for t, pl in SB.desmonta(streams(lib)[st + '/Data']) if t == SB.BINARIO]
+        assert (pinos[0]['x'], pinos[0]['y'], pinos[0]['comprimento']) == (-7, 19, 5), 'o inteiro do Data é truncado'
+        assert pinos[1]['x'] % 1 == 0 and (1, pr[1]['num']) in por_pino and por_pino[(1, pr[1]['num'])] == (0, 0, 0)
+        # (2c) negativo com fração, no SEGUNDO pino: a entrada vai para o ordinal 1
+        neg = copy.deepcopy(res)
+        neg['parts'][0]['pins'][1].update(x=-236.221)
+        r = P.patch(lib, neg, bk_dir)
+        assert r['verificado'], r
+        assert simbolo(lib, 'RES [ SMD ]')['parts'][0]['pins'][1]['x'] == -236.221
+        cru, _ = pinfrac(lib, st)
+        assert cru == {1: (-62210, 0, 0)}, cru
+        # de volta ao redondo: o PinFrac some (e avisa)
+        r = P.patch(lib, copy.deepcopy(res), bk_dir)
+        assert (st + '/PinFrac') not in streams(lib) and any('PinFrac' in a for a in r['avisos']), r['avisos']
+        assert streams(lib) == antes_m, 'o RES de volta ao redondo tinha que dar o arquivo de antes'
+        print('  (2a/2c) RES [ SMD ]: -78.74/196.85/59.055 e -236.221 vão e voltam pelo PinFrac; redondo -> sem PinFrac')
+
+        # ── (2b) quem JÁ tem PinFrac volta com as mesmas frações por pino ────
         com_frac = sorted(k.split('/')[0] for k in antes if k.endswith('/PinFrac'))
         assert com_frac, 'a lib de teste não tem PinFrac'
+        provados_f = []
+        for nome in ('AD210BN', 'EE-SX4330', 'AD711KN'):
+            try:
+                s = simbolo(lib, nome)
+            except AssertionError:
+                continue
+            stf = P.acha(P.carrega(lib), nome)
+            assert stf in com_frac, nome
+            cru_a, por_pino_a = pinfrac(lib, stf)
+            antes_f = streams(lib)
+            r = P.patch(lib, copy.deepcopy(s), bk_dir)
+            assert r['verificado'], r
+            outros_iguais(antes_f, streams(lib), [stf])
+            assert not P.compara(P.esperado(s), simbolo(lib, nome)['parts'])
+            cru_d, por_pino_d = pinfrac(lib, stf)
+            assert len(cru_d) == len(cru_a) and int(SB.le_texto(SB.desmonta(streams(lib)[stf + '/PinFrac'])[0][1])['Weight']) == len(cru_d)
+            assert sorted(por_pino_d) == sorted(por_pino_a), (nome, sorted(por_pino_d), sorted(por_pino_a))
+            for k in por_pino_a:
+                assert frac_perto(por_pino_a[k], por_pino_d[k]), (nome, k, por_pino_a[k], por_pino_d[k])
+            if s['partcount'] == 1:
+                # uma parte só: a ordem dos pinos é a do arquivo e os ordinais são os mesmos
+                assert sorted(cru_d) == sorted(cru_a), (nome, sorted(cru_d), sorted(cru_a))
+                assert all(frac_perto(cru_a[k], cru_d[k]) for k in cru_a), (nome, cru_a, cru_d)
+            provados_f.append('%s (%d entradas%s)' % (nome, len(cru_d), '' if s['partcount'] == 1 else ', %d partes' % s['partcount']))
+        assert len(provados_f) >= 2, provados_f
+        print('  (2b) PinFrac regravado igual por pino: %s' % '; '.join(provados_f))
+
+        # ── (2) geometria alterada num componente com PinFrac ───────────────
         alvo = None
         for stf in com_frac:
             nome = SB.le_texto(SB.desmonta(antes[stf + '/Data'])[0][1])['LibReference']
@@ -156,22 +242,27 @@ def main(origem=None):
         p0['graphics'].append({'g': 'label', 'x': 12.5, 'y': -7, 'text': 'teste|13pt', 'rot': 90, 'size': 13})
         assert 13 not in L.le_fontes(cab0).values(), 'o teste da fonte nova precisa de um tamanho que não existe'
         antes2 = streams(lib)
+        _, por_pino_a = pinfrac(lib, stf_alvo)
         r = P.patch(lib, novo, bk_dir)
         assert r['verificado'], r
         depois2 = streams(lib)
         outros_iguais(antes2, depois2, [stf_alvo])
-        assert (stf_alvo + '/PinFrac') not in depois2, 'PinFrac do componente editado ficou'
+        assert (stf_alvo + '/PinFrac') in depois2, 'o PinFrac do componente editado tinha que ficar'
         assert (stf_alvo + '/PinTextData') not in depois2
         assert stf_alvo + '/Data' in depois2
         for stf in com_frac:
             if stf != stf_alvo:
                 assert depois2[stf + '/PinFrac'] == antes2[stf + '/PinFrac'], 'PinFrac de %s mudou' % stf
+        cru_d, por_pino_d = pinfrac(lib, stf_alvo)
+        assert por_pino_d[(1, 'X99')] == (0, 50000, 0), por_pino_d          # y=5 mil = 0,5 unidade
+        assert cru_d[len(p0['pins']) - 1] == (0, 50000, 0), 'o pino novo é o último: ordinal n-1'
+        assert all(frac_perto(por_pino_a[k], por_pino_d[k]) for k in por_pino_a), (por_pino_a, por_pino_d)
         relido = simbolo(lib, alvo['name'])
         difs = P.compara(P.esperado(novo), relido['parts'])
         assert not difs, difs
         pr = relido['parts'][0]
         assert pr['pins'][-1]['name'] == 'N̅O̅V̅O̅' and pr['pins'][-1]['type'] == 'Power', pr['pins'][-1]
-        assert all(p['x'] % 10 == 0 and p['y'] % 10 == 0 for p in pr['pins']), 'pino fora de 10 mil'
+        assert pr['pins'][-1]['y'] == 5, 'y=5 mil tinha que sobreviver (antes ia para 10)'
         rr = next(g for g in pr['graphics'] if g['g'] == 'rect')
         assert rr['y2'] == 400.5, rr
         lab = next(g for g in pr['graphics'] if g['g'] == 'label')
@@ -183,9 +274,9 @@ def main(origem=None):
         indice_igual(cab0, cab2)
         assert int(cab2['FontIdCount']) == int(cab0['FontIdCount']) + 1, cab2['FontIdCount']
         assert cab2['Size%s' % cab2['FontIdCount']] == '13'
-        assert any('arredondado' in a for a in r['avisos']), r['avisos']       # os pinos com fração
-        print('  (2) %s: rect com fração, pino novo, rótulo 13pt (fonte %s criada); PinFrac só dele sumiu'
-              % (alvo['name'], cab2['FontIdCount']))
+        assert not any('arredond' in a for a in r['avisos']), r['avisos']
+        print('  (2) %s: rect com fração, pino novo em y=5, rótulo 13pt (fonte %s criada); PinFrac dele com %d entradas'
+              % (alvo['name'], cab2['FontIdCount'], len(cru_d)))
 
         # ── (3) nome > 31 chars: o storage é outro, achado pelo Data ────────
         longo = simbolo(lib, LONGO)
@@ -382,7 +473,7 @@ def main(origem=None):
         assert out.returncode == 0 and 'conferido' in out.stdout, out.stdout + out.stderr
 
         n = len([s for s in final if s.endswith('/Data')])
-        print('test_schlib_patch OK (%d componentes na cópia, 6 símbolos regravados, outros streams byte a byte)' % n)
+        print('test_schlib_patch OK (%d componentes na cópia, 9 símbolos regravados, PinFrac vai e volta, outros streams byte a byte)' % n)
         return 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

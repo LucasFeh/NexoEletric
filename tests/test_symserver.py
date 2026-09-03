@@ -9,8 +9,9 @@ tools/symbols/config.json apontando para uma CÓPIA da lib local
 dela vira o caminho "SchLib ausente" (espelho:true, altium:false) e o resto roda igual.
 
 Prova: config; save (o espelho muda SÓ a linha do símbolo e a do generated; altium grava a
-SchLib com backup idêntico ao original; 404; 423 com a lib ocupada; 500 com a SchLib faltando;
-o nome novo do rename-map cai para o antigo); lib add/rename/delete/409/404; extract 202+409 e
+SchLib com backup idêntico ao original; pino fora da grade de 10 mil — grade métrica — é
+preservado com 3 casas no espelho e na SchLib, via PinFrac; 404; 423 com a lib ocupada; 500
+com a SchLib faltando; o nome novo do rename-map cai para o antigo); lib add/rename/delete/409/404; extract 202+409 e
 o stream de verdade (--limite 1) até o `event: done`; mirror regera o espelho inteiro.
 """
 import copy
@@ -181,24 +182,29 @@ try:
     if tem_lib:
         assert le_bytes(lib_copia) == lib_meio, 'altium:false não pode encostar na SchLib'
 
-    # pino fora da grade de 10 mil: o espelho recebe o que a SchLib comporta, e avisa
-    redondo = copy.deepcopy(outro['parts'])
-    for q in redondo[0]['pins']:
-        for k in ('x', 'y', 'len'):
-            q[k] = P._mil10(q[k])
-    torto = copy.deepcopy(redondo)
-    torto[0]['pins'][0].update(x=105, len=79)
+    # pino fora da grade de 10 mil (grade métrica): preservado com 3 casas nos dois lados —
+    # o espelho guarda o número e a SchLib leva a fração para o PinFrac; só a 4ª casa cai
+    torto = copy.deepcopy(outro['parts'])
+    torto[0]['pins'][0].update(x=105.5, y=-78.74, len=79.0004)
     r = cli.post('/api/symbols/save', json={'name': OUTRO, 'parts': torto, 'altium': tem_lib})
     j = r.get_json()
-    assert r.status_code == 200 and len(j['avisos']) == 2 and 'arredondado' in j['avisos'][0], j
+    assert r.status_code == 200 and not any('arredond' in a for a in j['avisos']), j
     p0 = acha(H.load_var_file(espelho), OUTRO)['parts'][0]['pins'][0]
-    assert (p0['x'], p0['len']) == (100, 80), p0
+    assert (p0['x'], p0['y'], p0['len']) == (105.5, -78.74, 79), p0
     if tem_lib:
         q0 = next(q for q in acha(L.le_schlib(lib_copia), OUTRO)['parts'][0]['pins'] if q['num'] == p0['num'])
-        assert (q0['x'], q0['len']) == (100, 80), 'espelho e SchLib dizem o mesmo'
-    r = cli.post('/api/symbols/save', json={'name': OUTRO, 'parts': redondo, 'altium': tem_lib})
-    assert r.status_code == 200 and r.get_json()['avisos'] == [], r.get_json()
-    print('save com pino fora da grade -> arredondado a 10 mil nos dois lados ok')
+        assert (q0['x'], q0['y'], q0['len']) == (105.5, -78.74, 79), 'espelho e SchLib dizem o mesmo'
+        import olefile
+        st_o = P.acha(P.carrega(lib_copia), OUTRO)
+        o = olefile.OleFileIO(lib_copia)
+        try:
+            fr = L._le_pinfrac(o.openstream(st_o + '/PinFrac').read(), [], st_o)
+        finally:
+            o.close()
+        assert fr[0] == (55000, -87400, 90000), fr            # o 1º pino é o ordinal 0; truncado, com sinal
+    r = cli.post('/api/symbols/save', json={'name': OUTRO, 'parts': outro['parts'], 'altium': tem_lib})
+    assert r.status_code == 200 and not any('arredond' in a for a in r.get_json()['avisos']), r.get_json()
+    print('save com pino fora da grade de 10 mil -> preservado com 3 casas nos dois lados ok')
 
     # lib aberta no Altium -> 423, e o espelho JÁ foi gravado
     def ocupada(cfg, sym):
