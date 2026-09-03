@@ -329,6 +329,9 @@ button.ic.esq svg{transform:scaleX(-1)}
 .gv-seg button{flex:1}
 
 /* ── modal: a mesma linguagem da pagina, e nao a caixa cinza do navegador ── */
+#semrede{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:31;
+  background:#7a1420;color:#fff;padding:8px 14px;border-radius:6px;font-size:13px;
+  box-shadow:0 2px 12px rgba(0,0,0,.4)}
 #modalBg{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.42);
   display:none;align-items:center;justify-content:center;padding:16px}
 #modalBg.on{display:flex}
@@ -416,8 +419,104 @@ var CHAVE = 'altiumbom.' + D.proj;
    dele. largura 0 = ainda nao escolheu, e o primeiro desenho tira do tamanho da janela. */
 var lado = 'dir', largLista = 0;
 
-try { feitos = JSON.parse(localStorage.getItem(CHAVE) || '{}') || {}; } catch (e) { feitos = {}; }
-function salvaFeitos(){ try { localStorage.setItem(CHAVE, JSON.stringify(feitos)); } catch (e) {} }
+/* ---- vistos da bancada ------------------------------------------------------------
+   Com servidor (pagina servida por /bom/<id>) os vistos sao COMPARTILHADOS: quem monta
+   esta no tablet e quem confere esta no PC, e os dois tem que ver a mesma lista. Sem
+   servidor cai no localStorage, que era o comportamento de quando o BOM era um arquivo.
+
+   O que sobe e sempre um DELTA do que mudou, nunca o mapa inteiro: duas pessoas marcando
+   pecas diferentes ao mesmo tempo se somam em vez de a ultima apagar o trabalho da outra.
+   O "enviados" e o espelho do que o servidor confirmou; a diferenca contra "feitos"
+   e o delta a mandar. */
+var API = D.api || '';
+var enviados = {}, revVistos = D.rev || 0, enviando = 0, _k;
+
+if (API){
+  feitos = D.vistos || {};
+  for (_k in feitos) if (feitos[_k]) enviados[_k] = true;
+} else {
+  try { feitos = JSON.parse(localStorage.getItem(CHAVE) || '{}') || {}; } catch (e) { feitos = {}; }
+}
+
+/* Se o servidor cair no meio da montagem, quem esta na bancada TEM que saber: os vistos
+   que ele marcar dali em diante nao existem para mais ninguem. Silencio aqui seria pior
+   que o erro. */
+function avisaRede(msg){
+  var a = document.getElementById('semrede');
+  if (!a) return;
+  a.textContent = msg;
+  a.hidden = false;
+}
+function semAviso(){ var a = document.getElementById('semrede'); if (a) a.hidden = true; }
+
+/* O servidor e a verdade para o que os OUTROS marcaram - mas so quando nao ha nada voando
+   daqui, senao uma resposta que saiu antes do ultimo clique o apagaria da tela. */
+function absorve(vistos, rev){
+  if (enviando) return false;
+  var k, mudou = false;
+  for (k in vistos) if (vistos[k] && !feitos[k]) { feitos[k] = true; mudou = true; }
+  for (k in feitos) if (feitos[k] && !vistos[k]) { delete feitos[k]; mudou = true; }
+  enviados = {};
+  for (k in vistos) if (vistos[k]) enviados[k] = true;
+  revVistos = rev || 0;
+  return mudou;
+}
+
+function salvaFeitos(op){
+  if (!API){
+    try { localStorage.setItem(CHAVE, JSON.stringify(feitos)); } catch (e) {}
+    return;
+  }
+  var corpo, k, n = 0;
+  if (op && op.limpar){
+    corpo = { clear: true };            /* uma chamada, e nao um "false" por peca da placa */
+  } else {
+    var delta = {};
+    for (k in feitos) if (feitos[k] && !enviados[k]) { delta[k] = true; n++; }
+    for (k in enviados) if (enviados[k] && !feitos[k]) { delta[k] = false; n++; }
+    if (!n) return;
+    corpo = { set: delta };
+  }
+  enviando++;
+  fetch(API + '/vistos', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                           body: JSON.stringify(corpo) })
+    .then(function (r){ return r.ok ? r.json() : null; })
+    .then(function (j){
+      enviando--;
+      if (!j || !j.ok) return avisaRede('o servidor recusou o visto - ele nao esta salvo');
+      enviados = {};
+      for (var k2 in j.vistos) if (j.vistos[k2]) enviados[k2] = true;
+      revVistos = j.rev || 0;
+      semAviso();
+    })
+    .catch(function (){
+      enviando--;
+      avisaRede('servidor fora do ar - os vistos nao estao sendo salvos');
+    });
+}
+
+/* Traz o que mudou no servidor. board.js novo (outro ExportPcb) recarrega a pagina: o
+   desenho e a lista ficariam velhos, e isso nao da para remendar por partes. */
+function sincroniza(){
+  if (!API || enviando) return;
+  fetch(API + '/vistos', { cache: 'no-store' })
+    .then(function (r){ return r.ok ? r.json() : null; })
+    .then(function (j){
+      if (!j || !j.ok) return;
+      semAviso();
+      if (D.boardRev && j.boardRev && j.boardRev !== D.boardRev){ location.reload(); return; }
+      if (j.rev === revVistos) return;
+      if (absorve(j.vistos, j.rev)) montaBom();
+    })
+    .catch(function (){ avisaRede('servidor fora do ar - os vistos nao estao sendo salvos'); });
+}
+if (API){
+  setInterval(sincroniza, 4000);
+  /* volta do bolso / troca de aba: olha na hora, sem esperar o intervalo */
+  document.addEventListener('visibilitychange', function (){
+    if (!document.hidden) sincroniza();
+  });
+}
 try {
   var ui = JSON.parse(localStorage.getItem(CHAVE + '.ui') || 'null');
   if (ui && typeof ui === 'object'){
@@ -1597,7 +1696,7 @@ function inicia(){
   cbEscuro.onclick = function (){ document.body.classList.toggle('escuro', !!cbEscuro.checked); };
   document.getElementById('limpar').onclick = function (){
     pergunta('Limpar vistos', 'Isso desmarca tudo que j\u00e1 foi montado nesta placa. Continuar?',
-             function (){ feitos = {}; salvaFeitos(); montaBom(); });
+             function (){ feitos = {}; salvaFeitos({ limpar: true }); montaBom(); });
   };
   window.addEventListener('resize', function (){
     aplicaLateral();
@@ -1618,6 +1717,13 @@ function html(m, meta){
   const me = meta || {};
   const D = {
     proj: me.proj || 'placa',
+    /* Servida por /bom/<id>, a pagina fala com o servidor e os vistos da bancada passam a
+       ser COMPARTILHADOS por quem abrir o link. Vazio = pagina sem servidor (aberta de um
+       arquivo), e o estado volta para o localStorage de quem esta olhando. */
+    api: me.api || '',
+    vistos: me.vistos || null,
+    rev: me.rev || 0,
+    boardRev: me.boardRev || 0,
     lados: LADO, cores: COR,
     layout: o.layout,
     guiada: o.guided ? 1 : 0,
@@ -1753,6 +1859,10 @@ function html(m, meta){
          '<h2 id="modalTit"></h2><p id="modalTxt"></p>' +
          '<div class="acoes"><button class="t" id="modalNao">Não</button>' +
          '<button class="t primario" id="modalSim">Sim</button></div></div></div>');
+  /* O aviso de "servidor fora do ar" nasce no HTML, escondido, em vez de ser criado por
+     JS: quem esta montando a placa precisa saber na hora que os vistos pararam de ser
+     salvos, e todo id que o runtime procura tem que existir no documento. */
+  L.push('<div id="semrede" hidden></div>');
   L.push('<script>var D = ' + jsonSeguro(D) + ';</' + 'script>');
   L.push('<script>' + JS + '</' + 'script>');
   L.push('</body></html>');
@@ -1762,11 +1872,68 @@ function html(m, meta){
 const sane = s => String(s).replace(/[\\/:*?"<>|]/g, '_');
 const filename = proj => sane(proj || 'placa') + '-BOM.html';
 
+/* ---- o link do BOM ----------------------------------------------------------------
+   O BOM nao e mais um arquivo que se baixa: cada projeto tem uma URL fixa, /bom/<id>, que
+   o servidor monta na hora com ESTE gerador - por isso melhorar o gerador melhora o BOM
+   de todos os projetos de uma vez, sem regerar nada.
+
+   Copiar o link grava antes as opcoes da aba, para quem abrir do outro lado da rede ver o
+   que quem gerou escolheu. */
+const linkDe = projId => '/bom/' + encodeURIComponent(projId || '');
+
+/* navigator.clipboard existe so em contexto seguro, e o hub aberto pelo IP da rede
+   (http://192.168.x.x:8001) NAO e um - que e exatamente o caso de quem abre do tablet.
+   Por isso o textarea + execCommand continua aqui: nao e legado, e o caminho principal
+   fora do localhost. */
+async function paraAreaDeTransferencia(txt){
+  try {
+    if (navigator.clipboard && window.isSecureContext){
+      await navigator.clipboard.writeText(txt);
+      return true;
+    }
+  } catch (e) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select(); ta.setSelectionRange(0, txt.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return !!ok;
+  } catch (e) { return false; }
+}
+
+async function copiarLink(projId, opts){
+  if (!projId) return { ok: false, error: 'sem projeto selecionado' };
+  if (!location.protocol.startsWith('http'))
+    return { ok: false, error: 'o link precisa do hub servido por hubserver.py, nao por file://' };
+  const base = '/api/bom/' + encodeURIComponent(projId);
+  if (opts){
+    /* as opcoes sao conforto: se a gravacao falhar, o link ainda abre - no padrao */
+    try {
+      await fetch(base + '/opts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ opts }) });
+    } catch (e) {}
+  }
+  let j = null;
+  try {
+    const r = await fetch(base + '/link');
+    if (r.status === 404)
+      return { ok: false, error: 'este servidor nao tem a rota do link - reinicie o hubserver.py' };
+    j = await r.json();
+  } catch (e) { return { ok: false, error: 'servidor nao respondeu: ' + e.message }; }
+  if (!j || !j.ok) return { ok: false, error: (j && j.error) || 'nao consegui montar o link' };
+  return { ok: true, url: j.url, copiou: await paraAreaDeTransferencia(j.url), lan: !!j.lan };
+}
+
 /* porta unica da aba: do board.js ao arquivo, num passo */
 function gerar(board, opts, meta){
   const m = model(board, opts);
   return { html: html(m, meta), model: m, warnings: m.warnings };
 }
 
-return { defaults, model, html, filename, gerar, textoPolys, padGeom, ladoDe, natural, COR };
+return { defaults, model, html, filename, gerar, copiarLink, linkDe,
+         textoPolys, padGeom, ladoDe, natural, COR };
 });

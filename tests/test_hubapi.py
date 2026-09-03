@@ -1,4 +1,5 @@
 # Teste das funcoes puras do hubserver (rodar da raiz: python tests/test_hubapi.py)
+import io
 import os
 import shutil
 import sys
@@ -57,28 +58,76 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
     H.build_index(real_root)
 
-# Seletor de pasta: a rota inteira sem UI, trocando _pergunta_pasta. Cobre o normpath
-# (o Tcl devolve barra normal), o cancelamento e o lock de uma janela por vez.
+# BOM por link: /bom/<id> monta a pagina na hora, e o estado da bancada e compartilhado.
+# Roda contra o _DemoKit, que esta no repositorio, e limpa os arquivos de estado no fim.
 cli = H.app.test_client()          # test_client chega como 127.0.0.1, entao passa no _is_local
-escolhido = []
-H._pergunta_pasta = lambda inicial: (escolhido.append(inicial), 'C:/Users/Lucas/Desktop')[1]
-r = cli.post('/api/pick-dir')
-assert r.status_code == 200, 'escolha vale'
-assert r.get_json()['dir'] == os.path.normpath('C:/Users/Lucas/Desktop'), 'caminho normalizado'
-assert not r.get_json().get('cancelado')
+pid = H._proj_id('_DemoKit')
+assert os.path.basename(H._proj_dir_by_id(pid)) == '_DemoKit', 'o slug volta para a pasta'
+assert H._proj_dir_by_id('nao-existe') is None, 'id que nao existe nao pode virar pasta'
 
-H._pergunta_pasta = lambda inicial: ''
-r = cli.post('/api/pick-dir')
-assert r.status_code == 200 and r.get_json()['cancelado'] is True, 'cancelar nao e erro'
-assert r.get_json()['dir'] == '', 'cancelar nao devolve caminho (senao apagaria a pasta)'
-
-H._pick_lock.acquire()
+dbom = H._proj_dir_by_id(pid)
 try:
-    r = cli.post('/api/pick-dir')
-    assert r.status_code == 409, 'segunda janela e recusada'
+    r = cli.get('/bom/' + pid)
+    assert r.status_code == 200, '/bom/<id> tem que ganhar da rota /<path:path>'
+    pag = r.get_data(as_text=True)
+    # A pagina NAO e um BOM gravado: e um bootstrap que carrega o gerador ATUAL e monta na
+    # hora. E por isso que mexer no hub-bom.js muda o BOM de todos os projetos de uma vez.
+    assert '/hub-bom.js' in pag, 'o bootstrap nao carrega o gerador'
+    # A ORDEM dos <script> importa e nao e cosmetica: no browser o hub-bom.js le
+    # root.HubFont e root.HubLaser, e fora do CommonJS ninguem resolve isso sozinho. Com a
+    # ordem errada a pagina abre morta, com "reading 'padPrim'" no console.
+    assert pag.index('/hub-font.js') < pag.index('/hub-laser.js') < pag.index('/hub-bom.js'),         'as dependencias do gerador precisam vir antes dele, nesta ordem'
+    assert '/board.js' in pag, 'o bootstrap nao carrega o board do projeto'
+    assert '/api/bom/' + pid in pag, 'o bootstrap nao sabe com quem falar'
+    assert 'HubBom.gerar' in pag, 'o bootstrap nao monta a pagina'
+    assert cli.get('/bom/nao-existe').status_code == 404
+
+    # O link tem que servir para OUTRA maquina: quem abre o hub em 127.0.0.1 copiaria um
+    # endereco que so funciona no proprio PC, e o ponto do link e abrir no tablet.
+    j = cli.get('/api/bom/%s/link' % pid).get_json()
+    assert j['ok'] and j['url'].endswith('/bom/' + pid)
+    ip = H._lan_ip()
+    if ip:
+        assert ip in j['url'] and j['trocado'], 'localhost tinha de virar o IP da rede'
+    assert cli.get('/api/bom/nao-existe/link').status_code == 404
+
+    # Vistos: o corpo e um DELTA, nao o mapa inteiro. Dois tablets marcando pecas
+    # diferentes ao mesmo tempo se somam, em vez de o ultimo apagar o trabalho do outro.
+    assert cli.get('/api/bom/%s/vistos' % pid).get_json()['vistos'] == {}
+    a = cli.post('/api/bom/%s/vistos' % pid, json={'set': {'R1|10k': True}}).get_json()
+    b = cli.post('/api/bom/%s/vistos' % pid, json={'set': {'C2|100n': True}}).get_json()
+    assert b['vistos'] == {'R1|10k': True, 'C2|100n': True}, 'o segundo apagou o primeiro'
+    assert b['rev'] != a['rev'], 'o rev nao mudou - a outra maquina nao notaria'
+    # desmarcar APAGA a entrada em vez de gravar False: o arquivo guarda o que foi feito
+    assert cli.post('/api/bom/%s/vistos' % pid,
+                    json={'set': {'R1|10k': False}}).get_json()['vistos'] == {'C2|100n': True}
+    assert cli.post('/api/bom/%s/vistos' % pid, json={'clear': True}).get_json()['vistos'] == {}
+    assert cli.post('/api/bom/%s/vistos' % pid, json={'set': {'x' * 400: True}}).status_code == 400
+    assert cli.post('/api/bom/%s/vistos' % pid, json={'set': 5}).status_code == 400
+    assert cli.post('/api/bom/%s/vistos' % pid, json=[]).status_code == 400
+    assert cli.post('/api/bom/nao-existe/vistos', json={'set': {}}).status_code == 404
+    # estado ilegivel vira estado vazio: um arquivo corrompido nao pode derrubar a pagina
+    # que serve justamente para montar a placa
+    with io.open(os.path.join(dbom, H.BOM_VISTOS), 'w', encoding='utf-8') as f:
+        f.write('nao e json')
+    assert cli.get('/api/bom/%s/vistos' % pid).get_json()['vistos'] == {}
+
+    # Opcoes: o link abre do jeito que quem gerou escolheu
+    assert cli.get('/api/bom/%s/opts' % pid).get_json()['opts'] is None
+    assert cli.post('/api/bom/%s/opts' % pid, json={'opts': {'dark': False}}).status_code == 200
+    assert cli.get('/api/bom/%s/opts' % pid).get_json()['opts'] == {'dark': False}
+    assert cli.post('/api/bom/%s/opts' % pid, json={'opts': 'nao'}).status_code == 400
+
+    # O estado da bancada NAO pode entrar no watcher: ele muda a cada visto marcado, e o
+    # SSE recarregaria todas as paginas abertas - no meio da montagem, que e quando
+    # ninguem pode perder a tela de vista.
+    assert not [k for k in H._snapshot() if os.path.basename(k) in H.BOM_STATE_FILES], \
+        'visto marcado dispararia reload na pagina de quem esta montando'
 finally:
-    H._pick_lock.release()
-r = cli.post('/api/pick-dir')
-assert r.status_code == 200, 'e o lock volta a liberar'
+    for f in H.BOM_STATE_FILES:
+        try:
+            os.remove(os.path.join(dbom, f))
+        except OSError:
+            pass
 
 print('test_hubapi OK')

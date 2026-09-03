@@ -5,6 +5,7 @@ Uso: python hubserver.py [--port 8000]
 Aditivo: nao altera nenhum arquivo do hub; abrir hub.html por duplo clique segue igual.
 """
 import argparse
+import hashlib
 import hmac
 import json
 import os
@@ -16,12 +17,21 @@ import sys
 import threading
 import time
 
+from urllib.parse import quote
+
 from flask import Flask, Response, abort, request, send_from_directory
 from werkzeug.utils import safe_join
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WATCH_INTERVAL = 1.0   # segundos entre varreduras de mtime
 HEARTBEAT = 15.0       # keep-alive do SSE
+
+# Estado do BOM, ao lado do projeto. Ficam FORA do _snapshot(): mudam a cada visto
+# marcado, e o watcher dispararia reload em todas as paginas abertas -- exatamente no
+# meio da montagem, que e quando ninguem pode perder a tela de vista.
+BOM_VISTOS = 'bom-vistos.json'   # o que ja foi montado, COMPARTILHADO entre quem abre
+BOM_OPTS = 'bom-opts.json'       # as opcoes com que a aba gerou, para o link abrir igual
+BOM_STATE_FILES = (BOM_VISTOS, BOM_OPTS)
 
 app = Flask(__name__)
 _version = 0           # incrementa a cada mudanca detectada
@@ -54,6 +64,8 @@ def _snapshot():
     for base in ('Libs', 'Projects'):
         for dirpath, _dirnames, filenames in os.walk(os.path.join(ROOT, base)):
             for f in filenames:
+                if f in BOM_STATE_FILES:
+                    continue      # visto marcado nao e mudanca de projeto; ver BOM_VISTOS
                 add(os.path.join(dirpath, f))
     return snap
 
@@ -210,8 +222,6 @@ def api_laser_open():
 # hoje so a pasta padrao do BOM. Nao vai para o localStorage porque o caminho e do disco do
 # SERVIDOR: gravado no browser, cada PC da LAN teria a sua versao de um caminho que so o
 # servidor usa.
-CONFIG_FILE = 'hub-config.json'
-CONFIG_KEYS = ('bomDir',)
 LOCAL_ADDRS = ('127.0.0.1', '::1', 'localhost')
 
 
@@ -231,160 +241,6 @@ def _is_local(req):
         return addr in set(socket.gethostbyname_ex(socket.gethostname())[2])
     except OSError:
         return False
-
-
-def _config_read():
-    """Config invalida vira config VAZIA, nunca erro: um hub-config.json com `[]` dentro
-    derrubaria com 500 ate a rota que serve para consertar o problema."""
-    try:
-        with open(os.path.join(ROOT, CONFIG_FILE), encoding='utf-8') as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return {k: data[k] for k in CONFIG_KEYS if isinstance(data.get(k), str)}
-
-
-@app.route('/api/config', methods=['GET'])
-def api_config_get():
-    return {'ok': True, 'config': _config_read()}
-
-
-@app.route('/api/config', methods=['POST'])
-def api_config_set():
-    """Grava hub-config.json. So de localhost: bomDir aponta para o disco do servidor, e
-    quem escolhe onde o servidor escreve tem que estar sentado nele."""
-    if not _is_local(request):
-        return {'ok': False, 'error': 'a configuracao so muda no PC do servidor'}, 403
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return {'ok': False, 'error': 'JSON obrigatorio'}, 400
-    cfg = _config_read()
-    for k in CONFIG_KEYS:
-        if k in data:
-            if not isinstance(data[k], str):
-                return {'ok': False, 'error': '%s tem que ser texto' % k}, 400
-            cfg[k] = data[k].strip()
-    full = os.path.join(ROOT, CONFIG_FILE)
-    tmp = full + '.tmp'
-    try:
-        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, full)
-    except OSError as e:
-        return {'ok': False, 'error': 'falha ao gravar a configuracao: %s' % e}, 500
-    return {'ok': True, 'config': cfg}
-
-
-# ─────────────────── escolher a pasta pelo dialogo do Windows ───────────────────
-# O navegador nao sabe caminho absoluto (showDirectoryPicker da so o nome, webkitdirectory
-# da caminho relativo), entao quem abre a janela de pasta e o SERVIDOR, na maquina dele -
-# mesma consequencia honesta do laser-open: acessando o hub de outro PC, a janela abre LA.
-PICK_TIMEOUT = 120.0            # segundos: janela esquecida aberta se fecha sozinha
-_pick_lock = threading.Lock()   # uma por vez; a segunda abriria atras da primeira
-
-
-def _pergunta_pasta(inicial):
-    """Abre o dialogo de pasta e devolve o caminho, ou '' se cancelou/expirou.
-
-    Roda na thread do request (app.run(threaded=True)) e isso e seguro: o Tcl solta a GIL
-    enquanto o dialogo esta aberto, entao o resto do hub continua respondendo normalmente.
-    O timeout e um 'after' agendado ANTES de abrir - ele dispara mesmo com o modal nativo
-    na tela, destroi o root, e o askdirectory volta '' igualzinho ao Cancelar.
-
-    Funcao separada da rota de proposito: o teste troca ela e exercita a rota inteira sem
-    abrir janela nenhuma.
-    """
-    import tkinter                  # importado aqui: sem tkinter o resto do hub roda igual
-    from tkinter import filedialog
-    root = None
-    try:
-        root = tkinter.Tk()
-        root.withdraw()             # quero so o dialogo, nao a janela vazia do Tk
-        root.attributes('-topmost', True)
-        root.after(int(PICK_TIMEOUT * 1000), root.destroy)
-        return str(filedialog.askdirectory(
-            parent=root, title='Pasta padrao do BOM',
-            initialdir=inicial or None,   # None o tkinter descarta; '' viraria -initialdir {}
-            mustexist=True) or '')
-    finally:
-        if root is not None:
-            try:
-                root.destroy()      # se o timeout ja destruiu, tanto faz
-            except Exception:
-                pass
-
-
-@app.route('/api/pick-dir', methods=['POST'])
-def api_pick_dir():
-    """Abre a janela de pasta do Windows NO PC DO SERVIDOR e devolve o caminho absoluto.
-
-    So de localhost, pelo mesmo motivo do laser-open e do bom-save: o servidor escuta
-    0.0.0.0, e abrir janela na maquina de quem hospeda nao pode ficar exposto a LAN.
-    Nao grava nada - quem grava e o POST /api/config, que ja existe e ja e atomico.
-    """
-    if not _is_local(request):
-        return {'ok': False, 'error': 'escolher a pasta so funciona no PC do servidor; '
-                                      'digite o caminho a mao'}, 403
-    if not _pick_lock.acquire(blocking=False):
-        return {'ok': False, 'error': 'ja tem uma janela de pasta aberta no PC do servidor'}, 409
-    try:
-        inicial = _config_read().get('bomDir') or ''
-        escolhido = _pergunta_pasta(inicial if os.path.isdir(inicial) else '')
-    except ImportError:
-        return {'ok': False, 'error': 'este Python nao tem tkinter; digite o caminho a mao'}, 501
-    except Exception as e:
-        # sem sessao grafica (servico do Windows, sessao desconectada) o Tk nem sobe
-        return {'ok': False, 'error': 'nao consegui abrir a janela de pasta: %s' % e}, 500
-    finally:
-        _pick_lock.release()
-    if not escolhido:
-        # Cancelar e tempo esgotado caem aqui iguais; 200 porque nao houve falha nenhuma
-        return {'ok': True, 'cancelado': True, 'dir': ''}
-    return {'ok': True, 'dir': os.path.normpath(escolhido)}   # o Tcl devolve com barra normal
-
-
-@app.route('/api/bom-save', methods=['POST'])
-def api_bom_save():
-    """Grava o BOM em qualquer pasta do disco do SERVIDOR.
-
-    E o unico endpoint que escreve fora do workspace, entao carrega as mesmas travas do
-    laser-open e mais uma: so de localhost (o servidor escuta 0.0.0.0 e escrever no disco
-    nao pode ficar exposto a LAN), so .html, so nome de arquivo (nada de subpasta vinda do
-    cliente) e a pasta tem que existir - ou, no maximo, ser criavel DENTRO de uma que ja
-    existe. Sem isso um caminho digitado errado cria uma arvore inteira em silencio.
-    """
-    if not _is_local(request):
-        return {'ok': False, 'error': 'salvar em pasta so funciona no PC do servidor; '
-                                      'use "Baixar" de outra maquina'}, 403
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict) or 'name' not in data or 'content' not in data:
-        return {'ok': False, 'error': 'JSON {name, content, dir?} obrigatorio'}, 400
-    name = os.path.basename(str(data['name']))
-    if not name.lower().endswith('.html') or name.startswith('.'):
-        return {'ok': False, 'error': 'so .html'}, 403
-    d = str(data.get('dir') or _config_read().get('bomDir') or '').strip().strip('"')
-    if not d:
-        return {'ok': False, 'error': 'sem pasta padrao configurada - use "Salvar como"'}, 400
-    d = os.path.abspath(os.path.expanduser(d))
-    if not os.path.isdir(d):
-        pai = os.path.dirname(d)
-        if not os.path.isdir(pai):
-            return {'ok': False, 'error': 'a pasta nao existe e a de cima tambem nao: ' + d}, 400
-        try:
-            os.mkdir(d)
-        except OSError as e:
-            return {'ok': False, 'error': 'nao consegui criar a pasta: %s' % e}, 500
-    full = os.path.join(d, name)
-    tmp = full + '.tmp'
-    try:
-        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
-            f.write(str(data['content']))
-        os.replace(tmp, full)
-    except OSError as e:
-        return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
-    return {'ok': True, 'path': full}
 
 
 _PROJ_CACHE = {}
@@ -623,7 +479,7 @@ def api_project_delete(proj_id):
     mover e reversivel e apagar nao: um clique com a senha certa nao pode custar o
     historico de uma placa. Quem quiser sumir de vez esvazia o Trash\\ a mao.
 
-    Diferente do laser-open e do bom-save, este endpoint NAO e so-localhost: o hub e
+    Diferente do laser-open, este endpoint NAO e so-localhost: o hub e
     usado do tablet da bancada, e quem manda aqui e a senha mestre.
     """
     data = request.get_json(silent=True) or {}
@@ -811,6 +667,245 @@ def api_almox_sync_stream(run_id):
             _almox_lock.release()
 
     return Response(stream(), mimetype='text/event-stream')
+
+
+# ------------------------------- o BOM servido por link -------------------------------
+#
+# O BOM nao e mais um arquivo que se baixa: e a URL /bom/<proj_id>. Nada fica gravado em
+# lugar nenhum. A rota devolve um bootstrap curto que carrega o hub-bom.js ATUAL, o
+# board.js do projeto e o estado da bancada, e monta o documento no navegador de quem
+# abriu. E dai que vem a propriedade que se queria: mexer no gerador melhora o BOM de
+# TODOS os projetos no mesmo instante, porque nao existe copia velha para regerar.
+#
+# O preco e depender do servidor no ar. Foi uma troca deliberada: o link tem que abrir do
+# tablet da bancada e de qualquer maquina da rede, e amanha de um servidor de verdade --
+# nada disso um arquivo na pasta de Downloads de alguem faz.
+
+_bom_lock = threading.Lock()   # os vistos chegam de varias maquinas ao mesmo tempo
+
+
+def _proj_dir_by_id(proj_id):
+    """A pasta de Projects/ cujo slug bate com proj_id, ou None.
+
+    Usa o MESMO _proj_id do indice: o link /bom/<id> carrega o id que o resto da API ja
+    usa, em vez de inventar um segundo esquema de nomes para o mesmo projeto.
+    """
+    pdir = os.path.join(ROOT, 'Projects')
+    if not os.path.isdir(pdir):
+        return None
+    for name in sorted(os.listdir(pdir)):
+        d = os.path.join(pdir, name)
+        if os.path.isdir(d) and _proj_id(name) == proj_id:
+            return d
+    return None
+
+
+def _bom_json_read(d, fname):
+    """Estado ilegivel vira estado VAZIO, nunca erro: um bom-vistos.json corrompido nao
+    pode derrubar a pagina que serve para montar a placa."""
+    try:
+        with open(os.path.join(d, fname), encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _bom_json_write(d, fname, data):
+    """Grava atomico: dois tablets marcando junto nunca deixam meio arquivo no disco."""
+    full = os.path.join(d, fname)
+    tmp = full + '.tmp'
+    with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(data, f, ensure_ascii=False, indent=1, sort_keys=True)
+    os.replace(tmp, full)
+
+
+def _bom_tag(data):
+    """Token de versao do estado: hash do CONTEUDO, nao mtime.
+
+    O mtime nao serve aqui. Dois vistos marcados no mesmo milissegundo saem com o mesmo
+    st_mtime_ns no NTFS, e a outra maquina perderia o segundo -- justamente o caso de duas
+    pessoas montando a mesma placa. O hash muda exatamente quando o conteudo muda, que e a
+    unica pergunta que a pagina faz, e sobrevive a reinicio do servidor.
+    """
+    bruto = json.dumps(data, sort_keys=True, ensure_ascii=False).encode('utf-8')
+    return hashlib.md5(bruto).hexdigest()[:12]
+
+
+BOM_BOOTSTRAP = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BOM — %(projEsc)s</title>
+<style>html,body{margin:0;height:100%%;background:#14161a;color:#e8e8ea;
+  font:14px system-ui,Segoe UI,sans-serif}
+#av{padding:24px;line-height:1.5}#av b{color:#ff9a9a}</style></head><body>
+<div id="av">montando o BOM…</div>
+<!-- A ORDEM importa: no browser o hub-bom.js le root.HubFont e root.HubLaser, que sao os
+     dois arquivos acima. Fora do CommonJS ninguem resolve isso sozinho, e sem eles a
+     pagina abre com "Cannot read properties of undefined (reading 'padPrim')". -->
+<script src="/hub-font.js"></script>
+<script src="/hub-laser.js"></script>
+<script src="/hub-bom.js"></script>
+<script src="%(board)s"></script>
+<script>
+(function(){
+  var API = %(api)s, PROJ = %(projJson)s;
+  function falha(m){ document.getElementById('av').innerHTML = '<b>' + m + '</b>'; }
+  function pega(u){
+    return fetch(u, { cache: 'no-store' })
+      .then(function (r){ return r.ok ? r.json() : {}; })
+      .catch(function (){ return {}; });
+  }
+  if (typeof HubFont === 'undefined' || typeof HubLaser === 'undefined')
+    return falha('nao consegui carregar hub-font.js / hub-laser.js, de que o gerador depende');
+  if (typeof HubBom === 'undefined') return falha('nao consegui carregar hub-bom.js');
+  if (typeof pcbmirror === 'undefined') return falha('nao consegui carregar o board.js deste projeto');
+  Promise.all([pega(API + '/opts'), pega(API + '/vistos')]).then(function (res){
+    var r;
+    try {
+      r = HubBom.gerar(pcbmirror, (res[0] && res[0].opts) || null, {
+        proj: PROJ,
+        generated: pcbmirror.generated || '',
+        api: API,
+        vistos: (res[1] && res[1].vistos) || {},
+        rev: (res[1] && res[1].rev) || 0,
+        boardRev: (res[1] && res[1].boardRev) || 0
+      });
+    } catch (e) { return falha('o gerador falhou: ' + (e && e.message)); }
+    /* Troca o documento inteiro em vez de embutir num iframe: a URL continua sendo a do
+       link, e Ctrl+F, impressao e o zoom do tablet funcionam como em pagina normal. Num
+       iframe cada um desses vira um caso especial, e essa pagina vive na bancada. */
+    document.open(); document.write(r.html); document.close();
+  });
+})();
+</script>
+</body></html>
+"""
+
+
+@app.route('/bom/<proj_id>')
+def bom_page(proj_id):
+    """A pagina do BOM do projeto, montada na hora pelo gerador atual."""
+    d = _proj_dir_by_id(proj_id)
+    if d is None:
+        abort(404)
+    name = os.path.basename(d)
+    if not os.path.isfile(os.path.join(d, 'board.js')):
+        return Response(
+            '<!doctype html><meta charset="utf-8"><p style="font:14px system-ui;padding:24px">'
+            'O projeto <b>%s</b> ainda nao tem <code>board.js</code> — '
+            'rode ExportPcb no Altium.' % name.replace('<', '&lt;'),
+            mimetype='text/html', status=404)
+    body = BOM_BOOTSTRAP % {
+        'projEsc': name.replace('&', '&amp;').replace('<', '&lt;'),
+        'projJson': json.dumps(name),
+        'board': '/Projects/' + quote(name) + '/board.js',
+        'api': json.dumps('/api/bom/' + proj_id),
+    }
+    return Response(body, mimetype='text/html')
+
+
+@app.route('/api/bom/<proj_id>/vistos', methods=['GET'])
+def api_bom_vistos_get(proj_id):
+    d = _proj_dir_by_id(proj_id)
+    if d is None:
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    vistos = _bom_json_read(d, BOM_VISTOS)
+    return {'ok': True,
+            'vistos': vistos,
+            'rev': _bom_tag(vistos),
+            'boardRev': _mtime(os.path.join(d, 'board.js'))}
+
+
+@app.route('/api/bom/<proj_id>/vistos', methods=['POST'])
+def api_bom_vistos_set(proj_id):
+    """Marca e desmarca vistos da bancada.
+
+    NAO e so-localhost, de proposito: quem monta a placa esta no tablet, e e ele que
+    marca. Escreve um arquivo unico dentro da pasta do projeto, e o nome da pasta vem de
+    _proj_dir_by_id (nada de caminho vindo do cliente).
+
+    O corpo e um DELTA ({set:{chave:bool}}), nao o mapa inteiro: dois tablets marcando
+    pecas diferentes ao mesmo tempo se somam, em vez de o ultimo apagar o do outro.
+    """
+    d = _proj_dir_by_id(proj_id)
+    if d is None:
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return {'ok': False, 'error': 'JSON {set:{...}} ou {clear:true} obrigatorio'}, 400
+    mudar = data.get('set')
+    if mudar is not None and not isinstance(mudar, dict):
+        return {'ok': False, 'error': 'set tem que ser objeto'}, 400
+    with _bom_lock:
+        atual = {} if data.get('clear') else _bom_json_read(d, BOM_VISTOS)
+        for k, v in (mudar or {}).items():
+            if not isinstance(k, str) or not k or len(k) > 300:
+                return {'ok': False, 'error': 'chave de visto invalida'}, 400
+            if v:
+                atual[k] = True
+            else:
+                atual.pop(k, None)   # desmarcar APAGA: o arquivo guarda o que foi feito, so
+        if len(atual) > 20000:
+            return {'ok': False, 'error': 'vistos demais para uma placa'}, 400
+        try:
+            _bom_json_write(d, BOM_VISTOS, atual)
+        except OSError as e:
+            return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
+        return {'ok': True, 'vistos': atual, 'rev': _bom_tag(atual)}
+
+
+@app.route('/api/bom/<proj_id>/opts', methods=['GET'])
+def api_bom_opts_get(proj_id):
+    d = _proj_dir_by_id(proj_id)
+    if d is None:
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    return {'ok': True, 'opts': _bom_json_read(d, BOM_OPTS) or None}
+
+
+@app.route('/api/bom/<proj_id>/opts', methods=['POST'])
+def api_bom_opts_set(proj_id):
+    """As opcoes com que a aba gerou, para o link abrir do jeito que quem gerou escolheu.
+
+    Sao preferencia de exibicao (tema, lados, o que aparece), nao dado de projeto -- por
+    isso ficam em arquivo separado do board.js e podem ser reescritas a vontade.
+    """
+    d = _proj_dir_by_id(proj_id)
+    if d is None:
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    data = request.get_json(silent=True)
+    opts = data.get('opts') if isinstance(data, dict) else None
+    if not isinstance(opts, dict):
+        return {'ok': False, 'error': 'JSON {opts:{...}} obrigatorio'}, 400
+    if len(json.dumps(opts)) > 8000:
+        return {'ok': False, 'error': 'opcoes grandes demais'}, 400
+    try:
+        _bom_json_write(d, BOM_OPTS, opts)
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
+    return {'ok': True}
+
+
+@app.route('/api/bom/<proj_id>/link')
+def api_bom_link(proj_id):
+    """A URL do BOM deste projeto, no endereco que serve para OUTRA maquina.
+
+    Quem abre o hub em 127.0.0.1 copiaria um link que so funciona no proprio PC -- e o
+    ponto do link e justamente mandar para o tablet. Se o host do request ja e um
+    nome/IP de rede (o caso do dia em que isso virar um servidor de verdade), fica como
+    veio: o proprio Host: do request e a melhor pista de como se chega aqui.
+    """
+    if _proj_dir_by_id(proj_id) is None:
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    host, _, porta = request.host.partition(':')
+    trocado = False
+    if host in LOCAL_ADDRS:
+        ip = _lan_ip()
+        if ip:
+            host, trocado = ip, True
+    return {'ok': True,
+            'url': 'http://' + host + (':' + porta if porta else '') + '/bom/' + proj_id,
+            'lan': host not in LOCAL_ADDRS,
+            'trocado': trocado}
 
 
 def _lan_ip():

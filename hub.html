@@ -1021,12 +1021,10 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
           </div>
 
           <div class="nd-sep"></div>
-          <div class="kicker">arquivo</div>
+          <div class="kicker">link</div>
           <div class="lz-num" id="bomStats"></div>
           <div id="bomWarn"></div>
-          <button class="btn btn-primary" id="bomSalvar" style="width:100%;margin-top:16px">Salvar na pasta padrão</button>
-          <button class="btn btn-secondary" id="bomSalvarComo" style="width:100%;margin-top:6px">Salvar como…</button>
-          <button class="btn btn-ghost btn-sm" id="bomBaixar" style="width:100%;margin-top:6px">Baixar</button>
+          <button class="btn btn-primary" id="bomLink" style="width:100%;margin-top:16px">Copiar link</button>
           <p class="nd-hint bom-path" id="bomNome"></p>
         </aside>
 
@@ -1257,7 +1255,6 @@ const S = {
   laser: HubLaser.defaults(),
   /* opcoes do BOM interativo (por projeto) e a config da maquina (do servidor) */
   bom: HubBom.defaults(),
-  bomCfg: { bomDir: '' },
   /* sel = { k:'sym'|'fp'|'gone-sym'|'gone-fp', name }; fpShown troca so o preview de baixo */
   /* valQ = busca dentro da lista de valores; `valor` = o id do valor escolhido
      (o valor deixou de ser part do símbolo: agora é um conjunto de parâmetros) */
@@ -3568,12 +3565,22 @@ function bomCompute() {
   bomFooter();
 }
 
-/* o rodapé do painel: nome do arquivo e para onde ele vai. Vive fora de bomCompute
-   porque a pasta padrão agora muda no modal, com o BOM podendo nem estar gerado. */
+/* o rodapé do painel: a URL do BOM deste projeto. Vive fora de bomCompute porque o link
+   existe mesmo com o BOM ainda não gerado — a página é montada por quem abrir.
+
+   Enquanto ninguém copiou, mostra o endereço daqui; depois de copiar, mostra o que foi
+   copiado de verdade — que é o de REDE, e não o localhost que este navegador usou. */
+let bomUrl = null;          /* {id, url} do último link copiado */
 function bomFooter() {
   const p = proj();
-  $('#bomNome').textContent = HubBom.filename((p && p.name) || 'placa')
-    + (S.bomCfg.bomDir ? '  →  ' + S.bomCfg.bomDir : '  →  (sem pasta padrão)');
+  if (!p) { $('#bomNome').textContent = ''; return; }
+  if (!location.protocol.startsWith('http')) {
+    $('#bomNome').textContent = 'o link precisa do hub servido por hubserver.py';
+    return;
+  }
+  $('#bomNome').textContent = (bomUrl && bomUrl.id === p.id)
+    ? bomUrl.url
+    : location.origin + HubBom.linkDe(p.id);
 }
 function bomSchedule() {
   $('#bomMeta').textContent = 'gerando…';
@@ -3611,136 +3618,37 @@ function bomSyncControls() {
 }
 function bomSet(patch) { Object.assign(S.bom, patch); bomSave(); renderBom(); }
 
-/* ── configuração da máquina (pasta padrão) — mora no servidor, não no navegador:
-   o caminho e do disco do SERVIDOR, e no localStorage cada PC da LAN teria a sua versao de
-   um caminho que so o servidor usa. */
-async function bomCfgLoad() {
-  if (!location.protocol.startsWith('http')) return;
-  try {
-    const r = await fetch('/api/config');
-    if (!r.ok) return;
-    const j = await r.json();
-    if (j && j.ok && j.config) S.bomCfg = Object.assign({ bomDir: '' }, j.config);
-  } catch (e) {}
-}
-async function bomCfgSave(dir) {
-  if (!location.protocol.startsWith('http'))
-    return toast('a pasta padrão precisa do hub servido por hubserver.py', 'warn');
-  let resp;
-  try {
-    resp = await fetch('/api/config', { method:'POST', headers:{ 'Content-Type':'application/json' },
-                                        body: JSON.stringify({ bomDir: dir }) });
-  } catch (e) { return toast('servidor não respondeu: ' + e.message, 'err'); }
-  if (resp.status === 404)
-    return toast('rota /api/config não existe neste servidor — reinicie o hubserver.py', 'err');
-  let j = null; try { j = await resp.json(); } catch (e) {}
-  if (!j || !j.ok) return toast((j && j.error) || ('não foi possível gravar (HTTP ' + resp.status + ')'), 'err');
-  S.bomCfg = Object.assign({ bomDir: '' }, j.config);
-  bomFooter();          /* só a linha do destino mudou — não vale regerar o BOM inteiro */
-  toast(S.bomCfg.bomDir ? 'pasta padrão: ' + S.bomCfg.bomDir : 'pasta padrão limpa', 'ok');
-}
+/* ── o link do BOM ──────────────────────────────────────────────────────────────────
+   O BOM deixou de ser um arquivo que se baixa: cada projeto tem uma URL fixa, /bom/<id>,
+   que o hubserver monta na hora com o hub-bom.js ATUAL. Não existe cópia gravada em lugar
+   nenhum — é daí que vem a propriedade que se queria (melhorar o gerador melhora o BOM de
+   todos os projetos no mesmo instante) e é por isso que não há mais pasta padrão, "Salvar
+   como" nem "Baixar": não há arquivo para pôr em lugar algum.
 
-/* Abre a janela de pasta do Windows NO PC DO SERVIDOR e devolve o caminho, ou '' quando
-   não houve escolha. Cancelar e tempo esgotado voltam vazios de propósito: gravar ''
-   apagaria a pasta que já estava configurada. */
-async function bomPickDir() {
-  if (!location.protocol.startsWith('http')) { toast(t('cfg.proj.browseRemote'), 'warn'); return ''; }
-  let resp;
-  try { resp = await fetch('/api/pick-dir', { method: 'POST' }); }
-  catch (e) { toast(t('cfg.proj.browseFail', { e: e.message }), 'err'); return ''; }
-  if (resp.status === 404) { toast(t('cfg.proj.browseOld'), 'err'); return ''; }
-  let j = null; try { j = await resp.json(); } catch (e) {}
-  if (!j || !j.ok) {
-    toast((j && j.error) || t('cfg.proj.browseFail', { e: 'HTTP ' + resp.status }), 'err');
-    return '';
-  }
-  if (!j.dir) { toast(t('cfg.proj.browseNone'), 'warn'); return ''; }
-  return j.dir;
-}
-
-/* ── gravar ── */
-async function bomSalvar(dir, nome) {
-  const r = bomFeito || bomGerar();
-  if (!r) return toast('sem board.js — rode ExportPcb no Altium', 'err');
-  if (!location.protocol.startsWith('http'))
-    return toast('salvar em pasta precisa do hub servido por hubserver.py, não por file:// — use Baixar', 'warn');
-  if (!dir && !S.bomCfg.bomDir)
-    return toast('sem pasta padrão — defina em Configurações › Projeto, ou use "Salvar como…"', 'warn');
+   A lógica mora em HubBom.copiarLink, que é de quem gera o BOM. Aqui fica o que é da
+   casca: o aviso na tela e o rodapé. */
+async function bomCopiarLink() {
   const p = proj();
-  const body = { name: nome || HubBom.filename((p && p.name) || 'placa'), content: r.html };
-  if (dir) body.dir = dir;
-  let resp;
-  try {
-    resp = await fetch('/api/bom-save', { method:'POST', headers:{ 'Content-Type':'application/json' },
-                                          body: JSON.stringify(body) });
-  } catch (e) { return toast('servidor não respondeu: ' + e.message, 'err'); }
-  if (resp.status === 404)
-    return toast('rota /api/bom-save não existe neste servidor — reinicie o hubserver.py', 'err');
-  let j = null; try { j = await resp.json(); } catch (e) {}
-  if (!j) { toast('resposta inesperada do servidor (HTTP ' + resp.status + ')', 'err'); return false; }
-  if (!j.ok) { toast(j.error || ('não foi possível salvar (HTTP ' + resp.status + ')'), 'err'); return false; }
-  toast('salvo em ' + j.path, 'ok');
-  return true;
+  if (!p) return toast('sem projeto selecionado', 'err');
+  if (!bomBoard()) return toast('sem board.js — rode ExportPcb no Altium', 'err');
+  const r = await HubBom.copiarLink(p.id, S.bom);
+  if (!r.ok) return toast(r.error, 'err');
+  bomUrl = { id: p.id, url: r.url };
+  bomFooter();
+  if (r.copiou) return toast('link copiado: ' + r.url, 'ok');
+  /* área de transferência negada (acontece fora de contexto seguro): o link não pode
+     simplesmente sumir — ele está no rodapé, e o aviso diz onde. */
+  toast('não consegui copiar automaticamente — o link está no rodapé do painel', 'warn');
 }
 
-function bomBaixar() {
-  const r = bomFeito || bomGerar();
-  if (!r) return toast('sem board.js — rode ExportPcb no Altium', 'err');
-  const p = proj();
-  const nome = HubBom.filename((p && p.name) || 'placa');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([r.html], { type: 'text/html' }));
-  a.download = nome; a.click();
-  URL.revokeObjectURL(a.href);
-  toast(nome + ' baixado (' + (r.html.length/1024).toFixed(0) + ' KB)', 'ok');
-}
-
+/* "Abrir numa aba" vai para a MESMA URL do link, não para um blob: o que se vê aqui é
+   exatamente o que quem recebeu o link vê, com os vistos já marcados na bancada. */
 function bomAbrir() {
-  const r = bomFeito || bomGerar();
-  if (!r) return toast('sem board.js — rode ExportPcb no Altium', 'err');
-  const u = URL.createObjectURL(new Blob([r.html], { type: 'text/html' }));
-  window.open(u, '_blank');
-  /* nao revoga na hora: a aba nova ainda vai buscar o blob */
-  setTimeout(() => URL.revokeObjectURL(u), 60000);
-}
-
-/* "Salvar como" com pasta E nome, mais a opção de adotar a pasta como padrão — e a
-   mesma caixa que serve de área de mapeamento para quem prefere configurar na hora. */
-function openBomSaveAs() {
   const p = proj();
-  const bd = el('div', 'backdrop center'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
-  const d = el('div', 'dialog'); d.append(el('h3', null, 'Salvar BOM como'));
-  const f = el('div', 'nd-fields'); f.style.margin = '4px 0 2px';
-  const pasta = el('input', 'input mono'); pasta.type = 'text';
-  pasta.value = S.bomCfg.bomDir || ''; pasta.placeholder = 'D:\\Documentos\\BOM';
-  const arq = el('input', 'input mono'); arq.type = 'text';
-  arq.value = HubBom.filename((p && p.name) || 'placa');
-  f.append(el('span', 'k', 'pasta'), pasta, el('span', 'k', 'arquivo'), arq);
-  d.append(f);
-  const lab = el('label', 'nd-check');
-  const padrao = document.createElement('input'); padrao.type = 'checkbox';
-  lab.append(padrao, document.createTextNode(' usar esta pasta como padrão daqui em diante'));
-  d.append(lab);
-  const hint = el('p', 'nd-hint', 'a pasta é no disco do PC que roda o hubserver. Ela é criada se '
-    + 'a pasta acima dela já existir; senão o hub avisa em vez de criar a árvore toda.');
-  d.append(hint);
-  const act = el('div'); act.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:6px';
-  const cancel = el('button', 'btn btn-ghost', 'Cancelar'); cancel.onclick = closeOverlay;
-  const ok = el('button', 'btn btn-primary', 'Salvar');
-  ok.onclick = async () => {
-    const dir = pasta.value.trim(), nome = arq.value.trim();
-    if (!dir) return toast('informe a pasta', 'warn');
-    /* .html e nao .htm: e o que o servidor aceita, e recusar aqui evita fechar o dialogo
-       para levar um 403 depois */
-    if (!/\.html$/i.test(nome)) return toast('o arquivo tem que terminar em .html', 'warn');
-    closeOverlay();
-    /* a pasta padrao so muda DEPOIS de a gravacao dar certo: adotar um caminho que nem
-       aceitou o arquivo deixaria o botao "Salvar" apontando para o lugar errado */
-    if (!(await bomSalvar(dir, nome))) return;
-    if (padrao.checked) await bomCfgSave(dir);
-  };
-  act.append(cancel, ok); d.append(act); bd.append(d); $('#overlay').append(bd);
-  pasta.focus();
+  if (!p) return toast('sem projeto selecionado', 'err');
+  if (!location.protocol.startsWith('http'))
+    return toast('a página do BOM precisa do hub servido por hubserver.py', 'warn');
+  window.open(HubBom.linkDe(p.id), '_blank');
 }
 
 /* sem projeto não há barra, abas nem painel para desenhar (todos leem proj()):
@@ -3934,27 +3842,6 @@ function cfgPaneProjeto(pane) {
                                            t: LIB.index.odooRows });
     pane.append(q);
   }
-
-  pane.append(el('div', 'kicker', t('cfg.proj.bomDir')));
-  const row = el('div', 'cfgm-dir');
-  const dir = el('input', 'input mono'); dir.type = 'text';
-  dir.value = S.bomCfg.bomDir || ''; dir.placeholder = 'D:\\Documentos\\BOM';
-  const pick = el('button', 'btn btn-secondary', t('cfg.proj.browse'));
-  const save = el('button', 'btn btn-primary', t('cfg.proj.save'));
-  pick.onclick = async () => {
-    /* o fetch fica pendurado enquanto a janela estiver aberta lá — daí o botão travado
-       e o rótulo mudando: sem isso o segundo clique leva 409 do servidor */
-    const rotulo = pick.textContent;
-    pick.disabled = true; pick.textContent = t('cfg.proj.browsing');
-    const escolhido = await bomPickDir();
-    pick.disabled = false; pick.textContent = rotulo;
-    if (!escolhido) return;    /* cancelar já se explicou; gravar '' apagaria a pasta */
-    dir.value = escolhido;
-    bomCfgSave(escolhido);
-  };
-  save.onclick = () => bomCfgSave(dir.value.trim());
-  row.append(dir, pick, save);
-  pane.append(row, cfgHint('cfg.proj.bomHint'), cfgHint('cfg.proj.browseHint'));
 
   pane.append(el('div', 'kicker', t('cfg.proj.risk')));
   const del = el('button', 'btn btn-danger', t('cfg.delete'));
@@ -4158,9 +4045,7 @@ $('#bomLayout').onchange = e => bomSet({ layout: e.target.value });
   S.bom.empresa = $('#bomEmpresa').value; S.bom.revisao = $('#bomRev').value;
   bomSave(); bomSchedule();
 }));
-$('#bomSalvar').onclick = () => bomSalvar(null, null);
-$('#bomSalvarComo').onclick = openBomSaveAs;
-$('#bomBaixar').onclick = bomBaixar;
+$('#bomLink').onclick = bomCopiarLink;
 $('#bomAbrir').onclick = bomAbrir;
 
 /* ── laser ── */
@@ -4259,9 +4144,6 @@ document.addEventListener('keydown', e => {
     e.append(inner); pane.append(e);
     return;
   }
-  /* a pasta padrao do BOM e da MAQUINA, nao do projeto: carrega uma vez, antes da primeira
-     tela, para o rodape do painel ja dizer para onde "Salvar" vai escrever */
-  await bomCfgLoad();
   /* indice dos acervos: leve, e sem ele o combobox de biblioteca nasce com uma opcao so */
   await loadLibTabelas();
   const url = readURL();
