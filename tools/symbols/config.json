@@ -1,0 +1,10 @@
+{
+  "schlib": "Y:\\Biblioteca\\ALTIUM LIBRARY ------ LUCAS\\BIBLIOTECA DE ESQUEMA.SchLib",
+  "backup_dir": "Y:\\Biblioteca\\ALTIUM LIBRARY ------ LUCAS\\Backup-hub",
+  "fontes": [
+    "Y:\\Biblioteca\\ALTIUM LIBRARY ------ LUCAS",
+    "Y:\\EQUIPAMENTOS ATUALIZADOS",
+    "Y:\\EQUIPAMENTOS_REVISADOS"
+  ],
+  "ignorar": ["History", "__Previews", "Project Outputs", "Project Logs", "Backup-hub"]
+}
