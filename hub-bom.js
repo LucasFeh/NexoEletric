@@ -266,6 +266,9 @@ header{padding:10px 14px;border-bottom:1px solid var(--linha);background:var(--p
   display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;position:sticky;top:0;z-index:5}
 h1{font-size:15px;margin:0;font-weight:600}
 .meta{color:var(--fg2);font-size:12px}
+/* a data/empresa/rev se alinha pela linha de baixo do titulo (as contas), e nao pelo
+   meio do bloco: duas legendas de 12px na mesma base leem como uma faixa so */
+header>.meta{align-self:flex-end}
 .tools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-left:auto}
 button.t{font:inherit;font-size:12px;padding:3px 9px;border:1px solid var(--linha);
   background:var(--pane);color:var(--fg);border-radius:6px;cursor:pointer}
