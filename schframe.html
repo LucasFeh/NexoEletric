@@ -8,11 +8,23 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <style>
-  :root{ --bg:#1b1b1b; --panel:#242424; --panel2:#2d2d2d; --border:#3a3a3a;
+  :root{ color-scheme:dark;     /* lista aberta do select e setas do input number vem escuras */
+    --bg:#1b1b1b; --panel:#242424; --panel2:#2d2d2d; --border:#3a3a3a; --scroll:#4a4a4a;
     --fg:#d8d8d8; --fg-dim:#9a9a9a; --accent:#4fc3f7; --warn:#ffd54f; --err:#ff5252; --ok:#00e676;
     --sel:#2979ff; }
   *{box-sizing:border-box; margin:0; padding:0;}
   html,body{height:100%; overflow:hidden;}
+  /* barra de rolagem no tema da pagina — a mesma receita do hub: polegar arredondado com uma
+     borda da cor do painel que o afasta das laterais, trilho invisivel. O Chrome ignora os
+     ::-webkit-scrollbar quando scrollbar-color esta definido, por isso a forma padrao
+     (Firefox) fica atras do @supports. */
+  ::-webkit-scrollbar{width:10px; height:10px;}
+  ::-webkit-scrollbar-thumb{background:var(--scroll); border-radius:8px; border:3px solid var(--panel);}
+  ::-webkit-scrollbar-thumb:hover{background:var(--fg-dim);}
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner{background:transparent;}
+  @supports not selector(::-webkit-scrollbar){
+    *{scrollbar-width:thin; scrollbar-color:var(--scroll) transparent;}
+  }
   body{background:var(--bg); color:var(--fg); font:13px/1.45 "Segoe UI",sans-serif; display:flex; flex-direction:column;}
   button{background:var(--panel2); color:var(--fg); border:1px solid var(--border);
     border-radius:3px; padding:3px 10px; font-size:12px; cursor:pointer;}
