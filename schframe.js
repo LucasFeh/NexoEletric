@@ -4,7 +4,50 @@
 
 const fatal = m => { const f = document.getElementById('fatal'); f.style.display = 'flex'; f.textContent = m; };
 if (typeof schematic === 'undefined') { fatal('schematic.js não encontrado para o projeto "' + SCH_P + '".'); return; }
-const SLIB = typeof schlib  !== 'undefined' ? schlib  : { symbols:[] };
+/* ------- acervos -------
+   A folha pode referenciar simbolo da SchLib do Altium OU das bibliotecas do
+   almoxarifado. SLIB precisa conter todos: e ele que o desenho, a extracao de nets e a
+   validacao consultam — um simbolo de fora viraria quadrado vermelho e erro de
+   validacao. O picker e que separa por acervo, na hora de escolher. */
+const _acervo = (g, id, titulo) => (g && g.symbols && g.symbols.length)
+  ? { id, titulo: g.title || titulo, syms: g.symbols, almox: id !== 'altium' } : null;
+const ACERVOS = [
+  _acervo(typeof schlib         !== 'undefined' ? schlib         : null, 'altium', 'Biblioteca do Altium'),
+  _acervo(typeof almoxBasicos   !== 'undefined' ? almoxBasicos   : null, 'almox-basicos', 'Almoxarifado — Básicos'),
+  _acervo(typeof almoxEspeciais !== 'undefined' ? almoxEspeciais : null, 'almox-especiais', 'Almoxarifado — Especiais'),
+].filter(Boolean);
+
+const SLIB = { symbols: [] };
+const ACERVO_DE = new Map();
+for (const a of ACERVOS) for (const sy of a.syms) {
+  if (ACERVO_DE.has(sy.name)) continue;      /* o do Altium ganha em caso de xara */
+  ACERVO_DE.set(sy.name, a);
+  SLIB.symbols.push(sy);
+}
+
+/* Na conversao para o Altium cada VALOR virou um componente proprio, com nome
+   "SMD 0805 10K 1/8W". E esse nome que o schematic.js grava, porque e ele que existe
+   la dentro. Aqui registramos cada um como um simbolo que REAPROVEITA a geometria da
+   familia (mesma referencia de objeto, sem copia), para o hub desenhar, extrair nets e
+   validar sem precisar saber da diferenca. */
+const VALOR_DE = new Map();
+for (const a of ACERVOS) {
+  if (!a.almox) continue;
+  for (const sy of a.syms) for (const v of (sy.valores || [])) {
+    if (!v.altium || ACERVO_DE.has(v.altium)) continue;
+    const alias = {
+      name: v.altium, description: (v.itens && v.itens[0] && v.itens[0].nome) || v.label,
+      designator: sy.designator, familia: sy.familia, partcount: 1,
+      parts: sy.parts,                       /* a MESMA geometria, compartilhada */
+      footprints: v.footprint ? [{ name: v.footprint, current: true, incurrentlib: true }]
+                              : (sy.footprints || []),
+      valores: [v], deValor: true,
+    };
+    ACERVO_DE.set(alias.name, a);
+    VALOR_DE.set(alias.name, { sym: sy, valor: v });
+    SLIB.symbols.push(alias);
+  }
+}
 const PLIB = typeof pcblib  !== 'undefined' ? pcblib  : { footprints:[] };
 /* antes de qualquer symbolOf: sem as tabelas o resolvedor casa so por nome exato e por
    chave, e metade dos componentes viraria quadrado vermelho na folha */
@@ -75,6 +118,10 @@ document.getElementById('toolSelect').addEventListener('click', () => setSchTool
 let pickSym = null, placing = null, hoverW = null;
 
 function refPrefixOf(name){
+  /* o simbolo do almoxarifado carrega o designador ("R", "C", "DS"...); so o do Altium
+     precisa do palpite pela primeira letra do nome */
+  const sy = SLIB.symbols.find(x => x.name === name);
+  if (sy && sy.designator) return String(sy.designator).toUpperCase();
   const m = String(name || '').match(/^[A-Za-z]+/);
   return m ? m[0].toUpperCase() : 'U';
 }
@@ -82,7 +129,7 @@ function allComps(){ const out = []; for (const s of model.sheets) for (const c 
 function nextRef(symName){
   const comps = allComps();
   const same = comps.filter(c => c.sym === symName);
-  let prefix = same.length ? refPrefixOf(same[0].ref) : refPrefixOf(symName).slice(0, 1);
+  let prefix = same.length ? refPrefixOf(same[0].ref) : refPrefixOf(symName);
   let mx = 0;
   for (const c of comps){
     const m = String(c.ref).match(/^([A-Za-z]+)(\d+)$/);
@@ -90,19 +137,62 @@ function nextRef(symName){
   }
   return prefix + (mx + 1);
 }
+function acervoAtual(){
+  const id = document.getElementById('picksrc').value;
+  return ACERVOS.find(a => a.id === id) || ACERVOS[0];
+}
+const qtdFmt = n => (Math.round((n || 0) * 100) / 100).toLocaleString('pt-BR');
+/* No acervo do almoxarifado o simbolo tem UMA parte e uma lista de VALORES; cada valor
+   e um conjunto de parametros (Comment, Value, MPN, Mouser, Estoque, Local). O que se
+   escolhe no picker e o valor, nao a parte. */
+const valoresDe = sy => (sy && sy.valores) || [];
+const valorDe = (sy, id) => valoresDe(sy).find(v => v.id === +id) || null;
+/* os parametros viram um campo plano "K=V;K=V" no schematic.js: o parser do
+   BuildSchematic le linha a linha e nao aguenta objeto aninhado */
+const limpaPar = t => String(t == null ? '' : t).replace(/[;=|]/g, ',').trim();
+function paramsDoValor(v){
+  if (!v) return '';
+  const pares = [];
+  for (const q of (v.params || [])) if (q.v) pares.push(limpaPar(q.n) + '=' + limpaPar(q.v));
+  pares.push('ValorId=' + v.id);
+  return pares.join(';');
+}
+function buildPickSrc(){
+  const sel = document.getElementById('picksrc');
+  if (sel.options.length) return;
+  for (const a of ACERVOS){
+    const o = document.createElement('option');
+    o.value = a.id; o.textContent = a.titulo;
+    sel.appendChild(o);
+  }
+}
 function buildPickList(){
   const q = document.getElementById('picksearch').value.trim().toLowerCase();
+  const ac = acervoAtual();
   const list = document.getElementById('picklist');
   list.innerHTML = '';
-  const syms = (SLIB.symbols || []).filter(s =>
-    !q || s.name.toLowerCase().includes(q) || String(s.description || '').toLowerCase().includes(q)).slice(0, 60);
+  /* no acervo do almoxarifado a busca tambem entra nos VALORES: e assim que se acha
+     "10k" ou um codigo Mouser sem saber em que familia ele mora */
+  const casa = s => {
+    if (!q) return true;
+    if (s.name.toLowerCase().includes(q)) return true;
+    if (String(s.description || '').toLowerCase().includes(q)) return true;
+    if (!ac.almox) return false;
+    return valoresDe(s).some(p =>
+      (p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '')).toLowerCase().includes(q));
+  };
+  const syms = ac.syms.filter(casa).slice(0, 60);   /* ac.syms = familias, sem os alias */
   for (const s of syms){
     const div = document.createElement('div');
     div.className = 'pickitem' + (pickSym === s ? ' sel' : '');
-    div.textContent = s.name + (s.description ? ' — ' + s.description : '');
+    const n = valoresDe(s).length || s.partcount || 1;
+    div.textContent = s.name + (ac.almox && n > 1 ? '  (' + n + ' valores)' : '')
+                    + (s.description ? ' — ' + s.description : '');
     div.addEventListener('click', () => selectPickSym(s));
     list.appendChild(div);
   }
+  document.getElementById('picksrcinfo').textContent =
+    syms.length + (syms.length === 60 ? '+' : '') + ' de ' + ac.syms.length;
   if (!syms.length) list.innerHTML = '<div style="color:var(--fg-dim); font-size:11px;">nada encontrado</div>';
 }
 function selectPickSym(s){
@@ -120,11 +210,25 @@ function selectPickSym(s){
     if (cur && n === cur.name) o.selected = true;
     fps.appendChild(o);
   }
+  /* no almoxarifado o combo lista os VALORES, com o saldo do lado; na schlib do
+     Altium ele volta a ser a lista de partes do simbolo multi-part */
   const parts = document.getElementById('pickpart');
   parts.innerHTML = '';
-  const pc = s.partcount || (s.parts || []).length || 1;
-  for (let i = 1; i <= pc; i++){ const o = document.createElement('option'); o.textContent = i; parts.appendChild(o); }
+  const vals = valoresDe(s);
+  if (vals.length){
+    for (const v of vals){
+      const o = document.createElement('option');
+      o.value = v.id;
+      o.textContent = v.label + (typeof v.estoque === 'number' ? '  (' + qtdFmt(v.estoque) + ')' : '')
+                    + (v.fora ? '  [fora do Odoo]' : '');
+      parts.appendChild(o);
+    }
+  } else {
+    const pc = s.partcount || (s.parts || []).length || 1;
+    for (let i = 1; i <= pc; i++){ const o = document.createElement('option'); o.value = i; o.textContent = i; parts.appendChild(o); }
+  }
   document.getElementById('pickref').value = nextRef(s.name);
+  sincronizaValor();
   drawPickPreview();
 }
 function drawPickPreview(){
@@ -134,7 +238,8 @@ function drawPickPreview(){
   pctx.fillStyle = '#fffef2';
   pctx.fillRect(0, 0, pcv.width, pcv.height);
   if (!pickSym) return;
-  const part = HubCore.partOf(pickSym, +document.getElementById('pickpart').value || 1);
+  const part = valoresDe(pickSym).length ? (pickSym.parts || [])[0]
+             : HubCore.partOf(pickSym, +document.getElementById('pickpart').value || 1);
   if (part){
     const bb = D.symBBox(part);
     const sc = Math.min((pcv.width/2 - 16) / Math.max(bb.x2 - bb.x1, 1), (pcv.height - 16) / Math.max(bb.y2 - bb.y1, 1));
@@ -153,33 +258,173 @@ function drawPickPreview(){
 }
 function openPicker(){
   if (!editOn) return;
+  buildPickSrc();
   document.getElementById('pickform').style.display = 'block';
   buildPickList();
   document.getElementById('picksearch').focus();
 }
 function closePicker(){ document.getElementById('pickform').style.display = 'none'; }
+/* escolher o valor sugere o footprint daquele encapsulamento e preenche o comment */
+function sincronizaValor(){
+  if (!pickSym) return;
+  const v = valorDe(pickSym, document.getElementById('pickpart').value);
+  if (!v) return;
+  const fps = document.getElementById('pickfp');
+  for (const o of fps.options) if (o.textContent === v.footprint) { o.selected = true; break; }
+  document.getElementById('pickcomment').value = v.label;
+}
 document.getElementById('picksearch').addEventListener('input', buildPickList);
+document.getElementById('picksrc').addEventListener('change', () => { pickSym = null; buildPickList(); });
 document.getElementById('pickfp').addEventListener('change', drawPickPreview);
-document.getElementById('pickpart').addEventListener('change', drawPickPreview);
+document.getElementById('pickpart').addEventListener('change', () => { sincronizaValor(); drawPickPreview(); });
 document.getElementById('toolComp').addEventListener('click', openPicker);
 document.getElementById('pickcancel').addEventListener('click', closePicker);
 document.getElementById('pickok').addEventListener('click', () => {
   if (!pickSym) return;
   const ref = document.getElementById('pickref').value.trim();
   if (!ref){ alert('Informe o ref.'); return; }
-  placing = { sym:pickSym.name, part:+document.getElementById('pickpart').value || 1,
+  const vsel = valorDe(pickSym, document.getElementById('pickpart').value);
+  placing = { sym:(vsel && vsel.altium) || pickSym.name,
+              part: vsel ? 1 : (+document.getElementById('pickpart').value || 1),
               footprint:document.getElementById('pickfp').value, ref,
               comment:document.getElementById('pickcomment').value.trim().replace(/"/g, "'"),
+              params: paramsDoValor(vsel),
               rot:0, mirror:false };
   closePicker();
   document.getElementById('cv').style.cursor = 'copy';
 });
+/* ------- lista de componentes (o "carrinho") -------
+   Escolher um a um e ja posicionar cada um quebra o raciocinio de quem esta montando o
+   circuito. Aqui a escolha (simbolo + valor + footprint + quantidade) vai se juntando
+   numa lista, e no fim tudo cai na folha de uma vez, em grade, para depois ser arrastado
+   e ligado. A lista mora na memoria da vista; o que persiste e o schematic.js.        */
+let cesta = [];
+
+function cestaAtualiza(){
+  const n = cesta.reduce((a, c) => a + c.qtd, 0);
+  const alvo = document.getElementById('toolCestaN');
+  if (alvo) alvo.textContent = n ? '(' + n + ')' : '';
+  const info = document.getElementById('cestainfo');
+  if (info) info.textContent = n ? n + ' componente(s)' : 'vazia';
+  const lista = document.getElementById('cestalist');
+  if (!lista) return;
+  lista.innerHTML = '';
+  if (!cesta.length){
+    lista.innerHTML = '<div style="color:var(--fg-dim); font-size:11px;">'
+      + 'Escolha em "+ Componente" e clique em <b>+ Lista</b>.</div>';
+    return;
+  }
+  cesta.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; gap:6px; align-items:baseline; padding:3px 0;'
+                      + 'border-bottom:1px solid var(--border); font-size:11px;';
+    const est = c.estoque === null || c.estoque === undefined ? ''
+              : (c.estoque >= c.qtd ? '' : '  ⚠ saldo ' + qtdFmt(c.estoque));
+    const txt = document.createElement('div');
+    txt.style.cssText = 'flex:1; min-width:0;';
+    txt.innerHTML = '<div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">'
+      + (c.qtd > 1 ? '<b>' + c.qtd + '×</b> ' : '') + esc(c.rotulo) + '</div>'
+      + '<div style="color:var(--fg-dim);">' + esc(c.sym) + ' · ' + esc(c.footprint || 'sem footprint')
+      + '<span style="color:var(--warn,#ffd54f)">' + esc(est) + '</span></div>';
+    const menos = document.createElement('button');
+    menos.textContent = '−'; menos.title = 'uma a menos';
+    menos.addEventListener('click', () => { if (--cesta[i].qtd <= 0) cesta.splice(i, 1); cestaAtualiza(); });
+    const mais = document.createElement('button');
+    mais.textContent = '+'; mais.title = 'uma a mais';
+    mais.addEventListener('click', () => { cesta[i].qtd++; cestaAtualiza(); });
+    const fora = document.createElement('button');
+    fora.textContent = '✕'; fora.title = 'tirar da lista';
+    fora.addEventListener('click', () => { cesta.splice(i, 1); cestaAtualiza(); });
+    row.append(txt, menos, mais, fora);
+    lista.appendChild(row);
+  });
+}
+const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g,
+  ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[ch]));
+
+function cestaAdiciona(){
+  if (!pickSym) return;
+  const escolha = document.getElementById('pickpart').value;
+  const v = valorDe(pickSym, escolha);
+  const qtd = Math.max(1, Math.min(99, +document.getElementById('pickqtd').value || 1));
+  const comment = document.getElementById('pickcomment').value.trim().replace(/"/g, "'");
+  cesta.push({
+    /* o nome do componente no Altium: cada valor e um componente proprio na lib da
+       familia ("SMD 0805 10K 1/8W"). O espelho do hub continua por familia. */
+    sym: (v && v.altium) || pickSym.name,
+    part: v ? 1 : (+escolha || 1),
+    footprint: document.getElementById('pickfp').value,
+    comment: comment || (v && v.label) || '',
+    params: paramsDoValor(v),
+    rotulo: (v && v.label) || (pickSym.name + ' parte ' + escolha),
+    estoque: v && typeof v.estoque === 'number' ? v.estoque : null,
+    qtd,
+  });
+  cestaAtualiza();
+  abreCesta();
+}
+
+/* joga a lista inteira na folha, em grade, a partir de um canto livre */
+function cestaColoca(){
+  if (!editOn){ alert('Clique em "Editar" antes.'); return; }
+  if (!cesta.length) return;
+  const folha = model.sheets[sheetIdx];
+  const usados = folha.comps || [];
+  /* comeca abaixo do que ja existe, para nao cair em cima do circuito */
+  let y0 = 6200, x0 = 800;
+  if (usados.length){
+    const minY = Math.min.apply(null, usados.map(c => c.y));
+    y0 = snap100(minY - 900);
+  }
+  const PASSO_X = 700, PASSO_Y = 800, LARGURA = 9;
+  let i = 0, postos = 0;
+  for (const item of cesta){
+    for (let k = 0; k < item.qtd; k++){
+      const c = {
+        t: 'comp', sheet: folha.name, ref: nextRef(item.sym), sym: item.sym,
+        x: snap100(x0 + (i % LARGURA) * PASSO_X),
+        y: snap100(y0 - Math.floor(i / LARGURA) * PASSO_Y),
+        rot: 0, footprint: item.footprint,
+      };
+      if (item.part !== 1) c.part = item.part;
+      if (item.comment) c.comment = item.comment;
+      if (item.params) c.params = item.params;
+      schematic.items.push(c);
+      /* o model precisa enxergar o que acabou de entrar, senao o nextRef repete o ref */
+      model = HubCore.buildSchModel(schematic);
+      i++; postos++;
+    }
+  }
+  cesta = [];
+  cestaAtualiza();
+  commit();
+  alert(postos + ' componente(s) colocados na folha "' + folha.name + '". '
+      + 'Arraste, ligue os fios e clique em Salvar.');
+}
+
+function abreCesta(){ document.getElementById('cesta').style.display = 'block'; cestaAtualiza(); }
+function fechaCesta(){ document.getElementById('cesta').style.display = 'none'; }
+
+document.getElementById('pickadd').addEventListener('click', cestaAdiciona);
+document.getElementById('toolCesta').addEventListener('click', () => {
+  const el = document.getElementById('cesta');
+  if (el.style.display === 'block') fechaCesta(); else abreCesta();
+});
+document.getElementById('cestafechar').addEventListener('click', fechaCesta);
+document.getElementById('cestalimpa').addEventListener('click', () => {
+  if (cesta.length && !confirm('Esvaziar a lista?')) return;
+  cesta = []; cestaAtualiza();
+});
+document.getElementById('cestacolocar').addEventListener('click', cestaColoca);
+cestaAtualiza();
+
 function placeComp(w){
   const c = { t:'comp', sheet:model.sheets[sheetIdx].name, ref:placing.ref, sym:placing.sym,
               x:snap100(w.x), y:snap100(w.y), rot:placing.rot, footprint:placing.footprint };
   if (placing.part !== 1) c.part = placing.part;
   if (placing.mirror) c.mirror = true;
   if (placing.comment) c.comment = placing.comment;
+  if (placing.params) c.params = placing.params;
   schematic.items.push(c);
   const m = placing.ref.match(/^([A-Za-z]+)(\d+)$/);
   placing.ref = m ? m[1] + (+m[2] + 1) : placing.ref + '2';

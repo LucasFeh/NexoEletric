@@ -19,12 +19,19 @@ const
   SCRIPT_HOME = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror';
   PROJECTS_DIR = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects';
   SCHLIB_FILE = 'Z:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib';
+  // Bibliotecas do almoxarifado (tools\almox), procuradas DEPOIS da principal:
+  // xara de nome resolve pela biblioteca da casa. A pasta. Sao uma por familia (ALMOX RESISTOR,
+  // ALMOX CAPACITOR CERAMICO...), geradas pela sincronizacao do hub; o script varre
+  // a pasta em vez de listar arquivo por arquivo.
+  ALMOX_DIR = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Libs\Almox';
   PCBLIB_FILE = 'Z:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE FOOTPRINT.PcbLib';
 
 var
   Report: TStringList;
   OkCount, FailCount: Integer;
   SchLibDoc: ISch_Document;
+  SchLibs: TInterfaceList;      // todas as SchLib de origem, na ordem de busca
+  SchLibNomes: TStringList;     // os caminhos, para as mensagens
   ScanInfo: String; // diagnostico do ultimo ListProjectDirs (aparece nos dialogos)
   PcbFpNames: TStringList;   // nil = PcbLib indisponivel (validacao de footprint vira aviso)
 
@@ -588,35 +595,84 @@ end;
 
 { ------------------------------- bibliotecas reais ------------------------------- }
 
+// Abre uma SchLib e pendura na lista de origens. Ausente nao e erro: o almoxarifado
+// pode ainda nao ter sido gerado, e a biblioteca da casa sozinha continua servindo.
+procedure AddSchLib(Caminho: String);
+var
+  Doc: ISch_Document;
+begin
+  Doc := SchServer.GetSchDocumentByPath(Caminho);
+  if Doc = nil then
+    Doc := SchServer.LoadSchDocumentByPath(Caminho);
+  if Doc <> nil then
+  begin
+    SchLibs.Add(Doc);
+    SchLibNomes.Add(Caminho);
+  end;
+end;
+
+// Abre todas as .SchLib da pasta do almoxarifado. Sem a pasta, segue so com a lib da
+// casa - quem nunca sincronizou continua montando esquema normalmente.
+procedure AddAlmoxLibs(Dummy: Integer);
+var
+  Busca: TSearchRec;
+  Achou: Integer;
+begin
+  if not DirectoryExists(ALMOX_DIR) then
+    Exit;
+  Achou := FindFirst(ALMOX_DIR + '\*.SchLib', faAnyFile, Busca);
+  while Achou = 0 do
+  begin
+    AddSchLib(ALMOX_DIR + '\' + Busca.Name);
+    Achou := FindNext(Busca);
+  end;
+  FindClose(Busca);
+end;
+
 function OpenSchLib(Dummy: Integer): Boolean;
 begin
   Result := False;
   if SchServer = nil then
     Exit;
-  SchLibDoc := SchServer.GetSchDocumentByPath(SCHLIB_FILE);
-  if SchLibDoc = nil then
-    SchLibDoc := SchServer.LoadSchDocumentByPath(SCHLIB_FILE);
-  Result := SchLibDoc <> nil;
+  SchLibs := TInterfaceList.Create;
+  SchLibNomes := TStringList.Create;
+  AddSchLib(SCHLIB_FILE);
+  AddAlmoxLibs(0);
+  if SchLibs.Count = 0 then
+    Exit;
+  SchLibDoc := SchLibs.Items[0];      // a principal, para quem ainda usa a global
+  Result := True;
 end;
 
+// Procura o simbolo em TODAS as bibliotecas abertas, na ordem em que entraram. E o que
+// deixa a folha misturar componente da biblioteca da casa com valor vindo do
+// almoxarifado, sem ninguem ter que dizer de onde cada um veio.
 function FindLibSymbol(Name: String): ISch_Component;
 var
   Iterator, Comp: TObject;
+  Lib: ISch_Document;
+  k: Integer;
 begin
   Result := nil;
-  Iterator := SchLibDoc.SchLibIterator_Create;
-  Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
-  Comp := Iterator.FirstSchObject;
-  while Comp <> nil do
+  for k := 0 to SchLibs.Count - 1 do
   begin
-    if AnsiCompareText(Comp.LibReference, Name) = 0 then
+    Lib := SchLibs.Items[k];
+    Iterator := Lib.SchLibIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+    Comp := Iterator.FirstSchObject;
+    while Comp <> nil do
     begin
-      Result := Comp;
-      break;
+      if AnsiCompareText(Comp.LibReference, Name) = 0 then
+      begin
+        Result := Comp;
+        break;
+      end;
+      Comp := Iterator.NextSchObject;
     end;
-    Comp := Iterator.NextSchObject;
+    Lib.SchIterator_Destroy(Iterator);
+    if Result <> nil then
+      Exit;
   end;
-  SchLibDoc.SchIterator_Destroy(Iterator);
 end;
 
 procedure LoadPcbFpNames(Dummy: Integer);
@@ -722,6 +778,65 @@ begin
   end;
 end;
 
+// Escreve "Chave=Valor;Chave=Valor" como parametros do componente. Parametro que ja
+// existe (o simbolo do almoxarifado nasce com todos declarados e ocultos) e reaproveitado
+// em vez de duplicado - dois "Value" no mesmo componente confundem o BOM.
+procedure AplicaParams(Comp: ISch_Component; Texto: String);
+var
+  i, p: Integer;
+  Campo, Nome, Valor: String;
+  Iter, Obj, Alvo: TObject;
+  Par: ISch_Parameter;
+begin
+  Texto := Texto + ';';
+  Campo := '';
+  for i := 1 to Length(Texto) do
+  begin
+    if Texto[i] <> ';' then
+    begin
+      Campo := Campo + Texto[i];
+      Continue;
+    end;
+    p := Pos('=', Campo);
+    if (p > 1) and (Length(Campo) > p) then
+    begin
+      Nome := Copy(Campo, 1, p - 1);
+      Valor := Copy(Campo, p + 1, Length(Campo));
+      Alvo := nil;
+      Iter := Comp.SchIterator_Create;
+      Iter.AddFilter_ObjectSet(MkSet(eParameter));
+      Obj := Iter.FirstSchObject;
+      while Obj <> nil do
+      begin
+        if AnsiCompareText(Obj.Name, Nome) = 0 then
+        begin
+          Alvo := Obj;
+          break;
+        end;
+        Obj := Iter.NextSchObject;
+      end;
+      Comp.SchIterator_Destroy(Iter);
+
+      if Alvo <> nil then
+        Alvo.Text := Valor
+      else
+      begin
+        Par := SchServer.SchObjectFactory(eParameter, eCreate_GlobalCopy);
+        if Par <> nil then
+        begin
+          Par.Name := Nome;
+          Par.Text := Valor;
+          Par.IsHidden := True;
+          Par.OwnerPartId := -1;
+          Par.Location := Point(Comp.Location.X, Comp.Location.Y);
+          Comp.AddSchObject(Par);
+        end;
+      end;
+    end;
+    Campo := '';
+  end;
+end;
+
 procedure PlaceComp(SchDoc: ISch_Document; Line: String);
 var
   LibComp, NewComp: TObject;
@@ -758,6 +873,11 @@ begin
   NewComp.Designator.Text := Ref;
   if JHas(Line, 'comment') then
     NewComp.Comment.Text := JGet(Line, 'comment');
+  // O valor do almoxarifado nao e mais uma PART do simbolo: ele chega como um campo
+  // "params" no formato Chave=Valor;Chave=Valor e vira parametro do componente. E o
+  // que leva Value/MPN/Mouser/Estoque/Local/OdooId para o BOM e para a folha.
+  if JHas(Line, 'params') then
+    AplicaParams(NewComp, JGet(Line, 'params'));
   RegisterObj(SchDoc, NewComp);
   SetFootprint(NewComp, JGet(Line, 'footprint'), Ref);
   LogOk('comp ' + Ref + ' (' + JGet(Line, 'sym') + ' / ' + JGet(Line, 'footprint') + ')');
@@ -1332,7 +1452,8 @@ begin
 
   if not OpenSchLib(0) then
   begin
-    ShowMessage('Nao consegui abrir a SchLib:' + #13#10 + SCHLIB_FILE + #13#10 +
+    ShowMessage('Nao consegui abrir nenhuma SchLib de origem:' + #13#10 +
+      SCHLIB_FILE + #13#10 + ALMOX_DIR + #13#10#13#10 +
       'Abra a biblioteca no Altium e rode de novo.');
     Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free; ItemSheets.Free;
     Exit;
@@ -1340,7 +1461,8 @@ begin
   for i := 0 to Syms.Count - 1 do
     if FindLibSymbol(Syms[i]) = nil then
     begin
-      Report.Add('[ERRO] simbolo "' + Syms[i] + '" nao existe na SchLib');
+      Report.Add('[ERRO] simbolo "' + Syms[i] + '" nao existe em nenhuma das '
+                 + IntToStr(SchLibs.Count) + ' SchLib de origem');
       ErrCount := ErrCount + 1;
     end;
 

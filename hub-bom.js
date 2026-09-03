@@ -968,6 +968,13 @@ function ligaV3(){
   cv.addEventListener('wheel', function (ev){
     ev.preventDefault();
     anim = null;
+    /* Shift + roda anda para os lados, como nas outras vistas */
+    if (ev.shiftKey){
+      var d = (ev.deltaX || ev.deltaY) * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 400 : 1);
+      v3.cx += d / v3.esc;
+      desenha3();
+      return;
+    }
     /* amplia no CURSOR, como as vistas 2D fazem: o ponto sob o ponteiro nao sai do lugar */
     var antes = planoDe(cv, ev);
     var dy = ev.deltaY * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 400 : 1);
@@ -1401,6 +1408,13 @@ function liga(c){
   c.cv.addEventListener('wheel', function (ev){
     ev.preventDefault();
     anim = null;
+    /* Shift + roda anda para os lados; c.lado inverte, porque o verso e espelhado */
+    if (ev.shiftKey){
+      var d = (ev.deltaX || ev.deltaY) * (ev.deltaMode === 1 ? 16 : ev.deltaMode === 2 ? 400 : 1);
+      c.cx += (c.lado ? -1 : 1) * d / c.esc;
+      desenha(c);
+      return;
+    }
     var r = c.cv.getBoundingClientRect();
     var antes = c.mundo(ev.clientX - r.left, ev.clientY - r.top);
     /* deltaMode: 0 = pixel (Chrome), 1 = linha (Firefox, ~3 por entalhe), 2 = pagina.

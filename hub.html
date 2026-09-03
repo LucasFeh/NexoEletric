@@ -14,49 +14,152 @@
 <!-- gravação (POST /api/save, com queda para download em file://) — a aba Biblioteca
      escreve Libs/lib-subs.js por aqui -->
 <script src="hub-io.js"></script>
+<!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
+<script src="hub-i18n.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    1. TOKENS — única fonte de verdade de cor, espaço, raio e sombra.
    Nunca escreva um hex fora deste bloco.
+
+   O tema mora em dois atributos que o menu de configuração escreve no <html>:
+   data-mode = dark|light  e  data-theme = grafite|papel|altium|placa. Sem JS, o
+   :root cru vale como Grafite escuro — o hub abre igual ao que sempre foi.
+
+   Um TEMA só troca os neutros (fundo, superfície, texto, destaque); MODO cuida de
+   status, sombra e scrim. Por isso cada bloco de tema é curto: 14 tokens.
+
+   --tint é o RGB do véu que cobre hover, seleção e faixa — sempre a cor do TEXTO,
+   porque o véu é o texto encostando no fundo. No claro ele vira tinta escura, e é
+   isso que faz cada `rgba(var(--tint), α)` da folha inteira virar de lado sozinho.
    ═══════════════════════════════════════════════════════════════ */
 :root {
-  color-scheme: dark;     /* lista aberta do select e setas do input number vêm escuras */
+  --font: "Inter", system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  --bg:        #0f0f11;   /* fundo da página */
-  --surface:   #1a1a1d;   /* cards, menus, inputs, painéis */
-  --surface-2: #161619;   /* painel lateral, faixas */
-  --sunken:    #0b0b0d;   /* rodapé, viewport do canvas */
-  --text:      #f2f2f3;
-  --text-2:    #a8a8ae;   /* texto secundário */
-  --text-3:    #7a7a80;   /* metadados, rótulos */
-  --text-4:    #57575d;   /* numeração, texto desligado */
-  --line:      rgba(242,242,243,0.14);
-  --line-soft: rgba(242,242,243,0.08);
-  --hi:        #d8d8dd;   /* destaque = branco-cinza, nunca cor */
+  --sp-1: 3px; --sp-2: 6px; --sp-3: 8px; --sp-4: 11px; --sp-6: 17px; --sp-8: 22px;
+  --r-sm: 5px; --r-md: 8px; --r-lg: 14px;
+
+  --line:      rgba(var(--tint), 0.14);
+  --line-soft: rgba(var(--tint), 0.08);
+  --sheet:     #fffef2;  /* folha do Altium — o preview do simbolo mantem a cor real da lib */
+
+  --page-min: 1040px;      /* abaixo disso a página rola na horizontal */
+  --aside-w: 330px;        /* painel de detalhe do componente */
+  --picker-w: 420px;       /* seletor de projeto */
+}
+
+/* ── Fonte da casca — ortogonal a tema e modo ───────────────────
+   Só o ATRIBUTO viaja no localStorage; as pilhas moram aqui, para não existirem em
+   dois lugares e divergirem. data-font="inter" é o :root cru e não precisa de bloco. */
+:root[data-font="sistema"] { --font: system-ui, "Segoe UI", Roboto, -apple-system, "Helvetica Neue", sans-serif; }
+:root[data-font="bancada"] { --font: Verdana, "DejaVu Sans", Geneva, Tahoma, sans-serif; }
+:root[data-font="mono"]    { --font: var(--mono); }
+
+/* ── Modo escuro (padrão) · status, sombra e scrim ─────────────── */
+:root {
+  color-scheme: dark;     /* lista aberta do select e setas do input number vêm escuras */
 
   /* Cor carrega STATUS e nada mais. */
   --ok:    #4bbf7b;   /* online, etapa concluída, sucesso */
   --warn:  #d6a75a;   /* pendente, aviso de DRC */
   --err:   #e0555a;   /* offline, erro, sem esquema */
   --idle:  #4a4a50;   /* inativo, não iniciado */
+  --warn-soft: rgba(214,167,90,0.12);
+  --err-soft:  rgba(224,85,90,0.15);
 
-  --font: "Inter", system-ui, -apple-system, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --on-hi: #10120f;   /* texto por cima de --hi preenchido */
+  --scrim: rgba(11,11,13,0.55);
+  /* sombra = escuridão ambiente, não cor */
+  --shadow-menu: 0 0 0 1px rgba(var(--tint), 0.16), 0 16px 40px rgba(0,0,0,0.65);
+}
 
-  --sp-1: 3px; --sp-2: 6px; --sp-3: 8px; --sp-4: 11px; --sp-6: 17px; --sp-8: 22px;
-  --r-sm: 5px; --r-md: 8px; --r-lg: 14px;
-  --shadow-menu: 0 0 0 1px #3a3a40, 0 16px 40px rgba(0,0,0,0.65); /* sombra = escuridão ambiente, não cor */
+/* ── Modo claro ────────────────────────────────────────────────── */
+:root[data-mode="light"] {
+  color-scheme: light;
 
-  --surface-3: #17171a;  /* topo do gradiente do header */
-  --edge:      #2a2a2e;  /* borda interna de tag, card e viewport */
-  --scroll:    #34343a;  /* polegar da barra de rolagem */
-  --dot-idle:  #3a3a40;  /* ponto de etapa não iniciada */
-  --scrim:     rgba(11,11,13,0.55);
-  --sheet:     #fffef2;  /* folha do Altium — o preview do simbolo mantem a cor real da lib */
+  --ok:    #17804a;
+  --warn:  #8a6210;
+  --err:   #b8322f;
+  --idle:  #c0c0c7;
+  --warn-soft: rgba(138,98,16,0.13);
+  --err-soft:  rgba(184,50,47,0.12);
 
-  --page-min: 1040px;      /* abaixo disso a página rola na horizontal */
-  --aside-w: 330px;        /* painel de detalhe do componente */
-  --picker-w: 420px;       /* seletor de projeto */
+  --on-hi: #f7f7f8;
+  --scrim: rgba(22,22,26,0.32);
+  --shadow-menu: 0 0 0 1px rgba(var(--tint), 0.13), 0 14px 36px rgba(var(--tint), 0.16);
+}
+
+/* ── Tema Grafite · escuro (o hub de sempre, e o fallback sem JS) ─ */
+:root {
+  --bg:        #0f0f11;   /* fundo da página */
+  --surface:   #1a1a1d;   /* cards, menus, inputs, painéis */
+  --surface-2: #161619;   /* painel lateral, faixas */
+  --surface-3: #17171a;   /* topo do gradiente do header */
+  --sunken:    #0b0b0d;   /* rodapé, viewport do canvas */
+  --text:      #f2f2f3;
+  --text-2:    #a8a8ae;   /* texto secundário */
+  --text-3:    #7a7a80;   /* metadados, rótulos */
+  --text-4:    #57575d;   /* numeração, texto desligado */
+  --hi:        #d8d8dd;   /* destaque = branco-cinza, nunca cor */
+  --tint:      242,242,243;
+  --edge:      #2a2a2e;   /* borda interna de tag, card e viewport */
+  --scroll:    #34343a;   /* polegar da barra de rolagem */
+  --dot-idle:  #3a3a40;   /* ponto de etapa não iniciada */
+}
+:root[data-mode="light"] {
+  --bg: #f3f3f5; --surface: #ffffff; --surface-2: #eaeaee; --surface-3: #fbfbfc;
+  --sunken: #e4e4e8;
+  --text: #16161a; --text-2: #55555e; --text-3: #78787f; --text-4: #9b9ba2;
+  --hi: #26262c; --tint: 22,22,26;
+  --edge: #dcdce1; --scroll: #c4c4cb; --dot-idle: #cdcdd4;
+}
+
+/* ── Tema Papel · tinta sobre folha quente ─────────────────────── */
+:root[data-theme="papel"][data-mode="dark"] {
+  --bg: #14110d; --surface: #1e1a14; --surface-2: #191510; --surface-3: #221d16;
+  --sunken: #0e0c08;
+  --text: #f2ebdd; --text-2: #b3a894; --text-3: #8b8172; --text-4: #665e51;
+  --hi: #e8dcc4; --tint: 242,235,221;
+  --edge: #322b21; --scroll: #3e372b; --dot-idle: #393228;
+}
+:root[data-theme="papel"][data-mode="light"] {
+  --bg: #f4f0e6; --surface: #fffdf6; --surface-2: #ebe6d9; --surface-3: #faf7ee;
+  --sunken: #e6e0d0;
+  --text: #29251e; --text-2: #61594b; --text-3: #837a68; --text-4: #a39984;
+  --hi: #3c352a; --tint: 41,37,30;
+  --edge: #ddd5c4; --scroll: #c7bda8; --dot-idle: #d2cab8;
+}
+
+/* ── Tema Altium · azul de placa e o âmbar da barra de ferramentas ─ */
+:root[data-theme="altium"][data-mode="dark"] {
+  --bg: #0b0f16; --surface: #131a24; --surface-2: #101722; --surface-3: #151f2b;
+  --sunken: #070a0f;
+  --text: #e6edf6; --text-2: #99a8bc; --text-3: #73829a; --text-4: #54627a;
+  --hi: #e9a63f; --tint: 230,237,246;
+  --edge: #212f43; --scroll: #2b3b52; --dot-idle: #293649;
+}
+:root[data-theme="altium"][data-mode="light"] {
+  --bg: #edf1f7; --surface: #ffffff; --surface-2: #e2e8f1; --surface-3: #f7f9fc;
+  --sunken: #dce3ed;
+  --text: #0f1721; --text-2: #495667; --text-3: #6c7a8c; --text-4: #929fb0;
+  --hi: #9a5a05; --tint: 15,23,33;
+  --edge: #d2dae5; --scroll: #b7c2d0; --dot-idle: #c5ceda;
+}
+
+/* ── Tema Placa · máscara verde e o dourado do ENIG ────────────── */
+:root[data-theme="placa"][data-mode="dark"] {
+  --bg: #08120e; --surface: #0f1f18; --surface-2: #0c1913; --surface-3: #11231b;
+  --sunken: #050c09;
+  --text: #e6f2e9; --text-2: #92ac9d; --text-3: #6d8678; --text-4: #516459;
+  --hi: #d9b45c; --tint: 230,242,233;
+  --edge: #1c3228; --scroll: #263f35; --dot-idle: #22372c;
+}
+:root[data-theme="placa"][data-mode="light"] {
+  --bg: #edf4ee; --surface: #ffffff; --surface-2: #e1ebe4; --surface-3: #f6faf7;
+  --sunken: #dae6dd;
+  --text: #0e1b14; --text-2: #47574d; --text-3: #6a7c71; --text-4: #90a197;
+  --hi: #6f5210; --tint: 14,27,20;
+  --edge: #cfddd4; --scroll: #b5c7bb; --dot-idle: #c2d2c7;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -68,7 +171,7 @@ h1,h2,h3,h4 { font-weight: 500; letter-spacing: -0.015em; margin: 0; line-height
 button, input, select, textarea { font: inherit; color: inherit; }
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--hi); outline-offset: 2px; }
-::selection { background: rgba(242,242,243,0.22); }
+::selection { background: rgba(var(--tint),0.22); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 8px; border: 3px solid var(--bg); }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -95,13 +198,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn svg { display: block; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary { color: var(--hi); border-color: var(--hi); }          /* contornado, nunca preenchido */
-.btn-primary:hover { background: rgba(242,242,243,0.10); }
-.btn-primary:active { background: rgba(242,242,243,0.18); }
+.btn-primary:hover { background: rgba(var(--tint),0.10); }
+.btn-primary:active { background: rgba(var(--tint),0.18); }
 .btn-secondary { border-color: var(--line); }
-.btn-secondary:hover { background: rgba(242,242,243,0.07); }
-.btn-secondary:active { background: rgba(242,242,243,0.13); }
+.btn-secondary:hover { background: rgba(var(--tint),0.07); }
+.btn-secondary:active { background: rgba(var(--tint),0.13); }
 .btn-ghost { color: var(--hi); padding-inline: var(--sp-1); }
-.btn-ghost:hover { background: rgba(242,242,243,0.08); }
+.btn-ghost:hover { background: rgba(var(--tint),0.08); }
 .btn-icon { width: 34px; height: 34px; padding: 0; }
 .btn-sm { font-size: 12px; padding: 4px 10px; }
 
@@ -117,7 +220,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--r-md); caret-color: var(--hi);
 }
-.input:hover { border-color: rgba(242,242,243,0.30); }
+.input:hover { border-color: rgba(var(--tint),0.30); }
 .input:focus-visible { border-color: var(--hi); outline-offset: 0; }
 
 /* ── 4. Header ────────────────────────────────────────────────── */
@@ -127,7 +230,13 @@ header {
   background: linear-gradient(180deg, var(--surface-3), var(--bg));
   box-shadow: inset 0 -1px 0 var(--line);
 }
-.brand { display: flex; align-items: baseline; gap: 8px; flex: none; }
+/* a marca é o botão do menu do hub: fica na quina, onde se procura menu */
+.brand { display: flex; align-items: baseline; gap: 8px; flex: none;
+  cursor: pointer; border: 1px solid transparent; background: transparent; color: inherit;
+  margin-left: -9px; padding: 5px 9px; border-radius: var(--r-md); }
+.brand:hover { background: rgba(var(--tint),0.07); }
+.brand[aria-expanded="true"] { background: rgba(var(--tint),0.11); }
+.brand svg { align-self: center; opacity: 0.55; }
 .brand b { font-weight: 500; font-size: 15px; }
 .brand span { font-size: 11px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-3); }
 .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
@@ -156,7 +265,7 @@ header {
   width: 100%; text-align: left; cursor: pointer;
   border: 0; background: transparent; border-radius: var(--r-sm); padding: 7px 9px;
 }
-.picker-item:hover, .picker-item.active { background: rgba(242,242,243,0.09); }
+.picker-item:hover, .picker-item.active { background: rgba(var(--tint),0.09); }
 .picker-item .nm { font-size: 13px; }
 .picker-item .sub { font-size: 11px; color: var(--text-3); }
 .picker-item .dots { display: flex; gap: 3px; flex: none; }
@@ -164,7 +273,7 @@ header {
 .dot-sm { width: 5px; height: 5px; }
 .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
 .dot.err { background: var(--err); } .dot.idle { background: var(--dot-idle); }
-.dot.now { background: var(--text); box-shadow: 0 0 0 2px rgba(242,242,243,0.22); }
+.dot.now { background: var(--text); box-shadow: 0 0 0 2px rgba(var(--tint),0.22); }
 
 /* ── 6. Barra do projeto + pipeline ───────────────────────────── */
 .projbar { display: flex; align-items: center; gap: 24px; padding: 14px 18px 12px; }
@@ -181,8 +290,8 @@ header {
 .stage .mark { width: 6px; height: 6px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px var(--idle); }
 .stage.done { color: var(--text-2); }
 .stage.done .mark { background: var(--ok); box-shadow: none; }
-.stage.now { color: var(--text); box-shadow: inset 0 0 0 1px var(--hi); background: rgba(242,242,243,0.08); }
-.stage.now .mark { background: var(--text); box-shadow: 0 0 0 3px rgba(242,242,243,0.22); }
+.stage.now { color: var(--text); box-shadow: inset 0 0 0 1px var(--hi); background: rgba(var(--tint),0.08); }
+.stage.now .mark { background: var(--text); box-shadow: 0 0 0 3px rgba(var(--tint),0.22); }
 .projbar .actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
 .pending { font-size: 12px; color: var(--warn); }
 
@@ -198,9 +307,27 @@ header {
 }
 .tab:hover { color: var(--text-2); }
 .tab[aria-selected="true"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--hi); }
-.tab .n { font-size: 10px; padding: 1px 5px; border-radius: var(--r-sm); background: rgba(242,242,243,0.07); color: var(--text-3); }
-.tab[aria-selected="true"] .n { background: rgba(242,242,243,0.16); color: var(--text); }
+.tab .n { font-size: 10px; padding: 1px 5px; border-radius: var(--r-sm); background: rgba(var(--tint),0.07); color: var(--text-3); }
+.tab[aria-selected="true"] .n { background: rgba(var(--tint),0.16); color: var(--text); }
 .aggr { margin-left: auto; display: flex; gap: 16px; font-size: 11px; color: var(--text-3); padding-bottom: 8px; }
+
+/* Sub-abas: PCB (placa · componentes · nets) e Biblioteca (sch lib · footprint lib · footprints).
+   Segunda fileira, mais discreta que a de cima — a hierarquia tem que se ler de relance,
+   senão são só duas fileiras de abas brigando. Some quando a aba de cima não tem filhas. */
+.subtabs { display: flex; align-items: center; gap: 2px; padding: 6px 18px 0;
+  box-shadow: inset 0 -1px 0 var(--line); }
+.subtabs[hidden] { display: none; }
+.subtab { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border: 0;
+  background: transparent; color: var(--text-4); font-size: 12px; padding: 4px 10px 7px; }
+.subtab:hover { color: var(--text-2); }
+.subtab[aria-selected="true"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--hi); }
+.subtab .n { font-size: 10px; padding: 1px 5px; border-radius: var(--r-sm);
+  background: rgba(var(--tint),0.07); color: var(--text-4); font-variant-numeric: tabular-nums; }
+.subtab[aria-selected="true"] .n { background: rgba(var(--tint),0.16); color: var(--text); }
+/* o seletor de biblioteca vive à direita da fileira de sub-abas: é onde se troca de acervo */
+.subtabs .libpick { margin-left: auto; display: flex; align-items: center; gap: 7px;
+  padding-bottom: 5px; font-size: 11px; color: var(--text-4); }
+.subtabs .libpick select.input { max-width: 240px; }
 .aggr b { font-weight: 400; color: var(--text-2); }
 
 /* ── 8. Main ──────────────────────────────────────────────────── */
@@ -217,7 +344,7 @@ main { overflow: hidden; min-height: 0; }
 .canvas-bar .right { margin-left: auto; display: flex; gap: 6px; }
 .viewport {
   position: relative; margin: 0 18px 18px; border-radius: var(--r-md); overflow: hidden; min-height: 0;
-  background: var(--sunken) radial-gradient(circle at 1px 1px, rgba(242,242,243,0.10) 1px, transparent 0) 0 0 / 22px 22px;
+  background: var(--sunken) radial-gradient(circle at 1px 1px, rgba(var(--tint),0.10) 1px, transparent 0) 0 0 / 22px 22px;
   box-shadow: inset 0 0 0 1px var(--edge);
 }
 .zoom { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 4px; }
@@ -234,8 +361,8 @@ thead th {
 }
 tbody td { padding: var(--sp-2); border-bottom: 1px solid var(--line-soft); }
 tbody tr { cursor: pointer; }
-tbody tr:hover { background: rgba(242,242,243,0.04); }
-tbody tr[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow: inset 2px 0 0 var(--hi); }
+tbody tr:hover { background: rgba(var(--tint),0.04); }
+tbody tr[aria-selected="true"] { background: rgba(var(--tint),0.09); box-shadow: inset 2px 0 0 var(--hi); }
 .r { text-align: right; }
 
 /* componentes: tabela + detalhe */
@@ -285,11 +412,11 @@ tbody tr[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow:
 .lz-view .viewport { margin: 0 12px 18px; background: #f4f4f2; }
 .lz-seg { display: flex; gap: 6px; margin-top: 8px; }
 .lz-seg .btn { flex: 1; }
-.lz-seg .btn.on { background: var(--hi); color: #10120f; border-color: var(--hi); }
+.lz-seg .btn.on { background: var(--hi); color: var(--on-hi); border-color: var(--hi); }
 .lz-layer { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 8px; color: var(--text-2); }
 .lz-swatch { width: 11px; height: 11px; border-radius: 2px; border: 1px solid var(--line); flex: none; }
 .lz-warn { margin-top: 10px; padding: 8px 10px; border-radius: var(--r-sm);
-  background: rgba(214,167,90,0.12); color: var(--warn); font-size: 11px; line-height: 1.5; }
+  background: var(--warn-soft); color: var(--warn); font-size: 11px; line-height: 1.5; }
 /* editor de camadas: cada linha e uma camada do LightBurn; dá para repetir a mesma
    geometria em camadas diferentes (duas passadas de limpeza, por exemplo) */
 .lz-lrow { display: grid; grid-template-columns: 12px 56px 1fr 22px 22px 22px;
@@ -317,8 +444,8 @@ tbody tr[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow:
 .nd-grid .comp-bar .input { max-width: 240px; }
 .nd-kind { display: inline-flex; font-size: 10px; letter-spacing: 0.04em;
   padding: 2px 6px; border-radius: var(--r-sm); background: var(--edge); color: var(--text-2); }
-.nd-kind.pth { background: rgba(224,85,90,0.15); color: var(--err); }
-.nd-kind.misto { background: rgba(214,167,90,0.15); color: var(--warn); }
+.nd-kind.pth { background: var(--err-soft); color: var(--err); }
+.nd-kind.misto { background: var(--warn-soft); color: var(--warn); }
 .nd-inc { width: 15px; height: 15px; accent-color: var(--hi); vertical-align: middle; }
 .nd-inc:disabled { opacity: 0.4; cursor: default; }
 td.nd-c { cursor: default; }
@@ -353,16 +480,94 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .lib-head { padding: 13px 8px 4px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-4); }
 .lib-row { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; cursor: pointer;
   border: 0; background: transparent; color: inherit; border-radius: var(--r-sm); padding: 5px 8px; }
-.lib-row:hover { background: rgba(242,242,243,0.05); }
-.lib-row[aria-selected="true"] { background: rgba(242,242,243,0.09); box-shadow: inset 2px 0 0 var(--hi); }
+.lib-row:hover { background: rgba(var(--tint),0.05); }
+.lib-row[aria-selected="true"] { background: rgba(var(--tint),0.09); box-shadow: inset 2px 0 0 var(--hi); }
 .lib-row .nm { flex: 1 1 auto; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-row .nm.gone { color: var(--err); }
 .lib-row .mt { flex: none; font-size: 11px; color: var(--text-4); }
 .lib-row .pill { flex: none; font-size: 10px; padding: 1px 5px; border-radius: var(--r-sm);
-  background: rgba(242,242,243,0.07); color: var(--text-3); }
+  background: rgba(var(--tint),0.07); color: var(--text-3); }
 .lib-row .pill.warn { color: var(--warn); }
+
+/* ── biblioteca do almoxarifado ────────────────────────────────
+   O que muda em relação ao espelho da SchLib: o painel de baixo deixa de ser o
+   preview do footprint (que ainda não existe) e passa a ser a LISTA DE VALORES —
+   uma linha por part, com o saldo do almoxarifado ao lado. É a tabela que responde
+   à pergunta que motivou a lib: "tem esse valor aí?". */
+/* o `hidden` precisa ganhar do display:grid/flex abaixo — sem isto a linha continua na grade */
+.alx-box[hidden], .canvas-bar[hidden], .viewport[hidden], .seg[hidden] { display: none !important; }
+.alx-box { display: grid; grid-template-rows: auto minmax(0,1fr); min-height: 0; margin: 0 12px 12px;
+  border-radius: var(--r-md); box-shadow: inset 0 0 0 1px var(--edge); background: var(--surface); }
+.alx-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.alx-bar .input { min-height: 26px; font-size: 12px; }
+.alx-bar .count { margin-left: auto; font-size: 11px; color: var(--text-4); white-space: nowrap; }
+.alx-list { overflow: auto; padding: 0 4px 8px; }
+.alx-row { display: grid; grid-template-columns: 30px 1fr auto auto; gap: 8px; align-items: center;
+  width: 100%; text-align: left; cursor: pointer; border: 0; background: transparent; color: inherit;
+  border-radius: var(--r-sm); padding: 5px 7px; }
+.alx-row:hover { background: rgba(var(--tint),0.05); }
+.alx-row[aria-selected="true"] { background: rgba(var(--tint),0.10); box-shadow: inset 2px 0 0 var(--hi); }
+.alx-row .ix { font-size: 10px; color: var(--text-4); font-variant-numeric: tabular-nums; text-align: right; }
+.alx-row .lb { min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alx-row .pk { font-size: 10px; color: var(--text-4); white-space: nowrap; }
+.alx-row .qt { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ok);
+  min-width: 46px; text-align: right; }
+.alx-row .qt.zero { color: var(--text-4); }
+.alx-empty { padding: 18px; text-align: center; font-size: 12px; color: var(--text-4); }
+/* barrinha de saldo: leitura de relance de quem está em falta, sem ler o número */
+.alx-bars { display: flex; gap: 2px; align-items: flex-end; height: 26px; padding: 0 8px 4px; }
+.alx-bars i { flex: 1 1 0; min-width: 1px; background: rgba(var(--tint),0.25); border-radius: 1px; }
+.alx-bars i.zero { background: rgba(var(--tint),0.08); }
+/* o que chegou na última sincronização, marcado onde se procura componente */
+.lib-row .pill.novo { color: var(--ok); box-shadow: inset 0 0 0 1px rgba(var(--tint),0.18); }
+.alx-novo, .alx-fora { font-style: normal; font-size: 9px; letter-spacing: .04em;
+  text-transform: uppercase; margin-left: 6px; vertical-align: 1px; }
+.alx-novo { color: var(--ok); }
+/* valor que saiu do Odoo mas continua ocupando o seu número de part */
+.alx-fora { color: var(--warn); }
+.alx-row.fora .lb, .alx-row.fora .pk { color: var(--text-4); }
+
+/* diálogo de sincronização */
+.alx-dlg { width: min(680px, 100%); max-height: min(78vh, 760px); display: flex;
+  flex-direction: column; gap: 10px; }
+.alx-nota { font-size: 12px; color: var(--text-3); margin: 0; line-height: 1.5; }
+.alx-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
+.alx-acoes .btn:nth-child(2) { margin-right: auto; }
+.alx-cred { font-size: 12px; color: var(--text-3); }
+.alx-cred summary { cursor: pointer; padding: 4px 0; }
+.alx-grade { display: grid; grid-template-columns: 78px 1fr; gap: 6px 10px;
+  align-items: center; margin: 8px 0; }
+.alx-grade .k { font-size: 11px; color: var(--text-4); }
+.alx-grade .input { min-height: 28px; font-size: 12px; }
+/* o log é fonte mono e rola sozinho: é o stdout do gerador chegando por SSE */
+.alx-log { font-family: var(--mono); font-size: 11px; line-height: 1.65; color: var(--text-2);
+  background: var(--sunken); border-radius: var(--r-md); padding: 9px 11px;
+  max-height: 190px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.alx-log[hidden], .alx-res[hidden] { display: none; }
+.alx-res { overflow: auto; min-height: 0; }
+.alx-resumo { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 11px;
+  color: var(--text-4); padding: 2px 0 4px; }
+.alx-resumo b { font-weight: 400; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.alx-diff { display: flex; flex-direction: column; margin: 4px 0 10px; }
+.alx-di { display: grid; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr) auto; gap: 10px;
+  align-items: baseline; font-size: 12px; padding: 3px 0;
+  border-bottom: 1px solid var(--line-soft); }
+.alx-di .a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alx-di .b { font-size: 11px; color: var(--text-4); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.alx-di .c { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums;
+  white-space: nowrap; }
+.alx-di .c.ok { color: var(--ok); }
+.alx-di .c.warn { color: var(--warn); }
+.alx-mais { font-size: 11px; color: var(--text-4); padding: 5px 0 0; }
+
+/* ficha do item do Odoo, no aside */
+.alx-item { padding: 7px 0; border-bottom: 1px solid var(--line-soft); font-size: 11px; }
+.alx-item .t { font-size: 12px; color: var(--text-2); }
+.alx-item .d { color: var(--text-4); margin-top: 2px; display: flex; flex-wrap: wrap; gap: 3px 10px; }
+.alx-item .d b { font-weight: 400; color: var(--text-3); }
 button.tag { border: 0; cursor: pointer; }
-button.tag:hover { background: rgba(242,242,243,0.20); }
+button.tag:hover { background: rgba(var(--tint),0.20); }
 button.tag.gone { color: var(--err); }
 
 /* segmentado (tudo · símbolos · footprints · ausentes) */
@@ -371,7 +576,7 @@ button.tag.gone { color: var(--err); }
 .seg button { cursor: pointer; border: 0; background: transparent; color: var(--text-3);
   font-size: 12px; padding: 4px 9px; border-radius: var(--r-sm); }
 .seg button:hover { color: var(--text-2); }
-.seg button[aria-pressed="true"] { background: rgba(242,242,243,0.12); color: var(--text); }
+.seg button[aria-pressed="true"] { background: rgba(var(--tint),0.12); color: var(--text); }
 .seg button .n { font-variant-numeric: tabular-nums; color: var(--text-4); margin-left: 4px; }
 
 .lib-view { display: grid; grid-template-rows: auto minmax(0,1fr) auto minmax(0,1fr); min-height: 0; }
@@ -397,7 +602,7 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
 .flow { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
 .step { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: default; border: 0; background: transparent; color: var(--text-3); font-size: 11px; padding: 3px 8px; border-radius: var(--r-sm); }
 .step .n { color: var(--text-4); }
-.step.now { background: rgba(242,242,243,0.10); color: var(--text); }
+.step.now { background: rgba(var(--tint),0.10); color: var(--text); }
 
 /* ── 10. Overlays ─────────────────────────────────────────────── */
 .backdrop { position: fixed; inset: 0; z-index: 60; display: grid; background: var(--scrim); }
@@ -407,17 +612,88 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
 .dialog h3 { font-size: 20px; }
 .menu { width: 300px; padding: 6px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-menu); }
 .menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left; cursor: pointer; border: 0; background: transparent; border-radius: var(--r-sm); padding: 7px 9px; }
-.menu button:hover { background: rgba(242,242,243,0.09); }
+.menu button:hover { background: rgba(var(--tint),0.09); }
 .menu .l { font-size: 13px; }
 .menu .c { font-size: 11px; color: var(--text-3); }
+
+/* ── Modal de configuração — cabeçalho, nav lateral e painéis ────
+   Não reusa .menu nem .dialog: aqui a casca é uma grade de duas colunas com altura
+   fixa, para trocar de aba não fazer o modal pular de tamanho. */
+.backdrop.anchor-tl { align-items: start; justify-items: start; padding: 54px 18px; }
+.cfgm { width: min(760px, 100%); height: min(560px, calc(100vh - 72px));
+  display: grid; grid-template-rows: auto minmax(0,1fr);
+  border-radius: var(--r-lg); background: var(--surface);
+  box-shadow: var(--shadow-menu); overflow: hidden; }
+.cfgm-head { display: flex; align-items: center; gap: 10px; padding: 13px 14px 13px 20px;
+  box-shadow: inset 0 -1px 0 var(--line); }
+.cfgm-head h3 { font-size: 17px; }
+.cfgm-head .btn { margin-left: auto; }
+.cfgm-body { display: grid; grid-template-columns: 172px minmax(0,1fr); min-height: 0; }
+.cfgm-nav { display: flex; flex-direction: column; gap: 2px; padding: 10px 8px;
+  background: var(--surface-2); box-shadow: inset -1px 0 0 var(--line); }
+.cfgm-nav button { width: 100%; text-align: left; cursor: pointer; border: 0;
+  background: transparent; color: var(--text-3); font-size: 13px;
+  padding: 8px 11px; border-radius: var(--r-sm); }
+.cfgm-nav button:hover { background: rgba(var(--tint),0.06); color: var(--text-2); }
+.cfgm-nav button[aria-selected="true"] { background: rgba(var(--tint),0.10);
+  color: var(--text); box-shadow: inset 2px 0 0 var(--hi); }
+.cfgm-pane { overflow-y: auto; padding: 16px 20px 24px; min-height: 0; }
+.cfgm-pane .kicker { margin-top: 18px; }
+.cfgm-pane > .kicker:first-child { margin-top: 0; }
+.cfgm-hint { margin: 6px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-4); }
+.cfgm-hint b { font-weight: 500; color: var(--text-3); }
+.cfgm-val { margin: 5px 0 0; font-size: 13px; word-break: break-all; }
+.cfgm-val.sub { font-size: 11px; color: var(--text-3); }
+/* campo do Layout: rótulo à esquerda, combobox à direita, ajuda embaixo do combobox */
+.cfgm-field { display: grid; grid-template-columns: 100px minmax(0,1fr);
+  gap: 5px 12px; align-items: center; margin-top: 16px; }
+.cfgm-field > label { font-size: 13px; color: var(--text-2); }
+.cfgm-field > .cfgm-hint { grid-column: 2; margin: 2px 0 0; }
+/* select.input nasce width:auto e 12px (serve barra de painel); no modal preenche a coluna */
+.cfgm-field select.input { width: 100%; min-height: 32px; font-size: 13px; padding: 4px 8px; }
+/* pasta padrão: caminho, escolher e gravar na mesma linha */
+.cfgm-dir { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 6px; margin-top: 7px; }
+.cfgm-dir .input { min-height: 32px; }
+/* uma ação = rótulo + o comando real, com o botão de rodar à direita quando ela roda */
+.cfgm-act { display: flex; align-items: center; gap: 10px; padding: 9px 0;
+  border-bottom: 1px solid var(--line-soft); }
+.cfgm-act > div { flex: 1; min-width: 0; }
+.cfgm-act .l { font-size: 13px; }
+.cfgm-act .c { font-size: 11px; color: var(--text-3); }
+.cfgm-step { display: grid; grid-template-columns: 20px minmax(0,1fr); gap: 10px; padding: 7px 0; }
+.cfgm-step .n { font-size: 12px; color: var(--text-4); }
+.cfgm-step .l { font-size: 13px; }
+.cfgm-step .h { font-size: 11px; line-height: 1.5; color: var(--text-3); }
+.btn-danger { color: var(--err); border-color: var(--err); }
+.btn-danger:hover { background: var(--err-soft); }
 .toast { position: fixed; left: 50%; bottom: 54px; transform: translateX(-50%); z-index: 80; display: none; align-items: center; gap: 9px; padding: 9px 14px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-menu); font-size: 13px; }
 .toast.on { display: flex; }
 </style>
+<script>
+/* Tema ANTES da primeira pintura: lido aqui, no <head>, para a página não abrir
+   escura e clarear meio segundo depois. O menu de configuração escreve nos mesmos
+   dois atributos; "auto" resolve para o modo do sistema operacional. */
+(function () {
+  var r = document.documentElement, m = null, t = null, f = null;
+  try {
+    m = localStorage.getItem('altiumhub.mode');
+    t = localStorage.getItem('altiumhub.theme');
+    f = localStorage.getItem('altiumhub.font');
+  } catch (e) {}
+  if (!m || m === 'auto') m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  r.dataset.mode = m === 'light' ? 'light' : 'dark';
+  r.dataset.theme = t || 'grafite';
+  r.dataset.font = f || 'inter';   /* só o identificador; a pilha da família mora no CSS */
+})();
+</script>
 </head>
 <body>
 <div id="app">
   <header>
-    <div class="brand"><b>AltiumPCBMirror</b><span>hub</span></div>
+    <button class="brand" id="btnBrand" data-i18n-title="brand.menu" aria-haspopup="menu" aria-expanded="false">
+      <b>AltiumPCBMirror</b><span>hub</span>
+      <svg width="11" height="11" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M213.66 101.66l-80 80a8 8 0 0 1-11.32 0l-80-80A8 8 0 0 1 48 88h160a8 8 0 0 1 5.66 13.66z"/></svg>
+    </button>
 
     <div class="picker">
       <button class="picker-trigger" id="pickerBtn" aria-expanded="false" aria-haspopup="listbox">
@@ -429,17 +705,13 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
       </button>
       <div id="pickerCatcher" class="picker-catcher" hidden></div>
       <div id="pickerPanel" class="picker-panel" hidden role="listbox">
-        <div class="picker-search"><input class="input" id="pickerSearch" type="text" placeholder="Buscar projeto…" autocomplete="off"></div>
+        <div class="picker-search"><input class="input" id="pickerSearch" type="text" data-i18n-ph="hdr.search" autocomplete="off"></div>
         <div class="picker-list" id="pickerList"></div>
       </div>
     </div>
 
     <div class="header-right">
       <span class="server"><span class="dot dot-sm" id="serverDot"></span><span id="serverLabel">sem servidor</span></span>
-      <button class="btn btn-secondary" data-run="ExportLibs">ExportLibs</button>
-      <button class="btn btn-secondary btn-icon" data-run="Rescan" title="Reindexar projetos">
-        <svg width="15" height="15" viewBox="0 0 256 256" fill="currentColor"><path d="M240 56v48a8 8 0 0 1-8 8h-48a8 8 0 0 1 0-16h28.69L182.06 73.37A79.56 79.56 0 0 0 70 61.94a8 8 0 1 1-11.18-11.44A96 96 0 0 1 193.37 62L224 92.66V56a8 8 0 0 1 16 0zM186.06 182.63A79.56 79.56 0 0 1 74 171.2L62.63 160H88a8 8 0 0 0 0-16H24a8 8 0 0 0-8 8v48a8 8 0 0 0 16 0v-36.69L62.63 194a96 96 0 0 0 134.61 0 8 8 0 0 0-11.18-11.44z"/></svg>
-      </button>
     </div>
   </header>
 
@@ -452,13 +724,11 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
     <div class="actions">
       <span class="pending" id="pending" hidden></span>
       <button class="btn btn-primary" id="btnNext">—</button>
-      <button class="btn btn-secondary btn-icon" id="btnActions" title="Todas as ações">
-        <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor"><path d="M144 128a16 16 0 1 1-16-16 16 16 0 0 1 16 16zm-16-52a16 16 0 1 0-16-16 16 16 0 0 0 16 16zm0 104a16 16 0 1 0 16 16 16 16 0 0 0-16-16z"/></svg>
-      </button>
     </div>
   </section>
 
   <nav class="tabs" id="tabs" role="tablist"></nav>
+  <nav class="subtabs" id="subtabs" role="tablist" hidden></nav>
 
   <main>
     <!-- Esquema / PCB compartilham a mesma casca -->
@@ -498,7 +768,7 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
 
     <div class="pane" data-pane="fp"><div class="scroll" style="height:100%"><div class="cards" id="fpCards"></div></div></div>
 
-    <div class="pane" data-pane="lib">
+    <div class="pane" data-pane="lib libfp">
       <div class="lib-grid">
         <div class="lib-left">
           <div class="lib-bar">
@@ -515,8 +785,22 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
             <div class="right"><select class="input" id="libPart" title="parte do símbolo" hidden></select></div>
           </div>
           <div class="viewport sheet" id="libSymVp"><canvas id="libSymCv"></canvas><div class="hint" id="libSymHint"></div></div>
-          <div class="canvas-bar"><span class="ttl">footprint</span><span class="meta" id="libFpMeta"></span></div>
+          <!-- Uma barra só para o painel de baixo: ele alterna entre o footprint (2D e 3D)
+               e a lista de valores do almoxarifado. Como só um corpo fica visível de cada vez,
+               a grade de quatro linhas do .lib-view continua fechando. -->
+          <div class="canvas-bar" id="libFpBar">
+            <span class="ttl" id="libBotTtl">footprint</span>
+            <span class="meta" id="libFpMeta"></span><span class="meta" id="libValMeta" hidden></span>
+            <div class="right"><div class="seg" id="libBotSeg"></div></div>
+          </div>
           <div class="viewport" id="libFpVp"><canvas id="libFpCv"></canvas><div class="hint" id="libFpHint"></div></div>
+          <div class="alx-box" id="libValBox" hidden>
+            <div class="alx-bar">
+              <input class="input" id="libValSearch" type="text" placeholder="filtrar valor, MPN ou código Mouser…">
+              <span class="count" id="libValCount"></span>
+            </div>
+            <div class="alx-list" id="libValList"></div>
+          </div>
         </div>
 
         <aside id="libDetail"></aside>
@@ -737,14 +1021,6 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
           </div>
 
           <div class="nd-sep"></div>
-          <div class="kicker">pasta padrão do BOM</div>
-          <input id="bomDir" class="input mono" type="text" style="width:100%"
-                 placeholder="D:\\Documentos\\BOM" title="pasta no disco do PC que roda o hubserver">
-          <button class="btn btn-ghost btn-sm" id="bomDirSave" style="width:100%;margin-top:6px">Gravar pasta padrão</button>
-          <p class="nd-hint">é o disco do <b>servidor</b>: acessando o hub de outro PC da rede,
-            o arquivo é salvo lá, não aqui. De outra máquina, use <b>Baixar</b>.</p>
-
-          <div class="nd-sep"></div>
           <div class="kicker">arquivo</div>
           <div class="lz-num" id="bomStats"></div>
           <div id="bomWarn"></div>
@@ -770,9 +1046,9 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
   </main>
 
   <footer>
-    <span class="lbl">fluxo</span>
+    <span class="lbl" data-i18n="flow.label">fluxo</span>
     <div class="flow" id="flow"></div>
-    <button class="btn btn-ghost" style="font-size:11px;flex:none" id="btnFlow">Ver detalhes</button>
+    <button class="btn btn-ghost" style="font-size:11px;flex:none" id="btnFlow" data-i18n="flow.details">Ver detalhes</button>
   </footer>
 </div>
 
@@ -842,6 +1118,55 @@ const API = {
       es.addEventListener('error', e => { es.close(); rej(new Error(e.data || 'erro')); });
     });
   },
+  /* Exclusao: quem confere a senha mestre e o SERVIDOR - aqui ela so trafega, e o hub
+     nunca fica sabendo qual e. Devolve o erro em vez de estourar, porque o dialogo
+     continua aberto para a segunda tentativa. */
+  /* Almoxarifado. As credenciais do Odoo ficam no servidor e nunca voltam por aqui —
+     o GET só diz se existe senha gravada. A sincronização segue o mesmo par do run:
+     POST reserva a corrida, o log chega por SSE. */
+  async almoxConfig() {
+    try { const r = await fetch('/api/almox/config'); if (!r.ok) throw 0; return await r.json(); }
+    catch { return null; }
+  },
+  async almoxConfigSave(cfg) {
+    try {
+      const r = await fetch('/api/almox/config', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+      let j = {}; try { j = await r.json(); } catch (e) {}
+      if (!r.ok) return { ok: false, error: j.error || ('HTTP ' + r.status) };
+      return j;
+    } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  },
+  async almoxSync(pull, onLine) {
+    const r = await fetch('/api/almox/sync', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pull: !!pull }) });
+    let j = {}; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    return new Promise((res, rej) => {
+      const es = new EventSource('/api/almox/sync/' + j.runId + '/stream');
+      es.onmessage = e => onLine && onLine(e.data);
+      es.addEventListener('done', () => { es.close(); res(); });
+      /* o 'error' do próprio EventSource (rede caiu) vem sem data — o do servidor vem
+         com a mensagem em JSON */
+      es.addEventListener('error', e => {
+        es.close();
+        let msg = 'conexão perdida durante a sincronização';
+        if (e && e.data) { try { msg = JSON.parse(e.data); } catch (x) { msg = e.data; } }
+        rej(new Error(msg));
+      });
+    });
+  },
+  async remove(id, password) {
+    try {
+      const r = await fetch('/api/project/' + encodeURIComponent(id) + '/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      let j = {}; try { j = await r.json(); } catch (e) {}
+      if (!r.ok) return { ok: false, status: r.status, error: j.error || ('HTTP ' + r.status) };
+      return { ok: true, trash: j.trash || '' };
+    } catch (e) { return { ok: false, status: 0, error: String(e.message || e) }; }
+  },
 };
 
 /* ═══ CONSTANTES ═══════════════════════════════════════════════ */
@@ -849,44 +1174,72 @@ const STAGES = ['esquema','eco','roteada','aplicada'];
 /* Próximo passo: uma tabela explícita, indexada pelo nº de etapas concluídas.
    'flow' aponta o passo do rodapé; 'run:false' = passo manual no Altium ou
    pedido à IA — o botão abre a explicação em vez de executar um script.   */
+/* Rotulo que e NOME DE COMANDO do Altium fica literal; o resto e chave de idioma.
+   Da para misturar porque t() devolve a chave quando nao acha traducao. */
 const STEP = {
-  none:  { label: 'Pedir schematic.js',     flow: 1, run: false },
-  0:     { label: 'BuildSchematic',         flow: 3, run: false },
-  1:     { label: 'Compile + Update PCB',   flow: 4, run: false },
-  2:     { label: 'ExportBoard',            flow: 5, run: false },
-  3:     { label: 'ApplyChanges',           flow: 6, run: false },
-  4:     { label: 'DRC',                    flow: 6, run: false },
+  none:  { label: 'step.ask',     flow: 1, run: false },
+  1:     { label: 'step.eco',     flow: 3, run: false },
+  2:     { label: 'ExportBoard',  flow: 4, run: false },
+  3:     { label: 'ApplyChanges', flow: 5, run: false },
+  4:     { label: 'DRC',          flow: 5, run: false },
 };
+/* Duas fileiras de abas. A de cima e o assunto (Esquema, PCB, Biblioteca...); a de baixo
+   sao as vistas daquele assunto. "Componentes" e "Nets" sao leituras da MESMA placa, e
+   "Footprints" e uma leitura da MESMA biblioteca — como abas de primeiro nivel elas
+   competiam com PCB e Biblioteca em vez de pertencerem a elas.
+   S.tab continua sendo sempre a FOLHA (comp, nets, libfp...), entao URL, panes e todo o
+   resto do arquivo seguem falando de um id so. */
 const TABS = [
-  { id:'esquema', label:'Esquema' }, { id:'pcb', label:'PCB' },
-  { id:'comp', label:'Componentes', count:d=>d.components.length },
-  { id:'nets', label:'Nets', count:d=>d.nets.length },
-  { id:'fp', label:'Footprints', count:d=>d.footprints.length },
+  { id:'esquema', key:'tab.esquema' },
+  { id:'pcb', key:'tab.pcb', sub:[
+      { id:'pcb',  key:'tab.pcb.placa' },
+      { id:'comp', key:'tab.comp', count:d=>d.components.length },
+      { id:'nets', key:'tab.nets', count:d=>d.nets.length },
+  ]},
   /* Biblioteca nao depende do projeto: o contador vem das libs, nao do detalhe. */
-  { id:'lib', label:'Biblioteca', count:()=> LIB.ready ? LIB.syms.length + LIB.fps.length : '…' },
-  { id:'neoden', label:'Neoden' },
-  { id:'laser', label:'Laser' },
-  { id:'bom', label:'BOM' },
-  { id:'hist', label:'Histórico' },
+  { id:'lib', key:'tab.lib', count:()=> LIB.ready ? LIB.syms.length + LIB.fps.length : '…', sub:[
+      { id:'lib',   key:'tab.lib.sch', count:()=> LIB.ready ? LIB.syms.length : '…' },
+      { id:'libfp', key:'tab.lib.fp',  count:()=> LIB.ready ? LIB.fps.length : '…' },
+      { id:'fp',    key:'tab.fp', count:d=>d.footprints.length },
+  ]},
+  { id:'neoden', key:'tab.neoden' },
+  { id:'laser', key:'tab.laser' },
+  { id:'bom', key:'tab.bom' },
+  { id:'hist', key:'tab.hist' },
 ];
+/* folha -> aba de cima, para pintar o pai certo e saber que fileira de baixo mostrar */
+const TAB_PAI = {};
+TABS.forEach(t => { TAB_PAI[t.id] = t.id; (t.sub || []).forEach(s => { TAB_PAI[s.id] = t.id; }); });
+const TAB_FOLHAS = Object.keys(TAB_PAI);
+/* O espelho das bibliotecas (ExportLibs) saiu do fluxo junto com o script; o que o hub
+   mostra hoje e o espelho ja gravado em Libs\. O BuildSchematic ficou: e o unico caminho
+   de volta, o que leva um schematic.js para dentro do Altium. */
 const FLOW = [
-  ['1','ExportLibs','Rode no Altium para espelhar suas bibliotecas.'],
-  ['2','Pedir schematic.js','Peça à IA — ela cria Projects\\<nome>\\schematic.js.'],
-  ['3','Conferir no Esquema','Revise a vista Esquema aqui no hub.'],
-  ['4','BuildSchematic','No Altium: crie um .PrjPcb com o mesmo nome e rode BuildSchematic.'],
-  ['5','Compile + Update PCB','Design » Update PCB (ECO) para levar o esquema à placa.'],
-  ['6','ExportBoard','A IA roteia em changes.js; confira na vista PCB.'],
-  ['7','ApplyChanges','Aplique as mudanças e rode o DRC.'],
+  ['1','flow.l1',        'flow.h1'],
+  ['2','flow.l2',        'flow.h2'],
+  ['3','BuildSchematic', 'flow.h3'],
+  ['4','flow.l4',        'flow.h4'],
+  ['5','ExportBoard',    'flow.h5'],
+  ['6','ApplyChanges',   'flow.h6'],
 ];
 const ACTIONS = [
-  ['ExportLibs',     'no Altium: DXP » Run Script » ExportLibs'],
-  ['BuildSchematic', 'no Altium: DXP » Run Script » ApplyProject'],
-  ['ExportBoard',    'no Altium: DXP » Run Script » ExportPcb'],
-  ['ApplyChanges',   'no Altium: DXP » Run Script » ApplyProject'],
-  ['DRC',            'no Altium: Tools » Design Rule Check'],
-  ['Rescan',         'reindexa Projects\\ agora (servidor)'],
+  ['BuildSchematic', 'act.BuildSchematic'],
+  ['ExportBoard',    'act.ExportBoard'],
+  ['ApplyChanges',   'act.ApplyChanges'],
+  ['DRC',            'act.DRC'],
+  ['Rescan',         'act.Rescan'],
 ];
 const RUNNABLE = new Set(['Rescan']);
+
+/* Aparência: três eixos independentes, e os três viram atributo no <html> — o CSS faz
+   o resto, nada aqui redesenha a tela.
+   ATENÇÃO ao par de nomes, que é onde se erra: no modal, "Cor" é MODES e escreve
+   data-mode (claro/escuro/automático); "Tema" é THEMES e escreve data-theme (as
+   paletas). Trocar um pelo outro faz os dois brigarem pelo mesmo atributo. */
+const MODES  = [['dark','cfg.dark'], ['light','cfg.light'], ['auto','cfg.auto']];
+const THEMES = ['grafite', 'papel', 'altium', 'placa'];
+/* as pilhas de família moram no CSS (:root[data-font=...]); aqui só os identificadores */
+const FONTS  = ['inter', 'sistema', 'bancada', 'mono'];
 
 /* ═══ ESTADO ═══════════════════════════════════════════════════
    Nada de estado duplicado: pipeline, próxima ação, contadores e
@@ -906,10 +1259,13 @@ const S = {
   bom: HubBom.defaults(),
   bomCfg: { bomDir: '' },
   /* sel = { k:'sym'|'fp'|'gone-sym'|'gone-fp', name }; fpShown troca so o preview de baixo */
-  lib: { q: '', kind: 'all', sel: null, part: 1, fpShown: null },
+  /* valQ = busca dentro da lista de valores; `valor` = o id do valor escolhido
+     (o valor deixou de ser part do símbolo: agora é um conjunto de parâmetros) */
+  lib: { q: '', kind: 'all', sel: null, part: 1, valor: 0, fpShown: null, valQ: '' },
 };
 
 const $ = s => document.querySelector(s);
+const t = (k, vars) => HubI18n.t(k, vars);
 const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
 const sanitizeName = s => String(s).replace(/[\\/:*?"<>|]/g, '_');
 const proj = () => S.projects.find(p => p.id === S.projId) || S.projects[0] || null;
@@ -920,15 +1276,15 @@ const statusOf = p => p.noSchematic ? 'err' : (p.pending > 0 ? 'warn' : 'ok');
 /* ═══ RENDER ═══════════════════════════════════════════════════ */
 function renderHeader() {
   const p = proj();
-  $('#projName').textContent = p ? p.name : 'nenhum projeto';
+  $('#projName').textContent = p ? p.name : t('hdr.noProject');
   $('#projDot').className = 'dot ' + (p ? statusOf(p) : 'err');
-  $('#projCount').textContent = S.projects.length + ' projetos' + (S.demoMode ? ' (demo)' : '');
+  $('#projCount').textContent = t('hdr.projects', { n: S.projects.length }) + (S.demoMode ? t('hdr.demo') : '');
   $('#pickerBtn').setAttribute('aria-expanded', String(S.pickerOpen));
   $('#pickerPanel').hidden = !S.pickerOpen;
   $('#pickerCatcher').hidden = !S.pickerOpen;
 
   $('#serverDot').className = 'dot dot-sm ' + (S.serverOk ? 'ok' : 'err');
-  $('#serverLabel').textContent = location.protocol.startsWith('http') ? location.host : 'sem servidor';
+  $('#serverLabel').textContent = location.protocol.startsWith('http') ? location.host : t('hdr.noServer');
 
   const list = $('#pickerList'); list.textContent = '';
   filteredProjects().forEach((x, i) => {
@@ -937,7 +1293,8 @@ function renderHeader() {
     if (x.id === S.projId) b.setAttribute('aria-current', 'true');
     const left = el('div');
     left.append(el('div', 'nm trunc', x.name),
-      el('div', 'sub', x.noSchematic ? 'sem esquema' : x.stats.comps + ' comps · ' + x.stats.nets + ' nets'));
+      el('div', 'sub', x.noSchematic ? t('pick.noSch')
+        : t('pick.stats', { c: x.stats.comps, n: x.stats.nets })));
     const dots = el('div', 'dots');
     x.stages.forEach(v => dots.append(el('span', 'dot dot-sm ' + (v === 1 ? 'ok' : v === 2 ? 'now' : 'idle'))));
     b.append(left, dots);
@@ -952,44 +1309,73 @@ function renderProjBar() {
   $('#pPath').textContent = p.path;
   const badges = $('#pBadges'); badges.textContent = '';
   if (p.demo) badges.append(el('span', 'tag tag-outline', 'demo'));
-  if (p.noSchematic) badges.append(el('span', 'tag', 'sem esquema'));
+  if (p.noSchematic) badges.append(el('span', 'tag', t('pick.noSch')));
 
   const pipe = $('#pipeline'); pipe.textContent = '';
   p.stages.forEach((v, i) => {
     const s = el('span', 'stage' + (v === 1 ? ' done' : v === 2 ? ' now' : ''));
-    s.append(el('span', 'mark'), el('span', null, STAGES[i]));
+    s.append(el('span', 'mark'), el('span', null, t('stage.' + STAGES[i])));
     pipe.append(s);
   });
 
   const pend = $('#pending');
-  pend.hidden = !p.pending; pend.textContent = p.pending + ' mudanças pendentes';
+  pend.hidden = !p.pending; pend.textContent = t('proj.pending', { n: p.pending });
   const step = stepOf(p);
-  $('#btnNext').textContent = step.label;
-  $('#btnNext').title = step.run ? 'Executa agora' : 'Passo manual — ver detalhes do fluxo';
+  $('#btnNext').textContent = t(step.label);
+  $('#btnNext').title = t(step.run ? 'proj.runNow' : 'proj.manual');
 
   const flow = $('#flow'); flow.textContent = '';
   FLOW.forEach(([n, label, hint], i) => {
     const b = el('button', 'step' + (i === step.flow ? ' now' : ''));
-    b.title = hint; b.append(el('span', 'n num', n), el('span', null, label));
+    b.title = t(hint); b.append(el('span', 'n num', n), el('span', null, t(label)));
     flow.append(b);
   });
 }
 
+function goTab(id) { S.tab = id; syncURL(); renderTabs(); renderPanes(); }
+
 function renderTabs() {
   const d = S.detail, nav = $('#tabs'); nav.textContent = '';
-  TABS.forEach(t => {
+  const pai = TAB_PAI[S.tab] || S.tab;
+  TABS.forEach(tb => {
     const b = el('button', 'tab'); b.setAttribute('role', 'tab');
-    b.setAttribute('aria-selected', String(t.id === S.tab));
-    b.append(el('span', null, t.label));
-    if (t.count && d) b.append(el('span', 'n num', String(t.count(d))));
-    b.onclick = () => { S.tab = t.id; syncURL(); renderTabs(); renderPanes(); };
+    b.setAttribute('aria-selected', String(tb.id === pai));
+    b.append(el('span', null, t(tb.key)));
+    if (tb.count && (d || !tb.count.length)) b.append(el('span', 'n num', String(tb.count(d))));
+    /* clicar no pai leva a primeira filha, nunca a uma aba sem painel — mas voltar ao
+       pai que ja esta aberto nao pode jogar a sub-aba escolhida fora */
+    b.onclick = () => goTab(TAB_PAI[S.tab] === tb.id ? S.tab : (tb.sub ? tb.sub[0].id : tb.id));
     nav.append(b);
   });
+  renderSubtabs();
   const st = proj().stats, aggr = el('div', 'aggr');
-  [['comps',st.comps],['nets',st.nets],['trilhas',st.tracks],['vias',st.vias]].forEach(([l,v]) => {
-    const s = el('span'); s.append(el('b', 'num', String(v)), document.createTextNode(' ' + l)); aggr.append(s);
+  [['comps',st.comps],['nets',st.nets],['tracks',st.tracks],['vias',st.vias]].forEach(([l,v]) => {
+    const s = el('span');
+    s.append(el('b', 'num', String(v)), document.createTextNode(' ' + t('aggr.' + l)));
+    aggr.append(s);
   });
   nav.append(aggr);
+}
+
+/* Fileira de baixo: as vistas da aba de cima. Some inteira quando a aba nao tem filhas —
+   uma barra vazia so rouba altura da tela. */
+function renderSubtabs() {
+  const d = S.detail, nav = $('#subtabs');
+  const grupo = TABS.find(x => x.id === (TAB_PAI[S.tab] || S.tab));
+  nav.textContent = '';
+  nav.hidden = !grupo || !grupo.sub;
+  if (nav.hidden) return;
+  grupo.sub.forEach(sb => {
+    const b = el('button', 'subtab'); b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(sb.id === S.tab));
+    b.append(el('span', null, t(sb.key)));
+    if (sb.count && (d || !sb.count.length)) b.append(el('span', 'n', String(sb.count(d))));
+    b.onclick = () => goTab(sb.id);
+    nav.append(b);
+  });
+  /* o combobox de acervo mora aqui: trocar de biblioteca e uma escolha da aba Biblioteca,
+     e a configuracao geral so guarda qual e a padrao */
+  if (grupo.id === 'lib') nav.append(libPicker());
 }
 
 function canvasPane(kind) {
@@ -997,13 +1383,13 @@ function canvasPane(kind) {
   const empty = kind === 'esquema' ? p.noSchematic : (p.stats.tracks === 0 && p.stages[2] === 0);
   const wrap = el('div', 'canvas-wrap');
   const bar = el('div', 'canvas-bar');
-  bar.append(el('span', 'ttl', kind === 'pcb' ? 'vista pcb' : 'vista esquema'),
+  bar.append(el('span', 'ttl', t(kind === 'pcb' ? 'view.pcb' : 'view.sch')),
     el('span', 'meta', kind === 'pcb'
-      ? p.stats.tracks + ' trilhas · ' + p.stats.vias + ' vias · 2 layers'
-      : p.stats.sheets + ' folha(s) · ' + p.stats.comps + ' comps · ' + p.stats.nets + ' nets'));
+      ? t('view.pcbMeta', { t: p.stats.tracks, v: p.stats.vias })
+      : t('view.schMeta', { s: p.stats.sheets, c: p.stats.comps, n: p.stats.nets })));
   const right = el('div', 'right');
   let frame = null;
-  const btnOpen = el('button', 'btn btn-ghost btn-sm', 'Abrir em nova aba');
+  const btnOpen = el('button', 'btn btn-ghost btn-sm', t('view.openTab'));
   btnOpen.disabled = empty;
   btnOpen.onclick = () => { if (frame) window.open(frame.src); };
   right.append(btnOpen);
@@ -1011,10 +1397,8 @@ function canvasPane(kind) {
 
   if (empty) {
     const e = el('div', 'empty'), inner = el('div');
-    inner.append(el('span', 'tag', kind === 'esquema' ? 'sem esquema' : 'sem roteamento'));
-    inner.append(el('p', null, kind === 'esquema'
-      ? 'Este projeto ainda não tem schematic.js. Peça à IA para gerá-lo e ele aparece aqui.'
-      : 'A placa ainda não foi roteada. Rode ExportBoard e a IA escreve changes.js.'));
+    inner.append(el('span', 'tag', t(kind === 'esquema' ? 'view.noSch' : 'view.noRoute')));
+    inner.append(el('p', null, t(kind === 'esquema' ? 'view.noSchMsg' : 'view.noRouteMsg')));
     e.append(inner); wrap.append(e);
   } else {
     const vp = el('div', 'viewport');
@@ -1302,9 +1686,33 @@ function renderNeodenAside(row, opts) {
    do simbolo (LibReference), quem tem a geometria e a schlib; se o componente
    veio de outra biblioteca o nome nao resolve, o hub nao desenha o corpo e a
    folha sai diferente da do Altium. Esses aparecem como "ausentes".          */
-const LIB = { ready: false, loading: null, syms: [], fps: [], symBy: new Map(), fpBy: new Map(),
-              src: {}, gen: {}, rename: null, subs: [] };
+/* ── acervos ──────────────────────────────────────────────────────────────────
+   A aba Biblioteca deixou de olhar para um arquivo fixo. O primeiro acervo e sempre o
+   espelho da SchLib/PcbLib reais (o que o ExportLibs gera); os do almoxarifado vem de
+   Libs\almox-index.js, escrito pelo tools\almox\almox2lib.py a partir do dump do Odoo.
+   Trocar de acervo troca LIB.syms/LIB.fps inteiros — e so a aba Biblioteca depende deles,
+   entao nada mais na tela muda de sentido quando se troca. */
+const LIB_KEY = 'altiumhub.libsrc';
+const LIB_ALTIUM = { id: 'altium', title: 'Espelho do Altium',
+                     hint: 'a SchLib e a PcbLib reais da casa, como foram espelhadas',
+                     sch: 'Libs/schlib.js', schVar: 'schlib',
+                     pcb: 'Libs/pcblib.js', pcbVar: 'pcblib' };
+const LIB = { srcId: null, ready: false, loading: null, syms: [], fps: [], symBy: new Map(), fpBy: new Map(),
+              src: {}, gen: {}, rename: null, subs: [], almox: null, index: null, cache: {},
+              /* sync = Libs\almox-sync.js: o que a última sincronização trouxe de novo */
+              sync: null };
 let libCamSym = null, libCamFp = null, libDrawSym = null, libDrawFp = null, libUse = null, libUseFor = null;
+
+/* Os acervos do almoxarifado compartilham a PcbLib da casa: e nela que estao os
+   footprints que as .SchLib geradas referenciam (RES 0805, CAP 1206...), e e ela que a
+   sincronizacao copia para Libs\Almox para o conjunto andar junto. */
+const libSources = () => [LIB_ALTIUM].concat(((LIB.index && LIB.index.libs) || []).map(l =>
+  ({ id: l.id, title: l.title, hint: l.hint, sch: l.file, schVar: l.var,
+     pcb: 'Libs/pcblib.js', pcbVar: 'pcblib', almox: l })));
+const libWanted = () => {
+  const want = localStorage.getItem(LIB_KEY) || 'altium';
+  return libSources().some(s => s.id === want) ? want : 'altium';
+};
 
 /* "var X = ..." via <script>: e assim que os arquivos da lib sao gerados */
 function loadVarScript(src, name) {
@@ -1317,30 +1725,317 @@ function loadVarScript(src, name) {
     document.head.appendChild(s);
   });
 }
-function loadLibs() {
-  if (LIB.ready) return Promise.resolve();
-  if (LIB.loading) return LIB.loading;
-  /* rename-map e lib-subs sao as tabelas de apelido do resolvedor de nomes. lib-subs pode
-     nao existir ainda (nenhuma substituicao escolhida): loadVarScript devolve undefined no
-     404 e o resolvedor segue sem o passo de escolha, em vez de quebrar a aba. */
-  LIB.loading = Promise.all([loadVarScript('Libs/schlib.js', 'schlib'),
-                             loadVarScript('Libs/pcblib.js', 'pcblib'),
-                             loadVarScript('Libs/rename-map.js', 'renameMap'),
-                             loadVarScript('Libs/lib-subs.js', 'libSubs')])
-    .then(([s, p, rm, subs]) => {
-      LIB.syms = (s && s.symbols) || [];
-      LIB.fps  = (p && p.footprints) || [];
-      LIB.symBy = new Map(LIB.syms.map(x => [x.name, x]));
-      LIB.fpBy  = new Map(LIB.fps.map(x => [x.name, x]));
-      LIB.src = { sym: (s && s.source) || '—', fp: (p && p.source) || '—' };
-      LIB.gen = { sym: (s && s.generated) || '—', fp: (p && p.generated) || '—' };
+/* As tres tabelinhas leves: apelidos do resolvedor (rename-map, lib-subs) e o indice dos
+   acervos do almoxarifado. Sao ~15 KB somados e carregam no boot, porque o combobox de
+   acervo — na aba e na configuracao — precisa da lista antes de alguem abrir a Biblioteca.
+   Todas sao opcionais: no 404 o loadVarScript devolve undefined e o hub segue sem elas. */
+let libTabelas = null, libBust = 0;
+/* depois de uma sincronização os arquivos em Libs\ são outros; o ?v= garante que o
+   <script> novo não seja o mesmo do cache do browser */
+const libUrl = src => (libBust ? src + '?v=' + libBust : src);
+function loadLibTabelas() {
+  if (libTabelas) return libTabelas;
+  libTabelas = Promise.all([loadVarScript(libUrl('Libs/rename-map.js'), 'renameMap'),
+                            loadVarScript(libUrl('Libs/lib-subs.js'), 'libSubs'),
+                            loadVarScript(libUrl('Libs/almox-index.js'), 'almoxIndex'),
+                            loadVarScript(libUrl('Libs/almox-sync.js'), 'almoxSync')])
+    .then(([rm, subs, idx, sync]) => {
       LIB.rename = rm || null;
       LIB.subs = Array.isArray(subs) ? subs : [];
+      LIB.index = idx || { libs: [] };
+      LIB.sync = sync || null;
       HubCore.setLibTables(LIB.rename, LIB.subs);
-      LIB.ready = true;
-      LIB.loading = null;
     });
+  return libTabelas;
+}
+
+function loadLibs() {
+  const want = libWanted();
+  if (LIB.ready && LIB.srcId === want) return Promise.resolve();
+  if (LIB.loading) return LIB.loading;
+  LIB.ready = false;
+
+  LIB.loading = loadLibTabelas().then(() => {
+    const s = libSources().find(x => x.id === libWanted()) || LIB_ALTIUM;
+    const pronto = LIB.cache[s.id];
+    if (pronto) return pronto;
+    return Promise.all([loadVarScript(libUrl(s.sch), s.schVar),
+                        s.pcb ? loadVarScript(libUrl(s.pcb), s.pcbVar) : Promise.resolve(null)])
+      .then(([a, p]) => (LIB.cache[s.id] = {
+        src: s,
+        syms: (a && a.symbols) || [],
+        fps: (p && p.footprints) || [],
+        origem: { sym: (a && a.source) || '—', fp: (p && p.source) || '—' },
+        gerado: { sym: (a && a.generated) || '—', fp: (p && p.generated) || '—' },
+        titulo: (a && a.title) || s.title,
+      }));
+  }).then(c => {
+    LIB.srcId = c.src.id;
+    LIB.almox = c.src.almox || null;
+    LIB.syms = c.syms;
+    LIB.fps = c.fps;
+    LIB.symBy = new Map(LIB.syms.map(x => [x.name, x]));
+    LIB.fpBy  = new Map(LIB.fps.map(x => [x.name, x]));
+    LIB.src = c.origem;
+    LIB.gen = c.gerado;
+    LIB.title = c.titulo;
+    LIB.ready = true;
+    LIB.loading = null;
+  });
   return LIB.loading;
+}
+
+/* trocar de acervo: zera a selecao (o nome escolhido nao existe no outro acervo) e recarrega */
+function libSetSrc(id) {
+  if (id === LIB.srcId) return;
+  localStorage.setItem(LIB_KEY, id);
+  S.lib.sel = null; S.lib.part = 1; S.lib.fpShown = null; S.lib.q = ''; S.lib.valQ = '';
+  const busca = $('#libSearch'); if (busca) busca.value = '';
+  LIB.ready = false;
+  renderLib();
+}
+
+/* o combobox que vive na fileira de sub-abas da Biblioteca, mais o botão de sincronizar */
+function libPicker() {
+  const box = el('div', 'libpick');
+  const sel = el('select', 'input');
+  sel.id = 'libSrcPick';
+  sel.title = 'qual acervo a aba Biblioteca mostra';
+  libSources().forEach(s => {
+    const o = el('option', null, s.title); o.value = s.id;
+    if (s.id === libWanted()) o.selected = true;
+    sel.append(o);
+  });
+  sel.onchange = () => libSetSrc(sel.value);
+  const lab = el('label', null, t('lib.acervo')); lab.htmlFor = sel.id;
+  box.append(lab, sel);
+  /* só faz sentido num acervo do almoxarifado: o espelho do Altium quem regera é o
+     ExportLibs, de dentro do Altium */
+  if (libWanted() !== 'altium') {
+    const b = el('button', 'btn btn-secondary btn-sm', t('alx.sync'));
+    b.title = t('alx.syncHint');
+    b.onclick = () => openAlmoxSync();
+    box.append(b);
+  }
+  return box;
+}
+
+/* ── sincronizar almoxarifado ──────────────────────────────────────────────────
+   Puxa o Odoo, regera as duas libs e recarrega a aba — e, principalmente, DIZ o que
+   mudou. Quem sincroniza quer saber o que entrou de novo e o que zerou; um "pronto"
+   mudo obrigaria a caçar a diferença na lista de 2.400 valores.
+   O trabalho roda no servidor (tools\almox\almox2lib.py) e o log chega por SSE. */
+let alxRodando = false;
+
+function alxLinhaCfg(cfg) {
+  if (!cfg) return t('alx.semServidor');
+  const c = cfg.config || {};
+  if (!c.temSenha) return t('alx.semSenha');
+  return t('alx.credOk', { url: c.url || '—', db: c.db || '—', login: c.login || '—' });
+}
+
+async function openAlmoxSync() {
+  if (S.demoMode) { toast(t('alx.semServidor'), 'err'); return; }
+  if (alxRodando) { toast(t('alx.jaRodando'), 'warn'); return; }
+
+  const bd = el('div', 'backdrop center');
+  bd.onclick = e => { if (e.target === bd && !alxRodando) closeOverlay(); };
+  const d = el('div', 'dialog alx-dlg');
+  d.append(el('h3', null, t('alx.sync')));
+
+  const explica = el('p', 'alx-nota', t('alx.explica'));
+  const estado = el('p', 'alx-nota');
+  d.append(explica, estado);
+
+  const cred = el('div'); d.append(cred);
+  const log = el('div', 'alx-log'); log.hidden = true; d.append(log);
+  const res = el('div', 'alx-res'); res.hidden = true; d.append(res);
+
+  const act = el('div', 'alx-acoes');
+  const fechar = el('button', 'btn btn-ghost', t('alx.fechar'));
+  fechar.onclick = () => { if (!alxRodando) closeOverlay(); };
+  const snap = el('button', 'btn btn-secondary', t('alx.soRegerar'));
+  const pull = el('button', 'btn btn-primary', t('alx.puxar'));
+  act.append(fechar, snap, pull);
+  d.append(act);
+  bd.append(d); $('#overlay').append(bd);
+
+  const cfg = await API.almoxConfig();
+  estado.textContent = alxLinhaCfg(cfg);
+  const temSenha = !!(cfg && cfg.config && cfg.config.temSenha);
+  pull.disabled = !temSenha;
+  if (cfg && !cfg.script) {
+    estado.textContent = t('alx.semScript');
+    pull.disabled = true; snap.disabled = true;
+  }
+  alxFormCred(cred, cfg, novo => {
+    estado.textContent = alxLinhaCfg(novo);
+    pull.disabled = !(novo && novo.config && novo.config.temSenha);
+  });
+
+  const roda = async comPull => {
+    alxRodando = true;
+    snap.disabled = true; pull.disabled = true; fechar.disabled = true;
+    cred.hidden = true; res.hidden = true;
+    log.hidden = false; log.textContent = '';
+    const linha = txt => {
+      const p = el('div', null, txt); log.append(p); log.scrollTop = log.scrollHeight;
+    };
+    try {
+      await API.almoxSync(comPull, linha);
+      linha(t('alx.recarregando'));
+      const antesN = LIB.syms.length;
+      await almoxRecarrega();
+      alxMostraResultado(res, LIB.sync, antesN);
+      res.hidden = false;
+      toast(t('alx.pronto'), 'ok');
+    } catch (e) {
+      linha('✕ ' + e.message);
+      toast(t('alx.falhou', { e: e.message }), 'err');
+    } finally {
+      alxRodando = false;
+      fechar.disabled = false;
+      snap.disabled = false; pull.disabled = !temSenha;
+    }
+  };
+  snap.onclick = () => roda(false);
+  pull.onclick = () => roda(true);
+}
+
+/* As credenciais só mudam de dentro do PC do servidor — o backend recusa o resto, e
+   repetir a regra aqui evita oferecer um formulário que vai levar 403. */
+function alxFormCred(box, cfg, aoGravar) {
+  box.textContent = '';
+  if (!cfg) return;
+  if (!cfg.local) {
+    if (!cfg.config.temSenha) box.append(el('p', 'alx-nota', t('alx.credRemota')));
+    return;
+  }
+  const det = el('details', 'alx-cred');
+  det.open = !cfg.config.temSenha;
+  det.append(el('summary', null, t('alx.credTitulo')));
+  const grade = el('div', 'alx-grade');
+  const campos = {};
+  [['url', 'http://192.168.15.182:8070'], ['db', 'odoo_db'],
+   ['login', 'engenharia@dieletrons.com'], ['senha', '••••••••']].forEach(([k, ph]) => {
+    const i = el('input', 'input mono');
+    i.type = k === 'senha' ? 'password' : 'text';
+    i.placeholder = ph;
+    i.value = k === 'senha' ? '' : (cfg.config[k] || '');
+    i.autocomplete = 'off';
+    campos[k] = i;
+    grade.append(el('span', 'k', t('alx.cred.' + k)), i);
+  });
+  det.append(grade);
+  const nota = el('p', 'alx-nota', t('alx.credNota'));
+  const gravar = el('button', 'btn btn-secondary btn-sm', t('alx.credGravar'));
+  gravar.onclick = async () => {
+    gravar.disabled = true;
+    const r = await API.almoxConfigSave({ url: campos.url.value, db: campos.db.value,
+                                          login: campos.login.value, senha: campos.senha.value });
+    gravar.disabled = false;
+    if (!r || r.ok === false) { toast(t('alx.credFalhou', { e: (r && r.error) || '?' }), 'err'); return; }
+    campos.senha.value = '';
+    toast(t('alx.credOkToast'), 'ok');
+    aoGravar(r);
+  };
+  det.append(nota, gravar);
+  box.append(det);
+}
+
+/* Recarrega tudo que veio de Libs\ depois da sincronização: índice, diff e o acervo
+   aberto. Sem zerar o cache, a aba continuaria desenhando a geração anterior. */
+async function almoxRecarrega() {
+  libBust = Date.now();
+  libTabelas = null;
+  LIB.cache = {}; LIB.ready = false; LIB.loading = null;
+  await loadLibTabelas();
+  await loadLibs();
+  renderTabs();
+  if (S.tab === 'lib' || S.tab === 'libfp') renderLib();
+}
+
+function alxMostraResultado(box, sync, antesN) {
+  box.textContent = '';
+  if (!sync) { box.append(el('p', 'alx-nota', t('alx.semDiff'))); return; }
+  const r = sync.resumo || {};
+
+  const linha = (n, rot, tom) => {
+    const s = el('span'); const b = el('b', null, String(n));
+    if (tom && n) b.style.color = 'var(--' + tom + ')';
+    s.append(b, document.createTextNode(' ' + rot));
+    return s;
+  };
+  const topo = el('div', 'alx-resumo');
+  topo.append(linha(r.simbolosNovos || 0, 'símbolos novos', 'ok'),
+              linha(r.valoresNovos || 0, 'valores novos', 'ok'),
+              linha(r.valoresSumiram || 0, 'valores fora', 'warn'),
+              linha(r.estoqueMudou || 0, 'saldos mexeram'),
+              linha(r.zerou || 0, 'zeraram', 'warn'),
+              linha(LIB.syms.length, 'símbolos no acervo aberto'));
+  box.append(topo);
+
+  /* O que ESTA execução fez é uma coisa; o que está na lib e você ainda não olhou é
+     outra. Antes só existia a primeira, e por isso uma segunda execução (ou um
+     "só regerar do snapshot") deixava a tela dizendo que nada tinha acontecido. */
+  const nv = alxNovidades();
+  if (nv.total) {
+    const p2 = el('p', 'alx-nota');
+    p2.append(document.createTextNode(t('alx.acumulado', {
+      n: nv.total, s: nv.syms, v: nv.vals, d: alxVisto() }) + ' '));
+    const btn = el('button', 'btn btn-ghost btn-sm', t('alx.marcarVisto'));
+    btn.style.cssText = 'padding:0 7px;min-height:20px;font-size:11px';
+    btn.onclick = () => { alxMarcarVisto(); closeOverlay(); };
+    p2.append(btn);
+    box.append(p2);
+  }
+
+  if (sync.primeira) {
+    box.append(el('p', 'alx-nota', t('alx.primeira')));
+    return;
+  }
+  const nada = !(r.simbolosNovos || r.valoresNovos || r.valoresSumiram || r.estoqueMudou);
+  if (nada) { box.append(el('p', 'alx-nota', t('alx.semNovidade'))); return; }
+
+  const secao = (titulo, itens, sobra, pinta) => {
+    if (!itens || !itens.length) return;
+    box.append(el('div', 'kicker', titulo + ' (' + (itens.length + (sobra || 0)) + ')'));
+    const ul = el('div', 'alx-diff');
+    itens.slice(0, 60).forEach(x => ul.append(pinta(x)));
+    if (itens.length > 60 || sobra)
+      ul.append(el('div', 'alx-mais', '+ ' + (itens.length - Math.min(60, itens.length) + (sobra || 0)) + ' não listados'));
+    box.append(ul);
+  };
+
+  secao('símbolos novos', sync.simbolosNovos, 0, x => {
+    const r2 = el('div', 'alx-di');
+    r2.append(el('span', 'a', x.nome), el('span', 'b', x.valores + ' valores'),
+              el('span', 'c ok', alxQtd(x.estoque) + ' un'));
+    return r2;
+  });
+  secao('valores novos', sync.valoresNovos, sync.valoresNovosMais, x => {
+    const r2 = el('div', 'alx-di');
+    r2.append(el('span', 'a', x.label), el('span', 'b', x.sym),
+              el('span', 'c ' + (x.estoque > 0 ? 'ok' : 'warn'), alxQtd(x.estoque) + ' un'));
+    if (x.mouser) r2.title = 'Mouser ' + x.mouser;
+    return r2;
+  });
+  secao('valores que saíram do Odoo', sync.valoresSumiram, sync.valoresSumiramMais, x => {
+    const r2 = el('div', 'alx-di');
+    /* a part continua na lib: mostrar o número dela deixa claro que nada foi renumerado */
+    r2.append(el('span', 'a', x.label), el('span', 'b', x.sym),
+              el('span', 'c warn', x.parte ? 'parte ' + x.parte + ' · zerada' : 'fora'));
+    r2.title = 'o valor saiu do almoxarifado; a part fica na lib com saldo zero';
+    return r2;
+  });
+  secao('saldos que mexeram', sync.estoqueMudou, sync.estoqueMudouMais, x => {
+    const r2 = el('div', 'alx-di');
+    const d = x.para - x.de;
+    r2.append(el('span', 'a', x.label), el('span', 'b', x.sym),
+              el('span', 'c ' + (d > 0 ? 'ok' : 'warn'),
+                 alxQtd(x.de) + ' → ' + alxQtd(x.para)));
+    return r2;
+  });
 }
 
 /* o que o esquema DESTE projeto referencia, por nome de simbolo e de footprint */
@@ -1429,6 +2124,18 @@ function libCams() {
   libCamSym = HubDraw.mkCamera($('#libSymCv'), ctx => { if (libDrawSym) HubDraw.drawSymbolPart(ctx, libDrawSym); }, { bg: tok('--sheet') });
   libCamFp  = HubDraw.mkCamera($('#libFpCv'),  ctx => { if (libDrawFp)  HubDraw.drawFootprint(ctx, libDrawFp); },  { bg: tok('--sunken') });
 }
+
+/* Um só lugar para pôr o footprint na vista de baixo: quem o escolhe (o símbolo do Altium,
+   o valor do almoxarifado, um chip de encapsulamento, ou a seleção direta na lista) não
+   deveria ter de saber como ele é desenhado. */
+function libPoeFp(fp, rotulo) {
+  libDrawFp = fp || null;
+  libFit(libCamFp, fp ? fp.bbox : null);
+  $('#libFpMeta').textContent = fp ? fp.name + ' · ' + (fp.pads || []).length + ' pads'
+    : (rotulo ? rotulo + ' — ausente na pcblib' : '—');
+  $('#libFpHint').textContent = fp ? ''
+    : (rotulo ? 'footprint fora da pcblib espelhada' : 'sem footprint associado');
+}
 /* o pane so tem tamanho depois de visivel, entao resize() antes de qualquer fit() */
 function libFit(cam, bb) {
   cam.resize();
@@ -1464,14 +2171,24 @@ function fpBBoxSize(f) {
   return b ? (b.x2 - b.x1).toFixed(2) + ' × ' + (b.y2 - b.y1).toFixed(2) + ' mm' : '—';
 }
 
+/* saldo do almoxarifado formatado: 1.805 e não 1805.0 */
+const alxQtd = n => (Math.round(n * 100) / 100).toLocaleString('pt-BR');
+const alxValores = s => (s && s.valores) || [];
+const alxEstoque = s => alxValores(s).reduce((a, p) => a + (p.estoque || 0), 0);
+
 function renderLib() {
   if (!LIB.ready) {
     $('#libList').textContent = '';
-    $('#libSum').textContent = 'carregando Libs\\schlib.js e Libs\\pcblib.js…';
-    loadLibs().then(() => { renderTabs(); if (S.tab === 'lib') renderLib(); });
+    $('#libSum').textContent = t('lib.loading');
+    loadLibs().then(() => { renderTabs(); if (S.tab === 'lib' || S.tab === 'libfp') renderLib(); });
     return;
   }
   libCams();
+  /* a lista de VALORES so faz sentido na sub-aba de simbolos; a de footprints e a
+     mesma dos dois acervos, porque a PcbLib e a mesma */
+  const almoxSym = !!LIB.almox && S.tab !== 'libfp';
+  libPainelDeBaixo(almoxSym);
+  if (almoxSym) return renderLibAlmox();
 
   const u = libUsage();
   /* "ausente" e o que o RESOLVEDOR nao resolve, e nao o que falta por nome exato: um
@@ -1491,21 +2208,34 @@ function renderLib() {
   apelidos.sort((a, b) => a.from.localeCompare(b.from));
   const noFp    = LIB.syms.filter(s => !(s.footprints || []).some(f => f.incurrentlib));
 
-  /* filtro */
+  /* filtro. A sub-aba escolhe o acervo (símbolos ou footprints); o segmentado, o recorte
+     dentro dele. Antes as duas listas dividiam a mesma tela e o "Tudo" misturava as duas. */
+  const fpTab = S.tab === 'libfp';
+  /* a seleção pertence a uma das duas sub-abas: carregar um símbolo para a aba de
+     footprints (ou o contrário) deixaria o painel do meio contando outra história */
+  if (S.lib.sel && (S.lib.sel.k === 'sym' || S.lib.sel.k === 'gone-sym') === fpTab) S.lib.sel = null;
   const q = S.lib.q.trim().toLowerCase();
   const hit = (n, d) => !q || (n + ' ' + (d || '')).toLowerCase().includes(q);
-  const kind = S.lib.kind;
-  const syms = (kind === 'all' || kind === 'sym') ? LIB.syms.filter(s => hit(s.name, s.description)) : [];
-  const fps  = (kind === 'all' || kind === 'fp')  ? LIB.fps.filter(f => hit(f.name, f.description))  : [];
+  let kind = S.lib.kind;
+  if (fpTab && (kind === 'sym')) kind = 'all';
+  if (!fpTab && (kind === 'fp')) kind = 'all';
+  if (['all', 'sym', 'fp', 'alias', 'gone'].indexOf(kind) < 0) kind = 'all';
+  S.lib.kind = kind;      /* recorte de outro acervo nao existe aqui: fixa o que sobrou */
+  const aliasDaAba = apelidos.filter(a => a.k === (fpTab ? 'fp' : 'sym'));
+  const goneDaAba = fpTab ? goneFp : goneSym;
+
+  const syms = (!fpTab && (kind === 'all' || kind === 'sym')) ? LIB.syms.filter(s => hit(s.name, s.description)) : [];
+  const fps  = (fpTab && (kind === 'all' || kind === 'fp'))   ? LIB.fps.filter(f => hit(f.name, f.description))  : [];
   const gone = (kind === 'all' || kind === 'gone')
-    ? goneSym.filter(hit).map(n => ['gone-sym', n]).concat(goneFp.filter(hit).map(n => ['gone-fp', n])) : [];
-  const alias = (kind === 'all' || kind === 'alias') ? apelidos.filter(a => hit(a.from + ' ' + a.to)) : [];
+    ? goneDaAba.filter(hit).map(n => [fpTab ? 'gone-fp' : 'gone-sym', n]) : [];
+  const alias = (kind === 'all' || kind === 'alias') ? aliasDaAba.filter(a => hit(a.from + ' ' + a.to)) : [];
 
   /* segmentado */
   const seg = $('#libKind'); seg.textContent = '';
-  [['all', 'Tudo', LIB.syms.length + LIB.fps.length], ['sym', 'Símbolos', LIB.syms.length],
-   ['fp', 'Footprints', LIB.fps.length], ['alias', 'Apelidos', apelidos.length],
-   ['gone', 'Ausentes', goneSym.length + goneFp.length]]
+  [['all', 'Tudo', fpTab ? LIB.fps.length : LIB.syms.length],
+   [fpTab ? 'fp' : 'sym', fpTab ? 'Footprints' : 'Símbolos', fpTab ? LIB.fps.length : LIB.syms.length],
+   ['alias', 'Apelidos', aliasDaAba.length],
+   ['gone', 'Ausentes', goneDaAba.length]]
     .forEach(([k, label, n]) => {
       const b = el('button', null, label);
       b.setAttribute('aria-pressed', String(kind === k));
@@ -1585,6 +2315,411 @@ function renderLib() {
   renderLibPreview(u, goneSym, goneFp);
 }
 
+/* ── biblioteca do almoxarifado ────────────────────────────────────────────────
+   Mesma casca de três colunas do espelho do Altium, com uma troca no meio: onde ia o
+   preview do footprint vai a lista de VALORES, porque é ela que responde à pergunta que
+   fez a lib existir — "tem esse valor no almoxarifado?". Cada part é um valor, e cada
+   valor sabe o saldo, o endereço na prateleira e o código Mouser.                    */
+/* Dois corpos disputam a metade de baixo: o footprint e a lista de valores. A lista só
+   existe no acervo do almoxarifado, e é o padrão lá — é ela que responde à pergunta que fez
+   a lib existir. No espelho do Altium não há escolha a fazer, e a barra fica sem o seletor. */
+function libBaixoModo(almox) {
+  return almox ? (S.lib.baixo || 'val') : 'fp';
+}
+function libPainelDeBaixo(almox) {
+  const m = libBaixoModo(almox);
+  $('#libFpVp').hidden = m !== 'fp';
+  $('#libValBox').hidden = m !== 'val';
+  $('#libFpMeta').hidden = m === 'val';
+  $('#libValMeta').hidden = m !== 'val';
+  $('#libBotTtl').textContent = m === 'val' ? 'valores' : 'footprint';
+
+  const seg = $('#libBotSeg'); seg.textContent = ''; seg.hidden = !almox;
+  if (!almox) return;
+  [['val', 'valores'], ['fp', 'footprint']].forEach(([k, rot]) => {
+    const b = el('button', null, rot);
+    b.setAttribute('aria-pressed', String(k === m));
+    b.title = k === 'fp' ? 'o footprint do valor escolhido — clique num encapsulamento da ficha para trocar'
+                         : 'os valores deste componente no almoxarifado';
+    b.onclick = () => { S.lib.baixo = k; renderLib(); };
+    seg.append(b);
+  });
+}
+
+const alxSym = () => (S.lib.sel && S.lib.sel.k === 'sym' && LIB.symBy.get(S.lib.sel.name)) || null;
+
+/* ── o que é "novo" ────────────────────────────────────────────────────────────
+   Cada part e cada símbolo carregam `desde`: a data em que ENTRARAM na biblioteca,
+   gravada uma vez só pelo gerador. "Novo" é o que entrou depois da última vez que
+   esta máquina marcou como visto — e não "diferente da geração anterior", que era
+   como estava e fazia um simples "regerar do snapshot" apagar o que a puxada do Odoo
+   tinha acabado de trazer.
+   As datas são ISO ("2026-09-02 11:47"), então comparar como texto já ordena.        */
+const ALX_VISTO_KEY = 'altiumhub.almoxvisto.';
+
+/* a entrada mais recente do acervo: é o marco de "vi tudo que está aqui".
+   Tem que sair dos DADOS, e não do carimbo da geração — um acervo gerado antes de um
+   item ser carimbado deixaria esse item marcado para sempre. */
+function alxMaisRecente() {
+  const m = LIB.syms.reduce((a, s) => {
+    const b = alxValores(s).reduce((c, p) => (p.desde > c ? p.desde : c), s.desde || '');
+    return b > a ? b : a;
+  }, '');
+  return m || (LIB.index && LIB.index.generatedIso) || '';
+}
+function alxVisto() {
+  const k = ALX_VISTO_KEY + (LIB.srcId || '?');
+  let v = localStorage.getItem(k);
+  if (!v) {
+    /* primeira vez neste acervo: o que está aqui agora conta como já visto — marcar
+       1.500 valores de uma vez não informaria nada */
+    v = alxMaisRecente();
+    if (v) localStorage.setItem(k, v);
+  }
+  return v;
+}
+function alxMarcarVisto() {
+  localStorage.setItem(ALX_VISTO_KEY + (LIB.srcId || '?'), alxMaisRecente());
+  renderLib();
+  toast(t('alx.vistoOk'), 'ok');
+}
+const alxNovo = p => !!(p && p.desde && p.desde > alxVisto());
+/* para um símbolo: {sym:true} quando ele inteiro é novo, {n:N} quando só ganhou valores */
+function alxNovidade(s) {
+  if (!s || !s.desde) return null;
+  const visto = alxVisto();
+  if (s.desde > visto) return { sym: true };
+  const n = alxValores(s).filter(p => p.desde > visto).length;
+  return n ? { n } : null;
+}
+/* quantos valores não vistos há no acervo inteiro */
+function alxNovidades() {
+  const visto = alxVisto();
+  let syms = 0, vals = 0;
+  for (const s of LIB.syms) {
+    if (s.desde > visto) { syms++; continue; }
+    vals += alxValores(s).filter(p => p.desde > visto).length;
+  }
+  return { syms, vals, total: syms + vals };
+}
+
+function renderLibAlmox() {
+  const meta = LIB.almox;
+
+  const q = S.lib.q.trim().toLowerCase();
+  const hit = s => !q || (s.name + ' ' + (s.description || '') + ' ' +
+    alxValores(s).slice(0, 400).map(p => p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '')).join(' ')
+  ).toLowerCase().includes(q);
+
+  const comEstoque = LIB.syms.filter(s => alxEstoque(s) > 0);
+  const semEstoque = LIB.syms.filter(s => alxEstoque(s) <= 0);
+  const semFp = LIB.syms.filter(s => !(s.footprints || []).length);
+  let kind = S.lib.kind;
+  if (['all', 'stock', 'nostock', 'nofp'].indexOf(kind) < 0) kind = 'all';
+  S.lib.kind = kind;      /* recorte de outro acervo nao existe aqui: fixa o que sobrou */
+
+  const seg = $('#libKind'); seg.textContent = '';
+  [['all', 'Tudo', LIB.syms.length], ['stock', 'Com saldo', comEstoque.length],
+   ['nostock', 'Zerados', semEstoque.length], ['nofp', 'Sem encap.', semFp.length]]
+    .forEach(([k, label, n]) => {
+      const b = el('button', null, label);
+      b.setAttribute('aria-pressed', String(kind === k));
+      b.append(el('span', 'n', String(n)));
+      b.onclick = () => { S.lib.kind = k; renderLib(); };
+      seg.append(b);
+    });
+
+  const base = kind === 'stock' ? comEstoque : kind === 'nostock' ? semEstoque
+             : kind === 'nofp' ? semFp : LIB.syms;
+  const lista = base.filter(hit);
+
+  /* A busca serve para CHEGAR num componente. Se o selecionado nao esta entre os
+     resultados, o preview seguia mostrando ele — a tela dizia "DIODO RETIFICADOR [SMD]" na
+     lista e "CAPACITOR ELETROLITICO [SMD]" no cabecalho do simbolo ao mesmo tempo. Seguir o
+     primeiro resultado e o que a pessoa quer ao digitar; sem busca nem recorte, a selecao
+     fica onde estava. */
+  if (lista.length && S.lib.sel && S.lib.sel.k === 'sym'
+      && !lista.some(s => s.name === S.lib.sel.name)) {
+    S.lib.sel = { k: 'sym', name: lista[0].name };
+    S.lib.valor = (alxValores(lista[0])[0] || {}).id || 0;
+    S.lib.fpShown = null;
+  }
+
+  /* resumo */
+  const sum = $('#libSum'); sum.textContent = '';
+  const stat = (n, label, tone) => {
+    const s = el('span'); const b = el('b', null, String(n));
+    if (tone) b.style.color = 'var(--' + tone + ')';
+    s.append(b, document.createTextNode(' ' + label)); sum.append(s);
+  };
+  /* Os números do cabeçalho são a SOMA, componente por componente, do que está listado —
+     e não os totais prontos do índice. Vindo do índice, filtrar a lista em "Zerados" deixava
+     o cabeçalho dizendo 109.644 peças em cima de uma lista sem nenhuma: dois números
+     discordando na mesma tela. Somando aqui, o total é sempre o total do que se vê, e no
+     recorte "Tudo" ele bate com o índice.
+     "Zerado" aqui é não ter saldo — inclusive o saldo NEGATIVO que o Odoo às vezes carrega
+     (consumo lançado antes da entrada). É o mesmo critério do seg acima; o índice contava só
+     o zero exato, e por isso dava 4 a menos. */
+  const soma = lista.reduce((a, sy) => {
+    const vs = alxValores(sy);
+    a.vals += vs.length;
+    a.itens += (sy.itens || 0);
+    a.pecas += alxEstoque(sy);
+    a.zerados += vs.filter(v => !((v.estoque || 0) > 0)).length;
+    return a;
+  }, { vals: 0, itens: 0, pecas: 0, zerados: 0 });
+
+  stat(lista.length, 'símbolos');
+  stat(soma.vals, 'valores');
+  stat(soma.itens, 'itens do Odoo');
+  /* verde só quando há o que pegar: no recorte dos zerados a soma pode sair NEGATIVA, e é
+     um saldo negativo do Odoo aparecendo — não uma boa notícia */
+  stat(alxQtd(soma.pecas), 'peças em estoque', soma.pecas > 0 ? 'ok' : 'warn');
+  stat(soma.zerados, 'valores zerados', soma.zerados ? 'warn' : null);
+  /* quando há recorte, dizer de quantos componentes veio a soma evita a leitura errada */
+  if (lista.length !== LIB.syms.length) {
+    const s0 = el('span', null, 'de ' + LIB.syms.length + ' no acervo');
+    s0.title = 'o resumo acompanha o recorte: soma só os componentes listados';
+    sum.append(s0);
+  }
+  /* a última sincronização fica no resumo: é o que responde "isto está velho?" */
+  const us = LIB.index && LIB.index.ultimaSync;
+  if (us) {
+    const s2 = el('span');
+    s2.append(document.createTextNode('sincronizado ' + (us.generated || '—')));
+    s2.title = 'fonte: ' + (us.fonte || '—');
+    sum.append(s2);
+  }
+  /* o contador de novidades é acumulado e só zera quando alguém diz que viu — não na
+     próxima geração */
+  const nv = alxNovidades();
+  if (nv.total) {
+    const s3 = el('span');
+    const b3 = el('b', null, String(nv.total));
+    b3.style.color = 'var(--ok)';
+    s3.append(b3, document.createTextNode(' novo(s) desde ' + alxVisto() + ' '));
+    const btn = el('button', 'btn btn-ghost btn-sm', t('alx.marcarVisto'));
+    btn.style.cssText = 'padding:0 6px;min-height:18px;font-size:11px';
+    btn.title = t('alx.marcarVistoHint');
+    btn.onclick = alxMarcarVisto;
+    s3.append(btn);
+    sum.append(s3);
+  }
+  sum.title = meta.hint + '\ngerado em ' + (LIB.gen.sym || '—') + '\n' + (LIB.src.sym || '');
+
+  /* lista, agrupada por família — é assim que se procura um componente */
+  const list = $('#libList'); list.textContent = '';
+  const frag = document.createDocumentFragment();
+  let fam = null;
+  lista.forEach(s => {
+    if (s.familia !== fam) {
+      fam = s.familia;
+      const n = lista.filter(x => x.familia === fam).length;
+      frag.append(el('div', 'lib-head', fam + (n > 1 ? ' (' + n + ')' : '')));
+    }
+    const est = alxEstoque(s);
+    const b = el('button', 'lib-row');
+    b.setAttribute('aria-selected', String(!!S.lib.sel && S.lib.sel.name === s.name));
+    b.title = s.description || s.name;
+    b.append(el('span', 'nm', s.name));
+    if (alxValores(s).length > 1) b.append(el('span', 'pill', alxValores(s).length + ' val'));
+    /* o que a última sincronização trouxe fica marcado: sem isso, "o que é novo" some
+       no meio de 2.400 valores assim que o diálogo fecha */
+    const nv = alxNovidade(s);
+    if (nv) {
+      const p = el('span', 'pill novo', nv.sym ? 'novo' : '+' + nv.n);
+      p.title = nv.sym ? 'símbolo que entrou depois da última vez que você marcou como visto'
+                       : nv.n + ' valor(es) que entraram depois da última vez que você marcou como visto';
+      b.append(p);
+    }
+    if (!(s.footprints || []).length) b.append(el('span', 'pill warn', 'sem encap'));
+    const q2 = el('span', 'mt', alxQtd(est));
+    q2.style.color = est > 0 ? 'var(--ok)' : 'var(--text-4)';
+    b.append(q2);
+    /* valQ é o filtro DA lista de valores do símbolo anterior: mantê-lo esconderia
+       a lista inteira do símbolo novo, que é o oposto do que o clique pediu */
+    b.onclick = () => {
+      S.lib.sel = { k: 'sym', name: s.name };
+      S.lib.valor = (alxValores(s)[0] || {}).id || 0;
+      S.lib.valQ = ''; renderLib();
+    };
+    frag.append(b);
+  });
+  if (!frag.childNodes.length)
+    frag.append(el('div', 'lib-head', q ? 'nada com "' + S.lib.q + '"' : 'nada aqui'));
+  list.append(frag);
+
+  renderLibAlmoxPreview();
+}
+
+function renderLibAlmoxPreview() {
+  const aside = $('#libDetail'); aside.textContent = '';
+  $('#libPart').hidden = true;
+  libDrawSym = null; libDrawFp = null;
+  $('#libSymHint').textContent = ''; $('#libFpHint').textContent = '';
+  const s = alxSym();
+
+  if (!s) {
+    $('#libSymMeta').textContent = '—';
+    $('#libValMeta').textContent = '—';
+    $('#libSymHint').textContent = t('lib.escolha');
+    $('#libValList').textContent = ''; $('#libValCount').textContent = '';
+    libFit(libCamSym, null); libPoeFp(null, null);
+    const p = el('p', null, t('lib.almoxIntro'));
+    p.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:18px;line-height:1.55';
+    aside.append(p);
+    return;
+  }
+
+  /* o símbolo tem UMA geometria; o valor escolhido é só um conjunto de parâmetros */
+  const geom = (s.parts && s.parts[0]) || { pins: [], graphics: [] };
+  const parts = alxValores(s);
+  const part = parts.find(v => v.id === S.lib.valor) || parts[0]
+            || { id: 0, label: '—', itens: [], params: [] };
+  const pos = Math.max(1, parts.indexOf(part) + 1);
+  libDrawSym = geom;
+  const symBB = HubDraw.symBBox(geom);
+  libFit(libCamSym, symBB);
+  $('#libSymMeta').textContent = s.name + ' · ' + (geom.pins || []).length + ' pinos · valor '
+    + pos + '/' + parts.length;
+
+  /* O footprint aqui é o do VALOR, não o do símbolo: um resistor 0805 e um 2512 dividem o
+     mesmo desenho de símbolo e não têm nada a ver na placa. Quando o Odoo não disse o
+     encapsulamento, cai no modelo do símbolo, que é o melhor palpite que existe — e um chip
+     clicado na ficha passa na frente dos dois, para poder comparar os encapsulamentos. */
+  const fpAuto = part.footprint
+    || ((s.footprints || []).find(f => f.current) || (s.footprints || [])[0] || {}).name || null;
+  const fpNome = S.lib.fpShown || fpAuto;
+  libPoeFp(fpNome ? ((libResolve('fp', fpNome) || {}).item || null) : null, fpNome);
+
+  /* ── painel de valores ── */
+  const vq = (S.lib.valQ || '').trim().toLowerCase();
+  const vis = parts.filter(p => !vq ||
+    (p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '') + ' ' + (p.pkgs || []).join(' '))
+      .toLowerCase().includes(vq));
+  $('#libValMeta').textContent = s.name;
+  $('#libValCount').textContent = vis.length === parts.length
+    ? parts.length + ' valores' : vis.length + ' de ' + parts.length;
+  const busca = $('#libValSearch');
+  if (busca.value !== (S.lib.valQ || '')) busca.value = S.lib.valQ || '';
+  busca.oninput = () => { S.lib.valQ = busca.value; renderLibAlmoxPreview(); };
+
+  const vl = $('#libValList'); vl.textContent = '';
+  const vfrag = document.createDocumentFragment();
+  vis.forEach(p => {
+    const b = el('button', 'alx-row' + (p.fora ? ' fora' : ''));
+    b.setAttribute('aria-selected', String(p.id === part.id));
+    b.title = (p.itens && p.itens[0] && p.itens[0].nome) || p.label;
+    const lb = el('span', 'lb', p.label);
+    if (alxNovo(p)) {
+      lb.append(el('i', 'alx-novo', 'novo'));
+      b.title = 'entrou na lib em ' + p.desde + ' · ' + b.title;
+    }
+    if (p.fora) {
+      lb.append(el('i', 'alx-fora', 'fora'));
+      b.title = 'não está mais no Odoo — a part continua na lib para não renumerar as outras';
+    }
+    /* o número é o id do valor: é a chave dele no .DbLib e no schematic.js */
+    const ix = el('span', 'ix', String(p.id)); ix.title = 'id ' + p.id + ' no catálogo';
+    b.append(ix, lb, el('span', 'pk', (p.pkgs || []).join(' · ')));
+    const q2 = el('span', 'qt' + (p.estoque > 0 ? '' : ' zero'), alxQtd(p.estoque));
+    b.append(q2);
+    /* o encapsulamento fixado era do valor ANTERIOR: mantê-lo poria um 0805 na ficha de
+       um 2512 e ninguém repararia */
+    b.onclick = () => { S.lib.valor = p.id; S.lib.fpShown = null; renderLibAlmoxPreview(); };
+    vfrag.append(b);
+  });
+  if (!vis.length) vfrag.append(el('div', 'alx-empty', 'nenhum valor com "' + S.lib.valQ + '"'));
+  vl.append(vfrag);
+
+  /* ── ficha ── */
+  aside.append(el('div', 'kicker', 'símbolo'));
+  const h = el('div', 'det-head'); const dn = el('span', 'd', s.name);
+  dn.style.cssText = 'font-size:15px;word-break:break-word;line-height:1.3';
+  h.append(dn); aside.append(h);
+  if (s.description) {
+    const p = el('p', null, s.description);
+    p.style.cssText = 'font-size:12px;color:var(--text-2);margin:6px 0 0'; aside.append(p);
+  }
+  const kvs = el('div'); kvs.style.marginTop = '12px';
+  kvRow(kvs, 'Designator', s.designator || '—');
+  kvRow(kvs, 'Valores', parts.length);
+  kvRow(kvs, 'Pinos', (geom.pins || []).length);
+  kvRow(kvs, 'Itens no Odoo', s.itens || 0);
+  kvRow(kvs, 'Estoque total', alxQtd(alxEstoque(s)));
+  aside.append(kvs);
+
+  aside.append(el('div', 'kicker', 'encapsulamentos do símbolo'));
+  const chips = el('div', 'chips'); chips.style.margin = '6px 0 14px';
+  if (!(s.footprints || []).length) {
+    const p = el('p', null, t('lib.semEncap'));
+    p.style.cssText = 'font-size:12px;color:var(--warn);margin:6px 0 14px'; aside.append(p);
+  } else {
+    s.footprints.forEach(m => {
+      /* clicar troca o footprint desenhado embaixo; clicar no que já está desenhado desfaz a
+         escolha e devolve o do valor. É o mesmo gesto do espelho do Altium, e é o jeito de
+         comparar dois encapsulamentos do mesmo componente sem trocar de valor. */
+      const c = chip(m.name + (m.incurrentlib ? ' ✓' : ''), 'mono' + (m.incurrentlib ? '' : ' gone'),
+        () => {
+          S.lib.fpShown = (S.lib.fpShown === m.name) ? null : m.name;
+          S.lib.baixo = 'fp';                 /* ver o footprint é justamente o pedido */
+          libPainelDeBaixo(true);             /* antes de desenhar: canvas escondido não pinta */
+          renderLibAlmoxPreview();
+        });
+      c.title = (m.incurrentlib ? 'existe na PcbLib espelhada' : 'ainda não existe na PcbLib espelhada')
+        + ' · clique para ver embaixo';
+      if (m.name === fpNome) c.style.boxShadow = 'inset 0 0 0 1px var(--hi)';
+      chips.append(c);
+    });
+    aside.append(chips);
+  }
+
+  /* o valor escolhido, com o que o Odoo sabe dele */
+  aside.append(el('div', 'kicker', 'valor ' + pos + ' de ' + parts.length));
+  const hv = el('div', 'det-head');
+  const dv = el('span', 'd', part.label); dv.style.cssText = 'font-size:15px;word-break:break-word';
+  const vq2 = el('span', 'v', alxQtd(part.estoque) + ' un');
+  vq2.style.color = part.estoque > 0 ? 'var(--ok)' : 'var(--warn)';
+  hv.append(dv, vq2); aside.append(hv);
+
+  if (part.fora) {
+    const av = el('p', null, t('alx.foraDoOdoo'));
+    av.style.cssText = 'font-size:12px;color:var(--warn);margin:6px 0 0;line-height:1.5';
+    aside.append(av);
+  }
+  const kv2 = el('div'); kv2.style.marginTop = '10px';
+  kvRow(kv2, 'Id no catálogo', part.id);
+  kvRow(kv2, 'Footprint', part.footprint || '—');
+  kvRow(kv2, 'Value', part.value || '—');
+  kvRow(kv2, 'Encapsulamento', (part.pkgs || []).join(' · ') || '—');
+  kvRow(kv2, 'MPN', part.mpn || '—');
+  kvRow(kv2, 'Mouser', part.mouser || '—');
+  kvRow(kv2, 'Local', part.local || '—');
+  kvRow(kv2, 'Custo', part.custo ? ('R$ ' + part.custo.toFixed(2).replace('.', ',')) : '—');
+  aside.append(kv2);
+
+  const itens = part.itens || [];
+  aside.append(el('div', 'kicker', itens.length > 1
+    ? itens.length + ' itens do Odoo neste valor' : 'item do Odoo'));
+  itens.forEach(it => {
+    const box = el('div', 'alx-item');
+    box.append(el('div', 't', it.nome));
+    const d = el('div', 'd');
+    const add = (k, v) => { if (!v && v !== 0) return; const sp = el('span'); sp.append(el('b', null, k + ' '), document.createTextNode(String(v))); d.append(sp); };
+    add('saldo', alxQtd(it.estoque));
+    add('local', it.local);
+    add('encap', it.pkg);
+    add('mouser', it.mouser);
+    add('id', it.odoo);
+    box.append(d);
+    aside.append(box);
+  });
+
+  const nota = el('p', null, t('lib.almoxNota'));
+  nota.style.cssText = 'font-size:11px;color:var(--text-4);margin-top:14px;line-height:1.5';
+  aside.append(nota);
+}
+
 function renderLibPreview(u, goneSym, goneFp) {
   const sel = S.lib.sel;
   const aside = $('#libDetail'); aside.textContent = '';
@@ -1598,7 +2733,7 @@ function renderLibPreview(u, goneSym, goneFp) {
     $('#libSymHint').textContent = 'escolha um item na lista';
     $('#libFpHint').textContent = '';
     libFit(libCamSym, null); libFit(libCamFp, null);
-    const p = el('p', null, 'Todos os símbolos da SchLib e footprints da PcbLib espelhados por ExportLibs. '
+    const p = el('p', null, 'Todos os símbolos da SchLib e footprints da PcbLib espelhados da casa. '
       + 'Os marcados como ausentes são referenciados pelo esquema deste projeto mas não existem no espelho — '
       + 'é por isso que o corpo deles não aparece na aba Esquema.');
     p.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:18px';
@@ -1715,9 +2850,9 @@ function renderLibPreview(u, goneSym, goneFp) {
     head('ausente na biblioteca', sel.name);
     const p = el('p', null, isSym
       ? 'O esquema deste projeto usa este símbolo, mas ele não está em Libs\\schlib.js. '
-        + 'ExportLibs espelha uma única SchLib — se o componente veio de outra biblioteca, o nome não resolve '
-        + 'e a aba Esquema desenha só os pinos, sem o corpo. Rode ExportLibs com a biblioteca de origem, '
-        + 'ou aponte o componente para um símbolo equivalente que já esteja na lib.'
+        + 'O espelho cobre uma única SchLib — se o componente veio de outra biblioteca, o nome não resolve '
+        + 'e a aba Esquema desenha só os pinos, sem o corpo. Aponte o componente para um símbolo '
+        + 'equivalente que já esteja na lib, ou traga a biblioteca de origem para o espelho.'
       : 'O esquema aponta para este footprint, mas ele não está em Libs\\pcblib.js. '
         + 'O ECO no Altium vai falhar nesse componente até a PcbLib de origem ser espelhada.');
     p.style.cssText = 'font-size:12px;color:var(--text-2);margin:8px 0 14px';
@@ -1780,15 +2915,8 @@ function renderLibPreview(u, goneSym, goneFp) {
   }
 
   /* preview de baixo: o footprint escolhido (do simbolo) ou o proprio selecionado */
-  const fp = fpName ? ((libResolve('fp', fpName) || {}).item || null) : null;
-  libDrawFp = fp || null;
-  fpBB = fp ? fp.bbox : null;
-  $('#libFpMeta').textContent = fp ? fp.name + ' · ' + (fp.pads || []).length + ' pads'
-    : (fpName ? fpName + ' — ausente na pcblib' : '—');
-  if (!fp) $('#libFpHint').textContent = fpName ? 'footprint fora da pcblib espelhada' : 'sem footprint associado';
-
   libFit(libCamSym, symBB);
-  libFit(libCamFp, fpBB);
+  libPoeFp(fpName ? ((libResolve('fp', fpName) || {}).item || null) : null, fpName);
 }
 
 function libAsideUsage(aside, refs) {
@@ -1810,7 +2938,10 @@ function libAsideUsage(aside, refs) {
 
 function renderPanes() {
   const d = S.detail;
-  document.querySelectorAll('.pane').forEach(p => p.classList.toggle('on', p.dataset.pane === S.tab));
+  /* data-pane pode listar mais de uma aba ("lib libfp"): sch lib e footprint lib sao a
+     mesma casca de tres colunas, so muda o que a lista traz */
+  document.querySelectorAll('.pane').forEach(p =>
+    p.classList.toggle('on', p.dataset.pane.split(' ').indexOf(S.tab) >= 0));
   if (S.tab === 'esquema' || S.tab === 'pcb') {
     const pane = document.querySelector('.pane[data-pane="' + S.tab + '"]');
     if (pane.dataset.proj !== S.projId) {
@@ -1840,7 +2971,7 @@ function renderPanes() {
       c.append(m); g.append(c);
     });
   }
-  if (S.tab === 'lib') return renderLib();
+  if (S.tab === 'lib' || S.tab === 'libfp') return renderLib();
   if (S.tab === 'neoden') return renderNeoden();
   if (S.tab === 'laser') return renderLaser();
   if (S.tab === 'bom') return renderBom();
@@ -2400,7 +3531,6 @@ const bomSplits = mkSplits({
 });
 
 let bomTimer = null, bomFeito = null;      /* bomFeito = { html, model, warnings } */
-let bomDirServidor = '';                   /* ultimo valor que veio do servidor, p/ nao pisar no digitado */
 
 function bomGerar() {
   const B = bomBoard();
@@ -2435,6 +3565,13 @@ function bomCompute() {
                  + 'rode ApplyChanges e ExportPcb antes de usar na bancada.');
   for (const a of avisos) W.append(el('div', 'lz-warn', a));
 
+  bomFooter();
+}
+
+/* o rodapé do painel: nome do arquivo e para onde ele vai. Vive fora de bomCompute
+   porque a pasta padrão agora muda no modal, com o BOM podendo nem estar gerado. */
+function bomFooter() {
+  const p = proj();
   $('#bomNome').textContent = HubBom.filename((p && p.name) || 'placa')
     + (S.bomCfg.bomDir ? '  →  ' + S.bomCfg.bomDir : '  →  (sem pasta padrão)');
 }
@@ -2471,11 +3608,6 @@ function bomSyncControls() {
   document.querySelectorAll('[data-bom-ver]').forEach(c => c.checked = !!o[c.dataset.bomVer]);
   const set = (id, v) => { const n = $(id); if (document.activeElement !== n) n.value = v; };
   set('#bomLayout', o.layout); set('#bomEmpresa', o.empresa || ''); set('#bomRev', o.revisao || '');
-  /* a pasta so e reescrita quando ainda esta como o servidor mandou: qualquer re-render
-     (marcar uma caixa, por exemplo) apagaria um caminho digitado e ainda nao gravado */
-  const dir = $('#bomDir');
-  if (dir.value === '' || dir.value === bomDirServidor) dir.value = S.bomCfg.bomDir || '';
-  bomDirServidor = S.bomCfg.bomDir || '';
 }
 function bomSet(patch) { Object.assign(S.bom, patch); bomSave(); renderBom(); }
 
@@ -2504,8 +3636,26 @@ async function bomCfgSave(dir) {
   let j = null; try { j = await resp.json(); } catch (e) {}
   if (!j || !j.ok) return toast((j && j.error) || ('não foi possível gravar (HTTP ' + resp.status + ')'), 'err');
   S.bomCfg = Object.assign({ bomDir: '' }, j.config);
-  bomCompute();
+  bomFooter();          /* só a linha do destino mudou — não vale regerar o BOM inteiro */
   toast(S.bomCfg.bomDir ? 'pasta padrão: ' + S.bomCfg.bomDir : 'pasta padrão limpa', 'ok');
+}
+
+/* Abre a janela de pasta do Windows NO PC DO SERVIDOR e devolve o caminho, ou '' quando
+   não houve escolha. Cancelar e tempo esgotado voltam vazios de propósito: gravar ''
+   apagaria a pasta que já estava configurada. */
+async function bomPickDir() {
+  if (!location.protocol.startsWith('http')) { toast(t('cfg.proj.browseRemote'), 'warn'); return ''; }
+  let resp;
+  try { resp = await fetch('/api/pick-dir', { method: 'POST' }); }
+  catch (e) { toast(t('cfg.proj.browseFail', { e: e.message }), 'err'); return ''; }
+  if (resp.status === 404) { toast(t('cfg.proj.browseOld'), 'err'); return ''; }
+  let j = null; try { j = await resp.json(); } catch (e) {}
+  if (!j || !j.ok) {
+    toast((j && j.error) || t('cfg.proj.browseFail', { e: 'HTTP ' + resp.status }), 'err');
+    return '';
+  }
+  if (!j.dir) { toast(t('cfg.proj.browseNone'), 'warn'); return ''; }
+  return j.dir;
 }
 
 /* ── gravar ── */
@@ -2515,7 +3665,7 @@ async function bomSalvar(dir, nome) {
   if (!location.protocol.startsWith('http'))
     return toast('salvar em pasta precisa do hub servido por hubserver.py, não por file:// — use Baixar', 'warn');
   if (!dir && !S.bomCfg.bomDir)
-    return toast('sem pasta padrão configurada — use "Salvar como…"', 'warn');
+    return toast('sem pasta padrão — defina em Configurações › Projeto, ou use "Salvar como…"', 'warn');
   const p = proj();
   const body = { name: nome || HubBom.filename((p && p.name) || 'placa'), content: r.html };
   if (dir) body.dir = dir;
@@ -2593,7 +3743,14 @@ function openBomSaveAs() {
   pasta.focus();
 }
 
-function renderAll() { renderHeader(); renderProjBar(); renderTabs(); renderPanes(); }
+/* sem projeto não há barra, abas nem painel para desenhar (todos leem proj()):
+   o boot já pintou o estado vazio, e o cabeçalho é a única parte que ainda muda —
+   trocar de idioma com Projects\ vazio passa por aqui. */
+function renderAll() {
+  renderHeader();
+  if (!proj()) return;
+  renderProjBar(); renderTabs(); renderPanes();
+}
 
 /* ═══ AÇÕES E OVERLAYS ═════════════════════════════════════════ */
 let toastTimer;
@@ -2606,19 +3763,19 @@ function toast(msg, kind) {
 }
 
 async function runAction(action) {
-  if (!RUNNABLE.has(action)) { openFlowDialog(); return; }
-  if (S.demoMode) { toast('sem servidor — rode python hubserver.py', 'err'); return; }
-  toast(action + ' em execução…', 'warn');
+  if (!RUNNABLE.has(action)) { openConfig('acoes'); return; }
+  if (S.demoMode) { toast(t('run.noServer'), 'err'); return; }
+  toast(t('run.running', { a: action }), 'warn');
   const lines = [];
   try {
     await API.run(S.projId, action, line => lines.push(line));
-    toast(action + ' concluído', 'ok');
+    toast(t('run.done', { a: action }), 'ok');
     const idx = await API.index(); S.projects = idx.projects;
-    if (!S.projects.length) { toast('nenhum projeto encontrado em Projects\\', 'warn'); return; }
+    if (!S.projects.length) { toast(t('load.empty'), 'warn'); return; }
     const id = S.projects.some(p => p.id === S.projId) ? S.projId : S.projects[0].id;
     await loadProject(id);
   }
-  catch (e) { toast(action + ' falhou: ' + e.message, 'err'); alert(lines.join('\n') || e.message); }
+  catch (e) { toast(t('run.fail', { a: action, e: e.message }), 'err'); alert(lines.join('\n') || e.message); }
 }
 
 function exportBom() {
@@ -2649,41 +3806,259 @@ function neodenDownload(side) {
   toast(name + ' baixado', 'ok');
 }
 
-function closeOverlay() { $('#overlay').textContent = ''; }
-function openActionsMenu() {
-  const bd = el('div', 'backdrop anchor-tr'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
-  const m = el('div', 'menu');
-  ACTIONS.forEach(([label, cmd]) => {
-    const b = el('button'); b.append(el('span', 'l', label), el('span', 'c mono', cmd));
-    b.onclick = () => { closeOverlay(); runAction(label); };
-    m.append(b);
-  });
-  bd.append(m); $('#overlay').append(bd);
-}
-function openFlowDialog() {
-  const bd = el('div', 'backdrop center'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
-  const d = el('div', 'dialog'); d.append(el('h3', null, 'Fluxo de um projeto novo'));
-  FLOW.forEach(([n, label, hint]) => {
-    const row = el('div'); row.style.cssText = 'display:grid;grid-template-columns:20px 1fr;gap:10px';
-    const t = el('div'); t.append(el('div', null, label), el('div', null, hint));
-    t.lastChild.style.cssText = 'font-size:12px;color:var(--text-2)';
-    const num = el('span', 'num', n); num.style.cssText = 'font-size:12px;color:var(--text-3)';
-    row.append(num, t); d.append(row);
-  });
-  const act = el('div'); act.style.cssText = 'display:flex;justify-content:flex-end;margin-top:6px';
-  const close = el('button', 'btn btn-primary', 'Fechar'); close.onclick = closeOverlay;
-  act.append(close); d.append(act); bd.append(d); $('#overlay').append(bd);
+function closeOverlay() {
+  $('#overlay').textContent = '';
+  $('#btnBrand').setAttribute('aria-expanded', 'false');
 }
 
+/* ═══ APARÊNCIA ════════════════════════════════════════════════
+   O <head> já pintou a tela com o que estava guardado; aqui ficam só a troca e a
+   memória. 'auto' guarda 'auto' e resolve na hora — trocar o tema do Windows com o
+   hub aberto muda a tela sem F5.                                              */
+/* skinSet grava em SKIN_KEY[k]: um eixo novo TEM que entrar aqui, senão ele grava na
+   chave literal 'undefined' calado e a escolha some no F5. */
+const SKIN_KEY = { mode: 'altiumhub.mode', theme: 'altiumhub.theme', font: 'altiumhub.font' };
+const skin = {
+  mode: localStorage.getItem(SKIN_KEY.mode) || 'auto',
+  theme: localStorage.getItem(SKIN_KEY.theme) || 'grafite',
+  font: localStorage.getItem(SKIN_KEY.font) || 'inter',
+};
+/* a MESMA pergunta que o <head> faz, com a MESMA polaridade. Perguntar "é claro?" de um
+   lado e "é escuro?" do outro faz um sistema sem preferência declarada (as duas respostas
+   false) pintar escuro e virar claro no primeiro frame. Sem preferência, fica escuro —
+   que é a cara do hub. */
+const sysLight = matchMedia('(prefers-color-scheme: light)');
+function skinApply() {
+  const dark = skin.mode === 'auto' ? !sysLight.matches : skin.mode !== 'light';
+  document.documentElement.dataset.mode = dark ? 'dark' : 'light';
+  document.documentElement.dataset.theme = skin.theme;
+  document.documentElement.dataset.font = skin.font;
+}
+function skinSet(patch) {
+  Object.assign(skin, patch);
+  for (const k in patch) localStorage.setItem(SKIN_KEY[k], patch[k]);
+  skinApply();
+}
+sysLight.addEventListener('change', () => { if (skin.mode === 'auto') skinApply(); });
+skinApply();
+
+/* ═══ MODAL DE CONFIGURAÇÃO ════════════════════════════════════
+   Três abas laterais, na ordem em que se procura: Projeto (o que é deste projeto),
+   Layout (o que é desta tela) e Ações (o que fazer dentro do Altium). Os três painéis
+   são construídos de uma vez e alternados por hidden — trocar de aba não pode apagar
+   um caminho digitado e ainda não gravado. */
+const CFG_TABS = [['proj','cfg.tab.proj'], ['layout','cfg.tab.layout'], ['acoes','cfg.tab.acoes']];
+let cfgTab = 'proj';
+
+/* os textos de ajuda trazem <b> do dicionário — constantes do próprio hub, nunca
+   entrada de usuário, então innerHTML aqui não abre porta nenhuma */
+function cfgHint(key) { const n = el('p', 'cfgm-hint'); n.innerHTML = t(key); return n; }
+
+/* um campo do Layout: rótulo, combobox e a linha de ajuda embaixo dele */
+function cfgField(labelKey, opts, cur, pick, hintKey) {
+  const f = el('div', 'cfgm-field');
+  const sel = el('select', 'input');
+  sel.id = 'cfgf-' + labelKey.replace(/\W+/g, '-');
+  opts.forEach(([id, label]) => { const o = el('option', null, label); o.value = id; sel.append(o); });
+  sel.value = cur;
+  sel.onchange = () => pick(sel.value);
+  const lab = el('label', null, t(labelKey)); lab.htmlFor = sel.id;
+  f.append(lab, sel);
+  if (hintKey) f.append(cfgHint(hintKey));
+  return f;
+}
+
+/* o menu da marca: a quina superior esquerda é onde se procura menu */
+function openBrandMenu() {
+  const bd = el('div', 'backdrop anchor-tl'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
+  const m = el('div', 'menu'); m.style.width = '240px';
+  const b = el('button');
+  b.append(el('span', 'l', t('cfg.title')), el('span', 'c', t('cfg.menuHint')));
+  b.onclick = () => { closeOverlay(); openConfig(); };
+  m.append(b);
+  bd.append(m); $('#overlay').append(bd);
+  $('#btnBrand').setAttribute('aria-expanded', 'true');
+}
+
+function openConfig(tab) {
+  if (tab) cfgTab = tab;
+  const bd = el('div', 'backdrop center'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
+  const d = el('div', 'cfgm');
+
+  const head = el('div', 'cfgm-head');
+  const x = el('button', 'btn btn-ghost', '✕'); x.title = t('cfg.close'); x.onclick = closeOverlay;
+  head.append(el('h3', null, t('cfg.title')), x);
+
+  const nav = el('div', 'cfgm-nav');
+  const panes = {};
+  CFG_TABS.forEach(([id]) => { panes[id] = el('div', 'cfgm-pane'); panes[id].hidden = id !== cfgTab; });
+  const abas = CFG_TABS.map(([id, key]) => {
+    const b = el('button', null, t(key));
+    b.setAttribute('aria-selected', String(id === cfgTab));
+    b.onclick = () => {
+      cfgTab = id;
+      abas.forEach((n, i) => n.setAttribute('aria-selected', String(CFG_TABS[i][0] === id)));
+      CFG_TABS.forEach(([k]) => { panes[k].hidden = k !== id; });
+    };
+    nav.append(b);
+    return b;
+  });
+
+  cfgPaneProjeto(panes.proj);
+  cfgPaneLayout(panes.layout);
+  cfgPaneAcoes(panes.acoes);
+
+  const body = el('div', 'cfgm-body');
+  body.append(nav, panes.proj, panes.layout, panes.acoes);
+  d.append(head, body); bd.append(d); $('#overlay').append(bd);
+}
+
+function cfgPaneProjeto(pane) {
+  const p = proj();
+  pane.append(el('div', 'kicker', t('cfg.proj.now')),
+              el('p', 'cfgm-val mono', p ? p.name : '—'),
+              el('p', 'cfgm-val sub mono', p ? p.path : ''));
+
+  /* Qual acervo a aba Biblioteca abre. Fica no Projeto e não no Layout porque a resposta
+     muda com o que se está fazendo — desenhar a partir do que existe no almoxarifado é
+     outro trabalho que conferir o espelho da SchLib real. A escolha é da máquina
+     (localStorage), igual à do tema, e o combobox da própria aba é o atalho dela. */
+  pane.append(el('div', 'kicker', t('cfg.proj.lib')));
+  pane.append(cfgField('cfg.proj.libSel',
+    libSources().map(x => [x.id, x.title]), libWanted(),
+    id => { libSetSrc(id); if (S.tab === 'lib' || S.tab === 'libfp') renderTabs(); },
+    'cfg.proj.libHint'));
+  if (LIB.index && LIB.index.generated) {
+    const q = el('p', 'cfgm-hint');
+    q.textContent = t('cfg.proj.libGer', { d: LIB.index.generated, n: LIB.index.classificados,
+                                           t: LIB.index.odooRows });
+    pane.append(q);
+  }
+
+  pane.append(el('div', 'kicker', t('cfg.proj.bomDir')));
+  const row = el('div', 'cfgm-dir');
+  const dir = el('input', 'input mono'); dir.type = 'text';
+  dir.value = S.bomCfg.bomDir || ''; dir.placeholder = 'D:\\Documentos\\BOM';
+  const pick = el('button', 'btn btn-secondary', t('cfg.proj.browse'));
+  const save = el('button', 'btn btn-primary', t('cfg.proj.save'));
+  pick.onclick = async () => {
+    /* o fetch fica pendurado enquanto a janela estiver aberta lá — daí o botão travado
+       e o rótulo mudando: sem isso o segundo clique leva 409 do servidor */
+    const rotulo = pick.textContent;
+    pick.disabled = true; pick.textContent = t('cfg.proj.browsing');
+    const escolhido = await bomPickDir();
+    pick.disabled = false; pick.textContent = rotulo;
+    if (!escolhido) return;    /* cancelar já se explicou; gravar '' apagaria a pasta */
+    dir.value = escolhido;
+    bomCfgSave(escolhido);
+  };
+  save.onclick = () => bomCfgSave(dir.value.trim());
+  row.append(dir, pick, save);
+  pane.append(row, cfgHint('cfg.proj.bomHint'), cfgHint('cfg.proj.browseHint'));
+
+  pane.append(el('div', 'kicker', t('cfg.proj.risk')));
+  const del = el('button', 'btn btn-danger', t('cfg.delete'));
+  del.style.marginTop = '7px';
+  del.disabled = !p || S.demoMode;
+  del.onclick = () => { closeOverlay(); openDeleteDialog(); };
+  pane.append(del, cfgHint(S.demoMode ? 'cfg.deleteNoSrv' : 'cfg.deleteHint'));
+}
+
+function cfgPaneLayout(pane) {
+  pane.append(cfgField('cfg.lay.color', MODES.map(([id, k]) => [id, t(k)]), skin.mode,
+    id => skinSet({ mode: id }), 'cfg.lay.colorHint'));
+  pane.append(cfgField('cfg.lay.theme', THEMES.map(id => [id, t('theme.' + id)]), skin.theme,
+    id => skinSet({ theme: id }), 'cfg.lay.themeHint'));
+  /* trocar de idioma redesenha a casca inteira, este modal incluído — reabre na
+     mesma aba, senão a escolha seguinte exige renavegar */
+  pane.append(cfgField('cfg.lay.lang', HubI18n.langs.map(l => [l.id, l.label]), HubI18n.lang,
+    id => { HubI18n.set(id); renderAll(); closeOverlay(); openConfig('layout'); }, 'cfg.lay.langHint'));
+  pane.append(cfgField('cfg.lay.font', FONTS.map(id => [id, t('font.' + id)]), skin.font,
+    id => skinSet({ font: id }), 'cfg.lay.fontHint'));
+}
+
+/* Ações = os tutoriais. Cada comando com o caminho real do menu do Altium, e embaixo
+   o fluxo de um projeto novo do começo ao fim. */
+function cfgPaneAcoes(pane) {
+  pane.append(cfgHint('cfg.act.hint'));
+  ACTIONS.forEach(([label, hint]) => {
+    const row = el('div', 'cfgm-act');
+    const txt = el('div');
+    txt.append(el('div', 'l', label), el('div', 'c mono', t(hint)));
+    row.append(txt);
+    if (RUNNABLE.has(label)) {
+      const b = el('button', 'btn btn-secondary btn-sm', t('cfg.act.run'));
+      b.onclick = () => { closeOverlay(); runAction(label); };
+      row.append(b);
+    }
+    pane.append(row);
+  });
+
+  pane.append(el('div', 'kicker', t('flow.title')));
+  FLOW.forEach(([n, label, hint]) => {
+    const row = el('div', 'cfgm-step');
+    const box = el('div');
+    box.append(el('div', 'l', t(label)), el('div', 'h', t(hint)));
+    row.append(el('span', 'n num', n), box);
+    pane.append(row);
+  });
+}
+
+/* Excluir projeto. A senha mestre é conferida no SERVIDOR — o hub nunca fica sabendo
+   qual é. E a pasta não é apagada: vai inteira para Trash\, no mesmo workspace. */
+function openDeleteDialog() {
+  const p = proj(); if (!p) return;
+  const bd = el('div', 'backdrop center'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
+  const d = el('div', 'dialog'); d.style.width = 'min(480px,100%)';
+  d.append(el('h3', null, t('del.title')));
+  const nome = el('p', 'mono', p.name);
+  nome.style.cssText = 'font-size:13px;margin:0;word-break:break-all';
+  const cam = el('p', 'mono', p.path);
+  cam.style.cssText = 'font-size:11px;color:var(--text-3);margin:0';
+  const what = el('p', null, t('del.what'));
+  what.style.cssText = 'font-size:12px;color:var(--text-2);margin:2px 0 0';
+  d.append(nome, cam, what);
+
+  const pwd = el('input', 'input');
+  pwd.type = 'password'; pwd.autocomplete = 'off'; pwd.placeholder = t('del.pwd');
+  d.append(pwd);
+
+  const act = el('div'); act.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:6px';
+  const cancel = el('button', 'btn btn-ghost', t('del.cancel')); cancel.onclick = closeOverlay;
+  const ok = el('button', 'btn btn-danger', t('del.ok'));
+  const go = async () => {
+    if (!pwd.value) { toast(t('del.needPwd'), 'warn'); pwd.focus(); return; }
+    ok.disabled = true;
+    const r = await API.remove(p.id, pwd.value);
+    ok.disabled = false;
+    /* senha errada não fecha o diálogo: limpa o campo e devolve o foco */
+    if (!r.ok) {
+      toast(r.status === 403 ? t('del.wrong') : t('del.fail', { e: r.error }), 'err');
+      pwd.value = ''; pwd.focus(); return;
+    }
+    closeOverlay();
+    toast(t('del.done', { name: p.name, path: r.trash }), 'ok');
+    const idx = await API.index(); S.projects = idx.projects;
+    /* sem nenhum projeto a casca não tem o que desenhar (renderProjBar lê proj()
+       direto): recarregar cai no estado vazio do boot, que já existe */
+    if (!S.projects.length) { location.reload(); return; }
+    await loadProject(S.projects.some(x => x.id === S.projId) ? S.projId : S.projects[0].id);
+  };
+  ok.onclick = go;
+  pwd.onkeydown = e => { if (e.key === 'Enter') go(); };
+  act.append(cancel, ok); d.append(act); bd.append(d); $('#overlay').append(bd);
+  pwd.focus();
+}
 /* ═══ NAVEGAÇÃO / PERSISTÊNCIA ════════════════════════════════ */
 function syncURL() { location.hash = S.projId + '/' + S.tab; localStorage.setItem('altiumhub.project', S.projId); }
 function readURL() {
   const [id, tab] = (location.hash.replace(/^#/, '') || '').split('/');
-  return { id: id || localStorage.getItem('altiumhub.project'), tab: TABS.some(t => t.id === tab) ? tab : null };
+  return { id: id || localStorage.getItem('altiumhub.project'),
+           tab: TAB_FOLHAS.indexOf(tab) >= 0 ? tab : null };
 }
 async function loadProject(id) {
   const det = await API.detail(id);
-  if (!det) { toast('detalhe do projeto indisponível — tente Reindexar', 'err'); return; }
+  if (!det) { toast(t('load.failDetail'), 'err'); return; }
   /* recarga do MESMO projeto (o SSE do hubserver dispara uma a cada gravacao, inclusive a
      de Libs/lib-subs.js) nao pode zerar a selecao da aba Biblioteca: apagaria justamente o
      painel de "substituto em uso"/desfazer um segundo depois de aparecer */
@@ -2721,7 +4096,9 @@ window.__hubOnChange = async function () {
   });
   if (dirty) { toast('workspace mudou no disco — há edições não salvas numa vista', 'warn'); return; }
   const idx = await API.index(); S.projects = idx.projects;
-  await loadProject(S.projId);
+  /* o projeto atual pode ter acabado de sair (exclusao, ou renomeado no disco) */
+  if (!S.projects.length) { location.reload(); return; }
+  await loadProject(S.projects.some(p => p.id === S.projId) ? S.projId : S.projects[0].id);
 };
 
 function scrollPickerActiveIntoView() {
@@ -2761,9 +4138,9 @@ $('#pickerSearch').addEventListener('keydown', e => {
 $('#compSearch').oninput = e => { S.compQ = e.target.value; renderComponents(); };
 $('#libSearch').oninput = e => { S.lib.q = e.target.value; renderLib(); };
 $('#libPart').onchange = e => { S.lib.part = +e.target.value || 1; S.lib.fpShown = null; renderLib(); };
-$('#btnNext').onclick = () => { const p = proj(); if (!p) return; const s = stepOf(p); s.run ? runAction(s.label) : openFlowDialog(); };
-$('#btnActions').onclick = openActionsMenu;
-$('#btnFlow').onclick = openFlowDialog;
+$('#btnNext').onclick = () => { const p = proj(); if (!p) return; const s = stepOf(p); s.run ? runAction(s.label) : openConfig('acoes'); };
+$('#btnBrand').onclick = openBrandMenu;
+$('#btnFlow').onclick = () => openConfig('acoes');
 $('#btnBom').onclick = exportBom;
 ['ndRotAng','ndRotOx','ndRotOy','ndMvDx','ndMvDy','ndMvN'].forEach(id => {
   $('#' + id).addEventListener('input', renderNeoden);
@@ -2781,7 +4158,6 @@ $('#bomLayout').onchange = e => bomSet({ layout: e.target.value });
   S.bom.empresa = $('#bomEmpresa').value; S.bom.revisao = $('#bomRev').value;
   bomSave(); bomSchedule();
 }));
-$('#bomDirSave').onclick = () => bomCfgSave($('#bomDir').value.trim());
 $('#bomSalvar').onclick = () => bomSalvar(null, null);
 $('#bomSalvarComo').onclick = openBomSaveAs;
 $('#bomBaixar').onclick = bomBaixar;
@@ -2859,7 +4235,6 @@ $('#ndRestore').onclick = () => {
 };
 $('#ndTop').onclick = () => neodenDownload('Top');
 $('#ndBottom').onclick = () => neodenDownload('Bottom');
-document.querySelectorAll('[data-run]').forEach(b => b.onclick = () => runAction(b.dataset.run));
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { S.pickerOpen = false; closeOverlay(); renderHeader(); }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -2869,23 +4244,26 @@ document.addEventListener('keydown', e => {
 
 /* ═══ BOOT ═════════════════════════════════════════════════════ */
 (async function init() {
+  HubI18n.apply(document);
   const idx = await API.index();
   S.projects = idx.projects;
   if (!S.projects.length) {
-    $('#projName').textContent = 'nenhum projeto';
-    $('#projCount').textContent = '0 projetos';
+    $('#projName').textContent = t('hdr.noProject');
+    $('#projCount').textContent = t('boot.zero');
     $('#pName').textContent = '—';
     const pane = document.querySelector('.pane[data-pane="esquema"]');
     pane.classList.add('on');
     const e = el('div', 'empty'), inner = el('div');
-    inner.append(el('span', 'tag', 'sem projetos'));
-    inner.append(el('p', null, 'Nenhum projeto em Projects\\ — rode ExportProject ou ExportBoard no Altium e clique em Reindexar.'));
+    inner.append(el('span', 'tag', t('boot.noProjTag')));
+    inner.append(el('p', null, t('boot.noProjMsg')));
     e.append(inner); pane.append(e);
     return;
   }
   /* a pasta padrao do BOM e da MAQUINA, nao do projeto: carrega uma vez, antes da primeira
      tela, para o rodape do painel ja dizer para onde "Salvar" vai escrever */
   await bomCfgLoad();
+  /* indice dos acervos: leve, e sem ele o combobox de biblioteca nasce com uma opcao so */
+  await loadLibTabelas();
   const url = readURL();
   if (url.tab) S.tab = url.tab;
   const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;

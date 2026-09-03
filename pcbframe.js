@@ -967,6 +967,13 @@ cv.addEventListener('mousemove', e=>{
 });
 cv.addEventListener('wheel', e=>{
   e.preventDefault();
+  /* Shift + roda: anda para os lados, sem ampliar */
+  if (e.shiftKey){
+    const d = (e.deltaX || e.deltaY) * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+    view.cx += d / (view.scale * (view.flip ? -1 : 1));
+    updateZoomLabel(); draw();
+    return;
+  }
   const w = screenToWorld(e.offsetX, e.offsetY);
   const f = e.deltaY<0 ? 1.18 : 1/1.18;
   view.scale *= f;

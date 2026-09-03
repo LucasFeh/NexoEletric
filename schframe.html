@@ -78,6 +78,7 @@
   <span class="sep"></span>
   <button id="toolSelect" class="active" title="Selecionar/mover (Esc)">Selecionar</button>
   <button id="toolComp" title="Adicionar componente das libs (C)">+ Componente</button>
+  <button id="toolCesta" title="Lista de componentes a colocar (L)">Lista <span id="toolCestaN"></span></button>
   <button id="toolWire" title="Desenhar fio (W); botão direito/Esc encerra">Fio</button>
   <button id="toolLabel" title="Net label">Label</button>
   <button id="toolPower" title="Power port">Power</button>
@@ -104,9 +105,29 @@
         <button id="anncancel">Cancelar</button>
       </div>
     </div>
+    <!-- lista de compras: junta (simbolo, parte, footprint) e joga tudo na folha de uma vez -->
+    <div id="cesta" style="display:none; position:absolute; top:10px; right:10px; z-index:16;
+         background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:340px;">
+      <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+        <b style="font-size:12px;">lista de componentes</b>
+        <span id="cestainfo" style="font-size:11px; color:var(--fg-dim); margin-left:auto;"></span>
+      </div>
+      <div id="cestalist" style="max-height:300px; overflow-y:auto; margin-bottom:6px;"></div>
+      <div style="display:flex; gap:6px; justify-content:flex-end;">
+        <button id="cestalimpa">Limpar</button>
+        <button id="cestacolocar">Jogar no esquema</button>
+        <button id="cestafechar">Fechar</button>
+      </div>
+    </div>
+
     <div id="pickform" style="display:none; position:absolute; top:10px; left:10px; z-index:16;
          background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:430px;">
-      <input id="picksearch" placeholder="buscar símbolo (nome/descrição)" style="width:100%; background:var(--panel);
+      <div style="display:flex; gap:6px; margin-bottom:6px; align-items:center;">
+        <label style="flex:1; font-size:11px; color:var(--fg-dim);">acervo
+          <select id="picksrc" style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;"></select></label>
+        <span id="picksrcinfo" style="font-size:11px; color:var(--fg-dim); white-space:nowrap;"></span>
+      </div>
+      <input id="picksearch" placeholder="buscar símbolo, valor, MPN ou código Mouser" style="width:100%; background:var(--panel);
              color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:4px; margin-bottom:6px;">
       <div id="picklist" style="max-height:140px; overflow-y:auto; margin-bottom:6px;"></div>
       <canvas id="pickpreview" width="414" height="150" style="width:100%; height:150px; background:#fffef2;
@@ -121,7 +142,11 @@
       </div>
       <input id="pickcomment" placeholder="comment (opcional, ex: 10k)" style="width:100%; background:var(--panel);
              color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:4px; margin-bottom:6px;">
-      <div style="display:flex; gap:6px; justify-content:flex-end;">
+      <div style="display:flex; gap:6px; justify-content:flex-end; align-items:center;">
+        <label style="font-size:11px; color:var(--fg-dim); margin-right:auto;">qtd
+          <input id="pickqtd" type="number" min="1" max="99" value="1" style="width:46px; background:var(--panel);
+                 color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;"></label>
+        <button id="pickadd" title="junta na lista sem colocar na folha ainda">+ Lista</button>
         <button id="pickok">Posicionar</button>
         <button id="pickcancel">Cancelar</button>
       </div>
@@ -170,6 +195,10 @@
 <script src="hub-draw.js"></script>
 <script src="Libs/schlib.js"></script>
 <script src="Libs/pcblib.js"></script>
+<!-- acervos do almoxarifado: o picker escolhe de qual biblioteca vem o simbolo -->
+<script src="Libs/almox-basicos.js"></script>
+<script src="Libs/almox-especiais.js"></script>
+<script src="Libs/almox-index.js"></script>
 <!-- tabelas de apelido do resolvedor de nomes; ausentes, o resolvedor so perde os passos
      de rename e de substituicao (o 404 no console e esperado antes da primeira escolha) -->
 <script src="Libs/rename-map.js"></script>

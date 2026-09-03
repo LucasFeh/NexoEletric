@@ -182,6 +182,14 @@ function mkCamera(canvas, drawWorld, opts){
   });
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
+    /* Shift + roda anda para os lados em vez de ampliar. Alguns navegadores ja trocam
+       deltaY por deltaX quando o Shift esta preso, entao vale o que vier. */
+    if (e.shiftKey){
+      const d = (e.deltaX || e.deltaY) * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+      cam.cx += d / cam.scale;
+      draw();
+      return;
+    }
     const w = toWorld(e.offsetX, e.offsetY);
     cam.scale *= (e.deltaY < 0 ? 1.18 : 1/1.18);
     cam.cx = w.x - (e.offsetX-W/2)/cam.scale;
@@ -194,6 +202,13 @@ function mkCamera(canvas, drawWorld, opts){
     if (opts && opts.onClick) opts.onClick(toWorld(e.offsetX, e.offsetY), e);
   });
   window.addEventListener('resize', resize);
+  /* A JANELA nao e a unica coisa que muda o tamanho do canvas: a barra de rolagem da lista
+     que aparece e some conforme a busca filtra, a troca de sub-aba, o painel de baixo
+     alternando entre valores e footprint — nada disso dispara 'resize' da window. Sem
+     observar o proprio elemento, o bitmap e o W/H que o transform usa ficam do tamanho
+     ANTIGO, e o desenho sai espremido e fora de centro dentro de uma caixa de outra
+     proporcao. Observar o canvas conserta todos esses casos de uma vez. */
+  if (typeof ResizeObserver === 'function') new ResizeObserver(resize).observe(canvas);
   return { cam, ctx, draw, fit, toWorld, resize };
 }
 

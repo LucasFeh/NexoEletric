@@ -1,0 +1,580 @@
+# -*- coding: utf-8 -*-
+"""Escreve as .SchLib do almoxarifado direto, sem passar pelo Altium.
+
+Junta as três peças: `cfbf.py` (contêiner OLE2), `schlib_bin.py` (registros) e o espelho
+`Libs/almox-*.js` (o conteúdo). E faz o que o usuário pediu: em vez de desenhar símbolo
+novo, **recicla os símbolos da biblioteca real** — o `RES [ SMD ]` dele já vem com a
+geometria da casa e, de brinde, com os footprints `RES 0805 / 1206 / 2512` associados.
+
+Onde não há símbolo equivalente na lib real, cai para a geometria desenhada em
+`simbolos.py`, convertida para registros.
+
+Unidades: o espelho está em mil; o arquivo .SchLib guarda int16 em unidades de 10 mil.
+"""
+import io, json, os, re, struct, sys
+
+BASE = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(os.path.dirname(BASE))
+LIBS = os.path.join(RAIZ, 'Libs')
+sys.path.insert(0, BASE)
+
+import cfbf                                            # noqa: E402
+import schlib_bin as SB                                # noqa: E402
+
+LIB_REAL = r'\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib'
+
+# ─── quais símbolos da lib real cada família do almoxarifado reaproveita ──────
+# A chave é o nome do símbolo gerado; o valor, o LibReference na biblioteca do usuário.
+# O que não estiver aqui é desenhado a partir do `simbolos.py`.
+CATALOGO = {
+    'RESISTOR [SMD]':               'RES [ SMD ]',
+    'RESISTOR [PTH]':               'RES [ PTH ]',
+    'RESISTOR REDE':                'RES [ PTH ]',
+    'CAPACITOR CERAMICO [SMD]':     'CAP [  SMD  ]',
+    'CAPACITOR CERAMICO [PTH]':     'CAP [  PTH  ]',
+    'CAPACITOR ELETROLITICO [SMD]': 'CAP EL [ SMD  ]',
+    'CAPACITOR ELETROLITICO [PTH]': 'CAP EL [  PTH  ]',
+    'CAPACITOR POLIESTER [PTH]':    'CAP [  PTH  ]',
+    'CAPACITOR SEGURANCA [PTH]':    'CAP [  PTH  ]',
+    'CAPACITOR TANTALO [SMD]':      'CAP EL [ SMD  ]',
+    'CAPACITOR':                    'CAP [  PTH  ]',
+    'SUPERCAPACITOR':               'CAP EL [  PTH  ]',
+    'DIODO [SMD]':                  'DIODO SMD',
+    'DIODO [PTH]':                  'DIODO PTH',
+    'DIODO ZENER [PTH]':            'DIODO [ ZENER ] PTH',
+    'DIODO ZENER [SMD]':            'DIODO [ ZENER ] SMD',
+    'DIODO SCHOTTKY':               'DIODO [ Schottky ] PTH',
+    'DIODO TVS':                    'DIODO [ SUPRESSOR DE TRANSIENTE UNIDIRECIONAL ] PTH',
+    'PONTE RETIFICADORA [PTH]':     'PONTE RETIFICADORA',
+    'LED':                          'LED',
+    'MOSFET':                       'MOSFET',
+    'FUSIVEL':                      'FUSIVEL',
+    'FUSIVEL PTC':                  'FUSIVEL',
+    'CRISTAL [PTH]':                'Cristal',
+    'VARISTOR':                     'Varistor',
+    'POTENCIOMETRO':                'Potenciometro',
+    'FERRITE':                      'FERRITE BEAD',
+    'INDUTOR':                      'Indutor magnético',
+    'BATERIA':                      'Bateria',
+    'CHAVE':                        'Chave Contato Momentâneo',
+    'TRANSISTOR':                   '2N3904',          # símbolo BJT padrão da casa
+}
+# conectores: a família traz o número de vias no nome, e a lib real tem barra por via
+CONECTOR_RX = re.compile(r'^(CONECTOR|BARRA DE PINOS) (\d+)V')
+
+# Os parametros que a escolha do valor preenche. Sao declarados uma vez, aqui, e
+# qualquer homonimo herdado do simbolo reciclado e descartado.
+CAMPOS_DO_VALOR = ('Comment', 'Value', 'Encapsulamento', 'MPN', 'Mouser', 'OdooId',
+                   'Estoque', 'Local', 'Custo', 'ValorId')
+BARRA_FMT = 'BARRA TERMINAL %d VIAS'
+
+
+def footprints_do_modelo(nome_simbolo, comps):
+    """Os footprints que o simbolo reciclado ja carrega (RES 0805, RES 1206...).
+
+    O espelho do hub precisa listar OS MESMOS nomes que a .SchLib vai ter: se ele
+    disser "0805" (o encapsulamento do Odoo) e o arquivo tiver "RES 0805", o
+    BuildSchematic nao acha o modelo na hora de colocar o componente na folha."""
+    modelo = comps.get(CATALOGO.get(nome_simbolo, ''))
+    if modelo is None:
+        m = CONECTOR_RX.match(nome_simbolo or '')
+        if m:
+            modelo = comps.get(BARRA_FMT % int(m.group(2)))
+    if not modelo:
+        return []
+    fora = []
+    for tipo, pl in modelo:
+        if tipo != SB.TEXTO:
+            continue
+        d = SB.le_texto(pl)
+        if d.get('RECORD') == '45' and d.get('ModelName'):
+            fora.append((d['ModelName'], d.get('IsCurrent') == 'T'))
+    return fora
+
+
+def _uid(semente):
+    """UniqueID de 8 letras, estável entre gerações (o Altium só quer unicidade)."""
+    h = 0
+    for c in str(semente):
+        h = (h * 131 + ord(c)) & 0xFFFFFFFFFFFF
+    letras = ''
+    for _ in range(8):
+        letras += chr(65 + (h % 26))
+        h //= 26
+    return letras
+
+
+def u(v):
+    """mil -> unidade do arquivo"""
+    return int(round(v / 10.0))
+
+
+# ─── leitura da biblioteca de origem ─────────────────────────────────────────
+def carrega_lib(caminho=LIB_REAL):
+    """-> (cabecalho, {LibReference: [(tipo, payload)]})"""
+    import olefile
+    o = olefile.OleFileIO(caminho)
+    cab = SB.le_texto(SB.desmonta(o.openstream('FileHeader').read())[0][1])
+    comps = {}
+    for s in o.listdir():
+        if len(s) != 2 or s[1] != 'Data' or s[0] == 'FileHeader':
+            continue
+        regs = SB.desmonta(o.openstream('/'.join(s)).read())
+        if not regs or regs[0][0] != SB.TEXTO:
+            continue
+        d = SB.le_texto(regs[0][1])
+        if d.get('RECORD') == '1':
+            comps[d.get('LibReference', s[0])] = regs
+    o.close()
+    return cab, comps
+
+
+# ─── geometria desenhada -> registros (para quem não tem símbolo reciclado) ──
+def _reg(d):
+    return (SB.TEXTO, SB.escreve_texto(d))
+
+
+def forma_para_registro(g, parte, seq):
+    """um item `graphics` do espelho schlib-v2 -> registro ASCII do Altium"""
+    base = [('RECORD', None), ('IsNotAccesible', 'T'), ('OwnerPartId', parte)]
+    k = g['g']
+    d = dict()
+
+    def mk(rec, extra):
+        o = [('RECORD', rec), ('IsNotAccesible', 'T'), ('OwnerPartId', parte)]
+        o += extra
+        o += [('Color', 16711680), ('UniqueID', _uid(seq))]
+        from collections import OrderedDict
+        return OrderedDict(o)
+
+    if k == 'rect':
+        return _reg(mk(14, [('Location.X', u(g['x1'])), ('Location.Y', u(g['y1'])),
+                            ('Corner.X', u(g['x2'])), ('Corner.Y', u(g['y2'])),
+                            ('LineWidth', 1)]))
+    if k == 'line':
+        return _reg(mk(13, [('Location.X', u(g['x1'])), ('Location.Y', u(g['y1'])),
+                            ('Corner.X', u(g['x2'])), ('Corner.Y', u(g['y2'])),
+                            ('LineWidth', 1)]))
+    if k in ('polyline', 'poly'):
+        pts = g.get('pts') or []
+        extra = [('LineWidth', 1), ('LocationCount', len(pts))]
+        for i, (x, y) in enumerate(pts, 1):
+            extra += [('X%d' % i, u(x)), ('Y%d' % i, u(y))]
+        rec = 7 if k == 'poly' else 6
+        if k == 'poly':
+            extra = [('AreaColor', 16711680), ('IsSolid', 'T')] + extra
+        return _reg(mk(rec, extra))
+    if k == 'arc':
+        return _reg(mk(12, [('Location.X', u(g['cx'])), ('Location.Y', u(g['cy'])),
+                            ('Radius', u(g['r'])), ('LineWidth', 1),
+                            ('StartAngle', '%.3f' % float(g.get('sa', 0))),
+                            ('EndAngle', '%.3f' % float(g.get('ea', 360)))]))
+    if k == 'ellipse':
+        return _reg(mk(11, [('Location.X', u(g['cx'])), ('Location.Y', u(g['cy'])),
+                            ('Radius', u(g['rx'])), ('SecondaryRadius', u(g['ry'])),
+                            ('LineWidth', 1), ('EndAngle', '360.000')]))
+    if k == 'label':
+        return _reg(mk(4, [('Location.X', u(g['x'])), ('Location.Y', u(g['y'])),
+                           ('FontID', 1), ('Text', g.get('text', ''))]))
+    _ = (base, d)
+    return None
+
+
+# ─── montagem de um componente ───────────────────────────────────────────────
+def _classifica(regs):
+    """separa o modelo reciclado em cabeçalho, nível-componente, nível-parte e footprints"""
+    cab, comum, porparte, fps = None, [], [], []
+    i, n = 0, len(regs)
+    while i < n:
+        tipo, pl = regs[i]
+        if tipo == SB.BINARIO:
+            porparte.append((tipo, pl)); i += 1; continue
+        d = SB.le_texto(pl)
+        r = d.get('RECORD')
+        if r == '1':
+            cab = d
+        elif r == '44':
+            fps.append((tipo, pl))
+            j = i + 1
+            while j < n and regs[j][0] == SB.TEXTO and \
+                    SB.le_texto(regs[j][1]).get('RECORD') in ('45', '46', '48'):
+                fps.append(regs[j]); j += 1
+            i = j; continue
+        elif d.get('OwnerPartId', '-1') == '-1':
+            comum.append(d)
+        else:
+            porparte.append((tipo, pl))
+        i += 1
+    return cab, comum, porparte, fps
+
+
+def _com_parte(reg, parte):
+    """devolve o registro com OwnerPartId trocado (texto ou pino)"""
+    tipo, pl = reg
+    if tipo == SB.BINARIO:
+        p = SB.le_pino(pl)
+        p['ownerpartid'] = parte
+        return (tipo, SB.escreve_pino(p))
+    d = SB.le_texto(pl)
+    d['OwnerPartId'] = parte
+    if 'UniqueID' in d:
+        d['UniqueID'] = _uid(str(d.get('UniqueID')) + '#' + str(parte))
+    return _reg(d)
+
+
+def _fundo(regs):
+    """menor Y (em unidades do arquivo) dos registros, para pôr o rótulo embaixo"""
+    ys = []
+    for tipo, pl in regs:
+        if tipo == SB.BINARIO:
+            ys.append(SB.le_pino(pl)['y'])
+            continue
+        d = SB.le_texto(pl)
+        for k, v in d.items():
+            if k.startswith(('Location.Y', 'Corner.Y')) or re.match(r'^Y\d+$', k):
+                try:
+                    ys.append(int(float(v)))
+                except ValueError:
+                    pass
+    return min(ys) if ys else 0
+
+
+def monta_componente(sim, valor, modelo=None):
+    """um VALOR do espelho -> um componente completo da .SchLib.
+
+    Cada valor do almoxarifado vira um componente proprio, com nome
+    "SMD 0805 10K 1/8W 1% 100ppm", o footprint daquele encapsulamento como modelo atual
+    e os parametros ja preenchidos. A geometria vem da familia (o `sim`)."""
+    from collections import OrderedDict
+    nome = valor['altium']
+    partes = sim['parts']
+    npart = sim['partcount']
+
+    if modelo:
+        cab_m, comum, porparte, fps = _classifica(modelo)
+    else:
+        cab_m, comum, fps = None, [], []
+        porparte = []
+        base = partes[0]
+        for i, pin in enumerate(base['pins']):
+            porparte.append((SB.BINARIO, SB.escreve_pino(SB.pino(
+                pin['num'], pin['name'], pin['x'], pin['y'], pin['len'], pin['orient'],
+                pin.get('type', 'Passive'), 1))))
+        for i, g in enumerate(base['graphics']):
+            r = forma_para_registro(g, 1, nome + '/g%d' % i)
+            if r:
+                porparte.append(r)
+
+    fora = []
+    # 1. cabeçalho do componente
+    h = OrderedDict(cab_m or [])
+    h['RECORD'] = '1'
+    h.move_to_end('RECORD', last=False)
+    h['LibReference'] = nome
+    h['ComponentDescription'] = ((valor.get('itens') or [{}])[0].get('nome')
+                                 or valor.get('label') or sim.get('description', ''))
+    h['PartCount'] = npart + 1          # o ARQUIVO grava partes+1 (aqui sempre 2)
+    h['DisplayModeCount'] = 1
+    h['IndexInSheet'] = -1
+    h['OwnerPartId'] = -1
+    h['CurrentPartId'] = 1
+    h.setdefault('LibraryPath', '*')
+    h.setdefault('SourceLibraryName', '*')
+    h.setdefault('SheetPartFileName', '*')
+    h.setdefault('TargetFileName', '*')
+    h['UniqueID'] = _uid(nome)
+    h.setdefault('AreaColor', 11599871)
+    h.setdefault('Color', 128)
+    h['PartIDLocked'] = 'F'
+    h['DesignItemId'] = nome
+    h['AllPinCount'] = len(partes[0]['pins'])
+    fora.append(_reg(h))
+
+    # 2. parâmetros e designador do componente inteiro.
+    #    Os campos que a escolha do valor preenche são declarados adiante; se o símbolo
+    #    reciclado já trouxer um deles (o RES [ SMD ] da casa tem "Value" e um "Comment"
+    #    que é expressão), ele sai daqui — dois parâmetros com o mesmo nome confundem o
+    #    BOM e a atualização pelo DbLib.
+    for d in comum:
+        d = OrderedDict(d)
+        if d.get('RECORD') == '41' and d.get('Name') in CAMPOS_DO_VALOR:
+            continue
+        if d.get('RECORD') == '34':
+            d['Text'] = (sim.get('designator') or 'U') + '?'
+        if 'UniqueID' in d:
+            d['UniqueID'] = _uid(nome + '#' + str(d.get('Name', d.get('Text', ''))))
+        fora.append(_reg(d))
+    if not any(SB.le_texto(p).get('RECORD') == '34' for t, p in
+               [(SB.TEXTO, SB.escreve_texto(d)) for d in comum] if t == SB.TEXTO):
+        fora.append(_reg(OrderedDict([
+            ('RECORD', 34), ('IndexInSheet', -1), ('OwnerPartId', -1),
+            ('Location.X', 0), ('Location.Y', u(200)), ('Color', 8388608), ('FontID', 1),
+            ('Text', (sim.get('designator') or 'U') + '?'), ('Name', 'Designator'),
+            ('ReadOnlyState', 1), ('UniqueID', _uid(nome + '#desig'))])))
+
+    # 3. corpo e pinos — uma parte só. O valor NAO mora mais aqui: ele e um conjunto de
+    #    parametros preenchido na hora de colocar (pelo hub) ou escolhido no .DbLib.
+    ybase = _fundo(porparte) - 4
+    for reg in porparte:
+        fora.append(_com_parte(reg, 1))
+
+    # os parametros do valor, ja PREENCHIDOS — o componente sai da lib pronto
+    vals = {q['n']: q['v'] for q in (valor.get('params') or [])}
+    vals.setdefault('Comment', valor.get('label', ''))
+    vals['ValorId'] = valor.get('id', '')
+    vals['Familia'] = sim.get('familia', '')
+    for i, campo in enumerate(CAMPOS_DO_VALOR + ('Familia',)):
+        texto = vals.get(campo, '')
+        if campo != 'Comment' and not texto:
+            continue                       # parametro vazio so polui o Parameter Manager
+        d = OrderedDict([
+            ('RECORD', 41), ('IndexInSheet', -1), ('OwnerPartId', -1),
+            ('Location.X', 0), ('Location.Y', ybase - (0 if campo == 'Comment' else 2 + i)),
+            ('Color', 8388608), ('FontID', 1)])
+        if campo != 'Comment':
+            d['IsHidden'] = 'T'            # so o Comment aparece na folha
+        d['Text'] = texto
+        d['Name'] = campo
+        d['UniqueID'] = _uid(nome + '#' + campo)
+        fora.append(_reg(d))
+
+    # 4. footprints. Antes só saíam os do símbolo reciclado, e 110 dos 134 componentes
+    #    ficavam com a aba Models vazia no Altium. Agora a lista é sintetizada sempre:
+    #    os da casa (herdados do símbolo original) na frente, e os encapsulamentos que
+    #    vieram do Odoo atrás, para nenhum componente nascer sem nada em Models.
+    modelos = []
+    vistos = set()
+    for tipo, pl in fps:
+        d = SB.le_texto(pl)
+        if d.get('RECORD') == '45' and d.get('ModelName'):
+            n = d['ModelName']
+            if n not in vistos:
+                vistos.add(n)
+                modelos.append((n, d.get('IsCurrent') == 'T'))
+    for m in (sim.get('footprints') or []):
+        n = m.get('name')
+        if n and n not in vistos:
+            vistos.add(n)
+            modelos.append((n, False))
+    # O footprint DESTE valor e o atual; se nem estava na lista, entra na frente.
+    # Valor sem encapsulamento nenhum fica SEM footprint atual, de proposito: eleger o
+    # primeiro da familia colocaria um DIP14 num componente que ninguem sabe qual e —
+    # errado e silencioso. Os modelos continuam la, para escolher a mao.
+    alvo = valor.get('footprint') or ''
+    modelos = [(n, n == alvo) for n, _a in modelos]
+    if alvo and alvo not in vistos:
+        modelos.insert(0, (alvo, True))
+
+    if modelos:
+        idx_lista = len(fora)
+        fora.append(_reg(OrderedDict([('RECORD', 44)])))
+        for n, atual in modelos:
+            idx_modelo = len(fora)
+            d = OrderedDict([
+                ('RECORD', 45), ('OwnerIndex', idx_lista), ('IndexInSheet', -1),
+                ('ModelName', n), ('ModelType', 'PCBLIB'), ('DatafileCount', 1),
+                ('ModelDatafileEntity0', n), ('ModelDatafileKind0', 'PCBLib')])
+            if atual:
+                d['IsCurrent'] = 'T'
+            d['UniqueID'] = _uid(nome + '#fp' + n)
+            fora.append(_reg(d))
+            fora.append(_reg(OrderedDict([('RECORD', 46), ('OwnerIndex', idx_modelo)])))
+            fora.append(_reg(OrderedDict([('RECORD', 48), ('OwnerIndex', idx_modelo)])))
+    return fora
+
+
+# ─── a biblioteca inteira ────────────────────────────────────────────────────
+def _modelo_de(sim, comps):
+    """o simbolo da biblioteca da casa que esta familia recicla, se houver"""
+    modelo = comps.get(CATALOGO.get(sim['name'], ''))
+    if modelo is None:
+        m = CONECTOR_RX.match(sim['name'])
+        if m:
+            modelo = comps.get(BARRA_FMT % int(m.group(2)))
+    return modelo
+
+
+PROIBIDOS = re.compile(r'[\\/:*?"<>|]')
+
+
+def nome_storage(nome, usados):
+    """O nome do storage de um componente, na convencao do proprio Altium.
+
+    Ele NAO varre o arquivo procurando o LibReference: deriva o nome do storage a partir
+    dele e abre direto. Errar a derivacao da "Cannot find item [...] within the current
+    storage" na hora de abrir o componente.
+
+    A regra, lida da biblioteca da casa (403 componentes):
+      · caractere proibido vira '_'   ("24LC512-I/SM" -> "24LC512-I_SM")
+      · corta em 31 caracteres
+      · nao termina em '.' nem em espaco
+      · na colisao, o ULTIMO caractere vira um digito, e nao um sufixo:
+        "DIODO [ SUPRESSOR DE TRANSIENTE", depois "...TRANSIENT1", "...TRANSIENT2"
+    A comparacao e sem caixa porque o diretorio do CFBF ordena em maiusculo.
+    """
+    base = PROIBIDOS.sub('_', nome or '')[:31].rstrip(' .')
+    if not base:
+        base = 'COMPONENTE'
+    st, n = base, 0
+    while st.upper() in usados:
+        n += 1
+        st = (base[:31 - len(str(n))].rstrip(' .') + str(n))
+    usados.add(st.upper())
+    return st
+
+
+def monta_lib(itens, cab_modelo, comps_modelo):
+    """[(simbolo, valor)] -> arvore para o cfbf.escreve, um componente por valor"""
+    from collections import OrderedDict
+    arvore = {}
+    cab = OrderedDict()
+    for k, v in (cab_modelo or {}).items():
+        if re.match(r'^(LibRef|CompDescr|PartCount|AliasCount)\d+$', k):
+            continue
+        cab[k] = v
+    cab['HEADER'] = 'Protel for Windows - Schematic Library Editor Binary File Version 5.0'
+    cab['MinorVersion'] = 2
+
+    usados = set()
+    for i, (sim, valor) in enumerate(itens):
+        regs = monta_componente(sim, valor, _modelo_de(sim, comps_modelo))
+        nome = valor['altium']
+        st = nome_storage(nome, usados)
+        arvore[st] = {'Data': SB.monta(regs)}
+        cab['LibRef%d' % i] = nome
+        # o indice do cabecalho fica com o rotulo curto; a descricao completa do Odoo
+        # vive no proprio componente. Um cabecalho enxuto abre mais rapido no Altium.
+        cab['CompDescr%d' % i] = valor.get('label', '')
+        cab['PartCount%d' % i] = 2          # 1 parte, e o arquivo grava partes+1
+    cab['Weight'] = len(itens)
+    arvore['FileHeader'] = SB.monta([_reg(cab)])
+    return arvore
+
+
+# A PcbLib da casa. Ela e COPIADA para a pasta das libs geradas, para o conjunto andar
+# junto: o .LibPkg entao aponta para o arquivo ao lado, por nome, e o pacote fica
+# autocontido — abre e compila em qualquer maquina que enxergue a pasta.
+PCBLIB_ORIGEM = ('\\\\LUCAS-PC' + chr(92) + 'D' + chr(92) + 'ALTIUM LIBRARY ------ LUCAS'
+                 + chr(92) + 'BIBLIOTECA DE FOOTPRINT.PcbLib')
+PCBLIB_NOME = 'FOOTPRINTS ALMOX.PcbLib'
+
+
+def copia_pcblib(destino_dir, origem=PCBLIB_ORIGEM, log=print):
+    """Traz a PcbLib para junto das SchLib. So copia se faltar ou se a de la mudou —
+       sao 60 MB, e refazer isso a cada sincronizacao seria desperdicio."""
+    alvo = os.path.join(destino_dir, PCBLIB_NOME)
+    if not os.path.exists(origem):
+        if os.path.exists(alvo):
+            log('   PcbLib de origem fora de alcance; a copia ao lado continua valendo')
+            return alvo
+        log('   ATENCAO: nao alcancei a PcbLib da casa — as libs vao sem footprint ao lado')
+        return None
+    fonte = os.stat(origem)
+    if os.path.exists(alvo):
+        atual = os.stat(alvo)
+        if atual.st_size == fonte.st_size and atual.st_mtime >= fonte.st_mtime:
+            return alvo
+    import shutil
+    tmp = alvo + '.tmp'
+    shutil.copy2(origem, tmp)
+    if os.path.exists(alvo):
+        os.remove(alvo)
+    os.replace(tmp, alvo)
+    log('   %s copiada (%.1f MB)' % (PCBLIB_NOME, fonte.st_size / 1048576.0))
+    return alvo
+
+
+def escreve_libpkg(caminho, schlib, pcblib=PCBLIB_NOME):
+    """O projeto de biblioteca integrada.
+
+    A .IntLib em si quem produz e o Altium: ela embute a SchLib E a PcbLib inteiras,
+    compactadas (conferido abrindo uma real — sao cinco streams, e o PCBLib/0.pcblib e
+    a PcbLib zlib). Montar a PcbLib daqui exigiria escrever o formato binario de PCB, e
+    embutir a da casa (60 MB) em cada uma das 31 libs daria mais de 1,5 GB. Entao sai o
+    pacote pronto: Project >> Compile Integrated Library, um clique."""
+    def doc(n, caminho_doc):
+        return ['', '[Document%d]' % n, 'DocumentPath=%s' % caminho_doc,
+                'AnnotationEnabled=1', 'AnnotateStartValue=1',
+                'AnnotationIndexControlEnabled=0', 'AnnotateSuffix=', 'AnnotateScope=All',
+                'AnnotateOrder=-1', 'DoLibraryUpdate=1', 'DoDatabaseUpdate=1',
+                'ClassGenCCAutoEnabled=1', 'ClassGenCCAutoRoomEnabled=0',
+                'ClassGenNCAutoScope=None', 'DItemRevisionGUID=',
+                'GenerateClassCluster=0', 'DocumentUniqueId=']
+    L = ['[Design]', 'Version=1.0', 'HierarchyMode=0', 'ArchiveProject=0',
+         'OutputPath=', 'LogFolderPath=']
+    L += doc(1, os.path.basename(schlib))
+    if pcblib:
+        L += doc(2, os.path.basename(pcblib))
+    L.append('')
+    io.open(caminho, 'w', encoding='utf-8', newline='\r\n').write('\n'.join(L))
+
+
+def le_espelho(caminho):
+    txt = io.open(caminho, encoding='utf-8').read()
+    return json.loads(txt[txt.index('=') + 1:].strip().rstrip(';'))
+
+
+def nome_arquivo(fam):
+    """RESISTOR ALMOX, CAPACITOR CERAMICO ALMOX... — o sufixo vem DEPOIS do nome, para
+       as famílias ficarem em ordem alfabética no painel de bibliotecas."""
+    return re.sub(r'[\\/:*?"<>|]', '-', fam) + ' ALMOX'
+
+
+def gera(destino_dir=None, origem=LIB_REAL, log=print):
+    """Uma biblioteca por familia nos basicos, mais uma unica para os especiais."""
+    import collections
+    destino_dir = destino_dir or os.path.join(LIBS, 'Almox')
+    if not os.path.isdir(destino_dir):
+        os.makedirs(destino_dir)
+    try:
+        cab_modelo, comps = carrega_lib(origem)
+        log('reciclando simbolos de %s (%d componentes)'
+            % (os.path.basename(origem), len(comps)))
+    except Exception as e:                                   # noqa: BLE001
+        cab_modelo, comps = None, {}
+        log('sem a biblioteca de origem (%s) — desenhando tudo do simbolos.py' % e)
+
+    # agrupa: nos basicos, por familia; os especiais, todos juntos
+    grupos = collections.OrderedDict()
+    for arq, unica in (('almox-basicos.js', None), ('almox-especiais.js', 'ESPECIAIS')):
+        esp = le_espelho(os.path.join(LIBS, arq))
+        for sim in esp['symbols']:
+            fam = unica or sim['familia']
+            for v in sim.get('valores') or []:
+                grupos.setdefault(fam, []).append((sim, v))
+
+    # apaga as libs de uma geracao anterior que nao existem mais
+    esperados = {nome_arquivo(f) + '.SchLib' for f in grupos}
+    for f in os.listdir(destino_dir):
+        # pega tambem o padrao antigo ("ALMOX RESISTOR"), que saiu de circulacao
+        if not f.endswith('.SchLib') or f in esperados:
+            continue
+        if f.endswith(' ALMOX.SchLib') or f.startswith('ALMOX '):
+            os.remove(os.path.join(destino_dir, f))
+            lp = os.path.join(destino_dir, f[:-7] + '.LibPkg')
+            if os.path.exists(lp):
+                os.remove(lp)
+
+    pcb = copia_pcblib(destino_dir, log=log)
+
+    feitos, total, bytes_tot = [], 0, 0
+    for fam in sorted(grupos, key=lambda f: -len(grupos[f])):
+        itens = grupos[fam]
+        bruto = cfbf.escreve(monta_lib(itens, cab_modelo, comps))
+        base = nome_arquivo(fam)
+        alvo = os.path.join(destino_dir, base + '.SchLib')
+        with io.open(alvo, 'wb') as f:
+            f.write(bruto)
+        escreve_libpkg(os.path.join(destino_dir, base + '.LibPkg'), alvo, pcb)
+        feitos.append(alvo)
+        total += len(itens)
+        bytes_tot += len(bruto)
+        if len(itens) >= 40:
+            log('   %-34s %4d componentes  %6.1f KB' % (base, len(itens), len(bruto) / 1024.0))
+    log('%d bibliotecas, %d componentes, %.1f MB no total (+ um .LibPkg por lib)'
+        % (len(feitos), total, bytes_tot / 1024.0 / 1024.0))
+    return feitos
+
+
+if __name__ == '__main__':
+    gera()

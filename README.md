@@ -75,9 +75,10 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 ├── hub-font.js              fonte vetorial da serigrafia como geometria pura (canvas e SVG)
 ├── hub-laser.js             gerador da arte para gravação a laser (SVG para o LightBurn)
 ├── hub-bom.js               gerador do BOM interativo (uma página HTML autossuficiente)
+├── hub-i18n.js              idioma da casca do hub (pt-BR / en) — dicionário + t()
 ├── projects.js              índice do histórico de projetos (usado pelo hub-classic.html)
 ├── AI-GUIDE.md              contrato/manual para a sessão de IA
-├── hubserver.py             servidor local opcional (Flask; API do hub v2 — índice/detalhe/Rescan — e recarregamento automático)
+├── hubserver.py             servidor local opcional (Flask; API do hub v2 — índice/detalhe/Rescan/exclusão/seletor de pasta — e recarregamento automático)
 ├── Libs\
 │   ├── schlib.js            espelho da biblioteca de esquema (símbolos)
 │   ├── pcblib.js            espelho da biblioteca de footprints
@@ -90,6 +91,7 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 │       ├── changes.js       mudanças de PCB pendentes/aplicadas
 │       ├── annotations.js   sinalizadores do usuário para a IA (bandeiras no hub)
 │       └── build-report.txt / apply-report.txt
+├── Trash\                   projetos excluídos pelo hub (criada na primeira exclusão; esvaziar é manual)
 ├── tests\                   testes node (load.js, test-apply.js, test-geom.js, test-netextract.js, test-validate.js)
 └── example\                 placa sintética standalone do viewer v1 (intocada)
 ```
@@ -146,10 +148,42 @@ Casca única com:
   da placa para gravar no LightBurn — detalhes abaixo) e Histórico (linha do tempo a partir de `build-report.txt`/
   `apply-report.txt`/datas de `board.js`/`schematic.js`, mais um `history.jsonl` opcional por
   projeto).
-- **Ações** — menu **⋮** com os 5 comandos do Altium documentados (comando real embaixo do
-  rótulo, copiável). Só **Rescan** executa de fato (reindexa `Projects\` no servidor); os
-  demais (`ExportLibs`, `BuildSchematic`, `ExportBoard`, `ApplyChanges`, `DRC`) continuam
-  **passos manuais no Altium** — o hub só explica o passo, nunca finge executá-lo.
+- **Configurações** — clicar na **marca**, na quina superior esquerda, abre um menuzinho
+  com **Configurações**; ele abre o modal, com três abas laterais. O cabeçalho ficou só
+  com a marca, o seletor de projeto e o estado do servidor: `ExportLibs`, `Reindexar` e o
+  **⋮** da barra do projeto, que viviam soltos ali, entraram para o modal.
+  - **Projeto** (a primeira) — o projeto aberto, a **pasta padrão do BOM** e a exclusão.
+    A pasta é a mesma que estava no painel da aba BOM; **Selecionar…** abre o diálogo de
+    pastas do Windows **no PC que roda o hubserver** (o navegador não sabe caminho
+    absoluto, então quem abre a janela é o servidor — `POST /api/pick-dir`, só de
+    localhost, igual ao `laser-open`). A janela às vezes abre atrás do navegador; de
+    outro PC da rede, digite o caminho à mão. **Excluir projeto** fica atrás da **senha
+    mestre** (conferida no servidor; o browser só a transporta — veja `MASTER_PASSWORD`
+    em `hubserver.py`, ou a variável de ambiente `ALTIUMHUB_MASTER`). A pasta não é
+    apagada: vai inteira para `Trash\<nome>-<data>` no mesmo workspace, some do hub na
+    hora e volta arrastando de volta para `Projects\`. Senha errada não fecha o
+    diálogo; sem servidor o botão fica desligado.
+  - **Layout** — quatro comboboxes. **Cor**: Escuro · Claro · Automático (automático
+    segue o sistema e muda junto se o Windows mudar com o hub aberto). **Tema**:
+    Grafite (o de sempre) · Papel · Altium · Placa. **Linguagem**: Português ou English.
+    **Fonte**: Inter · Do sistema · Bancada (Verdana, de altura-x grande, para ler de um
+    passo atrás) · Monoespaçada. Os quatro são atributos no `<html>`
+    (`data-mode`/`data-theme`/`data-font`) já lidos no `<head>`, então a página não abre
+    de um jeito para virar no primeiro frame — e as pilhas de família moram no CSS, não
+    no JS, para não existirem em dois lugares. As vistas Esquema e PCB e a prévia do BOM
+    seguem escuras e com fonte própria: é a cor de trabalho do Altium, e elas têm folha
+    de estilo separada.
+  - **Ações** — os tutoriais. Os 5 comandos do Altium documentados (comando real embaixo
+    do rótulo, copiável) e, embaixo, o fluxo de um projeto novo do começo ao fim. Só
+    **Rescan** executa de fato (reindexa `Projects\` no servidor); os demais
+    (`ExportLibs`, `BuildSchematic`, `ExportBoard`, `ApplyChanges`, `DRC`) continuam
+    **passos manuais no Altium** — o hub só explica o passo, nunca finge executá-lo. É
+    aqui que caem o **Ver detalhes** do rodapé e o botão de próximo passo.
+
+  A tradução cobre a casca (cabeçalho, barra do projeto, abas, fluxo, diálogos e o
+  próprio modal); os painéis Laser, BOM e Neoden seguem em português. O dicionário é o
+  `hub-i18n.js` — chave sem tradução volta como ela mesma, que é como os nomes de
+  comando do Altium passam intactos.
 - **Sem servidor**, `hub.html` abre em **modo demonstração** (projetos fictícios, selo
   "demo" no seletor) — dados reais exigem `python hubserver.py` rodando (veja abaixo).
 
@@ -569,7 +603,8 @@ arquivo salvo, sim: cada um que abre o BOM guarda a sua preferência de tela.
 | **Salvar como…** | escolhe pasta e nome, com a opção de adotar aquela pasta como padrão |
 | Baixar | download pelo navegador — é o caminho de quem acessa o hub de outro PC |
 
-A **pasta padrão** é configurada na própria aba e fica em `hub-config.json`, na raiz, gravado
+A **pasta padrão** é configurada em **Configurações › Projeto** (era um campo desta aba) e
+fica em `hub-config.json`, na raiz, gravado
 pelo servidor. Ela **não** vai para o `localStorage` porque o caminho é do disco do
 **servidor**: guardado no navegador, cada PC da LAN teria a sua versão de um caminho que só o
 servidor usa. Por isso também o arquivo está no `.gitignore` — é configuração de máquina, como

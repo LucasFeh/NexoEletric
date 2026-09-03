@@ -5,10 +5,14 @@ Uso: python hubserver.py [--port 8000]
 Aditivo: nao altera nenhum arquivo do hub; abrir hub.html por duplo clique segue igual.
 """
 import argparse
+import hmac
 import json
 import os
 import re
+import shutil
 import socket
+import subprocess
+import sys
 import threading
 import time
 
@@ -273,6 +277,74 @@ def api_config_set():
     return {'ok': True, 'config': cfg}
 
 
+# ─────────────────── escolher a pasta pelo dialogo do Windows ───────────────────
+# O navegador nao sabe caminho absoluto (showDirectoryPicker da so o nome, webkitdirectory
+# da caminho relativo), entao quem abre a janela de pasta e o SERVIDOR, na maquina dele -
+# mesma consequencia honesta do laser-open: acessando o hub de outro PC, a janela abre LA.
+PICK_TIMEOUT = 120.0            # segundos: janela esquecida aberta se fecha sozinha
+_pick_lock = threading.Lock()   # uma por vez; a segunda abriria atras da primeira
+
+
+def _pergunta_pasta(inicial):
+    """Abre o dialogo de pasta e devolve o caminho, ou '' se cancelou/expirou.
+
+    Roda na thread do request (app.run(threaded=True)) e isso e seguro: o Tcl solta a GIL
+    enquanto o dialogo esta aberto, entao o resto do hub continua respondendo normalmente.
+    O timeout e um 'after' agendado ANTES de abrir - ele dispara mesmo com o modal nativo
+    na tela, destroi o root, e o askdirectory volta '' igualzinho ao Cancelar.
+
+    Funcao separada da rota de proposito: o teste troca ela e exercita a rota inteira sem
+    abrir janela nenhuma.
+    """
+    import tkinter                  # importado aqui: sem tkinter o resto do hub roda igual
+    from tkinter import filedialog
+    root = None
+    try:
+        root = tkinter.Tk()
+        root.withdraw()             # quero so o dialogo, nao a janela vazia do Tk
+        root.attributes('-topmost', True)
+        root.after(int(PICK_TIMEOUT * 1000), root.destroy)
+        return str(filedialog.askdirectory(
+            parent=root, title='Pasta padrao do BOM',
+            initialdir=inicial or None,   # None o tkinter descarta; '' viraria -initialdir {}
+            mustexist=True) or '')
+    finally:
+        if root is not None:
+            try:
+                root.destroy()      # se o timeout ja destruiu, tanto faz
+            except Exception:
+                pass
+
+
+@app.route('/api/pick-dir', methods=['POST'])
+def api_pick_dir():
+    """Abre a janela de pasta do Windows NO PC DO SERVIDOR e devolve o caminho absoluto.
+
+    So de localhost, pelo mesmo motivo do laser-open e do bom-save: o servidor escuta
+    0.0.0.0, e abrir janela na maquina de quem hospeda nao pode ficar exposto a LAN.
+    Nao grava nada - quem grava e o POST /api/config, que ja existe e ja e atomico.
+    """
+    if not _is_local(request):
+        return {'ok': False, 'error': 'escolher a pasta so funciona no PC do servidor; '
+                                      'digite o caminho a mao'}, 403
+    if not _pick_lock.acquire(blocking=False):
+        return {'ok': False, 'error': 'ja tem uma janela de pasta aberta no PC do servidor'}, 409
+    try:
+        inicial = _config_read().get('bomDir') or ''
+        escolhido = _pergunta_pasta(inicial if os.path.isdir(inicial) else '')
+    except ImportError:
+        return {'ok': False, 'error': 'este Python nao tem tkinter; digite o caminho a mao'}, 501
+    except Exception as e:
+        # sem sessao grafica (servico do Windows, sessao desconectada) o Tk nem sobe
+        return {'ok': False, 'error': 'nao consegui abrir a janela de pasta: %s' % e}, 500
+    finally:
+        _pick_lock.release()
+    if not escolhido:
+        # Cancelar e tempo esgotado caem aqui iguais; 200 porque nao houve falha nenhuma
+        return {'ok': True, 'cancelado': True, 'dir': ''}
+    return {'ok': True, 'dir': os.path.normpath(escolhido)}   # o Tcl devolve com barra normal
+
+
 @app.route('/api/bom-save', methods=['POST'])
 def api_bom_save():
     """Grava o BOM em qualquer pasta do disco do SERVIDOR.
@@ -512,10 +584,9 @@ def build_detail(root, proj_id):
             'history': history, 'schematic': sch or {}, 'board': board or {}}
 
 
-RUN_ACTIONS = ('ExportLibs', 'BuildSchematic', 'ExportBoard', 'ApplyChanges', 'DRC', 'Rescan')
+RUN_ACTIONS = ('BuildSchematic', 'ExportBoard', 'ApplyChanges', 'DRC', 'Rescan')
 ALTIUM_HINT = {
-    'ExportLibs': 'No Altium: DXP » Run Script » ExportLibs',
-    'BuildSchematic': 'No Altium: DXP » Run Script » ApplyProject (cria os .SchDoc)',
+    'BuildSchematic': 'No Altium: DXP » Run Script » BuildSchematic (cria os .SchDoc)',
     'ExportBoard': 'No Altium: DXP » Run Script » ExportPcb',
     'ApplyChanges': 'No Altium: DXP » Run Script » ApplyProject',
     'DRC': 'No Altium: Tools » Design Rule Check',
@@ -534,6 +605,53 @@ def api_project(proj_id):
     if det is None:
         return {'error': 'projeto desconhecido'}, 404
     return det
+
+
+# ─────────────────────────── exclusao de projeto ───────────────────────────
+# Senha mestre do hub, em texto aqui de proposito: o que ela protege e o clique errado
+# no menu, nao um invasor - quem le este arquivo tambem apaga a pasta a mao. Trocar sem
+# mexer no codigo: variavel de ambiente ALTIUMHUB_MASTER antes de subir o servidor.
+MASTER_PASSWORD = os.environ.get('ALTIUMHUB_MASTER') or 'LucasGatao'
+TRASH_DIR = 'Trash'
+
+
+@app.route('/api/project/<proj_id>/delete', methods=['POST'])
+def api_project_delete(proj_id):
+    """Tira o projeto de Projects\\ e move a pasta inteira para Trash\\<nome>-<data>.
+
+    Nao apaga nada. Para o hub da no mesmo - o indice so enxerga Projects\\ -, mas
+    mover e reversivel e apagar nao: um clique com a senha certa nao pode custar o
+    historico de uma placa. Quem quiser sumir de vez esvazia o Trash\\ a mao.
+
+    Diferente do laser-open e do bom-save, este endpoint NAO e so-localhost: o hub e
+    usado do tablet da bancada, e quem manda aqui e a senha mestre.
+    """
+    data = request.get_json(silent=True) or {}
+    senha = data.get('password')
+    if not isinstance(senha, str) or not hmac.compare_digest(
+            senha.encode('utf-8'), MASTER_PASSWORD.encode('utf-8')):
+        return {'ok': False, 'error': 'senha mestre incorreta'}, 403
+    if proj_id not in _PROJ_CACHE:
+        build_index(ROOT)
+    name = _PROJ_CACHE.get(proj_id)
+    if not name:
+        return {'ok': False, 'error': 'projeto desconhecido'}, 404
+    src = os.path.join(ROOT, 'Projects', name)
+    if not os.path.isdir(src):
+        return {'ok': False, 'error': 'a pasta do projeto ja nao existe'}, 404
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    dst = os.path.join(ROOT, TRASH_DIR, '%s-%s' % (name, stamp))
+    n = 1
+    while os.path.exists(dst):          # dois envios no mesmo segundo
+        n += 1
+        dst = os.path.join(ROOT, TRASH_DIR, '%s-%s-%d' % (name, stamp, n))
+    try:
+        os.makedirs(os.path.join(ROOT, TRASH_DIR), exist_ok=True)
+        shutil.move(src, dst)
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao mover para o Trash: %s' % e}, 500
+    build_index(ROOT)                   # o cache id->nome nao pode apontar para o que saiu
+    return {'ok': True, 'trash': os.path.relpath(dst, ROOT)}
 
 
 @app.route('/api/run', methods=['POST'])
@@ -563,6 +681,134 @@ def api_run_stream(run_id):
         except Exception as e:
             yield 'event: error\ndata: %s\n\n' % json.dumps(str(e))
         _runs.pop(run_id, None)
+
+    return Response(stream(), mimetype='text/event-stream')
+
+
+# ─────────────────── almoxarifado: sincronizacao com o Odoo ───────────────────
+# O trabalho pesado mora em tools/almox/almox2lib.py; aqui so o disparo, o stdout dele
+# virando SSE e o arquivo de credenciais.
+#
+# hub-almox.json fica FORA do git e nunca sai por HTTP: o GET responde se ha senha
+# gravada, nunca qual e. Gravar so de localhost, pela mesma regra do /api/config -
+# quem escolhe as credenciais que o servidor usa tem que estar sentado nele.
+ALMOX_CFG_FILE = 'hub-almox.json'
+ALMOX_KEYS = ('url', 'db', 'login', 'senha')
+ALMOX_SCRIPT = os.path.join('tools', 'almox', 'almox2lib.py')
+ALMOX_TIMEOUT = 600.0          # segundos: Odoo mudo nao pode prender o hub para sempre
+
+_almox_runs = {}
+_almox_lock = threading.Lock()
+
+
+def _almox_cfg_read():
+    try:
+        with open(os.path.join(ROOT, ALMOX_CFG_FILE), encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: data[k] for k in ALMOX_KEYS if isinstance(data.get(k), str)}
+
+
+@app.route('/api/almox/config', methods=['GET'])
+def api_almox_config_get():
+    cfg = _almox_cfg_read()
+    return {'ok': True, 'config': {
+        'url': cfg.get('url', ''), 'db': cfg.get('db', ''), 'login': cfg.get('login', ''),
+        # a senha nunca atravessa a rede de volta; o hub so precisa saber se existe
+        'temSenha': bool(cfg.get('senha') or os.environ.get('ODOO_SENHA')),
+    }, 'local': _is_local(request), 'script': os.path.isfile(os.path.join(ROOT, ALMOX_SCRIPT))}
+
+
+@app.route('/api/almox/config', methods=['POST'])
+def api_almox_config_set():
+    if not _is_local(request):
+        return {'ok': False, 'error': 'as credenciais do Odoo so mudam no PC do servidor'}, 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return {'ok': False, 'error': 'JSON obrigatorio'}, 400
+    cfg = _almox_cfg_read()
+    for k in ALMOX_KEYS:
+        if k in data:
+            if not isinstance(data[k], str):
+                return {'ok': False, 'error': '%s tem que ser texto' % k}, 400
+            v = data[k].strip()
+            # senha em branco no formulario significa "nao mexe", nao "apaga"
+            if k == 'senha' and not v:
+                continue
+            cfg[k] = v
+    full = os.path.join(ROOT, ALMOX_CFG_FILE)
+    tmp = full + '.tmp'
+    try:
+        with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, full)
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao gravar as credenciais: %s' % e}, 500
+    return api_almox_config_get()
+
+
+@app.route('/api/almox/sync', methods=['POST'])
+def api_almox_sync():
+    """Reserva a corrida. Quem executa e o stream, igual ao /api/run."""
+    if not os.path.isfile(os.path.join(ROOT, ALMOX_SCRIPT)):
+        return {'ok': False, 'error': 'tools/almox/almox2lib.py nao esta neste workspace'}, 404
+    data = request.get_json(silent=True) or {}
+    pull = bool(data.get('pull'))
+    if pull and not (_almox_cfg_read().get('senha') or os.environ.get('ODOO_SENHA')):
+        return {'ok': False, 'error': 'sem senha do Odoo gravada — configure antes de puxar '
+                                      'ao vivo, ou sincronize a partir do snapshot'}, 400
+    if _almox_lock.locked():
+        return {'ok': False, 'error': 'ja tem uma sincronizacao rodando'}, 409
+    run_id = 'a_%04x' % (int(time.time() * 1000) & 0xffff)
+    if len(_almox_runs) > 8:            # corridas reservadas e nunca abertas
+        _almox_runs.clear()
+    _almox_runs[run_id] = pull
+    return {'runId': run_id}, 202
+
+
+@app.route('/api/almox/sync/<run_id>/stream')
+def api_almox_sync_stream(run_id):
+    if run_id not in _almox_runs:
+        abort(404)
+    pull = _almox_runs.pop(run_id)
+
+    def stream():
+        if not _almox_lock.acquire(blocking=False):
+            yield 'event: error\ndata: %s\n\n' % json.dumps('ja tem uma sincronizacao rodando')
+            return
+        proc = None
+        try:
+            cmd = [sys.executable, os.path.join(ROOT, ALMOX_SCRIPT)] + (['--pull'] if pull else [])
+            yield 'data: %s\n\n' % ('puxando o Odoo e regerando…' if pull
+                                    else 'regerando do snapshot em disco…')
+            env = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1')
+            proc = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT)
+            limite = time.time() + ALMOX_TIMEOUT
+            for raw in iter(proc.stdout.readline, b''):
+                linha = raw.decode('utf-8', 'replace').rstrip()
+                if linha:
+                    yield 'data: %s\n\n' % linha.replace('\r', '')
+                if time.time() > limite:
+                    proc.kill()
+                    yield 'event: error\ndata: %s\n\n' % json.dumps(
+                        'passou de %d s e foi interrompida' % int(ALMOX_TIMEOUT))
+                    return
+            code = proc.wait()
+            if code != 0:
+                yield 'event: error\ndata: %s\n\n' % json.dumps(
+                    'o gerador terminou com codigo %d — veja o log acima' % code)
+                return
+            yield 'event: done\ndata: {"ok":true}\n\n'
+        except Exception as e:                                  # noqa: BLE001
+            yield 'event: error\ndata: %s\n\n' % json.dumps(str(e))
+        finally:
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+            _almox_lock.release()
 
     return Response(stream(), mimetype='text/event-stream')
 
