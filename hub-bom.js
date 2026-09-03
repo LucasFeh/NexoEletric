@@ -26,9 +26,14 @@ const COR = {
   0: { pad:'#ff5252', silk:'#ffe14d', trilha:'#c0392b', regiao:'#7a2620' },  /* frente */
   1: { pad:'#4d7cff', silk:'#c9c04d', trilha:'#2c4bb0', regiao:'#22306e' },  /* verso  */
   th:'#c9c9c9', furo:'#0d0d0d', borda:'#e8e8ea', alvo:'#25d07d', net:'#ff9d2e',
-  /* verde do que JA FOI MONTADO. Mais fundo que o `alvo` de proposito: o realce e o alvo de
-     agora (uma peça, e ja passa), e tem que ganhar da tinta do que ficou para tras. */
+  /* verde do que JA FOI MONTADO: e nas PROPRIAS formas da peça que ele entra - pad,
+     serigrafia e contorno - em vez de um retangulo por cima, que escondia justamente o que
+     se quer conferir. Mais fundo que o `alvo` de proposito: o realce e o alvo de agora (uma
+     peça, e ja passa) e tem que ganhar do que ficou para tras. */
   feito:'#1db954',
+  /* o furo da peça montada continua sendo FURO: verde bem mais escuro que o pad, senao o
+     pad passante vira uma bolota verde sem buraco no meio */
+  feitoFuro:'#0d5c2c',
   /* o disco do tique de montado: claro para se ler tanto sobre a placa escura do 2D quanto
      sobre o verde da mascara na vista 3D */
   selo:'#f6faf7',
@@ -195,12 +200,21 @@ function model(board, opts){
   });
   (B.freepads || []).forEach(p => comeuPad(p, null));
 
+  /* De quem e este primitivo. O board.js diz o designador (`owner`) e a pagina guarda o
+     INDICE do componente - e por ele que o desenho pinta de verde a serigrafia da peça ja
+     montada, do mesmo jeito que o pad ja fazia pelo `c`. Sai do objeto quando nao ha dono,
+     para nao inchar o JSON da placa inteira com um campo vazio. */
+  const comDono = (it, o) => {
+    const d = o && o.owner != null ? idxPorRef[o.owner] : null;
+    if (d != null) it.c = d;
+    return it;
+  };
   (B.silk || []).forEach(s => {
     const l = ladoDe(s.layer);
     if (l === null) return;
-    if (s.kind === 'arc') silk.push({ s:l, k:'a', x:r3(s.cx), y:r3(s.cy), r:r3(s.r),
-                                      a:r3(s.sa || 0), b:r3(s.ea == null ? 360 : s.ea), w:r3(s.w || 0.15) });
-    else silk.push({ s:l, k:'l', p:[[r3(s.x1), r3(s.y1)], [r3(s.x2), r3(s.y2)]], w:r3(s.w || 0.15) });
+    if (s.kind === 'arc') silk.push(comDono({ s:l, k:'a', x:r3(s.cx), y:r3(s.cy), r:r3(s.r),
+                                      a:r3(s.sa || 0), b:r3(s.ea == null ? 360 : s.ea), w:r3(s.w || 0.15) }, s));
+    else silk.push(comDono({ s:l, k:'l', p:[[r3(s.x1), r3(s.y1)], [r3(s.x2), r3(s.y2)]], w:r3(s.w || 0.15) }, s));
   });
   (B.texts || []).forEach(t => {
     const l = ladoDe(t.layer);
@@ -209,7 +223,7 @@ function model(board, opts){
     /* o designador vira uma marca a parte: e o que o montador liga e desliga para achar a
        peça sem o resto da serigrafia por cima */
     const d = t.designator ? 1 : 0;
-    textoPolys(t).forEach(p => silk.push({ s:l, k:'l', p, w, d }));
+    textoPolys(t).forEach(p => silk.push(comDono({ s:l, k:'l', p, w, d }, t)));
   });
 
   (B.tracks || []).forEach(t => {
@@ -519,9 +533,11 @@ function feitoComp(i){
   var g = D.groups[c.g];
   return !!(g && feitos['g' + g.k]);
 }
-/* nada marcado, nada a marcar: o laço da marca nao entra no caminho de quem esta so olhando
-   a placa, e sao dois por quadro (a tinta e o tique) vezes duas faces */
+/* nada marcado, nada a marcar: com a placa limpa nem o pad nem a serigrafia precisam
+   perguntar de quem sao, e sao milhares deles por quadro vezes duas faces */
 function temFeitos(){ for (var k in feitos) if (feitos[k]) return true; return false; }
+/* o mesmo, para o primitivo que sabe de quem e: pad e serigrafia trazem o indice em c */
+function feitoDe(i){ return i != null && feitoComp(i); }
 
 /* Traz o que mudou no servidor. board.js novo (outro ExportPcb) recarrega a pagina: o
    desenho e a lista ficariam velhos, e isso nao da para remendar por partes. */
@@ -706,18 +722,18 @@ function marcaFeitos(ctx, L, proj, ppmm, fy, k){
     /* o raio acompanha a peça, com teto e piso: sem teto um conector ganharia um disco do
        tamanho dele, e sem piso a placa inteira na tela nao mostraria marca nenhuma */
     confere(ctx, p[0], p[1],
-            Math.max(3.2*k, Math.min(8.5*k, 0.34 * Math.min(bw, bh * fy) * ppmm)));
+            Math.max(3*k, Math.min(7*k, 0.28 * Math.min(bw, bh * fy) * ppmm)));
   });
 }
-/* a mancha verde do que ja foi montado, no sistema da PLACA (bbox em mm): e a unica parte da
-   marca que pertence ao desenho, e nao a tela */
-function tintaFeitos(ctx, L, quadro){
-  ctx.fillStyle = D.cores.feito; ctx.globalAlpha = 0.24;
+/* O ENTORNO da peça montada, no sistema da PLACA (bbox em mm). So o contorno: o corpo dela
+   ja esta verde nas proprias formas, e um retangulo cheio por cima escondia o pad, a
+   serigrafia e o furo - que e exatamente o que a bancada precisa ver para conferir. */
+function contornoFeitos(ctx, L, quadro, larg){
+  ctx.strokeStyle = D.cores.feito; ctx.lineWidth = larg;
   D.comps.forEach(function (cp, i){
     if (!cp.bb || (cp.s !== L && !cp.t) || !feitoComp(i)) return;
     quadro(cp.bb);
   });
-  ctx.globalAlpha = 1;
 }
 
 function desenha(c){
@@ -725,6 +741,9 @@ function desenha(c){
      fora, e com a visao guiada mostrando uma face por vez isso vale metade do desenho */
   if (!c || !c.cv.clientWidth) return;
   var ctx = c.ctx, W = c.cv.width, H = c.cv.height, L = c.lado, P = D.cores[L];
+  /* uma pergunta por quadro, e nao uma por pad: com a placa sem nenhum visto o desenho segue
+     exatamente o caminho de antes */
+  var temF = temFeitos();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, W, H);
   ctx.save();
@@ -754,10 +773,13 @@ function desenha(c){
   if (mostra.pads){
     D.pads.forEach(function (p){
       if (p.s !== -1 && p.s !== L) return;
-      preencheTodos(ctx, p.p, p.th ? D.cores.th : P.pad);
+      /* o pad da peça montada sai verde: e a forma dela, e nao uma tarja por cima */
+      preencheTodos(ctx, p.p, temF && feitoDe(p.c) ? D.cores.feito
+                              : p.th ? D.cores.th : P.pad);
     });
     if (mostra.drills) D.pads.forEach(function (p){
-      if (p.h && (p.s === -1 || p.s === L)) preencheTodos(ctx, p.h, D.cores.furo);
+      if (p.h && (p.s === -1 || p.s === L))
+        preencheTodos(ctx, p.h, temF && feitoDe(p.c) ? D.cores.feitoFuro : D.cores.furo);
     });
     D.vias.forEach(function (v){
       ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, 6.2832);
@@ -772,7 +794,8 @@ function desenha(c){
   if (mostra.silk) D.silk.forEach(function (s){
     if (s.s !== L) return;
     if (s.d && !mostra.refs) return;
-    ctx.strokeStyle = P.silk; ctx.lineWidth = s.w;
+    ctx.strokeStyle = temF && feitoDe(s.c) ? D.cores.feito : P.silk;
+    ctx.lineWidth = s.w;
     ctx.beginPath();
     if (s.k === 'a') ctx.arc(s.x, s.y, s.r, s.a*Math.PI/180, s.b*Math.PI/180);
     else { for (var i = 0; i < s.p.length; i++){
@@ -780,12 +803,12 @@ function desenha(c){
     ctx.stroke();
   });
 
-  /* O que ja foi montado fica verde na placa: quem esta na bancada acha em UM olhar o que
-     falta, sem varrer a lista peça por peça. Entra antes da net e do realce - e o estado do
-     que ja passou, e nao o alvo de agora. */
-  if (temFeitos()) tintaFeitos(ctx, L, function (bb){
-    ctx.fillRect(bb[0], bb[1], bb[2]-bb[0], bb[3]-bb[1]);
-  });
+  /* e o entorno dela fecha o recado - quem esta na bancada acha em UM olhar o que falta, sem
+     varrer a lista peça por peça. Entra antes da net e do realce: e o estado do que ja
+     passou, e nao o alvo de agora. */
+  if (temF) contornoFeitos(ctx, L, function (bb){
+    ctx.strokeRect(bb[0], bb[1], bb[2]-bb[0], bb[3]-bb[1]);
+  }, Math.max(0.1, 1.4/c.esc));
 
   /* a net acesa vem antes do realce de peça: e contexto (por onde o sinal anda), enquanto o
      realce e o alvo. Acende o cobre inteiro daquela net, inclusive o que esta sob a peça. */
@@ -824,7 +847,7 @@ function desenha(c){
   ctx.restore();
   /* o tique vem depois do restore, e por isso depois de tudo: e o unico desenho que tem que
      continuar legivel mesmo com a peça selecionada acesa por cima */
-  if (temFeitos())
+  if (temF)
     marcaFeitos(ctx, L, function (x, y){ return telaDe(c, x, y); }, c.esc * c.dpr, 1, c.dpr);
 }
 function pinta(){ if (v3.on) desenha3(); else cams.forEach(desenha); }
@@ -947,6 +970,7 @@ function desenha3(){
 
   var L = ladoV3(), zf = L ? -ESP/2 : ESP/2;      /* a face que se ve */
   var zt = -zf;                                    /* a de tras */
+  var temF = temFeitos();
 
   /* 1. as paredes do FR4 - a espessura que faz a placa parecer uma placa */
   D.outline.forEach(function (loop){
@@ -997,7 +1021,7 @@ function desenha3(){
   if (mostra.pads){
     D.pads.forEach(function (p){
       if (p.s !== -1 && p.s !== L) return;
-      ctx.fillStyle = C3.metal;
+      ctx.fillStyle = temF && feitoDe(p.c) ? D.cores.feito : C3.metal;
       p.p.forEach(function (poly){ poly3(ctx, W, H, poly, zf); ctx.closePath(); ctx.fill(); });
     });
     D.vias.forEach(function (v){
@@ -1007,7 +1031,7 @@ function desenha3(){
     if (mostra.drills){
       D.pads.forEach(function (p){
         if (!p.h || (p.s !== -1 && p.s !== L)) return;
-        ctx.fillStyle = C3.furo;
+        ctx.fillStyle = temF && feitoDe(p.c) ? D.cores.feitoFuro : C3.furo;
         p.h.forEach(function (poly){ poly3(ctx, W, H, poly, zf); ctx.closePath(); ctx.fill(); });
       });
       D.vias.forEach(function (v){
@@ -1020,20 +1044,25 @@ function desenha3(){
 
   /* 4. serigrafia */
   if (mostra.silk){
-    var ls = lote();
+    /* dois lotes, e nao uma cor por segmento: o traço em lote e o que faz a orbita rodar em
+       placa grande, e a serigrafia da peça montada e so mais um lote - o da outra cor */
+    var ls = lote(), lf = lote();
     D.silk.forEach(function (sk){
       if (sk.s !== L || (sk.d && !mostra.refs)) return;
       var pts = sk.k === 'a' ? arco3(sk.x, sk.y, sk.r, sk.a, sk.b) : sk.p;
-      for (var i = 0; i + 1 < pts.length; i++) poeLinha(ls, pts[i], pts[i+1], zf, sk.w);
+      var qual = temF && feitoDe(sk.c) ? lf : ls;
+      for (var i = 0; i + 1 < pts.length; i++) poeLinha(qual, pts[i], pts[i+1], zf, sk.w);
     });
     traçaLote(ctx, W, H, ls, C3.silk);
+    if (lf.n) traçaLote(ctx, W, H, lf, D.cores.feito);
   }
 
-  /* 5. o que ja foi montado, no mesmo verde da vista 2D e antes do realce - estado, e nao alvo */
-  if (temFeitos()) tintaFeitos(ctx, L, function (bb){
+  /* 5. o entorno do que ja foi montado (o corpo dela ja saiu verde nas proprias formas, la
+     em cima), antes do realce - estado, e nao alvo */
+  if (temF) contornoFeitos(ctx, L, function (bb){
     poly3(ctx, W, H, [[bb[0],bb[1]],[bb[2],bb[1]],[bb[2],bb[3]],[bb[0],bb[3]]], zf);
-    ctx.closePath(); ctx.fill();
-  });
+    ctx.closePath(); ctx.stroke();
+  }, 1.4);
 
   /* 6. o realce, por cima de tudo */
   if (realce.length){
@@ -1051,7 +1080,7 @@ function desenha3(){
   /* 7. o tique de montado - depois do realce, pelo mesmo motivo do 2D. O tela3 ja devolve
      pixel de CSS (o ctx foi escalado pelo dpr aqui em cima), e a projecao achata a vertical
      pelo seno da inclinacao: de lado, um disco do tamanho da peça nao caberia nela. */
-  if (temFeitos())
+  if (temF)
     marcaFeitos(ctx, L, function (x, y){ return tela3(ctx, W, H, pr3(x, y, zf)); },
                 v3.esc, Math.max(0.2, Math.abs(Math.sin(v3.pitch))), 1);
   /* 8. a esfera com a cruz, no ponto em torno do qual se esta girando. Fica em PIXEIS, e nao

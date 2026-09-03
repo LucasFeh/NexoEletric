@@ -39,9 +39,11 @@ const B = board({
        caso em que a guiada em 3D precisa VIRAR a placa para mostra-la */
     comp('C2', 'Bottom', '22u', 'CAP 1206', 16, 4),
   ],
-  silk: [{ id:'s1', layer:'TopOverlay', kind:'line', x1:1, y1:1, x2:9, y2:1, w:0.2 },
+  /* o owner vem do board.js de verdade (ExportPcb marca de quem e cada primitivo); o s2 fica
+     sem dono de proposito - contorno de placa e serigrafia solta existem */
+  silk: [{ id:'s1', layer:'TopOverlay', kind:'line', x1:1, y1:1, x2:9, y2:1, w:0.2, owner:'R1' },
          { id:'s2', layer:'BottomOverlay', kind:'arc', cx:5, cy:15, r:1, sa:0, ea:180, w:0.2 }],
-  texts: [{ id:'x1', layer:'TopOverlay', x:5, y:7, text:'R1', h:1, rot:0, mirror:false, designator:true },
+  texts: [{ id:'x1', layer:'TopOverlay', x:5, y:7, text:'R1', h:1, rot:0, mirror:false, designator:true, owner:'R1' },
           { id:'x2', layer:'TopOverlay', x:12, y:12, text:'TESTE', h:1, rot:0, mirror:false, designator:false }],
   tracks: [{ id:'t1', layer:'Top', x1:2, y1:2, x2:8, y2:2, w:0.5, net:'GND' },
            { id:'t2', layer:'Mid1', x1:2, y1:3, x2:8, y2:3, w:0.5 }],
@@ -183,6 +185,15 @@ assert.ok(designadores.length > 0, 'o texto de designador vira silk com d=1');
 assert.ok(m.silk.some(s => !s.d && s.k === 'l'), 'o silk comum continua sem a marca');
 assert.ok(m.silk.some(s => s.k === 'a' && s.s === 1), 'arco de silk do verso entra');
 
+/* O primitivo de serigrafia guarda o INDICE do dono, como o pad ja guardava: e por ele que a
+   peça montada sai verde inteira - pad, serigrafia e furo - sem o desenho ter que adivinhar
+   por geometria quem e de quem. Sem dono, o campo nem aparece: sao milhares de primitivos
+   numa placa, e um campo vazio em cada um so incha o JSON. */
+const iR1 = m.comps.findIndex(c => c.ref === 'R1');
+assert.ok(m.silk.some(s => s.c === iR1 && !s.d), 'a linha de serigrafia do R1 sabe de quem e');
+assert.ok(m.silk.some(s => s.c === iR1 && s.d), 'e o designador dele tambem');
+assert.ok(m.silk.some(s => s.c === undefined), 'serigrafia sem dono nao ganha o campo a toa');
+
 /* ═══════════════ a pagina ═══════════════ */
 /* ── as opcoes da aba tem que chegar na pagina ──
    O runtime abria com um literal fixo, entao marcar "trilhas" na aba gerava uma pagina sem
@@ -288,6 +299,11 @@ function montaAmbiente(){
      do tique dos outros arcos do desenho (silk, trilha em arco, via). */
   const arcos = [];
   ctx.arc = function (x, y, r){ ops.push('arc'); arcos.push([x, y, r, ctx.fillStyle]); };
+  /* o retangulo diz COMO a peça montada e marcada: o entorno dela e um contorno, e nao mais
+     um quadrado cheio por cima do que se quer conferir */
+  const rets = [];
+  ctx.fillRect = function (){ ops.push('fillRect'); rets.push(['fill', ctx.fillStyle]); };
+  ctx.strokeRect = function (){ ops.push('strokeRect'); rets.push(['stroke', ctx.strokeStyle]); };
   const elems = {};
   /* textContent = '' limpa os filhos, como no DOM de verdade - sem isso a tabela
      acumularia as linhas de cada montaBom e o teste mediria lixo */
@@ -374,7 +390,7 @@ function montaAmbiente(){
     body: mk('body'),
   };
   amb.ops = ops; amb.doc = doc; amb.elems = elems; amb.escalas = escalas; amb.cores = cores;
-  amb.arcos = arcos;
+  amb.arcos = arcos; amb.rets = rets;
   return amb;
 }
 
@@ -604,6 +620,29 @@ function montaAmbiente(){
   assert.strictEqual(soNoVerso.length, 1, 'peça de uma face so ganha um tique so');
   assert.ok(emCima(r.cams1().mundo(soNoVerso[0][0], soNoVerso[0][1]), 16, 4),
             'o tique do verso acompanha o espelho da camera de baixo');
+  /* ── e a peça montada troca de cor NAS PROPRIAS formas ──
+     Pad, serigrafia e furo saem em verde, e o entorno e so um contorno: o quadrado cheio de
+     antes escondia justamente o que a bancada precisa ver para conferir a peça. */
+  const trR1 = amb.elems.linhas.children.find(t =>
+    t.children[COL_REFS] && t.children[COL_REFS].textContent.indexOf('R1') >= 0);
+  const cxR1 = caixaDaLinha(trR1);
+  amb.cores.length = 0; amb.rets.length = 0;
+  cxR1.checked = true; cxR1.onclick({ stopPropagation(){} });
+  const comVisto = amb.cores.slice(), retsCom = amb.rets.slice();
+  amb.cores.length = 0;
+  cxR1.checked = false; cxR1.onclick({ stopPropagation(){} });
+  const semVisto = amb.cores.slice();
+  const quantos = (a, c) => a.filter(x => x === c).length;
+  assert.strictEqual(quantos(semVisto, Bom.COR.feito), 0, 'sem visto, nenhum verde na placa');
+  assert.strictEqual(quantos(comVisto, Bom.COR[0].pad), quantos(semVisto, Bom.COR[0].pad) - 2,
+                     'os dois pads do R1 saem do vermelho da frente');
+  assert.ok(quantos(comVisto, Bom.COR.feito) >= 3,
+            'e entram no verde, com a serigrafia dele junto: ' + quantos(comVisto, Bom.COR.feito));
+  assert.ok(retsCom.some(r => r[0] === 'stroke' && r[1] === Bom.COR.feito),
+            'o entorno da peça montada e um contorno');
+  assert.ok(!retsCom.some(r => r[0] === 'fill' && r[1] === Bom.COR.feito),
+            'e nao um quadrado cheio por cima dela');
+
   marca(true);                     /* e volta marcada, que e como o teste do modal segue */
 
   /* ── o modal proprio, no lugar do confirm do navegador ── */
