@@ -279,10 +279,9 @@ function leftMove(e){
   else if (!editOn && !d.avisou){
     /* arrastar travado nao pode ser silencio: e a diferenca entre "nao funciona" e "esta em leitura" */
     d.avisou = true;
-    $('annmsg').textContent = AVISO_LEITURA;
+    HubDialog.toast('Só leitura — tecle E ou clique no lápis (Configurações) para mover.', 'warn');
   }
 }
-const AVISO_LEITURA = 'só leitura — tecle E ou clique no lápis (Configurações) para mover';
 function leftUp(){
   const d = mouse; if (!d) return;
   mouse = null;
@@ -344,7 +343,6 @@ function setEdit(v){
   const sm = $('smode');
   sm.textContent = editOn ? 'editando' : 'leitura · E edita';
   sm.classList.toggle('edit', editOn);
-  if (editOn && $('annmsg').textContent === AVISO_LEITURA) $('annmsg').textContent = '';
   /* o Salvar fica de fora de proposito: a trava e para NAO deixar alterar, e travar de
      volta com alteracoes pendentes nao pode impedir de grava-las. */
   $('btnAdd').disabled = $('btnAnn').disabled = !editOn;
@@ -701,7 +699,7 @@ function finalizar(){
   commit();
   const bb = unionBBox(novos);
   if (bb) cam.fit({ x1:bb.x1 - 600, y1:bb.y1 - 600, x2:bb.x2 + 600, y2:bb.y2 + 600 });
-  $('annmsg').textContent = novos.length + ' componente(s) na folha "' + folha.name + '" — arraste para o lugar e salve';
+  HubDialog.toast(novos.length + ' componente(s) na folha "' + folha.name + '" — arraste para o lugar e salve', 'ok');
 }
 
 $('addSearch').addEventListener('input', () => { buildAddList(); renderAddPreview(); });
@@ -712,7 +710,11 @@ $('addPart').addEventListener('change', () => { if (pick){ pick.part = +$('addPa
 $('addOk').addEventListener('click', cartAdd);
 $('addClose').addEventListener('click', closeAdd);
 $('addmodal').addEventListener('click', e => { if (e.target === $('addmodal')) closeAdd(); });
-$('cartClear').addEventListener('click', () => { if (cart.length && !confirm('Esvaziar a lista?')) return; cart = []; cartRender(); });
+$('cartClear').addEventListener('click', async () => {
+  if (cart.length && !(await HubDialog.confirm('Esvaziar a lista de componentes? O que já estava nela se perde.',
+      { title:'Limpar lista', ok:'Esvaziar', danger:true }))) return;
+  cart = []; cartRender();
+});
 $('cartDone').addEventListener('click', finalizar);
 $('btnAdd').addEventListener('click', openAdd);
 
@@ -764,7 +766,7 @@ $('schpropsok').addEventListener('click', () => {
   const clean = s => String(s).trim().replace(/"/g, "'");
   if (h.kind === 'comp'){
     const nref = clean(v.ref);
-    if (!nref){ alert('ref não pode ficar vazio.'); propItem = null; return; }
+    if (!nref){ HubDialog.alert('O ref não pode ficar vazio.', { title:'Componente' }); propItem = null; return; }
     it.ref = nref;
     it.comment = clean(v.comment); if (!it.comment) delete it.comment;
     it.footprint = clean(v.footprint);
@@ -787,15 +789,22 @@ const SCH_REL = 'Projects/' + SCH_P + '/schematic.js';
 const ANN_REL = 'Projects/' + SCH_P + '/annotations.js';
 (async () => { if (HubIO.canPost) try { schDiskSnapshot = await HubIO.fetchText(SCH_REL); } catch (e) {} })();
 
+/* as perguntas de seguranca dos dois escritores viram modal; o resultado, notificacao */
+const SOBRESCREVER = { title:'Salvar', ok:'Sobrescrever', danger:true };
+async function falhaSalvar(err, nome, texto){
+  if (await HubDialog.confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?',
+      { title:'Falha ao salvar', ok:'Baixar' }))
+    HubIO.download(nome, texto);
+}
 async function saveSchematic(){
-  if (staleWorkspace && !confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o schematic.js do disco. Continuar?')) return null;
+  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o schematic.js do disco. Continuar?', SOBRESCREVER))) return null;
   const out = HubCore.serializeSchematic(schematic);
-  if (!out.text){ alert('Esquema inválido:\n' + out.errors.map(e => e.msg).join('\n')); return null; }
+  if (!out.text){ await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Esquema inválido' }); return null; }
   if (HubIO.canPost){
     try {
       const cur = await HubIO.fetchText(SCH_REL);
       if ((schDiskSnapshot === null || cur !== schDiskSnapshot) &&
-          !confirm('schematic.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?')) return null;
+          !(await HubDialog.confirm('schematic.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?', SOBRESCREVER))) return null;
     } catch (e) {}
   }
   try {
@@ -803,34 +812,24 @@ async function saveSchematic(){
     setSchDirty(false);
     staleWorkspace = false;
     schDiskSnapshot = out.text;
-    return r.mode === 'server' ? '✓ schematic.js salvo' : '↓ arquivo baixado — substitua ' + SCH_REL;
-  } catch (err) {
-    if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
-      HubIO.download('schematic.js', out.text);
-    return null;
-  }
+    return r.mode === 'server' ? { m:'schematic.js salvo', k:'ok' } : { m:'arquivo baixado — substitua ' + SCH_REL, k:'warn' };
+  } catch (err) { await falhaSalvar(err, 'schematic.js', out.text); return null; }
 }
 async function saveAnnotations(){
-  if (staleWorkspace && !confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o annotations.js do disco. Continuar?')) return null;
+  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o annotations.js do disco. Continuar?', SOBRESCREVER))) return null;
   const out = HubCore.serializeAnnotations(ANN);
-  if (!out.text){ alert('Sinalizadores inválidos:\n' + out.errors.map(e => e.msg).join('\n')); return null; }
+  if (!out.text){ await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Sinalizadores inválidos' }); return null; }
   try {
     const r = await HubIO.saveFile(ANN_REL, out.text);
     setAnnDirty(false);
     staleWorkspace = false;
-    return r.mode === 'server' ? '✓ sinalizadores salvos' : '↓ arquivo baixado — substitua ' + ANN_REL;
-  } catch (err) {
-    if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
-      HubIO.download('annotations.js', out.text);
-    return null;
-  }
+    return r.mode === 'server' ? { m:'sinalizadores salvos', k:'ok' } : { m:'arquivo baixado — substitua ' + ANN_REL, k:'warn' };
+  } catch (err) { await falhaSalvar(err, 'annotations.js', out.text); return null; }
 }
 /* grava o que estiver alterado; sem nada pendente, grava o esquema (o que o botao antigo fazia) */
 async function saveAll(){
-  const msgs = [];
-  if (schDirty || !annDirty){ const m = await saveSchematic(); if (m) msgs.push(m); }
-  if (annDirty){ const m = await saveAnnotations(); if (m) msgs.push(m); }
-  if (msgs.length) $('annmsg').textContent = msgs.join(' · ');
+  if (schDirty || !annDirty){ const r = await saveSchematic(); if (r) HubDialog.toast(r.m, r.k); }
+  if (annDirty){ const r = await saveAnnotations(); if (r) HubDialog.toast(r.m, r.k); }
 }
 $('btnSave').addEventListener('click', saveAll);
 
@@ -1086,6 +1085,7 @@ window.__hubOnChange = function(){
   if (!annDirty && !schDirty){ location.reload(); return; }
   staleWorkspace = true;
   $('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
+  HubDialog.toast('O workspace mudou com edições pendentes aqui — salve e recarregue (F5).', 'warn', 0);
 };
 window.__hubDirty = function(){ return annDirty || schDirty; };
 window.__hubSelectComp = function(ref){

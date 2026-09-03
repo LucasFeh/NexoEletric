@@ -65,21 +65,25 @@ document.getElementById('annok').addEventListener('click', () => {
 });
 document.getElementById('anncancel').addEventListener('click', hideAnnForm);
 
+/* as perguntas de seguranca dos dois escritores viram modal; o resultado, notificacao */
+const SOBRESCREVER = { title:'Salvar', ok:'Sobrescrever', danger:true };
+async function falhaSalvar(err, nome, texto){
+  if (await HubDialog.confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?',
+      { title:'Falha ao salvar', ok:'Baixar' }))
+    HubIO.download(nome, texto);
+}
 async function saveAnnotations(){
-  if (staleWorkspace && !confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o annotations.js do disco. Continuar?')) return;
+  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o annotations.js do disco. Continuar?', SOBRESCREVER))) return;
   const out = HubCore.serializeAnnotations(ANN);
-  if (!out.text){ alert('Sinalizadores inválidos:\n' + out.errors.map(e => e.msg).join('\n')); return; }
+  if (!out.text){ await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Sinalizadores inválidos' }); return; }
   const rel = PCB_P ? 'Projects/' + PCB_P + '/annotations.js' : 'annotations.js';
-  const msg = document.getElementById('annmsg');
   try {
     const r = await HubIO.saveFile(rel, out.text);
     setAnnDirty(false);
     staleWorkspace = false;
-    msg.textContent = r.mode === 'server' ? '✓ sinalizadores salvos' : '↓ arquivo baixado — substitua ' + rel;
-  } catch (err) {
-    if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
-      HubIO.download('annotations.js', out.text);
-  }
+    if (r.mode === 'server') HubDialog.toast('sinalizadores salvos', 'ok');
+    else HubDialog.toast('arquivo baixado — substitua ' + rel, 'warn');
+  } catch (err) { await falhaSalvar(err, 'annotations.js', out.text); }
 }
 document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
 document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
@@ -90,6 +94,7 @@ window.__hubOnChange = function(){
   if (!annDirty && !chDirty){ location.reload(); return; }
   staleWorkspace = true;
   document.getElementById('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
+  HubDialog.toast('O workspace mudou com edições pendentes aqui — salve e recarregue (F5).', 'warn', 0);
 };
 window.__hubDirty = function(){ return annDirty || chDirty; };
 window.__hubSelectComp = function(ref){ const m = model.compByRef[ref]; if (m){ selected = m; showInfo(m); syncTableSel(); zoomToObj(m); } };
@@ -176,28 +181,25 @@ function extraCommentLines(diskText){
   return out;
 }
 async function saveChanges(){
-  if (staleWorkspace && !confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o changes.js do disco. Continuar?')) return;
+  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o changes.js do disco. Continuar?', SOBRESCREVER))) return;
   const out = HubCore.serializeChanges(CH);
-  if (!out.text){ alert('Mudanças inválidas:\n' + out.errors.map(e => e.msg).join('\n')); return; }
+  if (!out.text){ await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Mudanças inválidas' }); return; }
   let cur = null;
   if (HubIO.canPost){
     try { cur = await HubIO.fetchText(CH_REL); } catch (e) {}
     if (cur !== null && (chDiskSnapshot === null || cur !== chDiskSnapshot) &&
-        !confirm('changes.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?')) return;
+        !(await HubDialog.confirm('changes.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?', SOBRESCREVER))) return;
   }
   const extra = extraCommentLines(cur !== null ? cur : chDiskSnapshot);
   const text = extra.length ? out.text.replace('var changes = [', extra.join('\n') + '\nvar changes = [') : out.text;
-  const msg = document.getElementById('annmsg');
   try {
     const r = await HubIO.saveFile(CH_REL, text);
     setChDirty(false);
     chDiskSnapshot = text;
     staleWorkspace = false;
-    msg.textContent = r.mode === 'server' ? '✓ changes.js salvo' : '↓ arquivo baixado — substitua ' + CH_REL;
-  } catch (err) {
-    if (confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?'))
-      HubIO.download('changes.js', text);
-  }
+    if (r.mode === 'server') HubDialog.toast('changes.js salvo', 'ok');
+    else HubDialog.toast('arquivo baixado — substitua ' + CH_REL, 'warn');
+  } catch (err) { await falhaSalvar(err, 'changes.js', text); }
 }
 
 /* ------- snap e commits de edicao ------- */
@@ -862,7 +864,7 @@ function propValues(){
 document.getElementById('propok').addEventListener('click', () => {
   const badField = Array.from(document.querySelectorAll('#proprows input[type=number]'))
     .find(el => el.value.trim() === '' || !isFinite(+el.value));
-  if (badField){ alert('Valor numérico inválido no campo "' + badField.dataset.k + '"'); return; }
+  if (badField){ HubDialog.alert('Valor numérico inválido no campo "' + badField.dataset.k + '".', { title:'Propriedades' }); return; }
   const m = propTarget, v = propValues();
   document.getElementById('propform').style.display = 'none';
   if (!m) return;
