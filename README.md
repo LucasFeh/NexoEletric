@@ -55,6 +55,21 @@ transformados**; só a projeção de tela do hub inverte Y.
    As rotinas auxiliares recebem parâmetro de propósito, para não poluírem o menu
    (o *Run Script* só lista procedimentos sem parâmetros).
 
+### Dependências do servidor
+
+O `hubserver.py` precisa de **Flask**; a sincronização do almoxarifado e as ferramentas de
+símbolo precisam também de **olefile** (é ele que lê o `.SchLib` do Altium):
+
+```
+python -m pip install flask olefile
+```
+
+Rode isso **com o mesmo `python` que sobe o hub**. O hub dispara os scripts com
+`sys.executable`, então numa máquina com vários Pythons instalados (o do Espressif, o da
+Microsoft Store, o do python.org) é fácil subir o servidor com um que não tem `olefile` — e
+aí a sincronização morre com `ModuleNotFoundError` no meio do guardião. Quando isso
+acontece a mensagem já diz o caminho exato do interpretador a consertar.
+
 ## Estrutura do workspace
 
 ```
