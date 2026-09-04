@@ -1902,5 +1902,15 @@ const dirty = () => !!ST.dirty;
    seleção sobrevive a apagar e desfazer */
 const actions = { deleteSelection, duplicarSelecao, undo, redo, nudge, pushUndo, virar, setUnit };
 
-return { render, dirty, pure, state: ST, actions, cam: () => (CAM ? CAM.cam : null), confirmar, pedirTexto };
+/* a casca aplicou no espelho o que veio do Altium: o Libs/schlib.js em disco e outro. Zera a carga
+   e reabre o simbolo que estava na tela ja com a versao nova; edicao nao salva se perde - quem chama
+   (hub-libsync) ja avisou o usuario antes. */
+function reload() {
+  DATA.schlib = null; DATA.loading = null; DATA.schlibErro = '';
+  ST.draft = null; ST.dirty = false; ST.selection = []; ST.undo = []; ST.redo = []; ST.draw = null;
+  if (!UI) return Promise.resolve();
+  return loadSchlib().then(() => { listKey = ''; refreshAll(); if (ST.sel) return openSymbol(ST.sel, true); });
+}
+
+return { render, dirty, reload, pure, state: ST, actions, cam: () => (CAM ? CAM.cam : null), confirmar, pedirTexto };
 });
