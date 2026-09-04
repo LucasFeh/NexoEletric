@@ -66,6 +66,11 @@ CONECTOR_RX = re.compile(r'^(CONECTOR|BARRA DE PINOS) (\d+)V')
 # qualquer homonimo herdado do simbolo reciclado e descartado.
 CAMPOS_DO_VALOR = ('Comment', 'Value', 'Encapsulamento', 'MPN', 'Mouser', 'OdooId',
                    'Estoque', 'Local', 'Custo', 'ValorId')
+# Qual parametro APARECE na folha. O Altium mostra o parametro que nao tem IsHidden; o resto
+# vive no Parameter Manager. Aqui e o Value, e o Comment sai SUPRIMIDO: o Comment repete o
+# nome do componente — que o designador e o footprint ja dizem — enquanto o Value e o que
+# muda de peca para peca (10K, 100nF, 12V) e e o que se quer ler no esquema.
+PARAM_VISIVEL = 'Value'
 BARRA_FMT = 'BARRA TERMINAL %d VIAS'
 
 
@@ -437,14 +442,18 @@ def monta_componente(sim, valor, modelo=None):
     vals['Familia'] = sim.get('familia', '')
     for i, campo in enumerate(CAMPOS_DO_VALOR + ('Familia',)):
         texto = vals.get(campo, '')
-        if campo != 'Comment' and not texto:
-            continue                       # parametro vazio so polui o Parameter Manager
+        # o visivel e o Comment saem SEMPRE, mesmo vazios: o visivel porque sem ele o
+        # componente ficaria mudo na folha, e o Comment porque o Altium conta com o campo
+        # existindo. Os outros vazios so poluiriam o Parameter Manager.
+        if campo not in ('Comment', PARAM_VISIVEL) and not texto:
+            continue
         d = OrderedDict([
             ('RECORD', 41), ('IndexInSheet', -1), ('OwnerPartId', -1),
-            ('Location.X', 0), ('Location.Y', ybase - (0 if campo == 'Comment' else 2 + i)),
+            # o visivel fica na linha de cima (a boa); os suprimidos empilham abaixo
+            ('Location.X', 0), ('Location.Y', ybase - (0 if campo == PARAM_VISIVEL else 2 + i)),
             ('Color', 8388608), ('FontID', 1)])
-        if campo != 'Comment':
-            d['IsHidden'] = 'T'            # so o Comment aparece na folha
+        if campo != PARAM_VISIVEL:
+            d['IsHidden'] = 'T'
         d['Text'] = texto
         d['Name'] = campo
         d['UniqueID'] = _uid(nome + '#' + campo)
