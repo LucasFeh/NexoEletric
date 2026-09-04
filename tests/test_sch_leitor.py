@@ -5,6 +5,11 @@
 
 (a) lê a SchLib do Y: e exige que >= 97 % dos símbolos saiam iguais ao Libs/schlib.js
     (pinos e gráficos, tolerância 0.01 mil); os que diferem são listados com o motivo.
+    O espelho versionado já levou os hideNum/hideName (`sch_leitor.py --flags`), então a
+    linha tem que sair byte a byte igual COM os flags — de quem tem pino escondido e de quem
+    não tem — e o RES [ SMD ] volta com os dois flags enquanto o 24LC256 volta sem nenhum.
+(a2) offline: o rename-map (le_rename_map/aplica_rename) e o passo dos flags (aplica_flags)
+    num espelho de mentira, incluindo o que ele NÃO toca.
 (b) lê .SchDoc reais e prova a localização: um componente colocado, desfeitas posição,
     rotação e espelho, tem os mesmos pinos do espelho.
 (c) lê um .IntLib real.
@@ -15,6 +20,7 @@ O que depende do Y: PULA (não falha) quando a rede não está.
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -200,6 +206,16 @@ def test_offline():
     p = L.pino_binario({'designador': b'1', 'nome': b'A', 'x': 35, 'y': -35, 'comprimento': 7,
                         'conglomerado': 0x31, 'eletrico': 0}, (43307, -43309, 87402))
     assert p['x'] == 354.331 and p['y'] == -354.331 and p['len'] == 78.74 and p['orient'] == 90 and p['type'] == 'Input'
+    # visibilidade: 0x08 = nome à vista, 0x10 = número à vista; só o escondido vira flag
+    assert 'hideNum' not in p and p['hideName'] is True, '0x31 mostra o numero e esconde o nome'
+    assert L.flags_pino(0x38) == {} and L.flags_pino(0x20) == {'hideNum': True, 'hideName': True}
+    assert L.flags_pino(0x30) == {'hideName': True} and L.flags_pino(0x28) == {'hideNum': True}
+    p = L.pino_binario({'designador': b'2', 'nome': b'B', 'x': 5, 'y': 0, 'comprimento': 10,
+                        'conglomerado': 0x22, 'eletrico': 4})
+    assert p['orient'] == 180 and p['hideNum'] is True and p['hideName'] is True
+    assert list(p.keys()) == ['num', 'name', 'x', 'y', 'len', 'orient', 'type', 'hideNum', 'hideName']
+    p = L.pino_texto({'RECORD': '2', 'Designator': '3', 'Name': 'C', 'PinLength': '30', 'PinConglomerate': '49'})   # 0x31
+    assert p['orient'] == 90 and p['hideName'] is True and 'hideNum' not in p, 'PinConglomerate tem os mesmos bits'
     # arco elíptico: quase círculo vira arc; elipse de verdade vira polyline amostrada
     g = L.primitiva({'RECORD': '11', 'Location.X': '-2', 'Radius': '10', 'SecondaryRadius': '10',
                      'SecondaryRadius_Frac': '20000', 'LineWidth': '1', 'StartAngle': '209.055', 'EndAngle': '150.945'}, {})
@@ -213,7 +229,86 @@ def test_offline():
     print('  offline: localiza/serializa OK')
 
 
+# ─── (a2) offline: o rename-map e os flags no espelho que já existe ───────────
+# um rename-map no formato do RenameLibs: um símbolo renomeado, um fundido, um footprint
+# renomeado e outro fundido no que ficou
+MAPA_DE_MENTIRA = """var renameMap = {
+"format":"renamemap-v1",
+"symRename":{"VELHO A":"NOVO A"},
+"mergeSym":{"C":"NOVO A"},
+"fpRename":{"FP V":"FP-V"},
+"mergeFp":{"FP W":"FP V"}
+};
+"""
+
+
+def test_rename_e_flags():
+    """le_rename_map/aplica_rename/aplica_flags num espelho de mentira: dois símbolos, um
+    mapa e uma SchLib fingida por dicts — nada de rede."""
+    VIS, SEM_TUDO = 0x38, 0x20                  # 0x08 = nome à vista, 0x10 = número à vista
+    G, SRC = '2026-01-01 00:00', 'X.SchLib'
+
+    def pino(num, cong, x=0):
+        return L._pino(num, 'P' + num, x, 0, 100, cong, 4)          # 4 = Passive
+
+    def simbolo(nome, pins, fps=()):
+        return {'name': nome, 'description': '', 'partcount': 1,
+                'parts': [{'part': 1, 'pins': list(pins), 'graphics': []}],
+                'footprints': [{'name': f, 'incurrentlib': True, 'current': i == 0}
+                               for i, f in enumerate(fps)]}
+
+    def texto(syms):
+        return L.espelho({'symbols': list(syms), 'generated': G, 'source': SRC})
+
+    mapa = {'sym': {'VELHO A': 'NOVO A'}, 'fundidos': {}, 'fp': {}}
+    b = simbolo('B', [pino('1', VIS)])
+    fps = ['FP-A']
+    # o espelho do ExportLibs: o nome novo do RenameLibs e nenhum flag
+    sem = texto([simbolo('NOVO A', [pino('1', VIS), pino('2', VIS, 200)], fps), b])
+    # a SchLib real: o nome antigo, e o pino 1 com nome e número escondidos
+    lib = [simbolo('VELHO A', [pino('1', SEM_TUDO), pino('2', VIS, 200)], fps), b]
+    com = texto([simbolo('NOVO A', [pino('1', SEM_TUDO), pino('2', VIS, 200)], fps), b])
+
+    novo, r = L.aplica_flags(sem, lib, mapa)
+    assert novo == com, 'o passo dos flags nao reproduziu a linha que o /save escreveria'
+    assert (r['simbolos'], r['mudaram'], r['com_flag']) == (2, 1, 1), r
+    assert not r['sem_par'] and not r['pinos_sem_par'] and not r['avisos'], r
+    # de novo não muda nada; e o caminho de volta apaga o flag que a SchLib não tem mais
+    assert L.aplica_flags(com, lib, mapa)[0] == com, 'aplicar duas vezes tem que dar o mesmo'
+    volta, r2 = L.aplica_flags(com, [simbolo('VELHO A', [pino('1', VIS), pino('2', VIS, 200)], fps), b], mapa)
+    assert volta == sem and r2['mudaram'] == 1 and r2['com_flag'] == 0, r2
+    # símbolo que a SchLib não tem, e pino que mudou de posição: a linha fica como está
+    fora, r3 = L.aplica_flags(sem, [simbolo('VELHO A', [pino('1', SEM_TUDO, 500), pino('2', VIS, 200)], fps)], mapa)
+    assert fora == sem and r3['sem_par'] == ['B'] and r3['pinos_sem_par'] == ['NOVO A pino 1'], r3
+
+    # o rename-map: fpRename e mergeFp saem resolvidos numa tabela só
+    d = tempfile.mkdtemp(prefix='renamemap-')
+    try:
+        cam = os.path.join(d, 'rename-map.js')
+        with open(cam, 'w', encoding='utf-8') as f:
+            f.write(MAPA_DE_MENTIRA)
+        m = L.le_rename_map(cam)
+        assert L.le_rename_map(os.path.join(d, 'nao-existe.js')) == {'sym': {}, 'fundidos': {}, 'fp': {}}
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+    assert m['sym'] == {'VELHO A': 'NOVO A'} and m['fundidos'] == {'C': 'NOVO A'}, m
+    assert m['fp'] == {'FP V': 'FP-V', 'FP W': 'FP-V'}, m['fp']   # o fundido aponta para o nome novo
+
+    # aplica_rename: o fundido sai, o renomeado troca de nome, o footprint segue o mapa
+    dados = {'symbols': [simbolo('VELHO A', [pino('1', VIS)], ['FP V']), simbolo('C', [pino('1', VIS)]),
+                         simbolo('D', [pino('1', VIS)], ['FP W'])]}
+    r4 = L.aplica_rename(dados, m)
+    assert [x['name'] for x in dados['symbols']] == ['NOVO A', 'D'], dados
+    assert [x['footprints'][0]['name'] for x in dados['symbols']] == ['FP-V', 'FP-V'], dados
+    assert r4 == {'renomeados': 1, 'fundidos': 1, 'footprints': 2}, r4
+    print('  offline: rename-map e o passo dos flags OK')
+
+
 # ─── (a) a SchLib real contra o schlib.js ─────────────────────────────────────
+def _tem_flag(sym):
+    return any(k in q for p in sym['parts'] for q in p['pins'] for k in ('hideNum', 'hideName'))
+
+
 def _so_poly_solid(motivos):
     """o ExportLibs escrevia "solid":true FIXO para polígono; o leitor lê o IsSolid real.
     Diferença só nisso é o ExportLibs errado, não o leitor — conta como conhecida."""
@@ -230,6 +325,16 @@ def test_schlib():
     for av in dados['avisos'][:10]:
         print('      aviso:', av)
     assert len(syms) >= 400, 'poucos simbolos: %d' % len(syms)
+    # os flags de visibilidade, apurados na lib: RES [ SMD ] esconde nome e número, 24LC256 mostra os dois
+    por_ref = {s['name']: s for s in syms}
+    pr = por_ref['RES [ SMD ]']['parts'][0]['pins']
+    assert pr and all(q.get('hideNum') is True and q.get('hideName') is True for q in pr), pr
+    pe = por_ref['24LC256']['parts'][0]['pins']
+    assert pe and not any('hideNum' in q or 'hideName' in q for q in pe), pe
+    com_flag = [s['name'] for s in syms if _tem_flag(s)]
+    print('  (a) %d de %d simbolos tem pino com nome/numero escondido (hideNum/hideName); ex.: %s' % (
+        len(com_flag), len(syms), ', '.join(com_flag[:5])))
+    assert 'RES [ SMD ]' in com_flag and '24LC256' not in com_flag
 
     js = le_js(os.path.join(RAIZ, 'Libs', 'schlib.js'))
     por_nome = {s['name']: (linha, s) for linha, s in js}
@@ -238,6 +343,8 @@ def test_schlib():
     baixos = {n.lower() for n in nomes}
     iguais, comparados, texto_igual, conhecidas = 0, 0, 0, []
     diferentes, linhas_dif = [], []
+    # com e sem pino escondido: os dois grupos batem byte a byte com a linha do espelho
+    sem_flag, sem_flag_igual, com_flag_igual = 0, 0, 0
     for sym in syms:
         if sym['name'] in fund:
             continue                              # fundido pelo RenameLibs: saiu do espelho
@@ -262,7 +369,13 @@ def test_schlib():
         copia['footprints'] = [dict(f, name=ren_fp.get(f['name'], f['name']),
                                     incurrentlib=ren_fp.get(f['name'], f['name']).lower() in baixos)
                                for f in sym['footprints']]
-        if L.simbolo_json(copia) == linha:
+        igual = L.simbolo_json(copia) == linha
+        if _tem_flag(copia):
+            com_flag_igual += igual
+        else:
+            sem_flag += 1
+            sem_flag_igual += igual
+        if igual:
             texto_igual += 1
         else:
             a, b = L.simbolo_json(copia), linha
@@ -270,6 +383,8 @@ def test_schlib():
             linhas_dif.append('%s @%d: %r != %r' % (nome_js, i, a[max(0, i - 30):i + 40], b[max(0, i - 30):i + 40]))
     print('  (a) %d/%d simbolos identicos (%.1f %%); %d com a linha do schlib.js byte a byte' % (
         iguais, comparados, 100.0 * iguais / max(1, comparados), texto_igual))
+    print('  (a) linha byte a byte: %d de %d com pino escondido, %d de %d sem' % (
+        com_flag_igual, iguais - sem_flag, sem_flag_igual, sem_flag))
     if conhecidas:
         print('      poligono sem IsSolid que o ExportLibs chamava de solid:true (lido como false): %s' % ', '.join(conhecidas))
     for nome, motivos in diferentes:
@@ -279,6 +394,11 @@ def test_schlib():
     assert comparados >= 380, 'poucos simbolos casaram pelo nome: %d' % comparados
     assert iguais >= 0.97 * comparados, 'so %d de %d identicos' % (iguais, comparados)
     assert texto_igual >= 0.9 * iguais, 'so %d linhas byte a byte' % texto_igual
+    assert sem_flag and sem_flag_igual >= 0.9 * sem_flag, 'sem flag: so %d de %d linhas byte a byte' % (sem_flag_igual, sem_flag)
+    com_flag_tot = iguais - sem_flag
+    assert com_flag_tot and com_flag_igual >= 0.9 * com_flag_tot, (
+        'o espelho versionado nao tem os flags (rode sch_leitor.py --flags): so %d de %d linhas byte a byte'
+        % (com_flag_igual, com_flag_tot))
 
     # com extras, o que o ExportLibs ignorava (arco elíptico, bezier, round rect) aparece
     cheio = L.le_schlib(LIB, pcblib_names=nomes)
@@ -441,6 +561,7 @@ def main():
     except AttributeError:
         pass
     test_offline()
+    test_rename_e_flags()
     if not os.path.exists(LIB):
         print('test_sch_leitor PULADO (nao alcancei %s)' % LIB)
         return 0

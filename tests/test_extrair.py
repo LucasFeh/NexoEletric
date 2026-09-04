@@ -102,6 +102,10 @@ def testa_normaliza():
     assert G({'g': 'poly', 'pts': [[10, 10], [0, 0], [10, 0], [10, 10]], 'solid': True}) == tri, 'rotação e fecho explícito'
     assert G({'g': 'poly', 'pts': [[10, 0], [0, 0], [10, 10]], 'solid': True}) == tri, 'sentido invertido'
     assert E._i(float('inf')) == 0 and E._a(float('nan')) == 0 and E._i('x') == 0, 'lixo vira 0, não exceção'
+    # visibilidade do texto do pino não é desenho: hideNum/hideName ficam fora da normalização e do fingerprint
+    esc = [dict(q, hideNum=True, hideName=True) for q in pins]
+    assert E.normaliza(esc, gr) == (p, g) and not any('hideNum' in q or 'hideName' in q for q in E.normaliza(esc, gr)[0])
+    assert E.fingerprint(esc, gr, 'ci') == E.fingerprint(pins, gr, 'ci') and E.fingerprint(esc, gr, 'generico') == E.fingerprint(pins, gr, 'generico')
     # o que o leitor devolve de um símbolo colocado numa folha casa com o da biblioteca
     import sch_leitor as L
     pl, gl = L.localiza(pins, [arco], 0, 0, 0, False)

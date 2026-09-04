@@ -187,14 +187,27 @@ retificadora" (é a mesma caixa); um par de contatos abertos sem lâmina (dip sw
 "Conector 2 vias"; triac desenhado só a linhas não é reconhecido e fica com o nome de origem.
 Em todos os casos o nome de origem está em `aliases` e o usuário renomeia pelo hub.
 
-## O save do hub e a grade de 10 mil
+## O save do hub, a fração do pino e o olho de visibilidade
 
 `symserver.py » POST /api/symbols/save` valida o pedido inteiro (forma conhecida, coordenadas
-numéricas, `pts` como pares, `label` com texto) **antes** de encostar no espelho, e grava os
-pinos no `Libs/schlib.js` já arredondados a 10 mil (`x`, `y`, `len`) — é o que o registro
-binário de pino da SchLib comporta, então espelho e Altium dizem o mesmo número. Cada pino que
-mudou vira um item de `avisos` na resposta. O patch da SchLib roda sob um lock próprio: dois
-saves ao mesmo tempo reescreveriam o arquivo inteiro e o último apagaria o do primeiro.
+numéricas, `pts` como pares, `label` com texto, `hideNum`/`hideName` booleanos) **antes** de
+encostar no espelho, e grava os pinos no `Libs/schlib.js` com 3 casas (`x`, `y`, `len`) — as
+da API do Altium. O registro binário de pino da SchLib só tem o inteiro em 10 mil, mas a
+fração mora no stream `PinFrac` do componente, e o `schlib_patch` a regrava (é assim que a
+lib guarda pino a 2 mm = 78,74 mil): espelho e Altium dizem o mesmo número até 0,001 mil, e a
+grade métrica sobrevive ao save. O patch da SchLib roda sob um lock próprio: dois saves ao
+mesmo tempo reescreveriam o arquivo inteiro e o último apagaria o do primeiro.
+
+**`hideNum` / `hideName`** são campos opcionais do pino no `schlib-v2`: `true` quando o
+número / o nome do pino está escondido no Altium; **ausente = visível** (o save não grava
+`false`). No arquivo do Altium é o `conglomerado` do pino: bit `0x08` mostra o nome, bit
+`0x10` mostra o designador (24LC256 = `0x38`, os dois à vista; RES [ SMD ] = `0x20`, os dois
+escondidos). O `sch_leitor` emite o flag só para o pino escondido — assim o espelho dos 401
+símbolos só muda onde há pino escondido — e o `schlib_patch` acende/apaga só esses dois bits
+a partir do pino que o hub manda; os outros bits altos do conglomerado (`0x20`, `0x04`…)
+continuam vindo do pino antigo de mesmo número, ou da moda do componente para pino novo. O
+`extrair.py` descarta os flags: visibilidade de texto não é desenho e não entra no
+fingerprint nem na Biblioteca de símbolos.
 
 ## O que NÃO entra
 

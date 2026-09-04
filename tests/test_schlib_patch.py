@@ -15,6 +15,9 @@ Copia a lib local (D:) para um tmp e prova, nessa ordem:
       fração (-236,221) volta igual; e geometria alterada (retângulo maior + um pino em
       y=5) num componente com PinFrac: a releitura reflete, AllPinCount acompanha, o
       PinFrac dele ganha a entrada do pino novo e o dos outros não muda.
+  (2d) o olho do pino: tirar `hideNum` do RES [ SMD ] acende o bit 0x10 (e só ele) e a
+      releitura volta sem `hideNum`; pôr `hideName` no 24LC256 apaga o 0x08 (e só ele);
+      `false` explícito é visível; os outros bits altos do conglomerado não mudam.
   (3) componente cujo storage não é o LibReference (nome > 31 chars, via SectionKeys).
   (4) nome inexistente é erro claro.
   (5) o backup existe e é idêntico ao original.
@@ -194,6 +197,42 @@ def main(origem=None):
         assert (st + '/PinFrac') not in streams(lib) and any('PinFrac' in a for a in r['avisos']), r['avisos']
         assert streams(lib) == antes_m, 'o RES de volta ao redondo tinha que dar o arquivo de antes'
         print('  (2a/2c) RES [ SMD ]: -78.74/196.85/59.055 e -236.221 vão e voltam pelo PinFrac; redondo -> sem PinFrac')
+
+        # ── (2d) o olho do pino: hideNum/hideName mandam nos bits 0x10/0x08 ──
+        def congs(st_):
+            return [SB.le_pino(pl)['conglomerado'] for t, pl in SB.desmonta(streams(lib)[st_ + '/Data']) if t == SB.BINARIO]
+        assert all(q.get('hideNum') and q.get('hideName') for q in res['parts'][0]['pins']), 'o RES esconde os dois'
+        ver = copy.deepcopy(res)
+        for q in ver['parts'][0]['pins']:
+            del q['hideNum']                                   # tirar o flag = número à vista
+        r = P.patch(lib, ver, bk_dir)
+        assert r['verificado'], r
+        assert congs(st) == [0x30, 0x32], congs(st)             # 0x20 e a rotação ficam; 0x10 acende
+        pr = simbolo(lib, 'RES [ SMD ]')['parts'][0]['pins']
+        assert all('hideNum' not in q and q.get('hideName') is True for q in pr), pr
+        ee = simbolo(lib, '24LC256')
+        st_e = P.acha(P.carrega(lib), '24LC256')
+        congs_a = congs(st_e)
+        assert congs_a and all(c & 0x18 == 0x18 for c in congs_a), congs_a
+        assert not any('hideNum' in q or 'hideName' in q for q in ee['parts'][0]['pins'])
+        esc = copy.deepcopy(ee)
+        for q in esc['parts'][0]['pins']:
+            q['hideName'] = True
+        r = P.patch(lib, esc, bk_dir)
+        assert r['verificado'], r
+        assert congs(st_e) == [c & ~0x08 for c in congs_a], (congs(st_e), congs_a)
+        pe = simbolo(lib, '24LC256')['parts'][0]['pins']
+        assert all(q.get('hideName') is True and 'hideNum' not in q for q in pe), pe
+        volta = copy.deepcopy(ee)
+        for q in volta['parts'][0]['pins']:
+            q['hideName'], q['hideNum'] = False, False          # false explícito = visível
+        r = P.patch(lib, volta, bk_dir)
+        assert r['verificado'] and congs(st_e) == congs_a, (congs(st_e), congs_a)
+        assert not any('hideNum' in q or 'hideName' in q for q in simbolo(lib, '24LC256')['parts'][0]['pins'])
+        r = P.patch(lib, copy.deepcopy(res), bk_dir)            # o RES de volta aos dois escondidos
+        assert r['verificado'] and congs(st) == [0x20, 0x22], congs(st)
+        assert streams(lib)[st + '/Data'] == depois[st + '/Data'], 'o RES tinha que voltar ao byte de (1)'
+        print('  (2d) olho do pino: RES sem hideNum -> 0x30/0x32; 24LC256 com hideName -> 0x08 apagado; false = visivel')
 
         # ── (2b) quem JÁ tem PinFrac volta com as mesmas frações por pino ────
         com_frac = sorted(k.split('/')[0] for k in antes if k.endswith('/PinFrac'))

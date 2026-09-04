@@ -109,6 +109,7 @@ def _ciclo(pts, fechado):
 
 
 def _pino(p):
+    # só o que é desenho: hideNum/hideName (visibilidade do texto do pino) ficam de fora
     return OrderedDict([('num', str(p.get('num', ''))), ('name', str(p.get('name', ''))),
                         ('x', _i(p.get('x'))), ('y', _i(p.get('y'))), ('len', _i(p.get('len'))),
                         ('orient', _i(p.get('orient')) % 360), ('type', str(p.get('type', 'Passive')))])

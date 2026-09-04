@@ -10,13 +10,17 @@ dela vira o caminho "SchLib ausente" (espelho:true, altium:false) e o resto roda
 
 Prova: config; save (o espelho muda SÓ a linha do símbolo e a do generated; altium grava a
 SchLib com backup idêntico ao original; pino fora da grade de 10 mil — grade métrica — é
-preservado com 3 casas no espelho e na SchLib, via PinFrac; 404; 423 com a lib ocupada; 500
+preservado com 3 casas no espelho e na SchLib, via PinFrac; hideNum/hideName do pino vão
+para o espelho só quando true e chegam à SchLib; 404; 423 com a lib ocupada; 500
 com a SchLib faltando; o nome novo do rename-map cai para o antigo); lib add/rename/delete/409/404; extract 202+409 e
-o stream de verdade (--limite 1) até o `event: done`; mirror regera o espelho inteiro.
+o stream de verdade (--limite 1) até o `event: done`; mirror regera o espelho inteiro com o
+rename-map aplicado (`{rename:false}` desliga) e, com `{flags:true}`, só traz os
+hideNum/hideName de volta — o arquivo volta byte a byte ao que o leitor gerou.
 """
 import copy
 import io
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -206,6 +210,35 @@ try:
     assert r.status_code == 200 and not any('arredond' in a for a in r.get_json()['avisos']), r.get_json()
     print('save com pino fora da grade de 10 mil -> preservado com 3 casas nos dois lados ok')
 
+    # olho do pino: hideNum/hideName entram no espelho só quando true (false não é gravado —
+    # ausente é visível) e chegam à SchLib; qualquer outra coisa que não seja booleano é 400
+    olho = copy.deepcopy(outro['parts'])
+    olho[0]['pins'][0].update(hideNum=True, hideName=False)
+    if len(olho[0]['pins']) > 1:
+        olho[0]['pins'][-1].update(hideNum=False, hideName=True)
+    r = cli.post('/api/symbols/save', json={'name': OUTRO, 'parts': olho, 'altium': tem_lib})
+    assert r.status_code == 200, r.get_json()
+    pp = acha(H.load_var_file(espelho), OUTRO)['parts'][0]['pins']
+    assert list(pp[0].keys()) == ['num', 'name', 'x', 'y', 'len', 'orient', 'type', 'hideNum'], list(pp[0].keys())
+    assert pp[0]['hideNum'] is True and 'hideName' not in pp[0]
+    if len(pp) > 1:
+        assert pp[-1].get('hideName') is True and 'hideNum' not in pp[-1], pp[-1]
+    if tem_lib:
+        lidos = {q['num']: q for q in acha(L.le_schlib(lib_copia), OUTRO)['parts'][0]['pins']}
+        assert lidos[pp[0]['num']].get('hideNum') is True and 'hideName' not in lidos[pp[0]['num']], lidos[pp[0]['num']]
+        if len(pp) > 1:
+            assert lidos[pp[-1]['num']].get('hideName') is True and 'hideNum' not in lidos[pp[-1]['num']]
+    ruim = copy.deepcopy(outro['parts'])
+    ruim[0]['pins'][0]['hideNum'] = 'sim'
+    r = cli.post('/api/symbols/save', json={'name': OUTRO, 'parts': ruim})
+    assert r.status_code == 400 and 'hideNum' in r.get_json()['error'], r.get_json()
+    r = cli.post('/api/symbols/save', json={'name': OUTRO, 'parts': outro['parts'], 'altium': tem_lib})
+    assert r.status_code == 200
+    if tem_lib:
+        assert not P.compara(P.esperado({'name': OUTRO, 'parts': outro['parts']}),
+                             acha(L.le_schlib(lib_copia), OUTRO)['parts']), 'voltou ao original, flags inclusive'
+    print('save com hideNum/hideName -> espelho so com true, SchLib com os bits ok')
+
     # lib aberta no Altium -> 423, e o espelho JÁ foi gravado
     def ocupada(cfg, sym):
         raise P.LibOcupada('feche a biblioteca no Altium e tente de novo (teste)')
@@ -308,11 +341,34 @@ try:
         assert len(novo['symbols']) == j['symbols'] and novo['stats']['nofootprint'] == j['nofootprint']
         assert novo['source'] == lib_copia and le_bytes(espelho).count(b'\r\n') == j['symbols'] + 9
         assert os.path.isfile(os.path.join(tmp, 'Libs', 'libs-report.txt'))
+        # o rename-map foi aplicado: o espelho sai com o nome novo, não com o da SchLib
+        assert j['rename'] == {'renomeados': 1, 'fundidos': 0, 'footprints': 0}, j['rename']
+        assert acha(novo, RES_NOVO) and not any(s['name'] == RES for s in novo['symbols'])
         # e o save funciona sobre o espelho regerado
-        r = cli.post('/api/symbols/save', json={'name': RES, 'parts': res['parts'], 'altium': False})
-        assert r.status_code == 200
-        assert acha(H.load_var_file(espelho), RES)['parts'] == acha(novo, RES)['parts']
-        print('mirror ok: %d símbolos, %d sem footprint' % (j['symbols'], j['nofootprint']))
+        r = cli.post('/api/symbols/save', json={'name': RES_NOVO, 'parts': res['parts'], 'altium': False})
+        assert r.status_code == 200, r.get_json()
+        assert acha(H.load_var_file(espelho), RES_NOVO)['parts'] == acha(novo, RES_NOVO)['parts']
+        print('mirror ok: %d símbolos, %d sem footprint, %d nome(s) do rename-map' % (
+            j['symbols'], j['nofootprint'], j['rename']['renomeados']))
+
+        # {rename:false}: o espelho fica com os nomes que a SchLib real tem
+        j = cli.post('/api/symbols/mirror', json={'rename': False}).get_json()
+        assert j['rename'] == {'renomeados': 0, 'fundidos': 0, 'footprints': 0}, j
+        cru = H.load_var_file(espelho)
+        assert acha(cru, RES) and not any(s['name'] == RES_NOVO for s in cru['symbols'])
+
+        # {flags:true}: tirados os hideNum/hideName do espelho, o mirror só os traz de volta —
+        # o arquivo volta byte a byte ao que o leitor gerou, linha do generated inclusive
+        base = le_bytes(espelho)
+        sem = re.sub(rb',"hide(?:Num|Name)":true', b'', base)
+        assert sem != base, 'a lib de teste tinha que ter pino escondido'
+        with open(espelho, 'wb') as f:
+            f.write(sem)
+        j = cli.post('/api/symbols/mirror', json={'flags': True}).get_json()
+        assert j['ok'] and j['flags'] and j['symbols'] == len(cru['symbols']), j
+        assert j['mudaram'] and j['comFlag'] and not j['semPar'] and not j['pinosSemPar'], j
+        assert not j['avisos'] and le_bytes(espelho) == base, 'o passo dos flags mudou algo alem dos flags'
+        print('mirror flags ok: %d linhas de volta, %d com pino escondido' % (j['mudaram'], j['comFlag']))
     else:
         assert r.status_code == 404 and 'SchLib' in j['error'], j
         print('mirror sem SchLib -> 404 ok')

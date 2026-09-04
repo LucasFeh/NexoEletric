@@ -27,9 +27,13 @@ O que foi apurado na biblioteca real e manda no que está escrito aqui:
                        com os dois escondidos). 0x20 está na maioria mas NÃO em todos —
                        bits altos na lib: 0x38 ×1932, 0x30 ×831, 0x28 ×722, 0x20 ×271,
                        0x18 ×70 — e o que ele significa não foi apurado. (O comentário
-                       do schlib_bin.py, "0x20 = mostra nome", está errado.) O hub não
-                       edita isso: o pino novo herda os bits altos do pino de mesmo
-                       número, ou a moda do componente.
+                       do schlib_bin.py, "0x20 = mostra nome", está errado.) Os bits
+                       0x08/0x10 vêm do pino do hub: `hideName`/`hideNum` true apaga o
+                       bit, ausente (ou false) acende — é o que o schlib-v2 diz
+                       (ausente = visível) e o que o olho da ficha mostra na tela;
+                       herdar o bit do pino antigo faria o olho não valer no Altium.
+                       Os outros bits altos (0x20, 0x04…) continuam vindo do pino
+                       antigo de mesmo número, ou da moda do componente para pino novo.
   rótulos              o hub só sabe texto/posição/rotação/tamanho; Justification,
                        IsMirrored, cor e a fonte exata (negrito, rotação da fonte) vêm
                        do RECORD=4 antigo de mesmo texto e posição (ou só texto, se o
@@ -98,6 +102,7 @@ TIPOS = ['Input', 'IO', 'Output', 'OpenCollector', 'Passive', 'HiZ', 'OpenEmitte
 SOBRELINHA = chr(0x305)          # a API do Altium/schlib.js: negação sobre a letra
 BARRA = chr(0xAF)                # o mesmo sinal, no binário do pino
 CONG_ALTOS = 0xFC                # tudo que não é rotação no conglomerado do pino
+CONG_VIS = sch_leitor.CONG_NOME | sch_leitor.CONG_NUM   # 0x18: os bits que o olho do hub manda
 CONG_PADRAO = 0x38               # nome e número visíveis, como a maioria da lib
 BACKUPS = 30
 FONTE_NOVA = 'Times New Roman'
@@ -296,11 +301,23 @@ def _bytes_pino(s):
     return str(s if s is not None else '').replace(SOBRELINHA, BARRA).encode('cp1252', 'replace')
 
 
+def _visibilidade(pin):
+    """bits 0x08/0x10 do conglomerado pelo `hideName`/`hideNum` do pino: true apaga,
+    ausente ou false acende (ausente = visível, como o schlib-v2 e o canvas do hub)"""
+    v = 0
+    if not pin.get('hideName'):
+        v |= sch_leitor.CONG_NOME
+    if not pin.get('hideNum'):
+        v |= sch_leitor.CONG_NUM
+    return v
+
+
 def _pino_registro(pin, parte, antigo, altos):
     """pin schlib-v2 -> ((tipo, payload) binário, (xfrac, yfrac, lenfrac)); `antigo` é o
     dict do pino de mesmo número que estava no arquivo (o que o hub não sabe editar vem
-    dele). O binário leva o inteiro TRUNCADO (o `SB.pino` arredonda, por isso a conta é
-    refeita aqui com a `_unidade`) e a fração vai para o PinFrac."""
+    dele — menos a visibilidade de nome/número, que é do hub). O binário leva o inteiro
+    TRUNCADO (o `SB.pino` arredonda, por isso a conta é refeita aqui com a `_unidade`)
+    e a fração vai para o PinFrac."""
     x, y, comp = (float(pin.get(k, d) or 0) for k, d in (('x', 0), ('y', 0), ('len', 100)))
     p = SB.pino(pin.get('num', ''), pin.get('name', ''), x, y, comp,
                 _int(pin.get('orient')), pin.get('type', 'Passive'), parte)
@@ -311,9 +328,8 @@ def _pino_registro(pin, parte, antigo, altos):
     if antigo:
         for k in ('cabeca', 'simbolos', 'descricao', 'formal', 'cor', 'cauda'):
             p[k] = antigo[k]
-        p['conglomerado'] = rot | (antigo['conglomerado'] & CONG_ALTOS)
-    else:
-        p['conglomerado'] = rot | altos
+    herdado = (antigo['conglomerado'] if antigo else altos) & CONG_ALTOS & ~CONG_VIS
+    p['conglomerado'] = rot | herdado | _visibilidade(pin)
     return (SB.BINARIO, SB.escreve_pino(p)), (xf, yf, lf)
 
 
@@ -824,8 +840,9 @@ def _texto_lido(s):
 
 def esperado(sym):
     """o que o leitor tem que devolver depois do patch: coordenadas de pino nas 3 casas
-    da API (a fração vai e volta pelo PinFrac), nome de pino pelo cp1252, defaults do
-    leitor (size 10, rot 0, sa 0, ea 360) e a largura na tabela do Altium"""
+    da API (a fração vai e volta pelo PinFrac), nome de pino pelo cp1252, hideNum/hideName
+    só quando true (o leitor não emite o visível), defaults do leitor (size 10, rot 0,
+    sa 0, ea 360) e a largura na tabela do Altium"""
     parts = []
     for p in sym.get('parts') or []:
         pins = []
@@ -837,6 +854,11 @@ def esperado(sym):
             q['type'] = q.get('type') if q.get('type') in TIPOS else 'Passive'
             for k in ('num', 'name'):
                 q[k] = _bytes_pino(q.get(k, '')).decode('cp1252', 'replace').replace(BARRA, SOBRELINHA)
+            for k in ('hideNum', 'hideName'):
+                if q.get(k):
+                    q[k] = True
+                else:
+                    q.pop(k, None)
             pins.append(q)
         gs = []
         for g in p.get('graphics') or []:

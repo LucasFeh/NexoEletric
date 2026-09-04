@@ -5,7 +5,7 @@
     POST /api/symbols/save                   grava um símbolo no espelho (Libs/schlib.js) e na SchLib
     POST /api/symbols/lib                    add/rename/delete na Biblioteca de símbolos (Libs/symbols-lib.js)
     POST /api/symbols/extract                reserva uma extração; GET …/<runId>/stream roda e retransmite (SSE)
-    POST /api/symbols/mirror                 regera o espelho inteiro a partir da SchLib real
+    POST /api/symbols/mirror                 regera o espelho inteiro a partir da SchLib real; {flags:true} só leva os flags
 
 O trabalho pesado mora nos irmãos: `sch_leitor` lê, `schlib_patch` grava, `extrair` varre.
 Aqui só o HTTP e três decisões de arquivo:
@@ -23,7 +23,11 @@ Aqui só o HTTP e três decisões de arquivo:
                            78,74 mil) sobrevive ao save.
   nome antigo              o espelho saiu do RenameLibs e a SchLib real ainda tem os nomes de
                            antes. Quando o nome novo não está na SchLib, o save tenta o antigo
-                           pelo Libs/rename-map.js (symRename ao contrário).
+                           pelo Libs/rename-map.js (symRename ao contrário); e o mirror aplica
+                           o mapa ao regerar, senão desfaria os 152 nomes do espelho.
+  a resposta do save       devolve `parts` como foram ao disco (3 casas, chaves do vocabulário,
+                           hideNum/hideName só quando true): o hub guarda ISSO em memória, não o
+                           que mandou — senão o espelho na tela e o do arquivo divergem em silêncio.
 
 `registra(app, root)` é o único ponto de contato com o hubserver: guarda ROOT e registra o
 blueprint. ROOT é lido em tempo de chamada — os testes trocam.
@@ -196,6 +200,9 @@ def _valida_parts(parts):
                 return onde + ': pino %s com orient fora de 0/90/180/270' % q['num']
             if q.get('type') not in L.TIPOS:
                 return onde + ': pino %s com type desconhecido (%s)' % (q['num'], q.get('type'))
+            for k in ('hideNum', 'hideName'):
+                if q.get(k) is not None and not isinstance(q[k], bool):
+                    return onde + ': pino %s com %s que não é booleano' % (q['num'], k)
         for j, g in enumerate(p['graphics']):
             erro = _valida_grafico(g)
             if erro:
@@ -204,17 +211,23 @@ def _valida_parts(parts):
 
 
 def _partes(parts):
-    """só part/pins/graphics, numeradas, com x/y/len dos pinos em 3 casas — as que a API
-    do Altium (e o leitor) devolvem; a 4ª casa cairia na releitura de qualquer jeito, e
-    assim espelho e SchLib dizem exatamente o mesmo número."""
+    """só part/pins/graphics, numeradas, com o pino no vocabulário do espelho (chaves na
+    ordem do ExportLibs) e x/y/len em 3 casas — as que a API do Altium (e o leitor)
+    devolvem; a 4ª casa cairia na releitura de qualquer jeito, e assim espelho e SchLib
+    dizem exatamente o mesmo número. hideNum/hideName só saem quando true: ausente é
+    visível, e o espelho não ganha "false" que o leitor nunca escreveria."""
     fora = []
     for i, p in enumerate(parts):
         pins = []
         for q in p['pins']:
-            q = OrderedDict(q)
+            r = OrderedDict([('num', q['num']), ('name', q['name'])])
             for k in ('x', 'y', 'len'):
-                q[k] = L._n(round(float(q[k]), 3))
-            pins.append(q)
+                r[k] = L._n(round(float(q[k]), 3))
+            r['orient'], r['type'] = q['orient'], q['type']
+            for k in ('hideNum', 'hideName'):
+                if q.get(k):
+                    r[k] = True
+            pins.append(r)
         fora.append(OrderedDict([('part', int(p.get('part') or i + 1)), ('pins', pins),
                                  ('graphics', p['graphics'])]))
     return fora
@@ -325,7 +338,7 @@ def api_save():
     if sym is None:
         return _erro('símbolo "%s" não está no espelho Libs/schlib.js' % nome, 404)
 
-    resp = {'ok': True, 'espelho': True, 'altium': False, 'backup': None, 'avisos': []}
+    resp = {'ok': True, 'espelho': True, 'altium': False, 'backup': None, 'avisos': [], 'parts': sym['parts']}
     if not altium:
         return resp
     alvo = {'name': nome, 'parts': sym['parts']}
@@ -335,10 +348,10 @@ def api_save():
         with _lock_schlib:
             r = _patch_altium(_config(), alvo)
     except P.LibOcupada as e:
-        return _erro(str(e), 423, espelho=True, altium=False, backup=None, avisos=[])
+        return _erro(str(e), 423, espelho=True, altium=False, backup=None, avisos=[], parts=sym['parts'])
     except Exception as e:                                          # noqa: BLE001
         return _erro('espelho gravado, mas a SchLib não: %s' % e, 500,
-                     espelho=True, altium=False, backup=None, avisos=[])
+                     espelho=True, altium=False, backup=None, avisos=[], parts=sym['parts'])
     resp.update(altium=True, backup=r.get('backup'), avisos=r.get('avisos') or [],
                 storage=r.get('storage'), verificado=bool(r.get('verificado')),
                 nomeAltium=r.get('nomeAltium') or nome)
@@ -485,18 +498,45 @@ def api_extract_stream(run_id):
 
 @bp.route('/mirror', methods=['POST'])
 def api_mirror():
-    """regera Libs/schlib.js (e o libs-report.txt ao lado) a partir da SchLib real — o
-    --espelho do sch_leitor, síncrono (~2 s)"""
+    """`{}` regera Libs/schlib.js (e o libs-report.txt ao lado) a partir da SchLib real, com
+    o Libs/rename-map.js aplicado (`{rename:false}` desliga) — o --espelho do sch_leitor,
+    síncrono (~2 s). Regerar NÃO é só ganhar os flags: o leitor converte o que o ExportLibs
+    ignorava (RECORD 5/10/11) e lê o IsSolid real do polígono, então dezenas de linhas
+    mudam de geometria — a resposta diz quantos nomes o mapa trocou.
+
+    `{flags:true}` faz só o passo dos flags: leva hideNum/hideName da SchLib para o espelho
+    que já existe, linha a linha, e nada mais muda (nem nomes, nem geometria, nem o
+    `generated`)."""
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
     cfg = _config()
     schlib = cfg['schlib']
     if not os.path.isfile(schlib):
         return _erro('SchLib não encontrada: %s' % schlib, 404)
+    mapa = L.le_rename_map(os.path.join(ROOT, RENAME_MAP))
+    caminho = os.path.join(ROOT, ESPELHO)
     with _lock_espelho:
         try:
+            if data.get('flags'):
+                if not os.path.isfile(caminho):
+                    return _erro('Libs/schlib.js não existe neste workspace', 404)
+                with open(caminho, 'rb') as f:
+                    texto = f.read().decode('latin-1')      # ASCII: nenhum byte muda fora dos flags
+                with _lock_schlib:                          # não ler no meio de um patch
+                    dados = L.le_schlib(schlib, com_footprints=False)
+                novo, r = L.aplica_flags(texto, dados['symbols'], mapa)
+                if novo != texto:
+                    _grava_bytes(caminho, novo.encode('latin-1'))
+                return {'ok': True, 'flags': True, 'symbols': r['simbolos'], 'mudaram': r['mudaram'],
+                        'comFlag': r['com_flag'], 'semPar': r['sem_par'], 'pinosSemPar': r['pinos_sem_par'],
+                        'avisos': r['avisos'] + (dados.get('avisos') or []), 'source': schlib}
             nomes = L.nomes_pcblib(os.path.join(ROOT, 'Libs', 'pcblib.js'))
-            with _lock_schlib:                      # não ler no meio de um patch
+            with _lock_schlib:
                 dados = L.le_schlib(schlib, pcblib_names=nomes)
-            _grava_bytes(os.path.join(ROOT, ESPELHO), L.espelho(dados, nomes).encode('utf-8'))
+            ren = {'renomeados': 0, 'fundidos': 0, 'footprints': 0}
+            if data.get('rename', True):
+                ren = L.aplica_rename(dados, mapa)
+            _grava_bytes(caminho, L.espelho(dados, nomes).encode('utf-8'))
             _grava_bytes(os.path.join(ROOT, 'Libs', 'libs-report.txt'),
                          L.relatorio(dados, nomes).encode('utf-8'))
         except OSError as e:
@@ -506,4 +546,4 @@ def api_mirror():
     syms = dados['symbols']
     return {'ok': True, 'symbols': len(syms),
             'nofootprint': sum(1 for s in syms if L._sem_footprint(s)),
-            'avisos': dados.get('avisos') or [], 'source': schlib}
+            'avisos': dados.get('avisos') or [], 'source': schlib, 'rename': ren}

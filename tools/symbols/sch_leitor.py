@@ -28,6 +28,20 @@ O que foi apurado nos arquivos reais (e onde o contrato inicial estava errado):
   IntLib        cada stream é 1 byte 0x02 + zlib; inflado é uma .SchLib inteira.
   defaults      chave ausente = valor zero/falso: LineWidth 0 (Smallest, 4 mil), IsSolid
                 falso, StartAngle 0, Orientation 0, OwnerPartDisplayMode 0.
+  visibilidade  no conglomerado do pino (binário e `PinConglomerate` do SchDoc), bit 0x08
+                = mostra o NOME e bit 0x10 = mostra o DESIGNADOR (24LC256 = 0x38 com os
+                dois à vista; RES [ SMD ] = 0x20 com os dois escondidos). O schlib-v2 diz
+                isso com `hideName`/`hideNum`: true só quando escondido, ausente quando
+                visível — o ExportLibs nunca gravou isso, e o LEITOR só emite flag onde há
+                pino escondido. O Libs/schlib.js versionado (do ExportLibs) não os tem:
+                `aplica_flags` / `--flags` os leva para lá linha a linha, sem regerar,
+                porque regerar (`--espelho`) muda mais que isso — veja abaixo.
+  regerar       o espelho versionado saiu do RenameLibs (152 símbolos e 170 footprints com
+                nome novo, 1 fundido) e a SchLib real ainda tem os nomes antigos; `--espelho`
+                aplica o Libs/rename-map.js para não desfazer isso. Ainda assim ele NÃO sai
+                igual ao versionado: o leitor converte o que o ExportLibs ignorava (arco
+                elíptico, bezier, retângulo arredondado — 63 símbolos) e lê o IsSolid real do
+                polígono (8) — regerar é ganhar geometria, não só os flags.
 
 Nada aqui escreve no Altium: quem grava é o `schlib_patch.py`.
 """
@@ -57,6 +71,8 @@ LARGURA = {0: 4, 1: 10, 2: 20, 3: 30}
 # Electrical 0..7 -> nome; fora da faixa o ExportLibs devolvia Passive
 TIPOS = ['Input', 'IO', 'Output', 'OpenCollector', 'Passive', 'HiZ', 'OpenEmitter', 'Power']
 ORIENT = (0, 90, 180, 270)
+# conglomerado do pino: bit 0x08 = nome à vista, 0x10 = designador à vista
+CONG_NOME, CONG_NUM = 0x08, 0x10
 GEOMETRIA = {'2', '3', '4', '5', '6', '7', '8', '10', '11', '12', '13', '14'}
 BARRA = chr(0xAF)          # 0xAF no binario: negacao em cima da letra anterior
 SOBRELINHA = chr(0x305)    # como a API do Altium devolve o mesmo sinal
@@ -240,9 +256,22 @@ def primitiva(d, fontes, extras=True):
 
 # ─── pinos ────────────────────────────────────────────────────────────────────
 def _pino(num, nome, x, y, comp, cong, eletrico):
-    return OrderedDict([('num', num), ('name', nome), ('x', _n(x)), ('y', _n(y)), ('len', _n(comp)),
-                        ('orient', ORIENT[cong & 3]),
-                        ('type', TIPOS[eletrico] if 0 <= eletrico < len(TIPOS) else 'Passive')])
+    p = OrderedDict([('num', num), ('name', nome), ('x', _n(x)), ('y', _n(y)), ('len', _n(comp)),
+                     ('orient', ORIENT[cong & 3]),
+                     ('type', TIPOS[eletrico] if 0 <= eletrico < len(TIPOS) else 'Passive')])
+    p.update(flags_pino(cong))
+    return p
+
+
+def flags_pino(cong):
+    """conglomerado -> {'hideNum': True, 'hideName': True}, só o que está escondido
+    (ausente = visível; assim o pino visível sai igual ao do ExportLibs)"""
+    fora = OrderedDict()
+    if not cong & CONG_NUM:
+        fora['hideNum'] = True
+    if not cong & CONG_NOME:
+        fora['hideName'] = True
+    return fora
 
 
 def _texto_pino(b):
@@ -717,6 +746,135 @@ def nomes_pcblib(caminho=None):
     return nomes
 
 
+# ─── o rename-map do RenameLibs ───────────────────────────────────────────────
+def le_rename_map(caminho=None):
+    """Libs/rename-map.js -> {'sym': {antigo: novo}, 'fundidos': {antigo: alvo}, 'fp': {antigo: novo}}
+    (tudo vazio sem o arquivo). `fp` já resolve as fusões de footprint: o modelo do símbolo
+    passa a apontar para o footprint que ficou, como o RenameLibs fez no espelho."""
+    caminho = caminho or os.path.join(LIBS, 'rename-map.js')
+    vazio = {'sym': {}, 'fundidos': {}, 'fp': {}}
+    try:
+        with open(caminho, encoding='utf-8', errors='replace') as f:
+            raw = f.read()
+        obj = json.loads(raw[raw.index('{'):raw.rindex('}') + 1])
+    except (OSError, ValueError):
+        return vazio
+    if not isinstance(obj, dict):
+        return vazio
+    ren, fund = obj.get('fpRename') or {}, obj.get('mergeFp') or {}
+    fp = {k: fund.get(v, v) for k, v in ren.items()}
+    fp.update({k: ren.get(v, v) for k, v in fund.items() if k not in ren})
+    return {'sym': obj.get('symRename') or {}, 'fundidos': obj.get('mergeSym') or {}, 'fp': fp}
+
+
+def aplica_rename(dados, mapa):
+    """o rename-map sobre o que o le_schlib leu, no lugar: símbolo fundido sai, renomeado
+    muda de nome, footprint renomeado/fundido troca o `name` (o `incurrentlib` é refeito
+    pelo espelho()). -> {'renomeados': N, 'fundidos': N, 'footprints': N}"""
+    ren, fund, fp = mapa.get('sym') or {}, mapa.get('fundidos') or {}, mapa.get('fp') or {}
+    fora, r = [], {'renomeados': 0, 'fundidos': 0, 'footprints': 0}
+    for sym in dados['symbols']:
+        if sym['name'] in fund:
+            r['fundidos'] += 1
+            continue
+        if ren.get(sym['name']) and ren[sym['name']] != sym['name']:
+            sym['name'] = ren[sym['name']]
+            r['renomeados'] += 1
+        for f in sym.get('footprints') or []:
+            novo = fp.get(f.get('name', ''))
+            if novo and novo != f['name']:
+                f['name'] = novo
+                r['footprints'] += 1
+        fora.append(sym)
+    dados['symbols'] = fora
+    return r
+
+
+# ─── os flags no espelho que já existe ────────────────────────────────────────
+# um pino como o ExportLibs (e o simbolo_json) escreve: chaves nessa ordem, números sem
+# expoente, e no fim os flags que um save anterior possa ter deixado
+_RX_PINO = re.compile(
+    r'\{"num":"(?:[^"\\]|\\.)*","name":"(?:[^"\\]|\\.)*","x":-?\d+(?:\.\d+)?,"y":-?\d+(?:\.\d+)?,'
+    r'"len":-?\d+(?:\.\d+)?,"orient":\d+,"type":"[A-Za-z]+"(?:,"hideNum":true)?(?:,"hideName":true)?\}')
+_RX_FLAGS = re.compile(r',"hide(?:Num|Name)":true')
+TOL_PINO = 0.01
+
+
+def aplica_flags(texto, symbols, mapa=None):
+    """leva hideNum/hideName da SchLib para o texto de um Libs/schlib.js que ainda não os tem,
+    SEM regerar: em cada linha de símbolo, cada pino casado por (num, x, y, orient) com o da
+    SchLib ganha (ou perde) os flags e todo o resto da linha sai byte a byte igual — nem o
+    nome do RenameLibs, nem a geometria, nem o `generated` mudam. A linha resultante é a que
+    o /save produziria para esse símbolo. O nome do espelho pode ser o novo do rename-map;
+    `symbols` é o que `le_schlib` devolveu da SchLib real. -> (texto_novo, resumo)
+
+    Linha cujo símbolo não está na SchLib, ou em que a regex não acha exatamente os pinos
+    do JSON, fica como está e vai para o resumo; pino sem par (mudou de posição desde o
+    ExportLibs) também fica como está."""
+    mapa = mapa or {}
+    reverso = {novo: antigo for antigo, novo in (mapa.get('sym') or {}).items()}
+    por_ref = {s['name']: s for s in symbols}
+    resumo = {'simbolos': 0, 'mudaram': 0, 'com_flag': 0, 'sem_par': [], 'pinos_sem_par': [], 'avisos': []}
+    linhas = texto.splitlines(True)
+    for i, ln in enumerate(linhas):
+        virgula = ln.startswith(',')
+        corpo = ln[1:] if virgula else ln
+        if not corpo.startswith('{"name":'):
+            continue
+        resumo['simbolos'] += 1
+        fim = corpo[len(corpo.rstrip('\r\n')):]
+        corpo = corpo.rstrip('\r\n')
+        try:
+            velho = json.loads(corpo)
+        except ValueError:
+            resumo['avisos'].append('linha %d não parseia' % (i + 1))
+            continue
+        nome = velho.get('name', '')
+        real = por_ref.get(nome) or por_ref.get(reverso.get(nome, ''))
+        if real is None:
+            resumo['sem_par'].append(nome)
+            continue
+        # os pinos na ordem do texto (partes na ordem, pinos na ordem): a regex tem que
+        # achar exatamente esses, senão a linha não é tocada
+        pinos = [(_int(p.get('part'), k + 1), q) for k, p in enumerate(velho.get('parts') or [])
+                 for q in p.get('pins') or []]
+        achados = list(_RX_PINO.finditer(corpo))
+        if len(achados) != len(pinos):
+            resumo['avisos'].append('%s: %d pinos no JSON, %d no texto — linha mantida' % (nome, len(pinos), len(achados)))
+            continue
+        reais = {_int(p.get('part'), k + 1): list(p.get('pins') or []) for k, p in enumerate(real.get('parts') or [])}
+        usados = set()
+        saida, pos, mudou = [], 0, False
+        for m, (parte, q) in zip(achados, pinos):
+            par = None
+            for j, r in enumerate(reais.get(parte) or []):
+                if (parte, j) in usados or r.get('num') != q.get('num') or r.get('orient') != q.get('orient'):
+                    continue
+                if abs(float(r['x']) - float(q['x'])) <= TOL_PINO and abs(float(r['y']) - float(q['y'])) <= TOL_PINO:
+                    par = (j, r)
+                    break
+            trecho = m.group(0)
+            if par is None:
+                resumo['pinos_sem_par'].append('%s pino %s' % (nome, q.get('num')))
+            else:
+                usados.add((parte, par[0]))
+                novo = _RX_FLAGS.sub('', trecho)[:-1] + ''.join(
+                    ',"%s":true' % k for k in ('hideNum', 'hideName') if par[1].get(k)) + '}'
+                mudou = mudou or novo != trecho
+                trecho = novo
+            saida.append(corpo[pos:m.start()])
+            saida.append(trecho)
+            pos = m.end()
+        saida.append(corpo[pos:])
+        corpo = ''.join(saida)
+        if _RX_FLAGS.search(corpo):
+            resumo['com_flag'] += 1
+        if mudou:
+            resumo['mudaram'] += 1
+            linhas[i] = (',' if virgula else '') + corpo + fim
+    return ''.join(linhas), resumo
+
+
 def caminho_lib():
     """a SchLib real: o config.json da extração manda; sem ele, o caminho da casa"""
     cfg = os.path.join(BASE, 'config.json')
@@ -738,7 +896,12 @@ def _grava(caminho, texto):
 def main(argv):
     import argparse
     ap = argparse.ArgumentParser(description='lê símbolos do Altium sem abrir o Altium')
-    ap.add_argument('--espelho', action='store_true', help='regera Libs/schlib.js a partir da SchLib real')
+    ap.add_argument('--espelho', action='store_true',
+                    help='regera Libs/schlib.js a partir da SchLib real (com o Libs/rename-map.js aplicado)')
+    ap.add_argument('--flags', action='store_true',
+                    help='leva só hideNum/hideName da SchLib para o Libs/schlib.js atual, linha a linha, sem regerar')
+    ap.add_argument('--sem-rename', action='store_true', help='--espelho sem aplicar o rename-map')
+    ap.add_argument('--rename-map', help='caminho do rename-map.js (default: Libs/rename-map.js)')
     ap.add_argument('--lib', help='caminho da .SchLib (default: config.json ou a lib da casa)')
     ap.add_argument('--saida', help='onde escrever o espelho (default: Libs/schlib.js)')
     ap.add_argument('--pcblib', help='Libs/pcblib.js para o crosscheck dos footprints')
@@ -756,11 +919,37 @@ def main(argv):
         print(json.dumps(obj, ensure_ascii=False, indent=1))
         return 0
 
+    if a.flags:
+        lib = a.lib or caminho_lib()
+        saida = a.saida or os.path.join(LIBS, 'schlib.js')
+        with open(saida, 'rb') as f:
+            texto = f.read().decode('latin-1')          # o espelho é ASCII: nenhum byte muda fora dos flags
+        dados = le_schlib(lib, com_footprints=False)
+        novo, r = aplica_flags(texto, dados['symbols'], le_rename_map(a.rename_map))
+        if novo != texto:
+            tmp = saida + '.tmp'
+            with open(tmp, 'wb') as f:
+                f.write(novo.encode('latin-1'))
+            os.replace(tmp, saida)
+        for av in dados['avisos'] + r['avisos']:
+            print('aviso:', av)
+        print('%d simbolos no espelho, %d com pino escondido, %d linha(s) mudaram -> %s' % (
+            r['simbolos'], r['com_flag'], r['mudaram'], saida))
+        if r['sem_par']:
+            print('%d simbolo(s) do espelho sem par na SchLib: %s' % (len(r['sem_par']), ', '.join(r['sem_par'])))
+        if r['pinos_sem_par']:
+            print('%d pino(s) sem par (posicao mudou desde o ExportLibs): %s' % (
+                len(r['pinos_sem_par']), ', '.join(r['pinos_sem_par'][:10])))
+        return 0
+
     if a.espelho:
         lib = a.lib or caminho_lib()
         saida = a.saida or os.path.join(LIBS, 'schlib.js')
         nomes = nomes_pcblib(a.pcblib)
         dados = le_schlib(lib, pcblib_names=nomes)
+        ren = {'renomeados': 0, 'fundidos': 0, 'footprints': 0}
+        if not a.sem_rename:
+            ren = aplica_rename(dados, le_rename_map(a.rename_map))
         _grava(saida, espelho(dados, nomes))
         rel = os.path.join(os.path.dirname(os.path.abspath(saida)), 'libs-report.txt')
         _grava(rel, relatorio(dados, nomes))
@@ -768,6 +957,8 @@ def main(argv):
             print('aviso:', av)
         print('%d simbolos -> %s (%d sem footprint; relatorio em %s)' % (
             len(dados['symbols']), saida, sum(1 for s in dados['symbols'] if _sem_footprint(s)), rel))
+        print('rename-map: %d simbolo(s) renomeado(s), %d fundido(s) fora, %d footprint(s) renomeado(s)' % (
+            ren['renomeados'], ren['fundidos'], ren['footprints']))
         return 0
 
     ap.print_help()
