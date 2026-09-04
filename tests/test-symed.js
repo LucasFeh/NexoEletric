@@ -17,9 +17,12 @@ assert.strictEqual(P.snap(123, 100), 100);
 assert.strictEqual(P.snap(151, 100), 200);
 assert.strictEqual(P.snap(-26, 10), -30);
 assert.strictEqual(P.snap(7, 0), 7, 'passo 0 não divide por zero');
-assert.strictEqual(P.pinSnapOf(25), 100, 'pino nunca cai em 25: vai para 100');
+assert.strictEqual(P.pinSnapOf(25), 50, 'em 25 o pino vai para 50: o menor múltiplo de 10 que ainda é múltiplo do passo');
 assert.strictEqual(P.pinSnapOf(50), 50);
 assert.strictEqual(P.pinSnapOf(10), 10);
+assert.strictEqual(P.pinSnapOf(5, 'mil'), 10);
+assert.strictEqual(P.pinSnapOf(0, 'mil'), 100, 'sem passo vale 100');
+assert.strictEqual(P.pinSnapOf(12.5, 'mil'), 100, 'passo fracionário em mil não existe: vale 100');
 
 /* ── pino: ponta quente e aviso de grade ── */
 assert.deepStrictEqual(P.pinHot({ x: -100, y: 0, len: 100, orient: 180 }), { x: -200, y: 0 });
@@ -187,6 +190,133 @@ assert.deepStrictEqual(P.hitTest({ pins: [], graphics: [{ g: 'poly', pts: [[0, 0
   assert.strictEqual(h.hideNum, true); assert.ok(!('hideName' in h), 'false não sai — só true');
   const h2 = P.cleanPin({ num: 1, x: 0, y: 0, len: 100, orient: 0, hideName: 1 });
   assert.strictEqual(h2.hideName, true);
+  /* comprimento negativo invertia a ponta quente e ia como PinLength negativo para a SchLib */
+  assert.strictEqual(P.cleanPin({ num: '1', x: 0, y: 0, len: -100, orient: 0, type: 'Passive' }).len, 100, 'len negativo vira positivo');
+  assert.strictEqual(P.cleanPin({ num: '1', x: 0, y: 0, len: 0, orient: 0 }).len, 100, 'len zero volta ao padrão');
+  assert.strictEqual(P.cleanPin({ num: '1', x: 0, y: 0, len: -118.11, orient: 0 }).len, 118.11);
+}
+
+/* ── comprimento padrão do pino na unidade: em mil 100; em mm o múltiplo do snap de pino mais
+   perto de 2.54 mm — e a ponta quente do pino novo nasce dentro do snap ── */
+{
+  assert.strictEqual(P.pinLenDefault(100, 'mil'), 100);
+  assert.strictEqual(P.pinLenDefault(25, 'mil'), 100);
+  assert.strictEqual(P.pinLenDefault(P.MM, 'mm'), 118.11, 'snap 1 mm → 3 mm');
+  assert.strictEqual(P.pinLenDefault(0.5 * P.MM, 'mm'), 98.425, 'snap 0.5 mm → 2.5 mm');
+  assert.strictEqual(P.pinLenDefault(2.5 * P.MM, 'mm'), 98.425, 'snap 2.5 mm → 2.5 mm');
+  assert.strictEqual(P.pinLenDefault(0.1 * P.MM, 'mm'), 98.425, 'snap 0.1 mm → 2.5 mm');
+  for (const s of P.UNIT_SNAPS.mm) {
+    const step = s * P.MM, len = P.pinLenDefault(step, 'mm');
+    for (const orient of [0, 90, 180, 270]) {
+      const pin = { num: '9', x: P.snap(5 * P.MM, step), y: P.snap(-3 * P.MM, step), len, orient };
+      assert.deepStrictEqual(P.pinsOffGrid([pin], step), [], 'pino novo com snap ' + s + ' mm a ' + orient + '° nasce dentro do snap');
+    }
+  }
+}
+
+/* ── mover alinhado à grade: quem já estava na grade sai na grade (snap do resultado), quem
+   estava fora anda r3(dx); sem passo é o de sempre ── */
+{
+  assert.strictEqual(P.alinhado(0, P.MM, P.MM), 39.37);
+  assert.strictEqual(P.alinhado(1023.62, P.MM, P.MM), 1062.992, 'um valor ligeiramente fora (1023.62 vs 1023.622) volta à grade');
+  assert.strictEqual(P.alinhado(200, P.MM, P.MM), 239.37, 'fora da grade de 1 mm: anda r3(dx)');
+  assert.strictEqual(P.alinhado(200, P.MM, 0), 239.37, 'sem passo: r3(v + d)');
+  const m = P.moveItem({ num: '1', x: 39.37, y: 0, len: 118.11, orient: 0 }, P.MM, 0, P.MM);
+  assert.strictEqual(m.x, 78.74);
+  const r = P.moveItem({ g: 'rect', x1: 0, y1: 0, x2: 78.74, y2: 39.37 }, 25 * P.MM, -25 * P.MM, P.MM);
+  assert.deepStrictEqual([r.x1, r.y1, r.x2, r.y2], [984.252, -984.252, 1062.992, -944.882]);
+}
+
+/* ── 30 setas e 30 duplicações em mm sem deriva: x === r3(k·passo) e nenhum pino fora do snap
+   (somar r3 em r3 perdia 0.00008 mil por passo e na 26ª seta o aviso amarelo acendia) ── */
+{
+  const S = M.state, A = M.actions;
+  for (const s of [1, 0.1, 2.5]) {
+    const step = s * P.MM, len = P.pinLenDefault(step, 'mm');
+    S.draft = { name: 'D', parts: [{ part: 1, pins: [{ num: '1', name: '', x: 0, y: 0, len, orient: 0, type: 'Passive' }],
+                                               graphics: [{ g: 'rect', x1: 0, y1: 0, x2: P.snap(2 * P.MM, step), y2: P.snap(P.MM, step), solid: false }] }] };
+    S.part = 1; S.undo = []; S.redo = []; S.unit = 'mm'; S.snap = step;
+    S.selection = [{ kind: 'pin', idx: 0 }, { kind: 'g', idx: 0 }];
+    for (let k = 1; k <= 30; k++) {
+      A.nudge(1, 0);
+      const p = S.draft.parts[0];
+      assert.strictEqual(p.pins[0].x, Math.round(k * step * 1000) / 1000, 'seta ' + k + ' (snap ' + s + ' mm): pino em r3(k·passo)');
+      assert.strictEqual(p.graphics[0].x1, Math.round(k * step * 1000) / 1000, 'seta ' + k + ': retângulo em r3(k·passo)');
+      assert.deepStrictEqual(P.pinsOffGrid(p.pins, step), [], 'seta ' + k + ': ponta quente dentro do snap');
+    }
+    for (let k = 0; k < 30; k++) A.undo();
+    assert.strictEqual(S.draft.parts[0].pins[0].x, 0, 'desfez as 30 setas');
+    S.selection = [{ kind: 'pin', idx: 0 }, { kind: 'g', idx: 0 }];
+    for (let k = 1; k <= 30; k++) {
+      A.duplicarSelecao();
+      const p = S.draft.parts[0], pin = p.pins[p.pins.length - 1], g = p.graphics[p.graphics.length - 1];
+      assert.strictEqual(pin.x, Math.round(k * step * 1000) / 1000, 'duplicação ' + k + ' (snap ' + s + ' mm): x = r3(k·passo)');
+      assert.strictEqual(pin.y, -Math.round(k * step * 1000) / 1000, 'duplicação ' + k + ': y = -r3(k·passo)');
+      assert.strictEqual(g.x1, Math.round(k * step * 1000) / 1000);
+      assert.deepStrictEqual(P.pinsOffGrid(p.pins, step), [], 'duplicação ' + k + ': nenhum pino fora do snap');
+      assert.deepStrictEqual(S.selection, [{ kind: 'pin', idx: k }, { kind: 'g', idx: k }], 'a cópia vira a seleção');
+    }
+    assert.strictEqual(S.draft.parts[0].pins.length, 31);
+  }
+  S.draft = null; S.selection = []; S.undo = []; S.redo = []; S.dirty = false; S.unit = 'mm'; S.snap = P.MM;
+}
+
+/* ── Preencher: arco completo vira elipse sólida, polilinha vira polígono; desmarcar só apaga
+   o solid; quem não fecha área não tem o que preencher ── */
+{
+  const e = P.setFill({ g: 'arc', cx: 10, cy: 20, r: 50, sa: 0, ea: 360, w: 10, color: '#112233' }, true);
+  assert.deepStrictEqual(e, { g: 'ellipse', cx: 10, cy: 20, rx: 50, ry: 50, solid: true, w: 10, color: '#112233' }, 'círculo → elipse sólida, w e cor vão junto');
+  assert.strictEqual(P.setFill({ g: 'arc', cx: 0, cy: 0, r: 50, sa: 0, ea: 90, w: 10 }, true), null, 'arco parcial não vira nada');
+  assert.strictEqual(P.setFill({ g: 'arc', cx: 0, cy: 0, r: 50, sa: 0, ea: 360, w: 10 }, false), null, 'desmarcar um círculo vazio: nada a fazer');
+  const pg = P.setFill({ g: 'polyline', pts: [[0, 0], [10, 0], [0, 10]], w: 20 }, true);
+  assert.deepStrictEqual(pg, { g: 'poly', pts: [[0, 0], [10, 0], [0, 10]], solid: true, w: 20 }, 'polilinha → polígono fechado sólido');
+  const pv = P.setFill(pg, false);
+  assert.deepStrictEqual(pv, { g: 'poly', pts: [[0, 0], [10, 0], [0, 10]], solid: false, w: 20 }, 'desmarcar num polígono: continua polígono, vazado');
+  const el = P.setFill(e, false);
+  assert.strictEqual(el.g, 'ellipse'); assert.strictEqual(el.solid, false);
+  const rc = P.setFill({ g: 'rect', x1: 0, y1: 0, x2: 1, y2: 1, solid: false, fill: '#ffffb0' }, true);
+  assert.strictEqual(rc.solid, true); assert.strictEqual(rc.fill, '#ffffb0', 'a cor de área fica');
+  assert.strictEqual(P.setFill({ g: 'line', x1: 0, y1: 0, x2: 1, y2: 1, w: 10 }, true), null);
+  assert.strictEqual(P.setFill({ g: 'label', x: 0, y: 0, text: 'x' }, true), null);
+  assert.strictEqual(P.setFill({ num: '1', x: 0, y: 0, len: 100, orient: 0 }, true), null, 'pino não tem preenchimento');
+  assert.strictEqual(P.fillable({ g: 'rect' }).ok, true);
+  assert.strictEqual(P.fillable({ g: 'arc', sa: 0, ea: 360 }).ok, true);
+  assert.strictEqual(P.fillable({ g: 'arc', sa: 90, ea: 450 }).ok, true, 'volta inteira por qualquer ângulo');
+  assert.ok(!P.fillable({ g: 'arc', sa: 0, ea: 90 }).ok && /parcial/.test(P.fillable({ g: 'arc', sa: 0, ea: 90 }).why));
+  assert.ok(!P.fillable({ g: 'line' }).ok && !P.fillable({ g: 'label' }).ok && !P.fillable(null).ok && !P.fillable({ num: '1' }).ok);
+  /* o conversor não mexe no original */
+  const orig = { g: 'arc', cx: 0, cy: 0, r: 5, sa: 0, ea: 360, w: 10 };
+  P.setFill(orig, true); assert.strictEqual(orig.g, 'arc');
+}
+
+/* ── cores: color/fill saem só quando são "#rrggbb" (maiúscula vira minúscula); o resto cai ── */
+{
+  assert.ok(P.corValida('#ff0000') && P.corValida('#00008b') && !P.corValida('#FF0000') && !P.corValida('red') && !P.corValida('#fff') && !P.corValida('#ggg000') && !P.corValida(null) && !P.corValida(16711680));
+  const r = P.cleanGraphic({ g: 'rect', x1: 0, y1: 0, x2: 10, y2: 10, solid: true, color: '#FF0000', fill: '#ffffb0' });
+  assert.deepStrictEqual(r, { g: 'rect', x1: 0, y1: 0, x2: 10, y2: 10, solid: true, color: '#ff0000', fill: '#ffffb0' }, 'maiúscula vira minúscula');
+  const bad = P.cleanGraphic({ g: 'rect', x1: 0, y1: 0, x2: 10, y2: 10, solid: true, color: 'red', fill: '#fff' });
+  assert.ok(!('color' in bad) && !('fill' in bad), 'cor inválida cai: ' + JSON.stringify(bad));
+  const num = P.cleanGraphic({ g: 'line', x1: 0, y1: 0, x2: 1, y2: 1, w: 10, color: 16711680 });
+  assert.ok(!('color' in num), 'TColor inteiro não é cor do hub');
+  assert.strictEqual(P.cleanGraphic({ g: 'line', x1: 0, y1: 0, x2: 1, y2: 1, w: 10, color: '#0000ff', fill: '#ffffff' }).color, '#0000ff');
+  assert.ok(!('fill' in P.cleanGraphic({ g: 'line', x1: 0, y1: 0, x2: 1, y2: 1, w: 10, color: '#0000ff', fill: '#ffffff' })), 'linha não tem área: fill não sai');
+  assert.ok(!('fill' in P.cleanGraphic({ g: 'arc', cx: 0, cy: 0, r: 1, w: 10, fill: '#ffffff' })));
+  assert.ok(!('fill' in P.cleanGraphic({ g: 'polyline', pts: [], w: 10, fill: '#ffffff' })));
+  assert.strictEqual(P.cleanGraphic({ g: 'label', x: 0, y: 0, text: 'a', color: '#800000' }).color, '#800000');
+  assert.strictEqual(P.cleanGraphic({ g: 'ellipse', cx: 0, cy: 0, rx: 1, ry: 1, fill: '#ABCDEF' }).fill, '#abcdef');
+  assert.strictEqual(P.cleanGraphic({ g: 'poly', pts: [], solid: true, color: ' #123456 ' }).color, '#123456', 'espaço em volta é tolerado');
+  const out = P.serializeSymbol({ name: 'C', parts: [{ part: 1, pins: [], graphics: [
+    { g: 'rect', x1: 0, y1: 0, x2: 10, y2: 10, solid: true, color: '#ff0000', fill: '#00ff00' },
+    { g: 'rect', x1: 0, y1: 0, x2: 10, y2: 10, solid: true, color: 'vermelho', fill: '' },
+    { g: 'rect', x1: 0, y1: 0, x2: 10, y2: 10, solid: true } ] }] });
+  assert.deepStrictEqual(out.parts[0].graphics.map(g => [g.color, g.fill]), [['#ff0000', '#00ff00'], [undefined, undefined], [undefined, undefined]]);
+  assert.ok(!('color' in out.parts[0].graphics[2]) && !('fill' in out.parts[0].graphics[2]), 'sem cor = campo ausente, não undefined');
+  /* girar/espelhar/mover levam a cor junto */
+  const part = { pins: [], graphics: [{ g: 'rect', x1: 0, y1: 0, x2: 10, y2: 10, solid: true, color: '#ff0000', fill: '#00ff00' }] };
+  assert.strictEqual(P.rotateAll(part).graphics[0].fill, '#00ff00');
+  assert.strictEqual(P.mirrorAll(part).graphics[0].color, '#ff0000');
+  assert.strictEqual(P.moveItem(part.graphics[0], 1, 1).color, '#ff0000');
+  assert.strictEqual(typeof P.PIN_MARK, 'number'); assert.ok(P.PIN_MARK >= 14 && P.PIN_MARK <= 16, 'marca do pino com 14–16 mil de lado');
 }
 
 /* ── mm ↔ mil sem perda em 3 casas: mm de 3 casas vai a mil (3 casas) e volta igual; mil
@@ -226,7 +356,7 @@ assert.deepStrictEqual(P.hitTest({ pins: [], graphics: [{ g: 'poly', pts: [[0, 0
   assert.strictEqual(P.snap(7, 0.5 * P.MM), 0);
   assert.strictEqual(P.pinSnapOf(P.MM, 'mm'), P.MM, 'em mm o pino usa o snap escolhido');
   assert.strictEqual(P.pinSnapOf(0.1 * P.MM, 'mm'), 0.1 * P.MM);
-  assert.strictEqual(P.pinSnapOf(25, 'mil'), 100, 'em mil continua preferindo múltiplos de 10');
+  assert.strictEqual(P.pinSnapOf(25, 'mil'), 50, 'em mil continua preferindo múltiplos de 10 — o mmc com o passo');
   assert.strictEqual(P.pinSnapOf(50, 'mil'), 50);
   /* aviso relativo ao snap: os pinos do RES [SMD] (ponta quente em 150 e -250 mil) caem
      fora do snap de 1 mm, mas dentro do de 50 mil; um pino em 3 mm com 3 mm de comprimento está dentro */
@@ -460,4 +590,4 @@ assert.strictEqual(typeof M.confirmar, 'function');
 assert.strictEqual(typeof M.pedirTexto, 'function');
 assert.strictEqual(M.cam(), null, 'sem canvas não há câmera');
 
-console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum, itemsInBox, moveItems, duplicateItems, seleção × apagar/desfazer, mm↔mil, snap em mm, linha↔pino, insertLibSymbol)');
+console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum, itemsInBox, moveItems, duplicateItems, seleção × apagar/desfazer, mm↔mil, snap em mm, linha↔pino, insertLibSymbol, pinSnapOf mmc, len do pino, 30 setas/duplicações sem deriva, Preencher, cores)');

@@ -528,6 +528,9 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .symed-foot .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 /* caixa de ferramentas: botões-ícone de 30 px, cinco por linha, no topo do aside */
 .symed-toolbox { margin: 0 0 12px; }
+/* desfazer/refazer no canto direito da barra do canvas: 26 px para a barra não crescer */
+.symed-hist { gap: 4px; }
+.symed-hist .symed-ib { width: 26px; height: 26px; }
 .symed-tb { display: grid; grid-template-columns: repeat(5, 30px); gap: 4px; margin-top: 6px; }
 .symed-ib { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
   cursor: pointer; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text-3); }
@@ -555,6 +558,19 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .symed-tile .nm { font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .symed-tile .k { font-size: 9px; letter-spacing: .04em; text-transform: uppercase; color: var(--text-4); }
 .symed-empty { grid-column: 1 / -1; padding: 14px; text-align: center; font-size: 12px; color: var(--text-4); }
+/* a fileira de ações da ficha (virar · duplicar · excluir), em ícones como a caixa de ferramentas */
+.symed-acts { display: flex; gap: 4px; margin: 6px 0 2px; }
+/* cor de traço / de preenchimento: seletor nativo pequeno, apagado quando é a cor padrão da
+   casa, e o × que devolve o padrão (apaga o campo) */
+.symed-cor { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
+.symed-cor input[type="color"] { width: 30px; height: 24px; padding: 1px 2px; border: 1px solid var(--line);
+  border-radius: var(--r-sm); background: var(--surface); cursor: pointer; }
+.symed-cor input[type="color"].padrao { opacity: .55; }
+.symed-cor input[type="color"]:disabled { opacity: .3; cursor: not-allowed; }
+.symed-cor-x { width: 18px; height: 22px; padding: 0; border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--text-4); cursor: pointer; font-size: 14px; line-height: 1; }
+.symed-cor-x:hover { color: var(--text); border-color: var(--line); }
+.symed-cor-x:disabled { opacity: .3; cursor: not-allowed; }
 /* ficha no estilo do Properties do Altium: rótulo | campo | rótulo | campo | olho — dois pares
    por linha; campo de linha inteira vai da coluna 2 à 5; a última coluna é o olho de
    visibilidade (só nas linhas Número/Nome do pino, vazia nas outras) */
@@ -566,6 +582,8 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .symed-props .kicker { grid-column: 1 / -1; margin-top: 8px; }
 .symed-props .wide { grid-column: 2 / 5; }
 .symed-props .input { min-height: 26px; font-size: 12px; padding: 3px 5px; width: 100%; font-variant-numeric: tabular-nums; }
+/* o select nativo reserva a seta dentro da largura: menos padding, senão "padrão" vira "padrãc" */
+.symed-props select.input { padding: 2px 0 2px 4px; }
 .symed-props input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--hi); justify-self: start; margin: 0; }
 .symed-props .ro { color: var(--text-2); font-variant-numeric: tabular-nums; padding: 3px 0; }
 .symed-eye { width: 24px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
@@ -580,7 +598,6 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .symed-ghost canvas { display: block; width: 96px; height: 64px; }
 .symed-warn { font-size: 12px; color: var(--warn); margin: 6px 0 10px; line-height: 1.45; }
 .symed-note { font-size: 12px; color: var(--text-2); margin: 6px 0 10px; line-height: 1.45; }
-.symed-acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .symed-save { display: flex; align-items: center; gap: 10px; margin: 12px 0 6px; }
 .symed-save label { font-size: 12px; color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; }
 .symed-save input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--hi); }
