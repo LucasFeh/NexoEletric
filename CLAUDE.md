@@ -87,3 +87,16 @@ Rodar `-Pasta` sozinho, sem `-Branch`, reequipa um worktree que já existe.
 Commits pequenos e frequentes. Antes de pedir merge, traga o principal para o seu
 branch (`git rebase neoden-ordem-por-bico`) e resolva o conflito no seu worktree —
 nunca no do vizinho. Worktree que acabou: `git worktree remove ../APM-<nome>`.
+
+**`git add <arquivo>` leva o arquivo INTEIRO**, inclusive o que o dono dele deixou
+pendente ali. Editar o arquivo de outro agente e commitar parece inofensivo quando o
+`git status` estava limpo *quando você começou* — mas ele pode ter salvado no meio do
+caminho, e aí o seu commit publica trabalho pela metade dele. Foi assim que o
+`hub.html` chegou ao principal chamando um `hub-libsync.js` que só existia no worktree
+do `agente/page`: o `<script src>` viajou, o arquivo não, e o hub carregou com 404.
+
+Antes de commitar arquivo que não é seu: `git status` **na hora**, e confira o diff
+com `git diff --cached <arquivo>` — se aparecer coisa que você não escreveu, pare e
+peça ao dono. Se der para escolher só o que é seu, `git add -p` resolve. E depois de
+qualquer merge, um `grep -o 'src="[^"]*"' hub.html | sort -u` conferido contra os
+arquivos que existem custa dois segundos e pega esse tipo de metade.
