@@ -80,7 +80,7 @@ let editOn = false;
    marcado. O buildSchModel nao copia os itens, so os agrupa por folha, entao a identidade
    sobrevive ao reapply — mas nao ao undo, que reconstroi tudo do JSON (restoreItems limpa). */
 const sel = new Set();
-const SEL = '#2979ff';                      /* azul de selecao, no desenho e nas bordinhas */
+const SEL = '#2979ff';   /* azul da selecao — so no contorno tracejado, nunca no objeto */
 let schDirty = false, schDiskSnapshot = null;
 const undoStack = [JSON.stringify(schematic.items)], redoStack = [];
 function snap100(v){ return Math.round(v / 100) * 100; }
@@ -96,6 +96,9 @@ function reapply(){
   val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
   if (sheetIdx >= model.sheets.length) sheetIdx = 0;
   for (const it of Array.from(sel)) if (schematic.items.indexOf(it) < 0) sel.delete(it);
+  /* a net em foco tambem pode ter deixado de existir (apagou o fio, desfez): destaque
+     apontando para uma net que sumiu e cor sem dono na tela */
+  if (selNet && !nets.nets.some(n => n.name === selNet)) selNet = '';
   buildCompTable(); buildNetList(); buildValList(); updateMeta(); updateSelStatus(); renderProps();
   cam.draw();
 }
@@ -121,6 +124,7 @@ function restoreItems(json){
   schematic.items.length = 0;
   for (const it of JSON.parse(json)) schematic.items.push(it);
   sel.clear();
+  selNet = '';         /* os itens sao outros objetos: o foco antigo nao tem mais dono */
   setSchDirty(true);
   reapply();
 }
@@ -192,10 +196,50 @@ function describe(it){
 }
 function updateSelStatus(){
   const n = sel.size;
-  $('ssel').textContent = !n ? '' : n === 1 ? describe(sel.values().next().value) + ' selecionado' : n + ' selecionados';
+  const s = !n ? '' : n === 1 ? describe(sel.values().next().value) + ' selecionado' : n + ' selecionados';
+  /* o laranja precisa de dono escrito: sem isso a net acesa nao tem nome nem jeito obvio de
+     apagar, e a cor parece travada na folha */
+  $('ssel').textContent = selNet ? (s ? s + ' · net ' + selNet : 'net ' + selNet) : s;
 }
-function syncSel(){ buildCompTable(); updateSelStatus(); renderProps(); cam.draw(); }
-function selectOnly(items){ sel.clear(); for (const it of items) sel.add(it); syncSel(); }
+
+/* ------- selecao e foco de net, um escritor so -------
+   Sao dois estados que tem que andar juntos: 'sel' (o que esta marcado) e 'selNet' (a net
+   acesa em laranja). Enquanto cada caminho mexia num e esquecia o outro — Escape, tabela,
+   retangulo, troca de folha, undo, Ctrl+A — a folha ficava laranja sem nada selecionado e
+   sem gesto para desligar. Agora quem mexe na selecao diz, na MESMA chamada, que net fica
+   em foco; nao ha caminho que escreva 'selNet' por fora. */
+let netListDe = null;                    /* de que selNet a lista lateral foi desenhada */
+function aplicaSel(net){
+  /* net sem linha no painel nao tem interruptor: acender pintaria a folha sem jeito de
+     apagar (grupo de um pino so ganha nome automatico e nao entra em nets.nets) */
+  selNet = net && nets.nets.some(n => n.name === net) ? net : '';
+  buildCompTable(); updateSelStatus(); renderProps();
+  if (netListDe !== selNet) buildNetList();
+  cam.draw();
+}
+function limpaSel(){ sel.clear(); aplicaSel(''); }
+/* que net o alvo do clique representa; '' quando o alvo nao e de net (componente, texto) */
+function netDoAlvo(h){
+  if (!h) return '';
+  if (h.kind === 'pin')  return nets.pinNet[h.ref + '-' + h.num] || '';
+  if (h.kind === 'wire') return nets.wireNet[sheetIdx][h.wi] || '';
+  /* rotulo, power e junção sao objetos DE net: clicar neles acende a net, nao apaga */
+  if (h.kind === 'netlabel' || h.kind === 'power') return h.item.net || '';
+  if (h.kind === 'junction') return netEm(h.item.x, h.item.y);
+  return '';
+}
+/* a net que passa por um ponto da folha — o fio que encosta nele manda */
+function netEm(x, y){
+  const s = model.sheets[sheetIdx];
+  for (let wi = 0; wi < s.wires.length; wi++){
+    const pts = s.wires[wi].pts || [];
+    for (let i = 0; i < pts.length - 1; i++)
+      if (HubCore.distSeg(x, y, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1]) <= 1)
+        return nets.wireNet[sheetIdx][wi] || '';
+  }
+  return '';
+}
+function selectOnly(items){ sel.clear(); for (const it of items) sel.add(it); aplicaSel(''); }
 function rotateSel(){
   const comps = Array.from(sel).filter(it => it.t === 'comp');
   if (!comps.length) return;
@@ -212,6 +256,7 @@ function deleteSel(){
   if (!sel.size) return;
   for (const it of sel){ const i = schematic.items.indexOf(it); if (i >= 0) schematic.items.splice(i, 1); }
   sel.clear();
+  selNet = '';        /* os fios da net podem ter ido junto; o reapply do commit revalida */
   commit();
 }
 
@@ -371,7 +416,9 @@ function leftDown(e){
   lastDown = { item:it, wasSel };
   /* em leitura o clique so marca; e no modo edicao que o mesmo gesto vira arrasto */
   mouse = { mode: editOn ? 'move' : 'none', start:w, moved:false, base: editOn ? baseOf(sel) : null };
-  syncSel();
+  /* a net entra em foco AQUI, e nao no click: todo arrasto engole o click (swallowClick), e
+     a net anterior ficava acesa por cima de uma selecao que ja era outra */
+  aplicaSel(e.shiftKey && sel.size > 1 ? '' : netDoAlvo(h));
 }
 function leftMove(e){
   const d = mouse, w = worldOf(e);
@@ -405,7 +452,7 @@ function leftUp(){
     const inteiro = r.x2 >= r.x1;
     if (!d.shift) sel.clear();
     for (const it of sheetItems()){ const bb = itemBBox(it); if (inteiro ? bbInside(bb, n) : bbTouch(bb, n)) sel.add(it); }
-    syncSel();
+    aplicaSel('');     /* selecao de varios nao tem uma net so: apaga o foco anterior */
     return;
   }
   boxRect = null; cam.draw();
@@ -417,13 +464,12 @@ function leftClick(e){
   if (tool === 'wire'){ wireClick(w); return; }
   if (tool === 'power'){ placePower(w); return; }
   const h = hitTest(w.x, w.y);
-  if (!h){ if (!e.shiftKey){ sel.clear(); setNet(''); } syncSel(); return; }
-  /* Shift em cima de quem ja estava marcado tira da selecao */
-  if (e.shiftKey && lastDown && lastDown.item === h.item && lastDown.wasSel) sel.delete(h.item);
-  if (h.kind === 'pin')       setNet(nets.pinNet[h.ref + '-' + h.num] || '');
-  else if (h.kind === 'wire') setNet(nets.wireNet[sheetIdx][h.wi] || '');
-  else setNet('');
-  syncSel();
+  /* o alvo e a net ja foram resolvidos no mousedown; aqui so sobra o vazio e o Shift que TIRA */
+  if (!h){ if (!e.shiftKey) limpaSel(); return; }
+  if (e.shiftKey && lastDown && lastDown.item === h.item && lastDown.wasSel){
+    sel.delete(h.item);
+    aplicaSel('');            /* saiu da selecao: a net dele sai junto */
+  }
 }
 /* duplo clique com o fio na mao encerra o traçado (o Altium faz igual); no resto, nada:
    a ficha da direita e so de leitura, e quem edita propriedade e a IA no schematic.js */
@@ -799,6 +845,7 @@ function finalizar(){
   }
   cart = []; cartRender(); closeAdd();
   sel.clear(); for (const c of novos) sel.add(c);
+  selNet = '';        /* componentes novos nao pertencem a net nenhuma ainda */
   commit();
   const bb = unionBBox(novos);
   if (bb) cam.fit({ x1:bb.x1 - 600, y1:bb.y1 - 600, x2:bb.x2 + 600, y2:bb.y2 + 600 });
@@ -1036,34 +1083,41 @@ function drawWorld(ctx, cam){
   ctx.strokeStyle = D.SCH.border; ctx.lineWidth = 8;
   ctx.strokeRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
 
-  /* fios: selecionado azul, da net em foco laranja, o resto no azul-escuro da folha */
+  /* A COR E A IDENTIDADE ELETRICA, NAO A SELECAO.
+     Um fio sai laranja quando pertence a net em foco e azul-escuro quando nao — e so. Quem
+     esta selecionado ganha o contorno tracejado do drawSelection, por cima, como na vista
+     PCB e como no Altium. Enquanto a selecao RECOLORIA, clicar num fio deixava o fio azul e
+     os companheiros de net laranja: uma net com duas cores, que se lia como cor travada. */
   s.wires.forEach((w, wi) => {
-    const isSel = sel.has(w), hl = selNet && nets.wireNet[sheetIdx][wi] === selNet;
-    ctx.strokeStyle = isSel ? SEL : hl ? D.SCH.hl : D.SCH.wire;
-    ctx.lineWidth = (isSel || hl) ? 14 : 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const hl = selNet && nets.wireNet[sheetIdx][wi] === selNet;
+    ctx.strokeStyle = hl ? D.SCH.hl : D.SCH.wire;
+    ctx.lineWidth = hl ? 14 : 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
     (w.pts || []).forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
     ctx.stroke();
   });
-  /* junctions explicitas + automaticas */
-  for (const j of s.junctions) D.drawJunction(ctx, j.x, j.y, sel.has(j) ? SEL : undefined);
-  for (const j of nets.autoJunctions) if (j.sheet === sheetIdx) D.drawJunction(ctx, j.x, j.y);
+  /* junctions explicitas + automaticas: sao pontos DA net, entao acendem com ela */
+  for (const j of s.junctions)
+    D.drawJunction(ctx, j.x, j.y, selNet && netEm(j.x, j.y) === selNet ? D.SCH.hl : undefined);
+  for (const j of nets.autoJunctions) if (j.sheet === sheetIdx)
+    D.drawJunction(ctx, j.x, j.y, selNet && netEm(j.x, j.y) === selNet ? D.SCH.hl : undefined);
 
   /* componentes */
+  /* o simbolo tambem nao muda de cor por estar selecionado: o azul entrava por cima dos
+     PINOS junto com o corpo (o stroke do hub-draw vale para os dois), e pinos de outras nets
+     ficavam azuis sem motivo. Quem marca o componente e o contorno tracejado. */
   for (const c of s.comps) {
     const sym = HubCore.symbolOf(SLIB, c.sym);
     const part = HubCore.partOf(sym, c.part);
-    const isSel = sel.has(c);
     ctx.save();
     ctx.translate(c.x, c.y);
     ctx.rotate(((((c.rot||0)%360)+360)%360) * Math.PI/180);
     if (c.mirror) ctx.scale(-1, 1);
-    if (part) D.drawSymbolPart(ctx, part, { stroke: isSel ? SEL : undefined });
-    else { ctx.strokeStyle = isSel ? SEL : '#ff5252'; ctx.strokeRect(-100, -100, 200, 200); }
+    if (part) D.drawSymbolPart(ctx, part, {});
+    else { ctx.strokeStyle = '#ff5252'; ctx.strokeRect(-100, -100, 200, 200); }
     ctx.restore();
     const bbref = part ? D.symBBox(part) : { x1:-100, y1:-100, x2:100, y2:100 };
-    D.worldText(ctx, c.ref, c.x, c.y + Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) + 70, 60, 0,
-      isSel ? SEL : '#000000', 'center');
+    D.worldText(ctx, c.ref, c.x, c.y + Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) + 70, 60, 0, '#000000', 'center');
     if (c.comment)
       D.worldText(ctx, c.comment, c.x, c.y - Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) - 70, 55, 0, '#333366', 'center');
   }
@@ -1078,10 +1132,11 @@ function drawWorld(ctx, cam){
         }
     }
   }
-  /* rotulos e power */
-  for (const l of s.netlabels) D.drawNetLabel(ctx, l, sel.has(l) ? SEL : selNet === l.net ? D.SCH.hl : undefined);
-  for (const p of s.powers)    D.drawPowerPort(ctx, p, sel.has(p) ? SEL : selNet === p.net ? D.SCH.hl : undefined);
-  for (const t of s.texts)     D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, sel.has(t) ? SEL : D.SCH.text, 'left');
+  /* rotulos e power: acendem com a net deles. A guarda `selNet &&` importa — sem ela, com o
+     foco vazio um rotulo de net vazia casava com '' e acendia sozinho. */
+  for (const l of s.netlabels) D.drawNetLabel(ctx, l, selNet && selNet === l.net ? D.SCH.hl : undefined);
+  for (const p of s.powers)    D.drawPowerPort(ctx, p, selNet && selNet === p.net ? D.SCH.hl : undefined);
+  for (const t of s.texts)     D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, D.SCH.text, 'left');
 
   /* sinalizadores da folha ativa */
   for (const a of ANN){
@@ -1270,7 +1325,7 @@ function buildAnnPanel(){
       `${a.id} [${a.sheet}]: ${a.msg}` + (a.status === 'resolved' ? (a.reply ? ` ✓ ${a.reply}` : ' ✓') : '')));
     div.addEventListener('click', () => {
       const si = model.sheets.findIndex(sh => sh.name === a.sheet);
-      if (si >= 0 && si !== sheetIdx){ sheetIdx = si; $('sheetsel').value = si; }
+      if (si >= 0 && si !== sheetIdx){ sheetIdx = si; $('sheetsel').value = si; limpaSel(); }
       cam.fit({ x1: a.x - 900, y1: a.y - 900, x2: a.x + 900, y2: a.y + 900 });
     });
     list.appendChild(div);
@@ -1298,7 +1353,9 @@ window.addEventListener('keydown', e => {
       mouse = null; boxRect = null; swallowClick = true; cam.draw(); return;
     }
     if (annTool){ setAnnTool(false); return; }
-    if (sel.size){ sel.clear(); syncSel(); }
+    /* Escape e o botao de panico: larga a selecao E o foco de net. Enquanto largava so a
+       selecao, a folha ficava laranja sem nada marcado — a "cor travada". */
+    if (sel.size || selNet) limpaSel();
     return;
   }
   const tag = e.target.tagName;
@@ -1336,12 +1393,13 @@ window.__hubSelectComp = function(ref){
 window.addEventListener('beforeunload', e => { if (annDirty || schDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- paineis ---------- */
-function setNet(n){ selNet = n; buildNetList(); cam.draw(); }
 function focusComp(c){
   const si = model.sheets.findIndex(sh => sh.name === c.sheet);
   if (si >= 0 && si !== sheetIdx){ sheetIdx = si; $('sheetsel').value = si; }
   sel.clear(); sel.add(c);
-  buildCompTable(); updateSelStatus(); renderProps();
+  /* a porta de entrada do hub (__hubSelectComp) tambem passa por aqui: nao pode deixar a net
+     anterior acesa por baixo do componente novo */
+  aplicaSel('');
   cam.fit({ x1:c.x-800, y1:c.y-800, x2:c.x+800, y2:c.y+800 });
 }
 function buildCompTable(){
@@ -1370,9 +1428,11 @@ function buildNetList(){
     const div = document.createElement('div');
     div.className = 'netitem' + (n.name === selNet ? ' sel' : '');
     div.textContent = `${n.name}${n.auto ? ' (auto)' : ''} — ${n.pins.join(', ')}`;
-    div.addEventListener('click', () => setNet(n.name === selNet ? '' : n.name));
+    /* escolher a net pela lista tambem larga a selecao: um foco de cada vez na tela */
+    div.addEventListener('click', () => { sel.clear(); aplicaSel(n.name === selNet ? '' : n.name); });
     list.appendChild(div);
   }
+  netListDe = selNet;
 }
 function buildValList(){
   const list = $('vallist');
@@ -1396,7 +1456,8 @@ function buildSheetSel(){
     o.value = i; o.textContent = `folha: ${sh.name} (${sh.size})`;
     s.appendChild(o);
   });
-  s.addEventListener('change', () => { sheetIdx = +s.value; sel.clear(); syncSel(); cam.fit(sheetBBox()); });
+  /* a net acesa e da folha antiga: levar o laranja junto pintaria fios de outra folha */
+  s.addEventListener('change', () => { sheetIdx = +s.value; limpaSel(); cam.fit(sheetBBox()); });
 }
 /* sub-abas do painel: a ultima aberta fica lembrada nesta maquina */
 function showPane(id){
