@@ -423,24 +423,34 @@ function leftDown(e){
      a net anterior ficava acesa por cima de uma selecao que ja era outra */
   aplicaSel(e.shiftKey && sel.size > 1 ? '' : netDoAlvo(h));
 }
+/* um desenho por quadro: cada mousemove pedia um cam.draw() inteiro e, em folha grande, o
+   arrasto engasgava atras da fila de eventos */
+let quadro = 0;
+function desenhaNoQuadro(){ if (!quadro) quadro = requestAnimationFrame(() => { quadro = 0; cam.draw(); }); }
 function leftMove(e){
   const d = mouse, w = worldOf(e);
   const dx = w.x - d.start.x, dy = w.y - d.start.y;
   if (!d.moved && Math.hypot(dx, dy) * cam.cam.scale < 3) return;   /* 3 px de folga: clique nao vira arrasto */
   d.moved = true;
-  if (d.mode === 'move'){ applyMove(d.base, snap100(dx), snap100(dy)); cam.draw(); }
-  else if (d.mode === 'box'){ boxRect = { x1:d.start.x, y1:d.start.y, x2:w.x, y2:w.y }; cam.draw(); }
+  /* durante o arrasto o item acompanha o mouse; a grade so entra ao soltar (leftUp). Com o
+     snap a cada movimento ele so saia do lugar depois de 50 mil e pulava de 100 em 100 — em
+     zoom alto parecia travado */
+  if (d.mode === 'move'){ applyMove(d.base, dx, dy); desenhaNoQuadro(); }
+  else if (d.mode === 'box'){ boxRect = { x1:d.start.x, y1:d.start.y, x2:w.x, y2:w.y }; desenhaNoQuadro(); }
   else if (!editOn && !d.avisou){
     /* arrastar travado nao pode ser silencio: e a diferenca entre "nao funciona" e "esta em leitura" */
     d.avisou = true;
     HubDialog.toast('Só leitura — tecle E ou clique no lápis (Configurações) para mover.', 'warn');
   }
 }
-function leftUp(){
+function leftUp(e){
   const d = mouse; if (!d) return;
   mouse = null;
   swallowClick = d.moved;
   if (d.mode === 'move' && d.moved){
+    /* ao soltar, o deslocamento pousa na grade de 100 mil a partir da posicao original */
+    const w = e ? worldOf(e) : d.start;
+    applyMove(d.base, snap100(w.x - d.start.x), snap100(w.y - d.start.y));
     /* arrasto que voltou para a mesma grade nao e mudanca — nao entra no undo */
     const mudou = Array.from(d.base).some(([it, b]) => it.t === 'wire'
       ? (it.pts[0] && (it.pts[0][0] !== b[0][0] || it.pts[0][1] !== b[0][1]))
@@ -1302,12 +1312,12 @@ function hitTest(x, y){
       if (HubCore.distSeg(x, y, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1]) <= Math.max(tol, 20))
         return { kind:'wire', wi, item:s.wires[wi] };
   }
+  /* pela caixa do corpo como ele esta na folha (girado/espelhado), e nao por um circulo em
+     volta da ancora: o RES da casa vai de -150 a +50 mil, e o circulo errava o corpo de um
+     lado e acertava o vazio do outro */
   for (const c of s.comps) {
-    const sym = HubCore.symbolOf(SLIB, c.sym);
-    const part = HubCore.partOf(sym, c.part);
-    const bb = part ? D.symBBox(part) : { x1:-100, y1:-100, x2:100, y2:100 };
-    const r = Math.max(bb.x2 - bb.x1, bb.y2 - bb.y1) / 2 + 50;
-    if (Math.hypot(x - c.x, y - c.y) <= r) return { kind:'comp', ref:c.ref, item:c };
+    const bb = compBBox(c), f = Math.max(tol, 20);
+    if (x >= bb.x1 - f && x <= bb.x2 + f && y >= bb.y1 - f && y <= bb.y2 + f) return { kind:'comp', ref:c.ref, item:c };
   }
   return null;
 }
