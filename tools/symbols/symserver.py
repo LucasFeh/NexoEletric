@@ -28,6 +28,13 @@ Aqui só o HTTP e três decisões de arquivo:
   a resposta do save       devolve `parts` como foram ao disco (3 casas, chaves do vocabulário,
                            hideNum/hideName só quando true): o hub guarda ISSO em memória, não o
                            que mandou — senão o espelho na tela e o do arquivo divergem em silêncio.
+                           Vem também no 423/500 (o espelho JÁ foi gravado com elas).
+  cores                    `color`/`fill` dos gráficos entram só como '#rrggbb' minúsculo (o que o
+                           leitor emite e o hub serializa); outra coisa é 400 antes de gravar. O
+                           gráfico vai ao espelho com os valores que vieram (`solid` inclusive) nas
+                           chaves do vocabulário, na ordem do leitor — a linha sai igual venha de
+                           quem vier (o test_client do Flask manda as chaves em ordem alfabética);
+                           o schlib_patch leva a cor para a SchLib; sem cor, a paleta do componente.
 
 `registra(app, root)` é o único ponto de contato com o hubserver: guarda ROOT e registra o
 blueprint. ROOT é lido em tempo de chamada — os testes trocam.
@@ -112,11 +119,18 @@ def _num(v):
 CAMPOS = {'line': ('x1', 'y1', 'x2', 'y2'), 'rect': ('x1', 'y1', 'x2', 'y2'), 'arc': ('cx', 'cy', 'r'),
           'ellipse': ('cx', 'cy', 'rx', 'ry'), 'poly': (), 'polyline': (), 'label': ('x', 'y')}
 OPCIONAIS = ('w', 'sa', 'ea', 'size', 'rot')
+CORES = ('color', 'fill')
+# a ordem das chaves de cada forma no espelho: a do sch_leitor (e do serializeSymbol do hub)
+ORDEM = {'line': ('x1', 'y1', 'x2', 'y2', 'w'), 'rect': ('x1', 'y1', 'x2', 'y2', 'w', 'solid'),
+         'arc': ('cx', 'cy', 'r', 'sa', 'ea', 'w'), 'ellipse': ('cx', 'cy', 'rx', 'ry', 'w', 'solid'),
+         'poly': ('pts', 'w', 'solid'), 'polyline': ('pts', 'w'), 'label': ('x', 'y', 'text', 'rot', 'size')}
 
 
 def _valida_grafico(g):
-    """mensagem de erro ou None: forma conhecida, coordenadas numéricas, pts como pares.
-    Polígono aceita 2 pontos porque o espelho real tem um assim — recusar travaria o save."""
+    """mensagem de erro ou None: forma conhecida, coordenadas numéricas, pts como pares,
+    `solid` booleano, `color`/`fill` em '#rrggbb' minúsculo (o formato do schlib-v2 — a
+    mesma regex do serializeSymbol do hub). Polígono aceita 2 pontos porque o espelho real
+    tem um assim — recusar travaria o save."""
     if not isinstance(g, dict) or g.get('g') not in FORMAS:
         return 'gráfico desconhecido (%s)' % (g.get('g') if isinstance(g, dict) else g)
     k = g['g']
@@ -126,6 +140,11 @@ def _valida_grafico(g):
     for c in OPCIONAIS:
         if g.get(c) is not None and not _num(g[c]):
             return '%s com %s que não é número' % (k, c)
+    if g.get('solid') is not None and not isinstance(g['solid'], bool):
+        return '%s com solid que não é booleano' % k
+    for c in CORES:
+        if g.get(c) is not None and not (isinstance(g[c], str) and L.RX_COR.match(g[c])):
+            return '%s com %s que não é cor #rrggbb (%r)' % (k, c, g[c])
     if k in ('poly', 'polyline'):
         pts = g.get('pts')
         if not isinstance(pts, list) or len(pts) < 2:
@@ -210,12 +229,23 @@ def _valida_parts(parts):
     return None
 
 
+def _grafico(g):
+    """o gráfico nas chaves do vocabulário, na ordem do leitor (color/fill no fim); chave
+    estranha e null caem, valores ficam como vieram"""
+    r = OrderedDict([('g', g['g'])])
+    for k in ORDEM[g['g']] + CORES:
+        if g.get(k) is not None:
+            r[k] = g[k]
+    return r
+
+
 def _partes(parts):
     """só part/pins/graphics, numeradas, com o pino no vocabulário do espelho (chaves na
     ordem do ExportLibs) e x/y/len em 3 casas — as que a API do Altium (e o leitor)
     devolvem; a 4ª casa cairia na releitura de qualquer jeito, e assim espelho e SchLib
     dizem exatamente o mesmo número. hideNum/hideName só saem quando true: ausente é
-    visível, e o espelho não ganha "false" que o leitor nunca escreveria."""
+    visível, e o espelho não ganha "false" que o leitor nunca escreveria. Os gráficos
+    passam pelo `_grafico` (ordem das chaves), sem mexer em valor."""
     fora = []
     for i, p in enumerate(parts):
         pins = []
@@ -229,7 +259,7 @@ def _partes(parts):
                     r[k] = True
             pins.append(r)
         fora.append(OrderedDict([('part', int(p.get('part') or i + 1)), ('pins', pins),
-                                 ('graphics', p['graphics'])]))
+                                 ('graphics', [_grafico(g) for g in p['graphics']])]))
     return fora
 
 

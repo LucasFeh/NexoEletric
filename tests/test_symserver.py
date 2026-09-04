@@ -11,8 +11,11 @@ dela vira o caminho "SchLib ausente" (espelho:true, altium:false) e o resto roda
 Prova: config; save (o espelho muda SÓ a linha do símbolo e a do generated; altium grava a
 SchLib com backup idêntico ao original; pino fora da grade de 10 mil — grade métrica — é
 preservado com 3 casas no espelho e na SchLib, via PinFrac; hideNum/hideName do pino vão
-para o espelho só quando true e chegam à SchLib; 404; 423 com a lib ocupada; 500
-com a SchLib faltando; o nome novo do rename-map cai para o antigo); lib add/rename/delete/409/404; extract 202+409 e
+para o espelho só quando true e chegam à SchLib; a resposta traz `parts` exatamente como
+foram ao disco; `color`/`fill` só em #rrggbb minúsculo e `solid` só booleano — senão 400 —
+e a cor válida vai ao espelho e à SchLib (Color/AreaColor) e volta na releitura; 404; 423
+com a lib ocupada; 500 com a SchLib faltando; o nome novo do rename-map cai para o antigo);
+lib add/rename/delete/409/404 (a cor fica no símbolo guardado, fora do fingerprint); extract 202+409 e
 o stream de verdade (--limite 1) até o `event: done`; mirror regera o espelho inteiro com o
 rename-map aplicado (`{rename:false}` desliga) e, com `{flags:true}`, só traz os
 hideNum/hideName de volta — o arquivo volta byte a byte ao que o leitor gerou.
@@ -140,6 +143,13 @@ try:
         '{"name":%s,"parts":[{"pins":[{"num":"1","name":"1","x":NaN,"y":0,"len":100,"orient":0,"type":"Passive"}],'
         '"graphics":[]}]}' % S.json.dumps(RES)))
     assert r.status_code == 400, 'NaN não é coordenada'
+    # cor só em '#rrggbb' minúsculo (a regex do serializeSymbol do hub); solid só booleano
+    for campo, valor in (('color', 'red'), ('color', '#FF0000'), ('fill', '#12345'), ('fill', 255), ('color', '#ggeeff'),
+                         ('solid', 'sim'), ('solid', 1)):
+        ruim = copy.deepcopy(res['parts'])
+        ruim[0]['graphics'].append({'g': 'rect', 'x1': 0, 'y1': 0, 'x2': 1, 'y2': 1, 'solid': True, campo: valor})
+        r = cli.post('/api/symbols/save', json={'name': RES, 'parts': ruim})
+        assert r.status_code == 400 and campo in r.get_json()['error'], (campo, valor, r.get_json())
     assert le_bytes(espelho) == antes, 'pedido recusado não pode mexer no espelho'
 
     # ── save: o espelho muda SÓ a linha do símbolo (e o generated) ──────────
@@ -150,6 +160,7 @@ try:
     lib_antes = le_bytes(lib_copia) if tem_lib else None
     r = cli.post('/api/symbols/save', json={'name': RES, 'parts': mod, 'altium': True})
     j = r.get_json()
+    assert j['parts'] == acha(H.load_var_file(espelho), RES)['parts'], 'a resposta traz as parts como foram ao disco'
     linhas_a, linhas_d = antes.split(b'\r\n'), le_bytes(espelho).split(b'\r\n')
     # 6 de cabeçalho + 3 símbolos + 3 de rodapé, e o vazio depois do CRLF final
     assert len(linhas_a) == len(linhas_d) == 13, len(linhas_d)
@@ -195,6 +206,9 @@ try:
     assert r.status_code == 200 and not any('arredond' in a for a in j['avisos']), j
     p0 = acha(H.load_var_file(espelho), OUTRO)['parts'][0]['pins'][0]
     assert (p0['x'], p0['y'], p0['len']) == (105.5, -78.74, 79), p0
+    # e a resposta traz o pino NORMALIZADO (3 casas), não o que foi mandado (79.0004)
+    q0 = j['parts'][0]['pins'][0]
+    assert (q0['x'], q0['y'], q0['len']) == (105.5, -78.74, 79) and j['parts'] == acha(H.load_var_file(espelho), OUTRO)['parts'], q0
     if tem_lib:
         q0 = next(q for q in acha(L.le_schlib(lib_copia), OUTRO)['parts'][0]['pins'] if q['num'] == p0['num'])
         assert (q0['x'], q0['y'], q0['len']) == (105.5, -78.74, 79), 'espelho e SchLib dizem o mesmo'
@@ -228,6 +242,8 @@ try:
         assert lidos[pp[0]['num']].get('hideNum') is True and 'hideName' not in lidos[pp[0]['num']], lidos[pp[0]['num']]
         if len(pp) > 1:
             assert lidos[pp[-1]['num']].get('hideName') is True and 'hideNum' not in lidos[pp[-1]['num']]
+    assert 'hideName' not in r.get_json()['parts'][0]['pins'][0] and r.get_json()['parts'][0]['pins'][0]['hideNum'] is True, \
+        'a resposta traz os flags como o espelho: só o true'
     ruim = copy.deepcopy(outro['parts'])
     ruim[0]['pins'][0]['hideNum'] = 'sim'
     r = cli.post('/api/symbols/save', json={'name': OUTRO, 'parts': ruim})
@@ -238,6 +254,29 @@ try:
         assert not P.compara(P.esperado({'name': OUTRO, 'parts': outro['parts']}),
                              acha(L.le_schlib(lib_copia), OUTRO)['parts']), 'voltou ao original, flags inclusive'
     print('save com hideNum/hideName -> espelho so com true, SchLib com os bits ok')
+
+    # cores: color/fill válidos vão ao espelho como vieram (depois do solid), chegam à SchLib
+    # como Color/AreaColor e voltam na releitura; sem eles a SchLib fica com a paleta
+    cor = copy.deepcopy(res['parts'])
+    rc = next(g for g in cor[0]['graphics'] if g['g'] == 'rect')
+    rc.pop('color', None); rc.pop('fill', None)
+    rc.update(solid=True, color='#ff0000', fill='#00ff00')
+    r = cli.post('/api/symbols/save', json={'name': RES, 'parts': cor, 'altium': tem_lib})
+    j = r.get_json()
+    assert r.status_code == 200, j
+    linha = next(ln for ln in le_bytes(espelho).split(b'\r\n') if ln.lstrip(b',').startswith(pref))
+    assert b'"solid":true,"color":"#ff0000","fill":"#00ff00"}' in linha, linha[:300]
+    assert j['parts'] == acha(H.load_var_file(espelho), RES)['parts'] and \
+        next(g for g in j['parts'][0]['graphics'] if g['g'] == 'rect')['fill'] == '#00ff00'
+    if tem_lib:
+        rr = next(g for g in acha(L.le_schlib(lib_copia), RES)['parts'][0]['graphics'] if g['g'] == 'rect')
+        assert (rr['color'], rr['fill'], rr['solid']) == ('#ff0000', '#00ff00', True), rr
+    r = cli.post('/api/symbols/save', json={'name': RES, 'parts': res['parts'], 'altium': tem_lib})
+    assert r.status_code == 200, r.get_json()
+    if tem_lib:
+        assert not P.compara(P.esperado({'name': RES, 'parts': res['parts']}),
+                             acha(L.le_schlib(lib_copia), RES)['parts']), 'voltou ao original, cores inclusive'
+    print('save com color/fill -> espelho, SchLib (Color/AreaColor) e releitura ok')
 
     # lib aberta no Altium -> 423, e o espelho JÁ foi gravado
     def ocupada(cfg, sym):
@@ -270,6 +309,8 @@ try:
     assert cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': {'name': '', 'pins': [], 'graphics': []}}).status_code == 400
     assert cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': dict(resistor, kind='x')}).status_code == 400
     assert not os.path.exists(symlib), 'pedido recusado não cria arquivo'
+    assert cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': dict(
+        resistor, graphics=[dict(resistor['graphics'][0], color='red')])}).status_code == 400, 'cor inválida no add'
     j = cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': resistor}).get_json()
     s1 = j['symbol']
     assert j['ok'] and s1['id'] == 's0001' and s1['name'] == 'Resistor' and s1['kind'] == 'generico'
@@ -283,17 +324,23 @@ try:
     assert [k for k in E.CHAVES if ('"%s":' % k) in linha] == list(E.CHAVES) and \
         all(linha.index('"%s":' % a) < linha.index('"%s":' % b) for a, b in zip(E.CHAVES, E.CHAVES[1:])), \
         'no arquivo as chaves saem na ordem do symlib-v1'
-    # mesma geometria, outro nome: 409 devolvendo quem já está lá
+    # mesma geometria, outro nome: 409 devolvendo quem já está lá — com outra cor também
     r = cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': dict(resistor, name='Res de novo')})
     assert r.status_code == 409 and r.get_json()['symbol']['id'] == 's0001', r.get_json()
+    r = cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': dict(
+        resistor, name='Res azul', graphics=[dict(resistor['graphics'][0], color='#0000ff', fill='#ffffb0')])})
+    assert r.status_code == 409 and r.get_json()['symbol']['id'] == 's0001', 'a cor não é identidade'
     # mesmo nome, outra geometria: 409
     maior = copy.deepcopy(resistor)
     maior['graphics'][0]['x2'] = 150
     assert cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': maior}).status_code == 409
     # kind ausente: pelo número de pinos
+    maior['graphics'][0].update(color='#800000', fill='#ffffb0', solid=True)
     r = cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': dict(maior, name='Resistor largo', kind=None)})
     s2 = r.get_json()['symbol']
     assert r.status_code == 200 and s2['id'] == 's0002' and s2['kind'] == 'generico'
+    assert (s2['graphics'][0]['color'], s2['graphics'][0]['fill']) == ('#800000', '#ffffb0'), 'a cor fica no símbolo guardado'
+    assert E.le_symlib(symlib)['symbols'][1]['graphics'][0]['fill'] == '#ffffb0'
     assert cli.post('/api/symbols/lib', json={'op': 'rename', 'id': 's0002', 'name': 'Resistor'}).status_code == 409
     assert cli.post('/api/symbols/lib', json={'op': 'rename', 'id': 'zzz', 'name': 'x'}).status_code == 404
     j = cli.post('/api/symbols/lib', json={'op': 'rename', 'id': 's0002', 'name': ' Resistor 2 '}).get_json()

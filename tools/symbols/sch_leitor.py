@@ -28,6 +28,14 @@ O que foi apurado nos arquivos reais (e onde o contrato inicial estava errado):
   IntLib        cada stream é 1 byte 0x02 + zlib; inflado é uma .SchLib inteira.
   defaults      chave ausente = valor zero/falso: LineWidth 0 (Smallest, 4 mil), IsSolid
                 falso, StartAngle 0, Orientation 0, OwnerPartDisplayMode 0.
+  cores         `Color` e `AreaColor` são TColor do Delphi: int = R + G*256 + B*65536
+                (16711680 = azul #0000ff; 128 = #800000; 11599871 = #ffffb0; 8388608 =
+                #000080). O schlib-v2 os diz em `color` (traço) e `fill` (área, só quando
+                IsSolid — a lib tem retângulo com AreaColor e sem IsSolid, e o Altium não
+                pinta), sempre '#rrggbb' minúsculo; chave ausente no registro = campo
+                ausente (o Altium não grava 0, e 0 é preto). O ExportLibs nunca exportou
+                cor, então o Libs/schlib.js versionado não a tem e `--espelho` passa a
+                emiti-la em quase todo gráfico (na lib, 3.768 dos 4.616 têm Color).
   visibilidade  no conglomerado do pino (binário e `PinConglomerate` do SchDoc), bit 0x08
                 = mostra o NOME e bit 0x10 = mostra o DESIGNADOR (24LC256 = 0x38 com os
                 dois à vista; RES [ SMD ] = 0x20 com os dois escondidos). O schlib-v2 diz
@@ -74,6 +82,7 @@ ORIENT = (0, 90, 180, 270)
 # conglomerado do pino: bit 0x08 = nome à vista, 0x10 = designador à vista
 CONG_NOME, CONG_NUM = 0x08, 0x10
 GEOMETRIA = {'2', '3', '4', '5', '6', '7', '8', '10', '11', '12', '13', '14'}
+RX_COR = re.compile(r'^#[0-9a-f]{6}$')    # a cor no schlib-v2: '#rrggbb' minúsculo
 BARRA = chr(0xAF)          # 0xAF no binario: negacao em cima da letra anterior
 SOBRELINHA = chr(0x305)    # como a API do Altium devolve o mesmo sinal
 
@@ -204,26 +213,63 @@ def _amostra_bezier(p, seg):
     return pts
 
 
+# ─── cores ────────────────────────────────────────────────────────────────────
+def cor_hex(v):
+    """TColor do Altium (R + G*256 + B*65536) -> '#rrggbb' minúsculo; None quando não há
+    cor no registro ou o valor não é RGB (TColor de sistema, acima de 0xFFFFFF)"""
+    if v is None or v == '':
+        return None
+    n = _int(v, -1)
+    if n < 0 or n > 0xFFFFFF:
+        return None
+    return '#%02x%02x%02x' % (n & 255, (n >> 8) & 255, (n >> 16) & 255)
+
+
+def cor_int(s):
+    """'#rrggbb' (qualquer caixa — quem entra pela API já foi validado minúsculo) -> TColor;
+    None quando não é cor"""
+    if not isinstance(s, str) or not RX_COR.match(s.lower()):
+        return None
+    return int(s[1:3], 16) + int(s[3:5], 16) * 256 + int(s[5:7], 16) * 65536
+
+
+def _cores(d, area=False):
+    """[('color', …), ('fill', …)] de um registro: só o que está lá. `fill` só para forma
+    fechada (area=True) E sólida — sem IsSolid o Altium guarda a AreaColor mas não pinta"""
+    fora = []
+    c = cor_hex(d.get('Color'))
+    if c:
+        fora.append(('color', c))
+    if area and _solid(d):
+        f = cor_hex(d.get('AreaColor'))
+        if f:
+            fora.append(('fill', f))
+    return fora
+
+
 # ─── primitivas ───────────────────────────────────────────────────────────────
 def primitiva(d, fontes, extras=True):
     """um registro de texto (OrderedDict) -> item de `graphics`, ou None se não é desenho.
 
     As 7 formas do hub saem iguais ao ExportLibs; o que ele ignorava (bezier, arco
     elíptico, retângulo arredondado — RECORD 5, 11, 10) vira polyline/arc/rect para não
-    sumir do desenho. `extras=False` reproduz o ExportLibs à risca (é o que o teste compara)."""
+    sumir do desenho. `extras=False` reproduz o ExportLibs à risca (é o que o teste compara).
+    `color`/`fill` vão no fim, depois das chaves que o ExportLibs escrevia — e só quando o
+    registro tem a cor."""
     r = d.get('RECORD')
     if not extras and r in ('5', '10', '11'):
         return None
     if r == '13':
         return OrderedDict([('g', 'line'), ('x1', coord(d, 'Location.X')), ('y1', coord(d, 'Location.Y')),
-                            ('x2', coord(d, 'Corner.X')), ('y2', coord(d, 'Corner.Y')), ('w', _w(d))])
+                            ('x2', coord(d, 'Corner.X')), ('y2', coord(d, 'Corner.Y')), ('w', _w(d))] + _cores(d))
     if r in ('14', '10'):
         return OrderedDict([('g', 'rect'), ('x1', coord(d, 'Location.X')), ('y1', coord(d, 'Location.Y')),
-                            ('x2', coord(d, 'Corner.X')), ('y2', coord(d, 'Corner.Y')), ('solid', _solid(d))])
+                            ('x2', coord(d, 'Corner.X')), ('y2', coord(d, 'Corner.Y')), ('solid', _solid(d))]
+                           + _cores(d, True))
     if r == '12':
         return OrderedDict([('g', 'arc'), ('cx', coord(d, 'Location.X')), ('cy', coord(d, 'Location.Y')),
                             ('r', coord(d, 'Radius')), ('sa', _ang(d, 'StartAngle')),
-                            ('ea', _ang(d, 'EndAngle')), ('w', _w(d))])
+                            ('ea', _ang(d, 'EndAngle')), ('w', _w(d))] + _cores(d))
     if r == '11':
         cx, cy = coord(d, 'Location.X'), coord(d, 'Location.Y')
         rx, ry = coord(d, 'Radius'), coord(d, 'SecondaryRadius')
@@ -232,25 +278,27 @@ def primitiva(d, fontes, extras=True):
         # do Altium ao converter grade), e o hub só sabe arco circular — vale a média
         if abs(rx - ry) <= max(1.0, 0.05 * max(rx, ry)):
             return OrderedDict([('g', 'arc'), ('cx', cx), ('cy', cy), ('r', _r3((rx + ry) / 2.0)),
-                                ('sa', sa), ('ea', ea), ('w', _w(d))])
-        return OrderedDict([('g', 'polyline'), ('pts', _amostra_arco(cx, cy, rx, ry, sa, ea, 24)), ('w', _w(d))])
+                                ('sa', sa), ('ea', ea), ('w', _w(d))] + _cores(d))
+        return OrderedDict([('g', 'polyline'), ('pts', _amostra_arco(cx, cy, rx, ry, sa, ea, 24)), ('w', _w(d))]
+                           + _cores(d))
     if r == '8':
         return OrderedDict([('g', 'ellipse'), ('cx', coord(d, 'Location.X')), ('cy', coord(d, 'Location.Y')),
-                            ('rx', coord(d, 'Radius')), ('ry', coord(d, 'SecondaryRadius')), ('solid', _solid(d))])
+                            ('rx', coord(d, 'Radius')), ('ry', coord(d, 'SecondaryRadius')), ('solid', _solid(d))]
+                           + _cores(d, True))
     if r == '7':
-        return OrderedDict([('g', 'poly'), ('pts', _pts(d)), ('solid', _solid(d))])
+        return OrderedDict([('g', 'poly'), ('pts', _pts(d)), ('solid', _solid(d))] + _cores(d, True))
     if r == '6':
-        return OrderedDict([('g', 'polyline'), ('pts', _pts(d)), ('w', _w(d))])
+        return OrderedDict([('g', 'polyline'), ('pts', _pts(d)), ('w', _w(d))] + _cores(d))
     if r == '5':
         pts = _pts(d)
         if len(pts) == 4:
             pts = _amostra_bezier(pts, 16)
-        return OrderedDict([('g', 'polyline'), ('pts', pts), ('w', _w(d))])
+        return OrderedDict([('g', 'polyline'), ('pts', pts), ('w', _w(d))] + _cores(d))
     if r == '4':
         fid = _int(d.get('FontID'), 1)
         return OrderedDict([('g', 'label'), ('x', coord(d, 'Location.X')), ('y', coord(d, 'Location.Y')),
                             ('text', d.get('Text', '')), ('rot', ORIENT[_int(d.get('Orientation')) & 3]),
-                            ('size', (fontes or {}).get(fid, 10))])
+                            ('size', (fontes or {}).get(fid, 10))] + _cores(d))
     return None          # 3 (IEEE), 2 (pino), 34/41 (parâmetros), 44-48 (modelos)…
 
 

@@ -102,6 +102,18 @@ def testa_normaliza():
     assert G({'g': 'poly', 'pts': [[10, 10], [0, 0], [10, 0], [10, 10]], 'solid': True}) == tri, 'rotação e fecho explícito'
     assert G({'g': 'poly', 'pts': [[10, 0], [0, 0], [10, 10]], 'solid': True}) == tri, 'sentido invertido'
     assert E._i(float('inf')) == 0 and E._a(float('nan')) == 0 and E._i('x') == 0, 'lixo vira 0, não exceção'
+    # cor não é identidade: fica no gráfico normalizado (no fim), fora do fingerprint e da ordem
+    cores = [dict(gr[1], color='#ff0000'), dict(gr[0], color='#0000ff')]
+    pc, gc = E.normaliza(pins, cores)
+    assert [h['g'] for h in gc] == [h['g'] for h in g] and gc[0]['color'] == '#0000ff' and gc[1]['color'] == '#ff0000', gc
+    assert list(gc[1].keys())[-1] == 'color' and E._identidade(gc[1]) == g[1]
+    assert E.fingerprint(pins, cores, 'generico') == E.fingerprint(pins, gr, 'generico')
+    assert E.fingerprint(pins, [dict(c, color='#123456') for c in cores], 'ci') == E.fingerprint(pins, gr, 'ci')
+    rc = {'g': 'rect', 'x1': 0, 'y1': 0, 'x2': 10, 'y2': 10, 'solid': True, 'color': '#800000', 'fill': '#ffffb0'}
+    assert list(G(rc).keys()) == ['g', 'x1', 'y1', 'x2', 'y2', 'solid', 'color', 'fill'], list(G(rc).keys())
+    assert 'color' not in G(dict(rc, color='RED')) and 'fill' not in G(dict(rc, fill='#FFFFB0')), 'só #rrggbb minúsculo'
+    assert E.fingerprint([], [rc], 'generico') == E.fingerprint([], [dict(rc, color='#000000', fill='#00ff00')], 'generico') \
+        == E.fingerprint([], [{k: v for k, v in rc.items() if k not in ('color', 'fill')}], 'generico')
     # visibilidade do texto do pino não é desenho: hideNum/hideName ficam fora da normalização e do fingerprint
     esc = [dict(q, hideNum=True, hideName=True) for q in pins]
     assert E.normaliza(esc, gr) == (p, g) and not any('hideNum' in q or 'hideName' in q for q in E.normaliza(esc, gr)[0])
@@ -205,12 +217,18 @@ def testa_mescla(tmp):
     assert libq['symbols'][0]['fontes'] == ['X.SchDoc'], 'sem preferida, a mais usada'
 
     # biblioteca atual editada à mão: id/nome/fp quebrados são consertados, nunca descartados
-    torto = {'symbols': [dict(lib['symbols'][0], id=None, name=None, fp=None),
+    # (o resistor guardado com cor recalcula o MESMO fp: a cor fica, mas não é identidade)
+    colorido = [dict(g, color='#ff0000', fill='#00ff00') for g in lib['symbols'][0]['graphics']]
+    torto = {'symbols': [dict(lib['symbols'][0], id=None, name=None, fp=None, graphics=colorido),
                          dict(lib['symbols'][1], id='s0009'), dict(lib['symbols'][2], id='s0009')]}
     libs, rs = E.mescla(torto, [], HOJE, log=quieto)
     assert [s['id'] for s in libs['symbols']] == ['s0010', 's0009', 's0011'], [s['id'] for s in libs['symbols']]
     assert libs['symbols'][0]['name'] == 'RES [ SMD ]' and libs['symbols'][0]['fp'] == lib['symbols'][0]['fp']
+    assert libs['symbols'][0]['graphics'][0]['color'] == '#ff0000', 'a cor sobrevive ao saneamento'
     assert rs['novos'] == 0 and len(libs['symbols']) == 3
+    # e o mesmo corpo chegando colorido de outra fonte é repetido, não novo
+    _, rc = E.mescla(libs, [('F.SchDoc', 'R', 1, 1, res()[0], colorido)], HOJE, log=quieto)
+    assert rc['novos'] == 0 and rc['repetidos'] == 1, rc
 
     # ilegíveis passam para o resumo
     _, r5 = E.mescla(None, [], HOJE, log=quieto, ilegiveis=['X.SchDoc: quebrado'])
@@ -265,6 +283,10 @@ def testa_lib_local(tmp):
     R = por_alias['RES [ SMD ]']
     assert R is por_alias['RES [ PTH ]'] and R['name'].startswith('Resistor'), (R['name'], R['aliases'])
     assert R['usos'] >= 2 and R['kind'] == 'generico'
+    # a cor lida da SchLib fica no símbolo guardado (o 24LC256 é o corpo da casa: 128/11599871)
+    rect = next(g for g in por_alias['24LC256']['graphics'] if g['g'] == 'rect')
+    assert (rect['color'], rect['fill']) == ('#800000', '#ffffb0'), rect
+    assert next(g for g in R['graphics'] if g['g'] == 'rect')['color'] == '#0000ff' and 'fill' not in next(g for g in R['graphics'] if g['g'] == 'rect')
     erros = []
     for origem, esperado in BASICOS.items():
         s = por_alias.get(origem)
