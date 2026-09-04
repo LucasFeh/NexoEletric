@@ -211,14 +211,25 @@ precisar de servidor.
   seleciona (o item fica azul, com bordinhas), arrastar no vazio seleciona vários
   (esquerda→direita só quem couber inteiro; direita→esquerda quem encostar), `Shift` soma à
   seleção, e o arrasto move **só o que estiver selecionado**, com grade de 100 mil. `Del`
-  apaga, `Espaço` gira, `X` espelha, `Ctrl+A` seleciona a folha, `Ctrl+Z` desfaz e duplo
-  clique abre as propriedades. **Adicionar componentes** (`C`) abre um modal igual à aba
-  Biblioteca (busca, seletor de acervo, preview do símbolo, lista de valores do almoxarifado
-  ou footprint); cada **Adicionar** junta o item numa lista à direita e **Finalizar** coloca
-  tudo na folha ativa, em grade, já selecionado para arrastar. Fio, label, power port,
-  junção e texto não se desenham pelo hub: quem os escreve é a IA, no `schematic.js`
-  ([AI-GUIDE.md](AI-GUIDE.md), Parte A). Para o Altium refletir edições numa folha já
-  construída, rode o **BuildSchematic com limpeza da folha** (confirmação SIM).
+  apaga, `Espaço` gira, `X` espelha, `Ctrl+A` seleciona a folha e `Ctrl+Z` desfaz.
+  **Adicionar componentes** (`C`) abre um modal igual à aba Biblioteca (busca, seletor de
+  acervo, preview do símbolo, lista de valores do almoxarifado ou footprint); cada
+  **Adicionar** junta o item numa lista à direita e **Finalizar** coloca tudo na folha ativa,
+  em grade, já selecionado para arrastar.
+  Dentro da folha há uma **barra de ferramentas** com o pouco que a mão faz aqui: selecionar,
+  **Fio** (`W`) e os pousos **GND** (`G`), **3V3**, **5V5** e **VIN**. O fio é **magnético** —
+  a 60 mil de uma ponta de pino, vértice de fio, junção ou power port ele gruda (alvo laranja
+  na tela), e encostar num pino encerra o traçado; fora do ímã anda na grade de 100 mil, em
+  ortogonal. Botão direito sem arrastar, duplo clique ou `Esc` encerram o fio. Net label,
+  texto, junção explícita e troca de valor/footprint continuam sendo da IA, no `schematic.js`
+  ([AI-GUIDE.md](AI-GUIDE.md), Parte A).
+  À direita fica o painel **Propriedades**, no espírito do painel homônimo do Altium e
+  **só de leitura**: designator, comment, descrição, símbolo (e em que nome ele foi resolvido),
+  acervo de origem, footprint, posição/rotação, parâmetros e a tabela de pinos com a net de
+  cada um — com o **símbolo e o footprint desenhados no rodapé**. Não há um campo editável
+  sequer: esta vista serve para olhar e posicionar. Ambos os painéis são redimensionáveis.
+  Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com
+  limpeza da folha** (confirmação SIM).
 - **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
   `changes.js`: render fiel, fantasma tracejado das posições originais, lista de mudanças
   com validação, tabela PCB List pós-mudança e exportação para CSV.
