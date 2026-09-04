@@ -34,13 +34,15 @@
   button:disabled:hover{border-color:var(--border);}
   select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;}
 
-  #main{flex:1; display:flex; min-height:0;}
+  #main{flex:1; display:flex; min-height:0; position:relative;}   /* ancora da ficha, que flutua por cima */
   #cvwrap{flex:1; position:relative; min-width:0;}
   /* divisoria arrastavel entre o painel e a folha: a mesma peca das abas Laser e BOM do hub
      (6 px de alvo com um traco fino no meio, que acende ao pegar; duplo clique fecha/abre) */
   .split{flex:0 0 6px; cursor:col-resize; position:relative; touch-action:none; background:var(--panel);}
   #split{border-right:1px solid var(--border);}
-  #splitR{border-left:1px solid var(--border);}
+  /* a divisoria da ficha acompanha a borda esquerda dela, fora do fluxo como a propria ficha */
+  #splitR{position:absolute; top:0; bottom:0; right:var(--props-w, 320px); width:6px; z-index:15;
+    border-left:1px solid var(--border);}
   .split::after{content:''; position:absolute; top:0; bottom:0; left:50%; width:2px;
     transform:translateX(-50%); background:transparent; transition:background .12s;}
   .split:hover::after, .split.on::after{background:var(--accent);}
@@ -68,7 +70,12 @@
      Properties do Altium. Quem edita valor, footprint ou parametro e a IA, no
      schematic.js — por isso nao ha um campo editavel sequer aqui. */
   #props{width:var(--props-w, 320px); min-width:0; flex:none; background:var(--panel);
-    display:flex; flex-direction:column; min-height:0; overflow:hidden;}
+    display:flex; flex-direction:column; min-height:0; overflow:hidden;
+    /* POR CIMA do desenho, nao ao lado: abrir a ficha nao muda a largura do canvas, entao a
+       camera (centrada) nao desloca a folha e o que estava na tela fica onde estava. Abaixo do
+       formulario de sinalizacao (z 15) e acima da barra de ferramentas (z 12). */
+    position:absolute; top:0; right:0; bottom:0; z-index:14;
+    border-left:1px solid var(--border); box-shadow:-8px 0 22px rgba(0,0,0,.45);}
   /* a ficha nao fica na tela o tempo todo: aparece com a selecao e sai com ela, a nao ser
      que esteja fixada. Fechada, vira o botao de paineis no canto inferior esquerdo. */
   #props[hidden], #splitR[hidden], #btnPaineis[hidden]{display:none !important;}
