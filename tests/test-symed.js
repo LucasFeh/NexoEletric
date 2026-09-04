@@ -131,14 +131,15 @@ assert.deepStrictEqual(P.hitTest({ pins: [], graphics: [{ g: 'poly', pts: [[0, 0
   assert.notStrictEqual(out.footprints, sym.footprints, 'cópia, não referência');
   const p = out.parts[0];
   assert.strictEqual(p.part, 1);
-  assert.deepStrictEqual(p.pins[0], { num: '1', name: '', x: -100, y: 0, len: 100, orient: 180, type: 'Passive' });
+  assert.deepStrictEqual(p.pins[0], { num: '1', name: '', x: -100.4, y: 0.2, len: 100, orient: 180, type: 'Passive' }, 'pino com 3 casas, sem hideNum/hideName quando visível');
   assert.strictEqual(p.graphics.length, 4, 'bezier saiu');
   assert.deepStrictEqual(p.graphics[0], { g: 'rect', x1: -10, y1: -10, x2: 10, y2: 10, w: 10, solid: true });
   assert.deepStrictEqual(p.graphics[1], { g: 'arc', cx: 0, cy: 0, r: 50, sa: 0, ea: 360, w: 4 });
   assert.deepStrictEqual(p.graphics[2], { g: 'label', x: 0, y: 0, text: '12', rot: 0, size: 8 });
   assert.deepStrictEqual(p.graphics[3], { g: 'polyline', pts: [[1.235, 2]], w: 20 });
   /* tipos: tudo que o hub e o servidor esperam */
-  for (const pin of p.pins) { assert.strictEqual(typeof pin.num, 'string'); assert.strictEqual(typeof pin.name, 'string'); assert.ok(Number.isInteger(pin.x) && Number.isInteger(pin.y) && Number.isInteger(pin.len)); assert.ok([0, 90, 180, 270].includes(pin.orient)); assert.ok(P.PIN_TYPES.includes(pin.type)); }
+  const tresCasas = v => typeof v === 'number' && Math.round(v * 1000) / 1000 === v;
+  for (const pin of p.pins) { assert.strictEqual(typeof pin.num, 'string'); assert.strictEqual(typeof pin.name, 'string'); assert.ok(tresCasas(pin.x) && tresCasas(pin.y) && tresCasas(pin.len)); assert.ok([0, 90, 180, 270].includes(pin.orient)); assert.ok(P.PIN_TYPES.includes(pin.type)); }
   for (const g of p.graphics) { assert.ok(['line', 'rect', 'arc', 'ellipse', 'poly', 'polyline', 'label'].includes(g.g)); if ('w' in g) assert.ok(P.WIDTHS.includes(g.w)); }
   assert.ok(!('parts' in sym.parts[0]), 'sem lixo no original');
   assert.strictEqual(sym.parts[0].pins[0].x, '-100.4', 'original intacto');
@@ -174,14 +175,152 @@ assert.deepStrictEqual(P.hitTest({ pins: [], graphics: [{ g: 'poly', pts: [[0, 0
   assert.deepStrictEqual([n.sa, n.ea], [0, 360]);
 }
 
-/* ── pino só em múltiplo de 10 mil: é o que o registro binário guarda; o espelho não pode
-   ficar com x=5 enquanto a SchLib recebe 10 ── */
+/* ── pino com 3 casas como qualquer coordenada (o gravador grava a fração); hideNum/hideName
+   só saem quando escondidos ── */
 {
-  assert.strictEqual(P.mil10(5), 10); assert.strictEqual(P.mil10(4), 0); assert.strictEqual(P.mil10(-26), -30);
   const p = P.cleanPin({ num: 1, x: 5, y: 3, len: 95, orient: 0 });
-  assert.deepStrictEqual([p.x, p.y, p.len], [10, 0, 100]);
-  const q = P.cleanPin({ num: 1, x: 390.5515, y: 393.701, len: 100, orient: 0 });
-  assert.deepStrictEqual([q.x, q.y], [390, 390], 'PinFrac do leitor cai na grade de 10');
+  assert.deepStrictEqual([p.x, p.y, p.len], [5, 3, 95], 'nada de arredondar a 10 mil');
+  const q = P.cleanPin({ num: 1, x: 390.5515, y: 393.701, len: 100.0004, orient: 0 });
+  assert.deepStrictEqual([q.x, q.y, q.len], [390.552, 393.701, 100], 'PinFrac do leitor fica, com 3 casas');
+  assert.ok(!('hideNum' in q) && !('hideName' in q), 'visível = campo ausente');
+  const h = P.cleanPin({ num: 1, x: 0, y: 0, len: 100, orient: 0, hideNum: true, hideName: false });
+  assert.strictEqual(h.hideNum, true); assert.ok(!('hideName' in h), 'false não sai — só true');
+  const h2 = P.cleanPin({ num: 1, x: 0, y: 0, len: 100, orient: 0, hideName: 1 });
+  assert.strictEqual(h2.hideName, true);
+}
+
+/* ── mm ↔ mil sem perda em 3 casas: mm de 3 casas vai a mil (3 casas) e volta igual; mil
+   múltiplo do passo de 1 mm volta ao mesmo mil ── */
+{
+  assert.strictEqual(P.MM, 39.37007874);
+  assert.strictEqual(P.mm2mil(1), 39.37);
+  assert.strictEqual(P.mm2mil(3), 118.11);
+  assert.strictEqual(P.fmtUnit(118.11, 'mm'), '3.00', '2 casas quando a terceira é zero');
+  assert.strictEqual(P.fmtUnit(P.mm2mil(1.234), 'mm'), '1.234', '3 casas quando a terceira não é zero');
+  assert.strictEqual(P.fmtUnit(-100, 'mm'), '-2.54');
+  assert.strictEqual(P.fmtUnit(48.583, 'mil'), '48.583');
+  assert.strictEqual(P.fmtUnit(100, 'mil'), '100', 'mil sem zeros à direita');
+  assert.strictEqual(P.toMil('3', 'mm'), 118.11);
+  assert.strictEqual(P.toMil('118.1104', 'mil'), 118.11);
+  assert.strictEqual(P.toMil('x', 'mm'), 0, 'lixo vira 0, não NaN');
+  for (let i = 0; i <= 2000; i++) {
+    const mm = Math.round((i * 0.007 - 5) * 1000) / 1000;          /* -5.000 … 9.000 em passos de 7 µm */
+    const volta = Number(P.fmtUnit(P.mm2mil(mm), 'mm'));
+    assert.strictEqual(volta, mm, 'mm ' + mm + ' → mil ' + P.mm2mil(mm) + ' → ' + volta);
+  }
+  for (let k = -50; k <= 50; k++) {
+    const mil = P.snap(k * P.MM + 0.3, P.MM);
+    assert.strictEqual(P.toMil(P.fmtUnit(mil, 'mm'), 'mm'), mil, 'mil ' + mil + ' passa pelo mm e volta');
+  }
+  assert.deepStrictEqual(P.UNIT_SNAPS, { mm: [0.1, 0.5, 1, 2.5], mil: [10, 25, 50, 100] });
+  assert.strictEqual(P.UNIT_DEFAULT.mil, 100); assert.strictEqual(P.UNIT_DEFAULT.mm, P.MM);
+  assert.strictEqual(P.snapMil(2.5, 'mm'), 2.5 * P.MM); assert.strictEqual(P.snapMil(25, 'mil'), 25);
+}
+
+/* ── snap em mm: o passo é fracionário em mil e o resultado sai com 3 casas ── */
+{
+  assert.strictEqual(P.snap(100, P.MM), 118.11, '100 mil cai em 3 mm');
+  assert.strictEqual(P.snap(-20, P.MM), -39.37);
+  assert.strictEqual(P.snap(58, P.MM), 39.37, '58 mil = 1.47 mm → 1 mm');
+  assert.strictEqual(P.snap(60, P.MM), 78.74, '60 mil = 1.52 mm → 2 mm');
+  assert.strictEqual(P.snap(7, 0.5 * P.MM), 0);
+  assert.strictEqual(P.pinSnapOf(P.MM, 'mm'), P.MM, 'em mm o pino usa o snap escolhido');
+  assert.strictEqual(P.pinSnapOf(0.1 * P.MM, 'mm'), 0.1 * P.MM);
+  assert.strictEqual(P.pinSnapOf(25, 'mil'), 100, 'em mil continua preferindo múltiplos de 10');
+  assert.strictEqual(P.pinSnapOf(50, 'mil'), 50);
+  /* aviso relativo ao snap: os pinos do RES [SMD] (ponta quente em 150 e -250 mil) caem
+     fora do snap de 1 mm, mas dentro do de 50 mil; um pino em 3 mm com 3 mm de comprimento está dentro */
+  const res = [{ num: '2', x: 50, y: 0, len: 100, orient: 0 }, { num: '1', x: -150, y: 0, len: 100, orient: 180 }];
+  assert.deepStrictEqual(P.pinsOffGrid(res, P.MM).map(p => p.num), ['2', '1']);
+  assert.deepStrictEqual(P.pinsOffGrid(res, 50).map(p => p.num), []);
+  assert.deepStrictEqual(P.pinsOffGrid(res, 100).map(p => p.num), ['2', '1'], 'sem passo vale 100 (o de sempre)');
+  assert.deepStrictEqual(P.pinsOffGrid([{ num: '9', x: 118.11, y: -78.74, len: 118.11, orient: 0 }], P.MM), [], 'ponta quente em 6 mm: dentro');
+  assert.deepStrictEqual(P.pinsOffGrid([{ num: '9', x: 118.11, y: 0, len: 100, orient: 90 }], P.MM).map(p => p.num), ['9'], 'len de 100 mil tira do snap de 1 mm');
+}
+
+/* ── linha → pino e pino → linha ── */
+{
+  const base = { pins: [{ num: '1', name: '', x: -100, y: 0, len: 100, orient: 180, type: 'Passive' }],
+                 graphics: [{ g: 'rect', x1: -100, y1: -40, x2: 100, y2: 40, solid: false }, { g: 'line', x1: 100, y1: 0, x2: 300, y2: 0, w: 10 }] };
+  const r = P.lineToPin(base, 1);
+  assert.deepStrictEqual(r.part.graphics, [base.graphics[0]], 'a linha saiu dos gráficos');
+  assert.deepStrictEqual(r.part.pins[1], { num: '2', name: '', x: 100, y: 0, len: 200, orient: 0, type: 'Passive' }, 'corpo no extremo perto do retângulo, ponta quente para fora');
+  assert.deepStrictEqual(r.selection, [{ kind: 'pin', idx: 1 }]);
+  assert.strictEqual(r.aviso, '');
+  assert.strictEqual(base.graphics.length, 2, 'original intacto');
+  /* a mesma linha desenhada ao contrário dá o mesmo pino */
+  const inv = { pins: base.pins, graphics: [base.graphics[0], { g: 'line', x1: 300, y1: 0, x2: 100, y2: 0, w: 10 }] };
+  assert.deepStrictEqual(P.lineToPin(inv, 1).part.pins[1], r.part.pins[1]);
+  /* vertical para baixo: orient 270 */
+  const v = P.lineToPin({ pins: [], graphics: [base.graphics[0], { g: 'line', x1: 0, y1: -40, x2: 0, y2: -240, w: 10 }] }, 1);
+  assert.deepStrictEqual([v.part.pins[0].x, v.part.pins[0].y, v.part.pins[0].len, v.part.pins[0].orient, v.part.pins[0].num], [0, -40, 200, 270, '1']);
+  /* para a esquerda: 180 */
+  const e = P.lineToPin({ pins: [], graphics: [base.graphics[0], { g: 'line', x1: -300, y1: 0, x2: -100, y2: 0, w: 10 }] }, 1);
+  assert.deepStrictEqual([e.part.pins[0].x, e.part.pins[0].len, e.part.pins[0].orient], [-100, 200, 180]);
+  /* sem mais gráficos o centro é a origem */
+  const so = P.lineToPin({ pins: [], graphics: [{ g: 'line', x1: 50, y1: 0, x2: 250, y2: 0, w: 10 }] }, 0);
+  assert.deepStrictEqual([so.part.pins[0].x, so.part.pins[0].orient, so.part.graphics.length], [50, 0, 0]);
+  /* não axial: eixo dominante, len = componente, aviso */
+  const na = P.lineToPin({ pins: [], graphics: [base.graphics[0], { g: 'line', x1: 100, y1: 0, x2: 300, y2: 50, w: 10 }] }, 1);
+  assert.deepStrictEqual([na.part.pins[0].x, na.part.pins[0].y, na.part.pins[0].len, na.part.pins[0].orient], [100, 0, 200, 0]);
+  assert.ok(/não era axial/.test(na.aviso), na.aviso);
+  /* polilinha de 2 pontos serve; de 3 não; retângulo não; linha sem comprimento não */
+  const pl = P.lineToPin({ pins: [], graphics: [base.graphics[0], { g: 'polyline', pts: [[100, 0], [300, 0]], w: 10 }] }, 1);
+  assert.deepStrictEqual([pl.part.pins[0].x, pl.part.pins[0].len, pl.part.pins[0].orient], [100, 200, 0]);
+  assert.strictEqual(P.lineToPin({ pins: [], graphics: [{ g: 'polyline', pts: [[0, 0], [1, 0], [2, 2]], w: 10 }] }, 0), null);
+  assert.strictEqual(P.lineToPin(base, 0), null);
+  assert.strictEqual(P.lineToPin({ pins: [], graphics: [{ g: 'line', x1: 5, y1: 5, x2: 5, y2: 5, w: 10 }] }, 0), null);
+  assert.strictEqual(P.lineToPin(base, 7), null);
+  /* pino → linha do corpo à ponta quente, w 10, e o pino some */
+  const l = P.pinToLine(base, 0);
+  assert.deepStrictEqual(l.part.pins, []);
+  assert.deepStrictEqual(l.part.graphics[2], { g: 'line', x1: -100, y1: 0, x2: -200, y2: 0, w: 10 });
+  assert.deepStrictEqual(l.selection, [{ kind: 'g', idx: 2 }]);
+  assert.strictEqual(base.pins.length, 1, 'original intacto');
+  /* ida e volta: o pino que virou linha volta a ser o mesmo pino (o número é o próximo livre) */
+  const rt = P.lineToPin(l.part, 2);
+  assert.deepStrictEqual([rt.part.pins[0].x, rt.part.pins[0].y, rt.part.pins[0].len, rt.part.pins[0].orient], [-100, 0, 100, 180]);
+  assert.strictEqual(P.pinToLine(base, 3), null);
+  assert.strictEqual(P.viravel(base.pins[0]), 'linha');
+  assert.strictEqual(P.viravel(base.graphics[1]), 'pino');
+  assert.strictEqual(P.viravel({ g: 'polyline', pts: [[0, 0], [1, 1]] }), 'pino');
+  assert.strictEqual(P.viravel(base.graphics[0]), null);
+  assert.strictEqual(P.viravel(null), null);
+}
+
+/* ── inserir um símbolo da biblioteca: tudo deslocado para o ponto, tudo selecionado, pino
+   com número já usado ganha o próximo livre em sequência ── */
+{
+  const lib = { id: 's1', name: 'Resistor',
+    pins: [{ num: '1', name: '1', x: -100, y: 0, len: 100, orient: 180, type: 'Passive' }, { num: '2', name: '2', x: 100, y: 0, len: 100, orient: 0, type: 'Passive' }],
+    graphics: [{ g: 'rect', x1: -100, y1: -40, x2: 100, y2: 40, solid: false }] };
+  const res = { pins: [{ num: '2', name: '2', x: 50, y: 0, len: 100, orient: 0, type: 'Passive' }, { num: '1', name: '1', x: -150, y: 0, len: 100, orient: 180, type: 'Passive' }],
+                graphics: [{ g: 'rect', x1: -150, y1: -40, x2: 50, y2: 40, solid: false }] };
+  const r = P.insertLibSymbol(res, lib, 500, -200);
+  assert.strictEqual(r.part.pins.length, 4); assert.strictEqual(r.part.graphics.length, 2);
+  assert.deepStrictEqual(r.part.pins.slice(2).map(p => [p.num, p.x, p.y]), [['3', 400, -200], ['4', 600, -200]], 'renumerados 3 e 4, deslocados');
+  assert.deepStrictEqual(r.part.graphics[1], { g: 'rect', x1: 400, y1: -240, x2: 600, y2: -160, solid: false });
+  assert.deepStrictEqual(r.selection, [{ kind: 'pin', idx: 2 }, { kind: 'pin', idx: 3 }, { kind: 'g', idx: 1 }]);
+  assert.deepStrictEqual(r.renumerados, [['1', '3'], ['2', '4']]);
+  assert.deepStrictEqual(r.novos, ['3', '4']);
+  assert.deepStrictEqual(r.part.pins.slice(0, 2), res.pins, 'os pinos que já estavam ficam');
+  assert.strictEqual(res.pins.length, 2, 'original intacto'); assert.strictEqual(lib.pins[0].num, '1', 'biblioteca intacta');
+  /* só um número colide: só ele muda, e para o próximo livre depois do maior */
+  const r2 = P.insertLibSymbol({ pins: [{ num: '2', x: 0, y: 0, len: 100, orient: 0 }, { num: '7', x: 0, y: 0, len: 100, orient: 0 }], graphics: [] }, lib, 0, 0);
+  assert.deepStrictEqual(r2.part.pins.slice(2).map(p => p.num), ['1', '8']);
+  assert.deepStrictEqual(r2.renumerados, [['2', '8']]);
+  /* parte vazia: nada renumera e a origem cai no ponto */
+  const r3 = P.insertLibSymbol({ pins: [], graphics: [] }, lib, 39.37, 0);
+  assert.deepStrictEqual(r3.renumerados, []); assert.deepStrictEqual(r3.novos, ['1', '2']);
+  assert.deepStrictEqual([r3.part.pins[0].x, r3.part.graphics[0].x1], [-60.63, -60.63]);
+  assert.deepStrictEqual(r3.selection, [{ kind: 'pin', idx: 0 }, { kind: 'pin', idx: 1 }, { kind: 'g', idx: 0 }]);
+}
+
+/* ── applyLibSymbol leva a visibilidade do pino junto com número/nome ── */
+{
+  const lib = { name: 'X', pins: [{ num: '1', name: 'a', x: 0, y: 0, len: 100, orient: 0, hideName: true }], graphics: [] };
+  const r = P.applyLibSymbol({ pins: [{ num: '9', name: 'Z', x: 5, y: 5, len: 50, orient: 90, hideNum: true }], graphics: [] }, lib);
+  assert.deepStrictEqual(r.part.pins[0], { num: '9', name: 'Z', x: 0, y: 0, len: 100, orient: 0, hideNum: true }, 'hideNum do usuário fica, hideName da biblioteca sai');
 }
 
 /* ── applyLibSymbol: contagem igual mantém num/name/type na ordem; diferente avisa ── */
@@ -286,11 +425,30 @@ assert.strictEqual(P.nextPinNum([{ num: 'K' }]), '1');
   assert.deepStrictEqual(S.draft.parts[0], antes);
   assert.deepStrictEqual(S.selection, [{ kind: 'pin', idx: 0 }, { kind: 'g', idx: 1 }]);
   /* empurrar com as setas: um passo de snap (100) para os dois, pino inclusive */
-  S.snap = 100; A.nudge(1, 0);
+  S.unit = 'mil'; S.snap = 100; A.nudge(1, 0);
   assert.strictEqual(S.draft.parts[0].pins[0].x, 0); assert.strictEqual(S.draft.parts[0].graphics[1].x1, -200);
   assert.strictEqual(S.draft.parts[0].pins[1].x, 100, 'quem não estava marcado não andou');
   A.undo();
   assert.deepStrictEqual(S.draft.parts[0], antes);
+  /* em mm, snap de 1 mm: a seta anda 39.37 mil (3 casas) — o pino também */
+  S.unit = 'mm'; S.snap = P.MM; A.nudge(0, 1);
+  assert.strictEqual(S.draft.parts[0].pins[0].y, 39.37); assert.strictEqual(S.draft.parts[0].graphics[1].y1, 239.37);
+  A.undo();
+  assert.deepStrictEqual(S.draft.parts[0], antes);
+  /* K pela ação: a linha (índice 1) vira pino e volta a linha; o undo desfaz os dois */
+  S.selection = [{ kind: 'g', idx: 1 }]; A.virar();
+  assert.strictEqual(S.draft.parts[0].graphics.length, 4); assert.strictEqual(S.draft.parts[0].pins.length, 3);
+  assert.deepStrictEqual(S.selection, [{ kind: 'pin', idx: 2 }]);
+  const novo = S.draft.parts[0].pins[2];
+  assert.deepStrictEqual([novo.num, novo.len, novo.type], ['3', 600, 'Passive'], 'a linha de 600 mil virou pino 3');
+  A.virar();
+  assert.strictEqual(S.draft.parts[0].pins.length, 2); assert.strictEqual(S.draft.parts[0].graphics.length, 5);
+  assert.deepStrictEqual(S.selection, [{ kind: 'g', idx: 4 }]);
+  A.undo(); A.undo();
+  assert.deepStrictEqual(S.draft.parts[0], antes);
+  S.selection = [{ kind: 'g', idx: 0 }]; A.virar();
+  assert.deepStrictEqual(S.draft.parts[0], antes, 'retângulo não vira nada');
+  S.unit = 'mm'; S.snap = P.MM;
   /* seleção apontando para item que já não existe cai fora ao restaurar */
   S.selection = [{ kind: 'g', idx: 99 }]; A.pushUndo(); A.undo();
   assert.deepStrictEqual(S.selection, []);
@@ -302,4 +460,4 @@ assert.strictEqual(typeof M.confirmar, 'function');
 assert.strictEqual(typeof M.pedirTexto, 'function');
 assert.strictEqual(M.cam(), null, 'sem canvas não há câmera');
 
-console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum, itemsInBox, moveItems, duplicateItems, seleção × apagar/desfazer)');
+console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum, itemsInBox, moveItems, duplicateItems, seleção × apagar/desfazer, mm↔mil, snap em mm, linha↔pino, insertLibSymbol)');
