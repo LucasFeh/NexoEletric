@@ -531,6 +531,23 @@ do próprio componente (`SN74LVC244AQPWRQ1`). A varredura de 2026-09-03 leu 527 
 reduziu 176.322 ocorrências a 895 símbolos. O relatório fica em `tools/symbols/relatorio.txt`;
 o mesmo botão existe na API (`POST /api/symbols/extract`, log por SSE).
 
+**As duas bibliotecas andam juntas — Altium > hub > Odoo.** A sincronização do almoxarifado
+passa pelo **guardião** (`tools/symbols/guardiao.py`, botão *Sincronizar* da aba): antes de gerar,
+ele lê cada `.SchLib` de `Libs/Almox` e o que difere do que o gerador escreveu por último foi
+editado no Altium — vira *protegido*, com a geometria guardada em `Libs/lib-ledger.json`
+(versionado: é estado). O gerador roda reciclando a biblioteca real do Y: (o que você editou no
+hub chega ao almoxarifado), e depois cada protegido é reposto no arquivo e o espelho da família
+anda junto, marcado `origem:altium` (pílula *altium* na lista). Só quem ninguém tocou recebe o
+desenho do Odoo. O diálogo mostra "preservado do Altium: N componentes"; `--liberar` devolve um
+componente ao gerador.
+
+E ao entrar em qualquer sub-aba da **Biblioteca** o hub compara data e tamanho das `.SchLib` (a
+da casa e as do almoxarifado) com o que ele mesmo registrou por último; se mudou, aparece o badge
+*Altium mudou* e o modal "Identificamos modificações vindas do Altium em N símbolos — deseja
+atualizar a biblioteca do hub?". *Atualizar* troca só as linhas daqueles símbolos no espelho (ou
+protege os componentes do almoxarifado); *Agora não* guarda a assinatura na sessão e não pergunta
+de novo pelos mesmos arquivos. O que o próprio hub grava nunca dispara o aviso.
+
 O leitor Python (`tools/symbols/sch_leitor.py`) também regera o espelho inteiro sem abrir o
 Altium — `python tools/symbols/sch_leitor.py --espelho` (aplica o `rename-map.js` para não
 desfazer os nomes do RenameLibs) — e é provado contra o `schlib.js` que o `ExportLibs.pas`
