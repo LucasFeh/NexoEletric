@@ -411,6 +411,13 @@ tbody tr[aria-selected="true"] { background: rgba(var(--tint),0.09); box-shadow:
   grid-template-columns: var(--lz-l, var(--aside-w)) 6px minmax(240px, 1fr)
                          6px var(--lz-r, var(--aside-w)); }
 .lz-grid > * { min-width: 0; }        /* sem isto o conteudo trava o encolhimento da coluna */
+/* cada filho preso ao seu trilho: o mkSplits fecha uma coluna com display:none, e sem isto os
+   irmaos escorregam um trilho para a esquerda (o meio cai nos 6 px da divisoria) */
+.lz-grid > :nth-child(1), .bom-grid > :nth-child(1) { grid-column: 1; }
+.lz-grid > :nth-child(2), .bom-grid > :nth-child(2) { grid-column: 2; }
+.lz-grid > :nth-child(3), .bom-grid > :nth-child(3) { grid-column: 3; }
+.lz-grid > :nth-child(4) { grid-column: 4; }
+.lz-grid > :nth-child(5) { grid-column: 5; }
 /* divisoria arrastavel: 6px de alvo com um traco fino no meio, que acende ao pegar */
 /* divisoria arrastavel, usada pela aba Laser e pela aba BOM */
 .split { cursor: col-resize; position: relative; touch-action: none; }
