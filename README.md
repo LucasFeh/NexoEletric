@@ -207,8 +207,15 @@ precisar de servidor.
   centralizar, grade, o lápis de edição, Adicionar componentes, Sinalizar e um único
   **Salvar**, que grava `schematic.js` e `annotations.js` conforme o que estiver alterado —
   e fica sempre disponível, para nunca prender o que já foi alterado).
+  **Cor é identidade elétrica, seleção é contorno.** Um fio sai laranja quando pertence à net
+  em foco e azul-escuro quando não; quem está selecionado ganha um contorno tracejado por
+  cima, sem trocar de cor — a mesma convenção da vista PCB e do Altium. Clicar num fio, pino,
+  rótulo, power port ou junção põe a net dele em foco (o nome aparece na barra de status e a
+  linha acende no painel de nets); `Esc`, o clique no vazio, a troca de folha e qualquer nova
+  seleção largam o foco junto. Antes a seleção recoloria o objeto, e a net saía metade azul
+  metade laranja, com o laranja sobrevivendo ao `Esc` — a cor ficava presa na folha.
   A vista abre em leitura; o **lápis** (`E`) destrava a edição, que é **mover**: clique
-  seleciona (o item fica azul, com bordinhas), arrastar no vazio seleciona vários
+  seleciona, arrastar no vazio seleciona vários
   (esquerda→direita só quem couber inteiro; direita→esquerda quem encostar), `Shift` soma à
   seleção, e o arrasto move **só o que estiver selecionado**, com grade de 100 mil. `Del`
   apaga, `Espaço` gira, `X` espelha, `Ctrl+A` seleciona a folha e `Ctrl+Z` desfaz.
