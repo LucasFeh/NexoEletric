@@ -175,9 +175,15 @@ Casca única com:
     **Rescan** executa de fato (reindexa `Projects\` no servidor); os demais
     (`ExportLibs`, `BuildSchematic`, `ExportBoard`, `ApplyChanges`, `DRC`) continuam
     **passos manuais no Altium** — o hub só explica o passo, nunca finge executá-lo. É
-    aqui que caem o **Ver detalhes** do rodapé e o botão de próximo passo.
+    aqui que mora o fluxo inteiro: o rodapé **fluxo** e o botão de próximo passo
+    (*Compile + Update PCB* e companhia) saíram da casca porque repetiam esta aba.
 
-  A tradução cobre a casca (cabeçalho, barra do projeto, abas, fluxo, diálogos e o
+  A casca é **uma faixa só**: cabeçalho com a marca, o seletor de projeto, o estágio
+  (esquema · eco · roteada · aplicada) e o estado do servidor — depois as abas e a folha.
+  A barra do projeto saiu inteira: o nome e o caminho já estavam no seletor ao lado, e o
+  botão de próximo passo mudou para a configuração. São ~130 px a mais de folha.
+
+  A tradução cobre a casca (cabeçalho, abas, diálogos e o
   próprio modal); os painéis Laser, BOM e Neoden seguem em português. O dicionário é o
   `hub-i18n.js` — chave sem tradução volta como ela mesma, que é como os nomes de
   comando do Altium passam intactos.
@@ -234,7 +240,10 @@ precisar de servidor.
   **só de leitura**: designator, comment, descrição, símbolo (e em que nome ele foi resolvido),
   acervo de origem, footprint, posição/rotação, parâmetros e a tabela de pinos com a net de
   cada um — com o **símbolo e o footprint desenhados no rodapé**. Não há um campo editável
-  sequer: esta vista serve para olhar e posicionar. Ambos os painéis são redimensionáveis.
+  sequer: esta vista serve para olhar e posicionar. A ficha **não fica na tela o tempo
+  todo**: entra quando algo é selecionado e sai junto, a não ser que o **alfinete** (canto
+  superior direito dela) a prenda aberta; fechada, ela vira o botão de painéis no canto
+  inferior esquerdo da folha. Ambos os painéis são redimensionáveis.
   Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com
   limpeza da folha** (confirmação SIM).
 - **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
