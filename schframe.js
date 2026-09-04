@@ -405,6 +405,7 @@ window.addEventListener('blur', () => {
 function leftDown(e){
   const w = worldOf(e);
   swallowClick = false;
+  lastDown = null;        /* o click deste gesto so pode ver o que ESTE mousedown acertou */
   /* com uma ferramenta na mao o esquerdo nao seleciona nem arrasta: ele coloca */
   if (annTool || tool !== 'select'){ mouse = { mode:'none', start:w, moved:false }; return; }
   const h = hitTest(w.x, w.y);
@@ -465,11 +466,13 @@ function leftClick(e){
   if (annTool){ openAnnForm(w); return; }
   if (tool === 'wire'){ wireClick(w); return; }
   if (tool === 'power'){ placePower(w); return; }
-  const h = hitTest(w.x, w.y);
-  /* o alvo e a net ja foram resolvidos no mousedown; aqui so sobra o vazio e o Shift que TIRA */
-  if (!h){ if (!e.shiftKey) limpaSel(); return; }
-  if (e.shiftKey && lastDown && lastDown.item === h.item && lastDown.wasSel){
-    sel.delete(h.item);
+  /* O alvo foi resolvido no mousedown (lastDown) e NAO se refaz o hitTest aqui: entre o
+     mousedown e o click a ficha abriu e o canvas mudou de largura, entao o mesmo ponto de
+     tela cai em outro ponto do mundo, "erra" o componente que acabou de ser marcado e
+     limpava a selecao — era isso que fazia a ficha abrir e fechar no mesmo clique. */
+  if (!lastDown){ if (!e.shiftKey) limpaSel(); return; }
+  if (e.shiftKey && lastDown.wasSel){
+    sel.delete(lastDown.item);
     aplicaSel('');            /* saiu da selecao: a net dele sai junto */
   }
 }
