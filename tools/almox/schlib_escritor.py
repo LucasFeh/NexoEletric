@@ -117,7 +117,15 @@ def u(v):
 # ─── leitura da biblioteca de origem ─────────────────────────────────────────
 def carrega_lib(caminho=LIB_REAL):
     """-> (cabecalho, {LibReference: [(tipo, payload)]})"""
-    import olefile
+    try:
+        import olefile
+    except ImportError:
+        # o hub dispara os scripts com sys.executable; numa maquina com varios Pythons e
+        # facil subir o servidor com um que nao tem a dependencia. O recado diz QUAL.
+        raise RuntimeError(
+            'falta o modulo olefile, que le os arquivos .SchLib do Altium.\n'
+            'Instale no MESMO Python que roda o hub:\n'
+            '    "%s" -m pip install olefile' % sys.executable)
     o = olefile.OleFileIO(caminho)
     cab = SB.le_texto(SB.desmonta(o.openstream('FileHeader').read())[0][1])
     comps = {}
