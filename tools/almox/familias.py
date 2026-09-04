@@ -271,6 +271,43 @@ def limpa_rotulo(txt, pkg):
     return t.strip()
 
 
+# ─── polaridade do BJT ────────────────────────────────────────────────────────
+# A regra de TRANSISTOR engole os tokens "npn"/"pnp" para formar o rotulo, entao a
+# polaridade tem de ser lida do nome INTEIRO, antes de qualquer corte. Quando o nome cala, o
+# prefixo do part number resolve a maioria — sao familias de polaridade fixa. O que nao se
+# decide por nenhum dos dois fica em branco DE PROPOSITO: chutar a seta e pior que omitir,
+# porque um desenho errado e uma afirmacao errada no esquema.
+_POL_TXT = re.compile(r'\b(npn|pnp)\b')
+_POL_MPN = [
+    ('pnp', re.compile(r'^(?:bc(?:32[0-9]|807|85[67]|860)|2n(?:2905|3906|4403|5401)'
+                       r'|mmbt(?:3906|4403|5401)|bd(?:136|138|140|238|678|680)'
+                       r'|tip(?:32|42|127|147)|mjd(?:32|127|210)|s8550|a1015|bcp5[23])', re.I)),
+    ('npn', re.compile(r'^(?:bc(?:33[7-9]|54[6-8]|81[7-9]|846|84[78]|850)'
+                       r'|2n(?:2222|3055|3904|5551)|mmbt(?:3904|2222|5551)'
+                       r'|bd(?:135|137|139|237|239|677|679)|tip(?:31|41|122|142)'
+                       r'|mjd(?:31|122|44)|s8050|c1815|bcp5[456])', re.I)),
+]
+
+
+def polaridade_bjt(fam, folded, mpn):
+    """'npn', 'pnp' ou '' — nunca um chute."""
+    if fam != 'TRANSISTOR':
+        return ''
+    # o dump raramente isola o part number num campo proprio: os codigos aparecem soltos no
+    # meio do nome ("Transistor BC327-25"), entao a busca e por PALAVRA no nome inteiro
+    alvos = [(mpn or '').strip()] + re.findall(r'[a-z]{1,4}\d[\w-]*', folded or '')
+    por_mpn = ''
+    for pol, rx in _POL_MPN:
+        if any(a and rx.match(a) for a in alvos):
+            por_mpn = pol
+            break
+    m = _POL_TXT.search(folded or '')
+    # o part number tem a palavra final quando os dois discordam: ele e a peca, a descricao
+    # e texto digitado por gente. No dump de hoje isso salva o MMBT5551, que e NPN e esta
+    # descrito como PNP.
+    return por_mpn or (m.group(1) if m else '')
+
+
 # ─── analise de uma linha do dump ─────────────────────────────────────────────
 def analisar(row):
     nome = re.sub(r'\s+', ' ', (row.get('nome') or '')).strip()
@@ -302,6 +339,10 @@ def analisar(row):
 
         return {
             'familia': fam, 'des': des, 'forma': forma, 'grupo': gr, 'unidade': un,
+            # a polaridade nao cabe na FAMILIA: dividir TRANSISTOR em duas renumeraria o
+            # almoxarifado inteiro (a chave do livro-razao e o nome do simbolo). Ela viaja
+            # por VALOR e so troca o desenho daquele valor.
+            'polaridade': polaridade_bjt(fam, f, mpn),
             'nome': nome, 'rotulo': rotulo, 'pkg': pkg, 'mont': montagem(f, pkg),
             'pinos_pkg': pinos_do_pkg(pkg), 'vias': vias_de(f),
             'valor': valor, 'valor_txt': valor_txt,

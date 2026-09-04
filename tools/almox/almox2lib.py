@@ -337,10 +337,25 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
         # "SMD 0805 10K 1/8W 1% 100ppm". Cada valor vira um componente proprio na lib
         # da familia, entao e este nome que o esquema referencia — nao o da familia.
         enc = ' '.join(x for x in (s['mont'], (pkgs[0] if pkgs else '')) if x)
+        # ── desenho proprio deste valor ──────────────────────────────────────────────
+        # A familia desenha uma vez so, e para o BJT isso e uma afirmacao ERRADA: a seta no
+        # emissor diz NPN, e um terco do estoque e PNP. Dividir TRANSISTOR em duas familias
+        # renumeraria o livro-razao inteiro (a chave dele e o nome do simbolo), entao quem
+        # desce para o VALOR e o desenho — cada valor ja e um componente proprio na .SchLib.
+        # So carrega geometria quem DISCORDA da familia; quem nao declara polaridade herda,
+        # que e o degrade certo (a maioria do estoque e NPN).
+        parts_valor = None
+        if s['forma'] == 'bjt':
+            pols = {x.get('polaridade') for x in p['itens'] if x.get('polaridade')}
+            if pols == {'pnp'}:
+                pv, gv = SY.desenha('bjt_pnp')
+                parts_valor = [{'part': 1, 'pins': pv, 'graphics': gv}]
         valores.append({
             'id': 0,                        # numerado depois, por `numera_valores`
             'altium': re.sub(r'\s+', ' ', (enc + ' ' + p['rotulo'])).strip(),
             'label': p['rotulo'],
+            # geometria propria: so aparece quando o valor discorda do desenho da familia
+            **({'parts': parts_valor} if parts_valor else {}),
             'value': p['valor_txt'] or p['rotulo'],
             # a chave que ordenou este valor, em SI (ohm, farad, henry, volt, ampere,
             # hertz). null = o nome no Odoo nao trazia valor legivel; esses vao para o

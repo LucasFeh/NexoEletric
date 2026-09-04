@@ -166,14 +166,32 @@ def f_pot(_n=0):
     return p, g + [_pl([[0, 140], [0, 70]]), _pl([[0, 70], [-20, 95]]), _pl([[0, 70], [20, 95]])]
 
 
-def f_bjt(_n=0):
+def _bjt_base(seta, emissor):
+    """corpo comum do BJT; o que separa NPN de PNP e para onde a seta aponta.
+
+    A seta E a informacao: no NPN ela fica na saida do emissor apontando para fora, no PNP
+    fica encostada na barra da base apontando para dentro. Desenhar os dois igual (o que
+    esta biblioteca fazia) e dizer que todo transistor e NPN."""
     pins = [_pin('1', 'B', -200, 0, 180), _pin('2', 'C', 100, 200, 90), _pin('3', 'E', 100, -200, 270)]
     g = [{'g': 'ellipse', 'cx': 0, 'cy': 0, 'rx': 130, 'ry': 130, 'w': 10},
          _pl([[-200, 0], [-60, 0]]), _pl([[-60, -80], [-60, 80]]),
          _pl([[-60, 45], [100, 120], [100, 200]]),
-         _pl([[-60, -45], [100, -120], [100, -200]]),
-         _poly([[60, -105], [100, -85], [75, -55]], solid=True)]
+         emissor,
+         seta]
     return pins, g
+
+
+def f_bjt(_n=0):
+    return _bjt_base(_poly([[60, -105], [100, -85], [75, -55]], solid=True),
+                     _pl([[-60, -45], [100, -120], [100, -200]]))
+
+
+def f_bjt_pnp(_n=0):
+    """PNP: seta na BASE, apontando para dentro — a convencao das proprias BC327/BC807 da
+    casa. A perna do emissor comeca depois do triangulo, senao o traco corre por dentro
+    dele; e a seta nao e o espelho da do NPN, que e quase equilatera e flutua fora do eixo."""
+    return _bjt_base(_poly([[-60, -45], [0, -45], [-20, -90]], solid=True),
+                     _pl([[-25, -60], [100, -120], [100, -200]]))
 
 
 def f_mosfet(_n=0):
@@ -333,7 +351,8 @@ FORMAS = {
     'cap': f_cap, 'cpol': f_cpol, 'cvar': f_cvar, 'ind': f_ind, 'xtal': f_xtal,
     'diodo': f_diodo, 'zener': f_zener, 'schot': f_schot, 'tvs': f_tvs, 'diac': f_diac,
     'led': f_led, 'ponte': f_ponte, 'fuse': f_fuse, 'fusept': f_fusept, 'bat': f_bat,
-    'sw': f_sw, 'pot': f_pot, 'bjt': f_bjt, 'mosfet': f_mosfet, 'igbt': f_igbt,
+    'sw': f_sw, 'pot': f_pot, 'bjt': f_bjt, 'bjt_pnp': f_bjt_pnp,
+    'mosfet': f_mosfet, 'igbt': f_igbt,
     'scr': f_scr, 'conn': f_conn, 'rede': f_rede, 'dipsw': f_dipsw, 'opto': f_opto,
     'trafo': f_trafo, 'box': f_box,
 }

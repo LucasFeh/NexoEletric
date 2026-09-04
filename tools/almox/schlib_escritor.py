@@ -342,7 +342,9 @@ def monta_componente(sim, valor, modelo=None):
     e os parametros ja preenchidos. A geometria vem da familia (o `sim`)."""
     from collections import OrderedDict
     nome = valor['altium']
-    partes = sim['parts']
+    # a geometria e a da familia, a nao ser que o VALOR traga a dele: e o caso do BJT, em que
+    # a seta separa NPN de PNP e a familia sozinha afirmaria que todos sao NPN
+    partes = valor.get('parts') or sim['parts']
     npart = sim['partcount']
 
     if modelo:
