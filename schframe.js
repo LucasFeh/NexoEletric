@@ -41,7 +41,9 @@ for (const a of ACERVOS) {
     const alias = {
       name: v.altium, description: (v.itens && v.itens[0] && v.itens[0].nome) || v.label,
       designator: sy.designator, familia: sy.familia, partcount: 1,
-      parts: sy.parts,                       /* a MESMA geometria, compartilhada */
+      /* a geometria da familia, compartilhada — a nao ser que o VALOR traga a dele: e assim
+         que o PNP deixa de ser desenhado com a seta do NPN sem partir a familia em duas */
+      parts: v.parts || sy.parts,
       footprints: v.footprint ? [{ name: v.footprint, current: true, incurrentlib: true }]
                               : (sy.footprints || []),
       valores: [v], deValor: true,
