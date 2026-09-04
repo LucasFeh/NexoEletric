@@ -134,23 +134,46 @@ def _reg(d):
     return (SB.TEXTO, SB.escreve_texto(d))
 
 
+# Paleta da casa, medida POR TIPO DE REGISTRO na BIBLIOTECA DE ESQUEMA.SchLib real.
+# A cor NAO e uniforme, e generalizar de um tipo para os outros ja deu errado uma vez:
+#   retangulo (14) Color=128       283 de 336   <- so ele e 128
+#   polilinha (6)  Color=16711680 1497 de 1759
+#   arco      (12) Color=16711680  845 de 887   (128: nenhum)
+#   linha     (13) Color=16711680  775 de 830   (128: nenhum)
+#   elipse    (11) Color=16711680   85 de  85   (128: nenhum)
+#   rotulo    (4)  Color=8388608   111 de 155
+# O corpo preenchido do retangulo: AreaColor=11599871 + IsSolid=T + Transparent=T
+# (combinacao dominante, 190 de 336; AreaColor=11599871 em 300).
+# Miolo de poligono (7): AreaColor=1938175, 343 de 405.
+COR_LINHA = 16711680        # o azul padrao: polilinha, arco, linha, elipse
+COR_BORDA_CORPO = 128       # SO o retangulo do corpo
+COR_CORPO = 11599871
+COR_POLI = 1938175
+COR_TEXTO = 8388608
+
+
 def forma_para_registro(g, parte, seq):
     """um item `graphics` do espelho schlib-v2 -> registro ASCII do Altium"""
     base = [('RECORD', None), ('IsNotAccesible', 'T'), ('OwnerPartId', parte)]
     k = g['g']
     d = dict()
 
-    def mk(rec, extra):
+    def mk(rec, extra, cor=COR_LINHA, depois=None):
+        # a ordem segue a da lib real: ... Color, AreaColor, IsSolid, Transparent, UniqueID
         o = [('RECORD', rec), ('IsNotAccesible', 'T'), ('OwnerPartId', parte)]
         o += extra
-        o += [('Color', 16711680), ('UniqueID', _uid(seq))]
+        o += [('Color', cor)]
+        o += (depois or [])
+        o += [('UniqueID', _uid(seq))]
         from collections import OrderedDict
         return OrderedDict(o)
 
     if k == 'rect':
         return _reg(mk(14, [('Location.X', u(g['x1'])), ('Location.Y', u(g['y1'])),
                             ('Corner.X', u(g['x2'])), ('Corner.Y', u(g['y2'])),
-                            ('LineWidth', 1)]))
+                            ('LineWidth', 1)], cor=COR_BORDA_CORPO,
+                       depois=[('AreaColor', COR_CORPO), ('IsSolid', 'T'),
+                               ('Transparent', 'T')]))
     if k == 'line':
         return _reg(mk(13, [('Location.X', u(g['x1'])), ('Location.Y', u(g['y1'])),
                             ('Corner.X', u(g['x2'])), ('Corner.Y', u(g['y2'])),
@@ -162,7 +185,7 @@ def forma_para_registro(g, parte, seq):
             extra += [('X%d' % i, u(x)), ('Y%d' % i, u(y))]
         rec = 7 if k == 'poly' else 6
         if k == 'poly':
-            extra = [('AreaColor', 16711680), ('IsSolid', 'T')] + extra
+            extra = [('AreaColor', COR_POLI), ('IsSolid', 'T')] + extra
         return _reg(mk(rec, extra))
     if k == 'arc':
         return _reg(mk(12, [('Location.X', u(g['cx'])), ('Location.Y', u(g['cy'])),
@@ -175,7 +198,7 @@ def forma_para_registro(g, parte, seq):
                             ('LineWidth', 1), ('EndAngle', '360.000')]))
     if k == 'label':
         return _reg(mk(4, [('Location.X', u(g['x'])), ('Location.Y', u(g['y'])),
-                           ('FontID', 1), ('Text', g.get('text', ''))]))
+                           ('FontID', 1), ('Text', g.get('text', ''))], cor=COR_TEXTO))
     _ = (base, d)
     return None
 
@@ -222,21 +245,93 @@ def _com_parte(reg, parte):
     return _reg(d)
 
 
-def _fundo(regs):
-    """menor Y (em unidades do arquivo) dos registros, para pôr o rótulo embaixo"""
+# Altura de uma linha de texto e respiro, em unidades do arquivo (1 = 10 mil).
+# A ancora de um texto no Altium e o PE da linha: ele ocupa da ancora para CIMA.
+# Ignorar isso foi o defeito: o designador do termistor foi para 40 mil acima do
+# rotulo "t°" (ancorado em 70) e caiu bem no meio dele, que vai ate 170; e o Comment,
+# ancorado 40 mil abaixo do desenho, subia por cima do corpo.
+# Todo texto que este modulo grava sai com FontID=1 (a fonte 1 da lib da casa, tamanho
+# 10), entao 100 mil cobre qualquer linha - forma_para_registro nem repassa o `size`
+# do espelho.
+ALTURA_TEXTO = 10
+FOLGA_TEXTO = 5
+
+
+def _ys(regs):
+    """todos os Y (em unidades do arquivo) que o desenho da parte ocupa"""
     ys = []
     for tipo, pl in regs:
         if tipo == SB.BINARIO:
             ys.append(SB.le_pino(pl)['y'])
             continue
         d = SB.le_texto(pl)
+        # RECORD 4/34/41 sao texto; o resto e traco e ocupa so a propria coordenada
+        texto = d.get('RECORD') in ('4', '34', '41')
         for k, v in d.items():
-            if k.startswith(('Location.Y', 'Corner.Y')) or re.match(r'^Y\d+$', k):
+            # comparacao exata: "Location.Y_Frac" NAO e coordenada, e a fracao da
+            # unidade. Os simbolos reciclados da casa trazem esses campos, e deixar
+            # um 93701 entrar aqui jogava o extremo para o espaco.
+            if k in ('Location.Y', 'Corner.Y') or re.match(r'^Y\d+$', k):
                 try:
-                    ys.append(int(float(v)))
+                    y = int(float(v))
                 except ValueError:
-                    pass
+                    continue
+                ys.append(y)
+                if texto:
+                    ys.append(y + ALTURA_TEXTO)
+    return ys
+
+
+# RECORD que existe no arquivo mas nao vira desenho na folha: cabecalho do
+# componente e a lista de modelos/footprints.
+SEM_DESENHO = ('1', '44', '45', '46', '47', '48')
+
+
+def _visiveis(regs):
+    """só o que o Altium pinta na folha — fora o cabeçalho, os modelos e o escondido"""
+    fora = []
+    for tipo, pl in regs:
+        if tipo != SB.TEXTO:
+            fora.append((tipo, pl))
+            continue
+        d = SB.le_texto(pl)
+        if d.get('RECORD') in SEM_DESENHO or d.get('IsHidden') == 'T':
+            continue
+        fora.append((tipo, pl))
+    return fora
+
+
+def _fundo(regs):
+    """menor Y (em unidades do arquivo) dos registros, para pôr o rótulo embaixo"""
+    ys = _ys(regs)
     return min(ys) if ys else 0
+
+
+def _topo(regs):
+    """maior Y (em unidades do arquivo), para pôr o designador em cima do desenho"""
+    ys = _ys(regs)
+    return max(ys) if ys else 0
+
+
+def _acima_do_desenho(d, porparte, nivel=0):
+    """Sobe um registro de texto para fora do desenho, empilhando uma linha por nível.
+
+    Vale TAMBEM para o texto herdado de um simbolo reciclado. A biblioteca da casa
+    escreve o designador por cima do desenho em 148 dos 245 componentes dela, e 386
+    componentes gerados saiam assim - o "C?" atravessando as placas do capacitor.
+    Copiar a construcao da casa nao inclui copiar isso: aqui o gerador padroniza, e
+    como ele roda a cada sincronizacao, simbolo novo ja nasce certo e simbolo velho
+    se conserta sozinho na proxima passada.
+
+    A coordenada X fica como estava: o que incomoda e a sobreposicao vertical, e
+    manter o X preserva o alinhamento que a casa escolheu.
+    """
+    d['Location.Y'] = _topo(porparte) + FOLGA_TEXTO + nivel * ALTURA_TEXTO
+    # a fracao herdada somaria por cima da coordenada nova
+    d.pop('Location.Y_Frac', None)
+    # posicao automatica do Altium reescreveria o que acabamos de decidir
+    d.pop('NotAutoPosition', None)
+    d.pop('OverrideNotAutoPosition', None)
 
 
 def monta_componente(sim, valor, modelo=None):
@@ -295,12 +390,18 @@ def monta_componente(sim, valor, modelo=None):
     #    reciclado já trouxer um deles (o RES [ SMD ] da casa tem "Value" e um "Comment"
     #    que é expressão), ele sai daqui — dois parâmetros com o mesmo nome confundem o
     #    BOM e a atualização pelo DbLib.
+    nivel = 0
     for d in comum:
         d = OrderedDict(d)
         if d.get('RECORD') == '41' and d.get('Name') in CAMPOS_DO_VALOR:
             continue
         if d.get('RECORD') == '34':
             d['Text'] = (sim.get('designator') or 'U') + '?'
+        # Todo texto que APARECE sobe para cima do desenho, inclusive o que veio
+        # herdado do simbolo reciclado. Um por linha, para nao se cobrirem.
+        if d.get('RECORD') in ('34', '41') and d.get('IsHidden') != 'T':
+            _acima_do_desenho(d, porparte, nivel)
+            nivel += 1
         if 'UniqueID' in d:
             d['UniqueID'] = _uid(nome + '#' + str(d.get('Name', d.get('Text', ''))))
         fora.append(_reg(d))
@@ -308,13 +409,22 @@ def monta_componente(sim, valor, modelo=None):
                [(SB.TEXTO, SB.escreve_texto(d)) for d in comum] if t == SB.TEXTO):
         fora.append(_reg(OrderedDict([
             ('RECORD', 34), ('IndexInSheet', -1), ('OwnerPartId', -1),
-            ('Location.X', 0), ('Location.Y', u(200)), ('Color', 8388608), ('FontID', 1),
+            # Acima de TUDO que o desenho ocupa, inclusive a altura dos rotulos.
+            # Era u(200) fixo, que caia DENTRO do corpo em 460 dos 460 componentes.
+            ('Location.X', 0),
+            ('Location.Y', _topo(porparte) + FOLGA_TEXTO + nivel * ALTURA_TEXTO),
+            ('Color', 8388608), ('FontID', 1),
             ('Text', (sim.get('designator') or 'U') + '?'), ('Name', 'Designator'),
             ('ReadOnlyState', 1), ('UniqueID', _uid(nome + '#desig'))])))
 
     # 3. corpo e pinos — uma parte só. O valor NAO mora mais aqui: ele e um conjunto de
     #    parametros preenchido na hora de colocar (pelo hub) ou escolhido no .DbLib.
-    ybase = _fundo(porparte) - 4
+    # O Comment cresce para cima a partir daqui, entao desce a altura da linha INTEIRA
+    # mais o respiro - senao ele sobe por cima do corpo, que era o caso do "MF-250".
+    # A conta olha TUDO que ja foi emitido e aparece na folha, nao so o desenho da
+    # parte: num simbolo reciclado o designador vem da lib da casa e as vezes mora
+    # embaixo do corpo, e o Comment caia bem em cima dele.
+    ybase = _fundo(_visiveis(fora) + _visiveis(porparte)) - FOLGA_TEXTO - ALTURA_TEXTO
     for reg in porparte:
         fora.append(_com_parte(reg, 1))
 
@@ -423,31 +533,54 @@ def nome_storage(nome, usados):
     return st
 
 
-def monta_lib(itens, cab_modelo, comps_modelo):
-    """[(simbolo, valor)] -> arvore para o cfbf.escreve, um componente por valor"""
+def _cabecalho(itens, cab_modelo):
+    """o registro unico do stream FileHeader: o indice da biblioteca.
+
+    Separado do `monta_lib` porque o `gera` precisa MEDIR este registro antes de
+    montar a biblioteca inteira - e ele que tem teto de tamanho (SB.MAX_REGISTRO) e
+    que decide em quantos pedacos a familia vai sair.
+    """
     from collections import OrderedDict
-    arvore = {}
     cab = OrderedDict()
     for k, v in (cab_modelo or {}).items():
+        # tudo que e indexado POR COMPONENTE da lib modelo tem que sair: os indices
+        # nao valem nada aqui. Comp<N>Alias<M> ficava para tras enquanto AliasCount<N>
+        # saia - as 32 libs geradas carregavam 21 apelidos orfaos, herdados da lib da
+        # casa, apontando para componentes que nao existem nelas.
         if re.match(r'^(LibRef|CompDescr|PartCount|AliasCount)\d+$', k):
+            continue
+        if re.match(r'^Comp\d+Alias\d+$', k):
             continue
         cab[k] = v
     cab['HEADER'] = 'Protel for Windows - Schematic Library Editor Binary File Version 5.0'
     cab['MinorVersion'] = 2
-
-    usados = set()
-    for i, (sim, valor) in enumerate(itens):
-        regs = monta_componente(sim, valor, _modelo_de(sim, comps_modelo))
-        nome = valor['altium']
-        st = nome_storage(nome, usados)
-        arvore[st] = {'Data': SB.monta(regs)}
-        cab['LibRef%d' % i] = nome
+    for i, (_sim, valor) in enumerate(itens):
+        cab['LibRef%d' % i] = valor['altium']
         # o indice do cabecalho fica com o rotulo curto; a descricao completa do Odoo
         # vive no proprio componente. Um cabecalho enxuto abre mais rapido no Altium.
         cab['CompDescr%d' % i] = valor.get('label', '')
         cab['PartCount%d' % i] = 2          # 1 parte, e o arquivo grava partes+1
+    # CompCount vinha do cabecalho modelo e saia 403 nas 32 bibliotecas — o numero de
+    # componentes da lib da CASA, nao o desta. Na lib real ele bate exato: 404 para
+    # 404 componentes. (Weight nao e contagem: la sao 11.960 para os mesmos 404.)
+    cab['CompCount'] = len(itens)
     cab['Weight'] = len(itens)
-    arvore['FileHeader'] = SB.monta([_reg(cab)])
+    return cab
+
+
+def tamanho_cabecalho(itens, cab_modelo):
+    """bytes que o registro do FileHeader vai ocupar para esta lista de itens"""
+    return len(SB.escreve_texto(_cabecalho(itens, cab_modelo)))
+
+
+def monta_lib(itens, cab_modelo, comps_modelo):
+    """[(simbolo, valor)] -> arvore para o cfbf.escreve, um componente por valor"""
+    arvore = {}
+    usados = set()
+    for sim, valor in itens:
+        regs = monta_componente(sim, valor, _modelo_de(sim, comps_modelo))
+        arvore[nome_storage(valor['altium'], usados)] = {'Data': SB.monta(regs)}
+    arvore['FileHeader'] = SB.monta([_reg(_cabecalho(itens, cab_modelo))])
     return arvore
 
 
@@ -520,8 +653,56 @@ def nome_arquivo(fam):
     return re.sub(r'[\\/:*?"<>|]', '-', fam) + ' ALMOX'
 
 
+def _fatia(itens, n):
+    """Divide em ~n pedacos contiguos, sem partir um simbolo ao meio quando da.
+
+    O corte cru por contagem separava 'CONECTOR [PINAGEM A DEFINIR]' entre as duas
+    ESPECIAIS: metade dos conectores de pinagem a definir numa biblioteca, metade na
+    outra. Nao quebrava nada - cada valor e um componente independente -, mas quem
+    procura no painel acha so metade. Aqui o corte espera o simbolo acabar.
+    Pode devolver menos ou mais que n pedacos; quem chama confere pedaco a pedaco.
+    """
+    if n <= 1 or not itens:
+        return [itens]
+    alvo = -(-len(itens) // n)
+    pedacos, atual = [], []
+    for par in itens:
+        if atual and len(atual) >= alvo and atual[-1][0] is not par[0]:
+            pedacos.append(atual)
+            atual = []
+        atual.append(par)
+    if atual:
+        pedacos.append(atual)
+    return pedacos
+
+
+def fatias_que_cabem(itens, cab_modelo):
+    """Quebra a familia ate o FileHeader de CADA pedaco caber num registro.
+
+    Uma familia grande estoura o teto de 65.535 bytes do enquadramento (ver
+    SB.MAX_REGISTRO): a ESPECIAIS, com 919 componentes, pedia 81.617 e o Altium
+    devolvia a folha em preto. O peso vem do indice - LibRef, CompDescr e PartCount
+    por componente, uns 89 bytes cada -, entao quem manda e a soma dos NOMES, nao a
+    contagem. Por isso a conta e medida a cada tentativa em vez de um teto fixo de
+    componentes: uma familia de nomes curtos cabe inteira onde outra nao caberia.
+    """
+    n = 1
+    while True:
+        pedacos = _fatia(itens, n)
+        if all(tamanho_cabecalho(p, cab_modelo) <= SB.MAX_REGISTRO for p in pedacos):
+            return pedacos
+        if n >= len(itens):
+            return pedacos          # um componente por lib ja nao cabe: deixa estourar
+        n += 1
+
+
 def gera(destino_dir=None, origem=LIB_REAL, log=print):
-    """Uma biblioteca por familia nos basicos, mais uma unica para os especiais."""
+    """Uma biblioteca por familia nos basicos, mais uma unica para os especiais.
+
+    Familia que nao caiba num registro de cabecalho sai numerada - "ESPECIAIS 1
+    ALMOX", "ESPECIAIS 2 ALMOX" -, com o sufixo ALMOX no fim para os pedacos
+    ficarem lado a lado no painel de bibliotecas.
+    """
     import collections
     destino_dir = destino_dir or os.path.join(LIBS, 'Almox')
     if not os.path.isdir(destino_dir):
@@ -543,8 +724,21 @@ def gera(destino_dir=None, origem=LIB_REAL, log=print):
             for v in sim.get('valores') or []:
                 grupos.setdefault(fam, []).append((sim, v))
 
+    # plano: familia -> um ou mais pedacos, cada um com o nome de arquivo dele.
+    # Tem que vir ANTES da faxina, senao os pedacos numerados de uma geracao boa
+    # seriam apagados por nao estarem na lista de esperados.
+    plano = []
+    for fam in sorted(grupos, key=lambda f: -len(grupos[f])):
+        pedacos = fatias_que_cabem(grupos[fam], cab_modelo)
+        for k, itens in enumerate(pedacos, 1):
+            rotulo = fam if len(pedacos) == 1 else '%s %d' % (fam, k)
+            plano.append((nome_arquivo(rotulo), itens))
+        if len(pedacos) > 1:
+            log('   %s nao cabe num cabecalho so: sai em %d bibliotecas'
+                % (fam, len(pedacos)))
+
     # apaga as libs de uma geracao anterior que nao existem mais
-    esperados = {nome_arquivo(f) + '.SchLib' for f in grupos}
+    esperados = {base + '.SchLib' for base, _ in plano}
     for f in os.listdir(destino_dir):
         # pega tambem o padrao antigo ("ALMOX RESISTOR"), que saiu de circulacao
         if not f.endswith('.SchLib') or f in esperados:
@@ -558,10 +752,8 @@ def gera(destino_dir=None, origem=LIB_REAL, log=print):
     pcb = copia_pcblib(destino_dir, log=log)
 
     feitos, total, bytes_tot = [], 0, 0
-    for fam in sorted(grupos, key=lambda f: -len(grupos[f])):
-        itens = grupos[fam]
+    for base, itens in plano:
         bruto = cfbf.escreve(monta_lib(itens, cab_modelo, comps))
-        base = nome_arquivo(fam)
         alvo = os.path.join(destino_dir, base + '.SchLib')
         with io.open(alvo, 'wb') as f:
             f.write(bruto)

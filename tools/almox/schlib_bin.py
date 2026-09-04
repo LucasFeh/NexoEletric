@@ -48,13 +48,27 @@ def desmonta(dados):
     return fora
 
 
+# Teto de um registro na ESCRITA. O `desmonta` le TRES bytes de tamanho e continua
+# assim - e tolerante de proposito, e o round-trip byte a byte da lib real depende
+# disso. Escrever e outra historia: nenhum registro da biblioteca real passa de
+# 33.859 bytes, e o Altium 21.5.1 nao leu um FileHeader de 81.617 bytes que este
+# modulo gerou (a ESPECIAIS ALMOX com 919 componentes) - a biblioteca abriu com a
+# lista cheia, porque cada componente mora no seu storage, e a FOLHA em preto,
+# porque o cabecalho inteiro foi descartado. Lendo o tamanho como uint16 da 16.081:
+# o Altium procura o registro seguinte no meio de uma string e joga tudo fora.
+# Entao: ler com folga, escrever dentro do que a Altium comprovadamente le.
+MAX_REGISTRO = 0xFFFF
+
+
 def monta(regs):
     """[(tipo, payload)] -> bytes do stream"""
     out = bytearray()
     for tipo, pl in regs:
         n = len(pl)
-        if n > 0xFFFFFF:
-            raise ValueError('registro de %d bytes nao cabe no enquadramento' % n)
+        if n > MAX_REGISTRO:
+            raise ValueError(
+                'registro de %d bytes: o Altium nao le acima de %d. Quebre a '
+                'biblioteca em mais pedacos.' % (n, MAX_REGISTRO))
         out += bytes([n & 0xFF, (n >> 8) & 0xFF, (n >> 16) & 0xFF, tipo]) + pl
     return bytes(out)
 
@@ -174,6 +188,15 @@ ELETRICO = {'Input': 0, 'IO': 1, 'Output': 2, 'OpenCollector': 3, 'Passive': 4,
 ROTACAO = {0: 0, 90: 1, 180: 2, 270: 3}
 # bits 4 e 5 do conglomerado: mostrar designador e mostrar nome
 CONG_MOSTRA_DESIG, CONG_MOSTRA_NOME = 0x10, 0x20
+# CENSO dos 3.834 pinos da BIBLIOTECA DE ESQUEMA.SchLib real, para quem vier depois:
+#   bits 0-1 rotacao (0: 1783, 2: 1470, 3: 309, 1: 272)
+#   0x08 ligado em 2.732 - NAO e "mostrar nome". Testei essa hipotese e ela morreu no
+#        2N3904, que tem nome "C" e designador "1" (nome != designador, portanto o
+#        nome diz algo) e mesmo assim vem com 0x31, sem o 0x08. O significado dele
+#        continua desconhecido; nao mexa sem uma medicao que feche.
+#   0x10 ligado em 2.841 · 0x20 ligado em 3.764 · 0x04/0x40/0x80 nunca.
+# O par 0x20|0x10 que este modulo emite e o mesmo do 2N3904 real (0x31 = 0x20|0x10|rot),
+# e e o que tests/test_schlib_bin.py exige byte a byte.
 
 
 def mil(v):

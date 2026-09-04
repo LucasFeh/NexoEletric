@@ -18,6 +18,15 @@ const
 var
   SkippedDocs: Integer;
   ScanInfo: String; // diagnostico do ultimo ListProjectDirs (aparece nos dialogos)
+  // estado do filtro de carimbo (ver bloco "carimbo da folha" mais abaixo)
+  StampKeys: TStringList;  // chave texto+posicao dos rotulos do carimbo da folha corrente
+  TplPath: String;         // .SchDot ja lido (cache entre folhas do mesmo projeto)
+  TplTexts: TStringList;   // textos dos rotulos desse .SchDot
+  StampDropped: Integer;   // rotulos de carimbo que ficaram fora do espelho
+  StampByObj: Integer;     // folhas em que a sonda do objeto eTemplate trouxe material
+  StampByTpl: Integer;     // folhas em que a sonda do .SchDot trouxe material
+  StampBlind: Integer;     // folhas em que nenhuma das duas respondeu
+                           // (as duas rodam juntas, entao ByObj e ByTpl se somam)
 
 { helpers JSON identicos aos do ExportLibs.pas — copie JF, JB, JS, AddItem daquele arquivo }
 { e os mapeamentos RotDegOf (TRotationBy90 -> 0/90/180/270) tambem. }
@@ -433,6 +442,194 @@ begin
     Result := FirstFp;
 end;
 
+{ ------------------------------- carimbo da folha (template) ------------------------------- }
+
+// POR QUE ESTE FILTRO EXISTE
+// O carimbo da folha e feito de eLabel - os mesmos "DESEN.", "VERIF.", "=Revisao",
+// "=Arquivo" que aparecem no rodape de todo desenho da casa - e o iterador de
+// DOCUMENTO devolve esses rotulos junto com os textos que o projetista escreveu.
+// Medido nos espelhos ja gravados em Projects\: 328 dos 416 itens {"t":"text"} sao
+// carimbo (26 a 29 por folha), e em 6 das 14 folhas o texto exportado e 100%
+// carimbo. Isso nao e o esquema: e a folha em que ele foi desenhado.
+//
+// COMO O ALTIUM MARCA O CARIMBO (lido nos .SchDoc reais, nao suposto)
+// Aplicar um .SchDot grava no .SchDoc um registro |RECORD=39| (Template) com o
+// caminho do template em FileName, e cada primitiva copiada dele recebe OwnerIndex
+// apontando para esse registro. Medido em SCH - DI261924(A).SchDoc: 29 rotulos com
+// OwnerIndex=1 (o RECORD=39 de A3_DiEletrons.SchDot) e 14 rotulos SEM OwnerIndex
+// nenhum - ATERRAMENTO, CLOCK, MENU, +12V, DISPLAY... que sao do projetista e tem
+// que continuar saindo. Mesma marcacao em SCH-LED-DI261898.SchDoc (29/29 com
+// OwnerIndex=1) e no ESQUEMA_1.SchDoc do TCMS_Reader2 (26/26). A folha (RECORD=31)
+// ainda guarda TemplateFileName e ShowTemplateGraphics.
+//
+// ARMADILHA: IsNotAccesible (a grafia com um 's' so e a da Altium) NAO serve. No
+// arquivo real ele marca o desenho INTERNO dos simbolos e o proprio RECORD=39 - os
+// filhos do template nao o carregam. Filtrar por ele deixaria o carimbo inteiro
+// passar e ainda comeria o desenho dos componentes.
+//
+// DUAS SONDAS, NENHUMA ASSUMIDA
+// A API de script nao publica OwnerIndex (ISch_GraphicalObject so expoe OwnerPartId
+// e OwnerPartDisplayMode), entao o filtro reconstroi a mesma resposta por dois
+// caminhos:
+//   1) descer no objeto eTemplate da folha e listar os rotulos que pertencem a ele;
+//   2) abrir o .SchDot que TemplateFileName aponta e casar os rotulos pelo texto.
+// As duas rodam JUNTAS e o rotulo cai fora se QUALQUER uma o reconhecer - nao e
+// cascata. O motivo: as duas so sabem descartar o que o proprio template entrega,
+// entao nenhuma delas consegue comer um texto do projetista por engano, e somar as
+// respostas so aumenta o alcance. Cascata teria um buraco silencioso: se a sonda 1
+// achasse o objeto eTemplate mas devolvesse enderecos que nao casam com os do
+// iterador de documento, ela "responderia" sem descartar nada e a 2 nunca correria.
+// Se as duas falharem, a folha sai como antes (com carimbo) e o dialogo final
+// avisa - nunca em silencio.
+//
+// EFEITO COLATERAL da sonda 2: ela abre o .SchDot no servidor de esquema (mesma
+// primitiva que ja carrega as folhas do projeto) e nao o fecha - nao ha primitiva
+// de fechar comprovada neste engine. O template pode ficar listado entre os
+// documentos abertos do Altium; e so fechar na mao, nada e gravado nele.
+
+// Chave de um rotulo: texto + posicao em Coord.
+// NAO use I_ObjectAddress para isso. Neste engine ele volta como Dispatch e
+// IntToStr estoura "EVariantTypeCastError: Could not convert variant of type
+// (Dispatch) into type (Boolean)" - medido, no primeiro rotulo do carimbo.
+// Texto+posicao e a mesma chave que o BuildSchematic ja usa em FindLabelAt, e
+// serve melhor aqui: nao depende de o iterador do template e o do documento
+// devolverem o MESMO wrapper para o mesmo objeto.
+function LabelKey(L: TObject): String;
+begin
+  Result := L.Text + '|' + IntToStr(L.Location.X) + '|' + IntToStr(L.Location.Y);
+end;
+
+// Sonda 1: os rotulos que pertencem ao objeto eTemplate da folha.
+function StampByTemplateObject(SchDoc: ISch_Document; Keys: TStringList): Integer;
+var
+  DocIter, TplIter, Tpl, L: TObject;
+begin
+  Result := 0;
+  DocIter := nil;
+  try
+    DocIter := SchDoc.SchIterator_Create;
+  except
+    DocIter := nil;
+  end;
+  if DocIter = nil then
+    Exit;
+  try
+    DocIter.AddFilter_ObjectSet(MkSet(eTemplate));
+    Tpl := DocIter.FirstSchObject;
+    while Tpl <> nil do
+    begin
+      TplIter := nil;
+      try
+        TplIter := Tpl.SchIterator_Create;
+      except
+        TplIter := nil;
+      end;
+      if TplIter <> nil then
+      begin
+        TplIter.AddFilter_ObjectSet(MkSet(eLabel));
+        L := TplIter.FirstSchObject;
+        while L <> nil do
+        begin
+          Keys.Add(LabelKey(L));
+          Result := Result + 1;
+          L := TplIter.NextSchObject;
+        end;
+        Tpl.SchIterator_Destroy(TplIter);
+      end;
+      Tpl := DocIter.NextSchObject;
+    end;
+  except
+    // engine que nao aceita eTemplate no filtro, ou que nao desce no template:
+    // fica com o que deu e a sonda 2 assume
+  end;
+  SchDoc.SchIterator_Destroy(DocIter);
+end;
+
+// Sonda 2: os textos dos rotulos do .SchDot que a folha aponta em TemplateFileName.
+// Cacheado entre folhas - um projeto costuma usar um template so (e as folhas A3 e
+// A4 da casa tem carimbos diferentes, dai o cache ser por caminho e nao por projeto).
+function LoadStampTexts(SchDoc: ISch_Document): Integer;
+var
+  Path: String;
+  TplDoc: ISch_Document;
+  Iter, L: TObject;
+begin
+  Result := 0;
+  Path := '';
+  try
+    Path := SchDoc.TemplateFileName;
+  except
+    Path := '';
+  end;
+  Path := Trim(Path);
+  if Path = '' then
+  begin
+    TplPath := '';
+    TplTexts.Clear;
+    Exit;
+  end;
+  if AnsiCompareText(Path, TplPath) = 0 then
+  begin
+    Result := TplTexts.Count;
+    Exit;
+  end;
+  TplPath := '';
+  TplTexts.Clear;
+  if not FileExists(Path) then
+    Exit; // template numa maquina que este PC nao enxerga
+  TplDoc := nil;
+  try
+    TplDoc := SchServer.GetSchDocumentByPath(Path);
+    if TplDoc = nil then
+      TplDoc := SchServer.LoadSchDocumentByPath(Path);
+  except
+    TplDoc := nil;
+  end;
+  if TplDoc = nil then
+    Exit;
+  Iter := TplDoc.SchIterator_Create;
+  if Iter = nil then
+    Exit;
+  Iter.AddFilter_ObjectSet(MkSet(eLabel));
+  L := Iter.FirstSchObject;
+  while L <> nil do
+  begin
+    if TplTexts.IndexOf(L.Text) < 0 then
+      TplTexts.Add(L.Text);
+    L := Iter.NextSchObject;
+  end;
+  TplDoc.SchIterator_Destroy(Iter);
+  TplPath := Path;
+  Result := TplTexts.Count;
+end;
+
+// Roda as duas sondas nesta folha e anota quem trouxe material.
+procedure PrepareStampFilter(SchDoc: ISch_Document);
+var
+  nObj, nTpl: Integer;
+begin
+  StampKeys.Clear;
+  nObj := StampByTemplateObject(SchDoc, StampKeys);
+  nTpl := LoadStampTexts(SchDoc); // deixa TplTexts em dia com o template DESTA folha
+  if nObj > 0 then
+    StampByObj := StampByObj + 1;
+  if nTpl > 0 then
+    StampByTpl := StampByTpl + 1;
+  if (nObj = 0) and (nTpl = 0) then
+    StampBlind := StampBlind + 1;
+end;
+
+// True se este eLabel e do carimbo - e portanto nao entra no espelho.
+// Basta uma das sondas reconhecer: as duas so apontam o que o template entregou.
+function IsStampLabel(Prim: TObject): Boolean;
+begin
+  Result := False;
+  if StampKeys.Count > 0 then
+    Result := StampKeys.IndexOf(LabelKey(Prim)) >= 0;
+  if (not Result) and (TplTexts.Count > 0) then
+    Result := TplTexts.IndexOf(Prim.Text) >= 0;
+end;
+
 { ------------------------------- exportacao de uma folha ------------------------------- }
 
 procedure ExportSheet(Path: String; ItemsL: TStringList);
@@ -451,6 +648,7 @@ begin
     Exit;
   end;
   SheetName := BaseName(Path);
+  PrepareStampFilter(SchDoc);
 
   AddItem(ItemsL, '{"t":"sheet","name":' + JS(SheetName) + ',"size":' + JS(SheetSizeName(SchDoc.SheetStyle)) + '}');
 
@@ -500,10 +698,15 @@ begin
         AddItem(ItemsL, '{"t":"junction","sheet":' + JS(SheetName) +
           ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) + '}');
       eLabel:
-        AddItem(ItemsL, '{"t":"text","sheet":' + JS(SheetName) +
-          ',"s":' + JS(Prim.Text) +
-          ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) +
-          ',"h":10}');
+        begin
+          if IsStampLabel(Prim) then
+            StampDropped := StampDropped + 1
+          else
+            AddItem(ItemsL, '{"t":"text","sheet":' + JS(SheetName) +
+              ',"s":' + JS(Prim.Text) +
+              ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) +
+              ',"h":10}');
+        end;
     end;
     Prim := Iterator.NextSchObject;
   end;
@@ -518,7 +721,7 @@ var
   Prj: IProject;
   Doc: IDocument;
   i, SheetCount: Integer;
-  ProjName, OutDir: String;
+  ProjName, OutDir, CarimboTxt: String;
   ItemsL, OutL: TStringList;
 begin
   if SchServer = nil then
@@ -545,6 +748,13 @@ begin
 
   SkippedDocs := 0;
   SheetCount := 0;
+  StampDropped := 0;
+  StampByObj := 0;
+  StampByTpl := 0;
+  StampBlind := 0;
+  TplPath := '';
+  StampKeys := TStringList.Create;
+  TplTexts := TStringList.Create;
   ItemsL := TStringList.Create;
   for i := 0 to Prj.DM_LogicalDocumentCount - 1 do
   begin
@@ -560,6 +770,8 @@ begin
   begin
     ShowMessage('O projeto "' + ProjName + '" nao tem documentos de esquema (.SchDoc).');
     ItemsL.Free;
+    StampKeys.Free;
+    TplTexts.Free;
     Exit;
   end;
 
@@ -575,12 +787,26 @@ begin
   OutL.SaveToFile(OutDir + '\schematic.js');
   OutL.Free;
   ItemsL.Free;
+  StampKeys.Free;
+  TplTexts.Free;
 
   RegenerateProjectsIndex(ProjName);
 
+  // O carimbo entra no relatorio porque o filtro dele depende de duas sondas que a
+  // doc da Altium nao garante (ver o bloco "carimbo da folha"). Dizer quantos
+  // rotulos sairam e por qual caminho e o que separa "filtrou" de "achei que filtrou".
+  CarimboTxt := 'Carimbo: ' + IntToStr(StampDropped) + ' rotulos de template fora do espelho' +
+    #13#10 + '   (sonda do objeto eTemplate respondeu em ' + IntToStr(StampByObj) +
+    ' folha(s); a do .SchDot em ' + IntToStr(StampByTpl) + ')';
+  if StampBlind > 0 then
+    CarimboTxt := CarimboTxt + #13#10 +
+      '   ATENCAO: em ' + IntToStr(StampBlind) + ' folha(s) nenhuma sonda respondeu -' +
+      #13#10 + '   o carimbo dessas saiu junto no schematic.js.';
+
   ShowMessage('Esquema espelhado em:' + #13#10 + OutDir + '\schematic.js' + #13#10#13#10 +
     'Folhas: ' + IntToStr(SheetCount) +
-    '   (nao abertas/puladas: ' + IntToStr(SkippedDocs) + ')' + #13#10#13#10 +
+    '   (nao abertas/puladas: ' + IntToStr(SkippedDocs) + ')' + #13#10 +
+    CarimboTxt + #13#10#13#10 +
     'PCB: rode o ExportBoard com o .PcbDoc focado.' + #13#10 +
     'Confira no hub.html (vista Esquema).');
 end;

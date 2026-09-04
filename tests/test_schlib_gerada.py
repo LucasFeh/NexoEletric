@@ -47,14 +47,27 @@ def main():
     pcb = os.path.join(LIBS, ESC.PCBLIB_NOME)
     assert os.path.exists(pcb), 'falta %s ao lado das SchLib' % ESC.PCBLIB_NOME
 
-    arquivos = [f for f in os.listdir(LIBS) if f.endswith('.SchLib')]
-    assert len(arquivos) == len(esperado), (
-        '%d .SchLib para %d familias' % (len(arquivos), len(esperado)))
+    # Uma familia sai em UMA biblioteca, ou em varias numeradas quando o indice nao
+    # cabe num registro: "ESPECIAIS 1 ALMOX", "ESPECIAIS 2 ALMOX" (ver
+    # ESC.fatias_que_cabem). O que tem que fechar e a UNIAO dos pedacos.
+    arquivos = sorted(f for f in os.listdir(LIBS) if f.endswith('.SchLib'))
+    de_quem = {}
+    for fam in esperado:
+        raiz_fam = re.escape(ESC.nome_arquivo(fam)[:-len(' ALMOX')])
+        rx = re.compile(r'^%s( \d+)? ALMOX\.SchLib$' % raiz_fam)
+        pedacos = [f for f in arquivos if rx.match(f)]
+        assert pedacos, 'falta a biblioteca da familia %s' % fam
+        for f in pedacos:
+            de_quem[os.path.join(LIBS, f)] = fam
+    assert len(de_quem) == len(arquivos), (
+        '%d .SchLib no disco, %d casaram com alguma familia' % (len(arquivos), len(de_quem)))
 
     total = com_fp = com_param = 0
-    for fam, alvos in esperado.items():
-        caminho = os.path.join(LIBS, ESC.nome_arquivo(fam) + '.SchLib')
-        assert os.path.exists(caminho), 'falta a biblioteca da familia %s' % fam
+    libref_de = collections.defaultdict(set)
+    vistos_de = collections.defaultdict(set)
+    for caminho in sorted(de_quem):
+        fam = de_quem[caminho]
+        alvos = esperado[fam]
         # o .LibPkg e o que o Altium compila em .IntLib
         pkg = caminho[:-7] + '.LibPkg'
         assert os.path.exists(pkg), '%s: sem .LibPkg' % fam
@@ -66,11 +79,16 @@ def main():
             '%s: documentos do .LibPkg = %r' % (fam, docs))
 
         o = olefile.OleFileIO(caminho)
-        cab = SB.le_texto(SB.desmonta(o.openstream('FileHeader').read())[0][1])
+        regs_cab = SB.desmonta(o.openstream('FileHeader').read())
+        # O teto do enquadramento: o Altium 21.5.1 descarta o FileHeader inteiro
+        # acima disso e abre a biblioteca com a folha em preto. Foi assim que a
+        # ESPECIAIS de 919 componentes (81.617 bytes) saiu quebrada.
+        assert len(regs_cab[0][1]) <= SB.MAX_REGISTRO, (
+            '%s: FileHeader de %d bytes, teto %d'
+            % (os.path.basename(caminho), len(regs_cab[0][1]), SB.MAX_REGISTRO))
+        cab = SB.le_texto(regs_cab[0][1])
         libref = {v for k, v in cab.items() if re.match(r'^LibRef\d+$', k)}
-        assert libref == set(alvos), (
-            '%s: indice do FileHeader diverge (falta %r, sobra %r)'
-            % (fam, sorted(set(alvos) - libref)[:2], sorted(libref - set(alvos))[:2]))
+        libref_de[fam] |= libref
 
         vistos = set()
         for st in [s[0] for s in o.listdir() if len(s) == 2 and s[1] == 'Data'
@@ -82,6 +100,47 @@ def main():
             assert h.get('RECORD') == '1', '%s/%s: primeiro registro' % (fam, st)
             nome = h['LibReference']
             assert nome in alvos, '%s: componente inesperado %r' % (fam, nome)
+
+            # NENHUM rotulo pode cair em cima do desenho. Vale para o texto que o
+            # gerador cria E para o que veio herdado de um simbolo reciclado: a
+            # biblioteca da casa escreve o designador por cima do desenho em 148 dos
+            # 245 componentes dela, e isso nao pode atravessar a sincronizacao.
+            # A ancora de um texto no Altium e o PE da linha - ele ocupa para CIMA -,
+            # por isso a faixa vai de y ate y + ESC.ALTURA_TEXTO.
+            dx0 = dy0 = 10 ** 9
+            dx1 = dy1 = -10 ** 9
+            rotulos = []
+            for tipo, pl in regs:
+                if tipo != SB.TEXTO:
+                    p = SB.le_pino(pl)
+                    dx0, dx1 = min(dx0, p['x']), max(dx1, p['x'])
+                    dy0, dy1 = min(dy0, p['y']), max(dy1, p['y'])
+                    continue
+                d = SB.le_texto(pl)
+                r = d.get('RECORD')
+                if r in ESC.SEM_DESENHO or d.get('IsHidden') == 'T':
+                    continue
+                if r == '34' or (r == '41' and d.get('Name') == 'Comment'):
+                    x = int(d.get('Location.X', 0))
+                    y = int(d.get('Location.Y', 0))
+                    larg = max(1, len(d.get('Text', '') or '')) * 6   # 60 mil/caractere
+                    rotulos.append((d.get('Name', r), x, y, x + larg, y + ESC.ALTURA_TEXTO))
+                    continue
+                for k, v in d.items():
+                    try:
+                        val = int(float(v))
+                    except (ValueError, TypeError):
+                        continue
+                    if k in ('Location.X', 'Corner.X') or (k[:1] == 'X' and k[1:].isdigit()):
+                        dx0, dx1 = min(dx0, val), max(dx1, val)
+                    elif k in ('Location.Y', 'Corner.Y') or (k[:1] == 'Y' and k[1:].isdigit()):
+                        dy0, dy1 = min(dy0, val), max(dy1, val)
+            if dx1 > dx0 or dy1 > dy0:
+                for qual, x0, y0, x1, y1 in rotulos:
+                    assert not (x1 > dx0 and x0 < dx1 and y1 > dy0 and y0 < dy1), (
+                        '%s: %s ocupa x[%d..%d] y[%d..%d] e invade o desenho '
+                        'x[%d..%d] y[%d..%d]'
+                        % (nome, qual, x0, x1, y0, y1, dx0, dx1, dy0, dy1))
             # O Altium NAO varre o arquivo atras do LibReference: ele deriva o nome do
             # storage e abre direto ("Cannot find item [...] within the current storage"
             # e o que aparece quando a derivacao nao bate). A regra, lida da biblioteca
@@ -155,12 +214,31 @@ def main():
                     '%s: footprint atual %r, esperado %r' % (nome, atual, valor['footprint']))
                 com_fp += 1
             total += 1
-        assert vistos == set(alvos), '%s: faltaram %r' % (fam, sorted(set(alvos) - vistos)[:2])
+        # Coerencia DENTRO do arquivo. So a uniao por familia nao basta: ela aceitaria
+        # um componente indexado numa biblioteca e gravado na irma, que no Altium some
+        # do painel das duas. Aqui o indice do FileHeader e os storages tem que ser o
+        # mesmo conjunto, arquivo por arquivo.
+        assert libref == vistos, (
+            '%s: indice e storages divergem (so no indice %r, so no disco %r)'
+            % (os.path.basename(caminho), sorted(libref - vistos)[:2],
+               sorted(vistos - libref)[:2]))
+        assert int(cab.get('CompCount', -1)) == len(vistos), (
+            '%s: CompCount=%s para %d componentes'
+            % (os.path.basename(caminho), cab.get('CompCount'), len(vistos)))
+        vistos_de[fam] |= vistos
         o.close()
 
-    print('test_schlib_gerada OK (%d bibliotecas por familia, %d componentes, '
+    for fam, alvos in esperado.items():
+        assert libref_de[fam] == set(alvos), (
+            '%s: indice do FileHeader diverge (falta %r, sobra %r)'
+            % (fam, sorted(set(alvos) - libref_de[fam])[:2],
+               sorted(libref_de[fam] - set(alvos))[:2]))
+        assert vistos_de[fam] == set(alvos), (
+            '%s: faltaram %r' % (fam, sorted(set(alvos) - vistos_de[fam])[:2]))
+
+    print('test_schlib_gerada OK (%d bibliotecas para %d familias, %d componentes, '
           '%d com footprint atual, %d com parametros preenchidos)'
-          % (len(esperado), total, com_fp, com_param))
+          % (len(arquivos), len(esperado), total, com_fp, com_param))
     return 0
 
 

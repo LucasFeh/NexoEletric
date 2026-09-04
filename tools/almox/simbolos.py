@@ -264,7 +264,38 @@ def f_trafo(_n=0):
     return pins, g
 
 
-def f_box(n=4, largura=400, rotulo=''):
+# Convencao da casa para corpo de CI, contada nos 3.834 pinos da
+# BIBLIOTECA DE ESQUEMA.SchLib real:
+#   comprimento do pino  100 mil - 2.431 pinos contra 1.066 de 200 e 113 de 300
+#   passo entre pinos    200 mil - 140 simbolos contra 36 de 100 e 31 de 400
+# O gerador usava passo 100 e pino de 200: um DIP40 saia 400x2100 quando a casa
+# desenha 1600x4200. Era esse o "ta muito errado a construcao" - o corpo ficava
+# quatro vezes mais estreito com os pinos amontoados no dobro da densidade.
+PASSO_PINO = 200
+COMPR_PINO = 100
+
+
+def largura_corpo(n):
+    """Largura do corpo em mil para um CI de n pinos.
+
+    SEMPRE multipla de 200. O corpo e centrado na origem e o pino sai de +-largura/2,
+    entao meia largura precisa ser multipla de 100 para a ponta quente cair na grade
+    de 100 mil do Altium - senao o fio nao engata no pino. A escada anterior tinha
+    700 e 900, que davam meia largura de 350 e 450 e jogavam a ponta para fora da
+    grade. Os degraus batem com a moda por faixa medida na lib da casa
+    (8-15 pinos -> 800; a faixa de 40+ tem 4 simbolos, mediana 1375, e o PIC16F77,
+    que e o DIP40 da casa, tem 1600).
+    """
+    if n >= 40:
+        return 1600
+    if n >= 24:
+        return 1000
+    if n >= 8:
+        return 800
+    return 600
+
+
+def f_box(n=4, largura=0, rotulo=''):
     """corpo generico dos ESPECIAIS: caixa com metade dos pinos de cada lado.
 
     A pinagem sai do encapsulamento (DIP8 -> 8 pinos) e a numeracao segue a
@@ -274,17 +305,26 @@ def f_box(n=4, largura=400, rotulo=''):
     n = max(2, int(n or 2))
     esq = (n + 1) // 2
     dir_ = n - esq
-    alt = max(300, max(esq, dir_) * 100 + 100)
+    largura = largura or largura_corpo(n)
+    alt = max(2 * PASSO_PINO, max(esq, dir_) * PASSO_PINO + PASSO_PINO)
     topo = alt // 2
+    meia = largura // 2
     pins = []
     for i in range(esq):
-        pins.append(_pin(i + 1, str(i + 1), -largura // 2, topo - 100 - i * 100, 180, 200))
+        pins.append(_pin(i + 1, str(i + 1), -meia,
+                         topo - PASSO_PINO - i * PASSO_PINO, 180, COMPR_PINO))
     for j in range(dir_):
-        pins.append(_pin(esq + j + 1, str(esq + j + 1), largura // 2,
-                         topo - 100 - (dir_ - 1 - j) * 100, 0, 200))
-    g = [_rect(-largura // 2, -topo, largura // 2, topo)]
+        pins.append(_pin(esq + j + 1, str(esq + j + 1), meia,
+                         topo - PASSO_PINO - (dir_ - 1 - j) * PASSO_PINO, 0, COMPR_PINO))
+    g = [_rect(-meia, -topo, meia, topo)]
     if rotulo:
-        g.append(_lab(rotulo, 0, 0, 9))
+        # ABAIXO do corpo, nao no meio dele. No centro o nome da familia cobria o
+        # desenho - "CIRCUITO INTEGRADO" tem uns 990 mil de largura e o corpo mais
+        # estreito tem 600. A ancora de um texto no Altium e o pe da linha e a letra
+        # cresce para CIMA: 150 mil abaixo da borda deixa a linha (uns 100 mil) fora
+        # do retangulo com 50 de respiro. O x acompanha a borda esquerda - nome
+        # comprido escapa para a direita em vez de ficar torto em volta do zero.
+        g.append(_lab(rotulo, -meia, -topo - 150, 9))
     return pins, g
 
 
