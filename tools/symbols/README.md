@@ -209,6 +209,44 @@ continuam vindo do pino antigo de mesmo número, ou da moda do componente para p
 `extrair.py` descarta os flags: visibilidade de texto não é desenho e não entra no
 fingerprint nem na Biblioteca de símbolos.
 
+## Cores: `color` e `fill`
+
+Dois campos **opcionais** dos gráficos do `schlib-v2`, sempre `#rrggbb` minúsculo:
+
+- `color` — a cor do traço (Altium `Color`);
+- `fill` — a cor da área (Altium `AreaColor`); só faz sentido com `solid`.
+
+Ausente = a cor padrão da casa (o `schlib_patch` herda a paleta que o componente já usa; o
+hub desenha com `HubDraw.SCH.body`/`SCH.fill`). O Altium guarda TColor do Delphi:
+`int = R + G*256 + B*65536` — `16711680` é azul `#0000ff`, `128` é `#800000`, `11599871` é
+`#ffffb0`, `8388608` é `#000080`. Na lib real o corpo da casa é `Color=128` +
+`AreaColor=11599871` (283 dos 335 retângulos); linhas, arcos e polilinhas `16711680`;
+rótulos `8388608`; 3.768 dos 4.616 gráficos têm `Color`.
+
+Quem faz o quê:
+
+- **`sch_leitor.primitiva`** emite `color` de `Color` e `fill` de `AreaColor` — este só quando
+  `IsSolid` (a lib tem retângulo com `AreaColor` e sem `IsSolid`, como o `RES [ SMD ]`, e o
+  Altium não o pinta). Chave ausente no registro = campo ausente: o Altium não grava 0, e 0
+  é preto. Os dois vão no **fim** do gráfico, depois das chaves que o ExportLibs escrevia.
+  Consequência: o `Libs/schlib.js` versionado (do ExportLibs) não tem cor, e regerá-lo com
+  `--espelho` / `POST /api/symbols/mirror` passa a escrever `color`/`fill` em quase toda
+  linha. O passo `--flags` não é afetado (só encosta nos pinos) e o `tests/test_sch_leitor.py`
+  compara com o espelho versionado **ignorando** `color`/`fill`, como já ignora os flags.
+- **`schlib_patch.grafico_para_registro`** grava `Color`/`AreaColor` a partir de
+  `color`/`fill` (hex → TColor); sem os campos, a paleta do componente e, por último, a da
+  casa — bytes iguais aos de antes. `#000000` sai como ausência (preto) e ganha da paleta.
+  `fill` é gravado tenha ou não `solid` (o Altium guarda a `AreaColor` do retângulo vazado);
+  na releitura ele só volta quando sólido, e a conferência do patch sabe disso. Chave que
+  seria 0 nunca é escrita — nem a `AreaColor` de linha/arco/polilinha/rótulo, que uma versão
+  anterior gravava como `AreaColor=0`.
+- **`symserver` `/save` e `/lib add`** aceitam `color`/`fill` só em `#rrggbb` minúsculo (a
+  regex do `serializeSymbol` do hub) e `solid` só booleano — 400 antes de encostar no espelho.
+  Os gráficos vão ao espelho como vieram.
+- **`extrair.py`**: a cor **não** entra no fingerprint (o mesmo corpo em azul e em vermelho é
+  um símbolo só) nem muda a ordem canônica, mas os campos ficam no símbolo guardado na
+  Biblioteca — é o desenho que o usuário vai aplicar.
+
 ## O que NÃO entra
 
 - Componente sem pino (logotipo, moldura) — nada a trocar de corpo.

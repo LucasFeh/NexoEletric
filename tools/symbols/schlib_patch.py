@@ -41,8 +41,16 @@ O que foi apurado na biblioteca real e manda no que está escrito aqui:
                        negrito, 4 com Justification, 2 espelhados, 42 sem Color (preto).
   cores                o corpo da casa é Color=128 + AreaColor=11599871 (283 dos 335
                        retângulos); linhas/arcos/polilinhas 16711680; rótulos 8388608.
-                       Ao regravar, o componente mantém as cores que já tinha por tipo —
+                       Gráfico com `color`/`fill` ('#rrggbb', o que o leitor emite) grava
+                       Color/AreaColor a partir deles (hex -> TColor, R + G*256 + B*65536);
+                       sem os campos, o componente mantém as cores que já tinha por tipo —
                        inclusive a AUSÊNCIA de cor, que é preto (0) e não "sem paleta".
+                       Preto explícito ('#000000') também sai como ausência, e ganha da
+                       paleta. `fill` é gravado tenha ou não IsSolid (o Altium guarda a
+                       AreaColor do retângulo vazado — 13 na lib); o leitor só a devolve
+                       quando sólido, e a `esperado()` sabe disso. Chave que seria 0 nunca
+                       é escrita — nem a AreaColor de linha/arco/polilinha/rótulo, que a
+                       paleta lia como 0 e uma versão anterior deste módulo gravava.
   PinFrac              regravado, não descartado: `|HEADER=PinFrac|Weight=N` + N
                        registros binários `D0` + string pascal do ORDINAL do pino +
                        uint32 + zlib de 3 int32 (xfrac, yfrac, lenfrac em 1/100000 da
@@ -387,7 +395,8 @@ def _casa_rotulo(antigos, g):
 
 
 # ─── gráficos ─────────────────────────────────────────────────────────────────
-def _registro(rec, parte, idx, uid, campos, cores):
+def _registro(rec, parte, idx, uid, campos):
+    """o registro de texto na ordem de `campos`; zero/vazio não é gravado (o Altium também não)"""
     d = OrderedDict([('RECORD', rec), ('IsNotAccesible', 'T')])
     if idx:
         d['IndexInSheet'] = idx
@@ -396,11 +405,17 @@ def _registro(rec, parte, idx, uid, campos, cores):
         if v is None or v == 0 or v == '':
             continue
         d[k] = v
-    for k in ('Color', 'AreaColor'):
-        if k in cores and k not in d:
-            d[k] = cores[k]
     d['UniqueID'] = uid
     return (SB.TEXTO, SB.escreve_texto(d))
+
+
+def _cor(g, chave, cores, k):
+    """o TColor de `k` (Color/AreaColor): o `color`/`fill` do gráfico quando veio, senão o
+    que o componente já usa nesse tipo (ou o da casa). Sai de `cores` nos dois casos. 0
+    (preto) vira ausência no `_registro`, como o Altium grava."""
+    herdada = cores.pop(k, None)
+    v = sch_leitor.cor_int(g.get(chave))
+    return herdada if v is None else v
 
 
 def _pts(g):
@@ -430,7 +445,8 @@ def _raio(g, chave, k):
 def grafico_para_registro(g, parte, idx, uid, cab, paleta, avisos, antigo=None):
     """um item `graphics` do hub -> registro de texto do Altium (RECORD 13/14/12/8/7/6/4).
     `antigo` (só para label) é o dict de `rotulo_antigo` de onde vêm fonte, cor,
-    Justification e IsMirrored."""
+    Justification e IsMirrored. `color`/`fill` do gráfico mandam na Color/AreaColor;
+    sem eles, a paleta do componente (`_paleta`) e, por último, a da casa (PALETA)."""
     k = g.get('g')
     cores = dict(PALETA.get({'line': '13', 'rect': '14', 'arc': '12', 'ellipse': '8',
                              'poly': '7', 'polyline': '6', 'label': '4'}.get(k, ''), {}))
@@ -461,25 +477,25 @@ def grafico_para_registro(g, parte, idx, uid, cab, paleta, avisos, antigo=None):
     if rec in (13, 14, 12, 8, 6, 7):
         if rec == 7:
             # o Altium escreve AreaColor/IsSolid ANTES dos pontos no polígono
-            campos = [('LineWidth', w), ('Color', cores.pop('Color', None)),
-                      ('AreaColor', cores.pop('AreaColor', None)),
+            campos = [('LineWidth', w), ('Color', _cor(g, 'color', cores, 'Color')),
+                      ('AreaColor', _cor(g, 'fill', cores, 'AreaColor')),
                       ('IsSolid', 'T' if g.get('solid') else None)] + _pts(g)
         elif rec == 6:
-            campos = [('LineWidth', w), ('Color', cores.pop('Color', None))] + _pts(g)
+            campos = [('LineWidth', w), ('Color', _cor(g, 'color', cores, 'Color'))] + _pts(g)
         else:
             campos.append(('LineWidth', w))
     if rec == 12:
         campos += [('StartAngle', '%.3f' % sa if sa else None), ('EndAngle', '%.3f' % ea)]
-        campos.append(('Color', cores.pop('Color', None)))
+        campos.append(('Color', _cor(g, 'color', cores, 'Color')))
     if rec in (13,):
-        campos.append(('Color', cores.pop('Color', None)))
+        campos.append(('Color', _cor(g, 'color', cores, 'Color')))
     if rec == 14:
         # Transparent segue o que o componente já tinha (193 dos 335 retângulos da lib têm)
-        campos += [('Color', cores.pop('Color', None)), ('AreaColor', cores.pop('AreaColor', None)),
+        campos += [('Color', _cor(g, 'color', cores, 'Color')), ('AreaColor', _cor(g, 'fill', cores, 'AreaColor')),
                    ('IsSolid', 'T' if g.get('solid') else None),
                    ('Transparent', 'T' if cores.pop('Transparent', True) else None)]
     if rec == 8:
-        campos += [('Color', cores.pop('Color', None)), ('AreaColor', cores.pop('AreaColor', None)),
+        campos += [('Color', _cor(g, 'color', cores, 'Color')), ('AreaColor', _cor(g, 'fill', cores, 'AreaColor')),
                    ('IsSolid', 'T' if g.get('solid') else None)]
     if rec == 4:
         rot = (_int(g.get('rot')) % 360) // 90
@@ -488,10 +504,10 @@ def grafico_para_registro(g, parte, idx, uid, cab, paleta, avisos, antigo=None):
             cores['Color'] = antigo['Color']         # 0 = preto = não gravar
         # a ordem das chaves é a do Altium: Orientation, Justification, Color, FontID, Text, IsMirrored
         campos += [('Orientation', rot or None), ('Justification', antigo.get('Justification')),
-                   ('Color', cores.pop('Color', None)),
+                   ('Color', _cor(g, 'color', cores, 'Color')),
                    ('FontID', _font_id(cab, g.get('size', 10), avisos, antigo.get('FontID'))),
                    ('Text', g.get('text', '')), ('IsMirrored', antigo.get('IsMirrored'))]
-    return _registro(rec, parte, idx, uid, campos, cores)
+    return _registro(rec, parte, idx, uid, campos)
 
 
 def _paleta(regs):
@@ -831,6 +847,7 @@ def grava(lib, caminho, backup_dir=None, backup=True):
 # ─── verificação ──────────────────────────────────────────────────────────────
 NUM = (int, float)
 TOL = 0.01
+FECHADAS = ('rect', 'ellipse', 'poly')       # as formas que têm área (e AreaColor)
 
 
 def _texto_lido(s):
@@ -842,7 +859,8 @@ def esperado(sym):
     """o que o leitor tem que devolver depois do patch: coordenadas de pino nas 3 casas
     da API (a fração vai e volta pelo PinFrac), nome de pino pelo cp1252, hideNum/hideName
     só quando true (o leitor não emite o visível), defaults do leitor (size 10, rot 0,
-    sa 0, ea 360) e a largura na tabela do Altium"""
+    sa 0, ea 360), a largura na tabela do Altium e as cores como ele as lê: minúsculas,
+    preto (0) ausente, `fill` só em forma fechada E sólida"""
     parts = []
     for p in sym.get('parts') or []:
         pins = []
@@ -872,6 +890,12 @@ def esperado(sym):
             if g.get('g') == 'arc':
                 g['sa'] = float(g.get('sa', 0) or 0)
                 g['ea'] = float(g.get('ea', 360) or 0)
+            for k in ('color', 'fill'):
+                v = sch_leitor.cor_int(g.get(k))
+                if v is None or v == 0 or (k == 'fill' and not (g.get('g') in FECHADAS and g.get('solid'))):
+                    g.pop(k, None)
+                else:
+                    g[k] = sch_leitor.cor_hex(v)
             gs.append(g)
         parts.append({'pins': pins, 'graphics': gs})
     return parts
@@ -883,6 +907,8 @@ def _dif(a, b, onde):
         va, vb = a.get(k), b.get(k)
         if k == 'w' and (va is None or vb is None):
             continue                                 # rect não devolve w
+        if k in ('color', 'fill') and va is None:
+            continue                                 # sem cor no pedido: a da paleta é a certa
         if isinstance(va, bool) or isinstance(vb, bool):
             if bool(va) != bool(vb):
                 return '%s.%s: %r != %r' % (onde, k, va, vb)

@@ -22,7 +22,9 @@
    tamanho na unidade da interface — mm por padrão, ou mil — e, no pino, número/nome com o
    olho de visibilidade (hideNum/hideName, opcionais no schlib-v2). K vira linha em pino e
    pino em linha; um tile da biblioteca arrastado para o canvas entra inserido (ou aplicado,
-   se a parte está vazia).
+   se a parte está vazia). Os gráficos podem levar `color` (traço) e `fill` (área) — opcionais
+   do schlib-v2, "#rrggbb" — e o canvas do editor os desenha ele mesmo; Preencher liga o
+   `solid` (círculo completo vira elipse sólida, polilinha vira polígono).
 
    Coordenadas: mil, Y para cima, pino = ponta do CORPO em (x,y) e ponta quente em
    (x,y) + len·dir(orient) — o mesmo vocabulário schlib-v2 que hub-draw.js desenha. O mm é
@@ -41,6 +43,10 @@ const clone = o => JSON.parse(JSON.stringify(o));
 const num = (v, d) => { const n = Number(v); return Number.isFinite(n) ? n : (d || 0); };
 /* arredonda a 0.001 mil: o suficiente para o _Frac do Altium e sem lixo de ponto flutuante */
 const r3 = v => Math.round(v * 1000) / 1000;
+/* cor de traço/área do schlib-v2: só "#rrggbb" minúsculo — é o que o servidor aceita */
+const corValida = c => typeof c === 'string' && /^#[0-9a-f]{6}$/.test(c);
+/* lado do quadradinho "::" da ponta quente (mil) — metade do que era; o traço do pino não muda */
+const PIN_MARK = 16;
 
 /* ── unidade da interface: mm (padrão) ou mil ──
    Por dentro TUDO continua em mil (schlib-v2, espelho, SchLib): o mm é só o que o usuário
@@ -63,11 +69,23 @@ const UNIT_DEFAULT = { mm: 1 * MM, mil: 100 };
 /* o passo pode ser fracionário (1 mm = 39.37007874 mil): o resultado sai com 3 casas */
 function snap(v, step) { const s = step > 0 ? step : 1; return r3(Math.round(v / s) * s); }
 function pinHot(p) { const d = OD[norm360(p.orient)] || [1, 0]; return { x: p.x + d[0]*p.len, y: p.y + d[1]*p.len }; }
-/* em mil o pino prefere múltiplo de 10 (é o inteiro do registro do Altium); em mm vale o
-   snap escolhido — o gravador já grava a fração do pino */
+/* em mil o pino prefere múltiplo de 10 (é o inteiro do registro do Altium): o menor múltiplo
+   de 10 que ainda é múltiplo do passo escolhido (25 → 50, 5 → 10) — mandar tudo para 100
+   fazia o pino ignorar a escolha do usuário por 75 mil; em mm vale o snap escolhido — o
+   gravador já grava a fração do pino */
+const mdc = (a, b) => (b ? mdc(b, a % b) : a);
 function pinSnapOf(step, unit) {
   if (unit === 'mm') return step > 0 ? step : UNIT_DEFAULT.mm;
-  return (step > 0 && step % 10 === 0) ? step : 100;
+  if (!(step > 0) || step !== Math.round(step)) return 100;
+  return step % 10 ? step * 10 / mdc(step, 10) : step;
+}
+/* comprimento com que um pino novo nasce: 100 mil (2.54 mm) em mil; em mm, o múltiplo do snap
+   de pino mais perto de 2.54 mm (1 mm → 3 mm; 0.5 e 2.5 → 2.5 mm) — com 100 mil fixos a ponta
+   quente já nascia fora do snap e o aviso amarelo acendia no fluxo normal, não no de erro */
+function pinLenDefault(step, unit) {
+  if (unit !== 'mm') return 100;
+  const s = pinSnapOf(step, unit);
+  return r3(Math.max(1, Math.round(100 / s)) * s);
 }
 /* ponta quente fora do snap atual: é onde o fio tem de encostar — daí o aviso amarelo.
    Tolerância de 2 milésimos de mil: as coordenadas vivem com 3 casas */
@@ -157,9 +175,16 @@ function hitTest(part, x, y, tol) {
 }
 
 /* todo deslocamento passa por aqui — e sai com 3 casas: um passo de 1 mm é 39.37007874 mil,
-   e somar isso sem arredondar deixaria lixo de ponto flutuante no estado */
-function moveItem(item, dx, dy) {
-  const o = clone(item), X = v => r3(v + dx), Y = v => r3(v + dy);
+   e somar isso sem arredondar deixaria lixo de ponto flutuante no estado. Com `step`, a
+   coordenada que JÁ estava na grade desse passo sai alinhada à grade (snap do RESULTADO, não
+   do delta): somar r3 em r3 perdia 0.00008 mil por passo de 1 mm e, na 26ª seta, a ponta
+   quente saía do snap sem o usuário ter feito nada. Quem estava fora da grade anda r3(dx). */
+function alinhado(v, d, s) {
+  if (!(s > 0)) return r3(v + d);
+  return Math.abs(v - snap(v, s)) <= 0.002 ? snap(v + d, s) : r3(v + d);
+}
+function moveItem(item, dx, dy, step) {
+  const o = clone(item), X = v => alinhado(v, dx, step), Y = v => alinhado(v, dy, step);
   if (o.g == null) { o.x = X(o.x); o.y = Y(o.y); return o; }          /* pino */
   switch (o.g) {
     case 'line': case 'rect': o.x1 = X(o.x1); o.y1 = Y(o.y1); o.x2 = X(o.x2); o.y2 = Y(o.y2); break;
@@ -232,7 +257,7 @@ function normW(w) { const v = num(w, 10); return WIDTHS.reduce((a, b) => Math.ab
    para o espelho de 401 símbolos mudar só onde há pino escondido */
 function cleanPin(p) {
   const o = { num: String(p.num == null ? '' : p.num), name: String(p.name == null ? '' : p.name),
-              x: r3(num(p.x)), y: r3(num(p.y)), len: r3(num(p.len, 100)),
+              x: r3(num(p.x)), y: r3(num(p.y)), len: r3(Math.abs(num(p.len, 100))) || 100,
               orient: norm360(Math.round(num(p.orient) / 90) * 90),
               type: PIN_TYPES.indexOf(p.type) >= 0 ? p.type : 'Passive' };
   if (p.hideNum) o.hideNum = true;
@@ -249,16 +274,47 @@ function normArc(g) {
    preserva o LineWidth original quando `w` NÃO vem no gráfico. Inventar w=10 aqui engrossava
    a borda de todo retângulo só de abrir e salvar — então w só sai quando existe de verdade. */
 const wOpc = g => (g.w == null ? {} : { w: normW(g.w) });
+/* color (traço) e fill (área) só saem válidos: "#RRGGBB" vira minúsculo, "red"/"#fff" caem —
+   ausente = a cor padrão da casa (o schlib_patch herda a paleta do componente) */
+const corOpc = (g, k) => { const c = typeof g[k] === 'string' ? g[k].trim().toLowerCase() : ''; return corValida(c) ? { [k]: c } : {}; };
+const cores = (g, area) => Object.assign(corOpc(g, 'color'), area ? corOpc(g, 'fill') : {});
 function cleanGraphic(g) {
   switch (g.g) {
-    case 'line': return { g: 'line', x1: r3(num(g.x1)), y1: r3(num(g.y1)), x2: r3(num(g.x2)), y2: r3(num(g.y2)), w: normW(g.w) };
-    case 'rect': return normRect(Object.assign({ g: 'rect', x1: r3(num(g.x1)), y1: r3(num(g.y1)), x2: r3(num(g.x2)), y2: r3(num(g.y2)) }, wOpc(g), { solid: !!g.solid }));
-    case 'arc': return normArc({ g: 'arc', cx: r3(num(g.cx)), cy: r3(num(g.cy)), r: r3(Math.abs(num(g.r))), sa: r3(num(g.sa)), ea: r3(g.ea == null ? 360 : num(g.ea)), w: normW(g.w) });
-    case 'ellipse': return Object.assign({ g: 'ellipse', cx: r3(num(g.cx)), cy: r3(num(g.cy)), rx: r3(Math.abs(num(g.rx))), ry: r3(Math.abs(num(g.ry))) }, wOpc(g), { solid: !!g.solid });
-    case 'poly': return Object.assign({ g: 'poly', pts: (g.pts || []).map(p => [r3(num(p[0])), r3(num(p[1]))]) }, wOpc(g), { solid: !!g.solid });
-    case 'polyline': return { g: 'polyline', pts: (g.pts || []).map(p => [r3(num(p[0])), r3(num(p[1]))]), w: normW(g.w) };
-    case 'label': return { g: 'label', x: r3(num(g.x)), y: r3(num(g.y)), text: String(g.text == null ? '' : g.text),
-                           rot: norm360(Math.round(num(g.rot) / 90) * 90), size: Math.max(1, Math.round(num(g.size, 10))) };
+    case 'line': return Object.assign({ g: 'line', x1: r3(num(g.x1)), y1: r3(num(g.y1)), x2: r3(num(g.x2)), y2: r3(num(g.y2)), w: normW(g.w) }, cores(g));
+    case 'rect': return normRect(Object.assign({ g: 'rect', x1: r3(num(g.x1)), y1: r3(num(g.y1)), x2: r3(num(g.x2)), y2: r3(num(g.y2)) }, wOpc(g), { solid: !!g.solid }, cores(g, true)));
+    case 'arc': return normArc(Object.assign({ g: 'arc', cx: r3(num(g.cx)), cy: r3(num(g.cy)), r: r3(Math.abs(num(g.r))), sa: r3(num(g.sa)), ea: r3(g.ea == null ? 360 : num(g.ea)), w: normW(g.w) }, cores(g)));
+    case 'ellipse': return Object.assign({ g: 'ellipse', cx: r3(num(g.cx)), cy: r3(num(g.cy)), rx: r3(Math.abs(num(g.rx))), ry: r3(Math.abs(num(g.ry))) }, wOpc(g), { solid: !!g.solid }, cores(g, true));
+    case 'poly': return Object.assign({ g: 'poly', pts: (g.pts || []).map(p => [r3(num(p[0])), r3(num(p[1]))]) }, wOpc(g), { solid: !!g.solid }, cores(g, true));
+    case 'polyline': return Object.assign({ g: 'polyline', pts: (g.pts || []).map(p => [r3(num(p[0])), r3(num(p[1]))]), w: normW(g.w) }, cores(g));
+    case 'label': return Object.assign({ g: 'label', x: r3(num(g.x)), y: r3(num(g.y)), text: String(g.text == null ? '' : g.text),
+                           rot: norm360(Math.round(num(g.rot) / 90) * 90), size: Math.max(1, Math.round(num(g.size, 10))) }, cores(g));
+  }
+  return null;
+}
+/* ── Preencher ──
+   Liga/desliga o `solid` de retângulo, elipse e polígono. Quem não é fechado mas pode virar:
+   círculo completo (sa 0 / ea 360) vira elipse sólida (rx = ry = r) e polilinha vira polígono
+   fechado sólido; desmarcar numa elipse/polígono só apaga o solid (o Altium tem polígono
+   vazado). Linha, arco parcial, texto e pino não têm o que preencher — `fillable` diz por quê. */
+function fillable(g) {
+  if (!g || g.g == null) return { ok: false, why: 'pino não tem preenchimento' };
+  switch (g.g) {
+    case 'rect': case 'ellipse': case 'poly': case 'polyline': return { ok: true };
+    case 'arc': return norm360(num(g.ea, 360) - num(g.sa)) === 0 ? { ok: true }
+      : { ok: false, why: 'arco parcial não fecha área — só o círculo completo (0–360°) vira elipse preenchida' };
+    case 'line': return { ok: false, why: 'linha não fecha área — polilinha ou polígono preenchem' };
+    case 'label': return { ok: false, why: 'texto não tem preenchimento' };
+  }
+  return { ok: false, why: 'sem preenchimento' };
+}
+function setFill(g, on) {
+  if (!fillable(g).ok) return null;
+  const o = clone(g);
+  const leva = n => { if (o.w != null) n.w = o.w; if (o.color) n.color = o.color; if (o.fill) n.fill = o.fill; return n; };
+  switch (o.g) {
+    case 'rect': case 'ellipse': case 'poly': o.solid = !!on; return o;
+    case 'arc': return on ? leva({ g: 'ellipse', cx: o.cx, cy: o.cy, rx: Math.abs(o.r), ry: Math.abs(o.r), solid: true }) : null;
+    case 'polyline': return on ? leva({ g: 'poly', pts: clone(o.pts || []), solid: true }) : null;
   }
   return null;
 }
@@ -342,12 +398,13 @@ function itemsInBox(part, rect, inteiro) {
   return out;
 }
 const selHasIn = (sel, kind, idx) => (sel || []).some(s => s.kind === kind && s.idx === idx);
-/* move os itens de `sel`; pinos podem levar um delta próprio (o passo de pino é outro) */
-function moveItems(part, sel, dx, dy, pdx, pdy) {
-  const px = pdx == null ? dx : pdx, py = pdy == null ? dy : pdy;
+/* move os itens de `sel`; pinos podem levar um delta próprio (o passo de pino é outro).
+   `step`/`pstep` são os passos das grades (gráficos / pinos) para o resultado sair alinhado */
+function moveItems(part, sel, dx, dy, pdx, pdy, step, pstep) {
+  const px = pdx == null ? dx : pdx, py = pdy == null ? dy : pdy, ps = pstep == null ? step : pstep;
   return {
-    pins: (part.pins || []).map((p, i) => selHasIn(sel, 'pin', i) ? moveItem(p, px, py) : clone(p)),
-    graphics: (part.graphics || []).map((g, i) => selHasIn(sel, 'g', i) ? moveItem(g, dx, dy) : clone(g)),
+    pins: (part.pins || []).map((p, i) => selHasIn(sel, 'pin', i) ? moveItem(p, px, py, ps) : clone(p)),
+    graphics: (part.graphics || []).map((g, i) => selHasIn(sel, 'g', i) ? moveItem(g, dx, dy, step) : clone(g)),
   };
 }
 function deleteItems(part, sel) {
@@ -358,11 +415,11 @@ function deleteItems(part, sel) {
 }
 /* cópias entram no fim (os índices de quem já estava não mudam) e viram a nova seleção;
    pino copiado ganha o próximo número livre — dois pinos "1" não servem para nada */
-function duplicateItems(part, sel, dx, dy, pdx, pdy) {
-  const px = pdx == null ? dx : pdx, py = pdy == null ? dy : pdy;
+function duplicateItems(part, sel, dx, dy, pdx, pdy, step, pstep) {
+  const px = pdx == null ? dx : pdx, py = pdy == null ? dy : pdy, ps = pstep == null ? step : pstep;
   const pins = (part.pins || []).map(clone), graphics = (part.graphics || []).map(clone), selection = [];
-  (part.pins || []).forEach((p, i) => { if (!selHasIn(sel, 'pin', i)) return; const c = moveItem(p, px, py); c.num = nextPinNum(pins); selection.push({ kind: 'pin', idx: pins.length }); pins.push(c); });
-  (part.graphics || []).forEach((g, i) => { if (!selHasIn(sel, 'g', i)) return; selection.push({ kind: 'g', idx: graphics.length }); graphics.push(moveItem(g, dx, dy)); });
+  (part.pins || []).forEach((p, i) => { if (!selHasIn(sel, 'pin', i)) return; const c = moveItem(p, px, py, ps); c.num = nextPinNum(pins); selection.push({ kind: 'pin', idx: pins.length }); pins.push(c); });
+  (part.graphics || []).forEach((g, i) => { if (!selHasIn(sel, 'g', i)) return; selection.push({ kind: 'g', idx: graphics.length }); graphics.push(moveItem(g, dx, dy, step)); });
   return { part: { pins, graphics }, selection };
 }
 
@@ -428,6 +485,7 @@ function insertLibSymbol(part, libSym, x, y) {
 const pure = { snap, pinHot, pinSnapOf, pinsOffGrid, segDist, pointInPoly, angleIn, labelBox, hitTest, hitGraphic,
                moveItem, moveVertex, rotateAll, mirrorAll, bbox, serializeSymbol, applyLibSymbol, nextPinNum,
                cleanPin, cleanGraphic, normW, normArc, PIN_TYPES, WIDTHS,
+               pinLenDefault, alinhado, corValida, fillable, setFill, PIN_MARK,
                itemBBox, itemsInBox, moveItems, deleteItems, duplicateItems,
                MM, mm2mil, mil2mm, fmtUnit, toMil, UNIT_SNAPS, UNIT_DEFAULT, snapMil,
                lineToPin, pinToLine, viravel, insertLibSymbol };
@@ -457,6 +515,8 @@ const ICONS = {
   grid: 'M5.5 2 V14 M10.5 2 V14 M2 5.5 H14 M2 10.5 H14',
   eye: 'M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z|c:8,8,2.2',
   eyeOff: 'M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z|c:8,8,2.2|M2.5 13.5 L13.5 2.5',
+  flip: 'M2 11 H9|c:11.5,11,2.2|M4 5.5 A4 4 0 0 1 12 5.5 M10 3.5 L12 5.5 L10 7.5',   /* pino com seta: linha ↔ pino */
+  duplicate: 'r:2,5.5,8.5,8.5|M6 5.5 V2 H14 V10 H10.5',
 };
 /* o tipo do item, como a ficha o chama */
 const TIPO = { line: 'linha', rect: 'retângulo', arc: 'arco', ellipse: 'elipse', poly: 'polígono', polyline: 'polilinha', label: 'texto' };
@@ -699,13 +759,11 @@ function buildToolbox() {
   UI.tools = el('div', 'symed-tb');
   TOOLS.forEach(([id, title]) => { const b = ibtn(id, title, () => setTool(id)); b.dataset.tool = id; UI.tools.append(b); });
   UI.acts = el('div', 'symed-tb');
-  UI.bUndo = ibtn('undo', 'Desfazer (Ctrl+Z)', undo);
-  UI.bRedo = ibtn('redo', 'Refazer (Ctrl+Y)', redo);
   UI.bRot = ibtn('rotate', 'Girar tudo 90° anti-horário (Ctrl+R)', girarTudo);
   UI.bMir = ibtn('mirror', 'Espelhar tudo em X (Ctrl+M)', espelharTudo);
   UI.bFit = ibtn('fit', 'Enquadrar o símbolo (F)', () => fit());
   UI.bGrid = ibtn('grid', 'Grade', () => { ST.grid = !ST.grid; refreshBar(); redraw(); });
-  UI.acts.append(UI.bUndo, UI.bRedo, UI.bRot, UI.bMir, UI.bFit, UI.bGrid);
+  UI.acts.append(UI.bRot, UI.bMir, UI.bFit, UI.bGrid);
   box.append(UI.tools, UI.acts);
   return box;
 }
@@ -759,6 +817,12 @@ function build(rootEl) {
   UI.partSel = el('select', 'input'); UI.partSel.hidden = true; UI.partSel.title = 'parte do símbolo';
   UI.partSel.onchange = () => abrirParte(parseInt(UI.partSel.value, 10) || 1);
   cb.append(el('span', 'ttl', 'editor'), UI.name, UI.partSel);
+  /* desfazer/refazer moram no canto direito da barra do canvas, não na caixa de ferramentas */
+  const hist = el('div', 'right symed-hist');
+  UI.bUndo = ibtn('undo', 'Desfazer (Ctrl+Z)', undo);
+  UI.bRedo = ibtn('redo', 'Refazer (Ctrl+Y)', redo);
+  hist.append(UI.bUndo, UI.bRedo);
+  cb.append(hist);
 
   UI.vp = el('div', 'viewport sheet symed-vp');
   UI.cv = el('canvas');
@@ -927,6 +991,7 @@ function refreshAside() {
   const itens = selItems(), it = itens.length === 1 ? itens[0].item : null;
   a.append(el('div', 'kicker', it ? tipoDe(it) : 'símbolo'));
   const h = el('div', 'det-head'); const nm = el('span', 'd', d.name); nm.style.cssText = 'font-size:16px;word-break:break-word;line-height:1.3'; h.append(nm); a.append(h);
+  if (itens.length) a.append(acoesDaSelecao(itens, it));
   if (it) a.append(fieldsFor(it));
   else if (itens.length > 1) {
     const q = el('p', null, itens.length + ' itens selecionados — Delete apaga, setas empurram, Ctrl+D duplica');
@@ -937,15 +1002,6 @@ function refreshAside() {
     desc.onchange = () => { pushUndo(); d.description = desc.value; touched(); refreshBar(); refreshList(); };
     a.append(desc, fieldsForSymbol(d, part));
   }
-  if (itens.length) {
-    const acts = el('div', 'symed-acts');
-    const v = viravel(it);
-    if (v) acts.append(btn('btn-secondary btn-sm', 'Virar ' + v, virar, 'K — ' + (v === 'pino' ? 'a linha vira pino (ponta quente para fora do corpo)' : 'o pino vira linha do corpo à ponta quente')));
-    acts.append(btn('btn-secondary btn-sm', 'Duplicar', duplicarSelecao, 'Ctrl+D — cópia deslocada um passo'),
-                btn('btn-secondary btn-sm', itens.length > 1 ? 'Excluir ' + itens.length + ' itens' : 'Excluir', deleteSelection, 'Delete'));
-    a.append(acts);
-  }
-
   const off = pinsOffGrid(part.pins, ST.snap);
   if (off.length) a.append(el('div', 'symed-warn', 'ponta quente fora do snap de ' + snapLabel() + ': pinos ' + off.map(x => x.num).join(', ')
     + ' — o fio não vai encostar no Altium'));
@@ -963,6 +1019,18 @@ function refreshAside() {
   a.append(sv);
   UI.status = el('div', 'symed-status' + (UI.statusKind ? ' ' + UI.statusKind : ''), UI.statusMsg || (ST.dirty ? 'edição não salva' : ''));
   a.append(UI.status);
+}
+/* a fileira de ações logo abaixo do nome, só com seleção: virar (K — só linha ou pino, sozinho),
+   duplicar (Ctrl+D) e excluir (Delete; com vários, o title diz quantos) — ícones como a caixa
+   de ferramentas, no lugar dos botões de texto */
+function acoesDaSelecao(itens, it) {
+  const acts = el('div', 'symed-acts');
+  const v = viravel(it);
+  if (v) acts.append(ibtn('flip', 'Virar ' + v + ' (K) — ' + (v === 'pino' ? 'a linha vira pino, ponta quente para fora do corpo' : 'o pino vira linha do corpo à ponta quente'), virar));
+  acts.append(ibtn('duplicate', 'Duplicar (Ctrl+D) — cópia deslocada um passo', duplicarSelecao));
+  const n = itens.length;
+  acts.append(ibtn('delete', n > 1 ? 'Excluir ' + n + ' itens (Delete)' : 'Excluir (Delete)', deleteSelection));
+  return acts;
 }
 function setStatus(msg, kind) { UI.statusMsg = msg; UI.statusKind = kind || ''; if (UI.status) { UI.status.textContent = msg; UI.status.className = 'symed-status ' + (kind || ''); } }
 
@@ -1010,29 +1078,70 @@ function fieldsFor(it) {
   const apply = fn => {
     const p = curPart();
     if (!alvo || !p || itemOf(p, alvo) !== it) return;
-    pushUndo(); const o = clone(it); fn(o); setItem(alvo, o); touched(); refreshBar(); refreshAside(); redraw();
+    /* fn edita a cópia no lugar ou devolve um substituto (Preencher troca o tipo do gráfico) */
+    pushUndo(); const o = clone(it); const r = fn(o); setItem(alvo, r || o); touched(); refreshBar(); refreshAside(); redraw();
   };
   /* campo numérico como texto (inputmode decimal): o type=number do Chrome pt-BR mostra
      vírgula e um spinner que come a metade dos 50 px da coluna, e "-1.016" saía cortado.
-     Vírgula digitada vale como ponto. */
+     Vírgula digitada vale como ponto. Vazio ou lixo ("abc") NÃO grava: antes virava 0 e o item
+     teleportava para a origem sem aviso — o valor mostrado volta e um toast diz por quê;
+     medida (`pos`: largura, diâmetro, comprimento) ainda exige > 0. */
   const inp = (val, on, o) => {
     const i = el('input', 'input'); i.type = 'text'; i.autocomplete = 'off';
-    const texto = !!(o && o.text);
+    const texto = !!(o && o.text), pos = !!(o && o.pos);
     if (!texto) { i.inputMode = 'decimal'; i.spellcheck = false; }
     i.value = val == null ? '' : val;
-    i.onchange = () => on(texto ? i.value : i.value.replace(',', '.'));
+    i.onchange = () => {
+      if (texto) { on(i.value); return; }
+      const s = i.value.trim().replace(',', '.'), n = s === '' ? NaN : Number(s);
+      if (!Number.isFinite(n) || (pos && n <= 0)) {
+        i.value = val == null ? '' : val;
+        if (O && O.toast) O.toast((!Number.isFinite(n) ? (s ? '"' + s + '" não é número' : 'campo vazio') : 'tem de ser maior que zero') + ' — valor mantido', 'warn');
+        return;
+      }
+      on(s);
+    };
     return i;
   };
-  const check = (val, on) => { const i = el('input'); i.type = 'checkbox'; i.checked = !!val; i.onchange = () => on(i.checked); return i; };
   /* coordenada/medida em mil mostrada na unidade; o que volta vira mil com 3 casas */
-  const medida = (mil, on) => inp(fmtUnit(mil, U), v => on(toMil(v, U)));
+  const medida = (mil, on, o) => inp(fmtUnit(mil, U), v => on(toMil(v, U)), o);
+  const POS = { pos: true };
+  /* ── Linha [cor][×] · Preencher [☐] [cor][×] ──
+     color/fill do schlib-v2 (opcionais): ausente = a cor padrão da casa, que o seletor mostra
+     apagado e o × devolve. O pino não tem cor no schlib-v2 (a da SchLib fica) — tudo desabilitado */
+  const corInput = (k, padrao, rotulo, off) => {
+    const wrap = el('span', 'symed-cor');
+    const tem = corValida(it[k]);
+    const c = el('input'); c.type = 'color'; c.value = tem ? it[k] : padrao; c.dataset.cor = k;
+    if (!tem) c.classList.add('padrao');
+    c.disabled = !!off;
+    c.title = off ? off : rotulo + (tem ? ': ' + it[k] : ' — cor padrão da casa (clique para escolher)');
+    c.onchange = () => apply(o => { o[k] = String(c.value).toLowerCase(); });
+    const x = el('button', 'symed-cor-x', '×'); x.type = 'button'; x.title = 'voltar à cor padrão'; x.dataset.corX = k;
+    x.disabled = !tem || !!off;
+    x.onclick = () => apply(o => { delete o[k]; });
+    wrap.append(c, x);
+    return wrap;
+  };
+  const corRow = () => {
+    const pino = it.g == null, f = fillable(it);
+    const fillWrap = el('span', 'symed-cor');
+    const cb = el('input'); cb.type = 'checkbox'; cb.dataset.fill = '1';
+    cb.checked = f.ok && !!it.solid; cb.disabled = !f.ok;
+    cb.title = f.ok ? (it.g === 'arc' ? 'preencher: o círculo vira elipse sólida' : it.g === 'polyline' ? 'preencher: a polilinha vira polígono fechado' : 'preencher a área (solid)') : f.why;
+    cb.onchange = () => { const r = setFill(it, cb.checked); if (!r) { cb.checked = !!it.solid; return; } apply(() => r); };
+    fillWrap.append(cb);
+    const semFill = pino ? 'pino não tem preenchimento' : !f.ok ? f.why : !it.solid ? 'marque Preencher para escolher a cor da área' : '';
+    fillWrap.append(corInput('fill', HubDraw.SCH.fill, 'cor do preenchimento', semFill));
+    linha(box, [['Linha', corInput('color', pino ? HubDraw.SCH.pin : it.g === 'label' ? HubDraw.SCH.text : HubDraw.SCH.body, 'cor do traço', pino ? 'a cor do pino é a da SchLib — o schlib-v2 não a guarda' : '')],
+                ['Preencher', fillWrap]]);
+  };
   const W = () => selectOf(WIDTHS.map(w => [w, wLabel(w)]), normW(it.w), v => apply(o => { o.w = num(v); }));
   /* rect/ellipse/poly sem w é "a largura que já está na SchLib" (o leitor não a exporta);
      só vira número quando o usuário escolhe — daí a opção 'padrão' */
   const PADRAO = 'padrão';
   const Wp = () => selectOf([[PADRAO, PADRAO]].concat(WIDTHS.map(w => [w, wLabel(w)])), it.w == null ? PADRAO : normW(it.w),
                             v => apply(o => { if (v === PADRAO) delete o.w; else o.w = num(v); }));
-  const S = () => check(it.solid, v => apply(o => { o.solid = !!v; }));
   const olho = (k, rot) => {
     const vis = !it[k];
     const b = el('button', 'symed-eye'); b.type = 'button';
@@ -1048,11 +1157,12 @@ function fieldsFor(it) {
   if (it.g == null) {
     kickerRow(box, loc);
     linha(box, [['X', medida(it.x, v => apply(o => { o.x = v; }))], ['Y', medida(it.y, v => apply(o => { o.y = v; }))]]);
+    corRow();
     partRow();
     kickerRow(box, 'pino');
     linha(box, [['Número', inp(it.num, v => apply(o => { o.num = v; }), { text: true })]], olho('hideNum', 'número'));
     linha(box, [['Nome', inp(it.name, v => apply(o => { o.name = v; }), { text: true })]], olho('hideName', 'nome'));
-    linha(box, [['Comprimento', medida(it.len, v => apply(o => { o.len = v; }))],
+    linha(box, [['Comprimento', medida(it.len, v => apply(o => { o.len = Math.abs(v); }), POS)],
                 ['Orientação', selectOf([[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']], it.orient, v => apply(o => { o.orient = num(v); }))]]);
     linha(box, [['Tipo elétrico', selectOf(PIN_TYPES.map(t => [t]), it.type, v => apply(o => { o.type = v; }))]]);
     return box;
@@ -1062,30 +1172,30 @@ function fieldsFor(it) {
     case 'line':
       linha(box, [['X', medida(it.x1, v => apply(o => { o.x1 = v; }))], ['Y', medida(it.y1, v => apply(o => { o.y1 = v; }))]]);
       linha(box, [['X2', medida(it.x2, v => apply(o => { o.x2 = v; }))], ['Y2', medida(it.y2, v => apply(o => { o.y2 = v; }))]]);
-      partRow(); kickerRow(box, tam);
+      corRow(); partRow(); kickerRow(box, tam);
       linha(box, [['Comprimento', ro(fmtUnit(Math.hypot(it.x2 - it.x1, it.y2 - it.y1), U))], ['Espessura', W()]]);
       break;
     case 'rect': {
       const x1 = Math.min(it.x1, it.x2), y1 = Math.min(it.y1, it.y2), w = Math.abs(it.x2 - it.x1), hh = Math.abs(it.y2 - it.y1);
       linha(box, [['X', medida(x1, v => apply(o => { Object.assign(o, moveItem(normRect(o), v - x1, 0)); }))],
                   ['Y', medida(y1, v => apply(o => { Object.assign(o, moveItem(normRect(o), 0, v - y1)); }))]]);
-      partRow(); kickerRow(box, tam);
-      linha(box, [['Largura', medida(w, v => apply(o => { normRect(o); o.x2 = r3(o.x1 + Math.abs(v)); normRect(o); }))],
-                  ['Altura', medida(hh, v => apply(o => { normRect(o); o.y2 = r3(o.y1 + Math.abs(v)); normRect(o); }))]]);
-      linha(box, [['Espessura', Wp()], ['Preenchido', S()]]);
+      corRow(); partRow(); kickerRow(box, tam);
+      linha(box, [['Largura', medida(w, v => apply(o => { normRect(o); o.x2 = r3(o.x1 + Math.abs(v)); normRect(o); }), POS)],
+                  ['Altura', medida(hh, v => apply(o => { normRect(o); o.y2 = r3(o.y1 + Math.abs(v)); normRect(o); }), POS)]]);
+      linha(box, [['Espessura', Wp()]]);        /* sozinho na linha: "padrão" saía cortado ao lado do Preenchido */
       break;
     }
     case 'arc':
       linha(box, [['X', medida(it.cx, v => apply(o => { o.cx = v; }))], ['Y', medida(it.cy, v => apply(o => { o.cy = v; }))]]);
-      partRow(); kickerRow(box, tam);
-      linha(box, [['Diâmetro', medida(2 * it.r, v => apply(o => { o.r = r3(Math.abs(v) / 2); }))], ['Espessura', W()]]);
+      corRow(); partRow(); kickerRow(box, tam);
+      linha(box, [['Diâmetro', medida(2 * it.r, v => apply(o => { o.r = r3(Math.abs(v) / 2); }), POS)], ['Espessura', W()]]);
       linha(box, [['Início (°)', inp(it.sa || 0, v => apply(o => { o.sa = num(v); normArc(o); }))], ['Fim (°)', inp(it.ea == null ? 360 : it.ea, v => apply(o => { o.ea = num(v); normArc(o); }))]]);
       break;
     case 'ellipse':
       linha(box, [['X', medida(it.cx, v => apply(o => { o.cx = v; }))], ['Y', medida(it.cy, v => apply(o => { o.cy = v; }))]]);
-      partRow(); kickerRow(box, tam);
-      linha(box, [['Ø X', medida(2 * it.rx, v => apply(o => { o.rx = r3(Math.abs(v) / 2); }))], ['Ø Y', medida(2 * it.ry, v => apply(o => { o.ry = r3(Math.abs(v) / 2); }))]]);
-      linha(box, [['Espessura', Wp()], ['Preenchido', S()]]);
+      corRow(); partRow(); kickerRow(box, tam);
+      linha(box, [['Ø X', medida(2 * it.rx, v => apply(o => { o.rx = r3(Math.abs(v) / 2); }), POS)], ['Ø Y', medida(2 * it.ry, v => apply(o => { o.ry = r3(Math.abs(v) / 2); }), POS)]]);
+      linha(box, [['Espessura', Wp()]]);
       break;
     case 'poly': case 'polyline': {
       const pts = it.pts || [], p0 = pts[0] || [0, 0];
@@ -1095,20 +1205,20 @@ function fieldsFor(it) {
       linha(box, [['X', medida(p0[0], v => apply(o => { Object.assign(o, moveItem(o, v - p0[0], 0)); }))],
                   ['Y', medida(p0[1], v => apply(o => { Object.assign(o, moveItem(o, 0, v - p0[1])); }))]]);
       linha(box, [['vértices', ro(pts.length)]]);
-      partRow(); kickerRow(box, tam);
-      linha(box, [['Comprimento', ro(fmtUnit(len, U))], ['Espessura', it.g === 'poly' ? Wp() : W()]]);
-      if (it.g === 'poly') linha(box, [['Preenchido', S()]]);
+      corRow(); partRow(); kickerRow(box, tam);
+      if (it.g === 'poly') { linha(box, [['Comprimento', ro(fmtUnit(len, U))]]); linha(box, [['Espessura', Wp()]]); }
+      else linha(box, [['Comprimento', ro(fmtUnit(len, U))], ['Espessura', W()]]);
       break;
     }
     case 'label':
       linha(box, [['X', medida(it.x, v => apply(o => { o.x = v; }))], ['Y', medida(it.y, v => apply(o => { o.y = v; }))]]);
-      partRow(); kickerRow(box, 'texto');
+      corRow(); partRow(); kickerRow(box, 'texto');
       linha(box, [['Texto', inp(it.text, v => apply(o => { o.text = v; }), { text: true })]]);
-      linha(box, [['Tamanho (pt)', inp(it.size, v => apply(o => { o.size = Math.max(1, Math.round(num(v, 10))); }))],
+      linha(box, [['Tamanho (pt)', inp(it.size, v => apply(o => { o.size = Math.max(1, Math.round(num(v, 10))); }), POS)],
                   ['Rotação', selectOf([[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']], it.rot || 0, v => apply(o => { o.rot = num(v); }))]]);
       break;
     default:
-      partRow();
+      corRow(); partRow();
   }
   return box;
 }
@@ -1219,26 +1329,50 @@ function drawWorld(ctx, cam) {
   ctx.moveTo(-60, 0); ctx.lineTo(60, 0); ctx.moveTo(0, -60); ctx.lineTo(0, 60); ctx.stroke();
 
   const p = curPart(); if (!p) return;
-  HubDraw.drawSymbolPart(ctx, { graphics: p.graphics, pins: [] });
+  drawGraphics(ctx, p.graphics);
   drawPins(ctx, p.pins, px);
   const itens = selItems();
   for (const s of itens) drawHL(ctx, s.item, px);
   drawSel(ctx, itens, px);
   if (ST.draw) drawRubber(ctx, px);
 }
+/* os gráficos, desenhados aqui e não pelo HubDraw.drawSymbolPart (que é do agente/laser e usa
+   cor fixa): a mesma geometria das 7 formas, com g.color/g.fill quando existem e as cores da
+   casa (HubDraw.SCH) quando não. As miniaturas da paleta continuam com o drawSymbolPart. */
+function drawGraphics(ctx, graphics, opts) {
+  const o = opts || {}, C = HubDraw.SCH;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  for (const g of (graphics || [])) {
+    ctx.beginPath();
+    ctx.lineWidth = g.w || 6;
+    ctx.strokeStyle = o.stroke || (corValida(g.color) ? g.color : C.body);
+    ctx.fillStyle = corValida(g.fill) ? g.fill : C.fill;
+    const poly = () => (g.pts || []).forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    switch (g.g) {
+      case 'rect': ctx.rect(g.x1, g.y1, g.x2 - g.x1, g.y2 - g.y1); if (g.solid) ctx.fill(); ctx.stroke(); break;
+      case 'line': ctx.moveTo(g.x1, g.y1); ctx.lineTo(g.x2, g.y2); ctx.stroke(); break;
+      case 'arc': ctx.arc(g.cx, g.cy, Math.abs(g.r || 0), (g.sa || 0) * Math.PI / 180, (g.ea == null ? 360 : g.ea) * Math.PI / 180); ctx.stroke(); break;
+      case 'ellipse': ctx.ellipse(g.cx, g.cy, Math.abs(g.rx || 0), Math.abs(g.ry || 0), 0, 0, 2 * Math.PI); if (g.solid) ctx.fill(); ctx.stroke(); break;
+      case 'poly': poly(); ctx.closePath(); if (g.solid) ctx.fill(); ctx.stroke(); break;
+      case 'polyline': poly(); ctx.stroke(); break;
+      case 'label': HubDraw.worldText(ctx, g.text || '', g.x, g.y, (g.size || 8) * 10, g.rot || 0, o.stroke || (corValida(g.color) ? g.color : C.text), 'center'); break;
+    }
+  }
+}
 /* o pino como o Altium o desenha: traço grosso saindo do corpo e, na ponta quente, o
-   quadradinho com quatro pontos que marca onde o fio encosta. Número por fora, nome por
-   dentro — cada um só quando o pino não o esconde (hideNum/hideName do schlib-v2) */
+   quadradinho com quatro pontos que marca onde o fio encosta (PIN_MARK de lado; os pontos
+   ficam fora da faixa do traço, que tem 8 mil). Número por fora, nome por dentro — cada um
+   só quando o pino não o esconde (hideNum/hideName do schlib-v2) */
 function drawPins(ctx, pins, px) {
-  const C = HubDraw.SCH;
+  const C = HubDraw.SCH, m = PIN_MARK / 2, q = PIN_MARK * 0.34, r = PIN_MARK * 0.08;
   for (const pin of (pins || [])) {
     const d = OD[norm360(pin.orient)] || [1, 0], h = pinHot(pin);
     ctx.strokeStyle = C.pin; ctx.lineWidth = 8; ctx.lineCap = 'butt';
     ctx.beginPath(); ctx.moveTo(pin.x, pin.y); ctx.lineTo(h.x, h.y); ctx.stroke();
-    ctx.lineWidth = Math.max(2, 1.2 * px);
-    ctx.strokeRect(h.x - 15, h.y - 15, 30, 30);
+    ctx.lineWidth = Math.max(1.5, 1.1 * px);
+    ctx.strokeRect(h.x - m, h.y - m, PIN_MARK, PIN_MARK);
     ctx.fillStyle = C.pin;
-    for (const [ox, oy] of [[-7, -7], [7, -7], [-7, 7], [7, 7]]) { ctx.beginPath(); ctx.arc(h.x + ox, h.y + oy, 2.6, 0, 2 * Math.PI); ctx.fill(); }
+    for (const [ox, oy] of [[-q, -q], [q, -q], [-q, q], [q, q]]) { ctx.beginPath(); ctx.arc(h.x + ox, h.y + oy, r, 0, 2 * Math.PI); ctx.fill(); }
     if (!pin.hideNum) HubDraw.worldText(ctx, String(pin.num), (pin.x + h.x) / 2 + Math.abs(d[1]) * 30, (pin.y + h.y) / 2 + Math.abs(d[0]) * 30, 45, 0, C.pinnum, 'center');
     if (!pin.hideName && pin.name) {
       const vert = d[1] !== 0;
@@ -1258,7 +1392,7 @@ function drawHL(ctx, it, px) {
     ctx.beginPath(); ctx.moveTo(it.x, it.y); ctx.lineTo(h.x, h.y); ctx.stroke();
   } else if (it.g !== 'label') {
     const g = clone(it); g.solid = false;          /* mesma largura, só a cor muda */
-    HubDraw.drawSymbolPart(ctx, { graphics: [g] }, { stroke: hl });
+    drawGraphics(ctx, [g], { stroke: hl });
   }
   ctx.restore();
 }
@@ -1356,7 +1490,8 @@ function hookMouse() {
    acumulado, para o snap não andar sozinho */
 function baseOf() { return selItems().map(s => ({ kind: s.kind, idx: s.idx, orig: clone(s.item) })); }
 function applyMove(base, dx, dy, pdx, pdy) {
-  for (const b of base) setItem(b, moveItem(b.orig, b.kind === 'pin' ? pdx : dx, b.kind === 'pin' ? pdy : dy));
+  const g = stepFor('g'), pn = stepFor('pin');
+  for (const b of base) { const pin = b.kind === 'pin'; setItem(b, moveItem(b.orig, pin ? pdx : dx, pin ? pdy : dy, pin ? pn : g)); }
 }
 function leftDown(e) {
   swallowClick = false; lastDown = null;
@@ -1447,7 +1582,7 @@ async function colocar(w, e) {
   const s = snapPt(w, ST.tool === 'pin' ? 'pin' : 'g');
   if (ST.tool === 'pin') {
     pushUndo();
-    p.pins.push({ num: nextPinNum(p.pins), name: '', x: s.x, y: s.y, len: 100, orient: ST.pinRot, type: 'Passive' });
+    p.pins.push({ num: nextPinNum(p.pins), name: '', x: s.x, y: s.y, len: pinLenDefault(ST.snap, ST.unit), orient: ST.pinRot, type: 'Passive' });
     ST.selection = [{ kind: 'pin', idx: p.pins.length - 1 }];
     touched(); afterEdit();
     return;
@@ -1517,7 +1652,7 @@ function duplicarSelecao() {
   const p = curPart(); if (!p || !ST.selection.length) return;
   pushUndo();
   const g = stepFor('g'), pn = stepFor('pin');
-  const r = duplicateItems(p, ST.selection, g, 0 - g, pn, 0 - pn);
+  const r = duplicateItems(p, ST.selection, g, 0 - g, pn, 0 - pn, g, pn);
   Object.assign(p, r.part); ST.selection = r.selection;
   touched(); afterEdit();
 }
@@ -1544,7 +1679,7 @@ function moverParaParte(alvo, n) {
 }
 /* K: linha vira pino, pino vira linha (parte C do brief) */
 function virar() {
-  const p = curPart(), s = selOnly(); if (!p || !s) return;
+  const p = curPart(), s = selOnly(); if (!p || !s || ST.draw) return;
   const it = itemOf(p, s), v = viravel(it); if (!v) return;
   const r = v === 'linha' ? pinToLine(p, s.idx) : lineToPin(p, s.idx);
   if (!r) { if (O && O.toast) O.toast('a linha não tem comprimento — nada para virar', 'warn'); return; }
@@ -1621,7 +1756,7 @@ function espelharTudo() {
 function nudge(dx, dy) {
   const p = curPart(); if (!p || !ST.selection.length) return;
   const g = stepFor('g'), pn = stepFor('pin');
-  pushUndo(); Object.assign(p, moveItems(p, ST.selection, dx * g, dy * g, dx * pn, dy * pn)); touched(); afterEdit();
+  pushUndo(); Object.assign(p, moveItems(p, ST.selection, dx * g, dy * g, dx * pn, dy * pn, g, pn)); touched(); afterEdit();
 }
 
 async function salvar() {
@@ -1725,9 +1860,11 @@ function onKey(e) {
   if (ctrl) return;
   if (k === 'Escape') { if (ST.draw) cancelDraw(); else if (ST.tool !== 'select') setTool('select'); else { selClear(); refreshAside(); redraw(); } return; }
   if (k === 'Enter') { if (ST.draw) { e.preventDefault(); finishDraw(); } return; }
-  if (k === 'Delete' || k === 'Backspace') { if (ST.selection.length) { e.preventDefault(); deleteSelection(); } return; }
+  /* com um desenho em curso, Delete, setas e K ficam de fora: agiriam na seleção antiga por
+     baixo do traço que está sendo desenhado (o K, aliás, só na ferramenta Selecionar) */
+  if (k === 'Delete' || k === 'Backspace') { if (ST.selection.length && !ST.draw) { e.preventDefault(); deleteSelection(); } return; }
   if (k.indexOf('Arrow') === 0) {
-    if (!ST.selection.length) return;
+    if (!ST.selection.length || ST.draw) return;
     e.preventDefault();
     const m = e.shiftKey ? 10 : 1;
     nudge(k === 'ArrowLeft' ? -m : k === 'ArrowRight' ? m : 0, k === 'ArrowDown' ? -m : k === 'ArrowUp' ? m : 0);
@@ -1735,7 +1872,7 @@ function onKey(e) {
   }
   if (K === 'r' && ST.tool === 'pin') { ST.pinRot = norm360(ST.pinRot + 90); refreshBar(); return; }
   if (K === 'f') { fit(); return; }
-  if (K === 'k' && ST.draft) { e.preventDefault(); virar(); return; }
+  if (K === 'k' && ST.draft && ST.tool === 'select' && !ST.draw) { e.preventDefault(); virar(); return; }
   const map ={ v: 'select', l: 'line', r: 'rect', p: 'polyline', g: 'poly', a: 'arc', e: 'ellipse', t: 'label', n: 'pin' };
   if (map[K] && ST.draft) { e.preventDefault(); setTool(map[K]); }
 }

@@ -18,6 +18,13 @@ Copia a lib local (D:) para um tmp e prova, nessa ordem:
   (2d) o olho do pino: tirar `hideNum` do RES [ SMD ] acende o bit 0x10 (e só ele) e a
       releitura volta sem `hideNum`; pôr `hideName` no 24LC256 apaga o 0x08 (e só ele);
       `false` explícito é visível; os outros bits altos do conglomerado não mudam.
+  (2e) cores: sem color/fill o registro do RES sai byte a byte como com as cores que o
+      leitor leu (a paleta do componente); com color #ff0000 / fill #00ff00 / solid vai
+      para Color=255 / AreaColor=65280 / IsSolid=T e relê igual — e a paleta passa a ser
+      ESSA (é o que o arquivo tem: um retângulo vazado sem `fill` herda a AreaColor que o
+      componente já guarda, como no Altium); #000000 é chave ausente (preto) e ganha da
+      paleta; fill sem solid é gravado mas não volta; linhas do 2N3904 regravadas não
+      ganham AreaColor=0.
   (3) componente cujo storage não é o LibReference (nome > 31 chars, via SectionKeys).
   (4) nome inexistente é erro claro.
   (5) o backup existe e é idêntico ao original.
@@ -233,6 +240,81 @@ def main(origem=None):
         assert r['verificado'] and congs(st) == [0x20, 0x22], congs(st)
         assert streams(lib)[st + '/Data'] == depois[st + '/Data'], 'o RES tinha que voltar ao byte de (1)'
         print('  (2d) olho do pino: RES sem hideNum -> 0x30/0x32; 24LC256 com hideName -> 0x08 apagado; false = visivel')
+
+        # ── (2e) cores: color/fill mandam na Color/AreaColor; sem eles, a paleta ──
+        def rect_reg(st_):
+            for t, pl in SB.desmonta(streams(lib)[st_ + '/Data']):
+                if t == SB.TEXTO and SB.le_texto(pl).get('RECORD') == '14':
+                    return SB.le_texto(pl)
+
+        def sem_cor(s):
+            s = copy.deepcopy(s)
+            for p in s['parts']:
+                p['graphics'] = [{k: v for k, v in g.items() if k not in ('color', 'fill')} for g in p['graphics']]
+            return s
+        rect0 = next(g for g in res['parts'][0]['graphics'] if g['g'] == 'rect')
+        assert rect0.get('color') == '#0000ff' and 'fill' not in rect0 and not rect0['solid'], rect0   # AreaColor sem IsSolid
+        reg0 = rect_reg(st)
+        assert (reg0['Color'], reg0['AreaColor']) == ('16711680', '11599871') and 'IsSolid' not in reg0, reg0
+        # sem os campos, a paleta do componente: os bytes do Data são os do patch com as cores lidas
+        r = P.patch(lib, sem_cor(res), bk_dir)
+        assert r['verificado'] and streams(lib)[st + '/Data'] == depois[st + '/Data'], 'sem cor tinha que herdar a paleta'
+        assert rect_reg(st) == reg0
+        cor = copy.deepcopy(res)
+        rc = next(g for g in cor['parts'][0]['graphics'] if g['g'] == 'rect')
+        rc.update(color='#ff0000', fill='#00ff00', solid=True)
+        r = P.patch(lib, cor, bk_dir)
+        assert r['verificado'], r
+        reg = rect_reg(st)
+        assert (reg['Color'], reg['AreaColor'], reg['IsSolid']) == ('255', '65280', 'T'), reg
+        rr = next(g for g in simbolo(lib, 'RES [ SMD ]')['parts'][0]['graphics'] if g['g'] == 'rect')
+        assert (rr['color'], rr['fill'], rr['solid']) == ('#ff0000', '#00ff00', True), rr
+        # a paleta é o que o arquivo TEM: regravar sem cor agora herda o vermelho/verde
+        r = P.patch(lib, sem_cor(res), bk_dir)
+        assert r['verificado'] and (rect_reg(st)['Color'], rect_reg(st)['AreaColor']) == ('255', '65280'), rect_reg(st)
+        # preto explícito: chave ausente, e a paleta NÃO volta por baixo; maiúsculas passam pelo patch
+        preto = copy.deepcopy(res)
+        rp = next(g for g in preto['parts'][0]['graphics'] if g['g'] == 'rect')
+        rp.update(color='#000000', fill='#FFFFB0', solid=True)
+        r = P.patch(lib, preto, bk_dir)
+        assert r['verificado'], r
+        reg = rect_reg(st)
+        assert 'Color' not in reg and reg['AreaColor'] == '11599871' and reg['IsSolid'] == 'T', reg
+        rr = next(g for g in simbolo(lib, 'RES [ SMD ]')['parts'][0]['graphics'] if g['g'] == 'rect')
+        assert 'color' not in rr and rr['fill'] == '#ffffb0', rr
+        # fill sem solid: gravado (o Altium guarda a AreaColor do retângulo vazado), mas não volta
+        vazado = copy.deepcopy(res)
+        next(g for g in vazado['parts'][0]['graphics'] if g['g'] == 'rect').update(fill='#123456', solid=False)
+        r = P.patch(lib, vazado, bk_dir)
+        assert r['verificado'] and rect_reg(st)['AreaColor'] == str(0x12 + 0x34 * 256 + 0x56 * 65536), rect_reg(st)
+        assert 'fill' not in next(g for g in simbolo(lib, 'RES [ SMD ]')['parts'][0]['graphics'] if g['g'] == 'rect')
+        # de volta ao byte de (1): a fill da casa explícita (o retângulo vazado não a devolve na
+        # leitura, então `res` sozinho herdaria o #123456), e depois `res` cru herda o que ficou
+        volta = copy.deepcopy(res)
+        next(g for g in volta['parts'][0]['graphics'] if g['g'] == 'rect').update(fill='#ffffb0')
+        r = P.patch(lib, volta, bk_dir)
+        assert r['verificado'] and streams(lib)[st + '/Data'] == depois[st + '/Data'], 'o RES tinha que voltar ao byte de (1)'
+        r = P.patch(lib, copy.deepcopy(res), bk_dir)
+        assert r['verificado'] and streams(lib)[st + '/Data'] == depois[st + '/Data'], 'sem fill: herda a AreaColor da casa'
+        # linha/polígono do 2N3904: Color/AreaColor iguais aos do arquivo, e NENHUM AreaColor=0 em linha
+        npn = simbolo(lib, '2N3904')
+        st_n = P.acha(P.carrega(lib), '2N3904')
+        antes_n = streams(lib)
+
+        def regs_de(st_):
+            return [SB.le_texto(pl) for t, pl in SB.desmonta(streams(lib)[st_ + '/Data']) if t == SB.TEXTO]
+        cores_a = [(d.get('RECORD'), d.get('Color'), d.get('AreaColor'), d.get('IsSolid')) for d in regs_de(st_n) if d.get('RECORD') in ('13', '7')]
+        assert cores_a == [('13', '16711680', None, None)] * 3 + [('7', '16711680', '16711680', 'T')], cores_a
+        r = P.patch(lib, copy.deepcopy(npn), bk_dir)
+        assert r['verificado'], r
+        outros_iguais(antes_n, streams(lib), [st_n])
+        cores_d = [(d.get('RECORD'), d.get('Color'), d.get('AreaColor'), d.get('IsSolid')) for d in regs_de(st_n) if d.get('RECORD') in ('13', '7')]
+        assert cores_d == cores_a, (cores_d, cores_a)
+        assert not any(v == '0' for d in regs_de(st_n) for k, v in d.items() if k in ('Color', 'AreaColor')), 'zero é ausência'
+        data_n = streams(lib)[st_n + '/Data']
+        r = P.patch(lib, sem_cor(npn), bk_dir)
+        assert r['verificado'] and streams(lib)[st_n + '/Data'] == data_n, 'sem cor, a paleta do 2N3904: bytes iguais'
+        print('  (2e) cores: #ff0000/#00ff00 -> Color=255/AreaColor=65280 e volta; sem cor = paleta (bytes iguais); #000000 = ausente; sem AreaColor=0 em linha')
 
         # ── (2b) quem JÁ tem PinFrac volta com as mesmas frações por pino ────
         com_frac = sorted(k.split('/')[0] for k in antes if k.endswith('/PinFrac'))

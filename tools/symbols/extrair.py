@@ -22,6 +22,9 @@ Três decisões que valem a pena conhecer:
                 opostos, linha de trás para frente, arco que cruza 0°, polígono começando
                 noutro vértice) — `_grafico` põe cada forma numa escrita só, senão a cópia
                 colocada numa folha (que o `localiza` devolve espelhada) nunca deduplica.
+                Cor (`color`/`fill`) NÃO é identidade: o mesmo corpo em azul e em vermelho
+                é um símbolo só. Os campos seguem no símbolo guardado (é o desenho que o
+                usuário vai aplicar), só ficam fora da chave e da ordem canônica.
   kind          `generico` quando tem até 4 pinos, `ci` acima disso. É a regra mais simples
                 que separa o que se troca de corpo (resistor, diodo, transistor…) do que se
                 nomeia pelo CI; os poucos blocos de 4 pinos (DC/DC, ponte) ficam genéricos e
@@ -55,6 +58,7 @@ RELATORIO_PADRAO = os.path.join(BASE, 'relatorio.txt')
 EXT = {'.schlib': 'schlib', '.schdoc': 'schdoc', '.intlib': 'intlib'}
 PARTE = ' · parte %d/%d'
 CHAVES = ('id', 'name', 'kind', 'fp', 'aliases', 'fontes', 'usos', 'desde', 'pins', 'graphics')
+CORES = ('color', 'fill')
 
 
 def _log(msg):
@@ -115,7 +119,25 @@ def _pino(p):
                         ('orient', _i(p.get('orient')) % 360), ('type', str(p.get('type', 'Passive')))])
 
 
+def _cores(g):
+    """`color`/`fill` válidos ('#rrggbb' minúsculo, o que o leitor emite), na ordem"""
+    return [(k, g[k]) for k in CORES if isinstance(g.get(k), str) and L.RX_COR.match(g[k])]
+
+
+def _identidade(h):
+    """o gráfico sem as cores: o que ordena e o que entra no fingerprint"""
+    return OrderedDict((k, v) for k, v in h.items() if k not in CORES)
+
+
 def _grafico(g):
+    """a escrita canônica da forma, com as cores (se válidas) no fim"""
+    h = _forma(g)
+    if h is not None:
+        h.update(_cores(g))
+    return h
+
+
+def _forma(g):
     k = g.get('g')
     if k == 'line':
         # uma linha não tem sentido: os extremos saem em ordem
@@ -165,17 +187,19 @@ def normaliza(pins, graphics):
     npins = sorted((_pino(p) for p in pins or []),
                    key=lambda p: (p['x'], p['y'], p['len'], p['orient'], p['num'], p['name']))
     ngr = [h for h in (_grafico(g) for g in graphics or []) if h is not None]
-    ngr.sort(key=_canon)
+    ngr.sort(key=lambda h: _canon(_identidade(h)))       # a cor não muda a ordem
     return npins, ngr
 
 
 def fingerprint(pins, graphics, kind):
-    """chave da deduplicação: sha1[:16] do JSON canônico. Aceita geometria crua (normaliza antes)."""
+    """chave da deduplicação: sha1[:16] do JSON canônico, sem as cores. Aceita geometria
+    crua (normaliza antes)."""
     npins, ngr = normaliza(pins, graphics)
     if kind == 'ci':
         chave = [[p['x'], p['y'], p['len'], p['orient'], p['num'], p['name']] for p in npins]
     else:
         chave = [[p['x'], p['y'], p['len'], p['orient']] for p in npins]
+    ngr = [_identidade(h) for h in ngr]
     return hashlib.sha1(_canon({'k': kind, 'p': chave, 'g': ngr}).encode('utf-8')).hexdigest()[:16]
 
 

@@ -7,7 +7,12 @@
     (pinos e gráficos, tolerância 0.01 mil); os que diferem são listados com o motivo.
     O espelho versionado já levou os hideNum/hideName (`sch_leitor.py --flags`), então a
     linha tem que sair byte a byte igual COM os flags — de quem tem pino escondido e de quem
-    não tem — e o RES [ SMD ] volta com os dois flags enquanto o 24LC256 volta sem nenhum.
+    não tem — e o RES [ SMD ] volta com os dois flags enquanto o 24LC256 volta sem nenhum;
+    a BARRA TERMINAL 10 VIAS só esconde o número (0x28) e o 2N7000 só o nome (0x31..0x33).
+    O ExportLibs nunca exportou cor, então `color`/`fill` ficam FORA da comparação e da
+    linha byte a byte (tirados da cópia antes de serializar); à parte, retângulos reais
+    voltam com color/fill (24LC256: #800000/#ffffb0) e o RES [ SMD ], com AreaColor mas
+    sem IsSolid, volta sem fill.
 (a2) offline: o rename-map (le_rename_map/aplica_rename) e o passo dos flags (aplica_flags)
     num espelho de mentira, incluindo o que ele NÃO toca.
 (b) lê .SchDoc reais e prova a localização: um componente colocado, desfeitas posição,
@@ -38,6 +43,7 @@ ANTIGO = r'Y:\EQUIPAMENTOS ATUALIZADOS\GERADORES DE PULSOS PDM\GP-DI92120-22C9E6
 ASCII = r'Y:\EQUIPAMENTOS ATUALIZADOS\SMVT - DI221660 - SISTEMA DE MONITORAMENTO DE VIBRAÇÃO E TEMPERATURA\SMTV-DI221661\SCH e PCB\Sensor grande\VERSAO 1.0\REFS\Sheet_1_2022-05-27.schdoc'
 TOL = 0.01
 NUM = (int, float)
+CORES = ('color', 'fill')      # o schlib.js do ExportLibs não os tem: ficam fora da comparação
 
 
 # ─── o espelho atual e o mapa de renomeação ───────────────────────────────────
@@ -91,8 +97,16 @@ def _difere(a, b, campos):
     return None
 
 
+def sem_cor(sym):
+    """cópia do símbolo sem color/fill nos gráficos (o que o ExportLibs escrevia)"""
+    s = dict(sym)
+    s['parts'] = [dict(p, graphics=[{k: v for k, v in g.items() if k not in CORES} for g in p['graphics']])
+                  for p in sym['parts']]
+    return s
+
+
 def compara_simbolo(meu, js):
-    """-> lista de motivos (vazia = idêntico)"""
+    """-> lista de motivos (vazia = idêntico); color/fill não contam"""
     motivos = []
     if meu['partcount'] != js.get('partcount'):
         motivos.append('partcount %s != %s' % (meu['partcount'], js.get('partcount')))
@@ -114,7 +128,7 @@ def compara_simbolo(meu, js):
                 if a['g'] != b['g']:
                     motivos.append('parte %d grafico %d: %s != %s' % (pm['part'], i, a['g'], b['g']))
                     break
-                d = _difere(a, b, sorted(set(a) | set(b)))
+                d = _difere(a, b, sorted((set(a) | set(b)) - set(CORES)))
                 if d:
                     motivos.append('parte %d %s %d: %s' % (pm['part'], a['g'], i, d))
                     break
@@ -226,7 +240,27 @@ def test_offline():
     assert L.primitiva({'RECORD': '3', 'Symbol': '1'}, {}) is None
     g = L.primitiva({'RECORD': '4', 'Location.X': '37', 'Orientation': '1', 'FontID': '13', 'Text': 'GND'}, {13: 12})
     assert g == {'g': 'label', 'x': 370, 'y': 0, 'text': 'GND', 'rot': 90, 'size': 12}
-    print('  offline: localiza/serializa OK')
+    # cores: TColor (R + G*256 + B*65536) <-> '#rrggbb' minúsculo; 0 é preto; fora de RGB não é cor
+    assert (L.cor_hex(128), L.cor_hex(11599871), L.cor_hex(16711680), L.cor_hex(8388608)) == \
+        ('#800000', '#ffffb0', '#0000ff', '#000080')
+    assert L.cor_hex(0) == '#000000' and L.cor_hex(None) is None and L.cor_hex('') is None and L.cor_hex('x') is None
+    assert L.cor_hex(0x80000005) is None, 'TColor de sistema não é cor'
+    assert (L.cor_int('#800000'), L.cor_int('#ffffb0'), L.cor_int('#0000FF'), L.cor_int('#000000')) == (128, 11599871, 16711680, 0)
+    assert L.cor_int('red') is None and L.cor_int(None) is None and L.cor_int('#12345') is None
+    assert all(L.cor_int(L.cor_hex(n)) == n for n in (0, 1, 255, 256, 65536, 128, 11599871, 16711680, 0xFFFFFF))
+    # o registro manda: sem Color não há `color`; AreaColor só vira `fill` com IsSolid; os dois vão no fim
+    g = L.primitiva({'RECORD': '14', 'Location.X': '-15', 'Corner.X': '5', 'Color': '16711680', 'AreaColor': '11599871'}, {})
+    assert list(g.keys()) == ['g', 'x1', 'y1', 'x2', 'y2', 'solid', 'color'] and g['color'] == '#0000ff', g
+    g = L.primitiva({'RECORD': '14', 'Corner.X': '5', 'Color': '128', 'AreaColor': '11599871', 'IsSolid': 'T'}, {})
+    assert list(g.keys())[-2:] == ['color', 'fill'] and (g['color'], g['fill']) == ('#800000', '#ffffb0'), g
+    assert 'color' not in L.primitiva({'RECORD': '13', 'Corner.X': '5'}, {})
+    assert L.primitiva({'RECORD': '6', 'LocationCount': '1', 'X1': '1', 'Color': '5220458'}, {})['color'] == '#6aa84f'
+    assert L.primitiva({'RECORD': '4', 'Text': 'x', 'Color': '8388608'}, {})['color'] == '#000080'
+    g = L.primitiva({'RECORD': '7', 'LocationCount': '1', 'X1': '1', 'AreaColor': '11599871', 'IsSolid': 'T'}, {})
+    assert 'color' not in g and g['fill'] == '#ffffb0', g
+    g = L.primitiva({'RECORD': '8', 'Radius': '1', 'SecondaryRadius': '1', 'Color': '16711680', 'AreaColor': '12632256', 'IsSolid': 'T'}, {})
+    assert (g['color'], g['fill']) == ('#0000ff', '#c0c0c0'), g
+    print('  offline: localiza/serializa/cores OK')
 
 
 # ─── (a2) offline: o rename-map e os flags no espelho que já existe ───────────
@@ -335,6 +369,35 @@ def test_schlib():
     print('  (a) %d de %d simbolos tem pino com nome/numero escondido (hideNum/hideName); ex.: %s' % (
         len(com_flag), len(syms), ', '.join(com_flag[:5])))
     assert 'RES [ SMD ]' in com_flag and '24LC256' not in com_flag
+    # os intermediários, em arquivo: só o número escondido (0x28) e só o nome escondido (0x31..0x33)
+    pb = por_ref['BARRA TERMINAL 10 VIAS']['parts'][0]['pins']
+    assert len(pb) == 10 and all(q.get('hideNum') is True and 'hideName' not in q for q in pb), pb
+    pn = por_ref['2N7000']['parts'][0]['pins']
+    assert [q['num'] for q in pn] == ['G', 'S', 'D'] and all(q.get('hideName') is True and 'hideNum' not in q for q in pn), pn
+    # as cores, em arquivo: Color/AreaColor viram color/fill, fill só com IsSolid
+    def graf(nome, k):
+        return next(g for g in por_ref[nome]['parts'][0]['graphics'] if g['g'] == k)
+    r = graf('24LC256', 'rect')
+    assert r['solid'] and (r['color'], r['fill']) == ('#800000', '#ffffb0'), r      # Color=128, AreaColor=11599871
+    assert list(r.keys())[-2:] == ['color', 'fill']
+    r = graf('BARRA TERMINAL 10 VIAS', 'rect')
+    assert (r['color'], r['fill']) == ('#800000', '#ffffb0'), r
+    r = graf('RES [ SMD ]', 'rect')
+    assert not r['solid'] and r['color'] == '#0000ff' and 'fill' not in r, r        # AreaColor sem IsSolid: sem fill
+    assert graf('2N3904', 'line')['color'] == '#0000ff'
+    p7 = graf('2N3904', 'poly')
+    assert p7['solid'] and (p7['color'], p7['fill']) == ('#0000ff', '#0000ff'), p7
+    assert graf('ADIS ADAPT', 'label')['color'] == '#000080'
+    p7 = graf('3140', 'poly')
+    assert 'color' not in p7 and p7['fill'] == '#ffffb0', p7                          # sem Color, com AreaColor+IsSolid
+    assert 'color' not in graf('3140', 'polyline')
+    p7 = graf('MicroSD', 'poly')
+    assert not p7['solid'] and p7['color'] == '#0000ff' and 'fill' not in p7, p7
+    todos = [g for s in syms for p in s['parts'] for g in p['graphics']]
+    com_cor = sum(1 for g in todos if 'color' in g)
+    print('  (a) cores: %d de %d graficos com color, %d com fill (24LC256 rect #800000/#ffffb0; RES sem fill)' % (
+        com_cor, len(todos), sum(1 for g in todos if 'fill' in g)))
+    assert com_cor >= 0.75 * len(todos), 'a lib real tem Color em quase todo grafico'
 
     js = le_js(os.path.join(RAIZ, 'Libs', 'schlib.js'))
     por_nome = {s['name']: (linha, s) for linha, s in js}
@@ -363,8 +426,9 @@ def test_schlib():
             continue
         iguais += 1
         # e a LINHA do espelho tem que sair igual, byte a byte, trocados só os nomes
-        # (símbolo e footprints) que o RenameLibs padronizou
-        copia = dict(sym)
+        # (símbolo e footprints) que o RenameLibs padronizou — e sem color/fill, que o
+        # ExportLibs nunca escreveu (regerar com --espelho os põe em quase toda linha)
+        copia = sem_cor(sym)
         copia['name'] = nome_js
         copia['footprints'] = [dict(f, name=ren_fp.get(f['name'], f['name']),
                                     incurrentlib=ren_fp.get(f['name'], f['name']).lower() in baixos)
