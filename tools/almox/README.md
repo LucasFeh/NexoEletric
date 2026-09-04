@@ -179,6 +179,42 @@ Três formas de regerá-lo, todas produzindo o mesmo arquivo:
 3. O dump SQL original, na VM do Odoo (`192.168.15.182`, base `odoo_db`, container
    `db19`), quando se quer conferir a fonte.
 
+## Quando a lib gerada abre com a folha PRETA no Altium
+
+Já aconteceu, e o sintoma engana: o hub mostra os símbolos certos, mas o Altium abre a
+biblioteca com a folha preta. O hub desenha a partir dos **registros**; a cor da folha mora
+no **`FileHeader`**, junto da moldura, da grade, da unidade e da tabela de fontes.
+
+Esses campos vinham de carona do cabeçalho **modelo** — a `BIBLIOTECA DE ESQUEMA.SchLib` da
+casa, lida por rede. No dia em que a rede falhou, `carrega_lib()` devolveu `{}` e as 32 libs
+saíram com **3 campos de documento em vez de ~74**. Sem `AreaColor`, o Altium não tem cor
+para pintar e usa preto.
+
+Diagnóstico, comparando o cabeçalho real com o gerado:
+
+```python
+import sys, re; sys.path.insert(0, 'tools/almox')
+import olefile, schlib_bin as SB
+def doc(p):
+    o = olefile.OleFileIO(p)
+    d = SB.le_texto(SB.desmonta(o.openstream('FileHeader').read())[0][1]); o.close()
+    lixo = re.compile(r'^(Comp|AliasCount|CompDescr|LibRef|PartCount)\d*', re.I)
+    return {k: v for k, v in d.items() if not lixo.match(k)}   # tira o que é por componente
+print(len(doc('Libs/Almox/BATERIA ALMOX.SchLib')))             # saudável: ~74, e com AreaColor
+```
+
+`AreaColor = 16317695` é rgb(255,252,248), a folha creme (o inteiro é BGR:
+`n & 255, (n>>8)&255, (n>>16)&255`).
+
+Hoje o `CABECALHO_PADRAO` do `schlib_escritor.py` é o **piso** — cor da folha, moldura,
+grade, unidade e a fonte 1, que é a única que os registros gerados referenciam — e o modelo,
+quando alcançável, escreve por cima. A geração não depende mais da rede para produzir um
+arquivo que abre certo, e o `almox2lib` avisa alto quando não consegue ler a lib da casa,
+em vez de degradar mudo.
+
+Regerar é `python tools/almox/almox2lib.py` — **sem** `--sem-schlib`, que pula justamente a
+escrita das `.SchLib`.
+
 ## Cobertura
 
 De 4.496 produtos ativos, 2.526 viram componente de PCB (70 símbolos básicos com 1.514
