@@ -419,6 +419,120 @@ try:
     else:
         assert r.status_code == 404 and 'SchLib' in j['error'], j
         print('mirror sem SchLib -> 404 ok')
+
+    # ── guardião: altium-changes / altium-apply / almox-sync ────────────────
+    import guardiao as G
+    ledger = os.path.join(tmp, 'Libs', 'lib-ledger.json')
+    if tem_lib:
+        assert cli.post('/api/symbols/mirror', json={}).status_code == 200      # espelho = SchLib, ledger sabe
+        assert os.path.isfile(ledger), 'o /mirror registra a SchLib no ledger'
+    # (6) o que o hub escreveu não é "mudança do Altium"
+    j = cli.get('/api/symbols/altium-changes').get_json()
+    assert j['ok'] and j['pendente'] is False and j['deep'] is False and j['itens'] == [], j
+    casa = next(a for a in j['arquivos'] if a['acervo'] == 'altium')
+    assert casa['arquivo'] == G.chave_arquivo(tmp, lib_copia) == 'lib/BIBLIOTECA DE ESQUEMA.SchLib', casa
+    assert casa['caminho'] == lib_copia and casa['existe'] == tem_lib and not casa['mudou']
+    if tem_lib:
+        assert casa['conhecido'] and 'adotado' not in casa
+        r = cli.post('/api/symbols/save', json={'name': RES_NOVO, 'parts': mod, 'altium': True})
+        assert r.status_code == 200 and r.get_json()['altium'], r.get_json()
+        j = cli.get('/api/symbols/altium-changes').get_json()
+        assert not j['pendente'] and not next(a for a in j['arquivos'] if a['acervo'] == 'altium')['mudou']
+        print('save do hub nao vira "mudou no Altium" ok')
+        # (7) edição por fora (sem raiz: é o Altium) -> pendente; deep lista; apply troca só a linha
+        mod2 = copy.deepcopy(res['parts'])
+        next(g for g in mod2[0]['graphics'] if g['g'] == 'rect')['x2'] += 120
+        P.patch(lib_copia, {'name': RES, 'parts': mod2}, backup=False)
+        j = cli.get('/api/symbols/altium-changes').get_json()
+        assert j['pendente'] and next(a for a in j['arquivos'] if a['acervo'] == 'altium')['mudou'] and j['itens'] == []
+        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
+        assert j['deep'] and j['itens'] == [{'acervo': 'altium', 'name': RES_NOVO, 'nomeAltium': RES, 'mudou': ['geometria']}], j['itens']
+        antes = le_bytes(espelho)
+        r = cli.post('/api/symbols/altium-apply', json={'itens': j['itens']})
+        jj = r.get_json()
+        assert r.status_code == 200 and jj['ok'] and jj['aplicados'] == 1 and jj['itens'][0]['acao'] == 'trocado', jj
+        linhas_a, linhas_d = antes.split(b'\r\n'), le_bytes(espelho).split(b'\r\n')
+        assert len(linhas_a) == len(linhas_d)
+        pref = b'{"name":' + L._js(RES_NOVO).encode() + b','
+        for i, (a, d) in enumerate(zip(linhas_a, linhas_d)):
+            if d.lstrip(b',').startswith(pref):
+                assert a != d
+            elif i == 2:
+                assert a.startswith(b'"generated":') and d.startswith(b'"generated":')
+            else:
+                assert a == d, 'linha %d mudou: %r' % (i, d[:60])
+        assert not P.compara(P.esperado({'name': RES_NOVO, 'parts': mod2}), acha(H.load_var_file(espelho), RES_NOVO)['parts'])
+        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
+        assert not j['pendente'] and j['itens'] == [], j
+        assert cli.post('/api/symbols/altium-apply', json={'itens': []}).status_code == 400
+        assert cli.post('/api/symbols/altium-apply', json={'itens': [{'acervo': 'x'}]}).status_code == 400
+        assert cli.post('/api/symbols/altium-apply', json={'itens': [{'acervo': 'almox', 'familia': 'A'}]}).status_code == 400
+        r = cli.post('/api/symbols/altium-apply', json={'itens': [{'acervo': 'altium', 'name': 'NAO EXISTE'}]})
+        assert r.status_code == 200 and r.get_json()['aplicados'] == 0 and not r.get_json()['itens'][0]['ok']
+        print('altium-changes/altium-apply (casa) ok')
+
+    almox_src = next((d for d in (r'D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Libs\Almox', os.path.join(RAIZ, 'Libs', 'Almox'))
+                      if os.path.isfile(os.path.join(d, 'DIAC ALMOX.SchLib'))), None)
+    tem_almox = almox_src is not None and all(os.path.isfile(os.path.join(RAIZ, 'Libs', f)) for f in G.ESPELHOS_ALMOX)
+    if tem_almox:
+        os.makedirs(os.path.join(tmp, 'Libs', 'Almox'))
+        for f in ('DIAC ALMOX.SchLib', 'CAPACITOR ALMOX.SchLib'):
+            shutil.copy2(os.path.join(almox_src, f), os.path.join(tmp, 'Libs', 'Almox', f))
+        for f in G.ESPELHOS_ALMOX:
+            shutil.copy2(os.path.join(RAIZ, 'Libs', f), os.path.join(tmp, 'Libs', f))
+        j = cli.get('/api/symbols/altium-changes').get_json()            # adota as libs nunca vistas
+        alm = [a for a in j['arquivos'] if a['acervo'] == 'almox']
+        assert len(alm) == 2 and all(a['adotado'] and not a['mudou'] for a in alm) and not j['pendente'], alm
+        assert j['ledger']['gerado'] == 2 and j['ledger']['protegidos'] == 0
+        cam = os.path.join(tmp, 'Libs', 'Almox', 'DIAC ALMOX.SchLib')
+        comp, parts = next(iter(G.le_familia(cam).items()))
+        mod3 = copy.deepcopy(parts)
+        mod3[0]['graphics'].append({'g': 'rect', 'x1': -120, 'y1': -90, 'x2': 120, 'y2': 90, 'solid': False})
+        P.patch(cam, {'name': comp, 'parts': mod3}, backup=False)
+        j = cli.get('/api/symbols/altium-changes').get_json()
+        assert j['pendente'] and next(a for a in j['arquivos'] if a['familia'] == 'DIAC')['mudou']
+        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
+        it = j['itens']
+        assert len(it) == 1 and (it[0]['acervo'], it[0]['familia'], it[0]['componente'], it[0]['mudou']) == \
+            ('almox', 'DIAC', comp, ['geometria']), it
+        r = cli.post('/api/symbols/altium-apply', json={'itens': it})
+        assert r.status_code == 200 and r.get_json()['aplicados'] == 1 and r.get_json()['itens'][0]['acao'] == 'protegido'
+        led = G.carrega_ledger(tmp)
+        assert led['protegidos']['DIAC'][comp]['origem'] == 'altium'
+        _var, esp = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
+        sim = next(s for s in esp['symbols'] if s['name'] == 'DIAC [PTH]')
+        assert sim['origem'] == 'altium' and sim['protegidos'] == 1 and G.fp_parts(sim['parts']) == G.fp_parts(mod3)
+        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
+        assert not j['pendente'] and j['itens'] == []
+        print('altium-changes/altium-apply (almoxarifado) ok')
+
+        # almox-sync: reserva, 409, 400 sem senha, e o stream de verdade (sem o gerador)
+        S._sync_runs.clear()
+        S.GUARDIAO_EXTRA[:] = ['--sem-gerador']
+        try:
+            if not os.environ.get('ODOO_SENHA'):
+                assert cli.post('/api/symbols/almox-sync', json={'pull': True}).status_code == 400, 'pull sem senha'
+            r = cli.post('/api/symbols/almox-sync', json={})
+            assert r.status_code == 202 and r.get_json()['runId'].startswith('g_'), r.get_json()
+            run = r.get_json()['runId']
+            assert cli.post('/api/symbols/almox-sync', json={}).status_code == 409
+            assert cli.get('/api/symbols/almox-sync/nao-existe/stream').status_code == 404
+            r = cli.get('/api/symbols/almox-sync/%s/stream' % run)
+            corpo = r.get_data(as_text=True)
+            assert r.mimetype == 'text/event-stream'
+            assert 'event: done' in corpo and 'event: error' not in corpo, corpo[-800:]
+            assert 'data: gerador pulado' in corpo and 'data: guardião:' in corpo, corpo[:600]
+            done = S.json.loads(corpo.split('event: done\ndata: ', 1)[1].split('\n', 1)[0])
+            assert done['ok'] and done['resumo']['ok'] and done['resumo']['gerados'] == 2
+            assert [p['componente'] for p in done['resumo']['protegidos']] == [comp] and done['resumo']['repostos']
+            assert cli.get('/api/symbols/almox-sync/%s/stream' % run).status_code == 404, 'reserva consumida'
+            assert cli.post('/api/symbols/almox-sync', json={}).status_code == 202, 'depois do done, libera'
+        finally:
+            S.GUARDIAO_EXTRA[:] = []
+            S._sync_runs.clear()
+        print('almox-sync 202/409/400 + stream do guardião ok')
+    else:
+        print('PULADO: sem DIAC/CAPACITOR ALMOX.SchLib ou sem os espelhos almox-*.js')
 finally:
     H.ROOT, S.ROOT = real_root, real_root
     shutil.rmtree(tmp, ignore_errors=True)

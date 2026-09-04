@@ -6,9 +6,13 @@
     POST /api/symbols/lib                    add/rename/delete na Biblioteca de símbolos (Libs/symbols-lib.js)
     POST /api/symbols/extract                reserva uma extração; GET …/<runId>/stream roda e retransmite (SSE)
     POST /api/symbols/mirror                 regera o espelho inteiro a partir da SchLib real; {flags:true} só leva os flags
+    GET  /api/symbols/altium-changes[?deep=1] o que mudou nas .SchLib do Altium desde o ledger (e os itens, com deep)
+    POST /api/symbols/altium-apply           aplica no hub o que veio do Altium (linhas do schlib.js; protegidos do almox)
+    POST /api/symbols/almox-sync             reserva a sincronização do almoxarifado pelo guardião; GET …/<runId>/stream roda (SSE)
 
-O trabalho pesado mora nos irmãos: `sch_leitor` lê, `schlib_patch` grava, `extrair` varre.
-Aqui só o HTTP e três decisões de arquivo:
+O trabalho pesado mora nos irmãos: `sch_leitor` lê, `schlib_patch` grava, `extrair` varre,
+`guardiao` vigia as .SchLib do Altium e envolve o gerador do almoxarifado. Aqui só o HTTP e
+três decisões de arquivo:
 
   espelho linha a linha    o Libs/schlib.js tem 685 KB, um símbolo por linha. O save troca SÓ a
                            linha do símbolo (e a do `generated`) em vez de reserializar tudo — o
@@ -35,6 +39,9 @@ Aqui só o HTTP e três decisões de arquivo:
                            chaves do vocabulário, na ordem do leitor — a linha sai igual venha de
                            quem vier (o test_client do Flask manda as chaves em ordem alfabética);
                            o schlib_patch leva a cor para a SchLib; sem cor, a paleta do componente.
+  o ledger                 tudo que escreve a SchLib da casa (/save) ou põe o espelho igual a ela
+                           (/mirror, flags inclusive) registra mtime/size dela no Libs/lib-ledger.json
+                           — senão o próprio hub apareceria em /altium-changes como "mudou no Altium".
 
 `registra(app, root)` é o único ponto de contato com o hubserver: guarda ROOT e registra o
 blueprint. ROOT é lido em tempo de chamada — os testes trocam.
@@ -61,6 +68,7 @@ sys.path.insert(0, BASE)
 import sch_leitor as L                                 # noqa: E402
 import schlib_patch as P                               # noqa: E402
 import extrair as E                                    # noqa: E402
+import guardiao as G                                   # noqa: E402
 
 bp = Blueprint('symbols', __name__, url_prefix='/api/symbols')
 ROOT = RAIZ                          # o workspace servido; registra() troca
@@ -71,7 +79,11 @@ CONFIG = os.path.join('tools', 'symbols', 'config.json')
 RENAME_MAP = os.path.join('Libs', 'rename-map.js')
 RELATORIO = os.path.join('tools', 'symbols', 'relatorio.txt')
 EXTRAIR = os.path.join(BASE, 'extrair.py')   # código, não dado: roda de onde o módulo mora
+GUARDIAO = os.path.join(BASE, 'guardiao.py')
+GUARDIAO_EXTRA = []                  # argumentos a mais para o guardião (o teste põe --sem-gerador)
+ALMOX_CFG = 'hub-almox.json'         # as credenciais do Odoo, como o hubserver as lê
 EXTRACT_TIMEOUT = 3600.0             # a varredura do Y: inteiro leva minutos, não horas
+SYNC_TIMEOUT = 600.0                 # o mesmo teto do /api/almox/sync: Odoo mudo não prende o hub
 RESERVA_TTL = 60.0                   # reserva sem stream aberto expira sozinha
 FORMAS = ('line', 'rect', 'arc', 'ellipse', 'poly', 'polyline', 'label')
 KINDS = ('generico', 'ci')
@@ -83,6 +95,8 @@ _lock_symlib = threading.Lock()
 _extract_lock = threading.Lock()     # segurado enquanto o subprocesso roda
 _reserva_lock = threading.Lock()
 _extract_runs = {}                   # runId -> (quando, args extras)
+_sync_lock = threading.Lock()        # o guardião reescreve Libs/Almox inteira: uma corrida por vez
+_sync_runs = {}                      # runId -> (quando, pull)
 
 
 def registra(app, root):
@@ -307,12 +321,12 @@ def _patch_altium(cfg, sym):
     if not os.path.isfile(schlib):
         raise FileNotFoundError('SchLib não encontrada: %s' % schlib)
     try:
-        return P.patch(schlib, sym, cfg['backup_dir'])
+        return P.patch(schlib, sym, cfg['backup_dir'], raiz=ROOT)
     except ValueError:
         antigo = _nome_antigo(sym['name'])
         if not antigo:
             raise
-        r = P.patch(schlib, dict(sym, name=antigo), cfg['backup_dir'])
+        r = P.patch(schlib, dict(sym, name=antigo), cfg['backup_dir'], raiz=ROOT)
         r['nomeAltium'] = antigo
         return r
 
@@ -557,6 +571,7 @@ def api_mirror():
                 novo, r = L.aplica_flags(texto, dados['symbols'], mapa)
                 if novo != texto:
                     _grava_bytes(caminho, novo.encode('latin-1'))
+                G.registra_arquivo(ROOT, schlib)
                 return {'ok': True, 'flags': True, 'symbols': r['simbolos'], 'mudaram': r['mudaram'],
                         'comFlag': r['com_flag'], 'semPar': r['sem_par'], 'pinosSemPar': r['pinos_sem_par'],
                         'avisos': r['avisos'] + (dados.get('avisos') or []), 'source': schlib}
@@ -569,6 +584,7 @@ def api_mirror():
             _grava_bytes(caminho, L.espelho(dados, nomes).encode('utf-8'))
             _grava_bytes(os.path.join(ROOT, 'Libs', 'libs-report.txt'),
                          L.relatorio(dados, nomes).encode('utf-8'))
+            G.registra_arquivo(ROOT, schlib)
         except OSError as e:
             return _erro('falha ao gravar o espelho: %s' % e, 500)
         except Exception as e:                                  # noqa: BLE001
@@ -577,3 +593,137 @@ def api_mirror():
     return {'ok': True, 'symbols': len(syms),
             'nofootprint': sum(1 for s in syms if L._sem_footprint(s)),
             'avisos': dados.get('avisos') or [], 'source': schlib, 'rename': ren}
+
+
+# ─── o Altium mudou? ──────────────────────────────────────────────────────────
+@bp.route('/altium-changes', methods=['GET'])
+def api_altium_changes():
+    """Sem `deep`: só mtime/size das .SchLib (a da casa e as de Libs/Almox) contra o ledger —
+    barato, é o que a aba Biblioteca pergunta ao abrir. Com `deep=1`: lê os arquivos que
+    mudaram e lista os itens (símbolo da casa com o que mudou; componente do almoxarifado
+    com geometria fora do gerador). Arquivo nunca visto é adotado como está; arquivo que
+    mudou sem diferença nenhuma é absorvido no deep — o aviso some sozinho."""
+    deep = (request.args.get('deep') or '').lower() in ('1', 'true', 'sim')
+    try:
+        with _lock_espelho, _lock_schlib:
+            r = G.detecta(ROOT, deep=deep)
+    except Exception as e:                                      # noqa: BLE001
+        return _erro('falha ao apurar as mudanças: %s' % e, 500)
+    r['ok'] = True
+    return r
+
+
+def _valida_itens(itens):
+    if not isinstance(itens, list) or not itens:
+        return 'itens tem que ser uma lista com ao menos um item'
+    for i, it in enumerate(itens):
+        onde = 'item %d' % (i + 1)
+        if not isinstance(it, dict) or it.get('acervo') not in ('altium', 'almox'):
+            return onde + ': acervo tem que ser altium ou almox'
+        if it['acervo'] == 'altium' and not (isinstance(it.get('name'), str) and it['name'].strip()):
+            return onde + ': símbolo da casa precisa de name'
+        if it['acervo'] == 'almox' and not all(isinstance(it.get(k), str) and it[k].strip()
+                                               for k in ('familia', 'componente')):
+            return onde + ': componente do almoxarifado precisa de familia e componente'
+    return None
+
+
+@bp.route('/altium-apply', methods=['POST'])
+def api_altium_apply():
+    """`{itens:[{acervo:'altium', name} | {acervo:'almox', familia, componente}]}` — o que o
+    deep do /altium-changes devolveu (ou parte). Casa: a linha do símbolo no Libs/schlib.js
+    vira o que o leitor lê da SchLib; almoxarifado: o componente vira protegido (ou perde a
+    proteção, se voltou ao gerador) e o espelho da família anda junto. Se o editor de
+    símbolos tem edição não salva, quem decide é o hub antes de chamar."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _erro('JSON {itens:[…]} obrigatório', 400)
+    erro = _valida_itens(data.get('itens'))
+    if erro:
+        return _erro(erro, 400)
+    try:
+        with _lock_espelho, _lock_schlib:
+            r = G.aplica(ROOT, data['itens'], log=lambda *a: None)
+    except Exception as e:                                      # noqa: BLE001
+        return _erro('falha ao aplicar: %s' % e, 500)
+    r['ok'] = True
+    return r
+
+
+# ─── sincronização do almoxarifado pelo guardião ──────────────────────────────
+def _senha_odoo():
+    try:
+        with open(os.path.join(ROOT, ALMOX_CFG), encoding='utf-8') as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        cfg = {}
+    return bool((isinstance(cfg, dict) and cfg.get('senha')) or os.environ.get('ODOO_SENHA'))
+
+
+@bp.route('/almox-sync', methods=['POST'])
+def api_almox_sync():
+    """Reserva a corrida; quem executa é o stream (o padrão do /api/almox/sync do hubserver,
+    que este endpoint substitui no diálogo do hub). `{pull:true}` puxa o Odoo antes."""
+    if not os.path.isfile(GUARDIAO):
+        return _erro('tools/symbols/guardiao.py não está neste workspace', 404)
+    data = request.get_json(silent=True) or {}
+    pull = bool(data.get('pull'))
+    if pull and not _senha_odoo():
+        return _erro('sem senha do Odoo gravada — configure antes de puxar ao vivo, '
+                     'ou sincronize a partir do snapshot', 400)
+    with _reserva_lock:
+        agora = time.time()
+        for k in [k for k, (ts, _p) in _sync_runs.items() if agora - ts > RESERVA_TTL]:
+            del _sync_runs[k]
+        if _sync_lock.locked() or _sync_runs:
+            return _erro('já tem uma sincronização rodando', 409)
+        run_id = 'g_%04x' % (int(agora * 1000) & 0xffff)
+        _sync_runs[run_id] = (agora, pull)
+    return {'runId': run_id}, 202
+
+
+@bp.route('/almox-sync/<run_id>/stream')
+def api_almox_sync_stream(run_id):
+    with _reserva_lock:
+        if run_id not in _sync_runs:
+            abort(404)
+        _ts, pull = _sync_runs.pop(run_id)
+    root = ROOT
+
+    def stream():
+        if not _sync_lock.acquire(blocking=False):
+            yield 'event: error\ndata: %s\n\n' % json.dumps('já tem uma sincronização rodando')
+            return
+        proc = None
+        try:
+            cmd = [sys.executable, GUARDIAO, '--raiz', root] + (['--pull'] if pull else []) + list(GUARDIAO_EXTRA)
+            yield 'data: %s\n\n' % ('puxando o Odoo e regerando, com o guardião…' if pull
+                                    else 'regerando do snapshot em disco, com o guardião…')
+            env = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1')
+            proc = subprocess.Popen(cmd, cwd=root, env=env, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT)
+            limite = time.time() + SYNC_TIMEOUT
+            for raw in iter(proc.stdout.readline, b''):
+                linha = raw.decode('utf-8', 'replace').rstrip()
+                if linha:
+                    yield 'data: %s\n\n' % linha.replace('\r', '')
+                if time.time() > limite:
+                    proc.kill()
+                    yield 'event: error\ndata: %s\n\n' % json.dumps(
+                        'passou de %d s e foi interrompida' % int(SYNC_TIMEOUT))
+                    return
+            code = proc.wait()
+            resumo = G.le_resumo(root)
+            if code != 0:
+                yield 'event: error\ndata: %s\n\n' % json.dumps(
+                    (resumo or {}).get('erro') or 'o guardião terminou com código %d — veja o log acima' % code)
+                return
+            yield 'event: done\ndata: %s\n\n' % json.dumps({'ok': True, 'resumo': resumo}, ensure_ascii=False)
+        except Exception as e:                                  # noqa: BLE001
+            yield 'event: error\ndata: %s\n\n' % json.dumps(str(e))
+        finally:
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+            _sync_lock.release()
+
+    return Response(stream(), mimetype='text/event-stream')

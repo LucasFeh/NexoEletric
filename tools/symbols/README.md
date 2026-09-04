@@ -8,6 +8,7 @@ Ferramentas Python que leem e escrevem símbolos de esquema direto nos arquivos 
 | `sch_leitor.py` | registros Altium → símbolos `schlib-v2` (o vocabulário do hub); regera `Libs/schlib.js` |
 | `extrair.py` | varre a biblioteca e os projetos, deduplica e mescla na **Biblioteca de símbolos** |
 | `schlib_patch.py` | grava a geometria de um símbolo dentro da SchLib real |
+| `guardiao.py` | vigia as `.SchLib` do Altium e envolve o gerador do almoxarifado: o que foi mudado no Altium fica |
 | `symserver.py` | os endpoints `/api/symbols/*` do hub |
 | `config.json` | onde estão a SchLib real, o backup e as pastas a varrer |
 
@@ -246,6 +247,103 @@ Quem faz o quê:
 - **`extrair.py`**: a cor **não** entra no fingerprint (o mesmo corpo em azul e em vermelho é
   um símbolo só) nem muda a ordem canônica, mas os campos ficam no símbolo guardado na
   Biblioteca — é o desenho que o usuário vai aplicar.
+
+## O guardião: Altium > hub > Odoo
+
+O pedido do usuário: *"o que foi mudado direto na lib do Altium deve permanecer > o que foi
+alterado no símbolo do hub deve permanecer > o que vem do Odoo só vem se não tiver nenhum
+dos dois"*. O gerador do almoxarifado (`tools/almox/almox2lib.py`) reescreve cada `.SchLib`
+de `Libs/Almox` do zero a cada sincronização; `guardiao.py` o envolve:
+
+```
+python tools/symbols/guardiao.py [--pull] [--full] [--podar] [--sem-schlib]   # sincroniza (repassa ao almox2lib)
+python tools/symbols/guardiao.py --status [--deep]        # o que está protegido e o que mudou no Altium desde o ledger
+python tools/symbols/guardiao.py --liberar "RESISTOR/SMD 0805 10K 1/8W 1% 100ppm"   # volta ao gerador na próxima
+python tools/symbols/guardiao.py --proteger "RESISTOR/SMD 0805 10K 1/8W 1% 100ppm"  # força (origem 'hub')
+```
+
+**Antes** do gerador, lê as libs do almoxarifado que mudaram desde o ledger: componente cuja
+geometria difere da que o gerador escreveu vira **protegido** (`origem: altium`, geometria
+guardada); componente que voltou ao desenho do gerador perde a proteção (o Altium é a
+verdade). **Depois**, repõe cada protegido com o `schlib_patch` (uma carga/gravação por
+arquivo; quem sumiu do Odoo fica `orfao: true` e é ignorado) e o espelho `almox-*.js` anda
+junto: o símbolo com protegidos ganha em `parts` a geometria protegida (a mais frequente;
+empate, a mais antiga) e os campos `"origem":"altium"` e `"protegidos":N` — o hub mostra a
+pílula. O resumo vai para `Libs/almox-guardiao.js` (`var almoxGuardiao = {...}`), para o
+diálogo de sincronização. O `--status` sai com código 3 quando há pendência.
+
+### O ledger — `Libs/lib-ledger.json` (VERSIONADO: é estado, como o `almox-parts.json`)
+
+```json
+{"format":"ledger-v1","atualizado":"2026-09-04 15:00",
+"arquivos":{
+ "Libs/Almox/RESISTOR ALMOX.SchLib":{"mtime":1788536158.267,"size":81920,"visto":"2026-09-04 15:00"},
+ "Y:\\Biblioteca\\ALTIUM LIBRARY ------ LUCAS\\BIBLIOTECA DE ESQUEMA.SchLib":{"mtime":…,"size":1725440,"visto":"…"}
+},
+"gerado":{
+ "RESISTOR [SMD]":"4db0bf098c602e19"
+},
+"protegidos":{
+ "RESISTOR":{
+  "SMD 0805 10K 1/8W 1% 100ppm":{"fp":"…","origem":"altium","desde":"2026-09-04 11:50","simbolo":"RESISTOR [SMD]","parts":[…]}
+ }
+}}
+```
+
+- `arquivos`: mtime+size de cada `.SchLib` que o hub conhece, registrados sempre que o HUB
+  escreve (`/save`, `schlib_patch` com `raiz`, guardião) ou põe o espelho igual à SchLib
+  (`/mirror`, `--espelho`, `--flags`). Arquivo diferente disso "mudou no Altium". Chave
+  relativa à raiz (`Libs/Almox/...`, com `/`: a pasta é uma junction compartilhada entre
+  worktrees) ou absoluta fora dela (a da casa no Y:). O mtime compara a 5 ms: a `.SchLib` é
+  alinhada a setor e duas edições seguidas costumam ter o mesmo tamanho.
+- `gerado`: a impressão digital (`extrair.fingerprint(..., 'ci')`: 1 mil, sem cor nem
+  visibilidade) da geometria que o gerador escreveu por último, **por símbolo do espelho**
+  — não por família: BARRA DE PINOS, CHAVE, CONECTOR, DIP SWITCH e ESPECIAIS têm de 3 a 57
+  geometrias no mesmo arquivo, uma por símbolo, e por símbolo ela é única (2.469 componentes
+  conferidos). O componente sabe o seu símbolo pelo `valores[].altium` do espelho.
+- `protegidos[família][componente]`: geometria inteira, para repor depois de cada geração.
+- Uma entrada por linha em cada seção, chaves em ordem: o git diffa.
+- O ledger nasce sem proteger nada: arquivo nunca visto é **adotado** (mtime e `gerado`
+  registrados como estão) pelo `--status` ou pela primeira chamada de `/altium-changes`.
+
+### Detecção e aplicação (endpoints do `symserver`)
+
+- `GET /api/symbols/altium-changes[?deep=1]` → `{ok, pendente, deep, arquivos:[{arquivo, caminho,
+  acervo:'altium'|'almox', familia, existe, conhecido, mudou, mtime, size, quando, adotado?,
+  absorvido?, itens?}], itens:[…], absorvidos:[…], ledger:{atualizado, arquivos, gerado, protegidos}}`.
+  Sem `deep`, só mtime/size (barato — a aba Biblioteca pergunta ao abrir). Com `deep=1`, lê os
+  arquivos que mudaram: casa → `{acervo:'altium', name, nomeAltium?, mudou:['geometria'|'descricao'|
+  'footprints'|'flags'|'cores'|'novo']}`; almoxarifado → `{acervo:'almox', familia, componente,
+  simbolo, arquivo, mudou:['geometria'], estado:'editado'|'gerador', protegido}`. Arquivo que mudou
+  sem diferença nenhuma é **absorvido** (mtime registrado) e o aviso some. A geometria da casa
+  compara contra as DUAS leituras (com e sem as conversões que o ExportLibs não fazia), e flags/
+  cores só se julgam no símbolo cuja linha do espelho já carrega cor (o leitor escreve cor em
+  quase todo gráfico; o ExportLibs em nenhum) — um `schlib.js` do ExportLibs não acusa a lib
+  inteira, nem depois de um apply ter trazido uma linha nova. Contra o Y: real e o `schlib.js`
+  versionado hoje o deep dá 7 itens (2 novos, 2 geometria, 3 footprints).
+- `POST /api/symbols/altium-apply {itens:[…]}` → `{ok, aplicados, itens:[{…, ok, acao:'trocado'|'novo'|
+  'protegido'|'liberado', erro?}]}`. Casa: a linha do símbolo no `Libs/schlib.js` vira o que o
+  leitor lê (nome do espelho pelo rename-map; `novo` entra no fim, `stats` acompanha; nenhum
+  outro byte muda). Almoxarifado: o componente vira protegido — ou, se voltou ao gerador, perde
+  a proteção e o espelho fica com o que o Altium tem — e o espelho da família anda junto.
+- `POST /api/symbols/almox-sync {pull}` → `{runId}` (202; 409 se já roda; 400 pull sem senha) e
+  `GET /api/symbols/almox-sync/<runId>/stream` (SSE): roda `guardiao.py [--pull]` como
+  subprocesso; `event: done` traz `{ok, resumo}` (o mesmo `almox-guardiao.js`). Substitui o
+  `/api/almox/sync` no diálogo do hub — o lock é próprio, então chamar os dois ao mesmo tempo
+  colidiria: o hub deve usar só este.
+
+### REMENDO: a reciclagem aponta para a lib real
+
+O `schlib_escritor.gera()` recicla o desenho da biblioteca da casa a partir de `LIB_REAL`, uma
+cópia antiga em D: (`\\LUCAS-PC\D\...`). O hub e o Altium editam a do `config.json » schlib`
+(Y:). Até o bom-almox ler o caminho do config, o guardião troca, no módulo já importado,
+`gera` por `functools.partial(gera, origem=<real>)` e `carrega_lib` por um wrapper com o
+default trocado (`gera` chama `carrega_lib(origem)` posicional — um partial com `caminho=`
+daria "multiple values"). Se a real está fora de alcance, fica o default do escritor.
+
+`tests/test_guardiao.py` prova tudo em cópias num tmp (DIAC e CAPACITOR ALMOX.SchLib + os
+espelhos, gerador injetado; a casa numa cópia da lib local em D:, PULA se ausente);
+`tests/test_symserver.py` cobre os endpoints, inclusive que o `/save` não vira "mudou no Altium".
 
 ## O que NÃO entra
 

@@ -817,8 +817,20 @@ def faz_backup(caminho, backup_dir=None):
     return alvo
 
 
-def grava(lib, caminho, backup_dir=None, backup=True):
-    """escreve a lib em `caminho` (tmp + os.replace), com backup do que estava lá"""
+def registra_no_ledger(raiz, caminho):
+    """anota no Libs/lib-ledger.json de `raiz` que o HUB acabou de escrever `caminho` — senão
+    o próprio save apareceria como "mudou no Altium". Import tardio: o guardião importa
+    este módulo. `raiz` None = ninguém registra (os testes patcham cópias em tmp)."""
+    if not raiz:
+        return
+    import guardiao
+    if guardiao.do_hub(raiz, caminho):          # cópia em tmp não é do hub: fica fora
+        guardiao.registra_arquivo(raiz, caminho)
+
+
+def grava(lib, caminho, backup_dir=None, backup=True, raiz=None):
+    """escreve a lib em `caminho` (tmp + os.replace), com backup do que estava lá; com
+    `raiz`, registra o arquivo no ledger do workspace"""
     bruto = _bytes_lib(lib)
     bk = faz_backup(caminho, backup_dir) if backup else None
     tmp = caminho + '.tmp'
@@ -841,6 +853,7 @@ def grava(lib, caminho, backup_dir=None, backup=True):
         if getattr(e, 'winerror', None) in (32, 33):
             raise _ocupada(e)
         raise
+    registra_no_ledger(raiz, caminho)
     return {'backup': bk, 'bytes': len(bruto)}
 
 
@@ -958,8 +971,10 @@ def verifica(bruto, sym):
     return compara(esperado(sym), alvo['parts'])
 
 
-def patch(caminho, sym, backup_dir=None, verificar=True, backup=True):
-    """carrega + aplica + grava (+ relê e confere). Falhou a conferência: volta o backup."""
+def patch(caminho, sym, backup_dir=None, verificar=True, backup=True, raiz=None):
+    """carrega + aplica + grava (+ relê e confere). Falhou a conferência: volta o backup.
+    Com `raiz`, o arquivo entra no ledger do workspace — só DEPOIS da conferência, porque
+    um backup restaurado é outro mtime."""
     lib = carrega(caminho)
     avisos = aplica(lib, sym)
     r = grava(lib, caminho, backup_dir, backup=backup)
@@ -977,6 +992,7 @@ def patch(caminho, sym, backup_dir=None, verificar=True, backup=True):
                 sym.get('name'), ' (backup restaurado)' if r.get('backup') else ' (SEM backup para restaurar)',
                 '\n  '.join(difs[:10])))
         r['verificado'] = True
+    registra_no_ledger(raiz, caminho)
     return r
 
 
@@ -989,13 +1005,16 @@ def main(argv):
     ap.add_argument('--backup-dir')
     ap.add_argument('--sem-backup', action='store_true')
     ap.add_argument('--sem-verificar', action='store_true')
+    ap.add_argument('--sem-ledger', action='store_true',
+                    help='não registrar o arquivo no Libs/lib-ledger.json deste repositório')
     a = ap.parse_args(argv)
     with open(a.simbolo, encoding='utf-8') as f:
         sym = json.load(f)
     if isinstance(sym, dict) and 'symbols' in sym:
         sym = sym['symbols'][0]
     try:
-        r = patch(a.lib, sym, a.backup_dir, verificar=not a.sem_verificar, backup=not a.sem_backup)
+        r = patch(a.lib, sym, a.backup_dir, verificar=not a.sem_verificar, backup=not a.sem_backup,
+                  raiz=None if a.sem_ledger else RAIZ)
     except LibOcupada as e:
         print('biblioteca ocupada:', e)
         return 2

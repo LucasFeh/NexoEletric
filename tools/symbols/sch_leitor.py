@@ -940,6 +940,20 @@ def _grava(caminho, texto):
     os.replace(tmp, caminho)
 
 
+def _registra_ledger(saida, lib):
+    """o espelho acabou de ser posto igual à SchLib: ela entra no Libs/lib-ledger.json ao
+    lado do espelho (o ledger mora na mesma Libs/ do schlib.js que descreve), senão o
+    guardião acusaria a SchLib como "mudou no Altium". Espelho fora de uma Libs/ não tem
+    ledger — nada a registrar."""
+    pasta = os.path.dirname(os.path.abspath(saida))
+    if os.path.basename(pasta).lower() != 'libs':
+        return
+    import guardiao
+    raiz = os.path.dirname(pasta)
+    if guardiao.do_hub(raiz, lib):              # `--lib` apontando para uma cópia: não é do hub
+        guardiao.registra_arquivo(raiz, lib)
+
+
 # ─── CLI ──────────────────────────────────────────────────────────────────────
 def main(argv):
     import argparse
@@ -979,6 +993,7 @@ def main(argv):
             with open(tmp, 'wb') as f:
                 f.write(novo.encode('latin-1'))
             os.replace(tmp, saida)
+        _registra_ledger(saida, lib)
         for av in dados['avisos'] + r['avisos']:
             print('aviso:', av)
         print('%d simbolos no espelho, %d com pino escondido, %d linha(s) mudaram -> %s' % (
@@ -1001,6 +1016,7 @@ def main(argv):
         _grava(saida, espelho(dados, nomes))
         rel = os.path.join(os.path.dirname(os.path.abspath(saida)), 'libs-report.txt')
         _grava(rel, relatorio(dados, nomes))
+        _registra_ledger(saida, lib)
         for av in dados['avisos']:
             print('aviso:', av)
         print('%d simbolos -> %s (%d sem footprint; relatorio em %s)' % (
