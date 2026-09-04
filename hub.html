@@ -185,18 +185,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #app {
   height: 100vh;
   display: grid;
-  /* header · projeto · abas · sub-abas · main · fluxo: SEIS filhos, seis linhas — com cinco
-     declaradas, a fileira de sub-abas ficava com o 1fr e o main caía no auto (a altura do
-     próprio conteúdo), engordando as sub-abas até 432 px com a busca vazia. A fileira some
-     (hidden) nas abas sem filhas; por isso main e footer ficam PRESOS às suas linhas — sem
-     isso, com ela visível (PCB, Biblioteca) as sub-abas herdavam o 1fr e a vista encolhia a
-     nada, e com ela oculta o rodapé é que subia para o 1fr. */
-  grid-template-rows: auto auto auto auto 1fr auto;
+  /* header · abas · sub-abas · main: QUATRO filhos, quatro linhas — com menos declaradas, a
+     fileira de sub-abas ficava com o 1fr e o main caía no auto (a altura do próprio
+     conteúdo), engordando as sub-abas até 432 px com a busca vazia. A fileira some (hidden)
+     nas abas sem filhas; por isso o main fica PRESO à sua linha — sem isso, com ela visível
+     (PCB, Biblioteca) as sub-abas herdavam o 1fr e a vista encolhia a nada. */
+  grid-template-rows: auto auto auto 1fr;
   grid-template-columns: minmax(var(--page-min), 1fr);
   overflow-x: auto; overflow-y: hidden;          /* só a página rola na horizontal */
 }
-#app > main { grid-row: 5; }
-#app > footer { grid-row: 6; }
+#app > main { grid-row: 4; }
 
 /* ── 3. Botões ────────────────────────────────────────────────── */
 .btn {
@@ -234,16 +232,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .input:focus-visible { border-color: var(--hi); outline-offset: 0; }
 
 /* ── 4. Header ────────────────────────────────────────────────── */
+/* o cabeçalho e a UNICA faixa de cima: nome do projeto (no seletor), estagio e servidor.
+   Enxuto de proposito — cada pixel aqui e pixel a menos de folha. */
 header {
-  display: flex; align-items: center; gap: 14px;
-  padding: 10px 18px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 5px 14px;
   background: linear-gradient(180deg, var(--surface-3), var(--bg));
   box-shadow: inset 0 -1px 0 var(--line);
 }
 /* a marca é o botão do menu do hub: fica na quina, onde se procura menu */
-.brand { display: flex; align-items: baseline; gap: 8px; flex: none;
+.brand { display: flex; align-items: baseline; gap: 7px; flex: none;
   cursor: pointer; border: 1px solid transparent; background: transparent; color: inherit;
-  margin-left: -9px; padding: 5px 9px; border-radius: var(--r-md); }
+  margin-left: -7px; padding: 3px 7px; border-radius: var(--r-md); }
 .brand:hover { background: rgba(var(--tint),0.07); }
 .brand[aria-expanded="true"] { background: rgba(var(--tint),0.11); }
 .brand svg { align-self: center; opacity: 0.55; }
@@ -257,7 +257,7 @@ header {
 .picker-trigger {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   width: 100%; text-align: left; cursor: pointer;
-  padding: 7px 11px; border-radius: var(--r-md);
+  padding: 4px 10px; border-radius: var(--r-md);
   background: var(--surface); border: 1px solid var(--line);
 }
 .picker-trigger[aria-expanded="true"] { border-color: var(--hi); }
@@ -285,25 +285,19 @@ header {
 .dot.err { background: var(--err); } .dot.idle { background: var(--dot-idle); }
 .dot.now { background: var(--text); box-shadow: 0 0 0 2px rgba(var(--tint),0.22); }
 
-/* ── 6. Barra do projeto + pipeline ───────────────────────────── */
-.projbar { display: flex; align-items: center; gap: 24px; padding: 14px 18px 12px; }
-.projbar .id { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.projbar .id .row { display: flex; align-items: center; gap: 9px; }
-.projbar h4 { font-size: 19px; max-width: 380px; }
-.projbar .path { font-size: 11px; color: var(--text-3); max-width: 380px; }
-.pipeline { display: flex; align-items: center; flex: none; padding: 0 4px; }
+/* ── 6. Estagio do projeto (dentro do cabeçalho) ──────────────── */
+.pipeline { display: flex; align-items: center; flex: none; min-width: 0; }
 .stage {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 11px 5px 9px; border-radius: var(--r-sm);
-  font-size: 12px; white-space: nowrap; color: var(--text-4);
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px 3px 7px; border-radius: var(--r-sm);
+  font-size: 11px; white-space: nowrap; color: var(--text-4);
 }
 .stage .mark { width: 6px; height: 6px; border-radius: 50%; flex: none; box-shadow: inset 0 0 0 1px var(--idle); }
 .stage.done { color: var(--text-2); }
 .stage.done .mark { background: var(--ok); box-shadow: none; }
 .stage.now { color: var(--text); box-shadow: inset 0 0 0 1px var(--hi); background: rgba(var(--tint),0.08); }
 .stage.now .mark { background: var(--text); box-shadow: 0 0 0 3px rgba(var(--tint),0.22); }
-.projbar .actions { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
-.pending { font-size: 12px; color: var(--warn); }
+.pending { font-size: 11px; color: var(--warn); white-space: nowrap; }
 
 /* ── 7. Abas ──────────────────────────────────────────────────── */
 .tabs {
@@ -724,12 +718,8 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
 .hist-row .d { font-size: 11px; color: var(--text-3); word-break: break-all; }
 
 /* ── 9. Rodapé do fluxo ───────────────────────────────────────── */
-footer { display: flex; align-items: center; gap: 10px; padding: 8px 18px; background: var(--sunken); box-shadow: inset 0 1px 0 var(--line); }
-footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-4); flex: none; }
-.flow { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
-.step { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: default; border: 0; background: transparent; color: var(--text-3); font-size: 11px; padding: 3px 8px; border-radius: var(--r-sm); }
-.step .n { color: var(--text-4); }
-.step.now { background: rgba(var(--tint),0.10); color: var(--text); }
+/* o rodapé do fluxo saiu: as seis etapas continuam inteiras na configuração (aba Ações),
+   que é de onde elas eram abertas de qualquer jeito */
 
 /* ── 10. Overlays ─────────────────────────────────────────────── */
 .backdrop { position: fixed; inset: 0; z-index: 60; display: grid; background: var(--scrim); }
@@ -793,7 +783,7 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
 .cfgm-step .h { font-size: 11px; line-height: 1.5; color: var(--text-3); }
 .btn-danger { color: var(--err); border-color: var(--err); }
 .btn-danger:hover { background: var(--err-soft); }
-.toast { position: fixed; left: 50%; bottom: 54px; transform: translateX(-50%); z-index: 80; display: none; align-items: center; gap: 9px; padding: 9px 14px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-menu); font-size: 13px; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; display: none; align-items: center; gap: 9px; padding: 9px 14px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-menu); font-size: 13px; }
 .toast.on { display: flex; }
 </style>
 <script>
@@ -837,22 +827,14 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
       </div>
     </div>
 
+    <!-- o estagio do projeto mora no cabecalho: e a unica informacao da barra antiga que
+         nao estava repetida no seletor logo ao lado -->
+    <div class="pipeline" id="pipeline"></div>
     <div class="header-right">
+      <span class="pending" id="pending" hidden></span>
       <span class="server"><span class="dot dot-sm" id="serverDot"></span><span id="serverLabel">sem servidor</span></span>
     </div>
   </header>
-
-  <section class="projbar">
-    <div class="id">
-      <div class="row"><h4 class="trunc" id="pName">—</h4><span id="pBadges"></span></div>
-      <div class="path mono trunc" id="pPath"></div>
-    </div>
-    <div class="pipeline" id="pipeline"></div>
-    <div class="actions">
-      <span class="pending" id="pending" hidden></span>
-      <button class="btn btn-primary" id="btnNext">—</button>
-    </div>
-  </section>
 
   <nav class="tabs" id="tabs" role="tablist"></nav>
   <nav class="subtabs" id="subtabs" role="tablist" hidden></nav>
@@ -1172,11 +1154,6 @@ footer .lbl { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
     <div class="pane" data-pane="hist"><div class="scroll" style="height:100%"><div class="hist" id="histRows"></div></div></div>
   </main>
 
-  <footer>
-    <span class="lbl" data-i18n="flow.label">fluxo</span>
-    <div class="flow" id="flow"></div>
-    <button class="btn btn-ghost" style="font-size:11px;flex:none" id="btnFlow" data-i18n="flow.details">Ver detalhes</button>
-  </footer>
 </div>
 
 <div class="toast" id="toast"><span class="dot dot-sm" id="toastDot"></span><span id="toastMsg"></span></div>
@@ -1303,13 +1280,6 @@ const STAGES = ['esquema','eco','roteada','aplicada'];
    pedido à IA — o botão abre a explicação em vez de executar um script.   */
 /* Rotulo que e NOME DE COMANDO do Altium fica literal; o resto e chave de idioma.
    Da para misturar porque t() devolve a chave quando nao acha traducao. */
-const STEP = {
-  none:  { label: 'step.ask',     flow: 1, run: false },
-  1:     { label: 'step.eco',     flow: 3, run: false },
-  2:     { label: 'ExportBoard',  flow: 4, run: false },
-  3:     { label: 'ApplyChanges', flow: 5, run: false },
-  4:     { label: 'DRC',          flow: 5, run: false },
-};
 /* Duas fileiras de abas. A de cima e o assunto (Esquema, PCB, Biblioteca...); a de baixo
    sao as vistas daquele assunto. "Componentes" e "Nets" sao leituras da MESMA placa, e
    "Footprints" e uma leitura da MESMA biblioteca — como abas de primeiro nivel elas
@@ -1397,7 +1367,6 @@ const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) 
 const sanitizeName = s => String(s).replace(/[\\/:*?"<>|]/g, '_');
 const proj = () => S.projects.find(p => p.id === S.projId) || S.projects[0] || null;
 const filteredProjects = () => { const q = S.q.trim().toLowerCase(); return S.projects.filter(x => !q || x.name.toLowerCase().includes(q)); };
-const stepOf = p => p.stages[0] === 1 ? STEP[p.stages.filter(v => v === 1).length] : STEP.none;
 const statusOf = p => p.noSchematic ? 'err' : (p.pending > 0 ? 'warn' : 'ok');
 
 /* ═══ RENDER ═══════════════════════════════════════════════════ */
@@ -1430,33 +1399,20 @@ function renderHeader() {
   });
 }
 
-function renderProjBar() {
+/* O estagio e o unico resto da barra de projeto: o nome e o caminho ja estavam no seletor
+   logo ao lado, e o botao da proxima acao vive na configuracao (aba Ações), junto do fluxo
+   inteiro. Por isso isto mora no cabeçalho e nao numa faixa propria. */
+function renderPipeline() {
   const p = proj();
-  $('#pName').textContent = p.name;
-  $('#pPath').textContent = p.path;
-  const badges = $('#pBadges'); badges.textContent = '';
-  if (p.demo) badges.append(el('span', 'tag tag-outline', 'demo'));
-  if (p.noSchematic) badges.append(el('span', 'tag', t('pick.noSch')));
-
   const pipe = $('#pipeline'); pipe.textContent = '';
+  const pend = $('#pending');
+  if (!p){ pend.hidden = true; return; }
   p.stages.forEach((v, i) => {
     const s = el('span', 'stage' + (v === 1 ? ' done' : v === 2 ? ' now' : ''));
     s.append(el('span', 'mark'), el('span', null, t('stage.' + STAGES[i])));
     pipe.append(s);
   });
-
-  const pend = $('#pending');
   pend.hidden = !p.pending; pend.textContent = t('proj.pending', { n: p.pending });
-  const step = stepOf(p);
-  $('#btnNext').textContent = t(step.label);
-  $('#btnNext').title = t(step.run ? 'proj.runNow' : 'proj.manual');
-
-  const flow = $('#flow'); flow.textContent = '';
-  FLOW.forEach(([n, label, hint], i) => {
-    const b = el('button', 'step' + (i === step.flow ? ' now' : ''));
-    b.title = t(hint); b.append(el('span', 'n num', n), el('span', null, t(label)));
-    flow.append(b);
-  });
 }
 
 function goTab(id) { S.tab = id; syncURL(); renderTabs(); renderPanes(); }
@@ -3790,7 +3746,7 @@ function bomAbrir() {
 function renderAll() {
   renderHeader();
   if (!proj()) return;
-  renderProjBar(); renderTabs(); renderPanes();
+  renderPipeline(); renderTabs(); renderPanes();
 }
 
 /* ═══ AÇÕES E OVERLAYS ═════════════════════════════════════════ */
@@ -4059,7 +4015,7 @@ function openDeleteDialog() {
     closeOverlay();
     toast(t('del.done', { name: p.name, path: r.trash }), 'ok');
     const idx = await API.index(); S.projects = idx.projects;
-    /* sem nenhum projeto a casca não tem o que desenhar (renderProjBar lê proj()
+    /* sem nenhum projeto a casca não tem o que desenhar (renderPipeline lê proj()
        direto): recarregar cai no estado vazio do boot, que já existe */
     if (!S.projects.length) { location.reload(); return; }
     await loadProject(S.projects.some(x => x.id === S.projId) ? S.projId : S.projects[0].id);
@@ -4159,9 +4115,7 @@ $('#pickerSearch').addEventListener('keydown', e => {
 $('#compSearch').oninput = e => { S.compQ = e.target.value; renderComponents(); };
 $('#libSearch').oninput = e => { S.lib.q = e.target.value; renderLib(); };
 $('#libPart').onchange = e => { S.lib.part = +e.target.value || 1; S.lib.fpShown = null; renderLib(); };
-$('#btnNext').onclick = () => { const p = proj(); if (!p) return; const s = stepOf(p); s.run ? runAction(s.label) : openConfig('acoes'); };
 $('#btnBrand').onclick = openBrandMenu;
-$('#btnFlow').onclick = () => openConfig('acoes');
 $('#btnBom').onclick = exportBom;
 ['ndRotAng','ndRotOx','ndRotOy','ndMvDx','ndMvDy','ndMvN'].forEach(id => {
   $('#' + id).addEventListener('input', renderNeoden);
@@ -4269,7 +4223,6 @@ document.addEventListener('keydown', e => {
   if (!S.projects.length) {
     $('#projName').textContent = t('hdr.noProject');
     $('#projCount').textContent = t('boot.zero');
-    $('#pName').textContent = '—';
     const pane = document.querySelector('.pane[data-pane="esquema"]');
     pane.classList.add('on');
     const e = el('div', 'empty'), inner = el('div');
