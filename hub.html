@@ -16,6 +16,8 @@
 <script src="hub-io.js"></script>
 <!-- editor de símbolos (sub-aba Símbolos da Biblioteca) -->
 <script src="hub-symed.js"></script>
+<!-- mudanças vindas do Altium: badge + modal na aba Biblioteca -->
+<script src="hub-libsync.js"></script>
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
 <script src="hub-i18n.js"></script>
 <style>
@@ -691,6 +693,34 @@ button.tag { border: 0; cursor: pointer; }
 button.tag:hover { background: rgba(var(--tint),0.20); }
 button.tag.gone { color: var(--err); }
 
+/* mudanças vindas do Altium (hub-libsync.js): o badge na fileira de sub-abas, o modal que
+   pergunta se é para trazer para o hub, o que o guardião preservou no diálogo de
+   sincronização, e a marca "altium" nos acervos do almoxarifado. */
+.libsync-badge { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px solid var(--warn); background: var(--warn-soft); color: var(--warn);
+  font-size: 11px; line-height: 1; padding: 4px 9px 4px 8px; border-radius: 999px; margin-right: 4px; }
+.libsync-badge:hover { background: rgba(var(--tint),0.10); }
+.libsync-badge i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.libsync-badge.busy i { animation: libsync-pulse 1s ease-in-out infinite; }
+@keyframes libsync-pulse { 50% { opacity: 0.25; } }
+.libsync-dlg { width: min(640px, 100%); max-height: min(80vh, 760px); }
+.libsync-p { font-size: 13px; color: var(--text-2); margin: 0; line-height: 1.5; }
+.libsync-lista { display: flex; flex-direction: column; overflow: auto; min-height: 0; max-height: 40vh; margin: 2px 0; }
+.libsync-li { display: grid; grid-template-columns: minmax(0,1.2fr) auto minmax(0,1fr); gap: 10px;
+  align-items: baseline; font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
+.libsync-li .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.libsync-li .ac { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-4); white-space: nowrap; }
+.libsync-li .mud { font-size: 11px; color: var(--warn); text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.libsync-mais { font-size: 11px; color: var(--text-4); padding: 5px 0 0; }
+.libsync-arq { font-size: 11px; color: var(--text-4); margin: 0; word-break: break-all; }
+.libsync-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+.libsync-origem { font-size: 12px; color: var(--warn); margin: 6px 0 0; line-height: 1.5; }
+.lib-row .pill.altium { color: var(--warn); background: transparent; box-shadow: inset 0 0 0 1px var(--warn); }
+.libsync-guard { margin: 2px 0 8px; }
+.libsync-guard .kicker { padding: 6px 0 2px; }
+.libsync-guard .alx-diff { margin-bottom: 6px; }
+
 /* segmentado (tudo · símbolos · footprints · ausentes) */
 .seg { display: flex; gap: 2px; flex: none; padding: 2px; border-radius: var(--r-md);
   background: var(--surface); box-shadow: inset 0 0 0 1px var(--edge); }
@@ -1241,15 +1271,26 @@ const API = {
       return j;
     } catch (e) { return { ok: false, error: String(e.message || e) }; }
   },
+  /* A sincronização passa pelo guardião (tools/symbols/guardiao.py, rota /api/symbols/
+     almox-sync): é ele que repõe o que foi mudado direto no Altium depois que o gerador
+     reescreve as .SchLib. Servidor sem essa rota (ainda não reiniciado) cai no
+     /api/almox/sync antigo, sem guardião. O 'done' traz o resumo do guardião. */
   async almoxSync(pull, onLine) {
-    const r = await fetch('/api/almox/sync', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pull: !!pull }) });
+    const req = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pull: !!pull }) };
+    let base = '/api/symbols/almox-sync';
+    let r = await fetch(base, req);
+    if (r.status === 404) { base = '/api/almox/sync'; r = await fetch(base, req); }
     let j = {}; try { j = await r.json(); } catch (e) {}
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     return new Promise((res, rej) => {
-      const es = new EventSource('/api/almox/sync/' + j.runId + '/stream');
+      const es = new EventSource(base + '/' + j.runId + '/stream');
       es.onmessage = e => onLine && onLine(e.data);
-      es.addEventListener('done', () => { es.close(); res(); });
+      es.addEventListener('done', e => {
+        es.close();
+        let resumo = null;
+        try { resumo = e && e.data ? JSON.parse(e.data) : null; } catch (x) {}
+        res(resumo);
+      });
       /* o 'error' do próprio EventSource (rede caiu) vem sem data — o do servidor vem
          com a mensagem em JSON */
       es.addEventListener('error', e => {
@@ -1891,6 +1932,10 @@ function libPicker() {
   });
   sel.onchange = () => libSetSrc(sel.value);
   const lab = el('label', null, t('lib.acervo')); lab.htmlFor = sel.id;
+  /* o aviso "Altium mudou" mora nesta fileira porque é da Biblioteca inteira, não de uma
+     sub-aba; a fileira é refeita a cada renderTabs(), e o hub-libsync devolve o mesmo nó */
+  const aviso = window.HubLibSync && HubLibSync.badge();
+  if (aviso) box.append(aviso);
   box.append(lab, sel);
   /* só faz sentido num acervo do almoxarifado: o espelho do Altium quem regera é o
      ExportLibs, de dentro do Altium */
@@ -1965,11 +2010,15 @@ async function openAlmoxSync() {
       const p = el('div', null, txt); log.append(p); log.scrollTop = log.scrollHeight;
     };
     try {
-      await API.almoxSync(comPull, linha);
+      const resumo = await API.almoxSync(comPull, linha);
       linha(t('alx.recarregando'));
       const antesN = LIB.syms.length;
       await almoxRecarrega();
-      alxMostraResultado(res, LIB.sync, antesN);
+      /* o guardião grava o resumo dele em Libs\almox-guardiao.js; sem o arquivo (servidor
+         antigo), vale o que veio no 'done' do SSE, se tiver a cara do resumo */
+      const guard = (await loadVarScript(libUrl('Libs/almox-guardiao.js'), 'almoxGuardiao'))
+        || (resumo && typeof resumo === 'object' && ('protegidos' in resumo) ? resumo : null);
+      alxMostraResultado(res, LIB.sync, antesN, guard);
       res.hidden = false;
       toast(t('alx.pronto'), 'ok');
     } catch (e) {
@@ -2038,9 +2087,37 @@ async function almoxRecarrega() {
   if (S.tab === 'lib' || S.tab === 'libfp') renderLib();
 }
 
-function alxMostraResultado(box, sync, antesN) {
+/* O guardião da sincronização (tools/symbols/guardiao.py): o que a regeneração NÃO
+   sobrescreveu porque foi mudado direto no Altium, e de onde o desenho da casa foi
+   reciclado. É a hierarquia Altium > hub > Odoo aparecendo no resultado. */
+function alxBlocoGuardiao(box, g) {
+  if (!g || typeof g !== 'object') { box.append(el('p', 'alx-nota', t('alx.semGuardiao'))); return; }
+  const prot = Array.isArray(g.protegidos) ? g.protegidos : [];
+  const orf = Array.isArray(g.orfaos) ? g.orfaos : [];
+  const bl = el('div', 'libsync-guard');
+  const tit = el('div', 'kicker', t('alx.preservado', { n: prot.length }));
+  tit.title = t('alx.preservadoHint');
+  bl.append(tit);
+  if (prot.length) {
+    const ul = el('div', 'alx-diff');
+    prot.slice(0, 60).forEach(p => {
+      const r2 = el('div', 'alx-di');
+      r2.append(el('span', 'a', p.componente || '?'), el('span', 'b', p.familia || ''),
+                el('span', 'c' + (p.origem === 'hub' ? '' : ' ok'), p.origem || 'altium'));
+      r2.title = p.origem === 'hub' ? 'mudado no editor de símbolos do hub' : 'mudado direto na .SchLib, no Altium';
+      ul.append(r2);
+    });
+    if (prot.length > 60) ul.append(el('div', 'alx-mais', '+ ' + (prot.length - 60) + ' não listados'));
+    bl.append(ul);
+  }
+  if (orf.length) bl.append(el('p', 'alx-nota', t('alx.orfaos', { n: orf.length })));
+  if (g.recicladoDe) bl.append(el('p', 'alx-nota mono', t('alx.recicladoDe', { p: g.recicladoDe })));
+  box.append(bl);
+}
+
+function alxMostraResultado(box, sync, antesN, guard) {
   box.textContent = '';
-  if (!sync) { box.append(el('p', 'alx-nota', t('alx.semDiff'))); return; }
+  if (!sync) { box.append(el('p', 'alx-nota', t('alx.semDiff'))); alxBlocoGuardiao(box, guard); return; }
   const r = sync.resumo || {};
 
   const linha = (n, rot, tom) => {
@@ -2057,6 +2134,7 @@ function alxMostraResultado(box, sync, antesN) {
               linha(r.zerou || 0, 'zeraram', 'warn'),
               linha(LIB.syms.length, 'símbolos no acervo aberto'));
   box.append(topo);
+  alxBlocoGuardiao(box, guard);
 
   /* O que ESTA execução fez é uma coisa; o que está na lib e você ainda não olhou é
      outra. Antes só existia a primeira, e por isso uma segunda execução (ou um
@@ -2618,6 +2696,12 @@ function renderLibAlmox() {
       b.append(p);
     }
     if (!(s.footprints || []).length) b.append(el('span', 'pill warn', 'sem encap'));
+    /* desenho que veio do Altium: o gerador não passa por cima dele (guardião) */
+    if (s.origem === 'altium') {
+      const p = el('span', 'pill altium', 'altium');
+      p.title = (s.protegidos || 0) + ' componente(s) com desenho mudado direto no Altium — preservado a cada sincronização';
+      b.append(p);
+    }
     const q2 = el('span', 'mt', alxQtd(est));
     q2.style.color = est > 0 ? 'var(--ok)' : 'var(--text-4)';
     b.append(q2);
@@ -2656,11 +2740,14 @@ function renderLibAlmoxPreview() {
     return;
   }
 
-  /* o símbolo tem UMA geometria; o valor escolhido é só um conjunto de parâmetros */
-  const geom = (s.parts && s.parts[0]) || { pins: [], graphics: [] };
   const parts = alxValores(s);
   const part = parts.find(v => v.id === S.lib.valor) || parts[0]
             || { id: 0, label: '—', itens: [], params: [] };
+  /* o símbolo tem UMA geometria e o valor costuma ser só um conjunto de parâmetros — mas
+     quando o valor DISCORDA do desenho da família ele traz o dele (um BJT PNP não pode sair
+     com a seta do NPN); ver `parts_valor` em tools/almox/almox2lib.py */
+  const geom = (part.parts && part.parts[0]) || (s.parts && s.parts[0])
+            || { pins: [], graphics: [] };
   const pos = Math.max(1, parts.indexOf(part) + 1);
   libDrawSym = geom;
   const symBB = HubDraw.symBBox(geom);
@@ -2725,6 +2812,11 @@ function renderLibAlmoxPreview() {
   if (s.description) {
     const p = el('p', null, s.description);
     p.style.cssText = 'font-size:12px;color:var(--text-2);margin:6px 0 0'; aside.append(p);
+  }
+  if (s.origem === 'altium') {
+    const p = el('p', 'libsync-origem', 'desenho vindo do Altium (' + (s.protegidos || 0) + ' componentes protegidos)');
+    p.title = 'a geometria desta família foi mudada direto na .SchLib do almoxarifado; o guardião a repõe a cada sincronização com o Odoo';
+    aside.append(p);
   }
   const kvs = el('div'); kvs.style.marginTop = '12px';
   kvRow(kvs, 'Designator', s.designator || '—');
@@ -3056,6 +3148,22 @@ function renderPanes() {
       c.append(m); g.append(c);
     });
   }
+  /* qualquer sub-aba da Biblioteca: as .SchLib podem ter mudado no Altium desde a última
+     vez que o hub as viu. Quem decide se pergunta é o hub-libsync (30 s entre consultas);
+     aqui só se avisa que a aba abriu e se diz como recarregar depois de aplicar. */
+  if (TAB_PAI[S.tab] === 'lib' && window.HubLibSync) HubLibSync.verifica({
+    t, toast,
+    editor: () => ({ dirty: !!(window.HubSymEd && HubSymEd.dirty()),
+                     sel: window.HubSymEd ? HubSymEd.state.sel : null,
+                     carregado: !!document.querySelector('#symed .lib-row') }),
+    /* o espelho em disco é outro: todo acervo em cache está velho, inclusive os do
+       almoxarifado (o guardião reescreve a família protegida) */
+    onApplied: () => {
+      libInvalida(); libBust = Date.now(); LIB.cache = {}; LIB.ready = false;
+      if (window.HubSymEd && typeof HubSymEd.reload === 'function') HubSymEd.reload();
+      renderTabs(); renderPanes();
+    },
+  });
   if (S.tab === 'libsym') return HubSymEd.render({ root: $('#symed'), t, toast, onSaved: libInvalida, lang: HubI18n.lang, splits: mkSplits });
   if (S.tab === 'lib' || S.tab === 'libfp') return renderLib();
   if (S.tab === 'neoden') return renderNeoden();
