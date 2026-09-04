@@ -213,7 +213,7 @@ function aplicaSel(net){
   /* net sem linha no painel nao tem interruptor: acender pintaria a folha sem jeito de
      apagar (grupo de um pino so ganha nome automatico e nao entra em nets.nets) */
   selNet = net && nets.nets.some(n => n.name === net) ? net : '';
-  buildCompTable(); updateSelStatus(); renderProps();
+  buildCompTable(); updateSelStatus(); renderProps(); mostraProps();
   if (netListDe !== selNet) buildNetList();
   cam.draw();
 }
@@ -878,6 +878,30 @@ const camPrSym = D.mkCamera($('prSymCv'), ctx => { if (prSym) D.drawSymbolPart(c
 const camPrFp  = D.mkCamera($('prFpCv'),  ctx => { if (prFp)  D.drawFootprint(ctx, prFp, {}); },  { bg:'#0b0b0d' });
 function refitProps(){ ajustaPreviews([camPrSym, camPrFp]); }
 
+/* ------- quando a ficha aparece -------
+   Ela nao fica ocupando a tela o tempo todo: entra com a selecao e sai com ela. O alfinete
+   no canto da ficha prende ela aberta; fechada, ela vira o botao de paineis no canto
+   inferior esquerdo da folha. O alfinete fica lembrado nesta maquina. */
+let propsPin = false, painelProps = null;
+try { propsPin = localStorage.getItem('schframe.propsPin') === '1'; } catch (e) {}
+function salvaPin(){ try { localStorage.setItem('schframe.propsPin', propsPin ? '1' : '0'); } catch (e) {} }
+function mostraProps(){
+  const ver = propsPin || sel.size > 0;
+  /* a ficha fechada pela divisoria tem largura zero: reabrir sem devolver largura mostraria
+     uma fatia de nada */
+  if (ver && painelProps) painelProps.abre();
+  $('props').hidden = !ver;
+  $('splitR').hidden = !ver;
+  $('btnPaineis').hidden = ver;
+  $('btnPin').setAttribute('aria-pressed', String(propsPin));
+  /* o canvas mudou de largura; os previews so enquadram depois de medidos */
+  if (ver) requestAnimationFrame(refitProps);
+}
+$('btnPin').addEventListener('click', () => { propsPin = !propsPin; salvaPin(); mostraProps(); });
+/* o botao de paineis so existe com a ficha fechada, entao ele SEMPRE prende: abrir para
+   fechar sozinho no proximo clique no vazio seria um botao que nao faz nada */
+$('btnPaineis').addEventListener('click', () => { propsPin = true; salvaPin(); mostraProps(); });
+
 function prSec(titulo){ const d = el('div', 'pr-sec'); if (titulo) d.append(el('h3', null, titulo)); return d; }
 function prKv(box, k, v, cls){
   const g = box.__kv || (box.__kv = (() => { const x = el('div', 'pr-kv'); box.append(x); return x; })());
@@ -1482,8 +1506,10 @@ function mkPainel(o){
   try { const v = localStorage.getItem(o.chave); if (v !== null && isFinite(+v)) larg = Math.max(0, +v); } catch (e) {}
   const aplica = () => {
     document.documentElement.style.setProperty(o.varCss, larg + 'px');
-    $(o.el).style.display = larg ? '' : 'none';
-    if (o.aoMudar) o.aoMudar();
+    /* o painel da esquerda some pela propria largura; o da direita nao — la quem manda em
+       estar na tela e o [hidden], que segue a selecao, e display inline atropelaria isso */
+    if (!o.porHidden) $(o.el).style.display = larg ? '' : 'none';
+    if (o.aoMudar) o.aoMudar(larg);
   };
   const salva = () => { try { localStorage.setItem(o.chave, String(larg)); } catch (e) {} };
   const sp = $(o.split);
@@ -1506,10 +1532,15 @@ function mkPainel(o){
   });
   sp.addEventListener('dblclick', () => { larg = larg ? 0 : o.padrao; aplica(); salva(); });
   aplica();
+  return { larg: () => larg, abre(){ if (!larg){ larg = o.padrao; aplica(); salva(); } } };
 }
 mkPainel({ chave:'schframe.sideW', varCss:'--side-w', el:'side', split:'split', padrao:330, lado:'l' });
-mkPainel({ chave:'schframe.propsW', varCss:'--props-w', el:'props', split:'splitR', padrao:320, lado:'r',
-           aoMudar: () => requestAnimationFrame(refitProps) });
+/* arrastar a divisoria da ficha ate o fim e o mesmo que soltar o alfinete: some agora e
+   volta quando alguma coisa for selecionada (ou pelo botao de paineis) */
+painelProps = mkPainel({ chave:'schframe.propsW', varCss:'--props-w', el:'props', split:'splitR',
+  padrao:320, lado:'r', porHidden:true,
+  aoMudar: w => { if (!w && propsPin){ propsPin = false; salvaPin(); } mostraProps(); } });
+mostraProps();
 
 $('btnFit').addEventListener('click', () => cam.fit(sheetBBox()));
 $('btnGrid').addEventListener('click', () => {

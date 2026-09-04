@@ -69,11 +69,30 @@
      schematic.js — por isso nao ha um campo editavel sequer aqui. */
   #props{width:var(--props-w, 320px); min-width:0; flex:none; background:var(--panel);
     display:flex; flex-direction:column; min-height:0; overflow:hidden;}
-  .pr-head{flex:none; display:flex; align-items:center; gap:8px; padding:9px 12px 8px;
+  /* a ficha nao fica na tela o tempo todo: aparece com a selecao e sai com ela, a nao ser
+     que esteja fixada. Fechada, vira o botao de paineis no canto inferior esquerdo. */
+  #props[hidden], #splitR[hidden], #btnPaineis[hidden]{display:none !important;}
+  .pr-head{flex:none; display:flex; align-items:center; gap:6px; padding:9px 8px 8px 12px;
     border-bottom:1px solid var(--border);}
   .pr-head h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); font-weight:400;}
   .pr-head .ro{margin-left:auto; font-size:10px; letter-spacing:.04em; color:var(--fg-dim);
     border:1px solid var(--border); border-radius:3px; padding:1px 5px;}
+  /* alfinete: fixa a ficha aberta mesmo sem nada selecionado */
+  .pr-head .pin{flex:none; width:24px; height:24px; padding:0; display:inline-flex;
+    align-items:center; justify-content:center; background:transparent; border:1px solid transparent;
+    color:var(--fg-dim); border-radius:4px;}
+  .pr-head .pin:hover{color:var(--fg); background:#333; border-color:var(--border);}
+  .pr-head .pin[aria-pressed="true"]{background:#0d47a1; border-color:#1565c0; color:#fff;}
+  .pr-head .pin svg{width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8;
+    stroke-linecap:round; stroke-linejoin:round;}
+  /* o botao que traz a ficha de volta quando ela esta fechada */
+  #btnPaineis{position:absolute; left:8px; bottom:8px; z-index:12; width:30px; height:30px;
+    padding:0; display:inline-flex; align-items:center; justify-content:center;
+    background:var(--panel); border:1px solid var(--border); border-radius:5px;
+    color:var(--fg-dim); box-shadow:0 3px 12px rgba(0,0,0,.45);}
+  #btnPaineis:hover{color:var(--fg); border-color:var(--accent);}
+  #btnPaineis svg{width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.7;
+    stroke-linecap:round; stroke-linejoin:round;}
   .pr-body{flex:1; min-height:0; overflow-y:auto;}
   .pr-sec{padding:9px 12px; border-bottom:1px solid var(--border);}
   .pr-sec h3{font-size:10px; text-transform:uppercase; letter-spacing:.09em; color:var(--fg-dim);
@@ -395,11 +414,18 @@
         <button id="anncancel">Cancelar</button>
       </div>
     </div>
+    <button id="btnPaineis" hidden title="Abrir a ficha de propriedades e deixá-la fixa">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
   </div>
 
   <div id="splitR" class="split" title="arraste para redimensionar · duplo clique fecha/abre"></div>
   <aside id="props">
-    <div class="pr-head"><h2>Propriedades</h2><span class="ro" title="a ficha é só de leitura — quem edita o esquema é a IA, no schematic.js">só leitura</span></div>
+    <div class="pr-head">
+      <h2>Propriedades</h2>
+      <span class="ro" title="a ficha é só de leitura — quem edita o esquema é a IA, no schematic.js">só leitura</span>
+      <button class="pin" id="btnPin" aria-pressed="false" title="Fixar a ficha aberta (sem fixar, ela some quando nada está selecionado)">
+        <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3.5 3H6.5L10 10 9 4Z"/><path d="M12 13v7"/></svg></button>
+    </div>
     <div class="pr-body" id="prBody"></div>
     <div class="pr-prev">
       <div class="pv"><span class="pvt">símbolo</span><canvas id="prSymCv"></canvas><div class="pvh" id="prSymHint"></div></div>
