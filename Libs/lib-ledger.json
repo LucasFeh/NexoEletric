@@ -1,4 +1,4 @@
-{"format":"ledger-v1","atualizado":"2026-09-04 12:49",
+{"format":"ledger-v1","atualizado":"2026-09-04 14:53",
 "arquivos":{
  "Libs/Almox/BARRA DE PINOS ALMOX.SchLib":{"mtime":1788534123.291,"size":51712,"visto":"2026-09-04 12:49"},
  "Libs/Almox/BATERIA ALMOX.SchLib":{"mtime":1788534123.248,"size":88064,"visto":"2026-09-04 12:49"},
@@ -17,8 +17,8 @@
  "Libs/Almox/DIODO TVS ALMOX.SchLib":{"mtime":1788534123.232,"size":112128,"visto":"2026-09-04 12:49"},
  "Libs/Almox/DIODO ZENER ALMOX.SchLib":{"mtime":1788534122.982,"size":460288,"visto":"2026-09-04 12:49"},
  "Libs/Almox/DIP SWITCH ALMOX.SchLib":{"mtime":1788534123.31,"size":19968,"visto":"2026-09-04 12:49"},
- "Libs/Almox/ESPECIAIS 1 ALMOX.SchLib":{"mtime":1788534122.311,"size":1875456,"visto":"2026-09-04 12:49"},
- "Libs/Almox/ESPECIAIS 2 ALMOX.SchLib":{"mtime":1788534122.465,"size":1168896,"visto":"2026-09-04 12:49"},
+ "Libs/Almox/ESPECIAIS 1 ALMOX.SchLib":{"mtime":1788544382.465,"size":1876480,"visto":"2026-09-04 14:53"},
+ "Libs/Almox/ESPECIAIS 2 ALMOX.SchLib":{"mtime":1788544382.608,"size":1170432,"visto":"2026-09-04 14:53"},
  "Libs/Almox/FUSIVEL ALMOX.SchLib":{"mtime":1788534123.217,"size":75264,"visto":"2026-09-04 12:49"},
  "Libs/Almox/FUSIVEL PTC ALMOX.SchLib":{"mtime":1788534123.313,"size":17408,"visto":"2026-09-04 12:49"},
  "Libs/Almox/INDUTOR ALMOX.SchLib":{"mtime":1788534123.195,"size":117760,"visto":"2026-09-04 12:49"},
