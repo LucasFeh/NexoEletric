@@ -38,12 +38,75 @@
   #cvwrap{flex:1; position:relative; min-width:0;}
   /* divisoria arrastavel entre o painel e a folha: a mesma peca das abas Laser e BOM do hub
      (6 px de alvo com um traco fino no meio, que acende ao pegar; duplo clique fecha/abre) */
-  #split{flex:0 0 6px; cursor:col-resize; position:relative; touch-action:none; background:var(--panel);
-    border-right:1px solid var(--border);}
-  #split::after{content:''; position:absolute; top:0; bottom:0; left:50%; width:2px;
+  .split{flex:0 0 6px; cursor:col-resize; position:relative; touch-action:none; background:var(--panel);}
+  #split{border-right:1px solid var(--border);}
+  #splitR{border-left:1px solid var(--border);}
+  .split::after{content:''; position:absolute; top:0; bottom:0; left:50%; width:2px;
     transform:translateX(-50%); background:transparent; transition:background .12s;}
-  #split:hover::after, #split.on::after{background:var(--accent);}
+  .split:hover::after, .split.on::after{background:var(--accent);}
   canvas#cv{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:default;}
+
+  /* ── barra de ferramentas, dentro da area do esquema ──────────────────────────
+     E a barra de fiacao do Altium: as poucas coisas que a MAO faz aqui — selecionar,
+     puxar fio e pousar um terra ou um trilho de alimentacao. O resto do esquema (rotulo,
+     texto, trocar valor, footprint) e da IA, pelo schematic.js. */
+  #schtb{position:absolute; top:8px; left:8px; z-index:12; display:flex; align-items:center; gap:2px;
+    padding:3px 4px; background:var(--panel); border:1px solid var(--border); border-radius:6px;
+    box-shadow:0 4px 16px rgba(0,0,0,.5);}
+  #schtb .sep{width:1px; height:20px; background:var(--border); margin:0 3px;}
+  #schtb button{display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 7px;
+    border:1px solid transparent; background:transparent; color:var(--fg-dim); border-radius:4px;}
+  #schtb button:hover:not(:disabled){color:var(--fg); background:#333; border-color:var(--border);}
+  #schtb button[aria-pressed="true"]{background:#0d47a1; border-color:#1565c0; color:#fff;}
+  #schtb button:disabled{opacity:.35; cursor:not-allowed;}
+  #schtb svg{width:18px; height:18px; flex:none; fill:none; stroke:currentColor; stroke-width:1.7;
+    stroke-linecap:round; stroke-linejoin:round;}
+  #schtb .lb{font-size:11px; letter-spacing:.02em; font-variant-numeric:tabular-nums;}
+
+  /* ── painel de propriedades (direita) ─────────────────────────────────────────
+     So leitura, de proposito: e a ficha do que esta selecionado, no espirito do painel
+     Properties do Altium. Quem edita valor, footprint ou parametro e a IA, no
+     schematic.js — por isso nao ha um campo editavel sequer aqui. */
+  #props{width:var(--props-w, 320px); min-width:0; flex:none; background:var(--panel);
+    display:flex; flex-direction:column; min-height:0; overflow:hidden;}
+  .pr-head{flex:none; display:flex; align-items:center; gap:8px; padding:9px 12px 8px;
+    border-bottom:1px solid var(--border);}
+  .pr-head h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); font-weight:400;}
+  .pr-head .ro{margin-left:auto; font-size:10px; letter-spacing:.04em; color:var(--fg-dim);
+    border:1px solid var(--border); border-radius:3px; padding:1px 5px;}
+  .pr-body{flex:1; min-height:0; overflow-y:auto;}
+  .pr-sec{padding:9px 12px; border-bottom:1px solid var(--border);}
+  .pr-sec h3{font-size:10px; text-transform:uppercase; letter-spacing:.09em; color:var(--fg-dim);
+    margin-bottom:6px; font-weight:400;}
+  .pr-title{font-size:15px; color:var(--fg); word-break:break-word; line-height:1.25;}
+  .pr-sub{font-size:11px; color:var(--fg-dim); margin-top:2px; word-break:break-word;}
+  /* rotulo a esquerda, valor a direita: e leitura de ficha, nao de formulario */
+  .pr-kv{display:grid; grid-template-columns:86px minmax(0,1fr); gap:3px 8px; font-size:12px;}
+  .pr-kv .k{color:var(--fg-dim);}
+  .pr-kv .v{color:var(--fg); word-break:break-word;}
+  .pr-kv .v.mono{font:11px Consolas,monospace;}
+  .pr-kv .v.warn{color:var(--warn);}
+  .pr-kv .v.dim{color:var(--fg-dim);}
+  .pr-tab{width:100%; border-collapse:collapse; font:11px Consolas,monospace;}
+  .pr-tab th{font:10px "Segoe UI",sans-serif; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--fg-dim); font-weight:400; text-align:left; padding:2px 4px; border-bottom:1px solid var(--border);}
+  .pr-tab td{padding:2px 4px; border-bottom:1px solid #333; color:var(--fg); white-space:nowrap;}
+  .pr-tab td.n{color:var(--fg-dim); width:24px;}
+  .pr-tab td.net{color:var(--accent); overflow:hidden; text-overflow:ellipsis; max-width:0;}
+  .pr-tab td.net.sem{color:var(--fg-dim);}
+  .pr-empty{font-size:12px; color:var(--fg-dim); line-height:1.5;}
+  /* os dois previews ficam presos no rodape do painel: sao a resposta visual de
+     "que simbolo e esse, e em que footprint ele cai" */
+  .pr-prev{flex:none; border-top:1px solid var(--border);}
+  .pr-prev .pv{position:relative; height:122px; border-bottom:1px solid var(--border);}
+  .pr-prev .pv:last-child{border-bottom:0;}
+  .pr-prev .pv canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
+  .pr-prev .pvt{position:absolute; top:4px; left:7px; z-index:1; font-size:9px; letter-spacing:.09em;
+    text-transform:uppercase; color:#8a8a6a; pointer-events:none;}
+  .pr-prev .pv.dark .pvt{color:var(--fg-dim);}
+  .pr-prev .pvh{position:absolute; inset:0; display:grid; place-items:center; padding:10px; text-align:center;
+    font-size:11px; color:#8a8a6a; pointer-events:none;}
+  .pr-prev .pv.dark .pvh{color:var(--fg-dim);}
 
   /* ── painel lateral (esquerda): duas sub-abas, Componentes e Configurações ── */
   /* a largura vem da variavel que a divisoria escreve; fechado (0) o painel some inteiro */
@@ -92,10 +155,6 @@
   kbd{font:11px Consolas,monospace; background:var(--panel2); border:1px solid var(--border);
     border-radius:3px; padding:0 4px; color:var(--fg);}
 
-  #schpropsrows label{display:flex; align-items:center; gap:6px; margin:3px 0; font-size:12px; color:var(--fg-dim);}
-  #schpropsrows label span{width:80px;}
-  #schpropsrows input, #schpropsrows select{flex:1; background:var(--panel); color:var(--fg);
-    border:1px solid var(--border); border-radius:3px; padding:3px 5px; font-size:12px; min-width:0;}
   #status{height:24px; display:flex; gap:16px; align-items:center; padding:0 10px;
     background:var(--panel); border-top:1px solid var(--border);
     font:12px Consolas,monospace; color:var(--fg-dim);}
@@ -304,6 +363,22 @@
   <div id="split" title="arraste para redimensionar · duplo clique fecha/abre"></div>
 
   <div id="cvwrap"><canvas id="cv"></canvas><div id="fatal"></div>
+    <!-- a barra de fiacao: selecionar, fio e os pousos de alimentacao -->
+    <div id="schtb" role="toolbar" aria-label="Ferramentas do esquema">
+      <button id="tbSel" aria-pressed="true" title="Selecionar e mover (Esc)">
+        <svg viewBox="0 0 24 24"><path d="M5 3l14 8.5-6.2 1.3L9.6 19 5 3z"/></svg></button>
+      <button id="tbWire" aria-pressed="false" title="Fio (W) — gruda na ponta do pino; botão direito ou Esc encerra">
+        <svg viewBox="0 0 24 24"><path d="M3 18h6.5V9H17V5"/><circle cx="3" cy="18" r="1.6"/><circle cx="20" cy="5" r="1.6"/><path d="M17 5h1.4"/></svg></button>
+      <span class="sep"></span>
+      <button class="pw" data-net="GND" data-style="GndPower" aria-pressed="false" title="Terra (GND)">
+        <svg viewBox="0 0 24 24"><path d="M12 4v7M5 11h14M8 15h8M10.5 19h3"/></svg><span class="lb">GND</span></button>
+      <button class="pw" data-net="3V3" data-style="Bar" aria-pressed="false" title="Trilho 3V3">
+        <svg viewBox="0 0 24 24"><path d="M12 20V8M5 8h14"/></svg><span class="lb">3V3</span></button>
+      <button class="pw" data-net="5V5" data-style="Bar" aria-pressed="false" title="Trilho 5V5">
+        <svg viewBox="0 0 24 24"><path d="M12 20V8M5 8h14"/></svg><span class="lb">5V5</span></button>
+      <button class="pw" data-net="VIN" data-style="Bar" aria-pressed="false" title="Entrada de alimentação (VIN)">
+        <svg viewBox="0 0 24 24"><path d="M12 20V8M5 8h14"/></svg><span class="lb">VIN</span></button>
+    </div>
     <div id="annform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
          background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
       <textarea id="anntext" rows="2" placeholder="problema (ex: trilha muito proxima)"
@@ -320,17 +395,17 @@
         <button id="anncancel">Cancelar</button>
       </div>
     </div>
-    <div id="schprops" style="display:none; position:absolute; top:10px; right:10px; z-index:17;
-         background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:250px;">
-      <div id="schpropstitle" style="color:var(--accent); font-size:12px; margin-bottom:6px;"></div>
-      <div id="schpropsrows"></div>
-      <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:6px;">
-        <button id="schpropsok">OK</button>
-        <button id="schpropscancel">Cancelar</button>
-      </div>
-      <datalist id="fplist-dl"></datalist>
-    </div>
   </div>
+
+  <div id="splitR" class="split" title="arraste para redimensionar · duplo clique fecha/abre"></div>
+  <aside id="props">
+    <div class="pr-head"><h2>Propriedades</h2><span class="ro" title="a ficha é só de leitura — quem edita o esquema é a IA, no schematic.js">só leitura</span></div>
+    <div class="pr-body" id="prBody"></div>
+    <div class="pr-prev">
+      <div class="pv"><span class="pvt">símbolo</span><canvas id="prSymCv"></canvas><div class="pvh" id="prSymHint"></div></div>
+      <div class="pv dark"><span class="pvt">footprint</span><canvas id="prFpCv"></canvas><div class="pvh" id="prFpHint"></div></div>
+    </div>
+  </aside>
 </div>
 <div id="status">
   <span id="smode" title="E alterna entre leitura e edição; o lápis fica em Configurações"></span>

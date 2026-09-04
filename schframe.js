@@ -96,7 +96,7 @@ function reapply(){
   val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
   if (sheetIdx >= model.sheets.length) sheetIdx = 0;
   for (const it of Array.from(sel)) if (schematic.items.indexOf(it) < 0) sel.delete(it);
-  buildCompTable(); buildNetList(); buildValList(); updateMeta(); updateSelStatus();
+  buildCompTable(); buildNetList(); buildValList(); updateMeta(); updateSelStatus(); renderProps();
   cam.draw();
 }
 /* um Salvar so: grava o que estiver alterado, esquema e/ou sinalizadores */
@@ -194,7 +194,7 @@ function updateSelStatus(){
   const n = sel.size;
   $('ssel').textContent = !n ? '' : n === 1 ? describe(sel.values().next().value) + ' selecionado' : n + ' selecionados';
 }
-function syncSel(){ buildCompTable(); updateSelStatus(); cam.draw(); }
+function syncSel(){ buildCompTable(); updateSelStatus(); renderProps(); cam.draw(); }
 function selectOnly(items){ sel.clear(); for (const it of items) sel.add(it); syncSel(); }
 function rotateSel(){
   const comps = Array.from(sel).filter(it => it.t === 'comp');
@@ -215,6 +215,96 @@ function deleteSel(){
   commit();
 }
 
+/* ------- ferramentas da barra -------
+   So o que a MAO faz nesta vista: escolher/mover, puxar fio e pousar um terra ou um trilho
+   de alimentacao. Rotulo, texto, junção e troca de valor/footprint sao da IA, no
+   schematic.js — por isso nao existem botoes para eles. */
+let tool = 'select';        /* 'select' | 'wire' | 'power' */
+let toolPower = null;       /* { net, style, rot } quando tool === 'power' */
+let wireDraw = null;        /* { pts:[[x,y],...] } enquanto o fio esta sendo puxado */
+let snapHit = null;         /* ponto magnetico sob o cursor: { x, y, kind, label } */
+
+/* O IMA: enquanto uma ferramenta esta ativa, o cursor procura um ponto de conexao por
+   perto — ponta quente de pino primeiro, depois vertice de fio, junção e power. 60 mil e
+   meia grade: perto o bastante para nao roubar o clique de quem quer o ponto livre. */
+const SNAP_MIL = 60;
+function snapPoint(w){
+  const s = model.sheets[sheetIdx];
+  let best = null;
+  const tenta = (x, y, kind, label, peso) => {
+    const d = Math.hypot(w.x - x, w.y - y);
+    if (d > SNAP_MIL) return;
+    if (!best || peso < best.peso || (peso === best.peso && d < best.d)) best = { x, y, d, kind, label, peso };
+  };
+  for (const c of s.comps){
+    const pins = HubCore.compPinsWorld(c, SLIB) || [];
+    for (const p of pins) tenta(p.x, p.y, 'pin', c.ref + '-' + p.num + (p.name && p.name !== p.num ? ' (' + p.name + ')' : ''), 0);
+  }
+  for (const j of s.junctions) tenta(j.x, j.y, 'junction', 'junção', 1);
+  for (const p of s.powers)    tenta(p.x, p.y, 'power', p.net || 'power', 1);
+  for (const wi of s.wires) for (const p of (wi.pts || [])) tenta(p[0], p[1], 'wire', 'fio', 2);
+  return best;
+}
+/* proximo ponto do fio: o ima ganha; sem ima, grade de 100 mil e traçado ortogonal */
+function wirePoint(w){
+  const hs = snapPoint(w);
+  if (hs) return { pt:[hs.x, hs.y], snap:hs };
+  const gx = snap100(w.x), gy = snap100(w.y);
+  if (!wireDraw || !wireDraw.pts.length) return { pt:[gx, gy], snap:null };
+  const last = wireDraw.pts[wireDraw.pts.length - 1];
+  return { pt: (Math.abs(gx - last[0]) >= Math.abs(gy - last[1])) ? [gx, last[1]] : [last[0], gy], snap:null };
+}
+function wireClick(w){
+  const r = wirePoint(w);
+  if (!wireDraw){ wireDraw = { pts:[r.pt] }; cam.draw(); return; }
+  const last = wireDraw.pts[wireDraw.pts.length - 1];
+  const [x, y] = r.pt;
+  if (x === last[0] && y === last[1]) return;
+  /* ponto magnetico fora do eixo: entra um canto, como o Altium faz */
+  if (x !== last[0] && y !== last[1]) wireDraw.pts.push([x, last[1]]);
+  wireDraw.pts.push([x, y]);
+  /* encostou num pino: o fio acabou ali */
+  if (r.snap && r.snap.kind === 'pin') endWire(); else cam.draw();
+}
+function endWire(){
+  const d = wireDraw; wireDraw = null;
+  if (d && d.pts.length >= 2){
+    schematic.items.push({ t:'wire', sheet:model.sheets[sheetIdx].name, pts:d.pts });
+    commit();
+  } else cam.draw();
+}
+function placePower(w){
+  const hs = snapPoint(w);
+  const p = toolPower;
+  schematic.items.push({ t:'power', sheet:model.sheets[sheetIdx].name, net:p.net, style:p.style,
+                         x: hs ? hs.x : snap100(w.x), y: hs ? hs.y : snap100(w.y), rot:p.rot });
+  commit();
+}
+function setTool(t, pw){
+  /* pegar uma ferramenta E dizer que se quer editar: obrigar a achar o lapis antes seria
+     um passo a toa, e o gesto ja e deliberado */
+  if (t !== 'select'){
+    if (!editOn) setEdit(true);
+    if (annTool) setAnnTool(false);
+  }
+  tool = t; toolPower = pw || null; wireDraw = null; snapHit = null;
+  $('tbSel').setAttribute('aria-pressed', String(t === 'select'));
+  $('tbWire').setAttribute('aria-pressed', String(t === 'wire'));
+  for (const b of document.querySelectorAll('#schtb .pw'))
+    b.setAttribute('aria-pressed', String(t === 'power' && !!pw && b.dataset.net === pw.net));
+  cv.style.cursor = t !== 'select' ? 'crosshair' : (annTool ? 'copy' : 'default');
+  cam.draw();
+}
+$('tbSel').addEventListener('click', () => setTool('select'));
+$('tbWire').addEventListener('click', () => setTool(tool === 'wire' ? 'select' : 'wire'));
+for (const b of document.querySelectorAll('#schtb .pw'))
+  b.addEventListener('click', () => {
+    const igual = tool === 'power' && toolPower && toolPower.net === b.dataset.net;
+    /* o terra aponta para baixo, o trilho de alimentacao para cima — como no Altium */
+    setTool(igual ? 'select' : 'power', igual ? null
+      : { net:b.dataset.net, style:b.dataset.style, rot: b.dataset.style === 'Bar' ? 90 : 270 });
+  });
+
 /* ------- mouse: esquerdo seleciona e move, direito arrasta a tela -------
    O mkCamera (hub-draw.js) arrasta a tela com QUALQUER botao e nao sabe de selecao. Em vez
    de mexer nele — e mudar junto o PCB, as previews da Biblioteca e o laser —, os eventos do
@@ -226,21 +316,34 @@ let mouse = null;           /* gesto do esquerdo em curso: { mode:'move'|'box'|'
 let lastDown = null;        /* o que o ultimo mousedown acertou, para o Shift+clique saber se tira */
 let boxRect = null;         /* retangulo de selecao em curso (mundo) */
 let swallowClick = false;   /* o click que fecha um arrasto nao e um clique */
-let panning = false;
+let panning = false, panFrom = null, panMoved = false;
 
 function worldOf(e){ const r = cv.getBoundingClientRect(); return cam.toWorld(e.clientX - r.left, e.clientY - r.top); }
 
 window.addEventListener('mousedown', () => { panning = false; }, true);
 cv.addEventListener('mousedown', e => {
-  if (e.button !== 0){ panning = true; cv.style.cursor = 'grabbing'; return; }   /* direito/meio: pan da camera */
+  if (e.button !== 0){                                  /* direito/meio: pan da camera */
+    panning = true; panMoved = false; panFrom = { x:e.clientX, y:e.clientY };
+    cv.style.cursor = 'grabbing'; return;
+  }
   e.stopImmediatePropagation();
   leftDown(e);
 }, true);
 cv.addEventListener('click', e => { e.stopImmediatePropagation(); leftClick(e); }, true);
 cv.addEventListener('contextmenu', e => e.preventDefault());
-/* soltar o direito fora do canvas dispararia o menu do navegador em cima do painel */
-window.addEventListener('contextmenu', e => { if (panning){ e.preventDefault(); panning = false; } });
-window.addEventListener('mousemove', e => { if (mouse) leftMove(e); });
+/* soltar o direito fora do canvas dispararia o menu do navegador em cima do painel.
+   Direito SEM arrastar encerra o fio, como no Altium; com arrasto, foi so um pan. */
+window.addEventListener('contextmenu', e => {
+  if (!panning) return;
+  e.preventDefault();
+  const arrastou = panMoved;
+  panning = false; panMoved = false;
+  if (!arrastou && wireDraw) endWire();
+});
+window.addEventListener('mousemove', e => {
+  if (mouse){ leftMove(e); return; }
+  if (panning && panFrom && Math.hypot(e.clientX - panFrom.x, e.clientY - panFrom.y) > 4) panMoved = true;
+});
 window.addEventListener('mouseup', e => {
   if (e.button === 0){ leftUp(e); return; }
   cv.style.cursor = annTool ? 'copy' : 'default';
@@ -255,7 +358,8 @@ window.addEventListener('blur', () => {
 function leftDown(e){
   const w = worldOf(e);
   swallowClick = false;
-  if (annTool){ mouse = { mode:'none', start:w, moved:false }; return; }
+  /* com uma ferramenta na mao o esquerdo nao seleciona nem arrasta: ele coloca */
+  if (annTool || tool !== 'select'){ mouse = { mode:'none', start:w, moved:false }; return; }
   const h = hitTest(w.x, w.y);
   if (!h){
     mouse = { mode:'box', start:w, moved:false, shift:e.shiftKey };
@@ -310,6 +414,8 @@ function leftClick(e){
   if (swallowClick){ swallowClick = false; return; }
   const w = worldOf(e);
   if (annTool){ openAnnForm(w); return; }
+  if (tool === 'wire'){ wireClick(w); return; }
+  if (tool === 'power'){ placePower(w); return; }
   const h = hitTest(w.x, w.y);
   if (!h){ if (!e.shiftKey){ sel.clear(); setNet(''); } syncSel(); return; }
   /* Shift em cima de quem ja estava marcado tira da selecao */
@@ -319,22 +425,18 @@ function leftClick(e){
   else setNet('');
   syncSel();
 }
-cv.addEventListener('dblclick', () => {
-  if (!editOn || annTool || !hoverW) return;
-  const h = hitTest(hoverW.x, hoverW.y);
-  if (!h) return;
-  if (h.kind === 'pin' || h.kind === 'comp') openSchProps({ kind:'comp', item:h.item });
-  else if (h.kind === 'netlabel' || h.kind === 'power' || h.kind === 'text') openSchProps(h);
-});
+/* duplo clique com o fio na mao encerra o traçado (o Altium faz igual); no resto, nada:
+   a ficha da direita e so de leitura, e quem edita propriedade e a IA no schematic.js */
+cv.addEventListener('dblclick', () => { if (wireDraw) endWire(); });
 
 /* liga/desliga o modo edicao e reflete o estado em tudo que edita */
 function setEdit(v){
   editOn = !!v;
   if (!editOn){
     if (annTool) setAnnTool(false);
+    if (tool !== 'select') setTool('select');
     if (mouse && mouse.mode === 'move'){ applyMove(mouse.base, 0, 0); mouse = null; }
     closeAdd();
-    $('schprops').style.display = 'none'; propItem = null;
   }
   const b = $('btnEdit');
   b.classList.toggle('active', editOn);
@@ -498,14 +600,15 @@ function buildAddList(){
 /* as previews sao canvases dentro de um modal que abre e fecha: o fit so vale com o canvas
    medido, entao a caixa fica guardada e o ajuste acontece no proximo frame, com tamanho */
 function fitPreview(c, bb){ c.__bb = bb || null; }
-function refitPreviews(){
-  for (const c of [camSym, camFp]){
+function ajustaPreviews(cams){
+  for (const c of cams){
     const cvs = c.ctx.canvas;
     if (!cvs.clientWidth || !cvs.clientHeight) continue;
     c.resize();
     if (c.__bb) c.fit(c.__bb, 1.35); else c.draw();
   }
 }
+function refitPreviews(){ ajustaPreviews([camSym, camFp]); }
 function renderAddPreview(){
   const ac = acervoAtual(), almox = !!ac.almox;
   const s = pick && pick.sym;
@@ -718,71 +821,150 @@ $('cartClear').addEventListener('click', async () => {
 $('cartDone').addEventListener('click', finalizar);
 $('btnAdd').addEventListener('click', openAdd);
 
-/* ------- propriedades (duplo clique) ------- */
-let propItem = null;
-function escAttr(v){ return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
-function sRow(key, label, value, type){
-  return `<label><span>${label}</span><input data-k="${key}" type="${type || 'text'}" value="${escAttr(value)}"${type === 'number' ? ' step="any"' : ''}></label>`;
+/* ------- painel de propriedades (direita, so leitura) -------
+   A ficha do que esta selecionado, no espirito do painel Properties do Altium: o que o
+   componente E, de onde ele veio, onde ele esta e em que pinos as nets caem — com o simbolo
+   e o footprint desenhados no rodape. Nada aqui e editavel de proposito: esta vista serve
+   para OLHAR e para posicionar; valor, footprint e parametro sao da IA, no schematic.js. */
+let prSym = null, prFp = null;
+const camPrSym = D.mkCamera($('prSymCv'), ctx => { if (prSym) D.drawSymbolPart(ctx, prSym, {}); }, { bg:D.SCH.sheet });
+const camPrFp  = D.mkCamera($('prFpCv'),  ctx => { if (prFp)  D.drawFootprint(ctx, prFp, {}); },  { bg:'#0b0b0d' });
+function refitProps(){ ajustaPreviews([camPrSym, camPrFp]); }
+
+function prSec(titulo){ const d = el('div', 'pr-sec'); if (titulo) d.append(el('h3', null, titulo)); return d; }
+function prKv(box, k, v, cls){
+  const g = box.__kv || (box.__kv = (() => { const x = el('div', 'pr-kv'); box.append(x); return x; })());
+  g.append(el('span', 'k', k), el('span', 'v' + (cls ? ' ' + cls : ''), v == null || v === '' ? '—' : String(v)));
 }
-function sSelect(key, label, value, opts){
-  return `<label><span>${label}</span><select data-k="${key}">` +
-    opts.map(o => `<option${String(o) === String(value) ? ' selected' : ''}>${o}</option>`).join('') + '</select></label>';
+/* os parametros viajam num campo plano "K=V;K=V" (o parser do BuildSchematic le linha a linha) */
+function prParams(s){
+  const out = [];
+  for (const par of String(s || '').split(';')){
+    const i = par.indexOf('=');
+    if (i > 0 && par.slice(0, i).trim()) out.push([par.slice(0, i).trim(), par.slice(i + 1).trim()]);
+  }
+  return out;
 }
-function openSchProps(h){
-  propItem = h;
-  const it = h.item, rows = $('schpropsrows');
-  const title = $('schpropstitle');
-  if (h.kind === 'comp'){
-    title.textContent = 'Componente ' + it.ref;
-    const sym = HubCore.symbolOf(SLIB, it.sym);
-    const pc = sym ? (sym.partcount || (sym.parts || []).length || 1) : 1;
-    $('fplist-dl').innerHTML =
-      (PLIB.footprints || []).map(f => '<option value="' + escAttr(f.name) + '">').join('');
-    rows.innerHTML = sRow('ref', 'ref', it.ref) + sRow('comment', 'comment', it.comment || '') +
-      `<label><span>footprint</span><input data-k="footprint" list="fplist-dl" value="${escAttr(it.footprint || '')}"></label>` +
-      (pc > 1 ? sSelect('part', 'parte', it.part || 1, Array.from({ length:pc }, (_, i) => i + 1)) : '') +
-      sRow('x', 'x (mil)', it.x, 'number') + sRow('y', 'y (mil)', it.y, 'number') +
-      sSelect('rot', 'rot', ((it.rot || 0) % 360 + 360) % 360, [0, 90, 180, 270]) +
-      sSelect('mirror', 'espelhado', it.mirror ? 'sim' : 'não', ['não', 'sim']);
-  } else if (h.kind === 'netlabel'){
-    title.textContent = 'Net label';
-    rows.innerHTML = sRow('net', 'net', it.net || '') + sSelect('rot', 'rot', it.rot || 0, [0, 90, 180, 270]);
-  } else if (h.kind === 'power'){
-    title.textContent = 'Power port';
-    rows.innerHTML = sRow('net', 'net', it.net || '') +
-      sSelect('style', 'estilo', it.style || 'Bar', ['Bar','Circle','Arrow','Wave','GndPower','GndSignal','GndEarth']) +
-      sSelect('rot', 'rot', it.rot || 0, [0, 90, 180, 270]);
-  } else if (h.kind === 'text'){
-    title.textContent = 'Texto';
-    rows.innerHTML = sRow('s', 'texto', it.s || '') + sRow('h', 'altura', it.h || 10, 'number');
-  } else return;
-  $('schprops').style.display = 'block';
+function prPreview(sym, part, fpNome){
+  prSym = part || null;
+  fitPreview(camPrSym, part ? D.symBBox(part) : null);
+  $('prSymHint').textContent = part ? '' : (sym === false ? '' : 'sem geometria na biblioteca');
+  const fp = fpNome ? HubCore.footprintOf(PLIB, fpNome) : null;
+  prFp = fp || null;
+  fitPreview(camPrFp, fp && fp.bbox ? fp.bbox : null);
+  $('prFpHint').textContent = fp ? ''
+    : fpNome ? '"' + fpNome + '" não está na PcbLib espelhada' : (sym === false ? '' : 'sem footprint');
+  requestAnimationFrame(refitProps);
 }
-$('schpropsok').addEventListener('click', () => {
-  const h = propItem; if (!h) return;
-  const it = h.item, v = {};
-  document.querySelectorAll('#schpropsrows [data-k]').forEach(e => { v[e.dataset.k] = e.value; });
-  $('schprops').style.display = 'none';
-  const clean = s => String(s).trim().replace(/"/g, "'");
-  if (h.kind === 'comp'){
-    const nref = clean(v.ref);
-    if (!nref){ HubDialog.alert('O ref não pode ficar vazio.', { title:'Componente' }); propItem = null; return; }
-    it.ref = nref;
-    it.comment = clean(v.comment); if (!it.comment) delete it.comment;
-    it.footprint = clean(v.footprint);
-    if (v.part !== undefined){ const p = +v.part; if (p !== 1) it.part = p; else delete it.part; }
-    const nx = +v.x, ny = +v.y;
-    if (isFinite(nx)) it.x = snap100(nx);
-    if (isFinite(ny)) it.y = snap100(ny);
-    it.rot = +v.rot;
-    if (v.mirror === 'sim') it.mirror = true; else delete it.mirror;
-  } else if (h.kind === 'netlabel'){ it.net = clean(v.net); it.rot = +v.rot; }
-  else if (h.kind === 'power'){ it.net = clean(v.net); it.style = v.style; it.rot = +v.rot; }
-  else if (h.kind === 'text'){ it.s = clean(v.s); const nh = +v.h; if (isFinite(nh) && nh > 0) it.h = nh; }
-  propItem = null;
-  commit();
-});
-$('schpropscancel').addEventListener('click', () => { $('schprops').style.display = 'none'; propItem = null; });
+function renderProps(){
+  const body = $('prBody');
+  body.textContent = '';
+  const itens = Array.from(sel).filter(onSheet);
+  if (!itens.length){
+    const s = prSec(null);
+    s.append(el('p', 'pr-empty', 'Clique num componente, fio ou pouso de alimentação para ver a ficha dele. '
+      + 'A ficha é só de leitura: aqui se olha e se posiciona. Valor, footprint e parâmetro são editados '
+      + 'pela IA, no schematic.js.'));
+    body.append(s);
+    return prPreview(false, null, null);
+  }
+  if (itens.length > 1){
+    const s = prSec('seleção');
+    s.append(el('div', 'pr-title', itens.length + ' itens'));
+    const cont = {};
+    for (const it of itens) cont[it.t] = (cont[it.t] || 0) + 1;
+    const NOME = { comp:'componente', wire:'fio', netlabel:'net label', power:'power port', junction:'junção', text:'texto' };
+    for (const [k, n] of Object.entries(cont)) prKv(s, (NOME[k] || k) + (n > 1 ? 's' : ''), n);
+    body.append(s);
+    return prPreview(false, null, null);
+  }
+
+  const it = itens[0];
+  if (it.t !== 'comp'){
+    const NOME = { wire:'fio', netlabel:'net label', power:'power port', junction:'junção', text:'texto' };
+    const s = prSec(NOME[it.t] || it.t);
+    if (it.t === 'wire'){
+      const wi = model.sheets[sheetIdx].wires.indexOf(it);
+      s.append(el('div', 'pr-title', (wi >= 0 && nets.wireNet[sheetIdx][wi]) || 'sem net'));
+      prKv(s, 'Vértices', (it.pts || []).length);
+      const p0 = (it.pts || [])[0] || [0, 0], pn = (it.pts || [])[(it.pts || []).length - 1] || [0, 0];
+      prKv(s, 'Início', p0[0] + ' , ' + p0[1] + ' mil', 'mono');
+      prKv(s, 'Fim', pn[0] + ' , ' + pn[1] + ' mil', 'mono');
+    } else {
+      s.append(el('div', 'pr-title', it.net || it.s || (NOME[it.t] || it.t)));
+      if (it.style) prKv(s, 'Estilo', it.style);
+      if (it.t === 'text') prKv(s, 'Altura', (it.h || 10) + ' mil');
+      prKv(s, 'Posição', it.x + ' , ' + it.y + ' mil', 'mono');
+      if (it.rot != null) prKv(s, 'Rotação', (((it.rot % 360) + 360) % 360) + '°');
+    }
+    prKv(s, 'Folha', it.sheet);
+    body.append(s);
+    return prPreview(false, null, null);
+  }
+
+  /* ── componente ── */
+  const sym = HubCore.symbolOf(SLIB, it.sym);
+  const part = HubCore.partOf(sym, it.part);
+  const ac = ACERVO_DE.get(it.sym) || (sym && ACERVO_DE.get(sym.name)) || null;
+  const nparts = sym ? (sym.partcount || (sym.parts || []).length || 1) : 1;
+  const fpNome = it.footprint || '';
+
+  const g = prSec('geral');
+  g.append(el('div', 'pr-title', it.ref));
+  if (it.comment) g.append(el('div', 'pr-sub', it.comment));
+  prKv(g, 'Comment', it.comment, it.comment ? null : 'dim');
+  prKv(g, 'Parte', nparts > 1 ? (it.part || 1) + ' de ' + nparts : '1 de 1');
+  prKv(g, 'Descrição', sym && sym.description, sym && sym.description ? null : 'dim');
+  prKv(g, 'Designador', sym && sym.designator, sym && sym.designator ? null : 'dim');
+  prKv(g, 'Símbolo', it.sym, 'mono');
+  /* o resolvedor pode ter entregue outro simbolo (apelido/substituto): dizer qual, senao a
+     ficha afirma um nome e o desenho mostra outro */
+  if (sym && sym.name !== it.sym) prKv(g, 'Resolvido em', sym.name, 'mono');
+  prKv(g, 'Acervo', ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca'), ac ? null : 'warn');
+  prKv(g, 'Footprint', fpNome, fpNome ? 'mono' : 'warn');
+  if (fpNome && !HubCore.footprintOf(PLIB, fpNome)) prKv(g, '', 'não está na PcbLib espelhada', 'warn');
+  body.append(g);
+
+  const p = prSec('posição');
+  prKv(p, 'X', it.x + ' mil', 'mono');
+  prKv(p, 'Y', it.y + ' mil', 'mono');
+  prKv(p, 'Rotação', ((((it.rot || 0) % 360) + 360) % 360) + '°');
+  prKv(p, 'Espelhado', it.mirror ? 'sim' : 'não');
+  prKv(p, 'Folha', it.sheet);
+  body.append(p);
+
+  const pars = prParams(it.params);
+  if (pars.length){
+    const s = prSec('parâmetros');
+    for (const [k, v] of pars) prKv(s, k, v);
+    body.append(s);
+  }
+
+  const pins = HubCore.compPinsWorld(it, SLIB) || [];
+  const s = prSec('pinos (' + pins.length + ')');
+  if (!pins.length) s.append(el('p', 'pr-empty', sym ? 'a parte não tem pinos' : 'símbolo ausente — sem pinagem para mostrar'));
+  else {
+    const t = el('table', 'pr-tab');
+    const th = el('tr');
+    for (const c of ['#', 'nome', 'net']) th.append(el('th', null, c));
+    t.append(el('thead', null).appendChild(th).parentNode);
+    const tb = el('tbody');
+    for (const pin of pins){
+      const tr = el('tr');
+      const rede = nets.pinNet[it.ref + '-' + pin.num] || '';
+      tr.append(el('td', 'n', pin.num), el('td', null, pin.name || '—'));
+      const td = el('td', 'net' + (rede ? '' : ' sem'), rede || 'sem net');
+      td.title = rede || 'sem net';
+      tr.append(td);
+      tb.append(tr);
+    }
+    t.append(tb);
+    s.append(t);
+  }
+  body.append(s);
+
+  prPreview(sym, part, fpNome);
+}
 
 /* ------- salvar ------- */
 const SCH_REL = 'Projects/' + SCH_P + '/schematic.js';
@@ -918,6 +1100,49 @@ function drawWorld(ctx, cam){
   }
 
   drawSelection(ctx, cam);
+  drawFerramenta(ctx, cam);
+}
+/* o que a ferramenta na mao esta prestes a fazer: o fio em elastico, o pouso de
+   alimentacao em fantasma e o alvo do ima */
+function drawFerramenta(ctx, cam){
+  const px = 1 / cam.scale;
+  if (wireDraw && wireDraw.pts.length){
+    const last = wireDraw.pts[wireDraw.pts.length - 1];
+    ctx.save();
+    ctx.strokeStyle = D.SCH.wire; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    wireDraw.pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    ctx.stroke();
+    if (hoverW){
+      const r = wirePoint(hoverW);
+      ctx.globalAlpha = 0.7; ctx.setLineDash([30, 20]);
+      ctx.beginPath(); ctx.moveTo(last[0], last[1]);
+      if (r.pt[0] !== last[0] && r.pt[1] !== last[1]) ctx.lineTo(r.pt[0], last[1]);
+      ctx.lineTo(r.pt[0], r.pt[1]);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  if (tool === 'power' && toolPower && hoverW){
+    const x = snapHit ? snapHit.x : snap100(hoverW.x), y = snapHit ? snapHit.y : snap100(hoverW.y);
+    ctx.save(); ctx.globalAlpha = 0.6;
+    D.drawPowerPort(ctx, { x, y, net:toolPower.net, style:toolPower.style, rot:toolPower.rot });
+    ctx.restore();
+  }
+  /* o ima: alvo laranja no ponto de conexao que vai grudar */
+  if (tool !== 'select' && snapHit){
+    const r = 7 * px;
+    ctx.save();
+    ctx.strokeStyle = D.SCH.hl; ctx.lineWidth = 2 * px; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(snapHit.x, snapHit.y, r, 0, 2 * Math.PI); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(snapHit.x - r * 2.1, snapHit.y); ctx.lineTo(snapHit.x - r * 1.2, snapHit.y);
+    ctx.moveTo(snapHit.x + r * 1.2, snapHit.y); ctx.lineTo(snapHit.x + r * 2.1, snapHit.y);
+    ctx.moveTo(snapHit.x, snapHit.y - r * 2.1); ctx.lineTo(snapHit.x, snapHit.y - r * 1.2);
+    ctx.moveTo(snapHit.x, snapHit.y + r * 1.2); ctx.lineTo(snapHit.x, snapHit.y + r * 2.1);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 /* as bordinhas: caixa tracejada com alcas nos cantos em cada item marcado (nos fios, tambem
    em cada vertice) e o retangulo de selecao enquanto ele e arrastado */
@@ -950,6 +1175,15 @@ const cam = D.mkCamera(cv, drawWorld, {
     hoverW = w;
     $('sx').textContent = w.x.toFixed(0);
     $('sy').textContent = w.y.toFixed(0);
+    /* com ferramenta na mao o que interessa e o ima, nao o que esta sob o cursor */
+    if (tool !== 'select'){
+      snapHit = panning ? null : snapPoint(w);
+      $('shover').textContent = snapHit ? '⊙ ' + snapHit.label
+        : (tool === 'wire' ? (wireDraw ? 'clique para o próximo ponto · botão direito encerra' : 'clique para começar o fio')
+                           : 'clique para pousar ' + (toolPower ? toolPower.net : ''));
+      cam.draw();
+      return;
+    }
     if (mouse || panning) return;      /* durante um gesto o hover nao manda no cursor nem no texto */
     const h = hitTest(w.x, w.y);
     $('shover').textContent =
@@ -997,6 +1231,7 @@ function hitTest(x, y){
 /* ------- sinalizadores ------- */
 function setAnnTool(v){
   if (v && !editOn) return;
+  if (v && tool !== 'select') setTool('select');   /* uma ferramenta de cada vez na mao */
   annTool = v;
   $('btnAnn').classList.toggle('active', v);
   cv.style.cursor = v ? 'copy' : 'default';
@@ -1056,7 +1291,8 @@ $('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (addOpen()){ closeAdd(); return; }
-    if ($('schprops').style.display === 'block'){ $('schprops').style.display = 'none'; propItem = null; return; }
+    if (wireDraw){ wireDraw = null; cam.draw(); return; }
+    if (tool !== 'select'){ setTool('select'); return; }
     if (mouse){
       if (mouse.mode === 'move') applyMove(mouse.base, 0, 0);
       mouse = null; boxRect = null; swallowClick = true; cam.draw(); return;
@@ -1072,10 +1308,16 @@ window.addEventListener('keydown', e => {
   if (e.ctrlKey && k === 'z'){ e.preventDefault(); if (editOn) undo(); return; }
   if (e.ctrlKey && k === 'y'){ e.preventDefault(); if (editOn) redo(); return; }
   if (e.ctrlKey && k === 'a'){ e.preventDefault(); selectOnly(sheetItems()); return; }
+  /* Ctrl+W e do NAVEGADOR (fecha a aba) e nenhuma pagina consegue interceptar — o atalho do
+     fio e o W sozinho. Isto aqui so pega onde o Ctrl+W chega mesmo (janela de aplicativo). */
+  if (e.ctrlKey && k === 'w'){ e.preventDefault(); setTool(tool === 'wire' ? 'select' : 'wire'); return; }
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   if (k === 'e'){ setEdit(!editOn); return; }
   if (k === 'c'){ openAdd(); return; }
   if (k === 'n'){ setAnnTool(!annTool); return; }
+  if (k === 'w'){ setTool(tool === 'wire' ? 'select' : 'wire'); return; }
+  if (k === 'g'){ setTool(tool === 'power' && toolPower && toolPower.net === 'GND' ? 'select' : 'power',
+                          { net:'GND', style:'GndPower', rot:270 }); return; }
   if (!editOn) return;
   if (e.key === 'Delete'){ deleteSel(); return; }
   if (e.key === ' ' && sel.size){ e.preventDefault(); rotateSel(); return; }
@@ -1099,7 +1341,7 @@ function focusComp(c){
   const si = model.sheets.findIndex(sh => sh.name === c.sheet);
   if (si >= 0 && si !== sheetIdx){ sheetIdx = si; $('sheetsel').value = si; }
   sel.clear(); sel.add(c);
-  buildCompTable(); updateSelStatus();
+  buildCompTable(); updateSelStatus(); renderProps();
   cam.fit({ x1:c.x-800, y1:c.y-800, x2:c.x+800, y2:c.y+800 });
 }
 function buildCompTable(){
@@ -1168,38 +1410,45 @@ let pane0 = 'comps';
 try { pane0 = localStorage.getItem('schframe.pane') || 'comps'; } catch (e) {}
 showPane(pane0 === 'cfg' ? 'cfg' : 'comps');
 
-/* ------- divisoria do painel -------
+/* ------- divisorias dos dois paineis -------
    Mesmo gesto das abas Laser e BOM do hub: arrastar redimensiona, soltar perto da borda
    fecha, duplo clique fecha/abre. A largura fica lembrada nesta maquina. O canvas nao
-   precisa de aviso: o mkCamera observa o proprio elemento e redesenha quando ele muda. */
-const SIDE_W = 330, SIDE_SNAP = 90, SIDE_VIEW_MIN = 240;   /* os mesmos limites do hub */
-let sideW = SIDE_W;
-try { const v = localStorage.getItem('schframe.sideW'); if (v !== null && isFinite(+v)) sideW = Math.max(0, +v); } catch (e) {}
-function aplicaSide(){
-  document.documentElement.style.setProperty('--side-w', sideW + 'px');
-  $('side').style.display = sideW ? '' : 'none';
-}
-function salvaSide(){ try { localStorage.setItem('schframe.sideW', String(sideW)); } catch (e) {} }
-aplicaSide();
-(function(){
-  const sp = $('split');
+   precisa de aviso: o mkCamera observa o proprio elemento e redesenha quando ele muda —
+   so os previews da ficha e que precisam refazer o enquadramento. */
+const SIDE_SNAP = 90, SIDE_VIEW_MIN = 240;   /* os mesmos limites do hub */
+function mkPainel(o){
+  let larg = o.padrao;
+  try { const v = localStorage.getItem(o.chave); if (v !== null && isFinite(+v)) larg = Math.max(0, +v); } catch (e) {}
+  const aplica = () => {
+    document.documentElement.style.setProperty(o.varCss, larg + 'px');
+    $(o.el).style.display = larg ? '' : 'none';
+    if (o.aoMudar) o.aoMudar();
+  };
+  const salva = () => { try { localStorage.setItem(o.chave, String(larg)); } catch (e) {} };
+  const sp = $(o.split);
   sp.addEventListener('pointerdown', e => {
     const total = $('main').getBoundingClientRect().width;
-    const teto = Math.max(SIDE_SNAP, total - SIDE_VIEW_MIN - 6);
-    const x0 = e.clientX, w0 = sideW;
+    const teto = Math.max(SIDE_SNAP, total - SIDE_VIEW_MIN - 12);
+    const x0 = e.clientX, w0 = larg;
     sp.classList.add('on');
     sp.setPointerCapture(e.pointerId);
-    const move = ev => { const w = w0 + (ev.clientX - x0); sideW = w < SIDE_SNAP ? 0 : Math.min(w, teto); aplicaSide(); };
+    /* o painel da direita cresce para o lado contrario do ponteiro */
+    const move = ev => { const w = w0 + (ev.clientX - x0) * (o.lado === 'r' ? -1 : 1);
+                         larg = w < SIDE_SNAP ? 0 : Math.min(w, teto); aplica(); };
     const up = () => {
       sp.classList.remove('on');
       sp.removeEventListener('pointermove', move); sp.removeEventListener('pointerup', up); sp.removeEventListener('pointercancel', up);
-      salvaSide();
+      salva();
     };
     sp.addEventListener('pointermove', move); sp.addEventListener('pointerup', up); sp.addEventListener('pointercancel', up);
     e.preventDefault();
   });
-  sp.addEventListener('dblclick', () => { sideW = sideW ? 0 : SIDE_W; aplicaSide(); salvaSide(); });
-})();
+  sp.addEventListener('dblclick', () => { larg = larg ? 0 : o.padrao; aplica(); salva(); });
+  aplica();
+}
+mkPainel({ chave:'schframe.sideW', varCss:'--side-w', el:'side', split:'split', padrao:330, lado:'l' });
+mkPainel({ chave:'schframe.propsW', varCss:'--props-w', el:'props', split:'splitR', padrao:320, lado:'r',
+           aoMudar: () => requestAnimationFrame(refitProps) });
 
 $('btnFit').addEventListener('click', () => cam.fit(sheetBBox()));
 $('btnGrid').addEventListener('click', () => {
@@ -1208,7 +1457,7 @@ $('btnGrid').addEventListener('click', () => {
 $('btnEdit').addEventListener('click', () => setEdit(!editOn));
 
 buildSheetSel(); buildCompTable(); buildNetList(); buildValList(); buildAnnPanel();
-updateMeta(); updateSaveBtn(); updateSelStatus(); cartRender();
+updateMeta(); updateSaveBtn(); updateSelStatus(); cartRender(); renderProps();
 cam.resize(); cam.fit(sheetBBox());
 setEdit(false);   /* abre travado; tambem ja desabilita o que edita */
 
