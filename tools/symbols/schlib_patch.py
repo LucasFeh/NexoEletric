@@ -199,7 +199,7 @@ class Lib(object):
 def _le_ole(fonte):
     """caminho | bytes | BytesIO -> {caminho/do/stream: bytes}; fecha o arquivo logo, para
     não segurar um handle na hora do os.replace"""
-    import olefile
+    olefile = sch_leitor.olefile_ou_erro()   # sem o modulo, um recado em vez de traceback
     if isinstance(fonte, (bytes, bytearray)):
         o = olefile.OleFileIO(io.BytesIO(bytes(fonte)))
     else:

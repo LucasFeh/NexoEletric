@@ -424,8 +424,26 @@ def _simbolo(regs, fontes, pinfrac, com_footprints, pcblib_names, avisos, extras
                         ('partcount', partcount), ('parts', parts), ('footprints', fps)])
 
 
+def olefile_ou_erro():
+    """o `olefile`, ou um erro que diz o que instalar e ONDE.
+
+    O hub dispara os scripts com `sys.executable` — o mesmo Python com que o servidor foi
+    subido. Numa maquina com varios Pythons (o do Espressif, o da Store, o do python.org)
+    e facil subir o hub com um que nao tem a dependencia, e a sincronizacao morria num
+    ModuleNotFoundError cru no fundo de um traceback. O interpretador vai no recado porque
+    e exatamente essa a informacao que falta: nao e "instale olefile", e "instale NESTE"."""
+    try:
+        import olefile
+        return olefile
+    except ImportError:
+        raise RuntimeError(
+            'falta o modulo olefile, que le os arquivos .SchLib/.SchDoc do Altium.\n'
+            'Instale no MESMO Python que roda o hub:\n'
+            '    "%s" -m pip install olefile' % sys.executable)
+
+
 def _abre(fonte):
-    import olefile
+    olefile = olefile_ou_erro()
     if isinstance(fonte, (bytes, bytearray)):
         return olefile.OleFileIO(io.BytesIO(bytes(fonte))), ''
     if hasattr(fonte, 'read'):
@@ -501,7 +519,7 @@ def agora():
 # ─── .IntLib ──────────────────────────────────────────────────────────────────
 def le_intlib(caminho, com_footprints=True):
     """concatena os símbolos de cada SchLib embutida (só os `SchLib/*.schlib`)"""
-    import olefile
+    olefile = olefile_ou_erro()
     o = olefile.OleFileIO(caminho)
     fora = []
     try:
@@ -593,7 +611,7 @@ def _registros_schdoc(caminho):
     formato ASCII ("Schematic Capture Ascii File": uma linha |CHAVE=valor|... por registro,
     que o EasyEDA e o próprio Altium exportam). Nos dois, `OwnerIndex` conta a partir do
     registro seguinte ao cabeçalho."""
-    import olefile
+    olefile = olefile_ou_erro()
     if olefile.isOleFile(caminho):
         o = olefile.OleFileIO(caminho)
         try:
