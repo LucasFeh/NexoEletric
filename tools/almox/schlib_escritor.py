@@ -535,6 +535,33 @@ def nome_storage(nome, usados):
     return st
 
 
+# ─── como o documento ABRE no Altium ─────────────────────────────────────────
+# O FileHeader nao guarda so o indice: guarda tambem a cor da folha, a moldura, a grade,
+# a unidade e a tabela de fontes. Isso vinha inteiro de carona no cabecalho modelo (a
+# BIBLIOTECA DE ESQUEMA.SchLib da casa) — e no dia em que a lib da casa ficou fora de
+# alcance, `carrega_lib()` devolveu {} e as 32 bibliotecas sairam com TRES campos de
+# documento. O hub nao percebeu (ele le os registros, nao o cabecalho), mas o Altium abriu
+# todas com a FOLHA PRETA, porque sem AreaColor ele nao tem cor para pintar.
+#
+# Agora estes valores sao o piso: o modelo, quando existe, escreve por cima. Sao os da lib
+# da casa, para a biblioteca gerada abrir igual as outras.
+CABECALHO_PADRAO = (
+    ('AreaColor', 16317695),           # rgb(255,252,248) — a folha creme do Altium
+    ('BorderOn', 'T'),
+    ('SheetStyle', 9),
+    ('UseCustomSheet', 'T'),
+    ('CustomX', 18000), ('CustomY', 18000),
+    ('Display_Unit', 1),
+    ('SnapGridOn', 'T'), ('SnapGridSize', 1),
+    ('VisibleGridOn', 'T'), ('VisibleGridSize', 3), ('VisibleGridSize_Frac', 93701),
+    ('ReferenceZonesOn', 'T'), ('AlwaysShowCD', 'T'), ('IsBOC', 'T'), ('UseMBCS', 'T'),
+    ('SheetNumberSpaceSize', 12),
+    # os nossos registros referenciam FontID=1 e mais nenhum; sem a declaracao o Altium
+    # cai numa fonte qualquer
+    ('FontIdCount', 1), ('FontName1', 'Times New Roman'), ('Size1', 10),
+)
+
+
 def _cabecalho(itens, cab_modelo):
     """o registro unico do stream FileHeader: o indice da biblioteca.
 
@@ -543,7 +570,7 @@ def _cabecalho(itens, cab_modelo):
     que decide em quantos pedacos a familia vai sair.
     """
     from collections import OrderedDict
-    cab = OrderedDict()
+    cab = OrderedDict(CABECALHO_PADRAO)
     for k, v in (cab_modelo or {}).items():
         # tudo que e indexado POR COMPONENTE da lib modelo tem que sair: os indices
         # nao valem nada aqui. Comp<N>Alias<M> ficava para tras enquanto AliasCount<N>

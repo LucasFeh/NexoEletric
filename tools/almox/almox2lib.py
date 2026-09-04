@@ -243,7 +243,13 @@ def carrega_reciclagem():
     try:
         import schlib_escritor as ESC
         _cab, comps = ESC.carrega_lib()
-    except Exception:                                       # noqa: BLE001
+    except Exception as e:                                  # noqa: BLE001
+        # Cair aqui em silencio ja custou caro: sem a lib da casa a geracao perde os
+        # footprints reciclados E o cabecalho de documento, e as .SchLib saiam abrindo com
+        # a folha PRETA no Altium. O CABECALHO_PADRAO do escritor cobre a folha; este aviso
+        # cobre o resto, que ninguem ve ate abrir o Altium.
+        print('AVISO: a biblioteca da casa nao pode ser lida (%s: %s)' % (type(e).__name__, e))
+        print('       as libs vao sair SEM footprint reciclado — confira a rede antes de usar')
         return {}, None
     return comps, ESC
 
