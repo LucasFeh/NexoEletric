@@ -450,22 +450,40 @@ ao botão "Salvar changes".
 ### Biblioteca » Símbolos — editar o símbolo e gravar na SchLib do Altium
 
 A sub-aba **Símbolos** (ao lado de Footprints) é um editor de símbolos de esquema sobre o
-espelho do Altium. A lista e a busca são as mesmas da sub-aba Sch Lib; o meio é um canvas de
-edição com ferramentas (selecionar/mover, linha, retângulo, polilinha, polígono, arco, elipse,
-texto, pino, girar/espelhar, desfazer/refazer, grade e snap) e, embaixo, a **Biblioteca de
-símbolos**: um acervo só de desenhos — sem valor, sem descrição, sem footprint — para trocar o
-corpo de um componente com um clique ("Aplicar ao símbolo"). Quando a contagem de pinos bate,
-a pinagem original (número, nome e tipo) é preservada: o que muda é o desenho. O painel
-inteiro vive em `hub-symed.js`; a casca só tem a sub-aba e o container.
+espelho do Altium, com a gramática do próprio Altium. À esquerda, a lista e a busca dos
+componentes do espelho (a mesma da sub-aba Sch Lib); no meio, o canvas; à direita, as
+ferramentas em ícones (selecionar, linha, retângulo, polilinha, polígono, arco, elipse,
+texto, pino, excluir; girar, espelhar, enquadrar, grade) e a ficha no estilo do painel
+Properties: o tipo e o nome, os ícones de virar pino/linha (`K`), duplicar e excluir, X e Y
+na primeira linha, a cor do traço e a caixa **Preencher** com a cor de área, a parte, o
+tamanho em mm (largura/altura, diâmetro, comprimento), e no pino o número e o nome com o
+olho de visibilidade. Desfazer e refazer ficam no canto direito da barra do editor. As
+colunas laterais são ajustáveis como nas abas Laser e BOM (arraste; duplo clique fecha).
+
+O mouse é o da vista Esquema: o botão esquerdo seleciona, arrasta o que está marcado e
+desenha a caixa de seleção (esquerda→direita pega o que cabe inteiro, direita→esquerda o que
+encosta); direito e meio arrastam a tela; a roda amplia; Shift alterna a seleção; Delete,
+setas e Ctrl+D agem sobre o conjunto. A unidade da interface é **mm** por padrão (snap 0,1 /
+0,5 / 1 / 2,5 mm; em mil, 10 / 25 / 50 / 100) — por dentro tudo continua em mil com três
+casas, que é o que o Altium e o espelho falam. O pino é desenhado como no Altium (traço
+grosso e a marca "::" na ponta quente) e a ficha avisa quando a ponta quente está fora do
+snap escolhido.
+
+Embaixo do canvas fica a **Biblioteca de símbolos**: um acervo só de desenhos — sem valor,
+sem descrição, sem footprint. Arraste um símbolo para o canvas (numa parte vazia ele entra
+na origem; numa parte com desenho, entra onde soltou, selecionado, renumerando os pinos que
+colidem) ou use "Aplicar ao símbolo", que troca o corpo inteiro preservando a pinagem
+quando a contagem de pinos bate. "+ corpo atual" guarda o desenho aberto na biblioteca.
 
 **Salvar** grava em dois lugares de uma vez: `Libs/schlib.js` (o espelho que o hub desenha) e,
 com a caixa *Altium* marcada, a SchLib real em `Y:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\`,
 escrita direto pelo Python (a mesma técnica do almoxarifado: `cfbf.py` + `schlib_bin.py`),
-com backup automático em `Backup-hub\` ao lado do arquivo e conferência por releitura. Se a
+com backup automático em `Backup-hub\` ao lado do arquivo e conferência por releitura. A
+fração do pino vai para o stream `PinFrac` como o Altium grava (a grade métrica sobrevive),
+a visibilidade de número e nome vai para os bits do pino, e as cores para `Color`/`AreaColor`
+de cada primitiva; todos os outros componentes da biblioteca saem byte a byte iguais. Se a
 biblioteca estiver aberta no Altium, a gravação na SchLib é recusada com aviso — feche-a e
-salve de novo. Os pinos vão para a grade de 10 mil; todos os outros componentes da biblioteca
-saem byte a byte iguais. O aside avisa quando a ponta quente de um pino está fora da grade de
-100 mil — é o caso de vários símbolos antigos, e é por isso que o fio não encosta no Altium.
+salve de novo.
 
 A Biblioteca de símbolos vive em `Libs/symbols-lib.js` (versionado — é estado curado, não
 saída). Quem a alimenta é:
@@ -476,21 +494,21 @@ python tools/symbols/extrair.py --limite 20     # amostra, para experimentar
 ```
 
 que percorre a biblioteca antiga e todos os projetos de `Y:\EQUIPAMENTOS ATUALIZADOS` e
-`Y:\EQUIPAMENTOS_REVISADOS` (`.SchLib`, `.SchDoc` e as `.SchLib` embutidas em `.IntLib`),
-extrai só a geometria, deduplica por impressão digital e **mescla**: o que já está cadastrado é
-ignorado (só ganha `usos`/`aliases`), nomes e ids existentes nunca mudam — renomear e excluir é
-pelo hub. Até 4 pinos vira símbolo genérico com nome básico por heurística de forma (Resistor,
-Capacitor polarizado, Diodo zener…); o resto é CI e leva o nome do próprio componente
-(`SN74LVC244AQPWRQ1`). A primeira varredura (2026-09-03) leu 517 arquivos e reduziu 168.768
-ocorrências a 841 símbolos. O relatório fica em `tools/symbols/relatorio.txt`; o mesmo botão
-existe na API (`POST /api/symbols/extract`, log por SSE).
+`Y:\EQUIPAMENTOS_REVISADOS` (`.SchLib`, `.SchDoc` — inclusive os antigos com chaves em
+maiúsculas e o formato ASCII — e as `.SchLib` embutidas em `.IntLib`), extrai só a
+geometria, deduplica por impressão digital (cor e visibilidade não contam) e **mescla**: o
+que já está cadastrado é ignorado (só ganha `usos`/`aliases`), nomes e ids existentes nunca
+mudam — renomear e excluir é pelo hub. Até 4 pinos vira símbolo genérico com nome básico por
+heurística de forma (Resistor, Capacitor polarizado, Diodo zener…); o resto é CI e leva o nome
+do próprio componente (`SN74LVC244AQPWRQ1`). A varredura de 2026-09-03 leu 527 arquivos e
+reduziu 176.322 ocorrências a 895 símbolos. O relatório fica em `tools/symbols/relatorio.txt`;
+o mesmo botão existe na API (`POST /api/symbols/extract`, log por SSE).
 
 O leitor Python (`tools/symbols/sch_leitor.py`) também regera o espelho inteiro sem abrir o
-Altium — `python tools/symbols/sch_leitor.py --espelho` — e é provado contra o `schlib.js`
-que o `ExportLibs.pas` gerou (`tests/test_sch_leitor.py`: 401/401 símbolos idênticos).
-Atenção: a SchLib real ainda tem os nomes **antigos** (o `RenameLibs` não rodou nela), então o
-espelho regerado volta a esses nomes; o Salvar do editor resolve o nome antigo pelo
-`rename-map.js` sozinho.
+Altium — `python tools/symbols/sch_leitor.py --espelho` (aplica o `rename-map.js` para não
+desfazer os nomes do RenameLibs) — e é provado contra o `schlib.js` que o `ExportLibs.pas`
+gerou (`tests/test_sch_leitor.py`: 401/401 símbolos idênticos). O passo `--flags` leva só os
+flags de visibilidade para o espelho, linha a linha, sem tocar em mais nada.
 
 ### BOM — página interativa para montar a placa
 
