@@ -548,6 +548,29 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .symed-libbar .kicker { white-space: nowrap; }
 .symed-libbar .input { flex: 1 1 160px; min-width: 120px; max-width: 260px; min-height: 26px; font-size: 12px; }
 .symed-libbar .count { font-size: 11px; color: var(--text-4); white-space: nowrap; }
+/* sub-aba da faixa: Símbolos | Componentes — mesma pinta das sub-abas do topo */
+.symed-faixatabs { display: flex; gap: 2px; }
+.symed-faixatabs button { cursor: pointer; border: 0; background: transparent; color: var(--text-3);
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 4px 8px; border-radius: var(--r-sm); }
+.symed-faixatabs button:hover:not(:disabled) { color: var(--text-2); background: rgba(var(--tint),0.06); }
+.symed-faixatabs button[aria-selected="true"] { color: var(--text); background: rgba(var(--tint),0.11); }
+.symed-faixatabs button:disabled { opacity: .38; cursor: default; }
+/* a lista de componentes ocupa a mesma área dos tiles, mas em linhas: são nomes longos
+   ("(TVS) CDSOT23-SM712"), e tile quadrado não os mostra */
+.symed-comp { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left; cursor: pointer;
+  border: 0; background: transparent; color: var(--text); border-radius: var(--r-sm); padding: 5px 8px; }
+.symed-comp:hover { background: rgba(var(--tint),0.06); }
+.symed-comp[aria-selected="true"] { background: rgba(var(--tint),0.12); }
+.symed-comp .nm { font-size: 12px; }
+.symed-comp .mt { margin-left: auto; display: flex; gap: 8px; align-items: baseline; font-size: 10px; color: var(--text-4); }
+.symed-comp .mt .pill { color: var(--ok); }
+.symed-comp .mt .fp { font-family: var(--mono); }
+.symed-tiles:has(.symed-comp) { display: block; overflow-y: auto; }
+/* de que família veio o componente aberto */
+.symed-viafam { font-size: 11px; color: var(--text-4); margin: 2px 0 6px; }
+.symed-viafam button { cursor: pointer; border: 0; background: transparent; padding: 0; color: var(--hi);
+  font: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.symed-viafam .q { color: var(--text-4); }
 .symed-libbar .right { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; }
 .symed-libbar .btn { white-space: nowrap; }
 /* a paleta cresce até 190px e rola; vazia (lib ainda não gerada) ocupa só a frase */

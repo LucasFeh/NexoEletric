@@ -537,6 +537,10 @@ const TOOLS = [
 const ST = {
   sel: null, part: 1, tool: 'select', selection: [], undo: [], redo: [], draft: null, dirty: false,
   q: '', kind: 'all', libQ: '', libSel: null,
+  /* faixa de baixo: 'simbolos' = os corpos prontos da symbols-lib; 'componentes' = os
+     VALORES da familia aberta (so faz sentido num acervo do almoxarifado) */
+  faixa: 'simbolos', valSel: null, valQ: '',
+  familia: null,      /* nome da familia quando ST.draft e o desenho de UM valor dela */
   unit: 'mm',         /* unidade da interface (mm | mil); o estado continua em mil */
   snap: UNIT_DEFAULT.mm, grid: true, draw: null, mouse: null, pinRot: 0, note: '', fitPending: false,
   saved: new Set(),   /* salvos nesta sessão; "modificado" = salvo ou o aberto com edição */
@@ -620,6 +624,23 @@ const symbols = () => (DATA.schlib && DATA.schlib.symbols) || [];
 /* o acervo do almoxarifado nao e gravavel pelo /api/symbols/save (ele so conhece o
    espelho Libs/schlib.js): dizer isso na cara, e nao deixar o POST falhar com 404 */
 const acervoGravavel = () => acervoAtual().id === 'altium';
+
+/* ═══ Componentes de uma familia ═══
+   No almoxarifado um "symbol" e uma FAMILIA desenhada (DIODO TVS) e `valores[]` sao os
+   componentes de verdade (25 no DIODO TVS). Cada valor pode ter geometria PROPRIA no
+   campo `parts` — 12 dos 1550 valores de almox-basicos ja tem — e quem a tem nao usa a
+   da familia. E assim que o PNP deixa de ser desenhado com a seta do NPN sem partir a
+   familia em duas. */
+function familiaAberta() {
+  /* com um valor aberto, ST.sel e o nome DO VALOR: a familia fica em ST.familia */
+  const nome = ST.familia || ST.sel;
+  return nome ? symByName(nome) : null;
+}
+const valoresDa = f => (f && f.valores) || [];
+const nomeDoValor = v => (v && (v.altium || v.label)) || '';
+const valorPorNome = (f, n) => valoresDa(f).find(v => nomeDoValor(v) === n) || null;
+/* o valor tem desenho proprio, ou herda o da familia? */
+const valorTemGeo = v => !!(v && v.parts && v.parts.length);
 const symByName = n => symbols().find(s => s.name === n) || null;
 const libSyms = () => (DATA.symlib && DATA.symlib.symbols) || [];
 const libById = id => libSyms().find(s => s.id === id) || null;
@@ -882,7 +903,10 @@ function build(rootEl) {
 
   const lb = el('div', 'symed-libbar');
   UI.libQ = el('input', 'input'); UI.libQ.type = 'text'; UI.libQ.placeholder = 'buscar na biblioteca de símbolos…'; UI.libQ.value = ST.libQ;
-  UI.libQ.oninput = () => { ST.libQ = UI.libQ.value; refreshLib(); };
+  UI.libQ.oninput = () => {
+    if (ST.faixa === 'componentes') ST.valQ = UI.libQ.value; else ST.libQ = UI.libQ.value;
+    libKey = ''; refreshLib();
+  };
   UI.libCount = el('span', 'count', '');
   const lr = el('div', 'right');
   UI.bLibAdd = btn('btn-secondary btn-sm', '+ corpo atual', adicionarCorpo, 'guarda o desenho da parte aberta na biblioteca de símbolos');
@@ -890,7 +914,23 @@ function build(rootEl) {
   UI.bLibRen = btn('btn-secondary btn-sm', 'Renomear', renomearLib);
   UI.bLibDel = btn('btn-secondary btn-sm', 'Excluir', excluirLib);
   lr.append(UI.bLibAdd, UI.bLibApply, UI.bLibRen, UI.bLibDel);
-  lb.append(el('span', 'kicker', 'biblioteca de símbolos'), UI.libQ, UI.libCount, lr);
+  /* sub-aba da faixa: "Símbolos" (os corpos prontos) x "Componentes" (os valores da
+     familia aberta). Sem ela nao havia como chegar num componente especifico: a lista da
+     esquerda mostra a FAMILIA, e a familia nao e o que se monta na placa. */
+  UI.faixaTabs = el('div', 'symed-faixatabs');
+  UI.faixaTabs.setAttribute('role', 'tablist');
+  [['simbolos', 'Símbolos'], ['componentes', 'Componentes']].forEach(([k, rot]) => {
+    const b = el('button', null, rot); b.type = 'button'; b.dataset.faixa = k;
+    b.setAttribute('role', 'tab');
+    b.onclick = () => {
+      if (ST.faixa === k) return;
+      ST.faixa = k; libKey = '';
+      UI.libQ.value = (k === 'componentes' ? ST.valQ : ST.libQ) || '';
+      refreshLib();
+    };
+    UI.faixaTabs.append(b);
+  });
+  lb.append(UI.faixaTabs, UI.libQ, UI.libCount, lr);
   UI.tiles = el('div', 'symed-tiles');
   mid.append(cb, UI.vp, foot, lb, UI.tiles);
 
@@ -1026,8 +1066,21 @@ function refreshAside() {
   }
   const part = curPart();
   const itens = selItems(), it = itens.length === 1 ? itens[0].item : null;
-  a.append(el('div', 'kicker', it ? tipoDe(it) : 'símbolo'));
+  a.append(el('div', 'kicker', it ? tipoDe(it) : (ST.familia ? 'componente' : 'símbolo')));
   const h = el('div', 'det-head'); const nm = el('span', 'd', d.name); nm.style.cssText = 'font-size:16px;word-break:break-word;line-height:1.3'; h.append(nm); a.append(h);
+  /* editando UM componente: dizer de que familia ele e, e como voltar. Sem isto o nome no
+     topo nao distingue "a familia DIODO TVS" de "o componente (TVS) CDSOT23-SM712". */
+  if (ST.familia) {
+    const via = el('div', 'symed-viafam');
+    via.append(document.createTextNode('de '));
+    const volta = el('button', null, ST.familia); volta.type = 'button';
+    volta.title = 'voltar para o desenho da família inteira';
+    volta.onclick = voltarParaFamilia;
+    via.append(volta);
+    const f = familiaAberta(), v = f && valorPorNome(f, d.name);
+    via.append(el('span', 'q', valorTemGeo(v) ? ' · desenho próprio' : ' · herdando o desenho da família'));
+    a.append(via);
+  }
   if (itens.length) a.append(acoesDaSelecao(itens, it));
   if (it) a.append(fieldsFor(it));
   else if (itens.length > 1) {
@@ -1266,8 +1319,59 @@ function fieldsFor(it) {
 
 /* ── paleta da biblioteca de símbolos ── */
 let libKey = '';
+/* Os componentes (valores) da familia aberta, na faixa de baixo. Cada um e uma peca de
+   verdade do almoxarifado; clicar abre SO o desenho dele para editar. */
+function refreshComponentes(f) {
+  const vals = valoresDa(f);
+  const q = (ST.valQ || '').trim().toLowerCase();
+  const rows = vals.filter(v => !q || (nomeDoValor(v) + ' ' + (v.mpn || '') + ' ' + (v.footprint || '')).toLowerCase().includes(q));
+  UI.libQ.placeholder = 'buscar componente em ' + (f ? f.name : '') + '…';
+  UI.libCount.textContent = rows.length + (rows.length !== vals.length ? ' de ' + vals.length : '')
+    + ' componente' + (vals.length === 1 ? '' : 's');
+  UI.bLibApply.disabled = !libById(ST.libSel) || !ST.draft;
+  UI.bLibAdd.disabled = !ST.draft || semServidor();
+  UI.bLibRen.disabled = true; UI.bLibDel.disabled = true;
+  if (UI.io) UI.io.disconnect();
+  UI.tiles.textContent = '';
+  if (!rows.length) { UI.tiles.append(el('div', 'symed-empty', q ? 'nada com "' + ST.valQ + '"' : 'sem componentes')); return; }
+  const frag = document.createDocumentFragment();
+  rows.forEach(v => {
+    const nome = nomeDoValor(v);
+    const b = el('button', 'symed-comp'); b.type = 'button';
+    b.setAttribute('aria-selected', String(ST.valSel === nome));
+    b.title = [nome,
+               v.footprint ? 'footprint: ' + v.footprint : '',
+               v.mpn ? 'MPN: ' + v.mpn : '',
+               valorTemGeo(v) ? 'desenho próprio' : 'usa o desenho da família'].filter(Boolean).join(' · ');
+    b.append(el('span', 'nm', nome));
+    const meta = el('span', 'mt');
+    if (valorTemGeo(v)) meta.append(el('span', 'pill', 'desenho próprio'));
+    if (v.footprint) meta.append(el('span', 'fp', v.footprint));
+    if (typeof v.estoque === 'number') meta.append(el('span', 'es', v.estoque + ' un'));
+    b.append(meta);
+    b.onclick = () => abrirValor(nome);
+    frag.append(b);
+  });
+  UI.tiles.append(frag);
+}
+
 function refreshLib() {
   if (!UI) return;
+  /* a faixa de componentes so existe onde ha valores: no espelho do Altium um simbolo
+     nao tem componentes por baixo dele */
+  const f = familiaAberta();
+  const podeComp = valoresDa(f).length > 0;
+  if (UI.faixaTabs) {
+    UI.faixaTabs.hidden = false;
+    for (const b of UI.faixaTabs.children) {
+      const dele = b.dataset.faixa;
+      b.disabled = (dele === 'componentes') && !podeComp;
+      b.title = b.disabled ? 'este símbolo não tem componentes por baixo (só o almoxarifado tem)' : '';
+      b.setAttribute('aria-selected', String(ST.faixa === dele));
+    }
+  }
+  if (ST.faixa === 'componentes' && !podeComp) ST.faixa = 'simbolos';
+  if (ST.faixa === 'componentes') return refreshComponentes(f);
   const L = DATA.symlib, all = libSyms();
   /* a seleção fica fora da chave: com 400+ tiles, refazer tudo a cada clique é o que trava */
   const key = [ST.libQ, all.length, L ? 1 : 0, DATA.symlibMissing ? 1 : 0].join(SEP);
@@ -1744,6 +1848,38 @@ async function excluirParte() {
   if (O && O.toast) O.toast('parte ' + alvo + ' excluída — agora são ' + d.parts.length, 'ok');
 }
 
+/* Abre UM componente (valor) da familia para editar so o desenho dele. O rascunho vira
+   o desenho do VALOR: parts proprias se ele ja tiver, senao uma copia das da familia —
+   copia, nao referencia, senao editar o componente mexeria na familia inteira. */
+async function abrirValor(nome) {
+  const f = familiaAberta(); if (!f) return false;
+  const v = valorPorNome(f, nome); if (!v) return false;
+  if (ST.dirty) {
+    const ok = await confirmar('Há edição não salva em "' + ST.sel + '". Descartar e abrir "' + nome + '"?',
+                               { title: 'Descartar edição?', ok: 'Descartar', danger: true });
+    if (!ok) return false;
+  }
+  ST.familia = f.name;
+  ST.valSel = nome;
+  ST.sel = nome;
+  ST.draft = { name: nome, description: v.label || f.description || '',
+               parts: clone(valorTemGeo(v) ? v.parts : (f.parts || [{ part: 1, pins: [], graphics: [] }])),
+               footprints: clone(v.footprint ? [{ name: v.footprint, current: true }] : (f.footprints || [])) };
+  ST.part = 1; ST.undo = []; ST.redo = []; ST.dirty = false; ST.selection = []; ST.draw = null; ST.note = '';
+  ST.fitPending = true;
+  refreshAll(); fitSeNecessario();
+  return true;
+}
+
+/* Volta da edicao de um componente para a familia inteira. */
+async function voltarParaFamilia() {
+  const nome = ST.familia; if (!nome) return;
+  if (ST.dirty && !(await confirmar('Há edição não salva em "' + ST.sel + '". Descartar?',
+                                    { title: 'Descartar edição?', ok: 'Descartar', danger: true }))) return;
+  ST.familia = null; ST.valSel = null; ST.dirty = false;
+  await openSymbol(nome, true);
+}
+
 function abrirParte(n) {
   if (!ST.draft) return;
   ST.part = n; ST.selection = []; ST.draw = null; ST.fitPending = true; refreshAll(); fitSeNecessario();
@@ -1849,7 +1985,9 @@ async function salvar() {
      almoxarifado ele devolve 404 DEPOIS de a pessoa ter desenhado. Melhor dizer antes,
      e com o motivo. */
   if (!acervoGravavel()) {
-    setStatus('“' + acervoAtual().title + '” ainda não é gravável pelo editor — só o espelho do Altium', 'err');
+    const alvo = ST.familia ? ('o componente “' + ST.sel + '” de ' + ST.familia)
+                            : ('“' + acervoAtual().title + '”');
+    setStatus('gravar ' + alvo + ' ainda não está ligado — hoje só o espelho do Altium', 'err');
     if (O && O.toast) O.toast('gravar em “' + acervoAtual().title + '” ainda não está ligado', 'warn');
     return;
   }
