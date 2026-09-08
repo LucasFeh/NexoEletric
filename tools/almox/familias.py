@@ -150,7 +150,21 @@ _REGRAS = [
      r'|carregador(?:es)? de bateria|pmic|bms)',
      'GESTAO DE BATERIA', 'U', 'box', '', 'e'),
     (r'(?:display|lcd|oled|modulo(?:s)?)(?: [a-z]+)?', 'MODULO', 'U', 'box', '', 'e'),
+    (r'controlador(?:es)?(?: de| para)?(?: [a-z]+){0,2}',
+     'CONTROLADOR', 'U', 'box', '', 'e'),
+    (r'driver(?:s)?(?: de| para)?(?: [a-z]+){0,2}', 'DRIVER', 'U', 'box', '', 'e'),
+    (r'comparador(?:es)?(?: de| para| analogico(?:s)?| logico(?:s)?)?(?: [a-z]+){0,2}',
+     'COMPARADOR', 'U', 'box', '', 'e'),
+    (r'referencia(?:s)?(?: de tensao)?', 'REFERENCIA DE TENSAO', 'U', 'box', '', 'e'),
+    (r'contador(?:es)?(?: de| para| digital(?:is)?| crescente)?(?: [a-z]+){0,2}',
+     'CONTADOR', 'U', 'box', '', 'e'),
     (r'(?:circuito(?:s)? integrado(?:s)?|ci)(?: -)?(?: [a-z]+){0,3}',
+     'CIRCUITO INTEGRADO', 'U', 'box', '', 'e'),
+    # `circuito` sozinho vem DEPOIS de `circuito integrado`, senao engoliria o especifico.
+    # E o que traz "Circuito de Interface RS-485 - SN65HVD75DR" e "Circuito WDT ..." — nomes
+    # que descrevem a FUNCAO em vez do tipo, e que caiam fora por nao comecar por nenhuma
+    # palavra conhecida. "Placa de circuito impresso" nao entra aqui: comeca por "placa".
+    (r'circuito(?:s)?(?: de| para)?(?: [a-z]+){0,3}',
      'CIRCUITO INTEGRADO', 'U', 'box', '', 'e'),
     (r'(?:transformador(?:es)?|trafo)', 'TRANSFORMADOR', 'T', 'trafo', '', 'e'),
     (r'(?:timer(?:s)?|temporizador(?:es)?)', 'TIMER', 'U', 'box', '', 'e'),
