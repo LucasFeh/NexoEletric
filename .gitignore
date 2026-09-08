@@ -15,10 +15,13 @@ Libs/almox-basicos.js
 Libs/almox-especiais.js
 Libs/almox-index.js
 Libs/almox-sync.js
+# resumo do guardiao (tools/symbols/guardiao.py o reescreve a cada sincronismo)
+Libs/almox-guardiao.js
 
 # puxados do Odoo / relatorio da ultima rodada (tools/almox)
 tools/almox/componentes_odoo.csv
 tools/almox/relatorio.txt
+tools/symbols/relatorio.txt
 
 # NAO ignorar Libs/almox-parts.json: e o livro-razao rotulo -> part number.
 # Ele e gerado, mas guarda estado; perder o arquivo renumera o almoxarifado.
