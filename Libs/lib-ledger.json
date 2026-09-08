@@ -1,4 +1,4 @@
-{"format":"ledger-v1","atualizado":"2026-09-08 10:25",
+{"format":"ledger-v1","atualizado":"2026-09-08 15:23",
 "arquivos":{
  "Libs/Almox/BARRA DE PINOS ALMOX.SchLib":{"mtime":1788551219.587,"size":61952,"visto":"2026-09-08 10:25"},
  "Libs/Almox/BATERIA ALMOX.SchLib":{"mtime":1788549184.216,"size":99328,"visto":"2026-09-04 16:13"},
@@ -14,7 +14,7 @@
  "Libs/Almox/DIAC ALMOX.SchLib":{"mtime":1788549183.948,"size":6656,"visto":"2026-09-04 16:13"},
  "Libs/Almox/DIODO RETIFICADOR ALMOX.SchLib":{"mtime":1788549183.5,"size":345600,"visto":"2026-09-04 16:13"},
  "Libs/Almox/DIODO SCHOTTKY ALMOX.SchLib":{"mtime":1788549185.763,"size":126464,"visto":"2026-09-04 16:13"},
- "Libs/Almox/DIODO TVS ALMOX.SchLib":{"mtime":1788549185.822,"size":142336,"visto":"2026-09-04 16:13"},
+ "Libs/Almox/DIODO TVS ALMOX.SchLib":{"mtime":1788891810.349,"size":142336,"visto":"2026-09-08 15:23"},
  "Libs/Almox/DIODO ZENER ALMOX.SchLib":{"mtime":1788549186.033,"size":589824,"visto":"2026-09-04 16:13"},
  "Libs/Almox/DIP SWITCH ALMOX.SchLib":{"mtime":1788549183.912,"size":21504,"visto":"2026-09-04 16:13"},
  "Libs/Almox/ESPECIAIS 1 ALMOX.SchLib":{"mtime":1788549182.389,"size":1876480,"visto":"2026-09-04 16:13"},
