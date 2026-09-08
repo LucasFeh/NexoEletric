@@ -41,7 +41,12 @@ function roundRect(ctx, x, y, w, h, r){
 function drawSymbolPart(ctx, part, opts){
   const o = opts || {};
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  for (const g of (part.graphics || [])) {
+  /* PREENCHIMENTO VAI PARA TRAS. A ordem do array e a ordem em que o Altium guardou, e o
+     corpo preenchido costuma vir por ULTIMO — desenhando na ordem crua, o retangulo amarelo
+     do corpo cobria os diodos desenhados dentro dele. Duas passadas: primeiro tudo que
+     preenche area, depois o resto, cada grupo na ordem original entre si. */
+  const gs = part.graphics || [];
+  for (const g of gs.filter(x => x && x.solid).concat(gs.filter(x => !(x && x.solid)))) {
     ctx.beginPath();
     ctx.lineWidth = g.w || 6;
     ctx.strokeStyle = o.stroke || SCH.body;

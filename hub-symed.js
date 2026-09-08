@@ -702,12 +702,19 @@ function redo() { if (!ST.redo.length) return; ST.undo.push(snapshot()); restore
 function afterEdit() { refreshBar(); refreshAside(); redraw(); }
 
 async function openSymbol(name, force) {
-  if (ST.sel === name && ST.draft) return;
+  /* com um COMPONENTE aberto, ST.sel e o nome dele; pedir a familia de mesmo nome tem que
+     passar, senao nao ha volta da edicao do componente para a da familia */
+  if (ST.sel === name && ST.draft && !ST.familia) return;
   if (ST.dirty && !force) {
     const ok = await confirmar('Há edição não salva em "' + ST.sel + '". Descartar e abrir "' + name + '"?', { title: 'Descartar edição?', ok: 'Descartar', danger: true });
     if (!ok) return;
   }
   const s = symByName(name);
+  /* Abrir da LISTA LATERAL e sempre abrir um simbolo/familia — nunca um componente. Sem
+     zerar isto, depois de editar "(TVS) CDSOT23-SM712" o ST.familia continuava valendo,
+     familiaAberta() devolvia a familia velha e clicar em outro simbolo na lista nao
+     trocava nada na faixa de componentes nem na ficha. */
+  ST.familia = null; ST.valSel = null;
   ST.sel = name; ST.draft = s ? clone(s) : null; ST.part = 1;
   ST.undo = []; ST.redo = []; ST.dirty = false; ST.selection = []; ST.draw = null; ST.note = '';
   ST.fitPending = true;
@@ -1487,7 +1494,13 @@ function drawWorld(ctx, cam) {
 function drawGraphics(ctx, graphics, opts) {
   const o = opts || {}, C = HubDraw.SCH;
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  for (const g of (graphics || [])) {
+  /* PREENCHIMENTO VAI PARA TRAS — mesma regra do HubDraw.drawSymbolPart. A ordem do array
+     e a que veio do Altium, e o corpo preenchido costuma ser o ULTIMO grafico: desenhando
+     cru, o retangulo amarelo cobria os diodos que moram dentro dele. A ordem relativa
+     dentro de cada grupo continua a original — dois preenchimentos empilhados continuam
+     empilhando na mesma ordem. */
+  const gs = graphics || [];
+  for (const g of gs.filter(x => x && x.solid).concat(gs.filter(x => !(x && x.solid)))) {
     ctx.beginPath();
     ctx.lineWidth = g.w || 6;
     ctx.strokeStyle = o.stroke || (corValida(g.color) ? g.color : C.body);
