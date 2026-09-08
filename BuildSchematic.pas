@@ -576,10 +576,22 @@ begin
     Result := ePowerWave;
 end;
 
+// NAO ha PortStyleFromName/PortIoFromName: style e io viajam como INTEIRO CRU.
+// A versao com constantes (ePortLeft, ePortNone_Vertical, ...) foi recusada pelo Altium
+// com "Undeclared identifier". O inteiro e o que o .SchDoc grava, entao o que sai no
+// ExportProject volta identico aqui - inclusive estilo que este script nao conheca.
+
+// -1 = nome que nao e um estilo padrao do Altium ("Custom", ou um tamanho que o
+// SheetSizeName do export nao sabe nomear). Quem chama NAO deve escrever SheetStyle nesse
+// caso: os templates da casa usam folha CUSTOM (a "A4" deles e a ISO real, 11693x8268), e
+// carimbar eSheetA4 por cima ENCOLHERIA a folha do usuario dentro do Altium — estrago no
+// arquivo dele, nao so na tela. Na duvida, preservar a folha que ja esta la.
 function SheetStyleFromName(s: String): Integer;
 begin
-  Result := eSheetA4;
-  if s = 'A3' then
+  Result := -1;
+  if s = 'A4' then
+    Result := eSheetA4
+  else if s = 'A3' then
     Result := eSheetA3
   else if s = 'A2' then
     Result := eSheetA2
@@ -1020,7 +1032,7 @@ begin
   Iter := SchDoc.SchIterator_Create;
   if Iter = nil then
     Exit;
-  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, eJunction));
+  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, ePort, eJunction));
   Obj := Iter.FirstSchObject;
   while Obj <> nil do
   begin
@@ -1073,7 +1085,7 @@ begin
     LogFail('limpeza: SchIterator_Create devolveu nil - nada removido');
     Exit;
   end;
-  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, eJunction));
+  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, ePort, eJunction));
   Obj := Iter.FirstSchObject;
   while Obj <> nil do
   begin
@@ -1225,6 +1237,101 @@ begin
   LogOk('netlabel ' + JGet(Line, 'net'));
 end;
 
+// A Port do Altium. Diferencas em relacao ao power/netlabel, medidas no .SchDoc real:
+// o nome mora em .Name (nao .Text) e nao ha Orientation - a direcao vem do Style.
+// Width em 0 nasceria invisivel, entao um w ausente vira 400 mil (o padrao do Altium).
+// Cada propriedade vai em try/except: se esta instalacao recusar alguma, a port ainda
+// nasce com o resto, em vez de derrubar a folha inteira no meio do despejo.
+// "#rrggbb" -> TColor BGR do Delphi (o byte baixo e o VERMELHO). -1 quando a string nao e
+// uma cor: melhor nao escrever nada do que pintar a port de uma cor inventada.
+function CorDeHex(s: String): Integer;
+var
+  r, g, b: Integer;
+begin
+  Result := -1;
+  if Length(s) <> 7 then
+    Exit;
+  if s[1] <> '#' then
+    Exit;
+  try
+    r := StrToInt('$' + Copy(s, 2, 2));
+    g := StrToInt('$' + Copy(s, 4, 2));
+    b := StrToInt('$' + Copy(s, 6, 2));
+  except
+    Exit;
+  end;
+  Result := r + (g shl 8) + (b shl 16);
+end;
+
+procedure PlacePort(SchDoc: ISch_Document; Line: String);
+var
+  PT: TObject;
+  W: Double;
+  Cor: Integer;
+begin
+  PT := SchServer.SchObjectFactory(ePort, eCreate_GlobalCopy);
+  if PT = nil then
+  begin
+    LogFail('port ' + JGet(Line, 'net') + ': factory falhou');
+    Exit;
+  end;
+  PT.Location := Point(MilsToCoord(JNum(Line, 'x')), MilsToCoord(JNum(Line, 'y')));
+  W := JNum(Line, 'w');
+  if W <= 0 then
+    W := 400;
+  try
+    PT.Name := JGet(Line, 'net');
+  except
+    LogFail('port ' + JGet(Line, 'net') + ': propriedade Name recusada pelo Altium');
+  end;
+  try
+    PT.Width := MilsToCoord(W);
+  except
+    LogFail('port ' + JGet(Line, 'net') + ': propriedade Width recusada pelo Altium');
+  end;
+  // style/io so sao escritos se vieram do Altium. -1 (ou ausente) quer dizer "o export
+  // nao conseguiu ler" - nesse caso deixa o Altium usar o padrao dele em vez de gravar
+  // um numero inventado por cima.
+  if JHas(Line, 'style') and (Round(JNum(Line, 'style')) >= 0) then
+  try
+    PT.Style := Round(JNum(Line, 'style'));
+  except
+    LogFail('port ' + JGet(Line, 'net') + ': propriedade Style recusada pelo Altium');
+  end;
+  if JHas(Line, 'io') and (Round(JNum(Line, 'io')) >= 0) then
+  try
+    PT.IOType := Round(JNum(Line, 'io'));
+  except
+    LogFail('port ' + JGet(Line, 'net') + ': propriedade IOType recusada pelo Altium');
+  end;
+  // As cores da ficha da vista Esquema voltam para o Altium. Sem isto o ajuste feito no
+  // hub seria desfeito no proximo despejo, e a "cor editavel" seria so cosmetica no HTML.
+  // Campo ausente = nao mexer: a port fica com a cor que o Altium ja da a ela.
+  Cor := CorDeHex(JGet(Line, 'fill'));
+  if Cor >= 0 then
+  try
+    PT.AreaColor := Cor;
+  except
+    LogFail('port ' + JGet(Line, 'net') + ': propriedade AreaColor recusada pelo Altium');
+  end;
+  Cor := CorDeHex(JGet(Line, 'textColor'));
+  if Cor >= 0 then
+  try
+    PT.TextColor := Cor;
+  except
+    LogFail('port ' + JGet(Line, 'net') + ': propriedade TextColor recusada pelo Altium');
+  end;
+  Cor := CorDeHex(JGet(Line, 'color'));
+  if Cor >= 0 then
+  try
+    PT.Color := Cor;
+  except
+    LogFail('port ' + JGet(Line, 'net') + ': propriedade Color recusada pelo Altium');
+  end;
+  RegisterObj(SchDoc, PT);
+  LogOk('port ' + JGet(Line, 'net'));
+end;
+
 procedure PlacePower(SchDoc: ISch_Document; Line: String);
 var
   PW: TObject;
@@ -1321,6 +1428,7 @@ var
   ProjFolder, SchFile, Line, T, SheetName, TargetPath, SalvouTxt: String;
   Src, Syms, Fps, Refs, SheetNames, SheetSizes, Pts, ItemSheets: TStringList;
   i, si, ErrCount, PartId, Restantes, AntesSave, DepoisSave: Integer;
+  EstiloFolha: Integer;                  // -1 = folha custom: nao escrever SheetStyle
   ServerDoc: IServerDocument;
   SchDoc: ISch_Document;
 begin
@@ -1422,13 +1530,27 @@ begin
       end;
       Pts.Free;
     end
-    else if (T = 'netlabel') or (T = 'power') then
+    else if (T = 'netlabel') or (T = 'power') or (T = 'port') then
     begin
       if JGet(Line, 'net') = '' then
       begin
         Report.Add('[ERRO] ' + T + ' sem net: ' + Line);
         ErrCount := ErrCount + 1;
       end;
+      // JNum de chave ausente devolve 0 calado: sem este teste um rotulo escrito sem
+      // x/y nasceria em (0,0), fora da folha, e ainda apareceria como [OK] no relatorio.
+      if (not JHas(Line, 'x')) or (not JHas(Line, 'y')) then
+      begin
+        Report.Add('[ERRO] ' + T + ' ' + JGet(Line, 'net') + ': faltam x/y: ' + Line);
+        ErrCount := ErrCount + 1;
+      end;
+    end
+    else if (T <> 'junction') and (T <> 'text') then
+    begin
+      // Tipo que o hub escreve e o builder nao conhece. Falhar aqui, no PASSO 1, e o que
+      // impede o despejo de "dar certo" jogando fora o trabalho do usuario em silencio.
+      Report.Add('[ERRO] tipo "' + T + '" desconhecido - este BuildSchematic nao sabe cria-lo');
+      ErrCount := ErrCount + 1;
     end;
   end;
 
@@ -1522,11 +1644,16 @@ begin
       LogFail('folha ' + SheetName + ': documento nao ficou focado');
       continue;
     end;
-    SchDoc.SheetStyle := SheetStyleFromName(SheetSizes[si]);
+    // So mexe no tamanho quando o espelho traz um estilo PADRAO que o Altium conhece.
+    // Folha custom (a do template da casa) nao tem estilo a escrever: deixar como esta e
+    // o certo — ver o comentario de SheetStyleFromName.
+    EstiloFolha := SheetStyleFromName(SheetSizes[si]);
+    if EstiloFolha >= 0 then
+      SchDoc.SheetStyle := EstiloFolha;
 
     SchServer.ProcessControl.PreProcess(SchDoc, '');
     if ConfirmTypedYes('Limpar o conteudo ja despejado nesta folha antes?' + #13#10 +
-      '(fios, rotulos, power ports, junctions e textos - o carimbo/template fica;' + #13#10 +
+      '(fios, rotulos, power ports, ports, junctions e textos - o carimbo/template fica;' + #13#10 +
       'os componentes sao reaproveitados pelo designador, nao sao apagados)' + #13#10 +
       'Responda SIM se voce ja despejou este projeto aqui antes.') then
       ClearDumpedObjects(SchDoc)
@@ -1542,7 +1669,7 @@ begin
     if Restantes > 0 then
     begin
       LogFail('folha ' + SheetName + ': DESPEJO ABORTADO - ainda ha ' +
-        IntToStr(Restantes) + ' objetos na folha (fios/rotulos/power/junctions/textos). ' +
+        IntToStr(Restantes) + ' objetos na folha (fios/rotulos/power/ports/junctions/textos). ' +
         'Despejar agora criaria copias sobrepostas. No Altium: Ctrl+A, Delete, e rode de novo.');
       SchServer.ProcessControl.PostProcess(SchDoc, '');
       continue;
@@ -1565,10 +1692,16 @@ begin
         PlaceNetLabel(SchDoc, Line)
       else if T = 'power' then
         PlacePower(SchDoc, Line)
+      else if T = 'port' then
+        PlacePort(SchDoc, Line)
       else if T = 'junction' then
         PlaceJunction(SchDoc, Line)
       else if T = 'text' then
-        PlaceText(SchDoc, Line);
+        PlaceText(SchDoc, Line)
+      else
+        // Sem este else, um tipo que o hub aprendeu e o builder ainda nao sumia sem
+        // deixar rastro, com o dialogo final anunciando "Falhas: 0". Melhor falhar alto.
+        LogFail('tipo desconhecido "' + T + '" ignorado: ' + Line);
     end;
     // 2b) posiciona cada componente pelo designador/parte do .js
     for i := 0 to Src.Count - 1 do

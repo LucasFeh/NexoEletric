@@ -63,7 +63,13 @@ let model = HubCore.buildSchModel(schematic);
 let nets  = HubCore.extractNets(model, SLIB);
 let val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
 let sheetIdx = 0, selNet = '';
-const showState = { grid:true };
+/* O comentario do componente nasce SUPRIMIDO. Numa folha real ele e a maior fonte de
+   poluicao visual: no DMB sao 44 componentes e "CONECTOR HEADER / 6 VIAS / Macho"
+   aparece dezenas de vezes por cima do desenho. Quem quiser ve-lo liga no olho — e a
+   escolha fica guardada, como no Altium. */
+const VER_COMMENT_KEY = 'altiumhub.sch.comment';
+const showState = { grid:true, comment:false };
+try { showState.comment = localStorage.getItem(VER_COMMENT_KEY) === '1'; } catch (e) {}
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
@@ -136,7 +142,7 @@ function redo(){ if (!redoStack.length) return; const s = redoStack.pop(); undoS
 /* ------- geometria da selecao ------- */
 function sheetItems(){
   const s = model.sheets[sheetIdx];
-  return [].concat(s.comps, s.wires, s.netlabels, s.powers, s.junctions, s.texts);
+  return [].concat(s.comps, s.wires, s.netlabels, s.powers, s.ports, s.junctions, s.texts);
 }
 const onSheet = it => it.sheet === model.sheets[sheetIdx].name;
 function compBBox(c){
@@ -161,6 +167,11 @@ function itemBBox(it){
     }
     case 'netlabel': return { x1:it.x - 20, y1:it.y - 20, x2:it.x + Math.max((it.net || '').length * 40, 120), y2:it.y + 80 };
     case 'power':    return { x1:it.x - 150, y1:it.y - 150, x2:it.x + 150, y2:it.y + 150 };
+    /* A caixa da port vem do PROPRIO desenho (D.portBBox), nao de uma copia da geometria
+       aqui: a barra nasce na ancora e cresce numa direcao so, entao cobrir os dois lados
+       dobrava a area de clique — e no dia em que a direcao passar a sair do `style` a caixa
+       acompanha sozinha, em vez de errar a port em silencio. */
+    case 'port': return D.portBBox(it);
     case 'junction': return { x1:it.x - 35, y1:it.y - 35, x2:it.x + 35, y2:it.y + 35 };
     case 'text': {
       const h = (it.h || 10) * 4;
@@ -266,8 +277,9 @@ function deleteSel(){
    So o que a MAO faz nesta vista: escolher/mover, puxar fio e pousar um terra ou um trilho
    de alimentacao. Rotulo, texto, junção e troca de valor/footprint sao da IA, no
    schematic.js — por isso nao existem botoes para eles. */
-let tool = 'select';        /* 'select' | 'wire' | 'power' */
+let tool = 'select';        /* 'select' | 'wire' | 'power' | 'label' */
 let toolPower = null;       /* { net, style, rot } quando tool === 'power' */
+let toolNet = '';           /* a palavra na mao quando tool === 'label' */
 let wireDraw = null;        /* { pts:[[x,y],...] } enquanto o fio esta sendo puxado */
 let snapHit = null;         /* ponto magnetico sob o cursor: { x, y, kind, label } */
 
@@ -289,6 +301,7 @@ function snapPoint(w){
   }
   for (const j of s.junctions) tenta(j.x, j.y, 'junction', 'junção', 1);
   for (const p of s.powers)    tenta(p.x, p.y, 'power', p.net || 'power', 1);
+  for (const p of s.ports)     tenta(p.x, p.y, 'port', p.net || 'port', 1);
   for (const wi of s.wires) for (const p of (wi.pts || [])) tenta(p[0], p[1], 'wire', 'fio', 2);
   return best;
 }
@@ -327,6 +340,15 @@ function placePower(w){
                          x: hs ? hs.x : snap100(w.x), y: hs ? hs.y : snap100(w.y), rot:p.rot });
   commit();
 }
+/* O rotulo de net: uma palavra pousada na folha. Quem une dois rotulos de mesmo nome e o
+   extractNets (fusao por nome), nao esta funcao — aqui e so pousar. */
+function placeLabel(w){
+  if (!toolNet) return;
+  const hs = snapPoint(w);
+  schematic.items.push({ t:'netlabel', sheet:model.sheets[sheetIdx].name, net:toolNet,
+                         x: hs ? hs.x : snap100(w.x), y: hs ? hs.y : snap100(w.y), rot:0 });
+  commit();
+}
 function setTool(t, pw){
   /* pegar uma ferramenta E dizer que se quer editar: obrigar a achar o lapis antes seria
      um passo a toa, e o gesto ja e deliberado */
@@ -335,8 +357,10 @@ function setTool(t, pw){
     if (annTool) setAnnTool(false);
   }
   tool = t; toolPower = pw || null; wireDraw = null; snapHit = null;
+  if (t !== 'label') toolNet = '';
   $('tbSel').setAttribute('aria-pressed', String(t === 'select'));
   $('tbWire').setAttribute('aria-pressed', String(t === 'wire'));
+  $('tbNet').setAttribute('aria-pressed', String(t === 'label'));
   for (const b of document.querySelectorAll('#schtb .pw'))
     b.setAttribute('aria-pressed', String(t === 'power' && !!pw && b.dataset.net === pw.net));
   cv.style.cursor = t !== 'select' ? 'crosshair' : (annTool ? 'copy' : 'default');
@@ -476,6 +500,7 @@ function leftClick(e){
   if (annTool){ openAnnForm(w); return; }
   if (tool === 'wire'){ wireClick(w); return; }
   if (tool === 'power'){ placePower(w); return; }
+  if (tool === 'label'){ placeLabel(w); return; }
   /* O alvo foi resolvido no mousedown (lastDown) e NAO se refaz o hitTest aqui: entre o
      mousedown e o click a ficha abriu e o canvas mudou de largura, entao o mesmo ponto de
      tela cai em outro ponto do mundo, "erra" o componente que acabou de ser marcado e
@@ -922,6 +947,30 @@ function prKv(box, k, v, cls){
   const g = box.__kv || (box.__kv = (() => { const x = el('div', 'pr-kv'); box.append(x); return x; })());
   g.append(el('span', 'k', k), el('span', 'v' + (cls ? ' ' + cls : ''), v == null || v === '' ? '—' : String(v)));
 }
+/* mesma grade do prKv, mas com um elemento no lugar do texto — para o campo ser editavel
+   sem quebrar o alinhamento da coluna de rotulos */
+function prKvEl(box, k, node){
+  const g = box.__kv || (box.__kv = (() => { const x = el('div', 'pr-kv'); box.append(x); return x; })());
+  const v = el('span', 'v'); v.append(node);
+  g.append(el('span', 'k', k), v);
+}
+const corValida = c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
+/* Cor de um campo do item, no molde do editor de simbolos (hub-symed): o seletor mostra a
+   cor em uso, o × devolve o padrao APAGANDO o campo — cor ausente e o estado normal, e
+   gravar "#ffff00" em toda port so para dizer "o padrao" sujaria o schematic.js. */
+function prCor(box, rotulo, it, chave, padrao){
+  const wrap = el('span', 'pr-cor');
+  const tem = corValida(it[chave]);
+  const c = el('input'); c.type = 'color'; c.value = tem ? it[chave] : padrao;
+  if (!tem) c.classList.add('padrao');
+  c.title = rotulo + (tem ? ': ' + it[chave] : ' — padrão (clique para escolher)');
+  c.onchange = () => { it[chave] = String(c.value).toLowerCase(); commit(); };
+  const x = el('button', 'pr-cor-x', '×'); x.type = 'button'; x.title = 'voltar à cor padrão';
+  x.disabled = !tem;
+  x.onclick = () => { delete it[chave]; commit(); };
+  wrap.append(c, x);
+  prKvEl(box, rotulo, wrap);
+}
 /* os parametros viajam num campo plano "K=V;K=V" (o parser do BuildSchematic le linha a linha) */
 function prParams(s){
   const out = [];
@@ -949,8 +998,8 @@ function renderProps(){
   if (!itens.length){
     const s = prSec(null);
     s.append(el('p', 'pr-empty', 'Clique num componente, fio ou pouso de alimentação para ver a ficha dele. '
-      + 'A ficha é só de leitura: aqui se olha e se posiciona. Valor, footprint e parâmetro são editados '
-      + 'pela IA, no schematic.js.'));
+      + 'Aqui se olha e se posiciona; a única propriedade editável é a cor da port. Valor, footprint '
+      + 'e parâmetro são editados pela IA, no schematic.js.'));
     body.append(s);
     return prPreview(false, null, null);
   }
@@ -959,7 +1008,8 @@ function renderProps(){
     s.append(el('div', 'pr-title', itens.length + ' itens'));
     const cont = {};
     for (const it of itens) cont[it.t] = (cont[it.t] || 0) + 1;
-    const NOME = { comp:'componente', wire:'fio', netlabel:'net label', power:'power port', junction:'junção', text:'texto' };
+    const NOME = { comp:'componente', wire:'fio', netlabel:'net label', power:'power port',
+                   port:'port', junction:'junção', text:'texto' };
     for (const [k, n] of Object.entries(cont)) prKv(s, (NOME[k] || k) + (n > 1 ? 's' : ''), n);
     body.append(s);
     return prPreview(false, null, null);
@@ -967,7 +1017,8 @@ function renderProps(){
 
   const it = itens[0];
   if (it.t !== 'comp'){
-    const NOME = { wire:'fio', netlabel:'net label', power:'power port', junction:'junção', text:'texto' };
+    const NOME = { wire:'fio', netlabel:'net label', power:'power port', port:'port',
+                   junction:'junção', text:'texto' };
     const s = prSec(NOME[it.t] || it.t);
     if (it.t === 'wire'){
       const wi = model.sheets[sheetIdx].wires.indexOf(it);
@@ -978,10 +1029,21 @@ function renderProps(){
       prKv(s, 'Fim', pn[0] + ' , ' + pn[1] + ' mil', 'mono');
     } else {
       s.append(el('div', 'pr-title', it.net || it.s || (NOME[it.t] || it.t)));
-      if (it.style) prKv(s, 'Estilo', it.style);
+      /* `!= null` e nao `if (it.style)`: estilo 0 e um estilo, e e o de TODA port dos
+         espelhos reais — o teste de verdade escondia o campo justamente onde ele existe */
+      if (it.style != null) prKv(s, 'Estilo', it.style);
+      if (it.t === 'port' && it.w != null) prKv(s, 'Largura', Math.round(it.w) + ' mil');
       if (it.t === 'text') prKv(s, 'Altura', (it.h || 10) + ' mil');
       prKv(s, 'Posição', it.x + ' , ' + it.y + ' mil', 'mono');
       if (it.rot != null) prKv(s, 'Rotação', (((it.rot % 360) + 360) % 360) + '°');
+      /* As unicas propriedades EDITAVEIS da ficha. Cor de port e coisa de desenho, nao de
+         eletrica: mudar aqui nao mexe em net nenhuma, e e o mesmo ajuste que se faz no
+         Altium. O resto da ficha continua so de leitura. */
+      if (it.t === 'port'){
+        prCor(s, 'Preenchimento', it, 'fill',      D.SCH.portFill);
+        prCor(s, 'Texto',         it, 'textColor', D.SCH.portText);
+        prCor(s, 'Borda',         it, 'color',     D.SCH.port);
+      }
     }
     prKv(s, 'Folha', it.sheet);
     body.append(s);
@@ -1102,10 +1164,25 @@ async function saveAll(){
 $('btnSave').addEventListener('click', saveAll);
 
 /* ---------- desenho ---------- */
+/* A folha desenhada e a folha MEDIDA no Altium (w/h do espelho); so quando o espelho nao
+   traz medida e que se cai na tabela por nome — e ai a folha custom da casa vira a "A4"
+   legada de 11500x7600, que e menor que o template, e o carimbo e os fios da borda ficam
+   para fora. Espelho antigo continua assim ate ser reexportado: e o unico jeito honesto,
+   porque a medida nao esta no arquivo para ser adivinhada. */
 function sheetBBox(){
-  const s = model.sheets[sheetIdx];
-  const sz = HubCore.SHEET_SIZES[s.size] || HubCore.SHEET_SIZES.A4;
+  const sz = HubCore.sheetSize(model.sheets[sheetIdx]);
   return { x1:0, y1:0, x2:sz[0], y2:sz[1] };
+}
+/* O que o "encaixar na tela" enquadra: a folha MAIS o que por acaso estiver fora dela.
+   Desenhar a folha e enquadrar sao coisas diferentes — a folha desenhada tem que ser a do
+   Altium, mas esconder item nenhum. Em espelho antigo (sem medida, caindo na tabela) e
+   justamente o carimbo e os fios da borda que ficam para fora; some tudo do enquadramento
+   e a impressao e de que o esquema veio pela metade. Com a folha certa, a uniao E a folha. */
+function fitBBox(){
+  const b = sheetBBox(), u = unionBBox(sheetItems());
+  if (!u) return b;
+  return { x1:Math.min(b.x1, u.x1), y1:Math.min(b.y1, u.y1),
+           x2:Math.max(b.x2, u.x2), y2:Math.max(b.y2, u.y2) };
 }
 function drawWorld(ctx, cam){
   const s = model.sheets[sheetIdx];
@@ -1157,7 +1234,7 @@ function drawWorld(ctx, cam){
     ctx.restore();
     const bbref = part ? D.symBBox(part) : { x1:-100, y1:-100, x2:100, y2:100 };
     D.worldText(ctx, c.ref, c.x, c.y + Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) + 70, 60, 0, '#000000', 'center');
-    if (c.comment)
+    if (c.comment && showState.comment)
       D.worldText(ctx, c.comment, c.x, c.y - Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) - 70, 55, 0, '#333366', 'center');
   }
   /* pinos destacados da net selecionada */
@@ -1175,6 +1252,7 @@ function drawWorld(ctx, cam){
      foco vazio um rotulo de net vazia casava com '' e acendia sozinho. */
   for (const l of s.netlabels) D.drawNetLabel(ctx, l, selNet && selNet === l.net ? D.SCH.hl : undefined);
   for (const p of s.powers)    D.drawPowerPort(ctx, p, selNet && selNet === p.net ? D.SCH.hl : undefined);
+  for (const p of s.ports)     D.drawPort(ctx, p, selNet && selNet === p.net ? D.SCH.hl : undefined);
   for (const t of s.texts)     D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, D.SCH.text, 'left');
 
   /* sinalizadores da folha ativa */
@@ -1221,6 +1299,12 @@ function drawFerramenta(ctx, cam){
     const x = snapHit ? snapHit.x : snap100(hoverW.x), y = snapHit ? snapHit.y : snap100(hoverW.y);
     ctx.save(); ctx.globalAlpha = 0.6;
     D.drawPowerPort(ctx, { x, y, net:toolPower.net, style:toolPower.style, rot:toolPower.rot });
+    ctx.restore();
+  }
+  if (tool === 'label' && toolNet && hoverW){
+    const x = snapHit ? snapHit.x : snap100(hoverW.x), y = snapHit ? snapHit.y : snap100(hoverW.y);
+    ctx.save(); ctx.globalAlpha = 0.6;
+    D.drawNetLabel(ctx, { x, y, net:toolNet, rot:0 });
     ctx.restore();
   }
   /* o ima: alvo laranja no ponto de conexao que vai grudar */
@@ -1274,6 +1358,7 @@ const cam = D.mkCamera(cv, drawWorld, {
       snapHit = panning ? null : snapPoint(w);
       $('shover').textContent = snapHit ? '⊙ ' + snapHit.label
         : (tool === 'wire' ? (wireDraw ? 'clique para o próximo ponto · botão direito encerra' : 'clique para começar o fio')
+        :  tool === 'label' ? 'clique para pousar o rótulo ' + toolNet
                            : 'clique para pousar ' + (toolPower ? toolPower.net : ''));
       cam.draw();
       return;
@@ -1302,6 +1387,10 @@ function hitTest(x, y){
       return { kind:'netlabel', item:l };
   for (const p of s.powers)
     if (Math.hypot(x - p.x, y - p.y) <= Math.max(tol, 140)) return { kind:'power', item:p };
+  for (const p of s.ports){
+    const b = itemBBox(p);
+    if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return { kind:'port', item:p };
+  }
   for (const t of s.texts)
     if (x >= t.x - 20 && x <= t.x + Math.max((t.s || '').length * (t.h || 10) * 4, 120) &&
         y >= t.y - (t.h || 10) * 4 && y <= t.y + (t.h || 10) * 4)
@@ -1379,6 +1468,36 @@ $('annok').addEventListener('click', () => {
   hideAnnForm(); annChanged();
 });
 $('anncancel').addEventListener('click', hideAnnForm);
+
+/* ------- rotulo de net: pedir a palavra, depois armar a ferramenta -------
+   A ferramenta so e armada DEPOIS que a palavra existe: um netlabel com net vazio e erro
+   de validacao (hub-core.js) e travaria o Salvar do arquivo inteiro. */
+function hideNetForm(){ $('netform').style.display = 'none'; }
+function openNetForm(){
+  $('nettext').value = toolNet || '';
+  $('netform').style.display = 'block';
+  $('nettext').focus(); $('nettext').select();
+}
+function confirmaNetForm(){
+  /* aspas viram apostrofo: a sequencia aspas-dois-pontos quebra o parser de linha do .pas */
+  const nome = $('nettext').value.trim().replace(/"/g, "'");
+  if (!nome){ HubDialog.toast('dê um nome à net', 'warn'); $('nettext').focus(); return; }
+  hideNetForm();
+  toolNet = nome;          /* antes do setTool: ele so zera a palavra ao SAIR de 'label' */
+  setTool('label');
+}
+$('netok').addEventListener('click', confirmaNetForm);
+$('netcancel').addEventListener('click', () => { hideNetForm(); setTool('select'); });
+/* Enter confirma e Escape fecha AQUI: o keydown global trata Escape antes de deixar
+   passar por INPUT, entao sem o stopPropagation o Esc do campo mexia na ferramenta */
+$('nettext').addEventListener('keydown', e => {
+  if (e.key === 'Enter'){ e.preventDefault(); confirmaNetForm(); }
+  else if (e.key === 'Escape'){ e.stopPropagation(); hideNetForm(); setTool('select'); }
+});
+$('tbNet').addEventListener('click', () => {
+  if (tool === 'label'){ setTool('select'); hideNetForm(); return; }
+  openNetForm();
+});
 $('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
 
 /* ------- teclado ------- */
@@ -1414,6 +1533,7 @@ window.addEventListener('keydown', e => {
   if (k === 'w'){ setTool(tool === 'wire' ? 'select' : 'wire'); return; }
   if (k === 'g'){ setTool(tool === 'power' && toolPower && toolPower.net === 'GND' ? 'select' : 'power',
                           { net:'GND', style:'GndPower', rot:270 }); return; }
+  if (k === 'l'){ if (tool === 'label'){ setTool('select'); hideNetForm(); } else openNetForm(); return; }
   if (!editOn) return;
   if (e.key === 'Delete'){ deleteSel(); return; }
   if (e.key === ' ' && sel.size){ e.preventDefault(); rotateSel(); return; }
@@ -1496,7 +1616,7 @@ function buildSheetSel(){
     s.appendChild(o);
   });
   /* a net acesa e da folha antiga: levar o laranja junto pintaria fios de outra folha */
-  s.addEventListener('change', () => { sheetIdx = +s.value; limpaSel(); cam.fit(sheetBBox()); });
+  s.addEventListener('change', () => { sheetIdx = +s.value; limpaSel(); cam.fit(fitBBox()); });
 }
 /* sub-abas do painel: a ultima aberta fica lembrada nesta maquina */
 function showPane(id){
@@ -1557,7 +1677,25 @@ painelProps = mkPainel({ chave:'schframe.propsW', varCss:'--props-w', el:'props'
   aoMudar: w => { if (!w && propsPin){ propsPin = false; salvaPin(); } mostraProps(); } });
 mostraProps();
 
-$('btnFit').addEventListener('click', () => cam.fit(sheetBBox()));
+$('btnFit').addEventListener('click', () => cam.fit(fitBBox()));
+/* o mesmo olho da Biblioteca: aberto = aparece, riscado = suprimido */
+const OLHO    = 'M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z';
+const OLHO_X  = 'M2.5 13.5 L13.5 2.5';
+function pintaOlhoComment(){
+  const b = $('btnComment'), on = showState.comment;
+  b.classList.toggle('active', on);
+  b.setAttribute('aria-pressed', String(on));
+  b.title = on ? 'Comment visível — clique para suprimir'
+               : 'Comment suprimido — clique para mostrar';
+  b.innerHTML = '<svg viewBox="0 0 16 16"><path d="' + OLHO + '"/><circle cx="8" cy="8" r="2.2"/>'
+              + (on ? '' : '<path d="' + OLHO_X + '"/>') + '</svg>';
+}
+$('btnComment').addEventListener('click', () => {
+  showState.comment = !showState.comment;
+  try { localStorage.setItem(VER_COMMENT_KEY, showState.comment ? '1' : '0'); } catch (e) {}
+  pintaOlhoComment(); cam.draw();
+});
+pintaOlhoComment();
 $('btnGrid').addEventListener('click', () => {
   showState.grid = !showState.grid; $('btnGrid').classList.toggle('active', showState.grid); cam.draw();
 });
@@ -1565,7 +1703,7 @@ $('btnEdit').addEventListener('click', () => setEdit(!editOn));
 
 buildSheetSel(); buildCompTable(); buildNetList(); buildValList(); buildAnnPanel();
 updateMeta(); updateSaveBtn(); updateSelStatus(); cartRender(); renderProps();
-cam.resize(); cam.fit(sheetBBox());
+cam.resize(); cam.fit(fitBBox());
 setEdit(false);   /* abre travado; tambem ja desabilita o que edita */
 
 })();

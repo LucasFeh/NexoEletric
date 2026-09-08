@@ -23,6 +23,11 @@ var
   TplPath: String;         // .SchDot ja lido (cache entre folhas do mesmo projeto)
   TplTexts: TStringList;   // textos dos rotulos desse .SchDot
   StampDropped: Integer;   // rotulos de carimbo que ficaram fora do espelho
+  // Contagem por tipo de item. Existe porque a omissao do ePort passou despercebida por
+  // meses: sem numero na tela, "nao exportou" e "nao tinha" sao indistinguiveis.
+  NComp, NWire, NLabel, NPower, NPort, NJunc, NText: Integer;
+  SheetsMeasured: Integer;  // folhas cuja medida real o Altium entregou
+  PortWarn: String;        // primeira propriedade de Port que o Altium recusou (se houver)
   StampByObj: Integer;     // folhas em que a sonda do objeto eTemplate trouxe material
   StampByTpl: Integer;     // folhas em que a sonda do .SchDot trouxe material
   StampBlind: Integer;     // folhas em que nenhuma das duas respondeu
@@ -83,6 +88,18 @@ end;
 function ML(v: Integer): String;
 begin
   Result := JF(CoordToMils(v));
+end;
+
+// TColor do Delphi e BGR, nao RGB: o byte BAIXO e o VERMELHO. Trocar a ordem faz a port
+// amarela do Altium chegar azul no hub, e ninguem percebe ate abrir a tela.
+// Sai em MAIUSCULA porque e o que o IntToHex ja da: o hub aceita as duas caixas
+// (hub-draw.corDePort), e nao vale acrescentar dependencia de RTL a um script que so
+// compila dentro do Altium para ganhar cosmetica.
+function HexDeCor(c: Integer): String;
+begin
+  Result := '#' + IntToHex(c and $FF, 2) +
+                  IntToHex((c shr 8) and $FF, 2) +
+                  IntToHex((c shr 16) and $FF, 2);
 end;
 
 function RotDegOf(o: TRotationBy90): Integer;
@@ -376,6 +393,58 @@ end;
 
 { ------------------------------- mapeamentos Sch ------------------------------- }
 
+// Medida da folha em mil.
+//
+// POR QUE ISTO EXISTE: o "A4" do Altium (estilo nomeado) mede 11500x7600 mil, mas os
+// templates da casa sao folha CUSTOM do tamanho ISO de verdade (297x210 mm =
+// 11693x8268). Mandando so o NOME do estilo, o hub desenhava 11500x7600 e o conteudo
+// ia ate 11690x8270 - por isso apareciam componentes fora da pagina. Pior no
+// PRJ-UR-DI261924, cuja folha e uma A3 custom (conteudo ate 16137x11011) exportada
+// como "A4".
+//
+// Entao mandamos o numero, nao o nome. UseCustomSheet/CustomX/CustomY sao PROPRIEDADES
+// (erro em tempo de execucao, nao de compilacao): cada uma em try/except, e se nada
+// responder saem zeros e o hub cai na tabela por nome, como antes.
+procedure SheetSizeMils(SchDoc: ISch_Document; var W: Double; var H: Double);
+var
+  Custom: Boolean;
+begin
+  W := 0;
+  H := 0;
+  Custom := False;
+  try
+    Custom := SchDoc.UseCustomSheet;
+  except
+    Custom := False;
+  end;
+  if Custom then
+  begin
+    try
+      W := CoordToMils(SchDoc.CustomX);
+      H := CoordToMils(SchDoc.CustomY);
+    except
+      W := 0;
+      H := 0;
+    end;
+  end
+  else
+  begin
+    // folha de estilo nomeado: o proprio Altium sabe dizer o retangulo dela
+    try
+      W := CoordToMils(SchDoc.SheetSizeX);
+      H := CoordToMils(SchDoc.SheetSizeY);
+    except
+      W := 0;
+      H := 0;
+    end;
+  end;
+  if (W < 0) or (H < 0) then
+  begin
+    W := 0;
+    H := 0;
+  end;
+end;
+
 function SheetSizeName(style: Integer): String;
 begin
   if style = eSheetA3 then
@@ -411,6 +480,18 @@ begin
   else
     Result := 'Bar';
 end;
+
+// NAO existe PortStyleName/PortIOName aqui, de proposito.
+//
+// A primeira versao usava constantes (ePortLeft, ePortNone_Vertical, ...) e o Altium
+// recusou: "Undeclared identifier: ePortNone_Vertical". Nao ha, neste repositorio nem
+// nesta maquina, fonte confiavel para os nomes dessas constantes - e cada chute custa
+// uma rodada do usuario dentro do Altium.
+//
+// O inteiro cru nao tem esse problema: e exatamente o que o .SchDoc grava (|Style=4|,
+// |IOType=3|), atravessa o espelho sem perda e volta igual pelo BuildSchematic, mesmo
+// para um estilo que este script nao conheca. O significado de cada numero mora no
+// AI-GUIDE e e preenchido conferindo um projeto real - nao chutando.
 
 // footprint atual (modelo PCBLIB IsCurrent; senao o primeiro PCBLIB; senao '')
 function CurrentFootprintOf(Comp: TObject): String;
@@ -637,6 +718,11 @@ var
   SchDoc: ISch_Document;
   Iterator, Prim: TObject;
   SheetName, s, pts: String;
+  PortNome: String;
+  PortCor: String;                       // ',"fill":...' montado so com o que o Altium deu
+  PortSty, PortIo: Integer;
+  PortFill, PortTxt, PortBrd: Integer;   // TColor BGR; -1 = a propriedade nao foi lida
+  PortW, ShW, ShH: Double;
   k: Integer;
 begin
   SchDoc := SchServer.GetSchDocumentByPath(Path);
@@ -650,16 +736,24 @@ begin
   SheetName := BaseName(Path);
   PrepareStampFilter(SchDoc);
 
-  AddItem(ItemsL, '{"t":"sheet","name":' + JS(SheetName) + ',"size":' + JS(SheetSizeName(SchDoc.SheetStyle)) + '}');
+  // w/h = medida medida no Altium; 0 quer dizer "nao consegui ler" e o hub cai na
+  // tabela por nome. O size continua saindo: serve de rotulo e de compatibilidade.
+  SheetSizeMils(SchDoc, ShW, ShH);
+  if (ShW > 0) and (ShH > 0) then
+    SheetsMeasured := SheetsMeasured + 1;
+  AddItem(ItemsL, '{"t":"sheet","name":' + JS(SheetName) +
+    ',"size":' + JS(SheetSizeName(SchDoc.SheetStyle)) +
+    ',"w":' + JF(ShW) + ',"h":' + JF(ShH) + '}');
 
   Iterator := SchDoc.SchIterator_Create;
-  Iterator.AddFilter_ObjectSet(MkSet(eSchComponent, eWire, eNetLabel, ePowerObject, eJunction, eLabel));
+  Iterator.AddFilter_ObjectSet(MkSet(eSchComponent, eWire, eNetLabel, ePowerObject, ePort, eJunction, eLabel));
   Prim := Iterator.FirstSchObject;
   while Prim <> nil do
   begin
     case Prim.ObjectId of
       eSchComponent:
         begin
+          NComp := NComp + 1;
           s := '{"t":"comp","sheet":' + JS(SheetName) +
             ',"ref":' + JS(Prim.Designator.Text) +
             ',"sym":' + JS(Prim.LibReference) +
@@ -674,6 +768,7 @@ begin
         end;
       eWire:
         begin
+          NWire := NWire + 1;
           pts := '';
           for k := 1 to Prim.VerticesCount do
           begin
@@ -684,28 +779,108 @@ begin
           AddItem(ItemsL, '{"t":"wire","sheet":' + JS(SheetName) + ',"pts":[' + pts + ']}');
         end;
       eNetLabel:
-        AddItem(ItemsL, '{"t":"netlabel","sheet":' + JS(SheetName) +
-          ',"net":' + JS(Prim.Text) +
-          ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) +
-          ',"rot":' + IntToStr(RotDegOf(Prim.Orientation)) + '}');
+        begin
+          NLabel := NLabel + 1;
+          AddItem(ItemsL, '{"t":"netlabel","sheet":' + JS(SheetName) +
+            ',"net":' + JS(Prim.Text) +
+            ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) +
+            ',"rot":' + IntToStr(RotDegOf(Prim.Orientation)) + '}');
+        end;
       ePowerObject:
-        AddItem(ItemsL, '{"t":"power","sheet":' + JS(SheetName) +
-          ',"net":' + JS(Prim.Text) +
-          ',"style":' + JS(PowerStyleName(Prim.Style)) +
-          ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) +
-          ',"rot":' + IntToStr(RotDegOf(Prim.Orientation)) + '}');
+        begin
+          NPower := NPower + 1;
+          AddItem(ItemsL, '{"t":"power","sheet":' + JS(SheetName) +
+            ',"net":' + JS(Prim.Text) +
+            ',"style":' + JS(PowerStyleName(Prim.Style)) +
+            ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) +
+            ',"rot":' + IntToStr(RotDegOf(Prim.Orientation)) + '}');
+        end;
+      // A Port e o conector de folha do Altium: uma palavra numa barra com bico. Ela nao
+      // usa .Text como o rotulo e o power - o nome mora em .Name - e nao tem Orientation:
+      // a direcao vem do Style. As tres propriedades novas (Name/Style/IOType/Width) vao
+      // dentro de try/except uma a uma: se esta instalacao do Altium nao publicar alguma,
+      // a folha inteira NAO pode parar de exportar por causa disso.
+      ePort:
+        begin
+          NPort := NPort + 1;
+          PortNome := '';
+          PortSty := -1;
+          PortIo := -1;
+          PortW := 400;
+          try
+            PortNome := Prim.Name;
+          except
+            if PortWarn = '' then PortWarn := 'Name';
+          end;
+          try
+            PortSty := Prim.Style;
+          except
+            if PortWarn = '' then PortWarn := 'Style';
+          end;
+          try
+            PortIo := Prim.IOType;
+          except
+            if PortWarn = '' then PortWarn := 'IOType';
+          end;
+          try
+            PortW := CoordToMils(Prim.Width);
+          except
+            if PortWarn = '' then PortWarn := 'Width';
+          end;
+          // Cores: sao a APARENCIA que o usuario escolheu no Altium (a port da casa e
+          // amarela com letra preta). Cada uma na sua sonda - se esta instalacao nao
+          // publicar TextColor, ainda assim o preenchimento vai. Campo omitido = o hub
+          // desenha com o padrao dele, que e melhor que gravar cor inventada.
+          PortFill := -1;
+          PortTxt := -1;
+          PortBrd := -1;
+          try
+            PortFill := Prim.AreaColor;
+          except
+            if PortWarn = '' then PortWarn := 'AreaColor';
+          end;
+          try
+            PortTxt := Prim.TextColor;
+          except
+            if PortWarn = '' then PortWarn := 'TextColor';
+          end;
+          try
+            PortBrd := Prim.Color;
+          except
+            if PortWarn = '' then PortWarn := 'Color';
+          end;
+          PortCor := '';
+          if PortFill >= 0 then
+            PortCor := PortCor + ',"fill":' + JS(HexDeCor(PortFill));
+          if PortTxt >= 0 then
+            PortCor := PortCor + ',"textColor":' + JS(HexDeCor(PortTxt));
+          if PortBrd >= 0 then
+            PortCor := PortCor + ',"color":' + JS(HexDeCor(PortBrd));
+          AddItem(ItemsL, '{"t":"port","sheet":' + JS(SheetName) +
+            ',"net":' + JS(PortNome) +
+            ',"io":' + IntToStr(PortIo) +
+            ',"style":' + IntToStr(PortSty) +
+            ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) +
+            ',"w":' + JF(PortW) + PortCor + '}');
+        end;
       eJunction:
-        AddItem(ItemsL, '{"t":"junction","sheet":' + JS(SheetName) +
-          ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) + '}');
+        begin
+          NJunc := NJunc + 1;
+          AddItem(ItemsL, '{"t":"junction","sheet":' + JS(SheetName) +
+            ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) + '}');
+        end;
       eLabel:
         begin
           if IsStampLabel(Prim) then
             StampDropped := StampDropped + 1
           else
+          begin
+            NText := NText + 1;
             AddItem(ItemsL, '{"t":"text","sheet":' + JS(SheetName) +
               ',"s":' + JS(Prim.Text) +
               ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) +
               ',"h":10}');
+          end;
         end;
     end;
     Prim := Iterator.NextSchObject;
@@ -721,7 +896,7 @@ var
   Prj: IProject;
   Doc: IDocument;
   i, SheetCount: Integer;
-  ProjName, OutDir, CarimboTxt: String;
+  ProjName, OutDir, CarimboTxt, ItensTxt: String;
   ItemsL, OutL: TStringList;
 begin
   if SchServer = nil then
@@ -749,6 +924,9 @@ begin
   SkippedDocs := 0;
   SheetCount := 0;
   StampDropped := 0;
+  NComp := 0; NWire := 0; NLabel := 0; NPower := 0; NPort := 0; NJunc := 0; NText := 0;
+  SheetsMeasured := 0;
+  PortWarn := '';
   StampByObj := 0;
   StampByTpl := 0;
   StampBlind := 0;
@@ -803,9 +981,23 @@ begin
       '   ATENCAO: em ' + IntToStr(StampBlind) + ' folha(s) nenhuma sonda respondeu -' +
       #13#10 + '   o carimbo dessas saiu junto no schematic.js.';
 
+  ItensTxt := 'Itens: ' + IntToStr(NComp) + ' comp, ' + IntToStr(NWire) + ' fio, ' +
+    IntToStr(NLabel) + ' rotulo, ' + IntToStr(NPower) + ' power, ' +
+    IntToStr(NPort) + ' port, ' + IntToStr(NJunc) + ' juncao, ' + IntToStr(NText) + ' texto';
+  if SheetsMeasured < SheetCount then
+    ItensTxt := ItensTxt + #13#10 +
+      '   ATENCAO: em ' + IntToStr(SheetCount - SheetsMeasured) + ' folha(s) o Altium nao' +
+      #13#10 + '   informou a medida; o hub vai desenhar pelo nome do estilo e pode' +
+      #13#10 + '   mostrar componente fora da pagina.';
+  if PortWarn <> '' then
+    ItensTxt := ItensTxt + #13#10 +
+      '   ATENCAO: esta instalacao do Altium recusou a propriedade "' + PortWarn +
+      '" da Port;' + #13#10 + '   as ports sairam com o valor padrao nesse campo.';
+
   ShowMessage('Esquema espelhado em:' + #13#10 + OutDir + '\schematic.js' + #13#10#13#10 +
     'Folhas: ' + IntToStr(SheetCount) +
     '   (nao abertas/puladas: ' + IntToStr(SkippedDocs) + ')' + #13#10 +
+    ItensTxt + #13#10 +
     CarimboTxt + #13#10#13#10 +
     'PCB: rode o ExportBoard com o .PcbDoc focado.' + #13#10 +
     'Confira no hub.html (vista Esquema).');

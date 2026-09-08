@@ -6,6 +6,10 @@ var HubDraw = (function () {
 const OD = { 0:[1,0], 90:[0,1], 180:[-1,0], 270:[0,-1] };
 const SCH = { body:'#00008b', fill:'#fff8c8', pin:'#00008b', pinnum:'#600000',
               wire:'#0000c8', junction:'#0000c8', label:'#000000', power:'#000000',
+              /* Port: barra AMARELA com a letra PRETA, como no Altium. Estes tres sao so o
+                 PADRAO — a port que trouxer color/fill/textColor (do proprio Altium, ou
+                 escolhidos na ficha da vista Esquema) manda neles. */
+              port:'#0000c8', portFill:'#ffff00', portText:'#000000',
               text:'#000080', sheet:'#fffef2', border:'#8a8a6a', grid:'#e6e4cf', hl:'#ff8c00' };
 const PCB = { Top:'#ff0000', Bottom:'#0a0aff', TopOverlay:'#ffff00', BottomOverlay:'#b4b400',
               Multi:'#c0c0c0', hole:'#000000', bg:'#1b1b1b' };
@@ -127,6 +131,87 @@ function drawPowerPort(ctx, p, color){
   const isGnd = st.indexOf('Gnd') === 0;
   worldText(ctx, p.net || '', p.x + d[0]*(isGnd?230:190), p.y + d[1]*(isGnd?230:190), 55, 0, c, 'center');
 }
+/* A Port do Altium: uma barra deitada com o nome dentro. O ponto ELETRICO e a ancora
+   (x,y) — e onde o fio encosta e onde a extracao de nets liga. `w` e o comprimento em
+   mil; sem ele, 400 (o padrao do Altium).
+
+   ESTILO: `p.style` e o INTEIRO CRU do Altium (o mesmo |Style=n| do .SchDoc). O
+   significado de cada numero AINDA NAO FOI CONFERIDO contra um Altium de verdade — a
+   tentativa de usar as constantes nomeadas (ePortLeft, ePortNone_Vertical...) foi
+   recusada com "Undeclared identifier". Enquanto nao houver medicao, TODA port e
+   desenhada com bico dos dois lados, que e a cara generica de uma port: preferimos uma
+   forma honestamente aproximada a uma forma errada com ar de certa.
+
+   Para calibrar: rode o ExportProject num projeto com ports, veja que numeros saem em
+   "style", compare com a forma na tela do Altium e preencha ESTILO_POR_NUM abaixo. */
+const ESTILO_POR_NUM = {
+  /* num: [bicoEsquerdo, bicoDireito, vertical] — vazio de proposito enquanto nao medido */
+};
+
+/* Medidas da barra, num lugar so. Encolhidas a pedido: a port ocupava 120 mil de altura
+   e competia com o componente ao lado. */
+const PORT_H    = 45;      /* meia-altura da barra (era 60) */
+const PORT_BICO = 24;      /* o quanto o chanfro avanca     */
+const PORT_TXT  = 45;      /* corpo da letra do nome        */
+
+/* Cor so vale se for "#rrggbb": espelho antigo nao tem o campo, e um valor estranho
+   (inteiro cru do Altium, 'rgb(...)') tem que cair no padrao em vez de sujar o canvas. */
+const corDePort = c => (typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c)) ? c : null;
+
+/* A GEOMETRIA DA PORT MORA AQUI, e so aqui: o desenho e a caixa de clique da vista Esquema
+   leem desta funcao. Se cada um calculasse a sua, no dia em que ESTILO_POR_NUM for
+   preenchido o desenho giraria e a caixa nao — o clique passaria a errar a port sem que
+   ninguem tivesse mexido no clique. */
+function portGeom(p){
+  const conhecido = ESTILO_POR_NUM[p.style];
+  const vertical  = conhecido ? conhecido[2] : false;
+  const ang = ((((vertical ? 90 : 0) + (p.rot || 0)) % 360) + 360) % 360;
+  return { w: (typeof p.w === 'number' && p.w > 0) ? p.w : 400,
+           h: PORT_H, bico: PORT_BICO,
+           pontaEsq: conhecido ? conhecido[0] : true,
+           pontaDir: conhecido ? conhecido[1] : true,
+           ang, dir: OD[ang] || [1, 0] };
+}
+
+/* Caixa da port em mil: EXATAMENTE o retangulo desenhado, nem um mil a mais. A barra nasce
+   na ancora (x,y) e cresce na direcao da port — nao para os dois lados. */
+function portBBox(p){
+  const g  = portGeom(p);
+  const xf = p.x + g.dir[0] * g.w, yf = p.y + g.dir[1] * g.w;
+  const ex = g.dir[0] ? 0 : g.h, ey = g.dir[0] ? g.h : 0;   /* engorda so no eixo transversal */
+  return { x1: Math.min(p.x, xf) - ex, y1: Math.min(p.y, yf) - ey,
+           x2: Math.max(p.x, xf) + ex, y2: Math.max(p.y, yf) + ey };
+}
+
+function drawPort(ctx, p, color){
+  const g = portGeom(p);
+  const dentro = corDePort(p.fill)      || SCH.portFill;
+  const letra  = corDePort(p.textColor) || SCH.portText;
+  /* O destaque de net (`color`) manda SO no contorno: pintar a letra de laranja por cima
+     do amarelo apagaria justamente o nome que se quer ler. Contorno mais grosso e o que
+     marca a port em foco. */
+  const borda  = color || corDePort(p.color) || SCH.port;
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.rotate((g.ang * Math.PI) / 180);
+  ctx.beginPath();
+  ctx.moveTo(g.pontaEsq ? g.bico : 0, g.h);
+  ctx.lineTo(g.pontaDir ? g.w - g.bico : g.w, g.h);
+  if (g.pontaDir) ctx.lineTo(g.w, 0);
+  ctx.lineTo(g.pontaDir ? g.w - g.bico : g.w, -g.h);
+  ctx.lineTo(g.pontaEsq ? g.bico : 0, -g.h);
+  if (g.pontaEsq) ctx.lineTo(0, 0);
+  ctx.closePath();
+  ctx.fillStyle = dentro; ctx.fill();
+  ctx.strokeStyle = borda; ctx.lineWidth = color ? 7 : 4; ctx.lineJoin = 'miter';
+  ctx.stroke();
+  ctx.restore();
+  /* o nome sai na horizontal mesmo em port vertical: rotulo de fio no Altium nunca fica
+     de cabeca para baixo, e aqui o objetivo e ler */
+  worldText(ctx, p.net || '', p.x + g.dir[0] * (g.w / 2), p.y + g.dir[1] * (g.w / 2),
+            PORT_TXT, 0, letra, 'center');
+}
+
 function drawNetLabel(ctx, l, color){
   worldText(ctx, l.net || '', l.x, l.y + 18, 55, l.rot || 0, color || SCH.label,
     (((l.rot||0)%360)+360)%360 === 0 ? 'left' : 'center');
@@ -213,6 +298,6 @@ function mkCamera(canvas, drawWorld, opts){
 }
 
 return { SCH, PCB, OD, worldText, roundRect, drawSymbolPart, symBBox, drawFootprint,
-         drawPowerPort, drawNetLabel, drawJunction, mkCamera };
+         drawPowerPort, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, mkCamera };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDraw;

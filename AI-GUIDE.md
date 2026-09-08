@@ -74,6 +74,7 @@ var schematic = {
 {"t":"wire","sheet":"main","pts":[[1400,3100],[1800,3100],[1800,3400],[2200,3400]]},
 {"t":"netlabel","sheet":"main","net":"VCC","x":1800,"y":3400,"rot":0},
 {"t":"power","sheet":"main","net":"GND","style":"GndPower","x":1600,"y":3000,"rot":270},
+{"t":"port","sheet":"main","net":"SDA","io":3,"style":0,"x":2600,"y":3400,"w":400},
 {"t":"junction","sheet":"main","x":1800,"y":3100},
 {"t":"text","sheet":"main","s":"Fonte 5V","x":3800,"y":4000,"h":10}
 ]};
@@ -86,11 +87,12 @@ Um item JSON **plano** por linha (o parser DelphiScript lê linha a linha, como 
 
 | `t` | obrigatórios | opcionais |
 |---|---|---|
-| `sheet` | `name`, `size` (A4/A3/A2/A1/A/B/C) | — |
+| `sheet` | `name`, `size` (A4/A3/A2/A1/A0/A/B/C/D/E, ou `Custom`) | `w`,`h` — **medida real da folha, em mil**, como o Altium a reporta. Sem elas vale a tabela por nome, que traz o tamanho *legado* do Altium e **não** o ISO real: a “A4” do template da casa mede 11693×8268, não 11500×7600, e a diferença joga carimbo e fios de borda para fora da página desenhada |
 | `comp` | `sheet`,`ref`,`sym`,`x`,`y`,`rot`,`footprint` | `part` (default 1), `mirror`, `comment` |
 | `wire` | `sheet`,`pts` (`[[x,y],...]` ≥2, numa linha só) | — |
 | `netlabel` | `sheet`,`net`,`x`,`y` | `rot` |
 | `power` | `sheet`,`net`,`style`,`x`,`y` | `rot` (`Bar`/`Circle`/`Arrow`/`Wave`/`GndPower`/`GndSignal`/`GndEarth`) |
+| `port` | `sheet`,`net`,`x`,`y` | `style` e `io` (**inteiros crus do Altium**, `-1` = não foi possível ler), `w` (comprimento em mil, default 400), `rot`, `fill`/`textColor`/`color` (preenchimento, letra e borda em `#rrggbb`; ausentes = o padrão amarelo com letra preta do `hub-draw`) |
 | `junction` | `sheet`,`x`,`y` | — |
 | `text` | `sheet`,`s`,`x`,`y` | `h` (só informativo — veja Limitações no README) |
 
@@ -103,8 +105,24 @@ Um item JSON **plano** por linha (o parser DelphiScript lê linha a linha, como 
 - **Cruzamento** de dois fios sem `junction` explícita **não conecta**; ponha uma
   `junction` no ponto se quiser uni-los.
 - `netlabel` nomeia a rede do fio bem debaixo da sua âncora (`x,y`).
+- **Nome igual conecta.** Dois `netlabel` com o mesmo `net` são a mesma rede, mesmo sem
+  fio nenhum entre eles — é o jeito normal de ligar dois cantos distantes da folha sem
+  puxar fio, e é o que o Altium faz. Vale igual para `power` e `port`, e os três se
+  misturam: uma `port` `SDA` e um `netlabel` `SDA` são a mesma rede.
 - `power` (power port) com o mesmo `net` funde-se numa única rede em **todo o
   projeto**, mesmo em folhas diferentes (é assim que o Altium trata GND/VCC).
+- `port` é o conector de folha do Altium: uma barra com bico levando um nome. Para a
+  extração de nets ele é um nomeador como os outros. A âncora (`x,y`) é o ponto elétrico:
+  é ali que o fio precisa encostar.
+  `style` (forma) e `io` (direção, só para o ERC do Altium) viajam como **o inteiro que o
+  Altium usa**, não como nome: a tentativa de usar as constantes nomeadas
+  (`ePortLeft`, `ePortNone_Vertical`…) foi recusada pelo compilador do Altium com
+  *Undeclared identifier*. O inteiro atravessa o espelho sem perda e volta idêntico no
+  `BuildSchematic`, inclusive para estilos que os scripts não conhecem. **O significado
+  de cada número ainda não foi medido** — enquanto isso o hub desenha toda port com bico
+  dos dois lados (`hub-draw.js » ESTILO_POR_NUM`, tabela vazia à espera da medição).
+- Um nomeador (`netlabel`, `power` ou `port`) que não encosta em fio nem em pino vira
+  aviso ("solto"/"solta") — ele nomeia, mas não está ligado a nada.
 - `footprint` é **OBRIGATÓRIO** em todo `comp` — o `BuildSchematic` rejeita (erro em
   `build-report.txt`, nada é criado) um componente sem footprint. Se o símbolo já tem
   modelo associado e presente na lib (`schlib.js » symbols[].footprints[].current` /

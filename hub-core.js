@@ -21,9 +21,22 @@ function distSeg(px, py, x1, y1, x2, y2){
   return Math.hypot(x1 + t*dx - px, y1 + t*dy - py);
 }
 
-/* tamanhos de folha do Altium em mil [largura, altura] */
+/* Tamanhos NOMEADOS de folha do Altium em mil [largura, altura] — o legado, nao o ISO real.
+   Isto e FALLBACK, nao a verdade: os templates da casa usam folha CUSTOM (a "A4" deles e a
+   ISO de verdade, 297x210 mm = 11693x8268 mil), e uma folha custom nao tem nome nenhum a
+   consultar aqui. Quem sabe a medida e o Altium — o ExportProject emite w/h junto do size, e
+   sheetSize() abaixo prefere esses numeros. A tabela so responde por espelho antigo. */
 const SHEET_SIZES = { A4:[11500,7600], A3:[15500,11000], A2:[22000,15500], A1:[31000,22000],
-                      A:[9500,7500], B:[15000,9500], C:[20000,15000] };
+                      A0:[44000,31000],
+                      A:[9500,7500], B:[15000,9500], C:[20000,15000], D:[32000,20000],
+                      E:[42000,32000] };
+
+/* Medida da folha, com a precedencia num lugar so: w/h medidos no Altium > tabela por nome
+   > A4. Sem isto cada vista repetiria a regra e uma delas ficaria para tras. */
+function sheetSize(s){
+  if (s && isNum(s.w) && s.w > 0 && isNum(s.h) && s.h > 0) return [s.w, s.h];
+  return SHEET_SIZES[s && s.size] || SHEET_SIZES.A4;
+}
 const ORIENT_DIR = { 0:[1,0], 90:[0,1], 180:[-1,0], 270:[0,-1] };
 
 /* ============ PCB: board + changes -> modelo efetivo (port do viewer v1) ============ */
@@ -421,19 +434,25 @@ function buildSchModel(schematic){
   for (const it of ((schematic && schematic.items) || [])) {
     if (it.t === 'sheet') {
       if (byName[it.name]) continue;
-      const s = { name: it.name, size: it.size || 'A4', comps:[], wires:[], netlabels:[], powers:[], junctions:[], texts:[] };
+      /* w/h = medida REAL da folha no Altium, quando o export a trouxe; 0 = "nao sei", e ai
+         sheetSize() cai na tabela por nome. Nao inventar medida a partir do size aqui. */
+      const s = { name: it.name, size: it.size || 'A4', w: isNum(it.w) ? it.w : 0, h: isNum(it.h) ? it.h : 0,
+                  comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], texts:[] };
       model.sheets.push(s); byName[it.name] = s;
       continue;
     }
     let s = byName[it.sheet];
     if (!s) {
-      s = { name: it.sheet || 'main', size:'A4', comps:[], wires:[], netlabels:[], powers:[], junctions:[], texts:[] };
+      /* folha IMPLICITA (ninguem declarou): mesma forma da declarada, sem medida de onde sair */
+      s = { name: it.sheet || 'main', size:'A4', w:0, h:0,
+            comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], texts:[] };
       model.sheets.push(s); byName[s.name] = s;
     }
     if      (it.t === 'comp')     s.comps.push(it);
     else if (it.t === 'wire')     s.wires.push(it);
     else if (it.t === 'netlabel') s.netlabels.push(it);
     else if (it.t === 'power')    s.powers.push(it);
+    else if (it.t === 'port')     s.ports.push(it);
     else if (it.t === 'junction') s.junctions.push(it);
     else if (it.t === 'text')     s.texts.push(it);
   }
@@ -457,7 +476,7 @@ function extractNets(schematicOrModel, schlib){
   const key = (si, x, y) => si + '|' + Math.round(x*2) + '|' + Math.round(y*2);
   const nodeAt = (si, x, y) => { const k = key(si, x, y); if (!(k in nodeMap)) nodeMap[k] = mk(); return nodeMap[k]; };
 
-  const segs = [], attach = [], pinRecs = [], labelRecs = [], powerRecs = [];
+  const segs = [], attach = [], pinRecs = [], labelRecs = [], powerRecs = [], portRecs = [];
   const wireNet = model.sheets.map(s => s.wires.map(() => ''));
 
   model.sheets.forEach((s, si) => {
@@ -488,6 +507,10 @@ function extractNets(schematicOrModel, schlib){
     s.junctions.forEach(j => attach.push({ si, x:j.x, y:j.y, node:nodeAt(si, j.x, j.y), kind:'junction' }));
     s.netlabels.forEach(l => { const n = nodeAt(si, l.x, l.y); labelRecs.push({ net:l.net, node:n, x:l.x, y:l.y }); attach.push({ si, x:l.x, y:l.y, node:n, kind:'label' }); });
     s.powers.forEach(p => { const n = nodeAt(si, p.x, p.y); powerRecs.push({ net:p.net, node:n, x:p.x, y:p.y }); attach.push({ si, x:p.x, y:p.y, node:n, kind:'power' }); });
+    /* A Port do Altium conecta pelo NOME, como o rotulo — a diferenca e so grafica (a
+       seta) e hierarquica (ela e o pino da folha vista de fora). Para a extracao ela e
+       um nomeador a mais; por isso entra em portRecs e nao ganha regra propria. */
+    s.ports.forEach(p => { const n = nodeAt(si, p.x, p.y); portRecs.push({ net:p.net, node:n, x:p.x, y:p.y }); attach.push({ si, x:p.x, y:p.y, node:n, kind:'port' }); });
   });
 
   /* conexoes em T: ponto de conexao sobre o interior de um segmento */
@@ -504,9 +527,9 @@ function extractNets(schematicOrModel, schlib){
     }
   }
 
-  /* fusao por nome (netlabel e power) */
+  /* fusao por nome (netlabel, power e port) */
   const nameRoot = {};
-  for (const rec of labelRecs.concat(powerRecs)) {
+  for (const rec of labelRecs.concat(powerRecs, portRecs)) {
     const r = find(rec.node);
     if (rec.net in nameRoot) uni(nameRoot[rec.net], r); else nameRoot[rec.net] = r;
   }
@@ -516,6 +539,7 @@ function extractNets(schematicOrModel, schlib){
   const gof = n => { const r = find(n); if (!groups[r]) groups[r] = { names:new Set(), pins:[] }; return groups[r]; };
   for (const rec of labelRecs) gof(rec.node).names.add(rec.net);
   for (const rec of powerRecs) gof(rec.node).names.add(rec.net);
+  for (const rec of portRecs)  gof(rec.node).names.add(rec.net);
   for (const rec of pinRecs)   gof(rec.node).pins.push(rec.ref + '-' + rec.num);
   for (const g of segs) gof(g.node);
   const segRoots = new Set(segs.map(g => find(g.node)));
@@ -553,6 +577,11 @@ function extractNets(schematicOrModel, schlib){
     const r = find(rec.node), g = groups[r];
     if (!segRoots.has(r) && (!g || !g.pins.length))
       warnings.push(`power "${rec.net}" solto em (${rec.x},${rec.y})`);
+  }
+  for (const rec of portRecs) {
+    const r = find(rec.node), g = groups[r];
+    if (!segRoots.has(r) && (!g || !g.pins.length))
+      warnings.push(`port "${rec.net}" solta em (${rec.x},${rec.y})`);
   }
   nets.sort((a, b) => natural(a.name, b.name));
 
@@ -613,6 +642,7 @@ function validateSchematic(schematic, schlib, pcblib){
     }
     for (const l of s.netlabels) if (!l.net) errors.push(`netlabel sem "net" na folha ${s.name}`);
     for (const p of s.powers)    if (!p.net) errors.push(`power sem "net" na folha ${s.name}`);
+    for (const p of s.ports)     if (!p.net) errors.push(`port sem "net" na folha ${s.name}`);
   }
   return { errors, warnings };
 }
@@ -710,11 +740,19 @@ function serializeLibSubs(subs){
 }
 
 const SCH_ITEM_REQUIRED = {
+  /* w/h (medida real da folha, em mil) sao OPCIONAIS e ficam FORA daqui: `size` continua
+     obrigatorio para que espelho antigo nao pare de salvar, e um export que trocasse size
+     por w/h derrubaria o Salvar do arquivo INTEIRO, nao so o da folha. */
   sheet:    { num:[], str:['name','size'] },
   comp:     { num:['x','y'], str:['sheet','ref','sym','footprint'] },
   wire:     { num:[], str:['sheet'] },
   netlabel: { num:['x','y'], str:['sheet','net'] },
   power:    { num:['x','y'], str:['sheet','net','style'] },
+  /* io/style/w/color/fill/textColor sao OPCIONAIS de proposito: o ExportProject emite o que
+     o Altium der, e um .SchDoc antigo pode nao trazer todos. Exigir aqui faria um espelho
+     legitimo travar o Salvar do arquivo inteiro — o mesmo estrago que um tipo desconhecido
+     causava. As cores ausentes caem no padrao amarelo/preto do hub-draw. */
+  port:     { num:['x','y'], str:['sheet','net'] },
   junction: { num:['x','y'], str:['sheet'] },
   text:     { num:['x','y'], str:['sheet','s'] },
 };
@@ -902,7 +940,7 @@ function deriveStatus(entry, loaded){
   return 'vazio';
 }
 
-return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, ORIENT_DIR,
+return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, sheetSize, ORIENT_DIR,
          symbolOf, partOf, footprintOf, pinHot, compTransform, compPinsWorld,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp,
          buildSchModel, extractNets, validateSchematic,
