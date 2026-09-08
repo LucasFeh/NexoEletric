@@ -1102,6 +1102,10 @@ function fieldsForSymbol(d, part) {
   kickerRow(box, 'partes');
   linha(box, [['partes', ro((d.parts || []).length)], ['aberta', partSelect(d, ST.part, abrirParte)]]);
   linha(box, [['pinos', ro(part.pins.length)], ['gráficos', ro(part.graphics.length)]]);
+  const acoes = el('span', 'symed-partacoes');
+  acoes.append(btn('btn-sm', '+ parte', novaParte, 'cria uma parte nova, vazia — depois escolha o corpo dela na faixa de baixo'),
+               btn('btn-sm', 'excluir', excluirParte, 'exclui a parte aberta e renumera as outras'));
+  linha(box, [['', acoes]]);
   return box;
 }
 
@@ -1697,6 +1701,49 @@ function girarTudo() {
   const p = curPart(); if (!p) return;
   pushUndo(); Object.assign(p, rotateAll(p)); touched(); afterEdit();
 }
+/* ═══ Partes de um componente ═══
+   Um componente multi-parte do Altium (um quad op-amp, um rele com bobina e contatos) e
+   uma lista de partes, cada uma com o SEU desenho. Trocar o desenho de uma parte ja
+   funcionava — `aplicarLib()` aplica na parte ABERTA — mas nao havia como CRIAR parte,
+   entao um componente com uma parte so ficava com uma para sempre.
+
+   INVARIANTE, e nao e opcional: as partes tem que ser 1..N contiguas. O
+   schlib_patch.aplica() recusa antes de escrever ("as partes tem que ser 1..%d, vieram
+   %s") porque PartCount e uma CONTAGEM, nao uma lista: uma parte 3 sem a 2 ficaria fora
+   dela e o Altium descartaria o desenho. Por isso excluir renumera. */
+function novaParte() {
+  const d = ST.draft; if (!d) return;
+  if (!d.parts) d.parts = [];
+  pushUndo();
+  const n = d.parts.length + 1;
+  d.parts.push({ part: n, pins: [], graphics: [] });
+  d.partcount = d.parts.length;
+  ST.part = n; ST.selection = []; ST.draw = null; ST.fitPending = true;
+  touched(); refreshAll(); fitSeNecessario();
+  if (O && O.toast) O.toast('parte ' + n + ' criada — escolha um corpo na faixa de baixo', 'ok');
+}
+
+async function excluirParte() {
+  const d = ST.draft; if (!d || !d.parts || d.parts.length < 2) {
+    if (O && O.toast) O.toast('um componente precisa de ao menos uma parte', 'warn');
+    return;
+  }
+  const alvo = ST.part;
+  const p = d.parts.find(x => x.part === alvo);
+  const tem = p ? ((p.pins || []).length + (p.graphics || []).length) : 0;
+  if (tem && !(await confirmar('Excluir a parte ' + alvo + '? Ela tem ' + tem + ' item(ns) desenhados.',
+                               { title: 'Excluir parte', ok: 'Excluir', danger: true }))) return;
+  pushUndo();
+  d.parts = d.parts.filter(x => x.part !== alvo);
+  /* renumera 1..N: sem isso sobraria um buraco e o patch recusaria a gravacao inteira */
+  d.parts.forEach((x, i) => { x.part = i + 1; });
+  d.partcount = d.parts.length;
+  ST.part = Math.min(alvo, d.parts.length);
+  ST.selection = []; ST.draw = null; ST.fitPending = true;
+  touched(); refreshAll(); fitSeNecessario();
+  if (O && O.toast) O.toast('parte ' + alvo + ' excluída — agora são ' + d.parts.length, 'ok');
+}
+
 function abrirParte(n) {
   if (!ST.draft) return;
   ST.part = n; ST.selection = []; ST.draw = null; ST.fitPending = true; refreshAll(); fitSeNecessario();
@@ -1949,7 +1996,8 @@ function render(opts) {
 const dirty = () => !!ST.dirty;
 /* ações sem DOM (afterEdit se cala sem UI) — é por aqui que o teste em Node prova que a
    seleção sobrevive a apagar e desfazer */
-const actions = { deleteSelection, duplicarSelecao, undo, redo, nudge, pushUndo, virar, setUnit };
+const actions = {
+  novaParte, excluirParte, deleteSelection, duplicarSelecao, undo, redo, nudge, pushUndo, virar, setUnit };
 
 /* a casca aplicou no espelho o que veio do Altium: o Libs/schlib.js em disco e outro. Zera a carga
    e reabre o simbolo que estava na tela ja com a versao nova; edicao nao salva se perde - quem chama

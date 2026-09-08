@@ -585,6 +585,9 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .symed-props label { color: var(--text-3); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 84px; }
 .symed-props .kicker { grid-column: 1 / -1; margin-top: 8px; }
 .symed-props .wide { grid-column: 2 / 5; }
+/* os dois botoes de parte ocupam a linha inteira: sao acao, nao campo, e nao tem rotulo */
+.symed-partacoes { grid-column: 2 / 5; display: flex; gap: 6px; }
+.symed-partacoes .btn { flex: none; }
 .symed-props .input { min-height: 26px; font-size: 12px; padding: 3px 5px; width: 100%; font-variant-numeric: tabular-nums; }
 /* o select nativo reserva a seta dentro da largura: menos padding, senão "padrão" vira "padrãc" */
 .symed-props select.input { padding: 2px 0 2px 4px; }
