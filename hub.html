@@ -756,6 +756,10 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
 .backdrop { position: fixed; inset: 0; z-index: 60; display: grid; background: var(--scrim); }
 .backdrop.center { place-items: center; padding: 18px; }
 .backdrop.anchor-tr { align-items: start; justify-items: end; padding: 74px 18px; }
+/* menu no ponto do cursor: as outras ancoras sao fixas (canto), esta e posicionada
+   por style.left/top no momento do clique direito */
+.backdrop.anchor-pt { align-items: start; justify-items: start; padding: 0; }
+.backdrop.anchor-pt > .menu { position: fixed; }
 .dialog { width: min(620px,100%); display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-6); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-menu); }
 .dialog h3 { font-size: 20px; }
 .menu { width: 300px; padding: 6px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-menu); }
@@ -2289,6 +2293,14 @@ function libCams() {
   const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   libCamSym = HubDraw.mkCamera($('#libSymCv'), ctx => { if (libDrawSym) HubDraw.drawSymbolPart(ctx, libDrawSym); }, { bg: tok('--sheet') });
   libCamFp  = HubDraw.mkCamera($('#libFpCv'),  ctx => { if (libDrawFp)  HubDraw.drawFootprint(ctx, libDrawFp); },  { bg: tok('--sunken') });
+  /* Botao direito no preview do simbolo. Fica AQUI, no lugar que roda uma vez so, e nao
+     dentro do render do preview: aquele ramo so executa quando ha simbolo para desenhar,
+     entao com um ausente selecionado o menu nunca aparecia. O nome sai de S.lib.sel na
+     hora do clique — o preview nao guarda de quem veio depois que o render termina. */
+  $('#libSymCv').addEventListener('contextmenu', e => {
+    e.preventDefault();
+    menuSimbolo(e.clientX, e.clientY, S.lib.sel && S.lib.sel.name);
+  });
 }
 
 /* Um só lugar para pôr o footprint na vista de baixo: quem o escolhe (o símbolo do Altium,
@@ -2438,6 +2450,8 @@ function renderLib() {
     if (o && o.warn) b.append(el('span', 'pill warn', o.warn));
     b.append(el('span', 'mt', meta || ''));
     b.onclick = (o && o.on) || (() => selectLib(k, name));
+    if (k === 'sym' || k === 'gone-sym')
+      b.oncontextmenu = e => { e.preventDefault(); selectLib(k, name); menuSimbolo(e.clientX, e.clientY, name); };
     frag.append(b);
   };
 
@@ -3978,6 +3992,58 @@ function cfgField(labelKey, opts, cur, pick, hintKey) {
   f.append(lab, sel);
   if (hintKey) f.append(cfgHint(hintKey));
   return f;
+}
+
+/* ═══ Menu de contexto do simbolo (Sch Lib) ═══
+   Nao havia menu de contexto nenhum no hub; o molde e o openBrandMenu logo abaixo, com
+   uma ancora nova (.anchor-pt) porque as existentes grudam num canto fixo.
+   O botao direito no canvas do EDITOR ja e o pan — por isso este menu vive so na aba
+   Sch Lib (preview e lista), nunca no editor. */
+function menuNoPonto(x, y, itens) {
+  closeOverlay();
+  const bd = el('div', 'backdrop anchor-pt');
+  bd.oncontextmenu = e => { e.preventDefault(); closeOverlay(); };
+  bd.onclick = e => { if (e.target === bd) closeOverlay(); };
+  const m = el('div', 'menu'); m.style.width = '260px';
+  for (const it of itens) {
+    if (!it) continue;
+    const b = el('button');
+    b.append(el('span', 'l', it.l), el('span', 'c', it.c || ''));
+    if (it.off) { b.disabled = true; b.style.opacity = '.45'; b.style.cursor = 'default'; }
+    else b.onclick = () => { closeOverlay(); it.on(); };
+    m.append(b);
+  }
+  bd.append(m); $('#overlay').append(bd);
+  /* so da para medir depois de estar no DOM; encosta nas bordas em vez de vazar */
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(6, Math.min(x, innerWidth  - r.width  - 6)) + 'px';
+  m.style.top  = Math.max(6, Math.min(y, innerHeight - r.height - 6)) + 'px';
+}
+
+/* Abre a aba Simbolos JA no simbolo pedido. Mesmo padrao do gotoSchComp: troca a aba,
+   redesenha e so entao fala com o painel — que precisa existir antes de responder. */
+async function editarSimbolo(nome) {
+  if (!nome) return;
+  goTab('libsym');
+  try {
+    const ok = await HubSymEd.abrir(nome, false);
+    if (!ok) toast(t('lib.editSymNao', { n: nome }) || ('não abriu "' + nome + '"'), 'warn');
+  } catch (e) { toast(String((e && e.message) || e), 'err'); }
+}
+
+/* O que o menu oferece para um nome de simbolo do acervo. `conhece` diz se o editor tem
+   esse simbolo no espelho — sem isso o "editar" abriria uma folha em branco. */
+function menuSimbolo(x, y, nome) {
+  if (!nome) return;
+  /* tri-estado: null = o editor ainda nao carregou a schlib e nao da para saber. So
+     desabilita no `false` explicito — no `null` deixa tentar, e o abrir() diz a verdade
+     depois de carregar. */
+  const tem = (window.HubSymEd && HubSymEd.conhece) ? HubSymEd.conhece(nome) : null;
+  menuNoPonto(x, y, [
+    { l: 'Editar símbolo',
+      c: tem === false ? 'não está no espelho do Altium' : 'abre "' + nome + '" na aba Símbolos',
+      off: tem === false, on: () => editarSimbolo(nome) },
+  ]);
 }
 
 /* o menu da marca: a quina superior esquerda é onde se procura menu */

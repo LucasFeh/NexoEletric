@@ -1912,5 +1912,27 @@ function reload() {
   return loadSchlib().then(() => { listKey = ''; refreshAll(); if (ST.sel) return openSymbol(ST.sel, true); });
 }
 
-return { render, dirty, reload, pure, state: ST, actions, cam: () => (CAM ? CAM.cam : null), confirmar, pedirTexto };
+/* Abrir um simbolo VINDO DE FORA (o "editar simbolo" do menu de contexto da aba Sch Lib).
+   Nao serve mexer em `state.sel` de fora: o unico ponto que honra um ST.sel externo e o
+   `.then` do PRIMEIRO loadSchlib dentro de render(), entao isso funcionaria uma vez — com
+   a aba nunca aberta — e viraria no-op silencioso depois.
+   Espera a schlib chegar antes de abrir, e devolve Promise porque openSymbol pode PARAR
+   para perguntar se descarta a edicao nao salva: quem chama nao pode assumir que abriu. */
+async function abrir(name, force) {
+  if (!name) return false;
+  /* loadSchlib() devolve a MESMA promessa quando ja ha uma carga em voo, entao isto
+     cobre os dois casos: nunca carregou, e carregando agora. */
+  if (!DATA.schlib) await loadSchlib().catch(() => {});
+  listKey = '';
+  await openSymbol(String(name), force);
+  return ST.sel === String(name) && !!ST.draft;
+}
+
+/* TRES estados, de proposito: true = existe no espelho, false = nao existe, null = a
+   schlib ainda nao foi carregada e portanto NAO DA PARA SABER. Um booleano so fazia a
+   casca desabilitar "editar simbolo" toda vez que a aba Simbolos nunca tivesse sido
+   aberta — que e justamente o caso comum de quem vem pelo menu de contexto. */
+const conhece = name => (DATA.schlib ? !!symByName(String(name || '')) : null);
+
+return { render, dirty, reload, pure, abrir, conhece, state: ST, actions, cam: () => (CAM ? CAM.cam : null), confirmar, pedirTexto };
 });
