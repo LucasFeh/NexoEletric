@@ -26,8 +26,9 @@
    Nunca escreva um hex fora deste bloco.
 
    O tema mora em dois atributos que o menu de configuração escreve no <html>:
-   data-mode = dark|light  e  data-theme = grafite|papel|altium|placa. Sem JS, o
-   :root cru vale como Grafite escuro — o hub abre igual ao que sempre foi.
+   data-mode = dark|light  e  data-theme = grafite|papel|altium|placa. Na primeira
+   abertura o hub escolhe Escuro/Altium (quem decide isso e o script do <head>); sem JS,
+   o :root cru vale como Grafite escuro — e o fallback, nao mais o padrao.
 
    Um TEMA só troca os neutros (fundo, superfície, texto, destaque); MODO cuida de
    status, sombra e scrim. Por isso cada bloco de tema é curto: 14 tokens.
@@ -93,7 +94,7 @@
   --shadow-menu: 0 0 0 1px rgba(var(--tint), 0.13), 0 14px 36px rgba(var(--tint), 0.16);
 }
 
-/* ── Tema Grafite · escuro (o hub de sempre, e o fallback sem JS) ─ */
+/* ── Tema Grafite · escuro (o :root cru, e o fallback sem JS) ──── */
 :root {
   --bg:        #0f0f11;   /* fundo da página */
   --surface:   #1a1a1d;   /* cards, menus, inputs, painéis */
@@ -827,9 +828,13 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
     t = localStorage.getItem('altiumhub.theme');
     f = localStorage.getItem('altiumhub.font');
   } catch (e) {}
-  if (!m || m === 'auto') m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  /* Sem nada guardado o hub abre Escuro/Altium: e o padrao DA CASA, nao o do sistema.
+     "auto" so entra em cena depois que alguem escolheu "auto" na configuracao — por isso
+     os dois ifs sao separados, e nao um "!m || m === 'auto'" so. */
+  if (!m) m = 'dark';
+  if (m === 'auto') m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
   r.dataset.mode = m === 'light' ? 'light' : 'dark';
-  r.dataset.theme = t || 'grafite';
+  r.dataset.theme = t || 'altium';
   r.dataset.font = f || 'inter';   /* só o identificador; a pilha da família mora no CSS */
 })();
 </script>
@@ -3923,9 +3928,11 @@ function closeOverlay() {
 /* skinSet grava em SKIN_KEY[k]: um eixo novo TEM que entrar aqui, senão ele grava na
    chave literal 'undefined' calado e a escolha some no F5. */
 const SKIN_KEY = { mode: 'altiumhub.mode', theme: 'altiumhub.theme', font: 'altiumhub.font' };
+/* Os defaults aqui tem que ser OS MESMOS do script do <head>: sao dois leitores da
+   mesma chave, e discordar faz a tela abrir de um jeito e trocar no primeiro frame. */
 const skin = {
-  mode: localStorage.getItem(SKIN_KEY.mode) || 'auto',
-  theme: localStorage.getItem(SKIN_KEY.theme) || 'grafite',
+  mode: localStorage.getItem(SKIN_KEY.mode) || 'dark',
+  theme: localStorage.getItem(SKIN_KEY.theme) || 'altium',
   font: localStorage.getItem(SKIN_KEY.font) || 'inter',
 };
 /* a MESMA pergunta que o <head> faz, com a MESMA polaridade. Perguntar "é claro?" de um
