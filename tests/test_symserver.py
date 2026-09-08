@@ -506,6 +506,61 @@ try:
         assert not j['pendente'] and j['itens'] == []
         print('altium-changes/altium-apply (almoxarifado) ok')
 
+        # ── /save-almox: o desenho de UM componente vai para os TRES destinos ──────────
+        # O que se prova aqui e o que o usuario pediu: mexer no simbolo de um componente
+        # nao pode mexer nos irmaos dele nem no desenho da familia, e tem que sobreviver ao
+        # proximo sincronismo (por isso o ledger).
+        alvo_fam, alvo_comp = 'DIAC', comp
+        _v0, esp0 = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
+        sim0 = next(x for x in esp0['symbols'] if x['name'] == 'DIAC [PTH]')
+        fam_parts_antes = G.fp_parts(sim0['parts'])
+        irmaos_antes = {v['altium']: G.fp_parts(v.get('parts')) if v.get('parts') else None
+                        for v in sim0['valores'] if v.get('altium') != alvo_comp}
+
+        novo_desenho = copy.deepcopy(parts)
+        novo_desenho[0]['graphics'].append({'g': 'ellipse', 'cx': 0, 'cy': 0, 'rx': 40, 'ry': 40})
+        r = cli.post('/api/symbols/save-almox', json={
+            'familia': alvo_fam, 'componente': alvo_comp,
+            'parts': novo_desenho, 'altium': True})
+        j = r.get_json()
+        assert r.status_code == 200 and j['ok'], j
+        assert j['espelho'] and j['altium'] and j['protegido'], j
+        assert (j['familia'], j['componente']) == (alvo_fam, alvo_comp), j
+
+        # (a) o VALOR ganhou geometria propria no espelho
+        _v1, esp1 = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
+        sim1 = next(x for x in esp1['symbols'] if x['name'] == 'DIAC [PTH]')
+        val = next(v for v in sim1['valores'] if v['altium'] == alvo_comp)
+        assert G.fp_parts(val['parts']) == G.fp_parts(j['parts']), 'o valor tem que ficar com o desenho novo'
+        # (b) a FAMILIA nao foi tocada
+        assert G.fp_parts(sim1['parts']) == fam_parts_antes, 'o desenho da familia nao pode mudar'
+        # (c) os IRMAOS nao foram tocados
+        for v in sim1['valores']:
+            if v['altium'] == alvo_comp:
+                continue
+            agora = G.fp_parts(v.get('parts')) if v.get('parts') else None
+            assert agora == irmaos_antes.get(v['altium']), 'o componente %s mudou sem ninguem pedir' % v['altium']
+        # (d) a .SchLib do Altium recebeu, so naquele componente
+        lido = G.le_familia(cam)
+        assert G.fp_parts(lido[alvo_comp]) == G.fp_parts(j['parts']), 'a SchLib tem que ter o desenho novo'
+        # (e) protegido como 'hub' — e o que faz sobreviver ao sync
+        led = G.carrega_ledger(tmp)
+        prot = led['protegidos'][alvo_fam][alvo_comp]
+        assert prot['origem'] == 'hub' and G.fp_parts(prot['parts']) == G.fp_parts(j['parts']), prot
+        # (f) o proprio save nao pode aparecer como "mudou no Altium"
+        j2 = cli.get('/api/symbols/altium-changes?deep=1').get_json()
+        assert not j2['pendente'] and j2['itens'] == [], j2
+
+        # recusas
+        assert cli.post('/api/symbols/save-almox', json={
+            'familia': alvo_fam, 'componente': 'NAO EXISTE', 'parts': novo_desenho}).status_code == 404
+        assert cli.post('/api/symbols/save-almox', json={
+            'familia': 'NAO EXISTE', 'componente': alvo_comp, 'parts': novo_desenho}).status_code == 404
+        assert cli.post('/api/symbols/save-almox', json={
+            'familia': alvo_fam, 'componente': alvo_comp, 'parts': []}).status_code == 400
+        assert cli.post('/api/symbols/save-almox', json={'parts': novo_desenho}).status_code == 400
+        print('save-almox ok')
+
         # almox-sync: reserva, 409, 400 sem senha, e o stream de verdade (sem o gerador)
         S._sync_runs.clear()
         S.GUARDIAO_EXTRA[:] = ['--sem-gerador']

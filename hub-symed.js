@@ -1994,14 +1994,15 @@ function nudge(dx, dy) {
 
 async function salvar() {
   const d = ST.draft; if (!d || semServidor() || ST.saving) return;
-  /* O /api/symbols/save so conhece o espelho Libs/schlib.js: para um simbolo do
-     almoxarifado ele devolve 404 DEPOIS de a pessoa ter desenhado. Melhor dizer antes,
-     e com o motivo. */
-  if (!acervoGravavel()) {
-    const alvo = ST.familia ? ('o componente “' + ST.sel + '” de ' + ST.familia)
-                            : ('“' + acervoAtual().title + '”');
-    setStatus('gravar ' + alvo + ' ainda não está ligado — hoje só o espelho do Altium', 'err');
-    if (O && O.toast) O.toast('gravar em “' + acervoAtual().title + '” ainda não está ligado', 'warn');
+  /* Duas rotas, dois alvos:
+       /save        — um simbolo da biblioteca da CASA (Libs/schlib.js + a SchLib da casa);
+       /save-almox  — UM componente do almoxarifado, na .SchLib da familia dele.
+     Editar a FAMILIA inteira de um acervo do almoxarifado continua sem caminho: o desenho
+     dela nasce do gerador, e o que se grava por componente e o `valores[].parts`. */
+  if (!acervoGravavel() && !ST.familia) {
+    setStatus('para gravar no almoxarifado, escolha um COMPONENTE na faixa de baixo — '
+              + 'o desenho da família inteira vem do sincronismo', 'err');
+    if (O && O.toast) O.toast('escolha um componente na aba Componentes', 'warn');
     return;
   }
   const sym = serializeSymbol(d);
@@ -2009,21 +2010,35 @@ async function salvar() {
   setStatus('salvando' + (altium ? ' no espelho e no Altium…' : ' no espelho…'), '');
   /* a flag (e não só o nó do botão) porque qualquer edição durante o await refaz a ficha */
   ST.saving = true; UI.bSave.disabled = true;
+  const doAlmox = !!ST.familia;
   let status, j;
   try {
-    ({ status, j } = await api('save', { name: sym.name, parts: sym.parts, description: sym.description, altium }));
+    ({ status, j } = doAlmox
+      ? await api('save-almox', { familia: ST.familia, componente: sym.name,
+                                  parts: sym.parts, description: sym.description, altium })
+      : await api('save', { name: sym.name, parts: sym.parts, description: sym.description, altium }));
   } finally { ST.saving = false; }
   /* o espelho em memória passa a ser o que foi gravado: reabrir o símbolo mostra a versão salva */
   const sincroniza = () => {
-    const s = symByName(sym.name);
-    if (s) { s.parts = clone(sym.parts); s.partcount = sym.partcount; s.description = sym.description; }
+    if (doAlmox) {
+      /* no almoxarifado quem recebe o desenho e o VALOR. Escrever em s.parts pintaria os
+         25 componentes da familia de uma vez na tela — o contrario do que se pediu. */
+      const f = familiaAberta(), v = f && valorPorNome(f, sym.name);
+      if (v) v.parts = clone(sym.parts);
+    } else {
+      const s = symByName(sym.name);
+      if (s) { s.parts = clone(sym.parts); s.partcount = sym.partcount; s.description = sym.description; }
+    }
     ST.dirty = false; ST.saved.add(sym.name);
   };
   if (j && j.ok) {
     sincroniza();
     const avisos = (j.avisos || []).length ? ' · ' + j.avisos.join(' · ') : '';
     setStatus('salvo ' + new Date().toLocaleTimeString('pt-BR') + (j.altium ? ' — espelho + Altium' + (j.backup ? ' (backup: ' + j.backup.split(/[\\/]/).pop() + ')' : '') : ' — só o espelho') + avisos, 'ok');
-    if (O && O.toast) O.toast('símbolo "' + sym.name + '" salvo' + (j.altium ? ' no espelho e na SchLib' : ' no espelho'), 'ok');
+    if (O && O.toast) O.toast((doAlmox ? 'componente "' : 'símbolo "') + sym.name + '" salvo'
+      + (j.altium ? ' no espelho e na SchLib' : ' no espelho')
+      + (doAlmox && j.protegido === false ? ' — ATENÇÃO: não protegido, o sincronismo pode desfazer' : ''),
+      doAlmox && j.protegido === false ? 'warn' : 'ok');
     if (O && O.onSaved) { try { O.onSaved(sym.name); } catch (e) {} }
     listKey = ''; refreshList(); refreshBar(); refreshAside();
     return;

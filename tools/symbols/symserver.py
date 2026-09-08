@@ -92,6 +92,7 @@ LOCAL_ADDRS = ('127.0.0.1', '::1', 'localhost')
 _lock_espelho = threading.Lock()     # save e mirror escrevem o mesmo arquivo
 _lock_schlib = threading.Lock()      # o patch reescreve a SchLib inteira: dois saves ao mesmo tempo perderiam um
 _lock_symlib = threading.Lock()
+_lock_almox = threading.Lock()       # grava_espelho_almox reescreve o espelho inteiro: um por vez
 _extract_lock = threading.Lock()     # segurado enquanto o subprocesso roda
 _reserva_lock = threading.Lock()
 _extract_runs = {}                   # runId -> (quando, args extras)
@@ -399,6 +400,111 @@ def api_save():
     resp.update(altium=True, backup=r.get('backup'), avisos=r.get('avisos') or [],
                 storage=r.get('storage'), verificado=bool(r.get('verificado')),
                 nomeAltium=r.get('nomeAltium') or nome)
+    return resp
+
+
+def _acha_valor(esp, i, componente):
+    """índice do valor dentro de symbols[i]['valores'] — o indice_almox não o guarda"""
+    vals = (esp.get('symbols') or [])[i].get('valores') or []
+    for j, v in enumerate(vals):
+        if v.get('altium') == componente:
+            return j
+    return None
+
+
+@bp.route('/save-almox', methods=['POST'])
+def api_save_almox():
+    """A geometria de UM componente do almoxarifado: espelho, .SchLib da família e ledger.
+
+    Diferente do /save, que mexe num símbolo da biblioteca da casa, aqui o alvo é um
+    `valores[].altium` — um dos 25 componentes de DIODO TVS, por exemplo — e cada um é um
+    componente próprio dentro de Libs/Almox/<FAMÍLIA> ALMOX.SchLib.
+
+    Os três destinos não são redundância; cada um responde por uma coisa:
+      espelho  Libs/almox-*.js  → é o que o hub desenha na tela (mas é saída gerada: o
+                                  próximo sync o reescreve do zero a partir do Odoo);
+      .SchLib  Libs/Almox/…     → é o que o Altium abre. A verdade da geometria;
+      ledger   protegidos[f][c] → é o que faz o desenho SOBREVIVER ao sync. Sem ele o
+                                  gerador repõe o símbolo default da categoria e o
+                                  trabalho some sem avisar.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _erro('JSON {familia, componente, parts, altium} obrigatório', 400)
+    fam = data.get('familia')
+    comp = data.get('componente')
+    if not (isinstance(fam, str) and fam.strip()) or not (isinstance(comp, str) and comp.strip()):
+        return _erro('familia e componente obrigatórios', 400)
+    fam, comp = fam.strip(), comp.strip()
+    erro = _valida_parts(data.get('parts'))
+    if erro:
+        return _erro(erro, 400)
+    desc = data.get('description') if isinstance(data.get('description'), str) else None
+    altium = bool(data.get('altium'))
+    partes = _partes(data['parts'])
+
+    # 1. onde este componente mora — espelho e arquivo
+    try:
+        espelhos = G.carrega_espelhos_almox(ROOT)
+    except (OSError, ValueError) as e:
+        return _erro('não li os espelhos do almoxarifado: %s' % e, 500)
+    if not espelhos:
+        return _erro('nenhum espelho do almoxarifado em Libs/ (rode o sincronismo)', 404)
+    achado = G.indice_almox(espelhos).get((fam, comp))
+    if not achado:
+        return _erro('"%s / %s" não está no espelho do almoxarifado' % (fam, comp), 404)
+    sim_nome, k, i = achado
+    cam_esp, var, esp = espelhos[k]
+    j = _acha_valor(esp, i, comp)
+    if j is None:
+        return _erro('"%s" não é um valor de "%s"' % (comp, sim_nome), 404)
+    cam, _hoje = G._acha_componente(ROOT, fam, comp, {})
+    if cam is None:
+        return _erro('"%s / %s" não está em Libs/Almox' % (fam, comp), 404)
+
+    # 2. espelho primeiro: se a SchLib falhar, o hub já mostra o desenho novo
+    with _lock_almox:
+        try:
+            esp['symbols'][i]['valores'][j]['parts'] = partes
+            G.grava_espelho_almox(cam_esp, var, esp)
+        except OSError as e:
+            return _erro('falha ao gravar o espelho do almoxarifado: %s' % e, 500)
+
+    resp = {'ok': True, 'espelho': True, 'altium': False, 'protegido': False,
+            'backup': None, 'avisos': [], 'parts': partes,
+            'familia': fam, 'componente': comp, 'simbolo': sim_nome}
+    alvo = {'name': comp, 'parts': partes}
+    if desc is not None:
+        alvo['description'] = desc
+
+    # 3. a .SchLib da família. backup_dir=None -> Libs/Almox/Backup-hub, LOCAL: apontar
+    #    para a rede faria o save inteiro morrer quando o compartilhamento cai.
+    if altium:
+        try:
+            with _lock_schlib:
+                r = P.patch(cam, alvo, None, raiz=ROOT)
+        except P.LibOcupada as e:
+            return _erro(str(e), 423, **resp)
+        except Exception as e:                                      # noqa: BLE001
+            return _erro('espelho gravado, mas a SchLib não: %s' % e, 500, **resp)
+        resp.update(altium=True, backup=r.get('backup'), avisos=r.get('avisos') or [],
+                    verificado=bool(r.get('verificado')), arquivo=G.chave_arquivo(ROOT, cam))
+
+    # 4. a proteção no ledger — o único lugar durável. NÃO usar G.protege(): ela lê a
+    #    geometria de hoje na .SchLib (não aceita `parts`) e ainda chama atualiza_espelhos,
+    #    que escolhe UMA geometria por símbolo e achataria os 25 componentes num só.
+    try:
+        with G._lock:
+            led = G.carrega_ledger(ROOT)
+            G._poe_prot(led, fam, comp, partes, 'hub', sim_nome)
+            if altium:
+                G.registra_arquivo(ROOT, cam, led, gravar=False)   # senão o próprio save
+                                                                   # aparece como "mudou no Altium"
+            G.grava_ledger(ROOT, led)
+        resp['protegido'] = True
+    except Exception as e:                                          # noqa: BLE001
+        resp['avisos'] = list(resp['avisos']) + [
+            'não protegi no ledger (%s): o próximo sincronismo pode repor o símbolo padrão' % e]
     return resp
 
 
