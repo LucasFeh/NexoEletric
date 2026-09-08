@@ -547,7 +547,8 @@ const ST = {
 };
 /* schlibErro / symlibMissing: carga que falhou fica como null (não como lista vazia) para o
    próximo render() tentar de novo — senão um 404 vira "0 símbolos" até o F5 */
-const DATA = { schlib: null, symlib: null, loading: null, libLoading: null, bust: 0, schlibErro: '', symlibMissing: false };
+const DATA = { schlib: null, symlib: null, loading: null, libLoading: null, bust: 0, schlibErro: '', symlibMissing: false,
+               acervo: null, loadingId: null, cache: {} };
 let O = null;      /* opts do último render: root, toast, onSaved, splits... */
 let UI = null;     /* nós do DOM criados uma vez */
 let CAM = null;
@@ -566,15 +567,44 @@ function loadVarScript(src, name) {
     document.head.appendChild(s);
   });
 }
+/* ACERVO: qual biblioteca a lista da esquerda mostra. O painel so conhecia
+   Libs/schlib.js (o espelho do Altium, 401 simbolos); os acervos do almoxarifado
+   (Libs/almox-basicos.js, Libs/almox-especiais.js) sao a MESMA lista que a aba Sch Lib
+   ja mostra no mesmo seletor. Quem escolhe e a casca, que passa `acervo` no render(). */
+const ACERVO_PADRAO = { id: 'altium', title: 'Espelho do Altium', file: 'Libs/schlib.js', varName: 'schlib' };
+function acervoAtual() { return DATA.acervo || ACERVO_PADRAO; }
+
 function loadSchlib() {
-  if (DATA.schlib) return Promise.resolve(DATA.schlib);
-  if (!DATA.loading) DATA.loading = loadVarScript('Libs/schlib.js', 'schlib').then(v => {
-    DATA.schlib = v && v.symbols ? v : null;
-    DATA.schlibErro = DATA.schlib ? '' : 'não carregou Libs/schlib.js — o servidor está de pé? (troque de aba para tentar de novo)';
+  const a = acervoAtual();
+  /* cache por acervo: trocar de acervo e voltar nao pode rebaixar a lista para vazia
+     enquanto recarrega, nem refazer o download do que ja veio */
+  if (DATA.cache[a.id]) { DATA.schlib = DATA.cache[a.id]; DATA.schlibErro = ''; return Promise.resolve(DATA.schlib); }
+  if (DATA.loading && DATA.loadingId === a.id) return DATA.loading;
+  DATA.loadingId = a.id;
+  DATA.loading = loadVarScript(a.file, a.varName).then(v => {
+    const ok = v && v.symbols ? v : null;
+    if (ok) DATA.cache[a.id] = ok;
+    DATA.schlib = ok;
+    DATA.schlibErro = ok ? '' : ('não carregou ' + a.file + ' — o servidor está de pé? (troque de aba para tentar de novo)');
     DATA.loading = null;
     return DATA.schlib;
   });
   return DATA.loading;
+}
+
+/* Troca o acervo mostrado. Devolve true quando mudou de verdade — a casca so precisa
+   redesenhar nesse caso. */
+function setAcervo(a) {
+  const novo = (a && a.id) ? a : ACERVO_PADRAO;
+  if (DATA.acervo && DATA.acervo.id === novo.id) return false;
+  DATA.acervo = novo;
+  DATA.schlib = DATA.cache[novo.id] || null;
+  DATA.schlibErro = '';
+  DATA.loading = null; DATA.loadingId = null;
+  listKey = '';
+  /* o simbolo aberto e de outro acervo: nao faz sentido continuar com ele na tela */
+  ST.sel = null; ST.draft = null; ST.selection = []; ST.undo = []; ST.redo = []; ST.dirty = false;
+  return true;
 }
 function loadSymlib() {
   if (DATA.symlib) return Promise.resolve(DATA.symlib);
@@ -587,6 +617,9 @@ function loadSymlib() {
   return DATA.libLoading;
 }
 const symbols = () => (DATA.schlib && DATA.schlib.symbols) || [];
+/* o acervo do almoxarifado nao e gravavel pelo /api/symbols/save (ele so conhece o
+   espelho Libs/schlib.js): dizer isso na cara, e nao deixar o POST falhar com 404 */
+const acervoGravavel = () => acervoAtual().id === 'altium';
 const symByName = n => symbols().find(s => s.name === n) || null;
 const libSyms = () => (DATA.symlib && DATA.symlib.symbols) || [];
 const libById = id => libSyms().find(s => s.id === id) || null;
@@ -806,7 +839,8 @@ function build(rootEl) {
   bar.append(UI.q, UI.seg);
   UI.sum = el('div', 'lib-sum');
   UI.list = el('div', 'scroll lib-list');
-  left.append(bar, el('div', 'kicker symed-kicker', 'componentes do espelho do Altium'), UI.sum, UI.list);
+  UI.kicker = el('div', 'kicker symed-kicker', 'componentes do espelho do Altium');
+  left.append(bar, UI.kicker, UI.sum, UI.list);
 
   const split = lado => { const s = el('div', 'split'); s.dataset.split = lado; s.title = 'arraste para redimensionar · duplo clique fecha/abre'; return s; };
 
@@ -893,7 +927,9 @@ let listKey = '';
 function refreshList() {
   if (!UI) return;
   const syms = symbols();
-  const key = [ST.q, ST.kind, ST.sel, nMod(), syms.length, ST.dirty, DATA.schlib ? 1 : 0, DATA.schlibErro].join(SEP);
+  /* o acervo ENTRA na chave: sem ele, trocar de acervo nao redesenha a lista, e duas
+     bibliotecas podem ter a mesma contagem de simbolos e passar batido */
+  const key = [acervoAtual().id, ST.q, ST.kind, ST.sel, nMod(), syms.length, ST.dirty, DATA.schlib ? 1 : 0, DATA.schlibErro].join(SEP);
   if (key === listKey) return;
   listKey = key;
   const semFp = s => !(s.footprints || []).some(f => f.incurrentlib);
@@ -910,16 +946,17 @@ function refreshList() {
     UI.seg.append(b);
   });
 
+  if (UI.kicker) UI.kicker.textContent = 'componentes · ' + acervoAtual().title;
   UI.sum.textContent = '';
   const stat = (n, rot, tone) => { const s = el('span'); const b = el('b', null, String(n)); if (tone) b.style.color = 'var(--' + tone + ')'; s.append(b, document.createTextNode(' ' + rot)); UI.sum.append(s); };
   stat(syms.length, 'símbolos'); stat(noFp.length, 'sem footprint', noFp.length ? 'warn' : null);
   stat(nMod(), 'modificados nesta sessão');
-  if (DATA.schlib) UI.sum.title = 'schlib: ' + (DATA.schlib.source || '—') + '  (' + (DATA.schlib.generated || '—') + ')';
+  if (DATA.schlib) UI.sum.title = acervoAtual().file + ': ' + (DATA.schlib.source || '—') + '  (' + (DATA.schlib.generated || '—') + ')';
 
   const rows = syms.filter(s => hit(s) && (ST.kind === 'all' || (ST.kind === 'nofp' ? semFp(s) : isMod(s.name))));
   UI.list.textContent = '';
   const frag = document.createDocumentFragment();
-  if (!DATA.schlib) frag.append(el('div', 'lib-head', DATA.schlibErro || 'carregando o espelho…'));
+  if (!DATA.schlib) frag.append(el('div', 'lib-head', DATA.schlibErro || ('carregando ' + acervoAtual().title + '…')));
   else if (!rows.length) frag.append(el('div', 'lib-head', q ? 'nada com "' + ST.q + '"' : 'nada aqui'));
   else frag.append(el('div', 'lib-head', 'símbolos (' + rows.length + (rows.length !== syms.length ? ' de ' + syms.length : '') + ')'));
   rows.forEach(s => {
@@ -1761,6 +1798,14 @@ function nudge(dx, dy) {
 
 async function salvar() {
   const d = ST.draft; if (!d || semServidor() || ST.saving) return;
+  /* O /api/symbols/save so conhece o espelho Libs/schlib.js: para um simbolo do
+     almoxarifado ele devolve 404 DEPOIS de a pessoa ter desenhado. Melhor dizer antes,
+     e com o motivo. */
+  if (!acervoGravavel()) {
+    setStatus('“' + acervoAtual().title + '” ainda não é gravável pelo editor — só o espelho do Altium', 'err');
+    if (O && O.toast) O.toast('gravar em “' + acervoAtual().title + '” ainda não está ligado', 'warn');
+    return;
+  }
   const sym = serializeSymbol(d);
   const altium = !!(UI.altium && UI.altium.checked);
   setStatus('salvando' + (altium ? ' no espelho e no Altium…' : ' no espelho…'), '');
@@ -1884,6 +1929,10 @@ function render(opts) {
   const rootEl = O.root;
   if (!rootEl) return;
   if (!UI || UI.root !== rootEl) build(rootEl);
+  /* a casca manda qual acervo esta escolhido no seletor do topo — o mesmo que a aba
+     Sch Lib usa. Sem isto o painel ficava preso no espelho do Altium e o seletor, que
+     aparece por cima dele, nao mudava nada aqui: a armadilha visual. */
+  if (O.acervo) setAcervo(O.acervo);
   if (!DATA.schlib && !DATA.loading) loadSchlib().then(() => { listKey = ''; refreshAll(); if (ST.sel && !ST.draft) openSymbol(ST.sel, true); });
   if (!DATA.symlib && !DATA.libLoading) loadSymlib().then(() => { libKey = ''; refreshLib(); });
   /* a casca chama render() por troca de idioma, mudança no disco, goTab… se o usuário está

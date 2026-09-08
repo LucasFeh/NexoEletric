@@ -1925,7 +1925,10 @@ function libSetSrc(id) {
   S.lib.sel = null; S.lib.part = 1; S.lib.fpShown = null; S.lib.q = ''; S.lib.valQ = '';
   const busca = $('#libSearch'); if (busca) busca.value = '';
   LIB.ready = false;
-  renderLib();
+  /* com a aba Simbolos aberta, renderLib() nao redesenha nada do que se ve: quem monta
+     aquele painel e o HubSymEd, por renderPanes() */
+  if (S.tab === 'libsym') renderPanes();
+  else renderLib();
 }
 
 /* o combobox que vive na fileira de sub-abas da Biblioteca, mais o botão de sincronizar */
@@ -3183,7 +3186,15 @@ function renderPanes() {
       renderTabs(); renderPanes();
     },
   });
-  if (S.tab === 'libsym') return HubSymEd.render({ root: $('#symed'), t, toast, onSaved: libInvalida, lang: HubI18n.lang, splits: mkSplits });
+  if (S.tab === 'libsym') {
+    /* o MESMO seletor de acervo da aba Sch Lib manda na lista do editor: a fileira de
+       sub-abas e do grupo lib inteiro, entao o combobox ja aparece por cima do painel de
+       simbolos — ate agora ele so nao fazia nada ali */
+    const a = libSources().find(x => x.id === libWanted()) || LIB_ALTIUM;
+    return HubSymEd.render({ root: $('#symed'), t, toast, onSaved: libInvalida, lang: HubI18n.lang,
+                             splits: mkSplits,
+                             acervo: { id: a.id, title: a.title, file: a.sch, varName: a.schVar } });
+  }
   if (S.tab === 'lib' || S.tab === 'libfp') return renderLib();
   if (S.tab === 'neoden') return renderNeoden();
   if (S.tab === 'laser') return renderLaser();
