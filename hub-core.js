@@ -358,6 +358,153 @@ const libTables = () => LIB_TABLES;
 /* Devolve { item, name, how, cands } ou null. `how`: 'escolha' | 'exato' | 'rename' |
    'chave' | 'ambiguo'. Em 'ambiguo' o item vem null de proposito - quem chama tem que
    tratar como nao resolvido e oferecer a escolha, nunca desempatar sozinho. */
+/* ============ Sugestao de simbolo (o 5o passo que resolveLib NAO tem) ============
+
+   resolveLib e uma cascata sobre o NOME: escolha do usuario, nome exato, rename-map,
+   chave normalizada. Quando o componente vem de outra biblioteca do Altium, o nome nao
+   bate com nada e ele fica sem simbolo — 290 de 782 componentes dos projetos reais
+   (37%), em 44 nomes distintos.
+
+   Esta parte NAO resolve nada: ela SUGERE, ranqueada, para a pessoa escolher. E de
+   proposito. Medindo nos projetos reais, os tres primeiros candidatos empatam com
+   frequencia (tres capacitores 0805 100nF diferentes servem igualmente), e escolher
+   sozinho um deles gravaria um esquema silenciosamente errado. Quem confirma vira
+   escolha em Libs/lib-subs.js, e ai o resolveLib passa a resolver pelo primeiro passo.
+
+   O que o componente do projeto tem: sym, comment, footprint, ref (designador).
+   O que o acervo tem: name, description, designator, familia, grupo, categorias e,
+   no almoxarifado, valores[] com label/value/mpn/mouser e itens[].nome do Odoo.       */
+
+/* Tokens de uma frase. A quebra e no texto CRU e o normKey vai token a token: normKey
+   COLA a frase inteira ("Conector 2 Filas 20pin" -> "CONECTOR2FILAS20PIN"), e um token
+   desse tamanho nunca casa com nada. Foi assim que os 120 conectores ficaram sem
+   candidato nenhum. */
+function frasToks(s, dentro){
+  for (const bruto of String(s == null ? '' : s).split(/[^A-Za-z0-9À-ÿ]+/)) {
+    if (!bruto) continue;
+    const t = normKey(bruto);
+    if (t.length > 1) dentro.add(t);
+  }
+  return dentro;
+}
+
+/* Todo texto que identifica um item do acervo, como CONJUNTO de tokens — inclusive o
+   nome do produto no Odoo, que e onde mora "Barra de pinos macho 5.08 10 pinos 2 linhas". */
+function libToks(it){
+  const set = new Set();
+  const add = v => { if (v) frasToks(v, set); };
+  add(it.name); add(it.description); add(it.familia); add(it.grupo);
+  for (const c of (it.categorias || [])) add(c);
+  for (const f of (it.footprints || [])) add(f && f.name);
+  for (const v of (it.valores || [])) {
+    add(v.label); add(v.value); add(v.mpn); add(v.mouser); add(v.footprint);
+    for (const i of (v.itens || [])) { add(i.nome); add(i.categoria); }
+  }
+  return set;
+}
+
+/* quantos pinos o item tem somando as partes — e o que separa um CONECTOR 20V de um 6V */
+function libPins(it){
+  let n = 0;
+  for (const pt of (it.parts || [])) n += ((pt.pins || []).length);
+  if (!n) for (const v of (it.valores || [])) for (const pt of (v.parts || [])) n += ((pt.pins || []).length);
+  return n;
+}
+
+const SUG_IDX = (typeof WeakMap === 'function') ? new WeakMap() : null;
+function sugIndex(list){
+  const arr = list || [];
+  if (SUG_IDX && SUG_IDX.has(arr)) return SUG_IDX.get(arr);
+  const idx = arr.filter(it => it && typeof it.name === 'string')
+                 .map(it => { const toks = libToks(it);
+                              /* colado: o acervo escreve "BAT85" e o Altium "BAT 85".
+                                 Token exato erra isso; o grudado acha. Vale menos porque
+                                 tambem casa pedaco de palavra. */
+                              return { it, toks, pins: libPins(it), colado: [...toks].join('') }; });
+  if (SUG_IDX) SUG_IDX.set(arr, idx);
+  return idx;
+}
+
+/* Comment do Altium as vezes e uma FORMULA nao resolvida ("=Value + ' ' + Voltage"):
+   parece texto, nao identifica peca nenhuma e envenena a busca. Medido em Cap
+   Eletrolitico e Cap Poliester dos projetos reais. */
+const FORMULA_RE = /^\s*=|Value|Voltage|Volts/i;
+const ehFormula = c => !c || FORMULA_RE.test(String(c));
+
+const sugToks = s => [...frasToks(s, new Set())];
+/* numeros soltos no nome/footprint ("2 Filas 20pin", "CONN20_250-710") — um deles
+   costuma ser a contagem de pinos */
+function sugNums(s){
+  const out = [];
+  const m = String(s || '').match(/\d+/g) || [];
+  for (const x of m) { const n = +x; if (n >= 2 && n <= 200) out.push(n); }
+  return out;
+}
+/* So o MAIOR numero conta como pinagem. Em "CONE FIO 15P - 5.08" os candidatos eram
+   15, 5 e 8, e o 5 casava com qualquer peca de 5 pinos do acervo — ruido puro. Em
+   "Conector 2 Filas 20pin" e "CONN20_250-710", o maior util e justamente o 20. */
+const maiorNum = arr => (arr.length ? Math.max.apply(null, arr) : 0);
+
+/* comp = { sym, comment, footprint, ref }. Devolve os melhores candidatos, cada um com
+   `pontos` e `porque` (os motivos em texto, para a UI mostrar em vez de um numero solto). */
+function suggestSym(comp, list, opts){
+  const o = opts || {};
+  const lim = o.limit || 8;
+  const c = comp || {};
+  const cm = ehFormula(c.comment) ? '' : String(c.comment || '');
+  const tc = sugToks(cm), ts = sugToks(c.sym), tf = sugToks(c.footprint);
+  const nPinos = maiorNum(sugNums(c.sym).concat(sugNums(c.footprint)));
+  const des = String(c.ref || '').replace(/[0-9]+$/, '').toUpperCase();
+  const nomeCm = normKey(cm), nomeFp = normKey(c.footprint);
+  const colCm = tc.join('');
+
+  const out = [];
+  for (const e of sugIndex(list)) {
+    let pts = 0; const porque = [];
+    const cobre = (toks, peso, rot) => {
+      if (!toks.length) return 0;
+      const n = toks.filter(t => e.toks.has(t)).length;
+      if (!n) return 0;
+      const f = n / toks.length;
+      pts += peso * f;
+      if (f >= 0.5) porque.push(rot + (f < 1 ? ' ' + Math.round(f * 100) + '%' : ''));
+      return f;
+    };
+    cobre(tc, 50, 'comment');
+    cobre(ts, 20, 'nome');
+    cobre(tf, 12, 'footprint');
+    /* o acervo grava "BAT85" e o Altium "BAT 85": sem isto o casamento certo some */
+    if (colCm && colCm.length > 3 && e.colado.indexOf(colCm) >= 0) {
+      pts += 22; porque.push('comment colado');
+    }
+    if (nomeCm && normKey(e.it.name) === nomeCm) { pts += 45; porque.push('comment = nome'); }
+    if (nomeFp) for (const f of (e.it.footprints || []))
+      if (normKey(f && f.name) === nomeFp) { pts += 25; porque.push('mesmo footprint'); break; }
+    /* Prefixo INTEIRO, nao prefixo-de-prefixo: "CN1" da "CN", que NAO e o "C" de
+       capacitor. Com startsWith, os 120 "Conector 2 Filas 20pin" casavam com CAPACITOR. */
+    if (des && e.it.designator && des === String(e.it.designator).toUpperCase()) {
+      pts += 10; porque.push('designador ' + e.it.designator);
+    }
+    /* Pinagem: e o unico sinal para "Conector 2 Filas 20pin", onde o comment repete o
+       nome e nenhuma palavra bate com o acervo. Duas travas, aprendidas medindo:
+       - so numero >= 4: "2 Filas" casava com toda peca de 2 pinos do acervo;
+       - so quando ja ha OUTRO sinal: contagem de pino sozinha nao identifica nada, e
+         era assim que "Cone Parafuso" virava "24LC256" (8 pinos, e nada mais em comum). */
+    if (e.pins >= 4 && pts > 0 && e.pins === nPinos) {
+      pts += 30; porque.push(e.pins + ' pinos');
+    }
+    if (pts > 0) out.push({ name: e.it.name, item: e.it, pontos: Math.round(pts),
+                            porque, especifico: !!e.it.deValor });
+  }
+  /* Empate e comum e nao e ruido: tres capacitores 0805 100nF servem igualmente. Mas
+     entre "SMD BAW56" (o valor) e "DIODO RETIFICADOR [SMD]" (a familia inteira), o valor
+     e a resposta — e a peca, nao a gaveta. Por isso o especifico sobe no empate. */
+  out.sort((a, b) => (b.pontos - a.pontos)
+                  || (b.especifico - a.especifico)
+                  || a.name.localeCompare(b.name));
+  return out.slice(0, lim);
+}
+
 function resolveLib(list, name, kind, tables){
   const nm = String(name == null ? '' : name);
   if (!nm) return null;
@@ -943,6 +1090,7 @@ function deriveStatus(entry, loaded){
 return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, sheetSize, ORIENT_DIR,
          symbolOf, partOf, footprintOf, pinHot, compTransform, compPinsWorld,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp,
+         suggestSym,
          buildSchModel, extractNets, validateSchematic,
          applyPcbChanges, deriveStatus,
          serializeChanges, serializeSchematic, serializeAnnotations, serializeLibSubs,

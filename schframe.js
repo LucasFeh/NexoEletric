@@ -1069,6 +1069,15 @@ function renderProps(){
      ficha afirma um nome e o desenho mostra outro */
   if (sym && sym.name !== it.sym) prKv(g, 'Resolvido em', sym.name, 'mono');
   prKv(g, 'Acervo', ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca'), ac ? null : 'warn');
+  /* Sem simbolo o componente e um quadrado vermelho e some da extracao de nets. E aqui,
+     onde a ficha ACUSA o problema, que tem que estar o caminho para resolve-lo. */
+  if (!sym){
+    const b = el('button', 'wide', 'Procurar símbolo no acervo…');
+    b.type = 'button';
+    b.title = 'sugere pelo comment, nome, footprint, designador e pinagem — você escolhe';
+    b.onclick = () => abrirEscolhaSimbolo(it);
+    g.append(b);
+  }
   prKv(g, 'Footprint', fpNome, fpNome ? 'mono' : 'warn');
   if (fpNome && !HubCore.footprintOf(PLIB, fpNome)) prKv(g, '', 'não está na PcbLib espelhada', 'warn');
   body.append(g);
@@ -1500,9 +1509,136 @@ $('tbNet').addEventListener('click', () => {
 });
 $('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
 
+/* ═══ Escolher um simbolo para um componente que nao foi identificado ═══
+   37% dos componentes dos projetos reais chegam do Altium com um `sym` que nenhuma
+   biblioteca daqui tem — vieram de outra lib, com outro nome. HubCore.suggestSym ranqueia
+   candidatos do acervo pelo comment, pelo nome, pelo footprint, pelo designador e pela
+   pinagem; QUEM ESCOLHE E A PESSOA. Empate no topo e comum e legitimo (tres capacitores
+   0805 100nF servem igual), e escolher sozinho gravaria um esquema silenciosamente errado.
+   A escolha vira linha em Libs/lib-subs.js — o mesmo lugar onde a aba Biblioteca grava as
+   dela — e dali em diante o resolveLib acerta ja no primeiro passo. */
+let symAlvo = null, symEscolhido = null, symCands = [];
+let symPart = null;
+const camSymEsc = D.mkCamera($('symCv'), ctx => { if (symPart) D.drawSymbolPart(ctx, symPart, {}); },
+                             { bg: D.SCH.sheet });
+const symModalAberto = () => $('symmodal').classList.contains('on');
+
+function fechaSymModal(){
+  $('symmodal').classList.remove('on');
+  symAlvo = null; symEscolhido = null; symCands = []; symPart = null;
+}
+
+function symSelecionar(c){
+  symEscolhido = c;
+  $('symEscolha').textContent = c ? c.name : 'nenhum escolhido';
+  $('symUsar').disabled = !c;
+  for (const b of $('symLista').querySelectorAll('.sym-item'))
+    b.setAttribute('aria-selected', String(!!c && b.dataset.nome === c.name));
+  symPart = c ? (HubCore.partOf(c.item, 1) || null) : null;
+  $('symHint').textContent = symPart ? '' : (c ? 'sem geometria para desenhar' : '');
+  fitPreview(camSymEsc, symPart ? D.symBBox(symPart) : null);
+  camSymEsc.resize(); ajustaPreviews([camSymEsc]);
+}
+
+function symLinha(c, sugerido){
+  const b = el('button', 'sym-item'); b.type = 'button'; b.dataset.nome = c.name;
+  b.setAttribute('aria-selected', 'false');
+  if (sugerido) b.append(el('span', 'nota', String(c.pontos)));
+  b.append(el('div', 'n', c.name));
+  const ac = ACERVO_DE.get(c.name);
+  b.append(el('div', 'p', (sugerido && c.porque.length) ? c.porque.join(' · ')
+                        : (ac ? ac.titulo : ((c.item && c.item.familia) || ''))));
+  b.onclick = () => symSelecionar(c);
+  return b;
+}
+
+function symRenderLista(){
+  const q = $('symBusca').value.trim().toUpperCase();
+  const lista = $('symLista'); lista.textContent = '';
+  if (!q){
+    lista.append(el('div', 'kicker', symCands.length ? 'sugestões para este componente' : 'nenhuma sugestão'));
+    symCands.forEach(c => lista.append(symLinha(c, true)));
+    $('symSum').textContent = symCands.length
+      ? symCands.length + ' sugestão(ões) — ou busque acima em todo o acervo'
+      : 'nada casou automaticamente; use a busca acima';
+    return;
+  }
+  const achados = [];
+  for (const sy of SLIB.symbols){
+    if (sy.name.toUpperCase().indexOf(q) < 0) continue;
+    achados.push({ name: sy.name, item: sy, pontos: 0, porque: [] });
+    if (achados.length >= 200) break;
+  }
+  lista.append(el('div', 'kicker', 'busca em todo o acervo'));
+  achados.forEach(c => lista.append(symLinha(c, false)));
+  $('symSum').textContent = achados.length + (achados.length >= 200 ? '+' : '') + ' de ' + SLIB.symbols.length;
+}
+
+function abrirEscolhaSimbolo(comp){
+  symAlvo = comp;
+  symCands = HubCore.suggestSym(comp, SLIB.symbols, { limit: 12 });
+  $('symMeta').textContent = comp.ref + ' — o Altium mandou "' + comp.sym + '"'
+    + (comp.comment ? ' · comment "' + comp.comment + '"' : '');
+  $('symBusca').value = '';
+  $('symmodal').classList.add('on');
+  symRenderLista();
+  symSelecionar(symCands[0] || null);
+}
+
+/* Grava RELENDO o disco antes: lib-subs.js e da LAN inteira e a aba Biblioteca do hub
+   grava nele tambem — reescrever de memoria apagaria a escolha que a outra aba fez. */
+async function usarSimboloEscolhido(){
+  if (!symAlvo || !symEscolhido) return;
+  const de = symAlvo.sym, para = symEscolhido.name;
+  if (de === para){ HubDialog.toast('já é esse símbolo', 'warn'); return; }
+  if (!HubIO.canPost){
+    await HubDialog.alert('Sem servidor: abra o hub por hubserver.py para gravar a escolha.',
+                          { title: 'não dá para gravar' });
+    return;
+  }
+  const REL = 'Libs/lib-subs.js';
+  let atuais = [];
+  try {
+    const txt = await HubIO.fetchText(REL);
+    atuais = new Function(txt + ';return typeof libSubs !== "undefined" ? libSubs : [];')() || [];
+  } catch (e) {
+    atuais = (typeof libSubs !== 'undefined' && Array.isArray(libSubs)) ? libSubs.slice() : [];
+  }
+  const antes = atuais.find(r => r && r.kind !== 'fp' && r.from === de);
+  if (antes && !(await HubDialog.confirm(
+        '"' + de + '" já aponta para "' + antes.to + '". Trocar por "' + para + '"?',
+        { title: 'já existe uma escolha', ok: 'Trocar' }))) return;
+
+  const nova = atuais.filter(r => !(r && r.kind !== 'fp' && r.from === de));
+  nova.push({ kind: 'sym', from: de, to: para, when: nowStr() });
+  const out = HubCore.serializeLibSubs(nova);
+  if (out.errors.length){
+    await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title: 'lib-subs.js inválido' });
+    return;
+  }
+  const r = await HubIO.saveFile(REL, out.text);
+  if (!r || r.ok === false){
+    await HubDialog.alert((r && r.msg) || 'o servidor recusou a gravação', { title: 'não salvou' });
+    return;
+  }
+  /* aplica sem recarregar: um F5 aqui jogaria fora edicao nao salva da folha */
+  HubCore.setLibTables(typeof renameMap !== 'undefined' ? renameMap : null, nova);
+  const quantos = model.sheets.reduce((k, sh) => k + sh.comps.filter(c => c.sym === de).length, 0);
+  fechaSymModal();
+  reapply();
+  HubDialog.toast('"' + de + '" agora usa "' + para + '"'
+                  + (quantos > 1 ? ' — ' + quantos + ' componentes' : ''), 'ok');
+}
+
+$('symClose').addEventListener('click', fechaSymModal);
+$('symUsar').addEventListener('click', usarSimboloEscolhido);
+$('symBusca').addEventListener('input', symRenderLista);
+$('symmodal').addEventListener('mousedown', e => { if (e.target === $('symmodal')) fechaSymModal(); });
+
 /* ------- teclado ------- */
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (symModalAberto()){ fechaSymModal(); return; }
     if (addOpen()){ closeAdd(); return; }
     if (wireDraw){ wireDraw = null; cam.draw(); return; }
     if (tool !== 'select'){ setTool('select'); return; }
@@ -1518,7 +1654,7 @@ window.addEventListener('keydown', e => {
   }
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-  if (addOpen()) return;                       /* os atalhos da folha nao valem dentro do modal */
+  if (addOpen() || symModalAberto()) return;   /* os atalhos da folha nao valem dentro do modal */
   const k = e.key.toLowerCase();
   if (e.ctrlKey && k === 'z'){ e.preventDefault(); if (editOn) undo(); return; }
   if (e.ctrlKey && k === 'y'){ e.preventDefault(); if (editOn) redo(); return; }

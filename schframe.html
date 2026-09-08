@@ -207,7 +207,7 @@
      esquema. Os tokens e as classes abaixo sao copia dos do hub.html (tema Grafite escuro),
      escopados no modal para nao mexer no resto da vista. Se a casca do hub mudar de
      tokens, este bloco e o lugar para acompanhar. */
-  #addmodal{ position:fixed; inset:0; z-index:50; display:none; align-items:center; justify-content:center;
+  #addmodal, #symmodal{ position:fixed; inset:0; z-index:50; display:none; align-items:center; justify-content:center;
     --font:"Inter", system-ui, -apple-system, sans-serif;
     --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --sp-1:3px; --sp-2:6px; --sp-3:8px; --sp-4:11px;
@@ -221,9 +221,26 @@
     --shadow-menu:0 0 0 1px rgba(var(--tint),0.16), 0 16px 40px rgba(0,0,0,0.65);
     --aside-w:330px;
     background:var(--scrim); color:var(--text); font:400 13px/1.5 var(--font); }
-  #addmodal.on{display:flex;}
-  #addmodal [hidden]{display:none !important;}
-  #addmodal button, #addmodal input, #addmodal select{font:inherit; color:inherit;}
+  #addmodal.on, #symmodal.on{display:flex;}
+  #addmodal [hidden], #symmodal [hidden]{display:none !important;}
+  #addmodal button, #addmodal input, #addmodal select,
+  #symmodal button, #symmodal input, #symmodal select{font:inherit; color:inherit;}
+  /* escolher simbolo: lista a esquerda, previa a direita — duas colunas, sem o carrinho */
+  #symmodal .sym-grid{height:100%; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); min-height:0;}
+  #symmodal .sym-esq{display:grid; grid-template-rows:auto auto 1fr; min-height:0;}
+  #symmodal .sym-dir{display:grid; grid-template-rows:minmax(0,1fr) auto; min-height:0; min-width:0;
+    box-shadow:inset 1px 0 0 var(--line);}
+  #symmodal .sym-item{display:block; width:100%; text-align:left; cursor:pointer; border:0; border-radius:var(--r-sm);
+    background:transparent; color:var(--text); padding:7px 9px; margin-bottom:2px;}
+  #symmodal .sym-item:hover{background:rgba(var(--tint),0.06);}
+  #symmodal .sym-item[aria-selected="true"]{background:rgba(var(--tint),0.11);}
+  #symmodal .sym-item .n{font-size:12px;}
+  #symmodal .sym-item .p{font-size:10px; color:var(--text-4); margin-top:2px;}
+  #symmodal .sym-item .nota{float:right; font-size:10px; color:var(--warn); font-variant-numeric:tabular-nums;}
+  #symmodal .sym-foot{display:flex; align-items:center; gap:10px; padding:11px 16px; box-shadow:inset 0 1px 0 var(--line);}
+  #symmodal .sym-foot .meta{font-size:11px; color:var(--text-3); flex:1; min-width:0;}
+  #symmodal .kicker{font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--text-4);
+    padding:9px 9px 3px;}
   #addmodal :focus{outline:none;}
   #addmodal :focus-visible{outline:2px solid var(--hi); outline-offset:2px;}
   #addmodal ::-webkit-scrollbar{width:10px; height:10px;}
@@ -476,6 +493,31 @@
   <span id="shover"></span>
   <span id="ssel"></span>
   <span id="annmsg" style="color:var(--warn); margin-left:auto;"></span>
+</div>
+
+<!-- ═══ Procurar simbolo para um componente nao identificado ═══ -->
+<div id="symmodal">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="symTitle">
+    <div class="modal-head">
+      <h2 id="symTitle">Procurar símbolo</h2>
+      <span class="meta" id="symMeta"></span>
+      <button class="btn btn-ghost btn-icon x" id="symClose" title="Fechar (Esc)">✕</button>
+    </div>
+    <div class="sym-grid">
+      <div class="sym-esq">
+        <div class="lib-bar"><input class="input" id="symBusca" type="text" placeholder="Buscar em todo o acervo…"></div>
+        <div class="lib-sum" id="symSum"></div>
+        <div class="lib-list" id="symLista"></div>
+      </div>
+      <div class="sym-dir">
+        <div class="viewport sheet"><canvas id="symCv"></canvas><div class="hint" id="symHint"></div></div>
+        <div class="sym-foot">
+          <span class="meta" id="symEscolha">nenhum escolhido</span>
+          <button class="btn" id="symUsar" disabled>Usar este símbolo</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ Adicionar componentes ═══ -->
