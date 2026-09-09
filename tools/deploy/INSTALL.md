@@ -191,14 +191,20 @@ receberam part number, e esse número já foi para o Odoo e para as `.SchLib`.
 
 ## 6. O share SMB
 
+A Ubuntu não usa `/etc/samba/smb.conf.d/`: o `smb.conf` dela é um arquivo só, sem
+`include`. Então a seção vai anexada no fim dele.
+
 ```bash
-sudo cp /srv/altiumhub/bin/smb-altiumhub.conf /etc/samba/smb.conf.d/altiumhub.conf
+grep -q '^\[altiumhub\]' /etc/samba/smb.conf \
+  || sudo tee -a /etc/samba/smb.conf < /srv/altiumhub/bin/smb-altiumhub.conf >/dev/null
 sudo smbpasswd -a altiumhub      # senha DO SHARE, não é a do Linux
 sudo testparm -s                 # tem que passar sem erro
 sudo systemctl reload smbd
 ```
 
-Se o `smb.conf` da máquina não tiver `include`, cole a seção no fim dele.
+O `grep` na frente é o que deixa o bloco seguro para rodar de novo: sem ele, uma
+segunda execução anexa a seção duas vezes e o `testparm` reclama de seção
+duplicada.
 
 A conta do Samba é obrigatória, não é zelo. O cliente SMB do Windows recusa logon
 guest desde a 1709 nas edições Enterprise e Education, e esta bancada é Windows 10
