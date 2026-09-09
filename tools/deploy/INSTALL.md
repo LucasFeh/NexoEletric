@@ -88,8 +88,14 @@ A senha mestre, fora do git:
 ```bash
 sudo install -d -m 755 /etc/altiumhub
 printf 'ALTIUMHUB_MASTER=%s\n' "$(openssl rand -base64 24)" | sudo tee /etc/altiumhub/senha.env >/dev/null
-sudo chmod 600 /etc/altiumhub/senha.env
+sudo chown root:altiumhub /etc/altiumhub/senha.env
+sudo chmod 640 /etc/altiumhub/senha.env
 ```
+
+O modo é 640 com grupo `altiumhub`, e não 600 do root. Quem lê o `env_file` é o
+**cliente** do compose, que roda como `altiumhub`; o container nem chega a ver o
+arquivo. Com 600 o deploy morre com `permission denied` no meio de um comando que
+fala de outra coisa.
 
 Confira antes de seguir:
 

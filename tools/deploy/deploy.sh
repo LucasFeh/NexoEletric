@@ -82,6 +82,15 @@ command -v docker >/dev/null 2>&1 || erro "docker nao esta instalado nesta maqui
 docker compose version >/dev/null 2>&1 || erro "o plugin 'docker compose' nao esta disponivel"
 docker info >/dev/null 2>&1 || erro "$(whoami) nao fala com o daemon do docker. Falta 'usermod -aG docker $(whoami)' e reabrir a sessao."
 
+# O env_file do compose e lido pelo CLIENTE do compose, nao pelo container, entao
+# quem precisa conseguir le-lo e o usuario que roda o deploy. Criado com chmod 600
+# e dono root, ele da 'permission denied' la na frente, no meio de um comando que
+# fala de outra coisa.
+ENVFILE=${ALTIUMHUB_ENVFILE:-/etc/altiumhub/senha.env}
+[ -e "$ENVFILE" ] || erro "$ENVFILE nao existe. E o env_file do compose, com ALTIUMHUB_MASTER."
+[ -r "$ENVFILE" ] || erro "$(whoami) nao consegue ler $ENVFILE.
+   Conserto:  sudo chown root:altiumhub $ENVFILE && sudo chmod 640 $ENVFILE"
+
 echo "-> release $CURTO"
 
 # ── 1. extrai o commit ──────────────────────────────────────────────────────
@@ -155,8 +164,22 @@ fi
 # no PRIMEIRO deploy ainda nao existe; o docker criaria um DIRETORIO com esse
 # nome dentro do bind mount, e o `mv -Tf` do passo 6 nao consegue por um symlink
 # por cima de um diretorio. A checagem passaria e a troca falharia logo depois.
-dc run --rm --no-deps -T -w /srv/altiumhub hub python -m py_compile "$DEST/hubserver.py" \
-  || erro "hubserver.py do commit $CURTO nao compila — nada foi trocado"
+# A saida do compose vai para um arquivo para a mensagem de erro poder dizer o que
+# REALMENTE falhou. Sem isso, qualquer tropeco do compose -- env_file ilegivel,
+# imagem que nao constroi, daemon que caiu -- era relatado como "nao compila", e
+# manda procurar defeito no lugar errado.
+LOG=$(mktemp)
+if ! dc run --rm --no-deps -T -w /srv/altiumhub hub python -m py_compile "$DEST/hubserver.py" >"$LOG" 2>&1; then
+  echo "--- saida do compose ---" >&2
+  cat "$LOG" >&2
+  echo "------------------------" >&2
+  if grep -qi 'syntaxerror\|py_compile' "$LOG"; then
+    rm -f "$LOG"; erro "hubserver.py do commit $CURTO nao compila — nada foi trocado"
+  fi
+  rm -f "$LOG"
+  erro "o compose falhou antes de compilar coisa nenhuma — veja a saida acima. Nada foi trocado."
+fi
+rm -f "$LOG"
 
 # ── 6. guarda para onde voltar, ENTAO troca (o symlink e a troca atomica) ───
 if [ -L "$BASE/current" ]; then
