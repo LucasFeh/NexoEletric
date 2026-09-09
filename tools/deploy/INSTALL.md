@@ -270,21 +270,43 @@ qualquer máquina em vez de depender de cada uma mapear a mesma letra.
 
 ## 9. O dia a dia
 
+Publicar uma versão é uma linha, daqui:
+
 ```powershell
 git push servidor neoden-ordem-por-bico
 ```
 
+O hook `post-receive` chama o `deploy.sh` sozinho. A saída do deploy aparece no
+seu terminal, junto com a do push, e termina em `-> no ar: <hash>`. Não precisa
+entrar no servidor.
+
+Se algo der errado no servidor, o deploy para sem trocar nada e o hub continua
+na versão anterior. Repetir o push **não** refaz o deploy, porque a ref já
+avançou e o hook não é chamado de novo. Nesse caso, no servidor:
+
 ```bash
-/srv/altiumhub/bin/rollback.sh              # volta uma release
-/srv/altiumhub/bin/rollback.sh a1b2c3d      # volta para uma específica
+sudo -u altiumhub /srv/altiumhub/bin/deploy.sh neoden-ordem-por-bico
+```
+
+Voltar atrás:
+
+```bash
+sudo -u altiumhub /srv/altiumhub/bin/rollback.sh              # volta uma release
+sudo -u altiumhub /srv/altiumhub/bin/rollback.sh a1b2c3d      # volta para uma específica
+```
+
+Ver o log:
+
+```bash
 docker compose -f /srv/altiumhub/compose.yml logs --tail 60
 ```
 
-O nome da release é o `git rev-parse --short` do commit empurrado, então
-`git show a1b2c3d` funciona nos dois lados.
-
-A imagem só é reconstruída quando o `requirements.txt` muda. Um deploy normal é
-extrair, trocar o link e recriar o container.
+Três coisas que valem saber. O nome da release é o `git rev-parse --short` do
+commit empurrado, então `git show a1b2c3d` funciona nos dois lados. A imagem só é
+reconstruída quando o `requirements.txt` muda; um deploy normal é extrair, trocar
+o link e recriar o container. E o `deploy.sh` atualiza o próprio `bin/` e o hook a
+partir da release no fim de cada deploy bem-sucedido, então mudanças em
+`tools/deploy/` entram sozinhas a partir do segundo push.
 
 ## 10. O que continua aberto
 

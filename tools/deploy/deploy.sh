@@ -236,4 +236,28 @@ ls -1dt "$BASE"/releases/*/ 2>/dev/null | tail -n +$((GUARDAR + 1)) | while read
   rm -rf "$velha"
 done
 
+# ── 9. bin/ e o hook acompanham a release ───────────────────────────────────
+# Sem isto, toda mudanca em tools/deploy/ exige uma extracao manual, e o par
+# deploy.sh + compose.yml fica em versoes diferentes. Foi assim que apareceu o
+# "No such image: altiumhub:local": deploy.sh velho esperando o compose
+# construir, compose.yml novo ja sem secao build.
+#
+# So depois do deploy dar certo, e por `mv` atomico: o bash que esta executando
+# este arquivo segue lendo o inode antigo, que o mv nao toca. Copiar por cima
+# faria o interpretador ler metade de um script novo.
+for f in deploy.sh rollback.sh compose.yml Dockerfile post-receive smb-altiumhub.conf INSTALL.md PENDENCIAS.md; do
+  [ -f "$DEST/tools/deploy/$f" ] || continue
+  cmp -s "$DEST/tools/deploy/$f" "$BASE/bin/$f" 2>/dev/null && continue
+  cp -f "$DEST/tools/deploy/$f" "$BASE/bin/.$f.novo"
+  chmod --reference="$DEST/tools/deploy/$f" "$BASE/bin/.$f.novo" 2>/dev/null || true
+  mv -f "$BASE/bin/.$f.novo" "$BASE/bin/$f"
+  echo "   bin/$f atualizado"
+done
+if ! cmp -s "$DEST/tools/deploy/post-receive" "$REPO/hooks/post-receive" 2>/dev/null; then
+  cp -f "$DEST/tools/deploy/post-receive" "$REPO/hooks/.post-receive.novo"
+  chmod +x "$REPO/hooks/.post-receive.novo"
+  mv -f "$REPO/hooks/.post-receive.novo" "$REPO/hooks/post-receive"
+  echo "   hook post-receive atualizado"
+fi
+
 echo "-> no ar: $CURTO   (voltar: $BASE/bin/rollback.sh)"
