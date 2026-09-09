@@ -12,22 +12,17 @@ name: altiumhub
 
 services:
   hub:
-    build:
-      context: ./current
-      dockerfile: tools/deploy/Dockerfile
-      args:
-        UID: "1500"
-        GID: "1500"
+    # SEM secao `build:` de proposito. Quem constroi a imagem e o deploy.sh, com
+    # `docker build` e a RELEASE como contexto. Duas razoes:
+    #  - no primeiro deploy o symlink `current` ainda nao existe, entao um
+    #    `context: ./current` aponta para o vazio bem na hora em que a imagem
+    #    precisa nascer;
+    #  - sem `build:`, o compose nunca tenta puxar altiumhub:local de um registry
+    #    e nunca imprime o "pull access denied ... may require docker login", que
+    #    parece falha e nao e.
     image: altiumhub:local
     container_name: altiumhub
-
-    # Sem isto, o compose tenta PUXAR altiumhub:local de um registry antes de
-    # reparar que a imagem e local, e imprime um "pull access denied ... may
-    # require docker login" que parece falha e nao e -- logo abaixo ele constroi.
-    # `build` diz para ir direto ao Dockerfile. O custo e um build por deploy,
-    # que com o cache de camadas e a context minuscula do .dockerignore sai em
-    # segundos.
-    pull_policy: build
+    pull_policy: never
 
     # Rede do host, e nao bridge. Dois motivos medidos:
     #   - o link do BOM (hubserver.py:888-908) e o banner de arranque montam a

@@ -148,15 +148,28 @@ fi
 cp -f "$DEST/tools/deploy/compose.yml" "$BASE/compose.yml"
 
 # ── 4. a imagem so e reconstruida quando as dependencias mudam ───────────────
+# O build e feito AQUI, com a release como contexto, e nao pelo compose: no
+# primeiro deploy o symlink `current` ainda nao existe, entao um contexto
+# apontado para ele nasceria vazio.
 anterior=$(cat "$BASE/anterior" 2>/dev/null || true)
-CONSTRUIR=""
+CONSTRUIR=0
 if ! docker image inspect altiumhub:local >/dev/null 2>&1; then
-  CONSTRUIR="--build"
+  CONSTRUIR=1
   echo "   imagem ainda nao existe: vai construir"
 elif [ -n "$anterior" ] && [ -f "$BASE/releases/$anterior/requirements.txt" ] \
      && ! cmp -s "$DEST/requirements.txt" "$BASE/releases/$anterior/requirements.txt"; then
-  CONSTRUIR="--build"
+  CONSTRUIR=1
   echo "   requirements.txt mudou: vai reconstruir a imagem"
+fi
+if [ "$CONSTRUIR" = 1 ]; then
+  echo "   construindo altiumhub:local (baixa a imagem base e instala as deps)"
+  docker build --pull=false \
+    --build-arg UID=1500 --build-arg GID=1500 \
+    -t altiumhub:local \
+    -f "$DEST/tools/deploy/Dockerfile" "$DEST" \
+    || erro "a imagem nao construiu. Se travou em apt-get ou pip, o servidor
+   provavelmente nao tem saida para a internet. Confira com:
+     curl -sS -m 10 -o /dev/null -w '%{http_code}\\n' https://deb.debian.org/debian/"
 fi
 
 # ── 5. prova que a release ao menos importa antes de trocar o hub ───────────
@@ -192,7 +205,7 @@ mv -Tf "$BASE/current.novo" "$BASE/current"
 # O bind mount e de /srv/altiumhub inteiro, entao o symlink novo ja e visto de
 # dentro do container; mesmo assim recriamos, porque o processo Python que esta
 # no ar carrega o codigo velho em memoria.
-dc up -d --force-recreate $CONSTRUIR
+dc up -d --force-recreate
 ok=0
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
   if curl -fsS -m 5 "http://127.0.0.1:$PORTA/api/index.json" >/dev/null 2>&1; then ok=1; break; fi
