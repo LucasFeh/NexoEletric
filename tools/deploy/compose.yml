@@ -21,6 +21,14 @@ services:
     image: altiumhub:local
     container_name: altiumhub
 
+    # Sem isto, o compose tenta PUXAR altiumhub:local de um registry antes de
+    # reparar que a imagem e local, e imprime um "pull access denied ... may
+    # require docker login" que parece falha e nao e -- logo abaixo ele constroi.
+    # `build` diz para ir direto ao Dockerfile. O custo e um build por deploy,
+    # que com o cache de camadas e a context minuscula do .dockerignore sai em
+    # segundos.
+    pull_policy: build
+
     # Rede do host, e nao bridge. Dois motivos medidos:
     #   - o link do BOM (hubserver.py:888-908) e o banner de arranque montam a
     #     URL a partir do IP real da interface (_lan_ip, hubserver.py:917); na
