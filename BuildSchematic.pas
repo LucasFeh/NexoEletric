@@ -15,16 +15,17 @@
 { ..................................................................................................................... }
 
 const
-  // Caminho como visto do PC que RODA o Altium (workspace fica no LUCAS-PC).
-  SCRIPT_HOME = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror';
-  PROJECTS_DIR = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects';
-  SCHLIB_FILE = 'Z:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib';
-  // Bibliotecas do almoxarifado (tools\almox), procuradas DEPOIS da principal:
-  // xara de nome resolve pela biblioteca da casa. A pasta. Sao uma por familia (ALMOX RESISTOR,
-  // ALMOX CAPACITOR CERAMICO...), geradas pela sincronizacao do hub; o script varre
-  // a pasta em vez de listar arquivo por arquivo.
-  ALMOX_DIR = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Libs\Almox';
-  PCBLIB_FILE = 'Z:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE FOOTPRINT.PcbLib';
+  // Caminho como visto do PC que RODA o Altium. O workspace mora no servidor
+  // ODOO e sai pelo Samba dele; por nome, \\ODOO\altiumhub\current tambem serve.
+  // `current` e um link para a release no ar: um deploy troca o alvo, nao o caminho.
+  SCRIPT_HOME = '\\192.168.15.192\altiumhub\current';
+  PROJECTS_DIR = '\\192.168.15.192\altiumhub\current\Projects';
+  // A biblioteca da casa saiu de cena: a unica em uso e a gerada a partir do Odoo
+  // pela sincronizacao do almoxarifado. Sao uma .SchLib por familia (ALMOX RESISTOR,
+  // ALMOX CAPACITOR CERAMICO...) mais uma .PcbLib com todos os footprints; o script
+  // varre a pasta em vez de listar arquivo por arquivo.
+  ALMOX_DIR = '\\192.168.15.192\altiumhub\current\Libs\Almox';
+  PCBLIB_FILE = '\\192.168.15.192\altiumhub\current\Libs\Almox\FOOTPRINTS ALMOX.PcbLib';
 
 var
   Report: TStringList;
@@ -623,8 +624,8 @@ begin
   end;
 end;
 
-// Abre todas as .SchLib da pasta do almoxarifado. Sem a pasta, segue so com a lib da
-// casa - quem nunca sincronizou continua montando esquema normalmente.
+// Abre todas as .SchLib da pasta do almoxarifado. E a unica origem de simbolos:
+// sem a pasta nao ha biblioteca nenhuma, e o BuildSchematic para com aviso.
 procedure AddAlmoxLibs(Dummy: Integer);
 var
   Busca: TSearchRec;
@@ -648,7 +649,6 @@ begin
     Exit;
   SchLibs := TInterfaceList.Create;
   SchLibNomes := TStringList.Create;
-  AddSchLib(SCHLIB_FILE);
   AddAlmoxLibs(0);
   if SchLibs.Count = 0 then
     Exit;
@@ -1575,7 +1575,7 @@ begin
   if not OpenSchLib(0) then
   begin
     ShowMessage('Nao consegui abrir nenhuma SchLib de origem:' + #13#10 +
-      SCHLIB_FILE + #13#10 + ALMOX_DIR + #13#10#13#10 +
+      ALMOX_DIR + #13#10#13#10 +
       'Abra a biblioteca no Altium e rode de novo.');
     Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free; ItemSheets.Free;
     Exit;

@@ -1,0 +1,81 @@
+# AltiumPCBMirror — o hub no servidor ODOO (192.168.15.192).
+#
+# Vive em /srv/altiumhub/compose.yml. Sobe com:
+#     cd /srv/altiumhub && docker compose up -d
+#
+# O Samba NAO esta aqui de proposito: a maquina ja roda um (as portas 445 e 139
+# estao ocupadas por ele, e ela e o master browser do workgroup, com o share
+# Compartilhado publicado). O share do hub entra no smb.conf que ja existe --
+# veja smb-altiumhub.conf ao lado deste arquivo.
+
+name: altiumhub
+
+services:
+  hub:
+    build:
+      context: ./current
+      dockerfile: tools/deploy/Dockerfile
+      args:
+        UID: "1500"
+        GID: "1500"
+    image: altiumhub:local
+    container_name: altiumhub
+
+    # Rede do host, e nao bridge. Tres motivos medidos no codigo, todos eles
+    # quebram de um jeito silencioso com NAT no meio:
+    #   - _is_local (hubserver.py:237-241) compara o IP do cliente com os IPs da
+    #     propria maquina. Atras da bridge todo cliente vira o gateway do docker,
+    #     e o que era "so do PC do servidor" passa a valer para a LAN inteira.
+    #   - o link do BOM (hubserver.py:888-908) e o banner de arranque montam a
+    #     URL a partir do IP real da interface; na bridge sai o IP interno do
+    #     container, que ninguem alcanca.
+    #   - o Odoo esta em 127.0.0.1:8070 do HOST. Com bridge, 127.0.0.1 dentro do
+    #     container e o proprio container, e o sincronismo nao acha o ERP.
+    network_mode: host
+
+    volumes:
+      # /srv/altiumhub inteiro, no MESMO caminho absoluto de dentro e de fora.
+      # E o que faz os dois niveis de symlink resolverem igual nos dois lados:
+      # current -> releases/<hash>, e dentro da release Projects/ e os arquivos
+      # de estado de Libs/ -> shared/. Montar so a release deixaria os symlinks
+      # apontando para um caminho que nao existe dentro do container.
+      - /srv/altiumhub:/srv/altiumhub
+
+    working_dir: /srv/altiumhub/current
+    command: ["python", "hubserver.py", "--port", "8100"]
+
+    environment:
+      TZ: America/Sao_Paulo
+      PYTHONUNBUFFERED: "1"
+      PYTHONIOENCODING: utf-8
+    # A senha mestre nunca entra em arquivo versionado. Crie no host:
+    #   printf 'ALTIUMHUB_MASTER=%s\n' "$(openssl rand -base64 24)" \
+    #     | sudo tee /etc/altiumhub/senha.env
+    #   sudo chmod 600 /etc/altiumhub/senha.env
+    env_file:
+      - /etc/altiumhub/senha.env
+
+    restart: unless-stopped
+
+    # /__live.js (hubserver.py:94) devolve uma constante e nao toca disco. E o
+    # que se quer num teste que roda a cada 30 s. O /api/index.json, que o
+    # deploy.sh usa uma vez por deploy, le TODOS os board.js -- bom como prova
+    # de que o hub funciona, caro como batimento cardiaco.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-m", "5", "http://127.0.0.1:8100/__live.js"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+    # Divide maquina com o ERP da empresa. Peso de CPU abaixo do padrao 1024, e
+    # teto de memoria para um vazamento no hub nunca chegar no Odoo.
+    cpu_shares: 256
+    mem_limit: 1g
+    pids_limit: 256
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

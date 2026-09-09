@@ -17,10 +17,11 @@
 { ..................................................................................................................... }
 
 const
-  // Caminho como visto do PC que RODA o Altium (workspace fica no LUCAS-PC).
-  // Se o nome nao resolver na sua rede, troque LUCAS-PC pelo IP da maquina.
-  SCRIPT_HOME = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror';
-  PROJECTS_DIR = '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects';
+  // Caminho como visto do PC que RODA o Altium. O workspace mora no servidor
+  // ODOO e sai pelo Samba dele; por nome, \\ODOO\altiumhub\current tambem serve.
+  // `current` e um link para a release no ar: um deploy troca o alvo, nao o caminho.
+  SCRIPT_HOME = '\\192.168.15.192\altiumhub\current';
+  PROJECTS_DIR = '\\192.168.15.192\altiumhub\current\Projects';
   TOL_MM = 0.001;
 
 var

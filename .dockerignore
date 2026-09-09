@@ -1,0 +1,6 @@
+# A imagem so precisa do requirements.txt: o codigo entra por bind mount do
+# release, nao por COPY. Sem isto o contexto de build seriam os 270 MB de
+# Libs/ -- e os symlinks de Libs/ e Projects/ da release, que apontam para
+# fora do contexto, fariam o build falhar.
+*
+!requirements.txt
