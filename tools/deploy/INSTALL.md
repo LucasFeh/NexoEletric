@@ -91,10 +91,19 @@ printf 'ALTIUMHUB_MASTER=%s\n' "$(openssl rand -base64 24)" | sudo tee /etc/alti
 sudo chmod 600 /etc/altiumhub/senha.env
 ```
 
-Confira antes de seguir. As três linhas têm que aparecer:
+Confira antes de seguir:
 
 ```bash
 ls -ld /srv/altiumhub /srv/altiumhub-repo.git && getent passwd altiumhub
+```
+
+`/srv/altiumhub` tem que sair como `drwxr-xr-x`. Se sair `drwxr-x---`, foi o
+`useradd -m` que criou o home com o `HOME_MODE` do sistema, que na Ubuntu é 750, e
+aí nenhum outro usuário nem entra na pasta. O `install -d` acima corrige, mas se
+você já tinha criado antes, force:
+
+```bash
+sudo chmod 755 /srv/altiumhub
 ```
 
 ## 2. Chave SSH, daqui
@@ -130,11 +139,20 @@ Só popula o repositório. O hook ainda não existe.
 
 ## 4. Servidor: instalar os scripts
 
+Tudo por caminho absoluto, sem `cd`. Você não precisa conseguir entrar em
+`/srv/altiumhub` com o seu usuário para instalar o hub, e insistir nisso é o que
+leva ao `sudo cd`, que não existe: `cd` é do shell, não um programa.
+
 ```bash
-cd /srv/altiumhub
 sudo -u altiumhub git --git-dir=/srv/altiumhub-repo.git archive neoden-ordem-por-bico tools/deploy \
-  | sudo -u altiumhub tar -x --strip-components=2 -C bin
-sudo -u altiumhub cp bin/post-receive /srv/altiumhub-repo.git/hooks/post-receive
+  | sudo -u altiumhub tar -x --strip-components=2 -C /srv/altiumhub/bin
+sudo -u altiumhub cp /srv/altiumhub/bin/post-receive /srv/altiumhub-repo.git/hooks/post-receive
+```
+
+Para olhar lá dentro, use um shell do dono em vez de forçar permissão:
+
+```bash
+sudo -u altiumhub -s        # abre um shell como altiumhub; `exit` volta
 ```
 
 ## 5. Semear `shared/` antes do primeiro deploy
