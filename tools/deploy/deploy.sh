@@ -37,8 +37,18 @@ PROJECTS_DE=shared
 
 # O que sobrevive ao deploy: os caminhos que o SERVIDOR escreve, medidos no
 # codigo. Ficam em shared/ e entram na release por symlink.
-COMPARTILHADOS=(
+#
+# Diretorios e arquivos vao em listas separadas porque o tratamento de "nao
+# existe em lado nenhum" e diferente: diretorio a gente cria vazio, arquivo a
+# gente deixa passar. Trash/ e Laser/ nascem so em runtime e sao gitignored --
+# sem o mkdir, o hub gravaria dentro da release e a lixeira do "Excluir projeto"
+# seria varrida pela poda no deploy seguinte.
+COMPARTILHADOS_DIR=(
   "Libs/Almox"                     # .SchLib do almoxarifado, 255 MB (gitignored)
+  "Trash"                          # hubserver.py TRASH_DIR: o unico desfazer que existe
+  "Laser"                          # .lbrn gerados pelo painel do laser
+)
+COMPARTILHADOS_ARQ=(
   "Libs/almox-basicos.js"          # espelhos gerados (gitignored)
   "Libs/almox-especiais.js"
   "Libs/almox-index.js"
@@ -47,12 +57,14 @@ COMPARTILHADOS=(
   "Libs/almox-parts.json"          # livro-razao rotulo->part number: PERDER RENUMERA TUDO
   "Libs/lib-ledger.json"           # guardiao.py:166 reescreve a cada sincronismo
   "Libs/lib-subs.js"               # unico Libs/ que o browser grava (hubserver.py:157)
+  "Libs/schlib.js"                 # symserver.py:374 reescreve a cada Salvar
+  "Libs/symbols-lib.js"            # symserver.py:540 — simbolos desenhados a mao
+  "Libs/libs-report.txt"           # symserver.py:711
+  "projects.js"                    # indice dos projetos; os .pas reescrevem
   "tools/almox/componentes_odoo.csv"   # estado do sincronismo incremental
   "tools/symbols/config.json"      # caminhos da maquina, nao do projeto
   "hub-config.json"
   "hub-almox.json"                 # credenciais do Odoo — chmod 600
-  "Trash"
-  "Laser"
 )
 
 erro() { echo "!! $*" >&2; exit 1; }
@@ -72,28 +84,46 @@ docker info >/dev/null 2>&1 || erro "$(whoami) nao fala com o daemon do docker. 
 
 echo "-> release $CURTO"
 
-# ── 1. extrai o commit (release nunca e reescrita; repetir um deploy refaz) ──
-rm -rf "$DEST"
-mkdir -p "$DEST"
-git --git-dir="$REPO" archive "$COMMIT" | tar -x -C "$DEST"
+# ── 1. extrai o commit ──────────────────────────────────────────────────────
+# A release e imutavel, entao re-extrair a que ESTA NO AR seria so destruicao:
+# o `rm -rf` apagaria o diretorio de onde o container serve, com `current` ainda
+# apontando para ele, e levaria junto o que o servidor escreveu la dentro. Como o
+# INSTALL manda re-rodar o deploy depois de semear um arquivo em shared/, esse
+# caso e rotina, nao exotico. Aqui ele vira "so religa os symlinks".
+NO_AR=$(basename "$(readlink -f "$BASE/current" 2>/dev/null)" 2>/dev/null || true)
+if [ "$CURTO" = "$NO_AR" ] && [ -d "$DEST" ]; then
+  echo "   $CURTO ja e a release no ar: religando shared/ sem re-extrair"
+else
+  rm -rf "$DEST"
+  mkdir -p "$DEST"
+  git --git-dir="$REPO" archive "$COMMIT" | tar -x -C "$DEST"
+fi
 
 # ── 2. liga o que e estado, nao codigo ──────────────────────────────────────
 mkdir -p "$BASE/shared"
-for alvo in "${COMPARTILHADOS[@]}"; do
-  origem=$BASE/shared/$alvo
+
+ligar() {   # $1 = caminho relativo, $2 = "dir" ou "arq"
+  local alvo=$1 tipo=$2
+  local origem=$BASE/shared/$alvo
   if [ ! -e "$origem" ]; then
     if [ -e "$DEST/$alvo" ]; then
       mkdir -p "$(dirname "$origem")"
       cp -a "$DEST/$alvo" "$origem"
       echo "   semeou shared/$alvo a partir do commit"
+    elif [ "$tipo" = dir ]; then
+      mkdir -p "$origem"           # Trash/, Laser/: nascem so em runtime
+      echo "   criou shared/$alvo vazio"
     else
-      continue                     # nao existe dos dois lados: nada a ligar
+      return 0                     # arquivo que nao existe dos dois lados
     fi
   fi
   mkdir -p "$(dirname "$DEST/$alvo")"
   rm -rf "$DEST/$alvo"
   ln -s "$origem" "$DEST/$alvo"
-done
+}
+
+for alvo in "${COMPARTILHADOS_DIR[@]}"; do ligar "$alvo" dir; done
+for alvo in "${COMPARTILHADOS_ARQ[@]}"; do ligar "$alvo" arq; done
 
 if [ "$PROJECTS_DE" = shared ]; then
   mkdir -p "$BASE/shared/Projects"
@@ -103,9 +133,6 @@ if [ "$PROJECTS_DE" = shared ]; then
   fi
   rm -rf "$DEST/Projects"
   ln -s "$BASE/shared/Projects" "$DEST/Projects"
-  if [ -e "$BASE/shared/projects.js" ]; then
-    rm -f "$DEST/projects.js"; ln -s "$BASE/shared/projects.js" "$DEST/projects.js"
-  fi
 fi
 
 # ── 3. o compose.yml e versionado: vem da release, nao do disco do servidor ──

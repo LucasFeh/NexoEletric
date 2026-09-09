@@ -24,10 +24,21 @@ Só o que está dentro do projeto:
 | `Projects/` | 5,6 MB |
 | os quatro `.pas` | 178 KB |
 
-A biblioteca da casa saiu de cena. A única em uso é a gerada a partir do Odoo, que
-vive em `Libs/Almox`: 32 `.SchLib`, uma por família, mais `FOOTPRINTS ALMOX.PcbLib`
-com 63 MB de footprints. Os `.pas` já apontam só para lá, e a pasta
-`D:\ALTIUM LIBRARY ------ LUCAS` não viaja nem é referenciada.
+A biblioteca gerada a partir do Odoo vive em `Libs/Almox`: 32 `.SchLib`, uma por
+família, mais `FOOTPRINTS ALMOX.PcbLib` com 63 MB de footprints. Ela viaja junto.
+
+A biblioteca da casa em `D:\ALTIUM LIBRARY ------ LUCAS` **não** viaja, e o
+`BuildSchematic.pas` continua abrindo ela por UNC. O motivo está medido: os 14
+projetos com `schematic.js` usam 108 símbolos distintos, e só **3** existem nas
+bibliotecas do almoxarifado. Outros 42 existem só na lib da casa, com nomes como
+`RES [SMD]`, `CAP [SMD]`, `BC337` e `CONE PADRAO`. Tirar a lib da casa faz
+`FindLibSymbol` falhar, o `ErrCount` crescer e a validação abortar sem criar nada:
+os 14 projetos deixam de ser reconstruíveis.
+
+Aposentar a lib da casa é uma mudança separada desta migração, e o preço dela é
+fazer nascer no almoxarifado os símbolos que faltam. Para medir de novo a qualquer
+momento, cruze os `"sym"` dos `Projects/*/schematic.js` com os `"name"` dos
+`Libs/almox-*.js`. Enquanto der mais que zero, a linha não pode sair.
 
 ## Como fica no disco do servidor
 
@@ -131,23 +142,38 @@ sudo -u altiumhub chmod 600 /srv/altiumhub/shared/hub-almox.json
 faltar, `le_config()` cai calado no padrão de `odoo_pull.py:34`, que aponta para o
 Odoo de **teste**, e o sincronismo puxa do ERP errado sem erro nenhum.
 
-E daqui, os 265 MB de biblioteca:
+E daqui, os 265 MB de biblioteca mais os arquivos de estado:
 
 ```powershell
 scp -r Libs\Almox altiumhub@192.168.15.192:/srv/altiumhub/shared/Libs/
-scp Libs\almox-basicos.js Libs\almox-especiais.js Libs\almox-index.js altiumhub@192.168.15.192:/srv/altiumhub/shared/Libs/
+scp Libs\almox-basicos.js Libs\almox-especiais.js Libs\almox-index.js Libs\almox-sync.js Libs\almox-guardiao.js altiumhub@192.168.15.192:/srv/altiumhub/shared/Libs/
+scp -p Libs\almox-parts.json Libs\lib-ledger.json Libs\lib-subs.js altiumhub@192.168.15.192:/srv/altiumhub/shared/Libs/
+scp -p projects.js altiumhub@192.168.15.192:/srv/altiumhub/shared/
 scp tools\almox\componentes_odoo.csv altiumhub@192.168.15.192:/srv/altiumhub/shared/tools/almox/
 ```
+
+A segunda e a terceira linha não são detalhe. `almox-parts.json`, `lib-ledger.json`,
+`lib-subs.js` e `projects.js` são versionados mas estão **sujos** na árvore agora:
+o `almox-parts.json` do disco tem 148 famílias contra 134 no commit. Se você não os
+mandar do disco, o deploy os semeia a partir do commit e o servidor nasce com o
+livro-razão velho. Aí o primeiro sincronismo renumera as 14 famílias que já
+receberam part number, e esse número já foi para o Odoo e para as `.SchLib`.
 
 ## 6. O share SMB
 
 ```bash
 sudo cp /srv/altiumhub/bin/smb-altiumhub.conf /etc/samba/smb.conf.d/altiumhub.conf
-sudo testparm -s            # tem que passar sem erro
+sudo smbpasswd -a altiumhub      # senha DO SHARE, não é a do Linux
+sudo testparm -s                 # tem que passar sem erro
 sudo systemctl reload smbd
 ```
 
 Se o `smb.conf` da máquina não tiver `include`, cole a seção no fim dele.
+
+A conta do Samba é obrigatória, não é zelo. O cliente SMB do Windows recusa logon
+guest desde a 1709 nas edições Enterprise e Education, e esta bancada é Windows 10
+Enterprise. O sintoma engana: o `testparm` passa, o `smbclient -L` rodado no próprio
+servidor lista o share, e nenhum PC monta.
 
 ## 7. Primeiro deploy
 
@@ -159,22 +185,36 @@ Ele constrói a imagem na primeira vez, extrai a release, liga `shared/`, compil
 `hubserver.py` para provar que o commit importa, troca o symlink, sobe o container
 e confere que o hub respondeu. Se não responder, volta sozinho.
 
-O hub fica em `http://192.168.15.192:8100`.
+O hub fica em `http://192.168.15.192:8100`. Confira que o estado ficou mesmo fora
+da release, senão o próximo deploy leva junto:
+
+```bash
+for f in Trash Laser projects.js Libs/Almox Libs/almox-parts.json Libs/lib-ledger.json; do
+  [ -L /srv/altiumhub/current/$f ] || echo "NAO E SYMLINK: $f"
+done
+```
 
 ## 8. Windows: mapear e apontar o Altium
 
 ```powershell
+cmdkey /add:192.168.15.192 /user:altiumhub /pass
 net use P: \\192.168.15.192\altiumhub /persistent:yes
 ```
+
+Guarde a credencial com `cmdkey`. O Windows mantém uma credencial por servidor,
+então este share e o `Compartilhado` que já existe têm que abrir com o mesmo
+usuário. Dois usuários no mesmo servidor dão "multiple connections to a server by
+the same user are not allowed".
 
 Os quatro `.pas` já apontam para `\\192.168.15.192\altiumhub\current`. Rode-os do
 Altium a partir de `P:\current`. Como `current` é um link para a release no ar, um
 deploy troca o alvo e o caminho continua o mesmo.
 
-O `BuildSchematic.pas` agora abre só as bibliotecas do almoxarifado. A constante
-`SCHLIB_FILE` foi removida junto com a chamada que a usava, e `PCBLIB_FILE` passou
-a apontar para `Libs\Almox\FOOTPRINTS ALMOX.PcbLib`. Se a pasta do almoxarifado
-faltar, ele para com aviso em vez de montar esquema com biblioteca vazia.
+O `BuildSchematic.pas` abre as bibliotecas do almoxarifado **e** a da casa. As duas
+constantes da lib da casa saíram do `Z:`, que não resolve, e passaram a apontar por
+UNC para onde o arquivo realmente está, `\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS`.
+É o mesmo caminho que `tools/almox/schlib_escritor.py:24` já usa, e funciona de
+qualquer máquina em vez de depender de cada uma mapear a mesma letra.
 
 ## 9. O dia a dia
 

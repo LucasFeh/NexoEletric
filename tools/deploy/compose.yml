@@ -21,16 +21,20 @@ services:
     image: altiumhub:local
     container_name: altiumhub
 
-    # Rede do host, e nao bridge. Tres motivos medidos no codigo, todos eles
-    # quebram de um jeito silencioso com NAT no meio:
-    #   - _is_local (hubserver.py:237-241) compara o IP do cliente com os IPs da
-    #     propria maquina. Atras da bridge todo cliente vira o gateway do docker,
-    #     e o que era "so do PC do servidor" passa a valer para a LAN inteira.
+    # Rede do host, e nao bridge. Dois motivos medidos:
     #   - o link do BOM (hubserver.py:888-908) e o banner de arranque montam a
-    #     URL a partir do IP real da interface; na bridge sai o IP interno do
-    #     container, que ninguem alcanca.
+    #     URL a partir do IP real da interface (_lan_ip, hubserver.py:917); na
+    #     bridge sai o IP interno do container, que ninguem alcanca.
     #   - o Odoo esta em 127.0.0.1:8070 do HOST. Com bridge, 127.0.0.1 dentro do
     #     container e o proprio container, e o sincronismo nao acha o ERP.
+    #
+    # O que host mode NAO conserta: _is_local (hubserver.py:237-241) compara o IP
+    # do CLIENTE com os IPs da maquina. Num servidor headless o usuario esta
+    # sempre remoto, em qualquer modo de rede, entao o formulario de credencial
+    # do Odoo nunca aparece no navegador de ninguem. Por isso o INSTALL manda
+    # escrever shared/hub-almox.json a mao, com os QUATRO campos: a variavel
+    # ODOO_SENHA cobre so a senha (odoo_pull.py:60-61), e url/db/login cairiam no
+    # PADRAO de odoo_pull.py:34, que e o Odoo de TESTE.
     network_mode: host
 
     volumes:
