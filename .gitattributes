@@ -1,0 +1,18 @@
+# Fim de linha. Sem este arquivo, cada maquina decide sozinha pelo core.autocrlf
+# (true aqui no Windows, false por padrao no Ubuntu do servidor) e os quatro
+# espelhos gerados com CRLF -- Libs/schlib.js, Libs/pcblib.js, Libs/symbols-lib.js
+# e Libs/libs-report.txt -- viram um diff de arquivo inteiro a cada troca de lado.
+* text=auto eol=lf
+
+# Os scripts do Altium sao editados no DelphiScript, que quer CRLF.
+*.pas text eol=crlf
+*.PrjScr text eol=crlf
+
+# Binarios: git nunca deve tocar nesses bytes.
+*.SchLib binary
+*.PcbLib binary
+*.DbLib  binary
+*.sqlite binary
+*.png binary
+*.jpg binary
+*.pdf binary

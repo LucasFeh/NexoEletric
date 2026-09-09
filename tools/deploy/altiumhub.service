@@ -1,0 +1,74 @@
+# /etc/systemd/system/altiumhub.service
+#
+# ExecStart chama hubserver.py DIRETO, nao gunicorn/waitress, e isso e de proposito:
+#
+#   - o watcher de mtime que alimenta o auto-reload (SSE) so sobe dentro do
+#     `if __name__ == '__main__'` (hubserver.py:932). Importado como `hubserver:app`
+#     por um WSGI ele nunca roda, e a pagina para de recarregar sozinha em silencio.
+#   - _runs, _almox_runs e _almox_lock sao estado em MEMORIA do processo. O POST que
+#     reserva a corrida e o GET que abre o stream precisam cair no mesmo processo;
+#     com dois workers, metade das sincronizacoes responde 404.
+#
+# Um processo com threads e o desenho certo: e ferramenta de LAN com um punhado de
+# abas, dividindo maquina com o ERP da empresa.
+[Unit]
+Description=AltiumPCBMirror hub
+After=network-online.target
+Wants=network-online.target
+# StartLimit* pertence a [Unit]; posto em [Service] o systemd ignora com aviso no
+# journal — que e exatamente o silencio a evitar quando a porta estiver ocupada.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# Usuario de sistema proprio: nem login, nem o usuario do Odoo.
+#   sudo adduser --system --group --home /srv/altiumhub altiumhub
+User=altiumhub
+Group=altiumhub
+WorkingDirectory=/srv/altiumhub/current
+
+# O venv fica FORA das releases para nao ser reinstalado a cada push; o codigo
+# vem pelo symlink current/, que e o que a troca atomica move.
+ExecStart=/srv/altiumhub/.venv/bin/python /srv/altiumhub/current/hubserver.py --port 8100
+
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+# Sem isto o servidor carimba UTC e toda data do hub (created dos sinalizadores,
+# carimbo do ledger, nome das pastas do Trash) sai 3 h adiantada.
+Environment=TZ=America/Sao_Paulo
+
+# A senha mestre NAO entra em arquivo versionado. Vai num drop-in chmod 600:
+#   /etc/systemd/system/altiumhub.service.d/senha.conf
+#   [Service]
+#   Environment=ALTIUMHUB_MASTER=<senha gerada>
+
+Restart=always
+RestartSec=2
+
+# ── nunca competir com o Odoo ───────────────────────────────────────────────
+Nice=10
+CPUWeight=20
+MemoryMax=1G
+
+# ── contencao ───────────────────────────────────────────────────────────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# Unico lugar gravavel: releases/, shared/ e o current/. O symserver grava em
+# Libs/ e tools/symbols/relatorio.txt, e os dois ficam aqui dentro.
+ReadWritePaths=/srv/altiumhub
+
+# hubserver.py:938 faz app.run(host='0.0.0.0') e nao aceita --host, entao a unica
+# trava de rede possivel e esta. Vale para entrada E saida: a LAN alcanca o hub, e
+# o hub alcanca o Odoo em 192.168.15.192:8070 — e nada mais.
+IPAddressDeny=any
+IPAddressAllow=192.168.15.0/24
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target

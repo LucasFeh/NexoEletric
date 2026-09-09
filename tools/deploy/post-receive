@@ -1,0 +1,36 @@
+#!/bin/sh
+# AltiumPCBMirror — deploy por push.
+#
+# Mora em /srv/altiumhub/repo.git/hooks/post-receive (chmod +x).
+# No Windows, publicar uma versao e uma linha:  git push servidor <branch>
+#
+# O hook so decide SE deploya; quem deploya e o bin/deploy.sh. Assim, repetir um
+# deploy que falhou nao depende de refazer o push — que, alias, nao adiantaria:
+# post-receive roda DEPOIS das refs ja terem avancado, entao o commit ja esta no
+# repositorio e um segundo push nao traz nada de novo para o hook ver.
+set -eu
+
+BASE=${ALTIUMHUB_BASE:-/srv/altiumhub}
+BRANCH_ALVO=neoden-ordem-por-bico
+
+while read -r _velho novo ref; do
+  if [ "$ref" != "refs/heads/$BRANCH_ALVO" ]; then
+    echo "-> $ref recebido, sem deploy (o hub segue $BRANCH_ALVO)"
+    continue
+  fi
+
+  # o git exporta GIT_DIR apontando para o bare; sem limpar, todo comando do
+  # deploy rodaria contra o repositorio errado.
+  unset GIT_DIR GIT_WORK_TREE GIT_QUARANTINE_PATH GIT_INDEX_FILE
+
+  if "$BASE/bin/deploy.sh" "$novo"; then
+    continue
+  fi
+
+  echo "!!"
+  echo "!! O DEPLOY FALHOU e o hub continua na versao anterior."
+  echo "!! O commit JA esta no repositorio do servidor: repetir o push nao refaz nada."
+  echo "!! Para tentar de novo, no servidor:  $BASE/bin/deploy.sh $novo"
+  echo "!!"
+  exit 1
+done

@@ -31,3 +31,12 @@ tools/symbols/relatorio.txt
 # quem esta montando a placa, e muda a cada peça marcada -- nao e do projeto.
 bom-vistos.json
 bom-opts.json
+
+# ambiente virtual do servidor (o deploy cria /srv/altiumhub/.venv fora da release,
+# mas quem instalar a mao dentro da arvore nao pode comitar isso)
+.venv/
+venv/
+
+# lixeira do hub: /api/project/<id>/delete move a pasta do projeto para ca
+# (hubserver.py, TRASH_DIR). E estado de maquina, e o hub SERVE o que esta dentro.
+Trash/
