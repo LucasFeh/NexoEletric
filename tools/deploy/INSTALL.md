@@ -149,10 +149,20 @@ Tudo por caminho absoluto, sem `cd`. Você não precisa conseguir entrar em
 `/srv/altiumhub` com o seu usuário para instalar o hub, e insistir nisso é o que
 leva ao `sudo cd`, que não existe: `cd` é do shell, não um programa.
 
+Cada comando numa linha só, sem barra de continuação. Colado em duas partes, o
+`git archive` despeja o tar na tela e o `tar` do outro lado morre com "Refusing to
+read archive contents from terminal". O `bin/` fica com os scripts velhos e o
+sintoma só aparece no deploy seguinte, com uma mensagem que não fala disso.
+
 ```bash
-sudo -u altiumhub git --git-dir=/srv/altiumhub-repo.git archive neoden-ordem-por-bico tools/deploy \
-  | sudo -u altiumhub tar -x --strip-components=2 -C /srv/altiumhub/bin
+sudo -u altiumhub git --git-dir=/srv/altiumhub-repo.git archive neoden-ordem-por-bico tools/deploy | sudo -u altiumhub tar -x --strip-components=2 -C /srv/altiumhub/bin
 sudo -u altiumhub cp /srv/altiumhub/bin/post-receive /srv/altiumhub-repo.git/hooks/post-receive
+```
+
+Confira que veio o script novo. Tem que responder `1`:
+
+```bash
+grep -c 'docker build' /srv/altiumhub/bin/deploy.sh
 ```
 
 Para olhar lá dentro, use um shell do dono em vez de forçar permissão:
