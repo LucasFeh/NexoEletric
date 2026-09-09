@@ -60,16 +60,22 @@ faz `current` e os symlinks de `shared/` resolverem igual dentro e fora.
 
 ## 1. Servidor: usuário, docker, estrutura
 
+Este bloco pode ser rodado de novo sem estragar nada: cada linha só age se o que
+ela cria ainda não existir. É o passo que cria `/srv/altiumhub`, então nada dos
+passos seguintes funciona antes dele.
+
 ```bash
 docker --version && docker compose version      # premissa do plano
 
-sudo groupadd -g 1500 altiumhub
-sudo useradd -u 1500 -g 1500 -m -d /srv/altiumhub -s /bin/bash altiumhub
+getent group  altiumhub >/dev/null || sudo groupadd -g 1500 altiumhub
+getent passwd altiumhub >/dev/null || sudo useradd -u 1500 -g 1500 -d /srv/altiumhub -s /bin/bash altiumhub
 sudo usermod -aG docker altiumhub
-sudo -u altiumhub mkdir -p /srv/altiumhub/{releases,shared,bin,.ssh}
-sudo -u altiumhub chmod 700 /srv/altiumhub/.ssh
 
-sudo mkdir -p /srv/altiumhub-repo.git && sudo chown altiumhub:altiumhub /srv/altiumhub-repo.git
+sudo install -d -o altiumhub -g altiumhub -m 755 \
+  /srv/altiumhub /srv/altiumhub/releases /srv/altiumhub/shared /srv/altiumhub/bin \
+  /srv/altiumhub-repo.git
+sudo install -d -o altiumhub -g altiumhub -m 700 /srv/altiumhub/.ssh
+
 sudo -u altiumhub git -C /srv/altiumhub-repo.git init --bare
 ```
 
@@ -80,9 +86,15 @@ não consegue reescrever.
 A senha mestre, fora do git:
 
 ```bash
-sudo mkdir -p /etc/altiumhub
-printf 'ALTIUMHUB_MASTER=%s\n' "$(openssl rand -base64 24)" | sudo tee /etc/altiumhub/senha.env
+sudo install -d -m 755 /etc/altiumhub
+printf 'ALTIUMHUB_MASTER=%s\n' "$(openssl rand -base64 24)" | sudo tee /etc/altiumhub/senha.env >/dev/null
 sudo chmod 600 /etc/altiumhub/senha.env
+```
+
+Confira antes de seguir. As três linhas têm que aparecer:
+
+```bash
+ls -ld /srv/altiumhub /srv/altiumhub-repo.git && getent passwd altiumhub
 ```
 
 ## 2. Chave SSH, daqui
