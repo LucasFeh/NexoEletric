@@ -584,7 +584,7 @@ function buildSchModel(schematic){
       /* w/h = medida REAL da folha no Altium, quando o export a trouxe; 0 = "nao sei", e ai
          sheetSize() cai na tabela por nome. Nao inventar medida a partir do size aqui. */
       const s = { name: it.name, size: it.size || 'A4', w: isNum(it.w) ? it.w : 0, h: isNum(it.h) ? it.h : 0,
-                  comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], texts:[] };
+                  comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], noercs:[], texts:[] };
       model.sheets.push(s); byName[it.name] = s;
       continue;
     }
@@ -592,7 +592,7 @@ function buildSchModel(schematic){
     if (!s) {
       /* folha IMPLICITA (ninguem declarou): mesma forma da declarada, sem medida de onde sair */
       s = { name: it.sheet || 'main', size:'A4', w:0, h:0,
-            comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], texts:[] };
+            comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], noercs:[], texts:[] };
       model.sheets.push(s); byName[s.name] = s;
     }
     if      (it.t === 'comp')     s.comps.push(it);
@@ -601,6 +601,10 @@ function buildSchModel(schematic){
     else if (it.t === 'power')    s.powers.push(it);
     else if (it.t === 'port')     s.ports.push(it);
     else if (it.t === 'junction') s.junctions.push(it);
+    /* o No ERC entra no modelo mas NAO na extracao de nets: ele e um recado para o ERC
+       do Altium, nao um condutor — somar seu ponto aos nos faria o preview inventar
+       ligacao que a folha real nao tem */
+    else if (it.t === 'noerc')    s.noercs.push(it);
     else if (it.t === 'text')     s.texts.push(it);
   }
   return model;
@@ -790,6 +794,17 @@ function validateSchematic(schematic, schlib, pcblib){
     for (const l of s.netlabels) if (!l.net) errors.push(`netlabel sem "net" na folha ${s.name}`);
     for (const p of s.powers)    if (!p.net) errors.push(`power sem "net" na folha ${s.name}`);
     for (const p of s.ports)     if (!p.net) errors.push(`port sem "net" na folha ${s.name}`);
+    /* No ERC fora de pino nao marca nada e falha CALADO: o Altium prende a diretiva onde
+       ela esta e segue reclamando do pino que ninguem cobriu. Como o erro e invisivel na
+       folha (o X aparece, so que 10 mil ao lado), o aviso e o unico jeito de ve-lo. */
+    if (s.noercs.length){
+      const quentes = new Set();
+      for (const c of s.comps)
+        for (const p of (compPinsWorld(c, schlib) || [])) quentes.add(p.x + "," + p.y);
+      for (const n of s.noercs)
+        if (!quentes.has(n.x + "," + n.y))
+          warnings.push(`No ERC em (${n.x},${n.y}) nao esta na ponta de nenhum pino`);
+    }
   }
   return { errors, warnings };
 }
@@ -901,6 +916,9 @@ const SCH_ITEM_REQUIRED = {
      causava. As cores ausentes caem no padrao amarelo/preto do hub-draw. */
   port:     { num:['x','y'], str:['sheet','net'] },
   junction: { num:['x','y'], str:['sheet'] },
+  /* style/color opcionais pelo mesmo motivo da port: o que o Altium der atravessa o
+     espelho como veio, e .SchDoc antigo pode nao trazer nenhum dos dois */
+  noerc:    { num:['x','y'], str:['sheet'] },
   text:     { num:['x','y'], str:['sheet','s'] },
 };
 

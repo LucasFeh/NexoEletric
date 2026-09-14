@@ -4,18 +4,27 @@
 var HubDraw = (function () {
 
 const OD = { 0:[1,0], 90:[0,1], 180:[-1,0], 270:[0,-1] };
+/* Nome do pino: altura e recuo para dentro do corpo, em mil. O numero ja tinha os seus
+   cravados na chamada; estes ficam nomeados porque sao usados em duas contas. */
+const PIN_NOME_H = 45, PIN_NOME_FOLGA = 20;
 const SCH = { body:'#00008b', fill:'#fff8c8', pin:'#00008b', pinnum:'#600000',
               wire:'#0000c8', junction:'#0000c8', label:'#000000', power:'#000000',
               /* Port: barra AMARELA com a letra PRETA, como no Altium. Estes tres sao so o
                  PADRAO — a port que trouxer color/fill/textColor (do proprio Altium, ou
                  escolhidos na ficha da vista Esquema) manda neles. */
               port:'#0000c8', portFill:'#ffff00', portText:'#000000',
+              /* o X do No ERC: o vermelho que o Altium usa na diretiva */
+              noerc:'#cc0000',
               text:'#000080', sheet:'#fffef2', border:'#8a8a6a', grid:'#e6e4cf', hl:'#ff8c00' };
 const PCB = { Top:'#ff0000', Bottom:'#0a0aff', TopOverlay:'#ffff00', BottomOverlay:'#b4b400',
               Multi:'#c0c0c0', hole:'#000000', bg:'#1b1b1b' };
 
-/* texto no mundo Y-up (desfaz o flip da camera); h em unidades de mundo */
-function worldText(ctx, txt, x, y, h, rot, color, align){
+/* texto no mundo Y-up (desfaz o flip da camera); h em unidades de mundo.
+   opts.overbar: o texto e nome de pino/pad, e a notacao ativo-baixo do Altium (R\S\T\) sai
+   barrada em vez de crua. E OPT-IN: o mesmo worldText desenha designador, comentario e
+   texto livre, onde uma barra na frente e barra mesmo. Sem o hub-overbar.js carregado o
+   desenho cai no fillText de sempre — quem carrega e a casca. */
+function worldText(ctx, txt, x, y, h, rot, color, align, opts){
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(((rot || 0) * Math.PI) / 180);
@@ -24,7 +33,9 @@ function worldText(ctx, txt, x, y, h, rot, color, align){
   ctx.fillStyle = color;
   ctx.textAlign = align || 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(txt, 0, 0);
+  const ovb = typeof HubOverbar !== 'undefined' ? HubOverbar : null;
+  if (opts && opts.overbar && ovb) ovb.canvas(ctx, txt, 0, 0);
+  else ctx.fillText(txt, 0, 0);
   ctx.restore();
 }
 
@@ -37,9 +48,42 @@ function roundRect(ctx, x, y, w, h, r){
   ctx.closePath();
 }
 
+/* ---------- espelho em X: no DADO, nunca no pixel ---------- */
+/* Espelhar o componente com um ctx.scale(-1,1) do chamador virava tambem a LETRA: o
+   worldText desfaz so o flip Y da camera, entao o flip X do chamador sobrevive ate o
+   glifo e o nome do pino saia de tras para frente (GP2/AN2 lido ao contrario). Espelhando
+   a GEOMETRIA aqui, o desenho de sempre calcula o lado do nome e o alinhamento a partir do
+   pino JA espelhado: a posicao vira, a letra nao — que e o que o Altium mostra.
+   Mesma regra do AI-GUIDE e do HubCore.compTransform (quem extrai as nets): angulo vira
+   180-a, arco troca inicio e fim. Um entendimento so de "espelhado" nos tres lugares.
+   O ROTULO NAO GIRA: 180-0 = 180 poria a legenda de cabeca para baixo, que e espelhar a
+   letra pela porta dos fundos. Do rotulo so a ancora vira. */
+const n360 = a => ((a % 360) + 360) % 360;
+function mirrorPart(part){
+  const N = v => 0 - v;                       /* 0 - v e nao -v: -0 suja comparacao */
+  const pins = (part.pins || []).map(p => Object.assign({}, p, { x: N(p.x), orient: n360(180 - (p.orient || 0)) }));
+  const graphics = (part.graphics || []).map(g => {
+    const o = Object.assign({}, g);
+    switch (g.g) {
+      case 'line': o.x1 = N(g.x1); o.x2 = N(g.x2); break;
+      case 'rect': o.x1 = Math.min(N(g.x1), N(g.x2)); o.x2 = Math.max(N(g.x1), N(g.x2)); break;
+      case 'arc': { o.cx = N(g.cx);
+        const sa = g.sa || 0, ea = g.ea == null ? 360 : g.ea;
+        if (n360(ea - sa) !== 0) { o.sa = n360(180 - ea); o.ea = n360(180 - sa); }
+        break; }
+      case 'ellipse': o.cx = N(g.cx); break;
+      case 'poly': case 'polyline': o.pts = (g.pts || []).map(p => [N(p[0]), p[1]]); break;
+      case 'label': o.x = N(g.x); break;
+    }
+    return o;
+  });
+  return Object.assign({}, part, { pins, graphics });
+}
+
 /* ---------- simbolo (coords locais do simbolo, mil) ---------- */
 function drawSymbolPart(ctx, part, opts){
   const o = opts || {};
+  if (o.mirror) part = mirrorPart(part);   /* o espelho vira o dado; o texto continua desenhado normal */
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   /* PREENCHIMENTO VAI PARA TRAS. A ordem do array e a ordem em que o Altium guardou, e o
      corpo preenchido costuma vir por ULTIMO — desenhando na ordem crua, o retangulo amarelo
@@ -64,8 +108,31 @@ function drawSymbolPart(ctx, part, opts){
     const hx = p.x + d[0]*p.len, hy = p.y + d[1]*p.len;
     ctx.beginPath(); ctx.lineWidth = 4; ctx.strokeStyle = o.stroke || SCH.pin;
     ctx.moveTo(p.x, p.y); ctx.lineTo(hx, hy); ctx.stroke();
-    if (o.showPinNums !== false)
+    const honra = o.honraOlho !== false;
+    if (o.showPinNums !== false && !(honra && p.hideNum))
       worldText(ctx, p.num, (p.x+hx)/2 + Math.abs(d[1])*30, (p.y+hy)/2 + Math.abs(d[0])*30, 45, 0, SCH.pinnum, 'center');
+    /* O NOME DO PINO VAI PARA DENTRO DO CORPO, como no Altium: d aponta para FORA (do corpo
+       para a ponta quente), entao -d e para dentro. Faltava: este desenhista so punha o
+       numero, e um SN65HVD75 virava um retangulo com 1..8 em volta, sem VCC/A/B/GND. Pino
+       vertical leva o nome deitado (rot 90), como o Altium tambem faz.
+       honraOlho: na FOLHA e na ficha o hideName do Altium manda, senao o desenho mente sobre
+       o esquema. Nas vistas de BIBLIOTECA quem chama passa honraOlho:false, porque ali o nome
+       do pino e justamente o que se foi ler — e porque o olho que veio do espelho agregado
+       nao e confiavel pino a pino (o fingerprint e grafico, o doador pode ser outra peca). */
+    /* NOME QUE SO REPETE O NUMERO NAO E NOME. Medido nos acervos: 4762 dos 12069 pinos (39%,
+       e 94-97% no almoxarifado) tem name igual a num — desenhar os dois punha o mesmo "1"
+       duas vezes no mesmo pino, um dentro do corpo e outro em cima do traco. E a regra que o
+       hub-symed » comPadraoDeVisibilidade ja aplica ao pino que chega da paleta.
+       So vale com o olho DESLIGADO: honrando, quem manda e o hideName do Altium, e adivinhar
+       por cima dele faria o desenho mentir sobre o que a folha real mostra. */
+    const nome = String(p.name == null ? '' : p.name).trim();
+    const mostraNome = honra ? !p.hideName : nome !== String(p.num == null ? '' : p.num).trim();
+    if (o.showPinNames !== false && p.name && mostraNome) {
+      const vert = d[0] === 0;
+      worldText(ctx, String(p.name), p.x - d[0]*PIN_NOME_FOLGA, p.y - d[1]*PIN_NOME_FOLGA,
+                PIN_NOME_H, vert ? 90 : 0, o.stroke || SCH.body,
+                (vert ? d[1] > 0 : d[0] > 0) ? 'right' : 'left', { overbar: true });
+    }
   }
 }
 
@@ -111,8 +178,11 @@ function drawFootprint(ctx, fp, opts){
     ctx.fill();
     if (p.type === 'th' && p.drill) { ctx.fillStyle = PCB.hole; ctx.beginPath(); ctx.arc(0, 0, p.drill/2, 0, 2*Math.PI); ctx.fill(); }
     ctx.restore();
+    /* nome de pad hoje nao tem nenhum barrado em Libs/pcblib.js (medido: 0 em 5212); vai
+       pelo mesmo caminho do nome de pino para nao ser o unico lugar que mostra a notacao
+       crua no dia em que aparecer um */
     if (!opts || opts.showPadNames !== false)
-      worldText(ctx, String(p.name), p.x, p.y, Math.max(Math.min(p.w, p.h)*0.55, 0.3), 0, '#ffffff', 'center');
+      worldText(ctx, String(p.name), p.x, p.y, Math.max(Math.min(p.w, p.h)*0.55, 0.3), 0, '#ffffff', 'center', { overbar:true });
   }
 }
 
@@ -217,6 +287,23 @@ function drawPort(ctx, p, color){
             PORT_TXT, 0, letra, 'center');
 }
 
+/* O "No ERC" do Altium: o X vermelho que marca "este pino fica sem ligar DE PROPOSITO".
+   Nao e objeto eletrico — nao liga, nao separa e nao nomeia nada; e um recado para o ERC do
+   Altium (e para quem le a folha) de que aquele pino solto ja foi visto e aprovado. Por isso
+   ele nao entra na extracao de nets: entrar faria o preview inventar ligacao que o Altium
+   nao faz.
+   A ancora e o ponto MARCADO (a ponta quente do pino, normalmente), e o X e centrado nela.
+   `color` vem do proprio Altium quando o espelho o trouxer; ausente, o vermelho da casa. */
+const NOERC_BRACO = 22;
+function drawNoERC(ctx, x, y, color){
+  ctx.save();
+  ctx.strokeStyle = color || SCH.noerc; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x - NOERC_BRACO, y - NOERC_BRACO); ctx.lineTo(x + NOERC_BRACO, y + NOERC_BRACO);
+  ctx.moveTo(x - NOERC_BRACO, y + NOERC_BRACO); ctx.lineTo(x + NOERC_BRACO, y - NOERC_BRACO);
+  ctx.stroke();
+  ctx.restore();
+}
 function drawNetLabel(ctx, l, color){
   worldText(ctx, l.net || '', l.x, l.y + 18, 55, l.rot || 0, color || SCH.label,
     (((l.rot||0)%360)+360)%360 === 0 ? 'left' : 'center');
@@ -302,7 +389,7 @@ function mkCamera(canvas, drawWorld, opts){
   return { cam, ctx, draw, fit, toWorld, resize };
 }
 
-return { SCH, PCB, OD, worldText, roundRect, drawSymbolPart, symBBox, drawFootprint,
-         drawPowerPort, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, mkCamera };
+return { SCH, PCB, OD, worldText, roundRect, drawSymbolPart, mirrorPart, symBBox, drawFootprint,
+         drawPowerPort, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, drawNoERC, mkCamera };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDraw;

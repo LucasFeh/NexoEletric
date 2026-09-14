@@ -98,6 +98,11 @@ function abre(msg, o, temCancelar){
 }
 function enfileira(fn){ const p = fila.then(fn, fn); fila = p.then(() => {}, () => {}); return p; }
 
+/* Resolve quando NAO ha modal na tela. Existe porque quem recarrega a pagina (o
+   __hubOnChange das vistas) nao pode fazer isso com uma pergunta aberta: o usuario ve o
+   dialogo sumir sozinho e fica sem saber se a resposta dele valeu. Fila vazia resolve na
+   hora, entao o caso comum nao paga nada. */
+function ocioso(){ return fila.then(() => {}, () => {}); }
 function alert(msg, o){ return enfileira(() => abre(msg, o || {}, false)).then(() => undefined); }
 function confirm(msg, o){ return enfileira(() => abre(msg, o || {}, true)); }
 
@@ -123,6 +128,6 @@ function toast(msg, kind, ms){
   return { close };
 }
 
-return { alert, confirm, toast };
+return { alert, confirm, toast, ocioso };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDialog;

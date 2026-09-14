@@ -41,7 +41,7 @@ Duas frentes de trabalho, normalmente nesta ordem para um projeto novo:
   `files.schematic:true` e todos os outros `false` até os scripts do Altium gerarem
   `board.js`/`changes.js`/os relatórios (eles regeneram `projects.js` sozinhos depois).
 
-**Dois escritores:** o usuário também edita o `schematic.js` pelo hub (vista Esquema). Releia o arquivo antes de cada edição e preserve as linhas dele; após edições, o BuildSchematic deve rodar com limpeza da folha para refletir removidos/alterados. A limpeza apaga fios, rótulos, power ports, junções e textos — **componentes não**: eles são reaproveitados pelo designador/parte para preservar o `UniqueID` que o ECO usa. Componente apagado do `schematic.js` continua na folha e precisa ser removido à mão no Altium.
+**Dois escritores:** o usuário também edita o `schematic.js` pelo hub (vista Esquema). Releia o arquivo antes de cada edição e preserve as linhas dele; após edições, o BuildSchematic deve rodar com limpeza da folha para refletir removidos/alterados. A limpeza apaga fios, rótulos, power ports, junções, No ERC e textos — **componentes não**: eles são reaproveitados pelo designador/parte para preservar o `UniqueID` que o ECO usa. Componente apagado do `schematic.js` continua na folha e precisa ser removido à mão no Altium.
 
 ### Coordenadas (idêntico ao Altium Sch)
 
@@ -76,6 +76,7 @@ var schematic = {
 {"t":"power","sheet":"main","net":"GND","style":"GndPower","x":1600,"y":3000,"rot":270},
 {"t":"port","sheet":"main","net":"SDA","io":3,"style":0,"x":2600,"y":3400,"w":400},
 {"t":"junction","sheet":"main","x":1800,"y":3100},
+{"t":"noerc","sheet":"main","x":2600,"y":3400},
 {"t":"text","sheet":"main","s":"Fonte 5V","x":3800,"y":4000,"h":10}
 ]};
 ```
@@ -88,15 +89,31 @@ Um item JSON **plano** por linha (o parser DelphiScript lê linha a linha, como 
 | `t` | obrigatórios | opcionais |
 |---|---|---|
 | `sheet` | `name`, `size` (A4/A3/A2/A1/A0/A/B/C/D/E, ou `Custom`) | `w`,`h` — **medida real da folha, em mil**, como o Altium a reporta. Sem elas vale a tabela por nome, que traz o tamanho *legado* do Altium e **não** o ISO real: a “A4” do template da casa mede 11693×8268, não 11500×7600, e a diferença joga carimbo e fios de borda para fora da página desenhada |
-| `comp` | `sheet`,`ref`,`sym`,`x`,`y`,`rot`,`footprint` | `part` (default 1), `mirror`, `comment` |
+| `comp` | `sheet`,`ref`,`sym`,`x`,`y`,`rot`,`footprint` | `part` (default 1), `mirror`, `comment`, `params` |
 | `wire` | `sheet`,`pts` (`[[x,y],...]` ≥2, numa linha só) | — |
 | `netlabel` | `sheet`,`net`,`x`,`y` | `rot` |
 | `power` | `sheet`,`net`,`style`,`x`,`y` | `rot` (`Bar`/`Circle`/`Arrow`/`Wave`/`GndPower`/`GndSignal`/`GndEarth`) |
 | `port` | `sheet`,`net`,`x`,`y` | `style` e `io` (**inteiros crus do Altium**, `-1` = não foi possível ler), `w` (comprimento em mil, default 400), `rot`, `fill`/`textColor`/`color` (preenchimento, letra e borda em `#rrggbb`; ausentes = o padrão amarelo com letra preta do `hub-draw`) |
 | `junction` | `sheet`,`x`,`y` | — |
+| `noerc` | `sheet`,`x`,`y` | `style`, `color` — **reservados**: o ExportProject ainda não os emite (o símbolo e a cor da diretiva não foram medidos num Altium real), e o BuildSchematic deixa o Altium usar o padrão dele |
 | `text` | `sheet`,`s`,`x`,`y` | `h` (só informativo — veja Limitações no README) |
 
 `sym` referencia o nome do símbolo em `schlib.js`.
+
+`params` é a **identidade da peça no cadastro**, num campo plano `Chave=Valor;Chave=Valor`
+(o parser DelphiScript lê linha a linha e não aguenta objeto aninhado). Ele carrega
+`OdooId` (o id da variante `product.product`), `ValorId`, `MPN`, `Encapsulamento`, `Value`
+e `Mouser` — e é o que liga um componente ao produto do Odoo **sem depender de texto**.
+
+O campo atravessa os três lados: o hub o escreve ao colocar um componente do almoxarifado
+(`schframe.js » paramsDoValor`), o `BuildSchematic` o transforma em parâmetro do componente
+no Altium (`AplicaParams`) e o `ExportProject` o traz de volta (`ParamsOf`). Só a
+identidade volta: saldo, local e custo são fotografia do almoxarifado, mudam sozinhos e
+fariam o `schematic.js` mudar sem que nada do desenho tenha mudado.
+
+Ele é **opcional e é omitido quando vazio** — `schematic.js` de projeto antigo não o tem, e
+componente da biblioteca da casa nunca vai ter. Sem ele a lista de materiais ainda sai,
+mas a linha só pode casar por MPN ou voltar para conferência humana.
 
 ### Regras de conectividade (como o Altium)
 
@@ -104,6 +121,12 @@ Um item JSON **plano** por linha (o parser DelphiScript lê linha a linha, como 
 - Extremo de um fio pousando **no meio** de outro fio forma um T — conecta.
 - **Cruzamento** de dois fios sem `junction` explícita **não conecta**; ponha uma
   `junction` no ponto se quiser uni-los.
+- `noerc` é a diretiva **No ERC** do Altium — o X vermelho que marca um pino como solto
+  **de propósito**. Ele **não é elétrico**: não liga, não separa e não nomeia nada, e por
+  isso fica de fora da extração de nets (somar o ponto dele aos nós faria a prévia
+  inventar ligação que a folha real não tem). A âncora é o ponto marcado — ponha-a
+  **exatamente na ponta quente do pino**, senão o Altium prende a diretiva ao lado e o
+  ERC continua reclamando do mesmo pino.
 - `netlabel` nomeia a rede do fio bem debaixo da sua âncora (`x,y`).
 - **Nome igual conecta.** Dois `netlabel` com o mesmo `net` são a mesma rede, mesmo sem
   fio nenhum entre eles — é o jeito normal de ligar dois cantos distantes da folha sem

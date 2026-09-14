@@ -1,63 +1,276 @@
-/* AltiumPCBMirror v2 - schframe.js — vista Esquema (le globals: schematic, schlib, pcblib). */
+/* AltiumPCBMirror v2 - schframe.js — vista Esquema (le globals: schematic, schlib, pcblib).
+
+   BIBLIOTECA EM TEMPO REAL. Os acervos entram pelo schframe.html como <script src> e viram
+   GLOBAIS no load; quando o editor de simbolos grava no espelho (Libs\) eles ficam velhos na
+   hora. Recarregar a pagina resolveria — e joga fora a edicao pendente da folha. Por isso a
+   montagem dos acervos e uma funcao PURA (montaAcervos, alimentada pelos globais) e existe
+   window.__hubRecarregaLibs(): re-injeta os <script> com ?v= novo, remonta os acervos e
+   redesenha, sem F5 e sem tocar no `schematic`.
+   Em Node (tests/test-schframe-libs.js) o arquivo vale so pela parte pura — por isso nada de
+   DOM antes do module.exports logo abaixo. */
 "use strict";
 (function(){
 
-const $ = id => document.getElementById(id);
-const fatal = m => { const f = $('fatal'); f.style.display = 'flex'; f.textContent = m; };
-if (typeof schematic === 'undefined') { fatal('schematic.js não encontrado para o projeto "' + SCH_P + '".'); return; }
-function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+/* ═══════════ parte pura (roda em Node, sem DOM) ═══════════ */
+
+/* Os arquivos de biblioteca e o global que cada um define. E a MESMA lista dos <script src>
+   do schframe.html: quem acrescentar um acervo la tem de acrescenta-lo aqui, senao ele nunca
+   se recarrega sozinho. */
+const LIBS = [
+  { src:'Libs/schlib.js',          nome:'schlib' },
+  { src:'Libs/pcblib.js',          nome:'pcblib' },
+  { src:'Libs/almox-basicos.js',   nome:'almoxBasicos' },
+  { src:'Libs/almox-especiais.js', nome:'almoxEspeciais' },
+  { src:'Libs/almox-index.js',     nome:'almoxIndex' },
+  { src:'Libs/rename-map.js',      nome:'renameMap' },
+  { src:'Libs/lib-subs.js',        nome:'libSubs' },
+  /* NAO e acervo (nao esta em ACERVO_DEFS): entra so para o resgate de desenho abaixo */
+  { src:'Libs/symbols-lib.js',     nome:'symbolsLib' },
+];
 
 /* ------- acervos -------
    A folha pode referenciar simbolo da SchLib do Altium OU das bibliotecas do
    almoxarifado. SLIB precisa conter todos: e ele que o desenho, a extracao de nets e a
    validacao consultam — um simbolo de fora viraria quadrado vermelho e erro de
    validacao. O modal de adicionar e que separa por acervo, na hora de escolher. */
+const ACERVO_DEFS = [
+  { id:'altium',          nome:'schlib',         titulo:'Biblioteca do Altium' },
+  { id:'almox-basicos',   nome:'almoxBasicos',   titulo:'Almoxarifado — Básicos' },
+  { id:'almox-especiais', nome:'almoxEspeciais', titulo:'Almoxarifado — Especiais' },
+];
 const _acervo = (g, id, titulo) => (g && g.symbols && g.symbols.length)
-  ? { id, titulo: g.title || titulo, syms: g.symbols, almox: id !== 'altium' } : null;
-const ACERVOS = [
-  _acervo(typeof schlib         !== 'undefined' ? schlib         : null, 'altium', 'Biblioteca do Altium'),
-  _acervo(typeof almoxBasicos   !== 'undefined' ? almoxBasicos   : null, 'almox-basicos', 'Almoxarifado — Básicos'),
-  _acervo(typeof almoxEspeciais !== 'undefined' ? almoxEspeciais : null, 'almox-especiais', 'Almoxarifado — Especiais'),
-].filter(Boolean);
+  ? { id, titulo: g.title || titulo, syms: g.symbols, almox: id !== 'altium',
+      gerado: g.generated || '' } : null;
 
+/* Monta a lista de acervos, o indice nome -> acervo e os alias por VALOR a partir dos
+   globais que os <script> deixaram.
+   `velhos` e a montagem anterior: o acervo cujo arquivo NAO veio agora (404, servidor
+   caido, sync no meio da escrita) e PRESERVADO como estava, marcado com `caiu:true` —
+   meio acervo faltando viraria metade da folha em quadrado vermelho. */
+function montaAcervos(globais, velhos){
+  const g = globais || {};
+  const antes = new Map((velhos || []).map(a => [a.id, a]));
+  const acervos = [];
+  for (const d of ACERVO_DEFS){
+    const novo = _acervo(g[d.nome], d.id, d.titulo);
+    const velho = antes.get(d.id);
+    if (novo) acervos.push(novo);
+    else if (velho) acervos.push(Object.assign({}, velho, { caiu:true }));
+  }
+  const symbols = [], acervoDe = new Map(), valorDe = new Map();
+  for (const a of acervos) for (const sy of a.syms){
+    if (acervoDe.has(sy.name)) continue;      /* o do Altium ganha em caso de xara */
+    acervoDe.set(sy.name, a);
+    symbols.push(sy);
+  }
+  /* Na conversao para o Altium cada VALOR virou um componente proprio, com nome
+     "SMD 0805 10K 1/8W". E esse nome que o schematic.js grava, porque e ele que existe
+     la dentro. Aqui registramos cada um como um simbolo que REAPROVEITA a geometria da
+     familia (mesma referencia de objeto, sem copia), para o hub desenhar, extrair nets e
+     validar sem precisar saber da diferenca. */
+  for (const a of acervos){
+    if (!a.almox) continue;
+    for (const sy of a.syms) for (const v of (sy.valores || [])){
+      if (!v.altium || acervoDe.has(v.altium)) continue;
+      const alias = {
+        name: v.altium, description: (v.itens && v.itens[0] && v.itens[0].nome) || v.label,
+        designator: sy.designator, familia: sy.familia, partcount: 1,
+        /* a geometria da familia, compartilhada — a nao ser que o VALOR traga a dele: e assim
+           que o PNP deixa de ser desenhado com a seta do NPN sem partir a familia em duas */
+        parts: v.parts || sy.parts,
+        footprints: v.footprint ? [{ name: v.footprint, current: true, incurrentlib: true }]
+                                : (sy.footprints || []),
+        valores: [v], deValor: true,
+      };
+      acervoDe.set(alias.name, a);
+      valorDe.set(alias.name, { sym: sy, valor: v });
+      symbols.push(alias);
+    }
+  }
+  return { acervos, symbols, acervoDe, valorDe };
+}
+/* A impressao digital de uma montagem: e o que diz se a recarga trouxe algo novo. O
+   `generated` do espelho muda a cada gravacao do editor de simbolos; a contagem pega o
+   resto (simbolo acrescentado ou removido). */
+const carimbo = acervos => (acervos || [])
+  .map(a => a.id + ':' + a.syms.length + ':' + (a.gerado || '') + (a.caiu ? ':caiu' : '')).join('|');
+
+/* ------- trocar o simbolo de um componente (parte pura) -------
+   Um componente chega ao simbolo por caminhos diferentes — nome exato, renomeacao, chave
+   normalizada ou uma ESCOLHA gravada em Libs/lib-subs.js — e a escolha e GLOBAL: vale para
+   todo componente com aquele nome, em todo projeto. Uma escolha ruim ja fez um transceptor
+   RS-485 de 8 pinos ser desenhado como um TVS de 3 durante tres dias, e a extracao de nets
+   foi junto: a ficha dizia em que simbolo tinha resolvido, nao dizia POR QUE, e o botao de
+   trocar sumia justamente quando o simbolo resolvia. Esta funcao e a regra dessa tela —
+   qual rotulo, qual motivo, qual aviso — separada do DOM para poder ser provada sem
+   navegador (tests/test-troca-simbolo.js). */
+
+/* o `how` do HubCore.resolveSym em portugues de gente. 'exato' fica de fora de proposito:
+   o nome pedido e o nome achado sao o mesmo, nao ha o que explicar, e uma linha dizendo o
+   obvio em todo componente esconderia justamente a linha que importa. */
+const MOTIVO_RESOL = {
+  escolha: 'por escolha sua, gravada em Libs/lib-subs.js',
+  rename:  'por uma renomeação registrada em Libs/rename-map.js',
+  chave:   'por aproximação do nome (maiúsculas, espaços e traços não contam)',
+  ambiguo: 'nome ambíguo: mais de um símbolo casa, e nenhum foi usado',
+};
+const _pinos = n => n + (n === 1 ? ' pino' : ' pinos');
+
+/* Estado ja medido -> o que a ficha e o modal mostram. Campos de entrada:
+   `sym`   nome do simbolo em que o componente resolveu, ou null/'' se nao resolveu;
+   `how`   como resolveu (HubCore.resolveSym);
+   `quantos` componentes DESTE projeto com o mesmo comp.sym — todos mudam junto;
+   `pinosEsperados` pinagem do simbolo em que o nome do componente resolveria SOZINHO, sem
+     a escolha; null quando esse simbolo nao existe em acervo nenhum — ai nao ha o que
+     comparar, e dizer isso e melhor do que inventar um numero;
+   `pinosDoCandidato` pinagem do candidato selecionado no modal; null sem candidato ou sem
+     geometria. */
+function decideTroca(est){
+  const e = est || {};
+  const nome = e.sym ? String(e.sym) : '';
+  const porEscolha = e.how === 'escolha';
+  const quantos = Math.max(0, Math.trunc(e.quantos || 0));
+  const esperados = e.pinosEsperados == null ? null : Math.trunc(e.pinosEsperados);
+  const cand = e.pinosDoCandidato == null ? null : Math.trunc(e.pinosDoCandidato);
+  const d = {
+    /* com simbolo resolvido a troca e acao secundaria: quem esta vendo o desenho certo nao
+       precisa de alarme. Sem simbolo o componente e um quadrado vermelho, e ai o botao e a
+       saida — por isso so nesse caso ele tem destaque. */
+    rotulo: nome ? 'Trocar símbolo…' : 'Procurar símbolo no acervo…',
+    title: 'sugere pelo comment, nome, footprint, designador e pinagem — você escolhe'
+         + (nome ? '; a folha continua com "' + nome + '" até você confirmar' : ''),
+    destaque: !nome,
+    porEscolha: porEscolha,
+    motivo: MOTIVO_RESOL[e.how] || null,
+    desfazer: porEscolha ? 'Desfazer a escolha' : null,
+    impacto: null, impactoAlerta: false,
+    pinos: null, pinosAlerta: false,
+  };
+  if (quantos > 1){
+    d.impacto = 'a escolha vale para todos os projetos; só neste, ' + quantos
+              + ' componentes usam este símbolo e mudam junto';
+    d.impactoAlerta = true;
+  } else if (quantos === 1){
+    d.impacto = 'a escolha vale para todos os projetos; neste, só este componente usa o símbolo';
+  }
+  if (cand != null){
+    if (esperados == null)
+      d.pinos = 'o símbolo de origem não existe em acervo nenhum — não há pinagem esperada '
+              + 'para comparar; o candidato tem ' + _pinos(cand);
+    else if (esperados === cand)
+      d.pinos = 'pinagem bate: ' + _pinos(esperados) + ' dos dois lados';
+    else {
+      d.pinos = 'pinagem NÃO bate: o componente espera ' + _pinos(esperados)
+              + ' e o candidato tem ' + cand + ' — os fios dos pinos que não existirem no '
+              + 'símbolo novo ficam sem ligação';
+      d.pinosAlerta = true;
+    }
+  }
+  return d;
+}
+
+const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca };
+/* Em Node o arquivo acaba aqui: dali para baixo e tudo DOM. */
+if (typeof module !== 'undefined' && module.exports){ module.exports = PURE; return; }
+if (typeof window !== 'undefined') window.SchFramePure = PURE;
+
+/* ═══════════ a vista ═══════════ */
+
+const $ = id => document.getElementById(id);
+const fatal = m => { const f = $('fatal'); f.style.display = 'flex'; f.textContent = m; };
+if (typeof schematic === 'undefined') { fatal('schematic.js não encontrado para o projeto "' + SCH_P + '".'); return; }
+function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+/* nome de pino ativo-baixo: R\S\T\ e RST com a barra em cima. O hub-overbar.js entra pelo
+   schframe.html, mas a vista nao pode morrer se faltar — sem ele a notacao aparece crua,
+   que e exatamente o que aparecia antes. */
+const OVB = () => (typeof HubOverbar !== 'undefined' && HubOverbar) || null;
+
+/* Os globais de biblioteca lidos pelo window: depois de uma recarga o valor e outro, e
+   `typeof schlib` congelado numa const apontaria para sempre para o do load. */
+function globaisDaLib(){
+  const g = {};
+  for (const l of LIBS) g[l.nome] = window[l.nome];
+  return g;
+}
+/* ACERVOS, SLIB, ACERVO_DE e VALOR_DE sao mutados NO LUGAR (nunca trocados por outro
+   objeto): o arquivo inteiro os captura por nome, e depois de uma recarga nada pode
+   continuar apontando para a montagem antiga.
+
+   UMA EXCECAO, e ela e obrigatoria: o ARRAY de dentro do SLIB (SLIB.symbols) tem de ser
+   TROCADO, nunca esvaziado e repovoado. O HubCore indexa a biblioteca num WeakMap chaveado
+   pela IDENTIDADE do array (hub-core.js:301-315, libIndex): mesmo array = mesmo indice, e o
+   indice e montado uma vez so. Esvaziar e repovoar mantinha a identidade, entao depois de
+   recarregar a biblioteca o symbolOf continuava devolvendo o simbolo VELHO — a folha
+   desenhava a geometria antiga e o extractNets casava os pinos antigos, enquanto os modais,
+   que leem SLIB.symbols direto, ja mostravam o novo. Duas verdades na mesma tela.
+   Trocar o array nao quebra a captura por nome, porque quem consulta recebe o SLIB e nao o
+   array: HubCore.symbolOf(SLIB, ...), compPinsWorld(c, SLIB), extractNets(model, SLIB). */
+const ACERVOS = [];
 const SLIB = { symbols: [] };
 const ACERVO_DE = new Map();
-for (const a of ACERVOS) for (const sy of a.syms) {
-  if (ACERVO_DE.has(sy.name)) continue;      /* o do Altium ganha em caso de xara */
-  ACERVO_DE.set(sy.name, a);
-  SLIB.symbols.push(sy);
-}
-
-/* Na conversao para o Altium cada VALOR virou um componente proprio, com nome
-   "SMD 0805 10K 1/8W". E esse nome que o schematic.js grava, porque e ele que existe
-   la dentro. Aqui registramos cada um como um simbolo que REAPROVEITA a geometria da
-   familia (mesma referencia de objeto, sem copia), para o hub desenhar, extrair nets e
-   validar sem precisar saber da diferenca. */
 const VALOR_DE = new Map();
-for (const a of ACERVOS) {
-  if (!a.almox) continue;
-  for (const sy of a.syms) for (const v of (sy.valores || [])) {
-    if (!v.altium || ACERVO_DE.has(v.altium)) continue;
-    const alias = {
-      name: v.altium, description: (v.itens && v.itens[0] && v.itens[0].nome) || v.label,
-      designator: sy.designator, familia: sy.familia, partcount: 1,
-      /* a geometria da familia, compartilhada — a nao ser que o VALOR traga a dele: e assim
-         que o PNP deixa de ser desenhado com a seta do NPN sem partir a familia em duas */
-      parts: v.parts || sy.parts,
-      footprints: v.footprint ? [{ name: v.footprint, current: true, incurrentlib: true }]
-                              : (sy.footprints || []),
-      valores: [v], deValor: true,
-    };
-    ACERVO_DE.set(alias.name, a);
-    VALOR_DE.set(alias.name, { sym: sy, valor: v });
-    SLIB.symbols.push(alias);
+let PLIB = { footprints:[] };
+/* ── RESGATE DE DESENHO (só para a vista) ──
+   Componente cujo símbolo nenhum acervo tem vira quadrado vermelho — a folha fica ilegível
+   justamente onde mais precisa ser lida. A Biblioteca de símbolos (`Libs/symbols-lib.js`) é
+   o apanhado de TODAS as folhas e libs já varridas e quase sempre tem o desenho: medido,
+   158 dos 319 quadrados vermelhos dos 14 projetos (50%).
+
+   Ela entra SÓ PARA DESENHAR, e de propósito fica FORA do SLIB. Casar por nome não é prova
+   de que é a peça certa, e net inventada em cima de palpite é pior que um quadrado vermelho
+   honesto — então extração de nets, validação e ficha de biblioteca seguem sem ela, e o
+   "símbolo não existe na schlib" continua de pé. Quem conserta de verdade é trocar o símbolo.
+
+   O nome do tile é HEURÍSTICO (o `_reconhece` do extrair.py inventa "Conector 1 via"); quem
+   casa com o que o projeto grava é o `aliases`, que guarda o nome de origem do Altium. Por
+   isso os dois entram no índice — só por nome o resgate cai de 50% para 17%. */
+const EMERG_COR = '#b06000';
+const EMERG = { porNome: new Map(), porChave: new Map() };
+function montaEmergencia(){
+  EMERG.porNome.clear(); EMERG.porChave.clear();
+  const lib = window.symbolsLib;
+  for (const s of ((lib && lib.symbols) || [])){
+    for (const n of [s.name].concat(s.aliases || [])){
+      if (!n) continue;
+      if (!EMERG.porNome.has(n)) EMERG.porNome.set(n, s);
+      const k = HubCore.normKey(n);
+      const l = EMERG.porChave.get(k) || [];
+      if (l.indexOf(s) < 0) l.push(s);
+      EMERG.porChave.set(k, l);
+    }
   }
 }
-const PLIB = typeof pcblib  !== 'undefined' ? pcblib  : { footprints:[] };
-/* antes de qualquer symbolOf: sem as tabelas o resolvedor casa so por nome exato e por
-   chave, e metade dos componentes viraria quadrado vermelho na folha */
-HubCore.setLibTables(typeof renameMap !== 'undefined' ? renameMap : null,
-                     typeof libSubs   !== 'undefined' ? libSubs   : null);
+/* { part, nome, how } do desenho emprestado, ou null. AMBÍGUO DEVOLVE NULL de propósito:
+   dois candidatos é o mesmo que nenhum, e desenhar um chute com cara de certeza é o erro
+   que este resgate existe para não cometer. */
+function desenhoDeEmergencia(c){
+  if (!c || !c.sym) return null;
+  let s = EMERG.porNome.get(c.sym), how = 'nome';
+  if (!s){
+    const l = EMERG.porChave.get(HubCore.normKey(c.sym)) || [];
+    if (l.length !== 1) return null;
+    s = l[0]; how = 'chave';
+  }
+  /* o symlib-v1 guarda pins/graphics no próprio símbolo; multi-part vira uma entrada por parte */
+  const part = s.parts ? HubCore.partOf(s, c.part) : s;
+  return part ? { part, nome: s.name, how } : null;
+}
+function aplicaAcervos(){
+  const r = montaAcervos(globaisDaLib(), ACERVOS.slice());
+  ACERVOS.length = 0;      for (const a of r.acervos) ACERVOS.push(a);
+  SLIB.symbols = r.symbols.slice();   /* array NOVO de proposito: ver a nota acima */
+  ACERVO_DE.clear(); r.acervoDe.forEach((v, k) => ACERVO_DE.set(k, v));
+  VALOR_DE.clear(); r.valorDe.forEach((v, k) => VALOR_DE.set(k, v));
+  /* a PcbLib nao tem acervo: ou veio agora, ou fica a de antes — um 404 no meio de uma
+     recarga nao pode zerar a lista de footprints da ficha */
+  if (window.pcblib && window.pcblib.footprints) PLIB = window.pcblib;
+  /* antes de qualquer symbolOf: sem as tabelas o resolvedor casa so por nome exato e por
+     chave, e metade dos componentes viraria quadrado vermelho na folha */
+  HubCore.setLibTables(window.renameMap || null, window.libSubs || null);
+  montaEmergencia();
+  return r;
+}
+aplicaAcervos();
 
 let model = HubCore.buildSchModel(schematic);
 let nets  = HubCore.extractNets(model, SLIB);
@@ -68,8 +281,16 @@ let sheetIdx = 0, selNet = '';
    aparece dezenas de vezes por cima do desenho. Quem quiser ve-lo liga no olho — e a
    escolha fica guardada, como no Altium. */
 const VER_COMMENT_KEY = 'altiumhub.sch.comment';
-const showState = { grid:true, comment:false };
+/* NOME E NUMERO DE PINO NASCEM A VISTA, ao contrario do comment. O simbolo traz do
+   Altium o hideName/hideNum de cada pino, e obedece-lo cegamente apagava 63% dos nomes
+   (548 de 865 pinos medidos nos 14 projetos) — a vista Biblioteca mostrava e a folha nao,
+   que e o sintoma classico de [dois desenhistas, um so honrando o olho]. Ligado, este
+   botao passa honraOlho:false e a folha le como a biblioteca; desligado, a folha volta a
+   obedecer o simbolo e fica fiel ao que o Altium desenha. A escolha fica guardada. */
+const VER_PINOS_KEY = 'altiumhub.sch.pinos';
+const showState = { grid:true, comment:false, pinos:true };
 try { showState.comment = localStorage.getItem(VER_COMMENT_KEY) === '1'; } catch (e) {}
+try { showState.pinos = localStorage.getItem(VER_PINOS_KEY) !== '0'; } catch (e) {}
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
@@ -142,12 +363,13 @@ function redo(){ if (!redoStack.length) return; const s = redoStack.pop(); undoS
 /* ------- geometria da selecao ------- */
 function sheetItems(){
   const s = model.sheets[sheetIdx];
-  return [].concat(s.comps, s.wires, s.netlabels, s.powers, s.ports, s.junctions, s.texts);
+  return [].concat(s.comps, s.wires, s.netlabels, s.powers, s.ports, s.junctions, s.noercs, s.texts);
 }
 const onSheet = it => it.sheet === model.sheets[sheetIdx].name;
 function compBBox(c){
   const sym = HubCore.symbolOf(SLIB, c.sym), part = HubCore.partOf(sym, c.part);
-  const bb = part ? D.symBBox(part) : { x1:-100, y1:-100, x2:100, y2:100 };
+  const emg = part ? null : desenhoDeEmergencia(c);
+  const bb = part ? D.symBBox(part) : emg ? D.symBBox(emg.part) : { x1:-100, y1:-100, x2:100, y2:100 };
   const tf = HubCore.compTransform(c);
   let x1 = 1e9, y1 = 1e9, x2 = -1e9, y2 = -1e9;
   for (const [lx, ly] of [[bb.x1, bb.y1], [bb.x2, bb.y1], [bb.x2, bb.y2], [bb.x1, bb.y2]]){
@@ -173,6 +395,9 @@ function itemBBox(it){
        acompanha sozinha, em vez de errar a port em silencio. */
     case 'port': return D.portBBox(it);
     case 'junction': return { x1:it.x - 35, y1:it.y - 35, x2:it.x + 35, y2:it.y + 35 };
+    /* do tamanho do X desenhado, e nao maior: o No ERC mora EM CIMA da ponta do pino,
+       e uma caixa generosa roubaria o clique do pino que ele marca */
+    case 'noerc':    return { x1:it.x - 30, y1:it.y - 30, x2:it.x + 30, y2:it.y + 30 };
     case 'text': {
       const h = (it.h || 10) * 4;
       return { x1:it.x - 20, y1:it.y - h, x2:it.x + Math.max((it.s || '').length * (it.h || 10) * 4, 120), y2:it.y + h };
@@ -205,7 +430,8 @@ function applyMove(base, dx, dy){
 }
 function describe(it){
   return it.t === 'comp' ? it.ref : it.t === 'wire' ? 'fio' : it.t === 'netlabel' ? 'label ' + (it.net || '')
-       : it.t === 'power' ? 'power ' + (it.net || '') : it.t === 'junction' ? 'junção' : 'texto';
+       : it.t === 'power' ? 'power ' + (it.net || '') : it.t === 'junction' ? 'junção'
+       : it.t === 'noerc' ? 'No ERC' : 'texto';
 }
 function updateSelStatus(){
   const n = sel.size;
@@ -290,19 +516,77 @@ const SNAP_MIL = 60;
 function snapPoint(w){
   const s = model.sheets[sheetIdx];
   let best = null;
-  const tenta = (x, y, kind, label, peso) => {
+  /* `html` so aparece onde ha o que barrar: e o mesmo rotulo, com o <span> da sobrelinha.
+     Quem mostra escolhe — a barra de status pinta o html, o resto continua em texto. */
+  const tenta = (x, y, kind, label, peso, html) => {
     const d = Math.hypot(w.x - x, w.y - y);
     if (d > SNAP_MIL) return;
-    if (!best || peso < best.peso || (peso === best.peso && d < best.d)) best = { x, y, d, kind, label, peso };
+    if (!best || peso < best.peso || (peso === best.peso && d < best.d)) best = { x, y, d, kind, label, html: html || null, peso };
   };
   for (const c of s.comps){
     const pins = HubCore.compPinsWorld(c, SLIB) || [];
-    for (const p of pins) tenta(p.x, p.y, 'pin', c.ref + '-' + p.num + (p.name && p.name !== p.num ? ' (' + p.name + ')' : ''), 0);
+    const ovb = OVB();
+    for (const p of pins){
+      const mostra = p.name && p.name !== p.num;
+      const base = c.ref + '-' + p.num;
+      tenta(p.x, p.y, 'pin', base + (mostra ? ' (' + (ovb ? ovb.plain(p.name) : p.name) + ')' : ''), 0,
+            mostra && ovb && ovb.temBarra(p.name) ? ovb.html(base) + ' (' + ovb.html(p.name) + ')' : null);
+    }
   }
   for (const j of s.junctions) tenta(j.x, j.y, 'junction', 'junção', 1);
   for (const p of s.powers)    tenta(p.x, p.y, 'power', p.net || 'power', 1);
   for (const p of s.ports)     tenta(p.x, p.y, 'port', p.net || 'port', 1);
   for (const wi of s.wires) for (const p of (wi.pts || [])) tenta(p[0], p[1], 'wire', 'fio', 2);
+  return best;
+}
+/* ── O IMA DO ARRASTO ──
+   Aproximar um componente da ponta de um fio nao bastava: o pouso era na grade de 100 mil
+   contada a partir da posicao ANTIGA, entao o pino parava a 20 ou 40 mil do fio e a net nao
+   fechava — o desenho dizia "ligado" e a extracao de nets dizia "solto". Agora o pino GRUDA:
+   se durante o arrasto alguma ponta quente do que esta sendo movido chega a menos de
+   SNAP_MIL de um ponto de conexao PARADO, o deslocamento inteiro e corrigido para ela cair
+   exatamente em cima, e o ima manda sobre a grade ao soltar.
+   Alvo nunca e o que viaja junto, senao o componente grudaria nele mesmo.
+   Aqui o criterio e a distancia pura, e nao o peso por tipo do snapPoint: quem arrasta esta
+   mirando um ponto, e o mais perto do pino e o ponto que ele esta mirando. */
+function alvosDeIma(base){
+  const s = model.sheets[sheetIdx], fora = [];
+  for (const c of s.comps){
+    if (base.has(c)) continue;
+    for (const p of (HubCore.compPinsWorld(c, SLIB) || [])) fora.push({ x:p.x, y:p.y, label:c.ref + '-' + p.num });
+  }
+  for (const wi of s.wires){
+    if (base.has(wi)) continue;
+    for (const p of (wi.pts || [])) fora.push({ x:p[0], y:p[1], label:'fio' });
+  }
+  for (const j of s.junctions) if (!base.has(j)) fora.push({ x:j.x, y:j.y, label:'junção' });
+  for (const p of s.powers)    if (!base.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'power' });
+  for (const p of s.ports)     if (!base.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'port' });
+  return fora;
+}
+/* pontas quentes do que esta sendo arrastado, na posicao de PARTIDA: o arrasto so lhes soma o
+   deslocamento, entao medir uma vez por gesto basta — e nao a folha inteira a cada quadro */
+function pinosDoArrasto(base){
+  const fora = [];
+  for (const it of base.keys()){
+    if (it.t !== 'comp') continue;
+    for (const p of (HubCore.compPinsWorld(it, SLIB) || [])) fora.push({ x:p.x, y:p.y, num:p.num, ref:it.ref });
+  }
+  return fora;
+}
+/* o deslocamento corrigido para o pino mais proximo pousar em cima do alvo; null = sem ima */
+function imaDoArrasto(g, dx, dy){
+  if (!g || !g.pinos.length || !g.alvos.length) return null;
+  let best = null;
+  for (const p of g.pinos){
+    const px = p.x + dx, py = p.y + dy;
+    for (const a of g.alvos){
+      const d = Math.hypot(px - a.x, py - a.y);
+      if (d > SNAP_MIL || (best && d >= best.d)) continue;
+      best = { d, dx: dx + (a.x - px), dy: dy + (a.y - py), x:a.x, y:a.y,
+               label: p.ref + '-' + p.num + ' → ' + a.label };
+    }
+  }
   return best;
 }
 /* proximo ponto do fio: o ima ganha; sem ima, grade de 100 mil e traçado ortogonal */
@@ -333,6 +617,15 @@ function endWire(){
     commit();
   } else cam.draw();
 }
+/* O No ERC pousa onde o ima mandar — e o ponto que ele marca precisa ser EXATAMENTE a
+   ponta quente do pino, senao o Altium recebe a diretiva ao lado do pino e o ERC
+   continua reclamando do mesmo pino. Sem ima, grade de 100 mil como o resto. */
+function placeNoERC(w){
+  const hs = snapPoint(w);
+  schematic.items.push({ t:'noerc', sheet:model.sheets[sheetIdx].name,
+                         x: hs ? hs.x : snap100(w.x), y: hs ? hs.y : snap100(w.y) });
+  commit();
+}
 function placePower(w){
   const hs = snapPoint(w);
   const p = toolPower;
@@ -361,6 +654,7 @@ function setTool(t, pw){
   $('tbSel').setAttribute('aria-pressed', String(t === 'select'));
   $('tbWire').setAttribute('aria-pressed', String(t === 'wire'));
   $('tbNet').setAttribute('aria-pressed', String(t === 'label'));
+  $('tbNoErc').setAttribute('aria-pressed', String(t === 'noerc'));
   for (const b of document.querySelectorAll('#schtb .pw'))
     b.setAttribute('aria-pressed', String(t === 'power' && !!pw && b.dataset.net === pw.net));
   cv.style.cursor = t !== 'select' ? 'crosshair' : (annTool ? 'copy' : 'default');
@@ -368,6 +662,7 @@ function setTool(t, pw){
 }
 $('tbSel').addEventListener('click', () => setTool('select'));
 $('tbWire').addEventListener('click', () => setTool(tool === 'wire' ? 'select' : 'wire'));
+$('tbNoErc').addEventListener('click', () => setTool(tool === 'noerc' ? 'select' : 'noerc'));
 for (const b of document.querySelectorAll('#schtb .pw'))
   b.addEventListener('click', () => {
     const igual = tool === 'power' && toolPower && toolPower.net === b.dataset.net;
@@ -375,6 +670,94 @@ for (const b of document.querySelectorAll('#schtb .pw'))
     setTool(igual ? 'select' : 'power', igual ? null
       : { net:b.dataset.net, style:b.dataset.style, rot: b.dataset.style === 'Bar' ? 90 : 270 });
   });
+
+/* ------- recarga de biblioteca, sem F5 -------
+   O editor de simbolos grava no espelho (Libs\schlib.js e os acervos do almoxarifado) e o
+   watcher do hubserver avisa esta pagina. Recarregar a pagina inteira e a saida simples — e
+   a errada quando ha edicao pendente na folha, porque joga o trabalho fora. Aqui as
+   bibliotecas voltam sozinhas: cada <script src> entra DE NOVO com um ?v= novo (o mesmo
+   truque do loadVarScript da casca), os acervos sao remontados pelo montaAcervos e a vista
+   redesenha. O `schematic` nao e tocado: nem a selecao, nem o undo, nem o que esta por
+   salvar. */
+function recarregaLib(l, v){
+  return new Promise(resolve => {
+    const antes = window[l.nome];
+    window[l.nome] = undefined;
+    const s = document.createElement('script');
+    s.src = l.src + '?v=' + v;
+    s.onload = () => {
+      const veio = window[l.nome];
+      s.remove();
+      /* carregou mas nao definiu o global (arquivo pela metade porque o sync estava
+         escrevendo, erro de sintaxe): vale o mesmo que 404 — fica valendo o de antes */
+      if (veio === undefined){ window[l.nome] = antes; resolve({ l, ok:false }); return; }
+      resolve({ l, ok:true });
+    };
+    s.onerror = () => { window[l.nome] = antes; s.remove(); resolve({ l, ok:false }); };
+    document.head.appendChild(s);
+  });
+}
+let libRecarga = null;
+/* Chamada pelo botao da barra, pelo __hubOnChange daqui e pelo hub (que a invoca em cada
+   iframe quando o disco muda). Devolve Promise com
+   { mudou, acervos, simbolos, falhas, caidos } — quem chamou decide o que dizer. */
+window.__hubRecarregaLibs = function(){
+  if (libRecarga) return libRecarga;          /* duas chamadas juntas: uma recarga so */
+  const antes = carimbo(ACERVOS);
+  const v = Date.now();
+  libRecarga = Promise.all(LIBS.map(l => recarregaLib(l, v))).then(res => {
+    aplicaAcervos();
+    /* o modelo do esquema e o mesmo; o que mudou foi a biblioteca que o desenho, a
+       extracao de nets e a validacao CONSULTAM — e tudo isso passa pelo reapply */
+    reapply();
+    /* o combobox de acervo do modal e montado uma vez so: um acervo a mais (ou a menos)
+       so aparece la se ele for refeito */
+    const src = $('addSrc'); if (src) src.textContent = '';
+    if (addOpen()){ buildAddSrc(); buildAddList(); renderAddPreview(); }
+    if ($('symmodal').classList.contains('on')) symRenderLista();
+    return { mudou: carimbo(ACERVOS) !== antes,
+             acervos: ACERVOS.length, simbolos: SLIB.symbols.length,
+             falhas: res.filter(r => !r.ok).map(r => r.l.src),
+             caidos: ACERVOS.filter(a => a.caiu).map(a => a.titulo) };
+  }).then(r => { libRecarga = null; return r; },
+          e => { libRecarga = null; throw e; });
+  return libRecarga;
+};
+/* O BOTAO, pedido explicito do usuario. O automatico depende do watcher do hubserver, que e
+   por polling de mtime — e nao existe com a pagina aberta direto do disco (file://). Aqui
+   ele forca, e ve o que veio. */
+function montaBotaoLibs(){
+  const tb = $('schtb');
+  if (!tb) return;
+  tb.append(el('span', 'sep'));
+  const b = el('button');
+  b.id = 'tbLibs';
+  b.setAttribute('aria-label', 'Atualizar biblioteca');
+  b.title = 'Recarregar do disco os símbolos e footprints (Libs\\) sem recarregar a página'
+          + ' — a edição pendente da folha NÃO se perde';
+  b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/>'
+              + '<path d="M20 5v6h-6"/></svg>';
+  b.append(el('span', 'lb', 'libs'));
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    try {
+      const r = await window.__hubRecarregaLibs();
+      if (r.falhas.length)
+        HubDialog.toast('não carregou ' + r.falhas.join(', ') + ' — o acervo anterior foi mantido ('
+                        + r.simbolos + ' símbolos)', 'warn', 7000);
+      else if (r.mudou)
+        HubDialog.toast('biblioteca recarregada — ' + r.simbolos + ' símbolos em '
+                        + r.acervos + ' acervo(s)', 'ok');
+      else
+        HubDialog.toast('nada mudou na biblioteca — ' + r.simbolos + ' símbolos', 'info');
+    } catch (e){
+      HubDialog.toast('não deu para recarregar a biblioteca: ' + (e && e.message || e), 'err', 7000);
+    }
+    b.disabled = false;
+  });
+  tb.append(b);
+}
+montaBotaoLibs();
 
 /* ------- mouse: esquerdo seleciona e move, direito arrasta a tela -------
    O mkCamera (hub-draw.js) arrasta a tela com QUALQUER botao e nao sabe de selecao. Em vez
@@ -386,6 +769,7 @@ let hoverW = null;          /* cursor em coords do mundo */
 let mouse = null;           /* gesto do esquerdo em curso: { mode:'move'|'box'|'none', start, moved, base, shift } */
 let lastDown = null;        /* o que o ultimo mousedown acertou, para o Shift+clique saber se tira */
 let boxRect = null;         /* retangulo de selecao em curso (mundo) */
+let moveIma = null;         /* alvo grudado pelo ima do arrasto: { x, y, dx, dy, label } */
 let swallowClick = false;   /* o click que fecha um arrasto nao e um clique */
 let panning = false, panFrom = null, panMoved = false;
 
@@ -442,7 +826,12 @@ function leftDown(e){
   if (!wasSel){ if (!e.shiftKey) sel.clear(); sel.add(it); }
   lastDown = { item:it, wasSel };
   /* em leitura o clique so marca; e no modo edicao que o mesmo gesto vira arrasto */
-  mouse = { mode: editOn ? 'move' : 'none', start:w, moved:false, base: editOn ? baseOf(sel) : null };
+  const base = editOn ? baseOf(sel) : null;
+  /* o ima e montado aqui, e nao no primeiro movimento: a folha parada e a mesma o gesto
+     inteiro, e varrer os pinos de 200 componentes a cada quadro engasgaria o arrasto */
+  mouse = { mode: editOn ? 'move' : 'none', start:w, moved:false, base,
+            ima: base ? { alvos: alvosDeIma(base), pinos: pinosDoArrasto(base) } : null };
+  moveIma = null;
   /* a net entra em foco AQUI, e nao no click: todo arrasto engole o click (swallowClick), e
      a net anterior ficava acesa por cima de uma selecao que ja era outra */
   aplicaSel(e.shiftKey && sel.size > 1 ? '' : netDoAlvo(h));
@@ -459,7 +848,12 @@ function leftMove(e){
   /* durante o arrasto o item acompanha o mouse; a grade so entra ao soltar (leftUp). Com o
      snap a cada movimento ele so saia do lugar depois de 50 mil e pulava de 100 em 100 — em
      zoom alto parecia travado */
-  if (d.mode === 'move'){ applyMove(d.base, dx, dy); desenhaNoQuadro(); }
+  if (d.mode === 'move'){
+    moveIma = imaDoArrasto(d.ima, dx, dy);
+    applyMove(d.base, moveIma ? moveIma.dx : dx, moveIma ? moveIma.dy : dy);
+    $('shover').textContent = moveIma ? '⊙ ' + moveIma.label : '';
+    desenhaNoQuadro();
+  }
   else if (d.mode === 'box'){ boxRect = { x1:d.start.x, y1:d.start.y, x2:w.x, y2:w.y }; desenhaNoQuadro(); }
   else if (!editOn && !d.avisou){
     /* arrastar travado nao pode ser silencio: e a diferenca entre "nao funciona" e "esta em leitura" */
@@ -472,9 +866,15 @@ function leftUp(e){
   mouse = null;
   swallowClick = d.moved;
   if (d.mode === 'move' && d.moved){
-    /* ao soltar, o deslocamento pousa na grade de 100 mil a partir da posicao original */
+    /* ao soltar: sem ima, o deslocamento pousa na grade de 100 mil contada da posicao
+       original — com ima, quem manda e ele (veja imaDoArrasto) */
     const w = e ? worldOf(e) : d.start;
-    applyMove(d.base, snap100(w.x - d.start.x), snap100(w.y - d.start.y));
+    const rx = w.x - d.start.x, ry = w.y - d.start.y;
+    /* o ima MANDA sobre a grade: e ele que faz o pino cair em cima da ponta do fio, e
+       100 mil de grade contados da posicao antiga jogariam o pino fora dela de novo */
+    const m = imaDoArrasto(d.ima, rx, ry);
+    if (m) applyMove(d.base, m.dx, m.dy); else applyMove(d.base, snap100(rx), snap100(ry));
+    moveIma = null; $('shover').textContent = '';
     /* arrasto que voltou para a mesma grade nao e mudanca — nao entra no undo */
     const mudou = Array.from(d.base).some(([it, b]) => it.t === 'wire'
       ? (it.pts[0] && (it.pts[0][0] !== b[0][0] || it.pts[0][1] !== b[0][1]))
@@ -501,6 +901,7 @@ function leftClick(e){
   if (tool === 'wire'){ wireClick(w); return; }
   if (tool === 'power'){ placePower(w); return; }
   if (tool === 'label'){ placeLabel(w); return; }
+  if (tool === 'noerc'){ placeNoERC(w); return; }
   /* O alvo foi resolvido no mousedown (lastDown) e NAO se refaz o hitTest aqui: entre o
      mousedown e o click a ficha abriu e o canvas mudou de largura, entao o mesmo ponto de
      tela cai em outro ponto do mundo, "erra" o componente que acabou de ser marcado e
@@ -547,7 +948,7 @@ let pick = null;                    /* { sym, valorId, part, fpShown } — o que
 let cart = [];
 const addState = { baixo:'val' };   /* painel de baixo no almoxarifado: 'val' | 'fp' */
 let addDrawSym = null, addDrawFp = null;
-const camSym = D.mkCamera($('addSymCv'), ctx => { if (addDrawSym) D.drawSymbolPart(ctx, addDrawSym, {}); }, { bg:D.SCH.sheet });
+const camSym = D.mkCamera($('addSymCv'), ctx => { if (addDrawSym) D.drawSymbolPart(ctx, addDrawSym, { honraOlho: false }); }, { bg:D.SCH.sheet });
 const camFp  = D.mkCamera($('addFpCv'),  ctx => { if (addDrawFp)  D.drawFootprint(ctx, addDrawFp, {}); },  { bg:'#0b0b0d' });
 
 function refPrefixOf(name){
@@ -914,7 +1315,7 @@ $('btnAdd').addEventListener('click', openAdd);
    e o footprint desenhados no rodape. Nada aqui e editavel de proposito: esta vista serve
    para OLHAR e para posicionar; valor, footprint e parametro sao da IA, no schematic.js. */
 let prSym = null, prFp = null;
-const camPrSym = D.mkCamera($('prSymCv'), ctx => { if (prSym) D.drawSymbolPart(ctx, prSym, {}); }, { bg:D.SCH.sheet });
+const camPrSym = D.mkCamera($('prSymCv'), ctx => { if (prSym) D.drawSymbolPart(ctx, prSym, { honraOlho: false }); }, { bg:D.SCH.sheet });
 const camPrFp  = D.mkCamera($('prFpCv'),  ctx => { if (prFp)  D.drawFootprint(ctx, prFp, {}); },  { bg:'#0b0b0d' });
 function refitProps(){ ajustaPreviews([camPrSym, camPrFp]); }
 
@@ -1009,7 +1410,7 @@ function renderProps(){
     const cont = {};
     for (const it of itens) cont[it.t] = (cont[it.t] || 0) + 1;
     const NOME = { comp:'componente', wire:'fio', netlabel:'net label', power:'power port',
-                   port:'port', junction:'junção', text:'texto' };
+                   port:'port', junction:'junção', noerc:'No ERC', text:'texto' };
     for (const [k, n] of Object.entries(cont)) prKv(s, (NOME[k] || k) + (n > 1 ? 's' : ''), n);
     body.append(s);
     return prPreview(false, null, null);
@@ -1018,7 +1419,7 @@ function renderProps(){
   const it = itens[0];
   if (it.t !== 'comp'){
     const NOME = { wire:'fio', netlabel:'net label', power:'power port', port:'port',
-                   junction:'junção', text:'texto' };
+                   junction:'junção', noerc:'No ERC', text:'texto' };
     const s = prSec(NOME[it.t] || it.t);
     if (it.t === 'wire'){
       const wi = model.sheets[sheetIdx].wires.indexOf(it);
@@ -1051,7 +1452,11 @@ function renderProps(){
   }
 
   /* ── componente ── */
-  const sym = HubCore.symbolOf(SLIB, it.sym);
+  /* resolveSym e nao symbolOf: o `how` e quem diz POR QUE a folha desenha o que desenha.
+     Sem ele a ficha afirmava um simbolo e calava a origem — inclusive quando a origem era
+     uma escolha gravada, que e justamente a que pode estar errada. */
+  const rsym = HubCore.resolveSym(SLIB, it.sym);
+  const sym = (rsym && rsym.item) || null;
   const part = HubCore.partOf(sym, it.part);
   const ac = ACERVO_DE.get(it.sym) || (sym && ACERVO_DE.get(sym.name)) || null;
   const nparts = sym ? (sym.partcount || (sym.parts || []).length || 1) : 1;
@@ -1068,15 +1473,32 @@ function renderProps(){
   /* o resolvedor pode ter entregue outro simbolo (apelido/substituto): dizer qual, senao a
      ficha afirma um nome e o desenho mostra outro */
   if (sym && sym.name !== it.sym) prKv(g, 'Resolvido em', sym.name, 'mono');
+  const dec = decideTroca({ sym: sym && sym.name, how: rsym && rsym.how, quantos: contaSym(it.sym) });
+  /* a linha que faltava: escolha sua fica em amarelo, ao lado do nome que ela impos */
+  if (dec.motivo) prKv(g, 'Por quê', dec.motivo, dec.porEscolha ? 'warn' : 'dim');
   prKv(g, 'Acervo', ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca'), ac ? null : 'warn');
-  /* Sem simbolo o componente e um quadrado vermelho e some da extracao de nets. E aqui,
-     onde a ficha ACUSA o problema, que tem que estar o caminho para resolve-lo. */
+  /* o desenho emprestado precisa se ANUNCIAR: o corpo ambar na folha diz que algo e
+     diferente, e e aqui que se le O QUE. Sem esta linha o usuario veria um simbolo
+     plausivel e concluiria que a biblioteca tem a peca — que e o oposto da verdade. */
   if (!sym){
-    const b = el('button', 'wide', 'Procurar símbolo no acervo…');
-    b.type = 'button';
-    b.title = 'sugere pelo comment, nome, footprint, designador e pinagem — você escolhe';
-    b.onclick = () => abrirEscolhaSimbolo(it);
-    g.append(b);
+    const emg = desenhoDeEmergencia(it);
+    prKv(g, 'Desenho', emg ? 'emprestado de "' + emg.nome + '" (Biblioteca de símbolos, por ' + emg.how + ') — só para ver'
+                           : 'nenhum: a folha mostra o quadrado vermelho', 'warn');
+  }
+  /* O botao existe com simbolo resolvido OU NAO. Enquanto ele so aparecia com o simbolo
+     ausente, uma escolha errada era definitiva pela interface: assim que ela resolvia o
+     nome, nao havia mais caminho nenhum na tela para trocar. */
+  const bTroca = el('button', dec.destaque ? 'wide' : 'wide sutil', dec.rotulo);
+  bTroca.type = 'button';
+  bTroca.title = dec.title;
+  bTroca.onclick = () => abrirEscolhaSimbolo(it);
+  g.append(bTroca);
+  if (dec.desfazer){
+    const bUndo = el('button', 'wide sutil', dec.desfazer);
+    bUndo.type = 'button';
+    bUndo.title = 'apaga a linha de Libs/lib-subs.js e volta à resolução natural do nome';
+    bUndo.onclick = () => desfazerEscolha(it);
+    g.append(bUndo);
   }
   prKv(g, 'Footprint', fpNome, fpNome ? 'mono' : 'warn');
   if (fpNome && !HubCore.footprintOf(PLIB, fpNome)) prKv(g, '', 'não está na PcbLib espelhada', 'warn');
@@ -1109,7 +1531,12 @@ function renderProps(){
     for (const pin of pins){
       const tr = el('tr');
       const rede = nets.pinNet[it.ref + '-' + pin.num] || '';
-      tr.append(el('td', 'n', pin.num), el('td', null, pin.name || '—'));
+      /* node() em vez de innerHTML: o <span> da barra vem montado, sem string para escapar */
+      const tdNome = el('td');
+      const ovb = OVB();
+      if (pin.name && ovb) tdNome.append(ovb.node(pin.name));
+      else tdNome.textContent = pin.name || '—';
+      tr.append(el('td', 'n', pin.num), tdNome);
       const td = el('td', 'net' + (rede ? '' : ' sem'), rede || 'sem net');
       td.title = rede || 'sem net';
       tr.append(td);
@@ -1237,11 +1664,16 @@ function drawWorld(ctx, cam){
     ctx.save();
     ctx.translate(c.x, c.y);
     ctx.rotate(((((c.rot||0)%360)+360)%360) * Math.PI/180);
-    if (c.mirror) ctx.scale(-1, 1);
-    if (part) D.drawSymbolPart(ctx, part, {});
+    /* espelho pelo DADO (opts.mirror), e nao por um ctx.scale(-1,1): o scale virava a
+       LETRA do nome e do numero do pino junto com o corpo. hub-draw.js » mirrorPart. */
+    const emg = part ? null : desenhoDeEmergencia(c);
+    if (part) D.drawSymbolPart(ctx, part, { mirror: !!c.mirror, honraOlho: !showState.pinos });
+    /* desenho emprestado sai INTEIRO em ambar, e nao no azul da casa: ele esta ali para a
+       folha ser legivel, nao para passar por simbolo resolvido — a cor e o aviso */
+    else if (emg) D.drawSymbolPart(ctx, emg.part, { mirror: !!c.mirror, honraOlho: !showState.pinos, stroke: EMERG_COR });
     else { ctx.strokeStyle = '#ff5252'; ctx.strokeRect(-100, -100, 200, 200); }
     ctx.restore();
-    const bbref = part ? D.symBBox(part) : { x1:-100, y1:-100, x2:100, y2:100 };
+    const bbref = part ? D.symBBox(part) : emg ? D.symBBox(emg.part) : { x1:-100, y1:-100, x2:100, y2:100 };
     D.worldText(ctx, c.ref, c.x, c.y + Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) + 70, 60, 0, '#000000', 'center');
     if (c.comment && showState.comment)
       D.worldText(ctx, c.comment, c.x, c.y - Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) - 70, 55, 0, '#333366', 'center');
@@ -1263,6 +1695,8 @@ function drawWorld(ctx, cam){
   for (const p of s.powers)    D.drawPowerPort(ctx, p, selNet && selNet === p.net ? D.SCH.hl : undefined);
   for (const p of s.ports)     D.drawPort(ctx, p, selNet && selNet === p.net ? D.SCH.hl : undefined);
   for (const t of s.texts)     D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, D.SCH.text, 'left');
+  /* o X por ULTIMO: ele marca um pino, e marca escondida atras do corpo nao marca nada */
+  for (const n of s.noercs)    D.drawNoERC(ctx, n.x, n.y, n.color);
 
   /* sinalizadores da folha ativa */
   for (const a of ANN){
@@ -1317,16 +1751,17 @@ function drawFerramenta(ctx, cam){
     ctx.restore();
   }
   /* o ima: alvo laranja no ponto de conexao que vai grudar */
-  if (tool !== 'select' && snapHit){
+  const ima = tool !== 'select' ? snapHit : moveIma;
+  if (ima){
     const r = 7 * px;
     ctx.save();
     ctx.strokeStyle = D.SCH.hl; ctx.lineWidth = 2 * px; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.arc(snapHit.x, snapHit.y, r, 0, 2 * Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ima.x, ima.y, r, 0, 2 * Math.PI); ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(snapHit.x - r * 2.1, snapHit.y); ctx.lineTo(snapHit.x - r * 1.2, snapHit.y);
-    ctx.moveTo(snapHit.x + r * 1.2, snapHit.y); ctx.lineTo(snapHit.x + r * 2.1, snapHit.y);
-    ctx.moveTo(snapHit.x, snapHit.y - r * 2.1); ctx.lineTo(snapHit.x, snapHit.y - r * 1.2);
-    ctx.moveTo(snapHit.x, snapHit.y + r * 1.2); ctx.lineTo(snapHit.x, snapHit.y + r * 2.1);
+    ctx.moveTo(ima.x - r * 2.1, ima.y); ctx.lineTo(ima.x - r * 1.2, ima.y);
+    ctx.moveTo(ima.x + r * 1.2, ima.y); ctx.lineTo(ima.x + r * 2.1, ima.y);
+    ctx.moveTo(ima.x, ima.y - r * 2.1); ctx.lineTo(ima.x, ima.y - r * 1.2);
+    ctx.moveTo(ima.x, ima.y + r * 1.2); ctx.lineTo(ima.x, ima.y + r * 2.1);
     ctx.stroke();
     ctx.restore();
   }
@@ -1365,9 +1800,13 @@ const cam = D.mkCamera(cv, drawWorld, {
     /* com ferramenta na mao o que interessa e o ima, nao o que esta sob o cursor */
     if (tool !== 'select'){
       snapHit = panning ? null : snapPoint(w);
-      $('shover').textContent = snapHit ? '⊙ ' + snapHit.label
+      /* o ima pegou um pino de nome barrado: o rotulo vai como markup ja escapado pelo
+         hub-overbar — nos outros casos segue texto, que nao passa por parser nenhum */
+      if (snapHit && snapHit.html) $('shover').innerHTML = '⊙ ' + snapHit.html;
+      else $('shover').textContent = snapHit ? '⊙ ' + snapHit.label
         : (tool === 'wire' ? (wireDraw ? 'clique para o próximo ponto · botão direito encerra' : 'clique para começar o fio')
         :  tool === 'label' ? 'clique para pousar o rótulo ' + toolNet
+        :  tool === 'noerc' ? 'clique no pino que fica sem ligar de propósito'
                            : 'clique para pousar ' + (toolPower ? toolPower.net : ''));
       cam.draw();
       return;
@@ -1384,6 +1823,12 @@ const cam = D.mkCamera(cv, drawWorld, {
 function hitTest(x, y){
   const s = model.sheets[sheetIdx];
   const tol = 8 / cam.cam.scale;
+  /* o No ERC vem ANTES do pino, e so: ele fica EM CIMA da ponta quente, entao com o
+     pino primeiro o X nunca poderia ser selecionado — nem apagado. O raio e curto (30
+     mil, o tamanho do desenho), entao clicar um fio de distancia ao lado ainda pega o
+     pino, como se espera de um objeto pequeno por cima de outro. */
+  for (const n of s.noercs)
+    if (Math.hypot(x - n.x, y - n.y) <= 30) return { kind:'noerc', item:n };
   for (const c of s.comps) {
     const pins = HubCore.compPinsWorld(c, SLIB) || [];
     for (const p of pins)
@@ -1519,13 +1964,58 @@ $('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
    dela — e dali em diante o resolveLib acerta ja no primeiro passo. */
 let symAlvo = null, symEscolhido = null, symCands = [];
 let symPart = null;
-const camSymEsc = D.mkCamera($('symCv'), ctx => { if (symPart) D.drawSymbolPart(ctx, symPart, {}); },
+/* medidos ao ABRIR o modal, para aparecerem antes do clique em Usar e nao num toast depois
+   de gravar: quantos componentes do projeto mudam junto e a pinagem que o componente
+   espera (null = o simbolo de origem nao existe em acervo nenhum) */
+let symQuantos = 0, symEsperados = null;
+const camSymEsc = D.mkCamera($('symCv'), ctx => { if (symPart) D.drawSymbolPart(ctx, symPart, { honraOlho: false }); },
                              { bg: D.SCH.sheet });
 const symModalAberto = () => $('symmodal').classList.contains('on');
 
 function fechaSymModal(){
   $('symmodal').classList.remove('on');
   symAlvo = null; symEscolhido = null; symCands = []; symPart = null;
+  symQuantos = 0; symEsperados = null;
+}
+
+/* quantos componentes DESTE projeto usam o mesmo nome de simbolo: e o tamanho do estrago
+   (ou do conserto) de uma escolha, que e global */
+function contaSym(nome){
+  if (!nome) return 0;
+  return model.sheets.reduce((k, sh) => k + sh.comps.filter(c => c.sym === nome).length, 0);
+}
+
+/* As tabelas de apelido SEM a escolha gravada para `de` — e assim que se pergunta ao
+   resolvedor "e se essa escolha nao existisse?" sem mexer no estado global. */
+function tabelasSemEscolha(de){
+  const t = HubCore.libTables();
+  const subs = {};
+  for (const k of Object.keys(t.sym.subs)) if (k !== de) subs[k] = t.sym.subs[k];
+  return { sym: { subs: subs, fwd: t.sym.fwd, bwd: t.sym.bwd }, fp: t.fp };
+}
+
+/* Pinagem que o componente ESPERA: a do simbolo em que o nome dele resolveria sozinho. O
+   caso comum de quem veio de outra biblioteca do Altium e nao existir em acervo nenhum —
+   ai a resposta e null, e a tela diz isso em vez de inventar um numero. */
+function pinosEsperadosDe(comp){
+  if (!comp || !comp.sym) return null;
+  const r = HubCore.resolveSym(SLIB, comp.sym, tabelasSemEscolha(comp.sym));
+  const p = r && r.item ? HubCore.partOf(r.item, comp.part) : null;
+  return p && p.pins ? p.pins.length : null;
+}
+
+/* O aviso que faltava, no pe da previa: pinagem esperada x pinagem do candidato, e quantos
+   componentes mudam junto — os dois ANTES do clique. */
+function symAtualizaInfo(){
+  const box = $('symInfo');
+  if (!box) return;
+  box.textContent = '';
+  const rs = symAlvo ? HubCore.resolveSym(SLIB, symAlvo.sym) : null;
+  const d = decideTroca({ sym: rs && rs.item && rs.item.name, how: rs && rs.how,
+                          quantos: symQuantos, pinosEsperados: symEsperados,
+                          pinosDoCandidato: symPart && symPart.pins ? symPart.pins.length : null });
+  if (d.pinos)   box.append(el('div', 'li' + (d.pinosAlerta   ? ' alerta' : ''), d.pinos));
+  if (d.impacto) box.append(el('div', 'li' + (d.impactoAlerta ? ' alerta' : ''), d.impacto));
 }
 
 function symSelecionar(c){
@@ -1534,8 +2024,12 @@ function symSelecionar(c){
   $('symUsar').disabled = !c;
   for (const b of $('symLista').querySelectorAll('.sym-item'))
     b.setAttribute('aria-selected', String(!!c && b.dataset.nome === c.name));
-  symPart = c ? (HubCore.partOf(c.item, 1) || null) : null;
+  /* a parte do COMPONENTE, nao a 1 fixa: previa e contagem de pinos tem de falar da mesma
+     parte, senao o aviso de pinagem compara coisas diferentes */
+  const parte = (symAlvo && symAlvo.part) || 1;
+  symPart = c ? (HubCore.partOf(c.item, parte) || HubCore.partOf(c.item, 1) || null) : null;
   $('symHint').textContent = symPart ? '' : (c ? 'sem geometria para desenhar' : '');
+  symAtualizaInfo();
   fitPreview(camSymEsc, symPart ? D.symBBox(symPart) : null);
   camSymEsc.resize(); ajustaPreviews([camSymEsc]);
 }
@@ -1577,8 +2071,17 @@ function symRenderLista(){
 function abrirEscolhaSimbolo(comp){
   symAlvo = comp;
   symCands = HubCore.suggestSym(comp, SLIB.symbols, { limit: 12 });
+  symQuantos = contaSym(comp.sym);
+  symEsperados = pinosEsperadosDe(comp);
+  const rs = HubCore.resolveSym(SLIB, comp.sym);
+  const atual = (rs && rs.item) || null;
+  /* o cabecalho muda de "procurar" para "trocar" quando ja ha simbolo, e diz qual e de onde
+     ele veio: e a pergunta que o modal tem de responder antes de qualquer clique */
+  $('symTitle').textContent = atual ? 'Trocar símbolo' : 'Procurar símbolo';
   $('symMeta').textContent = comp.ref + ' — o Altium mandou "' + comp.sym + '"'
-    + (comp.comment ? ' · comment "' + comp.comment + '"' : '');
+    + (comp.comment ? ' · comment "' + comp.comment + '"' : '')
+    + (atual ? ' · a folha desenha "' + atual.name + '"'
+             + (rs.how === 'escolha' ? ', por escolha sua' : '') : '');
   $('symBusca').value = '';
   $('symmodal').classList.add('on');
   symRenderLista();
@@ -1587,15 +2090,97 @@ function abrirEscolhaSimbolo(comp){
 
 /* Grava RELENDO o disco antes: lib-subs.js e da LAN inteira e a aba Biblioteca do hub
    grava nele tambem — reescrever de memoria apagaria a escolha que a outra aba fez. */
+/* ── ATRIBUIR O DESENHO EMPRESTADO AO SÍMBOLO DA BIBLIOTECA ──
+   O resgate acima deixa a folha legível, mas é remendo de VISTA: o símbolo da casa continua
+   sem geometria e no próximo projeto o quadrado vermelho volta. Aqui a correção fica de pé —
+   o símbolo escolhido RECEBE o desenho, no espelho e na .SchLib real.
+
+   É a única coisa desta vista que escreve na biblioteca viva, então ela é cercada: só com
+   servidor, só na biblioteca da CASA (o desenho do almoxarifado nasce do gerador e se grava
+   pela rota /save-almox, por componente), só em símbolo de UMA parte (atribuir um desenho de
+   uma parte a um símbolo de várias apagaria as outras) e sempre atrás de um confirm que diz,
+   em número de pinos e gráficos, o que vai ser sobrescrito. */
+const clonaJSON = o => JSON.parse(JSON.stringify(o));
+async function postSymbols(path, body){
+  let r;
+  try { r = await fetch('/api/symbols/' + path, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) }); }
+  catch (e){ return { status:0, j:{ ok:false, error:'servidor não respondeu: ' + e.message } }; }
+  let j = null;
+  try { j = await r.json(); }
+  catch (e){ j = { ok:false, error:(r.status === 404 || r.status === 405)
+    ? 'o servidor não tem /api/symbols — reinicie o hubserver.py'
+    : 'resposta inválida do servidor (HTTP ' + r.status + ')' }; }
+  return { status:r.status, j };
+}
+async function perguntaAtribuir(emg, para){
+  if (!emg || !HubIO.canPost) return;
+  const alvo = HubCore.symbolOf(SLIB, para);
+  if (!alvo) return;
+  const ac = ACERVO_DE.get(para);
+  if (ac && ac.almox){
+    HubDialog.toast('"' + para + '" é do almoxarifado: o desenho dele vem do sincronismo — '
+                    + 'para gravar, use a aba Biblioteca » Símbolos', 'warn', 7000);
+    return;
+  }
+  const nPartes = (alvo.parts || []).length || 1;
+  if (nPartes > 1){
+    HubDialog.toast('"' + para + '" tem ' + nPartes + ' partes — atribuir o desenho de uma só '
+                    + 'apagaria as outras; use a aba Biblioteca » Símbolos', 'warn', 7000);
+    return;
+  }
+  const atual = HubCore.partOf(alvo, 1) || { pins:[], graphics:[] };
+  const nPin = (emg.part.pins || []).length, nGrf = (emg.part.graphics || []).length;
+  const ok = await HubDialog.confirm(
+    'Deseja atribuir a "' + para + '" o desenho emprestado de "' + emg.nome + '"?\n\n'
+    + '"' + para + '" hoje tem ' + (atual.pins || []).length + ' pinos e '
+    + (atual.graphics || []).length + ' gráficos; passa a ter ' + nPin + ' pinos e ' + nGrf + ' gráficos.\n\n'
+    + 'Grava em Libs/schlib.js E na SchLib do Altium — vale para TODOS os projetos, não só este.',
+    { title: 'atribuir o símbolo ao componente da biblioteca', ok: 'Atribuir', danger: true });
+  if (!ok) return;
+  return true;
+}
+/* A GRAVACAO, separada da pergunta de proposito: escrever em Libs dispara o
+   __hubOnChange, que recarrega a pagina. Com a pergunta ja respondida antes de qualquer
+   escrita, nenhuma recarga pode pegar um dialogo aberto no meio. */
+async function gravaDesenhoNaBiblioteca(emg, para){
+  const alvo = HubCore.symbolOf(SLIB, para);
+  if (!alvo) return;
+  const parts = [{ part:1, pins: clonaJSON(emg.part.pins || []), graphics: clonaJSON(emg.part.graphics || []) }];
+  const { status, j } = await postSymbols('save', { name: para, parts, description: alvo.description, altium: true });
+  /* o espelho pode ter sido gravado mesmo quando a SchLib falhou (423 = lib aberta no
+     Altium): nesse caso a memória TEM de acompanhar o disco, senão a folha desenha uma
+     versão que já não existe em lugar nenhum */
+  const aplicaNaMemoria = () => { alvo.parts = (j && j.parts) || parts; alvo.partcount = 1; reapply(); };
+  if (j && j.ok){
+    aplicaNaMemoria();
+    HubDialog.toast('"' + para + '" recebeu o desenho' + (j.altium ? ' — espelho e SchLib' : ' — só o espelho'), 'ok');
+    return;
+  }
+  const msg = (j && j.error) || ('HTTP ' + status);
+  if (j && j.espelho && !j.altium){
+    aplicaNaMemoria();
+    HubDialog.toast(status === 423
+      ? 'espelho gravado; a biblioteca está aberta no Altium — feche e repita para a SchLib'
+      : 'espelho gravado, mas a SchLib ficou para trás — ' + msg, 'warn', 8000);
+    return;
+  }
+  await HubDialog.alert(msg, { title: 'não gravou na biblioteca' });
+}
+
 async function usarSimboloEscolhido(){
   if (!symAlvo || !symEscolhido) return;
   const de = symAlvo.sym, para = symEscolhido.name;
+  /* medido ANTES da substituicao: depois dela o simbolo resolve e o emprestimo some */
+  const emg = HubCore.symbolOf(SLIB, de) ? null : desenhoDeEmergencia(symAlvo);
   if (de === para){ HubDialog.toast('já é esse símbolo', 'warn'); return; }
   if (!HubIO.canPost){
     await HubDialog.alert('Sem servidor: abra o hub por hubserver.py para gravar a escolha.',
                           { title: 'não dá para gravar' });
     return;
   }
+  /* PERGUNTA ANTES DE GRAVAR QUALQUER COISA: o primeiro arquivo escrito em Libs derruba
+     a pagina pelo __hubOnChange, e uma pergunta aberta morreria sem resposta. */
+  const atribuir = emg ? await perguntaAtribuir(emg, para) : false;
   const REL = 'Libs/lib-subs.js';
   let atuais = [];
   try {
@@ -1628,6 +2213,67 @@ async function usarSimboloEscolhido(){
   reapply();
   HubDialog.toast('"' + de + '" agora usa "' + para + '"'
                   + (quantos > 1 ? ' — ' + quantos + ' componentes' : ''), 'ok');
+  /* a escolha ja vale; agora, se foi pedido la em cima, o desenho vai para a BIBLIOTECA */
+  if (atribuir) await gravaDesenhoNaBiblioteca(emg, para);
+}
+
+/* Espelho do usarSimboloEscolhido, ao contrario: rele o disco (a aba Biblioteca do hub
+   grava no mesmo arquivo), tira a linha daquele `from`, valida, grava e aplica sem F5.
+   Voltar a ficar SEM simbolo e um resultado legitimo de quem pediu para desfazer — e por
+   isso e dito com todas as letras antes e depois, senao parece que a remocao falhou. */
+async function desfazerEscolha(comp){
+  const de = comp && comp.sym;
+  if (!de) return;
+  if (!HubIO.canPost){
+    await HubDialog.alert('Sem servidor: abra o hub por hubserver.py para apagar a escolha.',
+                          { title: 'não dá para gravar' });
+    return;
+  }
+  const REL = 'Libs/lib-subs.js';
+  let atuais = [];
+  try {
+    const txt = await HubIO.fetchText(REL);
+    atuais = new Function(txt + ';return typeof libSubs !== "undefined" ? libSubs : [];')() || [];
+  } catch (e) {
+    atuais = (typeof libSubs !== 'undefined' && Array.isArray(libSubs)) ? libSubs.slice() : [];
+  }
+  const alvo = atuais.find(r => r && r.kind !== 'fp' && r.from === de);
+  if (!alvo){
+    HubDialog.toast('não há escolha gravada para "' + de + '" em ' + REL, 'warn');
+    return;
+  }
+  const nat = HubCore.resolveSym(SLIB, de, tabelasSemEscolha(de));
+  const natNome = (nat && nat.item && nat.item.name) || '';
+  const quantos = contaSym(de);
+  const fim = natNome
+    ? 'Sem ela, "' + de + '" volta a resolver em "' + natNome + '".'
+    : 'Sem ela, "' + de + '" não resolve em símbolo nenhum: o componente vira um quadrado '
+      + 'vermelho e sai da extração de nets.';
+  if (!(await HubDialog.confirm(
+        'Remover a escolha "' + de + '" → "' + alvo.to + '"? ' + fim
+        + (quantos > 1 ? ' ' + quantos + ' componentes deste projeto mudam junto.' : ''),
+        { title: 'desfazer a escolha', ok: 'Remover', danger: !natNome }))) return;
+
+  const nova = atuais.filter(r => !(r && r.kind !== 'fp' && r.from === de));
+  const out = HubCore.serializeLibSubs(nova);
+  if (out.errors.length){
+    await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title: 'lib-subs.js inválido' });
+    return;
+  }
+  const r = await HubIO.saveFile(REL, out.text);
+  if (!r || r.ok === false){
+    await HubDialog.alert((r && r.msg) || 'o servidor recusou a gravação', { title: 'não salvou' });
+    return;
+  }
+  /* aplica sem recarregar: um F5 aqui jogaria fora edicao nao salva da folha */
+  HubCore.setLibTables(typeof renameMap !== 'undefined' ? renameMap : null, nova);
+  if (symModalAberto() && symAlvo && symAlvo.sym === de) fechaSymModal();
+  reapply();
+  const quantosTxt = quantos > 1 ? ' (' + quantos + ' componentes)' : '';
+  HubDialog.toast(natNome
+    ? 'escolha removida — "' + de + '" volta a resolver em "' + natNome + '"' + quantosTxt
+    : 'escolha removida — "' + de + '" agora está SEM símbolo, como você pediu' + quantosTxt,
+    natNome ? 'ok' : 'warn');
 }
 
 $('symClose').addEventListener('click', fechaSymModal);
@@ -1676,10 +2322,32 @@ window.addEventListener('keydown', e => {
   if (k === 'x' && sel.size){ mirrorSel(); return; }
 });
 window.__hubOnChange = function(){
-  if (!annDirty && !schDirty){ location.reload(); return; }
+  /* Sem nada pendente, recarregar a pagina e o caminho mais simples E o mais completo: pega
+     tambem o schematic.js e os sinalizadores do disco, que a recarga de biblioteca nao pega. */
+  /* com uma pergunta na tela o reload a mataria antes de o usuario responder — medido:
+     o confirm aparecia e sumia 1,5 s depois, junto com a folha inteira */
+  if (!annDirty && !schDirty){ HubDialog.ocioso().then(() => location.reload()); return; }
+  /* Com edicao pendente a pagina NAO pode recarregar — mas a BIBLIOTECA pode: trocar o
+     acervo por baixo do desenho nao custa uma linha do que o usuario fez, e e justamente
+     isso que ele acabou de mudar no editor de simbolos. O que continua esperando o F5 e so
+     o que vem do disco e brigaria com o que esta na tela: o proprio schematic.js e os
+     sinalizadores. */
   staleWorkspace = true;
-  $('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
-  HubDialog.toast('O workspace mudou com edições pendentes aqui — salve e recarregue (F5).', 'warn', 0);
+  $('annmsg').textContent = '⚠ workspace mudou — conferindo a biblioteca…';
+  window.__hubRecarregaLibs().then(r => {
+    const lib = r.falhas.length ? 'biblioteca recarregada em parte (não veio ' + r.falhas.join(', ') + ')'
+              : r.mudou ? 'biblioteca recarregada — ' + r.simbolos + ' símbolos'
+              : 'biblioteca conferida — nada mudou nela';
+    /* O RODAPE FICA NA TELA depois que o toast passa, entao ele nao pode continuar pedindo
+       F5 pelo que JA entrou sozinho: empurrar para o F5 e empurrar para perder o trabalho
+       pendente, que e exatamente o que este caminho existe para proteger. Diga o que sobrou. */
+    $('annmsg').textContent = (r.mudou ? '⚠ biblioteca já atualizada aqui' : '⚠ workspace mudou')
+      + ' — só o schematic.js e os sinalizadores do disco esperam F5';
+    HubDialog.toast(lib + '. O schematic.js e os sinalizadores do disco só entram com F5: salve o que está pendente antes.', 'warn', 0);
+  }, () => {
+    $('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
+    HubDialog.toast('O workspace mudou com edições pendentes aqui — salve e recarregue (F5).', 'warn', 0);
+  });
 };
 window.__hubDirty = function(){ return annDirty || schDirty; };
 window.__hubSelectComp = function(ref){
@@ -1832,6 +2500,22 @@ $('btnComment').addEventListener('click', () => {
   pintaOlhoComment(); cam.draw();
 });
 pintaOlhoComment();
+/* mesmo idioma do olho do comment: aceso = a vista manda, riscado = o simbolo manda */
+function pintaOlhoPinos(){
+  const b = $('btnPinNames'), on = showState.pinos;
+  b.classList.toggle('active', on);
+  b.setAttribute('aria-pressed', String(on));
+  b.title = on ? 'Nomes e numeros de pino visiveis — clique para obedecer o simbolo'
+               : 'Pino escondido pelo simbolo fica escondido (como no Altium) — clique para mostrar tudo';
+  b.innerHTML = '<svg viewBox="0 0 16 16"><path d="M1 8h4.5"/><path d="M7.5 5h7M7.5 8h7M7.5 11h4.5"/>'
+              + (on ? '' : '<path d="' + OLHO_X + '"/>') + '</svg>';
+}
+$('btnPinNames').addEventListener('click', () => {
+  showState.pinos = !showState.pinos;
+  try { localStorage.setItem(VER_PINOS_KEY, showState.pinos ? '1' : '0'); } catch (e) {}
+  pintaOlhoPinos(); cam.draw();
+});
+pintaOlhoPinos();
 $('btnGrid').addEventListener('click', () => {
   showState.grid = !showState.grid; $('btnGrid').classList.toggle('active', showState.grid); cam.draw();
 });

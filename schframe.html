@@ -185,6 +185,10 @@
   .wide:first-child{margin-top:0;}
   .wide .n{margin-left:auto; color:var(--fg-dim); font-size:11px;}
   .wide.active .n{color:#cfe0ff;}
+  /* acao secundaria da ficha (trocar um simbolo que JA resolveu, desfazer a escolha): fica
+     a mao sem gritar — quem esta vendo o desenho certo nao precisa de um botao em destaque */
+  .wide.sutil{background:transparent; color:var(--fg-dim); font-size:11px; padding:4px 10px;}
+  .wide.sutil:hover{color:var(--fg); background:var(--panel2);}
   .hint{font-size:11px; color:var(--fg-dim); margin-top:6px; line-height:1.4;}
   .meta{color:var(--fg-dim); font-size:12px;}
   kbd{font:11px Consolas,monospace; background:var(--panel2); border:1px solid var(--border);
@@ -228,8 +232,14 @@
   /* escolher simbolo: lista a esquerda, previa a direita — duas colunas, sem o carrinho */
   #symmodal .sym-grid{height:100%; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); min-height:0;}
   #symmodal .sym-esq{display:grid; grid-template-rows:auto auto 1fr; min-height:0;}
-  #symmodal .sym-dir{display:grid; grid-template-rows:minmax(0,1fr) auto; min-height:0; min-width:0;
+  #symmodal .sym-dir{display:grid; grid-template-rows:minmax(0,1fr) auto auto; min-height:0; min-width:0;
     box-shadow:inset 1px 0 0 var(--line);}
+  /* pinagem esperada x pinagem do candidato, e quantos componentes mudam junto: o aviso
+     mora COLADO no botao Usar, porque e antes do clique que ele serve para alguma coisa */
+  #symmodal .sym-info{display:grid; gap:4px; padding:10px 16px 0; font-size:11px; color:var(--text-3);}
+  #symmodal .sym-info:empty{display:none;}
+  #symmodal .sym-info .li{line-height:1.35;}
+  #symmodal .sym-info .li.alerta{color:var(--warn);}
   #symmodal .sym-item{display:block; width:100%; text-align:left; cursor:pointer; border:0; border-radius:var(--r-sm);
     background:transparent; color:var(--text); padding:7px 9px; margin-bottom:2px;}
   #symmodal .sym-item:hover{background:rgba(var(--tint),0.06);}
@@ -387,6 +397,8 @@
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
           <button class="ibtn" id="btnComment" aria-pressed="false" title="Comment suprimido — clique para mostrar">
             <svg viewBox="0 0 16 16"><path d="M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z"/><circle cx="8" cy="8" r="2.2"/><path d="M2.5 13.5 L13.5 2.5"/></svg></button>
+          <button class="ibtn active" id="btnPinNames" aria-pressed="true" title="Nomes e numeros de pino visiveis — clique para obedecer o simbolo">
+            <svg viewBox="0 0 16 16"><path d="M1 8h4.5"/><path d="M7.5 5h7M7.5 8h7M7.5 11h4.5"/></svg></button>
           <button class="ibtn" id="btnEdit" title="Editar: mover componentes e fios (E)">
             <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
           <span class="hint" id="edithint" style="margin:0 0 0 4px; flex:1;"></span>
@@ -436,6 +448,9 @@
       <span class="sep"></span>
       <button id="tbNet" aria-pressed="false" title="Rótulo de net (L) — uma palavra; dois rótulos com o mesmo nome viram a mesma net, como no Altium">
         <svg viewBox="0 0 24 24"><path d="M3 16h5l3-8 3 8h5"/><path d="M4 20h16"/></svg><span class="lb">net</span></button>
+      <span class="sep"></span>
+      <button id="tbNoErc" aria-pressed="false" title="No ERC — marca um pino como sem ligação DE PROPÓSITO; o X viaja para o Altium como a diretiva No ERC">
+        <svg viewBox="0 0 24 24" stroke="#cc0000"><path d="M6 6l12 12M18 6L6 18"/></svg><span class="lb">No ERC</span></button>
     </div>
     <div id="annform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
          background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
@@ -511,6 +526,7 @@
       </div>
       <div class="sym-dir">
         <div class="viewport sheet"><canvas id="symCv"></canvas><div class="hint" id="symHint"></div></div>
+        <div class="sym-info" id="symInfo"></div>
         <div class="sym-foot">
           <span class="meta" id="symEscolha">nenhum escolhido</span>
           <button class="btn" id="symUsar" disabled>Usar este símbolo</button>
@@ -583,6 +599,9 @@
 </div>
 
 <script src="hub-core.js"></script>
+<!-- antes do hub-draw.js e do schframe.js: os dois procuram o HubOverbar para desenhar
+     nome de pino ativo-baixo (R\S\T\ vira RST com a barra em cima) -->
+<script src="hub-overbar.js"></script>
 <script src="hub-draw.js"></script>
 <script src="Libs/schlib.js"></script>
 <script src="Libs/pcblib.js"></script>
@@ -594,6 +613,8 @@
      de rename e de substituicao (o 404 no console e esperado antes da primeira escolha) -->
 <script src="Libs/rename-map.js"></script>
 <script src="Libs/lib-subs.js"></script>
+<!-- nao e acervo: so o resgate de desenho do schframe.js le isto -->
+<script src="Libs/symbols-lib.js"></script>
 <script>
   var SCH_P = new URLSearchParams(location.search).get('p') || '_DemoKit';
   document.write('<script src="Projects/' + SCH_P + '/schematic.js"><\/script>');
@@ -603,5 +624,7 @@
 <!-- modal e notificacao no tema da pagina: nada de alert()/confirm() do navegador -->
 <script src="hub-dialog.js"></script>
 <script src="schframe.js"></script>
+<!-- "Enviar para o Odoo": injeta o proprio botao, CSS e modal (nada mais aqui) -->
+<script src="hub-odoolista.js"></script>
 </body>
 </html>

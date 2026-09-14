@@ -20,7 +20,10 @@
 
    A ficha (aside) segue o painel Properties do Altium: X e Y na mesma linha, a parte, o
    tamanho na unidade da interface — mm por padrão, ou mil — e, no pino, número/nome com o
-   olho de visibilidade (hideNum/hideName, opcionais no schlib-v2). K vira linha em pino e
+   olho de visibilidade (hideNum/hideName, opcionais no schlib-v2). Pino novo — colocado
+   pela ferramenta, vindo de uma linha (K) ou de um tile da biblioteca de símbolos — nasce
+   com o NOME escondido: só o número à vista, como todo componente gerado do almoxarifado
+   (o nome quase sempre repete o número); o olho o mostra quando fizer falta. K vira linha em pino e
    pino em linha; um tile da biblioteca arrastado para o canvas entra inserido (ou aplicado,
    se a parte está vazia). Os gráficos podem levar `color` (traço) e `fill` (área) — opcionais
    do schlib-v2, "#rrggbb" — e o canvas do editor os desenha ele mesmo; Preencher liga o
@@ -225,24 +228,17 @@ function rotateAll(part) {
   });
   return o;
 }
-/* espelha em X (mesma regra do AI-GUIDE: ângulo vira 180-a; arco troca início e fim) */
+/* espelha em X. A REGRA MORA NO HubDraw.mirrorPart — a mesma que a folha usa para desenhar
+   componente espelhado —, para não existirem dois entendimentos de "espelhado" no hub: era
+   assim que o desenho e a edição podiam divergir sem ninguém notar. Aqui só entra o que é
+   do editor: retângulo volta normalizado (x1 < x2), invariante que o clique e a caixa de
+   seleção assumem.
+   A LEGENDA NÃO GIRA MAIS: o `rot = 180 - rot` de antes punha um rótulo de rot 0 em 180, de
+   cabeça para baixo. Espelhar é virar a POSIÇÃO, não a letra — vale para o rótulo como vale
+   para o nome e o número do pino. */
 function mirrorAll(part) {
-  const o = clone(part);
-  const N = v => 0 - v;                       /* idem: nada de -0 */
-  o.pins = (o.pins || []).map(p => Object.assign(p, { x: N(p.x), orient: norm360(180 - (p.orient || 0)) }));
-  o.graphics = (o.graphics || []).map(g => {
-    switch (g.g) {
-      case 'line': g.x1 = N(g.x1); g.x2 = N(g.x2); break;
-      case 'rect': g.x1 = N(g.x1); g.x2 = N(g.x2); normRect(g); break;
-      case 'arc': { g.cx = N(g.cx); const sa = g.sa || 0, ea = g.ea == null ? 360 : g.ea;
-        if (norm360(ea - sa) === 0) break;                     /* círculo inteiro fica como está */
-        g.sa = norm360(180 - ea); g.ea = norm360(180 - sa); break; }
-      case 'ellipse': g.cx = N(g.cx); break;
-      case 'poly': case 'polyline': g.pts = (g.pts || []).map(p => [N(p[0]), p[1]]); break;
-      case 'label': g.x = N(g.x); g.rot = norm360(180 - (g.rot || 0)); break;
-    }
-    return g;
-  });
+  const o = HubDraw.mirrorPart(part);
+  (o.graphics || []).forEach(g => { if (g.g === 'rect') normRect(g); });
   return o;
 }
 const bbox = part => HubDraw.symBBox(part);
@@ -348,6 +344,9 @@ function applyLibSymbol(part, libSym) {
     note = 'desenho trocado por "' + (libSym.name || '?') + '" — ' + pins.length + ' pino' + (pins.length > 1 ? 's' : '')
          + ' mantiveram número, nome e tipo.';
   } else {
+    /* a pinagem veio da biblioteca: quem não trouxer opinião de visibilidade cai no padrão —
+       que hoje só esconde nome vazio ou igual ao número (comPadraoDeVisibilidade) */
+    pins.forEach(comPadraoDeVisibilidade);
     note = 'desenho E pinagem vieram de "' + (libSym.name || '?') + '": o símbolo tinha ' + orig.length
          + ' pino' + (orig.length === 1 ? '' : 's') + ' e a biblioteca traz ' + pins.length + '. Confira os números.';
   }
@@ -358,6 +357,29 @@ function nextPinNum(pins) {
   let m = 0;
   for (const p of (pins || [])) { const n = parseInt(p.num, 10); if (String(n) === String(p.num).trim() && n > m) m = n; }
   return String(m + 1);
+}
+/* pino novo: número livre, sem nome, Passive — e com o NOME escondido (hideName). É o padrão
+   de todos os componentes: o nome quase sempre repete o número, e à vista ele saía duas
+   vezes ao lado de cada pino. O olho da ficha o mostra quando fizer falta. */
+function novoPino(pins, x, y, len, orient) {
+  return { num: nextPinNum(pins), name: '', x, y, len, orient, type: 'Passive', hideName: true };
+}
+/* pino que chega de um tile da biblioteca de símbolos (Libs/symbols-lib.js). ATÉ A
+   REGENERAÇÃO DE 2026-09-11 a paleta não guardava visibilidade — o extrair.py descartava
+   hideNum/hideName ao guardar um corpo — e todo pino chegava sem opinião, ganhando nome
+   escondido. Agora o olho do pino vem junto, e "sem flag" deixou de significar "sem opinião":
+   no schlib-v2 ausente quer dizer VISÍVEL. Esconder por padrão passou a apagar VCC/A/B/GND na
+   hora de jogar o tile no canvas — a miniatura mostrava o nome e o canvas não, porque a
+   miniatura desenha o símbolo da lib e o canvas desenha o que passou por aqui.
+   O incômodo que criou o padrão continua real, mas só no caso que o motivava: nome vazio ou
+   que apenas repete o número, que sairia duas vezes ao lado do pino. Nome de verdade fica à
+   vista. Pino que já traz algum flag continua sendo respeitado. */
+function comPadraoDeVisibilidade(p) {
+  if (!('hideNum' in p) && !('hideName' in p)) {
+    const n = String(p.name == null ? '' : p.name).trim();
+    p.hideName = !n || n === String(p.num).trim();
+  }
+  return p;
 }
 
 /* ── seleção múltipla: caixa de cada item e quem cabe numa caixa de seleção ── */
@@ -445,7 +467,7 @@ function lineToPin(part, idx) {
   const len = r3(Math.abs(horiz ? dx : dy));
   if (!len) return null;
   const orient = horiz ? (dx >= 0 ? 0 : 180) : (dy >= 0 ? 90 : 270);
-  const pin = { num: nextPinNum(part.pins), name: '', x: r3(corpo[0]), y: r3(corpo[1]), len, orient, type: 'Passive' };
+  const pin = novoPino(part.pins, r3(corpo[0]), r3(corpo[1]), len, orient);
   const pins = (part.pins || []).map(clone).concat([pin]);
   return { part: { pins, graphics: resto.map(clone) }, selection: [{ kind: 'pin', idx: pins.length - 1 }],
            aviso: (dx === 0 || dy === 0) ? '' : 'a linha não era axial: o pino ficou no eixo ' + (horiz ? 'X' : 'Y') + ', com ' + len + ' mil' };
@@ -473,7 +495,7 @@ function insertLibSymbol(part, libSym, x, y) {
   const pins = (part.pins || []).map(clone), graphics = (part.graphics || []).map(clone), selection = [], renumerados = [];
   const usados = new Set(pins.map(p => String(p.num).trim()));
   for (const src of (libSym.pins || [])) {
-    const p = moveItem(src, x, y);
+    const p = comPadraoDeVisibilidade(moveItem(src, x, y));
     if (usados.has(String(p.num).trim())) { const n = nextPinNum(pins); renumerados.push([String(p.num), n]); p.num = n; }
     usados.add(String(p.num).trim());
     selection.push({ kind: 'pin', idx: pins.length }); pins.push(p);
@@ -482,8 +504,40 @@ function insertLibSymbol(part, libSym, x, y) {
   return { part: { pins, graphics }, selection, renumerados, novos: pins.slice(pins.length - (libSym.pins || []).length).map(p => p.num) };
 }
 
+/* ── busca da lista de símbolos ──
+   O mesmo texto tem DUAS formas: a CRUA, que é o que o arquivo guarda e o que a coluna do
+   nome mostra, e a de TELA, sem a marcação de ativo-baixo (R\S\T\ → RST). Consulta e
+   palheiro entram nas duas e basta uma casar — é isso que faz "procurar pelo que está
+   escrito na tela sempre achar", nos dois sentidos.
+   Por que não só a forma de tela, como antes: as regras de barra NORMAL (/O/E, /CS) valem
+   para o campo INTEIRO, e dentro de "nome + descrição" a barra fica de pé. Limpar só a
+   consulta deixava "/O/E" digitado sem casar com o "/O/E" escrito numa descrição — e a
+   symbols-lib acabou de ganhar descrição de verdade, então isso deixou de ser hipótese.
+   Limpar nome e descrição SEPARADAMENTE (é
+   assim que cada campo aparece na tela) faz o nome "/O/E" casar com quem digita o "OE" que
+   lê; o palheiro guarda também o "nome + ' ' + descrição" cru, para a consulta que
+   atravessa os dois campos continuar achando.
+   E quem decide se HÁ consulta é o CRU: "\" limpava para "" e "" vale "passa tudo" — era
+   assim que digitar uma barra listava o acervo inteiro. */
+function filtroBusca(q, plain) {
+  const txt = v => String(v == null ? '' : v);
+  const limpo = v => txt(plain ? plain(txt(v)) : v);
+  const uniq = a => a.filter((v, i) => a.indexOf(v) === i);
+  const cru = txt(q).trim();
+  if (!cru) return () => true;                       /* sem consulta: passa tudo */
+  /* cru entra sempre: consulta não vazia nunca vira "passa tudo" por causa da limpeza */
+  const alvos = uniq([cru, limpo(cru).trim()].filter(Boolean).map(t => t.toLowerCase()));
+  return (nome, desc) => {
+    const n = txt(nome), d = txt(desc);
+    const hay = uniq([(n + ' ' + d).toLowerCase(), (limpo(n) + ' ' + limpo(d)).toLowerCase()]);
+    return hay.some(h => alvos.some(a => h.indexOf(a) >= 0));
+  };
+}
+
 const pure = { snap, pinHot, pinSnapOf, pinsOffGrid, segDist, pointInPoly, angleIn, labelBox, hitTest, hitGraphic,
-               moveItem, moveVertex, rotateAll, mirrorAll, bbox, serializeSymbol, applyLibSymbol, nextPinNum,
+               filtroBusca,
+               moveItem, moveVertex, rotateAll, mirrorAll, bbox, serializeSymbol, applyLibSymbol, nextPinNum, novoPino,
+               comPadraoDeVisibilidade,
                cleanPin, cleanGraphic, normW, normArc, PIN_TYPES, WIDTHS,
                pinLenDefault, alinhado, corValida, fillable, setFill, PIN_MARK,
                itemBBox, itemsInBox, moveItems, deleteItems, duplicateItems,
@@ -614,6 +668,10 @@ function loadSymlib() {
   if (DATA.symlib) return Promise.resolve(DATA.symlib);
   if (!DATA.libLoading) DATA.libLoading = loadVarScript('Libs/symbols-lib.js', 'symbolsLib').then(v => {
     DATA.symlib = v && v.symbols ? v : null;
+    /* DOIS FORMATOS, UM NOME. O symlib-v1 grava o campo como `desc`; o schlib-v2 — e toda a
+       tela, daqui e do hub — lê `description`. Eram 727 descrições invisíveis por causa de
+       uma letra. Normaliza na carga, que é o único ponto por onde os 897 passam. */
+    if (DATA.symlib) DATA.symlib.symbols.forEach(x => { if (x.desc && !x.description) x.description = x.desc; });
     DATA.symlibMissing = !DATA.symlib;
     DATA.libLoading = null;
     return DATA.symlib;
@@ -789,6 +847,11 @@ async function pedirTexto(title, label, valor) { const v = await abreModal({ tit
 /* ═══════════════════════ DOM ═══════════════════════ */
 
 const el = (tag, cls, txt) => { const n = document.createElement(tag); if (cls) n.className = cls; if (txt != null) n.textContent = txt; return n; };
+/* nome de pino ativo-baixo (R\S\T\ → RST com barra em cima). Quem carrega o hub-overbar.js
+   é a casca, e ele pode chegar DEPOIS deste arquivo: procura de cada vez, nunca referência
+   guardada. Sem ele o painel abre igual, só mostrando a notação crua — como antes. */
+const OVB = () => (typeof HubOverbar !== 'undefined' && HubOverbar) || null;
+const semBarra = t => { const o = OVB(); return o ? o.plain(t) : String(t == null ? '' : t); };
 const btn = (cls, txt, on, title) => { const b = el('button', 'btn ' + cls, txt); b.type = 'button'; b.onclick = on; if (title) b.title = title; return b; };
 const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const SVG = 'http://www.w3.org/2000/svg';
@@ -980,8 +1043,12 @@ function refreshList() {
   if (key === listKey) return;
   listKey = key;
   const semFp = s => !(s.footprints || []).some(f => f.incurrentlib);
-  const q = ST.q.trim().toLowerCase();
-  const hit = s => !q || (s.name + ' ' + (s.description || '')).toLowerCase().includes(q);
+  /* os DOIS lados entram nas duas formas — crua e sem marcação: assim "RST" acha R\S\T\,
+     quem cola a notação crua do Altium também acha, e o "/O/E" de uma descrição casa com
+     quem o digita. A regra (e o teste) estão em filtroBusca. */
+  const qCru = ST.q.trim();
+  const casa = filtroBusca(qCru, semBarra);
+  const hit = s => casa(s.name, s.description);
   const noFp = syms.filter(semFp);
 
   UI.seg.textContent = '';
@@ -1004,7 +1071,7 @@ function refreshList() {
   UI.list.textContent = '';
   const frag = document.createDocumentFragment();
   if (!DATA.schlib) frag.append(el('div', 'lib-head', DATA.schlibErro || ('carregando ' + acervoAtual().title + '…')));
-  else if (!rows.length) frag.append(el('div', 'lib-head', q ? 'nada com "' + ST.q + '"' : 'nada aqui'));
+  else if (!rows.length) frag.append(el('div', 'lib-head', qCru ? 'nada com "' + ST.q + '"' : 'nada aqui'));
   else frag.append(el('div', 'lib-head', 'símbolos (' + rows.length + (rows.length !== syms.length ? ' de ' + syms.length : '') + ')'));
   rows.forEach(s => {
     const b = el('button', 'lib-row'); b.type = 'button'; b.title = s.name;
@@ -1262,7 +1329,15 @@ function fieldsFor(it) {
     partRow();
     kickerRow(box, 'pino');
     linha(box, [['Número', inp(it.num, v => apply(o => { o.num = v; }), { text: true })]], olho('hideNum', 'número'));
-    linha(box, [['Nome', inp(it.name, v => apply(o => { o.name = v; }), { text: true })]], olho('hideName', 'nome'));
+    /* o campo guarda o valor CRU (R\S\T\): é ele que vai para a .SchLib, e o usuário precisa
+       poder digitar a notação do Altium. A prévia barrada vai no title, com a sobrelinha
+       combinante — o atributo é texto puro, não aceita <span>, e a grade da ficha tem 5
+       células fixas, sem lugar para um rótulo ao lado. O canvas ali do lado já mostra o
+       nome desenhado, e refaz a ficha a cada edição, então o title acompanha. */
+    const nomeInp = inp(it.name, v => apply(o => { o.name = v; }), { text: true });
+    const ovb = OVB();
+    if (ovb && ovb.temBarra(it.name)) nomeInp.title = 'no desenho: ' + ovb.unicode(it.name);
+    linha(box, [['Nome', nomeInp]], olho('hideName', 'nome'));
     linha(box, [['Comprimento', medida(it.len, v => apply(o => { o.len = Math.abs(v); }), POS)],
                 ['Orientação', selectOf([[0, '0°'], [90, '90°'], [180, '180°'], [270, '270°']], it.orient, v => apply(o => { o.orient = num(v); }))]]);
     linha(box, [['Tipo elétrico', selectOf(PIN_TYPES.map(t => [t]), it.type, v => apply(o => { o.type = v; }))]]);
@@ -1399,14 +1474,19 @@ function refreshLib() {
     return;
   }
   const q = ST.libQ.trim().toLowerCase();
-  const rows = all.filter(s => !q || (s.name + ' ' + (s.aliases || []).join(' ') + ' ' + (s.kind || '')).toLowerCase().includes(q));
+  /* a descrição entra na busca porque é o único jeito de achar símbolo cujo NOME é código de
+     catálogo: "CMP-0694-00003-2" não diz nada, "RS-485" acha. São 727 dos 897 com descrição. */
+  const rows = all.filter(s => !q || (s.name + ' ' + (s.aliases || []).join(' ') + ' ' + (s.kind || '')
+                                      + ' ' + (s.description || '')).toLowerCase().includes(q));
   UI.libCount.textContent = rows.length + (rows.length !== all.length ? ' de ' + all.length : '') + ' símbolo' + (all.length === 1 ? '' : 's');
   if (!rows.length) { UI.tiles.append(el('div', 'symed-empty', q ? 'nada com "' + ST.libQ + '"' : 'biblioteca vazia')); return; }
   const frag = document.createDocumentFragment();
   rows.forEach(s => {
     const t = el('button', 'symed-tile'); t.type = 'button'; t.dataset.id = s.id;
     t.setAttribute('aria-selected', String(ST.libSel === s.id));
-    t.title = s.name + '\n' + (s.pins || []).length + ' pinos · ' + (s.kind || '') + (s.usos ? ' · ' + s.usos + ' usos' : '')
+    /* a descricao no tooltip: com 897 tiles o nome sozinho nao diz o que a peca e, e
+       menos ainda quando o nome e codigo de catalogo (CMP-0694-00003-2) */
+    t.title = s.name + (s.description ? '\n' + s.description : '') + '\n' + (s.pins || []).length + ' pinos · ' + (s.kind || '') + (s.usos ? ' · ' + s.usos + ' usos' : '')
       + ((s.aliases || []).length ? '\n' + s.aliases.join(', ') : '');
     const cv = el('canvas'); cv.width = 96; cv.height = 64; cv.dataset.id = s.id;
     t.append(cv, el('span', 'nm', s.name), el('span', 'k', (s.kind === 'ci' ? 'CI' : 'genérico') + ' · ' + (s.pins || []).length + 'p'));
@@ -1520,7 +1600,8 @@ function drawGraphics(ctx, graphics, opts) {
 /* o pino como o Altium o desenha: traço grosso saindo do corpo e, na ponta quente, o
    quadradinho com quatro pontos que marca onde o fio encosta (PIN_MARK de lado; os pontos
    ficam fora da faixa do traço, que tem 8 mil). Número por fora, nome por dentro — cada um
-   só quando o pino não o esconde (hideNum/hideName do schlib-v2) */
+   só quando o pino não o esconde (hideNum/hideName do schlib-v2). O nome sai pelo overbar:
+   R\S\T\ é RST com a barra em cima, e é aqui que a notação crua vira desenho. */
 function drawPins(ctx, pins, px) {
   const C = HubDraw.SCH, m = PIN_MARK / 2, q = PIN_MARK * 0.34, r = PIN_MARK * 0.08;
   for (const pin of (pins || [])) {
@@ -1535,7 +1616,7 @@ function drawPins(ctx, pins, px) {
     if (!pin.hideName && pin.name) {
       const vert = d[1] !== 0;
       const align = (d[0] > 0 || d[1] > 0) ? 'right' : 'left';
-      HubDraw.worldText(ctx, pin.name, pin.x - d[0] * 15, pin.y - d[1] * 15, 45, vert ? 90 : 0, C.body, align);
+      HubDraw.worldText(ctx, pin.name, pin.x - d[0] * 15, pin.y - d[1] * 15, 45, vert ? 90 : 0, C.body, align, { overbar: true });
     }
   }
 }
@@ -1740,7 +1821,7 @@ async function colocar(w, e) {
   const s = snapPt(w, ST.tool === 'pin' ? 'pin' : 'g');
   if (ST.tool === 'pin') {
     pushUndo();
-    p.pins.push({ num: nextPinNum(p.pins), name: '', x: s.x, y: s.y, len: pinLenDefault(ST.snap, ST.unit), orient: ST.pinRot, type: 'Passive' });
+    p.pins.push(novoPino(p.pins, s.x, s.y, pinLenDefault(ST.snap, ST.unit), ST.pinRot));
     ST.selection = [{ kind: 'pin', idx: p.pins.length - 1 }];
     touched(); afterEdit();
     return;
@@ -2169,10 +2250,24 @@ const actions = {
    e reabre o simbolo que estava na tela ja com a versao nova; edicao nao salva se perde - quem chama
    (hub-libsync) ja avisou o usuario antes. */
 function reload() {
-  DATA.schlib = null; DATA.loading = null; DATA.schlibErro = '';
+  /* DATA.cache e o que o loadSchlib consulta ANTES de baixar qualquer coisa: zerar so
+     DATA.schlib nao recarregava NADA — a linha seguinte devolvia o mesmo objeto do cache e o
+     painel continuava na geracao anterior. O cache inteiro sai (os outros acervos tambem
+     estao velhos: o guardiao reescreve a familia protegida do almoxarifado junto). */
+  DATA.schlib = null; DATA.loading = null; DATA.loadingId = null; DATA.schlibErro = '';
+  DATA.cache = {};
+  /* a Biblioteca de simbolos de baixo (os tiles, Libs/symbols-lib.js) tambem e um arquivo de
+     Libs\ e tambem e reescrita — sem zerar symlib/libLoading os tiles ficavam velhos ate o F5 */
+  DATA.symlib = null; DATA.libLoading = null; DATA.symlibMissing = false;
   ST.draft = null; ST.dirty = false; ST.selection = []; ST.undo = []; ST.redo = []; ST.draw = null;
   if (!UI) return Promise.resolve();
-  return loadSchlib().then(() => { listKey = ''; refreshAll(); if (ST.sel) return openSymbol(ST.sel, true); });
+  /* as duas chaves de cache de DOM fora, senao refreshList/refreshLib acham que nada mudou
+     e nao redesenham; o refreshAll refaz lista, barra, ficha E os tiles */
+  listKey = ''; libKey = '';
+  return Promise.all([loadSchlib(), loadSymlib()]).then(() => {
+    listKey = ''; libKey = ''; refreshAll();
+    if (ST.sel) return openSymbol(ST.sel, true);
+  });
 }
 
 /* Abrir um simbolo VINDO DE FORA (o "editar simbolo" do menu de contexto da aba Sch Lib).

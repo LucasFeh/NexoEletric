@@ -11,13 +11,22 @@
 { ..................................................................................................................... }
 
 const
-  // Caminho como visto do PC que RODA o Altium. O workspace mora no servidor
-  // ODOO e sai pelo Samba dele; por nome, \\ODOO\altiumhub\current tambem serve.
-  // `current` e um link para a release no ar: um deploy troca o alvo, nao o caminho.
-  SCRIPT_HOME = '\\192.168.15.192\altiumhub\current';
-  PROJECTS_DIR = '\\192.168.15.192\altiumhub\current\Projects';
+  // Onde ESTA MAQUINA diz qual e a raiz do workspace (ver o bloco HOME mais abaixo).
+  // SCRIPT_HOME e PROJECTS_DIR sairam do const e viraram var, preenchidas no comeco
+  // do procedimento principal: o caminho e da maquina, nao do codigo. Aqui tudo roda
+  // local; o servidor so entra depois do deploy, e quem diz isso e o home.txt.
+  HOME_CFG_DIR = 'C:\ProgramData\AltiumPCBMirror';
+  HOME_CFG = 'C:\ProgramData\AltiumPCBMirror\home.txt';
+  // Marca que prova que um caminho e MESMO o workspace, e nao so uma pasta que existe.
+  HOME_MARCA = 'AI-GUIDE.md';
 
 var
+  // Preenchidas por HubHome(0) na PRIMEIRA linha do procedimento principal. Eram const,
+  // e const nao se reatribui em DelphiScript - por isso estao aqui. Nada que use as duas
+  // pode rodar antes daquela linha (ResolveProjectDir, ListProjectDirs, o indice...).
+  SCRIPT_HOME: String;
+  PROJECTS_DIR: String;
+  HomeOrigem: String;  // de onde veio SCRIPT_HOME; sai na mensagem de erro de gravacao
   SkippedDocs: Integer;
   ScanInfo: String; // diagnostico do ultimo ListProjectDirs (aparece nos dialogos)
   // estado do filtro de carimbo (ver bloco "carimbo da folha" mais abaixo)
@@ -27,7 +36,9 @@ var
   StampDropped: Integer;   // rotulos de carimbo que ficaram fora do espelho
   // Contagem por tipo de item. Existe porque a omissao do ePort passou despercebida por
   // meses: sem numero na tela, "nao exportou" e "nao tinha" sao indistinguiveis.
-  NComp, NWire, NLabel, NPower, NPort, NJunc, NText: Integer;
+  NComp, NWire, NLabel, NPower, NPort, NJunc, NText, NNoErc: Integer;
+  NCompPar: Integer;        // componentes que trouxeram parametro de identidade
+                            // (OdooId/MPN/...): e o que liga a lista ao cadastro do Odoo
   SheetsMeasured: Integer;  // folhas cuja medida real o Altium entregou
   PortWarn: String;        // primeira propriedade de Port que o Altium recusou (se houver)
   StampByObj: Integer;     // folhas em que a sonda do objeto eTemplate trouxe material
@@ -122,6 +133,265 @@ begin
   else
     Section.Add(Line);
 end;
+
+{ ========================= HOME (raiz do workspace, por maquina) ========================= }
+{ Onde fica o workspace deixou de ser constante no codigo: cada maquina diz a sua em        }
+{ C:\ProgramData\AltiumPCBMirror\home.txt -- uma "chave=valor" por linha; linha vazia e      }
+{ linha comecando por ';' ou '#' sao ignoradas. Chaves: home (obrigatoria), schlib e         }
+{ pcblib (opcionais, so o BuildSchematic usa). Aqui tudo roda local; o servidor so entra     }
+{ depois do deploy -- e quem diz qual e o caso e o home.txt DESTA maquina, nao o script.     }
+{ ProgramData porque e POR MAQUINA, abre no Bloco de Notas e nao depende de variavel de      }
+{ ambiente (GetEnvironmentVariable nao esta entre as primitivas provadas neste engine).      }
+{                                                                                           }
+{ Este bloco e DUPLICADO, com o mesmo texto, nos quatro .pas -- de proposito. O .PrjScr nao  }
+{ ganha unidade nova e resolucao entre unidades do DelphiScript do Altium nao da para testar }
+{ fora do Altium; quatro copias identicas custam menos que descobrir la dentro que a chamada }
+{ cruzada nao resolve. (Mesmo motivo do odoolista.py, que duplica le_var_js "de proposito".) }
+{ Mudou aqui, mude nos quatro com o mesmo texto.                                             }
+
+// Tira barra(s) do fim: 'D:\x\' e 'D:\x' tem de dar o mesmo caminho. Length > 1 no teste
+// para nao comer a barra de uma raiz escrita como '\' e nem a primeira de um UNC.
+function SemBarraFinal(s: String): String;
+begin
+  Result := Trim(s);
+  while (Length(Result) > 1) and (Result[Length(Result)] = '\') do
+    Result := Copy(Result, 1, Length(Result) - 1);
+end;
+
+// Validar uma raiz = achar a marca DENTRO dela. E FileExists de proposito (primitiva
+// provada neste engine): DirectoryExists aceitaria qualquer pasta que exista, e uma pasta
+// que existe mas nao e o workspace tem de ser recusada. A marca e o AI-GUIDE.md porque ele
+// mora na raiz, e versionado, e nenhuma outra pasta da maquina tem um.
+function HomeValida(Raiz: String): Boolean;
+begin
+  Result := False;
+  if Raiz = '' then
+    Exit;
+  Result := FileExists(Raiz + '\' + HOME_MARCA);
+end;
+
+// Valor de uma chave do home.txt ('' se o arquivo nao existe ou a chave nao esta la).
+function HomeCfgGet(Chave: String): String;
+var
+  L: TStringList;
+  i, p: Integer;
+  Linha, K: String;
+begin
+  Result := '';
+  if not FileExists(HOME_CFG) then
+    Exit;
+  L := TStringList.Create;
+  try
+    L.LoadFromFile(HOME_CFG);
+  except
+    L.Clear; // ilegivel vale como "esta maquina ainda nao foi configurada"
+  end;
+  for i := 0 to L.Count - 1 do
+  begin
+    Linha := Trim(L[i]);
+    if Linha = '' then
+      continue;
+    if (Linha[1] = ';') or (Linha[1] = '#') then
+      continue;
+    p := Pos('=', Linha);
+    if p = 0 then
+      continue;
+    K := Trim(Copy(Linha, 1, p - 1));
+    // sem break de proposito: a ULTIMA linha vence. E o que se espera de arquivo
+    // editado a mao, onde a linha nova costuma ser acrescentada no fim.
+    if UpperCase(K) = UpperCase(Chave) then
+      Result := Trim(Copy(Linha, p + 1, Length(Linha) - p));
+  end;
+  L.Free;
+end;
+
+// Grava/atualiza uma chave no home.txt preservando as outras linhas e os comentarios.
+// False = nao deu para gravar (a execucao segue; so vai procurar de novo da proxima vez).
+function HomeCfgSet(Chave, Valor: String): Boolean;
+var
+  L, Ou: TStringList;
+  i, p: Integer;
+  Linha, K: String;
+  Achou, EhAChave: Boolean;
+begin
+  Result := False;
+  L := TStringList.Create;
+  if FileExists(HOME_CFG) then
+  begin
+    try
+      L.LoadFromFile(HOME_CFG);
+    except
+      L.Clear;
+    end;
+  end;
+  Ou := TStringList.Create;
+  if L.Count = 0 then
+  begin
+    Ou.Add('; AltiumPCBMirror - configuracao DESTA maquina. Edite no Bloco de Notas.');
+    Ou.Add('; Uma "chave=valor" por linha; linha vazia ou comecando por ; ou # e ignorada.');
+    Ou.Add(';   home   = raiz do workspace (a pasta que tem o AI-GUIDE.md)  [obrigatoria]');
+    Ou.Add(';   schlib = .SchLib da casa                                    [opcional]');
+    Ou.Add(';   pcblib = .PcbLib da casa                                    [opcional]');
+  end;
+  Achou := False;
+  for i := 0 to L.Count - 1 do
+  begin
+    Linha := L[i];
+    K := Trim(Linha);
+    EhAChave := False;
+    if (K <> '') and (K[1] <> ';') and (K[1] <> '#') then
+    begin
+      p := Pos('=', K);
+      if p > 0 then
+        EhAChave := UpperCase(Trim(Copy(K, 1, p - 1))) = UpperCase(Chave);
+    end;
+    if EhAChave then
+    begin
+      if not Achou then
+        Ou.Add(Chave + '=' + Valor);
+      Achou := True;
+    end
+    else
+      Ou.Add(Linha);
+  end;
+  if not Achou then
+    Ou.Add(Chave + '=' + Valor);
+  try
+    ForceDirectories(HOME_CFG_DIR);
+    Ou.SaveToFile(HOME_CFG);
+    Result := True;
+  except
+    Result := False;
+  end;
+  Ou.Free;
+  L.Free;
+end;
+
+// Anota no home.txt a raiz que acabou de ser achada, para a proxima execucao nao procurar
+// de novo. Falhar aqui nao impede nada -- mas calar seria mentir sobre o que ficou gravado.
+procedure HomeCfgAnota(Raiz: String);
+begin
+  if not HomeCfgSet('home', Raiz) then
+    ShowMessage('Achei o workspace em:' + #13#10 + Raiz + #13#10#13#10 +
+      'Nao consegui anotar isso em ' + HOME_CFG + ' -' + #13#10 +
+      'da proxima vez vou procurar de novo. (Esta rodada funciona assim mesmo.)');
+end;
+
+// Raiz do workspace PARA ESTA MAQUINA, nesta ordem:
+//   1) a chave home do home.txt, se validar;
+//   2) os candidatos conhecidos, em ordem -- o primeiro que validar e GRAVADO no home.txt;
+//   3) InputBox, validando a resposta e gravando.
+// '' = nao deu para resolver; quem chamou aborta SEM escrever nada.
+// Tem parametro de proposito: some do menu Run Script (como AddAlmoxLibs e OpenSchLib).
+function HubHome(Dummy: Integer): String;
+var
+  Cand: TStringList;
+  i: Integer;
+  Raiz, Resposta, Tentei: String;
+begin
+  Result := '';
+  HomeOrigem := '';
+
+  Raiz := SemBarraFinal(HomeCfgGet('home'));
+  if Raiz <> '' then
+  begin
+    // A LINHA ESCRITA A MAO MANDA, mesmo quando ela nao responde agora.
+    //
+    // Cair nos candidatos aqui, e anotar o vencedor, era o pior dos mundos: bastava o
+    // servidor estar fora do ar, ou o share ainda nao ter montado quando o Altium subiu,
+    // para a configuracao manual ser TROCADA sozinha -- e no dia seguinte o script gravava
+    // noutro lugar sem ninguem ter mexido em nada. Configuracao que se reescreve sozinha e
+    // pior que caminho cravado, porque o cravado pelo menos nao mente.
+    //
+    // Entao: raiz configurada que nao responde e ERRO para o usuario resolver, nunca um
+    // convite para o script escolher por ele. A procura automatica so existe para a maquina
+    // que ainda NAO tem a chave home=.
+    if HomeValida(Raiz) then
+    begin
+      HomeOrigem := HOME_CFG;
+      Result := Raiz;
+      Exit;
+    end;
+    ShowMessage('O ' + HOME_CFG + ' aponta para:' + #13#10 +
+      '   ' + Raiz + #13#10#13#10 +
+      'Nao achei o ' + HOME_MARCA + ' la dentro.' + #13#10#13#10 +
+      'Se o caminho esta certo, o lugar pode estar fora do ar ou o share pode nao estar' + #13#10 +
+      'montado -- abra a pasta no Explorador para conferir.' + #13#10 +
+      'Se o caminho esta errado, corrija a linha home= nesse arquivo.' + #13#10#13#10 +
+      'NAO vou procurar sozinho: a sua configuracao fica como esta. NADA foi escrito.');
+    Result := '';
+    Exit;
+  end;
+
+  Tentei := '';
+
+  Cand := TStringList.Create;
+  Cand.Add('D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror');
+  Cand.Add('\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror');
+  Cand.Add('\\192.168.15.192\altiumhub\current');
+  Cand.Add('\\ODOO\altiumhub\current');
+  for i := 0 to Cand.Count - 1 do
+  begin
+    if HomeValida(Cand[i]) then
+    begin
+      Result := Cand[i];
+      HomeOrigem := 'candidato embutido no script';
+      HomeCfgAnota(Result);
+      Cand.Free;
+      Exit;
+    end;
+    Tentei := Tentei + '   ' + Cand[i] + #13#10;
+  end;
+  Cand.Free;
+
+  Resposta := SemBarraFinal(InputBox('AltiumPCBMirror',
+    'Nao achei o workspace do AltiumPCBMirror nesta maquina.' + #13#10 +
+    'Procurei o ' + HOME_MARCA + ' em:' + #13#10 + Tentei +
+    'Digite a RAIZ do workspace (a pasta que tem o ' + HOME_MARCA + '):',
+    'D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror'));
+  if HomeValida(Resposta) then
+  begin
+    Result := Resposta;
+    HomeOrigem := 'o caminho que voce digitou agora';
+    HomeCfgAnota(Result);
+    Exit;
+  end;
+  if Resposta <> '' then
+    Tentei := Tentei + '   ' + Resposta + '   (o que voce digitou)' + #13#10;
+
+  ShowMessage('Nao achei a raiz do workspace AltiumPCBMirror nesta maquina.' + #13#10 +
+    'Procurei o ' + HOME_MARCA + ' em:' + #13#10 + Tentei + #13#10 +
+    'Crie ou corrija ' + HOME_CFG + ' com a linha:' + #13#10 +
+    '   home=<a pasta que tem o ' + HOME_MARCA + '>' + #13#10#13#10 +
+    'NADA foi escrito.');
+  Result := '';
+end;
+
+// Grava o arquivo e, se o Windows recusar, diz QUAL caminho falhou, DE ONDE esse caminho
+// veio e o que fazer -- em vez da excecao crua do Delphi ("Cannot create file ... Acesso
+// negado"), que nem sequer diz que o culpado e a raiz do workspace. False = nao gravou.
+function SalvaOuExplica(L: TStringList; Caminho: String): Boolean;
+begin
+  Result := True;
+  try
+    L.SaveToFile(Caminho);
+  except
+    Result := False;
+    // Nao afirme a causa: o Windows devolve "Acesso negado" tambem para arquivo aberto
+    // noutro programa e para pasta sem permissao. Liste o que conferir, na ordem em que
+    // costuma ser -- a raiz errada e de longe a primeira.
+    ShowMessage('Nao consegui gravar:' + #13#10 + Caminho + #13#10#13#10 +
+      'Raiz em uso: ' + SCRIPT_HOME + #13#10 +
+      '   (veio de ' + HomeOrigem + ')' + #13#10#13#10 +
+      'Confira, nesta ordem:' + #13#10 +
+      '   1. essa raiz e mesmo a desta maquina? se nao, corrija a linha home= em' + #13#10 +
+      '      ' + HOME_CFG + #13#10 +
+      '   2. o arquivo esta aberto noutro programa?' + #13#10 +
+      '   3. a pasta aceita gravacao do seu usuario?');
+  end;
+end;
+
+{ ============================== fim HOME ============================== }
 
 { ======================= PROJ-HELPERS (workspace central) ======================= }
 
@@ -359,6 +629,7 @@ var
   Dirs, Ou: TStringList;
   i: Integer;
   d, line: String;
+  Gravou: Boolean;
 begin
   Dirs := TStringList.Create;
   ListProjectDirs(Dirs);
@@ -387,7 +658,7 @@ begin
     Ou.Add(line);
   end;
   Ou.Add('];');
-  Ou.SaveToFile(SCRIPT_HOME + '\projects.js');
+  Gravou := SalvaOuExplica(Ou, SCRIPT_HOME + '\projects.js');
   Ou.Free;
   Dirs.Free;
 end;
@@ -523,6 +794,60 @@ begin
   Comp.SchIterator_Destroy(Iter);
   if Result = '' then
     Result := FirstFp;
+end;
+
+// POR QUE OS PARAMETROS VOLTAM
+//
+// O componente do almoxarifado nasce na .SchLib com OdooId/ValorId/MPN/Encapsulamento
+// declarados (schlib_escritor.py), e o BuildSchematic ja escreve o campo plano "params"
+// como parametro do componente no Altium (AplicaParams). Faltava o caminho de VOLTA: sem
+// ele o OdooId morria no primeiro round-trip, e a lista que o hub manda para o Odoo ficava
+// sem o id da variante — o unico casamento que nao depende de texto.
+//
+// So a IDENTIDADE volta. Estoque, Local e Custo sao fotografia do almoxarifado, mudam
+// sozinhos e fariam o schematic.js mudar a cada export sem que nada do desenho tenha
+// mudado; quem sabe o saldo e o espelho das Libs, nao o esquema.
+const
+  PARAMS_IDENTIDADE = ';ODOOID;VALORID;MPN;ENCAPSULAMENTO;VALUE;MOUSER;';
+
+// ';' e '=' sao os separadores do campo plano - dentro de um valor eles viram ','
+// (mesma limpeza do schframe.js, para o que sai daqui voltar igual pelo BuildSchematic).
+// A ASPA sai junto, e nao e preciosismo: o AI-GUIDE proibe a sequencia aspas-dois-pontos
+// dentro de string, e o serializeSchematic do hub RECUSA O ARQUIVO INTEIRO quando a acha -
+// um Value de display como  10.1": 1024 x 600  faria a vista Esquema nao salvar mais nada.
+function ParamSafe(v: String): String;
+begin
+  Result := StringReplace(v, ';', ',', MkSet(rfReplaceAll));
+  Result := StringReplace(Result, '=', ',', MkSet(rfReplaceAll));
+  Result := StringReplace(Result, '|', ',', MkSet(rfReplaceAll));
+  Result := StringReplace(Result, '"', '''', MkSet(rfReplaceAll));
+end;
+
+// "Chave=Valor;Chave=Valor" com os parametros de identidade do componente ('' se nenhum).
+function ParamsOf(Comp: TObject): String;
+var
+  Iter, Par: TObject;
+  Nome, Valor: String;
+begin
+  Result := '';
+  Iter := Comp.SchIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(eParameter));
+  Par := Iter.FirstSchObject;
+  while Par <> nil do
+  begin
+    Nome := Trim(Par.Name);
+    Valor := Trim(Par.Text);
+    // valor que comeca por '=' e formula nao resolvida do Altium: nao diz nada e nao casa
+    if (Nome <> '') and (Valor <> '') and (Copy(Valor, 1, 1) <> '=') and
+       (Pos(';' + UpperCase(Nome) + ';', PARAMS_IDENTIDADE) > 0) then
+    begin
+      if Result <> '' then
+        Result := Result + ';';
+      Result := Result + ParamSafe(Nome) + '=' + ParamSafe(Valor);
+    end;
+    Par := Iter.NextSchObject;
+  end;
+  Comp.SchIterator_Destroy(Iter);
 end;
 
 { ------------------------------- carimbo da folha (template) ------------------------------- }
@@ -719,7 +1044,7 @@ procedure ExportSheet(Path: String; ItemsL: TStringList);
 var
   SchDoc: ISch_Document;
   Iterator, Prim: TObject;
-  SheetName, s, pts: String;
+  SheetName, s, pts, CompPars: String;
   PortNome: String;
   PortCor: String;                       // ',"fill":...' montado so com o que o Altium deu
   PortSty, PortIo: Integer;
@@ -748,7 +1073,7 @@ begin
     ',"w":' + JF(ShW) + ',"h":' + JF(ShH) + '}');
 
   Iterator := SchDoc.SchIterator_Create;
-  Iterator.AddFilter_ObjectSet(MkSet(eSchComponent, eWire, eNetLabel, ePowerObject, ePort, eJunction, eLabel));
+  Iterator.AddFilter_ObjectSet(MkSet(eSchComponent, eWire, eNetLabel, ePowerObject, ePort, eJunction, eNoERC, eLabel));
   Prim := Iterator.FirstSchObject;
   while Prim <> nil do
   begin
@@ -756,6 +1081,9 @@ begin
       eSchComponent:
         begin
           NComp := NComp + 1;
+          CompPars := ParamsOf(Prim);
+          if CompPars <> '' then
+            NCompPar := NCompPar + 1;
           s := '{"t":"comp","sheet":' + JS(SheetName) +
             ',"ref":' + JS(Prim.Designator.Text) +
             ',"sym":' + JS(Prim.LibReference) +
@@ -765,8 +1093,11 @@ begin
             ',"rot":' + IntToStr(RotDegOf(Prim.Orientation)) +
             ',"mirror":' + JB(Prim.IsMirrored) +
             ',"footprint":' + JS(CurrentFootprintOf(Prim)) +
-            ',"comment":' + JS(Prim.Comment.Text) + '}';
-          AddItem(ItemsL, s);
+            ',"comment":' + JS(Prim.Comment.Text);
+          // omitido quando vazio: o campo e novo e o schematic.js de projeto antigo nao o tem
+          if CompPars <> '' then
+            s := s + ',"params":' + JS(CompPars);
+          AddItem(ItemsL, s + '}');
         end;
       eWire:
         begin
@@ -871,6 +1202,16 @@ begin
           AddItem(ItemsL, '{"t":"junction","sheet":' + JS(SheetName) +
             ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) + '}');
         end;
+      // A diretiva No ERC: o X vermelho que diz "este pino fica solto DE PROPOSITO".
+      // So a ancora viaja. O SIMBOLO (cruz fina/grossa/circulo) e a cor ficam de fora ate
+      // serem MEDIDOS num Altium de verdade: o mesmo cuidado que a Port ensinou — la, usar
+      // as constantes nomeadas custou um "Undeclared identifier" e uma rodada perdida.
+      eNoERC:
+        begin
+          NNoErc := NNoErc + 1;
+          AddItem(ItemsL, '{"t":"noerc","sheet":' + JS(SheetName) +
+            ',"x":' + ML(Prim.Location.X) + ',"y":' + ML(Prim.Location.Y) + '}');
+        end;
       eLabel:
         begin
           if IsStampLabel(Prim) then
@@ -900,7 +1241,15 @@ var
   i, SheetCount: Integer;
   ProjName, OutDir, CarimboTxt, ItensTxt: String;
   ItemsL, OutL: TStringList;
+  Gravou: Boolean;
 begin
+  // Raiz do workspace DESTA maquina: PRIMEIRA coisa do procedimento, porque tudo abaixo
+  // depende dela (ResolveProjectDir, ListProjectDirs, o indice projects.js).
+  SCRIPT_HOME := HubHome(0);
+  if SCRIPT_HOME = '' then
+    Exit;
+  PROJECTS_DIR := SCRIPT_HOME + '\Projects';
+
   if SchServer = nil then
   begin
     ShowMessage('SchServer indisponivel. Abra um esquema no Altium e rode de novo.');
@@ -926,7 +1275,8 @@ begin
   SkippedDocs := 0;
   SheetCount := 0;
   StampDropped := 0;
-  NComp := 0; NWire := 0; NLabel := 0; NPower := 0; NPort := 0; NJunc := 0; NText := 0;
+  NComp := 0; NWire := 0; NLabel := 0; NPower := 0; NPort := 0; NJunc := 0; NText := 0; NNoErc := 0;
+  NCompPar := 0;
   SheetsMeasured := 0;
   PortWarn := '';
   StampByObj := 0;
@@ -964,11 +1314,15 @@ begin
   OutL.Add('"items":[');
   OutL.AddStrings(ItemsL);
   OutL.Add(']};');
-  OutL.SaveToFile(OutDir + '\schematic.js');
+  Gravou := SalvaOuExplica(OutL, OutDir + '\schematic.js');
   OutL.Free;
   ItemsL.Free;
   StampKeys.Free;
   TplTexts.Free;
+  // Nao gravou: SalvaOuExplica ja disse qual caminho falhou e de onde ele veio.
+  // Sai sem mexer no indice e sem anunciar espelho que nao existe.
+  if not Gravou then
+    Exit;
 
   RegenerateProjectsIndex(ProjName);
 
@@ -985,7 +1339,12 @@ begin
 
   ItensTxt := 'Itens: ' + IntToStr(NComp) + ' comp, ' + IntToStr(NWire) + ' fio, ' +
     IntToStr(NLabel) + ' rotulo, ' + IntToStr(NPower) + ' power, ' +
-    IntToStr(NPort) + ' port, ' + IntToStr(NJunc) + ' juncao, ' + IntToStr(NText) + ' texto';
+    IntToStr(NPort) + ' port, ' + IntToStr(NJunc) + ' juncao, ' + IntToStr(NNoErc) + ' no-erc, ' + IntToStr(NText) + ' texto';
+  if NComp > 0 then
+    ItensTxt := ItensTxt + #13#10 + '   ' + IntToStr(NCompPar) + ' de ' + IntToStr(NComp) +
+      ' item(ns) comp com parametro de identidade (OdooId/MPN) - e o que a' +
+      #13#10 + '   lista para o Odoo usa para achar o produto sem depender de texto.' +
+      #13#10 + '   (um componente multi-parte conta uma vez por parte, como o resto desta linha)';
   if SheetsMeasured < SheetCount then
     ItensTxt := ItensTxt + #13#10 +
       '   ATENCAO: em ' + IntToStr(SheetCount - SheetsMeasured) + ' folha(s) o Altium nao' +

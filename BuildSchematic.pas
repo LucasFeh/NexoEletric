@@ -15,23 +15,38 @@
 { ..................................................................................................................... }
 
 const
-  // Caminho como visto do PC que RODA o Altium. O workspace mora no servidor
-  // ODOO e sai pelo Samba dele; por nome, \\ODOO\altiumhub\current tambem serve.
-  // `current` e um link para a release no ar: um deploy troca o alvo, nao o caminho.
-  SCRIPT_HOME = '\\192.168.15.192\altiumhub\current';
-  PROJECTS_DIR = '\\192.168.15.192\altiumhub\current\Projects';
+  // Onde ESTA MAQUINA diz qual e a raiz do workspace (ver o bloco HOME mais abaixo).
+  // SCRIPT_HOME e PROJECTS_DIR sairam do const e viraram var, preenchidas no comeco
+  // do procedimento principal: o caminho e da maquina, nao do codigo. Aqui tudo roda
+  // local; o servidor so entra depois do deploy, e quem diz isso e o home.txt.
+  HOME_CFG_DIR = 'C:\ProgramData\AltiumPCBMirror';
+  HOME_CFG = 'C:\ProgramData\AltiumPCBMirror\home.txt';
+  // Marca que prova que um caminho e MESMO o workspace, e nao so uma pasta que existe.
+  HOME_MARCA = 'AI-GUIDE.md';
   // A biblioteca da casa. Os projetos existentes ainda dependem dela: dos 108
   // simbolos que os 14 schematic.js usam, so 3 existem nas libs do almoxarifado
   // e 42 so existem aqui. Enquanto esses simbolos nao nascerem no almoxarifado,
   // tirar esta linha faz a validacao abortar e nenhum projeto ser reconstruido.
-  SCHLIB_FILE = '\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib';
-  PCBLIB_FILE = '\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE FOOTPRINT.PcbLib';
+  // Sao o PADRAO: quem manda sao as chaves schlib/pcblib do home.txt desta maquina;
+  // estes valores so valem quando a maquina nao declarou as chaves (nao quebra quem
+  // ja usa, e quem trocou de PC corrige no home.txt em vez de no codigo).
+  SCHLIB_PADRAO = '\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib';
+  PCBLIB_PADRAO = '\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE FOOTPRINT.PcbLib';
   // Bibliotecas do almoxarifado, geradas a partir do Odoo: uma .SchLib por familia
   // (ALMOX RESISTOR, ALMOX CAPACITOR CERAMICO...), procuradas DEPOIS da principal.
-  // O script varre a pasta em vez de listar arquivo por arquivo.
-  ALMOX_DIR = '\\192.168.15.192\altiumhub\current\Libs\Almox';
+  // O script varre a pasta em vez de listar arquivo por arquivo. A pasta sai da raiz:
+  // ALMOX_DIR := SCRIPT_HOME + '\Libs\Almox', junto com o resto, no var abaixo.
 
 var
+  // Preenchidas por HubHome(0) na PRIMEIRA linha do procedimento principal. Eram const,
+  // e const nao se reatribui em DelphiScript - por isso estao aqui. Nada que use as duas
+  // pode rodar antes daquela linha (ResolveProjectDir, ListProjectDirs, o indice...).
+  SCRIPT_HOME: String;
+  PROJECTS_DIR: String;
+  HomeOrigem: String;  // de onde veio SCRIPT_HOME; sai na mensagem de erro de gravacao
+  SCHLIB_FILE: String;  // chave schlib do home.txt, ou SCHLIB_PADRAO
+  PCBLIB_FILE: String;  // chave pcblib do home.txt, ou PCBLIB_PADRAO
+  ALMOX_DIR: String;    // SCRIPT_HOME + '\Libs\Almox'
   Report: TStringList;
   OkCount, FailCount: Integer;
   SchLibDoc: ISch_Document;
@@ -224,6 +239,265 @@ function JNum(Line, Key: String): Double;
 begin
   Result := StrToFloatDot(JGet(Line, Key));
 end;
+
+{ ========================= HOME (raiz do workspace, por maquina) ========================= }
+{ Onde fica o workspace deixou de ser constante no codigo: cada maquina diz a sua em        }
+{ C:\ProgramData\AltiumPCBMirror\home.txt -- uma "chave=valor" por linha; linha vazia e      }
+{ linha comecando por ';' ou '#' sao ignoradas. Chaves: home (obrigatoria), schlib e         }
+{ pcblib (opcionais, so o BuildSchematic usa). Aqui tudo roda local; o servidor so entra     }
+{ depois do deploy -- e quem diz qual e o caso e o home.txt DESTA maquina, nao o script.     }
+{ ProgramData porque e POR MAQUINA, abre no Bloco de Notas e nao depende de variavel de      }
+{ ambiente (GetEnvironmentVariable nao esta entre as primitivas provadas neste engine).      }
+{                                                                                           }
+{ Este bloco e DUPLICADO, com o mesmo texto, nos quatro .pas -- de proposito. O .PrjScr nao  }
+{ ganha unidade nova e resolucao entre unidades do DelphiScript do Altium nao da para testar }
+{ fora do Altium; quatro copias identicas custam menos que descobrir la dentro que a chamada }
+{ cruzada nao resolve. (Mesmo motivo do odoolista.py, que duplica le_var_js "de proposito".) }
+{ Mudou aqui, mude nos quatro com o mesmo texto.                                             }
+
+// Tira barra(s) do fim: 'D:\x\' e 'D:\x' tem de dar o mesmo caminho. Length > 1 no teste
+// para nao comer a barra de uma raiz escrita como '\' e nem a primeira de um UNC.
+function SemBarraFinal(s: String): String;
+begin
+  Result := Trim(s);
+  while (Length(Result) > 1) and (Result[Length(Result)] = '\') do
+    Result := Copy(Result, 1, Length(Result) - 1);
+end;
+
+// Validar uma raiz = achar a marca DENTRO dela. E FileExists de proposito (primitiva
+// provada neste engine): DirectoryExists aceitaria qualquer pasta que exista, e uma pasta
+// que existe mas nao e o workspace tem de ser recusada. A marca e o AI-GUIDE.md porque ele
+// mora na raiz, e versionado, e nenhuma outra pasta da maquina tem um.
+function HomeValida(Raiz: String): Boolean;
+begin
+  Result := False;
+  if Raiz = '' then
+    Exit;
+  Result := FileExists(Raiz + '\' + HOME_MARCA);
+end;
+
+// Valor de uma chave do home.txt ('' se o arquivo nao existe ou a chave nao esta la).
+function HomeCfgGet(Chave: String): String;
+var
+  L: TStringList;
+  i, p: Integer;
+  Linha, K: String;
+begin
+  Result := '';
+  if not FileExists(HOME_CFG) then
+    Exit;
+  L := TStringList.Create;
+  try
+    L.LoadFromFile(HOME_CFG);
+  except
+    L.Clear; // ilegivel vale como "esta maquina ainda nao foi configurada"
+  end;
+  for i := 0 to L.Count - 1 do
+  begin
+    Linha := Trim(L[i]);
+    if Linha = '' then
+      continue;
+    if (Linha[1] = ';') or (Linha[1] = '#') then
+      continue;
+    p := Pos('=', Linha);
+    if p = 0 then
+      continue;
+    K := Trim(Copy(Linha, 1, p - 1));
+    // sem break de proposito: a ULTIMA linha vence. E o que se espera de arquivo
+    // editado a mao, onde a linha nova costuma ser acrescentada no fim.
+    if UpperCase(K) = UpperCase(Chave) then
+      Result := Trim(Copy(Linha, p + 1, Length(Linha) - p));
+  end;
+  L.Free;
+end;
+
+// Grava/atualiza uma chave no home.txt preservando as outras linhas e os comentarios.
+// False = nao deu para gravar (a execucao segue; so vai procurar de novo da proxima vez).
+function HomeCfgSet(Chave, Valor: String): Boolean;
+var
+  L, Ou: TStringList;
+  i, p: Integer;
+  Linha, K: String;
+  Achou, EhAChave: Boolean;
+begin
+  Result := False;
+  L := TStringList.Create;
+  if FileExists(HOME_CFG) then
+  begin
+    try
+      L.LoadFromFile(HOME_CFG);
+    except
+      L.Clear;
+    end;
+  end;
+  Ou := TStringList.Create;
+  if L.Count = 0 then
+  begin
+    Ou.Add('; AltiumPCBMirror - configuracao DESTA maquina. Edite no Bloco de Notas.');
+    Ou.Add('; Uma "chave=valor" por linha; linha vazia ou comecando por ; ou # e ignorada.');
+    Ou.Add(';   home   = raiz do workspace (a pasta que tem o AI-GUIDE.md)  [obrigatoria]');
+    Ou.Add(';   schlib = .SchLib da casa                                    [opcional]');
+    Ou.Add(';   pcblib = .PcbLib da casa                                    [opcional]');
+  end;
+  Achou := False;
+  for i := 0 to L.Count - 1 do
+  begin
+    Linha := L[i];
+    K := Trim(Linha);
+    EhAChave := False;
+    if (K <> '') and (K[1] <> ';') and (K[1] <> '#') then
+    begin
+      p := Pos('=', K);
+      if p > 0 then
+        EhAChave := UpperCase(Trim(Copy(K, 1, p - 1))) = UpperCase(Chave);
+    end;
+    if EhAChave then
+    begin
+      if not Achou then
+        Ou.Add(Chave + '=' + Valor);
+      Achou := True;
+    end
+    else
+      Ou.Add(Linha);
+  end;
+  if not Achou then
+    Ou.Add(Chave + '=' + Valor);
+  try
+    ForceDirectories(HOME_CFG_DIR);
+    Ou.SaveToFile(HOME_CFG);
+    Result := True;
+  except
+    Result := False;
+  end;
+  Ou.Free;
+  L.Free;
+end;
+
+// Anota no home.txt a raiz que acabou de ser achada, para a proxima execucao nao procurar
+// de novo. Falhar aqui nao impede nada -- mas calar seria mentir sobre o que ficou gravado.
+procedure HomeCfgAnota(Raiz: String);
+begin
+  if not HomeCfgSet('home', Raiz) then
+    ShowMessage('Achei o workspace em:' + #13#10 + Raiz + #13#10#13#10 +
+      'Nao consegui anotar isso em ' + HOME_CFG + ' -' + #13#10 +
+      'da proxima vez vou procurar de novo. (Esta rodada funciona assim mesmo.)');
+end;
+
+// Raiz do workspace PARA ESTA MAQUINA, nesta ordem:
+//   1) a chave home do home.txt, se validar;
+//   2) os candidatos conhecidos, em ordem -- o primeiro que validar e GRAVADO no home.txt;
+//   3) InputBox, validando a resposta e gravando.
+// '' = nao deu para resolver; quem chamou aborta SEM escrever nada.
+// Tem parametro de proposito: some do menu Run Script (como AddAlmoxLibs e OpenSchLib).
+function HubHome(Dummy: Integer): String;
+var
+  Cand: TStringList;
+  i: Integer;
+  Raiz, Resposta, Tentei: String;
+begin
+  Result := '';
+  HomeOrigem := '';
+
+  Raiz := SemBarraFinal(HomeCfgGet('home'));
+  if Raiz <> '' then
+  begin
+    // A LINHA ESCRITA A MAO MANDA, mesmo quando ela nao responde agora.
+    //
+    // Cair nos candidatos aqui, e anotar o vencedor, era o pior dos mundos: bastava o
+    // servidor estar fora do ar, ou o share ainda nao ter montado quando o Altium subiu,
+    // para a configuracao manual ser TROCADA sozinha -- e no dia seguinte o script gravava
+    // noutro lugar sem ninguem ter mexido em nada. Configuracao que se reescreve sozinha e
+    // pior que caminho cravado, porque o cravado pelo menos nao mente.
+    //
+    // Entao: raiz configurada que nao responde e ERRO para o usuario resolver, nunca um
+    // convite para o script escolher por ele. A procura automatica so existe para a maquina
+    // que ainda NAO tem a chave home=.
+    if HomeValida(Raiz) then
+    begin
+      HomeOrigem := HOME_CFG;
+      Result := Raiz;
+      Exit;
+    end;
+    ShowMessage('O ' + HOME_CFG + ' aponta para:' + #13#10 +
+      '   ' + Raiz + #13#10#13#10 +
+      'Nao achei o ' + HOME_MARCA + ' la dentro.' + #13#10#13#10 +
+      'Se o caminho esta certo, o lugar pode estar fora do ar ou o share pode nao estar' + #13#10 +
+      'montado -- abra a pasta no Explorador para conferir.' + #13#10 +
+      'Se o caminho esta errado, corrija a linha home= nesse arquivo.' + #13#10#13#10 +
+      'NAO vou procurar sozinho: a sua configuracao fica como esta. NADA foi escrito.');
+    Result := '';
+    Exit;
+  end;
+
+  Tentei := '';
+
+  Cand := TStringList.Create;
+  Cand.Add('D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror');
+  Cand.Add('\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror');
+  Cand.Add('\\192.168.15.192\altiumhub\current');
+  Cand.Add('\\ODOO\altiumhub\current');
+  for i := 0 to Cand.Count - 1 do
+  begin
+    if HomeValida(Cand[i]) then
+    begin
+      Result := Cand[i];
+      HomeOrigem := 'candidato embutido no script';
+      HomeCfgAnota(Result);
+      Cand.Free;
+      Exit;
+    end;
+    Tentei := Tentei + '   ' + Cand[i] + #13#10;
+  end;
+  Cand.Free;
+
+  Resposta := SemBarraFinal(InputBox('AltiumPCBMirror',
+    'Nao achei o workspace do AltiumPCBMirror nesta maquina.' + #13#10 +
+    'Procurei o ' + HOME_MARCA + ' em:' + #13#10 + Tentei +
+    'Digite a RAIZ do workspace (a pasta que tem o ' + HOME_MARCA + '):',
+    'D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror'));
+  if HomeValida(Resposta) then
+  begin
+    Result := Resposta;
+    HomeOrigem := 'o caminho que voce digitou agora';
+    HomeCfgAnota(Result);
+    Exit;
+  end;
+  if Resposta <> '' then
+    Tentei := Tentei + '   ' + Resposta + '   (o que voce digitou)' + #13#10;
+
+  ShowMessage('Nao achei a raiz do workspace AltiumPCBMirror nesta maquina.' + #13#10 +
+    'Procurei o ' + HOME_MARCA + ' em:' + #13#10 + Tentei + #13#10 +
+    'Crie ou corrija ' + HOME_CFG + ' com a linha:' + #13#10 +
+    '   home=<a pasta que tem o ' + HOME_MARCA + '>' + #13#10#13#10 +
+    'NADA foi escrito.');
+  Result := '';
+end;
+
+// Grava o arquivo e, se o Windows recusar, diz QUAL caminho falhou, DE ONDE esse caminho
+// veio e o que fazer -- em vez da excecao crua do Delphi ("Cannot create file ... Acesso
+// negado"), que nem sequer diz que o culpado e a raiz do workspace. False = nao gravou.
+function SalvaOuExplica(L: TStringList; Caminho: String): Boolean;
+begin
+  Result := True;
+  try
+    L.SaveToFile(Caminho);
+  except
+    Result := False;
+    // Nao afirme a causa: o Windows devolve "Acesso negado" tambem para arquivo aberto
+    // noutro programa e para pasta sem permissao. Liste o que conferir, na ordem em que
+    // costuma ser -- a raiz errada e de longe a primeira.
+    ShowMessage('Nao consegui gravar:' + #13#10 + Caminho + #13#10#13#10 +
+      'Raiz em uso: ' + SCRIPT_HOME + #13#10 +
+      '   (veio de ' + HomeOrigem + ')' + #13#10#13#10 +
+      'Confira, nesta ordem:' + #13#10 +
+      '   1. essa raiz e mesmo a desta maquina? se nao, corrija a linha home= em' + #13#10 +
+      '      ' + HOME_CFG + #13#10 +
+      '   2. o arquivo esta aberto noutro programa?' + #13#10 +
+      '   3. a pasta aceita gravacao do seu usuario?');
+  end;
+end;
+
+{ ============================== fim HOME ============================== }
 
 { ======================= PROJ-HELPERS (workspace central) ======================= }
 
@@ -461,6 +735,7 @@ var
   Dirs, Ou: TStringList;
   i: Integer;
   d, line: String;
+  Gravou: Boolean;
 begin
   Dirs := TStringList.Create;
   ListProjectDirs(Dirs);
@@ -490,7 +765,7 @@ begin
     Ou.Add(line);
   end;
   Ou.Add('];');
-  Ou.SaveToFile(SCRIPT_HOME + '\projects.js');
+  Gravou := SalvaOuExplica(Ou, SCRIPT_HOME + '\projects.js');
   Ou.Free;
   Dirs.Free;
 end;
@@ -1038,7 +1313,7 @@ begin
   Iter := SchDoc.SchIterator_Create;
   if Iter = nil then
     Exit;
-  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, ePort, eJunction));
+  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, ePort, eJunction, eNoERC));
   Obj := Iter.FirstSchObject;
   while Obj <> nil do
   begin
@@ -1091,7 +1366,7 @@ begin
     LogFail('limpeza: SchIterator_Create devolveu nil - nada removido');
     Exit;
   end;
-  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, ePort, eJunction));
+  Iter.AddFilter_ObjectSet(MkSet(eWire, eNetLabel, ePowerObject, ePort, eJunction, eNoERC));
   Obj := Iter.FirstSchObject;
   while Obj <> nil do
   begin
@@ -1357,6 +1632,26 @@ begin
   LogOk('power ' + JGet(Line, 'net'));
 end;
 
+// A diretiva No ERC - o X vermelho que marca um pino como solto DE PROPOSITO. E um objeto
+// de PONTO, igual a junction: so a ancora importa, e ela precisa cair EXATAMENTE na ponta
+// quente do pino, senao o Altium prende a diretiva ao lado e o ERC continua reclamando.
+// O simbolo (cruz fina/grossa/circulo) e a cor ficam no default do Altium ate serem MEDIDOS
+// num Altium de verdade - a Port ja ensinou o preco de adivinhar constante nomeada.
+procedure PlaceNoERC(SchDoc: ISch_Document; Line: String);
+var
+  N: TObject;
+begin
+  N := SchServer.SchObjectFactory(eNoERC, eCreate_GlobalCopy);
+  if N = nil then
+  begin
+    LogFail('noerc: factory falhou');
+    Exit;
+  end;
+  N.Location := Point(MilsToCoord(JNum(Line, 'x')), MilsToCoord(JNum(Line, 'y')));
+  RegisterObj(SchDoc, N);
+  LogOk('noerc');
+end;
+
 procedure PlaceJunction(SchDoc: ISch_Document; Line: String);
 var
   J: TObject;
@@ -1437,7 +1732,26 @@ var
   EstiloFolha: Integer;                  // -1 = folha custom: nao escrever SheetStyle
   ServerDoc: IServerDocument;
   SchDoc: ISch_Document;
+  RelTxt: String;
+  Gravou: Boolean;
 begin
+  // Raiz do workspace DESTA maquina: PRIMEIRA coisa do procedimento, porque tudo abaixo
+  // depende dela (ResolveProjectDir, ListProjectDirs, o indice projects.js).
+  SCRIPT_HOME := HubHome(0);
+  if SCRIPT_HOME = '' then
+    Exit;
+  PROJECTS_DIR := SCRIPT_HOME + '\Projects';
+
+  ALMOX_DIR := SCRIPT_HOME + '\Libs\Almox';
+  // A biblioteca da casa nao mora no workspace: vem das chaves schlib/pcblib do
+  // home.txt, e so cai no padrao quando esta maquina nao as declarou.
+  SCHLIB_FILE := HomeCfgGet('schlib');
+  if SCHLIB_FILE = '' then
+    SCHLIB_FILE := SCHLIB_PADRAO;
+  PCBLIB_FILE := HomeCfgGet('pcblib');
+  if PCBLIB_FILE = '' then
+    PCBLIB_FILE := PCBLIB_PADRAO;
+
   if SchServer = nil then
   begin
     ShowMessage('SchServer indisponivel. Abra um documento de esquema qualquer e rode de novo.');
@@ -1609,9 +1923,13 @@ begin
   begin
     Report.Add('');
     Report.Add('VALIDACAO FALHOU com ' + IntToStr(ErrCount) + ' erro(s). NADA foi criado.');
-    Report.SaveToFile(ProjDir + '\build-report.txt');
-    ShowMessage('Validacao falhou com ' + IntToStr(ErrCount) + ' erro(s) - nada foi criado.' + #13#10 +
-      'Veja ' + ProjDir + '\build-report.txt');
+    Gravou := SalvaOuExplica(Report, ProjDir + '\build-report.txt');
+    if Gravou then
+      ShowMessage('Validacao falhou com ' + IntToStr(ErrCount) + ' erro(s) - nada foi criado.' + #13#10 +
+        'Veja ' + ProjDir + '\build-report.txt')
+    else
+      ShowMessage('Validacao falhou com ' + IntToStr(ErrCount) + ' erro(s) - nada foi criado.' + #13#10 +
+        'O relatorio nao pode ser gravado (o aviso anterior diz por que).');
     if PcbFpNames <> nil then
       PcbFpNames.Free;
     Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetSizes.Free; ItemSheets.Free;
@@ -1702,6 +2020,8 @@ begin
         PlacePort(SchDoc, Line)
       else if T = 'junction' then
         PlaceJunction(SchDoc, Line)
+      else if T = 'noerc' then
+        PlaceNoERC(SchDoc, Line)
       else if T = 'text' then
         PlaceText(SchDoc, Line)
       else
@@ -1771,12 +2091,18 @@ begin
 
   Report.Add('');
   Report.Add('OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount));
-  Report.SaveToFile(ProjDir + '\build-report.txt');
-  RegenerateProjectsIndex(ExtractFileName(ProjDir));
+  // As folhas ja nasceram na pasta do .PrjPcb; so o relatorio depende da raiz.
+  Gravou := SalvaOuExplica(Report, ProjDir + '\build-report.txt');
+  if Gravou then
+    RelTxt := 'Relatorio: ' + ProjDir + '\build-report.txt'
+  else
+    RelTxt := 'O relatorio NAO pode ser gravado (o aviso anterior diz por que).';
+  if Gravou then
+    RegenerateProjectsIndex(ExtractFileName(ProjDir));
 
   ShowMessage('Esquema despejado.' + #13#10 +
     'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + #13#10#13#10 +
-    'Relatorio: ' + ProjDir + '\build-report.txt' + #13#10#13#10 +
+    RelTxt + #13#10#13#10 +
     'PROXIMOS PASSOS: salve (Ctrl+S), rode Project >> Compile,' + #13#10 +
     'e depois Design >> Update PCB (ECO) para levar tudo a placa.');
 
