@@ -1311,14 +1311,25 @@ const API = {
     } catch (e) { return { ok: false, error: String(e.message || e) }; }
   },
   /* A sincronização passa pelo guardião (tools/symbols/guardiao.py, rota /api/symbols/
-     almox-sync): é ele que repõe o que foi mudado direto no Altium depois que o gerador
-     reescreve as .SchLib. Servidor sem essa rota (ainda não reiniciado) cai no
-     /api/almox/sync antigo, sem guardião. O 'done' traz o resumo do guardião. */
+     almox-sync): é ele que repõe o desenho que não veio do gerador depois que a
+     regeneração reescreve as .SchLib. O 'done' traz o resumo do guardião.
+
+     SEM ESCAPATÓRIA. Até 2026-09-14 havia um fallback: 404 nessa rota e o hub chamava o
+     /api/almox/sync do hubserver, que roda o almox2lib.py CRU — e o gerador cru reescreve
+     as .SchLib inteiras, sem repor nada. Quem apertasse Sincronizar num servidor velho
+     perdia, calado, os 1376 símbolos que o guardião protege, e o botão não tinha como
+     dizer isso: a única diferença visível era o resumo do guardião não aparecer no fim.
+     Uma queda silenciosa de garantia não é tolerância a versão antiga, é perda de dado
+     com cara de sucesso. Agora o 404 é ERRO: a rota existe desde que o symserver.py foi
+     para o repo, e servidor que não a tem só precisa ser reiniciado. */
   async almoxSync(pull, onLine) {
     const req = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pull: !!pull }) };
-    let base = '/api/symbols/almox-sync';
-    let r = await fetch(base, req);
-    if (r.status === 404) { base = '/api/almox/sync'; r = await fetch(base, req); }
+    const base = '/api/symbols/almox-sync';
+    const r = await fetch(base, req);
+    if (r.status === 404)
+      throw new Error('este servidor não tem o guardião da sincronização (/api/symbols/'
+        + 'almox-sync). Reinicie o hubserver.py e tente de novo — sem o guardião a '
+        + 'regeneração apagaria o que foi desenhado fora dele.');
     let j = {}; try { j = await r.json(); } catch (e) {}
     if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
     return new Promise((res, rej) => {
