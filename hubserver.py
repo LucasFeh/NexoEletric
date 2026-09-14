@@ -32,6 +32,8 @@ HEARTBEAT = 15.0       # keep-alive do SSE
 BOM_VISTOS = 'bom-vistos.json'   # o que ja foi montado, COMPARTILHADO entre quem abre
 BOM_OPTS = 'bom-opts.json'       # as opcoes com que a aba gerou, para o link abrir igual
 BOM_STATE_FILES = (BOM_VISTOS, BOM_OPTS)
+ODOO_LISTA = 'odoo-lista.json'  # recibo do envio ao Odoo; muda sem o projeto mudar
+ESTADO_LOCAL = BOM_STATE_FILES + (ODOO_LISTA,)
 
 app = Flask(__name__)
 _version = 0           # incrementa a cada mudanca detectada
@@ -64,7 +66,7 @@ def _snapshot():
     for base in ('Libs', 'Projects'):
         for dirpath, _dirnames, filenames in os.walk(os.path.join(ROOT, base)):
             for f in filenames:
-                if f in BOM_STATE_FILES:
+                if f in ESTADO_LOCAL:
                     continue      # visto marcado nao e mudanca de projeto; ver BOM_VISTOS
                 add(os.path.join(dirpath, f))
     return snap
@@ -912,6 +914,17 @@ def api_bom_link(proj_id):
 sys.path.insert(0, os.path.join(ROOT, 'tools', 'symbols'))
 import symserver                     # noqa: E402
 symserver.registra(app, ROOT)
+
+# ─────────────────── lista de componentes para o Odoo ───────────────────
+# Sob try: o hub inteiro (laser, BOM, PCB) nao pode deixar de subir porque UM arquivo novo
+# nao viajou no merge -- e o acidente que o CLAUDE.md descreve, e o hubserver.py e o unico
+# arquivo aqui que e de outro dono. O aviso e alto de proposito: botao mudo e pior que erro.
+try:
+    import odoolista_server        # noqa: E402
+    odoolista_server.registra(app, ROOT)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: envio da lista ao Odoo desligado (%s) — falta odoolista_server.py '
+          'ou odoolista.py na raiz do workspace.' % _e)
 
 
 def _lan_ip():

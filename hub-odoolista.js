@@ -1,0 +1,493 @@
+/* AltiumPCBMirror v2 - hub-odoolista.js — "Enviar para o Odoo" na vista Esquema.
+
+   Monta a lista de componentes do projeto e a manda para a fila de aprovacao do Odoo
+   (modelo di.lista.altium). A lista NAO entra no inventario quando chega: alguem do
+   estoque confere e decide, e so na aprovacao nascem a PCB e a BoM.
+
+   Este arquivo e autossuficiente de proposito — injeta o proprio CSS, o proprio botao e o
+   proprio modal, como o hub-dialog.js faz. O schframe.html so precisa da linha
+   <script src="hub-odoolista.js"></script>, e nada da casca de outro dono muda.
+
+   Quem monta o payload e resolve o product_id e o SERVIDOR (odoolista.py), lendo o
+   schematic.js do disco. Nao e aqui: a lista tem que sair do arquivo salvo, e a senha do
+   Odoo nunca pode chegar ao navegador.                                                  */
+"use strict";
+var HubOdooLista = (function () {
+
+const CSS = `
+#odoomodal{position:fixed; inset:0; z-index:60; display:none; background:rgba(11,11,13,.62);}
+#odoomodal.on{display:flex;}
+#odoomodal .od-box{position:absolute; inset:14px; display:grid; grid-template-rows:auto 1fr auto;
+  background:var(--panel,#242424); border:1px solid var(--border,#3a3a3a); border-radius:8px;
+  box-shadow:0 22px 60px rgba(0,0,0,.62); overflow:hidden; min-height:0;}
+#odoomodal .od-head{display:flex; align-items:center; gap:10px; padding:11px 13px;
+  border-bottom:1px solid var(--border,#3a3a3a); background:var(--panel2,#2d2d2d);}
+#odoomodal .od-head h2{font-size:13px; font-weight:600; margin:0; letter-spacing:-.01em;}
+#odoomodal .od-head .alvo{font-size:11px; color:var(--fg-dim,#9a9a9a); flex:1;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+#odoomodal .od-head button{padding:2px 8px;}
+#odoomodal .od-body{overflow:auto; min-height:0; padding:0 13px;}
+#odoomodal .od-bar{display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 0 8px;
+  position:sticky; top:0; background:var(--panel,#242424); z-index:1;}
+#odoomodal label{font-size:11px; color:var(--fg-dim,#9a9a9a); display:flex; align-items:center; gap:6px;}
+#odoomodal input[type=text]{background:var(--panel2,#2d2d2d); color:var(--fg,#d8d8d8); font:inherit;
+  border:1px solid var(--border,#3a3a3a); border-radius:3px; padding:3px 7px;}
+#odoomodal input:focus-visible{outline:2px solid var(--accent,#4fc3f7); outline-offset:1px;}
+#odoomodal .od-obs{flex:1; min-width:150px;}
+#odoomodal .od-tot{font-size:11px; color:var(--fg-dim,#9a9a9a); margin-left:auto;}
+#odoomodal .od-aviso{font-size:11px; padding:7px 9px; border-radius:4px; margin-bottom:8px;
+  border:1px solid var(--border,#3a3a3a); border-left:3px solid var(--warn,#ffd54f);
+  background:var(--panel2,#2d2d2d); white-space:pre-wrap;}
+#odoomodal .od-aviso.err{border-left-color:var(--err,#ff5252);}
+#odoomodal .od-aviso.ok{border-left-color:var(--ok,#00e676);}
+/* a coluna do nome tem teto: sem ele, numa tela larga o nome estica e joga a quantidade
+   para longe da peca a que ela pertence. A folga sobra para a resolucao, que e texto longo. */
+#odoomodal .od-row{display:grid; gap:9px; align-items:baseline; padding:5px 4px;
+  grid-template-columns:150px minmax(0,17em) 8em 11em 12em 44px minmax(0,1fr);
+  border-bottom:1px solid var(--border,#3a3a3a);}
+#odoomodal .od-row.hd{position:sticky; top:42px; background:var(--panel,#242424); z-index:1;
+  font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim,#9a9a9a);}
+#odoomodal .od-row .des{font:11px/1.4 Consolas,ui-monospace,monospace; color:var(--fg,#d8d8d8);
+  overflow:hidden; text-overflow:ellipsis;}
+#odoomodal .od-row .nm{font-size:12px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+#odoomodal .od-row .qt{font-size:12px; text-align:right; font-variant-numeric:tabular-nums;}
+#odoomodal .od-row .rs{font-size:11px; color:var(--ok,#00e676); overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap;}
+#odoomodal .od-row .rs.pend{color:var(--warn,#ffd54f);}
+#odoomodal .od-row .vl, #odoomodal .od-row .en, #odoomodal .od-row .ac{font-size:11px;
+  color:var(--fg-dim,#9a9a9a); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* Fora dos dois almoxarifados e o que PRECISA MUDAR, e por isso e a unica coisa vermelha
+   da linha: a resolucao ja usa verde e amarelo, e um terceiro alarme na mesma cor se
+   perderia no meio deles. */
+#odoomodal .od-row .ac.fora{color:var(--err,#ff5252);}
+/* o cabecalho nao e uma linha resolvida: nao pode herdar o verde do .rs */
+#odoomodal .od-row.hd .des, #odoomodal .od-row.hd .nm, #odoomodal .od-row.hd .vl,
+#odoomodal .od-row.hd .en, #odoomodal .od-row.hd .ac,
+#odoomodal .od-row.hd .qt, #odoomodal .od-row.hd .rs{color:inherit; font:inherit;}
+#odoomodal .od-foot{display:flex; align-items:center; gap:9px; padding:10px 13px;
+  border-top:1px solid var(--border,#3a3a3a); background:var(--panel2,#2d2d2d);}
+#odoomodal .od-foot .est{flex:1; font-size:11px; color:var(--fg-dim,#9a9a9a);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+#odoomodal .od-foot button.pri{background:#0d47a1; border-color:#0d47a1; color:#fff;}
+#odoomodal .od-foot button.pri:hover:not(:disabled){background:#1565c0; border-color:#1565c0;}
+`;
+
+const $ = id => document.getElementById(id);
+function el(tag, cls, text){
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+const temServidor = () => !!(window.HubIO && HubIO.canPost);
+const proj = () => (typeof SCH_P === 'string' && SCH_P) || '';
+
+/* getJson/postJson nunca estouram: devolvem {ok:false,error} — o mesmo contrato do
+   hub-libsync.js, para a tela nunca ficar com um botao morto e nenhuma explicacao. */
+async function chama(rota, corpo){
+  try {
+    const o = corpo === undefined
+      ? { cache: 'no-store' }
+      : { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(corpo) };
+    const r = await fetch(rota, o);
+    const j = await r.json().catch(() => null);
+    if (j && typeof j === 'object') return j;
+    return { ok: false, error: 'o servidor respondeu ' + r.status + ' sem JSON' };
+  } catch (e) {
+    return { ok: false, error: 'sem resposta do servidor: ' + (e && e.message || e) };
+  }
+}
+
+/* ------------------------------- estado da tela ------------------------------- */
+
+const ST = {
+  aberto: false, rodando: false,
+  conferido: null,      /* o payload que o SERVIDOR montou no ultimo ensaio */
+  reciboLocal: null,    /* o ultimo envio, lido de Projects/<p>/odoo-lista.json */
+  destino: null,        /* url/db/login/temSenha */
+};
+
+/* A resolucao tem dois estados e a tela precisa distinguir, senao o projetista envia
+   achando que esta resolvido: palpite local (o que o espelho do almoxarifado sabe) e
+   veredito do Odoo (o que di_confere_lista respondeu). */
+function resolucaoDe(linha, pendencia){
+  if (pendencia) return { txt: pendencia.motivo || 'pendente', pend: true };
+  if (linha.product_id) return { txt: 'produto ' + linha.product_id + ' · ' + (linha._como || ''), pend: false };
+  if (linha.mpn) return { txt: 'MPN ' + linha.mpn + (linha.encapsulamento ? ' · ' + linha.encapsulamento : ''), pend: false };
+  return { txt: linha._como || 'sem vinculo com o cadastro', pend: true };
+}
+
+function pintaLista(payload, recibo){
+  const box = $('odooLista');
+  box.textContent = '';
+
+  const avisos = [];
+  if (payload && payload._sem_designador && payload._sem_designador.length){
+    avisos.push(['', payload._sem_designador.length + ' componente(s) fora da lista por nao terem '
+      + 'designador anotado (' + payload._sem_designador.join(', ') + '). Anote no Altium antes de enviar.']);
+  }
+  if (payload && payload._sem_valor){
+    avisos.push(['', payload._sem_valor + ' linha(s) juntam componentes cujo VALOR não está no '
+      + 'espelho — o comment do Altium é fórmula não resolvida e o componente não traz '
+      + 'parâmetro de identidade. Um "RES [SMD]" de quantidade 24 pode ser quatro resistores '
+      + 'diferentes. Rode o ExportProject de novo (ele agora traz os parâmetros) ou confira '
+      + 'essas linhas peça a peça antes de aprovar.']);
+  }
+  if (recibo && recibo.linhas_pendentes){
+    avisos.push(['', recibo.linhas_pendentes + ' de ' + recibo.total_linhas + ' linha(s) sem produto no Odoo. '
+      + 'A fila aceita assim mesmo, mas a lista so pode ser APROVADA quando toda linha apontar '
+      + 'para um produto — a peca provavelmente precisa ser cadastrada la, nao inventada aqui.']);
+  } else if (recibo){
+    avisos.push(['ok', 'As ' + recibo.total_linhas + ' linha(s) resolveram. O Odoo reconheceu todos os produtos.']);
+  }
+  for (const [k, t] of avisos) box.append(el('div', 'od-aviso' + (k ? ' ' + k : ''), t));
+
+  const hd = el('div', 'od-row hd');
+  hd.append(el('span', 'des', 'designadores'), el('span', 'nm', 'nome'),
+            el('span', 'vl', 'valor'), el('span', 'en', 'encapsulamento'),
+            el('span', 'ac', 'acervo'),
+            el('span', 'qt', 'qtd'), el('span', 'rs', 'resolução'));
+  box.append(hd);
+
+  const porDes = new Map();
+  for (const p of (recibo && recibo.pendencias) || []) porDes.set(p.designadores, p);
+
+  for (const ln of (payload && payload.linhas) || []){
+    const r = resolucaoDe(ln, porDes.get(ln.designadores));
+    const row = el('div', 'od-row');
+    const rs = el('span', 'rs' + (r.pend ? ' pend' : ''), r.txt);
+    rs.title = r.txt;
+    const nm = el('span', 'nm', ln.nome_altium || '');
+    nm.title = (ln.nome_altium || '') + (ln.footprint ? '\n' + ln.footprint : '');
+    /* Valor e encapsulamento saem em toda linha, inclusive nas que nao resolveram: sao
+       elas que mais precisam ser lidas por quem confere. Traço = o espelho nao sabe,
+       que e diferente de vazio. */
+    const vl = el('span', 'vl', ln._valor || '—'); vl.title = ln._valor || '';
+    const en = el('span', 'en', ln._encapsulamento || '—'); en.title = ln._encapsulamento || '';
+    const ac = el('span', 'ac' + (ln._acervo ? '' : ' fora'), ln._acervo || 'fora do almoxarifado');
+    ac.title = ln._acervo
+      || 'o componente não está em almox-basicos.js nem em almox-especiais.js — troque por um '
+       + 'componente do almoxarifado para a linha poder ser aprovada';
+    row.append(el('span', 'des', ln.designadores), nm, vl, en, ac,
+               el('span', 'qt', String(ln.quantidade)), rs);
+    box.append(row);
+  }
+
+  const n = ((payload && payload.linhas) || []).length;
+  const pecas = ((payload && payload.linhas) || []).reduce((a, l) => a + l.quantidade, 0);
+  $('odooTot').textContent = n ? n + ' linha(s) · ' + pecas + ' peça(s)' : '';
+}
+
+function trava(v){
+  ST.rodando = v;
+  $('odooConf').disabled = v;
+  $('odooEnviar').disabled = v || !ST.conferido;
+  $('odooRev').disabled = v;
+  /* o X junto: fechado no meio da conferencia, o resultado chegava numa tela invisivel e
+     a pessoa ficava sem toast, sem hint e sem saber se algo aconteceu */
+  $('odooFechar').disabled = v;
+}
+
+function estadoTxt(t){ $('odooEstado').textContent = t || ''; }
+
+function descRecibo(r){
+  if (!r) return '';
+  return (r.referencia || '(sem referência)') + ' · ' + (r.estado || '?')
+       + (r.revisao ? ' · rev ' + r.revisao : '')
+       + (r.enviado_em ? ' · ' + r.enviado_em : '');
+}
+
+/* ------------------------------- as duas acoes ------------------------------- */
+
+function corpo(extra){
+  return Object.assign({
+    projeto: proj(),
+    revisao: $('odooRev').value.trim(),
+    observacao: $('odooObs').value.trim(),
+    enviado_por: (ST.destino && ST.destino.login || '').split('@')[0],
+  }, extra || {});
+}
+
+async function conferir(){
+  const rev = $('odooRev').value.trim();
+  if (!rev){
+    await HubDialog.alert('Digite a revisão da placa. Ela entra no nome da PCB no Odoo '
+      + '("' + (typeof schematic !== 'undefined' ? schematic.project : proj()) + ' rev B") e é '
+      + 'o que impede o mesmo projeto de abrir duas solicitações na fila.',
+      { title: 'falta a revisão' });
+    $('odooRev').focus();
+    return;
+  }
+  trava(true);
+  ST.conferido = null;
+  estadoTxt('conferindo no Odoo…');
+  const j = await chama('/api/lista/ensaio', corpo());
+  trava(false);
+  if (!j.ok){
+    estadoTxt('');
+    pintaLista(null, null);
+    $('odooLista').prepend(el('div', 'od-aviso err', j.error || 'falhou'));
+    return;
+  }
+  ST.conferido = j.payload;
+  pintaLista(j.payload, j.recibo);
+  estadoTxt('ensaio: nada foi gravado · ' + j.uid_externo);
+  $('odooEnviar').disabled = false;
+}
+
+async function enviar(){
+  if (!ST.conferido) return;
+  const r = ST.conferido, n = r.linhas.length;
+  const ok = await HubDialog.confirm(
+    'Enviar ' + n + ' linha(s) de "' + r.projeto + ' rev ' + r.revisao + '" para a fila de '
+    + 'aprovação do Odoo?\n\nA lista não entra no estoque agora: alguém do almoxarifado '
+    + 'confere e decide. Reenviar a mesma revisão substitui as linhas enquanto ninguém '
+    + 'decidiu; depois da decisão, é preciso mudar a revisão.',
+    { title: 'Enviar lista', ok: 'Enviar' });
+  if (!ok) return;
+
+  trava(true);
+  estadoTxt('enviando…');
+  /* uid e contagem do ENSAIO viajam junto: o servidor releem o schematic.js do disco no
+     envio, e se a revisao ou o arquivo mudaram no meio ele recusa com 409 em vez de mandar
+     para o Odoo uma lista que ninguem conferiu */
+  const j = await chama('/api/lista/envio', corpo({
+    confirmado: true, uid_externo: r.uid_externo, total_linhas: n }));
+  trava(false);
+  if (!j.ok){
+    estadoTxt('');
+    $('odooLista').prepend(el('div', 'od-aviso err', j.error || 'falhou'));
+    HubDialog.toast(j.error || 'o envio falhou', 'err');
+    if (j.confiraDeNovo){ ST.conferido = null; $('odooEnviar').disabled = true; }
+    return;
+  }
+  const rec = j.recibo || {};
+  /* o recibo manda na revisao: o que o Odoo gravou e a verdade, nao o que estava na tela */
+  ST.reciboLocal = Object.assign({}, rec, { revisao: rec.revisao || r.revisao,
+                                            uid_externo: j.uid_externo });
+  ST.conferido = j.payload || ST.conferido;
+  pintaLista(ST.conferido, rec);
+  estadoTxt(descRecibo(ST.reciboLocal));
+  atualizaBotao();
+  if (rec.estado === 'recusada'){
+    await HubDialog.alert(rec.motivo_recusa || 'a lista foi recusada e o motivo não veio escrito.',
+      { title: 'Lista recusada', danger: true });
+  } else if (rec.gravou === false){
+    HubDialog.toast((rec.referencia || 'a lista') + ' já foi ' + (rec.estado || 'decidida')
+      + ' — nada foi alterado. Para mandar outra versão, mude a revisão.', 'warn', 8000);
+  } else {
+    HubDialog.toast((rec.referencia || 'lista') + ' — ' + (rec.estado || 'recebida')
+      + (rec.linhas_pendentes ? ' · ' + rec.linhas_pendentes + ' pendência(s)' : ''), 'ok');
+  }
+}
+
+/* ------------------------------- abrir e fechar ------------------------------- */
+
+function fecha(){ ST.aberto = false; $('odoomodal').classList.remove('on'); }
+
+/* O esquema aberto e o do disco? A lista sai do arquivo SALVO — quem monta e o servidor,
+   lendo Projects/<p>/schematic.js. Mandar com alteracao pendente mandaria uma lista que
+   nem o disco nem o Altium tem. */
+async function garanteSalvo(){
+  if (!(window.__hubDirty && window.__hubDirty())) return true;
+  const ok = await HubDialog.confirm(
+    'O esquema tem alterações não salvas. A lista é montada a partir do schematic.js '
+    + 'gravado em disco, então ela sairia sem essas alterações.',
+    { title: 'alterações pendentes', ok: 'Salvar e continuar' });
+  if (!ok) return false;
+  const btn = $('btnSave');
+  if (!btn) return false;
+  /* reusa o caminho de gravacao do schframe (btnSave) em vez de reimplementar: ele releem o
+     disco, pergunta se alguem gravou por cima e sabe cair no download quando o POST falha.
+     Por isso a espera e generosa — pode haver um modal DELE esperando resposta no meio. */
+  btn.click();
+  for (let i = 0; i < 300 && window.__hubDirty(); i++)
+    await new Promise(r => setTimeout(r, 100));
+  if (window.__hubDirty()){
+    await HubDialog.alert('O esquema ainda tem alterações pendentes, então o envio não '
+      + 'seguiu. Salve e clique em Enviar para o Odoo de novo.',
+      { title: 'ainda não salvou' });
+    return false;
+  }
+  return true;
+}
+
+async function abre(){
+  if (!temServidor()){
+    await HubDialog.alert('Sem servidor: abra o hub por hubserver.py para enviar a lista.',
+      { title: 'não dá para enviar' });
+    return;
+  }
+  if (!(await garanteSalvo())) return;
+
+  const cfg = await chama('/api/lista/config');
+  ST.destino = (cfg.ok && cfg.config) || null;
+  if (!ST.destino){
+    await HubDialog.alert(cfg.error || 'o servidor não respondeu sobre o Odoo.',
+      { title: 'sem destino' });
+    return;
+  }
+  if (!ST.destino.temSenha){
+    await HubDialog.alert(
+      /* A TELA PASSOU A EXISTIR, entao ela vem primeiro: mandar o usuario editar JSON a mao
+         era a unica saida enquanto a configuracao nao tinha os campos do Odoo. As outras duas
+         ficam, porque continuam valendo no servidor headless — la o formulario nao grava, ja
+         que a gravacao e so local, como a do almoxarifado. */
+      'Não há senha do Odoo gravada.\n\nAbra Configuração » Projeto » Envio da lista para '
+      + 'o Odoo e preencha url, base, login e senha. A tela só grava a partir desta máquina.\n\n'
+      + 'No servidor, a alternativa é ODOO_SENHA no ambiente (uma linha em '
+      + '/etc/altiumhub/senha.env) antes de subir o hubserver.\n\nA senha não vem do '
+      + 'hub-almox.json de propósito: aquele arquivo é servido em texto claro para a rede.',
+      { title: 'sem senha do Odoo' });
+    return;
+  }
+
+  const r = await chama('/api/lista/recibo?projeto=' + encodeURIComponent(proj()));
+  ST.reciboLocal = (r.ok && r.recibo) || null;
+  ST.conferido = null;
+  await atualizaEstado();
+
+  $('odooRev').value = (ST.reciboLocal && ST.reciboLocal.revisao) || (r.ok && r.revisaoSugerida) || '';
+  $('odooObs').value = '';
+  $('odooAlvo').textContent = ST.destino.db + ' em ' + ST.destino.url
+    + ' · ' + (ST.destino.login || '');
+  $('odooAlvo').title = 'senha lida de ' + (ST.destino.fonteSenha || '?');
+  $('odooEnviar').disabled = true;
+  estadoTxt(ST.reciboLocal ? 'último envio: ' + descRecibo(ST.reciboLocal)
+                           : 'nenhum envio deste projeto ainda');
+  pintaLista(null, null);
+  $('odooLista').prepend(el('div', 'od-aviso',
+    'Clique em Conferir: o Odoo resolve as linhas e diz o que resolveria, sem gravar nada.'));
+
+  ST.aberto = true;
+  $('odoomodal').classList.add('on');
+  $('odooRev').focus();
+  $('odooRev').select();
+}
+
+/* O disco so guarda o estado do momento do envio. Quem decide e uma pessoa no Odoo, depois
+   — entao um envio ainda nao decidido precisa ser perguntado, senao uma lista RECUSADA
+   aparece aqui como "recebida" para sempre e o motivo que a pessoa do estoque escreveu (a
+   spec, secao 8.4, pede justamente que ele volte para o projetista) nunca chega. */
+const DECIDIDO = { aprovada: 1, recusada: 1 };
+
+async function atualizaEstado(){
+  const loc = ST.reciboLocal;
+  if (!loc || !loc.uid_externo || DECIDIDO[loc.estado]) return;
+  const j = await chama('/api/lista/estado', { projeto: proj(), revisao: loc.revisao || '' });
+  if (!j.ok || !j.recibo) return;              /* Odoo fora do ar nao pode travar o modal */
+  ST.reciboLocal = Object.assign({}, loc, j.recibo);
+  atualizaBotao();
+  if (j.recibo.estado === 'recusada' && j.recibo.estado !== loc.estado){
+    await HubDialog.alert((j.recibo.motivo_recusa || 'o motivo não veio escrito.')
+      + '\n\nCorrija o que o motivo diz e mande com a revisão nova: o Odoo ignora o reenvio '
+      + 'de uma lista já decidida.',
+      { title: (j.recibo.referencia || 'a lista') + ' foi recusada', danger: true });
+  } else if (j.recibo.estado === 'aprovada' && j.recibo.estado !== loc.estado){
+    HubDialog.toast((j.recibo.referencia || 'a lista') + ' foi aprovada — virou a placa '
+      + (j.recibo.produto_id || '?') + ' com BoM ' + (j.recibo.bom_id || '?'), 'ok', 8000);
+  }
+}
+
+/* ------------------------------- o botao no painel ------------------------------- */
+
+function atualizaBotao(){
+  const b = $('btnOdooLista'), h = $('odooHint');
+  if (!b) return;
+  b.disabled = !temServidor();
+  if (!temServidor()){ h.textContent = 'sem servidor — abra o hub por hubserver.py'; return; }
+  h.textContent = ST.reciboLocal ? 'último envio: ' + descRecibo(ST.reciboLocal)
+                                 : 'monta a lista de componentes e manda para a fila do estoque';
+}
+
+function montaDom(){
+  const st = el('style'); st.textContent = CSS; document.head.appendChild(st);
+
+  /* o botao: no #odoolista se a casca deu o ancora, senao no fim da aba Configuracoes */
+  let sec = $('odoolista');
+  if (!sec){
+    const pane = $('pane-cfg');
+    if (!pane) return false;
+    sec = el('div', 'sec'); sec.id = 'odoolista';
+    pane.appendChild(sec);
+  }
+  sec.append(el('h2', null, 'Odoo'));
+  const b = el('button', 'wide'); b.id = 'btnOdooLista';
+  b.title = 'Monta a lista de componentes do esquema e manda para a fila de aprovação do Odoo';
+  b.append(el('span', null, '↗ Enviar para o Odoo'));
+  const h = el('div', 'hint'); h.id = 'odooHint';
+  sec.append(b, h);
+  b.addEventListener('click', () => { if (!ST.rodando) abre(); });
+
+  const m = el('div'); m.id = 'odoomodal';
+  m.innerHTML = ''
+    + '<div class="od-box" role="dialog" aria-modal="true" aria-labelledby="odooTitulo">'
+    +   '<div class="od-head">'
+    +     '<h2 id="odooTitulo">Enviar para o Odoo</h2>'
+    +     '<span class="alvo" id="odooAlvo"></span>'
+    +     '<button type="button" id="odooFechar" title="Fechar (Esc)">✕</button>'
+    +   '</div>'
+    +   '<div class="od-body">'
+    +     '<div class="od-bar">'
+    +       '<label>revisão <input type="text" id="odooRev" maxlength="8" size="6" '
+    +         'placeholder="B" title="entra no nome da placa no Odoo e na chave do envio"></label>'
+    +       '<input type="text" class="od-obs" id="odooObs" maxlength="500" '
+    +         'placeholder="observação para quem confere (opcional)">'
+    +       '<span class="od-tot" id="odooTot"></span>'
+    +     '</div>'
+    +     '<div id="odooLista"></div>'
+    +   '</div>'
+    +   '<div class="od-foot">'
+    +     '<span class="est" id="odooEstado"></span>'
+    +     '<button type="button" id="odooConf">Conferir</button>'
+    +     '<button type="button" class="pri" id="odooEnviar" disabled>Enviar</button>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(m);
+
+  $('odooFechar').addEventListener('click', fecha);
+  m.addEventListener('mousedown', e => { if (e.target === m && !ST.rodando) fecha(); });
+  $('odooConf').addEventListener('click', () => conferir());
+  $('odooEnviar').addEventListener('click', () => enviar());
+  $('odooRev').addEventListener('keydown', e => { if (e.key === 'Enter') conferir(); });
+  /* revisao mexida depois de conferir invalida o ensaio: o "tem certeza" nomearia uma
+     revisao e o envio abriria outra chave de idempotencia, com uma lista que ninguem viu */
+  $('odooRev').addEventListener('input', () => {
+    if (!ST.conferido) return;
+    ST.conferido = null;
+    $('odooEnviar').disabled = true;
+    estadoTxt('a revisão mudou — confira de novo antes de enviar');
+  });
+
+  /* Na BOLHA do document, nao na captura. Os atalhos da folha (W, G, L, Del, Espaço) moram
+     num listener de window (schframe.js:1639), que so recebe a tecla DEPOIS do document —
+     entao parar aqui basta para eles. Na captura o mesmo stopPropagation matava o evento
+     antes de ele descer ao alvo, e nenhum campo deste modal recebia tecla nenhuma: o Enter
+     da revisão simplesmente nao fazia nada.
+     De quebra o HubDialog continua ganhando quando abre por cima: o listener DELE e de
+     captura (hub-dialog.js:93), corta o evento antes, e este aqui nem roda — o Esc do "tem
+     certeza?" nao leva junto a lista que a pessoa ainda nao mandou. */
+  document.addEventListener('keydown', e => {
+    if (!ST.aberto) return;
+    e.stopPropagation();
+    if (e.key === 'Escape' && !ST.rodando){ e.preventDefault(); fecha(); }
+  });
+  return true;
+}
+
+function inicia(){
+  if (!montaDom()) return;
+  atualizaBotao();
+  if (!temServidor()) return;
+  chama('/api/lista/recibo?projeto=' + encodeURIComponent(proj())).then(r => {
+    if (r && r.ok && r.recibo){ ST.reciboLocal = r.recibo; atualizaBotao(); }
+  });
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', inicia);
+else inicia();
+
+return { abre, fecha, estado: ST, pure: { resolucaoDe, descRecibo } };
+})();
+if (typeof module === 'object' && module.exports) module.exports = HubOdooLista;

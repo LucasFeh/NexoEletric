@@ -368,13 +368,19 @@ assert.deepStrictEqual(P.hitTest({ pins: [], graphics: [{ g: 'poly', pts: [[0, 0
   assert.deepStrictEqual(P.pinsOffGrid([{ num: '9', x: 118.11, y: 0, len: 100, orient: 90 }], P.MM).map(p => p.num), ['9'], 'len de 100 mil tira do snap de 1 mm');
 }
 
+/* ── pino novo: só o número à vista (hideName), como todo componente gerado do almoxarifado ── */
+assert.deepStrictEqual(P.novoPino([], 0, 50, 100, 90), { num: '1', name: '', x: 0, y: 50, len: 100, orient: 90, type: 'Passive', hideName: true }, 'pino novo nasce com o nome escondido');
+assert.strictEqual(P.novoPino([{ num: '3' }, { num: 'A1' }], 0, 0, 100, 0).num, '4', 'número livre como o nextPinNum');
+assert.ok(!('hideNum' in P.novoPino([], 0, 0, 100, 0)), 'o número continua à vista');
+assert.strictEqual(P.cleanPin(P.novoPino([], 0, 0, 100, 0)).hideName, true, 'o cleanPin preserva o padrão para o servidor');
+
 /* ── linha → pino e pino → linha ── */
 {
   const base = { pins: [{ num: '1', name: '', x: -100, y: 0, len: 100, orient: 180, type: 'Passive' }],
                  graphics: [{ g: 'rect', x1: -100, y1: -40, x2: 100, y2: 40, solid: false }, { g: 'line', x1: 100, y1: 0, x2: 300, y2: 0, w: 10 }] };
   const r = P.lineToPin(base, 1);
   assert.deepStrictEqual(r.part.graphics, [base.graphics[0]], 'a linha saiu dos gráficos');
-  assert.deepStrictEqual(r.part.pins[1], { num: '2', name: '', x: 100, y: 0, len: 200, orient: 0, type: 'Passive' }, 'corpo no extremo perto do retângulo, ponta quente para fora');
+  assert.deepStrictEqual(r.part.pins[1], { num: '2', name: '', x: 100, y: 0, len: 200, orient: 0, type: 'Passive', hideName: true }, 'corpo no extremo perto do retângulo, ponta quente para fora, nome escondido');
   assert.deepStrictEqual(r.selection, [{ kind: 'pin', idx: 1 }]);
   assert.strictEqual(r.aviso, '');
   assert.strictEqual(base.graphics.length, 2, 'original intacto');
@@ -433,7 +439,12 @@ assert.deepStrictEqual(P.hitTest({ pins: [], graphics: [{ g: 'poly', pts: [[0, 0
   assert.deepStrictEqual(r.selection, [{ kind: 'pin', idx: 2 }, { kind: 'pin', idx: 3 }, { kind: 'g', idx: 1 }]);
   assert.deepStrictEqual(r.renumerados, [['1', '3'], ['2', '4']]);
   assert.deepStrictEqual(r.novos, ['3', '4']);
+  assert.ok(r.part.pins.slice(2).every(p => p.hideName === true && !('hideNum' in p)), 'pino do tile nasce com o nome escondido e o número à vista');
   assert.deepStrictEqual(r.part.pins.slice(0, 2), res.pins, 'os pinos que já estavam ficam');
+  /* pino de tile que já traz opinião de visibilidade é respeitado */
+  const rv = P.insertLibSymbol({ pins: [], graphics: [] }, { pins: [{ num: '1', name: '1', x: 0, y: 0, len: 100, orient: 0, type: 'Passive', hideNum: true }], graphics: [] }, 0, 0);
+  assert.deepStrictEqual(rv.part.pins[0], { num: '1', name: '1', x: 0, y: 0, len: 100, orient: 0, type: 'Passive', hideNum: true }, 'hideNum do tile fica, hideName não entra');
+  assert.deepStrictEqual(P.comPadraoDeVisibilidade({ num: '1', hideName: false }), { num: '1', hideName: false }, 'false explícito é opinião: fica');
   assert.strictEqual(res.pins.length, 2, 'original intacto'); assert.strictEqual(lib.pins[0].num, '1', 'biblioteca intacta');
   /* só um número colide: só ele muda, e para o próximo livre depois do maior */
   const r2 = P.insertLibSymbol({ pins: [{ num: '2', x: 0, y: 0, len: 100, orient: 0 }, { num: '7', x: 0, y: 0, len: 100, orient: 0 }], graphics: [] }, lib, 0, 0);
@@ -473,6 +484,21 @@ assert.deepStrictEqual(P.hitTest({ pins: [], graphics: [{ g: 'poly', pts: [[0, 0
   assert.strictEqual(lib.pins[0].num, '1', 'biblioteca intacta');
   const r2 = P.applyLibSymbol({ pins: [mine.pins[0]], graphics: [] }, lib);
   assert.deepStrictEqual(r2.part.pins.map(p => p.num), ['1', '2'], 'contagem diferente: pinos da biblioteca');
+  /* O PADRÃO DE VISIBILIDADE MUDOU EM 2026-09-11. Enquanto a paleta não guardava o olho do
+     pino, esconder o nome de tudo que vinha do tile era inofensivo; depois que a regeneração
+     trouxe hideNum/hideName do Altium, "sem flag" passou a querer dizer VISÍVEL, e o padrão
+     antigo apagava VCC/A/B/GND na hora de jogar o tile no canvas. Agora só esconde o nome que
+     repetiria o número — que é o incômodo que criou a regra. Os dois ramos, presos aqui: */
+  assert.ok(r2.part.pins.every(p => p.hideName === false), 'contagem diferente: nome de verdade do tile fica à vista');
+  const libRepete = JSON.parse(JSON.stringify(lib));
+  libRepete.pins.forEach(p => { p.name = p.num; });
+  const rRep = P.applyLibSymbol({ pins: [mine.pins[0]], graphics: [] }, libRepete);
+  assert.ok(rRep.part.pins.every(p => p.hideName === true), 'nome que só repete o número nasce escondido');
+  const libVazio = JSON.parse(JSON.stringify(lib));
+  libVazio.pins.forEach(p => { p.name = ''; });
+  const rVaz = P.applyLibSymbol({ pins: [mine.pins[0]], graphics: [] }, libVazio);
+  assert.ok(rVaz.part.pins.every(p => p.hideName === true), 'nome vazio nasce escondido');
+  assert.ok(r.part.pins.every(p => !('hideName' in p)), 'contagem igual: a visibilidade é a do usuário, o padrão não entra');
   assert.ok(/1 pino/.test(r2.note) && /2/.test(r2.note), r2.note);
 }
 
@@ -585,9 +611,69 @@ assert.strictEqual(P.nextPinNum([{ num: 'K' }]), '1');
   S.draft = null; S.selection = []; S.undo = []; S.redo = []; S.dirty = false;
 }
 
+/* ── busca da lista de símbolos: o que está na tela SEMPRE acha ──
+   A regra vive em pure.filtroBusca e recebe o plain() do hub-overbar.js de fora — é o mesmo
+   arranjo do painel, onde a casca pode carregar o overbar depois deste arquivo. */
+const OVB = require('../hub-overbar.js');
+const BS = String.fromCharCode(92);   /* uma barra invertida, sem inferno de escape */
+const busca = q => P.filtroBusca(q, OVB.plain);
+
+/* sem consulta, passa tudo */
+assert.strictEqual(busca('')('ESP32 30pin', 'módulo wifi'), true);
+assert.strictEqual(busca('   ')('ESP32 30pin', ''), true, 'só espaço é o mesmo que nada');
+assert.strictEqual(busca(null)('ESP32 30pin', ''), true);
+
+/* ── consulta que NÃO fica vazia antes da limpeza nunca vira "passa tudo" ──
+   digitar uma barra invertida listava o acervo inteiro: o plain() devolvia '' e o filtro
+   lia '' como "sem consulta". Quem decide se há consulta é o texto CRU. */
+assert.strictEqual(busca(BS)('ESP32 30pin', 'módulo wifi'), false, 'barra invertida não lista tudo');
+assert.strictEqual(busca(BS + BS)('ESP32 30pin', 'módulo wifi'), false);
+assert.strictEqual(busca('/')('ESP32 30pin', 'módulo wifi'), false, 'nem a barra normal');
+assert.strictEqual(busca('///')('ESP32 30pin', ''), false);
+/* e quem TEM barra no texto continua achável por ela — o filtro não virou cego, virou honesto */
+assert.strictEqual(busca(BS)('R' + BS + 'S' + BS + 'T' + BS, ''), true);
+assert.strictEqual(busca('/')('IO21/SDA', ''), true);
+
+/* ── as duas formas do texto: crua e de tela ──
+   "/O/E" desenha OE com barra em cima; quem lê a tela digita OE, quem copia do arquivo
+   digita /O/E. As duas têm de achar a MESMA linha. */
+assert.strictEqual(busca('/O/E')('/O/E', 'Output enable'), true, 'o cru acha o cru');
+assert.strictEqual(busca('OE')('/O/E', 'Output enable'), true, 'o que a tela mostra acha');
+assert.strictEqual(busca('oe')('/O/E', ''), true, 'e sem descrição também');
+/* o outro lado da assimetria: a barra dentro da FRASE fica de pé (as regras /O/E e /CS são
+   de campo inteiro), e era ali que a consulta já limpa deixava de achar. Agora que a
+   symbols-lib tem descrição de verdade, isto é caso real e não hipótese. */
+assert.strictEqual(busca('/O/E')('74HC245', 'habilitação /O/E ativa em nível baixo'), true,
+  'o /O/E escrito numa descrição tem de ser achável pelo /O/E digitado');
+assert.strictEqual(busca('/CS')('W25Q32', 'memória serial, /CS ativo baixo'), true);
+
+/* notação nativa do Altium, nos dois sentidos e dentro da frase */
+assert.strictEqual(busca('RST')('R' + BS + 'S' + BS + 'T' + BS, ''), true);
+assert.strictEqual(busca('R' + BS + 'S' + BS + 'T' + BS)('R' + BS + 'S' + BS + 'T' + BS, ''), true,
+  'colar a notação crua do Altium acha');
+assert.strictEqual(busca('RST')('74HC00', 'reset R' + BS + 'S' + BS + 'T' + BS + ' ativo baixo'), true);
+assert.strictEqual(busca('mclr')(BS + 'M' + BS + 'C' + BS + 'L' + BS + 'R' + BS + '/VPP', ''), true);
+
+/* o separador do meio continua fazendo parte do nome */
+assert.strictEqual(busca('IO21/SDA')('IO21/SDA', ''), true);
+assert.strictEqual(busca('21/SD')('IO21/SDA', ''), true);
+
+/* consulta que atravessa nome e descrição continua achando */
+assert.strictEqual(busca('245 habilita')('74HC245', 'habilitação'), true);
+/* e o que não tem nada a ver continua não achando */
+assert.strictEqual(busca('atmega')('ESP32 30pin', 'módulo wifi'), false);
+assert.strictEqual(busca('OE')('ESP32 30pin', 'módulo wifi'), false, 'sem falso positivo pela limpeza');
+/* caixa não importa; descrição ausente não explode */
+assert.strictEqual(busca('ESP')('esp32 30pin', undefined), true);
+assert.strictEqual(busca('esp')('ESP32 30pin', null), true);
+assert.strictEqual(busca('  esp  ')('ESP32 30pin', ''), true, 'a consulta vem aparada');
+/* sem plain() (a casca não carregou o hub-overbar) o filtro ainda funciona no cru */
+assert.strictEqual(P.filtroBusca('esp', null)('ESP32 30pin', ''), true);
+assert.strictEqual(P.filtroBusca(BS, null)('ESP32 30pin', ''), false);
+
 /* ── os modais existem como função (o navegador prova o resto) ── */
 assert.strictEqual(typeof M.confirmar, 'function');
 assert.strictEqual(typeof M.pedirTexto, 'function');
 assert.strictEqual(M.cam(), null, 'sem canvas não há câmera');
 
-console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum, itemsInBox, moveItems, duplicateItems, seleção × apagar/desfazer, mm↔mil, snap em mm, linha↔pino, insertLibSymbol, pinSnapOf mmc, len do pino, 30 setas/duplicações sem deriva, Preencher, cores)');
+console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum, itemsInBox, moveItems, duplicateItems, seleção × apagar/desfazer, mm↔mil, snap em mm, linha↔pino, insertLibSymbol, pinSnapOf mmc, len do pino, 30 setas/duplicações sem deriva, Preencher, cores, busca da lista)');

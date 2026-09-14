@@ -794,16 +794,25 @@ function validateSchematic(schematic, schlib, pcblib){
     for (const l of s.netlabels) if (!l.net) errors.push(`netlabel sem "net" na folha ${s.name}`);
     for (const p of s.powers)    if (!p.net) errors.push(`power sem "net" na folha ${s.name}`);
     for (const p of s.ports)     if (!p.net) errors.push(`port sem "net" na folha ${s.name}`);
-    /* No ERC fora de pino nao marca nada e falha CALADO: o Altium prende a diretiva onde
-       ela esta e segue reclamando do pino que ninguem cobriu. Como o erro e invisivel na
-       folha (o X aparece, so que 10 mil ao lado), o aviso e o unico jeito de ve-lo. */
     if (s.noercs.length){
+      /* A CONTA SO VALE COM A PINAGEM INTEIRA. Componente cujo simbolo nenhum acervo tem nao
+         entrega pino nenhum, e todo No ERC pousado nele viraria aviso falso — medido no
+         PRJ - DI261930: 13 dos 41 componentes sem simbolo faziam os 22 No ERC reclamarem de
+         uma vez, os 22 indevidamente. Sem a pinagem completa nao se afirma nada: diz-se, numa
+         linha so, que nao deu para conferir. Nao conferido e diferente de errado. */
       const quentes = new Set();
-      for (const c of s.comps)
-        for (const p of (compPinsWorld(c, schlib) || [])) quentes.add(p.x + "," + p.y);
-      for (const n of s.noercs)
-        if (!quentes.has(n.x + "," + n.y))
-          warnings.push(`No ERC em (${n.x},${n.y}) nao esta na ponta de nenhum pino`);
+      let cegos = 0;
+      for (const c of s.comps){
+        const pins = compPinsWorld(c, schlib);
+        if (!pins){ cegos++; continue; }
+        for (const p of pins) quentes.add(p.x + ',' + p.y);
+      }
+      if (cegos)
+        warnings.push(`${s.noercs.length} No ERC da folha ${s.name} não foram conferidos: `
+          + `${cegos} componente(s) sem símbolo, e a pinagem deles é desconhecida`);
+      else for (const n of s.noercs)
+        if (!quentes.has(n.x + ',' + n.y))
+          warnings.push(`No ERC em (${n.x},${n.y}) não está na ponta de nenhum pino`);
     }
   }
   return { errors, warnings };

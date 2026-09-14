@@ -219,8 +219,24 @@ function drawPowerPort(ctx, p, color){
 
    Para calibrar: rode o ExportProject num projeto com ports, veja que numeros saem em
    "style", compare com a forma na tela do Altium e preencha ESTILO_POR_NUM abaixo. */
+/* MEDIDO em 2026-09-14, nos 127 ports dos 14 projetos: so DOIS numeros aparecem no espelho,
+   0 (121 ports) e 4 (6 ports), e o que eles decidem e o EIXO — 0 deita, 4 fica em pe. Tres
+   evidencias independentes, e nenhum contraexemplo:
+     fio    todo port style 0 que encosta em fio so encosta em fio HORIZONTAL (19 casos);
+            todo style 4, so em fio VERTICAL (2 casos).
+     pino   os quatro style 4 do PRJ - DI261930 (MISO, CS, SCK, MOSI) sao exatamente os do
+            U2 (SCL3300), cujos pinos sao verticais — e eram os que sairam deitados na tela.
+     ancora os quatro crescem +Y a partir dela sem invadir o corpo do U2. Ou seja: no port
+            em pe a ancora e a ponta de BAIXO, como no deitado ela e a da ESQUERDA, e o
+            `dir` do portGeom ja resolve isso sozinho.
+   O BICO fica dos dois lados nos dois estilos: e o que o Altium desenha na tela (hexagono
+   apontado nas duas pontas, como na captura do usuario), e nao ha aqui medida que separe
+   bico de eixo. 1, 2, 3, 5, 6 e 7 nao apareceram em projeto nenhum e seguem SEM MEDIDA —
+   caem no padrao de antes, que e o mesmo desenho generico. */
 const ESTILO_POR_NUM = {
-  /* num: [bicoEsquerdo, bicoDireito, vertical] — vazio de proposito enquanto nao medido */
+  /* num: [bicoEsquerdo, bicoDireito, vertical] */
+  0: [true, true, false],
+  4: [true, true, true],
 };
 
 /* Medidas da barra, num lugar so. Encolhidas a pedido: a port ocupava 120 mil de altura
@@ -281,10 +297,16 @@ function drawPort(ctx, p, color){
   ctx.strokeStyle = borda; ctx.lineWidth = color ? 7 : 4; ctx.lineJoin = 'miter';
   ctx.stroke();
   ctx.restore();
-  /* o nome sai na horizontal mesmo em port vertical: rotulo de fio no Altium nunca fica
-     de cabeca para baixo, e aqui o objetivo e ler */
+  /* O NOME ACOMPANHA O EIXO DA PORT: deitada, texto deitado; em pe, texto em pe — igual ao
+     nome de pino vertical, que o drawSymbolPart ja desenha em 90. Com a barra em pe e a
+     letra deitada, o nome transbordava os 90 mil de largura da barra e brigava com o
+     componente ao lado.
+     O `% 180` e a trava contra letra de cabeca para baixo: 0 e 90 sao leituras honestas
+     (90 le de baixo para cima, como no Altium), 180 e 270 nao — e viram 0 e 90. Hoje o
+     `ang` so pode ser 0 ou 90 (o espelho nao traz `rot` de port), mas a trava fica para o
+     dia em que trouxer. Espelhar e virar a POSICAO, nunca a letra. */
   worldText(ctx, p.net || '', p.x + g.dir[0] * (g.w / 2), p.y + g.dir[1] * (g.w / 2),
-            PORT_TXT, 0, letra, 'center');
+            PORT_TXT, g.ang % 180, letra, 'center');
 }
 
 /* O "No ERC" do Altium: o X vermelho que marca "este pino fica sem ligar DE PROPOSITO".

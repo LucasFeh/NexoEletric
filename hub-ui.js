@@ -145,7 +145,8 @@ function ensureCams(){
   if (!camSym) {
     camSym = HubDraw.mkCamera(document.getElementById('cvsym'), (ctx) => {
       if (!showSymbol.cur) return;
-      HubDraw.drawSymbolPart(ctx, showSymbol.cur);
+      /* honraOlho:false — vista de BIBLIOTECA: aqui o nome do pino e o que se foi ler */
+      HubDraw.drawSymbolPart(ctx, showSymbol.cur, { honraOlho: false });
     }, { bg:'#fffef2' });
     camFp = HubDraw.mkCamera(document.getElementById('cvfp'), (ctx) => {
       if (curFp) HubDraw.drawFootprint(ctx, curFp);

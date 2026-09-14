@@ -112,7 +112,7 @@ const MOTIVO_RESOL = {
   escolha: 'por escolha sua, gravada em Libs/lib-subs.js',
   rename:  'por uma renomeação registrada em Libs/rename-map.js',
   chave:   'por aproximação do nome (maiúsculas, espaços e traços não contam)',
-  ambiguo: 'nome ambíguo: mais de um símbolo casa, e nenhum foi usado',
+  ambiguo: 'nome ambíguo: mais de um componente casa, e nenhum foi usado',
 };
 const _pinos = n => n + (n === 1 ? ' pino' : ' pinos');
 
@@ -136,7 +136,7 @@ function decideTroca(est){
     /* com simbolo resolvido a troca e acao secundaria: quem esta vendo o desenho certo nao
        precisa de alarme. Sem simbolo o componente e um quadrado vermelho, e ai o botao e a
        saida — por isso so nesse caso ele tem destaque. */
-    rotulo: nome ? 'Trocar símbolo…' : 'Procurar símbolo no acervo…',
+    rotulo: nome ? 'Trocar componente…' : 'Procurar componente no acervo…',
     title: 'sugere pelo comment, nome, footprint, designador e pinagem — você escolhe'
          + (nome ? '; a folha continua com "' + nome + '" até você confirmar' : ''),
     destaque: !nome,
@@ -148,28 +148,63 @@ function decideTroca(est){
   };
   if (quantos > 1){
     d.impacto = 'a escolha vale para todos os projetos; só neste, ' + quantos
-              + ' componentes usam este símbolo e mudam junto';
+              + ' componentes da folha usam este mesmo componente e mudam junto';
     d.impactoAlerta = true;
   } else if (quantos === 1){
-    d.impacto = 'a escolha vale para todos os projetos; neste, só este componente usa o símbolo';
+    d.impacto = 'a escolha vale para todos os projetos; neste, só este componente da folha usa essa entrada da biblioteca';
   }
   if (cand != null){
     if (esperados == null)
-      d.pinos = 'o símbolo de origem não existe em acervo nenhum — não há pinagem esperada '
+      d.pinos = 'o componente de origem não existe em acervo nenhum — não há pinagem esperada '
               + 'para comparar; o candidato tem ' + _pinos(cand);
     else if (esperados === cand)
       d.pinos = 'pinagem bate: ' + _pinos(esperados) + ' dos dois lados';
     else {
       d.pinos = 'pinagem NÃO bate: o componente espera ' + _pinos(esperados)
               + ' e o candidato tem ' + cand + ' — os fios dos pinos que não existirem no '
-              + 'símbolo novo ficam sem ligação';
+              + 'componente novo ficam sem ligação';
       d.pinosAlerta = true;
     }
   }
   return d;
 }
 
-const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca };
+/* ── TROCAR O SÍMBOLO DE UMA PARTE, SEM PERDER AS OUTRAS ──
+   O POST /api/symbols/save SUBSTITUI a lista de partes e recalcula o partcount a partir do
+   que recebe (symserver.py » _salva_espelho: `('partcount', len(parts)), ('parts', parts)`).
+   Mandar só a parte escolhida apagaria as demais no espelho E na .SchLib, para TODOS os
+   projetos — e a conferência do servidor aprovaria, porque ela compara o gravado com o que
+   foi PEDIDO, não com o que existia. Não é hipótese: 43 dos 401 componentes da casa têm mais
+   de uma parte, e o CONE PADRAO tem 80.
+
+   Por isso esta função devolve SEMPRE a lista inteira, com uma única parte trocada.
+
+   `aplica` entra por parâmetro (o applyLibSymbol do hub-symed) para a função ficar pura e
+   poder ser provada em Node, como o decideTroca. Ele mantém número, nome, tipo e olho do
+   pino e troca só posição e gráficos — que é exatamente "trocar a imagem".
+
+   PINAGEM NÃO MUDA: símbolo é a imagem. Contagem diferente é RECUSA, não aviso. É o que
+   separa "trocar o desenho" de "trocar a peça", e foi a decisão do usuário. */
+function montaPartsTrocando(componente, numeroParte, simbolo, aplica){
+  const todas = (componente && componente.parts) || [];
+  if (!todas.length) return { erro: 'este componente não tem nenhuma parte no espelho' };
+  const n = Math.trunc(Number(numeroParte)) || 1;
+  const alvo = todas.find(p => (p.part || 1) === n);
+  if (!alvo) return { erro: 'a parte ' + n + ' não existe neste componente' };
+  /* o symlib-v1 guarda pins/graphics no próprio símbolo; um acervo schlib-v2 guarda em
+     parts[] — aceitar os dois evita que a origem do desenho vire uma regra escondida */
+  const s = (simbolo && simbolo.parts && simbolo.parts.length) ? simbolo.parts[0] : (simbolo || {});
+  const nova = s.pins || [], velha = alvo.pins || [];
+  if (nova.length !== velha.length)
+    return { erro: 'o símbolo tem ' + nova.length + (nova.length === 1 ? ' pino' : ' pinos')
+                 + ' e a parte ' + n + ' tem ' + velha.length
+                 + ': trocar o desenho não pode mudar a pinagem do componente' };
+  const r = aplica(alvo, s);
+  const parts = todas.map(p => ((p.part || 1) === n ? r.part : p));
+  return { parts, nota: r.note, trocada: n, intactas: parts.length - 1 };
+}
+
+const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca, montaPartsTrocando };
 /* Em Node o arquivo acaba aqui: dali para baixo e tudo DOM. */
 if (typeof module !== 'undefined' && module.exports){ module.exports = PURE; return; }
 if (typeof window !== 'undefined') window.SchFramePure = PURE;
@@ -225,20 +260,34 @@ let PLIB = { footprints:[] };
    casa com o que o projeto grava é o `aliases`, que guarda o nome de origem do Altium. Por
    isso os dois entram no índice — só por nome o resgate cai de 50% para 17%. */
 const EMERG_COR = '#b06000';
-const EMERG = { porNome: new Map(), porChave: new Map() };
+const EMERG = { porNome: new Map(), porChave: new Map(), porId: new Map() };
 function montaEmergencia(){
-  EMERG.porNome.clear(); EMERG.porChave.clear();
+  EMERG.porNome.clear(); EMERG.porChave.clear(); EMERG.porId.clear();
   const lib = window.symbolsLib;
   for (const s of ((lib && lib.symbols) || [])){
+    /* O symlib-v1 grava `desc`; toda tela daqui lê `description`. Já custou 727 descrições
+       invisíveis de 897 símbolos por uma letra — o hub-symed normaliza na carga dele e aqui
+       ninguém normalizava. Sem esta linha a busca por descrição nasce morta, justamente nos
+       símbolos cujo NOME é código de catálogo (CMP-0694-00003-2) e a descrição é o que dá
+       para procurar. */
+    if (s.desc && !s.description) s.description = s.desc;
+    if (s.id) EMERG.porId.set(s.id, s);
     for (const n of [s.name].concat(s.aliases || [])){
       if (!n) continue;
-      if (!EMERG.porNome.has(n)) EMERG.porNome.set(n, s);
       const k = HubCore.normKey(n);
       const l = EMERG.porChave.get(k) || [];
       if (l.indexOf(s) < 0) l.push(s);
       EMERG.porChave.set(k, l);
     }
   }
+  /* DUAS PASSADAS para o índice por nome: todo `name` primeiro, `aliases` só depois. Numa
+     passada só, quem vem antes no arquivo leva a chave — e o APELIDO de um símbolo sequestra
+     o NOME PRÓPRIO de outro. Medido: 6 casos em 2661 chaves ("Jumper" caindo em "Conector 2
+     vias (Jumper)", "Trimpot" em "Potenciômetro"). O dono do nome tem de ganhar sempre. */
+  for (const s of ((lib && lib.symbols) || []))
+    if (s.name && !EMERG.porNome.has(s.name)) EMERG.porNome.set(s.name, s);
+  for (const s of ((lib && lib.symbols) || []))
+    for (const a of (s.aliases || [])) if (a && !EMERG.porNome.has(a)) EMERG.porNome.set(a, s);
 }
 /* { part, nome, how } do desenho emprestado, ou null. AMBÍGUO DEVOLVE NULL de propósito:
    dois candidatos é o mesmo que nenhum, e desenhar um chute com cara de certeza é o erro
@@ -733,7 +782,7 @@ function montaBotaoLibs(){
   const b = el('button');
   b.id = 'tbLibs';
   b.setAttribute('aria-label', 'Atualizar biblioteca');
-  b.title = 'Recarregar do disco os símbolos e footprints (Libs\\) sem recarregar a página'
+  b.title = 'Recarregar do disco os componentes e footprints (Libs\\) sem recarregar a página'
           + ' — a edição pendente da folha NÃO se perde';
   b.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/>'
               + '<path d="M20 5v6h-6"/></svg>';
@@ -744,12 +793,12 @@ function montaBotaoLibs(){
       const r = await window.__hubRecarregaLibs();
       if (r.falhas.length)
         HubDialog.toast('não carregou ' + r.falhas.join(', ') + ' — o acervo anterior foi mantido ('
-                        + r.simbolos + ' símbolos)', 'warn', 7000);
+                        + r.simbolos + ' componentes)', 'warn', 7000);
       else if (r.mudou)
-        HubDialog.toast('biblioteca recarregada — ' + r.simbolos + ' símbolos em '
+        HubDialog.toast('biblioteca recarregada — ' + r.simbolos + ' componentes em '
                         + r.acervos + ' acervo(s)', 'ok');
       else
-        HubDialog.toast('nada mudou na biblioteca — ' + r.simbolos + ' símbolos', 'info');
+        HubDialog.toast('nada mudou na biblioteca — ' + r.simbolos + ' componentes', 'info');
     } catch (e){
       HubDialog.toast('não deu para recarregar a biblioteca: ' + (e && e.message || e), 'err', 7000);
     }
@@ -1032,12 +1081,12 @@ function buildAddList(){
       a.zerados += vs.filter(v => !((v.estoque || 0) > 0)).length;
       return a;
     }, { vals:0, pecas:0, zerados:0 });
-    stat(lista.length, 'símbolos'); stat(soma.vals, 'valores');
+    stat(lista.length, 'componentes'); stat(soma.vals, 'valores');
     stat(qtdFmt(soma.pecas), 'peças em estoque', soma.pecas > 0 ? 'ok' : 'warn');
     stat(soma.zerados, 'valores zerados', soma.zerados ? 'warn' : null);
   } else {
     const semFp = lista.filter(s => !(s.footprints || []).some(f => f.incurrentlib)).length;
-    stat(lista.length, 'símbolos'); stat((PLIB.footprints || []).length, 'footprints');
+    stat(lista.length, 'componentes'); stat((PLIB.footprints || []).length, 'footprints');
     stat(semFp, 'sem footprint', semFp ? 'warn' : null);
   }
   if (lista.length !== ac.syms.length) sum.append(el('span', null, 'de ' + ac.syms.length + ' no acervo'));
@@ -1073,7 +1122,7 @@ function buildAddList(){
       });
     }
   } else {
-    frag.append(el('div', 'lib-head', 'símbolos (' + lista.length + (q ? ' de ' + ac.syms.length : '') + ')'));
+    frag.append(el('div', 'lib-head', 'componentes (' + lista.length + (q ? ' de ' + ac.syms.length : '') + ')'));
     for (const s of vis) row(s, b => {
       const part = HubCore.partOf(s, 1);
       if (!(s.footprints || []).some(f => f.incurrentlib)) b.append(el('span', 'pill warn', 'sem fp'));
@@ -1129,7 +1178,7 @@ function renderAddPreview(){
   const part = vals.length ? (s.parts || [])[0] : HubCore.partOf(s, pick.part || 1);
   addDrawSym = part || null;
   fitPreview(camSym, part ? D.symBBox(part) : null);
-  $('addSymHint').textContent = part && (part.graphics || []).length ? '' : 'símbolo sem geometria na lib';
+  $('addSymHint').textContent = part && (part.graphics || []).length ? '' : 'sem desenho na biblioteca';
   $('addSymMeta').textContent = s.name + ' · ' + ((part && part.pins) || []).length + ' pinos'
     + (v ? ' · valor ' + (vals.indexOf(v) + 1) + '/' + vals.length : nparts > 1 ? ' · parte ' + pick.part + '/' + nparts : '');
 
@@ -1469,7 +1518,7 @@ function renderProps(){
   prKv(g, 'Parte', nparts > 1 ? (it.part || 1) + ' de ' + nparts : '1 de 1');
   prKv(g, 'Descrição', sym && sym.description, sym && sym.description ? null : 'dim');
   prKv(g, 'Designador', sym && sym.designator, sym && sym.designator ? null : 'dim');
-  prKv(g, 'Símbolo', it.sym, 'mono');
+  prKv(g, 'Componente', it.sym, 'mono');
   /* o resolvedor pode ter entregue outro simbolo (apelido/substituto): dizer qual, senao a
      ficha afirma um nome e o desenho mostra outro */
   if (sym && sym.name !== it.sym) prKv(g, 'Resolvido em', sym.name, 'mono');
@@ -1521,7 +1570,7 @@ function renderProps(){
 
   const pins = HubCore.compPinsWorld(it, SLIB) || [];
   const s = prSec('pinos (' + pins.length + ')');
-  if (!pins.length) s.append(el('p', 'pr-empty', sym ? 'a parte não tem pinos' : 'símbolo ausente — sem pinagem para mostrar'));
+  if (!pins.length) s.append(el('p', 'pr-empty', sym ? 'a parte não tem pinos' : 'componente ausente na biblioteca — sem pinagem para mostrar'));
   else {
     const t = el('table', 'pr-tab');
     const th = el('tr');
@@ -1963,6 +2012,12 @@ $('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
    A escolha vira linha em Libs/lib-subs.js — o mesmo lugar onde a aba Biblioteca grava as
    dela — e dali em diante o resolveLib acerta ja no primeiro passo. */
 let symAlvo = null, symEscolhido = null, symCands = [];
+/* a lista do modal e o ALMOXARIFADO, agrupado por familia, e so ele: a biblioteca da
+   casa fica de fora por pedido explicito — a tela e ferramenta de migracao, e oferecer
+   a lib antiga seria oferecer justo o que se quer parar de usar. O painel mora no
+   hub-almoxpick.js (modulo proprio, como o hub-odoolista.js) para nao inflar este
+   arquivo nem entrar no script inline do hub.html, que e de outro dono. */
+let apGrupos = null, apFiltro = 'all', apRec = null, apFam = null;
 let symPart = null;
 /* medidos ao ABRIR o modal, para aparecerem antes do clique em Usar e nao num toast depois
    de gravar: quantos componentes do projeto mudam junto e a pinagem que o componente
@@ -1974,7 +2029,7 @@ const symModalAberto = () => $('symmodal').classList.contains('on');
 
 function fechaSymModal(){
   $('symmodal').classList.remove('on');
-  symAlvo = null; symEscolhido = null; symCands = []; symPart = null;
+  symAlvo = null; symEscolhido = null; symCands = []; symPart = null; apFam = null; apRec = null;
   symQuantos = 0; symEsperados = null;
 }
 
@@ -2020,9 +2075,9 @@ function symAtualizaInfo(){
 
 function symSelecionar(c){
   symEscolhido = c;
-  $('symEscolha').textContent = c ? c.name : 'nenhum escolhido';
+  $('symEscolha').textContent = c ? c.name : 'nenhum componente escolhido';
   $('symUsar').disabled = !c;
-  for (const b of $('symLista').querySelectorAll('.sym-item'))
+  for (const b of $('symVals').querySelectorAll('.ap-val'))
     b.setAttribute('aria-selected', String(!!c && b.dataset.nome === c.name));
   /* a parte do COMPONENTE, nao a 1 fixa: previa e contagem de pinos tem de falar da mesma
      parte, senao o aviso de pinagem compara coisas diferentes */
@@ -2030,6 +2085,8 @@ function symSelecionar(c){
   symPart = c ? (HubCore.partOf(c.item, parte) || HubCore.partOf(c.item, 1) || null) : null;
   $('symHint').textContent = symPart ? '' : (c ? 'sem geometria para desenhar' : '');
   symAtualizaInfo();
+  if (apFam) $('symEditar').title = 'abre "' + apFam.familia + '" na aba Biblioteca » Símbolos'
+    + (c ? ', já no componente "' + c.name + '"' : '');
   fitPreview(camSymEsc, symPart ? D.symBBox(symPart) : null);
   camSymEsc.resize(); ajustaPreviews([camSymEsc]);
 }
@@ -2047,45 +2104,163 @@ function symLinha(c, sugerido){
 }
 
 function symRenderLista(){
-  const q = $('symBusca').value.trim().toUpperCase();
-  const lista = $('symLista'); lista.textContent = '';
-  if (!q){
-    lista.append(el('div', 'kicker', symCands.length ? 'sugestões para este componente' : 'nenhuma sugestão'));
-    symCands.forEach(c => lista.append(symLinha(c, true)));
-    $('symSum').textContent = symCands.length
-      ? symCands.length + ' sugestão(ões) — ou busque acima em todo o acervo'
-      : 'nada casou automaticamente; use a busca acima';
+  if (!apGrupos) apGrupos = HubAlmoxPick.grupos();
+  const c = HubAlmoxPick.contagens(apGrupos);
+  $('symNTudo').textContent = c.tudo;
+  $('symNSaldo').textContent = c.comSaldo;
+  $('symNZero').textContent = c.zerados;
+  HubAlmoxPick.renderFamilias($('symLista'), {
+    grupos: apGrupos, busca: $('symBusca').value, filtro: apFiltro,
+    sel: apFam && apFam.familia, rec: apRec,
+    onPick: g => { escolheFamilia(g); symRenderLista(); },
+    onContagem: (n, tot) => {
+      $('symSum').textContent = (n === tot ? n : n + ' de ' + tot)
+        + (tot === 1 ? ' família' : ' famílias') + ' do almoxarifado';
+    },
+  });
+  symRenderValores();
+}
+/* os componentes da familia aberta, debaixo do simbolo dela — e aqui que se escolhe o que
+   vai para a folha. A familia nao e escolhivel: ninguem coloca "CAPACITOR CERAMICO [PTH]"
+   numa placa, coloca-se "3.3pF 25V". */
+function symRenderValores(){
+  HubAlmoxPick.renderValores($('symVals'), apFam, {
+    busca: $('symBusca').value, filtro: apFiltro,
+    sel: symEscolhido && symEscolhido.name, rec: apRec,
+    onPick: it => { symSelecionar(candidatoDoValor(it.nome)); symRenderValores(); },
+  });
+}
+/* abrir a familia mostra o DESENHO dela na hora, mesmo antes de escolher o componente: e o
+   desenho que diz se a familia e a certa. O componente so se escolhe depois, na lista. */
+function escolheFamilia(g){
+  apFam = g;
+  const b = $('symEditar');
+  b.hidden = !g;
+  if (g) b.title = 'abre "' + g.familia + '" na aba Biblioteca » Símbolos'
+                 + (symEscolhido ? ', já no componente "' + symEscolhido.name + '"' : '');
+  if (!g) return;
+  const dela = symEscolhido && g.valores.some(v => v.nome === symEscolhido.name);
+  if (!dela) symSelecionar(null);
+  if (!symPart) previaDaFamilia(g);
+}
+/* ── ABRIR O EDITOR NUMA ABA PRÓPRIA, mantendo esta ──
+   Trocar a aba do hub fecharia este modal, e a comparação "o desenho está certo?" é
+   justamente entre as duas telas. Então o editor vai para uma ABA NOVA, com o alvo na URL
+   (hub.html » ?edsym/&edcomp/&edacervo), e esta fica como está.
+
+   O que for salvo lá volta para cá SOZINHO: o hubserver vigia `Libs\` a cada segundo e
+   empurra um SSE `change` para toda aba aberta (hubserver.py » LIVE_JS/_watcher), que chama
+   __hubOnChange. O daqui, com o modal aberto, recarrega a biblioteca e redesenha o modal em
+   vez de recarregar a página — ver mais abaixo. */
+/* A biblioteca mudou por baixo do modal — alguém salvou na aba do editor. Refaz os grupos,
+   recalcula a recomendação e redesenha, PRESERVANDO a família aberta e o componente escolhido
+   quando eles ainda existirem (um rename ou uma exclusão lá podem tê-los levado embora).
+   É o outro lado do "Editar símbolo ↗": lá se edita, aqui se vê o resultado sem F5. */
+function atualizaModalDaBiblioteca(){
+  if (!symModalAberto()) return;
+  const famNome = apFam && apFam.familia;
+  const escolhido = symEscolhido && symEscolhido.name;
+  apGrupos = HubAlmoxPick.grupos();
+  apFam = famNome ? (apGrupos.find(g => g.familia === famNome) || null) : null;
+  if (symAlvo){
+    const rs = HubCore.resolveSym(SLIB, symAlvo.sym);
+    apRec = HubAlmoxPick.recomendado(apGrupos, symAlvo.sym, rs && rs.name);
+  }
+  /* a seleção ANTES do render: quem desenha a lista de valores lê symEscolhido para marcar */
+  const c = escolhido ? candidatoDoValor(escolhido) : null;
+  symSelecionar(c);
+  symRenderLista();
+  if (!c && apFam) previaDaFamilia(apFam);
+  const perdeu = (famNome && !apFam) || (escolhido && !c);
+  HubDialog.toast(perdeu
+    ? 'a biblioteca mudou e o que estava aberto aqui não existe mais — escolha de novo'
+    : 'a biblioteca mudou — o desenho aqui já está atualizado',
+    perdeu ? 'warn' : 'ok', perdeu ? 7000 : 4000);
+}
+function editarSimboloNoHub(){
+  const g = apFam;
+  if (!g) return;
+  const comp = symEscolhido && symEscolhido.name;
+  const q = new URLSearchParams();
+  q.set('edsym', g.familia);
+  if (comp) q.set('edcomp', comp);
+  if (g.lib && g.lib.id) q.set('edacervo', g.lib.id);
+  /* O hub e a PAGINA DE CIMA: dentro do iframe, `location` e o schframe.html.
+     A deteccao e por CAPACIDADE, nunca pelo nome do arquivo: o hubserver serve o hub tanto
+     em /hub.html quanto na RAIZ (hubserver.py » @app.route('/')), e exigir que o pathname
+     terminasse em "hub.html" acusava "sem o hub por perto" para quem abre por
+     http://servidor:8000/ — que e o caminho normal. O pathname so serve para MONTAR a URL,
+     e ele vai como veio: '/' ou '/hub.html', tanto faz. */
+  let base = null, temPorta = false;
+  try {
+    if (window.parent !== window){
+      base = window.parent.location.pathname;
+      temPorta = typeof window.parent.__hubEditarSimbolo === 'function';
+    }
+  } catch (e) { base = null; }          /* cross-origin: nao e o nosso hub */
+  if (base === null){
+    HubDialog.alert('A área de edição de símbolo é uma aba do hub. Esta vista está aberta '
+      + 'sozinha — abra o hub (python hubserver.py) e entre pela aba Esquema.',
+      { title: 'sem o hub por perto' });
     return;
   }
-  const achados = [];
-  for (const sy of SLIB.symbols){
-    if (sy.name.toUpperCase().indexOf(q) < 0) continue;
-    achados.push({ name: sy.name, item: sy, pontos: 0, porque: [] });
-    if (achados.length >= 200) break;
+  if (!temPorta){
+    HubDialog.alert('O hub aberto é de uma versão anterior e não tem a porta que abre o '
+      + 'editor numa aba nova. Recarregue a página do hub (F5) e tente de novo.',
+      { title: 'hub desatualizado' });
+    return;
   }
-  lista.append(el('div', 'kicker', 'busca em todo o acervo'));
-  achados.forEach(c => lista.append(symLinha(c, false)));
-  $('symSum').textContent = achados.length + (achados.length >= 200 ? '+' : '') + ' de ' + SLIB.symbols.length;
+  const w = window.open(base + '?' + q.toString() + '#/libsym', '_blank');
+  if (!w){
+    HubDialog.alert('o navegador bloqueou a aba nova. Libere os pop-ups para este endereço '
+      + 'e tente de novo.', { title: 'aba não abriu' });
+    return;
+  }
+  HubDialog.toast('abrindo "' + (comp || g.familia) + '" numa aba nova — o que você salvar lá '
+                  + 'aparece aqui sozinho', 'info', 6000);
+}
+function previaDaFamilia(g){
+  symPart = HubCore.partOf(g.sym, 1) || null;
+  $('symHint').textContent = symPart ? '' : 'esta família não tem desenho no espelho';
+  fitPreview(camSymEsc, symPart ? D.symBBox(symPart) : null);
+  camSymEsc.resize(); ajustaPreviews([camSymEsc]);
+}
+/* o valor escolhido vira o candidato que o resto do modal ja entende: o alias do valor esta
+   no SLIB (montaAcervos cria um por valor), entao e ele que a previa desenha e que o
+   usarSimboloEscolhido grava no lib-subs.js */
+function candidatoDoValor(nome){
+  const item = HubCore.symbolOf(SLIB, nome);
+  return item ? { name: nome, item, pontos: 0, porque: [] } : null;
 }
 
 function abrirEscolhaSimbolo(comp){
   symAlvo = comp;
   symCands = HubCore.suggestSym(comp, SLIB.symbols, { limit: 12 });
+  apGrupos = HubAlmoxPick.grupos();
+  apFiltro = 'all';
+  /* o componente de MESMO NOME que o Altium mandou sobe para o topo e ja vem marcado:
+     medido, 448 dos 824 componentes dos projetos casam por nome exato */
+  const rsRec = HubCore.resolveSym(SLIB, comp.sym);
+  apRec = HubAlmoxPick.recomendado(apGrupos, comp.sym, rsRec && rsRec.name);
   symQuantos = contaSym(comp.sym);
   symEsperados = pinosEsperadosDe(comp);
   const rs = HubCore.resolveSym(SLIB, comp.sym);
   const atual = (rs && rs.item) || null;
-  /* o cabecalho muda de "procurar" para "trocar" quando ja ha simbolo, e diz qual e de onde
-     ele veio: e a pergunta que o modal tem de responder antes de qualquer clique */
-  $('symTitle').textContent = atual ? 'Trocar símbolo' : 'Procurar símbolo';
+  /* o cabecalho muda de "procurar" para "trocar" quando ja ha COMPONENTE resolvido, e diz
+     qual e de onde ele veio: e a pergunta que o modal tem de responder antes de qualquer
+     clique. Componente e a entrada da biblioteca; simbolo e so o desenho dela — o modal
+     escolhe o primeiro, e a faixa de baixo (quando existir) troca o segundo */
+  $('symTitle').textContent = atual ? 'Trocar componente' : 'Procurar componente';
   $('symMeta').textContent = comp.ref + ' — o Altium mandou "' + comp.sym + '"'
     + (comp.comment ? ' · comment "' + comp.comment + '"' : '')
-    + (atual ? ' · a folha desenha "' + atual.name + '"'
+    + (atual ? ' · resolvido no componente "' + atual.name + '"'
              + (rs.how === 'escolha' ? ', por escolha sua' : '') : '');
   $('symBusca').value = '';
   $('symmodal').classList.add('on');
-  symRenderLista();
-  symSelecionar(symCands[0] || null);
+  apFam = apRec ? apRec.grupo : null;
+  symSelecionar(apRec ? candidatoDoValor(apRec.item.nome) : null);
+  if (!apRec) symRenderLista(); else { symRenderLista(); }
+  if (!symPart && apFam) previaDaFamilia(apFam);
 }
 
 /* Grava RELENDO o disco antes: lib-subs.js e da LAN inteira e a aba Biblioteca do hub
@@ -2150,7 +2325,13 @@ async function gravaDesenhoNaBiblioteca(emg, para){
   /* o espelho pode ter sido gravado mesmo quando a SchLib falhou (423 = lib aberta no
      Altium): nesse caso a memória TEM de acompanhar o disco, senão a folha desenha uma
      versão que já não existe em lugar nenhum */
-  const aplicaNaMemoria = () => { alvo.parts = (j && j.parts) || parts; alvo.partcount = 1; reapply(); };
+  /* partcount SAI DA LISTA, nunca cravado: com um componente de várias partes o 1 fixo
+     mentia na ficha e na contagem de partes do modal */
+  const aplicaNaMemoria = () => {
+    alvo.parts = (j && j.parts) || parts;
+    alvo.partcount = alvo.parts.length;
+    reapply();
+  };
   if (j && j.ok){
     aplicaNaMemoria();
     HubDialog.toast('"' + para + '" recebeu o desenho' + (j.altium ? ' — espelho e SchLib' : ' — só o espelho'), 'ok');
@@ -2172,7 +2353,7 @@ async function usarSimboloEscolhido(){
   const de = symAlvo.sym, para = symEscolhido.name;
   /* medido ANTES da substituicao: depois dela o simbolo resolve e o emprestimo some */
   const emg = HubCore.symbolOf(SLIB, de) ? null : desenhoDeEmergencia(symAlvo);
-  if (de === para){ HubDialog.toast('já é esse símbolo', 'warn'); return; }
+  if (de === para){ HubDialog.toast('já é esse componente', 'warn'); return; }
   if (!HubIO.canPost){
     await HubDialog.alert('Sem servidor: abra o hub por hubserver.py para gravar a escolha.',
                           { title: 'não dá para gravar' });
@@ -2247,7 +2428,7 @@ async function desfazerEscolha(comp){
   const quantos = contaSym(de);
   const fim = natNome
     ? 'Sem ela, "' + de + '" volta a resolver em "' + natNome + '".'
-    : 'Sem ela, "' + de + '" não resolve em símbolo nenhum: o componente vira um quadrado '
+    : 'Sem ela, "' + de + '" não resolve em componente nenhum: o item da folha vira um quadrado '
       + 'vermelho e sai da extração de nets.';
   if (!(await HubDialog.confirm(
         'Remover a escolha "' + de + '" → "' + alvo.to + '"? ' + fim
@@ -2272,13 +2453,21 @@ async function desfazerEscolha(comp){
   const quantosTxt = quantos > 1 ? ' (' + quantos + ' componentes)' : '';
   HubDialog.toast(natNome
     ? 'escolha removida — "' + de + '" volta a resolver em "' + natNome + '"' + quantosTxt
-    : 'escolha removida — "' + de + '" agora está SEM símbolo, como você pediu' + quantosTxt,
+    : 'escolha removida — "' + de + '" agora está SEM componente na biblioteca, como você pediu' + quantosTxt,
     natNome ? 'ok' : 'warn');
 }
 
 $('symClose').addEventListener('click', fechaSymModal);
 $('symUsar').addEventListener('click', usarSimboloEscolhido);
 $('symBusca').addEventListener('input', symRenderLista);
+$('symEditar').addEventListener('click', editarSimboloNoHub);
+$('symFiltros').addEventListener('click', e => {
+  const b = e.target.closest('.ap-f'); if (!b) return;
+  apFiltro = b.dataset.f;
+  for (const x of $('symFiltros').querySelectorAll('.ap-f'))
+    x.setAttribute('aria-pressed', String(x === b));
+  symRenderLista();
+});
 $('symmodal').addEventListener('mousedown', e => { if (e.target === $('symmodal')) fechaSymModal(); });
 
 /* ------- teclado ------- */
@@ -2322,6 +2511,13 @@ window.addEventListener('keydown', e => {
   if (k === 'x' && sel.size){ mirrorSel(); return; }
 });
 window.__hubOnChange = function(){
+  /* COM O MODAL ABERTO a página não pode recarregar. O "Editar símbolo ↗" abriu o editor numa
+     aba própria justamente para esta ficar de pé; recarregar aqui fecharia o modal e o usuário
+     salvaria lá para perder a tela de cá. Recarrega a BIBLIOTECA e redesenha o modal. */
+  if (symModalAberto()){
+    window.__hubRecarregaLibs().then(atualizaModalDaBiblioteca, atualizaModalDaBiblioteca);
+    return;
+  }
   /* Sem nada pendente, recarregar a pagina e o caminho mais simples E o mais completo: pega
      tambem o schematic.js e os sinalizadores do disco, que a recarga de biblioteca nao pega. */
   /* com uma pergunta na tela o reload a mataria antes de o usuario responder — medido:
@@ -2336,7 +2532,7 @@ window.__hubOnChange = function(){
   $('annmsg').textContent = '⚠ workspace mudou — conferindo a biblioteca…';
   window.__hubRecarregaLibs().then(r => {
     const lib = r.falhas.length ? 'biblioteca recarregada em parte (não veio ' + r.falhas.join(', ') + ')'
-              : r.mudou ? 'biblioteca recarregada — ' + r.simbolos + ' símbolos'
+              : r.mudou ? 'biblioteca recarregada — ' + r.simbolos + ' componentes'
               : 'biblioteca conferida — nada mudou nela';
     /* O RODAPE FICA NA TELA depois que o toast passa, entao ele nao pode continuar pedindo
        F5 pelo que JA entrou sozinho: empurrar para o F5 e empurrar para perder o trabalho

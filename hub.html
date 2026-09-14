@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
 <script src="hub-core.js"></script>
+<!-- barra de overline nos rótulos negados (\RESET) -->
+<script src="hub-overbar.js"></script>
 <script src="hub-draw.js"></script>
 <script src="hub-font.js"></script>
 <script src="hub-laser.js"></script>
@@ -18,6 +20,8 @@
 <script src="hub-symed.js"></script>
 <!-- mudanças vindas do Altium: badge + modal na aba Biblioteca -->
 <script src="hub-libsync.js"></script>
+<!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
+<script src="hub-odoocfg.js"></script>
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
 <script src="hub-i18n.js"></script>
 <style>
@@ -1534,6 +1538,8 @@ function renderSubtabs() {
   });
   /* o combobox de acervo mora aqui: trocar de biblioteca e uma escolha da aba Biblioteca,
      e a configuracao geral so guarda qual e a padrao */
+  /* o seletor de acervo saiu: ha um acervo so (libSources). O que sobrou da fileira e o
+     botao de sincronismo e o aviso do libsync, que o libPicker ainda monta. */
   if (grupo.id === 'lib') nav.append(libPicker());
 }
 
@@ -1865,13 +1871,34 @@ let libCamSym = null, libCamFp = null, libDrawSym = null, libDrawFp = null, libU
 /* Os acervos do almoxarifado compartilham a PcbLib da casa: e nela que estao os
    footprints que as .SchLib geradas referenciam (RES 0805, CAP 1206...), e e ela que a
    sincronizacao copia para Libs\Almox para o conjunto andar junto. */
-const libSources = () => [LIB_ALTIUM].concat(((LIB.index && LIB.index.libs) || []).map(l =>
-  ({ id: l.id, title: l.title, hint: l.hint, sch: l.file, schVar: l.var,
-     pcb: 'Libs/pcblib.js', pcbVar: 'pcblib', almox: l })));
-const libWanted = () => {
-  const want = localStorage.getItem(LIB_KEY) || 'altium';
-  return libSources().some(s => s.id === want) ? want : 'altium';
+const LIB_TODOS = 'almox-todos';
+const libSources = () => {
+  const almox = ((LIB.index && LIB.index.libs) || []).map(l =>
+    ({ id: l.id, title: l.title, hint: l.hint, sch: l.file, schVar: l.var,
+       pcb: 'Libs/pcblib.js', pcbVar: 'pcblib', almox: l }));
+  /* ACERVO COMBINADO. Basicos e especiais sao dois ARQUIVOS por causa de como o gerador
+     separa o almoxarifado, mas quem procura um simbolo nao sabe de que lado ele caiu — e com
+     um acervo por vez metade da biblioteca fica invisivel. Medido antes de juntar: 72 + 76
+     simbolos e ZERO nome em comum, entao concatenar nao esconde nenhum. O `almox` e o da
+     primeira parte: e so por ele que a aba sabe que esta num acervo do almoxarifado. */
+  const todos = almox.length > 1
+    ? [{ id: LIB_TODOS, title: 'Almoxarifado — Todos', hint: almox.map(a => a.title).join(' + '),
+         sch: null, schVar: null, pcb: 'Libs/pcblib.js', pcbVar: 'pcblib',
+         almox: almox[0].almox, partes: almox }]
+    : [];
+  /* UM ACERVO SO, por decisao do usuario (2026-09-14): a aba Biblioteca e o editor mostram
+     SEMPRE basicos + especiais juntos. O seletor saiu de cena junto com as outras opcoes —
+     "Espelho do Altium" e as duas libs separadas — porque a tela virou ferramenta de
+     migracao para o almoxarifado, e oferecer a lib antiga era oferecer o que se quer parar
+     de usar. LIB_ALTIUM fica como PISO: sem o indice do almoxarifado (workspace que nunca
+     sincronizou) a aba ficaria vazia, e uma lista vazia nao explica nada. */
+  if (todos.length) return todos;
+  return almox.length ? [almox[0]] : [LIB_ALTIUM];
 };
+/* Sem seletor, o "acervo desejado" e simplesmente o unico que existe. Consultar o
+   localStorage aqui deixaria uma escolha ANTIGA (almox-basicos, do tempo do combobox)
+   mandando numa lista que nao a oferece mais — e a aba nasceria vazia sem dizer por que. */
+const libWanted = () => (libSources()[0] || LIB_ALTIUM).id;
 
 /* "var X = ..." via <script>: e assim que os arquivos da lib sao gerados */
 function loadVarScript(src, name) {
@@ -1904,6 +1931,17 @@ function loadLibTabelas() {
       LIB.index = idx || { libs: [] };
       LIB.sync = sync || null;
       HubCore.setLibTables(LIB.rename, LIB.subs);
+      /* Quem ja tinha UM acervo do almoxarifado escolhido passa, uma vez so, para o
+         combinado — era exatamente isso que fazia metade da biblioteca sumir da aba
+         Simbolos. A escolha individual continua no combobox; depois desta vez o hub nunca
+         mais mexe no que o usuario escolheu. */
+      const MIG = LIB_KEY + '.todos';
+      if (!localStorage.getItem(MIG)) {
+        localStorage.setItem(MIG, '1');
+        const atual = localStorage.getItem(LIB_KEY);
+        if (atual && atual !== 'altium' && libSources().some(x => x.id === LIB_TODOS))
+          localStorage.setItem(LIB_KEY, LIB_TODOS);
+      }
     });
   return libTabelas;
 }
@@ -1918,11 +1956,27 @@ function loadLibs() {
     const s = libSources().find(x => x.id === libWanted()) || LIB_ALTIUM;
     const pronto = LIB.cache[s.id];
     if (pronto) return pronto;
-    return Promise.all([loadVarScript(libUrl(s.sch), s.schVar),
+    /* o acervo combinado nao tem arquivo proprio: carrega o de cada parte e concatena numa
+       lista so, no formato que o resto daqui para baixo ja espera */
+    const carregaSch = s.partes
+      ? Promise.all(s.partes.map(x => loadVarScript(libUrl(x.sch), x.schVar)))
+          .then(as => ({
+            symbols: as.reduce((acc, a) => acc.concat((a && a.symbols) || []), []),
+            source: s.partes.map((x, i) => (as[i] && as[i].title) || x.title).join(' + '),
+            generated: (as.find(a => a && a.generated) || {}).generated || '—',
+            title: s.title,
+          }))
+      : loadVarScript(libUrl(s.sch), s.schVar);
+    return Promise.all([carregaSch,
                         s.pcb ? loadVarScript(libUrl(s.pcb), s.pcbVar) : Promise.resolve(null)])
       .then(([a, p]) => (LIB.cache[s.id] = {
         src: s,
-        syms: (a && a.symbols) || [],
+        /* DOIS FORMATOS, UM NOME. O espelho da casa (schlib-v2) chama o campo de
+           `description`; a biblioteca agregada (symlib-v1) chama de `desc`. Toda a tela le
+           `description` — eram 727 descricoes invisiveis por causa de uma letra. Normaliza
+           aqui, na carga, que e o unico lugar por onde os dois passam. */
+        syms: ((a && a.symbols) || []).map(x =>
+          (x && x.desc && !x.description) ? Object.assign({}, x, { description: x.desc }) : x),
         fps: (p && p.footprints) || [],
         origem: { sym: (a && a.source) || '—', fp: (p && p.source) || '—' },
         gerado: { sym: (a && a.generated) || '—', fp: (p && p.generated) || '—' },
@@ -1957,24 +2011,21 @@ function libSetSrc(id) {
   else renderLib();
 }
 
-/* o combobox que vive na fileira de sub-abas da Biblioteca, mais o botão de sincronizar */
+/* a fileira de sub-abas da Biblioteca: o NOME do acervo (um só, sem escolha) e o botão de
+   sincronizar o almoxarifado */
 function libPicker() {
   const box = el('div', 'libpick');
-  const sel = el('select', 'input');
-  sel.id = 'libSrcPick';
-  sel.title = 'qual acervo a aba Biblioteca mostra';
-  libSources().forEach(s => {
-    const o = el('option', null, s.title); o.value = s.id;
-    if (s.id === libWanted()) o.selected = true;
-    sel.append(o);
-  });
-  sel.onchange = () => libSetSrc(sel.value);
-  const lab = el('label', null, t('lib.acervo')); lab.htmlFor = sel.id;
+  /* Um acervo so: em vez do <select>, o nome dele em texto. Um combobox de uma opcao so
+     promete uma escolha que nao existe. */
+  const unico = libSources()[0] || LIB_ALTIUM;
+  const nome = el('span', 'mt', unico.title);
+  nome.title = unico.hint || '';
+  const lab = el('label', null, t('lib.acervo'));
   /* o aviso "Altium mudou" mora nesta fileira porque é da Biblioteca inteira, não de uma
      sub-aba; a fileira é refeita a cada renderTabs(), e o hub-libsync devolve o mesmo nó */
   const aviso = window.HubLibSync && HubLibSync.badge();
   if (aviso) box.append(aviso);
-  box.append(lab, sel);
+  box.append(lab, nome);
   /* só faz sentido num acervo do almoxarifado: o espelho do Altium quem regera é o
      ExportLibs, de dentro do Altium */
   if (libWanted() !== 'altium') {
@@ -2320,7 +2371,7 @@ function libSuggest(name, pool) {
 function libCams() {
   if (libCamSym) return;
   const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-  libCamSym = HubDraw.mkCamera($('#libSymCv'), ctx => { if (libDrawSym) HubDraw.drawSymbolPart(ctx, libDrawSym); }, { bg: tok('--sheet') });
+  libCamSym = HubDraw.mkCamera($('#libSymCv'), ctx => { if (libDrawSym) HubDraw.drawSymbolPart(ctx, libDrawSym, { honraOlho: false }); }, { bg: tok('--sheet') });
   libCamFp  = HubDraw.mkCamera($('#libFpCv'),  ctx => { if (libDrawFp)  HubDraw.drawFootprint(ctx, libDrawFp); },  { bg: tok('--sunken') });
   /* Botao direito no preview do simbolo. Fica AQUI, no lugar que roda uma vez so, e nao
      dentro do render do preview: aquele ramo so executa quando ha simbolo para desenhar,
@@ -3219,7 +3270,7 @@ function renderPanes() {
     const a = libSources().find(x => x.id === libWanted()) || LIB_ALTIUM;
     return HubSymEd.render({ root: $('#symed'), t, toast, onSaved: libInvalida, lang: HubI18n.lang,
                              splits: mkSplits,
-                             acervo: { id: a.id, title: a.title, file: a.sch, varName: a.schVar } });
+                             acervo: acervoParaEditor(a) });
   }
   if (S.tab === 'lib' || S.tab === 'libfp') return renderLib();
   if (S.tab === 'neoden') return renderNeoden();
@@ -4057,16 +4108,67 @@ function menuNoPonto(x, y, itens) {
   m.style.top  = Math.max(6, Math.min(y, innerHeight - r.height - 6)) + 'px';
 }
 
-/* Abre a aba Simbolos JA no simbolo pedido. Mesmo padrao do gotoSchComp: troca a aba,
-   redesenha e so entao fala com o painel — que precisa existir antes de responder. */
-async function editarSimbolo(nome) {
+/* Abre o simbolo pedido NUMA ABA NOVA, e nao trocando esta. Quem esta na Sch Lib achou o
+   simbolo numa lista com filtro e rolagem; trocar a aba por baixo joga esse caminho fora, e
+   voltar nao o traz. A mesma escolha do "Editar simbolo ↗" da vista Esquema — e, como la, o
+   que for salvo na aba nova volta para esta sozinho: o hubserver vigia Libs\ e chama
+   __hubOnChange em TODA aba aberta.
+   O `edacervo` leva o acervo corrente, senao a aba nova abre no padrao e nao acha o simbolo. */
+/* O descritor de acervo no formato que o HubSymEd espera. Existe porque TRES chamadores
+   precisam dele (o render da aba, o __hubEditarSimbolo e o boot por URL) e o acervo
+   COMBINADO nao tem arquivo proprio — quem esquecesse o `partes` abriria o editor vazio. */
+function acervoParaEditor(a) {
+  if (!a) return null;
+  return { id: a.id, title: a.title, file: a.sch, varName: a.schVar,
+           partes: (a.partes || []).map(x => ({ file: x.sch, varName: x.schVar })) };
+}
+function editarSimbolo(nome) {
   if (!nome) return;
+  const q = new URLSearchParams();
+  q.set('edsym', nome);
+  const a = libSources().find(x => x.id === libWanted());
+  if (a) q.set('edacervo', a.id);
+  /* O COMPONENTE ESCOLHIDO VIAJA JUNTO. `S.lib.valor` e o id do valor marcado no painel de
+     valores — sem ele a aba nova abre na FAMILIA, e quem estava olhando "4.7pF 50V C0G" cai
+     num desenho que nao e o que estava na tela. So vale quando o simbolo do menu e o que
+     esta selecionado: o menu tambem e chamado de uma linha da lista (selectLib antes), e ai
+     o valor ja foi reposicionado para o primeiro dela. */
+  /* `S.lib.sel` e um DESCRITOR {k, name}, nao o simbolo — o simbolo vem do LIB.symBy.
+     Confundir os dois devolvia `valores` vazio e o edcomp nunca era posto: a aba nova
+     abria na familia, calada, exatamente o sintoma que se foi corrigir. */
+  if (S.lib.sel && S.lib.sel.name === nome) {
+    const sim = LIB.symBy.get(nome);
+    const v = (alxValores(sim) || []).find(x => x.id === S.lib.valor);
+    if (v && v.altium) q.set('edcomp', v.altium);
+  }
+  const w = window.open(location.pathname + '?' + q.toString() + '#/libsym', '_blank');
+  if (!w) toast('o navegador bloqueou a aba nova — libere os pop-ups para este endereço', 'warn');
+  else toast('abrindo "' + nome + '" numa aba nova', 'info');
+}
+
+/* A MESMA porta, aberta para o IFRAME. A vista Esquema roda dentro de um <iframe> e precisa
+   mandar abrir o editor num componente — mas nada daqui e global (este script inteiro e uma
+   IIFE), entao ela nao alcanca nem o goTab nem o editarSimbolo. Sem esta linha o schframe
+   tinha de CLICAR nas abas pelo rotulo, adivinhando o idioma, e ainda assim o combobox de
+   acervo ficava dizendo outra coisa.
+
+   Tres argumentos, e os tres importam: a FAMILIA (o simbolo que agrupa), o COMPONENTE (um
+   `valores[].altium` do almoxarifado, opcional) e o ACERVO — sem trocar o acervo antes, uma
+   familia do almoxarifado nao existe no espelho do Altium e o editor abre com o desenho
+   vazio, sem dizer por que. Trocar aqui, e nao so no editor, e o que faz o combobox
+   concordar com o que esta na tela. */
+window.__hubEditarSimbolo = async function (familia, componente, acervo) {
+  if (!familia) return false;
+  if (acervo && acervo.id && libSources().some(s => s.id === acervo.id)) libSetSrc(acervo.id);
   goTab('libsym');
   try {
-    const ok = await HubSymEd.abrir(nome, false);
-    if (!ok) toast(t('lib.editSymNao', { n: nome }) || ('não abriu "' + nome + '"'), 'warn');
-  } catch (e) { toast(String((e && e.message) || e), 'err'); }
-}
+    const ok = await HubSymEd.abrir(familia, false, componente || null, acervo || null);
+    if (!ok) toast(componente
+      ? ('abriu "' + familia + '", mas não o componente "' + componente + '"')
+      : (t('lib.editSymNao', { n: familia }) || ('não abriu "' + familia + '"')), 'warn');
+    return ok;
+  } catch (e) { toast(String((e && e.message) || e), 'err'); return false; }
+};
 
 /* O que o menu oferece para um nome de simbolo do acervo. `conhece` diz se o editor tem
    esse simbolo no espelho — sem isso o "editar" abriria uma folha em branco. */
@@ -4124,7 +4226,10 @@ function openConfig(tab) {
   cfgPaneAcoes(panes.acoes);
 
   const body = el('div', 'cfgm-body');
-  body.append(nav, panes.proj, panes.layout, panes.acoes);
+  /* percorre CFG_TABS em vez de listar os panes: com a lista literal, uma aba nova
+     aparecia no menu e o pane dela nunca entrava no DOM — clicar escondia as outras e
+     não mostrava nada */
+  body.append(nav, ...CFG_TABS.map(([id]) => panes[id]));
   d.append(head, body); bd.append(d); $('#overlay').append(bd);
 }
 
@@ -4134,21 +4239,29 @@ function cfgPaneProjeto(pane) {
               el('p', 'cfgm-val mono', p ? p.name : '—'),
               el('p', 'cfgm-val sub mono', p ? p.path : ''));
 
-  /* Qual acervo a aba Biblioteca abre. Fica no Projeto e não no Layout porque a resposta
-     muda com o que se está fazendo — desenhar a partir do que existe no almoxarifado é
-     outro trabalho que conferir o espelho da SchLib real. A escolha é da máquina
-     (localStorage), igual à do tema, e o combobox da própria aba é o atalho dela. */
+  /* A ESCOLHA DE ACERVO ACABOU (2026-09-14): a aba Biblioteca e o editor mostram sempre o
+     almoxarifado inteiro (básicos + especiais). Este campo era o irmão do combobox da aba, e
+     um seletor de uma opção só promete escolha que não existe — some junto com ele. O que
+     fica é a LINHA que diz de onde a lista veio, porque isso continua valendo a pena saber. */
   pane.append(el('div', 'kicker', t('cfg.proj.lib')));
-  pane.append(cfgField('cfg.proj.libSel',
-    libSources().map(x => [x.id, x.title]), libWanted(),
-    id => { libSetSrc(id); if (S.tab === 'lib' || S.tab === 'libfp') renderTabs(); },
-    'cfg.proj.libHint'));
+  {
+    const unico = libSources()[0];
+    const l = el('p', 'cfgm-val sub');
+    l.textContent = unico ? unico.title + (unico.hint ? ' — ' + unico.hint : '') : '—';
+    pane.append(l);
+  }
   if (LIB.index && LIB.index.generated) {
     const q = el('p', 'cfgm-hint');
     q.textContent = t('cfg.proj.libGer', { d: LIB.index.generated, n: LIB.index.classificados,
                                            t: LIB.index.odooRows });
     pane.append(q);
   }
+
+  /* Destino do envio da lista ao Odoo. Fica aqui pelo mesmo motivo que o combobox de
+     acervo logo acima: é configuração da MÁQUINA que a aba Projeto já abriga, e é onde se
+     procura depois que o "Enviar para o Odoo" da vista Esquema disse que falta senha. O
+     painel é dono dos próprios rótulos e do próprio CSS (hub-odoocfg.js). */
+  if (window.HubOdooCfg) HubOdooCfg.pane(pane);
 
   pane.append(el('div', 'kicker', t('cfg.proj.risk')));
   const del = el('button', 'btn btn-danger', t('cfg.delete'));
@@ -4280,16 +4393,41 @@ function selectProject(id) {
   loadProject(id);
 }
 
-/* reload escopado do hubserver: se algum iframe (esquema/pcb) tem edição não
-   salva, avisa e nao mexe em nada; senao recarrega so os DADOS (sem reload
-   de pagina — os proprios iframes cuidam de si via __hubOnChange deles). */
+/* reload escopado do hubserver. DUAS coisas mudaram no disco, e elas NAO tem o mesmo peso:
+
+   - a BIBLIOTECA (Libs\): invalidar o cache dela e NAO-DESTRUTIVO — o que ha de não salvo
+     mora no rascunho do editor e nas vistas, nunca no cache. Então isso roda SEMPRE, mesmo
+     com uma vista suja ou o editor sujo. É este o caminho de "salvei o símbolo e o resto
+     do software atualizou na hora": sem ele, LIB.cache / LIB.ready / libTabelas e os tiles
+     do HubSymEd continuavam mostrando a geração anterior até o F5.
+   - o PROJETO (loadProject): esse troca o que está aberto e descartaria trabalho. Com
+     qualquer coisa suja ele fica suprimido, como antes — quem avisa e quem salva é o
+     usuário. */
 window.__hubOnChange = async function () {
+  /* a receita de invalidação é a mesma do onApplied do libsync (a sincronização com o
+     Altium): cache por acervo fora, ?v= novo para furar o cache do browser, tabelas de
+     apelido de novo e o editor de símbolos relendo o espelho */
+  libInvalida(); libBust = Date.now(); libTabelas = null;
+  LIB.cache = {}; LIB.ready = false; LIB.loading = null;
+  /* A UNICA peca destrutiva da receita e o HubSymEd.reload(): ele joga fora o rascunho do
+     editor. Com o editor sujo ele fica de fora — o cache ja foi invalidado, o que nao custa
+     nada a ninguem, e o desenho que esta na mesa continua sendo do usuario. (No libsync ele
+     roda sempre porque la o usuario JA foi perguntado antes de aplicar.) */
+  const edSujo = !!(window.HubSymEd && HubSymEd.dirty());
+  if (!edSujo && window.HubSymEd && typeof HubSymEd.reload === 'function') HubSymEd.reload();
+  /* as vistas recarregam as bibliotecas DELAS sem recarregar a página (schframe.js »
+     __hubRecarregaLibs) — a edição pendente da folha sobrevive. Um try por iframe: acesso
+     cross-frame pode estourar, e um iframe que estoura não pode levar os outros junto. */
+  document.querySelectorAll('iframe').forEach(f => {
+    try { if (f.contentWindow && f.contentWindow.__hubRecarregaLibs) f.contentWindow.__hubRecarregaLibs(); } catch (e) {}
+  });
+  renderTabs(); renderPanes();
   let dirty = false;
   document.querySelectorAll('iframe').forEach(f => {
     try { if (f.contentWindow && f.contentWindow.__hubDirty && f.contentWindow.__hubDirty()) dirty = true; } catch (e) {}
   });
-  if (dirty) { toast('workspace mudou no disco — há edições não salvas numa vista', 'warn'); return; }
-  if (window.HubSymEd && HubSymEd.dirty()) { toast('workspace mudou no disco — há edição não salva no editor de símbolos', 'warn'); return; }
+  if (dirty) { toast('workspace mudou no disco — biblioteca recarregada; o projeto não (há edições não salvas numa vista)', 'warn'); return; }
+  if (edSujo) { toast('workspace mudou no disco — biblioteca recarregada; o projeto e o editor de símbolos não (há edição não salva lá)', 'warn'); return; }
   const idx = await API.index(); S.projects = idx.projects;
   /* o projeto atual pode ter acabado de sair (exclusao, ou renomeado no disco) */
   if (!S.projects.length) { location.reload(); return; }
@@ -4455,6 +4593,20 @@ document.addEventListener('keydown', e => {
   if (url.tab) S.tab = url.tab;
   const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;
   await loadProject(id);
+  /* ABERTO PARA EDITAR UM SIMBOLO, numa aba propria. A vista Esquema abre esta pagina com
+     ?edsym=... em vez de trocar a aba dela mesma: assim o modal "Trocar componente" fica de
+     pe do outro lado, e o que for salvo aqui volta para la sozinho pelo SSE do hubserver
+     (ele vigia Libs\ e chama __hubOnChange em TODA aba aberta).
+     Depois do loadProject, senao o painel ainda nao existe para responder. */
+  try {
+    const q = new URLSearchParams(location.search);
+    const fam = q.get('edsym');
+    if (fam) {
+      const ac = q.get('edacervo');
+      const a = ac ? libSources().find(x => x.id === ac) : null;
+      await window.__hubEditarSimbolo(fam, q.get('edcomp') || null, acervoParaEditor(a));
+    }
+  } catch (e) { toast(String((e && e.message) || e), 'err'); }
 })();
 </script>
 </body>

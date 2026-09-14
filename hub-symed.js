@@ -33,10 +33,13 @@
    (x,y) + len·dir(orient) — o mesmo vocabulário schlib-v2 que hub-draw.js desenha. O mm é
    só interface: 1 mm = 39.37007874 mil, e tudo grava com 3 casas de mil. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./hub-draw.js'));
-  else root.HubSymEd = factory(root.HubDraw);
-})(typeof self !== 'undefined' ? self : this, function (HubDraw) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./hub-draw.js'), require('./hub-core.js'));
+  else root.HubSymEd = factory(root.HubDraw, root.HubCore);
+})(typeof self !== 'undefined' ? self : this, function (HubDraw, HubCore) {
 "use strict";
+/* normKey do HubCore, com queda para maiuscula crua: se algum dia alguem carregar este
+   arquivo sem a casca, a pre-selecao perde o desempate por acento mas a aba nao morre. */
+const nk = s => (HubCore && HubCore.normKey) ? HubCore.normKey(s) : String(s == null ? '' : s).toUpperCase();
 
 /* ═══════════════════════ geometria pura (testável em Node) ═══════════════════════ */
 
@@ -534,10 +537,46 @@ function filtroBusca(q, plain) {
   };
 }
 
+/* ── a faixa dirigida de fora: índice e cascata (puras, provadas em Node) ──
+   DUAS PASSADAS de propósito: todo `name` primeiro, `aliases` só depois. Numa passada só, o
+   apelido de um símbolo sequestra o nome próprio de outro — "Jumper" cairia em "Conector 2
+   vias (Jumper)" e "Trimpot" em "Potenciômetro". */
+function montaIdxLib(syms) {
+  const porNome = new Map(), porChave = new Map(), todos = syms || [];
+  const poe = n => n && !porNome.has(n);
+  for (const s of todos) if (poe(s && s.name)) porNome.set(s.name, s);
+  for (const s of todos) for (const a of (s && s.aliases) || []) if (poe(a)) porNome.set(a, s);
+  for (const s of todos) for (const n of [s && s.name].concat((s && s.aliases) || [])) {
+    if (!n) continue;
+    const k = nk(n), l = porChave.get(k) || [];
+    if (l.indexOf(s) < 0) l.push(s);
+    porChave.set(k, l);
+  }
+  return { porNome, porChave };
+}
+/* O primeiro nome da lista que fechar em UM símbolo ganha. Medido nos acervos reais: só pelo
+   nome do COMPONENTE fecha em 30 dos 2513 (1,2%); com a cascata componente → nome da família
+   → raiz da família, 1215 (48,3%). No espelho do Altium, 299 de 401 (74,6%). É por isso que
+   o alvo útil é a FAMÍLIA, e não o componente — o número decidiu, não o palpite.
+   Devolve {s,how:'nome'|'alias'|'chave',nome} | {cands,how:'ambiguo',nome} | null. */
+function alvoNaFaixa(idx, nomes) {
+  let amb = null;
+  for (const n of nomes || []) {
+    if (!n) continue;
+    const s = idx.porNome.get(n);
+    if (s) return { s, how: s.name === n ? 'nome' : 'alias', nome: n };
+    const l = idx.porChave.get(nk(n)) || [];
+    if (l.length === 1) return { s: l[0], how: 'chave', nome: n };
+    /* empate NÃO encerra a cascata: o componente empata e a família costuma desempatar */
+    if (l.length > 1 && !amb) amb = { cands: l.slice(), how: 'ambiguo', nome: n };
+  }
+  return amb;
+}
+
 const pure = { snap, pinHot, pinSnapOf, pinsOffGrid, segDist, pointInPoly, angleIn, labelBox, hitTest, hitGraphic,
                filtroBusca,
                moveItem, moveVertex, rotateAll, mirrorAll, bbox, serializeSymbol, applyLibSymbol, nextPinNum, novoPino,
-               comPadraoDeVisibilidade,
+               comPadraoDeVisibilidade, montaIdxLib, alvoNaFaixa,
                cleanPin, cleanGraphic, normW, normArc, PIN_TYPES, WIDTHS,
                pinLenDefault, alinhado, corValida, fillable, setFill, PIN_MARK,
                itemBBox, itemsInBox, moveItems, deleteItems, duplicateItems,
@@ -594,6 +633,10 @@ const ST = {
   /* faixa de baixo: 'simbolos' = os corpos prontos da symbols-lib; 'componentes' = os
      VALORES da familia aberta (so faz sentido num acervo do almoxarifado) */
   faixa: 'simbolos', valSel: null, valQ: '',
+  /* a faixa dirigida de fora, pelo "Editar simbolo" da vista Esquema */
+  libIds: null,       /* restringe a faixa a estes ids (empate); null = biblioteca inteira */
+  faixaNota: '',      /* a frase ao lado da contagem: por que ESTE tile esta marcado */
+  faixaScroll: null,  /* id a rolar para dentro da vista no proximo refreshLib */
   familia: null,      /* nome da familia quando ST.draft e o desenho de UM valor dela */
   unit: 'mm',         /* unidade da interface (mm | mil); o estado continua em mil */
   snap: UNIT_DEFAULT.mm, grid: true, draw: null, mouse: null, pinRot: 0, note: '', fitPending: false,
@@ -639,11 +682,24 @@ function loadSchlib() {
   if (DATA.cache[a.id]) { DATA.schlib = DATA.cache[a.id]; DATA.schlibErro = ''; return Promise.resolve(DATA.schlib); }
   if (DATA.loading && DATA.loadingId === a.id) return DATA.loading;
   DATA.loadingId = a.id;
-  DATA.loading = loadVarScript(a.file, a.varName).then(v => {
+  /* ACERVO COMBINADO ("Almoxarifado — Todos"): não tem arquivo próprio — carrega o de cada
+     parte e concatena numa lista só, a mesma receita da aba Biblioteca (hub.html » carregaSch).
+     Sem isto o editor recebia `file: null`, o loadVarScript falhava e a aba Símbolos dizia
+     "não carregou" justamente no acervo que junta básicos e especiais. */
+  const partes = (a.partes && a.partes.length) ? a.partes : null;
+  const vem = partes
+    ? Promise.all(partes.map(x => loadVarScript(x.file, x.varName))).then(as => {
+        const syms = as.reduce((acc, x) => acc.concat((x && x.symbols) || []), []);
+        return syms.length ? { symbols: syms, title: a.title,
+                               generated: (as.find(x => x && x.generated) || {}).generated || '' } : null;
+      })
+    : loadVarScript(a.file, a.varName);
+  DATA.loading = vem.then(v => {
     const ok = v && v.symbols ? v : null;
     if (ok) DATA.cache[a.id] = ok;
     DATA.schlib = ok;
-    DATA.schlibErro = ok ? '' : ('não carregou ' + a.file + ' — o servidor está de pé? (troque de aba para tentar de novo)');
+    DATA.schlibErro = ok ? '' : ('não carregou ' + (partes ? partes.map(x => x.file).join(' + ') : a.file)
+      + ' — o servidor está de pé? (troque de aba para tentar de novo)');
     DATA.loading = null;
     return DATA.schlib;
   });
@@ -671,6 +727,7 @@ function loadSymlib() {
     /* DOIS FORMATOS, UM NOME. O symlib-v1 grava o campo como `desc`; o schlib-v2 — e toda a
        tela, daqui e do hub — lê `description`. Eram 727 descrições invisíveis por causa de
        uma letra. Normaliza na carga, que é o único ponto por onde os 897 passam. */
+    IDXLIB = null;
     if (DATA.symlib) DATA.symlib.symbols.forEach(x => { if (x.desc && !x.description) x.description = x.desc; });
     DATA.symlibMissing = !DATA.symlib;
     DATA.libLoading = null;
@@ -974,6 +1031,8 @@ function build(rootEl) {
   const lb = el('div', 'symed-libbar');
   UI.libQ = el('input', 'input'); UI.libQ.type = 'text'; UI.libQ.placeholder = 'buscar na biblioteca de símbolos…'; UI.libQ.value = ST.libQ;
   UI.libQ.oninput = () => {
+    /* quem digita quer a biblioteca inteira de volta: o filtro por id e a nota saem */
+    ST.libIds = null; ST.faixaNota = '';
     if (ST.faixa === 'componentes') ST.valQ = UI.libQ.value; else ST.libQ = UI.libQ.value;
     libKey = ''; refreshLib();
   };
@@ -994,7 +1053,7 @@ function build(rootEl) {
     b.setAttribute('role', 'tab');
     b.onclick = () => {
       if (ST.faixa === k) return;
-      ST.faixa = k; libKey = '';
+      ST.faixa = k; ST.libIds = null; ST.faixaNota = ''; libKey = '';
       UI.libQ.value = (k === 'componentes' ? ST.valQ : ST.libQ) || '';
       refreshLib();
     };
@@ -1437,6 +1496,66 @@ function refreshComponentes(f) {
   UI.tiles.append(frag);
 }
 
+let IDXLIB = null;                 /* indice da symbols-lib; null = refazer na proxima consulta */
+const idxLib = () => (IDXLIB || (IDXLIB = montaIdxLib(libSyms())));
+
+/* O PASSO QUE FALTAVA no "Editar símbolo" da vista Esquema: chegar na aba com o corpo de
+   mesmo nome já marcado na faixa. Marcar sozinho não resolve três coisas:
+     · ST.faixa é PEGAJOSO — quem esteve em "Componentes" voltaria para lá e nem veria os
+       tiles (openSymbol e abrirValor nunca tocam nele);
+     · o cache de DOM (libKey) não enxerga libSel nem libIds;
+     · o tile pode nascer fora da caixa de 190 px, e aí fica marcado onde ninguém vê — e sem
+       desenho, porque o IntersectionObserver só pinta o que está dentro dela. */
+function preSelecionarNaFaixa(familia, componente) {
+  const f = symByName(familia);
+  const alvos = [componente, familia, f && f.familia];
+  const r = DATA.symlib ? alvoNaFaixa(idxLib(), alvos) : null;
+  ST.faixa = 'simbolos';
+  ST.libIds = null;
+  /* a busca sai do caminho: com texto velho no filtro, o alvo pode nem estar na lista.
+     O input junto, porque o refreshLib nunca reescreve o campo. */
+  ST.libQ = ''; if (UI && UI.libQ) UI.libQ.value = '';
+  const quem = componente || familia;
+  if (!DATA.symlib) {
+    ST.libSel = null;
+    ST.faixaNota = 'a biblioteca de símbolos não carregou — procure "' + quem + '" à mão';
+  } else if (!r) {
+    ST.libSel = null;
+    ST.faixaNota = 'nenhum corpo com o nome "' + quem + '" na biblioteca — escolha um abaixo '
+                 + 'ou guarde este com "+ corpo atual"';
+    if (O && O.toast) O.toast(ST.faixaNota, 'warn', 7000);
+  } else if (r.how === 'ambiguo') {
+    /* EMPATE: mostra os dois e NÃO escolhe. "Aplicar ao símbolo" só destrava com libSel,
+       então ele não nasce armado com um chute. Só o filtro por id junta os dois: o filtro de
+       texto é substring e não dobra acento. */
+    ST.libIds = r.cands.map(x => x.id);
+    ST.libSel = null; ST.faixaScroll = r.cands[0].id;
+    ST.faixaNota = r.cands.length + ' corpos com o nome "' + r.nome + '" — escolha qual '
+                 + '(digite na busca para ver a biblioteca inteira)';
+    if (O && O.toast) O.toast(ST.faixaNota, 'warn', 7000);
+  } else {
+    ST.libSel = r.s.id; ST.faixaScroll = r.s.id;
+    ST.faixaNota = 'pré-selecionado "' + r.s.name + '"'
+      + (r.how === 'alias' ? ' (apelido de "' + r.nome + '")'
+       : r.how === 'chave' ? ' (mesmo nome que "' + r.nome + '", a menos de acento)' : '')
+      + (r.nome !== quem ? ' — pela família' : '');
+  }
+  libKey = '';       /* o cache nao ve libSel nem libIds: invalidar na mao */
+  refreshLib();      /* sem UI ainda, ele volta na hora e o render() aplica depois */
+}
+
+/* Rola SÓ a faixa. O scrollIntoView rolaria também os ancestrais, e o ancestral aqui é a
+   grade do editor: o canvas daria um pulo que ninguém pediu. */
+function consomeScroll() {
+  const id = ST.faixaScroll; if (!id || !UI || !UI.tiles) return;
+  ST.faixaScroll = null;
+  const t = UI.tiles.querySelector('.symed-tile[data-id="' + id + '"]'); if (!t) return;
+  const cx = UI.tiles.getBoundingClientRect(), r = t.getBoundingClientRect();
+  if (r.top < cx.top || r.bottom > cx.bottom) UI.tiles.scrollTop += (r.top - cx.top) - 4;
+  const cv = t.querySelector('canvas');
+  if (cv) drawTile(cv);   /* o observer so entrega no proximo quadro; drawTile e idempotente */
+}
+
 function refreshLib() {
   if (!UI) return;
   /* a faixa de componentes so existe onde ha valores: no espelho do Altium um simbolo
@@ -1456,13 +1575,14 @@ function refreshLib() {
   if (ST.faixa === 'componentes') return refreshComponentes(f);
   const L = DATA.symlib, all = libSyms();
   /* a seleção fica fora da chave: com 400+ tiles, refazer tudo a cada clique é o que trava */
-  const key = [ST.libQ, all.length, L ? 1 : 0, DATA.symlibMissing ? 1 : 0].join(SEP);
+  /* libIds e faixaNota entram na chave: sem isso, mudar so a nota nao redesenha nada */
+  const key = [ST.libQ, (ST.libIds || []).join(','), ST.faixaNota, all.length, L ? 1 : 0, DATA.symlibMissing ? 1 : 0].join(SEP);
   const sel = libById(ST.libSel);
   UI.bLibApply.disabled = !sel || !ST.draft;
   UI.bLibRen.disabled = !sel || semServidor();
   UI.bLibDel.disabled = !sel || semServidor();
   UI.bLibAdd.disabled = !ST.draft || semServidor();
-  if (key === libKey) { markLibSel(); return; }
+  if (key === libKey) { markLibSel(); consomeScroll(); return; }
   libKey = key;
   if (UI.io) UI.io.disconnect();          /* os canvases antigos vão embora; observar só os novos */
   UI.tiles.textContent = '';
@@ -1476,9 +1596,12 @@ function refreshLib() {
   const q = ST.libQ.trim().toLowerCase();
   /* a descrição entra na busca porque é o único jeito de achar símbolo cujo NOME é código de
      catálogo: "CMP-0694-00003-2" não diz nada, "RS-485" acha. São 727 dos 897 com descrição. */
-  const rows = all.filter(s => !q || (s.name + ' ' + (s.aliases || []).join(' ') + ' ' + (s.kind || '')
-                                      + ' ' + (s.description || '')).toLowerCase().includes(q));
-  UI.libCount.textContent = rows.length + (rows.length !== all.length ? ' de ' + all.length : '') + ' símbolo' + (all.length === 1 ? '' : 's');
+  const ids = (ST.libIds && ST.libIds.length) ? new Set(ST.libIds) : null;
+  const rows = all.filter(s => (!ids || ids.has(s.id))
+    && (!q || (s.name + ' ' + (s.aliases || []).join(' ') + ' ' + (s.kind || '')
+               + ' ' + (s.description || '')).toLowerCase().includes(q)));
+  UI.libCount.textContent = rows.length + (rows.length !== all.length ? ' de ' + all.length : '')
+    + ' símbolo' + (all.length === 1 ? '' : 's') + (ST.faixaNota ? ' — ' + ST.faixaNota : '');
   if (!rows.length) { UI.tiles.append(el('div', 'symed-empty', q ? 'nada com "' + ST.libQ + '"' : 'biblioteca vazia')); return; }
   const frag = document.createDocumentFragment();
   rows.forEach(s => {
@@ -1490,7 +1613,10 @@ function refreshLib() {
       + ((s.aliases || []).length ? '\n' + s.aliases.join(', ') : '');
     const cv = el('canvas'); cv.width = 96; cv.height = 64; cv.dataset.id = s.id;
     t.append(cv, el('span', 'nm', s.name), el('span', 'k', (s.kind === 'ci' ? 'CI' : 'genérico') + ' · ' + (s.pins || []).length + 'p'));
-    t.onclick = () => { if (tileDragged) { tileDragged = false; return; } ST.libSel = ST.libSel === s.id ? null : s.id; refreshLib(); };
+    t.onclick = () => { if (tileDragged) { tileDragged = false; return; }
+      /* so refaz o DOM quando ha nota a apagar — com 897 tiles, refazer a cada clique e o que trava */
+      if (ST.faixaNota) { ST.faixaNota = ''; libKey = ''; }
+      ST.libSel = ST.libSel === s.id ? null : s.id; refreshLib(); };
     t.ondblclick = () => { ST.libSel = s.id; aplicarLib(); };
     t.addEventListener('mousedown', e => tileDown(e, s, cv));
     t.draggable = false;
@@ -1498,6 +1624,7 @@ function refreshLib() {
     if (UI.io) UI.io.observe(cv); else drawTile(cv);
   });
   UI.tiles.append(frag);
+  consomeScroll();
 }
 /* só o destaque muda de tile: atributo em vez de reconstrução */
 function markLibSel() {
@@ -2158,7 +2285,7 @@ async function adicionarCorpo() {
   const { status, j } = await api('lib', { op: 'add', symbol: { name: name.trim(), kind: sym.pins.length <= 4 ? 'generico' : 'ci', pins: sym.pins, graphics: sym.graphics } });
   if (j && j.ok && j.symbol) {
     if (!DATA.symlib) { DATA.symlib = { symbols: [] }; DATA.symlibMissing = false; }
-    DATA.symlib.symbols.push(j.symbol); ST.libSel = j.symbol.id; ST.libQ = ''; UI.libQ.value = '';
+    DATA.symlib.symbols.push(j.symbol); IDXLIB = null; ST.libSel = j.symbol.id; ST.libQ = ''; UI.libQ.value = '';
     refreshLib(); O.toast('"' + j.symbol.name + '" entrou na biblioteca de símbolos', 'ok');
     return;
   }
@@ -2170,7 +2297,7 @@ async function renomearLib() {
   const name = await pedirTexto('Renomear', 'Novo nome', s.name);
   if (name == null || !name.trim() || name.trim() === s.name) return;
   const { status, j } = await api('lib', { op: 'rename', id: s.id, name: name.trim() });
-  if (j && j.ok) { s.name = (j.symbol && j.symbol.name) || name.trim(); libKey = ''; refreshLib(); O.toast('renomeado', 'ok'); return; }
+  if (j && j.ok) { s.name = (j.symbol && j.symbol.name) || name.trim(); IDXLIB = null; libKey = ''; refreshLib(); O.toast('renomeado', 'ok'); return; }
   O.toast((j && j.error) || ('não renomeou (HTTP ' + status + ')'), status === 409 ? 'warn' : 'err');
 }
 async function excluirLib() {
@@ -2178,7 +2305,7 @@ async function excluirLib() {
   const ok = await confirmar('Excluir "' + s.name + '" da biblioteca de símbolos? Se a extração o encontrar de novo, ele volta.', { title: 'Excluir da biblioteca', ok: 'Excluir', danger: true });
   if (!ok) return;
   const { status, j } = await api('lib', { op: 'delete', id: s.id });
-  if (j && j.ok) { DATA.symlib.symbols = libSyms().filter(x => x.id !== s.id); ST.libSel = null; refreshLib(); O.toast('excluído', 'ok'); return; }
+  if (j && j.ok) { DATA.symlib.symbols = libSyms().filter(x => x.id !== s.id); IDXLIB = null; ST.libSel = null; refreshLib(); O.toast('excluído', 'ok'); return; }
   O.toast((j && j.error) || ('não excluiu (HTTP ' + status + ')'), 'err');
 }
 
@@ -2258,7 +2385,7 @@ function reload() {
   DATA.cache = {};
   /* a Biblioteca de simbolos de baixo (os tiles, Libs/symbols-lib.js) tambem e um arquivo de
      Libs\ e tambem e reescrita — sem zerar symlib/libLoading os tiles ficavam velhos ate o F5 */
-  DATA.symlib = null; DATA.libLoading = null; DATA.symlibMissing = false;
+  DATA.symlib = null; DATA.libLoading = null; DATA.symlibMissing = false; IDXLIB = null;
   ST.draft = null; ST.dirty = false; ST.selection = []; ST.undo = []; ST.redo = []; ST.draw = null;
   if (!UI) return Promise.resolve();
   /* as duas chaves de cache de DOM fora, senao refreshList/refreshLib acham que nada mudou
@@ -2276,14 +2403,35 @@ function reload() {
    a aba nunca aberta — e viraria no-op silencioso depois.
    Espera a schlib chegar antes de abrir, e devolve Promise porque openSymbol pode PARAR
    para perguntar se descarta a edicao nao salva: quem chama nao pode assumir que abriu. */
-async function abrir(name, force) {
+async function abrir(name, force, componente, acervo) {
   if (!name) return false;
+  /* ACERVO PRIMEIRO. Uma familia do almoxarifado nao existe no espelho do Altium: sem trocar
+     o acervo, o openSymbol nao acha nada e o sintoma engana — a aba abre, ST.sel fica com o
+     nome certo e o desenho vem VAZIO. O setAcervo limpa a selecao de proposito, entao ele
+     tem de vir antes de qualquer carga. */
+  if (acervo && acervo.id) setAcervo(acervo);
+  /* A FAIXA E OUTRO ARQUIVO E OUTRA CARGA. Sem esperar por ela, esta funcao resolve com a
+     faixa ainda em "carregando…" e nao ha em que pre-selecionar. Disparada em PARALELO com a
+     schlib: nenhuma das duas espera a outra, e o loadSymlib devolve a mesma promessa se ja
+     houver carga em voo. */
+  const libPronta = loadSymlib().catch(() => null);
   /* loadSchlib() devolve a MESMA promessa quando ja ha uma carga em voo, entao isto
      cobre os dois casos: nunca carregou, e carregando agora. */
   if (!DATA.schlib) await loadSchlib().catch(() => {});
   listKey = '';
   await openSymbol(String(name), force);
-  return ST.sel === String(name) && !!ST.draft;
+  const ok = ST.sel === String(name) && !!ST.draft;
+  /* COMPONENTE do almoxarifado (um `valores[].altium`): o abrirValor le familiaAberta(),
+     entao a familia precisa ja estar aberta — por isso ele vem DEPOIS do openSymbol, e
+     nao no lugar dele. Quem chama de fora manda os dois e nao precisa saber dessa ordem.
+     Sem componente, o comportamento e o de antes: abre a familia e para ali. */
+  let okv = true;
+  if (ok && componente) okv = await abrirValor(String(componente));
+  await libPronta;
+  /* POR ULTIMO: o abrirValor chama refreshAll(), que chama refreshLib — o que a pre-selecao
+     escrevesse antes dele seria desfeito pelo cache de DOM. */
+  if (ok) preSelecionarNaFaixa(String(name), okv ? componente : null);
+  return ok && okv;
 }
 
 /* TRES estados, de proposito: true = existe no espelho, false = nao existe, null = a

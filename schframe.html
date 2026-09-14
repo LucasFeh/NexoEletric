@@ -231,9 +231,23 @@
   #symmodal button, #symmodal input, #symmodal select{font:inherit; color:inherit;}
   /* escolher simbolo: lista a esquerda, previa a direita — duas colunas, sem o carrinho */
   #symmodal .sym-grid{height:100%; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); min-height:0;}
-  #symmodal .sym-esq{display:grid; grid-template-rows:auto auto 1fr; min-height:0;}
-  #symmodal .sym-dir{display:grid; grid-template-rows:minmax(0,1fr) auto auto; min-height:0; min-width:0;
-    box-shadow:inset 1px 0 0 var(--line);}
+  /* QUATRO linhas agora: busca, filtros, resumo e a lista. Com tres, o resumo herdava o
+     1fr, esticava, e a lista de familias nascia empurrada para o meio da coluna. */
+  #symmodal .sym-esq{display:grid; grid-template-rows:auto auto auto minmax(0,1fr); min-height:0;}
+  #symmodal .sym-dir{display:grid; grid-template-rows:minmax(0,1.25fr) minmax(0,1fr) auto auto;
+    min-height:0; min-width:0; box-shadow:inset 1px 0 0 var(--line);}
+  /* os VALORES da familia escolhida, debaixo do simbolo dela — a mesma leitura da aba
+     Biblioteca: a esquerda escolhe a familia, a direita mostra o desenho e os componentes
+     que o compartilham. E aqui que se escolhe o COMPONENTE que vai para a folha. */
+  /* o "Editar símbolo" mora no CABEÇALHO, ao lado do fechar: flutuando sobre o desenho ele
+     tapava justamente o que se foi olhar, e some de vista quando a prévia é escura */
+  /* o espaço livre vai TODO para antes do botão, e o ✕ vem colado nele. Com margin-left
+     auto nos dois (o ✕ já tem, na .modal-head), a folga se dividia e o botão parava no
+     meio do cabeçalho. */
+  #symmodal .modal-head #symEditar{flex:none; margin-left:auto;}
+  #symmodal .modal-head .x{margin-left:0;}
+  #symmodal .sym-vals{overflow:auto; min-height:0; padding:0 16px 8px;
+    box-shadow:inset 0 1px 0 var(--line);}
   /* pinagem esperada x pinagem do candidato, e quantos componentes mudam junto: o aviso
      mora COLADO no botao Usar, porque e antes do clique que ele serve para alguma coisa */
   #symmodal .sym-info{display:grid; gap:4px; padding:10px 16px 0; font-size:11px; color:var(--text-3);}
@@ -264,30 +278,30 @@
   .modal-head .meta{font-size:11px; color:var(--text-3);}
   .modal-head .x{margin-left:auto;}
 
-  #addmodal .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;
+  #addmodal .btn, #symmodal .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;
     font-size:14px; line-height:1.2; background:transparent; border:1px solid transparent;
     padding:var(--sp-2) var(--sp-4); border-radius:var(--r-md); }
-  #addmodal .btn:disabled{opacity:0.45; cursor:not-allowed;}
-  #addmodal .btn-primary{color:var(--hi); border-color:var(--hi);}
-  #addmodal .btn-primary:hover:not(:disabled){background:rgba(var(--tint),0.10);}
-  #addmodal .btn-secondary{border-color:var(--line);}
-  #addmodal .btn-secondary:hover:not(:disabled){background:rgba(var(--tint),0.07);}
-  #addmodal .btn-ghost{color:var(--hi); padding-inline:var(--sp-1);}
-  #addmodal .btn-ghost:hover{background:rgba(var(--tint),0.08);}
-  #addmodal .btn-icon{width:34px; height:34px; padding:0;}
-  #addmodal .btn-sm{font-size:12px; padding:4px 10px;}
-  #addmodal .input{ width:100%; min-height:34px; padding:6px 10px; font-size:14px; background:var(--surface);
+  #addmodal .btn:disabled, #symmodal .btn:disabled{opacity:0.45; cursor:not-allowed;}
+  #addmodal .btn-primary, #symmodal .btn-primary{color:var(--hi); border-color:var(--hi);}
+  #addmodal .btn-primary:hover:not(:disabled), #symmodal .btn-primary:hover:not(:disabled){background:rgba(var(--tint),0.10);}
+  #addmodal .btn-secondary, #symmodal .btn-secondary{border-color:var(--line);}
+  #addmodal .btn-secondary:hover:not(:disabled), #symmodal .btn-secondary:hover:not(:disabled){background:rgba(var(--tint),0.07);}
+  #addmodal .btn-ghost, #symmodal .btn-ghost{color:var(--hi); padding-inline:var(--sp-1);}
+  #addmodal .btn-ghost:hover, #symmodal .btn-ghost:hover{background:rgba(var(--tint),0.08);}
+  #addmodal .btn-icon, #symmodal .btn-icon{width:34px; height:34px; padding:0;}
+  #addmodal .btn-sm, #symmodal .btn-sm{font-size:12px; padding:4px 10px;}
+  #addmodal .input, #symmodal .input{ width:100%; min-height:34px; padding:6px 10px; font-size:14px; background:var(--surface);
     border:1px solid var(--line); border-radius:var(--r-md); caret-color:var(--hi); }
-  #addmodal .input:hover{border-color:rgba(var(--tint),0.30);}
-  #addmodal .input:focus-visible{border-color:var(--hi); outline-offset:0;}
-  #addmodal select.input{min-height:28px; padding:2px 6px; font-size:12px; width:auto;}
-  #addmodal .seg{display:flex; gap:2px; flex:none; padding:2px; border-radius:var(--r-md);
+  #addmodal .input:hover, #symmodal .input:hover{border-color:rgba(var(--tint),0.30);}
+  #addmodal .input:focus-visible, #symmodal .input:focus-visible{border-color:var(--hi); outline-offset:0;}
+  #addmodal select.input, #symmodal select.input{min-height:28px; padding:2px 6px; font-size:12px; width:auto;}
+  #addmodal .seg, #symmodal .seg{display:flex; gap:2px; flex:none; padding:2px; border-radius:var(--r-md);
     background:var(--surface); box-shadow:inset 0 0 0 1px var(--edge);}
-  #addmodal .seg button{cursor:pointer; border:0; background:transparent; color:var(--text-3);
+  #addmodal .seg button, #symmodal .seg button{cursor:pointer; border:0; background:transparent; color:var(--text-3);
     font-size:12px; padding:4px 9px; border-radius:var(--r-sm);}
-  #addmodal .seg button:hover{color:var(--text-2);}
-  #addmodal .seg button[aria-pressed="true"]{background:rgba(var(--tint),0.12); color:var(--text);}
-  #addmodal .seg button .n{font-variant-numeric:tabular-nums; color:var(--text-4); margin-left:4px;}
+  #addmodal .seg button:hover, #symmodal .seg button:hover{color:var(--text-2);}
+  #addmodal .seg button[aria-pressed="true"], #symmodal .seg button[aria-pressed="true"]{background:rgba(var(--tint),0.12); color:var(--text);}
+  #addmodal .seg button .n, #symmodal .seg button .n{font-variant-numeric:tabular-nums; color:var(--text-4); margin-left:4px;}
 
   .lib-grid{ height:100%; display:grid; min-height:0;
     grid-template-columns:minmax(300px, 0.95fr) minmax(320px, 1.25fr) var(--aside-w); }
@@ -375,7 +389,7 @@
   <aside id="side">
     <div class="pane on" id="pane-comps">
       <div class="sec"><h2>Componentes (<span id="compcount">0</span>)</h2>
-        <table id="comptable"><thead><tr><th>Ref</th><th>Símbolo</th><th>Footprint</th><th>Comment</th></tr></thead><tbody></tbody></table>
+        <table id="comptable"><thead><tr><th>Ref</th><th>Componente</th><th>Footprint</th><th>Comment</th></tr></thead><tbody></tbody></table>
       </div>
       <div class="sec"><h2>Nets (<span id="netcount">0</span>)</h2><div id="netlist"></div></div>
       <div class="sec"><h2>Sinalizadores (<span id="anncount">0</span>)</h2><div id="annlist"></div></div>
@@ -514,22 +528,31 @@
 <div id="symmodal">
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="symTitle">
     <div class="modal-head">
-      <h2 id="symTitle">Procurar símbolo</h2>
+      <h2 id="symTitle">Procurar componente</h2>
       <span class="meta" id="symMeta"></span>
+      <button class="btn btn-sm" id="symEditar" hidden>Editar símbolo ↗</button>
       <button class="btn btn-ghost btn-icon x" id="symClose" title="Fechar (Esc)">✕</button>
     </div>
     <div class="sym-grid">
       <div class="sym-esq">
-        <div class="lib-bar"><input class="input" id="symBusca" type="text" placeholder="Buscar em todo o acervo…"></div>
+        <div class="lib-bar"><input class="input" id="symBusca" type="text" placeholder="Buscar componente do almoxarifado…"></div>
+        <div class="lib-bar">
+          <div class="seg" id="symFiltros" role="group" aria-label="Filtrar por saldo">
+            <button type="button" data-f="all" aria-pressed="true">Tudo<span class="n" id="symNTudo"></span></button>
+            <button type="button" data-f="stock" aria-pressed="false">Com saldo<span class="n" id="symNSaldo"></span></button>
+            <button type="button" data-f="nostock" aria-pressed="false">Zerados<span class="n" id="symNZero"></span></button>
+          </div>
+        </div>
         <div class="lib-sum" id="symSum"></div>
         <div class="lib-list" id="symLista"></div>
       </div>
       <div class="sym-dir">
         <div class="viewport sheet"><canvas id="symCv"></canvas><div class="hint" id="symHint"></div></div>
+        <div class="sym-vals" id="symVals"></div>
         <div class="sym-info" id="symInfo"></div>
         <div class="sym-foot">
-          <span class="meta" id="symEscolha">nenhum escolhido</span>
-          <button class="btn" id="symUsar" disabled>Usar este símbolo</button>
+          <span class="meta" id="symEscolha">nenhum componente escolhido</span>
+          <button class="btn" id="symUsar" disabled>Usar este componente</button>
         </div>
       </div>
     </div>
@@ -623,6 +646,8 @@
 <script src="hub-io.js"></script>
 <!-- modal e notificacao no tema da pagina: nada de alert()/confirm() do navegador -->
 <script src="hub-dialog.js"></script>
+<!-- escolher COMPONENTE do almoxarifado: modulo proprio, injeta o proprio CSS -->
+<script src="hub-almoxpick.js"></script>
 <script src="schframe.js"></script>
 <!-- "Enviar para o Odoo": injeta o proprio botao, CSS e modal (nada mais aqui) -->
 <script src="hub-odoolista.js"></script>
