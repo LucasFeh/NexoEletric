@@ -16,12 +16,20 @@ import io, json, os, re, struct, sys
 BASE = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.dirname(os.path.dirname(BASE))
 LIBS = os.path.join(RAIZ, 'Libs')
+sys.path.insert(0, os.path.join(RAIZ, 'tools'))
 sys.path.insert(0, BASE)
 
 import cfbf                                            # noqa: E402
 import schlib_bin as SB                                # noqa: E402
+import libpath as LP                                   # noqa: E402
 
-LIB_REAL = r'\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib'
+# O piso da ordem do `tools/libpath.py`: a cópia publicada dentro do repositório. Era o
+# literal `\\LUCAS-PC\D\...`, que não existe no servidor e, aqui, estava três saves do
+# Altium atrás da lib viva — os dois botões de sincronismo reciclavam de cópias diferentes.
+# Constante de módulo NÃO resolve a ordem inteira (o passo do config faz `isfile` num
+# caminho de rede, caro em tempo de import); quem chama `carrega_lib()`/`gera()` sem
+# argumento cai na resolução completa, lá dentro.
+LIB_REAL = LP.repo_schlib(RAIZ)
 
 # ─── quais símbolos da lib real cada família do almoxarifado reaproveita ──────
 # A chave é o nome do símbolo gerado; o valor, o LibReference na biblioteca do usuário.
@@ -115,8 +123,14 @@ def u(v):
 
 
 # ─── leitura da biblioteca de origem ─────────────────────────────────────────
-def carrega_lib(caminho=LIB_REAL):
-    """-> (cabecalho, {LibReference: [(tipo, payload)]})"""
+def carrega_lib(caminho=None):
+    """-> (cabecalho, {LibReference: [(tipo, payload)]})
+
+    Sem caminho, a ordem do `tools/libpath.py`: a lib viva do config enquanto ela
+    existir, senão a publicada no repositório. Resolvido AQUI, não no default da
+    assinatura — um default é avaliado uma vez, no import, e congelaria para a vida do
+    processo o que a rede respondeu naquele instante."""
+    caminho = caminho or LP.schlib(RAIZ)
     try:
         import olefile
     except ImportError:
@@ -367,9 +381,13 @@ def monta_componente(sim, valor, modelo=None):
         porparte = []
         base = partes[0]
         for i, pin in enumerate(base['pins']):
+            # o olho do pino viaja com ele: `hideName`/`hideNum` do espelho apagam os bits
+            # 0x08/0x10 do conglomerado. O pino gerado nasce com hideName (simbolos._pin) e
+            # sai 0x30|rot — so o numero a vista; o que o usuario acendeu no hub sai aceso.
             porparte.append((SB.BINARIO, SB.escreve_pino(SB.pino(
                 pin['num'], pin['name'], pin['x'], pin['y'], pin['len'], pin['orient'],
-                pin.get('type', 'Passive'), 1))))
+                pin.get('type', 'Passive'), 1,
+                mostra_nome=not pin.get('hideName'), mostra_desig=not pin.get('hideNum')))))
         for i, g in enumerate(base['graphics']):
             r = forma_para_registro(g, 1, nome + '/g%d' % i)
             if r:
@@ -633,15 +651,21 @@ def monta_lib(itens, cab_modelo, comps_modelo):
 # A PcbLib da casa. Ela e COPIADA para a pasta das libs geradas, para o conjunto andar
 # junto: o .LibPkg entao aponta para o arquivo ao lado, por nome, e o pacote fica
 # autocontido — abre e compila em qualquer maquina que enxergue a pasta.
-PCBLIB_ORIGEM = ('\\\\LUCAS-PC' + chr(92) + 'D' + chr(92) + 'ALTIUM LIBRARY ------ LUCAS'
-                 + chr(92) + 'BIBLIOTECA DE FOOTPRINT.PcbLib')
 PCBLIB_NOME = 'FOOTPRINTS ALMOX.PcbLib'
 
 
-def copia_pcblib(destino_dir, origem=PCBLIB_ORIGEM, log=print):
+def copia_pcblib(destino_dir, origem=None, log=print):
     """Traz a PcbLib para junto das SchLib. So copia se faltar ou se a de la mudou —
-       sao 60 MB, e refazer isso a cada sincronizacao seria desperdicio."""
+       sao 60 MB, e refazer isso a cada sincronizacao seria desperdicio.
+
+       Sem origem, a ordem do `tools/libpath.py` para a chave `pcblib`. Diferente da
+       SchLib, a PcbLib NAO e versionada (63 MB por versao no pack, e a release do
+       servidor passaria de 14 para 77 MB dentro do share do ERP): o piso e o proprio
+       alvo, `Libs/Almox/FOOTPRINTS ALMOX.PcbLib`, que ja chega ao servidor como
+       diretorio compartilhado do deploy. Com origem == alvo o tamanho e o mtime batem
+       consigo mesmos e a funcao devolve o alvo sem copiar nada."""
     alvo = os.path.join(destino_dir, PCBLIB_NOME)
+    origem = origem or LP.pcblib(RAIZ)
     if not os.path.exists(origem):
         if os.path.exists(alvo):
             log('   PcbLib de origem fora de alcance; a copia ao lado continua valendo')
@@ -654,6 +678,9 @@ def copia_pcblib(destino_dir, origem=PCBLIB_ORIGEM, log=print):
         if atual.st_size == fonte.st_size and atual.st_mtime >= fonte.st_mtime:
             return alvo
     import shutil
+    # O aviso vem ANTES da copia: sao 63 MB pela rede no meio de uma rodada que normalmente
+    # leva 19 s. Depois da copia, a linha so explica um travamento que ja passou.
+    log('   copiando %s (%.1f MB) de %s...' % (PCBLIB_NOME, fonte.st_size / 1048576.0, origem))
     tmp = alvo + '.tmp'
     shutil.copy2(origem, tmp)
     if os.path.exists(alvo):
@@ -742,7 +769,7 @@ def fatias_que_cabem(itens, cab_modelo):
         n += 1
 
 
-def gera(destino_dir=None, origem=LIB_REAL, log=print):
+def gera(destino_dir=None, origem=None, log=print):
     """Uma biblioteca por familia nos basicos, mais uma unica para os especiais.
 
     Familia que nao caiba num registro de cabecalho sai numerada - "ESPECIAIS 1
@@ -751,6 +778,7 @@ def gera(destino_dir=None, origem=LIB_REAL, log=print):
     """
     import collections
     destino_dir = destino_dir or os.path.join(LIBS, 'Almox')
+    origem = origem or LP.schlib(RAIZ)
     if not os.path.isdir(destino_dir):
         os.makedirs(destino_dir)
     try:

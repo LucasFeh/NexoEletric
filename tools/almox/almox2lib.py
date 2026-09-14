@@ -65,6 +65,15 @@ def montagem_dominante(itens):
     return dom
 
 
+def montagem_declarada(itens):
+    """A montagem que os proprios itens de um VALOR declaram — pelo encapsulamento (SOIC8,
+    DIP8) ou por palavra no nome do Odoo ("(PTH)", "SMD") — e nunca a que o `classifica`
+    presumiu pela dominante da familia (`mont_presumida`). Itens que discordam entre si (o
+    mesmo part number em DIP e em SOIC) nao afirmam nada: ''."""
+    m = {x['mont'] for x in itens if x.get('mont') and not x.get('mont_presumida')}
+    return m.pop() if len(m) == 1 else ''
+
+
 def nome_simbolo_especial(fam, npinos):
     return '%s [%dP]' % (fam, npinos) if npinos else '%s [PINAGEM A DEFINIR]' % fam
 
@@ -342,7 +351,16 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
         # O nome do componente no Altium: encapsulamento + caracteristica.
         # "SMD 0805 10K 1/8W 1% 100ppm". Cada valor vira um componente proprio na lib
         # da familia, entao e este nome que o esquema referencia — nao o da familia.
-        enc = ' '.join(x for x in (s['mont'], (pkgs[0] if pkgs else '')) if x)
+        # A montagem no nome: nos BASICOS e a do SIMBOLO, porque o simbolo e partido por ela
+        # (RESISTOR [SMD] / RESISTOR [PTH]) e o item omisso herda a dominante junto com a lib
+        # em que vai morar — o nome tem de dizer em qual das duas ele esta. Nos ESPECIAIS o
+        # simbolo e por pinagem, nao por montagem, e s['mont'] e so a do PRIMEIRO item que
+        # o criou; ela entrava no nome de todos os valores: um SOIC8 saia "PTH SOIC8 ...", e
+        # o SN65HVD75DR (SMD, sem encapsulamento no Odoo) saiu "PTH SN65HVD75DR" por heranca
+        # da dominante de CIRCUITO INTEGRADO. Ali o nome leva SO o que o proprio item
+        # declara; montagem presumida nao e fato e nao entra em nome de componente.
+        mont = s['mont'] if s['grupo'] == 'b' else montagem_declarada(p['itens'])
+        enc = ' '.join(x for x in (mont, (pkgs[0] if pkgs else '')) if x)
         # ── desenho proprio deste valor ──────────────────────────────────────────────
         # A familia desenha uma vez so, e para o BJT isso e uma afirmacao ERRADA: a seta no
         # emissor diz NPN, e um terco do estoque e PNP. Dividir TRANSISTOR em duas familias

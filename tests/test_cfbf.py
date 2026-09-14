@@ -17,7 +17,10 @@ sys.path.insert(0, os.path.join(RAIZ, 'tools', 'almox'))
 
 import cfbf  # noqa: E402
 
-REAL = '//LUCAS-PC/D/ALTIUM LIBRARY ------ LUCAS/BIBLIOTECA DE ESQUEMA.SchLib'
+# A biblioteca da casa publicada dentro do repositorio (tools/libpath.py). Era um
+# caminho de maquina (D:/ ou a UNC do PC do Lucas), entao este teste PULAVA em
+# silencio em qualquer clone que nao fosse o da bancada -- inclusive no servidor.
+REAL = os.path.join(RAIZ, 'Libs', 'BIBLIOTECA DE ESQUEMA.SchLib')
 
 
 def achata(arvore, prefixo=''):

@@ -49,11 +49,17 @@ import guardiao as G             # noqa: E402
 import schlib_patch as P         # noqa: E402
 import sch_leitor as L           # noqa: E402
 
+sys.path.insert(0, os.path.join(RAIZ, 'tools'))
+import libpath as LP             # noqa: E402
+
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 FIXTURES = (r'D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Libs\Almox', os.path.join(RAIZ, 'Libs', 'Almox'))
-LOCAL = r'D:\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib'
+# A biblioteca da casa publicada dentro do repositorio (tools/libpath.py). Era um
+# caminho de maquina (D:/ ou a UNC do PC do Lucas), entao este teste PULAVA em
+# silencio em qualquer clone que nao fosse o da bancada -- inclusive no servidor.
+LOCAL = os.path.join(RAIZ, 'Libs', 'BIBLIOTECA DE ESQUEMA.SchLib')
 LIBS = ('DIAC ALMOX.SchLib', 'CAPACITOR ALMOX.SchLib')
 GUARDIAO = os.path.join(RAIZ, 'tools', 'symbols', 'guardiao.py')
 RECT = {'g': 'rect', 'x1': -120, 'y1': -90, 'x2': 120, 'y2': 90, 'solid': False}
@@ -96,9 +102,18 @@ for d in (os.path.join('Libs', 'Almox'), os.path.join('tools', 'symbols'), 'casa
     os.makedirs(os.path.join(tmp, d))
 for f in LIBS:
     shutil.copy2(os.path.join(src, f), os.path.join(tmp, 'Libs', 'Almox', f))
+# O espelho copiado entra SEM as marcas do guardião. Ele é a saída do GERADOR neste teste
+# (o `gerador` de mentira o repõe byte a byte a cada rodada), e o gerador nunca escreve
+# `origem`/`protegidos`: quem as escreve é o `atualiza_espelhos`, depois. Copiar o espelho
+# vivo com as marcas que rodadas reais deixaram nele fazia a primeira sincronização — a que
+# começa com o ledger vazio — "tocar" os 39 símbolos marcados só para tirá-las, e a asserção
+# de que nada é tocado quando nada está protegido quebrava por dado, não por código.
+# O corte é no fim da linha e só das duas chaves; o resto do símbolo sai byte a byte igual.
+SEM_MARCA = re.compile(rb', "origem": "altium", "protegidos": \d+\}$', re.M)
 pristine = {}
 for f in G.ESPELHOS_ALMOX:
-    shutil.copy2(os.path.join(RAIZ, 'Libs', f), os.path.join(tmp, 'Libs', f))
+    with open(os.path.join(tmp, 'Libs', f), 'wb') as fh:
+        fh.write(SEM_MARCA.sub(b'}', le_bytes(os.path.join(RAIZ, 'Libs', f))))
     pristine[f] = le_bytes(os.path.join(tmp, 'Libs', f))
 casa = os.path.join(tmp, 'casa', 'BIBLIOTECA DE ESQUEMA.SchLib')
 with open(os.path.join(tmp, 'tools', 'symbols', 'config.json'), 'w', encoding='utf-8') as f:
@@ -333,6 +348,13 @@ try:
     # ── (7) a casa: só a linha do símbolo que mudou ─────────────────────────
     if os.path.isfile(LOCAL):
         shutil.copy2(LOCAL, casa)
+        # O `libpath` guarda por 30 s o `isfile` que deu False num caminho de rede, e as
+        # seções anteriores já perguntaram por esta `casa` quando ela ainda não existia. Sem
+        # zerar o cache, `resolve_schlib` cai na cópia publicada — que numa raiz de tmp não
+        # existe — e o `aplica` falha com ENOENT em vez de editar a lib da casa. Criar
+        # arquivo por fora é privilégio de teste; na bancada quem cria é o Altium, e 30 s de
+        # atraso é o preço combinado por não pagar 1054 ms de stat em share caído.
+        LP.esquece_ausentes()
         esp_cam = os.path.join(tmp, 'Libs', 'schlib.js')
         nomes = L.nomes_pcblib(os.path.join(tmp, 'Libs', 'pcblib.js'))
         dados = L.le_schlib(casa, pcblib_names=nomes)

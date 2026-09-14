@@ -4,8 +4,8 @@
     python tests/test_symserver.py
 
 Monta em tmp um Libs/schlib.js de 3 símbolos, um Libs/pcblib.js mínimo e um
-tools/symbols/config.json apontando para uma CÓPIA da lib local
-(D:\\ALTIUM LIBRARY ------ LUCAS\\BIBLIOTECA DE ESQUEMA.SchLib). Sem a cópia, o que depende
+tools/symbols/config.json apontando para uma CÓPIA da biblioteca da casa publicada no
+repo (Libs/BIBLIOTECA DE ESQUEMA.SchLib). Sem ela, o que depende
 dela vira o caminho "SchLib ausente" (espelho:true, altium:false) e o resto roda igual.
 
 Prova: config; save (o espelho muda SÓ a linha do símbolo e a do generated; altium grava a
@@ -44,7 +44,10 @@ import extrair as E              # noqa: E402
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-LOCAL = r'D:\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib'
+# A biblioteca da casa publicada dentro do repositorio (tools/libpath.py). Era um
+# caminho de maquina (D:/ ou a UNC do PC do Lucas), entao este teste PULAVA em
+# silencio em qualquer clone que nao fosse o da bancada -- inclusive no servidor.
+LOCAL = os.path.join(RAIZ, 'Libs', 'BIBLIOTECA DE ESQUEMA.SchLib')
 RES, RES_NOVO, OUTRO = 'RES [ SMD ]', 'RES [SMD]', None
 
 assert 'symbols' in H.app.blueprints, 'importar o hubserver tem que registrar o blueprint'
@@ -70,7 +73,36 @@ def acha(lib_json, nome):
     return next(s for s in lib_json['symbols'] if s['name'] == nome)
 
 
+# ─── a suíte não pode escrever na biblioteca de verdade ──────────────────────
+# Tudo aqui mora em tempdir; a Libs/ do repositório é só LEITURA (a .SchLib da casa é
+# copiada de lá, nunca escrita). Teste que suja o acervo versionado é um bug de teste —
+# quem roda a suíte depois não sabe mais o que é dele e o que é do teste —, então a
+# invariante fica provada aqui, e não na memória de quem escreveu. A foto é (tamanho,
+# mtime_ns): pega até a regravação de conteúdo idêntico, que comparar hash não pegaria.
+def _foto_libs():
+    fora = {}
+    for raiz, _dirs, files in os.walk(os.path.join(RAIZ, 'Libs')):
+        for f in files:
+            p = os.path.join(raiz, f)
+            try:
+                st = os.stat(p)
+            except OSError:                       # sumiu entre o walk e o stat: conta como mexido
+                fora[p] = None
+                continue
+            fora[p] = (st.st_size, st.st_mtime_ns)
+    return fora
+
+
+def confere_libs(antes):
+    depois = _foto_libs()
+    mexidos = sorted(set(antes) ^ set(depois)) + sorted(p for p in set(antes) & set(depois)
+                                                       if antes[p] != depois[p])
+    assert not mexidos, ('a suite escreveu na Libs/ de verdade (tudo tem que ficar no tempdir): '
+                         + ', '.join(os.path.relpath(p, RAIZ) for p in mexidos))
+
+
 # ─── workspace temporário ─────────────────────────────────────────────────────
+libs_antes = _foto_libs()
 tmp = tempfile.mkdtemp(prefix='symserver-')
 for d in ('Libs', os.path.join('tools', 'symbols'), 'Projects', 'fontes', 'bk'):
     os.makedirs(os.path.join(tmp, d))
@@ -559,7 +591,73 @@ try:
         assert cli.post('/api/symbols/save-almox', json={
             'familia': alvo_fam, 'componente': alvo_comp, 'parts': []}).status_code == 400
         assert cli.post('/api/symbols/save-almox', json={'parts': novo_desenho}).status_code == 400
-        print('save-almox ok')
+
+        # a família pode vir como o NOME do símbolo aberto no hub ("DIAC [PTH]", que é o que o
+        # editor manda): resolve para a família do arquivo, e o ledger continua chaveado por ela
+        r = cli.post('/api/symbols/save-almox', json={
+            'familia': 'DIAC [PTH]', 'componente': alvo_comp, 'parts': novo_desenho, 'altium': False})
+        j = r.get_json()
+        assert r.status_code == 200 and j['ok'] and j['familia'] == 'DIAC' and j['espelho'] and not j['altium'], j
+        assert G.carrega_ledger(tmp)['protegidos']['DIAC'][alvo_comp]['origem'] == 'hub'
+        # componente que está no espelho mas ainda não na .SchLib (entrou no Odoo depois do último
+        # sincronismo): salva no espelho e no ledger, avisa, e o arquivo fica para o sincronismo
+        _vn, espn = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
+        simn = next(x for x in espn['symbols'] if x['name'] == 'DIAC [PTH]')
+        novo_val = copy.deepcopy(simn['valores'][0])
+        novo_val.update(altium='PTH NOVO-DO-ODOO', label='NOVO-DO-ODOO', id=999)
+        novo_val.pop('parts', None)
+        simn['valores'].append(novo_val)
+        G.grava_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'), _vn, espn)
+        r = cli.post('/api/symbols/save-almox', json={
+            'familia': 'DIAC [PTH]', 'componente': 'PTH NOVO-DO-ODOO', 'parts': novo_desenho, 'altium': True})
+        j = r.get_json()
+        assert r.status_code == 200 and j['ok'] and j['espelho'] and j['protegido'] and not j['altium'], j
+        assert any('próximo sincronismo' in a for a in j['avisos']), j['avisos']
+        assert G.carrega_ledger(tmp)['protegidos']['DIAC']['PTH NOVO-DO-ODOO']['origem'] == 'hub'
+        assert 'PTH NOVO-DO-ODOO' not in G.le_familia(cam), 'a SchLib não pode ter sido tocada'
+        _vn2, espn2 = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
+        vn = next(v for x in espn2['symbols'] if x['name'] == 'DIAC [PTH]' for v in x['valores'] if v['altium'] == 'PTH NOVO-DO-ODOO')
+        assert G.fp_parts(vn['parts']) == G.fp_parts(j['parts']), 'o valor novo ficou com o desenho no espelho'
+        # limpa o valor sintético: o teste do almox-sync, logo abaixo, conta os protegidos da fixture
+        with G._lock:
+            led = G.carrega_ledger(tmp)
+            assert G._tira_prot(led, 'DIAC', 'PTH NOVO-DO-ODOO')
+            G.grava_ledger(tmp, led)
+        simn2 = next(x for x in espn2['symbols'] if x['name'] == 'DIAC [PTH]')
+        simn2['valores'] = [v for v in simn2['valores'] if v['altium'] != 'PTH NOVO-DO-ODOO']
+        G.grava_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'), _vn2, espn2)
+        print('save-almox ok (familia pelo nome do simbolo; componente que ainda nao esta na SchLib)')
+
+        # ── atualiza_espelhos: o desenho PROPRIO do componente volta ao valor depois do sync ──
+        # O gerador refaz os valores do snapshot e apaga valores[].parts; o guardiao poe de volta
+        # o do componente protegido cuja geometria NAO e a do simbolo (a mais frequente). Sem
+        # isso o desenho de um componente sumia do hub no sincronismo seguinte. Nao precisa da
+        # .SchLib: e so espelho + ledger, num simbolo qualquer com 3+ valores e sem protecao.
+        led = G.carrega_ledger(tmp)
+        _vg, espg = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
+        ja_prot = {q.get('simbolo') for f_ in led['protegidos'].values() for q in f_.values()}
+        simg = next(x for x in espg['symbols']
+                    if len(x.get('valores') or []) >= 3 and x['name'] not in ja_prot and 'origem' not in x)
+        fam_g, nome_g = simg['familia'], simg['name']
+        minoria, maioria = simg['valores'][0]['altium'], [v['altium'] for v in simg['valores'][1:3]]
+        for c in maioria:
+            G._poe_prot(led, fam_g, c, mod3, 'hub', nome_g)                # a maioria: mod3
+        G._poe_prot(led, fam_g, minoria, novo_desenho, 'hub', nome_g)      # a minoria: outro desenho
+        for v in simg['valores']:
+            v.pop('parts', None)                                           # como o gerador deixa
+        G.grava_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'), _vg, espg)
+        tocados = G.atualiza_espelhos(tmp, led, log=lambda *a: None)
+        assert nome_g in tocados, tocados
+        _vg2, espg2 = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
+        simg2 = next(x for x in espg2['symbols'] if x['name'] == nome_g)
+        assert G.fp_parts(simg2['parts']) == G.fp_parts(mod3) and simg2['protegidos'] == 3, 'o simbolo fica com a geometria da maioria'
+        vg = {v['altium']: v for v in simg2['valores']}
+        assert G.fp_parts(vg[minoria]['parts']) == G.fp_parts(novo_desenho), 'a minoria volta para o proprio valor'
+        assert all('parts' not in vg[c] for c in maioria), 'quem tem a geometria do simbolo nao precisa de parts proprio'
+        assert G.atualiza_espelhos(tmp, led, log=lambda *a: None) == [], 'segunda passada tem que ser vazia'
+        # o ledger em disco nao tem essas protecoes: nada foi gravado nele, e o resto do teste segue
+        G.atualiza_espelhos(tmp, G.carrega_ledger(tmp), log=lambda *a: None)
+        print('atualiza_espelhos devolve o desenho proprio do componente ao espelho ok (%s)' % nome_g)
 
         # almox-sync: reserva, 409, 400 sem senha, e o stream de verdade (sem o gerador)
         S._sync_runs.clear()
@@ -592,4 +690,5 @@ finally:
     H.ROOT, S.ROOT = real_root, real_root
     shutil.rmtree(tmp, ignore_errors=True)
 
+confere_libs(libs_antes)
 print('test_symserver OK')

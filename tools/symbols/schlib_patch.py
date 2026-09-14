@@ -26,8 +26,9 @@ O que foi apurado na biblioteca real e manda no que está escrito aqui:
                        (o 24LC256 tem 0x38 com os dois visíveis; o RES [ SMD ] tem 0x20
                        com os dois escondidos). 0x20 está na maioria mas NÃO em todos —
                        bits altos na lib: 0x38 ×1932, 0x30 ×831, 0x28 ×722, 0x20 ×271,
-                       0x18 ×70 — e o que ele significa não foi apurado. (O comentário
-                       do schlib_bin.py, "0x20 = mostra nome", está errado.) Os bits
+                       0x18 ×70 — e o que ele significa não foi apurado. (O schlib_bin.py
+                       dizia "0x20 = mostra nome"; hoje concorda, e o pino que ele gera
+                       sai 0x30|rot — só o número à vista.) Os bits
                        0x08/0x10 vêm do pino do hub: `hideName`/`hideNum` true apaga o
                        bit, ausente (ou false) acende — é o que o schlib-v2 diz
                        (ausente = visível) e o que o olho da ficha mostra na tela;

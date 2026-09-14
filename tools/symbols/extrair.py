@@ -5,13 +5,13 @@
                                     [--relatorio tools/symbols/relatorio.txt] [--so schlib|schdoc|intlib]
                                     [--limite N] [--fonte CAMINHO ...]
 
-Lê `.SchLib`, `.SchDoc` e `.IntLib` com o `sch_leitor.py`, fica só com a geometria (pinos e
-gráficos — nada de descrição, parâmetros ou footprint), deduplica por fingerprint e MESCLA no
-`Libs/symbols-lib.js` (formato `symlib-v1`): o que já existe ganha `usos`/`fontes`/`aliases`,
-o que é novo entra com id sequencial. Nome e id de quem já estava nunca mudam — quem renomeia
-ou apaga é o usuário, pelo hub.
+Lê `.SchLib`, `.SchDoc` e `.IntLib` com o `sch_leitor.py`, fica com a geometria (pinos e
+gráficos) e a descrição do componente — nada de parâmetros ou footprint —, deduplica por
+fingerprint e MESCLA no `Libs/symbols-lib.js` (formato `symlib-v1`): o que já existe ganha
+`usos`/`fontes`/`aliases`, o que é novo entra com id sequencial. Nome e id de quem já estava
+nunca mudam — quem renomeia ou apaga é o usuário, pelo hub.
 
-Três decisões que valem a pena conhecer:
+Quatro decisões que valem a pena conhecer:
 
   fingerprint   sha1 do JSON canônico da geometria arredondada a 1 mil (ângulos a 0,01°),
                 pinos ordenados por posição e gráficos em ordem canônica. NÃO recentra: a
@@ -32,6 +32,26 @@ Três decisões que valem a pena conhecer:
   nome básico   heurística POR FORMA (veja `_reconhece`): cada regra está documentada onde
                 mora. Quando nenhuma casa, o nome é o de origem limpo de "[ SMD ]"/"PTH".
                 Multi-part não reconhecido e todo `ci` recebem " · parte N/M".
+  descrição     o `ComponentDescription` do Altium, escolhida entre as concorrentes: como a
+                dedup é por FORMA, um mesmo fingerprint recebe a descrição de dezenas de
+                origens (o campeão medido tem 20: 'Resistor Metal Filme' 337 vezes,
+                'Resistor Metal Filme 1% SMD 1206' 95, '...0805' 23, 'Resistor PR01' 10).
+                A preferência da SchLib da casa vale enquanto a candidata dela não estiver
+                esmagada pela frequência (`PISO_CASA`); senão a mais frequente, o empate vai
+                para a mais longa (diz mais) e o empate que sobra para a ordem alfabética,
+                senão duas rodadas iguais dariam arquivos diferentes. Vazia e o placeholder
+                "AJUDA" (16 símbolos da casa) não concorrem.
+                A escolha é REFEITA a cada varredura que enxerga tudo o que já tinha dado
+                descrição ao símbolo (veja `_cobre`): sem isso, mudar a regra não conserta
+                rótulo nenhum — o que está no arquivo fica congelado para sempre. Uma rodada
+                com `--fonte` num projeto só não cobre as fontes antigas e, por isso, não
+                rebaixa o que a varredura inteira escolheu.
+  olho do pino  `hideNum`/`hideName` NÃO são complemento: no schlib-v2 a chave ausente é um
+                valor e quer dizer VISÍVEL. Então o olho é copiado inteiro das cópias recém
+                lidas — põe e TIRA —, pela assinatura mais frequente do lote e só quando os
+                pinos casam um a um sem ambiguidade (`_assinatura_olho`); sob a mesma trava
+                de cobertura da descrição, que é o que protege o símbolo desenhado no hub
+                (fonte 'hub', que varredura nenhuma cobre) e a rodada parcial.
 
 O log de progresso vai para stdout linha a linha, com flush — o hubserver retransmite por SSE.
 """
@@ -55,10 +75,31 @@ import sch_leitor as L                                  # noqa: E402
 CONFIG_PADRAO = os.path.join(BASE, 'config.json')
 SAIDA_PADRAO = os.path.join(LIBS, 'symbols-lib.js')
 RELATORIO_PADRAO = os.path.join(BASE, 'relatorio.txt')
+MOSTRA_CANDIDATAS = 5           # descrições concorrentes por símbolo no relatório
 EXT = {'.schlib': 'schlib', '.schdoc': 'schdoc', '.intlib': 'intlib'}
 PARTE = ' · parte %d/%d'
 CHAVES = ('id', 'name', 'kind', 'fp', 'aliases', 'fontes', 'usos', 'desde', 'pins', 'graphics')
+# a descrição é o único campo que nem todo símbolo tem: quem desenha um corpo no editor do
+# hub não tem nenhuma para dar (o `/api/symbols/lib` monta as CHAVES e para aí), e quem vem
+# de um arquivo do Altium quase sempre tem. Ela sai na linha logo depois do nome, e `_linha`
+# grava a chave sempre — vazia quando não há — para o arquivo não ter linha de dois feitios.
+CHAVES_ARQ = CHAVES[:2] + ('desc',) + CHAVES[2:]
 CORES = ('color', 'fill')
+LIXO_DESC = ('AJUDA',)          # 16 símbolos da casa trazem isso no campo; é chamada de ajuda
+RUIM = '\ufffd'                  # o caractere de substituição; veja `_sem_dano`
+# O piso da preferência da casa. O fingerprint é GRÁFICO: resistor, fusível e PTC são o mesmo
+# retângulo e caem no mesmo símbolo. A SchLib da casa descreve a FORMA — ela chama aquele
+# retângulo de "FUSÍVEL" —, o uso descreve a PEÇA — os projetos chamam o mesmo retângulo de
+# "Resistor Metal Filme", 2668 vezes. Dar a palavra final à casa trocou dezenas de rótulos
+# visíveis pela descrição de outro componente. Com o piso, a preferência da casa só vale
+# quando o que a CASA disse tem pelo menos esta fração da contagem da mais frequente.
+#
+# O que entra na conta é a contagem da casa (`casa[d]`), não o total daquela frase no
+# acervo: a descrição viaja com o componente colocado na folha, então cada projeto que usa
+# o símbolo da casa repete a frase da casa. Somar essas cópias seria contar a mesma
+# autoridade várias vezes — medido no capacitor, 74 ocorrências da frase da casa e 72 delas
+# são cópias dela mesma, contra 356 de "Capacitor Cerâmico" escrito pelos projetos.
+PISO_CASA = 0.10
 
 
 def _log(msg):
@@ -113,10 +154,128 @@ def _ciclo(pts, fechado):
 
 
 def _pino(p):
-    # só o que é desenho: hideNum/hideName (visibilidade do texto do pino) ficam de fora
-    return OrderedDict([('num', str(p.get('num', ''))), ('name', str(p.get('name', ''))),
-                        ('x', _i(p.get('x'))), ('y', _i(p.get('y'))), ('len', _i(p.get('len'))),
-                        ('orient', _i(p.get('orient')) % 360), ('type', str(p.get('type', 'Passive')))])
+    q = OrderedDict([('num', str(p.get('num', ''))), ('name', str(p.get('name', ''))),
+                     ('x', _i(p.get('x'))), ('y', _i(p.get('y'))), ('len', _i(p.get('len'))),
+                     ('orient', _i(p.get('orient')) % 360), ('type', str(p.get('type', 'Passive')))])
+    # hideNum/hideName ("o olho" do pino) seguem no símbolo guardado — é desenho, o usuário
+    # vê a diferença — mas não são identidade: `fingerprint` monta a chave campo a campo e
+    # nunca os lê. Só quando escondido, como o leitor os emite: ausente = visível.
+    for k in ('hideNum', 'hideName'):
+        if p.get(k):
+            q[k] = True
+    return q
+
+
+def _desc(s):
+    """a descrição como ela vale para a escolha: corridas de espaço viram uma só (o campo
+    guarda o que o usuário digitou, e uma delas traz cinco descrições coladas com cem espaços
+    no meio). Vazia, ou o placeholder "AJUDA", não concorre."""
+    d = ' '.join(str(s or '').split())
+    return '' if d.upper() in LIXO_DESC else d
+
+
+def _sem_dano(cands):
+    """-> `cands` com a candidata danificada somada à gêmea limpa, quando existe uma só.
+
+    O Altium grava o campo duas vezes no registro (`%UTF8%` e latin-1) e em alguns arquivos
+    a cópia UTF-8 já chega com U+FFFD no lugar da letra acentuada — o byte morreu antes de
+    o arquivo ser gravado, veja a nota "U+FFFD" no `sch_leitor`. Isso não é outra descrição:
+    é a MESMA frase com um buraco. Contada à parte, a grafia estragada ganhava da inteira na
+    frequência — medido, "Resistor Vari<?>vel NTC" 10 contra "Resistor Variável NTC" 4, e
+    o rótulo saindo ilegível na tela. Somadas, a inteira ganha com 14.
+
+    Sem gêmea, ou com mais de uma, a danificada continua candidata como está: o arquivo diz
+    aquilo, e adivinhar a letra seria inventar dado."""
+    todas = Counter()
+    for c in cands:
+        todas.update(c)
+    danificadas = [d for d in todas if RUIM in d]
+    if not danificadas:
+        return cands
+    limpas = [d for d in todas if RUIM not in d]
+    mapa = {}
+    for d in danificadas:
+        gemeas = [c for c in limpas if len(c) == len(d) and all(x == RUIM or x == y for x, y in zip(d, c))]
+        if len(gemeas) == 1:
+            mapa[d] = gemeas[0]
+    if not mapa:
+        return cands
+    fora = []
+    for c in cands:
+        nova = Counter()
+        for d, n in c.items():
+            nova[mapa.get(d, d)] += n
+        fora.append(nova)
+    return tuple(fora)
+
+
+def _escolhe_desc(cands):
+    """-> (escolhida, [(descrição, quantas vezes)...] para o relatório). `cands` é
+    [Counter da lib preferida, Counter do resto].
+
+    (i) a candidata da casa ganha, mas só enquanto o que a casa disse não estiver esmagado
+    pela frequência — `PISO_CASA` da contagem da mais frequente, e o comentário da constante
+    diz por que a conta é com `casa[d]` e não com o total;
+    (ii) senão a mais FREQUENTE; (iii) empate, a mais LONGA; (iv) empate, a alfabética."""
+    cands = _sem_dano(cands)
+    todas = Counter()
+    for c in cands:
+        todas.update(c)
+    if not todas:
+        return '', []
+    ordem = lambda d: (-todas[d], -len(d), d)          # a mesma dos dois lados e do relatório
+    campea = min(todas, key=ordem)
+    casa = cands[0] if cands else None
+    escolhida = campea
+    if casa:
+        # a candidata da casa: a que a casa mais repete; empate, a que o acervo mais apoia
+        preferida = min(casa, key=lambda d: (-casa[d],) + ordem(d))
+        if casa[preferida] >= PISO_CASA * todas[campea]:
+            escolhida = preferida
+    return escolhida, sorted(todas.items(), key=lambda kv: (-kv[1], -len(kv[0]), kv[0]))
+
+
+def _pos(q):
+    """a posição de um pino: é ela que amarra o olho ao pino certo"""
+    return (q.get('x'), q.get('y'), q.get('len'), q.get('orient'))
+
+
+def _assinatura_olho(vistos):
+    """o olho de uma cópia recém-lida, amarrado à posição de cada pino:
+    ((x,y,len,orient), hideNum, hideName) por pino, na ordem canônica de `normaliza`.
+
+    -> None quando dois pinos dividem a mesma posição. Aí a correspondência é AMBÍGUA e o
+    olho não pode ser aplicado: para `kind='generico'` o fingerprint nem olha num/name
+    (veja `fingerprint`), então dois pinos empilhados sairiam com os flags trocados — o
+    número some de um pino e aparece no outro. Recusar é mais seguro que adivinhar."""
+    chaves = [_pos(q) for q in vistos]
+    if len(set(chaves)) != len(chaves):
+        return None
+    return tuple((k, bool(q.get('hideNum')), bool(q.get('hideName'))) for k, q in zip(chaves, vistos))
+
+
+def _aplica_olho(guardados, assinatura):
+    """copia o olho INTEIRO da assinatura para os pinos guardados -> aplicou?
+
+    No schlib-v2 a chave ausente não é "sem opinião": é um valor, e quer dizer VISÍVEL (o
+    leitor só emite flag onde o pino está escondido, e o `hub-symed` desenha assim). Por
+    isso aqui se põe E se tira: completar só o que falta fazia o símbolo acumular flags de
+    qualquer origem que escondesse, e o número de um pino deixado de propósito à vista
+    sumia da tela na varredura seguinte. Recusa (devolve False) se a correspondência por
+    posição não for exata e sem ambiguidade."""
+    chaves = [_pos(q) for q in guardados]
+    if len(chaves) != len(assinatura) or len(set(chaves)) != len(chaves):
+        return False
+    if any(k != a[0] for k, a in zip(chaves, assinatura)):
+        return False
+    for q, (_k, num, nome) in zip(guardados, assinatura):
+        q.pop('hideNum', None)              # sai e volta para a ordem das chaves ser sempre
+        q.pop('hideName', None)             # a mesma: o arquivo tem que sair byte a byte igual
+        if num:
+            q['hideNum'] = True
+        if nome:
+            q['hideName'] = True
+    return True
 
 
 def _cores(g):
@@ -808,26 +967,27 @@ def _arquivos(config, so=None):
 
 
 def _le(caminho, tipo):
-    """-> [(nome_origem, part, partcount, pins, graphics)] de um arquivo"""
+    """-> [(nome_origem, desc, part, partcount, pins, graphics)] de um arquivo"""
     fora = []
     if tipo == 'schdoc':
         for c in L.le_schdoc(caminho):
             if not c['pins']:
                 continue
-            fora.append((c['ref'] or c['designator'] or 'sem nome', c['part'], c['partcount'],
-                         c['pins'], c['graphics']))
+            fora.append((c['ref'] or c['designator'] or 'sem nome', c.get('description') or '',
+                         c['part'], c['partcount'], c['pins'], c['graphics']))
         return fora
     syms = L.le_intlib(caminho, com_footprints=False) if tipo == 'intlib' \
         else L.le_schlib(caminho, com_footprints=False)['symbols']
     for s in syms:
         for p in s['parts']:
             if p['pins']:
-                fora.append((s['name'], p['part'], s['partcount'], p['pins'], p['graphics']))
+                fora.append((s['name'], s.get('description') or '', p['part'], s['partcount'],
+                             p['pins'], p['graphics']))
     return fora
 
 
 def varre(config, log=_log, so=None, limite=None, ilegiveis=None, stats=None):
-    """iterador de (origem_basename, nome_origem, part, partcount, pins, graphics).
+    """iterador de (origem_basename, nome_origem, desc, part, partcount, pins, graphics).
     Arquivo ilegível vai para o log (e para `ilegiveis`, se passado) e a varredura segue;
     `stats['arquivos']` recebe quantos foram lidos (o basename repete entre pastas)."""
     arqs = _arquivos(config, so)
@@ -850,8 +1010,8 @@ def varre(config, log=_log, so=None, limite=None, ilegiveis=None, stats=None):
         log('  [%d/%d] %s — %d componente%s' % (i, total, nome, len(itens), '' if len(itens) == 1 else 's'))
         if stats is not None:
             stats['arquivos'] = stats.get('arquivos', 0) + 1
-        for nome_origem, part, partcount, pins, graphics in itens:
-            yield nome, nome_origem, part, partcount, pins, graphics
+        for nome_origem, desc, part, partcount, pins, graphics in itens:
+            yield nome, nome_origem, desc, part, partcount, pins, graphics
 
 
 # ─── mescla ───────────────────────────────────────────────────────────────────
@@ -883,7 +1043,8 @@ def _lib_saneada(lib_atual, log):
         if not isinstance(s, dict) or not isinstance(s.get('pins'), list) or not isinstance(s.get('graphics'), list):
             log('  biblioteca atual: entrada sem pins/graphics ignorada (%r)' % (s.get('id') if isinstance(s, dict) else s))
             continue
-        e = OrderedDict((k, s.get(k)) for k in CHAVES)
+        e = OrderedDict((k, s.get(k)) for k in CHAVES_ARQ)
+        e['desc'] = _desc(e['desc'])
         e['aliases'] = [str(a) for a in (e['aliases'] if isinstance(e['aliases'], list) else [])]
         e['fontes'] = [str(f) for f in (e['fontes'] if isinstance(e['fontes'], list) else [])]
         e['usos'] = _i(e['usos'])
@@ -935,14 +1096,21 @@ def mescla(lib_atual, achados, hoje, log=_log, ilegiveis=None, stats=None, prefe
 
     novos = OrderedDict()
     classes, origem_de, forma_de = Counter(), {}, {}
-    repetidos, arquivos = Counter(), set()
-    for origem, nome_origem, part, partcount, pins, graphics in achados:
+    repetidos, arquivos, candidatas, olhos = Counter(), set(), {}, {}
+    for origem, nome_origem, desc, part, partcount, pins, graphics in achados:
         arquivos.add(origem)
         npins, ngr = normaliza(pins, graphics)
         kind, nome, visto = _classifica(npins, ngr, nome_origem, part, partcount)
         classes[nome.split(PARTE[:3])[0].split(' #')[0] if kind == 'generico' else '(ci) ' + nome_origem] += 1
         alias = nome_origem if partcount <= 1 else nome_origem + PARTE % (part, partcount)
         fp = fingerprint(npins, ngr, kind)
+        d = _desc(desc)
+        if d:
+            cands = candidatas.setdefault(fp, (Counter(), Counter()))
+            cands[0 if origem.lower() == preferida else 1][d] += 1
+        assinatura = _assinatura_olho(npins)
+        if assinatura is not None:
+            olhos.setdefault(fp, Counter())[assinatura] += 1
         s = por_fp.get(fp) or novos.get(fp)
         if s is not None:
             repetidos[fp] += 1
@@ -953,11 +1121,48 @@ def mescla(lib_atual, achados, hoje, log=_log, ilegiveis=None, stats=None, prefe
             if origem not in fontes_antes.get(fp, ()):
                 s['usos'] += 1
             continue
-        novos[fp] = OrderedDict([('id', None), ('name', nome), ('kind', kind), ('fp', fp), ('aliases', [alias]),
-                                 ('fontes', [origem]), ('usos', 1), ('desde', hoje),
+        novos[fp] = OrderedDict([('id', None), ('name', nome), ('desc', ''), ('kind', kind), ('fp', fp),
+                                 ('aliases', [alias]), ('fontes', [origem]), ('usos', 1), ('desde', hoje),
                                  ('pins', npins), ('graphics', ngr)])
         origem_de[fp] = origem
         forma_de[fp] = _limpa(alias) if visto else None      # com a parte, se multi-part
+
+    # A descrição e o olho só podem ser decididos com a contagem fechada: quem ganha é o do
+    # lote inteiro, não o que chegou primeiro.
+    #
+    # `_cobre` é a trava que permite REFAZER a escolha sem estragar nada. Só reescreve o que
+    # já estava no arquivo quando esta rodada enxergou todas as fontes que já tinham dado
+    # descrição/olho àquele símbolo: aí ela tem, no mínimo, a prova que a rodada anterior
+    # tinha, e regravar é atualizar, não rebaixar. Uma rodada com `--fonte` num projeto só
+    # não cobre as fontes antigas e passa reto; símbolo desenhado no hub (fonte 'hub') nenhuma
+    # varredura cobre, então o desenho e o olho do usuário ficam intactos. Símbolo novo não
+    # tem fonte anterior — conjunto vazio cabe em qualquer rodada — e é sempre decidido aqui.
+    def _cobre(fp):
+        return fontes_antes.get(fp, set()) <= arquivos
+
+    disputadas = []
+    for fp, cands in candidatas.items():
+        s = por_fp.get(fp) or novos.get(fp)
+        if s is None:
+            continue
+        escolhida, todas = _escolhe_desc(cands)
+        if escolhida and (not _desc(s.get('desc')) or _cobre(fp)):
+            s['desc'] = escolhida
+        if len(todas) > 1:
+            disputadas.append((fp, s['desc'], todas))
+    disputadas.sort(key=lambda d: (-len(d[2]), -d[2][0][1], d[0]))
+
+    # o olho: a assinatura mais frequente do lote, copiada inteira (põe e tira). O desempate
+    # é pelo `repr` da assinatura, e não pela ordem de chegada, senão duas rodadas com os
+    # arquivos em ordem diferente dariam arquivos diferentes.
+    olhos_postos = 0
+    for fp, votos in olhos.items():
+        s = por_fp.get(fp) or novos.get(fp)
+        if s is None or not _cobre(fp):
+            continue
+        vence = min(votos.items(), key=lambda kv: (-kv[1], repr(kv[0])))[0]
+        if _aplica_olho(s['pins'], vence):
+            olhos_postos += 1
 
     lista = []
 
@@ -983,7 +1188,9 @@ def mescla(lib_atual, achados, hoje, log=_log, ilegiveis=None, stats=None, prefe
               'arquivos': (stats or {}).get('arquivos', len(arquivos)),
               'ilegiveis': list(ilegiveis or []), 'lista_novos': lista,
               'repetidos_por': OrderedDict((por_nome[fp], n) for fp, n in repetidos.most_common()),
-              'classes': OrderedDict(classes.most_common())}
+              'classes': OrderedDict(classes.most_common()),
+              'olhos': olhos_postos,
+              'desc_disputadas': [(por_nome[fp], venc, todas) for fp, venc, todas in disputadas]}
     log('%d novo(s), %d repetido(s) em %d arquivo(s)%s' % (
         len(novos), resumo['repetidos'], resumo['arquivos'],
         ', %d ilegível(is)' % len(resumo['ilegiveis']) if resumo['ilegiveis'] else ''))
@@ -992,7 +1199,9 @@ def mescla(lib_atual, achados, hoje, log=_log, ilegiveis=None, stats=None, prefe
 
 # ─── arquivo symlib-v1 ────────────────────────────────────────────────────────
 def _linha(s):
-    return json.dumps(OrderedDict((k, s.get(k)) for k in CHAVES), ensure_ascii=True, separators=(',', ':'))
+    e = OrderedDict((k, s.get(k)) for k in CHAVES_ARQ)
+    e['desc'] = e['desc'] or ''          # símbolo desenhado no hub não tem: vazia, nunca null
+    return json.dumps(e, ensure_ascii=True, separators=(',', ':'))
 
 
 def escreve_symlib(lib, caminho):
@@ -1034,12 +1243,31 @@ def relatorio(lib, resumo, config, saida):
           'Fontes varridas:'] + ['  ' + str(f) for f in config.get('fontes') or []]
     li += ['', 'Arquivos lidos: %d   ilegiveis: %d' % (resumo['arquivos'], len(resumo['ilegiveis']))]
     li += ['  ' + x for x in resumo['ilegiveis']]
+    li += ['Olho do pino (hideNum/hideName) recopiado em %d simbolo(s)' % resumo.get('olhos', 0)]
     li += ['', 'Novos (%d):' % resumo['novos']]
     li += ['  %s  %-40s %-8s %s' % (i, n, k, o) for i, n, k, o in resumo['lista_novos']]
     li += ['', 'Repetidos (%d ocorrencias):' % resumo['repetidos']]
     li += ['  %5d  %s' % (n, nome) for nome, n in resumo['repetidos_por'].items()]
     li += ['', 'Classificacao (nome basico -> quantos):']
     li += ['  %5d  %s' % (n, nome) for nome, n in resumo['classes'].items()]
+    # escolher a descrição é a única coisa que esta varredura joga fora (as candidatas que
+    # perderam), então ela presta contas aqui em vez de engordar o symbols-lib.js com a
+    # procedência de cada uma: é este o arquivo que se abre quando o rótulo sai errado
+    disputadas = resumo.get('desc_disputadas') or []
+    li += ['', 'Descricoes disputadas (%d simbolos; a escolhida vem marcada, ate %d candidatas):'
+           % (len(disputadas), MOSTRA_CANDIDATAS)]
+    for nome, venc, todas in disputadas:
+        # a escolhida abre a lista mesmo quando perde na contagem: é quase sempre o caso
+        # interessante (a da lib da casa ganhando de uma mais frequente), e de nada adianta
+        # o relatório mostrar cinco candidatas e esconder justamente a que está no arquivo
+        quantas = dict(todas)
+        li.append('  ' + nome)
+        li.append('    <- %s  %s' % ('%5d' % quantas[venc] if venc in quantas else '    -', venc))
+        resto = [(d, n) for d, n in todas if d != venc]
+        for d, n in resto[:MOSTRA_CANDIDATAS - 1]:
+            li.append('       %5d  %s' % (n, d))
+        if len(resto) >= MOSTRA_CANDIDATAS:
+            li.append('             e mais %d' % (len(resto) - MOSTRA_CANDIDATAS + 1))
     return '\n'.join(li) + '\n'
 
 

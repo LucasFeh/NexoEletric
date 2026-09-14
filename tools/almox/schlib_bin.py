@@ -152,7 +152,7 @@ def le_pino(pl):
     p['descricao'] = desc
     p['formal'] = pl[i]
     p['eletrico'] = pl[i + 1]
-    p['conglomerado'] = pl[i + 2]               # bits 0-1 = rotacao, 4-5 = mostrar nome/desig
+    p['conglomerado'] = pl[i + 2]               # bits 0-1 rotacao; 0x08 nome, 0x10 designador a vista
     p['comprimento'] = struct.unpack('<h', pl[i + 3:i + 5])[0]
     p['x'] = struct.unpack('<h', pl[i + 5:i + 7])[0]
     p['y'] = struct.unpack('<h', pl[i + 7:i + 9])[0]
@@ -186,17 +186,28 @@ def escreve_pino(p):
 ELETRICO = {'Input': 0, 'IO': 1, 'Output': 2, 'OpenCollector': 3, 'Passive': 4,
             'HiZ': 5, 'OpenEmitter': 6, 'Power': 7}
 ROTACAO = {0: 0, 90: 1, 180: 2, 270: 3}
-# bits 4 e 5 do conglomerado: mostrar designador e mostrar nome
-CONG_MOSTRA_DESIG, CONG_MOSTRA_NOME = 0x10, 0x20
-# CENSO dos 3.834 pinos da BIBLIOTECA DE ESQUEMA.SchLib real, para quem vier depois:
-#   bits 0-1 rotacao (0: 1783, 2: 1470, 3: 309, 1: 272)
-#   0x08 ligado em 2.732 - NAO e "mostrar nome". Testei essa hipotese e ela morreu no
-#        2N3904, que tem nome "C" e designador "1" (nome != designador, portanto o
-#        nome diz algo) e mesmo assim vem com 0x31, sem o 0x08. O significado dele
-#        continua desconhecido; nao mexa sem uma medicao que feche.
-#   0x10 ligado em 2.841 · 0x20 ligado em 3.764 · 0x04/0x40/0x80 nunca.
-# O par 0x20|0x10 que este modulo emite e o mesmo do 2N3904 real (0x31 = 0x20|0x10|rot),
-# e e o que tests/test_schlib_bin.py exige byte a byte.
+# Bits altos do conglomerado do pino (bits 0-1 sao a rotacao):
+#   0x08  nome a vista        0x10  designador a vista
+#   0x20  significado desconhecido; ligado em 3.764 dos 3.834 pinos da lib da casa. O pino
+#         novo o leva, como quase todo pino que o Altium gravou.
+CONG_MOSTRA_NOME, CONG_MOSTRA_DESIG, CONG_LEGADO = 0x08, 0x10, 0x20
+# CENSO dos 3.834 pinos da BIBLIOTECA DE ESQUEMA.SchLib real (bits altos), para quem vier
+# depois: 0x38 x1940 · 0x30 x831 · 0x28 x722 · 0x20 x271 · 0x18 x70; 0x04/0x40/0x80 nunca.
+# O que fecha o significado nao e a contagem, e QUEM esta em cada grupo:
+#   0x18  os dois microcontroladores (DSPIC30F3011, ESP 32): RB0, IO4... sao nomes que
+#         ninguem esconde num MCU -> o 0x08 e o nome, e o 0x20 nao e visibilidade nenhuma
+#   0x38  24LC256, 74HCT4094, AD210BN: nome e numero a vista
+#   0x30  2N3904 (1=C 2=B 3=E), AP795 (1=1 2=2): so o numero. E no 7805 SO o pino 2=GND
+#         e 0x30 enquanto 1=IN e 3=OUT sao 0x38 — o nome do GND foi escondido de proposito
+#   0x28  BARRA TERMINAL n VIAS, CON5, Cone 10: so o nome (que e igual ao numero)
+#   0x20  BC327/BC337 (C/B/E), BOBINA, Bateria (+/-): nada a vista
+# E e o que o AltiumSharp e o python-altium documentam (0x08 DisplayNameVisible, 0x10
+# DesignatorVisible). Uma versao anterior deste modulo dizia "0x20 = mostrar nome" a partir
+# do 2N3904 (0x31, nome C != designador 1, "logo o nome diz algo") — mas o 2N3904 e
+# justamente um simbolo que ESCONDE o nome; o hub le esse bit com o sch_leitor
+# (tools/symbols) desde sempre como 0x08, e o Altium concorda com ele.
+# O pino que este modulo gera sai 0x30|rot por padrao — so o numero a vista, os mesmos
+# bytes do 2N3904 real, que e o que tests/test_schlib_bin.py exige byte a byte.
 
 
 def mil(v):
@@ -205,9 +216,13 @@ def mil(v):
 
 
 def pino(num, nome, x, y, comprimento, orient, eletrico='Passive', parte=1,
-         mostra_nome=True, mostra_desig=True):
-    """Monta um pino a partir dos mesmos campos que o espelho schlib-v2 usa."""
-    cong = ROTACAO.get(((orient % 360) + 360) % 360, 0)
+         mostra_nome=False, mostra_desig=True):
+    """Monta um pino a partir dos mesmos campos que o espelho schlib-v2 usa.
+
+    Por padrao so o DESIGNADOR fica a vista (0x30|rot): o nome do pino quase sempre
+    repete o numero, e a vista ele punha a mesma coisa duas vezes ao lado de cada pino.
+    `mostra_nome=True` acende o 0x08 — e o que o olho da ficha Simbolos do hub liga."""
+    cong = ROTACAO.get(((orient % 360) + 360) % 360, 0) | CONG_LEGADO
     if mostra_desig:
         cong |= CONG_MOSTRA_DESIG
     if mostra_nome:

@@ -53,7 +53,10 @@ import schlib_bin as SB          # noqa: E402
 import sch_leitor as L           # noqa: E402
 import schlib_patch as P         # noqa: E402
 
-LOCAL = r'D:\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib'
+# A biblioteca da casa publicada dentro do repositorio (tools/libpath.py). Era um
+# caminho de maquina (D:/ ou a UNC do PC do Lucas), entao este teste PULAVA em
+# silencio em qualquer clone que nao fosse o da bancada -- inclusive no servidor.
+LOCAL = os.path.join(RAIZ, 'Libs', 'BIBLIOTECA DE ESQUEMA.SchLib')
 LONGO = 'DIODO [ SUPRESSOR DE TRANSIENTE BIDIRECIONAL ] PTH'
 
 

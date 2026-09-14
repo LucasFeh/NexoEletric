@@ -79,6 +79,19 @@ Dois acervos, pelo motivo que os separa:
 Cada part carrega o que o Odoo sabe: `Value`, `Encapsulamento`, `MPN`, **`Mouser`**,
 `OdooId`, `Estoque`, `Local` (o endereço na prateleira) e `Custo`.
 
+**O nome do componente** (o `LibReference` na `.SchLib`, o `valores[].altium` do espelho) é
+montagem + encapsulamento + característica, e só o que é **fato do item** entra nele:
+
+- **básicos**: a montagem é a do símbolo, porque o símbolo é partido por ela
+  (`RESISTOR [SMD]` / `RESISTOR [PTH]`) e o item que não a declara herda a dominante da
+  família junto com a lib em que vai morar — `SMD 0805 10K 1/8W 1% 100ppm`.
+- **especiais**: o símbolo é por pinagem, não por montagem, então a montagem só entra
+  quando o **próprio item** a declara (pelo encapsulamento, `SOIC8`/`DIP8`, ou por palavra no
+  nome do Odoo); a presumida pela família **não** entra. `PTH DIP8 CA3140EZ`,
+  `SMD SOIC8 Duplo TL082IDRQ1`, e um `SN65HVD75DR` sem encapsulamento no Odoo fica só
+  `SN65HVD75DR`. Antes o nome levava a montagem do primeiro item que criou o símbolo, e um
+  SOIC8 saía `PTH SOIC8 …`. `tests/test_almox_nomes.py` guarda a regra.
+
 ## Rodar
 
 ```bash
@@ -229,6 +242,11 @@ algo que não devia.
 - `familias.py` — a tabela de famílias (regex → símbolo, designador, forma, unidade) e a
   análise de uma linha do dump.
 - `simbolos.py` — a geometria de cada forma, no mesmo vocabulário do `Libs/schlib.js`.
+  Todo pino gerado nasce com **`hideName: true`**: só o número à vista; o nome (A/K, B/C/E,
+  ou o próprio número) fica guardado no pino e o olho da ficha Símbolos o mostra. É o padrão
+  de todos os componentes — à vista, o nome repetia a mesma informação ao lado de cada pino.
+  No arquivo é o conglomerado `0x30|rot` que o `schlib_bin.pino` emite (bit `0x08` = nome,
+  `0x10` = número; o `0x20` é legado e vai junto).
 - `odoo_pull.py` — a puxada por XML-RPC; reproduz as colunas do dump SQL.
 - `almox2lib.py` — agrupa, ordena, compara com a geração anterior e escreve os arquivos.
 

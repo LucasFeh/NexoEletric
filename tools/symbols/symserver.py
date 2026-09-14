@@ -63,12 +63,14 @@ from flask import Blueprint, Response, abort, request
 BASE = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.dirname(os.path.dirname(BASE))
 sys.path.insert(0, os.path.join(RAIZ, 'tools', 'almox'))
+sys.path.insert(0, os.path.join(RAIZ, 'tools'))
 sys.path.insert(0, BASE)
 
 import sch_leitor as L                                 # noqa: E402
 import schlib_patch as P                               # noqa: E402
 import extrair as E                                    # noqa: E402
 import guardiao as G                                   # noqa: E402
+import libpath as LP                                   # noqa: E402
 
 bp = Blueprint('symbols', __name__, url_prefix='/api/symbols')
 ROOT = RAIZ                          # o workspace servido; registra() troca
@@ -180,9 +182,30 @@ def _config():
         cfg = {}
     if not isinstance(cfg, dict):
         cfg = {}
-    cfg['schlib'] = cfg.get('schlib') or L.LIB_PADRAO
-    cfg['backup_dir'] = cfg.get('backup_dir') or os.path.join(os.path.dirname(cfg['schlib']), 'Backup-hub')
+    cfg['schlib'] = LP.schlib(ROOT)
+    cfg['backup_dir'] = _backup_dir(cfg)
     return cfg
+
+
+def _backup_dir(cfg):
+    """onde o schlib_patch guarda as 30 cópias datadas.
+
+    O valor do config só vale se o PAI dele existir, e o pai é medido no valor CRU, antes
+    de juntar com a raiz. No Linux do servidor o config declara
+    `Y:\\Biblioteca\\...\\Backup-hub`, uma string sem barra nenhuma: `posixpath.dirname` dela
+    é `''` e o gate recusa. Juntar com o ROOT primeiro daria
+    `dirname('/srv/altiumhub/current/Y:\\...')` = `/srv/altiumhub/current`, que existe — o
+    gate passaria e o `os.makedirs` do `faz_backup` criaria alegremente UM diretório cujo
+    nome contém contrabarras, dentro da release e visível no share SMB.
+
+    Na bancada nada muda: o pai (`Y:\\Biblioteca\\ALTIUM LIBRARY ------ LUCAS`) existe, e o
+    `Backup-hub` em si nasce no primeiro save, como sempre."""
+    bk = (cfg.get('backup_dir') or '').strip()
+    if bk:
+        pai = os.path.dirname(bk)
+        if pai and os.path.isdir(pai if os.path.isabs(pai) else os.path.join(ROOT, pai)):
+            return bk if os.path.isabs(bk) else os.path.join(ROOT, bk)
+    return os.path.join(os.path.dirname(cfg['schlib']), 'Backup-hub')
 
 
 def _grava_bytes(caminho, bruto):
@@ -316,11 +339,51 @@ def _salva_espelho(caminho, nome, parts, description=None):
     return novo
 
 
+class SoLeitura(Exception):
+    """a lib resolvida é a cópia publicada, que não se escreve.
+
+    Exceção própria, e não `PermissionError`: o `schlib_patch` abre a .SchLib direto
+    (`_le_ole`) e, no Windows, uma lib aberta em modo exclusivo pelo Altium levanta
+    `PermissionError` PELADO — só o `copy2` do backup o converte em `LibOcupada`.
+    Capturar `PermissionError` aqui trocaria "a lib está aberta no Altium" por "edite na
+    bancada" dito a quem já está na bancada, e esconderia o erro verdadeiro."""
+
+
+SO_LEITURA = ('a biblioteca da casa aqui é a cópia publicada (%s), que é somente leitura: '
+              'ela viaja no push para o hub poder ler, e uma escrita nela morre no próximo '
+              'deploy. Edite o símbolo na bancada, onde a lib viva está montada — de lá o '
+              'sincronismo publica a cópia nova.')
+
+
+def _so_leitura(schlib):
+    """a lib resolvida é a cópia publicada dentro do repositório?
+
+    Enquanto o caminho da casa era `Y:\\...`, este caso não existia: no Linux o arquivo não
+    existe e toda rota de escrita morria num 404 inofensivo. Com a cópia dentro do
+    repositório o `isfile` passa a valer, e o mesmo clique passaria a gravar de verdade
+    dentro de `releases/<hash>/` — que o deploy seguinte apaga com um `rm -rf`, sem aviso.
+    A caixa "Altium" do editor vem marcada por padrão, então isso não é hipótese remota."""
+    return LP.e_publicada(ROOT, schlib)
+
+
 def _patch_altium(cfg, sym):
     """schlib_patch.patch na SchLib do config; nome novo ausente -> tenta o antigo do rename-map"""
     schlib = cfg['schlib']
     if not os.path.isfile(schlib):
+        # Antes da trava: um arquivo que não está lá merece "não encontrada", não
+        # "somente leitura" — a trava compara CAMINHO, não existência.
         raise FileNotFoundError('SchLib não encontrada: %s' % schlib)
+    if _so_leitura(schlib):
+        # Um único `isfile` False num share com soluço marca o caminho ausente por 30 s
+        # (libpath._ausentes) e faria a bancada cair aqui. Antes de recusar, esquece o
+        # cache e pergunta de novo: recusa tem que ser dita com certeza.
+        LP.esquece_ausentes()
+        cfg = _config()
+        schlib = cfg['schlib']
+        if _so_leitura(schlib):
+            raise SoLeitura(SO_LEITURA % os.path.relpath(schlib, ROOT).replace('\\', '/'))
+        if not os.path.isfile(schlib):
+            raise FileNotFoundError('SchLib não encontrada: %s' % schlib)
     try:
         return P.patch(schlib, sym, cfg['backup_dir'], raiz=ROOT)
     except ValueError:
@@ -351,6 +414,13 @@ def api_config():
             'symlibExiste': os.path.isfile(os.path.join(ROOT, SYMLIB)),
             'espelhoExiste': os.path.isfile(os.path.join(ROOT, ESPELHO)),
             'configExiste': os.path.isfile(os.path.join(ROOT, CONFIG)),
+            # A tela AINDA não lê estes campos — o `hub-symed.js` deixa a caixa "Altium"
+            # marcada por padrão e mostra o 409 como erro vermelho depois do clique. Estão
+            # expostos para quem cuidar do painel poder desmarcá-la antes: `soLeitura` diz
+            # que a escrita será recusada, `viva` para onde o config aponta (vazio quando
+            # não há lib viva declarada) e `procedencia` por qual passo da ordem se chegou.
+            'soLeitura': _so_leitura(schlib), 'viva': LP.viva(ROOT),
+            'procedencia': LP.resolve_schlib(ROOT)[1],
             'local': _is_local(request)}
 
 
@@ -394,6 +464,12 @@ def api_save():
             r = _patch_altium(_config(), alvo)
     except P.LibOcupada as e:
         return _erro(str(e), 423, espelho=True, altium=False, backup=None, avisos=[], parts=sym['parts'])
+    except SoLeitura as e:
+        # 409, não 500: o espelho FOI gravado e vale. Só a .SchLib ficou de fora, e de
+        # propósito — a resposta diz por quê, com `soLeitura` para a tela distinguir isso
+        # de uma falha de verdade.
+        return _erro(str(e), 409, espelho=True, altium=False, soLeitura=True,
+                     backup=None, avisos=[], parts=sym['parts'])
     except Exception as e:                                          # noqa: BLE001
         return _erro('espelho gravado, mas a SchLib não: %s' % e, 500,
                      espelho=True, altium=False, backup=None, avisos=[], parts=sym['parts'])
@@ -450,17 +526,32 @@ def api_save_almox():
         return _erro('não li os espelhos do almoxarifado: %s' % e, 500)
     if not espelhos:
         return _erro('nenhum espelho do almoxarifado em Libs/ (rode o sincronismo)', 404)
-    achado = G.indice_almox(espelhos).get((fam, comp))
+    idx = G.indice_almox(espelhos)
+    achado = idx.get((fam, comp))
     if not achado:
-        return _erro('"%s / %s" não está no espelho do almoxarifado' % (fam, comp), 404)
+        # O hub manda como família o NOME do símbolo aberto ("CIRCUITO INTEGRADO [PINAGEM A
+        # DEFINIR]", "RESISTOR [SMD]"); o índice, o ledger e o arquivo falam a família do
+        # ARQUIVO ("ESPECIAIS", "RESISTOR"). Os dois só coincidem quando o nome não tem sufixo
+        # (DIODO TVS, TRANSISTOR) — e só esses salvavam. Resolve pelo nome do símbolo e segue
+        # com a família do arquivo, que é a chave de tudo daqui para a frente.
+        por_nome = next(((f_, v) for (f_, c_), v in idx.items() if c_ == comp and v[0] == fam), None)
+        if por_nome:
+            fam, achado = por_nome
+    if not achado:
+        return _erro('"%s / %s" não está no espelho do almoxarifado (a família pode ser a do '
+                     'arquivo, "ESPECIAIS", ou o nome do símbolo)' % (fam, comp), 404)
     sim_nome, k, i = achado
     cam_esp, var, esp = espelhos[k]
     j = _acha_valor(esp, i, comp)
     if j is None:
         return _erro('"%s" não é um valor de "%s"' % (comp, sim_nome), 404)
     cam, _hoje = G._acha_componente(ROOT, fam, comp, {})
-    if cam is None:
-        return _erro('"%s / %s" não está em Libs/Almox' % (fam, comp), 404)
+    # Componente que está no espelho mas ainda não na .SchLib: entrou no Odoo depois do último
+    # sincronismo (o espelho é regerado do snapshot; o arquivo, só pelo sincronismo inteiro).
+    # Recusar aqui deixava o usuário sem caminho: o desenho vai para o espelho e para o ledger
+    # (protegido, origem hub), e o guardião o repõe na .SchLib assim que o gerador criar o
+    # componente — é o mesmo mecanismo que faz qualquer desenho sobreviver ao sincronismo.
+    sem_arquivo = cam is None
 
     # 2. espelho primeiro: se a SchLib falhar, o hub já mostra o desenho novo
     with _lock_almox:
@@ -479,7 +570,12 @@ def api_save_almox():
 
     # 3. a .SchLib da família. backup_dir=None -> Libs/Almox/Backup-hub, LOCAL: apontar
     #    para a rede faria o save inteiro morrer quando o compartilhamento cai.
-    if altium:
+    if sem_arquivo:
+        resp['avisos'].append(
+            '"%s" ainda não existe em Libs/Almox (entrou no Odoo depois do último sincronismo): '
+            'o desenho ficou no espelho e protegido no ledger, e entra na .SchLib da família '
+            'no próximo sincronismo' % comp)
+    if altium and not sem_arquivo:
         try:
             with _lock_schlib:
                 r = P.patch(cam, alvo, None, raiz=ROOT)
@@ -497,7 +593,7 @@ def api_save_almox():
         with G._lock:
             led = G.carrega_ledger(ROOT)
             G._poe_prot(led, fam, comp, partes, 'hub', sim_nome)
-            if altium:
+            if altium and not sem_arquivo:
                 G.registra_arquivo(ROOT, cam, led, gravar=False)   # senão o próprio save
                                                                    # aparece como "mudou no Altium"
             G.grava_ledger(ROOT, led)
@@ -663,6 +759,18 @@ def api_mirror():
     schlib = cfg['schlib']
     if not os.path.isfile(schlib):
         return _erro('SchLib não encontrada: %s' % schlib, 404)
+    # Regerar o espelho a partir da cópia publicada APAGA tudo que foi salvo por aqui: no
+    # servidor o `Libs/schlib.js` é o arquivo compartilhado onde vivem os saves feitos no
+    # hub (o passo do Altium não roda lá), e o mirror o reescreve inteiro, sem diff. Antes
+    # da lib viajar isso era impossível — a rota morria em 404. Agora tem que ser pedido.
+    if _so_leitura(schlib) and not data.get('confirmar'):
+        efeito = ('Levar os flags dela para o espelho traz o que a última publicação tinha, '
+                  'que pode estar atrás do que foi salvo aqui'
+                  if data.get('flags') else
+                  'Regerar o espelho a partir dela sobrescreve o Libs/schlib.js inteiro')
+        return _erro((SO_LEITURA % os.path.relpath(schlib, ROOT).replace('\\', '/'))
+                     + ' ' + efeito + '; se é isso mesmo, repita com {"confirmar":true}.',
+                     409, soLeitura=True)
     mapa = L.le_rename_map(os.path.join(ROOT, RENAME_MAP))
     caminho = os.path.join(ROOT, ESPELHO)
     with _lock_espelho:

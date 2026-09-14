@@ -47,18 +47,19 @@ e `protegidos: N`; o símbolo sem protegidos fica com o desenho que o gerador p�
 é reescrito com o `escreve_espelho` do próprio almox2lib, linha a linha — as linhas dos
 outros símbolos saem byte a byte iguais.
 
-REMENDO (até o bom-almox ler o caminho do config.json): o gerador recicla o desenho da
-biblioteca da casa a partir de `schlib_escritor.LIB_REAL`, uma cópia antiga em D:. O hub e o
-Altium editam a do `tools/symbols/config.json » schlib` (Y:). Antes de chamar o `main` do
-almox2lib, `gera` e `carrega_lib` do módulo já importado são trocados para apontar para a
-real — `gera` por `functools.partial(origem=…)`; `carrega_lib` por um wrapper que só troca o
-default, porque `gera` o chama com o caminho POSICIONAL e um partial com `caminho=` daria
-"multiple values". Se a real está fora de alcance, fica o default do escritor (a cópia em
-D:) — desenhar tudo do `simbolos.py` seria pior.
+A biblioteca da casa é resolvida pela ordem única do `tools/libpath.py` — a viva do
+`config.json » schlib` enquanto o arquivo dela existir, senão a cópia publicada em
+`Libs/BIBLIOTECA DE ESQUEMA.SchLib`. O `sincroniza` publica essa cópia no começo de cada
+rodada: é assim que a biblioteca da casa viaja no push e chega ao hub do servidor, que
+por desenho não alcança nem o `Y:` nem a UNC do PC.
+
+Aqui havia um REMENDO — trocar `gera` e `carrega_lib` do `schlib_escritor` já importado
+por versões apontadas para a lib real, porque o gerador reciclava de uma cópia antiga em
+D: enquanto o hub editava a do `Y:`. O escritor passou a ler a mesma ordem, e o remendo
+saiu.
 """
 import argparse
 import copy
-import functools
 import io
 import json
 import os
@@ -72,11 +73,13 @@ from datetime import datetime
 BASE = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.dirname(os.path.dirname(BASE))
 sys.path.insert(0, os.path.join(RAIZ, 'tools', 'almox'))
+sys.path.insert(0, os.path.join(RAIZ, 'tools'))
 sys.path.insert(0, BASE)
 
 import sch_leitor as L                                 # noqa: E402
 import schlib_patch as P                               # noqa: E402
 import extrair as E                                    # noqa: E402
+import libpath as LP                                   # noqa: E402
 
 FORMATO = 'ledger-v1'
 LEDGER = os.path.join('Libs', 'lib-ledger.json')
@@ -206,6 +209,11 @@ def registra_arquivo(raiz, caminho, ledger=None, gravar=True):
     with _lock:
         if ledger is None:
             ledger = carrega_ledger(raiz)
+        # A cópia publicada nunca entra no ledger — o gate mora AQUI, e não só no `do_hub`,
+        # porque as rotas do symserver (/save, /mirror, /altium-apply) chamam esta função
+        # direto, sem passar por ele. Ver `do_hub` para o porquê.
+        if LP.e_publicada(raiz, caminho):
+            return ledger
         st = estado_arquivo(caminho)
         if st is None:
             return ledger
@@ -242,7 +250,7 @@ def config_casa(raiz):
         cfg = {}
     if not isinstance(cfg, dict):
         cfg = {}
-    cfg['schlib'] = cfg.get('schlib') or L.LIB_PADRAO
+    cfg['schlib'] = LP.schlib(raiz)
     return cfg
 
 
@@ -253,8 +261,24 @@ def schlib_casa(raiz):
 def do_hub(raiz, caminho):
     """o arquivo é um dos que o hub vigia — a SchLib da casa (config.json) ou uma lib de
     Libs/Almox? Só esses entram no ledger: o schlib_patch e o sch_leitor também servem a
-    cópias em tmp (os testes), e uma cópia registrada seria lixo num arquivo versionado."""
-    if _norm(caminho) == _norm(schlib_casa(raiz)):
+    cópias em tmp (os testes), e uma cópia registrada seria lixo num arquivo versionado.
+
+    A cópia PUBLICADA (`Libs/BIBLIOTECA DE ESQUEMA.SchLib`) fica de fora, e isso é
+    deliberado: o ledger identifica edição do Altium por mtime, e o `git archive` do
+    deploy carimba nos arquivos extraídos a data do COMMIT. A cópia ganharia mtime novo a
+    cada deploy — de qualquer commit, mesmo um só de README — e o hub do servidor abriria
+    sozinho, para qualquer um na LAN, o modal de "mudou no Altium, quer aplicar?". Ela é
+    publicação: quem a escreve é o `libpath.publica`, e não há o que detectar."""
+    if LP.e_publicada(raiz, caminho):
+        return False
+    # A lib da casa é tanto a que a ordem resolveu quanto a que o config DECLARA: com o
+    # share fora do ar as duas divergem, e é a declarada que o `detecta` vigia para mostrar
+    # "não alcancei" em vez de fazer a linha sumir.
+    alvos = {_norm(schlib_casa(raiz))}
+    declarada = LP.viva(raiz)
+    if declarada:
+        alvos.add(_norm(declarada))
+    if _norm(caminho) in alvos:
         return True
     return chave_arquivo(raiz, caminho).startswith('Libs/Almox/')
 
@@ -448,44 +472,25 @@ def antes(raiz, ledger, log=print):
 
 
 # ─── o gerador ───────────────────────────────────────────────────────────────
-def _remenda_escritor(schlib_real):
-    """aponta a reciclagem do schlib_escritor para a SchLib real (ver o cabeçalho do módulo)"""
-    import schlib_escritor as ESC
-    if getattr(ESC, '_guardiao_origem', None) == schlib_real:
-        return
-    gera0 = getattr(ESC, '_guardiao_gera0', None) or ESC.gera
-    carrega0 = getattr(ESC, '_guardiao_carrega0', None) or ESC.carrega_lib
-    ESC._guardiao_gera0, ESC._guardiao_carrega0 = gera0, carrega0
-    ESC.gera = functools.partial(gera0, origem=schlib_real)
-
-    @functools.wraps(carrega0)
-    def carrega_lib(caminho=schlib_real):
-        return carrega0(caminho)
-
-    ESC.carrega_lib = carrega_lib
-    ESC._guardiao_origem = schlib_real
-
-
 def origem_reciclagem(raiz):
-    """de onde o gerador vai reciclar: a real do config.json, ou o default do escritor"""
-    real = schlib_casa(raiz)
-    if os.path.isfile(real):
-        return real
-    import schlib_escritor as ESC
-    return ESC.LIB_REAL
+    """de onde o gerador vai reciclar — a mesma ordem que o escritor usa sozinho"""
+    return LP.schlib(raiz)
 
 
 def gerador_real(argv, log=print, raiz=RAIZ):
-    """almox2lib.main EM PROCESSO, com a reciclagem apontando para a SchLib real"""
+    """almox2lib.main EM PROCESSO. O `schlib_escritor` resolve a origem da reciclagem
+    pelo `tools/libpath.py`, igual a este módulo — não há mais o que remendar."""
     if _norm(raiz) != _norm(RAIZ):
         raise RuntimeError('o almox2lib só escreve na raiz do repositório (%s); para outra raiz use --sem-gerador' % RAIZ)
     import almox2lib as A
-    real = schlib_casa(raiz)
-    if os.path.isfile(real):
-        _remenda_escritor(real)
-        log('reciclando da biblioteca real: %s' % real)
-    else:
-        log('ATENCAO: a SchLib da casa está fora de alcance (%s); o gerador recicla do caminho padrão dele' % real)
+    real, procedencia = LP.resolve_schlib(raiz)
+    if procedencia == LP.SEM_VIVA:
+        # O único caso que merece alarme: o config aponta para uma lib que não está lá.
+        # Na bancada isso é o share fora do ar; a rodada segue com a última publicação,
+        # que é boa, mas o que sair dela pode estar atrás do que o Altium já gravou.
+        log('ATENCAO: a SchLib da casa está fora de alcance (%s); reciclando da última publicação'
+            % LP.viva(raiz))
+    log('reciclando da biblioteca real: %s' % real)
     return A.main(list(argv or []))
 
 
@@ -560,6 +565,13 @@ def atualiza_espelhos(raiz, ledger, log=print, espelhos=None, substitutos=None):
     frequente; empate = a mais antiga) e `origem`/`protegidos`; sem protegidos, perde as
     marcas. `substitutos` {símbolo: parts} é a geometria a pôr num símbolo que acabou de
     perder a proteção fora de uma sincronização (o que o Altium tem agora).
+
+    Componente protegido cuja geometria NÃO é a que o símbolo recebeu ganha a sua em
+    `valores[].parts` — é o que o /save-almox grava e o que o gerador descarta a cada
+    sincronismo (ele refaz os valores do snapshot do Odoo). Sem isto o desenho de UM
+    componente sumia do hub no sincronismo seguinte, embora sobrevivesse na .SchLib
+    (o `depois` o repõe lá) e no ledger. Quem tem a geometria do símbolo não precisa de
+    `parts` próprio: o hub desenha o valor sem `parts` com o desenho da família.
     -> nomes dos símbolos tocados"""
     espelhos = espelhos if espelhos is not None else carrega_espelhos_almox(raiz)
     substitutos = substitutos or {}
@@ -568,7 +580,7 @@ def atualiza_espelhos(raiz, ledger, log=print, espelhos=None, substitutos=None):
         for comp, p in comps.items():
             if p.get('orfao'):
                 continue
-            por_sim.setdefault(p.get('simbolo'), []).append(p)
+            por_sim.setdefault(p.get('simbolo'), []).append(dict(p, componente=comp))
     tocados = []
     for cam, var, esp in espelhos:
         mudou_arq = False
@@ -591,6 +603,18 @@ def atualiza_espelhos(raiz, ledger, log=print, espelhos=None, substitutos=None):
             cont = Counter(p['fp'] for p in ps)
             melhor = sorted(cont, key=lambda f: (-cont[f], min(p.get('desde', '') for p in ps if p['fp'] == f)))[0]
             escolhido = next(p for p in ps if p['fp'] == melhor)
+            # a minoria: componente protegido com geometria diferente da do símbolo leva a
+            # sua para o próprio valor (o gerador acabou de apagá-la de lá)
+            por_comp = {p['componente']: p for p in ps}
+            for v in sim.get('valores') or []:
+                p = por_comp.get(v.get('altium'))
+                if not p or p['fp'] == melhor or _igual(v.get('parts'), p['parts']):
+                    continue
+                v['parts'] = copy.deepcopy(p['parts'])
+                mudou_arq = True
+                if sim['name'] not in tocados:
+                    tocados.append(sim['name'])
+                log('   espelho: %s / %s com o desenho protegido próprio' % (sim['name'], v.get('altium')))
             if _igual(sim.get('parts'), escolhido['parts']) and sim.get('origem') == 'altium' \
                     and sim.get('protegidos') == len(ps):
                 continue
@@ -641,6 +665,10 @@ def sincroniza(argv=(), log=print, raiz=RAIZ, gerador=None):
             sum(len(c) for c in ledger['protegidos'].values())))
         novos, liberados = antes(raiz, ledger, log)
         grava_ledger(raiz, ledger)          # o que o "antes" apurou não pode se perder se o gerador cair
+        # A publicação vem antes do gerador de propósito: se a rodada morrer no meio, a
+        # cópia que viaja no push já está atualizada. Não levanta nunca — share fora do ar
+        # é aviso, não motivo para o sincronismo inteiro cair.
+        pub = LP.publica(raiz, log)
         recicl = origem_reciclagem(raiz)
         erro = None
         gerador = gerador or (lambda a, l: gerador_real(a, l, raiz))
@@ -661,7 +689,10 @@ def sincroniza(argv=(), log=print, raiz=RAIZ, gerador=None):
             ('gerados', len(familias)), ('arquivos', len([k for k in ledger['arquivos'] if k.startswith('Libs/Almox/')])),
             ('protegidos', lista_protegidos(ledger, novos)),
             ('novos', novos), ('liberados', liberados), ('repostos', repostos), ('orfaos', orfaos),
-            ('espelhos', tocados), ('recicladoDe', recicl), ('segundos', round(time.time() - t0, 1))])
+            ('espelhos', tocados), ('recicladoDe', recicl),
+            ('publicada', os.path.relpath(pub['alvo'], raiz).replace('\\', '/')),
+            ('publicou', pub['publicou']), ('publicacao', pub['motivo'] or 'publicada agora'),
+            ('segundos', round(time.time() - t0, 1))])
         escreve_resumo(raiz, resumo)
         log('guardião: %d família(s), %d protegido(s) (%d novo(s), %d reposto(s), %d órfão(s)), %d símbolo(s) do espelho%s — %.1f s' % (
             len(familias), len(resumo['protegidos']), len(novos), len(repostos), len(orfaos), len(tocados),
@@ -803,8 +834,19 @@ def detecta(raiz, deep=False, adotar=True, log=None):
     with _lock:
         ledger = carrega_ledger(raiz)
         existia = os.path.isfile(caminho_ledger(raiz))
-        casa = schlib_casa(raiz)
-        lista = [('altium', None, casa)] + [('almox', fam, cam) for fam, cam in arquivos_almox(raiz)]
+        casa, procedencia = LP.resolve_schlib(raiz)
+        # A cópia publicada não é vigiada — ver `do_hub`: o `git archive` do deploy carimba
+        # nela a data do commit, e ela "mudaria no Altium" a cada deploy, abrindo o modal
+        # de aplicar sozinho no hub do servidor.
+        #
+        # Mas quando o share da bancada cai (SEM_VIVA), vigiar o caminho CRU da lib viva:
+        # ele aparece com `existe:false`, que é o sinal de "não alcancei a lib da casa" —
+        # e é justamente quando ele faz falta. Omitir a linha faria a lib sumir da aba
+        # Biblioteca em silêncio, no momento em que se quer saber dela.
+        if procedencia == LP.SEM_VIVA:
+            casa = LP.viva(raiz)
+        lista = ([('altium', None, casa)] if casa and do_hub(raiz, casa) else []) \
+            + [('almox', fam, cam) for fam, cam in arquivos_almox(raiz)]
         arquivos, itens, absorvidos = [], [], []
         ledger_mudou = False
         idx = None

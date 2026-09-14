@@ -27,9 +27,19 @@ Só o que está dentro do projeto:
 A biblioteca gerada a partir do Odoo vive em `Libs/Almox`: 32 `.SchLib`, uma por
 família, mais `FOOTPRINTS ALMOX.PcbLib` com 63 MB de footprints. Ela viaja junto.
 
-A biblioteca da casa em `D:\ALTIUM LIBRARY ------ LUCAS` **não** viaja, e o
-`BuildSchematic.pas` continua abrindo ela por UNC. O motivo está medido: os 14
-projetos com `schematic.js` usam 108 símbolos distintos, e só **3** existem nas
+A `.SchLib` da casa **viaja**, publicada dentro do repositório em
+`Libs/BIBLIOTECA DE ESQUEMA.SchLib` (1,7 MB) — sem ela o gerador do almoxarifado sai
+sem footprint reciclado e as 32 `.SchLib` abrem com a folha preta. Quem publica é o
+guardião, no começo de cada sincronismo, a partir da lib viva da bancada; a cópia é
+somente leitura no servidor. A ordem de resolução está em `tools/libpath.py` e no
+README principal, em **Onde está a biblioteca da casa**.
+
+A `.PcbLib` da casa (63 MB) **não** viaja no git: ela já chega como
+`Libs/Almox/FOOTPRINTS ALMOX.PcbLib`, que é diretório compartilhado.
+
+O `BuildSchematic.pas` continua abrindo as duas por UNC, e isso é de propósito: ele roda
+no Altium, que enxerga a rede. O motivo de a lib da casa não poder sumir está medido: os
+14 projetos com `schematic.js` usam 108 símbolos distintos, e só **3** existem nas
 bibliotecas do almoxarifado. Outros 42 existem só na lib da casa, com nomes como
 `RES [SMD]`, `CAP [SMD]`, `BC337` e `CONE PADRAO`. Tirar a lib da casa faz
 `FindLibSymbol` falhar, o `ErrCount` crescer e a validação abortar sem criar nada:
@@ -258,15 +268,36 @@ então este share e o `Compartilhado` que já existe têm que abrir com o mesmo
 usuário. Dois usuários no mesmo servidor dão "multiple connections to a server by
 the same user are not allowed".
 
-Os quatro `.pas` já apontam para `\\192.168.15.192\altiumhub\current`. Rode-os do
-Altium a partir de `P:\current`. Como `current` é um link para a release no ar, um
-deploy troca o alvo e o caminho continua o mesmo.
+Os quatro `.pas` **não apontam mais para lugar nenhum**: o caminho saiu do código e cada
+máquina diz o seu em `C:\ProgramData\AltiumPCBMirror\home.txt` (veja *Onde fica o
+workspace: `home.txt`* no README). Nesta máquina, aponte para o share:
 
-O `BuildSchematic.pas` abre as bibliotecas do almoxarifado **e** a da casa. As duas
-constantes da lib da casa saíram do `Z:`, que não resolve, e passaram a apontar por
-UNC para onde o arquivo realmente está, `\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS`.
-É o mesmo caminho que `tools/almox/schlib_escritor.py:24` já usa, e funciona de
-qualquer máquina em vez de depender de cada uma mapear a mesma letra.
+```ini
+home=\\192.168.15.192\altiumhub\current
+```
+
+`\\192.168.15.192\altiumhub\current` ainda é um dos candidatos embutidos, então numa
+máquina que só tem o share ele se resolve sozinho na primeira execução. Numa que também
+tem o workspace local, o candidato local ganha — por isso a chave `home` aqui é explícita,
+não opcional. Rode os scripts do Altium a partir de `P:\current`. Como `current` é um link
+para a release no ar, um deploy troca o alvo e o caminho continua o mesmo.
+
+O `BuildSchematic.pas` abre as bibliotecas do almoxarifado **e** a da casa. Os padrões da
+lib da casa (`SCHLIB_PADRAO`/`PCBLIB_PADRAO`) saíram do `Z:`, que não resolve, e apontam por
+UNC para `\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS` — funciona de qualquer máquina, em vez
+de depender de cada uma mapear a mesma letra. São só o piso: as chaves `schlib` e `pcblib`
+do `home.txt` mandam nelas.
+
+> **Essa cópia UNC está desatualizada e ninguém a atualiza.** Medido: a do `Y:` (que é
+> onde o Altium grava, e de onde sai a publicação) tem md5 `2c3f4b13…`; a UNC tem outro e
+> não contém o símbolo `NE555`, que `Projects/LM555 astável/schematic.js` usa. Rodar o
+> BuildSchematic nesse projeto hoje aborta pelo modo de falha descrito acima. O código
+> Python já não usa essa UNC — a ordem única vive em `tools/libpath.py`. Decidir para onde
+> o `SCHLIB_PADRAO` deve apontar (a lib viva, ou a publicação em
+> `\\192.168.15.192\altiumhub\current\Libs\`) é assunto em aberto; a publicação está
+> sempre fresca depois de um sincronismo, mas fica gravável pelo share. Enquanto isso não se
+> decide, dá para resolver por máquina com a chave `schlib` do `home.txt`, sem tocar no
+> `.pas`.
 
 ## 9. O dia a dia
 

@@ -26,11 +26,30 @@ tools/symbols/relatorio.txt
 # NAO ignorar Libs/almox-parts.json: e o livro-razao rotulo -> part number.
 # Ele e gerado, mas guarda estado; perder o arquivo renumera o almoxarifado.
 
+# NAO ignorar Libs/BIBLIOTECA DE ESQUEMA.SchLib: e a biblioteca da casa publicada
+# dentro do repositorio (tools/libpath.py). Ela PRECISA viajar no push -- o hub do
+# servidor nao alcanca o Y: nem a UNC do PC, e sem ela o gerador do almoxarifado
+# sai sem footprint reciclado e com a folha preta no Altium.
+#
+# O que nao viaja e o que o schlib_patch escreve ao lado dela a cada save: 30
+# rotacoes de backup de 1,7 MB cada, e o tmp do os.replace.
+Libs/Backup-hub/
+Libs/*.SchLib.tmp
+
 # estado da bancada do BOM, escrito pelo hubserver dentro de Projects/<nome>/:
 # os vistos do que ja foi montado e as opcoes com que a aba gerou o link. E de
 # quem esta montando a placa, e muda a cada peça marcada -- nao e do projeto.
 bom-vistos.json
 bom-opts.json
+# recibo do ultimo envio da lista ao Odoo: tudo nele volta de di_estado_lista(uid)
+odoo-lista.json
+
+# credenciais do envio ao Odoo. O ponto no nome NAO e enfeite: e o que faz o hubserver
+# recusar servi-lo por HTTP (_serve, hubserver.py:120) -- ao contrario do hub-almox.json.
+# O * e pelo temporario da gravacao (.hub-odoo.json.tmp, odoolista.py:437): se o os.replace
+# falhar -- no Windows um antivirus ou editor segurando o destino basta -- sobra um arquivo
+# untracked COM a senha dentro, a um "git add ." de ir para o servidor.
+.hub-odoo.json*
 
 # ambiente virtual do servidor (o deploy cria /srv/altiumhub/.venv fora da release,
 # mas quem instalar a mao dentro da arvore nao pode comitar isso)

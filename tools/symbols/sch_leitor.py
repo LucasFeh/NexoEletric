@@ -26,6 +26,16 @@ O que foi apurado nos arquivos reais (e onde o contrato inicial estava errado):
                 espelho (0 de 104 na outra). Afeta o preview do hub, não o BuildSchematic
                 (que usa Orientation/IsMirrored nativos).
   IntLib        cada stream é 1 byte 0x02 + zlib; inflado é uma .SchLib inteira.
+  U+FFFD        o caractere de substituição que aparece em descrição e em nome de
+                componente NÃO é do leitor: está nos bytes do arquivo. Medido em
+                DE-DI211619.SchDoc e nas suas 3 cópias, o registro traz
+                `%UTF8%ComponentDescription=Regulador de tens\xef\xbf\xbdo` — e
+                \xef\xbf\xbd é o próprio U+FFFD em UTF-8 — e a cópia latin-1 do mesmo
+                registro diz "tens?o", com '?' literal. O 'a' com til já tinha morrido
+                num round-trip do Altium antes de o arquivo ser gravado: nem tentar
+                utf-8 antes de cp1252, nem detectar codificação, trazem a letra de
+                volta — só adivinhando, e adivinhar é inventar dado. Fica como está:
+                o espelho mostra o que o arquivo diz.
   defaults      chave ausente = valor zero/falso: LineWidth 0 (Smallest, 4 mil), IsSolid
                 falso, StartAngle 0, Orientation 0, OwnerPartDisplayMode 0.
   cores         `Color` e `AreaColor` são TColor do Delphi: int = R + G*256 + B*65536
@@ -68,11 +78,18 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.dirname(os.path.dirname(BASE))
 LIBS = os.path.join(RAIZ, 'Libs')
 sys.path.insert(0, os.path.join(RAIZ, 'tools', 'almox'))
+sys.path.insert(0, os.path.join(RAIZ, 'tools'))
 sys.path.insert(0, BASE)
 
 import schlib_bin as SB                                # noqa: E402
+import libpath as LP                                   # noqa: E402
 
-LIB_PADRAO = r'Y:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib'
+# O piso, e SÓ o piso: a cópia publicada dentro do repositório. Constante de módulo não
+# resolve a ordem inteira do libpath — o passo do config faz `isfile` num caminho de rede,
+# e pagar isso em tempo de import poria um `stat` de share (1054 ms com a rede fora) no
+# boot do hubserver, em cada subprocesso do sincronismo e em cada teste. Quem quer a
+# biblioteca VIVA chama `caminho_lib()`.
+LIB_PADRAO = LP.repo_schlib(RAIZ)
 
 # LineWidth do Altium (0=Smallest .. 3=Large) -> mil, como o LineWMil do ExportLibs
 LARGURA = {0: 4, 1: 10, 2: 20, 3: 30}
@@ -666,7 +683,11 @@ def le_schdoc(caminho):
                                       [g for o, g in graficos if o == parte or o <= 0],
                                       x0, y0, rot, mirror)
             fora.append(OrderedDict([
-                ('ref', d.get('LibReference', '')), ('designator', designador), ('part', parte),
+                ('ref', d.get('LibReference', '')), ('designator', designador),
+                # a folha carrega a descrição do componente como a .SchLib carrega a do
+                # símbolo (94 % dos componentes têm o campo preenchido), e é dela que a
+                # biblioteca de símbolos tira o rótulo: veja `extrair.py`
+                ('description', d.get('ComponentDescription', '')), ('part', parte),
                 ('partcount', partcount), ('current', parte == atual),
                 ('x', x0), ('y', y0), ('rot', rot), ('mirror', mirror),
                 ('pins', pins), ('graphics', graphics)]))
@@ -942,13 +963,13 @@ def aplica_flags(texto, symbols, mapa=None):
 
 
 def caminho_lib():
-    """a SchLib real: o config.json da extração manda; sem ele, o caminho da casa"""
-    cfg = os.path.join(BASE, 'config.json')
-    try:
-        with open(cfg, encoding='utf-8') as f:
-            return json.load(f).get('schlib') or LIB_PADRAO
-    except (OSError, ValueError):
-        return LIB_PADRAO
+    """a SchLib real, pela ordem única do `tools/libpath.py`: o config.json manda enquanto
+    o arquivo dele existir; senão, a cópia publicada no repositório.
+
+    Lia o mesmo `config.json` por conta própria, com um fallback só dele. Não estava
+    errado — estava separado, e é dessa separação que nasceu o sintoma de dois botões de
+    sincronismo reciclando de cópias diferentes da mesma biblioteca."""
+    return LP.schlib(RAIZ)
 
 
 def _grava(caminho, texto):

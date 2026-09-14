@@ -12,9 +12,18 @@ tanto no espelho do hub quanto no arquivo que o BuildAlmoxLibs.pas le.
 PASSIVO = 'Passive'
 
 
-def _pin(num, nome, x, y, orient, ln=100, tipo=PASSIVO):
-    return {'num': str(num), 'name': nome, 'x': x, 'y': y, 'len': ln,
-            'orient': orient, 'type': tipo}
+def _pin(num, nome, x, y, orient, ln=100, tipo=PASSIVO, nome_visivel=False):
+    """Um pino no vocabulario schlib-v2. Nasce com o NOME escondido (`hideName: true`):
+    na folha so o numero aparece. E o padrao de TODO componente gerado — o nome ou repete
+    o numero (CI, conector, rede) ou e o A/K, B/C/E que o desenho ja diz, e a vista ele
+    punha a mesma informacao duas vezes ao lado de cada pino. O nome continua no pino (o
+    Altium o guarda e o olho da ficha Simbolos o mostra); `hideName` ausente = visivel,
+    como o schlib-v2 manda, e e o que `nome_visivel=True` faz."""
+    p = {'num': str(num), 'name': nome, 'x': x, 'y': y, 'len': ln,
+         'orient': orient, 'type': tipo}
+    if not nome_visivel:
+        p['hideName'] = True
+    return p
 
 
 def _pl(pts, w=10):

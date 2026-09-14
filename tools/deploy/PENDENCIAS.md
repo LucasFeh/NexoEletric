@@ -162,9 +162,19 @@ cabeçalho já existe; falta uma linha lendo um `/api/version` que devolva
 `os.path.basename(os.path.realpath(ROOT))` — que, com o desenho de release, é
 exatamente o short hash do commit.
 
-### 2.7 `tools/symbols/config.json` é versionado e é 100% da máquina
-Aponta para `Y:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\...`. O `deploy.sh` já o
-trata como estado compartilhado, mas o certo é `git rm --cached`, entrada no
-`.gitignore` ao lado de `hub-config.json`, e um `config.exemplo.json` versionado.
-`symserver.py:175-186` já trata a ausência caindo em `L.LIB_PADRAO`, então tirar do
-git não exige código.
+### 2.7 `tools/symbols/config.json` é versionado — e agora isso é de propósito
+~~O certo é `git rm --cached`~~. **Reavaliado**: depois que a biblioteca da casa passou a
+ser publicada dentro do repositório (`tools/libpath.py`), esse arquivo virou o **único
+lugar que declara onde está a lib VIVA** — `libpath.viva()` lê `schlib` cru dele. Um clone
+sem o config não quebra (a ordem cai na cópia publicada), mas a bancada passaria a reciclar
+da publicação e a publicação congelaria: ninguém mais saberia de onde atualizar.
+
+O valor apontar para `Y:` também deixou de ser problema no servidor: a ordem só aceita o
+config **se o arquivo existir**, e um `Y:\...` lido do Linux nem é reconhecido como
+absoluto. O congelamento em `shared/` (`deploy.sh:65`) ficou inofensivo — e é por isso que
+esta migração não precisou de uma linha no `deploy.sh`.
+
+O que sobra de válido: um `config.exemplo.json` versionado ajudaria quem clona numa
+máquina nova. E a referência antiga a `symserver.py:175-186` caindo em `L.LIB_PADRAO`
+está velha: `_config` hoje chama `LP.schlib(ROOT)`, e `sch_leitor.LIB_PADRAO` já não é o
+`Y:` — é a própria cópia publicada.

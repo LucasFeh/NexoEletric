@@ -210,6 +210,15 @@ continuam vindo do pino antigo de mesmo número, ou da moda do componente para p
 `extrair.py` descarta os flags: visibilidade de texto não é desenho e não entra no
 fingerprint nem na Biblioteca de símbolos.
 
+O **padrão de todo componente novo** é o nome escondido: o gerador do almoxarifado
+(`simbolos._pin`) põe `hideName: true` em cada pino que desenha e o `schlib_escritor` grava
+`0x30|rot` (só o número à vista); o editor Símbolos faz o mesmo com o pino colocado pela
+ferramenta, vindo de uma linha (K) ou de um tile da biblioteca de símbolos — a paleta
+(`Libs/symbols-lib.js`) não guarda visibilidade, o `extrair.py` a descarta, então o pino do
+tile chega sem opinião e ganha o padrão; pino que já traz `hideNum`/`hideName` é respeitado.
+O nome quase sempre repete o número, e à vista ele saía duas vezes ao lado de cada pino. O
+olho da ficha o mostra onde fizer falta — e aí o `schlib_patch` acende o `0x08`.
+
 ## Cores: `color` e `fill`
 
 Dois campos **opcionais** dos gráficos do `schlib-v2`, sempre `#rrggbb` minúsculo:
@@ -332,18 +341,31 @@ diálogo de sincronização. O `--status` sai com código 3 quando há pendênci
   `/api/almox/sync` no diálogo do hub — o lock é próprio, então chamar os dois ao mesmo tempo
   colidiria: o hub deve usar só este.
 
-### REMENDO: a reciclagem aponta para a lib real
+### De onde vem a biblioteca da casa
 
-O `schlib_escritor.gera()` recicla o desenho da biblioteca da casa a partir de `LIB_REAL`, uma
-cópia antiga em D: (`\\LUCAS-PC\D\...`). O hub e o Altium editam a do `config.json » schlib`
-(Y:). Até o bom-almox ler o caminho do config, o guardião troca, no módulo já importado,
-`gera` por `functools.partial(gera, origem=<real>)` e `carrega_lib` por um wrapper com o
-default trocado (`gera` chama `carrega_lib(origem)` posicional — um partial com `caminho=`
-daria "multiple values"). Se a real está fora de alcance, fica o default do escritor.
+Uma ordem só, em `tools/libpath.py`, e todo mundo a consulta — o guardião, o gerador, o
+leitor e este servidor: caminho explícito > `ALTIUMHUB_SCHLIB` > `config.json » schlib`
+**se o arquivo existir** > `Libs/BIBLIOTECA DE ESQUEMA.SchLib`, a cópia publicada dentro do
+repositório. Na bancada o `Y:` existe e ganha; no servidor, que não alcança nada fora dele,
+a ordem cai sozinha na publicação. O guardião publica essa cópia no começo de cada rodada.
 
-`tests/test_guardiao.py` prova tudo em cópias num tmp (DIAC e CAPACITOR ALMOX.SchLib + os
-espelhos, gerador injetado; a casa numa cópia da lib local em D:, PULA se ausente);
-`tests/test_symserver.py` cobre os endpoints, inclusive que o `/save` não vira "mudou no Altium".
+Aqui havia um REMENDO — o guardião trocava `gera` e `carrega_lib` do `schlib_escritor` já
+importado por versões apontadas para a lib real, porque o escritor tinha um `LIB_REAL`
+próprio, uma cópia antiga em `\\LUCAS-PC\D\...`. O escritor passou a ler a mesma ordem e o
+remendo saiu.
+
+A cópia publicada é **somente leitura pelo hub**: `_patch_altium` levanta `SoLeitura` (→ 409
+com `soLeitura:true`, o espelho gravado do mesmo jeito) e `/mirror` exige `{"confirmar":true}`.
+Ela também não entra no ledger — `registra_arquivo` e `do_hub` a recusam —, porque o
+`git archive` do deploy carimba nela a data do commit e ela "mudaria no Altium" a cada
+deploy. **A CLI do `schlib_patch` não tem essa trava**: `python tools/symbols/schlib_patch.py
+"Libs/BIBLIOTECA DE ESQUEMA.SchLib" sym.json` grava mesmo. É ferramenta de quem sabe o que
+está fazendo, mas não confunda com uma trava de arquivo.
+
+`tests/test_libpath.py` prova a ordem, a publicação e a recusa, tudo em tmp;
+`tests/test_guardiao.py` prova o guardião em cópias num tmp (DIAC e CAPACITOR ALMOX.SchLib +
+os espelhos, gerador injetado); `tests/test_symserver.py` cobre os endpoints, inclusive que
+o `/save` não vira "mudou no Altium".
 
 ## O que NÃO entra
 
