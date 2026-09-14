@@ -2211,6 +2211,29 @@ function alxBlocoGuardiao(box, g) {
     bl.append(ul);
   }
   if (orf.length) bl.append(el('p', 'alx-nota', t('alx.orfaos', { n: orf.length })));
+
+  /* O ALERTA DO ALTIUM. Desde a inversão de autoridade o desenho é do hub: o que estiver
+     diferente na .SchLib não sobe, e a regeração acabou de passar por cima. Sem esta lista
+     isso aconteceria calado — e calado é exatamente o que não pode ser. */
+  const div = Array.isArray(g.divergentes) ? g.divergentes : [];
+  if (div.length) {
+    const t2 = el('div', 'kicker', div.length + ' mudança(s) no Altium que NÃO entraram');
+    t2.title = 'o desenho é da biblioteca do hub; isto é aviso, não pendência';
+    bl.append(t2);
+    const ul = el('div', 'alx-diff');
+    div.slice(0, 40).forEach(d => {
+      const r2 = el('div', 'alx-di');
+      r2.append(el('span', 'a', d.componente || '?'), el('span', 'b', d.familia || ''),
+                el('span', 'c', d.reposto ? 'desfeito' : 'ignorado'));
+      r2.title = d.reposto
+        ? 'este componente é protegido: a regeração repôs o desenho do hub por cima'
+        : 'o desenho do hub (ou o do gerador) venceu; para adotar o do Altium, '
+          + 'python tools/symbols/guardiao.py --proteger "' + (d.familia || '') + '/' + (d.componente || '') + '"';
+      ul.append(r2);
+    });
+    if (div.length > 40) ul.append(el('div', 'alx-mais', '+ ' + (div.length - 40) + ' não listadas'));
+    bl.append(ul);
+  }
   if (g.recicladoDe) bl.append(el('p', 'alx-nota mono', t('alx.recicladoDe', { p: g.recicladoDe })));
   box.append(bl);
 }
@@ -2806,10 +2829,14 @@ function renderLibAlmox() {
       b.append(p);
     }
     if (!(s.footprints || []).length) b.append(el('span', 'pill warn', 'sem encap'));
-    /* desenho que veio do Altium: o gerador não passa por cima dele (guardião) */
-    if (s.origem === 'altium') {
-      const p = el('span', 'pill altium', 'altium');
-      p.title = (s.protegidos || 0) + ' componente(s) com desenho mudado direto no Altium — preservado a cada sincronização';
+    /* desenho PROTEGIDO: o gerador não passa por cima dele (guardião). A marca diz de
+       onde o desenho veio — 'hub' é o caminho normal desde a inversão de autoridade, e
+       chamar tudo de "altium" era mentira na tela. */
+    if (s.origem === 'hub' || s.origem === 'altium') {
+      const p = el('span', 'pill altium', s.origem);
+      p.title = (s.protegidos || 0) + ' componente(s) com desenho próprio, '
+        + (s.origem === 'hub' ? 'feito no editor de símbolos do hub' : 'adotado do Altium à mão')
+        + ' — preservado a cada sincronização';
       b.append(p);
     }
     const q2 = el('span', 'mt', alxQtd(est));
@@ -2923,9 +2950,12 @@ function renderLibAlmoxPreview() {
     const p = el('p', null, s.description);
     p.style.cssText = 'font-size:12px;color:var(--text-2);margin:6px 0 0'; aside.append(p);
   }
-  if (s.origem === 'altium') {
-    const p = el('p', 'libsync-origem', 'desenho vindo do Altium (' + (s.protegidos || 0) + ' componentes protegidos)');
-    p.title = 'a geometria desta família foi mudada direto na .SchLib do almoxarifado; o guardião a repõe a cada sincronização com o Odoo';
+  if (s.origem === 'hub' || s.origem === 'altium') {
+    const p = el('p', 'libsync-origem', s.origem === 'hub'
+      ? 'desenho do hub (' + (s.protegidos || 0) + ' componentes protegidos)'
+      : 'desenho adotado do Altium (' + (s.protegidos || 0) + ' componentes protegidos)');
+    p.title = 'a geometria desta família não é a que o gerador desenharia; o guardião a repõe '
+      + 'na .SchLib a cada sincronização com o Odoo';
     aside.append(p);
   }
   const kvs = el('div'); kvs.style.marginTop = '12px';
@@ -3259,21 +3289,14 @@ function renderPanes() {
     });
   }
   /* qualquer sub-aba da Biblioteca: as .SchLib podem ter mudado no Altium desde a última
-     vez que o hub as viu. Quem decide se pergunta é o hub-libsync (30 s entre consultas);
-     aqui só se avisa que a aba abriu e se diz como recarregar depois de aplicar. */
-  if (TAB_PAI[S.tab] === 'lib' && window.HubLibSync) HubLibSync.verifica({
-    t, toast,
-    editor: () => ({ dirty: !!(window.HubSymEd && HubSymEd.dirty()),
-                     sel: window.HubSymEd ? HubSymEd.state.sel : null,
-                     carregado: !!document.querySelector('#symed .lib-row') }),
-    /* o espelho em disco é outro: todo acervo em cache está velho, inclusive os do
-       almoxarifado (o guardião reescreve a família protegida) */
-    onApplied: () => {
-      libInvalida(); libBust = Date.now(); LIB.cache = {}; LIB.ready = false;
-      if (window.HubSymEd && typeof HubSymEd.reload === 'function') HubSymEd.reload();
-      renderTabs(); renderPanes();
-    },
-  });
+     vez que o hub as viu. Quem decide se avisa é o hub-libsync (30 s entre consultas);
+     aqui só se avisa que a aba abriu.
+
+     O `onApplied` saiu junto com o botão "Atualizar a lib do hub": desde a inversão de
+     autoridade (2026-09-14) o libsync só AVISA, nunca aplica, então não há mais momento em
+     que o espelho em disco muda por baixo desta aba por causa dele. Quem invalida o cache
+     depois de uma sincronização continua sendo o `almoxRecarrega`. */
+  if (TAB_PAI[S.tab] === 'lib' && window.HubLibSync) HubLibSync.verifica({ t, toast });
   if (S.tab === 'libsym') {
     /* o MESMO seletor de acervo da aba Sch Lib manda na lista do editor: a fileira de
        sub-abas e do grupo lib inteiro, entao o combobox ja aparece por cima do painel de

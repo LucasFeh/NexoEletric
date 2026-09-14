@@ -1,12 +1,23 @@
 /* AltiumPCBMirror v2 - hub-libsync.js — as libs do hub e do Altium andam juntas.
 
-   Quem manda é o Altium. O que foi mudado direto na .SchLib (a da casa, no Y:, ou as do
-   almoxarifado em Libs\Almox) vale mais que o espelho do hub, e mais que o que o Odoo
-   traria na próxima sincronização. Este módulo é a ponta do hub nessa hierarquia: ao
-   entrar na aba Biblioteca pergunta ao servidor (GET /api/symbols/altium-changes) se
-   alguma .SchLib mudou desde a última vez que o hub a viu; se mudou, acende um badge na
-   fileira de sub-abas, busca o detalhe (deep=1) e, com itens, pergunta num modal do tema
-   se é para trazer isso para a lib do hub (POST /api/symbols/altium-apply).
+   Quem manda é o HUB. Desde a inversão de autoridade (2026-09-14) o desenho é da
+   biblioteca do hub: o que se salva no editor de símbolos desce para a .SchLib, e o que
+   for mudado direto na .SchLib (a da casa, no Y:, ou as do almoxarifado em Libs\Almox)
+   NÃO sobe. Este módulo é o ALERTA dessa regra, e só isso: ao entrar na aba Biblioteca
+   pergunta ao servidor (GET /api/symbols/altium-changes) se alguma .SchLib mudou desde a
+   última vez que o hub a viu; se mudou, acende um badge na fileira de sub-abas, busca o
+   detalhe (deep=1) e mostra num modal do tema O QUE está diferente.
+
+   Ele não tem mais botão de aplicar. Havia um ("Atualizar a lib do hub", POST
+   /api/symbols/altium-apply) e era o caminho pelo qual o desenho do Altium entrava na
+   biblioteca do hub; o servidor agora recusa a rota, e adotar um desenho do Altium é
+   comando de gente, na linha de comando:
+
+       python tools/symbols/guardiao.py --proteger "FAMILIA/COMPONENTE"
+
+   Vale dizer o que o aviso significa: sem adotar, a próxima sincronização desfaz a edição
+   feita no Altium — repõe o desenho do hub por cima. É justamente o que o modal existe
+   para contar antes que aconteça.
 
    Convívio: no máximo uma consulta a cada 30 s e nunca duas em paralelo — a casca chama
    verifica() a cada renderPanes(), e o servidor não pode ser consultado a cada clique.
@@ -31,6 +42,17 @@ const MUDANCAS = ['geometria', 'descricao', 'footprints', 'flags', 'cores', 'nov
 
 /* t() de reserva (Node, ou casca sem i18n): a chave volta como ela mesma, com {n} trocado */
 const semT = (k, vars) => !vars ? k : k.replace(/\{(\w+)\}/g, (m, v) => (v in vars ? String(vars[v]) : m));
+
+/* Rótulo NOVO deste painel, com o texto aqui dentro. O CLAUDE.md manda: os rótulos de
+   painel vivem no .js do painel; o hub-i18n.js é da casca e de outro dono. Se a casca já
+   conhecer a chave, ela ganha (e o dia em que o `agente/page` as traduzir, nada aqui
+   muda); se devolver a chave como ela mesma — o comportamento do t() quando não conhece —,
+   vale o padrão em pt-BR escrito aqui. */
+function TX(chave, padrao, vars) {
+  const v = T(chave, vars);
+  if (v && v !== chave) return v;
+  return !vars ? padrao : padrao.replace(/\{(\w+)\}/g, (m, k) => (k in vars ? String(vars[k]) : m));
+}
 
 /* ═══════════════════════ lógica pura ═══════════════════════ */
 
@@ -62,12 +84,8 @@ function montaLista(itens, t, max) {
   return { linhas: all.slice(0, lim).map(it => descreveItem(it, t)), sobra: Math.max(0, all.length - lim), total: all.length };
 }
 function textoIntro(n, t) { t = t || semT; return n === 1 ? t('ls.texto1') : t('ls.texto', { n }); }
-function textoPronto(n, t) { t = t || semT; return n === 1 ? t('ls.pronto1') : t('ls.pronto', { n }); }
-/* o corpo do altium-apply é a lista como o servidor a mandou: é ele quem sabe o que cada campo é */
-function corpoApply(itens) { return { itens: (itens || []).map(it => Object.assign({}, it)) }; }
 /* o símbolo aberto no editor está entre os que o Altium mudou? (só o espelho da casa —
    o editor não abre componente do almoxarifado) */
-function editorNaLista(itens, sel) { return !!sel && (itens || []).some(it => it && it.acervo !== 'almox' && it.name === sel); }
 const arquivosMudados = arquivos => (arquivos || []).filter(a => a && a.mudou)
   .map(a => String(a.arquivo || '').split(/[\\/]/).pop());
 
@@ -96,8 +114,8 @@ function adiado(assin, store) { try { return !!assin && !!store && store.getItem
 function marcaAdiado(assin, store) { try { if (store) store.setItem(SS_KEY, assin); } catch (e) {} }
 function limpaAdiado(store) { try { if (store) store.removeItem(SS_KEY); } catch (e) {} }
 
-const pure = { assinatura, chaveItem, descreveItem, montaLista, textoIntro, textoPronto, corpoApply,
-               editorNaLista, arquivosMudados, mkThrottle, adiado, marcaAdiado, limpaAdiado,
+const pure = { assinatura, chaveItem, descreveItem, montaLista, textoIntro,
+               arquivosMudados, mkThrottle, adiado, marcaAdiado, limpaAdiado,
                INTERVALO, MAX_LISTA, SS_KEY, MUDANCAS };
 
 /* ═══════════════════════ estado e servidor ═══════════════════════ */
@@ -108,7 +126,6 @@ let O = {};            /* opts do último verifica(): t, toast, editor(), onAppl
 const T = (k, v) => (O.t || semT)(k, v);
 const ss = () => { try { return window.sessionStorage; } catch (e) { return null; } };
 const online = () => typeof location !== 'undefined' && /^http/.test(location.protocol);
-const seguro = fn => { try { return fn(); } catch (e) { return null; } };
 
 async function getJson(url) {
   try { const r = await fetch(url); if (!r.ok) return null; return await r.json(); } catch (e) { return null; }
@@ -189,27 +206,6 @@ function onBadgeClick() {
   thr.zera(); verifica();
 }
 
-/* modal de confirmação no tema do hub (o mesmo backdrop + dialog do openDeleteDialog);
-   fecha só a si mesmo, porque pode estar por cima do modal principal */
-function confirma(msg, o) {
-  o = o || {};
-  return new Promise(resolve => {
-    const ov = document.getElementById('overlay'); if (!ov) { resolve(false); return; }
-    const bd = el('div', 'backdrop center');
-    const d = el('div', 'dialog libsync-dlg libsync-confirma'); d.setAttribute('role', 'alertdialog');
-    d.append(el('h3', null, o.title || T('ls.sujoTitulo')), el('p', 'libsync-p', msg));
-    const act = el('div', 'libsync-acoes');
-    const nao = el('button', 'btn btn-ghost', T('ls.cancelar')); nao.type = 'button';
-    const sim = el('button', 'btn ' + (o.danger ? 'btn-danger' : 'btn-primary'), o.ok || 'OK'); sim.type = 'button';
-    const fim = v => { bd.remove(); resolve(v); };
-    nao.onclick = () => fim(false); sim.onclick = () => fim(true);
-    bd.onclick = e => { if (e.target === bd) fim(false); };
-    d.onkeydown = e => { if (e.key === 'Escape') { e.stopPropagation(); fim(false); } };
-    act.append(nao, sim); d.append(act); bd.append(d); ov.append(bd);
-    sim.focus();
-  });
-}
-
 function fecha() { if (ST.modal) { ST.modal.remove(); ST.modal = null; } }
 
 function abreModal() {
@@ -234,44 +230,31 @@ function abreModal() {
 
   const arqs = arquivosMudados(ST.arquivos);
   if (arqs.length) d.append(el('p', 'libsync-arq mono', T('ls.arquivos') + ': ' + arqs.join(' · ')));
-  d.append(el('p', 'libsync-p', T('ls.pergunta')));
+
+  /* O QUE ISSO SIGNIFICA — a parte que o modal antigo não precisava dizer, porque ele
+     simplesmente oferecia o botão. Sem a frase, um aviso sem ação vira ruído: a pessoa
+     fecha e a sincronização desfaz o trabalho dela sem que nada tenha avisado de verdade. */
+  d.append(el('p', 'libsync-p', TX('ls.soAviso',
+    'O desenho é da biblioteca do hub: isto é um aviso, não uma pergunta. O que foi mudado '
+    + 'direto no Altium NÃO entra no hub — e a próxima sincronização repõe por cima o desenho '
+    + 'do hub. Para adotar um destes desenhos, é comando manual:')));
+  const cmd = el('p', 'libsync-arq mono',
+    'python tools/symbols/guardiao.py --proteger "FAMILIA/COMPONENTE"');
+  cmd.title = TX('ls.comandoHint',
+    'rodar na raiz do workspace, com a família e o componente como aparecem na lista acima');
+  d.append(cmd);
 
   const act = el('div', 'libsync-acoes');
-  const nao = el('button', 'btn btn-ghost', T('ls.agoraNao')); nao.type = 'button';
-  const sim = el('button', 'btn btn-primary', T('ls.atualizar')); sim.type = 'button';
-  /* "Agora não" (e clicar fora, e Esc) = não perguntar de novo por ESTAS mudanças */
-  const agoraNao = () => { marcaAdiado(assinatura(ST.arquivos, itens), ss()); fecha(); };
-  nao.onclick = agoraNao;
-  sim.onclick = () => aplica(itens, sim, nao);
-  bd.onclick = e => { if (e.target === bd) agoraNao(); };
-  d.onkeydown = e => { if (e.key === 'Escape') agoraNao(); };   /* a casca fecha o overlay em seguida */
-  act.append(nao, sim); d.append(act); bd.append(d); ov.append(bd);
+  const ok = el('button', 'btn btn-primary', TX('ls.entendi', 'Entendi')); ok.type = 'button';
+  /* fechar (e clicar fora, e Esc) = não avisar de novo por ESTAS mudanças. O badge fica:
+     o aviso não sumiu, só parou de abrir sozinho. */
+  const visto = () => { marcaAdiado(assinatura(ST.arquivos, itens), ss()); fecha(); };
+  ok.onclick = visto;
+  bd.onclick = e => { if (e.target === bd) visto(); };
+  d.onkeydown = e => { if (e.key === 'Escape') visto(); };   /* a casca fecha o overlay em seguida */
+  act.append(ok); d.append(act); bd.append(d); ov.append(bd);
   ST.modal = bd;
-  sim.focus();
-}
-
-async function aplica(itens, sim, nao) {
-  /* edição não salva no editor de símbolos, no mesmo símbolo que o Altium mudou: a versão
-     do Altium vai passar por cima do espelho — quem decide é a pessoa */
-  const ed = O.editor ? seguro(O.editor) : null;
-  if (ed && ed.dirty && editorNaLista(itens, ed.sel)) {
-    const ok = await confirma(T('ls.sujo', { x: ed.sel }), { title: T('ls.sujoTitulo'), ok: T('ls.sujoOk'), danger: true });
-    if (!ok) return;
-  }
-  sim.disabled = true; nao.disabled = true;
-  const r = await postJson('/api/symbols/altium-apply', corpoApply(itens));
-  sim.disabled = false; nao.disabled = false;
-  if (!r || !r.ok) { if (O.toast) O.toast(T('ls.falhou', { e: (r && r.error) || '?' }), 'err'); return; }
-  fecha();
-  ST.pendente = false; ST.itens = null; limpaAdiado(ss()); thr.zera(); refreshBadge();
-  const n = r.aplicados != null ? r.aplicados : itens.length;
-  let msg = textoPronto(n, T);
-  /* o editor de símbolos guarda o espelho em memória e (hoje) não expõe recarga: se ele já
-     carregou a lista, a geometria nova só aparece lá depois de um F5 — melhor dizer */
-  const symed = typeof window !== 'undefined' ? window.HubSymEd : null;
-  if (ed && ed.carregado && !(symed && typeof symed.reload === 'function')) msg += T('ls.prontoSymed');
-  if (O.toast) O.toast(msg, 'ok');
-  if (O.onApplied) { try { O.onApplied(r); } catch (e) {} }
+  ok.focus();
 }
 
 return { verifica, badge, abreModal, estado: ST, pure };

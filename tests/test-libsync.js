@@ -86,22 +86,16 @@ assert.strictEqual(P.MAX_LISTA, 12);
 /* ── textos com plural ── */
 assert.strictEqual(P.textoIntro(3, t), 'Identificamos modificações vindas do Altium em 3 símbolos:');
 assert.strictEqual(P.textoIntro(1, t), 'Identificamos uma modificação vinda do Altium em 1 símbolo:');
-assert.strictEqual(P.textoPronto(1, t), '1 símbolo atualizado a partir do Altium');
-assert.strictEqual(P.textoPronto(7, t), '7 símbolos atualizados a partir do Altium');
 assert.strictEqual(P.textoIntro(2), 'ls.texto', 'sem t(), volta a chave — o {n} fica para a casca');
 
-/* ── o corpo do altium-apply: os itens como vieram, e sem partilhar objeto com o estado ── */
-const corpo = P.corpoApply(itens);
-assert.deepStrictEqual(corpo, { itens });
-assert.notStrictEqual(corpo.itens[0], itens[0], 'cópia rasa: mexer no corpo não mexe no estado');
-assert.deepStrictEqual(P.corpoApply(null), { itens: [] });
-
-/* ── cruzamento com o editor de símbolos ── */
-assert.strictEqual(P.editorNaLista(itens, 'RES [SMD]'), true, 'símbolo aberto está entre os mudados');
-assert.strictEqual(P.editorNaLista(itens, 'CAP [SMD]'), false);
-assert.strictEqual(P.editorNaLista(itens, null), false, 'nada aberto');
-assert.strictEqual(P.editorNaLista(itens, 'DB3 DO-35'), false, 'componente do almoxarifado não é símbolo do editor');
-assert.strictEqual(P.editorNaLista(null, 'RES [SMD]'), false);
+/* ── INVERSÃO DE AUTORIDADE (2026-09-14): o módulo não aplica mais nada ──
+   Saíram daqui, com o botão "Atualizar a lib do hub": `textoPronto` (o "{n} símbolos
+   atualizados a partir do Altium"), `corpoApply` (o corpo do POST /altium-apply) e
+   `editorNaLista` (o cruzamento com a edição não salva do editor de símbolos, que só
+   importava porque a versão do Altium ia passar por cima dela). O desenho é do hub; o que
+   vem do Altium é aviso. Nada em `pure` fala de aplicar: */
+['textoPronto', 'corpoApply', 'editorNaLista', 'aplica'].forEach(k =>
+  assert.strictEqual(P[k], undefined, 'pure.' + k + ' é do tempo em que o modal aplicava'));
 
 /* ── nomes dos arquivos para o badge/modal: só o basename, e só os mudados ── */
 assert.deepStrictEqual(P.arquivosMudados(arqs), ['BIBLIOTECA DE ESQUEMA.SchLib', 'DIAC ALMOX.SchLib']);
@@ -151,5 +145,5 @@ assert.deepStrictEqual(P.arquivosMudados(null), []);
   assert.strictEqual(await p6, 'seco', 'fn síncrona também vale');
   assert.strictEqual(thr.tenta(() => { throw new Error('sinc'); }), null, 'dentro do intervalo: nem chama');
 
-  console.log('test-libsync OK (assinatura, adiado/sessionStorage, descreveItem, montaLista 12+k, plural, corpoApply, editorNaLista, arquivosMudados, throttle 30 s/paralelo/zera/falha)');
+  console.log('test-libsync OK (assinatura, adiado/sessionStorage, descreveItem, montaLista 12+k, plural, nada de aplicar, arquivosMudados, throttle 30 s/paralelo/zera/falha)');
 })().catch(e => { console.error(e); process.exit(1); });

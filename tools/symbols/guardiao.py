@@ -6,12 +6,28 @@
     python tools/symbols/guardiao.py --liberar "FAMILIA/COMPONENTE" ...   # volta ao gerador na próxima sincronização
     python tools/symbols/guardiao.py --proteger "FAMILIA/COMPONENTE" ...  # força a proteção (origem 'hub')
 
-A hierarquia pedida pelo usuário: o que foi mudado direto na lib do Altium permanece > o que
-foi alterado no símbolo do hub permanece > o que vem do Odoo só entra onde não há nenhum dos
-dois. O gerador (`tools/almox/almox2lib.py`, de outro agente) reescreve cada `.SchLib` de
-`Libs/Almox` do zero a cada sincronização; este módulo o envolve — ANTES, apura o que mudou
-no Altium; DEPOIS, repõe — e guarda o estado no ledger `Libs/lib-ledger.json` (versionado:
-é estado, como o `almox-parts.json`).
+A HIERARQUIA MUDOU EM 2026-09-14, a pedido do usuário. Era: Altium > hub > Odoo — o que
+fosse mudado direto na `.SchLib` subia para a biblioteca do hub. É: **o desenho é do HTML**.
+
+    hub  ->  Altium    o que se salva no editor de símbolos vai para a `.SchLib` na hora
+                       (`/save-almox`) e é reposto depois de cada regeração (`depois`).
+    Altium -> hub      NÃO. Divergência vira ALERTA (`antes` -> `divergentes`, e a rota
+                       `/api/symbols/altium-changes`), nunca aplicação automática.
+    Odoo ->  hub       tudo o que não é desenho: valores, saldo, local, custo, footprint,
+                       parâmetros. O gerador só CRIA desenho que não existe
+                       (`almox2lib.geometria_congelada`).
+    manual             `--proteger` / `--liberar` na CLI, e só eles, ainda movem desenho do
+                       Altium para o hub. É a escapatória que o usuário guardou para si:
+                       "nada altera a lib do html, apenas ele mesmo, manualmente".
+
+O gerador (`tools/almox/almox2lib.py`, de outro agente) reescreve cada `.SchLib` de
+`Libs/Almox` a cada sincronização; este módulo o envolve — ANTES, apura o que está diferente
+no Altium e AVISA; DEPOIS, repõe o desenho do hub — e guarda o estado no ledger
+`Libs/lib-ledger.json` (versionado: é estado, como o `almox-parts.json`).
+
+Consequência que o alerta existe para contar: componente mexido no Altium e não adotado no
+hub volta ao desenho do hub (ou ao do gerador) na próxima sincronização. Antes ele era
+adotado sozinho; agora é preciso dizer `--proteger "FAMILIA/COMPONENTE"`.
 
 O ledger:
 
@@ -35,17 +51,18 @@ A impressão digital é `extrair.fingerprint(pins, graphics, 'ci')`: arredonda a
 ignora cor e visibilidade — o round-trip pelo `schlib_patch` (3 casas) não a altera.
 
 Um arquivo que o hub escreveu por último (mtime igual ao ledger) não é apurado: o que está
-nele é nosso. Só o que mudou desde então — ou nunca foi visto — é lido. Num arquivo que
-mudou, componente cuja geometria voltou à do gerador perde a proteção: o Altium é a verdade.
-Num arquivo nunca visto isso não vale (pode ser uma sincronização que caiu no meio), e
-componente sem `gerado` do símbolo não é julgado: assume-se que o arquivo é o que o gerador
-fez — é assim que o ledger nasce, sem proteger nada.
+nele é nosso. Só o que mudou desde então — ou nunca foi visto — é lido. Componente sem
+`gerado` do símbolo não é julgado: assume-se que o arquivo é o que o gerador fez — é assim
+que o ledger nasce, sem proteger nada. (Aqui havia a regra inversa: componente cuja
+geometria voltasse à do gerador NO ALTIUM perdia a proteção, "o Altium é a verdade". Saiu
+com a inversão: quem protege e quem libera é o hub.)
 
-O espelho `Libs/almox-*.js` anda junto: o símbolo com protegidos ganha em `parts` a geometria
-protegida (a mais frequente entre eles; empate, a mais antiga) e os campos `origem: altium`
-e `protegidos: N`; o símbolo sem protegidos fica com o desenho que o gerador pôs. O arquivo
-é reescrito com o `escreve_espelho` do próprio almox2lib, linha a linha — as linhas dos
-outros símbolos saem byte a byte iguais.
+O espelho `Libs/almox-*.js` anda junto com o ledger: o símbolo com protegidos ganha os campos
+`origem` (`hub` ou `altium`, de onde veio o desenho) e `protegidos: N`; o símbolo sem
+protegidos perde as marcas. A GEOMETRIA do espelho só é escrita no caminho manual
+(`atualiza_espelhos(..., geometria=True)`) — na sincronização o espelho é a verdade e
+ninguém escreve por cima dele. O arquivo é reescrito com o `escreve_espelho` do próprio
+almox2lib, linha a linha — as linhas dos outros símbolos saem byte a byte iguais.
 
 A biblioteca da casa é resolvida pela ordem única do `tools/libpath.py` — a viva do
 `config.json » schlib` enquanto o arquivo dela existir, senão a cópia publicada em
@@ -409,15 +426,21 @@ def _tira_prot(ledger, fam, comp):
     return True
 
 
-def lista_protegidos(ledger, novos=()):
-    marc = {(n['familia'], n['componente']) for n in novos}
+def lista_protegidos(ledger):
+    """o que está protegido, para o resumo e para o --status.
+
+    Havia aqui um `novos=()` que marcava `novo: True` no que o `antes` acabara de proteger
+    a partir do Altium. Com a inversão de autoridade (ver `antes`) nada mais nasce protegido
+    numa sincronização: proteção só entra pelo hub (`/save-almox`, `--proteger`), e o que o
+    Altium tem de diferente sai em `divergentes`, não aqui. O campo ficou, sempre False,
+    porque o espelho e a tela já o leem — tirá-lo mudaria o formato do resumo sem ganho."""
     fora = []
     for fam, comps in sorted((ledger.get('protegidos') or {}).items()):
         for comp, p in sorted(comps.items()):
             fora.append(OrderedDict([('familia', fam), ('componente', comp), ('simbolo', p.get('simbolo', '')),
                                      ('origem', p.get('origem', '')), ('desde', p.get('desde', '')),
                                      ('fp', p.get('fp', '')), ('orfao', bool(p.get('orfao'))),
-                                     ('novo', (fam, comp) in marc)]))
+                                     ('novo', False)]))
     return fora
 
 
@@ -435,12 +458,30 @@ def _acha_componente(raiz, fam, comp, cache):
 
 # ─── antes do gerador ────────────────────────────────────────────────────────
 def antes(raiz, ledger, log=print):
-    """apura o que mudou no Altium desde o ledger nas libs do almoxarifado: componente
-    cuja geometria difere da que o gerador escreveu vira protegido (origem altium); num
-    arquivo que mudou, componente que voltou à do gerador perde a proteção.
-    -> (novos, liberados)"""
+    """apura o que está diferente nas libs do almoxarifado desde o ledger — e SÓ apura.
+
+    A INVERSÃO DE AUTORIDADE, 2026-09-14. Até aqui esta função PROMOVIA o Altium: geometria
+    diferente da que o gerador escreveu virava proteção `origem: altium`, e daí subia para o
+    espelho do hub; geometria que voltasse à do gerador tirava a proteção. Era a hierarquia
+    antiga (Altium > hub > Odoo), e ela deixava o desenho da biblioteca do hub mudar sozinho
+    por causa de um save no Altium, sem ninguém pedir.
+
+    A regra agora é a do usuário: **o desenho é do HTML**. O que se edita no hub desce para a
+    .SchLib (o `/save-almox` grava lá na hora, e o `depois` repõe depois de cada regeração);
+    o que se edita no Altium **não sobe** — vira ALERTA. Esta função é esse alerta: devolve a
+    lista de divergências para o resumo do sincronismo e para a aba Biblioteca, e não mexe em
+    uma linha do ledger.
+
+    Divergência é geometria diferente da referência daquele componente:
+      protegido      a referência é o desenho protegido (o que o hub gravou). Divergir quer
+                     dizer que o Altium mexeu e que a próxima regeração vai desfazer — o
+                     `depois` repõe o do hub. É a divergência que mais importa avisar.
+      não protegido  a referência é `gerado[símbolo]`, a impressão digital do que o gerador
+                     escreveu por último. Divergir quer dizer que alguém desenhou no Altium
+                     e que ninguém no hub sabe.
+    -> [divergências]"""
     idx = indice_almox(carrega_espelhos_almox(raiz))
-    novos, liberados = [], []
+    divergentes = []
     for fam, cam in arquivos_almox(raiz):
         m, conhecido, st = mudou(ledger, raiz, cam)
         if conhecido and not m:
@@ -452,23 +493,27 @@ def antes(raiz, ledger, log=print):
             sim = idx.get((fam, comp))
             if not sim:
                 continue                    # não está no espelho: o gerador vai apagá-lo
-            esperado = ledger['gerado'].get(sim[0])
-            if esperado is None:
-                continue                    # primeira vez: assume-se que é o que o gerador fez
             prot = _prot(ledger, fam, comp)
             fp = fp_parts(parts)
-            if fp != esperado:
-                if prot and prot.get('fp') == fp and not prot.get('orfao'):
-                    continue                # já protegido com essa mesma geometria
-                _poe_prot(ledger, fam, comp, parts, 'altium', sim[0])
-                novos.append(OrderedDict([('familia', fam), ('componente', comp), ('simbolo', sim[0]),
-                                          ('origem', 'altium'), ('atualizado', bool(prot))]))
-                log('   protegido (altium%s): %s / %s' % (', de novo' if prot else '', fam, comp))
-            elif prot and conhecido:
-                _tira_prot(ledger, fam, comp)
-                liberados.append(OrderedDict([('familia', fam), ('componente', comp), ('simbolo', sim[0])]))
-                log('   voltou ao desenho do gerador no Altium, proteção retirada: %s / %s' % (fam, comp))
-    return novos, liberados
+            if prot and not prot.get('orfao'):
+                if prot.get('fp') == fp:
+                    continue                # o Altium está com o desenho do hub: nada a dizer
+                ref = 'protegido'
+            else:
+                esperado = ledger['gerado'].get(sim[0])
+                if esperado is None or fp == esperado:
+                    continue                # primeira vez, ou é o que o gerador escreveu
+                ref = 'gerado'
+            divergentes.append(OrderedDict([
+                ('familia', fam), ('componente', comp), ('simbolo', sim[0]),
+                ('referencia', ref), ('origem', (prot or {}).get('origem', '')),
+                ('reposto', ref == 'protegido')]))
+            log('   mudou no Altium (%s): %s / %s%s' % (
+                ref, fam, comp, ' — a regeração repõe o desenho do hub' if ref == 'protegido' else ''))
+    if divergentes:
+        log('   %d divergência(s) do Altium — o hub AVISA e não aplica; '
+            'quem manda no desenho é a biblioteca do hub' % len(divergentes))
+    return divergentes
 
 
 # ─── o gerador ───────────────────────────────────────────────────────────────
@@ -560,21 +605,29 @@ def depois(raiz, ledger, log=print):
     return repostos, orfaos, sorted(set(familias))
 
 
-def atualiza_espelhos(raiz, ledger, log=print, espelhos=None, substitutos=None):
-    """o espelho anda junto: símbolo com protegidos ganha a geometria protegida (a mais
-    frequente; empate = a mais antiga) e `origem`/`protegidos`; sem protegidos, perde as
-    marcas. `substitutos` {símbolo: parts} é a geometria a pôr num símbolo que acabou de
-    perder a proteção fora de uma sincronização (o que o Altium tem agora).
+def atualiza_espelhos(raiz, ledger, log=print, espelhos=None, substitutos=None, geometria=False):
+    """o espelho anda junto com o ledger: símbolo com protegidos ganha as marcas
+    `origem`/`protegidos`; sem protegidos, perde as marcas. -> nomes dos símbolos tocados
 
-    Componente protegido cuja geometria NÃO é a que o símbolo recebeu ganha a sua em
-    `valores[].parts` — é o que o /save-almox grava e o que o gerador descarta a cada
-    sincronismo (ele refaz os valores do snapshot do Odoo). Sem isto o desenho de UM
-    componente sumia do hub no sincronismo seguinte, embora sobrevivesse na .SchLib
-    (o `depois` o repõe lá) e no ledger. Quem tem a geometria do símbolo não precisa de
-    `parts` próprio: o hub desenha o valor sem `parts` com o desenho da família.
-    -> nomes dos símbolos tocados"""
+    `geometria` decide se a GEOMETRIA protegida também entra no espelho, e é o coração da
+    inversão de autoridade (2026-09-14):
+
+      False (a sincronização)  só as marcas. O desenho do espelho é a verdade e ninguém
+            escreve por cima dele — nem o gerador, que agora só cria o que não existe
+            (`almox2lib.geometria_congelada`), nem este módulo. Era por aqui que a geometria
+            vinda do Altium subia para a biblioteca do hub; não sobe mais.
+      True  (comando manual)   `aplica`, `protege` e `libera` — alguém digitou, ou apertou um
+            botão que diz o que vai fazer. É a escapatória que o usuário guardou para si
+            ("apenas ele mesmo, manualmente"), e o único caminho que ainda muda o desenho da
+            biblioteca do hub a partir do Altium.
+
+    Com `geometria`: o símbolo recebe a geometria protegida mais frequente (empate = a mais
+    antiga); `substitutos` {símbolo: parts} é a geometria a pôr num símbolo que acabou de
+    perder a proteção; e o componente protegido cuja geometria NÃO é a que o símbolo recebeu
+    ganha a sua em `valores[].parts` — o hub desenha o valor sem `parts` com o desenho da
+    família, então só a minoria precisa de `parts` próprio."""
     espelhos = espelhos if espelhos is not None else carrega_espelhos_almox(raiz)
-    substitutos = substitutos or {}
+    substitutos = (substitutos or {}) if geometria else {}
     por_sim = {}
     for fam, comps in (ledger.get('protegidos') or {}).items():
         for comp, p in comps.items():
@@ -603,31 +656,42 @@ def atualiza_espelhos(raiz, ledger, log=print, espelhos=None, substitutos=None):
             cont = Counter(p['fp'] for p in ps)
             melhor = sorted(cont, key=lambda f: (-cont[f], min(p.get('desde', '') for p in ps if p['fp'] == f)))[0]
             escolhido = next(p for p in ps if p['fp'] == melhor)
-            # a minoria: componente protegido com geometria diferente da do símbolo leva a
-            # sua para o próprio valor (o gerador acabou de apagá-la de lá)
-            por_comp = {p['componente']: p for p in ps}
-            for v in sim.get('valores') or []:
-                p = por_comp.get(v.get('altium'))
-                if not p or p['fp'] == melhor or _igual(v.get('parts'), p['parts']):
-                    continue
-                v['parts'] = copy.deepcopy(p['parts'])
-                mudou_arq = True
-                if sim['name'] not in tocados:
-                    tocados.append(sim['name'])
-                log('   espelho: %s / %s com o desenho protegido próprio' % (sim['name'], v.get('altium')))
-            if _igual(sim.get('parts'), escolhido['parts']) and sim.get('origem') == 'altium' \
-                    and sim.get('protegidos') == len(ps):
+            if geometria:
+                # a minoria: componente protegido com geometria diferente da do símbolo leva
+                # a sua para o próprio valor
+                por_comp = {p['componente']: p for p in ps}
+                for v in sim.get('valores') or []:
+                    p = por_comp.get(v.get('altium'))
+                    if not p or p['fp'] == melhor or _igual(v.get('parts'), p['parts']):
+                        continue
+                    v['parts'] = copy.deepcopy(p['parts'])
+                    mudou_arq = True
+                    if sim['name'] not in tocados:
+                        tocados.append(sim['name'])
+                    log('   espelho: %s / %s com o desenho protegido próprio' % (sim['name'], v.get('altium')))
+            # A MARCA diz DE ONDE veio o desenho protegido, e era 'altium' fixo — mentira
+            # desde que o hub passou a proteger o que se salva no editor de símbolos, e
+            # mentira grande depois da inversão, em que o caminho normal é justamente o hub.
+            # Havendo os dois no mesmo símbolo, 'hub' ganha: é o que manda no desenho.
+            marca = 'hub' if any(x.get('origem') == 'hub' for x in ps) else 'altium'
+            # as MARCAS valem sempre; a geometria, só no caminho manual
+            iguais = _igual(sim.get('parts'), escolhido['parts']) if geometria else True
+            if iguais and sim.get('origem') == marca and sim.get('protegidos') == len(ps):
                 continue
-            sim['parts'] = copy.deepcopy(escolhido['parts'])
-            sim['partcount'] = len(escolhido['parts'])
-            bb = _bbox(escolhido['parts'])
-            if bb:
-                sim['bbox'] = bb
-            sim['origem'] = 'altium'
+            if geometria:
+                sim['parts'] = copy.deepcopy(escolhido['parts'])
+                sim['partcount'] = len(escolhido['parts'])
+                bb = _bbox(escolhido['parts'])
+                if bb:
+                    sim['bbox'] = bb
+            sim['origem'] = marca
             sim['protegidos'] = len(ps)
             mudou_arq = True
-            tocados.append(sim['name'])
-            log('   espelho: %s com a geometria protegida (%d componente(s))' % (sim['name'], len(ps)))
+            if sim['name'] not in tocados:
+                tocados.append(sim['name'])
+            log('   espelho: %s %s (%d componente(s))' % (
+                sim['name'], 'com a geometria protegida' if geometria else 'marcado como protegido',
+                len(ps)))
         if mudou_arq:
             grava_espelho_almox(cam, var, esp)
     return tocados
@@ -663,8 +727,8 @@ def sincroniza(argv=(), log=print, raiz=RAIZ, gerador=None):
         log('guardião: ledger %s (%d arquivo(s), %d símbolo(s) gerado(s), %d protegido(s))' % (
             LEDGER.replace('\\', '/'), len(ledger['arquivos']), len(ledger['gerado']),
             sum(len(c) for c in ledger['protegidos'].values())))
-        novos, liberados = antes(raiz, ledger, log)
-        grava_ledger(raiz, ledger)          # o que o "antes" apurou não pode se perder se o gerador cair
+        divergentes = antes(raiz, ledger, log)
+        grava_ledger(raiz, ledger)          # o "antes" não mexe no ledger, mas o `carrega` normaliza
         # A publicação vem antes do gerador de propósito: se a rodada morrer no meio, a
         # cópia que viaja no push já está atualizada. Não levanta nunca — share fora do ar
         # é aviso, não motivo para o sincronismo inteiro cair.
@@ -687,15 +751,15 @@ def sincroniza(argv=(), log=print, raiz=RAIZ, gerador=None):
         resumo = OrderedDict([
             ('ok', erro is None), ('erro', erro), ('quando', agora()),
             ('gerados', len(familias)), ('arquivos', len([k for k in ledger['arquivos'] if k.startswith('Libs/Almox/')])),
-            ('protegidos', lista_protegidos(ledger, novos)),
-            ('novos', novos), ('liberados', liberados), ('repostos', repostos), ('orfaos', orfaos),
+            ('protegidos', lista_protegidos(ledger)),
+            ('divergentes', divergentes), ('repostos', repostos), ('orfaos', orfaos),
             ('espelhos', tocados), ('recicladoDe', recicl),
             ('publicada', os.path.relpath(pub['alvo'], raiz).replace('\\', '/')),
             ('publicou', pub['publicou']), ('publicacao', pub['motivo'] or 'publicada agora'),
             ('segundos', round(time.time() - t0, 1))])
         escreve_resumo(raiz, resumo)
-        log('guardião: %d família(s), %d protegido(s) (%d novo(s), %d reposto(s), %d órfão(s)), %d símbolo(s) do espelho%s — %.1f s' % (
-            len(familias), len(resumo['protegidos']), len(novos), len(repostos), len(orfaos), len(tocados),
+        log('guardião: %d família(s), %d protegido(s) (%d divergência(s) do Altium, %d reposto(s), %d órfão(s)), %d símbolo(s) do espelho%s — %.1f s' % (
+            len(familias), len(resumo['protegidos']), len(divergentes), len(repostos), len(orfaos), len(tocados),
             '' if not erro else '; ERRO: ' + erro, resumo['segundos']))
         return resumo
 
@@ -1012,7 +1076,7 @@ def aplica(raiz, itens, log=print):
                 n += 1
                 log('almoxarifado: %s / %s %s' % (fam, comp, acao))
             if tocados:
-                atualiza_espelhos(raiz, ledger, log, espelhos, subst)
+                atualiza_espelhos(raiz, ledger, log, espelhos, subst, geometria=True)
                 for cam in tocados:
                     registra_arquivo(raiz, cam, ledger, gravar=False)
         grava_ledger(raiz, ledger)
@@ -1033,7 +1097,7 @@ def libera(raiz, fam, comp, log=print):
         ledger = carrega_ledger(raiz)
         ok = _tira_prot(ledger, fam, comp)
         if ok:
-            atualiza_espelhos(raiz, ledger, log)
+            atualiza_espelhos(raiz, ledger, log, geometria=True)
             grava_ledger(raiz, ledger)
             log('liberado: %s / %s (o gerador vence na próxima sincronização)' % (fam, comp))
         else:
@@ -1055,7 +1119,7 @@ def protege(raiz, fam, comp, origem='hub', log=print):
             log('"%s / %s" não está no espelho do almoxarifado' % (fam, comp))
             return False
         _poe_prot(ledger, fam, comp, parts, origem, sim[0])
-        atualiza_espelhos(raiz, ledger, log, espelhos)
+        atualiza_espelhos(raiz, ledger, log, espelhos, geometria=True)
         grava_ledger(raiz, ledger)
         log('protegido (%s): %s / %s' % (origem, fam, comp))
         return True

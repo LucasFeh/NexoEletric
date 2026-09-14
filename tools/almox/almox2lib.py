@@ -13,6 +13,13 @@ com saldo zero e `fora: true`. Sem isso, um resistor novo de valor baixo empurra
 as parts seguintes, e o "parte 47" de um esquema ja desenhado passaria a apontar para
 outro componente.
 
+O DESENHO TAMBEM ACUMULA, desde 2026-09-14: este gerador so CRIA o que nao existe.
+Simbolo que ja esta no espelho sai daqui com a geometria que o espelho tem hoje — a
+autoridade sobre o desenho e do HTML (o editor de simbolos do hub), e uma sincronizacao
+nunca a reescreve. Veja `geometria_congelada`. O resto continua vindo do Odoo a cada
+rodada: valores, saldo, local, custo, footprint, parametros. Congelou o desenho, nao a
+ficha.
+
 Escreve em Libs\\:
     almox-basicos.js       espelho (formato schlib-v2, o mesmo que o hub ja le)
     almox-especiais.js     idem
@@ -263,10 +270,40 @@ def carrega_reciclagem():
     return comps, ESC
 
 
+def geometria_congelada(nome, antes):
+    """O desenho que JA ESTA no espelho, se houver — (parts, bbox, partcount) ou None.
+
+    A REGRA DE AUTORIDADE, desde 2026-09-14: o desenho e do HTML. Este gerador so CRIA o
+    que nao existe; simbolo que ja esta no espelho sai daqui com a geometria que ele tem
+    hoje, venha ela do `simbolos.py` de uma geracao antiga, do editor de simbolos do hub ou
+    do guardiao. Nada do que o usuario desenhou volta a ser redesenhado por uma
+    sincronizacao — que continua trazendo do Odoo TODO o resto (valores, saldo, local,
+    custo, footprint, parametros): o que congelou foi o desenho, nao a ficha.
+
+    Antes disto, cada rodada reescrevia `parts` a partir do `simbolos.py` e o guardiao
+    repunha por cima o que estava protegido. Funcionava para o protegido e so para ele: o
+    que fosse desenhado no hub sem virar protecao — ou cuja protecao tivesse sido retirada
+    pelo caminho do Altium — voltava ao desenho generico no sincronismo seguinte, calado.
+    """
+    v = (antes or {}).get(nome)
+    if not isinstance(v, dict):
+        return None
+    parts = v.get('parts')
+    if not isinstance(parts, list) or not parts:
+        return None
+    bb = v.get('bbox') if isinstance(v.get('bbox'), dict) else None
+    return parts, bb, (v.get('partcount') if isinstance(v.get('partcount'), int) else len(parts))
+
+
 def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
     pins, gfx = SY.desenha(s['forma'], s['npin'], rotulo=s['familia'] if s['forma'] == 'box' else '')
     ps = ordena_parts(s)
     x1, y1, x2, y2 = SY.bbox(pins, gfx)
+    # o desenho de quem ja existe vem do espelho, nao do simbolos.py (ver acima)
+    congelado = geometria_congelada(s['nome'], antes)
+    if congelado and congelado[1]:
+        b = congelado[1]
+        x1, y1, x2, y2 = b.get('x1', x1), b.get('y1', y1), b.get('x2', x2), b.get('y2', y2)
 
     modelos = []
     # primeiro os footprints que vem do simbolo reciclado: sao os da casa, existem na
@@ -412,6 +449,17 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
         })
 
     numera_valores(s['nome'], valores, mapa, antes, podar)
+    # O desenho PROPRIO de um valor (o que o /save-almox grava quando um componente foge do
+    # desenho da familia) tambem e do HTML: os valores sao remontados do zero a cada rodada,
+    # entao sem repor daqui o `parts` do valor sumiria do espelho na sincronizacao seguinte.
+    velhos_v = {v.get('label'): v for v in ((antes or {}).get(s['nome']) or {}).get('valores', [])
+                if isinstance(v, dict)}
+    for v in valores:
+        if v.get('parts'):
+            continue
+        antigo = velhos_v.get(v.get('label'))
+        if antigo and antigo.get('parts'):
+            v['parts'] = antigo['parts']
     if mapa is not None:
         reg = mapa.setdefault(s['nome'], {})
         reg.setdefault('desdeSym', AGORA_ISO)
@@ -428,7 +476,7 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
         'familia': s['familia'],
         'montagem': s['mont'],
         'grupo': 'basicos' if s['grupo'] == 'b' else 'especiais',
-        'partcount': 1,
+        'partcount': congelado[2] if congelado else 1,
         'estoque': estoque_total,
         'itens': sum(len(p['itens']) for p in valores),
         'bbox': {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2},
@@ -436,8 +484,8 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
         'footprints': modelos,
         'params': [par('Familia', s['familia']), par('Montagem', s['mont'] or '—'),
                    par('Designator', s['des']), par('Fonte', 'Odoo · Almoxarifado DI')],
-        # a geometria, uma vez so - e o que o hub desenha e o que vira a .SchLib
-        'parts': [{'part': 1, 'pins': pins, 'graphics': gfx}],
+        # a geometria: do espelho se o simbolo ja existe, desenhada so se ele e novo
+        'parts': congelado[0] if congelado else [{'part': 1, 'pins': pins, 'graphics': gfx}],
         'valores': valores,
     }
 

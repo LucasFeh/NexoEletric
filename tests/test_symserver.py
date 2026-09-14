@@ -480,9 +480,15 @@ try:
         j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
         assert j['deep'] and j['itens'] == [{'acervo': 'altium', 'name': RES_NOVO, 'nomeAltium': RES, 'mudou': ['geometria']}], j['itens']
         antes = le_bytes(espelho)
+        # INVERSÃO DE AUTORIDADE (2026-09-14): a rota RECUSA, e não encosta no espelho.
         r = cli.post('/api/symbols/altium-apply', json={'itens': j['itens']})
         jj = r.get_json()
-        assert r.status_code == 200 and jj['ok'] and jj['aplicados'] == 1 and jj['itens'][0]['acao'] == 'trocado', jj
+        assert r.status_code == 409 and not jj.get('ok'), jj
+        assert '--proteger' in jj['error'] and 'manual' in jj['error'], jj['error']
+        assert le_bytes(espelho) == antes, 'a recusa não pode ter gravado nada'
+        # e o caminho MANUAL (a CLI, o que a mensagem manda usar) continua aplicando
+        jj = G.aplica(tmp, j['itens'], log=lambda *a: None)
+        assert jj['aplicados'] == 1 and jj['itens'][0]['acao'] == 'trocado', jj
         linhas_a, linhas_d = antes.split(b'\r\n'), le_bytes(espelho).split(b'\r\n')
         assert len(linhas_a) == len(linhas_d)
         pref = b'{"name":' + L._js(RES_NOVO).encode() + b','
@@ -499,9 +505,10 @@ try:
         assert cli.post('/api/symbols/altium-apply', json={'itens': []}).status_code == 400
         assert cli.post('/api/symbols/altium-apply', json={'itens': [{'acervo': 'x'}]}).status_code == 400
         assert cli.post('/api/symbols/altium-apply', json={'itens': [{'acervo': 'almox', 'familia': 'A'}]}).status_code == 400
+        # o corpo é validado ANTES da recusa: pedido malformado continua sendo 400, não 409
         r = cli.post('/api/symbols/altium-apply', json={'itens': [{'acervo': 'altium', 'name': 'NAO EXISTE'}]})
-        assert r.status_code == 200 and r.get_json()['aplicados'] == 0 and not r.get_json()['itens'][0]['ok']
-        print('altium-changes/altium-apply (casa) ok')
+        assert r.status_code == 409, r.get_json()
+        print('altium-changes avisa; altium-apply recusa (casa); a CLI aplica ok')
 
     almox_src = next((d for d in (r'D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Libs\Almox', os.path.join(RAIZ, 'Libs', 'Almox'))
                       if os.path.isfile(os.path.join(d, 'DIAC ALMOX.SchLib'))), None)
@@ -527,8 +534,17 @@ try:
         it = j['itens']
         assert len(it) == 1 and (it[0]['acervo'], it[0]['familia'], it[0]['componente'], it[0]['mudou']) == \
             ('almox', 'DIAC', comp, ['geometria']), it
+        # a rota recusa também aqui, e o ledger não ganha proteção nenhuma
+        espelho_antes = le_bytes(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
         r = cli.post('/api/symbols/altium-apply', json={'itens': it})
-        assert r.status_code == 200 and r.get_json()['aplicados'] == 1 and r.get_json()['itens'][0]['acao'] == 'protegido'
+        assert r.status_code == 409 and '--proteger' in r.get_json()['error'], r.get_json()
+        assert G.carrega_ledger(tmp)['protegidos'] == {}, 'a recusa não protege nada'
+        assert le_bytes(os.path.join(tmp, 'Libs', 'almox-basicos.js')) == espelho_antes
+        # o aviso CONTINUA de pé depois da recusa: é a diferença entre avisar e resolver
+        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
+        assert j['pendente'] and len(j['itens']) == 1, j['itens']
+        # e o caminho manual adota o desenho, com espelho e ledger juntos
+        assert G.protege(tmp, 'DIAC', comp, 'altium', log=lambda *a: None)
         led = G.carrega_ledger(tmp)
         assert led['protegidos']['DIAC'][comp]['origem'] == 'altium'
         _var, esp = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
@@ -536,7 +552,7 @@ try:
         assert sim['origem'] == 'altium' and sim['protegidos'] == 1 and G.fp_parts(sim['parts']) == G.fp_parts(mod3)
         j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
         assert not j['pendente'] and j['itens'] == []
-        print('altium-changes/altium-apply (almoxarifado) ok')
+        print('altium-apply recusa (almoxarifado); o --proteger adota ok')
 
         # ── /save-almox: o desenho de UM componente vai para os TRES destinos ──────────
         # O que se prova aqui e o que o usuario pediu: mexer no simbolo de um componente
@@ -628,17 +644,21 @@ try:
         G.grava_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'), _vn2, espn2)
         print('save-almox ok (familia pelo nome do simbolo; componente que ainda nao esta na SchLib)')
 
-        # ── atualiza_espelhos: o desenho PROPRIO do componente volta ao valor depois do sync ──
-        # O gerador refaz os valores do snapshot e apaga valores[].parts; o guardiao poe de volta
-        # o do componente protegido cuja geometria NAO e a do simbolo (a mais frequente). Sem
-        # isso o desenho de um componente sumia do hub no sincronismo seguinte. Nao precisa da
-        # .SchLib: e so espelho + ledger, num simbolo qualquer com 3+ valores e sem protecao.
+        # ── atualiza_espelhos: MARCAS sempre, GEOMETRIA so no caminho manual ──
+        # A inversao de autoridade (2026-09-14) parte esta funcao em duas. Na SINCRONIZACAO
+        # (o padrao, geometria=False) o espelho e a verdade e ninguem escreve por cima do
+        # desenho dele. No caminho MANUAL (--proteger/--liberar/aplica, geometria=True) o
+        # simbolo recebe a geometria protegida mais frequente e o componente da MINORIA leva
+        # a dele para o proprio valor -- sem isso o desenho de um componente sumia do hub.
+        # Nao precisa da .SchLib: e so espelho + ledger, num simbolo com 3+ valores e sem
+        # protecao.
         led = G.carrega_ledger(tmp)
         _vg, espg = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
         ja_prot = {q.get('simbolo') for f_ in led['protegidos'].values() for q in f_.values()}
         simg = next(x for x in espg['symbols']
                     if len(x.get('valores') or []) >= 3 and x['name'] not in ja_prot and 'origem' not in x)
         fam_g, nome_g = simg['familia'], simg['name']
+        fp_do_espelho = G.fp_parts(simg['parts'])
         minoria, maioria = simg['valores'][0]['altium'], [v['altium'] for v in simg['valores'][1:3]]
         for c in maioria:
             G._poe_prot(led, fam_g, c, mod3, 'hub', nome_g)                # a maioria: mod3
@@ -646,7 +666,19 @@ try:
         for v in simg['valores']:
             v.pop('parts', None)                                           # como o gerador deixa
         G.grava_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'), _vg, espg)
+
+        # (a) o padrao da sincronizacao: entram as MARCAS, o desenho fica onde estava
         tocados = G.atualiza_espelhos(tmp, led, log=lambda *a: None)
+        assert nome_g in tocados, tocados
+        _vs, esps = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
+        sims = next(x for x in esps['symbols'] if x['name'] == nome_g)
+        assert sims['origem'] == 'hub' and sims['protegidos'] == 3, sims.get('origem')
+        assert G.fp_parts(sims['parts']) == fp_do_espelho, 'a sincronizacao NAO escreve geometria'
+        assert all('parts' not in v for v in sims['valores']), 'nem no valor'
+        assert G.atualiza_espelhos(tmp, led, log=lambda *a: None) == [], 'segunda passada vazia'
+
+        # (b) o caminho manual: a geometria entra
+        tocados = G.atualiza_espelhos(tmp, led, log=lambda *a: None, geometria=True)
         assert nome_g in tocados, tocados
         _vg2, espg2 = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
         simg2 = next(x for x in espg2['symbols'] if x['name'] == nome_g)
@@ -654,10 +686,10 @@ try:
         vg = {v['altium']: v for v in simg2['valores']}
         assert G.fp_parts(vg[minoria]['parts']) == G.fp_parts(novo_desenho), 'a minoria volta para o proprio valor'
         assert all('parts' not in vg[c] for c in maioria), 'quem tem a geometria do simbolo nao precisa de parts proprio'
-        assert G.atualiza_espelhos(tmp, led, log=lambda *a: None) == [], 'segunda passada tem que ser vazia'
+        assert G.atualiza_espelhos(tmp, led, log=lambda *a: None, geometria=True) == [], 'segunda passada tem que ser vazia'
         # o ledger em disco nao tem essas protecoes: nada foi gravado nele, e o resto do teste segue
-        G.atualiza_espelhos(tmp, G.carrega_ledger(tmp), log=lambda *a: None)
-        print('atualiza_espelhos devolve o desenho proprio do componente ao espelho ok (%s)' % nome_g)
+        G.atualiza_espelhos(tmp, G.carrega_ledger(tmp), log=lambda *a: None, geometria=True)
+        print('atualiza_espelhos: marcas na sincronizacao, geometria so no manual ok (%s)' % nome_g)
 
         # almox-sync: reserva, 409, 400 sem senha, e o stream de verdade (sem o gerador)
         S._sync_runs.clear()

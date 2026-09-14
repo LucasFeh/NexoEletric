@@ -11,14 +11,14 @@ que estava nelas) e repõe os espelhos como saíram dele. Prova, nesta ordem:
  (1) a primeira sincronização não protege nada e cria o ledger: `arquivos` com as duas libs,
      `gerado` POR SÍMBOLO do espelho, `protegidos` vazio; uma entrada por linha; o argv vai
      ao gerador; `Libs/almox-guardiao.js` nasce.
- (2) edição por fora (retângulo a mais no DIAC, via schlib_patch sem raiz) + sincronização:
-     o componente volta com a edição, os do CAPACITOR com a geometria do gerador, o espelho
-     do `DIAC [PTH]` ganha a geometria editada, `origem: altium` e `protegidos: 1` — e as
-     outras linhas do espelho saem byte a byte iguais. Edição de novo no Altium atualiza a
-     proteção (`atualizado: true`).
+ (2) INVERSÃO DE AUTORIDADE (2026-09-14): edição por fora (retângulo a mais no DIAC, via
+     schlib_patch sem raiz) + sincronização NÃO sobe para o hub. Vira `divergentes` no
+     resumo, o ledger não ganha proteção nenhuma, o espelho sai byte a byte igual e a
+     regeração desfaz a edição na .SchLib. Só o comando MANUAL (`protege`) adota o desenho
+     — e aí sim o espelho ganha a geometria, `origem: altium` e `protegidos: 1`.
  (3) segunda sincronização sem mudança mantém tudo (proteção, fp, desde, linha do espelho).
  (4) `libera` faz o gerador vencer na próxima; e o componente que volta ao desenho do gerador
-     NO ALTIUM perde a proteção sozinho.
+     NO ALTIUM **continua protegido** — quem tira a proteção é o hub, não o Altium.
  (5) `detecta` só acusa depois de um patch por fora; `deep` lista o item; `aplica` protege e o
      espelho anda junto; arquivo tocado sem diferença é absorvido; componente que voltou ao
      gerador é liberado pelo `aplica` e o espelho fica com o que o Altium tem. CLI:
@@ -168,7 +168,9 @@ try:
     assert not os.path.isfile(G.caminho_ledger(raiz))
     r = G.sincroniza(['--pull', '--full'], log, raiz, gerador)
     assert r['ok'] and r['erro'] is None and r['gerados'] == 2 and r['arquivos'] == 2, r
-    assert r['protegidos'] == [] and r['novos'] == [] and r['repostos'] == [] and r['orfaos'] == [] and r['espelhos'] == []
+    assert r['protegidos'] == [] and r['divergentes'] == [] and r['repostos'] == [] \
+        and r['orfaos'] == [] and r['espelhos'] == []
+    assert 'novos' not in r and 'liberados' not in r, 'saíram do resumo com a inversão'
     assert chamadas == [['--pull', '--full']], 'o argv vai ao gerador'
     assert r['recicladoDe'], 'de onde o gerador reciclaria'
     led = G.carrega_ledger(raiz)
@@ -189,46 +191,71 @@ try:
     assert le_bytes(os.path.join(tmp, 'Libs', 'almox-basicos.js')) == pristine['almox-basicos.js']
     print('(1) primeira sincronização: ledger criado, nada protegido ok')
 
-    # ── (2) edição no "Altium" + sincronização: a edição fica, o resto é do gerador ──
+    # ── (2) edição no "Altium" NÃO sobe: vira aviso, e a regeração a desfaz ──
+    # A inversão de autoridade em uma asserção: o desenho é do HTML. O que mudar na .SchLib
+    # sem passar pelo hub aparece em `divergentes` e nada mais — nem proteção no ledger, nem
+    # um byte no espelho. Antes disto, a mesma edição virava `origem: altium` e a biblioteca
+    # do hub mudava sozinha por causa de um save no Altium.
     mod = com_rect(padrao[cam_diac][comp])
     P.patch(cam_diac, {'name': comp, 'parts': mod}, backup=False)          # sem raiz: é o Altium
     assert G.mudou(G.carrega_ledger(raiz), raiz, cam_diac)[0], 'mtime/size acusam a edição'
     antes = linhas_espelho()
     r = G.sincroniza([], log, raiz, gerador)
     assert r['ok'] and chamadas[-1] == []
-    assert [(n['familia'], n['componente'], n['simbolo'], n['origem'], n['atualizado']) for n in r['novos']] == \
-        [('DIAC', comp, 'DIAC [PTH]', 'altium', False)], r['novos']
-    assert [(x['familia'], x['componente']) for x in r['repostos']] == [('DIAC', comp)]
-    assert r['espelhos'] == ['DIAC [PTH]'] and r['orfaos'] == [] and r['liberados'] == []
-    assert igual(mod, G.le_familia(cam_diac)[comp]), 'o componente editado voltou com a edição'
-    lido_cap = G.le_familia(cam_cap)
-    for c, parts in padrao[cam_cap].items():
-        assert igual(parts, lido_cap[c]), 'os outros com a geometria do gerador'
+    assert [(d['familia'], d['componente'], d['simbolo'], d['referencia'], d['reposto'])
+            for d in r['divergentes']] == [('DIAC', comp, 'DIAC [PTH]', 'gerado', False)], r['divergentes']
+    assert r['protegidos'] == [] and r['repostos'] == [] and r['espelhos'] == [] and r['orfaos'] == []
+    led = G.carrega_ledger(raiz)
+    assert led['protegidos'] == {}, 'o Altium não protege mais nada sozinho'
+    assert dict(led['gerado']) == gerado_1
+    assert linhas_espelho() == antes, 'o espelho não muda por edição no Altium'
+    assert le_bytes(os.path.join(tmp, 'Libs', 'almox-basicos.js')) == pristine['almox-basicos.js']
+    assert G.fp_parts(G.le_familia(cam_diac)[comp]) == gerado_1['DIAC [PTH]'], \
+        'a regeração desfaz a edição na .SchLib — é o que o aviso serve para contar'
+    print('(2) edição no Altium não sobe: sai em divergentes e o espelho não muda ok')
+
+    # (2b) o caminho MANUAL adota o desenho do Altium — e só ele
+    mod2 = com_rect(padrao[cam_diac][comp], dx=60)
+    P.patch(cam_diac, {'name': comp, 'parts': mod2}, backup=False)
+    antes = linhas_espelho()
+    assert G.protege(raiz, 'DIAC', comp, 'altium', log)
     led = G.carrega_ledger(raiz)
     p = led['protegidos']['DIAC'][comp]
-    assert p['origem'] == 'altium' and p['simbolo'] == 'DIAC [PTH]' and p['fp'] == G.fp_parts(mod) and p['desde'] and not p.get('orfao')
-    assert igual(mod, p['parts']) and dict(led['gerado']) == gerado_1
-    assert [x for x in r['protegidos'] if x['novo']] and r['protegidos'][0]['componente'] == comp
+    assert p['origem'] == 'altium' and p['simbolo'] == 'DIAC [PTH]' and p['fp'] == G.fp_parts(mod2)
+    assert p['desde'] and not p.get('orfao') and igual(mod2, p['parts'])
     var, esp, sim = espelho_sim('DIAC [PTH]')
     assert var == 'almoxBasicos' and sim['origem'] == 'altium' and sim['protegidos'] == 1
-    assert G.fp_parts(sim['parts']) == G.fp_parts(mod) and sim['partcount'] == 1
+    assert G.fp_parts(sim['parts']) == G.fp_parts(mod2) and sim['partcount'] == 1
     assert sim['bbox']['y2'] >= 90 and sim['bbox']['y1'] <= -90, sim['bbox']
     assert list(sim.keys())[-2:] == ['origem', 'protegidos']
     so_a_linha_mudou(antes, linhas_espelho(), 'DIAC [PTH]')
     assert 'origem' not in espelho_sim('CAPACITOR')[2]
     assert le_bytes(os.path.join(tmp, 'Libs', 'almox-especiais.js')) == pristine['almox-especiais.js']
+    desde = p['desde']
+    # agora protegido, a sincronização o REPÕE na .SchLib: HTML -> Altium
+    r = G.sincroniza([], log, raiz, gerador)
+    assert [(x['familia'], x['componente']) for x in r['repostos']] == [('DIAC', comp)]
+    assert r['divergentes'] == [], 'a .SchLib está com o desenho do hub: nada a avisar'
+    assert igual(mod2, G.le_familia(cam_diac)[comp])
+    lido_cap = G.le_familia(cam_cap)
+    for c, parts in padrao[cam_cap].items():
+        assert igual(parts, lido_cap[c]), 'os outros com a geometria do gerador'
+    led = G.carrega_ledger(raiz)
     for cam in (cam_diac, cam_cap):
         assert G.mudou(led, raiz, cam)[:2] == (False, True), 'o ledger conhece o que acabou de escrever'
-    # editado DE NOVO no Altium: a proteção acompanha, o desde fica
-    mod2 = com_rect(padrao[cam_diac][comp], dx=60)
-    P.patch(cam_diac, {'name': comp, 'parts': mod2}, backup=False)
-    desde = p['desde']
+    print('(2b) só o comando manual adota o desenho do Altium; depois disso ele é reposto ok')
+
+    # (2c) protegido e mexido no Altium DE NOVO: avisa que a regeração vai desfazer
+    P.patch(cam_diac, {'name': comp, 'parts': mod}, backup=False)
+    antes = linhas_espelho()
     r = G.sincroniza([], log, raiz, gerador)
-    assert [(n['componente'], n['atualizado']) for n in r['novos']] == [(comp, True)], r['novos']
+    assert [(d['componente'], d['referencia'], d['reposto']) for d in r['divergentes']] == \
+        [(comp, 'protegido', True)], r['divergentes']
     p = G.carrega_ledger(raiz)['protegidos']['DIAC'][comp]
-    assert p['fp'] == G.fp_parts(mod2) and p['desde'] == desde and igual(mod2, G.le_familia(cam_diac)[comp])
-    assert G.fp_parts(espelho_sim('DIAC [PTH]')[2]['parts']) == G.fp_parts(mod2)
-    print('(2) edição no Altium sobrevive à sincronização; espelho com origem altium ok')
+    assert p['fp'] == G.fp_parts(mod2) and p['desde'] == desde, 'a proteção não se mexeu'
+    assert igual(mod2, G.le_familia(cam_diac)[comp]), 'e o desenho do hub voltou para a .SchLib'
+    assert linhas_espelho() == antes
+    print('(2c) Altium mexendo em componente protegido: avisa e a regeração repõe o do hub ok')
 
     # ── (3) sincronização sem mudança: tudo igual ────────────────────────────
     def sem_carimbos(txt):      # o gerador reescreve as libs: mtime e carimbos mudam, o resto não pode
@@ -236,7 +263,7 @@ try:
     led_txt = sem_carimbos(open(G.caminho_ledger(raiz), encoding='utf-8').read())
     antes = linhas_espelho()
     r = G.sincroniza([], log, raiz, gerador)
-    assert r['novos'] == [] and r['liberados'] == [] and r['orfaos'] == [] and len(r['repostos']) == 1
+    assert r['divergentes'] == [] and r['orfaos'] == [] and len(r['repostos']) == 1
     assert sem_carimbos(open(G.caminho_ledger(raiz), encoding='utf-8').read()) == led_txt
     assert linhas_espelho() == antes, 'o espelho não muda sem mudança'
     assert igual(mod2, G.le_familia(cam_diac)[comp])
@@ -251,15 +278,21 @@ try:
     assert r['protegidos'] == [] and r['repostos'] == [] and r['espelhos'] == []
     assert G.fp_parts(G.le_familia(cam_diac)[comp]) == gerado_1['DIAC [PTH]'], 'o gerador venceu'
     assert linhas_espelho() == pristine['almox-basicos.js'].split(b'\n'), 'espelho como o gerador deixou'
-    # (4b) o Altium põe de volta o desenho do gerador: a proteção cai sozinha
-    P.patch(cam_diac, {'name': comp, 'parts': mod}, backup=False)
+    # (4b) o Altium põe de volta o desenho do gerador: a proteção CONTINUA.
+    # Era aqui que o Altium tirava a proteção sozinho — "o Altium é a verdade". Não é mais:
+    # quem protege e quem libera é o hub, e o desenho do hub continua indo para a .SchLib.
+    P.patch(cam_diac, {'name': comp, 'parts': mod}, backup=False)   # o desenho que o hub quer
+    assert G.protege(raiz, 'DIAC', comp, 'hub', log)
+    assert espelho_sim('DIAC [PTH]')[2]['origem'] == 'hub', 'a marca diz de onde veio o desenho'
+    P.patch(cam_diac, {'name': comp, 'parts': padrao[cam_diac][comp]}, backup=False)  # o Altium desfaz
     r = G.sincroniza([], log, raiz, gerador)
-    assert len(r['novos']) == 1 and G.carrega_ledger(raiz)['protegidos']['DIAC'][comp]
-    P.patch(cam_diac, {'name': comp, 'parts': padrao[cam_diac][comp]}, backup=False)
-    r = G.sincroniza([], log, raiz, gerador)
-    assert [(x['familia'], x['componente']) for x in r['liberados']] == [('DIAC', comp)], r['liberados']
-    assert r['protegidos'] == [] and 'DIAC' not in G.carrega_ledger(raiz)['protegidos']
-    print('(4) liberar faz o gerador vencer; voltar ao gerador no Altium libera sozinho ok')
+    assert [(d['componente'], d['referencia']) for d in r['divergentes']] == [(comp, 'protegido')], r['divergentes']
+    assert G.carrega_ledger(raiz)['protegidos']['DIAC'][comp], 'a proteção sobrevive ao Altium'
+    assert [(x['familia'], x['componente']) for x in r['repostos']] == [('DIAC', comp)]
+    assert G.libera(raiz, 'DIAC', comp, log)
+    G.sincroniza([], log, raiz, gerador)
+    assert 'DIAC' not in G.carrega_ledger(raiz)['protegidos']
+    print('(4) liberar faz o gerador vencer; voltar ao gerador no Altium NÃO libera mais ok')
 
     # ── (5) detecta / aplica no almoxarifado ────────────────────────────────
     d = G.detecta(raiz)
@@ -335,12 +368,11 @@ try:
     code, out = cli('--raiz', tmp)
     assert code == 1 and '--sem-gerador' in out, out
     code, out = cli('--raiz', tmp, '--sem-gerador')
-    assert code == 0 and 'gerador pulado' in out and 'protegido (altium): CAPACITOR' in out, out
-    assert len(G.carrega_ledger(raiz)['protegidos']['CAPACITOR']) == 1
+    assert code == 0 and 'gerador pulado' in out and 'mudou no Altium (gerado): CAPACITOR' in out, out
+    assert G.carrega_ledger(raiz)['protegidos'] == {}, 'nem com --sem-gerador o Altium protege'
     resumo = G.le_resumo(raiz)
-    assert resumo['ok'] and [p['familia'] for p in resumo['protegidos']] == ['CAPACITOR'] and resumo['novos']
-    code, out = cli('--raiz', tmp, '--liberar', 'CAPACITOR/' + next(iter(padrao[cam_cap])))
-    assert code == 0
+    assert resumo['ok'] and resumo['protegidos'] == []
+    assert [d['familia'] for d in resumo['divergentes']] == ['CAPACITOR'], resumo['divergentes']
     G.sincroniza([], log, raiz, gerador)
     assert G.carrega_ledger(raiz)['protegidos'] == {}
     print('CLI --proteger/--status/--liberar/--sem-gerador ok')

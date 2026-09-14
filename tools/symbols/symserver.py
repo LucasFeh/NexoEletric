@@ -7,7 +7,7 @@
     POST /api/symbols/extract                reserva uma extração; GET …/<runId>/stream roda e retransmite (SSE)
     POST /api/symbols/mirror                 regera o espelho inteiro a partir da SchLib real; {flags:true} só leva os flags
     GET  /api/symbols/altium-changes[?deep=1] o que mudou nas .SchLib do Altium desde o ledger (e os itens, com deep)
-    POST /api/symbols/altium-apply           aplica no hub o que veio do Altium (linhas do schlib.js; protegidos do almox)
+    POST /api/symbols/altium-apply           RECUSA (409): o desenho é do hub; adotar o do Altium é comando manual
     POST /api/symbols/almox-sync             reserva a sincronização do almoxarifado pelo guardião; GET …/<runId>/stream roda (SSE)
 
 O trabalho pesado mora nos irmãos: `sch_leitor` lê, `schlib_patch` grava, `extrair` varre,
@@ -842,26 +842,36 @@ def _valida_itens(itens):
     return None
 
 
+RECUSA_APPLY = (
+    'o desenho é da biblioteca do hub: mudança feita direto no Altium não entra por aqui. '
+    'Esta rota aplicava, e era por ela que a .SchLib mandava no espelho; desde 2026-09-14 a '
+    'autoridade é do hub e o que vem do Altium é AVISO (GET /api/symbols/altium-changes). '
+    'Para adotar um desenho do Altium, é comando manual na raiz do workspace: '
+    'python tools/symbols/guardiao.py --proteger "FAMILIA/COMPONENTE" '
+    '(ou --liberar, para devolver o símbolo ao gerador).'
+)
+
+
 @bp.route('/altium-apply', methods=['POST'])
 def api_altium_apply():
-    """`{itens:[{acervo:'altium', name} | {acervo:'almox', familia, componente}]}` — o que o
-    deep do /altium-changes devolveu (ou parte). Casa: a linha do símbolo no Libs/schlib.js
-    vira o que o leitor lê da SchLib; almoxarifado: o componente vira protegido (ou perde a
-    proteção, se voltou ao gerador) e o espelho da família anda junto. Se o editor de
-    símbolos tem edição não salva, quem decide é o hub antes de chamar."""
+    """RECUSA, sempre — 409 com o motivo e o comando que faz o que se queria.
+
+    A rota FICA de pé em vez de sair por três razões, nesta ordem de importância:
+      - 404/405 não explica nada. Um hub de uma aba que ficou aberta desde antes da
+        inversão apertaria o botão e veria "HTTP 404"; assim ele vê a regra e o comando.
+      - remover a rota é a mesma armadilha do fallback do /api/almox/sync: quem chamasse
+        cairia num caminho genérico, e a perda de garantia não teria nome.
+      - o dia em que houver um "adotar" com dono e confirmação, o lugar dele é aqui.
+
+    O corpo continua sendo validado antes da recusa: pedido malformado é 400, e um cliente
+    que mande lixo descobre isso mesmo agora que a rota não faz nada."""
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return _erro('JSON {itens:[…]} obrigatório', 400)
     erro = _valida_itens(data.get('itens'))
     if erro:
         return _erro(erro, 400)
-    try:
-        with _lock_espelho, _lock_schlib:
-            r = G.aplica(ROOT, data['itens'], log=lambda *a: None)
-    except Exception as e:                                      # noqa: BLE001
-        return _erro('falha ao aplicar: %s' % e, 500)
-    r['ok'] = True
-    return r
+    return _erro(RECUSA_APPLY, 409)
 
 
 # ─── sincronização do almoxarifado pelo guardião ──────────────────────────────
