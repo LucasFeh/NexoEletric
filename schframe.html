@@ -259,6 +259,23 @@
      meio do cabeçalho. */
   #symmodal .modal-head #symEditar{flex:none; margin-left:auto;}
   #symmodal .modal-head .x{margin-left:0;}
+  /* O NOME do componente no alto, e não só dentro da frase do meta. É o texto que a pessoa
+     leva daqui para a busca do acervo, e dentro da prosa ele só se seleciona junto com as
+     aspas e com o "o Altium mandou" em volta. Fica no canto ESQUERDO, oposto ao "Editar
+     símbolo ↗" — a mão que vai copiar não disputa espaço com a que vai editar.
+     `user-select:all` é o que faz um clique duplo pegar o nome inteiro, inclusive quando
+     ele tem hífen e ponto (SZMMSZ5240BT1G, CDSOT23-SM712), que é onde a seleção por
+     palavra erra. */
+  #symmodal #symNome{flex:none; max-width:36ch; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; font-family:var(--mono); font-size:12px; line-height:1.6;
+    color:var(--fg); background:var(--sunken); border:1px solid var(--line);
+    border-radius:var(--r-sm); padding:1px 8px; cursor:copy; user-select:all;}
+  #symmodal #symNome:hover{border-color:var(--accent); background:var(--panel2);}
+  #symmodal #symNome:empty{display:none;}
+  /* Sem ícone de copiar aqui: medido, o glifo ⧉ cresce o cabeçalho de 58 para 69 px (a
+     fonte de fallback dele tem métrica maior que a do texto), e a densidade da barra vale
+     mais que o enfeite. A pista de que dá para clicar são o cursor de cópia, a borda que
+     acende no hover e o title — o balão de confirmação fecha o ciclo. */
   #symmodal .sym-vals{overflow:auto; min-height:0; padding:0 16px 8px;
     box-shadow:inset 0 1px 0 var(--line);}
   /* pinagem esperada x pinagem do candidato, e quantos componentes mudam junto: o aviso
@@ -532,6 +549,7 @@
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="symTitle">
     <div class="modal-head">
       <h2 id="symTitle">Procurar componente</h2>
+      <button type="button" id="symNome" title="clique para copiar"></button>
       <span class="meta" id="symMeta"></span>
       <button class="btn btn-sm" id="symEditar" hidden>Editar símbolo ↗</button>
       <button class="btn btn-ghost btn-icon x" id="symClose" title="Fechar (Esc)">✕</button>

@@ -2166,7 +2166,12 @@ function abrirEscolhaSimbolo(comp){
      clique. Componente e a entrada da biblioteca; simbolo e so o desenho dela — o modal
      escolhe o primeiro, e a faixa de baixo (quando existir) troca o segundo */
   $('symTitle').textContent = atual ? 'Trocar componente' : 'Procurar componente';
-  $('symMeta').textContent = comp.ref + ' — o Altium mandou "' + comp.sym + '"'
+  /* o nome sai da prosa e vira um campo proprio, copiavel: e ele que a pessoa leva para a
+     busca do acervo logo abaixo. O meta continua com o RESTO — de quem e, o comment e onde
+     ja resolveu —, que e contexto para ler, nao texto para levar */
+  $('symNome').textContent = comp.sym || '';
+  $('symNome').title = comp.sym ? 'clique para copiar "' + comp.sym + '"' : '';
+  $('symMeta').textContent = comp.ref + ' — o Altium mandou este nome'
     + (comp.comment ? ' · comment "' + comp.comment + '"' : '')
     + (atual ? ' · resolvido no componente "' + atual.name + '"'
              + (rs.how === 'escolha' ? ', por escolha sua' : '') : '');
@@ -2372,6 +2377,49 @@ async function desfazerEscolha(comp){
     natNome ? 'ok' : 'warn');
 }
 
+/* Copiar texto numa página servida por HTTP simples.
+
+   `navigator.clipboard` só existe em contexto seguro. Na bancada o hub abre em
+   http://localhost, que O É — então um copiar escrito só com ele funciona aqui e some no
+   servidor (http://192.168.15.192:8100 não é contexto seguro), que é o jeito mais chato de
+   um defeito nascer: invisível justamente onde se testa. O execCommand é o caminho que
+   funciona nos dois, e fica sendo o fallback enquanto o hub não tiver HTTPS. */
+async function copiaTexto(txt, oque, alvo){
+  if (!txt) return;
+  if (window.isSecureContext && navigator.clipboard){
+    try { await navigator.clipboard.writeText(txt); HubDialog.toast(oque + ' copiado', 'ok', 1600); return; }
+    catch (e){ /* permissão negada ou aba sem foco: cai no de baixo */ }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = txt;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed; top:-1000px; left:0; opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, txt.length);          // iOS ignora o select() sozinho
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e){ ok = false; }
+  document.body.removeChild(ta);
+  if (ok){ HubDialog.toast(oque + ' copiado', 'ok', 1600); return; }
+  /* Sem clipboard e sem execCommand sobra o Ctrl+C — mas mandar usar Ctrl+C sem deixar
+     nada selecionado e pedir o impossivel, ainda mais porque o textarea de cima ja saiu
+     do DOM. Entao a selecao vai para o proprio texto na tela. */
+  if (alvo && window.getSelection){
+    const r = document.createRange();
+    r.selectNodeContents(alvo);
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+  }
+  HubDialog.toast('não deu para copiar sozinho — o ' + oque + ' está selecionado, use Ctrl+C', 'warn', 4000);
+}
+
+/* detail > 1 e o clique duplo: com user-select:all ele serve para SELECIONAR o nome, e
+   copiar de novo so empilharia um segundo balao por cima do primeiro */
+$('symNome').addEventListener('click', ev => {
+  if (ev.detail > 1) return;
+  copiaTexto($('symNome').textContent, 'nome', $('symNome'));
+});
 $('symClose').addEventListener('click', fechaSymModal);
 $('symUsar').addEventListener('click', usarSimboloEscolhido);
 $('symBusca').addEventListener('input', symRenderLista);
