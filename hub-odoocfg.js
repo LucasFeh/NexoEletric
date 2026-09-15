@@ -31,6 +31,11 @@ const CSS = `
   align-items: center; }
 .odcfg-grade > label { font-size: 13px; color: var(--text-2); }
 .odcfg-grade > input { min-height: 32px; width: 100%; }
+/* campo fixo: da para ler e selecionar, nao da para editar. Fica mais apagado que um campo
+   normal e menos que um desabilitado -- ele nao esta "fora do ar", esta "nao se mexe" */
+.odcfg-grade > input.fixo { color: var(--text-2); background: var(--bg-2, transparent);
+  border-style: dashed; cursor: default; }
+.odcfg-grade > input.fixo:focus { outline: none; border-color: var(--line); }
 .odcfg-bar { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .odcfg-bar .sep { flex: 1; }
 .odcfg-nota { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-4); }
@@ -52,7 +57,9 @@ const TXT = {
   remoto: 'Esta aba está aberta de outra máquina. As credenciais do Odoo só mudam no PC '
         + 'do servidor — o hub recusa a gravação vinda da rede, do mesmo jeito que faz '
         + 'com as do almoxarifado. Os valores abaixo são os que o servidor está usando.',
-  ajuda: 'A senha vai só para <b>.hub-odoo.json</b>, na raiz do workspace. Ela não é '
+  fixoTitle: 'fixo: o Odoo da casa é sempre este — só a credencial muda',
+  ajuda: 'Servidor, base e modelo são fixos (o Odoo da casa). Aqui só se troca a '
+       + 'credencial. A senha vai só para <b>.hub-odoo.json</b>, na raiz do workspace. Ela não é '
        + 'gravada no hub-almox.json de propósito: aquele arquivo é servido em texto claro '
        + 'para a rede. O campo em branco não apaga a senha já gravada.',
   metodos: 'Os três métodos do Odoo (conferir, receber e consultar) continuam no código: '
@@ -135,6 +142,13 @@ function desenha(box, r) {
   const cfg = r.config || {};
   const arquivo = r.arquivo || '.hub-odoo.json';
 
+  /* Servidor, base e modelo NAO sao configuracao: sao o endereco do Odoo da casa
+     (192.168.15.192:8070, odoo_db, di.lista.altium), iguais em toda maquina. Ficam a
+     vista, em somente-leitura, porque esconde-los faria a tela nao responder "para onde
+     isto vai" — que e a pergunta que ela existe para responder. Editavel, so a
+     CREDENCIAL. Quem precisar apontar para outro Odoo (a bancada, para testar) escreve o
+     .hub-odoo.json a mao: e caso raro e deliberado, nao coisa de formulario. */
+  const FIXOS = ['url', 'db', 'modelo'];
   const grade = nel('div', 'odcfg-grade');
   const campos = {};
   ['url', 'db', 'login', 'modelo', 'senha'].forEach(k => {
@@ -146,6 +160,13 @@ function desenha(box, r) {
     i.value = k === 'senha' ? '' : (cfg[k] || '');
     if (k === 'senha') i.placeholder = T('phSenha');
     i.disabled = !r.local;
+    if (FIXOS.indexOf(k) >= 0) {
+      /* readOnly e nao disabled: disabled apaga o campo da tela (cinza sobre cinza) e
+         ainda tira do foco, entao nao da nem para selecionar o endereco para conferir */
+      i.readOnly = true;
+      i.classList.add('fixo');
+      i.title = T('fixoTitle');
+    }
     campos[k] = i;
     const lab = nel('label', null, T(k)); lab.htmlFor = i.id;
     grade.append(lab, i);
@@ -193,9 +214,11 @@ function desenha(box, r) {
     desenha(box, resp);          /* redesenha com o que o servidor confirmou, senha zerada */
   };
 
+  /* so a credencial viaja: mandar url/db/modelo de volta gravaria no arquivo uma copia do
+     que ja e padrao, e bastaria um campo vir vazio (arquivo ilegivel, por exemplo) para o
+     POST escrever "" por cima de configuracao boa */
   gravar.onclick = () => grava({
-    url: campos.url.value, db: campos.db.value, login: campos.login.value,
-    modelo: campos.modelo.value, senha: campos.senha.value,
+    login: campos.login.value, senha: campos.senha.value,
   }, T('okGravado'));
 
   /* Apagar senha é destrutivo e não tem desfazer, mas confirm() do navegador é proibido e

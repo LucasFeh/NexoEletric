@@ -65,6 +65,12 @@ COMPARTILHADOS_ARQ=(
   "tools/symbols/config.json"      # caminhos da maquina, nao do projeto
   "hub-config.json"
   "hub-almox.json"                 # credenciais do Odoo — chmod 600
+  ".hub-odoo.json"                 # credencial do ENVIO da lista; o ponto no nome e o que
+                                   # impede o _serve de entrega-la por HTTP (hubserver.py).
+                                   # Sem esta linha ela morava dentro da release e o
+                                   # `rm -rf $DEST` do deploy seguinte a levava junto --
+                                   # o envio voltava a "nao ha senha configurada" a cada
+                                   # publicacao, sem ninguem ter mexido nela.
 )
 
 erro() { echo "!! $*" >&2; exit 1; }

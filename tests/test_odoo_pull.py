@@ -173,11 +173,14 @@ def main():
     # Enquanto o PADRAO trazia http://192.168.15.182:8070, uma maquina sem hub-almox.json
     # sincronizava do ERP de TESTE sem uma linha de aviso — e o CSV saia completo e
     # plausivel, que e o pior jeito de errar. PENDENCIAS 1.8.
-    assert OP.PADRAO['url'] == '', 'voltou a existir servidor cravado no codigo'
+    # O padrao voltou a ter servidor, mas agora e o Odoo DE VERDADE da casa — nunca o de
+    # teste, que era o defeito 1.8. Se alguem repuser o .182 aqui, este assert acusa.
+    assert OP.PADRAO['url'] == 'http://192.168.15.192:8070', 'o padrao mudou de servidor'
+    assert '182' not in OP.PADRAO['url'], 'o padrao voltou a apontar para o ERP de teste'
     cfg_velho = OP.CFG
     try:
         OP.CFG = os.path.join(tempfile.mkdtemp(), 'nao-existe.json')
-        assert OP.le_config()['url'] == '', 'sem arquivo, a url tem que sair vazia'
+        assert OP.le_config()['url'] == OP.PADRAO['url'], 'sem arquivo, vale o padrao'
     finally:
         OP.CFG = cfg_velho
     for ruim in ('', '   ', None):
@@ -187,10 +190,15 @@ def main():
             assert 'hub-almox.json' in str(e), 'o erro tem que dizer ONDE configurar: %s' % e
         else:
             raise AssertionError('url %r passou sem erro' % (ruim,))
-    # SemUrl PRECISA descender de Exception: odoobom_server e almox2lib traduzem a falha
-    # para a tela com `except Exception`. SystemExit, que o resto deste modulo usa, herda
-    # de BaseException e passaria batido por esses guardas, derrubando a requisicao.
+    # SemUrl e LoginRecusado PRECISAM descender de Exception: odoobom_server e almox2lib
+    # traduzem a falha para a tela com `except Exception`. SystemExit herda de
+    # BaseException e passa batido por esses guardas — a thread do Flask morre sem escrever
+    # resposta e o navegador diz "Failed to fetch", que manda o usuario procurar defeito em
+    # rede quando o que havia era login errado. Foi exatamente o que aconteceu com o
+    # SEU_LOGIN de exemplo no servidor, em 2026-09-15.
     assert issubclass(OP.SemUrl, Exception), 'SemUrl fora de Exception nao e capturavel'
+    assert issubclass(OP.LoginRecusado, Exception), 'LoginRecusado fora de Exception derruba a tela'
+    assert not issubclass(OP.LoginRecusado, SystemExit), 'LoginRecusado voltou a ser saida de programa'
 
     print('test_odoo_pull OK (incremental baixou 2 fichas de 3 produtos; '
           'saldo e prateleira sempre reescritos; sem url configurada, erro alto)')

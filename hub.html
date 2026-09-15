@@ -2148,13 +2148,25 @@ function alxFormCred(box, cfg, aoGravar) {
   det.append(el('summary', null, t('alx.credTitulo')));
   const grade = el('div', 'alx-grade');
   const campos = {};
-  [['url', 'http://192.168.15.182:8070'], ['db', 'odoo_db'],
-   ['login', 'engenharia@dieletrons.com'], ['senha', '••••••••']].forEach(([k, ph]) => {
+  /* Servidor e base sao o endereco do Odoo da casa (192.168.15.192:8070, odoo_db), igual
+     em toda maquina: ficam a vista e em somente-leitura. Editavel, so a CREDENCIAL.
+     O placeholder tambem deixou de oferecer o servidor de TESTE -- num hub de producao
+     ele era a sugestao que a pessoa digitava, e o defeito voltava pela tela. */
+  const FIXOS = ['url', 'db'];
+  [['url', 'http://192.168.15.192:8070'], ['db', 'odoo_db'],
+   ['login', 'voce@dieletrons.com'], ['senha', '••••••••']].forEach(([k, ph]) => {
     const i = el('input', 'input mono');
     i.type = k === 'senha' ? 'password' : 'text';
     i.placeholder = ph;
     i.value = k === 'senha' ? '' : (cfg.config[k] || '');
     i.autocomplete = 'off';
+    if (FIXOS.indexOf(k) >= 0) {
+      /* readOnly e nao disabled: disabled apaga o campo da tela e tira do foco, entao nem
+         selecionar o endereco para conferir daria */
+      i.readOnly = true;
+      i.style.cssText = 'border-style:dashed; cursor:default; opacity:.75';
+      i.title = 'fixo: o Odoo da casa e sempre este — so a credencial muda';
+    }
     campos[k] = i;
     grade.append(el('span', 'k', t('alx.cred.' + k)), i);
   });
@@ -2163,8 +2175,9 @@ function alxFormCred(box, cfg, aoGravar) {
   const gravar = el('button', 'btn btn-secondary btn-sm', t('alx.credGravar'));
   gravar.onclick = async () => {
     gravar.disabled = true;
-    const r = await API.almoxConfigSave({ url: campos.url.value, db: campos.db.value,
-                                          login: campos.login.value, senha: campos.senha.value });
+    /* so a credencial viaja: url e db sao fixos, e reenvia-los faria um campo vazio
+       (arquivo ilegivel, por exemplo) gravar "" por cima de configuracao boa */
+    const r = await API.almoxConfigSave({ login: campos.login.value, senha: campos.senha.value });
     gravar.disabled = false;
     if (!r || r.ok === false) { toast(t('alx.credFalhou', { e: (r && r.error) || '?' }), 'err'); return; }
     campos.senha.value = '';

@@ -36,11 +36,17 @@ RAIZ = os.path.dirname(os.path.dirname(BASE))
 CFG = os.path.join(RAIZ, 'hub-almox.json')
 CSV_OUT = os.path.join(BASE, 'componentes_odoo.csv')
 
-# url vazia de proposito: ver a docstring do modulo. db e login continuam com padrao
-# porque errar neles da erro de login, que aparece; errar a url da uma sincronizacao
-# inteira, bem-sucedida, do servidor errado.
-PADRAO = {'url': '', 'db': 'odoo_db',
-          'login': 'engenharia@dieletrons.com', 'senha': ''}
+# O Odoo da casa e UM so: 192.168.15.192:8070, base odoo_db. Isso deixou de ser "um padrao
+# entre varios" e passou a ser o endereco da empresa, por decisao do usuario em 2026-09-15 —
+# a unica coisa que muda de maquina para maquina e a CREDENCIAL.
+#
+# Nao e a volta do defeito 1.8: la o padrao cravado era o servidor de TESTE, e uma maquina
+# mal configurada sincronizava do ERP errado em silencio. Apontar para o servidor de verdade
+# inverte isso — errar a configuracao agora leva ao lugar certo, nao ao errado. O guarda de
+# url vazia (SemUrl) fica de pe para quem chamar a classe direto, e `hub-almox.json`
+# continua ganhando do padrao: e assim que a bancada segue falando com o .182 de teste.
+PADRAO = {'url': 'http://192.168.15.192:8070', 'db': 'odoo_db',
+          'login': 'lucas.ferreira@dieletrons.com', 'senha': ''}
 ALMOX = 'DI/Almoxarifado'
 TIMEOUT = 60.0                 # Odoo mudo nao pode prender a sincronizacao para sempre
 
@@ -93,6 +99,18 @@ def norm_url(v):
     return (v or '').strip().rstrip('/').strip()
 
 
+class LoginRecusado(RuntimeError):
+    """O Odoo respondeu, mas recusou usuario/senha/base.
+
+    Era `SystemExit`, e isso derrubava a tela inteira: SystemExit herda de BaseException,
+    entao atravessava o `except Exception` do odoobom_server, a thread do Flask morria sem
+    escrever resposta nenhuma, e o navegador mostrava "sem resposta do servidor: Failed to
+    fetch". O usuario lia ERRO DE REDE onde havia LOGIN ERRADO — e ia procurar defeito em
+    firewall, porta e container. Medido com o `SEU_LOGIN` que o INSTALL deixa de exemplo.
+    Pendencia 2.2 do tools/deploy/PENDENCIAS.md.
+    """
+
+
 class SemUrl(RuntimeError):
     """Nao ha Odoo configurado nesta maquina.
 
@@ -115,7 +133,8 @@ class Odoo(object):
         common = xmlrpc.client.ServerProxy(url.rstrip('/') + '/xmlrpc/2/common', allow_none=True)
         self.uid = common.authenticate(db, login, senha, {})
         if not self.uid:
-            raise SystemExit('login recusado pelo Odoo — confira usuario, senha e base em hub-almox.json')
+            raise LoginRecusado('login recusado pelo Odoo — confira usuario e senha em '
+                                'hub-almox.json (base "%s", servidor %s)' % (db, url))
         self.models = xmlrpc.client.ServerProxy(url.rstrip('/') + '/xmlrpc/2/object', allow_none=True)
 
     def call(self, modelo, metodo, args, kw=None):
@@ -323,14 +342,18 @@ def main(argv=None):
             cfg[k] = getattr(a, k)
     if not cfg['url']:
         raise SystemExit('sem url do Odoo: use --url ou grave "url" em hub-almox.json na '
-                         'raiz do workspace. Nao existe servidor padrao de proposito — '
-                         'antes havia, e uma maquina sem o arquivo sincronizava do ERP de '
-                         'teste sem avisar')
+                         'raiz do workspace')
     if not cfg['senha']:
         raise SystemExit('sem senha do Odoo: use --senha, a variavel ODOO_SENHA, '
                          'ou grave hub-almox.json na raiz do workspace')
 
-    linhas, st = puxa(cfg, None if a.full else le_csv(a.out))
+    # A CLI mostra uma linha, nao uma pilha: SemUrl e LoginRecusado sao RuntimeError para
+    # quem chama pelo hub poder captura-las com `except Exception` (ver as classes la em
+    # cima), e e aqui que elas voltam a ser saida de programa.
+    try:
+        linhas, st = puxa(cfg, None if a.full else le_csv(a.out))
+    except (SemUrl, LoginRecusado) as e:
+        raise SystemExit(str(e))
     grava(linhas, a.out)
     print('%d produtos em %s (%d novo(s), %d alterado(s), %d arquivado(s))'
           % (st['total'], a.out, st['novos'], st['alterados'], st['sumiram']))

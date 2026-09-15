@@ -17,9 +17,10 @@ Credenciais (secao 6 da spec):
          claro para a LAN inteira. O ponto no nome de .hub-odoo.json e o que o protege.
   resto  ODOO_LISTA_URL/DB/LOGIN/MODELO -> .hub-odoo.json -> hub-almox.json -> PADRAO
          (url/db/login nao sao segredo; herda-los do almoxarifado poupa uma configuracao)
-         O PADRAO nao tem url: se nenhuma fonte disser com qual Odoo falar, o envio para
-         alto em vez de escolher um. Enquanto havia default cravado, uma maquina sem
-         configuracao mandava a lista para o ERP de teste sem avisar ninguem.
+         O PADRAO aponta para o Odoo da casa (192.168.15.192:8070, base odoo_db). Ele ja
+         apontou para o servidor de TESTE, e ai uma maquina sem configuracao mandava a
+         lista para o lugar errado calada; agora errar a configuracao leva ao servidor
+         certo, e o guarda de url vazia continua de pe para quem sobrescreve com nada.
 
 O modelo entra nessa mesma cadeia porque a base do Odoo que recebe a lista nem sempre e a
 de producao: apontar o hub para uma copia de teste so muda a url se o modelo la se chamar
@@ -42,8 +43,10 @@ RECIBO = 'odoo-lista.json'       # ao lado do projeto, no molde de bom-opts.json
 MODELO = 'di.lista.altium'
 TIMEOUT = 30.0                   # por conexao; nunca socket.setdefaulttimeout (global)
 
-PADRAO = {'url': '', 'db': 'odoo_db',
-          'login': 'integracao.hub@dieletrons.com', 'modelo': MODELO}
+# Mesmo endereco unico do almoxarifado (tools/almox/odoo_pull.py): o Odoo da casa e
+# 192.168.15.192:8070, base odoo_db, modelo di.lista.altium. So a credencial varia.
+PADRAO = {'url': 'http://192.168.15.192:8070', 'db': 'odoo_db',
+          'login': 'lucas.ferreira@dieletrons.com', 'modelo': MODELO}
 
 # O TITULO entra no indice e viaja ate a tela: e ele que responde "de qual lib esta
 # vindo". Linha sem acervo nenhum aqui e a que a tela pinta de vermelho -- nao esta em
