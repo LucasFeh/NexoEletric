@@ -59,9 +59,6 @@ const CSS = `
 #odoobommodal button.ob-ok{color:#fff; background:#0d47a1; border-color:#1565c0;}
 #odoobommodal select{background:var(--panel2,#2d2d2d); color:var(--fg,#d8d8d8);
   border:1px solid var(--border,#3a3a3a); border-radius:3px; padding:4px; max-width:560px;}
-#odoobommodal .ob-tit{font-size:11px; text-transform:uppercase; letter-spacing:.08em;
-  color:var(--fg-dim,#9a9a9a); margin:14px 0 6px;}
-#odoobommodal .ob-tit:first-child{margin-top:0;}
 #odoobommodal .ob-li{display:grid; grid-template-columns:22px 1fr 16px 1fr 88px; gap:8px;
   align-items:center; padding:6px 8px; margin:3px 0; border-radius:3px;
   background:var(--panel2,#2d2d2d); border-left:3px solid transparent;}
@@ -80,8 +77,6 @@ const CSS = `
 #odoobommodal .ob-nota{font-size:11px; color:var(--fg-dim,#9a9a9a); margin:4px 0 10px;}
 #odoobommodal .ob-aviso{padding:8px 10px; margin:6px 0; border-radius:3px; font-size:12px;
   background:rgba(255,82,82,.12); border-left:3px solid var(--err,#ff5252);}
-#odoobommodal .ob-simples{padding:4px 8px; margin:2px 0; font-size:12px; border-radius:3px;
-  background:var(--panel2,#2d2d2d); color:var(--fg-dim,#9a9a9a);}
 #odoobommodal .ob-cnt{font-variant-numeric:tabular-nums;}
 `;
 
@@ -307,10 +302,19 @@ function pinta(){
   const body = $('odoobommodal').querySelector('.ob-body');
   body.textContent = '';
 
+  /* SO o que casou. A tela ja teve mais duas listas — os componentes que a BoM nao menciona
+     e as linhas que nao sao componente de folha — e elas respondiam a uma pergunta que
+     ninguem estava fazendo aqui: quem abre este painel quer vincular o que deu, nao auditar
+     o que ficou de fora. Quem precisar do resto tem a CLI (python odoobom.py), que imprime
+     as tres listas; o servidor continua devolvendo `semLinha` e `descartes` no JSON para
+     ela. Pedido do usuario em 2026-09-15: "o mais direta possivel, so o basico". */
   const sug = d.sugestoes || [];
-  body.append(el('div', 'ob-tit', 'o que a lista casou com o esquema (' + sug.length + ')'));
-  if (!sug.length)
-    body.append(el('div', 'ob-nota', 'nenhuma linha desta lista se parece com um componente do esquema.'));
+  if (!sug.length){
+    body.append(el('div', 'ob-nota', 'nenhuma linha desta lista casou com o esquema.'));
+    atualizaRodape();
+    return;
+  }
+
   for (const s of sug){
     const g = gs[s.grupo];
     const li = el('div', 'ob-li ' + s.confianca);
@@ -319,48 +323,35 @@ function pinta(){
                                           li.classList.toggle('off', !cx.checked); atualizaRodape(); });
     li.classList.toggle('off', !cx.checked);
     li.append(cx);
+
     const esq = el('div', 'ob-nm');
     esq.append(el('div', null, s.nome));
-    esq.append(el('div', 'ob-de2', 'vira ' + s.componente));
+    /* o multi-parte cabe em duas palavras na propria linha: antes era um paragrafo por
+       componente, repetindo em cada um que alias do almoxarifado tem uma parte so */
+    esq.append(el('div', 'ob-de2', (g && g.multiparte ? 'só a identidade · ' : 'vira ') + s.componente));
     li.append(esq, el('div', 'ob-seta', '→'));
-    const dir = el('div', 'ob-nm');
-    dir.append(el('div', null, g ? g.refs.join(', ') : s.grupo));
-    dir.append(el('div', 'ob-de2', g ? (g.sym || '(sem símbolo)') : ''));
-    li.append(dir, el('div', 'ob-conf', s.confianca === 'mao' ? 'na mão' : s.confianca));
-    const raz = el('div', 'ob-razao' + (s.aviso ? ' alerta' : ''));
-    raz.textContent = (s.aviso ? '⚠ ' + s.aviso + ' — ' : '') + (s.razoes || []).join('; ');
-    li.append(raz);
-    if (g && g.multiparte){
-      const mp = el('div', 'ob-razao alerta');
-      mp.textContent = '⚠ ' + g.refs.join(', ') + ' tem ' + g.partes + ' partes e todo componente '
-        + 'do almoxarifado tem uma só: a identidade é gravada e o desenho fica como está.';
-      li.append(mp);
+
+    li.append(el('div', 'ob-nm', g ? g.refs.join(', ') : s.grupo));
+    li.append(el('div', 'ob-conf', s.confianca === 'mao' ? 'na mão' : s.confianca));
+
+    /* as `razoes` ("casou por OdooId; footprint bate; comment igual") sairam: elas explicam
+       o passado de uma decisao que a pessoa toma olhando os dois nomes lado a lado. O AVISO
+       fica, porque ele fala do futuro — e o unico texto que muda o que se marca. */
+    if (s.aviso){
+      const av = el('div', 'ob-razao alerta');
+      av.textContent = '⚠ ' + s.aviso;
+      li.append(av);
     }
     body.append(li);
   }
-
-  const sem = (d.semLinha || []).map(id => gs[id]).filter(Boolean);
-  body.append(el('div', 'ob-tit', 'componentes do esquema que a lista NÃO menciona (' + sem.length + ')'));
-  body.append(el('div', 'ob-nota', 'ficam exatamente como estão. A lista de materiais do Odoo '
-    + 'não cobre o esquema inteiro — esta lista existe para isso não passar por engano.'));
-  for (const g of sem)
-    body.append(el('div', 'ob-simples', g.refs.join(', ') + '  ·  ' + (g.sym || '(sem símbolo)')
-                  + (g.multiparte ? '  ·  ' + g.partes + ' partes' : '')));
-
-  const desc = d.descartes || [];
-  body.append(el('div', 'ob-tit', 'linhas da lista que não são componente da folha (' + desc.length + ')'));
-  for (const x of desc)
-    body.append(el('div', 'ob-simples', x.nome + '  —  ' + x.motivo));
 
   atualizaRodape();
 }
 
 function atualizaRodape(){
   const r = resumo((ST.dados && ST.dados.sugestoes) || [], ST.marcadas, porGrupo());
-  $('obResumo').textContent = r.grupos
-    ? r.grupos + ' marcado(s): ' + r.trocam + ' trocam de componente, ' + r.soId
-      + ' só recebem a identidade'
-    : 'nada marcado';
+  const total = ((ST.dados && ST.dados.sugestoes) || []).length;
+  $('obResumo').textContent = r.grupos ? r.grupos + ' de ' + total + ' marcados' : 'nada marcado';
   $('obAplicar').disabled = !r.grupos || ST.rodando;
 }
 
@@ -377,11 +368,11 @@ async function aplica(){
   if (!planos.length) return;
 
   const r = resumo(d.sugestoes, ST.marcadas, gs);
+  /* duas frases, e as duas sao sobre RISCO: o footprint nao muda (a PCB roteada esta a
+     salvo) e nada foi para o disco ainda. O resto do que este texto dizia esta na tela */
   const ok = await HubDialog.confirm(
-    r.grupos + ' vínculo(s) vão para o esquema: ' + r.trocam + ' componente(s) trocam de '
-    + 'símbolo e ' + r.soId + ' recebem só a identidade (multi-parte).\n\n'
-    + 'O FOOTPRINT NÃO MUDA em nenhum — a PCB já roteada não corre risco.\n'
-    + 'Nada vai para o disco agora: dá para desfazer com Ctrl+Z, e só o Salvar grava.',
+    r.grupos + ' vínculo(s) vão para o esquema. O footprint não muda em nenhum.'
+    + '\nNada vai para o disco agora: Ctrl+Z desfaz, e só o Salvar grava.',
     { title:'Aplicar os vínculos', ok:'Aplicar' });
   if (!ok) return;
 
