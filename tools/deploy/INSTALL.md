@@ -194,11 +194,16 @@ J
 sudo -u altiumhub chmod 600 /srv/altiumhub/shared/hub-almox.json
 ```
 
-`http://127.0.0.1:8070` funciona porque o compose usa rede do host. **Os quatro campos
-são obrigatórios**: desde 2026-09-15 não existe url padrão no código, então um arquivo
-faltando — ou com a `url` em branco — para o sincronismo com uma mensagem dizendo onde
-gravá-la. Antes disso ele caía calado no padrão de `odoo_pull.py`, que apontava para o
-Odoo de **teste**, e o hub puxava do ERP errado sem erro nenhum; era a pendência 1.8.
+`http://127.0.0.1:8070` funciona porque o compose usa rede do host, e
+`http://192.168.15.192:8070` — o padrão do código desde 2026-09-15 — funciona de qualquer
+máquina. Na prática **só `login` e `senha` precisam ser escritos aqui**: servidor e base já
+vêm certos do código. O padrão apontava para o Odoo de **teste** até a pendência 1.8, e aí
+sim um arquivo faltando fazia o hub puxar do ERP errado sem erro nenhum.
+
+Se o `login` estiver errado (o `SEU_LOGIN` deste exemplo, por exemplo), o painel da lista de
+materiais mostra a recusa do Odoo em texto. Até 2026-09-15 ele mostrava
+`sem resposta do servidor: Failed to fetch`, porque a recusa subia como `SystemExit` e matava
+a thread do Flask sem resposta — se você vir isso num hub antigo, é login, não rede.
 
 E daqui, os 265 MB de biblioteca mais os arquivos de estado:
 

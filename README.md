@@ -1051,10 +1051,13 @@ portas 8000-8004) — e esta conta *escreve* no Odoo, não só lê. O ponto no n
 `.hub-odoo.json` não é enfeite: é o que faz o `_serve` recusá-lo. Url, base e login, que não
 são segredo, ainda são herdados do `hub-almox.json` quando não há nada mais específico.
 
-O destino é configurável (`ODOO_LISTA_URL` / `_DB` / `_LOGIN`) e **não tem padrão**: sem
-url configurada em nenhuma das fontes, o envio para com um erro dizendo onde gravá-la. Até
-2026-09-15 o padrão era `http://192.168.15.182:8070`, e era um convite ao acidente — uma
-máquina sem configuração mandava a lista para o ERP de teste sem avisar ninguém. Medido em
+O destino é **fixo**: `http://192.168.15.192:8070`, base `odoo_db`, modelo
+`di.lista.altium` — o Odoo da casa é um só, e a tela mostra os três em somente-leitura. A
+única coisa editável é a credencial. Até 2026-09-15 o padrão era `http://192.168.15.182:8070`,
+o servidor de **teste**, e era um convite ao acidente: uma máquina sem configuração mandava a
+lista para lá sem avisar ninguém. Quem precisar apontar para outro Odoo (uma bancada, para
+testar) escreve `.hub-odoo.json` à mão — as variáveis `ODOO_LISTA_URL` / `_DB` / `_LOGIN` /
+`_MODELO` continuam valendo e ganham de tudo. Medido em
 2026-09-11: o modelo `di.lista.altium` existe no `.182` e **não existe** no `.192` —
 apontar para produção hoje falha com modelo inexistente.
 O modal mostra sempre para onde vai antes de você enviar.

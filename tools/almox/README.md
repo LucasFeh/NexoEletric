@@ -161,14 +161,17 @@ por SSE. Sincronizar **não** mexe nas `.SchLib` do Altium — para isso, rode o
 Ficam em `hub-almox.json`, na raiz do workspace, **fora do git**:
 
 ```json
-{"url": "http://<ip-do-seu-odoo>:8070", "db": "odoo_db",
- "login": "voce@empresa.com", "senha": "..."}
+{"login": "voce@dieletrons.com", "senha": "..."}
 ```
 
-**Os quatro campos são obrigatórios e a `url` não tem padrão.** Este exemplo trazia o IP do
-servidor de teste pronto para copiar, e o código tinha o mesmo IP cravado como default —
-juntos, faziam uma máquina mal configurada sincronizar do ERP errado em silêncio. Desde
-2026-09-15 falta de `url` é erro alto, com a frase dizendo onde gravá-la.
+**Na prática só a credencial precisa estar aqui.** `url` e `db` já vêm certos do padrão do
+código (`http://192.168.15.192:8070`, base `odoo_db`) — o Odoo da casa é um só, e o
+formulário do hub mostra os dois em somente-leitura. Gravar `url` aqui continua valendo e
+ganha do padrão: é assim que uma bancada aponta para outro servidor para testar.
+
+Este exemplo já trouxe o IP do servidor de **teste** pronto para copiar, com o mesmo IP
+cravado como default no código; juntos, faziam uma máquina mal configurada sincronizar do
+ERP errado em silêncio (pendência 1.8).
 
 Dá para gravá-las pelo próprio diálogo (só de quem está no PC do servidor — de outra
 máquina da rede o backend recusa) ou à mão. A senha também pode vir da variável de

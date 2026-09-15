@@ -143,7 +143,22 @@ escrevendo CRLF. Trocar por `'\n'.join(...)`: nenhum consumidor exige CRLF
 (`schframe.html:587` carrega como `<script>`, `hubserver.py:355` via
 `load_var_file`, `tests/load.js` via `new Function`).
 
-### 2.2 Login recusado some com a mensagem certa
+### 2.2 Login recusado some com a mensagem certa — METADE FEITA
+**`tools/almox/odoo_pull.py` resolvido em 2026-09-15**, depois de o defeito custar uma
+sessão inteira de diagnóstico: com `SEU_LOGIN` no `shared/hub-almox.json`, o painel da BoM
+mostrava `sem resposta do servidor: Failed to fetch`, e o usuário foi procurar defeito em
+rede, porta e container. O que havia era `SystemExit` — `BaseException`, atravessa o
+`except Exception` do `odoobom_server`, mata a thread do Flask **sem escrever resposta**, e
+o navegador chama isso de erro de rede. Virou `LoginRecusado(RuntimeError)`, com a base e o
+servidor na mensagem; a CLI reconverte para `SystemExit` no `main()`, então ela continua
+mostrando uma linha em vez de pilha. `tests/test_odoo_pull.py` trava as duas metades: que
+descende de `Exception` e que **não** descende de `SystemExit`.
+
+Falta `tools/symbols/symserver.py`, e o `except xmlrpc.client.Fault` que diria
+"base X não existe nesse Odoo".
+
+O texto original:
+
 `tools/almox/odoo_pull.py:82-83` · `tools/symbols/symserver.py:842-845`
 
 `raise SystemExit` atravessa o `except Exception` de `guardiao.py:671` e pula
@@ -211,8 +226,10 @@ com frase própria; a interface não sabe disso e só pergunta por `temSenha`:
   travessão no lugar do servidor é a única pista de que falta o essencial.
 - `det.open = !cfg.config.temSenha` (`:2147`) não abre o formulário quando o que falta é a
   url, então a pessoa não vê o campo que precisa preencher.
-- `:2151` ainda oferece `http://192.168.15.182:8070` como *placeholder* do campo Servidor.
-  No hub de produção é a sugestão que a pessoa vai digitar — o 1.8 voltando pela tela.
+- ~~`:2151` ainda oferece `http://192.168.15.182:8070` como *placeholder*~~ **FEITO em
+  2026-09-15**: Servidor e Base viraram somente-leitura (o Odoo da casa é um só) e o
+  placeholder do servidor de teste saiu. Só a credencial é editável, e só ela é enviada no
+  POST. Mesma coisa em `hub-odoocfg.js`, onde Modelo entrou no grupo dos fixos.
 - `hub-odoolista.js:331` repete o pré-voo só-senha, e `:353` deixa o modal escrever
   `odoo_db em  · login`, contra a promessa do README de que o modal sempre mostra o destino.
 
