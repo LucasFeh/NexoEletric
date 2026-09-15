@@ -257,29 +257,30 @@ Quem faz o quê:
   um símbolo só) nem muda a ordem canônica, mas os campos ficam no símbolo guardado na
   Biblioteca — é o desenho que o usuário vai aplicar.
 
-## O guardião: Altium > hub > Odoo
+## O guardião: hub > Odoo (e o hub desce para o Altium)
 
-O pedido do usuário: *"o que foi mudado direto na lib do Altium deve permanecer > o que foi
-alterado no símbolo do hub deve permanecer > o que vem do Odoo só vem se não tiver nenhum
-dos dois"*. O gerador do almoxarifado (`tools/almox/almox2lib.py`) reescreve cada `.SchLib`
-de `Libs/Almox` do zero a cada sincronização; `guardiao.py` o envolve:
+O pedido do usuário mudou duas vezes. Era *"o que foi mudado direto na lib do Altium deve
+permanecer"*; em 2026-09-14 virou *"as alterações do Altium não sobem mais para o html, agora
+são as modificações no html que prevalecem"*; e em 2026-09-15, *"as modificações nascem e saem
+do hub para o Altium, mas nunca o contrário"*. Hoje a ordem é **hub > Odoo**, e o Altium é
+destino, não fonte. O gerador do almoxarifado (`tools/almox/almox2lib.py`) reescreve cada
+`.SchLib` de `Libs/Almox` do zero a cada sincronização; `guardiao.py` o envolve:
 
 ```
 python tools/symbols/guardiao.py [--pull] [--full] [--podar] [--sem-schlib]   # sincroniza (repassa ao almox2lib)
-python tools/symbols/guardiao.py --status [--deep]        # o que está protegido e o que mudou no Altium desde o ledger
 python tools/symbols/guardiao.py --liberar "RESISTOR/SMD 0805 10K 1/8W 1% 100ppm"   # volta ao gerador na próxima
 python tools/symbols/guardiao.py --proteger "RESISTOR/SMD 0805 10K 1/8W 1% 100ppm"  # força (origem 'hub')
 ```
 
-**Antes** do gerador, lê as libs do almoxarifado que mudaram desde o ledger: componente cuja
-geometria difere da que o gerador escreveu vira **protegido** (`origem: altium`, geometria
-guardada); componente que voltou ao desenho do gerador perde a proteção (o Altium é a
-verdade). **Depois**, repõe cada protegido com o `schlib_patch` (uma carga/gravação por
+**Antes** do gerador não há mais nada a apurar: o que estiver diferente na `.SchLib` vai ser
+sobrescrito, e isso é a regra, não um acidente a relatar. Proteção só entra pelo hub — pelo
+`/save-almox` do editor de símbolos ou pelo `--proteger` da CLI. **Depois**, repõe cada
+protegido com o `schlib_patch` (uma carga/gravação por
 arquivo; quem sumiu do Odoo fica `orfao: true` e é ignorado) e o espelho `almox-*.js` anda
 junto: o símbolo com protegidos ganha em `parts` a geometria protegida (a mais frequente;
 empate, a mais antiga) e os campos `"origem":"altium"` e `"protegidos":N` — o hub mostra a
 pílula. O resumo vai para `Libs/almox-guardiao.js` (`var almoxGuardiao = {...}`), para o
-diálogo de sincronização. O `--status` sai com código 3 quando há pendência.
+diálogo de sincronização.
 
 ### O ledger — `Libs/lib-ledger.json` (VERSIONADO: é estado, como o `almox-parts.json`)
 
@@ -312,29 +313,18 @@ diálogo de sincronização. O `--status` sai com código 3 quando há pendênci
   conferidos). O componente sabe o seu símbolo pelo `valores[].altium` do espelho.
 - `protegidos[família][componente]`: geometria inteira, para repor depois de cada geração.
 - Uma entrada por linha em cada seção, chaves em ordem: o git diffa.
-- O ledger nasce sem proteger nada: arquivo nunca visto é **adotado** (mtime e `gerado`
-  registrados como estão) pelo `--status` ou pela primeira chamada de `/altium-changes`.
+- O ledger nasce sem proteger nada. As seções `arquivos` (mtime/size) e `gerado`
+  (fingerprint por símbolo) existiam para a comparação com o Altium, que saiu em 2026-09-15:
+  hoje elas são registro de quem escreveu por último, e ninguém as lê para decidir nada.
 
-### Detecção e aplicação (endpoints do `symserver`)
+### Sincronização (endpoint do `symserver`)
 
-- `GET /api/symbols/altium-changes[?deep=1]` → `{ok, pendente, deep, arquivos:[{arquivo, caminho,
-  acervo:'altium'|'almox', familia, existe, conhecido, mudou, mtime, size, quando, adotado?,
-  absorvido?, itens?}], itens:[…], absorvidos:[…], ledger:{atualizado, arquivos, gerado, protegidos}}`.
-  Sem `deep`, só mtime/size (barato — a aba Biblioteca pergunta ao abrir). Com `deep=1`, lê os
-  arquivos que mudaram: casa → `{acervo:'altium', name, nomeAltium?, mudou:['geometria'|'descricao'|
-  'footprints'|'flags'|'cores'|'novo']}`; almoxarifado → `{acervo:'almox', familia, componente,
-  simbolo, arquivo, mudou:['geometria'], estado:'editado'|'gerador', protegido}`. Arquivo que mudou
-  sem diferença nenhuma é **absorvido** (mtime registrado) e o aviso some. A geometria da casa
-  compara contra as DUAS leituras (com e sem as conversões que o ExportLibs não fazia), e flags/
-  cores só se julgam no símbolo cuja linha do espelho já carrega cor (o leitor escreve cor em
-  quase todo gráfico; o ExportLibs em nenhum) — um `schlib.js` do ExportLibs não acusa a lib
-  inteira, nem depois de um apply ter trazido uma linha nova. Contra o Y: real e o `schlib.js`
-  versionado hoje o deep dá 7 itens (2 novos, 2 geometria, 3 footprints).
-- `POST /api/symbols/altium-apply {itens:[…]}` → `{ok, aplicados, itens:[{…, ok, acao:'trocado'|'novo'|
-  'protegido'|'liberado', erro?}]}`. Casa: a linha do símbolo no `Libs/schlib.js` vira o que o
-  leitor lê (nome do espelho pelo rename-map; `novo` entra no fim, `stats` acompanha; nenhum
-  outro byte muda). Almoxarifado: o componente vira protegido — ou, se voltou ao gerador, perde
-  a proteção e o espelho fica com o que o Altium tem — e o espelho da família anda junto.
+As rotas `GET /api/symbols/altium-changes` e `POST /api/symbols/altium-apply` **saíram em
+2026-09-15**. A primeira comparava as `.SchLib` com o ledger e alimentava o badge "Altium
+mudou"; a segunda já vinha recusando com 409 desde a inversão de 2026-09-14. Com o Altium
+deixando de ser fonte, as duas perderam a razão de existir. Quem adota um desenho do Altium é
+o comando manual `guardiao.py --proteger "FAMILIA/COMPONENTE"`.
+
 - `POST /api/symbols/almox-sync {pull}` → `{runId}` (202; 409 se já roda; 400 pull sem senha) e
   `GET /api/symbols/almox-sync/<runId>/stream` (SSE): roda `guardiao.py [--pull]` como
   subprocesso; `event: done` traz `{ok, resumo}` (o mesmo `almox-guardiao.js`). Substitui o

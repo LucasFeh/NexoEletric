@@ -200,9 +200,10 @@ Duas regras que vêm junto:
   do mesmo jeito, e vale), e `/api/symbols/mirror` exige `{"confirmar":true}`. A trava é do
   hub: a CLI do `schlib_patch` e o próprio Altium gravam nela se você mandar.
 - **A cópia publicada não entra no ledger.** O `git archive` do deploy carimba nos arquivos
-  extraídos a data do *commit*, então ela ganharia mtime novo a cada deploy — de qualquer
-  commit, mesmo um só de README — e o hub abriria sozinho o modal de "mudou no Altium,
-  quer aplicar?" para quem entrasse na aba Biblioteca.
+  extraídos a data do *commit*, então ela ganha mtime novo a cada deploy — de qualquer commit,
+  mesmo um só de README. Enquanto o hub comparava mtime, isso abria sozinho o modal de "mudou
+  no Altium" para quem entrasse na aba Biblioteca; a comparação saiu em 2026-09-15, e a regra
+  fica de pé porque carimbo de deploy continua não sendo informação sobre a biblioteca.
 
 A `.PcbLib` da casa (63 MB) **não** é versionada: seriam 52 MiB permanentes no pack e a
 release do servidor iria de 14 para 77 MB, cinco vezes, dentro do share que hospeda o ERP.
@@ -646,22 +647,22 @@ do próprio componente (`SN74LVC244AQPWRQ1`). A varredura de 2026-09-03 leu 527 
 reduziu 176.322 ocorrências a 895 símbolos. O relatório fica em `tools/symbols/relatorio.txt`;
 o mesmo botão existe na API (`POST /api/symbols/extract`, log por SSE).
 
-**As duas bibliotecas andam juntas — Altium > hub > Odoo.** A sincronização do almoxarifado
-passa pelo **guardião** (`tools/symbols/guardiao.py`, botão *Sincronizar* da aba): antes de gerar,
-ele lê cada `.SchLib` de `Libs/Almox` e o que difere do que o gerador escreveu por último foi
-editado no Altium — vira *protegido*, com a geometria guardada em `Libs/lib-ledger.json`
-(versionado: é estado). O gerador roda reciclando a biblioteca real do Y: (o que você editou no
-hub chega ao almoxarifado), e depois cada protegido é reposto no arquivo e o espelho da família
-anda junto, marcado `origem:altium` (pílula *altium* na lista). Só quem ninguém tocou recebe o
-desenho do Odoo. O diálogo mostra "preservado do Altium: N componentes"; `--liberar` devolve um
-componente ao gerador.
+**O desenho nasce no hub e vai para o Altium — nunca o contrário.** A sincronização do
+almoxarifado passa pelo **guardião** (`tools/symbols/guardiao.py`, botão *Sincronizar* da aba).
+O gerador reescreve cada `.SchLib` de `Libs/Almox` do zero; o guardião **repõe** nela, depois de
+cada regeração, o desenho de todo componente *protegido* — a geometria guardada em
+`Libs/lib-ledger.json` (versionado: é estado) — e o espelho da família anda junto, marcado
+`origem` (pílula na lista). Só quem ninguém protegeu recebe o desenho do Odoo. O diálogo mostra
+"preservado: N componentes"; `--liberar` devolve um componente ao gerador e `--proteger` adota
+um desenho.
 
-E ao entrar em qualquer sub-aba da **Biblioteca** o hub compara data e tamanho das `.SchLib` (a
-da casa e as do almoxarifado) com o que ele mesmo registrou por último; se mudou, aparece o badge
-*Altium mudou* e o modal "Identificamos modificações vindas do Altium em N símbolos — deseja
-atualizar a biblioteca do hub?". *Atualizar* troca só as linhas daqueles símbolos no espelho (ou
-protege os componentes do almoxarifado); *Agora não* guarda a assinatura na sessão e não pergunta
-de novo pelos mesmos arquivos. O que o próprio hub grava nunca dispara o aviso.
+**O que for editado direto na `.SchLib` pelo Altium é sobrescrito pela próxima regeração, em
+silêncio.** Foi assim que o usuário pediu, em duas etapas: em 2026-09-14 a hierarquia inverteu
+(o Altium deixou de subir e virou aviso) e em 2026-09-15 o aviso também saiu — *"as modificações
+nascem e saem do hub para o Altium, mas nunca o contrário, portanto não precisa mais identificar
+nenhuma modificação vinda do Altium"*. Saíram o badge, o modal, as rotas `/altium-changes` e
+`/altium-apply` e a apuração de divergências do resumo. A única porta que ainda leva um desenho
+do Altium para o hub é o comando manual `guardiao.py --proteger "FAMILIA/COMPONENTE"`.
 
 O leitor Python (`tools/symbols/sch_leitor.py`) também regera o espelho inteiro sem abrir o
 Altium — `python tools/symbols/sch_leitor.py --espelho` (aplica o `rename-map.js` para não
