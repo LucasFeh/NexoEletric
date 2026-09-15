@@ -81,15 +81,20 @@ Cada script resolve a raiz nesta ordem, **validando** cada candidato — validar
 existe mas não é o workspace tem de ser recusada:
 
 1. a chave `home` do `home.txt`;
-2. os candidatos embutidos, em ordem — `D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror`,
-   `\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror`,
-   `\\192.168.15.192\altiumhub\current`, `\\ODOO\altiumhub\current`. O primeiro que
-   validar é **gravado** no `home.txt`, para a próxima execução não procurar de novo;
+2. os candidatos embutidos, **o servidor primeiro** — `\\192.168.15.192\altiumhub\current`,
+   `\\ODOO\altiumhub\current`, `D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror`. O primeiro
+   que validar é **gravado** no `home.txt`, para a próxima execução não procurar de novo;
 3. um `InputBox` perguntando a raiz — a resposta também é validada e gravada;
 4. nada validou: uma mensagem dizendo onde procurou e o que editar, e **nada é escrito**.
 
-Na máquina onde tudo roda local o primeiro candidato resolve sozinho, na primeira execução,
-e nunca mais se fala nisso. Depois do deploy, a máquina que usa o servidor põe o UNC no
+A ordem mudou em 2026-09-15: o `\\LUCAS-PC\D\…` saiu da lista e o servidor passou à
+frente. Ele é o nome de UMA máquina, estava na frente do share, e a bancada está no ar —
+então o Altium achava o workspace de desenvolvimento e parava ali, exportando o esquema
+para lá em vez de para a release publicada. O `D:` local ficou por último e só casa na
+própria bancada.
+
+Na máquina onde tudo roda local o `D:` resolve sozinho, na primeira execução, e nunca
+mais se fala nisso. Depois do deploy, a máquina que usa o servidor põe o UNC no
 `home.txt` dela — e nenhuma das duas precisa de um `.pas` diferente.
 
 **Se aparecer "Acesso negado" apontando para um servidor que você não está usando, o
