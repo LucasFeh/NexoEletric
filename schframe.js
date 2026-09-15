@@ -2574,7 +2574,7 @@ function comEdicaoPendente(){
   });
 }
 window.__hubDirty = function(){ return schDirty; };
-/* ------- aplicar vinculos vindos de fora (hub-odoobom.js) -------
+/* ------- aplicar vinculos vindos de fora -------
    Quem monta a lista e o modulo do Odoo; quem ESCREVE e esta vista, e nao por gentileza: o
    caminho passa pelo `commit()`, e e ele que empilha o desfazer, acende o "Salvar *" e
    repinta folha, painel e miniatura. Um modulo de fora que mexesse em `schematic.items`

@@ -190,7 +190,7 @@ def main():
             assert 'hub-almox.json' in str(e), 'o erro tem que dizer ONDE configurar: %s' % e
         else:
             raise AssertionError('url %r passou sem erro' % (ruim,))
-    # SemUrl e LoginRecusado PRECISAM descender de Exception: odoobom_server e almox2lib
+    # SemUrl e LoginRecusado PRECISAM descender de Exception: almox2lib e o guardiao
     # traduzem a falha para a tela com `except Exception`. SystemExit herda de
     # BaseException e passa batido por esses guardas — a thread do Flask morre sem escrever
     # resposta e o navegador diz "Failed to fetch", que manda o usuario procurar defeito em

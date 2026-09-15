@@ -24,10 +24,12 @@ Credenciais: `hub-almox.json` na raiz do workspace (fora do git), no formato
      "login": "voce@empresa.com", "senha": "..."}
 A senha também pode vir da variável de ambiente ODOO_SENHA, que ganha do arquivo.
 
-**Não há URL padrão de propósito.** Cada máquina diz com qual Odoo fala: a bancada
-aponta para o servidor de teste, o hub do servidor aponta para o de produção. Enquanto
-havia um default cravado aqui, uma máquina sem `hub-almox.json` — ou com a url em branco
-— sincronizava do ERP errado sem uma linha de aviso. Agora falta de url é erro alto.
+**O Odoo da casa é um só** — `192.168.15.192:8070`, base `odoo_db` —, e é isso que o
+`PADRAO` traz. A única coisa que muda de máquina para máquina é a credencial. O padrão já
+apontou para o servidor de TESTE, e aí uma máquina sem `hub-almox.json` sincronizava do ERP
+errado sem uma linha de aviso (pendência 1.8); apontar para o servidor de verdade inverte o
+sinal. Gravar `url` no arquivo continua vencendo o padrão — é assim que a bancada fala com
+outro Odoo para testar.
 """
 import argparse, csv, io, json, os, socket, sys, xmlrpc.client
 
@@ -103,7 +105,7 @@ class LoginRecusado(RuntimeError):
     """O Odoo respondeu, mas recusou usuario/senha/base.
 
     Era `SystemExit`, e isso derrubava a tela inteira: SystemExit herda de BaseException,
-    entao atravessava o `except Exception` do odoobom_server, a thread do Flask morria sem
+    entao atravessava o `except Exception` de quem chama pelo hub, a thread do Flask morria sem
     escrever resposta nenhuma, e o navegador mostrava "sem resposta do servidor: Failed to
     fetch". O usuario lia ERRO DE REDE onde havia LOGIN ERRADO — e ia procurar defeito em
     firewall, porta e container. Medido com o `SEU_LOGIN` que o INSTALL deixa de exemplo.
@@ -114,7 +116,7 @@ class LoginRecusado(RuntimeError):
 class SemUrl(RuntimeError):
     """Nao ha Odoo configurado nesta maquina.
 
-    RuntimeError, e nao SystemExit: quem chama pelo hub (odoobom_server, almox2lib) tem
+    RuntimeError, e nao SystemExit: quem chama pelo hub (almox2lib, guardiao) tem
     `except Exception` e transforma isso na mensagem da tela. SystemExit herda de
     BaseException e passaria batido por esses guardas, derrubando a requisicao inteira.
     """

@@ -148,7 +148,7 @@ escrevendo CRLF. Trocar por `'\n'.join(...)`: nenhum consumidor exige CRLF
 sessão inteira de diagnóstico: com `SEU_LOGIN` no `shared/hub-almox.json`, o painel da BoM
 mostrava `sem resposta do servidor: Failed to fetch`, e o usuário foi procurar defeito em
 rede, porta e container. O que havia era `SystemExit` — `BaseException`, atravessa o
-`except Exception` do `odoobom_server`, mata a thread do Flask **sem escrever resposta**, e
+`except Exception` de quem chama pelo hub, mata a thread do Flask **sem escrever resposta**, e
 o navegador chama isso de erro de rede. Virou `LoginRecusado(RuntimeError)`, com a base e o
 servidor na mensagem; a CLI reconverte para `SystemExit` no `main()`, então ela continua
 mostrando uma linha em vez de pilha. `tests/test_odoo_pull.py` trava as duas metades: que
