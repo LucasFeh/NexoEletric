@@ -433,11 +433,17 @@ begin
 
   Tentei := '';
 
+  { A ORDEM E O SERVIDOR PRIMEIRO, e isso foi medido doendo: com o \\LUCAS-PC na frente, }
+  { o Altium achava a bancada (que esta no ar) e parava ali -- lia e escrevia no workspace }
+  { de desenvolvimento em vez do que esta publicado no servidor. O \\LUCAS-PC saiu da      }
+  { lista: ele e o nome de UMA maquina, e quem manda hoje e a release no share do .192.    }
+  { O D: local ficou por ultimo e so casa na propria bancada, onde o caminho existe -- e a }
+  { HomeValida ainda exige o AI-GUIDE.md la dentro, entao pasta parecida nao passa.        }
+  { Quem precisar de outro lugar escreve home= no home.txt: ele vence esta lista inteira.  }
   Cand := TStringList.Create;
-  Cand.Add('D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror');
-  Cand.Add('\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror');
   Cand.Add('\\192.168.15.192\altiumhub\current');
   Cand.Add('\\ODOO\altiumhub\current');
+  Cand.Add('D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror');
   for i := 0 to Cand.Count - 1 do
   begin
     if HomeValida(Cand[i]) then
