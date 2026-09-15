@@ -593,8 +593,12 @@ def api_almox_config_set():
             if not isinstance(data[k], str):
                 return {'ok': False, 'error': '%s tem que ser texto' % k}, 400
             v = data[k].strip()
-            # senha em branco no formulario significa "nao mexe", nao "apaga"
-            if k == 'senha' and not v:
+            # Campo em branco no formulario significa "nao mexe", nao "apaga". Valia so
+            # para a senha; passou a valer para todos. Gravar "" por cima de uma url
+            # valida nao limpa a configuracao: troca o Odoo com que a maquina fala --
+            # antes, calado, pelo default cravado; hoje, virando erro no proximo
+            # sincronismo. Quem quiser mesmo zerar apaga o hub-almox.json.
+            if not v:
                 continue
             cfg[k] = v
     full = os.path.join(ROOT, ALMOX_CFG_FILE)

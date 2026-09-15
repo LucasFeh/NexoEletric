@@ -20,9 +20,14 @@ Numa semana calma isso são ~4.500 registros minúsculos do censo e um punhado d
 em vez das cinco varreduras completas que o `--full` faz.
 
 Credenciais: `hub-almox.json` na raiz do workspace (fora do git), no formato
-    {"url": "http://192.168.15.182:8070", "db": "odoo_db",
-     "login": "engenharia@dieletrons.com", "senha": "..."}
+    {"url": "http://<ip-do-odoo>:8070", "db": "odoo_db",
+     "login": "voce@empresa.com", "senha": "..."}
 A senha também pode vir da variável de ambiente ODOO_SENHA, que ganha do arquivo.
+
+**Não há URL padrão de propósito.** Cada máquina diz com qual Odoo fala: a bancada
+aponta para o servidor de teste, o hub do servidor aponta para o de produção. Enquanto
+havia um default cravado aqui, uma máquina sem `hub-almox.json` — ou com a url em branco
+— sincronizava do ERP errado sem uma linha de aviso. Agora falta de url é erro alto.
 """
 import argparse, csv, io, json, os, socket, sys, xmlrpc.client
 
@@ -31,7 +36,10 @@ RAIZ = os.path.dirname(os.path.dirname(BASE))
 CFG = os.path.join(RAIZ, 'hub-almox.json')
 CSV_OUT = os.path.join(BASE, 'componentes_odoo.csv')
 
-PADRAO = {'url': 'http://192.168.15.182:8070', 'db': 'odoo_db',
+# url vazia de proposito: ver a docstring do modulo. db e login continuam com padrao
+# porque errar neles da erro de login, que aparece; errar a url da uma sincronizacao
+# inteira, bem-sucedida, do servidor errado.
+PADRAO = {'url': '', 'db': 'odoo_db',
           'login': 'engenharia@dieletrons.com', 'senha': ''}
 ALMOX = 'DI/Almoxarifado'
 TIMEOUT = 60.0                 # Odoo mudo nao pode prender a sincronizacao para sempre
@@ -59,6 +67,7 @@ def le_config():
         pass
     if os.environ.get('ODOO_SENHA'):
         cfg['senha'] = os.environ['ODOO_SENHA']
+    cfg['url'] = norm_url(cfg['url'])   # '/' gravado pela tela nao e uma url
     return cfg
 
 
@@ -73,8 +82,34 @@ def le_csv(caminho=CSV_OUT):
         return []
 
 
+def norm_url(v):
+    """A url como o resto do modulo quer ve-la: sem espaco em volta e sem barra no fim.
+
+    '/' e '   /   ' viram string VAZIA, e nao uma url de um caractere. Sem isso a barra
+    solta -- que a tela grava com um toque de teclado -- passava pelo guarda de "esta
+    vazia?" e so estourava la na frente, no ServerProxy, com um erro que nao diz nada.
+    O odoolista ja normaliza assim (`_norm_campo`); aqui era a metade que faltava.
+    """
+    return (v or '').strip().rstrip('/').strip()
+
+
+class SemUrl(RuntimeError):
+    """Nao ha Odoo configurado nesta maquina.
+
+    RuntimeError, e nao SystemExit: quem chama pelo hub (odoobom_server, almox2lib) tem
+    `except Exception` e transforma isso na mensagem da tela. SystemExit herda de
+    BaseException e passaria batido por esses guardas, derrubando a requisicao inteira.
+    """
+
+
 class Odoo(object):
     def __init__(self, url, db, login, senha):
+        url = norm_url(url)
+        if not url:
+            raise SemUrl('sem url do Odoo: grave "url" em hub-almox.json na raiz do '
+                         'workspace (no servidor, /srv/altiumhub/shared/hub-almox.json). '
+                         'Nao existe servidor padrao — a bancada e a producao falam com '
+                         'Odoos diferentes, e adivinhar erraria em silencio.')
         self.db, self.senha = db, senha
         socket.setdefaulttimeout(TIMEOUT)
         common = xmlrpc.client.ServerProxy(url.rstrip('/') + '/xmlrpc/2/common', allow_none=True)
@@ -286,6 +321,11 @@ def main(argv=None):
     for k in ('url', 'db', 'login', 'senha'):
         if getattr(a, k):
             cfg[k] = getattr(a, k)
+    if not cfg['url']:
+        raise SystemExit('sem url do Odoo: use --url ou grave "url" em hub-almox.json na '
+                         'raiz do workspace. Nao existe servidor padrao de proposito — '
+                         'antes havia, e uma maquina sem o arquivo sincronizava do ERP de '
+                         'teste sem avisar')
     if not cfg['senha']:
         raise SystemExit('sem senha do Odoo: use --senha, a variavel ODOO_SENHA, '
                          'ou grave hub-almox.json na raiz do workspace')

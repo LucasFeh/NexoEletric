@@ -7,7 +7,7 @@ O que este teste protege: que uma sincronização normal **não** releia o catá
 Ela só pode baixar a ficha do que é novo ou mudou — mas tem que reescrever saldo e
 localização de TODO mundo, que é o que muda sem passar pelo cadastro do produto.
 """
-import io, os, sys, json
+import io, os, sys, json, tempfile
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(RAIZ, 'tools', 'almox'))
@@ -169,8 +169,31 @@ def main():
         if os.path.exists(tmp):
             os.remove(tmp)
 
+    # ── nao existe Odoo padrao: falta de url e erro alto, nao servidor de teste ──
+    # Enquanto o PADRAO trazia http://192.168.15.182:8070, uma maquina sem hub-almox.json
+    # sincronizava do ERP de TESTE sem uma linha de aviso — e o CSV saia completo e
+    # plausivel, que e o pior jeito de errar. PENDENCIAS 1.8.
+    assert OP.PADRAO['url'] == '', 'voltou a existir servidor cravado no codigo'
+    cfg_velho = OP.CFG
+    try:
+        OP.CFG = os.path.join(tempfile.mkdtemp(), 'nao-existe.json')
+        assert OP.le_config()['url'] == '', 'sem arquivo, a url tem que sair vazia'
+    finally:
+        OP.CFG = cfg_velho
+    for ruim in ('', '   ', None):
+        try:
+            OP.Odoo(ruim, 'odoo_db', 'a@b.c', 'x')
+        except OP.SemUrl as e:
+            assert 'hub-almox.json' in str(e), 'o erro tem que dizer ONDE configurar: %s' % e
+        else:
+            raise AssertionError('url %r passou sem erro' % (ruim,))
+    # SemUrl PRECISA descender de Exception: odoobom_server e almox2lib traduzem a falha
+    # para a tela com `except Exception`. SystemExit, que o resto deste modulo usa, herda
+    # de BaseException e passaria batido por esses guardas, derrubando a requisicao.
+    assert issubclass(OP.SemUrl, Exception), 'SemUrl fora de Exception nao e capturavel'
+
     print('test_odoo_pull OK (incremental baixou 2 fichas de 3 produtos; '
-          'saldo e prateleira sempre reescritos)')
+          'saldo e prateleira sempre reescritos; sem url configurada, erro alto)')
 
 
 if __name__ == '__main__':

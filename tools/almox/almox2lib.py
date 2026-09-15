@@ -697,6 +697,16 @@ def main(argv=None):
     if args.pull:
         import odoo_pull
         cfg = odoo_pull.le_config()
+        # A url ANTES da senha, e as duas antes de conectar. Este pre-voo e o que a tela
+        # do hub enxerga: o botao "Puxar do Odoo" roda ESTE arquivo, nao o odoo_pull, entao
+        # a mensagem boa que o odoo_pull.main() tem no lugar dele nunca chega aqui. Sem
+        # esta linha o usuario via "conectando em  (base odoo_db)..." -- com o buraco no
+        # meio da frase -- e depois um traceback de SemUrl.
+        if not cfg['url']:
+            print('ERRO: sem url do Odoo — grave "url" em hub-almox.json (no servidor, '
+                  '/srv/altiumhub/shared/hub-almox.json). Nao existe servidor padrao: a '
+                  'bancada e a producao falam com Odoos diferentes')
+            return 2
         if not cfg['senha']:
             print('ERRO: sem senha do Odoo — configure hub-almox.json ou ODOO_SENHA')
             return 2

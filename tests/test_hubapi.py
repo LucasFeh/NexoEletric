@@ -1,5 +1,6 @@
 # Teste das funcoes puras do hubserver (rodar da raiz: python tests/test_hubapi.py)
 import io
+import json
 import os
 import shutil
 import sys
@@ -129,5 +130,36 @@ finally:
             os.remove(os.path.join(dbom, f))
         except OSError:
             pass
+
+# Credencial do almoxarifado: campo em branco no formulario significa "nao mexe", nunca
+# "apaga". Valia so para a senha. Passou a valer para os quatro quando a url saiu do
+# PADRAO do odoo_pull: gravar "" por cima de uma url valida deixou de ser inocente, porque
+# nao existe mais servidor para onde cair caladamente — some a configuracao e o proximo
+# sincronismo para. Roda num ROOT de mentira: este teste GRAVA hub-almox.json.
+tmp = tempfile.mkdtemp()
+real_root, H.ROOT = H.ROOT, tmp
+try:
+    cli = H.app.test_client()
+    cheio = {'url': 'http://alvo:8070', 'db': 'base', 'login': 'a@b.c', 'senha': 'x'}
+    assert cli.post('/api/almox/config', json=cheio).status_code == 200, 'gravou a config'
+    for k in ('url', 'db', 'login', 'senha'):
+        for branco in ('', '   ', '\t'):
+            assert cli.post('/api/almox/config', json={k: branco}).status_code == 200
+    with io.open(os.path.join(tmp, H.ALMOX_CFG_FILE), encoding='utf-8') as fh:
+        depois = json.load(fh)
+    assert depois == cheio, 'campo em branco apagou configuracao: %r' % (depois,)
+
+    # o que NAO esta em branco continua gravando, senao o guard viraria so-leitura
+    assert cli.post('/api/almox/config', json={'url': 'http://outro:8070'}).status_code == 200
+    with io.open(os.path.join(tmp, H.ALMOX_CFG_FILE), encoding='utf-8') as fh:
+        assert json.load(fh)['url'] == 'http://outro:8070', 'valor de verdade tem que gravar'
+
+    # e a senha nunca volta pela rede, so o booleano
+    corpo = cli.get('/api/almox/config').get_json()
+    assert 'senha' not in corpo['config'], 'a senha vazou pelo GET'
+    assert corpo['config']['temSenha'] is True
+finally:
+    H.ROOT = real_root
+    shutil.rmtree(tmp, ignore_errors=True)
 
 print('test_hubapi OK')

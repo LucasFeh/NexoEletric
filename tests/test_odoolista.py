@@ -789,8 +789,10 @@ def test_arquivo_ilegivel_nunca_apaga_a_senha():
 def test_url_so_de_barras_nao_apaga_a_url():
     """'/' passava pelo guard de "campo em branco não apaga" e gravava url VAZIA.
 
-    E url vazia não é inócua: o destino() cai no PADRAO, que é o servidor de TESTE
-    192.168.15.182 — a lista sairia do Odoo de produção sem ninguém mexer em nada.
+    E url vazia não é inócua. Enquanto o PADRAO tinha servidor cravado, ela fazia o
+    destino() cair no ERP de teste e a lista saía de lá sem ninguém mexer em nada. Hoje o
+    PADRAO não tem url e o envio para alto — melhor, mas o estrago continua sendo perder a
+    url que estava configurada, então o guard segue valendo.
     """
     velho = _sem_ambiente()
     try:
@@ -800,7 +802,7 @@ def test_url_so_de_barras_nao_apaga_a_url():
             assert _app(d).post('/api/lista/config', json={'url': u}).status_code == 200
             cfg = OL.destino(d)
             assert cfg['url'] == 'http://alvo:8070', (u, cfg['url'])
-            assert cfg['url'] != OL.PADRAO['url'], (u, 'caiu no servidor de teste')
+            assert OL.PADRAO['url'] == '', 'o PADRAO voltou a ter servidor cravado'
             shutil.rmtree(d, ignore_errors=True)
 
         # a barra do fim continua caindo quando há url de verdade na frente dela

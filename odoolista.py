@@ -17,6 +17,9 @@ Credenciais (secao 6 da spec):
          claro para a LAN inteira. O ponto no nome de .hub-odoo.json e o que o protege.
   resto  ODOO_LISTA_URL/DB/LOGIN/MODELO -> .hub-odoo.json -> hub-almox.json -> PADRAO
          (url/db/login nao sao segredo; herda-los do almoxarifado poupa uma configuracao)
+         O PADRAO nao tem url: se nenhuma fonte disser com qual Odoo falar, o envio para
+         alto em vez de escolher um. Enquanto havia default cravado, uma maquina sem
+         configuracao mandava a lista para o ERP de teste sem avisar ninguem.
 
 O modelo entra nessa mesma cadeia porque a base do Odoo que recebe a lista nem sempre e a
 de producao: apontar o hub para uma copia de teste so muda a url se o modelo la se chamar
@@ -39,7 +42,7 @@ RECIBO = 'odoo-lista.json'       # ao lado do projeto, no molde de bom-opts.json
 MODELO = 'di.lista.altium'
 TIMEOUT = 30.0                   # por conexao; nunca socket.setdefaulttimeout (global)
 
-PADRAO = {'url': 'http://192.168.15.182:8070', 'db': 'odoo_db',
+PADRAO = {'url': '', 'db': 'odoo_db',
           'login': 'integracao.hub@dieletrons.com', 'modelo': MODELO}
 
 # O TITULO entra no indice e viaja ate a tela: e ele que responde "de qual lib esta
@@ -604,8 +607,13 @@ class ClienteLista(object):
                            'no ambiente do hub (no servidor, uma linha em '
                            '/etc/altiumhub/senha.env), ou grave %s na raiz do workspace'
                            % CFG_LISTA)
-        if not (cfg.get('url') and cfg.get('db') and cfg.get('login')):
-            raise ErroOdoo('url, db e login do Odoo nao configurados')
+        if not cfg.get('url'):
+            raise ErroOdoo('sem url do Odoo: defina ODOO_LISTA_URL no ambiente do hub, ou '
+                           'grave "url" em %s (ou em hub-almox.json, de onde este envio a '
+                           'herda). Nao existe servidor padrao de proposito — a bancada e a '
+                           'producao falam com Odoos diferentes' % CFG_LISTA)
+        if not (cfg.get('db') and cfg.get('login')):
+            raise ErroOdoo('db e login do Odoo nao configurados')
         self.url, self.db, self.senha = cfg['url'], cfg['db'], cfg['senha']
         # o modelo vem da configuracao (base de teste pode ter outro nome); os METODOS nao
         self.modelo = cfg.get('modelo') or MODELO
