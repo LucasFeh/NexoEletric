@@ -1484,15 +1484,83 @@ function renderProps(){
   const part = HubCore.partOf(sym, it.part);
   const ac = ACERVO_DE.get(it.sym) || (sym && ACERVO_DE.get(sym.name)) || null;
   const nparts = sym ? (sym.partcount || (sym.parts || []).length || 1) : 1;
+  /* QUANTAS PARTES ESTE COMPONENTE TEM, DE VERDADE. Nao basta perguntar ao simbolo: todo
+     alias do almoxarifado tem partcount 1, e uma escolha gravada no lib-subs.js pode
+     apontar um conector de 4 partes para um alias de uma. Nesses casos a ficha dizia
+     '1 de 1' numa peca que a folha usa em 4 partes — e, pior, escondia a parte REAL do
+     item, que continuava sendo 3. A folha e a testemunha: se ha um comp com part 3 neste
+     ref, o componente tem ao menos 3 partes, o simbolo sabendo disso ou nao. */
+  const partesDoRef = sheetItems().filter(x => x.t === 'comp' && x.ref === it.ref);
+  const maxNaFolha = partesDoRef.reduce((m, x) => Math.max(m, x.part || 1), 0);
+  /* O TOTAL E DO COMPONENTE, NAO DO SIMBOLO. O CONE PADRAO tem 80 partes desenhadas, e um
+     conector de 4 vias que o usa nao deve oferecer 80 opcoes — seria convite para pousar
+     uma parte na 57 e criar um buraco que o ECO do Altium reclama. Quem sabe quantas
+     partes este componente tem e a folha: as que estao nela. O partcount do simbolo entra
+     so como AVISO, mais abaixo, quando ele nao alcanca o que a folha usa. */
+  const totalPartes = Math.max(maxNaFolha, it.part || 1);
   const fpNome = it.footprint || '';
 
   const g = prSec('geral');
   g.append(el('div', 'pr-title', it.ref));
   if (it.comment) g.append(el('div', 'pr-sub', it.comment));
   prKv(g, 'Comment', it.comment, it.comment ? null : 'dim');
-  prKv(g, 'Parte', nparts > 1 ? (it.part || 1) + ' de ' + nparts : '1 de 1');
+
+  /* DESIGNATOR, com o nome que o Altium usa. Ele e do COMPONENTE, nao da parte: renomear
+     CN4 renomeia as 4 partes de uma vez, senao a folha fica com um componente partido ao
+     meio e o ECO do Altium acusa. Recusa nome vazio e nome ja usado por OUTRO ref. */
+  const ref = el('input', 'input mono'); ref.type = 'text'; ref.value = it.ref;
+  ref.title = 'o designador do componente — muda todas as partes dele';
+  const aplicaRef = () => {
+    const novo = String(ref.value || '').trim().toUpperCase();
+    if (!novo || novo === it.ref){ ref.value = it.ref; return; }
+    const ocupado = sheetItems().some(x => x.t === 'comp' && x.ref === novo);
+    if (ocupado){
+      HubDialog.toast('\u201c' + novo + '\u201d ja esta em uso nesta folha', 'warn');
+      ref.value = it.ref; return;
+    }
+    const antigo = it.ref;
+    for (const x of partesDoRef) x.ref = novo;
+    commit();
+    HubDialog.toast(antigo + ' \u2192 ' + novo
+      + (partesDoRef.length > 1 ? ' (' + partesDoRef.length + ' partes)' : ''), 'ok');
+  };
+  ref.addEventListener('change', aplicaRef);
+  ref.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); ref.blur(); } });
+  prKvEl(g, 'Designator', ref);
+
+  /* PARTE, escolhivel depois de colocado. So vira combo quando ha mais de uma — em
+     componente de uma parte um seletor de um item so seria enfeite. */
+  if (totalPartes > 1){
+    const ps = el('select', 'input mono');
+    for (let i = 1; i <= totalPartes; i++){
+      const o = document.createElement('option');
+      o.value = i; o.textContent = i + ' de ' + totalPartes;
+      if (i === (it.part || 1)) o.selected = true;
+      ps.append(o);
+    }
+    ps.title = nparts >= totalPartes ? 'qual parte deste componente este item desenha'
+      : 'o simbolo resolvido so tem ' + nparts + ' parte(s); as demais ficam sem desenho';
+    ps.onchange = () => {
+      const n = parseInt(ps.value, 10) || 1;
+      if (n === (it.part || 1)) return;
+      const jaTem = partesDoRef.some(x => x !== it && (x.part || 1) === n);
+      if (jaTem){
+        HubDialog.toast(it.ref + ' ja tem a parte ' + n + ' na folha', 'warn');
+        ps.value = String(it.part || 1); return;
+      }
+      it.part = n; commit();
+    };
+    prKvEl(g, 'Parte', ps);
+    if (nparts < totalPartes)
+      prKv(g, '', 'o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham', 'dim');
+  } else {
+    prKv(g, 'Parte', '1 de 1');
+  }
   prKv(g, 'Descrição', sym && sym.description, sym && sym.description ? null : 'dim');
-  prKv(g, 'Designador', sym && sym.designator, sym && sym.designator ? null : 'dim');
+  /* o prefixo que a BIBLIOTECA sugere (CN, R, C...), nao o designador deste componente —
+     que agora e o campo editavel la em cima. Dois rotulos parecidos no mesmo painel foi
+     exatamente o que fez o combo de parte do editor de simbolos mover desenho sem querer. */
+  prKv(g, 'Prefixo da lib', sym && sym.designator, sym && sym.designator ? null : 'dim');
   prKv(g, 'Componente', it.sym, 'mono');
   /* o resolvedor pode ter entregue outro simbolo (apelido/substituto): dizer qual, senao a
      ficha afirma um nome e o desenho mostra outro */
