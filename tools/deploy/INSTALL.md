@@ -194,9 +194,11 @@ J
 sudo -u altiumhub chmod 600 /srv/altiumhub/shared/hub-almox.json
 ```
 
-`http://127.0.0.1:8070` funciona porque o compose usa rede do host. Se o arquivo
-faltar, `le_config()` cai calado no padrão de `odoo_pull.py:34`, que aponta para o
-Odoo de **teste**, e o sincronismo puxa do ERP errado sem erro nenhum.
+`http://127.0.0.1:8070` funciona porque o compose usa rede do host. **Os quatro campos
+são obrigatórios**: desde 2026-09-15 não existe url padrão no código, então um arquivo
+faltando — ou com a `url` em branco — para o sincronismo com uma mensagem dizendo onde
+gravá-la. Antes disso ele caía calado no padrão de `odoo_pull.py`, que apontava para o
+Odoo de **teste**, e o hub puxava do ERP errado sem erro nenhum; era a pendência 1.8.
 
 E daqui, os 265 MB de biblioteca mais os arquivos de estado:
 

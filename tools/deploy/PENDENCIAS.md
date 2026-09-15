@@ -99,7 +99,26 @@ GitHub. Vira `os.environ.get('ALTIUMHUB_MASTER')`, e `api_project_delete` respon
 503 quando for `None` e o request não for local. O drop-in do systemd já está no
 [INSTALL.md](INSTALL.md) item 4.
 
-### 1.8 Sem `hub-almox.json`, o sincronismo puxa do ERP de teste em silêncio
+### 1.8 ~~Sem `hub-almox.json`, o sincronismo puxa do ERP de teste em silêncio~~ FEITO
+**Resolvido em 2026-09-15**, a pedido do usuário, no branch do integrador — e não pelos
+donos, como o cabeçalho desta lista prescreve. `tools/almox/odoo_pull.py` e `hubserver.py`
+são do `agente/bom-almox`; o `APM-bom` estava sem nada pendente na hora, então nada dele
+foi publicado pela metade, mas o rebase de lá vai encostar nestes três pontos:
+
+- `odoo_pull.py`: `PADRAO['url']` virou `''`, nasceu `SemUrl(RuntimeError)` e o
+  `Odoo.__init__` a levanta com url vazia. `RuntimeError` e não `SystemExit` de propósito:
+  quem chama pelo hub tem `except Exception`, e `SystemExit` herda de `BaseException`
+  (é o mesmo defeito do item 2.2, ainda aberto na linha de baixo).
+- `odoolista.py`: `PADRAO['url']` virou `''`; o guard do `ClienteLista` separou a url dos
+  outros campos e diz onde configurar.
+- `hubserver.py`: o `"em branco = não mexe"` deixou de valer só para a senha e passou a
+  valer para todos os campos — era a segunda frase do conserto prescrito abaixo.
+
+Cobertura: `tests/test_odoo_pull.py` (url vazia, `le_config` sem arquivo, `SemUrl` dentro
+de `Exception`) e `tests/test_odoolista.py`.
+
+O texto original, para quem for revisar o rebase:
+
 `tools/almox/odoo_pull.py:34-35`, `:50-61`
 
 `PADRAO` traz `http://192.168.15.182:8070` cravado. Um servidor novo nasce sem o
@@ -178,3 +197,46 @@ O que sobra de válido: um `config.exemplo.json` versionado ajudaria quem clona 
 máquina nova. E a referência antiga a `symserver.py:175-186` caindo em `L.LIB_PADRAO`
 está velha: `_config` hoje chama `LP.schlib(ROOT)`, e `sch_leitor.LIB_PADRAO` já não é o
 `Y:` — é a própria cópia publicada.
+
+### 2.8 A tela só trava por senha, nunca por url
+`hub.html:2059-2062`, `:2093-2094`, `:2101`, `:2147`, `:2151` · dono: `agente/page`
+`hub-i18n.js` · dono: `agente/page` · `hub-odoocfg.js:160`, `hub-odoolista.js:331`, `:353`
+
+Rastro medido depois que o 1.8 tirou a url do `PADRAO`. O backend agora recusa sem url,
+com frase própria; a interface não sabe disso e só pergunta por `temSenha`:
+
+- `pull.disabled = !temSenha` (`:2093-2094`, espelhado em `:2101`) libera **Puxar do Odoo**
+  sem servidor configurado — o clique vai até o backend só para voltar com erro.
+- `alxLinhaCfg` (`:2059-2062`) escreve `Odoo — · base odoo_db · … · senha gravada`: o
+  travessão no lugar do servidor é a única pista de que falta o essencial.
+- `det.open = !cfg.config.temSenha` (`:2147`) não abre o formulário quando o que falta é a
+  url, então a pessoa não vê o campo que precisa preencher.
+- `:2151` ainda oferece `http://192.168.15.182:8070` como *placeholder* do campo Servidor.
+  No hub de produção é a sugestão que a pessoa vai digitar — o 1.8 voltando pela tela.
+- `hub-odoolista.js:331` repete o pré-voo só-senha, e `:353` deixa o modal escrever
+  `odoo_db em  · login`, contra a promessa do README de que o modal sempre mostra o destino.
+
+São ~6 linhas em `hub.html`, 4 em `hub-i18n.js` (uma chave `alx.semUrl` em pt e en, mais a
+nota de `:76`/`:298` passando a dizer que "em branco = não mexe" vale para os quatro campos)
+e 2 em `hub-odoocfg.js` — que já tem a frase certa escrita para a senha, em `:60`.
+
+### 2.9 `hub-almox.json` ilegível vira `{}`, e o POST seguinte apaga a configuração
+`hubserver.py` (`_almox_cfg_read` e `api_almox_config_set`) · dono: `agente/bom-almox`
+
+Arquivo com uma vírgula sobrando (ou BOM do Bloco de Notas) é lido como `{}` sem aviso. O
+formulário então grava `{}` mais o campo enviado **por cima do arquivo bom**: url, login e
+senha somem. O guard de "em branco = não mexe" do 1.8 não cobre este caso, porque não há
+nada em branco — há um dicionário vazio se passando por configuração.
+
+O `odoolista` já resolveu o mesmo problema do lado dele, com a bandeira `arquivoIlegivel`
+(`odoolista.py:401`): ler falhou é diferente de não ter nada, e o POST recusa em vez de
+sobrescrever. Falta a mesma distinção aqui.
+
+### 2.10 Envio da lista herda a url do almoxarifado quando o próprio arquivo está corrompido
+`odoolista.py` (`destino`)
+
+Herdar `url`/`db`/`login` do `hub-almox.json` é de propósito e está documentado. Mas a
+herança também acontece quando o `.hub-odoo.json` existe e está **ilegível** — e aí a lista
+sai para o Odoo do almoxarifado por causa de uma vírgula, não por escolha de ninguém. Na
+bancada isso significa voltar ao `.182`. A bandeira `arquivoIlegivel` já existe e já é
+reportada; falta ela impedir a herança silenciosa.
