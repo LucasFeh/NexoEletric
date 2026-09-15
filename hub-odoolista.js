@@ -41,19 +41,39 @@ const CSS = `
 #odoomodal .od-aviso.err{border-left-color:var(--err,#ff5252);}
 #odoomodal .od-aviso.ok{border-left-color:var(--ok,#00e676);}
 /* a coluna do nome tem teto: sem ele, numa tela larga o nome estica e joga a quantidade
-   para longe da peca a que ela pertence. A folga sobra para a resolucao, que e texto longo. */
+   para longe da peca a que ela pertence. A folga sobra para a resolucao, que e texto longo.
+
+   AS FAIXAS SAO EM PX, e isso nao e gosto. Elas eram 17em/8em/11em/12em, e o em se
+   resolve contra a fonte do PROPRIO container da grade: o cabecalho tinha font-size:10px e
+   as linhas herdavam 13px, entao o mesmo 12em valia 120px la e 156px aqui. As colunas
+   sairam desalinhadas a partir da terceira, com a deriva crescendo ate 144px na ultima —
+   medido no Chrome. Em px as duas fileiras resolvem igual, e a fonte menor do cabecalho
+   passou a morar nos FILHOS, para nunca mais mexer na largura das faixas. */
 #odoomodal .od-row{display:grid; gap:9px; align-items:baseline; padding:5px 4px;
-  grid-template-columns:150px minmax(0,17em) 8em 11em 12em 44px minmax(0,1fr);
+  grid-template-columns:150px minmax(0,221px) 104px 143px 156px 44px minmax(0,1fr);
   border-bottom:1px solid var(--border,#3a3a3a);}
 #odoomodal .od-row.hd{position:sticky; top:42px; background:var(--panel,#242424); z-index:1;
-  font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim,#9a9a9a);}
+  letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim,#9a9a9a);}
+#odoomodal .od-row.hd > *{font-size:10px;}
 #odoomodal .od-row .des{font:11px/1.4 Consolas,ui-monospace,monospace; color:var(--fg,#d8d8d8);
   overflow:hidden; text-overflow:ellipsis;}
 #odoomodal .od-row .nm{font-size:12px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 #odoomodal .od-row .qt{font-size:12px; text-align:right; font-variant-numeric:tabular-nums;}
-#odoomodal .od-row .rs{font-size:11px; color:var(--ok,#00e676); overflow:hidden;
-  text-overflow:ellipsis; white-space:nowrap;}
+/* a resolucao virou faixa: o texto (que elipsa) mais o botao de resolver, que so aparece
+   na linha com problema. O botao mora AQUI, e nao numa coluna propria, porque uma coluna a
+   mais encolheria todas as outras em toda linha para servir a algumas. */
+#odoomodal .od-row .rs{display:flex; align-items:baseline; gap:7px; min-width:0;
+  font-size:11px; color:var(--ok,#00e676);}
+#odoomodal .od-row .rs .rst{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 #odoomodal .od-row .rs.pend{color:var(--warn,#ffd54f);}
+#odoomodal .od-row .rs .od-fix{flex:none; font-size:10px; line-height:1.5; padding:0 8px;
+  border-radius:3px; background:var(--panel2,#2d2d2d); color:var(--fg,#d8d8d8);
+  border:1px solid var(--border,#3a3a3a); cursor:pointer;}
+#odoomodal .od-row .rs .od-fix:hover{border-color:var(--accent,#4fc3f7);}
+/* a barra do que foi resolvido e ainda nao foi salvo: a lista sai do DISCO, entao ate o
+   Salvar ela nao mostra o conserto — dizer isso e o que impede o "resolvi e nao mudou" */
+#odoomodal .od-aviso.od-pend{border-left-color:var(--accent,#4fc3f7); display:flex;
+  align-items:center; gap:10px; flex-wrap:wrap;}
 #odoomodal .od-row .vl, #odoomodal .od-row .en, #odoomodal .od-row .ac{font-size:11px;
   color:var(--fg-dim,#9a9a9a); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 /* Fora dos dois almoxarifados e o que PRECISA MUDAR, e por isso e a unica coisa vermelha
@@ -63,7 +83,7 @@ const CSS = `
 /* o cabecalho nao e uma linha resolvida: nao pode herdar o verde do .rs */
 #odoomodal .od-row.hd .des, #odoomodal .od-row.hd .nm, #odoomodal .od-row.hd .vl,
 #odoomodal .od-row.hd .en, #odoomodal .od-row.hd .ac,
-#odoomodal .od-row.hd .qt, #odoomodal .od-row.hd .rs{color:inherit; font:inherit;}
+#odoomodal .od-row.hd .qt, #odoomodal .od-row.hd .rs{color:inherit; font:inherit; font-size:10px;}
 #odoomodal .od-foot{display:flex; align-items:center; gap:9px; padding:10px 13px;
   border-top:1px solid var(--border,#3a3a3a); background:var(--panel2,#2d2d2d);}
 #odoomodal .od-foot .est{flex:1; font-size:11px; color:var(--fg-dim,#9a9a9a);
@@ -102,6 +122,7 @@ async function chama(rota, corpo){
 /* ------------------------------- estado da tela ------------------------------- */
 
 const ST = {
+  previa: null, aplicados: [],
   aberto: false, rodando: false,
   conferido: null,      /* o payload que o SERVIDOR montou no ultimo ensaio */
   reciboLocal: null,    /* o ultimo envio, lido de Projects/<p>/odoo-lista.json */
@@ -156,8 +177,17 @@ function pintaLista(payload, recibo){
   for (const ln of (payload && payload.linhas) || []){
     const r = resolucaoDe(ln, porDes.get(ln.designadores));
     const row = el('div', 'od-row');
-    const rs = el('span', 'rs' + (r.pend ? ' pend' : ''), r.txt);
-    rs.title = r.txt;
+    const rs = el('span', 'rs' + (r.pend ? ' pend' : ''));
+    const rst = el('span', 'rst', r.txt); rst.title = r.txt;
+    rs.append(rst);
+    /* so na linha com problema, e so quando esta vista sabe abrir o seletor: o painel roda
+       dentro do schframe, mas a lista vem do disco e pode citar componente de outra folha */
+    if (r.pend && typeof window.__hubResolveParaLista === 'function'){
+      const b = el('button', 'od-fix', 'resolver');
+      b.title = 'escolher o componente do almoxarifado para ' + ln.designadores;
+      b.onclick = () => resolveLinha(ln);
+      rs.append(b);
+    }
     const nm = el('span', 'nm', ln.nome_altium || '');
     nm.title = (ln.nome_altium || '') + (ln.footprint ? '\n' + ln.footprint : '');
     /* Valor e encapsulamento saem em toda linha, inclusive nas que nao resolveram: sao
@@ -196,6 +226,77 @@ function descRecibo(r){
   return (r.referencia || '(sem referência)') + ' · ' + (r.estado || '?')
        + (r.revisao ? ' · rev ' + r.revisao : '')
        + (r.enviado_em ? ' · ' + r.enviado_em : '');
+}
+
+/* ------------------------------- a previa (sem Odoo) ------------------------------- */
+
+/* A lista sai do esquema salvo e do espelho do almoxarifado — sem rede, sem credencial e
+   sem espera. E a resposta para "o que eu vou mandar?", que a tela tem de ter ANTES de
+   qualquer round-trip. O Conferir continua existindo para a outra pergunta, "e o que o Odoo
+   diz disto?", e essa sim justifica esperar. */
+async function previa(){
+  estadoTxt('montando a lista do esquema salvo…');
+  const j = await chama('/api/lista/previa', corpo());
+  if (!j.ok){
+    ST.previa = null;
+    pintaLista(null, null);
+    estadoTxt('');
+    $('odooLista').prepend(el('div', 'od-aviso err', j.error || 'não deu para montar a lista'));
+    return;
+  }
+  /* a revisao do palpite so entra em campo VAZIO: o que o projetista digitou manda */
+  if (!$('odooRev').value.trim() && j.revisaoUsada) $('odooRev').value = j.revisaoUsada;
+  ST.previa = j.payload;
+  ST.conferido = null;
+  ST.aplicados = [];
+  $('odooEnviar').disabled = true;
+  pintaLista(j.payload, null);
+  estadoTxt('lista montada aqui — Conferir pergunta ao Odoo antes de enviar');
+}
+
+/* Resolver uma linha e escolher o componente do almoxarifado para os designadores dela. O
+   seletor e o MESMO da vista Esquema; quem grava e a ponte __hubAplicaVinculos, a mesma do
+   painel da BoM — sym, comment e params (com OdooId) de uma vez, pela mesma funcao. */
+function resolveLinha(ln){
+  const refs = String(ln.designadores || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (!refs.length) return;
+  const modal = $('odoomodal');
+  modal.classList.remove('on');            // o seletor tem z-index menor que este painel
+  const volta = () => { if (ST.aberto) modal.classList.add('on'); };
+  const ok = window.__hubResolveParaLista(refs, info => {
+    ST.aplicados.push(info);
+    ST.conferido = null;
+    $('odooEnviar').disabled = true;
+    pintaPendentes();
+  }, volta);
+  if (!ok){
+    volta();
+    HubDialog.toast(refs.join(', ') + ' não está na folha aberta — abra a folha em que ele mora '
+      + 'para poder resolver por aqui', 'warn', 7000);
+  }
+}
+
+/* O conserto existe no esquema em memoria, e a lista vem do DISCO: enquanto nao salvar, a
+   tela continua mostrando o problema. Dizer isso na cara e o que evita o "resolvi tres e
+   nada mudou" — e o botao faz as duas coisas numa tacada. */
+function pintaPendentes(){
+  if (!ST.aplicados.length) return;
+  let bar = $('odooPend');
+  if (!bar){ bar = el('div', 'od-aviso od-pend'); bar.id = 'odooPend'; $('odooLista').prepend(bar); }
+  bar.textContent = '';
+  const quantos = ST.aplicados.length;
+  bar.append(el('span', null, quantos + (quantos === 1 ? ' vínculo aplicado' : ' vínculos aplicados')
+    + ' no esquema, ainda sem salvar. A lista é montada do arquivo salvo.'));
+  const b = el('button', null, 'Salvar e atualizar a lista');
+  b.onclick = async () => {
+    b.disabled = true;
+    const ok = await garanteSalvo();
+    b.disabled = false;
+    if (!ok) return;
+    ST.aplicados = [];
+    await previa();
+  };
+  bar.append(b);
 }
 
 /* ------------------------------- as duas acoes ------------------------------- */
@@ -357,11 +458,12 @@ async function abre(){
   estadoTxt(ST.reciboLocal ? 'último envio: ' + descRecibo(ST.reciboLocal)
                            : 'nenhum envio deste projeto ainda');
   pintaLista(null, null);
-  $('odooLista').prepend(el('div', 'od-aviso',
-    'Clique em Conferir: o Odoo resolve as linhas e diz o que resolveria, sem gravar nada.'));
 
   ST.aberto = true;
   $('odoomodal').classList.add('on');
+  /* depois de abrir, nao antes: a tela aparece na hora e a lista chega em seguida, em vez
+     de a janela ficar esperando para nascer pronta */
+  await previa();
   $('odooRev').focus();
   $('odooRev').select();
 }

@@ -1926,7 +1926,7 @@ $('tbNet').addEventListener('click', () => {
    0805 100nF servem igual), e escolher sozinho gravaria um esquema silenciosamente errado.
    A escolha vira linha em Libs/lib-subs.js — o mesmo lugar onde a aba Biblioteca grava as
    dela — e dali em diante o resolveLib acerta ja no primeiro passo. */
-let symAlvo = null, symEscolhido = null, symCands = [];
+let symAlvo = null, symEscolhido = null, symCands = [], symOpts = null;
 /* a lista do modal e o ALMOXARIFADO, agrupado por familia, e so ele: a biblioteca da
    casa fica de fora por pedido explicito — a tela e ferramenta de migracao, e oferecer
    a lib antiga seria oferecer justo o que se quer parar de usar. O painel mora no
@@ -1944,8 +1944,14 @@ const symModalAberto = () => $('symmodal').classList.contains('on');
 
 function fechaSymModal(){
   $('symmodal').classList.remove('on');
+  /* o aviso de fechamento sai ANTES do reset, e vale tambem para quem cancelou: o painel
+     que abriu este modal se escondeu para nao ficar por cima dele (z-index 60 contra 50) e
+     precisa voltar de qualquer jeito, senao um Esc deixa a tela vazia */
+  const aoFechar = symOpts && symOpts.aoFechar;
   symAlvo = null; symEscolhido = null; symCands = []; symPart = null; apFam = null; apRec = null;
+  symOpts = null;
   symQuantos = 0; symEsperados = null;
+  if (typeof aoFechar === 'function') aoFechar();
 }
 
 /* quantos componentes DESTE projeto usam o mesmo nome de simbolo: e o tamanho do estrago
@@ -2148,7 +2154,11 @@ function candidatoDoValor(nome){
   return item ? { name: nome, item, pontos: 0, porque: [] } : null;
 }
 
-function abrirEscolhaSimbolo(comp){
+/* `opts.vinculo` muda o que o botao Usar faz — ver usarSimboloEscolhido. O modal, a busca,
+   a previa e a conferencia de pinagem sao os mesmos: quem escolhe componente do almoxarifado
+   ja tem tela, e uma segunda seria outra tela para manter. */
+function abrirEscolhaSimbolo(comp, opts){
+  symOpts = opts || null;
   symAlvo = comp;
   symCands = HubCore.suggestSym(comp, SLIB.symbols, { limit: 12 });
   apGrupos = HubAlmoxPick.grupos();
@@ -2273,7 +2283,28 @@ async function usarSimboloEscolhido(){
   const de = symAlvo.sym, para = symEscolhido.name;
   /* medido ANTES da substituicao: depois dela o simbolo resolve e o emprestimo some */
   const emg = HubCore.symbolOf(SLIB, de) ? null : desenhoDeEmergencia(symAlvo);
-  if (de === para){ HubDialog.toast('já é esse componente', 'warn'); return; }
+  if (de === para && !(symOpts && symOpts.vinculo)){ HubDialog.toast('já é esse componente', 'warn'); return; }
+
+  /* MODO VINCULO — o painel "Enviar para o Odoo" abriu este modal para resolver UMA linha
+     da lista. O que resolve uma linha NAO e substituicao de simbolo: o lib-subs.js vale
+     para a folha inteira, nao grava OdooId, e o odoolista resolve por OdooId nos params.
+     Entao aqui vai o VINCULO, pelo mesmo caminho que o painel da BoM usa — sym, comment e
+     params de uma vez so, pela mesma funcao, para nao existirem dois formatos de params. */
+  if (symOpts && symOpts.vinculo){
+    const refs = (symOpts.refs && symOpts.refs.length) ? symOpts.refs : [symAlvo.ref];
+    const res = window.__hubAplicaVinculos([{ refs: refs, componente: para }]);
+    if (!res || !res.ok){
+      await HubDialog.alert((res && res.erro) || 'não deu para aplicar o vínculo.',
+                            { title: 'não apliquei' });
+      return;
+    }
+    const aoAplicar = symOpts.aoAplicar;
+    fechaSymModal();
+    HubDialog.toast(refs.join(', ') + ' → "' + para + '" — Ctrl+Z desfaz, e só o Salvar grava.', 'ok');
+    for (const rc of (res.recusados || [])) HubDialog.toast('recusado: ' + rc.porque, 'warn', 9000);
+    if (typeof aoAplicar === 'function') aoAplicar({ refs: refs, componente: para, res: res });
+    return;
+  }
   if (!HubIO.canPost){
     await HubDialog.alert('Sem servidor: abra o hub por hubserver.py para gravar a escolha.',
                           { title: 'não dá para gravar' });
@@ -2553,6 +2584,22 @@ window.__hubDirty = function(){ return schDirty; };
    Recusa ANTES de tocar no modelo, nunca no meio: sym que nenhum acervo resolve viraria
    quadrado vermelho sem nada reclamar (o serializeSchematic so exige string nao vazia), e a
    sequencia aspas-dois-pontos em qualquer campo derruba a gravacao do arquivo INTEIRO. */
+/* Ponte para o painel "Enviar para o Odoo": abrir o seletor de componente do almoxarifado
+   para um designador da lista e, na confirmacao, gravar o vinculo no esquema. Devolve false
+   quando o designador nao esta nesta folha — a lista vem do DISCO e pode citar componente
+   que a vista aberta nao tem. */
+window.__hubResolveParaLista = function(refs, aoAplicar, aoFechar){
+  const lista = Array.isArray(refs) ? refs : [refs];
+  let alvo = null;
+  for (const s of model.sheets)
+    for (const c of s.comps)
+      if (!alvo && lista.indexOf(c.ref) >= 0) alvo = c;
+  if (!alvo) return false;
+  abrirEscolhaSimbolo(alvo, { vinculo: true, refs: lista, aoAplicar: aoAplicar,
+                              aoFechar: aoFechar });
+  return true;
+};
+
 window.__hubAplicaVinculos = function(vinculos){
   const lista = Array.isArray(vinculos) ? vinculos : [];
   if (!lista.length) return { ok:false, erro:'nada para aplicar' };

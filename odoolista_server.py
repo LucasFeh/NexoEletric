@@ -207,6 +207,35 @@ def recibo():
             'revisaoSugerida': (r or {}).get('revisao') or OL.parse_revisao(nome)}
 
 
+@bp.route('/previa', methods=['POST'])
+def previa():
+    """A lista como o HUB a monta, sem falar com o Odoo.
+
+    O `/ensaio` faz duas coisas e so a segunda precisa de rede, de credencial e de espera:
+    montar a lista e perguntar ao Odoo o que ele acha dela. Separadas, a tela abre ja com a
+    lista na mao — o projetista ve o que vai mandar antes de qualquer round-trip — e o
+    Conferir passa a responder uma pergunta so, que e quando a espera se justifica.
+
+    A revisao aqui e opcional: ela nao muda nenhuma linha, so o `uid_externo`, e nada e
+    enviado. Sem ela, vale o palpite do nome da pasta (`parse_revisao`), devolvido a parte
+    para a tela poder preencher o campo — SUGERIR, nunca decidir: quem digita a revisao e o
+    projetista, e o `/envio` continua exigindo uma de verdade.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return {'ok': False, 'error': 'JSON obrigatorio'}, 400
+    nome = str(data.get('projeto') or '').strip()
+    if not _pasta(nome):
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    sugerida = OL.norm_rev(OL.parse_revisao(nome))
+    rev = OL.norm_rev(data.get('revisao')) or sugerida
+    payload, erro, status = _prepara(dict(data, revisao=rev or 'X'))
+    if erro:
+        return {'ok': False, 'error': erro}, status
+    return {'ok': True, 'payload': payload, 'uid_externo': payload['uid_externo'],
+            'revisaoSugerida': sugerida, 'revisaoUsada': rev}
+
+
 @bp.route('/ensaio', methods=['POST'])
 def ensaio():
     """di_confere_lista: resolve as linhas e diz o que resolveria. NAO grava em lugar nenhum.
