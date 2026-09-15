@@ -167,14 +167,30 @@
   .netitem.sel{background:#0d47a1; color:#fff;}
   .valitem.err{border-left-color:var(--err);}
   .valitem.warn{border-left-color:var(--warn);}
-  .annitem{padding:3px 6px; margin:2px 0; border-radius:3px; background:var(--panel2);
-    cursor:pointer; font-size:11px; border-left:3px solid transparent;}
-  .annitem.err{border-left-color:var(--err);}
-  .annitem.warn{border-left-color:var(--warn);}
-  .annitem.info{border-left-color:var(--accent);}
-  .annitem.resolved{opacity:.5;}
-  .annitem .annx{float:right; color:var(--fg-dim); padding:0 4px; cursor:pointer;}
-  .annitem .annx:hover{color:var(--err);}
+  /* ── a lista de folhas ────────────────────────────────────────────────────
+     Uma LINHA por folha, empilhando para baixo: a miniatura faz as vezes de ICONE e o nome
+     vem ao lado. Substituiu o <select> da secao Folha, que dizia o nome e mais nada — em
+     projeto de duas folhas so dava para saber qual era qual trocando e olhando. O desenho do
+     icone e o mesmo do canvas grande (schframe.js » desenhaMiniatura), so sem grade, sem
+     selecao e sem net em foco.
+     Os tokens sao os do :root DESTA vista — o .symed-tile do hub veste --surface/--edge/--hi,
+     que aqui so existem dentro do #addmodal/#symmodal e sairiam sem fundo nem borda. */
+  #sheetcards{display:flex; flex-direction:column; gap:4px;}
+  .sheetcard{display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+    padding:4px; background:var(--panel2); border:1px solid var(--border);
+    border-radius:3px; cursor:pointer;}
+  .sheetcard:hover{border-color:var(--accent);}
+  .sheetcard.on{background:#0d47a1; border-color:#1565c0;}
+  /* o aspecto e o da folha A4 do Altium (11693x8268 = 1.41); o desenho se encaixa dentro
+     dele sozinho, entao folha de outra proporcao sobra moldura em vez de distorcer */
+  .sheetcard canvas{flex:none; width:54px; aspect-ratio:1.41; display:block;
+    border-radius:2px; background:#3a3a34;}
+  .sheetcard .txt{flex:1; min-width:0;}     /* min-width:0 e o que deixa o ellipsis funcionar dentro do flex */
+  .sheetcard .nm{display:block; font-size:11px; color:var(--fg);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .sheetcard .k{display:block; font-size:10px; color:var(--fg-dim);}
+  .sheetcard.on .nm{color:#fff;}
+  .sheetcard.on .k{color:#cfe3ff;}
 
   /* configurações: icones de vista, edicao e arquivo */
   .cfg .row{display:flex; gap:6px; align-items:center; flex-wrap:wrap;}
@@ -183,8 +199,9 @@
   .ibtn svg{width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;}
   .wide{width:100%; text-align:left; padding:6px 10px; display:flex; align-items:center; gap:8px; margin-top:6px;}
   .wide:first-child{margin-top:0;}
-  .wide .n{margin-left:auto; color:var(--fg-dim); font-size:11px;}
-  .wide.active .n{color:#cfe0ff;}
+  /* o `.wide .n` que vestia o contador do carrinho saiu daqui junto com o proprio contador:
+     o #addBtnN mudou para a barra flutuante e la usa a .lb, que e o rotulo daquela barra.
+     Nenhum .wide que sobrou (#btnSave, e os botoes da ficha) tem filho .n. */
   /* acao secundaria da ficha (trocar um simbolo que JA resolveu, desfazer a escolha): fica
      a mao sem gritar — quem esta vendo o desenho certo nao precisa de um botao em destaque */
   .wide.sutil{background:transparent; color:var(--fg-dim); font-size:11px; padding:4px 10px;}
@@ -198,10 +215,6 @@
     background:var(--panel); border-top:1px solid var(--border);
     font:12px Consolas,monospace; color:var(--fg-dim);}
   #status b{color:var(--fg); font-weight:normal;}
-  /* o modo fica sempre a vista, independente da sub-aba aberta: e ele que explica por que
-     um arrasto nao moveu nada */
-  #smode{padding:1px 7px; border-radius:3px; background:var(--panel2); color:var(--fg-dim);}
-  #smode.edit{background:#0d47a1; color:#fff;}
   #fatal{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     color:var(--err); font-size:14px; text-align:center; padding:30px; background:var(--bg); z-index:5;}
 
@@ -392,14 +405,14 @@
         <table id="comptable"><thead><tr><th>Ref</th><th>Componente</th><th>Footprint</th><th>Comment</th></tr></thead><tbody></tbody></table>
       </div>
       <div class="sec"><h2>Nets (<span id="netcount">0</span>)</h2><div id="netlist"></div></div>
-      <div class="sec"><h2>Sinalizadores (<span id="anncount">0</span>)</h2><div id="annlist"></div></div>
       <div class="sec"><h2>Validação</h2><div id="vallist"></div></div>
     </div>
 
     <div class="pane cfg" id="pane-cfg">
       <div class="sec">
         <h2>Folha</h2>
-        <select id="sheetsel"></select>
+        <!-- um cartao por folha, com a miniatura dela; o clique troca a folha ativa -->
+        <div id="sheetcards"></div>
         <div class="meta" id="meta" style="margin-top:6px;"></div>
       </div>
       <div class="sec">
@@ -413,24 +426,21 @@
             <svg viewBox="0 0 16 16"><path d="M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z"/><circle cx="8" cy="8" r="2.2"/><path d="M2.5 13.5 L13.5 2.5"/></svg></button>
           <button class="ibtn active" id="btnPinNames" aria-pressed="true" title="Nomes e numeros de pino visiveis — clique para obedecer o simbolo">
             <svg viewBox="0 0 16 16"><path d="M1 8h4.5"/><path d="M7.5 5h7M7.5 8h7M7.5 11h4.5"/></svg></button>
-          <button class="ibtn" id="btnEdit" title="Editar: mover componentes e fios (E)">
-            <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
-          <span class="hint" id="edithint" style="margin:0 0 0 4px; flex:1;"></span>
         </div>
       </div>
       <div class="sec">
         <h2>Edição</h2>
-        <button class="wide" id="btnAdd" title="Escolher componentes das bibliotecas e jogar no esquema (C)">
-          <span>+ Adicionar componentes</span><span class="n" id="addBtnN"></span></button>
-        <button class="wide" id="btnAnn" title="Sinalizar um problema para a IA (N)"><span>⚑ Sinalizar</span></button>
+        <!-- A folha e sempre editavel: nao ha mais lapis para destravar. O "+ Adicionar
+             componentes" mudou para a barra flutuante sobre o esquema, junto das outras
+             coisas que a mao faz aqui; o que sobra nesta secao e o gesto. -->
         <div class="hint">Clique seleciona, arraste move; arraste no vazio para selecionar vários.
           <kbd>Shift</kbd> soma à seleção, <kbd>Del</kbd> apaga, <kbd>Espaço</kbd> gira, <kbd>X</kbd> espelha,
           <kbd>Ctrl+Z</kbd> desfaz. Botão direito arrasta a tela.
-          <kbd>W</kbd> fio, <kbd>G</kbd> terra, <kbd>L</kbd> rótulo de net.</div>
+          <kbd>C</kbd> adiciona componentes, <kbd>W</kbd> fio, <kbd>G</kbd> terra, <kbd>L</kbd> rótulo de net.</div>
       </div>
       <div class="sec">
         <h2>Arquivo</h2>
-        <button class="wide" id="btnSave" title="Grava schematic.js e annotations.js (o que estiver alterado)">
+        <button class="wide" id="btnSave" title="Grava o schematic.js">
           <span id="btnSaveLbl">Salvar</span></button>
         <div class="hint" id="savehint"></div>
       </div>
@@ -465,25 +475,19 @@
       <span class="sep"></span>
       <button id="tbNoErc" aria-pressed="false" title="No ERC — marca um pino como sem ligação DE PROPÓSITO; o X viaja para o Altium como a diretiva No ERC">
         <svg viewBox="0 0 24 24" stroke="#cc0000"><path d="M6 6l12 12M18 6L6 18"/></svg><span class="lb">No ERC</span></button>
-    </div>
-    <div id="annform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
-         background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
-      <textarea id="anntext" rows="2" placeholder="problema (ex: trilha muito proxima)"
-        style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-               border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px; resize:vertical;"></textarea>
-      <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
-        <select id="annsev" style="background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px;">
-          <option value="err">vermelho (erro)</option>
-          <option value="warn">amarelo (atenção)</option>
-          <option value="info">azul (nota)</option>
-        </select>
-        <span style="flex:1"></span>
-        <button id="annok">OK</button>
-        <button id="anncancel">Cancelar</button>
-      </div>
+      <span class="sep"></span>
+      <!-- AÇÃO, não ferramenta: abre o modal e não entra na máquina do setTool. Sem
+           aria-pressed de propósito — o CSS de ativo da barra é por atributo e ninguém
+           repintaria este, que nunca fica "ligado" — e sem class="pw", que o setTool varre
+           para pintar as alimentações e cujo listener leria um data-net inexistente.
+           O #addBtnN é o contador do carrinho (quantas peças esperam o Finalizar); ele usa
+           a .lb da própria barra porque o .n só tem estilo dentro de um .wide. -->
+      <button id="btnAdd" aria-label="Adicionar componentes"
+              title="Escolher componentes das bibliotecas e jogar no esquema (C)">
+        <svg viewBox="0 0 24 24"><rect x="3" y="7" width="10" height="10" rx="1"/><path d="M3 10H1M3 14H1M13 10h2M13 14h2"/><path d="M19 5v8M15 9h8"/></svg><span class="lb" id="addBtnN"></span></button>
     </div>
     <!-- a palavra do rotulo: o navegador nao pode abrir prompt() (CLAUDE.md), entao a
-         pergunta e este campo no tema da pagina, no molde do #annform ao lado -->
+         pergunta e este campo no tema da pagina -->
     <div id="netform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
          background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
       <div style="font:11px 'Segoe UI',sans-serif; color:var(--fg2); margin-bottom:5px;">
@@ -517,7 +521,6 @@
   </aside>
 </div>
 <div id="status">
-  <span id="smode" title="E alterna entre leitura e edição; o lápis fica em Configurações"></span>
   <span>X: <b id="sx">—</b> Y: <b id="sy">—</b> mil</span>
   <span id="shover"></span>
   <span id="ssel"></span>
@@ -641,7 +644,8 @@
 <script>
   var SCH_P = new URLSearchParams(location.search).get('p') || '_DemoKit';
   document.write('<script src="Projects/' + SCH_P + '/schematic.js"><\/script>');
-  document.write('<script src="Projects/' + SCH_P + '/annotations.js"><\/script>');
+  /* o annotations.js saiu daqui com o sinalizador: o arquivo continua no projeto e quem o
+     le e escreve agora e so a vista PCB */
 </script>
 <script src="hub-io.js"></script>
 <!-- modal e notificacao no tema da pagina: nada de alert()/confirm() do navegador -->
@@ -651,5 +655,7 @@
 <script src="schframe.js"></script>
 <!-- "Enviar para o Odoo": injeta o proprio botao, CSS e modal (nada mais aqui) -->
 <script src="hub-odoolista.js"></script>
+<!-- o caminho de volta: a lista de materiais do Odoo vinculada aos componentes da folha -->
+<script src="hub-odoobom.js"></script>
 </body>
 </html>

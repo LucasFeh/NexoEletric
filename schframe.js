@@ -340,17 +340,20 @@ const VER_PINOS_KEY = 'altiumhub.sch.pinos';
 const showState = { grid:true, comment:false, pinos:true };
 try { showState.comment = localStorage.getItem(VER_COMMENT_KEY) === '1'; } catch (e) {}
 try { showState.pinos = localStorage.getItem(VER_PINOS_KEY) !== '0'; } catch (e) {}
-const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
-  ? annotations.map(a => ({ ...a })) : [];
-const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
-let annTool = false, annDirty = false, annPending = null, staleWorkspace = false;
+/* `staleWorkspace` morava na linha do sinalizador, mas e do SALVAMENTO do esquema: o
+   __hubOnChange o levanta quando o disco muda por baixo, e o saveSchematic pergunta antes
+   de sobrescrever. */
+let staleWorkspace = false;
 
-/* ------- travamento de edicao -------
-   Abre em LEITURA; editar exige o lapis. Igual ao pcbframe: o bloqueio fica nos pontos de
-   ENTRADA (arrasto, modal, Delete, teclado), nunca no commit — nada chega a ser mexido na
-   tela para depois ser recusado. Editar aqui e MOVER: componentes, fios e o resto do que
-   esta na folha. Fio, label, power e texto novos quem escreve e a IA, no schematic.js. */
-let editOn = false;
+/* ------- a folha e SEMPRE editavel -------
+   Havia aqui um lapis: a vista abria em LEITURA e mexer exigia destravar. Saiu a pedido do
+   usuario (2026-09-14) — quem abre o esquema no hub abre para mexer nele, e um modo a menos
+   e um modo a menos para explicar. Editar aqui e MOVER: componentes, fios e o resto do que
+   esta na folha. Fio, label, power e texto novos quem escreve e a IA, no schematic.js.
+
+   O SINALIZADOR saiu junto, e da vista Esquema inteira: o `annotations.js` continua
+   existindo e quem o escreve agora e so a vista PCB. Sinalizador 'sch' que ja esteja no
+   disco fica no arquivo, intocado, e some da tela. */
 
 /* ------- selecao -------
    `sel` guarda os proprios objetos de schematic.items (comp, wire, netlabel, power,
@@ -378,19 +381,23 @@ function reapply(){
      apontando para uma net que sumiu e cor sem dono na tela */
   if (selNet && !nets.nets.some(n => n.name === selNet)) selNet = '';
   buildCompTable(); buildNetList(); buildValList(); updateMeta(); updateSelStatus(); renderProps();
+  /* O cartao da folha mostra a folha COMO ELA ESTA, e este e o unico funil por onde passam
+     commit, undo, redo, recarga de biblioteca e troca de simbolo. Repintar aqui e o que
+     separa "miniatura" de "foto do carregamento". */
+  renderSheetCards();
   cam.draw();
 }
-/* um Salvar so: grava o que estiver alterado, esquema e/ou sinalizadores */
+/* O Salvar grava o schematic.js. Ele gravava tambem o annotations.js; com o sinalizador
+   fora da vista Esquema sobrou um arquivo so, e o `#savehint` deixou de precisar dizer
+   QUAL dos dois esta pendente. O id #btnSave nao muda: o hub-odoolista.js o clica por id
+   antes de montar a lista para o Odoo. */
 function updateSaveBtn(){
-  const d = schDirty || annDirty;
+  const d = schDirty;
   $('btnSave').classList.toggle('active', d);
   $('btnSaveLbl').textContent = d ? 'Salvar *' : 'Salvar';
-  $('savehint').textContent = d
-    ? 'alterado: ' + [schDirty && 'esquema', annDirty && 'sinalizadores'].filter(Boolean).join(' e ')
-    : 'nada pendente';
+  $('savehint').textContent = d ? 'alterado: esquema' : 'nada pendente';
 }
 function setSchDirty(v){ schDirty = v; updateSaveBtn(); }
-function setAnnDirty(v){ annDirty = v; updateSaveBtn(); }
 function commit(){
   undoStack.push(JSON.stringify(schematic.items));
   if (undoStack.length > 60) undoStack.shift();
@@ -410,8 +417,8 @@ function undo(){ if (undoStack.length < 2) return; redoStack.push(undoStack.pop(
 function redo(){ if (!redoStack.length) return; const s = redoStack.pop(); undoStack.push(s); restoreItems(s); }
 
 /* ------- geometria da selecao ------- */
-function sheetItems(){
-  const s = model.sheets[sheetIdx];
+function sheetItems(si){
+  const s = model.sheets[si === undefined ? sheetIdx : si];
   return [].concat(s.comps, s.wires, s.netlabels, s.powers, s.ports, s.junctions, s.noercs, s.texts);
 }
 const onSheet = it => it.sheet === model.sheets[sheetIdx].name;
@@ -692,12 +699,6 @@ function placeLabel(w){
   commit();
 }
 function setTool(t, pw){
-  /* pegar uma ferramenta E dizer que se quer editar: obrigar a achar o lapis antes seria
-     um passo a toa, e o gesto ja e deliberado */
-  if (t !== 'select'){
-    if (!editOn) setEdit(true);
-    if (annTool) setAnnTool(false);
-  }
   tool = t; toolPower = pw || null; wireDraw = null; snapHit = null;
   if (t !== 'label') toolNet = '';
   $('tbSel').setAttribute('aria-pressed', String(t === 'select'));
@@ -706,7 +707,7 @@ function setTool(t, pw){
   $('tbNoErc').setAttribute('aria-pressed', String(t === 'noerc'));
   for (const b of document.querySelectorAll('#schtb .pw'))
     b.setAttribute('aria-pressed', String(t === 'power' && !!pw && b.dataset.net === pw.net));
-  cv.style.cursor = t !== 'select' ? 'crosshair' : (annTool ? 'copy' : 'default');
+  cv.style.cursor = t !== 'select' ? 'crosshair' : 'default';
   cam.draw();
 }
 $('tbSel').addEventListener('click', () => setTool('select'));
@@ -850,7 +851,7 @@ window.addEventListener('mousemove', e => {
 });
 window.addEventListener('mouseup', e => {
   if (e.button === 0){ leftUp(e); return; }
-  cv.style.cursor = annTool ? 'copy' : 'default';
+  cv.style.cursor = 'default';
   if (e.button !== 2) panning = false;      /* o direito espera o contextmenu para zerar */
 });
 window.addEventListener('blur', () => {
@@ -864,7 +865,7 @@ function leftDown(e){
   swallowClick = false;
   lastDown = null;        /* o click deste gesto so pode ver o que ESTE mousedown acertou */
   /* com uma ferramenta na mao o esquerdo nao seleciona nem arrasta: ele coloca */
-  if (annTool || tool !== 'select'){ mouse = { mode:'none', start:w, moved:false }; return; }
+  if (tool !== 'select'){ mouse = { mode:'none', start:w, moved:false }; return; }
   const h = hitTest(w.x, w.y);
   if (!h){
     mouse = { mode:'box', start:w, moved:false, shift:e.shiftKey };
@@ -874,12 +875,11 @@ function leftDown(e){
   const it = h.item, wasSel = sel.has(it);
   if (!wasSel){ if (!e.shiftKey) sel.clear(); sel.add(it); }
   lastDown = { item:it, wasSel };
-  /* em leitura o clique so marca; e no modo edicao que o mesmo gesto vira arrasto */
-  const base = editOn ? baseOf(sel) : null;
+  const base = baseOf(sel);
   /* o ima e montado aqui, e nao no primeiro movimento: a folha parada e a mesma o gesto
      inteiro, e varrer os pinos de 200 componentes a cada quadro engasgaria o arrasto */
-  mouse = { mode: editOn ? 'move' : 'none', start:w, moved:false, base,
-            ima: base ? { alvos: alvosDeIma(base), pinos: pinosDoArrasto(base) } : null };
+  mouse = { mode:'move', start:w, moved:false, base,
+            ima: { alvos: alvosDeIma(base), pinos: pinosDoArrasto(base) } };
   moveIma = null;
   /* a net entra em foco AQUI, e nao no click: todo arrasto engole o click (swallowClick), e
      a net anterior ficava acesa por cima de uma selecao que ja era outra */
@@ -904,11 +904,10 @@ function leftMove(e){
     desenhaNoQuadro();
   }
   else if (d.mode === 'box'){ boxRect = { x1:d.start.x, y1:d.start.y, x2:w.x, y2:w.y }; desenhaNoQuadro(); }
-  else if (!editOn && !d.avisou){
-    /* arrastar travado nao pode ser silencio: e a diferenca entre "nao funciona" e "esta em leitura" */
-    d.avisou = true;
-    HubDialog.toast('Só leitura — tecle E ou clique no lápis (Configurações) para mover.', 'warn');
-  }
+  /* O terceiro modo, 'none', e o arrasto com uma FERRAMENTA na mao: nao move nada, e e
+     assim que tem de ser. Havia aqui um toast "Só leitura" pendurado nesse mesmo ramo — ele
+     ja disparava indevidamente com a ferramenta na mao, e com o lapis fora nao teria mais o
+     que dizer. */
 }
 function leftUp(e){
   const d = mouse; if (!d) return;
@@ -946,7 +945,6 @@ function leftUp(e){
 function leftClick(e){
   if (swallowClick){ swallowClick = false; return; }
   const w = worldOf(e);
-  if (annTool){ openAnnForm(w); return; }
   if (tool === 'wire'){ wireClick(w); return; }
   if (tool === 'power'){ placePower(w); return; }
   if (tool === 'label'){ placeLabel(w); return; }
@@ -964,28 +962,6 @@ function leftClick(e){
 /* duplo clique com o fio na mao encerra o traçado (o Altium faz igual); no resto, nada:
    a ficha da direita e so de leitura, e quem edita propriedade e a IA no schematic.js */
 cv.addEventListener('dblclick', () => { if (wireDraw) endWire(); });
-
-/* liga/desliga o modo edicao e reflete o estado em tudo que edita */
-function setEdit(v){
-  editOn = !!v;
-  if (!editOn){
-    if (annTool) setAnnTool(false);
-    if (tool !== 'select') setTool('select');
-    if (mouse && mouse.mode === 'move'){ applyMove(mouse.base, 0, 0); mouse = null; }
-    closeAdd();
-  }
-  const b = $('btnEdit');
-  b.classList.toggle('active', editOn);
-  b.title = editOn ? 'Editando — clique para voltar à leitura (E)' : 'Editar: mover componentes e fios (E)';
-  $('edithint').textContent = editOn ? 'editando: arraste o que estiver selecionado' : 'só leitura — o lápis destrava';
-  const sm = $('smode');
-  sm.textContent = editOn ? 'editando' : 'leitura · E edita';
-  sm.classList.toggle('edit', editOn);
-  /* o Salvar fica de fora de proposito: a trava e para NAO deixar alterar, e travar de
-     volta com alteracoes pendentes nao pode impedir de grava-las. */
-  $('btnAdd').disabled = $('btnAnn').disabled = !editOn;
-  cam.draw();
-}
 
 /* ------- adicionar componentes (modal) -------
    E a aba Biblioteca do hub com uma troca: a ficha da direita virou a LISTA do que vai
@@ -1242,7 +1218,6 @@ function renderAddPreview(){
   requestAnimationFrame(refitPreviews);
 }
 function openAdd(){
-  if (!editOn) return;
   buildAddSrc();
   $('addmodal').classList.add('on');
   buildAddList(); renderAddPreview(); cartRender();
@@ -1305,7 +1280,7 @@ function cartRender(){
 /* joga a lista inteira na folha, em grade, a partir de um canto livre, e deixa tudo
    selecionado: o proximo gesto natural e arrastar para o lugar */
 function finalizar(){
-  if (!editOn || !cart.length) return;
+  if (!cart.length) return;
   const folha = model.sheets[sheetIdx];
   const usados = folha.comps || [];
   /* comeca abaixo do que ja existe, para nao cair em cima do circuito */
@@ -1601,7 +1576,6 @@ function renderProps(){
 
 /* ------- salvar ------- */
 const SCH_REL = 'Projects/' + SCH_P + '/schematic.js';
-const ANN_REL = 'Projects/' + SCH_P + '/annotations.js';
 (async () => { if (HubIO.canPost) try { schDiskSnapshot = await HubIO.fetchText(SCH_REL); } catch (e) {} })();
 
 /* as perguntas de seguranca dos dois escritores viram modal; o resultado, notificacao */
@@ -1630,21 +1604,13 @@ async function saveSchematic(){
     return r.mode === 'server' ? { m:'schematic.js salvo', k:'ok' } : { m:'arquivo baixado — substitua ' + SCH_REL, k:'warn' };
   } catch (err) { await falhaSalvar(err, 'schematic.js', out.text); return null; }
 }
-async function saveAnnotations(){
-  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o annotations.js do disco. Continuar?', SOBRESCREVER))) return null;
-  const out = HubCore.serializeAnnotations(ANN);
-  if (!out.text){ await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Sinalizadores inválidos' }); return null; }
-  try {
-    const r = await HubIO.saveFile(ANN_REL, out.text);
-    setAnnDirty(false);
-    staleWorkspace = false;
-    return r.mode === 'server' ? { m:'sinalizadores salvos', k:'ok' } : { m:'arquivo baixado — substitua ' + ANN_REL, k:'warn' };
-  } catch (err) { await falhaSalvar(err, 'annotations.js', out.text); return null; }
-}
-/* grava o que estiver alterado; sem nada pendente, grava o esquema (o que o botao antigo fazia) */
+/* O Salvar grava MESMO sem nada pendente, e e de proposito: ele nunca pode prender o que
+   ja foi alterado atras de uma deteccao de sujo que possa ter errado. Era o que a condicao
+   `schDirty || !annDirty` fazia quando havia dois arquivos; com um so, a condicao some e o
+   comportamento fica explicito. */
 async function saveAll(){
-  if (schDirty || !annDirty){ const r = await saveSchematic(); if (r) HubDialog.toast(r.m, r.k); }
-  if (annDirty){ const r = await saveAnnotations(); if (r) HubDialog.toast(r.m, r.k); }
+  const r = await saveSchematic();
+  if (r) HubDialog.toast(r.m, r.k);
 }
 $('btnSave').addEventListener('click', saveAll);
 
@@ -1654,8 +1620,8 @@ $('btnSave').addEventListener('click', saveAll);
    legada de 11500x7600, que e menor que o template, e o carimbo e os fios da borda ficam
    para fora. Espelho antigo continua assim ate ser reexportado: e o unico jeito honesto,
    porque a medida nao esta no arquivo para ser adivinhada. */
-function sheetBBox(){
-  const sz = HubCore.sheetSize(model.sheets[sheetIdx]);
+function sheetBBox(si){
+  const sz = HubCore.sheetSize(model.sheets[si === undefined ? sheetIdx : si]);
   return { x1:0, y1:0, x2:sz[0], y2:sz[1] };
 }
 /* O que o "encaixar na tela" enquadra: a folha MAIS o que por acaso estiver fora dela.
@@ -1663,19 +1629,32 @@ function sheetBBox(){
    Altium, mas esconder item nenhum. Em espelho antigo (sem medida, caindo na tabela) e
    justamente o carimbo e os fios da borda que ficam para fora; some tudo do enquadramento
    e a impressao e de que o esquema veio pela metade. Com a folha certa, a uniao E a folha. */
-function fitBBox(){
-  const b = sheetBBox(), u = unionBBox(sheetItems());
+function fitBBox(si){
+  const b = sheetBBox(si), u = unionBBox(sheetItems(si));
   if (!u) return b;
   return { x1:Math.min(b.x1, u.x1), y1:Math.min(b.y1, u.y1),
            x2:Math.max(b.x2, u.x2), y2:Math.max(b.y2, u.y2) };
 }
-function drawWorld(ctx, cam){
-  const s = model.sheets[sheetIdx];
-  const bb = sheetBBox();
+/* A FOLHA, DESENHADA POR INDICE. Era `drawWorld(ctx, cam)` com `sheetIdx` cravado dentro;
+   a miniatura do cartao precisa desenhar uma folha QUALQUER, entao o indice virou
+   parametro. As opcoes sao os tres estados que pertencem a folha ATIVA e nao podem vazar
+   para o cartao das outras:
+     grid   a grade de 100 mil (do olho da secao Vista)
+     foco   a net acesa (`selNet`) — com '' o ramo do laranja morre sozinho em toda parte,
+            inclusive no netEm(), que tambem le a folha ativa e so e chamado atras de `foco &&`
+     esc    a escala, que era `cam.scale`. O que depende de PIXEL (a grade e, antes, a
+            bandeirinha do sinalizador) sai dela.
+   A selecao e a ferramenta na mao NAO entram aqui: sao do canvas grande, e o drawSelection
+   filtra pela folha ativa — numa miniatura de outra folha ele desenharia as bordinhas no
+   cartao errado. */
+function desenhaFolha(ctx, si, o){
+  const s = model.sheets[si];
+  const foco = o.foco, esc = o.esc;
+  const bb = sheetBBox(si);
   ctx.fillStyle = D.SCH.sheet;
   ctx.fillRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
-  if (showState.grid && cam.scale > 0.045) {
-    ctx.strokeStyle = D.SCH.grid; ctx.lineWidth = 1/cam.scale;
+  if (o.grid && esc > 0.045) {
+    ctx.strokeStyle = D.SCH.grid; ctx.lineWidth = 1/esc;
     ctx.beginPath();
     for (let x = 0; x <= bb.x2; x += 100) { ctx.moveTo(x, 0); ctx.lineTo(x, bb.y2); }
     for (let y = 0; y <= bb.y2; y += 100) { ctx.moveTo(0, y); ctx.lineTo(bb.x2, y); }
@@ -1690,7 +1669,7 @@ function drawWorld(ctx, cam){
      PCB e como no Altium. Enquanto a selecao RECOLORIA, clicar num fio deixava o fio azul e
      os companheiros de net laranja: uma net com duas cores, que se lia como cor travada. */
   s.wires.forEach((w, wi) => {
-    const hl = selNet && nets.wireNet[sheetIdx][wi] === selNet;
+    const hl = foco && nets.wireNet[si][wi] === foco;
     ctx.strokeStyle = hl ? D.SCH.hl : D.SCH.wire;
     ctx.lineWidth = hl ? 14 : 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -1699,9 +1678,9 @@ function drawWorld(ctx, cam){
   });
   /* junctions explicitas + automaticas: sao pontos DA net, entao acendem com ela */
   for (const j of s.junctions)
-    D.drawJunction(ctx, j.x, j.y, selNet && netEm(j.x, j.y) === selNet ? D.SCH.hl : undefined);
-  for (const j of nets.autoJunctions) if (j.sheet === sheetIdx)
-    D.drawJunction(ctx, j.x, j.y, selNet && netEm(j.x, j.y) === selNet ? D.SCH.hl : undefined);
+    D.drawJunction(ctx, j.x, j.y, foco && netEm(j.x, j.y) === foco ? D.SCH.hl : undefined);
+  for (const j of nets.autoJunctions) if (j.sheet === si)
+    D.drawJunction(ctx, j.x, j.y, foco && netEm(j.x, j.y) === foco ? D.SCH.hl : undefined);
 
   /* componentes */
   /* o simbolo tambem nao muda de cor por estar selecionado: o azul entrava por cima dos
@@ -1728,11 +1707,11 @@ function drawWorld(ctx, cam){
       D.worldText(ctx, c.comment, c.x, c.y - Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) - 70, 55, 0, '#333366', 'center');
   }
   /* pinos destacados da net selecionada */
-  if (selNet) {
+  if (foco) {
     for (const c of s.comps) {
       const pins = HubCore.compPinsWorld(c, SLIB) || [];
       for (const p of pins)
-        if (nets.pinNet[c.ref + '-' + p.num] === selNet) {
+        if (nets.pinNet[c.ref + '-' + p.num] === foco) {
           ctx.strokeStyle = D.SCH.hl; ctx.lineWidth = 6;
           ctx.beginPath(); ctx.arc(p.x, p.y, 35, 0, 2*Math.PI); ctx.stroke();
         }
@@ -1740,29 +1719,18 @@ function drawWorld(ctx, cam){
   }
   /* rotulos e power: acendem com a net deles. A guarda `selNet &&` importa — sem ela, com o
      foco vazio um rotulo de net vazia casava com '' e acendia sozinho. */
-  for (const l of s.netlabels) D.drawNetLabel(ctx, l, selNet && selNet === l.net ? D.SCH.hl : undefined);
-  for (const p of s.powers)    D.drawPowerPort(ctx, p, selNet && selNet === p.net ? D.SCH.hl : undefined);
-  for (const p of s.ports)     D.drawPort(ctx, p, selNet && selNet === p.net ? D.SCH.hl : undefined);
+  for (const l of s.netlabels) D.drawNetLabel(ctx, l, foco && foco === l.net ? D.SCH.hl : undefined);
+  for (const p of s.powers)    D.drawPowerPort(ctx, p, foco && foco === p.net ? D.SCH.hl : undefined);
+  for (const p of s.ports)     D.drawPort(ctx, p, foco && foco === p.net ? D.SCH.hl : undefined);
   for (const t of s.texts)     D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, D.SCH.text, 'left');
   /* o X por ULTIMO: ele marca um pino, e marca escondida atras do corpo nao marca nada */
   for (const n of s.noercs)    D.drawNoERC(ctx, n.x, n.y, n.color);
 
-  /* sinalizadores da folha ativa */
-  for (const a of ANN){
-    if (a.view !== 'sch' || a.sheet !== s.name) continue;
-    const c = ANN_COLORS[a.severity] || ANN_COLORS.info;
-    const sz = 16 / cam.scale;
-    ctx.save();
-    ctx.globalAlpha = a.status === 'resolved' ? 0.45 : 1;
-    ctx.strokeStyle = c; ctx.fillStyle = c;
-    ctx.lineWidth = 2.5 / cam.scale; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x, a.y + sz * 1.6); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(a.x, a.y + sz * 1.6); ctx.lineTo(a.x + sz * 1.1, a.y + sz * 1.25);
-    ctx.lineTo(a.x, a.y + sz * 0.9); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.arc(a.x, a.y, 3 / cam.scale, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-  }
-
+}
+/* o que a camera do canvas grande desenha: a folha ATIVA com os tres estados dela, mais o
+   que so existe aqui — o contorno da selecao e a ferramenta na mao */
+function drawWorld(ctx, cam){
+  desenhaFolha(ctx, sheetIdx, { grid: showState.grid, foco: selNet, esc: cam.scale });
   drawSelection(ctx, cam);
   drawFerramenta(ctx, cam);
 }
@@ -1865,7 +1833,7 @@ const cam = D.mkCamera(cv, drawWorld, {
     $('shover').textContent =
       h ? (h.kind === 'pin' ? `${h.ref}-${h.num} · ${nets.pinNet[h.ref + '-' + h.num] || 'sem net'}`
                             : h.kind === 'wire' ? (nets.wireNet[sheetIdx][h.wi] || 'fio') : describe(h.item)) : '';
-    cv.style.cursor = annTool ? 'copy' : 'default';   /* seta normal; so o pan (agarrando) e o sinalizador mudam */
+    cv.style.cursor = 'default';   /* seta normal; so o pan (agarrando) muda */
   }
 });
 
@@ -1914,64 +1882,13 @@ function hitTest(x, y){
   return null;
 }
 
-/* ------- sinalizadores ------- */
-function setAnnTool(v){
-  if (v && !editOn) return;
-  if (v && tool !== 'select') setTool('select');   /* uma ferramenta de cada vez na mao */
-  annTool = v;
-  $('btnAnn').classList.toggle('active', v);
-  cv.style.cursor = v ? 'copy' : 'default';
-  if (!v) hideAnnForm();
-}
-function hideAnnForm(){ $('annform').style.display = 'none'; annPending = null; }
-function openAnnForm(w){
-  annPending = { x: Math.round(w.x), y: Math.round(w.y) };
-  $('anntext').value = '';
-  $('annform').style.display = 'block';
-  $('anntext').focus();
-}
-function annNextId(){
-  let mx = 0;
-  for (const a of ANN){ const n = parseInt(String(a.id || '').replace(/^n/, ''), 10); if (isFinite(n) && n > mx) mx = n; }
-  return 'n' + (mx + 1);
-}
+/* O carimbo de data do livro-razao da troca de simbolo. Morava no bloco do sinalizador
+   (que saiu inteiro) mas o dono de verdade e outro: `nova.push({ kind:'sym', ..., when:
+   nowStr() })`, mais abaixo neste arquivo. */
 function nowStr(){
   const d = new Date(), p = n => String(n).padStart(2, '0');
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
 }
-function annChanged(){ setAnnDirty(true); buildAnnPanel(); cam.draw(); }
-function buildAnnPanel(){
-  const list = $('annlist');
-  const mine = ANN.filter(a => a.view === 'sch');
-  $('anncount').textContent = mine.length;
-  list.innerHTML = mine.length ? '' : '<div style="color:var(--fg-dim)">nenhum — use ⚑ Sinalizar (Configurações)</div>';
-  for (const a of mine){
-    const div = document.createElement('div');
-    div.className = 'annitem ' + a.severity + (a.status === 'resolved' ? ' resolved' : '');
-    const x = document.createElement('span');
-    x.className = 'annx'; x.textContent = '✕'; x.title = 'apagar';
-    x.addEventListener('click', ev => { ev.stopPropagation(); if (!editOn) return; ANN.splice(ANN.indexOf(a), 1); annChanged(); });
-    div.appendChild(x);
-    div.appendChild(document.createTextNode(
-      `${a.id} [${a.sheet}]: ${a.msg}` + (a.status === 'resolved' ? (a.reply ? ` ✓ ${a.reply}` : ' ✓') : '')));
-    div.addEventListener('click', () => {
-      const si = model.sheets.findIndex(sh => sh.name === a.sheet);
-      if (si >= 0 && si !== sheetIdx){ sheetIdx = si; $('sheetsel').value = si; limpaSel(); }
-      cam.fit({ x1: a.x - 900, y1: a.y - 900, x2: a.x + 900, y2: a.y + 900 });
-    });
-    list.appendChild(div);
-  }
-}
-$('annok').addEventListener('click', () => {
-  const msg = $('anntext').value.trim().replace(/"/g, "'");
-  if (!msg || !annPending) return;
-  ANN.push({ id: annNextId(), view: 'sch', sheet: model.sheets[sheetIdx].name,
-             x: annPending.x, y: annPending.y, severity: $('annsev').value,
-             msg, ref: '', status: 'open', created: nowStr(), reply: '' });
-  hideAnnForm(); annChanged();
-});
-$('anncancel').addEventListener('click', hideAnnForm);
-
 /* ------- rotulo de net: pedir a palavra, depois armar a ferramenta -------
    A ferramenta so e armada DEPOIS que a palavra existe: um netlabel com net vazio e erro
    de validacao (hub-core.js) e travaria o Salvar do arquivo inteiro. */
@@ -2001,8 +1918,6 @@ $('tbNet').addEventListener('click', () => {
   if (tool === 'label'){ setTool('select'); hideNetForm(); return; }
   openNetForm();
 });
-$('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
-
 /* ═══ Escolher um simbolo para um componente que nao foi identificado ═══
    37% dos componentes dos projetos reais chegam do Altium com um `sym` que nenhuma
    biblioteca daqui tem — vieram de outra lib, com outro nome. HubCore.suggestSym ranqueia
@@ -2481,7 +2396,6 @@ window.addEventListener('keydown', e => {
       if (mouse.mode === 'move') applyMove(mouse.base, 0, 0);
       mouse = null; boxRect = null; swallowClick = true; cam.draw(); return;
     }
-    if (annTool){ setAnnTool(false); return; }
     /* Escape e o botao de panico: larga a selecao E o foco de net. Enquanto largava so a
        selecao, a folha ficava laranja sem nada marcado — a "cor travada". */
     if (sel.size || selNet) limpaSel();
@@ -2491,25 +2405,44 @@ window.addEventListener('keydown', e => {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   if (addOpen() || symModalAberto()) return;   /* os atalhos da folha nao valem dentro do modal */
   const k = e.key.toLowerCase();
-  if (e.ctrlKey && k === 'z'){ e.preventDefault(); if (editOn) undo(); return; }
-  if (e.ctrlKey && k === 'y'){ e.preventDefault(); if (editOn) redo(); return; }
+  if (e.ctrlKey && k === 'z'){ e.preventDefault(); undo(); return; }
+  if (e.ctrlKey && k === 'y'){ e.preventDefault(); redo(); return; }
   if (e.ctrlKey && k === 'a'){ e.preventDefault(); selectOnly(sheetItems()); return; }
   /* Ctrl+W e do NAVEGADOR (fecha a aba) e nenhuma pagina consegue interceptar — o atalho do
      fio e o W sozinho. Isto aqui so pega onde o Ctrl+W chega mesmo (janela de aplicativo). */
   if (e.ctrlKey && k === 'w'){ e.preventDefault(); setTool(tool === 'wire' ? 'select' : 'wire'); return; }
   if (e.ctrlKey || e.altKey || e.metaKey) return;
-  if (k === 'e'){ setEdit(!editOn); return; }
   if (k === 'c'){ openAdd(); return; }
-  if (k === 'n'){ setAnnTool(!annTool); return; }
   if (k === 'w'){ setTool(tool === 'wire' ? 'select' : 'wire'); return; }
   if (k === 'g'){ setTool(tool === 'power' && toolPower && toolPower.net === 'GND' ? 'select' : 'power',
                           { net:'GND', style:'GndPower', rot:270 }); return; }
   if (k === 'l'){ if (tool === 'label'){ setTool('select'); hideNetForm(); } else openNetForm(); return; }
-  if (!editOn) return;
+  /* O ESPACO COM UM BOTAO EM FOCO ja se resolve sozinho, e MEDIDO no Chrome: com selecao, o
+     `e.preventDefault()` da linha de girar cancela a ativacao nativa do botao (o componente
+     gira 0->90 e o olho da grade nao pisca); sem selecao aquela linha nao pega e o Espaco
+     volta a ser o clique do botao, que e o que se espera. Houve aqui uma guarda que devolvia
+     cedo quando o foco estava num <button> — ela trocava uma coisa pela outra: o botao era
+     reacionado e a selecao NAO girava. */
   if (e.key === 'Delete'){ deleteSel(); return; }
   if (e.key === ' ' && sel.size){ e.preventDefault(); rotateSel(); return; }
   if (k === 'x' && sel.size){ mirrorSel(); return; }
 });
+/* O schematic.js do disco ainda e o que esta aba tem?
+
+   `schDiskSnapshot` guarda os bytes EXATOS da ultima leitura ou da ultima gravacao, entao a
+   comparacao responde isso sem margem. Ela existe porque o aviso do hubserver e um contador
+   de versao e nao diz QUAL arquivo mudou (hubserver.py » /__events manda so o numero).
+
+   Falha de leitura responde NAO: um erro de rede nao e motivo para recarregar a pagina por
+   cima do que a pessoa esta fazendo. Sem servidor (file://) nao ha disco que mude por baixo. */
+async function schemaDoDiscoMudou(){
+  if (!HubIO.canPost) return false;
+  let atual;
+  try { atual = await HubIO.fetchText(SCH_REL); }
+  catch (e) { return false; }
+  if (schDiskSnapshot === null){ schDiskSnapshot = atual; return false; }   /* sem base: adota e segue */
+  return atual !== schDiskSnapshot;
+}
 window.__hubOnChange = function(){
   /* COM O MODAL ABERTO a página não pode recarregar. O "Editar símbolo ↗" abriu o editor numa
      aba própria justamente para esta ficar de pé; recarregar aqui fecharia o modal e o usuário
@@ -2518,16 +2451,27 @@ window.__hubOnChange = function(){
     window.__hubRecarregaLibs().then(atualizaModalDaBiblioteca, atualizaModalDaBiblioteca);
     return;
   }
-  /* Sem nada pendente, recarregar a pagina e o caminho mais simples E o mais completo: pega
-     tambem o schematic.js e os sinalizadores do disco, que a recarga de biblioteca nao pega. */
-  /* com uma pergunta na tela o reload a mataria antes de o usuario responder — medido:
-     o confirm aparecia e sumia 1,5 s depois, junto com a folha inteira */
-  if (!annDirty && !schDirty){ HubDialog.ocioso().then(() => location.reload()); return; }
-  /* Com edicao pendente a pagina NAO pode recarregar — mas a BIBLIOTECA pode: trocar o
-     acervo por baixo do desenho nao custa uma linha do que o usuario fez, e e justamente
-     isso que ele acabou de mudar no editor de simbolos. O que continua esperando o F5 e so
-     o que vem do disco e brigaria com o que esta na tela: o proprio schematic.js e os
-     sinalizadores. */
+  /* FOI ESTA ABA QUE MUDOU O DISCO? O aviso chega igual para uma biblioteca regerada, para
+     outro projeto e para o schematic.js que ESTA aba acabou de gravar — e no ultimo caso
+     recarregar nao traz nada (o disco e exatamente o que esta na tela) e leva junto o
+     enquadramento, a selecao e a pilha do desfazer. Medido: dois segundos depois de CADA
+     Salvar a folha piscava e voltava do zero, e era o proprio Salvar que a derrubava. */
+  schemaDoDiscoMudou().then(mudou => {
+    if (!mudou){
+      /* o schematic.js do disco e o nosso: o que mudou foi outra coisa. A biblioteca se
+         recarrega NO LUGAR — o __hubRecarregaLibs passa pelo reapply — e a folha fica onde
+         esta, com o zoom, a selecao e o desfazer intactos. */
+      window.__hubRecarregaLibs().catch(() => {});
+      return;
+    }
+    if (!schDirty){ HubDialog.ocioso().then(() => location.reload()); return; }
+    comEdicaoPendente();
+  });
+};
+/* O disco mudou DE VERDADE e ha edicao pendente aqui: a pagina nao pode recarregar, mas a
+   BIBLIOTECA pode — trocar o acervo por baixo do desenho nao custa uma linha do que o usuario
+   fez. O que continua esperando o F5 e so o schematic.js, que brigaria com a tela. */
+function comEdicaoPendente(){
   staleWorkspace = true;
   $('annmsg').textContent = '⚠ workspace mudou — conferindo a biblioteca…';
   window.__hubRecarregaLibs().then(r => {
@@ -2538,23 +2482,114 @@ window.__hubOnChange = function(){
        F5 pelo que JA entrou sozinho: empurrar para o F5 e empurrar para perder o trabalho
        pendente, que e exatamente o que este caminho existe para proteger. Diga o que sobrou. */
     $('annmsg').textContent = (r.mudou ? '⚠ biblioteca já atualizada aqui' : '⚠ workspace mudou')
-      + ' — só o schematic.js e os sinalizadores do disco esperam F5';
-    HubDialog.toast(lib + '. O schematic.js e os sinalizadores do disco só entram com F5: salve o que está pendente antes.', 'warn', 0);
+      + ' — só o schematic.js do disco espera F5';
+    HubDialog.toast(lib + '. O schematic.js do disco só entra com F5: salve o que está pendente antes.', 'warn', 0);
   }, () => {
     $('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
     HubDialog.toast('O workspace mudou com edições pendentes aqui — salve e recarregue (F5).', 'warn', 0);
   });
+}
+window.__hubDirty = function(){ return schDirty; };
+/* ------- aplicar vinculos vindos de fora (hub-odoobom.js) -------
+   Quem monta a lista e o modulo do Odoo; quem ESCREVE e esta vista, e nao por gentileza: o
+   caminho passa pelo `commit()`, e e ele que empilha o desfazer, acende o "Salvar *" e
+   repinta folha, painel e miniatura. Um modulo de fora que mexesse em `schematic.items`
+   direto perderia os quatro, em silencio.
+
+   Cada vinculo e { refs:[...], sym, comment, params, soParams }. `soParams` e o caminho do
+   componente MULTI-PARTE: todo alias de valor do almoxarifado tem uma parte so, entao trocar
+   o `sym` de um conector desenhado em 16 partes largaria 15 delas e a fiacao junto. Nesses
+   a identidade e gravada (comment + params) e o desenho fica como esta — dito na tela, nao
+   escondido.
+
+   Recusa ANTES de tocar no modelo, nunca no meio: sym que nenhum acervo resolve viraria
+   quadrado vermelho sem nada reclamar (o serializeSchematic so exige string nao vazia), e a
+   sequencia aspas-dois-pontos em qualquer campo derruba a gravacao do arquivo INTEIRO. */
+window.__hubAplicaVinculos = function(vinculos){
+  const lista = Array.isArray(vinculos) ? vinculos : [];
+  if (!lista.length) return { ok:false, erro:'nada para aplicar' };
+
+  const porRef = new Map();
+  for (const s of model.sheets)
+    for (const c of s.comps){
+      if (!porRef.has(c.ref)) porRef.set(c.ref, []);
+      porRef.get(c.ref).push(c);
+    }
+  const ruim = t => typeof t === 'string' && t.indexOf('":') >= 0;
+  const planos = [], recusados = [];
+
+  for (const v of lista){
+    const nome = String((v && v.componente) || '').trim();
+    const refs = (v && Array.isArray(v.refs)) ? v.refs.filter(r => porRef.has(r)) : [];
+    if (!refs.length){ recusados.push({ componente:nome, porque:'nenhum designador deste vinculo esta na folha' }); continue; }
+    if (!nome){ recusados.push({ componente:'?', porque:'vinculo sem componente' }); continue; }
+
+    /* O COMPONENTE E RESOLVIDO AQUI, no espelho desta vista, e nao vem pronto do servidor.
+       E o que garante que o vinculo grave exatamente o que o modal "Adicionar componentes"
+       grava: mesmo `sym`, mesmo `comment`, mesmo `params` — pela MESMA funcao. Montar o
+       params do outro lado seria uma segunda implementacao do formato, em outra linguagem,
+       que so se descobre divergente no dia em que divergir. */
+    const res = HubCore.resolveSym(SLIB, nome);
+    if (!(res && res.item)){
+      recusados.push({ componente:nome, porque:'nao existe em acervo nenhum aqui — o componente viraria um quadrado vermelho' });
+      continue;
+    }
+    const alias = res.item;
+    const valor = (alias.valores && alias.valores.length === 1) ? alias.valores[0] : null;
+    if (!valor){
+      recusados.push({ componente:nome, porque:'"' + nome + '" e uma FAMILIA do almoxarifado, nao um componente: nao da para saber o valor' });
+      continue;
+    }
+    const comment = String(valor.label || '').replace(/"/g, "'");
+    const params = paramsDoValor(valor);
+    if (ruim(comment) || ruim(params)){
+      recusados.push({ componente:nome, porque:'o texto tem a sequencia que o gravador do schematic.js recusa' });
+      continue;
+    }
+    planos.push({
+      refs, comment, params,
+      /* MULTI-PARTE nao troca de simbolo. Todo alias de valor do almoxarifado tem uma parte
+         so; um conector desenhado em 16 partes perderia 15 e a fiacao junto. Grava-se a
+         identidade e o desenho fica — dito na tela, nao escondido. */
+      sym: v.soParams ? null : (res.name || nome),
+      soParams: !!v.soParams,
+      /* resolveu, mas nao pelo nome exato: o lib-subs.js guarda escolhas GLOBAIS por nome e
+         elas vencem o nome exato. Gravar "X" e a folha desenhar "Y" nao e erro de gravacao,
+         e surpresa — e surpresa tem de sair na tela. */
+      desvio: res.how !== 'exato' ? { como:res.how, vira:res.name } : null,
+    });
+  }
+  if (!planos.length) return { ok:false, erro:'nenhum vinculo passou na conferencia', recusados };
+
+  let itens = 0;
+  const refsTocados = [];
+  for (const p of planos)
+    for (const ref of p.refs){
+      for (const c of porRef.get(ref)){
+        if (p.sym) c.sym = p.sym;
+        if (p.comment) c.comment = p.comment; else delete c.comment;
+        if (p.params) c.params = p.params; else delete c.params;
+        itens++;
+      }
+      refsTocados.push(ref);
+    }
+  commit();
+  limpaSel();
+  return { ok:true, vinculos:planos.length, refs:refsTocados, itens, recusados,
+           desvios: planos.filter(p => p.desvio).map(p => ({ refs:p.refs, sym:p.sym,
+                                                             como:p.desvio.como, vira:p.desvio.vira })) };
 };
-window.__hubDirty = function(){ return annDirty || schDirty; };
 window.__hubSelectComp = function(ref){
   for (const s of model.sheets){ const c = s.comps.find(c => c.ref === ref); if (c){ focusComp(c); return; } }
 };
-window.addEventListener('beforeunload', e => { if (annDirty || schDirty){ e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', e => { if (schDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- paineis ---------- */
 function focusComp(c){
   const si = model.sheets.findIndex(sh => sh.name === c.sheet);
-  if (si >= 0 && si !== sheetIdx){ sheetIdx = si; $('sheetsel').value = si; }
+  /* troca a folha SEM o limpaSel/enquadrar do setSheet: quem chama daqui ja traz a propria
+     selecao (o componente) e o proprio enquadramento, logo abaixo */
+  if (si >= 0 && si !== sheetIdx){ sheetIdx = si; pintaCartaoAtivo(); }
   sel.clear(); sel.add(c);
   /* a porta de entrada do hub (__hubSelectComp) tambem passa por aqui: nao pode deixar a net
      anterior acesa por baixo do componente novo */
@@ -2607,16 +2642,87 @@ function buildValList(){
     list.appendChild(div);
   }
 }
-function buildSheetSel(){
-  const s = $('sheetsel');
-  s.innerHTML = '';
+/* ------- as folhas, em cartoes com miniatura -------
+   Era um <select>: dizia o nome da folha e mais nada, e num projeto de duas folhas nao havia
+   como saber qual era qual sem trocar e olhar. O cartao mostra a folha COMO ELA ESTA, com o
+   mesmo desenho do canvas grande (desenhaFolha) — so sem grade, sem selecao e sem net em
+   foco, que sao estado da folha ATIVA e vazariam para o cartao das outras.
+
+   A miniatura NAO usa o mkCamera: ele registra wheel/mousedown/resize e um ResizeObserver
+   sem dispose, entao uma camera por folha recriada a cada edicao vazaria um listener de
+   janela por vez — e a roda do mouse sobre o cartao daria zoom nele em vez de rolar o
+   painel. O caminho e o ctx.setTransform manual, o mesmo do drawTile do editor de simbolos. */
+function renderSheetCards(){
+  const box = $('sheetcards');
+  if (!box) return;
+  /* reconstruir com innerHTML='' descarta os nos E os listeners deles junto — e a razao de
+     o clique estar delegado no container, registrado UMA vez (logo abaixo) */
+  box.innerHTML = '';
   model.sheets.forEach((sh, i) => {
-    const o = document.createElement('option');
-    o.value = i; o.textContent = `folha: ${sh.name} (${sh.size})`;
-    s.appendChild(o);
+    const b = el('button', 'sheetcard' + (i === sheetIdx ? ' on' : ''));
+    b.type = 'button';
+    b.dataset.i = String(i);
+    b.title = `folha ${sh.name} (${sh.size}) — ${(sh.comps || []).length} componente(s)`;
+    /* a miniatura e o icone da linha; o nome e o resumo vao ao lado, numa coluna que
+       encolhe (o .txt) para o ellipsis do nome ter onde acontecer */
+    const txt = el('div', 'txt');
+    txt.append(el('span', 'nm', sh.name),
+               el('span', 'k', `${sh.size} · ${(sh.comps || []).length} comp.`));
+    b.append(document.createElement('canvas'), txt);
+    box.append(b);
   });
-  /* a net acesa e da folha antiga: levar o laranja junto pintaria fios de outra folha */
-  s.addEventListener('change', () => { sheetIdx = +s.value; limpaSel(); cam.fit(fitBBox()); });
+  pintaMiniaturas();
+}
+$('sheetcards').addEventListener('click', e => {
+  const b = e.target.closest('.sheetcard');
+  if (b) setSheet(+b.dataset.i);
+});
+/* O canvas de um cartao mede 0 enquanto a sub-aba Configuracoes esta fechada, e enquadrar
+   numa largura 0 sai EM BRANCO sem erro nenhum (a escala vira Infinity). Um observador no
+   CONTAINER resolve os dois casos de uma vez — a aba abrindo e a divisoria mudando a largura
+   do painel — e e um so, permanente: os cartoes sao refeitos, o container nao. */
+new ResizeObserver(pintaMiniaturas).observe($('sheetcards'));
+function pintaCartaoAtivo(){
+  for (const b of document.querySelectorAll('#sheetcards .sheetcard'))
+    b.classList.toggle('on', +b.dataset.i === sheetIdx);
+}
+/* a folha ativa muda: larga a selecao (a net acesa era da folha antiga — levar o laranja
+   junto pintaria fios de outra folha) e reenquadra */
+function setSheet(i){
+  if (!(i >= 0) || i >= model.sheets.length || i === sheetIdx) return;
+  sheetIdx = i;
+  pintaCartaoAtivo();
+  /* O FIO EM CURSO E DA FOLHA ANTIGA. O endWire carimba o fio com a folha ATIVA no momento
+     de fechar, entao trocar de folha no meio do tracado gravaria na folha nova os pontos
+     clicados na velha. O Escape ja larga o fio assim; a troca de folha tinha de largar
+     tambem. */
+  wireDraw = null;
+  limpaSel();
+  cam.fit(fitBBox());
+}
+/* Desenha cada cartao. Canvas dentro de painel fechado mede 0 e sairia em branco SEM ERRO
+   (a escala vira Infinity) — por isso a guarda do desenhaMiniatura so pinta o cartao que
+   mediu. Quem repinta ao abrir a sub-aba e o ResizeObserver do #sheetcards, logo acima: o
+   showPane tira o display:none do painel, o container sai de 0 e o observador dispara. */
+function pintaMiniaturas(){
+  document.querySelectorAll('#sheetcards .sheetcard canvas').forEach((cvm, i) => desenhaMiniatura(cvm, i));
+}
+function desenhaMiniatura(cvm, si){
+  const W = cvm.clientWidth, H = cvm.clientHeight;
+  if (!W || !H || !model.sheets[si]) return false;
+  const DPR = window.devicePixelRatio || 1;
+  cvm.width = Math.round(W * DPR); cvm.height = Math.round(H * DPR);
+  const ctx = cvm.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#3a3a34';                       /* a mesma moldura do canvas grande */
+  ctx.fillRect(0, 0, cvm.width, cvm.height);
+  const bb = fitBBox(si);
+  const esc = Math.min(W / Math.max(bb.x2 - bb.x1, 1), H / Math.max(bb.y2 - bb.y1, 1)) / 1.06;
+  const cx = (bb.x1 + bb.x2) / 2, cy = (bb.y1 + bb.y2) / 2;
+  /* a matriz Y-up do mkCamera, copiada: o mundo do esquema tem Y para cima */
+  ctx.setTransform(DPR * esc, 0, 0, -DPR * esc, DPR * (W / 2 - cx * esc), DPR * (H / 2 + cy * esc));
+  desenhaFolha(ctx, si, { grid:false, foco:'', esc });
+  return true;
 }
 /* sub-abas do painel: a ultima aberta fica lembrada nesta maquina */
 function showPane(id){
@@ -2693,7 +2799,10 @@ function pintaOlhoComment(){
 $('btnComment').addEventListener('click', () => {
   showState.comment = !showState.comment;
   try { localStorage.setItem(VER_COMMENT_KEY, showState.comment ? '1' : '0'); } catch (e) {}
-  pintaOlhoComment(); cam.draw();
+  /* o cartao herda estes dois (sao preferencia de vista, nao estado da folha ativa), e
+     estes botoes so repintavam o canvas grande: sem isto o icone fica com o estado antigo
+     ate a proxima edicao */
+  pintaOlhoComment(); cam.draw(); pintaMiniaturas();
 });
 pintaOlhoComment();
 /* mesmo idioma do olho do comment: aceso = a vista manda, riscado = o simbolo manda */
@@ -2709,17 +2818,14 @@ function pintaOlhoPinos(){
 $('btnPinNames').addEventListener('click', () => {
   showState.pinos = !showState.pinos;
   try { localStorage.setItem(VER_PINOS_KEY, showState.pinos ? '1' : '0'); } catch (e) {}
-  pintaOlhoPinos(); cam.draw();
+  pintaOlhoPinos(); cam.draw(); pintaMiniaturas();
 });
 pintaOlhoPinos();
 $('btnGrid').addEventListener('click', () => {
   showState.grid = !showState.grid; $('btnGrid').classList.toggle('active', showState.grid); cam.draw();
 });
-$('btnEdit').addEventListener('click', () => setEdit(!editOn));
-
-buildSheetSel(); buildCompTable(); buildNetList(); buildValList(); buildAnnPanel();
+renderSheetCards(); buildCompTable(); buildNetList(); buildValList();
 updateMeta(); updateSaveBtn(); updateSelStatus(); cartRender(); renderProps();
 cam.resize(); cam.fit(fitBBox());
-setEdit(false);   /* abre travado; tambem ja desabilita o que edita */
 
 })();
