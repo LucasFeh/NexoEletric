@@ -60,6 +60,18 @@ COMPARTILHADOS_ARQ=(
   "Libs/schlib.js"                 # symserver.py:374 reescreve a cada Salvar
   "Libs/symbols-lib.js"            # symserver.py:540 — simbolos desenhados a mao
   "Libs/libs-report.txt"           # symserver.py:711
+  # OS TRES ABAIXO ESCAPAVAM, e o usuario pegou: sao VERSIONADOS e nao estavam nesta
+  # lista, entao o deploy os reescrevia a cada push com o conteudo do commit -- inclusive
+  # a .SchLib da casa, que e biblioteca de Altium e nao codigo. Medido em 2026-09-15:
+  # no servidor os tres eram arquivo real da release, e nao symlink.
+  #
+  # Estar no git nao os torna codigo: sao ESTADO publicado, como o schlib.js logo acima.
+  # Viajam no repositorio para uma instalacao NOVA nascer com eles; a que ja esta no ar
+  # tem a sua copia, e trocar isso por baixo de quem trabalha e a coisa que este deploy
+  # inteiro foi desenhado para nao fazer.
+  "Libs/BIBLIOTECA DE ESQUEMA.SchLib"  # a lib da casa publicada pelo guardiao
+  "Libs/pcblib.js"                 # espelho de footprints, escrito pelo ExportLibs
+  "Libs/rename-map.js"             # nomes antigos -> novos, estado da biblioteca
   "projects.js"                    # indice dos projetos; os .pas reescrevem
   "tools/almox/componentes_odoo.csv"   # estado do sincronismo incremental
   "tools/symbols/config.json"      # caminhos da maquina, nao do projeto
