@@ -108,12 +108,14 @@ assert.ok(/0/.test(zero.pinos), zero.pinos);
    A escolha é global: vale para todo componente com aquele comp.sym, em todo projeto. O
    toast só contava DEPOIS de gravar; a contagem tem de estar na tela antes do clique. */
 const tres = d({ sym: 'X', how: 'exato', quantos: 3 });
-assert.strictEqual(tres.impactoAlerta, true, 'mais de um componente tem de estar visível');
-assert.ok(/3 componentes/.test(tres.impacto), tres.impacto);
-assert.ok(/todos os projetos/.test(tres.impacto), 'a escolha não é só deste projeto: ' + tres.impacto);
+/* o alcance mudou: a troca vale so para o designador escolhido, entao nao ha mais alarme
+   — e o numero que interessa e quantos FICAM COMO ESTAO, nao quantos mudam junto */
+assert.strictEqual(tres.impactoAlerta, false, 'nao ha mais estrago coletivo a anunciar');
+assert.ok(/outros 2 componentes/.test(tres.impacto), tres.impacto);
+assert.ok(/muda só este designador/.test(tres.impacto), 'o alcance tem de estar dito: ' + tres.impacto);
 const um = d({ sym: 'X', how: 'exato', quantos: 1 });
 assert.strictEqual(um.impactoAlerta, false);
-assert.ok(/só este componente/.test(um.impacto), um.impacto);
+assert.ok(/único da folha/.test(um.impacto), um.impacto);
 assert.strictEqual(d({ sym: 'X', how: 'exato', quantos: 0 }).impacto, null,
   'nenhum componente na folha: não há alcance para anunciar');
 

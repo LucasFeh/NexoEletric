@@ -146,12 +146,16 @@ function decideTroca(est){
     impacto: null, impactoAlerta: false,
     pinos: null, pinosAlerta: false,
   };
+  /* O ALCANCE MUDOU em 2026-09-15: a troca vale so para ESTE designador (e todas as
+     partes dele). Antes ia para o lib-subs.js e valia para todo componente com o mesmo
+     nome de simbolo, em todos os projetos — e era isso que este texto avisava. Dizer
+     'muda junto' agora seria mentira, e mentira que assusta quem ia so trocar um. */
   if (quantos > 1){
-    d.impacto = 'a escolha vale para todos os projetos; só neste, ' + quantos
-              + ' componentes da folha usam este mesmo componente e mudam junto';
-    d.impactoAlerta = true;
+    d.impacto = 'muda só este designador; os outros ' + (quantos - 1)
+              + ' componentes da folha com este mesmo símbolo ficam como estão';
+    d.impactoAlerta = false;
   } else if (quantos === 1){
-    d.impacto = 'a escolha vale para todos os projetos; neste, só este componente da folha usa essa entrada da biblioteca';
+    d.impacto = 'muda só este designador — é o único da folha com este símbolo';
   }
   if (cand != null){
     if (esperados == null)
@@ -2368,67 +2372,49 @@ async function usarSimboloEscolhido(){
      para a folha inteira, nao grava OdooId, e o odoolista resolve por OdooId nos params.
      Entao aqui vai o VINCULO, pelo mesmo caminho que o painel da BoM usa — sym, comment e
      params de uma vez so, pela mesma funcao, para nao existirem dois formatos de params. */
-  if (symOpts && symOpts.vinculo){
-    const refs = (symOpts.refs && symOpts.refs.length) ? symOpts.refs : [symAlvo.ref];
-    const res = window.__hubAplicaVinculos([{ refs: refs, componente: para }]);
-    if (!res || !res.ok){
-      await HubDialog.alert((res && res.erro) || 'não deu para aplicar o vínculo.',
-                            { title: 'não apliquei' });
-      return;
-    }
-    const aoAplicar = symOpts.aoAplicar;
-    fechaSymModal();
-    /* dizer QUAL das duas coisas aconteceu: multi-parte recebe so a identidade, e prometer
-       troca de simbolo que nao houve e o comeco de "mas eu troquei e nao mudou nada" */
-    const so = (res.soIdentidade || []).length > 0;
-    HubDialog.toast(refs.join(', ') + (so
-      ? ' recebeu a identidade de "' + para + '" — o desenho fica, porque é multi-parte.'
-      : ' → "' + para + '"') + ' Ctrl+Z desfaz, e só o Salvar grava.', 'ok');
-    for (const rc of (res.recusados || [])) HubDialog.toast('recusado: ' + rc.porque, 'warn', 9000);
-    if (typeof aoAplicar === 'function') aoAplicar({ refs: refs, componente: para, res: res });
-    return;
-  }
-  if (!HubIO.canPost){
-    await HubDialog.alert('Sem servidor: abra o hub por hubserver.py para gravar a escolha.',
-                          { title: 'não dá para gravar' });
-    return;
-  }
-  /* PERGUNTA ANTES DE GRAVAR QUALQUER COISA: o primeiro arquivo escrito em Libs derruba
-     a pagina pelo __hubOnChange, e uma pergunta aberta morreria sem resposta. */
-  const atribuir = emg ? await perguntaAtribuir(emg, para) : false;
-  const REL = 'Libs/lib-subs.js';
-  let atuais = [];
-  try {
-    const txt = await HubIO.fetchText(REL);
-    atuais = new Function(txt + ';return typeof libSubs !== "undefined" ? libSubs : [];')() || [];
-  } catch (e) {
-    atuais = (typeof libSubs !== 'undefined' && Array.isArray(libSubs)) ? libSubs.slice() : [];
-  }
-  const antes = atuais.find(r => r && r.kind !== 'fp' && r.from === de);
-  if (antes && !(await HubDialog.confirm(
-        '"' + de + '" já aponta para "' + antes.to + '". Trocar por "' + para + '"?',
-        { title: 'já existe uma escolha', ok: 'Trocar' }))) return;
+  /* SEMPRE VINCULO, desde 2026-09-15. Antes, sem `symOpts.vinculo`, a escolha ia para o
+     lib-subs.js — substituicao GLOBAL por nome de simbolo. Trocar o componente de CN1
+     mudava todo CN que usasse o mesmo simbolo, em todos os projetos, e a folha nem
+     mostrava que isso tinha acontecido. O usuario pediu o contrario, com todas as letras:
+     um componente nao pode influenciar outro de designador diferente.
 
-  const nova = atuais.filter(r => !(r && r.kind !== 'fp' && r.from === de));
-  nova.push({ kind: 'sym', from: de, to: para, when: nowStr() });
-  const out = HubCore.serializeLibSubs(nova);
-  if (out.errors.length){
-    await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title: 'lib-subs.js inválido' });
+     Entao o `vinculo` deixou de ser um modo e virou O comportamento. O que muda e o
+     ALCANCE: agora sao as partes DESTE designador, e mais nada. A trava de multi-parte
+     mora dentro do __hubAplicaVinculos, entao ela vale para os dois caminhos.
+
+     O lib-subs.js continua existindo e continua sendo lido — ha escolhas antigas
+     gravadas la, e o 'Desfazer a escolha' as remove. So nao se escreve mais nele por
+     aqui. */
+  /* O DESENHO EMPRESTADO, antes de qualquer coisa. Um simbolo sem geometria desenha como
+     quadrado vermelho, e o vinculo sozinho nao conserta isso: quem conserta e levar o
+     desenho para a BIBLIOTECA. A pergunta vem primeiro porque gravar em Libs/ recarrega a
+     pagina pelo SSE do hubserver, e uma pergunta aberta morreria sem resposta.
+     So faz sentido com servidor: sem ele nao ha onde gravar a biblioteca. */
+  const atribuir = (emg && HubIO.canPost) ? await perguntaAtribuir(emg, para) : false;
+
+  /* todas as partes do MESMO designador: o designador e do componente, e trocar metade
+     dele deixaria a folha com um componente partido ao meio */
+  const refs = (symOpts && symOpts.vinculo && symOpts.refs && symOpts.refs.length)
+    ? symOpts.refs : [symAlvo.ref];
+  const res = window.__hubAplicaVinculos([{ refs: refs, componente: para }]);
+  if (!res || !res.ok){
+    await HubDialog.alert((res && res.erro) || 'não deu para aplicar a troca.',
+                          { title: 'não troquei' });
     return;
   }
-  const r = await HubIO.saveFile(REL, out.text);
-  if (!r || r.ok === false){
-    await HubDialog.alert((r && r.msg) || 'o servidor recusou a gravação', { title: 'não salvou' });
-    return;
-  }
-  /* aplica sem recarregar: um F5 aqui jogaria fora edicao nao salva da folha */
-  HubCore.setLibTables(typeof renameMap !== 'undefined' ? renameMap : null, nova);
-  const quantos = model.sheets.reduce((k, sh) => k + sh.comps.filter(c => c.sym === de).length, 0);
+  const aoAplicar = symOpts && symOpts.aoAplicar;
   fechaSymModal();
-  reapply();
-  HubDialog.toast('"' + de + '" agora usa "' + para + '"'
-                  + (quantos > 1 ? ' — ' + quantos + ' componentes' : ''), 'ok');
-  /* a escolha ja vale; agora, se foi pedido la em cima, o desenho vai para a BIBLIOTECA */
+  /* dizer QUAL das duas coisas aconteceu: multi-parte recebe so a identidade, e prometer
+     troca de desenho que nao houve e o comeco de "mas eu troquei e nao mudou nada" */
+  const so = (res.soIdentidade || []).length > 0;
+  HubDialog.toast(refs.join(', ') + (so
+    ? ' recebeu a identidade de "' + para + '" — o desenho fica, porque é multi-parte.'
+    : ' → "' + para + '"') + ' Ctrl+Z desfaz, e só o Salvar grava.', 'ok');
+  for (const rc of (res.recusados || [])) HubDialog.toast('recusado: ' + rc.porque, 'warn', 9000);
+  if (typeof aoAplicar === 'function') aoAplicar({ refs: refs, componente: para, res: res });
+
+  /* a troca ja vale na folha; agora, se foi pedido la em cima, o desenho vai para a
+     BIBLIOTECA — e dali em diante o simbolo deixa de nascer como quadrado vermelho */
   if (atribuir) await gravaDesenhoNaBiblioteca(emg, para);
 }
 
