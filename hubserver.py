@@ -926,6 +926,17 @@ except Exception as _e:            # noqa: BLE001
     print('AVISO: envio da lista ao Odoo desligado (%s) — falta odoolista_server.py '
           'ou odoolista.py na raiz do workspace.' % _e)
 
+# ─────────────── lista de materiais do Odoo sobre o esquema (so leitura) ───────────────
+# O caminho de volta do de cima: a BoM da PCB no Odoo vira vinculo para os componentes do
+# projeto. Sob try pela mesma razao — um arquivo novo que nao viajou no merge nao pode
+# impedir o hub inteiro de subir.
+try:
+    import odoobom_server          # noqa: E402
+    odoobom_server.registra(app, ROOT)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: lista de materiais do Odoo desligada (%s) — falta odoobom_server.py '
+          'ou odoobom.py na raiz do workspace.' % _e)
+
 
 def _lan_ip():
     try:
