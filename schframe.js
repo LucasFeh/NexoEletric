@@ -2300,7 +2300,12 @@ async function usarSimboloEscolhido(){
     }
     const aoAplicar = symOpts.aoAplicar;
     fechaSymModal();
-    HubDialog.toast(refs.join(', ') + ' → "' + para + '" — Ctrl+Z desfaz, e só o Salvar grava.', 'ok');
+    /* dizer QUAL das duas coisas aconteceu: multi-parte recebe so a identidade, e prometer
+       troca de simbolo que nao houve e o comeco de "mas eu troquei e nao mudou nada" */
+    const so = (res.soIdentidade || []).length > 0;
+    HubDialog.toast(refs.join(', ') + (so
+      ? ' recebeu a identidade de "' + para + '" — o desenho fica, porque é multi-parte.'
+      : ' → "' + para + '"') + ' Ctrl+Z desfaz, e só o Salvar grava.', 'ok');
     for (const rc of (res.recusados || [])) HubDialog.toast('recusado: ' + rc.porque, 'warn', 9000);
     if (typeof aoAplicar === 'function') aoAplicar({ refs: refs, componente: para, res: res });
     return;
@@ -2641,13 +2646,26 @@ window.__hubAplicaVinculos = function(vinculos){
       recusados.push({ componente:nome, porque:'o texto tem a sequencia que o gravador do schematic.js recusa' });
       continue;
     }
+    /* MULTI-PARTE NAO TROCA DE SIMBOLO, e quem decide isso e ESTA funcao, olhando a folha.
+       Todo alias de valor do almoxarifado tem uma parte so; um conector desenhado em 16
+       partes perderia 15 e a fiacao junto. Grava-se a identidade e o desenho fica.
+
+       Isto era responsabilidade de quem chamava, e custou um projeto: o painel da BoM
+       calculava `soParams` a partir do grupo, mas o caminho novo de "resolver pela lista do
+       Odoo" nao calculava nada — e o CN4 de um DMB, com 4 partes, saiu com 2 (2026-09-15).
+       A guarda mudou de lugar: o `porRef` daqui SABE quantas partes cada designador tem, e
+       nenhum chamador precisa lembrar de uma regra que a folha ja responde. O `v.soParams`
+       continua valendo para quem quer so a identidade mesmo sendo de uma parte. */
+    let multiParte = false;
+    for (const ref of refs)
+      for (const c of porRef.get(ref))
+        if ((c.part || 1) > 1 || porRef.get(ref).length > 1) multiParte = true;
+    const soParams = !!v.soParams || multiParte;
     planos.push({
       refs, comment, params,
-      /* MULTI-PARTE nao troca de simbolo. Todo alias de valor do almoxarifado tem uma parte
-         so; um conector desenhado em 16 partes perderia 15 e a fiacao junto. Grava-se a
-         identidade e o desenho fica — dito na tela, nao escondido. */
-      sym: v.soParams ? null : (res.name || nome),
-      soParams: !!v.soParams,
+      sym: soParams ? null : (res.name || nome),
+      soParams: soParams,
+      multiParte: multiParte,
       /* resolveu, mas nao pelo nome exato: o lib-subs.js guarda escolhas GLOBAIS por nome e
          elas vencem o nome exato. Gravar "X" e a folha desenhar "Y" nao e erro de gravacao,
          e surpresa — e surpresa tem de sair na tela. */
@@ -2671,6 +2689,7 @@ window.__hubAplicaVinculos = function(vinculos){
   commit();
   limpaSel();
   return { ok:true, vinculos:planos.length, refs:refsTocados, itens, recusados,
+           soIdentidade: planos.filter(p => p.multiParte).map(p => p.refs.join(', ')),
            desvios: planos.filter(p => p.desvio).map(p => ({ refs:p.refs, sym:p.sym,
                                                              como:p.desvio.como, vira:p.desvio.vira })) };
 };
