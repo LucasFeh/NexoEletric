@@ -189,10 +189,23 @@ deploy roda.
 ```bash
 sudo -u altiumhub mkdir -p /srv/altiumhub/shared/{Libs,tools/almox,tools/symbols}
 sudo -u altiumhub tee /srv/altiumhub/shared/hub-almox.json >/dev/null <<'J'
-{"url":"http://127.0.0.1:8070","db":"odoo_db","login":"SEU_LOGIN","senha":"SENHA_NOVA"}
+{"url":"http://192.168.15.192:8070","db":"odoo_db","login":"SEU_LOGIN","senha":"SENHA_NOVA"}
 J
-sudo -u altiumhub chmod 600 /srv/altiumhub/shared/hub-almox.json
+sudo -u altiumhub tee /srv/altiumhub/shared/.hub-odoo.json >/dev/null <<'J'
+{"url":"http://192.168.15.192:8070","db":"odoo_db","login":"SEU_LOGIN","modelo":"di.lista.altium","senha":"SENHA_NOVA"}
+J
+sudo -u altiumhub chmod 600 /srv/altiumhub/shared/hub-almox.json /srv/altiumhub/shared/.hub-odoo.json
 ```
+
+**`sudo -u altiumhub` e `tee`, não `cat >`.** Tudo sob `/srv/altiumhub` é do usuário
+`altiumhub`, e o redirecionamento `>` acontece no shell de *quem chamou* — com
+`sudo -u altiumhub cat > arquivo` o `sudo` até roda, mas quem tenta escrever é o seu
+login, e sai `Permission denied`. O mesmo vale para o `deploy.sh`: rodá-lo com outro
+login falha no `env_file` com uma mensagem que parece ser de chmod e não é.
+
+`SEU_LOGIN` e `SENHA_NOVA` são para trocar, e não trocá-los tem sintoma próprio: o painel
+da lista de materiais mostra a recusa do Odoo em texto vermelho. Se aparecer
+`Failed to fetch` em vez disso, o hub é anterior a 2026-09-15 — ver a pendência 2.2.
 
 `http://127.0.0.1:8070` funciona porque o compose usa rede do host, e
 `http://192.168.15.192:8070` — o padrão do código desde 2026-09-15 — funciona de qualquer

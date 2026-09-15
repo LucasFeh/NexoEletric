@@ -77,6 +77,19 @@ erro() { echo "!! $*" >&2; exit 1; }
 dc()   { docker compose --project-directory "$BASE" -f "$BASE/compose.yml" "$@"; }
 
 [ $# -eq 1 ] || erro "uso: deploy.sh <commit>"
+
+# ── 0a. o usuario certo, ANTES de qualquer outra coisa ──────────────────────
+# Rodar como outro login e o tropeco mais comum aqui, e ele nao se denuncia: tudo sob
+# $BASE e do altiumhub, entao quem roda como `odoo` (ou como o proprio login) so esbarra
+# la na frente, no env_file -- com uma mensagem que fala de permissao de ARQUIVO e manda
+# consertar um chmod que ja esta certo. Medido em 2026-09-15: /etc/altiumhub/senha.env
+# estava exatamente como o INSTALL manda (root:altiumhub 640) e a mensagem mandava
+# arruma-lo assim mesmo. O nome do usuario na frente mata a duvida antes de ela nascer.
+DONO=$(stat -c %U "$BASE" 2>/dev/null || echo altiumhub)
+if [ "$(id -un)" != "$DONO" ]; then
+  erro "este script roda como '$DONO' e voce e '$(id -un)'.
+   Rode:  sudo -u $DONO $0 $1"
+fi
 COMMIT=$(git --git-dir="$REPO" rev-parse --verify "$1^{commit}") || erro "commit desconhecido: $1"
 CURTO=$(git --git-dir="$REPO" rev-parse --short "$COMMIT")
 DEST=$BASE/releases/$CURTO
