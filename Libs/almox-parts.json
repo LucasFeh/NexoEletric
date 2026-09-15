@@ -138,6 +138,7 @@
 "35883JM": "2026-09-02 17:21",
 "AD711KN": "2026-09-02 17:21",
 "ADA4522-2ARMZ": "2026-09-02 17:21",
+"AMC1200STDUBRQ1": "2026-09-11 10:26",
 "AMP03GSZ": "2026-09-02 17:21",
 "Analógico de Precisão - ISO256P (Burr-Brown)- Módulo DIP híbrido de 16 pinos": "2026-09-02 17:21",
 "CA3140AMZ": "2026-09-02 17:21",
@@ -170,6 +171,7 @@
 "35883JM": 1,
 "AD711KN": 2,
 "ADA4522-2ARMZ": 3,
+"AMC1200STDUBRQ1": 30,
 "AMP03GSZ": 4,
 "Analógico de Precisão - ISO256P (Burr-Brown)- Módulo DIP híbrido de 16 pinos": 5,
 "CA3140AMZ": 6,
@@ -197,7 +199,7 @@
 "TL072CP": 29,
 "de Precisão LTC2050HVCS8#PBF": 7
 },
-"prox": 30
+"prox": 31
 },
 "BARRA DE PINOS 10V": {
 "desde": {
@@ -1877,7 +1879,9 @@
 "MAX1480BCPI+": "2026-09-02 17:21",
 "MC78L12ABP": "2026-09-02 17:21",
 "MC7918C": "2026-09-02 17:21",
+"MCP1316T-29LE/OT": "2026-09-08 16:15",
 "SI8380S-IU-IU 2.5kv": "2026-09-02 17:21",
+"SN65HVD75DR": "2026-09-08 16:15",
 "SN74180N": "2026-09-02 17:21",
 "SN74HC04AN": "2026-09-02 17:21",
 "TL431": "2026-09-02 17:21",
@@ -1901,7 +1905,9 @@
 "MAX1480BCPI+": 13,
 "MC78L12ABP": 14,
 "MC7918C": 15,
+"MCP1316T-29LE/OT": 22,
 "SI8380S-IU-IU 2.5kv": 16,
+"SN65HVD75DR": 23,
 "SN74180N": 18,
 "SN74HC04AN": 17,
 "TL431": 20,
@@ -1909,7 +1915,57 @@
 "VP1003": 21,
 "calendário digital PMOS da Fairchild": 5
 },
-"prox": 22
+"prox": 24
+},
+"COMPARADOR [14P]": {
+"desde": {
+"LM2901N": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"LM2901N": 1
+},
+"prox": 2
+},
+"COMPARADOR [16P]": {
+"desde": {
+"SN74LS85N": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"SN74LS85N": 1
+},
+"prox": 2
+},
+"COMPARADOR [8P]": {
+"desde": {
+"36V 2.4mA -LM311N": "2026-09-08 16:15",
+"LM311P": "2026-09-08 16:15",
+"LM393N": "2026-09-08 16:15",
+"LM393P": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"36V 2.4mA -LM311N": 1,
+"LM311P": 2,
+"LM393N": 3,
+"LM393P": 4
+},
+"prox": 5
+},
+"COMPARADOR [PINAGEM A DEFINIR]": {
+"desde": {
+"ADCMP392": "2026-09-08 16:15",
+"CD74HC85EE4": "2026-09-08 16:15",
+"LM2903P": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"ADCMP392": 1,
+"CD74HC85EE4": 2,
+"LM2903P": 3
+},
+"prox": 4
 },
 "CONECTOR 10V": {
 "desde": {
@@ -2698,6 +2754,78 @@
 "ste-28": 143
 },
 "prox": 149
+},
+"CONTADOR [14P]": {
+"desde": {
+"CD4023BE": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"CD4023BE": 1
+},
+"prox": 2
+},
+"CONTADOR [16P]": {
+"desde": {
+"SN74LS193N": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"SN74LS193N": 1
+},
+"prox": 2
+},
+"CONTADOR [PINAGEM A DEFINIR]": {
+"desde": {
+"CD4029BE": "2026-09-08 16:15",
+"CDM-DI211602": "2026-09-08 16:15",
+"CDM4L-DI221651": "2026-09-08 16:15",
+"TPS3828-33DBVR": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"CD4029BE": 1,
+"CDM-DI211602": 3,
+"CDM4L-DI221651": 2,
+"TPS3828-33DBVR": 4
+},
+"prox": 5
+},
+"CONTROLADOR [8P]": {
+"desde": {
+"MC33153PG": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"MC33153PG": 1
+},
+"prox": 2
+},
+"CONTROLADOR [PINAGEM A DEFINIR]": {
+"desde": {
+"CDM-DI211602 REV. D": "2026-09-08 16:15",
+"ICN2037BP": "2026-09-08 16:15",
+"L298N": "2026-09-08 16:15",
+"LM5116MHX/NOPB": "2026-09-08 16:15",
+"LM5122QMH/NOPB": "2026-09-08 16:15",
+"SAÍDAS: TENSÃO/CORRENTE - CDM-DI211602 REV. D": "2026-09-08 16:15",
+"TCA785": "2026-09-08 16:15",
+"TDA4863-2": "2026-09-08 16:15",
+"UCC2960D": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"CDM-DI211602 REV. D": 1,
+"ICN2037BP": 2,
+"L298N": 3,
+"LM5116MHX/NOPB": 4,
+"LM5122QMH/NOPB": 5,
+"SAÍDAS: TENSÃO/CORRENTE - CDM-DI211602 REV. D": 6,
+"TCA785": 7,
+"TDA4863-2": 8,
+"UCC2960D": 9
+},
+"prox": 10
 },
 "CONVERSOR A/D [10P]": {
 "desde": {
@@ -3555,6 +3683,38 @@
 },
 "prox": 2
 },
+"DRIVER [20P]": {
+"desde": {
+"DRV8805DWR": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"DRV8805DWR": 1
+},
+"prox": 2
+},
+"DRIVER [PINAGEM A DEFINIR]": {
+"desde": {
+"AM26LS31CD": "2026-09-08 16:15",
+"DMPU-ATE220004": "2026-09-08 16:15",
+"DTN-DI251837": "2026-09-08 16:15",
+"DTNDT-DI251838": "2026-09-08 16:15",
+"HT0440LG-G": "2026-09-08 16:15",
+"MAX1480BEPI+": "2026-09-08 16:15",
+"MAX7219CNG+": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"AM26LS31CD": 1,
+"DMPU-ATE220004": 2,
+"DTN-DI251837": 3,
+"DTNDT-DI251838": 4,
+"HT0440LG-G": 5,
+"MAX1480BEPI+": 6,
+"MAX7219CNG+": 7
+},
+"prox": 8
+},
 "FUSIVEL": {
 "desde": {
 "0.25A 250V (5x20mm)": "2026-09-02 17:21",
@@ -4392,6 +4552,42 @@
 "de 10K OHM 2W (CMU1031E)": 46
 },
 "prox": 58
+},
+"REFERENCIA DE TENSAO [3P]": {
+"desde": {
+"MCP1541T-I/TT": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"MCP1541T-I/TT": 1
+},
+"prox": 2
+},
+"REFERENCIA DE TENSAO [8P]": {
+"desde": {
+"LT1021": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"LT1021": 1
+},
+"prox": 2
+},
+"REFERENCIA DE TENSAO [PINAGEM A DEFINIR]": {
+"desde": {
+"REF195ESZ": "2026-09-08 16:15",
+"TL431ACD": "2026-09-08 16:15",
+"TL431IDT": "2026-09-08 16:15",
+"TLE2425IDR": "2026-09-08 16:15"
+},
+"desdeSym": "2026-09-08 16:15",
+"ids": {
+"REF195ESZ": 1,
+"TL431ACD": 2,
+"TL431IDT": 3,
+"TLE2425IDR": 4
+},
+"prox": 5
 },
 "REGULADOR [3P]": {
 "desde": {
@@ -5231,6 +5427,7 @@
 "4.7K 1/4W 1% 25ppm": "2026-09-02 17:21",
 "4.7K 1/8W 0.1% 25ppm": "2026-09-02 17:21",
 "4.7K 1/8W 0.1% 50ppm": "2026-09-02 17:21",
+"4.7K NAO-EXISTE-NO-ODOO": "2026-09-14 11:42",
 "4.7R 1/4W 1% 100ppm": "2026-09-02 17:21",
 "4.99K 1/4W 0.1% 15ppm": "2026-09-02 17:21",
 "4.99K 1/4W 1% 100ppm": "2026-09-02 17:21",
@@ -5490,6 +5687,7 @@
 "4.7K 1/4W 1% 25ppm": 134,
 "4.7K 1/8W 0.1% 25ppm": 136,
 "4.7K 1/8W 0.1% 50ppm": 137,
+"4.7K NAO-EXISTE-NO-ODOO": 257,
 "4.7R 1/4W 1% 100ppm": 15,
 "4.99K 1/4W 0.1% 15ppm": 140,
 "4.99K 1/4W 1% 100ppm": 141,
@@ -5561,7 +5759,7 @@
 "Tubular 270R 25W 10%": 65,
 "detecção de corrente 10mOhms 10W 1%": 6
 },
-"prox": 257
+"prox": 258
 },
 "RTC [PINAGEM A DEFINIR]": {
 "desde": {
@@ -5944,6 +6142,7 @@
 "(MOV) Ø7mm 4VCA 22V-CL 0.4J V8ZA1P": "2026-09-02 17:21",
 "(VDR) 250V 11J PV250K3225R2": "2026-09-02 17:21",
 "(VDR) 30Vac/38Vcc 10J B72520X1300K062": "2026-09-02 17:21",
+"320V V20E320P": "2026-09-14 11:42",
 "S14K17 53V 5J 7.5mm": "2026-09-02 17:21",
 "de Metal (MOV) - 4VCA 0.8J V8ZA2P": "2026-09-02 17:21",
 "de Metal (MOV) - Ø10mm 220V 140VCA 39J (Obsoleto) Z10D221": "2026-09-02 17:21",
@@ -5990,6 +6189,7 @@
 "(MOV) Ø7mm 4VCA 22V-CL 0.4J V8ZA1P": 1,
 "(VDR) 250V 11J PV250K3225R2": 33,
 "(VDR) 30Vac/38Vcc 10J B72520X1300K062": 7,
+"320V V20E320P": 44,
 "S14K17 53V 5J 7.5mm": 16,
 "de Metal (MOV) - 4VCA 0.8J V8ZA2P": 2,
 "de Metal (MOV) - Ø10mm 220V 140VCA 39J (Obsoleto) Z10D221": 27,
@@ -6007,6 +6207,6 @@
 "de Metal (MOV) Ø5mm 50V 10J 820KD07J": 15,
 "de Metal (MOV) Ø7mm 250VCA 390V VDRS05C250BSE": 35
 },
-"prox": 44
+"prox": 45
 }
 }
