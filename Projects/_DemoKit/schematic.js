@@ -4,21 +4,9 @@ var schematic = {
 "generated":"exemplo sintetico",
 "units":"mil",
 "items":[
-{"t":"sheet","name":"main","size":"A4"}
-,{"t":"comp","sheet":"main","ref":"P1","sym":"CONN2","part":1,"x":1200,"y":3000,"rot":0,"mirror":true,"footprint":"HDR2X1","comment":"ALIM 5V"}
-,{"t":"comp","sheet":"main","ref":"R1","sym":"RES","part":1,"x":2400,"y":3400,"rot":0,"mirror":false,"footprint":"R0805","comment":"330R"}
-,{"t":"comp","sheet":"main","ref":"C1","sym":"CAP","part":1,"x":1800,"y":2800,"rot":90,"mirror":false,"footprint":"C0805","comment":"100n"}
-,{"t":"comp","sheet":"main","ref":"D1","sym":"LED","part":1,"x":3200,"y":3400,"rot":0,"mirror":false,"footprint":"LED0805","comment":"LED VERMELHO"}
-,{"t":"wire","sheet":"main","pts":[[1400,3100],[1800,3100],[1800,3400],[2200,3400]]}
-,{"t":"wire","sheet":"main","pts":[[1800,2900],[1800,3100]]}
-,{"t":"wire","sheet":"main","pts":[[2600,3400],[3000,3400]]}
-,{"t":"wire","sheet":"main","pts":[[3400,3400],[3600,3400],[3600,3000]]}
-,{"t":"wire","sheet":"main","pts":[[1400,3000],[1600,3000]]}
-,{"t":"netlabel","sheet":"main","net":"VCC","x":1800,"y":3400,"rot":0}
-,{"t":"netlabel","sheet":"main","net":"NET_LED","x":2800,"y":3400,"rot":0}
-,{"t":"power","sheet":"main","net":"GND","style":"GndPower","x":1800,"y":2700,"rot":270}
-,{"t":"power","sheet":"main","net":"GND","style":"GndPower","x":3600,"y":3000,"rot":270}
-,{"t":"power","sheet":"main","net":"GND","style":"GndPower","x":1600,"y":3000,"rot":270}
-,{"t":"junction","sheet":"main","x":1800,"y":3100}
-,{"t":"text","sheet":"main","s":"DEMO KIT - LED + RC","x":2200,"y":3800,"h":12}
+{"t":"sheet","name":"main","size":"A4"},
+{"t":"comp","sheet":"main","ref":"J1","sym":"5 vias 180\u00ba 2.54mm Macho","x":2400,"y":5700,"rot":0,"footprint":"M7","comment":"5 vias 180\u00ba 2.54mm Macho","params":"Comment=5 vias 180\u00ba 2.54mm Macho;Value=5 vias 180\u00ba 2.54mm Macho;OdooId=1038;Estoque=95;Local=G-86-2;Custo=1.4700;Descricao=Barra De Pinos Simples - 5 vias 180\u00ba 2.54mm Macho;ValorId=1"},
+{"t":"comp","sheet":"main","ref":"J2","sym":"7 vias 180\u00ba 2.54mm Macho","x":3100,"y":5700,"rot":0,"footprint":"M7","comment":"7 vias 180\u00ba 2.54mm Macho","params":"Comment=7 vias 180\u00ba 2.54mm Macho;Value=7 vias 180\u00ba 2.54mm Macho;OdooId=1566;Estoque=21;Local=G-86-4;Custo=1.3700;Descricao=Barra De Pinos Simples - 7 vias 180\u00ba 2.54mm Macho;ValorId=2"},
+{"t":"comp","sheet":"main","ref":"C1","sym":"SMD 1206 22uF 25V X5R","x":3800,"y":5700,"rot":0,"footprint":"CAP 1206","comment":"22uF 25V X5R","params":"Comment=22uF 25V X5R;Value=22uF;Encapsulamento=1206;OdooId=2179;Estoque=10;Local=G-160-7;Custo=4.1100;Descricao=Capacitor Cer\u00e2mico 22uF 25V X5R SMD 1206;ValorId=88"},
+{"t":"comp","sheet":"main","ref":"C2","sym":"SMD 0805 10uF 50V X5R","x":4500,"y":5700,"rot":0,"footprint":"CAP 0805","comment":"10uF 50V X5R","params":"Comment=10uF 50V X5R;Value=10uF;Encapsulamento=0805;Mouser=187-CL31B106KBK6PJE;OdooId=113;Estoque=41;Local=G-161-6;Custo=4.6100;Descricao=Capacitor Cer\u00e2mico 10uF 50V X5R SMD 0805;ValorId=86"},
 ]};

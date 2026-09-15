@@ -1,203 +1,201 @@
 var schematic = {
 "format":"schmirror-v2",
 "project":"DMB - DI231765_P2",
-"generated":"08/09/2026 10:15:42",
+"generated":"11/09/2026 17:25:31",
 "units":"mil",
 "items":[
-{"t":"sheet","name":"DE - DI231765_P2","size":"A4","w":11692.913,"h":8267.717}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CI1","sym":"ESP32 30pin","part":1,"x":8052.995,"y":4292.444,"rot":0,"mirror":false,"footprint":"ESP32-DEVKITV1_BOARD","comment":"ESP32"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":16,"x":10969.927,"y":4546.46,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":15,"x":10969.927,"y":4743.31,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":14,"x":10969.927,"y":4940.161,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":13,"x":10970,"y":5140,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":12,"x":10969.927,"y":5333.862,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":11,"x":10969.927,"y":5530.712,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":10,"x":10969.927,"y":5727.562,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":9,"x":10969.927,"y":5924.413,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":8,"x":10969.927,"y":6121.263,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":7,"x":10970,"y":6320,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":6,"x":10969.927,"y":6514.964,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":5,"x":10969.927,"y":6711.814,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":4,"x":10969.927,"y":6908.665,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":3,"x":10970,"y":7100,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":2,"x":10969.927,"y":7300,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00C3O","part":1,"x":10969.927,"y":7499.216,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"CONECTOR HEADER / 16 VIAS / F\u00EAmea"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"R1","io":0,"style":0,"x":9372.995,"y":5892.444,"w":369.765,"fill":"#FF0000","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"D","io":0,"style":0,"x":7483.231,"y":6092.444,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CLK","io":0,"style":0,"x":7483.231,"y":6292.444,"w":369.765,"fill":"#FFFF00","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"LAT","io":0,"style":0,"x":7483.231,"y":6492.444,"w":369.765,"fill":"#D9D9D9","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"OE","io":0,"style":0,"x":7483.231,"y":6892.444,"w":369.765,"fill":"#9900FF","textColor":"#F3F3F3","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"G1","io":0,"style":0,"x":9372.995,"y":6092.444,"w":369.765,"fill":"#00FF00","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"C","io":0,"style":0,"x":7483.231,"y":5892.444,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"E","io":0,"style":0,"x":9372.995,"y":5492.444,"w":369.765,"fill":"#000000","textColor":"#FFFFFF","color":"#FFFFFF"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"R2","io":0,"style":0,"x":9372.995,"y":6492.444,"w":369.765,"fill":"#FF0000","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"B2","io":0,"style":0,"x":9372.995,"y":6892.444,"w":369.765,"fill":"#00FFFF","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"B1","io":0,"style":0,"x":9372.995,"y":6292.444,"w":369.765,"fill":"#00FFFF","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"G2","io":0,"style":0,"x":9372.995,"y":6692.444,"w":369.765,"fill":"#00FF00","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"B","io":0,"style":0,"x":7483.231,"y":5492.444,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"A","io":0,"style":0,"x":7483.231,"y":4492.444,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"R1","io":0,"style":0,"x":10482.052,"y":7499.216,"w":369.765,"fill":"#FF0000","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"G1","io":0,"style":0,"x":10480.235,"y":7300,"w":369.765,"fill":"#00FF00","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"B1","io":0,"style":0,"x":10480.235,"y":7100,"w":369.765,"fill":"#00FFFF","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"R2","io":0,"style":0,"x":10480.235,"y":6710,"w":369.765,"fill":"#FF0000","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"G2","io":0,"style":0,"x":10480.235,"y":6514.964,"w":369.765,"fill":"#00FF00","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"B2","io":0,"style":0,"x":10480.235,"y":6320,"w":369.765,"fill":"#00FFFF","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"E","io":0,"style":0,"x":10480.235,"y":6120,"w":369.765,"fill":"#000000","textColor":"#FFFFFF","color":"#FFFFFF"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"A","io":0,"style":0,"x":10490.162,"y":5924.413,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"B","io":0,"style":0,"x":10490.162,"y":5727.562,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"C","io":0,"style":0,"x":10490.162,"y":5530.712,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"D","io":0,"style":0,"x":10490.162,"y":5333.862,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CLK","io":0,"style":0,"x":10490.162,"y":5137.011,"w":369.765,"fill":"#FFFF00","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"LAT","io":0,"style":0,"x":10490.162,"y":4940.161,"w":369.765,"fill":"#D9D9D9","textColor":"#000000","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"OE","io":0,"style":0,"x":10490.162,"y":4743.31,"w":369.765,"fill":"#9900FF","textColor":"#F3F3F3","color":"#000000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"DS IN","io":0,"style":0,"x":9372.995,"y":5292.444,"w":367.005,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CLK IN","io":0,"style":0,"x":7480,"y":5292.444,"w":372.995,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00C3O","part":1,"x":11021.887,"y":3830,"rot":180,"mirror":false,"footprint":"Conector Header 6 vias","comment":"CONECTOR HEADER / 6 VIAS / Macho"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00C3O","part":2,"x":11021.887,"y":3640,"rot":180,"mirror":false,"footprint":"Conector Header 6 vias","comment":"CONECTOR HEADER / 6 VIAS / Macho"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00C3O","part":4,"x":850,"y":4610,"rot":180,"mirror":true,"footprint":"Conector Header 6 vias","comment":"CONECTOR HEADER / 6 VIAS / Macho"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00C3O","part":5,"x":850,"y":4400,"rot":180,"mirror":true,"footprint":"Conector Header 6 vias","comment":"CONECTOR HEADER / 6 VIAS / Macho"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00C3O","part":6,"x":848.113,"y":4240,"rot":180,"mirror":true,"footprint":"Conector Header 6 vias","comment":"CONECTOR HEADER / 6 VIAS / Macho"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":4,"x":11020.235,"y":2520,"rot":0,"mirror":true,"footprint":"KK 3.96 4p","comment":"KK / 3.96mm/ 4 vias"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":2,"x":10952.122,"y":1950,"rot":0,"mirror":true,"footprint":"KK 3.96 4p","comment":"KK / 3.96mm/ 4 vias"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":1,"x":10950,"y":2130,"rot":0,"mirror":true,"footprint":"KK 3.96 4p","comment":"KK / 3.96mm/ 4 vias"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN4","sym":"CONECTOR PADR\u00C3O","part":3,"x":11017.005,"y":2710,"rot":0,"mirror":true,"footprint":"KK 3.96 4p","comment":"KK / 3.96mm/ 4 vias"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"U1","sym":"88901bc343d40937cf0e66f0656714f","part":1,"x":4255.039,"y":5420,"rot":0,"mirror":false,"footprint":"FP-DW0020A-IPC_A","comment":"SN74HC245DWR"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"DS IN","io":0,"style":0,"x":3888.035,"y":5020,"w":367.005,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"DS OUT","io":0,"style":0,"x":1450,"y":4610,"w":373.074,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"C4","sym":"CAP [  SMD  ]","part":1,"x":3430,"y":5290,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"C3","sym":"CAP EL [  PTH  ]","part":1,"x":3026.926,"y":5335.588,"rot":270,"mirror":false,"footprint":"Cap El 3mm L15 D7","comment":"=Value + '-' + Volts"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"J1","sym":"Jumper 2 Vias","part":1,"x":6740,"y":5690,"rot":0,"mirror":false,"footprint":"JUMPER 2 VIAS PTH","comment":"Jumper 2 Vias"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"R1","sym":"RES [ SMD ]","part":1,"x":7120,"y":5540,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"=Value + ' - ' + Pot\u00EAncia + ' - ' + Tolerancia"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CE IN","io":0,"style":0,"x":7480,"y":4692.444,"w":372.995,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"PL IN","io":0,"style":0,"x":9372.995,"y":5692.444,"w":372.995,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"PL IN","io":0,"style":0,"x":5555.039,"y":4820,"w":318.113,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CLK IN","io":0,"style":0,"x":5555.039,"y":4620,"w":314.961,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CE IN","io":0,"style":0,"x":5555.039,"y":4420,"w":314.961,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"PL OUT1","io":0,"style":0,"x":3860,"y":4820,"w":395.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CLK OUT1","io":0,"style":0,"x":3720,"y":4620,"w":535.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CE OUT1","io":0,"style":0,"x":3820,"y":4420,"w":435.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"U2","sym":"88901bc343d40937cf0e66f0656714f","part":1,"x":4388.113,"y":3420,"rot":0,"mirror":false,"footprint":"FP-DW0020A-IPC_A","comment":"SN74HC245DWR"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"C6","sym":"CAP [  SMD  ]","part":1,"x":3623.074,"y":3270,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"=Value + '-' + Volts"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"C5","sym":"CAP EL [  PTH  ]","part":1,"x":3220,"y":3330,"rot":270,"mirror":false,"footprint":"Cap El 3mm L15 D7","comment":"=Value + '-' + Volts"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"PL OUT1","io":0,"style":0,"x":5688.113,"y":2420,"w":395.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CLK OUT1","io":0,"style":0,"x":5688.113,"y":2620,"w":535.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CE OUT1","io":0,"style":0,"x":5688.113,"y":2820,"w":435.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"PL OUT2","io":0,"style":0,"x":3993.074,"y":2420,"w":395.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CLK OUT2","io":0,"style":0,"x":3853.074,"y":2620,"w":535.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CE OUT2","io":0,"style":0,"x":3953.074,"y":2820,"w":435.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"PL OUT2","io":0,"style":0,"x":10366.848,"y":3830,"w":395.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CLK OUT2","io":0,"style":0,"x":10226.848,"y":3640,"w":535.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"DS OUT","io":0,"style":0,"x":5688.113,"y":3020,"w":373.074,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"DS OUT2","io":0,"style":0,"x":4015.039,"y":3020,"w":373.074,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"DS OUT2","io":0,"style":0,"x":5555.039,"y":5020,"w":373.074,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"D1","sym":"DIODO SMD","part":1,"x":10700,"y":2510,"rot":180,"mirror":false,"footprint":"DO-214AC","comment":"=Modelo + Value"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"D2","sym":"CMP-2000-05081-2","part":1,"x":2286.851,"y":7290,"rot":0,"mirror":false,"footprint":"SOT-23","comment":"CDSOT23-SM712"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CI2","sym":"CMP-0694-00003-2","part":1,"x":3530,"y":7270,"rot":0,"mirror":true,"footprint":"D008a_n","comment":"SN65HVD75DR"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"J2","sym":"Jumper 2","part":1,"x":1656.851,"y":6990,"rot":90,"mirror":true,"footprint":"JUMPER 2 VIAS PTH","comment":"Jumper"}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"+3V3","style":"Circle","x":3011.968,"y":7670.63,"rot":90}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"0V","style":"GndSignal","x":3011.968,"y":6804.488,"rot":270}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"0V","style":"GndSignal","x":2681.727,"y":7253.15,"rot":270}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"IO2","x":4231.022,"y":7065.588,"rot":0}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"R2","sym":"Res SMD 1206","part":1,"x":1656.851,"y":7430,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"120R 1%"}
-,{"t":"text","sheet":"DE - DI231765_P2","s":"RS485","x":1280,"y":7160,"h":10}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"J5","sym":"Jumper 2 Vias","part":1,"x":1120,"y":4860,"rot":0,"mirror":false,"footprint":"JUMPER 2 VIAS PTH","comment":"Jumper 2 Vias"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"J6","sym":"Jumper 2 Vias","part":1,"x":1120,"y":4610,"rot":0,"mirror":false,"footprint":"JUMPER 2 VIAS PTH","comment":"Jumper 2 Vias"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00C3O","part":3,"x":830,"y":5080,"rot":0,"mirror":false,"footprint":"Conector Header 6 vias","comment":"CONECTOR HEADER / 6 VIAS / Macho"}
-,{"t":"port","sheet":"DE - DI231765_P2","net":"CE OUT2","io":0,"style":0,"x":1430,"y":5080,"w":435.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"J3","sym":"Jumper 2 Vias","part":1,"x":1100,"y":5330,"rot":0,"mirror":false,"footprint":"JUMPER 2 VIAS PTH","comment":"Jumper 2 Vias"}
-,{"t":"comp","sheet":"DE - DI231765_P2","ref":"J4","sym":"Jumper 2 Vias","part":1,"x":1100,"y":5080,"rot":0,"mirror":false,"footprint":"JUMPER 2 VIAS PTH","comment":"Jumper 2 Vias"}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"A","x":1340,"y":7710,"rot":0}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"B","x":1370,"y":6820,"rot":0}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"RX","x":4030,"y":7570,"rot":0}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"TX","x":4030,"y":7370,"rot":0}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"RX","x":7740,"y":5092.444,"rot":0}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"TX","x":7740,"y":4892.444,"rot":0}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"IO2","x":7740,"y":6692.444,"rot":0}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"B","x":1450,"y":5330,"rot":0}
-,{"t":"netlabel","sheet":"DE - DI231765_P2","net":"A","x":1470,"y":4860,"rot":0}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"5V","style":"Bar","x":1260,"y":4400,"rot":0}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":1180,"y":4070,"rot":270}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"5V","style":"Bar","x":3620,"y":3720,"rot":90}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":3623.074,"y":2930,"rot":270}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":3430,"y":4940,"rot":270}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"+3V3","style":"Circle","x":3430,"y":5825.669,"rot":90}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"5V","style":"Bar","x":9450,"y":7480,"rot":90}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"+3V3","style":"Circle","x":7710,"y":7480,"rot":90}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"+3V3","style":"Circle","x":6510,"y":5690,"rot":180}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":7120,"y":5160,"rot":270}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":6080,"y":4010,"rot":270}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":6230,"y":1940,"rot":270}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":10320,"y":1900,"rot":270}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"5V","style":"Bar","x":10350,"y":2510,"rot":180}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":10160,"y":4300,"rot":270}
-,{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":7070,"y":6860,"rot":270}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10851.817,7499.216],[10969.927,7499.216]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,7300],[10850,7300]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10970,7100],[10850,7100]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,6711.814],[10850,6711.814],[10850,6710]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,6514.964],[10850,6514.964]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10970,6320],[10850,6320]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10850,6120],[10969.927,6120],[10969.927,6121.263]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,4743.31],[10969.927,4743.31]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,4940.161],[10969.927,4940.161]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5137.011],[10859.927,5140],[10970,5140]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5333.862],[10969.927,5333.862]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5530.712],[10969.927,5530.712]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5727.562],[10969.927,5727.562]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5924.413],[10969.927,5924.413]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10761.887,3640],[11021.887,3640]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[11021.887,3830],[10761.887,3830]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1260,4400],[850,4400]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3430,5825.669],[3430,5440]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3430,5110],[3430,5140]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[11017.005,2710],[10950,2710],[10950,2520]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[6940,5690],[7120,5690],[7120,5692.444],[7852.995,5692.444]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3623.074,3090],[3623.074,3120]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4388.113,3420],[3623.074,3420],[3620,3420],[3220,3420]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10350,2510],[10450,2510]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10850,2510],[10950,2510],[10950,2520],[11020.235,2520]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10880,2130],[10950,2130]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2526.851,7290],[2681.727,7290],[2681.727,7253.15]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2056.851,7360],[1906.851,7360],[1906.851,7710]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1656.851,7230],[1656.851,7190]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3030,7570],[3011.968,7570],[3011.968,7670.63]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3030,6970],[3011.968,6970],[3011.968,6804.488]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1656.851,6820],[1656.851,6890]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3030,7170],[2891.022,7170],[2891.022,6820],[1911.022,6820]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4054.877,7065.588],[4054.877,6970],[4030,6970]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4030,7170],[4054.877,7170],[4054.877,7065.588],[4231.022,7065.588]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1010,4610],[1010,4860],[1020,4860]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[850,4610],[1010,4610],[1020,4610]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1320,4610],[1450,4610]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1470,4860],[1320,4860]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[990,5080],[990,5330],[1000,5330]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[830,5080],[990,5080],[1000,5080]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1300,5080],[1430,5080]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1450,5330],[1300,5330]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3030,7370],[2893.858,7370],[2893.858,7710],[1906.851,7710],[1656.851,7710],[1656.851,7630]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1656.851,7710],[1340,7710]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2056.851,7220],[1911.022,7220],[1911.022,6820],[1656.851,6820],[1370,6820]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,5092.444],[7740,5092.444]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,4892.444],[7740,4892.444]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,6692.444],[7740,6692.444]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[848.113,4240],[1180,4240],[1180,4070]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3220,3120],[3220,3090],[3623.074,3090],[3623.074,2930]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3026.926,5125.588],[3026.926,5110],[3430,5110],[3430,4940]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[9372.995,7292.444],[9372.995,7290],[9450,7290],[9450,7480]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,7292.444],[7710,7292.444],[7710,7480]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[6640,5690],[6510,5690]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7120,5290],[7120,5160]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[5555.039,4120],[6080,4120],[6080,4010]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[5555.039,5420],[6080,5420],[6080,4120]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3026.926,5425.588],[3026.926,5440],[3430,5440]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4255.039,5420],[3430,5420],[3430,5440]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4255.039,5220],[3850,5220],[3850,5110],[3430,5110]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4388.113,3220],[3950,3220],[3950,3090],[3623.074,3090]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[5688.113,2120],[6230,2120],[6230,1940]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[5688.113,3420],[6230,3420],[6230,2120]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10952.122,1950],[10880,1950],[10880,2130],[10320,2130],[10320,1900]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,6908.665],[10160,6908.665],[10160,4546.46]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,7092.444],[7070,7092.444],[7070,6860]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,4546.46],[10160,4546.46],[10160,4300]]}
-,{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3620,3720],[3620,3420]]}
+{"t":"sheet","name":"DE - DI231765_P2","size":"A4","w":11692.913,"h":8267.717},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CI1","sym":"ESP32 DEVKIT V1 ESPWROOM32E-H4","part":1,"x":8052.995,"y":4292.444,"rot":0,"mirror":false,"footprint":"ESP32-DEVKITV1_BOARD","comment":"ESP32 DEVKIT V1 ESPWROOM32E-H4","params":"Comment=ESP32 DEVKIT V1 ESPWROOM32E-H4;Value=ESP32 DEVKIT V1 ESPWROOM32E-H4;OdooId=1091;Estoque=8;Local=CX-89A;Custo=62.0000;Descricao=M\u00f3dulo - ESP32 DEVKIT V1 ESPWROOM32E-H4;ValorId=35"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":16,"x":10969.927,"y":4546.46,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":15,"x":10969.927,"y":4743.31,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":14,"x":10969.927,"y":4940.161,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":13,"x":10970,"y":5140,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":12,"x":10969.927,"y":5333.862,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":11,"x":10969.927,"y":5530.712,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":10,"x":10969.927,"y":5727.562,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":9,"x":10969.927,"y":5924.413,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":8,"x":10969.927,"y":6121.263,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":7,"x":10970,"y":6320,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":6,"x":10969.927,"y":6514.964,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":5,"x":10969.927,"y":6711.814,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":4,"x":10969.927,"y":6908.665,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":3,"x":10970,"y":7100,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":2,"x":10969.927,"y":7300,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN1","sym":"CONECTOR PADR\u00c3O","part":1,"x":10969.927,"y":7499.216,"rot":180,"mirror":false,"footprint":"CONECTOR LATCH FEMEA","comment":"Latch 16 vias (2x8) passo 2.54mm 180\u00ba","params":"Comment=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;Value=Latch 16 vias (2x8) passo 2.54mm 180\u00ba;OdooId=1428;Estoque=5;Local=G-51-3;Custo=1.9600;Descricao=Conector Latch 16 vias (2x8) passo 2.54mm 180\u00ba;ValorId=3"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"R1","io":0,"style":0,"x":9372.995,"y":5892.444,"w":369.765,"fill":"#FF0000","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"D","io":0,"style":0,"x":7483.231,"y":6092.444,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CLK","io":0,"style":0,"x":7483.231,"y":6292.444,"w":369.765,"fill":"#FFFF00","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"LAT","io":0,"style":0,"x":7483.231,"y":6492.444,"w":369.765,"fill":"#D9D9D9","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"OE","io":0,"style":0,"x":7483.231,"y":6892.444,"w":369.765,"fill":"#9900FF","textColor":"#F3F3F3","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"G1","io":0,"style":0,"x":9372.995,"y":6092.444,"w":369.765,"fill":"#00FF00","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"C","io":0,"style":0,"x":7483.231,"y":5892.444,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"E","io":0,"style":0,"x":9372.995,"y":5492.444,"w":369.765,"fill":"#000000","textColor":"#FFFFFF","color":"#FFFFFF"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"R2","io":0,"style":0,"x":9372.995,"y":6492.444,"w":369.765,"fill":"#FF0000","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"B2","io":0,"style":0,"x":9372.995,"y":6892.444,"w":369.765,"fill":"#00FFFF","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"B1","io":0,"style":0,"x":9372.995,"y":6292.444,"w":369.765,"fill":"#00FFFF","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"G2","io":0,"style":0,"x":9372.995,"y":6692.444,"w":369.765,"fill":"#00FF00","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"B","io":0,"style":0,"x":7483.231,"y":5492.444,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"A","io":0,"style":0,"x":7483.231,"y":4492.444,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"R1","io":0,"style":0,"x":10482.052,"y":7499.216,"w":369.765,"fill":"#FF0000","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"G1","io":0,"style":0,"x":10480.235,"y":7300,"w":369.765,"fill":"#00FF00","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"B1","io":0,"style":0,"x":10480.235,"y":7100,"w":369.765,"fill":"#00FFFF","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"R2","io":0,"style":0,"x":10480.235,"y":6710,"w":369.765,"fill":"#FF0000","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"G2","io":0,"style":0,"x":10480.235,"y":6514.964,"w":369.765,"fill":"#00FF00","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"B2","io":0,"style":0,"x":10480.235,"y":6320,"w":369.765,"fill":"#00FFFF","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"E","io":0,"style":0,"x":10480.235,"y":6120,"w":369.765,"fill":"#000000","textColor":"#FFFFFF","color":"#FFFFFF"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"A","io":0,"style":0,"x":10490.162,"y":5924.413,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"B","io":0,"style":0,"x":10490.162,"y":5727.562,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"C","io":0,"style":0,"x":10490.162,"y":5530.712,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"D","io":0,"style":0,"x":10490.162,"y":5333.862,"w":369.765,"fill":"#0000FF","textColor":"#FFFFFF","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CLK","io":0,"style":0,"x":10490.162,"y":5137.011,"w":369.765,"fill":"#FFFF00","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"LAT","io":0,"style":0,"x":10490.162,"y":4940.161,"w":369.765,"fill":"#D9D9D9","textColor":"#000000","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"OE","io":0,"style":0,"x":10490.162,"y":4743.31,"w":369.765,"fill":"#9900FF","textColor":"#F3F3F3","color":"#000000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"DS IN","io":0,"style":0,"x":9372.995,"y":5292.444,"w":367.005,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CLK IN","io":0,"style":0,"x":7480,"y":5292.444,"w":372.995,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00c3O","part":1,"x":11021.887,"y":3830,"rot":180,"mirror":false,"footprint":"Conector Header 6 vias","comment":"Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba","params":"Comment=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;Value=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;OdooId=1431;Estoque=26;Local=G-52-1;Custo=0.7400;Descricao=Conector Header Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba PTH;ValorId=15"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00c3O","part":2,"x":11021.887,"y":3640,"rot":180,"mirror":false,"footprint":"Conector Header 6 vias","comment":"Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba","params":"Comment=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;Value=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;OdooId=1431;Estoque=26;Local=G-52-1;Custo=0.7400;Descricao=Conector Header Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba PTH;ValorId=15"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00c3O","part":4,"x":850,"y":4610,"rot":180,"mirror":true,"footprint":"Conector Header 6 vias","comment":"Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba","params":"Comment=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;Value=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;OdooId=1431;Estoque=26;Local=G-52-1;Custo=0.7400;Descricao=Conector Header Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba PTH;ValorId=15"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00c3O","part":5,"x":850,"y":4400,"rot":180,"mirror":true,"footprint":"Conector Header 6 vias","comment":"Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba","params":"Comment=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;Value=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;OdooId=1431;Estoque=26;Local=G-52-1;Custo=0.7400;Descricao=Conector Header Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba PTH;ValorId=15"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00c3O","part":6,"x":848.113,"y":4240,"rot":180,"mirror":true,"footprint":"Conector Header 6 vias","comment":"Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba","params":"Comment=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;Value=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;OdooId=1431;Estoque=26;Local=G-52-1;Custo=0.7400;Descricao=Conector Header Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba PTH;ValorId=15"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN4","sym":"CONECTOR PADR\u00c3O","part":4,"x":1695.039,"y":2071.181,"rot":180,"mirror":true,"footprint":"KK 3.96 4p","comment":"KK / 3.96mm/ 4 vias"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN4","sym":"CONECTOR PADR\u00c3O","part":2,"x":1275.118,"y":2620,"rot":0,"mirror":true,"footprint":"KK 3.96 4p","comment":"KK / 3.96mm/ 4 vias"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN4","sym":"CONECTOR PADR\u00c3O","part":1,"x":1272.995,"y":2800,"rot":0,"mirror":true,"footprint":"KK 3.96 4p","comment":"KK / 3.96mm/ 4 vias"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN4","sym":"CONECTOR PADR\u00c3O","part":3,"x":1698.27,"y":1881.181,"rot":180,"mirror":true,"footprint":"KK 3.96 4p","comment":"KK / 3.96mm/ 4 vias"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"U1","sym":"SN74HC245DWR","part":1,"x":4255.039,"y":5420,"rot":0,"mirror":false,"footprint":"FP-DW0020A-IPC_A","comment":"SN74HC245DWR","params":"Comment=SN74HC245DWR;Value=SN74HC245DWR;MPN=SN74HC245DWR;OdooId=1429;Estoque=18;Local=CX-89B;Custo=4.6700;Descricao=Transceptor de 3 Estados - SN74HC245DWR;ValorId=3"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"DS IN","io":0,"style":0,"x":3888.035,"y":5020,"w":367.005,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"DS OUT","io":0,"style":0,"x":950,"y":4610,"w":373.074,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"C4","sym":"SMD 0805 0.1uF / 100nF 16V","part":1,"x":3430,"y":5290,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"0.1uF / 100nF 16V","params":"Comment=0.1uF / 100nF 16V;Value=100nF;Encapsulamento=0805;Mouser=603-AC805KRX7R7BB104;OdooId=116;Estoque=175;Local=G-161-4;Custo=0.9000;Descricao=Capacitor Cer\u00e2mico 0.1uF / 100nF 16V SMD 0805;ValorId=41"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"C3","sym":"PTH 10uF 16V \u00d85 2mm","part":1,"x":3026.926,"y":5320,"rot":270,"mirror":false,"footprint":"Cap El 3mm L15 D7","comment":"10uF 16V \u00d85 2mm","params":"Comment=10uF 16V \u00d85 2mm;Value=10uF;OdooId=1237;Estoque=89;Local=G-24-7;Custo=1.6500;Descricao=Capacitor Eletrol\u00edtico Radial 10uF 16V \u00d85 2mm PTH;ValorId=25"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"J1","sym":"Jumper 2 Vias","part":1,"x":6740,"y":5690,"rot":0,"mirror":false,"footprint":"JUMPER 2 VIAS PTH","comment":"Jumper 2 Vias"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"R1","sym":"SMD 0805 10K 1/4W 1% 100ppm","part":1,"x":7120,"y":5540,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W 1% 100ppm","params":"Comment=10K 1/4W 1% 100ppm;Value=10K;Encapsulamento=0805 / 1206;Mouser=603-RC1206FR-0710KL;OdooId=903 1529;Estoque=684;Local=G-157-7/CX-89 \u00b7 G-169-6;Custo=1.0000;Descricao=Resistor de Filme Espesso 10K 1/4W 1% 100ppm SMD 1206;ValorId=153"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CE IN","io":0,"style":0,"x":7480,"y":4692.444,"w":372.995,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"PL IN","io":0,"style":0,"x":9372.995,"y":5692.444,"w":372.995,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"PL IN","io":0,"style":0,"x":5555.039,"y":4820,"w":318.113,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CLK IN","io":0,"style":0,"x":5555.039,"y":4620,"w":314.961,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CE IN","io":0,"style":0,"x":5555.039,"y":4420,"w":314.961,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"PL OUT1","io":0,"style":0,"x":3860,"y":4820,"w":395.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CLK OUT1","io":0,"style":0,"x":3720,"y":4620,"w":535.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CE OUT1","io":0,"style":0,"x":3820,"y":4420,"w":435.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"U2","sym":"SN74HC245DWR","part":1,"x":4388.113,"y":3420,"rot":0,"mirror":false,"footprint":"FP-DW0020A-IPC_A","comment":"SN74HC245DWR","params":"Comment=SN74HC245DWR;Value=SN74HC245DWR;MPN=SN74HC245DWR;OdooId=1429;Estoque=18;Local=CX-89B;Custo=4.6700;Descricao=Transceptor de 3 Estados - SN74HC245DWR;ValorId=3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"C6","sym":"SMD 0805 0.1uF / 100nF 16V","part":1,"x":3623.074,"y":3270,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"0.1uF / 100nF 16V","params":"Comment=0.1uF / 100nF 16V;Value=100nF;Encapsulamento=0805;Mouser=603-AC805KRX7R7BB104;OdooId=116;Estoque=175;Local=G-161-4;Custo=0.9000;Descricao=Capacitor Cer\u00e2mico 0.1uF / 100nF 16V SMD 0805;ValorId=41"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"C5","sym":"PTH 10uF 16V \u00d85 2mm","part":1,"x":3220,"y":3330,"rot":270,"mirror":false,"footprint":"Cap El 3mm L15 D7","comment":"10uF 16V \u00d85 2mm","params":"Comment=10uF 16V \u00d85 2mm;Value=10uF;OdooId=1237;Estoque=89;Local=G-24-7;Custo=1.6500;Descricao=Capacitor Eletrol\u00edtico Radial 10uF 16V \u00d85 2mm PTH;ValorId=25"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"PL OUT1","io":0,"style":0,"x":5688.113,"y":2420,"w":395.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CLK OUT1","io":0,"style":0,"x":5688.113,"y":2620,"w":535.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CE OUT1","io":0,"style":0,"x":5688.113,"y":2820,"w":435.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"PL OUT2","io":0,"style":0,"x":3993.074,"y":2420,"w":395.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CLK OUT2","io":0,"style":0,"x":3853.074,"y":2620,"w":535.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CE OUT2","io":0,"style":0,"x":3953.074,"y":2820,"w":435.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"PL OUT2","io":0,"style":0,"x":10366.848,"y":3830,"w":395.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CLK OUT2","io":0,"style":0,"x":10226.848,"y":3640,"w":535.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"DS OUT","io":0,"style":0,"x":5688.113,"y":3020,"w":373.074,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"DS OUT2","io":0,"style":0,"x":4015.039,"y":3020,"w":373.074,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"DS OUT2","io":0,"style":0,"x":5555.039,"y":5020,"w":373.074,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"D2","sym":"CMP-2000-05081-2","part":1,"x":2286.851,"y":7290,"rot":0,"mirror":false,"footprint":"SOT-23","comment":"CDSOT23-SM712","params":"Value=75pF"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CI2","sym":"CMP-0694-00003-2","part":1,"x":3530,"y":7270,"rot":0,"mirror":true,"footprint":"D008a_n","comment":"SN65HVD75DR"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"J2","sym":"Jumper 2","part":1,"x":1656.851,"y":7090,"rot":90,"mirror":true,"footprint":"JUMPER 2 VIAS PTH","comment":"Jumper"},
+{"t":"power","sheet":"DE - DI231765_P2","net":"+3V3","style":"Circle","x":3011.968,"y":7670.63,"rot":90},
+{"t":"power","sheet":"DE - DI231765_P2","net":"0V","style":"GndSignal","x":3011.968,"y":6804.488,"rot":270},
+{"t":"power","sheet":"DE - DI231765_P2","net":"0V","style":"GndSignal","x":2681.727,"y":7253.15,"rot":270},
+{"t":"netlabel","sheet":"DE - DI231765_P2","net":"IO2","x":4231.022,"y":7065.588,"rot":0},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"R2","sym":"Res SMD 1206","part":1,"x":1656.851,"y":7480,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"120R 1%","params":"Value=120R"},
+{"t":"text","sheet":"DE - DI231765_P2","s":"RS485","x":1280,"y":7160,"h":10},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN2","sym":"CONECTOR PADR\u00c3O","part":3,"x":830,"y":5080,"rot":0,"mirror":false,"footprint":"Conector Header 6 vias","comment":"Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba","params":"Comment=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;Value=Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba;OdooId=1431;Estoque=26;Local=G-52-1;Custo=0.7400;Descricao=Conector Header Sem Trava 6 vias (2x3) passo 2.54mm 180\u00ba PTH;ValorId=15"},
+{"t":"port","sheet":"DE - DI231765_P2","net":"CE OUT2","io":0,"style":0,"x":930,"y":5080,"w":435.039,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
+{"t":"netlabel","sheet":"DE - DI231765_P2","net":"RSA","x":1420,"y":7710,"rot":0},
+{"t":"netlabel","sheet":"DE - DI231765_P2","net":"RSB","x":1430,"y":6820,"rot":0},
+{"t":"netlabel","sheet":"DE - DI231765_P2","net":"RX","x":4030,"y":7570,"rot":0},
+{"t":"netlabel","sheet":"DE - DI231765_P2","net":"TX","x":4030,"y":7370,"rot":0},
+{"t":"netlabel","sheet":"DE - DI231765_P2","net":"RX","x":7740,"y":5092.444,"rot":0},
+{"t":"netlabel","sheet":"DE - DI231765_P2","net":"TX","x":7740,"y":4892.444,"rot":0},
+{"t":"netlabel","sheet":"DE - DI231765_P2","net":"IO2","x":7740,"y":6692.444,"rot":0},
+{"t":"power","sheet":"DE - DI231765_P2","net":"5V","style":"Bar","x":1260,"y":4400,"rot":0},
+{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":1180,"y":4070,"rot":270},
+{"t":"power","sheet":"DE - DI231765_P2","net":"5V","style":"Bar","x":3620,"y":3720,"rot":90},
+{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":3623.074,"y":2930,"rot":270},
+{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":3430,"y":4940,"rot":270},
+{"t":"power","sheet":"DE - DI231765_P2","net":"+3V3","style":"Circle","x":3430,"y":5825.669,"rot":90},
+{"t":"power","sheet":"DE - DI231765_P2","net":"5V","style":"Bar","x":9450,"y":7480,"rot":90},
+{"t":"power","sheet":"DE - DI231765_P2","net":"+3V3","style":"Circle","x":7710,"y":7480,"rot":90},
+{"t":"power","sheet":"DE - DI231765_P2","net":"+3V3","style":"Circle","x":6510,"y":5690,"rot":180},
+{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":7120,"y":5160,"rot":270},
+{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":6080,"y":4010,"rot":270},
+{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":6230,"y":1940,"rot":270},
+{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":642.995,"y":2570,"rot":270},
+{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":10160,"y":4300,"rot":270},
+{"t":"power","sheet":"DE - DI231765_P2","net":"GND","style":"GndPower","x":7070,"y":6860,"rot":270},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10851.817,7499.216],[10969.927,7499.216]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,7300],[10850,7300]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10970,7100],[10850,7100]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,6711.814],[10850,6711.814],[10850,6710]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,6514.964],[10850,6514.964]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10970,6320],[10850,6320]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10850,6120],[10969.927,6120],[10969.927,6121.263]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,4743.31],[10969.927,4743.31]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,4940.161],[10969.927,4940.161]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5137.011],[10859.927,5140],[10970,5140]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5333.862],[10969.927,5333.862]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5530.712],[10969.927,5530.712]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5727.562],[10969.927,5727.562]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10859.927,5924.413],[10969.927,5924.413]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10761.887,3640],[11021.887,3640]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[11021.887,3830],[10761.887,3830]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1260,4400],[850,4400]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3430,5825.669],[3430,5440]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3430,5110],[3430,5140]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[6940,5690],[7120,5690],[7120,5692.444],[7852.995,5692.444]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3623.074,3090],[3623.074,3120]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4388.113,3420],[3623.074,3420],[3620,3420],[3220,3420]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1202.995,2800],[1272.995,2800]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2526.851,7290],[2681.727,7290],[2681.727,7253.15]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2056.851,7360],[1906.851,7360],[1906.851,7710]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1656.851,7230],[1656.851,7190]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3030,7570],[3011.968,7570],[3011.968,7670.63]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3030,6970],[3011.968,6970],[3011.968,6804.488]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1656.851,6820],[1656.851,6890]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3030,7170],[2891.022,7170],[2891.022,6820],[1911.022,6820]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4054.877,7065.588],[4054.877,6970],[4030,6970]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4030,7170],[4054.877,7170],[4054.877,7065.588],[4231.022,7065.588]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3030,7370],[2893.858,7370],[2893.858,7710],[1906.851,7710],[1656.851,7710],[1656.851,7630]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1656.851,7710],[1340,7710]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2056.851,7220],[1911.022,7220],[1911.022,6820],[1656.851,6820],[1370,6820]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,5092.444],[7740,5092.444]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,4892.444],[7740,4892.444]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,6692.444],[7740,6692.444]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[848.113,4240],[1180,4240],[1180,4070]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3220,3120],[3220,3090],[3623.074,3090],[3623.074,2930]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3026.926,5125.588],[3026.926,5110],[3430,5110],[3430,4940]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[9372.995,7292.444],[9372.995,7290],[9450,7290],[9450,7480]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,7292.444],[7710,7292.444],[7710,7480]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[6640,5690],[6510,5690]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7120,5290],[7120,5160]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[5555.039,4120],[6080,4120],[6080,4010]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[5555.039,5420],[6080,5420],[6080,4120]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4255.039,5420],[3430,5420],[3430,5440]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4255.039,5220],[3850,5220],[3850,5110],[3430,5110]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[4388.113,3220],[3950,3220],[3950,3090],[3623.074,3090]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[5688.113,2120],[6230,2120],[6230,1940]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[5688.113,3420],[6230,3420],[6230,2120]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1275.118,2620],[1202.995,2620],[1202.995,2800],[642.995,2800],[642.995,2570]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,6908.665],[10160,6908.665],[10160,4546.46]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[7852.995,7092.444],[7070,7092.444],[7070,6860]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[10969.927,4546.46],[10160,4546.46],[10160,4300]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3620,3720],[3620,3420]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[930,5080],[830,5080]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[950,4610],[850,4610]]},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN5","sym":"CONECTOR PADR\u00c3O","part":1,"x":1340,"y":7710,"rot":0,"mirror":false,"footprint":"CONE MSTBH 2,5/ 2 GF","comment":"CONECTOR HEADER / 6 VIAS / Macho"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"CN5","sym":"CONECTOR PADR\u00c3O","part":2,"x":1370,"y":6820,"rot":0,"mirror":false,"footprint":"CONE MSTBH 2,5/ 2 GF","comment":"CONECTOR HEADER / 6 VIAS / Macho"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"T1","sym":"SQJ431AEP-T1_GE3","part":1,"x":2205.039,"y":1871.181,"rot":270,"mirror":true,"footprint":"SQJ402EPT1","comment":"SQJ431AEP-T1_GE3"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"D1","sym":"SZMMSZ5240BT1G","part":1,"x":2720,"y":1720,"rot":90,"mirror":false,"footprint":"SOD3716X135N","comment":"SZMMSZ5240BT1G"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"R3","sym":"RES [ SMD ]","part":1,"x":2205.039,"y":1506.221,"rot":270,"mirror":false,"footprint":"1206 resistor","comment":"=Value + ' - ' + Pot\u00eancia + ' - ' + Tolerancia","params":"Value=10R"},
+{"t":"comp","sheet":"DE - DI231765_P2","ref":"R4","sym":"RES [ SMD ]","part":1,"x":2444.409,"y":1073.149,"rot":270,"mirror":false,"footprint":"1206 resistor","comment":"=Value + ' - ' + Pot\u00eancia + ' - ' + Tolerancia","params":"Value=47K"},
+{"t":"power","sheet":"DE - DI231765_P2","net":"0V","style":"GndSignal","x":2444.409,"y":923.149,"rot":270},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2205.039,1871.181],[2205.039,1756.221]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2405.039,2071.181],[2720,2071.181],[2720,1920]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2205.039,1356.221],[2205.039,1323.149],[2444.409,1323.149],[2720,1323.149],[2720,1520]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2720,2071.181],[2920,2071.181],[2920,2141.181]]},
+{"t":"power","sheet":"DE - DI231765_P2","net":"5V","style":"Bar","x":2920,"y":2141.181,"rot":90},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1695.039,2071.181],[1860,2071.181],[2005.039,2071.181]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[1698.27,1881.181],[1860,1881.181],[1860,2071.181]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[3026.926,5410],[3430,5410],[3430,5440]]},
+{"t":"wire","sheet":"DE - DI231765_P2","pts":[[2720,1520],[2720,1620]]},
 ]};
