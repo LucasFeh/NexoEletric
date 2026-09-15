@@ -54,6 +54,8 @@ var
   SchLibNomes: TStringList;     // os caminhos, para as mensagens
   ScanInfo: String; // diagnostico do ultimo ListProjectDirs (aparece nos dialogos)
   PcbFpNames: TStringList;   // nil = PcbLib indisponivel (validacao de footprint vira aviso)
+  TrocouSimbolo: Boolean;    // algum componente ja existente teve o LibReference trocado:
+                             // o desenho na folha continua o antigo ate Update From Libraries
 
 { ------------------------------- helpers JSON (copias do ExportBoard/ApplyChanges) ------------------------------- }
 { Copie aqui, identicos aos originais: JF, JB, JS (do ExportBoard.pas)                                              }
@@ -1130,11 +1132,93 @@ begin
   end;
 end;
 
+// ─── componente que JA ESTA na folha: atualiza a identidade, nao recria ───────────
+// O caso e a migracao de um projeto antigo para a biblioteca nova: o hub vincula cada
+// componente ao item do almoxarifado (schematic.js ganha `sym`, `comment` e `params`
+// novos) e este script leva isso para a folha real.
+//
+// ATUALIZA, NUNCA RECRIA, e a diferenca nao e estilo:
+//   - o UniqueID e o que liga o componente do esquema ao da PCB. Apagar e recolocar da um
+//     UniqueID novo, e o ECO seguinte trata a peca como OUTRA: some da PCB e volta sem
+//     posicao nem roteamento. O AI-GUIDE ja registra que e por isso que o re-despejo
+//     reaproveita o componente pelo designador/parte.
+//   - os fios sao objetos separados, ancorados em COORDENADA. O componente ficando onde
+//     esta, a fiacao continua encostada onde estava.
+//
+// O QUE ESTA ROTINA NAO FAZ: redesenhar o simbolo. Trocar o LibReference diz QUAL peca da
+// biblioteca o componente e — e e isso que o ExportProject le de volta como `sym`
+// (ExportProject.pas:1089) —, mas o desenho na folha e a copia que foi replicada no dia em
+// que o componente nasceu. Quem repoe o desenho a partir da biblioteca e o proprio Altium,
+// em Tools » Update From Libraries, que mostra antes o que vai mudar. O relatorio avisa.
+procedure AtualizaComp(SchDoc: ISch_Document; C: TObject; Line: String; Ref: String; PartId: Integer);
+var
+  SymNovo, SymVelho, ComentNovo, Mudou: String;
+begin
+  SymNovo := JGet(Line, 'sym');
+  SymVelho := C.LibReference;
+  Mudou := '';
+
+  // simbolo que nao esta na biblioteca NAO entra: melhor o componente continuar o que era
+  // do que ficar apontando para uma peca que nao existe
+  if (SymNovo <> '') and (AnsiCompareText(SymVelho, SymNovo) <> 0) then
+  begin
+    if FindLibSymbol(SymNovo) = nil then
+    begin
+      LogFail('comp ' + Ref + '/' + IntToStr(PartId) + ': simbolo novo "' + SymNovo +
+        '" nao esta na SchLib - identidade NAO foi trocada');
+      SymNovo := '';
+    end;
+  end;
+
+  SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
+    SCHM_BeginModify, c_NoEventData);
+
+  if (SymNovo <> '') and (AnsiCompareText(SymVelho, SymNovo) <> 0) then
+  begin
+    C.LibReference := SymNovo;
+    Mudou := Mudou + 'simbolo ' + SymVelho + ' -> ' + SymNovo + '; ';
+  end;
+
+  if JHas(Line, 'comment') then
+  begin
+    ComentNovo := JGet(Line, 'comment');
+    if C.Comment.Text <> ComentNovo then
+    begin
+      C.Comment.Text := ComentNovo;
+      Mudou := Mudou + 'comment; ';
+    end;
+  end;
+
+  // os dois reaproveitam o que ja existe (parametro pelo nome, modelo pelo ModelName),
+  // entao chamar num componente ja colocado nao duplica nada
+  if JHas(Line, 'params') then
+  begin
+    AplicaParams(C, JGet(Line, 'params'));
+    Mudou := Mudou + 'params; ';
+  end;
+  if JGet(Line, 'footprint') <> '' then
+    SetFootprint(C, JGet(Line, 'footprint'), Ref);
+
+  SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
+    SCHM_EndModify, c_NoEventData);
+  C.GraphicallyInvalidate;
+
+  if Mudou = '' then
+    LogOk('comp ' + Ref + '/' + IntToStr(PartId) + ' ja existia - nada a atualizar')
+  else
+  begin
+    LogOk('comp ' + Ref + '/' + IntToStr(PartId) + ' atualizado: ' + Mudou);
+    if Pos('simbolo ', Mudou) = 1 then
+      TrocouSimbolo := True;
+  end;
+end;
+
 procedure PlaceComp(SchDoc: ISch_Document; Line: String);
 var
   LibComp, NewComp: TObject;
   Ref: String;
   PartId: Integer;
+  Achado: TObject;
 begin
   Ref := JGet(Line, 'ref');
   PartId := 1;
@@ -1142,10 +1226,13 @@ begin
     PartId := Round(JNum(Line, 'part'));
   if PartId < 1 then
     PartId := 1;
-  // ja existe na folha (re-despejo): nao duplica, so a passada 2b reposiciona
-  if FindCompInDoc(SchDoc, Ref, PartId) <> nil then
+  // ja existe na folha (re-despejo): nao duplica. Mas tambem nao ignora - a identidade
+  // (simbolo, comment, params, footprint) e atualizada, que e o que leva a biblioteca nova
+  // para um projeto antigo. A posicao continua sendo da passada 2b.
+  Achado := FindCompInDoc(SchDoc, Ref, PartId);
+  if Achado <> nil then
   begin
-    LogOk('comp ' + Ref + '/' + IntToStr(PartId) + ' ja existia - sera reposicionado');
+    AtualizaComp(SchDoc, Achado, Line, Ref, PartId);
     Exit;
   end;
   LibComp := FindLibSymbol(JGet(Line, 'sym'));
@@ -1784,6 +1871,8 @@ begin
   Report.Add('Data:    ' + DateTimeToStr(Now));
   Report.Add('');
   OkCount := 0;
+  TrocouSimbolo := False;   // DelphiScript nao zera global: sem isto o aviso do
+                           // relatorio herdaria o valor da rodada anterior do script
   FailCount := 0;
 
   Src := TStringList.Create;
@@ -2090,6 +2179,17 @@ begin
   end;
 
   Report.Add('');
+  // O aviso so aparece quando ALGUEM trocou de simbolo: recado que sai sempre vira
+  // paisagem, e este e justamente o que nao pode ser ignorado.
+  if TrocouSimbolo then
+  begin
+    Report.Add('ATENCAO: componente(s) mudaram de simbolo (LibReference).');
+    Report.Add('  A identidade ja e a nova - o ExportProject vai ler o simbolo novo, e o BOM tambem.');
+    Report.Add('  O DESENHO na folha continua o antigo: o simbolo de um componente colocado e uma');
+    Report.Add('  copia, feita no dia em que ele nasceu. Para repor o desenho a partir da biblioteca,');
+    Report.Add('  rode no Altium: Tools > Update From Libraries (ele mostra o que vai mudar antes).');
+    Report.Add('');
+  end;
   Report.Add('OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount));
   // As folhas ja nasceram na pasta do .PrjPcb; so o relatorio depende da raiz.
   Gravou := SalvaOuExplica(Report, ProjDir + '\build-report.txt');
