@@ -47,7 +47,7 @@ na bancada, não que é provável.
 
 ```
    ┌──────────────────────────────────────────────────────────────────┐
-   │  ALTIUM DESIGNER  (OUTRA MÁQUINA — caminhos UNC \\LUCAS-PC\D\…)  │
+   │  ALTIUM DESIGNER  (OUTRA MÁQUINA — UNC do servidor, \\…\current)  │
    │  DXP » Run Script  →  10 entradas no menu (README diz 4)         │
    │    ExportPcb · ExportSch · ExportLibs · ApplyProject             │
    │    RenameLibs · BuildSym · BuildFp · BuildObs · DoPcb · DoSch    │

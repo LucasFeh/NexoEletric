@@ -22,8 +22,11 @@ RAIZ = os.path.dirname(os.path.dirname(BASE))
 LIBS = os.path.join(RAIZ, 'Libs')
 DEST = os.path.join(LIBS, 'Almox')
 
-# O caminho como o PC do Altium enxerga (o workspace mora no LUCAS-PC).
-UNC = r'\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Libs\Almox'
+# O caminho como o PC do Altium enxerga. Ele entra DENTRO do ALMOX.DbLib, entao nao pode
+# ser o disco de ninguem: o Altium abre esse arquivo a partir do share do servidor, e um
+# caminho de bancada ali faz a Database Library nascer apontando para uma maquina que a
+# outra nao alcanca.
+UNC = r'\\192.168.15.192\altiumhub\current\Libs\Almox'
 
 COLUNAS = ['Chave', 'Biblioteca', 'Familia', 'Simbolo', 'Designator', 'Footprint',
            'Comment', 'Value', 'Encapsulamento', 'MPN', 'Mouser', 'OdooId',

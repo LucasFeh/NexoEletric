@@ -30,8 +30,13 @@ const
   // Sao o PADRAO: quem manda sao as chaves schlib/pcblib do home.txt desta maquina;
   // estes valores so valem quando a maquina nao declarou as chaves (nao quebra quem
   // ja usa, e quem trocou de PC corrige no home.txt em vez de no codigo).
-  SCHLIB_PADRAO = '\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib';
-  PCBLIB_PADRAO = '\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE FOOTPRINT.PcbLib';
+  { As bibliotecas vem de DENTRO do workspace, e por isso sao relativas a SCRIPT_HOME:  }
+  { a .SchLib da casa viaja na release (Libs\BIBLIOTECA DE ESQUEMA.SchLib, a copia que }
+  { o guardiao publica) e os footprints do almoxarifado moram em Libs\Almox. Eram UNC  }
+  { para o disco de uma maquina, e isso deixou de existir aqui: tudo vem do servidor.   }
+  { Quem tiver a biblioteca noutro lugar declara schlib= / pcblib= no home.txt.         }
+  SCHLIB_REL = '\Libs\BIBLIOTECA DE ESQUEMA.SchLib';
+  PCBLIB_REL = '\Libs\Almox\FOOTPRINTS ALMOX.PcbLib';
   // Bibliotecas do almoxarifado, geradas a partir do Odoo: uma .SchLib por familia
   // (ALMOX RESISTOR, ALMOX CAPACITOR CERAMICO...), procuradas DEPOIS da principal.
   // O script varre a pasta em vez de listar arquivo por arquivo. A pasta sai da raiz:
@@ -437,13 +442,14 @@ begin
   { o Altium achava a bancada (que esta no ar) e parava ali -- lia e escrevia no workspace }
   { de desenvolvimento em vez do que esta publicado no servidor. O \\LUCAS-PC saiu da      }
   { lista: ele e o nome de UMA maquina, e quem manda hoje e a release no share do .192.    }
-  { O D: local ficou por ultimo e so casa na propria bancada, onde o caminho existe -- e a }
-  { HomeValida ainda exige o AI-GUIDE.md la dentro, entao pasta parecida nao passa.        }
+  { Sobraram os dois nomes do MESMO servidor: o IP e o nome SMB dele. Nada mais aponta    }
+  { para a maquina de ninguem -- o D: local saiu junto, porque tambem era endereco da     }
+  { bancada. A HomeValida ainda exige o AI-GUIDE.md la dentro, entao pasta parecida nao   }
+  { passa, e quem precisar de outro lugar escreve home= no home.txt.                      }
   { Quem precisar de outro lugar escreve home= no home.txt: ele vence esta lista inteira.  }
   Cand := TStringList.Create;
   Cand.Add('\\192.168.15.192\altiumhub\current');
   Cand.Add('\\ODOO\altiumhub\current');
-  Cand.Add('D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror');
   for i := 0 to Cand.Count - 1 do
   begin
     if HomeValida(Cand[i]) then
@@ -1836,14 +1842,15 @@ begin
   PROJECTS_DIR := SCRIPT_HOME + '\Projects';
 
   ALMOX_DIR := SCRIPT_HOME + '\Libs\Almox';
-  // A biblioteca da casa nao mora no workspace: vem das chaves schlib/pcblib do
-  // home.txt, e so cai no padrao quando esta maquina nao as declarou.
+  // A biblioteca da casa MORA no workspace desde que o guardiao passou a publica-la:
+  // o padrao e relativo a SCRIPT_HOME, e as chaves schlib/pcblib do home.txt so
+  // existem para quem guarda a lib noutro lugar.
   SCHLIB_FILE := HomeCfgGet('schlib');
   if SCHLIB_FILE = '' then
-    SCHLIB_FILE := SCHLIB_PADRAO;
+    SCHLIB_FILE := SCRIPT_HOME + SCHLIB_REL;
   PCBLIB_FILE := HomeCfgGet('pcblib');
   if PCBLIB_FILE = '' then
-    PCBLIB_FILE := PCBLIB_PADRAO;
+    PCBLIB_FILE := SCRIPT_HOME + PCBLIB_REL;
 
   if SchServer = nil then
   begin

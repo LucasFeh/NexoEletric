@@ -81,7 +81,7 @@ def main():
             import posixpath
             assert not posixpath.isabs(WIN), 'se um dia virar absoluto, a ordem muda'
             assert LP._RX_WIN_ABS.match(WIN), 'o reconhecedor tem que pegar Y:'
-            assert LP._RX_WIN_ABS.match(chr(92) * 2 + 'LUCAS-PC'), 'e a UNC tambem'
+            assert LP._RX_WIN_ABS.match(chr(92) * 2 + 'SERVIDOR'), 'e a UNC tambem'
             assert not LP._RX_WIN_ABS.match('Libs/BIBLIOTECA DE ESQUEMA.SchLib'), 'relativo nao'
             assert proc in (LP.VIVA, LP.SEM_VIVA), proc
             feitos.append('(2) no Windows o Y: e desta maquina; o reconhecedor do caminho '

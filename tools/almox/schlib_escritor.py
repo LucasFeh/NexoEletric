@@ -24,7 +24,7 @@ import schlib_bin as SB                                # noqa: E402
 import libpath as LP                                   # noqa: E402
 
 # O piso da ordem do `tools/libpath.py`: a cópia publicada dentro do repositório. Era o
-# literal `\\LUCAS-PC\D\...`, que não existe no servidor e, aqui, estava três saves do
+# literal de uma máquina, que não existe no servidor e, aqui, estava três saves do
 # Altium atrás da lib viva — os dois botões de sincronismo reciclavam de cópias diferentes.
 # Constante de módulo NÃO resolve a ordem inteira (o passo do config faz `isfile` num
 # caminho de rede, caro em tempo de import); quem chama `carrega_lib()`/`gera()` sem

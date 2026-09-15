@@ -302,11 +302,12 @@ tem o workspace local, o candidato local ganha — por isso a chave `home` aqui 
 não opcional. Rode os scripts do Altium a partir de `P:\current`. Como `current` é um link
 para a release no ar, um deploy troca o alvo e o caminho continua o mesmo.
 
-O `BuildSchematic.pas` abre as bibliotecas do almoxarifado **e** a da casa. Os padrões da
-lib da casa (`SCHLIB_PADRAO`/`PCBLIB_PADRAO`) saíram do `Z:`, que não resolve, e apontam por
-UNC para `\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS` — funciona de qualquer máquina, em vez
-de depender de cada uma mapear a mesma letra. São só o piso: as chaves `schlib` e `pcblib`
-do `home.txt` mandam nelas.
+O `BuildSchematic.pas` abre as bibliotecas do almoxarifado **e** a da casa, e desde
+2026-09-15 as duas vêm de **dentro do workspace** — `Libs\BIBLIOTECA DE ESQUEMA.SchLib`
+(a cópia que o guardião publica) e `Libs\Almox\FOOTPRINTS ALMOX.PcbLib`. Os padrões são
+relativos ao `SCRIPT_HOME`, então seguem a release sem ninguém mapear letra nem depender
+do disco de uma máquina. São só o piso: as chaves `schlib` e `pcblib` do `home.txt`
+mandam nelas.
 
 > **Essa cópia UNC está desatualizada e ninguém a atualiza.** Medido: a do `Y:` (que é
 > onde o Altium grava, e de onde sai a publicação) tem md5 `2c3f4b13…`; a UNC tem outro e

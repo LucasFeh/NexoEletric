@@ -67,13 +67,13 @@ começando por `;` ou `#` são ignoradas.
 | chave | o quê |
 |---|---|
 | `home` | raiz do workspace: a pasta que tem o `AI-GUIDE.md`. **Obrigatória.** |
-| `schlib` | `.SchLib` da casa. Opcional; sem ela vale o `SCHLIB_PADRAO` do `BuildSchematic.pas`. |
-| `pcblib` | `.PcbLib` da casa. Opcional; idem, `PCBLIB_PADRAO`. |
+| `schlib` | `.SchLib` da casa. Opcional; sem ela vale a cópia publicada dentro do workspace (`Libs\BIBLIOTECA DE ESQUEMA.SchLib`). |
+| `pcblib` | `.PcbLib`. Opcional; sem ela valem os footprints do almoxarifado (`Libs\Almox\FOOTPRINTS ALMOX.PcbLib`). |
 
 ```ini
 ; AltiumPCBMirror - configuracao DESTA maquina
 home=D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror
-;schlib=\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib
+;schlib=\\192.168.15.192\altiumhub\current\Libs\BIBLIOTECA DE ESQUEMA.SchLib
 ```
 
 Cada script resolve a raiz nesta ordem, **validando** cada candidato — validar é achar o
