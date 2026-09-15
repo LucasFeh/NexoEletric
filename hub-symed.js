@@ -1278,8 +1278,9 @@ function selectOf(opts, val, on, rotulo) {
   return s;
 }
 /* seletor de parte: nas fichas do item move o item; sem seleção abre a parte */
-function partSelect(d, val, on) {
-  return selectOf((d.parts || []).map(pt => [pt.part, 'parte ' + pt.part + ' de ' + d.parts.length]), val, v => on(parseInt(v, 10) || 1));
+function partSelect(d, val, on, texto) {
+  const rot = texto || (pt => 'parte ' + pt.part + ' de ' + d.parts.length);
+  return selectOf((d.parts || []).map(pt => [pt.part, rot(pt)]), val, v => on(parseInt(v, 10) || 1));
 }
 
 /* sem item marcado: as contagens do símbolo e o seletor da parte aberta */
@@ -1378,7 +1379,15 @@ function fieldsFor(it) {
     b.onclick = () => apply(o => { if (vis) o[k] = true; else delete o[k]; });
     return b;
   };
-  const partRow = () => { kickerRow(box, 'parte'); linha(box, [['parte', partSelect(d, ST.part, n => moverParaParte(alvo, n))]]); };
+  /* ESTE COMBO MOVE, o do cabecalho NAVEGA — e ate 2026-09-15 os dois liam "parte N de M",
+     no mesmo canto da ficha. Quem marcava um grafico e trocava ali achando que ia mudar de
+     parte via o desenho PULAR para a outra. O rotulo agora diz o verbo, e a vista segue o
+     item (ver moverParaParte), que e o que desfaz a sensacao de "sumiu". */
+  const partRow = () => {
+    kickerRow(box, 'mover para outra parte');
+    linha(box, [['mover para', partSelect(d, ST.part, n => moverParaParte(alvo, n),
+                                          pt => (pt.part === ST.part ? 'parte ' + pt.part + ' (aqui)' : 'parte ' + pt.part))]]);
+  };
   const loc = 'localização (' + U + ')', tam = 'tamanho (' + U + ')';
 
   if (it.g == null) {
@@ -2114,9 +2123,16 @@ function moverParaParte(alvo, n) {
   pushUndo();
   if (!dest.pins) dest.pins = []; if (!dest.graphics) dest.graphics = [];
   Object.assign(p, deleteItems(p, [alvo]));
-  (alvo.kind === 'pin' ? dest.pins : dest.graphics).push(clone(it));
-  ST.selection = []; touched(); afterEdit();
-  if (O && O.toast) O.toast(tipoDe(it) + ' movido para a parte ' + n, 'ok');
+  const destino = (alvo.kind === 'pin' ? dest.pins : dest.graphics);
+  destino.push(clone(it));
+  /* A VISTA VAI JUNTO. Antes ela ficava na parte de origem e o item simplesmente sumia da
+     tela — indistinguivel de "apaguei sem querer". Agora a tela mostra onde ele foi, com
+     ele marcado; o Ctrl+Z devolve tudo, inclusive a parte aberta (o snapshot guarda ST.part). */
+  ST.part = n;
+  ST.selection = [{ kind: alvo.kind, idx: destino.length - 1 }];
+  ST.draw = null; ST.fitPending = true;
+  touched(); afterEdit(); fitSeNecessario();
+  if (O && O.toast) O.toast(tipoDe(it) + ' movido para a parte ' + n + ' — a tela veio junto; Ctrl+Z desfaz', 'ok');
 }
 /* K: linha vira pino, pino vira linha (parte C do brief) */
 function virar() {
