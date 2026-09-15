@@ -1589,6 +1589,16 @@ async function saveSchematic(){
   if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o schematic.js do disco. Continuar?', SOBRESCREVER))) return null;
   const out = HubCore.serializeSchematic(schematic);
   if (!out.text){ await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Esquema inválido' }); return null; }
+  /* Texto sem uma letra dentro nao vai para o arquivo (ver serializeSchematic), e isso
+     precisa ser DITO. Some da folha ao salvar, e descobrir depois seria pior do que o
+     defeito que isto conserta: ate agora ele impedia o projeto INTEIRO de ser salvo. */
+  if ((out.descartados || []).length){
+    const q = out.descartados.length;
+    schematic.items = schematic.items.filter(it => out.descartados.indexOf(it) < 0);
+    reapply();
+    HubDialog.toast(q + (q === 1 ? ' texto vazio foi descartado' : ' textos vazios foram descartados')
+      + ' — eles não desenhavam nada, e o arquivo não aceita texto sem conteúdo', 'warn', 8000);
+  }
   if (HubIO.canPost){
     try {
       const cur = await HubIO.fetchText(SCH_REL);

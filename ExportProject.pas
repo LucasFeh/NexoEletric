@@ -34,6 +34,7 @@ var
   TplPath: String;         // .SchDot ja lido (cache entre folhas do mesmo projeto)
   TplTexts: TStringList;   // textos dos rotulos desse .SchDot
   StampDropped: Integer;   // rotulos de carimbo que ficaram fora do espelho
+  TextVazio: Integer;    // objetos de texto sem uma letra dentro
   // Contagem por tipo de item. Existe porque a omissao do ePort passou despercebida por
   // meses: sem numero na tela, "nao exportou" e "nao tinha" sao indistinguiveis.
   NComp, NWire, NLabel, NPower, NPort, NJunc, NText, NNoErc: Integer;
@@ -1273,8 +1274,16 @@ begin
         end;
       eLabel:
         begin
+          { Texto SEM CONTEUDO nao viaja. Uma folha real tinha um objeto de texto vazio, e }
+          { como o `s` e obrigatorio no formato (AI-GUIDE), o hub passou a recusar a       }
+          { GRAVACAO DO PROJETO INTEIRO por causa dele -- o projetista nao conseguia salvar }
+          { mudanca nenhuma naquele esquema. Objeto sem uma letra dentro nao desenha nada e }
+          { nao diz nada: nao ha o que preservar. O hub tambem descarta ao salvar, mas la e }
+          { conserto; aqui e nao deixar nascer.                                            }
           if IsStampLabel(Prim) then
             StampDropped := StampDropped + 1
+          else if Trim(Prim.Text) = '' then
+            TextVazio := TextVazio + 1
           else
           begin
             NText := NText + 1;
@@ -1334,6 +1343,7 @@ begin
   SkippedDocs := 0;
   SheetCount := 0;
   StampDropped := 0;
+  TextVazio := 0;
   NComp := 0; NWire := 0; NLabel := 0; NPower := 0; NPort := 0; NJunc := 0; NText := 0; NNoErc := 0;
   NCompPar := 0;
   SheetsMeasured := 0;

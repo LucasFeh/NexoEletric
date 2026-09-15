@@ -937,7 +937,21 @@ function serializeSchematic(sch){
   if (!sch.project) errors.push({ idx:-1, msg:'header: falta "project"' });
   for (const k of Object.keys(sch)) if (k !== 'items' && badStr(sch[k]))
     errors.push({ idx:-1, msg:`header: campo "${k}" nao pode conter a sequencia aspas-dois-pontos` });
-  const items = Array.isArray(sch.items) ? sch.items : [];
+  const todos = Array.isArray(sch.items) ? sch.items : [];
+  /* TEXTO VAZIO NAO E CONTEUDO, e nao pode segurar o arquivo inteiro refem.
+
+     O ExportProject traz o que a folha do Altium tem, e uma folha real tinha um objeto de
+     texto sem uma letra dentro (PRJ-UR-DI261924, medido). Pelo contrato do AI-GUIDE o campo
+     `s` e obrigatorio, entao o validador recusava a gravacao inteira -- e o projetista
+     ficava sem conseguir salvar NADA naquele projeto por causa de um objeto que nao desenha
+     nada e nao diz nada.
+
+     Descartar e o unico desfecho honesto: nao ha o que preservar num texto sem texto. Mas
+     quem chama recebe a lista em `descartados` e AVISA na tela; silencio aqui seria perder
+     dado sem contar, que e justamente o que este projeto nao faz. */
+  const descartados = todos.filter(it => it && it.t === 'text'
+                                      && (typeof it.s !== 'string' || !it.s.trim()));
+  const items = descartados.length ? todos.filter(it => descartados.indexOf(it) < 0) : todos;
   checkFields(items, it => SCH_ITEM_REQUIRED[it.t], it => it.t || '?', errors);
   items.forEach((it, i) => {
     if (it.t === 'wire' && (!Array.isArray(it.pts) || it.pts.length < 2))
@@ -945,13 +959,13 @@ function serializeSchematic(sch){
     if (it.t === 'comp' && it.rot != null && ![0, 90, 180, 270].includes((((it.rot % 360) + 360) % 360)))
       errors.push({ idx:i, msg:'comp: rot deve ser 0/90/180/270' });
   });
-  if (errors.length) return { text:null, errors };
+  if (errors.length) return { text:null, errors, descartados };
   const L = ['var schematic = {'];
   for (const k of Object.keys(sch)) if (k !== 'items') L.push(JSON.stringify(k) + ':' + jline(sch[k]) + ',');
   L.push('"items":[');
   for (const it of items) L.push(jline(it) + ',');
   L.push(']};');
-  return { text: L.join('\n') + '\n', errors: [] };
+  return { text: L.join('\n') + '\n', errors: [], descartados };
 }
 
 const ANN_REQUIRED = { num:['x','y'], str:['id','severity','msg'] };
