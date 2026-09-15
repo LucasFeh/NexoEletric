@@ -362,6 +362,29 @@ begin
       'da proxima vez vou procurar de novo. (Esta rodada funciona assim mesmo.)');
 end;
 
+// Os dois enderecos que sairam em 2026-09-15: o share da bancada e o disco dela. Estao
+// nomeados aqui de proposito -- a migracao la embaixo toca NESTES DOIS e em mais nenhum
+// outro home=, que continua mandando como sempre mandou.
+function RaizAposentada(Raiz: String): Boolean;
+begin
+  Result := (CompareText(Raiz, '\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror') = 0)
+         or (CompareText(Raiz, 'D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror') = 0);
+end;
+
+// O primeiro nome do servidor que responde AGORA. '' se nenhum responde -- e ai a migracao
+// NAO acontece: trocar uma configuracao quebrada por outra quebrada seria so embaralhar.
+// Tem parametro de proposito: some do menu Run Script.
+function ServidorValido(Dummy: Integer): String;
+begin
+  Result := '';
+  if HomeValida('\\192.168.15.192\altiumhub\current') then
+  begin
+    Result := '\\192.168.15.192\altiumhub\current';
+    Exit;
+  end;
+  if HomeValida('\\ODOO\altiumhub\current') then
+    Result := '\\ODOO\altiumhub\current';
+end;
 // Raiz do workspace PARA ESTA MAQUINA, nesta ordem:
 //   1) a chave home do home.txt, se validar;
 //   2) os candidatos conhecidos, em ordem -- o primeiro que validar e GRAVADO no home.txt;
@@ -372,7 +395,7 @@ function HubHome(Dummy: Integer): String;
 var
   Cand: TStringList;
   i: Integer;
-  Raiz, Resposta, Tentei: String;
+  Raiz, Resposta, Tentei, Novo: String;
 begin
   Result := '';
   HomeOrigem := '';
@@ -391,6 +414,35 @@ begin
     // Entao: raiz configurada que nao responde e ERRO para o usuario resolver, nunca um
     // convite para o script escolher por ele. A procura automatica so existe para a maquina
     // que ainda NAO tem a chave home=.
+    // MIGRACAO 2026-09-15, e e o UNICO caso em que uma linha home= existente e trocada.
+    //
+    // A regra de cima vale porque `home=` costuma ser escolha de quem configurou. So que
+    // ela tambem e escrita pelo PROPRIO script (HomeCfgAnota, quando um candidato valida),
+    // e ate 2026-09-15 o primeiro candidato era a bancada. Quem rodou antes disso tem um
+    // carimbo apontando para la -- e a regra honraria esse carimbo para sempre. Foi assim
+    // que uma exportacao disparada do servidor foi gravar no D: de outra maquina.
+    //
+    // Consertar o proprio carimbo errado nao e configuracao que se reescreve sozinha: os
+    // dois caminhos estao nomeados em RaizAposentada, a troca so acontece com o servidor
+    // respondendo, e a tela diz o que mudou e como desfazer.
+    if RaizAposentada(Raiz) then
+    begin
+      Novo := ServidorValido(0);
+      if Novo <> '' then
+      begin
+        ShowMessage('O ' + HOME_CFG + ' ainda apontava para:' + #13#10 +
+          '   ' + Raiz + #13#10#13#10 +
+          'Esse endereco saiu: o workspace agora vem do servidor. Passei a usar' + #13#10 +
+          '   ' + Novo + #13#10 +
+          'e anotei isso no arquivo -- esta rodada ja vai para la.' + #13#10#13#10 +
+          'Se voce quer mesmo o caminho antigo, edite a linha home= nesse arquivo:' + #13#10 +
+          '   ' + HOME_CFG);
+        HomeOrigem := HOME_CFG + ' (migrado do endereco antigo)';
+        HomeCfgAnota(Novo);
+        Result := Novo;
+        Exit;
+      end;
+    end;
     if HomeValida(Raiz) then
     begin
       HomeOrigem := HOME_CFG;
