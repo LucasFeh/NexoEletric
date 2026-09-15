@@ -2328,7 +2328,11 @@ function onKey(e) {
   if (k === 'Enter') { if (ST.draw) { e.preventDefault(); finishDraw(); } return; }
   /* com um desenho em curso, Delete, setas e K ficam de fora: agiriam na seleção antiga por
      baixo do traço que está sendo desenhado (o K, aliás, só na ferramenta Selecionar) */
-  if (k === 'Delete' || k === 'Backspace') { if (ST.selection.length && !ST.draw) { e.preventDefault(); deleteSelection(); } return; }
+  /* SO O DELETE APAGA. O Backspace saiu a pedido do usuario em 2026-09-15: ele e a tecla
+     de "corrigir o que acabei de digitar", e num editor de desenho essa expectativa nao
+     vale — a mao vai nele por reflexo e leva a selecao junto. Delete e a tecla que a
+     pessoa aperta querendo apagar. */
+  if (k === 'Delete') { if (ST.selection.length && !ST.draw) { e.preventDefault(); deleteSelection(); } return; }
   if (k.indexOf('Arrow') === 0) {
     if (!ST.selection.length || ST.draw) return;
     e.preventDefault();
