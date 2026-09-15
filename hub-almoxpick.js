@@ -103,6 +103,11 @@ function grupos(){
         v, nome: v.altium, rotulo: v.label || v.altium,
         saldo: Number(v.estoque) || saldoDe(v),
         pkg: v.footprint || (v.pkgs || [])[0] || '',
+        /* 956 dos 2513 valores trazem MPN, em 97 das 148 familias — e o part number e
+           justamente o que se tem na mao quando se olha a peca ou o esquema antigo. Sem
+           ele na busca, digitar "SZMMSZ5240BT1G" nao achava o DIODO ZENER [PTH] que o
+           carrega, e a tela dizia "nenhuma familia casa" tendo a resposta dentro. */
+        mpn: String((v.mpn || '')).trim(),
       }));
       if (vals.length) fora.push({ familia: sy.name, sym: sy, acervo: titulo, lib: acervo, valores: vals });
     }
@@ -128,20 +133,35 @@ function recomendado(gs, ...nomes){
 }
 
 const casa = (txt, q) => String(txt || '').toUpperCase().indexOf(q) >= 0;
+/* part number se escreve dos dois jeitos: "CDSOT23-SM712" e "CDSOT23SM712", "SZMMSZ 5240"
+   e "SZMMSZ5240". Comparar so o literal faz a busca depender de quem digitou o hifen no
+   mesmo lugar que o fornecedor. Vale SO para o MPN: tirar separador dos outros campos
+   faria "CAP 0805" casar com "CAP0805" e tambem com coisas que nao se quer. */
+const semSep = t => String(t || '').toUpperCase().replace(/[\s\-\/.]/g, '');
+const casaMpn = (mpn, q, qSem) => !!mpn && (casa(mpn, q) || (qSem.length >= 3 && semSep(mpn).indexOf(qSem) >= 0));
 
 const passa = (it, filtro) => filtro === 'stock' ? it.saldo > 0
                             : filtro === 'nostock' ? it.saldo <= 0 : true;
+
+/* UM predicado para as duas listas. A da esquerda (familias) e a da direita (valores)
+   filtravam com duas copias da mesma condicao — e enquanto forem duas, acrescentar um campo
+   numa delas faz a familia aparecer na esquerda e a direita dizer "nenhum componente desta
+   familia passa no filtro", que e o pior jeito de errar: parece bug da tela, nao da busca. */
+function valorCasa(it, q, qSem){
+  return !q || casa(it.rotulo, q) || casa(it.nome, q) || casa(it.pkg, q)
+           || casaMpn(it.mpn, q, qSem);
+}
 
 /* A família entra na lista quando ELA casa a busca ou quando algum VALOR dela casa: quem
    digita "cap" quer a família, quem digita "4.7pF" quer a família que a contém. Sem as duas
    pontas, metade das buscas volta vazia sem explicar por quê. */
 function filtra(gs, busca, filtro){
   const q = String(busca || '').trim().toUpperCase();
+  const qSem = semSep(q);
   const fora = [];
   for (const g of gs){
     const famCasa = !q || casa(g.familia, q);
-    const vis = g.valores.filter(it => passa(it, filtro)
-      && (famCasa || casa(it.rotulo, q) || casa(it.nome, q) || casa(it.pkg, q)));
+    const vis = g.valores.filter(it => passa(it, filtro) && (famCasa || valorCasa(it, q, qSem)));
     if (vis.length) fora.push({ g, vis });
   }
   return fora;
@@ -208,9 +228,10 @@ function renderValores(box, g, opts){
     return;
   }
   const q = String(o.busca || '').trim().toUpperCase();
+  const qSem = semSep(q);
   const famCasa = !q || casa(g.familia, q);
   const vis = g.valores.filter(it => passa(it, o.filtro || 'all')
-    && (famCasa || casa(it.rotulo, q) || casa(it.nome, q) || casa(it.pkg, q)));
+    && (famCasa || valorCasa(it, q, qSem)));
 
   const h = el('div', 'ap-grupo');
   h.append(document.createTextNode(vis.length + (vis.length === 1 ? ' componente' : ' componentes')
@@ -226,9 +247,13 @@ function renderValores(box, g, opts){
     b.dataset.nome = it.nome;
     b.setAttribute('aria-selected', String(o.sel === it.nome));
     const v = el('span', 'v', it.rotulo);
-    v.title = it.nome + (it.pkg ? '\n' + it.pkg : '');
+    v.title = it.nome + (it.pkg ? '\n' + it.pkg : '') + (it.mpn ? '\nMPN ' + it.mpn : '');
     b.append(v);
+    /* achou POR CAUSA do MPN: mostre o MPN. "SZMMSZ5240BT1G" devolvendo "PTH 10V 0.5W"
+       parece resultado errado ate se ver que o part number esta nele. */
+    const porMpn = q && it.mpn && !casa(it.rotulo, q) && !casa(it.nome, q) && casaMpn(it.mpn, q, qSem);
     if (o.rec && o.rec.item === it) b.append(el('span', 'rec', '↩ mesmo nome'));
+    else if (porMpn) b.append(el('span', 'k', it.mpn));
     else b.append(el('span', 'k', it.pkg || ''));
     const q2 = el('span', 'q' + (it.saldo > 0 ? '' : ' zero'), String(it.saldo));
     q2.title = it.saldo > 0 ? it.saldo + ' em estoque' : 'sem saldo no almoxarifado';
@@ -238,6 +263,10 @@ function renderValores(box, g, opts){
   }
 }
 
-return { grupos, recomendado, contagens, renderFamilias, renderValores, poeCss };
+/* `filtra` e `valorCasa` saem no export por serem PUROS e por serem a regra que mais
+   silenciosamente erra: busca que nao acha nao levanta excecao, so devolve vazio e
+   parece que a peca nao existe. tests/test-almoxpick.js os exercita em Node. */
+return { grupos, recomendado, contagens, renderFamilias, renderValores, poeCss,
+         filtra, valorCasa, semSep };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubAlmoxPick;
