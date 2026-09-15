@@ -468,7 +468,7 @@ begin
     'Nao achei o workspace do AltiumPCBMirror nesta maquina.' + #13#10 +
     'Procurei o ' + HOME_MARCA + ' em:' + #13#10 + Tentei +
     'Digite a RAIZ do workspace (a pasta que tem o ' + HOME_MARCA + '):',
-    'D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror'));
+    '\\192.168.15.192\altiumhub\current'));
   if HomeValida(Resposta) then
   begin
     Result := Resposta;
