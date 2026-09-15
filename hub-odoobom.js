@@ -136,7 +136,7 @@ const el = (t, c, x) => { const n = document.createElement(t); if (c) n.classNam
                           if (x != null) n.textContent = x; return n; };
 
 /* nunca estoura: sem servidor, rota ausente ou resposta sem JSON viram {ok:false,error} —
-   o mesmo contrato do hub-odoolista.js e do hub-libsync.js */
+   o mesmo contrato do hub-odoolista.js */
 async function chama(rota){
   let r;
   try { r = await fetch(rota, { cache:'no-store' }); }

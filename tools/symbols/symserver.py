@@ -6,8 +6,6 @@
     POST /api/symbols/lib                    add/rename/delete na Biblioteca de símbolos (Libs/symbols-lib.js)
     POST /api/symbols/extract                reserva uma extração; GET …/<runId>/stream roda e retransmite (SSE)
     POST /api/symbols/mirror                 regera o espelho inteiro a partir da SchLib real; {flags:true} só leva os flags
-    GET  /api/symbols/altium-changes[?deep=1] o que mudou nas .SchLib do Altium desde o ledger (e os itens, com deep)
-    POST /api/symbols/altium-apply           RECUSA (409): o desenho é do hub; adotar o do Altium é comando manual
     POST /api/symbols/almox-sync             reserva a sincronização do almoxarifado pelo guardião; GET …/<runId>/stream roda (SSE)
 
 O trabalho pesado mora nos irmãos: `sch_leitor` lê, `schlib_patch` grava, `extrair` varre,
@@ -41,7 +39,7 @@ três decisões de arquivo:
                            o schlib_patch leva a cor para a SchLib; sem cor, a paleta do componente.
   o ledger                 tudo que escreve a SchLib da casa (/save) ou põe o espelho igual a ela
                            (/mirror, flags inclusive) registra mtime/size dela no Libs/lib-ledger.json
-                           — senão o próprio hub apareceria em /altium-changes como "mudou no Altium".
+                           — o ledger continua sendo o registro de quem escreveu por último.
 
 `registra(app, root)` é o único ponto de contato com o hubserver: guarda ROOT e registra o
 blueprint. ROOT é lido em tempo de chamada — os testes trocam.
@@ -807,71 +805,6 @@ def api_mirror():
     return {'ok': True, 'symbols': len(syms),
             'nofootprint': sum(1 for s in syms if L._sem_footprint(s)),
             'avisos': dados.get('avisos') or [], 'source': schlib, 'rename': ren}
-
-
-# ─── o Altium mudou? ──────────────────────────────────────────────────────────
-@bp.route('/altium-changes', methods=['GET'])
-def api_altium_changes():
-    """Sem `deep`: só mtime/size das .SchLib (a da casa e as de Libs/Almox) contra o ledger —
-    barato, é o que a aba Biblioteca pergunta ao abrir. Com `deep=1`: lê os arquivos que
-    mudaram e lista os itens (símbolo da casa com o que mudou; componente do almoxarifado
-    com geometria fora do gerador). Arquivo nunca visto é adotado como está; arquivo que
-    mudou sem diferença nenhuma é absorvido no deep — o aviso some sozinho."""
-    deep = (request.args.get('deep') or '').lower() in ('1', 'true', 'sim')
-    try:
-        with _lock_espelho, _lock_schlib:
-            r = G.detecta(ROOT, deep=deep)
-    except Exception as e:                                      # noqa: BLE001
-        return _erro('falha ao apurar as mudanças: %s' % e, 500)
-    r['ok'] = True
-    return r
-
-
-def _valida_itens(itens):
-    if not isinstance(itens, list) or not itens:
-        return 'itens tem que ser uma lista com ao menos um item'
-    for i, it in enumerate(itens):
-        onde = 'item %d' % (i + 1)
-        if not isinstance(it, dict) or it.get('acervo') not in ('altium', 'almox'):
-            return onde + ': acervo tem que ser altium ou almox'
-        if it['acervo'] == 'altium' and not (isinstance(it.get('name'), str) and it['name'].strip()):
-            return onde + ': símbolo da casa precisa de name'
-        if it['acervo'] == 'almox' and not all(isinstance(it.get(k), str) and it[k].strip()
-                                               for k in ('familia', 'componente')):
-            return onde + ': componente do almoxarifado precisa de familia e componente'
-    return None
-
-
-RECUSA_APPLY = (
-    'o desenho é da biblioteca do hub: mudança feita direto no Altium não entra por aqui. '
-    'Esta rota aplicava, e era por ela que a .SchLib mandava no espelho; desde 2026-09-14 a '
-    'autoridade é do hub e o que vem do Altium é AVISO (GET /api/symbols/altium-changes). '
-    'Para adotar um desenho do Altium, é comando manual na raiz do workspace: '
-    'python tools/symbols/guardiao.py --proteger "FAMILIA/COMPONENTE" '
-    '(ou --liberar, para devolver o símbolo ao gerador).'
-)
-
-
-@bp.route('/altium-apply', methods=['POST'])
-def api_altium_apply():
-    """RECUSA, sempre — 409 com o motivo e o comando que faz o que se queria.
-
-    A rota FICA de pé em vez de sair por três razões, nesta ordem de importância:
-      - 404/405 não explica nada. Um hub de uma aba que ficou aberta desde antes da
-        inversão apertaria o botão e veria "HTTP 404"; assim ele vê a regra e o comando.
-      - remover a rota é a mesma armadilha do fallback do /api/almox/sync: quem chamasse
-        cairia num caminho genérico, e a perda de garantia não teria nome.
-      - o dia em que houver um "adotar" com dono e confirmação, o lugar dele é aqui.
-
-    O corpo continua sendo validado antes da recusa: pedido malformado é 400, e um cliente
-    que mande lixo descobre isso mesmo agora que a rota não faz nada."""
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return _erro('JSON {itens:[…]} obrigatório', 400)
-    erro = _valida_itens(data.get('itens'))
-    if erro:
-        return _erro(erro, 400)
-    return _erro(RECUSA_APPLY, 409)
 
 
 # ─── sincronização do almoxarifado pelo guardião ──────────────────────────────

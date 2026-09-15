@@ -82,8 +82,8 @@ function el(tag, cls, text){
 const temServidor = () => !!(window.HubIO && HubIO.canPost);
 const proj = () => (typeof SCH_P === 'string' && SCH_P) || '';
 
-/* getJson/postJson nunca estouram: devolvem {ok:false,error} — o mesmo contrato do
-   hub-libsync.js, para a tela nunca ficar com um botao morto e nenhuma explicacao. */
+/* getJson/postJson nunca estouram: devolvem {ok:false,error}, para a tela nunca ficar com um
+   botao morto e nenhuma explicacao. */
 async function chama(rota, corpo){
   try {
     const o = corpo === undefined

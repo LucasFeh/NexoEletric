@@ -18,8 +18,6 @@
 <script src="hub-io.js"></script>
 <!-- editor de símbolos (sub-aba Símbolos da Biblioteca) -->
 <script src="hub-symed.js"></script>
-<!-- mudanças vindas do Altium: badge + modal na aba Biblioteca -->
-<script src="hub-libsync.js"></script>
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
 <script src="hub-odoocfg.js"></script>
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
@@ -724,29 +722,9 @@ button.tag { border: 0; cursor: pointer; }
 button.tag:hover { background: rgba(var(--tint),0.20); }
 button.tag.gone { color: var(--err); }
 
-/* mudanças vindas do Altium (hub-libsync.js): o badge na fileira de sub-abas, o modal que
-   pergunta se é para trazer para o hub, o que o guardião preservou no diálogo de
-   sincronização, e a marca "altium" nos acervos do almoxarifado. */
-.libsync-badge { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-  border: 1px solid var(--warn); background: var(--warn-soft); color: var(--warn);
-  font-size: 11px; line-height: 1; padding: 4px 9px 4px 8px; border-radius: 999px; margin-right: 4px; }
-.libsync-badge:hover { background: rgba(var(--tint),0.10); }
-.libsync-badge i { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
-.libsync-badge.busy i { animation: libsync-pulse 1s ease-in-out infinite; }
-@keyframes libsync-pulse { 50% { opacity: 0.25; } }
-.libsync-dlg { width: min(640px, 100%); max-height: min(80vh, 760px); }
-.libsync-p { font-size: 13px; color: var(--text-2); margin: 0; line-height: 1.5; }
-.libsync-lista { display: flex; flex-direction: column; overflow: auto; min-height: 0; max-height: 40vh; margin: 2px 0; }
-.libsync-li { display: grid; grid-template-columns: minmax(0,1.2fr) auto minmax(0,1fr); gap: 10px;
-  align-items: baseline; font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
-.libsync-li .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.libsync-li .ac { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-4); white-space: nowrap; }
-.libsync-li .mud { font-size: 11px; color: var(--warn); text-align: right;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.libsync-mais { font-size: 11px; color: var(--text-4); padding: 5px 0 0; }
-.libsync-arq { font-size: 11px; color: var(--text-4); margin: 0; word-break: break-all; }
-.libsync-acoes { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
-.libsync-origem { font-size: 12px; color: var(--warn); margin: 6px 0 0; line-height: 1.5; }
+/* marca do acervo e o que o guardião preservou na regeração (diálogo de sincronização).
+   O badge e o modal de "o Altium mudou" saíram em 2026-09-15: o desenho nasce no hub e vai
+   para o Altium, nunca o contrário, então não há mais mudança vinda de lá para anunciar. */
 .lib-row .pill.altium { color: var(--warn); background: transparent; box-shadow: inset 0 0 0 1px var(--warn); }
 .libsync-guard { margin: 2px 0 8px; }
 .libsync-guard .kicker { padding: 6px 0 2px; }
@@ -2032,10 +2010,6 @@ function libPicker() {
   const nome = el('span', 'mt', unico.title);
   nome.title = unico.hint || '';
   const lab = el('label', null, t('lib.acervo'));
-  /* o aviso "Altium mudou" mora nesta fileira porque é da Biblioteca inteira, não de uma
-     sub-aba; a fileira é refeita a cada renderTabs(), e o hub-libsync devolve o mesmo nó */
-  const aviso = window.HubLibSync && HubLibSync.badge();
-  if (aviso) box.append(aviso);
   box.append(lab, nome);
   /* só faz sentido num acervo do almoxarifado: o espelho do Altium quem regera é o
      ExportLibs, de dentro do Altium */
@@ -2225,28 +2199,6 @@ function alxBlocoGuardiao(box, g) {
   }
   if (orf.length) bl.append(el('p', 'alx-nota', t('alx.orfaos', { n: orf.length })));
 
-  /* O ALERTA DO ALTIUM. Desde a inversão de autoridade o desenho é do hub: o que estiver
-     diferente na .SchLib não sobe, e a regeração acabou de passar por cima. Sem esta lista
-     isso aconteceria calado — e calado é exatamente o que não pode ser. */
-  const div = Array.isArray(g.divergentes) ? g.divergentes : [];
-  if (div.length) {
-    const t2 = el('div', 'kicker', div.length + ' mudança(s) no Altium que NÃO entraram');
-    t2.title = 'o desenho é da biblioteca do hub; isto é aviso, não pendência';
-    bl.append(t2);
-    const ul = el('div', 'alx-diff');
-    div.slice(0, 40).forEach(d => {
-      const r2 = el('div', 'alx-di');
-      r2.append(el('span', 'a', d.componente || '?'), el('span', 'b', d.familia || ''),
-                el('span', 'c', d.reposto ? 'desfeito' : 'ignorado'));
-      r2.title = d.reposto
-        ? 'este componente é protegido: a regeração repôs o desenho do hub por cima'
-        : 'o desenho do hub (ou o do gerador) venceu; para adotar o do Altium, '
-          + 'python tools/symbols/guardiao.py --proteger "' + (d.familia || '') + '/' + (d.componente || '') + '"';
-      ul.append(r2);
-    });
-    if (div.length > 40) ul.append(el('div', 'alx-mais', '+ ' + (div.length - 40) + ' não listadas'));
-    bl.append(ul);
-  }
   if (g.recicladoDe) bl.append(el('p', 'alx-nota mono', t('alx.recicladoDe', { p: g.recicladoDe })));
   box.append(bl);
 }
@@ -3301,15 +3253,6 @@ function renderPanes() {
       c.append(m); g.append(c);
     });
   }
-  /* qualquer sub-aba da Biblioteca: as .SchLib podem ter mudado no Altium desde a última
-     vez que o hub as viu. Quem decide se avisa é o hub-libsync (30 s entre consultas);
-     aqui só se avisa que a aba abriu.
-
-     O `onApplied` saiu junto com o botão "Atualizar a lib do hub": desde a inversão de
-     autoridade (2026-09-14) o libsync só AVISA, nunca aplica, então não há mais momento em
-     que o espelho em disco muda por baixo desta aba por causa dele. Quem invalida o cache
-     depois de uma sincronização continua sendo o `almoxRecarrega`. */
-  if (TAB_PAI[S.tab] === 'lib' && window.HubLibSync) HubLibSync.verifica({ t, toast });
   if (S.tab === 'libsym') {
     /* o MESMO seletor de acervo da aba Sch Lib manda na lista do editor: a fileira de
        sub-abas e do grupo lib inteiro, entao o combobox ja aparece por cima do painel de

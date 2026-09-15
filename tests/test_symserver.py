@@ -452,63 +452,18 @@ try:
         assert r.status_code == 404 and 'SchLib' in j['error'], j
         print('mirror sem SchLib -> 404 ok')
 
-    # ── guardião: altium-changes / altium-apply / almox-sync ────────────────
+    # ── guardião: o que o hub grava, e o almox-sync ─────────────────────────
+    # As rotas /altium-changes e /altium-apply saíram em 2026-09-15: o desenho nasce no hub
+    # e vai para o Altium, nunca o contrário, então não há mudança vinda de lá para apurar
+    # nem para recusar. O que se prova aqui é o sentido que ficou.
     import guardiao as G
     ledger = os.path.join(tmp, 'Libs', 'lib-ledger.json')
     if tem_lib:
-        assert cli.post('/api/symbols/mirror', json={}).status_code == 200      # espelho = SchLib, ledger sabe
+        assert cli.post('/api/symbols/mirror', json={}).status_code == 200      # espelho = SchLib
         assert os.path.isfile(ledger), 'o /mirror registra a SchLib no ledger'
-    # (6) o que o hub escreveu não é "mudança do Altium"
-    j = cli.get('/api/symbols/altium-changes').get_json()
-    assert j['ok'] and j['pendente'] is False and j['deep'] is False and j['itens'] == [], j
-    casa = next(a for a in j['arquivos'] if a['acervo'] == 'altium')
-    assert casa['arquivo'] == G.chave_arquivo(tmp, lib_copia) == 'lib/BIBLIOTECA DE ESQUEMA.SchLib', casa
-    assert casa['caminho'] == lib_copia and casa['existe'] == tem_lib and not casa['mudou']
-    if tem_lib:
-        assert casa['conhecido'] and 'adotado' not in casa
         r = cli.post('/api/symbols/save', json={'name': RES_NOVO, 'parts': mod, 'altium': True})
         assert r.status_code == 200 and r.get_json()['altium'], r.get_json()
-        j = cli.get('/api/symbols/altium-changes').get_json()
-        assert not j['pendente'] and not next(a for a in j['arquivos'] if a['acervo'] == 'altium')['mudou']
-        print('save do hub nao vira "mudou no Altium" ok')
-        # (7) edição por fora (sem raiz: é o Altium) -> pendente; deep lista; apply troca só a linha
-        mod2 = copy.deepcopy(res['parts'])
-        next(g for g in mod2[0]['graphics'] if g['g'] == 'rect')['x2'] += 120
-        P.patch(lib_copia, {'name': RES, 'parts': mod2}, backup=False)
-        j = cli.get('/api/symbols/altium-changes').get_json()
-        assert j['pendente'] and next(a for a in j['arquivos'] if a['acervo'] == 'altium')['mudou'] and j['itens'] == []
-        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
-        assert j['deep'] and j['itens'] == [{'acervo': 'altium', 'name': RES_NOVO, 'nomeAltium': RES, 'mudou': ['geometria']}], j['itens']
-        antes = le_bytes(espelho)
-        # INVERSÃO DE AUTORIDADE (2026-09-14): a rota RECUSA, e não encosta no espelho.
-        r = cli.post('/api/symbols/altium-apply', json={'itens': j['itens']})
-        jj = r.get_json()
-        assert r.status_code == 409 and not jj.get('ok'), jj
-        assert '--proteger' in jj['error'] and 'manual' in jj['error'], jj['error']
-        assert le_bytes(espelho) == antes, 'a recusa não pode ter gravado nada'
-        # e o caminho MANUAL (a CLI, o que a mensagem manda usar) continua aplicando
-        jj = G.aplica(tmp, j['itens'], log=lambda *a: None)
-        assert jj['aplicados'] == 1 and jj['itens'][0]['acao'] == 'trocado', jj
-        linhas_a, linhas_d = antes.split(b'\r\n'), le_bytes(espelho).split(b'\r\n')
-        assert len(linhas_a) == len(linhas_d)
-        pref = b'{"name":' + L._js(RES_NOVO).encode() + b','
-        for i, (a, d) in enumerate(zip(linhas_a, linhas_d)):
-            if d.lstrip(b',').startswith(pref):
-                assert a != d
-            elif i == 2:
-                assert a.startswith(b'"generated":') and d.startswith(b'"generated":')
-            else:
-                assert a == d, 'linha %d mudou: %r' % (i, d[:60])
-        assert not P.compara(P.esperado({'name': RES_NOVO, 'parts': mod2}), acha(H.load_var_file(espelho), RES_NOVO)['parts'])
-        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
-        assert not j['pendente'] and j['itens'] == [], j
-        assert cli.post('/api/symbols/altium-apply', json={'itens': []}).status_code == 400
-        assert cli.post('/api/symbols/altium-apply', json={'itens': [{'acervo': 'x'}]}).status_code == 400
-        assert cli.post('/api/symbols/altium-apply', json={'itens': [{'acervo': 'almox', 'familia': 'A'}]}).status_code == 400
-        # o corpo é validado ANTES da recusa: pedido malformado continua sendo 400, não 409
-        r = cli.post('/api/symbols/altium-apply', json={'itens': [{'acervo': 'altium', 'name': 'NAO EXISTE'}]})
-        assert r.status_code == 409, r.get_json()
-        print('altium-changes avisa; altium-apply recusa (casa); a CLI aplica ok')
+        print('save do hub grava na SchLib da casa ok')
 
     almox_src = next((d for d in (r'D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Libs\Almox', os.path.join(RAIZ, 'Libs', 'Almox'))
                       if os.path.isfile(os.path.join(d, 'DIAC ALMOX.SchLib'))), None)
@@ -519,40 +474,24 @@ try:
             shutil.copy2(os.path.join(almox_src, f), os.path.join(tmp, 'Libs', 'Almox', f))
         for f in G.ESPELHOS_ALMOX:
             shutil.copy2(os.path.join(RAIZ, 'Libs', f), os.path.join(tmp, 'Libs', f))
-        j = cli.get('/api/symbols/altium-changes').get_json()            # adota as libs nunca vistas
-        alm = [a for a in j['arquivos'] if a['acervo'] == 'almox']
-        assert len(alm) == 2 and all(a['adotado'] and not a['mudou'] for a in alm) and not j['pendente'], alm
-        assert j['ledger']['gerado'] == 2 and j['ledger']['protegidos'] == 0
         cam = os.path.join(tmp, 'Libs', 'Almox', 'DIAC ALMOX.SchLib')
         comp, parts = next(iter(G.le_familia(cam).items()))
         mod3 = copy.deepcopy(parts)
         mod3[0]['graphics'].append({'g': 'rect', 'x1': -120, 'y1': -90, 'x2': 120, 'y2': 90, 'solid': False})
-        P.patch(cam, {'name': comp, 'parts': mod3}, backup=False)
-        j = cli.get('/api/symbols/altium-changes').get_json()
-        assert j['pendente'] and next(a for a in j['arquivos'] if a['familia'] == 'DIAC')['mudou']
-        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
-        it = j['itens']
-        assert len(it) == 1 and (it[0]['acervo'], it[0]['familia'], it[0]['componente'], it[0]['mudou']) == \
-            ('almox', 'DIAC', comp, ['geometria']), it
-        # a rota recusa também aqui, e o ledger não ganha proteção nenhuma
+        # edição por fora, do jeito que o Altium faria: NADA no hub reage a ela
         espelho_antes = le_bytes(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
-        r = cli.post('/api/symbols/altium-apply', json={'itens': it})
-        assert r.status_code == 409 and '--proteger' in r.get_json()['error'], r.get_json()
-        assert G.carrega_ledger(tmp)['protegidos'] == {}, 'a recusa não protege nada'
-        assert le_bytes(os.path.join(tmp, 'Libs', 'almox-basicos.js')) == espelho_antes
-        # o aviso CONTINUA de pé depois da recusa: é a diferença entre avisar e resolver
-        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
-        assert j['pendente'] and len(j['itens']) == 1, j['itens']
-        # e o caminho manual adota o desenho, com espelho e ledger juntos
+        P.patch(cam, {'name': comp, 'parts': mod3}, backup=False)
+        assert G.carrega_ledger(tmp)['protegidos'] == {}, 'o Altium não protege nada sozinho'
+        assert le_bytes(os.path.join(tmp, 'Libs', 'almox-basicos.js')) == espelho_antes, \
+            'o espelho do hub não pode se mexer por causa de um save no Altium'
+        # o caminho MANUAL continua sendo o único que adota, com espelho e ledger juntos
         assert G.protege(tmp, 'DIAC', comp, 'altium', log=lambda *a: None)
         led = G.carrega_ledger(tmp)
         assert led['protegidos']['DIAC'][comp]['origem'] == 'altium'
         _var, esp = G.le_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'))
         sim = next(s for s in esp['symbols'] if s['name'] == 'DIAC [PTH]')
         assert sim['origem'] == 'altium' and sim['protegidos'] == 1 and G.fp_parts(sim['parts']) == G.fp_parts(mod3)
-        j = cli.get('/api/symbols/altium-changes?deep=1').get_json()
-        assert not j['pendente'] and j['itens'] == []
-        print('altium-apply recusa (almoxarifado); o --proteger adota ok')
+        print('o Altium não move nada sozinho; o --proteger adota ok')
 
         # ── /save-almox: o desenho de UM componente vai para os TRES destinos ──────────
         # O que se prova aqui e o que o usuario pediu: mexer no simbolo de um componente
@@ -595,9 +534,6 @@ try:
         led = G.carrega_ledger(tmp)
         prot = led['protegidos'][alvo_fam][alvo_comp]
         assert prot['origem'] == 'hub' and G.fp_parts(prot['parts']) == G.fp_parts(j['parts']), prot
-        # (f) o proprio save nao pode aparecer como "mudou no Altium"
-        j2 = cli.get('/api/symbols/altium-changes?deep=1').get_json()
-        assert not j2['pendente'] and j2['itens'] == [], j2
 
         # recusas
         assert cli.post('/api/symbols/save-almox', json={

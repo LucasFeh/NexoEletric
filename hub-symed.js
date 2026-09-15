@@ -2373,9 +2373,10 @@ const dirty = () => !!ST.dirty;
 const actions = {
   novaParte, excluirParte, deleteSelection, duplicarSelecao, undo, redo, nudge, pushUndo, virar, setUnit };
 
-/* a casca aplicou no espelho o que veio do Altium: o Libs/schlib.js em disco e outro. Zera a carga
-   e reabre o simbolo que estava na tela ja com a versao nova; edicao nao salva se perde - quem chama
-   (hub-libsync) ja avisou o usuario antes. */
+/* o Libs/schlib.js em disco mudou por fora desta aba (uma sincronizacao, um /save de outra
+   janela): zera a carga e reabre o simbolo que estava na tela ja com a versao nova. Edicao nao
+   salva se perde, entao quem chama avisa o usuario antes — hoje quem chama e o recarregamento
+   por disco da casca (hub.html), nao mais o aviso do Altium, que saiu em 2026-09-15. */
 function reload() {
   /* DATA.cache e o que o loadSchlib consulta ANTES de baixar qualquer coisa: zerar so
      DATA.schlib nao recarregava NADA — a linha seguinte devolvia o mesmo objeto do cache e o
