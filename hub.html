@@ -4592,6 +4592,24 @@ document.addEventListener('keydown', e => {
     const q = new URLSearchParams(location.search);
     const fam = q.get('edsym');
     if (fam) {
+      /* CONSOME E APAGA DA URL. Estes parametros sao uma ordem de UMA vez — "abra este
+         componente agora" —, nao o endereco desta aba. Sem limpar, eles ficam grudados e
+         todo recarregamento volta para o editor.
+
+         E recarregar nao e coisa rara aqui: gravar qualquer coisa em Libs\ faz o SSE do
+         hubserver chamar __hubOnChange em TODA aba aberta. Entao "+ corpo atual" — que
+         grava em Libs\symbols-lib.js — reabria esta aba no mesmo componente, com o mesmo
+         aviso, em loop; e a vista Esquema deixava de ser alcancavel nela. Medido em
+         2026-09-15 com o "ESP32 DEVKIT V1 ESPWROOM32E-H4".
+
+         O replaceState vem ANTES do await de proposito: se o editor falhar ao abrir, a URL
+         ja esta limpa e o F5 seguinte devolve um hub normal em vez de repetir a falha. */
+      const limpa = new URLSearchParams(location.search);
+      ['edsym', 'edcomp', 'edacervo'].forEach(k => limpa.delete(k));
+      const resto = limpa.toString();
+      try {
+        history.replaceState(null, '', location.pathname + (resto ? '?' + resto : '') + location.hash);
+      } catch (e) { /* sem history: a aba continua presa, mas nada aqui pode derrubar o boot */ }
       const ac = q.get('edacervo');
       const a = ac ? libSources().find(x => x.id === ac) : null;
       await window.__hubEditarSimbolo(fam, q.get('edcomp') || null, acervoParaEditor(a));
