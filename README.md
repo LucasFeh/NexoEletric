@@ -31,17 +31,16 @@ transformados**; só a projeção de tela do hub inverte Y.
 ## Instalação
 
 1. Copie esta pasta para o seu PC — ela é o **workspace central** (ex.: `D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror`).
-2. Ajuste a constante `SCRIPT_HOME` (e `PROJECTS_DIR`/`OUT_DIR`, quando existir) no
-   início de cada um dos 5 scripts `.pas`. **Importante:** use o caminho como visto
-   do PC que **roda o Altium** — se o workspace fica em outra máquina da rede,
-   a constante deve ser o UNC do compartilhamento (ex.:
-   `\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror`), nunca um caminho
-   local que só existe na máquina do workspace
-   (`ExportLibs.pas`, `ExportProject.pas`, `BuildSchematic.pas`, `ExportBoard.pas`,
-   `ApplyChanges.pas`).
-3. Em `ExportLibs.pas` (e também em `BuildSchematic.pas`), ajuste `SCHLIB_FILE` e
-   `PCBLIB_FILE` para o caminho real da sua `.SchLib`/`.PcbLib` (por padrão apontam para
-   `Z:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\`).
+2. Diga a **esta máquina** onde fica o workspace, em
+   `C:\ProgramData\AltiumPCBMirror\home.txt` — veja **Onde fica o workspace: `home.txt`**
+   logo abaixo. Não há mais caminho gravado dentro dos `.pas`: na máquina onde tudo roda
+   local, a primeira execução acha sozinha e anota; na máquina que usa o servidor, você
+   escreve o UNC uma vez. Vale o caminho como visto do PC que **roda o Altium**.
+3. Se a `.SchLib`/`.PcbLib` da casa não estiverem onde o `BuildSchematic` procura por
+   padrão (`SCHLIB_PADRAO`/`PCBLIB_PADRAO`), acrescente as chaves `schlib` e `pcblib` no
+   mesmo `home.txt`. Elas são caminho de *máquina*, e não têm relação com a cópia publicada
+   em `Libs\` que o hub usa (veja **Onde está a biblioteca da casa**): o `.pas` roda no
+   Altium, que enxerga a rede.
 4. No Altium: **DXP » Run Script » Browse** e selecione `AltiumPCBMirror.PrjScr`
    (ou adicione o projeto de script ao seu workspace). O menu mostra **4 comandos**:
 
@@ -54,6 +53,53 @@ transformados**; só a projeção de tela do hub inverte Y.
 
    As rotinas auxiliares recebem parâmetro de propósito, para não poluírem o menu
    (o *Run Script* só lista procedimentos sem parâmetros).
+
+### Onde fica o workspace: `home.txt`
+
+O caminho do workspace **não é mais constante no código**. Cada máquina diz o seu em
+`C:\ProgramData\AltiumPCBMirror\home.txt`.
+
+`ProgramData` porque é por **máquina** — não por usuário, não por variável de ambiente
+(`GetEnvironmentVariable` não está entre as primitivas provadas no DelphiScript do Altium) —
+e porque abre no Bloco de Notas. Formato: uma `chave=valor` por linha; linha vazia e linha
+começando por `;` ou `#` são ignoradas.
+
+| chave | o quê |
+|---|---|
+| `home` | raiz do workspace: a pasta que tem o `AI-GUIDE.md`. **Obrigatória.** |
+| `schlib` | `.SchLib` da casa. Opcional; sem ela vale o `SCHLIB_PADRAO` do `BuildSchematic.pas`. |
+| `pcblib` | `.PcbLib` da casa. Opcional; idem, `PCBLIB_PADRAO`. |
+
+```ini
+; AltiumPCBMirror - configuracao DESTA maquina
+home=D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror
+;schlib=\\LUCAS-PC\D\ALTIUM LIBRARY ------ LUCAS\BIBLIOTECA DE ESQUEMA.SchLib
+```
+
+Cada script resolve a raiz nesta ordem, **validando** cada candidato — validar é achar o
+`AI-GUIDE.md` dentro dele, com `FileExists` e não `DirectoryExists`, porque uma pasta que
+existe mas não é o workspace tem de ser recusada:
+
+1. a chave `home` do `home.txt`;
+2. os candidatos embutidos, em ordem — `D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror`,
+   `\\LUCAS-PC\D\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror`,
+   `\\192.168.15.192\altiumhub\current`, `\\ODOO\altiumhub\current`. O primeiro que
+   validar é **gravado** no `home.txt`, para a próxima execução não procurar de novo;
+3. um `InputBox` perguntando a raiz — a resposta também é validada e gravada;
+4. nada validou: uma mensagem dizendo onde procurou e o que editar, e **nada é escrito**.
+
+Na máquina onde tudo roda local o primeiro candidato resolve sozinho, na primeira execução,
+e nunca mais se fala nisso. Depois do deploy, a máquina que usa o servidor põe o UNC no
+`home.txt` dela — e nenhuma das duas precisa de um `.pas` diferente.
+
+**Se aparecer "Acesso negado" apontando para um servidor que você não está usando, o
+`home.txt` desta máquina está apontando para o lugar errado.** Abra-o e corrija a linha
+`home=`. A mensagem de erro dos scripts já diz qual caminho falhou e de onde ele veio (do
+`home.txt` ou de um candidato embutido).
+
+O bloco que faz isso é **duplicado, com o mesmo texto, nos quatro `.pas`** — de propósito: o
+`.PrjScr` não ganha unidade nova, e resolução entre unidades do DelphiScript do Altium não
+dá para testar fora do Altium. Mudou num, mude nos quatro.
 
 ### Dependências do servidor
 
@@ -95,6 +141,7 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 ├── AI-GUIDE.md              contrato/manual para a sessão de IA
 ├── hubserver.py             servidor local opcional (Flask; API do hub v2 — índice/detalhe/Rescan/exclusão/seletor de pasta — e recarregamento automático)
 ├── Libs\
+│   ├── BIBLIOTECA DE ESQUEMA.SchLib   a biblioteca da casa PUBLICADA (binária, versionada)
 │   ├── schlib.js            espelho da biblioteca de esquema (símbolos)
 │   ├── pcblib.js            espelho da biblioteca de footprints
 │   ├── rename-map.js        o que o RenameLibs padronizou (antigo → novo) — tabela de apelido
@@ -112,6 +159,55 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 ```
 
 Projetos com nome iniciando `_` (ex.: `_DemoKit`) são demos — o hub mostra o selo **DEMO**.
+
+### Onde está a biblioteca da casa
+
+A `.SchLib` da casa mora fora do repositório, num share que só as máquinas da bancada
+enxergam (`Y:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\`). O hub do servidor não enxerga: ele
+roda num container que, por desenho, **não alcança nada fora dele — só serve**. Sem a
+biblioteca, o gerador do almoxarifado sai sem footprint reciclado e sem cabeçalho de
+documento, e as 32 `.SchLib` abrem com a folha preta no Altium — reportando `ok:true`.
+
+Por isso ela **viaja dentro do repositório**, publicada em
+`Libs\BIBLIOTECA DE ESQUEMA.SchLib` (1,7 MB, versionada, `*.SchLib binary` no
+`.gitattributes` para o git nunca tocar nos bytes). Quem publica é o próprio sincronismo: o
+guardião copia a lib viva para lá no começo de cada rodada, se ela mudou.
+
+Um módulo só decide o caminho, `tools\libpath.py`, e todo mundo o consulta — o gerador, o
+guardião, o leitor e o servidor de símbolos:
+
+| ordem | de onde | quando ganha |
+|---|---|---|
+| 1 | o caminho explícito de quem chamou | `--lib`, um teste, uma rota |
+| 2 | `ALTIUMHUB_SCHLIB` / `ALTIUMHUB_PCBLIB` | se a variável aponta para um arquivo que existe |
+| 3 | `tools\symbols\config.json » schlib` | **só se o arquivo existir** |
+| 4 | `Libs\BIBLIOTECA DE ESQUEMA.SchLib` | o piso: existe em todo clone |
+
+O passo 3 é o que faz a mesma ordem servir às duas máquinas sem um único `if` de
+plataforma. Na bancada o `Y:` existe e ganha — quem edita símbolo continua editando a
+biblioteca viva, com o History do Altium e o `Backup-hub` de lá. No Linux do servidor,
+`Y:\...` não é um caminho absoluto, o arquivo não existe, e a ordem cai sozinha na cópia
+publicada. O `config.json` congelado em `shared/` pelo deploy pode continuar apontando para
+o `Y:` para sempre: o valor morto é ignorado por não existir.
+
+Duas regras que vêm junto:
+
+- **A cópia publicada é somente leitura pelo hub.** No servidor ela vive dentro de
+  `releases/<hash>/`, que o deploy seguinte apaga com um `rm -rf`. Enquanto o caminho da
+  casa era o `Y:`, o "Salvar » Altium" do editor de símbolos morria num 404 inofensivo; com
+  a lib alcançável ele passaria a gravar de verdade, e o trabalho sumiria no deploy
+  seguinte. `/api/symbols/save` devolve **409** com `soLeitura:true` (o espelho é gravado
+  do mesmo jeito, e vale), e `/api/symbols/mirror` exige `{"confirmar":true}`. A trava é do
+  hub: a CLI do `schlib_patch` e o próprio Altium gravam nela se você mandar.
+- **A cópia publicada não entra no ledger.** O `git archive` do deploy carimba nos arquivos
+  extraídos a data do *commit*, então ela ganharia mtime novo a cada deploy — de qualquer
+  commit, mesmo um só de README — e o hub abriria sozinho o modal de "mudou no Altium,
+  quer aplicar?" para quem entrasse na aba Biblioteca.
+
+A `.PcbLib` da casa (63 MB) **não** é versionada: seriam 52 MiB permanentes no pack e a
+release do servidor iria de 14 para 77 MB, cinco vezes, dentro do share que hospeda o ERP.
+Ela já chega ao servidor como `Libs\Almox\FOOTPRINTS ALMOX.PcbLib`, que o deploy trata como
+diretório compartilhado — e é esse o piso da chave `pcblib`.
 
 ## Os 5 scripts
 
@@ -499,7 +595,9 @@ texto, pino, excluir; girar, espelhar, enquadrar, grade) e a ficha no estilo do 
 Properties: o tipo e o nome, os ícones de virar pino/linha (`K`), duplicar e excluir, X e Y
 na primeira linha, a cor do traço e a caixa **Preencher** com a cor de área, a parte, o
 tamanho em mm (largura/altura, diâmetro, comprimento), e no pino o número e o nome com o
-olho de visibilidade. Desfazer e refazer ficam no canto direito da barra do editor. As
+olho de visibilidade — pino novo nasce com o nome escondido, só o número à vista, como todo
+componente gerado do almoxarifado (o nome quase sempre repete o número); o olho o mostra
+quando fizer falta. Desfazer e refazer ficam no canto direito da barra do editor. As
 colunas laterais são ajustáveis como nas abas Laser e BOM (arraste; duplo clique fecha).
 
 O mouse é o da vista Esquema: o botão esquerdo seleciona, arrasta o que está marcado e
@@ -518,7 +616,9 @@ colidem) ou use "Aplicar ao símbolo", que troca o corpo inteiro preservando a p
 quando a contagem de pinos bate. "+ corpo atual" guarda o desenho aberto na biblioteca.
 
 **Salvar** grava em dois lugares de uma vez: `Libs/schlib.js` (o espelho que o hub desenha) e,
-com a caixa *Altium* marcada, a SchLib real em `Y:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\`,
+com a caixa *Altium* marcada, a SchLib da casa — a viva, resolvida pela ordem de
+**Onde está a biblioteca da casa**; onde só existe a cópia publicada (o servidor), esse
+segundo passo é recusado com **409** e só o espelho é gravado —,
 escrita direto pelo Python (a mesma técnica do almoxarifado: `cfbf.py` + `schlib_bin.py`),
 com backup automático em `Backup-hub\` ao lado do arquivo e conferência por releitura. A
 fração do pino vai para o stream `PinFrac` como o Altium grava (a grade métrica sobrevive),
@@ -857,6 +957,112 @@ Polígonos/planos, regiões, keepouts, textos e regras são exportados para **vi
 mas não são editáveis nesta versão. Furo de fixação feito como **recorte da placa** (*Board
 Cutout*) aparece em `cutouts` — sai como furo de verdade na vista PCB e na arte a laser;
 furo NPTH feito como pad aparece em `freepads`.
+
+## Enviar a lista de componentes para o Odoo
+
+Na vista **Esquema**, aba **Configurações**, o botão **↗ Enviar para o Odoo** monta a lista
+de materiais do esquema e a manda para a fila de aprovação do Odoo (modelo
+`di.lista.altium`, módulo `di_lista_altium`).
+
+**A lista não entra no inventário quando chega.** Ela cai numa fila, alguém do estoque
+confere e decide; só na aprovação nascem o produto "PCB (montada)" e a `mrp.bom`. Entre o
+desenho de um projetista e um fato do almoxarifado existe uma pessoa — que sabe se o
+projeto virou placa, se a revisão é a que foi para a fábrica e se as peças são as que a
+casa compra. O hub nunca aprova nada.
+
+### Como usar
+
+1. Salve o esquema. A lista sai do `schematic.js` **em disco** — o botão oferece salvar se
+   houver alteração pendente, porque uma lista montada do que está só na tela não existe
+   para mais ninguém.
+2. Digite a **revisão** (`B`, `P2`…). Ela entra no nome da placa no Odoo (`Projeto rev B`)
+   e compõe a chave de idempotência `altium:<PROJETO>:<REVISÃO>`. O campo vem pré-enchido
+   com a revisão do último envio, ou com o sufixo do nome da pasta quando dá para deduzir;
+   nunca com um palpite qualquer, porque um default silencioso abre a solicitação errada.
+3. **Conferir** — roda `di_confere_lista`, que resolve as linhas e diz o que resolveria
+   **sem gravar nada**. As pendências aparecem na coluna *resolução*.
+4. **Enviar** — só depois de conferir, e com uma confirmação explícita.
+
+Reenviar a mesma revisão **substitui as linhas** enquanto ninguém decidiu: é assim que se
+corrige a lista. Depois da decisão o Odoo ignora o reenvio e devolve o estado — para mandar
+outra versão, mude a revisão, porque placa de revisão diferente é outra placa no estoque.
+
+O recibo (`id`, `referencia`, `estado`, pendências) fica em
+`Projects\<nome>\odoo-lista.json`, fora do git: tudo nele volta de
+`di_estado_lista(uid_externo)`.
+
+### Como uma linha acha o produto
+
+Uma linha por componente, com os designadores agrupados — `R1, R2, R5` é **uma** linha com
+quantidade 3, que é como a BoM do Odoo quer o dado e como quem confere lê a placa.
+Componente multi-parte conta **uma vez**: um conector de 16 partes é um conector, e nos 16
+projetos do workspace são 782 itens `comp` para 562 componentes.
+
+A cascata para achar o produto, em ordem:
+
+| passo | de onde vem | quando pega |
+|---|---|---|
+| `product_id` | `params » OdooId` do próprio componente | peça colocada pelo hub a partir do almoxarifado |
+| `product_id` | `Libslmox-*.js » valores[].itens[].odoo`, pelo nome do símbolo | símbolo da biblioteca gerada do Odoo |
+| `mpn` (+ `encapsulamento`) | o nome do símbolo, quando tem cara de part number | biblioteca antiga da casa (`BC337`, `MMBD4148SE`) |
+| nada | — | a linha vai assim mesmo, marcada, e quem confere aponta na mão |
+
+Duas regras que valem o cuidado que custaram:
+
+- **valor ambíguo não manda `product_id`.** 62 dos 2511 valores do almoxarifado têm mais de
+  um produto do Odoo sob o mesmo rótulo (fabricantes diferentes); escolher o primeiro em
+  silêncio poria a peça errada na placa. O footprint desempata quando só um item casa; sem
+  isso a linha volta como pendência, que é o comportamento certo;
+- **valor de componente não é part number.** `330R` e `100n` nunca viram MPN. MPN que não
+  existe volta como pendência e não custa nada; MPN palpitado que casa por acaso põe a peça
+  errada na placa e ninguém desconfia.
+
+E o que **nunca** é mandado: `default_code`. Neste acervo ele é o **endereço da peça na
+gaveta**, não part number — casar por ele colocaria na placa o componente que mora no mesmo
+escaninho.
+
+### A cobertura depende de onde veio o símbolo
+
+Nos projetos legados do workspace, só 2% das linhas têm `product_id` e 21% têm MPN: esses
+esquemas foram desenhados com a `BIBLIOTECA DE ESQUEMA` da casa, que não tem vínculo com o
+cadastro, e 28% dos designadores têm como *comment* a fórmula não resolvida do Altium
+(`=Value + ' - ' + Potencia`), que não casa com nada.
+
+O caminho que resolve isso é o `params`: o **ExportProject** passou a exportá-lo, então um
+componente escolhido no hub a partir do almoxarifado mantém o `OdooId` depois de ir ao
+Altium e voltar. Antes ele morria no primeiro round-trip — o `BuildSchematic` escrevia o
+parâmetro, o export não o lia, e nenhum dos 16 `schematic.js` do workspace tinha o campo. O
+diálogo final do ExportProject agora diz quantos componentes trouxeram identidade.
+
+Para um projeto legado, a alternativa é o estoque cadastrar as peças e o projetista trocar
+os símbolos pelos do almoxarifado — a lista só pode ser **aprovada** quando toda linha
+apontar para um produto.
+
+### Credenciais e destino
+
+A senha vem de `ODOO_SENHA` (ou `ODOO_LISTA_SENHA`) no ambiente do processo do hub — no
+servidor, uma linha em `/etc/altiumhub/senha.env`, que o compose já injeta; na bancada,
+`$env:ODOO_SENHA = '...'` antes de subir o `hubserver.py`. Alternativa: `.hub-odoo.json` na
+raiz do workspace.
+
+**A senha não vem do `hub-almox.json` de propósito.** Aquele arquivo é servido em texto
+claro pela rota curinga do hub (`GET /hub-almox.json` responde 200 para a LAN inteira, nas
+portas 8000-8004) — e esta conta *escreve* no Odoo, não só lê. O ponto no nome de
+`.hub-odoo.json` não é enfeite: é o que faz o `_serve` recusá-lo. Url, base e login, que não
+são segredo, ainda são herdados do `hub-almox.json` quando não há nada mais específico.
+
+O destino é configurável (`ODOO_LISTA_URL` / `_DB` / `_LOGIN`) e o padrão é
+`http://192.168.15.182:8070`. Medido em 2026-09-11: o modelo `di.lista.altium` existe no
+`.182` e **não existe** no `.192` — apontar para produção hoje falha com modelo inexistente.
+O modal mostra sempre para onde vai antes de você enviar.
+
+### Sem passar pelo navegador
+
+    python odoolista.py --projeto "PESDA - DI241790" --revisao B              # ensaio
+    python odoolista.py --projeto "PESDA - DI241790" --revisao B --aplicar    # envia
+    python odoolista.py --projeto "PESDA - DI241790" --revisao B --estado     # consulta
+
+Ensaio por padrão, como o botão.
 
 ## Sinalizadores (usuário → IA)
 

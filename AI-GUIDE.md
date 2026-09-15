@@ -289,8 +289,13 @@ var changes = [
 
 ## Parte C — Sinalizadores (`annotations.js`)
 
-O usuário marca problemas direto no hub (vista PCB ou Esquema) com bandeirinhas
-coloridas; elas ficam em `Projects\<nome>\annotations.js` (um objeto JSON por linha):
+O usuário marca problemas direto no hub, **na vista PCB**, com bandeirinhas coloridas;
+elas ficam em `Projects\<nome>\annotations.js` (um objeto JSON por linha):
+
+> A vista **Esquema** deixou de sinalizar em 2026-09-14, numa limpeza de interface pedida
+> pelo usuário. O formato não mudou e o `view:"sch"` continua válido — sinalizador de
+> esquema que já esteja no arquivo permanece lá e continua sendo contrato seu (ver o
+> Contrato abaixo). O que não existe mais é o hub CRIAR um novo pela vista Esquema.
 
 ```js
 var annotations = [
