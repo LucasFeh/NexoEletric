@@ -934,12 +934,22 @@ except Exception as _e:            # noqa: BLE001
 # O caminho de volta do de cima: a BoM da PCB no Odoo vira vinculo para os componentes do
 # projeto. Sob try pela mesma razao — um arquivo novo que nao viajou no merge nao pode
 # impedir o hub inteiro de subir.
-try:
-    import odoobom_server          # noqa: E402
-    odoobom_server.registra(app, ROOT)
-except Exception as _e:            # noqa: BLE001
-    print('AVISO: lista de materiais do Odoo desligada (%s) — falta odoobom_server.py '
-          'ou odoobom.py na raiz do workspace.' % _e)
+# DESLIGADO EM 2026-09-15, a pedido do usuario. O painel "Vincular pela lista do Odoo"
+# quebrou um projeto (um CN4 de 4 partes recebeu o simbolo de um alias de uma parte e saiu
+# com 2). A causa ja foi consertada no schframe.js — a trava de multi-parte saiu de quem
+# chama e foi para dentro do __hubAplicaVinculos, que enxerga a folha —, mas o recurso fica
+# fora do ar ate alguem exercita-lo de novo com calma.
+#
+# As rotas somem JUNTO com o painel de proposito. Deixar /api/bom-odoo de pe sem tela seria
+# um caminho vivo que ninguem olha, e a tela e a unica coisa que hoje sabe usa-lo.
+# Para religar: descomente estas linhas e o <script src> em schframe.html.
+#
+# try:
+#     import odoobom_server          # noqa: E402
+#     odoobom_server.registra(app, ROOT)
+# except Exception as _e:            # noqa: BLE001
+#     print('AVISO: lista de materiais do Odoo desligada (%s) — falta odoobom_server.py '
+#           'ou odoobom.py na raiz do workspace.' % _e)
 
 
 def _lan_ip():

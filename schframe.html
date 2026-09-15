@@ -674,6 +674,13 @@
 <!-- "Enviar para o Odoo": injeta o proprio botao, CSS e modal (nada mais aqui) -->
 <script src="hub-odoolista.js"></script>
 <!-- o caminho de volta: a lista de materiais do Odoo vinculada aos componentes da folha -->
+<!-- DESLIGADO EM 2026-09-15, a pedido do usuario, depois de "Vincular pela lista do
+     Odoo" quebrar um projeto: um CN4 de 4 partes recebeu o simbolo de um alias de uma
+     parte e saiu com 2. A causa ja foi consertada (a trava de multi-parte saiu do
+     chamador e foi para dentro do __hubAplicaVinculos, que ve a folha), mas o recurso
+     fica fora do ar ate alguem exercita-lo de novo com calma.
+     Para religar: descomente esta linha e o par de linhas em hubserver.py (a rota).
 <script src="hub-odoobom.js"></script>
+-->
 </body>
 </html>
