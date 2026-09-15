@@ -100,6 +100,7 @@ function el(tag, cls, text){
   return e;
 }
 const temServidor = () => !!(window.HubIO && HubIO.canPost);
+const temDestino = () => !!(ST.destino && ST.destino.temSenha);
 const proj = () => (typeof SCH_P === 'string' && SCH_P) || '';
 
 /* getJson/postJson nunca estouram: devolvem {ok:false,error}, para a tela nunca ficar com um
@@ -211,7 +212,6 @@ function pintaLista(payload, recibo){
 
 function trava(v){
   ST.rodando = v;
-  $('odooConf').disabled = v;
   $('odooEnviar').disabled = v || !ST.conferido;
   $('odooRev').disabled = v;
   /* o X junto: fechado no meio da conferencia, o resultado chegava numa tela invisivel e
@@ -232,8 +232,8 @@ function descRecibo(r){
 
 /* A lista sai do esquema salvo e do espelho do almoxarifado — sem rede, sem credencial e
    sem espera. E a resposta para "o que eu vou mandar?", que a tela tem de ter ANTES de
-   qualquer round-trip. O Conferir continua existindo para a outra pergunta, "e o que o Odoo
-   diz disto?", e essa sim justifica esperar. */
+   qualquer round-trip. O ensaio vem logo atras, sozinho, e pinta por cima o que o Odoo
+   respondeu — sao duas perguntas diferentes, e so a segunda custa rede. */
 async function previa(){
   estadoTxt('montando a lista do esquema salvo…');
   const j = await chama('/api/lista/previa', corpo());
@@ -251,7 +251,7 @@ async function previa(){
   ST.aplicados = [];
   $('odooEnviar').disabled = true;
   pintaLista(j.payload, null);
-  estadoTxt('lista montada aqui — Conferir pergunta ao Odoo antes de enviar');
+  estadoTxt('lista montada do esquema salvo');
 }
 
 /* Resolver uma linha e escolher o componente do almoxarifado para os designadores dela. O
@@ -310,31 +310,47 @@ function corpo(extra){
   }, extra || {});
 }
 
+/* O ENSAIO DEIXOU DE SER UM BOTAO. Ele nunca foi uma decisao — era sempre "sim, confira" —,
+   e cobrar o clique so adiava a unica informacao que a tela tem a dar. Agora ele roda
+   sozinho, logo depois da previa: a lista aparece na hora (montada aqui) e em seguida se
+   pinta com o que o Odoo respondeu. O que o ensaio garante continua igual: nada e gravado,
+   e o uid_externo e a contagem que o /envio confere saem DELE, nao do que a tela imagina.
+
+   Falhar aqui nao apaga a lista — ela veio da previa e continua valendo. So o Enviar fica
+   de fora, com o motivo escrito. */
 async function conferir(){
-  const rev = $('odooRev').value.trim();
-  if (!rev){
-    await HubDialog.alert('Digite a revisão da placa. Ela entra no nome da PCB no Odoo '
-      + '("' + (typeof schematic !== 'undefined' ? schematic.project : proj()) + ' rev B") e é '
-      + 'o que impede o mesmo projeto de abrir duas solicitações na fila.',
-      { title: 'falta a revisão' });
-    $('odooRev').focus();
+  if (!temDestino()){
+    estadoTxt('lista montada do esquema salvo — sem senha do Odoo');
+    $('odooLista').prepend(el('div', 'od-aviso',
+      'Não há senha do Odoo gravada, então a lista não foi conferida e o Enviar está fora. '
+      + 'Abra Configuração » Projeto » Envio da lista para o Odoo e preencha usuário e senha '
+      + '(a tela só grava a partir desta máquina). No servidor, a alternativa é ODOO_SENHA no '
+      + 'ambiente, uma linha em /etc/altiumhub/senha.env. Resolver as linhas aqui continua '
+      + 'funcionando: isso é o esquema, não o Odoo.'));
     return;
   }
-  trava(true);
   ST.conferido = null;
   estadoTxt('conferindo no Odoo…');
   const j = await chama('/api/lista/ensaio', corpo());
-  trava(false);
+  if (!ST.aberto) return;
   if (!j.ok){
-    estadoTxt('');
-    pintaLista(null, null);
-    $('odooLista').prepend(el('div', 'od-aviso err', j.error || 'falhou'));
+    estadoTxt('a lista acima é a do esquema; o Odoo não respondeu');
+    $('odooLista').prepend(el('div', 'od-aviso err',
+      (j.error || 'falhou') + ' — dá para resolver as linhas mesmo assim; o Enviar volta quando o Odoo responder.'));
     return;
   }
   ST.conferido = j.payload;
   pintaLista(j.payload, j.recibo);
-  estadoTxt('ensaio: nada foi gravado · ' + j.uid_externo);
-  $('odooEnviar').disabled = false;
+  if (ST.aplicados.length) pintaPendentes();
+  estadoTxt('conferido no Odoo · nada foi gravado · ' + j.uid_externo);
+  $('odooEnviar').disabled = ST.aplicados.length > 0;
+}
+
+/* a revisao mudou: remonta e reconfere, na ordem */
+async function recarrega(){
+  if (!ST.aberto || ST.rodando) return;
+  await previa();
+  await conferir();
 }
 
 async function enviar(){
@@ -429,27 +445,16 @@ async function abre(){
       { title: 'sem destino' });
     return;
   }
-  if (!ST.destino.temSenha){
-    await HubDialog.alert(
-      /* A TELA PASSOU A EXISTIR, entao ela vem primeiro: mandar o usuario editar JSON a mao
-         era a unica saida enquanto a configuracao nao tinha os campos do Odoo. As outras duas
-         ficam, porque continuam valendo no servidor headless — la o formulario nao grava, ja
-         que a gravacao e so local, como a do almoxarifado. */
-      'Não há senha do Odoo gravada.\n\nAbra Configuração » Projeto » Envio da lista para '
-      + 'o Odoo e preencha url, base, login e senha. A tela só grava a partir desta máquina.\n\n'
-      + 'No servidor, a alternativa é ODOO_SENHA no ambiente (uma linha em '
-      + '/etc/altiumhub/senha.env) antes de subir o hubserver.\n\nA senha não vem do '
-      + 'hub-almox.json de propósito: aquele arquivo é servido em texto claro para a rede.',
-      { title: 'sem senha do Odoo' });
-    return;
-  }
-
   const r = await chama('/api/lista/recibo?projeto=' + encodeURIComponent(proj()));
   ST.reciboLocal = (r.ok && r.recibo) || null;
   ST.conferido = null;
   await atualizaEstado();
 
-  $('odooRev').value = (ST.reciboLocal && ST.reciboLocal.revisao) || (r.ok && r.revisaoSugerida) || '';
+  /* "A" e o comeco de tudo que nunca foi enviado — pedido do usuario. O palpite do nome da
+     pasta saiu do caminho: ele acertava 3 de 16 e, quando errava, errava em silencio (o
+     "_P2" de uma pasta e variante, nao revisao). O que vence "A" e so o que JA foi enviado
+     deste projeto: reenviar a mesma revisao substitui as linhas enquanto ninguem decidiu. */
+  $('odooRev').value = (ST.reciboLocal && ST.reciboLocal.revisao) || 'A';
   $('odooObs').value = '';
   $('odooAlvo').textContent = ST.destino.db + ' em ' + ST.destino.url
     + ' · ' + (ST.destino.login || '');
@@ -461,9 +466,11 @@ async function abre(){
 
   ST.aberto = true;
   $('odoomodal').classList.add('on');
-  /* depois de abrir, nao antes: a tela aparece na hora e a lista chega em seguida, em vez
-     de a janela ficar esperando para nascer pronta */
+  /* depois de abrir, nao antes: a tela aparece na hora, a lista chega em seguida (montada
+     aqui, sem rede) e por ultimo o Odoo pinta o que respondeu. Nenhum dos tres passos pede
+     clique — o unico botao que sobrou e o que grava de verdade. */
   await previa();
+  await conferir();
   $('odooRev').focus();
   $('odooRev').select();
 }
@@ -542,7 +549,6 @@ function montaDom(){
     +   '</div>'
     +   '<div class="od-foot">'
     +     '<span class="est" id="odooEstado"></span>'
-    +     '<button type="button" id="odooConf">Conferir</button>'
     +     '<button type="button" class="pri" id="odooEnviar" disabled>Enviar</button>'
     +   '</div>'
     + '</div>';
@@ -550,9 +556,12 @@ function montaDom(){
 
   $('odooFechar').addEventListener('click', fecha);
   m.addEventListener('mousedown', e => { if (e.target === m && !ST.rodando) fecha(); });
-  $('odooConf').addEventListener('click', () => conferir());
   $('odooEnviar').addEventListener('click', () => enviar());
-  $('odooRev').addEventListener('keydown', e => { if (e.key === 'Enter') conferir(); });
+  /* trocar a revisao muda o uid_externo — a chave que impede o envio duplicado —, entao a
+     lista precisa ser remontada e reconferida com ela. Enter faz na hora; sair do campo
+     tambem, para quem digita e clica direto no Enviar */
+  $('odooRev').addEventListener('keydown', e => { if (e.key === 'Enter') recarrega(); });
+  $('odooRev').addEventListener('change', () => recarrega());
   /* revisao mexida depois de conferir invalida o ensaio: o "tem certeza" nomearia uma
      revisao e o envio abriria outra chave de idempotencia, com uma lista que ninguem viu */
   $('odooRev').addEventListener('input', () => {
