@@ -933,6 +933,25 @@ except Exception as _e:            # noqa: BLE001
     print('AVISO: envio da lista ao Odoo desligado (%s) — falta odoolista_server.py '
           'ou odoolista.py na raiz do workspace.' % _e)
 
+# ─────────────────── chat do Claude dentro do hub (tools/chat) ──────────────────
+# A senha mestre e a MESMA do "Excluir projeto" — e a unica que este hub tem, e o chat
+# precisa de uma porque gasta dinheiro da conta do usuario a cada mensagem. No servidor ela
+# vem do /etc/altiumhub/senha.env (o compose ja monta o arquivo); aqui na bancada cai no
+# padrao que esta neste arquivo, e por isso o aviso abaixo existe: senha que esta no git nao
+# tranca nada contra quem alcanca a maquina pela rede.
+#
+# Sob try pela mesma razao dos dois de cima: o hub inteiro nao pode deixar de subir porque um
+# arquivo novo nao viajou num merge. Botao mudo e pior que erro — o aviso e alto de proposito.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'chat'))
+    import chatserver                # noqa: E402
+    chatserver.registra(app, ROOT, MASTER_PASSWORD)
+    if not os.environ.get('ALTIUMHUB_MASTER'):
+        print('AVISO: o chat esta usando a senha mestre PADRAO (a que esta no git). Numa '
+              'maquina que outras pessoas alcancam, defina ALTIUMHUB_MASTER antes de subir.')
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: chat do Claude desligado (%s) — falta tools/chat/chatserver.py.' % _e)
+
 # ─────────────── lista de materiais do Odoo sobre o esquema (so leitura) ───────────────
 # O caminho de volta do de cima: a BoM da PCB no Odoo vira vinculo para os componentes do
 # projeto. Sob try pela mesma razao — um arquivo novo que nao viajou no merge nao pode

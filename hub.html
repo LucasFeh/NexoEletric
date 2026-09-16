@@ -20,6 +20,10 @@
      vista Esquema usa — inclusive o texto da pergunta. Duas cópias divergiriam no dia em que
      uma delas ganhasse um aviso a mais. -->
 <script src="hub-almoxpick.js"></script>
+<!-- o operador: o lançador com a marca do Claude se pendura sozinho no <body> e fica por
+     cima de tudo, inclusive do iframe das vistas. Por isso UM lançador aqui cobre todas as
+     telas, e nada precisa ser duplicado dentro do schframe/pcbframe. -->
+<script src="hub-chat.js"></script>
 <!-- editor de símbolos (sub-aba Símbolos da Biblioteca) -->
 <script src="hub-symed.js"></script>
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
@@ -4690,6 +4694,45 @@ document.addEventListener('keydown', e => {
       await window.__hubEditarSimbolo(fam, q.get('edcomp') || null, acervoParaEditor(a));
     }
   } catch (e) { toast(String((e && e.message) || e), 'err'); }
+
+  /* O OPERADOR. O painel não conhece o hub: ele pergunta tudo por este adaptador, e as
+     funções aqui leem o estado VIVO (`proj()`, `S.tab`) em vez de receber uma cópia — um
+     projeto desatualizado aqui viraria proposta gravada no projeto errado. */
+  try {
+    HubChat.instala({
+      projeto: () => (proj() || {}).name || '',
+      tela: () => ({ vista: S.tab, projeto: (proj() || {}).name || '',
+                     designador: S.selDes || '', acervo: (S.lib && S.lib.sel && S.lib.sel.name) || '' }),
+      /* o canvas da vista aberta, de dentro do iframe (mesma origem). O maior da página é a
+         folha; os pequenos são miniatura de símbolo e de footprint, que ninguém quer recortar. */
+      canvasDaVista: () => {
+        try {
+          /* a vista ATIVA se houver; senao qualquer uma ja carregada. O hub mostra um painel
+             por vez, entao com o chat aberto sobre a aba Biblioteca a folha fica em
+             display:none — e o buffer do canvas continua la, inteiro. Procurar so em
+             `.pane.on` fazia o recorte desistir exatamente quando ele era mais util. */
+          const f = document.querySelector('.pane.on iframe[data-kind]')
+                 || document.querySelector('iframe[data-kind]');
+          const d = f && f.contentDocument;
+          if (!d) return null;
+          let maior = null, area = 0;
+          for (const c of d.querySelectorAll('canvas')) {
+            const a = (c.width || 0) * (c.height || 0);
+            if (a > area) { area = a; maior = c; }
+          }
+          return maior;
+        } catch (e) { return null; }      /* iframe ainda carregando */
+      },
+      toast: (m, k) => toast(m, k === 'err' ? 'err' : k === 'warn' ? 'warn' : 'ok'),
+      confirm: (txt, o) => confirmaNoHub(txt, o),
+      recarregarVista: () => {
+        const f = document.querySelector('.pane.on iframe[data-kind]');
+        try { if (f) f.contentWindow.location.reload(); } catch (e) { if (f) f.src = f.src; }
+      },
+    });
+  } catch (e) {
+    console.warn('operador não subiu:', e);   /* hub sem o chat continua sendo o hub */
+  }
 })();
 </script>
 </body>

@@ -47,6 +47,13 @@ COMPARTILHADOS_DIR=(
   "Libs/Almox"                     # .SchLib do almoxarifado, 255 MB (gitignored)
   "Trash"                          # hubserver.py TRASH_DIR: o unico desfazer que existe
   "Laser"                          # .lbrn gerados pelo painel do laser
+  ".chat"                          # conversas do chat e os anexos (prints de tela, PDFs).
+                                   # O PONTO no nome nao e enfeite: o hubserver recusa servir
+                                   # qualquer segmento que comece com ponto (_serve,
+                                   # hubserver.py:120), e sem ele a arvore inteira das
+                                   # conversas — inclusive os prints em base64 — ficaria
+                                   # legivel por HTTP para a LAN toda, sem senha nenhuma.
+                                   # E a mesma protecao do .hub-odoo.json.
 )
 COMPARTILHADOS_ARQ=(
   "Libs/almox-basicos.js"          # espelhos gerados (gitignored)

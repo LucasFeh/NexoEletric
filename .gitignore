@@ -55,6 +55,12 @@ odoo-lista.json
 # untracked COM a senha dentro, a um "git add ." de ir para o servidor.
 .hub-odoo.json*
 
+# conversas do chat e os anexos. Elas carregam PRINT DE TELA em base64 -- do Altium, do ERP,
+# do que o usuario recortou -- e ficariam a um "git add ." de ir para o repositorio. O ponto
+# no nome tambem e o que faz o hubserver recusar servi-las por HTTP (_serve, hubserver.py:120),
+# como no .hub-odoo.json acima.
+.chat/
+
 # ambiente virtual do servidor (o deploy cria /srv/altiumhub/.venv fora da release,
 # mas quem instalar a mao dentro da arvore nao pode comitar isso)
 .venv/
