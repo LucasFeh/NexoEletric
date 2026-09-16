@@ -325,11 +325,15 @@ precisar de servidor.
   `Libs\schlib.js`: símbolos, fios, junctions, net labels, power ports, designator/comment.
   Zoom com a roda, **botão direito arrasta a tela**, cursor em mil, clique numa net destaca
   ela na folha inteira (com os pinos membros). O painel da esquerda é redimensionável pela
-  divisória (duplo clique fecha/abre, como nas abas Laser e BOM) e tem duas sub-abas no
-  rodapé: **Componentes** (lista, nets, sinalizadores e validação) e **Configurações** (folha,
-  centralizar, grade, o lápis de edição, Adicionar componentes, Sinalizar e um único
-  **Salvar**, que grava `schematic.js` e `annotations.js` conforme o que estiver alterado —
-  e fica sempre disponível, para nunca prender o que já foi alterado).
+  divisória (duplo clique fecha/abre, como nas abas Laser e BOM) e tem três sub-abas no
+  rodapé: **Componentes** (lista, nets e validação), **Configurações** (folha, centralizar,
+  o passo da grade, os olhos de comment e de pino, e o **Salvar**) e **Atalhos**.
+  **Bolinha e ponte.** Onde três ou mais ramos se encontram — um T, uma estrela de pontas de
+  fio, um pino no meio de um fio — nasce a **bolinha** de conexão; onde dois fios só se
+  **cruzam**, sem nada declarado ali, o de cima vira uma **ponte** (um arco de passagem). Os
+  dois são desenho: quem decide ligação continua sendo a extração de nets do `hub-core.js`,
+  e cruzamento sem junção continua não ligando, como no Altium. Antes, o cruzamento era um X
+  mudo que se lia como ligação, e a estrela de três pontas não ganhava bolinha nenhuma.
   **Cor é identidade elétrica, seleção é contorno.** Um fio sai laranja quando pertence à net
   em foco e azul-escuro quando não; quem está selecionado ganha um contorno tracejado por
   cima, sem trocar de cor — a mesma convenção da vista PCB e do Altium. Clicar num fio, pino,
@@ -337,24 +341,50 @@ precisar de servidor.
   linha acende no painel de nets); `Esc`, o clique no vazio, a troca de folha e qualquer nova
   seleção largam o foco junto. Antes a seleção recoloria o objeto, e a net saía metade azul
   metade laranja, com o laranja sobrevivendo ao `Esc` — a cor ficava presa na folha.
-  A vista abre em leitura; o **lápis** (`E`) destrava a edição, que é **mover**: clique
-  seleciona, arrastar no vazio seleciona vários
-  (esquerda→direita só quem couber inteiro; direita→esquerda quem encostar), `Shift` soma à
-  seleção, e o arrasto move **só o que estiver selecionado**, com grade de 100 mil. `Del`
-  apaga, `Espaço` gira, `X` espelha, `Ctrl+A` seleciona a folha e `Ctrl+Z` desfaz.
+  A folha é sempre editável, e editar é **mover**: clique seleciona, arrastar no vazio
+  seleciona vários (esquerda→direita só quem couber inteiro; direita→esquerda quem encostar),
+  `Shift` soma à seleção. `Del` apaga, `Espaço` gira, `X` espelha na **horizontal**, `Y` na
+  **vertical**, `Ctrl+A` seleciona a folha e `Ctrl+Z` desfaz — e **todas essas teclas são
+  trocáveis** na sub-aba **Atalhos**, que é desenhada a partir da mesma tabela que o teclado
+  lê (não há lista de atalhos escrita à mão em lugar nenhum). Teclas que o navegador leva
+  antes da página (`Ctrl+W`, `F5`, `Ctrl+R`…) são recusadas na hora de gravar.
+  **No fio, o clique pega o trecho, não a polilinha.** Arrastar um trecho o empurra na
+  perpendicular e estica os vizinhos, como no Altium; arrastar um **vértice** move só aquele
+  canto (e ele gruda no pino pelo ímã); `Del` num trecho do meio **parte o fio em dois** e num
+  trecho da ponta apara. Clique duplo promove ao fio inteiro, e o laço de seleção continua
+  pegando fios inteiros. Mover um componente **leva os fios junto**: os vértices que estavam
+  em cima de uma ponta quente acompanham o pino, em vez de o desenho continuar encostado
+  enquanto a net se desfaz calada.
+  **O passo da grade é escolhido** na sub-aba Configurações — 100/50/25/10 mil e também
+  1 mm / 0,5 mm / 0,25 mm. O métrico está ali porque as folhas desta casa snapam em 1 mm ou
+  0,3 mm dentro do próprio Altium: quase todo vértice de fio dos projetos reais está fora da
+  grade de 100 mil, e um editor que só soubesse 100 mil empurraria o vértice para longe do
+  pino a cada arrasto. A malha desenhada e o raio do ímã acompanham o passo.
+  **O designador e o comment são objetos.** Dá para clicar no texto, arrastá-lo para longe do
+  símbolo (um tracinho o liga ao componente) e devolvê-lo ao lugar pelo `Del` ou pelo botão da
+  ficha; a posição vai para o `schematic.js` em `refdx/refdy` (e `comdx/comdy`), em mil, como
+  deslocamento da âncora do componente. A âncora automática também mudou: ela sai da caixa do
+  componente **como ela está na folha**, e não do símbolo sem girar — era por isso que todo
+  componente em `rot` 90/270 nascia com o nome escrito por cima do próprio corpo.
   **Adicionar componentes** (`C`) abre um modal igual à aba Biblioteca (busca, seletor de
   acervo, preview do símbolo, lista de valores do almoxarifado ou footprint); cada
   **Adicionar** junta o item numa lista à direita e **Finalizar** coloca tudo na folha ativa,
   em grade, já selecionado para arrastar.
   Dentro da folha há uma **barra de ferramentas** com o pouco que a mão faz aqui: selecionar,
   **Fio** (`W`) e os pousos **GND** (`G`), **3V3**, **5V5** e **VIN**. O fio é **magnético** —
-  a 60 mil de uma ponta de pino, vértice de fio, junção ou power port ele gruda (alvo laranja
-  na tela), e encostar num pino encerra o traçado; fora do ímã anda na grade de 100 mil, em
-  ortogonal. Botão direito sem arrastar, duplo clique ou `Esc` encerram o fio. Net label,
+  perto de uma ponta de pino, vértice de fio, junção ou power port ele gruda (alvo laranja na
+  tela), e encostar num pino encerra o traçado; fora do ímã anda na grade escolhida, em
+  ortogonal. O raio do ímã acompanha o passo da grade (60 mil em 100, menos nas grades finas,
+  nunca menos de 20). Botão direito sem arrastar, duplo clique ou `Esc` encerram o fio. Net label,
   texto, junção explícita e troca de valor/footprint continuam sendo da IA, no `schematic.js`
   ([AI-GUIDE.md](AI-GUIDE.md), Parte A).
-  À direita fica o painel **Propriedades**, no espírito do painel homônimo do Altium e
-  **só de leitura**: designator, comment, descrição, símbolo (e em que nome ele foi resolvido),
+  **Trocar componente encaixa.** O desenho novo põe os pinos noutro lugar em volta da mesma
+  âncora; a troca agora mede onde os pinos estavam, mede onde ficaram, e anda com o componente
+  o tanto que devolve o maior número de pinos de mesmo número ao ponto antigo — dizendo no
+  aviso quantos voltaram. Sem isso os fios ficavam onde estavam e a ligação se desfazia sem
+  uma linha de aviso, porque a extração de nets casa por coordenada exata.
+  À direita fica o painel **Propriedades**, no espírito do painel homônimo do Altium
+  (designator e parte são editáveis; o resto é leitura): designator, comment, descrição, símbolo (e em que nome ele foi resolvido),
   acervo de origem, footprint, posição/rotação, parâmetros e a tabela de pinos com a net de
   cada um — com o **símbolo e o footprint desenhados no rodapé**. Não há um campo editável
   sequer: esta vista serve para olhar e posicionar. A ficha **não fica na tela o tempo
