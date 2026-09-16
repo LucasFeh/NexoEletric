@@ -104,20 +104,44 @@ const zero = d({ sym: 'X', pinosEsperados: 8, pinosDoCandidato: 0 });
 assert.strictEqual(zero.pinosAlerta, true);
 assert.ok(/0/.test(zero.pinos), zero.pinos);
 
-/* ── 5. ALCANCE DA ESCOLHA ──
-   A escolha é global: vale para todo componente com aquele comp.sym, em todo projeto. O
-   toast só contava DEPOIS de gravar; a contagem tem de estar na tela antes do clique. */
+/* ── 5. ALCANCE DA ESCOLHA, em três viradas ──
+   (1) até 2026-09-15 a escolha ia para o `Libs/lib-subs.js`: substituição GLOBAL por nome de
+       símbolo, valendo em TODOS os projetos e sem aparecer em lugar nenhum. O usuário pediu o
+       fim disso — "um componente não pode influenciar outro de designador diferente";
+   (2) o alcance virou UM designador. Resolveu o vazamento e criou outro trabalho: trocar
+       quarenta capacitores iguais virava quarenta idas ao modal;
+   (3) 2026-09-16, o meio-termo: a troca vale para todos do mesmo tipo NESTE projeto, e a
+       caixa de marcar do modal devolve o alcance de um só quando é isso que se quer.
+
+   O que sobrou da recusa (1) é o que importava: nada vaza para outro projeto, e o número
+   está na tela ANTES do clique — o toast que contava depois de gravar era o defeito
+   original. */
 const tres = d({ sym: 'X', how: 'exato', quantos: 3 });
-/* o alcance mudou: a troca vale so para o designador escolhido, entao nao ha mais alarme
-   — e o numero que interessa e quantos FICAM COMO ESTAO, nao quantos mudam junto */
-assert.strictEqual(tres.impactoAlerta, false, 'nao ha mais estrago coletivo a anunciar');
-assert.ok(/outros 2 componentes/.test(tres.impacto), tres.impacto);
-assert.ok(/muda só este designador/.test(tres.impacto), 'o alcance tem de estar dito: ' + tres.impacto);
-const um = d({ sym: 'X', how: 'exato', quantos: 1 });
-assert.strictEqual(um.impactoAlerta, false);
-assert.ok(/único da folha/.test(um.impacto), um.impacto);
+assert.strictEqual(tres.alcance, 3, 'o padrão é trocar todos do tipo');
+assert.strictEqual(tres.impactoAlerta, true, 'mexer em três de uma vez tem de se anunciar');
+assert.ok(/muda os 3 componentes deste tipo/.test(tres.impacto), tres.impacto);
+assert.ok(/desmarque/.test(tres.impacto), 'a saída tem de estar dita junto: ' + tres.impacto);
+assert.ok(!/muda só este designador/.test(tres.impacto), 'no modo "todos" não pode prometer um só');
+
+/* desmarcado: o alcance de antes, palavra por palavra — e sem alarme, porque aí nada
+   coletivo acontece */
+const tresUm = d({ sym: 'X', how: 'exato', quantos: 3, todos: false });
+assert.strictEqual(tresUm.alcance, 1);
+assert.strictEqual(tresUm.impactoAlerta, false);
+assert.ok(/muda só este designador/.test(tresUm.impacto), tresUm.impacto);
+assert.ok(/outros 2 componentes/.test(tresUm.impacto), tresUm.impacto);
+
+/* único do tipo: os dois modos dizem a mesma coisa, porque não há diferença nenhuma entre
+   eles — e nenhum dos dois pode soar como alarme */
+for (const modo of [{}, { todos: false }]){
+  const um = d(Object.assign({ sym: 'X', how: 'exato', quantos: 1 }, modo));
+  assert.strictEqual(um.impactoAlerta, false, JSON.stringify(modo));
+  assert.strictEqual(um.alcance, 1, JSON.stringify(modo));
+  assert.ok(/único deste tipo no projeto/.test(um.impacto), um.impacto);
+}
 assert.strictEqual(d({ sym: 'X', how: 'exato', quantos: 0 }).impacto, null,
-  'nenhum componente na folha: não há alcance para anunciar');
+  'nenhum componente no projeto: não há alcance para anunciar');
+assert.strictEqual(d({ sym: 'X', how: 'exato', quantos: 0 }).alcance, 0);
 
 /* ── 6. entrada torta não derruba a tela ── */
 assert.doesNotThrow(() => d());

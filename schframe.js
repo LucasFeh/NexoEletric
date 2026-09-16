@@ -119,7 +119,8 @@ const _pinos = n => n + (n === 1 ? ' pino' : ' pinos');
 /* Estado ja medido -> o que a ficha e o modal mostram. Campos de entrada:
    `sym`   nome do simbolo em que o componente resolveu, ou null/'' se nao resolveu;
    `how`   como resolveu (HubCore.resolveSym);
-   `quantos` componentes DESTE projeto com o mesmo comp.sym — todos mudam junto;
+   `quantos` componentes DESTE projeto com o mesmo comp.sym;
+   `todos`   a troca vale para todos eles (o padrão) ou só para o designador clicado;
    `pinosEsperados` pinagem do simbolo em que o nome do componente resolveria SOZINHO, sem
      a escolha; null quando esse simbolo nao existe em acervo nenhum — ai nao ha o que
      comparar, e dizer isso e melhor do que inventar um numero;
@@ -131,6 +132,7 @@ function decideTroca(est){
   const porEscolha = e.how === 'escolha';
   const quantos = Math.max(0, Math.trunc(e.quantos || 0));
   const esperados = e.pinosEsperados == null ? null : Math.trunc(e.pinosEsperados);
+  const todos = e.todos !== false;              /* o padrão é trocar todos do tipo */
   const cand = e.pinosDoCandidato == null ? null : Math.trunc(e.pinosDoCandidato);
   const d = {
     /* com simbolo resolvido a troca e acao secundaria: quem esta vendo o desenho certo nao
@@ -145,17 +147,29 @@ function decideTroca(est){
     desfazer: porEscolha ? 'Desfazer a escolha' : null,
     impacto: null, impactoAlerta: false,
     pinos: null, pinosAlerta: false,
+    alcance: 0,
   };
-  /* O ALCANCE MUDOU em 2026-09-15: a troca vale so para ESTE designador (e todas as
-     partes dele). Antes ia para o lib-subs.js e valia para todo componente com o mesmo
-     nome de simbolo, em todos os projetos — e era isso que este texto avisava. Dizer
-     'muda junto' agora seria mentira, e mentira que assusta quem ia so trocar um. */
-  if (quantos > 1){
+  /* O ALCANCE, em duas viradas.
+     Em 2026-09-15 a troca deixou de ir para o lib-subs.js: aquilo era substituição GLOBAL
+     por nome de símbolo, valia em TODOS os projetos e não aparecia em lugar nenhum — o
+     usuário pediu o fim disso com todas as letras ("um componente não pode influenciar
+     outro de designador diferente"), e o alcance virou um designador só.
+     Em 2026-09-16 ele pediu o meio-termo, que é o que estava faltando: trocar um troca
+     TODOS do mesmo tipo NESTE projeto. Não é a volta do lib-subs — continua sendo edição
+     do schematic.js deste projeto, visível no arquivo e desfeita com um Ctrl+Z. O que
+     sobrou daquela recusa é o que importava: nada vaza para outro projeto, e nada acontece
+     sem estar escrito na tela antes do clique. */
+  d.alcance = todos ? quantos : Math.min(quantos, 1);
+  if (todos && quantos > 1){
+    d.impacto = 'muda os ' + quantos + ' componentes deste tipo no projeto, com designador '
+              + 'diferente ou não — desmarque abaixo para trocar só este';
+    d.impactoAlerta = true;
+  } else if (quantos > 1){
     d.impacto = 'muda só este designador; os outros ' + (quantos - 1)
-              + ' componentes da folha com este mesmo símbolo ficam como estão';
+              + ' componentes deste tipo ficam como estão';
     d.impactoAlerta = false;
   } else if (quantos === 1){
-    d.impacto = 'muda só este designador — é o único da folha com este símbolo';
+    d.impacto = 'muda só este designador — é o único deste tipo no projeto';
   }
   if (cand != null){
     if (esperados == null)
@@ -2979,6 +2993,9 @@ let symPart = null;
    de gravar: quantos componentes do projeto mudam junto e a pinagem que o componente
    espera (null = o simbolo de origem nao existe em acervo nenhum) */
 let symQuantos = 0, symEsperados = null;
+/* a troca vale para TODOS do tipo (o padrao) ou so para o designador clicado. Nasce
+   marcada a cada abertura do modal: a escolha e daquela troca, nao um modo do hub. */
+let symTodos = true;
 const camSymEsc = D.mkCamera($('symCv'), ctx => { if (symPart) D.drawSymbolPart(ctx, symPart, { honraOlho: false }); },
                              { bg: D.SCH.sheet });
 const symModalAberto = () => $('symmodal').classList.contains('on');
@@ -2991,7 +3008,7 @@ function fechaSymModal(){
   const aoFechar = symOpts && symOpts.aoFechar;
   symAlvo = null; symEscolhido = null; symCands = []; symPart = null; apFam = null; apRec = null;
   symOpts = null;
-  symQuantos = 0; symEsperados = null;
+  symQuantos = 0; symEsperados = null; symTodos = true;
   if (typeof aoFechar === 'function') aoFechar();
 }
 
@@ -3029,10 +3046,23 @@ function symAtualizaInfo(){
   box.textContent = '';
   const rs = symAlvo ? HubCore.resolveSym(SLIB, symAlvo.sym) : null;
   const d = decideTroca({ sym: rs && rs.item && rs.item.name, how: rs && rs.how,
-                          quantos: symQuantos, pinosEsperados: symEsperados,
+                          quantos: symQuantos, todos: symTodos, pinosEsperados: symEsperados,
                           pinosDoCandidato: symPart && symPart.pins ? symPart.pins.length : null });
   if (d.pinos)   box.append(el('div', 'li' + (d.pinosAlerta   ? ' alerta' : ''), d.pinos));
   if (d.impacto) box.append(el('div', 'li' + (d.impactoAlerta ? ' alerta' : ''), d.impacto));
+  /* A ESCAPATÓRIA, e só quando ela existe. Com um componente só do tipo no projeto, uma
+     caixa dizendo "trocar os 1" seria enfeite — e enfeite que faz duvidar do que o botão vai
+     fazer. Ela nasce MARCADA a cada abertura: o pedido foi que trocar um troque todos, e uma
+     escolha grudenta faria o gesto seguinte trocar só um sem ninguém ter pedido. */
+  if (symQuantos > 1){
+    const l = el('label', 'sym-todos');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = symTodos;
+    cb.onchange = () => { symTodos = cb.checked; symAtualizaInfo(); };
+    l.append(cb, el('span', null, 'trocar os ' + symQuantos + ' componentes deste tipo'));
+    box.append(l);
+  }
 }
 
 function symSelecionar(c){
@@ -3209,6 +3239,7 @@ function abrirEscolhaSimbolo(comp, opts){
   const rsRec = HubCore.resolveSym(SLIB, comp.sym);
   apRec = HubAlmoxPick.recomendado(apGrupos, comp.sym, rsRec && rsRec.name);
   symQuantos = contaSym(comp.sym);
+  symTodos = true;
   symEsperados = pinosEsperadosDe(comp);
   const rs = HubCore.resolveSym(SLIB, comp.sym);
   const atual = (rs && rs.item) || null;
@@ -3366,8 +3397,16 @@ async function usarSimboloEscolhido(){
 
   /* todas as partes do MESMO designador: o designador e do componente, e trocar metade
      dele deixaria a folha com um componente partido ao meio */
+  /* TODOS DO MESMO TIPO, que é o padrão. "Mesmo tipo" é o mesmo `sym` no arquivo — a mesma
+     chave que o contaSym usa para dizer quantos são, e a mesma que a caixa de marcar
+     anuncia. O designador não entra na conta: dois CAP EL [PTH] são o mesmo tipo sejam eles
+     C3 e C5 ou C3 e R9. Cada designador aparece UMA vez na lista, e o __hubAplicaVinculos
+     expande cada um para todas as partes dele. */
   const refs = (symOpts && symOpts.vinculo && symOpts.refs && symOpts.refs.length)
-    ? symOpts.refs : [symAlvo.ref];
+    ? symOpts.refs
+    : symTodos ? Array.from(new Set(model.sheets.reduce((l, sh) => l.concat(
+        sh.comps.filter(c => c.sym === de).map(c => c.ref)), [])))
+    : [symAlvo.ref];
   const res = window.__hubAplicaVinculos([{ refs: refs, componente: para }]);
   if (!res || !res.ok){
     await HubDialog.alert((res && res.erro) || 'não deu para aplicar a troca.',
