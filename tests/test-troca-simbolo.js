@@ -120,7 +120,7 @@ const tres = d({ sym: 'X', how: 'exato', quantos: 3 });
 assert.strictEqual(tres.alcance, 3, 'o padrão é trocar todos do tipo');
 assert.strictEqual(tres.impactoAlerta, true, 'mexer em três de uma vez tem de se anunciar');
 assert.ok(/muda os 3 componentes deste tipo/.test(tres.impacto), tres.impacto);
-assert.ok(/desmarque/.test(tres.impacto), 'a saída tem de estar dita junto: ' + tres.impacto);
+assert.ok(/escolha abaixo/.test(tres.impacto), 'a saída tem de estar dita junto: ' + tres.impacto);
 assert.ok(!/muda só este designador/.test(tres.impacto), 'no modo "todos" não pode prometer um só');
 
 /* desmarcado: o alcance de antes, palavra por palavra — e sem alarme, porque aí nada
@@ -143,6 +143,90 @@ assert.strictEqual(d({ sym: 'X', how: 'exato', quantos: 0 }).impacto, null,
   'nenhum componente no projeto: não há alcance para anunciar');
 assert.strictEqual(d({ sym: 'X', how: 'exato', quantos: 0 }).alcance, 0);
 
+/* ── 5b. O VALOR, que é a outra metade do "mesmo tipo" ──
+   O caso do pedido, medido no PRJ-UR-DI261924: `RES [ SMD ]` tem 24 componentes e QUATRO
+   valores (10K x10, 1K x8, 2K2 x4, 15R x2). Até 2026-09-16 trocar o 10K trocava os 24. */
+const val = d({ sym: 'RES', how: 'exato', quantos: 24, quantosValor: 10, valor: '10K' });
+assert.strictEqual(val.alcance, 10, 'o padrão passou a ser mesmo tipo E mesmo valor');
+assert.strictEqual(val.escopo, 'valor');
+assert.ok(/10K/.test(val.impacto), 'o valor tem de estar escrito: ' + val.impacto);
+assert.ok(/outros 14/.test(val.impacto), 'e quantos ficam de fora: ' + val.impacto);
+assert.strictEqual(val.impactoAlerta, true);
+
+/* os três escopos saem prontos daqui — a tela só desenha o que esta função decidiu */
+assert.deepStrictEqual(val.escopos.map(o => o.id), ['valor', 'tipo', 'um']);
+assert.deepStrictEqual(val.escopos.map(o => o.n), [10, 24, 1]);
+assert.ok(/10K/.test(val.escopos[0].rotulo), val.escopos[0].rotulo);
+assert.ok(/qualquer valor/.test(val.escopos[1].rotulo), val.escopos[1].rotulo);
+
+/* o alcance de antes continua a um clique, e diz em voz alta o que faz */
+const tipo = d({ sym: 'RES', how: 'exato', quantos: 24, quantosValor: 10, valor: '10K',
+                 escopo: 'tipo' });
+assert.strictEqual(tipo.alcance, 24);
+assert.ok(/TODOS os valores/.test(tipo.impacto), tipo.impacto);
+assert.strictEqual(tipo.impactoAlerta, true);
+
+const umSo = d({ sym: 'RES', how: 'exato', quantos: 24, quantosValor: 10, valor: '10K',
+                 escopo: 'um' });
+assert.strictEqual(umSo.alcance, 1);
+assert.strictEqual(umSo.impactoAlerta, false);
+
+/* SEM VALOR DECLARADO nada muda: é o conector, o test point, o LED. Medido nos 8 projetos,
+   63 dos 76 grupos estão neste caso, e partir qualquer um deles pelo rótulo deixaria os
+   outros 27 conectores para trás. */
+const semVal = d({ sym: 'CONE PADRAO', how: 'exato', quantos: 19 });
+assert.strictEqual(semVal.alcance, 19, 'sem valor, o alcance é o símbolo inteiro, como sempre foi');
+assert.deepStrictEqual(semVal.escopos.map(o => o.id), ['valor', 'um'],
+  'sem valor não existe a opção "qualquer valor": ela seria a mesma coisa duas vezes');
+assert.ok(!/valor/.test(semVal.escopos[0].rotulo), semVal.escopos[0].rotulo);
+
+/* único do seu valor entre vários do símbolo: não é alarme, e explica por que é um só.
+   E "trocar os 1 com valor 4.7 uF" não pode existir: é "trocar só este" com plural errado. */
+const unico = d({ sym: 'CAP', how: 'exato', quantos: 15, quantosValor: 1, valor: '4.7 uF' });
+assert.strictEqual(unico.alcance, 1);
+assert.strictEqual(unico.impactoAlerta, false);
+assert.ok(/único de valor 4\.7 uF/.test(unico.impacto), unico.impacto);
+assert.deepStrictEqual(unico.escopos.map(o => o.id), ['tipo', 'um'],
+  'a opção "por valor" some quando ela é a mesma que "só este"');
+assert.ok(!/os 1 /.test(unico.escopos.map(o => o.rotulo).join(' ')),
+  'nenhum rótulo pode dizer "os 1": ' + unico.escopos.map(o => o.rotulo).join(' | '));
+assert.strictEqual(unico.escopo, 'um', 'o padrão cai para "só este" quando o valor é único');
+
+/* com um componente só do tipo não há escolha de alcance para oferecer */
+assert.deepStrictEqual(d({ sym: 'X', how: 'exato', quantos: 1 }).escopos, []);
+
+/* ── 5c. A LEITURA DO VALOR ──
+   De onde ele sai, na ordem medida nos projetos da casa. */
+const v = SF.valorDoComp;
+assert.strictEqual(v({ params: 'Value=10K' }), '10k', 'o parâmetro Value é a primeira fonte');
+assert.strictEqual(v({ params: 'Comment=x;Value=0.1 uF;OdooId=213' }), '0.1 uf',
+  'Value no meio da lista, e o espaço interno normalizado');
+assert.strictEqual(v({ params: 'value = 2K2 ' }), '2k2', 'maiúsculas e folga não contam');
+/* o comment só vale em R… e C…, que foi o pedido: resistor e capacitor */
+assert.strictEqual(v({ ref: 'R9', comment: '2k2' }), '2k2');
+assert.strictEqual(v({ ref: 'C4', comment: '0,1uF' }), '0,1uf');
+assert.strictEqual(v({ ref: 'CN1', comment: 'CONEXÃO COM FIO SOLDADO' }), '',
+  'conector não tem valor: partir por rótulo deixaria 18 conectores para trás');
+assert.strictEqual(v({ ref: 'TP7', comment: 'test point' }), '');
+assert.strictEqual(v({ ref: 'D11', comment: '1A / 1000 V M7 1n4007' }), '',
+  'diodo sem parâmetro fica como está: o pedido foi resistor e capacitor');
+/* a fórmula do Altium por resolver NÃO é valor: ela é idêntica nos 24 resistores */
+assert.strictEqual(v({ ref: 'R17', comment: "=Value + ' - ' + Potência" }), '');
+/* o parâmetro vence o comment, inclusive em R e C */
+assert.strictEqual(v({ ref: 'R1', params: 'Value=10K', comment: '1K' }), '10k');
+assert.doesNotThrow(() => v());
+assert.strictEqual(v(null), '');
+assert.strictEqual(v({}), '');
+
+/* a chave do "mesmo tipo": símbolo e valor, e um não pode vazar para o outro */
+const t = SF.tipoDoComp;
+assert.strictEqual(t({ sym: 'RES', params: 'Value=10K' }), t({ sym: 'RES', params: 'Value=10k' }),
+  'o valor é comparado sem caixa');
+assert.notStrictEqual(t({ sym: 'RES', params: 'Value=10K' }), t({ sym: 'RES', params: 'Value=1K' }));
+assert.notStrictEqual(t({ sym: 'RES', params: 'Value=10K' }), t({ sym: 'CAP', params: 'Value=10K' }));
+assert.notStrictEqual(t({ sym: 'RES', params: 'Value=10K' }), t({ sym: 'RES1', params: 'Value=0K' }),
+  'concatenar sem separador faria RES+10K casar com RES1+0K');
+
 /* ── 6. entrada torta não derruba a tela ── */
 assert.doesNotThrow(() => d());
 assert.doesNotThrow(() => d({}));
@@ -152,4 +236,4 @@ assert.strictEqual(d({ sym: 'X', quantos: -5 }).impacto, null);
 assert.strictEqual(d({ sym: 'X', how: 'inventado' }).motivo, null, 'how desconhecido não vaza cru');
 
 console.log('test-troca-simbolo OK (rótulo, motivo do resolveSym, desfazer, pinagem 8x3, '
-          + 'pinagem desconhecida, alcance global antes do clique)');
+          + 'pinagem desconhecida, alcance por tipo E VALOR antes do clique, leitura do valor)');

@@ -116,11 +116,55 @@ const MOTIVO_RESOL = {
 };
 const _pinos = n => n + (n === 1 ? ' pino' : ' pinos');
 
+/* ── O VALOR DO COMPONENTE, que é metade do "mesmo tipo" ──
+   Até 2026-09-16 "mesmo tipo" era só o `sym`. No PRJ-UR-DI261924 isso quer dizer que os
+   24 componentes de `RES [ SMD ]` são o mesmo tipo — 10K, 1K, 2K2 e 15R juntos — e trocar
+   o 10K trocava os quatro valores de uma vez. O usuário pediu o corte certo: trocar um
+   resistor troca os que TAMBÉM têm o mesmo valor.
+
+   De onde sai o valor, nesta ordem e por medição nos 8 projetos da casa:
+
+   1. o parâmetro `Value` do componente. É o dado dos espelhos novos, e é exato
+      (`params:"Value=10K"`). O `comment` NÃO serve aqui: nesses mesmos projetos ele é a
+      fórmula do Altium por resolver (`"=Value + ' - ' + Potência"`), igual nos 24;
+   2. o `comment`, mas SÓ em designador R… ou C… — resistor e capacitor, que foi o pedido.
+      É o que faz a regra valer também nos espelhos antigos (SHP2, PRJ-DI221694D), onde
+      não há `Value` e o comment é mesmo o valor ("2k2", "0,1uF");
+   3. nada. E aí o alcance volta a ser o de hoje, o símbolo inteiro.
+
+   O passo 2 é limitado a R e C DE PROPÓSITO. Solto, ele parte o que não é valor: medido,
+   quebraria `TEST POINT` em 2 grupos pelo rótulo, `MSTBH 12 Pin` em 28 pelo nome da net e
+   `CONE PADRAO` em 6 pela descrição — e trocar um conector deixaria os outros 27 para
+   trás. Com o limite, 63 grupos ficam inteiros e só resistor e capacitor se dividem. */
+const RE_VALUE = /(?:^|;)\s*Value\s*=\s*([^;]*)/i;
+const RE_REF_RC = /^[RC]\d/i;
+function _normValor(t){ return String(t == null ? '' : t).trim().replace(/\s+/g, ' ').toLowerCase(); }
+function valorDoComp(c){
+  if (!c) return '';
+  const m = RE_VALUE.exec(String(c.params || ''));
+  if (m) return _normValor(m[1]);
+  if (RE_REF_RC.test(String(c.ref || ''))){
+    const cm = String(c.comment || '').trim();
+    /* fórmula do Altium por resolver não é valor: ela é IGUAL nos 24 resistores */
+    if (cm && cm.charAt(0) !== '=') return _normValor(cm);
+  }
+  return '';
+}
+/* A chave do "mesmo tipo e mesmo valor". O \u0000 separa porque não existe em nome de
+   símbolo nem em valor — concatenar sem ele faria "RES"+"10K" casar com "RES1"+"0K". */
+function tipoDoComp(c){
+  return c ? String(c.sym || '') + '\u0000' + valorDoComp(c) : '';
+}
+
 /* Estado ja medido -> o que a ficha e o modal mostram. Campos de entrada:
    `sym`   nome do simbolo em que o componente resolveu, ou null/'' se nao resolveu;
    `how`   como resolveu (HubCore.resolveSym);
    `quantos` componentes DESTE projeto com o mesmo comp.sym;
-   `todos`   a troca vale para todos eles (o padrão) ou só para o designador clicado;
+   `quantosValor` componentes com o mesmo comp.sym E o mesmo valor (veja valorDoComp).
+     Ausente = igual a `quantos`, que é o caso de quem não tem valor nenhum declarado;
+   `valor`   o valor em si, para escrever na tela ("10K"). Vazio quando não há;
+   `escopo`  'valor' (o padrão), 'tipo' ou 'um' — veja o bloco ALCANCE abaixo;
+   `todos`   compatibilidade: false é o mesmo que escopo 'um';
    `pinosEsperados` pinagem do simbolo em que o nome do componente resolveria SOZINHO, sem
      a escolha; null quando esse simbolo nao existe em acervo nenhum — ai nao ha o que
      comparar, e dizer isso e melhor do que inventar um numero;
@@ -131,8 +175,18 @@ function decideTroca(est){
   const nome = e.sym ? String(e.sym) : '';
   const porEscolha = e.how === 'escolha';
   const quantos = Math.max(0, Math.trunc(e.quantos || 0));
+  /* sem valor declarado os dois números são o mesmo, e aí a tela não fala de valor */
+  const quantosValor = Math.min(quantos, Math.max(0, Math.trunc(
+    e.quantosValor == null ? quantos : e.quantosValor)));
+  const valor = String(e.valor == null ? '' : e.valor).trim();
+  const temValor = !!valor && quantosValor < quantos;
+  let escopo = ['um', 'valor', 'tipo'].indexOf(e.escopo) >= 0
+    ? e.escopo : (e.todos === false ? 'um' : 'valor');
+  /* único do seu valor: "trocar os 1 com valor 4.7 uF" e "trocar só este designador" são a
+     MESMA coisa escrita duas vezes, e a primeira ainda sai com o plural errado. Some uma. */
+  const valorEhUm = temValor && quantosValor <= 1;
+  if (escopo === 'valor' && valorEhUm) escopo = 'um';
   const esperados = e.pinosEsperados == null ? null : Math.trunc(e.pinosEsperados);
-  const todos = e.todos !== false;              /* o padrão é trocar todos do tipo */
   const cand = e.pinosDoCandidato == null ? null : Math.trunc(e.pinosDoCandidato);
   const d = {
     /* com simbolo resolvido a troca e acao secundaria: quem esta vendo o desenho certo nao
@@ -149,25 +203,61 @@ function decideTroca(est){
     pinos: null, pinosAlerta: false,
     alcance: 0,
   };
-  /* O ALCANCE, em duas viradas.
+  /* O ALCANCE, em três viradas.
      Em 2026-09-15 a troca deixou de ir para o lib-subs.js: aquilo era substituição GLOBAL
      por nome de símbolo, valia em TODOS os projetos e não aparecia em lugar nenhum — o
      usuário pediu o fim disso com todas as letras ("um componente não pode influenciar
      outro de designador diferente"), e o alcance virou um designador só.
-     Em 2026-09-16 ele pediu o meio-termo, que é o que estava faltando: trocar um troca
-     TODOS do mesmo tipo NESTE projeto. Não é a volta do lib-subs — continua sendo edição
-     do schematic.js deste projeto, visível no arquivo e desfeita com um Ctrl+Z. O que
-     sobrou daquela recusa é o que importava: nada vaza para outro projeto, e nada acontece
-     sem estar escrito na tela antes do clique. */
-  d.alcance = todos ? quantos : Math.min(quantos, 1);
-  if (todos && quantos > 1){
-    d.impacto = 'muda os ' + quantos + ' componentes deste tipo no projeto, com designador '
-              + 'diferente ou não — desmarque abaixo para trocar só este';
-    d.impactoAlerta = true;
-  } else if (quantos > 1){
+     Em 2026-09-16 ele pediu o meio-termo: trocar um troca TODOS do mesmo tipo NESTE
+     projeto. Não é a volta do lib-subs — continua sendo edição do schematic.js deste
+     projeto, visível no arquivo e desfeita com um Ctrl+Z.
+     No mesmo dia veio o corte que faltava: "mesmo tipo" era só o `sym`, e no
+     PRJ-UR-DI261924 os 24 `RES [ SMD ]` são 10K, 1K, 2K2 e 15R juntos — trocar o 10K
+     trocava os quatro valores. Agora o padrão é MESMO TIPO E MESMO VALOR, e o símbolo
+     inteiro continua ao alcance de um clique, dito com o número na frente.
+
+     Os três escopos saem daqui prontos (`d.escopos`), com rótulo e contagem: a tela só
+     desenha o que esta função decidiu, e a regra se prova sem navegador. */
+  d.escopo = escopo;
+  d.escopos = [];
+  if (quantos > 1){
+    if (temValor){
+      if (!valorEhUm)
+        d.escopos.push({ id:'valor', n:quantosValor,
+                         rotulo:'trocar os ' + quantosValor + ' com valor ' + valor });
+      d.escopos.push({ id:'tipo', n:quantos,
+                       rotulo:'trocar os ' + quantos + ' deste tipo, qualquer valor' });
+    } else {
+      d.escopos.push({ id:'valor', n:quantos,
+                       rotulo:'trocar os ' + quantos + ' componentes deste tipo' });
+    }
+    d.escopos.push({ id:'um', n:1, rotulo:'trocar só este designador' });
+  }
+  d.alcance = escopo === 'um' ? Math.min(quantos, 1)
+            : escopo === 'tipo' ? quantos
+            : quantosValor;
+  if (escopo === 'um' && valorEhUm){
+    d.impacto = 'muda só este designador — é o único de valor ' + valor + ' no projeto, '
+              + 'entre os ' + quantos + ' deste símbolo';
+    d.impactoAlerta = false;
+  } else if (escopo === 'um' && quantos > 1){
     d.impacto = 'muda só este designador; os outros ' + (quantos - 1)
               + ' componentes deste tipo ficam como estão';
     d.impactoAlerta = false;
+  } else if (escopo === 'tipo' && quantos > 1){
+    d.impacto = 'muda os ' + quantos + ' componentes deste símbolo no projeto — TODOS os '
+              + 'valores junto' + (temValor ? ', e não só os ' + quantosValor + ' de '
+              + valor : '') + '; escolha abaixo para reduzir';
+    d.impactoAlerta = true;
+  } else if (escopo === 'valor' && temValor && quantosValor > 1){
+    d.impacto = 'muda os ' + quantosValor + ' componentes deste tipo com valor ' + valor
+              + ' — os outros ' + (quantos - quantosValor) + ' deste símbolo, de outro '
+              + 'valor, ficam como estão';
+    d.impactoAlerta = true;
+  } else if (quantos > 1){
+    d.impacto = 'muda os ' + quantos + ' componentes deste tipo no projeto, com designador '
+              + 'diferente ou não — escolha abaixo para trocar só este';
+    d.impactoAlerta = true;
   } else if (quantos === 1){
     d.impacto = 'muda só este designador — é o único deste tipo no projeto';
   }
@@ -560,6 +650,7 @@ function caixaTexto(x, y, txt, h){
 }
 
 const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca, montaPartsTrocando,
+               valorDoComp, tipoDoComp,
                topologiaFolha, moveSegmento, apagaSegmento, apagaVertice, espelha, encaixeDaTroca,
                GRADES, gradePorId, snapPasso, MM_MIL, caixaTexto, larguraTexto,
                ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho };
@@ -2338,6 +2429,41 @@ function renderProps(){
                    port:'port', junction:'junção', noerc:'No ERC', text:'texto' };
     for (const [k, n] of Object.entries(cont)) prKv(s, (NOME[k] || k) + (n > 1 ? 's' : ''), n);
     body.append(s);
+
+    /* ── TROCAR OS SELECIONADOS ──
+       O alcance automático ("os do mesmo tipo e valor") resolve o caso regular; este resolve
+       o resto, que o usuário pediu junto: marcar os componentes A DEDO — de valores
+       diferentes, de símbolos diferentes, de folhas diferentes — e dar um componente só a
+       todos. É o mesmo caminho do painel "Enviar para o Odoo" (`vinculo` com a lista de
+       refs pronta): quem escolheu o conjunto foi a pessoa, e o modal não reabre a conta.
+
+       O modal precisa de um componente de referência para sugerir candidatos e medir a
+       pinagem; usa-se o PRIMEIRO da seleção, e a tela diz isso, senão as sugestões parecem
+       vir do nada. Fios e textas marcados junto são ignorados em silêncio — marcar um fio
+       por acidente não pode custar o gesto inteiro. */
+    const comps = itens.filter(it => it.t === 'comp');
+    const refsSel = Array.from(new Set(comps.map(c => c.ref)));
+    if (comps.length > 1){
+      const sT = prSec('trocar em bloco');
+      const b = el('button', 'wide sutil', 'Definir o componente nos ' + refsSel.length
+                   + ' designadores…');
+      b.type = 'button';
+      b.title = 'um componente só para ' + refsSel.join(', ')
+              + ' — as sugestões saem de "' + (comps[0].ref || '?') + '"';
+      b.onclick = () => abrirEscolhaSimbolo(comps[0], { vinculo: true, refs: refsSel });
+      sT.append(b);
+      /* os valores que vão junto, ditos ANTES do clique: é a única defesa contra marcar um
+         10K e um 1K sem perceber e dar o mesmo componente aos dois. */
+      const vals = Array.from(new Set(comps.map(c => valorDoComp(c)).filter(Boolean)));
+      if (vals.length > 1)
+        prKv(sT, '', 'atenção: a seleção mistura ' + vals.length + ' valores ('
+             + vals.slice(0, 6).join(', ') + (vals.length > 6 ? '…' : '')
+             + ') — todos vão receber o MESMO componente', 'warn');
+      else
+        prKv(sT, '', 'todos recebem o mesmo componente; Ctrl+Z desfaz e só o Salvar grava',
+             'dim');
+      body.append(sT);
+    }
     return prPreview(false, null, null);
   }
 
@@ -2506,7 +2632,9 @@ function renderProps(){
   const g = prSec('geral');
   /* o texto do botão de troca (e se ele sai em destaque) é regra pura, provada em
      tests/test-troca-simbolo.js — a ficha só desenha o que ela decide */
-  const dec = decideTroca({ sym: sym && sym.name, how: rsym && rsym.how, quantos: contaSym(it.sym) });
+  const dec = decideTroca({ sym: sym && sym.name, how: rsym && rsym.how,
+                           quantos: contaSym(it.sym), quantosValor: contaTipo(it),
+                           valor: valorDoComp(it) });
 
   /* DESIGNATOR com o olho do lado. Ele é do COMPONENTE, não da parte: renomear CN4 renomeia
      as 4 partes de uma vez, senão a folha fica com um componente partido ao meio e o ECO do
@@ -3161,9 +3289,13 @@ let symPart = null;
    de gravar: quantos componentes do projeto mudam junto e a pinagem que o componente
    espera (null = o simbolo de origem nao existe em acervo nenhum) */
 let symQuantos = 0, symEsperados = null;
-/* a troca vale para TODOS do tipo (o padrao) ou so para o designador clicado. Nasce
-   marcada a cada abertura do modal: a escolha e daquela troca, nao um modo do hub. */
-let symTodos = true;
+/* quantos tem o mesmo tipo E o mesmo valor, e qual e o valor — os dois medidos ao abrir,
+   como o symQuantos, para a conta nao mudar embaixo de quem esta lendo a tela */
+let symQuantosValor = 0, symValor = '';
+/* 'valor' (o padrao: mesmo tipo e mesmo valor), 'tipo' (o simbolo inteiro) ou 'um'.
+   Nasce em 'valor' a cada abertura do modal: a escolha e daquela troca, nao um modo do
+   hub — escolha grudenta faria o gesto seguinte trocar um alcance que ninguem pediu. */
+let symEscopo = 'valor';
 const camSymEsc = D.mkCamera($('symCv'), ctx => { if (symPart) D.drawSymbolPart(ctx, symPart, { honraOlho: false }); },
                              { bg: D.SCH.sheet });
 const symModalAberto = () => $('symmodal').classList.contains('on');
@@ -3176,7 +3308,8 @@ function fechaSymModal(){
   const aoFechar = symOpts && symOpts.aoFechar;
   symAlvo = null; symEscolhido = null; symCands = []; symPart = null; apFam = null; apRec = null;
   symOpts = null;
-  symQuantos = 0; symEsperados = null; symTodos = true;
+  symQuantos = 0; symEsperados = null;
+  symQuantosValor = 0; symValor = ''; symEscopo = 'valor';
   if (typeof aoFechar === 'function') aoFechar();
 }
 
@@ -3185,6 +3318,28 @@ function fechaSymModal(){
 function contaSym(nome){
   if (!nome) return 0;
   return model.sheets.reduce((k, sh) => k + sh.comps.filter(c => c.sym === nome).length, 0);
+}
+
+/* quantos sao do MESMO TIPO E VALOR que este componente — o alcance padrao da troca.
+   `contaSym` continua existindo e continua sendo por nome de simbolo: ele mede o estrago
+   de uma escolha do lib-subs.js, que e global por nome e nao sabe de valor. */
+function contaTipo(comp){
+  if (!comp) return 0;
+  const chave = tipoDoComp(comp);
+  return model.sheets.reduce((k, sh) =>
+    k + sh.comps.filter(c => tipoDoComp(c) === chave).length, 0);
+}
+
+/* os componentes desta folha e das outras que casam com o alcance pedido, sem repetir
+   designador (o __hubAplicaVinculos expande cada ref para todas as partes dele) */
+function refsDoAlcance(comp, escopo){
+  if (!comp) return [];
+  const chave = tipoDoComp(comp), sym = comp.sym;
+  const casa = escopo === 'tipo' ? (c => c.sym === sym)
+             : escopo === 'um'   ? (c => c.ref === comp.ref)
+             : (c => tipoDoComp(c) === chave);
+  return Array.from(new Set(model.sheets.reduce(
+    (l, sh) => l.concat(sh.comps.filter(casa).map(c => c.ref)), [])));
 }
 
 /* As tabelas de apelido SEM a escolha gravada para `de` — e assim que se pergunta ao
@@ -3214,21 +3369,39 @@ function symAtualizaInfo(){
   box.textContent = '';
   const rs = symAlvo ? HubCore.resolveSym(SLIB, symAlvo.sym) : null;
   const d = decideTroca({ sym: rs && rs.item && rs.item.name, how: rs && rs.how,
-                          quantos: symQuantos, todos: symTodos, pinosEsperados: symEsperados,
+                          quantos: symQuantos, quantosValor: symQuantosValor, valor: symValor,
+                          escopo: symEscopo, pinosEsperados: symEsperados,
                           pinosDoCandidato: symPart && symPart.pins ? symPart.pins.length : null });
   if (d.pinos)   box.append(el('div', 'li' + (d.pinosAlerta   ? ' alerta' : ''), d.pinos));
+  /* LISTA VINDA DE FORA: o conjunto já foi escolhido (uma linha da lista do Odoo, ou os
+     componentes marcados na folha). Aqui não há alcance a decidir — e oferecer um seletor
+     que não muda nada seria pior do que não ter nenhum. Diz-se QUEM vai mudar, e só. */
+  const deFora = !!(symOpts && symOpts.vinculo && symOpts.refs && symOpts.refs.length);
+  if (deFora){
+    const r = symOpts.refs;
+    box.append(el('div', 'li alerta', 'vai valer para ' + r.length + ' designador'
+      + (r.length > 1 ? 'es' : '') + ': ' + r.slice(0, 12).join(', ')
+      + (r.length > 12 ? ' e mais ' + (r.length - 12) : '')));
+    return;
+  }
   if (d.impacto) box.append(el('div', 'li' + (d.impactoAlerta ? ' alerta' : ''), d.impacto));
-  /* A ESCAPATÓRIA, e só quando ela existe. Com um componente só do tipo no projeto, uma
-     caixa dizendo "trocar os 1" seria enfeite — e enfeite que faz duvidar do que o botão vai
-     fazer. Ela nasce MARCADA a cada abertura: o pedido foi que trocar um troque todos, e uma
-     escolha grudenta faria o gesto seguinte trocar só um sem ninguém ter pedido. */
-  if (symQuantos > 1){
+  /* o escopo efetivo vem do decideTroca, que normaliza: pedir 'valor' onde só existe um
+     daquele valor vira 'um', e sem isto nenhum rádio ficaria marcado */
+  symEscopo = d.escopo;
+  /* O ALCANCE, e só quando há escolha. Com um componente só do tipo no projeto uma caixa
+     dizendo "trocar os 1" seria enfeite — e enfeite que faz duvidar do que o botão vai
+     fazer. Quem decide quais opções existem (e o texto de cada uma) é o decideTroca, que é
+     puro e testado; aqui só se desenha o que ele devolveu. Nasce sempre no primeiro item,
+     'valor', a cada abertura do modal. */
+  for (const op of (d.escopos || [])){
     const l = el('label', 'sym-todos');
-    const cb = el('input');
-    cb.type = 'checkbox';
-    cb.checked = symTodos;
-    cb.onchange = () => { symTodos = cb.checked; symAtualizaInfo(); };
-    l.append(cb, el('span', null, 'trocar os ' + symQuantos + ' componentes deste tipo'));
+    const rb = el('input');
+    rb.type = 'radio';
+    rb.name = 'symEscopo';
+    rb.value = op.id;
+    rb.checked = symEscopo === op.id;
+    rb.onchange = () => { if (rb.checked){ symEscopo = op.id; symAtualizaInfo(); } };
+    l.append(rb, el('span', null, op.rotulo));
     box.append(l);
   }
 }
@@ -3428,7 +3601,11 @@ function abrirEscolhaSimbolo(comp, opts){
   const rsRec = HubCore.resolveSym(SLIB, comp.sym);
   apRec = HubAlmoxPick.recomendado(apGrupos, comp.sym, rsRec && rsRec.name);
   symQuantos = contaSym(comp.sym);
-  symTodos = true;
+  symQuantosValor = contaTipo(comp);
+  symValor = valorDoComp(comp);
+  /* o alcance nasce em 'valor'; no modo vinculo ele nem aparece, porque a lista de refs
+     ja veio decidida de fora (a linha da lista do Odoo, ou a selecao de varios) */
+  symEscopo = 'valor';
   symEsperados = pinosEsperadosDe(comp);
   const rs = HubCore.resolveSym(SLIB, comp.sym);
   const atual = (rs && rs.item) || null;
@@ -3586,16 +3763,19 @@ async function usarSimboloEscolhido(){
 
   /* todas as partes do MESMO designador: o designador e do componente, e trocar metade
      dele deixaria a folha com um componente partido ao meio */
-  /* TODOS DO MESMO TIPO, que é o padrão. "Mesmo tipo" é o mesmo `sym` no arquivo — a mesma
-     chave que o contaSym usa para dizer quantos são, e a mesma que a caixa de marcar
-     anuncia. O designador não entra na conta: dois CAP EL [PTH] são o mesmo tipo sejam eles
-     C3 e C5 ou C3 e R9. Cada designador aparece UMA vez na lista, e o __hubAplicaVinculos
-     expande cada um para todas as partes dele. */
+  /* O ALCANCE, decidido pelo seletor do modal (refsDoAlcance).
+     "Mesmo tipo" passou a ser `sym` E VALOR em 2026-09-16: os 24 `RES [ SMD ]` do
+     PRJ-UR-DI261924 são 10K, 1K, 2K2 e 15R, e trocar o 10K trocava os quatro. O designador
+     não entra na conta — dois CAP de 100nF são o mesmo tipo sejam eles C3 e C5 ou C3 e R9.
+     Cada designador aparece UMA vez na lista, e o __hubAplicaVinculos expande cada um para
+     todas as partes dele.
+
+     A lista de fora vence tudo: ela é a linha da lista do Odoo, ou a seleção de vários
+     componentes na folha — nos dois casos quem escolheu o conjunto foi o usuário, e não
+     cabe a esta função reabrir a conta. */
   const refs = (symOpts && symOpts.vinculo && symOpts.refs && symOpts.refs.length)
-    ? symOpts.refs
-    : symTodos ? Array.from(new Set(model.sheets.reduce((l, sh) => l.concat(
-        sh.comps.filter(c => c.sym === de).map(c => c.ref)), [])))
-    : [symAlvo.ref];
+    ? symOpts.refs.slice()
+    : refsDoAlcance(symAlvo, symEscopo);
   const res = window.__hubAplicaVinculos([{ refs: refs, componente: para }]);
   if (!res || !res.ok){
     await HubDialog.alert((res && res.erro) || 'não deu para aplicar a troca.',
