@@ -67,11 +67,19 @@ services:
       # O HOME aponta para dentro do bind mount /srv/altiumhub (mesmo caminho absoluto dos dois
       # lados), que e o unico pedaco de disco que atravessa o deploy.
       #
-      # E o HOME, e nao outra coisa, porque e ali que o login mora -- conferido olhando o disco:
-      # ~/.claude/.credentials.json (567 bytes) e ~/.claude.json. Vale para os dois jeitos de
-      # autenticar: o `claude` interativo e o `claude setup-token`, que foi o que o usuario
-      # tinha feito DENTRO do container e perdeu no deploy seguinte. Com o HOME aqui, o token
-      # nao precisa ser refeito a cada publicacao.
+      # O QUE O DEPLOY DESTRUIA ERA O BINARIO, e nao o login -- medido depois, e vale corrigir
+      # aqui porque a primeira explicacao estava errada. O login do servidor e um
+      # CLAUDE_CODE_OAUTH_TOKEN que mora no /etc/altiumhub/senha.env, do HOST: ele nunca se
+      # perdeu, e por isso o chat voltou a funcionar assim que o binario foi reinstalado, sem
+      # refazer `claude setup-token`.
+      #
+      # O HOME importa porque e onde o INSTALADOR poe as coisas: ~/.local/bin/claude e um
+      # atalho para ~/.local/share/claude/versions/<v>, 219 MB no total. Com o HOME aqui, esses
+      # 219 MB caem dentro do bind mount e atravessam a publicacao.
+      #
+      # De quebra, ele cobre tambem quem autenticar pelo `claude` interativo em vez do token:
+      # a credencial desse caminho e um arquivo (~/.claude/.credentials.json), e arquivo dentro
+      # do container morre no deploy do mesmo jeito que o binario morreu.
       #
       # A instalacao e de UMA vez, no servidor (ver README, secao do chat):
       #   docker compose -f /srv/altiumhub/compose.yml exec hub       #     sh -lc 'curl -fsSL https://claude.ai/install.sh | bash'
