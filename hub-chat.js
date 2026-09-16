@@ -35,8 +35,10 @@
      HubChat.instala(io)          põe no <body> um botão na borda direita (a estrela do
                                   Claude) e um painel encostado nessa borda, que abre e fecha
                                   no clique, tem a largura arrastável e lembrada, e fecha no
-                                  Esc. É a porta normal: NÃO precisa de container, e do
-                                  hub.html não precisa de linha nenhuma além do <script src>.
+                                  Esc. Aberto, ele EMPURRA o hub para o lado em vez de cobri-lo
+                                  (um padding no <body>, veja `empurra`). É a porta normal: NÃO
+                                  precisa de container, e do hub.html não precisa de linha
+                                  nenhuma além do <script src>.
      HubChat.monta(container, io) o mesmo painel embutido num container, para quem quiser o
                                   chat dentro de uma aba.
 
@@ -68,8 +70,9 @@
    origem é recortar o CANVAS da vista — o desenho já mora em canvas, e o canvas está num
    iframe de MESMA ORIGEM, então dá para alcançá-lo e copiar o pedaço com drawImage. Capturar
    a tela inteira do Windows (o Altium, por exemplo) só existe em localhost/HTTPS; quando não
-   existe, o painel diz numa linha por que, e ensina o Ctrl+V — o caminho do Win+Shift+S, que
-   é o único que atravessa origem insegura.
+   existe, o `title` do botão diz por quê e ensina o Ctrl+V — o caminho do Win+Shift+S, que é o
+   único que atravessa origem insegura. (Era uma linha de rodapé fixa embaixo do campo até
+   16/09; saiu a pedido do dono, e o texto foi para o botão — veja `desenhaRecorte`.)
 
    ── Markdown não é renderizado, de propósito ──
    A resposta é texto curto, e o que importa de verdade aparece fora dela: no cartão de
@@ -111,8 +114,11 @@ const CSS = `
 /* Tokens da casa (--surface, --line, --text-*, --hi, --ok, --err…) vêm do hub.html; os
    fallbacks existem só para o painel não ficar invisível se alguém carregar este arquivo
    fora do hub. Tudo é escopado em .hc para não encostar em painel de outro dono. */
+/* 15px, e nao os 14 do comeco: o dono pediu "aumenta a fonte pra ficar mais visual", e a base
+   arrasta junto o botao, o seletor e o campo de escrever. O texto da conversa sobe mais do que
+   a base (veja .hc-txt) — a base e a moldura, a conversa e o que se le. */
 .hc{display:flex; flex-direction:column; min-height:0; height:100%;
-  font:14px var(--font, system-ui, sans-serif); color:var(--text,#f2f2f3);}
+  font:15px var(--font, system-ui, sans-serif); color:var(--text,#f2f2f3);}
 .hc *{box-sizing:border-box;}
 
 /* embrulha de propósito: no painel no mínimo (300 px, a largura que a pega permite) a fila da
@@ -142,7 +148,20 @@ const CSS = `
 .hc-msg{display:flex; flex-direction:column; gap:5px; max-width:100%;}
 .hc-msg .hc-quem{font-size:10px; letter-spacing:.09em; text-transform:uppercase;
   color:var(--text-4,#57575d);}
-.hc-msg .hc-txt{white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.5; font-size:13px;}
+/* O QUE SE LE: 13 → 15 px e a cor dita na regra, em vez de herdada. O dono disse que a
+   escrita estava "apagada", e o apagado nao era so a cor — 13 px de texto corrido num painel
+   de 420 px le-se com o pescoco esticado. O rotulo (.hc-quem), o contador e o nome da
+   ferramenta FICAM apagados de proposito: se tudo branqueia, some a hierarquia e o olho perde
+   onde comeca a resposta. */
+.hc-msg .hc-txt{white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.55; font-size:15px;
+  color:var(--text,#f2f2f3);}
+/* O hub marca o modo no <html> (data-mode="light" no claro). NO ESCURO o texto lido passa do
+   --text (242,242,243 no Grafite) para o quase-branco; no claro a regra nao vale, que la
+   clarear e apagar. O color-mix guarda o tom do tema (o "papel" tem texto creme, e virar #fff
+   cru tiraria a cor do tema inteiro por causa de 13 pontos de luz); navegador sem color-mix
+   fica com o #fff da linha de cima, que e a declaracao anterior do mesmo campo. */
+:root:not([data-mode="light"]) .hc-msg .hc-txt{
+  color:#fff; color:color-mix(in srgb, var(--text,#f2f2f3) 35%, #fff);}
 .hc-eu{align-items:flex-end;}
 .hc-eu .hc-txt{background:rgba(var(--tint,242,242,243),0.07); padding:8px 11px;
   border-radius:var(--r-md,8px) var(--r-md,8px) 2px var(--r-md,8px); max-width:min(46ch,92%);}
@@ -153,10 +172,10 @@ const CSS = `
 
 /* As ferramentas. Linha discreta, não balão: o usuário precisa VER o que o Claude fez —
    "leu o esquema", "procurou resistor 10k" — sem que isso dispute espaço com a resposta. */
-.hc-fer{display:flex; align-items:baseline; gap:7px; font-size:11.5px;
+.hc-fer{display:flex; align-items:baseline; gap:7px; font-size:12px;
   color:var(--text-3,#7a7a80); padding:1px 0 1px 2px;}
 .hc-fer .hc-pt{color:var(--text-4,#57575d);}
-.hc-fer .hc-arg{font:11px var(--mono,ui-monospace,Consolas,monospace); color:var(--text-4,#57575d);
+.hc-fer .hc-arg{font:11.5px var(--mono,ui-monospace,Consolas,monospace); color:var(--text-4,#57575d);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:38ch;}
 .hc-fer.hc-fim .hc-pt{color:var(--ok,#4bbf7b);}
 .hc-fer.hc-ruim{color:var(--err,#e0555a);} .hc-fer.hc-ruim .hc-pt{color:var(--err,#e0555a);}
@@ -164,14 +183,22 @@ const CSS = `
 /* O COMANDO do Bash tem bloco próprio, e é a única ferramenta que ganha isso. Motivo: com o
    motor CLI, o Bash roda na máquina que serve o hub, e esta linha é a única forma de o
    usuário ver o que foi rodado ali. Cortar em 38ch com reticências, como os outros
-   argumentos, esconderia justamente o fim do comando — que é onde mora o rm -rf. */
-.hc-fer.hc-bash{flex-direction:column; align-items:stretch; gap:3px;}
+   argumentos, esconderia justamente o fim do comando — que é onde mora o rm -rf.
+
+   E UM TERMINAL, entao ele e PRETO — pedido do dono, com o comando "dentro de cor bem
+   levinha". As duas cores sao cravadas, e nao tokens do tema, justamente porque o bloco nao e
+   superficie do painel: no modo claro o --sunken e quase branco, e o comando perdia o unico
+   sinal visual de que aquilo rodou numa maquina de verdade. Preto em qualquer tema, letra
+   clara em cima dele — e a borda esquerda continua sendo a que fica vermelha no erro. */
+.hc-fer.hc-bash{flex-direction:column; align-items:stretch; gap:4px;}
 .hc-fer.hc-bash .hc-ferl{display:flex; align-items:baseline; gap:7px;}
-.hc-fer .hc-cmd{margin-left:9px; padding:4px 8px; max-height:98px; overflow:auto;
-  font:11px var(--mono,ui-monospace,Consolas,monospace); color:var(--text-2,#a8a8ae);
-  white-space:pre-wrap; overflow-wrap:anywhere; background:var(--sunken,#0b0b0d);
-  border:1px solid var(--line-soft,rgba(242,242,243,.08));
-  border-left:2px solid var(--line,rgba(242,242,243,.14)); border-radius:var(--r-sm,5px);}
+/* 132 px de teto, e nao os 98 de antes: a letra subiu para 12.5 px e o teto velho cortava o
+   bloco em quatro linhas e meia — a meia linha e que denunciava o corte. */
+.hc-fer .hc-cmd{margin-left:9px; padding:7px 9px; max-height:132px; overflow:auto;
+  font:12.5px/1.5 var(--mono,ui-monospace,Consolas,monospace); color:#e9e9ee;
+  white-space:pre-wrap; overflow-wrap:anywhere; background:#000;
+  border:1px solid rgba(255,255,255,.10);
+  border-left:2px solid rgba(255,255,255,.22); border-radius:var(--r-sm,5px);}
 .hc-fer.hc-ruim .hc-cmd{border-left-color:var(--err,#e0555a);}
 
 /* O cartão de proposta: nada é escrito sem os dois botões daqui. */
@@ -182,14 +209,18 @@ const CSS = `
 .hc-prop .hc-ph .t{font-size:12.5px; font-weight:600;}
 .hc-prop .hc-ph .f{font:11px var(--mono,ui-monospace,Consolas,monospace); color:var(--text-3,#7a7a80);
   margin-left:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:30ch;}
-.hc-prop .hc-res{font-size:12px; color:var(--text-2,#a8a8ae); padding:7px 11px 0; line-height:1.45;}
-.hc-diff{margin:8px 0 0; max-height:270px; overflow:auto; font:11.5px var(--mono,ui-monospace,Consolas,monospace);
+/* o resumo da proposta e texto que se LE antes de clicar em Aplicar: sai do --text-2 e vai
+   para o --text, junto com o resto da conversa */
+.hc-prop .hc-res{font-size:13px; color:var(--text,#f2f2f3); padding:7px 11px 0; line-height:1.5;}
+.hc-diff{margin:8px 0 0; max-height:270px; overflow:auto; font:12px var(--mono,ui-monospace,Consolas,monospace);
   background:var(--sunken,#0b0b0d); border-top:1px solid var(--line-soft,rgba(242,242,243,.08));}
 .hc-diff div{padding:1px 11px; white-space:pre; }
 .hc-diff .mais{background:rgba(75,191,123,.13); color:var(--ok,#4bbf7b);}
 .hc-diff .menos{background:rgba(224,85,90,.13); color:var(--err,#e0555a);}
 .hc-diff .cab{color:var(--text-4,#57575d);}
-.hc-diff .igual{color:var(--text-3,#7a7a80);}
+/* a linha de contexto do diff e o que diz ONDE a mudanca cai — --text-3 fazia dela um
+   fantasma entre o verde e o vermelho */
+.hc-diff .igual{color:var(--text-2,#a8a8ae);}
 .hc-prop .hc-pb{display:flex; align-items:center; gap:8px; padding:9px 11px;
   border-top:1px solid var(--line-soft,rgba(242,242,243,.08));}
 .hc-prop .hc-pb .hc-nota{font-size:11px; color:var(--text-3,#7a7a80); margin-left:auto;}
@@ -198,7 +229,7 @@ const CSS = `
 
 /* A linha de recado: sem motor, sem servidor, sem projeto. Um chat que não responde e não
    diz por quê é pior do que um chat que não existe. */
-.hc-aviso{flex:none; margin:10px 12px 0; padding:9px 11px; font-size:12px; line-height:1.5;
+.hc-aviso{flex:none; margin:10px 12px 0; padding:9px 11px; font-size:12.5px; line-height:1.5;
   border:1px solid var(--line,rgba(242,242,243,.14)); border-left:3px solid var(--warn,#d6a75a);
   border-radius:var(--r-sm,5px); background:var(--warn-soft,rgba(214,167,90,.12));}
 .hc-aviso.err{border-left-color:var(--err,#e0555a); background:var(--err-soft,rgba(224,85,90,.15));}
@@ -224,9 +255,10 @@ const CSS = `
 
 /* ── a coleira ──
    Colada no campo de escrever porque é ali que ela vale: é a última coisa que o usuário vê
-   antes de apertar Enter. Duas linhas de propósito — o rótulo do seletor ("Solto (terminal)")
-   não tem espaço para explicar o que o modo faz, e a frase embaixo é justamente o que
-   precisa ser lido antes de escolher. Só aparece com o motor que tem modos (o CLI). */
+   antes de apertar Enter. UMA linha desde 16/09: a frase que explicava o modo escolhido saiu
+   a pedido do dono ("deixe mais limpo"). Ela nao evaporou — o mesmo texto e o title do
+   seletor e o de cada opcao, isto e, fica onde quem tem a duvida vai passar o mouse, em vez
+   de aceso o tempo todo em cima do campo. Só aparece com o motor que tem modos (o CLI). */
 .hc-coleira{display:flex; flex-wrap:wrap; align-items:center; gap:5px 8px; padding-bottom:7px;}
 /* mesma armadilha do passo da tela de entrada: sem isto, coleira.hidden = true deixaria uma
    faixa vazia ocupando espaço em cima do campo de escrever no motor que não tem modos */
@@ -235,25 +267,23 @@ const CSS = `
 .hc-coleira .hc-motor{margin-left:auto; max-width:50%; overflow:hidden; text-overflow:ellipsis;
   white-space:nowrap; font:11px var(--mono,ui-monospace,Consolas,monospace);
   color:var(--text-4,#57575d);}
-.hc-coleira .hc-frase{flex:1 1 58%; min-width:0; font-size:11px; line-height:1.45;
-  color:var(--text-3,#7a7a80);}
 .hc-coleira .hc-equiv{margin-left:auto; white-space:nowrap; font-size:11px;
   font-variant-numeric:tabular-nums; color:var(--text-4,#57575d); cursor:help;}
 .hc-coleira .hc-equiv:empty, .hc-coleira .hc-motor:empty{display:none;}
-/* solto é o único modo que muda de cor: a coleira aberta tem de ser visível de canto de olho */
+/* solto é o único modo que muda de cor: a coleira aberta tem de ser visível de canto de olho.
+   Sem a frase, o seletor amarelo e o unico aviso que sobra — por isso ele fica. */
 .hc-coleira.hc-solta .hc-modo{border-color:var(--warn,#d6a75a); color:var(--warn,#d6a75a);}
-.hc-coleira.hc-solta .hc-frase{color:var(--warn,#d6a75a);}
 
 .hc-escrita{display:flex; align-items:flex-end; gap:7px;}
 .hc-campo{flex:1; min-height:38px; max-height:170px; resize:none; overflow-y:auto;
-  padding:9px 11px; font:inherit; font-size:13px; line-height:1.45;
+  padding:9px 11px; font:inherit; font-size:14.5px; line-height:1.45;
   background:var(--surface,#1a1a1d); color:var(--text,#f2f2f3);
   border:1px solid var(--line,rgba(242,242,243,.14)); border-radius:var(--r-md,8px);
   caret-color:var(--hi,#d8d8dd);}
 .hc-campo:focus-visible{border-color:var(--hi,#d8d8dd); outline:none;}
 .hc-campo:disabled{opacity:.5;}
 .hc-bt{flex:none; display:inline-flex; align-items:center; justify-content:center; gap:6px;
-  cursor:pointer; font:inherit; font-size:12.5px; line-height:1.2; padding:7px 11px;
+  cursor:pointer; font:inherit; font-size:13.5px; line-height:1.2; padding:7px 11px;
   background:transparent; color:var(--text-2,#a8a8ae);
   border:1px solid var(--line,rgba(242,242,243,.14)); border-radius:var(--r-md,8px);}
 .hc-bt:hover:not(:disabled){background:rgba(var(--tint,242,242,243),.07); color:var(--text,#f2f2f3);}
@@ -261,8 +291,6 @@ const CSS = `
 .hc-bt.forte{color:var(--hi,#d8d8dd); border-color:var(--hi,#d8d8dd);}
 .hc-bt.perigo{color:var(--err,#e0555a); border-color:var(--err,#e0555a);}
 .hc-bt.icone{width:34px; padding:0; height:34px; font-size:15px;}
-.hc-dica{font-size:11px; color:var(--text-4,#57575d); line-height:1.5; padding-top:6px;}
-.hc-dica b{font-weight:600; color:var(--text-3,#7a7a80);}
 
 /* arrastar arquivo para cima do painel */
 .hc.hc-caindo{outline:2px dashed var(--hi,#d8d8dd); outline-offset:-6px;}
@@ -314,6 +342,21 @@ const CSS = `
   box-shadow:-2px 0 14px rgba(0,0,0,.35);
   transition:right .18s ease, background .12s ease;}
 .hcx-lanca:hover{background:rgba(217,119,87,.16);}
+
+/* NO CABEÇALHO. O dono tirou o botão do meio da borda direita e o pôs lá em cima, ao lado do
+   indicador de servidor: "quando clica ele fica coloridinho, e quando ta fechado fica cinza
+   apagado". É o mesmo botão — só troca de casa e de forma: deixa de ser fixo na janela, perde
+   a sombra e não precisa mais sair da frente do dock quando o painel abre. */
+.hcx-lanca.hcx-no-topo{position:static; transform:none; width:26px; height:26px;
+  border-radius:var(--r-sm,5px); border:1px solid transparent; box-shadow:none;
+  background:transparent; transition:color .12s ease, background .12s ease, opacity .12s ease;
+  /* FECHADO: cinza apagado. A cor da marca só acende quando o painel está aberto, e é esse
+     contraste que diz, de canto de olho, se o operador está ligado. */
+  color:var(--text-4,#57575d); opacity:.75;}
+.hcx-lanca.hcx-no-topo svg{width:17px; height:17px;}
+.hcx-lanca.hcx-no-topo:hover{background:rgba(217,119,87,.12); color:#D97757; opacity:1;}
+.hcx-lanca.hcx-no-topo[aria-expanded="true"]{color:#D97757; opacity:1;
+  background:rgba(217,119,87,.14); border-color:rgba(217,119,87,.35);}
 .hcx-lanca:focus-visible{outline:2px solid #D97757; outline-offset:-3px;}
 .hcx-lanca svg{width:21px; height:21px; display:block;}
 
@@ -337,8 +380,25 @@ const CSS = `
 .hcx-veu{position:fixed; inset:0; z-index:9995; cursor:col-resize;}
 .hcx-arrastando{user-select:none;}
 
+/* ── o empurrao: o painel abre e o hub anda para o lado, em vez de sumir debaixo dele ──
+   O hub inteiro mora no #app, filho direto do <body>, e esse <body> tem margin:0 e
+   overflow:hidden — um padding-right nele encolhe o #app e, dentro dele, o IFRAME width:100%
+   da vista, sem que o hub.html precise de uma linha. O canvas do schframe/pcbframe se
+   reajusta sozinho (ResizeObserver no hub-draw.js, resize de window no pcbframe.js).
+   O que NAO anda: modal, toast e menu do hub, que sao position:fixed do viewport. E de
+   proposito — eles ja vivem por cima de tudo, painel inclusive.
+   A transicao acompanha os .18s do dock; no arrasto ela e desligada, senao a tela chega
+   atrasada no ponteiro e o arrasto parece emperrado. */
+body.hcx-empurra{padding-right:var(--hcx-empurra,0px); transition:padding-right .18s ease;}
+body.hcx-empurra.hcx-arrastando{transition:none;}
+/* o lancador anda junto com a borda (bt.style.right, no poeLargura), e os .18s dele sao os
+   mesmos .18s do dock deslizando ao abrir. No ARRASTO eles atrapalham: medido em 16/09, o
+   botao ficava parado em 1130 px enquanto a borda ja estava em 824 — 300 px de atraso, que na
+   tela e o botao descolado do painel o arrasto inteiro. */
+body.hcx-arrastando .hcx-lanca{transition:none;}
+
 .hc-raiz{display:flex; flex-direction:column; min-height:0; height:100%;
-  font:14px var(--font, system-ui, sans-serif); color:var(--text,#f2f2f3);}
+  font:15px var(--font, system-ui, sans-serif); color:var(--text,#f2f2f3);}
 .hc-raiz *{box-sizing:border-box;}
 .hc-raiz > .hc{flex:1; min-height:0;}
 
@@ -479,6 +539,9 @@ const VERBO = {
   Edit: 'editou',                MultiEdit: 'editou (vários trechos)',
   NotebookEdit: 'editou o notebook',
   Bash: 'rodou na máquina',      BashOutput: 'leu a saída do comando',
+  /* o mesmo verbo do Bash: nesta máquina as duas são a MESMA coisa para quem lê a
+     conversa — comando rodando no Windows que serve o hub */
+  PowerShell: 'rodou na máquina',
   KillShell: 'encerrou o comando', KillBash: 'encerrou o comando',
   Grep: 'procurou no código',    Glob: 'listou arquivos',
   LS: 'listou a pasta',          Task: 'chamou um subagente',
@@ -548,7 +611,11 @@ function fraseFerramenta(nome, entrada){
      serve o hub, e ver o que rodou é tudo o que sobra ao usuário depois do fato — cortar em
      38ch esconderia justamente o fim da linha, que é onde mora o que dói. */
   let cmd = '';
-  if (nome === 'Bash' || nome === 'BashOutput' || nome === 'SlashCommand'){
+  /* PowerShell entra junto com o Bash: nesta maquina o Claude Code tem as duas ferramentas de
+     terminal, e as duas trazem o comando no mesmo campo `command`. Deixar so o Bash fazia o
+     comando do PowerShell cair na linha comum e ser cortado em 38ch — que e exatamente o corte
+     que esconde o fim da linha, onde mora o que dói. */
+  if (nome === 'Bash' || nome === 'BashOutput' || nome === 'SlashCommand' || nome === 'PowerShell'){
     cmd = typeof e.command === 'string' ? e.command.trim() : '';
     if (cmd.length > TETO_CMD) cmd = cmd.slice(0, TETO_CMD) + '\n… (comando cortado na tela)';
   }
@@ -1233,9 +1300,8 @@ function montaConversa(container, io, sessao, aoSair){
   const selModo = el('select', 'hc-sel hc-modo');
   selModo.title = 'até onde o Claude pode ir nesta máquina';
   const rotMotor = el('span', 'hc-motor', '');
-  const fraseModo = el('span', 'hc-frase', '');
   const rotEquiv = el('span', 'hc-equiv', '');
-  coleira.append(selModo, rotMotor, fraseModo, rotEquiv);
+  coleira.append(selModo, rotMotor, rotEquiv);
 
   const escrita = el('div', 'hc-escrita');
   const btArquivo = el('button', 'hc-bt icone', '+');
@@ -1243,14 +1309,13 @@ function montaConversa(container, io, sessao, aoSair){
   const btRecorte = el('button', 'hc-bt icone', '⬚');
   const campo = el('textarea', 'hc-campo');
   campo.rows = 1;
-  campo.placeholder = 'peça ao operador — ele mexe só no projeto aberto';
+  campo.placeholder = '';      /* ver o comentário do outro placeholder, logo abaixo */
   const btEnviar = el('button', 'hc-bt forte', 'Enviar');
   const entrada = el('input');
   entrada.type = 'file'; entrada.multiple = true; entrada.hidden = true;
   entrada.accept = 'image/*,application/pdf,.txt,.md,.csv,.json,.js,.log,.pas';
   escrita.append(btArquivo, btRecorte, campo, btEnviar, entrada);
-  const dica = el('div', 'hc-dica');
-  baixo.append(chips, coleira, escrita, dica);
+  baixo.append(chips, coleira, escrita);
 
   container.append(topo, avisos, lista, baixo);
 
@@ -1335,7 +1400,11 @@ function montaConversa(container, io, sessao, aoSair){
       selModo.value = ST.modo;
     }
     const m = modoAtual();
-    fraseModo.textContent = m ? m.frase : '';
+    /* a frase do modo era um <span> aceso o tempo todo em cima do campo; agora ela e o `title`
+       do seletor. Mesmo texto, mesmo servidor (`m.frase`), e sem uma linha de tela gasta com
+       uma explicacao que se le uma vez. O title de cada OPCAO ja existia (o.title = m.frase),
+       entao a frase aparece tanto no seletor fechado quanto ao percorrer a lista. */
+    selModo.title = (m && m.frase) ? m.frase : 'até onde o Claude pode ir nesta máquina';
     coleira.classList.toggle('hc-solta', !!(m && m.solto));
     desenhaEquiv();
   }
@@ -2201,15 +2270,26 @@ function montaConversa(container, io, sessao, aoSair){
      — inclusive a solta —, e ela não é perigosa por si: o modo solto só sai daqui depois da
      confirmação do `liberaModo`, que acontece antes do primeiro envio da sessão. Quando o
      servidor não anuncia modo nenhum (motor API, servidor velho), a coleira não existe e o
-     campo `modo` não é enviado. */
+     campo `modo` não é enviado.
+
+     O PADRAO DO SERVIDOR VALE, INCLUSIVE SOLTO. Antes, a coleira começava sempre num modo que
+     não fosse solto, mesmo que o servidor anunciasse o contrário — e isso deixou de ser
+     cuidado no dia em que o dono da máquina configurou o solto COMO padrão. Quem escolhe o
+     padrão e quem confirmaria são a mesma pessoa; perguntar de novo é só um modal que se
+     aprende a fechar sem ler. A confirmação continua existindo para o que ela sempre foi: a
+     TROCA de um modo mais curto para o solto, no seletor. */
   function aplicaModos(est){
     ST.modos = est.modos;
     ST.modoPadrao = est.modoPadrao;
     if (!ST.modos.length){ ST.modo = ''; return; }
     const salvo = guardado(CHAVE_MODO, '');
     const vale = ST.modos.some(m => m.id === salvo);
-    const seguro = modoSeguro();
-    ST.modo = vale ? salvo : (seguro ? seguro.id : ST.modos[0].id);
+    const padrao = ST.modos.find(m => m.id === ST.modoPadrao) || null;
+    if (!vale && padrao && padrao.solto) ST.soltoOk = true;   /* o servidor já disse que sim */
+    const inicial = padrao || modoSeguro();
+    ST.modo = vale ? salvo : (inicial ? inicial.id : ST.modos[0].id);
+    /* modo solto RESTAURADO do navegador continua pedindo confirmação: ele pode ter sido
+       escolhido noutro dia, noutra máquina, por outra pessoa neste mesmo navegador */
   }
 
   async function perguntaEstado(){
@@ -2255,25 +2335,23 @@ function montaConversa(container, io, sessao, aoSair){
   /* O convite do campo muda com o motor, porque o que se pede a cada um é diferente: ao motor
      CLI se pede trabalho no workspace (ele edita e roda), ao da API se pede proposta. */
   function desenhaEscrita(){
-    campo.placeholder = ST.motor === 'cli'
-      ? 'peça ao Claude — ele trabalha no workspace do hub'
-      : 'peça ao operador — ele mexe só no projeto aberto';
+    /* SEM texto dentro do campo. O dono pediu para tirar: quem abriu o painel do chat já
+       sabe que ali se escreve, e a frase ocupava a única linha vazia da tela. */
+    campo.placeholder = '';
   }
 
-  /* ── a linha de dica: ela existe justamente quando o recorte é limitado ── */
-  function desenhaDica(){
-    dica.textContent = '';
-    if (temTelaInteira){
-      btRecorte.title = 'recortar a vista, ou capturar a tela do sistema';
-      dica.append(el('b', null, 'Recorte: '));
-      dica.append(document.createTextNode('a vista daqui ou a tela do sistema. Anexe também arrastando o arquivo, ou colando com Ctrl+V.'));
-    } else {
-      btRecorte.title = 'recortar a vista aberta (nesta origem o navegador não deixa capturar a tela toda)';
-      dica.append(el('b', null, 'Recorte: '));
-      dica.append(document.createTextNode(
-        'só a vista daqui — nesta origem (http na LAN) o navegador bloqueia a captura de tela. ' +
-        'Para mandar o Altium, use Win+Shift+S e cole aqui com Ctrl+V.'));
-    }
+  /* ── o que o botão de recorte sabe dizer de si ──
+     Era uma linha de rodapé embaixo do campo ("Recorte: …"), e ela saiu a pedido do dono junto
+     com a frase do modo: ficava acesa o tempo todo repetindo uma instrução que se lê uma vez.
+     O que ela ENSINAVA não podia evaporar — o Ctrl+V é o único jeito de mandar um print do
+     Altium quando a origem é http na LAN —, então o texto veio inteiro para o `title` do botão,
+     que é onde vai parar quem está procurando como anexar a tela. */
+  function desenhaRecorte(){
+    btRecorte.title = temTelaInteira
+      ? 'recortar a vista daqui, ou capturar a tela do sistema. Também aceita arquivo arrastado ' +
+        'para cima do painel, ou colado com Ctrl+V.'
+      : 'recortar a vista aberta — nesta origem (http na LAN) o navegador bloqueia a captura de ' +
+        'tela. Para mandar o Altium: Win+Shift+S e cole aqui com Ctrl+V.';
   }
 
   /* ── ligações ── */
@@ -2374,7 +2452,7 @@ function montaConversa(container, io, sessao, aoSair){
   desenhaConta();
   desenhaColeira();      /* escondida até o /estado dizer que há motor com modos */
   desenhaEscrita();
-  desenhaDica();
+  desenhaRecorte();
   desenhaAnexos();
   atualizaProjeto();
   ajustaBotoes();
@@ -2519,19 +2597,58 @@ function monta(container, io){
    ════════════════════════════════════════════════════════════════════════════ */
 
 const LARG_MIN = 300;
+
+/* ── o piso do que tem de sobrar de hub ──
+   O painel EMPURRA o hub em vez de cobri-lo (pedido do dono: "ele ocupa toda a lateral, mas eu
+   preciso continuar podendo ver tudo"). Só que empurrar 300 px de painel numa janela de 400 px
+   deixaria 100 px de hub — isso não é continuar vendo, é um talo. Então o empurrão SATURA:
+   `min(largura, innerWidth - piso)`. Enquanto sobrar hub, ele empurra; passado o piso, o painel
+   volta a cobrir só o excedente. Uma conta só, igual no arrasto e na abertura — sem um modo que
+   troca de comportamento no meio do movimento. Numa janela de 400 px a conta dá negativo, o
+   empurrão é zero e o painel cobre, exatamente como antes desta mudança.
+
+   O PISO É METADE DO --page-min DO HUB (1040 px, declarado no hub.html:61; abaixo disso o #app
+   já rola na horizontal por decisão do hub, não nossa). Metade, e não o valor inteiro, porque
+   exigir 1040 desligaria o empurrão em qualquer notebook 1366 com o painel aberto
+   (1366-420 = 946) — e lá o empurrão ainda paga, com uma barra horizontal curta. Com metade, o
+   pior caso ainda mostra a metade esquerda da página e o resto está a um arrasto da barra;
+   abaixo disso é ler a página por um buraco de fechadura, e aí cobrir — que um clique no botão
+   desfaz — é mais honesto do que espremer. Em número: com o painel no mínimo (300 px), o
+   empurrão vale até a janela cair abaixo de 820 px (520 + 300). */
+let pisoCache = 0;
+function pisoVista(){
+  if (pisoCache) return pisoCache;
+  let n = 0;
+  /* o valor é do hub, e é lido dele: hardcodar 520 aqui faria a conta mentir no dia em que o
+     hub mudasse o --page-min. Fora do hub a variável não existe e vale o número do hub.html. */
+  try { n = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-min')); }
+  catch (e) { n = 0; }
+  if (!(n > 0)) n = 1040;
+  pisoCache = Math.round(n / 2);
+  return pisoCache;
+}
+
 let posto = null;          /* instala() é idempotente: dois lançadores seriam dois chats */
 
-function instala(io){
+/* `encaixe` é onde o lançador mora. Sem ele, o botão flutua grudado na borda direita, que
+   era o desenho antigo e continua servindo a qualquer página que carregue este arquivo sem
+   ter um cabeçalho. Com ele — o `hub.html` passa o vão ao lado do indicador de servidor — o
+   botão vira um ícone de cabeçalho. A casca entrega um elemento vazio e nada mais, que é o
+   que o CLAUDE.md pede dela. */
+function instala(io, opcoes){
   if (posto){
     if (io) posto.io(io);
+    if (opcoes && opcoes.encaixe) posto.encaixa(opcoes.encaixe);
     return posto;
   }
+  const encaixe = (opcoes && opcoes.encaixe) || null;
   poeCss();
 
   let ioAtual = io || {};
   let painel = null;
   let aberto = false;
   let larg = Math.round(Number(guardado(CHAVE_LARG, '')) || 0) || 420;
+  let soltaArrasto = null;   /* o encerrador do arrasto em curso, quando há um */
 
   const dock = el('div', 'hcx-dock');
   dock.setAttribute('role', 'complementary');
@@ -2551,8 +2668,18 @@ function instala(io){
   /* um <script> no <head> roda antes de existir <body>, e `document.body.append` ali levanta.
      Quem carrega o hub-chat.js no fim da página não passa por isto — quem carregar no topo,
      passa, e o lançador aparece assim que o documento termina em vez de derrubar a página. */
+  function encaixa(onde){
+    if (onde && onde.isConnected){
+      bt.classList.add('hcx-no-topo');
+      onde.append(bt);
+    } else {
+      bt.classList.remove('hcx-no-topo');
+      document.body.append(bt);
+    }
+  }
   function pendura(){
-    document.body.append(dock, bt);
+    document.body.append(dock);
+    encaixa(encaixe);
     poeLargura(larg);
   }
   if (document.body) pendura();
@@ -2582,6 +2709,20 @@ function instala(io){
     dock.style.width = larg + 'px';
     /* o botão anda junto com a borda: aberto, ele é o próprio fechar, grudado no painel */
     bt.style.right = aberto ? larg + 'px' : '0px';
+    empurra();
+  }
+
+  /* Quanto do hub o painel empurra AGORA. É uma CLASSE no <body> mais uma variável, e não um
+     style inline de padding: fechar o painel tira a classe e o hub volta sozinho — inclusive
+     quando o fechamento acontece no meio de um arrasto, que é o caso em que um padding inline
+     ficaria pendurado no body para sempre. Chamado de dentro do `poeLargura`, então vale para
+     os três caminhos que mudam a largura: abrir, arrastar e redimensionar a janela. */
+  function empurra(){
+    const b = document.body;
+    if (!b) return;          /* carregado no <head>: o body ainda não existe (veja `pendura`) */
+    const px = aberto ? Math.max(0, Math.min(larg, window.innerWidth - pisoVista())) : 0;
+    b.style.setProperty('--hcx-empurra', px + 'px');
+    b.classList.toggle('hcx-empurra', px > 0);
   }
   poeLargura(larg);
   function abre(){
@@ -2601,6 +2742,10 @@ function instala(io){
 
   function fecha(){
     if (!aberto) return;
+    /* fechar no meio de um arrasto encerra o arrasto ANTES de mais nada: senão o véu fica
+       pendurado no <body> comendo todo clique do hub, e o ponteiro segue mexendo na largura de
+       um painel que já saiu da tela. É também o que garante que nada sobra empurrado. */
+    if (soltaArrasto) soltaArrasto();
     aberto = false;
     dock.classList.remove('aberto');
     bt.classList.remove('aberto');
@@ -2627,6 +2772,8 @@ function instala(io){
     document.body.classList.add('hcx-arrastando');
     const move = ev => poeLargura(window.innerWidth - ev.clientX);
     const solta = () => {
+      if (!soltaArrasto) return;      /* o `fecha` já encerrou este arrasto */
+      soltaArrasto = null;
       window.removeEventListener('pointermove', move, true);
       window.removeEventListener('pointerup', solta, true);
       window.removeEventListener('pointercancel', solta, true);
@@ -2634,12 +2781,16 @@ function instala(io){
       document.body.classList.remove('hcx-arrastando');
       guarda(CHAVE_LARG, String(larg));
     };
+    soltaArrasto = solta;
     window.addEventListener('pointermove', move, true);
     window.addEventListener('pointerup', solta, true);
     window.addEventListener('pointercancel', solta, true);
   });
 
-  window.addEventListener('resize', () => poeLargura(larg));
+  /* o piso do empurrão vem de uma variável CSS, e uma media query do hub pode trocá-la ao
+     redimensionar — por isso o cache morre aqui, e não uma vez na carga */
+  function aoRedimensionar(){ pisoCache = 0; poeLargura(larg); }
+  window.addEventListener('resize', aoRedimensionar);
 
   /* ── Esc fecha, mas só quando o Esc é dele ──
      O véu do recorte e o menu tratam o próprio Esc (o véu até para a propagação); o #overlay
@@ -2667,12 +2818,25 @@ function instala(io){
     aberto(){ return aberto; },
     painel(){ return painel; },
     largura(){ return larg; },
+    /* quanto o hub está empurrado agora — é por aqui que a medição de fora confere o
+       empurrão sem ter de reimplementar a saturação do piso */
+    empurrao(){ return parseFloat(document.body.style.getPropertyValue('--hcx-empurra')) || 0; },
     botao: bt, dock,
+    /* trocar a casa do lançador depois de instalado: o hub redesenha o cabeçalho e o
+       elemento de encaixe é outro, então quem instala chama de novo com o novo vão */
+    encaixa,
     io(novo){ if (novo) ioAtual = novo; },
     atualiza(){ if (painel) painel.atualiza(); },
     destroi(){
       window.removeEventListener('keydown', tecla);
+      window.removeEventListener('resize', aoRedimensionar);
+      if (soltaArrasto) soltaArrasto();
       if (painel){ try { painel.destroi(); } catch (e) {} painel = null; }
+      /* o hub não pode ficar empurrado por um painel que não existe mais */
+      try {
+        document.body.classList.remove('hcx-empurra');
+        document.body.style.removeProperty('--hcx-empurra');
+      } catch (e) {}
       dock.remove(); bt.remove();
       posto = null;
     },

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """A cerca do motor CLI: um hook PreToolUse do Claude Code, em stdlib pura.
 
-    python cerca.py <pasta-do-projeto-aberto> [escrita]     ← é assim que o CLI o chama
-    decide(nome, entrada, pasta, escrita) -> (None|'deny', motivo)
+    python cerca.py <pasta-do-projeto-aberto> [escrita] [memoria]  ← é assim que o CLI o chama
+    decide(nome, entrada, pasta, escrita, memoria) -> (None|'deny', motivo)
 
 POR QUE ISTO EXISTE, e por que não é o `operador.py`. No motor da API as ferramentas eram
 minhas: o modelo só alcançava o que o `operador.py` oferecia, e escrita nenhuma virava disco
@@ -26,6 +26,17 @@ MEDIDO nesta bancada em 2026-09-16, com o CLI 2.1.260 (é o que autoriza o /esta
                      aqui a cerca é uma LISTA DO QUE PODE e não uma lista do que não pode:
                      ferramenta que escreve sem se chamar Write existe, e ferramenta nova
                      numa versão nova do CLI também vai existir.
+
+A EXCEÇÃO DA MEMÓRIA, e por que ela é de UM ARQUIVO SÓ.
+O dono do sistema pediu que o chat aprendesse e guardasse o que aprendeu para a próxima
+conversa (2026-09-16). O caderno onde isso fica é `.chat/memoria.md`, que está FORA da pasta
+do projeto aberto — sem exceção nenhuma, a cerca o recusa e o pedido não acontece. Então a
+exceção existe, e é o caminho EXATO daquele arquivo, comparado arquivo com arquivo: nunca a
+pasta `.chat/`, que é onde moram as conversas inteiras e os prints de tela do usuário; nunca
+um padrão de nome, que casaria com o arquivo de amanhã que ninguém pensou. Um arquivo, um
+caminho, vindo de fora (o `chatserver.py` é quem sabe qual é a raiz deste hub).
+Ela vale só quando o modo deixa escrever: em "Só planejar" nem a memória é gravada, porque o
+seletor do painel promete ao usuário que aquele turno não grava NADA.
 
 A CERCA NUNCA DIZ "allow". Só "deny" ou nada.
 Dizer "allow" num hook PreToolUse ATROPELA o modo de permissão — um "allow" num Write faria
@@ -60,9 +71,10 @@ FRASE_SO_LEITURA = ('CERCA DO HUB: este turno está no modo "Só planejar", que 
                     'o usuário, no seletor do painel.')
 FRASE_FERRAMENTA = ('CERCA DO HUB: a ferramenta "%s" não é usada pelo chat do hub e foi '
                     'recusada. Aqui você tem Read, Glob e Grep para ver o projeto, e '
-                    'Write/Edit para gravar dentro da pasta do projeto aberto. Comando de '
-                    'sistema (Bash, PowerShell) não passa: o hub roda na máquina do servidor, '
-                    'e ninguém está olhando o terminal dela.')
+                    'Write/Edit para gravar dentro da pasta do projeto aberto (e no seu '
+                    'caderno, .chat/memoria.md). Comando de sistema (Bash, PowerShell) não '
+                    'passa: o hub roda na máquina do servidor, e ninguém está olhando o '
+                    'terminal dela.')
 
 
 def _normal(caminho):
@@ -73,6 +85,23 @@ def _normal(caminho):
     de maiúscula.
     """
     return os.path.normcase(os.path.abspath(os.path.normpath(caminho or '')))
+
+
+def mesmo_arquivo(a, b):
+    """é o MESMO arquivo? (comparação de caminho, não de pasta — é a exceção da memória)
+
+    Compara também os dois `realpath`: no servidor `.chat/` é symlink para `shared/.chat/`, e
+    o mesmo arquivo tem dois nomes. Resolver os dois lados continua sendo UM arquivo — o que
+    não pode acontecer é isto virar comparação de prefixo, que abriria a pasta inteira.
+    """
+    if not a or not b:
+        return False
+    if _normal(a) == _normal(b):
+        return True
+    try:
+        return _normal(os.path.realpath(a)) == _normal(os.path.realpath(b))
+    except (OSError, ValueError):
+        return False
 
 
 def dentro(caminho, pasta):
@@ -92,11 +121,12 @@ def dentro(caminho, pasta):
         return False            # unidades diferentes no Windows: não há caminho comum
 
 
-def decide(nome, entrada, pasta, escrita=True):
+def decide(nome, entrada, pasta, escrita=True, memoria=''):
     """(None, '') deixa o CLI seguir; ('deny', motivo) recusa.
 
     `pasta` é a pasta do projeto aberto (vazia = nenhum projeto aberto).
     `escrita` é False no modo "Só planejar": aí nem dentro da pasta se grava.
+    `memoria` é o caminho do caderno do chat — o único arquivo de fora que pode ser gravado.
     """
     entrada = entrada if isinstance(entrada, dict) else {}
     if nome in LEITURA:
@@ -106,10 +136,17 @@ def decide(nome, entrada, pasta, escrita=True):
             continue
         if not escrita:
             return 'deny', FRASE_SO_LEITURA
+        caminho = entrada.get(campo) or ''
+        if not isinstance(caminho, str):
+            caminho = ''
+        # A EXCEÇÃO, e ela é a PRIMEIRA porque a memória não é de projeto nenhum: vale
+        # inclusive quando não há projeto aberto na tela (o caderno é do chat, não da placa).
+        # Um arquivo, comparado por caminho — ver o cabeçalho.
+        if mesmo_arquivo(caminho, memoria):
+            return None, ''
         if not pasta:
             return 'deny', FRASE_SEM_PROJETO
-        caminho = entrada.get(campo) or ''
-        if not isinstance(caminho, str) or not caminho.strip():
+        if not caminho.strip():
             return 'deny', FRASE_FORA % (pasta, '(sem caminho)')
         if not dentro(caminho, pasta):
             return 'deny', FRASE_FORA % (pasta, caminho)
@@ -132,7 +169,7 @@ def resposta(veredito, motivo):
 
 
 def main(argv, entrada_bruta):
-    """argv: [pasta_do_projeto, '1'|'0' para escrita]. Nunca levanta.
+    """argv: [pasta_do_projeto, '1'|'0' para escrita, caminho_da_memoria]. Nunca levanta.
 
     Hook que estoura é hook que não decide nada, e o CLI segue em frente: uma cerca que cai
     é uma cerca aberta. Por isso o `except` largo — e por isso ele FECHA (deny) em vez de
@@ -140,12 +177,14 @@ def main(argv, entrada_bruta):
     """
     pasta = argv[0] if argv else ''
     escrita = (argv[1] if len(argv) > 1 else '1') not in ('0', 'false', 'nao', 'não')
+    # sem o terceiro argumento não há exceção nenhuma: cerca velha, ou chamada à mão, fecha
+    memoria = argv[2] if len(argv) > 2 else ''
     try:
         d = json.loads(entrada_bruta or '{}')
         if not isinstance(d, dict):
             d = {}
         veredito, motivo = decide(d.get('tool_name') or '', d.get('tool_input'),
-                                  pasta, escrita)
+                                  pasta, escrita, memoria)
     except Exception as e:                                       # noqa: BLE001
         return resposta('deny', 'CERCA DO HUB: a cerca do chat falhou por dentro (%s) e por '
                                 'isso recusou esta ferramenta. Avise o usuário.'

@@ -80,6 +80,22 @@ MODOS = {
         'solto': True,
     },
 }
+# O CHAT NASCE SO LENDO, e o dono pode mudar isso aqui.
+#
+# Em 2026-09-16 ele pediu o terminal como padrao ("faca o claude entrar no terminal"), e a
+# linha chegou a ser trocada. Voltou para 'plan' por um motivo pratico, nao por discordancia:
+# com 'bypassPermissions' aqui, o classificador de seguranca do proprio Claude Code passa a
+# recusar qualquer comando que toque neste codigo ("Create Unsafe Agents"), e ninguem consegue
+# nem rodar o teste. Trocar e uma linha; quem troca assume o commit.
+#
+# O que 'bypassPermissions' quer dizer NESTA instalacao, medido: o hubserver escuta em
+# 0.0.0.0, a bancada fica numa rede de empresa, e neste modo a cerca do PreToolUse nem e
+# pendurada. Somado a ALTIUMHUB_CHAT_SENHA vazia (a porta aberta, ver chatserver.py), quem
+# alcanca a porta do hub roda comando na maquina.
+#
+# Sao DUAS trancas independentes, de proposito:
+#     MODO_PADRAO                 -> o quanto o chat pode fazer sem que ninguem escolha
+#     ALTIUMHUB_CHAT_SENHA=1      -> o chat volta a pedir a senha mestre
 MODO_PADRAO = 'plan'
 
 # aliases que o CLI aceita em --model. Nome cheio também passa; modelo desconhecido é
@@ -112,7 +128,7 @@ def executavel():
     no `claude` do PATH depois de um caminho errado e o pior resultado possivel: o /estado
     responde "ligado, versao 2.1.260" e o administrador passa a tarde procurando por que a
     variavel dele "nao faz nada". Medido nesta sessao, com ALTIUMHUB_CLAUDE apontando para
-    C:\nao-existe\claude.exe: o hub respondia ligado e usava outro executavel.
+    um caminho que nao existe: o hub respondia ligado e usava outro executavel.
     """
     apontado = os.environ.get(ENV_EXE)
     if apontado:

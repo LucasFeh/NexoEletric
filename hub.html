@@ -888,6 +888,9 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
     <div class="header-right">
       <span class="pending" id="pending" hidden></span>
       <span class="server"><span class="dot dot-sm" id="serverDot"></span><span id="serverLabel">sem servidor</span></span>
+      <!-- a casa do lancador do operador: o hub-chat.js poe o botao aqui dentro. Um vao vazio
+           e nada mais -- o desenho, a cor e o estado sao dele. -->
+      <span id="chatLanc"></span>
     </div>
   </header>
 
@@ -4699,7 +4702,9 @@ document.addEventListener('keydown', e => {
      funções aqui leem o estado VIVO (`proj()`, `S.tab`) em vez de receber uma cópia — um
      projeto desatualizado aqui viraria proposta gravada no projeto errado. */
   try {
-    HubChat.instala({
+    /* o retorno e GUARDADO: ele carrega o alterna()/aberto()/empurrao() que a medicao de fora
+       usa, e sem isto o acessor existia sem porta nenhuma para ser alcancado */
+    window.__hubChat = HubChat.instala({
       projeto: () => (proj() || {}).name || '',
       tela: () => ({ vista: S.tab, projeto: (proj() || {}).name || '',
                      designador: S.selDes || '', acervo: (S.lib && S.lib.sel && S.lib.sel.name) || '' }),
@@ -4729,7 +4734,7 @@ document.addEventListener('keydown', e => {
         const f = document.querySelector('.pane.on iframe[data-kind]');
         try { if (f) f.contentWindow.location.reload(); } catch (e) { if (f) f.src = f.src; }
       },
-    });
+    }, { encaixe: document.getElementById('chatLanc') });
   } catch (e) {
     console.warn('operador não subiu:', e);   /* hub sem o chat continua sendo o hub */
   }
