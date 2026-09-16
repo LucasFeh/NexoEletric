@@ -16,6 +16,10 @@
 <!-- gravação (POST /api/save, com queda para download em file://) — a aba Biblioteca
      escreve Libs/lib-subs.js por aqui -->
 <script src="hub-io.js"></script>
+<!-- o menu de botão direito e o fluxo de excluir um valor moram aqui, e são os MESMOS que a
+     vista Esquema usa — inclusive o texto da pergunta. Duas cópias divergiriam no dia em que
+     uma delas ganhasse um aviso a mais. -->
+<script src="hub-almoxpick.js"></script>
 <!-- editor de símbolos (sub-aba Símbolos da Biblioteca) -->
 <script src="hub-symed.js"></script>
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
@@ -2911,6 +2915,20 @@ function renderLibAlmoxPreview() {
     /* o encapsulamento fixado era do valor ANTERIOR: mantê-lo poria um 0805 na ficha de
        um 2512 e ninguém repararia */
     b.onclick = () => { S.lib.valor = p.id; S.lib.fpShown = null; renderLibAlmoxPreview(); };
+    /* BOTÃO DIREITO: excluir este valor da biblioteca. A família que a rota espera é a do
+       SÍMBOLO aberto (o servidor resolve para a família do arquivo sozinho, como o /save-almox
+       já faz), e o "componente" é o valores[].altium — nunca o label, que se repete entre
+       famílias. */
+    b.oncontextmenu = ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      if (typeof HubAlmoxPick === 'undefined') return;
+      HubAlmoxPick.menu(ev.clientX, ev.clientY, p.label, [
+        { rotulo: 'Excluir da biblioteca…', perigo: true, onEscolher: () =>
+            HubAlmoxPick.excluirValor(
+              { familia: s.familia || s.name, componente: p.altium, label: p.label },
+              ioExcluirAlmox()) },
+      ]);
+    };
     vfrag.append(b);
   });
   if (!vis.length) vfrag.append(el('div', 'alx-empty', 'nenhum valor com "' + S.lib.valQ + '"'));
@@ -4015,6 +4033,54 @@ function neodenDownload(side) {
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
   URL.revokeObjectURL(a.href);
   toast(name + ' baixado', 'ok');
+}
+
+/* Confirmação no idioma da casa: o hub monta os diálogos dele com backdrop + dialog +
+   closeOverlay (veja openDeleteDialog), e trazer um segundo sistema de modal para cá só para
+   uma pergunta faria a mesma ação parecer de outro programa. Devolve Promise<bool>. */
+function confirmaNoHub(texto, o) {
+  return new Promise(resolve => {
+    let respondido = false;
+    const fim = v => { if (respondido) return; respondido = true; closeOverlay(); resolve(v); };
+    const bd = el('div', 'backdrop center');
+    bd.onclick = e => { if (e.target === bd) fim(false); };
+    const d = el('div', 'dialog'); d.style.width = 'min(520px,100%)';
+    d.append(el('h3', null, (o && o.title) || 'Confirmar'));
+    /* o texto vem com quebras de linha (a lista de quem usa o item): um <p> só as comeria */
+    for (const linha of String(texto).split('\n')) {
+      const p = el('p', null, linha);
+      p.style.cssText = 'font-size:12px;color:var(--text-2);margin:0;white-space:pre-wrap;'
+                      + 'line-height:1.45;min-height:' + (linha ? 'auto' : '6px');
+      d.append(p);
+    }
+    const act = el('div');
+    act.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:10px';
+    const cancel = el('button', 'btn btn-ghost', (o && o.cancel) || 'Cancelar');
+    cancel.onclick = () => fim(false);
+    const ok = el('button', 'btn' + ((o && o.danger) ? ' btn-danger' : ''), (o && o.ok) || 'OK');
+    ok.onclick = () => fim(true);
+    act.append(cancel, ok);
+    d.append(act);
+    bd.append(d); $('#overlay').append(bd);
+    ok.focus();
+    d.addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); fim(false); } });
+  });
+}
+
+/* o adaptador desta tela para o fluxo compartilhado do hub-almoxpick */
+function ioExcluirAlmox() {
+  return {
+    confirm: (txt, o) => confirmaNoHub(txt, o),
+    toast: (m, k) => toast(m, k === 'err' ? 'err' : k === 'warn' ? 'warn' : 'ok'),
+    post: async (url, body) => {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                   body: JSON.stringify(body) });
+      try { return await r.json(); }
+      catch (e) { return { ok: false, error: 'resposta inválida do servidor (HTTP ' + r.status + ')' }; }
+    },
+    /* recarrega os espelhos e repinta: sem isto o valor excluído continua na lista, clicável */
+    recarregar: async () => { await almoxRecarrega(); renderLib(); },
+  };
 }
 
 function closeOverlay() {

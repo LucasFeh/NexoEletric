@@ -55,6 +55,11 @@ COMPARTILHADOS_ARQ=(
   "Libs/almox-sync.js"
   "Libs/almox-guardiao.js"
   "Libs/almox-parts.json"          # livro-razao rotulo->part number: PERDER RENUMERA TUDO
+  "Libs/almox-excluidos.json"      # valores que o usuario tirou da biblioteca a mao. E
+                                   # ESTADO, nao codigo: e VERSIONADO (como o almox-parts
+                                   # acima) e mesmo assim entra aqui, senao o proximo deploy
+                                   # o substitui pelo conteudo do commit e as exclusoes
+                                   # feitas no servidor voltam para a biblioteca sozinhas.
   "Libs/lib-ledger.json"           # guardiao.py:166 reescreve a cada sincronismo
   "Libs/lib-subs.js"               # unico Libs/ que o browser grava (hubserver.py:157)
   "Libs/schlib.js"                 # symserver.py:374 reescreve a cada Salvar

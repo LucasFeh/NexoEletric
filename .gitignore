@@ -25,6 +25,10 @@ tools/symbols/relatorio.txt
 
 # NAO ignorar Libs/almox-parts.json: e o livro-razao rotulo -> part number.
 # Ele e gerado, mas guarda estado; perder o arquivo renumera o almoxarifado.
+#
+# NAO ignorar Libs/almox-excluidos.json: e a lista de valores que o usuario tirou da
+# biblioteca a mao. O gerador a consulta em toda rodada; perder o arquivo repoe no
+# almoxarifado tudo que ele ja tinha excluido.
 
 # NAO ignorar Libs/BIBLIOTECA DE ESQUEMA.SchLib: e a biblioteca da casa publicada
 # dentro do repositorio (tools/libpath.py). Ela PRECISA viajar no push -- o hub do

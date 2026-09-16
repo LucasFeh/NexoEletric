@@ -20,6 +20,10 @@ nunca a reescreve. Veja `geometria_congelada`. O resto continua vindo do Odoo a 
 rodada: valores, saldo, local, custo, footprint, parametros. Congelou o desenho, nao a
 ficha.
 
+O QUE O USUARIO EXCLUIU NAO VOLTA: Libs\\almox-excluidos.json lista valores que ele tirou
+da biblioteca pelo hub, e TODA rodada pula esses valores — inclusive a que so regera do
+snapshot. A lista e versionada (e estado, nao saida gerada) e so o hub a escreve.
+
 Escreve em Libs\\:
     almox-basicos.js       espelho (formato schlib-v2, o mesmo que o hub ja le)
     almox-especiais.js     idem
@@ -295,7 +299,7 @@ def geometria_congelada(nome, antes):
     return parts, bb, (v.get('partcount') if isinstance(v.get('partcount'), int) else len(parts))
 
 
-def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
+def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, excluidos=None):
     pins, gfx = SY.desenha(s['forma'], s['npin'], rotulo=s['familia'] if s['forma'] == 'box' else '')
     ps = ordena_parts(s)
     x1, y1, x2, y2 = SY.bbox(pins, gfx)
@@ -398,6 +402,33 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
         # declara; montagem presumida nao e fato e nao entra em nome de componente.
         mont = s['mont'] if s['grupo'] == 'b' else montagem_declarada(p['itens'])
         enc = ' '.join(x for x in (mont, (pkgs[0] if pkgs else '')) if x)
+        nome_altium = re.sub(r'\s+', ' ', (enc + ' ' + p['rotulo'])).strip()
+        # ── o valor que o usuario EXCLUIU a mao nao volta ────────────────────────────
+        # A lista (Libs/almox-excluidos.json) e versionada e vale em TODA rodada, inclusive
+        # no "so regerar do snapshot": tirar um item da biblioteca e uma decisao do usuario,
+        # e uma sincronizacao nao pode desfaze-la pelas costas dele. O Odoo continua
+        # mandando o produto — ele so nao vira componente aqui.
+        # Pular ANTES do append deixa o id reservado no livro-razao (Libs/almox-parts.json):
+        # se a exclusao for desfeita, o valor volta com o MESMO numero e nenhum esquema ja
+        # desenhado passa a apontar para outro componente.
+        # E o nome DEPOIS do desempate de homonimos que vai para a lista (a tela le o
+        # `valores[].altium` do espelho), e o desempate so acontece la no main(), quando
+        # todas as familias ja estao montadas: aqui o nome ainda e o cru. Na biblioteca
+        # real isso e um valor hoje — CIRCUITO INTEGRADO [8P] / "PTH DIP8 OP07CP #27",
+        # homonimo do AMPLIFICADOR [8P] / "PTH DIP8 OP07CP" — e comparar so o nome cru
+        # fazia a exclusao dele parecer que funcionou e o sincronismo seguinte devolve-lo,
+        # calado. O sufixo e previsivel: '<nome> #<id>', e o id vem do livro-razao pelo
+        # label, que e estavel desde sempre. Sem livro-razao (`mapa is None`) os ids sao
+        # posicionais e ninguem pode preve-los: ali vale so o nome cru.
+        if excluidos and (s['nome'], nome_altium) in excluidos:
+            global PULADOS
+            PULADOS += 1
+            continue
+        if excluidos and mapa is not None:
+            vid = ((mapa.get(s['nome']) or {}).get('ids') or {}).get(p['rotulo'])
+            if vid is not None and (s['nome'], '%s #%d' % (nome_altium, vid)) in excluidos:
+                PULADOS += 1
+                continue
         # ── desenho proprio deste valor ──────────────────────────────────────────────
         # A familia desenha uma vez so, e para o BJT isso e uma afirmacao ERRADA: a seta no
         # emissor diz NPN, e um terco do estoque e PNP. Dividir TRANSISTOR em duas familias
@@ -413,7 +444,7 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
                 parts_valor = [{'part': 1, 'pins': pv, 'graphics': gv}]
         valores.append({
             'id': 0,                        # numerado depois, por `numera_valores`
-            'altium': re.sub(r'\s+', ' ', (enc + ' ' + p['rotulo'])).strip(),
+            'altium': nome_altium,
             'label': p['rotulo'],
             # geometria propria: so aparece quando o valor discorda do desenho da familia
             **({'parts': parts_valor} if parts_valor else {}),
@@ -448,7 +479,7 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
                        par('Descricao', p['itens'][0]['nome'])],
         })
 
-    numera_valores(s['nome'], valores, mapa, antes, podar)
+    numera_valores(s['nome'], valores, mapa, antes, podar, excluidos)
     # O desenho PROPRIO de um valor (o que o /save-almox grava quando um componente foge do
     # desenho da familia) tambem e do HTML: os valores sao remontados do zero a cada rodada,
     # entao sem repor daqui o `parts` do valor sumiria do espelho na sincronizacao seguinte.
@@ -490,6 +521,123 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
     }
 
 
+def balde_de(sim):
+    """em qual .SchLib o simbolo vai morar — e onde o nome dele precisa ser unico"""
+    return sim['familia'] if sim['grupo'] == 'basicos' else 'ESPECIAIS'
+
+
+def desempata_nomes(simbolos, excluidos=None):
+    """O `altium` de cada valor, unico DENTRO da .SchLib em que ele vai morar.
+
+    Dois valores de simbolos diferentes da mesma biblioteca podem cair no mesmo nome (a
+    familia ESPECIAIS junta pinagens que nao se conhecem): o segundo leva ' #<id>'. Hoje,
+    na biblioteca real, isso acontece uma vez — CIRCUITO INTEGRADO [8P] /
+    "PTH DIP8 OP07CP #27", homonimo do AMPLIFICADOR [8P] / "PTH DIP8 OP07CP".
+
+    O nome de um valor EXCLUIDO continua RESERVADO. Sem isso o par de homonimos tem uma
+    simetria venenosa: excluir o "PTH DIP8 OP07CP" faria o "#27" deixar de colidir e ser
+    RENOMEADO para "PTH DIP8 OP07CP" — e todo schematic.js que grava esse texto em `sym`
+    passaria a apontar, calado, para outra peca. Excluir um componente nao pode mexer no
+    nome de outro.
+
+    E funcao, e nao um trecho do main, porque e uma regra de NOME: o que ela decide fica
+    dentro da .SchLib do usuario e dentro do `sym` dos esquemas ja desenhados. Regra assim
+    se testa — tests/test_almox_excluir.py, secao 6.
+    """
+    porfam = collections.defaultdict(set)
+    baldes = {sim['name']: balde_de(sim) for sim in simbolos}
+    for sim_nome, alt in (excluidos or ()):
+        fam = baldes.get(sim_nome)
+        if fam:
+            porfam[fam].add(alt)
+    for sim in simbolos:
+        fam = balde_de(sim)
+        for v in sim['valores']:
+            nome = v['altium'] or (sim['name'] + ' #' + str(v['id']))
+            if nome in porfam[fam]:
+                nome = '%s #%d' % (nome, v['id'])
+            porfam[fam].add(nome)
+            v['altium'] = nome
+    return simbolos
+
+
+# ─── a lista de excluídos ─────────────────────────────────────────────────────
+# O usuário exclui um VALOR pelo hub (botão direito » Excluir, no modal "Trocar componente"
+# e na aba Biblioteca) e ele não pode voltar na próxima sincronização. O Odoo continua
+# mandando o produto — quem manda aqui é esta lista, que o gerador consulta a cada valor.
+#
+# É ESTADO, não saída gerada: por isso fica VERSIONADA (como Libs/almox-parts.json, e ao
+# contrário dos espelhos `Libs/almox-*.js`) e entra em COMPARTILHADOS_ARQ do
+# tools/deploy/deploy.sh — sem essa linha, o deploy seguinte apagaria as exclusões.
+#
+# A chave é (nome do símbolo, valores[].altium). O `altium` é o LibReference do componente
+# dentro da .SchLib da família, e é ele que o `schematic.js` grava em `sym`; o `label` e a
+# `familia` viajam junto só para a tela e para o diff do git fazerem sentido a olho nu.
+EXCLUIDOS = 'almox-excluidos.json'
+FORMATO_EXCLUIDOS = 'excluidos-v1'
+PULADOS = 0         # quantos valores esta rodada pulou pela lista (o main imprime a linha)
+
+
+def caminho_excluidos(raiz=None):
+    """Libs/almox-excluidos.json — sem `raiz`, o Libs/ desta rodada (o teste repõe `LIBS`);
+    com `raiz`, o workspace que o servidor está servindo (o symserver chama de fora)"""
+    return os.path.join(LIBS if raiz is None else os.path.join(raiz, 'Libs'), EXCLUIDOS)
+
+
+def carrega_excluidos(raiz=None):
+    """A lista do disco, ou a lista vazia — é assim que ela nasce.
+
+    Formato errado é ERRO, não lista vazia: seguir calado com uma lista vazia reporia no
+    almoxarifado tudo que o usuário já tinha excluído, e ele só descobriria abrindo o
+    Altium. Quem chama decide o que fazer (o gerador avisa e segue; a rota devolve 500)."""
+    p = caminho_excluidos(raiz)
+    if not os.path.exists(p):
+        return {'format': FORMATO_EXCLUIDOS, 'atualizado': '', 'itens': []}
+    with io.open(p, encoding='utf-8') as f:
+        d = json.load(f)
+    if not isinstance(d, dict) or d.get('format') != FORMATO_EXCLUIDOS:
+        raise ValueError('%s nao e uma lista %s' % (p, FORMATO_EXCLUIDOS))
+    if not isinstance(d.get('itens'), list):
+        d['itens'] = []
+    return d
+
+
+def dumps_excluidos(d):
+    """um item por linha, como o guardiao.dumps_ledger: o git diffa a EXCLUSÃO, não o arquivo"""
+    itens = [x for x in (d.get('itens') or []) if isinstance(x, dict)]
+    fora = ['{"format":%s,"atualizado":%s,"itens":[' % (
+        json.dumps(d.get('format', FORMATO_EXCLUIDOS), ensure_ascii=False),
+        json.dumps(d.get('atualizado', ''), ensure_ascii=False))]
+    for i, it in enumerate(itens):
+        fora.append(' %s%s' % (json.dumps(it, ensure_ascii=False, separators=(',', ':')),
+                               ',' if i < len(itens) - 1 else ''))
+    fora.append(']}')
+    return '\n'.join(fora) + '\n'
+
+
+def grava_excluidos(raiz, d):
+    """atômico, e SEGUINDO O LINK antes de trocar (ver tools/symbols/guardiao.py >>
+    grava_ledger): no servidor este arquivo é `Libs/almox-excluidos.json -> shared/…`, e
+    `os.replace` sobre o symlink substituiria O LINK — a release ficaria com cópia própria,
+    o shared/ congelaria e o deploy seguinte devolveria as exclusões de antes"""
+    d['atualizado'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+    p = caminho_excluidos(raiz)
+    pasta = os.path.dirname(p)
+    if pasta and not os.path.isdir(pasta):
+        os.makedirs(pasta)
+    tmp = p + '.tmp'
+    with io.open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(dumps_excluidos(d))
+    os.replace(tmp, os.path.realpath(p))
+    return p
+
+
+def chaves_excluidas(d):
+    """{(símbolo, altium)} — a chave que o gerador consulta a cada valor"""
+    return {(it.get('simbolo') or '', it.get('altium') or '')
+            for it in (d.get('itens') or []) if isinstance(it, dict) and it.get('altium')}
+
+
 # ─── numeração estável dos valores ────────────────────────────────────────────
 MAPA_IDS = 'almox-parts.json'
 AGORA_ISO = ''      # carimbo desta geração, em ISO ordenável (definido no main)
@@ -507,7 +655,7 @@ def carrega_ids():
         return {}
 
 
-def numera_valores(nome, valores, mapa, antes, podar):
+def numera_valores(nome, valores, mapa, antes, podar, excluidos=None):
     """Uma vez dado, o `id` é daquele valor para sempre.
 
     O id é a chave do valor no .DbLib e no `schematic.js`: com ele estável, um esquema
@@ -553,6 +701,12 @@ def numera_valores(nome, valores, mapa, antes, podar):
                 continue
             v = velhos.get(label)
             if not v:
+                continue
+            # o excluido nao volta nem pela porta dos fundos. A exclusao poe na lista ANTES
+            # de mexer no espelho; se a gravacao do espelho falhar no meio, o valor ainda
+            # esta em `velhos` e entraria aqui como "saiu do Odoo", com saldo zero — de
+            # volta na biblioteca que o usuario mandou limpar.
+            if excluidos and (nome, v.get('altium')) in excluidos:
                 continue
             w = dict(v)
             w['id'] = vid
@@ -748,6 +902,16 @@ def main(argv=None):
     # o mapa de numeros e o que faz a lib acumular em vez de ser recriada: valor que ja
     # esta la mantem a sua part, valor novo entra no fim da fila de numeros
     mapa = {} if args.podar else carrega_ids()
+    # a lista de excluidos vale em TODA rodada — inclusive nesta, que so regera do snapshot
+    global PULADOS
+    PULADOS = 0
+    try:
+        excluidos = chaves_excluidas(carrega_excluidos())
+    except (OSError, ValueError) as e:
+        # seguir com a lista vazia reporia tudo que o usuario excluiu, calado
+        print('AVISO: nao li %s (%s: %s) — NADA foi pulado nesta rodada, e o que voce '
+              'excluiu pode ter voltado' % (EXCLUIDOS, type(e).__name__, e))
+        excluidos = set()
     comps_reais, ESC = carrega_reciclagem()
     recicl = {}
     if ESC is not None:
@@ -756,20 +920,14 @@ def main(argv=None):
             if fps:
                 recicl[s] = fps
         print('reciclagem: %d simbolo(s) herdam footprint da biblioteca real' % len(recicl))
-    sb = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl) for s in bas]
-    se = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl) for s in esp]
+    sb = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl, excluidos) for s in bas]
+    se = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl, excluidos) for s in esp]
+    print('%d valor(es) pulado(s) pela lista de excluidos (%d na lista)'
+          % (PULADOS, len(excluidos)))
 
-    # Nome do componente unico DENTRO da sua biblioteca (uma por familia). Dois valores
-    # de simbolos diferentes da mesma familia podem cair no mesmo nome — o id desempata.
-    porfam = collections.defaultdict(set)
-    for sim in sb + se:
-        fam = sim['familia'] if sim['grupo'] == 'basicos' else 'ESPECIAIS'
-        for v in sim['valores']:
-            nome = v['altium'] or (sim['name'] + ' #' + str(v['id']))
-            if nome in porfam[fam]:
-                nome = '%s #%d' % (nome, v['id'])
-            porfam[fam].add(nome)
-            v['altium'] = nome
+    # o nome de cada valor dentro da .SchLib em que ele vai morar (e o que o `sym` do
+    # schematic.js guarda): unico, e estavel mesmo quando alguem exclui o homonimo
+    desempata_nomes(sb + se, excluidos)
 
     if not os.path.isdir(LIBS):
         os.makedirs(LIBS)

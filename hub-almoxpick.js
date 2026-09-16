@@ -35,6 +35,19 @@ const CSS = `
 .ap-fam .s b{font-weight:600; color:var(--text-3,#9a9a9a);}
 .ap-grupo{font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--text-4,#7a7a7a);
   padding:12px 2px 4px;}
+/* o menu do botao direito. Vive no <body> e fecha em qualquer clique, rolagem ou Esc:
+   menu que sobrevive a um scroll fica flutuando sobre outra coisa e clica no que nao devia. */
+.ap-menu{position:fixed; z-index:9999; min-width:210px; padding:4px;
+  background:var(--card,#242424); border:1px solid var(--line,#3a3a3a);
+  border-radius:var(--r-sm,4px); box-shadow:0 8px 24px rgba(0,0,0,.45);}
+.ap-menu button{display:block; width:100%; text-align:left; border:0; background:transparent;
+  color:var(--text,#d8d8d8); font:12px 'Segoe UI',sans-serif; padding:7px 10px;
+  border-radius:3px; cursor:pointer;}
+.ap-menu button:hover{background:rgba(255,255,255,.07);}
+.ap-menu button.perigo{color:#ff6b6b;}
+.ap-menu button.perigo:hover{background:rgba(255,107,107,.12);}
+.ap-menu .ap-menu-alvo{font-size:10px; color:var(--text-4,#7a7a7a); padding:5px 10px 6px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:260px;}
 /* o valor: e ele o COMPONENTE que vai para a folha */
 .ap-val{display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:baseline;
   width:100%; text-align:left; cursor:pointer; border:0; border-radius:var(--r-sm,4px);
@@ -219,6 +232,106 @@ function renderFamilias(box, opts){
 /* ── DIREITA, debaixo do símbolo: os VALORES da família escolhida ──
    É aqui que se escolhe o COMPONENTE — o valor é que vai para o schematic.js.
    `opts`: { busca, filtro, sel (nome do valor), rec, onPick(it, g) } */
+/* ── O MENU DO BOTAO DIREITO ──
+   Generico de proposito: quem chama diz o alvo e as acoes. O arquivo continua sem saber o que
+   e um servidor — quem sabe disso e o `excluirValor` logo abaixo, e mesmo ele recebe o que
+   precisa por parametro. */
+let menuAberto = null;
+function fechaMenu(){
+  if (!menuAberto) return;
+  menuAberto.remove();
+  menuAberto = null;
+  window.removeEventListener('scroll', fechaMenu, true);
+  window.removeEventListener('resize', fechaMenu);
+}
+function menu(x, y, titulo, acoes){
+  poeCss();
+  fechaMenu();
+  const m = el('div', 'ap-menu');
+  if (titulo) m.append(el('div', 'ap-menu-alvo', titulo));
+  for (const a of acoes){
+    const b = el('button', a.perigo ? 'perigo' : null, a.rotulo);
+    b.type = 'button';
+    b.onclick = ev => { ev.stopPropagation(); fechaMenu(); a.onEscolher(); };
+    m.append(b);
+  }
+  document.body.append(m);
+  /* encosta na borda: sem isto o menu aberto no rodape da lista fica metade fora da tela */
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(4, Math.min(x, window.innerWidth  - r.width  - 6)) + 'px';
+  m.style.top  = Math.max(4, Math.min(y, window.innerHeight - r.height - 6)) + 'px';
+  menuAberto = m;
+  setTimeout(() => {
+    document.addEventListener('click', fechaMenu, { once: true });
+    document.addEventListener('contextmenu', fechaMenu, { once: true });
+  }, 0);
+  window.addEventListener('scroll', fechaMenu, true);
+  window.addEventListener('resize', fechaMenu);
+  return m;
+}
+/* O ESC FECHA O MENU E PARA AI. Sem o stopPropagation ele seguia viagem e o Escape da vista
+   fechava o MODAL inteiro junto — quem abriu o menu sem querer perdia a tela de troca. O
+   evento so e consumido quando havia menu aberto: fora isso o Escape continua sendo o botao
+   de panico de sempre. Em captura, para chegar antes do handler de window da vista. */
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !menuAberto) return;
+  e.stopPropagation();
+  e.preventDefault();
+  fechaMenu();
+}, true);
+
+/* ── EXCLUIR UM VALOR DA BIBLIOTECA ──
+   Duas idas ao servidor de proposito: a primeira SO PERGUNTA (previa), e e ela que traz quem
+   usa o item nos projetos. Perguntar antes de apagar e o que transforma "excluir" numa decisao
+   informada em vez de um susto — o usuario pediu para ser avisado, nao barrado.
+
+   O `io` e o adaptador da tela que chamou: a vista Esquema tem HubDialog e HubIO, a aba
+   Biblioteca do hub tem os proprios. Assim o fluxo (e o texto da pergunta) existe UMA vez. */
+async function excluirValor(alvo, io){
+  const corpo = { familia: alvo.familia, componente: alvo.componente };
+  let previa;
+  try {
+    previa = await io.post('/api/symbols/almox-excluir', corpo);
+  } catch (e) {
+    io.toast('não consegui perguntar ao servidor: ' + (e && e.message || e), 'err', 7000);
+    return false;
+  }
+  if (!previa || !previa.ok){
+    io.toast((previa && previa.error) || 'o servidor recusou', 'err', 7000);
+    return false;
+  }
+  const usos = previa.usos || [];
+  const quantos = usos.reduce((n, u) => n + (u.refs || []).length, 0);
+  let texto = 'Excluir “' + (previa.label || alvo.componente) + '” da biblioteca?\n\n'
+            + 'Ele sai do acervo e NÃO volta nas próximas sincronizações — fica numa lista de '
+            + 'excluídos até alguém tirá-lo de lá.';
+  if (quantos){
+    texto += '\n\nEM USO por ' + quantos + (quantos === 1 ? ' componente' : ' componentes') + ':\n'
+           + usos.map(u => '  · ' + u.projeto + ': ' + (u.refs || []).join(', ')).join('\n')
+           + '\n\nEsses componentes ficam órfãos (quadrado vermelho na folha) até você trocá-los.';
+  } else {
+    texto += '\n\nNão está em uso em nenhum projeto do workspace.';
+  }
+  const sim = await io.confirm(texto, { title: 'Excluir da biblioteca',
+                                        ok: 'Excluir', danger: true });
+  if (!sim) return false;
+  let r;
+  try {
+    r = await io.post('/api/symbols/almox-excluir', Object.assign({ confirmar: true }, corpo));
+  } catch (e) {
+    io.toast('não consegui excluir: ' + (e && e.message || e), 'err', 7000);
+    return false;
+  }
+  if (!r || !r.ok){
+    io.toast((r && r.error) || 'o servidor recusou a exclusão', 'err', 7000);
+    return false;
+  }
+  io.toast('“' + (r.label || alvo.componente) + '” saiu da biblioteca', 'ok');
+  for (const a of (r.avisos || [])) io.toast(a, 'warn', 9000);
+  if (io.recarregar) await io.recarregar();
+  return true;
+}
+
 function renderValores(box, g, opts){
   poeCss();
   const o = opts || {};
@@ -259,6 +372,14 @@ function renderValores(box, g, opts){
     q2.title = it.saldo > 0 ? it.saldo + ' em estoque' : 'sem saldo no almoxarifado';
     b.append(q2);
     b.onclick = () => { if (o.onPick) o.onPick(it, g); };
+    /* o botao direito NAO seleciona: quem abre o menu esta mirando aquela linha, e trocar a
+       selecao por baixo faria o "Usar este componente" apontar para outra coisa */
+    if (o.onExcluir) b.oncontextmenu = ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      menu(ev.clientX, ev.clientY, it.rotulo, [
+        { rotulo: 'Excluir da biblioteca…', perigo: true, onEscolher: () => o.onExcluir(it, g) },
+      ]);
+    };
     box.append(b);
   }
 }
@@ -267,6 +388,7 @@ function renderValores(box, g, opts){
    silenciosamente erra: busca que nao acha nao levanta excecao, so devolve vazio e
    parece que a peca nao existe. tests/test-almoxpick.js os exercita em Node. */
 return { grupos, recomendado, contagens, renderFamilias, renderValores, poeCss,
+         menu, fechaMenu, excluirValor,
          filtra, valorCasa, semSep };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubAlmoxPick;

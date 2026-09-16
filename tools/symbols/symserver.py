@@ -7,6 +7,9 @@
     POST /api/symbols/extract                reserva uma extração; GET …/<runId>/stream roda e retransmite (SSE)
     POST /api/symbols/mirror                 regera o espelho inteiro a partir da SchLib real; {flags:true} só leva os flags
     POST /api/symbols/almox-sync             reserva a sincronização do almoxarifado pelo guardião; GET …/<runId>/stream roda (SSE)
+    POST /api/symbols/almox-excluir          tira um VALOR do almoxarifado de vez (sem `confirmar`, só a prévia com os usos)
+    GET  /api/symbols/almox-excluidos        a lista de valores excluídos
+    POST /api/symbols/almox-excluir/desfazer devolve um item da lista ao almoxarifado
 
 O trabalho pesado mora nos irmãos: `sch_leitor` lê, `schlib_patch` grava, `extrair` varre,
 `guardiao` vigia as .SchLib do Altium e envolve o gerador do almoxarifado. Aqui só o HTTP e
@@ -69,6 +72,7 @@ import schlib_patch as P                               # noqa: E402
 import extrair as E                                    # noqa: E402
 import guardiao as G                                   # noqa: E402
 import libpath as LP                                   # noqa: E402
+import almox2lib as A                                  # noqa: E402  (a lista de excluídos)
 
 bp = Blueprint('symbols', __name__, url_prefix='/api/symbols')
 ROOT = RAIZ                          # o workspace servido; registra() troca
@@ -78,6 +82,7 @@ SYMLIB = os.path.join('Libs', 'symbols-lib.js')
 CONFIG = os.path.join('tools', 'symbols', 'config.json')
 RENAME_MAP = os.path.join('Libs', 'rename-map.js')
 RELATORIO = os.path.join('tools', 'symbols', 'relatorio.txt')
+PROJETOS = 'Projects'                # onde o /almox-excluir procura o valor em uso
 EXTRAIR = os.path.join(BASE, 'extrair.py')   # código, não dado: roda de onde o módulo mora
 GUARDIAO = os.path.join(BASE, 'guardiao.py')
 GUARDIAO_EXTRA = []                  # argumentos a mais para o guardião (o teste põe --sem-gerador)
@@ -93,6 +98,7 @@ _lock_espelho = threading.Lock()     # save e mirror escrevem o mesmo arquivo
 _lock_schlib = threading.Lock()      # o patch reescreve a SchLib inteira: dois saves ao mesmo tempo perderiam um
 _lock_symlib = threading.Lock()
 _lock_almox = threading.Lock()       # grava_espelho_almox reescreve o espelho inteiro: um por vez
+_lock_excluidos = threading.Lock()   # a lista de excluídos é reescrita inteira: idem
 _extract_lock = threading.Lock()     # segurado enquanto o subprocesso roda
 _reserva_lock = threading.Lock()
 _extract_runs = {}                   # runId -> (quando, args extras)
@@ -487,6 +493,48 @@ def _acha_valor(esp, i, componente):
     return None
 
 
+class _ErroAlmox(Exception):
+    """recusa já com o código HTTP: quem chama devolve `_erro(str(e), e.status)`"""
+
+    def __init__(self, msg, status):
+        Exception.__init__(self, msg)
+        self.status = status
+
+
+def _resolve_almox(fam, comp):
+    """Onde mora o valor `comp` da família `fam`: (espelhos, família do ARQUIVO, símbolo,
+    k do espelho, i do símbolo, j do valor).
+
+    Saiu de dentro do /save-almox quando o /almox-excluir passou a precisar do MESMO
+    caminho — inclusive do desvio pelo nome do símbolo. Duas cópias da resolução seriam
+    duas regras: uma rota acharia o componente e a outra não, no mesmo clique."""
+    try:
+        espelhos = G.carrega_espelhos_almox(ROOT)
+    except (OSError, ValueError) as e:
+        raise _ErroAlmox('não li os espelhos do almoxarifado: %s' % e, 500)
+    if not espelhos:
+        raise _ErroAlmox('nenhum espelho do almoxarifado em Libs/ (rode o sincronismo)', 404)
+    idx = G.indice_almox(espelhos)
+    achado = idx.get((fam, comp))
+    if not achado:
+        # O hub manda como família o NOME do símbolo aberto ("CIRCUITO INTEGRADO [PINAGEM A
+        # DEFINIR]", "RESISTOR [SMD]"); o índice, o ledger e o arquivo falam a família do
+        # ARQUIVO ("ESPECIAIS", "RESISTOR"). Os dois só coincidem quando o nome não tem sufixo
+        # (DIODO TVS, TRANSISTOR) — e só esses salvavam. Resolve pelo nome do símbolo e segue
+        # com a família do arquivo, que é a chave de tudo daqui para a frente.
+        por_nome = next(((f_, v) for (f_, c_), v in idx.items() if c_ == comp and v[0] == fam), None)
+        if por_nome:
+            fam, achado = por_nome
+    if not achado:
+        raise _ErroAlmox('"%s / %s" não está no espelho do almoxarifado (a família pode ser a do '
+                         'arquivo, "ESPECIAIS", ou o nome do símbolo)' % (fam, comp), 404)
+    sim_nome, k, i = achado
+    j = _acha_valor(espelhos[k][2], i, comp)
+    if j is None:
+        raise _ErroAlmox('"%s" não é um valor de "%s"' % (comp, sim_nome), 404)
+    return espelhos, fam, sim_nome, k, i, j
+
+
 @bp.route('/save-almox', methods=['POST'])
 def api_save_almox():
     """A geometria de UM componente do almoxarifado: espelho, .SchLib da família e ledger.
@@ -520,30 +568,10 @@ def api_save_almox():
 
     # 1. onde este componente mora — espelho e arquivo
     try:
-        espelhos = G.carrega_espelhos_almox(ROOT)
-    except (OSError, ValueError) as e:
-        return _erro('não li os espelhos do almoxarifado: %s' % e, 500)
-    if not espelhos:
-        return _erro('nenhum espelho do almoxarifado em Libs/ (rode o sincronismo)', 404)
-    idx = G.indice_almox(espelhos)
-    achado = idx.get((fam, comp))
-    if not achado:
-        # O hub manda como família o NOME do símbolo aberto ("CIRCUITO INTEGRADO [PINAGEM A
-        # DEFINIR]", "RESISTOR [SMD]"); o índice, o ledger e o arquivo falam a família do
-        # ARQUIVO ("ESPECIAIS", "RESISTOR"). Os dois só coincidem quando o nome não tem sufixo
-        # (DIODO TVS, TRANSISTOR) — e só esses salvavam. Resolve pelo nome do símbolo e segue
-        # com a família do arquivo, que é a chave de tudo daqui para a frente.
-        por_nome = next(((f_, v) for (f_, c_), v in idx.items() if c_ == comp and v[0] == fam), None)
-        if por_nome:
-            fam, achado = por_nome
-    if not achado:
-        return _erro('"%s / %s" não está no espelho do almoxarifado (a família pode ser a do '
-                     'arquivo, "ESPECIAIS", ou o nome do símbolo)' % (fam, comp), 404)
-    sim_nome, k, i = achado
+        espelhos, fam, sim_nome, k, i, j = _resolve_almox(fam, comp)
+    except _ErroAlmox as e:
+        return _erro(str(e), e.status)
     cam_esp, var, esp = espelhos[k]
-    j = _acha_valor(esp, i, comp)
-    if j is None:
-        return _erro('"%s" não é um valor de "%s"' % (comp, sim_nome), 404)
     cam, _hoje = G._acha_componente(ROOT, fam, comp, {})
     # Componente que está no espelho mas ainda não na .SchLib: entrou no Odoo depois do último
     # sincronismo (o espelho é regerado do snapshot; o arquivo, só pelo sincronismo inteiro).
@@ -601,6 +629,236 @@ def api_save_almox():
         resp['avisos'] = list(resp['avisos']) + [
             'não protegi no ledger (%s): o próximo sincronismo pode repor o símbolo padrão' % e]
     return resp
+
+
+def _acha_no_espelho(esp, simbolo, componente):
+    """(i, j) do valor dentro do espelho, achados pelo NOME.
+
+    O /save-almox reusa os índices que a resolução devolveu; aqui não dá: quem erra o índice
+    numa exclusão REMOVE o valor errado, e entre a resolução e o lock uma sincronização pode
+    ter reescrito o espelho inteiro (símbolo novo no meio da lista, valor que saiu do Odoo).
+    Custa uma releitura e vale o preço."""
+    for i, sim in enumerate(esp.get('symbols') or []):
+        if sim.get('name') != simbolo:
+            continue
+        for j, v in enumerate(sim.get('valores') or []):
+            if v.get('altium') == componente:
+                return i, j
+    return None, None
+
+
+def _usos_do_valor(valor, altium):
+    """Onde este valor já foi colocado: [{'projeto', 'refs':[…]}] varrendo Projects/*/schematic.js.
+
+    Serve para AVISAR, nunca para recusar: a decisão de excluir é do usuário, e um
+    componente já desenhado não deixa de existir na folha porque saiu da biblioteca (o
+    `.SchDoc` real guarda a geometria dele). O que ele perde é a volta ao almoxarifado —
+    trocar o valor, refazer a lista de materiais.
+
+    Três marcas, nesta ordem:
+      `OdooId=<id>` no `params`    o id da variante `product.product` — Único no catálogo
+                                   inteiro, e por isso a marca que manda quando existe. É o
+                                   que o AI-GUIDE chama de identidade da peça: liga componente
+                                   e produto sem depender de texto nenhum.
+      `ValorId=<id>` + símbolo     o `valores[].id` é por SÍMBOLO: a bateria e a barra de
+                                   pinos têm, as duas, um valor de id 1. Sozinho ele acusou o
+                                   J1 do _DemoKit (uma barra de pinos, OdooId=1038) como uso
+                                   de uma BATERIA — medido, não suposto. Então só vale
+                                   corroborado pelo `sym` ou pelo `comment`. Aviso errado não
+                                   é "um aviso a mais": ou assusta quem ia excluir com razão,
+                                   ou ensina a ignorar o aviso que um dia estará certo.
+      `sym` / `comment`            o esquema anterior ao params só tem isto. `sym` é o
+                                   LibReference na .SchLib da família, exatamente o
+                                   `valores[].altium` (odoolista.py » carrega_acervo);
+                                   `comment` igual ao `label` é o último recurso.
+    """
+    vid = valor.get('id')
+    label = (valor.get('label') or '').strip()
+    odoo = ''
+    for p in (valor.get('params') or []):
+        if isinstance(p, dict) and str(p.get('n') or '').strip() == 'OdooId':
+            odoo = str(p.get('v') or '').strip()
+    alvo_odoo = ('OdooId=%s' % odoo) if odoo else None
+    alvo_val = ('ValorId=%s' % vid) if vid not in (None, '', 0) else None
+    fora = []
+    base = os.path.join(ROOT, PROJETOS)
+    try:
+        nomes = sorted(os.listdir(base))
+    except OSError:
+        return fora
+    for nome in nomes:
+        cam = os.path.join(base, nome, 'schematic.js')
+        if not os.path.isfile(cam):
+            continue
+        try:
+            sch = _le_var(cam)
+        except (OSError, ValueError):
+            continue            # projeto com o schematic.js quebrado não cala a exclusão
+        if not isinstance(sch, dict):
+            continue
+        refs = []
+        for it in (sch.get('items') or []):
+            if not isinstance(it, dict) or it.get('t') != 'comp':
+                continue
+            params = it.get('params') if isinstance(it.get('params'), str) else ''
+            pares = [t.strip() for t in params.split(';')] if params else []
+            # o texto do desenho, que vale sozinho só quando não há identidade no params
+            texto = ((it.get('sym') or '').strip() == altium
+                     or (bool(label) and (it.get('comment') or '').strip() == label))
+            if any(t.startswith('OdooId=') for t in pares) and alvo_odoo:
+                bate = alvo_odoo in pares
+            elif any(t.startswith('ValorId=') for t in pares):
+                bate = alvo_val is not None and alvo_val in pares and texto
+            else:
+                bate = texto
+            ref = str(it.get('ref') or '').strip()
+            # multi-parte é vários `comp` com o MESMO designador: contar duas vezes faria o
+            # aviso pedir mais componentes do que existem na folha
+            if bate and ref and ref not in refs:
+                refs.append(ref)
+        if refs:
+            fora.append({'projeto': nome, 'refs': refs})
+    return fora
+
+
+@bp.route('/almox-excluidos', methods=['GET'])
+def api_almox_excluidos():
+    """A lista inteira — é dela que a tela monta o "Excluídos" e oferece o desfazer."""
+    try:
+        return {'ok': True, 'itens': A.carrega_excluidos(ROOT).get('itens') or []}
+    except (OSError, ValueError) as e:
+        return _erro('não li a lista de excluídos: %s' % e, 500)
+
+
+@bp.route('/almox-excluir', methods=['POST'])
+def api_almox_excluir():
+    """Tira um VALOR do almoxarifado para sempre — e o próximo sincronismo não o traz de volta.
+
+    Só valores. Símbolo é família inteira e sai do Odoo junto com o último produto dela; o
+    que o usuário exclui à mão é o item, o "PTH 10uF 16V O5 2mm" que ele não quer mais ver
+    na lista.
+
+    Sem `confirmar` isto é uma PRÉVIA: não encosta em arquivo nenhum e devolve `usos`, para
+    a tela dizer onde o item já está antes de perguntar. Item em uso não é recusa — a
+    decisão é do usuário; recusar calado seria pior que avisar.
+
+    Com `confirmar`, nesta ordem:
+      1. entra em Libs/almox-excluidos.json — VERSIONADO, e o que o gerador consulta a cada
+         rodada (almox2lib » monta_simbolo). É o passo que faz a exclusão durar;
+      2. sai do espelho (Libs/almox-*.js), que é o que o hub desenha na tela;
+      3. perde a proteção no ledger, se tinha: o guardião tentaria repor o desenho de um
+         componente que não existe mais;
+      4. a .SchLib NÃO é tocada. O schlib_escritor reescreve as .SchLib inteiras a cada
+         sincronismo a partir do espelho, então o componente sai de lá sozinho — e escrever
+         remoção no binário seria código novo por cima da biblioteca do usuário. Até o
+         próximo sincronismo o componente continua existindo dentro do Altium, e a resposta
+         diz isso em `avisos` (o usuário precisa saber, não descobrir).
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _erro('JSON {familia, componente, confirmar} obrigatório', 400)
+    fam, comp = data.get('familia'), data.get('componente')
+    if not (isinstance(fam, str) and fam.strip()) or not (isinstance(comp, str) and comp.strip()):
+        return _erro('familia e componente obrigatórios', 400)
+    fam, comp = fam.strip(), comp.strip()
+    try:
+        espelhos, fam, sim_nome, k, i, j = _resolve_almox(fam, comp)
+    except _ErroAlmox as e:
+        return _erro(str(e), e.status)
+    cam_esp, _var, esp = espelhos[k]     # o varname vem da releitura, dentro do lock
+    valor = (esp['symbols'][i].get('valores') or [])[j]
+    label = (valor.get('label') or '').strip()
+    usos = _usos_do_valor(valor, comp)
+    total = sum(len(u['refs']) for u in usos)
+    resp = {'ok': True, 'simbolo': sim_nome, 'familia': fam, 'componente': comp,
+            'label': label, 'usos': usos, 'total': total}
+    if not data.get('confirmar'):
+        return dict(resp, previa=True)
+
+    avisos = []
+    if usos:
+        avisos.append('"%s" está em %d componente(s) de %d projeto(s) (%s): o esquema '
+                      'continua como está, mas o componente sai da biblioteca'
+                      % (comp, total, len(usos), ', '.join(u['projeto'] for u in usos)))
+
+    # 1. a LISTA primeiro: é o único passo que dura. Se o espelho falhar logo abaixo, a
+    #    sincronização seguinte tira o valor de qualquer jeito — o contrário (espelho sem
+    #    lista) devolveria o item na primeira rodada, e o usuário acharia que não excluiu.
+    with _lock_excluidos:
+        try:
+            lista = A.carrega_excluidos(ROOT)
+        except (OSError, ValueError) as e:
+            return _erro('não li a lista de excluídos: %s' % e, 500)
+        if not any(it.get('simbolo') == sim_nome and it.get('altium') == comp
+                   for it in lista['itens']):
+            lista['itens'].append(OrderedDict([
+                ('simbolo', sim_nome), ('familia', fam), ('altium', comp), ('label', label),
+                ('quando', datetime.now().strftime('%Y-%m-%d %H:%M'))]))
+        try:
+            A.grava_excluidos(ROOT, lista)
+        except OSError as e:
+            return _erro('não gravei a lista de excluídos: %s' % e, 500)
+
+    # 2. o espelho, relido dentro do lock (ver _acha_no_espelho)
+    with _lock_almox:
+        try:
+            var2, esp2 = G.le_espelho_almox(cam_esp)
+            i2, j2 = _acha_no_espelho(esp2, sim_nome, comp)
+            if i2 is None:
+                avisos.append('o valor já não estava no espelho — nada a remover ali')
+            else:
+                esp2['symbols'][i2]['valores'].pop(j2)
+                G.grava_espelho_almox(cam_esp, var2, esp2)
+        except (OSError, ValueError) as e:
+            avisos.append('está na lista de excluídos, mas não saiu do espelho (%s): a '
+                          'próxima sincronização o tira' % e)
+
+    # 3. a proteção do ledger: sem isso o guardião repõe o desenho de um componente que não
+    #    existe mais, e o resumo passa a mostrar um protegido órfão para sempre
+    try:
+        with G._lock:
+            led = G.carrega_ledger(ROOT)
+            if G._tira_prot(led, fam, comp):
+                G.grava_ledger(ROOT, led)
+    except Exception as e:                                          # noqa: BLE001
+        avisos.append('não tirei a proteção do ledger (%s): rode --liberar "%s/%s" se ela '
+                      'sobrar' % (e, fam, comp))
+
+    # 4. o Altium só sente no próximo sincronismo — e isso tem de sair dito
+    avisos.append('o componente sai das .SchLib de Libs/Almox no próximo sincronismo do '
+                  'almoxarifado (elas são reescritas inteiras a partir do espelho); até lá '
+                  'ele continua aparecendo dentro do Altium')
+    return dict(resp, excluido=True, espelho=True, avisos=avisos)
+
+
+@bp.route('/almox-excluir/desfazer', methods=['POST'])
+def api_almox_excluir_desfazer():
+    """Tira o item da lista. O valor volta ao espelho e às .SchLib no próximo sincronismo —
+    com o MESMO id, porque o livro-razão (Libs/almox-parts.json) nunca devolveu o número."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _erro('JSON {simbolo, altium} obrigatório', 400)
+    sim, alt = data.get('simbolo'), data.get('altium')
+    if not (isinstance(sim, str) and sim.strip()) or not (isinstance(alt, str) and alt.strip()):
+        return _erro('simbolo e altium obrigatórios', 400)
+    sim, alt = sim.strip(), alt.strip()
+    with _lock_excluidos:
+        try:
+            lista = A.carrega_excluidos(ROOT)
+        except (OSError, ValueError) as e:
+            return _erro('não li a lista de excluídos: %s' % e, 500)
+        achado = next((it for it in lista['itens']
+                       if it.get('simbolo') == sim and it.get('altium') == alt), None)
+        if achado is None:
+            return _erro('"%s / %s" não está na lista de excluídos' % (sim, alt), 404)
+        lista['itens'] = [it for it in lista['itens'] if it is not achado]
+        try:
+            A.grava_excluidos(ROOT, lista)
+        except OSError as e:
+            return _erro('não gravei a lista de excluídos: %s' % e, 500)
+    return {'ok': True, 'desfeito': True, 'item': achado,
+            'avisos': ['o valor volta ao espelho e ao Altium no próximo sincronismo do '
+                       'almoxarifado']}
 
 
 @bp.route('/lib', methods=['POST'])

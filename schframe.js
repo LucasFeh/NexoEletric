@@ -3120,6 +3120,27 @@ function symRenderValores(){
     busca: $('symBusca').value, filtro: apFiltro,
     sel: symEscolhido && symEscolhido.name, rec: apRec,
     onPick: it => { symSelecionar(candidatoDoValor(it.nome)); symRenderValores(); },
+    /* BOTAO DIREITO: excluir o valor da biblioteca. O fluxo (previa, pergunta com quem usa,
+       exclusao) mora no hub-almoxpick para a aba Biblioteca do hub usar o MESMO — inclusive o
+       mesmo texto de pergunta. Aqui entra so o adaptador desta tela. */
+    onExcluir: (it, g) => HubAlmoxPick.excluirValor(
+      { familia: g.familia, componente: it.nome, label: it.rotulo },
+      {
+        confirm: (txt, o) => HubDialog.confirm(txt, o),
+        toast: (m, k, ms) => HubDialog.toast(m, k, ms),
+        post: async (url, body) => {
+          const r = await postSymbols(url.replace('/api/symbols/', ''), body);
+          return r.j;
+        },
+        /* a lista some da tela na hora: sem isto o item excluido continua ali, clicavel, ate
+           alguem fechar e reabrir o modal */
+        recarregar: async () => {
+          await window.__hubRecarregaLibs();
+          apGrupos = HubAlmoxPick.grupos();
+          apFam = apGrupos.find(x => x.familia === (apFam && apFam.familia)) || null;
+          symRenderValores();
+        },
+      }),
   });
 }
 /* abrir a familia mostra o DESENHO dela na hora, mesmo antes de escolher o componente: e o
