@@ -378,6 +378,19 @@ precisar de servidor.
   nunca menos de 20). Botão direito sem arrastar, duplo clique ou `Esc` encerram o fio. Net label,
   texto, junção explícita e troca de valor/footprint continuam sendo da IA, no `schematic.js`
   ([AI-GUIDE.md](AI-GUIDE.md), Parte A).
+  **Trocar um troca os do mesmo tipo E do mesmo valor.** "Mesmo tipo" era só o nome do
+  símbolo, e num projeto real isso junta demais: os 24 `RES [ SMD ]` do `PRJ-UR-DI261924`
+  são 10K, 1K, 2K2 e 15R, e trocar o 10K trocava os quatro valores. O valor sai do parâmetro
+  `Value` do componente — e, só em designador `R…` ou `C…`, do `comment` quando não há
+  parâmetro, que é o caso dos espelhos antigos. Componente sem valor declarado (conector,
+  test point, LED, diodo) continua com o alcance de antes, o símbolo inteiro: medido nos 8
+  projetos da casa, 63 dos 76 grupos ficam intactos e só resistor e capacitor se dividem.
+  O modal mostra **os três alcances antes do clique**, com o número em cada um — *os N com
+  valor 10K* (padrão), *os N deste tipo, qualquer valor* e *só este designador*.
+  **Vários de uma vez, escolhidos a dedo:** marque os componentes na folha (clique com
+  `Shift`, ou laço) e o painel Propriedades oferece **"Definir o componente nos N
+  designadores…"** — mesmo componente para todos, de valores ou símbolos diferentes, com um
+  aviso quando a seleção mistura valores. É o mesmo caminho do "resolver" da lista do Odoo.
   **Trocar componente encaixa.** O desenho novo põe os pinos noutro lugar em volta da mesma
   âncora; a troca agora mede onde os pinos estavam, mede onde ficaram, e anda com o componente
   o tanto que devolve o maior número de pinos de mesmo número ao ponto antigo — dizendo no
