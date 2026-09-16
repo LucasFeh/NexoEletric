@@ -2174,9 +2174,20 @@ async function almoxRecarrega() {
   if (S.tab === 'lib' || S.tab === 'libfp') renderLib();
 }
 
-/* O guardião da sincronização (tools/symbols/guardiao.py): o que a regeneração NÃO
-   sobrescreveu porque foi mudado direto no Altium, e de onde o desenho da casa foi
-   reciclado. É a hierarquia Altium > hub > Odoo aparecendo no resultado. */
+/* O guardião da sincronização (tools/symbols/guardiao.py): os desenhos que a regeração NÃO
+   repõe, e de onde o desenho da casa foi reciclado.
+
+   O nome disto era "preservado do Altium", e envelheceu junto com a inversão de 2026-09-14:
+   hoje o Altium é DESTINO, e nenhum desenho sobe de lá. O que esta lista guarda é o caminho
+   contrário — o desenho feito no editor de símbolos do hub. Ele precisa da lista porque o
+   schlib_escritor prefere o modelo da biblioteca da casa nas famílias do CATALOGO (RESISTOR,
+   CAPACITOR, DIODO, LED, MOSFET…) e descarta o desenho do espelho: sem o repost do guardião,
+   o trabalho do editor some no sincronismo seguinte, sem avisar.
+
+   A coluna de origem também saiu. Ela imprimia "altium" para 1371 registros de um lote único
+   de 2026-09-04, medidos depois como redundantes (o gerador escreve geometria idêntica
+   sozinho) e podados do ledger em 2026-09-16 — ficaram os 6 do hub e o único "altium" que
+   carregava geometria de verdade. */
 function alxBlocoGuardiao(box, g) {
   if (!g || typeof g !== 'object') { box.append(el('p', 'alx-nota', t('alx.semGuardiao'))); return; }
   const prot = Array.isArray(g.protegidos) ? g.protegidos : [];
@@ -2189,9 +2200,8 @@ function alxBlocoGuardiao(box, g) {
     const ul = el('div', 'alx-diff');
     prot.slice(0, 60).forEach(p => {
       const r2 = el('div', 'alx-di');
-      r2.append(el('span', 'a', p.componente || '?'), el('span', 'b', p.familia || ''),
-                el('span', 'c' + (p.origem === 'hub' ? '' : ' ok'), p.origem || 'altium'));
-      r2.title = p.origem === 'hub' ? 'mudado no editor de símbolos do hub' : 'mudado direto na .SchLib, no Altium';
+      r2.append(el('span', 'a', p.componente || '?'), el('span', 'b', p.familia || ''));
+      r2.title = 'o gerador repõe o símbolo padrão da categoria aqui — este desenho sobrevive porque está no registro';
       ul.append(r2);
     });
     if (prot.length > 60) ul.append(el('div', 'alx-mais', '+ ' + (prot.length - 60) + ' não listados'));
@@ -2794,14 +2804,14 @@ function renderLibAlmox() {
       b.append(p);
     }
     if (!(s.footprints || []).length) b.append(el('span', 'pill warn', 'sem encap'));
-    /* desenho PROTEGIDO: o gerador não passa por cima dele (guardião). A marca diz de
-       onde o desenho veio — 'hub' é o caminho normal desde a inversão de autoridade, e
-       chamar tudo de "altium" era mentira na tela. */
+    /* desenho PRÓPRIO: o gerador redesenharia por cima, e o guardião o repõe. A marca não
+       diz mais "de onde veio" — desde a inversão de 2026-09-14 o único caminho é o editor de
+       símbolos do hub, e as 1371 marcas "altium" eram um lote de 2026-09-04 que a medição
+       mostrou redundante (podadas do ledger em 2026-09-16). */
     if (s.origem === 'hub' || s.origem === 'altium') {
-      const p = el('span', 'pill altium', s.origem);
-      p.title = (s.protegidos || 0) + ' componente(s) com desenho próprio, '
-        + (s.origem === 'hub' ? 'feito no editor de símbolos do hub' : 'adotado do Altium à mão')
-        + ' — preservado a cada sincronização';
+      const p = el('span', 'pill altium', 'desenho próprio');
+      p.title = (s.protegidos || 0) + ' componente(s) com desenho próprio — o gerador repõe o '
+        + 'símbolo padrão da categoria, e o registro devolve este depois';
       b.append(p);
     }
     const q2 = el('span', 'mt', alxQtd(est));
@@ -2916,9 +2926,8 @@ function renderLibAlmoxPreview() {
     p.style.cssText = 'font-size:12px;color:var(--text-2);margin:6px 0 0'; aside.append(p);
   }
   if (s.origem === 'hub' || s.origem === 'altium') {
-    const p = el('p', 'libsync-origem', s.origem === 'hub'
-      ? 'desenho do hub (' + (s.protegidos || 0) + ' componentes protegidos)'
-      : 'desenho adotado do Altium (' + (s.protegidos || 0) + ' componentes protegidos)');
+    const p = el('p', 'libsync-origem',
+      'desenho próprio (' + (s.protegidos || 0) + ' componentes no registro)');
     p.title = 'a geometria desta família não é a que o gerador desenharia; o guardião a repõe '
       + 'na .SchLib a cada sincronização com o Odoo';
     aside.append(p);
