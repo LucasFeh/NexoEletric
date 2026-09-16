@@ -529,7 +529,24 @@ def depois(raiz, ledger, log=print):
                 except (ValueError, KeyError) as e:
                     log('   ATENCAO: não repus %s / %s: %s' % (fam, c, e))
             if feitos:
-                P.grava(lib, cam, backup=False)
+                # UMA BIBLIOTECA RUIM NAO PODE DERRUBAR A SINCRONIZACAO INTEIRA.
+                # Em 2026-09-16 o indice de uma familia passou do teto de 65.535 bytes do
+                # Altium e o ValueError do schlib_bin subiu ate o topo: o guardiao terminou
+                # com codigo 1, e as outras 31 bibliotecas, o espelho e o resumo ficaram por
+                # fazer. A causa daquele caso foi consertada, mas o formato tem um teto de
+                # verdade e um dia outra familia vai encostar nele. Aqui a falha fica do
+                # tamanho dela: esta familia nao recebe os desenhos protegidos, o log diz
+                # qual e o que fazer, e o resto da rodada segue.
+                try:
+                    P.grava(lib, cam, backup=False)
+                except ValueError as e:
+                    log('   ATENCAO: nao gravei %s: %s' % (os.path.basename(cam), e))
+                    log('            os desenhos protegidos desta familia NAO foram repostos.')
+                    log('            o teto e do formato do Altium; a saida e quebrar a familia'
+                        ' em mais pedacos (schlib_escritor >> RESERVA_CAB).')
+                    registra_arquivo(raiz, cam, ledger, gravar=False)
+                    vistos.add(cam)
+                    continue
                 lido = le_familia(cam)
                 for c in feitos:
                     difs = P.compara(P.esperado({'name': c, 'parts': prots[c]['parts']}), lido.get(c) or [])

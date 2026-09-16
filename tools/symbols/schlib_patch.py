@@ -742,15 +742,36 @@ def aplica(lib, sym):
         if _int(lib.cab.get('PartCount%d' % k)) != len(parts) + 1:
             lib.cab['PartCount%d' % k] = len(parts) + 1
             avisos.append('PartCount de "%s": %d parte(s)' % (nome, len(parts)))
-        desc = cabc.get('ComponentDescription', '')
-        if lib.cab.get('CompDescr%d' % k, '') != desc:
-            if desc:
-                if ('CompDescr%d' % k) in lib.cab:
-                    lib.cab['CompDescr%d' % k] = desc
+        # A DESCRICAO DO INDICE SO MUDA QUANDO QUEM CHAMOU PEDIU.
+        #
+        # Este bloco sincronizava o CompDescr<N> do indice com o ComponentDescription do
+        # componente SEMPRE, inclusive em chamadas que nao trazem descricao nenhuma - e o
+        # repost do guardiao e exatamente assim: ele passa {'name','parts'}, so a geometria.
+        #
+        # O estrago: o gerador poe no indice o ROTULO CURTO de proposito (schlib_escritor
+        # >> _cabecalho: "um cabecalho enxuto abre mais rapido no Altium") e a descricao
+        # longa do Odoo no proprio componente. A cada sincronizacao o repost trocava um pelo
+        # outro, inchando o indice ~30 bytes por componente reposto - medido: o CONECTOR ia
+        # de 25.450 para 28.063 e o RESISTOR de 41.538 para 54.964. E o indice tem teto de
+        # 65.535 (SB.MAX_REGISTRO). O gerador mede o tamanho para decidir em quantos pedacos
+        # a familia sai, mas media o cabecalho DELE, nao o que sobrava depois do repost: com
+        # o almoxarifado crescendo no Odoo, a conta passou do teto no servidor e a
+        # sincronizacao inteira morreu com "registro de 73112 bytes".
+        #
+        # O crescimento era idempotente (nao dobrava a cada rodada), entao isto nao e um
+        # vazamento - e uma discordancia entre dois escritores sobre o que vai no indice. Com
+        # a guarda, quem manda no indice e o gerador, e o /save-almox continua podendo mudar
+        # a descricao porque ele PASSA description.
+        if sym.get('description') is not None:
+            desc = cabc.get('ComponentDescription', '')
+            if lib.cab.get('CompDescr%d' % k, '') != desc:
+                if desc:
+                    if ('CompDescr%d' % k) in lib.cab:
+                        lib.cab['CompDescr%d' % k] = desc
+                    else:
+                        _poe_depois(lib.cab, 'LibRef%d' % k, [('CompDescr%d' % k, desc)])
                 else:
-                    _poe_depois(lib.cab, 'LibRef%d' % k, [('CompDescr%d' % k, desc)])
-            else:
-                del lib.cab['CompDescr%d' % k]
+                    del lib.cab['CompDescr%d' % k]
     else:
         avisos.append('"%s" não está no índice LibRef do FileHeader' % nome)
     if SB.escreve_texto(lib.cab) != cab_antes:

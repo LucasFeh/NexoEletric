@@ -102,7 +102,12 @@ for f in LIBS:
 # começa com o ledger vazio — "tocar" os 39 símbolos marcados só para tirá-las, e a asserção
 # de que nada é tocado quando nada está protegido quebrava por dado, não por código.
 # O corte é no fim da linha e só das duas chaves; o resto do símbolo sai byte a byte igual.
-SEM_MARCA = re.compile(rb', "origem": "altium", "protegidos": \d+\}$', re.M)
+# A origem NAO e mais so "altium": desde a inversao de 2026-09-14 quem grava protecao
+# grava "hub", e em 2026-09-16 o lote historico de "altium" foi podado do ledger. Com o
+# valor cravado aqui, as marcas "hub" passavam pelo filtro, entravam no espelho de
+# partida e a primeira sincronizacao as tirava — quebrando por dado a asserção de que
+# nada e tocado quando nada esta protegido, que e justamente o que esta secao prova.
+SEM_MARCA = re.compile(rb', "origem": "[^"]*", "protegidos": \d+\}$', re.M)
 pristine = {}
 for f in G.ESPELHOS_ALMOX:
     with open(os.path.join(tmp, 'Libs', f), 'wb') as fh:

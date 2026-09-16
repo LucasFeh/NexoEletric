@@ -749,6 +749,16 @@ def _fatia(itens, n):
     return pedacos
 
 
+# FOLGA DO CABECALHO. O gerador nao e o unico a escrever no indice: o repost do guardiao
+# reabre a lib depois dele (guardiao.py >> depois) e o /save-almox tambem. Em 2026-09-16 uma
+# discordancia entre dois escritores sobre o que vai no CompDescr<N> inchou o indice ~30 bytes
+# por componente reposto e derrubou a sincronizacao INTEIRA no servidor, com "registro de 73112
+# bytes" - uma familia que cabia por pouco deixou de caber. A causa foi consertada
+# (schlib_patch >> aplica), e esta folga existe para o proximo desencontro custar uma
+# biblioteca a mais em vez de uma sincronizacao perdida: 4 KB dao ~130 componentes de margem.
+RESERVA_CAB = 4096
+
+
 def fatias_que_cabem(itens, cab_modelo):
     """Quebra a familia ate o FileHeader de CADA pedaco caber num registro.
 
@@ -759,10 +769,11 @@ def fatias_que_cabem(itens, cab_modelo):
     contagem. Por isso a conta e medida a cada tentativa em vez de um teto fixo de
     componentes: uma familia de nomes curtos cabe inteira onde outra nao caberia.
     """
+    teto = SB.MAX_REGISTRO - RESERVA_CAB
     n = 1
     while True:
         pedacos = _fatia(itens, n)
-        if all(tamanho_cabecalho(p, cab_modelo) <= SB.MAX_REGISTRO for p in pedacos):
+        if all(tamanho_cabecalho(p, cab_modelo) <= teto for p in pedacos):
             return pedacos
         if n >= len(itens):
             return pedacos          # um componente por lib ja nao cabe: deixa estourar
