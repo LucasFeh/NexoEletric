@@ -47,6 +47,14 @@ var
                             // tinha" ficam indistinguiveis - foi assim que 0 juncoes em 15
                             // projetos passaram meses sem ninguem notar.
   SheetsMeasured: Integer;  // folhas cuja medida real o Altium entregou
+  SheetPortrait: Integer;   // folhas cuja medida veio EM PE (h > w). O retrato nao tem
+                            // campo proprio no formato: ele E a medida, e este contador
+                            // existe so para o numero aparecer na tela - sem ele, "nao
+                            // exportou o retrato" e "nao tinha retrato" ficam iguais.
+  SheetProbe: String;       // SONDA da folha: leitura CRUA da primeira folha da rodada
+                            // (de preferencia uma de ESTILO NOMEADO, ver SondaFolha)
+  SheetProbeNamed: Boolean; // a sonda guardada ja e de uma folha de estilo nomeado?
+  SheetNamed: Integer;      // folhas que o Altium diz NAO ser custom (UseCustomSheet=F)
   PortWarn: String;        // primeira propriedade de Port que o Altium recusou (se houver)
   TxtPosWarn: String;      // o que esta instalacao do Altium recusou na sonda de POSICAO DE
                            // TEXTO de componente, ja no formato do relatorio (os nomes
@@ -792,6 +800,192 @@ begin
   end;
 end;
 
+{ ------------------------------- tamanho da folha ------------------------------- }
+{ Este bloco e DUPLICADO, com o mesmo texto, no BuildSchematic.pas - de proposito, pelo    }
+{ mesmo motivo do bloco HOME: o .PrjScr nao ganha unidade nova e resolucao entre unidades  }
+{ do DelphiScript do Altium nao da para testar fora do Altium. Mudou aqui, mude la.        }
+
+// DIFERENCA ABSOLUTA sem usar Abs. Abs nao aparece em nenhum destes scripts, e neste engine
+// identificador que nao existe e erro de COMPILACAO: derruba o script INTEIRO, nao a linha
+// (foi o que ePortLeft e ePortNone_Vertical fizeram - ver o comentario do PortStyle no
+// BuildSchematic). Duas subtracoes custam menos que descobrir isso dentro do Altium.
+function DifAbs(a: Double; b: Double): Double;
+begin
+  if a > b then
+    Result := a - b
+  else
+    Result := b - a;
+end;
+
+// Duas medidas sao a MESMA folha? Tolerancia de 5 mil (0,127 mm), escolhida pelos dois
+// lados:
+//   - folga de sobra para o ruido. A folha ISO nasce em mm e chega aqui em mil
+//     (297 mm = 11692,9134 mil), passando pelo Coord inteiro do Altium (1/10000 mil) e por
+//     template de terceiro que arredonda - erro de decimo de mil, nunca de unidade. Medido
+//     no template da casa (Libs\Almox\snippets\*.SchDoc, RECORD=31): CustomX=1169 +
+//     CustomX_Frac=29134, ou seja 11692,9134 - a ISO exata.
+//   - 133 vezes MENOR que a menor distancia entre duas entradas das tabelas abaixo, que e
+//     667,7 mil - entre a A4 ISO (11692,913) e a A4 legado (11500), que ainda por cima
+//     carregam o MESMO nome. Entre entradas de nomes DIFERENTES a menor distancia e 1500
+//     mil (A3 legado 15500x11000 e B legado 15000x9500). Distancia aqui e o maior dos dois
+//     eixos, que e o que importa: so ha confusao quando OS DOIS caem dentro da tolerancia.
+//     Nenhuma folha se confunde com outra, e nenhuma deixa de se reconhecer.
+function CasaMedida(W: Double; H: Double; NomW: Double; NomH: Double): Boolean;
+begin
+  Result := (DifAbs(W, NomW) <= 5.0) and (DifAbs(H, NomH) <= 5.0);
+end;
+
+// NOME DA FOLHA PELA MEDIDA - e nao pelo SheetStyle.
+//
+// POR QUE EXISTE: o SheetSizeName(SheetStyle) logo abaixo conhece so A3/A2/A1/A/B/C e manda
+// TODO o resto para o 'A4' do else. Como os templates da casa sao folha CUSTOM (e folha
+// custom nem consulta o SheetStyle), na pratica TODA folha saia do espelho chamada de "A4"
+// - inclusive a A0 do usuario. E o nome nao e enfeite: o BuildSchematic o usava para decidir
+// se escrevia SheetStyle na folha do Altium, e "A4" em cima de uma A0 ENCOLHE o arquivo
+// dele. Medida e o unico dado confiavel que ha aqui, entao o nome sai dela.
+//
+// AS DUAS TABELAS: a ISO real (a da casa, medida no proprio .SchDoc do template) e a LEGADO
+// do Altium (a que o hub-core.js lista em SHEET_SIZES, e que uma folha de estilo nomeado de
+// verdade mede). As duas existem no mundo real, entao as duas respondem - e as duas caem no
+// mesmo nome: "A4" quer dizer a familia, nao um numero.
+//
+// RETRATO: compara MAIOR lado com MAIOR lado, entao A4 em pe continua se chamando A4. O que
+// muda e a medida, que ja viaja em w/h. NAO ha campo novo no formato: retrato E h > w, e o
+// hub ja desenha por w/h (hub-core.js >> sheetSize prefere os dois quando existem). Campo
+// novo custaria os oito lugares da nota "tipo novo de item do esquema" para dizer o que dois
+// numeros que ja estao la dizem sozinhos.
+//
+// '' = nenhuma das duas tabelas reconheceu; quem chama escreve "Custom", que e a verdade e e
+// o valor que o BuildSchematic trata como "nao mexa no tamanho".
+function SheetNameFromMils(W: Double; H: Double): String;
+var
+  Maior, Menor: Double;
+begin
+  Result := '';
+  if (W <= 0) or (H <= 0) then
+    Exit;
+  if W >= H then
+  begin
+    Maior := W;
+    Menor := H;
+  end
+  else
+  begin
+    Maior := H;
+    Menor := W;
+  end;
+  // ISO real, em mil (210 / 297 / 420 / 594 / 841 / 1189 mm)
+  if CasaMedida(Maior, Menor, 11692.913, 8267.717) then
+    Result := 'A4'
+  else if CasaMedida(Maior, Menor, 16535.433, 11692.913) then
+    Result := 'A3'
+  else if CasaMedida(Maior, Menor, 23385.827, 16535.433) then
+    Result := 'A2'
+  else if CasaMedida(Maior, Menor, 33110.236, 23385.827) then
+    Result := 'A1'
+  else if CasaMedida(Maior, Menor, 46811.024, 33110.236) then
+    Result := 'A0'
+  // legado do Altium: a medida de uma folha de ESTILO NOMEADO de verdade
+  else if CasaMedida(Maior, Menor, 11500, 7600) then
+    Result := 'A4'
+  else if CasaMedida(Maior, Menor, 15500, 11000) then
+    Result := 'A3'
+  else if CasaMedida(Maior, Menor, 22000, 15500) then
+    Result := 'A2'
+  else if CasaMedida(Maior, Menor, 31000, 22000) then
+    Result := 'A1'
+  else if CasaMedida(Maior, Menor, 44000, 31000) then
+    Result := 'A0'
+  else if CasaMedida(Maior, Menor, 9500, 7500) then
+    Result := 'A'
+  else if CasaMedida(Maior, Menor, 15000, 9500) then
+    Result := 'B'
+  else if CasaMedida(Maior, Menor, 20000, 15000) then
+    Result := 'C'
+  else if CasaMedida(Maior, Menor, 32000, 20000) then
+    Result := 'D'
+  else if CasaMedida(Maior, Menor, 42000, 32000) then
+    Result := 'E';
+end;
+
+// SONDA DA FOLHA - UMA linha por rodada, para a primeira execucao dentro do Altium contar o
+// que achou. Este repositorio nao tem Altium na bancada; e assim que ele mede o que nao da
+// para medir daqui (mesmo caminho do PortWarn e do TxtPosWarn).
+//
+// O QUE NINGUEM MEDIU AINDA: o que o Altium responde para uma folha de ESTILO NOMEADO posta
+// EM PE. SheetSizeX/Y ja vem trocados (e ai o espelho ja esta certo hoje)? Ou o retrato mora
+// noutro lugar e a folha nomeada em pe sai daqui deitada?
+//
+// SO LE IDENTIFICADOR JA USADO NESTE ARQUIVO - SheetStyle, UseCustomSheet, SheetSizeX/Y,
+// CustomX/CustomY -, cada um no seu try/except. NAO ha aqui chute de nome de propriedade de
+// orientacao, de proposito: o unico .SchDoc real que da para abrir desta bancada (o template
+// da casa, em Libs\Almox\snippets) nao tem chave NENHUMA de orientacao no RECORD=31 - so
+// CustomX, CustomY e UseCustomSheet -, entao nao existe nome candidato com prova por tras, e
+// chutar um que EXISTA com outro significado erraria em silencio, que e pior que nao ler.
+//
+// LE OS QUATRO SEMPRE, custom ou nao, de proposito: o SheetSizeMils le so o par do caso, e e
+// justamente o par que ele descarta que diria se ha medida escondida do outro lado.
+procedure SondaFolha(SchDoc: ISch_Document; SheetName: String);
+var
+  Custom: Boolean;
+  Estilo, CustomTxt, Sx, Sy, Cx, Cy: String;
+begin
+  Estilo := '?';
+  try
+    Estilo := IntToStr(SchDoc.SheetStyle);
+  except
+    Estilo := '?';
+  end;
+  Custom := False;
+  CustomTxt := '?';
+  try
+    Custom := SchDoc.UseCustomSheet;
+    if Custom then
+      CustomTxt := 'T'
+    else
+      CustomTxt := 'F';
+  except
+    CustomTxt := '?';
+  end;
+  if CustomTxt = 'F' then
+    SheetNamed := SheetNamed + 1;
+  Sx := '?';
+  Sy := '?';
+  try
+    Sx := ML(SchDoc.SheetSizeX);
+    Sy := ML(SchDoc.SheetSizeY);
+  except
+    Sx := '?';
+    Sy := '?';
+  end;
+  Cx := '?';
+  Cy := '?';
+  try
+    Cx := ML(SchDoc.CustomX);
+    Cy := ML(SchDoc.CustomY);
+  except
+    Cx := '?';
+    Cy := '?';
+  end;
+  // Guarda a PRIMEIRA folha da rodada, e troca por uma de estilo NOMEADO se ela aparecer
+  // depois: e a nomeada que carrega a pergunta em aberto. Projeto so de folha custom (o
+  // caso da casa) ainda deixa a linha da custom, que responde "aqui nao ha nomeada".
+  if (SheetProbe = '') or ((CustomTxt = 'F') and (not SheetProbeNamed)) then
+  begin
+    SheetProbe := SheetName + ': SheetStyle=' + Estilo + ' UseCustomSheet=' + CustomTxt +
+      ' SheetSizeX/Y=' + Sx + 'x' + Sy + ' CustomX/Y=' + Cx + 'x' + Cy + ' mil';
+    if CustomTxt = 'F' then
+      SheetProbeNamed := True;
+  end;
+end;
+
+// ULTIMO RECURSO, e so ele: o nome do estilo quando NAO deu para ler a medida. Conhece
+// so o que o Altium declara aqui (A3/A2/A1/A/B/C) e chama todo o resto de "A4" - e foi
+// exatamente essa linha do else que fez todo projeto sair do espelho como "A4", inclusive
+// uma A0. NAO ACRESCENTE eSheet* NOVO: eSheetA0, eSheetD e eSheetE nunca foram usados
+// neste repositorio e ninguem sabe se existem; identificador inexistente nao da erro de
+// execucao, da erro de COMPILACAO e leva o script inteiro junto. Quem sabe o tamanho e a
+// medida, e quem a le e o SheetNameFromMils acima.
 function SheetSizeName(style: Integer): String;
 begin
   if style = eSheetA3 then
@@ -1157,6 +1351,7 @@ var
   AncX, AncY: Integer;                   // ancora do componente, lida FORA da sonda
   TemRef, TemCom: Boolean;               // a sonda respondeu? False = o campo NAO sai
   TxtObj: TObject;                       // o objeto Designator/Comment, pego a parte
+  SizeNome: String;                      // nome da folha, derivado da MEDIDA (ver abaixo)
   k: Integer;
 begin
   SchDoc := SchServer.GetSchDocumentByPath(Path);
@@ -1172,11 +1367,44 @@ begin
 
   // w/h = medida medida no Altium; 0 quer dizer "nao consegui ler" e o hub cai na
   // tabela por nome. O size continua saindo: serve de rotulo e de compatibilidade.
+  //
+  // O NOME SAI DA MEDIDA, e nao do SheetStyle. O SheetSizeName(SheetStyle) chamava TODA
+  // folha de "A4" - a A3 do PRJ-UR-DI261924 e a A0 que o usuario pediu agora saiam as duas
+  // como "A4" -, e esse nome nao para na tela: o BuildSchematic decidia por ele se escrevia
+  // SheetStyle na folha do Altium, e carimbar eSheetA4 numa A0 ENCOLHE o arquivo do
+  // usuario. Com w/h na mao a medida diz o nome sozinha, nas duas orientacoes; o que nao
+  // bater com tabela nenhuma sai "Custom", que e a verdade.
+  //
+  // RETRATO viaja nos proprios w/h (h > w), sem campo novo: e onde ele ja esta e onde o hub
+  // ja o le (hub-core.js >> sheetSize). Ver SheetNameFromMils.
   SheetSizeMils(SchDoc, ShW, ShH);
   if (ShW > 0) and (ShH > 0) then
     SheetsMeasured := SheetsMeasured + 1;
+  if (ShW > 0) and (ShH > 0) and (ShH > ShW) then
+    SheetPortrait := SheetPortrait + 1;
+  SondaFolha(SchDoc, SheetName);
+  SizeNome := SheetNameFromMils(ShW, ShH);
+  if SizeNome = '' then
+  begin
+    if (ShW > 0) and (ShH > 0) then
+      // medida lida e nao e nenhum tamanho conhecido: "Custom" e a verdade, e e o unico
+      // valor que faz o BuildSchematic nao mexer no tamanho da folha.
+      SizeNome := 'Custom'
+    else
+    begin
+      // sem medida so sobra o nome do estilo - que e justamente o que mentia. Sai assim
+      // mesmo (o relatorio ja conta quantas folhas ficaram sem medida), e se ate isso for
+      // recusado fica "Custom", que e o valor que nao estraga folha nenhuma.
+      SizeNome := 'Custom';
+      try
+        SizeNome := SheetSizeName(SchDoc.SheetStyle);
+      except
+        SizeNome := 'Custom';
+      end;
+    end;
+  end;
   AddItem(ItemsL, '{"t":"sheet","name":' + JS(SheetName) +
-    ',"size":' + JS(SheetSizeName(SchDoc.SheetStyle)) +
+    ',"size":' + JS(SizeNome) +
     ',"w":' + JF(ShW) + ',"h":' + JF(ShH) + '}');
 
   Iterator := SchDoc.SchIterator_Create;
@@ -1461,7 +1689,7 @@ var
   Prj: IProject;
   Doc: IDocument;
   i, SheetCount: Integer;
-  ProjName, OutDir, CarimboTxt, ItensTxt: String;
+  ProjName, OutDir, CarimboTxt, ItensTxt, FolhaTxt: String;
   ItemsL, OutL: TStringList;
   Gravou: Boolean;
 begin
@@ -1503,6 +1731,10 @@ begin
   NCompRefPos := 0;
   NCompComPos := 0;
   SheetsMeasured := 0;
+  SheetPortrait := 0;
+  SheetNamed := 0;
+  SheetProbe := '';
+  SheetProbeNamed := False;
   PortWarn := '';
   TxtPosWarn := '';
   TxtPosKeys := '';
@@ -1596,9 +1828,31 @@ begin
       #13#10 + '   por rodada, e a lista acima e completa: nem um aviso por componente,' +
       #13#10 + '   nem recusa escondida.';
 
+  // A FOLHA ENTRA NO DIALOGO porque o "size" deixou de ser enfeite: ele e o que o
+  // BuildSchematic le para decidir se mexe no tamanho da folha do usuario, e ate esta versao
+  // ele dizia "A4" para todas. A linha da SONDA sai SEMPRE, uma vez por rodada: e a primeira
+  // execucao dentro do Altium que responde o que uma folha de estilo NOMEADO em pe reporta -
+  // daqui nao da para medir isso.
+  FolhaTxt := 'Folha: ' + IntToStr(SheetsMeasured) + ' de ' + IntToStr(SheetCount) +
+    ' medida(s) pelo Altium';
+  if SheetPortrait > 0 then
+    FolhaTxt := FolhaTxt + ', ' + IntToStr(SheetPortrait) + ' em RETRATO (h > w)';
+  if SheetNamed > 0 then
+    FolhaTxt := FolhaTxt + ', ' + IntToStr(SheetNamed) + ' de estilo nomeado';
+  FolhaTxt := FolhaTxt + '.' + #13#10 +
+    '   O "size" agora vem da MEDIDA (A0..A4 ISO, A..E legado, ou "Custom"), e nao mais do' +
+    #13#10 + '   SheetStyle, que chamava TODA folha de "A4" - inclusive uma A0.';
+  if SheetProbe <> '' then
+    FolhaTxt := FolhaTxt + #13#10 +
+      '   SONDA (leitura crua da folha, so para esta primeira rodada ser medida):' + #13#10 +
+      '   ' + SheetProbe + #13#10 +
+      '   Se uma folha de estilo NOMEADO em pe aparecer aqui com SheetSizeX/Y ja trocados,' +
+      #13#10 + '   o retrato de folha nomeada ja chega inteiro no espelho. Anote o que saiu.';
+
   ShowMessage('Esquema espelhado em:' + #13#10 + OutDir + '\schematic.js' + #13#10#13#10 +
     'Folhas: ' + IntToStr(SheetCount) +
     '   (nao abertas/puladas: ' + IntToStr(SkippedDocs) + ')' + #13#10 +
+    FolhaTxt + #13#10 +
     ItensTxt + #13#10 +
     CarimboTxt + #13#10#13#10 +
     'PCB: rode o ExportBoard com o .PcbDoc focado.' + #13#10 +

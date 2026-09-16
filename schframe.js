@@ -1924,6 +1924,7 @@ function cartAdd(){
 function cartRender(){
   const n = cartCount();
   $('addBtnN').textContent = n ? '(' + n + ')' : '';
+  pintaBotaoFolha();
   $('cartInfo').textContent = n ? n + ' peça(s) · ' + cart.length + ' tipo(s)' : 'vazia';
   $('cartDone').disabled = !cart.length; $('cartClear').disabled = !cart.length;
   const box = $('cartList'); box.textContent = '';
@@ -2140,6 +2141,172 @@ function prPreview(sym, part, fpNome){
     : fpNome ? '"' + fpNome + '" não está na PcbLib espelhada' : (sym === false ? '' : 'sem footprint');
   requestAnimationFrame(refitProps);
 }
+/* ── A FOLHA É O QUE SOBRA ──
+   Com nada selecionado a ficha só tinha um parágrafo dizendo "clique em alguma coisa". Mas
+   quando nada está marcado o que está debaixo do cursor É A FOLHA, e ela também tem
+   propriedades — a primeira delas o formato, que até aqui ninguém conseguia escolher em lugar
+   nenhum: o hub desenhava a medida que o espelho trouxe e ponto.
+
+   Por que aqui e não numa barra nova: é o mesmo lugar onde se edita posição, rotação e
+   designador, com a mesma mecânica (campo → commit() → Salvar *). Uma barra nova seria um
+   segundo jeito de editar a mesma coisa.
+
+   O QUE É GRAVADO: `size` (o nome) e `w`/`h` (a medida em mil) no item `sheet` do
+   schematic.js. Os dois, sempre — o nome porque é o que o BuildSchematic procura, e a medida
+   porque o nome MENTE (o ExportProject chama de "A4" toda folha que não seja A3/A2/A1/A/B/C,
+   inclusive a A0 do usuário) e porque só a medida sabe dizer se a folha está em pé. */
+function itemFolha(nome){
+  let it = schematic.items.find(i => i && i.t === 'sheet' && i.name === nome);
+  if (!it){
+    /* FOLHA IMPLÍCITA: ninguém a declarou e o buildSchModel a inventou a partir do campo
+       `sheet` dos itens. Para gravar um formato é preciso ter onde — declara agora, no topo,
+       que é onde o ExportProject a escreve. O BuildSchematic exige a declaração de qualquer
+       jeito (ele recusa item cuja folha não foi declarada), então isto só conserta. */
+    it = { t:'sheet', name:nome, size:'A4' };
+    schematic.items.unshift(it);
+  }
+  return it;
+}
+/* quantos itens desta folha cairiam FORA de uma página de medida `med` */
+function contaFora(si, med){
+  let n = 0;
+  for (const it of sheetItems(si)){
+    const b = itemBBox(it);
+    if (b.x1 < 0 || b.y1 < 0 || b.x2 > med[0] || b.y2 > med[1]) n++;
+  }
+  return n;
+}
+const milTxt = v => String(Math.round(v));
+const mmTxt  = v => String(Math.round(v * 0.0254 * 10) / 10);
+/* O rotulo do botao da barra. Ele e a UNICA pista visivel de que da para trocar a folha: a
+   ficha de propriedades so mostra a secao quando nada esta selecionado, e o painel fecha
+   exatamente quando se desmarca. */
+function pintaBotaoFolha(){
+  const b = $('tbFolhaN');
+  if (!b) return;
+  const sh = model && model.sheets && model.sheets[sheetIdx];
+  b.textContent = sh ? HubCore.sheetLabel(sh) : '—';
+}
+$('tbFolha').addEventListener('click', () => {
+  propsPin = true; salvaPin();
+  limpaSel();                 /* a secao da folha so existe com nada selecionado */
+  mostraProps(); renderProps();
+});
+
+function secFolha(){
+  const s = prSec('folha');
+  const sh = model.sheets[sheetIdx];
+  /* esquema sem folha nenhuma (arquivo vazio) nao pode derrubar a ficha inteira: sem folha
+     nao ha formato a escolher, e dizer isso e melhor que um painel em branco */
+  if (!sh){ s.append(el('p', 'pr-empty', 'este esquema ainda não tem folha nenhuma')); return s; }
+  const med = HubCore.sheetSize(sh);
+  /* SEM w/h NO ESPELHO, `med` e o palpite da tabela legado — e o `sheetMatch` casa com esse
+     palpite, devolvendo "leg:A4" para uma folha que ninguem mediu. Deixar o seletor de
+     formato JA PREENCHIDO com esse palpite era o buraco: qualquer mexida (girar a folha)
+     passava pelo preset herdado e gravava 11500x7600 como se fosse medida declarada, e o
+     BuildSchematic escrevia isso por cima da folha real do Altium. Sem medida, nenhum
+     formato vem escolhido: o usuario precisa AFIRMAR qual e. */
+  const medida = HubCore.isNum(sh.w) && sh.w > 0 && HubCore.isNum(sh.h) && sh.h > 0;
+  const casa = medida ? HubCore.sheetMatch(sh) : null;
+  s.append(el('div', 'pr-title', sh.name));
+
+  /* O NOME DE CADA OPÇÃO LEVA A MEDIDA JUNTO. Não é enfeite: "A4" quer dizer 11693×8268 no
+     template da casa e 11500×7600 no estilo legado do Altium, e sem o número na frente a
+     escolha entre os dois grupos seria adivinhação. Por isso também são dois optgroups. */
+  const selFmt = el('select');
+  selFmt.title = 'o formato da página desta folha';
+  if (!casa){
+    /* "Custom" só existe quando a medida não é de formato nenhum — que é o caso da maioria
+       das folhas reais. Ele não é escolhível para "virar custom": é onde o seletor pousa
+       enquanto a folha for a que veio do Altium. */
+    const o = el('option', null, 'Custom · ' + milTxt(med[0]) + '×' + milTxt(med[1]) + ' mil');
+    o.value = '';
+    selFmt.append(o);
+  }
+  for (const [fam, rotulo] of [['iso', 'ISO — a folha de verdade'], ['legado', 'Altium legado']]){
+    const g = document.createElement('optgroup');
+    g.label = rotulo;
+    for (const p of HubCore.SHEET_PRESETS.filter(p => p.fam === fam)){
+      const o = el('option', null, p.name + ' · ' + milTxt(p.size[0]) + '×' + milTxt(p.size[1]));
+      o.value = p.id;
+      g.append(o);
+    }
+    selFmt.append(g);
+  }
+  selFmt.value = casa ? casa.id : '';
+  if (!medida){
+    /* a opcao vazia existe e e a selecionada: ela diz o que esta acontecendo em vez de
+       deixar o seletor mostrando um formato que ninguem mediu */
+    const o0 = selFmt.querySelector('option[value=""]');
+    if (o0) o0.textContent = '— não medida: rode o ExportProject —';
+  }
+
+  /* RETRATO NÃO É UM CAMPO DO ESPELHO: é a mesma medida com h > w (ver hub-core » SHEET_ISO).
+     Por isso o seletor de orientação escreve w/h trocados em vez de uma propriedade nova que
+     os dois .pas teriam de aprender — e por isso ele funciona igual para folha Custom, onde
+     "em pé" quer dizer só "o maior dos dois lados é a altura". */
+  const selOri = el('select');
+  selOri.title = 'retrato (em pé) ou paisagem (deitado)';
+  for (const [v, t] of [['0', 'deitado'], ['1', 'em pé']]){
+    const o = el('option', null, t); o.value = v; selOri.append(o);
+  }
+  selOri.value = med[1] > med[0] ? '1' : '0';
+
+  /* FOLHA NUNCA MEDIDA: sem w/h no espelho, `med` e o palpite da tabela legado do hub-core --
+     bom para desenhar alguma coisa, pessimo como base de calculo. Girar a orientacao aqui
+     gravava esse palpite (7600x11500) como medida declarada, e o BuildSchematic, que PRESERVA
+     a folha justamente quando nao ha w/h, passava a escrever o palpite por cima da folha real
+     do Altium. Medido em 11 projetos deste repositorio.
+     Entao: sem medida, a orientacao sozinha nao decide nada. Escolher um formato continua
+     valendo -- ali o usuario esta afirmando o tamanho, e afirmar e diferente de herdar. */
+  if (!medida){
+    selOri.disabled = true;
+    selOri.title = 'esta folha nunca foi medida: o tamanho que aparece e um palpite. '
+                 + 'Rode o ExportProject, ou escolha um formato aqui para afirmar qual e.';
+  }
+
+  const aplica = () => {
+    const id = selFmt.value, retrato = selOri.value === '1';
+    const atual = HubCore.sheetSize(sh);
+    let nova;
+    if (id) nova = HubCore.sheetPreset(id, retrato);
+    else if (!medida) return;     /* ver o comentario do selOri: palpite nao vira medida */
+    else {
+      const a = Math.max(atual[0], atual[1]), b = Math.min(atual[0], atual[1]);
+      nova = retrato ? [b, a] : [a, b];
+    }
+    if (!nova) return;
+    /* trocar pela mesma medida não é edição: acender o "Salvar *" e empilhar um undo por um
+       select que voltou ao que já estava seria ruído */
+    if (HubCore.near(nova[0], atual[0], 1e-3) && HubCore.near(nova[1], atual[1], 1e-3)) return;
+    const preset = id ? HubCore.SHEET_PRESETS.find(p => p.id === id) : null;
+    const fora = contaFora(sheetIdx, nova);
+    const it = itemFolha(sh.name);
+    if (preset) it.size = preset.name;          /* folha Custom conserva o nome que já tinha */
+    it.w = nova[0]; it.h = nova[1];
+    const nome = HubCore.sheetLabel({ size:it.size, w:it.w, h:it.h });
+    commit();
+    /* o enquadramento era da folha antiga: numa A0 vinda de uma A4 o desenho ficaria num
+       canto de 5% da página, e no caminho contrário metade dele fora da tela */
+    cam.fit(fitBBox());
+    /* A FOLHA É DO USUÁRIO: encolher e deixar componente para fora é decisão dele, não erro a
+       impedir. Mas ele tem de SABER — o item que sobrou da página some do desenho impresso
+       sem avisar nada no Altium. */
+    if (fora) HubDialog.toast(nome + ' · ' + fora + (fora > 1 ? ' itens ficaram' : ' item ficou')
+                              + ' fora da página', 'warn', 5000);
+    else HubDialog.toast('folha ' + nome + ' · ' + milTxt(nova[0]) + '×' + milTxt(nova[1]) + ' mil', 'ok');
+  };
+  selFmt.addEventListener('change', aplica);
+  selOri.addEventListener('change', aplica);
+  prPar(s, ['formato', selFmt], ['orientação', selOri]);
+  prKv(s, 'medida', milTxt(med[0]) + ' × ' + milTxt(med[1]) + ' mil');
+  prKv(s, 'em mm', mmTxt(med[0]) + ' × ' + mmTxt(med[1]) + ' mm', 'dim');
+  /* o `size` do arquivo fica à vista justamente porque ele pode estar mentindo: é assim que o
+     usuário descobre que o export chamou de "A4" a folha A3 dele */
+  prKv(s, 'size no arquivo', (sh.size || '—') + (casa && casa.name !== sh.size ? '  (mede ' + casa.name + ')' : ''),
+       casa && casa.name !== sh.size ? 'warn' : 'mono');
+  return s;
+}
 function renderProps(){
   const body = $('prBody');
   body.textContent = '';
@@ -2154,10 +2321,11 @@ function renderProps(){
   const alvos = selAlvos().filter(a => onSheet(a.it));
   const itens = alvos.map(a => a.it);
   if (!itens.length){
+    body.append(secFolha());
     const s = prSec(null);
     s.append(el('p', 'pr-empty', 'Clique num componente, fio ou pouso de alimentação para ver a ficha dele. '
-      + 'Aqui se olha e se posiciona; a única propriedade editável é a cor da port. Valor, footprint '
-      + 'e parâmetro são editados pela IA, no schematic.js.'));
+      + 'Aqui se olha e se posiciona; a única propriedade editável de um item é a cor da port. Valor, '
+      + 'footprint e parâmetro são editados pela IA, no schematic.js.'));
     body.append(s);
     return prPreview(false, null, null);
   }
@@ -3911,12 +4079,16 @@ function renderSheetCards(){
     const b = el('button', 'sheetcard' + (i === sheetIdx ? ' on' : ''));
     b.type = 'button';
     b.dataset.i = String(i);
-    b.title = `folha ${sh.name} (${sh.size}) — ${(sh.comps || []).length} componente(s)`;
+    /* O CARTÃO DIZ O QUE A FOLHA MEDE, e não o que o `size` afirma: o ExportProject chama de
+       "A4" toda folha que ele não sabe nomear (A0 inclusive), então o nome do arquivo daria a
+       mesma etiqueta para folhas de tamanhos diferentes. O sheetLabel lê a medida. */
+    const fmt = HubCore.sheetLabel(sh);
+    b.title = `folha ${sh.name} — ${fmt} (size no arquivo: ${sh.size}) — ${(sh.comps || []).length} componente(s)`;
     /* a miniatura e o icone da linha; o nome e o resumo vao ao lado, numa coluna que
        encolhe (o .txt) para o ellipsis do nome ter onde acontecer */
     const txt = el('div', 'txt');
     txt.append(el('span', 'nm', sh.name),
-               el('span', 'k', `${sh.size} · ${(sh.comps || []).length} comp.`));
+               el('span', 'k', `${fmt} · ${(sh.comps || []).length} comp.`));
     b.append(document.createElement('canvas'), txt);
     box.append(b);
   });

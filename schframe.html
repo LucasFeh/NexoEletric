@@ -587,6 +587,14 @@
       <button id="btnAdd" aria-label="Adicionar componentes"
               title="Escolher componentes das bibliotecas e jogar no esquema (C)">
         <svg viewBox="0 0 24 24"><rect x="3" y="7" width="10" height="10" rx="1"/><path d="M3 10H1M3 14H1M13 10h2M13 14h2"/><path d="M19 5v8M15 9h8"/></svg><span class="lb" id="addBtnN"></span></button>
+      <span class="sep"></span>
+      <!-- O TAMANHO DA FOLHA, na barra e nao so na ficha. Os seletores moram na ficha de
+           propriedades, que so aparece quando NADA esta selecionado -- e o painel fecha
+           justamente ao desmarcar, entao o recurso existia atras de um botao que ninguem
+           adivinha. Este botao mostra o formato atual e abre a ficha nele. -->
+      <button id="tbFolha" aria-label="Tamanho da folha"
+              title="Tamanho da folha — clique para escolher o formato (A4, A3, A0, em pé ou deitado)">
+        <svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M8 7h8M8 11h8M8 15h5"/></svg><span class="lb" id="tbFolhaN">A4</span></button>
     </div>
     <!-- a palavra do rotulo: o navegador nao pode abrir prompt() (CLAUDE.md), entao a
          pergunta e este campo no tema da pagina -->

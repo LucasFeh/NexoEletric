@@ -25,11 +25,86 @@ function distSeg(px, py, x1, y1, x2, y2){
    Isto e FALLBACK, nao a verdade: os templates da casa usam folha CUSTOM (a "A4" deles e a
    ISO de verdade, 297x210 mm = 11693x8268 mil), e uma folha custom nao tem nome nenhum a
    consultar aqui. Quem sabe a medida e o Altium — o ExportProject emite w/h junto do size, e
-   sheetSize() abaixo prefere esses numeros. A tabela so responde por espelho antigo. */
+   sheetSize() abaixo prefere esses numeros. A tabela so responde por espelho antigo.
+   A outra familia de numeros (a ISO, que e a folha de verdade) vem logo abaixo, no SHEET_ISO —
+   o comentario de la explica qual das duas ganha em cada situacao. */
 const SHEET_SIZES = { A4:[11500,7600], A3:[15500,11000], A2:[22000,15500], A1:[31000,22000],
                       A0:[44000,31000],
                       A:[9500,7500], B:[15000,9500], C:[20000,15000], D:[32000,20000],
                       E:[42000,32000] };
+
+/* ── A MESMA LETRA, DUAS MEDIDAS ──
+   "A3" quer dizer duas coisas diferentes conforme quem fala, e por isso ha DUAS tabelas:
+
+   SHEET_SIZES (acima) e o LEGADO do Altium — o que o eSheetA3 dele mede, 15500x11000 mil, um
+   tamanho historico em polegadas que nao e o ISO de ninguem. Ele continua sendo o FALLBACK do
+   sheetSize() porque espelho antigo, sem w/h, tem de desenhar hoje exatamente como desenhava
+   ontem: mexer nesses numeros moveria a folha de todo projeto ainda nao reexportado.
+
+   SHEET_ISO e a folha ISO de verdade (A3 = 420x297 mm = 16535.433x11692.913 mil), que e o que
+   os templates DESTA CASA usam. Medido nos projetos do usuario: PRJ-UR-DI261924 mede
+   16535.433x11692.913 (A3 ISO) e PRJ - DI261930 mede 11692.913x8267.717 (A4 ISO) — e o espelho
+   chama os dois de "A4", porque o SheetSizeName do ExportProject so sabe dizer A4/A3/A2/A1/A/B/C
+   e joga todo o resto, inclusive A0, no `else Result := 'A4'`. Ou seja: o NOME no espelho e
+   decorativo e mentiroso, a MEDIDA (w/h) e a verdade.
+
+   Quem ganha: w/h sempre, em qualquer consulta (sheetSize abaixo). Escolha NOVA de formato
+   grava ISO para A0..A4 (sheetPreset), porque e o que a casa usa de verdade; o legado so
+   responde por espelho velho sem medida e pelos nomes que so existem nele (A/B/C/D/E).
+
+   RETRATO nao e campo nenhum: e a mesma medida com h > w. Nem o espelho, nem esta tabela, nem
+   o ExportProject carregam orientacao, e inventar um campo novo obrigaria os dois .pas (que
+   nao sao testaveis desta bancada) a aprender um conceito novo. Trocar w por h atravessa o
+   cano inteiro pelo caminho que ja existe — folha custom sempre chegou assim. */
+const SHEET_ISO = { A0:[46811.024,33110.236], A1:[33110.236,23385.827], A2:[23385.827,16535.433],
+                    A3:[16535.433,11692.913], A4:[11692.913,8267.717] };
+
+/* A lista que o seletor da vista Esquema mostra, na ordem em que ela aparece. O `id` leva a
+   familia junto (`iso:A3` x `leg:A3`) porque as duas existem e tem o MESMO nome — sem isso o
+   seletor teria dois "A3" indistinguiveis. O `size` escrito no arquivo e so o nome (`A3`): e o
+   nome de estilo que o BuildSchematic procura, e a familia esta nos w/h, que e onde ela cabe. */
+const SHEET_PRESETS = [].concat(
+  Object.keys(SHEET_ISO).map(n => ({ id:'iso:' + n, name:n, fam:'iso',    size:SHEET_ISO[n] })),
+  Object.keys(SHEET_SIZES).map(n => ({ id:'leg:' + n, name:n, fam:'legado', size:SHEET_SIZES[n] })));
+
+/* Medida de um formato, ja com a orientacao: `retrato` so troca largura por altura. Aceita o
+   id com familia (`iso:A0`) ou so o nome — e neste caso o ISO ganha, pela regra acima. */
+function sheetPreset(id, retrato){
+  const p = SHEET_PRESETS.find(p => p.id === id)
+         || SHEET_PRESETS.find(p => p.name === id && p.fam === 'iso')
+         || SHEET_PRESETS.find(p => p.name === id);
+  if (!p) return null;
+  return retrato ? [p.size[1], p.size[0]] : [p.size[0], p.size[1]];
+}
+
+/* Tolerancia do reconhecimento, em mil. 1 mil = 0,0254 mm: folgado para o espelho que chegou
+   com a medida arredondada em inteiro (11693 x 8268 e A4 ISO) e apertado demais para confundir
+   dois formatos — medido aqui, o par mais proximo de toda a tabela, nas duas orientacoes, e
+   A4 ISO x A4 legado, e eles estao a 668 mil (17 mm) um do outro. O teste prende isso. */
+const SHEET_TOL = 1;
+
+/* Que formato e esta folha, olhando a MEDIDA e nao o nome — e o antidoto para o "A4" que o
+   export carimba em tudo. Devolve {id,name,fam,retrato} ou null (= Custom, medida que nao e de
+   nenhum formato conhecido; a maioria das folhas do mundo real e assim). */
+function sheetMatch(s){
+  const m = sheetSize(s);
+  for (const p of SHEET_PRESETS)
+    for (const retrato of [false, true]){
+      const t = sheetPreset(p.id, retrato);
+      if (near(m[0], t[0], SHEET_TOL) && near(m[1], t[1], SHEET_TOL))
+        return { id:p.id, name:p.name, fam:p.fam, retrato };
+    }
+  return null;
+}
+
+/* O rotulo curto da folha (cartao, titulo, ficha). Diz o que a MEDIDA e, nao o que o `size`
+   afirma: "A3", "A0 em pé", "A3 legado" ou "Custom". O "legado" fica explicito porque folha
+   legada quase sempre e espelho sem medida caindo na tabela — vale o usuario saber. */
+function sheetLabel(s){
+  const m = sheetMatch(s);
+  if (!m) return 'Custom';
+  return m.name + (m.retrato ? ' em pé' : '') + (m.fam === 'legado' ? ' legado' : '');
+}
 
 /* Medida da folha, com a precedencia num lugar so: w/h medidos no Altium > tabela por nome
    > A4. Sem isto cada vista repetiria a regra e uma delas ficaria para tras. */
@@ -1128,7 +1203,9 @@ function deriveStatus(entry, loaded){
   return 'vazio';
 }
 
-return { near, nearAng, isNum, distSeg, TOL, STOL, SHEET_SIZES, sheetSize, ORIENT_DIR,
+return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
+         SHEET_SIZES, SHEET_ISO, SHEET_PRESETS, SHEET_TOL,
+         sheetSize, sheetPreset, sheetMatch, sheetLabel,
          symbolOf, partOf, footprintOf, pinHot, compTransform, compPinsWorld,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp,
          suggestSym,

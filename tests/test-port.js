@@ -168,4 +168,103 @@ assert.strictEqual(sf.errors.length, 0, 'sheet com w/h deve serializar: ' + JSON
 assert.deepStrictEqual(new Function(sf.text + ';return schematic;')(), comFolha,
   'round-trip da folha tem que preservar w/h');
 
+/* ---- 11. FORMATO DE FOLHA: duas familias de numeros e o retrato ----
+   O usuario tem projeto em A0 RETRATO e o espelho chamava tudo de "A4" (o SheetSizeName do
+   ExportProject so sabe A4/A3/A2/A1/A/B/C e joga o resto no else). A partir daqui o hub sabe
+   escolher formato, e quem sabe qual e a folha e a MEDIDA, nunca o nome. */
+
+/* a tabela ISO e a ISO de verdade, e nao "uns numeros parecidos": 1 mil = 0,0254 mm */
+const MM = { A0:[1189,841], A1:[841,594], A2:[594,420], A3:[420,297], A4:[297,210] };
+for (const [n, [lmm, amm]] of Object.entries(MM)){
+  const t = Core.SHEET_ISO[n];
+  assert.ok(t, 'falta ' + n + ' na tabela ISO');
+  assert.ok(Math.abs(t[0] - lmm / 0.0254) < 0.01 && Math.abs(t[1] - amm / 0.0254) < 0.01,
+    n + ' ISO tem que ser ' + lmm + 'x' + amm + ' mm em mil, veio ' + t.join('x'));
+}
+
+/* as duas familias convivem e NENHUMA das duas some: o legado continua sendo o que o
+   sheetSize() usa quando o espelho nao traz medida */
+assert.deepStrictEqual(Core.SHEET_SIZES.A3, [15500, 11000], 'o legado do Altium nao pode mudar');
+assert.deepStrictEqual(Core.sheetSize({ size:'A3' }), [15500, 11000],
+  'espelho antigo (sem w/h) tem que desenhar como desenhava: fallback e o LEGADO, nao o ISO');
+assert.deepStrictEqual(Core.sheetSize({ size:'A0' }), [44000, 31000],
+  'idem para A0 — a tabela nova nao pode vazar para o fallback');
+assert.deepStrictEqual(Core.sheetSize({ size:'A3', w:16535.433, h:11692.913 }), [16535.433, 11692.913],
+  'com medida, ela manda — a regra de precedencia nao mudou');
+
+/* escolha NOVA de formato: por nome ganha o ISO (e o que a casa usa); o legado continua
+   alcancavel pelo id, que e o unico jeito de pedir "o A3 do Altium" e nao o A3 de verdade */
+assert.deepStrictEqual(Core.sheetPreset('A3'), Core.SHEET_ISO.A3, 'sheetPreset por nome = ISO');
+assert.deepStrictEqual(Core.sheetPreset('iso:A3'), Core.SHEET_ISO.A3, 'id iso: = ISO');
+assert.deepStrictEqual(Core.sheetPreset('leg:A3'), [15500, 11000], 'id leg: = legado do Altium');
+assert.deepStrictEqual(Core.sheetPreset('A', false), [9500, 7500], 'A/B/C/D/E so existem no legado');
+assert.strictEqual(Core.sheetPreset('Z9'), null, 'formato que nao existe devolve null, nao A4 calado');
+
+/* RETRATO E SO w/h TROCADOS — nao ha campo novo no espelho, e e assim que ele atravessa os
+   dois .pas sem que nenhum deles precise aprender orientacao */
+assert.deepStrictEqual(Core.sheetPreset('A0', true), [Core.SHEET_ISO.A0[1], Core.SHEET_ISO.A0[0]],
+  'A0 em pe = A0 deitado com largura e altura trocadas');
+assert.ok(Core.sheetPreset('A0', true)[1] > Core.sheetPreset('A0', true)[0],
+  'em pe quer dizer mais alto que largo');
+assert.notDeepStrictEqual(Core.sheetPreset('A0', true), Core.sheetPreset('A0', false),
+  'em pe e deitado nao podem ser a mesma medida');
+/* e o preset nao pode ser um alias da tabela: girar duas vezes nao pode ter virado a tabela */
+Core.sheetPreset('A0', true);
+assert.deepStrictEqual(Core.SHEET_ISO.A0, [46811.024, 33110.236], 'sheetPreset nao pode mexer na tabela');
+
+/* RECONHECER A FOLHA PELA MEDIDA — o antidoto para o nome mentiroso.
+   Numeros medidos nos projetos do usuario (o `size` dos dois diz "A4"). */
+assert.deepStrictEqual(Core.sheetMatch({ size:'A4', w:16535.433, h:11692.913 }),
+  { id:'iso:A3', name:'A3', fam:'iso', retrato:false },
+  'PRJ-UR-DI261924 mede A3 ISO, por mais que o espelho o chame de A4');
+assert.deepStrictEqual(Core.sheetMatch({ size:'A4', w:11692.913, h:8267.717 }),
+  { id:'iso:A4', name:'A4', fam:'iso', retrato:false }, 'PRJ - DI261930 mede A4 ISO');
+assert.deepStrictEqual(Core.sheetMatch({ size:'A4', w:33110.236, h:46811.024 }),
+  { id:'iso:A0', name:'A0', fam:'iso', retrato:true }, 'A0 em pe tem que ser reconhecida como A0 em pe');
+/* medida arredondada em inteiro (espelho antigo escrevia assim) ainda casa: a tolerancia e 1 mil */
+assert.strictEqual((Core.sheetMatch({ w:11693, h:8268 }) || {}).id, 'iso:A4',
+  'medida arredondada em inteiro tem que continuar sendo A4 ISO');
+/* sem medida nenhuma, quem responde e o fallback legado — e o match diz isso, em vez de mentir ISO */
+assert.deepStrictEqual(Core.sheetMatch({ size:'A4' }),
+  { id:'leg:A4', name:'A4', fam:'legado', retrato:false },
+  'sem w/h a folha E a legada: o match tem que dizer legado');
+assert.strictEqual(Core.sheetMatch({ size:'A4', w:11022, h:7710 }), null,
+  'medida que nao e de formato nenhum e Custom (null), nao o formato mais parecido');
+
+/* rotulo curto: e o que o cartao da folha e a ficha mostram */
+assert.strictEqual(Core.sheetLabel({ size:'A4', w:16535.433, h:11692.913 }), 'A3');
+assert.strictEqual(Core.sheetLabel({ size:'A4', w:33110.236, h:46811.024 }), 'A0 em pé');
+assert.strictEqual(Core.sheetLabel({ size:'A4' }), 'A4 legado');
+assert.strictEqual(Core.sheetLabel({ size:'A4', w:11022, h:7710 }), 'Custom');
+
+/* DOIS FORMATOS NUNCA PODEM CASAR COM A MESMA MEDIDA, senao o sheetMatch (que devolve o
+   primeiro) escolheria por ordem de tabela. Confere todos contra todos, nas duas orientacoes. */
+const todas = [];
+for (const p of Core.SHEET_PRESETS)
+  for (const r of [false, true]) todas.push([p.id + (r ? ' em pe' : ''), Core.sheetPreset(p.id, r)]);
+let menor = [Infinity, ''];
+for (let i = 0; i < todas.length; i++)
+  for (let j = i + 1; j < todas.length; j++){
+    const d = Math.max(Math.abs(todas[i][1][0] - todas[j][1][0]),
+                       Math.abs(todas[i][1][1] - todas[j][1][1]));
+    if (d < menor[0]) menor = [d, todas[i][0] + ' x ' + todas[j][0]];
+  }
+/* medido: o par mais proximo e iso:A4 x leg:A4, a 667,7 mil (17 mm). A folga de 10x sobre a
+   tolerancia e o que sustenta o comentario do SHEET_TOL no hub-core. */
+assert.ok(menor[0] > Core.SHEET_TOL * 10,
+  'dois formatos quase colidem (' + menor[1] + ', ' + menor[0].toFixed(1) + ' mil): a tolerancia '
+  + 'de ' + Core.SHEET_TOL + ' mil do sheetMatch deixaria a escolha depender da ordem da tabela');
+
+/* O CAMINHO INTEIRO: escolher A0 em pe grava size+w/h, sobrevive ao Salvar e volta igual —
+   e o modelo leva a medida adiante (e ali que ela morria antes). */
+const a0 = Core.sheetPreset('A0', true);
+const escolhida = sch([ { t:'sheet', name:'m', size:'A0', w:a0[0], h:a0[1] }, comp('R1', 2000) ]);
+const sa0 = Core.serializeSchematic(escolhida);
+assert.strictEqual(sa0.errors.length, 0, 'folha A0 em pe deve serializar: ' + JSON.stringify(sa0.errors));
+assert.deepStrictEqual(new Function(sa0.text + ';return schematic;')(), escolhida,
+  'round-trip de A0 em pe tem que preservar size e w/h, casas decimais inclusive');
+const mA0 = Core.buildSchModel(escolhida).sheets[0];
+assert.deepStrictEqual(Core.sheetSize(mA0), a0, 'o modelo tem que levar a medida escolhida adiante');
+assert.strictEqual(Core.sheetLabel(mA0), 'A0 em pé', 'e o rotulo dela e A0 em pe');
+
 console.log('test-port OK');
