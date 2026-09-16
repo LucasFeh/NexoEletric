@@ -208,7 +208,347 @@ function montaPartsTrocando(componente, numeroParte, simbolo, aplica){
   return { parts, nota: r.note, trocada: n, intactas: parts.length - 1 };
 }
 
-const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca, montaPartsTrocando };
+/* ═══════════ o fio maleável, a bolinha e a ponte ═══════════ */
+
+/* Distancia de um ponto a um segmento. E a mesma conta do HubCore.distSeg, repetida aqui de
+   proposito: este bloco roda em Node SEM o hub-core.js carregado, e amarrar oito linhas de
+   geometria ao carregamento do outro arquivo tiraria do teste justamente a regra mais
+   delicada do fio. Se um dia divergirem, a testemunha e tests/test-fio-topologia.js. */
+function distPS(px, py, x1, y1, x2, y2){
+  const dx = x2 - x1, dy = y2 - y1, dd = dx*dx + dy*dy;
+  let t = dd ? ((px - x1)*dx + (py - y1)*dy) / dd : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return Math.hypot(px - (x1 + t*dx), py - (y1 + t*dy));
+}
+/* a tolerancia do esquema e o balde de ponto do HubCore (round(v*2)), copiados pelo mesmo
+   motivo: o desenho e a extracao de nets tem de concordar sobre o que e "o mesmo ponto",
+   senao a folha desenha bolinha onde a net nao existe */
+const STOL_SCH = 0.5;
+const pertoDe  = (ax, ay, bx, by) => Math.abs(ax - bx) <= STOL_SCH && Math.abs(ay - by) <= STOL_SCH;
+const chavePt  = (x, y) => Math.round(x * 2) + '|' + Math.round(y * 2);
+
+/* Cruzamento de verdade entre dois segmentos: os dois se cortam NO MEIO. Paralelo, encosto de
+   ponta e T ficam de fora — ponta encostada e ancora, e ancora ja e tratada como ligacao. */
+function cruzaSeg(a, b){
+  const rx = a.x2 - a.x1, ry = a.y2 - a.y1, sx = b.x2 - b.x1, sy = b.y2 - b.y1;
+  const den = rx*sy - ry*sx;
+  if (!den) return null;
+  const t = ((b.x1 - a.x1)*sy - (b.y1 - a.y1)*sx) / den;
+  const u = ((b.x1 - a.x1)*ry - (b.y1 - a.y1)*rx) / den;
+  const ea = STOL_SCH / Math.max(Math.hypot(rx, ry), 1e-9);
+  const eb = STOL_SCH / Math.max(Math.hypot(sx, sy), 1e-9);
+  if (t <= ea || t >= 1 - ea || u <= eb || u >= 1 - eb) return null;
+  return { x: a.x1 + t*rx, y: a.y1 + t*ry };
+}
+
+/* ── ONDE NASCE A BOLINHA E QUEM SALTA ──
+   Duas perguntas que a folha nunca soube responder, e que se respondem com o mesmo censo.
+
+   BOLINHA = "ha mais de uma conexao aqui". Conta-se o numero de RAMOS que saem do ponto:
+   ponta de fio vale 1, vertice do meio vale 2 (o fio entra e sai), pino vale 1, e fio que
+   PASSA por cima de uma ancora sem ter vertice nela vale 2. Com 3 ou mais ramos ha derivacao
+   e a bolinha aparece — que e a regra do Altium. Por que assim: o `autoJunctions` de hoje so
+   enxerga o T (ponta pousando no meio de um fio) e deixa passar a estrela de tres pontas de
+   fio no mesmo ponto — 18 pontos assim nos projetos deste workspace, todos sem bolinha. E
+   contar ramo (em vez de afrouxar a guarda de extremidade do HubCore) e o que impede o canto
+   em L — 2 ramos — de virar bolinha em todo dobra de fio da folha.
+
+   PONTE = "eu so passo por cima". E o cruzamento que NAO tem ancora nenhuma: pelo Altium (e
+   pelo HubCore.extractNets) dois fios que so se cruzam nao se ligam, e hoje a folha desenha
+   isso como um X mudo, que se le como ligacao. O arco diz o contrario com o desenho.
+   Quem salta e o HORIZONTAL: nos 58 cruzamentos sem conexao dos projetos reais deste
+   workspace, os 58 sao um horizontal contra um vertical, entao a regra decide todos.
+
+   Entra a folha ja em coordenada de mundo (fios com pts, pontas quentes de pino, junções
+   explicitas) e saem os dois desenhos. Nada aqui liga ou desliga net — quem decide ligacao
+   continua sendo o HubCore. */
+function topologiaFolha(fios, pinos, juncoes){
+  const segs = [];
+  (fios || []).forEach((w, wi) => {
+    const pts = (w && w.pts) || [];
+    for (let i = 0; i < pts.length - 1; i++){
+      const a = pts[i], b = pts[i+1];
+      if (a[0] === b[0] && a[1] === b[1]) continue;   /* segmento de comprimento zero nao e segmento */
+      segs.push({ wi, i, x1:a[0], y1:a[1], x2:b[0], y2:b[1] });
+    }
+  });
+  const anc = new Map();
+  const poe = (x, y, ramos) => {
+    const k = chavePt(x, y);
+    let a = anc.get(k);
+    if (!a){ a = { x, y, ramos:0 }; anc.set(k, a); }
+    a.ramos += ramos;
+  };
+  (fios || []).forEach(w => {
+    const pts = (w && w.pts) || [];
+    for (let j = 0; j < pts.length; j++)
+      poe(pts[j][0], pts[j][1], (j === 0 || j === pts.length - 1) ? 1 : 2);
+  });
+  for (const p of (pinos || [])) poe(p.x, p.y, 1);
+  /* A junção EXPLICITA nao traz ramo — quem tem ramo ali sao os fios que ela une — mas ela
+     desenha de qualquer jeito: e um objeto que alguem pos no arquivo (ou que veio do Altium),
+     e sumir com ele porque a conta de ramos nao chegou a tres seria o desenho contradizer o
+     dado. Sem a marca, uma junção pousada sozinha ganharia bolinha de si mesma pelo caminho
+     errado — por isso ela entra como ancora com zero ramos E com a marca. */
+  for (const j of (juncoes || [])){ poe(j.x, j.y, 0); const a = anc.get(chavePt(j.x, j.y)); if (a) a.forcada = true; }
+  for (const a of anc.values())
+    for (const s of segs){
+      if (pertoDe(a.x, a.y, s.x1, s.y1) || pertoDe(a.x, a.y, s.x2, s.y2)) continue;
+      if (distPS(a.x, a.y, s.x1, s.y1, s.x2, s.y2) <= STOL_SCH) a.ramos += 2;
+    }
+  const bolinhas = [];
+  for (const a of anc.values()) if (a.ramos >= 3 || a.forcada) bolinhas.push({ x:a.x, y:a.y, ramos:a.ramos });
+
+  /* Os pares de segmento saem de um balde de 1000 mil em vez do laço de todos contra todos:
+     a folha maior deste workspace tem 555 segmentos (154 mil pares), e esta conta roda a cada
+     quadro do arrasto. Com o balde sobram os vizinhos de verdade. */
+  const CEL = 1000, balde = new Map();
+  segs.forEach((s, si) => {
+    const cx1 = Math.floor(Math.min(s.x1, s.x2) / CEL), cx2 = Math.floor(Math.max(s.x1, s.x2) / CEL);
+    const cy1 = Math.floor(Math.min(s.y1, s.y2) / CEL), cy2 = Math.floor(Math.max(s.y1, s.y2) / CEL);
+    for (let cx = cx1; cx <= cx2; cx++) for (let cy = cy1; cy <= cy2; cy++){
+      const k = cx + ':' + cy;
+      let l = balde.get(k); if (!l){ l = []; balde.set(k, l); }
+      l.push(si);
+    }
+  });
+  const temAncora = (x, y) => {
+    for (const dx of [-STOL_SCH, 0, STOL_SCH]) for (const dy of [-STOL_SCH, 0, STOL_SCH])
+      if (anc.has(chavePt(x + dx, y + dy))) return true;
+    return false;
+  };
+  const vistos = new Set(), pontes = [];
+  for (const lista of balde.values())
+    for (let a = 0; a < lista.length; a++) for (let b = a + 1; b < lista.length; b++){
+      const i1 = Math.min(lista[a], lista[b]), i2 = Math.max(lista[a], lista[b]);
+      const par = i1 + '#' + i2;
+      if (vistos.has(par)) continue;
+      vistos.add(par);
+      const s1 = segs[i1], s2 = segs[i2];
+      if (s1.wi === s2.wi) continue;                 /* fio nao salta por cima de si mesmo */
+      const p = cruzaSeg(s1, s2);
+      if (!p || temAncora(p.x, p.y)) continue;
+      const h1 = Math.abs(s1.x2 - s1.x1) >= Math.abs(s1.y2 - s1.y1);
+      const h2 = Math.abs(s2.x2 - s2.x1) >= Math.abs(s2.y2 - s2.y1);
+      /* mesmo eixo nos dois (nao aconteceu em nenhum dos 58 casos reais): salta o que vier
+         DEPOIS no arquivo. Criterio arbitrario, mas estavel — o desenho nao pisca entre um
+         quadro e outro, que e o que importa num arco puramente visual. */
+      const salta = (h1 !== h2) ? (h1 ? s1 : s2) : (s1.wi > s2.wi ? s1 : s2);
+      pontes.push({ x:p.x, y:p.y, wi:salta.wi, seg:salta.i });
+    }
+  return { bolinhas, pontes };
+}
+
+/* ── ARRASTAR UM TRECHO ──
+   O Altium empurra o trecho na PERPENDICULAR e deixa os vizinhos esticarem; e isso que faz o
+   fio parecer maleavel em vez de duro. Trecho no eixo X so anda em Y, trecho no eixo Y so anda
+   em X — e os vizinhos acompanham de graca, porque compartilham os vertices movidos.
+   Duas excecoes deliberadas: o fio de DOIS pontos anda inteiro (ali o trecho E o fio, e travar
+   o unico trecho num eixo tiraria o gesto de mover o fio), e o trecho em diagonal — os que vem
+   do Altium — anda livre, porque nele nao existe "a perpendicular certa". */
+function moveSegmento(pts, i, dx, dy){
+  const out = (pts || []).map(p => [p[0], p[1]]);
+  const a = out[i], b = out[i+1];
+  if (!a || !b) return out;
+  if (out.length === 2){ a[0] += dx; a[1] += dy; b[0] += dx; b[1] += dy; return out; }
+  const horiz = Math.abs(b[1] - a[1]) <= STOL_SCH && Math.abs(b[0] - a[0]) > STOL_SCH;
+  const vert  = Math.abs(b[0] - a[0]) <= STOL_SCH && Math.abs(b[1] - a[1]) > STOL_SCH;
+  const ux = horiz ? 0 : dx, uy = vert ? 0 : dy;
+  a[0] += ux; a[1] += uy; b[0] += ux; b[1] += uy;
+  return out;
+}
+
+/* Apagar um trecho PARTE o fio em dois — e e essa a troca de "apagar tudo e refazer" por
+   "tirar so o pedaco errado". Pedaco de menos de dois pontos nao existe: o serializeSchematic
+   recusa o ARQUIVO INTEIRO por causa de um fio assim, entao a ponta que sobra e descartada. */
+function apagaSegmento(pts, i){
+  const A = (pts || []).slice(0, i + 1), B = (pts || []).slice(i + 1);
+  const out = [];
+  if (A.length >= 2) out.push(A.map(p => [p[0], p[1]]));
+  if (B.length >= 2) out.push(B.map(p => [p[0], p[1]]));
+  return out;
+}
+/* Apagar um vertice endireita o fio no ponto; com menos de dois pontos sobrando, o fio acaba. */
+function apagaVertice(pts, i){
+  const out = (pts || []).filter((p, j) => j !== i).map(p => [p[0], p[1]]);
+  return out.length >= 2 ? out : null;
+}
+
+/* ── ESPELHO NA TELA, NOS DOIS EIXOS ──
+   O formato tem um booleano `mirror` (espelho em X aplicado ANTES da rotacao) e rot 0/90/180/
+   270. Nao ha terceiro campo a inventar — o Altium tambem so tem IsMirrored + Orientation —,
+   entao espelhar o que se VE e composicao:
+       horizontal (vira esquerda/direita):  rot' = 360 - rot,  mirror' = !mirror
+       vertical   (vira em cima/embaixo):   rot' = 180 - rot,  mirror' = !mirror
+   Ate aqui o X trocava so o booleano, que e o espelho no eixo LOCAL do componente: num
+   componente girado 90 a tecla X espelhava na vertical, e a mesma tecla fazia coisas
+   diferentes conforme a rotacao. Com a conta acima X e sempre horizontal e Y e sempre
+   vertical, em qualquer rotacao. */
+function espelha(rot, mirror, eixo){
+  const r = (((rot || 0) % 360) + 360) % 360;
+  const base = (eixo === 'y' ? 180 - r : 360 - r);
+  return { rot: ((base % 360) + 360) % 360, mirror: !mirror };
+}
+
+/* ── O COMPONENTE NOVO CAI ONDE O ANTIGO ESTAVA ──
+   Trocar o componente troca o DESENHO, e desenho novo poe os pinos noutro lugar em volta da
+   mesma ancora. Os fios ficam onde estavam e a ligacao se desfaz sem uma linha de aviso — a
+   extracao de nets casa por coordenada exata, sem tolerancia. Aqui se escolhe o deslocamento
+   que faz o MAIOR numero de pinos de mesmo numero voltar ao ponto antigo: a moda dos
+   deslocamentos, nao a media, que nao devolveria nenhum pino ao lugar. Empate no numero de
+   pinos, ganha o menor deslocamento — o componente anda o minimo possivel. */
+function encaixeDaTroca(antes, depois){
+  const de = new Map();
+  for (const p of (antes || [])) de.set(String(p.num), p);
+  const votos = new Map();
+  let comuns = 0;
+  for (const p of (depois || [])){
+    const a = de.get(String(p.num));
+    if (!a) continue;
+    comuns++;
+    const dx = a.x - p.x, dy = a.y - p.y, k = dx + '|' + dy;
+    const v = votos.get(k) || { dx, dy, n:0 };
+    v.n++; votos.set(k, v);
+  }
+  let best = null;
+  for (const v of votos.values())
+    if (!best || v.n > best.n || (v.n === best.n && Math.hypot(v.dx, v.dy) < Math.hypot(best.dx, best.dy))) best = v;
+  return best ? { dx:best.dx, dy:best.dy, encaixa:best.n, comuns }
+              : { dx:0, dy:0, encaixa:0, comuns:0 };
+}
+
+/* ── A GRADE ──
+   Os 100 mil do AI-GUIDE nao descrevem esta casa: as folhas reais snapam em 1 mm (39,37 mil)
+   ou 0,3 mm, e 3980 dos 4188 vertices de fio dos projetos deste workspace estao fora da grade
+   de 100 mil — muitos nem sao inteiros. Uma grade que so sabe 100 mil empurra tudo para fora
+   do lugar e desencosta fio de pino, que no Altium so liga por coincidencia EXATA. Por isso a
+   lista abaixo tem os dois mundos, e o metrico tem nome de metrico. */
+const MM_MIL = 39.3700787402;
+const GRADES = [
+  { id:'100mil',  rotulo:'100 mil',  passo:100 },
+  { id:'50mil',   rotulo:'50 mil',   passo:50 },
+  { id:'25mil',   rotulo:'25 mil',   passo:25 },
+  { id:'10mil',   rotulo:'10 mil',   passo:10 },
+  { id:'1mm',     rotulo:'1 mm',     passo:MM_MIL },
+  { id:'0.5mm',   rotulo:'0,5 mm',   passo:MM_MIL / 2 },
+  { id:'0.25mm',  rotulo:'0,25 mm',  passo:MM_MIL / 4 },
+];
+/* 4 casas: o passo metrico e dizima, e sem o corte o vertice acumula sujeira de float a cada
+   arrasto — coordenada que nao fecha e pino que nao liga. */
+function snapPasso(v, passo){
+  if (!(passo > 0)) return v;
+  return Math.round(Math.round(v / passo) * passo * 1e4) / 1e4;
+}
+function gradePorId(id){ return GRADES.find(g => g.id === id) || GRADES[0]; }
+
+/* ── ATALHOS: uma tabela so ──
+   A dica do painel era uma COPIA escrita a mao, e ja mentia: nao citava Ctrl+Y, Ctrl+A, Ctrl+W
+   nem o Escape, que sozinho faz seis coisas. Agora a tabela e a verdade — o teclado le dela e a
+   aba Atalhos desenha dela, entao trocar uma tecla troca as duas de uma vez.
+   O Escape fica DE FORA de proposito: ele e a saida de emergencia de seis estados e e tratado
+   antes da guarda de campo de texto, para funcionar com o foco dentro de um <input>. */
+const ATALHOS_PADRAO = [
+  { id:'add',       tecla:'C',      rotulo:'Adicionar componentes' },
+  { id:'fio',       tecla:'W',      rotulo:'Ferramenta fio' },
+  { id:'terra',     tecla:'G',      rotulo:'Pousar terra (GND)' },
+  { id:'rotulo',    tecla:'L',      rotulo:'Rótulo de net' },
+  { id:'noerc',     tecla:'N',      rotulo:'No ERC' },
+  { id:'girar',     tecla:'Espaço', rotulo:'Girar 90°' },
+  { id:'espelhoX',  tecla:'X',      rotulo:'Espelhar na horizontal' },
+  { id:'espelhoY',  tecla:'Y',      rotulo:'Espelhar na vertical' },
+  { id:'apagar',    tecla:'Delete', rotulo:'Apagar a seleção' },
+  { id:'enquadrar', tecla:'F',      rotulo:'Enquadrar a folha' },
+  { id:'grade',     tecla:'B',      rotulo:'Mostrar/ocultar a grade' },
+  { id:'desfazer',  tecla:'Ctrl+Z', rotulo:'Desfazer' },
+  { id:'refazer',   tecla:'Ctrl+Y', rotulo:'Refazer' },
+  { id:'tudo',      tecla:'Ctrl+A', rotulo:'Selecionar tudo da folha' },
+];
+/* O navegador leva estas antes da pagina ver. Deixar gravar uma delas seria entregar um
+   "gravei e nao funciona" sem nenhuma pista de por que. */
+const TECLAS_PROIBIDAS = ['Ctrl+W','Ctrl+T','Ctrl+N','Ctrl+Shift+N','Ctrl+Shift+T','Ctrl+R','Ctrl+P',
+                          'F5','F11','F12','Escape','Tab','Ctrl+Tab'];
+/* A tecla como a tabela a escreve. Shift nao entra em tecla de UM caractere: o navegador ja
+   manda 'X' para Shift+x, e distinguir os dois criaria dois atalhos que a mao nao distingue. */
+function normalizaTecla(e){
+  if (!e || !e.key) return '';
+  let k = e.key;
+  if (k === 'Control' || k === 'Shift' || k === 'Alt' || k === 'Meta') return '';
+  if (k === ' ' || k === 'Spacebar') k = 'Espaço';
+  else if (k.length === 1) k = k.toUpperCase();
+  const m = [];
+  if (e.ctrlKey || e.metaKey) m.push('Ctrl');
+  if (e.altKey) m.push('Alt');
+  if (e.shiftKey && k.length > 1 && k !== 'Espaço') m.push('Shift');
+  m.push(k);
+  return m.join('+');
+}
+/* O padrao, com o que o usuario gravou por cima. Entrada desconhecida, tecla proibida e tecla
+   repetida sao DESCARTADAS em vez de derrubar o mapa: uma chave estragada no localStorage nao
+   pode deixar a vista sem teclado nenhum. */
+function mapaAtalhos(salvos){
+  const porAcao = {}, descartados = [];
+  for (const a of ATALHOS_PADRAO) porAcao[a.id] = a.tecla;
+  const s = salvos && typeof salvos === 'object' ? salvos : {};
+  for (const id of Object.keys(s)){
+    const t = String(s[id] || '');
+    if (!porAcao[id]) { descartados.push(id + ': ação que não existe'); continue; }
+    if (!t || TECLAS_PROIBIDAS.indexOf(t) >= 0) { descartados.push(id + ': tecla não permitida'); continue; }
+    porAcao[id] = t;
+  }
+  const porTecla = {}, repetidas = [];
+  for (const a of ATALHOS_PADRAO){
+    const t = porAcao[a.id];
+    if (porTecla[t]){ repetidas.push(t); porAcao[a.id] = a.tecla; }   /* volta ao padrao do que repetiu */
+    else porTecla[t] = a.id;
+  }
+  /* a volta ao padrao pode ter repetido de novo; o segundo passe resolve sem laço infinito */
+  const finalTecla = {};
+  for (const a of ATALHOS_PADRAO){
+    let t = porAcao[a.id];
+    if (finalTecla[t] && finalTecla[t] !== a.id) t = a.tecla;
+    if (finalTecla[t] && finalTecla[t] !== a.id) continue;
+    porAcao[a.id] = t; finalTecla[t] = a.id;
+  }
+  return { porAcao, porTecla:finalTecla, descartados, repetidas };
+}
+/* Grava uma tecla nova para uma ação; devolve o que a interface tem de dizer. */
+function defineAtalho(salvos, id, tecla){
+  if (!ATALHOS_PADRAO.some(a => a.id === id)) return { ok:false, erro:'ação desconhecida' };
+  if (!tecla) return { ok:false, erro:'tecla vazia' };
+  if (TECLAS_PROIBIDAS.indexOf(tecla) >= 0) return { ok:false, erro:'“' + tecla + '” é do navegador — escolha outra' };
+  const m = mapaAtalhos(salvos);
+  const dono = m.porTecla[tecla];
+  if (dono && dono !== id){
+    const r = ATALHOS_PADRAO.find(a => a.id === dono);
+    return { ok:false, erro:'“' + tecla + '” já é ' + (r ? r.rotulo.toLowerCase() : dono) };
+  }
+  const novo = Object.assign({}, salvos && typeof salvos === 'object' ? salvos : {});
+  novo[id] = tecla;
+  return { ok:true, salvos:novo };
+}
+
+/* A largura estimada de um texto, em mil. E a mesma estimativa por caractere que o editor de
+   simbolos usa (hub-symed.js » labelBox): numa fonte proporcional ela erra para MAIS, e errar
+   para mais e o lado certo de errar numa area de clique. */
+function larguraTexto(txt, h){
+  return Math.max(h || 60, String(txt == null ? '' : txt).length * (h || 60) * 0.58);
+}
+/* A caixa de um texto ANCORADO NO CANTO INFERIOR-ESQUERDO — que e o ponto que o Altium guarda
+   para um rotulo (o RECORD=34/41 do .SchDoc nao traz Justification, e o padrao dele e
+   BottomLeft; o proprio hub ja desenhava o net label assim, hub-draw.js » drawNetLabel).
+   A ancora importa porque ela E o contrato: `refdx/refdy` sao medidos ATE ESTE PONTO nos dois
+   lados do espelho. Enquanto o hub desenhava o designador centrado e o Altium o ancorava no
+   canto, a mesma coordenada queria dizer dois lugares diferentes, e a ida e volta pelo hub
+   andava meia palavra a cada passagem — sem nunca convergir. */
+function caixaTexto(x, y, txt, h){
+  const alt = h || 60, larg = larguraTexto(txt, alt), folga = alt * 0.18;
+  return { x1:x - folga, y1:y - folga, x2:x + larg + folga, y2:y + alt + folga };
+}
+
+const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca, montaPartsTrocando,
+               topologiaFolha, moveSegmento, apagaSegmento, apagaVertice, espelha, encaixeDaTroca,
+               GRADES, gradePorId, snapPasso, MM_MIL, caixaTexto, larguraTexto,
+               ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho };
 /* Em Node o arquivo acaba aqui: dali para baixo e tudo DOM. */
 if (typeof module !== 'undefined' && module.exports){ module.exports = PURE; return; }
 if (typeof window !== 'undefined') window.SchFramePure = PURE;
@@ -359,16 +699,52 @@ let staleWorkspace = false;
    existindo e quem o escreve agora e so a vista PCB. Sinalizador 'sch' que ja esteja no
    disco fica no arquivo, intocado, e some da tela. */
 
-/* ------- selecao -------
-   `sel` guarda os proprios objetos de schematic.items (comp, wire, netlabel, power,
-   junction, text): e por identidade que o desenho, o arrasto e o Delete sabem quem esta
-   marcado. O buildSchModel nao copia os itens, so os agrupa por folha, entao a identidade
-   sobrevive ao reapply — mas nao ao undo, que reconstroi tudo do JSON (restoreItems limpa). */
-const sel = new Set();
+/* ------- selecao: ALVOS, nao itens -------
+   Ate 2026-09-16 `sel` era um Set dos proprios objetos de schematic.items, e a granularidade
+   era o item inteiro: clicar num fio de seis vertices marcava a polilinha toda, e tirar um
+   pedaco errado do meio exigia apagar o fio e refazer. Agora `sel` guarda ALVOS:
+
+       { it, k:'all' }            o item inteiro (componente, rotulo, power, texto, junção…)
+       { it, k:'seg',  i }        UM trecho do fio (entre pts[i] e pts[i+1])
+       { it, k:'vert', i }        UM vertice do fio
+       { it, k:'ref' } / 'com'    o texto do designador / do comment de um componente
+
+   A identidade continua sendo a do objeto — o buildSchModel nao copia os itens, so os agrupa
+   por folha, entao ela sobrevive ao reapply (e nao ao undo, que reconstroi tudo do JSON). O
+   que muda e que agora ha um Map: dois alvos iguais precisam colidir na mesma chave, coisa que
+   `Set.add({...})` nao faria — dois objetos iguais sao dois membros. A chave e um numero de
+   serie por item (WeakMap, nao suja o objeto que vai para o arquivo) + o tipo + o indice. */
+const sel = new Map();
+let serieN = 0;
+const SERIE = new WeakMap();
+function idDe(it){ let n = SERIE.get(it); if (n == null){ n = ++serieN; SERIE.set(it, n); } return n; }
+function chaveAlvo(a){ return idDe(a.it) + '|' + a.k + '|' + (a.i == null ? '' : a.i); }
+const alvoAll = it => ({ it, k:'all' });
+function selAdd(a){ sel.set(chaveAlvo(a), a); }
+function selDel(a){ sel.delete(chaveAlvo(a)); }
+function selTem(a){ return sel.has(chaveAlvo(a)); }
+function selAlvos(){ return Array.from(sel.values()); }
+/* os ITENS envolvidos, sem repetir: um fio com tres trechos marcados e um item so */
+function selItens(){
+  const out = [], vistos = new Set();
+  for (const a of sel.values()) if (!vistos.has(a.it)){ vistos.add(a.it); out.push(a.it); }
+  return out;
+}
+function selTemItem(it){ for (const a of sel.values()) if (a.it === it) return true; return false; }
+function selSo(alvos){ sel.clear(); for (const a of alvos) selAdd(a); }
 const SEL = '#2979ff';   /* azul da selecao — so no contorno tracejado, nunca no objeto */
 let schDirty = false, schDiskSnapshot = null;
 const undoStack = [JSON.stringify(schematic.items)], redoStack = [];
-function snap100(v){ return Math.round(v / 100) * 100; }
+/* ------- a grade -------
+   O passo deixou de ser 100 mil cravado. Motivo medido: as folhas desta casa snapam em 1 mm
+   (39,37 mil) ou 0,3 mm no proprio Altium, e 3980 dos 4188 vertices de fio dos projetos deste
+   workspace estao fora da grade de 100 mil — muitos nem sao inteiros. Uma grade que so sabe
+   100 mil empurra o vertice para longe do pino a cada arrasto, e no Altium so liga o que
+   coincide EXATAMENTE. A escolha fica lembrada nesta maquina, como o comment e os pinos. */
+const VER_GRADE_KEY = 'altiumhub.sch.grade';
+let grade = GRADES[0];
+try { const g = localStorage.getItem(VER_GRADE_KEY); if (g) grade = gradePorId(g); } catch (e) {}
+function snapG(v){ return snapPasso(v, grade.passo); }
 const D = HubDraw;
 const cv = $('cv');
 
@@ -380,7 +756,16 @@ function reapply(){
   nets  = HubCore.extractNets(model, SLIB);
   val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
   if (sheetIdx >= model.sheets.length) sheetIdx = 0;
-  for (const it of Array.from(sel)) if (schematic.items.indexOf(it) < 0) sel.delete(it);
+  /* poda da selecao: o item pode ter sumido (Delete, undo, troca de simbolo) e o INDICE do
+     alvo pode ter ficado fora de faixa — um fio que perdeu vertices por outro caminho deixa
+     para tras um alvo apontando para um trecho que nao existe mais */
+  for (const [k, a] of Array.from(sel)){
+    const pts = a.it && a.it.pts;
+    if (schematic.items.indexOf(a.it) < 0
+        || (a.k === 'vert' && !(pts && a.i < pts.length))
+        || (a.k === 'seg'  && !(pts && a.i < pts.length - 1))) sel.delete(k);
+  }
+  geomVer++;
   /* a net em foco tambem pode ter deixado de existir (apagou o fio, desfez): destaque
      apontando para uma net que sumiu e cor sem dono na tela */
   if (selNet && !nets.nets.some(n => n.name === selNet)) selNet = '';
@@ -438,6 +823,62 @@ function compBBox(c){
   }
   return { x1, y1, x2, y2 };
 }
+/* ------- o designador e o comment na folha -------
+   ONDE ELES POUSAM, e por que a conta mudou. Ate 2026-09-16 a ancora saia do bbox LOCAL do
+   simbolo e usava `max(|y1|,|y2|)`, duas coisas erradas ao mesmo tempo:
+
+   - o bbox local ignora a rotacao, entao num componente girado 90 o afastamento era calculado
+     no eixo Y do SIMBOLO enquanto o corpo, na folha, ocupava o eixo X. Medido nos 12 projetos
+     deste workspace: 142 dos 383 componentes com simbolo resolvido tinham o designador dentro
+     do proprio corpo, e sao EXATAMENTE os rot 90 e 270 (nenhum caso em rot 0/180);
+   - `max(|y1|,|y2|)` e simetrico em torno da ORIGEM, nao da borda: 94 dos 401 simbolos da casa
+     jogavam o nome mais de 300 mil acima do corpo (o CONE BARRA [13V] vai de -2540 a 1320 e o
+     ref saia em +2610).
+
+   Agora a ancora sai da caixa do componente COMO ELA ESTA NA FOLHA (compBBox, que passa pelo
+   compTransform) e da BORDA de verdade.
+
+   QUANDO A MAO MOVE O TEXTO, ele deixa de ser derivado: `refdx/refdy` (e `comdx/comdy`)
+   passam a valer, e sao o deslocamento em relacao a ANCORA DO COMPONENTE (c.x, c.y), em mil,
+   na coordenada da folha. Tres razoes para ser assim, e nao "deslocamento em relacao ao lugar
+   de origem":
+     - o lado Altium consegue calcular: `Designator.Location = Location do componente + (dx,dy)`
+       e uma conta que o BuildSchematic faz sem precisar refazer o bbox do simbolo do jeito que
+       o hub faz — refazer daria numeros diferentes e o texto sairia noutro lugar no Altium;
+     - mover o componente leva o texto junto de graca, sem uma linha de codigo;
+     - girar o componente NAO gira o texto, que e o que o Altium tambem faz.
+   Ausente = derivado. E por isso que "voltar ao lugar de origem" e apagar os dois campos.
+
+   O PONTO e o CANTO INFERIOR-ESQUERDO do texto, e nao o centro dele — porque e esse o ponto
+   que o Altium guarda (veja caixaTexto). O centro seria mais comodo aqui e faria o espelho
+   mentir la: a posicao lida do Altium chegaria ao hub deslocada de meia palavra, e a posicao
+   que a mao escolhe aqui chegaria ao Altium deslocada da mesma meia palavra, para o outro
+   lado — um ciclo que nunca fecha. Um ponto so, e o dele. */
+const FOLGA_TXT = 70;
+function textoComp(c, qual){
+  const bb = compBBox(c);
+  const h = qual === 'com' ? 55 : 60;
+  const s = qual === 'com' ? (c.comment || '') : c.ref;
+  /* o lugar derivado centraliza a PALAVRA sobre o corpo, e para isso a ancora recua meia
+     largura: centralizar e coisa do desenho, a ancora continua sendo o canto */
+  const cx = (bb.x1 + bb.x2) / 2 - larguraTexto(s, h) / 2;
+  const base = qual === 'com' ? { x:cx, y:bb.y1 - FOLGA_TXT - h } : { x:cx, y:bb.y2 + FOLGA_TXT };
+  const dx = qual === 'com' ? c.comdx : c.refdx;
+  const dy = qual === 'com' ? c.comdy : c.refdy;
+  /* O PAR TEM DE ESTAR INTEIRO. Meio par (so o refdy, digamos) era desenhado com o eixo que
+     falta valendo zero — e o lado Altium RECUSA meio par e nao toca no texto. Era a unica
+     combinacao do formato em que a previa do hub e a folha do Altium mostravam coisas
+     diferentes; tratar meio par como ausente nos dois lados acaba com ela. O erro continua
+     sendo dito em voz alta: quem escrever meio par no arquivo leva [FALHA] no build-report. */
+  const posto = (typeof dx === 'number' && typeof dy === 'number');
+  return { x: posto ? c.x + (dx || 0) : base.x,
+           y: posto ? c.y + (dy || 0) : base.y,
+           h, s, bx:base.x, by:base.y, posto };
+}
+function textoBBox(c, qual){
+  const t = textoComp(c, qual);
+  return caixaTexto(t.x, t.y, t.s, t.h);
+}
 /* caixa de cada tipo de item, em mil — o mesmo alcance que o hitTest usa */
 function itemBBox(it){
   switch (it.t){
@@ -475,20 +916,80 @@ function unionBBox(items){
   }
   return u;
 }
-/* posicao de partida de cada item selecionado: o arrasto e sempre "base + delta", nunca
-   acumulado, para o snap de 100 mil nao andar sozinho */
-function baseOf(items){
+/* a caixa de UM alvo: o item inteiro, o trecho, o vertice ou o texto */
+function alvoBBox(a){
+  if (a.k === 'ref' || a.k === 'com') return textoBBox(a.it, a.k);
+  if (a.k === 'vert'){
+    const p = (a.it.pts || [])[a.i];
+    return p ? { x1:p[0] - 30, y1:p[1] - 30, x2:p[0] + 30, y2:p[1] + 30 } : { x1:0, y1:0, x2:0, y2:0 };
+  }
+  if (a.k === 'seg'){
+    const p = (a.it.pts || [])[a.i], q = (a.it.pts || [])[a.i + 1];
+    if (!p || !q) return { x1:0, y1:0, x2:0, y2:0 };
+    return { x1:Math.min(p[0], q[0]), y1:Math.min(p[1], q[1]), x2:Math.max(p[0], q[0]), y2:Math.max(p[1], q[1]) };
+  }
+  return itemBBox(a.it);
+}
+/* posicao de partida de cada ALVO selecionado: o arrasto e sempre "base + delta", nunca
+   acumulado, para o passo da grade nao andar sozinho.
+   A chave do Map e a chave do alvo (e nao o objeto item): dois trechos do MESMO fio sao dois
+   alvos, e chaveando pelo item um deles apagaria a foto do outro. Quem precisa saber "este
+   item esta viajando?" — o ima, para nao grudar o componente nele mesmo — usa `base.itens`. */
+function baseOf(alvos){
   const m = new Map();
-  for (const it of items) m.set(it, it.t === 'wire' ? (it.pts || []).map(p => [p[0], p[1]]) : { x:it.x, y:it.y });
+  m.itens = new Set();
+  for (const a of alvos){
+    const it = a.it;
+    m.itens.add(it);
+    if (a.k === 'ref' || a.k === 'com'){
+      /* a foto do texto e a posicao ABSOLUTA de onde ele esta agora — inclusive quando ele
+         ainda e derivado. Assim o primeiro arrasto tambem parte do lugar certo. */
+      const t = textoComp(it, a.k);
+      m.set(chaveAlvo(a), { a, x0:t.x, y0:t.y });
+    }
+    else if (a.k === 'vert' || a.k === 'seg')
+      m.set(chaveAlvo(a), { a, pts:(it.pts || []).map(p => [p[0], p[1]]) });
+    else if (it.t === 'wire')
+      m.set(chaveAlvo(a), { a, pts:(it.pts || []).map(p => [p[0], p[1]]) });
+    else
+      m.set(chaveAlvo(a), { a, x:it.x, y:it.y });
+  }
   return m;
 }
 function applyMove(base, dx, dy){
-  for (const [it, b] of base){
-    if (it.t === 'wire') it.pts = b.map(p => [p[0] + dx, p[1] + dy]);
+  geomVer++;                 /* a geometria mudou: a topologia (bolinha/ponte) tem de refazer */
+  for (const b of base.values()){
+    const a = b.a, it = a.it;
+    if (a.k === 'ref' || a.k === 'com'){
+      /* os DOIS campos sao gravados sempre que a mao move o texto, inclusive em zero: aqui o
+         zero e uma posicao (o texto em cima da ancora do componente) e nao "sem opiniao".
+         Quem apaga os campos e o "voltar ao lugar de origem" e o Delete no texto. */
+      const nx = Math.round((b.x0 + dx - it.x) * 1e4) / 1e4, ny = Math.round((b.y0 + dy - it.y) * 1e4) / 1e4;
+      if (a.k === 'com'){ it.comdx = nx; it.comdy = ny; } else { it.refdx = nx; it.refdy = ny; }
+    }
+    else if (a.k === 'vert'){
+      const pts = b.pts.map(p => [p[0], p[1]]);
+      if (pts[a.i]){ pts[a.i][0] += dx; pts[a.i][1] += dy; }
+      it.pts = pts;
+    }
+    else if (a.k === 'seg') it.pts = moveSegmento(b.pts, a.i, dx, dy);
+    else if (it.t === 'wire') it.pts = b.pts.map(p => [p[0] + dx, p[1] + dy]);
     else { it.x = b.x + dx; it.y = b.y + dy; }
   }
+  /* os fios que acompanham os pinos movidos — o elastico. Vem DEPOIS da base: um fio que
+     esteja ele proprio selecionado ja andou acima, e nao pode andar duas vezes (a montagem
+     em `elasticoDoArrasto` ja o exclui). */
+  if (base.elastico) for (const e of base.elastico){
+    const p = (e.w.pts || [])[e.i];
+    if (p){ p[0] = e.x + dx; p[1] = e.y + dy; }
+  }
 }
-function describe(it){
+function describe(a){
+  const it = a && a.it ? a.it : a;      /* aceita alvo ou item cru: a tabela ainda passa item */
+  if (a && a.k === 'ref') return 'designador ' + it.ref;
+  if (a && a.k === 'com') return 'comment de ' + it.ref;
+  if (a && a.k === 'seg') return 'trecho ' + (a.i + 1) + ' de ' + Math.max((it.pts || []).length - 1, 1) + ' do fio';
+  if (a && a.k === 'vert') return 'vértice ' + (a.i + 1) + ' do fio';
   return it.t === 'comp' ? it.ref : it.t === 'wire' ? 'fio' : it.t === 'netlabel' ? 'label ' + (it.net || '')
        : it.t === 'power' ? 'power ' + (it.net || '') : it.t === 'junction' ? 'junção'
        : it.t === 'noerc' ? 'No ERC' : 'texto';
@@ -523,6 +1024,7 @@ function netDoAlvo(h){
   if (h.kind === 'pin')  return nets.pinNet[h.ref + '-' + h.num] || '';
   if (h.kind === 'wire') return nets.wireNet[sheetIdx][h.wi] || '';
   /* rotulo, power e junção sao objetos DE net: clicar neles acende a net, nao apaga */
+  if (h.kind === 'ref' || h.kind === 'com') return '';   /* texto nao e objeto de net */
   if (h.kind === 'netlabel' || h.kind === 'power') return h.item.net || '';
   if (h.kind === 'junction') return netEm(h.item.x, h.item.y);
   return '';
@@ -538,25 +1040,75 @@ function netEm(x, y){
   }
   return '';
 }
-function selectOnly(items){ sel.clear(); for (const it of items) sel.add(it); aplicaSel(''); }
+function selectOnly(items){ selSo(items.map(alvoAll)); aplicaSel(''); }
 function rotateSel(){
-  const comps = Array.from(sel).filter(it => it.t === 'comp');
+  const comps = selItens().filter(it => it.t === 'comp');
   if (!comps.length) return;
   for (const c of comps) c.rot = (((c.rot || 0) + 90) % 360);
   if (mouse && mouse.mode === 'move') cam.draw(); else commit();
 }
-function mirrorSel(){
-  const comps = Array.from(sel).filter(it => it.t === 'comp');
+/* Espelhar o que se VE: 'x' vira esquerda/direita, 'y' vira em cima/embaixo, em qualquer
+   rotacao. A conta esta no bloco puro (espelha) e vale para os dois eixos. */
+function mirrorSel(eixo){
+  const comps = selItens().filter(it => it.t === 'comp');
   if (!comps.length) return;
-  for (const c of comps){ if (c.mirror) delete c.mirror; else c.mirror = true; }
+  for (const c of comps){
+    const r = espelha(c.rot, !!c.mirror, eixo === 'y' ? 'y' : 'x');
+    if (r.rot) c.rot = r.rot; else c.rot = 0;
+    if (r.mirror) c.mirror = true; else delete c.mirror;
+  }
   if (mouse && mouse.mode === 'move') cam.draw(); else commit();
 }
+/* ------- apagar -------
+   O Delete agora entende o que esta marcado. No fio, apagar um TRECHO parte a polilinha em
+   duas (e e essa a troca de "apagar tudo e refazer" pelo gesto de tirar so o pedaco errado);
+   apagar um VERTICE endireita o fio ali. Ponta que sobra com menos de dois pontos nao vira
+   fio — o serializeSchematic recusaria o arquivo inteiro por causa dela.
+   O texto do designador nao se apaga: o Delete nele DEVOLVE o texto ao lugar de origem, que
+   e o unico "apagar" que faz sentido para uma posicao. */
 function deleteSel(){
   if (!sel.size) return;
-  for (const it of sel){ const i = schematic.items.indexOf(it); if (i >= 0) schematic.items.splice(i, 1); }
+  const fora = new Set();            /* itens a remover do arquivo */
+  const novos = [];                  /* fios nascidos de um corte */
+  /* os trechos e vertices do mesmo fio sao resolvidos JUNTOS: cortar um por vez invalidaria
+     os indices dos outros no meio do caminho */
+  const porFio = new Map();
+  let mexeu = false;
+  for (const a of sel.values()){
+    if (a.k === 'seg' || a.k === 'vert'){
+      let l = porFio.get(a.it); if (!l){ l = []; porFio.set(a.it, l); }
+      l.push(a);
+    } else if (a.k === 'ref'){ delete a.it.refdx; delete a.it.refdy; mexeu = true; }
+    else if (a.k === 'com'){ delete a.it.comdx; delete a.it.comdy; mexeu = true; }
+    else { fora.add(a.it); mexeu = true; }
+  }
+  for (const [w, alvos] of porFio){
+    if (fora.has(w)) continue;
+    /* do maior indice para o menor: assim o corte de um nao mexe no indice do proximo */
+    let pedacos = [w.pts || []];
+    const ordem = alvos.slice().sort((p, q) => q.i - p.i);
+    for (const a of ordem){
+      const saida = [];
+      for (const pts of pedacos){
+        /* o pedaco que contem este indice e o que foi cortado — os outros passam intactos */
+        if (pts !== pedacos[0]){ saida.push(pts); continue; }
+        if (a.k === 'seg') saida.push.apply(saida, apagaSegmento(pts, a.i));
+        else { const r = apagaVertice(pts, a.i); if (r) saida.push(r); }
+      }
+      pedacos = saida;
+      if (!pedacos.length) break;
+    }
+    mexeu = true;
+    if (!pedacos.length){ fora.add(w); continue; }
+    w.pts = pedacos[0];
+    for (let i = 1; i < pedacos.length; i++)
+      novos.push({ t:'wire', sheet:w.sheet, pts:pedacos[i] });
+  }
+  for (const it of fora){ const i = schematic.items.indexOf(it); if (i >= 0) schematic.items.splice(i, 1); }
+  for (const w of novos) schematic.items.push(w);
   sel.clear();
   selNet = '';        /* os fios da net podem ter ido junto; o reapply do commit revalida */
-  commit();
+  if (mexeu) commit(); else aplicaSel('');
 }
 
 /* ------- ferramentas da barra -------
@@ -570,9 +1122,13 @@ let wireDraw = null;        /* { pts:[[x,y],...] } enquanto o fio esta sendo pux
 let snapHit = null;         /* ponto magnetico sob o cursor: { x, y, kind, label } */
 
 /* O IMA: enquanto uma ferramenta esta ativa, o cursor procura um ponto de conexao por
-   perto — ponta quente de pino primeiro, depois vertice de fio, junção e power. 60 mil e
-   meia grade: perto o bastante para nao roubar o clique de quem quer o ponto livre. */
-const SNAP_MIL = 60;
+   perto — ponta quente de pino primeiro, depois vertice de fio, junção e power.
+   O RAIO ACOMPANHA A GRADE. Com 100 mil ele e 60, como sempre foi — "meia grade", perto o
+   bastante para nao roubar o clique de quem quer o ponto livre. Com uma grade de 10 mil, 60
+   mil seriam SEIS grades de alcance: o ima capturaria pontos que a mao nem estava mirando e o
+   pouso deixaria de ser previsivel. O piso de 20 mil existe para o ima nao sumir na grade
+   mais fina, onde ele e justamente o que faz o fio encostar no pino. */
+const snapMil = () => Math.max(20, Math.min(60, grade.passo * 0.6));
 function snapPoint(w){
   const s = model.sheets[sheetIdx];
   let best = null;
@@ -580,7 +1136,7 @@ function snapPoint(w){
      Quem mostra escolhe — a barra de status pinta o html, o resto continua em texto. */
   const tenta = (x, y, kind, label, peso, html) => {
     const d = Math.hypot(w.x - x, w.y - y);
-    if (d > SNAP_MIL) return;
+    if (d > snapMil()) return;
     if (!best || peso < best.peso || (peso === best.peso && d < best.d)) best = { x, y, d, kind, label, html: html || null, peso };
   };
   for (const c of s.comps){
@@ -604,35 +1160,73 @@ function snapPoint(w){
    contada a partir da posicao ANTIGA, entao o pino parava a 20 ou 40 mil do fio e a net nao
    fechava — o desenho dizia "ligado" e a extracao de nets dizia "solto". Agora o pino GRUDA:
    se durante o arrasto alguma ponta quente do que esta sendo movido chega a menos de
-   SNAP_MIL de um ponto de conexao PARADO, o deslocamento inteiro e corrigido para ela cair
+   snapMil() de um ponto de conexao PARADO, o deslocamento inteiro e corrigido para ela cair
    exatamente em cima, e o ima manda sobre a grade ao soltar.
    Alvo nunca e o que viaja junto, senao o componente grudaria nele mesmo.
    Aqui o criterio e a distancia pura, e nao o peso por tipo do snapPoint: quem arrasta esta
    mirando um ponto, e o mais perto do pino e o ponto que ele esta mirando. */
 function alvosDeIma(base){
-  const s = model.sheets[sheetIdx], fora = [];
+  const s = model.sheets[sheetIdx], fora = [], viaja = base.itens;
   for (const c of s.comps){
-    if (base.has(c)) continue;
+    if (viaja.has(c)) continue;
     for (const p of (HubCore.compPinsWorld(c, SLIB) || [])) fora.push({ x:p.x, y:p.y, label:c.ref + '-' + p.num });
   }
   for (const wi of s.wires){
-    if (base.has(wi)) continue;
+    if (viaja.has(wi)) continue;
     for (const p of (wi.pts || [])) fora.push({ x:p[0], y:p[1], label:'fio' });
   }
-  for (const j of s.junctions) if (!base.has(j)) fora.push({ x:j.x, y:j.y, label:'junção' });
-  for (const p of s.powers)    if (!base.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'power' });
-  for (const p of s.ports)     if (!base.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'port' });
+  for (const j of s.junctions) if (!viaja.has(j)) fora.push({ x:j.x, y:j.y, label:'junção' });
+  for (const p of s.powers)    if (!viaja.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'power' });
+  for (const p of s.ports)     if (!viaja.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'port' });
   return fora;
 }
-/* pontas quentes do que esta sendo arrastado, na posicao de PARTIDA: o arrasto so lhes soma o
-   deslocamento, entao medir uma vez por gesto basta — e nao a folha inteira a cada quadro */
+/* O que viaja e pode GRUDAR, na posicao de PARTIDA: o arrasto so lhe soma o deslocamento,
+   entao medir uma vez por gesto basta — e nao a folha inteira a cada quadro.
+   Eram so as pontas quentes de componente; agora o vertice de fio tambem gruda, e e isso que
+   permite puxar a ponta do fio ate o pino em vez de mirar o pixel. */
 function pinosDoArrasto(base){
   const fora = [];
-  for (const it of base.keys()){
-    if (it.t !== 'comp') continue;
-    for (const p of (HubCore.compPinsWorld(it, SLIB) || [])) fora.push({ x:p.x, y:p.y, num:p.num, ref:it.ref });
+  for (const b of base.values()){
+    const a = b.a, it = a.it;
+    if (it.t === 'comp' && a.k === 'all'){
+      for (const p of (HubCore.compPinsWorld(it, SLIB) || [])) fora.push({ x:p.x, y:p.y, num:p.num, ref:it.ref });
+    } else if (it.t === 'wire' && (a.k === 'vert' || a.k === 'seg' || a.k === 'all')){
+      const idx = a.k === 'vert' ? [a.i] : a.k === 'seg' ? [a.i, a.i + 1] : (it.pts || []).map((p, i) => i);
+      for (const i of idx){
+        const p = b.pts && b.pts[i];
+        if (p) fora.push({ x:p[0], y:p[1], num:'', ref:'fio' });
+      }
+    }
   }
   return fora;
+}
+/* ── O ELASTICO ──
+   Mover um componente deixava os fios parados: o desenho continuava encostado (o simbolo passa
+   por cima) e a net se desfazia calada, porque a extracao casa por coordenada EXATA. Agora os
+   vertices de fio que estavam em cima de uma ponta quente dos componentes que viajam andam
+   junto, como no Altium.
+   Montado UMA vez por gesto, pelo mesmo motivo do ima: varrer os pinos de 200 componentes a
+   cada quadro engasga o arrasto. Fio que ja esta na selecao fica de fora — ele ja anda pela
+   base, e andar duas vezes o levaria ao dobro do deslocamento. */
+function elasticoDoArrasto(base){
+  const s = model.sheets[sheetIdx], out = [], pinos = [];
+  /* SO o componente que esta viajando INTEIRO puxa fio. `base.itens` guarda o item de todo
+     alvo do gesto, e o texto do designador e um alvo DO COMPONENTE: sem este `k === 'all'`,
+     arrastar o nome de um resistor levava junto todos os fios ligados a ele — os pinos nao
+     tinham saido do lugar, e mesmo assim a fiacao andava. */
+  for (const b of base.values()){
+    if (b.a.k !== 'all' || b.a.it.t !== 'comp') continue;
+    for (const p of (HubCore.compPinsWorld(b.a.it, SLIB) || [])) pinos.push(p);
+  }
+  if (!pinos.length) return out;
+  for (const w of s.wires){
+    if (base.itens.has(w)) continue;
+    const pts = w.pts || [];
+    for (let i = 0; i < pts.length; i++)
+      for (const p of pinos)
+        if (pertoDe(pts[i][0], pts[i][1], p.x, p.y)){ out.push({ w, i, x:pts[i][0], y:pts[i][1] }); break; }
+  }
+  return out;
 }
 /* o deslocamento corrigido para o pino mais proximo pousar em cima do alvo; null = sem ima */
 function imaDoArrasto(g, dx, dy){
@@ -642,9 +1236,9 @@ function imaDoArrasto(g, dx, dy){
     const px = p.x + dx, py = p.y + dy;
     for (const a of g.alvos){
       const d = Math.hypot(px - a.x, py - a.y);
-      if (d > SNAP_MIL || (best && d >= best.d)) continue;
+      if (d > snapMil() || (best && d >= best.d)) continue;
       best = { d, dx: dx + (a.x - px), dy: dy + (a.y - py), x:a.x, y:a.y,
-               label: p.ref + '-' + p.num + ' → ' + a.label };
+               label: (p.num ? p.ref + '-' + p.num : p.ref) + ' → ' + a.label };
     }
   }
   return best;
@@ -653,7 +1247,7 @@ function imaDoArrasto(g, dx, dy){
 function wirePoint(w){
   const hs = snapPoint(w);
   if (hs) return { pt:[hs.x, hs.y], snap:hs };
-  const gx = snap100(w.x), gy = snap100(w.y);
+  const gx = snapG(w.x), gy = snapG(w.y);
   if (!wireDraw || !wireDraw.pts.length) return { pt:[gx, gy], snap:null };
   const last = wireDraw.pts[wireDraw.pts.length - 1];
   return { pt: (Math.abs(gx - last[0]) >= Math.abs(gy - last[1])) ? [gx, last[1]] : [last[0], gy], snap:null };
@@ -683,14 +1277,14 @@ function endWire(){
 function placeNoERC(w){
   const hs = snapPoint(w);
   schematic.items.push({ t:'noerc', sheet:model.sheets[sheetIdx].name,
-                         x: hs ? hs.x : snap100(w.x), y: hs ? hs.y : snap100(w.y) });
+                         x: hs ? hs.x : snapG(w.x), y: hs ? hs.y : snapG(w.y) });
   commit();
 }
 function placePower(w){
   const hs = snapPoint(w);
   const p = toolPower;
   schematic.items.push({ t:'power', sheet:model.sheets[sheetIdx].name, net:p.net, style:p.style,
-                         x: hs ? hs.x : snap100(w.x), y: hs ? hs.y : snap100(w.y), rot:p.rot });
+                         x: hs ? hs.x : snapG(w.x), y: hs ? hs.y : snapG(w.y), rot:p.rot });
   commit();
 }
 /* O rotulo de net: uma palavra pousada na folha. Quem une dois rotulos de mesmo nome e o
@@ -699,7 +1293,7 @@ function placeLabel(w){
   if (!toolNet) return;
   const hs = snapPoint(w);
   schematic.items.push({ t:'netlabel', sheet:model.sheets[sheetIdx].name, net:toolNet,
-                         x: hs ? hs.x : snap100(w.x), y: hs ? hs.y : snap100(w.y), rot:0 });
+                         x: hs ? hs.x : snapG(w.x), y: hs ? hs.y : snapG(w.y), rot:0 });
   commit();
 }
 function setTool(t, pw){
@@ -876,18 +1470,33 @@ function leftDown(e){
     lastDown = null;
     return;
   }
-  const it = h.item, wasSel = sel.has(it);
-  if (!wasSel){ if (!e.shiftKey) sel.clear(); sel.add(it); }
-  lastDown = { item:it, wasSel };
-  const base = baseOf(sel);
-  /* o ima e montado aqui, e nao no primeiro movimento: a folha parada e a mesma o gesto
-     inteiro, e varrer os pinos de 200 componentes a cada quadro engasgaria o arrasto */
+  /* O ALVO do clique, e nao mais "o item inteiro". Num fio, o hitTest diz qual TRECHO e, se o
+     cursor estiver em cima de um vertice, qual vertice — e e o vertice que ganha, porque quem
+     mira a alcinha esta querendo mexer no canto. O fio inteiro continua alcançavel: clique
+     duplo promove (veja o dblclick mais abaixo) e o retangulo de selecao pega fio inteiro. */
+  const a = alvoDoHit(h);
+  const wasSel = selTem(a);
+  if (!wasSel){ if (!e.shiftKey) sel.clear(); selAdd(a); }
+  lastDown = { alvo:a, wasSel };
+  const base = baseOf(selAlvos());
+  /* o ima e o elastico sao montados aqui, e nao no primeiro movimento: a folha parada e a
+     mesma o gesto inteiro, e varrer os pinos de 200 componentes a cada quadro engasgaria */
+  base.elastico = elasticoDoArrasto(base);
   mouse = { mode:'move', start:w, moved:false, base,
             ima: { alvos: alvosDeIma(base), pinos: pinosDoArrasto(base) } };
   moveIma = null;
   /* a net entra em foco AQUI, e nao no click: todo arrasto engole o click (swallowClick), e
      a net anterior ficava acesa por cima de uma selecao que ja era outra */
   aplicaSel(e.shiftKey && sel.size > 1 ? '' : netDoAlvo(h));
+}
+/* do que o hitTest devolveu para o alvo que a selecao guarda */
+function alvoDoHit(h){
+  if (h.kind === 'ref' || h.kind === 'com') return { it:h.item, k:h.kind };
+  if (h.kind === 'wire'){
+    if (h.vert != null) return { it:h.item, k:'vert', i:h.vert };
+    if (h.seg  != null) return { it:h.item, k:'seg',  i:h.seg };
+  }
+  return alvoAll(h.item);
 }
 /* um desenho por quadro: cada mousemove pedia um cam.draw() inteiro e, em folha grande, o
    arrasto engasgava atras da fila de eventos */
@@ -925,12 +1534,22 @@ function leftUp(e){
     /* o ima MANDA sobre a grade: e ele que faz o pino cair em cima da ponta do fio, e
        100 mil de grade contados da posicao antiga jogariam o pino fora dela de novo */
     const m = imaDoArrasto(d.ima, rx, ry);
-    if (m) applyMove(d.base, m.dx, m.dy); else applyMove(d.base, snap100(rx), snap100(ry));
+    if (m) applyMove(d.base, m.dx, m.dy); else applyMove(d.base, snapG(rx), snapG(ry));
     moveIma = null; $('shover').textContent = '';
-    /* arrasto que voltou para a mesma grade nao e mudanca — nao entra no undo */
-    const mudou = Array.from(d.base).some(([it, b]) => it.t === 'wire'
-      ? (it.pts[0] && (it.pts[0][0] !== b[0][0] || it.pts[0][1] !== b[0][1]))
-      : (it.x !== b.x || it.y !== b.y));
+    /* Arrasto que voltou para a mesma grade nao e mudanca — nao entra no undo.
+       A conta olhava SO o pts[0] do fio: arrastar um vertice do meio (que agora e um gesto de
+       verdade) mudava o desenho, nao entrava no undo e nao acendia o "Salvar *" — a falha
+       silenciosa que so aparece quando a pagina recarrega e o trabalho sumiu. Agora compara
+       ponto a ponto, mais o deslocamento do texto e mais o elastico. */
+    const mudou = Array.from(d.base.values()).some(b => {
+      const a = b.a, it = a.it;
+      if (a.k === 'ref' || a.k === 'com'){ const t = textoComp(it, a.k); return t.x !== b.x0 || t.y !== b.y0; }
+      if (b.pts) return (it.pts || []).some((p, i) => !b.pts[i] || p[0] !== b.pts[i][0] || p[1] !== b.pts[i][1]);
+      return it.x !== b.x || it.y !== b.y;
+    }) || (d.base.elastico || []).some(e => {
+      const p = (e.w.pts || [])[e.i];
+      return p && (p[0] !== e.x || p[1] !== e.y);
+    });
     if (mudou) commit(); else cam.draw();
     return;
   }
@@ -940,7 +1559,10 @@ function leftUp(e){
     /* esquerda→direita pega so quem cabe inteiro; direita→esquerda pega quem encosta (como no Altium) */
     const inteiro = r.x2 >= r.x1;
     if (!d.shift) sel.clear();
-    for (const it of sheetItems()){ const bb = itemBBox(it); if (inteiro ? bbInside(bb, n) : bbTouch(bb, n)) sel.add(it); }
+    /* O RETANGULO CONTINUA PEGANDO ITEM INTEIRO. E de proposito: o gesto de laço serve para
+       pegar um pedaço da folha e arrasta-lo junto, e um laço que devolvesse trechos soltos
+       partiria os fios ao mover. O trecho e coisa do clique; o laço e coisa do bloco. */
+    for (const it of sheetItems()){ const bb = itemBBox(it); if (inteiro ? bbInside(bb, n) : bbTouch(bb, n)) selAdd(alvoAll(it)); }
     aplicaSel('');     /* selecao de varios nao tem uma net so: apaga o foco anterior */
     return;
   }
@@ -959,13 +1581,29 @@ function leftClick(e){
      limpava a selecao — era isso que fazia a ficha abrir e fechar no mesmo clique. */
   if (!lastDown){ if (!e.shiftKey) limpaSel(); return; }
   if (e.shiftKey && lastDown.wasSel){
-    sel.delete(lastDown.item);
+    selDel(lastDown.alvo);
     aplicaSel('');            /* saiu da selecao: a net dele sai junto */
   }
 }
-/* duplo clique com o fio na mao encerra o traçado (o Altium faz igual); no resto, nada:
-   a ficha da direita e so de leitura, e quem edita propriedade e a IA no schematic.js */
-cv.addEventListener('dblclick', () => { if (wireDraw) endWire(); });
+/* Duplo clique: com o fio na mao encerra o traçado (o Altium faz igual). Sem ferramenta, ele e
+   o gesto que PROMOVE — o trecho marcado vira o fio inteiro, e o texto do designador leva o
+   foco para o campo da ficha, que e onde se troca a palavra. Sem isso, o clique simples ter
+   virado "trecho" teria tirado o gesto de pegar o fio todo, que ainda e o certo para mover o
+   fio de lugar. */
+cv.addEventListener('dblclick', e => {
+  if (wireDraw){ endWire(); return; }
+  if (tool !== 'select') return;
+  const w = worldOf(e);
+  const h = hitTest(w.x, w.y);
+  if (!h) return;
+  if (h.kind === 'wire'){ selSo([alvoAll(h.item)]); aplicaSel(netDoAlvo(h)); return; }
+  if (h.kind === 'ref' || h.kind === 'com'){
+    selSo([alvoAll(h.item)]); aplicaSel('');
+    propsPin = true; salvaPin(); mostraProps();
+    const campo = $('prBody') && $('prBody').querySelector('input.mono');
+    if (campo){ campo.focus(); campo.select(); }
+  }
+});
 
 /* ------- adicionar componentes (modal) -------
    E a aba Biblioteca do hub com uma troca: a ficha da direita virou a LISTA do que vai
@@ -1291,7 +1929,7 @@ function finalizar(){
   let y0 = 6200, x0 = 800;
   if (usados.length){
     const minY = Math.min.apply(null, usados.map(c => c.y));
-    y0 = snap100(minY - 900);
+    y0 = snapG(minY - 900);
   }
   const PASSO_X = 700, PASSO_Y = 800, LARGURA = 9;
   let i = 0; const novos = [];
@@ -1299,8 +1937,8 @@ function finalizar(){
     for (let k = 0; k < item.qtd; k++){
       const c = {
         t: 'comp', sheet: folha.name, ref: nextRef(item.sym), sym: item.sym,
-        x: snap100(x0 + (i % LARGURA) * PASSO_X),
-        y: snap100(y0 - Math.floor(i / LARGURA) * PASSO_Y),
+        x: snapG(x0 + (i % LARGURA) * PASSO_X),
+        y: snapG(y0 - Math.floor(i / LARGURA) * PASSO_Y),
         rot: 0, footprint: item.footprint,
       };
       if (item.part !== 1) c.part = item.part;
@@ -1313,7 +1951,7 @@ function finalizar(){
     }
   }
   cart = []; cartRender(); closeAdd();
-  sel.clear(); for (const c of novos) sel.add(c);
+  selSo(novos.map(alvoAll));
   selNet = '';        /* componentes novos nao pertencem a net nenhuma ainda */
   commit();
   const bb = unionBBox(novos);
@@ -1423,7 +2061,8 @@ function prPreview(sym, part, fpNome){
 function renderProps(){
   const body = $('prBody');
   body.textContent = '';
-  const itens = Array.from(sel).filter(onSheet);
+  const alvos = selAlvos().filter(a => onSheet(a.it));
+  const itens = alvos.map(a => a.it);
   if (!itens.length){
     const s = prSec(null);
     s.append(el('p', 'pr-empty', 'Clique num componente, fio ou pouso de alimentação para ver a ficha dele. '
@@ -1444,18 +2083,32 @@ function renderProps(){
     return prPreview(false, null, null);
   }
 
-  const it = itens[0];
+  const it = itens[0], alvo = alvos[0];
   if (it.t !== 'comp'){
     const NOME = { wire:'fio', netlabel:'net label', power:'power port', port:'port',
                    junction:'junção', noerc:'No ERC', text:'texto' };
     const s = prSec(NOME[it.t] || it.t);
     if (it.t === 'wire'){
       const wi = model.sheets[sheetIdx].wires.indexOf(it);
+      const pts = it.pts || [];
       s.append(el('div', 'pr-title', (wi >= 0 && nets.wireNet[sheetIdx][wi]) || 'sem net'));
-      prKv(s, 'Vértices', (it.pts || []).length);
-      const p0 = (it.pts || [])[0] || [0, 0], pn = (it.pts || [])[(it.pts || []).length - 1] || [0, 0];
-      prKv(s, 'Início', p0[0] + ' , ' + p0[1] + ' mil', 'mono');
-      prKv(s, 'Fim', pn[0] + ' , ' + pn[1] + ' mil', 'mono');
+      /* A ficha fala do que esta MARCADO. Com um trecho na mao ela mostrava "Vertices/Inicio/
+         Fim" do fio inteiro — informacao verdadeira sobre o objeto errado. */
+      if (alvo.k === 'seg' && pts[alvo.i] && pts[alvo.i+1]){
+        prKv(s, 'Trecho', (alvo.i + 1) + ' de ' + (pts.length - 1));
+        prKv(s, 'De', pts[alvo.i][0] + ' , ' + pts[alvo.i][1] + ' mil', 'mono');
+        prKv(s, 'Até', pts[alvo.i+1][0] + ' , ' + pts[alvo.i+1][1] + ' mil', 'mono');
+        prKv(s, '', 'Del parte o fio aqui · clique duplo pega o fio inteiro', 'dim');
+      } else if (alvo.k === 'vert' && pts[alvo.i]){
+        prKv(s, 'Vértice', (alvo.i + 1) + ' de ' + pts.length);
+        prKv(s, 'Posição', pts[alvo.i][0] + ' , ' + pts[alvo.i][1] + ' mil', 'mono');
+        prKv(s, '', 'Del tira o vértice e endireita o fio', 'dim');
+      } else {
+        prKv(s, 'Vértices', pts.length);
+        const p0 = pts[0] || [0, 0], pn = pts[pts.length - 1] || [0, 0];
+        prKv(s, 'Início', p0[0] + ' , ' + p0[1] + ' mil', 'mono');
+        prKv(s, 'Fim', pn[0] + ' , ' + pn[1] + ' mil', 'mono');
+      }
     } else {
       s.append(el('div', 'pr-title', it.net || it.s || (NOME[it.t] || it.t)));
       /* `!= null` e nao `if (it.style)`: estilo 0 e um estilo, e e o de TODA port dos
@@ -1608,6 +2261,28 @@ function renderProps(){
   prKv(p, 'Folha', it.sheet);
   body.append(p);
 
+  /* O TEXTO, quando e ele que esta marcado. A posicao do designador e um deslocamento em
+     relacao ao lugar de origem (embaixo/em cima do corpo): mostrar o deslocamento, e nao a
+     coordenada, e o que deixa "voltar ao lugar" ser uma acao obvia. */
+  if (alvo.k === 'ref' || alvo.k === 'com'){
+    const q = alvo.k === 'com' ? 'comment' : 'designador';
+    const t = prSec('texto · ' + q);
+    const tx = textoComp(it, alvo.k);
+    prKv(t, 'Deslocamento', tx.posto ? ((it[alvo.k === 'com' ? 'comdx' : 'refdx'] || 0) + ' , '
+                                     + (it[alvo.k === 'com' ? 'comdy' : 'refdy'] || 0) + ' mil (da âncora)')
+                                     : 'no lugar de origem', 'mono');
+    if (tx.posto){
+      const b = el('button', 'wide sutil', 'Voltar ao lugar de origem');
+      b.title = 'apaga o deslocamento — o mesmo que o Delete faz com o texto marcado';
+      b.onclick = () => {
+        if (alvo.k === 'com'){ delete it.comdx; delete it.comdy; } else { delete it.refdx; delete it.refdy; }
+        commit();
+      };
+      t.append(b);
+    } else prKv(t, '', 'arraste o texto na folha para afastá-lo do símbolo', 'dim');
+    body.append(t);
+  }
+
   const pars = prParams(it.params);
   if (pars.length){
     const s = prSec('parâmetros');
@@ -1729,18 +2404,52 @@ function fitBBox(si){
    A selecao e a ferramenta na mao NAO entram aqui: sao do canvas grande, e o drawSelection
    filtra pela folha ativa — numa miniatura de outra folha ele desenharia as bordinhas no
    cartao errado. */
+/* ------- a topologia da folha, uma vez por quadro -------
+   O censo de ramos e os cruzamentos custam O(ancoras x segmentos) e um passe por balde; na
+   folha maior deste workspace sao 555 segmentos. Rodar isso duas vezes no mesmo quadro (o
+   canvas grande e a miniatura do cartao) seria desperdicio, e rodar a cada mousemove do
+   arrasto engasgaria. A memoria e por folha + versao da geometria: o `geomVer` sobe no
+   applyMove (que e o unico que mexe em coordenada durante o gesto) e no reapply. */
+const PONTE_R = 28;          /* raio do arco da ponte, em mil — cabe nos 58 cruzamentos reais,
+                                onde o vertice mais proximo esta a 39,8 mil no pior caso */
+let topoCache = new Map(), geomVer = 0;
+function topologiaDe(si){
+  const k = si + ':' + geomVer;
+  const achou = topoCache.get(k);
+  if (achou) return achou;
+  /* uma entrada por FOLHA, e nao uma so: o commit redesenha o canvas grande (folha ativa) e
+     logo em seguida a miniatura de cada cartao de folha. Com memoria de um lugar so, as duas
+     se expulsavam e cada commit recalculava tudo de novo, folha por folha. O Map velho e
+     jogado fora inteiro quando a geometria muda, entao ele nao cresce sem limite. */
+  const s = model.sheets[si];
+  const pinos = [];
+  for (const c of s.comps) for (const p of (HubCore.compPinsWorld(c, SLIB) || [])) pinos.push(p);
+  const r = topologiaFolha(s.wires, pinos, s.junctions);
+  if (topoCache.size > 8) topoCache.clear();
+  topoCache.set(k, r);
+  return r;
+}
 function desenhaFolha(ctx, si, o){
   const s = model.sheets[si];
   const foco = o.foco, esc = o.esc;
   const bb = sheetBBox(si);
   ctx.fillStyle = D.SCH.sheet;
   ctx.fillRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
-  if (o.grid && esc > 0.045) {
-    ctx.strokeStyle = D.SCH.grid; ctx.lineWidth = 1/esc;
-    ctx.beginPath();
-    for (let x = 0; x <= bb.x2; x += 100) { ctx.moveTo(x, 0); ctx.lineTo(x, bb.y2); }
-    for (let y = 0; y <= bb.y2; y += 100) { ctx.moveTo(0, y); ctx.lineTo(bb.x2, y); }
-    ctx.stroke();
+  /* A GRADE SEGUE O PASSO ESCOLHIDO, e some por DENSIDADE e nao por um corte fixo de escala:
+     com passo de 10 mil, o corte antigo (esc > 0.045) mandaria desenhar 1100 linhas em cada
+     eixo numa folha A4 — dezenas de milhares de segmentos por quadro, com a camera sem limite
+     de zoom. Aqui a malha fina so aparece quando cada quadrado tem pelo menos 5 px de tela; se
+     nao tiver, sobe para o passo de 10 em 10, e se nem esse couber a grade some. */
+  if (o.grid) {
+    const px = p => p * esc;
+    const passo = px(grade.passo) >= 5 ? grade.passo : px(grade.passo * 10) >= 5 ? grade.passo * 10 : 0;
+    if (passo){
+      ctx.strokeStyle = D.SCH.grid; ctx.lineWidth = 1/esc;
+      ctx.beginPath();
+      for (let x = 0; x <= bb.x2; x += passo) { ctx.moveTo(x, 0); ctx.lineTo(x, bb.y2); }
+      for (let y = 0; y <= bb.y2; y += passo) { ctx.moveTo(0, y); ctx.lineTo(bb.x2, y); }
+      ctx.stroke();
+    }
   }
   ctx.strokeStyle = D.SCH.border; ctx.lineWidth = 8;
   ctx.strokeRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
@@ -1750,18 +2459,54 @@ function desenhaFolha(ctx, si, o){
      esta selecionado ganha o contorno tracejado do drawSelection, por cima, como na vista
      PCB e como no Altium. Enquanto a selecao RECOLORIA, clicar num fio deixava o fio azul e
      os companheiros de net laranja: uma net com duas cores, que se lia como cor travada. */
+  const topo = topologiaDe(si);
+  /* Os arcos por trecho, para o desenho do fio saber onde saltar. Chave "wi:seg". */
+  const saltos = new Map();
+  for (const p of topo.pontes){
+    const k = p.wi + ':' + p.seg;
+    let l = saltos.get(k); if (!l){ l = []; saltos.set(k, l); }
+    l.push(p);
+  }
   s.wires.forEach((w, wi) => {
     const hl = foco && nets.wireNet[si][wi] === foco;
     ctx.strokeStyle = hl ? D.SCH.hl : D.SCH.wire;
     ctx.lineWidth = hl ? 14 : 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();
-    (w.pts || []).forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    const pts = w.pts || [];
+    /* UM path por fio, com o arco DENTRO dele. Desenhar o arco por cima, num path separado,
+       nao serviria: o fio por baixo pode estar laranja (net em foco) e o fundo e o creme da
+       folha, entao nao ha cor de "apagar". E quebrar o path por trecho tiraria o lineJoin
+       arredondado, que e o que faz o canto do fio parecer canto. */
+    pts.forEach((p, i) => {
+      if (!i){ ctx.moveTo(p[0], p[1]); return; }
+      const arcos = saltos.get(wi + ':' + (i - 1));
+      if (arcos){
+        const a = pts[i-1];
+        const vx = p[0] - a[0], vy = p[1] - a[1], L = Math.hypot(vx, vy) || 1;
+        const ux = vx / L, uy = vy / L;
+        /* em ordem ao longo do trecho: dois cruzamentos no mesmo trecho nao podem sair fora
+           de ordem, senao o path volta para tras e o fio ganha um nó */
+        const ord = arcos.map(q => ({ q, t:((q.x - a[0]) * ux + (q.y - a[1]) * uy) })).sort((m, n) => m.t - n.t);
+        for (const { q, t } of ord){
+          const r = Math.min(PONTE_R, L / 4);
+          if (!(r > 0)) continue;
+          ctx.lineTo(a[0] + ux * (t - r), a[1] + uy * (t - r));
+          /* meia-lua para o lado do +X/+Y: o sentido nao importa eletricamente, so precisa
+             ser o mesmo sempre — e o arco anti-horario em torno do ponto de cruzamento */
+          const ang = Math.atan2(uy, ux);
+          ctx.arc(q.x, q.y, r, ang + Math.PI, ang, true);
+        }
+      }
+      ctx.lineTo(p[0], p[1]);
+    });
     ctx.stroke();
   });
-  /* junctions explicitas + automaticas: sao pontos DA net, entao acendem com ela */
-  for (const j of s.junctions)
-    D.drawJunction(ctx, j.x, j.y, foco && netEm(j.x, j.y) === foco ? D.SCH.hl : undefined);
-  for (const j of nets.autoJunctions) if (j.sheet === si)
+  /* As bolinhas. Vinham de dois lugares (as junções explicitas do arquivo e o autoJunctions
+     do HubCore, que so enxerga o T) e deixavam de fora a estrela de tres pontas de fio no
+     mesmo ponto — 18 pontos assim nos projetos deste workspace, todos sem bolinha. Agora sai
+     do censo de ramos (topologiaFolha), que cobre os tres casos de uma vez: T, estrela e pino
+     no meio do fio. Quem liga continua sendo o HubCore; isto aqui so DESENHA. */
+  for (const j of topo.bolinhas)
     D.drawJunction(ctx, j.x, j.y, foco && netEm(j.x, j.y) === foco ? D.SCH.hl : undefined);
 
   /* componentes */
@@ -1783,10 +2528,29 @@ function desenhaFolha(ctx, si, o){
     else if (emg) D.drawSymbolPart(ctx, emg.part, { mirror: !!c.mirror, honraOlho: !showState.pinos, stroke: EMERG_COR });
     else { ctx.strokeStyle = '#ff5252'; ctx.strokeRect(-100, -100, 200, 200); }
     ctx.restore();
-    const bbref = part ? D.symBBox(part) : emg ? D.symBBox(emg.part) : { x1:-100, y1:-100, x2:100, y2:100 };
-    D.worldText(ctx, c.ref, c.x, c.y + Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) + 70, 60, 0, '#000000', 'center');
-    if (c.comment && showState.comment)
-      D.worldText(ctx, c.comment, c.x, c.y - Math.max(Math.abs(bbref.y1), Math.abs(bbref.y2)) - 70, 55, 0, '#333366', 'center');
+    /* designador e comment: ancora medida pelo textoComp (caixa NA FOLHA + o deslocamento que
+       a mao deu). Continuam desenhados fora do ctx.rotate e sempre na horizontal — girar o
+       componente nao pode deitar o nome dele, que e o que o Altium tambem faz. */
+    /* ancora no canto + `align:'left'` + o mesmo levante de baseline que o net label usa
+       (hub-draw.js » drawNetLabel: y + 18 para altura 55, ou seja um terco da altura): o
+       worldText centra a letra na vertical, e o Altium a apoia na base */
+    const tr = textoComp(c, 'ref');
+    D.worldText(ctx, tr.s, tr.x, tr.y + tr.h * 0.33, tr.h, 0, '#000000', 'left');
+    if (c.comment && showState.comment){
+      const tc = textoComp(c, 'com');
+      D.worldText(ctx, tc.s, tc.x, tc.y + tc.h * 0.33, tc.h, 0, '#333366', 'left');
+    }
+    /* o tracinho que liga o texto ao componente quando ele foi afastado com a mao: sem ele,
+       um designador arrastado para longe vira uma palavra solta no meio da folha */
+    for (const qual of ['ref', 'com']){
+      if (qual === 'com' && !(c.comment && showState.comment)) continue;
+      const t = textoComp(c, qual);
+      if (!t.posto || (Math.abs(t.x - t.bx) < 1 && Math.abs(t.y - t.by) < 1)) continue;
+      ctx.save();
+      ctx.strokeStyle = '#9a9a86'; ctx.lineWidth = 3; ctx.setLineDash([18, 14]);
+      ctx.beginPath(); ctx.moveTo(t.bx, t.by); ctx.lineTo(t.x, t.y); ctx.stroke();
+      ctx.restore();
+    }
   }
   /* pinos destacados da net selecionada */
   if (foco) {
@@ -1838,13 +2602,13 @@ function drawFerramenta(ctx, cam){
     ctx.restore();
   }
   if (tool === 'power' && toolPower && hoverW){
-    const x = snapHit ? snapHit.x : snap100(hoverW.x), y = snapHit ? snapHit.y : snap100(hoverW.y);
+    const x = snapHit ? snapHit.x : snapG(hoverW.x), y = snapHit ? snapHit.y : snapG(hoverW.y);
     ctx.save(); ctx.globalAlpha = 0.6;
     D.drawPowerPort(ctx, { x, y, net:toolPower.net, style:toolPower.style, rot:toolPower.rot });
     ctx.restore();
   }
   if (tool === 'label' && toolNet && hoverW){
-    const x = snapHit ? snapHit.x : snap100(hoverW.x), y = snapHit ? snapHit.y : snap100(hoverW.y);
+    const x = snapHit ? snapHit.x : snapG(hoverW.x), y = snapHit ? snapHit.y : snapG(hoverW.y);
     ctx.save(); ctx.globalAlpha = 0.6;
     D.drawNetLabel(ctx, { x, y, net:toolNet, rot:0 });
     ctx.restore();
@@ -1870,16 +2634,40 @@ function drawFerramenta(ctx, cam){
 function drawSelection(ctx, cam){
   const px = 1 / cam.scale, hs = 3.5 * px, m = 40;
   ctx.save();
-  for (const it of sel){
+  for (const a of sel.values()){
+    const it = a.it;
     if (!onSheet(it)) continue;
-    const bb = itemBBox(it);
-    const x = bb.x1 - m, y = bb.y1 - m, w = (bb.x2 - bb.x1) + 2*m, h = (bb.y2 - bb.y1) + 2*m;
+    const pts = it.pts || [];
+    /* O TRECHO se marca por cima do proprio fio, e nao por uma caixa: um trecho horizontal tem
+       caixa de altura zero, e um retangulo tracejado de 80 mil em volta dele apontaria para o
+       lugar certo dizendo a coisa errada — "peguei esta area" em vez de "peguei este trecho". */
+    if (a.k === 'seg' && pts[a.i] && pts[a.i+1]){
+      ctx.strokeStyle = SEL; ctx.lineWidth = Math.max(16, 6 * px); ctx.setLineDash([]);
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath(); ctx.moveTo(pts[a.i][0], pts[a.i][1]); ctx.lineTo(pts[a.i+1][0], pts[a.i+1][1]); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = SEL;
+      for (const p of [pts[a.i], pts[a.i+1]]) ctx.fillRect(p[0] - hs, p[1] - hs, 2*hs, 2*hs);
+      continue;
+    }
+    if (a.k === 'vert'){
+      const p = pts[a.i];
+      if (!p) continue;
+      ctx.fillStyle = SEL;
+      ctx.fillRect(p[0] - hs*2, p[1] - hs*2, 4*hs, 4*hs);
+      continue;
+    }
+    const bb = alvoBBox(a);
+    const mm = (a.k === 'ref' || a.k === 'com') ? 10 : m;    /* o texto quer moldura justa */
+    const x = bb.x1 - mm, y = bb.y1 - mm, w = (bb.x2 - bb.x1) + 2*mm, h = (bb.y2 - bb.y1) + 2*mm;
     ctx.strokeStyle = SEL; ctx.lineWidth = 1.5 * px; ctx.setLineDash([6 * px, 4 * px]);
     ctx.strokeRect(x, y, w, h);
     ctx.setLineDash([]);
     ctx.fillStyle = SEL;
     for (const [cx, cy] of [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) ctx.fillRect(cx - hs, cy - hs, 2*hs, 2*hs);
-    if (it.t === 'wire') for (const p of (it.pts || [])) ctx.fillRect(p[0] - hs, p[1] - hs, 2*hs, 2*hs);
+    /* as alcinhas de vertice do fio inteiro: elas ja eram desenhadas e nao faziam nada. Agora
+       sao alvo de verdade — o hitTest devolve o vertice quando o cursor esta em cima delas. */
+    if (it.t === 'wire' && a.k === 'all') for (const p of pts) ctx.fillRect(p[0] - hs, p[1] - hs, 2*hs, 2*hs);
   }
   if (boxRect){
     const r = boxRect;
@@ -1912,9 +2700,12 @@ const cam = D.mkCamera(cv, drawWorld, {
     }
     if (mouse || panning) return;      /* durante um gesto o hover nao manda no cursor nem no texto */
     const h = hitTest(w.x, w.y);
+    /* o hover diz o que o clique vai pegar — com o trecho, o numero do trecho, senao a mao
+       marca uma coisa e a barra de status anuncia outra */
     $('shover').textContent =
       h ? (h.kind === 'pin' ? `${h.ref}-${h.num} · ${nets.pinNet[h.ref + '-' + h.num] || 'sem net'}`
-                            : h.kind === 'wire' ? (nets.wireNet[sheetIdx][h.wi] || 'fio') : describe(h.item)) : '';
+         : h.kind === 'wire' ? (describe(alvoDoHit(h)) + ' · ' + (nets.wireNet[sheetIdx][h.wi] || 'sem net'))
+                             : describe(alvoDoHit(h))) : '';
     cv.style.cursor = 'default';   /* seta normal; so o pan (agarrando) muda */
   }
 });
@@ -1948,11 +2739,31 @@ function hitTest(x, y){
     if (x >= t.x - 20 && x <= t.x + Math.max((t.s || '').length * (t.h || 10) * 4, 120) &&
         y >= t.y - (t.h || 10) * 4 && y <= t.y + (t.h || 10) * 4)
       return { kind:'text', item:t };
+  /* O TEXTO DO COMPONENTE (designador e comment) vem antes do fio e do corpo: ele mora em
+     area vazia, e quem clica em cima de uma palavra esta mirando a palavra. Entre os dois, o
+     designador ganha — ele esta sempre a vista, o comment so com o olho ligado. */
+  for (const c of s.comps){
+    const b = textoBBox(c, 'ref');
+    if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return { kind:'ref', ref:c.ref, item:c };
+  }
+  if (showState.comment) for (const c of s.comps){
+    if (!c.comment) continue;
+    const b = textoBBox(c, 'com');
+    if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return { kind:'com', ref:c.ref, item:c };
+  }
+  /* O FIO DEVOLVE O TRECHO, e o vertice quando o cursor esta em cima da alcinha. O indice do
+     segmento ja era calculado aqui e jogado fora no return — era so isso que faltava para
+     "selecionar o trecho e nao a polilinha inteira". O vertice ganha do trecho porque a
+     alcinha e menor e quem a mira esta querendo justamente o canto. */
   for (let wi = 0; wi < s.wires.length; wi++) {
     const pts = s.wires[wi].pts || [];
     for (let i = 0; i < pts.length - 1; i++)
-      if (HubCore.distSeg(x, y, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1]) <= Math.max(tol, 20))
-        return { kind:'wire', wi, item:s.wires[wi] };
+      if (HubCore.distSeg(x, y, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1]) <= Math.max(tol, 20)){
+        const rv = Math.max(tol, 22);
+        const vert = Math.hypot(x - pts[i][0], y - pts[i][1]) <= rv ? i
+                   : Math.hypot(x - pts[i+1][0], y - pts[i+1][1]) <= rv ? i + 1 : null;
+        return { kind:'wire', wi, item:s.wires[wi], seg:i, vert };
+      }
   }
   /* pela caixa do corpo como ele esta na folha (girado/espelhado), e nao por um circulo em
      volta da ancora: o RES da casa vai de -150 a +50 mil, e o circulo errava o corpo de um
@@ -2410,6 +3221,13 @@ async function usarSimboloEscolhido(){
   HubDialog.toast(refs.join(', ') + (so
     ? ' recebeu a identidade de "' + para + '" — o desenho fica, porque é multi-parte.'
     : ' → "' + para + '"') + ' Ctrl+Z desfaz, e só o Salvar grava.', 'ok');
+  /* O ENCAIXE dito em voz alta. Mover o componente para os pinos caírem onde estavam e um
+     ajuste que o usuario nao pediu: se ele nao for anunciado, o componente "anda sozinho" e
+     a duvida sobra para quem estava olhando a folha. */
+  for (const en of (res.encaixes || []))
+    HubDialog.toast(en.ref + ': encaixei no lugar do antigo — ' + en.encaixa + ' de ' + en.comuns
+      + ' pinos voltaram ao mesmo ponto (andou ' + Math.round(en.dx) + ' , ' + Math.round(en.dy) + ' mil)',
+      'info', 9000);
   for (const rc of (res.recusados || [])) HubDialog.toast('recusado: ' + rc.porque, 'warn', 9000);
   if (typeof aoAplicar === 'function') aoAplicar({ refs: refs, componente: para, res: res });
 
@@ -2552,29 +3370,43 @@ window.addEventListener('keydown', e => {
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   if (addOpen() || symModalAberto()) return;   /* os atalhos da folha nao valem dentro do modal */
-  const k = e.key.toLowerCase();
-  if (e.ctrlKey && k === 'z'){ e.preventDefault(); undo(); return; }
-  if (e.ctrlKey && k === 'y'){ e.preventDefault(); redo(); return; }
-  if (e.ctrlKey && k === 'a'){ e.preventDefault(); selectOnly(sheetItems()); return; }
-  /* Ctrl+W e do NAVEGADOR (fecha a aba) e nenhuma pagina consegue interceptar — o atalho do
-     fio e o W sozinho. Isto aqui so pega onde o Ctrl+W chega mesmo (janela de aplicativo). */
-  if (e.ctrlKey && k === 'w'){ e.preventDefault(); setTool(tool === 'wire' ? 'select' : 'wire'); return; }
-  if (e.ctrlKey || e.altKey || e.metaKey) return;
-  if (k === 'c'){ openAdd(); return; }
-  if (k === 'w'){ setTool(tool === 'wire' ? 'select' : 'wire'); return; }
-  if (k === 'g'){ setTool(tool === 'power' && toolPower && toolPower.net === 'GND' ? 'select' : 'power',
-                          { net:'GND', style:'GndPower', rot:270 }); return; }
-  if (k === 'l'){ if (tool === 'label'){ setTool('select'); hideNetForm(); } else openNetForm(); return; }
+  if (capturandoAtalho) return;                /* a aba Atalhos esta ouvindo a proxima tecla */
+  const acao = ATALHOS.porTecla[normalizaTecla(e)];
+  if (!acao) return;
   /* O ESPACO COM UM BOTAO EM FOCO ja se resolve sozinho, e MEDIDO no Chrome: com selecao, o
      `e.preventDefault()` da linha de girar cancela a ativacao nativa do botao (o componente
      gira 0->90 e o olho da grade nao pisca); sem selecao aquela linha nao pega e o Espaco
      volta a ser o clique do botao, que e o que se espera. Houve aqui uma guarda que devolvia
      cedo quando o foco estava num <button> — ela trocava uma coisa pela outra: o botao era
-     reacionado e a selecao NAO girava. */
-  if (e.key === 'Delete'){ deleteSel(); return; }
-  if (e.key === ' ' && sel.size){ e.preventDefault(); rotateSel(); return; }
-  if (k === 'x' && sel.size){ mirrorSel(); return; }
+     reacionado e a selecao NAO girava.
+     Por isso o preventDefault e do ESPACO-com-selecao e dos Ctrl, nao de todo atalho. */
+  const t = ATALHOS.porAcao[acao] || '';
+  if (t.indexOf('Ctrl') === 0 || (t === 'Espaço' && sel.size)) e.preventDefault();
+  if (fazAcao(acao) === false) return;
 });
+/* O QUE CADA AÇÃO FAZ. Separado do teclado de proposito: a aba Atalhos precisa saber o nome e
+   a tecla, e o teclado precisa saber o que executar — sem esta tabela as duas coisas voltariam
+   a ser duas copias escritas a mao, que foi o que fez a dica do painel mentir por meses. */
+function fazAcao(id){
+  switch (id){
+    case 'add':       openAdd(); return;
+    case 'fio':       setTool(tool === 'wire' ? 'select' : 'wire'); return;
+    case 'terra':     setTool(tool === 'power' && toolPower && toolPower.net === 'GND' ? 'select' : 'power',
+                              { net:'GND', style:'GndPower', rot:270 }); return;
+    case 'rotulo':    if (tool === 'label'){ setTool('select'); hideNetForm(); } else openNetForm(); return;
+    case 'noerc':     setTool(tool === 'noerc' ? 'select' : 'noerc'); return;
+    case 'girar':     if (sel.size) rotateSel(); else return false; return;
+    case 'espelhoX':  if (sel.size) mirrorSel('x'); else return false; return;
+    case 'espelhoY':  if (sel.size) mirrorSel('y'); else return false; return;
+    case 'apagar':    deleteSel(); return;
+    case 'enquadrar': cam.fit(fitBBox()); return;
+    case 'grade':     $('btnGrid').click(); return;
+    case 'desfazer':  undo(); return;
+    case 'refazer':   redo(); return;
+    case 'tudo':      selectOnly(sheetItems()); return;
+  }
+  return false;
+}
 /* O schematic.js do disco ainda e o que esta aba tem?
 
    `schDiskSnapshot` guarda os bytes EXATOS da ultima leitura ou da ultima gravacao, entao a
@@ -2739,20 +3571,38 @@ window.__hubAplicaVinculos = function(vinculos){
   if (!planos.length) return { ok:false, erro:'nenhum vinculo passou na conferencia', recusados };
 
   let itens = 0;
-  const refsTocados = [];
+  const refsTocados = [], encaixes = [];
   for (const p of planos)
     for (const ref of p.refs){
       for (const c of porRef.get(ref)){
+        /* ── O ENCAIXE ──
+           Trocar o componente troca o DESENHO, e desenho novo poe os pinos noutro lugar em
+           volta da MESMA ancora: os fios ficam onde estavam e a ligacao se desfaz sem uma
+           linha de aviso, porque a extracao de nets casa por coordenada exata. Mede-se onde
+           os pinos estavam, troca-se, mede-se de novo, e o componente inteiro anda o tanto
+           que devolve o maior numero de pinos ao ponto antigo (encaixeDaTroca, no bloco puro).
+           So faz sentido quando o SIMBOLO muda: com `soParams` o desenho fica o mesmo e nao
+           ha nada a encaixar. */
+        const antes = p.sym ? (HubCore.compPinsWorld(c, SLIB) || []) : null;
         if (p.sym) c.sym = p.sym;
         if (p.comment) c.comment = p.comment; else delete c.comment;
         if (p.params) c.params = p.params; else delete c.params;
+        if (antes && antes.length){
+          const depois = HubCore.compPinsWorld(c, SLIB) || [];
+          const enc = encaixeDaTroca(antes, depois);
+          if ((enc.dx || enc.dy) && enc.encaixa > 0){
+            c.x = Math.round((c.x + enc.dx) * 1e4) / 1e4;
+            c.y = Math.round((c.y + enc.dy) * 1e4) / 1e4;
+            encaixes.push({ ref, dx:enc.dx, dy:enc.dy, encaixa:enc.encaixa, comuns:enc.comuns });
+          }
+        }
         itens++;
       }
       refsTocados.push(ref);
     }
   commit();
   limpaSel();
-  return { ok:true, vinculos:planos.length, refs:refsTocados, itens, recusados,
+  return { ok:true, vinculos:planos.length, refs:refsTocados, itens, recusados, encaixes,
            soIdentidade: planos.filter(p => p.multiParte).map(p => p.refs.join(', ')),
            desvios: planos.filter(p => p.desvio).map(p => ({ refs:p.refs, sym:p.sym,
                                                              como:p.desvio.como, vira:p.desvio.vira })) };
@@ -2768,7 +3618,7 @@ function focusComp(c){
   /* troca a folha SEM o limpaSel/enquadrar do setSheet: quem chama daqui ja traz a propria
      selecao (o componente) e o proprio enquadramento, logo abaixo */
   if (si >= 0 && si !== sheetIdx){ sheetIdx = si; pintaCartaoAtivo(); }
-  sel.clear(); sel.add(c);
+  selSo([alvoAll(c)]);
   /* a porta de entrada do hub (__hubSelectComp) tambem passa por aqui: nao pode deixar a net
      anterior acesa por baixo do componente novo */
   aplicaSel('');
@@ -2781,7 +3631,7 @@ function buildCompTable(){
   for (const s of model.sheets) for (const c of s.comps) {
     n++;
     const tr = document.createElement('tr');
-    if (sel.has(c)) tr.className = 'sel';
+    if (selTemItem(c)) tr.className = 'sel';
     for (const v of [c.ref, c.sym, c.footprint || '—', c.comment || '']) {
       const td = document.createElement('td');
       td.textContent = v;
@@ -2903,16 +3753,95 @@ function desenhaMiniatura(cvm, si){
   return true;
 }
 /* sub-abas do painel: a ultima aberta fica lembrada nesta maquina */
+/* ------- a aba Atalhos -------
+   A dica de atalhos morava na secao "Edicao" do painel, escrita a mao em <kbd>, e ja mentia:
+   nao citava Ctrl+Y, Ctrl+A nem o Escape, e citava um X que fazia coisas diferentes conforme
+   a rotacao do componente. Agora a lista SAI da tabela que o teclado le, e a tecla e
+   trocavel — clicar no botao da tecla e pressionar a nova. O que o usuario grava fica nesta
+   maquina, no mesmo molde de toda preferencia desta vista (localStorage, try/catch, padrao
+   no codigo): uma chave estragada nao pode deixar a folha sem teclado nenhum. */
+const ATALHOS_KEY = 'altiumhub.sch.atalhos';
+let atalhosSalvos = {};
+try { atalhosSalvos = JSON.parse(localStorage.getItem(ATALHOS_KEY) || '{}') || {}; } catch (e) { atalhosSalvos = {}; }
+let ATALHOS = mapaAtalhos(atalhosSalvos);
+let capturandoAtalho = false;
+function gravaAtalhos(){
+  ATALHOS = mapaAtalhos(atalhosSalvos);
+  try { localStorage.setItem(ATALHOS_KEY, JSON.stringify(atalhosSalvos)); } catch (e) {}
+  renderAtalhos();
+}
+function renderAtalhos(){
+  const box = $('atalhoslist');
+  if (!box) return;
+  box.textContent = '';
+  for (const a of ATALHOS_PADRAO){
+    const linha = el('div', 'atalho');
+    linha.append(el('span', 'atalho-nome', a.rotulo));
+    const b = el('button', 'atalho-tecla', ATALHOS.porAcao[a.id]);
+    b.type = 'button';
+    b.title = 'clique e pressione a tecla nova';
+    if (ATALHOS.porAcao[a.id] !== a.tecla) b.classList.add('mudado');
+    b.addEventListener('click', () => {
+      if (capturandoAtalho) return;
+      capturandoAtalho = true;
+      b.classList.add('ouvindo');
+      b.textContent = 'pressione…';
+      const ouve = ev => {
+        ev.preventDefault(); ev.stopPropagation();
+        const t = normalizaTecla(ev);
+        if (!t) return;                       /* so o modificador: continua esperando */
+        window.removeEventListener('keydown', ouve, true);
+        capturandoAtalho = false;
+        if (ev.key === 'Escape'){ renderAtalhos(); return; }   /* Escape desiste */
+        const r = defineAtalho(atalhosSalvos, a.id, t);
+        if (!r.ok){ HubDialog.toast(r.erro, 'warn'); renderAtalhos(); return; }
+        atalhosSalvos = r.salvos;
+        gravaAtalhos();
+        HubDialog.toast(a.rotulo + ' → ' + t, 'ok');
+      };
+      window.addEventListener('keydown', ouve, true);
+    });
+    linha.append(b);
+    box.append(linha);
+  }
+  const rest = $('atalhosReset');
+  if (rest) rest.disabled = !Object.keys(atalhosSalvos).length;
+}
+
+/* ------- o passo da grade ------- */
+function montaGrade(){
+  const seu = $('gridsel');
+  if (!seu) return;
+  seu.textContent = '';
+  for (const g of GRADES){
+    const o = document.createElement('option');
+    o.value = g.id; o.textContent = g.rotulo;
+    if (g.id === grade.id) o.selected = true;
+    seu.append(o);
+  }
+  seu.onchange = () => {
+    grade = gradePorId(seu.value);
+    try { localStorage.setItem(VER_GRADE_KEY, grade.id); } catch (e) {}
+    /* o ima anda com a grade (snapMil), entao trocar o passo muda os dois de uma vez */
+    cam.draw(); pintaMiniaturas();
+    HubDialog.toast('grade: ' + grade.rotulo + ' · ímã ' + Math.round(snapMil()) + ' mil', 'info', 2500);
+  };
+}
+
+/* Os paineis saem da propria lista de abas, e nao de uma linha por id: era assim que uma aba
+   nova nascia acesa no rodape e com o painel do vizinho na tela — a mesma armadilha que o
+   modal de configuracao da casca ja documenta em hub.html. */
+const PANES = Array.from(document.querySelectorAll('#side .subtab')).map(b => b.dataset.pane);
 function showPane(id){
+  if (PANES.indexOf(id) < 0) id = PANES[0];
   document.querySelectorAll('#side .subtab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.pane === id)));
-  $('pane-comps').classList.toggle('on', id === 'comps');
-  $('pane-cfg').classList.toggle('on', id === 'cfg');
+  for (const p of PANES){ const el0 = $('pane-' + p); if (el0) el0.classList.toggle('on', p === id); }
   try { localStorage.setItem('schframe.pane', id); } catch (e) {}
 }
 document.querySelectorAll('#side .subtab').forEach(b => b.addEventListener('click', () => showPane(b.dataset.pane)));
 let pane0 = 'comps';
 try { pane0 = localStorage.getItem('schframe.pane') || 'comps'; } catch (e) {}
-showPane(pane0 === 'cfg' ? 'cfg' : 'comps');
+showPane(pane0);
 
 /* ------- divisorias dos dois paineis -------
    Mesmo gesto das abas Laser e BOM do hub: arrastar redimensiona, soltar perto da borda
@@ -3002,6 +3931,12 @@ pintaOlhoPinos();
 $('btnGrid').addEventListener('click', () => {
   showState.grid = !showState.grid; $('btnGrid').classList.toggle('active', showState.grid); cam.draw();
 });
+$('atalhosReset').addEventListener('click', () => {
+  atalhosSalvos = {};
+  gravaAtalhos();
+  HubDialog.toast('atalhos de volta ao padrão', 'ok');
+});
+montaGrade(); renderAtalhos();
 renderSheetCards(); buildCompTable(); buildNetList(); buildValList();
 updateMeta(); updateSaveBtn(); updateSelStatus(); cartRender(); renderProps();
 cam.resize(); cam.fit(fitBBox());
