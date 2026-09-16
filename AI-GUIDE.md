@@ -89,7 +89,7 @@ Um item JSON **plano** por linha (o parser DelphiScript lê linha a linha, como 
 | `t` | obrigatórios | opcionais |
 |---|---|---|
 | `sheet` | `name`, `size` (A4/A3/A2/A1/A0/A/B/C/D/E, ou `Custom`) | `w`,`h` — **medida real da folha, em mil**, como o Altium a reporta. Sem elas vale a tabela por nome, que traz o tamanho *legado* do Altium e **não** o ISO real: a “A4” do template da casa mede 11693×8268, não 11500×7600, e a diferença joga carimbo e fios de borda para fora da página desenhada |
-| `comp` | `sheet`,`ref`,`sym`,`x`,`y`,`rot`,`footprint` | `part` (default 1), `mirror`, `comment`, `params` |
+| `comp` | `sheet`,`ref`,`sym`,`x`,`y`,`rot`,`footprint` | `part` (default 1), `mirror`, `comment`, `params`, `refdx`/`refdy` e `comdx`/`comdy` — deslocamento do texto do designador e do comment em relação à âncora do componente, em mil, na coordenada da folha, medido até o **canto inferior-esquerdo** do texto; par ausente = o hub decide onde pousar o texto — mas o export os emite para todo componente |
 | `wire` | `sheet`,`pts` (`[[x,y],...]` ≥2, numa linha só) | — |
 | `netlabel` | `sheet`,`net`,`x`,`y` | `rot` |
 | `power` | `sheet`,`net`,`style`,`x`,`y` | `rot` (`Bar`/`Circle`/`Arrow`/`Wave`/`GndPower`/`GndSignal`/`GndEarth`) |
@@ -99,6 +99,60 @@ Um item JSON **plano** por linha (o parser DelphiScript lê linha a linha, como 
 | `text` | `sheet`,`s`,`x`,`y` | `h` (só informativo — veja Limitações no README) |
 
 `sym` referencia o nome do símbolo em `schlib.js`.
+
+`refdx`/`refdy` e `comdx`/`comdy` são o **deslocamento do texto em relação à âncora do
+componente**: a posição na folha é `(comp.x + refdx, comp.y + refdy)` para o designador e
+`(comp.x + comdx, comp.y + comdy)` para o comment — mesma coordenada de `comp.x`/`comp.y`, Y
+para cima, em mil. É deslocamento a partir da âncora, e não do lugar de origem, porque assim
+mover o componente leva o texto junto e **girar não gira o texto**.
+
+O ponto é o **canto inferior-esquerdo** do texto, e não o centro dele — é esse o ponto que o
+Altium guarda (o `RECORD=34`/`41` do `.SchDoc` não traz `Justification`, e o padrão dele é
+`BottomLeft`), e o hub ancora no canto também (`schframe.js » textoComp`/`caixaTexto`). Os dois
+lados medem até o mesmo ponto: `Txt.Location` é exatamente o ponto do contrato, e não há
+conversão a fazer em lado nenhum. Com o hub centrando e o Altium ancorando no canto, a mesma
+coordenada queria dizer dois lugares, e a ida e volta andava meia palavra a cada passagem.
+
+Designador e comment saem na horizontal dos dois lados, mas isso é limitação do espelho, não
+regra do Altium: ele guarda uma `Orientation` no registro do próprio texto e sabe deixar o
+designador em pé. Nenhum dos dois lados carrega essa propriedade hoje — designador em pé no
+Altium aparece deitado no hub.
+
+**Ausente não é zero**, e a regra vale **por par**: `refdx` com `refdy`, `comdx` com `comdy`.
+Zero é uma posição legítima (texto em cima da âncora); par ausente quer dizer "o hub decide
+sozinho", e ele pousa o designador em cima do corpo e o comment embaixo. Espelho antigo, que
+não tem os campos, não muda de comportamento nenhum.
+
+**Meio par é erro** — escreva sempre os dois. Os dois lados o ignoram do mesmo jeito: o hub
+desenha como se o par não existisse (ele decide onde pousar o texto) e o `BuildSchematic` não
+toca no texto. A diferença é só no barulho: o hub fica quieto e o build registra `[FALHA]`
+nomeando o campo que falta, porque quem escreveu meio par quase sempre queria escrever os dois.
+O `BuildSchematic` também recusa deslocamento absurdo (acima de 50000 mil), pelo mesmo motivo
+por que recusa componente sem footprint: é quase sempre erro de quem escreveu, não intenção.
+
+O `ExportProject` lê e emite os quatro campos — a posição do designador **e a do comment**. Ele
+os emite para TODO componente sempre que a sonda responder, porque daqui não dá para saber qual
+texto a mão moveu: o lugar automático do Altium não é um deslocamento fixo com que comparar. Na
+prática, depois do primeiro export "ausente" deixa de existir naquele projeto. Se esta
+instalação do Altium recusar a leitura, o componente sai sem os campos, o relatório avisa uma
+vez (não um por componente) e o hub volta a decidir onde pousar o texto.
+
+O `BuildSchematic` escreve a posição e **tenta** desligar o autoposicionamento daquele texto —
+senão o Altium o re-ancora sozinho no desenho seguinte. "Tenta" é a palavra certa: o nome dessa
+propriedade no DelphiScript de esquema **nunca foi medido** (no arquivo a marca é
+`OverrideNotAutoPosition`, mas nome de arquivo não é nome de API, e do lado PCB o equivalente é
+um *método* no componente, não uma propriedade no texto). É a mesma situação dos inteiros de
+`style`/`io` da port, logo abaixo: atravessa como sonda, e a primeira rodada dentro do Altium
+diz se pegou. Enquanto não pegar, a posição é escrita e o Altium pode re-ancorar o texto depois.
+
+O que ele escreve fica gravado no `.SchDoc`, então só vale para o texto que realmente mudou de
+lugar: o que já está onde o espelho pede não é tocado — nem a posição, nem o autoposicionamento.
+Sem essa guarda, um único re-despejo passaria para manual os designadores de toda a folha (nos
+projetos medidos, 156 de 159 se reposicionam sozinhos hoje).
+
+A posição é somada à âncora **atual** do componente, já depois de ele ter sido posicionado —
+igual à fórmula acima quando o posicionamento deu certo, e diferente dela exatamente quando não
+deu (aí o texto acompanha o símbolo onde ele ficou, em vez de ficar sozinho no lugar certo).
 
 `params` é a **identidade da peça no cadastro**, num campo plano `Chave=Valor;Chave=Valor`
 (o parser DelphiScript lê linha a linha e não aguenta objeto aninhado). Ele carrega

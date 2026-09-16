@@ -40,8 +40,22 @@ var
   NComp, NWire, NLabel, NPower, NPort, NJunc, NText, NNoErc: Integer;
   NCompPar: Integer;        // componentes que trouxeram parametro de identidade
                             // (OdooId/MPN/...): e o que liga a lista ao cadastro do Odoo
+  NCompRefPos: Integer;     // componentes cuja posicao do texto do DESIGNADOR o Altium deu
+  NCompComPos: Integer;     // idem, para o texto do COMMENT
+                            // Os dois estao aqui pelo mesmo motivo dos de cima: sem numero
+                            // na tela, "o Altium recusou a propriedade" e "o componente nao
+                            // tinha" ficam indistinguiveis - foi assim que 0 juncoes em 15
+                            // projetos passaram meses sem ninguem notar.
   SheetsMeasured: Integer;  // folhas cuja medida real o Altium entregou
   PortWarn: String;        // primeira propriedade de Port que o Altium recusou (se houver)
+  TxtPosWarn: String;      // o que esta instalacao do Altium recusou na sonda de POSICAO DE
+                           // TEXTO de componente, ja no formato do relatorio (os nomes
+                           // ligados por " e "). O aviso continua saindo UMA vez por rodada
+                           // - nao um por componente - mas nomeia TODAS as recusas: guardar
+                           // so a primeira calava sobre a segunda da mesma rodada e mandava
+                           // o usuario investigar metade do problema.
+  TxtPosKeys: String;      // os mesmos nomes, cada um entre ';', e so para a deduplicacao.
+                           // Separado do texto de cima de proposito - ver MaisRecusada.
   StampByObj: Integer;     // folhas em que a sonda do objeto eTemplate trouxe material
   StampByTpl: Integer;     // folhas em que a sonda do .SchDot trouxe material
   StampBlind: Integer;     // folhas em que nenhuma das duas respondeu
@@ -1098,6 +1112,35 @@ begin
     Result := TplTexts.IndexOf(Prim.Text) >= 0;
 end;
 
+// Anota mais uma propriedade recusada pela sonda, sem repetir. Serve aos avisos de sonda:
+// eles saem UMA vez por rodada (rodar um aviso por componente e o erro que o ExportProject
+// nunca cometeu), mas um aviso que so sabe a PRIMEIRA recusa mente por omissao quando duas
+// caem juntas - foi o caso de Designator.Location e Comment.Location, que sao a mesma
+// aposta e portanto caem as duas ou nenhuma.
+//
+// DUAS variaveis para uma lista so, e nao uma: TxtPosWarn e o texto que vai para o
+// relatorio (os nomes ligados por " e ") e TxtPosKeys e a mesma lista com cada nome entre
+// ';', que e onde a deduplicacao olha. Procurar o nome solto dentro do texto pronto
+// funciona por sorte enquanto os nomes forem dois e nenhum for pedaco do outro; no dia em
+// que entrar um terceiro que seja - um "Location" seco ao lado de "Designator.Location", um
+// "Designator.Location.X" -, o Pos() acha o pedaco, da a recusa nova por ja dita e ela some
+// em silencio. E a mesma doenca dos numeros que juntam "deu certo" com "nao sei", so que em
+// texto: "ja avisei disso" e "nunca soube disso" virariam a mesma coisa. Com o ';' dos dois
+// lados o nome so casa inteiro - a mesma disciplina do AvisaSonda do BuildSchematic.
+//
+// Sem lista e sem objeto de proposito: dois String nao tem nada para criar nem para
+// liberar, e por isso nao entram em nenhum caminho de saida antecipada.
+procedure MaisRecusada(Nome: String);
+begin
+  if Pos(';' + Nome + ';', TxtPosKeys) > 0 then
+    Exit;
+  TxtPosKeys := TxtPosKeys + ';' + Nome + ';';
+  if TxtPosWarn = '' then
+    TxtPosWarn := Nome
+  else
+    TxtPosWarn := TxtPosWarn + ' e ' + Nome;
+end;
+
 { ------------------------------- exportacao de uma folha ------------------------------- }
 
 procedure ExportSheet(Path: String; ItemsL: TStringList);
@@ -1110,6 +1153,10 @@ var
   PortSty, PortIo: Integer;
   PortFill, PortTxt, PortBrd: Integer;   // TColor BGR; -1 = a propriedade nao foi lida
   PortW, ShW, ShH: Double;
+  RefDX, RefDY, ComDX, ComDY: Integer;   // deslocamento do texto, em Coord (ver o bloco comp)
+  AncX, AncY: Integer;                   // ancora do componente, lida FORA da sonda
+  TemRef, TemCom: Boolean;               // a sonda respondeu? False = o campo NAO sai
+  TxtObj: TObject;                       // o objeto Designator/Comment, pego a parte
   k: Integer;
 begin
   SchDoc := SchServer.GetSchDocumentByPath(Path);
@@ -1144,12 +1191,112 @@ begin
           CompPars := ParamsOf(Prim);
           if CompPars <> '' then
             NCompPar := NCompPar + 1;
+          // ONDE O DESIGNADOR E O COMMENT ESTAO NA FOLHA (sonda)
+          //
+          // Os dois textos nao ficam colados no corpo do simbolo: no .SchDoc cada um e um
+          // registro proprio - RECORD=34 o designador, RECORD=41 com Name=Comment o
+          // comentario - e cada um tem Location.X/Y ABSOLUTA, na mesma coordenada de folha
+          // que o componente usa. Medido nas duas folhas do PRJ-UR-DI261924: 159
+          // designadores, 159 posicoes proprias. Sem esse par de numeros o hub desenha o
+          // nome no lugar que ELE calcula a partir do bbox do simbolo, que nao e o mesmo
+          // que o Altium escolheu - e o projetista ve na vista Esquema um desenho que nao
+          // e o do Altium.
+          //
+          // Sai como DESLOCAMENTO da ancora do componente, nao como posicao absoluta: e o
+          // que o contrato do schframe.js pede (refdx/refdy e comdx/comdy sao somados a
+          // comp.x/comp.y) e e o que faz mover o componente levar o texto junto, de graca.
+          // Coordenada de FOLHA: o texto nao gira com o componente, como no Altium.
+          //
+          // SONDA, e nao leitura comum: "Prim.Designator.Text" esta provado neste arquivo,
+          // mas o ".Location" DESSES textos nunca foi medido numa instalacao real. Como e
+          // PROPRIEDADE, o erro e de execucao e da para segurar - ao contrario de constante
+          // nomeada, que e erro de COMPILACAO e derruba o script inteiro para todo mundo
+          // (foi o que ePortLeft custou). Por isso cada leitura vai no seu try/except: se o
+          // Altium recusar, o componente sai SEM os campos e o relatorio avisa UMA vez por
+          // rodada - uma vez so, mas nomeando TODAS as recusas se mais de uma cair.
+          //
+          // DOIS try POR TEXTO, e o primeiro deles pega so o OBJETO: sao apostas diferentes.
+          // "Prim.Designator" (o objeto) e terreno provado - e dele que sai o "ref" logo
+          // abaixo, sem protecao nenhuma; o que nunca foi medido e o ".Location" DELE. Um
+          // try so, cobrindo os dois, faria um objeto que o Altium nao entregasse ser
+          // reportado como "recusou Designator.Location" e mandaria o usuario investigar a
+          // propriedade errada - errada justamente por ser a unica das duas sem prova, ou
+          // seja, a mais convincente das culpadas falsas. E a mesma separacao que o
+          // BuildSchematic ja faz do outro lado, com o mesmo recado no aviso.
+          //
+          // POR QUE EMITE SEMPRE QUE A LEITURA DER CERTO, e nao so quando o texto foi movido
+          // a mao: daqui nao da para separar as duas coisas. O lugar "automatico" do Altium
+          // nao e um deslocamento fixo com que comparar - ele depende do corpo do simbolo,
+          // da rotacao e do proprio texto. Medido nos mesmos 159 designadores: os 156 que
+          // NAO carregam a marca OverrideNotAutoPosition estao em 58 deslocamentos
+          // diferentes, de -361 a +330 mil em X e de -310 a +1320 mil em Y. A marca existe
+          // no arquivo, mas o nome dela no DelphiScript de esquema nunca foi medido, e
+          // chutar um nome de propriedade que EXISTA com outro significado erraria em
+          // silencio - pior que emitir demais. Emitir sempre diz a verdade: e onde o texto
+          // esta. Espelho antigo nao tem os campos e so ganha os dele no proximo export.
+          //
+          // A ANCORA DO COMPONENTE FICA FORA DO TRY, de proposito. Prim.Location e leitura
+          // provada - e o "x"/"y" de todo item deste arquivo, inclusive o deste comp logo
+          // abaixo. Subtraida DENTRO do try, uma falha dela seria contada como recusa de
+          // Designator.Location: o relatorio acusaria a sonda por um problema que nao e
+          // dela e mandaria investigar a propriedade errada, justamente na hora em que o
+          // usuario mais precisa de um nome confiavel. Lida aqui, o que sobra dentro do
+          // try e so o que esta mesmo sendo sondado. De brinde, o deslocamento e o "x"/"y"
+          // emitidos passam a vir da MESMA leitura da ancora.
+          AncX := Prim.Location.X;
+          AncY := Prim.Location.Y;
+          RefDX := 0;
+          RefDY := 0;
+          ComDX := 0;
+          ComDY := 0;
+          TemRef := False;
+          TemCom := False;
+          TxtObj := nil;
+          try
+            TxtObj := Prim.Designator;
+          except
+            TxtObj := nil;
+          end;
+          if TxtObj = nil then
+            MaisRecusada('Designator (o objeto do texto - nao o Designator.Text, que e provado)')
+          else
+          begin
+            try
+              RefDX := TxtObj.Location.X - AncX;
+              RefDY := TxtObj.Location.Y - AncY;
+              TemRef := True;
+            except
+              MaisRecusada('Designator.Location');
+            end;
+          end;
+          TxtObj := nil;
+          try
+            TxtObj := Prim.Comment;
+          except
+            TxtObj := nil;
+          end;
+          if TxtObj = nil then
+            MaisRecusada('Comment (o objeto do texto - nao o Comment.Text, que e provado)')
+          else
+          begin
+            try
+              ComDX := TxtObj.Location.X - AncX;
+              ComDY := TxtObj.Location.Y - AncY;
+              TemCom := True;
+            except
+              MaisRecusada('Comment.Location');
+            end;
+          end;
+          if TemRef then
+            NCompRefPos := NCompRefPos + 1;
+          if TemCom then
+            NCompComPos := NCompComPos + 1;
           s := '{"t":"comp","sheet":' + JS(SheetName) +
             ',"ref":' + JS(Prim.Designator.Text) +
             ',"sym":' + JS(Prim.LibReference) +
             ',"part":' + IntToStr(Prim.CurrentPartID) +
-            ',"x":' + ML(Prim.Location.X) +
-            ',"y":' + ML(Prim.Location.Y) +
+            ',"x":' + ML(AncX) +
+            ',"y":' + ML(AncY) +
             ',"rot":' + IntToStr(RotDegOf(Prim.Orientation)) +
             ',"mirror":' + JB(Prim.IsMirrored) +
             ',"footprint":' + JS(CurrentFootprintOf(Prim)) +
@@ -1157,6 +1304,13 @@ begin
           // omitido quando vazio: o campo e novo e o schematic.js de projeto antigo nao o tem
           if CompPars <> '' then
             s := s + ',"params":' + JS(CompPars);
+          // Omitidos quando a sonda nao respondeu, e isso NAO e o mesmo que zero: campo
+          // AUSENTE quer dizer "o hub decide sozinho onde desenhar", enquanto zero e uma
+          // posicao legitima - o texto em cima da ancora do componente.
+          if TemRef then
+            s := s + ',"refdx":' + ML(RefDX) + ',"refdy":' + ML(RefDY);
+          if TemCom then
+            s := s + ',"comdx":' + ML(ComDX) + ',"comdy":' + ML(ComDY);
           AddItem(ItemsL, s + '}');
         end;
       eWire:
@@ -1346,8 +1500,12 @@ begin
   TextVazio := 0;
   NComp := 0; NWire := 0; NLabel := 0; NPower := 0; NPort := 0; NJunc := 0; NText := 0; NNoErc := 0;
   NCompPar := 0;
+  NCompRefPos := 0;
+  NCompComPos := 0;
   SheetsMeasured := 0;
   PortWarn := '';
+  TxtPosWarn := '';
+  TxtPosKeys := '';
   StampByObj := 0;
   StampByTpl := 0;
   StampBlind := 0;
@@ -1414,6 +1572,11 @@ begin
       ' item(ns) comp com parametro de identidade (OdooId/MPN) - e o que a' +
       #13#10 + '   lista para o Odoo usa para achar o produto sem depender de texto.' +
       #13#10 + '   (um componente multi-parte conta uma vez por parte, como o resto desta linha)';
+  if NComp > 0 then
+    ItensTxt := ItensTxt + #13#10 + '   posicao dos textos: ' + IntToStr(NCompRefPos) +
+      ' designador(es) e ' + IntToStr(NCompComPos) + ' comment(s) de ' + IntToStr(NComp) +
+      #13#10 + '   (refdx/refdy e comdx/comdy - onde o texto esta NA FOLHA. Sem eles o hub' +
+      #13#10 + '   desenha o nome no lugar que ele mesmo calcula, que nao e o do Altium.)';
   if SheetsMeasured < SheetCount then
     ItensTxt := ItensTxt + #13#10 +
       '   ATENCAO: em ' + IntToStr(SheetCount - SheetsMeasured) + ' folha(s) o Altium nao' +
@@ -1423,6 +1586,15 @@ begin
     ItensTxt := ItensTxt + #13#10 +
       '   ATENCAO: esta instalacao do Altium recusou a propriedade "' + PortWarn +
       '" da Port;' + #13#10 + '   as ports sairam com o valor padrao nesse campo.';
+  if TxtPosWarn <> '' then
+    ItensTxt := ItensTxt + #13#10 +
+      '   ATENCAO: esta instalacao do Altium recusou: ' + TxtPosWarn + #13#10 +
+      '   - SONDA: nome que nunca foi medido num Altium real; o aviso acima diz se' +
+      #13#10 + '   caiu a propriedade de posicao ou o proprio objeto do texto. Os' +
+      #13#10 + '   componentes saem sem refdx/refdy (e/ou comdx/comdy) e o hub volta a' +
+      #13#10 + '   desenhar designador e comment no lugar calculado por ele. Aviso unico' +
+      #13#10 + '   por rodada, e a lista acima e completa: nem um aviso por componente,' +
+      #13#10 + '   nem recusa escondida.';
 
   ShowMessage('Esquema espelhado em:' + #13#10 + OutDir + '\schematic.js' + #13#10#13#10 +
     'Folhas: ' + IntToStr(SheetCount) +

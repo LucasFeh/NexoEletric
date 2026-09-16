@@ -61,6 +61,42 @@ var
   PcbFpNames: TStringList;   // nil = PcbLib indisponivel (validacao de footprint vira aviso)
   TrocouSimbolo: Boolean;    // algum componente ja existente teve o LibReference trocado:
                              // o desenho na folha continua o antigo ate Update From Libraries
+  AvisosDeTexto: String;     // recados sobre POSICAO DE TEXTO ja dados nesta rodada, entre
+                             // ';': nome de propriedade recusada (AvisaSonda) e tipo de
+                             // falha sistemica (FalhaDeTexto). Cada um sai UMA vez - o que
+                             // impede um texto impede os 318 da folha, e repetir afogaria o
+                             // resto do despejo
+  CompsDescolados: String;   // componentes que a passada 2b PROVOU descolados (a ancora diz
+                             // um lugar e o desenho esta noutro), entre ';' no formato
+                             // 'Ref/Parte'. A 2c le esta lista antes de posicionar texto:
+                             // ancora mentirosa nao serve de referencia para nada
+  // Contagem dos textos de componente (refdx/refdy, comdx/comdy). Existe pelo mesmo motivo
+  // que o contador por tipo do ExportProject: sem numero, "nao aplicou" e "nao tinha o que
+  // aplicar" ficam indistinguiveis - foi assim que a omissao do ePort passou meses de pe.
+  // Sao baldes SEPARADOS, UM POR DESFECHO, e nao um so: "no lugar", "no lugar mas sem trava",
+  // "nada a fazer", "nem mexi", "mexi e nao sei onde parou", "mexi e nao ficou" e "nem
+  // tentei" sao SETE respostas diferentes, e juntar qualquer uma delas na primeira daria
+  // rodape de sucesso numa rodada em que o Altium nao deixou mexer em texto nenhum. E a
+  // regra da casa, escrita depois das juncoes: um numero de relatorio nunca junta "deu
+  // certo" com "nao sei".
+  TextosPedidos: Integer;    // textos que o espelho mandou posicionar
+  TextosPostos: Integer;     // MOVIDOS, conferidos (antes e depois) e com a trava do
+                             // autoposicionamento ACEITA - aceita, que nao e o mesmo que
+                             // provada: a propria DesligaAutoPos avisa que a atribuicao pode
+                             // ser aceita e ignorada. E o melhor desfecho que este script
+                             // consegue afirmar, e nao uma garantia
+  TextosSemTrava: Integer;   // movidos e conferidos, mas o autoposicionamento continuou
+                             // LIGADO (a sonda Autoposition foi recusada): o Altium
+                             // provavelmente re-ancora esses no proximo desenho
+  TextosJaEstavam: Integer;  // ja estavam no lugar pedido: nada escrito, nada a relatar
+  TextosNaoMexidos: Integer; // nenhuma posicao chegou a ser gravada (o objeto do texto, a
+                             // leitura de antes ou a propria escrita foram recusados): o
+                             // texto ficou onde o Altium ja o punha
+  TextosSemConferencia: Integer; // a escrita foi ACEITA e a RELEITURA foi recusada: o texto
+                             // provavelmente MEXEU e este script nao sabe onde ele parou
+  TextosRecusados: Integer;  // a escrita foi feita e o texto NAO ficou onde foi pedido
+  TextosPulados: Integer;    // nem tentados: a 2b marcou o componente como DESCOLADO, e a
+                             // ancora dele nao serve de referencia para texto nenhum
 
 { ------------------------------- helpers JSON (copias do ExportBoard/ApplyChanges) ------------------------------- }
 { Copie aqui, identicos aos originais: JF, JB, JS (do ExportBoard.pas)                                              }
@@ -892,6 +928,52 @@ begin
   Report.Add('[FALHA] ' + Msg);
 end;
 
+// Aviso de SONDA: propriedade cujo nome no DelphiScript de ESQUEMA nunca foi medido num
+// Altium de verdade. Sai no relatorio UMA vez por propriedade - repetido a cada componente
+// viraria paisagem e afogaria o resto do despejo em 300 linhas iguais.
+// Sem lista e sem objeto de proposito: um String com os recados ja dados entre ';' nao
+// tem nada para criar nem para liberar, e por isso nao entra em nenhum dos caminhos de
+// saida antecipada la de baixo (que hoje liberam sete TStringList na mao, um por um).
+//
+// ESTE AVISO NAO DIZ O QUE ACONTECEU COM O TEXTO, e nao pode dizer: ele e o mesmo recado
+// para quatro pontos de chamada com desfechos DIFERENTES. Recusa no Autoposition nao impede
+// nada - a posicao e escrita logo depois -; recusa na leitura DEPOIS quer dizer que a
+// escrita ja foi feita e o texto provavelmente MEXEU. So o objeto do texto e a leitura de
+// antes significam "nao mexi". A versao anterior afirmava "O texto fica onde o Altium ja o
+// punha" nos quatro, o que era falso em dois - exatamente o tipo de frase que junta "deu
+// certo" com "nao sei". O desfecho de cada texto esta nos baldes do rodape.
+procedure AvisaSonda(Prop: String);
+begin
+  if Pos(';' + Prop + ';', AvisosDeTexto) > 0 then
+    Exit;
+  AvisosDeTexto := AvisosDeTexto + ';' + Prop + ';';
+  Report.Add('[AVISO] ATENCAO: esta instalacao do Altium recusou a propriedade ' + Prop);
+  Report.Add('        E uma SONDA: o nome dela no lado ESQUEMA nunca foi medido - o que esta');
+  Report.Add('        provado sao Designator.Text e Comment.Text, nao a posicao deles.');
+  Report.Add('        O QUE ISSO CUSTOU EM CADA TEXTO esta no resumo do rodape: recusa aqui');
+  Report.Add('        pode significar "nem mexi", "mexi e nao sei onde parou" ou "mexi sem');
+  Report.Add('        travar o autoposicionamento" - e esta linha nao sabe qual foi.');
+  Report.Add('        O resto do despejo segue normal.');
+end;
+
+// Falha de posicao de texto que, quando acontece, acontece com TODOS: a escrita e aceita e
+// IGNORADA pelo engine, ou o Altium RE-ANCORA o texto. Nao ha nada de particular ao
+// componente nisso, e por isso o recado nao pode ser por componente: numa folha de 159
+// componentes uma instalacao assim geraria 318 linhas [FALHA] dizendo a mesma coisa e o
+// dialogo anunciaria "Falhas: 318" num despejo em que o desenho saiu inteiro - o oposto do
+// cuidado que o ExportProject toma com os avisos dele.
+// Entao: o PRIMEIRO caso de cada tipo sai INTEIRO, com nomes e numeros (ele e o exemplo que
+// o usuario precisa para investigar) e conta uma falha no placar; do segundo em diante so
+// entra no total, que sai numa linha unica no rodape do relatorio.
+procedure FalhaDeTexto(Chave, Msg: String);
+begin
+  TextosRecusados := TextosRecusados + 1;
+  if Pos(';' + Chave + ';', AvisosDeTexto) > 0 then
+    Exit;
+  AvisosDeTexto := AvisosDeTexto + ';' + Chave + ';';
+  LogFail(Msg + ' [PRIMEIRO caso desta rodada - os proximos iguais so contam, no rodape]');
+end;
+
 { ------------------------------- mapeamentos ------------------------------- }
 
 function RotToOrient(rot: Integer): TRotationBy90;
@@ -1402,6 +1484,22 @@ begin
   // alvo enquanto o desenho estava (2920,4300) mil dali (medido no .SchDoc).
   // A ancora de um simbolo sao tem que cair DENTRO da caixa dele; se nao cair,
   // ancora e desenho estao descolados e nenhum delta conserta - so refazer.
+  //
+  // A CAIXA INCLUI O TEXTO DO DESIGNADOR, e e por isso que a passada 2c (que afasta esse
+  // texto quando o espelho manda) roda DEPOIS deste teste, e nao aqui dentro. Caixa maior
+  // nunca inventa um "descolado" - o teste pergunta se a ancora caiu FORA dela -, mas pode
+  // ESCONDER um: mexendo no texto so depois, a 2b continua medindo exatamente o que media
+  // antes destes campos existirem.
+  //
+  // Num RE-despejo, porem, o texto ja vem afastado do PROPRIO arquivo e a caixa ja nasce
+  // inflada - para essa parte nao ha ordem de passada que resolva. Inflada de quanto: nos
+  // mesmos 159 designadores medidos do PRJ-UR-DI261924 (ExportProject.pas) os deslocamentos
+  // vao de -361 a +330 mil em X e de -310 a +1320 mil em Y - mais de SEIS vezes a tolerancia
+  // de 200 mil deste teste, e nao "dezenas de mil" como se escreveu aqui antes de conferir.
+  // A consequencia e concreta e fica registrada: um componente descolado por ate ~1300 mil
+  // em Y pode sair [OK] daqui, porque a ancora ainda cai dentro da caixa que o proprio
+  // designador esticou. O descolamento que existiu de verdade (2920x4300 mil) continua sendo
+  // pego com folga; o que some e o pequeno.
   TemBBox := True;
   BL := 0; BR := 0; BB := 0; BT := 0;
   try
@@ -1426,11 +1524,20 @@ begin
       IntToStr(C.Location.X) + ',' + IntToStr(C.Location.Y) +
       ' (ultimo metodo: ' + Metodo + ')')
   else if Descolado then
+  begin
+    // A 2c precisa saber DISTO. La a ancora do componente e a unica referencia possivel
+    // para o texto ("ancora + deslocamento"), e aqui acabou de ficar provado que ela mente:
+    // ela diz o alvo enquanto o desenho esta longe dali (foi medido 2920x4300 mil). Sem
+    // este registro a 2c poe o designador em ancora-mentirosa+dx - milhares de mil do
+    // simbolo que o usuario ve - e ainda escreve [OK], porque a conferencia dela confirma
+    // uma coordenada que esta certa em relacao a uma referencia errada.
+    CompsDescolados := CompsDescolados + ';' + Ref + '/' + IntToStr(PartId) + ';';
     LogFail('posicao ' + Ref + '/' + IntToStr(PartId) + ': ancora em ' +
       JGet(Line, 'x') + ',' + JGet(Line, 'y') + ' mas o DESENHO esta fora dela ' +
       '(caixa ' + IntToStr(BL) + ',' + IntToStr(BB) + ' a ' + IntToStr(BR) + ',' +
       IntToStr(BT) + ') - componente descolado por despejo antigo; apague a folha ' +
-      '(Ctrl+A, Delete) e redespeje')
+      '(Ctrl+A, Delete) e redespeje');
+  end
   else
   begin
     if not TemBBox then
@@ -1439,6 +1546,400 @@ begin
       JGet(Line, 'x') + ',' + JGet(Line, 'y') + ' rot ' + JGet(Line, 'rot') +
       ' [' + Metodo + ']');
   end;
+end;
+
+{ ------------------- passada 2c: posicao dos textos do componente ------------------- }
+{                                                                                         }
+{ O item "comp" pode trazer QUATRO campos OPCIONAIS, todos numeros planos em mil:          }
+{   refdx/refdy -> deslocamento do texto do DESIGNADOR em relacao a ANCORA do componente   }
+{   comdx/comdy -> o mesmo para o texto do COMMENT                                         }
+{                                                                                         }
+{ A posicao do texto na folha e (comp.x + dx, comp.y + dy): coordenada de FOLHA, mil, Y    }
+{ para cima, a mesma de comp.x/comp.y. O texto NAO gira com o componente (o Altium desenha }
+{ designador e comment sempre na horizontal), entao aqui nao ha transform nenhum: e soma.  }
+{                                                                                         }
+{ O PONTO E O CANTO INFERIOR-ESQUERDO do texto, e nao o centro dele - e e o mesmo ponto    }
+{ que o .SchDoc guarda (RECORD=34 no designador, RECORD=41 no comment: sem Justification   }
+{ os dois nascem BottomLeft). O hub ancora no canto tambem (schframe.js >> textoComp e     }
+{ caixaTexto). Os tres lados falam do MESMO ponto, entao aqui NAO HA CONVERSAO A FAZER:    }
+{ Txt.Location e, tal e qual, o ponto do contrato. Meia palavra de correcao "para          }
+{ centralizar" seria um erro que nunca fecha o ciclo - o espelho leria deslocado para um   }
+{ lado e escreveria deslocado para o outro.                                                }
+{                                                                                         }
+{ AUSENTE NAO E ZERO. Zero e uma posicao legitima - o texto em cima da ancora -, enquanto  }
+{ ausente quer dizer "o hub decide sozinho" (ele desenha embaixo/em cima do corpo) e o     }
+{ Altium tem de ficar com o que ja tinha. Por isso TODO campo passa pelo portao JHas ANTES }
+{ de ser lido: JNum de chave ausente devolve 0 CALADO (ver JNum la em cima), e sem o       }
+{ portao os 15 projetos que existem hoje - nenhum deles tem estes campos - teriam TODO     }
+{ designador empilhado em cima da ancora do proprio componente, com o relatorio dizendo    }
+{ [OK] para cada um.                                                                       }
+{                                                                                         }
+{ E "ausente nao e zero" vale POR CAMPO, nao por par: dx sem dy nao e "dy = 0". O par e    }
+{ EXIGIDO, e meio par e recusado com [FALHA] sem tocar no texto. A escolha e essa, e nao   }
+{ "nao mexer nesse eixo", por dois motivos: os dois escritores do arquivo sempre escrevem  }
+{ os dois campos juntos e sempre apagam os dois juntos (schframe.js >> arrastar o texto e  }
+{ "voltar ao lugar de origem"; ExportProject.pas >> um try por texto, que emite o par ou   }
+{ nada), entao meio par nao vem de uso normal - vem de .js editado a mao ou truncado, e    }
+{ nessa hora chutar o eixo que falta e escrever no arquivo do usuario uma posicao que      }
+{ ninguem pediu. O que existia antes puxava o designador para o X exato da ancora e ainda  }
+{ dizia [OK]. Segundo motivo: "nao mexer nesse eixo" exigiria LER a posicao atual do texto }
+{ para completar o par - e essa leitura e justamente a sonda que pode nao existir nesta    }
+{ instalacao, ou seja, o caminho mais fragil para o caso mais raro.                        }
+{                                                                                         }
+{ O preco da escolha, dito por inteiro: com meio par o hub AINDA desenha o texto com       }
+{ zero no eixo que falta (schframe.js >> textoComp, "dx || 0"), entao previa e folha       }
+{ divergem nesse caso unico. E por isso a recusa sai como [FALHA] nomeando o campo que     }
+{ falta, e nao em silencio: o relatorio e o unico lugar onde a divergencia aparece.        }
+
+// "No mesmo lugar", com folga. Comparar coordenada interna com igualdade exata faria todo
+// re-despejo ver diferenca onde nao ha: o deslocamento da uma volta inteira (Coord -> mil
+// no ExportProject via CoordToMils, mil no .js, mil -> Coord aqui via MilsToCoord) e volta
+// com o arredondamento da volta. A folga e de 2 mil, bem menor que o menor passo de grade
+// da folha (100 mil) - ela nao confunde texto movido com texto parado.
+// Sem Abs de proposito: as duas comparacoes dizem o mesmo e nao dependem de mais uma
+// primitiva do engine.
+function MesmoPonto(AX, AY, BX, BY, Tol: Integer): Boolean;
+begin
+  Result := (AX - BX <= Tol) and (BX - AX <= Tol) and
+            (AY - BY <= Tol) and (BY - AY <= Tol);
+end;
+
+// Desliga o autoposicionamento do texto: com ele ligado, o Altium re-ancora o texto sozinho
+// e a posicao escrita pode nao aparecer em lugar nenhum.
+//
+// ISTO E UMA SONDA - e sao TRES suposicoes numa linha so, nenhuma delas medida:
+//   1. o NOME. No .SchDoc a marca e OverrideNotAutoPosition (designador) e NotAutoPosition
+//      (parametro); como a propriedade se chama no DelphiScript de ESQUEMA, ninguem mediu;
+//   2. o MECANISMO. Do lado PCB isto NAO e atribuicao, e METODO:
+//      Comp.ChangeNameAutoposition(eAutoPos_Manual) (ApplyChanges.pas >> DoDesignatorMove);
+//   3. o DONO. La o metodo e do COMPONENTE, nao do objeto do texto - aqui se atribui no
+//      texto, que e o dono que faz sentido para o Comment tambem.
+// A consequencia de (2) e (3) e o que precisa estar escrito: se no esquema tambem for
+// preciso um metodo, esta atribuicao pode ser ACEITA e nao fazer NADA - sem excecao, sem
+// aviso. Por isso ela nunca e prova de coisa nenhuma: quem diz se a posicao pegou e a
+// conferencia ANTES/DEPOIS da PositionCompText, nunca esta linha.
+//
+// O valor vai como INTEIRO CRU (0 = o primeiro item de TTextAutoposition, que do lado PCB e
+// o Manual que o ApplyChanges usa) pelo mesmo motivo de style/io da port: constante NOMEADA
+// desconhecida e erro de COMPILACAO, derruba o script INTEIRO para todo mundo e nenhum
+// try/except pega; propriedade desconhecida e erro de EXECUCAO, que o try/except pega.
+//
+// O QUE A PRIMEIRA RODADA NUM ALTIUM DE VERDADE RESPONDE, e como ler a resposta:
+//   excecao aqui                  -> o NOME esta errado; sai [AVISO] uma vez, com o nome
+//                                    tentado, e o resto do despejo segue normal;
+//   sem excecao e texto no alvo   -> nome, mecanismo e dono certos;
+//   sem excecao e texto re-ancorado pelo Altium -> a atribuicao foi aceita e IGNORADA: o
+//                                    caminho e procurar o metodo equivalente ao do lado PCB.
+// Recusada, segue-se em frente: a posicao ainda e TENTADA.
+//
+// E POR ISSO ESTA ROTINA DEVOLVE UM BOOLEAN, em vez de engolir a recusa num aviso. Como o
+// nome nunca foi medido, a recusa e o desfecho MAIS PROVAVEL da primeira rodada num Altium
+// de verdade - e, sem o valor de volta, esse desfecho ficava invisivel: a posicao era
+// escrita, a conferencia antes/depois dava certo e o rodape anunciava "N movidos e
+// CONFERIDOS" sem uma palavra de que aqueles N textos continuaram com o autoposicionamento
+// LIGADO e vao ser re-ancorados pelo Altium no proximo desenho. "Movido e conferido" e
+// "movido e o Altium provavelmente vai desfazer" nao podem ser o mesmo numero.
+function DesligaAutoPos(Txt: TObject; Qual: String): Boolean;
+begin
+  Result := True;
+  try
+    Txt.Autoposition := 0;
+  except
+    Result := False;
+    AvisaSonda(Qual + '.Autoposition');
+  end;
+end;
+
+// Aplica refdx/refdy e comdx/comdy num componente que JA ESTA no lugar final.
+// Chamada pela passada 2c - o porque de ser uma passada propria esta no comentario dela,
+// la na rotina principal.
+procedure PositionCompText(SchDoc: ISch_Document; Line: String);
+var
+  C, Txt: TObject;
+  Ref, Qual, Pref, Falta, Quem, Feito, Trava: String;
+  PartId, i, AX, AY, TX, TY, Tol: Integer;
+  AntesX, AntesY, DepoisX, DepoisY: Integer;
+  DX, DY: Double;
+  TemX, TemY, LeuAntes, LeuDepois, Escreveu, TravouAutoPos: Boolean;
+begin
+  // Espelho antigo nao tem nenhum dos quatro campos: sai ANTES de procurar o componente.
+  // Para quem nao usa, esta passada nao toca em propriedade nenhuma e nao escreve uma linha
+  // sequer no relatorio - que e o que "nao pode mudar de comportamento" quer dizer.
+  if not (JHas(Line, 'refdx') or JHas(Line, 'refdy') or
+          JHas(Line, 'comdx') or JHas(Line, 'comdy')) then
+    Exit;
+  Ref := JGet(Line, 'ref');
+  PartId := 1;
+  if JHas(Line, 'part') then
+    PartId := Round(JNum(Line, 'part'));
+  if PartId < 1 then
+    PartId := 1;
+  Quem := 'texto ' + Ref + '/' + IntToStr(PartId);
+  C := FindCompInDoc(SchDoc, Ref, PartId);
+  if C = nil then
+    // Sai CALADO, de proposito. A passada 2b varre exatamente as mesmas linhas "comp" desta
+    // folha e ja registrou [FALHA] para este componente, com este mesmo designador e esta
+    // mesma parte: "componente nao esta na folha". Se a 2b nao achou, a 2c nao vai achar, e
+    // repetir o recado so dobraria o numero do rodape por um problema so - o usuario iria
+    // procurar dois defeitos onde existe um.
+    Exit;
+
+  // COMPONENTE DESCOLADO: nao se tenta nada. A 2b mediu e provou que a ancora deste
+  // componente diz um lugar enquanto o desenho esta noutro, e a ancora e justamente a unica
+  // referencia que esta passada teria para o texto. Tentar aqui poria o designador em
+  // ancora-mentirosa + dx, longe do simbolo que o usuario ve, e - pior - registraria [OK],
+  // porque a conferencia antes/depois confirmaria uma coordenada certa em relacao a uma
+  // referencia errada. O conserto do descolado e refazer a folha (a 2b diz como); ate la o
+  // texto fica onde esta.
+  // O numero sai no rodape porque "nem tentei" nao pode virar "deu certo" nem sumir: o
+  // pedido existiu no .js e tem de aparecer em algum balde.
+  if Pos(';' + Ref + '/' + IntToStr(PartId) + ';', CompsDescolados) > 0 then
+  begin
+    if JHas(Line, 'refdx') or JHas(Line, 'refdy') then
+    begin
+      TextosPedidos := TextosPedidos + 1;
+      TextosPulados := TextosPulados + 1;
+    end;
+    if JHas(Line, 'comdx') or JHas(Line, 'comdy') then
+    begin
+      TextosPedidos := TextosPedidos + 1;
+      TextosPulados := TextosPulados + 1;
+    end;
+    // Sem linha propria no relatorio, pelo mesmo motivo do C = nil acima: a 2b ja gritou
+    // por este componente, com este designador e esta parte.
+    Exit;
+  end;
+
+  // A ancora e a do componente COMO ELE ESTA AGORA, e nao o x/y pedido no .js. Isso e para o
+  // outro desfecho ruim da 2b, o em que ela nao CONSEGUIU mover o componente: ali a ancora
+  // continua honesta - ela diz onde o simbolo de fato ficou - e o texto tem de acompanhar o
+  // simbolo, em vez de voar para uma coordenada que ninguem alcancou. O caso em que a ancora
+  // MENTE e o descolado, e ele ja saiu logo acima sem tentar nada: se a 2b marcou, nenhum
+  // valor lido daqui presta. Com a 2b em ordem os dois numeros sao o mesmo.
+  AX := C.Location.X;
+  AY := C.Location.Y;
+  Tol := MilsToCoord(2);
+
+  for i := 0 to 1 do
+  begin
+    if i = 0 then
+    begin
+      Qual := 'Designator';
+      Pref := 'ref';
+    end
+    else
+    begin
+      Qual := 'Comment';
+      Pref := 'com';
+    end;
+    TemX := JHas(Line, Pref + 'dx');
+    TemY := JHas(Line, Pref + 'dy');
+    if not (TemX or TemY) then
+      continue;
+    TextosPedidos := TextosPedidos + 1;
+
+    // O PAR E OBRIGATORIO (o porque esta no cabecalho desta passada): meio par nao vira
+    // zero no eixo que falta, vira recusa - e o texto fica exatamente onde esta.
+    if not (TemX and TemY) then
+    begin
+      if TemX then
+        Falta := Pref + 'dy'
+      else
+        Falta := Pref + 'dx';
+      LogFail(Quem + ' (' + Qual + '): falta ' + Falta + ' - o par ' + Pref + 'dx/' +
+        Pref + 'dy e obrigatorio, o eixo que falta NAO vale zero; texto NAO movido ' +
+        '(conserte a linha no .js ou reexporte o projeto)');
+      continue;
+    end;
+    DX := JNum(Line, Pref + 'dx');
+    DY := JNum(Line, Pref + 'dy');
+    Feito := JF(DX) + ',' + JF(DY) + ' mil da ancora do componente';
+
+    // Faixa valida, no mesmo espirito do style/io da port. 50000 mil e maior que o maior
+    // lado de folha do Altium (a A0 tem 46811), entao nenhum deslocamento de texto de
+    // verdade e recusado aqui - e um texto a 50000 mil do proprio componente nao seria
+    // dele. Recusar e melhor que escrever: fora da folha, o usuario nem acha o texto.
+    if (DX < -50000) or (DX > 50000) or (DY < -50000) or (DY > 50000) then
+    begin
+      LogFail(Quem + ' (' + Qual + '): deslocamento ' + JF(DX) + ',' + JF(DY) +
+        ' mil esta fora da faixa - NAO aplicado');
+      continue;
+    end;
+
+    // Designator e Comment sao OBJETOS de texto do componente. Ler o .Text dos dois e o que
+    // este arquivo ja faz e esta provado; pegar o objeto para ESCREVER nele e o passo novo,
+    // entao ele tambem vai protegido.
+    Txt := nil;
+    try
+      if i = 0 then
+        Txt := C.Designator
+      else
+        Txt := C.Comment;
+    except
+      Txt := nil;
+    end;
+    if Txt = nil then
+    begin
+      // O nome que vai no aviso diz o que FALHOU: o objeto, e nao a propriedade de posicao
+      // dele. Avisar "recusou a propriedade Designator" mandaria investigar Designator.Text,
+      // que e justamente o que este arquivo ja usa e sabe que funciona.
+      AvisaSonda(Qual + ' (o objeto do texto - nao o ' + Qual + '.Text, que e provado)');
+      // Sem o objeto nao ha o que escrever: nada foi tocado, o texto ficou onde estava.
+      TextosNaoMexidos := TextosNaoMexidos + 1;
+      continue;
+    end;
+
+    TX := AX + MilsToCoord(DX);
+    TY := AY + MilsToCoord(DY);
+
+    // LEITURA ANTES DA ESCRITA - e ela e o portao de tudo o que vem depois. Duas razoes:
+    //
+    //   1. e a unica base de comparacao HONESTA. Ler Location DEPOIS de escrever Location e
+    //      perguntar a mesma propriedade que acabou de ser gravada: verificacao circular, a
+    //      mesma que este arquivo proibe por escrito na passada 2b e que fez 81 componentes
+    //      desenhados FORA da folha sairem [OK]. Com o valor de antes na mao da para exigir
+    //      o que importa - que a Location tenha MUDADO, e mudado para o alvo -, e e isso que
+    //      pega o caso real: a escrita ser aceita e ignorada pelo engine;
+    //
+    //   2. nao dando para LER, nao se ESCREVE. Sem leitura nao ha como saber se o texto ja
+    //      esta onde foi pedido, e escrever as cegas significaria desligar o
+    //      autoposicionamento de TODOS os textos da folha para nada (ver a guarda abaixo).
+    LeuAntes := True;
+    AntesX := 0;
+    AntesY := 0;
+    try
+      AntesX := Txt.Location.X;
+      AntesY := Txt.Location.Y;
+    except
+      LeuAntes := False;
+    end;
+    if not LeuAntes then
+    begin
+      AvisaSonda(Qual + '.Location');
+      // A guarda acima e explicita: nao dando para LER, nao se ESCREVE. Entao aqui o texto
+      // com certeza nao mexeu.
+      TextosNaoMexidos := TextosNaoMexidos + 1;
+      continue;
+    end;
+
+    // JA ESTA NO LUGAR: nao escreve NADA - nem a posicao, nem o autoposicionamento - e nem
+    // gasta linha de relatorio. Isto nao e economia, e o contrario de um estrago: foi medido
+    // que 156 dos 159 designadores reais NAO carregam a marca OverrideNotAutoPosition, ou
+    // seja, hoje eles se reposicionam sozinhos quando o simbolo muda. Como o ExportProject
+    // emite refdx/refdy para TODOS (dali nao da para separar "movido a mao" de "posto pelo
+    // Altium"), um re-despejo sem esta guarda passaria a folha INTEIRA para manual de uma
+    // vez, para sempre, sem ninguem ter pedido - e dali em diante o nome de cada componente
+    // so acompanharia o simbolo na unha. Com a guarda, quem perde o autoposicionamento e so
+    // o texto que o usuario REALMENTE moveu: o unico cujo deslocamento no .js difere do que
+    // esta na folha.
+    if MesmoPonto(AntesX, AntesY, TX, TY, Tol) then
+    begin
+      TextosJaEstavam := TextosJaEstavam + 1;
+      continue;
+    end;
+
+    // CICLO 1, so o autoposicionamento. Separado de proposito: do lado PCB foi MEDIDO que
+    // ele precisa estar commitado ANTES do movimento, senao o Altium re-ancora o texto
+    // sozinho (ApplyChanges.pas >> DoDesignatorMove, "num ciclo proprio"). Aqui nao ha
+    // medicao nenhuma, entao vale a licao do lado que ja doeu.
+    // As mensagens vao no endereco do COMPONENTE, o unico provado neste arquivo.
+    // O valor de volta e guardado porque ele muda o VEREDITO la embaixo: texto que chega no
+    // alvo sem a trava do autoposicionamento nao entra no mesmo balde do que chega travado.
+    SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
+      SCHM_BeginModify, c_NoEventData);
+    TravouAutoPos := DesligaAutoPos(Txt, Qual);
+    SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
+      SCHM_EndModify, c_NoEventData);
+    // Frase pronta para as mensagens la de baixo. Com o valor de volta na mao, elas param de
+    // PERGUNTAR se o autoposicionamento estava ligado e passam a DIZER - a pergunta era a
+    // mesma coisa que este arquivo cobra em todo lugar: afirmar (ou duvidar) sem medir.
+    if TravouAutoPos then
+      Trava := 'a trava do autoposicionamento foi ACEITA e mesmo assim ele re-ancorou'
+    else
+      Trava := 'o autoposicionamento continuou LIGADO: a trava foi recusada nesta instalacao';
+
+    // CICLO 2, a posicao. Location de TEXTO e a ancora do proprio texto - e o que netlabel
+    // e power ja usam aqui, e a medicao do .SchDoc real mostrou esses dois exatos. O
+    // "NUNCA atribuir Location" da PositionComp vale para COMPONENTE, que tem as primitivas
+    // do simbolo penduradas na ancora; o designador nao tem nenhuma pendurada nele.
+    Escreveu := True;
+    SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
+      SCHM_BeginModify, c_NoEventData);
+    try
+      Txt.Location := Point(TX, TY);
+    except
+      Escreveu := False;
+    end;
+    SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
+      SCHM_EndModify, c_NoEventData);
+    if not Escreveu then
+    begin
+      AvisaSonda(Qual + '.Location');
+      // A atribuicao levantou excecao: o engine recusou a escrita, entao nenhuma posicao
+      // nova foi gravada e o texto ficou onde estava.
+      TextosNaoMexidos := TextosNaoMexidos + 1;
+      continue;
+    end;
+
+    // LEITURA DEPOIS. Leu antes e nao le agora: a escrita foi ACEITA (nenhuma excecao) e nao
+    // da para saber onde o texto parou - o provavel e que ele TENHA mexido. Isso nao e "nao
+    // mexi", e "mexi e nao sei onde foi parar": balde proprio, e nunca o mesmo de "no
+    // lugar" - ver o rodape.
+    LeuDepois := True;
+    DepoisX := 0;
+    DepoisY := 0;
+    try
+      DepoisX := Txt.Location.X;
+      DepoisY := Txt.Location.Y;
+    except
+      LeuDepois := False;
+    end;
+    if not LeuDepois then
+    begin
+      AvisaSonda(Qual + '.Location');
+      TextosSemConferencia := TextosSemConferencia + 1;
+      continue;
+    end;
+
+    // O VEREDITO. Chegar aqui ja quer dizer que o texto NAO estava no alvo antes (a guarda
+    // acima teria saido), entao "esta no alvo agora" e mudanca de verdade, e nao a leitura
+    // de volta do que acabou de ser gravado.
+    if MesmoPonto(DepoisX, DepoisY, TX, TY, Tol) then
+    begin
+      if TravouAutoPos then
+      begin
+        TextosPostos := TextosPostos + 1;
+        LogOk(Quem + ' (' + Qual + ') -> ' + Feito);
+      end
+      else
+      begin
+        // CHEGOU NO ALVO, MAS SEM TRAVA. A posicao foi escrita e conferida AGORA - por isso
+        // e [OK] e nao [FALHA] -, so que o autoposicionamento continuou ligado: no proximo
+        // redesenho o Altium pode re-ancorar este texto sozinho e desfazer tudo, sem avisar
+        // ninguem. Numero separado no rodape porque a diferenca e temporal, e nao de grau:
+        // um esta feito, o outro esta feito ATE o Altium desenhar de novo.
+        TextosSemTrava := TextosSemTrava + 1;
+        LogOk(Quem + ' (' + Qual + ') -> ' + Feito +
+          ' - SEM TRAVA: o autoposicionamento nao pode ser desligado (sonda recusada), ' +
+          'entao o Altium pode re-ancorar este texto no proximo desenho');
+      end;
+    end
+    else if MesmoPonto(DepoisX, DepoisY, AntesX, AntesY, 0) then
+      // O caso que a conferencia circular NUNCA pegaria: a escrita foi aceita (nenhuma
+      // excecao) e o engine a ignorou - a Location nao saiu do lugar. Do lado PCB isso e
+      // regra, e nao excecao: "escrever XLocation em texto e ignorado neste engine"
+      // (ApplyChanges.pas >> DoDesignatorMove, que por isso move com MoveByXY).
+      FalhaDeTexto('ignorada', Quem + ' (' + Qual + '): a escrita foi ACEITA mas a Location ' +
+        'NAO mudou - continua em ' + IntToStr(AntesX) + ',' + IntToStr(AntesY) + ', pedido ' +
+        IntToStr(TX) + ',' + IntToStr(TY) + '. Neste engine a Location de texto pode ser ' +
+        'ignorada; o caminho e mover por metodo, como o MoveByXY do lado PCB.')
+    else
+      FalhaDeTexto('reancorado', Quem + ' (' + Qual + '): pedido ' + IntToStr(TX) + ',' +
+        IntToStr(TY) + ' mas ficou ' + IntToStr(DepoisX) + ',' + IntToStr(DepoisY) +
+        ' (antes estava em ' + IntToStr(AntesX) + ',' + IntToStr(AntesY) + ') - o Altium ' +
+        're-ancorou o texto; ' + Trava);
+  end;
+  C.GraphicallyInvalidate;
 end;
 
 // Confirmacao digitada (usa so primitivas provadas neste engine)
@@ -1883,7 +2384,7 @@ var
   EstiloFolha: Integer;                  // -1 = folha custom: nao escrever SheetStyle
   ServerDoc: IServerDocument;
   SchDoc: ISch_Document;
-  RelTxt: String;
+  RelTxt, TxtWarn: String;
   Gravou: Boolean;
 begin
   // Raiz do workspace DESTA maquina: PRIMEIRA coisa do procedimento, porque tudo abaixo
@@ -1938,6 +2439,19 @@ begin
   OkCount := 0;
   TrocouSimbolo := False;   // DelphiScript nao zera global: sem isto o aviso do
                            // relatorio herdaria o valor da rodada anterior do script
+  AvisosDeTexto := '';     // idem: sem zerar, a segunda rodada da sessao ficaria MUDA
+                           // sobre uma propriedade que o Altium recusou de novo
+  CompsDescolados := '';   // idem: sem zerar, a 2c pularia o texto de um componente que so
+                           // estava descolado na rodada ANTERIOR - e que esta rodada, com a
+                           // folha ja refeita, posicionaria sem problema
+  TextosPedidos := 0;
+  TextosPostos := 0;
+  TextosSemTrava := 0;
+  TextosJaEstavam := 0;
+  TextosNaoMexidos := 0;
+  TextosSemConferencia := 0;
+  TextosRecusados := 0;
+  TextosPulados := 0;
   FailCount := 0;
 
   Src := TStringList.Create;
@@ -2094,9 +2608,10 @@ begin
 
   { ---------------- PASSO 2: despejo folha a folha ----------------
     O usuario escolhe um .SchDoc JA EXISTENTE do projeto (o carimbo/template dele
-    e preservado). Dentro da folha o despejo e em duas passadas:
+    e preservado). Dentro da folha o despejo e em tres passadas:
       2a) coloca os simbolos (ou reaproveita o que ja tem o mesmo designador/parte)
       2b) so entao aplica posicao/orientacao/espelho de cada um, conforme o .js
+      2c) e, por fim, a posicao dos TEXTOS (designador/comment) de quem pediu
     Aplicar a posicao no fim evita o deslocamento que a mudanca de Orientation
     provoca quando ela vem depois do Location. }
   for si := 0 to SheetNames.Count - 1 do
@@ -2193,6 +2708,28 @@ begin
         continue;
       PositionComp(SchDoc, Line);
     end;
+    // 2c) posicao dos TEXTOS do componente (refdx/refdy, comdx/comdy). Passada PROPRIA,
+    // depois da 2b, por tres motivos - nesta ordem de importancia:
+    //   1. a posicao do texto e "ancora do componente + deslocamento", e so existe depois
+    //      que o componente chegou no lugar final. A 2b so termina aqui;
+    //   2. ela precisa valer TAMBEM para componente que JA ESTAVA na folha - que hoje e o
+    //      caso de todos os 15 projetos deste workspace. Esse passa pela AtualizaComp, la
+    //      na 2a, quando a ancora dele ainda e a antiga; aplicar o texto de dentro da
+    //      AtualizaComp resolveria so o re-despejo e ainda por cima em cima de uma ancora
+    //      velha. Uma passada que varre as MESMAS linhas "comp" da 2b pega os dois casos,
+    //      novo e existente, sem nenhum if sobre quem colocou o componente;
+    //   3. a conferencia geometrica da 2b mede BoundingRectangle_Full, e o designador entra
+    //      nessa caixa (ver a nota la). Mexer no texto so depois deixa aquele teste medindo
+    //      o mesmo que ele media antes destes campos existirem.
+    for i := 0 to Src.Count - 1 do
+    begin
+      Line := Trim(Src[i]);
+      if not JHas(Line, 't') then
+        continue;
+      if (JGet(Line, 'sheet') <> SheetName) or (JGet(Line, 't') <> 'comp') then
+        continue;
+      PositionCompText(SchDoc, Line);
+    end;
     SchServer.ProcessControl.PostProcess(SchDoc, '');
     SchDoc.GraphicallyInvalidate;
 
@@ -2255,6 +2792,64 @@ begin
     Report.Add('  rode no Altium: Tools > Update From Libraries (ele mostra o que vai mudar antes).');
     Report.Add('');
   end;
+  // O numero dos textos e a prova de que a passada 2c fez alguma coisa. Sem ele, "o Altium
+  // recusou a propriedade" e "o espelho nao pediu nada" sairiam iguais no relatorio: em
+  // silencio. A linha so aparece quando alguem pediu - projeto que nao usa os campos nao
+  // ganha linha nova nenhuma.
+  //
+  // Um numero por DESFECHO, e nao um so: "no lugar", "no lugar mas sem trava", "nada a
+  // fazer", "nem mexi", "mexi e nao sei onde parou", "mexi e nao ficou" e "nem tentei" sao
+  // sete respostas diferentes, e a primeira nao pode comer nenhuma das outras seis.
+  // Esses baldes sao tambem o que impede a enxurrada - numa instalacao que recuse a sonda,
+  // uma folha de 159 componentes daria 318 linhas [FALHA] repetindo o mesmo recado e o
+  // dialogo anunciaria "Falhas: 318" num despejo em que o desenho saiu inteiro. Aqui isso e
+  // UM resumo por rodada, com o [AVISO] (ou a primeira [FALHA]) la em cima dizendo o que
+  // esta instalacao recusou.
+  if TextosPedidos > 0 then
+  begin
+    Report.Add('Textos de componente (refdx/refdy, comdx/comdy): ' + IntToStr(TextosPedidos) +
+      ' pedidos.');
+    Report.Add('  ' + IntToStr(TextosPostos) + ' movidos e CONFERIDOS (posicao lida ANTES e ' +
+      'DEPOIS da escrita, e ela mudou para o ponto pedido; a trava do autoposicionamento foi ' +
+      'ACEITA - aceita, que nao e o mesmo que provada).');
+    if TextosSemTrava > 0 then
+    begin
+      Report.Add('  ' + IntToStr(TextosSemTrava) + ' movidos e conferidos, mas SEM TRAVA: esta ' +
+        'instalacao recusou a propriedade de autoposicionamento (o [AVISO] acima diz qual).');
+      Report.Add('     Estao no lugar AGORA e nao contam junto com os de cima: com o');
+      Report.Add('     autoposicionamento ligado, o Altium pode re-ancorar cada um deles no');
+      Report.Add('     proximo redesenho e desfazer isto sem avisar. Confira depois de');
+      Report.Add('     compilar; se voltaram, o caminho e o metodo, como o do lado PCB.');
+    end;
+    if TextosJaEstavam > 0 then
+      Report.Add('  ' + IntToStr(TextosJaEstavam) + ' ja estavam no lugar pedido: nada a fazer, ' +
+        'nenhuma propriedade escrita (e por isso nao ha uma linha para cada um acima).');
+    if TextosNaoMexidos > 0 then
+    begin
+      Report.Add('  ' + IntToStr(TextosNaoMexidos) + ' NAO mexidos: a sonda foi recusada e ' +
+        'nenhuma posicao chegou a ser gravada (o [AVISO] acima diz qual propriedade).');
+      Report.Add('     Nao contam como "no lugar" nem como falha por componente: aqui o texto');
+      Report.Add('     ficou mesmo onde o Altium ja o punha.');
+    end;
+    if TextosSemConferencia > 0 then
+    begin
+      Report.Add('  ' + IntToStr(TextosSemConferencia) + ' escritos SEM CONFERENCIA: a escrita ' +
+        'foi aceita e a RELEITURA foi recusada (o [AVISO] acima diz qual propriedade).');
+      Report.Add('     Estes nao sao "nao mexi": o provavel e que tenham mexido, e o que falta');
+      Report.Add('     e saber onde pararam. Confira no Altium antes de dar o desenho por bom.');
+    end;
+    if TextosRecusados > 0 then
+      Report.Add('  ' + IntToStr(TextosRecusados) + ' NAO ficaram onde foi pedido (escrita ' +
+        'aceita e ignorada, ou texto re-ancorado pelo Altium): a [FALHA] acima e o primeiro ' +
+        'caso, com os numeros, e vale por todos eles.');
+    if TextosPulados > 0 then
+      Report.Add('  ' + IntToStr(TextosPulados) + ' nem tentados: o componente esta DESCOLADO ' +
+        '(a [FALHA] de posicao acima nomeia cada um) - a ancora dele mente, e texto posto a ' +
+        'partir dela cairia longe do simbolo com cara de [OK]. Refaca a folha e redespeje.');
+    if (TextosPostos + TextosSemTrava + TextosJaEstavam + TextosNaoMexidos +
+        TextosSemConferencia + TextosRecusados + TextosPulados) < TextosPedidos then
+      Report.Add('  O resto esta acima, um a um, com o motivo.');
+  end;
   Report.Add('OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount));
   // As folhas ja nasceram na pasta do .PrjPcb; so o relatorio depende da raiz.
   Gravou := SalvaOuExplica(Report, ProjDir + '\build-report.txt');
@@ -2265,8 +2860,39 @@ begin
   if Gravou then
     RegenerateProjectsIndex(ExtractFileName(ProjDir));
 
+  // O DIALOGO E O UNICO LUGAR QUE O USUARIO SEMPRE VE - o build-report.txt ele so abre se
+  // tiver motivo, e "OK: 159   Falhas: 0" nao e motivo nenhum. Enquanto o resumo dos textos
+  // vivia so no rodape do relatorio, uma instalacao que recusasse a sonda mostrava
+  // exatamente o mesmo dialogo de um despejo perfeito, e a recusa podia passar rodadas sem
+  // ser vista. O ExportProject ja leva o ATENCAO da sonda dele para dentro do ShowMessage
+  // (TxtPosWarn); aqui vale igual - nada de placar que junta "deu certo" com "nao sei".
+  // Uma linha por desfecho, e so quando ele aconteceu: despejo limpo continua com o dialogo
+  // de sempre.
+  TxtWarn := '';
+  if TextosSemTrava > 0 then
+    TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(TextosSemTrava) +
+      ' texto(s) no lugar mas SEM TRAVA - o Altium pode' + #13#10 +
+      '   re-ancorar cada um no proximo redesenho (sonda de autoposicionamento recusada).';
+  if TextosNaoMexidos > 0 then
+    TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(TextosNaoMexidos) +
+      ' texto(s) NAO posicionados - esta instalacao do' + #13#10 +
+      '   Altium recusou a sonda de posicao de texto.';
+  if TextosSemConferencia > 0 then
+    TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(TextosSemConferencia) +
+      ' texto(s) escritos SEM CONFERENCIA - a releitura' + #13#10 +
+      '   foi recusada e nao da para saber onde eles pararam.';
+  if TextosRecusados > 0 then
+    TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(TextosRecusados) +
+      ' texto(s) NAO ficaram onde foi pedido.';
+  if TextosPulados > 0 then
+    TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(TextosPulados) +
+      ' texto(s) nem tentados - o componente esta DESCOLADO.';
+  if TxtWarn <> '' then
+    TxtWarn := TxtWarn + #13#10 +
+      '   O relatorio explica cada numero (secao "Textos de componente").';
+
   ShowMessage('Esquema despejado.' + #13#10 +
-    'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + #13#10#13#10 +
+    'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + TxtWarn + #13#10#13#10 +
     RelTxt + #13#10#13#10 +
     'PROXIMOS PASSOS: salve (Ctrl+S), rode Project >> Compile,' + #13#10 +
     'e depois Design >> Update PCB (ECO) para levar tudo a placa.');
