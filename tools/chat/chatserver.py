@@ -119,6 +119,24 @@ ABRIR = None         # injeção de teste: o `abrir` do claude_cli (None = Popen
 
 CAB_SENHA = 'X-Hub-Senha'
 
+# ── A PORTA ESTA ABERTA, e foi decisao do dono da maquina ────────────────────────────
+# Em 2026-09-16 o usuario pediu: "tira essa senha, deixa aberto pra qlqr um usar". Antes de
+# fazer, foi medido e dito a ele o que isso significa nesta instalacao: o hubserver escuta em
+# 0.0.0.0, a bancada dele e 192.168.15.213 na rede da empresa, e o painel tem um modo
+# "Solto (terminal)" que roda comando na maquina. Sem senha, quem alcanca a porta 8000 roda
+# comando ali. Ele confirmou escolhendo "Tudo aberto, sem senha nenhuma".
+#
+# Fica como VARIAVEL e nao como codigo apagado porque o caminho de volta tem que ser curto:
+#     ALTIUMHUB_CHAT_SENHA=1   -> volta a pedir a senha mestre do hub
+# Qualquer valor diferente de "" liga a tranca de novo, sem editar arquivo nenhum.
+ENV_TRANCA = 'ALTIUMHUB_CHAT_SENHA'
+
+
+def exige_senha():
+    """True quando a tranca esta ligada. Lido a cada pedido de proposito: ligar a tranca
+       num servidor que ja esta no ar nao deveria precisar de reinicio."""
+    return bool((os.environ.get(ENV_TRANCA) or '').strip())
+
 # O PONTO NA FRENTE NÃO É ENFEITE, E NÃO SE "ARRUMA" ESTE NOME.
 # O hubserver serve a árvore inteira do workspace sem senha nenhuma (hubserver.py:143 ->
 # _serve), e _serve (hubserver.py:120-121) aborta 404 em QUALQUER segmento que comece com
@@ -417,10 +435,12 @@ def _autoriza(dados=None):
     A senha NUNCA é escrita em log, nem devolvida, nem ecoada na mensagem de recusa — a
     recusa diz onde pôr a senha, não o que veio.
     """
+    if not exige_senha():
+        return None          # porta aberta: ver o bloco "A PORTA ESTA ABERTA" no topo
     if not SENHA:
-        return _erro('o chat foi registrado sem senha mestre e por isso está fechado. '
-                     'Quem registra é o hubserver, em chatserver.registra(app, root, senha).',
-                     403)
+        return _erro('a tranca do chat está ligada (%s), mas o hub subiu sem senha mestre. '
+                     'Defina ALTIUMHUB_MASTER, ou apague %s para deixar o chat aberto.'
+                     % (ENV_TRANCA, ENV_TRANCA), 403)
     veio = request.headers.get(CAB_SENHA) or ''
     if not veio and isinstance(dados, dict):
         veio = dados.get('senha') or dados.get('password') or ''
@@ -1188,6 +1208,8 @@ def _turno_cli(ident, projeto, tela, modelo, modo, historico, conv):
 
 @bp.route('/estado', methods=['GET', 'POST'])
 def api_estado():
+    # `exige_senha` vai na resposta para o painel saber se desenha a tela de entrada ou se
+    # abre direto na conversa. Sem isso ele pediria uma senha que ninguem confere.
     """Que motor? Que modos? Que tetos? NADA DE SEGREDO SAI DAQUI.
 
     Nem a chave, nem um pedaço dela, nem o tamanho dela (qualquer um dos três estreita o campo
@@ -1212,6 +1234,8 @@ def api_estado():
         # chat não usa mais. A verdade sobre a chave, quando alguém precisar dela, é
         # `api_chave` — e ela é um booleano, nunca o valor.
         ('chave', ligado), ('api_chave', bool(A.chave())),
+        # a porta: o painel le isto para saber se desenha a tela de entrada
+        ('exige_senha', exige_senha()),
         ('projeto', (dados.get('projeto') or '')),
     ))
 

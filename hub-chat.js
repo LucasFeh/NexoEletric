@@ -2466,7 +2466,21 @@ function monta(container, io){
       }
     });
   } else {
-    abrePorta('');
+    /* A PORTA PODE ESTAR ABERTA. Desde 2026-09-16 o dono da máquina pode deixar o chat sem
+       senha (chatserver.py » "A PORTA ESTA ABERTA"), e aí desenhar a tela de entrada seria
+       pedir uma senha que ninguém confere — a pior das telas: obrigatória e inútil.
+       Então perguntamos ao servidor ANTES, com senha vazia: se ele responder, entra direto.
+       Um servidor que exige senha recusa esse mesmo pedido, e aí a tela aparece como sempre. */
+    const p = abrePorta('vendo se este hub pede senha…', true);
+    sessao.testa('').then(r => {
+      if (porta !== p) return;               /* o usuário digitou algo enquanto isso */
+      if (r.ok && (r.estado || {}).exige_senha === false){
+        sessao.estado = r.estado;
+        abreChat();
+      } else {
+        abrePorta('');
+      }
+    });
   }
 
   const api = {

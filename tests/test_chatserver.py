@@ -357,28 +357,55 @@ try:
                  'na variável ANTHROPIC_API_KEY, no servidor dentro de /etc/altiumhub/senha.env.')
     CS.motor = lambda *a, **k: ('api', '', '')
 
-    # ═══ 1. sem senha ninguém entra ═══
-    print('\n── 1. a senha ──')
+    # ═══ 1. a porta: ABERTA por padrão, e a tranca como caminho de volta ═══
+    #
+    # Em 2026-09-16 o dono da máquina pediu o chat sem senha ("tira essa senha, deixa aberto
+    # pra qlqr um usar"), depois de lhe ser medido e dito o que isso significa: o hubserver
+    # escuta em 0.0.0.0, a bancada dele está numa rede de empresa, e o painel tem um modo que
+    # roda comando na máquina. Ele confirmou.
+    #
+    # Então o que este teste prende NÃO é "a senha protege" — é que os dois estados existem e
+    # que cada um faz o que promete. A tranca volta com ALTIUMHUB_CHAT_SENHA, sem editar
+    # arquivo nenhum, e uma regressão que a deixasse presa (aberta ou fechada) some daqui.
+    print('\n── 1. a porta ──')
     os.environ['ANTHROPIC_API_KEY'] = CHAVE
     portas = [('GET', '/api/chat/estado'), ('POST', '/api/chat/enviar'),
               ('POST', '/api/chat/conversa'), ('POST', '/api/chat/anexo'),
               ('POST', '/api/chat/aplicar'), ('GET', '/api/chat/conversas'),
               ('GET', '/api/chat/conversa/c1'), ('DELETE', '/api/chat/conversa/c1')]
+
+    os.environ.pop(CS.ENV_TRANCA, None)
+    assert CS.exige_senha() is False
     for metodo, rota in portas:
         r = cli.open(rota, method=metodo, json={'texto': 'oi'})
-        assert r.status_code == 403, '%s %s passou sem senha (%d)' % (metodo, rota, r.status_code)
-        assert CS.CAB_SENHA in (r.get_json() or {}).get('erro', ''), \
-            'a recusa tem que dizer ONDE pôr a senha: %s' % r.get_json()
-    print('  ok  as %d rotas respondem 403 sem senha' % len(portas))
+        assert r.status_code != 403, '%s %s pediu senha com a porta aberta' % (metodo, rota)
+    r = cli.get('/api/chat/estado')
+    assert r.status_code == 200 and r.get_json()['exige_senha'] is False, r.get_json()
+    print('  ok  porta aberta: as %d rotas respondem sem senha, e o /estado avisa' % len(portas))
 
-    r = cli.post('/api/chat/enviar', headers={CS.CAB_SENHA: 'LucasGatai'}, json={'texto': 'oi'})
-    assert r.status_code == 403, 'senha errada tem que ser 403'
-    assert 'LucasGatai' not in r.get_data(as_text=True), \
-        'a recusa não pode ecoar o que veio — log e tela não são lugar de senha'
-    # a senha vale também no corpo: é assim que o /api/project/<id>/delete já a recebe
-    r = cli.get('/api/chat/conversas', json={'senha': SENHA})
-    assert r.status_code == 200, 'senha no corpo tem que valer também: %s' % r.get_json()
-    print('  ok  senha errada é 403 e não volta ecoada; senha no corpo também vale')
+    # e a tranca, que é o caminho de volta em uma variável
+    os.environ[CS.ENV_TRANCA] = '1'
+    try:
+        assert CS.exige_senha() is True
+        for metodo, rota in portas:
+            r = cli.open(rota, method=metodo, json={'texto': 'oi'})
+            assert r.status_code == 403, \
+                '%s %s passou sem senha com a tranca ligada (%d)' % (metodo, rota, r.status_code)
+            assert CS.CAB_SENHA in (r.get_json() or {}).get('erro', ''), \
+                'a recusa tem que dizer ONDE pôr a senha: %s' % r.get_json()
+        r = cli.post('/api/chat/enviar', headers={CS.CAB_SENHA: 'LucasGatai'},
+                     json={'texto': 'oi'})
+        assert r.status_code == 403, 'senha errada tem que ser 403'
+        assert 'LucasGatai' not in r.get_data(as_text=True), \
+            'a recusa não pode ecoar o que veio — log e tela não são lugar de senha'
+        # a senha vale também no corpo: é assim que o /api/project/<id>/delete já a recebe
+        r = cli.get('/api/chat/conversas', json={'senha': SENHA})
+        assert r.status_code == 200, 'senha no corpo tem que valer também: %s' % r.get_json()
+        r = cli.get('/api/chat/estado', headers=CAB)
+        assert r.get_json()['exige_senha'] is True, r.get_json()
+        print('  ok  tranca ligada: 403 sem senha, senha errada não volta ecoada, corpo vale')
+    finally:
+        os.environ.pop(CS.ENV_TRANCA, None)
 
     # ═══ 2. estado sem motor nenhum, e estado no motor da chave ═══
     print('\n── 2. o estado ──')
