@@ -681,7 +681,13 @@ const VER_COMMENT_KEY = 'altiumhub.sch.comment';
    botao passa honraOlho:false e a folha le como a biblioteca; desligado, a folha volta a
    obedecer o simbolo e fica fiel ao que o Altium desenha. A escolha fica guardada. */
 const VER_PINOS_KEY = 'altiumhub.sch.pinos';
-const showState = { grid:true, comment:false, pinos:true };
+/* O DESIGNADOR NASCE A VISTA, e o olho dele mora na ficha do componente — ao lado do campo
+   que ele apaga, e não numa seção de configuração do outro painel. É preferencia de VISTA
+   (vale para a folha inteira, fica nesta máquina), e não um campo do componente: um campo
+   por componente seria mudança de formato, com os dois .pas atrás. */
+const VER_REF_KEY = 'altiumhub.sch.ref';
+const showState = { grid:true, comment:false, pinos:true, ref:true };
+try { showState.ref = localStorage.getItem(VER_REF_KEY) !== '0'; } catch (e) {}
 try { showState.comment = localStorage.getItem(VER_COMMENT_KEY) === '1'; } catch (e) {}
 try { showState.pinos = localStorage.getItem(VER_PINOS_KEY) !== '0'; } catch (e) {}
 /* `staleWorkspace` morava na linha do sinalizador, mas e do SALVAMENTO do esquema: o
@@ -2021,6 +2027,53 @@ function prKvEl(box, k, node){
   const v = el('span', 'v'); v.append(node);
   g.append(el('span', 'k', k), v);
 }
+/* ── CAMPO DISCRETO ──
+   A ficha passou a EDITAR posicao, rotacao e designador, e um <input> com borda em cada linha
+   transformava o painel numa planilha. Aqui a caixa fica lisa e cinza, como se estivesse
+   desligada, e so se revela ao passar o mouse ou ao receber o foco — o pedido foi literalmente
+   "uma caixa mais discreta, que fique em cinza claro como se tivesse desativada, so ativa
+   quando clica em cima". Quem edita continua sabendo que da para editar (o cursor de texto e o
+   realce no hover dizem), e quem so esta lendo nao ve uma grade de caixas. */
+function prCampo(valor, titulo, aplica, opts){
+  const o = opts || {};
+  const i = el('input', 'pr-inp' + (o.cls ? ' ' + o.cls : ''));
+  i.type = 'text';
+  i.value = valor == null ? '' : String(valor);
+  if (titulo) i.title = titulo;
+  i.addEventListener('change', () => aplica(i));
+  i.addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); i.blur(); }
+    if (e.key === 'Escape'){ e.preventDefault(); i.value = valor == null ? '' : String(valor); i.blur(); }
+  });
+  return i;
+}
+/* dois campos na mesma linha (o X e o Y), com o rotulo de cada um em cima do seu */
+function prPar(box, a, b){
+  const linha = el('div', 'pr-par');
+  for (const [rot, node] of [a, b]){
+    const c = el('div', 'pr-par-c');
+    /* o rotulo pode ser um NO (o do designador leva o olho junto) ou so o texto; passar um
+       no para o el() o transformaria em "[object HTMLDivElement]" no textContent */
+    c.append(rot && rot.nodeType ? rot : el('span', 'k', rot), node);
+    linha.append(c);
+  }
+  box.append(linha);
+  box.__kv = null;                 /* a proxima linha de prKv abre uma grade nova, abaixo */
+}
+/* o olho da barra Vista, do lado do campo que ele apaga: quem quer sumir com o designador
+   procura pelo designador, nao pela secao de configuracao do outro painel */
+function prOlho(box, ligado, titulo, aoClicar){
+  const b = el('button', 'pr-olho');
+  b.type = 'button';
+  b.title = titulo;
+  b.setAttribute('aria-pressed', String(!!ligado));
+  b.innerHTML = '<svg viewBox="0 0 16 16"><path d="M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 '
+              + 'C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z"/><circle cx="8" cy="8" r="2.2"/>'
+              + (ligado ? '' : '<path d="M2.5 13.5 L13.5 2.5"/>') + '</svg>';
+  b.onclick = aoClicar;
+  box.append(b);
+  return b;
+}
 const corValida = c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
 /* Cor de um campo do item, no molde do editor de simbolos (hub-symed): o seletor mostra a
    cor em uso, o × devolve o padrao APAGANDO o campo — cor ausente e o estado normal, e
@@ -2047,6 +2100,9 @@ function prParams(s){
   }
   return out;
 }
+/* O NOME DO FOOTPRINT MORA EMBAIXO DA PRÉVIA DELE, e não numa linha da seção geral: ali ele
+   é legenda do que se está vendo. Enquanto era linha de texto lá em cima, era mais um item na
+   lista de procedencia que o usuário pediu para sumir. */
 function prPreview(sym, part, fpNome){
   prSym = part || null;
   fitPreview(camPrSym, part ? D.symBBox(part) : null);
@@ -2054,13 +2110,23 @@ function prPreview(sym, part, fpNome){
   const fp = fpNome ? HubCore.footprintOf(PLIB, fpNome) : null;
   prFp = fp || null;
   fitPreview(camPrFp, fp && fp.bbox ? fp.bbox : null);
-  $('prFpHint').textContent = fp ? ''
+  const hf = $('prFpHint');
+  hf.className = 'pvh' + (fp ? ' mono' : '');
+  hf.textContent = fp ? fpNome
     : fpNome ? '"' + fpNome + '" não está na PcbLib espelhada' : (sym === false ? '' : 'sem footprint');
   requestAnimationFrame(refitProps);
 }
 function renderProps(){
   const body = $('prBody');
   body.textContent = '';
+  /* A FOLHA NO CABEÇALHO. Ela era a última linha da seção "posição" e repetia, item a item,
+     o que vale para a ficha inteira — no topo ela diz de uma vez de onde é o que se está
+     olhando, e devolve uma linha para cada seção. */
+  const cabFolha = $('prFolha');
+  if (cabFolha){
+    const um = selAlvos().filter(a => onSheet(a.it));
+    cabFolha.textContent = um.length ? (um[0].it.sheet || '') : '';
+  }
   const alvos = selAlvos().filter(a => onSheet(a.it));
   const itens = alvos.map(a => a.it);
   if (!itens.length){
@@ -2157,86 +2223,126 @@ function renderProps(){
   const totalPartes = Math.max(maxNaFolha, it.part || 1);
   const fpNome = it.footprint || '';
 
-  const g = prSec('geral');
-  g.append(el('div', 'pr-title', it.ref));
-  if (it.comment) g.append(el('div', 'pr-sub', it.comment));
-  prKv(g, 'Comment', it.comment, it.comment ? null : 'dim');
+  /* ── POSICAO PRIMEIRO ──
+     A ficha começava por "geral" e a posição ficava no fim, depois de dez linhas de
+     procedência do símbolo. Quem abre a ficha de um componente colocado está quase sempre
+     ajustando ONDE ele está — então o que se mexe vem primeiro, e o que se lê vem depois. */
+  const p = prSec('posição');
+  const aplicaXY = (campo, eixo) => {
+    const v = parseFloat(String(campo.value).replace(',', '.'));
+    if (!isFinite(v)){ campo.value = it[eixo]; return; }
+    const n = Math.round(v * 1e4) / 1e4;
+    if (n === it[eixo]){ campo.value = n; return; }
+    it[eixo] = n;
+    commit();
+  };
+  prPar(p,
+    ['X', prCampo(it.x, 'posição X em mil — o mesmo número do Altium', c => aplicaXY(c, 'x'), { cls:'mono' })],
+    ['Y', prCampo(it.y, 'posição Y em mil (Y para cima, como no Altium)', c => aplicaXY(c, 'y'), { cls:'mono' })]);
 
-  /* DESIGNATOR, com o nome que o Altium usa. Ele e do COMPONENTE, nao da parte: renomear
-     CN4 renomeia as 4 partes de uma vez, senao a folha fica com um componente partido ao
-     meio e o ECO do Altium acusa. Recusa nome vazio e nome ja usado por OUTRO ref. */
-  const ref = el('input', 'input mono'); ref.type = 'text'; ref.value = it.ref;
-  ref.title = 'o designador do componente — muda todas as partes dele';
-  const aplicaRef = () => {
-    const novo = String(ref.value || '').trim().toUpperCase();
-    if (!novo || novo === it.ref){ ref.value = it.ref; return; }
-    const ocupado = sheetItems().some(x => x.t === 'comp' && x.ref === novo);
-    if (ocupado){
-      HubDialog.toast('\u201c' + novo + '\u201d ja esta em uso nesta folha', 'warn');
-      ref.value = it.ref; return;
+  /* ROTACAO + OS DOIS ESPELHOS na mesma linha. O formato só aceita 0/90/180/270 (o
+     validateSchematic recusa o resto), então valor fora disso é RECUSADO em vez de
+     arredondado calado: arredondar faria a ficha dizer um número e o arquivo guardar outro. */
+  const rotAtual = () => ((((it.rot || 0) % 360) + 360) % 360);
+  const linhaRot = el('div', 'pr-par');
+  const cRot = el('div', 'pr-par-c');
+  cRot.append(el('span', 'k', 'Rotação'), prCampo(rotAtual(),
+    'graus, anti-horário: só 0, 90, 180 ou 270', campo => {
+      const v = parseInt(String(campo.value).replace(/[^0-9-]/g, ''), 10);
+      const n = ((v % 360) + 360) % 360;
+      if (!isFinite(v) || [0, 90, 180, 270].indexOf(n) < 0){
+        HubDialog.toast('rotação só pode ser 0, 90, 180 ou 270', 'warn');
+        campo.value = rotAtual();
+        return;
+      }
+      if (n === rotAtual()) return;
+      it.rot = n;
+      commit();
+    }, { cls:'mono' }));
+  const cEsp = el('div', 'pr-par-c');
+  cEsp.append(el('span', 'k', 'Espelhar'));
+  const caixaEsp = el('div', 'pr-esp');
+  const bH = el('button', 'pr-ib'); bH.type = 'button';
+  bH.title = 'Espelhar na horizontal (X) — vira esquerda/direita';
+  bH.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M9.5 7 5 12l4.5 5z"/>'
+               + '<path d="M14.5 7 19 12l-4.5 5z"/></svg>';
+  bH.onclick = () => { selSo([alvoAll(it)]); mirrorSel('x'); };
+  const bV = el('button', 'pr-ib'); bV.type = 'button';
+  bV.title = 'Espelhar na vertical (Y) — vira em cima/embaixo';
+  bV.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 12h18"/><path d="M7 9.5 12 5l5 4.5z"/>'
+               + '<path d="M7 14.5 12 19l5-4.5z"/></svg>';
+  bV.onclick = () => { selSo([alvoAll(it)]); mirrorSel('y'); };
+  caixaEsp.append(bH, bV);
+  cEsp.append(caixaEsp);
+  linhaRot.append(cRot, cEsp);
+  p.append(linhaRot);
+  body.append(p);
+
+  /* ── GERAL ──
+     Saiu daqui tudo que era PROCEDENCIA e não propriedade: "Por quê", "Resolvido em" e
+     "Prefixo da lib". Eram verdadeiros e ninguém os lia — e empurravam para baixo o que se
+     usa. O nome do componente também saiu: ele agora vive dentro do "Trocar componente…",
+     que é o único lugar onde ele serve para alguma coisa (e lá dá para copiar). */
+  const g = prSec('geral');
+  /* o texto do botão de troca (e se ele sai em destaque) é regra pura, provada em
+     tests/test-troca-simbolo.js — a ficha só desenha o que ela decide */
+  const dec = decideTroca({ sym: sym && sym.name, how: rsym && rsym.how, quantos: contaSym(it.sym) });
+
+  /* DESIGNATOR com o olho do lado. Ele é do COMPONENTE, não da parte: renomear CN4 renomeia
+     as 4 partes de uma vez, senão a folha fica com um componente partido ao meio e o ECO do
+     Altium acusa. Recusa nome vazio e nome já usado por OUTRO ref. */
+  const kRef = el('div', 'pr-lab');
+  kRef.append(el('span', null, 'Designator'));
+  prOlho(kRef, showState.ref, showState.ref
+    ? 'Designadores visíveis na folha — clique para suprimir'
+    : 'Designadores suprimidos — clique para mostrar', () => {
+      showState.ref = !showState.ref;
+      try { localStorage.setItem(VER_REF_KEY, showState.ref ? '1' : '0'); } catch (e) {}
+      renderProps(); cam.draw(); pintaMiniaturas();
+    });
+  const ref = prCampo(it.ref, 'o designador do componente — muda todas as partes dele', campo => {
+    const novo = String(campo.value || '').trim().toUpperCase();
+    if (!novo || novo === it.ref){ campo.value = it.ref; return; }
+    if (sheetItems().some(x => x.t === 'comp' && x.ref === novo)){
+      HubDialog.toast('\u201c' + novo + '\u201d já está em uso nesta folha', 'warn');
+      campo.value = it.ref; return;
     }
     const antigo = it.ref;
     for (const x of partesDoRef) x.ref = novo;
     commit();
     HubDialog.toast(antigo + ' \u2192 ' + novo
       + (partesDoRef.length > 1 ? ' (' + partesDoRef.length + ' partes)' : ''), 'ok');
-  };
-  ref.addEventListener('change', aplicaRef);
-  ref.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); ref.blur(); } });
-  prKvEl(g, 'Designator', ref);
+  }, { cls:'mono' });
+  prPar(g, [kRef, ref], ['Parte', el('span', 'pr-ro mono', (it.part || 1) + ' de ' + totalPartes)]);
+  if (nparts < totalPartes)
+    prKv(g, '', 'o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham', 'dim');
 
-  /* PARTE, escolhivel depois de colocado. So vira combo quando ha mais de uma — em
-     componente de uma parte um seletor de um item so seria enfeite. */
-  if (totalPartes > 1){
-    const ps = el('select', 'input mono');
-    for (let i = 1; i <= totalPartes; i++){
-      const o = document.createElement('option');
-      o.value = i; o.textContent = i + ' de ' + totalPartes;
-      if (i === (it.part || 1)) o.selected = true;
-      ps.append(o);
-    }
-    ps.title = nparts >= totalPartes ? 'qual parte deste componente este item desenha'
-      : 'o simbolo resolvido so tem ' + nparts + ' parte(s); as demais ficam sem desenho';
-    ps.onchange = () => {
-      const n = parseInt(ps.value, 10) || 1;
-      if (n === (it.part || 1)) return;
-      const jaTem = partesDoRef.some(x => x !== it && (x.part || 1) === n);
-      if (jaTem){
-        HubDialog.toast(it.ref + ' ja tem a parte ' + n + ' na folha', 'warn');
-        ps.value = String(it.part || 1); return;
-      }
-      it.part = n; commit();
-    };
-    prKvEl(g, 'Parte', ps);
-    if (nparts < totalPartes)
-      prKv(g, '', 'o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham', 'dim');
-  } else {
-    prKv(g, 'Parte', '1 de 1');
-  }
+  prKv(g, 'Comment', it.comment, it.comment ? null : 'dim');
   prKv(g, 'Descrição', sym && sym.description, sym && sym.description ? null : 'dim');
-  /* o prefixo que a BIBLIOTECA sugere (CN, R, C...), nao o designador deste componente —
-     que agora e o campo editavel la em cima. Dois rotulos parecidos no mesmo painel foi
-     exatamente o que fez o combo de parte do editor de simbolos mover desenho sem querer. */
-  prKv(g, 'Prefixo da lib', sym && sym.designator, sym && sym.designator ? null : 'dim');
-  prKv(g, 'Componente', it.sym, 'mono');
-  /* o resolvedor pode ter entregue outro simbolo (apelido/substituto): dizer qual, senao a
-     ficha afirma um nome e o desenho mostra outro */
-  if (sym && sym.name !== it.sym) prKv(g, 'Resolvido em', sym.name, 'mono');
-  const dec = decideTroca({ sym: sym && sym.name, how: rsym && rsym.how, quantos: contaSym(it.sym) });
-  /* a linha que faltava: escolha sua fica em amarelo, ao lado do nome que ela impos */
-  if (dec.motivo) prKv(g, 'Por quê', dec.motivo, dec.porEscolha ? 'warn' : 'dim');
-  prKv(g, 'Acervo', ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca'), ac ? null : 'warn');
-  /* o desenho emprestado precisa se ANUNCIAR: o corpo ambar na folha diz que algo e
-     diferente, e e aqui que se le O QUE. Sem esta linha o usuario veria um simbolo
-     plausivel e concluiria que a biblioteca tem a peca — que e o oposto da verdade. */
+
+  /* ACERVO. "Biblioteca do Altium" sai em VERMELHO com o triângulo: o componente ainda não
+     tem par no almoxarifado, e é isso que impede a lista do Odoo de casar a linha por id em
+     vez de por texto. Não é erro — é trabalho pendente, e a cor diz isso sem abrir modal. */
+  const acNome = ac ? ac.titulo : (sym ? '—' : 'ausente na biblioteca');
+  const acPendente = !!ac && /biblioteca do altium|espelho do altium/i.test(String(ac.titulo || ''));
+  if (acPendente){
+    const v = el('span', 'pr-alerta');
+    v.append(el('span', 'tri', '\u25B2'), document.createTextNode(' ' + acNome));
+    v.title = 'este componente ainda vem da biblioteca do Altium — vincule-o ao almoxarifado '
+            + 'pelo "Trocar componente…" para a lista do Odoo casar por id';
+    prKvEl(g, 'Acervo', v);
+  } else prKv(g, 'Acervo', acNome, ac ? null : 'warn');
+
+  /* o desenho emprestado precisa se ANUNCIAR: o corpo âmbar na folha diz que algo é
+     diferente, e é aqui que se lê O QUÊ. */
   if (!sym){
     const emg = desenhoDeEmergencia(it);
     prKv(g, 'Desenho', emg ? 'emprestado de "' + emg.nome + '" (Biblioteca de símbolos, por ' + emg.how + ') — só para ver'
                            : 'nenhum: a folha mostra o quadrado vermelho', 'warn');
   }
-  /* O botao existe com simbolo resolvido OU NAO. Enquanto ele so aparecia com o simbolo
+  /* O botão existe com símbolo resolvido OU NÃO. Enquanto ele só aparecia com o símbolo
      ausente, uma escolha errada era definitiva pela interface: assim que ela resolvia o
-     nome, nao havia mais caminho nenhum na tela para trocar. */
+     nome, não havia mais caminho nenhum na tela para trocar. */
   const bTroca = el('button', dec.destaque ? 'wide' : 'wide sutil', dec.rotulo);
   bTroca.type = 'button';
   bTroca.title = dec.title;
@@ -2249,17 +2355,7 @@ function renderProps(){
     bUndo.onclick = () => desfazerEscolha(it);
     g.append(bUndo);
   }
-  prKv(g, 'Footprint', fpNome, fpNome ? 'mono' : 'warn');
-  if (fpNome && !HubCore.footprintOf(PLIB, fpNome)) prKv(g, '', 'não está na PcbLib espelhada', 'warn');
   body.append(g);
-
-  const p = prSec('posição');
-  prKv(p, 'X', it.x + ' mil', 'mono');
-  prKv(p, 'Y', it.y + ' mil', 'mono');
-  prKv(p, 'Rotação', ((((it.rot || 0) % 360) + 360) % 360) + '°');
-  prKv(p, 'Espelhado', it.mirror ? 'sim' : 'não');
-  prKv(p, 'Folha', it.sheet);
-  body.append(p);
 
   /* O TEXTO, quando e ele que esta marcado. A posicao do designador e um deslocamento em
      relacao ao lugar de origem (embaixo/em cima do corpo): mostrar o deslocamento, e nao a
@@ -2292,6 +2388,16 @@ function renderProps(){
 
   const pins = HubCore.compPinsWorld(it, SLIB) || [];
   const s = prSec('pinos (' + pins.length + ')');
+  /* o olho dos NOMES DE PINO, do lado da lista deles. É o mesmo interruptor da barra Vista
+     (showState.pinos): ligado, a folha mostra nome e número de todo pino; desligado, ela
+     obedece o hideName/hideNum que veio do Altium. */
+  if (s.firstChild) prOlho(s.firstChild, showState.pinos, showState.pinos
+    ? 'Nomes e números de pino visíveis na folha — clique para obedecer o símbolo'
+    : 'Pino escondido pelo símbolo fica escondido — clique para mostrar tudo', () => {
+      showState.pinos = !showState.pinos;
+      try { localStorage.setItem(VER_PINOS_KEY, showState.pinos ? '1' : '0'); } catch (e) {}
+      pintaOlhoPinos(); renderProps(); cam.draw(); pintaMiniaturas();
+    });
   if (!pins.length) s.append(el('p', 'pr-empty', sym ? 'a parte não tem pinos' : 'componente ausente na biblioteca — sem pinagem para mostrar'));
   else {
     const t = el('table', 'pr-tab');
@@ -2535,7 +2641,7 @@ function desenhaFolha(ctx, si, o){
        (hub-draw.js » drawNetLabel: y + 18 para altura 55, ou seja um terco da altura): o
        worldText centra a letra na vertical, e o Altium a apoia na base */
     const tr = textoComp(c, 'ref');
-    D.worldText(ctx, tr.s, tr.x, tr.y + tr.h * 0.33, tr.h, 0, '#000000', 'left');
+    if (showState.ref) D.worldText(ctx, tr.s, tr.x, tr.y + tr.h * 0.33, tr.h, 0, '#000000', 'left');
     if (c.comment && showState.comment){
       const tc = textoComp(c, 'com');
       D.worldText(ctx, tc.s, tc.x, tc.y + tc.h * 0.33, tc.h, 0, '#333366', 'left');
@@ -2742,7 +2848,7 @@ function hitTest(x, y){
   /* O TEXTO DO COMPONENTE (designador e comment) vem antes do fio e do corpo: ele mora em
      area vazia, e quem clica em cima de uma palavra esta mirando a palavra. Entre os dois, o
      designador ganha — ele esta sempre a vista, o comment so com o olho ligado. */
-  for (const c of s.comps){
+  if (showState.ref) for (const c of s.comps){
     const b = textoBBox(c, 'ref');
     if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return { kind:'ref', ref:c.ref, item:c };
   }
@@ -3072,8 +3178,21 @@ function abrirEscolhaSimbolo(comp, opts){
   /* o nome sai da prosa e vira um campo proprio, copiavel: e ele que a pessoa leva para a
      busca do acervo logo abaixo. O meta continua com o RESTO — de quem e, o comment e onde
      ja resolveu —, que e contexto para ler, nao texto para levar */
-  $('symNome').textContent = comp.sym || '';
-  $('symNome').title = comp.sym ? 'clique para copiar "' + comp.sym + '"' : '';
+  /* O NOME DO COMPONENTE SO EXISTE AQUI. Ele saiu da ficha (era mais uma linha de
+     procedencia entre "Por que" e "Resolvido em", que o usuario pediu para sumir) e aqui
+     ele serve para alguma coisa: e o que se leva para a busca do acervo. O icone de copia
+     diz isso sem precisar do title — antes, so quem passasse o mouse descobria. */
+  const nb = $('symNome');
+  nb.textContent = '';
+  if (comp.sym){
+    nb.append(el('span', 'nm', comp.sym));
+    const ic = document.createElement('span');
+    ic.className = 'cp';
+    ic.innerHTML = '<svg viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>'
+                 + '<path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></svg>';
+    nb.append(ic);
+  }
+  nb.title = comp.sym ? 'clique para copiar “' + comp.sym + '”' : '';
   $('symMeta').textContent = comp.ref + ' — o Altium mandou este nome'
     + (comp.comment ? ' · comment "' + comp.comment + '"' : '')
     + (atual ? ' · resolvido no componente "' + atual.name + '"'

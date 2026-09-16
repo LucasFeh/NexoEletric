@@ -219,6 +219,44 @@
   .atalho-tecla{font:11px Consolas,monospace; min-width:76px; text-align:center; padding:2px 6px;}
   .atalho-tecla.mudado{border-color:var(--accent);}
   .atalho-tecla.ouvindo{background:var(--accent); color:#fff;}
+  /* A FICHA EDITA: a caixa fica lisa, cinza, como se estivesse desligada, e só se revela no
+     hover ou no foco. Foi o pedido — "uma caixa mais discreta, que fique em cinza claro como
+     se tivesse desativada, só ativa quando clica em cima" — e serve ao painel: com borda em
+     toda linha, a ficha virava planilha. */
+  .pr-inp{width:100%; min-width:0; box-sizing:border-box; background:transparent; color:var(--fg);
+    border:1px solid transparent; border-radius:3px; padding:2px 4px; font:12px 'Segoe UI',sans-serif;}
+  .pr-inp.mono{font-family:Consolas,monospace; font-size:11px;}
+  .pr-inp:hover{background:var(--panel2); border-color:var(--border);}
+  .pr-inp:focus{background:var(--panel); border-color:var(--accent); outline:none; color:var(--fg);}
+  .pr-ro{color:var(--fg2); font-size:11px; padding:2px 4px; display:inline-block;}
+  /* dois campos lado a lado (X e Y; rotação e os espelhos) */
+  .pr-par{display:flex; gap:8px; margin:3px 0 1px;}
+  .pr-par-c{flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:1px;}
+  .pr-par-c .k{font-size:10px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.04em;}
+  .pr-lab{display:flex; align-items:center; gap:4px;}
+  .pr-lab>span{font-size:10px; color:var(--fg-dim); text-transform:uppercase; letter-spacing:.04em;}
+  .pr-olho{flex:none; width:16px; height:16px; padding:0; background:transparent; border:0;
+    color:var(--fg-dim); display:inline-flex; align-items:center; justify-content:center; cursor:pointer;}
+  .pr-olho:hover{color:var(--fg);}
+  .pr-olho[aria-pressed="false"]{color:var(--fg-dim); opacity:.65;}
+  .pr-olho svg{width:14px; height:14px; fill:none; stroke:currentColor; stroke-width:1.3;}
+  .pr-esp{display:flex; gap:4px;}
+  .pr-ib{width:26px; height:22px; padding:0; display:inline-flex; align-items:center; justify-content:center;}
+  .pr-ib svg{width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.7;
+    stroke-linecap:round; stroke-linejoin:round;}
+  /* acervo pendente: vermelho com triângulo — não é erro, é trabalho por fazer */
+  .pr-alerta{color:#ff6b6b;}
+  .pr-alerta .tri{font-size:9px; vertical-align:1px;}
+  .pr-head .folha{margin-left:auto; font-size:10px; color:var(--fg-dim); overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; max-width:160px;}
+  /* O NOME DO FOOTPRINT E LEGENDA, nao aviso: ele desce para o rodape da previa em vez de
+     ficar centralizado por cima do desenho. O .pvh continua servindo aos dois casos — o
+     aviso ("nao esta na PcbLib espelhada") segue no meio, porque ali nao ha desenho para
+     atrapalhar; com .mono ele vira uma tarja discreta embaixo. */
+  .pr-prev .pvh.mono{inset:auto 0 0 0; display:block; place-items:initial; padding:3px 7px;
+    text-align:left; font-family:Consolas,monospace; font-size:10px; color:var(--fg2);
+    background:linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0)); pointer-events:none;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   kbd{font:11px Consolas,monospace; background:var(--panel2); border:1px solid var(--border);
     border-radius:3px; padding:0 4px; color:var(--fg);}
 
@@ -283,6 +321,11 @@
     border-radius:var(--r-sm); padding:1px 8px; cursor:copy; user-select:all;}
   #symmodal #symNome:hover{border-color:var(--accent); background:var(--panel2);}
   #symmodal #symNome:empty{display:none;}
+  #symmodal #symNome{display:inline-flex; align-items:center; gap:6px;}
+  #symmodal #symNome .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #symmodal #symNome .cp{flex:none; display:inline-flex; opacity:.55;}
+  #symmodal #symNome .cp svg{width:13px; height:13px; fill:none; stroke:currentColor; stroke-width:1.4;}
+  #symmodal #symNome:hover .cp{opacity:1;}
   /* Sem ícone de copiar aqui: medido, o glifo ⧉ cresce o cabeçalho de 58 para 69 px (a
      fonte de fallback dele tem métrica maior que a do texto), e a densidade da barra vale
      mais que o enfeite. A pista de que dá para clicar são o cursor de cópia, a borda que
@@ -554,7 +597,11 @@
   <aside id="props">
     <div class="pr-head">
       <h2>Propriedades</h2>
-      <span class="ro" title="a ficha só edita a cor da port; valor, footprint e parâmetro são da IA, no schematic.js">só leitura (exceto cor)</span>
+      <!-- A FOLHA vem para o cabeçalho: ela vale para a ficha inteira, e repetir "Folha: X"
+           dentro de cada seção era uma linha por item dizendo a mesma coisa. O cracha de
+           "só leitura" saiu junto — a ficha passou a editar designador, posição e rotação,
+           e continuar anunciando leitura seria mentir na primeira linha da tela. -->
+      <span class="folha mono" id="prFolha" title="a folha deste item"></span>
       <button class="pin" id="btnPin" aria-pressed="false" title="Fixar a ficha aberta (sem fixar, ela some quando nada está selecionado)">
         <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3.5 3H6.5L10 10 9 4Z"/><path d="M12 13v7"/></svg></button>
     </div>
