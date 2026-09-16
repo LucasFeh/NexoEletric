@@ -1,13 +1,34 @@
 /* AltiumPCBMirror v2 - hub-chat.js — a conversa com o Claude OPERADOR do hub.
 
    O que este arquivo é: a CASCA da conversa. Ele desenha a lista de mensagens, recebe o
-   texto enquanto chega, mostra o que o operador fez (as ferramentas), oferece o cartão de
+   texto enquanto chega, mostra o que o Claude fez (as ferramentas), oferece o cartão de
    proposta com os dois botões e cuida dos anexos. Ele NÃO fala com a Anthropic e não
-   escreve em disco: quem fala é o `tools/chat/chatserver.py`, quem decide é o
-   `tools/chat/operador.py`, e a chave mora no ambiente do container. O navegador nunca vê a
-   CHAVE da Anthropic — é a mesma regra que o /hub-almox.json já quebrou uma vez, vazando a
-   senha do Odoo em texto claro para a LAN inteira, e que não se quebra de novo. (A senha
-   mestre do hub, essa sim, o navegador guarda: veja "entrar", logo abaixo.)
+   escreve em disco: quem fala é o `tools/chat/chatserver.py`, quem decide é o motor que
+   estiver atrás dele. O navegador nunca vê CHAVE nenhuma — é a mesma regra que o
+   /hub-almox.json já quebrou uma vez, vazando a senha do Odoo em texto claro para a LAN
+   inteira, e que não se quebra de novo. (A senha mestre do hub, essa sim, o navegador
+   guarda: veja "entrar", logo abaixo.)
+
+   ── DOIS MOTORES, e a tela diz qual ──
+   O servidor responde no /estado qual está atrás, e a tela muda de acordo:
+
+     motor "cli"  o `claude` DA MÁQUINA que serve o hub, subido como subprocesso
+                  (tools/chat/claude_cli.py). É literalmente o acesso de terminal do Claude
+                  Code com outra cara: o login é o que já está na máquina, não há chave de
+                  API, e as ferramentas são as dele (Read, Edit, Write, Bash, Grep…). Aqui
+                  existe o SELETOR DE COLEIRA colado no campo de escrever — é ele que diz
+                  até onde o Claude pode ir — e NÃO existe cartão de proposta: o Claude
+                  edita direto. O dólar que o CLI relata é QUANTO CUSTARIA pela API; quem
+                  está na assinatura não paga aquilo, e por isso ele só aparece com a frase
+                  que diz o que é (ver `desenhaEquiv`).
+     motor "api"  a chave da Anthropic no ambiente do container (tools/chat/claude_api.py),
+                  com as ferramentas do `tools/chat/operador.py` — que devolvem PROPOSTA e
+                  não gravam nada. É o caminho do servidor (192.168.15.192:8100), onde não
+                  há `claude` instalado nem login de ninguém. Aí o cartão de proposta e o
+                  contador em dólar valem, e o seletor de coleira não aparece.
+
+   Servidor mais velho que esta tela responde só `chave:bool`, e nada aqui quebra por isso:
+   campo ausente vira "não sei", e "não sei" não desliga funcionalidade nenhuma.
 
    Autossuficiente de propósito — injeta o próprio CSS e o próprio DOM. São duas portas:
 
@@ -51,16 +72,18 @@
    é o único que atravessa origem insegura.
 
    ── Markdown não é renderizado, de propósito ──
-   O operador responde em texto curto, e o que importa de verdade (a mudança) vem no CARTÃO
-   DE PROPOSTA, com diff colorido. Renderizar markdown no meio do streaming custa um parser
-   que reescreve o que já está na tela a cada pedaço que chega, e paga isso com nada.       */
+   A resposta é texto curto, e o que importa de verdade aparece fora dela: no cartão de
+   proposta (motor "api") ou nas linhas de ferramenta (motor "cli"). Renderizar markdown no
+   meio do streaming custa um parser que reescreve o que já está na tela a cada pedaço que
+   chega, e paga isso com nada.                                                            */
 "use strict";
 var HubChat = (function () {
 
 /* ── rotas do chatserver.py ──
    Nomes fixados com o agente do servidor. O painel só conhece estes três.               */
 const R = {
-  estado:   '/api/chat/estado',    // { ok, chave:bool, modelos:[...], modelo, projeto }
+  estado:   '/api/chat/estado',    // { ok, ligado, motivo, motor, versao, modos, modo_padrao,
+                                   //   modelos, modelo, projeto, teto } — servidor velho: chave:bool
   conversa: '/api/chat/conversa',  // SSE: texto / ferramenta / resultado / proposta / fim / erro
   aplicar:  '/api/chat/aplicar',   // { ok, resumo } — o ÚNICO lugar em que o disco é tocado
 };
@@ -92,13 +115,17 @@ const CSS = `
   font:14px var(--font, system-ui, sans-serif); color:var(--text,#f2f2f3);}
 .hc *{box-sizing:border-box;}
 
-.hc-topo{display:flex; align-items:center; gap:10px; flex:none; padding:8px 12px;
-  border-bottom:1px solid var(--line,rgba(242,242,243,.14));}
+/* embrulha de propósito: no painel no mínimo (300 px, a largura que a pega permite) a fila da
+   direita mede 311 px e empurrava o "Sair" para fora da tela — botão que existe e não dá para
+   clicar é pior do que botão nenhum. Medido no headless, 16/09. */
+.hc-topo{display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; flex:none;
+  padding:8px 12px; border-bottom:1px solid var(--line,rgba(242,242,243,.14));}
 .hc-topo .hc-tit{font-size:11px; letter-spacing:.09em; text-transform:uppercase;
   color:var(--text-3,#7a7a80);}
 .hc-topo .hc-proj{font-size:12px; color:var(--text-2,#a8a8ae); overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap; max-width:34ch;}
-.hc-topo .hc-dir{margin-left:auto; display:flex; align-items:center; gap:8px;}
+.hc-topo .hc-dir{margin-left:auto; display:flex; flex-wrap:wrap; justify-content:flex-end;
+  align-items:center; gap:6px 8px;}
 .hc-sel{min-height:26px; padding:2px 6px; font:inherit; font-size:12px;
   background:var(--surface,#1a1a1d); color:var(--text,#f2f2f3);
   border:1px solid var(--line,rgba(242,242,243,.14)); border-radius:var(--r-sm,5px);}
@@ -124,7 +151,7 @@ const CSS = `
 .hc-vivo .hc-txt::after{content:'▍'; color:var(--text-4,#57575d); animation:hc-pisca 1s steps(2) infinite;}
 @keyframes hc-pisca{50%{opacity:0;}}
 
-/* As ferramentas. Linha discreta, não balão: o usuário precisa VER o que o operador fez —
+/* As ferramentas. Linha discreta, não balão: o usuário precisa VER o que o Claude fez —
    "leu o esquema", "procurou resistor 10k" — sem que isso dispute espaço com a resposta. */
 .hc-fer{display:flex; align-items:baseline; gap:7px; font-size:11.5px;
   color:var(--text-3,#7a7a80); padding:1px 0 1px 2px;}
@@ -133,6 +160,19 @@ const CSS = `
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:38ch;}
 .hc-fer.hc-fim .hc-pt{color:var(--ok,#4bbf7b);}
 .hc-fer.hc-ruim{color:var(--err,#e0555a);} .hc-fer.hc-ruim .hc-pt{color:var(--err,#e0555a);}
+
+/* O COMANDO do Bash tem bloco próprio, e é a única ferramenta que ganha isso. Motivo: com o
+   motor CLI, o Bash roda na máquina que serve o hub, e esta linha é a única forma de o
+   usuário ver o que foi rodado ali. Cortar em 38ch com reticências, como os outros
+   argumentos, esconderia justamente o fim do comando — que é onde mora o rm -rf. */
+.hc-fer.hc-bash{flex-direction:column; align-items:stretch; gap:3px;}
+.hc-fer.hc-bash .hc-ferl{display:flex; align-items:baseline; gap:7px;}
+.hc-fer .hc-cmd{margin-left:9px; padding:4px 8px; max-height:98px; overflow:auto;
+  font:11px var(--mono,ui-monospace,Consolas,monospace); color:var(--text-2,#a8a8ae);
+  white-space:pre-wrap; overflow-wrap:anywhere; background:var(--sunken,#0b0b0d);
+  border:1px solid var(--line-soft,rgba(242,242,243,.08));
+  border-left:2px solid var(--line,rgba(242,242,243,.14)); border-radius:var(--r-sm,5px);}
+.hc-fer.hc-ruim .hc-cmd{border-left-color:var(--err,#e0555a);}
 
 /* O cartão de proposta: nada é escrito sem os dois botões daqui. */
 .hc-prop{border:1px solid var(--line,rgba(242,242,243,.14)); border-left:3px solid var(--hi,#d8d8dd);
@@ -156,13 +196,16 @@ const CSS = `
 .hc-prop.hc-feito{border-left-color:var(--ok,#4bbf7b);}
 .hc-prop.hc-fora{border-left-color:var(--idle,#4a4a50); opacity:.62;}
 
-/* A linha de recado: sem chave, sem servidor, sem projeto. Um chat que não responde e não
+/* A linha de recado: sem motor, sem servidor, sem projeto. Um chat que não responde e não
    diz por quê é pior do que um chat que não existe. */
 .hc-aviso{flex:none; margin:10px 12px 0; padding:9px 11px; font-size:12px; line-height:1.5;
   border:1px solid var(--line,rgba(242,242,243,.14)); border-left:3px solid var(--warn,#d6a75a);
   border-radius:var(--r-sm,5px); background:var(--warn-soft,rgba(214,167,90,.12));}
 .hc-aviso.err{border-left-color:var(--err,#e0555a); background:var(--err-soft,rgba(224,85,90,.15));}
 .hc-aviso code{font:11.5px var(--mono,ui-monospace,Consolas,monospace); color:var(--text,#f2f2f3);}
+/* a faixa de pergunta: onde não há modal da página (io.confirm/HubDialog), a confirmação
+   acontece AQUI, no tema — nunca no confirm() do navegador, que chega em inglês e trava a aba */
+.hc-aviso .hc-botoes{display:flex; gap:8px; padding-top:9px;}
 
 /* A caixa de escrever */
 .hc-baixo{flex:none; border-top:1px solid var(--line,rgba(242,242,243,.14)); padding:8px 12px 10px;}
@@ -178,6 +221,28 @@ const CSS = `
   font:13px/1 var(--font,sans-serif); padding:2px 5px; border-radius:3px;}
 .hc-chip button:hover{background:rgba(var(--tint,242,242,243),.1); color:var(--text,#f2f2f3);}
 .hc-chip.grande{border-color:var(--warn,#d6a75a);}
+
+/* ── a coleira ──
+   Colada no campo de escrever porque é ali que ela vale: é a última coisa que o usuário vê
+   antes de apertar Enter. Duas linhas de propósito — o rótulo do seletor ("Solto (terminal)")
+   não tem espaço para explicar o que o modo faz, e a frase embaixo é justamente o que
+   precisa ser lido antes de escolher. Só aparece com o motor que tem modos (o CLI). */
+.hc-coleira{display:flex; flex-wrap:wrap; align-items:center; gap:5px 8px; padding-bottom:7px;}
+/* mesma armadilha do passo da tela de entrada: sem isto, coleira.hidden = true deixaria uma
+   faixa vazia ocupando espaço em cima do campo de escrever no motor que não tem modos */
+.hc-coleira[hidden]{display:none;}
+.hc-coleira .hc-modo{max-width:62%;}
+.hc-coleira .hc-motor{margin-left:auto; max-width:50%; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font:11px var(--mono,ui-monospace,Consolas,monospace);
+  color:var(--text-4,#57575d);}
+.hc-coleira .hc-frase{flex:1 1 58%; min-width:0; font-size:11px; line-height:1.45;
+  color:var(--text-3,#7a7a80);}
+.hc-coleira .hc-equiv{margin-left:auto; white-space:nowrap; font-size:11px;
+  font-variant-numeric:tabular-nums; color:var(--text-4,#57575d); cursor:help;}
+.hc-coleira .hc-equiv:empty, .hc-coleira .hc-motor:empty{display:none;}
+/* solto é o único modo que muda de cor: a coleira aberta tem de ser visível de canto de olho */
+.hc-coleira.hc-solta .hc-modo{border-color:var(--warn,#d6a75a); color:var(--warn,#d6a75a);}
+.hc-coleira.hc-solta .hc-frase{color:var(--warn,#d6a75a);}
 
 .hc-escrita{display:flex; align-items:flex-end; gap:7px;}
 .hc-campo{flex:1; min-height:38px; max-height:170px; resize:none; overflow-y:auto;
@@ -305,6 +370,10 @@ const CSS = `
   overflow-wrap:anywhere;}
 .hc-porta .hc-passo{display:flex; flex-direction:column; gap:11px; padding-top:13px;
   border-top:1px solid var(--line-soft,rgba(242,242,243,.08));}
+/* display:flex numa CLASSE ganha do [hidden]{display:none} do navegador, que é regra de
+   agente do usuário. Sem esta linha, p.hidden = true não esconde nada — e o segundo passo
+   aparecia com o campo de senha ainda em cima dele (medido no headless, 16/09). */
+.hc-porta .hc-passo[hidden]{display:none;}
 .hc-porta .hc-rodape{margin-top:auto; padding-top:14px; font-size:11px; line-height:1.55;
   color:var(--text-4,#57575d);}
 .hc-porta .hc-textobt{border:0; background:transparent; padding:0; cursor:pointer;
@@ -361,7 +430,18 @@ function normaliza(bruto){
              proposta: ev.proposta || ev };
   if (t === 'fim' || t === 'done' || t === 'message_stop'){
     const u = ev.uso || ev.usage || {};
-    return { t: 'fim', motivo: ev.motivo || ev.stop_reason || 'end_turn', uso: {
+    /* `custo_equivalente_usd` só existe no motor CLI (claude_cli.py » eventos_da_linha): é o
+       que o turno CUSTARIA pela API. NÃO é o mesmo número do contador do motor API, e por
+       isso viaja num campo próprio — somar os dois no mesmo lugar faria a tela apresentar
+       como fatura um dinheiro que a assinatura não cobra. `null` quando o servidor não diz. */
+    const eq = ev.custo_equivalente_usd != null ? ev.custo_equivalente_usd
+             : (ev.custo_equivalente != null ? ev.custo_equivalente : null);
+    return { t: 'fim', motivo: ev.motivo || ev.stop_reason || 'end_turn',
+      /* o id da sessão do CLI. Quem retoma (`--resume`) é o SERVIDOR, pelo id da conversa —
+         o painel guarda isto só para saber com qual sessão está falando. */
+      sessao: String(ev.sessao || ev.session_id || ''),
+      equivalente: (eq == null || isNaN(Number(eq))) ? null : Number(eq),
+      uso: {
       entrada: Number(u.entrada != null ? u.entrada : u.input_tokens) || 0,
       saida:   Number(u.saida   != null ? u.saida   : u.output_tokens) || 0,
       cacheLeitura:  Number(u.cache_leitura  != null ? u.cache_leitura  : u.cache_read_input_tokens) || 0,
@@ -374,11 +454,17 @@ function normaliza(bruto){
   return null;
 }
 
-/* Frase para a linha de ferramenta. O dicionário é cortesia: o operador.py é de outro agente
-   e pode ganhar ferramenta nova a qualquer commit, então o padrão é mostrar o NOME CRU com o
-   sublinhado trocado por espaço — ferramenta desconhecida aparece feia, mas aparece. Sumir
-   seria pior: o usuário precisa ver o que o operador fez, não só o resultado. */
+/* Frase para a linha de ferramenta. São DUAS famílias de ferramenta, e o painel desenha as
+   duas: as do `operador.py` (motor API, nomes em snake_case e em português) e as do CLAUDE
+   CODE (motor CLI: Read, Edit, Write, Bash, Grep, Glob, Task…), que chegam em inglês e em
+   PascalCase. Traduzir a segunda família não é enfeite: com o motor CLI não há cartão de
+   proposta nenhum, e esta linha passa a ser a ÚNICA coisa que o usuário vê do que foi feito
+   no disco e na máquina dele.
+
+   O dicionário continua sendo cortesia: ferramenta que não estiver aqui aparece com o nome
+   cru e o sublinhado trocado por espaço. Feia, mas aparece — sumir seria pior. */
 const VERBO = {
+  /* operador.py — motor "api" */
   ler_esquema: 'leu o esquema',        ler_placa: 'leu a placa',
   ler_arquivo: 'leu o arquivo',        listar_projetos: 'listou os projetos',
   procurar_componente: 'procurou',     buscar_simbolo: 'procurou o símbolo',
@@ -387,26 +473,87 @@ const VERBO = {
   escrever_esquema: 'propôs mudar o esquema',
   escrever_changes: 'propôs mudar a PCB',
   escrever_anotacoes: 'propôs responder um sinalizador',
+  /* Claude Code — motor "cli". O tempo verbal é o passado dos outros: a linha nasce quando a
+     chamada começa, mas quem lê a conversa depois está lendo o que já aconteceu. */
+  Read: 'leu',                   Write: 'escreveu o arquivo',
+  Edit: 'editou',                MultiEdit: 'editou (vários trechos)',
+  NotebookEdit: 'editou o notebook',
+  Bash: 'rodou na máquina',      BashOutput: 'leu a saída do comando',
+  KillShell: 'encerrou o comando', KillBash: 'encerrou o comando',
+  Grep: 'procurou no código',    Glob: 'listou arquivos',
+  LS: 'listou a pasta',          Task: 'chamou um subagente',
+  TodoWrite: 'anotou as tarefas', ExitPlanMode: 'fechou o plano',
+  WebFetch: 'abriu a página',    WebSearch: 'pesquisou na web',
+  SlashCommand: 'rodou um comando do Claude', Skill: 'abriu uma habilidade',
+  AskUserQuestion: 'perguntou',  NotebookRead: 'leu o notebook',
+};
+/* O campo que vale mostrar, POR FERRAMENTA — é o que separa "leu" de "leu schematic.js". A
+   lista genérica (ARGS) atende quem não estiver aqui. */
+const ARG_DA = {
+  Read: 'file_path', Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path',
+  NotebookEdit: 'notebook_path', NotebookRead: 'notebook_path', LS: 'path',
+  Grep: 'pattern', Glob: 'pattern', Task: 'description', WebFetch: 'url',
+  WebSearch: 'query', SlashCommand: 'command', Skill: 'skill', BashOutput: 'bash_id',
+  /* Bash mostra a `description` na linha e o COMANDO no bloco de baixo — ver `cmd` */
+  Bash: 'description',
 };
 /* o argumento que vale mostrar: o primeiro campo curto e legível. "procurou resistor 10k"
    diz o que "procurar_componente" sozinho não diz. */
-const ARGS = ['termo','busca','q','texto','ref','net','simbolo','componente','arquivo','caminho','projeto','folha','sheet','id'];
+const ARGS = ['termo','busca','q','texto','ref','net','simbolo','componente','arquivo','caminho','projeto','folha','sheet','id','file_path','pattern','command','description','path','url','query'];
+const TETO_ARG = 60;
+/* 38 é o `max-width:38ch` do `.hc-arg` no CSS, e os dois números TÊM de ser o mesmo para
+   CAMINHO: o corte do CSS come o FIM da linha, e o fim de um caminho é o nome do arquivo —
+   a única parte que interessa. Deixar o JS cortar em 60 fazia um caminho de 52 passar
+   inteiro daqui e sair da tela como "…/Projects/X/schemat…". Texto livre continua em 60,
+   porque lá o começo é que importa. */
+const TETO_CAMINHO = 38;
+const TETO_CMD = 2000;   /* comando maior que isto não é comando, é um script colado */
+
+/* Caminho inteiro não cabe na linha, e o que importa dele é o FIM: `…/Projects/X/schematic.js`
+   diz o que `D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\Projects…` esconde. Só encurta o
+   que é caminho (tem barra) e só quando passa do teto. */
+function caminhoCurto(s, teto){
+  const t = teto || TETO_ARG;
+  const txt = String(s == null ? '' : s);
+  if (txt.length <= t || !/[\\/]/.test(txt)) return txt;
+  const p = txt.replace(/\\/g, '/').split('/').filter(Boolean);
+  for (let n = 3; n >= 1; n--){
+    if (p.length <= n) break;
+    const curto = '…/' + p.slice(-n).join('/');
+    if (curto.length <= t || n === 1) return curto;
+  }
+  return txt;
+}
+
 function fraseFerramenta(nome, entrada){
   const verbo = VERBO[nome] || String(nome || 'ferramenta').replace(/_/g, ' ');
   const e = entrada && typeof entrada === 'object' ? entrada : {};
-  let arg = '';
-  for (const k of ARGS){
+  const texto = k => {
     const v = e[k];
-    if (typeof v === 'string' && v.trim()){ arg = v.trim(); break; }
-    if (typeof v === 'number'){ arg = String(v); break; }
-  }
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'number') return String(v);
+    return '';
+  };
+  let arg = ARG_DA[nome] ? texto(ARG_DA[nome]) : '';
+  if (!arg) for (const k of ARGS){ arg = texto(k); if (arg) break; }
   if (!arg){
     for (const k of Object.keys(e)){
       const v = e[k];
-      if (typeof v === 'string' && v.trim() && v.length <= 60){ arg = v.trim(); break; }
+      if (typeof v === 'string' && v.trim() && v.length <= TETO_ARG){ arg = v.trim(); break; }
     }
   }
-  return { verbo, arg: arg.length > 60 ? arg.slice(0, 57) + '…' : arg };
+  arg = caminhoCurto(arg, TETO_CAMINHO);
+  if (arg.length > TETO_ARG) arg = arg.slice(0, TETO_ARG - 3) + '…';
+  /* O COMANDO do Bash sai inteiro, num bloco à parte. Com o motor CLI ele roda na máquina que
+     serve o hub, e ver o que rodou é tudo o que sobra ao usuário depois do fato — cortar em
+     38ch esconderia justamente o fim da linha, que é onde mora o que dói. */
+  let cmd = '';
+  if (nome === 'Bash' || nome === 'BashOutput' || nome === 'SlashCommand'){
+    cmd = typeof e.command === 'string' ? e.command.trim() : '';
+    if (cmd.length > TETO_CMD) cmd = cmd.slice(0, TETO_CMD) + '\n… (comando cortado na tela)';
+  }
+  if (cmd && arg === cmd) arg = '';     /* não repetir o comando na linha e no bloco */
+  return { verbo, arg, cmd };
 }
 
 /* O diff em linhas classificadas. Aceita as duas formas que a proposta pode trazer: o texto
@@ -450,6 +597,75 @@ function custo(uso, preco){
   const cl = (uso.cacheLeitura || 0) / 1e6 * preco.entrada * 0.1;
   const ce = (uso.cacheEscrita || 0) / 1e6 * preco.entrada * 1.25;
   return e + s + cl + ce;
+}
+
+/* ── o /estado, normalizado ──
+   Dois servidores respondem esta rota e o painel aguenta os dois. O novo diz qual MOTOR está
+   atrás (`cli` = o claude desta máquina; `api` = a chave no container) e manda versão, modos
+   e modelos; o velho respondia só `chave:bool`. A regra aqui é uma só: CAMPO AUSENTE VIRA
+   "NÃO SEI", e "não sei" nunca desliga nada — um painel que se cala porque o servidor é mais
+   velho que ele é um painel quebrado por conta própria.
+
+   As listas chegam como array (`[{id,rotulo,…}]`) ou como o dicionário cru do Python
+   (`{plan:{rotulo,…}}`, que é a forma do claude_cli.MODOS). As duas são aceitas: qual das
+   duas o servidor manda é decisão dele, e não vale um painel mudo. */
+function emLista(v){
+  const fora = [];
+  if (Array.isArray(v)){
+    for (const x of v){
+      if (typeof x === 'string'){ if (x) fora.push({ id: x }); }
+      else if (x && typeof x === 'object' && (x.id || x.nome)) fora.push(Object.assign({}, x, { id: String(x.id || x.nome) }));
+    }
+  } else if (v && typeof v === 'object'){
+    for (const k of Object.keys(v)){
+      const x = v[k];
+      fora.push(Object.assign({}, (x && typeof x === 'object') ? x : {}, { id: String(k) }));
+    }
+  }
+  return fora;
+}
+
+function leEstado(bruto){
+  const r = bruto && typeof bruto === 'object' ? bruto : {};
+  /* `ligado` é a única pergunta que importa: dá para conversar? O servidor velho respondia
+     isso em `chave`. Nenhum dos dois presente = não sei, e não sei deixa a conversa aberta —
+     quem sabe de verdade é o primeiro turno, e o erro dele vem com frase. */
+  const ligado = typeof r.ligado === 'boolean' ? r.ligado
+               : typeof r.chave === 'boolean' ? r.chave : null;
+  const modos = emLista(r.modos).map(m => ({
+    id: m.id, rotulo: String(m.rotulo || m.id), frase: String(m.frase || ''), solto: !!m.solto }));
+  const modelos = emLista(r.modelos).map(m => {
+    const o = { id: m.id, rotulo: String(m.rotulo || m.id) };
+    if (m.entrada != null) o.entrada = Number(m.entrada) || 0;
+    if (m.saida   != null) o.saida   = Number(m.saida) || 0;
+    return o;
+  });
+  return {
+    motor: String(r.motor || '').toLowerCase(),
+    versao: String(r.versao || r.version || ''),
+    ligado, motivo: String(r.motivo || ''),
+    modelos, modelo: String(r.modelo || ''),
+    modos, modoPadrao: String(r.modo_padrao != null ? r.modo_padrao
+                             : (r.modoPadrao != null ? r.modoPadrao : (r.modo || ''))),
+    /* `dolar.fatura` é o servidor DIZENDO se o número é conta a pagar, em vez de a tela
+       deduzir isso do nome do motor. É a resposta certa para a mesma pergunta, e ela ganha:
+       quem sabe se aquilo é cobrado é quem mede. `null` = não disse, e aí vale o motor. */
+    fatura: (r.dolar && typeof r.dolar.fatura === 'boolean') ? r.dolar.fatura : null,
+    /* a frase do servidor dizendo que o dólar do CLI é equivalente, e não fatura. Sem ela o
+       painel usa a própria — mas a do servidor ganha, porque é lá que a conta é medida. */
+    avisoCusto: String(r.aviso_custo || (r.dolar && r.dolar.frase) || r.custo_aviso || r.aviso || ''),
+    teto: (r.teto && typeof r.teto === 'object') ? r.teto : {},
+  };
+}
+
+/* Com quem eu estou falando. É a frase que a tela de entrada mostra depois da senha e que o
+   painel repete em letra miúda ao lado da coleira. Servidor que não diz o motor não ganha
+   frase inventada: devolve vazio, e o lugar dela simplesmente não aparece. */
+function rotuloMotor(est){
+  if (!est) return '';
+  if (est.motor === 'cli') return 'claude CLI' + (est.versao ? ' ' + est.versao : '') + ' nesta máquina';
+  if (est.motor === 'api') return 'chave da API no servidor';
+  return '';
 }
 
 function kilo(n){
@@ -540,6 +756,10 @@ function retanguloDe(a, b, limite){
 const CAB_SENHA  = 'X-Hub-Senha';
 const CHAVE_SENHA = 'altiumhub.chat.senha';
 const CHAVE_LARG  = 'altiumhub.chat.largura';
+/* a coleira escolhida fica por NAVEGADOR, como a largura do painel: quem trabalha solto o dia
+   inteiro não quer reescolher a cada aba. O que NÃO é lembrado é a confirmação do modo solto —
+   essa é por sessão, e acontece antes do primeiro envio (ver `liberaModo`). */
+const CHAVE_MODO  = 'altiumhub.chat.modo';
 
 /* localStorage LEVANTA (não devolve null) quando o navegador está com os dados do site
    bloqueados ou numa janela anônima restrita — e um painel que não abre porque não deu para
@@ -732,13 +952,14 @@ function marcaClaude(){
    com a conta Claude". Aquele login é do Claude Code e não tem porta pública para um app de
    terceiro — botão que finge fazer isso é pior do que botão nenhum, porque o usuário clica.
 
-   O segundo passo (a chave da Anthropic) é INSTRUÇÃO, nunca campo. Conferido no servidor
-   antes de escrever esta tela: o chatserver.py tem /estado, /enviar, /conversa, /anexo,
-   /aplicar, /conversas e /conversa/<id> — nenhuma grava chave — e o claude_api.py » chave()
-   lê `os.environ['ANTHROPIC_API_KEY']` e diz por escrito que não existe versão dele que leia
-   arquivo, justamente para o erro do /hub-almox.json não se repetir. Um campo aqui só teria
-   para onde mandar a chave se alguém abrisse essa porta; enquanto ela não existe, o campo
-   seria uma mentira bonita.
+   O segundo passo NÃO PEDE MAIS CHAVE DE API, e não é só porque o campo não gravava: com o
+   motor CLI não existe chave nenhuma para pedir. O que ele faz agora é DIZER QUEM ESTÁ
+   ATRÁS — "claude CLI 2.1.260 nesta máquina" — porque a diferença entre falar com o terminal
+   da máquina e falar com uma API paga muda o que o usuário pode pedir e o que aquilo custa.
+   Quando não há motor nenhum, quem fala é o servidor: a frase do /estado (`motivo`) já diz o
+   que falta fazer (instalar o Claude Code e rodar `claude` uma vez para entrar na conta, ou
+   pôr a chave no ambiente do container). Instrução, nunca campo: nenhuma rota do chatserver.py
+   grava chave ou login, e campo que não grava é mentira bonita.
    ════════════════════════════════════════════════════════════════════════════ */
 
 function montaPorta(sessao, aoEntrar, recado){
@@ -752,9 +973,10 @@ function montaPorta(sessao, aoEntrar, recado){
   p1.style.borderTop = '0';
   p1.style.paddingTop = '0';
   p1.append(el('p', null,
-    'O operador gasta dinheiro e edita projeto, então toda rota dele pede a senha mestre do ' +
-    'hub — a mesma do "Excluir projeto". Depois de aceita, ela fica guardada neste navegador ' +
-    'e vai em todo pedido; o botão Sair apaga.'));
+    'O operador edita projeto — e, dependendo da coleira, roda comando na máquina que serve ' +
+    'o hub. Por isso toda rota dele pede a senha mestre, a mesma do "Excluir projeto". ' +
+    'Depois de aceita, ela fica guardada neste navegador e vai em todo pedido; o botão Sair ' +
+    'apaga.'));
 
   const campoz = el('div', 'hc-campoz');
   const rot = el('label', null, 'senha mestre do hub');
@@ -783,9 +1005,10 @@ function montaPorta(sessao, aoEntrar, recado){
 
   const rodape = el('div', 'hc-rodape');
   rodape.textContent =
-    'Não existe "entrar com a conta Claude" aqui: aquele login é do Claude Code, e não há ' +
-    'porta pública dele para um app de terceiro. Quem paga a conversa é a chave da Anthropic ' +
-    'que mora no servidor, no ambiente do container.';
+    'Não existe "entrar com a conta Claude" aqui, e nem precisa: quem conversa é o `claude` ' +
+    'que já está instalado e logado na máquina que serve o hub — a mesma conta do terminal. ' +
+    'Onde não houver esse claude (o servidor do deploy, por exemplo), o motor é a chave da ' +
+    'Anthropic no ambiente do container. Nenhum dos dois passa por este navegador.';
   raiz.append(rodape);
 
   function diz(texto, bom){
@@ -800,29 +1023,65 @@ function montaPorta(sessao, aoEntrar, recado){
     try { campo.focus(); campo.select(); } catch (e) {}
   }
 
-  /* O segundo passo: sem chave no servidor, a conversa não sai. Ele aparece DEPOIS da senha
-     aceita porque é resposta de uma rota que só responde a quem entrou. */
-  function mostraPasso2(estado){
+  /* O SEGUNDO PASSO: quem está atrás.
+     Aparece DEPOIS da senha aceita, porque o /estado só responde a quem entrou. Ele existe
+     mesmo quando está tudo certo: a diferença entre conversar com o `claude` da máquina (as
+     ferramentas do terminal, a assinatura, edição direta no disco) e conversar com a API
+     paga (o operador.py, cartão de proposta, cobrança por token) muda o que se pode pedir —
+     e descobrir isso no meio da primeira conversa é tarde. */
+  function mostraMotor(est){
     p1.hidden = true;
     p2.hidden = false;
     p2.innerHTML = '';
-    p2.append(el('h4', null, 'Falta a chave da Anthropic no servidor'));
-    p2.append(el('p', null, (estado && estado.motivo) ||
-      'O servidor não tem chave da Anthropic, e sem ela o operador não responde.'));
-    p2.append(el('code', null, '/etc/altiumhub/senha.env   →   ANTHROPIC_API_KEY=sk-ant-…'));
-    p2.append(el('p', null,
-      'É um arquivo do servidor, fora da árvore que o hub serve por HTTP — segredo em arquivo ' +
-      'servido é o erro que o /hub-almox.json já cometeu com a senha do Odoo. Depois de ' +
-      'editar, o container precisa subir de novo.'));
-    p2.append(el('p', null,
-      'Não há campo para colar a chave aqui porque não há rota que a grave: o chatserver.py ' +
-      'não tem nenhuma, e a chave sai do ambiente e de lugar nenhum mais. Campo que não grava ' +
-      'seria só uma mentira bonita.'));
+    const pronto = est.ligado !== false;
+    const cli = est.motor === 'cli';
+
+    if (pronto){
+      p2.append(el('h4', null, 'Pronto para conversar'));
+      const rot = rotuloMotor(est);
+      if (rot) p2.append(el('code', null, rot));
+      if (cli){
+        p2.append(el('p', null,
+          'O chat sobe o MESMO `claude` do terminal, na máquina que serve o hub, com o login ' +
+          'que já está nela. Não há chave de API no caminho e nada é cobrado por token — é um ' +
+          'acesso de terminal com outra cara.'));
+        p2.append(el('p', null,
+          'As ferramentas são as dele: ler, procurar, editar arquivo e rodar comando. Por isso ' +
+          'não há cartão de proposta para aprovar — o que limita o alcance é a COLEIRA, o ' +
+          'seletor colado no campo de escrever, e ela começa no modo que só lê e propõe.'));
+      } else if (est.motor === 'api'){
+        p2.append(el('p', null,
+          'Esta instalação não tem o `claude` da máquina, então quem responde é a chave da ' +
+          'Anthropic guardada no ambiente do container. Aqui cada mensagem é cobrada por ' +
+          'token, o histórico inteiro sobe a cada envio, e toda mudança em arquivo vem como ' +
+          'PROPOSTA, com diff e dois botões: nada é gravado sem o seu clique.'));
+      } else {
+        p2.append(el('p', null,
+          'O servidor não disse qual motor está atrás — ele é mais velho que esta tela. Dá ' +
+          'para conversar; o que a tela não pode fazer é adivinhar se aquilo é cobrado.'));
+      }
+    } else {
+      p2.append(el('h4', null, 'Ainda não dá para conversar'));
+      /* a frase é do SERVIDOR: é ele que sabe o que faltou (claude ausente, `--version` mudo,
+         chave fora do ambiente). Reescrevê-la aqui seria adivinhar de longe. */
+      p2.append(el('p', null, est.motivo ||
+        'O servidor não tem motor para conversar: nem o `claude` desta máquina, nem chave de API.'));
+      if (cli || !est.motor)
+        p2.append(el('code', null, 'claude    ← rode uma vez na máquina do hub, para entrar na conta'));
+      if (!cli && est.motor === 'api')
+        p2.append(el('code', null, '/etc/altiumhub/senha.env   →   ANTHROPIC_API_KEY=sk-ant-…'));
+      p2.append(el('p', null,
+        'Não há campo para colar chave nem login aqui porque não há rota que os grave: o ' +
+        'chatserver.py não tem nenhuma. Campo que não grava seria só uma mentira bonita.'));
+    }
+
     const l2 = el('div', 'hc-linha');
-    const btVer = el('button', 'hc-bt forte', 'Conferir de novo');
-    const btAssim = el('button', 'hc-bt', 'Entrar assim mesmo');
-    btAssim.title = 'o painel abre e a conversa fica desligada até a chave existir';
-    l2.append(btVer, btAssim);
+    const btIr = el('button', 'hc-bt forte', pronto ? 'Conversar' : 'Entrar assim mesmo');
+    if (!pronto) btIr.className = 'hc-bt';
+    btIr.title = pronto ? 'abre a conversa'
+                        : 'o painel abre e a conversa fica desligada até o motor existir';
+    const btVer = el('button', 'hc-bt' + (pronto ? '' : ' forte'), 'Conferir de novo');
+    l2.append(pronto ? btIr : btVer, pronto ? btVer : btIr);
     p2.append(l2);
     const m2 = el('div', 'hc-mau');
     p2.append(m2);
@@ -833,15 +1092,16 @@ function montaPorta(sessao, aoEntrar, recado){
       const r = await sessao.testa(sessao.senha);
       btVer.disabled = false;
       btVer.textContent = 'Conferir de novo';
-      if (r.ok && r.estado && r.estado.ligado !== false && r.estado.chave !== false){
+      if (r.ok){
         sessao.estado = r.estado;
-        aoEntrar();
+        const novo = leEstado(r.estado);
+        if (novo.ligado !== false || pronto){ mostraMotor(novo); return; }
+        m2.textContent = 'o servidor ainda não achou motor — o container já subiu de novo?';
         return;
       }
-      m2.textContent = r.ok ? 'ainda sem chave — o container já subiu de novo depois de editar?'
-                            : r.msg;
+      m2.textContent = r.msg;
     };
-    btAssim.onclick = () => aoEntrar();
+    btIr.onclick = () => aoEntrar();
 
     const volta = el('button', 'hc-textobt', 'usar outra senha');
     volta.onclick = () => {
@@ -869,9 +1129,10 @@ function montaPorta(sessao, aoEntrar, recado){
       sessao.estado = r.estado;
       guarda(CHAVE_SENHA, s);
       campo.value = '';
-      const semChave = r.estado && (r.estado.ligado === false || r.estado.chave === false);
-      if (semChave) mostraPasso2(r.estado);
-      else aoEntrar();
+      /* sempre o segundo passo, mesmo estando tudo certo: ele é onde a tela diz com quem o
+         usuário vai falar. Só custa um clique, e só na primeira vez deste navegador — quem
+         já entrou volta direto para a conversa (ver `monta`). */
+      mostraMotor(leEstado(r.estado));
       return;
     }
     /* o campo continua focado e com o texto selecionado: quem errou a senha vai digitar de
@@ -893,7 +1154,7 @@ function montaPorta(sessao, aoEntrar, recado){
       ocupado(sim);
       if (texto) diz(texto, true);
     },
-    mostraPasso2,
+    mostraMotor,
   };
 }
 
@@ -916,7 +1177,18 @@ function montaConversa(container, io, sessao, aoSair){
     msgs: [], anexos: [],
     rodando: false, cancelado: false, parar: null,
     modelo: MODELO_PADRAO, modelos: null, precos: null,
-    temChave: null,
+    /* quem está atrás (ver `leEstado`). `pronto` é bool ou null: null = o servidor não disse,
+       e não dizer não desliga a conversa. */
+    motor: '', versao: '', pronto: null, motivo: '',
+    /* o servidor dizendo se o dólar é conta a pagar (`dolar.fatura`); null = não disse */
+    fatura: null,
+    /* a coleira: os modos que o servidor anunciou, o escolhido, e se o modo SOLTO já foi
+       confirmado nesta sessão do painel (uma vez só — ver `liberaModo`). */
+    modos: [], modo: '', modoPadrao: '', soltoOk: false,
+    /* o dólar EQUIVALENTE do motor CLI, somado pelos turnos. Não é fatura: é quanto este papo
+       custaria pela API. Mora longe do contador de cima de propósito. */
+    equiv: 0, avisoEquiv: '', sessaoCli: '',
+    perguntando: false,   /* uma pergunta de coleira aberta; ver `envia` */
     uso: { entrada: 0, saida: 0, cacheLeitura: 0, cacheEscrita: 0 },
     vivo: null,          /* o balão que está recebendo texto agora */
     ferAbertas: new Map(),
@@ -954,6 +1226,17 @@ function montaConversa(container, io, sessao, aoSair){
 
   const baixo = el('div', 'hc-baixo');
   const chips = el('div', 'hc-anexos');
+
+  /* ── a coleira, colada no campo de escrever ── */
+  const coleira = el('div', 'hc-coleira');
+  coleira.hidden = true;
+  const selModo = el('select', 'hc-sel hc-modo');
+  selModo.title = 'até onde o Claude pode ir nesta máquina';
+  const rotMotor = el('span', 'hc-motor', '');
+  const fraseModo = el('span', 'hc-frase', '');
+  const rotEquiv = el('span', 'hc-equiv', '');
+  coleira.append(selModo, rotMotor, fraseModo, rotEquiv);
+
   const escrita = el('div', 'hc-escrita');
   const btArquivo = el('button', 'hc-bt icone', '+');
   btArquivo.title = 'anexar arquivo, foto ou documento';
@@ -967,7 +1250,7 @@ function montaConversa(container, io, sessao, aoSair){
   entrada.accept = 'image/*,application/pdf,.txt,.md,.csv,.json,.js,.log,.pas';
   escrita.append(btArquivo, btRecorte, campo, btEnviar, entrada);
   const dica = el('div', 'hc-dica');
-  baixo.append(chips, escrita, dica);
+  baixo.append(chips, coleira, escrita, dica);
 
   container.append(topo, avisos, lista, baixo);
 
@@ -986,10 +1269,25 @@ function montaConversa(container, io, sessao, aoSair){
   }
 
   /* ── contador ──
-     Mostra sempre os tokens; o dinheiro só quando o preço do modelo é conhecido. */
+     Mostra sempre os tokens; o dinheiro só quando ele é DINHEIRO DE VERDADE — ou seja, no
+     motor da API. Com o motor CLI o que existe é um equivalente, e ele vive na coleira, com
+     a frase que diz o que é (`desenhaEquiv`). */
+  /* O número é FATURA ou é equivalente? O servidor responde (`dolar.fatura`); quando ele não
+     responde, o motor responde por ele. Uma pergunta só, um lugar só — o contador de cima e a
+     linha da coleira são os dois lados dela. */
+  function ehFatura(){
+    if (ST.fatura !== null) return ST.fatura;
+    return ST.motor !== 'cli';
+  }
+  function precoDo(id){
+    /* a tabela de reserva PRECO é de modelos da API (`claude-sonnet-5`…). Com o motor CLI os
+       ids são apelidos do CLI (`sonnet`) e o token não tem preço: quem está na assinatura não
+       paga por token. Deixar a reserva responder aqui inventaria uma conta. */
+    if (!ehFatura()) return null;
+    return (ST.precos && ST.precos[id]) || PRECO[id] || null;
+  }
   function desenhaConta(){
-    const p = (ST.precos && ST.precos[ST.modelo]) || PRECO[ST.modelo] || null;
-    const c = custo(ST.uso, p);
+    const c = custo(ST.uso, precoDo(ST.modelo));
     conta.textContent = '';
     conta.append(el('b', null, kilo(ST.uso.entrada)));
     conta.append(document.createTextNode(' ent · '));
@@ -998,7 +1296,118 @@ function montaConversa(container, io, sessao, aoSair){
     if (c != null) conta.append(document.createTextNode(' · ' + moeda(c)));
     conta.title = c != null
       ? 'a conversa inteira até agora — entrada, saída e o que ela custou no modelo escolhido'
-      : 'tokens da conversa; o preço deste modelo o servidor ainda não informou';
+      : (!ehFatura()
+         ? 'os tokens desta conversa. Pelo login do terminal não se paga por token; o que isto ' +
+           'custaria pela API aparece na linha do modo, embaixo.'
+         : 'tokens da conversa; o preço deste modelo o servidor ainda não informou');
+  }
+
+  /* ── a coleira ── */
+  function modoAtual(){
+    for (const m of ST.modos) if (m.id === ST.modo) return m;
+    return null;
+  }
+  /* o mais seguro: o padrão que o servidor manda, se não for solto; senão o primeiro que não
+     seja. É onde a coleira começa e para onde ela volta quando a confirmação é recusada. */
+  function modoSeguro(){
+    for (const m of ST.modos) if (m.id === ST.modoPadrao && !m.solto) return m;
+    for (const m of ST.modos) if (!m.solto) return m;
+    return ST.modos[0] || null;
+  }
+  function desenhaColeira(){
+    const rot = rotuloMotor(ST);
+    const tem = ST.modos.length > 0;
+    coleira.hidden = !(tem || rot);
+    rotMotor.textContent = rot;
+    rotMotor.title = ST.motor === 'cli'
+      ? 'o mesmo claude do terminal, rodando na máquina que serve o hub, com o login que já ' +
+        'está nela' + (ST.sessaoCli ? ' — sessão ' + ST.sessaoCli : '')
+      : (rot ? 'a conversa sai pela chave da API que mora no ambiente do servidor' : '');
+    selModo.hidden = !tem;
+    if (tem){
+      selModo.innerHTML = '';
+      for (const m of ST.modos){
+        const o = el('option', null, m.rotulo);
+        o.value = m.id;
+        o.title = m.frase;
+        selModo.append(o);
+      }
+      selModo.value = ST.modo;
+    }
+    const m = modoAtual();
+    fraseModo.textContent = m ? m.frase : '';
+    coleira.classList.toggle('hc-solta', !!(m && m.solto));
+    desenhaEquiv();
+  }
+  /* O DÓLAR DO CLI NÃO É FATURA, e a tela não pode deixar dúvida.
+     O `claude` relata quanto o turno CUSTARIA pela API (claude_cli.py » `total_cost_usd`);
+     quem está na assinatura não paga aquilo. Mostrá-lo do mesmo jeito que o contador do motor
+     API faria o usuário somar no fim do mês um dinheiro que ninguém cobrou — e número que
+     parece fatura sem ser é pior do que número nenhum. Então ele existe (é a única régua de
+     tamanho de papo que o CLI dá), mas nunca sem a frase que diz o que ele é. */
+  function desenhaEquiv(){
+    if (ehFatura() || !(ST.equiv > 0)){
+      rotEquiv.textContent = ''; rotEquiv.title = '';
+      return;
+    }
+    rotEquiv.textContent = '≈' + moeda(ST.equiv) + ' se fosse API';
+    rotEquiv.title = ST.avisoEquiv ||
+      ('é o que esta conversa custaria pela API da Anthropic. Pelo login do terminal ela não é ' +
+       'cobrada por token — o número serve de régua do tamanho do papo, não de conta a pagar.');
+  }
+
+  /* A pergunta no tema da página. Nunca `confirm()`: o diálogo do navegador chega em inglês,
+     com a cara do sistema, e trava a aba. Quando não há modal de ninguém (o painel pode estar
+     fora do hub), a pergunta vira uma faixa DENTRO do painel — que também é no tema. */
+  function pergunta(frase, opc){
+    const f = ST.io.confirm ||
+      ((typeof window !== 'undefined' && window.HubDialog && window.HubDialog.confirm)
+        ? (t, o) => window.HubDialog.confirm(t, o) : null);
+    if (f){
+      try { return Promise.resolve(f(frase, opc || {})); } catch (e) { /* cai na faixa */ }
+    }
+    return faixaPergunta(frase, opc || {});
+  }
+  function faixaPergunta(frase, opc){
+    return new Promise(resolve => {
+      tiraAviso('pergunta');
+      const a = el('div', 'hc-aviso err');
+      a.dataset.hc = 'pergunta';
+      a.append(document.createTextNode(frase));
+      const bs = el('div', 'hc-botoes');
+      const sim = el('button', 'hc-bt perigo', opc.ok || 'Confirmar');
+      const nao = el('button', 'hc-bt', 'Cancelar');
+      const fim = v => { a.remove(); resolve(v); };
+      sim.onclick = () => fim(true);
+      nao.onclick = () => fim(false);
+      bs.append(sim, nao);
+      a.append(bs);
+      avisos.append(a);
+      try { nao.focus(); } catch (e) {}
+    });
+  }
+
+  /* A coleira solta pede confirmação UMA VEZ POR SESSÃO do painel, e a frase diz em uma linha
+     o que ela significa: comando rodando na máquina que serve o hub. Duas portas chegam aqui —
+     trocar no seletor e mandar a primeira mensagem com um modo solto que veio guardado do
+     navegador. A segunda é o motivo de a pergunta não acontecer na abertura do painel: modal
+     que pula na cara de quem só abriu a aba é modal que se aprende a fechar sem ler. */
+  async function liberaModo(){
+    const m = modoAtual();
+    if (!m || !m.solto || ST.soltoOk) return true;
+    const ok = await pergunta(
+      'No modo "' + m.rotulo + '" o Claude roda comando na máquina que serve o hub — com as ' +
+      'ferramentas do terminal e sem perguntar a cada uma. Soltar?',
+      { title: 'Soltar o Claude nesta máquina', ok: 'Soltar', danger: true });
+    if (ok) ST.soltoOk = true;
+    return !!ok;
+  }
+  function voltaAoSeguro(){
+    const s = modoSeguro();
+    if (!s) return;
+    ST.modo = s.id;
+    guarda(CHAVE_MODO, ST.modo);
+    desenhaColeira();
   }
 
   /* ── modelos ── */
@@ -1048,10 +1457,19 @@ function montaConversa(container, io, sessao, aoSair){
   /* ── as linhas de ferramenta ── */
   function poeFerramenta(ev){
     const f = fraseFerramenta(ev.nome, ev.entrada);
-    const linha = el('div', 'hc-fer');
-    linha.append(el('span', 'hc-pt', '·'));
-    linha.append(el('span', null, f.verbo));
-    if (f.arg) linha.append(el('span', 'hc-arg', f.arg));
+    const linha = el('div', 'hc-fer' + (f.cmd ? ' hc-bash' : ''));
+    /* com comando, a linha vira duas: o verbo em cima e o comando inteiro embaixo, no bloco.
+       Sem comando, a linha é a de sempre — não há caixa a mais para quem só leu um arquivo. */
+    const cab = f.cmd ? el('div', 'hc-ferl') : linha;
+    cab.append(el('span', 'hc-pt', '·'));
+    cab.append(el('span', null, f.verbo));
+    if (f.arg) cab.append(el('span', 'hc-arg', f.arg));
+    if (f.cmd){
+      linha.append(cab);
+      const bloco = el('div', 'hc-cmd', f.cmd);
+      bloco.title = f.cmd;
+      linha.append(bloco);
+    }
     /* a linha entra ANTES do texto que ainda vai chegar: o operador chama a ferramenta e só
        depois comenta o que achou, e é nessa ordem que se lê. */
     if (ST.vivo) lista.insertBefore(linha, ST.vivo.raiz);
@@ -1596,7 +2014,7 @@ function montaConversa(container, io, sessao, aoSair){
   }
 
   function podeEnviar(){
-    return !ST.rodando && ST.temChave !== false &&
+    return !ST.rodando && ST.pronto !== false &&
            !!(campo.value.trim() || ST.anexos.length);
   }
   function ajustaBotoes(){
@@ -1605,8 +2023,9 @@ function montaConversa(container, io, sessao, aoSair){
     btEnviar.classList.toggle('perigo', ST.rodando);
     btEnviar.classList.toggle('forte', !ST.rodando);
     if (ST.rodando) btEnviar.disabled = false;
-    campo.disabled = ST.temChave === false;
-    btArquivo.disabled = ST.temChave === false;
+    campo.disabled = ST.pronto === false;
+    btArquivo.disabled = ST.pronto === false;
+    selModo.disabled = ST.rodando;      /* trocar a coleira no meio do turno não muda o turno */
   }
   function ajustaAltura(){
     campo.style.height = 'auto';
@@ -1626,12 +2045,28 @@ function montaConversa(container, io, sessao, aoSair){
     const forcado = typeof textoDado === 'string' ? textoDado.trim() : '';
     if (ST.rodando){ if (!forcado) para(); return; }
     if (!forcado && !podeEnviar()) return;
-    if (ST.temChave === false) return;
+    if (ST.pronto === false) return;
 
     const texto = forcado || campo.value.trim();
     /* o rascunho e os anexos do usuário não são varridos por uma frase que não foi ele que
        escreveu: eles ficam para a mensagem dele */
     const anexos = forcado ? [] : ST.anexos.slice();
+
+    /* A COLEIRA É CONFERIDA ANTES DE O CAMPO SER LIMPO. A pergunta do modo solto pode ser
+       recusada, e recusar não pode custar ao usuário o texto que ele acabou de escrever.
+       `perguntando` existe porque durante a espera `rodando` ainda é falso: um segundo Enter
+       ali dentro começaria um segundo turno com a mesma pergunta pendurada. */
+    if (ST.perguntando) return;
+    ST.perguntando = true;
+    const liberou = await liberaModo();
+    ST.perguntando = false;
+    if (!liberou){
+      voltaAoSeguro();
+      const m = modoAtual();
+      toast('nada foi enviado — a coleira voltou para "' + (m ? m.rotulo : 'o modo seguro') + '"', 'info');
+      return;
+    }
+
     if (!forcado){
       ST.anexos.length = 0; desenhaAnexos();
       campo.value = ''; ajustaAltura();
@@ -1647,6 +2082,10 @@ function montaConversa(container, io, sessao, aoSair){
       tela: telaAgora(),              /* o que está na tela AGORA — o operador só mexe nisto */
       mensagens: ST.msgs.map(paraServidor),
     };
+    /* `modo` só viaja quando o servidor anunciou modos. Mandar um campo que o servidor velho
+       nunca ouviu falar é inventar contrato — e o servidor novo, sem o campo, usa o padrão
+       dele, que é o mais fechado. */
+    if (ST.modos.length) corpo.modo = ST.modo;
 
     ST.rodando = true; ST.cancelado = false; ajustaBotoes();
     ST.vivo = balao('assistente');
@@ -1671,7 +2110,9 @@ function montaConversa(container, io, sessao, aoSair){
         fechaPendentes();
         ST.uso.entrada += ev.uso.entrada; ST.uso.saida += ev.uso.saida;
         ST.uso.cacheLeitura += ev.uso.cacheLeitura; ST.uso.cacheEscrita += ev.uso.cacheEscrita;
-        desenhaConta();
+        if (ev.equivalente != null) ST.equiv += ev.equivalente;
+        if (ev.sessao) ST.sessaoCli = ev.sessao;
+        desenhaConta(); desenhaColeira();
         if (ev.motivo === 'max_tokens')
           ST.vivo.raiz.append(el('div', 'hc-fer hc-ruim', 'a resposta bateu no teto de tokens e parou no meio'));
       } else if (ev.t === 'erro'){
@@ -1680,7 +2121,9 @@ function montaConversa(container, io, sessao, aoSair){
         l.append(el('span', 'hc-pt', '!'));
         l.append(el('span', null, ev.msg + (ev.status ? ' (HTTP ' + ev.status + ')' : '')));
         lista.insertBefore(l, ST.vivo.raiz);
-        if (ev.status === 401) marcaSemChave();
+        /* 401 é a API dizendo que a chave não vale. No motor CLI ele não existe — lá a falta
+           de motor vem como frase do /estado, e não como código HTTP. */
+        if (ev.status === 401) marcaDesligado('');
         desce();
       }
     };
@@ -1730,50 +2173,91 @@ function montaConversa(container, io, sessao, aoSair){
   function limpa(){
     ST.msgs.length = 0;
     ST.uso = { entrada: 0, saida: 0, cacheLeitura: 0, cacheEscrita: 0 };
+    ST.equiv = 0;
+    /* a sessão do CLI vai junto: conversa nova é fio novo, e continuar mostrando o id da
+       anterior faria a letra miúda apontar para um contexto que ninguém mais está usando. */
+    ST.sessaoCli = '';
     ST.conversa = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     lista.innerHTML = '';
-    desenhaConta();
+    desenhaConta(); desenhaColeira();
   }
 
-  /* ── estado do servidor: tem chave? tem servidor? ── */
-  function marcaSemChave(){
-    ST.temChave = false;
+  /* ── estado do servidor: tem motor? tem servidor? ── */
+  function marcaDesligado(motivo){
+    ST.pronto = false;
     ajustaBotoes();
-    poeAviso('chave',
-      'Falta a chave da Anthropic. Ela vai no arquivo de segredos que o compose já monta, ' +
-      'como ANTHROPIC_API_KEY — fora da árvore servida por HTTP, porque segredo em arquivo ' +
-      'que o hub serve é o erro que o /hub-almox.json já cometeu. Depois de pôr a chave, ' +
-      'o container precisa subir de novo.',
-      'warn', '/etc/altiumhub/senha.env  →  ANTHROPIC_API_KEY=sk-ant-…');
+    /* a frase é a do SERVIDOR quando ela existe: é ele que sabe se faltou o `claude` na
+       máquina, se o `--version` não respondeu ou se a chave não está no ambiente. A nossa só
+       entra quando ele não disse nada. */
+    poeAviso('motor',
+      motivo ||
+      'O servidor não tem motor para conversar: nem o `claude` desta máquina, nem chave de API.',
+      'warn',
+      ST.motor === 'api' ? '/etc/altiumhub/senha.env  →  ANTHROPIC_API_KEY=sk-ant-…'
+                         : 'claude    ← rode uma vez na máquina do hub, para entrar na conta');
+  }
+
+  /* Os modos que vieram do servidor viram a coleira. A escolha guardada neste navegador vale
+     — inclusive a solta —, e ela não é perigosa por si: o modo solto só sai daqui depois da
+     confirmação do `liberaModo`, que acontece antes do primeiro envio da sessão. Quando o
+     servidor não anuncia modo nenhum (motor API, servidor velho), a coleira não existe e o
+     campo `modo` não é enviado. */
+  function aplicaModos(est){
+    ST.modos = est.modos;
+    ST.modoPadrao = est.modoPadrao;
+    if (!ST.modos.length){ ST.modo = ''; return; }
+    const salvo = guardado(CHAVE_MODO, '');
+    const vale = ST.modos.some(m => m.id === salvo);
+    const seguro = modoSeguro();
+    ST.modo = vale ? salvo : (seguro ? seguro.id : ST.modos[0].id);
   }
 
   async function perguntaEstado(){
     try {
       const r = await ST.sessao.post(R.estado, { projeto: projetoAgora() });
       tiraAviso('servidor');
-      if (r && Array.isArray(r.modelos) && r.modelos.length){
-        ST.modelos = r.modelos.map(m => (typeof m === 'string' ? { id: m } : m));
+      const est = leEstado(r);
+      ST.motor = est.motor;
+      ST.versao = est.versao;
+      ST.motivo = est.motivo;
+      ST.fatura = est.fatura;
+      ST.avisoEquiv = est.avisoCusto;
+      if (est.modelos.length){
+        ST.modelos = est.modelos;
         ST.precos = {};
-        for (const m of ST.modelos)
+        for (const m of est.modelos)
           if (m.entrada != null || m.saida != null)
             ST.precos[m.id] = { entrada: Number(m.entrada) || 0, saida: Number(m.saida) || 0 };
       }
-      if (r && r.modelo) ST.modelo = r.modelo;
-      desenhaModelos(); desenhaConta();
-      if (r && r.chave === false) marcaSemChave();
-      else { ST.temChave = true; tiraAviso('chave'); ajustaBotoes(); }
+      if (est.modelo) ST.modelo = est.modelo;
+      aplicaModos(est);
+      desenhaModelos(); desenhaColeira(); desenhaConta(); desenhaEscrita();
+      if (est.ligado === false) marcaDesligado(est.motivo);
+      else {
+        /* `null` (o servidor não disse) conta como ligado: um painel que se cala porque o
+           servidor é mais velho que ele é um painel quebrado por conta própria. */
+        ST.pronto = true; tiraAviso('motor'); ajustaBotoes();
+      }
     } catch (e){
       /* senha recusada tem dono: a sessão já devolveu o usuário à tela de entrada, e pôr um
          aviso aqui seria escrever num painel que está saindo da tela. */
       if (e && e.senhaRuim) return;
       /* o chatserver ainda pode não estar registrado (deploy velho, ou o arquivo ainda não
-         subiu). É diferente de "sem chave", e dizer qual dos dois é poupa meia hora. */
-      ST.temChave = null;
+         subiu). É diferente de "sem motor", e dizer qual dos dois é poupa meia hora. */
+      ST.pronto = null;
       poeAviso('servidor',
         'O servidor do chat não respondeu. Confira se o hubserver está com o chatserver ' +
         'registrado e se a rota existe:', 'err', 'POST ' + R.estado + ' — ' + (e && e.message ? e.message : e));
       desenhaModelos(); desenhaConta(); ajustaBotoes();
     }
+  }
+
+  /* O convite do campo muda com o motor, porque o que se pede a cada um é diferente: ao motor
+     CLI se pede trabalho no workspace (ele edita e roda), ao da API se pede proposta. */
+  function desenhaEscrita(){
+    campo.placeholder = ST.motor === 'cli'
+      ? 'peça ao Claude — ele trabalha no workspace do hub'
+      : 'peça ao operador — ele mexe só no projeto aberto';
   }
 
   /* ── a linha de dica: ela existe justamente quando o recorte é limitado ── */
@@ -1800,6 +2284,20 @@ function montaConversa(container, io, sessao, aoSair){
   btRecorte.onclick = () => { if (temTelaInteira) menuRecorte(); else recortaVista(); };
   entrada.onchange = async () => { await anexaVarios(entrada.files); entrada.value = ''; };
   selModelo.onchange = () => { ST.modelo = selModelo.value; desenhaConta(); };
+  /* trocar a coleira: a solta pergunta AGORA, porque agora é quando o usuário está olhando
+     para o seletor e a frase tem efeito. Recusou, volta para o que estava — e o que estava
+     continua sendo o que vai no próximo envio. */
+  selModo.onchange = async () => {
+    const antes = ST.modo;
+    ST.modo = selModo.value;
+    desenhaColeira();
+    if (!(await liberaModo())){
+      ST.modo = antes;
+      desenhaColeira();
+      return;
+    }
+    guarda(CHAVE_MODO, ST.modo);
+  };
 
   campo.addEventListener('input', () => { ajustaAltura(); ajustaBotoes(); });
   campo.addEventListener('keydown', e => {
@@ -1874,6 +2372,8 @@ function montaConversa(container, io, sessao, aoSair){
 
   desenhaModelos();
   desenhaConta();
+  desenhaColeira();      /* escondida até o /estado dizer que há motor com modos */
+  desenhaEscrita();
   desenhaDica();
   desenhaAnexos();
   atualizaProjeto();
@@ -2171,10 +2671,11 @@ function instala(io){
    as quatro que erram em silêncio — retângulo invertido não levanta exceção, só recorta o
    lugar errado. */
 return { instala, monta, poeCss,
-         pure: { normaliza, fraseFerramenta, linhasDoDiff, classifica, custo, cabe,
+         pure: { normaliza, leEstado, emLista, rotuloMotor, fraseFerramenta, caminhoCurto,
+                 linhasDoDiff, classifica, custo, cabe,
                  tokensImagem, retanguloDe, retanguloNaTela, kilo, bytes, moeda,
                  eventosDe, dadoDoBloco },
          MODELO_PADRAO, PRECO, LADO_MAX, TETO_IMG, ROTAS: R,
-         CHAVE_SENHA, CHAVE_LARG, CAB_SENHA };
+         CHAVE_SENHA, CHAVE_LARG, CHAVE_MODO, CAB_SENHA };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubChat;
