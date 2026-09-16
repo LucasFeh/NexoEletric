@@ -686,6 +686,12 @@ const VER_PINOS_KEY = 'altiumhub.sch.pinos';
    (vale para a folha inteira, fica nesta máquina), e não um campo do componente: um campo
    por componente seria mudança de formato, com os dois .pas atrás. */
 const VER_REF_KEY = 'altiumhub.sch.ref';
+/* QUAL SUB-ABA DA FICHA estava aberta. Ela precisa sobreviver ao renderProps, que roda a cada
+   selecao e a cada commit: sem isso, arrastar um componente com a aba Pinos aberta devolvia a
+   Geral no meio do gesto. Fica nesta maquina, como as outras preferencias da vista. */
+const PR_ABA_KEY = 'schframe.prAba';
+let prAba = 'geral';
+try { prAba = localStorage.getItem(PR_ABA_KEY) === 'pinos' ? 'pinos' : 'geral'; } catch (e) {}
 const showState = { grid:true, comment:false, pinos:true, ref:true };
 try { showState.ref = localStorage.getItem(VER_REF_KEY) !== '0'; } catch (e) {}
 try { showState.comment = localStorage.getItem(VER_COMMENT_KEY) === '1'; } catch (e) {}
@@ -1604,6 +1610,10 @@ cv.addEventListener('dblclick', e => {
   if (!h) return;
   if (h.kind === 'wire'){ selSo([alvoAll(h.item)]); aplicaSel(netDoAlvo(h)); return; }
   if (h.kind === 'ref' || h.kind === 'com'){
+    /* o campo do designador vive na aba Geral: se a ficha estiver na aba Pinos, focar um
+       campo escondido nao daria erro nenhum — so nao aconteceria nada, que e pior */
+    prAba = 'geral';
+    try { localStorage.setItem(PR_ABA_KEY, prAba); } catch (e) {}
     selSo([alvoAll(h.item)]); aplicaSel('');
     propsPin = true; salvaPin(); mostraProps();
     const campo = $('prBody') && $('prBody').querySelector('input.mono');
@@ -2278,6 +2288,34 @@ function renderProps(){
   p.append(linhaRot);
   body.append(p);
 
+  /* ── AS DUAS SUB-ABAS ──
+     "Não ficar tudo junto": com geral, parâmetros e a tabela de pinos empilhados, a ficha
+     virava uma coluna longa em que a lista de pinos empurrava o resto para fora da tela. A
+     POSIÇÃO fica de fora das abas, sempre à vista — ela é pequena e é o que se mexe. */
+  const abas = el('div', 'pr-abas');
+  const paneG = el('div', 'pr-pane');
+  const paneP = el('div', 'pr-pane');
+  const pinsN = (HubCore.compPinsWorld(it, SLIB) || []).length;
+  const mostraAba = () => {
+    paneG.hidden = prAba !== 'geral';
+    paneP.hidden = prAba !== 'pinos';
+    for (const b of abas.children) b.setAttribute('aria-selected', String(b.dataset.aba === prAba));
+  };
+  for (const [id, rot] of [['geral', 'Geral'], ['pinos', 'Pinos (' + pinsN + ')']]){
+    const b = el('button', 'pr-aba', rot);
+    b.type = 'button';
+    b.dataset.aba = id;
+    b.setAttribute('role', 'tab');
+    b.onclick = () => {
+      prAba = id;
+      try { localStorage.setItem(PR_ABA_KEY, id); } catch (e) {}
+      mostraAba();
+    };
+    abas.append(b);
+  }
+  abas.setAttribute('role', 'tablist');
+  body.append(abas, paneG, paneP);
+
   /* ── GERAL ──
      Saiu daqui tudo que era PROCEDENCIA e não propriedade: "Por quê", "Resolvido em" e
      "Prefixo da lib". Eram verdadeiros e ninguém os lia — e empurravam para baixo o que se
@@ -2355,7 +2393,7 @@ function renderProps(){
     bUndo.onclick = () => desfazerEscolha(it);
     g.append(bUndo);
   }
-  body.append(g);
+  paneG.append(g);
 
   /* O TEXTO, quando e ele que esta marcado. A posicao do designador e um deslocamento em
      relacao ao lugar de origem (embaixo/em cima do corpo): mostrar o deslocamento, e nao a
@@ -2376,28 +2414,31 @@ function renderProps(){
       };
       t.append(b);
     } else prKv(t, '', 'arraste o texto na folha para afastá-lo do símbolo', 'dim');
-    body.append(t);
+    paneG.append(t);
   }
 
   const pars = prParams(it.params);
   if (pars.length){
     const s = prSec('parâmetros');
     for (const [k, v] of pars) prKv(s, k, v);
-    body.append(s);
+    paneG.append(s);
   }
 
   const pins = HubCore.compPinsWorld(it, SLIB) || [];
-  const s = prSec('pinos (' + pins.length + ')');
-  /* o olho dos NOMES DE PINO, do lado da lista deles. É o mesmo interruptor da barra Vista
-     (showState.pinos): ligado, a folha mostra nome e número de todo pino; desligado, ela
-     obedece o hideName/hideNum que veio do Altium. */
-  if (s.firstChild) prOlho(s.firstChild, showState.pinos, showState.pinos
+  const s = prSec(null);
+  /* O OLHO DIZ O QUE ELE APAGA. Ele estava colado no título "pinos (2)", e ali dava para ler
+     que apagaria a TABELA; o que ele apaga é o nome do pino na FOLHA. Com a aba assumindo o
+     título, sobrou lugar para a frase inteira. */
+  const linhaOlho = el('div', 'pr-lab pr-olholinha');
+  linhaOlho.append(el('span', null, 'nomes de pino na folha'));
+  prOlho(linhaOlho, showState.pinos, showState.pinos
     ? 'Nomes e números de pino visíveis na folha — clique para obedecer o símbolo'
     : 'Pino escondido pelo símbolo fica escondido — clique para mostrar tudo', () => {
       showState.pinos = !showState.pinos;
       try { localStorage.setItem(VER_PINOS_KEY, showState.pinos ? '1' : '0'); } catch (e) {}
       pintaOlhoPinos(); renderProps(); cam.draw(); pintaMiniaturas();
     });
+  s.append(linhaOlho);
   if (!pins.length) s.append(el('p', 'pr-empty', sym ? 'a parte não tem pinos' : 'componente ausente na biblioteca — sem pinagem para mostrar'));
   else {
     const t = el('table', 'pr-tab');
@@ -2422,7 +2463,8 @@ function renderProps(){
     t.append(tb);
     s.append(t);
   }
-  body.append(s);
+  paneP.append(s);
+  mostraAba();          /* so agora os dois paineis existem: acende a aba escolhida */
 
   prPreview(sym, part, fpNome);
 }

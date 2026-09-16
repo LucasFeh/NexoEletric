@@ -245,6 +245,17 @@
   .pr-ib svg{width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.7;
     stroke-linecap:round; stroke-linejoin:round;}
   /* acervo pendente: vermelho com triângulo — não é erro, é trabalho por fazer */
+  /* SUB-ABAS DA FICHA (Geral | Pinos). Nao reusam a .subtabs do painel esquerdo: aquela se
+     prega no RODAPE (margin-top:auto) e tem borda em cima; esta e um separador no meio do
+     conteudo, e a linha do ativo fica embaixo, apontando para o painel que ela abre. */
+  .pr-abas{display:flex; gap:2px; border-bottom:1px solid var(--border); margin:2px 0 6px;}
+  .pr-aba{flex:1 1 0; min-width:0; background:transparent; border:0; border-radius:0;
+    color:var(--fg-dim); font-size:11px; padding:5px 4px 6px; cursor:pointer;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .pr-aba:hover{color:var(--fg);}
+  .pr-aba[aria-selected="true"]{color:var(--fg); box-shadow:inset 0 -2px 0 var(--accent);}
+  .pr-pane[hidden]{display:none !important;}
+  .pr-olholinha{margin:0 0 4px;}
   .pr-alerta{color:#ff6b6b;}
   .pr-alerta .tri{font-size:9px; vertical-align:1px;}
   .pr-head .folha{margin-left:auto; font-size:10px; color:var(--fg-dim); overflow:hidden;
