@@ -1752,7 +1752,14 @@ function drawPins(ctx, pins, px) {
     if (!pin.hideName && pin.name) {
       const vert = d[1] !== 0;
       const align = (d[0] > 0 || d[1] > 0) ? 'right' : 'left';
-      HubDraw.worldText(ctx, pin.name, pin.x - d[0] * 15, pin.y - d[1] * 15, 45, vert ? 90 : 0, C.body, align, { overbar: true });
+      /* 20 mil, e nao 15: e a MESMA folga que o hub-draw usa na folha (PIN_NOME_FOLGA) e nas
+         miniaturas. Enquanto eram dois numeros, o editor desenhava o nome 5 mil mais para
+         dentro do corpo do que a folha — quem viesse aqui afastar um nome que estava
+         encavalando media contra uma regua errada, e o encavalamento na folha continuava.
+         A folga em si e o desenhista quem escolhe (o dado do pino nao guarda posicao de nome:
+         nem o espelho, nem o servidor, nem a .SchLib da casa tem onde por isso), entao o
+         minimo honesto e que os dois desenhistas escolham igual. */
+      HubDraw.worldText(ctx, pin.name, pin.x - d[0] * 20, pin.y - d[1] * 20, 45, vert ? 90 : 0, C.body, align, { overbar: true });
     }
   }
 }
