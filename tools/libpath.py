@@ -265,7 +265,8 @@ def publica(raiz=RAIZ, log=print):
             log('   ATENCAO: a copia da biblioteca da casa saiu inconsistente '
                 '(a lib viva estava sendo gravada?); publicacao cancelada')
             return {'publicou': False, 'motivo': 'copia inconsistente', 'origem': origem, 'alvo': alvo}
-        os.replace(tmp, alvo)
+        # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+        os.replace(tmp, os.path.realpath(alvo))
     except OSError as e:
         # O contrato é não levantar: quem chama (guardiao.sincroniza) conta com isso para o
         # share caindo não derrubar a rodada inteira antes do gerador.

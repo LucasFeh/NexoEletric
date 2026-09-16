@@ -88,7 +88,8 @@ def grava_sqlite(rows, caminho):
     con.close()
     if os.path.exists(caminho):
         os.remove(caminho)
-    os.replace(tmp, caminho)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(caminho))
 
 
 def grava_csv(rows, caminho):

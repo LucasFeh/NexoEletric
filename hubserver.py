@@ -172,7 +172,8 @@ def api_save():
     try:
         with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
             f.write(str(data['content']))
-        os.replace(tmp, full)
+        # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+        os.replace(tmp, os.path.realpath(full))
     except OSError as e:
         return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
     return {'ok': True}
@@ -606,7 +607,8 @@ def api_almox_config_set():
     try:
         with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, full)
+        # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+        os.replace(tmp, os.path.realpath(full))
     except OSError as e:
         return {'ok': False, 'error': 'falha ao gravar as credenciais: %s' % e}, 500
     return api_almox_config_get()
@@ -723,7 +725,8 @@ def _bom_json_write(d, fname, data):
     tmp = full + '.tmp'
     with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
         json.dump(data, f, ensure_ascii=False, indent=1, sort_keys=True)
-    os.replace(tmp, full)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(full))
 
 
 def _bom_tag(data):

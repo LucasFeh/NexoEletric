@@ -142,14 +142,34 @@ fi
 # ── 2. liga o que e estado, nao codigo ──────────────────────────────────────
 mkdir -p "$BASE/shared"
 
+# QUEM SEMEIA shared/ QUANDO ELE NAO TEM O ARQUIVO: a release QUE ESTA NO AR, nunca o
+# commit -- quando ha uma no ar. `$DEST` e a release recem-extraida, ou seja a copia da
+# BANCADA que veio no push; `$BASE/current` e o que o servidor vinha usando.
+#
+# A diferenca custou caro em 2026-09-16. Um `os.replace` sobre o symlink (o padrao de
+# gravacao atomica de 17 pontos do codigo) substitui O LINK, e a release passa a ter copia
+# propria: o trabalho do servidor continua, mas dentro da release. No push seguinte, shared/
+# ainda nao tinha aquele arquivo, e esta funcao o semeava DO COMMIT -- publicando a lib da
+# bancada por cima de dias de trabalho do servidor, sem uma linha de aviso. Foi o que o
+# usuario descreveu como "toda vez que voce faz deploy o banco de esquema volta pra tras".
+#
+# O `os.replace` ja foi consertado (os.path.realpath, ver tests/test_symlink_sobrevive.py),
+# entao o link nao quebra mais. Isto aqui e a segunda tranca: mesmo que ele quebre de novo,
+# por qualquer caminho, o estado do servidor VENCE o do commit. O commit so semeia numa
+# instalacao nova, que e onde ele e a unica coisa que existe.
 ligar() {   # $1 = caminho relativo, $2 = "dir" ou "arq"
   local alvo=$1 tipo=$2
   local origem=$BASE/shared/$alvo
   if [ ! -e "$origem" ]; then
-    if [ -e "$DEST/$alvo" ]; then
+    local vivo=$BASE/current/$alvo
+    if [ -e "$vivo" ]; then
+      mkdir -p "$(dirname "$origem")"
+      cp -aL "$vivo" "$origem"          # -L: se for link, copia o CONTEUDO apontado
+      echo "   semeou shared/$alvo a partir da release NO AR (estado do servidor)"
+    elif [ -e "$DEST/$alvo" ]; then
       mkdir -p "$(dirname "$origem")"
       cp -a "$DEST/$alvo" "$origem"
-      echo "   semeou shared/$alvo a partir do commit"
+      echo "   semeou shared/$alvo a partir do commit (instalacao nova)"
     elif [ "$tipo" = dir ]; then
       mkdir -p "$origem"           # Trash/, Laser/: nascem so em runtime
       echo "   criou shared/$alvo vazio"

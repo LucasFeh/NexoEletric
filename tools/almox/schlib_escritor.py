@@ -685,7 +685,8 @@ def copia_pcblib(destino_dir, origem=None, log=print):
     shutil.copy2(origem, tmp)
     if os.path.exists(alvo):
         os.remove(alvo)
-    os.replace(tmp, alvo)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(alvo))
     log('   %s copiada (%.1f MB)' % (PCBLIB_NOME, fonte.st_size / 1048576.0))
     return alvo
 

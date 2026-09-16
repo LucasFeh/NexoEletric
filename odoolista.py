@@ -574,7 +574,8 @@ def grava_destino(dados, raiz=RAIZ):
     tmp = full + '.tmp'
     with io.open(tmp, 'w', encoding='utf-8', newline='\n') as f:
         f.write(json.dumps(cfg, ensure_ascii=False, indent=1))
-    os.replace(tmp, full)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(full))
     return full
 
 
@@ -693,7 +694,8 @@ def grava_recibo(nome, dados, raiz=RAIZ):
     tmp = full + '.tmp'
     with io.open(tmp, 'w', encoding='utf-8', newline='\n') as f:
         f.write(json.dumps(dados, ensure_ascii=False, indent=1))
-    os.replace(tmp, full)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(full))
     return full
 
 

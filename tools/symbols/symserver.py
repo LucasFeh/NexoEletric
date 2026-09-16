@@ -211,7 +211,8 @@ def _grava_bytes(caminho, bruto):
     tmp = caminho + '.tmp'
     with open(tmp, 'wb') as f:
         f.write(bruto)
-    os.replace(tmp, caminho)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(caminho))
 
 
 def _le_var(caminho):

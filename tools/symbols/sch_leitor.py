@@ -976,7 +976,8 @@ def _grava(caminho, texto):
     tmp = caminho + '.tmp'
     with open(tmp, 'w', encoding='utf-8', newline='') as f:
         f.write(texto)
-    os.replace(tmp, caminho)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(caminho))
 
 
 def _registra_ledger(saida, lib):
@@ -1031,7 +1032,8 @@ def main(argv):
             tmp = saida + '.tmp'
             with open(tmp, 'wb') as f:
                 f.write(novo.encode('latin-1'))
-            os.replace(tmp, saida)
+            # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+            os.replace(tmp, os.path.realpath(saida))
         _registra_ledger(saida, lib)
         for av in dados['avisos'] + r['avisos']:
             print('aviso:', av)

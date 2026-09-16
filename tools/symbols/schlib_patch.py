@@ -859,7 +859,8 @@ def grava(lib, caminho, backup_dir=None, backup=True, raiz=None):
     try:
         with open(tmp, 'wb') as f:
             f.write(bruto)
-        os.replace(tmp, caminho)
+        # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+        os.replace(tmp, os.path.realpath(caminho))
     except PermissionError as e:
         try:
             os.remove(tmp)

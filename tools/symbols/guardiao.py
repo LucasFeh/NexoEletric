@@ -197,7 +197,15 @@ def grava_ledger(raiz, ledger):
     tmp = p + '.tmp'
     with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
         f.write(dumps_ledger(ledger))
-    os.replace(tmp, p)
+    # SEGUIR O LINK ANTES DE TROCAR. No servidor o deploy monta cada release com
+    # `Libs/<arquivo> -> shared/<arquivo>` para o estado sobreviver ao push (ver
+    # tools/deploy/deploy.sh >> COMPARTILHADOS_ARQ). Mas `os.replace` sobre um symlink
+    # substitui O LINK, nao o arquivo apontado: a release passava a ter copia propria, o
+    # shared/ congelava, e o deploy seguinte devolvia o estado do dia em que o link
+    # quebrou. Foi assim que o ledger do servidor ficou parado em 08/09 enquanto o
+    # trabalho continuava numa copia dentro da release — e cada push "voltava tudo".
+    # realpath resolve o link quando ha um e nao faz nada quando nao ha (a bancada).
+    os.replace(tmp, os.path.realpath(p))
 
 
 # ─── arquivos: mtime/size ─────────────────────────────────────────────────────
@@ -359,7 +367,8 @@ def grava_espelho_almox(caminho, varname, esp):
     os.makedirs(d, exist_ok=True)
     tmp = os.path.join(d, os.path.basename(caminho))
     A.escreve_espelho(tmp, varname, esp.get('title', ''), esp.get('symbols') or [], esp.get('generated', ''))
-    os.replace(tmp, caminho)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(caminho))
     try:
         os.rmdir(d)
     except OSError:
@@ -664,7 +673,8 @@ def escreve_resumo(raiz, resumo):
     tmp = cam + '.tmp'
     with io.open(tmp, 'w', encoding='utf-8', newline='\n') as f:
         f.write('var almoxGuardiao = %s;\n' % json.dumps(resumo, ensure_ascii=False, indent=1))
-    os.replace(tmp, cam)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(cam))
 
 
 def le_resumo(raiz):

@@ -1218,7 +1218,8 @@ def escreve_symlib(lib, caminho):
     tmp = caminho + '.tmp'
     with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
         f.write('\n'.join(linhas) + '\n')
-    os.replace(tmp, caminho)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(caminho))
 
 
 def le_symlib(caminho):

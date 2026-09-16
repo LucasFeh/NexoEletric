@@ -326,7 +326,8 @@ def grava(linhas, destino=CSV_OUT):
         w.writeheader()
         for r in linhas:
             w.writerow({k: r.get(k, '') for k in COLUNAS})
-    os.replace(tmp, destino)
+    # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+    os.replace(tmp, os.path.realpath(destino))
     return destino
 
 
