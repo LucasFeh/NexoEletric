@@ -55,6 +55,33 @@ services:
       TZ: America/Sao_Paulo
       PYTHONUNBUFFERED: "1"
       PYTHONIOENCODING: utf-8
+
+      # O CLAUDE DO CHAT MORA EM shared/, E NAO DENTRO DO CONTAINER.
+      #
+      # Medido em 2026-09-16, depois de o usuario perder o dele: o deploy RECRIA o container
+      # (docker compose up -d apos trocar o `current`), entao tudo que for instalado la dentro
+      # a mao -- binario e login -- desaparece no deploy seguinte. Foi exatamente o que
+      # aconteceu: "eu tinha resolvido esse problema com o claude de la mas dps do seu deploy
+      # parou de funcionar".
+      #
+      # O HOME aponta para dentro do bind mount /srv/altiumhub (mesmo caminho absoluto dos dois
+      # lados), que e o unico pedaco de disco que atravessa o deploy.
+      #
+      # E o HOME, e nao outra coisa, porque e ali que o login mora -- conferido olhando o disco:
+      # ~/.claude/.credentials.json (567 bytes) e ~/.claude.json. Vale para os dois jeitos de
+      # autenticar: o `claude` interativo e o `claude setup-token`, que foi o que o usuario
+      # tinha feito DENTRO do container e perdeu no deploy seguinte. Com o HOME aqui, o token
+      # nao precisa ser refeito a cada publicacao.
+      #
+      # A instalacao e de UMA vez, no servidor (ver README, secao do chat):
+      #   docker compose -f /srv/altiumhub/compose.yml exec hub       #     sh -lc 'curl -fsSL https://claude.ai/install.sh | bash'
+      #   docker compose -f /srv/altiumhub/compose.yml exec -it hub claude   # e entrar na conta
+      #
+      # ALTIUMHUB_CLAUDE e explicito porque o PATH do container e curto
+      # (/usr/local/bin:/usr/bin:/bin) e nao inclui ~/.local/bin. Nao e segredo: caminho de
+      # arquivo nao vai para o senha.env, que e para o que nao pode ser lido.
+      HOME: /srv/altiumhub/shared/claude-home
+      ALTIUMHUB_CLAUDE: /srv/altiumhub/shared/claude-home/.local/bin/claude
     # A senha mestre nunca entra em arquivo versionado. Crie no host:
     #   printf 'ALTIUMHUB_MASTER=%s\n' "$(openssl rand -base64 24)" \
     #     | sudo tee /etc/altiumhub/senha.env

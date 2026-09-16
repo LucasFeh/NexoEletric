@@ -183,9 +183,18 @@ def disponivel():
     try:
         exe = executavel()
     except ExeApontadoErrado as e:
-        return False, ('a variável %s aponta para "%s", e não há arquivo aí. Corrija o '
-                       'caminho ou apague a variável para o hub procurar o `claude` no PATH.'
-                       % (ENV_EXE, e))
+        # DUAS coisas levam aqui, e a frase precisa servir as duas: ou o caminho esta errado,
+        # ou ele esta certo e o Claude Code ainda nao foi instalado ali. No servidor o segundo
+        # caso e o comum -- o compose ja aponta para dentro do shared/, que e o unico lugar que
+        # sobrevive ao deploy recriar o container -- e mandar "corrija o caminho" seria o
+        # conselho errado justamente para quem so precisa instalar.
+        return False, ('o hub procura o `claude` em "%s" (variável %s) e não há arquivo aí. '
+                       'Se o caminho estiver certo, falta instalar: no servidor, '
+                       '`docker compose -f /srv/altiumhub/compose.yml exec hub sh -lc '
+                       '"curl -fsSL https://claude.ai/install.sh | bash"` e depois '
+                       '`... exec -it hub claude` uma vez, para entrar na conta. '
+                       'Se o caminho estiver errado, corrija a variável ou apague-a para o hub '
+                       'procurar no PATH.' % (e, ENV_EXE))
     if not exe:
         return False, ('não achei o `claude` nesta máquina. Instale o Claude Code e rode '
                        '`claude` uma vez para entrar na sua conta — o chat usa esse login, '
