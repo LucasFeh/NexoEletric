@@ -29,7 +29,7 @@ var HubLibView = (function () {
 
 const CSS = `
 /* A faixa mora no TOPO DO CENTRO (a janela do meio), que é onde a vista troca. Ela é a
-   primeira linha da grade do .lib-view — por isso o hub.html abriu um \`auto\` a mais ali. */
+   primeira linha da grade do .lib-view — por isso o hub.html abriu um "auto" a mais ali. */
 .lv-tabs{display:flex; gap:2px; padding:6px 12px 0; border-bottom:1px solid var(--line,#3a3a3a);}
 .lv-tabs button{border:0; background:transparent; color:var(--text-3,#9a9a9a);
   font:12px 'Segoe UI',sans-serif; padding:7px 14px; cursor:pointer;
@@ -40,6 +40,15 @@ const CSS = `
 /* Fora da vista Geral o centro deixa de ser a grade de quatro painéis e vira faixa + corpo:
    senão as linhas vazias da grade continuariam reservando altura para canvas escondido. */
 .lib-view.lv-outra{grid-template-rows:auto minmax(0,1fr);}
+/* FORA DA GERAL, SÓ A VISTA DA VEZ — declarativo, e não a disputa de hidden que eu vinha
+   perdendo. O hub.html tem vários donos do hidden dessas peças (libPainelDeBaixo, os ~16
+   chamadores de renderLib, e o próprio redesenha que este módulo dispara ao vincular), e
+   cada um deles reexibia a caixa de valores por cima da vista Símbolos. Com a regra na
+   CLASSE que este módulo controla, todos os caminhos fecham de uma vez — inclusive os que
+   alguém escrever amanhã. O laço de aplicaVisibilidade fica como cinto e suspensório. */
+.lib-view.lv-outra > :not(.lv-tabs):not(#symed):not(#lvFootprints){display:none !important;}
+/* o footprint é desenhado em fundo escuro, como na vista Geral — ver desenhaTile */
+.lv-fp .symed-tile canvas{background:var(--sunken,#14161a);}
 
 /* A FICHA DA DIREITA SÓ EXISTE NA VISTA GERAL. Em Símbolos o editor já tem o painel dele
    (e os dois mostravam componentes DIFERENTES, porque o editor abre o seu e a ficha segue a
@@ -61,7 +70,7 @@ const CSS = `
 
 /* o centro da sub-aba Footprints */
 .lv-fp{display:flex; flex-direction:column; height:100%; min-height:0;}
-/* [hidden] é só \`display:none\` da folha do navegador, e perde para o \`display:flex\` acima
+/* [hidden] é só display:none da folha do navegador, e perde para o display:flex acima
    — a mesma armadilha que o hub.html já resolve assim para .viewport e .seg (hub.html:659).
    Sem esta linha a lista de footprints aparecia POR BAIXO da vista Geral, as duas juntas. */
 .lv-fp[hidden]{display:none !important;}
@@ -310,6 +319,7 @@ function pintaLista(){
   }
   const atual = fpAtualDe(simboloAtual());
   const frag = document.createDocumentFragment();
+  const pendentes = [];
   for (const f of vis.slice(0, 400)){
     const obj = API.footprint && API.footprint(f.name);
     const t = el('button', 'symed-tile' + (f.desenhado ? '' : ' nao'));
@@ -331,9 +341,15 @@ function pintaLista(){
     t.onclick = () => { ST.sel = (ST.sel === f.name) ? null : f.name; pintaLista(); pintaAcoes(); };
     t.ondblclick = () => vincula(f.name, false);
     frag.append(t);
-    if (obj) desenhaTile(cv, obj);
+    if (obj){ cv._fp = obj; pendentes.push(cv); }
   }
   lista.append(frag);
+  /* DESENHAR SÓ DEPOIS DE ENTRAR NO DOCUMENTO. Dentro do fragmento o canvas tem
+     clientWidth 0, e o resize() da câmera monta uma transformação vazia: o tile ficava
+     preenchido com o fundo e mais nada — foi o "as miniaturas estão brancas". O
+     IntersectionObserver é o mesmo remédio da galeria de símbolos (hub-symed.js), e de
+     quebra não pinta 400 canvas de uma vez: só os que estão à vista. */
+  observa(lista, pendentes);
   if (vis.length > 400){
     lista.append(el('div', 'symed-empty', '… e mais ' + (vis.length - 400)
       + '. Refine a busca — a galeria para em 400 para a rolagem não travar.'));
@@ -344,10 +360,40 @@ function pintaLista(){
 /* o desenho do footprint no tile. Mesmo motor da vista Geral (HubDraw), mesma moldura dos
    tiles de símbolo — footprint sem pads (o só-cadastrado) fica com o quadro vazio, que é a
    verdade dele. */
+/* O FUNDO ESCURO NÃO É ENFEITE. Sem `bg`, o mkCamera pinta BRANCO (hub-draw.js:345) e o
+   footprint — cobre e furo, cores feitas para fundo escuro — some no branco: foi o "as
+   miniaturas estão brancas, não aparece nada". A vista Geral sempre passou `--sunken` no
+   canvas de footprint (hub.html:2397); o tile passa o mesmo, e o CSS do .symed-tile canvas,
+   que é `--sheet` (a folha clara do símbolo), é sobrescrito junto. */
+const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+let IO = null;
+
+/* Pinta cada canvas quando ele entra na área visível da galeria. `rootMargin` generoso para
+   o tile já chegar desenhado, e `unobserve` depois de pintar porque o desenho não muda. */
+function observa(raiz, canvases){
+  if (!canvases.length) return;
+  if (IO) IO.disconnect();
+  if (typeof IntersectionObserver !== 'function'){
+    for (const cv of canvases) desenhaTile(cv, cv._fp);
+    return;
+  }
+  IO = new IntersectionObserver(entradas => {
+    for (const e of entradas){
+      if (!e.isIntersecting) continue;
+      desenhaTile(e.target, e.target._fp);
+      IO.unobserve(e.target);
+    }
+  }, { root: raiz, rootMargin: '160px' });
+  for (const cv of canvases) IO.observe(cv);
+}
+
 function desenhaTile(cv, fp){
+  if (!fp) return;
   if (!window.HubDraw || !HubDraw.mkCamera) return;
   try {
-    const cam = HubDraw.mkCamera(cv, ctx => HubDraw.drawFootprint(ctx, fp), {});
+    const cam = HubDraw.mkCamera(cv, ctx => HubDraw.drawFootprint(ctx, fp),
+                                 { bg: tok('--sunken') || '#14161a' });
     cam.resize();
     if (fp.bbox && cam.cam) cam.fit(fp.bbox, 1.25); else cam.draw();
   } catch (e) { /* um tile sem preview é melhor que a galeria inteira sem aparecer */ }
