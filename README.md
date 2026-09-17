@@ -1191,6 +1191,46 @@ O modal mostra sempre para onde vai antes de você enviar.
 
 Ensaio por padrão, como o botão.
 
+## Converter um projeto para o almoxarifado
+
+Projeto antigo vem com os componentes da biblioteca da casa — `RES [ SMD ]`, footprint
+`RES 1206`, comment `10k` —, e o que se quer daqui em diante é a peça do almoxarifado, que
+carrega o `OdooId` e entra na lista de compras. Trocar um por um pelo seletor da vista
+Esquema sempre deu; o botão **⇄ Converter para o almoxarifado** (vista Esquema, aba
+*Configurações*) olha o projeto inteiro de uma vez.
+
+Ele lê a folha aberta, junta os componentes iguais numa linha só (mesmo símbolo, footprint,
+comment e parâmetros — 175 resistores iguais são UMA decisão) e recomenda o substituto a
+partir de, em ordem de força:
+
+| sinal | peso | de onde vem |
+|---|---|---|
+| MPN igual | 120 | `params » MPN` dos dois lados |
+| valor igual | 60 | `params » Value` ou o comment, normalizado (`4k7` = `4.7k`, `100nF` = `0.1uF`) |
+| part number no nome | 55 | `1N4148` no comment achado em `PTH 1N4148UR-1` |
+| encapsulamento | 40 | o nome do footprint (`RES 1206` → `1206`, `DIP8` → `DIP-8`) |
+| família no texto | 35 | `LED SMD 1206 RED` traz "LED" |
+| vias | 30 | `CONECTOR HEADER / 16 VIAS` ↔ `16 Pin` |
+| mesmo tipo, montagem, tensão, estoque | 25/15/6/3 | designador, `[SMD]`/`[PTH]`, `25V`, saldo |
+
+Três coisas **nunca** são recomendadas, por mais pontos que o resto some: tipo diferente
+(um varistor 1206 não substitui um LED 1206), valor diferente e SMD por PTH. Quando o valor
+exato não existe no almoxarifado, a linha diz qual é o mais próximo — e não o escolhe.
+
+Vêm **marcadas** só as linhas de confiança alta e média; as de confiança baixa aparecem com
+a sugestão, desmarcadas. Componente cujo comment é uma fórmula do Altium
+(`=Value + ' - ' + Potência`) e cujo `Value` não veio no export nunca passa de baixa: sem o
+valor não há recomendação, e a linha diz isso.
+
+O **Aplicar** muda só o esquema aberto — nada vai para o disco antes do Salvar. Quem grava é
+a mesma ponte que o painel da BoM e o envio da lista usam (`__hubAplicaVinculos`), então a
+troca sai com `sym`, `comment` e `params` (com `OdooId`) idênticos aos de um componente
+colocado à mão; conector multi-parte recebe só a identidade, para não perder as outras
+partes e a fiação junto.
+
+Medido nos 19 projetos deste workspace: 1428 componentes, 368 tipos, 134 linhas de confiança
+alta e 12 sem sugestão nenhuma. `node tests/test-converte.js` roda isso a cada mudança.
+
 ## Sinalizadores (usuário → IA)
 
 Nas vistas **PCB** e **Esquema**, o botão **⚑ Sinalizar** (tecla `N`) deixa você marcar
