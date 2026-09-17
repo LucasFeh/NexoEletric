@@ -1,229 +1,229 @@
 var schematic = {
 "format":"schmirror-v2",
 "project":"PRJ - DI261930",
-"generated":"14/09/2026 10:50:39",
+"generated":"15/09/2026 09:25:51",
 "units":"mil",
 "items":[
-{"t":"sheet","name":"SCH - DI261930","size":"A4","w":11692.913,"h":8267.717},
-{"t":"comp","sheet":"SCH - DI261930","ref":"U2","sym":"SCL3300-D01-1","part":1,"x":10259.586,"y":3349.995,"rot":270,"mirror":false,"footprint":"SCL3300-D01-1","comment":"SCL3300"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"U3","sym":"a031a76f8c27026a7a7f4657ff233a3","part":1,"x":6170,"y":4530,"rot":0,"mirror":false,"footprint":"FP-ESP32-WROOM-32D-MFG","comment":"ESP32-WROOM-32D"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"D1","sym":"1N4007","part":1,"x":1270.788,"y":7077.166,"rot":0,"mirror":false,"footprint":"DO-214AC","comment":"1N4007"},
-{"t":"text","sheet":"SCH - DI261930","s":"ALIMENTA\u00c7\u00c3O","x":307.086,"y":6489.751,"h":10},
-{"t":"text","sheet":"SCH - DI261930","s":"12V ISO","x":431.103,"y":6986.457,"h":10},
-{"t":"text","sheet":"SCH - DI261930","s":"0V ISO","x":431.103,"y":6536.457,"h":10},
-{"t":"text","sheet":"SCH - DI261930","s":"A","x":861.969,"y":7117.166,"h":10},
-{"t":"text","sheet":"SCH - DI261930","s":"B","x":870.077,"y":6622.821,"h":10},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":8000,"y":1392.123,"rot":270},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C5","sym":"CAP [  SMD  ]","part":1,"x":10450,"y":4986.141,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100nF 25V","params":"Value=100nF 25V"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C8","sym":"CAP [  SMD  ]","part":1,"x":10320,"y":1730,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100nF 25V","params":"Value=100nF 25V"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C7","sym":"CAP [  SMD  ]","part":1,"x":10190,"y":1983.623,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100nF 25V","params":"Value=100nF 25V"},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":10320,"y":1380,"rot":270},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C6","sym":"CAP [  SMD  ]","part":1,"x":10190,"y":4986.141,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100nF 25V","params":"Value=100nF 25V"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"R2","sym":"RES [ PTH ]","part":1,"x":5650,"y":4010.632,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W","params":"Value=10K 1/4W"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"R1","sym":"RES [ PTH ]","part":1,"x":8130,"y":4850,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W","params":"Value=10K 1/4W"},
-{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":9250.236,"y":5444.015,"rot":90},
-{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":6080,"y":5270,"rot":90},
-{"t":"power","sheet":"SCH - DI261930","net":"+5V","style":"Circle","x":2700.868,"y":6018.665,"rot":90},
-{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":4130},
-{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":4030},
-{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2430},
-{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2330},
-{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2230},
-{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2130},
-{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2030},
-{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":1930},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2430},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2530},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2630},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2730},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2830},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2930},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":3030},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":3230},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":3330},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":3830},
-{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":3230},
-{"t":"comp","sheet":"SCH - DI261930","ref":"U1","sym":"AMS 1117 3.3","part":1,"x":3380.868,"y":5358.665,"rot":0,"mirror":false,"footprint":"SOT223","comment":"LM1117MP-3.3NOPB"},
-{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Bar","x":4030.868,"y":6018.665,"rot":90},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":3380.868,"y":4468.665,"rot":270},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":4030.868,"y":4468.665,"rot":270},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":4130},
-{"t":"comp","sheet":"SCH - DI261930","ref":"CN1","sym":"Cone 6P-3V","part":1,"x":4549.302,"y":1853.949,"rot":0,"mirror":false,"footprint":"BARRA PROG ESP32 1.27mm PTH 6MM","comment":"PROG"},
-{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Bar","x":3838.575,"y":1955.114,"rot":90},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":5367.327,"y":2253.124,"rot":270},
-{"t":"comp","sheet":"SCH - DI261930","ref":"R3","sym":"RES [ SMD ]","part":1,"x":5455.895,"y":3146.056,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W","params":"Value=10K 1/4W"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"LD1","sym":"LED","part":1,"x":8350,"y":2240,"rot":270,"mirror":false,"footprint":"LED SMD 0603 - GREEN","comment":"VERDE"},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":8350,"y":1390,"rot":270},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":8680,"y":1390,"rot":270},
-{"t":"comp","sheet":"SCH - DI261930","ref":"R5","sym":"RES [ SMD ]","part":1,"x":8680,"y":2750,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W","params":"Value=10K 1/4W"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"R4","sym":"RES [ SMD ]","part":1,"x":8350,"y":2740,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"470R 1/4W","params":"Value=470R 1/4W"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C1","sym":"CAP [  SMD  ]","part":1,"x":2704.331,"y":6857.166,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"0.1uF 16V","params":"Value=0.1uF 16V"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C2","sym":"CAP [  SMD  ]","part":1,"x":2700.868,"y":5188.665,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100uF 10V","params":"Value=100uF 10V"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C3","sym":"CAP [  SMD  ]","part":1,"x":4030.868,"y":5158.665,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100uF 10V","params":"Value=100uF 10V"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C4","sym":"CAP [  SMD  ]","part":1,"x":4760.868,"y":5158.665,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"0.1uF 16V","params":"Value=0.1uF 16V"},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":4760.868,"y":4468.665,"rot":270},
-{"t":"comp","sheet":"SCH - DI261930","ref":"D2","sym":"CMP-2000-05081-2","part":1,"x":8621.105,"y":7102.36,"rot":0,"mirror":false,"footprint":"SOT-23","comment":"CDSOT23-SM712","params":"Value=75pF"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"U4","sym":"CMP-0694-00003-2","part":1,"x":10051.105,"y":7082.36,"rot":0,"mirror":true,"footprint":"D008a_n","comment":"SN65HVD75DR"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"J1","sym":"Jumper 2","part":1,"x":7896.617,"y":6902.36,"rot":90,"mirror":true,"footprint":"JUMPER 2 VIAS SMD","comment":"Jumper"},
-{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":9411.105,"y":7492.36,"rot":90},
-{"t":"comp","sheet":"SCH - DI261930","ref":"R6","sym":"Res SMD 1206","part":1,"x":7896.617,"y":7292.36,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"120R 1%","params":"Value=120R 1/4W"},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":9410.865,"y":6517.951,"rot":270},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":9048.801,"y":6520.459,"rot":270},
-{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":1,"x":910.788,"y":7077.166,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"5V ISO"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":2,"x":910.788,"y":6579.378,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"Cone Apont Ext"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":3,"x":961.969,"y":4691.972,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"0V ISO"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":4,"x":964.565,"y":4309.44,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"Cone Apont Ext"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":5,"x":961.969,"y":3821.106,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"Cone Apont Ext"},
-{"t":"power","sheet":"SCH - DI261930","net":"T","style":"GndEarth","x":1514.958,"y":4667.707,"rot":270},
-{"t":"comp","sheet":"SCH - DI261930","ref":"U5","sym":"PM-SCCT-MCP1316-5","part":1,"x":1876.844,"y":2175.586,"rot":0,"mirror":false,"footprint":"SOT-23-OT5_M","comment":"STWD100YNYWY3F"},
-{"t":"power","sheet":"SCH - DI261930","net":"3V3","style":"Circle","x":2902.356,"y":2338.579,"rot":90},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C9","sym":"Cap Ceramico SMD","part":1,"x":3103.143,"y":1824.407,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"1uF 50V","params":"Value=1uF 50V"},
-{"t":"noerc","sheet":"SCH - DI261930","x":1676.844,"y":2075.586},
-{"t":"comp","sheet":"SCH - DI261930","ref":"J2","sym":"Jumper 2","part":1,"x":2151.964,"y":1322.833,"rot":0,"mirror":false,"footprint":"JUMPER 2 VIAS SMD","comment":"Jumper"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C10","sym":"Cap Eletrolitico","part":1,"x":1827.555,"y":1147.125,"rot":270,"mirror":false,"footprint":"CapE SMD D4.L5.8","comment":"1uF 35V","params":"Value=1uF 35V"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"R7","sym":"Res SMD 1206","part":1,"x":1381.887,"y":1951.571,"rot":270,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W"},
-{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":4330},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":2907.081,"y":911.022,"rot":270},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":1827.555,"y":911.022,"rot":270},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":2702.357,"y":4452.747,"rot":270},
-{"t":"comp","sheet":"SCH - DI261930","ref":"PTC1","sym":"0ZCJ0010FF2E","part":1,"x":1728.82,"y":7081.496,"rot":0,"mirror":false,"footprint":"0ZCJ0010FF2E","comment":"0ZCJ0010FF2E"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"D3","sym":"DIODO SMD","part":1,"x":2118.893,"y":6803.53,"rot":90,"mirror":false,"footprint":"DO-214AB","comment":"SMDJ33CA","params":"Value=*"},
-{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":5650,"y":4300.632,"rot":90},
-{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":8130,"y":5140,"rot":90},
-{"t":"port","sheet":"SCH - DI261930","net":"IO14","io":3,"style":0,"x":655.117,"y":1675.586,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"IO14","io":3,"style":0,"x":7870,"y":3930,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"MISO","io":3,"style":0,"x":7870,"y":3430,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"MISO","io":3,"style":4,"x":9949.586,"y":4129.995,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"CS","io":3,"style":0,"x":7870,"y":4230,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"CS","io":3,"style":4,"x":10069.586,"y":4129.995,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"SCK","io":3,"style":0,"x":7870,"y":3530,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"SCK","io":3,"style":4,"x":10069.586,"y":2222.83,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"MOSI","io":3,"style":0,"x":7870,"y":3130,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"MOSI","io":3,"style":4,"x":9949.586,"y":2221.255,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":10737.774,"y":5416.141,"rot":270},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":10901.553,"y":4320,"rot":270},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":10570,"y":2380,"rot":270},
-{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":9478.721,"y":2251.964,"rot":90},
-{"t":"port","sheet":"SCH - DI261930","net":"IO13","io":3,"style":0,"x":7870,"y":4030,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"IO13","io":3,"style":0,"x":10820.865,"y":6877.951,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"IO0","io":3,"style":0,"x":5149.302,"y":1553.949,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"IO0","io":3,"style":0,"x":8389.371,"y":4530,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"RXD0","io":1,"style":0,"x":5149.302,"y":1653.949,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"RXD0","io":1,"style":0,"x":5791.261,"y":2930,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"EN","io":3,"style":0,"x":1188.974,"y":1322.833,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"EN","io":3,"style":0,"x":4071.261,"y":3630,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"TXD0","io":1,"style":0,"x":4941.261,"y":2830,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"TXD0","io":1,"style":0,"x":3970.562,"y":1553.949,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"EN","io":3,"style":0,"x":3970.562,"y":1753.949,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":5455.895,"y":3296.056,"rot":90},
-{"t":"port","sheet":"SCH - DI261930","net":"TXD1","io":3,"style":0,"x":7870,"y":3630,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"RXD1","io":1,"style":0,"x":10551.105,"y":7382.36,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"TXD1","io":3,"style":0,"x":10551.105,"y":7182.36,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"RS-485A","io":3,"style":0,"x":7226.757,"y":7527.556,"w":488.681,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"RS-485A","io":3,"style":0,"x":1228.344,"y":4309.44,"w":488.681,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"RS-485B","io":3,"style":0,"x":1228.344,"y":3821.106,"w":488.681,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"RS-485B","io":3,"style":0,"x":7226.757,"y":6629.92,"w":488.681,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"port","sheet":"SCH - DI261930","net":"RXD1","io":3,"style":0,"x":7870,"y":3730,"w":380.377,"fill":"#FFFF80","textColor":"#800000","color":"#800000"},
-{"t":"text","sheet":"SCH - DI261930","s":"*curto","x":1668.501,"y":6868.49,"h":10},
-{"t":"text","sheet":"SCH - DI261930","s":"RS-485","x":409.448,"y":3920.465,"h":10},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C13","sym":"Cap Poliester","part":1,"x":6187.387,"y":6996.84,"rot":270,"mirror":false,"footprint":"1206 capacitor","comment":"0.1uF/50V"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C11","sym":"Cap Eletrolitico","part":1,"x":3514.166,"y":6858.926,"rot":270,"mirror":false,"footprint":"CAP EL SMD 5.8MM D6.3","comment":"100uF/50V"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"D4","sym":"1N5822","part":1,"x":4649.598,"y":6854.869,"rot":90,"mirror":false,"footprint":"DO-214AC","comment":"1N5822"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"L1","sym":"Indutor magn\u00e9tico","part":1,"x":4909.44,"y":7177.152,"rot":0,"mirror":false,"footprint":"INDUTOR IFDC2525DZER331M SMD","comment":"330uH"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"CI1","sym":"LM2575-5","part":1,"x":4155.11,"y":7177.152,"rot":0,"mirror":false,"footprint":"TO-263-5","comment":"LM2575-5"},
-{"t":"comp","sheet":"SCH - DI261930","ref":"C12","sym":"Cap Eletrolitico","part":1,"x":5479.142,"y":6824.378,"rot":270,"mirror":false,"footprint":"CAP EL SMD 5.8MM D6.3","comment":"330uF 35V"},
-{"t":"power","sheet":"SCH - DI261930","net":"+5V","style":"Circle","x":6187.387,"y":7077.939,"rot":90},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10449.586,2601.57],[10449.586,2380],[10570,2380]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,2030],[8000,2030],[8000,1930]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,2130],[8000,2130],[8000,2030]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,2230],[8000,2230],[8000,2130]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10319.586,2601.57],[10320,2601.57],[10320,1880]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10449.586,4129.995],[10450,4129.995],[10450,4836.141]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10320,1480],[10190,1480],[10190,1833.623]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[3830.868,5408.665],[4030.868,5408.665],[4030.868,5308.665]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[3380.868,5058.665],[3380.868,4468.665]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4030.868,6018.665],[4030.868,5408.665]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4030.868,4468.665],[4030.868,5008.665]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[8130,4600],[8130,4530],[7870,4530]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4450,3630],[5650,3630]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[8389.371,4530],[8130,4530]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5650,3630],[6170,3630]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5650,3760.632],[5650,3630]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5367.327,2253.124],[5149.302,2253.124],[5149.302,1753.949]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[8350,2490],[8350,2440]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,4430],[8350,4430],[8350,2890]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[8350,4430],[8680,4430],[8680,2900]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[8350,2140],[8350,1390]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[8680,2500],[8680,1390]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2704.331,7007.166],[2704.331,7077.166]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4030.868,5408.665],[4760.868,5408.665],[4760.868,5308.665]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4760.868,5008.665],[4760.868,4468.665]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[9250.236,5444.015],[9250.236,4634.015],[10189.586,4634.015],[10190,4634.015],[10200.236,4634.015]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10320,5276.141],[10320,5416.141],[10737.774,5416.141]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[9551.105,6782.36],[9410.865,6782.36],[9410.865,6517.951]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[7896.617,7042.36],[7896.617,7002.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[9551.105,7382.36],[9411.105,7382.36],[9411.105,7492.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[8391.105,7032.36],[8241.105,7032.36],[8241.105,6632.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10561.889,6877.951],[10820.865,6877.951]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[9551.105,7182.36],[9215.435,7182.36],[9215.435,7522.36],[8241.105,7522.36],[8241.105,7172.36],[8391.105,7172.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[7896.617,7442.36],[7896.617,7522.36],[8241.105,7522.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[7715.438,7527.556],[7896.617,7527.556],[7896.617,7522.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[7715.438,6629.92],[7896.617,6629.92],[7896.617,6632.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[9551.105,6982.36],[9228.113,6982.36],[9228.113,6632.36],[8241.105,6632.36],[7896.617,6632.36],[7896.617,6702.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[9048.801,6520.459],[9048.801,7103.923],[8861.105,7103.923],[8861.105,7102.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10551.105,6982.36],[10561.889,6982.36],[10561.889,6877.951],[10561.889,6782.36],[10551.105,6782.36]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5650,4160.632],[5650,4300.632]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10569.586,2601.57],[10570,2601.57],[10570,2380]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10320,1380],[10320,1480],[10320,1580]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1064.565,4309.44],[1228.344,4309.44]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2676.844,1875.586],[2737.002,1875.586],[2737.002,1322.833],[2351.964,1322.833]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1827.555,1292.125],[1827.555,1322.833],[2051.964,1322.833]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1567.713,1322.833],[1827.555,1322.833]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1381.887,2201.571],[1381.887,2279.524],[2902.356,2279.524]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2907.081,1675.586],[2907.081,911.022]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1061.969,4691.972],[1514.958,4691.972],[1514.958,4667.707]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1827.555,992.125],[1827.555,911.022]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10319.586,4129.995],[10319.586,4320],[10569.586,4320],[10570,4320],[10901.553,4320]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2676.844,1675.586],[2907.081,1675.586],[3103.143,1675.586],[3103.143,1724.407]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2676.844,2075.586],[2902.356,2075.586],[3103.143,2075.586],[3103.143,2024.407]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2902.356,2075.586],[2902.356,2279.524],[2902.356,2338.579]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2118.893,7053.53],[2118.893,7077.166],[2704.331,7077.166]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[8130,5000],[8130,5140]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[6170,4530],[6080,4530],[6080,5270]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[8000,1930],[8000,1392.123]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1676.844,1675.586],[1381.887,1675.586],[1033.856,1675.586]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1381.887,1801.571],[1381.887,1675.586]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,1930],[8000,1930]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[9478.721,2251.964],[9478.721,2133.623],[10190,2133.623],[10190,2601.57],[10189.586,2601.57]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10190,5136.141],[10190,5276.141],[10320,5276.141],[10450,5276.141],[10450,5136.141]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5455.895,2830],[6170,2830]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5320,2830],[5455.895,2830],[5455.895,2896.056]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[3838.575,1955.114],[3838.575,1653.949],[4349.302,1653.949]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1061.969,3821.106],[1228.344,3821.106]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4055.11,6877.152],[4055.11,6586.37],[4048.118,6579.378]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4255.11,6877.152],[4255.11,6586.37],[4248.118,6579.378]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4649.598,6579.378],[4649.598,6654.869]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4649.598,7077.152],[4649.598,7054.869]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4455.11,7077.152],[4649.598,7077.152],[4809.44,7077.152]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5409.44,7077.152],[5478.732,7077.152]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[4455.11,7277.152],[5478.732,7277.152],[5478.732,7077.152]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5479.142,6969.378],[5479.142,7077.152],[5478.732,7077.152]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5479.142,7077.152],[6187.387,7077.152],[6187.387,6996.84]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2700.868,6018.665],[2700.868,5408.665],[2700.868,5338.665]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2930.868,5408.665],[2700.868,5408.665]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2700.868,5038.665],[2700.868,4452.747],[2702.357,4452.747]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[6187.387,7077.152],[6187.387,7077.939]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2704.331,6707.166],[2704.331,6579.378],[3514.166,6579.378]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2118.893,6579.378],[2704.331,6579.378]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2118.893,6653.53],[2118.893,6579.378],[1010.788,6579.378]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1070.788,7077.166],[1010.788,7077.166]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[2704.331,7077.166],[3514.166,7077.166]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[1961.142,7077.166],[2118.893,7077.166]]},
-{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":4248.118,"y":6579.378,"rot":270},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[5479.142,6581.877],[5479.142,6669.378]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[3514.166,6703.926],[3514.166,6579.378],[4048.118,6579.378],[4248.118,6579.378],[4649.598,6579.378],[5479.142,6579.378],[5479.142,6581.877],[6187.387,6581.877],[6187.387,6696.84]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[3514.166,7003.926],[3514.166,7077.166],[3855.11,7077.166],[3855.11,7077.152]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10189.586,4128.42],[10189.586,4634.015]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10190,4634.015],[10190,4836.141]]},
-{"t":"wire","sheet":"SCH - DI261930","pts":[[10569.586,4129.995],[10569.586,4320]]},
+{"t":"sheet","name":"SCH - DI261930","size":"A4","w":11692.913,"h":8267.717}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"U2","sym":"SCL3300-D01-1","part":1,"x":10259.586,"y":3349.995,"rot":270,"mirror":false,"footprint":"SCL3300-D01-1","comment":"SCL3300"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"U3","sym":"a031a76f8c27026a7a7f4657ff233a3","part":1,"x":6170,"y":4530,"rot":0,"mirror":false,"footprint":"FP-ESP32-WROOM-32D-MFG","comment":"ESP32-WROOM-32D"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"D1","sym":"1N4007","part":1,"x":1270.788,"y":7077.166,"rot":0,"mirror":false,"footprint":"DO-214AC","comment":"1N4007"}
+,{"t":"text","sheet":"SCH - DI261930","s":"ALIMENTA\u00C7\u00C3O","x":307.086,"y":6489.751,"h":10}
+,{"t":"text","sheet":"SCH - DI261930","s":"12V ISO","x":431.103,"y":6986.457,"h":10}
+,{"t":"text","sheet":"SCH - DI261930","s":"0V ISO","x":431.103,"y":6536.457,"h":10}
+,{"t":"text","sheet":"SCH - DI261930","s":"A","x":861.969,"y":7117.166,"h":10}
+,{"t":"text","sheet":"SCH - DI261930","s":"B","x":870.077,"y":6622.821,"h":10}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":8000,"y":1392.123,"rot":270}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C5","sym":"CAP [  SMD  ]","part":1,"x":10450,"y":4986.141,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100nF 25V","params":"Value=100nF 25V"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C8","sym":"CAP [  SMD  ]","part":1,"x":10320,"y":1730,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100nF 25V","params":"Value=100nF 25V"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C7","sym":"CAP [  SMD  ]","part":1,"x":10190,"y":1983.623,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100nF 25V","params":"Value=100nF 25V"}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":10320,"y":1380,"rot":270}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C6","sym":"CAP [  SMD  ]","part":1,"x":10190,"y":4986.141,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100nF 25V","params":"Value=100nF 25V"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"R2","sym":"RES [ PTH ]","part":1,"x":5650,"y":4010.632,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W","params":"Value=10K 1/4W"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"R1","sym":"RES [ PTH ]","part":1,"x":8130,"y":4850,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W","params":"Value=10K 1/4W"}
+,{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":9250.236,"y":5444.015,"rot":90}
+,{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":6080,"y":5270,"rot":90}
+,{"t":"power","sheet":"SCH - DI261930","net":"+5V","style":"Circle","x":2700.868,"y":6018.665,"rot":90}
+,{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":4130}
+,{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":4030}
+,{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2430}
+,{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2330}
+,{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2230}
+,{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2130}
+,{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":2030}
+,{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":1930}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2430}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2530}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2630}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2730}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2830}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":2930}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":3030}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":3230}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":3330}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":3830}
+,{"t":"noerc","sheet":"SCH - DI261930","x":6170,"y":3230}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"U1","sym":"AMS 1117 3.3","part":1,"x":3380.868,"y":5358.665,"rot":0,"mirror":false,"footprint":"SOT223","comment":"LM1117MP-3.3NOPB"}
+,{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Bar","x":4030.868,"y":6018.665,"rot":90}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":3380.868,"y":4468.665,"rot":270}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":4030.868,"y":4468.665,"rot":270}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":4130}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"CN1","sym":"Cone 6P-3V","part":1,"x":4549.302,"y":1853.949,"rot":0,"mirror":false,"footprint":"BARRA PROG ESP32 1.27mm PTH 6MM","comment":"PROG"}
+,{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Bar","x":3838.575,"y":1955.114,"rot":90}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":5367.327,"y":2253.124,"rot":270}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"R3","sym":"RES [ SMD ]","part":1,"x":5455.895,"y":3146.056,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W","params":"Value=10K 1/4W"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"LD1","sym":"LED","part":1,"x":8350,"y":2240,"rot":270,"mirror":false,"footprint":"LED SMD 0603 - GREEN","comment":"VERDE"}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":8350,"y":1390,"rot":270}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":8680,"y":1390,"rot":270}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"R5","sym":"RES [ SMD ]","part":1,"x":8680,"y":2750,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W","params":"Value=10K 1/4W"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"R4","sym":"RES [ SMD ]","part":1,"x":8350,"y":2740,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"470R 1/4W","params":"Value=470R 1/4W"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C1","sym":"CAP [  SMD  ]","part":1,"x":2704.331,"y":6857.166,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"0.1uF 16V","params":"Value=0.1uF 16V"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C2","sym":"CAP [  SMD  ]","part":1,"x":2700.868,"y":5188.665,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100uF 10V","params":"Value=100uF 10V"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C3","sym":"CAP [  SMD  ]","part":1,"x":4030.868,"y":5158.665,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"100uF 10V","params":"Value=100uF 10V"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C4","sym":"CAP [  SMD  ]","part":1,"x":4760.868,"y":5158.665,"rot":90,"mirror":false,"footprint":"CAP 1206","comment":"0.1uF 16V","params":"Value=0.1uF 16V"}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":4760.868,"y":4468.665,"rot":270}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"D2","sym":"CMP-2000-05081-2","part":1,"x":8621.105,"y":7102.36,"rot":0,"mirror":false,"footprint":"SOT-23","comment":"CDSOT23-SM712","params":"Value=75pF"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"U4","sym":"CMP-0694-00003-2","part":1,"x":10051.105,"y":7082.36,"rot":0,"mirror":true,"footprint":"D008a_n","comment":"SN65HVD75DR"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"J1","sym":"Jumper 2","part":1,"x":7896.617,"y":6802.36,"rot":90,"mirror":true,"footprint":"JUMPER 2 VIAS SMD","comment":"Jumper"}
+,{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":9411.105,"y":7492.36,"rot":90}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"R6","sym":"Res SMD 1206","part":1,"x":7896.617,"y":7242.36,"rot":90,"mirror":false,"footprint":"RES 1206","comment":"120R 1%","params":"Value=120R 1/4W"}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":9410.865,"y":6517.951,"rot":270}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":9048.801,"y":6520.459,"rot":270}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":1,"x":910.788,"y":7077.166,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"5V ISO"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":2,"x":910.788,"y":6579.378,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"Cone Apont Ext"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":3,"x":961.969,"y":4691.972,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"0V ISO"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":4,"x":964.565,"y":4309.44,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"Cone Apont Ext"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"CN2","sym":"Cone Apont Ext","part":5,"x":961.969,"y":3821.106,"rot":0,"mirror":false,"footprint":"FIO 5","comment":"Cone Apont Ext"}
+,{"t":"power","sheet":"SCH - DI261930","net":"T","style":"GndEarth","x":1514.958,"y":4667.707,"rot":270}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"U5","sym":"PM-SCCT-MCP1316-5","part":1,"x":1876.844,"y":2175.586,"rot":0,"mirror":false,"footprint":"SOT-23-OT5_M","comment":"STWD100YNYWY3F"}
+,{"t":"power","sheet":"SCH - DI261930","net":"3V3","style":"Circle","x":2902.356,"y":2338.579,"rot":90}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C9","sym":"Cap Ceramico SMD","part":1,"x":3103.143,"y":1824.407,"rot":90,"mirror":false,"footprint":"CAP 0805","comment":"1uF 50V","params":"Value=1uF 50V"}
+,{"t":"noerc","sheet":"SCH - DI261930","x":1676.844,"y":2075.586}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"J2","sym":"Jumper 2","part":1,"x":2151.964,"y":1322.833,"rot":0,"mirror":false,"footprint":"JUMPER 2 VIAS SMD","comment":"Jumper"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C10","sym":"Cap Eletrolitico","part":1,"x":1827.555,"y":1147.125,"rot":270,"mirror":false,"footprint":"CapE SMD D4.L5.8","comment":"1uF 35V","params":"Value=1uF 35V"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"R7","sym":"Res SMD 1206","part":1,"x":1381.887,"y":2001.571,"rot":270,"mirror":false,"footprint":"RES 1206","comment":"10K 1/4W"}
+,{"t":"noerc","sheet":"SCH - DI261930","x":7870,"y":4330}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":2907.081,"y":911.022,"rot":270}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":1827.555,"y":911.022,"rot":270}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":2702.357,"y":4452.747,"rot":270}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"PTC1","sym":"0ZCJ0010FF2E","part":1,"x":1728.82,"y":7081.496,"rot":0,"mirror":false,"footprint":"0ZCJ0010FF2E","comment":"0ZCJ0010FF2E"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"D3","sym":"DIODO SMD","part":1,"x":2118.893,"y":6803.53,"rot":90,"mirror":false,"footprint":"DO-214AB","comment":"SMDJ33CA","params":"Value=*"}
+,{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":5650,"y":4300.632,"rot":90}
+,{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":8130,"y":5140,"rot":90}
+,{"t":"port","sheet":"SCH - DI261930","net":"IO14","io":3,"style":0,"x":655.117,"y":1675.586,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"IO14","io":3,"style":0,"x":7870,"y":3930,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"MISO","io":3,"style":0,"x":7870,"y":3430,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"MISO","io":3,"style":4,"x":9949.586,"y":4129.995,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"CS","io":3,"style":0,"x":7870,"y":4230,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"CS","io":3,"style":4,"x":10069.586,"y":4129.995,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"SCK","io":3,"style":0,"x":7870,"y":3530,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"SCK","io":3,"style":4,"x":10069.586,"y":2222.83,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"MOSI","io":3,"style":0,"x":7870,"y":3130,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"MOSI","io":3,"style":4,"x":9949.586,"y":2221.255,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":10737.774,"y":5416.141,"rot":270}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":10901.553,"y":4320,"rot":270}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":10570,"y":2380,"rot":270}
+,{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":9478.721,"y":2251.964,"rot":90}
+,{"t":"port","sheet":"SCH - DI261930","net":"IO13","io":3,"style":0,"x":7870,"y":4030,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"IO13","io":3,"style":0,"x":10820.865,"y":6877.951,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"IO0","io":3,"style":0,"x":5149.302,"y":1553.949,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"IO0","io":3,"style":0,"x":8389.371,"y":4530,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"RXD0","io":1,"style":0,"x":5149.302,"y":1653.949,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"RXD0","io":1,"style":0,"x":5791.261,"y":2930,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"EN","io":3,"style":0,"x":1188.974,"y":1322.833,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"EN","io":3,"style":0,"x":4071.261,"y":3630,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"TXD0","io":1,"style":0,"x":4941.261,"y":2830,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"TXD0","io":1,"style":0,"x":3970.562,"y":1553.949,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"EN","io":3,"style":0,"x":3970.562,"y":1753.949,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"power","sheet":"SCH - DI261930","net":"+3.3V","style":"Circle","x":5455.895,"y":3296.056,"rot":90}
+,{"t":"port","sheet":"SCH - DI261930","net":"TXD1","io":3,"style":0,"x":7870,"y":3630,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"RXD1","io":1,"style":0,"x":10551.105,"y":7382.36,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"TXD1","io":3,"style":0,"x":10551.105,"y":7182.36,"w":378.739,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"RS-485A","io":3,"style":0,"x":7226.757,"y":7527.556,"w":488.681,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"RS-485A","io":3,"style":0,"x":1228.344,"y":4309.44,"w":488.681,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"RS-485B","io":3,"style":0,"x":1228.344,"y":3821.106,"w":488.681,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"RS-485B","io":3,"style":0,"x":7226.757,"y":6629.92,"w":488.681,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"port","sheet":"SCH - DI261930","net":"RXD1","io":3,"style":0,"x":7870,"y":3730,"w":380.377,"fill":"#FFFF80","textColor":"#800000","color":"#800000"}
+,{"t":"text","sheet":"SCH - DI261930","s":"*curto","x":1668.501,"y":6868.49,"h":10}
+,{"t":"text","sheet":"SCH - DI261930","s":"RS-485","x":409.448,"y":3920.465,"h":10}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C13","sym":"Cap Poliester","part":1,"x":6187.387,"y":6996.84,"rot":270,"mirror":false,"footprint":"1206 capacitor","comment":"0.1uF/50V"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C11","sym":"Cap Eletrolitico","part":1,"x":3514.166,"y":6858.926,"rot":270,"mirror":false,"footprint":"CAP EL SMD 5.8MM D6.3","comment":"100uF/50V"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"D4","sym":"1N5822","part":1,"x":4649.598,"y":6854.869,"rot":90,"mirror":false,"footprint":"DO-214AC","comment":"1N5822"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"L1","sym":"Indutor magn\u00E9tico","part":1,"x":4909.44,"y":7177.152,"rot":0,"mirror":false,"footprint":"INDUTOR IFDC2525DZER331M SMD","comment":"330uH"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"CI1","sym":"LM2575-5","part":1,"x":4155.11,"y":7177.152,"rot":0,"mirror":false,"footprint":"TO-263-5","comment":"LM2575-5"}
+,{"t":"comp","sheet":"SCH - DI261930","ref":"C12","sym":"Cap Eletrolitico","part":1,"x":5479.142,"y":6824.378,"rot":270,"mirror":false,"footprint":"CAP EL SMD 5.8MM D6.3","comment":"330uF 35V"}
+,{"t":"power","sheet":"SCH - DI261930","net":"+5V","style":"Circle","x":6187.387,"y":7077.939,"rot":90}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10449.586,2601.57],[10449.586,2380],[10570,2380]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,2030],[8000,2030],[8000,1930]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,2130],[8000,2130],[8000,2030]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,2230],[8000,2230],[8000,2130]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10319.586,2601.57],[10320,2601.57],[10320,1880]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10449.586,4129.995],[10450,4129.995],[10450,4836.141]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10320,1480],[10190,1480],[10190,1833.623]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[3830.868,5408.665],[4030.868,5408.665],[4030.868,5308.665]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[3380.868,5058.665],[3380.868,4468.665]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4030.868,6018.665],[4030.868,5408.665]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4030.868,4468.665],[4030.868,5008.665]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[8130,4600],[8130,4530],[7870,4530]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4450,3630],[5650,3630]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[8389.371,4530],[8130,4530]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5650,3630],[6170,3630]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5650,3760.632],[5650,3630]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5367.327,2253.124],[5149.302,2253.124],[5149.302,1753.949]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[8350,2490],[8350,2440]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,4430],[8350,4430],[8350,2890]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[8350,4430],[8680,4430],[8680,2900]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[8350,2140],[8350,1390]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[8680,2500],[8680,1390]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2704.331,7007.166],[2704.331,7077.166]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4030.868,5408.665],[4760.868,5408.665],[4760.868,5308.665]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4760.868,5008.665],[4760.868,4468.665]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[9250.236,5444.015],[9250.236,4634.015],[10189.586,4634.015],[10190,4634.015],[10200.236,4634.015]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10320,5276.141],[10320,5416.141],[10737.774,5416.141]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[9551.105,6782.36],[9410.865,6782.36],[9410.865,6517.951]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[7896.617,7042.36],[7896.617,7002.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[9551.105,7382.36],[9411.105,7382.36],[9411.105,7492.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[8391.105,7032.36],[8241.105,7032.36],[8241.105,6632.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10561.889,6877.951],[10820.865,6877.951]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[9551.105,7182.36],[9215.435,7182.36],[9215.435,7522.36],[8241.105,7522.36],[8241.105,7172.36],[8391.105,7172.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[7896.617,7442.36],[7896.617,7522.36],[8241.105,7522.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[7715.438,7527.556],[7896.617,7527.556],[7896.617,7522.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[7715.438,6629.92],[7896.617,6629.92],[7896.617,6632.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[9551.105,6982.36],[9228.113,6982.36],[9228.113,6632.36],[8241.105,6632.36],[7896.617,6632.36],[7896.617,6702.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[9048.801,6520.459],[9048.801,7103.923],[8861.105,7103.923],[8861.105,7102.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10551.105,6982.36],[10561.889,6982.36],[10561.889,6877.951],[10561.889,6782.36],[10551.105,6782.36]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5650,4160.632],[5650,4300.632]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10569.586,2601.57],[10570,2601.57],[10570,2380]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10320,1380],[10320,1480],[10320,1580]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1064.565,4309.44],[1228.344,4309.44]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2676.844,1875.586],[2737.002,1875.586],[2737.002,1322.833],[2351.964,1322.833]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1827.555,1292.125],[1827.555,1322.833],[2051.964,1322.833]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1567.713,1322.833],[1827.555,1322.833]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1381.887,2201.571],[1381.887,2279.524],[2902.356,2279.524]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2907.081,1675.586],[2907.081,911.022]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1061.969,4691.972],[1514.958,4691.972],[1514.958,4667.707]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1827.555,992.125],[1827.555,911.022]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10319.586,4129.995],[10319.586,4320],[10569.586,4320],[10570,4320],[10901.553,4320]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2676.844,1675.586],[2907.081,1675.586],[3103.143,1675.586],[3103.143,1724.407]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2676.844,2075.586],[2902.356,2075.586],[3103.143,2075.586],[3103.143,2024.407]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2902.356,2075.586],[2902.356,2279.524],[2902.356,2338.579]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2118.893,7053.53],[2118.893,7077.166],[2704.331,7077.166]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[8130,5000],[8130,5140]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[6170,4530],[6080,4530],[6080,5270]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[8000,1930],[8000,1392.123]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1676.844,1675.586],[1381.887,1675.586],[1033.856,1675.586]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1381.887,1801.571],[1381.887,1675.586]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[7870,1930],[8000,1930]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[9478.721,2251.964],[9478.721,2133.623],[10190,2133.623],[10190,2601.57],[10189.586,2601.57]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10190,5136.141],[10190,5276.141],[10320,5276.141],[10450,5276.141],[10450,5136.141]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5455.895,2830],[6170,2830]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5320,2830],[5455.895,2830],[5455.895,2896.056]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[3838.575,1955.114],[3838.575,1653.949],[4349.302,1653.949]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1061.969,3821.106],[1228.344,3821.106]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4055.11,6877.152],[4055.11,6586.37],[4048.118,6579.378]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4255.11,6877.152],[4255.11,6586.37],[4248.118,6579.378]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4649.598,6579.378],[4649.598,6654.869]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4649.598,7077.152],[4649.598,7054.869]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4455.11,7077.152],[4649.598,7077.152],[4809.44,7077.152]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5409.44,7077.152],[5478.732,7077.152]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[4455.11,7277.152],[5478.732,7277.152],[5478.732,7077.152]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5479.142,6969.378],[5479.142,7077.152],[5478.732,7077.152]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5479.142,7077.152],[6187.387,7077.152],[6187.387,6996.84]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2700.868,6018.665],[2700.868,5408.665],[2700.868,5338.665]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2930.868,5408.665],[2700.868,5408.665]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2700.868,5038.665],[2700.868,4452.747],[2702.357,4452.747]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[6187.387,7077.152],[6187.387,7077.939]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2704.331,6707.166],[2704.331,6579.378],[3514.166,6579.378]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2118.893,6579.378],[2704.331,6579.378]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2118.893,6653.53],[2118.893,6579.378],[1010.788,6579.378]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1070.788,7077.166],[1010.788,7077.166]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[2704.331,7077.166],[3514.166,7077.166]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[1961.142,7077.166],[2118.893,7077.166]]}
+,{"t":"power","sheet":"SCH - DI261930","net":"0V","style":"GndPower","x":4248.118,"y":6579.378,"rot":270}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[5479.142,6581.877],[5479.142,6669.378]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[3514.166,6703.926],[3514.166,6579.378],[4048.118,6579.378],[4248.118,6579.378],[4649.598,6579.378],[5479.142,6579.378],[5479.142,6581.877],[6187.387,6581.877],[6187.387,6696.84]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[3514.166,7003.926],[3514.166,7077.166],[3855.11,7077.166],[3855.11,7077.152]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10189.586,4128.42],[10189.586,4634.015]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10190,4634.015],[10190,4836.141]]}
+,{"t":"wire","sheet":"SCH - DI261930","pts":[[10569.586,4129.995],[10569.586,4320]]}
 ]};

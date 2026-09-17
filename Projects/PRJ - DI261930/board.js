@@ -1,6 +1,6 @@
 var pcbmirror = {
 "format":"pcbmirror-v1",
-"generated":"14/09/2026 10:52:03",
+"generated":"15/09/2026 09:26:02",
 "source":"Z:\\EQUIPAMENTOS ATUALIZADOS\\SUI - DI141388XY - SUPERVISOR DE INCLINA\u00C7\u00C3O\\PCB E SCH\\MODELO 2026\\PRJ - SENSOR-DI261924\\PCB\\PCB - DI261930.PcbDoc",
 "units":"mm",
 "axis":"y-up",
