@@ -1525,14 +1525,26 @@ function preSelecionarNaFaixa(familia, componente) {
      O input junto, porque o refreshLib nunca reescreve o campo. */
   ST.libQ = ''; if (UI && UI.libQ) UI.libQ.value = '';
   const quem = componente || familia;
+  /* SEM COMPONENTE NÃO HÁ O QUE PRÉ-SELECIONAR, e o silêncio é a resposta certa.
+     O corpo da biblioteca de símbolos corresponde ao COMPONENTE (a peça: "PTH DIP8 LM555"),
+     não à família — e família do almoxarifado é CATEGORIA: "CAPACITOR ELETROLITICO [SMD]",
+     "BARRA DE PINOS 6V". Nunca vai existir um corpo com esse nome, então "nenhum corpo com
+     o nome X" era uma reclamação garantida, e com toast de 7 s, toda vez que alguém abrisse
+     uma família. Virou ruído no dia (2026-09-17) em que a vista Biblioteca passou a abrir a
+     família a cada clique na lista da esquerda.
+     Com componente a pergunta volta a fazer sentido, e o aviso continua: ali "não achei o
+     corpo" é informação de verdade para quem veio do "Editar símbolo" da vista Esquema. */
+  const vale = !!componente;
   if (!DATA.symlib) {
     ST.libSel = null;
-    ST.faixaNota = 'a biblioteca de símbolos não carregou — procure "' + quem + '" à mão';
+    ST.faixaNota = vale
+      ? 'a biblioteca de símbolos não carregou — procure "' + quem + '" à mão' : '';
   } else if (!r) {
     ST.libSel = null;
-    ST.faixaNota = 'nenhum corpo com o nome "' + quem + '" na biblioteca — escolha um abaixo '
-                 + 'ou guarde este com "+ corpo atual"';
-    if (O && O.toast) O.toast(ST.faixaNota, 'warn', 7000);
+    ST.faixaNota = vale
+      ? 'nenhum corpo com o nome "' + quem + '" na biblioteca — escolha um abaixo '
+        + 'ou guarde este com "+ corpo atual"' : '';
+    if (vale && O && O.toast) O.toast(ST.faixaNota, 'warn', 7000);
   } else if (r.how === 'ambiguo') {
     /* EMPATE: mostra os dois e NÃO escolhe. "Aplicar ao símbolo" só destrava com libSel,
        então ele não nasce armado com um chute. Só o filtro por id junta os dois: o filtro de
@@ -1541,7 +1553,9 @@ function preSelecionarNaFaixa(familia, componente) {
     ST.libSel = null; ST.faixaScroll = r.cands[0].id;
     ST.faixaNota = r.cands.length + ' corpos com o nome "' + r.nome + '" — escolha qual '
                  + '(digite na busca para ver a biblioteca inteira)';
-    if (O && O.toast) O.toast(ST.faixaNota, 'warn', 7000);
+    /* a nota fica (ela mostra os candidatos); o TOAST só quando alguém pediu um componente.
+       Abrir família não pode gritar — é o que o clique na lista da esquerda faz o tempo todo. */
+    if (vale && O && O.toast) O.toast(ST.faixaNota, 'warn', 7000);
   } else {
     ST.libSel = r.s.id; ST.faixaScroll = r.s.id;
     ST.faixaNota = 'pré-selecionado "' + r.s.name + '"'
