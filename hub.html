@@ -1509,7 +1509,21 @@ function renderPipeline() {
   pend.hidden = !p.pending; pend.textContent = t('proj.pending', { n: p.pending });
 }
 
-function goTab(id) { S.tab = id; syncURL(); renderTabs(); renderPanes(); }
+/* "libsym" NAO E MAIS UMA ABA -- virou a vista Simbolos dentro da Biblioteca (2026-09-17).
+   Continua sendo aceito como APELIDO porque ele existe fora deste arquivo: o menu de
+   contexto do acervo, o "editar simbolo" da vista Esquema e as duas janelas novas que
+   abrem com #/libsym (aqui e no schframe). Sem a traducao, goTab punha S.tab num id que
+   nao esta em TABS -- nenhuma aba acendia, e o pane `data-pane="libsym"` aparecia VAZIO,
+   porque o #symed dele foi movido para dentro da Biblioteca. Era o "clico em editar e nao
+   leva pra tela de edicao". */
+function goTab(id) {
+  if (id === 'libsym') {
+    S.tab = 'lib'; syncURL(); renderTabs(); renderPanes();
+    if (window.__hubLibView) { try { window.__hubLibView.ir('simbolos'); } catch (e) {} }
+    return;
+  }
+  S.tab = id; syncURL(); renderTabs(); renderPanes();
+}
 
 function renderTabs() {
   const d = S.detail, nav = $('#tabs'); nav.textContent = '';
@@ -4310,6 +4324,10 @@ function editarSimbolo(nome) {
 window.__hubEditarSimbolo = async function (familia, componente, acervo) {
   if (!familia) return false;
   if (acervo && acervo.id && libSources().some(s => s.id === acervo.id)) libSetSrc(acervo.id);
+  /* a lista da esquerda passa a apontar para a familia pedida ANTES de trocar de vista: ela
+     e quem dirige as tres vistas agora, e sem isto a vista Simbolos abriria o que estava
+     selecionado antes e o `abrir` logo abaixo teria de desfazer. */
+  S.lib.sel = { k: 'sym', name: familia }; S.lib.part = 1; S.lib.fpShown = null;
   goTab('libsym');
   try {
     const ok = await HubSymEd.abrir(familia, false, componente || null, acervo || null);
@@ -4511,7 +4529,10 @@ function syncURL() { location.hash = S.projId + '/' + S.tab; localStorage.setIte
 function readURL() {
   const [id, tab] = (location.hash.replace(/^#/, '') || '').split('/');
   return { id: id || localStorage.getItem('altiumhub.project'),
-           tab: TAB_FOLHAS.indexOf(tab) >= 0 ? tab : null };
+           /* #/libsym: apelido, ver goTab. Quem tem o link antigo salvo continua caindo
+              na tela de edicao, e nao numa aba que nao existe mais. */
+           tab: tab === 'libsym' ? 'libsym'
+                : (TAB_FOLHAS.indexOf(tab) >= 0 ? tab : null) };
 }
 async function loadProject(id) {
   const det = await API.detail(id);
@@ -4740,7 +4761,13 @@ document.addEventListener('keydown', e => {
   /* indice dos acervos: leve, e sem ele o combobox de biblioteca nasce com uma opcao so */
   await loadLibTabelas();
   const url = readURL();
-  if (url.tab) S.tab = url.tab;
+  /* "libsym" e apelido de "lib + vista Simbolos" (ver goTab). No boot ele nao pode ficar em
+     S.tab: nenhuma aba de TABS casa com esse id, e o pane dele esta vazio desde que o
+     #symed passou a morar dentro da Biblioteca. Traduz aqui, e pede a vista depois que o
+     painel existir. */
+  let vistaPedida = null;
+  if (url.tab === 'libsym') { S.tab = 'lib'; vistaPedida = 'simbolos'; }
+  else if (url.tab) S.tab = url.tab;
   const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;
   await loadProject(id);
   /* ABERTO PARA EDITAR UM SIMBOLO, numa aba propria. A vista Esquema abre esta pagina com
@@ -4827,6 +4854,8 @@ document.addEventListener('keydown', e => {
       },
       toast: (txt, tom) => toast(txt, tom),
     });
+    /* a vista pedida pela URL (#/libsym) so pode ser aplicada DEPOIS que o painel existe */
+    if (vistaPedida && window.__hubLibView) window.__hubLibView.ir(vistaPedida);
   } catch (e) { /* o painel é acessório: sem ele a Biblioteca continua sendo a vista Geral */ }
 
   try {
