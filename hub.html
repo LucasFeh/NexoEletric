@@ -675,7 +675,10 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .alx-row[aria-selected="true"] { background: rgba(var(--tint),0.10); box-shadow: inset 2px 0 0 var(--hi); }
 .alx-row .ix { font-size: 10px; color: var(--text-4); font-variant-numeric: tabular-nums; text-align: right; }
 .alx-row .lb { min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.alx-row .pk { font-size: 10px; color: var(--text-4); white-space: nowrap; }
+.alx-row .pk { font-size: 11px; color: var(--text-2); white-space: nowrap;
+  font-family: Consolas, ui-monospace, monospace; padding: 0 5px; border-radius: var(--r-sm);
+  background: rgba(var(--tint),0.10); }
+.alx-row[aria-selected="true"] .pk { color: var(--hi); background: rgba(var(--tint),0.18); }
 .alx-row .qt { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ok);
   min-width: 46px; text-align: right; }
 .alx-row .qt.zero { color: var(--text-4); }
@@ -2467,6 +2470,17 @@ function fpBBoxSize(f) {
 }
 
 /* saldo do almoxarifado formatado: 1.805 e não 1805.0 */
+/* UM ENCAP POR COMPONENTE. O Odoo pode mandar mais de um encapsulamento no mesmo valor
+   (o "0603 · 1206" da lista), mas a peça é uma só e tem um tamanho só. Quando há dúvida,
+   quem desempata é o FOOTPRINT: o nome dele carrega o encap ("CAP 1206" traz "1206"), e é
+   a ligação que o dono descreveu — o encap vem do Odoo, o footprint é o nome da casa para
+   o mesmo tamanho. Sem footprint que ajude, vale o primeiro, que é o que batiza o valor. */
+function alxEncap(v) {
+  const pk = (v && v.pkgs) || [];
+  if (pk.length <= 1) return pk[0] || '';
+  const fp = String((v && v.footprint) || '').toLowerCase();
+  return pk.find(x => fp.includes(String(x).toLowerCase())) || pk[0];
+}
 const alxQtd = n => (Math.round(n * 100) / 100).toLocaleString('pt-BR');
 const alxValores = s => (s && s.valores) || [];
 const alxEstoque = s => alxValores(s).reduce((a, p) => a + (p.estoque || 0), 0);
@@ -2520,7 +2534,9 @@ function renderLib() {
      footprints (ou o contrário) deixaria o painel do meio contando outra história */
   if (S.lib.sel && (S.lib.sel.k === 'sym' || S.lib.sel.k === 'gone-sym') === fpTab) S.lib.sel = null;
   const q = S.lib.q.trim().toLowerCase();
-  const hit = (n, d) => !q || (n + ' ' + (d || '')).toLowerCase().includes(q);
+  /* idem no espelho do Altium: ali o encap mora no NOME do footprint associado */
+  const hit = (n, d, extra) => !q
+    || (n + ' ' + (d || '') + ' ' + (extra || '')).toLowerCase().includes(q);
   let kind = S.lib.kind;
   if (fpTab && (kind === 'sym')) kind = 'all';
   if (!fpTab && (kind === 'fp')) kind = 'all';
@@ -2529,7 +2545,9 @@ function renderLib() {
   const aliasDaAba = apelidos.filter(a => a.k === (fpTab ? 'fp' : 'sym'));
   const goneDaAba = fpTab ? goneFp : goneSym;
 
-  const syms = (!fpTab && (kind === 'all' || kind === 'sym')) ? LIB.syms.filter(s => hit(s.name, s.description)) : [];
+  const syms = (!fpTab && (kind === 'all' || kind === 'sym'))
+    ? LIB.syms.filter(s => hit(s.name, s.description,
+                              (s.footprints || []).map(f => f.name).join(' '))) : [];
   const fps  = (fpTab && (kind === 'all' || kind === 'fp'))   ? LIB.fps.filter(f => hit(f.name, f.description))  : [];
   const gone = (kind === 'all' || kind === 'gone')
     ? goneDaAba.filter(hit).map(n => [fpTab ? 'gone-fp' : 'gone-sym', n]) : [];
@@ -2707,8 +2725,13 @@ function renderLibAlmox() {
   const meta = LIB.almox;
 
   const q = S.lib.q.trim().toLowerCase();
+  /* O ENCAP E O FOOTPRINT SAO CRITERIO DE BUSCA, em toda barra do sistema que procura
+     componente (pedido do dono, 2026-09-17). Sao dois nomes para o mesmo tamanho — "1206"
+     vem do Odoo, "CAP 1206" e como a casa chama —, e quem digita um dos dois esta
+     procurando a mesma peca. Sem isso, procurar "1206" na biblioteca nao achava nada. */
   const hit = s => !q || (s.name + ' ' + (s.description || '') + ' ' +
-    alxValores(s).slice(0, 400).map(p => p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '')).join(' ')
+    alxValores(s).slice(0, 400).map(p => p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '')
+      + ' ' + (p.pkgs || []).join(' ') + ' ' + (p.footprint || '')).join(' ')
   ).toLowerCase().includes(q);
 
   const comEstoque = LIB.syms.filter(s => alxEstoque(s) > 0);
@@ -2934,8 +2957,10 @@ function renderLibAlmoxPreview() {
   /* ── painel de valores ── */
   const vq = (S.lib.valQ || '').trim().toLowerCase();
   const vis = parts.filter(p => !vq ||
-    (p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '') + ' ' + (p.pkgs || []).join(' '))
-      .toLowerCase().includes(vq));
+    /* o FOOTPRINT entra na busca junto com o encap: são dois nomes para o mesmo
+       tamanho ("1206" do Odoo, "CAP 1206" da casa) e quem procura um aceita achar pelo outro */
+    (p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '') + ' ' + (p.pkgs || []).join(' ')
+     + ' ' + (p.footprint || '')).toLowerCase().includes(vq));
   $('#libValMeta').textContent = s.name;
   $('#libValCount').textContent = vis.length === parts.length
     ? parts.length + ' valores' : vis.length + ' de ' + parts.length;
@@ -2960,7 +2985,14 @@ function renderLibAlmoxPreview() {
     }
     /* o número é o id do valor: é a chave dele no .DbLib e no schematic.js */
     const ix = el('span', 'ix', String(p.id)); ix.title = 'id ' + p.id + ' no catálogo';
-    b.append(ix, lb, el('span', 'pk', (p.pkgs || []).join(' · ')));
+    /* o encap do valor, UM só e legível: era `pkgs.join(' · ')` em 10px na cor mais
+       apagada da paleta — o dono não conseguia ler, e ele é justamente a ponte entre o
+       valor do Odoo e o footprint da casa */
+    const pk = alxEncap(p);
+    const pkEl = el('span', 'pk', pk || '—');
+    if (pk) pkEl.title = 'encapsulamento ' + pk
+      + (p.footprint ? ' · footprint ' + p.footprint : ' · sem footprint');
+    b.append(ix, lb, pkEl);
     const q2 = el('span', 'qt' + (p.estoque > 0 ? '' : ' zero'), alxQtd(p.estoque));
     b.append(q2);
     /* o encapsulamento fixado era do valor ANTERIOR: mantê-lo poria um 0805 na ficha de
@@ -3009,7 +3041,24 @@ function renderLibAlmoxPreview() {
   kvRow(kvs, 'Estoque total', alxQtd(alxEstoque(s)));
   aside.append(kvs);
 
-  aside.append(el('div', 'kicker', 'encapsulamentos do símbolo'));
+  /* O ENCAP DO COMPONENTE vem primeiro e sozinho: a peça tem UM tamanho, e é este.
+     Antes esta seção era a lista de footprints da FAMÍLIA — dez chips para um capacitor
+     que é 1206 e mais nada —, e o dono leu isso como "vários encaps para o mesmo
+     componente", que é exatamente o que não deveria ser. A lista da família continua
+     abaixo, com o nome certo e o papel certo: é de lá que se escolhe. */
+  aside.append(el('div', 'kicker', 'encapsulamento deste componente'));
+  const enc = alxEncap(part);
+  const hEnc = el('div', 'det-head');
+  const dEnc = el('span', 'd', enc || 'sem encapsulamento');
+  dEnc.style.cssText = 'font-size:15px;font-family:Consolas,ui-monospace,monospace'
+    + (enc ? '' : ';color:var(--err)');
+  const vEnc = el('span', 'v', part.footprint || 'sem footprint');
+  vEnc.style.color = part.footprint ? 'var(--hi)' : 'var(--err)';
+  vEnc.title = part.footprint ? 'o footprint da casa para este encapsulamento'
+                              : 'nenhum footprint vinculado — a aba Footprints resolve';
+  hEnc.append(dEnc, vEnc); aside.append(hEnc);
+
+  aside.append(el('div', 'kicker', 'encapsulamentos da família'));
   const chips = el('div', 'chips'); chips.style.margin = '6px 0 14px';
   if (!(s.footprints || []).length) {
     const p = el('p', null, t('lib.semEncap'));

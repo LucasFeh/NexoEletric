@@ -116,6 +116,10 @@ const CSS = `
   border-bottom:1px solid var(--line,#3a3a3a);}
 .lv-comps .symed-comp .fpat{font-size:10px; color:var(--hi,#4fc3f7);
   font-family:Consolas,ui-monospace,monospace;}
+/* o encap, legível: mesma pinta do que a vista Geral usa na lista de valores */
+.lv-comps .symed-comp .enc{font-size:11px; color:var(--text-2,#b8b8b8); padding:0 5px;
+  border-radius:var(--r-sm,4px); background:rgba(var(--tint,79,195,247),.10);
+  font-family:Consolas,ui-monospace,monospace; white-space:nowrap;}
 .lv-comps .symed-comp .semfp{font-size:10px; color:var(--warn,#ffb74d);}
 .lv-titulo{display:flex; align-items:baseline; gap:8px; padding:7px 12px 4px;
   font-size:10px; letter-spacing:.09em; text-transform:uppercase;
@@ -303,10 +307,18 @@ function componentesDa(cat){
        Sem nenhum dos dois, o componente vai para o Altium sem símbolo — e é isso que a tag
        vermelha diz. */
     const temFam = !!(s.parts && s.parts.length);
+    /* UM encap por componente, como o resto do hub: a peça tem um tamanho só. Havendo mais
+       de um no Odoo, quem desempata é o footprint — "CAP 1206" carrega "1206". */
+    const encapDe = v => {
+      const pk = v.pkgs || [];
+      if (pk.length <= 1) return pk[0] || '';
+      const fp = String(v.footprint || '').toLowerCase();
+      return pk.find(x => fp.includes(String(x).toLowerCase())) || pk[0];
+    };
     return vals.map(v => ({ nome: v.altium, rotulo: v.label || v.altium, fp: v.footprint || '',
                             sym: !!(v.parts && v.parts.length) || temFam,
                             proprio: !!(v.parts && v.parts.length),
-                            estoque: v.estoque, pkgs: (v.pkgs || []).join(' / '), valor: true }));
+                            estoque: v.estoque, pkgs: encapDe(v), valor: true }));
   }
   const fps = s.footprints || [];
   return [{ nome: s.name, rotulo: s.name, fp: (fps[0] && fps[0].name) || '',
@@ -396,7 +408,14 @@ function pintaComponentes(){
             + (c.pkgs ? '\nencapsulamento: ' + c.pkgs : '');
     b.append(el('span', 'nm', c.rotulo));
     const meta = el('span', 'mt');
-    /* O QUE FALTA VEM PRIMEIRO, em vermelho e com o nome da coisa que falta — as mesmas
+    /* o ENCAP primeiro, do mesmo jeito da lista de valores da vista Geral: é a ponte entre
+       o que veio do Odoo ("1206") e o footprint da casa ("CAP 1206") */
+    if (c.pkgs){
+      const e = el('span', 'enc', c.pkgs);
+      e.title = 'encapsulamento ' + c.pkgs + ' (do Odoo)';
+      meta.append(e);
+    }
+    /* O QUE FALTA VEM DEPOIS, em vermelho e com o nome da coisa que falta — as mesmas
        tags da categoria (hub.html » .pill.falta), para a lista e o agrupador dizerem a
        mesma coisa do mesmo jeito. Tendo footprint, mostra QUAL: é o que se veio trocar. */
     if (!c.fp){
