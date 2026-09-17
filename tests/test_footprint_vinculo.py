@@ -70,9 +70,16 @@ try:
         f.write(',' + sym(OUTRO, [{'name': 'RES 0805', 'incurrentlib': True,
                                    'current': True}]) + '\n')
         f.write(']};\n')
+    # UM footprint por linha, COM pads que tambem tem `name` — e a forma do arquivo real
+    # (Libs/pcblib.js: 627 linhas, 618 footprints, 5816 ocorrencias de {"name":). Um findall
+    # solto no arquivo inteiro colhia os nomes dos PADS junto e a galeria enchia de "1",
+    # "2", "A" — cada um virando um tile vazio. O fixture so prende isso se tiver pads.
     with io.open(os.path.join(tmp, 'Libs', 'pcblib.js'), 'w', encoding='utf-8') as f:
-        f.write('var pcblib = {"footprints":[{"name":"DO-214AC","pads":[]},'
-                '{"name":"DO-214AB","pads":[]},{"name":"RES 0805","pads":[]}]};\n')
+        f.write('var pcblib = {\n"format":"pcblib-v2",\n"footprints":[\n')
+        f.write('{"name":"DO-214AC","pads":[{"name":"1","type":"smd"},{"name":"2","type":"smd"}]}\n')
+        f.write(',{"name":"DO-214AB","pads":[{"name":"A","type":"smd"},{"name":"K","type":"smd"}]}\n')
+        f.write(',{"name":"RES 0805","pads":[{"name":"1","type":"smd"}]}\n')
+        f.write(']};\n')
 
     real_root = H.ROOT
     H.ROOT = S.ROOT = tmp
@@ -144,7 +151,13 @@ try:
     assert porn[FP_NOVO]['usos'] == 1, porn[FP_NOVO]
     assert porn['RES 0805']['usos'] == 1, porn['RES 0805']
     assert porn['DO-214AB']['usos'] == 0, 'ninguém usa mais o DO-214AB: %s' % porn['DO-214AB']
-    print('(7) GET /footprints lista desenhados e só-cadastrados, com os usos ok')
+    # e NENHUM nome de pad entrou na lista: o arquivo real tem 5816 `{"name":` para 618
+    # footprints, e colher todos enchia a galeria de "1", "2", "A" — tiles vazios
+    for pad in ('1', '2', 'A', 'K'):
+        assert pad not in porn, 'nome de PAD virou footprint na lista: %r' % pad
+    assert len(j['footprints']) == 4, \
+        '3 da pcblib + 1 só-cadastrado; vieram %d: %s' % (len(j['footprints']), sorted(porn))
+    print('(7) GET /footprints lista desenhados e só-cadastrados, sem colher nome de pad ok')
 
     print('test_footprint_vinculo OK (um componente, um footprint — garantido no servidor)')
 finally:

@@ -4700,6 +4700,9 @@ document.addEventListener('keydown', e => {
       centro: () => document.querySelector('.lib-view'),
       sel: () => S.lib.sel,
       simbolo: nome => (LIB.symBy && LIB.symBy.get(nome)) || null,
+      /* o footprint COM os pads e o bbox: é o que a galeria desenha em cada tile. Vem daqui
+         e não de um fetch porque o espelho já está em memória — são 3,2 MB de pcblib.js. */
+      footprint: nome => (LIB.fpBy && LIB.fpBy.get(nome)) || null,
       redesenha: () => { try { renderLib(); } catch (e) {} },
       /* A vista Símbolos é o MESMO editor de sempre — o `#symed`, que vivia num pane próprio
          e agora é MOVIDO para dentro do centro da Biblioteca. Mover, e não clonar: o

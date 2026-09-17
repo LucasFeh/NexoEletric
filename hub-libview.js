@@ -49,6 +49,16 @@ const CSS = `
 .lib-grid.lv-sem-ficha{grid-template-columns:minmax(300px,0.95fr) minmax(320px,1.25fr);}
 #libDetail[hidden]{display:none !important;}
 
+/* UMA BUSCA SÓ. Dentro da Biblioteca o editor de símbolos perde a coluna de busca dele: a
+   lista da esquerda serve as três vistas, e duas caixas "Buscar símbolo" na mesma tela era
+   justamente o que o dono mandou tirar. A coluna e a divisória somem juntas, e os trilhos 1
+   e 2 fecham em zero — o .symed-grid prende cada filho ao seu grid-column, então deixar a
+   faixa aberta deixaria um vão.
+   Só aqui dentro: aberto pela aba própria, o editor continua com a busca dele. */
+.lib-view #symed .symed-grid{grid-template-columns:0 0 minmax(240px,1fr) 6px var(--symed-r, var(--aside-w));}
+.lib-view #symed .symed-grid > .lib-left,
+.lib-view #symed .symed-grid > [data-split="l"]{display:none !important;}
+
 /* o centro da sub-aba Footprints */
 .lv-fp{display:flex; flex-direction:column; height:100%; min-height:0;}
 /* [hidden] é só \`display:none\` da folha do navegador, e perde para o \`display:flex\` acima
@@ -70,21 +80,24 @@ const CSS = `
 .lv-alvo .atual .x{border:0; background:transparent; color:#ff6b6b; cursor:pointer;
   font-size:11px; padding:0 2px;}
 .lv-alvo .nenhum{color:var(--warn,#ffb74d);}
-.lv-fp-list{flex:1; min-height:0; overflow:auto; padding:4px;}
-.lv-row{display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:10px; align-items:center;
-  width:100%; text-align:left; border:0; background:transparent; color:var(--text,#d8d8d8);
-  font:12px 'Segoe UI',sans-serif; padding:7px 10px; border-radius:var(--r-sm,4px); cursor:pointer;}
-.lv-row:hover{background:rgba(var(--tint,79,195,247),.07);}
-.lv-row[aria-pressed="true"]{background:rgba(var(--tint,79,195,247),.16);
-  box-shadow:inset 2px 0 0 var(--hi,#4fc3f7);}
-.lv-row .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-.lv-row .us{font-size:11px; color:var(--text-4,#7a7a7a); white-space:nowrap;}
-.lv-row .st{font-size:10px; white-space:nowrap; padding:1px 6px; border-radius:8px;}
-.lv-row .st.ok{color:var(--ok,#00e676); background:rgba(0,230,118,.10);}
-.lv-row .st.no{color:var(--warn,#ffb74d); background:rgba(255,183,77,.12);}
+/* A GALERIA É A MESMA DO EDITOR DE SÍMBOLOS, de propósito: reusa .symed-tiles/.symed-tile do
+   hub.html em vez de inventar um cartão parecido. Foi o pedido ("a tela de seleção do
+   footprint pode ser igualzinha a de símbolo"), e um cartão "quase igual" envelheceria
+   sozinho quando o outro mudasse. Só o teto de altura cai: aqui a galeria É a vista. */
+.lv-fp .symed-tiles{max-height:none; flex:1; min-height:0;}
+.lv-fp .symed-tile .pads{font-size:9px; color:var(--text-4,#7a7a7a);}
+.lv-fp .symed-tile.nao canvas{opacity:.35;}
+.lv-fp .symed-tile .nd{font-size:9px; color:var(--warn,#ffb74d); text-transform:uppercase;
+  letter-spacing:.04em;}
 .lv-vazio{padding:18px 12px; font-size:12px; color:var(--text-4,#7a7a7a); line-height:1.5;}
-.lv-novo{padding:8px 10px; border-top:1px solid var(--line,#3a3a3a); display:flex; gap:8px;}
+.lv-novo{padding:8px 10px; border-top:1px solid var(--line,#3a3a3a); display:flex; gap:8px;
+  align-items:center;}
 .lv-novo .input{flex:1; min-width:0;}
+/* a fileira de ações, no lugar e no tom da do editor (Aplicar ao símbolo / Renomear…) */
+.lv-acts{display:flex; gap:6px; align-items:center; padding:6px 12px;
+  border-bottom:1px solid var(--line,#3a3a3a);}
+.lv-acts .esc{font-size:11px; color:var(--text-4,#7a7a7a); margin-left:auto;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 `;
 
 let cssPosto = false;
@@ -194,7 +207,20 @@ function montaFootprints(){
   const cnt = el('span', 'count'); cnt.id = 'lvCount';
   bar.append(inp, cnt);
 
-  const lista = el('div', 'lv-fp-list'); lista.id = 'lvLista';
+  /* A fileira de ações, no molde da do editor: escolher é uma coisa, aplicar é outra. O
+     fluxo pedido é "seleciona o componente → escolhe o footprint → aplica no componente",
+     e um clique que já grava não tem esse meio-passo. Duplo clique aplica direto, como o
+     tile de símbolo faz. */
+  const acts = el('div', 'lv-acts');
+  const bAp = el('button', 'btn pri'); bAp.id = 'lvAplicar';
+  bAp.textContent = 'Aplicar ao componente'; bAp.disabled = true;
+  bAp.onclick = () => { if (ST.sel) vincula(ST.sel, false); };
+  const bDes = el('button', 'btn'); bDes.id = 'lvDesvincular';
+  bDes.textContent = 'Desvincular'; bDes.onclick = () => vincula('', false);
+  const esc = el('span', 'esc'); esc.id = 'lvEscolhido';
+  acts.append(bAp, bDes, esc);
+
+  const lista = el('div', 'symed-tiles'); lista.id = 'lvLista';
 
   /* cadastrar um nome que a PcbLib ainda não tem. NÃO desenha footprint nenhum — não existe
      escritor de .PcbLib neste projeto (só de .SchLib). O nome fica vinculado e marcado como
@@ -207,7 +233,7 @@ function montaFootprints(){
   ni.addEventListener('keydown', e => { if (e.key === 'Enter') nb.click(); });
   novo.append(ni, nb);
 
-  box.append(alvo, bar, lista, novo);
+  box.append(alvo, bar, acts, lista, novo);
   return box;
 }
 
@@ -267,21 +293,61 @@ function pintaLista(){
     return;
   }
   const atual = fpAtualDe(simboloAtual());
+  const frag = document.createDocumentFragment();
   for (const f of vis.slice(0, 400)){
-    const b = el('button', 'lv-row');
-    b.setAttribute('aria-pressed', String(!!atual && atual.name === f.name));
-    const nm = el('span', 'nm', f.name); nm.title = f.name;
-    const st = el('span', 'st ' + (f.desenhado ? 'ok' : 'no'),
-                  f.desenhado ? 'desenhado' : 'não desenhado');
-    const us = el('span', 'us', f.usos ? f.usos + (f.usos === 1 ? ' uso' : ' usos') : '—');
-    b.append(nm, st, us);
-    b.onclick = () => vincula(f.name, false);
-    lista.append(b);
+    const obj = API.footprint && API.footprint(f.name);
+    const t = el('button', 'symed-tile' + (f.desenhado ? '' : ' nao'));
+    t.type = 'button';
+    /* marcado = o escolhido agora; se ninguém escolheu ainda, o que já está vinculado */
+    const marcado = ST.sel ? (ST.sel === f.name) : (!!atual && atual.name === f.name);
+    t.setAttribute('aria-selected', String(marcado));
+    t.title = f.name + '\n' + (f.desenhado ? ((obj && (obj.pads || []).length) || 0) + ' pads'
+                                           : 'ainda não desenhado na PcbLib')
+      + (f.usos ? '\n' + f.usos + (f.usos === 1 ? ' componente usa' : ' componentes usam') : '')
+      + (atual && atual.name === f.name ? '\n— é o vinculado hoje' : '');
+    const cv = el('canvas'); cv.width = 96; cv.height = 64;
+    const nm = el('span', 'nm', f.name);
+    const k = el('span', f.desenhado ? 'pads' : 'nd',
+                 f.desenhado ? (((obj && (obj.pads || []).length) || 0) + ' pads'
+                                + (f.usos ? ' · ' + f.usos + ' uso' + (f.usos === 1 ? '' : 's') : ''))
+                             : 'não desenhado');
+    t.append(cv, nm, k);
+    t.onclick = () => { ST.sel = (ST.sel === f.name) ? null : f.name; pintaLista(); pintaAcoes(); };
+    t.ondblclick = () => vincula(f.name, false);
+    frag.append(t);
+    if (obj) desenhaTile(cv, obj);
   }
+  lista.append(frag);
   if (vis.length > 400){
-    lista.append(el('div', 'lv-vazio', '… e mais ' + (vis.length - 400)
-      + '. Refine a busca — a lista para em 400 para a rolagem não travar.'));
+    lista.append(el('div', 'symed-empty', '… e mais ' + (vis.length - 400)
+      + '. Refine a busca — a galeria para em 400 para a rolagem não travar.'));
   }
+  pintaAcoes();
+}
+
+/* o desenho do footprint no tile. Mesmo motor da vista Geral (HubDraw), mesma moldura dos
+   tiles de símbolo — footprint sem pads (o só-cadastrado) fica com o quadro vazio, que é a
+   verdade dele. */
+function desenhaTile(cv, fp){
+  if (!window.HubDraw || !HubDraw.mkCamera) return;
+  try {
+    const cam = HubDraw.mkCamera(cv, ctx => HubDraw.drawFootprint(ctx, fp), {});
+    cam.resize();
+    if (fp.bbox && cam.cam) cam.fit(fp.bbox, 1.25); else cam.draw();
+  } catch (e) { /* um tile sem preview é melhor que a galeria inteira sem aparecer */ }
+}
+
+function pintaAcoes(){
+  const b = document.getElementById('lvAplicar');
+  const d = document.getElementById('lvDesvincular');
+  const e = document.getElementById('lvEscolhido');
+  const sim = simboloAtual();
+  const atual = fpAtualDe(sim);
+  if (b) b.disabled = !sim || !ST.sel || (!!atual && atual.name === ST.sel);
+  if (d) d.disabled = !sim || !atual;
+  if (e) e.textContent = !sim ? 'nenhum componente selecionado'
+    : ST.sel ? 'escolhido: ' + ST.sel
+    : 'escolha um footprint na galeria';
 }
 
 function pintaFootprints(){ pintaAlvo(); pintaLista(); }
@@ -323,6 +389,7 @@ async function vincula(nome, ehNovo){
       ST.fps = null;                    /* o nome novo passa a existir na lista */
       carregaFps();
     }
+    ST.sel = null;
     aviso(nome ? ('“' + sim + '” → ' + nome) : ('“' + sim + '” ficou sem footprint'), 'ok');
     for (const a of (j.avisos || [])) aviso(a, 'warn');
     pintaFootprints();

@@ -946,7 +946,17 @@ def _nomes_pcblib():
             txt = io.open(p, encoding='utf-8', errors='replace').read()
         except OSError:
             return frozenset()
-        _pcblib_cache['nomes'] = frozenset(re.findall(r'\{"name":"([^"]+)"', txt))
+        # UM FOOTPRINT POR LINHA, e o nome dele é o PRIMEIRO `{"name":` da linha — os
+        # outros são os PADS. Varrer o arquivo inteiro com um findall solto dava 5816
+        # nomes em vez de 618: a galeria enchia de "+", "14L", "15U", que são nomes de pad,
+        # e cada um virava um tile vazio. Mesma disciplina de leitura do resto do projeto.
+        nomes = set()
+        for ln in txt.splitlines():
+            corpo = ln[1:] if ln.startswith(',') else ln
+            m = re.match(r'\{\s*"name"\s*:\s*"((?:[^"\\]|\\.)*)"', corpo)
+            if m:
+                nomes.add(m.group(1))
+        _pcblib_cache['nomes'] = frozenset(nomes)
         _pcblib_cache['mtime'] = st.st_mtime_ns
     return _pcblib_cache['nomes']
 
