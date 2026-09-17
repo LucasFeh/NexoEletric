@@ -4176,6 +4176,18 @@ window.__hubAplicaVinculos = function(vinculos){
            desvios: planos.filter(p => p.desvio).map(p => ({ refs:p.refs, sym:p.sym,
                                                              como:p.desvio.como, vira:p.desvio.vira })) };
 };
+/* Os componentes da folha, para quem precisa LISTAR o projeto (hub-converte.js). Copia rasa
+   de propriedade, e nao o objeto do modelo: painel que recebe o comp de verdade pode escrever
+   nele sem passar pelo commit(), e a folha passa a mostrar uma coisa que o undo nao desfaz. */
+window.__hubComponentes = function(){
+  const fora = [];
+  for (const s of model.sheets)
+    for (const c of s.comps)
+      fora.push({ ref:c.ref, sym:c.sym, footprint:c.footprint, comment:c.comment,
+                  params:c.params, part:c.part || 1, sheet:s.name });
+  return fora;
+};
+
 window.__hubSelectComp = function(ref){
   for (const s of model.sheets){ const c = s.comps.find(c => c.ref === ref); if (c){ focusComp(c); return; } }
 };
