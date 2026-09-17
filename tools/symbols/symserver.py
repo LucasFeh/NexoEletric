@@ -47,6 +47,7 @@ três decisões de arquivo:
 `registra(app, root)` é o único ponto de contato com o hubserver: guarda ROOT e registra o
 blueprint. ROOT é lido em tempo de chamada — os testes trocam.
 """
+import io
 import json
 import math
 import os
@@ -875,6 +876,151 @@ def api_almox_excluir_desfazer():
             'avisos': ['tirei do registro. O valor volta ao espelho e ao Altium no próximo '
                        'sincronismo SE o produto ainda existir no Odoo; se não existir, ele '
                        'já foi apagado de vez e isto só limpou o histórico']}
+
+
+def _salva_footprint(caminho, nome, footprint):
+    """Troca a linha do símbolo `nome` no schlib.js pondo UM footprint — ou nenhum.
+
+    Mesma técnica cirúrgica do `_salva_espelho` acima (latin-1 nos dois sentidos, uma linha
+    trocada e o `generated`), e pelo mesmo motivo: o arquivo tem 700 KB e reserializá-lo
+    inteiro moveria bytes que ninguém pediu para mover.
+
+    UM footprint, nunca dois. Regra do dono, 2026-09-17: todo componente da biblioteca tem
+    exatamente um footprint vinculado. `footprint` vazio DESVINCULA (lista vazia), que é
+    diferente de "não mexer" — quem não quer mexer não chama esta rota.
+
+    Devolve (símbolo novo, erro). O `incurrentlib` diz se o nome existe na PcbLib espelhada:
+    é o mesmo crosscheck que a vista Libs já mostra, e ele viaja com o vínculo para a tela
+    poder marcar "ainda não desenhado" sem consultar a PcbLib de novo.
+    """
+    with open(caminho, 'rb') as f:
+        linhas = f.read().decode('latin-1').splitlines(True)
+    prefixo = '{"name":' + L._js(nome) + ','
+    alvo = None
+    for i, ln in enumerate(linhas):
+        corpo = ln[1:] if ln.startswith(',') else ln
+        if corpo.startswith(prefixo):
+            alvo = i
+            break
+    if alvo is None:
+        return None, 'símbolo "%s" não está em %s' % (nome, os.path.basename(caminho))
+    ln = linhas[alvo]
+    virgula = ln.startswith(',')
+    fim = ln[len(ln.rstrip('\r\n')):]
+    velho = json.loads(ln.rstrip('\r\n')[1 if virgula else 0:])
+    fps = []
+    if footprint:
+        fps = [OrderedDict([('name', footprint),
+                            ('incurrentlib', footprint in _nomes_pcblib()),
+                            ('current', True)])]
+    novo = OrderedDict([
+        ('name', velho.get('name', nome)),
+        ('description', velho.get('description', '')),
+        ('partcount', velho.get('partcount', 1)),
+        ('parts', velho.get('parts') or []),
+        ('footprints', fps),
+    ])
+    linhas[alvo] = (',' if virgula else '') + L.simbolo_json(novo) + fim
+    for i in range(min(alvo, 8)):
+        if linhas[i].startswith('"generated":'):
+            f2 = linhas[i][len(linhas[i].rstrip('\r\n')):]
+            linhas[i] = '"generated":' + L._js(L.agora()) + ',' + f2
+            break
+    _grava_bytes(caminho, ''.join(linhas).encode('latin-1'))
+    return novo, None
+
+
+_pcblib_cache = {'mtime': 0, 'nomes': frozenset()}
+
+
+def _nomes_pcblib():
+    """Os nomes de footprint que a PcbLib espelhada tem. Em cache pelo mtime: o arquivo tem
+    3,2 MB e esta rota pode ser chamada uma vez por vínculo."""
+    p = os.path.join(ROOT, 'Libs', 'pcblib.js')
+    try:
+        st = os.stat(p)
+    except OSError:
+        return frozenset()
+    if _pcblib_cache['mtime'] != st.st_mtime_ns:
+        try:
+            txt = io.open(p, encoding='utf-8', errors='replace').read()
+        except OSError:
+            return frozenset()
+        _pcblib_cache['nomes'] = frozenset(re.findall(r'\{"name":"([^"]+)"', txt))
+        _pcblib_cache['mtime'] = st.st_mtime_ns
+    return _pcblib_cache['nomes']
+
+
+@bp.route('/footprints', methods=['GET'])
+def api_footprints():
+    """A lista de footprints para a aba Footprints escolher — nome e se está desenhado.
+
+    Sai daqui, e não do `Libs/pcblib.js` cru pelo navegador, porque a tela precisa de duas
+    coisas que o espelho não junta: quantos símbolos usam cada footprint hoje, e os nomes
+    que alguém já vinculou mas que a PcbLib ainda não tem (cadastrados para desenhar depois).
+    """
+    reais = sorted(_nomes_pcblib())
+    usos = {}
+    try:
+        caminho = os.path.join(ROOT, ESPELHO)
+        txt = io.open(caminho, encoding='latin-1').read()
+        # tolerante a espaco depois dos dois-pontos: o arquivo de verdade sai compacto do
+        # `simbolo_json`, mas um espelho escrito por outra ferramenta (ou por um teste com
+        # json.dumps cru) tem espacos, e uma contagem que zera em silencio nesse caso e pior
+        # que um regex um pouco mais largo.
+        for nome_sym, bloco in re.findall(
+                r'\{\s*"name"\s*:\s*("(?:[^"\\]|\\.)*").*?"footprints"\s*:\s*(\[.*?\])', txt):
+            for fp in re.findall(r'\{\s*"name"\s*:\s*"([^"]+)"', bloco):
+                usos.setdefault(fp, 0)
+                usos[fp] += 1
+    except (OSError, ValueError):
+        pass
+    nomes = sorted(set(reais) | set(usos))
+    return {'ok': True, 'total': len(nomes),
+            'footprints': [{'name': n, 'desenhado': n in reais, 'usos': usos.get(n, 0)}
+                           for n in nomes]}
+
+
+@bp.route('/footprint', methods=['POST'])
+def api_footprint():
+    """Vincula UM footprint a um símbolo do espelho da casa (Libs/schlib.js).
+
+    {simbolo, footprint} — `footprint` vazio desvincula. A regra de um-só é do servidor, e
+    não da tela: qualquer caminho que chegue aqui sai com no máximo um.
+
+    Aceita nome que a PcbLib ainda não tem, de propósito: cadastrar o nome agora e desenhar
+    no Altium depois é o fluxo do usuário. A resposta diz `desenhado: false` para a tela
+    poder marcar isso, em vez de recusar e travar o trabalho.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _erro('JSON {simbolo, footprint} obrigatório', 400)
+    sim = data.get('simbolo')
+    if not (isinstance(sim, str) and sim.strip()):
+        return _erro('simbolo obrigatório', 400)
+    fp = data.get('footprint')
+    if fp is not None and not isinstance(fp, str):
+        return _erro('footprint tem de ser texto (vazio desvincula)', 400)
+    sim, fp = sim.strip(), (fp or '').strip()
+    if isinstance(data.get('footprints'), list) and len(data['footprints']) > 1:
+        return _erro('um componente tem exatamente um footprint: vieram %d'
+                     % len(data['footprints']), 400)
+    caminho = os.path.join(ROOT, ESPELHO)
+    if not os.path.isfile(caminho):
+        return _erro('%s não existe neste workspace' % ESPELHO, 404)
+    with _lock_espelho:
+        try:
+            novo, erro = _salva_footprint(caminho, sim, fp)
+        except (OSError, ValueError) as e:
+            return _erro('não gravei o vínculo: %s' % e, 500)
+    if erro:
+        return _erro(erro, 404)
+    return {'ok': True, 'simbolo': sim, 'footprint': fp,
+            'desenhado': bool(fp) and fp in _nomes_pcblib(),
+            'footprints': novo.get('footprints') or [],
+            'avisos': ([] if not fp or fp in _nomes_pcblib() else
+                       ['"%s" ainda não está na PcbLib espelhada: o vínculo fica gravado, '
+                        'mas o footprint precisa ser desenhado no Altium' % fp])}
 
 
 @bp.route('/lib', methods=['POST'])

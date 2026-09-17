@@ -26,6 +26,7 @@
 <script src="hub-chat.js"></script>
 <!-- editor de símbolos (sub-aba Símbolos da Biblioteca) -->
 <script src="hub-symed.js"></script>
+<script src="hub-libview.js"></script>
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
 <script src="hub-odoocfg.js"></script>
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
@@ -933,7 +934,6 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
       </div>
     </div>
 
-    <div class="pane" data-pane="fp"><div class="scroll" style="height:100%"><div class="cards" id="fpCards"></div></div></div>
 
     <div class="pane" data-pane="lib libfp">
       <div class="lib-grid">
@@ -1373,13 +1373,13 @@ const TABS = [
       { id:'comp', key:'tab.comp', count:d=>d.components.length },
       { id:'nets', key:'tab.nets', count:d=>d.nets.length },
   ]},
-  /* Biblioteca nao depende do projeto: o contador vem das libs, nao do detalhe. */
-  { id:'lib', key:'tab.lib', count:()=> LIB.ready ? LIB.syms.length + LIB.fps.length : '…', sub:[
-      { id:'lib',   key:'tab.lib.sch', count:()=> LIB.ready ? LIB.syms.length : '…' },
-      { id:'libfp', key:'tab.lib.fp',  count:()=> LIB.ready ? LIB.fps.length : '…' },
-      { id:'fp',    key:'tab.fp', count:d=>d.footprints.length },
-      { id:'libsym', key:'tab.lib.sym' },
-  ]},
+  /* Biblioteca nao depende do projeto: o contador vem das libs, nao do detalhe.
+     UMA aba so, desde 2026-09-17: as quatro sub-abas viraram tres VISTAS do mesmo acervo,
+     e elas moram no aside da direita (hub-libview.js). A busca da esquerda e uma so para as
+     tres -- era o pedido: "a busca continua exatamente como e hoje, o que muda e a vista".
+     A sub-aba "Footprints" que listava os footprints do PROJETO aberto saiu de vez: ela era
+     leitura da PLACA, nao da biblioteca, e nunca pertenceu aqui. */
+  { id:'lib', key:'tab.lib', count:()=> LIB.ready ? LIB.syms.length + LIB.fps.length : '…' },
   { id:'neoden', key:'tab.neoden' },
   { id:'laser', key:'tab.laser' },
   { id:'bom', key:'tab.bom' },
@@ -2425,6 +2425,10 @@ function selectLib(kind, name) {
   S.lib.part = 1;
   S.lib.fpShown = null;
   renderLib();
+  /* as três vistas da direita seguem a seleção da esquerda: é ela o alvo do vínculo de
+     footprint e o símbolo que o editor abre. O painel é acessório — se não carregou, a
+     Biblioteca continua sendo a vista Geral de sempre. */
+  if (window.__hubLibView) { try { window.__hubLibView.atualiza(); } catch (e) {} }
 }
 function libShowFp(name) { S.lib.fpShown = name; renderLib(); }
 /* o editor de símbolos gravou no espelho: o acervo 'altium' em cache está velho */
@@ -2845,7 +2849,12 @@ function renderLibAlmox() {
 }
 
 function renderLibAlmoxPreview() {
-  const aside = $('#libDetail'); aside.textContent = '';
+  /* a faixa de sub-abas (hub-libview.js) sobrevive a limpeza: ela e da VISTA, nao do
+     item selecionado, e recria-la a cada preview piscaria na tela */
+  const aside = $('#libDetail');
+  const _lvTabs = aside.querySelector('.lv-tabs');
+  aside.textContent = '';
+  if (_lvTabs) aside.append(_lvTabs);
   $('#libPart').hidden = true;
   libDrawSym = null; libDrawFp = null;
   $('#libSymHint').textContent = ''; $('#libFpHint').textContent = '';
@@ -3038,7 +3047,12 @@ function renderLibAlmoxPreview() {
 
 function renderLibPreview(u, goneSym, goneFp) {
   const sel = S.lib.sel;
-  const aside = $('#libDetail'); aside.textContent = '';
+  /* a faixa de sub-abas (hub-libview.js) sobrevive a limpeza: ela e da VISTA, nao do
+     item selecionado, e recria-la a cada preview piscaria na tela */
+  const aside = $('#libDetail');
+  const _lvTabs = aside.querySelector('.lv-tabs');
+  aside.textContent = '';
+  if (_lvTabs) aside.append(_lvTabs);
   const partSel = $('#libPart'); partSel.hidden = true;
   libDrawSym = null; libDrawFp = null;
   $('#libSymHint').textContent = ''; $('#libFpHint').textContent = '';
@@ -3278,24 +3292,8 @@ function renderPanes() {
       tb.append(tr);
     });
   }
-  if (S.tab === 'fp') {
-    const g = $('#fpCards'); g.textContent = '';
-    d.footprints.forEach(f => {
-      const c = el('div', 'card');
-      c.append(el('div', 'kicker', f.lib), el('div', 't mono', f.name), el('p', 'b', f.desc));
-      const m = el('div', 'm'); m.append(el('span', null, f.usage), el('span', null, f.pads));
-      c.append(m); g.append(c);
-    });
-  }
-  if (S.tab === 'libsym') {
-    /* o MESMO seletor de acervo da aba Sch Lib manda na lista do editor: a fileira de
-       sub-abas e do grupo lib inteiro, entao o combobox ja aparece por cima do painel de
-       simbolos — ate agora ele so nao fazia nada ali */
-    const a = libSources().find(x => x.id === libWanted()) || LIB_ALTIUM;
-    return HubSymEd.render({ root: $('#symed'), t, toast, onSaved: libInvalida, lang: HubI18n.lang,
-                             splits: mkSplits,
-                             acervo: acervoParaEditor(a) });
-  }
+  /* a vista "Footprints do projeto" saiu em 2026-09-17: era leitura da PLACA morando na
+     aba Biblioteca. Quem quer os footprints do projeto aberto vê em PCB » Componentes. */
   if (S.tab === 'lib' || S.tab === 'libfp') return renderLib();
   if (S.tab === 'neoden') return renderNeoden();
   if (S.tab === 'laser') return renderLaser();
@@ -4701,6 +4699,40 @@ document.addEventListener('keydown', e => {
   /* O OPERADOR. O painel não conhece o hub: ele pergunta tudo por este adaptador, e as
      funções aqui leem o estado VIVO (`proj()`, `S.tab`) em vez de receber uma cópia — um
      projeto desatualizado aqui viraria proposta gravada no projeto errado. */
+  /* AS TRÊS VISTAS DA BIBLIOTECA (hub-libview.js). A casca entrega os dois elementos e
+     quatro perguntas; o painel não conhece o `S`. Tudo função, lida na hora de usar: o aside
+     e o centro são redesenhados o tempo todo, e guardar o nó daria um ponteiro morto. */
+  try {
+    window.__hubLibView = HubLibView.instala({
+      detalhe: () => $('#libDetail'),
+      centro: () => document.querySelector('.lib-view'),
+      sel: () => S.lib.sel,
+      simbolo: nome => (LIB.symBy && LIB.symBy.get(nome)) || null,
+      redesenha: () => { try { renderLib(); } catch (e) {} },
+      /* A vista Símbolos é o MESMO editor de sempre — o `#symed`, que vivia num pane próprio
+         e agora é MOVIDO para dentro do centro da Biblioteca. Mover, e não clonar: o
+         HubSymEd guarda referências para os nós dele, e uma cópia deixaria o editor vivo
+         mandando num DOM que ninguém vê. O seletor de acervo continua sendo o da esquerda. */
+      montaEditor: centro => {
+        if (!centro || !window.HubSymEd) return;
+        const raiz = $('#symed');
+        if (raiz && raiz.parentNode !== centro) centro.append(raiz);
+        if (raiz) raiz.hidden = false;
+        const a = libSources().find(x => x.id === libWanted()) || LIB_ALTIUM;
+        try {
+          HubSymEd.render({ root: raiz, t, toast, onSaved: libInvalida, lang: HubI18n.lang,
+                            splits: mkSplits, acervo: acervoParaEditor(a) });
+        } catch (e) {}
+      },
+      escondeEditor: () => { const r = $('#symed'); if (r) r.hidden = true; },
+      abreEditor: nome => {
+        if (!nome || !window.HubSymEd || !HubSymEd.abrir) return;
+        try { HubSymEd.abrir(nome, false, null, null); } catch (e) {}
+      },
+      toast: (txt, tom) => toast(txt, tom),
+    });
+  } catch (e) { /* o painel é acessório: sem ele a Biblioteca continua sendo a vista Geral */ }
+
   try {
     /* o retorno e GUARDADO: ele carrega o alterna()/aberto()/empurrao() que a medicao de fora
        usa, e sem isto o acessor existia sem porta nenhuma para ser alcancado */

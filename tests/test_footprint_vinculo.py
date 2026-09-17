@@ -1,0 +1,153 @@
+# -*- coding: utf-8 -*-
+"""Um componente, UM footprint — a regra do dono, aplicada no servidor.
+
+    python tests/test_footprint_vinculo.py
+
+Regra de 2026-09-17: todo componente da biblioteca tem exatamente um footprint vinculado.
+Ela mora no SERVIDOR e não na tela, porque tela é sugestão e servidor é garantia — qualquer
+caminho que chegue na rota sai com no máximo um.
+
+Até aqui não existia rota nenhuma que gravasse o vínculo: o /save preservava o campo
+(symserver.py » _salva_espelho) e nada o escrevia. Estas são as duas rotas novas.
+
+O que este teste prende:
+  1. vincular grava UM footprint, com `current: true`;
+  2. vincular de novo TROCA, não acumula — é aqui que a regra vive;
+  3. footprint vazio DESVINCULA (lista vazia), que é diferente de não mexer;
+  4. nome que a PcbLib ainda não tem é ACEITO, com aviso: cadastrar agora e desenhar no
+     Altium depois é o fluxo do usuário, e recusar travaria o trabalho;
+  5. a gravação é cirúrgica: nenhuma outra linha do espelho muda, e o desenho do símbolo
+     (parts/partcount) sobrevive ao vínculo;
+  6. GET /footprints lista os desenhados e os só-cadastrados, com a contagem de usos.
+
+Roda sem rede e sem Altium, num espelho sintético em workspace temporário.
+"""
+import io
+import json
+import os
+import shutil
+import sys
+import tempfile
+
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, RAIZ)
+sys.path.insert(0, os.path.join(RAIZ, 'tools', 'almox'))
+sys.path.insert(0, os.path.join(RAIZ, 'tools', 'symbols'))
+
+import hubserver as H            # noqa: E402
+import symserver as S            # noqa: E402
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+ALVO = 'DIODO SCHOTTKY [SMD]'
+OUTRO = 'RES [ SMD ]'
+FP_REAL = 'DO-214AC'             # existe na pcblib sintética
+FP_NOVO = 'QFN-24 NAO DESENHADO'  # não existe: o caso do cadastro para desenhar depois
+
+
+def sym(nome, fps):
+    """A linha como o `simbolo_json` a escreve: COMPACTA, sem espaço depois dos dois-pontos.
+    Escrever com o `json.dumps` cru aqui (que põe ', ' e ': ') faria o fixture divergir do
+    arquivo de verdade — e foi exatamente assim que a primeira versão deste teste acusou
+    "0 usos" para um footprint que estava lá."""
+    return ('{"name":%s,"description":"","partcount":1,'
+            '"parts":[{"part":1,"pins":[{"num":"1","name":"A","x":0,"y":0,"len":100,'
+            '"orient":0,"type":"Passive"}],"graphics":[]}],"footprints":%s}'
+            % (json.dumps(nome), json.dumps(fps, separators=(',', ':'))))
+
+
+tmp = tempfile.mkdtemp(prefix='fp-vinculo-')
+try:
+    os.makedirs(os.path.join(tmp, 'Libs'))
+    espelho = os.path.join(tmp, 'Libs', 'schlib.js')
+    with io.open(espelho, 'w', encoding='latin-1', newline='\n') as f:
+        f.write('var schlib = {\n"format":"schmirror-lib-v1",\n'
+                '"generated":"01/01/2026 00:00:00",\n"symbols":[\n')
+        # o alvo comeca com DOIS footprints: o estado que a regra veio proibir
+        f.write(sym(ALVO, [{'name': 'DO-214AC', 'incurrentlib': True, 'current': True},
+                           {'name': 'DO-214AB', 'incurrentlib': True, 'current': False}]) + '\n')
+        f.write(',' + sym(OUTRO, [{'name': 'RES 0805', 'incurrentlib': True,
+                                   'current': True}]) + '\n')
+        f.write(']};\n')
+    with io.open(os.path.join(tmp, 'Libs', 'pcblib.js'), 'w', encoding='utf-8') as f:
+        f.write('var pcblib = {"footprints":[{"name":"DO-214AC","pads":[]},'
+                '{"name":"DO-214AB","pads":[]},{"name":"RES 0805","pads":[]}]};\n')
+
+    real_root = H.ROOT
+    H.ROOT = S.ROOT = tmp
+    S._pcblib_cache['mtime'] = 0          # o cache é por mtime; a raiz mudou
+    cli = H.app.test_client()
+
+    def le_sym(nome):
+        txt = io.open(espelho, encoding='latin-1').read()
+        for ln in txt.splitlines():
+            corpo = ln[1:] if ln.startswith(',') else ln
+            if corpo.startswith('{"name":' + json.dumps(nome) + ','):
+                return json.loads(corpo)
+        return None
+
+    # ── 1. vincular grava UM, e TROCA os dois que estavam lá ─────────────────
+    antes_outro = le_sym(OUTRO)
+    r = cli.post('/api/symbols/footprint', json={'simbolo': ALVO, 'footprint': FP_REAL})
+    j = r.get_json()
+    assert r.status_code == 200 and j['ok'], j
+    fps = le_sym(ALVO)['footprints']
+    assert len(fps) == 1, 'a regra é UM footprint, ficaram %d: %s' % (len(fps), fps)
+    assert fps[0]['name'] == FP_REAL and fps[0]['current'] is True, fps
+    assert fps[0]['incurrentlib'] is True, fps
+    assert j['desenhado'] is True and not j['avisos'], j
+    print('(1) vincular grava UM footprint e substitui os dois que existiam ok')
+
+    # ── 2. vincular de novo troca, nunca acumula ─────────────────────────────
+    cli.post('/api/symbols/footprint', json={'simbolo': ALVO, 'footprint': 'DO-214AB'})
+    fps = le_sym(ALVO)['footprints']
+    assert len(fps) == 1 and fps[0]['name'] == 'DO-214AB', fps
+    print('(2) vincular de novo troca, não acumula ok')
+
+    # ── 3. o desenho sobrevive, e o vizinho não é tocado ─────────────────────
+    s = le_sym(ALVO)
+    assert s['partcount'] == 1 and len(s['parts'][0]['pins']) == 1, \
+        'o vínculo comeu o desenho do símbolo: %s' % s
+    assert le_sym(OUTRO) == antes_outro, 'mexeu no símbolo vizinho'
+    print('(3) o desenho do símbolo e o vizinho ficam intactos ok')
+
+    # ── 4. vazio DESVINCULA ──────────────────────────────────────────────────
+    j = cli.post('/api/symbols/footprint', json={'simbolo': ALVO, 'footprint': ''}).get_json()
+    assert j['ok'] and le_sym(ALVO)['footprints'] == [], le_sym(ALVO)['footprints']
+    print('(4) footprint vazio desvincula ok')
+
+    # ── 5. nome fora da PcbLib é aceito, com aviso ───────────────────────────
+    j = cli.post('/api/symbols/footprint',
+                 json={'simbolo': ALVO, 'footprint': FP_NOVO}).get_json()
+    assert j['ok'] and j['desenhado'] is False, j
+    assert j['avisos'] and 'desenhado no Altium' in j['avisos'][0], j['avisos']
+    assert le_sym(ALVO)['footprints'][0]['incurrentlib'] is False
+    print('(5) footprint ainda não desenhado é aceito, e a resposta avisa ok')
+
+    # ── 6. recusas ───────────────────────────────────────────────────────────
+    assert cli.post('/api/symbols/footprint', json={'footprint': 'X'}).status_code == 400
+    assert cli.post('/api/symbols/footprint',
+                    json={'simbolo': 'NAO EXISTE', 'footprint': 'X'}).status_code == 404
+    assert cli.post('/api/symbols/footprint',
+                    json={'simbolo': ALVO, 'footprint': 'X',
+                          'footprints': [1, 2]}).status_code == 400, \
+        'mandar dois footprints tem de ser recusado: a regra é do servidor'
+    print('(6) 400 sem símbolo, 404 no que não existe, 400 em mais de um footprint ok')
+
+    # ── 7. a lista para a tela ───────────────────────────────────────────────
+    j = cli.get('/api/symbols/footprints').get_json()
+    assert j['ok'], j
+    porn = {f['name']: f for f in j['footprints']}
+    assert porn['DO-214AC']['desenhado'] is True
+    assert porn[FP_NOVO]['desenhado'] is False, 'o só-cadastrado tem de aparecer na lista'
+    assert porn[FP_NOVO]['usos'] == 1, porn[FP_NOVO]
+    assert porn['RES 0805']['usos'] == 1, porn['RES 0805']
+    assert porn['DO-214AB']['usos'] == 0, 'ninguém usa mais o DO-214AB: %s' % porn['DO-214AB']
+    print('(7) GET /footprints lista desenhados e só-cadastrados, com os usos ok')
+
+    print('test_footprint_vinculo OK (um componente, um footprint — garantido no servidor)')
+finally:
+    H.ROOT = real_root
+    S.ROOT = real_root
+    shutil.rmtree(tmp, ignore_errors=True)
