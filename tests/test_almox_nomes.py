@@ -58,6 +58,7 @@ def main():
     # a presuncao existe de verdade (senao a regra nao teria o que filtrar)
     sn = next(a for a in analisados if 'SN65HVD75DR' in a['nome'])
     assert sn['mont'] == 'PTH' and sn.get('mont_presumida'), (sn['mont'], sn.get('mont_presumida'))
+    test_encap_separa_valores_e_preserva_o_id()
     tl = next(a for a in analisados if 'TL082IDRQ1' in a['nome'])
     assert tl['mont'] == 'SMD' and not tl.get('mont_presumida'), tl['mont']
 
@@ -95,6 +96,52 @@ def main():
     print('test_almox_nomes OK (especial sem montagem declarada sai sem prefixo; SOIC8 nao herda o PTH '
           'do primeiro item; basico continua com a montagem do simbolo)')
     return 0
+
+
+# ─────────── o encapsulamento faz parte da identidade (2026-09-17) ───────────
+# Dois produtos do Odoo com o MESMO valor e encapsulamentos diferentes sao pecas
+# diferentes -- saldo proprio, local proprio, footprint proprio. Agrupados so pelo rotulo,
+# viravam um componente com dois `itens` e `pkgs` de dois. Medido na lib real antes do
+# conserto: 26 valores assim, entre eles o "SMD 0603 1K 1/4W 1% 100ppm", que juntava o
+# resistor 0603 e o 1206.
+
+
+def test_encap_separa_valores_e_preserva_o_id():
+    import almox2lib as A2
+
+    def item(nome, pkg):
+        return {'familia': 'RESISTOR', 'grupo': 'b', 'des': 'R', 'forma': 'res', 'vias': 0,
+                'npin': 0, 'mont': 'SMD', 'unidade': 'Unidades', 'pkg': pkg, 'mpn': '',
+                'mpn_expl': '', 'rotulo': '1K', 'valor': 1000.0, 'valor_txt': '1K',
+                'nome': nome, 'categoria': 'Resistores', 'estoque': 1, 'local': '',
+                'custo': 0.0, 'mouser': '', 'fornecedores': '', 'odoo_id': 1, 'tmpl_id': 1,
+                'pinos_pkg': 0}
+
+    sims = A2.agrupar([item('R 1K 0603', '0603'), item('R 1K 1206', '1206')])
+    sim = next(iter(sims.values()))
+    assert len(sim['parts']) == 2, 'mesmo valor, encaps diferentes = DUAS pecas: %s' % list(sim['parts'])
+    chaves = sorted(p['chave'] for p in sim['parts'].values())
+    # o encap alfabeticamente primeiro fica com a chave LIMPA, e por isso com o id de
+    # ontem; so o extra nasce componente novo
+    assert chaves == ['1K', '1K 1206'], chaves
+
+    # e o vazio vai para o FIM: o nome do componente sai de `pkgs`, que descarta vazio,
+    # entao quem batiza o valor e o primeiro encap NAO vazio. Sem isto o item sem
+    # encapsulamento herdava a chave limpa -- e o id -- de um valor cujo nome e do outro.
+    sims2 = A2.agrupar([item('R 1K sem encap', ''), item('R 1K DO-35', 'DO-35')])
+    sim2 = next(iter(sims2.values()))
+    chaves2 = sorted(p['chave'] for p in sim2['parts'].values())
+    assert chaves2 == ['1K', '1K (sem encap)'], chaves2
+    assert next(p['chave'] for p in sim2['parts'].values() if p['encap'] == 'DO-35') == '1K',         'quem tem encapsulamento e quem fica com a chave limpa'
+
+    # e a numeracao chaveia pela CHAVE: dois rotulos iguais nao podem levar o mesmo id
+    mapa = {}
+    vals = [{'altium': 'SMD 0603 1K', 'label': '1K'},
+            {'altium': 'SMD 1206 1K', 'label': '1K', 'chave': '1K 1206'}]
+    A2.numera_valores('RESISTOR [SMD]', vals, mapa, {}, False)
+    assert vals[0]['id'] != vals[1]['id'], 'os dois receberam o mesmo id: %s' % vals
+    assert sorted(mapa['RESISTOR [SMD]']['ids']) == ['1K', '1K 1206'], mapa['RESISTOR [SMD]']['ids']
+    print('encap separa valores, e o primario mantem a chave (e o id) ok')
 
 
 if __name__ == '__main__':

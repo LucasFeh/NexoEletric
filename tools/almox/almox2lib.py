@@ -234,13 +234,45 @@ def agrupar(itens):
         if a['categoria']:
             s['cats'][a['categoria']] += 1
 
-        p = s['parts'].get(rotulo)
+        # O ENCAPSULAMENTO FAZ PARTE DA IDENTIDADE, como o part number acima. Dois produtos
+        # do Odoo com o MESMO valor e encapsulamentos diferentes sao pecas diferentes: tem
+        # saldo proprio, local proprio na prateleira e footprint proprio. Agrupados pelo
+        # rotulo sozinho, viravam um componente so com dois `itens` e uma lista `pkgs` de
+        # dois -- e a tela mostrava "2 itens do Odoo neste valor", que foi como o dono
+        # achou isto. Medido antes da mudanca: 26 valores em 2513 misturavam assim, sendo
+        # um deles o "SMD 0603 1K 1/4W 1% 100ppm", que juntava o resistor 0603 e o 1206.
+        chave = (rotulo, a['pkg'] or '')
+        p = s['parts'].get(chave)
         if not p:
-            p = s['parts'][rotulo] = {'rotulo': rotulo, 'valor': a['valor'],
-                                      'valor_txt': a['valor_txt'], 'itens': []}
+            p = s['parts'][chave] = {'rotulo': rotulo, 'encap': a['pkg'] or '',
+                                     'valor': a['valor'], 'valor_txt': a['valor_txt'],
+                                     'itens': []}
         if p['valor'] is None and a['valor'] is not None:
             p['valor'], p['valor_txt'] = a['valor'], a['valor_txt']
         p['itens'].append(a)
+
+    # A CHAVE DO LIVRO-RAZAO so muda para quem se DIVIDIU, e so para os extras. O id de uma
+    # part, uma vez dado, e daquele valor para sempre (Libs/almox-parts.json), e um rotulo
+    # que ate ontem era um componente so nao pode perder o numero dele: o encapsulamento
+    # alfabeticamente primeiro -- que ja era o que batizava o nome, porque `pkgs` sai
+    # ordenado -- FICA com a chave limpa e com o id. Os outros nascem componentes novos,
+    # com chave propria e numero novo. Assim nenhum esquema ja desenhado muda de peca.
+    for s in simbolos.values():
+        porrot = collections.defaultdict(list)
+        for (rot, enc) in s['parts']:
+            porrot[rot].append(enc)
+        for rot, encs in porrot.items():
+            # O VAZIO VAI PARA O FIM, e isso nao e detalhe: o NOME do componente sai de
+            # `pkgs`, que descarta encapsulamento vazio (monta_simbolo), entao quem batiza o
+            # valor hoje e o primeiro encap NAO VAZIO. Ordenar com o vazio na frente fazia o
+            # item sem encapsulamento herdar a chave limpa -- e o id -- de um valor cujo
+            # nome pertence ao outro. Medido: o "PTH DO-35 1N4148" perdia o id 48 para um
+            # "PTH 1N4148" recem-nascido. Seis valores mudavam de numero por isso.
+            primeiro = sorted(encs, key=lambda e: (e == '', e))[0]
+            for enc in encs:
+                pt = s['parts'][(rot, enc)]
+                pt['chave'] = (rot if enc == primeiro
+                               else ('%s %s' % (rot, enc) if enc else rot + ' (sem encap)'))
     return simbolos
 
 
@@ -444,6 +476,10 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpm
             'id': 0,                        # numerado depois, por `numera_valores`
             'altium': nome_altium,
             'label': p['rotulo'],
+            # a chave do livro-razao. SO aparece quando difere do rotulo (os valores que se
+            # dividiram por encapsulamento): poe-la em todos engordaria o espelho e mudaria
+            # o diff de 2513 linhas para dizer o que o rotulo ja diz.
+            **({'chave': p['chave']} if p.get('chave') and p['chave'] != p['rotulo'] else {}),
             # geometria propria: so aparece quando o valor discorda do desenho da familia
             **({'parts': parts_valor} if parts_valor else {}),
             'value': p['valor_txt'] or p['rotulo'],
@@ -713,22 +749,32 @@ def numera_valores(nome, valores, mapa, antes, podar):
     ids = reg['ids']
     desde = reg.setdefault('desde', {})
 
+    # A CHAVE, e nao o rotulo. Desde que o valor se divide por encapsulamento (agrupar),
+    # dois componentes podem ter o MESMO rotulo na mesma familia -- "1K 1/4W 1% 100ppm" em
+    # 0603 e em 1206 -- e chavear pelo rotulo daria o mesmo id aos dois. Quem nao se
+    # dividiu tem chave == rotulo, entao o arquivo de ontem continua valendo linha por linha
+    # e ninguem e renumerado.
+    def chave(v):
+        return v.get('chave') or v['label']
+
     for p in valores:
-        vid = ids.get(p['label'])
+        k = chave(p)
+        vid = ids.get(k)
         if vid is None:
             vid = reg['prox']
             reg['prox'] = vid + 1
-            ids[p['label']] = vid
+            ids[k] = vid
         # a data de ENTRADA na lib, gravada uma vez só. É o que faz "novo" sobreviver a
         # uma regeração que não mudou nada — antes a marcação era "diferente da geração
         # anterior", e um "só regerar do snapshot" apagava o que a puxada tinha trazido.
-        p['desde'] = desde.setdefault(p['label'], AGORA_ISO)
+        p['desde'] = desde.setdefault(k, AGORA_ISO)
         p['id'] = vid
 
     # o que saiu do Odoo continua na lista, com o seu id, saldo zerado e marcado
     if not podar and valores:
-        atuais = {p['label'] for p in valores}
-        velhos = {v['label']: v for v in ((antes or {}).get(nome) or {}).get('valores', [])}
+        atuais = {chave(p) for p in valores}
+        velhos = {(v.get('chave') or v['label']): v
+                  for v in ((antes or {}).get(nome) or {}).get('valores', [])}
         for label, vid in ids.items():
             if label in atuais:
                 continue
