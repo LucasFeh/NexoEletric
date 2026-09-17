@@ -148,28 +148,44 @@ function trocaCentro(){
     meu = montaFootprints();
     centro.append(meu);
   }
-  for (const filho of Array.from(centro.children)){
-    if (filho.id === 'lvFootprints' || filho.id === 'symed') continue;
-    if (filho.classList && filho.classList.contains('lv-tabs')) continue;   /* a faixa fica */
-    filho.hidden = (ST.aba !== 'geral');
-  }
-  if (meu) meu.hidden = (ST.aba !== 'footprints');
-  /* a grade de 4 painéis só faz sentido na vista Geral (ver .lv-outra no CSS) */
-  const soGeral = (ST.aba === 'geral');
-  centro.classList.toggle('lv-outra', !soGeral);
-  /* e a ficha da direita idem — com a coluna dela, senão sobra o buraco */
-  const aside = API.detalhe && API.detalhe();
-  if (aside) aside.hidden = !soGeral;
-  const grade = centro.parentElement;
-  if (grade && grade.classList) grade.classList.toggle('lv-sem-ficha', !soGeral);
+  aplicaVisibilidade();
   if (ST.aba === 'footprints'){
     pintaFootprints();
     if (ST.fps === null && !ST.carregando) carregaFps();
   }
   if (ST.aba === 'simbolos' && API.abreEditor){
     const s = API.sel && API.sel();
-    if (s && (s.k === 'sym' || s.k === 'gone-sym')) API.abreEditor(s.name);
+    if (s && (s.k === 'sym' || s.k === 'gone-sym')){ ultimoAberto = s.name; API.abreEditor(s.name); }
   }
+}
+
+/* QUEM ESCONDE O QUE, separado de montar o centro — e barato de propósito, porque roda
+   toda vez que a casca redesenha.
+
+   Precisa rodar sempre porque o `renderLib` do hub.html RE-EXIBE as peças da vista Geral
+   (o #libValBox e a barra de footprint) a cada desenho: ele não sabe que existe uma vista
+   por cima. Sem reaplicar, bastava digitar na busca da esquerda para a caixa de valores
+   reaparecer no topo da vista Símbolos, empilhada com o editor — que foi o que o dono viu. */
+function aplicaVisibilidade(){
+  const centro = API && API.centro && API.centro();
+  if (!centro) return;
+  const soGeral = (ST.aba === 'geral');
+  for (const filho of Array.from(centro.children)){
+    if (filho.id === 'lvFootprints' || filho.id === 'symed') continue;
+    if (filho.classList && filho.classList.contains('lv-tabs')) continue;   /* a faixa fica */
+    filho.hidden = !soGeral;
+  }
+  const meu = centro.querySelector('#lvFootprints');
+  if (meu) meu.hidden = (ST.aba !== 'footprints');
+  const ed = document.getElementById('symed');
+  if (ed && ed.closest('.lib-view')) ed.hidden = (ST.aba !== 'simbolos');
+  /* a grade de 4 painéis só faz sentido na vista Geral (ver .lv-outra no CSS) */
+  centro.classList.toggle('lv-outra', !soGeral);
+  /* e a ficha da direita idem — com a coluna dela, senão sobra o buraco */
+  const aside = API.detalhe && API.detalhe();
+  if (aside) aside.hidden = !soGeral;
+  const grade = centro.parentElement;
+  if (grade && grade.classList) grade.classList.toggle('lv-sem-ficha', !soGeral);
 }
 
 /* ── as sub-abas, no topo do CENTRO ──
@@ -417,13 +433,26 @@ function instala(api){
 }
 
 /* a casca chama quando a seleção da esquerda muda: o alvo do vínculo é aquela seleção */
+/* A casca chama isto a CADA desenho da Biblioteca (o fim dos dois previews), e não só
+   quando a seleção muda: é o único ponto por onde os dois caminhos de clique passam — o
+   `selectLib` do acervo do Altium e o onclick solto da lista do almoxarifado
+   (hub.html:2839), que mexe em S.lib.sel direto e nunca chamou selectLib. Pendurar o aviso
+   só no selectLib deixava o acervo padrão (Almoxarifado — Todos) sem aviso nenhum. */
+let ultimoAberto = null;
+
 function atualiza(){
   pintaAbas();
-  if (ST.aba === 'footprints') pintaFootprints();
-  else if (ST.aba === 'simbolos' && API && API.abreEditor){
-    const s = API.sel && API.sel();
-    if (s && (s.k === 'sym' || s.k === 'gone-sym')) API.abreEditor(s.name);
-  }
+  aplicaVisibilidade();                 /* barato, e desfaz o que o renderLib re-exibiu */
+  if (ST.aba === 'footprints'){ pintaFootprints(); return; }
+  if (ST.aba !== 'simbolos') return;
+  /* abrir no editor é CARO (carrega a schlib, redesenha a faixa), então só quando o
+     componente selecionado realmente mudou — senão cada tecla digitada na busca da
+     esquerda reabriria o símbolo e o editor piscaria. */
+  const s = API && API.sel && API.sel();
+  const nome = s && (s.k === 'sym' || s.k === 'gone-sym') ? s.name : null;
+  if (!nome || nome === ultimoAberto) return;
+  ultimoAberto = nome;
+  if (API.abreEditor) API.abreEditor(nome);
 }
 
 function ir(aba){

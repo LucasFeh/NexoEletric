@@ -2462,6 +2462,16 @@ const alxQtd = n => (Math.round(n * 100) / 100).toLocaleString('pt-BR');
 const alxValores = s => (s && s.valores) || [];
 const alxEstoque = s => alxValores(s).reduce((a, p) => a + (p.estoque || 0), 0);
 
+/* As tres vistas da Biblioteca (hub-libview.js) seguem o desenho da casca. Chamado no FIM
+   de cada preview porque e o unico ponto por onde os DOIS caminhos de clique passam: o
+   selectLib do acervo do Altium e o onclick solto da lista do almoxarifado, que mexe em
+   S.lib.sel direto. E porque o renderLib RE-EXIBE as pecas da vista Geral a cada desenho:
+   sem reaplicar aqui, digitar na busca trazia a caixa de valores de volta por cima da
+   vista Simbolos. */
+function lvSync() {
+  if (window.__hubLibView) { try { window.__hubLibView.atualiza(); } catch (e) {} }
+}
+
 function renderLib() {
   if (!LIB.ready) {
     $('#libList').textContent = '';
@@ -3040,6 +3050,7 @@ function renderLibAlmoxPreview() {
   const nota = el('p', null, t('lib.almoxNota'));
   nota.style.cssText = 'font-size:11px;color:var(--text-4);margin-top:14px;line-height:1.5';
   aside.append(nota);
+  lvSync();
 }
 
 function renderLibPreview(u, goneSym, goneFp) {
@@ -3239,6 +3250,7 @@ function renderLibPreview(u, goneSym, goneFp) {
   /* preview de baixo: o footprint escolhido (do simbolo) ou o proprio selecionado */
   libFit(libCamSym, symBB);
   libPoeFp(fpName ? ((libResolve('fp', fpName) || {}).item || null) : null, fpName);
+  lvSync();
 }
 
 function libAsideUsage(aside, refs) {
@@ -4720,9 +4732,22 @@ document.addEventListener('keydown', e => {
         } catch (e) {}
       },
       escondeEditor: () => { const r = $('#symed'); if (r) r.hidden = true; },
+      /* O ACERVO VAI JUNTO, e não é detalhe: `abrir` avisa que uma família do almoxarifado
+         não existe no espelho do Altium e que, sem trocar o acervo antes, o openSymbol não
+         acha nada — "a aba abre, ST.sel fica com o nome certo e o desenho vem VAZIO"
+         (hub-symed.js » abrir). Passar null era exatamente cair nessa.
+         E DEPOIS a faixa de baixo vai para "Componentes": é lá que mora a lista de valores
+         da família, e é o lugar onde o dono pediu para escolher o valor antes de atribuir
+         um símbolo a ele. O `abrir` termina em preSelecionarNaFaixa, que força "simbolos" —
+         por isso isto vem no .then, e não antes. Família sem valores volta sozinha. */
       abreEditor: nome => {
         if (!nome || !window.HubSymEd || !HubSymEd.abrir) return;
-        try { HubSymEd.abrir(nome, false, null, null); } catch (e) {}
+        const a = libSources().find(x => x.id === libWanted()) || LIB_ALTIUM;
+        try {
+          Promise.resolve(HubSymEd.abrir(nome, false, null, acervoParaEditor(a)))
+            .then(ok => { if (ok && HubSymEd.faixa) HubSymEd.faixa('componentes'); })
+            .catch(() => {});
+        } catch (e) {}
       },
       toast: (txt, tom) => toast(txt, tom),
     });

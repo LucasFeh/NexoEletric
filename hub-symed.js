@@ -2468,5 +2468,23 @@ async function abrir(name, force, componente, acervo) {
    aberta — que e justamente o caso comum de quem vem pelo menu de contexto. */
 const conhece = name => (DATA.schlib ? !!symByName(String(name || '')) : null);
 
-return { render, dirty, reload, pure, abrir, conhece, state: ST, actions, cam: () => (CAM ? CAM.cam : null), confirmar, pedirTexto };
+/* Abrir a faixa de baixo numa aba específica, DE FORA. Existe para a vista Biblioteca
+   (hub-libview.js), que desde 2026-09-17 quer a lista de VALORES da família no lugar onde
+   ela sempre esteve — a aba "Componentes" — em vez de repetida noutra caixa.
+
+   Não é `state.faixa = x` de fora porque trocar a faixa tem três efeitos além do valor:
+   zera o recorte (libIds), apaga a nota e invalida o cache de DOM (libKey). Sem eles a
+   faixa troca e a tela não. Mesmo trio que o clique na aba faz (refreshLib » a barra).
+
+   Família sem valores não tem o que mostrar, e o próprio refreshLib já devolve para
+   "simbolos" nesse caso — então aqui não se checa nada: quem manda é ele. */
+function faixa(qual) {
+  if (qual !== 'simbolos' && qual !== 'componentes') return false;
+  if (ST.faixa === qual) return true;
+  ST.faixa = qual; ST.libIds = null; ST.faixaNota = ''; libKey = '';
+  refreshLib();
+  return ST.faixa === qual;      /* false = a família não tinha valores e ele voltou */
+}
+
+return { render, dirty, reload, pure, abrir, conhece, faixa, state: ST, actions, cam: () => (CAM ? CAM.cam : null), confirmar, pedirTexto };
 });
