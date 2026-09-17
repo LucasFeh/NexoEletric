@@ -712,6 +712,33 @@ nenhuma modificação vinda do Altium"*. Saíram o badge, o modal, as rotas `/al
 `/altium-apply` e a apuração de divergências do resumo. A única porta que ainda leva um desenho
 do Altium para o hub é o comando manual `guardiao.py --proteger "FAMILIA/COMPONENTE"`.
 
+**Apagar um componente da biblioteca: apaga mesmo, e quem decide se ele volta é o Odoo.**
+A biblioteca foi construída quando o cadastro do Odoo ainda não tinha padrão de nome, e por
+isso alguns itens nasceram **duas vezes**, com nomes diferentes. Limpar isso é apagar o
+duplicado pelo botão direito » *Apagar da biblioteca…* — e a mecânica protege quem erra a mão:
+
+| o item… | o que acontece na próxima geração |
+|---|---|
+| **ainda existe no Odoo** | volta, remontado do CSV, **com o mesmo número de part** |
+| **já não existe no Odoo** (o duplicado) | não volta: morreu de vez |
+
+Não há lista de veto. O gerador não consulta `Libs/almox-excluidos.json` — esse arquivo é o
+**registro** do que foi apagado e quando. Funciona sem filtro porque o valor que já não vem do
+Odoo só aparece no espelho por ser repescado do espelho **anterior** (é o `fora: true`, saldo
+zero, de `almox2lib.py » numera_valores`); apagar corta essa única fonte. Por isso *desfazer* só
+limpa o registro: quem traz o item de volta é a sincronização, se o produto ainda estiver lá.
+
+Duas coisas sobrevivem a apagar, de propósito: o **número da part** fica reservado no
+livro-razão (ninguém herda o número de um apagado) e o **desenho protegido** fica no
+`Libs/lib-ledger.json` — ele era apagado junto até 2026-09-17, e como o espelho e a `.SchLib`
+são gerados, essa era a única cópia durável; o item voltava do Odoo com o desenho genérico e
+sem aviso. E um **sufixo de homônimo, uma vez dado, não sai mais** (`almox-parts.json » sufixados`):
+sem isso, apagar o `PTH DIP8 OP07CP` renomearia o `PTH DIP8 OP07CP #26` para o nome cru, e todo
+`schematic.js` que grava esse texto em `sym` passaria a apontar para outra peça.
+
+O componente só sai da `.SchLib` dentro do Altium na sincronização seguinte, porque elas são
+reescritas inteiras a partir do espelho — a resposta do hub diz isso.
+
 O leitor Python (`tools/symbols/sch_leitor.py`) também regera o espelho inteiro sem abrir o
 Altium — `python tools/symbols/sch_leitor.py --espelho` (aplica o `rename-map.js` para não
 desfazer os nomes do RenameLibs) — e é provado contra o `schlib.js` que o `ExportLibs.pas`
