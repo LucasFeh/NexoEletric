@@ -28,19 +28,26 @@
 var HubLibView = (function () {
 
 const CSS = `
-/* As sub-abas moram no topo do aside da direita e mandam no centro. Ficam grudadas ali em
-   cima porque o aside rola: sub-aba que some com o scroll vira sub-aba que ninguém acha. */
-.lv-tabs{position:sticky; top:0; z-index:5; display:flex; gap:2px; padding:6px 6px 8px;
-  background:var(--card,#242424); border-bottom:1px solid var(--line,#3a3a3a); margin-bottom:8px;}
-.lv-tabs button{flex:1; border:0; background:transparent; color:var(--text-3,#9a9a9a);
-  font:12px 'Segoe UI',sans-serif; padding:6px 4px; border-radius:var(--r-sm,4px); cursor:pointer;
-  border-bottom:2px solid transparent;}
+/* A faixa mora no TOPO DO CENTRO (a janela do meio), que é onde a vista troca. Ela é a
+   primeira linha da grade do .lib-view — por isso o hub.html abriu um \`auto\` a mais ali. */
+.lv-tabs{display:flex; gap:2px; padding:6px 12px 0; border-bottom:1px solid var(--line,#3a3a3a);}
+.lv-tabs button{border:0; background:transparent; color:var(--text-3,#9a9a9a);
+  font:12px 'Segoe UI',sans-serif; padding:7px 14px; cursor:pointer;
+  border-bottom:2px solid transparent; margin-bottom:-1px;}
 .lv-tabs button:hover{background:rgba(255,255,255,.05); color:var(--text,#d8d8d8);}
-.lv-tabs button[aria-pressed="true"]{color:var(--hi,#4fc3f7); border-bottom-color:var(--hi,#4fc3f7);
-  background:rgba(var(--tint,79,195,247),.08);}
+.lv-tabs button[aria-pressed="true"]{color:var(--hi,#4fc3f7); border-bottom-color:var(--hi,#4fc3f7);}
+
+/* Fora da vista Geral o centro deixa de ser a grade de quatro painéis e vira faixa + corpo:
+   senão as linhas vazias da grade continuariam reservando altura para canvas escondido. */
+.lib-view.lv-outra{grid-template-rows:auto minmax(0,1fr);}
 
 /* o centro da sub-aba Footprints */
 .lv-fp{display:flex; flex-direction:column; height:100%; min-height:0;}
+/* [hidden] é só \`display:none\` da folha do navegador, e perde para o \`display:flex\` acima
+   — a mesma armadilha que o hub.html já resolve assim para .viewport e .seg (hub.html:659).
+   Sem esta linha a lista de footprints aparecia POR BAIXO da vista Geral, as duas juntas. */
+.lv-fp[hidden]{display:none !important;}
+#symed[hidden]{display:none !important;}
 .lv-fp-bar{display:flex; gap:8px; align-items:center; padding:8px 10px;
   border-bottom:1px solid var(--line,#3a3a3a);}
 .lv-fp-bar .input{flex:1; min-width:0;}
@@ -122,9 +129,12 @@ function trocaCentro(){
   }
   for (const filho of Array.from(centro.children)){
     if (filho.id === 'lvFootprints' || filho.id === 'symed') continue;
+    if (filho.classList && filho.classList.contains('lv-tabs')) continue;   /* a faixa fica */
     filho.hidden = (ST.aba !== 'geral');
   }
   if (meu) meu.hidden = (ST.aba !== 'footprints');
+  /* a grade de 4 painéis só faz sentido na vista Geral (ver .lv-outra no CSS) */
+  centro.classList.toggle('lv-outra', ST.aba !== 'geral');
   if (ST.aba === 'footprints'){
     pintaFootprints();
     if (ST.fps === null && !ST.carregando) carregaFps();
@@ -135,14 +145,18 @@ function trocaCentro(){
   }
 }
 
-/* ── as sub-abas, no aside da direita ── */
+/* ── as sub-abas, no topo do CENTRO ──
+   Elas são a primeira linha da grade do `.lib-view`, e não do aside da direita: quem troca
+   é a janela do meio, e a faixa tem de estar em cima do que ela troca. */
 function pintaAbas(){
-  const aside = API && API.detalhe && API.detalhe();
-  if (!aside) return;
-  let faixa = aside.querySelector('.lv-tabs');
+  const centro = API && API.centro && API.centro();
+  if (!centro) return;
+  let faixa = centro.querySelector('.lv-tabs');
   if (!faixa){
     faixa = el('div', 'lv-tabs');
-    aside.prepend(faixa);
+    centro.prepend(faixa);
+  } else if (faixa !== centro.firstElementChild){
+    centro.prepend(faixa);          /* um redesenho da casca pode tê-la empurrado para baixo */
   }
   faixa.textContent = '';
   for (const [id, rotulo] of ABAS){

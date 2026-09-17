@@ -748,7 +748,9 @@ button.tag.gone { color: var(--err); }
 .seg button[aria-pressed="true"] { background: rgba(var(--tint),0.12); color: var(--text); }
 .seg button .n { font-variant-numeric: tabular-nums; color: var(--text-4); margin-left: 4px; }
 
-.lib-view { display: grid; grid-template-rows: auto minmax(0,1fr) auto minmax(0,1fr); min-height: 0; }
+.lib-view { display: grid; grid-template-rows: auto auto minmax(0,1fr) auto minmax(0,1fr); min-height: 0; }
+/* a 1a linha e a faixa de sub-abas do hub-libview.js (Geral/Simbolos/Footprints); sem
+   o painel carregado ela fica vazia e a linha fecha em zero, sem estragar nada */
 .lib-view .canvas-bar { padding: 8px 12px 6px; }
 .lib-view .viewport { margin: 0 12px 12px; }
 .viewport.sheet { background: var(--sheet); }   /* símbolo: mesma folha clara do Altium */
@@ -2849,12 +2851,7 @@ function renderLibAlmox() {
 }
 
 function renderLibAlmoxPreview() {
-  /* a faixa de sub-abas (hub-libview.js) sobrevive a limpeza: ela e da VISTA, nao do
-     item selecionado, e recria-la a cada preview piscaria na tela */
-  const aside = $('#libDetail');
-  const _lvTabs = aside.querySelector('.lv-tabs');
-  aside.textContent = '';
-  if (_lvTabs) aside.append(_lvTabs);
+  const aside = $('#libDetail'); aside.textContent = '';
   $('#libPart').hidden = true;
   libDrawSym = null; libDrawFp = null;
   $('#libSymHint').textContent = ''; $('#libFpHint').textContent = '';
@@ -3047,12 +3044,7 @@ function renderLibAlmoxPreview() {
 
 function renderLibPreview(u, goneSym, goneFp) {
   const sel = S.lib.sel;
-  /* a faixa de sub-abas (hub-libview.js) sobrevive a limpeza: ela e da VISTA, nao do
-     item selecionado, e recria-la a cada preview piscaria na tela */
-  const aside = $('#libDetail');
-  const _lvTabs = aside.querySelector('.lv-tabs');
-  aside.textContent = '';
-  if (_lvTabs) aside.append(_lvTabs);
+  const aside = $('#libDetail'); aside.textContent = '';
   const partSel = $('#libPart'); partSel.hidden = true;
   libDrawSym = null; libDrawFp = null;
   $('#libSymHint').textContent = ''; $('#libFpHint').textContent = '';
