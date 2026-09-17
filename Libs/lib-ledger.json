@@ -1,4 +1,4 @@
-{"format":"ledger-v1","atualizado":"2026-09-16 18:17",
+{"format":"ledger-v1","atualizado":"2026-09-17 16:54",
 "arquivos":{
  "Libs/Almox/BARRA DE PINOS ALMOX.SchLib":{"mtime":1789563939.063,"size":61952,"visto":"2026-09-16 10:05"},
  "Libs/Almox/BATERIA ALMOX.SchLib":{"mtime":1789563938.709,"size":98816,"visto":"2026-09-16 10:05"},
@@ -200,5 +200,11 @@
  },
  "MOSFET":{
   "SQJ431AEP-T1_GE3":{"fp":"fc93000030ce7b31","origem":"hub","desde":"2026-09-04 16:12","simbolo":"MOSFET","parts":[{"part":1,"pins":[{"num":"G","name":"G","x":100,"y":0,"len":100,"orient":180,"type":"Passive","hideName":true},{"num":"D","name":"D","x":200,"y":-100,"len":100,"orient":270,"type":"Passive","hideName":true},{"num":"S","name":"S","x":200,"y":100,"len":100,"orient":90,"type":"Passive","hideName":true}],"graphics":[{"g":"line","x1":120,"y1":-90,"x2":120,"y2":90,"w":10},{"g":"line","x1":140,"y1":0,"x2":160,"y2":0,"w":10},{"g":"line","x1":140,"y1":-70,"x2":200,"y2":-70,"w":10},{"g":"line","x1":140,"y1":70,"x2":200,"y2":70,"w":10},{"g":"line","x1":250,"y1":-40,"x2":250,"y2":-10,"w":10},{"g":"poly","pts":[[165,-25],[165,25],[200,0]],"solid":true},{"g":"poly","pts":[[230,-10],[250,20],[270,-10]],"solid":true},{"g":"polyline","pts":[[100,0],[120,0]],"w":10},{"g":"polyline","pts":[[140,-20],[140,20]],"w":10},{"g":"polyline","pts":[[140,-90],[140,-50]],"w":10},{"g":"polyline","pts":[[140,50],[140,90]],"w":10},{"g":"polyline","pts":[[200,-100],[200,-90]],"w":10},{"g":"polyline","pts":[[200,-90],[200,-70]],"w":10},{"g":"polyline","pts":[[200,-90],[250,-90],[250,-40]],"w":10},{"g":"polyline","pts":[[200,0],[200,70]],"w":10},{"g":"polyline","pts":[[200,70],[200,90]],"w":10},{"g":"polyline","pts":[[200,90],[200,100]],"w":10},{"g":"polyline","pts":[[200,90],[250,90],[250,20]],"w":10},{"g":"polyline","pts":[[220,20],[230,30]],"w":10},{"g":"polyline","pts":[[230,30],[270,30]],"w":10},{"g":"polyline","pts":[[270,30],[280,40]],"w":10}]}]}
+ }
+},
+"footprints":{
+ "BARRA DE PINOS":{
+  "8 vias 180º 2.54mm Macho":{"nome":"Barra 8 Pinos","desde":"2026-09-17 16:54"},
+  "9 vias 180º 2.54mm Macho":{"nome":"CONE TERMINAL 9 VIAS","desde":"2026-09-17 15:11"}
  }
 }}

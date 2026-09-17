@@ -14,11 +14,10 @@ O que este teste prende:
   1. vincular grava UM footprint, com `current: true`;
   2. vincular de novo TROCA, não acumula — é aqui que a regra vive;
   3. footprint vazio DESVINCULA (lista vazia), que é diferente de não mexer;
-  4. nome que a PcbLib ainda não tem é ACEITO, com aviso: cadastrar agora e desenhar no
-     Altium depois é o fluxo do usuário, e recusar travaria o trabalho;
+  4. nome que a PcbLib não tem é RECUSADO: o footprint vem do Altium, e só de lá;
   5. a gravação é cirúrgica: nenhuma outra linha do espelho muda, e o desenho do símbolo
      (parts/partcount) sobrevive ao vínculo;
-  6. GET /footprints lista os desenhados e os só-cadastrados, com a contagem de usos.
+  6. GET /footprints lista os da PcbLib, com a contagem de usos.
 
 Roda sem rede e sem Altium, num espelho sintético em workspace temporário.
 """
@@ -43,7 +42,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 ALVO = 'DIODO SCHOTTKY [SMD]'
 OUTRO = 'RES [ SMD ]'
 FP_REAL = 'DO-214AC'             # existe na pcblib sintética
-FP_NOVO = 'QFN-24 NAO DESENHADO'  # não existe: o caso do cadastro para desenhar depois
+FP_NOVO = 'QFN-24 NAO DESENHADO'  # não existe na PcbLib: o caso que tem de ser recusado
 
 
 def sym(nome, fps):
@@ -124,18 +123,21 @@ try:
     assert j['ok'] and le_sym(ALVO)['footprints'] == [], le_sym(ALVO)['footprints']
     print('(4) footprint vazio desvincula ok')
 
-    # ── 5. nome fora da PcbLib é aceito, com aviso ───────────────────────────
-    j = cli.post('/api/symbols/footprint',
-                 json={'simbolo': ALVO, 'footprint': FP_NOVO}).get_json()
-    assert j['ok'] and j['desenhado'] is False, j
-    assert j['avisos'] and 'desenhado no Altium' in j['avisos'][0], j['avisos']
-    assert le_sym(ALVO)['footprints'][0]['incurrentlib'] is False
-    print('(5) footprint ainda não desenhado é aceito, e a resposta avisa ok')
+    # ── 5. nome fora da PcbLib é RECUSADO ────────────────────────────────────
+    # O footprint vem do Altium, e só de lá — é a única exceção ao fluxo do projeto (todo o
+    # resto nasce no hub e vai PARA o Altium). Até 2026-09-17 esta rota aceitava um nome
+    # qualquer "para desenhar depois": isso fazia um footprint nascer no hub, e o componente
+    # ia para o Altium apontando para nada.
+    r = cli.post('/api/symbols/footprint', json={'simbolo': ALVO, 'footprint': FP_NOVO})
+    assert r.status_code == 400, r.get_json()
+    assert 'Altium' in r.get_json()['error'], r.get_json()
+    assert le_sym(ALVO)['footprints'] == [], 'recusou mas mexeu no espelho'
+    print('(5) footprint fora da biblioteca do Altium é recusado, e nada é gravado ok')
 
     # ── 6. recusas ───────────────────────────────────────────────────────────
     assert cli.post('/api/symbols/footprint', json={'footprint': 'X'}).status_code == 400
     assert cli.post('/api/symbols/footprint',
-                    json={'simbolo': 'NAO EXISTE', 'footprint': 'X'}).status_code == 404
+                    json={'simbolo': 'NAO EXISTE', 'footprint': FP_REAL}).status_code == 404
     assert cli.post('/api/symbols/footprint',
                     json={'simbolo': ALVO, 'footprint': 'X',
                           'footprints': [1, 2]}).status_code == 400, \
@@ -147,17 +149,16 @@ try:
     assert j['ok'], j
     porn = {f['name']: f for f in j['footprints']}
     assert porn['DO-214AC']['desenhado'] is True
-    assert porn[FP_NOVO]['desenhado'] is False, 'o só-cadastrado tem de aparecer na lista'
-    assert porn[FP_NOVO]['usos'] == 1, porn[FP_NOVO]
+    assert FP_NOVO not in porn, 'nada fora da PcbLib pode ter sido gravado: %s' % FP_NOVO
     assert porn['RES 0805']['usos'] == 1, porn['RES 0805']
     assert porn['DO-214AB']['usos'] == 0, 'ninguém usa mais o DO-214AB: %s' % porn['DO-214AB']
     # e NENHUM nome de pad entrou na lista: o arquivo real tem 5816 `{"name":` para 618
     # footprints, e colher todos enchia a galeria de "1", "2", "A" — tiles vazios
     for pad in ('1', '2', 'A', 'K'):
         assert pad not in porn, 'nome de PAD virou footprint na lista: %r' % pad
-    assert len(j['footprints']) == 4, \
-        '3 da pcblib + 1 só-cadastrado; vieram %d: %s' % (len(j['footprints']), sorted(porn))
-    print('(7) GET /footprints lista desenhados e só-cadastrados, sem colher nome de pad ok')
+    assert len(j['footprints']) == 3, \
+        'os 3 da pcblib, e nada mais; vieram %d: %s' % (len(j['footprints']), sorted(porn))
+    print('(7) GET /footprints lista os da PcbLib, sem colher nome de pad ok')
 
     print('test_footprint_vinculo OK (um componente, um footprint — garantido no servidor)')
 finally:

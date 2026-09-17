@@ -998,9 +998,8 @@ def api_footprint():
     {simbolo, footprint} — `footprint` vazio desvincula. A regra de um-só é do servidor, e
     não da tela: qualquer caminho que chegue aqui sai com no máximo um.
 
-    Aceita nome que a PcbLib ainda não tem, de propósito: cadastrar o nome agora e desenhar
-    no Altium depois é o fluxo do usuário. A resposta diz `desenhado: false` para a tela
-    poder marcar isso, em vez de recusar e travar o trabalho.
+    Só aceita nome que a PcbLib já tem: o footprint vem do Altium, e só de lá. Ver o
+    comentário longo mais abaixo, junto da recusa.
     """
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
@@ -1015,6 +1014,16 @@ def api_footprint():
     if isinstance(data.get('footprints'), list) and len(data['footprints']) > 1:
         return _erro('um componente tem exatamente um footprint: vieram %d'
                      % len(data['footprints']), 400)
+
+    # O FOOTPRINT VEM DO ALTIUM, E SO DE LA. Essa e a unica excecao ao fluxo do projeto:
+    # simbolo, valores, parametros e nomes nascem aqui e vao para o Altium; o footprint faz
+    # o caminho inverso, e por isso o hub so pode ESCOLHER entre os que a .PcbLib ja tem
+    # (espelhada em Libs/pcblib.js). Aceitar um nome que ela nao tem era fazer um footprint
+    # nascer no hub -- e o componente iria para o Altium apontando para nada.
+    # Vazio continua valendo: e desvincular, nao criar.
+    if fp and fp not in _nomes_pcblib():
+        return _erro('"%s" nao esta na biblioteca de footprints do Altium. O footprint vem '
+                     'de la: desenhe na PcbLib e sincronize. (Vazio desvincula.)' % fp, 400)
     caminho = os.path.join(ROOT, ESPELHO)
     if not os.path.isfile(caminho):
         return _erro('%s não existe neste workspace' % ESPELHO, 404)
@@ -1028,9 +1037,7 @@ def api_footprint():
     return {'ok': True, 'simbolo': sim, 'footprint': fp,
             'desenhado': bool(fp) and fp in _nomes_pcblib(),
             'footprints': novo.get('footprints') or [],
-            'avisos': ([] if not fp or fp in _nomes_pcblib() else
-                       ['"%s" ainda não está na PcbLib espelhada: o vínculo fica gravado, '
-                        'mas o footprint precisa ser desenhado no Altium' % fp])}
+            'avisos': []}
 
 
 @bp.route('/almox-footprint', methods=['POST'])
@@ -1067,6 +1074,16 @@ def api_almox_footprint():
         return _erro('footprint tem de ser texto (vazio desvincula)', 400)
     fam, comp, fp = fam.strip(), comp.strip(), (fp or '').strip()
 
+
+    # O FOOTPRINT VEM DO ALTIUM, E SO DE LA. Essa e a unica excecao ao fluxo do projeto:
+    # simbolo, valores, parametros e nomes nascem aqui e vao para o Altium; o footprint faz
+    # o caminho inverso, e por isso o hub so pode ESCOLHER entre os que a .PcbLib ja tem
+    # (espelhada em Libs/pcblib.js). Aceitar um nome que ela nao tem era fazer um footprint
+    # nascer no hub -- e o componente iria para o Altium apontando para nada.
+    # Vazio continua valendo: e desvincular, nao criar.
+    if fp and fp not in _nomes_pcblib():
+        return _erro('"%s" nao esta na biblioteca de footprints do Altium. O footprint vem '
+                     'de la: desenhe na PcbLib e sincronize. (Vazio desvincula.)' % fp, 400)
     try:
         espelhos, fam_arq, sim_nome, k, i, j = _resolve_almox(fam, comp)
     except _ErroAlmox as e:
@@ -1101,9 +1118,6 @@ def api_almox_footprint():
 
     avisos.append('o Altium só vê o footprint novo no próximo sincronismo do almoxarifado '
                   '(as .SchLib são reescritas inteiras a partir do espelho)')
-    if fp and fp not in _nomes_pcblib():
-        avisos.append('"%s" ainda não está na PcbLib espelhada: o vínculo fica gravado, mas '
-                      'o footprint precisa ser desenhado no Altium' % fp)
     return {'ok': True, 'familia': fam_arq, 'simbolo': sim_nome, 'componente': comp,
             'footprint': fp, 'desenhado': bool(fp) and fp in _nomes_pcblib(),
             'avisos': avisos}

@@ -99,9 +99,8 @@ const CSS = `
 .lv-fp .symed-tile .nd{font-size:9px; color:var(--warn,#ffb74d); text-transform:uppercase;
   letter-spacing:.04em;}
 .lv-vazio{padding:18px 12px; font-size:12px; color:var(--text-4,#7a7a7a); line-height:1.5;}
-.lv-novo{padding:8px 10px; border-top:1px solid var(--line,#3a3a3a); display:flex; gap:8px;
-  align-items:center;}
-.lv-novo .input{flex:1; min-width:0;}
+.lv-nota{padding:8px 12px; border-top:1px solid var(--line,#3a3a3a); font-size:11px;
+  color:var(--text-4,#7a7a7a); line-height:1.5;}
 /* a fileira de ações, no lugar e no tom da do editor (Aplicar ao símbolo / Renomear…) */
 .lv-acts{display:flex; gap:6px; align-items:center; padding:6px 12px;
   border-bottom:1px solid var(--line,#3a3a3a);}
@@ -263,24 +262,25 @@ function montaFootprints(){
   const acts = el('div', 'lv-acts');
   const bAp = el('button', 'btn pri'); bAp.id = 'lvAplicar';
   bAp.textContent = 'Aplicar ao componente'; bAp.disabled = true;
-  bAp.onclick = () => { if (ST.sel) vincula(ST.sel, false); };
+  bAp.onclick = () => { if (ST.sel) vincula(ST.sel); };
   const bDes = el('button', 'btn'); bDes.id = 'lvDesvincular';
-  bDes.textContent = 'Desvincular'; bDes.onclick = () => vincula('', false);
+  bDes.textContent = 'Desvincular'; bDes.onclick = () => vincula('');
   const esc = el('span', 'esc'); esc.id = 'lvEscolhido';
   acts.append(bAp, bDes, esc);
 
   const lista = el('div', 'symed-tiles'); lista.id = 'lvLista';
 
-  /* cadastrar um nome que a PcbLib ainda não tem. NÃO desenha footprint nenhum — não existe
-     escritor de .PcbLib neste projeto (só de .SchLib). O nome fica vinculado e marcado como
-     "não desenhado", para ser desenhado no Altium depois. */
-  const novo = el('div', 'lv-novo');
-  const ni = el('input', 'input'); ni.id = 'lvNovo'; ni.type = 'text';
-  ni.placeholder = 'nome de um footprint que ainda não existe…';
-  const nb = el('button', 'btn'); nb.textContent = 'Cadastrar e vincular';
-  nb.onclick = () => vincula(ni.value.trim(), true);
-  ni.addEventListener('keydown', e => { if (e.key === 'Enter') nb.click(); });
-  novo.append(ni, nb);
+  /* NAO EXISTE "criar footprint" AQUI, e isso e a regra, nao uma limitacao: o footprint e a
+     UNICA coisa cuja verdade mora na lib do Altium (a .PcbLib, espelhada em Libs/pcblib.js).
+     Todo o resto -- simbolo, valores, parametros, nomes -- nasce no hub e vai para o Altium;
+     o footprint faz o caminho inverso, e por isso o hub so ESCOLHE entre os que ja existem
+     la. Havia aqui um "Cadastrar e vincular" que aceitava um nome novo: ele fazia um
+     footprint nascer no hub, que e exatamente o que nao pode. Saiu em 2026-09-17, junto com
+     a recusa no servidor. Footprint que falta se desenha no Altium e chega pelo sincronismo.
+  */
+  const novo = el('div', 'lv-nota');
+  novo.textContent = 'os footprints vêm da biblioteca do Altium — para criar um novo, '
+                   + 'desenhe na PcbLib e sincronize.';
 
   const tit = el('div', 'lv-titulo'); tit.id = 'lvTitulo';
   const comps = el('div', 'lv-comps'); comps.id = 'lvComps';
@@ -366,7 +366,7 @@ function pintaAlvo(){
     l2.append(el('span', null, '↳ ' + c.fp));
     const x = el('button', 'x', '✕ desvincular');
     x.title = 'tirar o footprint deste componente';
-    x.onclick = () => vincula('', false);
+    x.onclick = () => vincula('');
     l2.append(x);
   } else {
     l2.className = 'atual nenhum';
@@ -452,7 +452,7 @@ function pintaLista(){
   if (cnt) cnt.textContent = vis.length + ' de ' + ST.fps.length;
   if (!vis.length){
     lista.append(el('div', 'lv-vazio', q
-      ? 'nada com "' + ST.q + '". Dá para cadastrar esse nome abaixo e desenhar no Altium depois.'
+      ? 'nada com "' + ST.q + '" na biblioteca do Altium.'
       : 'nenhum footprint.'));
     return;
   }
@@ -478,7 +478,7 @@ function pintaLista(){
                              : 'não desenhado');
     t.append(cv, nm, k);
     t.onclick = () => { ST.sel = (ST.sel === f.name) ? null : f.name; pintaLista(); pintaAcoes(); };
-    t.ondblclick = () => vincula(f.name, false);
+    t.ondblclick = () => vincula(f.name);
     frag.append(t);
     if (obj){ cv._fp = obj; pendentes.push(cv); }
   }
@@ -570,11 +570,10 @@ async function carregaFps(){
 
 /* UM footprint. A rota recusa mais de um, e aqui nem se oferece: clicar troca, e o ✕
    desvincula. Não existe "adicionar mais um" nesta tela de propósito. */
-async function vincula(nome, ehNovo){
+async function vincula(nome){
   const c = componenteAtual();
   const sim = c && c.nome;
   if (!sim){ aviso('escolha um componente na lista acima primeiro.', 'warn'); return; }
-  if (ehNovo && !nome){ aviso('digite o nome do footprint.', 'warn'); return; }
   try {
     /* DUAS ROTAS, porque sao dois mundos. No almoxarifado o alvo e um VALOR dentro da
        familia, e a escolha precisa ir ao ledger para sobreviver ao sincronismo; na
@@ -599,12 +598,6 @@ async function vincula(nome, ehNovo){
       if (v) v.footprint = nome;
     } else if (fam){
       fam.footprints = j.footprints || [];
-    }
-    if (ehNovo){
-      const ni = document.getElementById('lvNovo');
-      if (ni) ni.value = '';
-      ST.fps = null;                    /* o nome novo passa a existir na lista */
-      carregaFps();
     }
     ST.sel = null;
     aviso(nome ? ('“' + sim + '” → ' + nome) : ('“' + sim + '” ficou sem footprint'), 'ok');
