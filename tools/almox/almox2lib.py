@@ -53,6 +53,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.dirname(os.path.dirname(BASE))
 LIBS = os.path.join(RAIZ, 'Libs')
 sys.path.insert(0, BASE)
+sys.path.insert(0, os.path.join(RAIZ, 'tools', 'symbols'))
 
 import familias as F                                    # noqa: E402
 import simbolos as SY                                   # noqa: E402
@@ -307,7 +308,7 @@ def geometria_congelada(nome, antes):
     return parts, bb, (v.get('partcount') if isinstance(v.get('partcount'), int) else len(parts))
 
 
-def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
+def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpman=None):
     pins, gfx = SY.desenha(s['forma'], s['npin'], rotulo=s['familia'] if s['forma'] == 'box' else '')
     ps = ordena_parts(s)
     x1, y1, x2, y2 = SY.bbox(pins, gfx)
@@ -411,6 +412,18 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None):
         mont = s['mont'] if s['grupo'] == 'b' else montagem_declarada(p['itens'])
         enc = ' '.join(x for x in (mont, (pkgs[0] if pkgs else '')) if x)
         nome_altium = re.sub(r'\s+', ' ', (enc + ' ' + p['rotulo'])).strip()
+        # ── o footprint ESCOLHIDO A MAO vence o calculado ───────────────────────────
+        # `fp` acima e deducao: sai dos encapsulamentos que o Odoo mandou e dos modelos da
+        # lib da casa. Quando alguem escolheu na tela (Biblioteca >> Footprints), a deducao
+        # nao tem o direito de desfazer a escolha no sincronismo seguinte -- e o mesmo
+        # contrato do DESENHO protegido, e pelo mesmo motivo: o que a pessoa decidiu sobre
+        # a peca sobrevive ao que o gerador acha. A chave e (familia do arquivo, nome do
+        # componente), a mesma do ledger; ela e montada aqui porque so aqui o nome final do
+        # componente existe.
+        if fpman:
+            escolhido = fpman.get((s['familia'], nome_altium))
+            if escolhido:
+                fp = escolhido
         # Nao ha filtro de exclusao aqui, e isso e proposital: o que esta no CSV vira
         # componente, ponto. Excluir e apagar do espelho, e o que ainda existe no Odoo
         # volta por esta linha na proxima geracao — ver a nota em `numera_valores`.
@@ -927,8 +940,23 @@ def main(argv=None):
             if fps:
                 recicl[s] = fps
         print('reciclagem: %d simbolo(s) herdam footprint da biblioteca real' % len(recicl))
-    sb = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl) for s in bas]
-    se = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl) for s in esp]
+    # O FOOTPRINT ESCOLHIDO A MAO, do ledger. Ele vence a deducao deste gerador, do mesmo
+    # jeito que o desenho protegido vence o simbolo padrao da categoria -- senao o
+    # sincronismo desfaria em silencio o que alguem decidiu na tela. Ledger ilegivel nao
+    # derruba a geracao: segue sem as escolhas e AVISA, porque o silencio aqui seria a
+    # escolha do usuario sumindo sem uma linha.
+    fpman = {}
+    try:
+        import guardiao as _G
+        fpman = _G.footprints_manuais(_G.carrega_ledger(RAIZ))
+        if fpman:
+            print('%d footprint(s) escolhido(s) a mao no ledger — o gerador os preserva'
+                  % len(fpman))
+    except Exception as e:                                          # noqa: BLE001
+        print('AVISO: nao li os footprints manuais do ledger (%s: %s) — uma escolha feita '
+              'na tela pode ser desfeita nesta rodada' % (type(e).__name__, e))
+    sb = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl, fpman) for s in bas]
+    se = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl, fpman) for s in esp]
 
     # o nome de cada valor dentro da .SchLib em que ele vai morar (e o que o `sym` do
     # schematic.js guarda): unico, e estavel mesmo quando o homonimo some

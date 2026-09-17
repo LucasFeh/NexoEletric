@@ -1033,6 +1033,82 @@ def api_footprint():
                         'mas o footprint precisa ser desenhado no Altium' % fp])}
 
 
+@bp.route('/almox-footprint', methods=['POST'])
+def api_almox_footprint():
+    """Vincula UM footprint a um COMPONENTE do almoxarifado (um `valores[].altium`).
+
+    A categoria — "CAPACITOR CERAMICO [SMD]" — é o agrupador; quem recebe footprint é a
+    peça, "SMD 1206 4.7pF 50V C0G". A rota irmã (/footprint) serve a biblioteca da CASA,
+    onde o símbolo é o próprio componente e não há valores.
+
+    DOIS DESTINOS, e nenhum é redundância:
+      espelho  Libs/almox-*.js » valores[].footprint  → é o que a tela desenha agora. Mas é
+                                                        saída gerada: o sync o reescreve;
+      ledger   footprints[familia][componente]        → é o que faz a escolha SOBREVIVER ao
+                                                        sync. Sem ele o gerador recalcula o
+                                                        footprint dos encapsulamentos do
+                                                        Odoo e a escolha some em silêncio —
+                                                        exatamente o que `protegidos` já
+                                                        resolve para o desenho.
+    Escrever só no espelho seria pior que recusar: a tela diria "pronto" e a próxima
+    sincronização desfaria, sem uma linha de aviso.
+
+    A .SchLib não é tocada: ela é reescrita inteira a partir do espelho no próximo
+    sincronismo, e é lá que o Altium passa a ver o footprint novo. A resposta diz isso.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _erro('JSON {familia, componente, footprint} obrigatório', 400)
+    fam, comp = data.get('familia'), data.get('componente')
+    if not (isinstance(fam, str) and fam.strip()) or not (isinstance(comp, str) and comp.strip()):
+        return _erro('familia e componente obrigatórios', 400)
+    fp = data.get('footprint')
+    if fp is not None and not isinstance(fp, str):
+        return _erro('footprint tem de ser texto (vazio desvincula)', 400)
+    fam, comp, fp = fam.strip(), comp.strip(), (fp or '').strip()
+
+    try:
+        espelhos, fam_arq, sim_nome, k, i, j = _resolve_almox(fam, comp)
+    except _ErroAlmox as e:
+        return _erro(str(e), e.status)
+    cam_esp, _var, _esp = espelhos[k]
+
+    avisos = []
+    # 1. o espelho, relido dentro do lock (mesma disciplina do /almox-excluir)
+    with _lock_almox:
+        try:
+            var2, esp2 = G.le_espelho_almox(cam_esp)
+            i2, j2 = _acha_no_espelho(esp2, sim_nome, comp)
+            if i2 is None:
+                return _erro('"%s" não está mais no espelho' % comp, 404)
+            if fp:
+                esp2['symbols'][i2]['valores'][j2]['footprint'] = fp
+            else:
+                esp2['symbols'][i2]['valores'][j2]['footprint'] = ''
+            G.grava_espelho_almox(cam_esp, var2, esp2)
+        except (OSError, ValueError) as e:
+            return _erro('não gravei no espelho (%s): nada foi alterado' % e, 500)
+
+    # 2. o ledger — o passo que faz durar
+    try:
+        with G._lock:
+            led = G.carrega_ledger(ROOT)
+            G.poe_footprint(led, fam_arq, comp, fp)
+            G.grava_ledger(ROOT, led)
+    except Exception as e:                                          # noqa: BLE001
+        avisos.append('a escolha está no espelho mas NÃO no ledger (%s): a próxima '
+                      'sincronização vai desfazê-la' % e)
+
+    avisos.append('o Altium só vê o footprint novo no próximo sincronismo do almoxarifado '
+                  '(as .SchLib são reescritas inteiras a partir do espelho)')
+    if fp and fp not in _nomes_pcblib():
+        avisos.append('"%s" ainda não está na PcbLib espelhada: o vínculo fica gravado, mas '
+                      'o footprint precisa ser desenhado no Altium' % fp)
+    return {'ok': True, 'familia': fam_arq, 'simbolo': sim_nome, 'componente': comp,
+            'footprint': fp, 'desenhado': bool(fp) and fp in _nomes_pcblib(),
+            'avisos': avisos}
+
+
 @bp.route('/lib', methods=['POST'])
 def api_lib():
     """Biblioteca de símbolos: add / rename / delete, sempre regravando o arquivo inteiro

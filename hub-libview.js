@@ -107,6 +107,22 @@ const CSS = `
   border-bottom:1px solid var(--line,#3a3a3a);}
 .lv-acts .esc{font-size:11px; color:var(--text-4,#7a7a7a); margin-left:auto;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
+/* A LISTA DE COMPONENTES DA CATEGORIA — o espelho da faixa "Componentes" do editor, e a
+   peça que faltava: a categoria ("CAPACITOR CERAMICO [SMD]") é só o agrupador da esquerda;
+   quem recebe o footprint é o COMPONENTE ("SMD 1206 4.7pF 50V C0G"). Reusa .symed-comp,
+   a mesma linha que o editor desenha, para as duas telas serem a mesma tela. */
+.lv-comps{max-height:34%; min-height:96px; overflow:auto; padding:4px 6px;
+  border-bottom:1px solid var(--line,#3a3a3a);}
+.lv-comps .symed-comp .fpat{font-size:10px; color:var(--hi,#4fc3f7);
+  font-family:Consolas,ui-monospace,monospace;}
+.lv-comps .symed-comp .semfp{font-size:10px; color:var(--warn,#ffb74d);}
+.lv-titulo{display:flex; align-items:baseline; gap:8px; padding:7px 12px 4px;
+  font-size:10px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--text-4,#7a7a7a);}
+.lv-titulo .n{text-transform:none; letter-spacing:0; font-size:11px;}
+.lv-titulo .cat{text-transform:none; letter-spacing:0; color:var(--text-2,#b8b8b8);
+  font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 `;
 
 let cssPosto = false;
@@ -131,7 +147,8 @@ const ST = {
   aba: 'geral',
   fps: null,          /* [{name, desenhado, usos}] — cache do GET */
   q: '',
-  sel: null,          /* o footprint marcado na lista */
+  sel: null,          /* o footprint marcado na galeria */
+  comp: null,         /* o COMPONENTE da categoria que vai receber o footprint */
   carregando: false,
 };
 
@@ -258,38 +275,73 @@ function montaFootprints(){
   ni.addEventListener('keydown', e => { if (e.key === 'Enter') nb.click(); });
   novo.append(ni, nb);
 
-  box.append(alvo, bar, acts, lista, novo);
+  const tit = el('div', 'lv-titulo'); tit.id = 'lvTitulo';
+  const comps = el('div', 'lv-comps'); comps.id = 'lvComps';
+  box.append(alvo, tit, comps, bar, acts, lista, novo);
   return box;
 }
 
-function simboloAtual(){
+/* A CATEGORIA selecionada na esquerda. Ela não recebe footprint — é o agrupador. */
+function categoriaAtual(){
   const s = API && API.sel && API.sel();
   if (!s || (s.k !== 'sym' && s.k !== 'gone-sym')) return null;
   return s.name;
 }
 
-function fpAtualDe(nome){
-  const s = API && API.simbolo && API.simbolo(nome);
-  const fps = (s && s.footprints) || [];
-  return fps.length ? fps[0] : null;
+/* OS COMPONENTES da categoria: no almoxarifado são os `valores` (cada um é uma peça de
+   verdade, "SMD 1206 4.7pF 50V C0G"); na biblioteca da casa a categoria É o componente, e
+   a lista tem um item só. As duas viram a mesma coisa daqui para cima. */
+function componentesDa(cat){
+  const s = cat && API.simbolo && API.simbolo(cat);
+  if (!s) return [];
+  const vals = s.valores;
+  if (Array.isArray(vals) && vals.length){
+    return vals.map(v => ({ nome: v.altium, rotulo: v.label || v.altium, fp: v.footprint || '',
+                            estoque: v.estoque, pkgs: (v.pkgs || []).join(' / '), valor: true }));
+  }
+  const fps = s.footprints || [];
+  return [{ nome: s.name, rotulo: s.name, fp: (fps[0] && fps[0].name) || '',
+            estoque: null, pkgs: '', valor: false }];
+}
+
+/* o componente escolhido agora — ou o primeiro da categoria, para a tela nunca abrir sem
+   alvo (e o cabeçalho poder dizer em quem o clique vai mexer) */
+function componenteAtual(){
+  const cat = categoriaAtual();
+  if (!cat) return null;
+  const lista = componentesDa(cat);
+  if (!lista.length) return null;
+  const achado = ST.comp && lista.find(c => c.nome === ST.comp);
+  return achado || lista[0];
+}
+
+function fpAtualDe(){
+  const c = componenteAtual();
+  return c && c.fp ? { name: c.fp } : null;
 }
 
 function pintaAlvo(){
   const cx = document.getElementById('lvAlvo');
   if (!cx) return;
   cx.textContent = '';
-  const nome = simboloAtual();
-  if (!nome){
-    cx.append(el('span', 'q', 'escolha um componente na lista da esquerda para vincular.'));
+  const cat = categoriaAtual();
+  if (!cat){
+    cx.append(el('span', 'q', 'escolha uma categoria na lista da esquerda.'));
     return;
   }
+  const c = componenteAtual();
   const l1 = el('div');
-  l1.append(el('span', 'q', 'vincular a '), el('b', null, nome));
+  if (!c){
+    l1.append(el('span', 'q', 'a categoria '), el('b', null, cat),
+              el('span', 'q', ' não tem componentes.'));
+    cx.append(l1);
+    return;
+  }
+  l1.append(el('span', 'q', 'vincular a '), el('b', null, c.nome));
   cx.append(l1);
-  const at = fpAtualDe(nome);
   const l2 = el('div', 'atual');
-  if (at){
-    l2.append(el('span', null, '↳ ' + at.name + (at.incurrentlib === false ? '  (não desenhado)' : '')));
+  if (c.fp){
+    l2.append(el('span', null, '↳ ' + c.fp));
     const x = el('button', 'x', '✕ desvincular');
     x.title = 'tirar o footprint deste componente';
     x.onclick = () => vincula('', false);
@@ -299,6 +351,47 @@ function pintaAlvo(){
     l2.append(el('span', null, '↳ sem footprint vinculado'));
   }
   cx.append(l2);
+}
+
+/* A LISTA DE COMPONENTES da categoria. É o que faltava para o fluxo fechar: sem ela a tela
+   sabia a categoria e não sabia em QUEM aplicar. Cada linha é .symed-comp — a mesma do
+   editor — e mostra o footprint que o componente já tem, porque é isso que se está vindo
+   trocar. */
+function pintaComponentes(){
+  const box = document.getElementById('lvComps');
+  const tit = document.getElementById('lvTitulo');
+  if (!box) return;
+  box.textContent = '';
+  const cat = categoriaAtual();
+  const lista = cat ? componentesDa(cat) : [];
+  const atual = componenteAtual();
+  if (tit){
+    tit.textContent = '';
+    tit.append(el('span', null, 'componentes'));
+    if (cat) tit.append(el('span', 'cat', cat));
+    tit.append(el('span', 'n', lista.length
+      ? lista.length + (lista.length === 1 ? ' item' : ' itens')
+        + ' · ' + lista.filter(c => !c.fp).length + ' sem footprint'
+      : ''));
+  }
+  if (!cat){ box.append(el('div', 'lv-vazio', 'escolha uma categoria na lista da esquerda.')); return; }
+  if (!lista.length){ box.append(el('div', 'lv-vazio', 'sem componentes nesta categoria.')); return; }
+  const frag = document.createDocumentFragment();
+  for (const c of lista){
+    const b = el('button', 'symed-comp'); b.type = 'button';
+    b.setAttribute('aria-selected', String(!!atual && atual.nome === c.nome));
+    b.title = c.nome + (c.fp ? '\nfootprint: ' + c.fp : '\nsem footprint')
+            + (c.pkgs ? '\nencapsulamento: ' + c.pkgs : '');
+    b.append(el('span', 'nm', c.rotulo));
+    const meta = el('span', 'mt');
+    if (c.fp) meta.append(el('span', 'fpat', c.fp));
+    else meta.append(el('span', 'semfp', 'sem footprint'));
+    if (typeof c.estoque === 'number') meta.append(el('span', 'es', c.estoque + ' un'));
+    b.append(meta);
+    b.onclick = () => { ST.comp = c.nome; ST.sel = null; pintaFootprints(); };
+    frag.append(b);
+  }
+  box.append(frag);
 }
 
 function pintaLista(){
@@ -317,7 +410,7 @@ function pintaLista(){
       : 'nenhum footprint.'));
     return;
   }
-  const atual = fpAtualDe(simboloAtual());
+  const atual = fpAtualDe();
   const frag = document.createDocumentFragment();
   const pendentes = [];
   for (const f of vis.slice(0, 400)){
@@ -403,8 +496,9 @@ function pintaAcoes(){
   const b = document.getElementById('lvAplicar');
   const d = document.getElementById('lvDesvincular');
   const e = document.getElementById('lvEscolhido');
-  const sim = simboloAtual();
-  const atual = fpAtualDe(sim);
+  const c = componenteAtual();
+  const sim = c && c.nome;
+  const atual = fpAtualDe();
   if (b) b.disabled = !sim || !ST.sel || (!!atual && atual.name === ST.sel);
   if (d) d.disabled = !sim || !atual;
   if (e) e.textContent = !sim ? 'nenhum componente selecionado'
@@ -412,7 +506,7 @@ function pintaAcoes(){
     : 'escolha um footprint na galeria';
 }
 
-function pintaFootprints(){ pintaAlvo(); pintaLista(); }
+function pintaFootprints(){ pintaAlvo(); pintaComponentes(); pintaLista(); }
 
 async function carregaFps(){
   ST.carregando = true;
@@ -431,20 +525,35 @@ async function carregaFps(){
 /* UM footprint. A rota recusa mais de um, e aqui nem se oferece: clicar troca, e o ✕
    desvincula. Não existe "adicionar mais um" nesta tela de propósito. */
 async function vincula(nome, ehNovo){
-  const sim = simboloAtual();
-  if (!sim){ aviso('escolha um componente na lista da esquerda primeiro.', 'warn'); return; }
+  const c = componenteAtual();
+  const sim = c && c.nome;
+  if (!sim){ aviso('escolha um componente na lista acima primeiro.', 'warn'); return; }
   if (ehNovo && !nome){ aviso('digite o nome do footprint.', 'warn'); return; }
   try {
-    const r = await fetch('/api/symbols/footprint', {
+    /* DUAS ROTAS, porque sao dois mundos. No almoxarifado o alvo e um VALOR dentro da
+       familia, e a escolha precisa ir ao ledger para sobreviver ao sincronismo; na
+       biblioteca da casa o simbolo E o componente e o vinculo mora no proprio schlib.js.
+       `c.valor` diz de qual dos dois se trata — quem monta a lista ja sabe. */
+    const corpo = c.valor
+      ? { familia: categoriaAtual(), componente: sim, footprint: nome }
+      : { simbolo: sim, footprint: nome };
+    const r = await fetch(c.valor ? '/api/symbols/almox-footprint' : '/api/symbols/footprint', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ simbolo: sim, footprint: nome }),
+      body: JSON.stringify(corpo),
     });
     const j = await r.json();
     if (!j || !j.ok){ aviso((j && j.error) || 'não deu para vincular', 'err'); return; }
     /* o espelho em memória da casca tem de andar junto, senão a tela mostra o vínculo velho
        até alguém recarregar a página */
-    const s = API.simbolo && API.simbolo(sim);
-    if (s) s.footprints = j.footprints || [];
+    /* o espelho em memoria da casca anda junto, senao a tela mostra o vinculo velho ate
+       alguem recarregar a pagina */
+    const fam = API.simbolo && API.simbolo(categoriaAtual());
+    if (c.valor && fam && Array.isArray(fam.valores)){
+      const v = fam.valores.find(x => x.altium === sim);
+      if (v) v.footprint = nome;
+    } else if (fam){
+      fam.footprints = j.footprints || [];
+    }
     if (ehNovo){
       const ni = document.getElementById('lvNovo');
       if (ni) ni.value = '';

@@ -183,7 +183,11 @@ try:
     txt = open(G.caminho_ledger(raiz), encoding='utf-8').read()
     assert txt.startswith('{"format":"ledger-v1","atualizado":"') and txt.endswith('}}\n')
     assert '\n "Libs/Almox/DIAC ALMOX.SchLib":{"mtime":' in txt and '\n "DIAC [PTH]":"%s"' % gerado_1['DIAC [PTH]'] in txt
-    assert '\n"protegidos":{\n}}' in txt
+    # as DUAS seções de decisão humana, vazias e uma por linha. `footprints` entrou em
+    # 2026-09-17 (o footprint escolhido à mão, que o gerador tem de preservar); ela precisa
+    # aparecer AQUI porque `dumps_ledger` é uma lista fechada de seções — o que ela não
+    # escrever some do disco em silêncio, e foi assim que a primeira versão se perdeu.
+    assert '\n"protegidos":{\n},\n"footprints":{\n}}' in txt, txt[-120:]
     resumo = G.le_resumo(raiz)
     assert resumo and resumo['ok'] and resumo['gerados'] == 2 and resumo['protegidos'] == []
     assert le_bytes(os.path.join(tmp, 'Libs', 'almox-basicos.js')) == pristine['almox-basicos.js']

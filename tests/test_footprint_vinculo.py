@@ -164,3 +164,45 @@ finally:
     H.ROOT = real_root
     S.ROOT = real_root
     shutil.rmtree(tmp, ignore_errors=True)
+
+# ─────────── o footprint de um COMPONENTE do almoxarifado ───────────
+# A categoria ("CAPACITOR CERAMICO [SMD]") e o agrupador; quem recebe footprint e a PECA
+# ("SMD 1206 4.7pF 50V C0G"). E, diferente da lib da casa, aqui o footprint e CALCULADO pelo
+# gerador a cada rodada — entao a escolha so vale se sobreviver ao sincronismo.
+
+
+def test_almox_footprint_sobrevive_ao_sync():
+    import copy
+    import guardiao as G2
+    import almox2lib as A2
+
+    led = G2.ledger_vazio()
+    G2.poe_footprint(led, 'CAPACITOR CERAMICO', 'SMD 1206 4.7pF 50V C0G', 'CAP 0805')
+    man = G2.footprints_manuais(led)
+    assert man == {('CAPACITOR CERAMICO', 'SMD 1206 4.7pF 50V C0G'): 'CAP 0805'}, man
+
+    # A SECAO TEM DE CHEGAR AO DISCO. `dumps_ledger` e uma lista FECHADA de secoes: a
+    # primeira versao desta funcionalidade gravava no dict e o arquivo saia sem ela, sem
+    # erro nenhum — a escolha do usuario sumia em silencio.
+    txt = G2.dumps_ledger(led)
+    assert '"footprints"' in txt, 'a secao nao foi serializada: ' + txt
+    volta = json.loads(txt)
+    assert volta['footprints']['CAPACITOR CERAMICO']['SMD 1206 4.7pF 50V C0G']['nome'] == 'CAP 0805'
+
+    # e o GERADOR tem de preferi-la ao que ele deduz
+    sim = {'nome': 'X [SMD]', 'familia': 'CAPACITOR CERAMICO', 'grupo': 'b', 'forma': 'box',
+           'npin': 2, 'mont': 'SMD', 'pkgs': __import__('collections').Counter({'1206': 1}),
+           'partes': None}
+    assert A2.monta_simbolo.__defaults__ is not None
+    import inspect
+    ps = list(inspect.signature(A2.monta_simbolo).parameters)
+    assert ps[-1] == 'fpman', 'monta_simbolo precisa receber as escolhas manuais: %s' % ps
+
+    # desvincular apaga a linha, e a familia vazia nao fica sobrando no arquivo
+    G2.poe_footprint(led, 'CAPACITOR CERAMICO', 'SMD 1206 4.7pF 50V C0G', '')
+    assert G2.footprints_manuais(led) == {}
+    assert 'CAPACITOR CERAMICO' not in (led.get('footprints') or {}), led.get('footprints')
+    print('(8) footprint manual: vai ao ledger, chega ao disco e o gerador o respeita ok')
+
+
+test_almox_footprint_sobrevive_ao_sync()

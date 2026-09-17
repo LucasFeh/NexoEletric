@@ -145,7 +145,51 @@ def caminho_ledger(raiz):
 
 def ledger_vazio():
     return OrderedDict([('format', FORMATO), ('atualizado', ''), ('arquivos', OrderedDict()),
-                        ('gerado', OrderedDict()), ('protegidos', OrderedDict())])
+                        ('gerado', OrderedDict()), ('protegidos', OrderedDict()),
+                        ('footprints', OrderedDict())])
+
+
+# ─── o footprint escolhido a mao, por COMPONENTE ──────────────────────────────
+# Secao propria, e nao um campo dentro de `protegidos`: protegido quer dizer "tem desenho
+# guardado", e escolher um footprint nao obriga ninguem a desenhar nada. Sao duas decisoes
+# independentes sobre a mesma peca, e juntar as duas faria uma exigir a outra.
+#
+# POR QUE PRECISA EXISTIR: o footprint de um valor do almoxarifado e CALCULADO pelo gerador
+# a cada rodada, a partir dos encapsulamentos que vem do Odoo (almox2lib >> monta_simbolo).
+# Sem um lugar duravel, a escolha da tela sobreviveria ate o proximo sincronismo e sumiria
+# em silencio -- exatamente o que o desenho ja resolveu com `protegidos`. A chave e a mesma
+# dali, (familia, componente), pelo mesmo motivo: e a peca que recebe, nao a categoria.
+
+
+def _fps_manuais(ledger):
+    d = ledger.get('footprints')
+    if not isinstance(d, dict):
+        d = ledger['footprints'] = OrderedDict()
+    return d
+
+
+def poe_footprint(ledger, fam, comp, footprint):
+    """grava (ou apaga, com footprint vazio) a escolha manual de UM componente"""
+    d = _fps_manuais(ledger)
+    fam_d = d.setdefault(fam, OrderedDict())
+    if footprint:
+        fam_d[comp] = OrderedDict([('nome', footprint), ('desde', agora())])
+    else:
+        fam_d.pop(comp, None)
+    if not fam_d:
+        d.pop(fam, None)
+    return bool(footprint)
+
+
+def footprints_manuais(ledger):
+    """{(familia, componente): nome} — o que o gerador consulta para nao sobrescrever"""
+    fora = {}
+    for fam, comps in (_fps_manuais(ledger) or {}).items():
+        for comp, d in (comps or {}).items():
+            nome = (d or {}).get('nome') if isinstance(d, dict) else d
+            if nome:
+                fora[(fam, comp)] = nome
+    return fora
 
 
 def carrega_ledger(raiz):
@@ -157,7 +201,7 @@ def carrega_ledger(raiz):
         d = json.load(f, object_pairs_hook=OrderedDict)
     if not isinstance(d, dict) or d.get('format') != FORMATO:
         raise ValueError('%s não é um ledger %s' % (p, FORMATO))
-    for k in ('arquivos', 'gerado', 'protegidos'):
+    for k in ('arquivos', 'gerado', 'protegidos', 'footprints'):
         if not isinstance(d.get(k), dict):
             d[k] = OrderedDict()
     return d
@@ -184,6 +228,19 @@ def dumps_ledger(d):
         for k, (c, v) in enumerate(cs):
             fora.append('  %s:%s%s' % (_j(c), _j(v), ',' if k < len(cs) - 1 else ''))
         fora.append(' }%s' % (',' if i < len(fams) - 1 else ''))
+    fora.append('},')
+    # `footprints`: a escolha manual de footprint por componente. ESTA FUNCAO E A LISTA
+    # FECHADA do que vai a disco -- uma secao que o dict tenha e ela nao escreva some em
+    # SILENCIO, que foi o que aconteceu na primeira versao desta secao: a rota gravava, o
+    # arquivo saia sem ela e ninguem reclamava. Secao nova aqui, sempre.
+    fps = sorted((d.get('footprints') or {}).items())
+    fora.append('"footprints":{')
+    for i, (fam, comps) in enumerate(fps):
+        fora.append(' %s:{' % _j(fam))
+        cs = sorted((comps or {}).items())
+        for k, (c, v) in enumerate(cs):
+            fora.append('  %s:%s%s' % (_j(c), _j(v), ',' if k < len(cs) - 1 else ''))
+        fora.append(' }%s' % (',' if i < len(fps) - 1 else ''))
     fora.append('}}')
     return '\n'.join(fora) + '\n'
 
