@@ -739,6 +739,33 @@ sem isso, apagar o `PTH DIP8 OP07CP` renomearia o `PTH DIP8 OP07CP #26` para o n
 O componente só sai da `.SchLib` dentro do Altium na sincronização seguinte, porque elas são
 reescritas inteiras a partir do espelho — a resposta do hub diz isso.
 
+**Limpeza em lote: `tools/almox/limpa_fantasmas.py`.** Um terço do acervo do servidor era
+fantasma (1318 de 4064 valores, medido em 2026-09-17) — apagar um por um pelo hub não era
+viável. Sem argumento nenhum ele é **relatório e não escreve um byte**; `--apagar` executa.
+
+```
+python tools/almox/limpa_fantasmas.py                 # relatório
+python tools/almox/limpa_fantasmas.py --csv f.csv     # a lista para conferir fora
+python tools/almox/limpa_fantasmas.py --apagar        # apaga os seguros
+```
+
+Ele segura sozinho o fantasma que está **em uso** num projeto: o `sym` de um `schematic.js` é
+exatamente o `valores[].altium`, e apagar deixaria aquele componente órfão na folha. Esses saem
+listados com projeto e designador — o certo é trocar o componente no esquema antes (vista
+Esquema, que troca em bloco) e rodar de novo; `--em-uso-tambem` inclui mesmo assim.
+
+Antes de escrever ele copia os espelhos para `Libs/.backup-fantasmas-<carimbo>/`, porque apagar
+fantasma não tem desfazer. Não encosta na `.SchLib` (o sincronismo a reescreve), nem no
+`almox-parts.json` (o número da part fica reservado), nem no `lib-ledger.json` — desenho
+protegido de um apagado **continua guardado**, só vira órfão. O relatório separa os protegidos
+por origem, porque só um punhado interessa: no servidor eram 853 protegidos entre os fantasmas,
+dos quais **3** feitos à mão no hub e 850 herdados da biblioteca da casa, que se refazem sozinhos.
+
+Ele reusa o `_usos_do_valor` do `symserver` — a mesma função da prévia do hub — em vez de
+reimplementar a detecção de uso; onde o Flask não existir, cai para a busca pelo `sym`, que para
+um fantasma é a marca que sobra (o `params` dele sai com `OdooId` vazio). **Não use o hub
+enquanto ele roda**: o espelho é reescrito inteiro e o lock do hub está noutro processo.
+
 O leitor Python (`tools/symbols/sch_leitor.py`) também regera o espelho inteiro sem abrir o
 Altium — `python tools/symbols/sch_leitor.py --espelho` (aplica o `rename-map.js` para não
 desfazer os nomes do RenameLibs) — e é provado contra o `schlib.js` que o `ExportLibs.pas`
