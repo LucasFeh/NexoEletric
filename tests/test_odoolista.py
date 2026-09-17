@@ -986,6 +986,106 @@ def test_arquivo_vazio_nao_trava_a_gravacao():
             shutil.rmtree(d, ignore_errors=True)
 
 
+
+# ─────────────── a revisão é OPCIONAL (2026-09-17) ───────────────
+# Pedido do dono: enviar qualquer revisão, repetir, ou deixar em branco — critério de quem
+# envia. O Odoo não pede revisão (a spec só exige projeto e linhas); a exigência era daqui, em
+# três lugares, e um deles ainda INVENTAVA uma revisão em silêncio.
+
+
+def _com_projeto(nome='P'):
+    """raiz temporária com Projects/<nome>/schematic.js de duas linhas"""
+    d = tempfile.mkdtemp()
+    os.makedirs(os.path.join(d, 'Projects', nome))
+    with io.open(os.path.join(d, 'Projects', nome, 'schematic.js'), 'w', encoding='utf-8') as f:
+        f.write('var schematic = ' + json.dumps(
+            esquema(comp('R1', 'SMD 0805 10K 1/8W'), comp('U1', 'CONVERSOR DC/DC 5V 1W'))) + ';\n')
+    return d
+
+
+def test_prepara_aceita_revisao_vazia():
+    """_prepara devolvia 400 'revisao obrigatoria'. Agora monta, e o uid fica com sufixo vazio."""
+    import odoolista_server as OS
+    d = _com_projeto()
+    velho = OS.ROOT
+    try:
+        OS.ROOT = d
+        payload, erro, status = OS._prepara({'projeto': 'P', 'revisao': ''})
+        assert erro is None, 'revisão vazia ainda é recusada: %r (%s)' % (erro, status)
+        assert payload['revisao'] == '', payload['revisao']
+        assert payload['uid_externo'] == 'altium:P:', payload['uid_externo']
+        # o invariante que o resto do sistema usa para fatiar a chave
+        assert payload['uid_externo'].count(':') == 2, payload['uid_externo']
+        # e projeto continua obrigatório: afrouxar a revisão não afrouxou o resto
+        assert OS._prepara({'projeto': '', 'revisao': 'B'})[2] == 404
+    finally:
+        OS.ROOT = velho
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_previa_nao_inventa_revisao():
+    """A prévia montava com `rev or sugerida or 'X'` — mostrava um uid que ninguém pediu."""
+    import odoolista_server as OS
+    d = _com_projeto('DMB - DI231765_P2')      # parse_revisao acha 'P2' nesse nome
+    cli = _app(d)
+    try:
+        j = cli.post('/api/lista/previa',
+                     json={'projeto': 'DMB - DI231765_P2', 'revisao': ''}).get_json()
+        assert j['ok'], j
+        assert j['revisaoUsada'] == '', 'a prévia inventou revisão: %r' % j['revisaoUsada']
+        assert j['uid_externo'].endswith(':'), j['uid_externo']
+        assert j['payload']['revisao'] == '', j['payload']['revisao']
+        # o palpite continua viajando como SUGESTÃO, e é isso que o campo vazio da tela usa
+        assert j['revisaoSugerida'] == 'P2', j['revisaoSugerida']
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_confere_ensaio_com_revisao_vazia():
+    """Afrouxar (A) não pode afrouxar a guarda que impede enviar lista que ninguém viu."""
+    import odoolista_server as OS
+    p = {'uid_externo': 'altium:P:', 'revisao': '', 'linhas': [1, 2]}
+    assert OS._confere_ensaio(p, {'uid_externo': 'altium:P:', 'total_linhas': 2}) is None
+    # e a mensagem precisa NOMEAR a revisão vazia, senão sai "(B -> )"
+    msg = OS._confere_ensaio(p, {'uid_externo': 'altium:P:B', 'total_linhas': 2})
+    assert 'revisao mudou' in msg and '(sem revisao)' in msg, msg
+    assert 'esquema mudou' in OS._confere_ensaio(
+        p, {'uid_externo': 'altium:P:', 'total_linhas': 9})
+
+
+def test_cli_sem_revisao_nao_inventa_a_do_nome_da_pasta():
+    """MEDIDO antes do conserto: `--aplicar` sem --revisao num "DMB - DI231765_P2" abria a
+    solicitação como rev "P2", calado — e "_P2" ali é variante, não revisão."""
+    assert OL.parse_revisao('DMB - DI231765_P2') == 'P2', 'a fixture perdeu a graça'
+    visto = {}
+
+    class ClienteFalso(object):
+        def __init__(self, *a, **kw):
+            pass
+
+        def confere(self, payload):
+            visto['payload'] = payload
+            return {'estado': 'ensaio', 'total_linhas': len(payload['linhas']),
+                    'linhas_pendentes': 0, 'pendencias': []}
+
+    # `le_schematic(nome, raiz=RAIZ)` prende a raiz no DEFAULT, na hora da definição: trocar
+    # OL.RAIZ depois do import não muda nada e o teste leria o workspace de verdade (medido:
+    # 18 linhas do DMB real em vez das 2 da fixture). Substituir as duas leituras de disco é
+    # o que mantém este caso hermético, como manda o cabeçalho desta seção.
+    velho = (OL.ClienteLista, OL.le_schematic, OL.carrega_acervo)
+    try:
+        OL.ClienteLista = ClienteFalso
+        OL.le_schematic = lambda nome, raiz=None: esquema(comp('R1', 'SMD 0805 10K 1/8W'))
+        OL.carrega_acervo = lambda raiz=None: ACERVO
+        OL.main(['--projeto', 'DMB - DI231765_P2'])          # ensaio, sem --revisao
+        assert visto['payload']['revisao'] == '', \
+            'o CLI inventou a revisão %r' % visto['payload']['revisao']
+        assert visto['payload']['uid_externo'] == 'altium:DMB-DI231765-P2:', \
+            visto['payload']['uid_externo']
+        assert len(visto['payload']['linhas']) == 1, 'leu de outro lugar que não a fixture'
+    finally:
+        OL.ClienteLista, OL.le_schematic, OL.carrega_acervo = velho
+
 def main():
     n = 0
     for nome, fn in sorted(globals().items()):

@@ -86,9 +86,12 @@ def _confere_ensaio(payload, data):
     if not uid:
         return 'envio sem o ensaio: confira a lista antes de enviar'
     if uid != payload['uid_externo']:
+        # revisao vazia e legitima, entao ela precisa de NOME nos dois lados da seta: com o
+        # `or '?'` de antes, trocar "B" por vazio saia como "(B -> )", que nao se le.
         return ('a revisao mudou depois da conferencia (%s -> %s). Confira de novo antes de '
                 'enviar: revisao diferente e outra placa no estoque.'
-                % (uid.rsplit(':', 1)[-1] or '?', payload['revisao']))
+                % (uid.rsplit(':', 1)[-1] or '(sem revisao)',
+                   payload['revisao'] or '(sem revisao)'))
     try:
         n = int(data.get('total_linhas'))
     except (TypeError, ValueError):
@@ -106,10 +109,11 @@ def _prepara(data):
     nome = str(data.get('projeto') or '').strip()
     if not _pasta(nome):
         return None, 'projeto nao encontrado', 404
+    # Revisao e OPCIONAL desde 2026-09-17, por decisao do dono: por o texto, repetir o que ja
+    # foi, ou deixar em branco e criterio de quem envia. O Odoo nao pede revisao (a spec so
+    # exige projeto e linhas nao vazias); a exigencia era daqui. Vazia, o uid vira
+    # 'altium:<SLUG>:' — continua com exatamente dois ':', que e o invariante da chave.
     rev = OL.norm_rev(data.get('revisao'))
-    if not rev:
-        return None, ('revisao obrigatoria — ela entra no nome da placa no Odoo e na chave '
-                      'que impede o envio duplicado'), 400
     try:
         schematic = OL.le_schematic(nome, ROOT)
     except OL.ErroOdoo as e:
@@ -227,9 +231,12 @@ def previa():
     nome = str(data.get('projeto') or '').strip()
     if not _pasta(nome):
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    # A previa monta com a revisao REAL, vazia inclusive. O `or sugerida` e o `or 'X'` eram
+    # muleta da epoca em que revisao vazia era 400 aqui embaixo: faziam a previa aparecer com
+    # uma revisao que ninguem digitou, e o uid mostrado na tela mentia.
     sugerida = OL.norm_rev(OL.parse_revisao(nome))
-    rev = OL.norm_rev(data.get('revisao')) or sugerida
-    payload, erro, status = _prepara(dict(data, revisao=rev or 'X'))
+    rev = OL.norm_rev(data.get('revisao'))
+    payload, erro, status = _prepara(dict(data, revisao=rev))
     if erro:
         return {'ok': False, 'error': erro}, status
     return {'ok': True, 'payload': payload, 'uid_externo': payload['uid_externo'],
@@ -282,10 +289,17 @@ def envio():
             return {'ok': False, 'error': str(e)}, 502
         gravado = ''
         try:
-            gravado = OL.grava_recibo(payload['projeto'],
-                                      OL.recibo_para_disco(limpo, recibo_odoo,
-                                                           time.strftime('%Y-%m-%d %H:%M')),
-                                      ROOT)
+            # `gravou: False` quer dizer que o Odoo NAO mexeu em nada (lista ja decidida).
+            # Carimbar "enviado_em" agora faria o disco dizer que houve um envio que nao
+            # houve. O estado, as pendencias e o motivo do retorno CONTINUAM entrando: esses
+            # sao a verdade atual do Odoo, e e por eles que se descobre uma decisao nova.
+            # `is False` de proposito: instalacao que nao mande o campo (None) segue como antes.
+            velho = OL.le_recibo(payload['projeto'], ROOT) if recibo_odoo.get('gravou') is False else {}
+            quando = velho.get('enviado_em') or time.strftime('%Y-%m-%d %H:%M')
+            disco = OL.recibo_para_disco(limpo, recibo_odoo, quando)
+            if velho.get('enviado_por'):
+                disco['enviado_por'] = velho['enviado_por']
+            gravado = OL.grava_recibo(payload['projeto'], disco, ROOT)
         except (OSError, OL.ErroOdoo):
             pass          # o envio valeu; nao guardar o recibo e chateacao, nao falha
         return {'ok': True, 'recibo': recibo_odoo, 'payload': payload,
@@ -305,9 +319,9 @@ def estado():
     if not _pasta(nome):
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
     local = OL.le_recibo(nome, ROOT)
+    # uid com sufixo vazio ('altium:<SLUG>:') e legitimo desde que a revisao virou opcional:
+    # a lista enviada sem revisao tambem precisa poder ter o estado consultado.
     uid = local.get('uid_externo') or OL.uid_externo(nome, data.get('revisao'))
-    if not OL.norm_rev(uid.rsplit(':', 1)[-1]):
-        return {'ok': False, 'error': 'revisao obrigatoria'}, 400
     cliente, erro = _cliente()
     if erro:
         return {'ok': False, 'error': erro, 'semSenha': True}, 400

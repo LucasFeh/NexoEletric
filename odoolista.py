@@ -738,10 +738,13 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     try:
-        rev = norm_rev(args.revisao) or parse_revisao(args.projeto)
-        if not rev:
-            raise ErroOdoo('revisao obrigatoria: nao da para deduzir de "%s" e um default '
-                           'silencioso abre a solicitacao errada no Odoo' % args.projeto)
+        # A revisao e a que foi DIGITADA, e mais nada. O `or parse_revisao(...)` que estava
+        # aqui era o proprio default silencioso que a mensagem abaixo dele condenava: medido,
+        # `--aplicar` sem `--revisao` num "DMB - DI231765_P2" abria a solicitacao como rev
+        # "P2" sem avisar ninguem — e "_P2" naquela pasta e variante, nao revisao. A propria
+        # docstring de parse_revisao diz "So SUGERE — nunca decide"; agora e verdade.
+        # Vazia e uma escolha legitima desde 2026-09-17: quem quer o palpite passa --revisao.
+        rev = norm_rev(args.revisao)
         if args.estado:
             uid = uid_externo(args.projeto, rev)
             print(json.dumps(ClienteLista().estado(uid), ensure_ascii=False, indent=1))

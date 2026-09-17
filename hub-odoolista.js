@@ -356,11 +356,28 @@ async function recarrega(){
 async function enviar(){
   if (!ST.conferido) return;
   const r = ST.conferido, n = r.linhas.length;
+  /* o estado de ANTES do POST: e ele que diz se a recusa que voltar e nova ou a de sempre.
+     Tem de ser lido aqui, porque ST.reciboLocal e sobrescrito com o recibo novo la embaixo. */
+  const estadoAntes = (ST.reciboLocal && ST.reciboLocal.estado) || '';
+  const loc = ST.reciboLocal;
+  /* Aviso, nao trava: se esta revisao ja foi decidida, o modulo do Odoo ignora o reenvio.
+     Dizer isso ANTES do clique e o que faltava — a tela so descobria depois, porque o ensaio
+     sempre volta com estado 'ensaio' e o Enviar fica habilitado. O botao continua habilitado
+     de proposito: mandar assim mesmo e decisao de quem envia. */
+  const jaDecidida = loc && (loc.estado === 'recusada' || loc.estado === 'aprovada')
+                     && (loc.revisao || '') === (r.revisao || '');
+  const semRev = !String(r.revisao || '').trim();
   const ok = await HubDialog.confirm(
-    'Enviar ' + n + ' linha(s) de "' + r.projeto + ' rev ' + r.revisao + '" para a fila de '
+    'Enviar ' + n + ' linha(s) de "' + r.projeto
+    + (semRev ? '" (sem revisão)' : ' rev ' + r.revisao + '"') + ' para a fila de '
     + 'aprovação do Odoo?\n\nA lista não entra no estoque agora: alguém do almoxarifado '
-    + 'confere e decide. Reenviar a mesma revisão substitui as linhas enquanto ninguém '
-    + 'decidiu; depois da decisão, é preciso mudar a revisão.',
+    + 'confere e decide. Enquanto ninguém decidiu, reenviar a mesma revisão substitui as '
+    + 'linhas.'
+    + (jaDecidida ? '\n\nEsta revisão já foi ' + loc.estado + ' no Odoo. Pelo comportamento '
+       + 'de hoje do módulo de lá, um reenvio dela não altera nada — mas o envio é seu: dá '
+       + 'para mandar assim mesmo.' : '')
+    + (semRev ? '\n\nSem revisão, todos os envios sem revisão deste projeto dividem um '
+       + 'registro só no Odoo.' : ''),
     { title: 'Enviar lista', ok: 'Enviar' });
   if (!ok) return;
 
@@ -387,16 +404,50 @@ async function enviar(){
   pintaLista(ST.conferido, rec);
   estadoTxt(descRecibo(ST.reciboLocal));
   atualizaBotao();
-  if (rec.estado === 'recusada'){
-    await HubDialog.alert(rec.motivo_recusa || 'a lista foi recusada e o motivo não veio escrito.',
-      { title: 'Lista recusada', danger: true });
-  } else if (rec.gravou === false){
-    HubDialog.toast((rec.referencia || 'a lista') + ' já foi ' + (rec.estado || 'decidida')
-      + ' — nada foi alterado. Para mandar outra versão, mude a revisão.', 'warn', 8000);
+  const d = desfechoDoEnvio(rec, estadoAntes);
+  if (d.tipo === 'recusa-nova' && d.titulo){
+    await HubDialog.alert(d.texto, { title: d.titulo, danger: true });
   } else {
-    HubDialog.toast((rec.referencia || 'lista') + ' — ' + (rec.estado || 'recebida')
-      + (rec.linhas_pendentes ? ' · ' + rec.linhas_pendentes + ' pendência(s)' : ''), 'ok');
+    HubDialog.toast(d.texto, d.tom, d.ms);
   }
+}
+
+/* O DESFECHO DO ENVIO — pura de proposito, porque foi aqui que morava o defeito e regra
+   que se testa nao volta. tests/test-odoolista-desfecho.js.
+
+   O ERRO ERA A ORDEM. `estado === 'recusada'` vinha antes de `gravou === false`, e um uid ja
+   decidido volta com os DOIS ao mesmo tempo (a spec, tabela de di_recebe_lista). Entao todo
+   reenvio de uma lista recusada — que nao altera nada no Odoo — abria o modal vermelho
+   bloqueante com o motivo VELHO, como se a recusa tivesse acabado de acontecer. O ramo
+   honesto ("ja foi decidida, nada mudou") era inalcancavel. Foi o que fez o DMB, recusado
+   uma vez, cobrar para sempre.
+
+   A raiz: o codigo lia o ESTADO devolvido como se fosse um EVENTO. Recusa e evento quando o
+   estado MUDOU — e por isso `estadoAntes` entra aqui. O caminho irmao (atualizaEstado) ja
+   fazia essa comparacao; o do envio tinha esquecido dela. */
+function desfechoDoEnvio(rec, estadoAntes){
+  rec = rec || {};
+  const ref = rec.referencia || 'a lista';
+  /* 1o: o Odoo nao mexeu em nada. Vem ANTES da recusa porque uma lista decidida volta com
+     estado E gravou:false juntos. Sem ordem nenhuma de trocar revisao: repetir, abrir outra
+     ou pedir reabertura no Odoo e decisao de quem envia. */
+  if (rec.gravou === false){
+    return { tipo: 'nada-mudou', titulo: '', tom: 'warn', ms: 8000,
+             texto: ref + ' já está ' + (rec.estado || 'decidida') + ' no Odoo — este envio '
+                    + 'não alterou nada lá.' };
+  }
+  /* 2o: recusa NOVA (o estado mudou nesta ida). Modal so com motivo escrito; recusa sem
+     motivo e normal e nao vira interrogatorio. */
+  if (rec.estado === 'recusada' && rec.estado !== estadoAntes){
+    return rec.motivo_recusa
+      ? { tipo: 'recusa-nova', titulo: 'Lista recusada', tom: 'warn', ms: 8000,
+          texto: ref + ' foi recusada.\n\n' + rec.motivo_recusa }
+      : { tipo: 'recusa-nova', titulo: '', tom: 'warn', ms: 8000,
+          texto: ref + ' foi recusada.' };
+  }
+  return { tipo: 'ok', titulo: '', tom: 'ok', ms: 0,
+           texto: (rec.referencia || 'lista') + ' — ' + (rec.estado || 'recebida')
+                  + (rec.linhas_pendentes ? ' · ' + rec.linhas_pendentes + ' pendência(s)' : '') };
 }
 
 /* ------------------------------- abrir e fechar ------------------------------- */
@@ -478,8 +529,12 @@ async function abre(){
 /* O disco so guarda o estado do momento do envio. Quem decide e uma pessoa no Odoo, depois
    — entao um envio ainda nao decidido precisa ser perguntado, senao uma lista RECUSADA
    aparece aqui como "recebida" para sempre e o motivo que a pessoa do estoque escreveu (a
-   spec, secao 8.4, pede justamente que ele volte para o projetista) nunca chega. */
-const DECIDIDO = { aprovada: 1, recusada: 1 };
+   spec, secao 8.4, pede justamente que ele volte para o projetista) nunca chega.
+
+   RECUSADA NAO E TERMINAL do nosso lado (2026-09-17). Ela estava aqui, e com isso o disco
+   congelava o projeto: recusado uma vez, a tela nunca mais perguntava o estado e nunca mais
+   via uma reabertura feita no Odoo. Aprovada continua terminal — dali nao se voltea. */
+const DECIDIDO = { aprovada: 1 };
 
 async function atualizaEstado(){
   const loc = ST.reciboLocal;
@@ -489,10 +544,17 @@ async function atualizaEstado(){
   ST.reciboLocal = Object.assign({}, loc, j.recibo);
   atualizaBotao();
   if (j.recibo.estado === 'recusada' && j.recibo.estado !== loc.estado){
-    await HubDialog.alert((j.recibo.motivo_recusa || 'o motivo não veio escrito.')
-      + '\n\nCorrija o que o motivo diz e mande com a revisão nova: o Odoo ignora o reenvio '
-      + 'de uma lista já decidida.',
-      { title: (j.recibo.referencia || 'a lista') + ' foi recusada', danger: true });
+    /* recusa sem motivo e NORMAL — quem recusa nao deve satisfacao. Modal so quando ha
+       texto para ler (a spec, 8.4, pede que o motivo chegue ao projetista); sem texto, o
+       aviso e um toast e acabou. E nao se manda mais "corrija e mande com revisao nova":
+       o que enviar depois e decisao de quem envia. */
+    const ref = j.recibo.referencia || 'a lista';
+    if (j.recibo.motivo_recusa){
+      await HubDialog.alert(ref + ' foi recusada.\n\n' + j.recibo.motivo_recusa,
+        { title: 'Lista recusada', danger: true });
+    } else {
+      HubDialog.toast(ref + ' foi recusada.', 'warn', 8000);
+    }
   } else if (j.recibo.estado === 'aprovada' && j.recibo.estado !== loc.estado){
     HubDialog.toast((j.recibo.referencia || 'a lista') + ' foi aprovada — virou a placa '
       + (j.recibo.produto_id || '?') + ' com BoM ' + (j.recibo.bom_id || '?'), 'ok', 8000);
@@ -599,6 +661,6 @@ function inicia(){
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', inicia);
 else inicia();
 
-return { abre, fecha, estado: ST, pure: { resolucaoDe, descRecibo } };
+return { abre, fecha, estado: ST, pure: { resolucaoDe, descRecibo, desfechoDoEnvio } };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubOdooLista;
