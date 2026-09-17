@@ -302,9 +302,11 @@ async function excluirValor(alvo, io){
   }
   const usos = previa.usos || [];
   const quantos = usos.reduce((n, u) => n + (u.refs || []).length, 0);
-  let texto = 'Excluir “' + (previa.label || alvo.componente) + '” da biblioteca?\n\n'
-            + 'Ele sai do acervo e NÃO volta nas próximas sincronizações — fica numa lista de '
-            + 'excluídos até alguém tirá-lo de lá.';
+  let texto = 'Apagar “' + (previa.label || alvo.componente) + '” da biblioteca?\n\n'
+            + 'Ele sai do acervo agora. Quem decide se volta é o Odoo: se o produto ainda '
+            + 'existir lá, a próxima sincronização o traz de volta com o mesmo número — é '
+            + 'assim que se desfaz um engano. Some de vez só o que já não está mais no Odoo, '
+            + 'que é o caso dos duplicados.';
   if (quantos){
     texto += '\n\nEM USO por ' + quantos + (quantos === 1 ? ' componente' : ' componentes') + ':\n'
            + usos.map(u => '  · ' + u.projeto + ': ' + (u.refs || []).join(', ')).join('\n')
@@ -312,8 +314,8 @@ async function excluirValor(alvo, io){
   } else {
     texto += '\n\nNão está em uso em nenhum projeto do workspace.';
   }
-  const sim = await io.confirm(texto, { title: 'Excluir da biblioteca',
-                                        ok: 'Excluir', danger: true });
+  const sim = await io.confirm(texto, { title: 'Apagar da biblioteca',
+                                        ok: 'Apagar', danger: true });
   if (!sim) return false;
   let r;
   try {
@@ -377,7 +379,7 @@ function renderValores(box, g, opts){
     if (o.onExcluir) b.oncontextmenu = ev => {
       ev.preventDefault(); ev.stopPropagation();
       menu(ev.clientX, ev.clientY, it.rotulo, [
-        { rotulo: 'Excluir da biblioteca…', perigo: true, onEscolher: () => o.onExcluir(it, g) },
+        { rotulo: 'Apagar da biblioteca…', perigo: true, onEscolher: () => o.onExcluir(it, g) },
       ]);
     };
     box.append(b);

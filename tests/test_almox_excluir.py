@@ -1,27 +1,39 @@
 # -*- coding: utf-8 -*-
-"""Excluir um VALOR do almoxarifado — e ele nao volta na proxima sincronizacao.
+"""Apagar um VALOR do almoxarifado — e o ODOO decide se ele volta.
 
     python tests/test_almox_excluir.py
 
-O usuario clica com o botao direito num valor (modal "Trocar componente", aba Biblioteca) e
-manda excluir. Entre os tres desenhos possiveis, o escolhido foi a LISTA DE EXCLUIDOS
-versionada (Libs/almox-excluidos.json), que o gerador pula em TODA rodada — inclusive na que
-so regera do snapshot, que e a que mais roda.
+A mecanica mudou em 2026-09-17, a pedido do dono. A lib foi construida quando o cadastro do
+Odoo nao tinha padrao de nome, e por isso alguns itens nasceram DUAS VEZES, com nomes
+diferentes. Ele quer apagar o duplicado e ficar so com o certo — mas pode errar a mao e
+apagar um item bom. A regra que resolve os dois casos de uma vez:
+
+    apagar tira do espelho; a geracao seguinte remonta do CSV o que AINDA EXISTE no Odoo,
+    e deixa morto o que ja nao existe mais.
+
+O item bom volta sozinho (puxar de novo e o desfazer); o duplicado, cujo produto nao esta
+mais no Odoo, nao tem de onde voltar. NAO HA MAIS LISTA DE VETO: o gerador nao le
+Libs/almox-excluidos.json, que virou o REGISTRO do que foi apagado e quando.
+
+Por que isso funciona sem filtro nenhum, e o que este teste prova: o valor que nao vem do
+CSV so aparece no espelho porque `numera_valores` o repesca do espelho ANTERIOR (o
+`fora: true`, saldo zero). Tirar do espelho corta essa unica fonte.
 
 O que este teste prende, nesta ordem:
   1. a PREVIA (sem `confirmar`) nao encosta em arquivo nenhum e ja diz onde o valor esta em
      uso — item em uso AVISA, nunca recusa calado;
-  2. excluir poe na lista, tira do espelho, tira a protecao do ledger e NAO toca na .SchLib
-     (ela e reescrita inteira no proximo sincronismo, e a resposta tem de dizer isso);
-  3. o gerador pula o excluido numa rodada seguinte, de dois jeitos: no laco dos valores e
-     na porta dos fundos do `numera_valores` (o "saiu do Odoo", que repescaria o valor do
-     espelho anterior se a gravacao do espelho tivesse falhado no meio da exclusao);
-  4. desfazer devolve o item, e o id dele continua reservado no livro-razao;
-  5. o HOMONIMO: o nome que vai para a lista e o de DEPOIS do desempate ('PTH DIP8
-     OP07CP #27'), e o gerador comparava o de antes — a exclusao parecia funcionar e o
-     sincronismo seguinte devolvia o valor, calado. E excluir um homonimo nao pode
-     RENOMEAR o outro: o `sym` de todo esquema ja desenhado aponta para esse texto;
-  6. a gravacao SEGUE O SYMLINK — no servidor este arquivo e
+  2. apagar tira do espelho, registra em almox-excluidos.json, PRESERVA a protecao do
+     desenho no ledger e NAO toca na .SchLib (ela e reescrita inteira no proximo
+     sincronismo, e a resposta tem de dizer isso);
+  3. o valor que ainda esta no Odoo VOLTA na rodada seguinte, com o mesmo id;
+  4. o valor que ja nao esta no Odoo NAO volta — e o teste prova os dois lados: com o valor
+     no espelho anterior ele seria repescado como `fora: true`; sem ele, morre;
+  5. desfazer so limpa o registro (nao e ele que traz o valor de volta);
+  6. o HOMONIMO: um sufixo, uma vez dado, nao sai mais. A reserva mora no LIVRO-RAZAO
+     (almox-parts.json » sufixados) e nao mais na lista de excluidos — apagar 'PTH DIP8
+     OP07CP' nao pode RENOMEAR o 'PTH DIP8 OP07CP #27', porque o `sym` de todo esquema ja
+     desenhado aponta para esse texto;
+  7. a gravacao SEGUE O SYMLINK — no servidor este arquivo e
      `Libs/almox-excluidos.json -> shared/…`, e `os.replace` sobre o link substituiria O
      LINK (a licao de 2026-09-16; ver tests/test_symlink_sobrevive.py). Essa parte pula com
      mensagem clara onde o SO recusa criar symlink: a bancada e Windows.
@@ -234,13 +246,20 @@ try:
     assert {v['altium']: v['id'] for v in sim['valores']} == {c: IDS_ANTES[c] for c in IRMAOS}, \
         'o id dos irmaos nao pode se mexer'
 
+    # A PROTECAO FICA. Ela era apagada aqui ate 2026-09-17, e era a unica copia duravel do
+    # desenho feito a mao (o espelho e a .SchLib sao gitignored; o lib-ledger.json nao).
+    # Com o valor podendo voltar pelo Odoo, apagar o desenho o faria voltar generico e
+    # calado. Quem cuida de protegido sem componente e o guardiao: marca `orfao` guardando
+    # o `parts` e desmarca sozinho quando ele reaparece.
     led = G.carrega_ledger(tmp)
-    assert ALVO not in led['protegidos'].get(FAMILIA, {}), 'a protecao do excluido tem que sair'
+    assert ALVO in led['protegidos'].get(FAMILIA, {}), \
+        'a protecao do desenho tem que SOBREVIVER a exclusao — senao o valor volta generico'
+    assert led['protegidos'][FAMILIA][ALVO]['parts'], 'e com o desenho dentro'
     assert IRMAOS[0] in led['protegidos'][FAMILIA], 'a do irmao tem que ficar'
 
     assert (open(schlib, 'rb').read(), os.stat(schlib).st_mtime_ns) == schlib_antes, \
         'a exclusao nao pode escrever na .SchLib — ela e reescrita pelo sincronismo'
-    print('(2) excluir: entra na lista, sai do espelho e do ledger, .SchLib intacta ok')
+    print('(2) apagar: sai do espelho, registra, PRESERVA o desenho, .SchLib intacta ok')
 
     # excluir de novo e inofensivo: a lista nao ganha item repetido (o valor ja saiu do
     # espelho, entao a resolucao devolve 404 — que e a resposta honesta)
@@ -251,53 +270,56 @@ try:
     assert j['ok'] and [x['altium'] for x in j['itens']] == [ALVO], j
     print('(2b) GET /almox-excluidos lista o que saiu ok')
 
-    # ── 3. o gerador pula o excluido na rodada seguinte ──────────────────────
-    chaves = A.chaves_excluidas(A.carrega_excluidos(tmp))
-    assert chaves == {(SIMBOLO, ALVO)}, chaves
+    # ── 3. o item que AINDA existe no Odoo volta sozinho ─────────────────────
+    # E a rede de seguranca de quem apagou por engano: o gerador nao consulta lista nenhuma,
+    # entao o valor e remontado do CSV como qualquer outro — e com o MESMO id, senao um
+    # esquema ja desenhado passaria a apontar para outra peca.
     _var, esp = G.le_espelho_almox(os.path.join(tmp, ESPELHO))
-    anterior = {s['name']: s for s in esp['symbols']}
+    anterior = {s['name']: s for s in esp['symbols']}      # o espelho SEM o valor apagado
 
-    A.PULADOS = 0
-    sim1 = A.monta_simbolo(simbolo_de(LINHAS), set(), mapa, anterior, False, None, chaves)
-    assert [v['altium'] for v in sim1['valores']] == list(IRMAOS), [v['altium'] for v in sim1['valores']]
-    assert A.PULADOS == 1, A.PULADOS
-    assert {v['altium']: v['id'] for v in sim1['valores']} == {c: IDS_ANTES[c] for c in IRMAOS}
-    assert mapa[SIMBOLO]['ids']['1K'] == ID_ALVO, 'o id do excluido continua reservado'
-    # sem a lista, o Odoo o traria de volta: e isso que a lista impede
-    sim_sem = A.monta_simbolo(simbolo_de(LINHAS), set(), dict(mapa), anterior, False, None)
-    assert ALVO in [v['altium'] for v in sim_sem['valores']], 'o teste tem que provar algo'
-    print('(3) o gerador pula o excluido na rodada seguinte ok')
+    sim1 = A.monta_simbolo(simbolo_de(LINHAS), set(), mapa, anterior, False, None)
+    volta = next((v for v in sim1['valores'] if v['altium'] == ALVO), None)
+    assert volta is not None, 'o valor que ainda esta no Odoo tem que voltar na geracao seguinte'
+    assert volta['id'] == ID_ALVO, 'e tem que voltar com o mesmo id'
+    assert not volta.get('fora'), 'voltou pelo CSV, entao nao e o repesque de saldo zero'
+    assert volta['estoque'] == 10, volta['estoque']
+    assert mapa[SIMBOLO]['ids']['1K'] == ID_ALVO, 'o id continua reservado no livro-razao'
+    print('(3) o item que ainda esta no Odoo volta na rodada seguinte, com o mesmo id ok')
 
-    # a porta dos fundos: espelho que AINDA tem o valor (a gravacao do espelho falhou depois
-    # da lista) + Odoo que nao o manda mais -> o `numera_valores` o repescaria como
-    # "saiu do Odoo", com saldo zero, de volta na biblioteca que o usuario mandou limpar
-    sem_1k = [LINHAS[0], LINHAS[2]]
-    com_o_valor = {SIMBOLO: copy.deepcopy(sim0)}
-    volta = A.monta_simbolo(simbolo_de(sem_1k), set(), dict(mapa), com_o_valor, False, None)
-    assert ALVO in [v['altium'] for v in volta['valores']], 'o repesque tem que existir'
-    guardado = A.monta_simbolo(simbolo_de(sem_1k), set(), dict(mapa), com_o_valor, False, None, chaves)
-    assert ALVO not in [v['altium'] for v in guardado['valores']], \
-        'o excluido voltou pela porta dos fundos do numera_valores'
-    print('(3b) nem pelo repesque de "saiu do Odoo" o excluido volta ok')
+    # ── 4. o DUPLICADO (que ja nao esta no Odoo) nao volta ───────────────────
+    # Os dois lados, porque so o par prova a mecanica. O valor fora do CSV so existe se o
+    # espelho ANTERIOR o tiver: e o repesque `fora: true` do numera_valores. Apagar do
+    # espelho corta essa unica fonte, e e por isso que apagar basta, sem lista de veto.
+    sem_1k = [LINHAS[0], LINHAS[2]]                        # o Odoo nao manda mais o 1K
+    com_o_valor = {SIMBOLO: copy.deepcopy(sim0)}           # espelho de ANTES de apagar
 
-    # ── 4. desfazer devolve ──────────────────────────────────────────────────
+    fantasma = A.monta_simbolo(simbolo_de(sem_1k), set(), dict(mapa), com_o_valor, False, None)
+    f = next((v for v in fantasma['valores'] if v['altium'] == ALVO), None)
+    assert f is not None, 'sem apagar, o valor fora do Odoo e repescado do espelho anterior'
+    assert f.get('fora') is True and f['estoque'] == 0, f
+    assert f['id'] == ID_ALVO, 'o repescado mantem o id'
+
+    morto = A.monta_simbolo(simbolo_de(sem_1k), set(), dict(mapa), anterior, False, None)
+    assert ALVO not in [v['altium'] for v in morto['valores']], \
+        'apagado do espelho e fora do Odoo, o duplicado nao pode voltar de lugar nenhum'
+    assert mapa[SIMBOLO]['ids']['1K'] == ID_ALVO, \
+        'mesmo morto, o id fica reservado: ninguem herda o numero dele'
+    print('(4) o duplicado, fora do Odoo e fora do espelho, morre de vez ok')
+
+    # ── 5. desfazer so limpa o REGISTRO ──────────────────────────────────────
     r = cli.post('/api/symbols/almox-excluir/desfazer', json={'simbolo': SIMBOLO, 'altium': ALVO})
     j = r.get_json()
     assert r.status_code == 200 and j['ok'] and j['desfeito'], j
     assert j['item']['altium'] == ALVO and j['item']['familia'] == FAMILIA, j
     assert A.carrega_excluidos(tmp)['itens'] == [], A.carrega_excluidos(tmp)
-    assert A.chaves_excluidas(A.carrega_excluidos(tmp)) == set()
-    # e agora o gerador o traz de volta, com o MESMO id
-    devolvido = A.monta_simbolo(simbolo_de(LINHAS), set(), mapa, anterior, False, None,
-                                A.chaves_excluidas(A.carrega_excluidos(tmp)))
-    assert next(v['id'] for v in devolvido['valores'] if v['altium'] == ALVO) == ID_ALVO, \
-        'o valor tem que voltar com o mesmo id — senao um esquema ja desenhado muda de peca'
+    assert any('Odoo' in a for a in j['avisos']), \
+        'o aviso tem que dizer que quem traz de volta e o Odoo, nao este botao'
     r = cli.post('/api/symbols/almox-excluir/desfazer', json={'simbolo': SIMBOLO, 'altium': ALVO})
     assert r.status_code == 404, r.get_json()
     assert cli.post('/api/symbols/almox-excluir/desfazer', json={'simbolo': SIMBOLO}).status_code == 400
-    print('(4) desfazer devolve o item (e o id volta igual); 404 no que nao esta la ok')
+    print('(5) desfazer limpa o registro; 404 no que nao esta la ok')
 
-    # ── 5. a gravacao segue o symlink ────────────────────────────────────────
+    # ── 7. a gravacao segue o symlink ────────────────────────────────────────
     def pode_symlink():
         try:
             a, b = os.path.join(tmp, '_probe'), os.path.join(tmp, '_probe.lnk')
@@ -333,57 +355,65 @@ try:
         assert not os.path.exists(link + '.tmp'), 'deixou o .tmp para tras'
         assert [x['altium'] for x in cli.get('/api/symbols/almox-excluidos').get_json()['itens']] \
             == [IRMAOS[1]], 'e a leitura tem que enxergar o que foi gravado no shared/'
-        print('(5) a lista e gravada ATRAVES do symlink ok')
+        print('(7) o registro e gravado ATRAVES do symlink ok')
 
-    # ── 6. o homonimo ──
-    # A lista guarda o `valores[].altium` do espelho, que e o nome DEPOIS do desempate; o
-    # gerador so conhecia o nome cru, porque o desempate acontece la no fim, quando todas
-    # as familias ja estao montadas. Na biblioteca real isso e exatamente um valor hoje
-    # (CIRCUITO INTEGRADO [8P] / "PTH DIP8 OP07CP #27"), e excluir esse valor gravava a
-    # lista, sumia do espelho, dizia "saiu da biblioteca" — e voltava na sincronizacao
-    # seguinte, sem uma linha de aviso.
-    A.PULADOS = 0
-    com_sufixo = {(SIMBOLO, '%s #%d' % (ALVO, ID_ALVO))}
-    sim6 = A.monta_simbolo(simbolo_de(LINHAS), set(), mapa, anterior, False, None, com_sufixo)
-    assert [v['altium'] for v in sim6['valores']] == list(IRMAOS),         'o gerador nao achou o excluido pelo nome com sufixo: %s' % [v['altium'] for v in sim6['valores']]
-    assert A.PULADOS == 1, A.PULADOS
-    # o sufixo previsto vem do id que o livro-razao ja deu aquele label: id de outro valor
-    # nao pode levar este junto (o contrario do defeito seria excluir o que ninguem mandou)
-    A.PULADOS = 0
-    sim6b = A.monta_simbolo(simbolo_de(LINHAS), set(), mapa, anterior, False, None,
-                            {(SIMBOLO, '%s #%d' % (ALVO, ID_ALVO + 99))})
-    assert ALVO in [v['altium'] for v in sim6b['valores']] and A.PULADOS == 0,         'sufixo com outro id nao pode excluir este valor'
-    print('(6) a exclusao encontra o valor pelo nome COM o sufixo do desempate ok')
-
-    # a outra metade: o desempate em si. Excluir um homonimo nao pode renomear o outro.
+    # ── 6. o homonimo: um sufixo, uma vez dado, nao sai mais ─────────────────
+    # Na biblioteca real isso e exatamente um par hoje (AMPLIFICADOR [8P] / "PTH DIP8 OP07CP"
+    # e CIRCUITO INTEGRADO [8P] / "PTH DIP8 OP07CP #27"). Sumido o primeiro — apagado a mao,
+    # ou arquivado no Odoo —, o segundo deixaria de colidir e seria RENOMEADO para o nome
+    # cru, e todo `sym` que aponta para esse texto passaria a valer para outra peca.
+    # A reserva mora no LIVRO-RAZAO (almox-parts.json » sufixados), e nao mais na lista de
+    # excluidos: a lista so cobria o sumico por exclusao, e o sumico por arquivamento no
+    # Odoo ja renomeava o sobrevivente, calado, e ninguem via.
     def par():
         """o par de verdade da biblioteca: mesmo nome cru, mesma .SchLib (ESPECIAIS)"""
         return [{'name': 'AMPLIFICADOR [8P]', 'familia': 'AMPLIFICADOR', 'grupo': 'especiais',
-                 'valores': [{'altium': 'PTH DIP8 OP07CP', 'id': 26}]},
+                 'valores': [{'altium': 'PTH DIP8 OP07CP', 'label': 'OP07CP', 'id': 26}]},
                 {'name': 'CIRCUITO INTEGRADO [8P]', 'familia': 'CIRCUITO INTEGRADO',
-                 'grupo': 'especiais', 'valores': [{'altium': 'PTH DIP8 OP07CP', 'id': 27}]}]
+                 'grupo': 'especiais',
+                 'valores': [{'altium': 'PTH DIP8 OP07CP', 'label': 'OP07CP', 'id': 27}]}]
 
     def nomes(sims):
         return [v['altium'] for sim in sims for v in sim['valores']]
 
-    assert nomes(A.desempata_nomes(par())) == ['PTH DIP8 OP07CP', 'PTH DIP8 OP07CP #27'],         'o desempate de sempre mudou'
-    # agora o AMPLIFICADOR teve o valor excluido: o simbolo continua na rodada, sem valores
+    def razao():
+        return {'AMPLIFICADOR [8P]': {'prox': 1, 'ids': {}, 'desde': {}},
+                'CIRCUITO INTEGRADO [8P]': {'prox': 1, 'ids': {}, 'desde': {}}}
+
+    m = razao()
+    assert nomes(A.desempata_nomes(par(), m)) == ['PTH DIP8 OP07CP', 'PTH DIP8 OP07CP #27'], (
+        'o desempate de sempre mudou')
+    assert m['CIRCUITO INTEGRADO [8P]']['sufixados'] == ['OP07CP'], (
+        'o sufixo tem que ficar anotado no livro-razao: %s' % m['CIRCUITO INTEGRADO [8P]'])
+    assert 'sufixados' not in m['AMPLIFICADOR [8P]'], 'quem ficou com o nome cru nao anota nada'
+
+    # agora o AMPLIFICADOR sumiu: o simbolo continua na rodada, sem valores
     depois = par()
     depois[0]['valores'] = []
-    assert nomes(A.desempata_nomes(depois, {('AMPLIFICADOR [8P]', 'PTH DIP8 OP07CP')}))         == ['PTH DIP8 OP07CP #27'],         'excluir o homonimo RENOMEOU o outro — todo `sym` que aponta para "PTH DIP8 '         'OP07CP" passaria a valer para outra peca'
-    # sem a reserva o defeito aparece: e a prova de que o teste testa algo
+    assert nomes(A.desempata_nomes(depois, m)) == ['PTH DIP8 OP07CP #27'], (
+        'o homonimo sumiu e RENOMEOU o outro — todo `sym` que aponta para '
+        '"PTH DIP8 OP07CP #27" passaria a valer para outra peca')
+    # sem a reserva no livro-razao o defeito aparece: e a prova de que o teste testa algo
     solto = par()
     solto[0]['valores'] = []
-    assert nomes(A.desempata_nomes(solto)) == ['PTH DIP8 OP07CP'], 'o teste nao prova nada'
+    assert nomes(A.desempata_nomes(solto, {})) == ['PTH DIP8 OP07CP'], 'o teste nao prova nada'
+    # e a reserva nao pega carona: sufixo anotado para OUTRO label nao vale para este
+    outro = par()
+    outro[0]['valores'] = []
+    m2 = razao()
+    m2['CIRCUITO INTEGRADO [8P]']['sufixados'] = ['OUTRA COISA']
+    assert nomes(A.desempata_nomes(outro, m2)) == ['PTH DIP8 OP07CP'], (
+        'sufixo anotado para outro label nao pode pegar carona neste')
     # basicos: o balde e a familia, entao homonimo de OUTRA familia nao desempata nada
     duas = [{'name': 'RESISTOR [SMD]', 'familia': 'RESISTOR', 'grupo': 'basicos',
-             'valores': [{'altium': 'SMD 0603 1K', 'id': 3}]},
+             'valores': [{'altium': 'SMD 0603 1K', 'label': '1K', 'id': 3}]},
             {'name': 'CAPACITOR [SMD]', 'familia': 'CAPACITOR', 'grupo': 'basicos',
-             'valores': [{'altium': 'SMD 0603 1K', 'id': 4}]}]
-    assert nomes(A.desempata_nomes(duas)) == ['SMD 0603 1K', 'SMD 0603 1K'],         'familias diferentes sao .SchLib diferentes: nao ha colisao para desempatar'
-    print('(6b) excluir um homonimo nao renomeia o outro ok')
+             'valores': [{'altium': 'SMD 0603 1K', 'label': '1K', 'id': 4}]}]
+    assert nomes(A.desempata_nomes(duas, {})) == ['SMD 0603 1K', 'SMD 0603 1K'], (
+        'familias diferentes sao .SchLib diferentes: nao ha colisao para desempatar')
+    print('(6) sufixo dado nao sai mais; sumir o homonimo nao renomeia o sobrevivente ok')
 
-    print('test_almox_excluir OK (o valor excluido sai da biblioteca e nao volta sozinho)')
+    print('test_almox_excluir OK (apagar apaga; quem decide se volta e o Odoo)')
 finally:
     H.ROOT = real_root
     S.ROOT = real_root

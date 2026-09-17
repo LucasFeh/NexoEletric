@@ -732,22 +732,35 @@ def api_almox_excluidos():
 
 @bp.route('/almox-excluir', methods=['POST'])
 def api_almox_excluir():
-    """Tira um VALOR do almoxarifado para sempre — e o próximo sincronismo não o traz de volta.
+    """APAGA um VALOR da biblioteca. Quem decide se ele volta é o Odoo, não esta rota.
+
+    Desde 2026-09-17 a exclusão deixou de ser um veto permanente e passou a ser o que o
+    nome diz. O gerador não consulta lista nenhuma (almox2lib » numera_valores), então o
+    destino do valor apagado é decidido pela próxima geração:
+
+      - AINDA EXISTE no Odoo -> é remontado do CSV, com o mesmo id. É a rede de segurança
+        de quem apagou por engano: puxar de novo resolve;
+      - JÁ NÃO EXISTE no Odoo -> era o duplicado do tempo em que o cadastro não tinha
+        padrão de nome, e só sobrevivia por estar no espelho. Sai daqui e morre de vez.
 
     Só valores. Símbolo é família inteira e sai do Odoo junto com o último produto dela; o
-    que o usuário exclui à mão é o item, o "PTH 10uF 16V O5 2mm" que ele não quer mais ver
-    na lista.
+    que o usuário apaga à mão é o item, o "PTH 10uF 16V O5 2mm" duplicado.
 
     Sem `confirmar` isto é uma PRÉVIA: não encosta em arquivo nenhum e devolve `usos`, para
     a tela dizer onde o item já está antes de perguntar. Item em uso não é recusa — a
     decisão é do usuário; recusar calado seria pior que avisar.
 
     Com `confirmar`, nesta ordem:
-      1. entra em Libs/almox-excluidos.json — VERSIONADO, e o que o gerador consulta a cada
-         rodada (almox2lib » monta_simbolo). É o passo que faz a exclusão durar;
-      2. sai do espelho (Libs/almox-*.js), que é o que o hub desenha na tela;
-      3. perde a proteção no ledger, se tinha: o guardião tentaria repor o desenho de um
-         componente que não existe mais;
+      1. sai do espelho (Libs/almox-*.js). É ESTE o passo que apaga — e, para o valor que
+         não vem mais do Odoo, é o passo que o mata de vez, porque o espelho anterior era
+         a única fonte dele;
+      2. entra em Libs/almox-excluidos.json como REGISTRO (o que foi apagado e quando).
+         Não é filtro: perder este arquivo não ressuscita nada;
+      3. a proteção do desenho no ledger é PRESERVADA. Era apagada até 2026-09-17, e isso
+         destruía a única cópia durável do desenho feito à mão — se o valor voltasse pelo
+         Odoo, voltava genérico e calado. O guardião já sabe lidar com protegido cujo
+         componente sumiu: marca `orfao` guardando o `parts` e desmarca sozinho quando ele
+         reaparece (guardiao.py » depois);
       4. a .SchLib NÃO é tocada. O schlib_escritor reescreve as .SchLib inteiras a cada
          sincronismo a partir do espelho, então o componente sai de lá sozinho — e escrever
          remoção no binário seria código novo por cima da biblioteca do usuário. Até o
@@ -781,25 +794,10 @@ def api_almox_excluir():
                       'continua como está, mas o componente sai da biblioteca'
                       % (comp, total, len(usos), ', '.join(u['projeto'] for u in usos)))
 
-    # 1. a LISTA primeiro: é o único passo que dura. Se o espelho falhar logo abaixo, a
-    #    sincronização seguinte tira o valor de qualquer jeito — o contrário (espelho sem
-    #    lista) devolveria o item na primeira rodada, e o usuário acharia que não excluiu.
-    with _lock_excluidos:
-        try:
-            lista = A.carrega_excluidos(ROOT)
-        except (OSError, ValueError) as e:
-            return _erro('não li a lista de excluídos: %s' % e, 500)
-        if not any(it.get('simbolo') == sim_nome and it.get('altium') == comp
-                   for it in lista['itens']):
-            lista['itens'].append(OrderedDict([
-                ('simbolo', sim_nome), ('familia', fam), ('altium', comp), ('label', label),
-                ('quando', datetime.now().strftime('%Y-%m-%d %H:%M'))]))
-        try:
-            A.grava_excluidos(ROOT, lista)
-        except OSError as e:
-            return _erro('não gravei a lista de excluídos: %s' % e, 500)
-
-    # 2. o espelho, relido dentro do lock (ver _acha_no_espelho)
+    # 1. O ESPELHO PRIMEIRO: é o passo que apaga de verdade. Para o valor que não vem mais
+    #    do Odoo, o espelho anterior era a única fonte dele (almox2lib » numera_valores),
+    #    então tirá-lo daqui é o que o mata. Se este passo falhar, nada foi apagado — e o
+    #    registro abaixo não é escrito, para a tela não mentir dizendo que apagou.
     with _lock_almox:
         try:
             var2, esp2 = G.le_espelho_almox(cam_esp)
@@ -810,31 +808,48 @@ def api_almox_excluir():
                 esp2['symbols'][i2]['valores'].pop(j2)
                 G.grava_espelho_almox(cam_esp, var2, esp2)
         except (OSError, ValueError) as e:
-            avisos.append('está na lista de excluídos, mas não saiu do espelho (%s): a '
-                          'próxima sincronização o tira' % e)
+            return _erro('não consegui apagar do espelho (%s): nada foi alterado' % e, 500)
 
-    # 3. a proteção do ledger: sem isso o guardião repõe o desenho de um componente que não
-    #    existe mais, e o resumo passa a mostrar um protegido órfão para sempre
-    try:
-        with G._lock:
-            led = G.carrega_ledger(ROOT)
-            if G._tira_prot(led, fam, comp):
-                G.grava_ledger(ROOT, led)
-    except Exception as e:                                          # noqa: BLE001
-        avisos.append('não tirei a proteção do ledger (%s): rode --liberar "%s/%s" se ela '
-                      'sobrar' % (e, fam, comp))
+    # 2. o REGISTRO do que foi apagado. Não é filtro (o gerador não lê): serve para a tela
+    #    mostrar o histórico da limpeza e para o desfazer saber o que tirar da lista. Falhar
+    #    aqui não desfaz o passo 1, então é aviso e não erro.
+    with _lock_excluidos:
+        try:
+            lista = A.carrega_excluidos(ROOT)
+            if not any(it.get('simbolo') == sim_nome and it.get('altium') == comp
+                       for it in lista['itens']):
+                lista['itens'].append(OrderedDict([
+                    ('simbolo', sim_nome), ('familia', fam), ('altium', comp), ('label', label),
+                    ('quando', datetime.now().strftime('%Y-%m-%d %H:%M'))]))
+            A.grava_excluidos(ROOT, lista)
+        except (OSError, ValueError) as e:
+            avisos.append('apaguei da biblioteca, mas não registrei em %s (%s): só o '
+                          'histórico se perde' % (A.EXCLUIDOS, e))
+
+    # 3. A PROTEÇÃO DO DESENHO FICA. Ela era apagada aqui até 2026-09-17, e isso destruía a
+    #    única cópia durável do desenho feito à mão: se o valor voltasse pelo Odoo, voltava
+    #    genérico e calado. O guardião já trata protegido cujo componente sumiu — marca
+    #    `orfao` guardando o `parts` e desmarca sozinho quando ele reaparece.
 
     # 4. o Altium só sente no próximo sincronismo — e isso tem de sair dito
     avisos.append('o componente sai das .SchLib de Libs/Almox no próximo sincronismo do '
                   'almoxarifado (elas são reescritas inteiras a partir do espelho); até lá '
                   'ele continua aparecendo dentro do Altium')
+    avisos.append('se este item ainda existir no Odoo, a próxima sincronização o traz de '
+                  'volta com o mesmo número — é assim que se desfaz um engano. Some de vez '
+                  'só o que já não está mais no Odoo')
     return dict(resp, excluido=True, espelho=True, avisos=avisos)
 
 
 @bp.route('/almox-excluir/desfazer', methods=['POST'])
 def api_almox_excluir_desfazer():
-    """Tira o item da lista. O valor volta ao espelho e às .SchLib no próximo sincronismo —
-    com o MESMO id, porque o livro-razão (Libs/almox-parts.json) nunca devolveu o número."""
+    """Tira a linha do REGISTRO. Não é isto que traz o valor de volta — quem traz é o Odoo.
+
+    Desde 2026-09-17 o gerador não lê a lista, então tirar daqui só limpa o histórico. Se o
+    produto ainda existir no Odoo, o valor volta na próxima sincronização de qualquer jeito
+    (com o MESMO id, porque Libs/almox-parts.json nunca devolveu o número) — inclusive sem
+    passar por aqui. Se não existir mais, não há desfazer: ele foi apagado de vez.
+    """
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return _erro('JSON {simbolo, altium} obrigatório', 400)
@@ -857,8 +872,9 @@ def api_almox_excluir_desfazer():
         except OSError as e:
             return _erro('não gravei a lista de excluídos: %s' % e, 500)
     return {'ok': True, 'desfeito': True, 'item': achado,
-            'avisos': ['o valor volta ao espelho e ao Altium no próximo sincronismo do '
-                       'almoxarifado']}
+            'avisos': ['tirei do registro. O valor volta ao espelho e ao Altium no próximo '
+                       'sincronismo SE o produto ainda existir no Odoo; se não existir, ele '
+                       'já foi apagado de vez e isto só limpou o histórico']}
 
 
 @bp.route('/lib', methods=['POST'])
