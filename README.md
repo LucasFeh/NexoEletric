@@ -1078,17 +1078,35 @@ casa compra. O hub nunca aprova nada.
 1. Salve o esquema. A lista sai do `schematic.js` **em disco** — o botão oferece salvar se
    houver alteração pendente, porque uma lista montada do que está só na tela não existe
    para mais ninguém.
-2. Digite a **revisão** (`B`, `P2`…). Ela entra no nome da placa no Odoo (`Projeto rev B`)
-   e compõe a chave de idempotência `altium:<PROJETO>:<REVISÃO>`. O campo vem pré-enchido
-   com a revisão do último envio, ou com o sufixo do nome da pasta quando dá para deduzir;
-   nunca com um palpite qualquer, porque um default silencioso abre a solicitação errada.
+2. A **revisão** (`B`, `P2`…) é **opcional**, e repeti-la é permitido. Ela entra no nome da
+   placa no Odoo (`Projeto rev B`) e compõe a chave de idempotência
+   `altium:<PROJETO>:<REVISÃO>`. Pôr, repetir ou deixar em branco é decisão de quem envia —
+   o Odoo não pede revisão, e a exigência que existia era só nossa. Em branco, a chave vira
+   `altium:<PROJETO>:` e **todos** os envios sem revisão daquele projeto dividem um registro
+   só lá; a tela diz isso na confirmação. O campo vem pré-enchido com a revisão do último
+   envio. **O palpite pelo nome da pasta só sugere, nunca decide**: `parse_revisao` lê `P2`
+   em `DMB - DI231765_P2`, e ali `_P2` é variante, não revisão — até 2026-09-17 o CLI
+   mandava como rev `P2` sem avisar ninguém.
 3. **Conferir** — roda `di_confere_lista`, que resolve as linhas e diz o que resolveria
    **sem gravar nada**. As pendências aparecem na coluna *resolução*.
 4. **Enviar** — só depois de conferir, e com uma confirmação explícita.
 
 Reenviar a mesma revisão **substitui as linhas** enquanto ninguém decidiu: é assim que se
-corrige a lista. Depois da decisão o Odoo ignora o reenvio e devolve o estado — para mandar
-outra versão, mude a revisão, porque placa de revisão diferente é outra placa no estoque.
+corrige a lista. Depois da decisão, o módulo do Odoo (`di_recebe_lista`) não mexe mais
+naquele registro e devolve o estado com `gravou:false` — **o hub avisa e não impede**.
+Repetir assim mesmo, abrir outra revisão ou pedir a reabertura no Odoo é decisão de quem
+envia. Fazer o reenvio ter efeito de verdade depende do módulo de lá, não deste lado.
+
+**Recusa não pede explicação.** Foi recusada e pronto: se quem recusou escreveu um motivo,
+ele aparece num diálogo (a spec pede que chegue ao projetista); se não escreveu, o aviso é
+uma notificação e acabou — ausência de motivo não é falta. E recusa **não** é estado
+terminal deste lado: a tela continua consultando `di_estado_lista`, então uma reabertura
+feita no Odoo chega aqui. Até 2026-09-17 não chegava, e havia um defeito pior — o hub
+comparava o estado devolvido em vez da *mudança* de estado, e por isso todo reenvio de uma
+lista recusada reabria o modal vermelho com o motivo antigo, como se a recusa tivesse
+acabado de acontecer. Era o que fazia o `DMB - DI231765_P2`, recusado uma vez, cobrar para
+sempre. A regra agora mora numa função pura, `desfechoDoEnvio`, presa por
+`tests/test-odoolista-desfecho.js`.
 
 O recibo (`id`, `referencia`, `estado`, pendências) fica em
 `Projects\<nome>\odoo-lista.json`, fora do git: tudo nele volta de
@@ -1167,7 +1185,7 @@ O modal mostra sempre para onde vai antes de você enviar.
 
 ### Sem passar pelo navegador
 
-    python odoolista.py --projeto "PESDA - DI241790" --revisao B              # ensaio
+    python odoolista.py --projeto "PESDA - DI241790" --revisao B              # ensaio (revisao e opcional)
     python odoolista.py --projeto "PESDA - DI241790" --revisao B --aplicar    # envia
     python odoolista.py --projeto "PESDA - DI241790" --revisao B --estado     # consulta
 
