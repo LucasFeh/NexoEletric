@@ -296,11 +296,18 @@ function componentesDa(cat){
   if (!s) return [];
   const vals = s.valores;
   if (Array.isArray(vals) && vals.length){
+    /* `sym`: o valor tem desenho? O dele (`parts` próprio) ou, na falta, o da família.
+       Sem nenhum dos dois, o componente vai para o Altium sem símbolo — e é isso que a tag
+       vermelha diz. */
+    const temFam = !!(s.parts && s.parts.length);
     return vals.map(v => ({ nome: v.altium, rotulo: v.label || v.altium, fp: v.footprint || '',
+                            sym: !!(v.parts && v.parts.length) || temFam,
+                            proprio: !!(v.parts && v.parts.length),
                             estoque: v.estoque, pkgs: (v.pkgs || []).join(' / '), valor: true }));
   }
   const fps = s.footprints || [];
   return [{ nome: s.name, rotulo: s.name, fp: (fps[0] && fps[0].name) || '',
+            sym: !!(s.parts && s.parts.length), proprio: false,
             estoque: null, pkgs: '', valor: false }];
 }
 
@@ -372,6 +379,8 @@ function pintaComponentes(){
     tit.append(el('span', 'n', lista.length
       ? lista.length + (lista.length === 1 ? ' item' : ' itens')
         + ' · ' + lista.filter(c => !c.fp).length + ' sem footprint'
+        + (lista.filter(c => !c.sym).length
+           ? ' · ' + lista.filter(c => !c.sym).length + ' sem símbolo' : '')
       : ''));
   }
   if (!cat){ box.append(el('div', 'lv-vazio', 'escolha uma categoria na lista da esquerda.')); return; }
@@ -384,8 +393,23 @@ function pintaComponentes(){
             + (c.pkgs ? '\nencapsulamento: ' + c.pkgs : '');
     b.append(el('span', 'nm', c.rotulo));
     const meta = el('span', 'mt');
-    if (c.fp) meta.append(el('span', 'fpat', c.fp));
-    else meta.append(el('span', 'semfp', 'sem footprint'));
+    /* O QUE FALTA VEM PRIMEIRO, em vermelho e com o nome da coisa que falta — as mesmas
+       tags da categoria (hub.html » .pill.falta), para a lista e o agrupador dizerem a
+       mesma coisa do mesmo jeito. Tendo footprint, mostra QUAL: é o que se veio trocar. */
+    if (!c.fp){
+      const t = el('span', 'pill falta', 'footprint');
+      t.title = 'sem footprint vinculado';
+      meta.append(t);
+    } else {
+      meta.append(el('span', 'fpat', c.fp));
+    }
+    if (!c.sym){
+      const t = el('span', 'pill falta', 'símbolo');
+      t.title = 'sem desenho: nem próprio nem o da categoria';
+      meta.append(t);
+    } else if (c.proprio){
+      meta.append(el('span', 'pill', 'desenho próprio'));
+    }
     if (typeof c.estoque === 'number') meta.append(el('span', 'es', c.estoque + ' un'));
     b.append(meta);
     b.onclick = () => { ST.comp = c.nome; ST.sel = null; pintaFootprints(); };

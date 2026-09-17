@@ -513,6 +513,11 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .lib-row .pill { flex: none; font-size: 10px; padding: 1px 5px; border-radius: var(--r-sm);
   background: rgba(var(--tint),0.07); color: var(--text-3); }
 .lib-row .pill.warn { color: var(--warn); }
+/* A tag de FALTA é vermelha, e o texto dela é o que FALTA: "footprint" num componente sem
+   footprint, "símbolo" num sem desenho. Antes era um "sem encap" amarelo, que dizia a mesma
+   coisa com outra palavra (encapsulamento) e no tom de aviso — falta é falta. */
+.lib-row .pill.falta, .symed-comp .mt .pill.falta { color: var(--err);
+  box-shadow: inset 0 0 0 1px var(--err); background: transparent; }
 
 /* editor de símbolos (hub-symed.js): lista do espelho · editor · ferramentas + ficha, com
    divisórias arrastáveis como as abas Laser e BOM. O meio empilha barra · canvas · rodapé ·
@@ -2483,7 +2488,7 @@ function renderLib() {
   /* a lista de VALORES so faz sentido na sub-aba de simbolos; a de footprints e a
      mesma dos dois acervos, porque a PcbLib e a mesma */
   const almoxSym = !!LIB.almox && S.tab !== 'libfp';
-  libPainelDeBaixo(almoxSym);
+  libPainelDeBaixo();
   if (almoxSym) return renderLibAlmox();
 
   const u = libUsage();
@@ -2618,30 +2623,18 @@ function renderLib() {
    preview do footprint vai a lista de VALORES, porque é ela que responde à pergunta que
    fez a lib existir — "tem esse valor no almoxarifado?". Cada part é um valor, e cada
    valor sabe o saldo, o endereço na prateleira e o código Mouser.                    */
-/* Dois corpos disputam a metade de baixo: o footprint e a lista de valores. A lista só
-   existe no acervo do almoxarifado, e é o padrão lá — é ela que responde à pergunta que fez
-   a lib existir. No espelho do Altium não há escolha a fazer, e a barra fica sem o seletor. */
-function libBaixoModo(almox) {
-  return almox ? (S.lib.baixo || 'val') : 'fp';
-}
-function libPainelDeBaixo(almox) {
-  const m = libBaixoModo(almox);
-  $('#libFpVp').hidden = m !== 'fp';
-  $('#libValBox').hidden = m !== 'val';
-  $('#libFpMeta').hidden = m === 'val';
-  $('#libValMeta').hidden = m !== 'val';
-  $('#libBotTtl').textContent = m === 'val' ? 'valores' : 'footprint';
-
-  const seg = $('#libBotSeg'); seg.textContent = ''; seg.hidden = !almox;
-  if (!almox) return;
-  [['val', 'valores'], ['fp', 'footprint']].forEach(([k, rot]) => {
-    const b = el('button', null, rot);
-    b.setAttribute('aria-pressed', String(k === m));
-    b.title = k === 'fp' ? 'o footprint do valor escolhido — clique num encapsulamento da ficha para trocar'
-                         : 'os valores deste componente no almoxarifado';
-    b.onclick = () => { S.lib.baixo = k; renderLib(); };
-    seg.append(b);
-  });
+/* A metade de baixo da vista Geral é o FOOTPRINT, e só. O seletor "valores | footprint"
+   saiu em 2026-09-17: a lista de valores virou a aba Componentes das vistas Símbolos e
+   Footprints, onde dá para escolher o componente E mexer nele. Aqui ela era só leitura,
+   repetia o que agora tem lugar próprio, e o seletor escondia o footprint por padrão —
+   justamente o que a vista Geral existe para mostrar. */
+function libPainelDeBaixo() {
+  $('#libFpVp').hidden = false;
+  $('#libValBox').hidden = true;
+  $('#libFpMeta').hidden = false;
+  $('#libValMeta').hidden = true;
+  $('#libBotTtl').textContent = 'footprint';
+  const seg = $('#libBotSeg'); seg.textContent = ''; seg.hidden = true;
 }
 
 const alxSym = () => (S.lib.sel && S.lib.sel.k === 'sym' && LIB.symBy.get(S.lib.sel.name)) || null;
@@ -2711,14 +2704,20 @@ function renderLibAlmox() {
 
   const comEstoque = LIB.syms.filter(s => alxEstoque(s) > 0);
   const semEstoque = LIB.syms.filter(s => alxEstoque(s) <= 0);
-  const semFp = LIB.syms.filter(s => !(s.footprints || []).length);
+  /* O FILTRO OLHA OS COMPONENTES, pelo mesmo motivo que a tag: quem tem footprint é a
+     peça, não a categoria. Antes ele contava categorias sem `footprints` — a lista da
+     família —, então vincular um footprint a um componente não mudava o número. */
+  const semFp = LIB.syms.filter(s => {
+    const vals = alxValores(s);
+    return vals.length ? vals.some(v => !v.footprint) : !(s.footprints || []).length;
+  });
   let kind = S.lib.kind;
   if (['all', 'stock', 'nostock', 'nofp'].indexOf(kind) < 0) kind = 'all';
   S.lib.kind = kind;      /* recorte de outro acervo nao existe aqui: fixa o que sobrou */
 
   const seg = $('#libKind'); seg.textContent = '';
   [['all', 'Tudo', LIB.syms.length], ['stock', 'Com saldo', comEstoque.length],
-   ['nostock', 'Zerados', semEstoque.length], ['nofp', 'Sem encap.', semFp.length]]
+   ['nostock', 'Zerados', semEstoque.length], ['nofp', 'Sem footprint', semFp.length]]
     .forEach(([k, label, n]) => {
       const b = el('button', null, label);
       b.setAttribute('aria-pressed', String(kind === k));
@@ -2830,7 +2829,27 @@ function renderLibAlmox() {
                        : nv.n + ' valor(es) que entraram depois da última vez que você marcou como visto';
       b.append(p);
     }
-    if (!(s.footprints || []).length) b.append(el('span', 'pill warn', 'sem encap'));
+    /* A TAG OLHA OS COMPONENTES, e não a categoria. Ela dizia "sem encap" a partir de
+       `s.footprints` — a lista da FAMÍLIA — e por isso não sumia quando alguém vinculava
+       um footprint a um componente: são coisas diferentes, e quem recebe o vínculo é o
+       componente. Agora a categoria mostra a falta quando ALGUM componente dela está sem,
+       com a conta ao lado; o componente mostra a dele na lista da vista Footprints. */
+    const vals = alxValores(s);
+    const semFp = vals.length ? vals.filter(v => !v.footprint).length
+                              : ((s.footprints || []).length ? 0 : 1);
+    const semSym = (s.parts && s.parts.length) ? 0 : 1;
+    if (semFp) {
+      const p = el('span', 'pill falta', 'footprint' + (vals.length > 1 ? ' ' + semFp : ''));
+      p.title = vals.length > 1
+        ? semFp + ' de ' + vals.length + ' componente(s) desta categoria sem footprint'
+        : 'sem footprint vinculado';
+      b.append(p);
+    }
+    if (semSym) {
+      const p = el('span', 'pill falta', 'símbolo');
+      p.title = 'a categoria não tem desenho de símbolo';
+      b.append(p);
+    }
     /* desenho PRÓPRIO: o gerador redesenharia por cima, e o guardião o repõe. A marca não
        diz mais "de onde veio" — desde a inversão de 2026-09-14 o único caminho é o editor de
        símbolos do hub, e as 1371 marcas "altium" eram um lote de 2026-09-04 que a medição
@@ -2994,8 +3013,7 @@ function renderLibAlmoxPreview() {
       const c = chip(m.name + (m.incurrentlib ? ' ✓' : ''), 'mono' + (m.incurrentlib ? '' : ' gone'),
         () => {
           S.lib.fpShown = (S.lib.fpShown === m.name) ? null : m.name;
-          S.lib.baixo = 'fp';                 /* ver o footprint é justamente o pedido */
-          libPainelDeBaixo(true);             /* antes de desenhar: canvas escondido não pinta */
+          libPainelDeBaixo();                 /* antes de desenhar: canvas escondido não pinta */
           renderLibAlmoxPreview();
         });
       c.title = (m.incurrentlib ? 'existe na PcbLib espelhada' : 'ainda não existe na PcbLib espelhada')
