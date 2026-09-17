@@ -1,0 +1,13 @@
+AltiumPCBMirror - BuildSchematic
+Projeto: Z:\EQUIPAMENTOS ATUALIZADOS\MCER - DI241787 - MODULO CONVERSOR ENCODER-RS485\PCB E SCH\PLACA INPUT ENCODER\PRJ-DI26XXXX\PAEL-DI261940.PrjPcb
+Fonte:   \\192.168.15.192\altiumhub\current\Projects\PAEL-DI261940\schematic.js
+Data:    16/09/2026 15:05:12
+
+[ERRO] simbolo "BC337-25" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] simbolo "MC 1.5-3.81 8GF 8 vias 1817864" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] simbolo "SMD 1206 1K 200V 1/4W 1% 100ppm 603-RC1206FR-131KL" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] simbolo "SMD 1206 499K 200V 1/4W 1% 100ppm 71-CRCW1206-499K-E3" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] footprint "BC337-TO92" nao existe na PcbLib
+[ERRO] footprint "CONE MC1.5-3.81 8P" nao existe na PcbLib
+
+VALIDACAO FALHOU com 6 erro(s). NADA foi criado.

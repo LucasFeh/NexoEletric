@@ -1,0 +1,40 @@
+AltiumPCBMirror - BuildSchematic
+Projeto: Z:\EQUIPAMENTOS ATUALIZADOS\MCER - DI241787 - MODULO CONVERSOR ENCODER-RS485\PCB E SCH\PLACA INPUT ENCODER\PRJ-DI26XXXX\PAEL-DI261940.PrjPcb
+Fonte:   \\192.168.15.192\altiumhub\current\Projects\DMB - DI231765_P2\schematic.js
+Data:    16/09/2026 15:06:01
+
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] tipo "noerc" desconhecido - este BuildSchematic nao sabe cria-lo
+[ERRO] simbolo "88901bc343d40937cf0e66f0656714f" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] simbolo "CMP-0694-00003-2" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] simbolo "CMP-2000-05081-2" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] simbolo "Jumper 2" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] simbolo "Res SMD 1206" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] simbolo "SQJ431AEP-T1_GE3" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] simbolo "SZMMSZ5240BT1G" nao existe em nenhuma das 1 SchLib de origem
+[ERRO] footprint "1206 resistor" nao existe na PcbLib
+[ERRO] footprint "Conector Header 6 vias" nao existe na PcbLib
+[ERRO] footprint "FP-DW0020A-IPC_A" nao existe na PcbLib
+[ERRO] footprint "SOD3716X135N" nao existe na PcbLib
+[ERRO] footprint "SQJ402EPT1" nao existe na PcbLib
+
+VALIDACAO FALHOU com 33 erro(s). NADA foi criado.
