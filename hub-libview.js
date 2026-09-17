@@ -196,11 +196,14 @@ function aplicaVisibilidade(){
   const centro = API && API.centro && API.centro();
   if (!centro) return;
   const soGeral = (ST.aba === 'geral');
-  for (const filho of Array.from(centro.children)){
-    if (filho.id === 'lvFootprints' || filho.id === 'symed') continue;
-    if (filho.classList && filho.classList.contains('lv-tabs')) continue;   /* a faixa fica */
-    filho.hidden = !soGeral;
-  }
+  /* NÃO SE MEXE NO `hidden` DAS PEÇAS DA GERAL. Quem esconde fora da Geral é a classe
+     .lv-outra (CSS acima), e dentro da Geral quem decide QUAL corpo de baixo aparece é o
+     `libPainelDeBaixo` do hub.html — hoje sempre o footprint.
+     O laço que ficava aqui punha `hidden = false` em TODOS os filhos ao voltar para a
+     Geral, e com isso reexibia a caixa de valores que o hub.html tinha acabado de
+     esconder. Ela então caía numa SEXTA linha implícita da grade (que tem cinco) e comia
+     o espaço: os dois viewports, que são `1fr`, colapsavam para 0 px e a vista Geral
+     ficava só com as duas barras de título — "eu clico e não aparece nada". */
   const meu = centro.querySelector('#lvFootprints');
   if (meu) meu.hidden = (ST.aba !== 'footprints');
   const ed = document.getElementById('symed');
