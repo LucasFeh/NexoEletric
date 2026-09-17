@@ -41,6 +41,14 @@ const CSS = `
    senão as linhas vazias da grade continuariam reservando altura para canvas escondido. */
 .lib-view.lv-outra{grid-template-rows:auto minmax(0,1fr);}
 
+/* A FICHA DA DIREITA SÓ EXISTE NA VISTA GERAL. Em Símbolos o editor já tem o painel dele
+   (e os dois mostravam componentes DIFERENTES, porque o editor abre o seu e a ficha segue a
+   seleção da lista); em Footprints o cabeçalho "vincular a X" já diz o alvo. Esconder o
+   aside não basta: a coluna dele é uma faixa fixa do grid e continuaria reservada, deixando
+   um buraco — por isso a grade perde a terceira coluna junto. */
+.lib-grid.lv-sem-ficha{grid-template-columns:minmax(300px,0.95fr) minmax(320px,1.25fr);}
+#libDetail[hidden]{display:none !important;}
+
 /* o centro da sub-aba Footprints */
 .lv-fp{display:flex; flex-direction:column; height:100%; min-height:0;}
 /* [hidden] é só \`display:none\` da folha do navegador, e perde para o \`display:flex\` acima
@@ -134,7 +142,13 @@ function trocaCentro(){
   }
   if (meu) meu.hidden = (ST.aba !== 'footprints');
   /* a grade de 4 painéis só faz sentido na vista Geral (ver .lv-outra no CSS) */
-  centro.classList.toggle('lv-outra', ST.aba !== 'geral');
+  const soGeral = (ST.aba === 'geral');
+  centro.classList.toggle('lv-outra', !soGeral);
+  /* e a ficha da direita idem — com a coluna dela, senão sobra o buraco */
+  const aside = API.detalhe && API.detalhe();
+  if (aside) aside.hidden = !soGeral;
+  const grade = centro.parentElement;
+  if (grade && grade.classList) grade.classList.toggle('lv-sem-ficha', !soGeral);
   if (ST.aba === 'footprints'){
     pintaFootprints();
     if (ST.fps === null && !ST.carregando) carregaFps();
