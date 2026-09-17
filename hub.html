@@ -753,7 +753,11 @@ button.tag.gone { color: var(--err); }
 .seg button[aria-pressed="true"] { background: rgba(var(--tint),0.12); color: var(--text); }
 .seg button .n { font-variant-numeric: tabular-nums; color: var(--text-4); margin-left: 4px; }
 
-.lib-view { display: grid; grid-template-rows: auto auto minmax(0,1fr) auto minmax(0,1fr); min-height: 0; }
+.lib-view { display: grid; grid-template-rows: auto auto minmax(0,1fr) auto minmax(0,1fr) minmax(0,0.85fr); min-height: 0; }
+/* 6 linhas: faixa de sub-abas · barra+canvas do simbolo · barra+canvas do footprint ·
+   lista de valores. A ultima e MENOR de proposito (0.85fr) e some sozinha no acervo
+   do Altium, que nao tem valores -- linha `minmax(0,...)` sem conteudo fecha em zero.
+   Sem esta linha a lista caia numa implicita `auto` e comia os dois canvas. */
 /* a 1a linha e a faixa de sub-abas do hub-libview.js (Geral/Simbolos/Footprints); sem
    o painel carregado ela fica vazia e a linha fecha em zero, sem estragar nada */
 .lib-view .canvas-bar { padding: 8px 12px 6px; }
@@ -2488,7 +2492,7 @@ function renderLib() {
   /* a lista de VALORES so faz sentido na sub-aba de simbolos; a de footprints e a
      mesma dos dois acervos, porque a PcbLib e a mesma */
   const almoxSym = !!LIB.almox && S.tab !== 'libfp';
-  libPainelDeBaixo();
+  libPainelDeBaixo(almoxSym);
   if (almoxSym) return renderLibAlmox();
 
   const u = libUsage();
@@ -2628,11 +2632,16 @@ function renderLib() {
    Footprints, onde dá para escolher o componente E mexer nele. Aqui ela era só leitura,
    repetia o que agora tem lugar próprio, e o seletor escondia o footprint por padrão —
    justamente o que a vista Geral existe para mostrar. */
-function libPainelDeBaixo() {
+function libPainelDeBaixo(almox) {
+  /* OS TRES PAINEIS DE UMA VEZ. O seletor "valores | footprint" saiu em 2026-09-17 porque
+     ele ESCONDIA um para mostrar o outro -- e, no almoxarifado, abria escondendo o
+     footprint. Tirar o seletor nao era tirar a lista: a busca dela ("filtrar valor, MPN ou
+     codigo Mouser") e como se acha um valor entre 90, e e ela que diz qual valor o preview
+     esta mostrando. Agora simbolo, footprint e valores dividem a coluna. */
   $('#libFpVp').hidden = false;
-  $('#libValBox').hidden = true;
   $('#libFpMeta').hidden = false;
-  $('#libValMeta').hidden = true;
+  $('#libValBox').hidden = !almox;      /* o espelho do Altium nao tem valores */
+  $('#libValMeta').hidden = !almox;
   $('#libBotTtl').textContent = 'footprint';
   const seg = $('#libBotSeg'); seg.textContent = ''; seg.hidden = true;
 }
@@ -3013,7 +3022,7 @@ function renderLibAlmoxPreview() {
       const c = chip(m.name + (m.incurrentlib ? ' ✓' : ''), 'mono' + (m.incurrentlib ? '' : ' gone'),
         () => {
           S.lib.fpShown = (S.lib.fpShown === m.name) ? null : m.name;
-          libPainelDeBaixo();                 /* antes de desenhar: canvas escondido não pinta */
+          libPainelDeBaixo(true);             /* antes de desenhar: canvas escondido não pinta */
           renderLibAlmoxPreview();
         });
       c.title = (m.incurrentlib ? 'existe na PcbLib espelhada' : 'ainda não existe na PcbLib espelhada')
