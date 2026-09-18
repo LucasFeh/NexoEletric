@@ -12,6 +12,11 @@ const assert = require('assert');
 
 global.window = { addEventListener() {} };            /* sem isSecureContext: força o caminho do textarea */
 const Bom = require('../hub-bom.js');
+/* O painel BOM mora no script inline do hub. Um erro de sintaxe ali derruba o hub inteiro,
+   mesmo que o servidor e a pagina /bom/<id> respondam 200. */
+const hub = require('fs').readFileSync(require('path').join(__dirname, '..', 'hub.html'), 'utf8');
+for (const trecho of hub.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g))
+  new Function(trecho[1]);
 
 /* placa mínima: um resistor no topo, com bbox e outline, que é o que o model exige */
 const B = {

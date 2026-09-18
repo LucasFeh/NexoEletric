@@ -3992,7 +3992,6 @@ async function bomCompute() {
 
   const W = $('#bomWarn'); W.textContent = '';
   const avisos = (r.warnings || []).slice();
-  const p = proj();
   if (p && p.pending > 0)
     avisos.unshift(p.pending + ' mudança(s) pendente(s) em changes.js — o BOM sai do board.js cru; '
                  + 'rode ApplyChanges e ExportPcb antes de usar na bancada.');
