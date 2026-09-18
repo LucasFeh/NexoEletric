@@ -1259,10 +1259,10 @@ function montaAmbiente(){
   assert.ok(/data-ver="tracks"[^>]*><svg/.test(barra), 'trilhas tem que ser \u00edcone na barra');
   assert.ok(barra.indexOf('data-modo=') < 0, 'o modo da lista saiu da barra');
   assert.ok(barra.indexOf('id="escuro"') < 0, 'o tema saiu da barra');
-  /* sobra na barra so o que muda a VISTA: as tres de layout, as trilhas, o lado da lista e
-     a gaveta */
-  assert.strictEqual((barra.match(/<button/g) || []).length, 6,
-                     'a barra tem que ficar com seis bot\u00f5es: ' + (barra.match(/<button/g) || []).length);
+  /* a barra inclui tambem o refresh manual dos espelhos */
+  assert.strictEqual((barra.match(/<button/g) || []).length, 7,
+                     'a barra tem que ficar com sete bot\u00f5es: ' + (barra.match(/<button/g) || []).length);
+  assert.ok(barra.includes('id="btRefresh"'), 'refresh manual do BOM');
   const gaveta = hn.match(/<aside id="gaveta">[\s\S]*?<\/aside>/)[0];
   NA_GAVETA.forEach(k =>
     assert.ok(gaveta.includes('type="checkbox" data-ver="' + k + '"'), k + ' tem que ser caixa na gaveta'));

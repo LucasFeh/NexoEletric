@@ -31,12 +31,12 @@ const runtimeDe = h => partes(h)[1];
 /* ── servida por /bom/<id>: a página fala com o servidor ── */
 {
   const h = Bom.gerar(B, null, { proj: 'Placa X', api: '/api/bom/placa-x',
-                                 vistos: { 'R1|10k': true }, rev: 7, boardRev: 99 }).html;
+                                 vistos: { 'R1|10k': true }, rev: 7, sourceRev: 'abc123' }).html;
   const D = dDe(h);
   assert.strictEqual(D.api, '/api/bom/placa-x', 'a página não recebeu com quem falar');
   assert.deepStrictEqual(D.vistos, { 'R1|10k': true }, 'os vistos da bancada não vieram');
   assert.strictEqual(D.rev, 7);
-  assert.strictEqual(D.boardRev, 99, 'sem boardRev a página não nota um ExportPcb novo');
+  assert.strictEqual(D.sourceRev, 'abc123', 'sem sourceRev a página não nota esquema/PCB novos');
 
   const js = runtimeDe(h);
   /* o que sobe é um DELTA: dois tablets marcando peças diferentes têm de se somar, e não
@@ -52,7 +52,9 @@ const runtimeDe = h => partes(h)[1];
   /* sincronia entre quem abriu o link, e recarga quando o board muda */
   assert.ok(/setInterval\(sincroniza, 4000\)/.test(js), 'não busca o que os outros marcaram');
   assert.ok(/visibilitychange/.test(js), 'voltar para a aba não re-sincroniza');
-  assert.ok(/location\.reload\(\)/.test(js), 'board.js novo não recarrega');
+  assert.ok(/j\.sourceRev !== D\.sourceRev/.test(js), 'fonte nova nao recarrega');
+  assert.ok(h.includes('id="btRefresh"') && /btRefresh'\)\.onclick/.test(js),
+            'botao de refresh manual nao esta ligado');
 }
 
 /* ── sem servidor (aberta de um arquivo): volta ao localStorage, como era ── */

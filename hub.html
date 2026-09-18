@@ -1216,7 +1216,7 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
         <div class="bom-view">
           <div class="canvas-bar">
             <span class="ttl">prévia</span><span class="meta" id="bomMeta"></span>
-            <div class="right"><button class="btn btn-ghost btn-sm" id="bomAbrir">Abrir numa aba</button></div>
+            <div class="right"><button class="btn btn-ghost btn-sm" id="bomRefresh" title="Buscar alterações no esquema e na PCB">↻ Refresh</button><button class="btn btn-ghost btn-sm" id="bomAbrir">Abrir numa aba</button></div>
           </div>
           <iframe id="bomFrame" title="prévia do BOM"></iframe>
         </div>
@@ -3910,8 +3910,8 @@ async function lzAbrirNoLightBurn() {
 }
 
 /* ═══ BOM — página interativa para montar a placa ══════════════
-   Sai do MESMO board.js que a vista PCB desenha, entao nao ha um segundo caminho de
-   extracao para divergir. Toda a geometria e a montagem do arquivo moram no hub-bom.js;
+   Sai da mesma fonte /api/bom/<id>/source usada pelo link: geometria da PCB e dados de
+   compra do esquema quando ele e o espelho mais novo. A montagem mora no hub-bom.js;
    aqui so ha estado de UI, previa e gravacao.
 
    A previa e um iframe com srcdoc do arquivo INTEIRO - o que se ve e literalmente o que vai
@@ -3947,18 +3947,34 @@ const bomSplits = mkSplits({
   lados: { l: { v:'--bom-l', sel:'.bom-opts' } },
 });
 
-let bomTimer = null, bomFeito = null;      /* bomFeito = { html, model, warnings } */
+let bomTimer = null, bomFeito = null, bomPedido = 0; /* evita resposta antiga apos trocar projeto */
 
-function bomGerar() {
-  const B = bomBoard();
+function bomGerar(B) {
+  B = B || bomBoard();
   if (!B) return null;
   const p = proj();
   return HubBom.gerar(B, S.bom, { proj: (p && p.name) || 'placa', generated: B.generated || '' });
 }
 
-function bomCompute() {
+async function bomCompute() {
+  const pedido = ++bomPedido, p = proj();
+  if (!p) return;
   const t0 = (window.performance || Date).now();
-  const r = bomGerar();
+  let B = bomBoard();
+  if (location.protocol.startsWith('http')) {
+    try {
+      const resp = await fetch('/api/bom/' + encodeURIComponent(p.id) + '/source', { cache:'no-store' });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const dado = await resp.json();
+      if (!dado.ok || !dado.board) throw new Error(dado.error || 'resposta vazia');
+      B = dado.board;
+    } catch (e) {
+      if (pedido === bomPedido) $('#bomMeta').textContent = 'falha ao atualizar: ' + e.message;
+      return;
+    }
+  }
+  if (pedido !== bomPedido || !proj() || proj().id !== p.id) return;
+  const r = bomGerar(B);
   if (!r) return;
   bomFeito = r;
   const ms = Math.round((window.performance || Date).now() - t0);
@@ -4006,6 +4022,11 @@ function bomSchedule() {
   $('#bomMeta').textContent = 'gerando…';
   clearTimeout(bomTimer);
   bomTimer = setTimeout(bomCompute, 260);
+}
+function bomRefresh() {
+  clearTimeout(bomTimer);
+  $('#bomMeta').textContent = 'atualizando…';
+  bomCompute();
 }
 
 function renderBom() {
@@ -4661,6 +4682,7 @@ $('#bomLayout').onchange = e => bomSet({ layout: e.target.value });
   bomSave(); bomSchedule();
 }));
 $('#bomLink').onclick = bomCopiarLink;
+$('#bomRefresh').onclick = bomRefresh;
 $('#bomAbrir').onclick = bomAbrir;
 
 /* ── laser ── */

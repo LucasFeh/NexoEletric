@@ -17,8 +17,6 @@ import sys
 import threading
 import time
 
-from urllib.parse import quote
-
 from flask import Flask, Response, abort, request, send_from_directory
 from werkzeug.utils import safe_join
 
@@ -681,7 +679,7 @@ def api_almox_sync_stream(run_id):
 #
 # O BOM nao e mais um arquivo que se baixa: e a URL /bom/<proj_id>. Nada fica gravado em
 # lugar nenhum. A rota devolve um bootstrap curto que carrega o hub-bom.js ATUAL, o
-# board.js do projeto e o estado da bancada, e monta o documento no navegador de quem
+# os espelhos do projeto e o estado da bancada, e monta o documento no navegador de quem
 # abriu. E dai que vem a propriedade que se queria: mexer no gerador melhora o BOM de
 # TODOS os projetos no mesmo instante, porque nao existe copia velha para regerar.
 #
@@ -741,6 +739,60 @@ def _bom_tag(data):
     return hashlib.md5(bruto).hexdigest()[:12]
 
 
+def _bom_source_rev(d):
+    """Revisao dos dois espelhos: o BOM muda com a PCB ou com o esquema."""
+    stamps = []
+    for fname in ('board.js', 'schematic.js'):
+        try:
+            st = os.stat(os.path.join(d, fname))
+            stamps.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            stamps.append(None)
+    return _bom_tag(stamps)
+
+
+def _bom_source(d):
+    """Geometria da PCB com os dados de compra do espelho mais recente.
+
+    Um comment alterado no esquema deve chegar a bancada antes do proximo ECO/ExportBoard.
+    Quando a PCB for exportada depois, os dados dela passam a prevalecer. A geometria e a
+    presenca fisica de componentes continuam vindo da PCB.
+    """
+    board_path = os.path.join(d, 'board.js')
+    sch_path = os.path.join(d, 'schematic.js')
+    board = load_var_file(board_path)
+    if os.path.isfile(sch_path) and os.stat(sch_path).st_mtime_ns >= os.stat(board_path).st_mtime_ns:
+        sch = load_var_file(sch_path)
+        por_ref = {it.get('ref'): it for it in sch.get('items', [])
+                   if isinstance(it, dict) and it.get('t') == 'comp' and it.get('ref')}
+        for comp in board.get('components', []):
+            origem = por_ref.get(comp.get('ref'))
+            if origem:
+                for campo in ('comment', 'footprint'):
+                    if campo in origem:
+                        comp[campo] = origem[campo]
+    return board
+
+
+@app.route('/api/bom/<proj_id>/source')
+def api_bom_source(proj_id):
+    d = _proj_dir_by_id(proj_id)
+    if d is None:
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    if not os.path.isfile(os.path.join(d, 'board.js')):
+        return {'ok': False, 'error': 'board.js ausente'}, 404
+    try:
+        for _ in range(3):
+            antes = _bom_source_rev(d)
+            board = _bom_source(d)
+            rev = _bom_source_rev(d)
+            if antes == rev:
+                return {'ok': True, 'board': board, 'sourceRev': rev}
+    except (OSError, ValueError) as e:
+        return {'ok': False, 'error': 'nao consegui ler os espelhos: ' + str(e)}, 500
+    return {'ok': False, 'error': 'espelhos mudaram durante a leitura; tente Refresh'}, 503
+
+
 BOM_BOOTSTRAP = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BOM — %(projEsc)s</title>
@@ -754,7 +806,6 @@ BOM_BOOTSTRAP = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"
 <script src="/hub-font.js"></script>
 <script src="/hub-laser.js"></script>
 <script src="/hub-bom.js"></script>
-<script src="%(board)s"></script>
 <script>
 (function(){
   var API = %(api)s, PROJ = %(projJson)s;
@@ -767,17 +818,18 @@ BOM_BOOTSTRAP = """<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"
   if (typeof HubFont === 'undefined' || typeof HubLaser === 'undefined')
     return falha('nao consegui carregar hub-font.js / hub-laser.js, de que o gerador depende');
   if (typeof HubBom === 'undefined') return falha('nao consegui carregar hub-bom.js');
-  if (typeof pcbmirror === 'undefined') return falha('nao consegui carregar o board.js deste projeto');
-  Promise.all([pega(API + '/opts'), pega(API + '/vistos')]).then(function (res){
+  Promise.all([pega(API + '/source'), pega(API + '/opts'), pega(API + '/vistos')]).then(function (res){
     var r;
+    if (!res[0] || !res[0].ok || !res[0].board)
+      return falha((res[0] && res[0].error) || 'nao consegui carregar os dados do BOM');
     try {
-      r = HubBom.gerar(pcbmirror, (res[0] && res[0].opts) || null, {
+      r = HubBom.gerar(res[0].board, (res[1] && res[1].opts) || null, {
         proj: PROJ,
-        generated: pcbmirror.generated || '',
+        generated: res[0].board.generated || '',
         api: API,
-        vistos: (res[1] && res[1].vistos) || {},
-        rev: (res[1] && res[1].rev) || 0,
-        boardRev: (res[1] && res[1].boardRev) || 0
+        vistos: (res[2] && res[2].vistos) || {},
+        rev: (res[2] && res[2].rev) || 0,
+        sourceRev: res[0].sourceRev
       });
     } catch (e) { return falha('o gerador falhou: ' + (e && e.message)); }
     /* Troca o documento inteiro em vez de embutir num iframe: a URL continua sendo a do
@@ -807,7 +859,6 @@ def bom_page(proj_id):
     body = BOM_BOOTSTRAP % {
         'projEsc': name.replace('&', '&amp;').replace('<', '&lt;'),
         'projJson': json.dumps(name),
-        'board': '/Projects/' + quote(name) + '/board.js',
         'api': json.dumps('/api/bom/' + proj_id),
     }
     return Response(body, mimetype='text/html')
@@ -822,7 +873,7 @@ def api_bom_vistos_get(proj_id):
     return {'ok': True,
             'vistos': vistos,
             'rev': _bom_tag(vistos),
-            'boardRev': _mtime(os.path.join(d, 'board.js'))}
+            'sourceRev': _bom_source_rev(d)}
 
 
 @app.route('/api/bom/<proj_id>/vistos', methods=['POST'])

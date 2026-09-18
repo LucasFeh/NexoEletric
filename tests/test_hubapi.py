@@ -78,10 +78,11 @@ try:
     # root.HubFont e root.HubLaser, e fora do CommonJS ninguem resolve isso sozinho. Com a
     # ordem errada a pagina abre morta, com "reading 'padPrim'" no console.
     assert pag.index('/hub-font.js') < pag.index('/hub-laser.js') < pag.index('/hub-bom.js'),         'as dependencias do gerador precisam vir antes dele, nesta ordem'
-    assert '/board.js' in pag, 'o bootstrap nao carrega o board do projeto'
+    assert '/source' in pag, 'o bootstrap nao busca a fonte conjunta do BOM'
     assert '/api/bom/' + pid in pag, 'o bootstrap nao sabe com quem falar'
     assert 'HubBom.gerar' in pag, 'o bootstrap nao monta a pagina'
     assert cli.get('/bom/nao-existe').status_code == 404
+    assert cli.get('/api/bom/nao-existe/source').status_code == 404
 
     # O link tem que servir para OUTRA maquina: quem abre o hub em 127.0.0.1 copiaria um
     # endereco que so funciona no proprio PC, e o ponto do link e abrir no tablet.
@@ -130,6 +131,43 @@ finally:
             os.remove(os.path.join(dbom, f))
         except OSError:
             pass
+
+# O BOM acompanha comment/footprint do esquema sem esperar novo ExportBoard. Se a PCB
+# for exportada depois, o espelho novo dela prevalece. A revisao muda nos dois casos.
+tmp = tempfile.mkdtemp()
+try:
+    pasta = os.path.join(tmp, 'Projects', 'Placa BOM')
+    os.makedirs(pasta)
+    bp, sp = os.path.join(pasta, 'board.js'), os.path.join(pasta, 'schematic.js')
+    with io.open(bp, 'w', encoding='utf-8') as f:
+        f.write('var pcbmirror = ' + json.dumps({'components': [
+            {'ref': 'R1', 'comment': '15k', 'footprint': '0603', 'layer': 'Top'}]}) + ';')
+    with io.open(sp, 'w', encoding='utf-8') as f:
+        f.write('var schematic = ' + json.dumps({'items': [
+            {'t': 'comp', 'ref': 'R1', 'comment': '16k', 'footprint': '0805'}]}) + ';')
+    os.utime(bp, ns=(1000000000, 1000000000))
+    os.utime(sp, ns=(2000000000, 2000000000))
+    antigo = H.ROOT
+    H.ROOT = tmp
+    try:
+        cli = H.app.test_client()
+        fonte = cli.get('/api/bom/placa-bom/source').get_json()
+        assert fonte['board']['components'][0]['comment'] == '16k'
+        assert fonte['board']['components'][0]['footprint'] == '0805'
+        assert cli.get('/api/bom/placa-bom/vistos').get_json()['sourceRev'] == fonte['sourceRev']
+        rev = fonte['sourceRev']
+        os.utime(bp, ns=(3000000000, 3000000000))
+        fonte = cli.get('/api/bom/placa-bom/source').get_json()
+        assert fonte['board']['components'][0]['comment'] == '15k', 'ExportBoard novo prevalece'
+        assert fonte['sourceRev'] != rev, 'mudanca da PCB nao disparou atualizacao'
+        rev = fonte['sourceRev']
+        os.utime(sp, ns=(4000000000, 4000000000))
+        assert cli.get('/api/bom/placa-bom/vistos').get_json()['sourceRev'] != rev, \
+            'mudanca do esquema nao disparou atualizacao'
+    finally:
+        H.ROOT = antigo
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
 
 # Credencial do almoxarifado: campo em branco no formulario significa "nao mexe", nunca
 # "apaga". Valia so para a senha. Passou a valer para os quatro quando a url saiu do

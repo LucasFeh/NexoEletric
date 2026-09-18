@@ -941,12 +941,23 @@ O BOM **não é um arquivo que se baixa**. Cada projeto tem uma URL fixa:
 |---|---|
 | **Copiar link** | grava as opções da aba e copia a URL do BOM deste projeto |
 | Abrir numa aba | abre a mesma URL — o que se vê é o que quem recebeu o link vê |
+| Refresh | busca novamente os espelhos do esquema e da PCB e recria o BOM |
 
 `/bom/<id>` não devolve um BOM gravado: devolve um **bootstrap** de duas mil letras que
-carrega o `hub-bom.js` atual, o `board.js` do projeto e o estado da bancada, e monta o
+carrega o `hub-bom.js` atual, os espelhos do projeto e o estado da bancada, e monta o
 documento no navegador de quem abriu. Não existe cópia velha em lugar nenhum — é daí que
 vem a propriedade que se queria: melhorar o gerador melhora o BOM de **todos** os projetos
 no mesmo instante, sem regerar nada e sem reenviar link para ninguém.
+
+O BOM usa a geometria e os componentes físicos de `board.js`. Para componentes que existem
+nos dois espelhos, `comment` e `footprint` vêm de `schematic.js` quando ele foi atualizado
+depois da PCB; após um novo `ExportBoard`, os dados da PCB prevalecem. Assim, trocar um
+comentário de 15k para 16k no esquema exportado atualiza o agrupamento sem esperar o ECO.
+A página aberta confere a revisão dos dois espelhos a cada quatro segundos e se recria
+quando ela muda. O botão **Refresh** faz essa busca na hora, tanto no link quanto na prévia
+do hub. Mudanças feitas somente nos documentos nativos do Altium precisam ser exportadas
+para os espelhos; inclusão, remoção e posição de peças na placa precisam do ECO e de
+`ExportBoard` para aparecerem no desenho do BOM.
 
 A ordem dos `<script>` do bootstrap não é cosmética. No browser o `hub-bom.js` lê
 `root.HubFont` e `root.HubLaser`, e fora do CommonJS ninguém resolve isso sozinho: com a

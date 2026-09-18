@@ -539,8 +539,8 @@ function temFeitos(){ for (var k in feitos) if (feitos[k]) return true; return f
 /* o mesmo, para o primitivo que sabe de quem e: pad e serigrafia trazem o indice em c */
 function feitoDe(i){ return i != null && feitoComp(i); }
 
-/* Traz o que mudou no servidor. board.js novo (outro ExportPcb) recarrega a pagina: o
-   desenho e a lista ficariam velhos, e isso nao da para remendar por partes. */
+/* Traz o que mudou no servidor. Uma edicao no esquema ou na PCB refaz a pagina inteira:
+   desenho, valores e agrupamento precisam nascer da mesma revisao. */
 function sincroniza(){
   if (!API || enviando) return;
   fetch(API + '/vistos', { cache: 'no-store' })
@@ -548,7 +548,7 @@ function sincroniza(){
     .then(function (j){
       if (!j || !j.ok) return;
       semAviso();
-      if (D.boardRev && j.boardRev && j.boardRev !== D.boardRev){ location.reload(); return; }
+      if (D.sourceRev && j.sourceRev && j.sourceRev !== D.sourceRev){ location.reload(); return; }
       if (j.rev === revVistos) return;
       if (absorve(j.vistos, j.rev)) vistoMudou();
     })
@@ -1759,6 +1759,7 @@ function inicia(){
   var gv = document.getElementById('gaveta'), gvBg = document.getElementById('gavetaBg');
   var abreGaveta = function (v){ gv.classList.toggle('on', v); gvBg.classList.toggle('on', v); };
   document.getElementById('btGaveta').onclick = function (){ abreGaveta(!gv.classList.contains('on')); };
+  document.getElementById('btRefresh').onclick = function (){ location.reload(); };
   document.getElementById('gavetaFecha').onclick = function (){ abreGaveta(false); };
   gvBg.onclick = function (){ abreGaveta(false); };
   document.addEventListener('keydown', function (ev){
@@ -1915,7 +1916,7 @@ function html(m, meta){
     api: me.api || '',
     vistos: me.vistos || null,
     rev: me.rev || 0,
-    boardRev: me.boardRev || 0,
+    sourceRev: me.sourceRev || '',
     lados: LADO, cores: COR,
     layout: o.layout,
     guiada: o.guided ? 1 : 0,
@@ -1950,6 +1951,7 @@ function html(m, meta){
          (o.empresa ? ' · ' + esc(o.empresa) : '') +
          (o.revisao ? ' · rev ' + esc(o.revisao) : '') + '</div>');
   L.push('<div class="tools">');
+  L.push('<button class="t" id="btRefresh" title="buscar alterações no esquema e na PCB">↻ Refresh</button>');
   /* Os quatro layouts sao icones: a barra fica curta e o desenho de cada um diz o que vai
      acontecer sem depender de leitura. O `title` continua nomeando, para quem passar o mouse. */
   /* UM icone para as duas faces: clicar troca de uma para a outra, e o desenho mostra a que
