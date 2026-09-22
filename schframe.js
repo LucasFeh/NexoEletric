@@ -1979,7 +1979,14 @@ function renderAddPreview(){
       /* UMA ETIQUETA PARA CADA COISA — encapsulamento e codigo do fabricante sao leituras
          diferentes, e juntas num balao so viram texto corrido. Etiqueta vazia nao existe,
          em vez de virar um travessao. Mesmo desenho do hub.html. */
-      const pkTxt = (p.pkgs || []).join(' · ');
+      /* UM encapsulamento, desempatado pelo footprint -- a mesma regra do `alxEncap` do
+         hub.html. Aqui era `pkgs.join(' · ')`, que mostra TODOS: hoje da no mesmo (nenhum
+         valor do acervo tem mais de um), mas no dia em que o Odoo mandar dois as duas telas
+         diriam coisas diferentes sobre a mesma peca. */
+      const pks = p.pkgs || [];
+      const fpl = String(p.footprint || '').toLowerCase();
+      const pkTxt = pks.length <= 1 ? (pks[0] || '')
+                  : (pks.find(x => fpl.includes(String(x).toLowerCase())) || pks[0]);
       const cod = String((p.conn && p.conn.tipo) || p.mpn || '').trim();
       const tags = el('span', 'tags');
       if (pkTxt) tags.append(el('span', 'pk', pkTxt));

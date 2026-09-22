@@ -115,9 +115,14 @@ const CSS = `
   border-bottom:1px solid var(--line,#3a3a3a);}
 .lv-comps .symed-comp .fpat{font-size:10px; color:var(--hi,#4fc3f7);
   font-family:Consolas,ui-monospace,monospace;}
-/* o encap, legível: mesma pinta do que a vista Geral usa na lista de valores */
-.lv-comps .symed-comp .enc{font-size:11px; color:var(--text-2,#b8b8b8); padding:0 5px;
-  border-radius:var(--r-sm,4px); background:rgba(var(--tint,79,195,247),.10);
+/* o encap, legivel: MESMA PINTA da etiqueta .pk da lista de valores (hub.html e
+   schframe.html). O comentario ja dizia isso e tinha deixado de ser verdade -- a lista
+   virou pilula (radius 999px, padding 1px 7px) e esta copia ficou no desenho velho.
+   Terceira copia do mesmo chip; se mudar uma, mude as tres.
+   SEM CRASE NESTE ARQUIVO: todo este CSS vive dentro de um template literal, e uma crase
+   no comentario FECHA A STRING -- o modulo inteiro morre com "is not a function". */
+.lv-comps .symed-comp .enc{font-size:11px; color:var(--text-2,#b8b8b8); padding:1px 7px;
+  border-radius:999px; background:rgba(var(--tint,79,195,247),.12);
   font-family:Consolas,ui-monospace,monospace; white-space:nowrap;}
 .lv-comps .symed-comp .semfp{font-size:10px; color:var(--warn,#ffb74d);}
 .lv-titulo{display:flex; align-items:baseline; gap:8px; padding:7px 12px 4px;
