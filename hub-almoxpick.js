@@ -100,10 +100,65 @@ function acervos(){
 
 const saldoDe = v => (v.itens || []).reduce((a, i) => a + (Number(i.estoque) || 0), 0);
 
-/* [{familia, sym, acervo, valores:[{v, nome, saldo, pkg}]}] — uma entrada por símbolo do
-   almoxarifado, com os valores dele. `nome` é o que vai para o schematic.js (`v.altium`). */
+/* ── A LINHA DO CONECTOR ──
+   "4 vias 3.81 180 femea". Ela é MONTADA AQUI, na tela, a partir dos campos que o gerador
+   emite soltos em `valores[].conn` (tools/almox/conectores.py). Não é o rótulo do valor e
+   não pode ser: o rótulo é a chave do livro-razão (Libs/almox-parts.json) e metade da
+   identidade do valor — `agrupar()` chaveia por (rótulo, encapsulamento), então dois
+   produtos com o mesmo rótulo VIRAM UM, com o estoque somado. Medido no dump: esta frase
+   se repete em 27 dos 327 conectores; como rótulo, funde sete blocos terminais Phoenix
+   diferentes — macho e fêmea juntos — num componente só.
+   Campo que o Odoo não diz simplesmente não aparece: em CIRCULAR MIL e RÉGUA TERMINAL o
+   passo e o ângulo não existem como propriedade da peça. */
+function linhaConn(c){
+  if (!c) return '';
+  const p = [];
+  if (c.vias) p.push(c.vias + (c.vias === 1 ? ' via' : ' vias'));
+  if (c.matriz) p.push('(' + c.matriz + ')');
+  if (c.passo != null) p.push(String(c.passo));
+  if (c.angulo) p.push(c.angulo + '°');
+  if (c.genero) p.push(c.genero);
+  return p.join(' ');
+}
+
+/* A CHAVE DO GRUPO — o texto de uma linha da lista da esquerda.
+   Era o nome do SÍMBOLO, e por isso a esquerda tinha 148 linhas: nos ESPECIAIS o símbolo
+   se parte por número de pinos (CIRCUITO INTEGRADO [8P], [14P], [16P]…) porque o desenho
+   precisa ter N pinos — e isso é verdade sobre o DESENHO, não sobre como se procura uma
+   peça. Agrupando por família são 82 linhas, e o número de pinos desce para o rótulo do
+   valor, onde ele é um dado a mais em vez de um labirinto.
+   O conector não depende disto: lá o corte foi feito no gerador, e ele já tem um símbolo
+   por subtipo, com a pinagem no próprio valor (`valores[].parts`).
+   A montagem continua partindo — só nos BÁSICOS, onde o símbolo é mesmo partido por ela
+   (RESISTOR [SMD] / RESISTOR [PTH]). Nos especiais `montagem` é só a do primeiro item que
+   criou o símbolo (ver almox2lib » monta_simbolo) e dividir por ela seria dividir por acaso. */
+function chaveDoGrupo(sy){
+  const fam = String(sy.familia || sy.name || '');
+  return (sy.grupo === 'basicos' && sy.montagem) ? fam + ' [' + sy.montagem + ']' : fam;
+}
+
+/* a ordem DENTRO da família: primeiro por número de vias, depois passo, depois o rótulo.
+   Alfabética sobre o nome do símbolo dava "10V, 12V, 13V, …, 2V, 20V", e juntar vários
+   símbolos numa linha só espalharia essa bagunça pela lista da direita inteira. */
+function ordemDoValor(it){
+  const c = it.conn || {};
+  return [Number(c.vias) || 0, c.passo == null ? 1e9 : Number(c.passo), it.rotulo || ''];
+}
+function comparaValor(a, b){
+  const x = ordemDoValor(a), y = ordemDoValor(b);
+  if (x[0] !== y[0]) return x[0] - y[0];
+  if (x[1] !== y[1]) return x[1] - y[1];
+  return String(x[2]).localeCompare(String(y[2]), 'pt-BR', { numeric: true });
+}
+
+/* [{familia, sym, acervo, valores:[{v, sym, nome, saldo, pkg}]}] — uma entrada por FAMÍLIA
+   do almoxarifado, com os valores de todos os símbolos dela. `nome` é o que vai para o
+   schematic.js (`v.altium`).
+   Cada item carrega o `sym`/`lib` DE ONDE ELE VEIO. É obrigatório desde que o grupo deixou
+   de ser um símbolo só: a prévia do desenho, o "Editar símbolo" e o `/api/symbols/almox-*`
+   precisam do símbolo do COMPONENTE ESCOLHIDO, e `g.sym` agora é só o primeiro da família. */
 function grupos(){
-  const fora = [];
+  const porChave = new Map();
   for (const a of acervos()){
     const lib = window[a.var];
     const titulo = String(a.title || '').replace(/^Almoxarifado\s*[—-]\s*/i, '').toLowerCase();
@@ -113,7 +168,7 @@ function grupos(){
     const acervo = { id: a.id, title: a.title, file: a.file, varName: a.var };
     for (const sy of ((lib && lib.symbols) || [])){
       const vals = (sy.valores || []).filter(v => v && v.altium).map(v => ({
-        v, nome: v.altium, rotulo: v.label || v.altium,
+        v, sym: sy, lib: acervo, nome: v.altium, rotulo: v.label || v.altium,
         saldo: Number(v.estoque) || saldoDe(v),
         pkg: v.footprint || (v.pkgs || [])[0] || '',
         /* 956 dos 2513 valores trazem MPN, em 97 das 148 familias — e o part number e
@@ -121,9 +176,31 @@ function grupos(){
            ele na busca, digitar "SZMMSZ5240BT1G" nao achava o DIODO ZENER [PTH] que o
            carrega, e a tela dizia "nenhuma familia casa" tendo a resposta dentro. */
         mpn: String((v.mpn || '')).trim(),
+        conn: v.conn || null,
+        linha: linhaConn(v.conn),
+        /* o codigo do fabricante (MC 1,5/4-G-3,81, 2510, BBPTC-4). E ele que separa duas
+           linhas identicas em vias/passo/angulo, e e o que se tem na mao olhando a peca. */
+        tipo: String(((v.conn || {}).tipo) || '').trim(),
       }));
-      if (vals.length) fora.push({ familia: sy.name, sym: sy, acervo: titulo, lib: acervo, valores: vals });
+      if (!vals.length) continue;
+      const chave = chaveDoGrupo(sy);
+      let g = porChave.get(chave);
+      if (!g){
+        g = { familia: chave, sym: sy, acervo: titulo, lib: acervo, valores: [], acervos: new Set() };
+        porChave.set(chave, g);
+      }
+      g.acervos.add(titulo);
+      for (const it of vals) g.valores.push(it);
     }
+  }
+  const fora = [];
+  for (const g of porChave.values()){
+    g.valores.sort(comparaValor);
+    /* uma familia pode cruzar os dois acervos — os conectores sem pinagem legivel ficam nos
+       especiais enquanto os irmaos dela estao nos basicos. O titulo diz os dois. */
+    g.acervo = [...g.acervos].sort().join(' + ');
+    delete g.acervos;
+    fora.push(g);
   }
   fora.sort((a, b) => a.familia.localeCompare(b.familia, 'pt-BR'));
   return fora;
@@ -145,13 +222,50 @@ function recomendado(gs, ...nomes){
   return null;
 }
 
-const casa = (txt, q) => String(txt || '').toUpperCase().indexOf(q) >= 0;
+/* ── NÚMERO PROCURADO É NÚMERO INTEIRO, não pedaço de outro ──
+   Quem digita "10" está dizendo DEZ VIAS, e `indexOf` achava o "10" de dentro do número de
+   pedido `(0710196)` — o bloco terminal de 4 vias entrava na busca por "10". A fronteira é
+   de DÍGITO, não de palavra: "10" tem de casar "10 vias" e "SMD 0805 10K", e não pode casar
+   "110 vias" nem "100nF". Só vale para o termo puramente numérico; "100NF" e "BPSC-40"
+   continuam sendo procurados como texto.
+   O regex é montado uma vez por termo e guardado: são 2.545 valores por tecla digitada. */
+const _regras = new Map();
+function regraDoTermo(q){
+  let r = _regras.get(q);
+  if (!r){
+    const num = /^[0-9]+(?:[.,][0-9]+)?$/.test(q);
+    r = { num: num, letra: /[A-Z]/.test(q),
+          rx: num ? new RegExp('(?<![0-9])' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+                               + '(?![0-9])') : null };
+    if (_regras.size > 400) _regras.clear();        // a busca é por tecla: não acumula
+    _regras.set(q, r);
+  }
+  return r;
+}
+function casa(txt, q){
+  const s = String(txt || '').toUpperCase();
+  if (!s || !q) return false;
+  const r = regraDoTermo(q);
+  return r.rx ? r.rx.test(s) : s.indexOf(q) >= 0;
+}
 /* part number se escreve dos dois jeitos: "CDSOT23-SM712" e "CDSOT23SM712", "SZMMSZ 5240"
    e "SZMMSZ5240". Comparar so o literal faz a busca depender de quem digitou o hifen no
    mesmo lugar que o fornecedor. Vale SO para o MPN: tirar separador dos outros campos
    faria "CAP 0805" casar com "CAP0805" e tambem com coisas que nao se quer. */
-const semSep = t => String(t || '').toUpperCase().replace(/[\s\-\/.]/g, '');
-const casaMpn = (mpn, q, qSem) => !!mpn && (casa(mpn, q) || (qSem.length >= 3 && semSep(mpn).indexOf(qSem) >= 0));
+/* A VIRGULA ENTRA NA LISTA por causa do conector. O mesmo bloco terminal Phoenix esta
+   cadastrado no Odoo como "MC 1,5/ 4-STF-3,81" e como "MC 1.5/ 4-STF-3.81" — decimal
+   brasileiro numa linha, ponto na outra, no mesmo catalogo. Sem a virgula aqui, quem
+   digitasse a forma que NAO fosse a da linha procurada recebia lista vazia; medido no
+   navegador com o codigo lido da propria peca. */
+const semSep = t => String(t || '').toUpperCase().replace(/[\s\-\/.,]/g, '');
+/* O caminho SEM SEPARADOR é para PART NUMBER, e por isso exige LETRA no termo. Um número
+   solto colapsado perde o sentido e casa qualquer coisa: "2.54" vira "254", e "254" existe
+   dentro de `DFK-MSTB 2,5/ 4-GF-5,08` — que é passo 5,08 — porque o "2,5/ 4" da bitola e da
+   contagem de vias encosta um no outro quando a vírgula e a barra saem. Medido no navegador:
+   era esse o caminho que fazia "10 conector 2.54 bloco terminal" devolver um conector de 4
+   vias e passo 5,08. */
+const casaMpn = (mpn, q, qSem) => !!mpn && (casa(mpn, q)
+  || (regraDoTermo(q).letra && qSem.length >= 3 && semSep(mpn).indexOf(qSem) >= 0));
 
 const passa = (it, filtro) => filtro === 'stock' ? it.saldo > 0
                             : filtro === 'nostock' ? it.saldo <= 0 : true;
@@ -162,19 +276,60 @@ const passa = (it, filtro) => filtro === 'stock' ? it.saldo > 0
    familia passa no filtro", que e o pior jeito de errar: parece bug da tela, nao da busca. */
 function valorCasa(it, q, qSem){
   return !q || casa(it.rotulo, q) || casa(it.nome, q) || casa(it.pkg, q)
-           || casaMpn(it.mpn, q, qSem);
+           || casaMpn(it.mpn, q, qSem)
+           /* Os campos do conector, e o NOME DO SÍMBOLO junto. Os dois são regressão se
+              faltarem: a linha da esquerda deixou de trazer o número de vias (era
+              "CONECTOR 10V", hoje é "CONECTOR HEADER SEM TRAVA"), então quem digita "10V"
+              ou "10 vias" agora depende só daqui. `it.linha` responde por "10 vias",
+              "3.81", "90°" e "femea"; `it.sym.name` responde pelo "10V" de quem tem o
+              costume antigo — e pelo "[8P]" dos especiais. */
+           || casa(it.linha, q) || casaMpn(it.tipo, q, qSem)
+           || casa(it.sym && it.sym.name, q);
+}
+
+/* ── A BUSCA POR PALAVRAS SOLTAS ──
+   `10 conector 2.54 bloco terminal` tem de achar o bloco terminal de 10 vias e passo 2,54.
+   A busca era UM pedaço de texto procurado inteiro, então essa frase não achava nada: ela
+   não existe literalmente em campo nenhum, e nem podia — metade dela descreve a FAMÍLIA
+   ("conector bloco terminal") e a outra metade o COMPONENTE ("10", "2.54").
+
+   Agora cada palavra é uma exigência à parte, e cada uma pode ser satisfeita pela família
+   OU pelo valor. Quem digita uma palavra só continua com o comportamento de antes, porque
+   uma palavra é o caso de uma lista de uma. */
+function termos(busca){
+  const q = String(busca || '').trim().toUpperCase();
+  if (!q) return [];
+  return q.split(/\s+/).filter(Boolean).map(t => ({ t: t, sem: semSep(t) }));
+}
+const termoCasa = (it, famUp, x) => casa(famUp, x.t) || valorCasa(it, x.t, x.sem);
+
+/* os valores de UMA família que passam na busca e no filtro de saldo.
+   É a única implementação: a lista da esquerda conta o que esta função devolve e a da
+   direita mostra exatamente isto. Enquanto foram duas cópias da condição, acrescentar um
+   campo numa fazia a família aparecer à esquerda e a direita dizer "nenhum componente desta
+   família passa no filtro" — que parece bug da tela, não da busca. */
+function visiveis(g, busca, filtro){
+  const ts = termos(busca);
+  const famUp = String((g && g.familia) || '').toUpperCase();
+  /* A BUSCA INTEIRA CONTINUA VALENDO, ao lado das palavras soltas. Um part number tem
+     espaço dentro ("MC 1.5/ 4-STF-3.81") e é exatamente ele que a pessoa cola no campo:
+     partido em palavras, o pedaço "1.5/" vira "15" sem separadores — curto demais para o
+     piso de 3 caracteres — e o código deixava de achar a própria peça. Aceitar as duas
+     leituras é um superconjunto do que havia antes, então nada que achava deixa de achar. */
+  const inteiro = ts.length > 1
+    ? { t: String(busca || '').trim().toUpperCase(), sem: semSep(busca) } : null;
+  return ((g && g.valores) || []).filter(it => passa(it, filtro || 'all')
+    && (ts.every(x => termoCasa(it, famUp, x))
+        || (inteiro && termoCasa(it, famUp, inteiro))));
 }
 
 /* A família entra na lista quando ELA casa a busca ou quando algum VALOR dela casa: quem
    digita "cap" quer a família, quem digita "4.7pF" quer a família que a contém. Sem as duas
    pontas, metade das buscas volta vazia sem explicar por quê. */
 function filtra(gs, busca, filtro){
-  const q = String(busca || '').trim().toUpperCase();
-  const qSem = semSep(q);
   const fora = [];
   for (const g of gs){
-    const famCasa = !q || casa(g.familia, q);
-    const vis = g.valores.filter(it => passa(it, filtro) && (famCasa || valorCasa(it, q, qSem)));
+    const vis = visiveis(g, busca, filtro);
     if (vis.length) fora.push({ g, vis });
   }
   return fora;
@@ -272,8 +427,13 @@ function menu(x, y, titulo, acoes){
 /* O ESC FECHA O MENU E PARA AI. Sem o stopPropagation ele seguia viagem e o Escape da vista
    fechava o MODAL inteiro junto — quem abriu o menu sem querer perdia a tela de troca. O
    evento so e consumido quando havia menu aberto: fora isso o Escape continua sendo o botao
-   de panico de sempre. Em captura, para chegar antes do handler de window da vista. */
-document.addEventListener('keydown', e => {
+   de panico de sempre. Em captura, para chegar antes do handler de window da vista.
+
+   O guard de `document` e o que deixa este arquivo ser CARREGADO EM NODE. Sem ele o require
+   do teste morria aqui, no topo do modulo, antes de qualquer assercao -- e `filtra`/`valorCasa`,
+   que sao as funcoes que mais silenciosamente erram (busca que nao acha nao levanta excecao,
+   so devolve vazio), ficavam sem teste nenhum. Mesmo recurso do hub-converte.js:478. */
+if (typeof document !== 'undefined') document.addEventListener('keydown', e => {
   if (e.key !== 'Escape' || !menuAberto) return;
   e.stopPropagation();
   e.preventDefault();
@@ -342,11 +502,8 @@ function renderValores(box, g, opts){
     box.append(el('div', 'ap-vazio', 'escolha uma família à esquerda para ver os componentes dela.'));
     return;
   }
-  const q = String(o.busca || '').trim().toUpperCase();
-  const qSem = semSep(q);
-  const famCasa = !q || casa(g.familia, q);
-  const vis = g.valores.filter(it => passa(it, o.filtro || 'all')
-    && (famCasa || valorCasa(it, q, qSem)));
+  const ts = termos(o.busca);
+  const vis = visiveis(g, o.busca, o.filtro);
 
   const h = el('div', 'ap-grupo');
   h.append(document.createTextNode(vis.length + (vis.length === 1 ? ' componente' : ' componentes')
@@ -361,15 +518,29 @@ function renderValores(box, g, opts){
     b.type = 'button';
     b.dataset.nome = it.nome;
     b.setAttribute('aria-selected', String(o.sel === it.nome));
-    const v = el('span', 'v', it.rotulo);
-    v.title = it.nome + (it.pkg ? '\n' + it.pkg : '') + (it.mpn ? '\nMPN ' + it.mpn : '');
+    /* O CONECTOR SE MOSTRA PELOS CAMPOS: "4 vias 3.81 180° femea" em vez de
+       "Bloco Terminal MC 1,5/ 4-STF-3,81 (1827729)". É o que se procura numa gaveta, e é o
+       pedido. Só quando a linha tem o número de vias, porque sem ele ela vira um "3.81"
+       solto — aí vale mais o rótulo do Odoo, que ao menos diz a cor do borne. O nome
+       inteiro do produto continua no title, que é onde ele é útil: na conferência. */
+    const conn = it.conn && it.conn.vias ? it.linha : '';
+    const v = el('span', 'v', conn || it.rotulo);
+    v.title = (conn ? it.rotulo + '\n' : '') + it.nome
+            + (it.pkg ? '\n' + it.pkg : '') + (it.mpn ? '\nMPN ' + it.mpn : '');
     b.append(v);
     /* achou POR CAUSA do MPN: mostre o MPN. "SZMMSZ5240BT1G" devolvendo "PTH 10V 0.5W"
        parece resultado errado ate se ver que o part number esta nele. */
-    const porMpn = q && it.mpn && !casa(it.rotulo, q) && !casa(it.nome, q) && casaMpn(it.mpn, q, qSem);
+    /* achou POR CAUSA do MPN — agora com a busca por palavras, basta UMA delas ter casado
+       só ali. "SZMMSZ5240BT1G" devolvendo "PTH 10V 0.5W" parece resultado errado até se ver
+       que o part number está nele. */
+    const porMpn = !!it.mpn && ts.some(x =>
+      !casa(it.rotulo, x.t) && !casa(it.nome, x.t) && casaMpn(it.mpn, x.t, x.sem));
     if (o.rec && o.rec.item === it) b.append(el('span', 'rec', '↩ mesmo nome'));
     else if (porMpn) b.append(el('span', 'k', it.mpn));
-    else b.append(el('span', 'k', it.pkg || ''));
+    /* no fim da linha, o código do fabricante — que em conector é o que identifica a peça
+       (não existe "encapsulamento 0805" de bloco terminal). Sem ele cai para o encap, como
+       em todas as outras famílias. */
+    else b.append(el('span', 'k', it.tipo || it.pkg || ''));
     const q2 = el('span', 'q' + (it.saldo > 0 ? '' : ' zero'), String(it.saldo));
     q2.title = it.saldo > 0 ? it.saldo + ' em estoque' : 'sem saldo no almoxarifado';
     b.append(q2);
@@ -391,6 +562,11 @@ function renderValores(box, g, opts){
    parece que a peca nao existe. tests/test-almoxpick.js os exercita em Node. */
 return { grupos, recomendado, contagens, renderFamilias, renderValores, poeCss,
          menu, fechaMenu, excluirValor,
-         filtra, valorCasa, semSep };
+         filtra, valorCasa, semSep,
+         /* puros tambem, e pela mesma razao: `chaveDoGrupo` decide quantas linhas a
+            esquerda tem, `linhaConn` e o texto que o usuario le no lugar do rotulo e
+            `comparaValor` e a ordem da lista da direita. Errar qualquer um dos tres nao
+            levanta excecao — so mostra a lista errada. */
+         chaveDoGrupo, linhaConn, comparaValor, termos, visiveis };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubAlmoxPick;

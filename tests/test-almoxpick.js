@@ -98,5 +98,157 @@ assert.ok(A.valorCasa(it('SMD 0805 100nF', '0.1uF / 100nF 16V', '0805', '', 1), 
 assert.strictEqual(A.valorCasa(it('x', 'x', '', undefined, 1), 'ABC', 'ABC'), false, 'mpn ausente não explode');
 console.log('(5) busca vazia, por família e valor sem MPN continuam como eram');
 
-console.log('\ntest-almoxpick OK (MPN na busca, com e sem separador, um predicado para as '
-          + 'duas listas, saldo junto)');
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   O CONECTOR POR SUBTIPO (2026-09-22)
+
+   A lista da esquerda era uma linha por SÍMBOLO, e o símbolo se parte por número de
+   pinos: procurar um bloco terminal Phoenix de 4 vias queria dizer adivinhar as vias
+   primeiro, achar "CONECTOR 4V" entre 25 irmãs ordenadas 10V, 12V, 13V, 2V, 20V… e só
+   então ler 25 rótulos quase iguais. Agora a linha é a FAMÍLIA (= o subtipo) e as vias
+   descem para o rótulo do valor.
+
+   O que este bloco prende:
+    6. a chave do grupo junta os símbolos da família e NÃO junta o que a montagem separa;
+    7. a linha do conector é montada dos campos, e campo que o Odoo não diz não aparece;
+    8. a busca por vias continua funcionando — ela dependia do nome do símbolo, que saiu
+       da lista da esquerda;
+    9. a ordem da direita é por vias, não alfabética.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── (6) a chave do grupo ──────────────────────────────────────────────────── */
+const sym = (name, familia, grupo, montagem) => ({ name, familia, grupo, montagem });
+assert.strictEqual(A.chaveDoGrupo(sym('CONECTOR BLOCO TERMINAL 4V', 'CONECTOR BLOCO TERMINAL', 'basicos', '')),
+  'CONECTOR BLOCO TERMINAL', 'o número de vias sai da linha da esquerda');
+assert.strictEqual(A.chaveDoGrupo(sym('CONECTOR BLOCO TERMINAL 12V', 'CONECTOR BLOCO TERMINAL', 'basicos', '')),
+  'CONECTOR BLOCO TERMINAL', 'e 4V e 12V caem na MESMA linha');
+assert.strictEqual(A.chaveDoGrupo(sym('RESISTOR [SMD]', 'RESISTOR', 'basicos', 'SMD')),
+  'RESISTOR [SMD]', 'a montagem continua separando — o símbolo é mesmo partido por ela');
+assert.strictEqual(A.chaveDoGrupo(sym('RESISTOR [PTH]', 'RESISTOR', 'basicos', 'PTH')),
+  'RESISTOR [PTH]', 'e SMD não se mistura com PTH');
+assert.strictEqual(A.chaveDoGrupo(sym('CIRCUITO INTEGRADO [8P]', 'CIRCUITO INTEGRADO', 'especiais', 'PTH')),
+  'CIRCUITO INTEGRADO',
+  'nos especiais a montagem é só a do primeiro item que criou o símbolo: dividir por ela é dividir por acaso');
+console.log('(6) a chave do grupo junta por família e respeita a montagem dos básicos');
+
+/* ── (7) a linha do conector ───────────────────────────────────────────────── */
+assert.strictEqual(A.linhaConn({ vias: 4, matriz: '', passo: 3.81, angulo: 180, genero: 'femea' }),
+  '4 vias 3.81 180° femea', 'o pedido do usuário, na ordem pedida');
+assert.strictEqual(A.linhaConn({ vias: 26, matriz: '2x13', passo: 2.54, angulo: 180, genero: '' }),
+  '26 vias (2x13) 2.54 180°',
+  'a matriz fica: 1x8 e 2x4 têm oito vias os dois e footprints diferentes');
+assert.strictEqual(A.linhaConn({ vias: 4, matriz: '', passo: null, angulo: 0, genero: '' }), '4 vias',
+  'em circular MIL o passo e o ângulo não existem como propriedade — campo vazio não aparece');
+assert.strictEqual(A.linhaConn({ vias: 1, matriz: '', passo: null, angulo: 0, genero: '' }), '1 via',
+  'uma via não é "1 vias"');
+assert.strictEqual(A.linhaConn(null), '', 'valor que não é conector não tem linha');
+console.log('(7) a linha do conector sai dos campos, e o que o Odoo não diz não aparece');
+
+/* ── (8) a busca por vias sobrevive à saída do número da esquerda ──────────── */
+const conn = (nome, rotulo, c, symName) => ({
+  nome, rotulo, pkg: '', mpn: '', saldo: 1, conn: c, linha: A.linhaConn(c),
+  tipo: (c && c.tipo) || '', sym: { name: symName },
+});
+const bt4 = conn('Bloco Terminal MC 1,5/ 4-STF-3,81', 'Bloco Terminal MC 1,5/ 4-STF-3,81',
+  { vias: 4, matriz: '', passo: 3.81, angulo: 0, genero: 'femea', tipo: 'MC 1,5/ 4-STF-3,81' },
+  'CONECTOR BLOCO TERMINAL 4V');
+const bt2 = conn('Bloco Terminal MSTB 2,5/ 2-GF-5,08', 'Bloco Terminal MSTB 2,5/ 2-GF-5,08',
+  { vias: 2, matriz: '', passo: 5.08, angulo: 0, genero: 'macho', tipo: 'MSTB 2,5/ 2-GF-5,08' },
+  'CONECTOR BLOCO TERMINAL 2V');
+const blocos = { familia: 'CONECTOR BLOCO TERMINAL', valores: [bt4, bt2] };
+
+assert.deepStrictEqual(vistos(A.filtra([blocos], '4 vias', 'all')), [bt4.nome],
+  '"4 vias" tem de achar — a linha da esquerda não traz mais o número');
+assert.deepStrictEqual(vistos(A.filtra([blocos], '4V', 'all')), [bt4.nome],
+  '"4V" também, pelo nome do símbolo, que é o costume de quem usava a lista antiga');
+assert.deepStrictEqual(vistos(A.filtra([blocos], '5.08', 'all')), [bt2.nome], 'busca por passo');
+assert.deepStrictEqual(vistos(A.filtra([blocos], 'macho', 'all')), [bt2.nome], 'busca por gênero');
+assert.deepStrictEqual(vistos(A.filtra([blocos], 'MC 1,5/ 4-STF-3,81', 'all')), [bt4.nome],
+  'busca pelo código do fabricante, que é o que se tem na mão olhando a peça');
+assert.deepStrictEqual(vistos(A.filtra([blocos], 'MC1,54STF3,81', 'all')), [bt4.nome],
+  'e sem os separadores, como já valia para o MPN');
+assert.deepStrictEqual(vistos(A.filtra([blocos], 'MC 1.5/ 4-STF-3.81', 'all')), [bt4.nome],
+  'o MESMO codigo escrito com PONTO: o Odoo cadastra as duas formas do mesmo bloco '
+  + 'terminal Phoenix, e quem digita le o codigo da peca, nao do cadastro');
+assert.strictEqual(A.semSep('MC 1,5/ 4-STF-3,81'), A.semSep('MC 1.5/ 4-STF-3.81'),
+  'virgula e ponto tem de colapsar no mesmo texto');
+assert.deepStrictEqual(vistos(A.filtra([blocos], 'BLOCO TERMINAL', 'all')), [bt4.nome, bt2.nome],
+  'buscar a família traz a família inteira');
+console.log('(8) a busca por vias, passo, gênero e código do fabricante');
+
+/* ── (9) a ordem da direita ────────────────────────────────────────────────── */
+const ordenados = [bt4, bt2].slice().sort(A.comparaValor).map(x => x.conn.vias);
+assert.deepStrictEqual(ordenados, [2, 4], 'do menor número de vias para o maior');
+const semVias = conn('X', 'X', { vias: 0, matriz: '', passo: null, angulo: 0, genero: '', tipo: '' }, 'S');
+assert.strictEqual([bt4, semVias, bt2].slice().sort(A.comparaValor)[0], semVias,
+  'quem não tem vias legível fica no começo, junto — não espalhado pela lista');
+console.log('(9) a lista da direita ordena por vias, não alfabeticamente');
+
+/* ── (10) a busca por PALAVRAS SOLTAS ──────────────────────────────────────
+   "10 conector 2.54 bloco terminal": metade da frase descreve a FAMILIA e a outra metade o
+   COMPONENTE, e nenhum campo contem a frase inteira. Cada palavra e uma exigencia a parte e
+   pode ser satisfeita pela familia OU pelo valor. */
+const bt10 = conn('Bloco Terminal MSTB 2,5/10-GF-5,08', 'Bloco Terminal MSTB 2,5/10-GF-5,08',
+  { vias: 10, matriz: '', passo: 2.54, angulo: 180, genero: 'macho', tipo: 'MSTB 2,5/10-GF-5,08' },
+  'CONECTOR BLOCO TERMINAL');
+const bt10b = conn('Bloco Terminal MC 1,5/10-ST-3,81', 'Bloco Terminal MC 1,5/10-ST-3,81',
+  { vias: 10, matriz: '', passo: 3.81, angulo: 180, genero: 'femea', tipo: 'MC 1,5/10-ST-3,81' },
+  'CONECTOR BLOCO TERMINAL');
+const latch10 = conn('Latch 10 vias', 'Latch 10 vias',
+  { vias: 10, matriz: '2x5', passo: 2.54, angulo: 180, genero: '', tipo: '' }, 'CONECTOR LATCH');
+const acervo = [
+  { familia: 'CONECTOR BLOCO TERMINAL', valores: [bt4, bt2, bt10, bt10b] },
+  { familia: 'CONECTOR LATCH', valores: [latch10] },
+];
+
+assert.deepStrictEqual(vistos(A.filtra(acervo, '10 conector 2.54 bloco terminal', 'all')),
+  [bt10.nome],
+  'as cinco palavras juntas: 10 vias E passo 2.54 E da familia bloco terminal');
+assert.deepStrictEqual(vistos(A.filtra(acervo, 'conector 10', 'all')),
+  [bt10.nome, bt10b.nome, latch10.nome],
+  '"conector 10" pega os tres de 10 vias, de duas familias');
+assert.deepStrictEqual(vistos(A.filtra(acervo, 'latch 10', 'all')), [latch10.nome],
+  'a palavra da familia estreita para uma so');
+assert.deepStrictEqual(vistos(A.filtra(acervo, '2.54 10 latch', 'all')), [latch10.nome],
+  'a ordem das palavras nao importa');
+assert.deepStrictEqual(vistos(A.filtra(acervo, '10 2x5', 'all')), [latch10.nome],
+  'a montagem da matriz (2 linhas x 5 colunas) tambem e palavra de busca');
+assert.deepStrictEqual(vistos(A.filtra(acervo, 'bloco terminal 10 femea', 'all')), [bt10b.nome],
+  'genero entra na conjuncao como qualquer outra palavra');
+assert.deepStrictEqual(vistos(A.filtra(acervo, '10 conector 9.5', 'all')), [],
+  'palavra que nao casa nada derruba a linha inteira — e conjuncao, nao soma');
+/* e a busca de UMA palavra continua sendo o que era */
+assert.deepStrictEqual(vistos(A.filtra(acervo, 'BLOCO TERMINAL', 'all')),
+  [bt4.nome, bt2.nome, bt10.nome, bt10b.nome], 'duas palavras que sao a familia: familia inteira');
+console.log('(10) a busca conjuga palavras soltas: familia + vias + passo + matriz + genero');
+
+/* ── (11) numero procurado e numero INTEIRO ────────────────────────────────
+   Achado no navegador, nao aqui: "10 conector 2.54 bloco terminal" devolvia um conector de
+   4 vias e passo 5,08. O "10" casava dentro do numero de pedido (0710196) e o "2.54" casava
+   pelo caminho sem separadores, onde "2,5/ 4" (bitola + vias) colapsa em "254". */
+const pedido = conn('Bloco Terminal Header DFK-MSTB 2,5/ 4-GF-5,08 (0710196)',
+  'Bloco Terminal Header DFK-MSTB 2,5/ 4-GF-5,08 (0710196)',
+  { vias: 4, matriz: '', passo: 5.08, angulo: 0, genero: 'macho', tipo: 'DFK-MSTB 2,5/ 4-GF-5,08' },
+  'CONECTOR BLOCO TERMINAL');
+const so = [{ familia: 'CONECTOR BLOCO TERMINAL', valores: [pedido] }];
+assert.deepStrictEqual(vistos(A.filtra(so, '10', 'all')), [],
+  'o "10" de dentro de "(0710196)" nao e dez vias');
+assert.deepStrictEqual(vistos(A.filtra(so, '2.54', 'all')), [],
+  'nem o "254" que sai de colapsar "2,5/ 4" — esse caminho e so para part number');
+assert.deepStrictEqual(vistos(A.filtra(so, '4', 'all')), [pedido.nome], 'as 4 vias de verdade casam');
+assert.deepStrictEqual(vistos(A.filtra(so, '5.08', 'all')), [pedido.nome], 'e o passo de verdade');
+assert.deepStrictEqual(vistos(A.filtra(so, 'DFK-MSTB 2,5/ 4-GF-5,08', 'all')), [pedido.nome],
+  'o codigo colado inteiro continua achando — o termo tem letra');
+/* a fronteira e de DIGITO, nao de palavra: o numero dentro de um codigo continua valendo */
+assert.ok(A.valorCasa(it('PTH DIP8 LM555', 'DIP8 LM555', '', '', 1), '555', '555'),
+  '"555" acha "LM555": o que veio antes e letra, nao digito');
+assert.strictEqual(A.valorCasa(it('SMD 0805 100nF', '100nF 16V', '0805', '', 1), '10', '10'), false,
+  '"10" nao acha "100nF"');
+assert.ok(A.valorCasa(it('SMD 0805 10K', '10K 1%', '0805', '', 1), '10', '10'), '"10" acha "10K"');
+console.log('(11) numero e numero inteiro: nao casa pedaco de outro numero');
+
+
+
+console.log('\ntest-almoxpick OK (MPN na busca com e sem separador, um predicado '
+          + 'para as duas listas, saldo junto, e o conector por subtipo: chave do '
+          + 'grupo, linha dos campos, busca por vias/passo/genero/codigo, ordem por vias)');

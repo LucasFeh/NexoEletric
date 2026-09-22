@@ -3464,8 +3464,13 @@ function symRenderValores(){
     /* BOTAO DIREITO: excluir o valor da biblioteca. O fluxo (previa, pergunta com quem usa,
        exclusao) mora no hub-almoxpick para a aba Biblioteca do hub usar o MESMO — inclusive o
        mesmo texto de pergunta. Aqui entra so o adaptador desta tela. */
+    /* O SÍMBOLO DO ITEM, não o da família. Desde que a lista da esquerda passou a agrupar
+       por família (hub-almoxpick » chaveDoGrupo), "CONECTOR BLOCO TERMINAL" cobre 15
+       símbolos e `g.familia` deixou de identificar um. O servidor resolve por nome de
+       símbolo ou por família do arquivo (symserver » _resolve_almox), e o nome do símbolo
+       é o que sempre aponta para um só. */
     onExcluir: (it, g) => HubAlmoxPick.excluirValor(
-      { familia: g.familia, componente: it.nome, label: it.rotulo },
+      { familia: (it.sym && it.sym.name) || g.familia, componente: it.nome, label: it.rotulo },
       {
         confirm: (txt, o) => HubDialog.confirm(txt, o),
         toast: (m, k, ms) => HubDialog.toast(m, k, ms),
@@ -3535,10 +3540,16 @@ function editarSimboloNoHub(){
   const g = apFam;
   if (!g) return;
   const comp = symEscolhido && symEscolhido.name;
+  /* `edsym` é NOME DE SÍMBOLO, e a família deixou de ser um (ver o comentário do onExcluir).
+     Mandar "CONECTOR BLOCO TERMINAL" faz o hub-symed abrir a aba vazia e devolver false —
+     sem toast, sem erro, só uma tela em branco. O símbolo sai do componente escolhido; sem
+     escolha, do primeiro da lista, que depois da ordenação é o de menor número de vias. */
+  const doItem = (comp && g.valores.find(x => x.nome === comp)) || g.valores[0] || null;
   const q = new URLSearchParams();
-  q.set('edsym', g.familia);
+  q.set('edsym', (doItem && doItem.sym && doItem.sym.name) || g.familia);
   if (comp) q.set('edcomp', comp);
-  if (g.lib && g.lib.id) q.set('edacervo', g.lib.id);
+  const acervo = (doItem && doItem.lib) || g.lib;
+  if (acervo && acervo.id) q.set('edacervo', acervo.id);
   /* O hub e a PAGINA DE CIMA: dentro do iframe, `location` e o schframe.html.
      A deteccao e por CAPACIDADE, nunca pelo nome do arquivo: o hubserver serve o hub tanto
      em /hub.html quanto na RAIZ (hubserver.py » @app.route('/')), e exigir que o pathname
@@ -3574,8 +3585,19 @@ function editarSimboloNoHub(){
                   + 'aparece aqui sozinho', 'info', 6000);
 }
 function previaDaFamilia(g){
-  symPart = HubCore.partOf(g.sym, 1) || null;
-  $('symHint').textContent = symPart ? '' : 'esta família não tem desenho no espelho';
+  /* A família pode cobrir vários símbolos — `CIRCUITO INTEGRADO` junta [8P], [14P], [16P]…
+     numa linha só. A prévia mostra o PRIMEIRO da lista e diz que há outros, em vez de
+     desenhar um qualquer calado: o desenho aqui serve para reconhecer a família, e o do
+     componente certo aparece assim que se escolhe. Conector não cai neste caso — ele tem um
+     símbolo por subtipo e a pinagem vive no próprio valor (`valores[].parts`). */
+  const prim = (g.valores && g.valores[0]) || null;
+  const sy = (prim && prim.sym) || g.sym;
+  const quantos = new Set((g.valores || []).map(x => x.sym && x.sym.name)).size;
+  symPart = HubCore.partOf(sy, 1) || null;
+  $('symHint').textContent = symPart
+    ? (quantos > 1 ? 'desenho de "' + sy.name + '" — esta família tem ' + quantos
+                     + ' pinagens; escolha o componente para ver a dele' : '')
+    : 'esta família não tem desenho no espelho';
   fitPreview(camSymEsc, symPart ? D.symBBox(symPart) : null);
   camSymEsc.resize(); ajustaPreviews([camSymEsc]);
 }

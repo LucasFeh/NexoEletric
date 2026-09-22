@@ -136,9 +136,13 @@ const mesmoEncap = (a, b) => !!a && !!b && semSep(a) === semSep(b);
 function viasDe(){
   for (const txt of arguments){
     const t = CX(txt);
-    let m = t.match(/(\d+)\s*(?:VIAS?|PINOS?|PIN|POS|P)\b/) || t.match(/\b(?:VIAS?|PINOS?)\s*(\d+)/);
+    /* O "P" TEM DE ESTAR COLADO NO NÚMERO ("EK508V-02P"). Solto, ele lia "RJ45 P/ PCB"
+       como 45 vias — o mesmo erro que o extrator do gerador tinha e que sustentava um
+       símbolo fantasma "CONECTOR 45V" com o RJ45 dentro (tools/almox/conectores.py). */
+    let m = t.match(/(\d+)\s*(?:VIAS?|PINOS?|PINS?|POS)\b/) || t.match(/(?<![0-9.,])(\d+)P\b/)
+         || t.match(/\b(?:VIAS?|PINOS?)\s*(\d+)/);
     if (m) return parseInt(m[1], 10);
-    m = t.match(/(\d+)\s*X\s*(\d+)/);            /* "2x10", "1X4" */
+    m = t.match(/(?<![0-9.,])(\d+)\s*X\s*(\d+)(?![0-9.,])/);      /* "2x10", "1X4" */
     if (m) return parseInt(m[1], 10) * parseInt(m[2], 10);
   }
   return null;
@@ -277,7 +281,13 @@ function perfilDoValor(g, it){
     encaps: encapsDoValor(v, it, par),
     mont: montagemDe(par.MONTAGEM, familia, it.nome, it.pkg),
     fp: String(it.pkg || ''),
-    vias: viasDe(it.rotulo, it.nome, familia),
+    /* O NÚMERO DE VIAS JÁ VEM LIDO. O gerador o extrai de cinco pistas do nome do Odoo
+       (tools/almox/conectores.py) e o publica em `valores[].conn`; aqui ele é fato, não
+       releitura. O `viasDe` fica de reserva para o espelho antigo e para as famílias que
+       não são conector — e a família saiu da lista de fontes porque ela não traz mais o
+       número ("CONECTOR 10V" virou "CONECTOR HEADER SEM TRAVA"); quem traz é o símbolo. */
+    vias: (it.conn && it.conn.vias) || viasDe(it.rotulo, it.nome,
+                                              (it.sym && it.sym.name) || familia),
     pn: pareceMPN(it.mpn || par.MPN) || pareceMPN(it.rotulo),
   };
 }
