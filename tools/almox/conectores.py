@@ -67,8 +67,11 @@ _SUBTIPOS = [
     (r'carcaca|\binserto\b|aliviador|ferramentas,|ferramentas e acess|caixa de cabos'
      r'|pino de conector', 'ACESSORIO'),
     (r'baioneta|ca06a\d', 'BAIONETA'),
-    (r'header\s*(?:c/|com)\s*trava', 'HEADER COM TRAVA'),
-    (r'header\s*(?:s/|sem)\s*trava', 'HEADER SEM TRAVA'),
+    # SEM TRAVA vem PRIMEIRO desde que a regra de "com trava" afrouxou. O cadastro novo
+    # escreve so "Header trava 2x5 10 vias", sem o "c/" — e um `header.*trava` que viesse
+    # antes engoliria tambem "header sem trava", que e a peca oposta.
+    (r'header[^,]*?(?:s/|sem)\s*trava', 'HEADER SEM TRAVA'),
+    (r'header[^,]*?trava', 'HEADER COM TRAVA'),
     (r'\blatch\b', 'LATCH'),
     (r'\bkk\b|molex|alojamento', 'KK'),
     (r'\bjst\b|shr-\d', 'JST'),
@@ -302,6 +305,16 @@ def passo(nome):
             p = _encaixa(_num(m.group(1)))
             if p:
                 return p
+    # O PASSO ESCRITO SOLTO, sem o "mm": "Barra de Pinos 5.08 linhas 10 vias Macho 180g".
+    # So vale um DECIMAL que seja passo de catalogo, e so quando o nome NAO tem serie
+    # Phoenix — porque la o decimal solto e a bitola do cabo ("MSTB 2,5 HC/ 4-STF" e passo
+    # 5,08, e 2,5 esta na tabela de passos). Sem essa trava, 54 blocos terminais passariam
+    # a anunciar 2,5 mm de passo, que e o numero errado com cara de certo.
+    if not re.search(_PHX, f):
+        for m in re.finditer(r'(?<![0-9.,])(\d+[.,]\d+)(?![0-9])', f):
+            p = _encaixa(_num(m.group(1)))
+            if p:
+                return p
     return None
 
 
@@ -314,7 +327,12 @@ def passo_txt(p):
 
 # ─── angulo ───────────────────────────────────────────────────────────────────
 # So o explicito. Ver o cabecalho: deduzir do V do Phoenix foi medido e recusado.
-_ANGULO = re.compile(r'(?<![0-9.,])(90|180)\s*(?:°|º|o\b|graus\b|\b)')
+#
+# O `g\b` e o padrao NOVO do cadastro ("180g", "90g", de graus), e ele nao entrava por
+# acidente de regex: entre o "0" e o "g" nao ha fronteira de palavra, entao a alternativa
+# `\b` solta do fim nao casava e o angulo saia vazio. Medido contra os 618 conectores do
+# Odoo de producao em 2026-09-22: 96 nomes ja no padrao novo, e o extrator lia ZERO deles.
+_ANGULO = re.compile(r'(?<![0-9.,])(90|180)\s*(?:°|º|o\b|g\b|graus\b|\b)')
 _VERTICAL = re.compile(r'\bvertical\b|\d[.,]\d+\s*(?:mm)?\s*v\b|-v-')
 
 

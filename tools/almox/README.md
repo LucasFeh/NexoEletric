@@ -77,6 +77,29 @@ Como a família também decide o **arquivo** (`balde_de` → `nome_arquivo`), is
 o que o Altium precisava: **22 `.SchLib`, uma por subtipo** — `CONECTOR KK ALMOX.SchLib`,
 `CONECTOR BLOCO TERMINAL ALMOX.SchLib` — em vez de um `CONECTOR ALMOX.SchLib` de 870 KB.
 
+#### O que o extrator lê do nome
+
+Medido contra os 618 conectores do Odoo de **produção** em 2026-09-22, no meio da faxina de
+nomes — o cadastro tinha os dois padrões convivendo. O formato novo é lido inteiro:
+
+| Campo | Como escrever | Também aceita |
+|---|---|---|
+| vias | `10 vias` | `10 pinos`, `10 polos`, `2-polos`, `16 Pin`, a matriz `2x5`, o `/10` do Phoenix (`MSTB 2,5/10-GF-5,08`), `-02P`, `DB9`, `DIP 40` |
+| matriz | `2x5` (2 linhas × 5 colunas) | `2X5`, `(2x5)` |
+| passo | `P2.54mm` | `passo 2.54mm`, `2.54mm`, o sufixo `-5,08`, e o decimal solto (`5.08 linhas`) quando o nome não tem série Phoenix |
+| ângulo | `180g` / `90g` | `180°`, `180º`, `180 graus`, a palavra `Vertical` |
+| gênero | `Macho` / `Femea` | o `G`/`GF` (base) e `ST`/`STF` (plugue) do Phoenix; o sufixo `P`/`S` dos circulares MIL |
+| subtipo | `Header trava`, `Bloco Terminal`, `Latch`, `Kk`… | a série sozinha (`MSTB`, `MC 1,5/`, `AKZ`, `EK508`…) já identifica bloco terminal |
+
+Duas armadilhas que o extrator conhece e que vale conhecer na hora de escrever o nome:
+
+- **decimal antes da barra do Phoenix é bitola de cabo, não passo.** Em `MC 1,5/ 4-G-3,81`
+  o `1,5` é mm² e o passo é o `3,81` do fim. Por isso o decimal solto só vale como passo
+  quando não há série Phoenix no nome;
+- **número entre parênteses com 6+ dígitos é número de pedido** (`(1827761)`), e é ignorado
+  em vias, passo e ângulo. Série curta entre parênteses (`(2510)`, `(5051)`) é lida como
+  código de tipo, que é o que separa dois alojamentos KK iguais em tudo o mais.
+
 O subtipo é deduzido do nome do Odoo por uma tabela de regex (`conectores.SUBTIPOS`), que é
 um remendo com prazo: **quando o Odoo passar a ter o campo "subtipo"**, ele vira a fonte e a
 tabela vira só o degradê para o cadastro que ainda não o tiver.

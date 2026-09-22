@@ -145,6 +145,35 @@ def main():
     eq(C.tipo('Barra De Pinos Simples -  5 vias 180 2.54mm Macho'), '',
        'a barra simples nao tem codigo, e as vias/passo/angulo ja a separam')
 
+    # ── o PADRAO NOVO do cadastro (2026-09-22) ────────────────────────────────
+    # Nomes reais do Odoo de producao, colhidos enquanto a faxina de nomes acontecia. O
+    # cadastro novo escreve o passo como "P2.54mm", o angulo como "180g"/"90g" (graus) e a
+    # trava sem o "c/". Medido nos 618 conectores de producao: 96 ja estavam no padrao novo
+    # e o extrator lia ZERO angulos deles.
+    eq(C.angulo('Barra de Pinos Simples 3 vias P2.54mm Macho 180g'), 180,
+       '"180g" e graus; entre o 0 e o g nao ha fronteira de palavra, e era por isso que '
+       'a alternativa solta do regex nao casava')
+    eq(C.angulo('Barra de Pinos 10 vias P2.54mm Macho 90g'), 90, '')
+    eq(C.passo('Barra de Pinos Simples 3 vias P2.54mm Macho 180g'), 2.54,
+       'o "P" colado no numero nao atrapalha')
+    eq(C.vias('Barra de Pinos Simples 3 vias P2.54mm Macho 180g'), 3, '')
+    eq(C.genero('Barra de Pinos Simples 3 vias P2.54mm Macho 180g'), 'macho', '')
+
+    eq(C.subtipo('Conector Header trava 2x5 10 vias P2.54mm 180g'), 'HEADER COM TRAVA',
+       'o cadastro novo escreve so "Header trava", sem o "c/"')
+    eq(C.subtipo('Conector Header sem trava 2x5 10 vias P2.54mm 180g'), 'HEADER SEM TRAVA',
+       'e a regra afrouxada NAO pode engolir a peca oposta')
+    eq(C.subtipo('Conector Header S/ trava 10 vias (2x5) 180 Passo 2,54mm'),
+       'HEADER SEM TRAVA', 'nem a forma antiga dela')
+
+    eq(C.passo('Barra de Pinos 5.08 linhas 10 vias Macho 180g'), 5.08,
+       'passo escrito solto, sem o "mm"')
+    eq(C.passo('Conector Femea MSTB 2,5 HC/ 4-STF (1912090)'), None,
+       'mas o decimal solto de uma serie Phoenix e BITOLA, nao passo: 54 blocos terminais '
+       'passariam a anunciar 2,5 mm se esta trava nao existisse')
+    eq(C.passo('Conector Bloco Terminal MSTB 2,5/10-GF-5,08 (1776582)'), 5.08,
+       'e o passo de verdade continua saindo do sufixo')
+
     # ── a linha que a tela monta ──────────────────────────────────────────────
     c = C.campos('Conector Bloco Terminal - MC 1.5/ 4-STF-3.81 (1827729)', 'CONECTOR')
     eq(C.rotulo_curto(c), '4 vias 3.81 femea', 'o pedido do usuario, sem inventar o angulo')
