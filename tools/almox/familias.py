@@ -188,7 +188,7 @@ LIXO = re.compile(
     # "Conector de Reducao - 1\" x 15mm" e reducao de TUBO, cadastrada em Producao
     # Mecanica. Era o unico item de conector que nenhum subtipo reconhecia, e sozinho
     # sustentava uma familia "CONECTOR" sem subtipo na lista da esquerda.
-    r'conector de reducao')
+    r'conector (?:de )?reducao')
 
 
 # ─── extracao de campos do nome ───────────────────────────────────────────────

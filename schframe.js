@@ -1976,11 +1976,15 @@ function renderAddPreview(){
       if (p.fora){ lb.append(el('i', null, 'fora')); b.title = 'não está mais no Odoo — a part continua na lib para não renumerar as outras'; }
       /* o numero e o id do valor: e a chave dele no .DbLib e no schematic.js */
       const ix = el('span', 'ix', String(p.id)); ix.title = 'id ' + p.id + ' no catálogo';
-      /* codigo do fabricante + encapsulamento na tag, separados do nome: a esquerda diz
-         O QUE E, a direita diz QUAL E */
+      /* UMA ETIQUETA PARA CADA COISA — encapsulamento e codigo do fabricante sao leituras
+         diferentes, e juntas num balao so viram texto corrido. Etiqueta vazia nao existe,
+         em vez de virar um travessao. Mesmo desenho do hub.html. */
+      const pkTxt = (p.pkgs || []).join(' · ');
       const cod = String((p.conn && p.conn.tipo) || p.mpn || '').trim();
-      const pkEl = el('span', 'pk', [cod, (p.pkgs || []).join(' · ')].filter(Boolean).join(' · '));
-      b.append(ix, lb, pkEl);
+      const tags = el('span', 'tags');
+      if (pkTxt) tags.append(el('span', 'pk', pkTxt));
+      if (cod) tags.append(el('span', 'mp', cod));
+      b.append(ix, lb, tags);
       b.append(el('span', 'qt' + (p.estoque > 0 ? '' : ' zero'), qtdFmt(p.estoque)));
       /* o encapsulamento fixado era do valor ANTERIOR: mantê-lo poria um 0805 na ficha de um 2512 */
       b.addEventListener('click', () => { pick.valorId = p.id; pick.fpShown = null; $('addComment').value = p.label; renderAddPreview(); });

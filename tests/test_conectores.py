@@ -174,6 +174,27 @@ def main():
     eq(C.passo('Conector Bloco Terminal MSTB 2,5/10-GF-5,08 (1776582)'), 5.08,
        'e o passo de verdade continua saindo do sufixo')
 
+    # ── os sete que sobraram SEM SUBTIPO no servidor, depois da faxina de nomes ──────
+    # Colhidos do espelho de producao em 2026-09-22, um por lacuna real da tabela.
+    eq(C.subtipo('Conector Base P/ Reles 2 4 Contatos Reversiveis Pyf14-ae'), 'SOQUETE',
+       'o soquete de rele nao tem a palavra "soquete": no cadastro ele e a BASE do rele')
+    eq(C.subtipo('Conector Bloco P/PCB Com/Fix 4 vias P7.62mm'), 'BLOCO TERMINAL',
+       '"Bloco P/PCB" e bloco terminal sem a palavra "terminal"')
+    eq(C.subtipo('Conector BORNER POLITEC PRETO GERADORES'), 'BORNE',
+       '"BORNER" e como algumas linhas escrevem borne')
+    eq(C.subtipo('Conector Cabo conector 5.5x2.5mm fonte Macho'), 'JACK',
+       'o jack P4 e pedido pela medida, nao pela palavra')
+    eq(C.subtipo('Conector Pino Faston 1 vias [62395-1] PTH'), 'FASTON',
+       'terminal de desconexao rapida e tipo proprio')
+    eq(C.subtipo('Conector'), '',
+       'a palavra sozinha nao da subtipo — e o degrade correto, nao um balde OUTROS')
+    # e a reducao de tubo, que a faxina renomeou e fez escapar do LIXO
+    import familias as _F
+    ok_lixo = bool(_F.LIXO.search(_F.fold1('Conector Reducao D1" P15mm')))
+    eq(ok_lixo, True, 'reducao de tubo nao e conector, com o nome velho ou com o novo')
+    eq(bool(_F.LIXO.search(_F.fold1('Conector de Reducao - 1\" x 15mm'))), True,
+       'e a forma antiga continua fora')
+
     # ── a linha que a tela monta ──────────────────────────────────────────────
     c = C.campos('Conector Bloco Terminal - MC 1.5/ 4-STF-3.81 (1827729)', 'CONECTOR')
     eq(C.rotulo_curto(c), '4 vias 3.81 femea', 'o pedido do usuario, sem inventar o angulo')

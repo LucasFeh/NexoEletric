@@ -78,19 +78,25 @@ _SUBTIPOS = [
     (r'barra de pinos', 'BARRA DE PINOS'),
     (r'regua terminal|bloco terminal de barreira|barra termoplastico|sindal'
      r'|\bbtsp\b|\bbbptc\b|\bbdmu\b|\btep-\d', 'REGUA TERMINAL'),
-    (r'soquete', 'SOQUETE'),
+    # o soquete de rele nao tem a palavra: no cadastro ele e a BASE do rele
+    (r'soquete|base p/ ?rele|base para rele', 'SOQUETE'),
     (r'\bdb\d|trapezoidal|sub-?d\b', 'DB'),
     (r'circular mil|circular mike|\bmil spec\b|\bweipu\b|\bdelphi\b|ms3\d{3}|pt0\d[a-z]?-'
      r'|amphenol', 'CIRCULAR MIL'),
     (r'rj ?45|ethernet', 'RJ45'),
     (r'\busb\b', 'USB'),
-    (r'\bjack\b|plug(?:ue)? p4', 'JACK'),
+    # o jack P4 e pedido pela MEDIDA ("Cabo conector 5.5x2.5mm fonte Macho")
+    (r'\bjack\b|plug(?:ue)? p4|5[.,]5 ?x ?2[.,][15]', 'JACK'),
     (r'conector plano|slot edge|\bedge\b', 'PLANO'),
     (r'cartao (?:micro )?sd|micro ?sd\b', 'CARTAO SD'),
     (r'clip para bateria|porta.?fusivel', 'ACESSORIO DE PAINEL'),
     (r'poliamida|para terra|\bsak\b', 'TERRA'),
-    (r'\bborne\b', 'BORNE'),
-    (r'bloco terminal|de bloco\b|mini bloco|' + _PHX, 'BLOCO TERMINAL'),
+    # "BORNER" e como algumas linhas do cadastro escrevem borne
+    (r'\bborner?s?\b', 'BORNE'),
+    # "Bloco P/PCB Com/Fix 4 vias" e bloco terminal sem a palavra "terminal"
+    (r'bloco terminal|de bloco\b|mini bloco|bloco p/? ?pcb|' + _PHX, 'BLOCO TERMINAL'),
+    # terminal de desconexao rapida: tipo proprio, nao e plugue nem acessorio
+    (r'\bfaston\b', 'FASTON'),
     (r'\bplug\b|conector e plug', 'PLUGUE'),
 ]
 SUBTIPOS = [(re.compile(rx), s) for rx, s in _SUBTIPOS]
