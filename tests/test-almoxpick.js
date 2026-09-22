@@ -248,6 +248,38 @@ assert.ok(A.valorCasa(it('SMD 0805 10K', '10K 1%', '0805', '', 1), '10', '10'), 
 console.log('(11) numero e numero inteiro: nao casa pedaco de outro numero');
 
 
+/* ── (12) o filtro FORA ────────────────────────────────────────────────────
+   `fora` e `zerado` nao sao a mesma coisa e o olho nao separa: os dois mostram 0 de saldo.
+   Zerado e peca do catalogo que acabou e volta na proxima compra; FORA e peca que saiu do
+   Odoo -- ou que perdeu a marca "e componente eletronico" -- e so volta se alguem mexer no
+   cadastro. Quem esta caçando o que sumiu precisa de uma lista so com esses. */
+const iF = (nome, saldo, fora) => ({ nome, rotulo: nome, pkg: '', mpn: '', saldo, fora });
+const mix = [{ familia: 'CAPACITOR', valores: [
+  iF('com saldo', 12, false),
+  iF('zerado', 0, false),
+  iF('saiu do odoo', 0, true),
+  iF('saiu mas tinha saldo', 7, true),
+]}];
+assert.deepStrictEqual(vistos(A.filtra(mix, '', 'all')).length, 4, 'Tudo mostra os quatro');
+assert.deepStrictEqual(vistos(A.filtra(mix, '', 'fora')), ['saiu do odoo', 'saiu mas tinha saldo'],
+  'o filtro Fora traz SO os que sairam, com saldo ou sem');
+assert.deepStrictEqual(vistos(A.filtra(mix, '', 'nostock')), ['zerado'],
+  'Zerados nao pode mais trazer os que sairam: eram dois tipos de zero no mesmo balde');
+assert.deepStrictEqual(vistos(A.filtra(mix, '', 'stock')), ['com saldo'],
+  'e Com saldo nao traz quem saiu, mesmo que o saldo ainda nao tenha zerado');
+
+const c = A.contagens(mix);
+assert.strictEqual(c.tudo, 4);
+assert.strictEqual(c.fora, 2, 'a contagem do botao Fora');
+assert.strictEqual(c.comSaldo, 1, 'e as outras duas nao contam quem saiu');
+assert.strictEqual(c.zerados, 1);
+assert.strictEqual(c.comSaldo + c.zerados + c.fora, c.tudo, 'os tres botoes somam o total');
+
+/* a busca continua valendo junto com o filtro */
+assert.deepStrictEqual(vistos(A.filtra(mix, 'odoo', 'fora')), ['saiu do odoo']);
+console.log('(12) o filtro Fora separa quem saiu do Odoo de quem so esta zerado');
+
+
 
 console.log('\ntest-almoxpick OK (MPN na busca com e sem separador, um predicado '
           + 'para as duas listas, saldo junto, e o conector por subtipo: chave do '

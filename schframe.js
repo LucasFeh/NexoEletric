@@ -3464,6 +3464,7 @@ function symRenderLista(){
   $('symNTudo').textContent = c.tudo;
   $('symNSaldo').textContent = c.comSaldo;
   $('symNZero').textContent = c.zerados;
+  $('symNFora').textContent = c.fora;
   HubAlmoxPick.renderFamilias($('symLista'), {
     grupos: apGrupos, busca: $('symBusca').value, filtro: apFiltro,
     sel: apFam && apFam.familia, rec: apRec,
@@ -3955,10 +3956,15 @@ $('symClose').addEventListener('click', fechaSymModal);
 $('symUsar').addEventListener('click', usarSimboloEscolhido);
 $('symBusca').addEventListener('input', symRenderLista);
 $('symEditar').addEventListener('click', editarSimboloNoHub);
+/* O SELETOR PROCURAVA UMA CLASSE QUE NAO EXISTE. Os botoes sao `<button data-f=...>` e o
+   handler fazia `closest('.ap-f')` -- nenhum elemento do projeto tem essa classe, entao o
+   clique saia pelo `if (!b) return` e os tres filtros (Tudo / Com saldo / Zerados) nunca
+   fizeram nada. Nao dava erro nenhum: o botao acendia? nao, nem isso. Agora casa pelo
+   proprio `data-f`, que e o que define um botao deste grupo. */
 $('symFiltros').addEventListener('click', e => {
-  const b = e.target.closest('.ap-f'); if (!b) return;
+  const b = e.target.closest('button[data-f]'); if (!b) return;
   apFiltro = b.dataset.f;
-  for (const x of $('symFiltros').querySelectorAll('.ap-f'))
+  for (const x of $('symFiltros').querySelectorAll('button[data-f]'))
     x.setAttribute('aria-pressed', String(x === b));
   symRenderLista();
 });

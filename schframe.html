@@ -671,6 +671,10 @@
             <button type="button" data-f="all" aria-pressed="true">Tudo<span class="n" id="symNTudo"></span></button>
             <button type="button" data-f="stock" aria-pressed="false">Com saldo<span class="n" id="symNSaldo"></span></button>
             <button type="button" data-f="nostock" aria-pressed="false">Zerados<span class="n" id="symNZero"></span></button>
+            <!-- FORA nao e ZERADO, e o olho nao separa: os dois mostram 0 de saldo. Zerado e
+                 peca do catalogo que acabou; fora e peca que saiu do Odoo (ou perdeu a marca
+                 "e componente eletronico") e so volta se alguem mexer no cadastro. -->
+            <button type="button" data-f="fora" aria-pressed="false">Fora<span class="n" id="symNFora"></span></button>
           </div>
         </div>
         <div class="lib-sum" id="symSum"></div>

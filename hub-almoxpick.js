@@ -176,6 +176,9 @@ function grupos(){
            ele na busca, digitar "SZMMSZ5240BT1G" nao achava o DIODO ZENER [PTH] que o
            carrega, e a tela dizia "nenhuma familia casa" tendo a resposta dentro. */
         mpn: String((v.mpn || '')).trim(),
+        /* SAIU DO ODOO (ou perdeu a marca "e componente eletronico"): continua na lib,
+           com saldo zero e o numero de part reservado, para nao renumerar as outras. */
+        fora: !!v.fora,
         conn: v.conn || null,
         linha: linhaConn(v.conn),
         /* o codigo do fabricante (MC 1,5/4-G-3,81, 2510, BBPTC-4). E ele que separa duas
@@ -267,8 +270,14 @@ const semSep = t => String(t || '').toUpperCase().replace(/[\s\-\/.,]/g, '');
 const casaMpn = (mpn, q, qSem) => !!mpn && (casa(mpn, q)
   || (regraDoTermo(q).letra && qSem.length >= 3 && semSep(mpn).indexOf(qSem) >= 0));
 
-const passa = (it, filtro) => filtro === 'stock' ? it.saldo > 0
-                            : filtro === 'nostock' ? it.saldo <= 0 : true;
+/* O FILTRO DE SALDO, mais o `fora`. Zerado e fora nao sao a mesma coisa e o olho nao
+   separa: os dois aparecem com 0 do lado direito. Zerado e peca do catalogo que acabou e
+   vai voltar na proxima compra; FORA e peca que saiu do Odoo -- ou que perdeu a marca
+   "e componente eletronico" -- e so volta se alguem mexer no cadastro. Quem esta caçando
+   o que sumiu precisa de uma lista so com esses, e "Zerados" traz os dois misturados. */
+const passa = (it, filtro) => filtro === 'stock' ? it.saldo > 0 && !it.fora
+                            : filtro === 'nostock' ? it.saldo <= 0 && !it.fora
+                            : filtro === 'fora' ? !!it.fora : true;
 
 /* UM predicado para as duas listas. A da esquerda (familias) e a da direita (valores)
    filtravam com duas copias da mesma condicao — e enquanto forem duas, acrescentar um campo
@@ -338,9 +347,13 @@ function filtra(gs, busca, filtro){
 /* os números dos três botões do .seg — contados no acervo inteiro, não no que está filtrado:
    um contador que muda junto com o próprio filtro não informa nada */
 function contagens(gs){
-  let tudo = 0, comSaldo = 0;
-  for (const g of gs) for (const it of g.valores){ tudo++; if (it.saldo > 0) comSaldo++; }
-  return { tudo, comSaldo, zerados: tudo - comSaldo };
+  let tudo = 0, comSaldo = 0, fora = 0;
+  for (const g of gs) for (const it of g.valores){
+    tudo++;
+    if (it.fora) fora++;
+    else if (it.saldo > 0) comSaldo++;
+  }
+  return { tudo, comSaldo, fora, zerados: tudo - comSaldo - fora };
 }
 
 /* ── ESQUERDA: só as FAMÍLIAS ──

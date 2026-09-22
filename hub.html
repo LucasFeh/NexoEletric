@@ -672,6 +672,13 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .alx-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
 .alx-bar .input { min-height: 26px; font-size: 12px; }
 .alx-bar .count { margin-left: auto; font-size: 11px; color: var(--text-4); white-space: nowrap; }
+/* o botao `Fora` da barra de valores: apagado quando nao ha nenhum, aceso quando ligado */
+.alx-bar #libValFora { white-space: nowrap; }
+.alx-bar #libValFora .n { font-variant-numeric: tabular-nums; color: var(--text-4);
+  margin-left: 5px; }
+.alx-bar #libValFora[aria-pressed="true"] { background: rgba(var(--tint),0.16);
+  color: var(--warn); }
+.alx-bar #libValFora[disabled] { opacity: .35; pointer-events: none; }
 .alx-list { overflow: auto; padding: 0 4px 8px; }
 .alx-row { display: grid; grid-template-columns: 30px minmax(0,1fr) auto auto; gap: 8px; align-items: center;
   width: 100%; text-align: left; cursor: pointer; border: 0; background: transparent; color: inherit;
@@ -997,6 +1004,15 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
           <div class="alx-box" id="libValBox" hidden>
             <div class="alx-bar">
               <input class="input" id="libValSearch" type="text" placeholder="filtrar valor, MPN ou código Mouser…">
+              <!-- FORA nao e ZERADO, e o olho nao separa: os dois mostram 0 de saldo. Zerado
+                   e peca do catalogo que acabou e volta na proxima compra; fora e peca que
+                   saiu do Odoo (ou perdeu a marca "e componente eletronico") e so volta se
+                   alguem mexer no cadastro. Um botao de liga/desliga, e nao um `.seg` de
+                   quatro: aqui a lista ja e de UMA familia, e o que se procura e "o que
+                   sumiu desta familia". -->
+              <button type="button" class="btn btn-ghost btn-sm" id="libValFora"
+                      aria-pressed="false" title="só os que saíram do Odoo">Fora<span
+                      class="n" id="libValNFora"></span></button>
               <span class="count" id="libValCount"></span>
             </div>
             <div class="alx-list" id="libValList"></div>
@@ -3010,7 +3026,17 @@ function renderLibAlmoxPreview() {
 
   /* ── painel de valores ── */
   const vq = (S.lib.valQ || '').trim().toLowerCase();
-  const vis = parts.filter(p => !vq ||
+  /* o botao "Fora": ligado, a lista mostra SO quem saiu do Odoo. Ele e por familia, entao
+     a contagem tambem e -- e se esta familia nao tem nenhum, o botao fica apagado em vez
+     de mentir que ha o que ver. */
+  const nFora = parts.filter(p => p.fora).length;
+  const bFora = $('#libValFora'), nFEl = $('#libValNFora');
+  if (nFora && S.lib.soFora) { /* mantem */ } else if (!nFora) S.lib.soFora = false;
+  nFEl.textContent = nFora || '';
+  bFora.disabled = !nFora;
+  bFora.setAttribute('aria-pressed', String(!!S.lib.soFora));
+  bFora.onclick = () => { S.lib.soFora = !S.lib.soFora; renderLibAlmoxPreview(); };
+  const vis = parts.filter(p => (S.lib.soFora ? p.fora : true)).filter(p => !vq ||
     /* o FOOTPRINT entra na busca junto com o encap: são dois nomes para o mesmo
        tamanho ("1206" do Odoo, "CAP 1206" da casa) e quem procura um aceita achar pelo outro */
     (p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '') + ' ' + (p.pkgs || []).join(' ')
