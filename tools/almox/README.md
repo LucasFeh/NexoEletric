@@ -35,6 +35,124 @@ Onde se escolhe:
 De quebra a `.SchLib` encolheu 8× (413 KB em vez de 3,5 MB), porque a geometria deixou
 de ser duplicada uma vez por valor.
 
+### O conector é procurado pelo subtipo, não pelo número de vias
+
+Até 2026-09-22 todo conector era **uma** família, `CONECTOR`, partida por número de vias na
+hora de virar símbolo: `CONECTOR 2V`, `CONECTOR 3V`, … `CONECTOR 64V`. Procurar um bloco
+terminal Phoenix de 4 vias queria dizer adivinhar as vias primeiro, achar `CONECTOR 4V` no
+meio de 25 irmãs ordenadas `10V, 12V, 13V, …, 2V, 20V` e só então ler 25 rótulos quase
+iguais. E **metade do acervo nem estava lá**: 148 dos 291 valores caíam num balde único
+chamado `CONECTOR [PINAGEM A DEFINIR]`, porque o extrator de vias só conhecia a palavra
+"N vias" e o Phoenix escreve a contagem no meio do part number — em `MC 1,5/ 4-G-3,81` o
+**4 é a via** e o **1,5 é a bitola do cabo em mm²**.
+
+Agora a família **é o subtipo**, que é como a bancada pede a peça:
+
+| No Odoo | Símbolo (= a linha da busca) | Valor, na tela |
+|---|---|---|
+| `Conector Bloco Terminal - MC 1.5/ 4-STF-3.81 (1827729)` | `CONECTOR BLOCO TERMINAL` | `4 vias 3.81 femea` · `MC 1.5/ 4-STF-3.81` |
+| `Conector Bloco Terminal MSTB 2,5/10-GF-5,08 (1776582)` | `CONECTOR BLOCO TERMINAL` | `10 vias 5.08 macho` · `MSTB 2,5/10-GF-5,08` |
+| `Conector Latch 26 vias (2x13) passo 2.54mm 180°` | `CONECTOR LATCH` | `26 vias (2x13) 2.54 180°` |
+| `Barra de Pinos Macho 1x40 2.54mm 90° (BPSN-40)` | `CONECTOR BARRA DE PINOS` | `40 vias (1x40) 2.54 90° macho` · `BPSN-40` |
+
+**Um símbolo por subtipo, e o número de vias NÃO entra no nome dele.** A pinagem é atributo
+do componente: o bloco terminal de 4 e o de 10 são a mesma peça com contagem diferente, e
+fabricar `CONECTOR BLOCO TERMINAL 4V`, `…10V`, `…12V` só recria o labirinto num nível abaixo.
+Cada valor carrega o próprio desenho em `valores[].parts`, montado a partir das vias dele —
+recurso que o formato já tinha, porque na `.SchLib` cada valor **já é** um componente
+próprio, com geometria própria. São **22 símbolos para 325 valores**, contra 36 antes (e 116
+na primeira tentativa, que errou exatamente nisto).
+
+Regenerar o desenho a cada sincronismo não apaga trabalho manual: o desenho editado no hub
+ou adotado do Altium vive no ledger do guardião (`protegidos[família][componente]`, escrito
+pelo `/save-almox`) e volta por cima deste.
+
+São **22 subtipos** e eles cobrem o dump inteiro: BAIONETA, BARRA DE PINOS, BLOCO TERMINAL,
+BORNE, CARTAO SD, CIRCULAR MIL, DB, HEADER COM TRAVA, HEADER SEM TRAVA, JACK, JST, KK,
+LATCH, PLANO, PLUGUE, REGUA TERMINAL, RJ45, SOQUETE, TERRA, USB, ACESSORIO,
+ACESSORIO DE PAINEL — e `CONECTOR` puro como degradê para o que nenhuma regra reconhecer.
+`BARRA DE PINOS` deixou de ser família própria e virou subtipo: na bancada ela é conector.
+
+Como a família também decide o **arquivo** (`balde_de` → `nome_arquivo`), isso dá de graça
+o que o Altium precisava: **22 `.SchLib`, uma por subtipo** — `CONECTOR KK ALMOX.SchLib`,
+`CONECTOR BLOCO TERMINAL ALMOX.SchLib` — em vez de um `CONECTOR ALMOX.SchLib` de 870 KB.
+
+O subtipo é deduzido do nome do Odoo por uma tabela de regex (`conectores.SUBTIPOS`), que é
+um remendo com prazo: **quando o Odoo passar a ter o campo "subtipo"**, ele vira a fonte e a
+tabela vira só o degradê para o cadastro que ainda não o tiver.
+
+**O rótulo do valor NÃO mudou, e isso é o ponto delicado.** A frase `4 vias 3.81 180°` é
+montada **na tela** (`hub-almoxpick.js » linhaConn`) a partir de campos que o gerador emite
+soltos em `valores[].conn` (`vias`, `matriz`, `passo`, `angulo`, `genero`, `tipo`). Ela não
+pode ser o rótulo porque o rótulo é a chave do livro-razão e metade da identidade do valor
+(`agrupar()` chaveia por `(rótulo, encapsulamento)`): medido no dump, essa frase se repete
+em 27 dos 327 conectores, e como rótulo ela fundiria **sete** blocos terminais Phoenix
+diferentes — macho e fêmea juntos — num componente só, com o estoque somado.
+
+Campo que o Odoo não diz **não aparece**. O ângulo sai em 100 dos 327 nomes; em CIRCULAR
+MIL, RÉGUA TERMINAL, SOQUETE e BAIONETA o passo e o ângulo não existem como propriedade da
+peça. Deduzir o ângulo da letra `V` das séries Phoenix (`MCV`, `MSTBV`) foi medido e
+**recusado**: esse V é a direção de entrada do fio, que não é o mesmo eixo do 180/90 que os
+headers escrevem — preencher 70 blocos terminais com esse palpite faria a tela afirmar o
+que ninguém mediu.
+
+O extrator vive em `conectores.py`, tem teste próprio (`tests/test_conectores.py`, um caso
+por armadilha real do dump) e levou o número de conectores com pinagem legível de **154 para
+311 em 327** — o balde `[PINAGEM A DEFINIR]` caiu de 148 valores para 16, espalhados por
+subtipo. O balde `[PINAGEM A DEFINIR]` **deixou de existir para conector**: com um símbolo
+por subtipo, o valor sem pinagem legível mora no subtipo dele e apenas não ganha desenho
+próprio — herda o da família. De quebra sumiu o símbolo fantasma `CONECTOR 45V`, que existia
+porque o regex antigo lia o `P/` de `RJ45 P/ PCB` como "45 vias".
+
+> **Renomear símbolo renumera o livro-razão.** `almox-parts.json` é indexado pelo nome do
+> símbolo e `numera_valores` cai em `{prox:1, ids:{}}` **em silêncio** quando não acha a
+> chave. Por isso a troca veio com `migra_conectores.py`, que casa velho e novo **pelo id do
+> produto no Odoo** (e não pelo rótulo, que muda para quem sai dos especiais) e leva junto as
+> chaves do `lib-ledger.json` — `gerado`, `protegidos` e `footprints`. Preservou **247 dos
+> 326** números; os outros 78 colidiram, e a colisão é estrutural: até 15 espaços de
+> numeração viram um (`BARRA DE PINOS 2V`..`10V` → `CONECTOR BARRA DE PINOS`) e todos
+> começavam no 1. Quem chegou primeiro fica com o número; o resto tira do `prox`. A **data de
+> entrada** não disputa e é herdada sempre, inclusive por quem perdeu o número — senão 78
+> conectores que estão na biblioteca desde agosto voltariam a aparecer como recém-chegados.
+> Rode-o **uma vez**, antes da primeira geração:
+> `python3 tools/almox/migra_conectores.py` mostra o plano, `--aplicar` grava.
+
+### Renomear o produto no Odoo não duplica o componente
+
+O livro-razão chaveia o valor pelo **rótulo**, e o rótulo sai do nome do produto. Trocar o
+nome no cadastro, sem mais nada, fazia duas coisas erradas ao mesmo tempo:
+
+- nascia um componente **novo** — número novo, data de hoje, sem o footprint escolhido à mão
+  nem o desenho adotado do Altium;
+- o antigo ficava na lista como **`fora: true`**, saldo zero, para sempre, porque
+  `numera_valores` ressuscita do espelho tudo que está em `ids` e não veio no CSV.
+
+Uma faxina de nomes no Odoo dobrava a biblioteca. Agora o **`product_id`** é quem diz "é a
+mesma peça" — ele não muda quando o nome muda:
+
+- `almox2lib » segue_renomeacoes` roda **antes** da numeração: o número e a data de entrada
+  mudam de chave, e a chave velha **sai** do livro-razão. É a saída dela que impede o zumbi.
+  Vale inclusive quando o item muda de símbolo junto com o nome (um bloco terminal
+  recadastrado como KK vai para `CONECTOR KK` levando o número);
+- `guardiao » segue_renomeacoes` roda **antes** de julgar órfão: `protegidos` e `footprints`
+  são reencontrados pelo id e mudam de chave junto, então o desenho adotado e o footprint
+  manual acompanham o nome novo.
+
+De onde vem o id: `Libs/almox-parts.json` guarda um `odoo` por símbolo (`{product_id: chave}`)
+e cada entrada do `lib-ledger.json` guarda o seu. **Fica no livro-razão, e não no espelho, de
+propósito**: `Libs/almox-*.js` está no `.gitignore` e não existe num clone novo — o
+livro-razão é versionado e é a única memória de quem era quem. O campo é preenchido sozinho
+na primeira sincronização depois desta mudança, enquanto ainda dá para achar cada entrada
+pelo nome; é essa rodada que habilita as seguintes.
+
+**O que NÃO muda:** produto que saiu do Odoo de verdade continua virando `fora: true` com
+saldo zero e guardando o número — que é o comportamento pedido. A diferença é que agora
+"sumiu" quer dizer sumiu, e não "mudou de nome".
+
+> Uma ressalva de ordem: um símbolo que perde **todos** os valores deixa de ser montado, e aí
+> não há de onde ressuscitar os que saíram — eles somem em vez de virar `fora`. Só acontece
+> quando a família inteira sai do catálogo.
+
 ### O catálogo acumula, não é recriado
 
 O **id** de um valor, uma vez dado, é daquele valor para sempre — `Libs/almox-parts.json`
@@ -249,6 +367,11 @@ algo que não devia.
   (ohm/farad/henry/volt/ampère/hertz) e os põe em forma canônica.
 - `familias.py` — a tabela de famílias (regex → símbolo, designador, forma, unidade) e a
   análise de uma linha do dump.
+- `conectores.py` — o conector lido em campos: subtipo, vias, matriz, passo, ângulo, gênero
+  e código do fabricante. É ele que troca a família `CONECTOR` por `CONECTOR <SUBTIPO>` e
+  que enche o `valores[].conn` do espelho. Testado em `tests/test_conectores.py`.
+- `migra_conectores.py` — a migração de uma vez só do livro-razão e do ledger do guardião
+  para os nomes com subtipo. Sem `--aplicar` ele só mostra o plano.
 - `simbolos.py` — a geometria de cada forma, no mesmo vocabulário do `Libs/schlib.js`.
   Todo pino gerado nasce com **`hideName: true`**: só o número à vista; o nome (A/K, B/C/E,
   ou o próprio número) fica guardado no pino e o olho da ficha Símbolos o mostra. É o padrão
