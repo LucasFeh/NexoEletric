@@ -34,12 +34,17 @@ def main():
         print('test_schlib_gerada PULADO (Libs/Almox ainda nao foi gerada)')
         return 0
 
-    # o que o espelho manda existir: um componente por valor, agrupado por familia
+    # o que o espelho manda existir: um componente por valor, agrupado por familia.
+    # O balde sai do `almox2lib.balde_de`, o MESMO que o escritor usa — reescrever a regra
+    # aqui foi o que fez este teste acusar "52 .SchLib no disco, 49 casaram" no dia em que
+    # o conector passou a ter uma biblioteca por subtipo: o disco estava certo e a copia da
+    # regra que vivia neste arquivo e que estava velha.
+    import almox2lib as A2
     esperado = collections.defaultdict(dict)     # familia -> {nome_altium: (sim, valor)}
-    for arq, unica in (('almox-basicos.js', None), ('almox-especiais.js', 'ESPECIAIS')):
+    for arq in ('almox-basicos.js', 'almox-especiais.js'):
         esp = ESC.le_espelho(os.path.join(RAIZ, 'Libs', arq))
         for sim in esp['symbols']:
-            fam = unica or sim['familia']
+            fam = A2.balde_de(sim)
             for v in sim.get('valores') or []:
                 esperado[fam][v['altium']] = (sim, v)
 
@@ -174,7 +179,15 @@ def main():
                         contagem[d['Name']] += 1
             rep = sorted(k for k, c in contagem.items() if c > 1)
             assert not rep, '%s: parametro repetido %r' % (nome, rep)
-            assert len(pinos) == len(sim['parts'][0]['pins']), '%s: contagem de pinos' % nome
+            # O DESENHO DO VALOR GANHA DO DESENHO DA FAMILIA, como em
+            # `schlib_escritor.monta_componente:379` (`valor.get('parts') or sim['parts']`).
+            # Sao 3 valores hoje — SN65HVD75DR, ESP32-DevKitC-32D e ESP32 DEVKIT V1 —, todos
+            # salvos pelo /save-almox por cima de um simbolo [PINAGEM A DEFINIR] de 4 pinos.
+            # Comparar sempre contra a familia acusava "contagem de pinos" num arquivo certo.
+            partes = valor.get('parts') or sim['parts']
+            assert len(pinos) == len(partes[0]['pins']), (
+                '%s: contagem de pinos (%d no arquivo, %d no espelho)'
+                % (nome, len(pinos), len(partes[0]['pins'])))
 
             # os parametros saem PREENCHIDOS, nao como placeholder. Campo que o Odoo nao
             # tem (Local de um item sem prateleira, MPN de um generico) simplesmente nao

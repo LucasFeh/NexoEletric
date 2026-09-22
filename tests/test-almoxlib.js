@@ -68,14 +68,21 @@ for (const meta of idx.libs) {
   assert.strictEqual(valores, meta.parts, meta.id + ': total de valores no índice');
   assert.ok(Math.abs(estoque - meta.estoque) < 0.5, meta.id + ': estoque somado bate com o índice');
 
-  /* o mapa de ids é o que faz a lib acumular em vez de ser recriada */
+  /* o mapa de ids é o que faz a lib acumular em vez de ser recriada.
+     A BUSCA É PELA CHAVE, não pelo rótulo — é a chave que o `numera_valores` grava
+     (`chave(v) = v.chave || v.label`, tools/almox/almox2lib.py). Desde que o valor se
+     divide por encapsulamento, dois componentes têm o MESMO label na mesma família
+     ("20V 0.5W" em SOD-123 e sem encapsulamento) e só a chave os separa; procurar por
+     label achava o primeiro dos dois e acusava "mudou de id (75 → 100)" num espelho
+     correto. */
+  const chaveDoValor = v => v.chave || v.label;
   for (const nome in mapaIds) {
     const s = lib.symbols.find(x => x.name === nome);
     if (!s) continue;
-    for (const label in mapaIds[nome].ids) {
-      const v = s.valores.find(x => x.label === label);
-      if (v) assert.strictEqual(v.id, mapaIds[nome].ids[label],
-        nome + ': "' + label + '" mudou de id (' + mapaIds[nome].ids[label] + ' → ' + v.id + ')');
+    for (const chave in mapaIds[nome].ids) {
+      const v = s.valores.find(x => chaveDoValor(x) === chave);
+      if (v) assert.strictEqual(v.id, mapaIds[nome].ids[chave],
+        nome + ': "' + chave + '" mudou de id (' + mapaIds[nome].ids[chave] + ' → ' + v.id + ')');
     }
   }
 }
