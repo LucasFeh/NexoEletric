@@ -67,8 +67,13 @@ CATALOGO = {
     'CHAVE':                        'Chave Contato Momentâneo',
     'TRANSISTOR':                   '2N3904',          # símbolo BJT padrão da casa
 }
-# conectores: a família traz o número de vias no nome, e a lib real tem barra por via
-CONECTOR_RX = re.compile(r'^(CONECTOR|BARRA DE PINOS) (\d+)V')
+# LEGADO. Quando o número de vias morava no NOME DO SÍMBOLO ("CONECTOR 4V",
+# "BARRA DE PINOS 9V"), era daqui que saía o modelo `BARRA TERMINAL N VIAS` da lib da casa.
+# Desde 2026-09-22 o conector tem um símbolo por subtipo e a pinagem desceu para o valor
+# (`valores[].parts`), então este regex não casa mais nome nenhum que o gerador produza — e
+# não faz falta: o desenho de cada componente vem do próprio valor. Fica para o espelho de
+# uma geração anterior, que ainda traz os nomes antigos.
+CONECTOR_RX = re.compile(r'^(CONECTOR(?: [A-Z/ ]+?)?|BARRA DE PINOS) (\d+)V')
 
 # Os parametros que a escolha do valor preenche. Sao declarados uma vez, aqui, e
 # qualquer homonimo herdado do simbolo reciclado e descartado.
@@ -801,12 +806,15 @@ def gera(destino_dir=None, origem=None, log=print):
         cab_modelo, comps = None, {}
         log('sem a biblioteca de origem (%s) — desenhando tudo do simbolos.py' % e)
 
-    # agrupa: nos basicos, por familia; os especiais, todos juntos
+    # agrupa: quem decide o balde e o `almox2lib.balde_de`, e SO ele — a regra ja esteve
+    # copiada aqui, no desempata_nomes e no teste, e as copias divergiram na primeira
+    # mudanca (ver o docstring de la).
+    import almox2lib as A2
     grupos = collections.OrderedDict()
-    for arq, unica in (('almox-basicos.js', None), ('almox-especiais.js', 'ESPECIAIS')):
+    for arq in ('almox-basicos.js', 'almox-especiais.js'):
         esp = le_espelho(os.path.join(LIBS, arq))
         for sim in esp['symbols']:
-            fam = unica or sim['familia']
+            fam = A2.balde_de(sim)
             for v in sim.get('valores') or []:
                 grupos.setdefault(fam, []).append((sim, v))
 

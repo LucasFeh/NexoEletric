@@ -149,14 +149,29 @@ def classifica(a, dominante):
     numbers diferentes cairiam no mesmo valor."""
     fam, gr = a['familia'], a['grupo']
     forma, vias = a['forma'], a['vias']
+    # UM SIMBOLO POR SUBTIPO DE CONECTOR, e o numero de vias NAO entra no nome dele.
+    # A pinagem e atributo do COMPONENTE, nao de um simbolo diferente: o bloco terminal de
+    # 4 e o de 10 sao o mesmo tipo de peca, com contagem diferente. Cada valor carrega o
+    # proprio desenho (`valores[].parts`, montado no monta_simbolo a partir das vias), que
+    # e um recurso que o formato ja tinha — no .SchLib cada valor ja e um componente
+    # proprio, com geometria propria. O que muda aqui e so parar de fabricar um SIMBOLO por
+    # contagem: eram 116 para 326 valores, e a aba Biblioteca e o painel de bibliotecas do
+    # Altium mostravam "CONECTOR BARRA DE PINOS 10V, 12V, 13V…" onde tem de haver um.
+    conector = bool(a.get('conn'))
+    if conector:
+        # a montagem tambem nao parte o conector. No Odoo ela e quase toda PTH e serve so
+        # para rachar um subtipo em dois ("CONECTOR PLANO" e "CONECTOR PLANO [PTH]").
+        a['mont'] = ''
+        return fam, (a['rotulo'] or a['mpn'] or 'S/ VALOR'), 'b', 'conn', vias
+
     if dominante.get(fam) is None:
         a['mont'] = ''                       # familia sem split de montagem
     elif not a['mont']:
         a['mont'] = dominante[fam]
         a['mont_presumida'] = True
 
-    if gr == 'b' and forma in ('conn', 'rede', 'dipsw') and not vias:
-        # conector sem numero de vias no nome: a pinagem seria chute, entao
+    if gr == 'b' and forma in ('rede', 'dipsw') and not vias:
+        # rede/dipsw sem numero de vias no nome: a pinagem seria chute, entao
         # ele vai para os especiais, onde o vinculo ja e manual
         gr, forma = 'e', 'box'
 
@@ -228,7 +243,14 @@ def agrupar(itens):
                 'forma': forma, 'npin': npin, 'mont': a['mont'],
                 'unidade': a['unidade'], 'parts': collections.OrderedDict(),
                 'pkgs': collections.Counter(), 'cats': collections.Counter(),
+                'vias_cnt': collections.Counter(),
             }
+        # a contagem de vias de todos os itens do simbolo. So o conector usa: o `npin` dele
+        # deixou de sair do primeiro item que criou o simbolo (o que e acaso, e com um
+        # simbolo por subtipo passou a ser acaso VISIVEL — o desenho da familia inteira) e
+        # passa a ser a pinagem mais comum do subtipo, resolvida no fim desta funcao.
+        if a.get('conn') and a['vias']:
+            s['vias_cnt'][a['vias']] += 1
         if a['pkg']:
             s['pkgs'][a['pkg']] += 1
         if a['categoria']:
@@ -273,6 +295,13 @@ def agrupar(itens):
                 pt = s['parts'][(rot, enc)]
                 pt['chave'] = (rot if enc == primeiro
                                else ('%s %s' % (rot, enc) if enc else rot + ' (sem encap)'))
+
+    # a pinagem do DESENHO DA FAMILIA do conector: a mais comum do subtipo, com empate
+    # resolvido pela menor. Ela e so a previa — cada valor desenha com as vias dele.
+    for s in simbolos.values():
+        c = s.pop('vias_cnt', None)
+        if c:
+            s['npin'] = min(c, key=lambda n: (-c[n], n))
     return simbolos
 
 
@@ -340,6 +369,25 @@ def geometria_congelada(nome, antes):
     return parts, bb, (v.get('partcount') if isinstance(v.get('partcount'), int) else len(parts))
 
 
+def conn_do_valor(itens):
+    """Os campos de conector de um VALOR, a partir dos itens do Odoo que caem nele.
+
+    Um valor pode juntar mais de uma linha do Odoo (mesmo rotulo, mesmo encapsulamento).
+    Campo em que os itens DISCORDAM nao afirma nada e sai vazio — a mesma regra do
+    `montagem_declarada` logo acima, e pelo mesmo motivo: um numero de vias tirado do
+    primeiro item de dois desenharia a pinagem de um e o rotulo do outro.
+    """
+    cs = [x['conn'] for x in itens if x.get('conn')]
+    if not cs:
+        return None
+    fora = {}
+    for k in ('subtipo', 'vias', 'matriz', 'passo', 'angulo', 'genero', 'tipo'):
+        vals = {c.get(k) for c in cs}
+        fora[k] = vals.pop() if len(vals) == 1 else (0 if k in ('vias', 'angulo') else
+                                                     None if k == 'passo' else '')
+    return fora
+
+
 def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpman=None):
     pins, gfx = SY.desenha(s['forma'], s['npin'], rotulo=s['familia'] if s['forma'] == 'box' else '')
     ps = ordena_parts(s)
@@ -388,6 +436,7 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpm
         est = sum(x['estoque'] for x in p['itens'])
         mouser = next((x['mouser'] for x in p['itens'] if x['mouser']), '')
         mpn = next((x['mpn'] for x in p['itens'] if x['mpn']), '')
+        conn = conn_do_valor(p['itens'])
         pkgs = sorted({x['pkg'] for x in p['itens'] if x['pkg']})
         locais = sorted({x['local'] for x in p['itens'] if x['local']})
         custos = [x['custo'] for x in p['itens'] if x['custo']]
@@ -472,6 +521,15 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpm
             if pols == {'pnp'}:
                 pv, gv = SY.desenha('bjt_pnp')
                 parts_valor = [{'part': 1, 'pins': pv, 'graphics': gv}]
+        # O CONECTOR DESENHA POR VALOR. O simbolo do subtipo e um so, entao a pinagem tem de
+        # descer para ca — e o lugar certo: no .SchLib cada valor ja e um componente proprio,
+        # com geometria propria (schlib_escritor » `valor.get('parts') or sim['parts']`).
+        # Regenerar todo sincronismo nao apaga trabalho manual: o desenho editado no hub ou
+        # adotado do Altium vive no ledger do guardiao (`protegidos[familia][componente]`,
+        # symserver » /save-almox), e e de la que ele volta, por cima deste.
+        elif conn and conn.get('vias'):
+            pv, gv = SY.desenha('conn', conn['vias'])
+            parts_valor = [{'part': 1, 'pins': pv, 'graphics': gv}]
         valores.append({
             'id': 0,                        # numerado depois, por `numera_valores`
             'altium': nome_altium,
@@ -488,6 +546,10 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpm
             # fim da lista. Fica no arquivo para o hub e os testes conferirem a ordem
             # sem reinterpretar o rotulo.
             'ord': p['valor'],
+            # o conector em campos. Sai como objeto proprio, e nao diluido no `label`, para
+            # a tela poder montar "4 vias 3.81 180 femea" sem que o gerador tenha de escrever
+            # essa frase no rotulo -- que e a chave do livro-razao e funde homonimos.
+            **({'conn': conn} if conn else {}),
             'estoque': est,
             'pkgs': pkgs,
             'footprint': fp,
@@ -556,8 +618,22 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpm
 
 
 def balde_de(sim):
-    """em qual .SchLib o simbolo vai morar — e onde o nome dele precisa ser unico"""
-    return sim['familia'] if sim['grupo'] == 'basicos' else 'ESPECIAIS'
+    """Em qual .SchLib o simbolo vai morar — e, por isso, onde o nome dele precisa ser unico.
+
+    UMA regra, TRES consumidores: `desempata_nomes` logo abaixo (o dominio em que dois
+    valores nao podem ter o mesmo nome), `schlib_escritor.gera` (o arquivo que vai para o
+    disco) e `tests/test_schlib_gerada` (o que o teste espera achar la). Ela ja esteve
+    escrita tres vezes, cada uma na sua casa, e foi assim que a biblioteca por subtipo de
+    conector nasceu certa no disco e errada no teste na mesma rodada.
+
+    A excecao do conector: um especial normalmente vai para a lib unica 'ESPECIAIS', mas
+    conector sai por familia dos dois lados, porque a familia E o subtipo e o pedido era uma
+    biblioteca por subtipo. Sem isso os 7 simbolos de conector sem pinagem legivel ficariam
+    escondidos dentro de ESPECIAIS 1/2 ALMOX.SchLib.
+    """
+    fam = sim.get('familia') or ''
+    especial = (sim.get('grupo') or '') in ('especiais', 'e')
+    return 'ESPECIAIS' if (especial and not fam.startswith('CONECTOR')) else fam
 
 
 def desempata_nomes(simbolos, mapa=None):
@@ -707,6 +783,140 @@ def carrega_ids():
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def chave_do_valor(v):
+    """a chave do valor no livro-razao — a mesma regra do `numera_valores`"""
+    return v.get('chave') or v.get('label') or ''
+
+
+def indice_odoo(mapa, antes):
+    """{id do produto no Odoo: (simbolo, chave)} — onde cada produto estava na rodada anterior.
+
+    Duas fontes, nesta ordem. O LIVRO-RAZAO (`odoo` dentro de cada simbolo) e a durável: ela
+    e versionada e sobrevive a um clone novo. O espelho anterior e so o degradê para o
+    primeiro sincronismo depois desta mudança, quando o livro-razao ainda nao tem o indice —
+    e ele nao serve sozinho, porque `Libs/almox-*.js` esta no .gitignore e some no clone.
+    """
+    fora = {}
+    for sym, s in (antes or {}).items():
+        for v in s.get('valores') or []:
+            for it in v.get('itens') or []:
+                oid = str(it.get('odoo') or '').strip()
+                if oid:
+                    fora[oid] = (sym, chave_do_valor(v))
+    for sym, reg in (mapa or {}).items():
+        if not isinstance(reg, dict):
+            continue
+        for oid, chave in (reg.get('odoo') or {}).items():
+            fora[str(oid)] = (sym, chave)
+    return fora
+
+
+def _reg_do_simbolo(mapa, nome):
+    reg = mapa.get(nome)
+    if not isinstance(reg, dict) or not isinstance(reg.get('ids'), dict):
+        reg = mapa[nome] = {'prox': 1, 'ids': {}, 'desde': {}}
+    reg.setdefault('desde', {})
+    return reg
+
+
+def segue_renomeacoes(simbolos, antes, mapa):
+    """PRODUTO RENOMEADO NO ODOO CONTINUA SENDO O MESMO COMPONENTE.
+
+    O livro-razao chaveia o valor pelo ROTULO, e o rotulo sai do nome do produto. Trocar o
+    nome no Odoo, sem isto, faz duas coisas erradas ao mesmo tempo: nasce um componente novo
+    (com numero novo, data de hoje e sem as escolhas de footprint) e o antigo fica na lista
+    como zumbi `fora: true`, saldo zero, para sempre — porque `numera_valores` ressuscita do
+    espelho tudo que esta em `ids` e nao veio no CSV. Era assim que uma faxina de nomes no
+    cadastro dobrava a biblioteca.
+
+    O `product_id` do Odoo nao muda quando o nome muda, entao e ele que diz "e o mesmo". Aqui
+    o id e a data de entrada mudam de chave ANTES da numeracao, e a chave velha SAI do livro-
+    razao — e a saida dela que impede a ressurreicao.
+
+    O que NAO e renomeacao continua como era: produto que sumiu do Odoo de verdade nao
+    aparece em `novo`, a chave dele fica em `ids` e ele vira `fora: true`, que e o
+    comportamento pedido.
+
+    Devolve [(de_simbolo, de_chave, para_simbolo, para_chave)], para o relatorio.
+    """
+    velho = indice_odoo(mapa, antes)
+    if not velho:
+        return []
+    # {(simbolo, chave): [ids do Odoo]} desta rodada
+    agora = collections.defaultdict(list)
+    for nome, s in simbolos.items():
+        for (rot, _enc), p in s['parts'].items():
+            ch = p.get('chave') or rot
+            for it in p['itens']:
+                oid = str(it.get('odoo_id') or '').strip()
+                if oid:
+                    agora[(nome, ch)].append(oid)
+
+    renomes = []
+    for (sym, chave), oids in agora.items():
+        # de onde estes produtos vinham, tirando o proprio lugar
+        origens = {velho[o] for o in oids if o in velho}
+        origens.discard((sym, chave))
+        if not origens:
+            continue
+        # o id mais antigo entre as origens: quando duas linhas do Odoo viram um valor so,
+        # o componente herda o numero do mais velho dos dois
+        cand = []
+        for (osym, ochave) in origens:
+            oreg = mapa.get(osym)
+            if isinstance(oreg, dict) and ochave in (oreg.get('ids') or {}):
+                cand.append((oreg['ids'][ochave], osym, ochave))
+        if not cand:
+            continue
+        cand.sort()
+        vid, osym, ochave = cand[0]
+        reg = _reg_do_simbolo(mapa, sym)
+        # os numeros ja tomados AQUI DENTRO — tirando as chaves que estao de saida. Sem essa
+        # exclusao, a renomeacao dentro da MESMA familia se auto-bloqueia: a chave velha
+        # ainda esta em `ids`, entao o numero que ela vai doar aparece como "ja usado" e o
+        # componente renomeado tira numero novo, que e exatamente o que isto evita.
+        saindo = {oc for (osym, oc) in origens if osym == sym}
+        usados = {n for k, n in reg['ids'].items() if k != chave and k not in saindo}
+        if reg['ids'].get(chave) == vid or vid in usados:
+            continue                     # o numero ja e dele, ou ja e de outro aqui dentro
+        reg['ids'][chave] = vid
+        reg['prox'] = max(reg.get('prox', 1), vid + 1)
+        # TODAS as origens saem do livro-razao, inclusive as que nao doaram o numero: o que
+        # as mantem vivas e justamente o que as ressuscitaria como zumbi
+        for (osym2, ochave2) in origens:
+            oreg = mapa.get(osym2)
+            if not isinstance(oreg, dict):
+                continue
+            dt = (oreg.get('desde') or {}).pop(ochave2, None)
+            if dt and chave not in reg['desde']:
+                reg['desde'][chave] = dt
+            (oreg.get('ids') or {}).pop(ochave2, None)
+            renomes.append((osym2, ochave2, sym, chave))
+    return renomes
+
+
+def grava_indice_odoo(simbolos_montados, mapa):
+    """Guarda no livro-razao de que produto do Odoo veio cada valor.
+
+    E o que faz a renomeacao ser seguida na PROXIMA rodada. Fica aqui, e nao no espelho,
+    porque `Libs/almox-parts.json` e versionado de proposito e os espelhos nao (.gitignore):
+    num clone novo o espelho nao existe e este indice e a unica memoria de quem era quem.
+    """
+    for s in simbolos_montados:
+        reg = _reg_do_simbolo(mapa, s['name'])
+        ix = {}
+        for v in s.get('valores') or []:
+            ch = chave_do_valor(v)
+            for it in v.get('itens') or []:
+                oid = str(it.get('odoo') or '').strip()
+                if oid:
+                    ix[oid] = ch
+        if ix:
+            reg['odoo'] = ix
+        else:
+            reg.pop('odoo', None)
 
 
 def numera_valores(nome, valores, mapa, antes, podar):
@@ -978,6 +1188,16 @@ def main(argv=None):
     # o mapa de numeros e o que faz a lib acumular em vez de ser recriada: valor que ja
     # esta la mantem a sua part, valor novo entra no fim da fila de numeros
     mapa = {} if args.podar else carrega_ids()
+    # ANTES de numerar: quem so trocou de nome no Odoo leva o numero e a data com ele, e a
+    # chave velha sai do livro-razao para nao voltar como zumbi `fora: true`.
+    renomes = [] if args.podar else segue_renomeacoes(simbolos, antes, mapa)
+    if renomes:
+        print('%d produto(s) renomeado(s) no Odoo: o componente manteve o numero e a data'
+              % len(renomes))
+        for de_s, de_c, pa_s, pa_c in renomes[:10]:
+            print('   %s / %s  ->  %s / %s' % (de_s, de_c, pa_s, pa_c))
+        if len(renomes) > 10:
+            print('   ... e mais %d (a lista inteira em relatorio.txt)' % (len(renomes) - 10))
     comps_reais, ESC = carrega_reciclagem()
     recicl = {}
     if ESC is not None:
@@ -1007,6 +1227,10 @@ def main(argv=None):
     # o nome de cada valor dentro da .SchLib em que ele vai morar (e o que o `sym` do
     # schematic.js guarda): unico, e estavel mesmo quando o homonimo some
     desempata_nomes(sb + se, mapa)
+
+    # de que produto do Odoo veio cada valor — e o que a PROXIMA rodada usa para seguir uma
+    # renomeacao no cadastro
+    grava_indice_odoo(sb + se, mapa)
 
     if not os.path.isdir(LIBS):
         os.makedirs(LIBS)

@@ -7,6 +7,7 @@ PCB (parafuso, broca, cabo, caixa...).
 """
 import re
 
+import conectores as CN
 from classificar import (sa, acha_pkg, pinos_do_pkg, montagem, valor_de, canon_si)
 
 
@@ -183,7 +184,11 @@ LIXO = re.compile(
     r'impressao 3d|trilho din|garra de jacare|terminal olhal|ponta de solda|cooler|'
     r'lampada|valvula|disjuntor|filtro emi|fonte de alimentacao|^nucleo |coluna|maminha|'
     r'plastico bolha|^cabo |^fio |^tubo|conversor (?:av|hdmi)|camera|modem|multimetro|'
-    r'osciloscopio|amperimetro|^rede\b|^conexoes|^regua linear|^pilha para|calculadora')
+    r'osciloscopio|amperimetro|^rede\b|^conexoes|^regua linear|^pilha para|calculadora|'
+    # "Conector de Reducao - 1\" x 15mm" e reducao de TUBO, cadastrada em Producao
+    # Mecanica. Era o unico item de conector que nenhum subtipo reconhecia, e sozinho
+    # sustentava uma familia "CONECTOR" sem subtipo na lista da esquerda.
+    r'conector de reducao')
 
 
 # ─── extracao de campos do nome ───────────────────────────────────────────────
@@ -345,6 +350,15 @@ def analisar(row):
 
         valor, valor_txt = valor_de(nome, un) if un else (None, '')
 
+        # O SUBTIPO DO CONECTOR entra DEPOIS de a regra ter casado, e lendo o nome INTEIRO.
+        # A ordem nao e detalhe: `rotulo` acima foi recortado por `m.end()`, entao alargar o
+        # prefixo consumido para caber o subtipo mudaria o rotulo de todo conector -- e o
+        # rotulo e a chave do livro-razao (Libs/almox-parts.json) e metade da identidade do
+        # valor, que se funde com o homonimo. O subtipo troca a FAMILIA e mais nada.
+        conn = CN.campos(nome, fam)
+        if conn:
+            fam = CN.familia_com_subtipo(fam, nome)
+
         def _f(k):
             try:
                 return float(row.get(k) or 0)
@@ -353,12 +367,20 @@ def analisar(row):
 
         return {
             'familia': fam, 'des': des, 'forma': forma, 'grupo': gr, 'unidade': un,
+            # os campos do conector, soltos: e a tela que os junta numa linha (ver o
+            # cabecalho de conectores.py). None para tudo que nao e conector.
+            'conn': conn,
             # a polaridade nao cabe na FAMILIA: dividir TRANSISTOR em duas renumeraria o
             # almoxarifado inteiro (a chave do livro-razao e o nome do simbolo). Ela viaja
             # por VALOR e so troca o desenho daquele valor.
             'polaridade': polaridade_bjt(fam, f, mpn),
             'nome': nome, 'rotulo': rotulo, 'pkg': pkg, 'mont': montagem(f, pkg),
-            'pinos_pkg': pinos_do_pkg(pkg), 'vias': vias_de(f),
+            # o extrator novo SO para conector. As outras familias que usam `vias`
+            # (DIP SWITCH, CHAVE, RESISTOR REDE) continuam no vias_de de sempre: trocar o
+            # numero de vias troca a PINAGEM DO SIMBOLO, e mexer nelas de carona seria
+            # renomear simbolo que ninguem pediu para renomear.
+            'pinos_pkg': pinos_do_pkg(pkg),
+            'vias': conn['vias'] if conn else vias_de(f),
             'valor': valor, 'valor_txt': valor_txt,
             'mpn': mpn, 'mouser': mouser, 'fornecedores': outros,
             # so o colchete: o palpite do ultimo trecho e fraco demais para separar peca

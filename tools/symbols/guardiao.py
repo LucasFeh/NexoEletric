@@ -464,6 +464,92 @@ def indice_almox(espelhos):
     return idx
 
 
+def indice_odoo_almox(espelhos):
+    """({id do produto: (família do arquivo, componente)}, {(família, componente): 'id id'})
+
+    O `product_id` do Odoo é o que não muda quando o nome do produto muda — é por ele que a
+    proteção acha o componente que foi renomeado.
+    """
+    por_id, do_comp = {}, {}
+    for cam, _var, esp in espelhos:
+        base = os.path.basename(cam)
+        for sim in esp.get('symbols') or []:
+            fam = _familia_arquivo(sim, base)
+            for v in sim.get('valores') or []:
+                if not v.get('altium'):
+                    continue
+                oids = [str(it.get('odoo') or '').strip() for it in (v.get('itens') or [])]
+                oids = [o for o in oids if o]
+                if not oids:
+                    continue
+                do_comp[(fam, v['altium'])] = ' '.join(oids)
+                for o in oids:
+                    por_id[o] = (fam, v['altium'])
+    return por_id, do_comp
+
+
+def segue_renomeacoes(ledger, espelhos, idx, log=print):
+    """O componente RENOMEADO no Odoo leva junto o desenho protegido e o footprint manual.
+
+    `protegidos` e `footprints` são chaveados por (família do arquivo, NOME DO COMPONENTE), e
+    esse nome sai do nome do produto no Odoo. Sem isto, uma faxina de nomes no cadastro
+    transforma toda proteção em órfã de uma vez: o desenho adotado do Altium deixa de ser
+    reposto e a escolha de footprint volta para a dedução do gerador — as duas em silêncio,
+    que é o pior jeito de perder trabalho manual.
+
+    Duas metades. A cada rodada, toda entrada que AINDA é achada pelo nome guarda o id do
+    produto (`odoo`); a entrada que não é mais achada procura por esse id. A primeira metade
+    é o que faz a segunda funcionar, e é também a migração: quem já estava no ledger antes
+    deste campo o ganha na primeira sincronização em que ainda dá para achá-lo pelo nome.
+    """
+    por_id, do_comp = indice_odoo_almox(espelhos)
+    mexidos = []
+    for bloco in ('protegidos', 'footprints'):
+        b = ledger.get(bloco) or OrderedDict()
+        for fam in list(b):
+            for comp in list(b.get(fam) or {}):
+                d = b[fam][comp]
+                if not isinstance(d, dict):
+                    continue
+                if (fam, comp) in idx:
+                    oids = do_comp.get((fam, comp))
+                    if oids and d.get('odoo') != oids:
+                        d['odoo'] = oids          # backfill: é o que salva a próxima rodada
+                    continue
+                alvo = next((por_id[o] for o in (d.get('odoo') or '').split() if o in por_id),
+                            None)
+                if alvo is None:
+                    # SEM O ID AINDA: a entrada é de antes deste campo existir e o backfill
+                    # nunca chegou nela, porque o que mudou foi a FAMÍLIA e não o nome. É o
+                    # caso do conector ao ganhar subtipo — `BARRA DE PINOS` virou
+                    # `CONECTOR BARRA DE PINOS` e o componente continuou "2 vias 180º
+                    # 2.54mm Macho". Casa pelo nome do componente, e só quando ele é único
+                    # em todo o acervo: dois candidatos não são uma resposta.
+                    iguais = [k for k in idx if k[1] == comp]
+                    alvo = iguais[0] if len(iguais) == 1 else None
+                if not alvo or alvo == (fam, comp):
+                    continue
+                fam2, comp2 = alvo
+                destino = b.setdefault(fam2, OrderedDict())
+                if comp2 in destino:
+                    continue                      # já há proteção no destino: não sobrescreve
+                d.pop('orfao', None)
+                d['odoo'] = do_comp.get(alvo, d.get('odoo', ''))
+                if bloco == 'protegidos' and d.get('simbolo'):
+                    sim = idx.get(alvo)
+                    if sim:
+                        d['simbolo'] = sim[0]
+                destino[comp2] = d
+                del b[fam][comp]
+                if not b[fam]:
+                    del b[fam]
+                mexidos.append((bloco, fam, comp, fam2, comp2))
+                log('   renomeado no Odoo: %s / %s  ->  %s / %s (%s preservado)'
+                    % (fam, comp, fam2, comp2,
+                       'desenho' if bloco == 'protegidos' else 'footprint'))
+    return mexidos
+
+
 def _bbox(parts):
     try:
         import simbolos as SY
@@ -561,6 +647,10 @@ def depois(raiz, ledger, log=print):
     quem sumiu vira órfão); mtime/size registrados. -> (repostos, orfaos, familias)"""
     espelhos = carrega_espelhos_almox(raiz)
     idx = indice_almox(espelhos)
+    # ANTES de julgar órfão: quem só trocou de nome no Odoo é reencontrado pelo id do produto
+    # e a proteção o acompanha. Tem de vir antes do laço porque a proteção pode mudar de
+    # FAMÍLIA junto com o nome — e a família cujo arquivo já passou não seria reposta.
+    segue_renomeacoes(ledger, espelhos, idx, log)
     simbolos_atuais = {v[0] for v in idx.values()}
     repostos, orfaos, familias, vistos = [], [], [], set()
     gerado_visto = set()
