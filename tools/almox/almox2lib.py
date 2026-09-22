@@ -1171,10 +1171,25 @@ def main(argv=None):
     print('geracao anterior: %d simbolos' % len(antes))
 
     rows = list(csv.DictReader(io.open(CSV_ODOO, encoding='utf-8')))
-    analisados, fora = [], []
+    analisados, fora, sem_marca = [], [], []
+    tem_coluna = bool(rows) and 'componente' in rows[0]
     for r in rows:
         a = F.analisar(r)
-        (analisados.append(a) if a else fora.append(r))
+        if a:
+            analisados.append(a)
+        elif not F.marcado_componente(r):
+            # SAIU PELA MARCA DO ODOO, nao por palavra no nome. Fica numa lista propria:
+            # e o unico descarte que se conserta FORA daqui, marcando "e componente
+            # eletronico" no cadastro -- e para isso e preciso saber QUEM saiu.
+            sem_marca.append(r)
+        else:
+            fora.append(r)
+    if not tem_coluna:
+        print('AVISO: o dump nao tem a coluna `componente` -- o filtro de "e componente '
+              'eletronico" NAO esta valendo. Rode uma puxada (--pull) para traze-la.')
+    elif sem_marca:
+        print('%d produto(s) fora da biblioteca por nao estarem marcados como '
+              '"e componente eletronico" no Odoo (lista em relatorio.txt)' % len(sem_marca))
 
     # {nome normalizado: nome de verdade} - o valor e o que vai para a .SchLib
     fps_reais = {norm_fp(n): n for n in carrega_pcblib()}
@@ -1279,7 +1294,8 @@ def main(argv=None):
     rel.write('almox2lib — %s\n' % quando)
     rel.write('linhas no dump do Odoo : %d\n' % len(rows))
     rel.write('classificadas          : %d\n' % len(analisados))
-    rel.write('fora (nao e PCB)       : %d\n\n' % len(fora))
+    rel.write('fora (nao e PCB)       : %d\n' % len(fora))
+    rel.write('sem a marca do Odoo    : %d\n\n' % len(sem_marca))
     for titulo, lst in (('BASICOS', sb), ('ESPECIAIS', se)):
         r = resumo(lst)
         rel.write('=== %s: %d simbolos, %d valores, %d itens, %g em estoque ===\n'
@@ -1289,7 +1305,16 @@ def main(argv=None):
                       % (s['name'], len(s['valores']), s['itens'],
                          ', '.join(m['name'] for m in s['footprints'][:8]) or '—'))
         rel.write('\n')
-    rel.write('=== descartadas ===\n')
+    # Duas listas, e nao uma: o que saiu pela MARCA se conserta marcando o produto no
+    # cadastro; o que saiu pelo nome (LIXO) e decisao deste gerador. Misturadas, a que
+    # tem conserto fica escondida no meio da que nao tem.
+    rel.write('=== fora por nao estarem marcados "e componente eletronico" (%d) ===\n'
+              % len(sem_marca))
+    rel.write('    marque x_is_componente no produto e sincronize de novo\n')
+    for r_ in sem_marca:
+        rel.write('  [%s] %s\n' % (r_.get('product_id') or '?',
+                                       (r_.get('nome') or '').strip()))
+    rel.write('\n=== descartadas por nao serem componente de PCB (%d) ===\n' % len(fora))
     for r_ in fora:
         rel.write('  %s\n' % (r_.get('nome') or '').strip())
     rel.close()

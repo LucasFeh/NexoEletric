@@ -35,6 +35,42 @@ Onde se escolhe:
 De quebra a `.SchLib` encolheu 8× (413 KB em vez de 3,5 MB), porque a geometria deixou
 de ser duplicada uma vez por valor.
 
+### Quem entra na biblioteca: a marca do Odoo
+
+Só entra o produto marcado **"É componente eletrônico"** (`x_is_componente`, em
+`product.template`; vira a coluna `componente` no dump). Medido em 2026-09-22: dos 4.714
+produtos ativos, **2.712 têm a marca e 2.002 não**.
+
+Isso substitui um palpite por uma afirmação. O filtro que existia — e que continua, **depois**
+deste — é o `LIXO` do `familias.py`: uma lista de palavras que tenta adivinhar o que não é
+componente (`parafuso`, `broca`, `ferramenta`…) e erra dos dois lados. Ela deixava passar a
+`Chave Canhão 8mm Gedore` porque o nome começa com "Chave", e barrava o
+`Conector DB9 com Borne Parafuso` porque tem "parafuso" no meio. Quem cadastra sabe; o
+regex, não.
+
+**Vazio não é "não".** Dump anterior a esta coluna, ou um Odoo sem a customização, não
+trazem o campo — e tratar isso como "não é componente" faria a biblioteca nascer **vazia**
+no primeiro sincronismo depois da atualização. Sem a marca, vale o que valia antes, e o
+gerador avisa na tela que o filtro não está valendo.
+
+**Quem perde a marca não é apagado, é desabilitado.** Vira `fora: true` com saldo zero e
+**mantém o número de part** — é o mesmo caminho de quem sai do Odoo. Marcar o produto de
+volta e sincronizar o traz com o mesmo número; nada renumera.
+
+O relatório separa os dois descartes, porque só um deles tem conserto do lado de fora:
+
+```
+=== fora por nao estarem marcados "e componente eletronico" (65) ===
+    marque x_is_componente no produto e sincronize de novo
+  [3944] Circuito de Interface RS-485 - SN65HVD75DR
+  ...
+=== descartadas por nao serem componente de PCB (2117) ===
+```
+
+> **Confira a lista na primeira rodada.** Componente de verdade ainda sem a marca sai da
+> biblioteca junto com o parafuso — e se ele tiver desenho protegido ou footprint escolhido
+> à mão, esse trabalho fica órfão no ledger até o produto voltar.
+
 ### O conector é procurado pelo subtipo, não pelo número de vias
 
 Até 2026-09-22 todo conector era **uma** família, `CONECTOR`, partida por número de vias na

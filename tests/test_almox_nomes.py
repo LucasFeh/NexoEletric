@@ -142,6 +142,42 @@ def test_encap_separa_valores_e_preserva_o_id():
     assert vals[0]['id'] != vals[1]['id'], 'os dois receberam o mesmo id: %s' % vals
     assert sorted(mapa['RESISTOR [SMD]']['ids']) == ['1K', '1K 1206'], mapa['RESISTOR [SMD]']['ids']
     print('encap separa valores, e o primario mantem a chave (e o id) ok')
+    testa_marca_de_componente()
+
+
+
+def testa_marca_de_componente():
+    """A marca "e componente eletronico" do Odoo (coluna `componente`) manda no que entra.
+
+    Ela ganha do LIXO -- a lista de palavras que tenta adivinhar o que nao e componente e
+    erra dos dois lados: deixa passar a "Chave Canhao 8mm Gedore" porque o nome comeca com
+    "Chave", e barra o "Conector DB9 com Borne Parafuso" porque tem "parafuso" no meio.
+
+    VAZIO NAO E "NAO". Dump anterior a esta coluna, ou Odoo sem a customizacao, nao trazem o
+    campo -- e trata-lo como "nao e componente" faria a biblioteca nascer VAZIA no primeiro
+    sincronismo depois da atualizacao. E o unico caso aqui em que errar custa tudo.
+    """
+    base = linha('Resistor Metal Filme 1K 1/4W 1% 100ppm SMD 0805', 'Resistores - 0805', '9')
+
+    r = dict(base); r['componente'] = 'true'
+    assert F.analisar(r), 'marcado entra'
+
+    r = dict(base); r['componente'] = 'false'
+    assert F.analisar(r) is None, 'NAO marcado fica de fora'
+
+    r = dict(base); r['componente'] = ''
+    assert F.analisar(r), 'vazio nao e "nao": entra (Odoo sem o campo)'
+
+    r = dict(base)                              # a chave nem existe: dump antigo
+    assert F.analisar(r), 'dump sem a coluna nao pode esvaziar a biblioteca'
+
+    # e o portao vem ANTES do LIXO: marcar resolve o falso positivo da lista de palavras
+    r = linha('Conector DB9 Macho com Borne Parafuso Serial RS232/RS485', 'Conectores', '10')
+    assert F.analisar(r) is None, 'sem marca, o "parafuso" do LIXO ainda derruba'
+    r['componente'] = 'true'
+    assert F.analisar(r) is None, ('o LIXO continua valendo depois do portao: a marca nao '
+                                   'desliga a lista de palavras, so a antecede')
+    print('marca de componente ok (marcado entra, desmarcado sai, vazio nao e nao)')
 
 
 if __name__ == '__main__':

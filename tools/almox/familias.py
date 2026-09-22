@@ -328,9 +328,28 @@ def polaridade_bjt(fam, folded, mpn):
 
 
 # ─── analise de uma linha do dump ─────────────────────────────────────────────
+# ─── a marca do Odoo ──────────────────────────────────────────────────────────
+# "E componente eletronico" (`x_is_componente` em product.template, coluna `componente` no
+# dump). E a AFIRMACAO de quem cadastra, e ganha de qualquer palpite deste arquivo: o
+# `LIXO` abaixo e uma lista de palavras que tenta adivinhar o que nao e componente
+# ("parafuso", "broca", "ferramenta"...) e erra dos dois lados -- deixa passar a chave
+# Gedore porque o nome comeca com "Chave", e barra o "Conector DB9 com Borne Parafuso"
+# porque tem "parafuso" no meio.
+#
+# VAZIO NAO E "NAO": dump anterior a esta coluna, ou Odoo sem a customizacao, nao trazem o
+# campo -- e tratar isso como "nao e componente" faria a biblioteca nascer VAZIA no primeiro
+# sincronismo depois da atualizacao. Sem a marca, vale o que valia antes.
+def marcado_componente(row):
+    """False so quando o Odoo diz explicitamente que NAO e componente."""
+    v = str(row.get('componente', '')).strip().lower()
+    return v not in ('false', '0', 'nao', 'não')
+
+
 def analisar(row):
     nome = re.sub(r'\s+', ' ', (row.get('nome') or '')).strip()
     if not nome:
+        return None
+    if not marcado_componente(row):
         return None
     f = fold1(nome)
     if LIXO.search(f):

@@ -56,10 +56,16 @@ TIMEOUT = 60.0                 # Odoo mudo nao pode prender a sincronizacao para
 COLUNAS = ['product_id', 'template_id', 'localizacao_codigo', 'nome', 'categoria', 'unidade',
            'qtd_almoxarifado', 'qtd_total_interna', 'locais_estoque', 'barcode', 'custo',
            'preco_venda', 'fornecedor_partnumber', 'menor_preco_compra', 'estocavel', 'tipo',
-           'write_date']
+           'write_date',
+           # A MARCA DO ODOO: "E componente eletronico" (x_is_componente, em
+           # product.template). E ela que decide se o produto entra na biblioteca --
+           # ferramenta, parafuso e material de consumo ficam de fora por AFIRMACAO de
+           # quem cadastra, em vez de por adivinhacao de palavra no nome.
+           'componente']
 
 CAMPOS_PROD = ['id', 'product_tmpl_id', 'barcode', 'standard_price', 'default_code', 'write_date']
-CAMPOS_TMPL = ['id', 'name', 'categ_id', 'uom_id', 'list_price', 'type', 'default_code']
+CAMPOS_TMPL = ['id', 'name', 'categ_id', 'uom_id', 'list_price', 'type', 'default_code',
+               'x_is_componente']
 
 
 def le_config():
@@ -217,7 +223,24 @@ def _linha(p, t, forn, menor):
         'estocavel': 'true' if t.get('type') in ('product', 'consu') else 'false',
         'tipo': t.get('type') or '',
         'write_date': p.get('write_date') or '',
+        # 'true'/'false' como o `estocavel` acima. Campo AUSENTE no Odoo (instalacao sem a
+        # customizacao) vira '' -- e '' quer dizer "nao sei", nao "nao e": o gerador deixa
+        # passar, senao uma base sem o campo nasceria com a biblioteca vazia.
+        'componente': _bool_txt(t.get('x_is_componente')),
     }
+
+
+def _bool_txt(v):
+    """o booleano do Odoo -> 'true' / 'false' / '' quando o campo nao existe.
+
+    O XML-RPC devolve False tanto para "desmarcado" quanto para "campo inexistente", mas os
+    dois casos nao sao a mesma coisa aqui: desmarcado tira o produto da biblioteca, campo
+    inexistente nao pode tirar nada. Por isso a leitura passa pelo `CAMPOS_TMPL`: se o campo
+    nao existir no modelo, a chave nem vem no dict, e ai `v is None` e a resposta e ''.
+    """
+    if v is None:
+        return ''
+    return 'true' if v else 'false'
 
 
 def _fichas(o, pids, log):
