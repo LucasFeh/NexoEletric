@@ -1957,7 +1957,10 @@ function renderAddPreview(){
   if (almox){
     const vq = $('addValSearch').value.trim().toLowerCase();
     const vis = vals.filter(p => !vq ||
-      (p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '') + ' ' + (p.pkgs || []).join(' ')).toLowerCase().includes(vq));
+      (p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '') + ' ' + (p.pkgs || []).join(' ')
+       /* a linha montada do conector e o codigo do fabricante entram na busca */
+       + ' ' + (p.conn ? HubAlmoxPick.linhaConn(p.conn) : '')
+       + ' ' + ((p.conn && p.conn.tipo) || '')).toLowerCase().includes(vq));
     $('addValCount').textContent = vis.length === vals.length ? vals.length + ' valores' : vis.length + ' de ' + vals.length;
     const vl = $('addValList'); vl.textContent = '';
     const frag = document.createDocumentFragment();
@@ -1965,11 +1968,19 @@ function renderAddPreview(){
       const b = el('button', 'alx-row'); b.type = 'button';
       b.setAttribute('aria-selected', String(!!v && p.id === v.id));
       b.title = (p.itens && p.itens[0] && p.itens[0].nome) || p.label;
-      const lb = el('span', 'lb', p.label);
+      /* o conector se mostra pelos campos (hub-almoxpick » linhaConn), e o nome inteiro do
+         Odoo — com codigo do fabricante e numero de pedido — fica no title */
+      const linhaC = (p.conn && p.conn.vias) ? HubAlmoxPick.linhaConn(p.conn) : '';
+      const lb = el('span', 'lb', linhaC || p.label);
+      if (linhaC) b.title = p.label + '\n' + b.title;
       if (p.fora){ lb.append(el('i', null, 'fora')); b.title = 'não está mais no Odoo — a part continua na lib para não renumerar as outras'; }
       /* o numero e o id do valor: e a chave dele no .DbLib e no schematic.js */
       const ix = el('span', 'ix', String(p.id)); ix.title = 'id ' + p.id + ' no catálogo';
-      b.append(ix, lb, el('span', 'pk', (p.pkgs || []).join(' · ')));
+      /* codigo do fabricante + encapsulamento na tag, separados do nome: a esquerda diz
+         O QUE E, a direita diz QUAL E */
+      const cod = String((p.conn && p.conn.tipo) || p.mpn || '').trim();
+      const pkEl = el('span', 'pk', [cod, (p.pkgs || []).join(' · ')].filter(Boolean).join(' · '));
+      b.append(ix, lb, pkEl);
       b.append(el('span', 'qt' + (p.estoque > 0 ? '' : ' zero'), qtdFmt(p.estoque)));
       /* o encapsulamento fixado era do valor ANTERIOR: mantê-lo poria um 0805 na ficha de um 2512 */
       b.addEventListener('click', () => { pick.valorId = p.id; pick.fpShown = null; $('addComment').value = p.label; renderAddPreview(); });
