@@ -342,10 +342,15 @@ header {
 .subtab .n { font-size: 10px; padding: 1px 5px; border-radius: var(--r-sm);
   background: rgba(var(--tint),0.07); color: var(--text-4); font-variant-numeric: tabular-nums; }
 .subtab[aria-selected="true"] .n { background: rgba(var(--tint),0.16); color: var(--text); }
-/* o seletor de biblioteca vive à direita da fileira de sub-abas: é onde se troca de acervo */
-.subtabs .libpick { margin-left: auto; display: flex; align-items: center; gap: 7px;
+/* O sincronismo do almoxarifado, à direita da barra de abas. O seletor vivia na fileira de
+   sub-abas; ela deixou de existir para a Biblioteca e levou o botão junto (ver renderTabs).
+   O `margin-left` NÃO é `auto` aqui: quem empurra para a direita nesta fileira é o `.aggr`,
+   que vem antes — dois `auto` dividiriam o espaço e deixariam o botão no meio da barra. */
+.tabs .libpick, .subtabs .libpick { display: flex; align-items: center; gap: 7px;
   padding-bottom: 5px; font-size: 11px; color: var(--text-4); }
-.subtabs .libpick select.input { max-width: 240px; }
+.subtabs .libpick { margin-left: auto; }
+.tabs .libpick { margin-left: 16px; padding-bottom: 6px; }
+.tabs .libpick select.input, .subtabs .libpick select.input { max-width: 240px; }
 .aggr b { font-weight: 400; color: var(--text-2); }
 
 /* ── 8. Main ──────────────────────────────────────────────────── */
@@ -1546,6 +1551,11 @@ function renderTabs() {
     aggr.append(s);
   });
   nav.append(aggr);
+  /* O SINCRONISMO DO ALMOXARIFADO MORA NESTA FILEIRA, que sempre existe. Ele vivia na de
+     sub-abas, e quando a Biblioteca deixou de ter filhas a fileira inteira passou a nascer
+     escondida — o botao sumiu da tela sem ninguem mexer nele. Aqui ele nao depende de
+     estrutura que pode deixar de existir: a barra de abas e a propria aba. */
+  if ((TAB_PAI[S.tab] || S.tab) === 'lib') nav.append(libPicker());
 }
 
 /* Fileira de baixo: as vistas da aba de cima. Some inteira quando a aba nao tem filhas —
@@ -1564,11 +1574,13 @@ function renderSubtabs() {
     b.onclick = () => goTab(sb.id);
     nav.append(b);
   });
-  /* o combobox de acervo mora aqui: trocar de biblioteca e uma escolha da aba Biblioteca,
-     e a configuracao geral so guarda qual e a padrao */
-  /* o seletor de acervo saiu: ha um acervo so (libSources). O que sobrou da fileira e o
-     botao de sincronismo e o aviso do libsync, que o libPicker ainda monta. */
-  if (grupo.id === 'lib') nav.append(libPicker());
+  /* O libPicker NAO mora mais aqui — ver renderTabs. Esta funcao sai cedo quando a aba de
+     cima nao tem filhas (`nav.hidden`), e desde que a Biblioteca virou UMA aba so (as
+     quatro sub-abas viraram tres vistas do aside, em 2026-09-17) ela cai exatamente nesse
+     caso. O botao de sincronizar o almoxarifado estava pendurado nesta fileira e sumiu da
+     tela junto com ela, sem erro nenhum: `renderSubtabs` simplesmente voltava antes de
+     chegar no append. Foi preciso abrir o DOM renderizado para ver — pelo codigo, o botao
+     "estava la". */
 }
 
 function canvasPane(kind) {
@@ -2057,6 +2069,16 @@ function libPicker() {
     b.title = t('alx.syncHint');
     b.onclick = () => openAlmoxSync();
     box.append(b);
+    /* PUXAR DO ODOO EM UM CLIQUE. O comando já existia, mas só dentro da janela do
+       "Sincronizar almoxarifado" — e é ele o caminho de todo dia: puxa, carrega, mostra o
+       que mudou. Dois cliques e uma leitura para chegar no botão que se usa sempre.
+       A janela continua sendo a MESMA e continua sendo onde o log e o resumo aparecem;
+       a diferença é que ela abre já rodando. Quem quiser regerar sem tocar no Odoo entra
+       pelo botão ao lado, como antes. */
+    const p = el('button', 'btn btn-primary btn-sm', t('alx.puxarJa'));
+    p.title = t('alx.puxarJaHint');
+    p.onclick = () => openAlmoxSync({ puxarJa: true });
+    box.append(p);
   }
   return box;
 }
@@ -2075,7 +2097,7 @@ function alxLinhaCfg(cfg) {
   return t('alx.credOk', { url: c.url || '—', db: c.db || '—', login: c.login || '—' });
 }
 
-async function openAlmoxSync() {
+async function openAlmoxSync(opts) {
   if (S.demoMode) { toast(t('alx.semServidor'), 'err'); return; }
   if (alxRodando) { toast(t('alx.jaRodando'), 'warn'); return; }
 
@@ -2145,6 +2167,10 @@ async function openAlmoxSync() {
   };
   snap.onclick = () => roda(false);
   pull.onclick = () => roda(true);
+  /* aberta pelo botão "Puxar do Odoo" do cabeçalho: já começa. O `pull.disabled`
+     acima é a mesma guarda de sempre — sem credencial gravada no servidor não há o que
+     puxar, e aí a janela abre parada, mostrando o porquê na linha de estado. */
+  if (opts && opts.puxarJa && !pull.disabled) roda(true);
 }
 
 /* As credenciais só mudam de dentro do PC do servidor — o backend recusa o resto, e

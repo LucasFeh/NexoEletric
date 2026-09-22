@@ -81,6 +81,9 @@ const DICT = {
   'alx.fechar':      'Fechar',
   'alx.soRegerar':   'Só regerar do snapshot',
   'alx.puxar':       'Puxar do Odoo e sincronizar',
+  /* o mesmo comando, no cabecalho da Biblioteca: cabe curto e ja comeca sozinho */
+  'alx.puxarJa':     'Puxar do Odoo',
+  'alx.puxarJaHint': 'puxa o Odoo agora e mostra o que mudou',
   'alx.recarregando': 'recarregando a biblioteca…',
   'alx.pronto':      'almoxarifado sincronizado',
   'alx.falhou':      'a sincronização falhou: {e}',
@@ -275,6 +278,8 @@ const DICT = {
   'alx.fechar':      'Close',
   'alx.soRegerar':   'Rebuild from snapshot only',
   'alx.puxar':       'Pull from Odoo and sync',
+  'alx.puxarJa':     'Pull from Odoo',
+  'alx.puxarJaHint': 'pulls Odoo now and shows what changed',
   'alx.recarregando': 'reloading the library…',
   'alx.pronto':      'stockroom synced',
   'alx.falhou':      'sync failed: {e}',
