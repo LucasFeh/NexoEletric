@@ -64,6 +64,7 @@ var
   BoardFps: TStringList;     // footprints que JA ESTAO na placa deste projeto (board.js)
   BoardRefs: TStringList;    // designador de cada componente da placa...
   BoardRefFp: TStringList;   // ...e o footprint dele, no MESMO indice (ver LoadBoardFps)
+  SemFpRefs: TStringList;    // designadores que foram SEM vinculo de footprint (VinculaFootprint)
   TrocouSimbolo: Boolean;    // algum componente ja existente teve o LibReference trocado:
                              // o desenho na folha continua o antigo ate Update From Libraries
   AvisosDeTexto: String;     // recados sobre POSICAO DE TEXTO ja dados nesta rodada, entre
@@ -1680,6 +1681,10 @@ begin
   BoardFps.CaseSensitive := False;
   BoardRefs := TStringList.Create;
   BoardRefFp := TStringList.Create;
+  SemFpRefs := TStringList.Create;
+  SemFpRefs.Sorted := True;
+  SemFpRefs.Duplicates := dupIgnore;
+  SemFpRefs.CaseSensitive := False;
   if not FileExists(ProjDir + '\board.js') then
     Exit;
   L := TStringList.Create;
@@ -1710,9 +1715,12 @@ begin
     BoardRefs.Free;
   if BoardRefFp <> nil then
     BoardRefFp.Free;
+  if SemFpRefs <> nil then
+    SemFpRefs.Free;
   BoardFps := nil;
   BoardRefs := nil;
   BoardRefFp := nil;
+  SemFpRefs := nil;
 end;
 
 { ------------------------------- colocacao de objetos ------------------------------- }
@@ -1788,6 +1796,53 @@ begin
     Impl.MapAsString := '';
     Impl.IsCurrent := True;
   end;
+end;
+
+// true se o footprint existe na PcbLib OU na placa deste projeto (ver LoadBoardFps).
+// PcbLib indisponivel: nao da para conferir, e vale o de antes - vincula.
+function FootprintConhecido(Fp: String): Boolean;
+begin
+  Result := True;
+  if PcbFpNames = nil then
+    Exit;
+  if PcbFpNames.IndexOf(Fp) >= 0 then
+    Exit;
+  if BoardFps.IndexOf(Fp) >= 0 then
+    Exit;
+  Result := False;
+end;
+
+// O ESQUEMA VAI PARA O ALTIUM INDEPENDENTE DO FOOTPRINT (pedido do usuario em 2026-09-23:
+// "se tiver footprint estabelecido blz, se nao, mantem sem e eu mesmo resolvo").
+//
+// Nao basta tirar o footprint da validacao: o SetFootprint, quando o nome nao esta entre os
+// modelos do componente, CRIA um modelo novo com esse nome e desliga os outros. Chamado
+// com um footprint que nao existe, ele trocaria o footprint que funciona por um vinculo
+// quebrado. Entao a decisao mora aqui, e so aqui, para os dois caminhos (AtualizaComp e
+// PlaceComp):
+//   - conhecido (PcbLib ou placa): vincula, como sempre;
+//   - desconhecido ou vazio: NAO toca nos modelos. O componente que ja existe mantem os
+//     que tem; o novo vai com o que o simbolo da biblioteca ja traz. Um aviso por
+//     DESIGNADOR (nao por parte: um conector de 16 partes daria 16 avisos) e a contagem
+//     no dialogo final.
+procedure VinculaFootprint(Comp: TObject; Line: String; Ref: String);
+var
+  Fp: String;
+begin
+  Fp := JGet(Line, 'footprint');
+  if (Fp <> '') and FootprintConhecido(Fp) then
+  begin
+    SetFootprint(Comp, Fp, Ref);
+    Exit;
+  end;
+  if SemFpRefs.IndexOf(Ref) >= 0 then
+    Exit;
+  SemFpRefs.Add(Ref);
+  if Fp = '' then
+    Report.Add('[AVISO] ' + Ref + ': sem footprint no schematic.js - foi sem vinculo, defina no Altium')
+  else
+    Report.Add('[AVISO] ' + Ref + ': footprint "' + Fp +
+      '" nao existe na PcbLib nem na placa - vinculo NAO feito, os modelos do componente ficaram como estavam');
 end;
 
 // Escreve "Chave=Valor;Chave=Valor" como parametros do componente. Parametro que ja
@@ -1913,8 +1968,7 @@ begin
     AplicaParams(C, JGet(Line, 'params'));
     Mudou := Mudou + 'params; ';
   end;
-  if JGet(Line, 'footprint') <> '' then
-    SetFootprint(C, JGet(Line, 'footprint'), Ref);
+  VinculaFootprint(C, Line, Ref);
 
   SchServer.RobotManager.SendMessage(C.I_ObjectAddress, c_BroadCast,
     SCHM_EndModify, c_NoEventData);
@@ -1976,7 +2030,7 @@ begin
   if JHas(Line, 'params') then
     AplicaParams(NewComp, JGet(Line, 'params'));
   RegisterObj(SchDoc, NewComp);
-  SetFootprint(NewComp, JGet(Line, 'footprint'), Ref);
+  VinculaFootprint(NewComp, Line, Ref);
   LogOk('comp ' + Ref + ' (' + JGet(Line, 'sym') + ' / ' + JGet(Line, 'footprint') + ')');
 end;
 
@@ -2957,6 +3011,7 @@ var
                                          // deixou de bastar (ver AplicaFolha)
   i, si, ErrCount, PartId, Restantes, AntesSave, DepoisSave: Integer;
   k, Diverge: Integer;                   // esquema x placa (ver LoadBoardFps)
+  ListaSemFp: String;                    // designadores sem vinculo, para o dialogo
   Avisados: TStringList;
   ServerDoc: IServerDocument;
   SchDoc: ISch_Document;
@@ -3067,11 +3122,10 @@ begin
         Report.Add('[ERRO] comp invalido (faltam ref/sym/x/y): ' + Line);
         ErrCount := ErrCount + 1;
       end;
+      // footprint NAO bloqueia mais (ver VinculaFootprint): o esquema vai, e o componente
+      // sem footprint e resolvido no Altium
       if JGet(Line, 'footprint') = '' then
-      begin
-        Report.Add('[ERRO] comp ' + JGet(Line, 'ref') + ': falta footprint (obrigatorio)');
-        ErrCount := ErrCount + 1;
-      end;
+        Report.Add('[AVISO] comp ' + JGet(Line, 'ref') + ': sem footprint - vai sem vinculo');
       if (Round(JNum(Line, 'rot')) mod 90) <> 0 then
       begin
         Report.Add('[ERRO] comp ' + JGet(Line, 'ref') + ': rot deve ser 0/90/180/270');
@@ -3181,11 +3235,11 @@ begin
     Report.Add('[AVISO] PcbLib indisponivel - existencia dos footprints NAO conferida')
   else
     for i := 0 to Fps.Count - 1 do
+      // AVISO, nao erro: o esquema vai mesmo assim, e o VinculaFootprint deixa os modelos
+      // desse componente como estavam
       if (PcbFpNames.IndexOf(Fps[i]) < 0) and (BoardFps.IndexOf(Fps[i]) < 0) then
-      begin
-        Report.Add('[ERRO] footprint "' + Fps[i] + '" nao existe na PcbLib nem na placa deste projeto');
-        ErrCount := ErrCount + 1;
-      end;
+        Report.Add('[AVISO] footprint "' + Fps[i] + '" nao existe na PcbLib nem na placa deste projeto' +
+          ' - os componentes com ele vao sem esse vinculo');
 
   // ESQUEMA x PLACA: o mesmo designador com footprint diferente nos dois lados.
   //
@@ -3554,6 +3608,21 @@ begin
     TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(Diverge) +
       ' componente(s) com footprint DIFERENTE do da placa -' + #13#10 +
       '   no ECO o Altium vai propor trocar o footprint na placa (o relatorio lista cada um).';
+  // e o que foi SEM vinculo: e trabalho que ficou para o usuario fazer no Altium. A lista e
+  // montada a mao, e nao com CommaText: essa propriedade nunca rodou neste engine.
+  if SemFpRefs.Count > 0 then
+  begin
+    ListaSemFp := '';
+    for i := 0 to SemFpRefs.Count - 1 do
+    begin
+      if ListaSemFp <> '' then
+        ListaSemFp := ListaSemFp + ', ';
+      ListaSemFp := ListaSemFp + SemFpRefs[i];
+    end;
+    TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(SemFpRefs.Count) +
+      ' componente(s) foram SEM vinculo de footprint (nao existe na PcbLib nem na placa):' +
+      #13#10 + '   ' + ListaSemFp + ' - defina no Altium.';
+  end;
 
   ShowMessage('Esquema despejado.' + #13#10 +
     'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + TxtWarn + #13#10#13#10 +
