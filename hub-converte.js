@@ -286,6 +286,16 @@ function perfilDoValor(g, it){
     cod: String(it.tipo || '').trim(),
     pkgs: (v && v.pkgs) || [],
     fora: !!it.fora,
+    /* O ID DA FICHA NO ODOO É O `tmpl`, NÃO O `OdooId`. O link do Odoo aponta para o
+       product.TEMPLATE; o `OdooId` dos params é o product.product (a variante). Medido no
+       componente que o dono usou de exemplo — "Kk Macho 2,54mm 4 Vias 180° Molex Branco
+       (2510)": variante 2118, template 2116, e 2116 é o número do link dele. Usar o OdooId
+       abriria a ficha errada, ou ficha nenhuma.
+       Cobertura: 2545 de 2545 valores têm `itens[].tmpl` — inclusive os marcados `fora`. */
+    tmpl: String((((v && v.itens) || [])[0] || {}).tmpl || '').trim(),
+    /* 31 valores juntam mais de um item do Odoo; o link vai no primeiro e a contagem diz
+       que há mais, em vez de a tela fingir que a ficha é uma só */
+    nItens: ((v && v.itens) || []).length,
     tipo,
     valor: normValor(valorTxt, CLASSE_DO_TIPO[tipo] || ''),
     tensao: tensaoDe(it.rotulo) || tensaoDe(par.COMMENT) || null,
@@ -568,19 +578,17 @@ const CSS = `
    página. Sem teto de largura nas etiquetas: quem encolhe é o NOME (minmax(0,1fr)) e,
    depois dele, a FAMÍLIA — código e encapsulamento cortados não identificam peça nenhuma. */
 #cvmodal .cv-sel{min-width:0;}
-#cvmodal .cv-trig{display:flex; align-items:center; gap:6px; width:100%; text-align:left;
-  background:var(--panel2,#2d2d2d); color:var(--fg,#d8d8d8); border:1px solid var(--border,#3a3a3a);
-  border-radius:3px; padding:3px 6px; cursor:pointer; min-width:0;}
-#cvmodal .cv-trig:hover{border-color:var(--accent,#4fc3f7);}
-#cvmodal .cv-trig > .cv-op{flex:1; min-width:0;}
-#cvmodal .cv-trig .seta{color:var(--fg-dim,#9a9a9a); font-size:10px; flex:none;}
-#cvmodal .cv-trig[aria-expanded=true]{border-color:var(--accent,#4fc3f7);}
+/* a FAIXA é o flex; quem desenha a caixa é o botão de escolher, para o "Odoo" ficar fora
+   dela e continuar clicável por conta própria */
+#cvmodal .cv-esc{flex:1; min-width:0; display:flex; align-items:center; gap:6px;
+  text-align:left; border:0; background:transparent; color:var(--fg,#d8d8d8);
+  cursor:pointer; padding:3px 6px;}
+#cvmodal .cv-esc > .cv-op{flex:1; min-width:0;}
+#cvmodal .cv-esc .seta{color:var(--fg-dim,#9a9a9a); font-size:10px; flex:none;}
 #cvmodal .cv-opcoes{margin-top:3px; max-height:290px; overflow:auto;
   border:1px solid var(--border,#3a3a3a); border-radius:3px; background:var(--panel,#242424);}
-#cvmodal .cv-opb{display:block; width:100%; text-align:left; border:0; background:transparent;
-  color:var(--fg,#d8d8d8); padding:3px 6px; cursor:pointer;}
 #cvmodal .cv-opb:hover{background:rgba(79,195,247,.10);}
-#cvmodal .cv-opb[aria-selected=true]{background:rgba(79,195,247,.14);
+#cvmodal .cv-opb:has(.cv-esc[aria-selected=true]){background:rgba(79,195,247,.14);
   box-shadow:inset 2px 0 0 var(--accent,#4fc3f7);}
 #cvmodal .cv-op{display:grid; grid-template-columns:30px minmax(0,1fr) auto auto; gap:8px;
   align-items:center; min-width:0;}
@@ -612,6 +620,15 @@ const CSS = `
   min-width:46px; text-align:right;}
 #cvmodal .cv-op .qt.zero{color:var(--fg-dim,#9a9a9a);}
 #cvmodal .cv-sel .nada{font-size:12px; color:var(--fg-dim,#9a9a9a);}
+#cvmodal .cv-trig, #cvmodal .cv-opb{display:flex; align-items:stretch; gap:4px; min-width:0;}
+#cvmodal .cv-trig .cv-esc{border:1px solid var(--border,#3a3a3a); border-radius:3px;
+  background:var(--panel2,#2d2d2d);}
+#cvmodal .cv-trig.on .cv-esc{border-color:var(--accent,#4fc3f7);}
+#cvmodal .cv-odoo{flex:none; align-self:center; font-size:10px; letter-spacing:.04em;
+  padding:4px 8px; border-radius:3px; cursor:pointer; white-space:nowrap;
+  text-decoration:none; border:1px solid var(--border,#3a3a3a);
+  background:transparent; color:var(--fg-dim,#9a9a9a);}
+#cvmodal .cv-odoo:hover{border-color:var(--accent,#4fc3f7); color:var(--accent,#4fc3f7);}
 #cvmodal .cv-vai .pq{font-size:10px; color:var(--fg-dim,#9a9a9a); margin-top:2px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 #cvmodal .cv-vai .alerta{font-size:10px; color:var(--warn,#ffd54f); margin-top:2px; white-space:normal;}
@@ -878,6 +895,28 @@ function encapDaOpcao(a){
   if (lit) return { txt: String(lit).trim(), literal: true };
   return { txt: String((a.encaps || [])[0] || '').trim(), literal: false };
 }
+/* ── o link da ficha no Odoo ──
+   A base sai do PRÓPRIO espelho: `almoxIndex.fonte` é a linha que o gerador escreveu com o
+   Odoo de onde os dados vieram ("Odoo incremental · http://192.168.15.192:8070 · odoo_db"),
+   e ela já está na página (schframe.html carrega Libs/almox-index.js). Ler dali, e não do
+   `hub-almox.json`, é de propósito por dois motivos: o link passa a apontar para o Odoo que
+   produziu AQUELES dados — medido, a bancada diz .182 e o servidor diz .192, cada um certo
+   no seu lugar — e o hub-almox.json carrega a senha do Odoo, que não tem por que passar
+   perto de uma tela.
+
+   A ação 282 é a ficha de produto DESTA instalação. É o único número daqui que não sai do
+   dado; se um dia a ação mudar de id, é esta linha que muda. */
+const ODOO_ACAO = 282;
+function odooBase(){
+  const f = String((window.almoxIndex && window.almoxIndex.fonte) || '');
+  const m = f.match(/https?:\/\/[^\s·]+/);
+  return m ? m[0].replace(/\/+$/, '') : '';
+}
+function linkOdoo(a){
+  const base = odooBase();
+  return (base && a && a.tmpl) ? base + '/odoo/action-' + ODOO_ACAO + '/' + a.tmpl : '';
+}
+
 /* o saldo como a lib o escreve: inteiro quando é inteiro */
 function saldoTxt(n){
   const x = Number(n) || 0;
@@ -945,33 +984,58 @@ function seletor(ln){
   if (ln.escolha && opcoes.indexOf(ln.escolha) < 0) opcoes.unshift(ln.escolha);
   const aberta = ST.aberta === ln;
 
-  const bt = el('button', 'cv-trig');
-  bt.type = 'button';
-  bt.setAttribute('aria-haspopup', 'listbox');
-  bt.setAttribute('aria-expanded', String(aberta));
-  if (ln.escolha) bt.append(opcaoRow(ln.escolha.alvo));
-  else bt.append(el('span', 'nada', '— não trocar —'));
-  bt.append(el('span', 'seta', aberta ? '▴' : '▾'));
-  bt.addEventListener('click', () => { ST.aberta = aberta ? null : ln; pinta(); });
-  fora.append(bt);
+  /* BOTÃO DENTRO DE BOTÃO NÃO EXISTE. O "ver no Odoo" precisa ser clicável por conta
+     própria, então a faixa é um <div> com dois botões lado a lado — o que escolhe ocupa a
+     largura toda, o do Odoo fica no fim. Aninhar um no outro é HTML inválido e o navegador
+     desmonta a árvore sozinho: some o clique de um dos dois, e não dá aviso nenhum. */
+  const faixa = (alvo, onClick, cls, extra) => {
+    const cx = el('div', cls);
+    const b = el('button', 'cv-esc');
+    b.type = 'button';
+    b.append(alvo ? opcaoRow(alvo) : el('span', 'nada', '— não trocar —'));
+    /* DEPOIS do append da linha: o `extra` acrescenta a seta, e ela tem de ser o último
+       filho. Rodando antes, a seta virava o primeiro item da faixa e subia para cima do
+       nome — que foi exatamente o que aconteceu na primeira tentativa. */
+    if (extra) extra(b);
+    b.addEventListener('click', onClick);
+    cx.append(b);
+    const url = linkOdoo(alvo);
+    if (url){
+      /* <a> DE VERDADE, e não um botão com window.open: assim o clique do meio abre em aba
+         nova, o Ctrl+clique e o "copiar endereço do link" funcionam, e nenhum bloqueador de
+         pop-up entra no caminho. O stopPropagation é o que impede o clique de escorrer para
+         a faixa e trocar a escolha junto. */
+      const o = el('a', 'cv-odoo', 'Odoo ↗');
+      o.href = url;
+      o.target = '_blank';
+      o.rel = 'noopener';
+      o.title = 'abrir a ficha de ' + alvo.nome + ' no Odoo'
+              + (alvo.nItens > 1 ? '  (este valor junta ' + alvo.nItens + ' fichas; abre a primeira)' : '');
+      o.addEventListener('click', e => e.stopPropagation());
+      cx.append(o);
+    }
+    return cx;
+  };
+
+  fora.append(faixa(ln.escolha ? ln.escolha.alvo : null,
+    () => { ST.aberta = aberta ? null : ln; pinta(); },
+    'cv-trig' + (aberta ? ' on' : ''),
+    b => { b.setAttribute('aria-haspopup', 'listbox');
+           b.setAttribute('aria-expanded', String(aberta));
+           b.append(el('span', 'seta', aberta ? '▴' : '▾')); }));
   if (!aberta) return fora;
 
   const lista = el('div', 'cv-opcoes');
   lista.setAttribute('role', 'listbox');
-  const poe = (alvo, escolha) => {
-    const b = el('button', 'cv-opb');
-    b.type = 'button';
+  const poe = (alvo, escolha) => lista.append(faixa(alvo, () => {
+    ln.escolha = escolha;
+    ln.marcado = !!escolha;
+    ST.aberta = null;
+    pinta();
+  }, 'cv-opb', b => {
     b.setAttribute('role', 'option');
     b.setAttribute('aria-selected', String(ln.escolha === escolha));
-    b.append(alvo ? opcaoRow(alvo) : el('span', 'nada', '— não trocar —'));
-    b.addEventListener('click', () => {
-      ln.escolha = escolha;
-      ln.marcado = !!escolha;
-      ST.aberta = null;
-      pinta();
-    });
-    lista.append(b);
-  };
+  }));
   poe(null, null);
   for (const o of opcoes) poe(o.alvo, o);
   fora.append(lista);
