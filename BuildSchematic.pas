@@ -59,6 +59,9 @@ var
   SchLibNomes: TStringList;     // os caminhos, para as mensagens
   ScanInfo: String; // diagnostico do ultimo ListProjectDirs (aparece nos dialogos)
   PcbFpNames: TStringList;   // nil = PcbLib indisponivel (validacao de footprint vira aviso)
+  BoardFps: TStringList;     // footprints que JA ESTAO na placa deste projeto (board.js)
+  BoardRefs: TStringList;    // designador de cada componente da placa...
+  BoardRefFp: TStringList;   // ...e o footprint dele, no MESMO indice (ver LoadBoardFps)
   TrocouSimbolo: Boolean;    // algum componente ja existente teve o LibReference trocado:
                              // o desenho na folha continua o antigo ate Update From Libraries
   AvisosDeTexto: String;     // recados sobre POSICAO DE TEXTO ja dados nesta rodada, entre
@@ -1553,6 +1556,74 @@ begin
   PLib.LibraryIterator_Destroy(LibIter);
 end;
 
+// OS FOOTPRINTS QUE JA ESTAO NA PLACA deste projeto, lidos do board.js que o ExportPcb
+// grava.
+//
+// POR QUE: a validacao conferia todo footprint do schematic.js contra UMA PcbLib - a do
+// almoxarifado, desde que a da casa deixou de ser alcancavel (a bancada saiu dos .pas em
+// 2026-09-15). Um projeto exportado do Altium traz os footprints da biblioteca antiga
+// ("RES 1206", "1206 resistor", "Cap El 3mm L15 D7"), que nao estao la - e um so ja
+// abortava a folha inteira. Foi o que o build-report do DMB registrou em 16/09, um dia
+// depois: 5 footprints recusados, NADA criado. O proprio commit que trocou a PcbLib
+// avisava que isso ia acontecer.
+//
+// So que esses footprints nao sao invencao: estao na placa, ligados aos componentes. E o
+// painel de conversao do hub os PRESERVA de proposito ao trocar um componente pela peca do
+// almoxarifado (medido no DMB: 30 partes convertidas, zero footprints alterados), e o
+// AtualizaComp os reaplica com SetFootprint. O vinculo ja estava certo nas duas pontas; so
+// a validacao o recusava.
+//
+// O FORMATO: um componente por linha, com exatamente um "footprint" em cada (medido no
+// board.js do DMB: 21 linhas, nenhuma com dois), entao o mesmo JHas/JGet do schematic.js
+// serve. Sem board.js (projeto que ainda nao tem placa) as listas ficam vazias e a
+// validacao volta a ser so contra a PcbLib - que e o certo para um projeto novo.
+procedure LoadBoardFps(ProjDir: String);
+var
+  L: TStringList;
+  i: Integer;
+  Linha, Fp: String;
+begin
+  BoardFps := TStringList.Create;
+  BoardFps.Sorted := True;
+  BoardFps.Duplicates := dupIgnore;
+  BoardFps.CaseSensitive := False;
+  BoardRefs := TStringList.Create;
+  BoardRefFp := TStringList.Create;
+  if not FileExists(ProjDir + '\board.js') then
+    Exit;
+  L := TStringList.Create;
+  L.LoadFromFile(ProjDir + '\board.js');
+  for i := 0 to L.Count - 1 do
+  begin
+    Linha := L[i];
+    if not JHas(Linha, 'footprint') then
+      continue;
+    Fp := JGet(Linha, 'footprint');
+    if Fp = '' then
+      continue;
+    BoardFps.Add(Fp);
+    if JGet(Linha, 'ref') <> '' then
+    begin
+      BoardRefs.Add(JGet(Linha, 'ref'));
+      BoardRefFp.Add(Fp);
+    end;
+  end;
+  L.Free;
+end;
+
+procedure FreeBoardFps(Dummy: Integer);
+begin
+  if BoardFps <> nil then
+    BoardFps.Free;
+  if BoardRefs <> nil then
+    BoardRefs.Free;
+  if BoardRefFp <> nil then
+    BoardRefFp.Free;
+  BoardFps := nil;
+  BoardRefs := nil;
+  BoardRefFp := nil;
+end;
+
 { ------------------------------- colocacao de objetos ------------------------------- }
 
 // Acha na folha um componente ja colocado, pelo designador + parte (nil = nao existe).
@@ -2794,6 +2865,8 @@ var
                                          // passou a se decidir por w/h, e o nome sozinho
                                          // deixou de bastar (ver AplicaFolha)
   i, si, ErrCount, PartId, Restantes, AntesSave, DepoisSave: Integer;
+  k, Diverge: Integer;                   // esquema x placa (ver LoadBoardFps)
+  Avisados: TStringList;
   ServerDoc: IServerDocument;
   SchDoc: ISch_Document;
   RelTxt, TxtWarn: String;
@@ -2991,15 +3064,53 @@ begin
     end;
 
   LoadPcbFpNames(0);
+  // o footprint que JA ESTA NA PLACA vale como existente: ver LoadBoardFps
+  LoadBoardFps(ProjDir);
+  if BoardFps.Count > 0 then
+    Report.Add('Placa deste projeto (board.js): ' + IntToStr(BoardFps.Count) +
+      ' footprint(s) - valem como existentes, mesmo fora da PcbLib.');
   if PcbFpNames = nil then
     Report.Add('[AVISO] PcbLib indisponivel - existencia dos footprints NAO conferida')
   else
     for i := 0 to Fps.Count - 1 do
-      if PcbFpNames.IndexOf(Fps[i]) < 0 then
+      if (PcbFpNames.IndexOf(Fps[i]) < 0) and (BoardFps.IndexOf(Fps[i]) < 0) then
       begin
-        Report.Add('[ERRO] footprint "' + Fps[i] + '" nao existe na PcbLib');
+        Report.Add('[ERRO] footprint "' + Fps[i] + '" nao existe na PcbLib nem na placa deste projeto');
         ErrCount := ErrCount + 1;
       end;
+
+  // ESQUEMA x PLACA: o mesmo designador com footprint diferente nos dois lados.
+  //
+  // Nao bloqueia - o esquema pode estar certo e a placa desatualizada -, mas precisa ser
+  // dito ANTES do ECO, porque o ECO vai propor trocar o footprint de um componente que ja
+  // esta posicionado e roteado. Medido no DMB: o D1 e "SOD3716X135N" no esquema e
+  // "DO-214AC" na placa, e ninguem tinha como saber sem abrir os dois.
+  //
+  // Uma linha por DESIGNADOR, nao por parte: um conector de 16 partes daria 16 avisos iguais.
+  Avisados := TStringList.Create;
+  Avisados.Sorted := True;
+  Avisados.Duplicates := dupIgnore;
+  Avisados.CaseSensitive := False;
+  Diverge := 0;
+  for i := 0 to Src.Count - 1 do
+  begin
+    Line := Trim(Src[i]);
+    if JGet(Line, 't') <> 'comp' then
+      continue;
+    k := BoardRefs.IndexOf(JGet(Line, 'ref'));
+    if k < 0 then
+      continue;
+    if AnsiCompareText(BoardRefFp[k], JGet(Line, 'footprint')) = 0 then
+      continue;
+    if Avisados.IndexOf(JGet(Line, 'ref')) >= 0 then
+      continue;
+    Avisados.Add(JGet(Line, 'ref'));
+    Report.Add('[AVISO] ' + JGet(Line, 'ref') + ': o esquema pede o footprint "' +
+      JGet(Line, 'footprint') + '" e a placa usa "' + BoardRefFp[k] +
+      '" - no ECO o Altium vai propor trocar o da placa');
+    Diverge := Diverge + 1;
+  end;
+  Avisados.Free;
 
   if ErrCount > 0 then
   begin
@@ -3014,6 +3125,7 @@ begin
         'O relatorio nao pode ser gravado (o aviso anterior diz por que).');
     if PcbFpNames <> nil then
       PcbFpNames.Free;
+    FreeBoardFps(0);
     Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetLines.Free; ItemSheets.Free;
     Exit;
   end;
@@ -3328,6 +3440,13 @@ begin
       ' folha(s) com tamanho PRESERVADO - o espelho nao' + #13#10 +
       '   soube pedir com certeza, ou o Altium recusou a escrita (o relatorio diz qual).';
 
+  // No DIALOGO e nao so no relatorio, pela mesma razao das folhas acima: o proximo passo e o
+  // ECO, e e nele que a troca de footprint numa placa ja roteada acontece.
+  if Diverge > 0 then
+    TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(Diverge) +
+      ' componente(s) com footprint DIFERENTE do da placa -' + #13#10 +
+      '   no ECO o Altium vai propor trocar o footprint na placa (o relatorio lista cada um).';
+
   ShowMessage('Esquema despejado.' + #13#10 +
     'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + TxtWarn + #13#10#13#10 +
     RelTxt + #13#10#13#10 +
@@ -3337,4 +3456,5 @@ begin
   Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetLines.Free; ItemSheets.Free;
   if PcbFpNames <> nil then
     PcbFpNames.Free;
+  FreeBoardFps(0);
 end;
