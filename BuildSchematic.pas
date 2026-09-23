@@ -65,6 +65,9 @@ var
   BoardRefs: TStringList;    // designador de cada componente da placa...
   BoardRefFp: TStringList;   // ...e o footprint dele, no MESMO indice (ver LoadBoardFps)
   SemFpRefs: TStringList;    // designadores que foram SEM vinculo de footprint (VinculaFootprint)
+  NomeDe, NomePara: TStringList;   // cache do NomeNaLib: nome pedido e nome achado, mesmo indice
+  RenNovo, RenVelho: TStringList;  // rename-map AO CONTRARIO: nome novo e o antigo, mesmo indice
+  SubsDe, SubsPara: TStringList;   // lib-subs: nome do projeto e nome da biblioteca, mesmo indice
   TrocouSimbolo: Boolean;    // algum componente ja existente teve o LibReference trocado:
                              // o desenho na folha continua o antigo ate Update From Libraries
   AvisosDeTexto: String;     // recados sobre POSICAO DE TEXTO ja dados nesta rodada, entre
@@ -1620,6 +1623,198 @@ begin
   end;
 end;
 
+{ ------------------------ o nome do hub -> o nome da biblioteca ------------------------
+  O HUB E O ALTIUM USAM NOMES DIFERENTES PARA O MESMO SIMBOLO, e isso e de proposito: a
+  biblioteca da casa que o Altium le ainda tem os nomes de antes da padronizacao ("RES [ SMD
+  ]", "CAP EL [  PTH  ]", "CONECTOR PADRAO"), e o espelho do hub aplica o rename-map para
+  MOSTRAR os padronizados ("RES [SMD]", "CAP EL [PTH]", "CONE PADRAO") - d83e7c4, "o mirror
+  respeita o rename-map". Faltava a volta: o schematic.js que o hub regrava sai com o nome
+  novo, e o BuildSchematic procurava o nome literal numa biblioteca que so tem o antigo.
+  Medido em 2026-09-23: o TCMS_Reader_V2 parou em 8 simbolos assim, e os 8 voltam, pelo
+  rename-map lido de tras para frente, a um nome que EXISTE na biblioteca publicada. O DMB
+  funcionava so porque o schematic.js dele veio cru do Altium, com os nomes antigos.
+
+  Republicar a biblioteca com os nomes novos nao era a saida: todo projeto que ja existe no
+  Altium referencia os antigos, e ficaria apontando para simbolos que sumiram.
+
+  O ACENTO: o rename-map.js e UTF-8 cru, e o jeito como o Altium converte esses bytes ao ler
+  o arquivo nao da para provar daqui ("CONECTOR PADR" + os dois bytes do A til). Entao, quando
+  o nome antigo nao casa direto, a comparacao e so pela parte ASCII (ChaveAscii) - e o nome
+  usado e SEMPRE o que esta dentro da biblioteca, nunca o lido do mapa. }
+
+// o texto sem os caracteres acima de 127: igual para o nome certo e para o mal decodificado
+function ChaveAscii(S: String): String;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 1 to Length(S) do
+    if Ord(S[i]) < 128 then
+      Result := Result + S[i];
+end;
+
+// o mesmo FindLibSymbol, comparando pela ChaveAscii
+function FindLibSymbolChave(Chave: String): ISch_Component;
+var
+  Iterator, Comp: TObject;
+  Lib: ISch_Document;
+  k: Integer;
+begin
+  Result := nil;
+  for k := 0 to SchLibs.Count - 1 do
+  begin
+    Lib := SchLibs.Items[k];
+    Iterator := Lib.SchLibIterator_Create;
+    Iterator.AddFilter_ObjectSet(MkSet(eSchComponent));
+    Comp := Iterator.FirstSchObject;
+    while Comp <> nil do
+    begin
+      if AnsiCompareText(ChaveAscii(Comp.LibReference), Chave) = 0 then
+      begin
+        Result := Comp;
+        break;
+      end;
+      Comp := Iterator.NextSchObject;
+    end;
+    Lib.SchIterator_Destroy(Iterator);
+    if Result <> nil then
+      Exit;
+  end;
+end;
+
+// O nome a usar na biblioteca para o `sym` do schematic.js. Na ordem:
+//   1. o proprio nome, se a biblioteca o tem;
+//   2. o lib-subs (nome do projeto -> nome da lib, escolha feita na aba Biblioteca);
+//   3. o rename-map ao contrario (nome padronizado -> nome antigo), casado direto ou pela
+//      parte ASCII.
+// Nao achou: devolve o proprio nome, e a validacao diz que falta. Cada traducao sai no
+// relatorio uma vez, e o resultado fica em cache - o nome e pedido de novo por componente.
+function NomeNaLib(S: String): String;
+var
+  k: Integer;
+  T, O: String;
+  C: ISch_Component;
+begin
+  Result := S;
+  if S = '' then
+    Exit;
+  k := NomeDe.IndexOf(S);
+  if k >= 0 then
+  begin
+    Result := NomePara[k];
+    Exit;
+  end;
+  if FindLibSymbol(S) = nil then
+  begin
+    T := S;
+    k := SubsDe.IndexOf(S);
+    if k >= 0 then
+      T := SubsPara[k];
+    if (T <> S) and (FindLibSymbol(T) <> nil) then
+      Result := T
+    else
+    begin
+      k := RenNovo.IndexOf(T);
+      if k >= 0 then
+      begin
+        O := RenVelho[k];
+        if FindLibSymbol(O) <> nil then
+          Result := O
+        else
+        begin
+          C := FindLibSymbolChave(ChaveAscii(O));
+          if C <> nil then
+            Result := C.LibReference;
+        end;
+      end;
+    end;
+    if Result <> S then
+      Report.Add('[OK]    simbolo "' + S + '" e "' + Result + '" na biblioteca (nome antigo, via rename-map/lib-subs)');
+  end;
+  NomeDe.Add(S);
+  NomePara.Add(Result);
+end;
+
+// Le o rename-map (so o bloco symRename) e o lib-subs de Libs\. Sem os arquivos, as listas
+// ficam vazias e o NomeNaLib so acha o nome literal - que e o comportamento de antes.
+procedure CarregaRenomes(Dummy: Integer);
+var
+  L: TStringList;
+  i, p: Integer;
+  Linha: String;
+  Dentro: Boolean;
+begin
+  NomeDe := TStringList.Create;
+  NomePara := TStringList.Create;
+  RenNovo := TStringList.Create;
+  RenVelho := TStringList.Create;
+  SubsDe := TStringList.Create;
+  SubsPara := TStringList.Create;
+
+  if FileExists(SCRIPT_HOME + '\Libs\rename-map.js') then
+  begin
+    // formato: a linha '"symRename":{' abre o bloco, um par por linha - ,"antigo":"novo" -
+    // e a linha que comeca com '}' fecha. Medido no do servidor: 152 pares, sem aspas
+    // escapadas dentro dos nomes.
+    L := TStringList.Create;
+    L.LoadFromFile(SCRIPT_HOME + '\Libs\rename-map.js');
+    Dentro := False;
+    for i := 0 to L.Count - 1 do
+    begin
+      Linha := Trim(L[i]);
+      if not Dentro then
+      begin
+        if Pos('"symRename":{', Linha) = 1 then
+          Dentro := True;
+        continue;
+      end;
+      if Pos('}', Linha) = 1 then
+        break;
+      if Pos(',', Linha) = 1 then
+        Linha := Copy(Linha, 2, Length(Linha));
+      p := Pos('":"', Linha);
+      if (p = 0) or (Pos('"', Linha) <> 1) then
+        continue;
+      RenVelho.Add(Copy(Linha, 2, p - 2));
+      RenNovo.Add(Copy(Linha, p + 3, Length(Linha) - p - 3));
+    end;
+    L.Free;
+  end;
+
+  if FileExists(SCRIPT_HOME + '\Libs\lib-subs.js') then
+  begin
+    // um objeto por linha; o JGet ja desfaz os escapes \uXXXX
+    L := TStringList.Create;
+    L.LoadFromFile(SCRIPT_HOME + '\Libs\lib-subs.js');
+    for i := 0 to L.Count - 1 do
+      if JGet(L[i], 'kind') = 'sym' then
+      begin
+        SubsDe.Add(JGet(L[i], 'from'));
+        SubsPara.Add(JGet(L[i], 'to'));
+      end;
+    L.Free;
+  end;
+
+  Report.Add('Nomes: ' + IntToStr(RenNovo.Count) + ' renomeacao(oes) do rename-map e ' +
+    IntToStr(SubsDe.Count) + ' substituicao(oes) do lib-subs - para achar o nome antigo na biblioteca.');
+end;
+
+procedure FreeRenomes(Dummy: Integer);
+begin
+  if NomeDe <> nil then NomeDe.Free;
+  if NomePara <> nil then NomePara.Free;
+  if RenNovo <> nil then RenNovo.Free;
+  if RenVelho <> nil then RenVelho.Free;
+  if SubsDe <> nil then SubsDe.Free;
+  if SubsPara <> nil then SubsPara.Free;
+  NomeDe := nil;
+  NomePara := nil;
+  RenNovo := nil;
+  RenVelho := nil;
+  SubsDe := nil;
+  SubsPara := nil;
+end;
+
 procedure LoadPcbFpNames(Dummy: Integer);
 var
   PLib: IPCB_Library;
@@ -1926,7 +2121,7 @@ procedure AtualizaComp(SchDoc: ISch_Document; C: TObject; Line: String; Ref: Str
 var
   SymNovo, SymVelho, ComentNovo, Mudou: String;
 begin
-  SymNovo := JGet(Line, 'sym');
+  SymNovo := NomeNaLib(JGet(Line, 'sym'));
   SymVelho := C.LibReference;
   Mudou := '';
 
@@ -2006,7 +2201,7 @@ begin
     AtualizaComp(SchDoc, Achado, Line, Ref, PartId);
     Exit;
   end;
-  LibComp := FindLibSymbol(JGet(Line, 'sym'));
+  LibComp := FindLibSymbol(NomeNaLib(JGet(Line, 'sym')));
   if LibComp = nil then
   begin
     LogFail('comp ' + Ref + ': simbolo "' + JGet(Line, 'sym') + '" sumiu da SchLib');
@@ -3217,11 +3412,13 @@ begin
   Report.Add('SchLib de origem: ' + IntToStr(SchLibs.Count) +
     ' (almoxarifado pelo almox.csv: ' + IntToStr(AlmoxIndice) +
     ', pela varredura da pasta: ' + IntToStr(AlmoxVarredura) + ')');
+  // o nome que o hub escreve pode ser o padronizado, e a biblioteca ter o antigo: NomeNaLib
+  CarregaRenomes(0);
   for i := 0 to Syms.Count - 1 do
-    if FindLibSymbol(Syms[i]) = nil then
+    if FindLibSymbol(NomeNaLib(Syms[i])) = nil then
     begin
       Report.Add('[ERRO] simbolo "' + Syms[i] + '" nao existe em nenhuma das '
-                 + IntToStr(SchLibs.Count) + ' SchLib de origem');
+                 + IntToStr(SchLibs.Count) + ' SchLib de origem (nem pelo rename-map/lib-subs)');
       ErrCount := ErrCount + 1;
     end;
 
@@ -3288,6 +3485,7 @@ begin
     if PcbFpNames <> nil then
       PcbFpNames.Free;
     FreeBoardFps(0);
+    FreeRenomes(0);
     Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetLines.Free; ItemSheets.Free;
     Exit;
   end;
@@ -3634,4 +3832,5 @@ begin
   if PcbFpNames <> nil then
     PcbFpNames.Free;
   FreeBoardFps(0);
+  FreeRenomes(0);
 end;
