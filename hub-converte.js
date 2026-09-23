@@ -48,6 +48,22 @@ const ACENTO = /[̀-ͯ]/g;
 const CX = t => String(t == null ? '' : t).normalize('NFD').replace(ACENTO, '').toUpperCase();
 const semSep = t => CX(t).replace(/[\s\-_/.,]/g, '');
 
+/* ── "180g" é 180 graus ──
+   O cadastro do Odoo escreve o ângulo do conector com "g" de graus ("1x10 P2.54mm Macho
+   180g"). Na tela isso lê como unidade errada, então o símbolo ° entra no lugar.
+
+   SÓ 90 E 180, e a restrição não é frescura — é o que separa ângulo de código de peça.
+   Medido no espelho do servidor (3568 valores): "<número>g" aparece 122 vezes, das quais
+   118 são 180g (85) ou 90g (33), todas em conector ou chave. As outras 4 seriam estrago:
+   "LM2575D2T-5G" e "LP2950CZ-3.3G" são sufixo de part number, "BDMU-12G" é código de régua
+   terminal, e o "200g" de "Cofisil Sensor Silo 1 6m 2X1.0mm² 200g 750v" é o PESO do cabo.
+   Uma troca cega de número-seguido-de-g teria reescrito os quatro.
+
+   É TROCA DE EXIBIÇÃO, e o nome gravado não muda: o `sym` que vai para o schematic.js
+   continua sendo o texto do acervo, e o `title` da linha mostra o nome cru. */
+const GRAUS = /(?<![0-9A-Za-z])(90|180)\s*g\b/gi;
+const comGraus = t => String(t == null ? '' : t).replace(GRAUS, '$1°');
+
 /* ── o valor de engenharia ──
    "100nF", "0.1uF", "4k7", "10K", "330R", "1M2", "22pF 50V" — a mesma peça se escreve de
    meia dúzia de jeitos, e comparar o literal faz "100nF" e "0.1uF" parecerem coisas
@@ -514,7 +530,7 @@ function aproxima(perfil, cands, quantos){
 
 const PURO = { paramsPlanos, normValor, mesmoValor, tensaoDe, encapDe, montagemDe, viasDe,
                pareceMPN, tipoDoRef, tipoDoTexto, perfilDoComp, perfilDoValor, pontua, sugere,
-               varre, aproxima, chaveDoComp, semSep, CX, MINIMO };
+               varre, aproxima, chaveDoComp, semSep, CX, comGraus, MINIMO };
 
 /* ══════════════════ TELA ══════════════════ */
 if (typeof document === 'undefined') return { pure: PURO };
@@ -940,11 +956,11 @@ function opcaoRow(a){
      schematic.js; o rótulo legível da lib difere dele em 1483 dos 2545 valores. Numa tela
      cuja função é conferir ANTES de aplicar, mostrar só o nome bonito e esconder o que será
      gravado troca a conferência por uma aposta. Os dois aparecem, e o gravado manda. */
-  const n1 = el('span', 'n1', a.nome);
+  const n1 = el('span', 'n1', comGraus(a.nome));
   if (a.fora) n1.append(el('i', null, 'fora'));
   nm.append(n1);
   const leg = a.linha || a.rotulo || '';
-  if (leg && leg !== a.nome) nm.append(el('span', 'n2', leg));
+  if (leg && leg !== a.nome) nm.append(el('span', 'n2', comGraus(leg)));
   row.append(nm);
 
   const tags = el('span', 'tags');

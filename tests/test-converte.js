@@ -253,4 +253,38 @@ console.log('    já-do-almoxarifado: ' + porId.length + ' tipos com OdooId, '
   + ' que o casamento por nome deixava passar');
 console.log('(9) quem já é do almoxarifado sai da lista, mesmo renomeado ok');
 
+/* ── 10. "180g" vira "180°", e código de peça NÃO ─────────────────────────
+   O cadastro escreve o ângulo do conector com "g" de graus. Trocar todo <número>g por grau
+   parece inofensivo e não é: medido no espelho do servidor, das 122 ocorrências 4 são código
+   de peça ("LM2575D2T-5G", "LP2950CZ-3.3G", "BDMU-12G") ou PESO ("...200g 750v"). Por isso a
+   regra só aceita 90 e 180 — os dois ângulos que a casa usa. É este teste que impede alguém
+   de "generalizar" a regra depois e reescrever part number. */
+const GRAU = '°';
+for (const [ent, esp] of [
+  ['1x10 P2.54mm Macho 180g',              '1x10 P2.54mm Macho 180' + GRAU],
+  ['1x6 P2.54mm Macho 90g',                '1x6 P2.54mm Macho 90' + GRAU],
+  ['FKCT 2.5/ 5-STF-5.08 1902330 90g',     'FKCT 2.5/ 5-STF-5.08 1902330 90' + GRAU],
+  ['Switch 4 vias P2.54mm 180g 642-3ETL',  'Switch 4 vias P2.54mm 180' + GRAU + ' 642-3ETL'],
+  ['Latch 2x8 16 vias P2.54mm 180G',       'Latch 2x8 16 vias P2.54mm 180' + GRAU],
+  /* os quatro que NAO podem ser tocados */
+  ['LM2575D2T-5G',                         'LM2575D2T-5G'],
+  ['LP2950CZ-3.3G',                        'LP2950CZ-3.3G'],
+  ['Nylon C/Fix. BDMU-12G 12 vias',        'Nylon C/Fix. BDMU-12G 12 vias'],
+  ['Cofisil Sensor Silo 1 6m 200g 750v',   'Cofisil Sensor Silo 1 6m 200g 750v'],
+  /* o que ja esta em grau fica como esta */
+  ['Kk 6 vias Macho, passo 3.96mm, 180º', 'Kk 6 vias Macho, passo 3.96mm, 180º'],
+]) assert.strictEqual(P.comGraus(ent), esp, 'comGraus("' + ent + '")');
+/* e contra o acervo de verdade: nenhum part number pode mudar */
+let trocados = 0, suspeitos = [];
+for (const c of CANDS){
+  const novo2 = P.comGraus(c.nome);
+  if (novo2 === c.nome) continue;
+  trocados++;
+  if (!/vias|pinos|macho|fêmea|femea|passo|p\d|barra|latch|kk|header|switch|db\d|fkc|mc /i.test(c.nome))
+    suspeitos.push(c.nome);
+}
+assert.deepStrictEqual(suspeitos, [], 'trocou grau fora de contexto de conector: ' + suspeitos.join(' | '));
+console.log('    graus: ' + trocados + ' nomes do acervo ganharam o simbolo, 0 fora de contexto');
+console.log('(10) "180g" vira grau, e codigo de peca fica intacto ok');
+
 console.log('test-converte OK (o portão é tipo, valor e montagem; o resto é ordem)');
