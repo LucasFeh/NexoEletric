@@ -200,12 +200,22 @@ mas a linha só pode casar por MPN ou voltar para conferência humana.
   dos dois lados (`hub-draw.js » ESTILO_POR_NUM`, tabela vazia à espera da medição).
 - Um nomeador (`netlabel`, `power` ou `port`) que não encosta em fio nem em pino vira
   aviso ("solto"/"solta") — ele nomeia, mas não está ligado a nada.
-- `footprint` é **OBRIGATÓRIO** em todo `comp` — o `BuildSchematic` rejeita (erro em
-  `build-report.txt`, nada é criado) um componente sem footprint. Se o símbolo já tem
-  modelo associado e presente na lib (`schlib.js » symbols[].footprints[].current` /
-  `incurrentlib`), use esse nome; senão escolha um footprint em `pcblib.js` conferindo
-  que os nomes dos pads batem com os pinos do símbolo (`schlib` `pins[].num` ↔ `pcblib`
-  `pads[].name`) — é o mesmo crosscheck que a vista Libs do hub mostra.
+- **Escreva sempre um `footprint`** em todo `comp`. Se o símbolo já tem modelo associado
+  e presente na lib (`schlib.js » symbols[].footprints[].current` / `incurrentlib`), use
+  esse nome; senão escolha um footprint em `pcblib.js` conferindo que os nomes dos pads
+  batem com os pinos do símbolo (`schlib` `pins[].num` ↔ `pcblib` `pads[].name`) — é o
+  mesmo crosscheck que a vista Libs do hub mostra.
+
+  **Footprint não trava o `BuildSchematic`** (decisão do usuário em 2026-09-23: "o esquema
+  precisa voltar pro Altium; se não tiver footprint, mantém sem e eu mesmo resolvo"). Um
+  footprint que existe na PcbLib **ou na placa do projeto** (`board.js`) é vinculado; um
+  que não existe em nenhum dos dois, ou um `footprint` vazio, **não é vinculado** — o
+  componente que já está na folha mantém os modelos que tem, o novo vai só com o que o
+  símbolo da biblioteca traz — e sai como `[AVISO]` no relatório e na contagem do diálogo
+  final, para ser resolvido no Altium. Não confunda isso com permissão para omitir: o que
+  você deixa sem footprint vira trabalho manual de alguém.
+
+  O que **continua travando** é símbolo: sem o desenho não há o que colocar na folha.
 
 ### Fluxo de trabalho recomendado
 
