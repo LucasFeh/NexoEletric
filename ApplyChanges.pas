@@ -1856,6 +1856,43 @@ end;
 {  faz sentido no momento: esquema (cria os .SchDoc) ou PCB (aplica changes.js).}
 { ---------------------------------------------------------------------------- }
 
+// true se o changes.js tem ao menos UMA mudanca de verdade.
+//
+// O ARQUIVO SEMPRE EXISTE: o ExportPcb cria o esqueleto vazio ("var changes = [ ];") e
+// nunca o apaga. Perguntar so FileExists fazia o ApplyProject escolher o ramo da PCB
+// sempre que houvesse um .PcbDoc focado - aplicava zero mudancas, saia, e o esquema
+// nunca era construido. Medido em 2026-09-23: os 11 changes.js do servidor estavam
+// vazios, e o schematic.js do DMB tinha sido gravado naquele dia pelo painel de
+// conversao do hub. O esquema convertido simplesmente nao chegava ao Altium.
+//
+// Reconhece a mudanca EXATAMENTE como o ApplyChangesInto reconhece (pula // e exige
+// "op"), para os dois nunca discordarem sobre o que e uma mudanca. Mora ANTES da janela
+// de escolha porque a etiqueta [PCB] da lista usa o mesmo criterio.
+function ChangesTemOps(Arq: String): Boolean;
+var
+  L: TStringList;
+  i: Integer;
+  Linha: String;
+begin
+  Result := False;
+  if not FileExists(Arq) then
+    Exit;
+  L := TStringList.Create;
+  L.LoadFromFile(Arq);
+  for i := 0 to L.Count - 1 do
+  begin
+    Linha := Trim(L[i]);
+    if Pos('//', Linha) = 1 then
+      continue;
+    if JHas(Linha, 'op') then
+    begin
+      Result := True;
+      break;
+    end;
+  end;
+  L.Free;
+end;
+
 // Janela com a lista de projetos de Projects\ (selecao por clique).
 // Retorna o nome escolhido; '' se o usuario cancelar.
 function PickProjectName(Dirs: TStringList): String;
@@ -1865,7 +1902,7 @@ var
   BOk, BCan: TButton;
   Lbl: TLabel;
   i, res: Integer;
-  Nome, Tag: String;
+  Nome, Tag, Foco: String;
 begin
   Result := '';
   F := TForm.Create(nil);
@@ -1892,12 +1929,22 @@ begin
     Tag := '';
     if FileExists(PROJECTS_DIR + '\' + Nome + '\schematic.js') then
       Tag := Tag + '   [esquema]';
-    if FileExists(PROJECTS_DIR + '\' + Nome + '\changes.js') then
+    // pelo CONTEUDO: o changes.js sempre existe, e a etiqueta aparecia em todo projeto
+    if ChangesTemOps(PROJECTS_DIR + '\' + Nome + '\changes.js') then
       Tag := Tag + '   [PCB]';
     LB.Items.Add(Nome + Tag);
   end;
   if LB.Items.Count > 0 then
     LB.ItemIndex := 0;
+  // O PROJETO FOCADO VEM MARCADO, e nao o primeiro da lista. Com o primeiro marcado, quem
+  // apertava Aplicar sem olhar levava o que viesse primeiro na ordem alfabetica - e foi
+  // assim, duas vezes, que o esquema do DMB (o primeiro da lista) foi mandado para outro
+  // projeto: com o PAEL focado em 16/09 e com o PCB_Project_1 em 2026-09-23.
+  Foco := FocusedProjectName(0);
+  if Foco <> '' then
+    for i := 0 to Dirs.Count - 1 do
+      if AnsiCompareText(Dirs[i], Foco) = 0 then
+        LB.ItemIndex := i;
 
   BOk := TButton.Create(F);
   BOk.Parent := F;
@@ -1923,46 +1970,10 @@ begin
   F.Free;
 end;
 
-// true se o changes.js tem ao menos UMA mudanca de verdade.
-//
-// O ARQUIVO SEMPRE EXISTE: o ExportPcb cria o esqueleto vazio ("var changes = [ ];") e
-// nunca o apaga. Perguntar so FileExists fazia o ApplyProject escolher o ramo da PCB
-// sempre que houvesse um .PcbDoc focado - aplicava zero mudancas, saia, e o esquema
-// nunca era construido. Medido em 2026-09-23: os 11 changes.js do servidor estavam
-// vazios, e o schematic.js do DMB tinha sido gravado naquele dia pelo painel de
-// conversao do hub. O esquema convertido simplesmente nao chegava ao Altium.
-//
-// Reconhece a mudanca EXATAMENTE como o ApplyChangesInto reconhece (pula // e exige
-// "op"), para os dois nunca discordarem sobre o que e uma mudanca.
-function ChangesTemOps(Arq: String): Boolean;
-var
-  L: TStringList;
-  i: Integer;
-  Linha: String;
-begin
-  Result := False;
-  if not FileExists(Arq) then
-    Exit;
-  L := TStringList.Create;
-  L.LoadFromFile(Arq);
-  for i := 0 to L.Count - 1 do
-  begin
-    Linha := Trim(L[i]);
-    if Pos('//', Linha) = 1 then
-      continue;
-    if JHas(Linha, 'op') then
-    begin
-      Result := True;
-      break;
-    end;
-  end;
-  L.Free;
-end;
-
 procedure ApplyProject;
 var
   Dirs: TStringList;
-  Nome, Dir: String;
+  Nome, Dir, Foco: String;
   HasSch, HasChg, PcbFocada: Boolean;
 begin
   // Raiz do workspace DESTA maquina: PRIMEIRA coisa do procedimento, porque tudo abaixo
@@ -1988,6 +1999,27 @@ begin
   Dirs.Free;
   if Nome = '' then
     Exit;
+
+  // TRAVA: A PASTA ESCOLHIDA TEM DE SER A DO PROJETO FOCADO. O esquema e despejado no
+  // projeto que esta FOCADO no Altium, e o changes.js e aplicado na placa FOCADA - a pasta
+  // escolhida so diz de onde vem o conteudo. Nada comparava os dois: o build-report de
+  // 16/09 registra o esquema do DMB indo para o PAEL, e o de 2026-09-23 16:14, para o
+  // PCB_Project_1. So nao criaram nada porque a validacao falhou por outro motivo.
+  //
+  // Nome diferente nao e sempre engano (a pasta pode ter nascido com outro nome), entao a
+  // trava pergunta em vez de recusar - com SIM digitado, como o outline_set, porque um
+  // Enter distraido e exatamente o erro que ela existe para pegar. Sem projeto focado
+  // ('' - Free Documents), nao ha com o que comparar, e quem reclama e o passo seguinte.
+  Foco := FocusedProjectName(0);
+  if (Foco <> '') and (AnsiCompareText(Foco, Nome) <> 0) then
+    if not ConfirmNoYes('O projeto FOCADO no Altium e:' + #13#10 +
+      '   ' + Foco + #13#10#13#10 +
+      'mas a pasta escolhida e:' + #13#10 +
+      '   ' + Nome + #13#10#13#10 +
+      'Seguir despeja o conteudo de "' + Nome + '" DENTRO de "' + Foco + '".' + #13#10 +
+      'Para usar o projeto certo: cancele, clique nele no painel Projects e rode de novo.') then
+      Exit;
+
   Dir := PROJECTS_DIR + '\' + Nome;
 
   HasSch := FileExists(Dir + '\schematic.js');
