@@ -68,6 +68,8 @@ var
   NomeDe, NomePara: TStringList;   // cache do NomeNaLib: nome pedido e nome achado, mesmo indice
   RenNovo, RenVelho: TStringList;  // rename-map AO CONTRARIO: nome novo e o antigo, mesmo indice
   SubsDe, SubsPara: TStringList;   // lib-subs: nome do projeto e nome da biblioteca, mesmo indice
+  SemSimbRefs: TStringList;        // componentes NOVOS sem simbolo em biblioteca nenhuma: nao colocados
+  SimbAntigoRefs: TStringList;     // componentes que JA estavam na folha e ficaram com o simbolo antigo
   TrocouSimbolo: Boolean;    // algum componente ja existente teve o LibReference trocado:
                              // o desenho na folha continua o antigo ate Update From Libraries
   AvisosDeTexto: String;     // recados sobre POSICAO DE TEXTO ja dados nesta rodada, entre
@@ -1750,6 +1752,14 @@ begin
   RenVelho := TStringList.Create;
   SubsDe := TStringList.Create;
   SubsPara := TStringList.Create;
+  SemSimbRefs := TStringList.Create;
+  SemSimbRefs.Sorted := True;
+  SemSimbRefs.Duplicates := dupIgnore;
+  SemSimbRefs.CaseSensitive := False;
+  SimbAntigoRefs := TStringList.Create;
+  SimbAntigoRefs.Sorted := True;
+  SimbAntigoRefs.Duplicates := dupIgnore;
+  SimbAntigoRefs.CaseSensitive := False;
 
   if FileExists(SCRIPT_HOME + '\Libs\rename-map.js') then
   begin
@@ -1807,12 +1817,30 @@ begin
   if RenVelho <> nil then RenVelho.Free;
   if SubsDe <> nil then SubsDe.Free;
   if SubsPara <> nil then SubsPara.Free;
+  if SemSimbRefs <> nil then SemSimbRefs.Free;
+  if SimbAntigoRefs <> nil then SimbAntigoRefs.Free;
+  SemSimbRefs := nil;
+  SimbAntigoRefs := nil;
   NomeDe := nil;
   NomePara := nil;
   RenNovo := nil;
   RenVelho := nil;
   SubsDe := nil;
   SubsPara := nil;
+end;
+
+// "A, B, C" - a lista do dialogo final. Montada a mao: o CommaText nunca rodou neste engine.
+function JuntaLista(L: TStringList): String;
+var
+  i: Integer;
+begin
+  Result := '';
+  for i := 0 to L.Count - 1 do
+  begin
+    if Result <> '' then
+      Result := Result + ', ';
+    Result := Result + L[i];
+  end;
 end;
 
 procedure LoadPcbFpNames(Dummy: Integer);
@@ -2131,8 +2159,14 @@ begin
   begin
     if FindLibSymbol(SymNovo) = nil then
     begin
-      LogFail('comp ' + Ref + '/' + IntToStr(PartId) + ': simbolo novo "' + SymNovo +
-        '" nao esta na SchLib - identidade NAO foi trocada');
+      // aviso e nao [FALHA]: e o desfecho combinado (ver a validacao), e sai listado no
+      // dialogo final - contar como falha tambem so dobraria o recado
+      if SimbAntigoRefs.IndexOf(Ref) < 0 then
+      begin
+        SimbAntigoRefs.Add(Ref);
+        Report.Add('[AVISO] comp ' + Ref + ': simbolo novo "' + SymNovo +
+          '" nao esta em biblioteca nenhuma - ficou o simbolo antigo, "' + SymVelho + '"');
+      end;
       SymNovo := '';
     end;
   end;
@@ -2204,7 +2238,15 @@ begin
   LibComp := FindLibSymbol(NomeNaLib(JGet(Line, 'sym')));
   if LibComp = nil then
   begin
-    LogFail('comp ' + Ref + ': simbolo "' + JGet(Line, 'sym') + '" sumiu da SchLib');
+    // NAO COLOCADO, de proposito: sem o desenho nao ha o que por na folha. Os fios dele
+    // ficam no lugar, soltos, e o designador sai no dialogo final para ser colocado a mao.
+    // Uma linha por designador, nao por parte.
+    if SemSimbRefs.IndexOf(Ref) < 0 then
+    begin
+      SemSimbRefs.Add(Ref);
+      Report.Add('[AVISO] comp ' + Ref + ': simbolo "' + JGet(Line, 'sym') +
+        '" nao existe em biblioteca nenhuma - NAO colocado, coloque no Altium');
+    end;
     Exit;
   end;
   NewComp := LibComp.Replicate;
@@ -2248,6 +2290,10 @@ begin
   C := FindCompInDoc(SchDoc, Ref, PartId);
   if C = nil then
   begin
+    // quem o PlaceComp deixou de fora por falta de simbolo ja esta no dialogo final:
+    // repetir aqui transformaria um componente faltando em varias "falhas"
+    if SemSimbRefs.IndexOf(Ref) >= 0 then
+      Exit;
     LogFail('posicao ' + Ref + '/' + IntToStr(PartId) + ': componente nao esta na folha');
     Exit;
   end;
@@ -3206,7 +3252,6 @@ var
                                          // deixou de bastar (ver AplicaFolha)
   i, si, ErrCount, PartId, Restantes, AntesSave, DepoisSave: Integer;
   k, Diverge: Integer;                   // esquema x placa (ver LoadBoardFps)
-  ListaSemFp: String;                    // designadores sem vinculo, para o dialogo
   Avisados: TStringList;
   ServerDoc: IServerDocument;
   SchDoc: ISch_Document;
@@ -3415,12 +3460,17 @@ begin
   // o nome que o hub escreve pode ser o padronizado, e a biblioteca ter o antigo: NomeNaLib
   CarregaRenomes(0);
   for i := 0 to Syms.Count - 1 do
+    // SIMBOLO QUE NAO EXISTE NAO TRAVA MAIS A FOLHA - a mesma regra que o usuario deu para
+    // o footprint ("o esquema precisa voltar pro Altium; o que faltar, eu resolvo la"). Era o
+    // ultimo tudo-ou-nada: em 2026-09-23 o TCMS_Reader parou inteiro por UM componente, o
+    // IC2 (MAX3051ESA+T, "CMP-05676-000007-1"), peca do cofre do Altium que nao esta na lib
+    // da casa nem no almoxarifado. O despejo ja sabia o que fazer com ele - o AtualizaComp
+    // mantem o simbolo antigo de quem ja esta na folha, e o PlaceComp pula o novo -; so esta
+    // validacao, que roda antes, barrava. Os dois casos saem no dialogo final.
     if FindLibSymbol(NomeNaLib(Syms[i])) = nil then
-    begin
-      Report.Add('[ERRO] simbolo "' + Syms[i] + '" nao existe em nenhuma das '
-                 + IntToStr(SchLibs.Count) + ' SchLib de origem (nem pelo rename-map/lib-subs)');
-      ErrCount := ErrCount + 1;
-    end;
+      Report.Add('[AVISO] simbolo "' + Syms[i] + '" nao existe em nenhuma das '
+                 + IntToStr(SchLibs.Count) + ' SchLib de origem (nem pelo rename-map/lib-subs)' +
+                 ' - quem ja esta na folha fica com o simbolo que tem; o novo NAO e colocado');
 
   LoadPcbFpNames(0);
   // o footprint que JA ESTA NA PLACA vale como existente: ver LoadBoardFps
@@ -3806,21 +3856,21 @@ begin
     TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(Diverge) +
       ' componente(s) com footprint DIFERENTE do da placa -' + #13#10 +
       '   no ECO o Altium vai propor trocar o footprint na placa (o relatorio lista cada um).';
-  // e o que foi SEM vinculo: e trabalho que ficou para o usuario fazer no Altium. A lista e
-  // montada a mao, e nao com CommaText: essa propriedade nunca rodou neste engine.
+  // O QUE FICOU PARA O USUARIO FAZER NO ALTIUM - na tela, e nao so no relatorio, porque e
+  // trabalho manual que ninguem mais vai lembrar. O mais grave primeiro: componente que nem
+  // entrou na folha.
+  if SemSimbRefs.Count > 0 then
+    TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(SemSimbRefs.Count) +
+      ' componente(s) NAO foram colocados (simbolo em biblioteca nenhuma):' +
+      #13#10 + '   ' + JuntaLista(SemSimbRefs) + ' - coloque no Altium; os fios deles estao no lugar.';
+  if SimbAntigoRefs.Count > 0 then
+    TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(SimbAntigoRefs.Count) +
+      ' componente(s) ficaram com o simbolo ANTIGO (o novo nao existe em biblioteca nenhuma):' +
+      #13#10 + '   ' + JuntaLista(SimbAntigoRefs) + '.';
   if SemFpRefs.Count > 0 then
-  begin
-    ListaSemFp := '';
-    for i := 0 to SemFpRefs.Count - 1 do
-    begin
-      if ListaSemFp <> '' then
-        ListaSemFp := ListaSemFp + ', ';
-      ListaSemFp := ListaSemFp + SemFpRefs[i];
-    end;
     TxtWarn := TxtWarn + #13#10 + '   ATENCAO: ' + IntToStr(SemFpRefs.Count) +
       ' componente(s) foram SEM vinculo de footprint (nao existe na PcbLib nem na placa):' +
-      #13#10 + '   ' + ListaSemFp + ' - defina no Altium.';
-  end;
+      #13#10 + '   ' + JuntaLista(SemFpRefs) + ' - defina no Altium.';
 
   ShowMessage('Esquema despejado.' + #13#10 +
     'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + TxtWarn + #13#10#13#10 +
