@@ -270,6 +270,22 @@ function perfilDoValor(g, it){
     familiaBase: CX(familia).replace(/\s*\[.*$/, '').trim(),
     saldo: Number(it.saldo) || 0,
     mpn: String(it.mpn || par.MPN || '').trim(),
+    /* O ID DO ODOO E A IDENTIDADE, o nome e so o rotulo do dia. O espelho emite OdooId em
+       todo valor (medido: 1756 de 1756 nos basicos) e e ele que diz "esta peca da folha e
+       esta peca do acervo" sem depender de texto nenhum. */
+    odooId: String(par.ODOOID || '').trim(),
+    /* ── o que a ETIQUETA precisa, e mais nada ──
+       Campos inertes para a pontuacao: nenhum peso os le, entao a recomendacao nao muda de
+       ordem por causa deles. `grupos()` do hub-almoxpick ja os entrega prontos — inclusive a
+       `linha` do conector, que nao precisa ser remontada aqui.
+       O `it.tipo` do almoxpick e o CODIGO DO FABRICANTE ("MC 1,5/4-G-3,81", "2510") e entra
+       como `cod`: por nada neste mundo em `tipo`, que neste arquivo e a classe da peca
+       (R/C/D/J...) e e portao de recusa em `pontua`. */
+    id: (v && v.id) != null ? v.id : null,
+    linha: String(it.linha || '').trim(),
+    cod: String(it.tipo || '').trim(),
+    pkgs: (v && v.pkgs) || [],
+    fora: !!it.fora,
     tipo,
     valor: normValor(valorTxt, CLASSE_DO_TIPO[tipo] || ''),
     tensao: tensaoDe(it.rotulo) || tensaoDe(par.COMMENT) || null,
@@ -430,8 +446,14 @@ function varre(comps, cands, jaAlmox){
     const k = chaveDoComp(c);
     let ln = linhas.get(k);
     if (!ln){
-      ln = { chave: k, comp: c, perfil: perfilDoComp(c), refs: [], partes: 0,
-             almox: ehAlmox(c), sugestoes: [], escolha: null, marcado: false, alerta: '' };
+      const perfil = perfilDoComp(c);
+      /* o detector pode devolver o NOME da peca que casou, e nao so um sim/nao: quando o
+         acervo renomeia um valor, o nome da folha e o do acervo sao dois textos para a
+         mesma peca, e a linha precisa poder dizer isso */
+      const achou = ehAlmox(c, perfil);
+      ln = { chave: k, comp: c, perfil: perfil, refs: [], partes: 0,
+             almox: !!achou, almoxNome: (typeof achou === 'string' ? achou : ''),
+             sugestoes: [], escolha: null, marcado: false, alerta: '' };
       linhas.set(k, ln);
     }
     ln.partes++;
@@ -526,12 +548,70 @@ const CSS = `
   color:var(--fg,#d8d8d8); cursor:pointer;}
 #cvmodal .cv-refs button:hover{border-color:var(--accent,#4fc3f7); color:var(--accent,#4fc3f7);}
 #cvmodal .cv-refs .mais{font-size:10px; color:var(--fg-dim,#9a9a9a); align-self:center;}
-#cvmodal .cv-hoje .nm{font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-#cvmodal .cv-hoje .det{font-size:10px; color:var(--fg-dim,#9a9a9a); overflow:hidden;
+/* A LINHA GRANDE É O QUE SE TROCA. O valor vem em destaque, o corpo do componente
+   (o footprint) ao lado em tamanho de leitura, e o nome do símbolo — que não decide
+   substituição nenhuma — desce para a linha de baixo. */
+#cvmodal .cv-hoje .chave{display:flex; flex-wrap:wrap; align-items:baseline; gap:3px 8px;}
+#cvmodal .cv-hoje .val{font:600 15px/1.25 'Segoe UI',sans-serif; color:var(--accent,#4fc3f7);
+  background:rgba(79,195,247,.11); border-radius:3px; padding:1px 7px; letter-spacing:-.01em;}
+#cvmodal .cv-hoje .val.sem{color:var(--warn,#ffd54f); background:rgba(255,213,79,.10);
+  font-weight:500; font-style:italic;}
+#cvmodal .cv-hoje .fp{font-size:13px; color:var(--fg,#d8d8d8); min-width:0; overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap;}
-#cvmodal .cv-vai select{width:100%; background:var(--panel2,#2d2d2d); color:var(--fg,#d8d8d8);
-  font:12px 'Segoe UI',sans-serif; border:1px solid var(--border,#3a3a3a); border-radius:3px;
-  padding:2px 4px;}
+#cvmodal .cv-hoje .nm{font-size:10px; color:var(--fg-dim,#9a9a9a); margin-top:3px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+/* ── o seletor com etiquetas ──
+   NADA DE CRASE DAQUI PARA BAIXO: este bloco é um template literal, e uma crase de comentário
+   o fecha no meio. O node --check aceita (vira expressão válida) e os testes não pegam, porque
+   em Node o módulo retorna antes desta linha — só a página quebra, com "row is not defined".
+   Mesma grade do .alx-row da lib (30px / 1fr / auto / auto), vocabulário do :root desta
+   página. Sem teto de largura nas etiquetas: quem encolhe é o NOME (minmax(0,1fr)) e,
+   depois dele, a FAMÍLIA — código e encapsulamento cortados não identificam peça nenhuma. */
+#cvmodal .cv-sel{min-width:0;}
+#cvmodal .cv-trig{display:flex; align-items:center; gap:6px; width:100%; text-align:left;
+  background:var(--panel2,#2d2d2d); color:var(--fg,#d8d8d8); border:1px solid var(--border,#3a3a3a);
+  border-radius:3px; padding:3px 6px; cursor:pointer; min-width:0;}
+#cvmodal .cv-trig:hover{border-color:var(--accent,#4fc3f7);}
+#cvmodal .cv-trig > .cv-op{flex:1; min-width:0;}
+#cvmodal .cv-trig .seta{color:var(--fg-dim,#9a9a9a); font-size:10px; flex:none;}
+#cvmodal .cv-trig[aria-expanded=true]{border-color:var(--accent,#4fc3f7);}
+#cvmodal .cv-opcoes{margin-top:3px; max-height:290px; overflow:auto;
+  border:1px solid var(--border,#3a3a3a); border-radius:3px; background:var(--panel,#242424);}
+#cvmodal .cv-opb{display:block; width:100%; text-align:left; border:0; background:transparent;
+  color:var(--fg,#d8d8d8); padding:3px 6px; cursor:pointer;}
+#cvmodal .cv-opb:hover{background:rgba(79,195,247,.10);}
+#cvmodal .cv-opb[aria-selected=true]{background:rgba(79,195,247,.14);
+  box-shadow:inset 2px 0 0 var(--accent,#4fc3f7);}
+#cvmodal .cv-op{display:grid; grid-template-columns:30px minmax(0,1fr) auto auto; gap:8px;
+  align-items:center; min-width:0;}
+#cvmodal .cv-op .ix{font-size:10px; color:var(--fg-dim,#9a9a9a); text-align:right;
+  font-variant-numeric:tabular-nums;}
+#cvmodal .cv-op .nm{min-width:0;}
+#cvmodal .cv-op .n1{display:block; font-size:12px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap;}
+#cvmodal .cv-op .n1 i{font-style:normal; font-size:9px; letter-spacing:.06em;
+  text-transform:uppercase; margin-left:6px; padding:0 4px; border-radius:3px;
+  background:rgba(255,213,79,.12); color:var(--warn,#ffd54f);}
+#cvmodal .cv-op .n2{display:block; font-size:10px; color:var(--fg-dim,#9a9a9a);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+#cvmodal .cv-op .tags{display:flex; align-items:center; gap:6px; justify-content:flex-end;
+  min-width:0;}
+#cvmodal .cv-op .fam, #cvmodal .cv-op .pk, #cvmodal .cv-op .mp{padding:1px 7px;
+  border-radius:999px; font-family:Consolas,ui-monospace,monospace; white-space:nowrap;}
+/* a família é a que cede espaço: contexto, não identidade */
+#cvmodal .cv-op .fam{font-size:10px; color:var(--fg-dim,#9a9a9a); min-width:0;
+  overflow:hidden; text-overflow:ellipsis;
+  box-shadow:inset 0 0 0 1px rgba(154,154,154,.28);}
+#cvmodal .cv-op .pk{font-size:11px; color:var(--fg,#d8d8d8); background:rgba(79,195,247,.14);}
+/* deduzido do footprint, não escrito no catálogo: pílula vazada diz a procedência */
+#cvmodal .cv-op .pk.deduz{background:transparent; color:var(--fg-dim,#9a9a9a);
+  box-shadow:inset 0 0 0 1px rgba(79,195,247,.28);}
+#cvmodal .cv-op .mp{font-size:10px; color:var(--fg-dim,#9a9a9a);
+  box-shadow:inset 0 0 0 1px rgba(79,195,247,.22);}
+#cvmodal .cv-op .qt{font-size:11px; font-variant-numeric:tabular-nums; color:var(--ok,#00e676);
+  min-width:46px; text-align:right;}
+#cvmodal .cv-op .qt.zero{color:var(--fg-dim,#9a9a9a);}
+#cvmodal .cv-sel .nada{font-size:12px; color:var(--fg-dim,#9a9a9a);}
 #cvmodal .cv-vai .pq{font-size:10px; color:var(--fg-dim,#9a9a9a); margin-top:2px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 #cvmodal .cv-vai .alerta{font-size:10px; color:var(--warn,#ffd54f); margin-top:2px; white-space:normal;}
@@ -582,7 +662,7 @@ function el(tag, cls, text){
 const proj = () => (typeof SCH_P === 'string' && SCH_P) || '';
 
 const ST = { aberto: false, rodando: false, linhas: [], cands: [], filtro: 'pend', busca: '',
-             aplicados: 0 };
+             aplicados: 0, aberta: null };
 
 /* os candidatos: SÓ o almoxarifado, pelo mesmo caminho que o seletor da folha usa. A
    biblioteca da casa fica de fora de propósito — é dela que se está saindo. */
@@ -596,11 +676,63 @@ function candidatos(){
   return fora;
 }
 
+/* ── quem JA e do almoxarifado ──
+   Casar pelo NOME e o que havia, e o nome e a coisa mais instavel do acervo: medido nos 19
+   projetos, 13 componentes carregam OdooId (ou seja, alguem ja os converteu) e 8 deles NAO
+   casam por nome. Tres causas, todas reais:
+
+     - o acervo RENOMEIA o valor. O D2 do DMB-DI231765_P2 tem "Supressor Transiente TVS
+       CDSOT23-SM712" e o acervo hoje o chama de "(TVS) CDSOT23-SM712"; os R1-R4 do
+       PAEL-DI261940 ficaram com o codigo do fabricante no nome, que saiu do nome do valor
+       e virou etiqueta ao lado. Peca identica, dois textos.
+     - o espelho tem valor com o acento gravado em UTF-8 dentro de um arquivo latin-1
+       ("180 graus" do _DemoKit): o mesmo nome, byte diferente.
+     - o nome simplesmente nunca foi igual.
+
+   O resultado era o pior possivel: a peca CERTA aparecia em "a converter" com uma sugestao
+   de trocar por outra coisa. O D2 vinha marcado para virar um BAV99 — um diodo duplo no
+   lugar de um supressor TVS.
+
+   O OdooId nao tem esse problema: e o id da variante no Odoo, o espelho o emite em todo
+   valor e o AI-GUIDE o define como o que liga componente a produto SEM depender de texto.
+
+   A CASA JA TEM UMA ROTINA PARA ISSO e ela mora no servidor: `_usos_do_valor` do
+   symserver.py, com as "tres marcas" (OdooId; ValorId corroborado pelo texto; sym/comment).
+   Esta aqui e a terceira implementacao da ideia e por isso segue a ordem de la — id antes de
+   texto — em vez de inventar outra. As duas diferencas sao deliberadas e medidas:
+
+     - NAO uso o ValorId. La ele vale corroborado; aqui nao vale nada: o `valores[].id` e por
+       SIMBOLO (a bateria e a barra de pinos tem, as duas, um valor de id 1) e ja acusou o J1
+       do _DemoKit como uso de uma BATERIA. Sem ele nao perco caso nenhum medido.
+
+     - NAO uso `comment == label`. La um falso positivo e um aviso a mais; aqui ele ESCONDE da
+       lista um componente que precisava ser convertido — custo invertido. Medido: 123
+       componentes do corpus casariam so por essa marca, e eles sao justamente o alvo do
+       painel. Os U1/U2 do DMB tem `sym` "88901bc343d40937cf0e66f0656714f" (simbolo da lib
+       antiga) e comment "SN74HC245DWR", que por acaso e o nome de um valor do acervo: sao
+       componentes A CONVERTER, e o painel ja os recomenda com confianca alta.
+
+   Uma divergencia a mais, esta na precedencia: a rotina do servidor, quando o params TEM
+   OdooId, decide so por ele. Aqui, se o OdooId nao casar, o nome ainda vale — a pergunta e
+   outra ("esta peca ja e do almoxarifado?", e nao "esta peca e ESTE valor?"). Medido: 1 caso,
+   o CI2 do DMB, com OdooId=67 que sumiu do acervo e `sym` que casa exato. Como esse ramo so
+   aceita nome EXATO, o `almoxNome` sai igual ao `sym` e a linha "outro nome no acervo" nunca
+   aparece por engano. */
 function varreFolha(){
   ST.cands = candidatos();
-  const nomes = new Set(ST.cands.map(c => c.nome));
+  const nomes = new Map();
+  const porOdoo = new Map();
+  for (const c of ST.cands){
+    if (!nomes.has(c.nome)) nomes.set(c.nome, c.nome);
+    if (c.odooId && !porOdoo.has(c.odooId)) porOdoo.set(c.odooId, c.nome);
+  }
   const comps = (window.__hubComponentes && window.__hubComponentes()) || [];
-  ST.linhas = varre(comps, ST.cands, c => nomes.has(String(c.sym || '')));
+  ST.linhas = varre(comps, ST.cands, (c, perfil) => {
+    const oid = (perfil && perfil.odooId) || paramsPlanos(c && c.params).ODOOID || '';
+    /* o id vale mais que o nome: o nome muda, o id nao */
+    if (oid && porOdoo.has(String(oid).trim())) return porOdoo.get(String(oid).trim());
+    return nomes.get(String((c && c.sym) || '')) || '';
+  });
   for (const ln of ST.linhas){ ln.busca = ''; ln.buscando = false; }
   return comps.length;
 }
@@ -669,28 +801,50 @@ function linha(ln){
   if (ln.refs.length > 8) refs.append(el('span', 'mais', '+' + (ln.refs.length - 8)));
   row.append(refs);
 
+  /* QUEM DECIDE A TROCA É O VALOR E O CORPO, não o nome do símbolo. "CAP EL [ PTH ]" é o
+     nome da família antiga e se repete em dezenas de linhas; o que muda de uma para a
+     outra — "10uF", "Cap El 3mm L15 D7" — é o que a pessoa compara com a peça do
+     almoxarifado ao lado. Estava ao contrário: o nome em 12px em cima e o valor em 10px
+     cinza embaixo. */
   const hoje = el('div', 'cv-hoje');
-  hoje.append(el('div', 'nm', ln.perfil.sym || '(sem símbolo)'));
-  const det = [ln.perfil.fp || 'sem footprint'];
   const c = ln.perfil.comment;
-  if (c && c.charAt(0) !== '=') det.push(c);
-  else if (ln.perfil.valorTxt) det.push(ln.perfil.valorTxt);
-  if (ln.partes > ln.refs.length) det.push(ln.partes + ' partes');
-  hoje.append(el('div', 'det', det.join('  ·  ')));
+  /* comment que começa com "=" é fórmula do Altium: ela se resolve na folha, e o valor de
+     verdade (quando veio no export) está no params */
+  const valor = (c && c.charAt(0) !== '=') ? c : (ln.perfil.valorTxt || '');
+  const chave = el('div', 'chave');
+  /* SEM VALOR TAMBÉM É RESPOSTA. A linha que não tem valor é justo aquela em que trocar
+     é arriscado (o comment é uma fórmula, ou o export não trouxe o Value): deixar o lugar
+     do valor vazio faz a linha parecer só mais curta, e o footprint ao lado assume o
+     destaque como se FOSSE o valor. */
+  chave.append(valor ? el('span', 'val', valor) : el('span', 'val sem', 'sem valor'));
+  chave.append(el('span', 'fp', ln.perfil.fp || 'sem footprint'));
+  hoje.append(chave);
+  const nm = [ln.perfil.sym || '(sem símbolo)'];
+  if (ln.partes > ln.refs.length) nm.push(ln.partes + ' partes');
+  hoje.append(el('div', 'nm', nm.join('  ·  ')));
+  hoje.title = (valor ? valor : 'sem valor') + '  ·  ' + (ln.perfil.fp || 'sem footprint')
+             + '  ·  ' + nm.join('  ·  ');
   row.append(hoje);
 
   row.append(el('div', 'seta', ln.almox ? '' : '→'));
 
   const vai = el('div', 'cv-vai');
   if (ln.almox){
-    vai.append(el('div', 'nm', ln.perfil.sym));
+    /* o nome do ACERVO, nao o da folha: quando os dois diferem e porque o valor foi
+       renomeado, e esconder isso deixa a pessoa procurando na lib um nome que saiu de la */
+    const atual = ln.almoxNome || ln.perfil.sym;
+    vai.append(el('div', 'nm', atual));
+    /* "outro nome", e nao "renomeada": as duas causas medidas produzem nomes diferentes
+       para a MESMA peca, e so uma delas e renome. A outra e o acento gravado em UTF-8
+       dentro do espelho latin-1 (o "180 graus" do _DemoKit), em que o nome nem mudou. */
+    if (ln.almoxNome && ln.almoxNome !== ln.perfil.sym)
+      vai.append(el('div', 'pq', 'mesma peça, outro nome no acervo — a folha ainda diz "'
+        + ln.perfil.sym + '"'));
   } else {
     vai.append(seletor(ln));
-    if (ln.escolha){
-      vai.append(el('div', 'pq', ln.escolha.motivos.join(' · ')
-        + (ln.escolha.alvo.saldo > 0 ? '  ·  ' + ln.escolha.alvo.saldo + ' em estoque'
-                                     : '  ·  sem estoque')));
-    }
+    /* o estoque saiu daqui: ele agora está na própria linha da opção, no fim, como o dono
+       pediu — repetir na linha de motivos era dizer duas vezes a mesma coisa */
+    if (ln.escolha) vai.append(el('div', 'pq', ln.escolha.motivos.join(' · ')));
     if (ln.alerta) vai.append(el('div', 'alerta', '⚠ ' + ln.alerta));
     if (!ln.escolha) vai.append(semSugestao(ln));
     vai.append(busca(ln));
@@ -704,26 +858,129 @@ function linha(ln){
   return row;
 }
 
+/* ── a etiqueta de encapsulamento ──
+   A lib escreve o `pkgs` LITERAL, desempatado pelo footprint (schframe.js » buildAddList).
+   Copiar a REGRA e não o resultado importa: o `encaps` deste arquivo é normalizado para a
+   pontuação — ele escreve "TO-220" onde o catálogo diz "TO-220-2" — e usá-lo aqui faria as
+   duas telas dizerem coisas diferentes sobre a mesma peça.
+
+   Só que o literal sozinho não resolve o que o dono pediu: medido no espelho, 1683 dos 2545
+   valores NÃO têm `pkgs`, e a etiqueta ficaria vazia em dois terços das opções — que é
+   exatamente a queixa ("do jeito que tá não dá pra vê essas coisas"). Daí o segundo degrau:
+   o encapsulamento DEDUZIDO do footprint, na pílula vazada em vez da cheia. A procedência
+   fica visível sem precisar de legenda, e o catálogo continua sendo o único que fala pela
+   pílula cheia. */
+function encapDaOpcao(a){
+  const pks = (a.pkgs || []).filter(x => String(x).trim());
+  const fpl = String(a.fp || '').toLowerCase();
+  const lit = pks.length <= 1 ? (pks[0] || '')
+            : (pks.find(x => fpl.includes(String(x).toLowerCase())) || pks[0]);
+  if (lit) return { txt: String(lit).trim(), literal: true };
+  return { txt: String((a.encaps || [])[0] || '').trim(), literal: false };
+}
+/* o saldo como a lib o escreve: inteiro quando é inteiro */
+function saldoTxt(n){
+  const x = Number(n) || 0;
+  return Math.round(x) === x ? String(x)
+                             : x.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+}
+
+/* A LINHA DE UMA OPÇÃO — a mesma leitura da lib, no vocabulário desta tela.
+   O desenho é o do `.alx-row` (schframe.js » buildAddList): id, nome, etiquetas, saldo, na
+   mesma grade 30px / 1fr / auto / auto. O CSS NÃO é reusado, e a razão é medida: os
+   seletores `.alx-row` de schframe.html são crus e casariam aqui, mas os TOKENS deles
+   (--tint, --hi, --text-2) estão declarados em `#addmodal, #symmodal`, não no `:root`.
+   Herdar a classe traria a grade certa com a paleta morta. Mesma forma, então, no
+   vocabulário do `:root` desta página — que é o que o resto deste painel já usa. */
+function opcaoRow(a){
+  const row = el('div', 'cv-op');
+  row.append(el('span', 'ix', a.id != null ? String(a.id) : ''));
+
+  const nm = el('span', 'nm');
+  /* O QUE SE LÊ É O QUE SE GRAVA. `alvo.nome` é o texto que vai para o `sym` do
+     schematic.js; o rótulo legível da lib difere dele em 1483 dos 2545 valores. Numa tela
+     cuja função é conferir ANTES de aplicar, mostrar só o nome bonito e esconder o que será
+     gravado troca a conferência por uma aposta. Os dois aparecem, e o gravado manda. */
+  const n1 = el('span', 'n1', a.nome);
+  if (a.fora) n1.append(el('i', null, 'fora'));
+  nm.append(n1);
+  const leg = a.linha || a.rotulo || '';
+  if (leg && leg !== a.nome) nm.append(el('span', 'n2', leg));
+  row.append(nm);
+
+  const tags = el('span', 'tags');
+  /* A FAMÍLIA é a etiqueta que o dono pediu e a lib não tem — lá a lista já está DENTRO de
+     uma família, aqui as 8 sugestões podem vir de famílias diferentes. É também a única que
+     pode ser cortada: nome e código não identificam peça pela metade (a regra do commit das
+     duas etiquetas), família identifica. */
+  if (a.familia) tags.append(el('span', 'fam', a.familia));
+  const enc = encapDaOpcao(a);
+  if (enc.txt) tags.append(el('span', 'pk' + (enc.literal ? '' : ' deduz'), enc.txt));
+  const cod = a.cod || a.mpn || '';
+  if (cod) tags.append(el('span', 'mp', cod));
+  row.append(tags);
+
+  row.append(el('span', 'qt' + (a.saldo > 0 ? '' : ' zero'), saldoTxt(a.saldo)));
+  row.title = a.nome + (leg && leg !== a.nome ? '\n' + leg : '')
+            + '\n' + (a.familia || '') + (cod ? '  ·  ' + cod : '')
+            + '  ·  ' + saldoTxt(a.saldo) + ' em estoque';
+  return row;
+}
+
+/* ── o seletor ──
+   Era um <select> nativo, e <option> não aceita HTML: etiqueta colorida dentro dele não
+   existe. A lista própria é o preço de ver o que o dono pediu.
+
+   EM FLUXO, NÃO FLUTUANDO. O painel se desdobra logo abaixo do gatilho, no mesmo molde do
+   `.cv-achados` do "escolher outro…" que já vive neste arquivo. Nada de `position:fixed`: o
+   `.cv-body` tem `overflow:auto` e uma lista absoluta seria cortada, o que obrigaria a
+   z-index, a medir espaço na tela e a fechar no scroll. Desdobrar não depende de nada disso
+   e funciona igual no toque.
+
+   UMA SÓ ABERTA (`ST.aberta`), montada sob demanda: 368 linhas × 9 opções pré-montadas
+   seriam mais de 3000 itens remontados a cada `pinta()`, que roda a cada troca. */
 function seletor(ln){
-  const s = el('select');
+  const fora = el('div', 'cv-sel');
   const opcoes = ln.sugestoes.slice();
   if (ln.escolha && opcoes.indexOf(ln.escolha) < 0) opcoes.unshift(ln.escolha);
-  const nada = el('option', null, '— não trocar —');
-  nada.value = '';
-  s.append(nada);
-  for (let i = 0; i < opcoes.length; i++){
-    const o = el('option', null, opcoes[i].alvo.nome
-      + (opcoes[i].alvo.saldo > 0 ? '' : '  (sem estoque)'));
-    o.value = String(i);
-    s.append(o);
-  }
-  s.value = ln.escolha ? String(opcoes.indexOf(ln.escolha)) : '';
-  s.addEventListener('change', () => {
-    ln.escolha = s.value === '' ? null : opcoes[Number(s.value)];
-    ln.marcado = !!ln.escolha;
-    pinta();
-  });
-  return s;
+  const aberta = ST.aberta === ln;
+
+  const bt = el('button', 'cv-trig');
+  bt.type = 'button';
+  bt.setAttribute('aria-haspopup', 'listbox');
+  bt.setAttribute('aria-expanded', String(aberta));
+  if (ln.escolha) bt.append(opcaoRow(ln.escolha.alvo));
+  else bt.append(el('span', 'nada', '— não trocar —'));
+  bt.append(el('span', 'seta', aberta ? '▴' : '▾'));
+  bt.addEventListener('click', () => { ST.aberta = aberta ? null : ln; pinta(); });
+  fora.append(bt);
+  if (!aberta) return fora;
+
+  const lista = el('div', 'cv-opcoes');
+  lista.setAttribute('role', 'listbox');
+  const poe = (alvo, escolha) => {
+    const b = el('button', 'cv-opb');
+    b.type = 'button';
+    b.setAttribute('role', 'option');
+    b.setAttribute('aria-selected', String(ln.escolha === escolha));
+    b.append(alvo ? opcaoRow(alvo) : el('span', 'nada', '— não trocar —'));
+    b.addEventListener('click', () => {
+      ln.escolha = escolha;
+      ln.marcado = !!escolha;
+      ST.aberta = null;
+      pinta();
+    });
+    lista.append(b);
+  };
+  poe(null, null);
+  for (const o of opcoes) poe(o.alvo, o);
+  fora.append(lista);
+  /* Abrir numa linha do fim desdobrava a lista por baixo do rodapé, e ela só aparecia se a
+     pessoa adivinhasse que precisava rolar. `block:'nearest'` rola o `.cv-body` o mínimo para
+     caber e não faz nada quando a lista já está à vista — não rouba a rolagem de quem abriu
+     uma linha do meio. Depois do append, senão não há o que medir. */
+  setTimeout(() => { try { lista.scrollIntoView({ block: 'nearest' }); } catch (e) {} }, 0);
+  return fora;
 }
 
 function semSugestao(ln){
@@ -1017,7 +1274,13 @@ function montaDom(){
   document.addEventListener('keydown', e => {
     if (!ST.aberto) return;
     e.stopPropagation();
-    if (e.key === 'Escape' && !ST.rodando){ e.preventDefault(); fecha(); }
+    /* PRECEDÊNCIA EXPLÍCITA, um handler só: o Esc fecha primeiro a lista de opções aberta e
+       só depois o painel. Registrar um listener novo para a lista criaria a mesma disputa de
+       fase que este bloco existe para evitar. */
+    if (e.key === 'Escape'){
+      if (ST.aberta){ e.preventDefault(); ST.aberta = null; pinta(); return; }
+      if (!ST.rodando){ e.preventDefault(); fecha(); }
+    }
   });
   return true;
 }

@@ -208,4 +208,49 @@ if (P.sugere(r30k, CANDS, 1).length === 0){
 }
 console.log('(8) sem o valor exato, a tela sabe dizer o mais próximo ok');
 
+/* ── 9. quem JÁ é do almoxarifado sai da lista, mesmo com outro nome ─────────
+   Casar pelo NOME é o que havia, e o nome é a coisa mais instável do acervo. Medido aqui:
+   dos componentes do corpus que carregam OdooId (alguém já os converteu), a maioria NÃO
+   casa por nome — o acervo renomeou o valor, ou o acento veio gravado em UTF-8 dentro do
+   espelho latin-1. O resultado era o pior possível: a peça CERTA aparecia em "a converter"
+   com uma sugestão de trocar por OUTRA coisa. */
+const POR_ODOO = new Map();
+for (const c of CANDS) if (c.odooId && !POR_ODOO.has(c.odooId)) POR_ODOO.set(c.odooId, c.nome);
+assert.ok(POR_ODOO.size > 1000, 'o espelho tem de emitir OdooId em todo valor: ' + POR_ODOO.size);
+
+/* o MESMO detector do hub-converte.js » varreFolha */
+const NOME_DE = new Map(CANDS.map(c => [c.nome, c.nome]));
+const detecta = (c, perfil) => {
+  const oid = (perfil && perfil.odooId) || P.paramsPlanos(c && c.params).ODOOID || '';
+  if (oid && POR_ODOO.has(String(oid).trim())) return POR_ODOO.get(String(oid).trim());
+  return NOME_DE.get(String((c && c.sym) || '')) || '';
+};
+
+/* o contrato: componente com OdooId que existe no acervo É do almoxarifado, diga o nome o
+   que disser — e nunca recebe sugestão de troca */
+const comOdoo = COMPS.filter(c => {
+  const oid = P.paramsPlanos(c.params).ODOOID;
+  return oid && POR_ODOO.has(String(oid).trim());
+});
+assert.ok(comOdoo.length >= 10, 'o corpus tem de ter componentes já convertidos: ' + comOdoo.length);
+const porId = P.varre(comOdoo, CANDS, detecta);
+for (const l of porId){
+  assert.strictEqual(l.almox, true,
+    'tem OdooId no acervo e não foi reconhecido: ' + l.refs.join(',') + ' sym=' + l.perfil.sym);
+  assert.strictEqual(l.escolha, null, 'linha já do almoxarifado não pode trazer sugestão');
+  assert.strictEqual(l.marcado, false, 'linha já do almoxarifado não pode vir marcada');
+}
+/* e o nome do acervo tem de viajar, senão a tela não sabe dizer "mesma peça, outro nome" */
+const renomeados = porId.filter(l => l.almoxNome && l.almoxNome !== l.perfil.sym);
+assert.ok(renomeados.length, 'o corpus tem casos de nome diferente; nenhum foi marcado');
+
+/* o detector velho (só nome) deixava esses passar — é a regressão que este teste prende */
+const soNome = P.varre(comOdoo, CANDS, c => NOME_DE.has(String(c.sym || '')));
+const escapavam = soNome.filter(l => !l.almox).length;
+assert.ok(escapavam > 0, 'se ninguém mais escapa por nome, este teste perdeu o sentido');
+console.log('    já-do-almoxarifado: ' + porId.length + ' tipos com OdooId, '
+  + renomeados.length + ' com outro nome no acervo, ' + escapavam
+  + ' que o casamento por nome deixava passar');
+console.log('(9) quem já é do almoxarifado sai da lista, mesmo renomeado ok');
+
 console.log('test-converte OK (o portão é tipo, valor e montagem; o resto é ordem)');
