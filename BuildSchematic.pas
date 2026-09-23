@@ -52,6 +52,8 @@ var
   SCHLIB_FILE: String;  // chave schlib do home.txt, ou SCHLIB_PADRAO
   PCBLIB_FILE: String;  // chave pcblib do home.txt, ou PCBLIB_PADRAO
   ALMOX_DIR: String;    // SCRIPT_HOME + '\Libs\Almox'
+  AlmoxIndice: Integer;     // .SchLib do almoxarifado achadas pelo almox.csv + FileExists
+  AlmoxVarredura: Integer;  // ...e as que o FindFirst devolveu (ver AddAlmoxLibs)
   Report: TStringList;
   OkCount, FailCount: Integer;
   SchLibDoc: ISch_Document;
@@ -1463,20 +1465,109 @@ begin
   end;
 end;
 
+// A mesma SchLib nao entra duas vezes: o indice e a varredura abaixo acham os mesmos
+// arquivos, e o nome pode vir com caixa diferente ("especiais 1" do csv, "ESPECIAIS 1" da
+// pasta) - o SchLibNomes nao diferencia caixa.
+procedure AddSchLibUnica(Caminho: String);
+begin
+  if SchLibNomes.IndexOf(Caminho) < 0 then
+    AddSchLib(Caminho);
+end;
+
 // Abre todas as .SchLib da pasta do almoxarifado, alem da biblioteca da casa.
 // Sem a pasta, segue so com a lib da casa - quem nunca sincronizou continua
 // montando esquema normalmente.
+//
+// NAO DEPENDE DE LISTAR A PASTA. Era um `if not DirectoryExists(...) then Exit` seguido de
+// FindFirst/FindNext - as duas primitivas que este workspace ja registrou como nao
+// confiaveis neste engine (HomeValida e ProjectDirExists usam FileExists de proposito). Pelo
+// share do servidor, atraves de dois symlinks (current -> release, Libs -> shared), o
+// resultado foi ZERO bibliotecas do almoxarifado: o build-report do DMB de 2026-09-23 diz
+// "nenhuma das 1 SchLib de origem", e os 13 componentes convertidos naquele dia foram
+// recusados. Os 13 existem, com o nome exato, nas .SchLib do almoxarifado (conferido lendo
+// o LibReference de cada uma) - o script so nao as abria.
+//
+// Agora e o mesmo remedio do ListProjectDirs: um INDICE lido com FileExists+LoadFromFile,
+// cada candidato confirmado com FileExists, e a varredura so como fonte extra. O indice e o
+// almox.csv que o sincronismo grava junto das bibliotecas: cada .SchLib se chama
+// "<Familia ou Biblioteca>[ N] ALMOX.SchLib" (o N e a quebra pelo teto do cabecalho:
+// RESISTOR 1, RESISTOR 2, ESPECIAIS 1...). Medido: esses candidatos cobrem os 55 arquivos
+// reais, sem sobrar nenhum; e as colunas Biblioteca/Familia nunca levam virgula nem aspas
+// nas 3574 linhas, entao separar pelas virgulas basta.
+//
+// As duas contagens vao para o relatorio. Se um dia o total cair de novo, ele diz qual
+// caminho falhou, em vez de "nenhuma das 1 SchLib" sem mais nada.
 procedure AddAlmoxLibs(Dummy: Integer);
 var
   Busca: TSearchRec;
-  Achou: Integer;
+  Achou, i, n, p: Integer;
+  Csv, Bases: TStringList;
+  Linha, Arq: String;
 begin
-  if not DirectoryExists(ALMOX_DIR) then
-    Exit;
+  AlmoxIndice := 0;
+  AlmoxVarredura := 0;
+
+  if FileExists(ALMOX_DIR + '\almox.csv') then
+  begin
+    Bases := TStringList.Create;
+    Bases.Sorted := True;
+    Bases.Duplicates := dupIgnore;
+    Bases.CaseSensitive := False;
+    Csv := TStringList.Create;
+    Csv.LoadFromFile(ALMOX_DIR + '\almox.csv');
+    // a linha 0 e o cabecalho (e carrega o BOM): comeca da 1
+    for i := 1 to Csv.Count - 1 do
+    begin
+      // Chave,Biblioteca,Familia,...
+      Linha := Csv[i];
+      p := Pos(',', Linha);
+      if p = 0 then
+        continue;
+      Linha := Copy(Linha, p + 1, Length(Linha));
+      p := Pos(',', Linha);
+      if p = 0 then
+        continue;
+      Bases.Add(Trim(Copy(Linha, 1, p - 1)));
+      Linha := Copy(Linha, p + 1, Length(Linha));
+      p := Pos(',', Linha);
+      if p = 0 then
+        continue;
+      Bases.Add(Trim(Copy(Linha, 1, p - 1)));
+    end;
+    Csv.Free;
+
+    for i := 0 to Bases.Count - 1 do
+    begin
+      if Bases[i] = '' then
+        continue;
+      Arq := ALMOX_DIR + '\' + Bases[i] + ' ALMOX.SchLib';
+      if FileExists(Arq) then
+      begin
+        AlmoxIndice := AlmoxIndice + 1;
+        AddSchLibUnica(Arq);
+      end;
+      // as partes numeradas nascem em sequencia (1, 2, ...): para no primeiro buraco
+      n := 1;
+      Arq := ALMOX_DIR + '\' + Bases[i] + ' ' + IntToStr(n) + ' ALMOX.SchLib';
+      while FileExists(Arq) do
+      begin
+        AlmoxIndice := AlmoxIndice + 1;
+        AddSchLibUnica(Arq);
+        n := n + 1;
+        Arq := ALMOX_DIR + '\' + Bases[i] + ' ' + IntToStr(n) + ' ALMOX.SchLib';
+      end;
+    end;
+    Bases.Free;
+  end;
+
+  // a varredura continua, como fonte extra: acha a .SchLib que nao tem linha no csv. Sem a
+  // guarda do DirectoryExists - FindFirst numa pasta que nao existe so devolve erro, e o
+  // ListProjectDirs ja faz assim.
   Achou := FindFirst(ALMOX_DIR + '\*.SchLib', faAnyFile, Busca);
   while Achou = 0 do
   begin
-    AddSchLib(ALMOX_DIR + '\' + Busca.Name);
+    AlmoxVarredura := AlmoxVarredura + 1;
+    AddSchLibUnica(ALMOX_DIR + '\' + Busca.Name);
     Achou := FindNext(Busca);
   end;
   FindClose(Busca);
@@ -3020,6 +3111,20 @@ begin
         ErrCount := ErrCount + 1;
       end;
     end
+    else if T = 'noerc' then
+    begin
+      // O DESPEJO JA SABIA CRIAR O No ERC (PlaceNoERC, no passo 2), mas esta lista branca
+      // nao tinha o tipo - e ela roda ANTES. Os 21 No ERC do DMB viravam "tipo
+      // desconhecido", abortavam a folha inteira, e o PlaceNoERC nunca era chamado
+      // (build-report de 2026-09-23 15:39). Um tipo novo precisa entrar nas DUAS listas.
+      // A conferencia de x/y e a mesma dos rotulos acima: o PlaceNoERC le as duas com
+      // JNum, que devolve 0 calado, e o X nasceria em (0,0), fora da folha.
+      if (not JHas(Line, 'x')) or (not JHas(Line, 'y')) then
+      begin
+        Report.Add('[ERRO] noerc: faltam x/y: ' + Line);
+        ErrCount := ErrCount + 1;
+      end;
+    end
     else if (T <> 'junction') and (T <> 'text') then
     begin
       // Tipo que o hub escreve e o builder nao conhece. Falhar aqui, no PASSO 1, e o que
@@ -3055,6 +3160,9 @@ begin
     Report.Free; Src.Free; Syms.Free; Fps.Free; Refs.Free; SheetNames.Free; SheetLines.Free; ItemSheets.Free;
     Exit;
   end;
+  Report.Add('SchLib de origem: ' + IntToStr(SchLibs.Count) +
+    ' (almoxarifado pelo almox.csv: ' + IntToStr(AlmoxIndice) +
+    ', pela varredura da pasta: ' + IntToStr(AlmoxVarredura) + ')');
   for i := 0 to Syms.Count - 1 do
     if FindLibSymbol(Syms[i]) = nil then
     begin
