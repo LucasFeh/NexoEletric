@@ -1923,6 +1923,42 @@ begin
   F.Free;
 end;
 
+// true se o changes.js tem ao menos UMA mudanca de verdade.
+//
+// O ARQUIVO SEMPRE EXISTE: o ExportPcb cria o esqueleto vazio ("var changes = [ ];") e
+// nunca o apaga. Perguntar so FileExists fazia o ApplyProject escolher o ramo da PCB
+// sempre que houvesse um .PcbDoc focado - aplicava zero mudancas, saia, e o esquema
+// nunca era construido. Medido em 2026-09-23: os 11 changes.js do servidor estavam
+// vazios, e o schematic.js do DMB tinha sido gravado naquele dia pelo painel de
+// conversao do hub. O esquema convertido simplesmente nao chegava ao Altium.
+//
+// Reconhece a mudanca EXATAMENTE como o ApplyChangesInto reconhece (pula // e exige
+// "op"), para os dois nunca discordarem sobre o que e uma mudanca.
+function ChangesTemOps(Arq: String): Boolean;
+var
+  L: TStringList;
+  i: Integer;
+  Linha: String;
+begin
+  Result := False;
+  if not FileExists(Arq) then
+    Exit;
+  L := TStringList.Create;
+  L.LoadFromFile(Arq);
+  for i := 0 to L.Count - 1 do
+  begin
+    Linha := Trim(L[i]);
+    if Pos('//', Linha) = 1 then
+      continue;
+    if JHas(Linha, 'op') then
+    begin
+      Result := True;
+      break;
+    end;
+  end;
+  L.Free;
+end;
+
 procedure ApplyProject;
 var
   Dirs: TStringList;
@@ -1955,7 +1991,8 @@ begin
   Dir := PROJECTS_DIR + '\' + Nome;
 
   HasSch := FileExists(Dir + '\schematic.js');
-  HasChg := FileExists(Dir + '\changes.js');
+  // pelo CONTEUDO, nao pela existencia: ver ChangesTemOps
+  HasChg := ChangesTemOps(Dir + '\changes.js');
   PcbFocada := False;
   if PCBServer <> nil then
     PcbFocada := PCBServer.GetCurrentPCBBoard <> nil;
@@ -1967,20 +2004,21 @@ begin
     Exit;
   end;
 
-  // senao, materializa o esquema (etapa 1 de um projeto novo)
+  // senao, materializa o esquema (etapa 1 de um projeto novo, ou um esquema editado no hub)
+  //
+  // SEM AVISO PROPRIO DEPOIS DAQUI. Aqui havia um ShowMessage dizendo "Esquema gerado no
+  // projeto atual", disparado SEMPRE - inclusive quando o BuildSchematicInto tinha acabado
+  // de dizer "Validacao falhou com 33 erro(s) - nada foi criado" (build-report do DMB,
+  // 16/09). A ultima coisa na tela era a mentira. O BuildSchematicInto ja avisa o proprio
+  // desfecho em todo ramo alcancavel daqui - falha de validacao, sucesso com os proximos
+  // passos, e cada motivo de parada -, entao o aviso daqui so podia repetir ou contradizer.
   if HasSch then
   begin
     BuildSchematicInto(Dir);
-    ShowMessage('Esquema de "' + Nome + '" gerado no projeto atual.' + #13#10#13#10 +
-      'Proximos passos no Altium:' + #13#10 +
-      '1) Project >> Compile PCB Project' + #13#10 +
-      '2) Design >> Update PCB Document (ECO) >> Execute Changes' + #13#10 +
-      '3) foque o .PcbDoc e rode ExportPcb (gera board.js para a IA)' + #13#10 +
-      '4) com o changes.js pronto, rode ApplyProject de novo com a PCB focada.');
     Exit;
   end;
 
-  ShowMessage('A pasta ' + Dir + ' nao tem schematic.js nem changes.js.' + #13#10 +
+  ShowMessage('A pasta ' + Dir + ' nao tem schematic.js nem mudancas no changes.js.' + #13#10 +
     'Peca o projeto a IA primeiro.');
 end;
 
