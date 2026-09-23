@@ -215,7 +215,13 @@ mas a linha só pode casar por MPN ou voltar para conferência humana.
   final, para ser resolvido no Altium. Não confunda isso com permissão para omitir: o que
   você deixa sem footprint vira trabalho manual de alguém.
 
-  O que **continua travando** é símbolo: sem o desenho não há o que colocar na folha.
+  **Símbolo também não trava** (mesma decisão, no mesmo dia). O `sym` passa primeiro pela
+  tradução de nomes — o `lib-subs` e o `rename-map` lido ao contrário, porque a biblioteca
+  da casa que o Altium lê ainda usa os nomes de antes da padronização. Se nem assim existir
+  em biblioteca nenhuma: o componente que **já está na folha** fica com o símbolo que tem;
+  o **novo não é colocado** (os fios dele ficam no lugar, soltos). Os dois saem como
+  `[AVISO]` e listados no diálogo final. Então um `sym` errado não derruba mais o esquema —
+  ele vira um buraco na folha, com o designador na lista para alguém colocar à mão.
 
 ### Fluxo de trabalho recomendado
 
