@@ -31,6 +31,7 @@
 <script src="hub-libview.js"></script>
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
 <script src="hub-odoocfg.js"></script>
+<script src="hub-atalhos.js"></script>
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
 <script src="hub-i18n.js"></script>
 <script src="hub-shell.js" defer></script>
@@ -4369,11 +4370,13 @@ sysLight.addEventListener('change', () => { if (skin.mode === 'auto') skinApply(
 skinApply();
 
 /* ═══ MODAL DE CONFIGURAÇÃO ════════════════════════════════════
-   Três abas laterais, na ordem em que se procura: Projeto (o que é deste projeto),
-   Layout (o que é desta tela) e Ações (o que fazer dentro do Altium). Os três painéis
-   são construídos de uma vez e alternados por hidden — trocar de aba não pode apagar
-   um caminho digitado e ainda não gravado. */
-const CFG_TABS = [['proj','cfg.tab.proj'], ['layout','cfg.tab.layout'], ['acoes','cfg.tab.acoes']];
+   Quatro abas laterais, na ordem em que se procura: Projeto (o que é deste projeto),
+   Layout (o que é desta tela), Atalhos (as teclas da vista Esquema, hub-atalhos.js) e
+   Ações (o que fazer dentro do Altium). Os painéis são construídos de uma vez e
+   alternados por hidden — trocar de aba não pode apagar um caminho digitado e ainda não
+   gravado. */
+const CFG_TABS = [['proj','cfg.tab.proj'], ['layout','cfg.tab.layout'], ['atalhos','cfg.tab.atalhos'],
+                  ['acoes','cfg.tab.acoes']];
 let cfgTab = 'proj';
 
 /* os textos de ajuda trazem <b> do dicionário — constantes do próprio hub, nunca
@@ -4539,6 +4542,7 @@ function openConfig(tab) {
 
   cfgPaneProjeto(panes.proj);
   cfgPaneLayout(panes.layout);
+  if (window.HubAtalhos) HubAtalhos.pane(panes.atalhos, { toast });
   cfgPaneAcoes(panes.acoes);
 
   const body = el('div', 'cfgm-body');
@@ -4628,9 +4632,11 @@ function cfgPaneAcoes(pane) {
 }
 
 /* Excluir projeto. A senha mestre é conferida no SERVIDOR — o hub nunca fica sabendo
-   qual é. E a pasta não é apagada: vai inteira para Trash\, no mesmo workspace. */
-function openDeleteDialog() {
-  const p = proj(); if (!p) return;
+   qual é. E a pasta não é apagada: vai inteira para Trash\, no mesmo workspace.
+   Sem `id` é o projeto aberto (Configurações › Projeto); com `id`, o que foi clicado com o
+   botão direito no painel Projetos (hub-shell.js), que pode não ser o aberto. */
+function openDeleteDialog(id) {
+  const p = id ? (S.projects || []).find(x => x.id === id) : proj(); if (!p) return;
   const bd = el('div', 'backdrop center'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
   const d = el('div', 'dialog'); d.style.width = 'min(480px,100%)';
   d.append(el('h3', null, t('del.title')));

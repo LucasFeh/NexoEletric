@@ -57,6 +57,7 @@
     paineis: '<rect x="2" y="3" width="12" height="10" rx="1"/><path d="M6 3v10"/>',
     busca: '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/>',
     fecharTodos: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5.5 8h5"/>',
+    lixo: '<path d="M2.5 4.5h11M6 4.5V2.8h4v1.7M4 4.5l.7 9h6.6l.7-9"/><path d="M6.8 7v4.5M9.2 7v4.5"/>',
     config: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
   };
   const ICONE_DA_ABA = { esquema: 'esquema', pcb: 'pcb', comp: 'comp', nets: 'nets', lib: 'lib',
@@ -231,6 +232,13 @@ body.eh-shell .tab[aria-selected="true"]::after {
 .eh-menu .it:hover { background: rgba(var(--tint), 0.08); }
 .eh-menu .ck { width: 14px; flex: none; color: var(--hi); text-align: center; }
 .eh-menu .hr { height: 1px; margin: 4px 6px; background: var(--line); }
+.eh-menu .it .eh-ico { width: 14px; height: 14px; flex: none; color: var(--text-3); }
+.eh-menu .it.perigo, .eh-menu .it.perigo .eh-ico { color: var(--err); }
+.eh-menu .it.perigo:hover { background: rgba(224, 85, 90, 0.12); }
+.eh-menu .it:disabled { opacity: .45; cursor: default; }
+.eh-menu .it:disabled:hover { background: transparent; }
+.eh-menu .tit { padding: 4px 10px 6px; font-size: 11px; color: var(--text-3); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 `;
 
   /* ── estado da casca ──────────────────────────────────────────────────────────── */
@@ -320,6 +328,11 @@ body.eh-shell .tab[aria-selected="true"]::after {
         abertos.add(p.id);
         if (eAtivo) renderArvore(); else selectProject(p.id);
       };
+      r.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        menuDoProjeto(p, Boolean(eAtivo), e.clientX, e.clientY);
+      });
       frag.append(r);
       if (!aberto) continue;
       for (const d of documentosDe(p)) {
@@ -430,16 +443,51 @@ body.eh-shell .tab[aria-selected="true"]::after {
   function fecharMenu() {
     if (menuAberto) { menuAberto.remove(); menuAberto = null; }
   }
+  // um item de menu: `marca` e o que vai na coluna da esquerda (um ✓ ou um icone)
+  function itemDeMenu(m, rotulo, marca, acao, o) {
+    const b = el('button', 'it' + (o && o.perigo ? ' perigo' : ''));
+    b.type = 'button';
+    b.append(typeof marca === 'string' || !marca ? el('span', 'ck', marca || '') : marca, el('span', null, rotulo));
+    if (o && o.titulo) b.title = o.titulo;
+    if (o && o.off) b.disabled = true;
+    else b.onclick = () => { fecharMenu(); acao(); };
+    m.append(b);
+    return b;
+  }
+  // Botao direito num projeto da arvore. Excluir usa o mesmo dialogo das Configuracoes do hub
+  // (senha mestre conferida no servidor; a pasta vai para Trash\, nao some), agora com o id do
+  // projeto clicado -- que pode nao ser o aberto.
+  function menuDoProjeto(p, eAtivo, x, y) {
+    fecharMenu();
+    const m = el('div', 'eh-menu');
+    m.append(el('div', 'tit', p.name));
+    itemDeMenu(m, eAtivo ? 'Projeto aberto' : 'Abrir o projeto', icone('projeto'), () => {
+      abertos.add(p.id);
+      selectProject(p.id);
+    }, { off: eAtivo });
+    itemDeMenu(m, abertos.has(p.id) ? 'Fechar a gaveta' : 'Abrir a gaveta', icone('recolher'), () => {
+      if (abertos.has(p.id)) abertos.delete(p.id); else abertos.add(p.id);
+      renderArvore();
+    });
+    m.append(el('div', 'hr'));
+    const semServidor = typeof S !== 'undefined' && S.demoMode;
+    itemDeMenu(m, 'Excluir projeto…', icone('lixo'), () => openDeleteDialog(p.id), {
+      perigo: true,
+      off: semServidor || typeof openDeleteDialog !== 'function',
+      titulo: semServidor ? 'sem servidor não há o que excluir'
+        : 'pede a senha mestre; a pasta vai para Trash\\, na pasta de trabalho',
+    });
+    document.body.append(m);
+    // so da para medir no DOM; encosta nas bordas em vez de vazar
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.max(6, Math.min(x, window.innerWidth - r.width - 6)) + 'px';
+    m.style.top = Math.max(6, Math.min(y, window.innerHeight - r.height - 6)) + 'px';
+    menuAberto = m;
+  }
   function menuPaineis(ancora) {
     if (menuAberto) { fecharMenu(); return; }
     const m = el('div', 'eh-menu');
-    const it = (rotulo, marcado, acao) => {
-      const b = el('button', 'it');
-      b.type = 'button';
-      b.append(el('span', 'ck', marcado ? '✓' : ''), el('span', null, rotulo));
-      b.onclick = () => { fecharMenu(); acao(); };
-      m.append(b);
-    };
+    const it = (rotulo, marcado, acao) => itemDeMenu(m, rotulo, marcado ? '✓' : '', acao);
     it('Projetos', dockAberto(), () => mostrarDock(!dockAberto()));
     it('Configurações do hub…', false, () => { if (typeof openConfig === 'function') openConfig(); });
     m.append(el('div', 'hr'));
@@ -573,6 +621,9 @@ body.eh-shell .tab[aria-selected="true"]::after {
       if (n) obs.observe(n, { childList: true, characterData: true, subtree: true, attributes: true });
     }
     document.addEventListener('click', (e) => { if (menuAberto && !menuAberto.contains(e.target)) fecharMenu(); });
+    document.addEventListener('contextmenu', (e) => { if (menuAberto && !menuAberto.contains(e.target)) fecharMenu(); }, true);
+    document.addEventListener('keydown', (e) => { if (menuAberto && e.key === 'Escape') { e.stopPropagation(); fecharMenu(); } }, true);
+    tree.addEventListener('scroll', fecharMenu);
     // Ctrl+K abria o seletor do cabecalho, que agora nao aparece: leva para a busca do
     // painel Projetos. Captura na janela, antes do atalho do proprio hub.
     window.addEventListener('keydown', (e) => {

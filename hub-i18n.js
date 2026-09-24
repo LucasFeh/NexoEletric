@@ -150,6 +150,7 @@ const DICT = {
   'cfg.close':       'Fechar',
   'cfg.tab.proj':    'Projeto',
   'cfg.tab.layout':  'Layout',
+  'cfg.tab.atalhos': 'Atalhos',
   'cfg.tab.acoes':   'Ações',
 
   /* projeto */
@@ -340,6 +341,7 @@ const DICT = {
   'cfg.close':       'Close',
   'cfg.tab.proj':    'Project',
   'cfg.tab.layout':  'Layout',
+  'cfg.tab.atalhos': 'Shortcuts',
   'cfg.tab.acoes':   'Actions',
 
   'cfg.proj.now':    'open project',

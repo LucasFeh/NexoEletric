@@ -545,91 +545,12 @@ function snapPasso(v, passo){
 }
 function gradePorId(id){ return GRADES.find(g => g.id === id) || GRADES[0]; }
 
-/* ── ATALHOS: uma tabela so ──
-   A dica do painel era uma COPIA escrita a mao, e ja mentia: nao citava Ctrl+Y, Ctrl+A, Ctrl+W
-   nem o Escape, que sozinho faz seis coisas. Agora a tabela e a verdade — o teclado le dela e a
-   aba Atalhos desenha dela, entao trocar uma tecla troca as duas de uma vez.
-   O Escape fica DE FORA de proposito: ele e a saida de emergencia de seis estados e e tratado
-   antes da guarda de campo de texto, para funcionar com o foco dentro de um <input>. */
-const ATALHOS_PADRAO = [
-  { id:'add',       tecla:'C',      rotulo:'Adicionar componentes' },
-  { id:'fio',       tecla:'W',      rotulo:'Ferramenta fio' },
-  { id:'terra',     tecla:'G',      rotulo:'Pousar terra (GND)' },
-  { id:'rotulo',    tecla:'L',      rotulo:'Rótulo de net' },
-  { id:'noerc',     tecla:'N',      rotulo:'No ERC' },
-  { id:'girar',     tecla:'Espaço', rotulo:'Girar 90°' },
-  { id:'espelhoX',  tecla:'X',      rotulo:'Espelhar na horizontal' },
-  { id:'espelhoY',  tecla:'Y',      rotulo:'Espelhar na vertical' },
-  { id:'apagar',    tecla:'Delete', rotulo:'Apagar a seleção' },
-  { id:'enquadrar', tecla:'F',      rotulo:'Enquadrar a folha' },
-  { id:'grade',     tecla:'B',      rotulo:'Mostrar/ocultar a grade' },
-  { id:'desfazer',  tecla:'Ctrl+Z', rotulo:'Desfazer' },
-  { id:'refazer',   tecla:'Ctrl+Y', rotulo:'Refazer' },
-  { id:'tudo',      tecla:'Ctrl+A', rotulo:'Selecionar tudo da folha' },
-];
-/* O navegador leva estas antes da pagina ver. Deixar gravar uma delas seria entregar um
-   "gravei e nao funciona" sem nenhuma pista de por que. */
-const TECLAS_PROIBIDAS = ['Ctrl+W','Ctrl+T','Ctrl+N','Ctrl+Shift+N','Ctrl+Shift+T','Ctrl+R','Ctrl+P',
-                          'F5','F11','F12','Escape','Tab','Ctrl+Tab'];
-/* A tecla como a tabela a escreve. Shift nao entra em tecla de UM caractere: o navegador ja
-   manda 'X' para Shift+x, e distinguir os dois criaria dois atalhos que a mao nao distingue. */
-function normalizaTecla(e){
-  if (!e || !e.key) return '';
-  let k = e.key;
-  if (k === 'Control' || k === 'Shift' || k === 'Alt' || k === 'Meta') return '';
-  if (k === ' ' || k === 'Spacebar') k = 'Espaço';
-  else if (k.length === 1) k = k.toUpperCase();
-  const m = [];
-  if (e.ctrlKey || e.metaKey) m.push('Ctrl');
-  if (e.altKey) m.push('Alt');
-  if (e.shiftKey && k.length > 1 && k !== 'Espaço') m.push('Shift');
-  m.push(k);
-  return m.join('+');
-}
-/* O padrao, com o que o usuario gravou por cima. Entrada desconhecida, tecla proibida e tecla
-   repetida sao DESCARTADAS em vez de derrubar o mapa: uma chave estragada no localStorage nao
-   pode deixar a vista sem teclado nenhum. */
-function mapaAtalhos(salvos){
-  const porAcao = {}, descartados = [];
-  for (const a of ATALHOS_PADRAO) porAcao[a.id] = a.tecla;
-  const s = salvos && typeof salvos === 'object' ? salvos : {};
-  for (const id of Object.keys(s)){
-    const t = String(s[id] || '');
-    if (!porAcao[id]) { descartados.push(id + ': ação que não existe'); continue; }
-    if (!t || TECLAS_PROIBIDAS.indexOf(t) >= 0) { descartados.push(id + ': tecla não permitida'); continue; }
-    porAcao[id] = t;
-  }
-  const porTecla = {}, repetidas = [];
-  for (const a of ATALHOS_PADRAO){
-    const t = porAcao[a.id];
-    if (porTecla[t]){ repetidas.push(t); porAcao[a.id] = a.tecla; }   /* volta ao padrao do que repetiu */
-    else porTecla[t] = a.id;
-  }
-  /* a volta ao padrao pode ter repetido de novo; o segundo passe resolve sem laço infinito */
-  const finalTecla = {};
-  for (const a of ATALHOS_PADRAO){
-    let t = porAcao[a.id];
-    if (finalTecla[t] && finalTecla[t] !== a.id) t = a.tecla;
-    if (finalTecla[t] && finalTecla[t] !== a.id) continue;
-    porAcao[a.id] = t; finalTecla[t] = a.id;
-  }
-  return { porAcao, porTecla:finalTecla, descartados, repetidas };
-}
-/* Grava uma tecla nova para uma ação; devolve o que a interface tem de dizer. */
-function defineAtalho(salvos, id, tecla){
-  if (!ATALHOS_PADRAO.some(a => a.id === id)) return { ok:false, erro:'ação desconhecida' };
-  if (!tecla) return { ok:false, erro:'tecla vazia' };
-  if (TECLAS_PROIBIDAS.indexOf(tecla) >= 0) return { ok:false, erro:'“' + tecla + '” é do navegador — escolha outra' };
-  const m = mapaAtalhos(salvos);
-  const dono = m.porTecla[tecla];
-  if (dono && dono !== id){
-    const r = ATALHOS_PADRAO.find(a => a.id === dono);
-    return { ok:false, erro:'“' + tecla + '” já é ' + (r ? r.rotulo.toLowerCase() : dono) };
-  }
-  const novo = Object.assign({}, salvos && typeof salvos === 'object' ? salvos : {});
-  novo[id] = tecla;
-  return { ok:true, salvos:novo };
-}
+/* ── ATALHOS ──
+   A tabela, as regras e o editor moram no hub-atalhos.js: o editor saiu desta vista para as
+   Configuracoes do hub (aba Atalhos), e os dois lados leem a mesma tabela. Daqui para baixo a
+   vista so usa o mapa; as funcoes continuam no PURE porque os testes as pegam por aqui. */
+const HA = (typeof module !== 'undefined' && module.exports) ? require('./hub-atalhos.js') : window.HubAtalhos;
+const { ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho } = HA;
 
 /* A largura estimada de um texto, em mil. E a mesma estimativa por caractere que o editor de
    simbolos usa (hub-symed.js » labelBox): numa fonte proporcional ela erra para MAIS, e errar
@@ -886,7 +807,7 @@ function reapply(){
   /* a net em foco tambem pode ter deixado de existir (apagou o fio, desfez): destaque
      apontando para uma net que sumiu e cor sem dono na tela */
   if (selNet && !nets.nets.some(n => n.name === selNet)) selNet = '';
-  buildCompTable(); buildNetList(); buildValList(); updateMeta(); updateSelStatus(); renderProps();
+  buildValList(); updateMeta(); updateSelStatus(); renderProps();
   /* O cartao da folha mostra a folha COMO ELA ESTA, e este e o unico funil por onde passam
      commit, undo, redo, recarga de biblioteca e troca de simbolo. Repintar aqui e o que
      separa "miniatura" de "foto do carregamento". */
@@ -1125,13 +1046,11 @@ function updateSelStatus(){
    retangulo, troca de folha, undo, Ctrl+A — a folha ficava laranja sem nada selecionado e
    sem gesto para desligar. Agora quem mexe na selecao diz, na MESMA chamada, que net fica
    em foco; nao ha caminho que escreva 'selNet' por fora. */
-let netListDe = null;                    /* de que selNet a lista lateral foi desenhada */
 function aplicaSel(net){
   /* net sem linha no painel nao tem interruptor: acender pintaria a folha sem jeito de
      apagar (grupo de um pino so ganha nome automatico e nao entra em nets.nets) */
   selNet = net && nets.nets.some(n => n.name === net) ? net : '';
-  buildCompTable(); updateSelStatus(); renderProps(); mostraProps();
-  if (netListDe !== selNet) buildNetList();
+  updateSelStatus(); renderProps(); mostraProps();
   cam.draw();
 }
 function limpaSel(){ sel.clear(); aplicaSel(''); }
@@ -1720,7 +1639,7 @@ cv.addEventListener('dblclick', e => {
     prAba = 'geral';
     try { localStorage.setItem(PR_ABA_KEY, prAba); } catch (e) {}
     selSo([alvoAll(h.item)]); aplicaSel('');
-    propsPin = true; salvaPin(); mostraProps();
+    mostraDir('props');
     const campo = $('prBody') && $('prBody').querySelector('input.mono');
     if (campo){ campo.focus(); campo.select(); }
   }
@@ -2130,29 +2049,33 @@ const camPrSym = D.mkCamera($('prSymCv'), ctx => { if (prSym) D.drawSymbolPart(c
 const camPrFp  = D.mkCamera($('prFpCv'),  ctx => { if (prFp)  D.drawFootprint(ctx, prFp, {}); },  { bg:'#0b0b0d' });
 function refitProps(){ ajustaPreviews([camPrSym, camPrFp]); }
 
-/* ------- quando a ficha aparece -------
-   Ela nao fica ocupando a tela o tempo todo: entra com a selecao e sai com ela. O alfinete
-   no canto da ficha prende ela aberta; fechada, ela vira o botao de paineis no canto
-   inferior esquerdo da folha. O alfinete fica lembrado nesta maquina. */
-let propsPin = false, painelProps = null;
-try { propsPin = localStorage.getItem('schframe.propsPin') === '1'; } catch (e) {}
-function salvaPin(){ try { localStorage.setItem('schframe.propsPin', propsPin ? '1' : '0'); } catch (e) {} }
-function mostraProps(){
-  const ver = propsPin || sel.size > 0;
-  /* a ficha fechada pela divisoria tem largura zero: reabrir sem devolver largura mostraria
-     uma fatia de nada */
-  if (ver && painelProps) painelProps.abre();
-  $('props').hidden = !ver;
-  $('splitR').hidden = !ver;
-  $('btnPaineis').hidden = ver;
-  $('btnPin').setAttribute('aria-pressed', String(propsPin));
-  /* o canvas mudou de largura; os previews so enquadram depois de medidos */
-  if (ver) requestAnimationFrame(refitProps);
+/* ------- o painel da direita: Configuracoes | Propriedades -------
+   Ele fica sempre na tela e troca de pagina sozinho: selecionar mostra a ficha, largar a
+   selecao volta para as Configuracoes. As sub-abas do rodape trocam a mao.
+   A troca automatica so acontece quando a SELECAO muda (a chave do Map `sel`), e nao a cada
+   chamada: o aplicaSel roda tambem depois de cada commit, e sem essa guarda quem abriu as
+   Configuracoes com um componente marcado seria mandado de volta para a ficha no proximo
+   arrasto. Fechado pela divisoria, o painel vira o botao de paineis no canto da folha. */
+let dirAba = 'cfg', selChaveAntes = '', painelProps = null;
+function pintaDir(){
+  for (const b of document.querySelectorAll('#props .subtab'))
+    b.setAttribute('aria-selected', String(b.dataset.dir === dirAba));
+  $('pane-cfg').classList.toggle('on', dirAba === 'cfg');
+  $('pane-props').classList.toggle('on', dirAba === 'props');
+  $('prTitulo').textContent = dirAba === 'cfg' ? 'Configurações' : 'Propriedades';
+  $('prFolha').hidden = dirAba !== 'props';
+  /* os previews da ficha so enquadram depois de medidos, e escondidos eles medem 0 */
+  if (dirAba === 'props') requestAnimationFrame(refitProps);
 }
-$('btnPin').addEventListener('click', () => { propsPin = !propsPin; salvaPin(); mostraProps(); });
-/* o botao de paineis so existe com a ficha fechada, entao ele SEMPRE prende: abrir para
-   fechar sozinho no proximo clique no vazio seria um botao que nao faz nada */
-$('btnPaineis').addEventListener('click', () => { propsPin = true; salvaPin(); mostraProps(); });
+function mostraDir(aba){ dirAba = aba === 'props' ? 'props' : 'cfg'; pintaDir(); }
+function mostraProps(){
+  const chave = Array.from(sel.keys()).sort().join(',');
+  if (chave !== selChaveAntes){ selChaveAntes = chave; dirAba = chave ? 'props' : 'cfg'; }
+  $('btnPaineis').hidden = !painelProps || painelProps.larg() > 0;
+  pintaDir();
+}
+document.querySelectorAll('#props .subtab').forEach(b => b.addEventListener('click', () => mostraDir(b.dataset.dir)));
+$('btnPaineis').addEventListener('click', () => { if (painelProps) painelProps.abre(); mostraProps(); });
 
 /* ── A FICHA DO ODOO DE UM COMPONENTE DA FOLHA ──
    A cascata é a do odoolista.py (quem decide o product_id da lista enviada ao Odoo) e mora no
@@ -2301,9 +2224,8 @@ function contaFora(si, med){
 }
 const milTxt = v => String(Math.round(v));
 const mmTxt  = v => String(Math.round(v * 0.0254 * 10) / 10);
-/* O rotulo do botao da barra. Ele e a UNICA pista visivel de que da para trocar a folha: a
-   ficha de propriedades so mostra a secao quando nada esta selecionado, e o painel fecha
-   exatamente quando se desmarca. */
+/* O rotulo do botao da barra: o formato da folha ativa. O clique leva as Configuracoes do
+   painel da direita, onde o formato se escolhe (secao Folha). */
 function pintaBotaoFolha(){
   const b = $('tbFolhaN');
   if (!b) return;
@@ -2311,13 +2233,14 @@ function pintaBotaoFolha(){
   b.textContent = sh ? HubCore.sheetLabel(sh) : '—';
 }
 $('tbFolha').addEventListener('click', () => {
-  propsPin = true; salvaPin();
-  limpaSel();                 /* a secao da folha so existe com nada selecionado */
-  mostraProps(); renderProps();
+  if (painelProps) painelProps.abre();
+  mostraDir('cfg');
+  const f = $('folhaFmt');
+  if (f) f.scrollIntoView({ block:'nearest' });
 });
 
 function secFolha(){
-  const s = prSec('folha');
+  const s = prSec(null);
   const sh = model.sheets[sheetIdx];
   /* esquema sem folha nenhuma (arquivo vazio) nao pode derrubar a ficha inteira: sem folha
      nao ha formato a escolher, e dizer isso e melhor que um painel em branco */
@@ -2331,7 +2254,6 @@ function secFolha(){
      formato vem escolhido: o usuario precisa AFIRMAR qual e. */
   const medida = HubCore.isNum(sh.w) && sh.w > 0 && HubCore.isNum(sh.h) && sh.h > 0;
   const casa = medida ? HubCore.sheetMatch(sh) : null;
-  s.append(el('div', 'pr-title', sh.name));
 
   /* O NOME DE CADA OPÇÃO LEVA A MEDIDA JUNTO. Não é enfeite: "A4" quer dizer 11693×8268 no
      template da casa e 11500×7600 no estilo legado do Altium, e sem o número na frente a
@@ -2436,6 +2358,10 @@ function renderProps(){
   /* A FOLHA NO CABEÇALHO. Ela era a última linha da seção "posição" e repetia, item a item,
      o que vale para a ficha inteira — no topo ela diz de uma vez de onde é o que se está
      olhando, e devolve uma linha para cada seção. */
+  /* o formato da folha ativa, na secao Folha das Configuracoes: redesenhado aqui porque este e
+     o funil de toda troca (commit, undo, troca de folha, selecao) */
+  const fmt = $('folhaFmt');
+  if (fmt) fmt.replaceChildren(secFolha());
   const cabFolha = $('prFolha');
   if (cabFolha){
     const um = selAlvos().filter(a => onSheet(a.it));
@@ -2444,7 +2370,6 @@ function renderProps(){
   const alvos = selAlvos().filter(a => onSheet(a.it));
   const itens = alvos.map(a => a.it);
   if (!itens.length){
-    body.append(secFolha());
     const s = prSec(null);
     s.append(el('p', 'pr-empty', 'Clique num componente, fio ou pouso de alimentação para ver a ficha dele. '
       + 'Aqui se olha e se posiciona; a única propriedade editável de um item é a cor da port. Valor, '
@@ -4015,7 +3940,6 @@ window.addEventListener('keydown', e => {
   const tag = e.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   if (addOpen() || symModalAberto()) return;   /* os atalhos da folha nao valem dentro do modal */
-  if (capturandoAtalho) return;                /* a aba Atalhos esta ouvindo a proxima tecla */
   const acao = ATALHOS.porTecla[normalizaTecla(e)];
   if (!acao) return;
   /* O ESPACO COM UM BOTAO EM FOCO ja se resolve sozinho, e MEDIDO no Chrome: com selecao, o
@@ -4281,38 +4205,6 @@ function focusComp(c){
   aplicaSel('');
   cam.fit({ x1:c.x-800, y1:c.y-800, x2:c.x+800, y2:c.y+800 });
 }
-function buildCompTable(){
-  const tb = document.querySelector('#comptable tbody');
-  tb.innerHTML = '';
-  let n = 0;
-  for (const s of model.sheets) for (const c of s.comps) {
-    n++;
-    const tr = document.createElement('tr');
-    if (selTemItem(c)) tr.className = 'sel';
-    for (const v of [c.ref, c.sym, c.footprint || '—', c.comment || '']) {
-      const td = document.createElement('td');
-      td.textContent = v;
-      tr.appendChild(td);
-    }
-    tr.addEventListener('click', () => focusComp(c));
-    tb.appendChild(tr);
-  }
-  $('compcount').textContent = n;
-}
-function buildNetList(){
-  $('netcount').textContent = nets.nets.length;
-  const list = $('netlist');
-  list.innerHTML = '';
-  for (const n of nets.nets) {
-    const div = document.createElement('div');
-    div.className = 'netitem' + (n.name === selNet ? ' sel' : '');
-    div.textContent = `${n.name}${n.auto ? ' (auto)' : ''} — ${n.pins.join(', ')}`;
-    /* escolher a net pela lista tambem larga a selecao: um foco de cada vez na tela */
-    div.addEventListener('click', () => { sel.clear(); aplicaSel(n.name === selNet ? '' : n.name); });
-    list.appendChild(div);
-  }
-  netListDe = selNet;
-}
 function buildValList(){
   const list = $('vallist');
   list.innerHTML = '';
@@ -4391,8 +4283,9 @@ function setSheet(i){
 }
 /* Desenha cada cartao. Canvas dentro de painel fechado mede 0 e sairia em branco SEM ERRO
    (a escala vira Infinity) — por isso a guarda do desenhaMiniatura so pinta o cartao que
-   mediu. Quem repinta ao abrir a sub-aba e o ResizeObserver do #sheetcards, logo acima: o
-   showPane tira o display:none do painel, o container sai de 0 e o observador dispara. */
+   mediu. Quem repinta ao abrir a sub-aba e o ResizeObserver do #sheetcards, logo acima: a
+   troca para as Configuracoes tira o display:none do painel, o container sai de 0 e o
+   observador dispara. */
 function pintaMiniaturas(){
   document.querySelectorAll('#sheetcards .sheetcard canvas').forEach((cvm, i) => desenhaMiniatura(cvm, i));
 }
@@ -4413,61 +4306,15 @@ function desenhaMiniatura(cvm, si){
   desenhaFolha(ctx, si, { grid:false, foco:'', esc });
   return true;
 }
-/* sub-abas do painel: a ultima aberta fica lembrada nesta maquina */
-/* ------- a aba Atalhos -------
-   A dica de atalhos morava na secao "Edicao" do painel, escrita a mao em <kbd>, e ja mentia:
-   nao citava Ctrl+Y, Ctrl+A nem o Escape, e citava um X que fazia coisas diferentes conforme
-   a rotacao do componente. Agora a lista SAI da tabela que o teclado le, e a tecla e
-   trocavel — clicar no botao da tecla e pressionar a nova. O que o usuario grava fica nesta
-   maquina, no mesmo molde de toda preferencia desta vista (localStorage, try/catch, padrao
-   no codigo): uma chave estragada nao pode deixar a folha sem teclado nenhum. */
-const ATALHOS_KEY = 'altiumhub.sch.atalhos';
-let atalhosSalvos = {};
-try { atalhosSalvos = JSON.parse(localStorage.getItem(ATALHOS_KEY) || '{}') || {}; } catch (e) { atalhosSalvos = {}; }
-let ATALHOS = mapaAtalhos(atalhosSalvos);
-let capturandoAtalho = false;
-function gravaAtalhos(){
-  ATALHOS = mapaAtalhos(atalhosSalvos);
-  try { localStorage.setItem(ATALHOS_KEY, JSON.stringify(atalhosSalvos)); } catch (e) {}
-  renderAtalhos();
-}
-function renderAtalhos(){
-  const box = $('atalhoslist');
-  if (!box) return;
-  box.textContent = '';
-  for (const a of ATALHOS_PADRAO){
-    const linha = el('div', 'atalho');
-    linha.append(el('span', 'atalho-nome', a.rotulo));
-    const b = el('button', 'atalho-tecla', ATALHOS.porAcao[a.id]);
-    b.type = 'button';
-    b.title = 'clique e pressione a tecla nova';
-    if (ATALHOS.porAcao[a.id] !== a.tecla) b.classList.add('mudado');
-    b.addEventListener('click', () => {
-      if (capturandoAtalho) return;
-      capturandoAtalho = true;
-      b.classList.add('ouvindo');
-      b.textContent = 'pressione…';
-      const ouve = ev => {
-        ev.preventDefault(); ev.stopPropagation();
-        const t = normalizaTecla(ev);
-        if (!t) return;                       /* so o modificador: continua esperando */
-        window.removeEventListener('keydown', ouve, true);
-        capturandoAtalho = false;
-        if (ev.key === 'Escape'){ renderAtalhos(); return; }   /* Escape desiste */
-        const r = defineAtalho(atalhosSalvos, a.id, t);
-        if (!r.ok){ HubDialog.toast(r.erro, 'warn'); renderAtalhos(); return; }
-        atalhosSalvos = r.salvos;
-        gravaAtalhos();
-        HubDialog.toast(a.rotulo + ' → ' + t, 'ok');
-      };
-      window.addEventListener('keydown', ouve, true);
-    });
-    linha.append(b);
-    box.append(linha);
-  }
-  const rest = $('atalhosReset');
-  if (rest) rest.disabled = !Object.keys(atalhosSalvos).length;
-}
+/* ------- atalhos -------
+   O editor das teclas saiu desta vista para as Configuracoes do hub (aba Atalhos,
+   hub-atalhos.js); aqui fica so o mapa que o teclado le. O hub e esta vista (um iframe da
+   mesma origem) dividem o localStorage: quando o modal grava, o evento `storage` chega aqui e
+   o teclado troca na hora, sem recarregar a folha. `key === null` e o localStorage.clear(). */
+let ATALHOS = mapaAtalhos(HA.carrega());
+window.addEventListener('storage', e => {
+  if (e.key === HA.CHAVE || e.key === null) ATALHOS = mapaAtalhos(HA.carrega());
+});
 
 /* ------- o passo da grade ------- */
 function montaGrade(){
@@ -4489,22 +4336,7 @@ function montaGrade(){
   };
 }
 
-/* Os paineis saem da propria lista de abas, e nao de uma linha por id: era assim que uma aba
-   nova nascia acesa no rodape e com o painel do vizinho na tela — a mesma armadilha que o
-   modal de configuracao da casca ja documenta em hub.html. */
-const PANES = Array.from(document.querySelectorAll('#side .subtab')).map(b => b.dataset.pane);
-function showPane(id){
-  if (PANES.indexOf(id) < 0) id = PANES[0];
-  document.querySelectorAll('#side .subtab').forEach(b => b.setAttribute('aria-selected', String(b.dataset.pane === id)));
-  for (const p of PANES){ const el0 = $('pane-' + p); if (el0) el0.classList.toggle('on', p === id); }
-  try { localStorage.setItem('schframe.pane', id); } catch (e) {}
-}
-document.querySelectorAll('#side .subtab').forEach(b => b.addEventListener('click', () => showPane(b.dataset.pane)));
-let pane0 = 'comps';
-try { pane0 = localStorage.getItem('schframe.pane') || 'comps'; } catch (e) {}
-showPane(pane0);
-
-/* ------- divisorias dos dois paineis -------
+/* ------- a divisoria do painel -------
    Mesmo gesto das abas Laser e BOM do hub: arrastar redimensiona, soltar perto da borda
    fecha, duplo clique fecha/abre. A largura fica lembrada nesta maquina. O canvas nao
    precisa de aviso: o mkCamera observa o proprio elemento e redesenha quando ele muda —
@@ -4515,9 +4347,8 @@ function mkPainel(o){
   try { const v = localStorage.getItem(o.chave); if (v !== null && isFinite(+v)) larg = Math.max(0, +v); } catch (e) {}
   const aplica = () => {
     document.documentElement.style.setProperty(o.varCss, larg + 'px');
-    /* o painel da esquerda some pela propria largura; o da direita nao — la quem manda em
-       estar na tela e o [hidden], que segue a selecao, e display inline atropelaria isso */
-    if (!o.porHidden) $(o.el).style.display = larg ? '' : 'none';
+    /* fechado (0) o painel some inteiro; a divisoria fica, para arrastar de volta */
+    $(o.el).style.display = larg ? '' : 'none';
     if (o.aoMudar) o.aoMudar(larg);
   };
   const salva = () => { try { localStorage.setItem(o.chave, String(larg)); } catch (e) {} };
@@ -4543,12 +4374,8 @@ function mkPainel(o){
   aplica();
   return { larg: () => larg, abre(){ if (!larg){ larg = o.padrao; aplica(); salva(); } } };
 }
-mkPainel({ chave:'schframe.sideW', varCss:'--side-w', el:'side', split:'split', padrao:330, lado:'l' });
-/* arrastar a divisoria da ficha ate o fim e o mesmo que soltar o alfinete: some agora e
-   volta quando alguma coisa for selecionada (ou pelo botao de paineis) */
 painelProps = mkPainel({ chave:'schframe.propsW', varCss:'--props-w', el:'props', split:'splitR',
-  padrao:320, lado:'r', porHidden:true,
-  aoMudar: w => { if (!w && propsPin){ propsPin = false; salvaPin(); } mostraProps(); } });
+  padrao:320, lado:'r', aoMudar: () => mostraProps() });
 mostraProps();
 
 $('btnFit').addEventListener('click', () => cam.fit(fitBBox()));
@@ -4592,13 +4419,8 @@ pintaOlhoPinos();
 $('btnGrid').addEventListener('click', () => {
   showState.grid = !showState.grid; $('btnGrid').classList.toggle('active', showState.grid); cam.draw();
 });
-$('atalhosReset').addEventListener('click', () => {
-  atalhosSalvos = {};
-  gravaAtalhos();
-  HubDialog.toast('atalhos de volta ao padrão', 'ok');
-});
-montaGrade(); renderAtalhos();
-renderSheetCards(); buildCompTable(); buildNetList(); buildValList();
+montaGrade();
+renderSheetCards(); buildValList();
 updateMeta(); updateSaveBtn(); updateSelStatus(); cartRender(); renderProps();
 cam.resize(); cam.fit(fitBBox());
 
