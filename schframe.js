@@ -1034,7 +1034,11 @@ function designadorVisivel(c){
      duas o componente e um quadrado vermelho sem pino, e sem o designador ele ficaria anonimo */
   const sym = HubCore.symbolOf(SLIB, c.sym);
   const part = HubCore.partOf(sym, c.part) || ((desenhoDeEmergencia(c) || {}).part || null);
-  return designadorAparece(c, sym, part);
+  /* a regra esconde o designador PORQUE o numero do pino aparece no lugar. Com o olho dos
+     pinos desligado o desenho obedece o hideNum do simbolo, e na parte em que todo pino tem o
+     numero escondido nao sairia nem numero nem designador — um quadrado anonimo */
+  const mostraNum = showState.pinos || ((part && part.pins) || []).some(p => !p.hideNum);
+  return !mostraNum || designadorAparece(c, sym, part);
 }
 function textoBBox(c, qual){
   const t = textoComp(c, qual);
@@ -1119,6 +1123,12 @@ function baseOf(alvos){
 }
 function applyMove(base, dx, dy){
   geomVer++;                 /* a geometria mudou: a topologia (bolinha/ponte) tem de refazer */
+  /* DOIS ALVOS DO MESMO FIO (um trecho e um vertice, dois trechos) se COMPOEM: cada um parte do
+     fio que o anterior ja moveu. Partindo cada um da propria foto, o ultimo reescrevia o fio
+     inteiro e o movimento dos outros se perdia. O moveSegmento nao muda a contagem de pontos,
+     entao os indices continuam valendo de um para o outro. */
+  const trab = new Map();
+  const ptsDe = b => trab.get(b.a.it) || b.pts;
   for (const b of base.values()){
     const a = b.a, it = a.it;
     if (a.k === 'ref' || a.k === 'com'){
@@ -1128,12 +1138,21 @@ function applyMove(base, dx, dy){
       const nx = Math.round((b.x0 + dx - it.x) * 1e4) / 1e4, ny = Math.round((b.y0 + dy - it.y) * 1e4) / 1e4;
       if (a.k === 'com'){ it.comdx = nx; it.comdy = ny; } else { it.refdx = nx; it.refdy = ny; }
     }
-    else if (a.k === 'vert'){
-      const pts = b.pts.map(p => [p[0], p[1]]);
-      if (pts[a.i]){ pts[a.i][0] += dx; pts[a.i][1] += dy; }
-      it.pts = pts;
+    else if (a.k === 'vert' || a.k === 'seg'){
+      /* cada alvo e medido da FOTO, e o vertice anda num eixo quando ALGUM alvo o move nesse
+         eixo: dois trechos que dividem um canto (um anda em X, o outro em Y) levam o canto nos
+         dois eixos, e nenhum apaga o eixo do outro */
+      const mov = a.k === 'seg' ? moveSegmento(b.pts, a.i, dx, dy)
+                : b.pts.map((p, i) => i === a.i ? [p[0] + dx, p[1] + dy] : p);
+      const pts = ptsDe(b).map(p => [p[0], p[1]]);
+      for (const i of (a.k === 'seg' ? [a.i, a.i + 1] : [a.i])){
+        const o = b.pts[i], q = mov[i];
+        if (!pts[i] || !o || !q) continue;
+        if (q[0] !== o[0]) pts[i][0] = q[0];
+        if (q[1] !== o[1]) pts[i][1] = q[1];
+      }
+      it.pts = pts; trab.set(it, pts);
     }
-    else if (a.k === 'seg') it.pts = moveSegmento(b.pts, a.i, dx, dy);
     else if (it.t === 'wire') it.pts = b.pts.map(p => [p[0] + dx, p[1] + dy]);
     else { it.x = b.x + dx; it.y = b.y + dy; }
   }
@@ -1144,7 +1163,10 @@ function applyMove(base, dx, dy){
      fio continua ortogonal. Vem DEPOIS do laco: o moveSegmento ja moveu o trecho. */
   if (base.colados) for (const e of base.colados){
     const q = (e.w.pts || [])[e.i];
-    if (q){ q[0] = e.x + dx; q[1] = e.y + dy; }
+    if (!q) continue;
+    /* onde o pino ESTA agora — com um giro no meio do arrasto ele nao e mais a partida + delta */
+    const p = e.c ? (HubCore.compPinsWorld(e.c, SLIB) || []).find(p => p.num === e.num) : null;
+    if (p){ q[0] = p.x; q[1] = p.y; } else { q[0] = e.x + dx; q[1] = e.y + dy; }
   }
 }
 /* os vertices de fio SELECIONADO (como trecho ou vertice) que estao num pino de componente que
@@ -1152,16 +1174,25 @@ function applyMove(base, dx, dy){
 function coladosNosPinos(base){
   const pinos = [], out = [];
   for (const b of base.values())
-    if (b.a.k === 'all' && b.a.it.t === 'comp') for (const p of (HubCore.compPinsWorld(b.a.it, SLIB) || [])) pinos.push(p);
+    if (b.a.k === 'all' && b.a.it.t === 'comp')
+      for (const p of (HubCore.compPinsWorld(b.a.it, SLIB) || [])) pinos.push({ x:p.x, y:p.y, num:p.num, comp:b.a.it });
   if (!pinos.length) return out;
   const vistos = new Set();
   for (const b of base.values()){
     if (b.a.it.t !== 'wire' || (b.a.k !== 'seg' && b.a.k !== 'vert')) continue;
-    (b.pts || []).forEach((q, i) => {
+    /* SO os vertices do alvo: o trecho leva as duas pontas dele, o vertice leva ele mesmo. Varrer
+       o fio inteiro prendia ao pino a ponta de OUTRO trecho, que a mao nao selecionou, e o
+       trecho entre as duas saia na diagonal. */
+    const idx = b.a.k === 'seg' ? [b.a.i, b.a.i + 1] : [b.a.i];
+    for (const i of idx){
+      const q = (b.pts || [])[i];
       const k = idDe(b.a.it) + ':' + i;
-      if (vistos.has(k)) return;
-      if (pinos.some(p => pertoDe(q[0], q[1], p.x, p.y))){ vistos.add(k); out.push({ w:b.a.it, i, x:q[0], y:q[1] }); }
-    });
+      if (!q || vistos.has(k)) continue;
+      const p = pinos.find(p => pertoDe(q[0], q[1], p.x, p.y));
+      /* guarda QUAL pino (componente + numero), e nao so onde ele estava: um giro ou espelho no
+         meio do arrasto leva o pino para outro lugar, e a ponta tem de ir atras dele */
+      if (p){ vistos.add(k); out.push({ w:b.a.it, i, x:q[0], y:q[1], c:p.comp, num:p.num }); }
+    }
   }
   return out;
 }
@@ -1359,9 +1390,14 @@ function snapPoint(w, comMeio){
   let best = null;
   /* `html` so aparece onde ha o que barrar: e o mesmo rotulo, com o <span> da sobrelinha.
      Quem mostra escolhe — a barra de status pinta o html, o resto continua em texto. */
-  const tenta = (x, y, kind, label, peso, html) => {
+  /* O PISO DE 20 MIL E DO PINO, que mora fora da grade nas folhas metricas da casa. Ponta de
+     fio, juncao, power e port sao pousados PELA grade: com o piso, nas grades de 10 mil e 0,25
+     mm a ponta de um fio a DOIS passos ainda puxava o cursor, e o fio paralelo caia em cima
+     dela. Para eles o alcance fica em 0,6 passo (de 1 mm para cima nada muda). */
+  const rPonto = Math.min(snapMil(), grade.passo * 0.6);
+  const tenta = (x, y, kind, label, peso, html, raio) => {
     const d = Math.hypot(w.x - x, w.y - y);
-    if (d > snapMil()) return;
+    if (d > (raio || snapMil())) return;
     if (!best || peso < best.peso || (peso === best.peso && d < best.d)) best = { x, y, d, kind, label, html: html || null, peso };
   };
   for (const c of s.comps){
@@ -1374,16 +1410,23 @@ function snapPoint(w, comMeio){
             mostra && ovb && ovb.temBarra(p.name) ? ovb.html(base) + ' (' + ovb.html(p.name) + ')' : null);
     }
   }
-  for (const j of s.junctions) tenta(j.x, j.y, 'junction', 'junção', 1);
-  for (const p of s.powers)    tenta(p.x, p.y, 'power', p.net || 'power', 1);
-  for (const p of s.ports)     tenta(p.x, p.y, 'port', p.net || 'port', 1);
-  for (const wi of s.wires) for (const p of (wi.pts || [])) tenta(p[0], p[1], 'wire', 'fio', 2);
+  for (const j of s.junctions) tenta(j.x, j.y, 'junction', 'junção', 1, null, rPonto);
+  for (const p of s.powers)    tenta(p.x, p.y, 'power', p.net || 'power', 1, null, rPonto);
+  for (const p of s.ports)     tenta(p.x, p.y, 'port', p.net || 'port', 1, null, rPonto);
+  for (const wi of s.wires) for (const p of (wi.pts || [])) tenta(p[0], p[1], 'wire', 'fio', 2, null, rPonto);
   /* peso 3: ponta de fio, pino e juncao ganham do meio quando estao no alcance. Ao longo do fio
-     o ponto cai no passo da grade (e dentro do trecho); no trecho em diagonal, na projecao. */
+     o ponto cai no passo da grade (e dentro do trecho); no trecho em diagonal, na projecao.
+     O MEIO e uma LINHA, e nao um ponto: com o raio do snapMil() (piso de 20 mil) as grades de
+     10 mil, 0,5 mm e 0,25 mm tinham o passo vizinho de TODO fio dentro do alcance, e o fio
+     puxado em paralelo a um passo de outro caia em cima dele — ligando duas nets sem que a mao
+     pedisse. A distancia ATE a linha fica abaixo de meio passo; pino, ponta e juncao, que sao
+     pontos, continuam com o snapMil(). */
+  const rMeio = Math.min(snapMil(), grade.passo * 0.45);
   if (comMeio) for (const wi of s.wires){
     const pts = wi.pts || [];
     for (let i = 0; i < pts.length - 1; i++){
       const a = pts[i], b = pts[i + 1];
+      if (HubCore.distSeg(w.x, w.y, a[0], a[1], b[0], b[1]) > rMeio) continue;
       const x1 = Math.min(a[0], b[0]), x2 = Math.max(a[0], b[0]), y1 = Math.min(a[1], b[1]), y2 = Math.max(a[1], b[1]);
       let q;
       if (Math.abs(a[1] - b[1]) <= STOL_SCH) q = [Math.min(Math.max(snapG(w.x), x1), x2), a[1]];
@@ -1414,30 +1457,16 @@ function alvosDeIma(base){
     if (viaja.has(c)) continue;
     for (const p of (HubCore.compPinsWorld(c, SLIB) || [])) fora.push({ x:p.x, y:p.y, label:c.ref + '-' + p.num });
   }
-  /* A PONTA DE FIO QUE ESTAVA NO PINO nao e alvo: ela esta exatamente onde o pino saiu, e como
-     alvo puxava o componente de volta para a origem em todo arrasto menor que snapMil() — uma
-     zona morta de 60 mil em todo componente com fio, que engolia os ajustes finos das guias.
-     Voltar a encostar nela continua possivel: as guias alinham o pino com ela nos dois eixos.
-     Os outros vertices do mesmo fio continuam alvo. */
-  const leva = new Map();
-  for (const e of (base.pontas || [])){ let m = leva.get(e.w); if (!m) leva.set(e.w, m = new Set()); m.add(e.i); }
   for (const wi of s.wires){
     if (viaja.has(wi)) continue;
-    const l = leva.get(wi);
-    (wi.pts || []).forEach((p, i) => { if (!(l && l.has(i))) fora.push({ x:p[0], y:p[1], label:'fio' }); });
+    for (const p of (wi.pts || [])) fora.push({ x:p[0], y:p[1], label:'fio' });
   }
   for (const j of s.junctions) if (!viaja.has(j)) fora.push({ x:j.x, y:j.y, label:'junção' });
   for (const p of s.powers)    if (!viaja.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'power' });
   for (const p of s.ports)     if (!viaja.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'port' });
-  /* NADA QUE ESTEJA EM CIMA DE UM PINO QUE VIAJA e alvo — nao so a ponta de fio: um GND, uma
-     port, uma juncao ou o pino de outro componente encostado ali estao a distancia ZERO na
-     partida, e puxavam o componente de volta em todo arrasto menor que snapMil() (medido em
-     2026-09-24: 42 dos 1428 componentes dos projetos). Voltar a encostar continua possivel
-     pelas guias, que alinham o pino com eles. */
-  const partida = [];
-  for (const b of base.values())
-    if (b.a.k === 'all' && b.a.it.t === 'comp') for (const p of (HubCore.compPinsWorld(b.a.it, SLIB) || [])) partida.push(p);
-  return partida.length ? fora.filter(a => !partida.some(p => pertoDe(a.x, a.y, p.x, p.y))) : fora;
+  /* O que esta EM CIMA de um pino que viaja nao e filtrado aqui: o filtro e POR PAR, no
+     imaDoArrasto (o pino nao gruda no que estava debaixo dele mesmo). */
+  return fora;
 }
 /* O que viaja e pode GRUDAR, na posicao de PARTIDA: o arrasto so lhe soma o deslocamento,
    entao medir uma vez por gesto basta — e nao a folha inteira a cada quadro.
@@ -1496,6 +1525,14 @@ function imaDoArrasto(g, dx, dy, fixo){
   for (const p of g.pinos){
     const px = p.x + dx, py = p.y + dy;
     for (const a of g.alvos){
+      /* O PINO NAO GRUDA NO QUE ESTAVA DEBAIXO DELE: a ponta de fio, o GND, a port ou o pino
+         vizinho encostados ali estao a distancia ZERO na partida, e puxavam o componente de
+         volta em todo arrasto menor que snapMil() — uma zona morta que engolia os ajustes finos
+         (42 dos 1428 componentes dos projetos, medido em 2026-09-24). E POR PAR, e nao global:
+         o filtro antigo tirava o alvo de TODOS os pinos, e o conector deslocado um passo ao
+         longo da fileira nao grudava mais o pino 1 no GND que estava no pino 2. Voltar a
+         encostar no proprio ponto continua possivel pelas guias. p.x/p.y sao a partida. */
+      if (pertoDe(a.x, a.y, p.x, p.y)) continue;
       const d = Math.hypot(px - a.x, py - a.y);
       if (d > snapMil() || (best && d >= best.d)) continue;
       /* NO TRILHO DO SHIFT so concorre o alvo que esta na linha do pino. Filtrar DEPOIS de
@@ -1689,9 +1726,14 @@ function pontoDoFio(w){
   return { pt:[snapG(w.x), snapG(w.y)], snap:null };
 }
 const primeiroDoModo = () => fioModo.modo === '45' ? fioModo.p45 : fioModo.p90;
+const gravaFioModo = () => { try { localStorage.setItem(FIO_MODO_KEY, JSON.stringify(fioModo)); } catch (e) {} };
+/* o ultimo clique da ferramenta, fora do fio: a barra mede dX/dY a partir dele tambem ENTRE um
+   fio e outro, como a do Altium */
+let fioUltClique = null;
 function wireClick(w){
   const r = pontoDoFio(w);
   fioCursor = r;
+  fioUltClique = r.pt.slice();
   if (!wireDraw){
     /* a partida que encostou num ponto eletrico ganha a bolinha magenta do Altium */
     wireDraw = Object.assign(HubFio.novo(r.pt, fioModo.modo, primeiroDoModo()), { ligado: !!r.snap });
@@ -1709,6 +1751,13 @@ function wireClick(w){
 /* termina no que ja foi fixado — as pernas soltas ate o cursor nao entram, como no Altium */
 function endWire(){
   const d = wireDraw; wireDraw = null;
+  /* O CANTO PASSA PARA O PROXIMO FIO. O Altium alterna "90 Degree start/end" a cada clique e
+     o proximo fio sai no canto em que este parou; recomecar sempre do lado do Espaco fazia o
+     fio seguinte sair ao contrario do Altium (o video, aos 12 s). */
+  if (d && d.modo === fioModo.modo){
+    if (d.modo === '90') fioModo.p90 = d.primeiro; else if (d.modo === '45') fioModo.p45 = d.primeiro;
+    gravaFioModo();
+  }
   const pts = d ? HubFio.limpa(d.pts) : [];
   if (pts.length >= 2){
     schematic.items.push({ t:'wire', sheet:model.sheets[sheetIdx].name, pts });
@@ -1719,10 +1768,10 @@ function endWire(){
 /* ESPACO inverte o canto; SHIFT+ESPACO troca o modo. Sem fio em curso, vale para o proximo. */
 function espacoDoFio(shift){
   const est = wireDraw || HubFio.novo([0, 0], fioModo.modo, primeiroDoModo());
-  const novo = shift ? HubFio.trocaModo(est) : HubFio.trocaCanto(est);
+  const novo = shift ? HubFio.trocaModo(est, fioModo) : HubFio.trocaCanto(est);
   fioModo.modo = novo.modo;
   if (novo.modo === '90') fioModo.p90 = novo.primeiro; else if (novo.modo === '45') fioModo.p45 = novo.primeiro;
-  try { localStorage.setItem(FIO_MODO_KEY, JSON.stringify(fioModo)); } catch (e) {}
+  gravaFioModo();
   if (wireDraw) wireDraw = Object.assign(novo, { ligado: wireDraw.ligado });
   statusDoFio(); cam.draw();
 }
@@ -1739,7 +1788,8 @@ function statusDoFio(){
   const r = fioCursor;
   const est = wireDraw || { modo: fioModo.modo, primeiro: primeiroDoModo() };
   const partes = ['Fio ' + HubFio.nomeDoModo(est)];
-  if (wireDraw && r) partes.push('dX ' + fmtMedida(r.pt[0] - wireDraw.ult[0]) + '  dY ' + fmtMedida(r.pt[1] - wireDraw.ult[1]));
+  const ult = wireDraw ? wireDraw.ult : fioUltClique;
+  if (ult && r) partes.push('dX ' + fmtMedida(r.pt[0] - ult[0]) + '  dY ' + fmtMedida(r.pt[1] - ult[1]));
   partes.push(wireDraw ? 'clique fixa o canto · Backspace desfaz · direito/Esc termina'
                        : 'clique para começar · direito/Esc larga a ferramenta');
   partes.push('Espaço inverte · Shift+Espaço muda o modo');
@@ -1775,6 +1825,13 @@ function placeLabel(w){
   commit();
 }
 function setTool(t, pw){
+  /* O FIO EM CURSO E GRAVADO, como no Esc e no botao direito: no Altium o trecho fixado ja
+     esta no documento, e trocar de ferramenta (W, G, os botoes da barra) nao o apaga. Aqui ele
+     sumia calado, sem undo que o trouxesse de volta. */
+  if (wireDraw) endWire();
+  /* a barra do fio ("clique para comecar · direito/Esc larga a ferramenta") nao pode ficar
+     falando de uma ferramenta que ja foi largada */
+  if (tool === 'wire' && t !== 'wire') $('shover').textContent = '';
   tool = t; toolPower = pw || null; wireDraw = null; snapHit = null; fioCursor = null;
   if (t !== 'label') toolNet = '';
   $('tbSel').setAttribute('aria-pressed', String(t === 'select'));
@@ -3376,6 +3433,8 @@ function desenhaFolha(ctx, si, o){
   }
   ctx.strokeStyle = D.SCH.border; ctx.lineWidth = 8;
   ctx.strokeRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
+  /* o que tem de ficar POR BAIXO dos fios e dos simbolos (a cruz do cursor do fio) */
+  if (o.antesDosFios) o.antesDosFios(ctx);
 
   /* A COR E A IDENTIDADE ELETRICA, NAO A SELECAO.
      Um fio sai laranja quando pertence a net em foco e azul-escuro quando nao — e so. Quem
@@ -3511,7 +3570,8 @@ function textosNaMao(){
   return out.size ? out : null;
 }
 function drawWorld(ctx, cam){
-  desenhaFolha(ctx, sheetIdx, { grid: showState.grid, foco: selNet, esc: cam.scale, textosNaMao: textosNaMao() });
+  desenhaFolha(ctx, sheetIdx, { grid: showState.grid, foco: selNet, esc: cam.scale, textosNaMao: textosNaMao(),
+                                antesDosFios: tool === 'wire' ? c => desenhaCruzDoFio(c, 1 / cam.scale) : null });
   drawSelection(ctx, cam);
   drawFerramenta(ctx, cam);
 }
@@ -3551,17 +3611,41 @@ function drawFerramenta(ctx, cam){
     ctx.restore();
   }
 }
-/* O FIO EM CURSO, com as cores e as espessuras medidas no video do Altium (2026-09-24):
-     - o que ja foi fixado: lavanda, 2 px de tela (o fio so ganha o azul da folha ao terminar);
-     - a perna 1 ate o cursor: cinza, 1 px, continua; a perna 2 (a de antecipacao): pontilhada;
-     - um × pequeno em cada canto e na ponta; a partida que encostou num ponto eletrico, uma
-       bolinha magenta com o X vermelho;
-     - a cruzinha do cursor no ponto ENCAIXADO (a seta do mouse fica onde a mao esta), e o X
-       vermelho quando ele esta sobre um ponto eletrico. */
-const FIO_FIXADO = '#69699d', FIO_PERNA = '#9a99a3', FIO_HOT = '#e3242b', FIO_PARTIDA = '#c2357c';
+/* O FIO EM CURSO, com as cores e as espessuras medidas no video do Altium (2026-09-24).
+   O video e a tela inteira reduzida a 720p: a barra de tarefas do Windows (40 px a 100%) mede
+   32 px no quadro, e a seta do mouse bate com isso — escala 0,8. As medidas abaixo sao as do
+   quadro vezes 1,25, em px de tela:
+     - o que ja foi fixado: nucleo lavanda-escuro de 2,5 px com um halo lavanda claro (5 px no
+       total); o fio so ganha o azul da folha ao terminar;
+     - a perna 1 ate o cursor: cinza, 1 px, continua e NITIDA (no meio do pixel — entre dois
+       pixels ela saia em duas linhas palidas); a perna 2, a de antecipacao, pontilhada 4/1;
+     - um x de ±6 px em cada canto fixado, no canto das pernas e no centro da cruz;
+     - a partida que encostou num ponto eletrico: a bolinha magenta POR CIMA de um X fino;
+     - o X vermelho fino e comprido (±10 px) quando o cursor esta sobre um ponto eletrico;
+     - a cruz do cursor (±41 px, cinza claro) vai por BAIXO dos fios: desenhaCruzDoFio. */
+const FIO_FIXADO = '#7c7a9d', FIO_HALO = '#dcdaf9', FIO_PERNA = '#9a98ad', FIO_PONTOS = '#8a889a',
+      FIO_CRUZ = '#c0c0c0', FIO_HOT = '#e3242b', FIO_PARTIDA = '#c2357c';
+/* a coordenada de mundo que poe a linha horizontal (eixo 'y') ou vertical ('x') no MEIO do pixel
+   do aparelho — com a espessura atual do ctx. Sem getTransform (o harness de Node), fica como esta. */
+function noPixel(ctx, v, eixo){
+  const m = ctx.getTransform ? ctx.getTransform() : null;
+  if (!m) return v;
+  const esc = eixo === 'x' ? m.a : m.d, off = eixo === 'x' ? m.e : m.f;
+  if (!esc) return v;
+  const lw = Math.max(1, Math.round(Math.abs(ctx.lineWidth * esc)));
+  const d = esc * v + off;
+  const alvo = lw % 2 ? Math.floor(d) + 0.5 : Math.round(d);
+  return (alvo - off) / esc;
+}
 function desenhaFioEmCurso(ctx, px){
   const r = fioCursor;
   const linha = (a, b) => { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); };
+  /* reta horizontal ou vertical, nitida; a diagonal (45°, livre) vai como esta */
+  const reta = (a, b) => {
+    if (a[1] === b[1]){ const y = noPixel(ctx, a[1], 'y'); linha([a[0], y], [b[0], y]); }
+    else if (a[0] === b[0]){ const x = noPixel(ctx, a[0], 'x'); linha([x, a[1]], [x, b[1]]); }
+    else linha(a, b);
+  };
   const xis = (p, t) => { ctx.beginPath(); ctx.moveTo(p[0] - t, p[1] - t); ctx.lineTo(p[0] + t, p[1] + t);
                           ctx.moveTo(p[0] - t, p[1] + t); ctx.lineTo(p[0] + t, p[1] - t); ctx.stroke(); };
   ctx.save();
@@ -3569,32 +3653,51 @@ function desenhaFioEmCurso(ctx, px){
   if (wireDraw){
     const pts = wireDraw.pts;
     if (pts.length >= 2){
-      ctx.strokeStyle = FIO_FIXADO; ctx.lineWidth = 2 * px;
-      ctx.beginPath(); pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke();
+      const tudo = () => { ctx.beginPath(); pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke(); };
+      ctx.strokeStyle = FIO_HALO; ctx.lineWidth = 5 * px; tudo();
+      ctx.strokeStyle = FIO_FIXADO; ctx.lineWidth = 2.5 * px; tudo();
     }
-    ctx.strokeStyle = FIO_PERNA; ctx.lineWidth = px;
+    ctx.lineWidth = px;
     const marcas = pts.slice(1);
     if (r){
       const pn = HubFio.pernas(wireDraw, r.pt);
-      if (pn.perna1) linha(pn.perna1[0], pn.perna1[1]);
-      if (pn.perna2){ ctx.setLineDash([2 * px, 2 * px]); linha(pn.perna2[0], pn.perna2[1]); ctx.setLineDash([]); }
+      ctx.strokeStyle = FIO_PERNA;
+      if (pn.perna1) reta(pn.perna1[0], pn.perna1[1]);
+      if (pn.perna2){ ctx.strokeStyle = FIO_PONTOS; ctx.setLineDash([4 * px, 1 * px]); reta(pn.perna2[0], pn.perna2[1]); ctx.setLineDash([]); }
       if (pn.canto) marcas.push(pn.canto);
-      marcas.push(r.pt);
     }
-    for (const q of marcas) xis(q, 3.5 * px);
+    ctx.strokeStyle = FIO_PONTOS;
+    for (const q of marcas) xis(q, 6 * px);
+    /* na partida, o X e fino e a bolinha fica POR CIMA dele — no video e a bolinha que se ve */
     if (wireDraw.ligado){
       const a = pts[0];
-      ctx.fillStyle = FIO_PARTIDA; ctx.beginPath(); ctx.arc(a[0], a[1], 4 * px, 0, 2 * Math.PI); ctx.fill();
-      ctx.strokeStyle = FIO_HOT; ctx.lineWidth = 1.5 * px; xis(a, 6 * px);
+      ctx.strokeStyle = FIO_HOT; xis(a, 11 * px);
+      ctx.fillStyle = FIO_PARTIDA; ctx.beginPath(); ctx.arc(a[0], a[1], 6 * px, 0, 2 * Math.PI); ctx.fill();
     }
   }
   if (r){
-    ctx.strokeStyle = '#8c8c8c'; ctx.lineWidth = px;
-    const c = 24 * px;
-    linha([r.pt[0] - c, r.pt[1]], [r.pt[0] + c, r.pt[1]]);
-    linha([r.pt[0], r.pt[1] - c], [r.pt[0], r.pt[1] + c]);
-    if (r.snap){ ctx.strokeStyle = FIO_HOT; ctx.lineWidth = 1.5 * px; xis(r.pt, 6 * px); }
+    ctx.lineWidth = px;
+    /* sobre um ponto eletrico, o X vermelho — mas nao repetido em cima da propria partida;
+       fora dele, o x cinza no centro da cruz, que o Altium mostra ate sem fio em curso */
+    const naPartida = wireDraw && wireDraw.ligado && r.pt[0] === wireDraw.pts[0][0] && r.pt[1] === wireDraw.pts[0][1];
+    if (r.snap){ if (!naPartida){ ctx.strokeStyle = FIO_HOT; xis(r.pt, 10 * px); } }
+    else { ctx.strokeStyle = FIO_PONTOS; xis(r.pt, 6 * px); }
   }
+  ctx.restore();
+}
+/* A CRUZ DO CURSOR vai POR BAIXO dos fios (desenhaFolha » antesDosFios): por cima, ela
+   desbotava de cinza o fio azul que cruzava. ±41 px de tela e cinza claro, a medida do video. */
+function desenhaCruzDoFio(ctx, px){
+  const r = fioCursor;
+  if (!r) return;
+  const c = 41 * px;
+  ctx.save();
+  ctx.strokeStyle = FIO_CRUZ; ctx.lineWidth = px; ctx.setLineDash([]); ctx.lineCap = 'butt';
+  const x = noPixel(ctx, r.pt[0], 'x'), y = noPixel(ctx, r.pt[1], 'y');
+  ctx.beginPath();
+  ctx.moveTo(r.pt[0] - c, y); ctx.lineTo(r.pt[0] + c, y);
+  ctx.moveTo(x, r.pt[1] - c); ctx.lineTo(x, r.pt[1] + c);
+  ctx.stroke();
   ctx.restore();
 }
 /* as bordinhas: caixa tracejada com alcas nos cantos em cada item marcado (nos fios, tambem
@@ -4768,7 +4871,12 @@ function focusComp(c){
   const si = model.sheets.findIndex(sh => sh.name === c.sheet);
   /* troca a folha SEM o limpaSel/enquadrar do setSheet: quem chama daqui ja traz a propria
      selecao (o componente) e o proprio enquadramento, logo abaixo */
-  if (si >= 0 && si !== sheetIdx){ sheetIdx = si; pintaCartaoAtivo(); }
+  if (si >= 0 && si !== sheetIdx){
+    /* o fio em curso e da folha que esta saindo: gravado ANTES da troca (o endWire carimba a
+       folha ativa), senao ia para a folha nova com os pontos clicados na velha */
+    if (wireDraw) endWire();
+    sheetIdx = si; pintaCartaoAtivo();
+  }
   selSo([alvoAll(c)]);
   /* a porta de entrada do hub (__hubSelectComp) tambem passa por aqui: nao pode deixar a net
      anterior acesa por baixo do componente novo */
@@ -4873,13 +4981,12 @@ function pintaCartaoAtivo(){
    junto pintaria fios de outra folha) e reenquadra */
 function setSheet(i){
   if (!(i >= 0) || i >= model.sheets.length || i === sheetIdx) return;
+  /* O FIO EM CURSO E DA FOLHA ANTIGA. O endWire carimba o fio com a folha ATIVA no momento
+     de fechar, entao ele e gravado ANTES da troca — como o Esc faz. Deixado para depois, iria
+     para a folha nova com os pontos clicados na velha. */
+  if (wireDraw) endWire();
   sheetIdx = i;
   pintaCartaoAtivo();
-  /* O FIO EM CURSO E DA FOLHA ANTIGA. O endWire carimba o fio com a folha ATIVA no momento
-     de fechar, entao trocar de folha no meio do tracado gravaria na folha nova os pontos
-     clicados na velha. O Escape ja larga o fio assim; a troca de folha tinha de largar
-     tambem. */
-  wireDraw = null;
   limpaSel();
   cam.fit(fitBBox());
 }

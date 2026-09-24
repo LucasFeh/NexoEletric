@@ -61,7 +61,13 @@ function inverte(modo, primeiro){
 /* o `primeiro` que deixa a proxima perna PERPENDICULAR ao trecho A→B que acabou de ser fixado */
 function depoisDe(modo, A, B, primeiroAtual){
   if (modo === '90') return Math.abs(B[0] - A[0]) > EPS ? 'v' : 'h';
-  if (modo === '45') return inverte('45', primeiroAtual);
+  /* no 45° tambem pela GEOMETRIA, e nao invertendo o que estava: com a primeira perna de
+     comprimento zero o clique fixa a SEGUNDA, e inverter fazia a perna seguinte sair do mesmo
+     tipo da fixada — reta depois de reta, um vertice colinear que o limpa apagava depois */
+  if (modo === '45'){
+    const dx = Math.abs(B[0] - A[0]), dy = Math.abs(B[1] - A[1]);
+    return dx > EPS && Math.abs(dx - dy) <= EPS ? 'orto' : 'diag';
+  }
   return primeiroAtual;
 }
 
@@ -89,6 +95,10 @@ function completa(est, C){
   const K = canto(A, C, e.modo, e.primeiro);
   if (K && !igual(K, A) && !igual(K, C)) e.pts.push(copia(K));
   if (!igual(C, A)) e.pts.push(copia(C));
+  /* o `primeiro` segue o ultimo trecho, como no fixa: ele e o canto com que o PROXIMO fio
+     sai (o Altium carrega o "90 Degree start/end" de um fio para o outro) */
+  const n = e.pts.length;
+  if (n >= 2) e.primeiro = depoisDe(e.modo, e.pts[n - 2], e.pts[n - 1], e.primeiro);
   return e;
 }
 /* BACKSPACE: tira o último ponto fixado; sem nada fixado além da partida, o fio acaba (null) */
@@ -100,11 +110,21 @@ function desfaz(est){
   return { pts, modo:est.modo, primeiro, inicial:est.inicial, ult:copia(pts[pts.length - 1]) };
 }
 /* ESPAÇO e SHIFT+ESPAÇO */
-function trocaCanto(est){ return Object.assign({}, est, { primeiro: inverte(est.modo, est.primeiro) }); }
-function trocaModo(est){
+/* Na PARTIDA (nada fixado ainda) o lado escolhido vira tambem o `inicial`: e a ele que o
+   Backspace volta, e ele tem de ser o que a mao escolheu, nao o de antes do Espaco. */
+const naPartida = est => !est.pts || est.pts.length <= 1;
+function trocaCanto(est){
+  const primeiro = inverte(est.modo, est.primeiro);
+  return Object.assign({}, est, { primeiro }, naPartida(est) ? { inicial: primeiro } : null);
+}
+/* `lembra` ({ p90, p45 }): o lado que a mao escolheu por ultimo em cada modo. Sem ele, entrar
+   no 90° punha 'v' e no 45° 'diag' — um ciclo 90→45→livre→90 apagava o lado lembrado. */
+function trocaModo(est, lembra){
   const modo = MODOS[(MODOS.indexOf(est.modo) + 1) % MODOS.length];
-  const primeiro = modo === '45' ? 'diag' : modo === '90' ? 'v' : est.primeiro;
-  return Object.assign({}, est, { modo, primeiro });
+  const l = lembra || {};
+  const primeiro = modo === '45' ? (l.p45 === 'orto' ? 'orto' : 'diag')
+                 : modo === '90' ? (l.p90 === 'h' ? 'h' : 'v') : est.primeiro;
+  return Object.assign({}, est, { modo, primeiro }, naPartida(est) ? { inicial: primeiro } : null);
 }
 
 /* O FIO QUE VAI PARA O ARQUIVO: sem ponto repetido e sem vértice no meio de uma reta. Um canto

@@ -97,7 +97,48 @@ const F = require('../hub-fio.js');
   assert.deepStrictEqual(F.limpa([[5, 5]]), [[5, 5]]);
 }
 
-/* ── 8. nada muda o estado de quem chamou ── */
+/* ── 8. 45° com a primeira perna de comprimento zero: a seguinte ainda sai do OUTRO tipo ── */
+{
+  /* 'diag' com o cursor na mesma linha: a diagonal tem zero, o clique fixa a RETA */
+  let e = F.fixa(F.novo([0, 0], '45', 'diag'), [500, 0]);
+  assert.deepStrictEqual(e.pts, [[0, 0], [500, 0]]);
+  assert.strictEqual(e.primeiro, 'diag', 'depois de uma reta, a perna seguinte é a diagonal');
+  /* 'orto' com o cursor na diagonal exata: a reta tem zero, o clique fixa a DIAGONAL */
+  e = F.fixa(F.novo([0, 0], '45', 'orto'), [300, 300]);
+  assert.deepStrictEqual(e.pts, [[0, 0], [300, 300]]);
+  assert.strictEqual(e.primeiro, 'orto', 'depois de uma diagonal, a perna seguinte é a reta');
+}
+
+/* ── 9. o canto passa para o PRÓXIMO fio: o completa também acerta o `primeiro` ── */
+{
+  /* L até um pino: desce e vai para a direita; o próximo fio sai na vertical (perpendicular à
+     última perna), como o "90 Degree start/end" do Altium */
+  const e = F.completa(F.novo([0, 0], '90', 'v'), [300, -200]);
+  assert.deepStrictEqual(e.pts, [[0, 0], [0, -200], [300, -200]]);
+  assert.strictEqual(e.primeiro, 'v');
+  /* reta só (o pino na linha do ponto): o próximo sai perpendicular a ela */
+  assert.strictEqual(F.completa(F.novo([0, 0], '90', 'v'), [0, -400]).primeiro, 'h');
+}
+
+/* ── 10. o Espaço na partida é o lado a que o Backspace volta; Shift+Espaço lembra o lado ── */
+{
+  let e = F.trocaCanto(F.novo([0, 0], '90', 'v'));
+  assert.strictEqual(e.inicial, 'h', 'o Espaço dado na partida vira o inicial');
+  e = F.fixa(e, [400, 300]);
+  assert.strictEqual(F.desfaz(e).primeiro, 'h', 'o Backspace volta ao lado escolhido, não ao de antes');
+  /* com canto fixado, o Espaço não mexe no inicial */
+  assert.strictEqual(F.trocaCanto(e).inicial, 'h');
+  /* o ciclo 90 → 45 → livre → 90 volta ao lado lembrado de cada modo */
+  const lembra = { p90:'h', p45:'orto' };
+  let m = F.trocaModo(F.novo([0, 0], '90', 'h'), lembra);
+  assert.strictEqual(m.modo, '45'); assert.strictEqual(m.primeiro, 'orto');
+  m = F.trocaModo(F.trocaModo(m, lembra), lembra);
+  assert.strictEqual(m.modo, '90'); assert.strictEqual(m.primeiro, 'h');
+  /* lado lembrado estragado cai no padrão do modo */
+  assert.strictEqual(F.trocaModo(F.novo([0, 0], '90', 'v'), { p45:'xyz' }).primeiro, 'diag');
+}
+
+/* ── 11. nada muda o estado de quem chamou ── */
 {
   const e = F.novo([0, 0], '90', 'v'), antes = JSON.stringify(e);
   F.fixa(e, [100, 100]); F.completa(e, [100, 100]); F.trocaCanto(e); F.trocaModo(e);
