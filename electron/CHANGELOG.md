@@ -3,6 +3,12 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.1.2 — 2026-09-24
+
+- Painel Projetos: botão direito num projeto abre um menu com **Excluir projeto…** (e abrir o projeto, abrir/fechar a gaveta). É o mesmo diálogo das Configurações do hub — senha mestre, a pasta vai para `Trash\` —, agora para o projeto clicado, mesmo que não seja o aberto.
+- Vista Esquema: o painel da esquerda saiu. O da direita tem duas abas no rodapé, **Configurações** (folhas e formato, vista, salvar, Odoo, almoxarifado e validação) e **Propriedades**. Sem nada selecionado ele mostra as Configurações; ao selecionar, troca para as Propriedades; as abas trocam à mão. O painel fica ao lado da folha em vez de por cima, e o alfinete deixou de existir. A aba Componentes (lista de componentes e de nets) saiu.
+- Os atalhos de teclado da vista Esquema foram para as Configurações do hub, aba **Atalhos**. As teclas já trocadas continuam valendo, e trocar ali vale na hora, também para a vista que já estiver aberta.
+
 ## 1.1.1 — 2026-09-24
 
 - Sem a faixa do cabeçalho: no topo ficam só as abas. O estágio do projeto (esquema, eco, roteada, aplicada) e as pendências foram para a barra de status; o chat e as configurações do hub (⚙) ficaram no canto direito das abas. As configurações do hub também estão em Arquivo › Configurações do hub…, e as do app passaram a se chamar Configurações do aplicativo….
