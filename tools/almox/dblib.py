@@ -26,7 +26,12 @@ DEST = os.path.join(LIBS, 'Almox')
 # ser o disco de ninguem: o Altium abre esse arquivo a partir do share do servidor, e um
 # caminho de bancada ali faz a Database Library nascer apontando para uma maquina que a
 # outra nao alcanca.
-UNC = r'\\192.168.15.192\altiumhub\current\Libs\Almox'
+#
+# ALTIUMHUB_DBLIB_DIR troca esse caminho sem mexer no codigo. E o que o app desktop
+# (electron/) usa: la o sincronismo roda numa pasta de trabalho LOCAL, e um DbLib gerado ali
+# apontando para o share faria o Altium daquela maquina ler o SQLite do servidor em vez do
+# que acabou de ser escrito ao lado dele.
+UNC = os.environ.get('ALTIUMHUB_DBLIB_DIR') or r'\\192.168.15.192\altiumhub\current\Libs\Almox'
 
 COLUNAS = ['Chave', 'Biblioteca', 'Familia', 'Simbolo', 'Designator', 'Footprint',
            'Comment', 'Value', 'Encapsulamento', 'MPN', 'Mouser', 'OdooId',
