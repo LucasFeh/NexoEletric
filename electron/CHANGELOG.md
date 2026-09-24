@@ -3,6 +3,11 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.1.4 — 2026-09-24
+
+- Sem o botão **Painéis** na barra de status. O painel Projetos agora recolhe e expande pelo próprio cabeçalho: clicar em **Projetos** recolhe numa faixa fina à esquerda, e clicar na faixa abre de novo (Exibir › Painel Projetos, Ctrl+Alt+P, faz o mesmo). Duplo clique na borda do painel volta à largura padrão.
+- As configurações do hub ficam só em **Arquivo › Configurações do hub…**: o ⚙ ao lado do botão do Claude saiu. O item abre as configurações na janela do hub que estiver à mão; se só houver uma janela à parte da vista Esquema aberta, abre uma janela nova do hub já com elas. Com um diálogo do hub esperando resposta, ele não abre outro por cima.
+
 ## 1.1.3 — 2026-09-24
 
 - Vista Esquema: a lista de **Validação** saiu das Configurações. A validação continua valendo (é ela que impede salvar um esquema inválido), só não é mais listada no painel.
