@@ -1,7 +1,7 @@
 {
   "name": "altiumhub-desktop",
   "productName": "AltiumHub",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "AltiumPCBMirror hub como aplicativo desktop",
   "author": "Dieletrons <engenharia@dieletrons.com>",
@@ -90,7 +90,13 @@
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
       "installerIcon": "assets/icon.ico",
-      "uninstallerIcon": "assets/icon.ico"
+      "uninstallerIcon": "assets/icon.ico",
+      "include": "assets/installer.nsh",
+      "language": "1046",
+      "installerLanguages": [
+        "pt_BR"
+      ],
+      "multiLanguageInstaller": false
     },
     "publish": [
       {

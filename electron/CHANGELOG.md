@@ -3,6 +3,12 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o AltiumHub**.
 
+## 1.0.1 — 2026-09-24
+
+- O instalador reconhece o AltiumHub já instalado: de uma versão mais velha ele **atualiza** (e diz isso), na mesma versão oferece abrir o app em vez de reinstalar, e nunca volta para uma versão mais antiga. Projetos, bibliotecas, a pasta de trabalho e as configurações não são tocados. Mensagens do instalador em português.
+- Com o app aberto, o instalador pede para ele fechar como o X da janela: as vistas perguntam pelo que não foi salvo e o hub é parado direito. Só se o app continuar aberto é que ele pergunta de novo.
+- Hub que abriu sem projeto nenhum (primeira execução, antes da importação do servidor) não atualizava a lista quando os projetos chegavam: ficava vazio até um F5.
+
 ## 1.0.0 — 2026-09-24
 
 Primeira versão: o hub do AltiumPCBMirror como aplicativo do Windows.

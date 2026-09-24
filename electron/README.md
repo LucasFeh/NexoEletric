@@ -128,6 +128,26 @@ repositório inteiro, inclusive o histórico e `Projects/`. O `release` se recus
 embutir o token de publicar. Um token também pode ser informado depois, em
 **Configurações › Atualizações**, e fica cifrado com o DPAPI do Windows.
 
+### Rodar o instalador com o app já instalado
+
+O instalador lê a versão instalada (a chave de desinstalação do usuário) e age conforme
+o caso (`assets/installer.nsh`):
+
+| instalado | o que o instalador faz |
+|---|---|
+| nada | instalação normal |
+| versão mais velha | pergunta "Atualizar de X para Y?" e troca só o programa |
+| a mesma versão | não reinstala: oferece abrir o app (ou reparar a instalação) |
+| versão mais nova | recusa voltar para trás |
+
+Nada disso pergunta nada na atualização automática (`--updated`) nem em instalação
+silenciosa (`/S`). Com o app aberto, o instalador pede para ele fechar como o X da
+janela, então as vistas perguntam pelo que não foi salvo e o app para o hub antes de
+sair. Só os processos da própria pasta de instalação são fechados.
+
+Como é a versão que decide, **todo instalador distribuído precisa de um número novo**:
+dois builds com o mesmo número parecem "já instalado".
+
 ### Como a atualização chega
 
 Ao abrir e a cada 4 horas, o app consulta `releases/latest` e baixa em segundo plano.
