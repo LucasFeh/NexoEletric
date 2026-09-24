@@ -771,6 +771,16 @@ function selItens(){
 function selTemItem(it){ for (const a of sel.values()) if (a.it === it) return true; return false; }
 function selSo(alvos){ sel.clear(); for (const a of alvos) selAdd(a); }
 const SEL = '#2979ff';   /* azul da selecao — so no contorno tracejado, nunca no objeto */
+/* A MESA — o fundo do canvas EM VOLTA da folha — segue o tema do hub. Era um oliva escuro
+   cravado, e a vista ficava avulsa quando o tema mudava. A folha e tudo o que se desenha nela
+   NAO seguem: sao as cores do Altium. O canvas nao le var() sozinho, entao a cor sai do token
+   (--sunken, o mesmo fundo de viewport do hub) e fica guardada aqui; o evento 'hubtema'
+   (hub-tema.js, la embaixo junto dos atalhos) a rele e repinta o canvas grande e as
+   miniaturas das folhas. Sem o hub-tema carregado, a mesa de sempre. */
+const MESA_RESERVA = '#3a3a34';
+let mesaCor = MESA_RESERVA;
+function leMesa(){ mesaCor = window.HubTema ? HubTema.cor('--sunken', MESA_RESERVA) : MESA_RESERVA; }
+leMesa();
 let schDirty = false, schDiskSnapshot = null;
 const undoStack = [JSON.stringify(schematic.items)], redoStack = [];
 /* ------- a grade -------
@@ -3103,7 +3113,8 @@ function drawSelection(ctx, cam){
   ctx.restore();
 }
 const cam = D.mkCamera(cv, drawWorld, {
-  bg:'#3a3a34',
+  /* o mkCamera le o bg a cada quadro: com o getter a troca de tema chega sem recriar a camera */
+  get bg(){ return mesaCor; },
   onMove: w => {
     hoverW = w;
     $('sx').textContent = w.x.toFixed(0);
@@ -4282,7 +4293,7 @@ function desenhaMiniatura(cvm, si){
   cvm.width = Math.round(W * DPR); cvm.height = Math.round(H * DPR);
   const ctx = cvm.getContext('2d');
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = '#3a3a34';                       /* a mesma moldura do canvas grande */
+  ctx.fillStyle = mesaCor;                         /* a mesma mesa do canvas grande */
   ctx.fillRect(0, 0, cvm.width, cvm.height);
   const bb = fitBBox(si);
   const esc = Math.min(W / Math.max(bb.x2 - bb.x1, 1), H / Math.max(bb.y2 - bb.y1, 1)) / 1.06;
@@ -4301,6 +4312,10 @@ let ATALHOS = mapaAtalhos(HA.carrega());
 window.addEventListener('storage', e => {
   if (e.key === HA.CHAVE || e.key === null) ATALHOS = mapaAtalhos(HA.carrega());
 });
+/* ------- o tema -------
+   Pelo mesmo `storage`, o hub-tema.js troca o tema do CSS sozinho e avisa com 'hubtema'. O
+   que o CSS nao alcanca e o que esta pintado em canvas: a mesa (leMesa, la em cima). */
+window.addEventListener('hubtema', () => { leMesa(); cam.draw(); pintaMiniaturas(); });
 
 /* ------- o passo da grade ------- */
 function montaGrade(){

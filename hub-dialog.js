@@ -12,36 +12,46 @@
 "use strict";
 var HubDialog = (function () {
 
+/* NO TEMA DO HUB. As cores sao os tokens do hub-tema.css (--surface, --text, --hi, --scrim,
+   --shadow-menu...), que as vistas carregam; a cor depois da virgula e a do escuro antigo, e so
+   vale numa pagina que nao carregou os tokens. O desenho e o da casca: caixa sem borda, com o
+   anel e a sombra do --shadow-menu (borda + anel viravam uma linha dupla), e os botoes da casca
+   (.btn-primary/.btn-danger do hub.html) — contornados, nunca preenchidos. O azul cheio de
+   antes ficava avulso em qualquer tema que nao fosse o escuro. */
 const CSS = `
 .hd-scrim{position:fixed; inset:0; z-index:9000; display:flex; align-items:center; justify-content:center;
-  background:rgba(11,11,13,.6); font:13px/1.45 "Segoe UI",system-ui,sans-serif; color:var(--fg,#d8d8d8);}
+  background:var(--scrim,rgba(11,11,13,.6)); font:13px/1.45 var(--font,"Segoe UI",system-ui,sans-serif);
+  color:var(--text,#d8d8d8);}
 .hd-scrim[hidden]{display:none;}
-.hd-box{width:min(440px, 92vw); background:var(--panel2,#2d2d2d); border:1px solid var(--border,#3a3a3a);
-  border-radius:8px; box-shadow:0 0 0 1px rgba(255,255,255,.04), 0 18px 44px rgba(0,0,0,.6); padding:16px 18px 14px;}
-.hd-box h3{margin:0 0 8px; font-size:14px; font-weight:600; color:var(--fg,#d8d8d8); letter-spacing:-.01em;}
+.hd-box{width:min(440px, 92vw); background:var(--surface,#2d2d2d); border-radius:var(--r-md,8px);
+  box-shadow:var(--shadow-menu, 0 0 0 1px #3a3a3a, 0 18px 44px rgba(0,0,0,.6)); padding:16px 18px 14px;}
+.hd-box h3{margin:0 0 8px; font-size:14px; font-weight:600; color:var(--text,#d8d8d8); letter-spacing:-.01em;}
 .hd-box h3.danger{color:var(--err,#ff5252);}
-.hd-box p{margin:0; white-space:pre-wrap; word-break:break-word; color:var(--fg,#d8d8d8); max-height:52vh; overflow:auto;}
+.hd-box p{margin:0; white-space:pre-wrap; word-break:break-word; color:var(--text,#d8d8d8); max-height:52vh; overflow:auto;}
 .hd-btns{display:flex; gap:8px; justify-content:flex-end; margin-top:16px;}
-.hd-btns button{background:var(--panel,#242424); color:var(--fg,#d8d8d8); border:1px solid var(--border,#3a3a3a);
-  border-radius:4px; padding:6px 14px; font:inherit; font-size:12px; cursor:pointer; min-width:84px;}
-.hd-btns button:hover{border-color:var(--accent,#4fc3f7);}
-.hd-btns button.ok{background:#0d47a1; border-color:#0d47a1; color:#fff;}
-.hd-btns button.ok:hover{background:#1565c0; border-color:#1565c0;}
-.hd-btns button.ok.danger{background:#8e1b1b; border-color:#8e1b1b;}
-.hd-btns button.ok.danger:hover{background:#a52424; border-color:#a52424;}
-.hd-btns button:focus-visible{outline:2px solid var(--accent,#4fc3f7); outline-offset:1px;}
+.hd-btns button{background:transparent; color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a);
+  border-radius:var(--r-sm,4px); padding:6px 14px; font:inherit; font-size:12px; cursor:pointer; min-width:84px;}
+.hd-btns button:hover{background:rgba(var(--tint,255,255,255),.07);}
+.hd-btns button.ok{color:var(--hi,#4fc3f7); border-color:var(--hi,#4fc3f7);}
+.hd-btns button.ok:hover{background:rgba(var(--tint,79,195,247),.10);}
+.hd-btns button.ok.danger{color:var(--err,#ff5252); border-color:var(--err,#ff5252);}
+.hd-btns button.ok.danger:hover{background:var(--err-soft,rgba(255,82,82,.15));}
+.hd-btns button:focus-visible{outline:2px solid var(--hi,#4fc3f7); outline-offset:1px;}
 .hd-toasts{position:fixed; top:12px; right:12px; z-index:10000; display:flex; flex-direction:column; gap:8px;
-  align-items:flex-end; pointer-events:none; font:13px/1.4 "Segoe UI",system-ui,sans-serif;}
+  align-items:flex-end; pointer-events:none; font:13px/1.4 var(--font,"Segoe UI",system-ui,sans-serif);}
+/* a borda e transparente e o contorno e o anel do --shadow-menu, como na caixa; so a faixa da
+   esquerda tem cor, e ela e o status */
 .hd-toast{pointer-events:auto; display:flex; align-items:flex-start; gap:9px; max-width:min(420px, 80vw);
-  padding:9px 12px 9px 11px; border-radius:6px; background:var(--panel2,#2d2d2d); color:var(--fg,#d8d8d8);
-  border:1px solid var(--border,#3a3a3a); border-left-width:3px; box-shadow:0 10px 28px rgba(0,0,0,.5);
+  padding:9px 12px 9px 11px; border-radius:var(--r-sm,6px); background:var(--surface,#2d2d2d);
+  color:var(--text,#d8d8d8); border:1px solid transparent; border-left-width:3px;
+  box-shadow:var(--shadow-menu, 0 0 0 1px #3a3a3a, 0 10px 28px rgba(0,0,0,.5));
   opacity:0; transform:translateY(-6px); transition:opacity .16s, transform .16s; cursor:pointer;}
 .hd-toast.on{opacity:1; transform:none;}
 .hd-toast.ok{border-left-color:var(--ok,#00e676);}   .hd-toast.warn{border-left-color:var(--warn,#ffd54f);}
-.hd-toast.err{border-left-color:var(--err,#ff5252);} .hd-toast.info{border-left-color:var(--accent,#4fc3f7);}
+.hd-toast.err{border-left-color:var(--err,#ff5252);} .hd-toast.info{border-left-color:var(--hi,#4fc3f7);}
 .hd-toast .t{flex:1; white-space:pre-wrap; word-break:break-word;}
-.hd-toast .x{color:var(--fg-dim,#9a9a9a); padding:0 2px; line-height:1;}
-.hd-toast:hover .x{color:var(--fg,#d8d8d8);}
+.hd-toast .x{color:var(--text-3,#9a9a9a); padding:0 2px; line-height:1;}
+.hd-toast:hover .x{color:var(--text,#d8d8d8);}
 `;
 
 let pronto = false, scrim = null, pilha = null;

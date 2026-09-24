@@ -13,6 +13,8 @@ const B = pcbmirror;
 const CH = (typeof changes !== 'undefined' && Array.isArray(changes)) ? changes : [];
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
+/* cor da bandeira NO DESENHO: o canvas e preto em qualquer tema, entao nao segue o tema do hub.
+   O azul da nota e repetido no .annitem.info do pcbframe.html (a lista e a legenda dela). */
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
 /* ------- travamento de edicao -------
    A vista abre em LEITURA. Editar exige clicar em "Editar" na barra de ferramentas.
@@ -280,7 +282,8 @@ function deleteSelected(){
 const compDelta = HubCore.compDelta, xfPoint = HubCore.xfPoint, xfAngle = HubCore.xfAngle;
 const ownerDelta = (ref) => HubCore.ownerDelta(model, ref);
 const effLayerForOwner = (ref, layer) => HubCore.effLayerForOwner(model, ref, layer);
-/* Cores padrão do ambiente 2D do Altium */
+/* Cores padrão do ambiente 2D do Altium. O canvas inteiro fica fora do tema do hub (o Altium
+   mantem a PCB escura em qualquer tema): cor de interface mora no CSS do pcbframe.html. */
 const LAYER_COLORS = {
   Top:'#ff0000', Bottom:'#0a0aff', TopOverlay:'#ffff00', BottomOverlay:'#b4b400',
   Multi:'#c0c0c0', Mech1:'#ff00ff', KeepOut:'#c800c8'

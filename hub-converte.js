@@ -536,11 +536,16 @@ const PURO = { paramsPlanos, normValor, mesmoValor, tensaoDe, encapDe, montagemD
 if (typeof document === 'undefined') return { pure: PURO };
 
 const CSS = `
-#cvmodal{position:fixed; inset:0; z-index:60; display:none; background:rgba(11,11,13,.62);}
+/* O TEMA É O DO HUB. Os nomes curtos (--panel, --fg, --border, --accent) são a ponte do
+   schframe.html; --tint, --hi, --on-hi, --warn-soft, --scrim, --font e --mono vêm direto do
+   hub-tema.css, que a vista carrega. O que vem depois da vírgula é o escuro antigo, a reserva
+   para a página sem tema. Nenhuma cor fixa aqui: este modal é interface, não desenho, e com o
+   azul e os cinzas cravados ele ficava escuro no meio do tema claro. */
+#cvmodal{position:fixed; inset:0; z-index:60; display:none; background:var(--scrim,rgba(11,11,13,.62));}
 #cvmodal.on{display:flex;}
 #cvmodal .cv-box{position:absolute; inset:14px; display:grid; grid-template-rows:auto auto 1fr auto;
   background:var(--panel,#242424); border:1px solid var(--border,#3a3a3a); border-radius:8px;
-  box-shadow:0 22px 60px rgba(0,0,0,.62); overflow:hidden; min-height:0;}
+  box-shadow:var(--shadow-menu,0 22px 60px rgba(0,0,0,.62)); overflow:hidden; min-height:0;}
 #cvmodal .cv-head{display:flex; align-items:center; gap:10px; padding:11px 13px;
   border-bottom:1px solid var(--border,#3a3a3a); background:var(--panel2,#2d2d2d);}
 #cvmodal .cv-head h2{font-size:13px; font-weight:600; margin:0; letter-spacing:-.01em;}
@@ -556,7 +561,8 @@ const CSS = `
   background:var(--panel2,#2d2d2d); color:var(--fg-dim,#9a9a9a); cursor:pointer;}
 #cvmodal .cv-seg button:first-child{border-radius:3px 0 0 3px;}
 #cvmodal .cv-seg button:last-child{border-radius:0 3px 3px 0;}
-#cvmodal .cv-seg button[aria-pressed=true]{background:#0d47a1; border-color:#0d47a1; color:#fff;}
+#cvmodal .cv-seg button[aria-pressed=true]{background:var(--hi,#0d47a1); border-color:var(--hi,#0d47a1);
+  color:var(--on-hi,#fff);}
 #cvmodal .cv-cont{font-size:11px; color:var(--fg-dim,#9a9a9a); margin-left:auto;
   display:flex; gap:10px; align-items:center;}
 #cvmodal .cv-body{overflow:auto; min-height:0; padding:0 13px 10px;}
@@ -567,9 +573,11 @@ const CSS = `
   letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim,#9a9a9a); align-items:center;}
 #cvmodal .cv-row.hd > *{font-size:10px;}
 #cvmodal .cv-row.ja{opacity:.5;}
+/* a caixa de marcar no destaque do tema, como as do hub — a nativa vinha no azul do sistema */
+#cvmodal .cv-row input[type=checkbox]{accent-color:var(--hi,auto);}
 #cvmodal .cv-row .seta{color:var(--fg-dim,#9a9a9a); font-size:13px; text-align:center;}
 #cvmodal .cv-refs{display:flex; flex-wrap:wrap; gap:3px;}
-#cvmodal .cv-refs button{font:11px/1.3 Consolas,ui-monospace,monospace; padding:1px 5px;
+#cvmodal .cv-refs button{font:11px/1.3 var(--mono,Consolas,ui-monospace,monospace); padding:1px 5px;
   border:1px solid var(--border,#3a3a3a); border-radius:3px; background:var(--panel2,#2d2d2d);
   color:var(--fg,#d8d8d8); cursor:pointer;}
 #cvmodal .cv-refs button:hover{border-color:var(--accent,#4fc3f7); color:var(--accent,#4fc3f7);}
@@ -578,9 +586,12 @@ const CSS = `
    (o footprint) ao lado em tamanho de leitura, e o nome do símbolo — que não decide
    substituição nenhuma — desce para a linha de baixo. */
 #cvmodal .cv-hoje .chave{display:flex; flex-wrap:wrap; align-items:baseline; gap:3px 8px;}
-#cvmodal .cv-hoje .val{font:600 15px/1.25 'Segoe UI',sans-serif; color:var(--accent,#4fc3f7);
-  background:rgba(79,195,247,.11); border-radius:3px; padding:1px 7px; letter-spacing:-.01em;}
-#cvmodal .cv-hoje .val.sem{color:var(--warn,#ffd54f); background:rgba(255,213,79,.10);
+/* o fundo do valor é o destaque do tema diluído: âmbar no Altium, dourado na Placa, cinza no
+   Grafite — o mesmo color-mix do hub-bom.js */
+#cvmodal .cv-hoje .val{font:600 15px/1.25 var(--font,'Segoe UI',sans-serif); color:var(--accent,#4fc3f7);
+  background:color-mix(in srgb, var(--accent,#4fc3f7) 12%, transparent);
+  border-radius:3px; padding:1px 7px; letter-spacing:-.01em;}
+#cvmodal .cv-hoje .val.sem{color:var(--warn,#ffd54f); background:var(--warn-soft,rgba(255,213,79,.10));
   font-weight:500; font-style:italic;}
 #cvmodal .cv-hoje .fp{font-size:13px; color:var(--fg,#d8d8d8); min-width:0; overflow:hidden;
   text-overflow:ellipsis; white-space:nowrap;}
@@ -603,9 +614,11 @@ const CSS = `
 #cvmodal .cv-esc .seta{color:var(--fg-dim,#9a9a9a); font-size:10px; flex:none;}
 #cvmodal .cv-opcoes{margin-top:3px; max-height:290px; overflow:auto;
   border:1px solid var(--border,#3a3a3a); border-radius:3px; background:var(--panel,#242424);}
-#cvmodal .cv-opb:hover{background:rgba(79,195,247,.10);}
-#cvmodal .cv-opb:has(.cv-esc[aria-selected=true]){background:rgba(79,195,247,.14);
-  box-shadow:inset 2px 0 0 var(--accent,#4fc3f7);}
+/* hover e escolhida como a árvore do hub: o véu do --tint (vira tinta escura no claro sozinho)
+   e o traço do destaque à esquerda */
+#cvmodal .cv-opb:hover{background:rgba(var(--tint,79,195,247),.08);}
+#cvmodal .cv-opb:has(.cv-esc[aria-selected=true]){background:rgba(var(--tint,79,195,247),.12);
+  box-shadow:inset 2px 0 0 var(--hi,#4fc3f7);}
 #cvmodal .cv-op{display:grid; grid-template-columns:30px minmax(0,1fr) auto auto; gap:8px;
   align-items:center; min-width:0;}
 #cvmodal .cv-op .ix{font-size:10px; color:var(--fg-dim,#9a9a9a); text-align:right;
@@ -615,23 +628,25 @@ const CSS = `
   white-space:nowrap;}
 #cvmodal .cv-op .n1 i{font-style:normal; font-size:9px; letter-spacing:.06em;
   text-transform:uppercase; margin-left:6px; padding:0 4px; border-radius:3px;
-  background:rgba(255,213,79,.12); color:var(--warn,#ffd54f);}
+  background:var(--warn-soft,rgba(255,213,79,.12)); color:var(--warn,#ffd54f);}
 #cvmodal .cv-op .n2{display:block; font-size:10px; color:var(--fg-dim,#9a9a9a);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 #cvmodal .cv-op .tags{display:flex; align-items:center; gap:6px; justify-content:flex-end;
   min-width:0;}
 #cvmodal .cv-op .fam, #cvmodal .cv-op .pk, #cvmodal .cv-op .mp{padding:1px 7px;
-  border-radius:999px; font-family:Consolas,ui-monospace,monospace; white-space:nowrap;}
+  border-radius:999px; font-family:var(--mono,Consolas,ui-monospace,monospace); white-space:nowrap;}
+/* as pílulas usam os véus do --tint, como as da lib (.alx-row .pk/.mp), e a força do véu é
+   a hierarquia: família mais apagada, código no meio, encapsulamento o mais forte */
 /* a família é a que cede espaço: contexto, não identidade */
 #cvmodal .cv-op .fam{font-size:10px; color:var(--fg-dim,#9a9a9a); min-width:0;
   overflow:hidden; text-overflow:ellipsis;
-  box-shadow:inset 0 0 0 1px rgba(154,154,154,.28);}
-#cvmodal .cv-op .pk{font-size:11px; color:var(--fg,#d8d8d8); background:rgba(79,195,247,.14);}
+  box-shadow:inset 0 0 0 1px rgba(var(--tint,154,154,154),.16);}
+#cvmodal .cv-op .pk{font-size:11px; color:var(--fg,#d8d8d8); background:rgba(var(--tint,79,195,247),.12);}
 /* deduzido do footprint, não escrito no catálogo: pílula vazada diz a procedência */
 #cvmodal .cv-op .pk.deduz{background:transparent; color:var(--fg-dim,#9a9a9a);
-  box-shadow:inset 0 0 0 1px rgba(79,195,247,.28);}
+  box-shadow:inset 0 0 0 1px rgba(var(--tint,79,195,247),.30);}
 #cvmodal .cv-op .mp{font-size:10px; color:var(--fg-dim,#9a9a9a);
-  box-shadow:inset 0 0 0 1px rgba(79,195,247,.22);}
+  box-shadow:inset 0 0 0 1px rgba(var(--tint,79,195,247),.22);}
 #cvmodal .cv-op .qt{font-size:11px; font-variant-numeric:tabular-nums; color:var(--ok,#00e676);
   min-width:46px; text-align:right;}
 #cvmodal .cv-op .qt.zero{color:var(--fg-dim,#9a9a9a);}
@@ -650,27 +665,29 @@ const CSS = `
 #cvmodal .cv-vai .alerta{font-size:10px; color:var(--warn,#ffd54f); margin-top:2px; white-space:normal;}
 #cvmodal .cv-vai .busca{display:flex; gap:5px; margin-top:4px;}
 #cvmodal .cv-vai button.lnk{margin-top:3px; padding:0; border:0; background:transparent;
-  color:var(--fg-dim,#9a9a9a); font:10px 'Segoe UI',sans-serif; cursor:pointer;
+  color:var(--fg-dim,#9a9a9a); font:10px var(--font,'Segoe UI',sans-serif); cursor:pointer;
   text-decoration:underline; text-underline-offset:2px;}
 #cvmodal .cv-vai button.lnk:hover{color:var(--accent,#4fc3f7);}
 #cvmodal .cv-vai .busca input{flex:1; min-width:0; background:var(--panel2,#2d2d2d);
-  color:var(--fg,#d8d8d8); font:11px 'Segoe UI',sans-serif;
+  color:var(--fg,#d8d8d8); font:11px var(--font,'Segoe UI',sans-serif);
   border:1px solid var(--border,#3a3a3a); border-radius:3px; padding:2px 6px;}
 #cvmodal .cv-achados{max-height:168px; overflow:auto; margin-top:3px;
   border:1px solid var(--border,#3a3a3a); border-radius:3px;}
 #cvmodal .cv-achados button{display:block; width:100%; text-align:left; border:0;
-  background:transparent; color:var(--fg,#d8d8d8); font:11px 'Segoe UI',sans-serif;
+  background:transparent; color:var(--fg,#d8d8d8); font:11px var(--font,'Segoe UI',sans-serif);
   padding:4px 7px; cursor:pointer;}
-#cvmodal .cv-achados button:hover{background:rgba(79,195,247,.10);}
+#cvmodal .cv-achados button:hover{background:rgba(var(--tint,79,195,247),.08);}
 #cvmodal .cv-achados .fam{color:var(--fg-dim,#9a9a9a);}
 #cvmodal .cv-conf{font-size:10px; text-align:right;}
 #cvmodal .pill{display:inline-block; padding:1px 6px; border-radius:9px; font-size:10px;
   border:1px solid var(--border,#3a3a3a); color:var(--fg-dim,#9a9a9a);}
-#cvmodal .pill.alta{border-color:#2e7d32; color:#81c784;}
-#cvmodal .pill.media{border-color:#ef6c00; color:#ffb74d;}
-#cvmodal .pill.baixa{border-color:#6d4c41; color:#bcaaa4;}
-#cvmodal .pill.nada{border-color:#b71c1c; color:#ef9a9a;}
-#cvmodal .pill.ja{border-color:#2e7d32; color:#81c784;}
+/* a confiança é STATUS, e status tem as três cores do modo (hub-tema.css): o verde, o âmbar e
+   o vermelho do escuro são claros e os do claro são escuros, e é isso que as deixa legíveis nos
+   dois. A baixa não tem cor de propósito — é palpite, não alarme. */
+#cvmodal .pill.alta, #cvmodal .pill.ja{border-color:var(--ok,#2e7d32); color:var(--ok,#81c784);}
+#cvmodal .pill.media{border-color:var(--warn,#ef6c00); color:var(--warn,#ffb74d);}
+#cvmodal .pill.baixa{border-color:rgba(var(--tint,109,76,65),.28); color:var(--fg-dim,#bcaaa4);}
+#cvmodal .pill.nada{border-color:var(--err,#b71c1c); color:var(--err,#ef9a9a);}
 #cvmodal .cv-vazio{padding:26px 6px; text-align:center; color:var(--fg-dim,#9a9a9a); font-size:12px;}
 #cvmodal .cv-aviso{font-size:11px; padding:7px 9px; border-radius:4px; margin:9px 0;
   border:1px solid var(--border,#3a3a3a); border-left:3px solid var(--warn,#ffd54f);
@@ -681,8 +698,12 @@ const CSS = `
   border-top:1px solid var(--border,#3a3a3a); background:var(--panel2,#2d2d2d);}
 #cvmodal .cv-foot .est{font-size:11px; color:var(--fg-dim,#9a9a9a); flex:1;
   overflow:hidden; text-overflow:ellipsis;}
-#cvmodal .cv-foot button.pri{background:#0d47a1; border-color:#0d47a1; color:#fff;}
-#cvmodal .cv-foot button.pri:hover:not(:disabled){background:#1565c0; border-color:#1565c0;}
+/* o botão principal como o .btn-primary do hub e o OK do hub-dialog.js: CONTORNADO no destaque
+   do tema, nunca preenchido (hub.html » .btn-primary) -- cheio fica o botão ligado de uma
+   ferramenta, e os dois não podem se confundir */
+#cvmodal .cv-foot button.pri{background:transparent; border-color:var(--hi,#4fc3f7);
+  color:var(--hi,#4fc3f7);}
+#cvmodal .cv-foot button.pri:hover:not(:disabled){background:rgba(var(--tint,216,216,216),0.10);}
 `;
 
 const $ = id => document.getElementById(id);
@@ -928,11 +949,12 @@ function saldoTxt(n){
 
 /* A LINHA DE UMA OPÇÃO — a mesma leitura da lib, no vocabulário desta tela.
    O desenho é o do `.alx-row` (schframe.js » buildAddList): id, nome, etiquetas, saldo, na
-   mesma grade 30px / 1fr / auto / auto. O CSS NÃO é reusado, e a razão é medida: os
+   mesma grade 30px / 1fr / auto / auto. O CSS NÃO é reusado, e a razão era medida: os
    seletores `.alx-row` de schframe.html são crus e casariam aqui, mas os TOKENS deles
-   (--tint, --hi, --text-2) estão declarados em `#addmodal, #symmodal`, não no `:root`.
-   Herdar a classe traria a grade certa com a paleta morta. Mesma forma, então, no
-   vocabulário do `:root` desta página — que é o que o resto deste painel já usa. */
+   (--tint, --hi, --text-2) estavam declarados em `#addmodal, #symmodal`, não no `:root`, e
+   herdar a classe traria a grade certa com a paleta morta. Desde o hub-tema.css (2026-09-24)
+   os tokens moram no `:root` e as pílulas daqui usam os mesmos véus de --tint da lib; juntar
+   as duas classes ficou possível e não foi feito. */
 function opcaoRow(a){
   const row = el('div', 'cv-op');
   row.append(el('span', 'ix', a.id != null ? String(a.id) : ''));

@@ -35,153 +35,10 @@
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
 <script src="hub-i18n.js"></script>
 <script src="hub-shell.js" defer></script>
+<!-- tokens do tema (hub-tema.css) e quem escolhe o tema antes da primeira pintura (hub-tema.js) -->
+<link rel="stylesheet" href="hub-tema.css">
+<script src="hub-tema.js"></script>
 <style>
-/* ═══════════════════════════════════════════════════════════════════
-   1. TOKENS — única fonte de verdade de cor, espaço, raio e sombra.
-   Nunca escreva um hex fora deste bloco.
-
-   O tema mora em dois atributos que o menu de configuração escreve no <html>:
-   data-mode = dark|light  e  data-theme = grafite|papel|altium|placa. Na primeira
-   abertura o hub escolhe Escuro/Altium (quem decide isso e o script do <head>); sem JS,
-   o :root cru vale como Grafite escuro — e o fallback, nao mais o padrao.
-
-   Um TEMA só troca os neutros (fundo, superfície, texto, destaque); MODO cuida de
-   status, sombra e scrim. Por isso cada bloco de tema é curto: 14 tokens.
-
-   --tint é o RGB do véu que cobre hover, seleção e faixa — sempre a cor do TEXTO,
-   porque o véu é o texto encostando no fundo. No claro ele vira tinta escura, e é
-   isso que faz cada `rgba(var(--tint), α)` da folha inteira virar de lado sozinho.
-   ═══════════════════════════════════════════════════════════════ */
-:root {
-  --font: "Inter", system-ui, -apple-system, sans-serif;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-
-  --sp-1: 3px; --sp-2: 6px; --sp-3: 8px; --sp-4: 11px; --sp-6: 17px; --sp-8: 22px;
-  --r-sm: 5px; --r-md: 8px; --r-lg: 14px;
-
-  --line:      rgba(var(--tint), 0.14);
-  --line-soft: rgba(var(--tint), 0.08);
-  --sheet:     #fffef2;  /* folha do Altium — o preview do simbolo mantem a cor real da lib */
-
-  --page-min: 1040px;      /* abaixo disso a página rola na horizontal */
-  --aside-w: 330px;        /* painel de detalhe do componente */
-  --picker-w: 420px;       /* seletor de projeto */
-}
-
-/* ── Fonte da casca — ortogonal a tema e modo ───────────────────
-   Só o ATRIBUTO viaja no localStorage; as pilhas moram aqui, para não existirem em
-   dois lugares e divergirem. data-font="inter" é o :root cru e não precisa de bloco. */
-:root[data-font="sistema"] { --font: system-ui, "Segoe UI", Roboto, -apple-system, "Helvetica Neue", sans-serif; }
-:root[data-font="bancada"] { --font: Verdana, "DejaVu Sans", Geneva, Tahoma, sans-serif; }
-:root[data-font="mono"]    { --font: var(--mono); }
-
-/* ── Modo escuro (padrão) · status, sombra e scrim ─────────────── */
-:root {
-  color-scheme: dark;     /* lista aberta do select e setas do input number vêm escuras */
-
-  /* Cor carrega STATUS e nada mais. */
-  --ok:    #4bbf7b;   /* online, etapa concluída, sucesso */
-  --warn:  #d6a75a;   /* pendente, aviso de DRC */
-  --err:   #e0555a;   /* offline, erro, sem esquema */
-  --idle:  #4a4a50;   /* inativo, não iniciado */
-  --warn-soft: rgba(214,167,90,0.12);
-  --err-soft:  rgba(224,85,90,0.15);
-
-  --on-hi: #10120f;   /* texto por cima de --hi preenchido */
-  --scrim: rgba(11,11,13,0.55);
-  /* sombra = escuridão ambiente, não cor */
-  --shadow-menu: 0 0 0 1px rgba(var(--tint), 0.16), 0 16px 40px rgba(0,0,0,0.65);
-}
-
-/* ── Modo claro ────────────────────────────────────────────────── */
-:root[data-mode="light"] {
-  color-scheme: light;
-
-  --ok:    #17804a;
-  --warn:  #8a6210;
-  --err:   #b8322f;
-  --idle:  #c0c0c7;
-  --warn-soft: rgba(138,98,16,0.13);
-  --err-soft:  rgba(184,50,47,0.12);
-
-  --on-hi: #f7f7f8;
-  --scrim: rgba(22,22,26,0.32);
-  --shadow-menu: 0 0 0 1px rgba(var(--tint), 0.13), 0 14px 36px rgba(var(--tint), 0.16);
-}
-
-/* ── Tema Grafite · escuro (o :root cru, e o fallback sem JS) ──── */
-:root {
-  --bg:        #0f0f11;   /* fundo da página */
-  --surface:   #1a1a1d;   /* cards, menus, inputs, painéis */
-  --surface-2: #161619;   /* painel lateral, faixas */
-  --surface-3: #17171a;   /* topo do gradiente do header */
-  --sunken:    #0b0b0d;   /* rodapé, viewport do canvas */
-  --text:      #f2f2f3;
-  --text-2:    #a8a8ae;   /* texto secundário */
-  --text-3:    #7a7a80;   /* metadados, rótulos */
-  --text-4:    #57575d;   /* numeração, texto desligado */
-  --hi:        #d8d8dd;   /* destaque = branco-cinza, nunca cor */
-  --tint:      242,242,243;
-  --edge:      #2a2a2e;   /* borda interna de tag, card e viewport */
-  --scroll:    #34343a;   /* polegar da barra de rolagem */
-  --dot-idle:  #3a3a40;   /* ponto de etapa não iniciada */
-}
-:root[data-mode="light"] {
-  --bg: #f3f3f5; --surface: #ffffff; --surface-2: #eaeaee; --surface-3: #fbfbfc;
-  --sunken: #e4e4e8;
-  --text: #16161a; --text-2: #55555e; --text-3: #78787f; --text-4: #9b9ba2;
-  --hi: #26262c; --tint: 22,22,26;
-  --edge: #dcdce1; --scroll: #c4c4cb; --dot-idle: #cdcdd4;
-}
-
-/* ── Tema Papel · tinta sobre folha quente ─────────────────────── */
-:root[data-theme="papel"][data-mode="dark"] {
-  --bg: #14110d; --surface: #1e1a14; --surface-2: #191510; --surface-3: #221d16;
-  --sunken: #0e0c08;
-  --text: #f2ebdd; --text-2: #b3a894; --text-3: #8b8172; --text-4: #665e51;
-  --hi: #e8dcc4; --tint: 242,235,221;
-  --edge: #322b21; --scroll: #3e372b; --dot-idle: #393228;
-}
-:root[data-theme="papel"][data-mode="light"] {
-  --bg: #f4f0e6; --surface: #fffdf6; --surface-2: #ebe6d9; --surface-3: #faf7ee;
-  --sunken: #e6e0d0;
-  --text: #29251e; --text-2: #61594b; --text-3: #837a68; --text-4: #a39984;
-  --hi: #3c352a; --tint: 41,37,30;
-  --edge: #ddd5c4; --scroll: #c7bda8; --dot-idle: #d2cab8;
-}
-
-/* ── Tema Altium · azul de placa e o âmbar da barra de ferramentas ─ */
-:root[data-theme="altium"][data-mode="dark"] {
-  --bg: #0b0f16; --surface: #131a24; --surface-2: #101722; --surface-3: #151f2b;
-  --sunken: #070a0f;
-  --text: #e6edf6; --text-2: #99a8bc; --text-3: #73829a; --text-4: #54627a;
-  --hi: #e9a63f; --tint: 230,237,246;
-  --edge: #212f43; --scroll: #2b3b52; --dot-idle: #293649;
-}
-:root[data-theme="altium"][data-mode="light"] {
-  --bg: #edf1f7; --surface: #ffffff; --surface-2: #e2e8f1; --surface-3: #f7f9fc;
-  --sunken: #dce3ed;
-  --text: #0f1721; --text-2: #495667; --text-3: #6c7a8c; --text-4: #929fb0;
-  --hi: #9a5a05; --tint: 15,23,33;
-  --edge: #d2dae5; --scroll: #b7c2d0; --dot-idle: #c5ceda;
-}
-
-/* ── Tema Placa · máscara verde e o dourado do ENIG ────────────── */
-:root[data-theme="placa"][data-mode="dark"] {
-  --bg: #08120e; --surface: #0f1f18; --surface-2: #0c1913; --surface-3: #11231b;
-  --sunken: #050c09;
-  --text: #e6f2e9; --text-2: #92ac9d; --text-3: #6d8678; --text-4: #516459;
-  --hi: #d9b45c; --tint: 230,242,233;
-  --edge: #1c3228; --scroll: #263f35; --dot-idle: #22372c;
-}
-:root[data-theme="placa"][data-mode="light"] {
-  --bg: #edf4ee; --surface: #ffffff; --surface-2: #e1ebe4; --surface-3: #f6faf7;
-  --sunken: #dae6dd;
-  --text: #0e1b14; --text-2: #47574d; --text-3: #6a7c71; --text-4: #90a197;
-  --hi: #6f5210; --tint: 14,27,20;
-  --edge: #cfddd4; --scroll: #b5c7bb; --dot-idle: #c2d2c7;
-}
-
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
 body { font: 400 15px/1.55 var(--font); }
@@ -884,27 +741,6 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
 .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 80; display: none; align-items: center; gap: 9px; padding: 9px 14px; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-menu); font-size: 13px; }
 .toast.on { display: flex; }
 </style>
-<script>
-/* Tema ANTES da primeira pintura: lido aqui, no <head>, para a página não abrir
-   escura e clarear meio segundo depois. O menu de configuração escreve nos mesmos
-   dois atributos; "auto" resolve para o modo do sistema operacional. */
-(function () {
-  var r = document.documentElement, m = null, t = null, f = null;
-  try {
-    m = localStorage.getItem('altiumhub.mode');
-    t = localStorage.getItem('altiumhub.theme');
-    f = localStorage.getItem('altiumhub.font');
-  } catch (e) {}
-  /* Sem nada guardado o hub abre Escuro/Altium: e o padrao DA CASA, nao o do sistema.
-     "auto" so entra em cena depois que alguem escolheu "auto" na configuracao — por isso
-     os dois ifs sao separados, e nao um "!m || m === 'auto'" so. */
-  if (!m) m = 'dark';
-  if (m === 'auto') m = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  r.dataset.mode = m === 'light' ? 'light' : 'dark';
-  r.dataset.theme = t || 'altium';
-  r.dataset.font = f || 'inter';   /* só o identificador; a pilha da família mora no CSS */
-})();
-</script>
 </head>
 <body>
 <div id="app">
@@ -4367,6 +4203,9 @@ function skinSet(patch) {
   skinApply();
 }
 sysLight.addEventListener('change', () => { if (skin.mode === 'auto') skinApply(); });
+/* outra janela do hub trocou o tema: o hub-tema.js ja repintou esta; o `skin` acompanha, senao a
+   proxima troca daqui (so a fonte, por exemplo) reaplicaria o modo e o tema velhos */
+window.addEventListener('storage', e => { for (const k in SKIN_KEY) if (e.key === SKIN_KEY[k] && e.newValue) skin[k] = e.newValue; });
 skinApply();
 
 /* ═══ MODAL DE CONFIGURAÇÃO ════════════════════════════════════

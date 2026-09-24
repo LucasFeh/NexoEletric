@@ -3,16 +3,48 @@
 <head>
 <meta charset="utf-8">
 <title>PCB — EletricHUB</title>
+<!-- a mesma Inter do hub, para a fonte escolhida nas Configuracoes valer aqui tambem; se a rede
+     nao responder, cai no system-ui sem quebrar nada -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<!-- o tema do hub: os tokens (hub-tema.css) e quem escolhe o tema antes da primeira pintura e
+     o troca ao vivo quando ele muda nas Configuracoes do hub (hub-tema.js, sincrono) -->
+<link rel="stylesheet" href="hub-tema.css">
+<script src="hub-tema.js"></script>
 <style>
+  /* PONTE PARA O TEMA DO HUB. Esta vista tinha um escuro proprio e ficava avulsa quando o tema
+     do hub mudava; agora os nomes dela apontam para os tokens do hub-tema.css. --bg, --scroll,
+     --ok, --warn, --err, --font e o color-scheme sao os do proprio hub. Cor fixa (hex) nesta
+     folha so a da legenda da bandeira azul (.annitem.info, a mesma ANN_COLORS.info que o canvas
+     pinta); as cores de camada e o fundo preto da placa moram no pcbframe.js e ficam fora do
+     tema, como no Altium. */
   :root{
-    color-scheme:dark;
-    --bg:#1b1b1b; --panel:#242424; --panel2:#2d2d2d; --border:#3a3a3a;
-    --fg:#d8d8d8; --fg-dim:#9a9a9a; --accent:#4fc3f7;
-    --ok:#00e676; --warn:#ffd54f; --err:#ff5252; --chg:#ffe082;
+    --panel:var(--surface-2); --panel2:var(--surface); --border:var(--edge);
+    --fg:var(--text); --fg-dim:var(--text-2); --accent:var(--hi);
+    --chg:var(--warn);     /* o que o changes.js mexeu: o amarelo de aviso do tema */
   }
   *{box-sizing:border-box; margin:0; padding:0;}
   html,body{height:100%; overflow:hidden;}
-  body{background:var(--bg); color:var(--fg); font:13px/1.45 "Segoe UI",sans-serif;}
+  /* barra de rolagem no tema da pagina — a mesma receita do hub e da vista Esquema: polegar
+     arredondado com uma borda da cor do painel, trilho invisivel. O Chrome ignora os
+     ::-webkit-scrollbar quando scrollbar-color esta definido, por isso a forma padrao
+     (Firefox) fica atras do @supports. */
+  ::-webkit-scrollbar{width:10px; height:10px;}
+  ::-webkit-scrollbar-thumb{background:var(--scroll); border-radius:8px; border:3px solid var(--panel);}
+  ::-webkit-scrollbar-thumb:hover{background:var(--fg-dim);}
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner{background:transparent;}
+  @supports not selector(::-webkit-scrollbar){
+    *{scrollbar-width:thin; scrollbar-color:var(--scroll) transparent;}
+  }
+  /* foco no destaque do tema, como no hub (o anel azul do navegador ficava avulso) */
+  /* checkbox e radio nativos nao mostram border-color: eles levam o anel, como os botoes */
+  button:focus-visible, input[type=checkbox]:focus-visible, input[type=radio]:focus-visible{
+    outline:2px solid var(--accent); outline-offset:1px;}
+  input:not([type=checkbox]):not([type=radio]):focus-visible, select:focus-visible, textarea:focus-visible{
+    outline:none; border-color:var(--accent);}
+  body{background:var(--bg); color:var(--fg); font:13px/1.45 var(--font);}
+  /* o navegador da aos controles a fonte do sistema; aqui eles seguem a fonte do tema */
+  button,input,select,textarea{font-family:inherit;}
 
   #header{display:flex; align-items:center; gap:10px; height:42px; padding:0 12px;
     background:var(--panel); border-bottom:1px solid var(--border);}
@@ -21,8 +53,9 @@
   #header .spacer{flex:1;}
   button{background:var(--panel2); color:var(--fg); border:1px solid var(--border);
     border-radius:3px; padding:4px 10px; font-size:12px; cursor:pointer; white-space:nowrap;}
-  button:hover{border-color:var(--accent); color:#fff;}
-  button.active{background:#0d47a1; border-color:var(--accent); color:#fff;}
+  button:hover{border-color:var(--accent); color:var(--fg);}
+  /* ligado (ferramenta, Grade, Diff) e "tem o que salvar": o destaque do tema preenchido */
+  button.active{background:var(--hi); border-color:var(--hi); color:var(--on-hi);}
   select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;}
 
   #main{display:flex; height:calc(100% - 76px);}
@@ -49,29 +82,33 @@
   .section h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); margin-bottom:6px;}
   .layerrow{display:flex; align-items:center; gap:7px; padding:2px 0; cursor:pointer; user-select:none;}
   .layerrow input{accent-color:var(--accent);}
-  .swatch{width:14px; height:10px; border-radius:2px; display:inline-block;}
+  /* a amostra e a cor da camada (desenho, fica); o contorno do tema a separa do painel claro,
+     onde o Multi cinza e o overlay amarelo quase sumiam */
+  .swatch{width:14px; height:10px; border-radius:2px; display:inline-block; box-shadow:0 0 0 1px var(--line);}
   .changeitem,.valitem{padding:4px 6px; margin:2px 0; border-radius:3px; background:var(--panel2);
     cursor:pointer; font-size:12px; border-left:3px solid transparent; word-break:break-word;}
-  .changeitem:hover,.valitem:hover{background:#383838;}
+  .changeitem:hover,.valitem:hover{background:rgba(var(--tint),0.08);}
   .changeitem.ok{border-left-color:var(--ok);}
   .changeitem.warn,.valitem.warn{border-left-color:var(--warn);}
   .changeitem.err,.valitem.err{border-left-color:var(--err);}
   .annitem{padding:4px 6px; margin:2px 0; border-radius:3px; background:var(--panel2);
     cursor:pointer; font-size:12px; border-left:3px solid transparent; word-break:break-word;}
-  .annitem:hover{background:#383838;}
+  .annitem:hover{background:rgba(var(--tint),0.08);}
   .annitem.err{border-left-color:var(--err);}
   .annitem.warn{border-left-color:var(--warn);}
-  .annitem.info{border-left-color:var(--accent);}
+  /* a nota e a bandeira AZUL da placa (ANN_COLORS.info no pcbframe.js); o destaque do tema
+     seria ambar no Altium e confundiria com o amarelo de atencao */
+  .annitem.info{border-left-color:#4fc3f7;}
   .annitem.resolved{opacity:.5;}
   .annitem .annx{float:right; color:var(--fg-dim); padding:0 4px; cursor:pointer;}
   .annitem .annx:hover{color:var(--err);}
-  #infopanel{font-family:Consolas,monospace; font-size:11px; white-space:pre-wrap; word-break:break-all; color:#bde0bd;}
+  #infopanel{font-family:var(--mono); font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--fg);}
 
   #center{flex:1; display:flex; flex-direction:column; min-width:0;}
   #canvaswrap{flex:1; position:relative; min-height:0;}
   canvas{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair;}
   #statusbar{height:26px; display:flex; align-items:center; gap:18px; padding:0 12px;
-    background:var(--panel); border-top:1px solid var(--border); font-family:Consolas,monospace;
+    background:var(--panel); border-top:1px solid var(--border); font-family:var(--mono);
     font-size:12px; color:var(--fg-dim); white-space:nowrap; overflow:hidden;}
   #statusbar b{color:var(--fg); font-weight:normal;}
 
@@ -82,14 +119,15 @@
     border-radius:3px; padding:4px 8px; font-size:12px; min-width:0;}
   #tablewrap{flex:1; overflow:auto;}
   table{border-collapse:collapse; width:100%; font-size:12px;}
-  th,td{padding:3px 7px; text-align:left; border-bottom:1px solid #333; white-space:nowrap;}
+  th,td{padding:3px 7px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap;}
   th{position:sticky; top:0; background:var(--panel2); cursor:pointer; user-select:none; z-index:1;}
   th:hover{color:var(--accent);}
   tbody tr{cursor:pointer;}
-  tbody tr:hover{background:#333;}
-  tbody tr.sel{background:#0d47a1;}
-  td.num{text-align:right; font-family:Consolas,monospace;}
-  td.chg{background:rgba(255,224,130,.18); color:var(--chg);}
+  tbody tr:hover{background:rgba(var(--tint),0.06);}
+  /* linha selecionada como a arvore do hub: veu + filete do destaque na quina */
+  tbody tr.sel{background:rgba(var(--tint),0.12); box-shadow:inset 2px 0 0 var(--hi);}
+  td.num{text-align:right; font-family:var(--mono);}
+  td.chg{background:var(--warn-soft); color:var(--chg);}
   tbody tr.moved td:first-child{color:var(--chg);}
 
   #proprows label{display:flex; align-items:center; gap:6px; margin:3px 0; font-size:12px; color:var(--fg-dim);}
@@ -97,14 +135,14 @@
   #proprows input, #proprows select{flex:1; background:var(--panel); color:var(--fg);
     border:1px solid var(--border); border-radius:3px; padding:3px 5px; font-size:12px; min-width:0;}
 
-  #help{position:absolute; inset:30px; background:rgba(20,20,20,.96); border:1px solid var(--border);
-    border-radius:6px; padding:24px 30px; overflow:auto; display:none; z-index:10;}
+  #help{position:absolute; inset:30px; background:var(--panel2); border:1px solid var(--border);
+    border-radius:6px; padding:24px 30px; overflow:auto; display:none; z-index:10; box-shadow:var(--shadow-menu);}
   #help h2{color:var(--accent); margin-bottom:10px;}
   #help h3{color:var(--fg); margin:14px 0 4px;}
   #help p,#help li{color:var(--fg-dim); font-size:13px;}
   #help ul{padding-left:20px;}
-  #help kbd{background:var(--panel2); border:1px solid var(--border); border-radius:3px; padding:0 5px;
-    font-family:Consolas,monospace; font-size:12px; color:var(--fg);}
+  #help kbd{background:var(--panel); border:1px solid var(--border); border-radius:3px; padding:0 5px;
+    font-family:var(--mono); font-size:12px; color:var(--fg);}
   #fatal{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     color:var(--err); font-size:15px; text-align:center; padding:40px; z-index:20; background:var(--bg);}
 </style>
@@ -171,17 +209,18 @@
         <h3>Diff</h3>
         <ul>
           <li>Tracejado — posição/geometria original de objeto alterado</li>
-          <li>Contorno <span style="color:#00e676">verde</span> — objeto adicionado</li>
-          <li><span style="color:#ff5252">Vermelho</span> — objeto removido</li>
+          <li>Contorno <span style="color:var(--ok)">verde</span> — objeto adicionado</li>
+          <li><span style="color:var(--err)">Vermelho</span> — objeto removido</li>
         </ul>
         <p style="margin-top:14px">Feche com <kbd>H</kbd> ou clicando aqui.</p>
       </div>
       <div id="fatal"></div>
       <div id="annform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
-           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
+           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;
+           box-shadow:var(--shadow-menu);">
         <textarea id="anntext" rows="2" placeholder="problema (ex: trilha muito proxima)"
           style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-                 border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px; resize:vertical;"></textarea>
+                 border-radius:3px; font:12px var(--font); padding:4px; resize:vertical;"></textarea>
         <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
           <select id="annsev" style="background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px;">
             <option value="err">vermelho (erro)</option>
@@ -194,18 +233,19 @@
         </div>
       </div>
       <div id="viaform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
-           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:220px;">
+           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:220px;
+           box-shadow:var(--shadow-menu);">
         <div style="display:flex; gap:6px; margin-bottom:6px;">
           <label style="flex:1">size <input id="viasize" type="number" step="0.05" min="0.1" value="0.6"
             style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-                   border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px;"></label>
+                   border-radius:3px; font:12px var(--font); padding:4px;"></label>
           <label style="flex:1">drill <input id="viadrill" type="number" step="0.05" min="0.05" value="0.3"
             style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-                   border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px;"></label>
+                   border-radius:3px; font:12px var(--font); padding:4px;"></label>
         </div>
         <input id="vianet" list="netlist-dl" placeholder="net (opcional)"
           style="width:100%; margin-bottom:6px; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-                 border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px;">
+                 border-radius:3px; font:12px var(--font); padding:4px;">
         <datalist id="netlist-dl"></datalist>
         <div style="display:flex; gap:6px; justify-content:flex-end;">
           <button id="viaok">OK</button>
@@ -213,7 +253,8 @@
         </div>
       </div>
       <div id="propform" style="display:none; position:absolute; top:10px; right:10px; z-index:16;
-           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:250px;">
+           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:250px;
+           box-shadow:var(--shadow-menu);">
         <div id="proptitle" style="color:var(--accent); font-size:12px; margin-bottom:6px;"></div>
         <div id="proprows"></div>
         <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:6px;">
