@@ -569,8 +569,8 @@ begin
   end;
   Cand.Free;
 
-  Resposta := SemBarraFinal(InputBox('AltiumPCBMirror',
-    'Nao achei o workspace do AltiumPCBMirror nesta maquina.' + #13#10 +
+  Resposta := SemBarraFinal(InputBox('EletricHUB',
+    'Nao achei o workspace do EletricHUB nesta maquina.' + #13#10 +
     'Procurei o ' + HOME_MARCA + ' em:' + #13#10 + Tentei +
     'Digite a RAIZ do workspace (a pasta que tem o ' + HOME_MARCA + '):',
     '\\192.168.15.192\altiumhub\current'));
@@ -584,7 +584,7 @@ begin
   if Resposta <> '' then
     Tentei := Tentei + '   ' + Resposta + '   (o que voce digitou)' + #13#10;
 
-  ShowMessage('Nao achei a raiz do workspace AltiumPCBMirror nesta maquina.' + #13#10 +
+  ShowMessage('Nao achei a raiz do workspace do EletricHUB nesta maquina.' + #13#10 +
     'Procurei o ' + HOME_MARCA + ' em:' + #13#10 + Tentei + #13#10 +
     'Crie ou corrija ' + HOME_CFG + ' com a linha:' + #13#10 +
     '   home=<a pasta que tem o ' + HOME_MARCA + '>' + #13#10#13#10 +
@@ -821,7 +821,7 @@ begin
   end;
   if Dirs.Count = 0 then
   begin
-    Answer := Trim(InputBox('AltiumPCBMirror',
+    Answer := Trim(InputBox('EletricHUB',
       'Nao consegui listar as pastas de ' + PROJECTS_DIR + '.' + #13#10 +
       '[' + ScanInfo + ']' + #13#10 +
       'Digite o NOME da pasta do projeto (ou cancele):', WantedName));
@@ -841,7 +841,7 @@ begin
     'Digite o NUMERO do projeto a usar:' + #13#10;
   for i := 0 to Dirs.Count - 1 do
     ListStr := ListStr + IntToStr(i + 1) + ' = ' + Dirs[i] + #13#10;
-  Answer := InputBox('AltiumPCBMirror', ListStr, '1');
+  Answer := InputBox('EletricHUB', ListStr, '1');
   Choice := SafeStrToInt(Answer);
   if (Choice >= 1) and (Choice <= Dirs.Count) then
     Result := PROJECTS_DIR + '\' + Dirs[Choice - 1];
@@ -2813,7 +2813,7 @@ function ConfirmTypedYes(Msg: String): Boolean;
 var
   s: String;
 begin
-  s := Trim(InputBox('AltiumPCBMirror', Msg + #13#10#13#10 + 'Digite SIM para confirmar:', ''));
+  s := Trim(InputBox('EletricHUB', Msg + #13#10#13#10 + 'Digite SIM para confirmar:', ''));
   Result := (AnsiCompareText(s, 'SIM') = 0);
 end;
 
@@ -2940,7 +2940,7 @@ begin
   end;
 
   F := TForm.Create(nil);
-  F.Caption := 'AltiumPCBMirror - onde despejar "' + SheetName + '"';
+  F.Caption := 'EletricHUB - onde despejar "' + SheetName + '"';
   F.Width := 620;
   F.Height := 360;
   Lbl := TLabel.Create(F);
@@ -3302,7 +3302,7 @@ begin
   ProjFolder := ExtractFilePath(Prj.DM_ProjectFullPath);
 
   Report := TStringList.Create;
-  Report.Add('AltiumPCBMirror - BuildSchematic');
+  Report.Add('EletricHUB - BuildSchematic');
   Report.Add('Projeto: ' + Prj.DM_ProjectFullPath);
   Report.Add('Fonte:   ' + SchFile);
   Report.Add('Data:    ' + DateTimeToStr(Now));
