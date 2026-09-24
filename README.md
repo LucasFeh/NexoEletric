@@ -265,10 +265,10 @@ Casca única com:
   da placa para gravar no LightBurn — detalhes abaixo) e Histórico (linha do tempo a partir de `build-report.txt`/
   `apply-report.txt`/datas de `board.js`/`schematic.js`, mais um `history.jsonl` opcional por
   projeto).
-- **Configurações** — clicar na **marca**, na quina superior esquerda, abre um menuzinho
-  com **Configurações**; ele abre o modal, com quatro abas laterais. O cabeçalho ficou só
-  com a marca, o seletor de projeto e o estado do servidor: `ExportLibs`, `Reindexar` e o
-  **⋮** da barra do projeto, que viviam soltos ali, entraram para o modal.
+- **Configurações** — no app desktop, **Arquivo › Configurações do hub…**; no navegador, o
+  **⚙** no canto direito das abas, ao lado do chat (ali não há menu Arquivo). O modal tem
+  quatro abas laterais. `ExportLibs`, `Reindexar` e o **⋮** da barra do projeto, que viviam
+  soltos no antigo cabeçalho, entraram para ele.
   - **Projeto** (a primeira) — o projeto aberto e a exclusão. (A **pasta padrão do BOM**
     morava aqui; saiu quando o BOM virou link e deixou de existir arquivo para pôr em
     pasta alguma — veja *BOM* mais abaixo.) **Excluir projeto** fica atrás da **senha
@@ -300,10 +300,10 @@ Casca única com:
     aqui que mora o fluxo inteiro: o rodapé **fluxo** e o botão de próximo passo
     (*Compile + Update PCB* e companhia) saíram da casca porque repetiam esta aba.
 
-  A casca é **uma faixa só**: cabeçalho com a marca, o seletor de projeto, o estágio
-  (esquema · eco · roteada · aplicada) e o estado do servidor — depois as abas e a folha.
-  A barra do projeto saiu inteira: o nome e o caminho já estavam no seletor ao lado, e o
-  botão de próximo passo mudou para a configuração. São ~130 px a mais de folha.
+  **Sem cabeçalho**: com o painel Projetos (logo abaixo), a faixa de cima some e ficam as
+  abas e a folha. O estágio (esquema · eco · roteada · aplicada), as pendências e o estado
+  do servidor vão para a barra de status. A barra do projeto também saiu: o nome e o
+  caminho estão no painel, e o botão de próximo passo mudou para a configuração.
 
   A tradução cobre a casca (cabeçalho, abas, diálogos e o
   próprio modal); os painéis Laser, BOM e Neoden seguem em português. O dicionário é o
@@ -315,9 +315,10 @@ Casca única com:
   gaveta dele (e abre o projeto, se for outro); clicar de novo fecha. **Fechar todos os
   projetos** recolhe todas as gavetas. O **botão direito** num projeto abre um menu com
   **Excluir projeto…** — o mesmo diálogo da aba Projeto das configurações (senha mestre,
-  pasta para `Trash\`), só que para o projeto clicado, que não precisa ser o aberto. Com
-  esse painel, a faixa do cabeçalho some: o estágio e as pendências vão para a barra de
-  status, e o chat e as configurações (⚙) para o canto direito das abas.
+  pasta para `Trash\`), só que para o projeto clicado, que não precisa ser o aberto.
+  Clicar no cabeçalho **Projetos** recolhe o painel numa faixa fina, com o título em pé, e
+  clicar na faixa o traz de volta (no app, também **Exibir › Painel Projetos**, `Ctrl+Alt+P`).
+  A largura se ajusta arrastando a borda; duplo clique nela volta ao padrão.
 - **Sem servidor**, `hub.html` abre em **modo demonstração** (projetos fictícios, selo
   "demo" no seletor) — dados reais exigem `python hubserver.py` rodando (veja abaixo).
 
@@ -1053,10 +1054,11 @@ sistema desde 2026-09-24; o hub também se apresenta assim). Não é uma
 reescrita: o app sobe o próprio `hubserver.py` com um Python 3.12 embutido e o mostra
 numa janela. Tudo o que o hub do servidor faz, o app faz, só que nesta máquina.
 
-- **Instalação:** `AltiumHub-Setup-X.Y.Z.exe`, por usuário e sem administrador. O
+- **Instalação:** `EletricHUB-Setup-X.Y.Z.exe`, por usuário e sem administrador. O
   instalador não é assinado, então o Windows SmartScreen pede **Mais informações ›
   Executar assim mesmo** na primeira vez.
-- **Pasta de trabalho** (padrão `C:\AltiumHub`): recebe o código do hub e o estado da
+- **Pasta de trabalho** (padrão `C:\EletricHUB`; instalações de antes da 1.1.0 seguem em
+  `C:\AltiumHub`): recebe o código do hub e o estado da
   máquina (`Projects\`, `Libs\`, credenciais). A cada atualização o app repõe só o
   código, pelas mesmas regras do `tools/deploy/deploy.sh`.
 - **Importar do servidor** (Arquivo › Importar do servidor): traz projetos, bibliotecas
@@ -1068,6 +1070,10 @@ numa janela. Tudo o que o hub do servidor faz, o app faz, só que nesta máquina
 - **Altium:** as configurações podem apontar o `home.txt` dos scripts para a pasta
   local. Depois disso, rode os scripts pelo `AltiumPCBMirror.PrjScr` da pasta de
   trabalho.
+- **Menus:** as configurações do hub (tema, idioma, atalhos, Odoo, exclusão de projeto)
+  abrem por **Arquivo › Configurações do hub…** — no app o ⚙ do canto das abas não existe;
+  as do próprio app (pasta de trabalho, porta, rede) por **Arquivo › Configurações do
+  aplicativo…** (`Ctrl+,`).
 - **Atualização automática** pelos releases deste repositório no GitHub.
 
 Build, release, tokens e o porquê de cada escolha estão em
