@@ -3,6 +3,10 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.1.3 — 2026-09-24
+
+- Vista Esquema: a lista de **Validação** saiu das Configurações. A validação continua valendo (é ela que impede salvar um esquema inválido), só não é mais listada no painel.
+
 ## 1.1.2 — 2026-09-24
 
 - Painel Projetos: botão direito num projeto abre um menu com **Excluir projeto…** (e abrir o projeto, abrir/fechar a gaveta). É o mesmo diálogo das Configurações do hub — senha mestre, a pasta vai para `Trash\` —, agora para o projeto clicado, mesmo que não seja o aberto.
