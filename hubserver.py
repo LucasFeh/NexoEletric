@@ -983,6 +983,47 @@ def api_bom_opts_set(proj_id):
     return {'ok': True}
 
 
+# O BOM que vale para a bancada pode morar noutro hub. O app desktop (electron/) roda um hub
+# por PC, mas a referencia -- o projeto que a producao usa e os vistos que os tablets
+# compartilham -- e o hub do servidor: com ALTIUMHUB_BOM_LINK=http://192.168.15.192:8100 o
+# link copiado e o "abrir" apontam para la. Sem a variavel (o proprio servidor), nada muda.
+BOM_LINK_BASE = (os.environ.get('ALTIUMHUB_BOM_LINK') or '').strip().rstrip('/')
+
+
+def _bom_na_referencia(proj_id):
+    """O hub de referencia tem o BOM deste projeto? True/False, ou None se nao respondeu.
+
+    HEAD em /bom/<id>: la ele e 404 para projeto desconhecido E para projeto sem board.js,
+    que sao exatamente os dois casos em que o link copiado abriria um erro no tablet.
+    """
+    import urllib.error
+    import urllib.request
+    try:
+        req = urllib.request.Request(BOM_LINK_BASE + '/bom/' + proj_id, method='HEAD')
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return resp.status == 200
+    except urllib.error.HTTPError as e:
+        return False if e.code == 404 else None
+    except Exception:                                    # noqa: BLE001 (rede, DNS, timeout)
+        return None
+
+
+def _bom_opts_para_referencia(d, proj_id):
+    """Leva as opcoes do BOM gravadas aqui para o hub de referencia. Falhar e silencioso: o
+    link abre do mesmo jeito, so com as opcoes de la."""
+    import urllib.request
+    opts = _bom_json_read(d, BOM_OPTS) if d else {}
+    if not opts:
+        return
+    try:
+        req = urllib.request.Request(BOM_LINK_BASE + '/api/bom/' + proj_id + '/opts',
+                                     data=json.dumps({'opts': opts}).encode('utf-8'),
+                                     headers={'Content-Type': 'application/json'}, method='POST')
+        urllib.request.urlopen(req, timeout=3).close()
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
 @app.route('/api/bom/<proj_id>/link')
 def api_bom_link(proj_id):
     """A URL do BOM deste projeto, no endereco que serve para OUTRA maquina.
@@ -994,6 +1035,23 @@ def api_bom_link(proj_id):
     """
     if _proj_dir_by_id(proj_id) is None:
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    if BOM_LINK_BASE:
+        # O BOM de referencia e o do OUTRO hub (o do servidor): e la que a bancada inteira
+        # abre e marca os vistos. O slug e o mesmo dos dois lados (_proj_id).
+        r = {'ok': True, 'url': BOM_LINK_BASE + '/bom/' + proj_id, 'lan': True, 'trocado': False,
+             'externo': True}
+        if request.args.get('verificar') != '0':
+            tem = _bom_na_referencia(proj_id)
+            if tem:
+                # As opcoes da aba (tema, lados, colunas) acabaram de ser gravadas AQUI pelo
+                # copiarLink; o link abre LA. Repassa, como faria quem copiasse no servidor.
+                _bom_opts_para_referencia(_proj_dir_by_id(proj_id), proj_id)
+            if tem is False:
+                r['aviso'] = ('o servidor nao tem este projeto (ou ele esta sem board.js): o link '
+                              'abre um erro la ate o projeto chegar ao servidor')
+            elif tem is None:
+                r['aviso'] = 'o servidor nao respondeu agora; o link e o dele, confira quando ele voltar'
+        return r
     host, _, porta = request.host.partition(':')
     trocado = False
     # Escutando so em 127.0.0.1 (app desktop sem "compartilhar na rede"), o IP de rede

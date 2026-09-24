@@ -2080,6 +2080,18 @@ const filename = proj => sane(proj || 'placa') + '-BOM.html';
    que quem gerou escolheu. */
 const linkDe = projId => '/bom/' + encodeURIComponent(projId || '');
 
+/* O endereco do BOM de REFERENCIA quando ele mora noutro hub: no app desktop, o do servidor
+   (hubserver.py » ALTIUMHUB_BOM_LINK), que e onde a bancada abre e marca os vistos. null =
+   o BOM e deste hub mesmo (o caso do servidor), e vale o linkDe relativo. Sem conferencia
+   no servidor (verificar=0): serve para o rodape e o "abrir", que nao podem esperar a rede. */
+async function linkRef(projId){
+  try {
+    const r = await fetch('/api/bom/' + encodeURIComponent(projId || '') + '/link?verificar=0');
+    const j = r.ok ? await r.json() : null;
+    return j && j.ok && j.externo ? j.url : null;
+  } catch (e) { return null; }
+}
+
 /* navigator.clipboard existe so em contexto seguro, e o hub aberto pelo IP da rede
    (http://192.168.x.x:8001) NAO e um - que e exatamente o caso de quem abre do tablet.
    Por isso o textarea + execCommand continua aqui: nao e legado, e o caminho principal
@@ -2124,7 +2136,8 @@ async function copiarLink(projId, opts){
     j = await r.json();
   } catch (e) { return { ok: false, error: 'servidor nao respondeu: ' + e.message }; }
   if (!j || !j.ok) return { ok: false, error: (j && j.error) || 'nao consegui montar o link' };
-  return { ok: true, url: j.url, copiou: await paraAreaDeTransferencia(j.url), lan: !!j.lan };
+  return { ok: true, url: j.url, copiou: await paraAreaDeTransferencia(j.url), lan: !!j.lan,
+           externo: !!j.externo, aviso: j.aviso || '' };
 }
 
 /* porta unica da aba: do board.js ao arquivo, num passo */
@@ -2133,6 +2146,6 @@ function gerar(board, opts, meta){
   return { html: html(m, meta), model: m, warnings: m.warnings };
 }
 
-return { defaults, model, html, filename, gerar, copiarLink, linkDe,
+return { defaults, model, html, filename, gerar, copiarLink, linkDe, linkRef,
          textoPolys, padGeom, ladoDe, natural, COR };
 });

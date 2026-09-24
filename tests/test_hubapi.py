@@ -178,6 +178,56 @@ try:
     assert cli.get('/api/bom/%s/opts' % pid).get_json()['opts'] == {'dark': False}
     assert cli.post('/api/bom/%s/opts' % pid, json={'opts': 'nao'}).status_code == 400
 
+    # BOM de REFERENCIA noutro hub (app desktop -> o do servidor .192): o link copiado e o do
+    # outro hub, conferido la, e as opcoes da aba vao junto. Um servidor de mentira faz o .192.
+    import http.server
+    import threading as _th
+    visto = {'head': [], 'opts': []}
+
+    class Ref(http.server.BaseHTTPRequestHandler):
+        def do_HEAD(self):
+            visto['head'].append(self.path)
+            self.send_response(200 if self.path == '/bom/' + pid else 404)
+            self.end_headers()
+
+        def do_POST(self):
+            corpo = self.rfile.read(int(self.headers.get('Content-Length') or 0))
+            visto['opts'].append((self.path, json.loads(corpo)))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    ref = http.server.HTTPServer(('127.0.0.1', 0), Ref)
+    _th.Thread(target=ref.serve_forever, daemon=True).start()
+    base_antes = H.BOM_LINK_BASE
+    try:
+        H.BOM_LINK_BASE = 'http://127.0.0.1:%d' % ref.server_port
+        j = cli.get('/api/bom/%s/link' % pid).get_json()
+        assert j['ok'] and j['externo'] and j['url'] == H.BOM_LINK_BASE + '/bom/' + pid, j
+        assert 'aviso' not in j, 'o projeto existe na referencia: sem aviso'
+        assert visto['opts'] == [('/api/bom/%s/opts' % pid, {'opts': {'dark': False}})], \
+            'as opcoes da aba vao para o hub onde o link abre'
+        n = len(visto['head'])
+        j = cli.get('/api/bom/%s/link?verificar=0' % pid).get_json()
+        assert j['url'].startswith(H.BOM_LINK_BASE) and len(visto['head']) == n, \
+            'rodape e "abrir" nao esperam a rede'
+        # a referencia nao tem o projeto (ou nao tem board.js): o link ainda e o dela, com aviso
+        antes_pid = pid
+        visto['head'].clear()
+        Ref.do_HEAD = lambda self: (self.send_response(404), self.end_headers())
+        j = cli.get('/api/bom/%s/link' % antes_pid).get_json()
+        assert j['url'].startswith(H.BOM_LINK_BASE) and 'nao tem este projeto' in j['aviso'], j
+        # referencia fora do ar
+        H.BOM_LINK_BASE = 'http://127.0.0.1:1'
+        j = cli.get('/api/bom/%s/link' % pid).get_json()
+        assert j['url'] == 'http://127.0.0.1:1/bom/' + pid and 'nao respondeu' in j['aviso'], j
+    finally:
+        H.BOM_LINK_BASE = base_antes
+        ref.shutdown()
+    assert 'externo' not in cli.get('/api/bom/%s/link' % pid).get_json(), 'sem a variavel, o de sempre'
+
     # O estado da bancada NAO pode entrar no watcher: ele muda a cada visto marcado, e o
     # SSE recarregaria todas as paginas abertas - no meio da montagem, que e quando
     # ninguem pode perder a tela de vista.
