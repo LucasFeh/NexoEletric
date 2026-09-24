@@ -4711,6 +4711,16 @@ async function selectProject(id) {
      qualquer coisa suja ele fica suprimido, como antes — quem avisa e quem salva é o
      usuário. */
 window.__hubOnChange = async function () {
+  /* HUB QUE ABRIU SEM PROJETO NENHUM (pasta nova: antes do primeiro export do Altium, ou de
+     uma importacao do servidor no app desktop). Nao ha o que recarregar no lugar — o
+     renderTabs abaixo le proj().stats e quebrava aqui com "reading 'stats'", antes de
+     buscar o indice: a lista ficava vazia ate alguem apertar F5. Chegou projeto: a pagina
+     recomeca, como no F5. */
+  if (!proj()) {
+    const idx = await API.index();
+    if (idx.projects && idx.projects.length) location.reload();
+    return;
+  }
   /* a receita de invalidação é a mesma do onApplied do libsync (a sincronização com o
      Altium): cache por acervo fora, ?v= novo para furar o cache do browser, tabelas de
      apelido de novo e o editor de símbolos relendo o espelho */
