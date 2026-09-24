@@ -282,16 +282,21 @@ Casca única com:
     Grafite (o de sempre) · Papel · Altium · Placa. **Linguagem**: Português ou English.
     **Fonte**: Inter · Do sistema · Bancada (Verdana, de altura-x grande, para ler de um
     passo atrás) · Monoespaçada. Os quatro são atributos no `<html>`
-    (`data-mode`/`data-theme`/`data-font`) já lidos no `<head>`, então a página não abre
-    de um jeito para virar no primeiro frame — e as pilhas de família moram no CSS, não
-    no JS, para não existirem em dois lugares. As vistas Esquema e PCB e a prévia do BOM
-    seguem escuras e com fonte própria: é a cor de trabalho do Altium, e elas têm folha
-    de estilo separada.
-  - **Atalhos** — as teclas da vista Esquema, com os gestos do mouse em cima. Clique na
-    tecla e pressione a nova (`Esc` desiste); **Restaurar o padrão** desfaz tudo. A lista
-    sai da mesma tabela que o teclado da vista lê (`hub-atalhos.js`), e a troca vale na
-    hora, inclusive para a vista Esquema que já estiver aberta. Até a 1.1.1 do app isto era
-    uma sub-aba da própria vista.
+    (`data-mode`/`data-theme`/`data-font`) já lidos no `<head>` pelo `hub-tema.js`, então
+    a página não abre de um jeito para virar no primeiro frame — e as cores e as pilhas de
+    família moram no `hub-tema.css`, não no JS, para não existirem em dois lugares. As
+    vistas **Esquema e PCB seguem o mesmo tema** (carregam os dois arquivos) e trocam ao
+    vivo quando ele muda aqui, sem recarregar a folha. Fica de fora só o que é desenho: a
+    folha do Altium com o que está nela, a seleção azul, e a placa com as camadas sobre o
+    fundo preto, como no Altium. A prévia do BOM continua escura.
+  - **Atalhos** — as teclas da vista Esquema, no molde do *Keyboard Shortcuts* do VSCode:
+    busca no topo (por texto, ou pelo botão de teclado, que pesquisa pela combinação
+    pressionada) e a tabela **Comando · Atalho · Quando · Origem**, com os gestos do mouse
+    como linhas fixas. Duplo clique numa linha (ou `Enter`, ou o lápis) abre a caixa
+    "pressione a combinação desejada e depois Enter", que avisa na hora tecla ocupada ou do
+    navegador; `Esc` desiste. Cada linha trocada tem o ↺ para voltar ao padrão, e
+    **Restaurar o padrão** desfaz tudo. A tabela sai da mesma lista que o teclado da vista
+    lê (`hub-atalhos.js`), e a troca vale na hora, inclusive para a vista Esquema aberta.
   - **Ações** — os tutoriais. Os 5 comandos do Altium documentados (comando real embaixo
     do rótulo, copiável) e, embaixo, o fluxo de um projeto novo do começo ao fim. Só
     **Rescan** executa de fato (reindexa `Projects\` no servidor); os demais
