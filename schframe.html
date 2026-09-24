@@ -523,6 +523,8 @@
             <svg viewBox="0 0 16 16"><path d="M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z"/><circle cx="8" cy="8" r="2.2"/><path d="M2.5 13.5 L13.5 2.5"/></svg></button>
           <button class="ibtn active" id="btnPinNames" aria-pressed="true" title="Nomes e numeros de pino visiveis — clique para obedecer o simbolo">
             <svg viewBox="0 0 16 16"><path d="M1 8h4.5"/><path d="M7.5 5h7M7.5 8h7M7.5 11h4.5"/></svg></button>
+          <!-- guias do arrasto (alinhamento, espaço igual, distância); o desenho do ícone e o título saem do schframe.js -->
+          <button class="ibtn active" id="btnGuias" aria-pressed="true"></button>
         </div>
         <!-- O PASSO DA GRADE. As folhas desta casa snapam em 1 mm ou 0,3 mm dentro do proprio
              Altium, e quase todo vertice de fio dos projetos reais esta fora da grade de 100
@@ -546,8 +548,14 @@
     <div class="pane" id="pane-atalhos">
       <div class="sec">
         <h2>Gestos</h2>
-        <div class="hint">Clique seleciona — no fio, o <b>trecho</b>; clique duplo pega o fio inteiro.
+        <div class="hint">Clique seleciona — no fio, o fio <b>inteiro</b>; um segundo clique no mesmo fio pega
+          só o <b>trecho</b> (ou o vértice, na alcinha). <kbd>Alt</kbd>+clique acende a net.
           Arraste move; arraste no vazio para selecionar vários. <kbd>Shift</kbd> soma à seleção.
+          Arrastando, <kbd>Shift</kbd> anda reto no trilho da guia que está pegando (sem guia, só na
+          horizontal ou na vertical) e <kbd>Ctrl</kbd> solta as guias.
+          Com o fio na mão (<kbd>W</kbd>): o clique fixa o canto, <kbd>Espaço</kbd> inverte o canto,
+          <kbd>Shift</kbd>+<kbd>Espaço</kbd> muda o modo (90°, 45°, livre), <kbd>Backspace</kbd> desfaz o canto,
+          e o botão direito ou <kbd>Esc</kbd> termina — de novo, larga a ferramenta.
           Botão direito arrasta a tela. <kbd>Esc</kbd> larga o que estiver na mão.</div>
       </div>
       <div class="sec">
@@ -786,6 +794,10 @@
 <script src="hub-odoolink.js"></script>
 <!-- escolher COMPONENTE do almoxarifado: modulo proprio, injeta o proprio CSS -->
 <script src="hub-almoxpick.js"></script>
+<!-- guias do arrasto (alinhamento, espaço igual, distância): motor puro, o schframe desenha -->
+<script src="hub-guias.js"></script>
+<!-- o traçado de fio como o do Altium: regra pura, o schframe liga ao mouse -->
+<script src="hub-fio.js"></script>
 <script src="schframe.js"></script>
 <!-- "Enviar para o Odoo": injeta o proprio botao, CSS e modal (nada mais aqui) -->
 <script src="hub-odoolista.js"></script>

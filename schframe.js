@@ -450,14 +450,23 @@ function topologiaFolha(fios, pinos, juncoes){
    Duas excecoes deliberadas: o fio de DOIS pontos anda inteiro (ali o trecho E o fio, e travar
    o unico trecho num eixo tiraria o gesto de mover o fio), e o trecho em diagonal — os que vem
    do Altium — anda livre, porque nele nao existe "a perpendicular certa". */
+/* Em que eixos o trecho i anda ('xy', so 'x' ou so 'y'). E a regra de cima, numa funcao so,
+   porque tres lugares precisam dela e tem de concordar: o moveSegmento (que move), as guias (que
+   nao podem prometer guia no eixo travado) e o Shift (que nao pode prender o unico eixo que
+   anda — o trecho congelava e a barra dizia "so na horizontal" de um trecho que so anda em Y). */
+function eixosDoTrecho(pts, i){
+  const a = (pts || [])[i], b = (pts || [])[i + 1];
+  if (!a || !b || pts.length === 2) return 'xy';
+  const horiz = Math.abs(b[1] - a[1]) <= STOL_SCH && Math.abs(b[0] - a[0]) > STOL_SCH;
+  const vert  = Math.abs(b[0] - a[0]) <= STOL_SCH && Math.abs(b[1] - a[1]) > STOL_SCH;
+  return horiz ? 'y' : vert ? 'x' : 'xy';
+}
 function moveSegmento(pts, i, dx, dy){
   const out = (pts || []).map(p => [p[0], p[1]]);
   const a = out[i], b = out[i+1];
   if (!a || !b) return out;
-  if (out.length === 2){ a[0] += dx; a[1] += dy; b[0] += dx; b[1] += dy; return out; }
-  const horiz = Math.abs(b[1] - a[1]) <= STOL_SCH && Math.abs(b[0] - a[0]) > STOL_SCH;
-  const vert  = Math.abs(b[0] - a[0]) <= STOL_SCH && Math.abs(b[1] - a[1]) > STOL_SCH;
-  const ux = horiz ? 0 : dx, uy = vert ? 0 : dy;
+  const ex = eixosDoTrecho(out, i);
+  const ux = ex.indexOf('x') >= 0 ? dx : 0, uy = ex.indexOf('y') >= 0 ? dy : 0;
   a[0] += ux; a[1] += uy; b[0] += ux; b[1] += uy;
   return out;
 }
@@ -649,10 +658,22 @@ function caixaTexto(x, y, txt, h){
   return { x1:x - folga, y1:y - folga, x2:x + larg + folga, y2:y + alt + folga };
 }
 
+/* a regra do designador do conector multiparte (veja designadorVisivel, na parte DOM): pura,
+   para o teste provar sem folha nem biblioteca */
+function designadorAparece(c, sym, part){
+  if ((c.part || 1) <= 1) return true;
+  /* so esconde quando a parte desenhada vai MOSTRAR o numero do pino no lugar: o conector sem
+     simbolo resolvido e um quadrado vermelho sem pino (134 partes em 3 projetos, medido em
+     2026-09-24), e escondido o designador ele virava um quadrado anonimo */
+  if (!part || !(part.pins || []).length) return true;
+  if (/^(CN|J|X)\d/i.test(c.ref || '')) return false;
+  return !(sym && (sym.parts || []).length > 1 && part && (part.pins || []).length === 1);
+}
+
 const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca, montaPartsTrocando,
                valorDoComp, tipoDoComp,
-               topologiaFolha, moveSegmento, apagaSegmento, apagaVertice, espelha, encaixeDaTroca,
-               GRADES, gradePorId, snapPasso, MM_MIL, caixaTexto, larguraTexto,
+               topologiaFolha, moveSegmento, eixosDoTrecho, apagaSegmento, apagaVertice, espelha, encaixeDaTroca,
+               GRADES, gradePorId, snapPasso, MM_MIL, caixaTexto, larguraTexto, designadorAparece,
                ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho };
 /* Em Node o arquivo acaba aqui: dali para baixo e tudo DOM. */
 if (typeof module !== 'undefined' && module.exports){ module.exports = PURE; return; }
@@ -797,7 +818,12 @@ const VER_REF_KEY = 'altiumhub.sch.ref';
 const PR_ABA_KEY = 'schframe.prAba';
 let prAba = 'geral';
 try { prAba = localStorage.getItem(PR_ABA_KEY) === 'pinos' ? 'pinos' : 'geral'; } catch (e) {}
-const showState = { grid:true, comment:false, pinos:true, ref:true };
+/* AS GUIAS DO ARRASTO nascem LIGADAS, e o botao delas mora na secao Vista das Configuracoes
+   (pedido de 2026-09-24). Desligadas, o arrasto volta a ser o de antes: o cursor, a grade ao
+   soltar e o ima do pino — que nao e guia, e continua. Preferencia de vista, desta maquina. */
+const VER_GUIAS_KEY = 'altiumhub.sch.guias';
+const showState = { grid:true, comment:false, pinos:true, ref:true, guias:true };
+try { showState.guias = localStorage.getItem(VER_GUIAS_KEY) !== '0'; } catch (e) {}
 try { showState.ref = localStorage.getItem(VER_REF_KEY) !== '0'; } catch (e) {}
 try { showState.comment = localStorage.getItem(VER_COMMENT_KEY) === '1'; } catch (e) {}
 try { showState.pinos = localStorage.getItem(VER_PINOS_KEY) !== '0'; } catch (e) {}
@@ -850,6 +876,9 @@ function selItens(){
 function selTemItem(it){ for (const a of sel.values()) if (a.it === it) return true; return false; }
 function selSo(alvos){ sel.clear(); for (const a of alvos) selAdd(a); }
 const SEL = '#2979ff';   /* azul da selecao — so no contorno tracejado, nunca no objeto */
+/* o fio selecionado tem as cores do Altium: tracejado claro por dentro, alcinha verde no
+   vertice, vermelha no pedaco escolhido */
+const SEL_FIO = '#d8ecff', ALCA_VERDE = '#1fdc1f', ALCA_VERMELHA = '#ff2a2a';
 let schDirty = false, schDiskSnapshot = null;
 const undoStack = [JSON.stringify(schematic.items)], redoStack = [];
 /* ------- a grade -------
@@ -992,6 +1021,21 @@ function textoComp(c, qual){
            y: posto ? c.y + (dy || 0) : base.y,
            h, s, bx:base.x, by:base.y, posto };
 }
+/* ── O DESIGNADOR DO CONECTOR MULTIPARTE ──
+   Pedido de 2026-09-24: no conector desenhado UMA PARTE POR PINO (CONE PADRAO, MSTBH, CONE
+   APONT), o designador aparece so na parte 1; nas outras fica so o numero — que ja e o numero
+   do pino, porque cada parte e um pino. Seis "CN2" empilhados diziam a mesma coisa seis vezes.
+   Conector = designador CN/J/X, ou simbolo multiparte com UM pino por parte (medido nos projetos:
+   os 120 "Conector 2 Filas" sem simbolo resolvido entram pelo prefixo). CI multiparte (CD4069,
+   TL082 — 2 a 5 pinos por parte) continua com o designador em toda parte, como no Altium.
+   Designador escondido nao se desenha, nao se clica e nao e guia de alinhamento. */
+function designadorVisivel(c){
+  /* a parte que a folha DESENHA — a do simbolo, ou a de emergencia (ambar); sem nenhuma das
+     duas o componente e um quadrado vermelho sem pino, e sem o designador ele ficaria anonimo */
+  const sym = HubCore.symbolOf(SLIB, c.sym);
+  const part = HubCore.partOf(sym, c.part) || ((desenhoDeEmergencia(c) || {}).part || null);
+  return designadorAparece(c, sym, part);
+}
 function textoBBox(c, qual){
   const t = textoComp(c, qual);
   return caixaTexto(t.x, t.y, t.s, t.h);
@@ -1093,13 +1137,33 @@ function applyMove(base, dx, dy){
     else if (it.t === 'wire') it.pts = b.pts.map(p => [p[0] + dx, p[1] + dy]);
     else { it.x = b.x + dx; it.y = b.y + dy; }
   }
-  /* os fios que acompanham os pinos movidos — o elastico. Vem DEPOIS da base: um fio que
-     esteja ele proprio selecionado ja andou acima, e nao pode andar duas vezes (a montagem
-     em `elasticoDoArrasto` ja o exclui). */
-  if (base.elastico) for (const e of base.elastico){
-    const p = (e.w.pts || [])[e.i];
-    if (p){ p[0] = e.x + dx; p[1] = e.y + dy; }
+  /* O FIO SELECIONADO FICA PRESO AO PINO. Com o trecho (ou o vertice) de um fio selecionado
+     junto com o componente, a ponta que estava no pino anda com ele inteira — o trecho, em fio
+     de 3 ou mais pontos, so anda na perpendicular (moveSegmento), e sem isto o pino saia da
+     ponta e o fio atravessava o corpo. A ponta so desliza ao longo do proprio trecho, entao o
+     fio continua ortogonal. Vem DEPOIS do laco: o moveSegmento ja moveu o trecho. */
+  if (base.colados) for (const e of base.colados){
+    const q = (e.w.pts || [])[e.i];
+    if (q){ q[0] = e.x + dx; q[1] = e.y + dy; }
   }
+}
+/* os vertices de fio SELECIONADO (como trecho ou vertice) que estao num pino de componente que
+   viaja inteiro — os que o applyMove prende ao pino */
+function coladosNosPinos(base){
+  const pinos = [], out = [];
+  for (const b of base.values())
+    if (b.a.k === 'all' && b.a.it.t === 'comp') for (const p of (HubCore.compPinsWorld(b.a.it, SLIB) || [])) pinos.push(p);
+  if (!pinos.length) return out;
+  const vistos = new Set();
+  for (const b of base.values()){
+    if (b.a.it.t !== 'wire' || (b.a.k !== 'seg' && b.a.k !== 'vert')) continue;
+    (b.pts || []).forEach((q, i) => {
+      const k = idDe(b.a.it) + ':' + i;
+      if (vistos.has(k)) return;
+      if (pinos.some(p => pertoDe(q[0], q[1], p.x, p.y))){ vistos.add(k); out.push({ w:b.a.it, i, x:q[0], y:q[1] }); }
+    });
+  }
+  return out;
 }
 function describe(a){
   const it = a && a.it ? a.it : a;      /* aceita alvo ou item cru: a tabela ainda passa item */
@@ -1161,20 +1225,52 @@ function selectOnly(items){ selSo(items.map(alvoAll)); aplicaSel(''); }
 function rotateSel(){
   const comps = selItens().filter(it => it.t === 'comp');
   if (!comps.length) return;
+  retratoDoGiro(comps);
   for (const c of comps) c.rot = (((c.rot || 0) + 90) % 360);
-  if (mouse && mouse.mode === 'move') cam.draw(); else commit();
+  if (mouse && mouse.mode === 'move') giroNoArrasto(); else commit();
+}
+/* GIRAR OU ESPELHAR NO MEIO DO ARRASTO (Espaço/X/Y com o botao preso, como no Altium).
+   Duas coisas, e as duas pertencem ao gesto:
+   - o que o gesto mediu na partida ficou velho: os pinos do ima e as guias sao medidos de
+     novo com o desenho novo — senao a guia alinha a borda de um corpo que nao existe mais e
+     anuncia um alinhamento falso. A medicao e na PARTIDA, entao o item volta a ela, e o
+     arrasto e refeito da ultima posicao do cursor;
+   - o giro e mudanca MESMO que a posicao volte ao lugar: girouDeFato faz o leftUp gravar (o
+     "mudou" dele so olha coordenada) — antes, girar e soltar parado nao entrava no undo nem
+     acendia o "Salvar *". E so o giro que FICOU: X e X de novo, ou quatro Espacos, volta ao
+     desenho da partida e nao e mudanca — gravar ali empilhava um undo vazio. */
+function retratoDoGiro(comps){
+  if (!mouse || mouse.mode !== 'move') return;
+  if (!mouse.giro0) mouse.giro0 = new Map();
+  for (const c of comps) if (!mouse.giro0.has(c)) mouse.giro0.set(c, { rot:c.rot || 0, mir:!!c.mirror });
+}
+function girouDeFato(d){
+  if (!d || !d.giro0) return false;
+  for (const [c, o] of d.giro0) if ((c.rot || 0) !== o.rot || !!c.mirror !== o.mir) return true;
+  return false;
+}
+function giroNoArrasto(){
+  const d = mouse;
+  applyMove(d.base, 0, 0);
+  d.guias = null; d.cena = null;
+  /* o trilho do Shift era uma guia do desenho de ANTES do giro: com o Shift preso, o gesto
+     refeito cai no "anda reto" ate uma guia nova pegar e o Shift descer de novo */
+  d.shift = null; d.ultGuia = null;
+  d.ima.pinos = pinosDoArrasto(d.base);
+  if (d.moved && d.ult) leftMove(d.ult); else cam.draw();
 }
 /* Espelhar o que se VE: 'x' vira esquerda/direita, 'y' vira em cima/embaixo, em qualquer
    rotacao. A conta esta no bloco puro (espelha) e vale para os dois eixos. */
 function mirrorSel(eixo){
   const comps = selItens().filter(it => it.t === 'comp');
   if (!comps.length) return;
+  retratoDoGiro(comps);
   for (const c of comps){
     const r = espelha(c.rot, !!c.mirror, eixo === 'y' ? 'y' : 'x');
     if (r.rot) c.rot = r.rot; else c.rot = 0;
     if (r.mirror) c.mirror = true; else delete c.mirror;
   }
-  if (mouse && mouse.mode === 'move') cam.draw(); else commit();
+  if (mouse && mouse.mode === 'move') giroNoArrasto(); else commit();
 }
 /* ------- apagar -------
    O Delete agora entende o que esta marcado. No fio, apagar um TRECHO parte a polilinha em
@@ -1235,8 +1331,17 @@ function deleteSel(){
 let tool = 'select';        /* 'select' | 'wire' | 'power' | 'label' */
 let toolPower = null;       /* { net, style, rot } quando tool === 'power' */
 let toolNet = '';           /* a palavra na mao quando tool === 'label' */
-let wireDraw = null;        /* { pts:[[x,y],...] } enquanto o fio esta sendo puxado */
+let wireDraw = null;        /* o fio em curso: o estado do hub-fio.js ({ pts, modo, primeiro, ult }) + ligado */
 let snapHit = null;         /* ponto magnetico sob o cursor: { x, y, kind, label } */
+let fioCursor = null;       /* onde o fio vai: { pt, snap } — refeito a cada movimento do mouse */
+/* O MODO DO FIO fica lembrado nesta maquina, como no Altium, que guarda o ultimo modo usado:
+   90°/45°/livre (Shift+Espaco) e para que lado sai o primeiro trecho (Espaco). */
+const FIO_MODO_KEY = 'altiumhub.sch.fioModo';
+let fioModo = { modo:'90', p90:'v', p45:'diag' };
+try {
+  const m = JSON.parse(localStorage.getItem(FIO_MODO_KEY) || 'null');
+  if (m && typeof HubFio !== 'undefined' && HubFio.MODOS.indexOf(m.modo) >= 0) fioModo = Object.assign(fioModo, m);
+} catch (e) {}
 
 /* O IMA: enquanto uma ferramenta esta ativa, o cursor procura um ponto de conexao por
    perto — ponta quente de pino primeiro, depois vertice de fio, junção e power.
@@ -1246,7 +1351,10 @@ let snapHit = null;         /* ponto magnetico sob o cursor: { x, y, kind, label
    pouso deixaria de ser previsivel. O piso de 20 mil existe para o ima nao sumir na grade
    mais fina, onde ele e justamente o que faz o fio encostar no pino. */
 const snapMil = () => Math.max(20, Math.min(60, grade.passo * 0.6));
-function snapPoint(w){
+/* `comMeio`: o MEIO dos fios tambem e ponto de ligacao — como no Altium, o cursor que passa por
+   cima de um fio encosta nele, e o fio novo que sai ou chega ali forma um T (a bolinha aparece
+   sozinha, topologiaFolha). O fio, o rotulo e o power usam; o No ERC nao: ele marca PINO. */
+function snapPoint(w, comMeio){
   const s = model.sheets[sheetIdx];
   let best = null;
   /* `html` so aparece onde ha o que barrar: e o mesmo rotulo, com o <span> da sobrelinha.
@@ -1270,6 +1378,24 @@ function snapPoint(w){
   for (const p of s.powers)    tenta(p.x, p.y, 'power', p.net || 'power', 1);
   for (const p of s.ports)     tenta(p.x, p.y, 'port', p.net || 'port', 1);
   for (const wi of s.wires) for (const p of (wi.pts || [])) tenta(p[0], p[1], 'wire', 'fio', 2);
+  /* peso 3: ponta de fio, pino e juncao ganham do meio quando estao no alcance. Ao longo do fio
+     o ponto cai no passo da grade (e dentro do trecho); no trecho em diagonal, na projecao. */
+  if (comMeio) for (const wi of s.wires){
+    const pts = wi.pts || [];
+    for (let i = 0; i < pts.length - 1; i++){
+      const a = pts[i], b = pts[i + 1];
+      const x1 = Math.min(a[0], b[0]), x2 = Math.max(a[0], b[0]), y1 = Math.min(a[1], b[1]), y2 = Math.max(a[1], b[1]);
+      let q;
+      if (Math.abs(a[1] - b[1]) <= STOL_SCH) q = [Math.min(Math.max(snapG(w.x), x1), x2), a[1]];
+      else if (Math.abs(a[0] - b[0]) <= STOL_SCH) q = [a[0], Math.min(Math.max(snapG(w.y), y1), y2)];
+      else {
+        const vx = b[0] - a[0], vy = b[1] - a[1], L2 = vx * vx + vy * vy;
+        const t = Math.max(0, Math.min(1, ((w.x - a[0]) * vx + (w.y - a[1]) * vy) / L2));
+        q = [a[0] + vx * t, a[1] + vy * t];
+      }
+      tenta(q[0], q[1], 'fio-meio', 'fio', 3);
+    }
+  }
   return best;
 }
 /* ── O IMA DO ARRASTO ──
@@ -1288,14 +1414,30 @@ function alvosDeIma(base){
     if (viaja.has(c)) continue;
     for (const p of (HubCore.compPinsWorld(c, SLIB) || [])) fora.push({ x:p.x, y:p.y, label:c.ref + '-' + p.num });
   }
+  /* A PONTA DE FIO QUE ESTAVA NO PINO nao e alvo: ela esta exatamente onde o pino saiu, e como
+     alvo puxava o componente de volta para a origem em todo arrasto menor que snapMil() — uma
+     zona morta de 60 mil em todo componente com fio, que engolia os ajustes finos das guias.
+     Voltar a encostar nela continua possivel: as guias alinham o pino com ela nos dois eixos.
+     Os outros vertices do mesmo fio continuam alvo. */
+  const leva = new Map();
+  for (const e of (base.pontas || [])){ let m = leva.get(e.w); if (!m) leva.set(e.w, m = new Set()); m.add(e.i); }
   for (const wi of s.wires){
     if (viaja.has(wi)) continue;
-    for (const p of (wi.pts || [])) fora.push({ x:p[0], y:p[1], label:'fio' });
+    const l = leva.get(wi);
+    (wi.pts || []).forEach((p, i) => { if (!(l && l.has(i))) fora.push({ x:p[0], y:p[1], label:'fio' }); });
   }
   for (const j of s.junctions) if (!viaja.has(j)) fora.push({ x:j.x, y:j.y, label:'junção' });
   for (const p of s.powers)    if (!viaja.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'power' });
   for (const p of s.ports)     if (!viaja.has(p)) fora.push({ x:p.x, y:p.y, label:p.net || 'port' });
-  return fora;
+  /* NADA QUE ESTEJA EM CIMA DE UM PINO QUE VIAJA e alvo — nao so a ponta de fio: um GND, uma
+     port, uma juncao ou o pino de outro componente encostado ali estao a distancia ZERO na
+     partida, e puxavam o componente de volta em todo arrasto menor que snapMil() (medido em
+     2026-09-24: 42 dos 1428 componentes dos projetos). Voltar a encostar continua possivel
+     pelas guias, que alinham o pino com eles. */
+  const partida = [];
+  for (const b of base.values())
+    if (b.a.k === 'all' && b.a.it.t === 'comp') for (const p of (HubCore.compPinsWorld(b.a.it, SLIB) || [])) partida.push(p);
+  return partida.length ? fora.filter(a => !partida.some(p => pertoDe(a.x, a.y, p.x, p.y))) : fora;
 }
 /* O que viaja e pode GRUDAR, na posicao de PARTIDA: o arrasto so lhe soma o deslocamento,
    entao medir uma vez por gesto basta — e nao a folha inteira a cada quadro.
@@ -1317,20 +1459,22 @@ function pinosDoArrasto(base){
   }
   return fora;
 }
-/* ── O ELASTICO ──
-   Mover um componente deixava os fios parados: o desenho continuava encostado (o simbolo passa
-   por cima) e a net se desfazia calada, porque a extracao casa por coordenada EXATA. Agora os
-   vertices de fio que estavam em cima de uma ponta quente dos componentes que viajam andam
-   junto, como no Altium.
-   Montado UMA vez por gesto, pelo mesmo motivo do ima: varrer os pinos de 200 componentes a
-   cada quadro engasga o arrasto. Fio que ja esta na selecao fica de fora — ele ja anda pela
-   base, e andar duas vezes o levaria ao dobro do deslocamento. */
-function elasticoDoArrasto(base){
+/* ── O FIO NAO VEM JUNTO ──
+   Houve um ELASTICO aqui: os vertices de fio em cima dos pinos do componente que viajava andavam
+   com ele, como no Altium. Saiu a pedido do usuario (2026-09-24: "quero poder movimentar o
+   componente sem a trilha vir junto, a nao ser que eu selecione ela"). Agora o componente anda
+   SOZINHO; o fio so anda se estiver na selecao (o laco e o Ctrl+A pegam os dois). A net se
+   desfaz quando o pino sai da ponta do fio — e o que se pediu, e a lista de nets mostra.
+   O que sobrou do elastico sao AS PONTAS: quais vertices estavam em cima dos pinos na partida.
+   Elas nao se movem mais, mas duas coisas precisam saber delas: o ima (que nao pode mirar a
+   propria ponta, senao o componente volta para a origem) e as guias (que alinham o pino com o
+   fio que ele deixou — e assim que se volta a encostar nele).
+   Montado UMA vez por gesto: varrer os pinos de 200 componentes a cada quadro engasga o arrasto.
+   Fio que ja esta na selecao fica de fora — ele anda pela base. */
+function pontasNosPinos(base){
   const s = model.sheets[sheetIdx], out = [], pinos = [];
-  /* SO o componente que esta viajando INTEIRO puxa fio. `base.itens` guarda o item de todo
-     alvo do gesto, e o texto do designador e um alvo DO COMPONENTE: sem este `k === 'all'`,
-     arrastar o nome de um resistor levava junto todos os fios ligados a ele — os pinos nao
-     tinham saido do lugar, e mesmo assim a fiacao andava. */
+  /* SO o componente que esta viajando INTEIRO tem pinos que saem do lugar: arrastar o texto do
+     designador e um alvo DO COMPONENTE, mas os pinos ficam. */
   for (const b of base.values()){
     if (b.a.k !== 'all' || b.a.it.t !== 'comp') continue;
     for (const p of (HubCore.compPinsWorld(b.a.it, SLIB) || [])) pinos.push(p);
@@ -1346,7 +1490,7 @@ function elasticoDoArrasto(base){
   return out;
 }
 /* o deslocamento corrigido para o pino mais proximo pousar em cima do alvo; null = sem ima */
-function imaDoArrasto(g, dx, dy){
+function imaDoArrasto(g, dx, dy, fixo){
   if (!g || !g.pinos.length || !g.alvos.length) return null;
   let best = null;
   for (const p of g.pinos){
@@ -1354,51 +1498,268 @@ function imaDoArrasto(g, dx, dy){
     for (const a of g.alvos){
       const d = Math.hypot(px - a.x, py - a.y);
       if (d > snapMil() || (best && d >= best.d)) continue;
+      /* NO TRILHO DO SHIFT so concorre o alvo que esta na linha do pino. Filtrar DEPOIS de
+         escolher o mais perto nao serve: um alvo fora da linha, mais perto, era escolhido,
+         recusado, e o alvo da linha nunca era considerado — o pino pousava desligado a 15 mil
+         do fio que devia pegar. dx/dy ja trazem o eixo preso, entao a linha e p.x/p.y. */
+      if (fixo && ((fixo.x && Math.abs(a.x - px) > STOL_SCH) || (fixo.y && Math.abs(a.y - py) > STOL_SCH))) continue;
       best = { d, dx: dx + (a.x - px), dy: dy + (a.y - py), x:a.x, y:a.y,
                label: (p.num ? p.ref + '-' + p.num : p.ref) + ' → ' + a.label };
     }
   }
   return best;
 }
-/* proximo ponto do fio: o ima ganha; sem ima, grade de 100 mil e traçado ortogonal */
-function wirePoint(w){
-  const hs = snapPoint(w);
+/* ── AS GUIAS DO ARRASTO (hub-guias.js) ──
+   O ima gruda PONTO em PONTO, nos dois eixos, e so quando o pino chega em cima do alvo. As
+   guias sao a outra metade do arrasto, pedida em 2026-09-24: alinham POR EIXO (a borda, o
+   centro, a fileira de pinos que deixa o fio reto), acham o espaco igual e mostram o vao ate
+   cada vizinho — como no Figma. O ima continua mandando: quando ele pega, a guia so mostra o
+   que coincidiu. O Ctrl apertado solta a guia (o ima fica).
+   O que se move e o que esta parado sao medidos UMA vez por gesto, no primeiro movimento de
+   verdade (o clique que nao arrasta nao paga nada), na posicao de PARTIDA — e isso que deixa
+   cada quadro barato. */
+const GUIAS = typeof HubGuias !== 'undefined' ? HubGuias : null;
+const PONTO_DE_LIGACAO = { power:1, port:1, netlabel:1, junction:1 };
+function guiasDoGesto(base){
+  const s = model.sheets[sheetIdx];
+  const movComp = new Set(), fioMove = new Map(), pontos = [], textos = [];
+  let caixa = null;
+  const soma = b => { caixa = !caixa ? { x1:b.x1, y1:b.y1, x2:b.x2, y2:b.y2 }
+    : { x1:Math.min(caixa.x1, b.x1), y1:Math.min(caixa.y1, b.y1), x2:Math.max(caixa.x2, b.x2), y2:Math.max(caixa.y2, b.y2) }; };
+  /* os vertices de cada fio que ANDAM neste gesto; os outros do mesmo fio sao alvo */
+  const marcaFio = (w, i) => {
+    const m = fioMove.get(w);
+    if (m === 'todos') return;
+    if (i === 'todos'){ fioMove.set(w, 'todos'); return; }
+    if (m) m.add(i); else fioMove.set(w, new Set([i]));
+  };
+  for (const b of base.values()){
+    const a = b.a, it = a.it;
+    if (a.k === 'ref' || a.k === 'com'){ textos.push(a); continue; }
+    if (it.t === 'comp'){
+      movComp.add(it); soma(compBBox(it));
+      for (const p of (HubCore.compPinsWorld(it, SLIB) || [])) pontos.push({ x:p.x, y:p.y, nome:it.ref + '-' + p.num });
+    } else if (it.t === 'wire'){
+      const pts = b.pts || [];
+      if (a.k === 'vert'){
+        marcaFio(it, a.i);
+        if (pts[a.i]) pontos.push({ x:pts[a.i][0], y:pts[a.i][1], nome:'fio' });
+      } else if (a.k === 'seg'){
+        const p = pts[a.i], q = pts[a.i + 1];
+        if (!p || !q) continue;
+        const eixos = eixosDoTrecho(pts, a.i);
+        marcaFio(it, a.i); marcaFio(it, a.i + 1);
+        pontos.push({ x:p[0], y:p[1], nome:'fio', eixos }, { x:q[0], y:q[1], nome:'fio', eixos });
+      } else {
+        marcaFio(it, 'todos');
+        for (const p of pts) pontos.push({ x:p[0], y:p[1], nome:'fio' });
+      }
+    } else if (PONTO_DE_LIGACAO[it.t]) pontos.push({ x:b.x, y:b.y, nome:it.net || describe(a) });
+  }
+  /* os fios que estavam nos pinos entram SEMPRE, com todos os vertices (inclusive a ponta que o
+     pino deixou): alinhar o pino com eles e o que deixa o fio reto, ou o reencosta */
+  const fiosDosPinos = new Set((base.pontas || []).map(e => e.w));
+  let tipoCaixa = caixa ? 'comp' : null;
+  if (!caixa && textos.length){
+    for (const a of textos) soma(textoBBox(a.it, a.k));
+    tipoCaixa = 'texto';
+  }
+  const fixos = { caixas:[], pontos:[], sempre:[], folha: caixa ? sheetBBox() : null };
+  if (tipoCaixa === 'texto'){
+    /* texto alinha com o texto do MESMO tipo dos outros componentes, e so com o que esta a vista */
+    const movendo = new Set(textos.map(chaveAlvo)), tipos = new Set(textos.map(a => a.k));
+    for (const c of s.comps) for (const k of tipos){
+      if (movendo.has(chaveAlvo({ it:c, k }))) continue;
+      if (k === 'ref' ? !(showState.ref && designadorVisivel(c)) : !(showState.comment && c.comment)) continue;
+      fixos.caixas.push(Object.assign(textoBBox(c, k), { nome:c.ref, tipo:'texto' }));
+    }
+  } else {
+    for (const c of s.comps){
+      if (movComp.has(c)) continue;
+      const pinos = pontos.length ? (HubCore.compPinsWorld(c, SLIB) || []) : [];
+      fixos.caixas.push(Object.assign(compBBox(c), { nome:c.ref, tipo:'comp',
+        pontos: pinos.map(p => ({ x:p.x, y:p.y, nome:c.ref + '-' + p.num })) }));
+    }
+  }
+  if (pontos.length){
+    for (const w of s.wires){
+      const m = fioMove.get(w);
+      if (m === 'todos') continue;
+      const lista = m || fiosDosPinos.has(w) ? fixos.sempre : fixos.pontos;
+      (w.pts || []).forEach((p, i) => { if (!(m && m.has(i))) lista.push({ x:p[0], y:p[1], nome:'fio' }); });
+    }
+    for (const arr of [s.junctions, s.powers, s.ports, s.netlabels])
+      for (const it of arr) if (!base.itens.has(it)) fixos.pontos.push({ x:it.x, y:it.y, nome:it.net || describe(it) });
+  }
+  return { G: GUIAS.prepara({ caixa, tipoCaixa, pontos }, fixos, { eps:0.1 }), livre: eixosLivres(base) };
+}
+/* os eixos em que ALGUM alvo do gesto anda — medido sobre TODOS os alvos, e nao so sobre os que
+   tem guia: No ERC e texto livre nao tem guia nenhuma e andam nos dois eixos. So o trecho travado
+   do moveSegmento, sozinho, deixa de andar num eixo. Nao depende das guias: o Shift precisa
+   disto com elas desligadas tambem. */
+function eixosLivres(base){
+  let x = false, y = false;
+  for (const b of base.values()){
+    const ex = b.a.it.t === 'wire' && b.a.k === 'seg' ? eixosDoTrecho(b.pts || [], b.a.i) : 'xy';
+    if (ex.indexOf('x') >= 0) x = true;
+    if (ex.indexOf('y') >= 0) y = true;
+  }
+  return { x, y };
+}
+/* a medida na unidade da grade escolhida: quem arruma a folha em 1 mm pensa em mm */
+function fmtMedida(v){
+  const mm = /mm$/.test(grade.id), casas = mm ? 2 : 1, f = Math.pow(10, casas);
+  const n = Math.round((mm ? v / MM_MIL : v) * f) / f;
+  return n.toLocaleString('pt-BR', { maximumFractionDigits:casas }) + (mm ? ' mm' : ' mil');
+}
+/* o deslocamento do arrasto passado pelas guias. null quando nao ha guia a medir — elas estao
+   desligadas no botao da vista, o hub-guias.js nao carregou, ou o gesto so leva o que nao tem
+   guia (No ERC, texto livre) — e ai o arrasto e o de sempre: o cursor, e a grade ao soltar */
+function guiasDoArrasto(d, dx, dy, e, trava, fixo){
+  if (!GUIAS || !showState.guias) return null;
+  if (!d.guias) d.guias = guiasDoGesto(d.base);
+  if (!d.guias.G.box0) return null;
+  /* o eixo em que nada do gesto anda (o trecho travado) fica parado aqui tambem: a vizinhanca,
+     os × e a extensao da guia sao medidos onde o trecho ESTA, e nao onde o cursor esta */
+  const lv = d.guias.livre, sx = v => lv.x ? v : 0, sy = v => lv.y ? v : 0;
+  return GUIAS.resolve(d.guias.G, sx(dx), sy(dy), { escala:cam.cam.scale, grade:snapG,
+                       trava: trava ? { dx:sx(trava.dx), dy:sy(trava.dy) } : null,
+                       fixo: fixo ? { x: lv.x ? fixo.x : null, y: lv.y ? fixo.y : null } : null,
+                       desliga:!!(e && e.ctrlKey), fmt:fmtMedida });
+}
+/* ── O SHIFT: ANDAR RETO NO TRILHO DA GUIA ──
+   Pedido de 2026-09-24: "se enquanto eu estiver movimentando eu apertar Shift ele trava no eixo
+   centralizado, pra eu movimentar reto na direção do alinhamento".
+   Com uma guia pegando, o Shift PRENDE o eixo dela: guia vertical (mesmo X) — o X fica e a peca
+   so anda em Y; guia horizontal — so anda em X. No trilho o outro eixo continua achando guia
+   (sobe pela vertical ate alinhar com o vizinho de cima). Com as duas guias pegando, quem decide
+   e a mao: os primeiros SHIFT_DECIDE_PX de movimento escolhem a direcao, e ate la a peca fica.
+   Sem guia nenhuma (ou com as guias desligadas) e o "anda reto" de sempre: so na horizontal ou
+   so na vertical, a partir de onde a peca estava, conforme a mao mais andou.
+   O trilho e a guia que estava pegando QUANDO o Shift desceu (d.ultGuia), e nao a proxima que
+   aparecer no caminho. Com o IMA do pino pegando, o trilho e o lugar em que ele pos a peca, nos
+   dois eixos (a mao escolhe a direcao) — sem isso a peca voltava para a linha de partida.
+   O Shift nunca prende o UNICO eixo em que o gesto anda (o trecho de fio travado pelo
+   moveSegmento): com o outro eixo ja parado, prender este congelava o gesto inteiro.
+   Soltar o Shift devolve o movimento livre. */
+const SHIFT_DECIDE_PX = 4;
+function fixoDoShift(d, dx, dy, e){
+  if (!(e && e.shiftKey)){ d.shift = null; return null; }
+  const lv = d.livre || (d.livre = eixosLivres(d.base));
+  if (!d.shift){
+    const g = d.ultGuia || {};
+    /* candidato de guia, ou o lugar do ima; o 'fixo' do proprio Shift nao vira trilho */
+    const vale = c => c && (c.tipo !== 'fixo' || c.ima) ? c : null;
+    /* trilho em X deixa andar em Y: so serve se Y anda; e vice-versa */
+    const gx = lv.y ? vale(g.x) : null, gy = lv.x ? vale(g.y) : null;
+    d.shift = gx && gy ? { ambos:{ x:gx, y:gy }, dx, dy }
+            : gx ? { fixo:{ x:gx } } : gy ? { fixo:{ y:gy } } : { reto:true };
+  }
+  const s = d.shift;
+  if (s.fixo) return s.fixo;
+  if (s.ambos){
+    const mx = Math.abs(dx - s.dx), my = Math.abs(dy - s.dy);
+    if (Math.max(mx, my) * cam.cam.scale < SHIFT_DECIDE_PX) return s.ambos;
+    s.fixo = mx >= my ? { y:s.ambos.y } : { x:s.ambos.x };     /* a mao andou em X: o Y e o trilho */
+    return s.fixo;
+  }
+  /* o "anda reto": a mao escolhe so quando os dois eixos andam */
+  if (!lv.x && !lv.y) return null;
+  const emX = lv.x && (!lv.y || Math.abs(dx) >= Math.abs(dy));
+  return emX ? { y:{ tipo:'fixo', delta:0 } } : { x:{ tipo:'fixo', delta:0 } };
+}
+/* a frase do Shift na barra: para onde a peca ainda pode andar */
+function dicaDoShift(f){
+  if (!f) return '';
+  if (f.x && f.y) return 'Shift: mova para escolher a direção';
+  return f.x ? 'Shift: só na vertical' : 'Shift: só na horizontal';
+}
+/* ── O FIO, COMO NO ALTIUM (hub-fio.js tem a regra; aqui e so o mouse, o teclado e a folha) ──
+   Pedido de 2026-09-24, com um video do Altium: "quero que a construcao de trilha funcione
+   assim no esquema, igualzinho". Do ultimo ponto fixado saem duas pernas em L ate o cursor; o
+   clique fixa SO a primeira, e a seguinte sai perpendicular; clicar num ponto eletrico completa
+   o L ate ele e termina o fio; botao direito, Esc ou duplo clique terminam no que ja foi
+   fixado, e a ferramenta continua na mao para o proximo fio (um segundo direito/Esc a larga);
+   Espaco inverte o canto, Shift+Espaco troca o modo (90°, 45°, livre), Backspace desfaz o canto.
+   Onde o cursor vai: o ponto eletrico em alcance (pino, ponta ou meio de fio, juncao, power,
+   port), senao o passo da grade. */
+function pontoDoFio(w){
+  const hs = snapPoint(w, true);
   if (hs) return { pt:[hs.x, hs.y], snap:hs };
-  const gx = snapG(w.x), gy = snapG(w.y);
-  if (!wireDraw || !wireDraw.pts.length) return { pt:[gx, gy], snap:null };
-  const last = wireDraw.pts[wireDraw.pts.length - 1];
-  return { pt: (Math.abs(gx - last[0]) >= Math.abs(gy - last[1])) ? [gx, last[1]] : [last[0], gy], snap:null };
+  return { pt:[snapG(w.x), snapG(w.y)], snap:null };
 }
+const primeiroDoModo = () => fioModo.modo === '45' ? fioModo.p45 : fioModo.p90;
 function wireClick(w){
-  const r = wirePoint(w);
-  if (!wireDraw){ wireDraw = { pts:[r.pt] }; cam.draw(); return; }
-  const last = wireDraw.pts[wireDraw.pts.length - 1];
-  const [x, y] = r.pt;
-  if (x === last[0] && y === last[1]) return;
-  /* ponto magnetico fora do eixo: entra um canto, como o Altium faz */
-  if (x !== last[0] && y !== last[1]) wireDraw.pts.push([x, last[1]]);
-  wireDraw.pts.push([x, y]);
-  /* encostou num pino: o fio acabou ali */
-  if (r.snap && r.snap.kind === 'pin') endWire(); else cam.draw();
+  const r = pontoDoFio(w);
+  fioCursor = r;
+  if (!wireDraw){
+    /* a partida que encostou num ponto eletrico ganha a bolinha magenta do Altium */
+    wireDraw = Object.assign(HubFio.novo(r.pt, fioModo.modo, primeiroDoModo()), { ligado: !!r.snap });
+    statusDoFio(); cam.draw();
+    return;
+  }
+  const A = wireDraw.pts[wireDraw.pts.length - 1];
+  if (r.pt[0] === A[0] && r.pt[1] === A[1]) return;
+  const ligado = wireDraw.ligado;
+  /* CLICOU NUM PONTO ELETRICO: o L inteiro ate ele, e o fio acaba ali */
+  if (r.snap){ wireDraw = Object.assign(HubFio.completa(wireDraw, r.pt), { ligado }); endWire(); return; }
+  wireDraw = Object.assign(HubFio.fixa(wireDraw, r.pt), { ligado });
+  statusDoFio(); cam.draw();
 }
+/* termina no que ja foi fixado — as pernas soltas ate o cursor nao entram, como no Altium */
 function endWire(){
   const d = wireDraw; wireDraw = null;
-  if (d && d.pts.length >= 2){
-    schematic.items.push({ t:'wire', sheet:model.sheets[sheetIdx].name, pts:d.pts });
+  const pts = d ? HubFio.limpa(d.pts) : [];
+  if (pts.length >= 2){
+    schematic.items.push({ t:'wire', sheet:model.sheets[sheetIdx].name, pts });
     commit();
   } else cam.draw();
+  statusDoFio();
+}
+/* ESPACO inverte o canto; SHIFT+ESPACO troca o modo. Sem fio em curso, vale para o proximo. */
+function espacoDoFio(shift){
+  const est = wireDraw || HubFio.novo([0, 0], fioModo.modo, primeiroDoModo());
+  const novo = shift ? HubFio.trocaModo(est) : HubFio.trocaCanto(est);
+  fioModo.modo = novo.modo;
+  if (novo.modo === '90') fioModo.p90 = novo.primeiro; else if (novo.modo === '45') fioModo.p45 = novo.primeiro;
+  try { localStorage.setItem(FIO_MODO_KEY, JSON.stringify(fioModo)); } catch (e) {}
+  if (wireDraw) wireDraw = Object.assign(novo, { ligado: wireDraw.ligado });
+  statusDoFio(); cam.draw();
+}
+/* BACKSPACE desfaz o ultimo canto; sem canto fixado, o fio em curso acaba (sem gravar nada) */
+function backspaceDoFio(){
+  const ligado = wireDraw.ligado, d = HubFio.desfaz(wireDraw);
+  wireDraw = d ? Object.assign(d, { ligado }) : null;
+  statusDoFio(); cam.draw();
+}
+/* a barra de status do fio: o ponto eletrico sob o cursor, o modo, dX/dY desde o ultimo clique
+   (na unidade da grade), e as teclas — o Altium diz "Shift + Space to change mode" ali mesmo */
+function statusDoFio(){
+  if (tool !== 'wire') return;
+  const r = fioCursor;
+  const est = wireDraw || { modo: fioModo.modo, primeiro: primeiroDoModo() };
+  const partes = ['Fio ' + HubFio.nomeDoModo(est)];
+  if (wireDraw && r) partes.push('dX ' + fmtMedida(r.pt[0] - wireDraw.ult[0]) + '  dY ' + fmtMedida(r.pt[1] - wireDraw.ult[1]));
+  partes.push(wireDraw ? 'clique fixa o canto · Backspace desfaz · direito/Esc termina'
+                       : 'clique para começar · direito/Esc larga a ferramenta');
+  partes.push('Espaço inverte · Shift+Espaço muda o modo');
+  const txt = partes.join(' · ');
+  if (r && r.snap && r.snap.html){
+    const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    $('shover').innerHTML = '⊙ ' + r.snap.html + ' · ' + esc(txt);
+  } else $('shover').textContent = (r && r.snap ? '⊙ ' + r.snap.label + ' · ' : '') + txt;
 }
 /* O No ERC pousa onde o ima mandar — e o ponto que ele marca precisa ser EXATAMENTE a
    ponta quente do pino, senao o Altium recebe a diretiva ao lado do pino e o ERC
    continua reclamando do mesmo pino. Sem ima, grade de 100 mil como o resto. */
 function placeNoERC(w){
-  const hs = snapPoint(w);
+  const hs = snapPoint(w, false);
   schematic.items.push({ t:'noerc', sheet:model.sheets[sheetIdx].name,
                          x: hs ? hs.x : snapG(w.x), y: hs ? hs.y : snapG(w.y) });
   commit();
 }
 function placePower(w){
-  const hs = snapPoint(w);
+  const hs = snapPoint(w, true);
   const p = toolPower;
   schematic.items.push({ t:'power', sheet:model.sheets[sheetIdx].name, net:p.net, style:p.style,
                          x: hs ? hs.x : snapG(w.x), y: hs ? hs.y : snapG(w.y), rot:p.rot });
@@ -1408,13 +1769,13 @@ function placePower(w){
    extractNets (fusao por nome), nao esta funcao — aqui e so pousar. */
 function placeLabel(w){
   if (!toolNet) return;
-  const hs = snapPoint(w);
+  const hs = snapPoint(w, true);
   schematic.items.push({ t:'netlabel', sheet:model.sheets[sheetIdx].name, net:toolNet,
                          x: hs ? hs.x : snapG(w.x), y: hs ? hs.y : snapG(w.y), rot:0 });
   commit();
 }
 function setTool(t, pw){
-  tool = t; toolPower = pw || null; wireDraw = null; snapHit = null;
+  tool = t; toolPower = pw || null; wireDraw = null; snapHit = null; fioCursor = null;
   if (t !== 'label') toolNet = '';
   $('tbSel').setAttribute('aria-pressed', String(t === 'select'));
   $('tbWire').setAttribute('aria-pressed', String(t === 'wire'));
@@ -1422,7 +1783,8 @@ function setTool(t, pw){
   $('tbNoErc').setAttribute('aria-pressed', String(t === 'noerc'));
   for (const b of document.querySelectorAll('#schtb .pw'))
     b.setAttribute('aria-pressed', String(t === 'power' && !!pw && b.dataset.net === pw.net));
-  cv.style.cursor = t !== 'select' ? 'crosshair' : 'default';
+  cv.style.cursor = t !== 'select' && t !== 'wire' ? 'crosshair' : 'default';
+  if (t === 'wire') statusDoFio();
   cam.draw();
 }
 $('tbSel').addEventListener('click', () => setTool('select'));
@@ -1559,6 +1921,7 @@ window.addEventListener('contextmenu', e => {
   const arrastou = panMoved;
   panning = false; panMoved = false;
   if (!arrastou && wireDraw) endWire();
+  else if (!arrastou && tool === 'wire') setTool('select');
 });
 window.addEventListener('mousemove', e => {
   if (mouse){ leftMove(e); return; }
@@ -1569,10 +1932,24 @@ window.addEventListener('mouseup', e => {
   cv.style.cursor = 'default';
   if (e.button !== 2) panning = false;      /* o direito espera o contextmenu para zerar */
 });
+/* O Ctrl solta a guia, e o Shift prende o trilho — e soltar a tecla desfaz — NA HORA, sem
+   esperar o mouse andar: o gesto e refeito da ultima posicao do cursor com a tecla no estado
+   novo (e a outra como estava) */
+for (const tipo of ['keydown', 'keyup'])
+  window.addEventListener(tipo, e => {
+    if ((e.key !== 'Control' && e.key !== 'Shift') || !mouse || mouse.mode !== 'move' || !mouse.moved || !mouse.ult) return;
+    const u = mouse.ult, desce = tipo === 'keydown';
+    leftMove({ clientX:u.clientX, clientY:u.clientY,
+               ctrlKey:  e.key === 'Control' ? desce : !!u.ctrlKey,
+               shiftKey: e.key === 'Shift'   ? desce : !!u.shiftKey });
+  });
 window.addEventListener('blur', () => {
   if (!mouse) return;
+  const girou = mouse.mode === 'move' && girouDeFato(mouse);
   if (mouse.mode === 'move') applyMove(mouse.base, 0, 0);
-  mouse = null; boxRect = null; cam.draw();
+  mouse = null; boxRect = null;
+  moveIma = null; $('shover').textContent = '';
+  if (girou) commit(); else cam.draw();
 });
 
 function leftDown(e){
@@ -1587,29 +1964,46 @@ function leftDown(e){
     lastDown = null;
     return;
   }
-  /* O ALVO do clique, e nao mais "o item inteiro". Num fio, o hitTest diz qual TRECHO e, se o
-     cursor estiver em cima de um vertice, qual vertice — e e o vertice que ganha, porque quem
-     mira a alcinha esta querendo mexer no canto. O fio inteiro continua alcançavel: clique
-     duplo promove (veja o dblclick mais abaixo) e o retangulo de selecao pega fio inteiro. */
-  const a = alvoDoHit(h);
+  /* O FIO COMO NO ALTIUM (pedido de 2026-09-24, com fotos do Altium): o PRIMEIRO clique pega o
+     fio inteiro — a "perninha" que e um fio so fica sozinha na selecao —, e o SEGUNDO clique no
+     mesmo fio pega so o pedaco em que ele caiu: o trecho, ou o vertice se foi na alcinha. E o
+     pedaco que se move ou apaga. A troca inteiro->pedaco acontece no CLICK (leftClick), e nao
+     aqui: apertar num fio ja selecionado e arrastar leva o fio inteiro, como la. So a alcinha de
+     vertice troca ja no aperto, para o arrasto mover o canto.
+     Ate 2026-09-24 era o contrario — o clique pegava o trecho e o duplo clique promovia a fio
+     inteiro —, e num fio comprido nao havia como pegar so a perninha sem pegar um trecho que
+     nao era ela. */
+  let a = alvoDoHit(h), promover = null;
+  if (h.kind === 'wire' && a.k === 'all' && selTem(a) && !e.shiftKey){
+    if (h.vert != null) a = { it:h.item, k:'vert', i:h.vert };
+    else if (h.seg != null) promover = { it:h.item, k:'seg', i:h.seg };
+  }
   const wasSel = selTem(a);
   if (!wasSel){ if (!e.shiftKey) sel.clear(); selAdd(a); }
-  lastDown = { alvo:a, wasSel };
+  lastDown = { alvo:a, wasSel, promover };
   const base = baseOf(selAlvos());
-  /* o ima e o elastico sao montados aqui, e nao no primeiro movimento: a folha parada e a
+  /* o ima e as pontas sao montados aqui, e nao no primeiro movimento: a folha parada e a
      mesma o gesto inteiro, e varrer os pinos de 200 componentes a cada quadro engasgaria */
-  base.elastico = elasticoDoArrasto(base);
+  base.pontas = pontasNosPinos(base);
+  base.colados = coladosNosPinos(base);
   mouse = { mode:'move', start:w, moved:false, base,
             ima: { alvos: alvosDeIma(base), pinos: pinosDoArrasto(base) } };
   moveIma = null;
-  /* a net entra em foco AQUI, e nao no click: todo arrasto engole o click (swallowClick), e
-     a net anterior ficava acesa por cima de uma selecao que ja era outra */
-  aplicaSel(e.shiftKey && sel.size > 1 ? '' : netDoAlvo(h));
+  /* A NET ACENDE SO COM ALT+CLIQUE (ou pela lista de nets), como no Altium. O clique simples
+     acendia a net inteira de laranja, e pegar uma perninha parecia pegar o circuito todo — era
+     a queixa da foto de 2026-09-24. Com Alt, a net entra em foco AQUI, e nao no click: todo
+     arrasto engole o click (swallowClick). */
+  aplicaSel(e.altKey && !(e.shiftKey && sel.size > 1) ? netDoAlvo(h) : '');
 }
 /* do que o hitTest devolveu para o alvo que a selecao guarda */
+/* (o fio: sem nada dele na selecao, o clique pega ele INTEIRO; com ele inteiro selecionado, o
+   pedaco vem no click — leftDown/leftClick; com um PEDACO dele ja selecionado, o clique fica
+   no nivel do pedaco e pega o trecho ou o vertice em que caiu) */
 function alvoDoHit(h){
   if (h.kind === 'ref' || h.kind === 'com') return { it:h.item, k:h.kind };
   if (h.kind === 'wire'){
+    const pedaco = selAlvos().some(a => a.it === h.item && (a.k === 'seg' || a.k === 'vert'));
+    if (!pedaco) return alvoAll(h.item);
     if (h.vert != null) return { it:h.item, k:'vert', i:h.vert };
     if (h.seg  != null) return { it:h.item, k:'seg',  i:h.seg };
   }
@@ -1628,9 +2022,23 @@ function leftMove(e){
      snap a cada movimento ele so saia do lugar depois de 50 mil e pulava de 100 em 100 — em
      zoom alto parecia travado */
   if (d.mode === 'move'){
-    moveIma = imaDoArrasto(d.ima, dx, dy);
-    applyMove(d.base, moveIma ? moveIma.dx : dx, moveIma ? moveIma.dy : dy);
-    $('shover').textContent = moveIma ? '⊙ ' + moveIma.label : '';
+    /* no trilho do Shift o cursor so conta no eixo livre */
+    const fixo = fixoDoShift(d, dx, dy, e);
+    const fx = fixo && fixo.x ? fixo.x.delta : dx, fy = fixo && fixo.y ? fixo.y.delta : dy;
+    moveIma = imaDoArrasto(d.ima, fx, fy, fixo);
+    /* as guias grudam por eixo; com o ima pegando, elas so mostram (trava) */
+    const g = guiasDoArrasto(d, fx, fy, e, moveIma, fixo);
+    d.cena = g ? g.cena : null;
+    /* o que esta pegando e o trilho que o Shift vai prender — a guia, ou o lugar em que o ima
+       pos a peca — lembrado so FORA do trilho */
+    if (!fixo) d.ultGuia = moveIma ? { x:{ tipo:'fixo', delta:moveIma.dx, ima:true }, y:{ tipo:'fixo', delta:moveIma.dy, ima:true } }
+                                   : g ? g.guia : null;
+    /* a ultima posicao do cursor, com o Ctrl e o Shift: quem refaz o gesto sem o mouse andar
+       (as teclas, o giro, o zoom da roda) refaz com o que a mao estava fazendo */
+    d.ult = { clientX:e.clientX, clientY:e.clientY, ctrlKey:!!e.ctrlKey, shiftKey:!!e.shiftKey };
+    applyMove(d.base, moveIma ? moveIma.dx : g ? g.dx : fx, moveIma ? moveIma.dy : g ? g.dy : fy);
+    const frase = [dicaDoShift(fixo), g && g.rotulo ? g.rotulo + ' · Ctrl solta a guia' : ''].filter(Boolean).join(' · ');
+    $('shover').textContent = moveIma ? '⊙ ' + moveIma.label + (fixo ? ' · ' + dicaDoShift(fixo) : '') : frase;
     desenhaNoQuadro();
   }
   else if (d.mode === 'box'){ boxRect = { x1:d.start.x, y1:d.start.y, x2:w.x, y2:w.y }; desenhaNoQuadro(); }
@@ -1650,24 +2058,30 @@ function leftUp(e){
     const rx = w.x - d.start.x, ry = w.y - d.start.y;
     /* o ima MANDA sobre a grade: e ele que faz o pino cair em cima da ponta do fio, e
        100 mil de grade contados da posicao antiga jogariam o pino fora dela de novo */
-    const m = imaDoArrasto(d.ima, rx, ry);
-    if (m) applyMove(d.base, m.dx, m.dy); else applyMove(d.base, snapG(rx), snapG(ry));
+    /* o trilho do Shift vale no soltar tambem: o eixo preso pousa no trilho, e nao na grade */
+    const fixo = fixoDoShift(d, rx, ry, e);
+    const fx = fixo && fixo.x ? fixo.x.delta : rx, fy = fixo && fixo.y ? fixo.y.delta : ry;
+    const m = imaDoArrasto(d.ima, fx, fy, fixo);
+    /* sem ima, cada eixo pousa onde a guia mandou — e o eixo que nenhuma guia pegou, na grade.
+       E a MESMA conta que desenhou as medidas durante o arrasto: o numero que se viu e o que fica */
+    const g = m ? null : guiasDoArrasto(d, fx, fy, e, null, fixo);
+    if (m) applyMove(d.base, m.dx, m.dy);
+    else if (g) applyMove(d.base, g.lx, g.ly);
+    else applyMove(d.base, fixo && fixo.x ? fx : snapG(rx), fixo && fixo.y ? fy : snapG(ry));
     moveIma = null; $('shover').textContent = '';
     /* Arrasto que voltou para a mesma grade nao e mudanca — nao entra no undo.
        A conta olhava SO o pts[0] do fio: arrastar um vertice do meio (que agora e um gesto de
        verdade) mudava o desenho, nao entrava no undo e nao acendia o "Salvar *" — a falha
        silenciosa que so aparece quando a pagina recarrega e o trabalho sumiu. Agora compara
-       ponto a ponto, mais o deslocamento do texto e mais o elastico. */
+       ponto a ponto, mais o deslocamento do texto. */
     const mudou = Array.from(d.base.values()).some(b => {
       const a = b.a, it = a.it;
       if (a.k === 'ref' || a.k === 'com'){ const t = textoComp(it, a.k); return t.x !== b.x0 || t.y !== b.y0; }
       if (b.pts) return (it.pts || []).some((p, i) => !b.pts[i] || p[0] !== b.pts[i][0] || p[1] !== b.pts[i][1]);
       return it.x !== b.x || it.y !== b.y;
-    }) || (d.base.elastico || []).some(e => {
-      const p = (e.w.pts || [])[e.i];
-      return p && (p[0] !== e.x || p[1] !== e.y);
     });
-    if (mudou) commit(); else cam.draw();
+    /* o giro no meio do gesto e mudanca mesmo que a posicao volte ao lugar (giroNoArrasto) */
+    if (mudou || girouDeFato(d)) commit(); else cam.draw();
     return;
   }
   if (d.mode === 'box' && d.moved && boxRect){
@@ -1683,6 +2097,8 @@ function leftUp(e){
     aplicaSel('');     /* selecao de varios nao tem uma net so: apaga o foco anterior */
     return;
   }
+  /* segurou, girou e soltou sem arrastar: o giro e a mudanca do gesto */
+  if (d.mode === 'move' && girouDeFato(d)){ commit(); return; }
   boxRect = null; cam.draw();
 }
 function leftClick(e){
@@ -1697,13 +2113,19 @@ function leftClick(e){
      tela cai em outro ponto do mundo, "erra" o componente que acabou de ser marcado e
      limpava a selecao — era isso que fazia a ficha abrir e fechar no mesmo clique. */
   if (!lastDown){ if (!e.shiftKey) limpaSel(); return; }
+  /* o segundo clique num fio ja inteiro na selecao: fica SO o trecho clicado */
+  if (lastDown.promover && !e.shiftKey){
+    selSo([lastDown.promover]);
+    aplicaSel('');
+    return;
+  }
   if (e.shiftKey && lastDown.wasSel){
     selDel(lastDown.alvo);
     aplicaSel('');            /* saiu da selecao: a net dele sai junto */
   }
 }
-/* Duplo clique: com o fio na mao encerra o traçado (o Altium faz igual). Sem ferramenta, ele e
-   o gesto que PROMOVE — o trecho marcado vira o fio inteiro, e o texto do designador leva o
+/* Duplo clique: com o fio na mao encerra o traçado (o Altium faz igual). Sem ferramenta, no
+   texto do designador ele leva o
    foco para o campo da ficha, que e onde se troca a palavra. Sem isso, o clique simples ter
    virado "trecho" teria tirado o gesto de pegar o fio todo, que ainda e o certo para mover o
    fio de lugar. */
@@ -1713,7 +2135,8 @@ cv.addEventListener('dblclick', e => {
   const w = worldOf(e);
   const h = hitTest(w.x, w.y);
   if (!h) return;
-  if (h.kind === 'wire'){ selSo([alvoAll(h.item)]); aplicaSel(netDoAlvo(h)); return; }
+  /* o FIO nao tem mais duplo clique: o primeiro clique ja pega o fio inteiro, e o segundo pega o
+     trecho (leftClick). Promover aqui desfaria o que o segundo clique acabou de escolher. */
   if (h.kind === 'ref' || h.kind === 'com'){
     /* o campo do designador vive na aba Geral: se a ficha estiver na aba Pinos, focar um
        campo escondido nao daria erro nenhum — so nao aconteceria nada, que e pior */
@@ -3021,10 +3444,10 @@ function desenhaFolha(ctx, si, o){
     /* espelho pelo DADO (opts.mirror), e nao por um ctx.scale(-1,1): o scale virava a
        LETRA do nome e do numero do pino junto com o corpo. hub-draw.js » mirrorPart. */
     const emg = part ? null : desenhoDeEmergencia(c);
-    if (part) D.drawSymbolPart(ctx, part, { mirror: !!c.mirror, honraOlho: !showState.pinos });
+    if (part) D.drawSymbolPart(ctx, part, { mirror: !!c.mirror, honraOlho: !showState.pinos, rot: c.rot || 0 });
     /* desenho emprestado sai INTEIRO em ambar, e nao no azul da casa: ele esta ali para a
        folha ser legivel, nao para passar por simbolo resolvido — a cor e o aviso */
-    else if (emg) D.drawSymbolPart(ctx, emg.part, { mirror: !!c.mirror, honraOlho: !showState.pinos, stroke: EMERG_COR });
+    else if (emg) D.drawSymbolPart(ctx, emg.part, { mirror: !!c.mirror, honraOlho: !showState.pinos, stroke: EMERG_COR, rot: c.rot || 0 });
     else { ctx.strokeStyle = '#ff5252'; ctx.strokeRect(-100, -100, 200, 200); }
     ctx.restore();
     /* designador e comment: ancora medida pelo textoComp (caixa NA FOLHA + o deslocamento que
@@ -3034,17 +3457,22 @@ function desenhaFolha(ctx, si, o){
        (hub-draw.js » drawNetLabel: y + 18 para altura 55, ou seja um terco da altura): o
        worldText centra a letra na vertical, e o Altium a apoia na base */
     const tr = textoComp(c, 'ref');
-    if (showState.ref) D.worldText(ctx, tr.s, tr.x, tr.y + tr.h * 0.33, tr.h, 0, '#000000', 'left');
+    const refVisivel = showState.ref && designadorVisivel(c);
+    if (refVisivel) D.worldText(ctx, tr.s, tr.x, tr.y + tr.h * 0.33, tr.h, 0, '#000000', 'left');
     if (c.comment && showState.comment){
       const tc = textoComp(c, 'com');
       D.worldText(ctx, tc.s, tc.x, tc.y + tc.h * 0.33, tc.h, 0, '#333366', 'left');
     }
-    /* o tracinho que liga o texto ao componente quando ele foi afastado com a mao: sem ele,
-       um designador arrastado para longe vira uma palavra solta no meio da folha */
+    /* O TRACINHO que liga o texto ao componente e so um INDICADOR de a quem o texto pertence,
+       e aparece so ENQUANTO a mao arrasta aquele texto (pedido de 2026-09-24): soltou, some, ate
+       o proximo arrasto. Antes ele ficava para sempre em todo texto afastado, e a folha se
+       enchia de linhas tracejadas. */
     for (const qual of ['ref', 'com']){
+      if (qual === 'ref' && !refVisivel) continue;
       if (qual === 'com' && !(c.comment && showState.comment)) continue;
+      if (!(o.textosNaMao && o.textosNaMao.has(chaveAlvo({ it:c, k:qual })))) continue;
       const t = textoComp(c, qual);
-      if (!t.posto || (Math.abs(t.x - t.bx) < 1 && Math.abs(t.y - t.by) < 1)) continue;
+      if (Math.abs(t.x - t.bx) < 1 && Math.abs(t.y - t.by) < 1) continue;
       ctx.save();
       ctx.strokeStyle = '#9a9a86'; ctx.lineWidth = 3; ctx.setLineDash([18, 14]);
       ctx.beginPath(); ctx.moveTo(t.bx, t.by); ctx.lineTo(t.x, t.y); ctx.stroke();
@@ -3074,8 +3502,15 @@ function desenhaFolha(ctx, si, o){
 }
 /* o que a camera do canvas grande desenha: a folha ATIVA com os tres estados dela, mais o
    que so existe aqui — o contorno da selecao e a ferramenta na mao */
+/* os textos (designador/comment) que a mao esta arrastando AGORA — so eles ganham o tracinho */
+function textosNaMao(){
+  if (!mouse || mouse.mode !== 'move' || !mouse.moved) return null;
+  const out = new Set();
+  for (const b of mouse.base.values()) if (b.a.k === 'ref' || b.a.k === 'com') out.add(chaveAlvo(b.a));
+  return out.size ? out : null;
+}
 function drawWorld(ctx, cam){
-  desenhaFolha(ctx, sheetIdx, { grid: showState.grid, foco: selNet, esc: cam.scale });
+  desenhaFolha(ctx, sheetIdx, { grid: showState.grid, foco: selNet, esc: cam.scale, textosNaMao: textosNaMao() });
   drawSelection(ctx, cam);
   drawFerramenta(ctx, cam);
 }
@@ -3083,23 +3518,7 @@ function drawWorld(ctx, cam){
    alimentacao em fantasma e o alvo do ima */
 function drawFerramenta(ctx, cam){
   const px = 1 / cam.scale;
-  if (wireDraw && wireDraw.pts.length){
-    const last = wireDraw.pts[wireDraw.pts.length - 1];
-    ctx.save();
-    ctx.strokeStyle = D.SCH.wire; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath();
-    wireDraw.pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
-    ctx.stroke();
-    if (hoverW){
-      const r = wirePoint(hoverW);
-      ctx.globalAlpha = 0.7; ctx.setLineDash([30, 20]);
-      ctx.beginPath(); ctx.moveTo(last[0], last[1]);
-      if (r.pt[0] !== last[0] && r.pt[1] !== last[1]) ctx.lineTo(r.pt[0], last[1]);
-      ctx.lineTo(r.pt[0], r.pt[1]);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
+  if (tool === 'wire') desenhaFioEmCurso(ctx, px);
   if (tool === 'power' && toolPower && hoverW){
     const x = snapHit ? snapHit.x : snapG(hoverW.x), y = snapHit ? snapHit.y : snapG(hoverW.y);
     ctx.save(); ctx.globalAlpha = 0.6;
@@ -3112,8 +3531,11 @@ function drawFerramenta(ctx, cam){
     D.drawNetLabel(ctx, { x, y, net:toolNet, rot:0 });
     ctx.restore();
   }
-  /* o ima: alvo laranja no ponto de conexao que vai grudar */
-  const ima = tool !== 'select' ? snapHit : moveIma;
+  /* as guias do arrasto, por baixo do alvo do ima */
+  if (GUIAS && mouse && mouse.mode === 'move' && mouse.moved && mouse.cena)
+    GUIAS.desenha(ctx, mouse.cena, { escala:cam.scale, fmt:fmtMedida });
+  /* o ima: alvo laranja no ponto de conexao que vai grudar (o fio tem o X vermelho dele) */
+  const ima = tool === 'wire' ? null : tool !== 'select' ? snapHit : moveIma;
   if (ima){
     const r = 7 * px;
     ctx.save();
@@ -3128,34 +3550,81 @@ function drawFerramenta(ctx, cam){
     ctx.restore();
   }
 }
+/* O FIO EM CURSO, com as cores e as espessuras medidas no video do Altium (2026-09-24):
+     - o que ja foi fixado: lavanda, 2 px de tela (o fio so ganha o azul da folha ao terminar);
+     - a perna 1 ate o cursor: cinza, 1 px, continua; a perna 2 (a de antecipacao): pontilhada;
+     - um × pequeno em cada canto e na ponta; a partida que encostou num ponto eletrico, uma
+       bolinha magenta com o X vermelho;
+     - a cruzinha do cursor no ponto ENCAIXADO (a seta do mouse fica onde a mao esta), e o X
+       vermelho quando ele esta sobre um ponto eletrico. */
+const FIO_FIXADO = '#69699d', FIO_PERNA = '#9a99a3', FIO_HOT = '#e3242b', FIO_PARTIDA = '#c2357c';
+function desenhaFioEmCurso(ctx, px){
+  const r = fioCursor;
+  const linha = (a, b) => { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); };
+  const xis = (p, t) => { ctx.beginPath(); ctx.moveTo(p[0] - t, p[1] - t); ctx.lineTo(p[0] + t, p[1] + t);
+                          ctx.moveTo(p[0] - t, p[1] + t); ctx.lineTo(p[0] + t, p[1] - t); ctx.stroke(); };
+  ctx.save();
+  ctx.lineCap = 'butt'; ctx.lineJoin = 'miter'; ctx.setLineDash([]);
+  if (wireDraw){
+    const pts = wireDraw.pts;
+    if (pts.length >= 2){
+      ctx.strokeStyle = FIO_FIXADO; ctx.lineWidth = 2 * px;
+      ctx.beginPath(); pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke();
+    }
+    ctx.strokeStyle = FIO_PERNA; ctx.lineWidth = px;
+    const marcas = pts.slice(1);
+    if (r){
+      const pn = HubFio.pernas(wireDraw, r.pt);
+      if (pn.perna1) linha(pn.perna1[0], pn.perna1[1]);
+      if (pn.perna2){ ctx.setLineDash([2 * px, 2 * px]); linha(pn.perna2[0], pn.perna2[1]); ctx.setLineDash([]); }
+      if (pn.canto) marcas.push(pn.canto);
+      marcas.push(r.pt);
+    }
+    for (const q of marcas) xis(q, 3.5 * px);
+    if (wireDraw.ligado){
+      const a = pts[0];
+      ctx.fillStyle = FIO_PARTIDA; ctx.beginPath(); ctx.arc(a[0], a[1], 4 * px, 0, 2 * Math.PI); ctx.fill();
+      ctx.strokeStyle = FIO_HOT; ctx.lineWidth = 1.5 * px; xis(a, 6 * px);
+    }
+  }
+  if (r){
+    ctx.strokeStyle = '#8c8c8c'; ctx.lineWidth = px;
+    const c = 24 * px;
+    linha([r.pt[0] - c, r.pt[1]], [r.pt[0] + c, r.pt[1]]);
+    linha([r.pt[0], r.pt[1] - c], [r.pt[0], r.pt[1] + c]);
+    if (r.snap){ ctx.strokeStyle = FIO_HOT; ctx.lineWidth = 1.5 * px; xis(r.pt, 6 * px); }
+  }
+  ctx.restore();
+}
 /* as bordinhas: caixa tracejada com alcas nos cantos em cada item marcado (nos fios, tambem
    em cada vertice) e o retangulo de selecao enquanto ele e arrastado */
 function drawSelection(ctx, cam){
   const px = 1 / cam.scale, hs = 3.5 * px, m = 40;
   ctx.save();
+  /* O FIO SELECIONADO, COMO NO ALTIUM (as fotos de 2026-09-24): sem caixa em volta — um trecho
+     horizontal teria caixa de altura zero, e um retangulo diria "peguei esta area" em vez de
+     "peguei este fio". O fio ganha um tracejado claro por dentro e uma alcinha VERDE em cada
+     vertice; o PEDACO escolhido no segundo clique (trecho ou vertice) leva as alcinhas VERMELHAS,
+     e o resto do fio continua com as verdes, para se ver de que fio ele e pedaco. */
+  const linhaSel = (a, b) => { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); };
+  const alca = (q, cor) => {
+    ctx.fillStyle = cor; ctx.fillRect(q[0] - hs, q[1] - hs, 2 * hs, 2 * hs);
+    ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = px; ctx.setLineDash([]); ctx.strokeRect(q[0] - hs, q[1] - hs, 2 * hs, 2 * hs);
+  };
   for (const a of sel.values()){
     const it = a.it;
-    if (!onSheet(it)) continue;
+    if (!onSheet(it) || it.t !== 'wire') continue;
     const pts = it.pts || [];
-    /* O TRECHO se marca por cima do proprio fio, e nao por uma caixa: um trecho horizontal tem
-       caixa de altura zero, e um retangulo tracejado de 80 mil em volta dele apontaria para o
-       lugar certo dizendo a coisa errada — "peguei esta area" em vez de "peguei este trecho". */
-    if (a.k === 'seg' && pts[a.i] && pts[a.i+1]){
-      ctx.strokeStyle = SEL; ctx.lineWidth = Math.max(16, 6 * px); ctx.setLineDash([]);
-      ctx.globalAlpha = 0.35;
-      ctx.beginPath(); ctx.moveTo(pts[a.i][0], pts[a.i][1]); ctx.lineTo(pts[a.i+1][0], pts[a.i+1][1]); ctx.stroke();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = SEL;
-      for (const p of [pts[a.i], pts[a.i+1]]) ctx.fillRect(p[0] - hs, p[1] - hs, 2*hs, 2*hs);
-      continue;
-    }
-    if (a.k === 'vert'){
-      const p = pts[a.i];
-      if (!p) continue;
-      ctx.fillStyle = SEL;
-      ctx.fillRect(p[0] - hs*2, p[1] - hs*2, 4*hs, 4*hs);
-      continue;
-    }
+    const escolhidos = a.k === 'seg' ? [a.i, a.i + 1] : a.k === 'vert' ? [a.i] : [];
+    ctx.strokeStyle = SEL_FIO; ctx.lineWidth = px; ctx.setLineDash([3 * px, 3 * px]);
+    if (a.k === 'seg'){ if (pts[a.i] && pts[a.i + 1]) linhaSel(pts[a.i], pts[a.i + 1]); }
+    else for (let i = 1; i < pts.length; i++) linhaSel(pts[i - 1], pts[i]);
+    pts.forEach((q, i) => { if (escolhidos.indexOf(i) < 0) alca(q, ALCA_VERDE); });
+    for (const i of escolhidos) if (pts[i]) alca(pts[i], ALCA_VERMELHA);
+  }
+  for (const a of sel.values()){
+    const it = a.it;
+    if (!onSheet(it) || it.t === 'wire') continue;
     const bb = alvoBBox(a);
     const mm = (a.k === 'ref' || a.k === 'com') ? 10 : m;    /* o texto quer moldura justa */
     const x = bb.x1 - mm, y = bb.y1 - mm, w = (bb.x2 - bb.x1) + 2*mm, h = (bb.y2 - bb.y1) + 2*mm;
@@ -3164,9 +3633,6 @@ function drawSelection(ctx, cam){
     ctx.setLineDash([]);
     ctx.fillStyle = SEL;
     for (const [cx, cy] of [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) ctx.fillRect(cx - hs, cy - hs, 2*hs, 2*hs);
-    /* as alcinhas de vertice do fio inteiro: elas ja eram desenhadas e nao faziam nada. Agora
-       sao alvo de verdade — o hitTest devolve o vertice quando o cursor esta em cima delas. */
-    if (it.t === 'wire' && a.k === 'all') for (const p of pts) ctx.fillRect(p[0] - hs, p[1] - hs, 2*hs, 2*hs);
   }
   if (boxRect){
     const r = boxRect;
@@ -3184,8 +3650,15 @@ const cam = D.mkCamera(cv, drawWorld, {
     $('sx').textContent = w.x.toFixed(0);
     $('sy').textContent = w.y.toFixed(0);
     /* com ferramenta na mao o que interessa e o ima, nao o que esta sob o cursor */
+    if (tool === 'wire'){
+      fioCursor = panning ? null : pontoDoFio(w);
+      snapHit = null;
+      statusDoFio();
+      cam.draw();
+      return;
+    }
     if (tool !== 'select'){
-      snapHit = panning ? null : snapPoint(w);
+      snapHit = panning ? null : snapPoint(w, tool !== 'noerc');
       /* o ima pegou um pino de nome barrado: o rotulo vai como markup ja escapado pelo
          hub-overbar — nos outros casos segue texto, que nao passa por parser nenhum */
       if (snapHit && snapHit.html) $('shover').innerHTML = '⊙ ' + snapHit.html;
@@ -3208,6 +3681,14 @@ const cam = D.mkCamera(cv, drawWorld, {
     cv.style.cursor = 'default';   /* seta normal; so o pan (agarrando) muda */
   }
 });
+/* O GESTO E REFEITO A CADA MUDANCA DE CAMERA no meio do arrasto. A roda amplia (e com o Shift
+   anda para os lados) com o cursor parado: o ponto do mundo sob ele muda, e o raio da guia, que
+   e em px de TELA, tambem. Sem refazer, a tela continuava mostrando o pouso antigo e o soltar
+   recalculava com a camera nova — pousava noutro lugar, com a barra ainda anunciando o
+   alinhamento. Este ouvinte vem DEPOIS do da camera (mesmo alvo, ordem de registro), entao ja
+   ve a camera nova. */
+function refazGesto(){ if (mouse && mouse.mode === 'move' && mouse.moved && mouse.ult) leftMove(mouse.ult); }
+cv.addEventListener('wheel', refazGesto);
 
 function hitTest(x, y){
   const s = model.sheets[sheetIdx];
@@ -3242,6 +3723,7 @@ function hitTest(x, y){
      area vazia, e quem clica em cima de uma palavra esta mirando a palavra. Entre os dois, o
      designador ganha — ele esta sempre a vista, o comment so com o olho ligado. */
   if (showState.ref) for (const c of s.comps){
+    if (!designadorVisivel(c)) continue;          /* o que nao se ve nao se clica */
     const b = textoBBox(c, 'ref');
     if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return { kind:'ref', ref:c.ref, item:c };
   }
@@ -4001,11 +4483,18 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (symModalAberto()){ fechaSymModal(); return; }
     if (addOpen()){ closeAdd(); return; }
-    if (wireDraw){ wireDraw = null; cam.draw(); return; }
+    if (wireDraw){ endWire(); return; }
     if (tool !== 'select'){ setTool('select'); return; }
     if (mouse){
+      /* o Escape desfaz o DESLOCAMENTO; o giro dado no meio do gesto fica, e entra no undo */
+      const girou = mouse.mode === 'move' && girouDeFato(mouse);
       if (mouse.mode === 'move') applyMove(mouse.base, 0, 0);
-      mouse = null; boxRect = null; swallowClick = true; cam.draw(); return;
+      mouse = null; boxRect = null; swallowClick = true;
+      /* o alvo do ima e a frase da guia sao do gesto: sem isto ficavam na tela, anunciando um
+         alinhamento que o Escape acabou de desfazer */
+      moveIma = null; $('shover').textContent = '';
+      if (girou) commit(); else cam.draw();
+      return;
     }
     /* Escape e o botao de panico: larga a selecao E o foco de net. Enquanto largava so a
        selecao, a folha ficava laranja sem nada marcado — a "cor travada". */
@@ -4016,6 +4505,10 @@ window.addEventListener('keydown', e => {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   if (addOpen() || symModalAberto()) return;   /* os atalhos da folha nao valem dentro do modal */
   if (capturandoAtalho) return;                /* a aba Atalhos esta ouvindo a proxima tecla */
+  /* O FIO NA MAO tem teclas proprias, como no Altium, e elas vem antes dos atalhos: aqui o
+     Espaco inverte o canto (nao gira a selecao), Shift+Espaco troca o modo, Backspace desfaz */
+  if (tool === 'wire' && (e.key === ' ' || e.code === 'Space')){ e.preventDefault(); espacoDoFio(e.shiftKey); return; }
+  if (tool === 'wire' && wireDraw && e.key === 'Backspace'){ e.preventDefault(); backspaceDoFio(); return; }
   const acao = ATALHOS.porTecla[normalizaTecla(e)];
   if (!acao) return;
   /* O ESPACO COM UM BOTAO EM FOCO ja se resolve sozinho, e MEDIDO no Chrome: com selecao, o
@@ -4044,7 +4537,7 @@ function fazAcao(id){
     case 'espelhoX':  if (sel.size) mirrorSel('x'); else return false; return;
     case 'espelhoY':  if (sel.size) mirrorSel('y'); else return false; return;
     case 'apagar':    deleteSel(); return;
-    case 'enquadrar': cam.fit(fitBBox()); return;
+    case 'enquadrar': cam.fit(fitBBox()); refazGesto(); return;
     case 'grade':     $('btnGrid').click(); return;
     case 'desfazer':  undo(); return;
     case 'refazer':   redo(); return;
@@ -4589,6 +5082,29 @@ $('btnPinNames').addEventListener('click', () => {
   pintaOlhoPinos(); cam.draw(); pintaMiniaturas();
 });
 pintaOlhoPinos();
+/* o botao das guias: duas caixas na mesma linha de centro; desligado, o risco dos outros olhos */
+function pintaGuias(){
+  const b = $('btnGuias');
+  if (!b) return;
+  const on = showState.guias && !!GUIAS;
+  b.classList.toggle('active', on);
+  b.setAttribute('aria-pressed', String(on));
+  b.setAttribute('aria-label', 'Guias de alinhamento');
+  b.title = !GUIAS ? 'Guias de alinhamento indisponíveis: o hub-guias.js não carregou'
+          : on ? 'Guias de alinhamento ligadas: ao arrastar, alinha, iguala o espaço e mostra a distância (Ctrl solta a guia, Shift anda reto no trilho dela) — clique para desligar'
+               : 'Guias de alinhamento desligadas: o arrasto usa só a grade e o ímã do pino — clique para ligar';
+  b.innerHTML = '<svg viewBox="0 0 16 16"><rect x="1.5" y="5" width="4" height="6" rx="0.6"/>'
+              + '<rect x="10.5" y="3.5" width="4" height="9" rx="0.6"/><path d="M0.5 8h15" stroke-dasharray="1.4 1.4"/>'
+              + (on ? '' : '<path d="' + OLHO_X + '"/>') + '</svg>';
+}
+$('btnGuias').addEventListener('click', () => {
+  if (!GUIAS) return;
+  showState.guias = !showState.guias;
+  try { localStorage.setItem(VER_GUIAS_KEY, showState.guias ? '1' : '0'); } catch (e) {}
+  pintaGuias();
+  HubDialog.toast(showState.guias ? 'guias de alinhamento ligadas' : 'guias de alinhamento desligadas', 'info', 2200);
+});
+pintaGuias();
 $('btnGrid').addEventListener('click', () => {
   showState.grid = !showState.grid; $('btnGrid').classList.toggle('active', showState.grid); cam.draw();
 });

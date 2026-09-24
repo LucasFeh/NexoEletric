@@ -325,4 +325,21 @@ for (const lixo of [null, undefined, 'nada', 42, [], { naoExiste:'K' }, { fio:''
   assert.ok(SF.larguraTexto('', 60) >= 60, 'largura mínima: um texto vazio ainda é agarrável');
 }
 
+/* ── os eixos do trecho: UMA regra para quem move, para as guias e para o Shift ──
+   (o Shift chegou a prender o único eixo em que o trecho anda, e o fio congelava) */
+{
+  const P = [[0,0],[100,0],[100,100],[200,100]];
+  assert.strictEqual(SF.eixosDoTrecho(P, 0), 'y', 'trecho horizontal: só anda em Y');
+  assert.strictEqual(SF.eixosDoTrecho(P, 1), 'x', 'trecho vertical: só anda em X');
+  assert.strictEqual(SF.eixosDoTrecho([[0,0],[100,0]], 0), 'xy', 'fio de dois pontos anda inteiro');
+  assert.strictEqual(SF.eixosDoTrecho([[0,0],[100,100],[200,100]], 0), 'xy', 'diagonal anda livre');
+  assert.strictEqual(SF.eixosDoTrecho(P, 9), 'xy', 'índice fora do fio não trava nada');
+  /* e o moveSegmento obedece a mesma regra, em todo trecho */
+  for (let i = 0; i < P.length - 1; i++){
+    const ex = SF.eixosDoTrecho(P, i), m = SF.moveSegmento(P, i, 7, 11);
+    assert.strictEqual(m[i][0] - P[i][0], ex.indexOf('x') >= 0 ? 7 : 0);
+    assert.strictEqual(m[i][1] - P[i][1], ex.indexOf('y') >= 0 ? 11 : 0);
+  }
+}
+
 console.log('test-fio-topologia: OK');
