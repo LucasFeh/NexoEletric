@@ -1,18 +1,35 @@
-# AltiumHub desktop (Electron)
+# EletricHUB desktop (Electron)
 
 O hub do AltiumPCBMirror como aplicativo do Windows. Faz o mesmo que o hub do servidor
 (192.168.15.192:8100), porque **é** o mesmo hub: o app sobe o `hubserver.py` deste
 repositório com um Python embutido e o mostra numa janela.
 
 ```
-AltiumHub.exe (Electron)
+EletricHUB.exe (Electron)
  ├─ resources/python/        CPython 3.12.10 embeddable + Flask/Werkzeug/olefile
  ├─ resources/hub/           o hub do commit do build (git ls-files, sem segredos)
  └─ main.js
-      1. sincroniza resources/hub -> pasta de trabalho (C:\AltiumHub)
+      1. sincroniza resources/hub -> pasta de trabalho (C:\EletricHUB)
       2. python hubserver.py --port 8200 --host 127.0.0.1   (cwd = pasta de trabalho)
       3. janela em http://127.0.0.1:8200/
 ```
+
+## O nome
+
+Desde a 1.1.0 o sistema se chama **EletricHUB**: app, janela, instalador, atalhos e a
+marca do hub. Alguns identificadores internos continuam com o nome antigo, e isso é de
+propósito, porque trocá-los quebraria o que já está instalado:
+
+- **`appId` `com.dieletrons.altiumhub` e pacote `altiumhub-desktop`.** São o que faz o
+  instalador reconhecer a instalação existente (a chave de desinstalação e a pasta
+  `%LOCALAPPDATA%\Programs\altiumhub-desktop`).
+- **As chaves `altiumhub.*` do localStorage.** São as preferências do hub.
+- **As variáveis `ALTIUMHUB_*`** e o caminho `C:\ProgramData\AltiumPCBMirror\home.txt`,
+  lido pelos scripts do Altium.
+- **O marcador `// AltiumPCBMirror` dos arquivos que o hub lê de volta.**
+
+A pasta de dados segue o nome do produto. Na primeira abertura da 1.1.0,
+`%APPDATA%\AltiumHub` vira `%APPDATA%\EletricHUB` (`main.js`, antes de tudo).
 
 ## Por que é assim
 
@@ -69,7 +86,7 @@ cd electron
 npm install
 npm run build:prep     # build/python (baixa o Python), build/hub (do HEAD), gen/build-info.json
 npm test               # 26 testes; os de backend/importação sobem o hub de verdade
-npm run dev            # abre o app (pasta de dados normal: %APPDATA%\AltiumHub)
+npm run dev            # abre o app (pasta de dados normal: %APPDATA%\EletricHUB)
 ```
 
 `build/hub` sai do **commit** (`git cat-file --filters`, que aplica o CRLF dos `.pas`), e
@@ -91,7 +108,7 @@ Rode com `env -u ELECTRON_RUN_AS_NODE` (Git Bash) ou limpe a variável.
 ## Instalador e release
 
 ```powershell
-npm run dist                       # electron/dist/AltiumHub-Setup-X.Y.Z.exe, sem publicar
+npm run dist                       # electron/dist/EletricHUB-Setup-X.Y.Z.exe, sem publicar
 $env:GH_TOKEN = "<token de PUBLICAR>"
 $env:ALTIUMHUB_UPDATE_TOKEN = "<token de LER, vai dentro do .exe>"
 npm run release -- patch           # ou minor, major, X.Y.Z; --dry-run para ensaiar
@@ -152,6 +169,7 @@ dois builds com o mesmo número parecem "já instalado".
 
 Ao abrir e a cada 4 horas, o app consulta `releases/latest` e baixa em segundo plano.
 Depois pergunta se pode reiniciar, ou instala ao fechar. O instalador é per-user
-(`%LOCALAPPDATA%\Programs\AltiumHub`), e por isso atualiza sem pedir administrador.
+(`%LOCALAPPDATA%\Programs\altiumhub-desktop`, o nome interno do pacote), e por isso atualiza
+sem pedir administrador.
 Antes de instalar, o app derruba o hub e os filhos dele, porque arquivo aberto não é
 substituído. Na abertura seguinte, a pasta de trabalho recebe o código novo.

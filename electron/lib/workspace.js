@@ -120,7 +120,7 @@ function sync(ws, bundleDir, log = () => {}) {
   const anterior = estado(ws);
   const res = { dev: false, copied: 0, seeded: 0, removed: 0, kept: [], falhas: [], maisNova: '' };
 
-  // A pasta e da MAQUINA (C:\AltiumHub) e o app e instalado por usuario: duas contas do
+  // A pasta e da MAQUINA (C:\EletricHUB) e o app e instalado por usuario: duas contas do
   // Windows podem estar em versoes diferentes. A mais velha nao rebaixa o codigo que a mais
   // nova pos ali (a nova ja pode ter mudado o estado de um jeito que a velha nao entende).
   const maisNova = anterior && versaoMaior(anterior.appVersion, manifest.appVersion);

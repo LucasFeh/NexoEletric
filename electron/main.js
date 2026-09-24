@@ -1,5 +1,5 @@
 'use strict';
-// AltiumHub desktop: o hub do AltiumPCBMirror numa janela propria.
+// EletricHUB desktop: o hub do AltiumPCBMirror numa janela propria.
 //
 // O que o app faz, na ordem:
 //   1. garante a pasta de trabalho (lib/workspace.js): o codigo do hub que veio neste
@@ -16,7 +16,22 @@ const { pathToFileURL } = require('node:url');
 const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require('electron');
 
 // Testes/automacao: pasta de dados propria ANTES de qualquer uso do userData.
-if (process.env.ALTIUMHUB_USERDATA) app.setPath('userData', process.env.ALTIUMHUB_USERDATA);
+if (process.env.ALTIUMHUB_USERDATA) {
+  app.setPath('userData', process.env.ALTIUMHUB_USERDATA);
+} else {
+  // O app se chamava AltiumHub ate a 1.0.2, e o userData segue o nome do produto: sem isto a
+  // atualizacao abriria como instalacao nova -- sem a pasta de trabalho configurada e sem as
+  // preferencias do hub (o localStorage mora ali). A pasta antiga muda de nome uma vez; se
+  // o Windows recusar (algo ainda segurando um arquivo), o app continua usando a antiga.
+  const appData = app.getPath('appData');
+  const nova = path.join(appData, app.getName());                                   // EletricHUB
+  const antiga = path.join(appData, app.getName().replace(/^EletricHUB/, 'AltiumHub')); // AltiumHub
+  try {
+    if (antiga !== nova && !fs.existsSync(nova) && fs.existsSync(antiga)) fs.renameSync(antiga, nova);
+  } catch {
+    app.setPath('userData', antiga);
+  }
+}
 // O hub decide o idioma da casca pelo navigator.language (hub-i18n.js). Os paineis sao
 // pt-BR sempre; num Windows em ingles a casca sairia em ingles e o resto nao.
 app.commandLine.appendSwitch('lang', 'pt-BR');
@@ -106,7 +121,7 @@ function criarJanela() {
     x: w.x, y: w.y, width: w.width || 1480, height: w.height || 940,
     minWidth: 900, minHeight: 600,
     show: false,
-    title: 'AltiumHub',
+    title: 'EletricHUB',
     icon: web.ICONE,
     backgroundColor: '#14161a',
     webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
@@ -122,7 +137,8 @@ function criarJanela() {
   esta.on('closed', () => { if (janela === esta) janela = null; });
   esta.webContents.on('page-title-updated', (e, t) => {
     e.preventDefault();
-    esta.setTitle(t && !/^AltiumHub/.test(t) ? `${t} — AltiumHub` : 'AltiumHub');
+    // o hub (hub-shell.js) ja poe "Projeto · Documento — EletricHUB" no titulo
+    esta.setTitle(t ? (/EletricHUB/.test(t) ? t : `${t} — EletricHUB`) : 'EletricHUB');
   });
   esta.webContents.on('render-process-gone', (_e, d) => {
     log.error('renderer caiu: ' + d.reason);
@@ -168,11 +184,11 @@ async function subirHub({ porta } = {}) {
   const avisos = [];
   if (r.falhas.length) {
     avisos.push(`${r.falhas.length} arquivo(s) do hub não foram atualizados por estarem em uso ` +
-      `(${r.falhas.slice(0, 3).join(', ')}${r.falhas.length > 3 ? '…' : ''}). Feche o Altium e reabra o AltiumHub.`);
+      `(${r.falhas.slice(0, 3).join(', ')}${r.falhas.length > 3 ? '…' : ''}). Feche o Altium e reabra o EletricHUB.`);
   }
   if (r.maisNova) {
     avisos.push(`a pasta de trabalho está com o código da versão ${r.maisNova}, mais nova que este app ` +
-      `(${app.getVersion()}): atualize o AltiumHub nesta conta do Windows.`);
+      `(${app.getVersion()}): atualize o EletricHUB nesta conta do Windows.`);
   }
   avisoSync = avisos.join(' ');
 
@@ -290,7 +306,7 @@ function abrirConfig() {
   if (janelaConfig && !janelaConfig.isDestroyed()) { janelaConfig.focus(); return; }
   janelaConfig = new BrowserWindow({
     parent: janela || undefined, modal: false, width: 760, height: 860, minWidth: 620, minHeight: 600,
-    title: 'Configurações — AltiumHub', icon: web.ICONE, backgroundColor: '#14161a', show: false,
+    title: 'Configurações — EletricHUB', icon: web.ICONE, backgroundColor: '#14161a', show: false,
     autoHideMenuBar: true,
     webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
   });
@@ -301,7 +317,7 @@ function abrirConfig() {
 }
 
 function aviso(message, detail) {
-  dialog.showMessageBox(janela || undefined, { type: 'info', title: 'AltiumHub', message, detail, buttons: ['OK'], noLink: true });
+  dialog.showMessageBox(janela || undefined, { type: 'info', title: 'EletricHUB', message, detail, buttons: ['OK'], noLink: true });
 }
 
 function abrirImportacao(opts = {}) {
@@ -318,7 +334,7 @@ function abrirImportacao(opts = {}) {
   if (janelaImport && !janelaImport.isDestroyed()) { janelaImport.focus(); return; }
   janelaImport = new BrowserWindow({
     parent: janela || undefined, width: 720, height: 620, minWidth: 560, minHeight: 420,
-    title: 'Importar do servidor — AltiumHub', icon: web.ICONE, backgroundColor: '#14161a', show: false,
+    title: 'Importar do servidor — EletricHUB', icon: web.ICONE, backgroundColor: '#14161a', show: false,
     webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
   });
   janelaImport.removeMenu();
@@ -374,7 +390,7 @@ async function antesDoSincronismo(d) {
   const wc = d.webContents;
   const win = (wc && BrowserWindow.fromWebContents(wc)) || janela;
   const pergunta = (message, detail) => dialog.showMessageBox(win, {
-    type: 'warning', title: 'AltiumHub', message,
+    type: 'warning', title: 'EletricHUB', message,
     detail: `${detail}\n\nSincronizar agora usa só o estado local do almoxarifado. ` +
       'Componentes novos no Odoo podem receber part numbers diferentes dos que o servidor daria.',
     buttons: ['Sincronizar assim mesmo', 'Cancelar'], defaultId: 1, cancelId: 1, noLink: true,
@@ -472,6 +488,11 @@ function montarMenu() {
         { label: 'Diminuir zoom', accelerator: 'CmdOrCtrl+-', click: () => zoom(-0.5) },
         { label: 'Tamanho original', accelerator: 'CmdOrCtrl+0', click: () => zoom(0) },
         { type: 'separator' },
+        { label: 'Painel Projetos', accelerator: 'CmdOrCtrl+Alt+P', click: () => {
+          const c = wc();
+          if (c) c.executeJavaScript('window.EletricShell && EletricShell.alternarProjetos()').catch(() => {});
+        } },
+        { type: 'separator' },
         { label: 'Tela cheia', accelerator: 'F11', click: () => { const w = focada(); if (w) w.setFullScreen(!w.isFullScreen()); } },
         { type: 'separator' },
         { label: 'Ferramentas do desenvolvedor', accelerator: 'CmdOrCtrl+Shift+I', click: () => { const c = wc(); if (c) c.toggleDevTools(); } },
@@ -486,7 +507,7 @@ function montarMenu() {
         { label: 'Abrir log do hub', click: () => shell.openPath(path.join(LOG_DIR, 'hub.log')) },
         { label: 'Abrir pasta de logs', click: () => shell.openPath(LOG_DIR) },
         { type: 'separator' },
-        { label: 'Sobre o AltiumHub', click: () => sobre() },
+        { label: 'Sobre o EletricHUB', click: () => sobre() },
       ],
     },
   ];
@@ -507,7 +528,7 @@ function sobre() {
   const s = settings.load();
   const u = updater.status();
   dialog.showMessageBox(focada(), {
-    type: 'info', title: 'Sobre o AltiumHub', message: `AltiumHub ${b.version}`,
+    type: 'info', title: 'Sobre o EletricHUB', message: `EletricHUB ${b.version}`,
     detail: [
       `commit ${b.commit ? b.commit.slice(0, 10) : '?'}${b.builtAt ? ` · build ${b.builtAt.slice(0, 16).replace('T', ' ')}` : ''}`,
       `Python ${b.python || '3.12 (embutido)'} · Electron ${process.versions.electron}`,
@@ -546,7 +567,7 @@ async function verificarAtualizacoes() {
     verificando: ['Verificando…', ''],
   }[st.fase] || [st.fase, st.erro];
   const botoes = st.fase === 'sem-token' ? ['Abrir configurações', 'Fechar'] : ['OK'];
-  const r = await dialog.showMessageBox(w, { type: st.fase === 'erro' ? 'warning' : 'info', title: 'AltiumHub', message: msg[0], detail: msg[1], buttons: botoes, noLink: true });
+  const r = await dialog.showMessageBox(w, { type: st.fase === 'erro' ? 'warning' : 'info', title: 'EletricHUB', message: msg[0], detail: msg[1], buttons: botoes, noLink: true });
   if (st.fase === 'sem-token' && r.response === 0) abrirConfig();
 }
 
@@ -587,7 +608,7 @@ function registrarIpc() {
   });
   handle('config:escolherPasta', async (e, atual) => {
     const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
-      title: 'Pasta de trabalho do AltiumHub', defaultPath: atual || settings.workspacePadrao(),
+      title: 'Pasta de trabalho do EletricHUB', defaultPath: atual || settings.workspacePadrao(),
       properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
     });
     return r.canceled ? '' : r.filePaths[0];
@@ -705,7 +726,7 @@ async function salvarConfig(e, d) {
     const ok = await reiniciarHub();
     if (!ok) {
       aviso('Configurações salvas, mas o hub não foi reiniciado.',
-        'Há edições não salvas numa vista. Salve-as e reabra o AltiumHub para aplicar a mudança.');
+        'Há edições não salvas numa vista. Salve-as e reabra o EletricHUB para aplicar a mudança.');
     }
     return { ok: true, reiniciou: ok };
   }

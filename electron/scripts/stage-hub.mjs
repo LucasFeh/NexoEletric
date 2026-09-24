@@ -55,7 +55,7 @@ const PROJETO_QUE_VIAJA = null;
 function configDesktop(buf) {
   const cfg = JSON.parse(buf.toString('utf8'));
   for (const k of ['schlib', 'pcblib', 'backup_dir']) delete cfg[k];
-  cfg._desktop = 'AltiumHub desktop: a biblioteca da casa e a copia publicada em Libs/ ' +
+  cfg._desktop = 'EletricHUB desktop: a biblioteca da casa e a copia publicada em Libs/ ' +
     '(somente leitura, como no servidor). Para gravar na lib viva, declare "schlib" aqui.';
   return Buffer.from(JSON.stringify(cfg, null, 2) + '\n', 'utf8');
 }

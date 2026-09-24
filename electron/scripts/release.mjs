@@ -1,4 +1,4 @@
-// Publica uma versao do AltiumHub desktop no GitHub (releases do LucasFeh/AltiumPCBMirror).
+// Publica uma versao do EletricHUB desktop no GitHub (releases do LucasFeh/AltiumPCBMirror).
 //
 //   npm run release -- 1.0.0            versao exata (a primeira foi assim)
 //   npm run release -- patch            1.0.0 -> 1.0.1   (minor, major tambem)
@@ -101,7 +101,7 @@ const ramo = git('rev-parse', '--abbrev-ref', 'HEAD');
 const tagExiste = Boolean(git('tag', '--list', tag));
 const retomar = tagExiste && pkg.version === versao && git('rev-parse', `${tag}^{commit}`) === git('rev-parse', 'HEAD');
 if (tagExiste && !retomar) erro(`a tag ${tag} ja existe e nao e o HEAD desta arvore`);
-console.log(`\nAltiumHub ${pkg.version} -> ${versao} (branch ${ramo})${DRY ? '  [dry-run]' : ''}${retomar ? '  [retomando a publicacao]' : ''}\n`);
+console.log(`\nEletricHUB ${pkg.version} -> ${versao} (branch ${ramo})${DRY ? '  [dry-run]' : ''}${retomar ? '  [retomando a publicacao]' : ''}\n`);
 
 if (!retomar) {
   // ── 2. versao e CHANGELOG ──
@@ -111,7 +111,7 @@ if (!retomar) {
   const commits = git('log', '--no-merges', '--format=- %s (%h)', ...(anterior ? [`${anterior}..HEAD`] : ['HEAD', '--', 'electron']))
     .split('\n').filter(Boolean);
   const clArq = path.join(APP, 'CHANGELOG.md');
-  const cl = fs.existsSync(clArq) ? fs.readFileSync(clArq, 'utf8') : '# Changelog — AltiumHub desktop\n';
+  const cl = fs.existsSync(clArq) ? fs.readFileSync(clArq, 'utf8') : '# Changelog — EletricHUB desktop\n';
   const hoje = new Date().toISOString().slice(0, 10);
   // Entrada escrita a mao para esta versao vence a gerada (a 1.0.0 foi assim).
   if (!new RegExp(`^## ${versao.replace(/\./g, '\\.')}\\b`, 'm').test(cl)) {
@@ -137,7 +137,7 @@ if (!retomar) {
   // ── 4. commit, tag, push ──
   git('add', 'electron/package.json', 'electron/package-lock.json', 'electron/CHANGELOG.md');
   if (git('diff', '--cached', '--name-only')) git('commit', '-m', `desktop: ${tag}`);
-  git('tag', '-a', tag, '-m', `AltiumHub desktop ${versao}`);
+  git('tag', '-a', tag, '-m', `EletricHUB desktop ${versao}`);
 }
 run('git', ['-C', REPO, 'push', 'origin', ramo]);
 run('git', ['-C', REPO, 'push', 'origin', tag]);
@@ -151,7 +151,7 @@ try {
   const rel = Array.isArray(lista) && lista.find((r) => r.tag_name === tag);
   if (!rel) throw new Error(`o release ${tag} nao apareceu no GitHub`);
   const tem = new Set((rel.assets || []).filter((a) => a.state === 'uploaded').map((a) => a.name));
-  for (const n of [`AltiumHub-Setup-${versao}.exe`, `AltiumHub-Setup-${versao}.exe.blockmap`, 'latest.yml']) {
+  for (const n of [`EletricHUB-Setup-${versao}.exe`, `EletricHUB-Setup-${versao}.exe.blockmap`, 'latest.yml']) {
     if (!tem.has(n)) throw new Error(`falta ${n} no release ${tag}`);
   }
   if (rel.draft) {

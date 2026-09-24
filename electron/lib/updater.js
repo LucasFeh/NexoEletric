@@ -80,7 +80,7 @@ function configurar(token) {
 async function perguntarReinicio(versao) {
   const r = await dialog.showMessageBox({
     type: 'info',
-    title: 'AltiumHub',
+    title: 'EletricHUB',
     message: `A versão ${versao} foi baixada.`,
     detail: 'Reiniciar agora para instalar? Se preferir, ela é instalada sozinha quando você fechar o app.',
     buttons: ['Reiniciar agora', 'Depois'],

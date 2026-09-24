@@ -1,7 +1,13 @@
-# Changelog — AltiumHub desktop
+# Changelog — EletricHUB desktop
 
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
-commit em que foi gerada; o commit aparece em **Ajuda › Sobre o AltiumHub**.
+commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
+
+## 1.1.0 — 2026-09-24
+
+- O sistema passa a se chamar **EletricHUB**: app, janela, instalador, atalhos, hub e as caixas dos scripts do Altium. A pasta de dados (`%APPDATA%\AltiumHub`) muda de nome sozinha na primeira abertura, com a pasta de trabalho, as configurações e as preferências do hub. Instalações novas usam `C:\EletricHUB` como pasta de trabalho; as existentes continuam onde estão.
+- Interface de ambiente de CAD, com a mesma identidade visual: painel **Projetos** à esquerda (projetos, documentos e bibliotecas em árvore, com busca, pendências e largura ajustável), abas de documento com ícone e barra de status com projeto, documento, contagens, servidor e o botão **Painéis**. Exibir › Painel Projetos (Ctrl+Alt+P) mostra e esconde o painel.
+- O título da janela mostra o projeto e o documento abertos.
 
 ## 1.0.2 — 2026-09-24
 

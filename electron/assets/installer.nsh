@@ -10,8 +10,8 @@
 ; Nada disso roda na atualizacao automatica (o app chama o instalador com --updated) nem
 ; em instalacao silenciosa (/S): la ninguem esta olhando para clicar.
 ;
-; Em qualquer caso, projetos, bibliotecas, a pasta de trabalho (C:\AltiumHub) e as
-; configuracoes (%APPDATA%\AltiumHub) ficam como estao: a troca e so do programa.
+; Em qualquer caso, projetos, bibliotecas, a pasta de trabalho (C:\EletricHUB) e as
+; configuracoes (%APPDATA%\EletricHUB) ficam como estao: a troca e so do programa.
 
 !include "WordFunc.nsh"
 
@@ -60,11 +60,13 @@ Var pid
     ${if} $R0 == 0
       altiumhub_fecha:
         ; so os processos DESTA instalacao (caminho dentro de $INSTDIR), o mesmo criterio do
+        ; FIND_PROCESS. O AltiumHub.exe e o nome do exe ate a 1.0.2: a atualizacao que troca o
+        ; nome encontra o app antigo aberto.
         ; FIND_PROCESS: um outro programa com o mesmo nome de exe nao e tocado
         ${if} $IsPowerShellAvailable == 0
-          nsExec::Exec `"$PowerShellPath" -C "Get-CimInstance -ClassName Win32_Process | ? {$$_.Path -and $$_.Path.StartsWith('$INSTDIR', 'CurrentCultureIgnoreCase') -and $$_.Name -eq '${APP_EXECUTABLE_FILENAME}'} | % { taskkill.exe /PID $$_.ProcessId }"`
+          nsExec::Exec `"$PowerShellPath" -C "Get-CimInstance -ClassName Win32_Process | ? {$$_.Path -and $$_.Path.StartsWith('$INSTDIR', 'CurrentCultureIgnoreCase') -and ($$_.Name -eq '${APP_EXECUTABLE_FILENAME}' -or $$_.Name -eq 'AltiumHub.exe')} | % { taskkill.exe /PID $$_.ProcessId }"`
         ${else}
-          nsExec::Exec `"$CmdPath" /C taskkill /IM "${APP_EXECUTABLE_FILENAME}" /FI "USERNAME eq %USERNAME%"`
+          nsExec::Exec `"$CmdPath" /C taskkill /IM "${APP_EXECUTABLE_FILENAME}" /IM "AltiumHub.exe" /FI "USERNAME eq %USERNAME%"`
         ${endIf}
         Pop $R2
         StrCpy $R1 0

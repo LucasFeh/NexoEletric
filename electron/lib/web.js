@@ -179,7 +179,7 @@ function endurecer(wc, o) {
     const win = BrowserWindow.fromWebContents(wc);
     const r = dialog.showMessageBoxSync(win, {
       type: 'warning',
-      title: 'AltiumHub',
+      title: 'EletricHUB',
       message: 'Há edições não salvas nesta janela.',
       detail: 'Se continuar, o que não foi salvo nas vistas Esquema/PCB se perde.',
       buttons: ['Descartar e continuar', 'Voltar e salvar'],
