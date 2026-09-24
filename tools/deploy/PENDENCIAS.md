@@ -11,6 +11,14 @@ da LAN**, no .192 ou em qualquer outra máquina. O Grupo 2 pode vir depois.
 ## Grupo 1 — antes de expor o hub
 
 ### 1.1 `GET /hub-almox.json` entrega a senha do Odoo em texto claro
+
+> **PARCIAL, 2026-09-24** (branch `electron`). O `_serve` passou a recusar o
+> `hub-almox.json` e o `.tmp` dele, comparando o caminho resolvido, o que também
+> pega os apelidos do Windows (caixa, ponto no fim, `::$DATA`). O teste está em
+> `tests/test_hubapi.py`. O resto do item continua valendo: o
+> `componentes_odoo.csv` (custos) e os `.py` ainda saem por HTTP, e o conserto
+> definitivo é a allowlist descrita abaixo. O app desktop importa esse CSV pelo HTTP,
+> então a allowlist precisa deixá-lo passar ou oferecer outra rota.
 `hubserver.py:120-133` · dono: `agente/bom-almox`
 
 `_serve` só recusa segmento começado por ponto (`:121`); a curinga
