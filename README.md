@@ -1019,10 +1019,40 @@ máquina da rede local), rode na raiz do workspace:
   hubs).
 - `--port N` muda a porta. Requer Python 3 + Flask (`pip install flask`). O servidor
   não altera nenhum arquivo do hub.
+- `--host 127.0.0.1` deixa o hub só nesta máquina: ninguém da rede o alcança, o link do
+  BOM sai com o endereço de loopback e só `Host:` de loopback é aceito (proteção contra
+  DNS rebinding). O padrão continua `0.0.0.0`, a rede toda. É assim que o app desktop
+  sobe o hub.
 - Com o servidor rodando, o hub também **salva** arquivos direto no workspace
   (`POST /api/save`, restrito a `Projects\<nome>\{changes,schematic,annotations}.js`,
   escrita atômica). Sem servidor, os botões de salvar baixam o arquivo para você
   substituir manualmente.
+
+## App desktop (Windows)
+
+`electron/` empacota este hub como aplicativo do Windows, o **AltiumHub**. Não é uma
+reescrita: o app sobe o próprio `hubserver.py` com um Python 3.12 embutido e o mostra
+numa janela. Tudo o que o hub do servidor faz, o app faz, só que nesta máquina.
+
+- **Instalação:** `AltiumHub-Setup-X.Y.Z.exe`, por usuário e sem administrador. O
+  instalador não é assinado, então o Windows SmartScreen pede **Mais informações ›
+  Executar assim mesmo** na primeira vez.
+- **Pasta de trabalho** (padrão `C:\AltiumHub`): recebe o código do hub e o estado da
+  máquina (`Projects\`, `Libs\`, credenciais). A cada atualização o app repõe só o
+  código, pelas mesmas regras do `tools/deploy/deploy.sh`.
+- **Importar do servidor** (Arquivo › Importar do servidor): traz projetos, bibliotecas
+  e o almoxarifado do hub central (`http://192.168.15.192:8100`). Um arquivo mudado só
+  aqui não é sobrescrito.
+- **Almoxarifado:** consulta o Odoo de produção (`192.168.15.192:8070`, `odoo_db`) e
+  gera as bibliotecas localmente. Antes de cada sincronismo, o app traz do servidor o
+  livro-razão de part numbers, para a numeração daqui continuar igual à do servidor.
+- **Altium:** as configurações podem apontar o `home.txt` dos scripts para a pasta
+  local. Depois disso, rode os scripts pelo `AltiumPCBMirror.PrjScr` da pasta de
+  trabalho.
+- **Atualização automática** pelos releases deste repositório no GitHub.
+
+Build, release, tokens e o porquê de cada escolha estão em
+[electron/README.md](electron/README.md).
 
 ## Fluxo projeto novo do zero
 
