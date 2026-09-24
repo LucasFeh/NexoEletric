@@ -3,6 +3,11 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.1.5 — 2026-09-24
+
+- As vistas **Esquema e PCB seguem o tema do hub**: modo claro ou escuro, os temas Grafite, Papel, Altium e Placa, e a fonte escolhida. Painéis, barras, botões, listas, a ficha de propriedades e os modais (Adicionar componentes, Odoo, almoxarifado) trocam junto, na hora, sem recarregar a folha. O desenho não muda: a folha do Altium, os fios e símbolos, e a placa sobre o fundo preto, como no Altium.
+- Aba **Atalhos** das configurações do hub no molde do *Keyboard Shortcuts* do VSCode: busca (por texto ou pela tecla pressionada), tabela Comando · Atalho · Quando · Origem, teclas desenhadas, troca por duplo clique numa caixa "pressione a combinação e depois Enter", voltar ao padrão por linha. Os gestos do mouse aparecem na mesma tabela.
+
 ## 1.1.4 — 2026-09-24
 
 - Sem o botão **Painéis** na barra de status. O painel Projetos agora recolhe e expande pelo próprio cabeçalho: clicar em **Projetos** recolhe numa faixa fina à esquerda, e clicar na faixa abre de novo (Exibir › Painel Projetos, Ctrl+Alt+P, faz o mesmo). Duplo clique na borda do painel volta à largura padrão.
