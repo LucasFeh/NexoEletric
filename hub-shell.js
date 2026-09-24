@@ -56,6 +56,8 @@
     mais: '<path d="M3.5 8h9M8 3.5v9"/>',
     paineis: '<rect x="2" y="3" width="12" height="10" rx="1"/><path d="M6 3v10"/>',
     busca: '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/>',
+    fecharTodos: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5.5 8h5"/>',
+    config: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
   };
   const ICONE_DA_ABA = { esquema: 'esquema', pcb: 'pcb', comp: 'comp', nets: 'nets', lib: 'lib',
     neoden: 'neoden', laser: 'laser', bom: 'bom', hist: 'hist' };
@@ -89,9 +91,19 @@ body.eh-shell.eh-sem-dock .eh-dock { display: none; }
 /* marca: o chip do icone do app na quina, como o logo de um ambiente de CAD */
 .brand .brand-logo { align-self: center; opacity: 1; color: var(--hi); margin-right: 1px; }
 
-/* o servidor e as contagens descem para a barra de status */
-body.eh-shell header .server { display: none; }
+/* SEM a faixa do cabecalho: o painel Projetos faz o papel do seletor, e o que mais morava
+   la foi redistribuido -- estagio e pendencias na barra de status, chat e configuracoes no
+   canto das abas. Os elementos sao MOVIDOS (mesmos ids), entao o hub continua achando-os. */
+body.eh-shell #app > header { display: none; }
 body.eh-shell .tabs .aggr { display: none; }
+body.eh-shell .tabs { padding-right: 120px; }
+body.eh-shell #app > .eh-topo {
+  grid-column: 2; grid-row: 2; justify-self: end; align-self: stretch; z-index: 3;
+  display: flex; align-items: center; gap: 4px; padding: 0 10px 0 6px;
+}
+.eh-topo #chatLanc { display: inline-flex; align-items: center; }
+.eh-topo .eh-bt { width: 28px; height: 28px; }
+.eh-topo .eh-bt .eh-ico { width: 16px; height: 16px; }
 
 /* abas de documento: cara de aba de editor, com icone */
 body.eh-shell .tabs {
@@ -119,7 +131,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
   background: var(--surface-2); box-shadow: inset -1px 0 0 var(--line); overflow: hidden;
 }
 .eh-panel-hd {
-  display: flex; align-items: center; gap: 4px; flex: none; height: 30px; padding: 0 6px 0 12px;
+  display: flex; align-items: center; gap: 4px; flex: none; height: 38px; padding: 0 6px 0 12px;
   font-size: 12px; font-weight: 600; letter-spacing: 0.01em; color: var(--text-2);
   background: var(--surface-3); box-shadow: inset 0 -1px 0 var(--line);
 }
@@ -196,6 +208,18 @@ body.eh-shell .tab[aria-selected="true"]::after {
 }
 .eh-status .pnl:hover { border-color: rgba(var(--tint), 0.3); color: var(--text); }
 .eh-status .pnl .eh-ico { width: 12px; height: 12px; }
+.eh-status .info { display: flex; align-items: center; gap: 12px; min-width: 0; overflow: hidden; }
+.eh-status .pipe { display: flex; align-items: center; gap: 8px; flex: none; }
+.eh-status .pipe:empty { display: none; }
+.eh-status .pipeline .stage { padding: 1px 7px 1px 6px; font-size: 10.5px; }
+.eh-status .pending { font-size: 10.5px; }
+.eh-tools .txt {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px 0 6px;
+  border: 0; border-radius: 5px; background: transparent; color: var(--text-3);
+  font-size: 11.5px; cursor: pointer; white-space: nowrap;
+}
+.eh-tools .txt:hover { background: rgba(var(--tint), 0.09); color: var(--text); }
+.eh-tools .txt .eh-ico { width: 14px; height: 14px; }
 .eh-menu {
   position: fixed; z-index: 80; min-width: 220px; padding: 5px; border-radius: var(--r-md);
   background: var(--surface); box-shadow: var(--shadow-menu);
@@ -210,11 +234,14 @@ body.eh-shell .tab[aria-selected="true"]::after {
 `;
 
   /* ── estado da casca ──────────────────────────────────────────────────────────── */
-  const abertos = new Set();        // projetos expandidos na arvore (o ativo sempre esta)
+  // Projetos com a gaveta aberta. Clicar no projeto abre; clicar de novo fecha -- vale
+  // tambem para o ativo. A gaveta do ativo so abre sozinha quando o ativo MUDA.
+  const abertos = new Set();
+  let ultimoAtivo = null;
   let bibliotecasAbertas = true;
   let filtro = '';
   let pendente = null;              // {id, tab, ate}: documento de OUTRO projeto clicado
-  let dock, tree, status, busca;
+  let dock, tree, status, busca, stInfo, stSrv;
 
   const hub = () => typeof S !== 'undefined' && typeof TABS !== 'undefined';
   const tr = (k, fb) => { try { const v = t(k); return v && v !== k ? v : fb; } catch (e) { return fb; } };
@@ -271,7 +298,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
     }
     for (const p of lista) {
       const eAtivo = ativo && ativo.id === p.id;
-      const aberto = eAtivo || abertos.has(p.id) || Boolean(q);
+      const aberto = abertos.has(p.id) || Boolean(q);
       const dot = el('span', 'dot dot-sm ' + (p.pending ? 'warn' : 'ok'));
       const extras = [];
       if (p.pending) {
@@ -287,7 +314,12 @@ body.eh-shell .tab[aria-selected="true"]::after {
         if (abertos.has(p.id)) abertos.delete(p.id); else abertos.add(p.id);
         renderArvore();
       });
-      r.onclick = () => { if (!eAtivo) { abertos.add(p.id); selectProject(p.id); } else { abertos.add(p.id); renderArvore(); } };
+      // primeiro clique abre a gaveta (e abre o projeto, se for outro); o segundo fecha
+      r.onclick = () => {
+        if (abertos.has(p.id)) { abertos.delete(p.id); renderArvore(); return; }
+        abertos.add(p.id);
+        if (eAtivo) renderArvore(); else selectProject(p.id);
+      };
       frag.append(r);
       if (!aberto) continue;
       for (const d of documentosDe(p)) {
@@ -335,25 +367,16 @@ body.eh-shell .tab[aria-selected="true"]::after {
       const cont = el('span', 'num',
         `${st.comps || 0} comps · ${st.nets || 0} nets · ${st.tracks || 0} trilhas · ${st.vias || 0} vias`);
       partes.push(cont);
-      if (p.pending) partes.push(item('', `${p.pending} mudança(s) pendente(s)`));
     } else {
       partes.push(el('span', null, 'nenhum projeto aberto'));
     }
     const frag = document.createDocumentFragment();
     partes.forEach((x, i) => { if (i) frag.append(el('span', 'sep')); frag.append(x); });
+    stInfo.replaceChildren(frag);
 
-    const dir = el('span', 'dir');
     const srvDot = document.getElementById('serverDot');
     const srvLbl = document.getElementById('serverLabel');
-    const srv = el('span', 'srv');
-    srv.append(el('span', srvDot ? srvDot.className : 'dot dot-sm'), el('span', null, srvLbl ? srvLbl.textContent : ''));
-    const pnl = el('button', 'pnl');
-    pnl.type = 'button';
-    pnl.append(icone('paineis'), document.createTextNode('Painéis'));
-    pnl.onclick = (e) => { e.stopPropagation(); menuPaineis(pnl); };
-    dir.append(srv, pnl);
-    frag.append(dir);
-    status.replaceChildren(frag);
+    stSrv.replaceChildren(el('span', srvDot ? srvDot.className : 'dot dot-sm'), el('span', null, srvLbl ? srvLbl.textContent : ''));
   }
 
   function iconesDasAbas() {
@@ -375,6 +398,10 @@ body.eh-shell .tab[aria-selected="true"]::after {
   }
 
   function tudo() {
+    if (hub() && S.projId && S.projId !== ultimoAtivo) {
+      ultimoAtivo = S.projId;
+      abertos.add(S.projId);         // projeto recem-aberto: a gaveta dele aparece aberta
+    }
     if (pendente && hub()) {
       if (Date.now() > pendente.ate) pendente = null;
       else if (S.projId === pendente.id) { const tab = pendente.tab; pendente = null; goTab(tab); return; }
@@ -414,6 +441,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
       m.append(b);
     };
     it('Projetos', dockAberto(), () => mostrarDock(!dockAberto()));
+    it('Configurações do hub…', false, () => { if (typeof openConfig === 'function') openConfig(); });
     m.append(el('div', 'hr'));
     it('Restaurar a largura do painel', false, () => { grava(LS_DOCK_W, String(DOCK_PADRAO)); larguraDock(DOCK_PADRAO); mostrarDock(true); });
     document.body.append(m);
@@ -457,8 +485,13 @@ body.eh-shell .tab[aria-selected="true"]::after {
       if (typeof runAction === 'function') runAction('Rescan');
     });
     tools.append(el('span', 'sep'));
-    ferramenta('mais', 'Expandir todos', () => { (S.projects || []).forEach((p) => abertos.add(p.id)); renderArvore(); });
-    ferramenta('menos', 'Recolher todos', () => { abertos.clear(); renderArvore(); });
+    ferramenta('mais', 'Abrir todos os projetos', () => { (S.projects || []).forEach((p) => abertos.add(p.id)); renderArvore(); });
+    const fecharTodos = el('button', 'txt');
+    fecharTodos.type = 'button';
+    fecharTodos.title = 'Fecha a gaveta de todos os projetos';
+    fecharTodos.append(icone('fecharTodos'), document.createTextNode('Fechar todos os projetos'));
+    fecharTodos.onclick = () => { abertos.clear(); renderArvore(); };
+    tools.append(fecharTodos);
 
     const bz = el('div', 'eh-busca');
     busca = el('input');
@@ -494,10 +527,38 @@ body.eh-shell .tab[aria-selected="true"]::after {
 
     dock.append(hd, tools, bz, tree, tabsDoPainel, rz);
 
+    // barra de status: o que muda a cada render (info, servidor) e o que o HUB desenha
+    // (estagio e pendencias: renderPipeline escreve em #pipeline/#pending, movidos para ca)
     status = el('footer', 'eh-status');
     status.setAttribute('role', 'status');
+    stInfo = el('span', 'info');
+    const stPipe = el('span', 'pipe');
+    for (const id of ['pipeline', 'pending']) {
+      const n = document.getElementById(id);
+      if (n) stPipe.append(n);
+    }
+    const dir = el('span', 'dir');
+    stSrv = el('span', 'srv');
+    const pnl = el('button', 'pnl');
+    pnl.type = 'button';
+    pnl.append(icone('paineis'), document.createTextNode('Painéis'));
+    pnl.onclick = (e) => { e.stopPropagation(); menuPaineis(pnl); };
+    dir.append(stSrv, pnl);
+    status.append(stInfo, el('span', 'sep'), stPipe, dir);
 
-    app.append(dock, status);
+    // canto direito da fileira das abas: o chat (hub-chat.js ja pos o botao no #chatLanc) e
+    // as configuracoes do hub (o unico item do antigo menu da marca)
+    const topo = el('div', 'eh-topo');
+    const lanc = document.getElementById('chatLanc');
+    if (lanc) topo.append(lanc);
+    const cfg = el('button', 'eh-bt');
+    cfg.type = 'button';
+    cfg.title = 'Configurações do hub (tema, idioma, projeto, Odoo)';
+    cfg.append(icone('config'));
+    cfg.onclick = () => { if (typeof openConfig === 'function') openConfig(); };
+    topo.append(cfg);
+
+    app.append(dock, status, topo);
     const w = parseInt(ler(LS_DOCK_W) || '', 10);
     larguraDock(Number.isFinite(w) ? w : DOCK_PADRAO);
     if (ler(LS_DOCK) === '0') document.body.classList.add('eh-sem-dock');
@@ -512,6 +573,17 @@ body.eh-shell .tab[aria-selected="true"]::after {
       if (n) obs.observe(n, { childList: true, characterData: true, subtree: true, attributes: true });
     }
     document.addEventListener('click', (e) => { if (menuAberto && !menuAberto.contains(e.target)) fecharMenu(); });
+    // Ctrl+K abria o seletor do cabecalho, que agora nao aparece: leva para a busca do
+    // painel Projetos. Captura na janela, antes do atalho do proprio hub.
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        mostrarDock(true);
+        busca.focus();
+        busca.select();
+      }
+    }, true);
     window.addEventListener('resize', fecharMenu);
     tudo();
   }
@@ -519,6 +591,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
   // API para o app desktop (menu Exibir » Painel Projetos) e para testes
   window.EletricShell = {
     alternarProjetos: () => mostrarDock(!dockAberto()),
+    configuracoes: () => { if (typeof openConfig === 'function') openConfig(); },
     projetosAberto: dockAberto,
     render: tudo,
   };
