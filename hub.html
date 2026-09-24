@@ -4014,7 +4014,9 @@ async function lzAbrirNoLightBurn() {
   try { j = await resp.json(); } catch (e) {}
   if (!j) return toast('resposta inesperada do servidor (HTTP ' + resp.status + ')', 'err');
   if (!j.ok) return toast(j.error || ('não foi possível abrir (HTTP ' + resp.status + ')'), 'err');
-  toast('aberto no LightBurn (na máquina do servidor): ' + j.path, 'ok');
+  /* so chega aqui quem esta no proprio PC do hub (a rota recusa a rede): "neste PC" e
+     verdade tanto na bancada quanto no app desktop */
+  toast('aberto no LightBurn, neste PC: ' + j.path, 'ok');
 }
 
 /* ═══ BOM — página interativa para montar a placa ══════════════
@@ -4231,7 +4233,11 @@ async function runAction(action) {
     const id = S.projects.some(p => p.id === S.projId) ? S.projId : S.projects[0].id;
     await loadProject(id);
   }
-  catch (e) { toast(t('run.fail', { a: action, e: e.message }), 'err'); alert(lines.join('\n') || e.message); }
+  catch (e) {
+    toast(t('run.fail', { a: action, e: e.message }), 'err');
+    /* o log da corrida num modal do hub, e nao no alert() do navegador (CLAUDE.md) */
+    confirmaNoHub(lines.join('\n') || e.message, { title: action, ok: 'Fechar', cancel: false });
+  }
 }
 
 function exportBom() {
@@ -4286,7 +4292,8 @@ function confirmaNoHub(texto, o) {
     cancel.onclick = () => fim(false);
     const ok = el('button', 'btn' + ((o && o.danger) ? ' btn-danger' : ''), (o && o.ok) || 'OK');
     ok.onclick = () => fim(true);
-    act.append(cancel, ok);
+    /* cancel:false = aviso de um botao so (o lugar do antigo alert) */
+    if (o && o.cancel === false) act.append(ok); else act.append(cancel, ok);
     d.append(act);
     bd.append(d); $('#overlay').append(bd);
     ok.focus();
@@ -4681,13 +4688,14 @@ async function loadProject(id) {
   syncURL();
   renderAll();
 }
-function selectProject(id) {
+async function selectProject(id) {
   S.pickerOpen = false; renderHeader();
   let dirty = false;
   document.querySelectorAll('iframe').forEach(f => {
     try { if (f.contentWindow && f.contentWindow.__hubDirty && f.contentWindow.__hubDirty()) dirty = true; } catch (e) {}
   });
-  if (dirty && !confirm('Há edições não salvas nas vistas Esquema/PCB — trocar de projeto e descartá-las?')) return;
+  if (dirty && !(await confirmaNoHub('Há edições não salvas nas vistas Esquema/PCB — trocar de projeto e descartá-las?',
+                                     { title: 'Trocar de projeto', ok: 'Descartar e trocar', danger: true }))) return;
   S.q = ''; $('#pickerSearch').value = '';
   loadProject(id);
 }
