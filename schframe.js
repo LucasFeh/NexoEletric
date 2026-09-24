@@ -3612,17 +3612,18 @@ function drawFerramenta(ctx, cam){
   }
 }
 /* O FIO EM CURSO, com as cores e as espessuras medidas no video do Altium (2026-09-24).
-   O video e a tela inteira reduzida a 720p: a barra de tarefas do Windows (40 px a 100%) mede
-   32 px no quadro, e a seta do mouse bate com isso — escala 0,8. As medidas abaixo sao as do
-   quadro vezes 1,25, em px de tela:
-     - o que ja foi fixado: nucleo lavanda-escuro de 2,5 px com um halo lavanda claro (5 px no
+   O video e a tela inteira de um 1920x1080 reduzida a 720p: a barra de tarefas do Windows 11
+   (48 px a 100%) mede 32 px no quadro, e a seta do mouse bate com isso — escala 2/3. As
+   medidas abaixo sao as do quadro vezes 1,5, em px de tela; o traco fino continua de 1 px
+   (no quadro ele e o 1 px da tela borrado pela reducao):
+     - o que ja foi fixado: nucleo lavanda-escuro de 3 px com um halo lavanda claro (6 px no
        total); o fio so ganha o azul da folha ao terminar;
      - a perna 1 ate o cursor: cinza, 1 px, continua e NITIDA (no meio do pixel — entre dois
-       pixels ela saia em duas linhas palidas); a perna 2, a de antecipacao, pontilhada 4/1;
-     - um x de ±6 px em cada canto fixado, no canto das pernas e no centro da cruz;
+       pixels ela saia em duas linhas palidas); a perna 2, a de antecipacao, pontilhada 4,5/1,5;
+     - um x de ±7,5 px em cada canto fixado, no canto das pernas e no centro da cruz;
      - a partida que encostou num ponto eletrico: a bolinha magenta POR CIMA de um X fino;
-     - o X vermelho fino e comprido (±10 px) quando o cursor esta sobre um ponto eletrico;
-     - a cruz do cursor (±41 px, cinza claro) vai por BAIXO dos fios: desenhaCruzDoFio. */
+     - o X vermelho fino e comprido (±12 px) quando o cursor esta sobre um ponto eletrico;
+     - a cruz do cursor (±50 px, cinza claro) vai por BAIXO dos fios: desenhaCruzDoFio. */
 const FIO_FIXADO = '#7c7a9d', FIO_HALO = '#dcdaf9', FIO_PERNA = '#9a98ad', FIO_PONTOS = '#8a889a',
       FIO_CRUZ = '#c0c0c0', FIO_HOT = '#e3242b', FIO_PARTIDA = '#c2357c';
 /* a coordenada de mundo que poe a linha horizontal (eixo 'y') ou vertical ('x') no MEIO do pixel
@@ -3654,8 +3655,8 @@ function desenhaFioEmCurso(ctx, px){
     const pts = wireDraw.pts;
     if (pts.length >= 2){
       const tudo = () => { ctx.beginPath(); pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke(); };
-      ctx.strokeStyle = FIO_HALO; ctx.lineWidth = 5 * px; tudo();
-      ctx.strokeStyle = FIO_FIXADO; ctx.lineWidth = 2.5 * px; tudo();
+      ctx.strokeStyle = FIO_HALO; ctx.lineWidth = 6 * px; tudo();
+      ctx.strokeStyle = FIO_FIXADO; ctx.lineWidth = 3 * px; tudo();
     }
     ctx.lineWidth = px;
     const marcas = pts.slice(1);
@@ -3663,16 +3664,16 @@ function desenhaFioEmCurso(ctx, px){
       const pn = HubFio.pernas(wireDraw, r.pt);
       ctx.strokeStyle = FIO_PERNA;
       if (pn.perna1) reta(pn.perna1[0], pn.perna1[1]);
-      if (pn.perna2){ ctx.strokeStyle = FIO_PONTOS; ctx.setLineDash([4 * px, 1 * px]); reta(pn.perna2[0], pn.perna2[1]); ctx.setLineDash([]); }
+      if (pn.perna2){ ctx.strokeStyle = FIO_PONTOS; ctx.setLineDash([4.5 * px, 1.5 * px]); reta(pn.perna2[0], pn.perna2[1]); ctx.setLineDash([]); }
       if (pn.canto) marcas.push(pn.canto);
     }
     ctx.strokeStyle = FIO_PONTOS;
-    for (const q of marcas) xis(q, 6 * px);
+    for (const q of marcas) xis(q, 7.5 * px);
     /* na partida, o X e fino e a bolinha fica POR CIMA dele — no video e a bolinha que se ve */
     if (wireDraw.ligado){
       const a = pts[0];
-      ctx.strokeStyle = FIO_HOT; xis(a, 11 * px);
-      ctx.fillStyle = FIO_PARTIDA; ctx.beginPath(); ctx.arc(a[0], a[1], 6 * px, 0, 2 * Math.PI); ctx.fill();
+      ctx.strokeStyle = FIO_HOT; xis(a, 13.5 * px);
+      ctx.fillStyle = FIO_PARTIDA; ctx.beginPath(); ctx.arc(a[0], a[1], 7.5 * px, 0, 2 * Math.PI); ctx.fill();
     }
   }
   if (r){
@@ -3680,17 +3681,17 @@ function desenhaFioEmCurso(ctx, px){
     /* sobre um ponto eletrico, o X vermelho — mas nao repetido em cima da propria partida;
        fora dele, o x cinza no centro da cruz, que o Altium mostra ate sem fio em curso */
     const naPartida = wireDraw && wireDraw.ligado && r.pt[0] === wireDraw.pts[0][0] && r.pt[1] === wireDraw.pts[0][1];
-    if (r.snap){ if (!naPartida){ ctx.strokeStyle = FIO_HOT; xis(r.pt, 10 * px); } }
-    else { ctx.strokeStyle = FIO_PONTOS; xis(r.pt, 6 * px); }
+    if (r.snap){ if (!naPartida){ ctx.strokeStyle = FIO_HOT; xis(r.pt, 12 * px); } }
+    else { ctx.strokeStyle = FIO_PONTOS; xis(r.pt, 7.5 * px); }
   }
   ctx.restore();
 }
 /* A CRUZ DO CURSOR vai POR BAIXO dos fios (desenhaFolha » antesDosFios): por cima, ela
-   desbotava de cinza o fio azul que cruzava. ±41 px de tela e cinza claro, a medida do video. */
+   desbotava de cinza o fio azul que cruzava. ±50 px de tela e cinza claro, a medida do video. */
 function desenhaCruzDoFio(ctx, px){
   const r = fioCursor;
   if (!r) return;
-  const c = 41 * px;
+  const c = 50 * px;
   ctx.save();
   ctx.strokeStyle = FIO_CRUZ; ctx.lineWidth = px; ctx.setLineDash([]); ctx.lineCap = 'butt';
   const x = noPixel(ctx, r.pt[0], 'x'), y = noPixel(ctx, r.pt[1], 'y');
