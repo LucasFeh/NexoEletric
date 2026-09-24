@@ -639,7 +639,10 @@ body.eh-shell .tab[aria-selected="true"]::after {
     // Ctrl+K abria o seletor do cabecalho, que agora nao aparece: leva para a busca do
     // painel Projetos. Captura na janela, antes do atalho do proprio hub.
     window.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+      // com um modal do hub aberto (as Configuracoes, um dialogo) o Ctrl+K e dele: la ele pode
+      // ser a tecla que o editor de atalhos esta gravando, e abrir o painel por tras roubaria o foco
+      const modal = document.querySelector('#overlay .backdrop, .hat-caixa-fundo');
+      if (!modal && (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         e.stopImmediatePropagation();
         mostrarDock(true);
