@@ -181,6 +181,13 @@ function pintaLista(payload, recibo){
     const rs = el('span', 'rs' + (r.pend ? ' pend' : ''));
     const rst = el('span', 'rst', r.txt); rst.title = r.txt;
     rs.append(rst);
+    /* a linha que resolveu leva a ficha do produto: o product_id é a variante, e o
+       hub-odoolink a traduz para o template, que é o que a URL do Odoo quer */
+    if (ln.product_id && typeof HubOdooLink !== 'undefined'){
+      const lk = HubOdooLink.link(HubOdooLink.tmplDoProduto(ln.product_id),
+                                  { nome: ln.nome_altium || ('produto ' + ln.product_id) });
+      if (lk) rs.append(lk);
+    }
     /* so na linha com problema, e so quando esta vista sabe abrir o seletor: o painel roda
        dentro do schframe, mas a lista vem do disco e pode citar componente de outra folha */
     if (r.pend && typeof window.__hubResolveParaLista === 'function'){

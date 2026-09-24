@@ -912,25 +912,11 @@ function encapDaOpcao(a){
   return { txt: String((a.encaps || [])[0] || '').trim(), literal: false };
 }
 /* ── o link da ficha no Odoo ──
-   A base sai do PRÓPRIO espelho: `almoxIndex.fonte` é a linha que o gerador escreveu com o
-   Odoo de onde os dados vieram ("Odoo incremental · http://192.168.15.192:8070 · odoo_db"),
-   e ela já está na página (schframe.html carrega Libs/almox-index.js). Ler dali, e não do
-   `hub-almox.json`, é de propósito por dois motivos: o link passa a apontar para o Odoo que
-   produziu AQUELES dados — medido, a bancada diz .182 e o servidor diz .192, cada um certo
-   no seu lugar — e o hub-almox.json carrega a senha do Odoo, que não tem por que passar
-   perto de uma tela.
-
-   A ação 282 é a ficha de produto DESTA instalação. É o único número daqui que não sai do
-   dado; se um dia a ação mudar de id, é esta linha que muda. */
-const ODOO_ACAO = 282;
-function odooBase(){
-  const f = String((window.almoxIndex && window.almoxIndex.fonte) || '');
-  const m = f.match(/https?:\/\/[^\s·]+/);
-  return m ? m[0].replace(/\/+$/, '') : '';
-}
+   Mora no hub-odoolink.js desde que TODA tela com componente passou a ter o seu (pedido do
+   dono, 2026-09-24): a base lida do `almoxIndex.fonte`, a ação 282 e a regra do `tmpl` estão
+   lá, uma vez só. Aqui fica o atalho, e o desenho `.cv-odoo` deste modal. */
 function linkOdoo(a){
-  const base = odooBase();
-  return (base && a && a.tmpl) ? base + '/odoo/action-' + ODOO_ACAO + '/' + a.tmpl : '';
+  return (a && typeof HubOdooLink !== 'undefined') ? HubOdooLink.url(a.tmpl) : '';
 }
 
 /* o saldo como a lib o escreve: inteiro quando é inteiro */

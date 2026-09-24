@@ -20,6 +20,8 @@
      vista Esquema usa — inclusive o texto da pergunta. Duas cópias divergiriam no dia em que
      uma delas ganhasse um aviso a mais. -->
 <script src="hub-almoxpick.js"></script>
+<!-- o "Odoo ↗" de todo componente: Biblioteca, editor de símbolos e aba Footprints -->
+<script src="hub-odoolink.js"></script>
 <!-- o operador: o lançador com a marca do Claude se pendura sozinho no <body> e fica por
      cima de tudo, inclusive do iframe das vistas. Por isso UM lançador aqui cobre todas as
      telas, e nada precisa ser duplicado dentro do schframe/pcbframe. -->
@@ -758,7 +760,9 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 
 /* ficha do item do Odoo, no aside */
 .alx-item { padding: 7px 0; border-bottom: 1px solid var(--line-soft); font-size: 11px; }
-.alx-item .t { font-size: 12px; color: var(--text-2); }
+.alx-item .t { font-size: 12px; color: var(--text-2); display: flex; align-items: flex-start;
+  justify-content: space-between; gap: 8px; }
+.alx-item .t > span { min-width: 0; word-break: break-word; }
 .alx-item .d { color: var(--text-4); margin-top: 2px; display: flex; flex-wrap: wrap; gap: 3px 10px; }
 .alx-item .d b { font-weight: 400; color: var(--text-3); }
 button.tag { border: 0; cursor: pointer; }
@@ -1999,6 +2003,8 @@ function loadLibTabelas() {
       LIB.rename = rm || null;
       LIB.subs = Array.isArray(subs) ? subs : [];
       LIB.index = idx || { libs: [] };
+      /* o loadVarScript apaga o global: o "Odoo ↗" recebe o índice (odooUrl/fonte) daqui */
+      if (typeof HubOdooLink !== 'undefined') HubOdooLink.setFonte(LIB.index);
       LIB.sync = sync || null;
       HubCore.setLibTables(LIB.rename, LIB.subs);
       /* Quem ja tinha UM acervo do almoxarifado escolhido passa, uma vez so, para o
@@ -3120,7 +3126,9 @@ function renderLibAlmoxPreview() {
               ioExcluirAlmox()) },
       ]);
     };
-    vfrag.append(b);
+    /* o "Odoo ↗" fica AO LADO da linha, não dentro: a linha é um <button> (hub-odoolink » faixa) */
+    vfrag.append(typeof HubOdooLink !== 'undefined'
+      ? HubOdooLink.faixa(b, p, { nome: p.label }) : b);
   });
   if (!vis.length) vfrag.append(el('div', 'alx-empty', 'nenhum valor com "' + S.lib.valQ + '"'));
   vl.append(vfrag);
@@ -3219,7 +3227,13 @@ function renderLibAlmoxPreview() {
     ? itens.length + ' itens do Odoo neste valor' : 'item do Odoo'));
   itens.forEach(it => {
     const box = el('div', 'alx-item');
-    box.append(el('div', 't', it.nome));
+    /* CADA ITEM LEVA O SEU "Odoo ↗": num valor que junta mais de um item, cada um tem a sua
+       ficha (o `tmpl` dele), e é só aqui que dá para abrir a certa */
+    const tl = el('div', 't');
+    tl.append(el('span', null, it.nome));
+    const lk = typeof HubOdooLink !== 'undefined' ? HubOdooLink.link(it, { nome: it.nome }) : null;
+    if (lk) tl.append(lk);
+    box.append(tl);
     const d = el('div', 'd');
     const add = (k, v) => { if (!v && v !== 0) return; const sp = el('span'); sp.append(el('b', null, k + ' '), document.createTextNode(String(v))); d.append(sp); };
     add('saldo', alxQtd(it.estoque));

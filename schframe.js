@@ -1995,7 +1995,8 @@ function renderAddPreview(){
       b.append(el('span', 'qt' + (p.estoque > 0 ? '' : ' zero'), qtdFmt(p.estoque)));
       /* o encapsulamento fixado era do valor ANTERIOR: mantê-lo poria um 0805 na ficha de um 2512 */
       b.addEventListener('click', () => { pick.valorId = p.id; pick.fpShown = null; $('addComment').value = p.label; renderAddPreview(); });
-      frag.append(b);
+      /* o "Odoo ↗" ao lado da linha, não dentro: a linha é um <button> (hub-odoolink » faixa) */
+      frag.append(typeof HubOdooLink !== 'undefined' ? HubOdooLink.faixa(b, p, { nome: p.label }) : b);
     }
     if (!vis.length) frag.append(el('div', 'alx-empty', 'nenhum valor com "' + $('addValSearch').value + '"'));
     vl.append(frag);
@@ -2152,6 +2153,15 @@ $('btnPin').addEventListener('click', () => { propsPin = !propsPin; salvaPin(); 
 /* o botao de paineis so existe com a ficha fechada, entao ele SEMPRE prende: abrir para
    fechar sozinho no proximo clique no vazio seria um botao que nao faz nada */
 $('btnPaineis').addEventListener('click', () => { propsPin = true; salvaPin(); mostraProps(); });
+
+/* ── A FICHA DO ODOO DE UM COMPONENTE DA FOLHA ──
+   A cascata é a do odoolista.py (quem decide o product_id da lista enviada ao Odoo) e mora no
+   hub-odoolink » fichaDoComp, onde é provada em Node. NÃO passa pelo resolveSym: ele segue as
+   escolhas de DESENHO do lib-subs.js, e uma delas fazia todo resistor "RES [ SMD ]" abrir a
+   ficha do 10R. Devolve { alvo, nome }, { motivo } ou null. */
+function odooDoComp(comp){
+  return (comp && typeof HubOdooLink !== 'undefined') ? HubOdooLink.fichaDoComp(comp) : null;
+}
 
 function prSec(titulo){ const d = el('div', 'pr-sec'); if (titulo) d.append(el('h3', null, titulo)); return d; }
 function prKv(box, k, v, cls){
@@ -2702,6 +2712,15 @@ function renderProps(){
             + 'pelo "Trocar componente…" para a lista do Odoo casar por id';
     prKvEl(g, 'Acervo', v);
   } else prKv(g, 'Acervo', acNome, ac ? null : 'warn');
+
+  /* ODOO: a ficha do produto a um clique, logo abaixo de de onde ele vem. Sem ficha a linha
+     continua lá e diz POR QUÊ — sumir com ela faria parecer que a ficha nem tem esse campo. */
+  const od = odooDoComp(it);
+  const lkOdoo = od && od.alvo ? HubOdooLink.link(od.alvo, { nome: od.nome, texto: 'Abrir no Odoo ↗' }) : null;
+  if (lkOdoo) prKvEl(g, 'Odoo', lkOdoo);
+  else prKv(g, 'Odoo', od && od.motivo ? od.motivo
+                     : od ? 'o espelho não diz qual é o Odoo — rode a sincronização do almoxarifado'
+                     : 'sem ficha: vincule ao almoxarifado pelo "Trocar componente…"', 'dim');
 
   /* o desenho emprestado precisa se ANUNCIAR: o corpo âmbar na folha diz que algo é
      diferente, e é aqui que se lê O QUÊ. */
@@ -3677,6 +3696,13 @@ function abrirEscolhaSimbolo(comp, opts){
     nb.append(ic);
   }
   nb.title = comp.sym ? 'clique para copiar “' + comp.sym + '”' : '';
+  /* a ficha no Odoo do componente que está NA FOLHA, ao lado do nome dele — irmão, não
+     filho: o #symNome é um <button> (o de copiar). O da abertura anterior sai antes. */
+  const odVelho = $('symOdoo');
+  if (odVelho) odVelho.remove();
+  const odAtual = odooDoComp(comp);
+  const lkAtual = odAtual && odAtual.alvo ? HubOdooLink.link(odAtual.alvo, { nome: odAtual.nome }) : null;
+  if (lkAtual){ lkAtual.id = 'symOdoo'; nb.after(lkAtual); }
   $('symMeta').textContent = comp.ref + ' — o Altium mandou este nome'
     + (comp.comment ? ' · comment "' + comp.comment + '"' : '')
     + (atual ? ' · resolvido no componente "' + atual.name + '"'

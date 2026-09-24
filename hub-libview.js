@@ -323,7 +323,9 @@ function componentesDa(cat){
     return vals.map(v => ({ nome: v.altium, rotulo: v.label || v.altium, fp: v.footprint || '',
                             sym: !!(v.parts && v.parts.length) || temFam,
                             proprio: !!(v.parts && v.parts.length),
-                            estoque: v.estoque, pkgs: encapDe(v), valor: true }));
+                            estoque: v.estoque, pkgs: encapDe(v), valor: true,
+                            /* o valor inteiro, para o "Odoo ↗" achar o `tmpl` dos itens */
+                            v }));
   }
   const fps = s.footprints || [];
   return [{ nome: s.name, rotulo: s.name, fp: (fps[0] && fps[0].name) || '',
@@ -440,7 +442,9 @@ function pintaComponentes(){
     if (typeof c.estoque === 'number') meta.append(el('span', 'es', c.estoque + ' un'));
     b.append(meta);
     b.onclick = () => { ST.comp = c.nome; ST.sel = null; pintaFootprints(); };
-    frag.append(b);
+    /* o "Odoo ↗" ao lado da linha, não dentro dela (hub-odoolink » faixa) */
+    frag.append(typeof HubOdooLink !== 'undefined'
+      ? HubOdooLink.faixa(b, c.v, { nome: c.rotulo }) : b);
   }
   box.append(frag);
 }

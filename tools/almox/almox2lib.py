@@ -1033,6 +1033,28 @@ def escreve_espelho(caminho, varname, titulo, simbolos, quando):
     o.close()
 
 
+def url_odoo_anterior(caminho):
+    """A url do Odoo da ULTIMA puxada, lida do almox-index.js que ainda esta no disco.
+
+    Regerar sem --pull ("So regerar do snapshot", a unica opcao do hub sem senha gravada)
+    escreve `fonte = 'snapshot em disco'` -- verdade, e sem url nenhuma. O "Odoo ↗" das telas
+    (hub-odoolink.js) monta o link da ficha a partir dessa url, e todos sumiam ate a proxima
+    puxada. Os dados continuam vindo daquele Odoo, so nao foram relidos agora: a url
+    atravessa a regeracao em `odooUrl`. O `fonte` antigo e o lugar dela antes deste campo."""
+    if not os.path.exists(caminho):
+        return ''
+    try:
+        txt = io.open(caminho, encoding='utf-8').read()
+        idx = json.loads(txt[txt.index('=') + 1:].strip().rstrip(';').strip())
+    except (OSError, ValueError):
+        return ''
+    url = str(idx.get('odooUrl') or '') if isinstance(idx, dict) else ''
+    if not url and isinstance(idx, dict):
+        m = re.search(r'https?://[^\s·]+', str(idx.get('fonte') or ''))
+        url = m.group(0) if m else ''
+    return url.rstrip('/')
+
+
 def le_espelho(caminho):
     """Le um `var X = {...};` gerado aqui e devolve {nome_simbolo: simbolo}."""
     if not os.path.exists(caminho):
@@ -1133,6 +1155,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     fonte = 'snapshot em disco'
+    # lido ANTES de o indice ser reescrito la embaixo: sem puxar, e a url da puxada anterior
+    odoo_url = url_odoo_anterior(os.path.join(LIBS, 'almox-index.js'))
     stats = None
     if args.pull:
         import odoo_pull
@@ -1156,6 +1180,7 @@ def main(argv=None):
         odoo_pull.grava(linhas, CSV_ODOO)
         fonte = 'Odoo %s · %s · %s' % ('incremental' if stats['incremental'] else 'completo',
                                        cfg['url'], cfg['db'])
+        odoo_url = str(cfg['url']).rstrip('/')
         print('Odoo: %d produtos (%d novo(s), %d alterado(s), %d arquivado(s); '
               '%d ficha(s) baixada(s))'
               % (stats['total'], stats['novos'], stats['alterados'], stats['sumiram'],
@@ -1272,6 +1297,9 @@ def main(argv=None):
            'generatedIso': AGORA_ISO,
            'source': 'Odoo DI · tools/almox/componentes_odoo.csv',
            'fonte': fonte,
+           # o Odoo de onde os dados vieram, mesmo numa regeracao sem puxar: e dele que as
+           # telas montam o link da ficha do produto (hub-odoolink.js)
+           'odooUrl': odoo_url,
            'odooRows': len(rows), 'classificados': len(analisados), 'fora': len(fora),
            'ultimaSync': dict(mudou['resumo'], generated=quando, fonte=fonte,
                               primeira=mudou['primeira'], odoo=stats or {}),

@@ -1212,6 +1212,9 @@ function refreshAside() {
     via.append(volta);
     const f = familiaAberta(), v = f && valorPorNome(f, d.name);
     via.append(el('span', 'q', valorTemGeo(v) ? ' · desenho próprio' : ' · herdando o desenho da família'));
+    /* o componente aberto é uma peça do Odoo: a ficha dele fica a um clique daqui */
+    const lk = v && typeof HubOdooLink !== 'undefined' ? HubOdooLink.link(v, { nome: d.name }) : null;
+    if (lk) { lk.style.marginLeft = '8px'; via.append(lk); }
     a.append(via);
   }
   if (itens.length) a.append(acoesDaSelecao(itens, it));
@@ -1500,7 +1503,8 @@ function refreshComponentes(f) {
     if (typeof v.estoque === 'number') meta.append(el('span', 'es', v.estoque + ' un'));
     b.append(meta);
     b.onclick = () => abrirValor(nome);
-    frag.append(b);
+    /* o "Odoo ↗" ao lado do tile, nunca dentro: o tile é um <button> (hub-odoolink » faixa) */
+    frag.append(typeof HubOdooLink !== 'undefined' ? HubOdooLink.faixa(b, v, { nome }) : b);
   });
   UI.tiles.append(frag);
 }

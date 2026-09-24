@@ -566,7 +566,10 @@ function renderValores(box, g, opts){
         { rotulo: 'Apagar da biblioteca…', perigo: true, onEscolher: () => o.onExcluir(it, g) },
       ]);
     };
-    box.append(b);
+    /* o "Odoo ↗" ao lado da linha, nunca dentro: a linha é um <button> (hub-odoolink » faixa).
+       Sem o hub-odoolink carregado a lista continua sendo a de sempre. */
+    box.append(typeof HubOdooLink !== 'undefined'
+      ? HubOdooLink.faixa(b, it.v, { nome: it.rotulo }) : b);
   }
 }
 
