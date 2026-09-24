@@ -343,8 +343,8 @@ precisar de servidor.
 
 - **Esquema** — renderiza `Projects\<nome>\schematic.js` com os gráficos reais de
   `Libs\schlib.js`: símbolos, fios, junctions, net labels, power ports, designator/comment.
-  Zoom com a roda, **botão direito arrasta a tela**, cursor em mil, clique numa net destaca
-  ela na folha inteira (com os pinos membros). O painel fica **à direita**, redimensionável
+  Zoom com a roda, **botão direito arrasta a tela**, cursor em mil, `Alt`+clique numa net
+  destaca ela na folha inteira (com os pinos membros). O painel fica **à direita**, redimensionável
   pela divisória (duplo clique fecha/abre, como nas abas Laser e BOM), com duas sub-abas no
   rodapé: **Configurações** (as folhas e o formato da ativa, centralizar, o passo da grade,
   os olhos de comment e de pino, o **Salvar**, Odoo e almoxarifado) e
@@ -361,11 +361,13 @@ precisar de servidor.
   mudo que se lia como ligação, e a estrela de três pontas não ganhava bolinha nenhuma.
   **Cor é identidade elétrica, seleção é contorno.** Um fio sai laranja quando pertence à net
   em foco e azul-escuro quando não; quem está selecionado ganha um contorno tracejado por
-  cima, sem trocar de cor — a mesma convenção da vista PCB e do Altium. Clicar num fio, pino,
-  rótulo, power port ou junção põe a net dele em foco (o nome aparece na barra de status);
-  `Esc`, o clique no vazio, a troca de folha e qualquer nova
-  seleção largam o foco junto. Antes a seleção recoloria o objeto, e a net saía metade azul
-  metade laranja, com o laranja sobrevivendo ao `Esc` — a cor ficava presa na folha.
+  cima, sem trocar de cor — a mesma convenção da vista PCB e do Altium. `Alt`+clique num fio,
+  pino, rótulo, power port ou junção põe a net dele em foco (o nome aparece na barra de status);
+  o clique simples só seleciona — acender a net inteira a
+  cada clique fazia pegar uma perninha parecer pegar o circuito todo. `Esc`, o clique no
+  vazio, a troca de folha e qualquer nova seleção largam o foco junto. Antes a seleção
+  recoloria o objeto, e a net saía metade azul metade laranja, com o laranja sobrevivendo ao
+  `Esc` — a cor ficava presa na folha.
   A folha é sempre editável, e editar é **mover**: clique seleciona, arrastar no vazio
   seleciona vários (esquerda→direita só quem couber inteiro; direita→esquerda quem encostar),
   `Shift` soma à seleção. `Del` apaga, `Espaço` gira, `X` espelha na **horizontal**, `Y` na
@@ -373,34 +375,62 @@ precisar de servidor.
   trocáveis** na aba **Atalhos** das configurações do hub, que é desenhada a partir da mesma
   tabela que o teclado lê (não há lista de atalhos escrita à mão em lugar nenhum). Teclas que o navegador leva
   antes da página (`Ctrl+W`, `F5`, `Ctrl+R`…) são recusadas na hora de gravar.
-  **No fio, o clique pega o trecho, não a polilinha.** Arrastar um trecho o empurra na
-  perpendicular e estica os vizinhos, como no Altium; arrastar um **vértice** move só aquele
-  canto (e ele gruda no pino pelo ímã); `Del` num trecho do meio **parte o fio em dois** e num
-  trecho da ponta apara. Clique duplo promove ao fio inteiro, e o laço de seleção continua
-  pegando fios inteiros. Mover um componente **leva os fios junto**: os vértices que estavam
-  em cima de uma ponta quente acompanham o pino, em vez de o desenho continuar encostado
-  enquanto a net se desfaz calada.
+  **No fio, dois cliques, como no Altium.** O primeiro clique pega o **fio inteiro** (a
+  "perninha" que é um fio só fica sozinha na seleção), com uma alcinha verde em cada vértice;
+  o segundo clique no mesmo fio pega **só o pedaço** em que caiu — o trecho, ou o vértice se foi
+  na alcinha —, marcado com as alcinhas vermelhas. Apertar e arrastar logo no primeiro clique
+  leva o fio inteiro. Arrastar um trecho o empurra na perpendicular e estica os vizinhos;
+  arrastar um **vértice** move só aquele canto (e ele gruda no pino pelo ímã); `Del` num trecho
+  do meio **parte o fio em dois** e num trecho da ponta apara. `Esc` e um clique voltam ao fio
+  inteiro, e o laço de seleção continua pegando fios inteiros. Até 2026-09-24 era o contrário
+  (o clique pegava o trecho e o duplo clique promovia), e num fio comprido não havia como
+  pegar só a perninha.
+  **Mover um componente não leva o fio**, a não ser que o fio (ou o trecho dele) esteja
+  selecionado junto: aí a ponta que estava no pino fica presa ao pino, inclusive se ele girar
+  no meio do arrasto. Sem o fio na seleção, a net se desfaz quando o pino sai da ponta — e as
+  guias alinham o pino com o fio que ele deixou, que é como se volta a encostar nele.
   **O passo da grade é escolhido** na aba Configurações do painel — 100/50/25/10 mil e também
   1 mm / 0,5 mm / 0,25 mm. O métrico está ali porque as folhas desta casa snapam em 1 mm ou
   0,3 mm dentro do próprio Altium: quase todo vértice de fio dos projetos reais está fora da
   grade de 100 mil, e um editor que só soubesse 100 mil empurraria o vértice para longe do
   pino a cada arrasto. A malha desenhada e o raio do ímã acompanham o passo.
   **O designador e o comment são objetos.** Dá para clicar no texto, arrastá-lo para longe do
-  símbolo (um tracinho o liga ao componente) e devolvê-lo ao lugar pelo `Del` ou pelo botão da
-  ficha; a posição vai para o `schematic.js` em `refdx/refdy` (e `comdx/comdy`), em mil, como
+  símbolo (um tracinho o liga ao componente **enquanto ele está sendo arrastado**; solto, o
+  tracinho some) e devolvê-lo ao lugar pelo `Del` ou pelo botão da ficha; a posição vai para o `schematic.js` em `refdx/refdy` (e `comdx/comdy`), em mil, como
   deslocamento da âncora do componente. A âncora automática também mudou: ela sai da caixa do
   componente **como ela está na folha**, e não do símbolo sem girar — era por isso que todo
   componente em `rot` 90/270 nascia com o nome escrito por cima do próprio corpo.
+  No conector desenhado uma parte por pino, o designador aparece **só na parte 1**; nas outras
+  fica só o número do pino (que ali é a própria parte), sempre de pé — girado de cabeça para
+  baixo ele é desvirado, como o Altium faz. Se o olho dos pinos está desligado e o símbolo
+  esconde o número, o designador volta, para a parte não ficar anônima.
+  **Guias de alinhamento**, como as do Figma, enquanto se arrasta: linhas magenta mostram o
+  alinhamento de borda ou de centro com os vizinhos, a **equidistância** (o mesmo espaço dos
+  dois lados, ou o espaço de uma fila repetido) e a **distância** até os vizinhos mais perto,
+  na unidade da grade. O alinhamento é **magnético** — dá uma travada ao chegar, e só solta
+  quando a mão passa do ponto. Com `Shift` apertado o arrasto anda **reto na direção da guia**
+  que está valendo (guia vertical, só em Y; horizontal, só em X); `Ctrl` solta o ímã naquele
+  instante. O botão das guias fica em **Configurações › Vista** e vem ligado.
   **Adicionar componentes** (`C`) abre um modal igual à aba Biblioteca (busca, seletor de
   acervo, preview do símbolo, lista de valores do almoxarifado ou footprint); cada
   **Adicionar** junta o item numa lista à direita e **Finalizar** coloca tudo na folha ativa,
   em grade, já selecionado para arrastar.
   Dentro da folha há uma **barra de ferramentas** com o pouco que a mão faz aqui: selecionar,
-  **Fio** (`W`) e os pousos **GND** (`G`), **3V3**, **5V5** e **VIN**. O fio é **magnético** —
-  perto de uma ponta de pino, vértice de fio, junção ou power port ele gruda (alvo laranja na
-  tela), e encostar num pino encerra o traçado; fora do ímã anda na grade escolhida, em
-  ortogonal. O raio do ímã acompanha o passo da grade (60 mil em 100, menos nas grades finas,
-  nunca menos de 20). Botão direito sem arrastar, duplo clique ou `Esc` encerram o fio. Net label,
+  **Fio** (`W`) e os pousos **GND** (`G`), **3V3**, **5V5** e **VIN**.
+  **O fio é traçado como no Altium** (conferido quadro a quadro contra um vídeo dele): do último
+  ponto saem duas pernas em L até o cursor, a primeira contínua e a segunda pontilhada; o
+  clique fixa **só a primeira**, e a seguinte sai perpendicular. Clicar num ponto elétrico —
+  pino, ponta ou **meio** de fio, junção, power, port — completa o L até ele e termina o fio
+  (no meio de um fio nasce o T, com a bolinha). Botão direito, `Esc` ou duplo clique terminam
+  no que já foi fixado e deixam a ferramenta na mão para o próximo fio (o segundo direito/`Esc`
+  a larga); trocar de ferramenta ou de folha também grava o fio. `Espaço` inverte o canto,
+  `Shift+Espaço` troca o modo (90°, 45°, ângulo livre) e `Backspace` desfaz o último canto. O
+  canto em que um fio parou é o canto com que o próximo sai, e o modo fica lembrado nesta
+  máquina. A barra de status mostra o ponto elétrico sob o cursor e o dX/dY desde o último
+  clique. O ímã do pino acompanha o passo da grade (60 mil em 100, nunca menos de 20 — o pino
+  mora fora da grade nas folhas métricas); ponta de fio, junção, power e port pegam a até 0,6
+  passo, e o meio de um fio a menos de meio passo, para o fio paralelo não cair em cima do
+  vizinho nas grades finas. Net label,
   texto, junção explícita e troca de valor/footprint continuam sendo da IA, no `schematic.js`
   ([AI-GUIDE.md](AI-GUIDE.md), Parte A).
   **Trocar um troca os do mesmo tipo E do mesmo valor.** "Mesmo tipo" era só o nome do

@@ -12,9 +12,10 @@ do lado do Odoo esta em docs/prompt-altium-envio-de-lista.md.
 
 Credenciais (secao 6 da spec):
   senha  ODOO_LISTA_SENHA -> ODOO_SENHA -> .hub-odoo.json
-         NUNCA de hub-almox.json: o hubserver serve qualquer arquivo da raiz que nao
-         comece por ponto (hubserver.py:120), entao aquele arquivo responde 200 em texto
-         claro para a LAN inteira. O ponto no nome de .hub-odoo.json e o que o protege.
+         NUNCA de hub-almox.json: ate 2026-09-24 o hubserver servia qualquer arquivo da
+         raiz que nao comecasse por ponto, e aquele respondia 200 em texto claro para a
+         LAN inteira. Hoje o _serve o recusa (hubserver.py » _e_segredo), mas a senha do
+         envio continua so em .hub-odoo.json, que o ponto no nome sempre protegeu.
   resto  ODOO_LISTA_URL/DB/LOGIN/MODELO -> .hub-odoo.json -> hub-almox.json -> PADRAO
          (url/db/login nao sao segredo; herda-los do almoxarifado poupa uma configuracao)
          O PADRAO aponta para o Odoo da casa (192.168.15.192:8070, base odoo_db). Ele ja
@@ -36,8 +37,8 @@ import sys
 import xmlrpc.client
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
-CFG_LISTA = '.hub-odoo.json'     # o ponto no nome e a protecao: _serve recusa (hubserver.py:120)
-CFG_ALMOX = 'hub-almox.json'     # so url/db/login; a senha daqui e publica, ver docstring
+CFG_LISTA = '.hub-odoo.json'     # o ponto no nome e a protecao: _serve recusa (hubserver.py » _serve)
+CFG_ALMOX = 'hub-almox.json'     # so url/db/login; a senha do envio nunca vem daqui, ver docstring
 RECIBO = 'odoo-lista.json'       # ao lado do projeto, no molde de bom-opts.json
 
 MODELO = 'di.lista.altium'

@@ -8,9 +8,10 @@
    Duas coisas que este painel NÃO faz, e que são a razão dele existir separado do
    formulário do almoxarifado (hub.html » alxFormCred):
 
-   - não grava em `hub-almox.json`. Aquele arquivo não começa por ponto, então o _serve
-     (hubserver.py:122) o entrega por HTTP em texto claro para a LAN inteira. A senha do
-     envio vai só para `.hub-odoo.json`, e o ponto no nome é a proteção;
+   - não grava em `hub-almox.json`. Até 2026-09-24 aquele arquivo saía por HTTP em texto
+     claro para a LAN inteira (o _serve só recusava nome começando por ponto); hoje o _serve
+     o recusa pelo caminho (hubserver.py » _e_segredo). A senha do envio continua só em
+     `.hub-odoo.json`, onde o ponto no nome sempre bastou;
    - não expõe os três métodos (`di_confere_lista`, `di_recebe_lista`, `di_estado_lista`).
      Eles são o contrato da spec, não configuração: método errado não dá erro de tela,
      dá 500 do Odoo depois que alguém clicou em enviar.
@@ -59,9 +60,9 @@ const TXT = {
         + 'com as do almoxarifado. Os valores abaixo são os que o servidor está usando.',
   fixoTitle: 'fixo: o Odoo da casa é sempre este — só a credencial muda',
   ajuda: 'Servidor, base e modelo são fixos (o Odoo da casa). Aqui só se troca a '
-       + 'credencial. A senha vai só para <b>.hub-odoo.json</b>, na raiz do workspace. Ela não é '
-       + 'gravada no hub-almox.json de propósito: aquele arquivo é servido em texto claro '
-       + 'para a rede. O campo em branco não apaga a senha já gravada.',
+       + 'credencial. A senha vai só para <b>.hub-odoo.json</b>, na raiz do workspace, que o hub '
+       + 'nunca entrega pela rede — e não para o hub-almox.json, que é a credencial do '
+       + 'almoxarifado. O campo em branco não apaga a senha já gravada.',
   metodos: 'Os três métodos do Odoo (conferir, receber e consultar) continuam no código: '
          + 'eles são o contrato da integração, não configuração.',
   semSenha: 'Não há senha configurada — o envio da lista vai recusar antes de falar com o Odoo.',

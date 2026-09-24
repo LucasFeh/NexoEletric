@@ -222,17 +222,30 @@ const ICONE = {
 };
 function icone(nome){ const s = el('span'); s.innerHTML = ICONE[nome]; return s.firstChild; }
 
-/* Os gestos do mouse: fixos (o teclado le a tabela ATALHOS_PADRAO; estes o canvas trata
-   direto), mas moram na mesma tabela porque respondem a mesma pergunta. */
+/* Os gestos do mouse e as teclas do fio: fixos (o teclado le a tabela ATALHOS_PADRAO; estes o
+   canvas trata direto, ANTES do mapa), mas moram na mesma tabela porque respondem a mesma
+   pergunta. `quando` e a coluna Quando do VSCode: o Espaco da vista gira a selecao, e so com o
+   fio na mao (W) ele inverte o canto. Sem `quando`, vale o da vista (QUANDO).
+   Desde 2026-09-24 o fio se pega em dois cliques, como no Altium: o primeiro pega o fio
+   inteiro, o segundo so o trecho (o duplo clique que promovia a fio inteiro saiu). */
+const FIO = 'fio na mão (W)', ARRASTO = 'arrastando';
 const GESTOS = [
-  { rotulo:'Selecionar',                    teclas:['Clique'] },
-  { rotulo:'Pegar o fio inteiro',           teclas:['Clique duplo'] },
-  { rotulo:'Somar à seleção',               teclas:['Shift', 'Clique'] },
-  { rotulo:'Mover a seleção',               teclas:['Arrastar'] },
-  { rotulo:'Selecionar vários',             teclas:['Arrastar no vazio'] },
-  { rotulo:'Arrastar a tela',               teclas:['Botão direito', 'Arrastar'] },
-  { rotulo:'Aproximar e afastar',           teclas:['Roda do mouse'] },
-  { rotulo:'Largar o que estiver na mão',   teclas:['Escape'] },
+  { rotulo:'Selecionar (no fio, o fio inteiro)',           teclas:['Clique'] },
+  { rotulo:'Pegar só o trecho do fio (ou o vértice)',      teclas:['Segundo clique'] },
+  { rotulo:'Acender a net',                                teclas:['Alt', 'Clique'] },
+  { rotulo:'Somar à seleção',                              teclas:['Shift', 'Clique'] },
+  { rotulo:'Mover a seleção',                              teclas:['Arrastar'] },
+  { rotulo:'Andar reto no trilho da guia',                 teclas:['Shift'],            quando:ARRASTO },
+  { rotulo:'Soltar as guias',                              teclas:['Ctrl'],             quando:ARRASTO },
+  { rotulo:'Selecionar vários',                            teclas:['Arrastar no vazio'] },
+  { rotulo:'Fixar o canto do fio',                         teclas:['Clique'],           quando:FIO },
+  { rotulo:'Inverter o canto do fio',                      teclas:['Espaço'],           quando:FIO },
+  { rotulo:'Mudar o modo do fio (90°, 45°, livre)',        teclas:['Shift', 'Espaço'],  quando:FIO },
+  { rotulo:'Desfazer o último canto',                      teclas:['Backspace'],        quando:FIO },
+  { rotulo:'Terminar o fio (de novo, larga a ferramenta)', teclas:['Botão direito'],    quando:FIO },
+  { rotulo:'Arrastar a tela',                              teclas:['Botão direito', 'Arrastar'] },
+  { rotulo:'Aproximar e afastar',                          teclas:['Roda do mouse'] },
+  { rotulo:'Largar o que estiver na mão',                  teclas:['Escape'] },
 ];
 const QUANDO = 'vista Esquema';
 
@@ -316,9 +329,9 @@ function pane(box, o){
     const out = ATALHOS_PADRAO.map(a => {
       const t = m.porAcao[a.id];
       return { id:a.id, rotulo:a.rotulo, tecla:t, teclas:partes(t), padrao:a.tecla,
-               usuario:t !== a.tecla, fixo:false };
+               usuario:t !== a.tecla, fixo:false, quando:QUANDO };
     });
-    for (const g of GESTOS) out.push({ rotulo:g.rotulo, teclas:g.teclas, fixo:true });
+    for (const g of GESTOS) out.push({ rotulo:g.rotulo, teclas:g.teclas, fixo:true, quando:g.quando || QUANDO });
     return out;
   }
   function passa(l){
@@ -326,7 +339,7 @@ function pane(box, o){
     if (gravando) return !l.fixo && l.tecla === filtro;
     const q = sem(filtro);
     const origem = l.fixo ? 'fixo' : (l.usuario ? 'usuario' : 'padrao');
-    return [l.rotulo, l.teclas.join('+'), l.teclas.join(' '), QUANDO, origem].some(x => sem(x).includes(q));
+    return [l.rotulo, l.teclas.join('+'), l.teclas.join(' '), l.quando, origem].some(x => sem(x).includes(q));
   }
 
   function desenha(foco){
@@ -363,7 +376,8 @@ function pane(box, o){
         rs.onclick = e => { e.stopPropagation(); volta(l); };
         org.append(rs);
       }
-      r.append(ed, cmd, teclinhas(l.teclas), el('span', 'qdo', QUANDO), org);
+      const qdo = el('span', 'qdo', l.quando); qdo.title = l.quando;
+      r.append(ed, cmd, teclinhas(l.teclas), qdo, org);
       if (!l.fixo){
         r.ondblclick = () => edita(l);
         r.onkeydown = e => {
@@ -489,6 +503,6 @@ function pane(box, o){
   desenha();
 }
 
-return { CHAVE, ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho,
+return { CHAVE, ATALHOS_PADRAO, TECLAS_PROIBIDAS, GESTOS, normalizaTecla, mapaAtalhos, defineAtalho,
          carrega, grava, pane };
 });

@@ -81,6 +81,19 @@ function mirrorPart(part){
 }
 
 /* ---------- simbolo (coords locais do simbolo, mil) ---------- */
+/* O TEXTO DO PINO FICA DE PE, como no Altium. Quem desenha a folha gira o componente INTEIRO
+   (ctx.rotate(rot) antes de chamar drawSymbolPart), e o numero e o nome do pino giravam junto:
+   num conector em 180° o numero saia de cabeca para baixo (queixa de 2026-09-24, nos conectores
+   de uma parte por pino, em que o numero do pino E o numero da parte), e a 270° lia de cima para
+   baixo. Se o angulo NA FOLHA (rot do componente + angulo do texto) cai em (90°, 270°], o texto
+   ganha meia volta em torno da propria ancora e o alinhamento troca de lado — assim ele continua
+   ocupando o mesmo lugar, so que legivel. `rotComp` ausente (previews de biblioteca) = 0. */
+function dePe(ang, rotComp, align){
+  const ef = ((((ang + (rotComp || 0)) % 360) + 360) % 360);
+  if (ef > 90.5 && ef <= 270.5)
+    return { ang: ang + 180, align: align === 'left' ? 'right' : align === 'right' ? 'left' : align };
+  return { ang, align };
+}
 function drawSymbolPart(ctx, part, opts){
   const o = opts || {};
   if (o.mirror) part = mirrorPart(part);   /* o espelho vira o dado; o texto continua desenhado normal */
@@ -109,8 +122,10 @@ function drawSymbolPart(ctx, part, opts){
     ctx.beginPath(); ctx.lineWidth = 4; ctx.strokeStyle = o.stroke || SCH.pin;
     ctx.moveTo(p.x, p.y); ctx.lineTo(hx, hy); ctx.stroke();
     const honra = o.honraOlho !== false;
-    if (o.showPinNums !== false && !(honra && p.hideNum))
-      worldText(ctx, p.num, (p.x+hx)/2 + Math.abs(d[1])*30, (p.y+hy)/2 + Math.abs(d[0])*30, 45, 0, SCH.pinnum, 'center');
+    if (o.showPinNums !== false && !(honra && p.hideNum)){
+      const t = dePe(0, o.rot, 'center');
+      worldText(ctx, p.num, (p.x+hx)/2 + Math.abs(d[1])*30, (p.y+hy)/2 + Math.abs(d[0])*30, 45, t.ang, SCH.pinnum, t.align);
+    }
     /* O NOME DO PINO VAI PARA DENTRO DO CORPO, como no Altium: d aponta para FORA (do corpo
        para a ponta quente), entao -d e para dentro. Faltava: este desenhista so punha o
        numero, e um SN65HVD75 virava um retangulo com 1..8 em volta, sem VCC/A/B/GND. Pino
@@ -129,9 +144,9 @@ function drawSymbolPart(ctx, part, opts){
     const mostraNome = honra ? !p.hideName : nome !== String(p.num == null ? '' : p.num).trim();
     if (o.showPinNames !== false && p.name && mostraNome) {
       const vert = d[0] === 0;
+      const t = dePe(vert ? 90 : 0, o.rot, (vert ? d[1] > 0 : d[0] > 0) ? 'right' : 'left');
       worldText(ctx, String(p.name), p.x - d[0]*PIN_NOME_FOLGA, p.y - d[1]*PIN_NOME_FOLGA,
-                PIN_NOME_H, vert ? 90 : 0, o.stroke || SCH.body,
-                (vert ? d[1] > 0 : d[0] > 0) ? 'right' : 'left', { overbar: true });
+                PIN_NOME_H, t.ang, o.stroke || SCH.body, t.align, { overbar: true });
     }
   }
 }
@@ -411,7 +426,7 @@ function mkCamera(canvas, drawWorld, opts){
   return { cam, ctx, draw, fit, toWorld, resize };
 }
 
-return { SCH, PCB, OD, worldText, roundRect, drawSymbolPart, mirrorPart, symBBox, drawFootprint,
+return { SCH, PCB, OD, worldText, roundRect, dePe, drawSymbolPart, mirrorPart, symBBox, drawFootprint,
          drawPowerPort, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, drawNoERC, mkCamera };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDraw;
