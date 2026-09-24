@@ -98,7 +98,7 @@
         "owner": "LucasFeh",
         "repo": "AltiumPCBMirror",
         "private": true,
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ]
   }

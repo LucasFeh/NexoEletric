@@ -68,7 +68,7 @@ igual à de lá. Com o servidor fora do ar, o app pergunta antes de seguir. Conf
 cd electron
 npm install
 npm run build:prep     # build/python (baixa o Python), build/hub (do HEAD), gen/build-info.json
-npm test               # 19 testes; os de backend/importação sobem o hub de verdade
+npm test               # 26 testes; os de backend/importação sobem o hub de verdade
 npm run dev            # abre o app (pasta de dados normal: %APPDATA%\AltiumHub)
 ```
 
@@ -97,9 +97,21 @@ $env:ALTIUMHUB_UPDATE_TOKEN = "<token de LER, vai dentro do .exe>"
 npm run release -- patch           # ou minor, major, X.Y.Z; --dry-run para ensaiar
 ```
 
-O `release` sobe a versão, escreve o `CHANGELOG.md`, gera o instalador, commita
-`desktop: vX.Y.Z`, cria a tag `vX.Y.Z`, empurra branch e tag para `origin` e publica o
-release com o `.exe`, o `.blockmap` e o `latest.yml`.
+O `release` segue estes passos:
+
+1. Testa os dois tokens no GitHub antes de qualquer commit.
+2. Sobe a versão e escreve o `CHANGELOG.md`.
+3. Gera o instalador.
+4. Commita `desktop: vX.Y.Z`, cria a tag `vX.Y.Z` e empurra branch e tag para `origin`.
+5. Sobe o `.exe`, o `.blockmap` e o `latest.yml` num **rascunho**. O rascunho só vira
+   release publicado quando os três estão lá. Os apps instalados consultam
+   `releases/latest`, que nunca enxerga rascunho, então um upload pela metade não quebra
+   a atualização de ninguém.
+
+Se o upload falhar, rode de novo o mesmo `npm run release -- X.Y.Z`. O script reconhece
+a tag no HEAD e só refaz a publicação. Sem token de leitura ele se recusa a publicar,
+porque quem instalar ficaria sem atualização automática. Para publicar assim mesmo, use
+`--sem-token-de-leitura`.
 
 ### Os dois tokens
 

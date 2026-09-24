@@ -133,6 +133,59 @@ test('avaliar: pasta de rede, acento, pasta alheia', () => {
   assert.strictEqual(workspace.avaliar(base).ok, false, 'pasta com arquivos de outra coisa');
 });
 
+test('unidade mapeada que e pasta de rede e recusada', (t) => {
+  // Z: -> \\servidor\share so aparece no realpath.native; stub para nao depender da maquina
+  const original = fs.realpathSync.native;
+  t.after(() => { fs.realpathSync.native = original; });
+  fs.realpathSync.native = (p) => {
+    if (/^Z:\\?$/i.test(p)) return '\\\\192.168.15.31\\Controle de Projetos';
+    return original(p);
+  };
+  const r = workspace.avaliar('Z:\\AltiumHub-que-nao-existe');
+  assert.strictEqual(r.ok, false);
+  assert.match(r.motivo, /rede/);
+});
+
+test('.git numa pasta que o app ja gerencia nao liga o modo desenvolvedor', () => {
+  const base = tmp();
+  const pk = path.join(base, 'pk');
+  const ws = path.join(base, 'ws');
+  pacote(pk, '1.0.0', { 'hubserver.py': 'v1' }, {});
+  workspace.sync(ws, pk);
+  fs.mkdirSync(path.join(ws, '.git'));            // o usuario resolveu versionar os projetos
+  pacote(pk, '1.1.0', { 'hubserver.py': 'v2' }, {});
+  const r = workspace.sync(ws, pk);
+  assert.strictEqual(r.dev, false);
+  assert.strictEqual(ler(ws, 'hubserver.py'), 'v2', 'continua recebendo o codigo novo');
+});
+
+test('versao mais velha do app nao rebaixa o codigo que a mais nova pos na pasta', () => {
+  const base = tmp();
+  const pk = path.join(base, 'pk');
+  const ws = path.join(base, 'ws');
+  pacote(pk, '1.0.2', { 'hubserver.py': 'v102', 'novo.py': 'n' }, { 'projects.js': 'p' });
+  workspace.sync(ws, pk);
+  pacote(pk, '1.0.0', { 'hubserver.py': 'v100' }, { 'projects.js': 'p', 'Libs/x.json': '{}' });
+  const r = workspace.sync(ws, pk);
+  assert.strictEqual(r.maisNova, '1.0.2');
+  assert.strictEqual(ler(ws, 'hubserver.py'), 'v102');
+  assert.ok(fs.existsSync(path.join(ws, 'novo.py')));
+  assert.ok(fs.existsSync(path.join(ws, 'Libs', 'x.json')), 'estado que falta continua sendo semeado');
+  assert.strictEqual(JSON.parse(ler(ws, '.altiumhub/install.json')).appVersion, '1.0.2', 'a marca nao volta');
+});
+
+test('seedHashes junta o que cada versao semeou com o pacote atual', () => {
+  const base = tmp();
+  const pk = path.join(base, 'pk');
+  const ws = path.join(base, 'ws');
+  pacote(pk, '1.0.0', { 'hubserver.py': 'v1' }, { 'Libs/schlib.js': 'a' });
+  workspace.sync(ws, pk);
+  pacote(pk, '1.0.1', { 'hubserver.py': 'v2' }, { 'Libs/schlib.js': 'b' });
+  workspace.sync(ws, pk);
+  const h = workspace.seedHashes(ws, pk)['Libs/schlib.js'];
+  assert.deepStrictEqual(h.sort(), [sha1('a'), sha1('b')].sort());
+});
+
 test('hub-almox.json semeado so com servidor e base, e so uma vez', () => {
   const ws = tmp();
   assert.ok(workspace.seedOdoo(ws, { odooUrl: 'http://192.168.15.192:8070', odooDb: 'odoo_db' }));

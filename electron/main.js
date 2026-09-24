@@ -54,19 +54,24 @@ let saindo = false;
 let backendParado = false;
 let reinicios = 0;
 let importando = null;          // AbortController da importacao em curso
+let importacao = null;          // Promise da importacao em curso (a guarda do sincronismo espera)
 let janelaConfig = null;
 let janelaImport = null;
-let avisoSync = '';             // arquivos do hub que a sincronizacao nao conseguiu trocar
+let avisoSync = '';             // o que a sincronizacao da pasta de trabalho precisa dizer
 
 // ───────────────────────────── instancia unica ─────────────────────────────
-// Duas copias disputariam a mesma porta e a mesma pasta de trabalho.
+// Duas copias disputariam a mesma porta e a mesma pasta de trabalho. Com a janela
+// principal fechada e um pop-up do hub ainda aberto, o atalho traz o pop-up.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (!janela) return;
-    if (janela.isMinimized()) janela.restore();
-    janela.focus();
+    const w = (janela && !janela.isDestroyed()) ? janela
+      : BrowserWindow.getAllWindows().find((x) => !x.isDestroyed());
+    if (!w) return;
+    if (w.isMinimized()) w.restore();
+    w.show();
+    w.focus();
   });
 }
 
@@ -80,13 +85,17 @@ function status(fase, msg, extra = {}) {
 
 function dev(ws) { return workspace.isDevWorkspace(ws || settings.load().workspace); }
 
-function seedHashes() {
-  try {
-    const m = workspace.lerManifesto(BUNDLE);
-    return Object.fromEntries(m.seed.map((e) => [e.p, e.sha1]));
-  } catch {
-    return {};
-  }
+// Base das tres vias da importacao: o que o app semeou, nesta versao e nas anteriores.
+function seedHashes() { return workspace.seedHashes(settings.load().workspace, BUNDLE); }
+
+// Todo o ciclo de vida do hub (subir, reiniciar, cair e voltar) passa por esta fila. Dois
+// "Tentar de novo" seguidos, ou uma queda no meio de um reinicio, nao podem criar dois
+// hubservers disputando a mesma porta.
+let ciclo = Promise.resolve();
+function emSerie(f) {
+  const p = ciclo.then(() => f());
+  ciclo = p.catch(() => {});
+  return p;
 }
 
 // ───────────────────────────── janela principal ─────────────────────────────
@@ -103,25 +112,27 @@ function criarJanela() {
     webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
   });
   if (w.maximized) janela.maximize();
-  janela.once('ready-to-show', () => janela.show());
-  janela.on('close', () => {
-    if (janela.isDestroyed()) return;
-    const b = janela.getNormalBounds();
-    settings.save({ window: { ...b, maximized: janela.isMaximized() } });
+  const esta = janela;
+  esta.once('ready-to-show', () => esta.show());
+  esta.on('close', () => {
+    if (esta.isDestroyed()) return;
+    const b = esta.getNormalBounds();
+    settings.save({ window: { ...b, maximized: esta.isMaximized() } });
   });
-  janela.on('closed', () => { janela = null; });
-  janela.webContents.on('page-title-updated', (e, t) => {
+  esta.on('closed', () => { if (janela === esta) janela = null; });
+  esta.webContents.on('page-title-updated', (e, t) => {
     e.preventDefault();
-    janela.setTitle(t && !/^AltiumHub/.test(t) ? `${t} — AltiumHub` : 'AltiumHub');
+    esta.setTitle(t && !/^AltiumHub/.test(t) ? `${t} — AltiumHub` : 'AltiumHub');
   });
-  janela.webContents.on('render-process-gone', (_e, d) => {
+  esta.webContents.on('render-process-gone', (_e, d) => {
     log.error('renderer caiu: ' + d.reason);
-    if (d.reason !== 'clean-exit' && origem) janela.loadURL(origem + '/');
+    if (d.reason !== 'clean-exit' && origem && !esta.isDestroyed()) esta.loadURL(origem + '/');
   });
   return janela;
 }
 
 async function carregarUi(nome, query = {}) {
+  if (!janela || janela.isDestroyed()) criarJanela();
   await janela.loadFile(path.join(UI_DIR, nome), { query });
 }
 
@@ -142,29 +153,42 @@ function envDoHub(ws) {
   return env;
 }
 
-async function subirHub() {
+// So chamada de dentro da fila (emSerie).
+async function subirHub({ porta } = {}) {
   const s = settings.load();
   const ws = s.workspace;
   status('workspace', 'preparando a pasta de trabalho…');
   const r = workspace.sync(ws, BUNDLE, logWs);
   workspace.seedOdoo(ws, s, logWs);
   if (r.kept.length) log.warn('arquivos de codigo antigos mantidos por terem sido editados: ' + r.kept.join(', '));
-  avisoSync = r.falhas.length
-    ? `${r.falhas.length} arquivo(s) do hub não foram atualizados por estarem em uso (${r.falhas.slice(0, 3).join(', ')}` +
-      `${r.falhas.length > 3 ? '…' : ''}). Feche o Altium e reabra o AltiumHub.`
-    : '';
+  const avisos = [];
+  if (r.falhas.length) {
+    avisos.push(`${r.falhas.length} arquivo(s) do hub não foram atualizados por estarem em uso ` +
+      `(${r.falhas.slice(0, 3).join(', ')}${r.falhas.length > 3 ? '…' : ''}). Feche o Altium e reabra o AltiumHub.`);
+  }
+  if (r.maisNova) {
+    avisos.push(`a pasta de trabalho está com o código da versão ${r.maisNova}, mais nova que este app ` +
+      `(${app.getVersion()}): atualize o AltiumHub nesta conta do Windows.`);
+  }
+  avisoSync = avisos.join(' ');
 
   status('python', 'subindo o hub…');
-  backend = new Backend({ python: PYTHON, workspace: ws, logDir: LOG_DIR, env: envDoHub(ws) });
+  if (backend) await backend.stop();              // o anterior sai primeiro (saida esperada)
+  const b = new Backend({ python: PYTHON, workspace: ws, logDir: LOG_DIR, env: envDoHub(ws) });
+  backend = b;
   backendParado = false;
-  backend.on('exit', aoCairOHub);
-  backend.on('log', (l) => {
-    bootStatus.log = [...bootStatus.log.slice(-60), l];
+  let noAr = false;
+  // Queda = so do hub ATUAL e so depois de ele ter subido. Falha durante a subida quem
+  // trata e quem esperou o start().
+  b.on('exit', (ev) => {
+    if (noAr && b === backend && !ev.esperado && !saindo) emSerie(() => (b === backend ? aoCairOHub(ev) : null));
   });
-  await backend.start({ port: s.port, lan: s.lan });
-  origem = backend.url();
-  if (backend.port !== s.port) {
-    log.warn(`porta ${s.port} ocupada; o hub subiu na ${backend.port} (preferencias do navegador ficam por porta)`);
+  b.on('log', (l) => { bootStatus.log = [...bootStatus.log.slice(-60), l]; });
+  await b.start({ port: porta || s.port, lan: s.lan });
+  noAr = true;
+  origem = b.url();
+  if (b.port !== s.port) {
+    log.warn(`porta ${s.port} ocupada; o hub subiu na ${b.port} (preferencias do navegador ficam por porta)`);
   }
   // O hub cai sozinho no modo DEMO (projetos de mentira) se o /api/index.json falhar
   // (hub.html » API.index). Aquecer aqui garante que a primeira pagina ja o encontra.
@@ -176,31 +200,38 @@ async function subirHub() {
   }
 }
 
-async function aoCairOHub({ code, esperado }) {
-  if (esperado || saindo) return;
+// So chamada de dentro da fila.
+async function aoCairOHub({ code }) {
+  if (saindo) return;
   log.error(`o hub caiu (codigo ${code})`);
   if (reinicios < 2) {
     reinicios++;
+    const antiga = origem;
+    const portaAntiga = backend ? backend.port : 0;
     try {
-      await subirHub();
+      // a mesma porta de antes, se estiver livre: origem igual = localStorage do hub igual
+      await subirHub({ porta: portaAntiga });
       for (const w of BrowserWindow.getAllWindows()) {
-        if (web.mesmaOrigem(w.webContents.getURL(), origem)) w.webContents.reload();
+        const url = w.webContents.getURL();
+        if (!antiga || !web.mesmaOrigem(url, antiga)) continue;
+        if (origem === antiga) { w.webContents.reload(); continue; }
+        const u = new URL(url);
+        w.loadURL(origem + u.pathname + u.search + u.hash);   // mesma pagina, porta nova
       }
       return;
     } catch (e) {
       log.error('reinicio falhou: ' + e.message);
     }
   }
-  if (janela && !janela.isDestroyed()) {
+  try {
     await carregarUi('splash.html');
-    status('erro', 'o hub parou de responder', { erro: `o processo Python terminou (codigo ${code}). Veja o log abaixo.` });
-  }
+  } catch { /* a pagina recusou sair (edicao pendente): o status fica para quando ela sair */ }
+  status('erro', 'o hub parou de responder', { erro: `o processo Python terminou (codigo ${code}). Veja o log abaixo.` });
 }
 
-async function boot() {
+async function bootImpl() {
   reinicios = 0;
   try {
-    if (!janela) criarJanela();
     await carregarUi('splash.html');
     await subirHub();
     status('pronto', 'abrindo o hub…');
@@ -214,12 +245,30 @@ async function boot() {
   }
 }
 
-async function reiniciarHub() {
-  if (backend) await backend.stop();
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (w !== janela && w !== janelaConfig && w !== janelaImport) w.close();
-  }
-  await boot();
+function boot() { return emSerie(bootImpl); }
+
+// Primeiro as paginas do hub saem (uma vista com edicao pendente pode recusar -- "Voltar e
+// salvar" -- e ai o hub tem de continuar no ar para ela salvar); so depois o servidor para.
+// Navegar uma janela cuja pagina recusou o beforeunload rejeita com ERR_ABORTED.
+function reiniciarHub() {
+  return emSerie(async () => {
+    const outras = BrowserWindow.getAllWindows().filter((w) => w !== janela && w !== janelaConfig &&
+      w !== janelaImport && !pickers.has(w.webContents.id));
+    try {
+      await carregarUi('splash.html');
+      for (const w of outras) if (!w.isDestroyed()) await w.webContents.loadURL('about:blank');
+    } catch (e) {
+      log.warn('reinicio cancelado: ' + e.message);
+      if (janela && !janela.isDestroyed() && origem && !web.mesmaOrigem(janela.webContents.getURL(), origem)) {
+        janela.loadURL(origem + '/').catch(() => {});
+      }
+      return false;
+    }
+    for (const w of outras) if (!w.isDestroyed()) w.close();
+    if (backend) await backend.stop();
+    await bootImpl();
+    return true;
+  });
 }
 
 // ───────────────────────────── primeira execucao ─────────────────────────────
@@ -247,13 +296,19 @@ function abrirConfig() {
   janelaConfig.loadFile(path.join(UI_DIR, 'config.html'), { query: { modo: 'config' } });
 }
 
+function aviso(message, detail) {
+  dialog.showMessageBox(janela || undefined, { type: 'info', title: 'AltiumHub', message, detail, buttons: ['OK'], noLink: true });
+}
+
 function abrirImportacao(opts = {}) {
+  const s = settings.load();
+  if (!s.setupDone || !s.workspace) {
+    aviso('Escolha a pasta de trabalho primeiro.', 'Conclua a configuração inicial; ela oferece importar do servidor ao final.');
+    return;
+  }
   if (dev()) {
-    dialog.showMessageBox(janela, {
-      type: 'info', title: 'AltiumHub', message: 'A pasta de trabalho é um repositório git.',
-      detail: 'Importar do servidor sujaria arquivos versionados. Use uma pasta de trabalho comum (Configurações).',
-      buttons: ['OK'], noLink: true,
-    });
+    aviso('A pasta de trabalho é um repositório git.',
+      'Importar do servidor sujaria arquivos versionados. Use uma pasta de trabalho comum (Configurações).');
     return;
   }
   if (janelaImport && !janelaImport.isDestroyed()) { janelaImport.focus(); return; }
@@ -271,17 +326,24 @@ function abrirImportacao(opts = {}) {
 async function rodarImportacao(grupos, progresso) {
   if (importando) throw new Error('já existe uma importação em andamento');
   const s = settings.load();
+  // Sem pasta de trabalho, os caminhos cairiam na pasta do processo (a de instalacao).
+  if (!s.setupDone || !s.workspace || !path.isAbsolute(s.workspace)) {
+    throw new Error('termine a configuração inicial (pasta de trabalho) antes de importar');
+  }
   importando = new AbortController();
+  const p = importer.importar({
+    ws: s.workspace, serverUrl: s.serverUrl, grupos, seedHashes: seedHashes(),
+    progresso, signal: importando.signal,
+  });
+  importacao = p.catch(() => {});
   try {
-    const res = await importer.importar({
-      ws: s.workspace, serverUrl: s.serverUrl, grupos, seedHashes: seedHashes(),
-      progresso, signal: importando.signal,
-    });
+    const res = await p;
     log.info(`[import] ${res.novos.length} novos, ${res.atualizados.length} atualizados, ` +
       `${res.conflitos.length} conflitos, ${res.erros.length} erros`);
     return res;
   } finally {
     importando = null;
+    importacao = null;
   }
 }
 
@@ -291,42 +353,56 @@ function toastNoHub(wc, msg, tipo) {
     .catch(() => {});
 }
 
+async function esperaImportacao(wc) {
+  if (importando) toastNoHub(wc, 'esperando a importação em andamento terminar antes de sincronizar…', 'warn');
+  while (importando) await importacao;
+}
+
 // Antes de o hub sincronizar o almoxarifado com o Odoo: traz do servidor o estado que o
 // gerador le para numerar (livro-razao de part numbers, ledger dos desenhos, espelhos).
 // Com o mesmo estado e o mesmo Odoo, a numeracao daqui e a do servidor saem iguais; sem
-// isso, cada PC que sincroniza vira uma segunda autoridade dos part numbers.
+// isso, cada PC que sincroniza vira uma segunda autoridade dos part numbers. Importacao em
+// andamento: espera ela terminar (sincronizar no meio dela e justamente numerar do estado
+// velho). Nao deu para trazer o estado: pergunta, como quando o servidor nao responde.
 async function antesDoSincronismo(d) {
   const s = settings.load();
   if (!s.syncGuard || dev(s.workspace)) return true;
   const wc = d.webContents;
   const win = (wc && BrowserWindow.fromWebContents(wc)) || janela;
-  if (importando) return true;
+  const pergunta = (message, detail) => dialog.showMessageBox(win, {
+    type: 'warning', title: 'AltiumHub', message,
+    detail: `${detail}\n\nSincronizar agora usa só o estado local do almoxarifado. ` +
+      'Componentes novos no Odoo podem receber part numbers diferentes dos que o servidor daria.',
+    buttons: ['Sincronizar assim mesmo', 'Cancelar'], defaultId: 1, cancelId: 1, noLink: true,
+  }).then((r) => r.response === 0);
+
+  await esperaImportacao(wc);
   const t = await importer.testar(s.serverUrl);
-  if (!t.ok) {
-    const r = await dialog.showMessageBox(win, {
-      type: 'warning', title: 'AltiumHub',
-      message: 'O servidor central não respondeu.',
-      detail: `${s.serverUrl}: ${t.erro}\n\nSincronizar agora usa só o estado local do almoxarifado. ` +
-        'Componentes novos no Odoo podem receber part numbers diferentes dos que o servidor daria.',
-      buttons: ['Sincronizar assim mesmo', 'Cancelar'], defaultId: 1, cancelId: 1, noLink: true,
-    });
-    return r.response === 0;
-  }
+  if (!t.ok) return pergunta('O servidor central não respondeu.', `${s.serverUrl}: ${t.erro}`);
   toastNoHub(wc, 'atualizando o almoxarifado a partir do servidor antes de sincronizar…', 'warn');
+  let falha = '';
   try {
+    await esperaImportacao(wc);                    // uma importacao manual comecou durante o teste
     const res = await rodarImportacao(['almox'], () => {});
-    const n = res.novos.length + res.atualizados.length;
-    toastNoHub(wc, n ? `estado do almoxarifado atualizado do servidor (${n} arquivo${n > 1 ? 's' : ''})`
-      : 'almoxarifado já estava igual ao do servidor', res.erros.length ? 'warn' : 'ok');
+    const errAlmox = res.erros.filter((e) => importer.ARQ_ALMOX.some((a) => e.startsWith(a + ':')));
+    if (errAlmox.length) {
+      falha = errAlmox.join('; ');
+    } else {
+      const n = res.novos.length + res.atualizados.length;
+      toastNoHub(wc, n ? `estado do almoxarifado atualizado do servidor (${n} arquivo${n > 1 ? 's' : ''})`
+        : 'almoxarifado já estava igual ao do servidor', 'ok');
+    }
   } catch (e) {
     log.warn('pre-sincronismo: ' + e.message);
-    toastNoHub(wc, 'não consegui atualizar do servidor: ' + e.message, 'warn');
+    falha = e.message;
   }
+  if (falha) return pergunta('Não consegui trazer do servidor o estado do almoxarifado.', falha);
   return true;
 }
 
 // ───────────────────────────── seletor de tela (chat) ─────────────────────────────
-let pickerPendente = null;
+// Um por janela que pediu: dois chats capturando ao mesmo tempo nao trocam de resposta.
+const pickers = new Map();      // webContents.id do seletor -> {fontes, responde}
 function escolherTela(sources, parent) {
   return new Promise((resolve) => {
     const w = new BrowserWindow({
@@ -334,19 +410,20 @@ function escolherTela(sources, parent) {
       title: 'Escolha o que capturar', icon: web.ICONE, backgroundColor: '#14161a', show: false,
       webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
     });
+    const id = w.webContents.id;
     w.removeMenu();
     let fim = false;
-    const responde = (id) => {
+    const responde = (escolha) => {
       if (fim) return;
       fim = true;
-      pickerPendente = null;
-      resolve(id);
+      pickers.delete(id);
+      resolve(escolha);
       if (!w.isDestroyed()) w.close();
     };
-    pickerPendente = {
+    pickers.set(id, {
       fontes: sources.map((s) => ({ id: s.id, nome: s.name, tela: s.id.startsWith('screen:'), img: s.thumbnail.toDataURL() })),
       responde,
-    };
+    });
     w.once('ready-to-show', () => w.show());
     w.on('closed', () => responde(null));
     w.loadFile(path.join(UI_DIR, 'picker.html'));
@@ -443,14 +520,13 @@ function sobre() {
   });
 }
 
+// A instalacao da atualizacao NAO derruba o hub por conta propria: "Reiniciar agora" vira
+// um app.quit() comum, e o hub so para no will-quit (la embaixo), quando todas as janelas
+// ja aceitaram fechar. Derrubar antes deixava a vista com edicao pendente sem hub para
+// salvar -- e o instalador a matava segundos depois.
 const opcoesUpdater = {
   token: () => settings.getUpdateToken() || buildInfo.get().updateToken,
   enabled: () => settings.load().autoUpdate,
-  beforeInstall: async () => {
-    saindo = true;
-    if (backend) await backend.stop();
-    backendParado = true;
-  },
 };
 
 async function verificarAtualizacoes() {
@@ -529,8 +605,8 @@ function registrarIpc() {
     return true;
   });
 
-  handle('picker:fontes', () => (pickerPendente ? pickerPendente.fontes : []));
-  handle('picker:escolher', (_e, id) => { if (pickerPendente) pickerPendente.responde(id || null); return true; });
+  handle('picker:fontes', (e) => { const p = pickers.get(e.sender.id); return p ? p.fontes : []; });
+  handle('picker:escolher', (e, id) => { const p = pickers.get(e.sender.id); if (p) p.responde(id || null); return true; });
 }
 
 function validarUrl(u, nome) {
@@ -542,7 +618,10 @@ function validarUrl(u, nome) {
 
 async function salvarConfig(e, d) {
   const antes = settings.load();
-  const setup = !antes.setupDone;
+  // Modo boas-vindas = quem pergunta e a janela principal (a unica que carrega config.html
+  // ali). So o flag salvo nao basta: um "Começar" que falhou depois de gravar setupDone
+  // (home.txt de outra conta, por exemplo) deixaria o segundo clique sem subir nada.
+  const setup = !antes.setupDone || Boolean(janela && !janela.isDestroyed() && e.sender === janela.webContents);
   const ws = path.resolve(String(d.workspace || '').trim() || settings.workspacePadrao());
   const av = workspace.avaliar(ws);
   if (!av.ok) throw new Error(av.motivo);
@@ -618,9 +697,14 @@ async function salvarConfig(e, d) {
   const w = BrowserWindow.fromWebContents(e.sender);
   if (reinicia) {
     if (w && w !== janela) w.close();
-    await reiniciarHub();
+    const ok = await reiniciarHub();
+    if (!ok) {
+      aviso('Configurações salvas, mas o hub não foi reiniciado.',
+        'Há edições não salvas numa vista. Salve-as e reabra o AltiumHub para aplicar a mudança.');
+    }
+    return { ok: true, reiniciou: ok };
   }
-  return { ok: true, reiniciou: reinicia };
+  return { ok: true, reiniciou: false };
 }
 
 // ───────────────────────────── smoke test (build) ─────────────────────────────
@@ -680,12 +764,19 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => app.quit());
 
-app.on('before-quit', (e) => {
-  if (backendParado || !backend) return;
+// will-quit, e nao before-quit: o before-quit vem ANTES de as janelas fecharem, e uma vista
+// com edicao pendente ainda pode recusar ("Voltar e salvar") -- com o hub ja derrubado ela
+// nao teria onde salvar. O will-quit so vem quando todas aceitaram fechar. So entao o hub
+// para e, se "Reiniciar agora" foi pedido, o instalador da atualizacao roda.
+app.on('will-quit', (e) => {
+  if (backendParado || !backend) {
+    updater.instalarSePedido();
+    return;
+  }
   e.preventDefault();
   saindo = true;
   backend.stop().finally(() => {
     backendParado = true;
-    app.quit();
+    if (!updater.instalarSePedido()) app.quit();
   });
 });

@@ -127,11 +127,19 @@ function preparar(ses, o) {
     });
   });
 
-  // Permissoes: o hub usa area de transferencia e captura de tela; nada mais.
-  const PERMITIDAS = new Set(['clipboard-sanitized-write', 'clipboard-read', 'display-capture', 'media', 'fullscreen']);
+  // Permissoes: o hub ESCREVE na area de transferencia e captura a tela (chat); nada mais.
+  // 'media' tambem cobre getUserMedia (microfone e camera), que o hub nao usa: so passa a
+  // captura de tela (mediaTypes vazio). Sem o check handler, o padrao do Electron e
+  // "concedido" e o enumerateDevices entrega os nomes dos dispositivos.
+  const PERMITIDAS = new Set(['clipboard-sanitized-write', 'display-capture', 'media', 'fullscreen']);
+  const semMicCam = (tipos) => !(tipos || []).some((t) => t === 'audio' || t === 'video');
   ses.setPermissionRequestHandler((wc, perm, cb, det) => {
-    cb(PERMITIDAS.has(perm) && mesmaOrigem(det.requestingUrl || wc.getURL(), o.origem()));
+    if (!PERMITIDAS.has(perm) || !mesmaOrigem(det.requestingUrl || wc.getURL(), o.origem())) return cb(false);
+    cb(perm !== 'media' || semMicCam(det.mediaTypes));
   });
+  ses.setPermissionCheckHandler((_wc, perm, origemPedido, det) =>
+    PERMITIDAS.has(perm) && mesmaOrigem(origemPedido, o.origem()) &&
+    !(perm === 'media' && (det.mediaType === 'audio' || det.mediaType === 'video')));
 }
 
 /** Tratamentos por webContents: janela principal, pop-ups e iframes herdam daqui. */
@@ -140,6 +148,9 @@ function endurecer(wc, o) {
     if (mesmaOrigem(url, o.origem())) {
       return {
         action: 'allow',
+        // Como a aba do Chrome: fechar a janela principal nao derruba a vista aberta a parte.
+        // Sem isto o Electron DESTROI o pop-up junto (sem beforeunload): edicao perdida.
+        outlivesOpener: true,
         overrideBrowserWindowOptions: {
           width: 1400, height: 900, icon: ICONE, backgroundColor: '#14161a', autoHideMenuBar: false,
           webPreferences: webPreferencesHub(),
@@ -177,6 +188,9 @@ function endurecer(wc, o) {
       noLink: true,
     });
     if (r === 0) e.preventDefault();
+    // "Voltar e salvar" cancelou o fechamento: um "Reiniciar agora" que estava armado nao
+    // pode instalar no proximo fechamento comum.
+    else require('./updater').desistirDeInstalar();
   });
 
   wc.on('context-menu', (_e, p) => {

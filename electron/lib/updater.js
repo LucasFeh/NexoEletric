@@ -10,10 +10,15 @@
 //
 // Use um token de granularidade fina, restrito a este repositorio e so com
 // "Contents: Read-only": qualquer um que abra o .exe consegue extrai-lo.
+//
+// O `private: true` fica de FORA do setFeedURL de proposito: com ele o electron-updater usa
+// GH_TOKEN/GITHUB_TOKEN do ambiente do usuario ANTES do token passado aqui (providerFactory),
+// e um PC com um GITHUB_TOKEN de outra conta (gh, outra ferramenta) passaria a receber 404.
+// Um token nao vazio no setFeedURL ja escolhe o provedor de repositorio privado.
 const { app, dialog } = require('electron');
 const log = require('electron-log/main');
 
-const REPO = { provider: 'github', owner: 'LucasFeh', repo: 'AltiumPCBMirror', private: true };
+const REPO = { provider: 'github', owner: 'LucasFeh', repo: 'AltiumPCBMirror' };
 // Teste de ponta a ponta sem o GitHub: qualquer servidor HTTP com o latest.yml e o
 // instalador que o electron-builder gera (provider "generic"). So existe com a variavel;
 // ALTIUMHUB_UPDATE_AUTOINSTALL=1 instala sem perguntar (o teste nao tem quem clique).
@@ -25,7 +30,7 @@ let autoUpdater = null;
 let estado = { fase: 'parado', versao: '', erro: '', progresso: 0 };
 let temporizador = null;
 let ouvintes = [];
-let antesDeInstalar = async () => {};
+let instalarAoSair = false;      // "Reiniciar agora" pedido; o main.js instala no will-quit
 
 function emite(patch) {
   estado = { ...estado, ...patch };
@@ -86,17 +91,29 @@ async function perguntarReinicio(versao) {
   if (r.response === 0) await instalarAgora();
 }
 
-async function instalarAgora() {
-  await antesDeInstalar();          // derruba o hub: arquivo aberto nao e substituido
+// "Reiniciar agora" e um app.quit() comum: as janelas perguntam pelo que nao foi salvo, e
+// uma que recusar cancela tudo (web.js chama desistirDeInstalar). Quando todas aceitaram,
+// o will-quit do main.js derruba o hub e so entao chama instalarSePedido().
+function instalarAgora() {
+  instalarAoSair = true;
+  app.quit();
+}
+
+function desistirDeInstalar() { instalarAoSair = false; }
+
+// true = o instalador foi disparado (e ele mesmo encerra o app).
+function instalarSePedido() {
+  if (!instalarAoSair) return false;
+  instalarAoSair = false;       // quitAndInstall nao pode rodar duas vezes
   // isSilent=false mostra o progresso do instalador; isForceRunAfter=true reabre o app.
   carregar().quitAndInstall(false, true);
+  return true;
 }
 
 /**
- * @param {{token:()=>string, enabled:()=>boolean, beforeInstall:()=>Promise<void>}} o
+ * @param {{token:()=>string, enabled:()=>boolean}} o
  */
 function iniciar(o) {
-  antesDeInstalar = o.beforeInstall || antesDeInstalar;
   if (!app.isPackaged) {
     emite({ fase: 'desligado', erro: 'rodando fora do instalador (desenvolvimento)' });
     return;
@@ -130,4 +147,4 @@ async function verificar(o, manual) {
   return estado;
 }
 
-module.exports = { iniciar, verificar, instalarAgora, onStatus, status, REPO };
+module.exports = { iniciar, verificar, instalarAgora, instalarSePedido, desistirDeInstalar, onStatus, status, REPO };

@@ -151,7 +151,14 @@ class Backend extends EventEmitter {
     });
     proc.on('error', (e) => this._log('falha ao iniciar o Python: ' + e.message));
 
-    await this._esperaNoAr(proc, 60000);
+    try {
+      await this._esperaNoAr(proc, 60000);
+    } catch (e) {
+      // Nada de python mudo para tras: ele seguraria a porta e a pasta de trabalho, e o
+      // proximo "Tentar de novo" subiria um segundo hub ao lado dele.
+      await this.stop();
+      throw e;
+    }
     this._log(`hub no ar em ${this.url()}`);
     return this.port;
   }
