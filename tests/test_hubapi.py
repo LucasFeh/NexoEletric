@@ -29,6 +29,31 @@ for k in ('des', 'value', 'footprint', 'pins', 'layer', 'pos', 'rot', 'nets'):
 assert det['board'].get('components'), 'board embutido'
 assert H.build_detail(ROOT, 'nao-existe') is None
 
+# /__live.js: UMA conexao SSE por janela. Os iframes das vistas se registram e a janela de
+# cima repassa o aviso; cada EventSource a mais prende uma das 6 conexoes por host do
+# Chromium, e com elas esgotadas o hub para de carregar qualquer coisa.
+live = H.app.test_client().get('/__live.js').get_data(as_text=True)
+assert live.count("new EventSource('/__events')") == 1, 'um EventSource so'
+assert '__hubLiveFilho' in live and 'window.top.__hubLive' in live, 'iframe se registra na janela de cima'
+assert live.index('__hubLiveFilho = true; return;') < live.index('new EventSource'), \
+    'o iframe registrado nao pode abrir a propria conexao'
+assert '__hubOnChange' in live, 'quem tem trabalho nao salvo continua decidindo o proprio reload'
+
+# --host 127.0.0.1 (app desktop): so o Host: de loopback passa. Um dominio que resolve para
+# 127.0.0.1 (DNS rebinding) nao pode ler o hub-almox.json nem falar com o chat.
+try:
+    assert H.configura_escuta('127.0.0.1') is False
+    cli = H.app.test_client()
+    for host in ('127.0.0.1:8200', 'localhost:8200', '[::1]:8200'):
+        assert cli.get('/__live.js', headers={'Host': host}).status_code == 200, host
+    for host in ('evil.example.com:8200', 'evil.example.com'):
+        assert cli.get('/__live.js', headers={'Host': host}).status_code == 400, host
+        assert cli.get('/hub-almox.json', headers={'Host': host}).status_code == 400, host
+finally:
+    assert H.configura_escuta('0.0.0.0') is True, 'o padrao volta a ser a rede toda'
+assert H.app.test_client().get('/__live.js', headers={'Host': 'hub.lan:8100'}).status_code == 200, \
+    'escutando na rede, qualquer nome serve (o tablet chega pelo IP ou pelo nome da maquina)'
+
 # Exclusao de projeto: senha errada nao pode encostar na pasta, e senha certa MOVE
 # (nao apaga). Roda num workspace de mentira - ROOT e lido em tempo de chamada.
 tmp = tempfile.mkdtemp()
@@ -92,6 +117,15 @@ try:
     if ip:
         assert ip in j['url'] and j['trocado'], 'localhost tinha de virar o IP da rede'
     assert cli.get('/api/bom/nao-existe/link').status_code == 404
+    # Escutando so em 127.0.0.1 (--host 127.0.0.1, o app desktop sem "compartilhar na rede"),
+    # o IP da rede seria um link MORTO: nada responde nele. Fica o de loopback.
+    real_rede, H._ESCUTA_REDE = H._ESCUTA_REDE, False
+    try:
+        j = cli.get('/api/bom/%s/link' % pid).get_json()
+        assert j['ok'] and not j['trocado'] and not j['lan'], j
+        assert '://localhost' in j['url'] or '://127.0.0.1' in j['url'], j['url']
+    finally:
+        H._ESCUTA_REDE = real_rede
 
     # Vistos: o corpo e um DELTA, nao o mapa inteiro. Dois tablets marcando pecas
     # diferentes ao mesmo tempo se somam, em vez de o ultimo apagar o trabalho do outro.

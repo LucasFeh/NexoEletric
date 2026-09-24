@@ -39,12 +39,31 @@ _version_lock = threading.Lock()
 
 LIVE_JS = b"""/* hubserver: auto-reload via SSE (injetado; nao existe como arquivo) */
 (function(){
+  /* paginas de edicao definem __hubOnChange p/ nao perder trabalho nao salvo */
+  function avisa(w){
+    if (w.__hubOnChange) { w.__hubOnChange(); return; }
+    w.location.reload();
+  }
+  /* UMA conexao por janela, e nao uma por documento. Este script entra em todo .html servido,
+     inclusive nos iframes das vistas (Esquema, PCB, Neoden), e cada EventSource prende uma
+     das 6 conexoes que o Chromium abre por host: hub + tres vistas + o stream de um
+     sincronismo + o do chat ja sao 6, e o fetch seguinte fica na fila para sempre -- o hub
+     parece travado. Agora o iframe se registra e quem escuta e a janela de cima, que repassa
+     o aviso a cada iframe registrado, na mesma ordem de antes (cada um decide o seu). */
+  function repassa(w){
+    for (var i = 0; i < w.frames.length; i++) {
+      try {
+        var f = w.frames[i];
+        if (f.__hubLiveFilho) { repassa(f); avisa(f); }
+      } catch (e) {}
+    }
+  }
+  var topo = null;
+  try { if (window.top !== window && window.top.__hubLive) topo = window.top; } catch (e) {}
+  if (topo) { window.__hubLiveFilho = true; return; }
+  window.__hubLive = true;
   var es = new EventSource('/__events');
-  es.addEventListener('change', function(){
-    /* paginas de edicao definem __hubOnChange p/ nao perder trabalho nao salvo */
-    if (window.__hubOnChange) { window.__hubOnChange(); return; }
-    location.reload();
-  });
+  es.addEventListener('change', function(){ repassa(window); avisa(window); });
   /* EventSource reconecta sozinho se o servidor cair/voltar */
 })();
 """
@@ -224,6 +243,9 @@ def api_laser_open():
 # SERVIDOR: gravado no browser, cada PC da LAN teria a sua versao de um caminho que so o
 # servidor usa.
 LOCAL_ADDRS = ('127.0.0.1', '::1', 'localhost')
+# O hub escuta na rede? Reescrito pelo __main__ a partir do --host. Importado por teste ou
+# WSGI, vale o padrao de sempre (rede toda).
+_ESCUTA_REDE = True
 
 
 def _is_local(req):
@@ -958,7 +980,9 @@ def api_bom_link(proj_id):
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
     host, _, porta = request.host.partition(':')
     trocado = False
-    if host in LOCAL_ADDRS:
+    # Escutando so em 127.0.0.1 (app desktop sem "compartilhar na rede"), o IP de rede
+    # daria um link morto: melhor o de loopback, que ao menos abre neste PC.
+    if host in LOCAL_ADDRS and _ESCUTA_REDE:
         ip = _lan_ip()
         if ip:
             host, trocado = ip, True
@@ -1009,6 +1033,21 @@ except Exception as _e:            # noqa: BLE001
 # impedir o hub inteiro de subir.
 
 
+def configura_escuta(host):
+    """O que muda quando o hub escuta so nesta maquina (--host 127.0.0.1).
+
+    - o link do BOM nao troca o loopback pelo IP da rede (api_bom_link): la nada responde;
+    - o Host: legitimo so pode ser o loopback. Sem isto uma pagina qualquer aberta no
+      navegador do usuario, com um dominio que resolve para 127.0.0.1 (DNS rebinding), vira
+      "mesma origem" do hub: le o hub-almox.json com a senha do Odoo e fala com o chat. Host
+      fora da lista = 400, antes de qualquer rota.
+    """
+    global _ESCUTA_REDE
+    _ESCUTA_REDE = host not in LOCAL_ADDRS
+    app.config['TRUSTED_HOSTS'] = None if _ESCUTA_REDE else ['127.0.0.1', 'localhost', '::1', '[::1]']
+    return _ESCUTA_REDE
+
+
 def _lan_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -1023,11 +1062,15 @@ def _lan_ip():
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(description='Servidor local do AltiumPCBMirror')
     ap.add_argument('--port', type=int, default=8000)
+    # O padrao continua sendo a rede toda: e o que o servidor e a bancada usam. O app desktop
+    # (electron/) passa 127.0.0.1 quando o usuario nao liga "compartilhar na rede".
+    ap.add_argument('--host', default='0.0.0.0')
     args = ap.parse_args()
+    configura_escuta(args.host)
     threading.Thread(target=_watcher, daemon=True).start()
     print('AltiumPCBMirror hub:')
     print('  http://127.0.0.1:%d' % args.port)
-    ip = _lan_ip()
+    ip = _lan_ip() if _ESCUTA_REDE else None
     if ip:
         print('  http://%s:%d  (rede local; o Windows pode pedir firewall)' % (ip, args.port))
-    app.run(host='0.0.0.0', port=args.port, threaded=True, debug=False)
+    app.run(host=args.host, port=args.port, threaded=True, debug=False)
