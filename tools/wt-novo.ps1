@@ -6,8 +6,12 @@
   .gitignore mantem fora do historico de proposito. Este script repoe isso.
 
   Uso:
-    .\tools\wt-novo.ps1 -Pasta APM-neoden -Branch agente/neoden
-    .\tools\wt-novo.ps1 -Pasta APM-bom                        # so reequipa
+    .\tools\wt-novo.ps1 -Pasta APM-homologacao -Branch homologacao -Base neoden-ordem-por-bico
+    .\tools\wt-novo.ps1 -Pasta APM-homologacao                # so reequipa
+
+  Para APAGAR um worktree, remova a junction Libs/Almox antes (cmd /c rmdir): o git
+  atravessa a junction, e o `git worktree remove --force` com ela no lugar pode
+  levar junto a Libs/Almox do principal. Ver CLAUDE.md, secao "Recriar a homologacao".
 
   Pasta e criada como irma do repo principal, nunca dentro dele.
 #>

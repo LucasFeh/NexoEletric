@@ -4,48 +4,49 @@
 
 O AI-GUIDE acima é o contrato para **editar projetos** (`schematic.js`,
 `changes.js`, `annotations.js`). Este arquivo é sobre **editar o código do
-workspace** — e sobre vários agentes fazendo isso ao mesmo tempo sem se atropelar.
+workspace**.
 
-## Quem é dono de quê
+## Dois worktrees: principal e homologação
 
-Cada agente roda no seu próprio worktree, num branch próprio. Antes de editar um
-arquivo, confira de quem ele é. **Se o arquivo não é seu, não edite: peça.**
+Até 2026-09-24 havia um worktree por agente (`APM-page`, `APM-bom`, `APM-laser`,
+`APM-frames`), cada um dono de um pedaço dos arquivos. O dono pediu para ficar só
+com um: **homologação**. Os quatro saíram (nenhum tinha commit fora do principal), e
+os `dono: agente/...` que ainda aparecem no `tools/deploy/PENDENCIAS.md` são
+histórico — hoje tudo é do principal.
 
-| worktree | branch | dono dos arquivos | porta |
+| worktree | branch | papel | porta |
 |---|---|---|---|
-| `AltiumPCBMirror` (principal) | `neoden-ordem-por-bico` | integrador: `*.pas`, `README.md`, `AI-GUIDE.md`, `CLAUDE.md`, `.gitignore` | 8000 |
-| `../APM-page` | `agente/page` | a casca do hub: `hub.html`, `hub-core.js`, `hub-ui.js`, `hub-io.js`, `hub-i18n.js` | 8004 |
-| `../APM-bom` | `agente/bom-almox` | `hub-bom.js`, `Libs/almox-*.js`, `tools/almox/**`, `hubserver.py` | 8001 |
-| `../APM-laser` | `agente/laser` | `hub-laser.js`, `hub-draw.js`, `hub-font.js` | 8002 |
-| `../APM-frames` | `agente/frames` | `pcbframe.js`, `pcbframe.html`, `schframe.js`, `schframe.html`, `hub-dialog.js` | 8003 |
+| `AltiumPCBMirror` (principal) | `neoden-ordem-por-bico` | onde se escreve e se commita; é daqui que sai o deploy | 8000 |
+| `../APM-homologacao` | `homologacao` | a versão que vai para produção, rodando antes do deploy | 8001 |
 
-Suba o servidor sempre na porta do seu worktree: `python hubserver.py --port 800X`.
-Quatro agentes na 8000 é a colisão mais boba e mais frequente deste projeto.
+Suba o servidor na porta do worktree: `python hubserver.py --port 800X`. A 8000 é a do
+dono — teste seu vai noutra porta.
 
-O **principal não escreve código de painel**. Ele integra: faz o merge dos branches
-de agente, cuida da documentação e dos scripts que rodam dentro do Altium (`*.pas`).
+**Homologação não recebe edição.** Ela só anda para a frente, atrás do principal:
 
-## A casca do hub é de um dono só
+```powershell
+git -C ..\APM-homologacao merge --ff-only neoden-ordem-por-bico
+```
+
+Confere-se lá (na 8001, contra o Odoo de teste do `hub-almox.json` local) e só então
+`git push servidor neoden-ordem-por-bico`. Se o `--ff-only` recusar, alguém commitou
+direto na homologação: traga o commit para o principal, não o contrário.
+
+## A casca do hub
 
 `hub.html` tem 216 KB e ~3200 linhas de script inline; qualquer mudança de UI
-encosta nele. Ele é do `agente/page`, junto com `hub-core.js`, `hub-ui.js`,
-`hub-io.js` e `hub-i18n.js`. Para que ninguém faça fila, vale a regra que também
+encosta nele. Vale a regra que nasceu para os agentes não fazerem fila e que também
 é a melhor arquitetura:
 
 - **Código novo de painel não entra no script inline do `hub.html`.** Vai no seu
-  próprio `hub-<subsistema>.js`. O que você precisa da casca deve caber em três
-  linhas: uma `<script src>`, um `<div>` container e um bloco de CSS.
-- Precisa disso? **Peça ao `agente/page`** — não edite. Diga o id do container, o
-  nome do arquivo e onde na aba ele entra. Precisa de mais que três linhas? É
-  sinal de que a lógica devia estar no seu `.js`, não na casca.
-- `agente/page`: você é dono da casca, não dos painéis. Não mexa em `hub-bom.js`,
-  `hub-laser.js` nem nos frames — se a casca precisa de algo deles, peça.
+  próprio `hub-<subsistema>.js`. O que ele precisa da casca deve caber em três
+  linhas: uma `<script src>`, um `<div>` container e um bloco de CSS. Precisa de
+  mais que três linhas? É sinal de que a lógica devia estar no `.js`, não na casca.
 - **Rótulo novo de UI**: os painéis Laser/BOM/Neoden/Biblioteca são pt-BR e os
   rótulos vivem dentro do `.js` de cada painel — resolva lá. `hub-i18n.js` é só a
-  casca (cabeçalho, abas, rodapé, config) e é do `agente/page`.
-- **README**: é do principal. Escreva a sua seção num commit separado e isolado,
-  só do README. Conflito em commit isolado se resolve em segundos; misturado com
-  código, não.
+  casca (cabeçalho, abas, rodapé, config).
+- **README**: a seção de um assunto vai num commit separado, só do README.
+  Conflito em commit isolado se resolve em segundos; misturado com código, não.
 
 ## Nunca `alert()`, `confirm()` ou `prompt()`
 
@@ -69,34 +70,32 @@ Uma exceção deliberada: **`Libs/almox-parts.json` é versionado**. É o livro-
 rótulo → part number. Ele é gerado, mas guarda estado: perder o arquivo renumera
 o almoxarifado inteiro.
 
-## Worktree novo
+## Recriar a homologação
 
 ```powershell
-.\tools\wt-novo.ps1 -Pasta APM-neoden -Branch agente/neoden
+.\tools\wt-novo.ps1 -Pasta APM-homologacao -Branch homologacao -Base neoden-ordem-por-bico
 ```
 
 O script cria a pasta **irmã** do repo (nunca dentro dele — worktree aninhado
 entra no `git status` e nas buscas de todo mundo) e repõe o que o `.gitignore`
 deixa de fora: `hub-config.json`, `hub-almox.json`, os espelhos do almoxarifado e
-uma junction para os 69 MB de `Libs/Almox`, compartilhados em vez de triplicados.
-
+uma junction para os 69 MB de `Libs/Almox`, compartilhados em vez de copiados.
 Rodar `-Pasta` sozinho, sem `-Branch`, reequipa um worktree que já existe.
+
+**Para apagar um worktree, tire a junction ANTES.** O Git atravessa a junction como se
+fosse pasta (o `git status --ignored` lista os 134 arquivos de `Libs/Almox` dentro do
+worktree), então um `git worktree remove --force` com ela no lugar pode apagar a
+`Libs/Almox` DO PRINCIPAL. `cmd /c rmdir ..\APM-x\Libs\Almox` remove só o link; confira
+que a do principal continua inteira e só então `git worktree remove --force ..\APM-x`.
 
 ## Integração
 
-Commits pequenos e frequentes. Antes de pedir merge, traga o principal para o seu
-branch (`git rebase neoden-ordem-por-bico`) e resolva o conflito no seu worktree —
-nunca no do vizinho. Worktree que acabou: `git worktree remove ../APM-<nome>`.
+Commits pequenos e frequentes. **`git add <arquivo>` leva o arquivo INTEIRO**, e
+`Libs/` tem estado que não é código (`almox-excluidos.json`, `lib-subs.js`,
+`lib-ledger.json`): esses são do servidor e não viajam no deploy. `git status` **na
+hora** de commitar e `git diff --cached` antes de publicar.
 
-**`git add <arquivo>` leva o arquivo INTEIRO**, inclusive o que o dono dele deixou
-pendente ali. Editar o arquivo de outro agente e commitar parece inofensivo quando o
-`git status` estava limpo *quando você começou* — mas ele pode ter salvado no meio do
-caminho, e aí o seu commit publica trabalho pela metade dele. Foi assim que o
-`hub.html` chegou ao principal chamando um `hub-libsync.js` que só existia no worktree
-do `agente/page`: o `<script src>` viajou, o arquivo não, e o hub carregou com 404.
-
-Antes de commitar arquivo que não é seu: `git status` **na hora**, e confira o diff
-com `git diff --cached <arquivo>` — se aparecer coisa que você não escreveu, pare e
-peça ao dono. Se der para escolher só o que é seu, `git add -p` resolve. E depois de
-qualquer merge, um `grep -o 'src="[^"]*"' hub.html | sort -u` conferido contra os
-arquivos que existem custa dois segundos e pega esse tipo de metade.
+Depois de qualquer merge, um `grep -o 'src="[^"]*"' hub.html | sort -u` conferido
+contra os arquivos que existem custa dois segundos: foi assim que o `hub.html` já
+chegou ao principal chamando um `hub-libsync.js` que só existia noutro worktree — o
+`<script src>` viajou, o arquivo não, e o hub carregou com 404.
