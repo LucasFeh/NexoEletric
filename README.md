@@ -341,11 +341,12 @@ precisar de servidor.
   ela na folha inteira (com os pinos membros). O painel fica **à direita**, redimensionável
   pela divisória (duplo clique fecha/abre, como nas abas Laser e BOM), com duas sub-abas no
   rodapé: **Configurações** (as folhas e o formato da ativa, centralizar, o passo da grade,
-  os olhos de comment e de pino, o **Salvar**, Odoo, almoxarifado e a validação) e
+  os olhos de comment e de pino, o **Salvar**, Odoo e almoxarifado) e
   **Propriedades** (a ficha do que está selecionado, logo abaixo). Ele troca sozinho: sem
   nada selecionado mostra as Configurações, selecionar mostra as Propriedades — e as abas
-  continuam lá para trocar à mão. A lista de componentes e a de nets saíram com a antiga
-  aba Componentes; os atalhos foram para as configurações do hub.
+  continuam lá para trocar à mão. A lista de componentes, a de nets e a de validação saíram
+  com a antiga aba Componentes (a validação continua valendo: é ela que trava o **Salvar**);
+  os atalhos foram para as configurações do hub.
   **Bolinha e ponte.** Onde três ou mais ramos se encontram — um T, uma estrela de pontas de
   fio, um pino no meio de um fio — nasce a **bolinha** de conexão; onde dois fios só se
   **cruzam**, sem nada declarado ali, o de cima vira uma **ponte** (um arco de passagem). Os
