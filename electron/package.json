@@ -1,7 +1,7 @@
 {
   "name": "altiumhub-desktop",
   "productName": "AltiumHub",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "AltiumPCBMirror hub como aplicativo desktop",
   "author": "Dieletrons <engenharia@dieletrons.com>",

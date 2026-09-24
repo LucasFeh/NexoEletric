@@ -24,10 +24,11 @@ const PADRAO = {
   // 8200 nao colide com as do repositorio (8000 principal, 8001 homologacao, 8100 servidor).
   port: 8200,
   // Escutar na rede local. Desligado por padrao: o hub tem rotas que gravam sem senha
-  // (tools/deploy/PENDENCIAS.md, grupo 1). Ligar e o que faz o link do BOM abrir no tablet,
-  // e exige senha mestre propria (main.js » salvarConfig).
+  // (tools/deploy/PENDENCIAS.md, grupo 1), e exige senha mestre propria (main.js »
+  // salvarConfig). O BOM nao precisa disto: o link copiado e o do servidor (serverUrl).
   lan: false,
-  // O hub central, de onde o "Importar do servidor" puxa projetos e bibliotecas.
+  // O hub central: de onde o "Importar do servidor" puxa projetos e bibliotecas, e o
+  // endereco do link do BOM (ALTIUMHUB_BOM_LINK).
   serverUrl: 'http://192.168.15.192:8100',
   // O Odoo de producao: e o que o sincronismo do almoxarifado consulta. So semeia o
   // hub-almox.json quando ele ainda nao existe; login e senha o usuario poe no hub.

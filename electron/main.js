@@ -144,6 +144,10 @@ function envDoHub(ws) {
   // de desenvolvedor (git) vale o comportamento de sempre: nada muda.
   if (!dev(ws)) env.ALTIUMHUB_DBLIB_DIR = path.join(ws, 'Libs', 'Almox');
   if (s.masterPassword) env.ALTIUMHUB_MASTER = s.masterPassword;
+  // O BOM de referencia e o do servidor: o "Copiar link" e o "Abrir" do painel BOM apontam
+  // para la (hubserver.py » ALTIUMHUB_BOM_LINK), onde a bancada abre e marca os vistos.
+  // Este app so facilita o acesso ao hub; o link que circula e sempre o do servidor.
+  if (s.serverUrl) env.ALTIUMHUB_BOM_LINK = s.serverUrl;
   // Na rede, o chat passa a pedir a senha mestre (tools/chat/chatserver.py): aberto, ele
   // roda o claude nesta maquina a pedido de qualquer um que alcance a porta.
   if (s.lan) env.ALTIUMHUB_CHAT_SENHA = '1';
@@ -666,6 +670,7 @@ async function salvarConfig(e, d) {
   settings.save(novo);
 
   const reinicia = setup || ws !== antes.workspace || port !== antes.port || novo.lan !== antes.lan ||
+    novo.serverUrl !== antes.serverUrl ||
     novo.masterPassword !== antes.masterPassword || settings.getSegredo('anthropicKey') !== chaveAntes;
 
   // O home.txt so muda DEPOIS de a pasta ter o AI-GUIDE.md (o HomeValida dos .pas).
