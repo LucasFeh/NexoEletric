@@ -1030,7 +1030,8 @@ máquina da rede local), rode na raiz do workspace:
 
 ## App desktop (Windows)
 
-`electron/` empacota este hub como aplicativo do Windows, o **AltiumHub**. Não é uma
+`electron/` empacota este hub como aplicativo do Windows, o **EletricHUB** (o nome do
+sistema desde 2026-09-24; o hub também se apresenta assim). Não é uma
 reescrita: o app sobe o próprio `hubserver.py` com um Python 3.12 embutido e o mostra
 numa janela. Tudo o que o hub do servidor faz, o app faz, só que nesta máquina.
 
