@@ -4126,6 +4126,13 @@ function bomFooter() {
   $('#bomNome').textContent = (bomUrl && bomUrl.id === p.id)
     ? bomUrl.url
     : location.origin + HubBom.linkDe(p.id);
+  /* BOM de referencia noutro hub (app desktop -> o do servidor): o rodape mostra ESSE */
+  if (!(bomUrl && bomUrl.id === p.id) && HubBom.linkRef) {
+    HubBom.linkRef(p.id).then(u => {
+      const q = proj();
+      if (u && q && q.id === p.id && !(bomUrl && bomUrl.id === p.id)) $('#bomNome').textContent = u;
+    });
+  }
 }
 function bomSchedule() {
   $('#bomMeta').textContent = 'gerando…';
@@ -4185,6 +4192,8 @@ async function bomCopiarLink() {
   if (!r.ok) return toast(r.error, 'err');
   bomUrl = { id: p.id, url: r.url };
   bomFooter();
+  /* o link e o do servidor, mas o projeto nao esta la (ou o servidor nao respondeu) */
+  if (r.aviso) return toast((r.copiou ? 'link do servidor copiado — ' : 'o link está no rodapé — ') + r.aviso, 'warn');
   if (r.copiou) return toast('link copiado: ' + r.url, 'ok');
   /* área de transferência negada (acontece fora de contexto seguro): o link não pode
      simplesmente sumir — ele está no rodapé, e o aviso diz onde. */
@@ -4193,12 +4202,14 @@ async function bomCopiarLink() {
 
 /* "Abrir numa aba" vai para a MESMA URL do link, não para um blob: o que se vê aqui é
    exatamente o que quem recebeu o link vê, com os vistos já marcados na bancada. */
-function bomAbrir() {
+async function bomAbrir() {
   const p = proj();
   if (!p) return toast('sem projeto selecionado', 'err');
   if (!location.protocol.startsWith('http'))
     return toast('a página do BOM precisa do hub servido por hubserver.py', 'warn');
-  window.open(HubBom.linkDe(p.id), '_blank');
+  /* no app desktop, o BOM de referencia e o do servidor (HubBom.linkRef); aqui mesmo, o relativo */
+  const ref = HubBom.linkRef ? await HubBom.linkRef(p.id) : null;
+  window.open(ref || HubBom.linkDe(p.id), '_blank');
 }
 
 /* sem projeto não há barra, abas nem painel para desenhar (todos leem proj()):
