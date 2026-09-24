@@ -470,10 +470,7 @@ function montarMenu() {
         { label: 'Abrir pasta de trabalho', click: () => shell.openPath(settings.load().workspace) },
         { label: 'Importar do servidor…', click: () => abrirImportacao() },
         { type: 'separator' },
-        { label: 'Configurações do hub…', click: () => {
-          const c = janela && !janela.isDestroyed() ? janela.webContents : null;
-          if (c) c.executeJavaScript('window.EletricShell && EletricShell.configuracoes()').catch(() => {});
-        } },
+        { label: 'Configurações do hub…', click: () => abrirConfigDoHub() },
         { label: 'Configurações do aplicativo…', accelerator: 'CmdOrCtrl+,', click: () => abrirConfig() },
         { type: 'separator' },
         { label: 'Sair', role: 'quit' },
@@ -519,12 +516,49 @@ function montarMenu() {
 }
 
 function novaJanela() {
-  if (!origem) return;
+  if (!origem) return null;
   const w = new BrowserWindow({
     width: 1400, height: 900, icon: web.ICONE, backgroundColor: '#14161a',
     webPreferences: web.webPreferencesHub(),
   });
   w.loadURL(origem + '/');
+  return w;
+}
+
+// Arquivo › Configurações do hub… e a UNICA porta das configuracoes do hub dentro do app: o ⚙ do
+// canto das abas so existe no navegador (hub-shell.js » NO_APP). Por isso ela procura o hub onde
+// ele estiver: a janela em foco, a principal, qualquer "Nova janela" -- trazendo para a frente a
+// que abriu. Sem nenhuma (so sobrou um popup da vista Esquema, ou a principal foi fechada), abre
+// uma janela nova do hub ja com as configuracoes. A casca pode estar montando (o indice chega
+// depois do load), entao o teste exige a casca montada e a janela nova tenta por alguns segundos.
+const ABRE_CONFIG_DO_HUB = 'Boolean(window.EletricShell && document.body.classList.contains("eh-shell")'
+  + ' && (EletricShell.configuracoes(), true))';
+function tentaConfigDoHub(w) {
+  if (!w || w.isDestroyed()) return Promise.resolve(false);
+  // janela travada ou ainda carregando nao pode segurar o menu para sempre
+  return Promise.race([
+    w.webContents.executeJavaScript(ABRE_CONFIG_DO_HUB).catch(() => false),
+    new Promise((r) => setTimeout(() => r(false), 1500)),
+  ]);
+}
+async function abrirConfigDoHub() {
+  const f = focada();
+  const ordem = [f, janela, ...BrowserWindow.getAllWindows()]
+    .filter((w, i, a) => w && !w.isDestroyed() && a.indexOf(w) === i);
+  for (const w of ordem) {
+    if (!(await tentaConfigDoHub(w))) continue;
+    if (w !== f) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); }
+    return;
+  }
+  const w = novaJanela();
+  if (!w) {
+    aviso('O hub não está rodando.', 'Reinicie o EletricHUB para abrir as configurações do hub.');
+    return;
+  }
+  for (let i = 0; i < 40 && !w.isDestroyed(); i++) {
+    await new Promise((r) => setTimeout(r, 300));
+    if (await tentaConfigDoHub(w)) return;
+  }
 }
 
 function sobre() {
@@ -760,11 +794,35 @@ async function smoke() {
       };
     })()`);
     r.hubLog = backend ? backend.tail.slice(-30) : [];
-    r.ok = r.page.demo === false && r.page.hubCore === 'object';
+    r.configPeloMenu = await smokeConfigPeloMenu();
+    r.ok = r.page.demo === false && r.page.hubCore === 'object'
+      && r.configPeloMenu.principal === true && r.configPeloMenu.semPrincipal === true;
   } catch (e) {
     r.erro = e.message;
   }
   fimSmoke(r);
+}
+
+// Arquivo › Configurações do hub…, clicado como pelo menu. Primeiro com a janela principal; depois
+// com ela FECHADA e so um popup da vista Esquema aberto -- ali o item tem de abrir uma janela nova
+// do hub, e nao ficar calado. Fecha a principal, entao roda por ultimo (o smoke sai logo depois).
+async function smokeConfigPeloMenu() {
+  const espera = (ms) => new Promise((res) => setTimeout(res, ms));
+  const item = Menu.getApplicationMenu().items.find((i) => i.label === 'Arquivo').submenu.items
+    .find((i) => i.label === 'Configurações do hub…');
+  const temConfig = (w) => w.webContents.executeJavaScript("!!document.querySelector('.cfgm')").catch(() => false);
+  const out = {};
+  item.click();
+  await espera(800);
+  out.principal = await temConfig(janela);
+  const pop = new BrowserWindow({ show: false, webPreferences: web.webPreferencesHub() });
+  await pop.loadURL(origem + '/schframe.html');
+  janela.destroy();
+  item.click();
+  await espera(8000);
+  const nova = BrowserWindow.getAllWindows().find((w) => w !== pop && !w.isDestroyed());
+  out.semPrincipal = nova ? await temConfig(nova) : false;
+  return out;
 }
 
 function fimSmoke(r) {

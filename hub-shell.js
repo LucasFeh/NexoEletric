@@ -5,7 +5,7 @@
        Neoden, Laser, Historico) e as bibliotecas, com busca -- o jeito de navegar de um
        ambiente de CAD, em vez de so o seletor do cabecalho (que continua la);
      - icone em cada aba de documento, e a aba com cara de aba de editor;
-     - a barra de status embaixo: projeto, documento, contagens, servidor e "Paineis".
+     - a barra de status embaixo: projeto, documento, contagens, estagio e servidor.
 
    Regra do CLAUDE.md para a casca: o hub.html so ganha a <script src> (e a marca). Toda a
    logica e o CSS moram aqui. A casca LE o estado do hub (S, TABS, TAB_PAI, proj(), t()) e
@@ -21,9 +21,15 @@
   }
 
   /* as preferencias da casca ficam junto das do hub (mesmo prefixo de localStorage) */
-  const LS_DOCK = 'altiumhub.shell.dock';       // '0' = painel Projetos fechado
+  const LS_DOCK = 'altiumhub.shell.dock';       // '0' = painel Projetos recolhido na faixa
   const LS_DOCK_W = 'altiumhub.shell.dockW';
   const DOCK_MIN = 200, DOCK_MAX = 520, DOCK_PADRAO = 268;
+  const FAIXA_W = 34;                            // o painel recolhido: so o cabecalho, em pe
+
+  /* Dentro do app desktop as configuracoes do hub moram no menu Arquivo (main.js), e o botao ⚙
+     no canto das abas sai. No navegador (o hub do servidor) nao ha menu Arquivo: la o ⚙ fica,
+     senao as configuracoes nao teriam porta nenhuma. */
+  const NO_APP = typeof navigator !== 'undefined' && /\bElectron\//.test(navigator.userAgent || '');
 
   const ler = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
   const grava = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* sem storage */ } };
@@ -50,11 +56,11 @@
     lib: '<path d="M3 2.5h3v11H3zM7 2.5h3v11H7z"/><path d="M11 3.2l2.6-.6 1 10.8-2.6.6z"/>',
     recarregar: '<path d="M13 8a5 5 0 1 1-1.6-3.7"/><path d="M13.2 2.5v3h-3"/>',
     recolher: '<path d="M4 6l4 4 4-4"/>',
-    fechar: '<path d="M4 4l8 8M12 4l-8 8"/>',
+    recolherEsq: '<path d="M10 4l-4 4 4 4"/>',
+    expandirDir: '<path d="M6 4l4 4-4 4"/>',
     fixar: '<path d="M6 2.5h4l-.6 4 2.1 2H4.5l2.1-2z"/><path d="M8 8.5V14"/>',
     menos: '<path d="M3.5 8h9"/>',
     mais: '<path d="M3.5 8h9M8 3.5v9"/>',
-    paineis: '<rect x="2" y="3" width="12" height="10" rx="1"/><path d="M6 3v10"/>',
     busca: '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/>',
     fecharTodos: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5.5 8h5"/>',
     lixo: '<path d="M2.5 4.5h11M6 4.5V2.8h4v1.7M4 4.5l.7 9h6.6l.7-9"/><path d="M6.8 7v4.5M9.2 7v4.5"/>',
@@ -80,24 +86,33 @@ body.eh-shell #app {
   grid-template-columns: var(--eh-dock-w, ${DOCK_PADRAO}px) minmax(var(--page-min), 1fr);
   grid-template-rows: auto auto auto 1fr auto;
 }
-body.eh-shell.eh-sem-dock #app { grid-template-columns: 0 minmax(var(--page-min), 1fr); }
+body.eh-shell.eh-dock-recolhido #app { grid-template-columns: ${FAIXA_W}px minmax(var(--page-min), 1fr); }
 body.eh-shell #app > header { grid-column: 1 / -1; grid-row: 1; }
 body.eh-shell #app > #tabs { grid-column: 2; grid-row: 2; }
 body.eh-shell #app > #subtabs { grid-column: 2; grid-row: 3; }
 body.eh-shell #app > main { grid-column: 2; grid-row: 4; }
 body.eh-shell #app > .eh-dock { grid-column: 1; grid-row: 2 / 5; }
 body.eh-shell #app > .eh-status { grid-column: 1 / -1; grid-row: 5; }
-body.eh-shell.eh-sem-dock .eh-dock { display: none; }
+/* RECOLHIDO, o painel vira uma faixa: so o cabecalho, em pe, com o chevron em cima. Nao some de
+   vez porque e clicando nele que ele volta -- o botao "Paineis" da barra de status, que era a
+   outra porta, deixou de existir. */
+body.eh-dock-recolhido .eh-dock > :not(.eh-panel-hd) { display: none; }
+body.eh-dock-recolhido .eh-panel-hd {
+  flex-direction: column; justify-content: flex-start; height: 100%; padding: 9px 0; gap: 10px;
+  box-shadow: none;
+}
+body.eh-dock-recolhido .eh-panel-hd .ttl { margin: 0; writing-mode: vertical-rl; }
+body.eh-dock-recolhido .eh-panel-hd .chev { order: -1; }
 
 /* marca: o chip do icone do app na quina, como o logo de um ambiente de CAD */
 .brand .brand-logo { align-self: center; opacity: 1; color: var(--hi); margin-right: 1px; }
 
 /* SEM a faixa do cabecalho: o painel Projetos faz o papel do seletor, e o que mais morava
-   la foi redistribuido -- estagio e pendencias na barra de status, chat e configuracoes no
-   canto das abas. Os elementos sao MOVIDOS (mesmos ids), entao o hub continua achando-os. */
+   la foi redistribuido -- estagio e pendencias na barra de status, o chat no canto das abas e
+   as configuracoes no menu Arquivo do app (no navegador, no ⚙ ao lado do chat: ver NO_APP). Os
+   elementos sao MOVIDOS (mesmos ids), entao o hub continua achando-os. */
 body.eh-shell #app > header { display: none; }
 body.eh-shell .tabs .aggr { display: none; }
-body.eh-shell .tabs { padding-right: 120px; }
 body.eh-shell #app > .eh-topo {
   grid-column: 2; grid-row: 2; justify-self: end; align-self: stretch; z-index: 3;
   display: flex; align-items: center; gap: 4px; padding: 0 10px 0 6px;
@@ -107,8 +122,10 @@ body.eh-shell #app > .eh-topo {
 .eh-topo .eh-bt .eh-ico { width: 16px; height: 16px; }
 
 /* abas de documento: cara de aba de editor, com icone */
+/* o respiro da direita e a largura do canto (.eh-topo: o chat, e o ⚙ no navegador), medida
+   em montar() -- sem ele a ultima aba passa por baixo dos botoes numa janela estreita */
 body.eh-shell .tabs {
-  gap: 2px; padding: 5px 10px 0; align-items: flex-end;
+  gap: 2px; padding: 5px var(--eh-topo-w, 120px) 0 10px; align-items: flex-end;
   background: var(--surface-2); box-shadow: inset 0 -1px 0 var(--line);
 }
 body.eh-shell .tab {
@@ -131,12 +148,17 @@ body.eh-shell .tab[aria-selected="true"]::after {
   position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0;
   background: var(--surface-2); box-shadow: inset -1px 0 0 var(--line); overflow: hidden;
 }
+/* o cabecalho E o botao: clicar nele recolhe o painel na faixa, e na faixa clicar abre */
 .eh-panel-hd {
-  display: flex; align-items: center; gap: 4px; flex: none; height: 38px; padding: 0 6px 0 12px;
-  font-size: 12px; font-weight: 600; letter-spacing: 0.01em; color: var(--text-2);
-  background: var(--surface-3); box-shadow: inset 0 -1px 0 var(--line);
+  display: flex; align-items: center; gap: 4px; flex: none; width: 100%; height: 38px; padding: 0 8px 0 12px;
+  border: 0; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.01em; color: var(--text-2);
+  background: var(--surface-3); box-shadow: inset 0 -1px 0 var(--line); text-align: left; cursor: pointer;
 }
+.eh-panel-hd:hover { color: var(--text); background: rgba(var(--tint), 0.06); }
+.eh-panel-hd:focus-visible { outline: 1px solid var(--hi); outline-offset: -1px; }
 .eh-panel-hd .ttl { margin-right: auto; }
+.eh-panel-hd .chev { width: 14px; height: 14px; flex: none; color: var(--text-3); }
+.eh-panel-hd:hover .chev { color: var(--text); }
 .eh-bt {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
   width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px;
@@ -202,13 +224,6 @@ body.eh-shell .tab[aria-selected="true"]::after {
 .eh-status .num { font-variant-numeric: tabular-nums; }
 .eh-status .dir { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .eh-status .srv { display: flex; align-items: center; gap: 6px; }
-.eh-status .pnl {
-  display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 9px;
-  border: 1px solid var(--line); border-radius: 4px; background: var(--surface);
-  color: var(--text-2); font-size: 11px; cursor: pointer;
-}
-.eh-status .pnl:hover { border-color: rgba(var(--tint), 0.3); color: var(--text); }
-.eh-status .pnl .eh-ico { width: 12px; height: 12px; }
 .eh-status .info { display: flex; align-items: center; gap: 12px; min-width: 0; overflow: hidden; }
 .eh-status .pipe { display: flex; align-items: center; gap: 8px; flex: none; }
 .eh-status .pipe:empty { display: none; }
@@ -427,11 +442,21 @@ body.eh-shell .tab[aria-selected="true"]::after {
   let agendado = 0;
   const agenda = () => { if (!agendado) agendado = requestAnimationFrame(() => { agendado = 0; tudo(); }); };
 
-  /* ── painel: abrir, fechar, largura ───────────────────────────────────────────── */
-  function dockAberto() { return !document.body.classList.contains('eh-sem-dock'); }
+  /* ── painel: expandir, recolher, largura ──────────────────────────────────────── */
+  let cabecalho = null;
+  function dockAberto() { return !document.body.classList.contains('eh-dock-recolhido'); }
+  function pintaCabecalho() {
+    if (!cabecalho) return;
+    const aberto = dockAberto();
+    cabecalho.querySelector('.chev').replaceWith(icone(aberto ? 'recolherEsq' : 'expandirDir', 'chev'));
+    cabecalho.title = aberto ? 'Recolher o painel Projetos' : 'Expandir o painel Projetos';
+    cabecalho.setAttribute('aria-expanded', String(aberto));
+  }
   function mostrarDock(sim) {
-    document.body.classList.toggle('eh-sem-dock', !sim);
+    fecharMenu();
+    document.body.classList.toggle('eh-dock-recolhido', !sim);
     grava(LS_DOCK, sim ? '1' : '0');
+    pintaCabecalho();
   }
   function larguraDock(w) {
     const v = Math.max(DOCK_MIN, Math.min(DOCK_MAX, Math.round(w)));
@@ -484,21 +509,6 @@ body.eh-shell .tab[aria-selected="true"]::after {
     m.style.top = Math.max(6, Math.min(y, window.innerHeight - r.height - 6)) + 'px';
     menuAberto = m;
   }
-  function menuPaineis(ancora) {
-    if (menuAberto) { fecharMenu(); return; }
-    const m = el('div', 'eh-menu');
-    const it = (rotulo, marcado, acao) => itemDeMenu(m, rotulo, marcado ? '✓' : '', acao);
-    it('Projetos', dockAberto(), () => mostrarDock(!dockAberto()));
-    it('Configurações do hub…', false, () => { if (typeof openConfig === 'function') openConfig(); });
-    m.append(el('div', 'hr'));
-    it('Restaurar a largura do painel', false, () => { grava(LS_DOCK_W, String(DOCK_PADRAO)); larguraDock(DOCK_PADRAO); mostrarDock(true); });
-    document.body.append(m);
-    const r = ancora.getBoundingClientRect();
-    m.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
-    m.style.bottom = (window.innerHeight - r.top + 6) + 'px';
-    menuAberto = m;
-  }
-
   function montar() {
     if (document.body.classList.contains('eh-shell')) return;
     const app = document.getElementById('app');
@@ -512,14 +522,11 @@ body.eh-shell .tab[aria-selected="true"]::after {
     // painel Projetos
     dock = el('section', 'eh-dock');
     dock.setAttribute('aria-label', 'Projetos');
-    const hd = el('div', 'eh-panel-hd');
-    hd.append(el('span', 'ttl', 'Projetos'));
-    const btFechar = el('button', 'eh-bt');
-    btFechar.type = 'button';
-    btFechar.title = 'Fechar o painel (reabra em Painéis, na barra de status)';
-    btFechar.append(icone('fechar'));
-    btFechar.onclick = () => mostrarDock(false);
-    hd.append(btFechar);
+    const hd = el('button', 'eh-panel-hd');
+    hd.type = 'button';
+    hd.append(el('span', 'ttl', 'Projetos'), icone('recolherEsq', 'chev'));
+    hd.onclick = () => mostrarDock(!dockAberto());
+    cabecalho = hd;
 
     const tools = el('div', 'eh-tools');
     const ferramenta = (nome, titulo, acao) => {
@@ -557,7 +564,8 @@ body.eh-shell .tab[aria-selected="true"]::after {
     tabsDoPainel.append(tp);
 
     const rz = el('div', 'eh-resize');
-    rz.title = 'Arraste para mudar a largura';
+    rz.title = 'Arraste para mudar a largura · duplo clique volta ao padrão';
+    rz.addEventListener('dblclick', () => { grava(LS_DOCK_W, String(DOCK_PADRAO)); larguraDock(DOCK_PADRAO); });
     rz.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       rz.setPointerCapture(e.pointerId);
@@ -587,30 +595,34 @@ body.eh-shell .tab[aria-selected="true"]::after {
     }
     const dir = el('span', 'dir');
     stSrv = el('span', 'srv');
-    const pnl = el('button', 'pnl');
-    pnl.type = 'button';
-    pnl.append(icone('paineis'), document.createTextNode('Painéis'));
-    pnl.onclick = (e) => { e.stopPropagation(); menuPaineis(pnl); };
-    dir.append(stSrv, pnl);
+    dir.append(stSrv);
     status.append(stInfo, el('span', 'sep'), stPipe, dir);
 
-    // canto direito da fileira das abas: o chat (hub-chat.js ja pos o botao no #chatLanc) e
-    // as configuracoes do hub (o unico item do antigo menu da marca)
+    // canto direito da fileira das abas: o chat (hub-chat.js ja pos o botao no #chatLanc) e,
+    // so no navegador, as configuracoes do hub -- no app elas ficam no menu Arquivo (NO_APP)
     const topo = el('div', 'eh-topo');
     const lanc = document.getElementById('chatLanc');
     if (lanc) topo.append(lanc);
-    const cfg = el('button', 'eh-bt');
-    cfg.type = 'button';
-    cfg.title = 'Configurações do hub (tema, idioma, projeto, Odoo)';
-    cfg.append(icone('config'));
-    cfg.onclick = () => { if (typeof openConfig === 'function') openConfig(); };
-    topo.append(cfg);
+    if (!NO_APP) {
+      const cfg = el('button', 'eh-bt');
+      cfg.type = 'button';
+      cfg.title = 'Configurações do hub (tema, idioma, projeto, Odoo)';
+      cfg.append(icone('config'));
+      cfg.onclick = () => { if (typeof openConfig === 'function') openConfig(); };
+      topo.append(cfg);
+    }
 
     app.append(dock, status, topo);
     const w = parseInt(ler(LS_DOCK_W) || '', 10);
     larguraDock(Number.isFinite(w) ? w : DOCK_PADRAO);
-    if (ler(LS_DOCK) === '0') document.body.classList.add('eh-sem-dock');
+    if (ler(LS_DOCK) === '0') document.body.classList.add('eh-dock-recolhido');
+    pintaCabecalho();
     document.body.classList.add('eh-shell');
+    // as abas reservam a largura do canto: o botao do chat chega depois (hub-chat.js) e o ⚙
+    // existe so no navegador, entao a medida e do que esta la, e acompanha quando muda
+    const mede = () => document.documentElement.style.setProperty('--eh-topo-w', (topo.offsetWidth + 12) + 'px');
+    if (typeof ResizeObserver === 'function') new ResizeObserver(mede).observe(topo);
+    mede();
 
     // o hub redesenha as abas a cada troca de projeto/aba/indice: e o sinal para a casca
     const obs = new MutationObserver(agenda);
@@ -642,7 +654,16 @@ body.eh-shell .tab[aria-selected="true"]::after {
   // API para o app desktop (menu Exibir » Painel Projetos) e para testes
   window.EletricShell = {
     alternarProjetos: () => mostrarDock(!dockAberto()),
-    configuracoes: () => { if (typeof openConfig === 'function') openConfig(); },
+    // O menu Arquivo do app e nativo: o backdrop do #overlay nao o bloqueia como bloqueia o ⚙.
+    // Com um dialogo do hub aberto (uma confirmacao esperando resposta, ou as proprias
+    // configuracoes), abrir por cima empilharia dois modais, e o closeOverlay do de cima apagaria
+    // o de baixo sem resposta. Fica o que esta aberto. Um menu aberto (so .menu) sai e da lugar.
+    configuracoes: () => {
+      const ov = document.getElementById('overlay');
+      if (ov && ov.querySelector('.dialog, .cfgm')) return;
+      if (ov && ov.childElementCount && typeof closeOverlay === 'function') closeOverlay();
+      if (typeof openConfig === 'function') openConfig();
+    },
     projetosAberto: dockAberto,
     render: tudo,
   };
