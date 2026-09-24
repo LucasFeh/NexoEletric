@@ -2937,7 +2937,7 @@ function renderProps(){
         prKv(s, 'Trecho', (alvo.i + 1) + ' de ' + (pts.length - 1));
         prKv(s, 'De', pts[alvo.i][0] + ' , ' + pts[alvo.i][1] + ' mil', 'mono');
         prKv(s, 'Até', pts[alvo.i+1][0] + ' , ' + pts[alvo.i+1][1] + ' mil', 'mono');
-        prKv(s, '', 'Del parte o fio aqui · clique duplo pega o fio inteiro', 'dim');
+        prKv(s, '', 'Del parte o fio aqui · Esc e um clique pegam o fio inteiro', 'dim');
       } else if (alvo.k === 'vert' && pts[alvo.i]){
         prKv(s, 'Vértice', (alvo.i + 1) + ' de ' + pts.length);
         prKv(s, 'Posição', pts[alvo.i][0] + ' , ' + pts[alvo.i][1] + ' mil', 'mono');
@@ -2947,6 +2947,7 @@ function renderProps(){
         const p0 = pts[0] || [0, 0], pn = pts[pts.length - 1] || [0, 0];
         prKv(s, 'Início', p0[0] + ' , ' + p0[1] + ' mil', 'mono');
         prKv(s, 'Fim', pn[0] + ' , ' + pn[1] + ' mil', 'mono');
+        prKv(s, '', 'outro clique no fio pega só o trecho', 'dim');
       }
     } else {
       s.append(el('div', 'pr-title', it.net || it.s || (NOME[it.t] || it.t)));
