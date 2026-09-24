@@ -54,6 +54,13 @@ finally:
 assert H.app.test_client().get('/__live.js', headers={'Host': 'hub.lan:8100'}).status_code == 200, \
     'escutando na rede, qualquer nome serve (o tablet chega pelo IP ou pelo nome da maquina)'
 
+# A folha do tema e o script dele saem com o tipo certo: o Chrome recusa folha de estilo que nao
+# venha como text/css, e sem ela o hub e as vistas abrem sem cor nenhuma. O hubserver fixa os
+# dois tipos no import, por cima do que o registro do Windows disser.
+_css = H.app.test_client().get('/hub-tema.css')
+assert _css.status_code == 200 and _css.mimetype == 'text/css', _css.mimetype
+assert H.app.test_client().get('/hub-tema.js').mimetype in ('text/javascript', 'application/javascript')
+
 # hub-almox.json (login e senha do Odoo) nao sai por HTTP para ninguem, nem pelos apelidos
 # que o Windows aceita para o mesmo arquivo. Os outros arquivos da raiz continuam servidos.
 tmp = tempfile.mkdtemp()

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Escolha o que capturar</title>
+<link rel="stylesheet" href="ui.css">
+<style>
+  body { overflow: auto; }
+  .grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .fonte { background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: 8px; cursor: pointer; text-align: left; color: inherit; font: inherit; }
+  .fonte:hover, .fonte:focus { border-color: var(--hi); outline: none; }
+  .fonte img { width: 100%; aspect-ratio: 16/9; object-fit: contain; background: #000; border-radius: 4px; display: block; }
+  .fonte span { display: block; font-size: 12px; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-2); }
+  h2 { margin-top: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap" style="width:min(1100px,100%)">
+  <h1>Escolha o que capturar</h1>
+  <p>O chat do hub pega um quadro desta tela ou janela (por exemplo, o Altium) para você recortar.</p>
+  <h2>Janelas</h2>
+  <div class="grade" id="janelas"></div>
+  <h2>Telas inteiras</h2>
+  <div class="grade" id="telas"></div>
+  <div class="acoes"><button class="btn" id="bCancelar">Cancelar</button></div>
+</div>
+<script>
+  const api = window.altiumhub;
+  api.chamar('picker:fontes').then((fontes) => {
+    for (const f of fontes) {
+      const b = document.createElement('button');
+      b.className = 'fonte';
+      const img = document.createElement('img'); img.src = f.img; img.alt = '';
+      const s = document.createElement('span'); s.textContent = f.nome;
+      b.append(img, s);
+      b.onclick = () => api.chamar('picker:escolher', f.id);
+      document.getElementById(f.tela ? 'telas' : 'janelas').append(b);
+    }
+    const primeiro = document.querySelector('.fonte');
+    if (primeiro) primeiro.focus();
+  });
+  document.getElementById('bCancelar').onclick = () => api.chamar('picker:escolher', null);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') api.chamar('picker:escolher', null); });
+</script>
+</body>
+</html>

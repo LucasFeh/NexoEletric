@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import mimetypes
 import os
 import re
 import shutil
@@ -21,6 +22,14 @@ from flask import Flask, Response, abort, request, send_from_directory
 from werkzeug.utils import safe_join
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# O send_from_directory tira o Content-Type do mimetypes, e no Windows o mimetypes le o registro
+# (HKCR\.css\Content Type) POR CIMA do padrao. Numa maquina em que algum instalador registrou o
+# .css como text/plain, o Chrome recusa a folha (checagem estrita de MIME) e o hub e as vistas
+# abrem sem os tokens do tema (hub-tema.css): fundo transparente, texto preto. O .js vai junto
+# pelo mesmo motivo -- e o defeito conhecido do registro do Windows.
+mimetypes.add_type('text/css', '.css')
+mimetypes.add_type('text/javascript', '.js')
 WATCH_INTERVAL = 1.0   # segundos entre varreduras de mtime
 HEARTBEAT = 15.0       # keep-alive do SSE
 
@@ -1134,7 +1143,7 @@ def _lan_ip():
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description='Servidor local do AltiumPCBMirror')
+    ap = argparse.ArgumentParser(description='Servidor local do EletricHUB (AltiumPCBMirror)')
     ap.add_argument('--port', type=int, default=8000)
     # O padrao continua sendo a rede toda: e o que o servidor e a bancada usam. O app desktop
     # (electron/) passa 127.0.0.1 quando o usuario nao liga "compartilhar na rede".
@@ -1142,7 +1151,7 @@ if __name__ == '__main__':
     args = ap.parse_args()
     configura_escuta(args.host)
     threading.Thread(target=_watcher, daemon=True).start()
-    print('AltiumPCBMirror hub:')
+    print('EletricHUB:')
     print('  http://127.0.0.1:%d' % args.port)
     ip = _lan_ip() if _ESCUTA_REDE else None
     if ip:
