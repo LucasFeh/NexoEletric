@@ -1,6 +1,6 @@
 # dependencias e saidas do build do app desktop
 node_modules/
-dist/
+dist*/
 build/
 gen/
 .cache/
