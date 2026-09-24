@@ -1,0 +1,8 @@
+# dependencias e saidas do build do app desktop
+node_modules/
+dist/
+build/
+gen/
+.cache/
+# token de atualizacao embutido no build (scripts/prepare.mjs): NUNCA no git
+.update-token

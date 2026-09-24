@@ -1,0 +1,112 @@
+'use strict';
+// Importacao contra um hub DE VERDADE: o hubserver.py do pacote (build/hub), no Python do
+// app (build/python), servindo uma pasta temporaria no papel do 192.168.15.192. ETag, 304,
+// Last-Modified e o 404 de pasta sao os do Flask, nao uma imitacao.
+const test = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { Backend } = require('../lib/backend');
+const workspace = require('../lib/workspace');
+const importer = require('../lib/import-server');
+
+const APP = path.resolve(__dirname, '..');
+const PYTHON = path.join(APP, 'build', 'python', 'python.exe');
+const BUNDLE = path.join(APP, 'build', 'hub');
+const PRONTO = fs.existsSync(PYTHON) && fs.existsSync(path.join(BUNDLE, 'altiumhub-manifest.json'));
+
+function tmp(p) { return fs.mkdtempSync(path.join(os.tmpdir(), p)); }
+function escreve(ws, rel, txt) {
+  const f = path.join(ws, ...rel.split('/'));
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, txt);
+  return f;
+}
+const ler = (ws, rel) => fs.readFileSync(path.join(ws, ...rel.split('/')), 'utf8');
+
+test('importar do servidor: tres vias, 304, conflitos e ajustes locais', { skip: !PRONTO && 'rode npm run build:prep antes' }, async (t) => {
+  // ── o "servidor" ──
+  const srv = tmp('ahsrv-');
+  workspace.sync(srv, BUNDLE);
+  const P = 'Projects/PAEL-DI261940';
+  escreve(srv, `${P}/board.js`, 'var board = {"components":[],"nets":[],"tracks":[],"vias":[]};');
+  escreve(srv, `${P}/schematic.js`, 'var schematic = {"items":[]};');
+  escreve(srv, `${P}/changes.js`, 'var changes = [];');
+  escreve(srv, `${P}/annotations.js`, 'var annotations = [];');
+  escreve(srv, `${P}/apply-report.txt`, 'ok');
+  escreve(srv, `${P}/bom-vistos.json`, '{"R1":true}');           // bancada do servidor: nao vem
+  escreve(srv, 'Libs/lib-ledger.json', JSON.stringify({ arquivos: { 'Libs/Almox/RESISTOR ALMOX.SchLib': {} } }));
+  escreve(srv, 'Libs/Almox/RESISTOR ALMOX.SchLib', Buffer.alloc(200000, 7));
+  escreve(srv, 'Libs/Almox/RESISTOR ALMOX.LibPkg', 'pkg');
+  escreve(srv, 'Libs/Almox/ALMOX.DbLib', '[DatabaseLinks]\r\nConnectionString=Driver={SQLite3 ODBC Driver};Database=\\\\192.168.15.192\\altiumhub\\current\\Libs\\Almox\\almox.sqlite;\r\n');
+  escreve(srv, 'Libs/almox-index.js', 'var almoxIndex = {"odooUrl":"http://127.0.0.1:8070","libs":[]};');
+  escreve(srv, 'Libs/almox-parts.json', '{"familias":{"RES":1}}');
+  const hub = new Backend({ python: PYTHON, workspace: srv, logDir: tmp('ahlog-') });
+  await hub.start({ port: 18350, lan: false });
+  t.after(() => hub.stop());
+  // localhost, e nao 127.0.0.1: assim da para ver o loopback do almox-index virar o host
+  const serverUrl = `http://localhost:${hub.port}`;
+
+  assert.deepStrictEqual(await importer.testar(serverUrl), { ok: true, projetos: 1 });
+
+  // ── a maquina local, recem-instalada ──
+  const ws = tmp('ahloc-');
+  workspace.sync(ws, BUNDLE);
+  const m = workspace.lerManifesto(BUNDLE);
+  const seedHashes = Object.fromEntries(m.seed.map((e) => [e.p, e.sha1]));
+  const imp = (grupos) => importer.importar({ ws, serverUrl, grupos, seedHashes });
+
+  let r = await imp();
+  assert.deepStrictEqual(r.erros, []);
+  assert.strictEqual(ler(ws, `${P}/changes.js`), 'var changes = [];');
+  assert.ok(!fs.existsSync(path.join(ws, P, 'bom-vistos.json')), 'vistos da bancada do servidor nao vem');
+  assert.ok(r.atualizados.includes('Libs/lib-ledger.json'), 'estado semeado do git e trocado pelo do servidor');
+  assert.strictEqual(fs.statSync(path.join(ws, 'Libs/Almox/RESISTOR ALMOX.SchLib')).size, 200000, 'lib do almoxarifado da lista do ledger');
+  assert.ok(fs.existsSync(path.join(ws, 'Libs/Almox/RESISTOR ALMOX.LibPkg')), 'o .LibPkg vem junto');
+  const dblib = ler(ws, 'Libs/Almox/ALMOX.DbLib');
+  assert.ok(dblib.includes(`Database=${path.join(ws, 'Libs', 'Almox', 'almox.sqlite')};`), 'DbLib aponta o SQLite local: ' + dblib);
+  assert.ok(!dblib.includes('192.168.15.192'));
+  assert.ok(ler(ws, 'Libs/almox-index.js').includes('"odooUrl":"http://localhost:8070"'), 'loopback do servidor vira o host dele');
+  // data do servidor, e nao a da copia: o hub decide "pendente" comparando mtimes
+  const dt = Math.abs(fs.statSync(path.join(ws, P, 'changes.js')).mtimeMs - fs.statSync(path.join(srv, P, 'changes.js')).mtimeMs);
+  assert.ok(dt < 2000, 'mtime veio do Last-Modified (diferenca ' + dt + ' ms)');
+
+  // ── segunda importacao, nada mudou: tudo 304 ──
+  r = await imp();
+  assert.strictEqual(r.novos.length + r.atualizados.length, 0, JSON.stringify(r));
+  assert.strictEqual(r.bytes, 0, 'nada baixado: o ETag fez o servidor responder 304');
+
+  // ── so o local mudou / so o servidor mudou / os dois mudaram ──
+  escreve(ws, `${P}/changes.js`, 'var changes = [{"op":"via_add"}];');           // local
+  escreve(srv, `${P}/schematic.js`, 'var schematic = {"items":[1]};');            // servidor
+  escreve(ws, `${P}/annotations.js`, 'var annotations = ["local"];');             // os dois
+  escreve(srv, `${P}/annotations.js`, 'var annotations = ["servidor"];');
+  escreve(ws, 'Libs/almox-parts.json', '{"familias":{"RES":1,"LOCAL":2}}');       // os dois, almox
+  escreve(srv, 'Libs/almox-parts.json', '{"familias":{"RES":1,"SERV":3}}');
+  r = await imp();
+  assert.strictEqual(ler(ws, `${P}/changes.js`), 'var changes = [{"op":"via_add"}];', 'mudanca so local fica');
+  assert.ok(r.mantidos.includes(`${P}/changes.js`));
+  assert.strictEqual(ler(ws, `${P}/schematic.js`), 'var schematic = {"items":[1]};', 'mudanca so do servidor vem');
+  assert.strictEqual(ler(ws, `${P}/annotations.js`), 'var annotations = ["local"];', 'conflito de projeto: fica o local');
+  assert.ok(r.conflitos.includes(`${P}/annotations.js`));
+  assert.strictEqual(fs.readFileSync(path.join(r.pastaConflitos, ...`${P}/annotations.js`.split('/')), 'utf8'),
+    'var annotations = ["servidor"];', 'a versao do servidor fica guardada a parte');
+  assert.strictEqual(ler(ws, 'Libs/almox-parts.json'), '{"familias":{"RES":1,"SERV":3}}', 'livro-razao: o servidor vence');
+  assert.strictEqual(fs.readFileSync(path.join(r.pastaBackup, 'Libs', 'almox-parts.json'), 'utf8'),
+    '{"familias":{"RES":1,"LOCAL":2}}', 'e o local vai para o backup');
+
+  // ── so o grupo do almoxarifado (o que roda antes de cada sincronismo) ──
+  escreve(srv, 'Libs/lib-ledger.json', JSON.stringify({ arquivos: { 'Libs/Almox/RESISTOR ALMOX.SchLib': {} }, v: 2 }));
+  escreve(srv, `${P}/schematic.js`, 'var schematic = {"items":[2]};');
+  r = await imp(['almox']);
+  assert.ok(r.atualizados.includes('Libs/lib-ledger.json'));
+  assert.strictEqual(ler(ws, `${P}/schematic.js`), 'var schematic = {"items":[1]};', 'grupo almox nao mexe em projeto');
+  assert.ok(importer.ultimaImportacao(ws));
+});
+
+test('servidor fora do ar: testar diz o motivo sem travar', async () => {
+  const r = await importer.testar('http://127.0.0.1:1');
+  assert.strictEqual(r.ok, false);
+  assert.ok(r.erro);
+});

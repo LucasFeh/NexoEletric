@@ -1,0 +1,105 @@
+{
+  "name": "altiumhub-desktop",
+  "productName": "AltiumHub",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AltiumPCBMirror hub como aplicativo desktop",
+  "author": "Dieletrons <engenharia@dieletrons.com>",
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/LucasFeh/AltiumPCBMirror",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LucasFeh/AltiumPCBMirror.git"
+  },
+  "main": "main.js",
+  "scripts": {
+    "start": "node scripts/prepare.mjs && electron .",
+    "dev": "electron .",
+    "build:prep": "node scripts/prepare.mjs",
+    "icon": "node scripts/make-icon.mjs",
+    "test": "node --test test/*.test.js",
+    "dist": "node scripts/prepare.mjs && electron-builder --win --x64 --publish never",
+    "release": "node scripts/release.mjs"
+  },
+  "dependencies": {
+    "electron-log": "^5.4.4",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "allowScripts": {
+    "electron@44.4.5": true,
+    "electron-winstaller@5.4.0": true
+  },
+  "build": {
+    "appId": "com.dieletrons.altiumhub",
+    "productName": "AltiumHub",
+    "copyright": "Dieletrons",
+    "artifactName": "AltiumHub-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main.js",
+      "lib/**",
+      "ui/**",
+      "assets/**",
+      "gen/**",
+      "package.json",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "build/python",
+        "to": "python",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build/hub",
+        "to": "hub",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "executableName": "AltiumHub"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AltiumHub",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "LucasFeh",
+        "repo": "AltiumPCBMirror",
+        "private": true,
+        "releaseType": "release"
+      }
+    ]
+  }
+}

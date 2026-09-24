@@ -1,0 +1,316 @@
+'use strict';
+// "Importar do servidor": traz para a pasta de trabalho local os projetos e as bibliotecas
+// do hub central (http://192.168.15.192:8100), pelas mesmas rotas que o navegador usa.
+//
+// O servidor nao lista diretorio (hubserver.py » _serve devolve 404 para pasta), entao a
+// lista de arquivos e montada a partir do que ele publica:
+//   - projetos: /api/index.json + os nomes de arquivo que os .pas e o hub escrevem;
+//   - bibliotecas do almoxarifado: as chaves "Libs/Almox/..." de Libs/lib-ledger.json »
+//     arquivos (o almox-index.js NAO as lista: medido, ele traz nomes legados).
+//
+// Tres vias, por arquivo: L (local), R (servidor) e B (a base = o que veio do servidor na
+// importacao anterior, ou o que o instalador semeou). Assim se sabe QUEM mudou:
+//   L == R            nada a fazer
+//   L == B            so o servidor mudou       -> traz
+//   R == B            so o local mudou          -> fica o local
+//   os dois mudaram   conflito                  -> depende do grupo:
+//     'almox'   o servidor VENCE e o local vai para .altiumhub/backup/<data>/. E o
+//               livro-razao dos part numbers: duas autoridades renumeram o almoxarifado.
+//     'projeto', 'lib'  o LOCAL fica e a versao do servidor vai para
+//               .altiumhub/conflitos/<data>/, e o resumo lista cada um. Nada do trabalho
+//               de ninguem some calado.
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
+const { MARCA_DIR } = require('./workspace');
+
+// Arquivos de um projeto, pelos nomes que ExportBoard/ExportProject/BuildSchematic/
+// ApplyChanges e o hubserver escrevem. Ficam de fora os de BANCADA do servidor
+// (bom-vistos.json, bom-opts.json, odoo-lista.json): sao estado de quem monta a placa la.
+const ARQ_PROJETO = ['board.js', 'schematic.js', 'changes.js', 'annotations.js', 'pcb-list.csv',
+  'history.jsonl', 'build-report.txt', 'apply-report.txt'];
+
+// Estado do almoxarifado: o que o gerador (tools/almox, tools/symbols/guardiao.py) LE antes de
+// numerar. Semear isto do servidor antes de sincronizar localmente e o que evita a
+// numeracao de dois PCs divergir (Libs/almox-parts.json: "perder renumera tudo").
+const ARQ_ALMOX = ['Libs/almox-parts.json', 'Libs/lib-ledger.json', 'Libs/almox-excluidos.json',
+  'Libs/almox-basicos.js', 'Libs/almox-especiais.js', 'Libs/almox-index.js', 'Libs/almox-sync.js',
+  'Libs/almox-guardiao.js', 'tools/almox/componentes_odoo.csv'];
+
+// Bibliotecas publicadas (espelhos do Altium, lib da casa, substituicoes, indice classico).
+const ARQ_LIB = ['Libs/schlib.js', 'Libs/pcblib.js', 'Libs/symbols-lib.js', 'Libs/rename-map.js',
+  'Libs/lib-subs.js', 'Libs/libs-report.txt', 'Libs/BIBLIOTECA DE ESQUEMA.SchLib', 'projects.js'];
+
+// Fora a lista do ledger, o que o gerador escreve em Libs/Almox (almox2lib.py, dblib.py).
+const ARQ_ALMOX_DIR_FIXOS = ['Libs/Almox/FOOTPRINTS ALMOX.PcbLib', 'Libs/Almox/ALMOX.DbLib',
+  'Libs/Almox/almox.sqlite', 'Libs/Almox/almox.csv'];
+
+const TIMEOUT_MS = 30000;
+const PARALELO = 4;
+
+function sha1(buf) {
+  return crypto.createHash('sha1').update(buf).digest('hex');
+}
+
+function sha1File(f) {
+  try {
+    return crypto.createHash('sha1').update(fs.readFileSync(f)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+function carimbo() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function urlDe(base, rel) {
+  return base.replace(/\/+$/, '') + '/' + rel.split('/').map(encodeURIComponent).join('/');
+}
+
+// O limite e de INATIVIDADE (30 s sem chegar um byte), nao do arquivo inteiro: a PcbLib do
+// almoxarifado tem 63 MB e, num Wi-Fi ou VPN abaixo de ~17 Mbit/s, um teto fixo de 30 s a
+// cortaria sempre. Servidor mudo continua sendo pego do mesmo jeito.
+async function pega(url, { etag, signal } = {}) {
+  const ctl = new AbortController();
+  let t = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  const renova = () => { clearTimeout(t); t = setTimeout(() => ctl.abort(), TIMEOUT_MS); };
+  const aborta = () => ctl.abort();
+  if (signal) signal.addEventListener('abort', aborta, { once: true });
+  try {
+    const headers = {};
+    if (etag) headers['If-None-Match'] = etag;
+    const res = await fetch(url, { headers, signal: ctl.signal, redirect: 'error' });
+    renova();
+    if (res.status === 304) return { status: 304 };
+    if (res.status === 404) return { status: 404 };
+    if (!res.ok) throw new Error(`HTTP ${res.status} em ${url}`);
+    const partes = [];
+    const leitor = res.body.getReader();
+    for (;;) {
+      const { done, value } = await leitor.read();
+      if (done) break;
+      partes.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+      renova();
+    }
+    const buf = Buffer.concat(partes);
+    return {
+      status: 200,
+      buf,
+      etag: res.headers.get('etag') || '',
+      lastModified: res.headers.get('last-modified') || '',
+    };
+  } finally {
+    clearTimeout(t);
+    if (signal) signal.removeEventListener('abort', aborta);
+  }
+}
+
+// O servidor responde? E e mesmo um hub? (/__live.js e o batimento dele.)
+async function testar(serverUrl) {
+  try {
+    const r = await pega(urlDe(serverUrl, '__live.js'));
+    if (r.status !== 200 || !/EventSource/.test(r.buf.toString('utf8'))) {
+      return { ok: false, erro: 'respondeu, mas nao parece o hub do AltiumPCBMirror' };
+    }
+    const idx = await pega(urlDe(serverUrl, 'api/index.json'));
+    const n = idx.status === 200 ? (JSON.parse(idx.buf.toString('utf8')).projects || []).length : 0;
+    return { ok: true, projetos: n };
+  } catch (e) {
+    return { ok: false, erro: e.name === 'AbortError' ? 'sem resposta em 30 s' : e.message };
+  }
+}
+
+class Estado {
+  constructor(ws) {
+    this.arq = path.join(ws, MARCA_DIR, 'import-state.json');
+    try {
+      this.d = JSON.parse(fs.readFileSync(this.arq, 'utf8'));
+    } catch {
+      this.d = {};
+    }
+    this.d.files = this.d.files || {};
+  }
+  get(rel) { return this.d.files[rel] || null; }
+  set(rel, v) { this.d.files[rel] = v; }
+  salvar(extra) {
+    Object.assign(this.d, extra || {});
+    fs.mkdirSync(path.dirname(this.arq), { recursive: true });
+    fs.writeFileSync(this.arq + '.tmp', JSON.stringify(this.d, null, 1));
+    fs.renameSync(this.arq + '.tmp', this.arq);
+  }
+}
+
+function escreveAtomico(dest, buf, lastModified) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const tmp = dest + '.altiumhub-tmp';
+  fs.writeFileSync(tmp, buf);
+  fs.renameSync(tmp, dest);
+  // A data do servidor, e nao "agora": o hub decide o que esta pendente comparando mtimes
+  // (changes.js mais novo que apply-report.txt = mudancas por aplicar, hubserver.py »
+  // build_index; schematic.js x board.js no BOM). Importar tudo com a hora da copia
+  // inventaria pendencia onde nao ha.
+  const t = Date.parse(lastModified);
+  if (Number.isFinite(t)) {
+    try { fs.utimesSync(dest, new Date(), new Date(t)); } catch { /* data e conforto */ }
+  }
+}
+
+// Pos-processamento de arquivo que o servidor escreve para a MAQUINA dele.
+function ajustar(rel, buf, ctx) {
+  if (rel === 'Libs/Almox/ALMOX.DbLib') {
+    // O DbLib aponta o SQLite por caminho absoluto (dblib.py » UNC). Vindo do servidor, ele
+    // aponta o share; aqui ele tem de apontar a copia local, senao o Altium desta maquina
+    // le a tabela do servidor.
+    const local = path.join(ctx.ws, 'Libs', 'Almox', 'almox.sqlite');
+    const txt = buf.toString('utf8').replace(/(Database=)[^;\r\n]*(;)/, `$1${local}$2`);
+    return Buffer.from(txt, 'utf8');
+  }
+  if (rel === 'Libs/almox-index.js') {
+    // O link "Odoo ↗" usa o odooUrl do indice. Se o servidor gravou o Odoo como loopback
+    // (o compose roda em rede do host), aqui o loopback seria ESTE PC.
+    const host = new URL(ctx.serverUrl).hostname;
+    const txt = buf.toString('utf8').replace(/http:\/\/(127\.0\.0\.1|localhost)(:\d+)/g, `http://${host}$2`);
+    return Buffer.from(txt, 'utf8');
+  }
+  return buf;
+}
+
+async function comLimite(itens, n, fn) {
+  let i = 0;
+  const trab = Array.from({ length: Math.min(n, itens.length) }, async () => {
+    while (i < itens.length) {
+      const k = i++;
+      await fn(itens[k], k);
+    }
+  });
+  await Promise.all(trab);
+}
+
+/**
+ * @param {object} o
+ * @param {string} o.ws            pasta de trabalho
+ * @param {string} o.serverUrl     hub central
+ * @param {string[]} o.grupos      subconjunto de ['projetos','libs','almox','almoxLibs']
+ * @param {object} o.seedHashes    {rel: sha1} do que o instalador semeou (base de 3 vias)
+ * @param {(ev:object)=>void} o.progresso
+ * @param {AbortSignal} [o.signal]
+ */
+async function importar(o) {
+  const { ws, serverUrl, progresso = () => {}, signal } = o;
+  const grupos = new Set(o.grupos || ['projetos', 'libs', 'almox', 'almoxLibs']);
+  const estado = new Estado(ws);
+  const quando = carimbo();
+  const res = { novos: [], atualizados: [], mantidos: [], conflitos: [], backups: [], erros: [], iguais: 0, ausentes: 0, bytes: 0 };
+  const ctx = { ws, serverUrl };
+  const seed = o.seedHashes || {};
+
+  progresso({ fase: 'lista', msg: `consultando ${serverUrl}` });
+  const lista = [];                      // [{rel, grupo}]
+  if (grupos.has('projetos')) {
+    const idx = await pega(urlDe(serverUrl, 'api/index.json'), { signal });
+    if (idx.status !== 200) throw new Error('o servidor nao devolveu /api/index.json');
+    const projetos = JSON.parse(idx.buf.toString('utf8')).projects || [];
+    for (const p of projetos) {
+      // o nome vem do servidor: nada de separador nem ".." virando caminho aqui
+      if (!p.name || /[\\/]|^\.\.?$/.test(p.name)) continue;
+      for (const f of ARQ_PROJETO) lista.push({ rel: `Projects/${p.name}/${f}`, grupo: 'projeto' });
+    }
+  }
+  if (grupos.has('libs')) for (const rel of ARQ_LIB) lista.push({ rel, grupo: 'lib' });
+  if (grupos.has('almox')) for (const rel of ARQ_ALMOX) lista.push({ rel, grupo: 'almox' });
+
+  const processa = async ({ rel, grupo }) => {
+    if (signal && signal.aborted) return;
+    const dest = path.join(ws, ...rel.split('/'));
+    const base = estado.get(rel);
+    const L = sha1File(dest);
+    // ETag so quando o local ainda e o que veio do servidor: e o que permite pular os
+    // 70 MB de Libs/Almox numa segunda importacao sem baixar nada.
+    const etag = base && L && L === (base.localSha1 || base.sha1) ? base.etag : '';
+    let r;
+    try {
+      r = await pega(urlDe(serverUrl, rel), { etag, signal });
+    } catch (e) {
+      res.erros.push(`${rel}: ${e.name === 'AbortError' ? 'tempo esgotado' : e.message}`);
+      return;
+    }
+    if (r.status === 304) { res.iguais++; return; }
+    if (r.status === 404) { res.ausentes++; return; }
+    const buf = ajustar(rel, r.buf, ctx);
+    const R = sha1(r.buf);                // o hash do SERVIDOR (antes do ajuste local)
+    const Rl = sha1(buf);                 // o que fica no disco daqui
+    res.bytes += r.buf.length;
+    const B = base ? (base.localSha1 || base.sha1) : (seed[rel] || null);
+    const registra = () => estado.set(rel, { sha1: R, localSha1: Rl, etag: r.etag, em: quando });
+
+    if (!L) {
+      escreveAtomico(dest, buf, r.lastModified);
+      res.novos.push(rel);
+      registra();
+    } else if (L === Rl) {
+      res.iguais++;
+      registra();
+    } else if (B && L === B) {
+      escreveAtomico(dest, buf, r.lastModified);
+      res.atualizados.push(rel);
+      registra();
+    } else if (base && R === base.sha1) {
+      res.mantidos.push(rel);             // so o local mudou: fica
+    } else if (grupo === 'almox') {
+      const bk = path.join(ws, MARCA_DIR, 'backup', quando, ...rel.split('/'));
+      fs.mkdirSync(path.dirname(bk), { recursive: true });
+      fs.copyFileSync(dest, bk);
+      escreveAtomico(dest, buf, r.lastModified);
+      res.atualizados.push(rel);
+      res.backups.push(rel);
+      registra();
+    } else {
+      const cf = path.join(ws, MARCA_DIR, 'conflitos', quando, ...rel.split('/'));
+      fs.mkdirSync(path.dirname(cf), { recursive: true });
+      fs.writeFileSync(cf, buf);
+      res.conflitos.push(rel);
+    }
+  };
+
+  let feitos = 0;
+  const total = () => lista.length;
+  const um = async (item) => {
+    progresso({ fase: 'arquivo', rel: item.rel, feitos, total: total() });
+    await processa(item);
+    feitos++;
+    progresso({ fase: 'arquivo', rel: item.rel, feitos, total: total() });
+  };
+  await comLimite(lista, PARALELO, um);
+
+  // A lista de Libs/Almox so e conhecida depois do lib-ledger.json (grupo almox) chegar.
+  if (grupos.has('almoxLibs') && !(signal && signal.aborted)) {
+    let ledger = null;
+    try {
+      ledger = JSON.parse(fs.readFileSync(path.join(ws, 'Libs', 'lib-ledger.json'), 'utf8'));
+    } catch { /* sem ledger: so os fixos */ }
+    const extra = new Set(ARQ_ALMOX_DIR_FIXOS);
+    for (const k of Object.keys((ledger && ledger.arquivos) || {})) {
+      if (!k.startsWith('Libs/Almox/') || k.includes('..')) continue;
+      extra.add(k);
+      if (k.endsWith('.SchLib')) extra.add(k.replace(/\.SchLib$/, '.LibPkg'));
+    }
+    const lote = [...extra].map((rel) => ({ rel, grupo: 'almox' }));
+    lista.push(...lote);
+    await comLimite(lote, PARALELO, um);
+  }
+
+  estado.salvar({ ultimaImportacao: new Date().toISOString(), servidor: serverUrl });
+  if (res.conflitos.length) res.pastaConflitos = path.join(ws, MARCA_DIR, 'conflitos', quando);
+  if (res.backups.length) res.pastaBackup = path.join(ws, MARCA_DIR, 'backup', quando);
+  progresso({ fase: 'fim', res });
+  return res;
+}
+
+function ultimaImportacao(ws) {
+  return new Estado(ws).d.ultimaImportacao || '';
+}
+
+module.exports = { importar, testar, ultimaImportacao, ARQ_PROJETO, ARQ_ALMOX, ARQ_LIB };

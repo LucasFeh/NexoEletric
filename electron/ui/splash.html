@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>AltiumHub</title>
+<link rel="stylesheet" href="ui.css">
+<style>
+  body { justify-content: center; }
+  .centro { width: min(640px, 100%); margin: 0 auto; padding: 24px; }
+  .marca { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .marca img { width: 40px; height: 40px; }
+  #msg { font-size: 15px; color: var(--text); }
+  .gira { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--hi); animation: g 0.8s linear infinite; flex: none; }
+  @keyframes g { to { transform: rotate(360deg); } }
+  #erro { display: none; }
+  body.falhou #erro { display: block; }
+  body.falhou .gira { display: none; }
+</style>
+</head>
+<body>
+<div class="centro">
+  <div class="marca">
+    <img src="../assets/icon.png" alt="">
+    <div>
+      <h1>AltiumHub</h1>
+      <p id="versao" class="mono"></p>
+    </div>
+  </div>
+  <div class="linha"><div class="gira"></div><div id="msg" class="grow">iniciando…</div></div>
+  <div id="erro" class="card" style="margin-top:18px">
+    <div class="aviso err" id="erroTxt"></div>
+    <div class="log" id="log"></div>
+    <div class="acoes">
+      <button class="btn" id="bLog">Abrir log completo</button>
+      <button class="btn" id="bCfg">Configurações…</button>
+      <button class="btn primario" id="bTentar">Tentar de novo</button>
+    </div>
+  </div>
+</div>
+<script>
+  const api = window.altiumhub;
+  function mostra(st) {
+    document.getElementById('msg').textContent = st.msg || '';
+    const falhou = st.fase === 'erro';
+    document.body.classList.toggle('falhou', falhou);
+    if (falhou) {
+      document.getElementById('erroTxt').textContent = st.erro || 'erro desconhecido';
+      const log = document.getElementById('log');
+      log.textContent = (st.log || []).join('\n') || '(sem saída do hub)';
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+  api.ouvir('boot:status', mostra);
+  api.chamar('boot:estado').then(mostra);
+  api.chamar('config:ler').then((c) => { document.getElementById('versao').textContent = 'versão ' + c.versao; });
+  document.getElementById('bTentar').onclick = () => api.chamar('boot:tentar');
+  document.getElementById('bLog').onclick = () => api.chamar('boot:log');
+  document.getElementById('bCfg').onclick = () => api.chamar('boot:config');
+</script>
+</body>
+</html>
