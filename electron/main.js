@@ -470,7 +470,11 @@ function montarMenu() {
         { label: 'Abrir pasta de trabalho', click: () => shell.openPath(settings.load().workspace) },
         { label: 'Importar do servidor…', click: () => abrirImportacao() },
         { type: 'separator' },
-        { label: 'Configurações…', accelerator: 'CmdOrCtrl+,', click: () => abrirConfig() },
+        { label: 'Configurações do hub…', click: () => {
+          const c = janela && !janela.isDestroyed() ? janela.webContents : null;
+          if (c) c.executeJavaScript('window.EletricShell && EletricShell.configuracoes()').catch(() => {});
+        } },
+        { label: 'Configurações do aplicativo…', accelerator: 'CmdOrCtrl+,', click: () => abrirConfig() },
         { type: 'separator' },
         { label: 'Sair', role: 'quit' },
       ],
