@@ -54,6 +54,30 @@ finally:
 assert H.app.test_client().get('/__live.js', headers={'Host': 'hub.lan:8100'}).status_code == 200, \
     'escutando na rede, qualquer nome serve (o tablet chega pelo IP ou pelo nome da maquina)'
 
+# hub-almox.json (login e senha do Odoo) nao sai por HTTP para ninguem, nem pelos apelidos
+# que o Windows aceita para o mesmo arquivo. Os outros arquivos da raiz continuam servidos.
+tmp = tempfile.mkdtemp()
+real_root, H.ROOT = H.ROOT, tmp
+try:
+    with io.open(os.path.join(tmp, 'hub-almox.json'), 'w', encoding='utf-8') as fh:
+        fh.write('{"url":"http://x","login":"a","senha":"SEGREDO"}')
+    with io.open(os.path.join(tmp, 'hub-almox.json.tmp'), 'w', encoding='utf-8') as fh:
+        fh.write('{"senha":"SEGREDO"}')
+    with io.open(os.path.join(tmp, 'hub.html'), 'w', encoding='utf-8') as fh:
+        fh.write('<html><body>ok</body></html>')
+    cli = H.app.test_client()
+    lan = {'Host': '192.168.15.50:8100'}
+    caminhos = ['/hub-almox.json', '/hub-almox.json.tmp', '/./hub-almox.json', '/Libs/../hub-almox.json']
+    if os.name == 'nt':
+        caminhos += ['/HUB-ALMOX.JSON', '/hub-almox.json.', '/hub-almox.json%20', '/hub-almox.json::$DATA']
+    for u in caminhos:
+        r = cli.get(u, headers=lan)
+        assert r.status_code == 404 and b'SEGREDO' not in r.data, (u, r.status_code)
+    assert cli.get('/hub.html', headers=lan).status_code == 200, 'o resto da raiz continua servido'
+finally:
+    H.ROOT = real_root
+    shutil.rmtree(tmp, ignore_errors=True)
+
 # Exclusao de projeto: senha errada nao pode encostar na pasta, e senha certa MOVE
 # (nao apaga). Roda num workspace de mentira - ROOT e lido em tempo de chamada.
 tmp = tempfile.mkdtemp()

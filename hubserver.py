@@ -136,11 +136,27 @@ def events():
     return Response(stream(), mimetype='text/event-stream')
 
 
+def _e_segredo(full):
+    """E a credencial do Odoo (hub-almox.json) ou o temporario dela?
+
+    O ponto no nome e o que tira um arquivo do HTTP (.hub-odoo.json, .chat/), e o
+    hub-almox.json nao tem ponto: ate aqui GET /hub-almox.json entregava login e senha do
+    Odoo a qualquer maquina da rede (tools/deploy/PENDENCIAS.md, 1.1). A comparacao e pelo
+    caminho RESOLVIDO, e nao pelo nome: pega o symlink de shared/ no servidor e os apelidos
+    que o Windows aceita para o mesmo arquivo (caixa, ponto ou espaco no fim).
+    """
+    alvo = os.path.normcase(os.path.realpath(full))
+    return any(alvo == os.path.normcase(os.path.realpath(os.path.join(ROOT, n)))
+               for n in (ALMOX_CFG_FILE, ALMOX_CFG_FILE + '.tmp'))
+
+
 def _serve(path):
     if any(seg.startswith('.') for seg in path.replace('\\', '/').split('/')):
         abort(404)
+    if os.name == 'nt' and ':' in path:   # fluxo alternativo do NTFS (hub-almox.json::$DATA)
+        abort(404)
     full = safe_join(ROOT, path)
-    if full is None or not os.path.isfile(full):
+    if full is None or not os.path.isfile(full) or _e_segredo(full):
         abort(404)
     if full.lower().endswith('.html'):
         with open(full, 'rb') as f:
