@@ -147,10 +147,6 @@
   tbody tr{cursor:pointer;}
   tbody tr:hover{background:#333;}
   tbody tr.sel{background:#0d47a1;}
-  .valitem{padding:3px 6px; margin:2px 0; border-radius:3px; background:var(--panel2);
-    font-size:11px; border-left:3px solid transparent;}
-  .valitem.err{border-left-color:var(--err);}
-  .valitem.warn{border-left-color:var(--warn);}
   /* ── a lista de folhas ────────────────────────────────────────────────────
      Uma LINHA por folha, empilhando para baixo: a miniatura faz as vezes de ICONE e o nome
      vem ao lado. Substituiu o <select> da secao Folha, que dizia o nome e mais nada — em
@@ -587,12 +583,11 @@
         <div class="hint" id="savehint"></div>
       </div>
       <!-- os ancoras do "Enviar para o Odoo" (hub-odoolista.js) e do almoxarifado
-           (hub-converte.js): sem eles os dois iriam para o fim do painel, depois da validacao -->
+           (hub-converte.js). A lista de validacao que vinha depois deles saiu a pedido do
+           usuario (2026-09-24): a validacao continua valendo (trava o Salvar e alimenta a
+           ficha), so nao e mais listada aqui. -->
       <div class="sec" id="odoolista"></div>
       <div class="sec" id="converte"></div>
-      <!-- o que a validacao do hub-core acusa na folha: simbolo que nao existe, footprint que
-           falta, rotulo solto. Era a ultima secao da aba Componentes, e a unica que ficou. -->
-      <div class="sec"><h2>Validação</h2><div id="vallist"></div></div>
     </div>
 
     <div class="dpane" id="pane-props">

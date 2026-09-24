@@ -807,7 +807,7 @@ function reapply(){
   /* a net em foco tambem pode ter deixado de existir (apagou o fio, desfez): destaque
      apontando para uma net que sumiu e cor sem dono na tela */
   if (selNet && !nets.nets.some(n => n.name === selNet)) selNet = '';
-  buildValList(); updateMeta(); updateSelStatus(); renderProps();
+  updateMeta(); updateSelStatus(); renderProps();
   /* O cartao da folha mostra a folha COMO ELA ESTA, e este e o unico funil por onde passam
      commit, undo, redo, recarga de biblioteca e troca de simbolo. Repintar aqui e o que
      separa "miniatura" de "foto do carregamento". */
@@ -4205,20 +4205,6 @@ function focusComp(c){
   aplicaSel('');
   cam.fit({ x1:c.x-800, y1:c.y-800, x2:c.x+800, y2:c.y+800 });
 }
-function buildValList(){
-  const list = $('vallist');
-  list.innerHTML = '';
-  const items = val.errors.map(m => ({ level:'err', m }))
-    .concat(val.warnings.map(m => ({ level:'warn', m })))
-    .concat(nets.warnings.map(m => ({ level:'warn', m })));
-  if (!items.length) { list.innerHTML = '<div style="color:var(--ok)">✓ sem problemas</div>'; return; }
-  for (const it of items) {
-    const div = document.createElement('div');
-    div.className = 'valitem ' + it.level;
-    div.textContent = it.m;
-    list.appendChild(div);
-  }
-}
 /* ------- as folhas, em cartoes com miniatura -------
    Era um <select>: dizia o nome da folha e mais nada, e num projeto de duas folhas nao havia
    como saber qual era qual sem trocar e olhar. O cartao mostra a folha COMO ELA ESTA, com o
@@ -4420,7 +4406,7 @@ $('btnGrid').addEventListener('click', () => {
   showState.grid = !showState.grid; $('btnGrid').classList.toggle('active', showState.grid); cam.draw();
 });
 montaGrade();
-renderSheetCards(); buildValList();
+renderSheetCards();
 updateMeta(); updateSaveBtn(); updateSelStatus(); cartRender(); renderProps();
 cam.resize(); cam.fit(fitBBox());
 
