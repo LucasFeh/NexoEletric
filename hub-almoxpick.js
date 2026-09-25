@@ -36,16 +36,18 @@ const CSS = `
 .ap-grupo{font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--text-4,#7a7a7a);
   padding:12px 2px 4px;}
 /* o menu do botao direito. Vive no <body> e fecha em qualquer clique, rolagem ou Esc:
-   menu que sobrevive a um scroll fica flutuando sobre outra coisa e clica no que nao devia. */
+   menu que sobrevive a um scroll fica flutuando sobre outra coisa e clica no que nao devia.
+   E o .menu da casca: --surface com o anel e a sombra do --shadow-menu, sem borda. Ele lia um
+   --card que nenhuma pagina define, e por isso ficava escuro em todo tema. */
 .ap-menu{position:fixed; z-index:9999; min-width:210px; padding:4px;
-  background:var(--card,#242424); border:1px solid var(--line,#3a3a3a);
-  border-radius:var(--r-sm,4px); box-shadow:0 8px 24px rgba(0,0,0,.45);}
+  background:var(--surface,#242424); border-radius:var(--r-sm,4px);
+  box-shadow:var(--shadow-menu, 0 0 0 1px #3a3a3a, 0 8px 24px rgba(0,0,0,.45));}
 .ap-menu button{display:block; width:100%; text-align:left; border:0; background:transparent;
-  color:var(--text,#d8d8d8); font:12px 'Segoe UI',sans-serif; padding:7px 10px;
+  color:var(--text,#d8d8d8); font:12px var(--font,'Segoe UI',sans-serif); padding:7px 10px;
   border-radius:3px; cursor:pointer;}
-.ap-menu button:hover{background:rgba(255,255,255,.07);}
-.ap-menu button.perigo{color:#ff6b6b;}
-.ap-menu button.perigo:hover{background:rgba(255,107,107,.12);}
+.ap-menu button:hover{background:rgba(var(--tint,255,255,255),.09);}
+.ap-menu button.perigo{color:var(--err,#ff6b6b);}
+.ap-menu button.perigo:hover{background:var(--err-soft,rgba(255,107,107,.12));}
 .ap-menu .ap-menu-alvo{font-size:10px; color:var(--text-4,#7a7a7a); padding:5px 10px 6px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:260px;}
 /* o valor: e ele o COMPONENTE que vai para a folha */
@@ -56,7 +58,7 @@ const CSS = `
 .ap-val[aria-selected="true"]{background:rgba(var(--tint,79,195,247),0.14);
   box-shadow:inset 2px 0 0 var(--hi,#4fc3f7);}
 .ap-val .v{font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-.ap-val .k{font:10px Consolas,ui-monospace,monospace; color:var(--text-4,#7a7a7a); white-space:nowrap;}
+.ap-val .k{font:10px var(--mono,Consolas,ui-monospace,monospace); color:var(--text-4,#7a7a7a); white-space:nowrap;}
 .ap-val .q{font-size:11px; font-variant-numeric:tabular-nums; color:var(--ok,#00e676); min-width:3ch; text-align:right;}
 .ap-val .q.zero{color:var(--text-4,#7a7a7a);}
 /* a recomendacao: o componente de mesmo nome que o Altium mandou. Ela se anuncia, senao

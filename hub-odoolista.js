@@ -14,12 +14,16 @@
 "use strict";
 var HubOdooLista = (function () {
 
+/* No tema do hub: --panel, --fg, --border... sao os nomes da vista Esquema, que a ponte do
+   schframe.html aponta para os tokens do hub-tema.css; fundo do modal, sombra e fonte sao os
+   tokens da casca direto. A cor depois da virgula e o escuro antigo, para pagina sem tokens. */
 const CSS = `
-#odoomodal{position:fixed; inset:0; z-index:60; display:none; background:rgba(11,11,13,.62);}
+#odoomodal{position:fixed; inset:0; z-index:60; display:none; background:var(--scrim,rgba(11,11,13,.62));}
 #odoomodal.on{display:flex;}
+/* sem borda: o contorno e o anel do --shadow-menu, como no .dialog da casca */
 #odoomodal .od-box{position:absolute; inset:14px; display:grid; grid-template-rows:auto 1fr auto;
-  background:var(--panel,#242424); border:1px solid var(--border,#3a3a3a); border-radius:8px;
-  box-shadow:0 22px 60px rgba(0,0,0,.62); overflow:hidden; min-height:0;}
+  background:var(--panel,#242424); border-radius:var(--r-md,8px);
+  box-shadow:var(--shadow-menu, 0 0 0 1px #3a3a3a, 0 22px 60px rgba(0,0,0,.62)); overflow:hidden; min-height:0;}
 #odoomodal .od-head{display:flex; align-items:center; gap:10px; padding:11px 13px;
   border-bottom:1px solid var(--border,#3a3a3a); background:var(--panel2,#2d2d2d);}
 #odoomodal .od-head h2{font-size:13px; font-weight:600; margin:0; letter-spacing:-.01em;}
@@ -55,7 +59,7 @@ const CSS = `
 #odoomodal .od-row.hd{position:sticky; top:42px; background:var(--panel,#242424); z-index:1;
   letter-spacing:.09em; text-transform:uppercase; color:var(--fg-dim,#9a9a9a);}
 #odoomodal .od-row.hd > *{font-size:10px;}
-#odoomodal .od-row .des{font:11px/1.4 Consolas,ui-monospace,monospace; color:var(--fg,#d8d8d8);
+#odoomodal .od-row .des{font:11px/1.4 var(--mono,Consolas,ui-monospace,monospace); color:var(--fg,#d8d8d8);
   overflow:hidden; text-overflow:ellipsis;}
 #odoomodal .od-row .nm{font-size:12px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 #odoomodal .od-row .qt{font-size:12px; text-align:right; font-variant-numeric:tabular-nums;}
@@ -88,8 +92,9 @@ const CSS = `
   border-top:1px solid var(--border,#3a3a3a); background:var(--panel2,#2d2d2d);}
 #odoomodal .od-foot .est{flex:1; font-size:11px; color:var(--fg-dim,#9a9a9a);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-#odoomodal .od-foot button.pri{background:#0d47a1; border-color:#0d47a1; color:#fff;}
-#odoomodal .od-foot button.pri:hover:not(:disabled){background:#1565c0; border-color:#1565c0;}
+/* o Enviar e o .btn-primary da casca: contornado no destaque do tema, nunca preenchido */
+#odoomodal .od-foot button.pri{background:transparent; border-color:var(--hi,#4fc3f7); color:var(--hi,#4fc3f7);}
+#odoomodal .od-foot button.pri:hover:not(:disabled){background:rgba(var(--tint,79,195,247),.10);}
 `;
 
 const $ = id => document.getElementById(id);

@@ -2,16 +2,25 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>AltiumPCBMirror — Esquema</title>
+<title>Esquema — EletricHUB</title>
 <!-- a mesma fonte do hub: o modal "Adicionar componentes" copia a aba Biblioteca e tem que
      parecer a mesma tela; se a rede nao responder, cai no system-ui sem quebrar nada -->
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<!-- o tema do hub: os tokens (hub-tema.css) e quem escolhe o tema antes da primeira pintura e
+     o troca ao vivo quando ele muda nas Configuracoes do hub (hub-tema.js, sincrono) -->
+<link rel="stylesheet" href="hub-tema.css">
+<script src="hub-tema.js"></script>
 <style>
-  :root{ color-scheme:dark;     /* lista aberta do select e setas do input number vem escuras */
-    --bg:#1b1b1b; --panel:#242424; --panel2:#2d2d2d; --border:#3a3a3a; --scroll:#4a4a4a;
-    --fg:#d8d8d8; --fg-dim:#9a9a9a; --accent:#4fc3f7; --warn:#ffd54f; --err:#ff5252; --ok:#00e676;
-    --sel:#2979ff; }
+  /* PONTE PARA O TEMA DO HUB. Esta vista tinha um escuro proprio e ficava avulsa quando o tema
+     do hub mudava; agora os nomes dela apontam para os tokens do hub-tema.css. --bg, --scroll,
+     --ok, --warn, --err, --font e o color-scheme sao os do proprio hub. Cor fixa (hex) nesta
+     folha so para DESENHO que tem cor propria de verdade (a folha do Altium, camadas da placa,
+     a selecao azul), nunca para a interface. */
+  :root{
+    --panel:var(--surface-2); --panel2:var(--surface); --border:var(--edge);
+    --fg:var(--text); --fg-dim:var(--text-2); --fg2:var(--text-2); --accent:var(--hi);
+    --sel:#2979ff;     /* a selecao no desenho: azul como no Altium, em qualquer tema */ }
   *{box-sizing:border-box; margin:0; padding:0;}
   html,body{height:100%; overflow:hidden;}
   /* barra de rolagem no tema da pagina — a mesma receita do hub: polegar arredondado com uma
@@ -25,24 +34,25 @@
   @supports not selector(::-webkit-scrollbar){
     *{scrollbar-width:thin; scrollbar-color:var(--scroll) transparent;}
   }
-  body{background:var(--bg); color:var(--fg); font:13px/1.45 "Segoe UI",sans-serif; display:flex; flex-direction:column;}
+  body{background:var(--bg); color:var(--fg); font:13px/1.45 var(--font); display:flex; flex-direction:column;}
+  /* botao e select nao herdam a familia do body por padrao: sem o inherit eles ficavam na
+     fonte do sistema e a troca de fonte nas Configuracoes do hub so pegava metade do painel */
   button{background:var(--panel2); color:var(--fg); border:1px solid var(--border);
-    border-radius:3px; padding:3px 10px; font-size:12px; cursor:pointer;}
+    border-radius:3px; padding:3px 10px; font-size:12px; font-family:inherit; cursor:pointer;}
   button:hover{border-color:var(--accent);}
-  button.active{background:#0d47a1; color:#fff;}
+  /* ligado = o destaque do tema preenchido, como o botao primario do hub (era azul fixo) */
+  button.active{background:var(--hi); color:var(--on-hi); border-color:var(--hi);}
   button:disabled{opacity:.4; cursor:not-allowed;}
   button:disabled:hover{border-color:var(--border);}
-  select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;}
+  select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;
+    font-family:inherit;}
 
   #main{flex:1; display:flex; min-height:0; position:relative;}   /* ancora da ficha, que flutua por cima */
   #cvwrap{flex:1; position:relative; min-width:0;}
-  /* divisoria arrastavel entre o painel e a folha: a mesma peca das abas Laser e BOM do hub
+  /* divisoria arrastavel entre a folha e o painel: a mesma peca das abas Laser e BOM do hub
      (6 px de alvo com um traco fino no meio, que acende ao pegar; duplo clique fecha/abre) */
   .split{flex:0 0 6px; cursor:col-resize; position:relative; touch-action:none; background:var(--panel);}
-  #split{border-right:1px solid var(--border);}
-  /* a divisoria da ficha acompanha a borda esquerda dela, fora do fluxo como a propria ficha */
-  #splitR{position:absolute; top:0; bottom:0; right:var(--props-w, 320px); width:6px; z-index:15;
-    border-left:1px solid var(--border);}
+  #splitR{border-left:1px solid var(--border);}
   .split::after{content:''; position:absolute; top:0; bottom:0; left:50%; width:2px;
     transform:translateX(-50%); background:transparent; transition:background .12s;}
   .split:hover::after, .split.on::after{background:var(--accent);}
@@ -52,14 +62,16 @@
      E a barra de fiacao do Altium: as poucas coisas que a MAO faz aqui — selecionar,
      puxar fio e, pela gaveta, pousar terra, trilho, rotulo de net ou No ERC. O resto do
      esquema (texto, trocar valor, footprint) e da IA, pelo schematic.js. */
+  /* flutua sobre a mesa como os menus do hub: a sombra e a --shadow-menu do tema (no claro
+     ela e tinta, nao o preto que pesava sobre a mesa clara) */
   #schtb{position:absolute; top:8px; left:8px; z-index:12; display:flex; align-items:center; gap:2px;
     padding:3px 4px; background:var(--panel); border:1px solid var(--border); border-radius:6px;
-    box-shadow:0 4px 16px rgba(0,0,0,.5);}
+    box-shadow:var(--shadow-menu);}
   #schtb .sep{width:1px; height:20px; background:var(--border); margin:0 3px;}
   #schtb button{display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 7px;
     border:1px solid transparent; background:transparent; color:var(--fg-dim); border-radius:4px;}
-  #schtb button:hover:not(:disabled){color:var(--fg); background:#333; border-color:var(--border);}
-  #schtb button[aria-pressed="true"]{background:#0d47a1; border-color:#1565c0; color:#fff;}
+  #schtb button:hover:not(:disabled){color:var(--fg); background:rgba(var(--tint),0.08); border-color:var(--border);}
+  #schtb button[aria-pressed="true"]{background:var(--hi); border-color:var(--hi); color:var(--on-hi);}
   #schtb button:disabled{opacity:.35; cursor:not-allowed;}
   #schtb svg{width:18px; height:18px; flex:none; fill:none; stroke:currentColor; stroke-width:1.7;
     stroke-linecap:round; stroke-linejoin:round;}
@@ -76,49 +88,42 @@
     justify-content:center; align-items:flex-end; padding-bottom:2px; border-radius:0 0 4px 0;}
   #schtb .gav-seta svg{width:7px; height:5px; fill:currentColor; stroke:none;}
   #schtb .gav-seta[aria-expanded="true"]{color:var(--fg);}
-  /* com o pouso armado a face fica azul, e a setinha na cor apagada sumia justo quando se quer
-     trocar de pouso: ela passa a ter a cor do texto da face */
-  #schtb #tbPouso[aria-pressed="true"] + .gav-seta{color:#fff;}
+  /* com o pouso armado a face fica na cor de destaque do tema, e a setinha na cor apagada
+     sumia justo quando se quer trocar de pouso (contraste de 1,06 a 2,04 nos temas): ela passa
+     a ter a cor do texto da face */
+  #schtb #tbPouso[aria-pressed="true"] + .gav-seta{color:var(--on-hi);}
+  /* o hover da barra troca o fundo de destaque pelo tom da mesa: ai a setinha volta ao texto */
+  #schtb #tbPouso[aria-pressed="true"]:hover + .gav-seta{color:var(--fg);}
   #schtb #tbPouso[aria-pressed="true"] + .gav-seta:hover{background:rgba(0,0,0,.18); border-color:transparent;}
   #schtb .gav-lista{position:absolute; top:calc(100% + 7px); left:-5px; display:flex;
     flex-direction:column; gap:2px; min-width:128px; padding:4px; background:var(--panel);
-    border:1px solid var(--border); border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.5);}
+    border:1px solid var(--border); border-radius:6px; box-shadow:var(--shadow-menu);}
   #schtb .gav-lista[hidden]{display:none;}
   #schtb .gav-lista button{width:100%; justify-content:flex-start;}
   #schtb .gav-sep{height:1px; background:var(--border); margin:2px 4px;}
 
-  /* ── painel de propriedades (direita) ─────────────────────────────────────────
-     So leitura, de proposito: e a ficha do que esta selecionado, no espirito do painel
-     Properties do Altium. Quem edita valor, footprint ou parametro e a IA, no
-     schematic.js — por isso nao ha um campo editavel sequer aqui. */
+  /* ── o painel da direita: Configuracoes | Propriedades ──────────────────────────
+     Fica AO LADO da folha, e nao mais por cima dela: agora ele esta sempre na tela (sem nada
+     selecionado ele mostra as Configuracoes), e flutuando por cima esconderia para sempre a
+     faixa direita do desenho. Fechado pela divisoria, vira o botao de paineis no canto
+     inferior esquerdo da folha. */
   #props{width:var(--props-w, 320px); min-width:0; flex:none; background:var(--panel);
-    display:flex; flex-direction:column; min-height:0; overflow:hidden;
-    /* POR CIMA do desenho, nao ao lado: abrir a ficha nao muda a largura do canvas, entao a
-       camera (centrada) nao desloca a folha e o que estava na tela fica onde estava. Abaixo do
-       formulario de sinalizacao (z 15) e acima da barra de ferramentas (z 12). */
-    position:absolute; top:0; right:0; bottom:0; z-index:14;
-    border-left:1px solid var(--border); box-shadow:-8px 0 22px rgba(0,0,0,.45);}
-  /* a ficha nao fica na tela o tempo todo: aparece com a selecao e sai com ela, a nao ser
-     que esteja fixada. Fechada, vira o botao de paineis no canto inferior esquerdo. */
+    display:flex; flex-direction:column; min-height:0; overflow:hidden;}
   #props[hidden], #splitR[hidden], #btnPaineis[hidden]{display:none !important;}
+  /* as duas paginas do painel: so a ativa aparece, e cada uma rola por conta propria */
+  .dpane{display:none; flex:1; min-height:0;}
+  .dpane.on{display:flex; flex-direction:column;}
+  #pane-cfg.on{display:block; overflow-y:auto;}
   .pr-head{flex:none; display:flex; align-items:center; gap:6px; padding:9px 8px 8px 12px;
     border-bottom:1px solid var(--border);}
   .pr-head h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); font-weight:400;}
   .pr-head .ro{margin-left:auto; font-size:10px; letter-spacing:.04em; color:var(--fg-dim);
     border:1px solid var(--border); border-radius:3px; padding:1px 5px;}
-  /* alfinete: fixa a ficha aberta mesmo sem nada selecionado */
-  .pr-head .pin{flex:none; width:24px; height:24px; padding:0; display:inline-flex;
-    align-items:center; justify-content:center; background:transparent; border:1px solid transparent;
-    color:var(--fg-dim); border-radius:4px;}
-  .pr-head .pin:hover{color:var(--fg); background:#333; border-color:var(--border);}
-  .pr-head .pin[aria-pressed="true"]{background:#0d47a1; border-color:#1565c0; color:#fff;}
-  .pr-head .pin svg{width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.8;
-    stroke-linecap:round; stroke-linejoin:round;}
-  /* o botao que traz a ficha de volta quando ela esta fechada */
+  /* o botao que traz o painel de volta quando ele foi fechado pela divisoria */
   #btnPaineis{position:absolute; left:8px; bottom:8px; z-index:12; width:30px; height:30px;
     padding:0; display:inline-flex; align-items:center; justify-content:center;
     background:var(--panel); border:1px solid var(--border); border-radius:5px;
-    color:var(--fg-dim); box-shadow:0 3px 12px rgba(0,0,0,.45);}
+    color:var(--fg-dim); box-shadow:var(--shadow-menu);}
   #btnPaineis:hover{color:var(--fg); border-color:var(--accent);}
   #btnPaineis svg{width:17px; height:17px; fill:none; stroke:currentColor; stroke-width:1.7;
     stroke-linecap:round; stroke-linejoin:round;}
@@ -132,7 +137,7 @@
   .pr-kv{display:grid; grid-template-columns:86px minmax(0,1fr); gap:3px 8px; font-size:12px;}
   .pr-kv .k{color:var(--fg-dim);}
   .pr-kv .v{color:var(--fg); word-break:break-word;}
-  .pr-kv .v.mono{font:11px Consolas,monospace;}
+  .pr-kv .v.mono{font:11px var(--mono);}
   .pr-kv .v.warn{color:var(--warn);}
   .pr-kv .v.dim{color:var(--fg-dim);}
   /* seletor de cor da port: cor "padrao" fica apagada, e o x so acende quando ha cor
@@ -144,75 +149,72 @@
   .pr-cor-x{width:15px; height:15px; line-height:1; padding:0; font-size:12px; cursor:pointer;
     color:var(--fg-dim); background:none; border:1px solid var(--border); border-radius:3px;}
   .pr-cor-x:disabled{opacity:.25; cursor:default;}
-  .pr-tab{width:100%; border-collapse:collapse; font:11px Consolas,monospace;}
-  .pr-tab th{font:10px "Segoe UI",sans-serif; text-transform:uppercase; letter-spacing:.06em;
+  .pr-tab{width:100%; border-collapse:collapse; font:11px var(--mono);}
+  .pr-tab th{font:10px var(--font); text-transform:uppercase; letter-spacing:.06em;
     color:var(--fg-dim); font-weight:400; text-align:left; padding:2px 4px; border-bottom:1px solid var(--border);}
-  .pr-tab td{padding:2px 4px; border-bottom:1px solid #333; color:var(--fg); white-space:nowrap;}
+  .pr-tab td{padding:2px 4px; border-bottom:1px solid var(--border); color:var(--fg); white-space:nowrap;}
   .pr-tab td.n{color:var(--fg-dim); width:24px;}
   .pr-tab td.net{color:var(--accent); overflow:hidden; text-overflow:ellipsis; max-width:0;}
   .pr-tab td.net.sem{color:var(--fg-dim);}
   .pr-empty{font-size:12px; color:var(--fg-dim); line-height:1.5;}
   /* os dois previews ficam presos no rodape do painel: sao a resposta visual de
-     "que simbolo e esse, e em que footprint ele cai" */
+     "que simbolo e esse, e em que footprint ele cai". As legendas tem cor FIXA de proposito:
+     elas pousam sobre o desenho, e o desenho nao muda com o tema — o simbolo na cor da folha
+     do Altium (#8a8a6a sobre o creme), o footprint no fundo escuro de placa (#9a9a9a sobre o
+     preto, em qualquer modo; um texto de tema viraria tinta escura sobre ele no claro) */
   .pr-prev{flex:none; border-top:1px solid var(--border);}
   .pr-prev .pv{position:relative; height:122px; border-bottom:1px solid var(--border);}
   .pr-prev .pv:last-child{border-bottom:0;}
   .pr-prev .pv canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
   .pr-prev .pvt{position:absolute; top:4px; left:7px; z-index:1; font-size:9px; letter-spacing:.09em;
     text-transform:uppercase; color:#8a8a6a; pointer-events:none;}
-  .pr-prev .pv.dark .pvt{color:var(--fg-dim);}
+  .pr-prev .pv.dark .pvt{color:#9a9a9a;}
   .pr-prev .pvh{position:absolute; inset:0; display:grid; place-items:center; padding:10px; text-align:center;
     font-size:11px; color:#8a8a6a; pointer-events:none;}
-  .pr-prev .pv.dark .pvh{color:var(--fg-dim);}
+  .pr-prev .pv.dark .pvh{color:#9a9a9a;}
 
-  /* ── painel lateral (esquerda): duas sub-abas, Componentes e Configurações ── */
-  /* a largura vem da variavel que a divisoria escreve; fechado (0) o painel some inteiro */
-  #side{width:var(--side-w, 330px); min-width:0; flex:none; background:var(--panel);
-    display:flex; flex-direction:column; min-height:0; overflow:hidden;}
-  /* as sub-abas ficam no RODAPE do painel: o indicador sobe para a borda de cima */
+  /* as sub-abas (Configuracoes | Propriedades) ficam no RODAPE do painel: o indicador sobe
+     para a borda de cima */
   .subtabs{display:flex; border-top:1px solid var(--border); padding:0 6px; flex:none; margin-top:auto;}
   .subtab{flex:1; background:transparent; border:0; border-radius:0; color:var(--fg-dim);
     padding:8px 6px 9px; font-size:12px; letter-spacing:.02em; white-space:nowrap;}
   .subtab:hover{color:var(--fg);}
   .subtab[aria-selected="true"]{color:var(--fg); box-shadow:inset 0 2px 0 var(--accent);}
-  .pane{display:none; flex:1; min-height:0; overflow-y:auto;}
-  .pane.on{display:block;}
   .sec{padding:8px 10px; border-bottom:1px solid var(--border);}
+  .sec:empty{display:none;}      /* ancora de painel que nao carregou (Odoo, almoxarifado) */
+  /* o formato da folha (secFolha) mora dentro da secao Folha: sem a moldura de secao da ficha */
+  #folhaFmt .pr-sec{padding:8px 0 0; border-bottom:0;}
   .sec h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); margin-bottom:6px;}
   table{border-collapse:collapse; width:100%; font-size:11px;}
-  th,td{padding:2px 5px; text-align:left; border-bottom:1px solid #333; white-space:nowrap;}
+  th,td{padding:2px 5px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap;}
   tbody tr{cursor:pointer;}
-  tbody tr:hover{background:#333;}
-  tbody tr.sel{background:#0d47a1;}
-  .netitem,.valitem{padding:3px 6px; margin:2px 0; border-radius:3px; background:var(--panel2);
-    cursor:pointer; font-size:11px; border-left:3px solid transparent;}
-  .netitem.sel{background:#0d47a1; color:#fff;}
-  .valitem.err{border-left-color:var(--err);}
-  .valitem.warn{border-left-color:var(--warn);}
+  tbody tr:hover{background:rgba(var(--tint),0.08);}
+  /* linha escolhida: o veu do tema e a barrinha do destaque, como a arvore do hub */
+  tbody tr.sel{background:rgba(var(--tint),0.12); box-shadow:inset 2px 0 0 var(--hi);}
   /* ── a lista de folhas ────────────────────────────────────────────────────
      Uma LINHA por folha, empilhando para baixo: a miniatura faz as vezes de ICONE e o nome
      vem ao lado. Substituiu o <select> da secao Folha, que dizia o nome e mais nada — em
      projeto de duas folhas so dava para saber qual era qual trocando e olhando. O desenho do
      icone e o mesmo do canvas grande (schframe.js » desenhaMiniatura), so sem grade, sem
      selecao e sem net em foco.
-     Os tokens sao os do :root DESTA vista — o .symed-tile do hub veste --surface/--edge/--hi,
-     que aqui so existem dentro do #addmodal/#symmodal e sairiam sem fundo nem borda. */
+     Os tokens sao os nomes DESTA vista (--panel2, --border, --accent), que a ponte do topo
+     amarra no tema do hub. A folha ativa e uma linha de lista escolhida: o veu do tema e a
+     barrinha do destaque, como a arvore do hub (era azul fixo com texto branco). */
   #sheetcards{display:flex; flex-direction:column; gap:4px;}
   .sheetcard{display:flex; align-items:center; gap:8px; width:100%; text-align:left;
     padding:4px; background:var(--panel2); border:1px solid var(--border);
     border-radius:3px; cursor:pointer;}
   .sheetcard:hover{border-color:var(--accent);}
-  .sheetcard.on{background:#0d47a1; border-color:#1565c0;}
+  .sheetcard.on{background:rgba(var(--tint),0.12); box-shadow:inset 2px 0 0 var(--hi);}
   /* o aspecto e o da folha A4 do Altium (11693x8268 = 1.41); o desenho se encaixa dentro
-     dele sozinho, entao folha de outra proporcao sobra moldura em vez de distorcer */
+     dele sozinho, entao folha de outra proporcao sobra moldura em vez de distorcer. O fundo
+     e a MESA do tema, a mesma do canvas grande: e o que aparece antes da miniatura pintar */
   .sheetcard canvas{flex:none; width:54px; aspect-ratio:1.41; display:block;
-    border-radius:2px; background:#3a3a34;}
+    border-radius:2px; background:var(--sunken);}
   .sheetcard .txt{flex:1; min-width:0;}     /* min-width:0 e o que deixa o ellipsis funcionar dentro do flex */
   .sheetcard .nm{display:block; font-size:11px; color:var(--fg);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .sheetcard .k{display:block; font-size:10px; color:var(--fg-dim);}
-  .sheetcard.on .nm{color:#fff;}
-  .sheetcard.on .k{color:#cfe3ff;}
 
   /* configurações: icones de vista, edicao e arquivo */
   .cfg .row{display:flex; gap:6px; align-items:center; flex-wrap:wrap;}
@@ -230,24 +232,19 @@
   .wide.sutil:hover{color:var(--fg); background:var(--panel2);}
   .hint{font-size:11px; color:var(--fg-dim); margin-top:6px; line-height:1.4;}
   .meta{color:var(--fg-dim); font-size:12px;}
-  /* tres abas em 330px: sem o min-width:0 o nowrap de "Configuracoes" empurra e a terceira
-     sai cortada pelo overflow do #side, em vez de as tres encolherem juntas */
+  /* painel estreito: sem o min-width:0 o nowrap de "Configuracoes" empurra e a outra aba sai
+     cortada pelo overflow do painel, em vez de as duas encolherem juntas */
   .subtab{flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis;}
   .gridrow{display:flex; align-items:center; gap:6px; margin-top:6px;}
   .gridrow label{font-size:11px; color:var(--fg-dim);}
   .gridrow select{flex:1; min-width:0;}
-  .atalho{display:flex; align-items:center; gap:6px; padding:2px 0;}
-  .atalho-nome{flex:1; min-width:0; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  .atalho-tecla{font:11px Consolas,monospace; min-width:76px; text-align:center; padding:2px 6px;}
-  .atalho-tecla.mudado{border-color:var(--accent);}
-  .atalho-tecla.ouvindo{background:var(--accent); color:#fff;}
   /* A FICHA EDITA: a caixa fica lisa, cinza, como se estivesse desligada, e só se revela no
      hover ou no foco. Foi o pedido — "uma caixa mais discreta, que fique em cinza claro como
      se tivesse desativada, só ativa quando clica em cima" — e serve ao painel: com borda em
      toda linha, a ficha virava planilha. */
   .pr-inp{width:100%; min-width:0; box-sizing:border-box; background:transparent; color:var(--fg);
-    border:1px solid transparent; border-radius:3px; padding:2px 4px; font:12px 'Segoe UI',sans-serif;}
-  .pr-inp.mono{font-family:Consolas,monospace; font-size:11px;}
+    border:1px solid transparent; border-radius:3px; padding:2px 4px; font:12px var(--font);}
+  .pr-inp.mono{font-family:var(--mono); font-size:11px;}
   .pr-inp:hover{background:var(--panel2); border-color:var(--border);}
   .pr-inp:focus{background:var(--panel); border-color:var(--accent); outline:none; color:var(--fg);}
   .pr-ro{color:var(--fg2); font-size:11px; padding:2px 4px; display:inline-block;}
@@ -267,7 +264,7 @@
   .pr-ib svg{width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.7;
     stroke-linecap:round; stroke-linejoin:round;}
   /* acervo pendente: vermelho com triângulo — não é erro, é trabalho por fazer */
-  /* SUB-ABAS DA FICHA (Geral | Pinos). Nao reusam a .subtabs do painel esquerdo: aquela se
+  /* SUB-ABAS DA FICHA (Geral | Pinos). Nao reusam a .subtabs do rodape do painel: aquela se
      prega no RODAPE (margin-top:auto) e tem borda em cima; esta e um separador no meio do
      conteudo, e a linha do ativo fica embaixo, apontando para o painel que ela abre. */
   .pr-abas{display:flex; gap:2px; border-bottom:1px solid var(--border); margin:2px 0 6px;}
@@ -278,7 +275,7 @@
   .pr-aba[aria-selected="true"]{color:var(--fg); box-shadow:inset 0 -2px 0 var(--accent);}
   .pr-pane[hidden]{display:none !important;}
   .pr-olholinha{margin:0 0 4px;}
-  .pr-alerta{color:#ff6b6b;}
+  .pr-alerta{color:var(--err);}
   .pr-alerta .tri{font-size:9px; vertical-align:1px;}
   .pr-head .folha{margin-left:auto; font-size:10px; color:var(--fg-dim); overflow:hidden;
     text-overflow:ellipsis; white-space:nowrap; max-width:160px;}
@@ -287,15 +284,15 @@
      aviso ("nao esta na PcbLib espelhada") segue no meio, porque ali nao ha desenho para
      atrapalhar; com .mono ele vira uma tarja discreta embaixo. */
   .pr-prev .pvh.mono{inset:auto 0 0 0; display:block; place-items:initial; padding:3px 7px;
-    text-align:left; font-family:Consolas,monospace; font-size:10px; color:var(--fg2);
+    text-align:left; font-family:var(--mono); font-size:10px; color:#9a9a9a;
     background:linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0)); pointer-events:none;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  kbd{font:11px Consolas,monospace; background:var(--panel2); border:1px solid var(--border);
+  kbd{font:11px var(--mono); background:var(--panel2); border:1px solid var(--border);
     border-radius:3px; padding:0 4px; color:var(--fg);}
 
   #status{height:24px; display:flex; gap:16px; align-items:center; padding:0 10px;
     background:var(--panel); border-top:1px solid var(--border);
-    font:12px Consolas,monospace; color:var(--fg-dim);}
+    font:12px var(--mono); color:var(--fg-dim);}
   #status b{color:var(--fg); font-weight:normal;}
   #fatal{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     color:var(--err); font-size:14px; text-align:center; padding:30px; background:var(--bg); z-index:5;}
@@ -303,22 +300,11 @@
   /* ═══ modal "Adicionar componentes" ═══════════════════════════════════════════
      E a aba Biblioteca do hub, de proposito: mesma busca, mesmo seletor de acervo, mesma
      lista e os mesmos previews — so que a ficha da direita virou a LISTA do que vai para o
-     esquema. Os tokens e as classes abaixo sao copia dos do hub.html (tema Grafite escuro),
-     escopados no modal para nao mexer no resto da vista. Se a casca do hub mudar de
-     tokens, este bloco e o lugar para acompanhar. */
+     esquema. As classes abaixo sao copia das do hub.html, escopadas no modal para nao mexer
+     no resto da vista. Os TOKENS nao sao mais copia: este bloco redefinia os do Grafite
+     escuro aqui dentro, e o modal ficava escuro em qualquer tema; agora ele le os do
+     hub-tema.css, como a casca. */
   #addmodal, #symmodal{ position:fixed; inset:0; z-index:50; display:none; align-items:center; justify-content:center;
-    --font:"Inter", system-ui, -apple-system, sans-serif;
-    --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    --sp-1:3px; --sp-2:6px; --sp-3:8px; --sp-4:11px;
-    --r-sm:5px; --r-md:8px; --r-lg:14px;
-    --bg:#0f0f11; --surface:#1a1a1d; --surface-2:#161619; --sunken:#0b0b0d;
-    --text:#f2f2f3; --text-2:#a8a8ae; --text-3:#7a7a80; --text-4:#57575d;
-    --hi:#d8d8dd; --tint:242,242,243; --edge:#2a2a2e; --scroll:#34343a;
-    --line:rgba(var(--tint),0.14); --line-soft:rgba(var(--tint),0.08); --sheet:#fffef2;
-    --ok:#4bbf7b; --warn:#d6a75a; --err:#e0555a; --warn-soft:rgba(214,167,90,0.12);
-    --on-hi:#10120f; --scrim:rgba(11,11,13,0.62);
-    --shadow-menu:0 0 0 1px rgba(var(--tint),0.16), 0 16px 40px rgba(0,0,0,0.65);
-    --aside-w:330px;
     background:var(--scrim); color:var(--text); font:400 13px/1.5 var(--font); }
   #addmodal.on, #symmodal.on{display:flex;}
   #addmodal [hidden], #symmodal [hidden]{display:none !important;}
@@ -477,7 +463,7 @@
      NOME, que tem minmax(0,1fr) para isso. Codigo cortado nao identifica peca nenhuma. */
   .alx-row .tags{display:flex; align-items:center; gap:6px; justify-content:flex-end; min-width:0;}
   .alx-row .pk, .alx-row .mp{white-space:nowrap; padding:1px 7px; border-radius:999px;
-    font-family:Consolas,ui-monospace,monospace;}
+    font-family:var(--mono);}
   .alx-row .pk{font-size:11px; color:var(--text-2); background:rgba(var(--tint),0.12);}
   .alx-row .mp{font-size:10px; color:var(--text-3);
     box-shadow:inset 0 0 0 1px rgba(var(--tint),0.22);}
@@ -518,85 +504,6 @@
 </head>
 <body>
 <div id="main">
-  <aside id="side">
-    <div class="pane on" id="pane-comps">
-      <div class="sec"><h2>Componentes (<span id="compcount">0</span>)</h2>
-        <table id="comptable"><thead><tr><th>Ref</th><th>Componente</th><th>Footprint</th><th>Comment</th></tr></thead><tbody></tbody></table>
-      </div>
-      <div class="sec"><h2>Nets (<span id="netcount">0</span>)</h2><div id="netlist"></div></div>
-      <div class="sec"><h2>Validação</h2><div id="vallist"></div></div>
-    </div>
-
-    <div class="pane cfg" id="pane-cfg">
-      <div class="sec">
-        <h2>Folha</h2>
-        <!-- um cartao por folha, com a miniatura dela; o clique troca a folha ativa -->
-        <div id="sheetcards"></div>
-        <div class="meta" id="meta" style="margin-top:6px;"></div>
-      </div>
-      <div class="sec">
-        <h2>Vista</h2>
-        <div class="row">
-          <button class="ibtn" id="btnFit" title="Centralizar a folha na tela">
-            <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="3"/></svg></button>
-          <button class="ibtn active" id="btnGrid" title="Mostrar/ocultar a grade">
-            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
-          <button class="ibtn" id="btnComment" aria-pressed="false" title="Comment suprimido — clique para mostrar">
-            <svg viewBox="0 0 16 16"><path d="M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z"/><circle cx="8" cy="8" r="2.2"/><path d="M2.5 13.5 L13.5 2.5"/></svg></button>
-          <button class="ibtn active" id="btnPinNames" aria-pressed="true" title="Nomes e numeros de pino visiveis — clique para obedecer o simbolo">
-            <svg viewBox="0 0 16 16"><path d="M1 8h4.5"/><path d="M7.5 5h7M7.5 8h7M7.5 11h4.5"/></svg></button>
-          <!-- guias do arrasto (alinhamento, espaço igual, distância); o desenho do ícone e o título saem do schframe.js -->
-          <button class="ibtn active" id="btnGuias" aria-pressed="true"></button>
-        </div>
-        <!-- O PASSO DA GRADE. As folhas desta casa snapam em 1 mm ou 0,3 mm dentro do proprio
-             Altium, e quase todo vertice de fio dos projetos reais esta fora da grade de 100
-             mil — por isso a lista tem os dois mundos, e nao so os multiplos de 10. -->
-        <div class="gridrow">
-          <label for="gridsel">Passo</label>
-          <select id="gridsel" title="o passo do encaixe e da malha desenhada; o ímã acompanha"></select>
-        </div>
-      </div>
-      <div class="sec">
-        <h2>Arquivo</h2>
-        <button class="wide" id="btnSave" title="Grava o schematic.js">
-          <span id="btnSaveLbl">Salvar</span></button>
-        <div class="hint" id="savehint"></div>
-      </div>
-    </div>
-
-    <!-- ATALHOS. A lista e DESENHADA a partir da mesma tabela que o teclado le (schframe.js »
-         ATALHOS_PADRAO): nao ha texto de atalho escrito a mao nesta pagina, que era o que
-         deixava a dica antiga mentir. -->
-    <div class="pane" id="pane-atalhos">
-      <div class="sec">
-        <h2>Gestos</h2>
-        <div class="hint">Clique seleciona — no fio, o fio <b>inteiro</b>; um segundo clique no mesmo fio pega
-          só o <b>trecho</b> (ou o vértice, na alcinha). <kbd>Alt</kbd>+clique acende a net.
-          Arraste move; arraste no vazio para selecionar vários. <kbd>Shift</kbd> soma à seleção.
-          Arrastando, <kbd>Shift</kbd> anda reto no trilho da guia que está pegando (sem guia, só na
-          horizontal ou na vertical) e <kbd>Ctrl</kbd> solta as guias.
-          Com o fio na mão (<kbd>W</kbd>): o clique fixa o canto, <kbd>Espaço</kbd> inverte o canto,
-          <kbd>Shift</kbd>+<kbd>Espaço</kbd> muda o modo (90°, 45°, livre), <kbd>Backspace</kbd> desfaz o canto,
-          e o botão direito ou <kbd>Esc</kbd> termina — de novo, larga a ferramenta.
-          Botão direito arrasta a tela. <kbd>Esc</kbd> larga o que estiver na mão.</div>
-      </div>
-      <div class="sec">
-        <h2>Teclas</h2>
-        <div id="atalhoslist"></div>
-        <button class="wide sutil" id="atalhosReset" title="devolve todas as teclas ao padrão">Restaurar padrão</button>
-        <div class="hint">Clique na tecla e pressione a nova. <kbd>Esc</kbd> desiste.
-          Teclas que o navegador leva antes da página (Ctrl+W, F5, Ctrl+R…) são recusadas.</div>
-      </div>
-    </div>
-
-    <div class="subtabs" role="tablist">
-      <button class="subtab" role="tab" data-pane="comps" aria-selected="true">Componentes</button>
-      <button class="subtab" role="tab" data-pane="cfg" aria-selected="false">Configurações</button>
-      <button class="subtab" role="tab" data-pane="atalhos" aria-selected="false">Atalhos</button>
-    </div>
-  </aside>
-  <div id="split" title="arraste para redimensionar · duplo clique fecha/abre"></div>
-
   <div id="cvwrap"><canvas id="cv"></canvas><div id="fatal"></div>
     <!-- a barra de fiacao: selecionar, fio e os pousos de alimentacao -->
     <div id="schtb" role="toolbar" aria-label="Ferramentas do esquema">
@@ -645,45 +552,101 @@
       <button id="btnAdd" aria-label="Adicionar componentes"
               title="Escolher componentes das bibliotecas e jogar no esquema (C)">
         <svg viewBox="0 0 24 24"><rect x="3" y="7" width="10" height="10" rx="1"/><path d="M3 10H1M3 14H1M13 10h2M13 14h2"/><path d="M19 5v8M15 9h8"/></svg><span class="lb" id="addBtnN"></span></button>
-      <!-- o tamanho da folha saiu da barra (pedido do usuario em 2026-09-25): ele mora na ficha
-           de propriedades com nada selecionado — o botao de paineis, no canto inferior
-           esquerdo, a prende aberta. O montaBotaoLibs poe o separador antes do "libs". -->
+      <!-- o tamanho da folha saiu da barra (pedido do usuario em 2026-09-25): ele mora em
+           Configuracoes › Folha, no painel da direita. O montaBotaoLibs poe o separador
+           antes do "libs". -->
     </div>
     <!-- a palavra do rotulo: o navegador nao pode abrir prompt() (CLAUDE.md), entao a
          pergunta e este campo no tema da pagina -->
     <div id="netform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
          background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;">
-      <div style="font:11px 'Segoe UI',sans-serif; color:var(--fg2); margin-bottom:5px;">
+      <div style="font:11px var(--font); color:var(--fg2); margin-bottom:5px;">
         nome da net — pouse o mesmo nome em dois pontos e eles viram a mesma rede</div>
       <input id="nettext" type="text" placeholder="ex: SDA" autocomplete="off" spellcheck="false"
         style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-               border-radius:3px; font:12px 'Segoe UI',sans-serif; padding:4px;">
+               border-radius:3px; font:12px var(--font); padding:4px;">
       <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
         <span style="flex:1"></span>
         <button id="netok">OK</button>
         <button id="netcancel">Cancelar</button>
       </div>
     </div>
-    <button id="btnPaineis" hidden title="Abrir a ficha de propriedades e deixá-la fixa — com nada selecionado, é nela que se troca o tamanho da folha">
+    <button id="btnPaineis" hidden title="Abrir a ficha de propriedades e deixá-la fixa — o tamanho da folha fica em Configurações › Folha">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
   </div>
 
   <div id="splitR" class="split" title="arraste para redimensionar · duplo clique fecha/abre"></div>
+  <!-- O PAINEL DA DIREITA, com duas sub-abas no rodapé: Configurações (a folha, a vista, o
+       arquivo) e Propriedades (a ficha do que está selecionado). Ele troca SOZINHO: nada
+       selecionado mostra Configurações, selecionar mostra Propriedades — e as abas continuam
+       ali para trocar à mão. Até a 1.1.1 as Configurações moravam num painel à esquerda, com
+       as abas Componentes e Atalhos; a lista de componentes saiu e os atalhos foram para as
+       Configurações do hub (hub-atalhos.js). -->
   <aside id="props">
     <div class="pr-head">
-      <h2>Propriedades</h2>
+      <h2 id="prTitulo">Propriedades</h2>
       <!-- A FOLHA vem para o cabeçalho: ela vale para a ficha inteira, e repetir "Folha: X"
-           dentro de cada seção era uma linha por item dizendo a mesma coisa. O cracha de
-           "só leitura" saiu junto — a ficha passou a editar designador, posição e rotação,
-           e continuar anunciando leitura seria mentir na primeira linha da tela. -->
+           dentro de cada seção era uma linha por item dizendo a mesma coisa. -->
       <span class="folha mono" id="prFolha" title="a folha deste item"></span>
-      <button class="pin" id="btnPin" aria-pressed="false" title="Fixar a ficha aberta (sem fixar, ela some quando nada está selecionado)">
-        <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3.5 3H6.5L10 10 9 4Z"/><path d="M12 13v7"/></svg></button>
     </div>
-    <div class="pr-body" id="prBody"></div>
-    <div class="pr-prev">
-      <div class="pv"><span class="pvt">símbolo</span><canvas id="prSymCv"></canvas><div class="pvh" id="prSymHint"></div></div>
-      <div class="pv dark"><span class="pvt">footprint</span><canvas id="prFpCv"></canvas><div class="pvh" id="prFpHint"></div></div>
+
+    <div class="dpane cfg" id="pane-cfg">
+      <div class="sec">
+        <h2>Folha</h2>
+        <!-- um cartao por folha, com a miniatura dela; o clique troca a folha ativa -->
+        <div id="sheetcards"></div>
+        <!-- o formato da folha ativa (schframe.js » secFolha) -->
+        <div id="folhaFmt"></div>
+        <div class="meta" id="meta" style="margin-top:6px;"></div>
+      </div>
+      <div class="sec">
+        <h2>Vista</h2>
+        <div class="row">
+          <button class="ibtn" id="btnFit" title="Centralizar a folha na tela">
+            <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <button class="ibtn active" id="btnGrid" title="Mostrar/ocultar a grade">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></button>
+          <button class="ibtn" id="btnComment" aria-pressed="false" title="Comment suprimido — clique para mostrar">
+            <svg viewBox="0 0 16 16"><path d="M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z"/><circle cx="8" cy="8" r="2.2"/><path d="M2.5 13.5 L13.5 2.5"/></svg></button>
+          <button class="ibtn active" id="btnPinNames" aria-pressed="true" title="Nomes e numeros de pino visiveis — clique para obedecer o simbolo">
+            <svg viewBox="0 0 16 16"><path d="M1 8h4.5"/><path d="M7.5 5h7M7.5 8h7M7.5 11h4.5"/></svg></button>
+          <!-- guias do arrasto (alinhamento, espaço igual, distância); o desenho do ícone e o título saem do schframe.js -->
+          <button class="ibtn active" id="btnGuias" aria-pressed="true"></button>
+        </div>
+        <!-- O PASSO DA GRADE. As folhas desta casa snapam em 1 mm ou 0,3 mm dentro do proprio
+             Altium, e quase todo vertice de fio dos projetos reais esta fora da grade de 100
+             mil — por isso a lista tem os dois mundos, e nao so os multiplos de 10. -->
+        <div class="gridrow">
+          <label for="gridsel">Passo</label>
+          <select id="gridsel" title="o passo do encaixe e da malha desenhada; o ímã acompanha"></select>
+        </div>
+        <div class="hint">Os atalhos de teclado desta vista ficam nas Configurações do hub, aba Atalhos.</div>
+      </div>
+      <div class="sec">
+        <h2>Arquivo</h2>
+        <button class="wide" id="btnSave" title="Grava o schematic.js">
+          <span id="btnSaveLbl">Salvar</span></button>
+        <div class="hint" id="savehint"></div>
+      </div>
+      <!-- os ancoras do "Enviar para o Odoo" (hub-odoolista.js) e do almoxarifado
+           (hub-converte.js). A lista de validacao que vinha depois deles saiu a pedido do
+           usuario (2026-09-24): a validacao continua valendo (trava o Salvar e alimenta a
+           ficha), so nao e mais listada aqui. -->
+      <div class="sec" id="odoolista"></div>
+      <div class="sec" id="converte"></div>
+    </div>
+
+    <div class="dpane" id="pane-props">
+      <div class="pr-body" id="prBody"></div>
+      <div class="pr-prev">
+        <div class="pv"><span class="pvt">símbolo</span><canvas id="prSymCv"></canvas><div class="pvh" id="prSymHint"></div></div>
+        <div class="pv dark"><span class="pvt">footprint</span><canvas id="prFpCv"></canvas><div class="pvh" id="prFpHint"></div></div>
+      </div>
+    </div>
+
+    <div class="subtabs" role="tablist">
+      <button class="subtab" role="tab" data-dir="cfg" aria-selected="true">Configurações</button>
+      <button class="subtab" role="tab" data-dir="props" aria-selected="false">Propriedades</button>
     </div>
   </aside>
 </div>
@@ -827,6 +790,7 @@
 <script src="hub-odoolink.js"></script>
 <!-- escolher COMPONENTE do almoxarifado: modulo proprio, injeta o proprio CSS -->
 <script src="hub-almoxpick.js"></script>
+<script src="hub-atalhos.js"></script>
 <!-- guias do arrasto (alinhamento, espaço igual, distância): motor puro, o schframe desenha -->
 <script src="hub-guias.js"></script>
 <!-- o traçado de fio como o do Altium: regra pura, o schframe liga ao mouse -->

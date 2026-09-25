@@ -31,6 +31,8 @@
 <script src="hub-libview.js"></script>
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
 <script src="hub-odoocfg.js"></script>
+<!-- as teclas da vista Esquema: aba Atalhos da configuração (a vista só as lê) -->
+<script src="hub-atalhos.js"></script>
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
 <script src="hub-i18n.js"></script>
 <style>
@@ -4364,14 +4366,23 @@ function skinSet(patch) {
   skinApply();
 }
 sysLight.addEventListener('change', () => { if (skin.mode === 'auto') skinApply(); });
+/* outra aba do hub trocou o tema: as vistas (que carregam o hub-tema.js) ja repintaram
+   sozinhas, e a casca acompanha aqui — senao a casca ficava num tema e a vista noutro */
+window.addEventListener('storage', e => {
+  let mudou = false;
+  for (const k in SKIN_KEY) if (e.key === SKIN_KEY[k] && e.newValue){ skin[k] = e.newValue; mudou = true; }
+  if (mudou) skinApply();
+});
 skinApply();
 
 /* ═══ MODAL DE CONFIGURAÇÃO ════════════════════════════════════
-   Três abas laterais, na ordem em que se procura: Projeto (o que é deste projeto),
-   Layout (o que é desta tela) e Ações (o que fazer dentro do Altium). Os três painéis
-   são construídos de uma vez e alternados por hidden — trocar de aba não pode apagar
-   um caminho digitado e ainda não gravado. */
-const CFG_TABS = [['proj','cfg.tab.proj'], ['layout','cfg.tab.layout'], ['acoes','cfg.tab.acoes']];
+   Quatro abas laterais, na ordem em que se procura: Projeto (o que é deste projeto),
+   Layout (o que é desta tela), Atalhos (as teclas da vista Esquema, hub-atalhos.js) e
+   Ações (o que fazer dentro do Altium). Os painéis são construídos de uma vez e
+   alternados por hidden — trocar de aba não pode apagar um caminho digitado e ainda não
+   gravado. */
+const CFG_TABS = [['proj','cfg.tab.proj'], ['layout','cfg.tab.layout'], ['atalhos','cfg.tab.atalhos'],
+                  ['acoes','cfg.tab.acoes']];
 let cfgTab = 'proj';
 
 /* os textos de ajuda trazem <b> do dicionário — constantes do próprio hub, nunca
@@ -4537,6 +4548,7 @@ function openConfig(tab) {
 
   cfgPaneProjeto(panes.proj);
   cfgPaneLayout(panes.layout);
+  if (window.HubAtalhos) HubAtalhos.pane(panes.atalhos, { toast });
   cfgPaneAcoes(panes.acoes);
 
   const body = el('div', 'cfgm-body');
