@@ -3,6 +3,17 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.1.9 — 2026-09-25
+
+- Biblioteca › Símbolos, a ferramenta de símbolos depois da revisão:
+  - Os pinos casam **pelo nome** quando o símbolo e o componente nomeiam os pinos (A/K, B/C/E, +/−). Casar pelo número invertia o transistor e o zener quando a numeração do símbolo segue outra convenção. Quando só um lado nomeia os pinos (o eletrolítico "1"/"2" contra o símbolo "+"/"−"), a linha vem **a conferir**, desmarcada, e a seção mostra como os pinos casariam ("1 → +  2 → -"); conferido, um clique no cabeçalho marca a seção.
+  - A **pinagem nunca muda calada**: componente com outra contagem de pinos só recebe o símbolo se for marcado à mão. Ao editar um símbolo, quem teria a pinagem trocada fica de fora do "Atualizar", e o hub diz quantos são; salvar só a descrição não pergunta nada.
+  - Componente com desenho próprio do gerador (PNP, conector por vias) vem desmarcado, e categoria de pinagem a definir não recebe desenho padrão.
+  - `Enter` no "Aplicar à categoria" só confirma em cima do botão Aplicar.
+  - Aplicar e salvar são recusados enquanto a sincronização do almoxarifado roda (ela desfaria a gravação no fim), e editar a biblioteca enquanto a extração roda.
+  - Excluir um símbolo mantém a categoria com o desenho padrão. O hub volta a mostrar o desenho do componente de conector e PNP protegido depois de sincronizar.
+  - A tela não esvazia mais quando o hub recarrega com um componente aberto, e os avisos do último lote não somem da ficha.
+
 ## 1.1.8 — 2026-09-25
 
 - Biblioteca › Símbolos, **ferramenta de símbolos**. Símbolo não é componente: o símbolo é o desenho da biblioteca de símbolos; o componente é a peça do almoxarifado que o usa; a linha da lista da esquerda é a categoria.
