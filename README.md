@@ -411,8 +411,8 @@ precisar de servidor.
   clique. O ímã do pino acompanha o passo da grade (60 mil em 100, nunca menos de 20 — o pino
   mora fora da grade nas folhas métricas); ponta de fio, junção, power e port pegam a até 0,6
   passo, e o meio de um fio a menos de meio passo, para o fio paralelo não cair em cima do
-  vizinho nas grades finas. Net label,
-  texto, junção explícita e troca de valor/footprint continuam sendo da IA, no `schematic.js`
+  vizinho nas grades finas. Texto,
+  junção explícita e troca de valor/footprint continuam sendo da IA, no `schematic.js`
   ([AI-GUIDE.md](AI-GUIDE.md), Parte A).
   **Trocar um troca os do mesmo tipo E do mesmo valor.** "Mesmo tipo" era só o nome do
   símbolo, e num projeto real isso junta demais: os 24 `RES [ SMD ]` do `PRJ-UR-DI261924`
