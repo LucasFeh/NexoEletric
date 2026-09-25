@@ -416,7 +416,13 @@ precisar de servidor.
   **Adicionar** junta o item numa lista à direita e **Finalizar** coloca tudo na folha ativa,
   em grade, já selecionado para arrastar.
   Dentro da folha há uma **barra de ferramentas** com o pouco que a mão faz aqui: selecionar,
-  **Fio** (`W`) e os pousos **GND** (`G`), **3V3**, **5V5** e **VIN**.
+  **Fio** (`W`), a **gaveta dos pousos**, **Adicionar componentes** (`C`) e **libs**. A gaveta
+  junta **GND** (`G`), **3V3**, **5V5**, **VIN**, o **rótulo de net** (`L`) e o **No ERC** (`N`)
+  num botão só, como na Active Bar do Altium: a face é o último pouso usado (clicar nela usa de
+  novo, e as teclas também a trocam), e a setinha no canto de baixo, ou o botão direito, abre a
+  lista com os seis. A escolha fica lembrada nesta máquina. O tamanho da folha não fica na
+  barra: está na ficha de propriedades com nada selecionado (o botão de painéis, no canto
+  inferior esquerdo, a prende aberta) e, no app desktop, em **Configurações › Folha**.
   **O fio é traçado como no Altium** (conferido quadro a quadro contra um vídeo dele): do último
   ponto saem duas pernas em L até o cursor, a primeira contínua e a segunda pontilhada; o
   clique fixa **só a primeira**, e a seguinte sai perpendicular. Clicar num ponto elétrico —
@@ -430,8 +436,8 @@ precisar de servidor.
   clique. O ímã do pino acompanha o passo da grade (60 mil em 100, nunca menos de 20 — o pino
   mora fora da grade nas folhas métricas); ponta de fio, junção, power e port pegam a até 0,6
   passo, e o meio de um fio a menos de meio passo, para o fio paralelo não cair em cima do
-  vizinho nas grades finas. Net label,
-  texto, junção explícita e troca de valor/footprint continuam sendo da IA, no `schematic.js`
+  vizinho nas grades finas. Texto,
+  junção explícita e troca de valor/footprint continuam sendo da IA, no `schematic.js`
   ([AI-GUIDE.md](AI-GUIDE.md), Parte A).
   **Trocar um troca os do mesmo tipo E do mesmo valor.** "Mesmo tipo" era só o nome do
   símbolo, e num projeto real isso junta demais: os 24 `RES [ SMD ]` do `PRJ-UR-DI261924`

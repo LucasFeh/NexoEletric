@@ -1285,10 +1285,10 @@ function deleteSel(){
 }
 
 /* ------- ferramentas da barra -------
-   So o que a MAO faz nesta vista: escolher/mover, puxar fio e pousar um terra ou um trilho
-   de alimentacao. Rotulo, texto, junção e troca de valor/footprint sao da IA, no
-   schematic.js — por isso nao existem botoes para eles. */
-let tool = 'select';        /* 'select' | 'wire' | 'power' | 'label' */
+   So o que a MAO faz nesta vista: escolher/mover, puxar fio e, pela gaveta dos pousos, pousar
+   um terra, um trilho de alimentacao, um rotulo de net ou um No ERC. Texto, junção e troca de
+   valor/footprint sao da IA, no schematic.js — por isso nao existem botoes para eles. */
+let tool = 'select';        /* 'select' | 'wire' | 'power' | 'label' | 'noerc' */
 let toolPower = null;       /* { net, style, rot } quando tool === 'power' */
 let toolNet = '';           /* a palavra na mao quando tool === 'label' */
 let wireDraw = null;        /* o fio em curso: o estado do hub-fio.js ({ pts, modo, primeiro, ult }) + ligado */
@@ -1785,20 +1785,42 @@ function pintaGaveta(t, pw){
     gavFace = gavChave(ativo);
     try { localStorage.setItem(GAV_KEY, gavFace); } catch (e) {}
   }
-  const it = gavItem(gavFace), face = $('tbPouso');
-  face.replaceChildren(...[...it.childNodes].map(n => n.cloneNode(true)));
+  /* A FACE TEM LARGURA FIXA: ela leva os seis rotulos empilhados numa celula so e mostra o da
+     vez, entao mede sempre o mais largo. Com o rotulo sozinho ela ia de "net" a "No ERC" e a
+     barra inteira pulava ate 26 px a cada troca — o Adicionar saia de baixo do cursor. */
+  const it = gavItem(gavFace), face = $('tbPouso'), rot = el('span', 'gav-rot');
+  for (const b of gavItens()){
+    const lb = b.querySelector('.lb').cloneNode(true);
+    if (b !== it) lb.classList.add('fora');
+    rot.append(lb);
+  }
+  face.replaceChildren(it.querySelector('svg').cloneNode(true), rot);
   face.title = it.title + ' · a setinha (ou o botão direito) abre os outros pousos';
   face.setAttribute('aria-pressed', String(!!ativo));
 }
 $('tbPouso').addEventListener('click', () => { gavAbre(false); gavItem(gavFace).click(); });
-$('tbPouso').addEventListener('contextmenu', e => { e.preventDefault(); gavAbre(!gavAberta()); });
+/* O botao direito vale na gaveta inteira: na face e na setinha abre e fecha; num item so nao
+   deixa o menu do navegador subir. O pan pelo botao direito que termina solto em cima da face
+   tambem dispara um contextmenu (no Windows ele sai no mouseup, onde o cursor estiver): esse
+   nao e pedido de gaveta, e o listener da window o engole. */
+$('gavPouso').addEventListener('contextmenu', e => {
+  if (panning) return;
+  e.preventDefault();
+  if (!$('gavPousoLista').contains(e.target)) gavAbre(!gavAberta());
+});
 $('tbPousoSeta').addEventListener('click', () => gavAbre(!gavAberta()));
 /* escolher um item fecha a gaveta; o listener do proprio item (mais abaixo) ja agiu */
 $('gavPousoLista').addEventListener('click', e => { if (e.target.closest('button')) gavAbre(false); });
 /* clicar fora fecha. Em CAPTURA na window: o canvas engole o mousedown com
    stopImmediatePropagation, e um listener em bolha nunca veria o clique na folha. */
 window.addEventListener('mousedown', e => {
-  if (gavAberta() && !$('gavPouso').contains(e.target)) gavAbre(false);
+  if (!gavAberta() || $('gavPouso').contains(e.target)) return;
+  gavAbre(false);
+  /* NA FOLHA, O CLIQUE QUE FECHA A GAVETA NAO FAZ MAIS NADA, como no Altium: sem isto ele
+     pousava o pouso armado (ou fixava um canto do fio) em quem so queria desistir da gaveta.
+     O mousedown para aqui, antes da captura do canvas, e o click que vem depois e engolido
+     pelo swallowClick, que o leftClick respeita. */
+  if (e.target === cv && e.button === 0){ e.stopImmediatePropagation(); swallowClick = true; }
 }, true);
 window.addEventListener('blur', () => gavAbre(false));
 pintaGaveta(tool, toolPower);     /* a face nasce com o ultimo pouso usado nesta maquina */
@@ -2734,7 +2756,9 @@ function prPreview(sym, part, fpNome){
 
    Por que aqui e não numa barra nova: é o mesmo lugar onde se edita posição, rotação e
    designador, com a mesma mecânica (campo → commit() → Salvar *). Uma barra nova seria um
-   segundo jeito de editar a mesma coisa.
+   segundo jeito de editar a mesma coisa. NO DESKTOP o seletor saiu da ficha: desde a 1.1.2 ele
+   fica em Configurações › Folha (#folhaFmt), que o renderProps redesenha a cada troca; a
+   mecânica de gravar é a mesma.
 
    O QUE É GRAVADO: `size` (o nome) e `w`/`h` (a medida em mil) no item `sheet` do
    schematic.js. Os dois, sempre — o nome porque é o que o BuildSchematic procura, e a medida
@@ -4559,10 +4583,16 @@ $('symmodal').addEventListener('mousedown', e => { if (e.target === $('symmodal'
 /* ------- teclado ------- */
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    /* a gaveta aberta e a primeira coisa que o Esc fecha: a ferramenta na mao fica */
-    if (gavAberta()){ gavAbre(false); return; }
     if (symModalAberto()){ fechaSymModal(); return; }
     if (addOpen()){ closeAdd(); return; }
+    /* a gaveta aberta vem logo depois dos modais: o Esc a fecha e a ferramenta na mao fica.
+       Quem estava nela pelo teclado volta para a setinha, e nao para o nada. */
+    if (gavAberta()){
+      const dentro = $('gavPousoLista').contains(document.activeElement);
+      gavAbre(false);
+      if (dentro) $('tbPousoSeta').focus();
+      return;
+    }
     if (wireDraw){ endWire(); return; }
     if (tool !== 'select'){ setTool('select'); return; }
     if (mouse){
@@ -4605,6 +4635,7 @@ window.addEventListener('keydown', e => {
    a tecla, e o teclado precisa saber o que executar — sem esta tabela as duas coisas voltariam
    a ser duas copias escritas a mao, que foi o que fez a dica do painel mentir por meses. */
 function fazAcao(id){
+  gavAbre(false);     /* um atalho que age fecha a gaveta: senao ela sobrava atras do modal */
   switch (id){
     case 'add':       openAdd(); return;
     case 'fio':       setTool(tool === 'wire' ? 'select' : 'wire'); return;
