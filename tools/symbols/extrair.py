@@ -55,6 +55,7 @@ Quatro decisões que valem a pena conhecer:
 
 O log de progresso vai para stdout linha a linha, com flush — o hubserver retransmite por SSE.
 """
+import copy
 import hashlib
 import json
 import math
@@ -1019,6 +1020,43 @@ def _lib_vazia():
     return OrderedDict([('format', 'symlib-v1'), ('generated', ''), ('units', 'mil'), ('symbols', [])])
 
 
+# ─── os excluídos ─────────────────────────────────────────────────────────────
+# `excluidos` é a lista do que o USUÁRIO tirou da biblioteca pelo hub: o símbolo excluído e
+# a geometria que uma edição substituiu. Cada entrada é {fp, id, name, desde, motivo}; quem
+# decide é o fingerprint, o nome é só para o humano que abrir o arquivo, e o `id` fica para
+# nunca mais ser dado a outro símbolo (o ledger pode lembrar dele). O arquivo só ganha a
+# linha quando a lista tem alguém — biblioteca sem exclusão sai byte a byte como antes.
+def excluidos_de(lib):
+    fora = []
+    for e in (lib or {}).get('excluidos') or []:
+        if isinstance(e, dict) and isinstance(e.get('fp'), str) and e['fp']:
+            fora.append(OrderedDict([('fp', e['fp']), ('id', str(e.get('id') or '')),
+                                     ('name', str(e.get('name') or '')),
+                                     ('desde', str(e.get('desde') or '')),
+                                     ('motivo', str(e.get('motivo') or ''))]))
+    return fora
+
+
+def exclui_fp(lib, fp, nome, motivo, sid=''):
+    """põe o fingerprint na lista (sem repetir) -> a lista"""
+    lista = excluidos_de(lib)
+    if fp and not any(e['fp'] == fp for e in lista):
+        lista.append(OrderedDict([('fp', fp), ('id', sid or ''), ('name', nome or ''),
+                                  ('desde', date.today().isoformat()), ('motivo', motivo)]))
+    lib['excluidos'] = lista
+    return lista
+
+
+def reabilita_fp(lib, fp):
+    """o usuário pôs de volta, à mão, uma forma que tinha excluído: ela sai da lista"""
+    lista = [e for e in excluidos_de(lib) if e['fp'] != fp]
+    if lista:
+        lib['excluidos'] = lista
+    else:
+        lib.pop('excluidos', None)
+    return lista
+
+
 def _num_id(s):
     m = re.match(r'^s(\d+)$', str(s.get('id', '')))
     return int(m.group(1)) if m else 0
@@ -1082,6 +1120,14 @@ def mescla(lib_atual, achados, hoje, log=_log, ilegiveis=None, stats=None, prefe
     lib = _lib_vazia()
     symbols = lib['symbols']
     symbols.extend(_lib_saneada(lib_atual, log))
+    # O QUE O USUÁRIO TIROU NÃO VOLTA. Excluir um símbolo pelo hub, ou trocar o desenho dele
+    # (a geometria velha sai), deixa o fingerprint em `excluidos`; sem isto a varredura
+    # seguinte achava a mesma forma num .SchDoc antigo e a devolvia como símbolo novo — e o
+    # "Excluir" do hub tinha de avisar que o símbolo podia voltar.
+    excluidos = excluidos_de(lib_atual)
+    if excluidos:
+        lib['excluidos'] = copy.deepcopy(excluidos)
+    fora_fp = {e['fp'] for e in excluidos}
     por_fp = {}
     for s in symbols:
         if s['fp'] in por_fp:
@@ -1091,12 +1137,14 @@ def mescla(lib_atual, achados, hoje, log=_log, ilegiveis=None, stats=None, prefe
         por_fp[s['fp']] = s
     nomes = {s['name'] for s in symbols}
     fontes_antes = {s['fp']: set(s['fontes']) for s in symbols}
-    maior = max([_num_id(s) for s in symbols] or [0])
+    # o id de um excluído também não volta: o ledger pode lembrar dele como o símbolo de um componente
+    maior = max([_num_id(s) for s in symbols] + [_num_id(e) for e in excluidos] or [0])
     preferida = (preferida or '').lower()
 
     novos = OrderedDict()
     classes, origem_de, forma_de = Counter(), {}, {}
     repetidos, arquivos, candidatas, olhos = Counter(), set(), {}, {}
+    barrados = Counter()
     for origem, nome_origem, desc, part, partcount, pins, graphics in achados:
         arquivos.add(origem)
         npins, ngr = normaliza(pins, graphics)
@@ -1104,6 +1152,9 @@ def mescla(lib_atual, achados, hoje, log=_log, ilegiveis=None, stats=None, prefe
         classes[nome.split(PARTE[:3])[0].split(' #')[0] if kind == 'generico' else '(ci) ' + nome_origem] += 1
         alias = nome_origem if partcount <= 1 else nome_origem + PARTE % (part, partcount)
         fp = fingerprint(npins, ngr, kind)
+        if fp in fora_fp and fp not in por_fp:
+            barrados[fp] += 1
+            continue
         d = _desc(desc)
         if d:
             cands = candidatas.setdefault(fp, (Counter(), Counter()))
@@ -1190,10 +1241,12 @@ def mescla(lib_atual, achados, hoje, log=_log, ilegiveis=None, stats=None, prefe
               'repetidos_por': OrderedDict((por_nome[fp], n) for fp, n in repetidos.most_common()),
               'classes': OrderedDict(classes.most_common()),
               'olhos': olhos_postos,
+              'barrados': sum(barrados.values()),
               'desc_disputadas': [(por_nome[fp], venc, todas) for fp, venc, todas in disputadas]}
-    log('%d novo(s), %d repetido(s) em %d arquivo(s)%s' % (
+    log('%d novo(s), %d repetido(s) em %d arquivo(s)%s%s' % (
         len(novos), resumo['repetidos'], resumo['arquivos'],
-        ', %d ilegível(is)' % len(resumo['ilegiveis']) if resumo['ilegiveis'] else ''))
+        ', %d ilegível(is)' % len(resumo['ilegiveis']) if resumo['ilegiveis'] else '',
+        ', %d barrado(s) por terem sido excluídos no hub' % resumo['barrados'] if resumo['barrados'] else ''))
     return lib, resumo
 
 
@@ -1208,7 +1261,11 @@ def escreve_symlib(lib, caminho):
     """Libs/symbols-lib.js: um símbolo por linha (o git diffa bem), gravação atômica"""
     linhas = ['var symbolsLib = {', '"format":"symlib-v1",',
               '"generated":%s,' % json.dumps(lib.get('generated') or datetime.now().strftime('%Y-%m-%d %H:%M')),
-              '"units":"mil",', '"symbols":[']
+              '"units":"mil",']
+    fora = excluidos_de(lib)
+    if fora:
+        linhas.append('"excluidos":%s,' % json.dumps(fora, ensure_ascii=True, separators=(',', ':')))
+    linhas.append('"symbols":[')
     for i, s in enumerate(lib.get('symbols') or []):
         linhas.append((',' if i else '') + _linha(s))
     linhas.append(']};')

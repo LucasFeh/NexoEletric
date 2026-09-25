@@ -994,6 +994,26 @@ def verifica(bruto, sym):
     return compara(esperado(sym), alvo['parts'])
 
 
+def verifica_varios(bruto, syms):
+    """o `verifica` de VÁRIOS componentes com UMA releitura da lib. O lote do
+    /api/symbols/almox-aplicar grava 100+ componentes de uma .SchLib de 1 MB; reler o
+    arquivo inteiro por componente levava 10 s dos 12 s do lote."""
+    lido = sch_leitor.le_schlib(bruto, com_footprints=False)
+    exato, baixo = {}, {}
+    for s in lido['symbols']:
+        exato.setdefault(s['name'], s)
+        baixo.setdefault(s['name'].lower(), s)
+    fora = []
+    for sym in syms:
+        nome = sym.get('name', '')
+        alvo = exato.get(nome) or baixo.get((nome or '').lower())
+        if alvo is None:
+            fora.append('"%s" não voltou na releitura' % nome)
+            continue
+        fora.extend(compara(esperado(sym), alvo['parts']))
+    return fora
+
+
 def patch(caminho, sym, backup_dir=None, verificar=True, backup=True, raiz=None):
     """carrega + aplica + grava (+ relê e confere). Falhou a conferência: volta o backup.
     Com `raiz`, o arquivo entra no ledger do workspace — só DEPOIS da conferência, porque

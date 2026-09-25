@@ -385,6 +385,52 @@ try:
     assert cli.get('/api/symbols/config').get_json()['symlibExiste'] is True
     print('lib add/rename/delete ok')
 
+    # ── lib update: o desenho EDITADO de um símbolo; o que o usuário tirou não volta ──
+    # A ferramenta de símbolos (pedido do dono, 2026-09-25): editar e excluir um SÍMBOLO da
+    # biblioteca, que não é componente. Editar troca a geometria no lugar (id e nome ficam);
+    # a forma velha e a excluída vão para `excluidos`, e a extração seguinte não as devolve.
+    fp_antes = E.le_symlib(symlib)['symbols'][0]['fp']
+    editado = copy.deepcopy(resistor)
+    editado['graphics'][0]['y2'] = 60
+    corpo = {'op': 'update', 'id': 's0001', 'pins': editado['pins'], 'graphics': editado['graphics']}
+    assert cli.post('/api/symbols/lib', json=dict(corpo, id='zzz')).status_code == 404
+    assert cli.post('/api/symbols/lib', json=dict(corpo, pins=[], graphics=[])).status_code == 400, 'vazio não'
+    r = cli.post('/api/symbols/lib', json=dict(corpo, desc='resistor editado no hub'))
+    j = r.get_json()
+    assert r.status_code == 200 and j['ok'] and j['symbol']['id'] == 's0001', j
+    assert j['symbol']['fp'] != fp_antes and j['symbol']['desc'] == 'resistor editado no hub'
+    assert 'hub' in j['symbol']['fontes'] and j['vinculados'] == [] and j['padroes'] == [], j
+    lib = E.le_symlib(symlib)
+    motivos = {e['fp']: (e['motivo'], e['id']) for e in lib['excluidos']}
+    assert motivos.get(fp_antes) == ('editado', 's0001'), motivos
+    assert ('excluido', 's0002') in motivos.values(), 'o excluído pelo delete lá em cima também'
+    with open(symlib, encoding='utf-8') as f:
+        assert '\n"excluidos":[' in f.read(), 'a lista vai para o arquivo'
+    # a extração não devolve a forma velha: ela é barrada, e a lista atravessa a mescla
+    nova, resumo_m = E.mescla(lib, [('velho.SchDoc', 'RES', '', 1, 1, resistor['pins'], resistor['graphics'])],
+                         date.today().isoformat(), log=lambda *a: None)
+    assert resumo_m['barrados'] == 1 and resumo_m['novos'] == 0 and len(nova['symbols']) == len(lib['symbols']), resumo_m
+    assert E.excluidos_de(nova) == E.excluidos_de(lib)
+    # o id de um excluído nunca volta a ser dado
+    j = cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': dict(
+        resistor, name='Resistor 3', graphics=[dict(resistor['graphics'][0], x2=250)])}).get_json()
+    assert j['ok'] and j['symbol']['id'] == 's0003', j['symbol']['id']
+    # desenhar de novo, à mão, a forma excluída a tira da lista
+    r = cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': dict(resistor, name='Resistor de volta')})
+    assert r.status_code == 200 and fp_antes not in {e['fp'] for e in E.excluidos_de(E.le_symlib(symlib))}
+    # arquivo ilegível: recusa, e NÃO grava uma biblioteca vazia por cima
+    with open(symlib, 'rb') as f:
+        bom = f.read()
+    with open(symlib, 'wb') as f:
+        f.write(b'var symbolsLib = {quebrado')
+    assert cli.post('/api/symbols/lib', json={'op': 'rename', 'id': 's0001', 'name': 'x'}).status_code == 500
+    assert le_bytes(symlib) == b'var symbolsLib = {quebrado', 'o arquivo quebrado não pode ser sobrescrito'
+    with open(symlib, 'wb') as f:
+        f.write(bom)
+    for sid in ('s0003', 's0004'):
+        assert cli.post('/api/symbols/lib', json={'op': 'delete', 'id': sid}).get_json()['ok']
+    print('lib update ok (excluidos barram a extração, id não volta, arquivo ilegível não é sobrescrito)')
+
     # ── extract: reserva, 409, e o stream de verdade ────────────────────────
     S._extract_runs.clear()
     r = cli.post('/api/symbols/extract', json={'limite': 1})
@@ -579,6 +625,124 @@ try:
         simn2['valores'] = [v for v in simn2['valores'] if v['altium'] != 'PTH NOVO-DO-ODOO']
         G.grava_espelho_almox(os.path.join(tmp, 'Libs', 'almox-basicos.js'), _vn2, espn2)
         print('save-almox ok (familia pelo nome do simbolo; componente que ainda nao esta na SchLib)')
+
+        # ── /almox-aplicar: UM símbolo da biblioteca em VÁRIOS componentes ──────────────
+        # O pedido do dono (2026-09-25): "atribuir um símbolo a todos os componentes de uma
+        # categoria". Prova: os componentes e o padrão da categoria recebem o desenho nos três
+        # destinos numa passada (espelho, .SchLib com UM backup, ledger com o vínculo); a
+        # pinagem casa pelo NÚMERO, então a polaridade não troca; editar o símbolo diz quem o
+        # usa e o mesmo lote leva o desenho novo; salvar um componente à mão tira o vínculo
+        # dele; o guardião dá o padrão a quem entra depois; excluir o símbolo desfaz os
+        # vínculos e deixa os desenhos. Os arquivos voltam como estavam no fim (copy2 guarda o
+        # mtime): o teste do almox-sync, lá embaixo, conta os protegidos da fixture.
+        cam_cap = os.path.join(tmp, 'Libs', 'Almox', 'CAPACITOR ALMOX.SchLib')
+        basicos = os.path.join(tmp, 'Libs', 'almox-basicos.js')
+        guarda = os.path.join(tmp, 'bk-aplicar')
+        os.makedirs(guarda)
+        salvos = [ledger, cam_cap, cam, symlib] + [os.path.join(tmp, 'Libs', f) for f in G.ESPELHOS_ALMOX]
+        for n, f in enumerate(salvos):
+            if os.path.isfile(f):
+                shutil.copy2(f, os.path.join(guarda, str(n)))
+        try:
+            _vc, espc = G.le_espelho_almox(basicos)
+            simc = next(x for x in espc['symbols'] if x['name'] == 'CAPACITOR')
+            comps_c = [v['altium'] for v in simc['valores']]
+            nums = [q['num'] for q in simc['parts'][0]['pins']]
+            assert len(comps_c) >= 2 and len(nums) == 2, (comps_c, nums)
+            # os MESMOS números do componente, nas posições trocadas: a biblioteca guarda os pinos
+            # ordenados por posição, então casar pela ordem inverteria a polaridade
+            cpol = {'name': 'Cap polarizado teste', 'kind': 'generico',
+                    'pins': [pin(nums[1], -200, 0, 180), pin(nums[0], 200, 0, 0)],
+                    'graphics': [{'g': 'line', 'x1': -100, 'y1': -60, 'x2': -100, 'y2': 60},
+                                 {'g': 'arc', 'cx': 60, 'cy': 0, 'r': 60, 'sa': 120, 'ea': 240},
+                                 {'g': 'label', 'x': -140, 'y': 60, 'text': '+', 'size': 8}]}
+            j = cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': cpol}).get_json()
+            assert j['ok'], j
+            sid = j['symbol']['id']
+            um = {'familia': 'CAPACITOR', 'componente': comps_c[0]}
+            assert cli.post('/api/symbols/almox-aplicar', json={'lib': sid}).status_code == 400
+            assert cli.post('/api/symbols/almox-aplicar', json={'lib': sid, 'alvos': [{'familia': 'CAPACITOR'}]}).status_code == 400
+            assert cli.post('/api/symbols/almox-aplicar', json={'lib': 'zzz', 'alvos': [um]}).status_code == 404
+            r = cli.post('/api/symbols/almox-aplicar', json={'lib': sid, 'alvos': [dict(um, componente='NAO EXISTE')]})
+            assert r.status_code == 404 and r.get_json()['falhas'], r.get_json()
+
+            bkdir = os.path.join(tmp, 'Libs', 'Almox', 'Backup-hub')
+            nbk = lambda: len([f for f in os.listdir(bkdir) if f.startswith('CAPACITOR ALMOX.')]) if os.path.isdir(bkdir) else 0   # noqa: E731
+            bk0 = nbk()
+            alvos = [{'familia': 'CAPACITOR', 'componente': c} for c in comps_c] + [dict(um, componente='NAO EXISTE')]
+            r = cli.post('/api/symbols/almox-aplicar', json={'lib': sid, 'alvos': alvos, 'padroes': ['CAPACITOR'], 'altium': True})
+            j = r.get_json()
+            assert r.status_code == 200 and j['ok'] and j['protegido'] and not j['ocupadas'], j
+            assert sorted(f['componente'] for f in j['feitos']) == sorted(comps_c) and all(f['altium'] for f in j['feitos']), j
+            assert [f['componente'] for f in j['falhas']] == ['NAO EXISTE'], j['falhas']
+            assert all(f['pinagem'] == 'numero' for f in j['feitos']) and [p['simbolo'] for p in j['padroes']] == ['CAPACITOR']
+            assert nbk() == bk0 + 1, 'UMA gravação da .SchLib para o lote inteiro'
+            for f in j['feitos']:
+                px = {q['num']: q['x'] for q in f['parts'][0]['pins']}
+                assert px[nums[0]] == 200 and px[nums[1]] == -200, ('a polaridade trocou', px)
+            fp1 = G.fp_parts(j['feitos'][0]['parts'])
+            _vc2, espc2 = G.le_espelho_almox(basicos)
+            simc2 = next(x for x in espc2['symbols'] if x['name'] == 'CAPACITOR')
+            assert all(G.fp_parts(v['parts']) == fp1 for v in simc2['valores']), 'espelho: os componentes'
+            assert G.fp_parts(simc2['parts']) == G.fp_parts(j['padroes'][0]['parts']), 'espelho: o padrão da categoria'
+            lido = G.le_familia(cam_cap)
+            assert all(G.fp_parts(lido[c]) == fp1 for c in comps_c), '.SchLib'
+            led = G.carrega_ledger(tmp)
+            assert all(led['protegidos']['CAPACITOR'][c]['lib'] == sid for c in comps_c), 'ledger: o vínculo'
+            assert led['padroes']['CAPACITOR']['lib'] == sid
+            v = cli.get('/api/symbols/lib-vinculos?lib=' + sid).get_json()
+            assert sorted(x['componente'] for x in v['componentes']) == sorted(comps_c) and v['padroes'] == {'CAPACITOR': sid}, v
+
+            # editar o símbolo: a resposta diz quem o usa, e o mesmo lote leva o desenho novo
+            cpol2 = copy.deepcopy(cpol)
+            cpol2['graphics'][0]['y2'] = 80
+            j = cli.post('/api/symbols/lib', json={'op': 'update', 'id': sid, 'pins': cpol2['pins'],
+                                                   'graphics': cpol2['graphics']}).get_json()
+            assert j['ok'] and len(j['vinculados']) == len(comps_c) and j['padroes'] == ['CAPACITOR'], j
+            r = cli.post('/api/symbols/almox-aplicar', json={
+                'lib': sid, 'alvos': [{'familia': x['familia'], 'componente': x['componente']} for x in j['vinculados']],
+                'padroes': j['padroes'], 'altium': True})
+            j2 = r.get_json()
+            fp2 = G.fp_parts(j2['feitos'][0]['parts'])
+            assert r.status_code == 200 and fp2 != fp1 and all(f['pinagem'] == 'numero' for f in j2['feitos']), j2
+            assert all(G.fp_parts(G.le_familia(cam_cap)[c]) == fp2 for c in comps_c)
+
+            # salvar UM componente à mão tira o vínculo dele: o desenho deixou de ser o do símbolo
+            r = cli.post('/api/symbols/save-almox', json={'familia': 'CAPACITOR', 'componente': comps_c[0],
+                                                          'parts': j2['feitos'][0]['parts'], 'altium': False})
+            assert r.status_code == 200 and 'lib' not in G.carrega_ledger(tmp)['protegidos']['CAPACITOR'][comps_c[0]]
+
+            # o guardião dá o padrão da categoria a quem ENTRA DEPOIS: comps_c[1] vira um componente
+            # novo (sem proteção, sem desenho próprio) e a sincronização o protege com o padrão
+            with G._lock:
+                led = G.carrega_ledger(tmp)
+                assert G._tira_prot(led, 'CAPACITOR', comps_c[1])
+                _v3, esp3 = G.le_espelho_almox(basicos)
+                s3 = next(x for x in esp3['symbols'] if x['name'] == 'CAPACITOR')
+                next(x for x in s3['valores'] if x['altium'] == comps_c[1]).pop('parts', None)
+                G.grava_espelho_almox(basicos, _v3, esp3)
+                repostos, _orf, _fams = G.depois(tmp, led, log=lambda *a: None)
+                G.grava_ledger(tmp, led)
+            p = led['protegidos']['CAPACITOR'][comps_c[1]]
+            assert p['lib'] == sid and p['fp'] == G.fp_parts(j2['padroes'][0]['parts']), p
+            assert any(x['componente'] == comps_c[1] for x in repostos), repostos
+            assert G.fp_parts(G.le_familia(cam_cap)[comps_c[1]]) == p['fp'], 'e chegou à .SchLib'
+
+            # excluir o símbolo: os componentes ficam com o desenho (é cópia), só perdem o vínculo
+            j = cli.post('/api/symbols/lib', json={'op': 'delete', 'id': sid}).get_json()
+            assert j['ok'] and j['desvinculados'] == 2, j          # comps_c[1] e o padrão
+            led = G.carrega_ledger(tmp)
+            assert not any(x.get('lib') == sid for x in led['protegidos']['CAPACITOR'].values())
+            assert 'CAPACITOR' not in led['padroes']
+            assert G.fp_parts(G.le_familia(cam_cap)[comps_c[1]]) == p['fp'], 'o desenho fica'
+            assert cli.post('/api/symbols/almox-aplicar', json={'lib': sid, 'alvos': [um]}).status_code == 404
+            print('almox-aplicar ok (%d componentes + o padrão numa passada, polaridade pelo número, '
+                  'vínculo, padrão para quem entra depois, excluir desvincula)' % len(comps_c))
+        finally:
+            for n, f in enumerate(salvos):
+                b = os.path.join(guarda, str(n))
+                if os.path.isfile(b):
+                    shutil.copy2(b, f)
 
         # ── atualiza_espelhos: MARCAS sempre, GEOMETRIA so no caminho manual ──
         # A inversao de autoridade (2026-09-14) parte esta funcao em duas. Na SINCRONIZACAO
