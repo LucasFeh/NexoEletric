@@ -266,7 +266,7 @@ Casca única com:
   `apply-report.txt`/datas de `board.js`/`schematic.js`, mais um `history.jsonl` opcional por
   projeto).
 - **Configurações** — clicar na **marca**, na quina superior esquerda, abre um menuzinho
-  com **Configurações**; ele abre o modal, com três abas laterais. O cabeçalho ficou só
+  com **Configurações**; ele abre o modal, com quatro abas laterais. O cabeçalho ficou só
   com a marca, o seletor de projeto e o estado do servidor: `ExportLibs`, `Reindexar` e o
   **⋮** da barra do projeto, que viviam soltos ali, entraram para o modal.
   - **Projeto** (a primeira) — o projeto aberto e a exclusão. (A **pasta padrão do BOM**
@@ -284,9 +284,18 @@ Casca única com:
     passo atrás) · Monoespaçada. Os quatro são atributos no `<html>`
     (`data-mode`/`data-theme`/`data-font`) já lidos no `<head>`, então a página não abre
     de um jeito para virar no primeiro frame — e as pilhas de família moram no CSS, não
-    no JS, para não existirem em dois lugares. As vistas Esquema e PCB e a prévia do BOM
-    seguem escuras e com fonte própria: é a cor de trabalho do Altium, e elas têm folha
-    de estilo separada.
+    no JS, para não existirem em dois lugares. A vista **Esquema segue o mesmo tema**
+    (carrega o `hub-tema.css` e o `hub-tema.js`) e troca ao vivo quando ele muda aqui, sem
+    recarregar a folha; fica de fora só o que é desenho — a folha do Altium com o que está
+    nela. A vista PCB e a prévia do BOM seguem escuras, com folha de estilo própria.
+  - **Atalhos** — as teclas da vista Esquema, no molde do *Keyboard Shortcuts* do VSCode:
+    busca no topo (por texto, ou pelo botão de teclado, que pesquisa pela combinação
+    pressionada) e a tabela **Comando · Atalho · Quando · Origem**, com os gestos do mouse
+    como linhas fixas. Duplo clique numa linha (ou `Enter`, ou o lápis) abre a caixa
+    "pressione a combinação desejada e depois Enter", que avisa na hora tecla ocupada ou do
+    navegador; `Esc` desiste. Cada linha trocada tem o ↺ para voltar ao padrão, e
+    **Restaurar o padrão** desfaz tudo. A tabela sai da mesma lista que o teclado da vista
+    lê (`hub-atalhos.js`), e a troca vale na hora, inclusive para a vista Esquema aberta.
   - **Ações** — os tutoriais. Os 5 comandos do Altium documentados (comando real embaixo
     do rótulo, copiável) e, embaixo, o fluxo de um projeto novo do começo ao fim. Só
     **Rescan** executa de fato (reindexa `Projects\` no servidor); os demais
@@ -324,10 +333,16 @@ precisar de servidor.
 - **Esquema** — renderiza `Projects\<nome>\schematic.js` com os gráficos reais de
   `Libs\schlib.js`: símbolos, fios, junctions, net labels, power ports, designator/comment.
   Zoom com a roda, **botão direito arrasta a tela**, cursor em mil, `Alt`+clique numa net
-  destaca ela na folha inteira (com os pinos membros). O painel da esquerda é redimensionável pela
-  divisória (duplo clique fecha/abre, como nas abas Laser e BOM) e tem três sub-abas no
-  rodapé: **Componentes** (lista, nets e validação), **Configurações** (folha, centralizar,
-  o passo da grade, os olhos de comment e de pino, e o **Salvar**) e **Atalhos**.
+  destaca ela na folha inteira (com os pinos membros). O painel fica **à direita**, igual ao
+  do app desktop, redimensionável pela divisória (duplo clique fecha/abre, como nas abas Laser
+  e BOM), com duas sub-abas no rodapé: **Configurações** (as folhas e o formato da ativa,
+  centralizar, o passo da grade, os olhos de comment e de pino, as guias, o **Salvar**, Odoo e
+  almoxarifado) e **Propriedades** (a ficha do que está selecionado). Ele troca sozinho: sem
+  nada selecionado mostra as Configurações, selecionar mostra as Propriedades — e as abas
+  continuam lá para trocar à mão. A lista de componentes, a de nets e a de validação saíram
+  com o antigo painel da esquerda (pedido de 2026-09-25, para a web ficar igual ao desktop), e
+  os atalhos foram para as configurações do hub; o hub clássico não tem esse modal, e nele as
+  teclas trocadas valem, mas não se editam.
   **Bolinha e ponte.** Onde três ou mais ramos se encontram — um T, uma estrela de pontas de
   fio, um pino no meio de um fio — nasce a **bolinha** de conexão; onde dois fios só se
   **cruzam**, sem nada declarado ali, o de cima vira uma **ponte** (um arco de passagem). Os
@@ -337,8 +352,8 @@ precisar de servidor.
   **Cor é identidade elétrica, seleção é contorno.** Um fio sai laranja quando pertence à net
   em foco e azul-escuro quando não; quem está selecionado ganha um contorno tracejado por
   cima, sem trocar de cor — a mesma convenção da vista PCB e do Altium. `Alt`+clique num fio,
-  pino, rótulo, power port ou junção põe a net dele em foco (o nome aparece na barra de status
-  e a linha acende no painel de nets); o clique simples só seleciona — acender a net inteira a
+  pino, rótulo, power port ou junção põe a net dele em foco (o nome aparece na barra de status);
+  o clique simples só seleciona — acender a net inteira a
   cada clique fazia pegar uma perninha parecer pegar o circuito todo. `Esc`, o clique no
   vazio, a troca de folha e qualquer nova seleção largam o foco junto. Antes a seleção
   recoloria o objeto, e a net saía metade azul metade laranja, com o laranja sobrevivendo ao
@@ -347,7 +362,7 @@ precisar de servidor.
   seleciona vários (esquerda→direita só quem couber inteiro; direita→esquerda quem encostar),
   `Shift` soma à seleção. `Del` apaga, `Espaço` gira, `X` espelha na **horizontal**, `Y` na
   **vertical**, `Ctrl+A` seleciona a folha e `Ctrl+Z` desfaz — e **todas essas teclas são
-  trocáveis** na sub-aba **Atalhos**, que é desenhada a partir da mesma tabela que o teclado
+  trocáveis** nas configurações do hub, aba **Atalhos**, desenhada a partir da mesma tabela que o teclado
   lê (não há lista de atalhos escrita à mão em lugar nenhum). Teclas que o navegador leva
   antes da página (`Ctrl+W`, `F5`, `Ctrl+R`…) são recusadas na hora de gravar.
   **No fio, dois cliques, como no Altium.** O primeiro clique pega o **fio inteiro** (a
@@ -364,7 +379,7 @@ precisar de servidor.
   selecionado junto: aí a ponta que estava no pino fica presa ao pino, inclusive se ele girar
   no meio do arrasto. Sem o fio na seleção, a net se desfaz quando o pino sai da ponta — e as
   guias alinham o pino com o fio que ele deixou, que é como se volta a encostar nele.
-  **O passo da grade é escolhido** na sub-aba Configurações — 100/50/25/10 mil e também
+  **O passo da grade é escolhido** na aba Configurações do painel — 100/50/25/10 mil e também
   1 mm / 0,5 mm / 0,25 mm. O métrico está ali porque as folhas desta casa snapam em 1 mm ou
   0,3 mm dentro do próprio Altium: quase todo vértice de fio dos projetos reais está fora da
   grade de 100 mil, e um editor que só soubesse 100 mil empurraria o vértice para longe do
@@ -396,8 +411,7 @@ precisar de servidor.
   num botão só, como na Active Bar do Altium: a face é o último pouso usado (clicar nela usa de
   novo, e as teclas também a trocam), e a setinha no canto de baixo, ou o botão direito, abre a
   lista com os seis. A escolha fica lembrada nesta máquina. O tamanho da folha não fica na
-  barra: está na ficha de propriedades com nada selecionado (o botão de painéis, no canto
-  inferior esquerdo, a prende aberta) e, no app desktop, em **Configurações › Folha**.
+  barra: está em **Configurações › Folha**, no painel.
   **O fio é traçado como no Altium** (conferido quadro a quadro contra um vídeo dele): do último
   ponto saem duas pernas em L até o cursor, a primeira contínua e a segunda pontilhada; o
   clique fixa **só a primeira**, e a seguinte sai perpendicular. Clicar num ponto elétrico —
@@ -432,14 +446,13 @@ precisar de servidor.
   o tanto que devolve o maior número de pinos de mesmo número ao ponto antigo — dizendo no
   aviso quantos voltaram. Sem isso os fios ficavam onde estavam e a ligação se desfazia sem
   uma linha de aviso, porque a extração de nets casa por coordenada exata.
-  À direita fica o painel **Propriedades**, no espírito do painel homônimo do Altium
+  A aba **Propriedades** do painel é a ficha, no espírito do painel homônimo do Altium
   (designator e parte são editáveis; o resto é leitura): designator, comment, descrição, símbolo (e em que nome ele foi resolvido),
   acervo de origem, footprint, posição/rotação, parâmetros e a tabela de pinos com a net de
   cada um — com o **símbolo e o footprint desenhados no rodapé**. Não há um campo editável
-  sequer: esta vista serve para olhar e posicionar. A ficha **não fica na tela o tempo
-  todo**: entra quando algo é selecionado e sai junto, a não ser que o **alfinete** (canto
-  superior direito dela) a prenda aberta; fechada, ela vira o botão de painéis no canto
-  inferior esquerdo da folha. Ambos os painéis são redimensionáveis.
+  sequer: esta vista serve para olhar e posicionar. A ficha entra quando algo é
+  selecionado e dá lugar às Configurações quando a seleção acaba; o painel fechado pela
+  divisória vira o botão de painéis no canto inferior esquerdo da folha.
   Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com
   limpeza da folha** (confirmação SIM).
 - **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
