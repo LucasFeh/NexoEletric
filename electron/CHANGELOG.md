@@ -3,6 +3,11 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.1.7 — 2026-09-25
+
+- Vista Esquema, **gaveta dos pousos** na barra de ferramentas, como na Active Bar do Altium: GND, 3V3, 5V5, VIN, o rótulo de net e o No ERC ficam num botão só. A face do botão é o último pouso usado, e clicar nela usa de novo; a setinha no canto de baixo, ou o botão direito, abre a lista com os seis. As teclas (`G`, `L`, `N`) continuam valendo e também trocam a face, e a escolha fica lembrada nesta máquina. Clicar fora ou `Esc` fecham a gaveta, e o clique na folha que a fecha não pousa nada.
+- O botão do tamanho da folha (**A4**) saiu da barra: o formato continua em **Configurações › Folha**.
+
 ## 1.1.6 — 2026-09-25
 
 - Vista Esquema, **fio traçado como no Altium** (ferramenta Fio, `W`): do último ponto saem duas pernas em L até o cursor, a primeira contínua e a segunda pontilhada; o clique fixa só a primeira, e a seguinte sai perpendicular. Clicar num ponto elétrico (pino, ponta ou **meio** de outro fio, junção, power, port) completa o L e termina o fio; no meio de um fio nasce o T. `Espaço` inverte o canto, `Shift+Espaço` troca o modo (90°, 45° ou livre, lembrado nesta máquina) e `Backspace` desfaz o último canto (sem canto fixado, desiste do fio). Botão direito ou `Esc` terminam no último canto fixado, e o duplo clique termina no ponto clicado; a ferramenta continua na mão, e um segundo botão direito ou `Esc` a larga. `Esc`, trocar de ferramenta e trocar de folha agora **gravam** o fio em curso — antes ele sumia. O fio gravado sai sem ponto repetido nem vértice no meio de uma reta.
