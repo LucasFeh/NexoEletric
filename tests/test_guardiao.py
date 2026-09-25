@@ -320,4 +320,36 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# ── casa_pinos: os pinos casam pelo que DIZEM (a mesma regra do hub-symed.js » casaPinos) ──
+# Os casos medidos nos dados reais em 2026-09-25: casar pelo número inverte o transistor e o
+# zener quando a numeração do símbolo segue outra convenção; pela ordem, o LED.
+def _p(num, name, x=0):
+    return {'num': num, 'name': name, 'x': x, 'y': 0, 'len': 100, 'orient': 0, 'type': 'Passive'}
+
+
+def _x(parts, num):
+    return next(p['x'] for p in parts[0]['pins'] if p['num'] == num)
+
+
+bc817 = {'pins': [_p('1', 'B', -200), _p('2', 'E', 100), _p('3', 'C', 200)], 'graphics': []}
+tr = [{'part': 1, 'pins': [_p('1', 'C'), _p('2', 'B'), _p('3', 'E')], 'graphics': []}]
+novas, modo = G.aplica_simbolo(tr, bc817)
+assert modo == 'nome' and _x(novas, '1') == 200 and _x(novas, '2') == -200, (modo, novas)
+assert sorted((p['num'], p['name']) for p in novas[0]['pins']) == [('1', 'C'), ('2', 'B'), ('3', 'E')]
+novas, modo = G.aplica_simbolo([{'part': 1, 'pins': [_p('1', 'A'), _p('2', 'K')], 'graphics': []}],
+                               {'pins': [_p('1', 'K', -200), _p('2', 'A', 200)], 'graphics': []})
+assert modo == 'nome' and _x(novas, '1') == 200, 'o anodo vai onde o zener desenhou o anodo'
+novas, modo = G.aplica_simbolo([{'part': 1, 'pins': [_p('K', 'K'), _p('A', 'A')], 'graphics': []}],
+                               {'pins': [_p('1', 'A', -200), _p('2', 'K', 200)], 'graphics': []})
+assert modo == 'nome' and _x(novas, 'K') == 200 and _x(novas, 'A') == -200, 'o LED numera pela letra'
+cap = {'pins': [_p('2', '2', -200), _p('1', '1', 200)], 'graphics': []}
+novas, modo = G.aplica_simbolo([{'part': 1, 'pins': [_p('1', '1'), _p('2', '2')], 'graphics': []}], cap)
+assert modo == 'numero' and _x(novas, '1') == 200
+assert G.casa_pinos([_p('1', 'C'), _p('2', 'A')], [_p('1', '1'), _p('2', '2')])[0] == 'confira', 'tântalo'
+assert G.casa_pinos(cap['pins'], [_p('1', '+'), _p('2', '-')])[0] == 'confira'
+assert G.casa_pinos(cap['pins'], [_p('3', '3'), _p('4', '4')])[0] == 'ordem'
+assert G.casa_pinos(cap['pins'], [_p('1', '1')])[0] == 'simbolo'
+assert G.e_placeholder('REGULADOR [PINAGEM A DEFINIR]') and not G.e_placeholder('REGULADOR [3P]')
+print('casa_pinos ok (pelo nome: transistor, zener, LED; pelo número; confira; ordem)')
+
 print('test_guardiao OK')

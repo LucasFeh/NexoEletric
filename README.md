@@ -736,21 +736,37 @@ que colidem) ou use **Aplicar**, cujo texto diz onde o desenho vai cair:
   guardião o aplica na sincronização, inclusive nas famílias cujo desenho da `.SchLib` vem de um
   modelo da biblioteca da casa.
 
-Os pinos casam **pelo número** quando o símbolo e o componente têm os mesmos números (o pino 1
-do desenho recebe o pino 1 da peça, com o nome e o olho dela) — é o que preserva a polaridade de
-capacitor, diodo e transistor; só quando os números não batem (A/K contra 1/2) eles casam pela
-ordem, e o hub avisa para conferir.
+Os pinos casam **pelo que dizem**: o número, o nome e o olho de cada pino continuam os do
+componente, e o que se decide é qual posição do desenho cada um ocupa. Quando os dois lados
+nomeiam os pinos com o mesmo conjunto (A/K, B/C/E, G/D/S, +/−) eles casam **pelo nome** — é o
+que garante a polaridade: a família TRANSISTOR numera 1=C 2=B 3=E e o BC817 da biblioteca
+1=B 2=E 3=C, e há zener na biblioteca com 1=K 2=A contra o 1=A 2=K dos diodos. Quando nenhum
+lado diz nada (pinos "1", "2"), casam **pelo número**. Quando um lado diz e o outro não — o
+eletrolítico do almoxarifado numera "1"/"2" e o símbolo chama os pinos de "+"/"−" —, a linha
+vem **a conferir**, desmarcada, e a seção mostra como eles casariam (`1 → +  2 → -`): conferido
+de olho, um clique no cabeçalho da seção marca todos. Componente com **desenho próprio do
+gerador** (o PNP da família TRANSISTOR, o conector por vias) também vem desmarcado. E a
+**pinagem nunca muda calada**: componente com outra contagem de pinos só recebe o símbolo se for
+marcado à mão, e o servidor recusa sem esse pedido.
 
 O **botão direito** num símbolo abre o cardápio dele: *Editar símbolo*, *Aplicar…*,
 *Renomear…* e *Excluir símbolo…*. **Editar** abre o desenho do símbolo no canvas (a marca
 SÍMBOLO no topo diz que não é um componente) e *Salvar símbolo* grava na biblioteca; se ele já
-estava aplicado, o hub pergunta se leva o desenho novo aos componentes que o usam — o vínculo
-fica no ledger (`protegidos[família][componente].lib` e `padroes[categoria]`), e salvar um
-componente à mão desfaz o vínculo dele. **+ Novo símbolo** começa um símbolo em branco, com nome,
-que entra na biblioteca no primeiro *Salvar símbolo*; **Guardar como símbolo** guarda o desenho
-que está no canvas como um símbolo novo. **Excluir** tira o símbolo da biblioteca de vez — a
-extração não o traz de volta — e os componentes que o usavam ficam com o desenho, só sem o
-vínculo.
+estava aplicado, o hub pergunta se leva o desenho novo aos componentes que ainda têm o desenho
+de antes (salvar só a descrição não pergunta nada; quem teria a pinagem trocada fica de fora, e
+o hub diz quantos) — o vínculo fica no ledger (`protegidos[família][componente].lib` e
+`padroes[categoria]`), e salvar um componente à mão desfaz o vínculo dele. **+ Novo símbolo**
+começa um símbolo em branco, com nome, que entra na biblioteca no primeiro *Salvar símbolo*;
+**Guardar como símbolo** guarda o desenho que está no canvas como um símbolo novo. **Excluir**
+tira o símbolo da biblioteca de vez — a extração não o traz de volta — e os componentes que o
+usavam ficam com o desenho, só sem o vínculo; a categoria de que ele era o padrão continua com
+esse desenho como padrão.
+
+Aplicar e salvar componente são recusados (409) enquanto a **sincronização** do almoxarifado
+roda, e editar a biblioteca de símbolos enquanto a **extração** roda: as duas são subprocessos
+que regravam no fim o que leram no começo, e desfariam a gravação calados. Depois de cada
+sincronização, o componente protegido pelo hub cujo desenho o gerador refez (conector por vias,
+PNP) volta ao desenho do hub também no espelho — antes só a `.SchLib` o recebia.
 
 **Salvar** grava em dois lugares de uma vez: `Libs/schlib.js` (o espelho que o hub desenha) e,
 com a caixa *Altium* marcada, a SchLib da casa — a viva, resolvida pela ordem de

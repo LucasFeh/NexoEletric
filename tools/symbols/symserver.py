@@ -129,6 +129,33 @@ def _is_local(req):
         return False
 
 
+# ─── gravação do hub x corrida em subprocesso ─────────────────────────────────
+# A sincronização (guardiao.py) e a extração (extrair.py) rodam em SUBPROCESSO: leem o
+# ledger / o espelho / a symbols-lib no começo e gravam no fim o que leram. Os locks deste
+# processo não os alcançam, então uma gravação do hub no meio de uma corrida era desfeita
+# calada no fim dela — e a resposta tinha dito "protegido". Enquanto uma dessas gravações
+# acontece, o lock da corrida fica com ela (o stream recusa começar); com uma corrida
+# rodando ou reservada, a gravação é recusada com 409.
+SYNC_OCUPADO = ('a sincronização do almoxarifado está rodando: no fim ela regrava o espelho, as .SchLib '
+                'e o ledger, e desfaria esta gravação. Nada foi gravado — tente de novo quando ela terminar.')
+EXTRACAO_OCUPADA = ('a extração da biblioteca de símbolos está rodando: no fim ela regrava a biblioteca '
+                    'inteira e desfaria esta mudança. Nada foi gravado — tente de novo quando ela terminar.')
+
+
+def _toma(lock, runs):
+    """segura `lock` (o da sincronização ou o da extração) para uma gravação do hub.
+    True = segurou (quem chamou solta); False = há uma corrida rodando ou reservada"""
+    if not lock.acquire(blocking=False):
+        return False
+    with _reserva_lock:
+        agora = time.time()
+        reservada = any(agora - v[0] <= RESERVA_TTL for v in runs.values())
+    if reservada:
+        lock.release()
+        return False
+    return True
+
+
 def _erro(msg, status, **extra):
     r = {'ok': False, 'error': msg}
     r.update(extra)
@@ -551,6 +578,16 @@ def _resolve_almox(fam, comp, espelhos=None, idx=None):
 
 @bp.route('/save-almox', methods=['POST'])
 def api_save_almox():
+    """(a trava da sincronização em volta do _save_almox — ver _toma)"""
+    if not _toma(_sync_lock, _sync_runs):
+        return _erro(SYNC_OCUPADO, 409)
+    try:
+        return _save_almox()
+    finally:
+        _sync_lock.release()
+
+
+def _save_almox():
     """A geometria de UM componente do almoxarifado: espelho, .SchLib da família e ledger.
 
     Diferente do /save, que mexe num símbolo da biblioteca da casa, aqui o alvo é um
@@ -595,11 +632,19 @@ def api_save_almox():
     sem_arquivo = cam is None
 
     # 2. espelho primeiro: se a SchLib falhar, o hub já mostra o desenho novo
+    # RELIDO DENTRO DO LOCK: o `esp` de cima foi lido antes do _acha_componente (centenas de
+    # ms parseando .SchLib), e gravá-lo inteiro desfazia o que outro save ou um lote do
+    # /almox-aplicar gravasse nessa janela
     with _lock_almox:
         try:
-            esp['symbols'][i]['valores'][j]['parts'] = partes
+            var, esp = G.le_espelho_almox(cam_esp)
+            i2, j2 = _acha_no_espelho(esp, sim_nome, comp)
+            if i2 is None:
+                return _erro('o espelho mudou enquanto salvava ("%s" não está mais lá): recarregue e salve '
+                             'de novo' % comp, 409)
+            esp['symbols'][i2]['valores'][j2]['parts'] = partes
             G.grava_espelho_almox(cam_esp, var, esp)
-        except OSError as e:
+        except (OSError, ValueError) as e:
             return _erro('falha ao gravar o espelho do almoxarifado: %s' % e, 500)
 
     resp = {'ok': True, 'espelho': True, 'altium': False, 'protegido': False,
@@ -661,6 +706,16 @@ def _simbolo_da_lib(sid):
 
 @bp.route('/almox-aplicar', methods=['POST'])
 def api_almox_aplicar():
+    """(a trava da sincronização em volta do _almox_aplicar — ver _toma)"""
+    if not _toma(_sync_lock, _sync_runs):
+        return _erro(SYNC_OCUPADO, 409)
+    try:
+        return _almox_aplicar()
+    finally:
+        _sync_lock.release()
+
+
+def _almox_aplicar():
     """UM símbolo da biblioteca em VÁRIOS componentes do almoxarifado, de uma vez.
 
     É o "trocar todos os CAPACITOR ELETROLITICO pelo mesmo símbolo" (pedido do dono,
@@ -670,8 +725,10 @@ def api_almox_aplicar():
     carregada e gravada uma vez com todos os seus componentes, e o ledger uma vez. Chamar o
     /save-almox 40 vezes regravaria a .SchLib 40 vezes, com 40 backups.
 
-    Corpo: {lib: sNNNN, alvos: [{familia, componente}], padroes: [nome do símbolo do
-    espelho], altium}. `padroes` troca também o desenho PADRÃO da categoria — o `parts` da
+    Corpo: {lib: sNNNN, alvos: [{familia, componente, trocaPinagem?}], padroes: [nome do
+    símbolo do espelho], altium}. A PINAGEM NÃO MUDA calada: componente com outra contagem
+    de pinos que o símbolo vai para `falhas`, a menos que o alvo traga `trocaPinagem: true`
+    (o modal manda quando o usuário marca à mão uma linha que não cabe). `padroes` troca também o desenho PADRÃO da categoria — o `parts` da
     família no espelho, que o componente sem desenho próprio herda (inclusive o que entrar
     no Odoo depois).
 
@@ -714,6 +771,7 @@ def api_almox_aplicar():
         vistos = set()
         for a in alvos:
             fam, comp = a['familia'].strip(), a['componente'].strip()
+            troca_pinagem = a.get('trocaPinagem') is True
             try:
                 _e, fam_arq, sim_nome, k, i, j = _resolve_almox(fam, comp, espelhos, idx)
             except _ErroAlmox as e:
@@ -724,13 +782,24 @@ def api_almox_aplicar():
             vistos.add((fam_arq, comp))
             s = espelhos[k][2]['symbols'][i]
             v = s['valores'][j]
-            novas, modo = G.aplica_simbolo(v.get('parts') or s.get('parts'), sym)
+            atual = v.get('parts') or s.get('parts')
+            novas, modo = G.aplica_simbolo(atual, sym)
+            npin = len(((atual or [{}])[0] or {}).get('pins') or [])
+            if modo == 'simbolo' and npin and not troca_pinagem:
+                falhas.append(OrderedDict([('familia', fam_arq), ('componente', comp), ('erro',
+                    '%d pino(s) contra %d do símbolo: a pinagem do componente seria trocada pela do símbolo'
+                    % (npin, len(sym.get('pins') or [])))]))
+                continue
             erro = _valida_parts(novas)
             if erro:
                 falhas.append(OrderedDict([('familia', fam_arq), ('componente', comp), ('erro', erro)]))
                 continue
+            # o id do produto vai junto para a proteção: é por ele que ela acha o componente
+            # que for renomeado no Odoo antes do próximo sincronismo
+            oids = ' '.join(str(it.get('odoo')).strip() for it in (v.get('itens') or []) if it.get('odoo'))
             feitos.append({'familia': fam_arq, 'componente': comp, 'simbolo': sim_nome, 'k': k,
-                           'i': i, 'j': j, 'parts': _partes(novas), 'pinagem': modo, 'altium': False})
+                           'i': i, 'j': j, 'parts': _partes(novas), 'pinagem': modo, 'altium': False,
+                           'odoo': oids})
         for nome in padroes:
             nome = nome.strip()
             onde = next(((k, i) for k, (_c, _v, esp) in enumerate(espelhos)
@@ -739,7 +808,16 @@ def api_almox_aplicar():
                 falhas.append(OrderedDict([('simbolo', nome), ('erro', 'a categoria "%s" não está no espelho' % nome)]))
                 continue
             k, i = onde
-            novas, modo = G.aplica_simbolo(espelhos[k][2]['symbols'][i].get('parts'), sym)
+            if G.e_placeholder(nome):
+                falhas.append(OrderedDict([('simbolo', nome), ('erro', 'categoria de pinagem a definir não '
+                    'recebe desenho padrão: o componente muda de símbolo quando o Odoo informar o encapsulamento')]))
+                continue
+            atual = espelhos[k][2]['symbols'][i].get('parts')
+            novas, modo = G.aplica_simbolo(atual, sym)
+            if modo == 'simbolo' and ((atual or [{}])[0] or {}).get('pins'):
+                falhas.append(OrderedDict([('simbolo', nome), ('erro', 'o desenho padrão da categoria tem outra '
+                    'contagem de pinos: a pinagem dela seria trocada pela do símbolo')]))
+                continue
             erro = _valida_parts(novas)
             if erro:
                 falhas.append(OrderedDict([('simbolo', nome), ('erro', erro)]))
@@ -769,12 +847,22 @@ def api_almox_aplicar():
     gravados = []
     if altium and feitos:
         cache, por_arquivo = {}, OrderedDict()
+        nao_achei = set()
         for f in feitos:
-            cam, _hoje = G._acha_componente(ROOT, f['familia'], f['componente'], cache)
+            # o espelho JÁ foi gravado: uma .SchLib ilegível aqui não pode virar 500 e deixar
+            # o espelho mudado sem a proteção no ledger (que vem logo abaixo)
+            try:
+                cam, _hoje = G._acha_componente(ROOT, f['familia'], f['componente'], cache)
+            except Exception as e:                                  # noqa: BLE001
+                nao_achei.add(f['componente'])
+                avisos.append('não localizei "%s" nas .SchLib (%s): o desenho ficou no espelho e no '
+                              'ledger, e entra na .SchLib no próximo sincronismo' % (f['componente'], e))
+                continue
             if cam is None:
                 continue
             por_arquivo.setdefault(cam, []).append(f)
-        sem = [f['componente'] for f in feitos if not any(f in fs for fs in por_arquivo.values())]
+        sem = [f['componente'] for f in feitos if not any(f in fs for fs in por_arquivo.values())
+               and f['componente'] not in nao_achei]
         if sem:
             avisos.append('%d componente(s) ainda não existe(m) em Libs/Almox (entraram no Odoo depois do '
                           'último sincronismo): o desenho ficou no espelho e no ledger, e entra na .SchLib '
@@ -811,7 +899,8 @@ def api_almox_aplicar():
         with G._lock:
             led = G.carrega_ledger(ROOT)
             for f in feitos:
-                G._poe_prot(led, f['familia'], f['componente'], f['parts'], 'hub', f['simbolo'], lib=sid)
+                G._poe_prot(led, f['familia'], f['componente'], f['parts'], 'hub', f['simbolo'], lib=sid,
+                            odoo=f.get('odoo') or None)
             for p in pads:
                 G.poe_padrao(led, p['simbolo'], sid)
             for cam in gravados:
@@ -821,10 +910,50 @@ def api_almox_aplicar():
     except Exception as e:                                          # noqa: BLE001
         avisos.append('não protegi no ledger (%s): o próximo sincronismo pode repor o desenho antigo' % e)
 
-    limpa = lambda d: OrderedDict((k, v) for k, v in d.items() if k not in ('k', 'i', 'j'))   # noqa: E731
+    limpa = lambda d: OrderedDict((k, v) for k, v in d.items() if k not in ('k', 'i', 'j', 'odoo'))   # noqa: E731
     return {'ok': True, 'lib': {'id': sid, 'name': sym.get('name', '')}, 'altium': altium,
             'protegido': protegido, 'feitos': [limpa(f) for f in feitos], 'padroes': [limpa(p) for p in pads],
             'falhas': falhas, 'ocupadas': ocupadas, 'avisos': avisos}
+
+
+def _quem_ficou_para_tras(sym):
+    """Quem usa o símbolo e ainda NÃO tem o desenho que ele dá hoje — é a lista que o editor
+    oferece atualizar depois de um Salvar símbolo. Salvar só a descrição não deixa ninguém
+    para trás (e não pergunta nada); uma edição recusada antes continua na lista.
+      vinculados / padroes            os que o /almox-aplicar pode atualizar
+      naoCabem / padroesNaoCabem      os que teriam a PINAGEM trocada (a contagem mudou): o
+                                      editor os deixa de fora e diz quantos são
+      emDia                           quantos já estão com o desenho de hoje"""
+    fora = OrderedDict([('vinculados', []), ('naoCabem', []), ('padroes', []), ('padroesNaoCabem', []),
+                        ('emDia', 0)])
+    led = G.carrega_ledger(ROOT)
+    comps, pads = G.vinculos(led, sym.get('id'))
+    npin = lambda parts: len((((parts or [{}])[0]) or {}).get('pins') or [])       # noqa: E731
+    for c in comps:
+        p = led['protegidos'][c['familia']][c['componente']]
+        novas, modo = G.aplica_simbolo(p.get('parts'), sym)
+        if modo == 'simbolo' and npin(p.get('parts')):
+            fora['naoCabem'].append(c)
+        elif G.fp_parts(_partes(novas)) == G.fp_parts(p.get('parts')):
+            fora['emDia'] += 1
+        else:
+            fora['vinculados'].append(OrderedDict(c, pinagem=modo))
+    if pads:
+        try:
+            espelhos = G.carrega_espelhos_almox(ROOT)
+        except (OSError, ValueError):
+            espelhos = []
+        por_nome = {s.get('name'): s for _c, _v, e in espelhos for s in (e.get('symbols') or [])}
+        for nome in pads:
+            s = por_nome.get(nome)
+            if s is None:
+                continue
+            novas, modo = G.aplica_simbolo(s.get('parts'), sym)
+            if modo == 'simbolo' and npin(s.get('parts')):
+                fora['padroesNaoCabem'].append(nome)
+            elif G.fp_parts(_partes(novas)) != G.fp_parts(s.get('parts')):
+                fora['padroes'].append(nome)
+    return fora
 
 
 @bp.route('/lib-vinculos', methods=['GET'])
@@ -1332,6 +1461,16 @@ def api_almox_footprint():
 
 @bp.route('/lib', methods=['POST'])
 def api_lib():
+    """(a trava da extração em volta do _lib — ver _toma)"""
+    if not _toma(_extract_lock, _extract_runs):
+        return _erro(EXTRACAO_OCUPADA, 409)
+    try:
+        return _lib()
+    finally:
+        _extract_lock.release()
+
+
+def _lib():
     """Biblioteca de símbolos: add / update / rename / delete, sempre regravando o arquivo
     inteiro (o formato é o do extrair.escreve_symlib — um símbolo por linha, atômico).
 
@@ -1464,8 +1603,7 @@ def api_lib():
                 if resp['desvinculados']:
                     G.grava_ledger(ROOT, led)
         elif op == 'update':
-            comps, pads = G.vinculos(G.carrega_ledger(ROOT), alvo.get('id'))
-            resp['vinculados'], resp['padroes'] = comps, list(pads)
+            resp.update(_quem_ficou_para_tras(alvo))
     except (OSError, ValueError) as e:
         resp['avisos'] = ['não li o ledger: %s' % e]
     return resp

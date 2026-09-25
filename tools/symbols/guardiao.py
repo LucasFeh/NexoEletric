@@ -199,22 +199,57 @@ def vinculos(ledger, lib=None):
     return comps, pads
 
 
+def rotulo_pino(p):
+    """o que o pino DIZ de si: o nome, quando não é só número nem repete o número (A, K, B,
+    C, E, +, VCC); senão o número, quando ele é letra (o LED do almoxarifado numera K e A);
+    senão nada ('' — o pino "1" que se chama "1" não diz polaridade nenhuma)"""
+    nome = str(p.get('name') if p.get('name') is not None else '').strip().upper()
+    num = str(p.get('num') if p.get('num') is not None else '').strip().upper()
+    if nome and not nome.isdigit() and nome != num:
+        return nome
+    if num and not num.isdigit():
+        return num
+    return ''
+
+
 def casa_pinos(lib_pins, orig):
     """-> (modo, pares [(pino do símbolo, pino do componente)]). A MESMA regra do editor
-    (hub-symed.js » casaPinos): pelo NÚMERO quando os dois lados têm os mesmos números — é o
-    que preserva a polaridade de capacitor, diodo e transistor —; pela ORDEM quando os
-    números não batem; contagem diferente = 'simbolo', sem pares (a pinagem vem do símbolo).
-    A ordem é frágil: a biblioteca guarda os pinos ordenados por posição e o componente na
-    ordem de origem."""
+    (hub-symed.js » casaPinos); o número, o nome e o olho de cada pino continuam os do
+    componente — o que se casa é QUAL posição do desenho cada um ocupa.
+
+      'nome'     os dois lados dizem o que cada pino é (A/K, B/C/E, G/D/S, +/−, VCC…), com o
+                 mesmo conjunto: casa pelo nome. É o único casamento que garante polaridade:
+                 a família TRANSISTOR numera 1=C 2=B 3=E e o BC817 da biblioteca 1=B 2=E 3=C;
+                 o DIODO numera 1=A 2=K e há zener na biblioteca com 1=K 2=A.
+      'numero'   nenhum lado diz nada (pinos "1", "2"): casa pelo número.
+      'confira'  um lado diz e o outro não concorda (o tântalo "1","2" contra um símbolo com
+                 C/A; nomes que não são o mesmo conjunto): casa pelo número, ou pela ordem, e
+                 quem chama tem de pedir conferência — o "Aplicar à categoria" desmarca.
+      'ordem'    ninguém diz nada e os números não batem: pela ordem, frágil (a biblioteca
+                 guarda os pinos ordenados por posição).
+      'simbolo'  contagem diferente: sem pares — a pinagem viria do símbolo."""
     lib_pins, orig = lib_pins or [], orig or []
     if not lib_pins or len(lib_pins) != len(orig):
         return 'simbolo', []
-    k = lambda p: str(p.get('num') if p.get('num') is not None else '').strip()   # noqa: E731
-    nl, no = [k(p) for p in lib_pins], [k(o) for o in orig]
-    if len(set(nl)) == len(nl) and len(set(no)) == len(no) and sorted(nl) == sorted(no):
-        por_num = {k(o): o for o in orig}
-        return 'numero', [(p, por_num[k(p)]) for p in lib_pins]
-    return 'ordem', list(zip(lib_pins, orig))
+    kl, ko = [rotulo_pino(p) for p in lib_pins], [rotulo_pino(o) for o in orig]
+    unico = lambda a: len(set(a)) == len(a)                                         # noqa: E731
+    if all(kl) and all(ko) and unico(kl) and unico(ko) and set(kl) == set(ko):
+        por = dict(zip(ko, orig))
+        return 'nome', [(p, por[k]) for p, k in zip(lib_pins, kl)]
+    duvida = any(kl) or any(ko)
+    num = lambda p: str(p.get('num') if p.get('num') is not None else '').strip()   # noqa: E731
+    nl, no = [num(p) for p in lib_pins], [num(o) for o in orig]
+    if unico(nl) and unico(no) and sorted(nl) == sorted(no):
+        por = dict(zip(no, orig))
+        return ('confira' if duvida else 'numero'), [(p, por[n]) for p, n in zip(lib_pins, nl)]
+    return ('confira' if duvida else 'ordem'), list(zip(lib_pins, orig))
+
+
+# a categoria que ainda não sabe a pinagem ("REGULADOR [PINAGEM A DEFINIR]"): o desenho
+# dela é um marcador de lugar e muda de símbolo quando o Odoo informar o encapsulamento —
+# congelar um padrão ali repunha 4 pinos num componente que virou [3P]
+def e_placeholder(simbolo):
+    return str(simbolo or '').upper().rstrip().endswith('[PINAGEM A DEFINIR]')
 
 
 def aplica_simbolo(parts, sym):
@@ -251,17 +286,22 @@ def aplica_simbolo(parts, sym):
 
 def esquece_lib(ledger, lib):
     """o símbolo saiu da biblioteca: os componentes ficam com o desenho (é cópia), só a
-    lembrança do vínculo sai. -> quantas entradas perderam o vínculo"""
+    lembrança do vínculo sai. -> quantas entradas perderam o vínculo
+
+    O PADRÃO DA CATEGORIA FICA, sem o vínculo. O desenho da família no espelho continua sendo
+    o do símbolo excluído (é cópia), e é ele que o hub mostra para quem entra depois; tirar a
+    entrada de `padroes` fazia o componente novo de uma família do CATALOGO ir para o Altium
+    com o modelo da casa enquanto o hub mostrava outro desenho."""
     n = 0
     for cs in (ledger.get('protegidos') or {}).values():
         for p in (cs or {}).values():
             if isinstance(p, dict) and p.get('lib') == lib:
                 del p['lib']
                 n += 1
-    d = _padroes(ledger)
-    for s in [s for s, v in d.items() if isinstance(v, dict) and v.get('lib') == lib]:
-        del d[s]
-        n += 1
+    for v in _padroes(ledger).values():
+        if isinstance(v, dict) and v.get('lib') == lib:
+            del v['lib']
+            n += 1
     return n
 
 
@@ -686,9 +726,12 @@ def _prot(ledger, fam, comp):
     return (ledger.get('protegidos') or {}).get(fam, {}).get(comp)
 
 
-def _poe_prot(ledger, fam, comp, parts, origem, simbolo, lib=None):
+def _poe_prot(ledger, fam, comp, parts, origem, simbolo, lib=None, odoo=None):
     """`lib`: o símbolo da biblioteca de que o desenho veio. Sem ele a entrada sai sem
-    vínculo — é o save à mão de um componente, cujo desenho deixou de ser o do símbolo."""
+    vínculo — é o save à mão de um componente, cujo desenho deixou de ser o do símbolo.
+    `odoo`: os ids do produto (o que o segue_renomeacoes usa para achar o componente
+    renomeado); sem ele fica o da entrada antiga — reescrever a entrada o apagava, e um lote
+    de 100 componentes deixava 100 proteções cegas até o sincronismo seguinte."""
     fam_d = ledger['protegidos'].setdefault(fam, OrderedDict())
     velho = fam_d.get(comp) or {}
     fam_d[comp] = OrderedDict([('fp', fp_parts(parts)), ('origem', origem),
@@ -696,6 +739,8 @@ def _poe_prot(ledger, fam, comp, parts, origem, simbolo, lib=None):
                                ('parts', copy.deepcopy(parts))])
     if lib:
         fam_d[comp]['lib'] = lib
+    if odoo or velho.get('odoo'):
+        fam_d[comp]['odoo'] = odoo or velho.get('odoo')
     return fam_d[comp]
 
 
@@ -781,10 +826,12 @@ def depois(raiz, ledger, log=print):
     repostos, orfaos, familias, vistos = [], [], [], set()
     gerado_visto = set()
     chaves_atuais = set()
+    comps_fam = {}          # família -> componentes de TODOS os arquivos dela (ver os órfãos)
     for fam, cam in arquivos_almox(raiz):
         familias.append(fam)
         chaves_atuais.add(chave_arquivo(raiz, cam))
         comps = le_familia(cam)
+        comps_fam.setdefault(fam, set()).update(comps)
         prots = ledger['protegidos'].get(fam) or OrderedDict()
         for comp, parts in comps.items():
             sim = idx.get((fam, comp))
@@ -803,7 +850,7 @@ def depois(raiz, ledger, log=print):
         pads = ledger.get('padroes') or {}
         for comp in (comps if pads else ()):
             sim = idx.get((fam, comp))
-            if not sim or comp in prots or sim[0] not in pads:
+            if not sim or comp in prots or sim[0] not in pads or e_placeholder(sim[0]):
                 continue
             s = espelhos[sim[1]][2]['symbols'][sim[2]]
             v = next((x for x in s.get('valores') or [] if x.get('altium') == comp), None)
@@ -813,14 +860,6 @@ def depois(raiz, ledger, log=print):
             _poe_prot(ledger, fam, comp, s['parts'], 'hub', sim[0], lib=(pads[sim[0]] or {}).get('lib'))
             log('   padrão da categoria: %s / %s ganhou o desenho de %s' % (fam, comp, sim[0]))
         a_repor = [c for c in prots if c in comps]
-        for c in prots:
-            if c not in comps:
-                if not prots[c].get('orfao'):
-                    log('   órfão (saiu do Odoo, proteção guardada): %s / %s' % (fam, c))
-                prots[c]['orfao'] = True
-                orfaos.append(OrderedDict([('familia', fam), ('componente', c)]))
-            else:
-                prots[c].pop('orfao', None)
         if a_repor:
             lib = P.carrega(cam)
             feitos = []
@@ -860,6 +899,20 @@ def depois(raiz, ledger, log=print):
                 log('   %s: %d protegido(s) reposto(s)' % (os.path.basename(cam), len(feitos)))
         registra_arquivo(raiz, cam, ledger, gravar=False)
         vistos.add(cam)
+    # ÓRFÃO SE DECIDE COM A FAMÍLIA INTEIRA, depois do laço. Uma família grande é fatiada em
+    # mais de um arquivo (ESPECIAIS 1 e 2 ALMOX.SchLib), e julgar por arquivo marcava órfão,
+    # a cada rodada, todo protegido que morava no OUTRO pedaço: o log acusava "saiu do Odoo"
+    # quem estava lá, e o `vinculos` o escondia — editar um símbolo não chegava a ele.
+    for fam, comps_todos in comps_fam.items():
+        prots = ledger['protegidos'].get(fam) or {}
+        for c in prots:
+            if c not in comps_todos:
+                if not prots[c].get('orfao'):
+                    log('   órfão (saiu do Odoo, proteção guardada): %s / %s' % (fam, c))
+                prots[c]['orfao'] = True
+                orfaos.append(OrderedDict([('familia', fam), ('componente', c)]))
+            else:
+                prots[c].pop('orfao', None)
     # o que o gerador apagou (família que sumiu, pedaço a menos) sai do ledger
     for k in [k for k in ledger['arquivos'] if k.startswith('Libs/Almox/') and k not in chaves_atuais]:
         del ledger['arquivos'][k]
@@ -960,6 +1013,46 @@ def atualiza_espelhos(raiz, ledger, log=print, espelhos=None, substitutos=None, 
     return tocados
 
 
+def repoe_valores_do_hub(raiz, ledger, log=print, espelhos=None):
+    """O DESENHO DO HUB VOLTA AO ESPELHO, no componente. -> quantos componentes voltaram
+
+    O gerador recalcula a cada rodada o desenho POR VALOR de conector (pelas vias) e de BJT
+    PNP (almox2lib » monta_simbolo), e o laço que devolveria o `parts` antigo do valor pula
+    justamente quem já ganhou parts do gerador. O componente protegido pelo hub — aplicado de
+    um símbolo da biblioteca, ou salvo no editor — voltava ao desenho do gerador NO HUB,
+    enquanto o `depois` repunha o desenho protegido NA .SchLib: hub e Altium divergiam, e o
+    próximo save desse componente gravava o desenho do gerador por cima.
+
+    Só a origem 'hub' (o que se adota do Altium com --proteger fica como era), só o valor —
+    o desenho da família continua do jeito que a sincronização o deixa — e só quando difere."""
+    espelhos = espelhos if espelhos is not None else carrega_espelhos_almox(raiz)
+    idx = indice_almox(espelhos)
+    mudou, n = set(), 0
+    for fam, comps in (ledger.get('protegidos') or {}).items():
+        for comp, p in (comps or {}).items():
+            if not isinstance(p, dict) or p.get('orfao') or p.get('origem') != 'hub' or not p.get('parts'):
+                continue
+            achado = idx.get((fam, comp))
+            if not achado:
+                continue
+            _sim, k, i = achado
+            s = espelhos[k][2]['symbols'][i]
+            v = next((x for x in s.get('valores') or [] if x.get('altium') == comp), None)
+            if v is None:
+                continue
+            atual = v.get('parts') or s.get('parts')
+            if atual and fp_parts(atual) == fp_parts(p['parts']):
+                continue
+            v['parts'] = copy.deepcopy(p['parts'])
+            mudou.add(k)
+            n += 1
+            log('   espelho: %s / %s de volta ao desenho do hub (o gerador o tinha redesenhado)' % (fam, comp))
+    for k in sorted(mudou):
+        cam, var, esp = espelhos[k]
+        grava_espelho_almox(cam, var, esp)
+    return n
+
+
 def escreve_resumo(raiz, resumo):
     """Libs/almox-guardiao.js — o diálogo de sincronização do hub lê por loadVarScript"""
     cam = os.path.join(raiz, RESUMO_JS)
@@ -1009,6 +1102,7 @@ def sincroniza(argv=(), log=print, raiz=RAIZ, gerador=None):
         if erro:
             log('ATENCAO: %s — as proteções são repostas no que existe' % erro)
         repostos, orfaos, familias = depois(raiz, ledger, log)
+        repoe_valores_do_hub(raiz, ledger, log)
         tocados = atualiza_espelhos(raiz, ledger, log)
         grava_ledger(raiz, ledger)
         resumo = OrderedDict([
