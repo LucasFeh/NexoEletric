@@ -64,6 +64,21 @@
   #schtb svg{width:18px; height:18px; flex:none; fill:none; stroke:currentColor; stroke-width:1.7;
     stroke-linecap:round; stroke-linejoin:round;}
   #schtb .lb{font-size:11px; letter-spacing:.02em; font-variant-numeric:tabular-nums;}
+  /* a gaveta dos pousos: a face leva folga a direita para a setinha, que fica no canto de
+     baixo, por cima dela; a lista cai logo abaixo da barra, na vertical, com os mesmos
+     botoes (e o mesmo ativo por aria-pressed) de antes */
+  #schtb .gaveta{position:relative; display:inline-flex;}
+  #schtb #tbPouso{padding-right:14px;}
+  #schtb .gav-seta{position:absolute; right:1px; bottom:1px; width:13px; height:12px; padding:0;
+    justify-content:center; align-items:flex-end; padding-bottom:2px; border-radius:0 0 4px 0;}
+  #schtb .gav-seta svg{width:7px; height:5px; fill:currentColor; stroke:none;}
+  #schtb .gav-seta[aria-expanded="true"]{color:var(--fg);}
+  #schtb .gav-lista{position:absolute; top:calc(100% + 7px); left:-5px; display:flex;
+    flex-direction:column; gap:2px; min-width:128px; padding:4px; background:var(--panel);
+    border:1px solid var(--border); border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.5);}
+  #schtb .gav-lista[hidden]{display:none;}
+  #schtb .gav-lista button{width:100%; justify-content:flex-start;}
+  #schtb .gav-sep{height:1px; background:var(--border); margin:2px 4px;}
 
   /* ── painel de propriedades (direita) ─────────────────────────────────────────
      So leitura, de proposito: e a ficha do que esta selecionado, no espirito do painel
@@ -583,20 +598,36 @@
       <button id="tbWire" aria-pressed="false" title="Fio (W) — gruda na ponta do pino; botão direito ou Esc encerra">
         <svg viewBox="0 0 24 24"><path d="M3 18h6.5V9H17V5"/><circle cx="3" cy="18" r="1.6"/><circle cx="20" cy="5" r="1.6"/><path d="M17 5h1.4"/></svg></button>
       <span class="sep"></span>
-      <button class="pw" data-net="GND" data-style="GndPower" aria-pressed="false" title="Terra (GND)">
-        <svg viewBox="0 0 24 24"><path d="M12 4v7M5 11h14M8 15h8M10.5 19h3"/></svg><span class="lb">GND</span></button>
-      <button class="pw" data-net="3V3" data-style="Bar" aria-pressed="false" title="Trilho 3V3">
-        <svg viewBox="0 0 24 24"><path d="M12 20V8M5 8h14"/></svg><span class="lb">3V3</span></button>
-      <button class="pw" data-net="5V5" data-style="Bar" aria-pressed="false" title="Trilho 5V5">
-        <svg viewBox="0 0 24 24"><path d="M12 20V8M5 8h14"/></svg><span class="lb">5V5</span></button>
-      <button class="pw" data-net="VIN" data-style="Bar" aria-pressed="false" title="Entrada de alimentação (VIN)">
-        <svg viewBox="0 0 24 24"><path d="M12 20V8M5 8h14"/></svg><span class="lb">VIN</span></button>
-      <span class="sep"></span>
-      <button id="tbNet" aria-pressed="false" title="Rótulo de net (L) — uma palavra; dois rótulos com o mesmo nome viram a mesma net, como no Altium">
-        <svg viewBox="0 0 24 24"><path d="M3 16h5l3-8 3 8h5"/><path d="M4 20h16"/></svg><span class="lb">net</span></button>
-      <span class="sep"></span>
-      <button id="tbNoErc" aria-pressed="false" title="No ERC — marca um pino como sem ligação DE PROPÓSITO; o X viaja para o Altium como a diretiva No ERC">
-        <svg viewBox="0 0 24 24" stroke="#cc0000"><path d="M6 6l12 12M18 6L6 18"/></svg><span class="lb">No ERC</span></button>
+      <!-- A GAVETA DOS POUSOS, como na Active Bar do Altium: um botao so, cuja face e o ultimo
+           pouso usado (clicar nela usa de novo), e a setinha no canto de baixo — ou o botao
+           direito — abre a lista com os seis. Os itens sao os botoes de sempre, com os mesmos
+           ids e o mesmo class="pw": o setTool os pinta e cada um tem o proprio listener; a
+           gaveta so os guarda e escolhe qual vai na face (schframe.js » gaveta dos pousos).
+           A face e a setinha NAO levam class="pw" nem ficam dentro da lista, pelo mesmo
+           motivo do #btnAdd abaixo. -->
+      <span class="gaveta" id="gavPouso">
+        <button id="tbPouso" aria-pressed="false" title="Pousos: GND, 3V3, 5V5, VIN, net e No ERC">
+          <svg viewBox="0 0 24 24"><path d="M12 4v7M5 11h14M8 15h8M10.5 19h3"/></svg><span class="lb">GND</span></button>
+        <button class="gav-seta" id="tbPousoSeta" aria-haspopup="menu" aria-expanded="false"
+                aria-label="Abrir a gaveta dos pousos" title="Outros pousos: GND, 3V3, 5V5, VIN, net e No ERC">
+          <svg viewBox="0 0 8 5"><path d="M0 0h8L4 5z"/></svg></button>
+        <div class="gav-lista" id="gavPousoLista" role="menu" aria-label="Pousos" hidden>
+          <button class="pw" data-net="GND" data-style="GndPower" aria-pressed="false" title="Terra (GND)">
+            <svg viewBox="0 0 24 24"><path d="M12 4v7M5 11h14M8 15h8M10.5 19h3"/></svg><span class="lb">GND</span></button>
+          <button class="pw" data-net="3V3" data-style="Bar" aria-pressed="false" title="Trilho 3V3">
+            <svg viewBox="0 0 24 24"><path d="M12 20V8M5 8h14"/></svg><span class="lb">3V3</span></button>
+          <button class="pw" data-net="5V5" data-style="Bar" aria-pressed="false" title="Trilho 5V5">
+            <svg viewBox="0 0 24 24"><path d="M12 20V8M5 8h14"/></svg><span class="lb">5V5</span></button>
+          <button class="pw" data-net="VIN" data-style="Bar" aria-pressed="false" title="Entrada de alimentação (VIN)">
+            <svg viewBox="0 0 24 24"><path d="M12 20V8M5 8h14"/></svg><span class="lb">VIN</span></button>
+          <span class="gav-sep"></span>
+          <button id="tbNet" aria-pressed="false" title="Rótulo de net (L) — uma palavra; dois rótulos com o mesmo nome viram a mesma net, como no Altium">
+            <svg viewBox="0 0 24 24"><path d="M3 16h5l3-8 3 8h5"/><path d="M4 20h16"/></svg><span class="lb">net</span></button>
+          <span class="gav-sep"></span>
+          <button id="tbNoErc" aria-pressed="false" title="No ERC — marca um pino como sem ligação DE PROPÓSITO; o X viaja para o Altium como a diretiva No ERC">
+            <svg viewBox="0 0 24 24" stroke="#cc0000"><path d="M6 6l12 12M18 6L6 18"/></svg><span class="lb">No ERC</span></button>
+        </div>
+      </span>
       <span class="sep"></span>
       <!-- AÇÃO, não ferramenta: abre o modal e não entra na máquina do setTool. Sem
            aria-pressed de propósito — o CSS de ativo da barra é por atributo e ninguém
@@ -607,14 +638,9 @@
       <button id="btnAdd" aria-label="Adicionar componentes"
               title="Escolher componentes das bibliotecas e jogar no esquema (C)">
         <svg viewBox="0 0 24 24"><rect x="3" y="7" width="10" height="10" rx="1"/><path d="M3 10H1M3 14H1M13 10h2M13 14h2"/><path d="M19 5v8M15 9h8"/></svg><span class="lb" id="addBtnN"></span></button>
-      <span class="sep"></span>
-      <!-- O TAMANHO DA FOLHA, na barra e nao so na ficha. Os seletores moram na ficha de
-           propriedades, que so aparece quando NADA esta selecionado -- e o painel fecha
-           justamente ao desmarcar, entao o recurso existia atras de um botao que ninguem
-           adivinha. Este botao mostra o formato atual e abre a ficha nele. -->
-      <button id="tbFolha" aria-label="Tamanho da folha"
-              title="Tamanho da folha — clique para escolher o formato (A4, A3, A0, em pé ou deitado)">
-        <svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M8 7h8M8 11h8M8 15h5"/></svg><span class="lb" id="tbFolhaN">A4</span></button>
+      <!-- o tamanho da folha saiu da barra (pedido do usuario em 2026-09-25): ele mora na ficha
+           de propriedades com nada selecionado — o botao de paineis, no canto inferior
+           esquerdo, a prende aberta. O montaBotaoLibs poe o separador antes do "libs". -->
     </div>
     <!-- a palavra do rotulo: o navegador nao pode abrir prompt() (CLAUDE.md), entao a
          pergunta e este campo no tema da pagina -->

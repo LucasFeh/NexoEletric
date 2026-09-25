@@ -1824,6 +1824,55 @@ function placeLabel(w){
                          x: hs ? hs.x : snapG(w.x), y: hs ? hs.y : snapG(w.y), rot:0 });
   commit();
 }
+/* ------- a gaveta dos pousos -------
+   GND, 3V3, 5V5, VIN, o rotulo de net e o No ERC moram num botao so, como na Active Bar do
+   Altium: a FACE e o ultimo pouso usado — clicar nela usa de novo —, e a setinha no canto (ou
+   o botao direito na face) abre a gaveta com os seis. Os itens sao os botoes de antes, com os
+   mesmos ids e listeners: clicar na face e clicar no item que ela mostra. Por isso a net pela
+   face passa pelo campo da palavra, como sempre (o rotulo nao existe sem ela).
+   A face e pintada no setTool, e nao no clique: as teclas (G, L, N) escolhem a ferramenta sem
+   tocar em botao nenhum, e a face tem de mostrar o que esta na mao. */
+const GAV_KEY = 'altiumhub.sch.pouso';
+let gavFace = 'GND';
+try { gavFace = localStorage.getItem(GAV_KEY) || 'GND'; } catch (e) {}
+const gavItens = () => [...$('gavPousoLista').querySelectorAll('button')];
+const gavChave = b => b.dataset.net || b.id;
+const gavItem = k => gavItens().find(b => gavChave(b) === k) || gavItens()[0];
+const gavAberta = () => !$('gavPousoLista').hidden;
+function gavAbre(sim){
+  $('gavPousoLista').hidden = !sim;
+  $('tbPousoSeta').setAttribute('aria-expanded', String(sim));
+}
+/* o item da gaveta que corresponde a ferramenta na mao, ou null */
+function gavDaFerramenta(t, pw){
+  if (t === 'power' && pw) return gavItens().find(b => b.dataset.net === pw.net) || null;
+  if (t === 'label') return $('tbNet');
+  if (t === 'noerc') return $('tbNoErc');
+  return null;
+}
+function pintaGaveta(t, pw){
+  const ativo = gavDaFerramenta(t, pw);
+  if (ativo && gavChave(ativo) !== gavFace){
+    gavFace = gavChave(ativo);
+    try { localStorage.setItem(GAV_KEY, gavFace); } catch (e) {}
+  }
+  const it = gavItem(gavFace), face = $('tbPouso');
+  face.replaceChildren(...[...it.childNodes].map(n => n.cloneNode(true)));
+  face.title = it.title + ' · a setinha (ou o botão direito) abre os outros pousos';
+  face.setAttribute('aria-pressed', String(!!ativo));
+}
+$('tbPouso').addEventListener('click', () => { gavAbre(false); gavItem(gavFace).click(); });
+$('tbPouso').addEventListener('contextmenu', e => { e.preventDefault(); gavAbre(!gavAberta()); });
+$('tbPousoSeta').addEventListener('click', () => gavAbre(!gavAberta()));
+/* escolher um item fecha a gaveta; o listener do proprio item (mais abaixo) ja agiu */
+$('gavPousoLista').addEventListener('click', e => { if (e.target.closest('button')) gavAbre(false); });
+/* clicar fora fecha. Em CAPTURA na window: o canvas engole o mousedown com
+   stopImmediatePropagation, e um listener em bolha nunca veria o clique na folha. */
+window.addEventListener('mousedown', e => {
+  if (gavAberta() && !$('gavPouso').contains(e.target)) gavAbre(false);
+}, true);
+window.addEventListener('blur', () => gavAbre(false));
+pintaGaveta(tool, toolPower);     /* a face nasce com o ultimo pouso usado nesta maquina */
 function setTool(t, pw){
   /* O FIO EM CURSO E GRAVADO, como no Esc e no botao direito: no Altium o trecho fixado ja
      esta no documento, e trocar de ferramenta (W, G, os botoes da barra) nao o apaga. Aqui ele
@@ -1840,6 +1889,7 @@ function setTool(t, pw){
   $('tbNoErc').setAttribute('aria-pressed', String(t === 'noerc'));
   for (const b of document.querySelectorAll('#schtb .pw'))
     b.setAttribute('aria-pressed', String(t === 'power' && !!pw && b.dataset.net === pw.net));
+  pintaGaveta(t, pw);
   cv.style.cursor = t !== 'select' && t !== 'wire' ? 'crosshair' : 'default';
   if (t === 'wire') statusDoFio();
   cam.draw();
@@ -2518,7 +2568,6 @@ function cartAdd(){
 function cartRender(){
   const n = cartCount();
   $('addBtnN').textContent = n ? '(' + n + ')' : '';
-  pintaBotaoFolha();
   $('cartInfo').textContent = n ? n + ' peça(s) · ' + cart.length + ' tipo(s)' : 'vazia';
   $('cartDone').disabled = !cart.length; $('cartClear').disabled = !cart.length;
   const box = $('cartList'); box.textContent = '';
@@ -2781,21 +2830,9 @@ function contaFora(si, med){
 }
 const milTxt = v => String(Math.round(v));
 const mmTxt  = v => String(Math.round(v * 0.0254 * 10) / 10);
-/* O rotulo do botao da barra. Ele e a UNICA pista visivel de que da para trocar a folha: a
-   ficha de propriedades so mostra a secao quando nada esta selecionado, e o painel fecha
-   exatamente quando se desmarca. */
-function pintaBotaoFolha(){
-  const b = $('tbFolhaN');
-  if (!b) return;
-  const sh = model && model.sheets && model.sheets[sheetIdx];
-  b.textContent = sh ? HubCore.sheetLabel(sh) : '—';
-}
-$('tbFolha').addEventListener('click', () => {
-  propsPin = true; salvaPin();
-  limpaSel();                 /* a secao da folha so existe com nada selecionado */
-  mostraProps(); renderProps();
-});
 
+/* O formato da folha: a ficha de propriedades com nada selecionado (o botao de paineis, no
+   canto inferior esquerdo, a prende aberta). O botao "A4" da barra saiu em 2026-09-25. */
 function secFolha(){
   const s = prSec('folha');
   const sh = model.sheets[sheetIdx];
@@ -4586,6 +4623,8 @@ $('symmodal').addEventListener('mousedown', e => { if (e.target === $('symmodal'
 /* ------- teclado ------- */
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    /* a gaveta aberta e a primeira coisa que o Esc fecha: a ferramenta na mao fica */
+    if (gavAberta()){ gavAbre(false); return; }
     if (symModalAberto()){ fechaSymModal(); return; }
     if (addOpen()){ closeAdd(); return; }
     if (wireDraw){ endWire(); return; }
