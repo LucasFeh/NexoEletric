@@ -22,13 +22,20 @@ O branch `homologacao` continua existindo, sem worktree. Suba o servidor na port
 worktree: `python hubserver.py --port 800X`. A 8000 é a do dono — teste seu vai noutra
 porta, com `--host 127.0.0.1`.
 
-**As duas interfaces são diferentes de propósito** (pedido do dono em 2026-09-24: "a
-interface do software desktop e da aplicação web vão ser diferentes mesmo por hora"). O
-desktop tem a casca EletricHUB, o Esquema com o painel à direita, as vistas no tema do hub e
-o editor de atalhos nas configurações. São da interface, e ficam diferentes nos dois
-branches: `hub.html`, `hub-classic.html`, `schframe.html`, `pcbframe.html`, o CSS de tema de
-`hub-dialog.js`/`hub-converte.js`/`hub-odoolista.js`/`hub-almoxpick.js`, e as partes do
-`schframe.js` que montam o painel. Lógica, backend, `.pas` e testes são um código só.
+**As cascas são diferentes de propósito** (pedido do dono em 2026-09-24: "a interface do
+software desktop e da aplicação web vão ser diferentes mesmo por hora"). O desktop tem a
+casca EletricHUB e a vista PCB no tema do hub. São da interface, e ficam diferentes nos dois
+branches: `hub.html`, `hub-classic.html` e `pcbframe.html`. Lógica, backend, `.pas` e testes
+são um código só.
+
+**A vista Esquema é uma só desde 2026-09-25** (pedido do dono: "o menu precisa ser igual ao
+do electron", e "toda modificação aplica nos dois"). `schframe.html`, `schframe.js` e os
+quatro módulos que ela carrega com CSS de tema (`hub-dialog.js`, `hub-converte.js`,
+`hub-odoolista.js`, `hub-almoxpick.js`) são idênticos nos dois branches: painel à direita com
+Configurações e Propriedades, no tema do hub, e o editor de atalhos nas configurações do hub
+(os dois `hub.html` carregam o `hub-atalhos.js`). Mudança no Esquema se faz no principal e
+desce por merge sem conflito; se um merge conflitar num desses arquivos, alguém os fez
+divergir de novo.
 
 - **Web → desktop: merge normal.** `git -C ..APM-homologacao merge neoden-ordem-por-bico`.
   Conflito numa casca se resolve ficando com o layout do desktop e trazendo a lógica. Depois
