@@ -146,7 +146,123 @@ def caminho_ledger(raiz):
 def ledger_vazio():
     return OrderedDict([('format', FORMATO), ('atualizado', ''), ('arquivos', OrderedDict()),
                         ('gerado', OrderedDict()), ('protegidos', OrderedDict()),
-                        ('footprints', OrderedDict())])
+                        ('footprints', OrderedDict()), ('padroes', OrderedDict())])
+
+
+# ─── o SÍMBOLO de que um desenho veio ─────────────────────────────────────────
+# Símbolo não é componente (o dono, 2026-09-25: "ENTENDAAA SIMBOLO != Componente"). O
+# símbolo é um desenho da Biblioteca de símbolos (Libs/symbols-lib.js, `id` sNNNN); o
+# componente é a peça do almoxarifado que o USA. Aplicar um símbolo copia o desenho para o
+# componente (é a cópia que vai para a .SchLib e sobrevive ao sincronismo) e deixa aqui a
+# lembrança de onde ele veio, para que editar o símbolo depois possa levar o desenho novo
+# aos componentes que o usam.
+#
+#   protegidos[f][c].lib   o símbolo aplicado ao componente. Salvar o componente à mão pelo
+#                          editor reescreve a entrada sem ele: o desenho deixou de ser o do
+#                          símbolo, e o vínculo cai junto — de propósito.
+#   padroes[símbolo]       {lib, desde}: o símbolo que é o desenho PADRÃO da categoria (o
+#                          `parts` da família no espelho, que o componente sem desenho
+#                          próprio herda). Chave = o nome do símbolo do espelho, como em
+#                          `gerado`, porque é ele que tem o `parts`.
+def _padroes(ledger):
+    d = ledger.get('padroes')
+    if not isinstance(d, dict):
+        d = ledger['padroes'] = OrderedDict()
+    return d
+
+
+def poe_padrao(ledger, simbolo, lib):
+    """o símbolo `lib` passa a ser o padrão da categoria `simbolo` (vazio tira)"""
+    d = _padroes(ledger)
+    if lib:
+        d[simbolo] = OrderedDict([('lib', lib), ('desde', agora())])
+    else:
+        d.pop(simbolo, None)
+    return bool(lib)
+
+
+def vinculos(ledger, lib=None):
+    """quem usa cada símbolo: ([{familia, componente, simbolo, lib}], {simbolo: lib}).
+    Com `lib`, só o que usa aquele. Componente órfão (saiu do Odoo) não conta: não há mais
+    para onde levar o desenho."""
+    comps = []
+    for fam, cs in sorted((ledger.get('protegidos') or {}).items()):
+        for comp, p in sorted((cs or {}).items()):
+            if not isinstance(p, dict) or not p.get('lib') or p.get('orfao'):
+                continue
+            if lib and p['lib'] != lib:
+                continue
+            comps.append(OrderedDict([('familia', fam), ('componente', comp),
+                                      ('simbolo', p.get('simbolo', '')), ('lib', p['lib'])]))
+    pads = OrderedDict((s, d.get('lib')) for s, d in sorted((ledger.get('padroes') or {}).items())
+                       if isinstance(d, dict) and d.get('lib') and (not lib or d.get('lib') == lib))
+    return comps, pads
+
+
+def casa_pinos(lib_pins, orig):
+    """-> (modo, pares [(pino do símbolo, pino do componente)]). A MESMA regra do editor
+    (hub-symed.js » casaPinos): pelo NÚMERO quando os dois lados têm os mesmos números — é o
+    que preserva a polaridade de capacitor, diodo e transistor —; pela ORDEM quando os
+    números não batem; contagem diferente = 'simbolo', sem pares (a pinagem vem do símbolo).
+    A ordem é frágil: a biblioteca guarda os pinos ordenados por posição e o componente na
+    ordem de origem."""
+    lib_pins, orig = lib_pins or [], orig or []
+    if not lib_pins or len(lib_pins) != len(orig):
+        return 'simbolo', []
+    k = lambda p: str(p.get('num') if p.get('num') is not None else '').strip()   # noqa: E731
+    nl, no = [k(p) for p in lib_pins], [k(o) for o in orig]
+    if len(set(nl)) == len(nl) and len(set(no)) == len(no) and sorted(nl) == sorted(no):
+        por_num = {k(o): o for o in orig}
+        return 'numero', [(p, por_num[k(p)]) for p in lib_pins]
+    return 'ordem', list(zip(lib_pins, orig))
+
+
+def aplica_simbolo(parts, sym):
+    """-> (parts novas, modo). O desenho do símbolo `sym` (da Biblioteca de símbolos: pins e
+    graphics no topo) na parte 1 do componente, com a regra do "Aplicar" do editor
+    (hub-symed.js » applyLibSymbol): com a mesma contagem de pinos a pinagem — número, nome,
+    tipo e o olho — continua a do componente, casada por `casa_pinos`; com contagem diferente
+    vem a do símbolo, com o nome escondido quando está vazio ou só repete o número. As outras
+    partes ficam como estão: o símbolo da biblioteca tem uma parte só."""
+    fora = copy.deepcopy(parts) if isinstance(parts, list) and parts else []
+    if not fora:
+        fora = [OrderedDict([('part', 1), ('pins', []), ('graphics', [])])]
+    alvo = next((p for p in fora if p.get('part') == 1), fora[0])
+    pins = copy.deepcopy(sym.get('pins') or [])
+    graphics = copy.deepcopy(sym.get('graphics') or [])
+    modo, pares = casa_pinos(pins, alvo.get('pins') or [])
+    for p, o in pares:
+        p['num'], p['name'] = o.get('num'), o.get('name')
+        if o.get('type'):
+            p['type'] = o['type']
+        p.pop('hideNum', None)
+        p.pop('hideName', None)
+        for chave in ('hideNum', 'hideName'):
+            if o.get(chave):
+                p[chave] = True
+    if modo == 'simbolo':
+        for p in pins:
+            if 'hideNum' not in p and 'hideName' not in p:
+                nome = str(p.get('name') or '').strip()
+                p['hideName'] = not nome or nome == str(p.get('num')).strip()
+    alvo['pins'], alvo['graphics'] = pins, graphics
+    return fora, modo
+
+
+def esquece_lib(ledger, lib):
+    """o símbolo saiu da biblioteca: os componentes ficam com o desenho (é cópia), só a
+    lembrança do vínculo sai. -> quantas entradas perderam o vínculo"""
+    n = 0
+    for cs in (ledger.get('protegidos') or {}).values():
+        for p in (cs or {}).values():
+            if isinstance(p, dict) and p.get('lib') == lib:
+                del p['lib']
+                n += 1
+    d = _padroes(ledger)
+    for s in [s for s, v in d.items() if isinstance(v, dict) and v.get('lib') == lib]:
+        del d[s]
+        n += 1
+    return n
 
 
 # ─── o footprint escolhido a mao, por COMPONENTE ──────────────────────────────
@@ -201,7 +317,7 @@ def carrega_ledger(raiz):
         d = json.load(f, object_pairs_hook=OrderedDict)
     if not isinstance(d, dict) or d.get('format') != FORMATO:
         raise ValueError('%s não é um ledger %s' % (p, FORMATO))
-    for k in ('arquivos', 'gerado', 'protegidos', 'footprints'):
+    for k in ('arquivos', 'gerado', 'protegidos', 'footprints', 'padroes'):
         if not isinstance(d.get(k), dict):
             d[k] = OrderedDict()
     return d
@@ -241,6 +357,12 @@ def dumps_ledger(d):
         for k, (c, v) in enumerate(cs):
             fora.append('  %s:%s%s' % (_j(c), _j(v), ',' if k < len(cs) - 1 else ''))
         fora.append(' }%s' % (',' if i < len(fps) - 1 else ''))
+    fora.append('},')
+    # `padroes`: o símbolo que é o desenho padrão de cada categoria (ver `poe_padrao`)
+    pads = sorted((d.get('padroes') or {}).items())
+    fora.append('"padroes":{')
+    for i, (k, v) in enumerate(pads):
+        fora.append(' %s:%s%s' % (_j(k), _j(v), ',' if i < len(pads) - 1 else ''))
     fora.append('}}')
     return '\n'.join(fora) + '\n'
 
@@ -564,12 +686,16 @@ def _prot(ledger, fam, comp):
     return (ledger.get('protegidos') or {}).get(fam, {}).get(comp)
 
 
-def _poe_prot(ledger, fam, comp, parts, origem, simbolo):
+def _poe_prot(ledger, fam, comp, parts, origem, simbolo, lib=None):
+    """`lib`: o símbolo da biblioteca de que o desenho veio. Sem ele a entrada sai sem
+    vínculo — é o save à mão de um componente, cujo desenho deixou de ser o do símbolo."""
     fam_d = ledger['protegidos'].setdefault(fam, OrderedDict())
     velho = fam_d.get(comp) or {}
     fam_d[comp] = OrderedDict([('fp', fp_parts(parts)), ('origem', origem),
                                ('desde', velho.get('desde') or agora()), ('simbolo', simbolo),
                                ('parts', copy.deepcopy(parts))])
+    if lib:
+        fam_d[comp]['lib'] = lib
     return fam_d[comp]
 
 
@@ -666,6 +792,26 @@ def depois(raiz, ledger, log=print):
                 continue
             ledger['gerado'][sim[0]] = fp_parts(parts)
             gerado_visto.add(sim[0])
+        # O PADRÃO DA CATEGORIA em quem entrou depois. Aplicar um símbolo à categoria inteira
+        # (/api/symbols/almox-aplicar com `padroes`) troca o desenho da família no espelho —
+        # e é ele que o componente novo herda no hub. Mas nas famílias com modelo no CATALOGO
+        # o gerador tira o desenho da .SchLib do modelo da casa e ignora o espelho: sem isto
+        # o capacitor que entrasse no Odoo amanhã apareceria no hub com o símbolo escolhido
+        # e iria para o Altium com o do modelo. Quem ainda não está protegido e não tem
+        # desenho próprio ganha o da família, protegido e ligado ao símbolo, e é reposto logo
+        # abaixo com os outros.
+        pads = ledger.get('padroes') or {}
+        for comp in (comps if pads else ()):
+            sim = idx.get((fam, comp))
+            if not sim or comp in prots or sim[0] not in pads:
+                continue
+            s = espelhos[sim[1]][2]['symbols'][sim[2]]
+            v = next((x for x in s.get('valores') or [] if x.get('altium') == comp), None)
+            if v is None or v.get('parts') or not s.get('parts'):
+                continue
+            prots = ledger['protegidos'].setdefault(fam, prots)
+            _poe_prot(ledger, fam, comp, s['parts'], 'hub', sim[0], lib=(pads[sim[0]] or {}).get('lib'))
+            log('   padrão da categoria: %s / %s ganhou o desenho de %s' % (fam, comp, sim[0]))
         a_repor = [c for c in prots if c in comps]
         for c in prots:
             if c not in comps:

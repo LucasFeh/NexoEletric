@@ -719,10 +719,38 @@ grosso e a marca "::" na ponta quente) e a ficha avisa quando a ponta quente est
 snap escolhido.
 
 Embaixo do canvas fica a **Biblioteca de símbolos**: um acervo só de desenhos — sem valor,
-sem descrição, sem footprint. Arraste um símbolo para o canvas (numa parte vazia ele entra
-na origem; numa parte com desenho, entra onde soltou, selecionado, renumerando os pinos que
-colidem) ou use "Aplicar ao símbolo", que troca o corpo inteiro preservando a pinagem
-quando a contagem de pinos bate. "+ corpo atual" guarda o desenho aberto na biblioteca.
+sem footprint. **Símbolo não é componente**: o símbolo é o desenho; o componente é a peça do
+almoxarifado que o *usa*, e a linha da lista da esquerda (`CAPACITOR ELETROLITICO [PTH]`) é a
+**categoria** que agrupa os componentes. Arraste um símbolo para o canvas (numa parte vazia ele
+entra na origem; numa parte com desenho, entra onde soltou, selecionado, renumerando os pinos
+que colidem) ou use **Aplicar**, cujo texto diz onde o desenho vai cair:
+
+- **Aplicar ao componente** — com um componente aberto (aba *Componentes* da faixa): troca o
+  desenho dele no canvas; *Salvar* grava.
+- **Aplicar à categoria…** — com a categoria aberta: abre a lista dos componentes dela, todos
+  marcados, para conferir e desmarcar, e grava todos de uma vez (espelho, `.SchLib` da família
+  e `lib-ledger.json`, numa passada só: `POST /api/symbols/almox-aplicar`). As outras linhas da
+  mesma família (o `[SMD]` do `[PTH]`) aparecem embaixo, desmarcadas, a um clique. Componente
+  com outra contagem de pinos nasce desmarcado. Marcada a categoria inteira, o símbolo vira
+  também o **desenho padrão** dela: o componente que entrar no Odoo depois já vem com ele — o
+  guardião o aplica na sincronização, inclusive nas famílias cujo desenho da `.SchLib` vem de um
+  modelo da biblioteca da casa.
+
+Os pinos casam **pelo número** quando o símbolo e o componente têm os mesmos números (o pino 1
+do desenho recebe o pino 1 da peça, com o nome e o olho dela) — é o que preserva a polaridade de
+capacitor, diodo e transistor; só quando os números não batem (A/K contra 1/2) eles casam pela
+ordem, e o hub avisa para conferir.
+
+O **botão direito** num símbolo abre o cardápio dele: *Editar símbolo*, *Aplicar…*,
+*Renomear…* e *Excluir símbolo…*. **Editar** abre o desenho do símbolo no canvas (a marca
+SÍMBOLO no topo diz que não é um componente) e *Salvar símbolo* grava na biblioteca; se ele já
+estava aplicado, o hub pergunta se leva o desenho novo aos componentes que o usam — o vínculo
+fica no ledger (`protegidos[família][componente].lib` e `padroes[categoria]`), e salvar um
+componente à mão desfaz o vínculo dele. **+ Novo símbolo** começa um símbolo em branco, com nome,
+que entra na biblioteca no primeiro *Salvar símbolo*; **Guardar como símbolo** guarda o desenho
+que está no canvas como um símbolo novo. **Excluir** tira o símbolo da biblioteca de vez — a
+extração não o traz de volta — e os componentes que o usavam ficam com o desenho, só sem o
+vínculo.
 
 **Salvar** grava em dois lugares de uma vez: `Libs/schlib.js` (o espelho que o hub desenha) e,
 com a caixa *Altium* marcada, a SchLib da casa — a viva, resolvida pela ordem de
@@ -749,7 +777,10 @@ que percorre a biblioteca antiga e todos os projetos de `Y:\EQUIPAMENTOS ATUALIZ
 maiúsculas e o formato ASCII — e as `.SchLib` embutidas em `.IntLib`), extrai só a
 geometria, deduplica por impressão digital (cor e visibilidade não contam) e **mescla**: o
 que já está cadastrado é ignorado (só ganha `usos`/`aliases`), nomes e ids existentes nunca
-mudam — renomear e excluir é pelo hub. Até 4 pinos vira símbolo genérico com nome básico por
+mudam — renomear, editar e excluir é pelo hub. O que o hub excluiu, e a geometria que uma
+edição substituiu, ficam na lista `excluidos` do próprio `symbols-lib.js` (impressão digital,
+id, nome, motivo): a mescla não os devolve, e o id de um excluído não é dado a outro símbolo.
+Até 4 pinos vira símbolo genérico com nome básico por
 heurística de forma (Resistor, Capacitor polarizado, Diodo zener…); o resto é CI e leva o nome
 do próprio componente (`SN74LVC244AQPWRQ1`). A varredura de 2026-09-03 leu 527 arquivos e
 reduziu 176.322 ocorrências a 895 símbolos. O relatório fica em `tools/symbols/relatorio.txt`;

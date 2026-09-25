@@ -3,7 +3,9 @@
 
     GET  /api/symbols/config                 onde está a SchLib, se existe, backups, fontes
     POST /api/symbols/save                   grava um símbolo no espelho (Libs/schlib.js) e na SchLib
-    POST /api/symbols/lib                    add/rename/delete na Biblioteca de símbolos (Libs/symbols-lib.js)
+    POST /api/symbols/lib                    add/update/rename/delete na Biblioteca de símbolos (Libs/symbols-lib.js)
+    GET  /api/symbols/lib-vinculos           que componentes (e categorias) usam cada símbolo da biblioteca
+    POST /api/symbols/almox-aplicar          UM símbolo da biblioteca em VÁRIOS componentes do almoxarifado
     POST /api/symbols/extract                reserva uma extração; GET …/<runId>/stream roda e retransmite (SSE)
     POST /api/symbols/mirror                 regera o espelho inteiro a partir da SchLib real; {flags:true} só leva os flags
     POST /api/symbols/almox-sync             reserva a sincronização do almoxarifado pelo guardião; GET …/<runId>/stream roda (SSE)
@@ -52,6 +54,7 @@ import json
 import math
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -502,20 +505,30 @@ class _ErroAlmox(Exception):
         self.status = status
 
 
-def _resolve_almox(fam, comp):
-    """Onde mora o valor `comp` da família `fam`: (espelhos, família do ARQUIVO, símbolo,
-    k do espelho, i do símbolo, j do valor).
-
-    Saiu de dentro do /save-almox quando o /almox-excluir passou a precisar do MESMO
-    caminho — inclusive do desvio pelo nome do símbolo. Duas cópias da resolução seriam
-    duas regras: uma rota acharia o componente e a outra não, no mesmo clique."""
+def _carrega_almox():
+    """(espelhos, índice) do almoxarifado, ou _ErroAlmox"""
     try:
         espelhos = G.carrega_espelhos_almox(ROOT)
     except (OSError, ValueError) as e:
         raise _ErroAlmox('não li os espelhos do almoxarifado: %s' % e, 500)
     if not espelhos:
         raise _ErroAlmox('nenhum espelho do almoxarifado em Libs/ (rode o sincronismo)', 404)
-    idx = G.indice_almox(espelhos)
+    return espelhos, G.indice_almox(espelhos)
+
+
+def _resolve_almox(fam, comp, espelhos=None, idx=None):
+    """Onde mora o valor `comp` da família `fam`: (espelhos, família do ARQUIVO, símbolo,
+    k do espelho, i do símbolo, j do valor).
+
+    Saiu de dentro do /save-almox quando o /almox-excluir passou a precisar do MESMO
+    caminho — inclusive do desvio pelo nome do símbolo. Duas cópias da resolução seriam
+    duas regras: uma rota acharia o componente e a outra não, no mesmo clique.
+    `espelhos`/`idx` já carregados: o /almox-aplicar resolve dezenas de componentes, e ler
+    3 MB de espelho por componente é o que não pode."""
+    if espelhos is None:
+        espelhos, idx = _carrega_almox()
+    elif idx is None:
+        idx = G.indice_almox(espelhos)
     achado = idx.get((fam, comp))
     if not achado:
         # O hub manda como família o NOME do símbolo aberto ("CIRCUITO INTEGRADO [PINAGEM A
@@ -630,6 +643,200 @@ def api_save_almox():
         resp['avisos'] = list(resp['avisos']) + [
             'não protegi no ledger (%s): o próximo sincronismo pode repor o símbolo padrão' % e]
     return resp
+
+
+# ─── um símbolo da biblioteca aplicado a um componente ────────────────────────
+# (a regra de casar os pinos mora no guardiao.aplica_simbolo: ele também a usa, ao dar o
+# padrão da categoria a quem entra no almoxarifado depois)
+def _simbolo_da_lib(sid):
+    """o símbolo `sid` do Libs/symbols-lib.js, ou _ErroAlmox"""
+    lib = E.le_symlib(os.path.join(ROOT, SYMLIB))
+    sym = next((s for s in ((lib or {}).get('symbols') or []) if s.get('id') == sid), None)
+    if sym is None:
+        raise _ErroAlmox('o símbolo %s não está na biblioteca de símbolos' % sid, 404)
+    if not (sym.get('pins') or sym.get('graphics')):
+        raise _ErroAlmox('o símbolo "%s" está vazio: desenhe-o antes de aplicar' % sym.get('name'), 400)
+    return sym
+
+
+@bp.route('/almox-aplicar', methods=['POST'])
+def api_almox_aplicar():
+    """UM símbolo da biblioteca em VÁRIOS componentes do almoxarifado, de uma vez.
+
+    É o "trocar todos os CAPACITOR ELETROLITICO pelo mesmo símbolo" (pedido do dono,
+    2026-09-25). Cada componente recebe o desenho pelo mesmo caminho do /save-almox —
+    espelho, .SchLib da família e `protegidos` no ledger, que é o que o faz sobreviver ao
+    sincronismo —, mas numa passada só: o espelho é gravado uma vez, cada .SchLib é
+    carregada e gravada uma vez com todos os seus componentes, e o ledger uma vez. Chamar o
+    /save-almox 40 vezes regravaria a .SchLib 40 vezes, com 40 backups.
+
+    Corpo: {lib: sNNNN, alvos: [{familia, componente}], padroes: [nome do símbolo do
+    espelho], altium}. `padroes` troca também o desenho PADRÃO da categoria — o `parts` da
+    família no espelho, que o componente sem desenho próprio herda (inclusive o que entrar
+    no Odoo depois).
+
+    O componente fica LIGADO ao símbolo (`protegidos[f][c].lib`, e `padroes[símbolo]` para a
+    categoria): é o que deixa editar o símbolo depois e levar o desenho novo a quem o usa.
+    Quem já falhou (não achado, desenho inválido) vai em `falhas` e não impede os outros;
+    .SchLib aberta no Altium vai em `ocupadas` — o espelho e o ledger já foram, e o
+    guardião repõe o desenho na .SchLib no próximo sincronismo."""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _erro('JSON {lib, alvos, padroes, altium} obrigatório', 400)
+    sid = data.get('lib')
+    alvos, padroes = data.get('alvos') or [], data.get('padroes') or []
+    if not isinstance(sid, str) or not sid.strip():
+        return _erro('lib (o id do símbolo) obrigatório', 400)
+    if not isinstance(alvos, list) or not isinstance(padroes, list):
+        return _erro('alvos e padroes têm que ser listas', 400)
+    if not alvos and not padroes:
+        return _erro('nada para aplicar: alvos e padroes vazios', 400)
+    for a in alvos:
+        if not isinstance(a, dict) or not all(isinstance(a.get(k), str) and a[k].strip()
+                                               for k in ('familia', 'componente')):
+            return _erro('cada alvo é {familia, componente}', 400)
+    if not all(isinstance(p, str) and p.strip() for p in padroes):
+        return _erro('padroes é uma lista de nomes de símbolo', 400)
+    sid, altium = sid.strip(), bool(data.get('altium'))
+    try:
+        sym = _simbolo_da_lib(sid)
+    except _ErroAlmox as e:
+        return _erro(str(e), e.status)
+
+    feitos, pads, falhas, avisos, ocupadas = [], [], [], [], []
+    # resolução e espelho no MESMO lock: entre ler e gravar, outro save poderia reescrever
+    # o espelho, e a gravação daqui levaria a versão velha de volta
+    with _lock_almox:
+        try:
+            espelhos, idx = _carrega_almox()
+        except _ErroAlmox as e:
+            return _erro(str(e), e.status)
+        vistos = set()
+        for a in alvos:
+            fam, comp = a['familia'].strip(), a['componente'].strip()
+            try:
+                _e, fam_arq, sim_nome, k, i, j = _resolve_almox(fam, comp, espelhos, idx)
+            except _ErroAlmox as e:
+                falhas.append(OrderedDict([('familia', fam), ('componente', comp), ('erro', str(e))]))
+                continue
+            if (fam_arq, comp) in vistos:
+                continue
+            vistos.add((fam_arq, comp))
+            s = espelhos[k][2]['symbols'][i]
+            v = s['valores'][j]
+            novas, modo = G.aplica_simbolo(v.get('parts') or s.get('parts'), sym)
+            erro = _valida_parts(novas)
+            if erro:
+                falhas.append(OrderedDict([('familia', fam_arq), ('componente', comp), ('erro', erro)]))
+                continue
+            feitos.append({'familia': fam_arq, 'componente': comp, 'simbolo': sim_nome, 'k': k,
+                           'i': i, 'j': j, 'parts': _partes(novas), 'pinagem': modo, 'altium': False})
+        for nome in padroes:
+            nome = nome.strip()
+            onde = next(((k, i) for k, (_c, _v, esp) in enumerate(espelhos)
+                         for i, s in enumerate(esp.get('symbols') or []) if s.get('name') == nome), None)
+            if onde is None:
+                falhas.append(OrderedDict([('simbolo', nome), ('erro', 'a categoria "%s" não está no espelho' % nome)]))
+                continue
+            k, i = onde
+            novas, modo = G.aplica_simbolo(espelhos[k][2]['symbols'][i].get('parts'), sym)
+            erro = _valida_parts(novas)
+            if erro:
+                falhas.append(OrderedDict([('simbolo', nome), ('erro', erro)]))
+                continue
+            pads.append({'simbolo': nome, 'k': k, 'i': i, 'parts': _partes(novas), 'pinagem': modo})
+        if not feitos and not pads:
+            return _erro('nada foi aplicado', 404, falhas=falhas)
+        tocados = set()
+        for f in feitos:
+            espelhos[f['k']][2]['symbols'][f['i']]['valores'][f['j']]['parts'] = f['parts']
+            tocados.add(f['k'])
+        for p in pads:
+            s = espelhos[p['k']][2]['symbols'][p['i']]
+            s['parts'], s['partcount'] = p['parts'], len(p['parts'])
+            bb = G._bbox(p['parts'])
+            if bb:
+                s['bbox'] = bb
+            tocados.add(p['k'])
+        try:
+            for k in sorted(tocados):
+                cam_esp, var, esp = espelhos[k]
+                G.grava_espelho_almox(cam_esp, var, esp)
+        except OSError as e:
+            return _erro('falha ao gravar o espelho do almoxarifado: %s' % e, 500)
+
+    # a .SchLib: uma carga e uma gravação por arquivo, com todos os componentes dele
+    gravados = []
+    if altium and feitos:
+        cache, por_arquivo = {}, OrderedDict()
+        for f in feitos:
+            cam, _hoje = G._acha_componente(ROOT, f['familia'], f['componente'], cache)
+            if cam is None:
+                continue
+            por_arquivo.setdefault(cam, []).append(f)
+        sem = [f['componente'] for f in feitos if not any(f in fs for fs in por_arquivo.values())]
+        if sem:
+            avisos.append('%d componente(s) ainda não existe(m) em Libs/Almox (entraram no Odoo depois do '
+                          'último sincronismo): o desenho ficou no espelho e no ledger, e entra na .SchLib '
+                          'no próximo sincronismo' % len(sem))
+        for cam, fs in por_arquivo.items():
+            base = os.path.basename(cam)
+            try:
+                with _lock_schlib:
+                    lb = P.carrega(cam)
+                    for f in fs:
+                        avisos.extend(P.aplica(lb, {'name': f['componente'], 'parts': f['parts']}) or [])
+                    r = P.grava(lb, cam, None, backup=True)
+                    with open(cam, 'rb') as fh:
+                        bruto = fh.read()
+                    difs = P.verifica_varios(bruto, [{'name': f['componente'], 'parts': f['parts']} for f in fs])
+                    if difs:
+                        if r.get('backup'):
+                            shutil.copy2(r['backup'], cam)
+                        raise RuntimeError('a releitura não bate com o que foi gravado%s: %s' % (
+                            ' (backup restaurado)' if r.get('backup') else '', difs[0]))
+            except P.LibOcupada:
+                ocupadas.append(base)
+                continue
+            except Exception as e:                                  # noqa: BLE001
+                avisos.append('%s não foi gravada: %s' % (base, e))
+                continue
+            gravados.append(cam)
+            for f in fs:
+                f['altium'] = True
+
+    # o ledger: a proteção (sobreviver ao sincronismo) e o vínculo com o símbolo
+    protegido = False
+    try:
+        with G._lock:
+            led = G.carrega_ledger(ROOT)
+            for f in feitos:
+                G._poe_prot(led, f['familia'], f['componente'], f['parts'], 'hub', f['simbolo'], lib=sid)
+            for p in pads:
+                G.poe_padrao(led, p['simbolo'], sid)
+            for cam in gravados:
+                G.registra_arquivo(ROOT, cam, led, gravar=False)
+            G.grava_ledger(ROOT, led)
+        protegido = True
+    except Exception as e:                                          # noqa: BLE001
+        avisos.append('não protegi no ledger (%s): o próximo sincronismo pode repor o desenho antigo' % e)
+
+    limpa = lambda d: OrderedDict((k, v) for k, v in d.items() if k not in ('k', 'i', 'j'))   # noqa: E731
+    return {'ok': True, 'lib': {'id': sid, 'name': sym.get('name', '')}, 'altium': altium,
+            'protegido': protegido, 'feitos': [limpa(f) for f in feitos], 'padroes': [limpa(p) for p in pads],
+            'falhas': falhas, 'ocupadas': ocupadas, 'avisos': avisos}
+
+
+@bp.route('/lib-vinculos', methods=['GET'])
+def api_lib_vinculos():
+    """quem usa cada símbolo da biblioteca, pelo ledger: os componentes e as categorias
+    (`?lib=sNNNN` filtra um só). Só leitura."""
+    try:
+        led = G.carrega_ledger(ROOT)
+    except (OSError, ValueError) as e:
+        return _erro('não li o ledger: %s' % e, 500)
+    comps, pads = G.vinculos(led, (request.args.get('lib') or '').strip() or None)
+    return {'ok': True, 'componentes': comps, 'padroes': pads}
 
 
 def _acha_no_espelho(esp, simbolo, componente):
@@ -1125,17 +1332,56 @@ def api_almox_footprint():
 
 @bp.route('/lib', methods=['POST'])
 def api_lib():
-    """Biblioteca de símbolos: add / rename / delete, sempre regravando o arquivo inteiro
-    (é pequeno e o formato é o do extrair.escreve_symlib — um símbolo por linha, atômico)."""
+    """Biblioteca de símbolos: add / update / rename / delete, sempre regravando o arquivo
+    inteiro (o formato é o do extrair.escreve_symlib — um símbolo por linha, atômico).
+
+      add     {symbol: {name, kind?, desc?, pins, graphics}}   símbolo novo (o "+ Novo
+              símbolo" do editor e o "+ corpo atual")
+      update  {id, pins, graphics, name?, kind?, desc?}         o desenho EDITADO de um
+              símbolo que já existe. A geometria velha vai para `excluidos`: sem isso a
+              próxima extração a acharia num .SchDoc antigo e a devolveria como símbolo novo.
+              A resposta traz `vinculados`/`padroes` — quem usa o símbolo (ledger) — para o
+              editor oferecer levar o desenho novo a eles (/almox-aplicar)
+      rename  {id, name}
+      delete  {id}      o símbolo sai, o fingerprint vai para `excluidos` (a extração não o
+              traz de volta) e os componentes que o usavam ficam com o desenho — é cópia —,
+              só perdem o vínculo no ledger
+
+    Símbolo não é componente: nada aqui mexe no almoxarifado nem na .SchLib."""
     data = request.get_json(silent=True)
-    if not isinstance(data, dict) or data.get('op') not in ('add', 'rename', 'delete'):
-        return _erro('JSON {op: add|rename|delete, ...} obrigatório', 400)
+    if not isinstance(data, dict) or data.get('op') not in ('add', 'update', 'rename', 'delete'):
+        return _erro('JSON {op: add|update|rename|delete, ...} obrigatório', 400)
     op = data['op']
+    esquecer = None
     with _lock_symlib:
         caminho = os.path.join(ROOT, SYMLIB)
-        lib = E.le_symlib(caminho) or E._lib_vazia()
+        lib = E.le_symlib(caminho)
+        if lib is None and os.path.isfile(caminho):
+            # arquivo que existe e não parseou: seguir com a lib vazia GRAVARIA POR CIMA de tudo
+            return _erro('não consegui ler %s — nada foi gravado' % SYMLIB, 500)
+        lib = lib or E._lib_vazia()
         syms = lib['symbols']
         nomes = {s.get('name') for s in syms}
+        # id nunca volta a ser usado, nem o de um símbolo excluído: o ledger pode lembrar dele
+        maior = max([E._num_id(e) for e in syms] + [E._num_id(e) for e in E.excluidos_de(lib)] + [0])
+
+        def desc_de(s):
+            d = s.get('desc', s.get('description'))
+            return d.strip() if isinstance(d, str) else None
+
+        def geometria(s, kind_padrao=None):
+            """{pins, graphics, kind, fp} normalizados, ou a resposta de erro (que é uma TUPLA
+            (corpo, status) — por isso o sucesso é um dict)"""
+            erro = _valida_parts([{'pins': s.get('pins'), 'graphics': s.get('graphics')}])
+            if erro:
+                return _erro(erro, 400)
+            if not s['pins'] and not s['graphics']:
+                return _erro('o símbolo está vazio: desenhe alguma coisa antes de salvar', 400)
+            kind = s.get('kind') or kind_padrao or ('generico' if len(s['pins']) <= 4 else 'ci')
+            if kind not in KINDS:
+                return _erro('kind tem que ser generico ou ci', 400)
+            pins, graphics = E.normaliza(s['pins'], s['graphics'])
+            return {'pins': pins, 'graphics': graphics, 'kind': kind, 'fp': E.fingerprint(pins, graphics, kind)}
 
         if op == 'add':
             s = data.get('symbol')
@@ -1145,14 +1391,10 @@ def api_lib():
             if not isinstance(nome, str) or not nome.strip():
                 return _erro('name obrigatório', 400)
             nome = nome.strip()
-            erro = _valida_parts([{'pins': s.get('pins'), 'graphics': s.get('graphics')}])
-            if erro:
-                return _erro(erro, 400)
-            kind = s.get('kind') or ('generico' if len(s['pins']) <= 4 else 'ci')
-            if kind not in KINDS:
-                return _erro('kind tem que ser generico ou ci', 400)
-            pins, graphics = E.normaliza(s['pins'], s['graphics'])
-            fp = E.fingerprint(pins, graphics, kind)
+            g = geometria(s)
+            if not isinstance(g, dict):
+                return g
+            pins, graphics, kind, fp = g['pins'], g['graphics'], g['kind'], g['fp']
             for e in syms:
                 if e.get('fp') == fp:
                     return _erro('essa geometria já está na biblioteca como "%s"' % e.get('name'),
@@ -1160,32 +1402,73 @@ def api_lib():
             if nome in nomes:
                 return _erro('já existe um símbolo chamado "%s"' % nome, 409)
             alvo = OrderedDict([
-                ('id', 's%04d' % (max([E._num_id(e) for e in syms] or [0]) + 1)),
-                ('name', nome), ('kind', kind), ('fp', fp), ('aliases', []), ('fontes', ['hub']),
-                ('usos', 1), ('desde', date.today().isoformat()), ('pins', pins), ('graphics', graphics)])
+                ('id', 's%04d' % (maior + 1)),
+                ('name', nome), ('kind', kind), ('fp', fp), ('aliases', []),
+                ('fontes', ['hub']), ('usos', 1), ('desde', date.today().isoformat()), ('pins', pins),
+                ('graphics', graphics)])
+            if desc_de(s):
+                alvo['desc'] = desc_de(s)
             syms.append(alvo)
+            E.reabilita_fp(lib, fp)          # desenhou de novo, à mão, uma forma excluída
         else:
             sid = data.get('id')
             alvo = next((e for e in syms if e.get('id') == sid), None)
             if alvo is None:
                 return _erro('símbolo %s não está na biblioteca' % sid, 404)
-            if op == 'rename':
+            renomeia = op == 'rename' or (op == 'update' and 'name' in data)
+            if renomeia:
                 nome = data.get('name')
                 if not isinstance(nome, str) or not nome.strip():
                     return _erro('name obrigatório', 400)
                 nome = nome.strip()
                 if nome != alvo.get('name') and nome in nomes:
                     return _erro('já existe um símbolo chamado "%s"' % nome, 409)
+            if op == 'update':
+                g = geometria(data, alvo.get('kind'))
+                if not isinstance(g, dict):
+                    return g
+                pins, graphics, kind, fp = g['pins'], g['graphics'], g['kind'], g['fp']
+                outro = next((e for e in syms if e is not alvo and e.get('fp') == fp), None)
+                if outro is not None:
+                    return _erro('essa geometria já está na biblioteca como "%s"' % outro.get('name'),
+                                 409, symbol=outro)
+                if fp != alvo.get('fp'):
+                    E.exclui_fp(lib, alvo.get('fp'), alvo.get('name'), 'editado', alvo.get('id'))
+                    E.reabilita_fp(lib, fp)
+                alvo['pins'], alvo['graphics'], alvo['kind'], alvo['fp'] = pins, graphics, kind, fp
+                if desc_de(data) is not None:
+                    alvo['desc'] = desc_de(data)
+                # desenhado no hub: nenhuma varredura "cobre" esta fonte, então a extração não
+                # redecide a descrição nem o olho dos pinos por cima da edição (extrair._cobre)
+                if 'hub' not in (alvo.get('fontes') or []):
+                    alvo['fontes'] = list(alvo.get('fontes') or []) + ['hub']
+            if renomeia:
                 alvo['name'] = nome
-            else:
+            if op == 'delete':
                 syms.remove(alvo)
+                E.exclui_fp(lib, alvo.get('fp'), alvo.get('name'), 'excluido', alvo.get('id'))
+                esquecer = alvo.get('id')
 
         lib['generated'] = datetime.now().strftime('%Y-%m-%d %H:%M')
         try:
             E.escreve_symlib(lib, caminho)
         except OSError as e:
             return _erro('falha ao gravar a biblioteca: %s' % e, 500)
-    return {'ok': True, 'symbol': alvo, 'total': len(syms)}
+    resp = {'ok': True, 'symbol': alvo, 'total': len(syms)}
+    # quem usa este símbolo — fora do lock da biblioteca: o ledger tem o dele
+    try:
+        if esquecer:
+            with G._lock:
+                led = G.carrega_ledger(ROOT)
+                resp['desvinculados'] = G.esquece_lib(led, esquecer)
+                if resp['desvinculados']:
+                    G.grava_ledger(ROOT, led)
+        elif op == 'update':
+            comps, pads = G.vinculos(G.carrega_ledger(ROOT), alvo.get('id'))
+            resp['vinculados'], resp['padroes'] = comps, list(pads)
+    except (OSError, ValueError) as e:
+        resp['avisos'] = ['não li o ledger: %s' % e]
+    return resp
 
 
 @bp.route('/extract', methods=['POST'])
