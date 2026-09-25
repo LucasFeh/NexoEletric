@@ -502,58 +502,101 @@ assert.strictEqual(P.cleanPin(P.novoPino([], 0, 0, 100, 0)).hideName, true, 'o c
   assert.ok(/1 pino/.test(r2.note) && /2/.test(r2.note), r2.note);
 }
 
-/* ── casaPinos / applyLibSymbol: os MESMOS números casam pelo número — a polaridade fica ──
-   A biblioteca guarda os pinos ordenados por posição; o componente, na ordem de origem. Um
-   capacitor eletrolítico com o pino 1 à direita na biblioteca e o componente listando [1, 2]
-   trocava + por − quando o casamento era pela ordem. (2026-09-25, ferramenta de símbolos) */
+/* ── casaPinos / applyLibSymbol: os pinos casam pelo que DIZEM — a polaridade fica ──
+   A biblioteca guarda os pinos ordenados por posição; o componente, na ordem de origem; e a
+   numeração dos dois lados nem sempre segue a mesma convenção. Os casos abaixo são os que a
+   revisão de 2026-09-25 mediu nos dados reais (Libs/symbols-lib.js × almox-*.js). A MESMA
+   regra está em tools/symbols/guardiao.py » casa_pinos (tests/test_symserver.py). */
 {
-  const lib = { name: 'CPOL', pins: [{ num: '2', name: '2', x: -200, y: 0, len: 100, orient: 180 },
-                                     { num: '1', name: '1', x: 200, y: 0, len: 100, orient: 0 }], graphics: [] };
-  const comp = { part: 1, graphics: [],
-    pins: [{ num: '1', name: '+', x: -50, y: 0, len: 100, orient: 180, type: 'Passive', hideName: true },
-           { num: '2', name: '-', x: 50, y: 0, len: 100, orient: 0, type: 'Passive' }] };
-  const c = P.casaPinos(lib.pins, comp.pins);
-  assert.strictEqual(c.modo, 'numero');
-  assert.deepStrictEqual(c.pares.map(([a, b]) => [a.num, b.num]), [['2', '2'], ['1', '1']]);
-  const r = P.applyLibSymbol(comp, lib);
-  const porNum = Object.fromEntries(r.part.pins.map(p => [p.num, p]));
-  assert.strictEqual(porNum['1'].x, 200, 'o pino 1 do componente vai onde o símbolo desenhou o 1');
-  assert.strictEqual(porNum['1'].name, '+', 'com o nome do componente');
-  assert.strictEqual(porNum['1'].hideName, true, 'e o olho dele');
-  assert.strictEqual(porNum['2'].x, -200);
-  assert.strictEqual(r.modo, 'numero');
-  assert.ok(!/ORDEM/.test(r.note), r.note);
-  /* números que não batem: pela ordem, avisando */
-  assert.strictEqual(P.casaPinos(lib.pins, [{ num: 'A' }, { num: 'K' }]).modo, 'ordem');
-  const ro = P.applyLibSymbol({ pins: [{ num: 'A', name: 'A', x: 0, y: 0, len: 100, orient: 0 }, { num: 'K', name: 'K', x: 0, y: 0, len: 100, orient: 0 }], graphics: [] }, lib);
+  const pin = (num, name, x) => ({ num, name, x, y: 0, len: 100, orient: x < 0 ? 180 : 0, type: 'Passive' });
+  const xDe = (r, num) => r.part.pins.find(p => p.num === num).x;
+  /* eletrolítico: nenhum lado diz nada ("1","2") — casa pelo número */
+  const cap = { name: 'CAP', graphics: [], pins: [pin('2', '2', -200), pin('1', '1', 200)] };
+  const cc = { part: 1, graphics: [], pins: [Object.assign(pin('1', '1', -50), { hideName: true }), pin('2', '2', 50)] };
+  const c1 = P.casaPinos(cap.pins, cc.pins);
+  assert.strictEqual(c1.modo, 'numero');
+  assert.deepStrictEqual(c1.pares.map(([a, b]) => [a.num, b.num]), [['2', '2'], ['1', '1']]);
+  const r1 = P.applyLibSymbol(cc, cap);
+  assert.strictEqual(xDe(r1, '1'), 200, 'o pino 1 do componente vai onde o símbolo desenhou o 1');
+  assert.strictEqual(r1.part.pins.find(p => p.num === '1').hideName, true, 'com o olho dele');
+  assert.strictEqual(r1.modo, 'numero');
+  /* transistor: a família numera 1=C 2=B 3=E, o BC817 da biblioteca 1=B 2=E 3=C — os números
+     batem e mentiriam; os NOMES dizem a verdade */
+  const bc817 = { name: 'BC817', graphics: [], pins: [pin('1', 'B', -200), pin('2', 'E', 100), pin('3', 'C', 200)] };
+  const tr = { graphics: [], pins: [pin('1', 'C', 0), pin('2', 'B', 0), pin('3', 'E', 0)] };
+  const r2 = P.applyLibSymbol(tr, bc817);
+  assert.strictEqual(r2.modo, 'nome');
+  assert.strictEqual(xDe(r2, '1'), 200, 'o coletor (pino 1 do componente) vai na posição do C do símbolo');
+  assert.strictEqual(xDe(r2, '2'), -200, 'a base na posição do B');
+  assert.deepStrictEqual(r2.part.pins.map(p => [p.num, p.name]).sort(), [['1', 'C'], ['2', 'B'], ['3', 'E']], 'número e nome continuam os do componente');
+  /* diodo: 1=A 2=K contra um zener da biblioteca com 1=K 2=A */
+  const zener = { graphics: [], pins: [pin('1', 'K', -200), pin('2', 'A', 200)] };
+  const r3 = P.applyLibSymbol({ graphics: [], pins: [pin('1', 'A', 0), pin('2', 'K', 0)] }, zener);
+  assert.strictEqual(r3.modo, 'nome');
+  assert.strictEqual(xDe(r3, '1'), 200, 'o anodo vai onde o símbolo desenhou o anodo');
+  /* LED: a família numera "K" e "A" (o número é a letra), o símbolo 1=A 2=K */
+  const led = { graphics: [], pins: [pin('1', 'A', -200), pin('2', 'K', 200)] };
+  const r4 = P.applyLibSymbol({ graphics: [], pins: [pin('K', 'K', 0), pin('A', 'A', 0)] }, led);
+  assert.strictEqual(r4.modo, 'nome');
+  assert.strictEqual(xDe(r4, 'K'), 200);
+  assert.strictEqual(xDe(r4, 'A'), -200);
+  /* tântalo: o componente não diz nada ("1","2"), o símbolo diz C/A — CONFIRA */
+  assert.strictEqual(P.casaPinos([pin('1', 'C', -200), pin('2', 'A', 200)], [pin('1', '1', 0), pin('2', '2', 0)]).modo, 'confira');
+  /* o componente diz +/−, o símbolo não */
+  const r5 = P.applyLibSymbol({ graphics: [], pins: [pin('1', '+', 0), pin('2', '-', 0)] }, cap);
+  assert.strictEqual(r5.modo, 'confira');
+  assert.ok(/CONFIRA/.test(r5.note), r5.note);
+  /* nomes que não são o mesmo conjunto: confira */
+  assert.strictEqual(P.casaPinos([pin('1', 'IN', 0), pin('2', 'OUT', 0)], [pin('1', 'VI', 0), pin('2', 'VO', 0)]).modo, 'confira');
+  /* nome repetido não decide nada */
+  assert.strictEqual(P.casaPinos([pin('1', 'GND', 0), pin('2', 'GND', 0)], [pin('1', 'GND', 0), pin('2', 'GND', 0)]).modo, 'confira');
+  /* ninguém diz nada e os números não batem: pela ordem, avisando */
+  const ro = P.applyLibSymbol({ graphics: [], pins: [pin('3', '3', 0), pin('4', '4', 0)] }, cap);
   assert.strictEqual(ro.modo, 'ordem');
   assert.ok(/ORDEM/.test(ro.note) && /polaridade/.test(ro.note), ro.note);
-  /* número repetido não casa pelo número (não há como saber qual é qual) */
-  assert.strictEqual(P.casaPinos(lib.pins, [{ num: '1' }, { num: '1' }]).modo, 'ordem');
   /* contagem diferente: a pinagem é do símbolo */
-  assert.strictEqual(P.casaPinos(lib.pins, [{ num: '1' }]).modo, 'simbolo');
+  assert.strictEqual(P.casaPinos(cap.pins, [pin('1', '1', 0)]).modo, 'simbolo');
   assert.strictEqual(P.casaPinos([], []).modo, 'simbolo');
+  /* o rótulo do pino */
+  assert.strictEqual(P.rotuloPino({ num: '1', name: '1' }), '');
+  assert.strictEqual(P.rotuloPino({ num: '1', name: ' a ' }), 'A');
+  assert.strictEqual(P.rotuloPino({ num: 'K', name: 'K' }), 'K');
+  assert.strictEqual(P.rotuloPino({ num: '12', name: '' }), '');
 }
 
 /* ── planoCategoria: o que o "Aplicar à categoria" mostra e o que nasce marcado ──
    A categoria do dono é a `familia`, que se parte em linhas ([PTH] e [SMD]); só a ABERTA vem
-   marcada, e só o que cabe (a mesma contagem de pinos que o símbolo). */
+   marcada, e só o que é seguro: cabe (a mesma contagem de pinos), casa pelo nome ou pelo
+   número, e não tem desenho próprio do gerador (o PNP da família TRANSISTOR). */
 {
-  const pp = n => [{ part: 1, pins: Array.from({ length: n }, (_, i) => ({ num: String(i + 1) })), graphics: [] }];
+  const pp = (n, nomes) => [{ part: 1, pins: Array.from({ length: n }, (_, i) => ({ num: String(i + 1), name: nomes ? nomes[i] : String(i + 1) })), graphics: [] }];
   const pth = { name: 'CAP EL [PTH]', familia: 'CAP EL', parts: pp(2),
-                valores: [{ altium: 'PTH 10uF' }, { altium: 'PTH 3 pinos', parts: pp(3) }, { label: 'sem altium' }] };
+                valores: [{ altium: 'PTH 10uF' }, { altium: 'PTH 3 pinos', parts: pp(3) }, { label: 'sem altium' },
+                          { altium: 'PTH proprio 2', parts: pp(2) }, { altium: 'PTH do simbolo', parts: pp(2) },
+                          { altium: 'PTH mais menos', parts: pp(2, ['+', '-']) }] };
   const smd = { name: 'CAP EL [SMD]', familia: 'CAP EL', parts: pp(2), valores: [{ altium: 'SMD 22uF' }] };
   const outra = { name: 'RESISTOR [SMD]', familia: 'RESISTOR', parts: pp(2), valores: [{ altium: 'R 10k' }] };
   const vazia = { name: 'CAP EL [NADA]', familia: 'CAP EL', parts: pp(2), valores: [] };
-  const lib = { pins: [{ num: '1' }, { num: '2' }] };
-  const pl = P.planoCategoria([smd, outra, pth, vazia], pth, lib);
+  const ph = { name: 'REGULADOR [PINAGEM A DEFINIR]', familia: 'REGULADOR', parts: pp(4), valores: [{ altium: 'LM' }] };
+  const lib = { pins: [{ num: '1', name: '1' }, { num: '2', name: '2' }] };
+  const vinc = (cat, comp) => comp === 'PTH do simbolo';
+  const pl = P.planoCategoria([smd, outra, pth, vazia], pth, lib, vinc);
   assert.deepStrictEqual(pl.map(s => [s.simbolo, s.aberta]), [['CAP EL [PTH]', true], ['CAP EL [SMD]', false]],
     'a aberta primeiro, depois as irmãs da mesma família com componentes; outra família não entra');
   const l = pl[0].linhas;
-  assert.deepStrictEqual(l.map(x => [x.componente, x.pinos, x.proprio, x.cabe, x.marcado]),
-    [['PTH 10uF', 2, false, true, true], ['PTH 3 pinos', 3, true, false, false], ['sem altium', 2, false, true, true]]);
-  assert.strictEqual(l[0].modo, 'numero');
+  assert.deepStrictEqual(l.map(x => [x.componente, x.pinos, x.proprio, x.cabe, x.modo, x.marcado]), [
+    ['PTH 10uF', 2, false, true, 'numero', true],
+    ['PTH 3 pinos', 3, true, false, 'simbolo', false],
+    ['sem altium', 2, false, true, 'numero', true],
+    ['PTH proprio 2', 2, true, true, 'numero', false],        /* desenho próprio do gerador: desmarcado */
+    ['PTH do simbolo', 2, false, true, 'numero', true],       /* o próprio que veio de um símbolo não conta */
+    ['PTH mais menos', 2, true, true, 'confira', false]]);    /* diz +/−, o símbolo não: confira */
   assert.deepStrictEqual(pl[1].linhas.map(x => [x.componente, x.cabe, x.marcado]), [['SMD 22uF', true, false]], 'a irmã não nasce marcada');
+  /* o "como casa" que a seção mostra para conferir de olho: pino do componente → do símbolo */
+  const libPm = { pins: [{ num: '1', name: '+' }, { num: '2', name: '-' }] };
+  assert.strictEqual(P.planoCategoria([pth], pth, libPm)[0].linhas[0].mapa, '1 → +  2 → -');
+  assert.strictEqual(pl[0].placeholder, false);
+  assert.strictEqual(P.planoCategoria([ph], ph, lib)[0].placeholder, true, 'pinagem a definir não recebe padrão');
   /* símbolo sem pinos não cabe em ninguém: aplicar apagaria a pinagem */
   assert.ok(P.planoCategoria([pth], pth, { pins: [] })[0].linhas.every(x => !x.cabe && !x.marcado));
 }

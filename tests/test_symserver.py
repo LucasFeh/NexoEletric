@@ -649,8 +649,9 @@ try:
             comps_c = [v['altium'] for v in simc['valores']]
             nums = [q['num'] for q in simc['parts'][0]['pins']]
             assert len(comps_c) >= 2 and len(nums) == 2, (comps_c, nums)
-            # os MESMOS números do componente, nas posições trocadas: a biblioteca guarda os pinos
-            # ordenados por posição, então casar pela ordem inverteria a polaridade
+            # os MESMOS pinos do componente (A e B, que dizem o que são), nas posições trocadas: a
+            # biblioteca guarda os pinos ordenados por posição, então casar pela ordem inverteria a
+            # polaridade — casa-se pelo NOME
             cpol = {'name': 'Cap polarizado teste', 'kind': 'generico',
                     'pins': [pin(nums[1], -200, 0, 180), pin(nums[0], 200, 0, 0)],
                     'graphics': [{'g': 'line', 'x1': -100, 'y1': -60, 'x2': -100, 'y2': 60},
@@ -675,7 +676,9 @@ try:
             assert r.status_code == 200 and j['ok'] and j['protegido'] and not j['ocupadas'], j
             assert sorted(f['componente'] for f in j['feitos']) == sorted(comps_c) and all(f['altium'] for f in j['feitos']), j
             assert [f['componente'] for f in j['falhas']] == ['NAO EXISTE'], j['falhas']
-            assert all(f['pinagem'] == 'numero' for f in j['feitos']) and [p['simbolo'] for p in j['padroes']] == ['CAPACITOR']
+            assert all(f['pinagem'] == 'nome' for f in j['feitos']) and [p['simbolo'] for p in j['padroes']] == ['CAPACITOR']
+            assert all(led_p.get('odoo') for led_p in G.carrega_ledger(tmp)['protegidos']['CAPACITOR'].values()) or \
+                not any(it.get('odoo') for v_ in simc['valores'] for it in v_.get('itens') or []), 'o id do Odoo vai junto'
             assert nbk() == bk0 + 1, 'UMA gravação da .SchLib para o lote inteiro'
             for f in j['feitos']:
                 px = {q['num']: q['x'] for q in f['parts'][0]['pins']}
@@ -699,13 +702,51 @@ try:
             j = cli.post('/api/symbols/lib', json={'op': 'update', 'id': sid, 'pins': cpol2['pins'],
                                                    'graphics': cpol2['graphics']}).get_json()
             assert j['ok'] and len(j['vinculados']) == len(comps_c) and j['padroes'] == ['CAPACITOR'], j
+            assert j['emDia'] == 0 and j['naoCabem'] == [] and j['padroesNaoCabem'] == [], j
             r = cli.post('/api/symbols/almox-aplicar', json={
                 'lib': sid, 'alvos': [{'familia': x['familia'], 'componente': x['componente']} for x in j['vinculados']],
                 'padroes': j['padroes'], 'altium': True})
             j2 = r.get_json()
             fp2 = G.fp_parts(j2['feitos'][0]['parts'])
-            assert r.status_code == 200 and fp2 != fp1 and all(f['pinagem'] == 'numero' for f in j2['feitos']), j2
+            assert r.status_code == 200 and fp2 != fp1 and all(f['pinagem'] == 'nome' for f in j2['feitos']), j2
             assert all(G.fp_parts(G.le_familia(cam_cap)[c]) == fp2 for c in comps_c)
+            # salvar só a DESCRIÇÃO não deixa ninguém para trás: não há o que atualizar
+            j = cli.post('/api/symbols/lib', json={'op': 'update', 'id': sid, 'pins': cpol2['pins'],
+                                                   'graphics': cpol2['graphics'], 'desc': 'só a descrição'}).get_json()
+            assert j['ok'] and j['vinculados'] == [] and j['padroes'] == [] and j['emDia'] == len(comps_c), j
+
+            # com a sincronização rodando (ou reservada), gravar é recusado: ela desfaria no fim
+            S._sync_runs['g_teste'] = (time.time(), False)
+            try:
+                r = cli.post('/api/symbols/almox-aplicar', json={'lib': sid, 'alvos': [um]})
+                assert r.status_code == 409 and 'sincronização' in r.get_json()['error'], r.get_json()
+                assert cli.post('/api/symbols/save-almox', json={'familia': 'CAPACITOR', 'componente': comps_c[0],
+                                                                 'parts': j2['feitos'][0]['parts']}).status_code == 409
+            finally:
+                S._sync_runs.clear()
+            assert not S._sync_lock.locked(), 'a trava tem de ser solta'
+            S._extract_runs['x_teste'] = (time.time(), [])
+            try:
+                r = cli.post('/api/symbols/lib', json={'op': 'rename', 'id': sid, 'name': 'nao pode'})
+                assert r.status_code == 409 and 'extração' in r.get_json()['error'], r.get_json()
+            finally:
+                S._extract_runs.clear()
+            assert not S._extract_lock.locked()
+
+            # o gerador redesenha o valor (conector por vias, PNP) e o espelho perde o desenho do
+            # hub; a sincronização o devolve — no componente, e só a origem hub
+            with G._lock:
+                _vg, espg = G.le_espelho_almox(basicos)
+                sg = next(x for x in espg['symbols'] if x['name'] == 'CAPACITOR')
+                vg = next(x for x in sg['valores'] if x['altium'] == comps_c[1])
+                vg['parts'] = copy.deepcopy(simc['parts'])          # o desenho "do gerador"
+                G.grava_espelho_almox(basicos, _vg, espg)
+                assert G.repoe_valores_do_hub(tmp, G.carrega_ledger(tmp), log=lambda *a: None) == 1
+                _vg, espg = G.le_espelho_almox(basicos)
+                sg = next(x for x in espg['symbols'] if x['name'] == 'CAPACITOR')
+                vg = next(x for x in sg['valores'] if x['altium'] == comps_c[1])
+                assert G.fp_parts(vg['parts']) == fp2, 'o espelho volta ao desenho do hub'
+                assert G.repoe_valores_do_hub(tmp, G.carrega_ledger(tmp), log=lambda *a: None) == 0
 
             # salvar UM componente à mão tira o vínculo dele: o desenho deixou de ser o do símbolo
             r = cli.post('/api/symbols/save-almox', json={'familia': 'CAPACITOR', 'componente': comps_c[0],
@@ -713,7 +754,11 @@ try:
             assert r.status_code == 200 and 'lib' not in G.carrega_ledger(tmp)['protegidos']['CAPACITOR'][comps_c[0]]
 
             # o guardião dá o padrão da categoria a quem ENTRA DEPOIS: comps_c[1] vira um componente
-            # novo (sem proteção, sem desenho próprio) e a sincronização o protege com o padrão
+            # novo (sem proteção, sem desenho próprio) e a sincronização o protege com o padrão.
+            # E a família FATIADA (um "CAPACITOR 2 ALMOX.SchLib" a mais): o protegido do primeiro
+            # pedaço não pode sair órfão por não estar no segundo
+            cam_cap2 = os.path.join(tmp, 'Libs', 'Almox', 'CAPACITOR 2 ALMOX.SchLib')
+            shutil.copy2(cam, cam_cap2)
             with G._lock:
                 led = G.carrega_ledger(tmp)
                 assert G._tira_prot(led, 'CAPACITOR', comps_c[1])
@@ -721,8 +766,11 @@ try:
                 s3 = next(x for x in esp3['symbols'] if x['name'] == 'CAPACITOR')
                 next(x for x in s3['valores'] if x['altium'] == comps_c[1]).pop('parts', None)
                 G.grava_espelho_almox(basicos, _v3, esp3)
-                repostos, _orf, _fams = G.depois(tmp, led, log=lambda *a: None)
+                repostos, orf, _fams = G.depois(tmp, led, log=lambda *a: None)
                 G.grava_ledger(tmp, led)
+            os.remove(cam_cap2)
+            assert not [o for o in orf if o['familia'] == 'CAPACITOR'], ('órfão falso na família fatiada', orf)
+            assert not any(x.get('orfao') for x in led['protegidos']['CAPACITOR'].values())
             p = led['protegidos']['CAPACITOR'][comps_c[1]]
             assert p['lib'] == sid and p['fp'] == G.fp_parts(j2['padroes'][0]['parts']), p
             assert any(x['componente'] == comps_c[1] for x in repostos), repostos
@@ -733,11 +781,36 @@ try:
             assert j['ok'] and j['desvinculados'] == 2, j          # comps_c[1] e o padrão
             led = G.carrega_ledger(tmp)
             assert not any(x.get('lib') == sid for x in led['protegidos']['CAPACITOR'].values())
-            assert 'CAPACITOR' not in led['padroes']
+            # o PADRÃO fica, sem o vínculo: o desenho da família continua sendo o do símbolo, e
+            # quem entrar depois ainda tem de ir ao Altium com ele
+            assert 'CAPACITOR' in led['padroes'] and 'lib' not in led['padroes']['CAPACITOR'], led['padroes']
+            assert cli.get('/api/symbols/lib-vinculos?lib=' + sid).get_json()['padroes'] == {}
             assert G.fp_parts(G.le_familia(cam_cap)[comps_c[1]]) == p['fp'], 'o desenho fica'
             assert cli.post('/api/symbols/almox-aplicar', json={'lib': sid, 'alvos': [um]}).status_code == 404
-            print('almox-aplicar ok (%d componentes + o padrão numa passada, polaridade pelo número, '
-                  'vínculo, padrão para quem entra depois, excluir desvincula)' % len(comps_c))
+
+            # A PINAGEM NÃO MUDA CALADA: um símbolo de 3 pinos num componente de 2 vai para as
+            # falhas; só com trocaPinagem (a linha marcada à mão no modal) ele entra
+            tres = {'name': 'Tres pinos teste', 'kind': 'generico',
+                    'pins': [pin('1', -200, 0, 180), pin('2', 200, 0, 0), pin('3', 0, -200, 270)],
+                    'graphics': [{'g': 'rect', 'x1': -100, 'y1': -100, 'x2': 100, 'y2': 100}]}
+            s3id = cli.post('/api/symbols/lib', json={'op': 'add', 'symbol': tres}).get_json()['symbol']['id']
+            r = cli.post('/api/symbols/almox-aplicar', json={'lib': s3id, 'alvos': [um], 'padroes': ['CAPACITOR']})
+            j = r.get_json()
+            assert r.status_code == 404 and len(j['falhas']) == 2 and all('pinagem' in f['erro'] for f in j['falhas']), j
+            r = cli.post('/api/symbols/almox-aplicar', json={'lib': s3id, 'alvos': [dict(um, trocaPinagem=True)]})
+            j = r.get_json()
+            assert r.status_code == 200 and j['feitos'][0]['pinagem'] == 'simbolo', j
+            assert len(j['feitos'][0]['parts'][0]['pins']) == 3
+            # categoria de pinagem a definir não recebe padrão
+            ph = next((x['name'] for _c, _v, e in G.carrega_espelhos_almox(tmp) for x in e['symbols']
+                       if G.e_placeholder(x['name'])), None)
+            if ph:
+                r = cli.post('/api/symbols/almox-aplicar', json={'lib': s3id, 'padroes': [ph]})
+                assert r.status_code == 404 and 'pinagem a definir' in r.get_json()['falhas'][0]['erro'], r.get_json()
+            print('almox-aplicar ok (%d componentes + o padrão numa passada, pinos pelo nome, vínculo, '
+                  'padrão para quem entra depois, família fatiada sem órfão falso, 409 com sincronização e '
+                  'extração, o espelho volta ao desenho do hub, excluir desvincula e o padrão fica, pinagem '
+                  'só troca com pedido%s)' % (len(comps_c), '' if ph else '; sem categoria de pinagem a definir na fixture'))
         finally:
             for n, f in enumerate(salvos):
                 b = os.path.join(guarda, str(n))
