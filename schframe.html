@@ -50,8 +50,8 @@
 
   /* ── barra de ferramentas, dentro da area do esquema ──────────────────────────
      E a barra de fiacao do Altium: as poucas coisas que a MAO faz aqui — selecionar,
-     puxar fio e pousar um terra ou um trilho de alimentacao. O resto do esquema (rotulo,
-     texto, trocar valor, footprint) e da IA, pelo schematic.js. */
+     puxar fio e, pela gaveta, pousar terra, trilho, rotulo de net ou No ERC. O resto do
+     esquema (texto, trocar valor, footprint) e da IA, pelo schematic.js. */
   #schtb{position:absolute; top:8px; left:8px; z-index:12; display:flex; align-items:center; gap:2px;
     padding:3px 4px; background:var(--panel); border:1px solid var(--border); border-radius:6px;
     box-shadow:0 4px 16px rgba(0,0,0,.5);}
@@ -68,11 +68,18 @@
      baixo, por cima dela; a lista cai logo abaixo da barra, na vertical, com os mesmos
      botoes (e o mesmo ativo por aria-pressed) de antes */
   #schtb .gaveta{position:relative; display:inline-flex;}
-  #schtb #tbPouso{padding-right:14px;}
+  #schtb #tbPouso{padding-right:14px; justify-content:flex-start;}
+  #schtb .gav-rot{display:inline-grid;}
+  #schtb .gav-rot > .lb{grid-area:1/1;}
+  #schtb .gav-rot > .lb.fora{visibility:hidden;}
   #schtb .gav-seta{position:absolute; right:1px; bottom:1px; width:13px; height:12px; padding:0;
     justify-content:center; align-items:flex-end; padding-bottom:2px; border-radius:0 0 4px 0;}
   #schtb .gav-seta svg{width:7px; height:5px; fill:currentColor; stroke:none;}
   #schtb .gav-seta[aria-expanded="true"]{color:var(--fg);}
+  /* com o pouso armado a face fica azul, e a setinha na cor apagada sumia justo quando se quer
+     trocar de pouso: ela passa a ter a cor do texto da face */
+  #schtb #tbPouso[aria-pressed="true"] + .gav-seta{color:#fff;}
+  #schtb #tbPouso[aria-pressed="true"] + .gav-seta:hover{background:rgba(0,0,0,.18); border-color:transparent;}
   #schtb .gav-lista{position:absolute; top:calc(100% + 7px); left:-5px; display:flex;
     flex-direction:column; gap:2px; min-width:128px; padding:4px; background:var(--panel);
     border:1px solid var(--border); border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.5);}
@@ -608,10 +615,10 @@
       <span class="gaveta" id="gavPouso">
         <button id="tbPouso" aria-pressed="false" title="Pousos: GND, 3V3, 5V5, VIN, net e No ERC">
           <svg viewBox="0 0 24 24"><path d="M12 4v7M5 11h14M8 15h8M10.5 19h3"/></svg><span class="lb">GND</span></button>
-        <button class="gav-seta" id="tbPousoSeta" aria-haspopup="menu" aria-expanded="false"
+        <button class="gav-seta" id="tbPousoSeta" aria-expanded="false" aria-controls="gavPousoLista"
                 aria-label="Abrir a gaveta dos pousos" title="Outros pousos: GND, 3V3, 5V5, VIN, net e No ERC">
           <svg viewBox="0 0 8 5"><path d="M0 0h8L4 5z"/></svg></button>
-        <div class="gav-lista" id="gavPousoLista" role="menu" aria-label="Pousos" hidden>
+        <div class="gav-lista" id="gavPousoLista" role="group" aria-label="Pousos" hidden>
           <button class="pw" data-net="GND" data-style="GndPower" aria-pressed="false" title="Terra (GND)">
             <svg viewBox="0 0 24 24"><path d="M12 4v7M5 11h14M8 15h8M10.5 19h3"/></svg><span class="lb">GND</span></button>
           <button class="pw" data-net="3V3" data-style="Bar" aria-pressed="false" title="Trilho 3V3">
@@ -657,7 +664,7 @@
         <button id="netcancel">Cancelar</button>
       </div>
     </div>
-    <button id="btnPaineis" hidden title="Abrir a ficha de propriedades e deixá-la fixa">
+    <button id="btnPaineis" hidden title="Abrir a ficha de propriedades e deixá-la fixa — com nada selecionado, é nela que se troca o tamanho da folha">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
   </div>
 
