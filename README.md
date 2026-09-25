@@ -351,8 +351,9 @@ precisar de servidor.
   **Propriedades** (a ficha do que está selecionado, logo abaixo). Ele troca sozinho: sem
   nada selecionado mostra as Configurações, selecionar mostra as Propriedades — e as abas
   continuam lá para trocar à mão. A lista de componentes, a de nets e a de validação saíram
-  com a antiga aba Componentes (a validação continua valendo: é ela que trava o **Salvar**);
-  os atalhos foram para as configurações do hub.
+  com a antiga aba Componentes, e os atalhos foram para as configurações do hub. A validação
+  ainda é calculada, mas hoje não aparece em lugar nenhum e **não trava o Salvar**: ele só
+  recusa o que o `schematic.js` não consegue gravar (o `serializeSchematic`).
   **Bolinha e ponte.** Onde três ou mais ramos se encontram — um T, uma estrela de pontas de
   fio, um pino no meio de um fio — nasce a **bolinha** de conexão; onde dois fios só se
   **cruzam**, sem nada declarado ali, o de cima vira uma **ponte** (um arco de passagem). Os
@@ -421,8 +422,7 @@ precisar de servidor.
   num botão só, como na Active Bar do Altium: a face é o último pouso usado (clicar nela usa de
   novo, e as teclas também a trocam), e a setinha no canto de baixo, ou o botão direito, abre a
   lista com os seis. A escolha fica lembrada nesta máquina. O tamanho da folha não fica na
-  barra: está na ficha de propriedades com nada selecionado (o botão de painéis, no canto
-  inferior esquerdo, a prende aberta) e, no app desktop, em **Configurações › Folha**.
+  barra: está em **Configurações › Folha**, no painel.
   **O fio é traçado como no Altium** (conferido quadro a quadro contra um vídeo dele): do último
   ponto saem duas pernas em L até o cursor, a primeira contínua e a segunda pontilhada; o
   clique fixa **só a primeira**, e a seguinte sai perpendicular. Clicar num ponto elétrico —
