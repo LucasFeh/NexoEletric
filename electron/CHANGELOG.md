@@ -3,6 +3,17 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.1.8 — 2026-09-25
+
+- Biblioteca › Símbolos, **ferramenta de símbolos**. Símbolo não é componente: o símbolo é o desenho da biblioteca de símbolos; o componente é a peça do almoxarifado que o usa; a linha da lista da esquerda é a categoria.
+  - **Botão direito num símbolo**: *Editar símbolo*, *Aplicar…*, *Renomear…* e *Excluir símbolo…*.
+  - **Editar** abre o desenho do símbolo no canvas (marca SÍMBOLO no topo) e **Salvar símbolo** grava na biblioteca. Se ele já estava aplicado, o hub pergunta se leva o desenho novo aos componentes que o usam.
+  - **+ Novo símbolo** começa um símbolo em branco, que entra na biblioteca no primeiro Salvar.
+  - **Excluir** tira o símbolo de vez (a extração não o traz de volta); os componentes que o usavam ficam com o desenho.
+  - **Aplicar à categoria…**: com uma categoria aberta, lista os componentes dela, todos marcados, para conferir e desmarcar, e grava todos de uma vez no espelho, na .SchLib e no ledger. As outras linhas da mesma família (o [SMD] do [PTH]) aparecem desmarcadas, a um clique. Marcada a categoria inteira, o símbolo vira também o **desenho padrão** dela, e o componente que entrar no almoxarifado depois já vem com ele.
+  - Os pinos casam **pelo número** quando o símbolo e o componente têm os mesmos números: a polaridade de capacitor, diodo e transistor fica. Pela ordem só quando os números não batem, e o hub avisa.
+  - O botão Aplicar diz onde o desenho vai cair: *Aplicar ao componente* ou *Aplicar à categoria…*.
+
 ## 1.1.7 — 2026-09-25
 
 - Vista Esquema, **gaveta dos pousos** na barra de ferramentas, como na Active Bar do Altium: GND, 3V3, 5V5, VIN, o rótulo de net e o No ERC ficam num botão só. A face do botão é o último pouso usado, e clicar nela usa de novo; a setinha no canto de baixo, ou o botão direito, abre a lista com os seis. As teclas (`G`, `L`, `N`) continuam valendo e também trocam a face, e a escolha fica lembrada nesta máquina. Clicar fora ou `Esc` fecham a gaveta, e o clique na folha que a fecha não pousa nada.
