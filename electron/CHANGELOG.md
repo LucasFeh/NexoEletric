@@ -3,6 +3,16 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.0 — 2026-09-28
+
+- **A biblioteca é a do servidor.** Símbolos, almoxarifado, substituições e a numeração dos componentes são lidos e gravados direto no hub central (http://192.168.15.192:8100). Salvar ou aplicar um símbolo, trocar um footprint, excluir um componente do almoxarifado, escolher uma substituição e sincronizar com o Odoo acontecem no servidor, e o que um PC grava os outros veem. A pasta de trabalho guarda uma cópia para leitura, que o hub atualiza sozinho (ao abrir, a cada mudança no servidor e a cada minuto). O hub, a lista para o Odoo, o chat e o Altium desta máquina leem dela.
+- **Sem o servidor, a biblioteca abre só para leitura**, com a última cópia. Toda gravação de biblioteca é recusada com aviso, e nada é gravado. Projetos continuam sendo editados e salvos neste PC normalmente. Um indicador no hub mostra **Biblioteca do servidor** ou **Servidor fora — biblioteca só leitura**, e avisa quando o servidor cai e quando volta.
+- **O que era só deste PC não some.** Um arquivo de biblioteca mudado aqui que o servidor não tem vai para `.altiumhub\backup\lib-remota-<data>\Libs\` antes de ser trocado pela versão do servidor, e o hub avisa onde ficou.
+- **Sincronizar almoxarifado** roda no servidor, com o Odoo e o login de lá, e é o servidor quem numera. O app não traz mais o estado do almoxarifado antes, nem pergunta "Sincronizar assim mesmo". A caixa correspondente das configurações fica sem efeito, mas continua guardada: volta a valer se a biblioteca do servidor for desligada.
+- **Importar do servidor** fica com **Projetos** e **Bibliotecas do almoxarifado para o Altium** (`Libs\Almox`). "Bibliotecas publicadas" e "Estado do almoxarifado" aparecem desligadas, porque a cópia da biblioteca já é o hub quem mantém. O índice dos projetos (`projects.js`) passa a vir com os projetos. As `.SchLib` do almoxarifado não entram na cópia automática: depois de sincronizar, se o Altium desta máquina lê a pasta de trabalho, importe as Bibliotecas do almoxarifado para ele receber as novas.
+- **Configurações › Servidor central › Usar a biblioteca do servidor**, ligada. Desligar volta a biblioteca própria deste PC, que se afasta da do servidor a cada edição. A cópia que a biblioteca do servidor deixou na pasta continua se atualizando pelo **Importar do servidor**, sem virar conflito nem backup; só o que foi editado aqui depois dela fica protegido. Mudar o servidor ou essa caixa reinicia o hub. Numa pasta de desenvolvedor (git) a biblioteca continua a do repositório. **Ajuda › Sobre o EletricHUB** diz qual biblioteca está valendo.
+- O hub do servidor precisa ser da mesma versão que o deste app: uma função que ele ainda não tem responde com o aviso de atualizar o hub do servidor, em vez de falhar calada.
+
 ## 1.1.9 — 2026-09-25
 
 - Biblioteca › Símbolos, a ferramenta de símbolos depois da revisão:

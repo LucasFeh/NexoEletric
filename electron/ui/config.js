@@ -20,15 +20,39 @@ function toast(msg, tipo = 'ok', ms = 3200) {
   if (ms) toastT = setTimeout(() => { t.className = ''; }, ms);
 }
 
+// So troca o tipo (ok/warn/err): as outras classes da nota (sob-caixa) ficam.
 function nota(id, txt, tipo = '') {
   const n = $(id);
   n.textContent = txt || '';
-  n.className = 'nota' + (tipo ? ' ' + tipo : '');
+  n.classList.remove('ok', 'warn', 'err');
+  if (tipo) n.classList.add(tipo);
+}
+
+// A pasta escolhida e de desenvolvedor (git)? Nela a biblioteca e a do repositorio e a
+// biblioteca do servidor nao liga (lib/lib-remota.js » servidor).
+let pastaDev = false;
+
+// A biblioteca do servidor vale com a caixa marcada, fora da pasta de desenvolvedor. Ela tira
+// o efeito do guarda do sincronismo (o sincronismo roda no servidor, que e quem numera) e muda
+// o que a importacao traz. O guarda fica desligado na tela, mas com o valor guardado: volta a
+// valer se a biblioteca do servidor for desligada.
+function mostraRemota() {
+  const remota = $('libRemota').checked && !pastaDev;
+  $('syncGuard').disabled = remota;
+  nota('nSyncGuard', remota ? 'sem efeito com a biblioteca do servidor: o sincronismo roda nele, com o livro-razão de lá' : '');
+  nota('nLibRemota', pastaDev && $('libRemota').checked
+    ? 'pasta de desenvolvedor (git): a biblioteca é a do repositório, e este ajuste não vale nela' : '', 'warn');
+  $('importarTxt').textContent = remota
+    ? 'Recomendado. Traz os projetos e as bibliotecas do almoxarifado que o Altium lê (cerca de 70 MB na primeira vez). A biblioteca do hub já vem do servidor.'
+    : 'Recomendado. Traz os projetos, as bibliotecas publicadas e o almoxarifado (cerca de 80 MB na primeira vez).';
+  $('nOdooRemota').style.display = remota ? '' : 'none';
 }
 
 async function avaliaPasta() {
   const ws = $('workspace').value.trim();
   const r = await api.chamar('config:avaliarPasta', ws);
+  pastaDev = Boolean(r.ok && r.dev);
+  mostraRemota();
   if (!r.ok) return nota('nPasta', r.motivo, 'err');
   if (r.aviso) return nota('nPasta', r.aviso, 'warn');
   if (r.nova) return nota('nPasta', 'a pasta será criada', 'ok');
@@ -65,6 +89,9 @@ async function carrega() {
   $('lan').checked = cfg.lan;
   $('masterPassword').value = cfg.masterPassword || '';
   $('syncGuard').checked = cfg.syncGuard !== false;
+  $('libRemota').checked = cfg.libRemota !== false;
+  pastaDev = Boolean(cfg.dev);
+  mostraRemota();
   $('autoUpdate').checked = cfg.autoUpdate;
   $('avisoLan').style.display = cfg.lan ? 'block' : 'none';
   $('altArq').textContent = cfg.altium.arquivo;
@@ -94,6 +121,7 @@ $('workspace').addEventListener('change', () => { avaliaPasta(); mostraPrj(); })
 $('bApagarChave').onclick = () => { apagarChave = true; $('anthropicKey').value = ''; nota('nChave', 'a chave será apagada ao salvar', 'warn'); };
 $('bTestar').onclick = testaServidor;
 $('lan').addEventListener('change', () => { $('avisoLan').style.display = $('lan').checked ? 'block' : 'none'; });
+$('libRemota').addEventListener('change', mostraRemota);
 $('bApagarToken').onclick = () => { apagarToken = true; $('updateToken').value = ''; nota('nToken', 'o token será apagado ao salvar', 'warn'); };
 $('bVoltarAltium').onclick = () => {
   voltarAltium = true;
@@ -118,6 +146,8 @@ $('bSalvar').onclick = async () => {
       port: Number($('port').value),
       lan: $('lan').checked,
       masterPassword: $('masterPassword').value,
+      libRemota: $('libRemota').checked,
+      // desligada na tela com a biblioteca do servidor, mas o valor vai: a setting nao se perde
       syncGuard: $('syncGuard').checked,
       autoUpdate: $('autoUpdate').checked,
       updateToken: $('updateToken').value,

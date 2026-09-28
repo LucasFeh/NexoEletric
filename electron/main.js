@@ -9,7 +9,10 @@
 //   3. mostra o hub na janela, com o comportamento de aba do Chrome (lib/web.js);
 //   4. busca atualizacao nos releases do GitHub (lib/updater.js);
 //   5. importa projetos e bibliotecas do hub central quando pedido (lib/import-server.js),
-//      e antes de todo sincronismo do almoxarifado, para a numeracao nao divergir.
+//      e antes de todo sincronismo do almoxarifado, para a numeracao nao divergir;
+//   6. desde a 1.2.0, a biblioteca e a do SERVIDOR (lib/lib-remota.js): o hub daqui repassa
+//      a ele as gravacoes de biblioteca e mantem Libs/ como espelho. Nesse modo o item 5 fica
+//      so com projetos e Libs/Almox, e o sincronismo roda no servidor, sem guarda aqui.
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -46,6 +49,7 @@ const { Backend } = require('./lib/backend');
 const updater = require('./lib/updater');
 const importer = require('./lib/import-server');
 const altiumHome = require('./lib/altium-home');
+const libRemota = require('./lib/lib-remota');
 const web = require('./lib/web');
 const buildInfo = require('./lib/build-info');
 
@@ -73,6 +77,10 @@ let importacao = null;          // Promise da importacao em curso (a guarda do s
 let janelaConfig = null;
 let janelaImport = null;
 let avisoSync = '';             // o que a sincronizacao da pasta de trabalho precisa dizer
+// A biblioteca do HUB QUE ESTA NO AR e a do servidor? E o que o guarda do sincronismo e a
+// importacao seguem, e nao a configuracao salva: um reinicio recusado (vista com edicao
+// pendente) deixa as duas diferentes, e um hub sem o libremota.py ignora a variavel.
+let libRemotaNoAr = false;
 
 // ───────────────────────────── instancia unica ─────────────────────────────
 // Duas copias disputariam a mesma porta e a mesma pasta de trabalho. Com a janela
@@ -164,6 +172,9 @@ function envDoHub(ws) {
   // para la (hubserver.py » ALTIUMHUB_BOM_LINK), onde a bancada abre e marca os vistos.
   // Este app so facilita o acesso ao hub; o link que circula e sempre o do servidor.
   if (s.serverUrl) env.ALTIUMHUB_BOM_LINK = s.serverUrl;
+  // A biblioteca e a do servidor: ALTIUMHUB_LIB_REMOTA=serverUrl liga o repasse e o espelho
+  // no hubserver (libremota.py). A decisao e uma so, a de lib/lib-remota.js.
+  Object.assign(env, libRemota.envDoHub(s, dev(ws)));
   // Na rede, o chat passa a pedir a senha mestre (tools/chat/chatserver.py): aberto, ele
   // roda o claude nesta maquina a pedido de qualquer um que alcance a porta.
   if (s.lan) env.ALTIUMHUB_CHAT_SENHA = '1';
@@ -171,6 +182,20 @@ function envDoHub(ws) {
   const chave = settings.getSegredo('anthropicKey');
   if (chave) env.ANTHROPIC_API_KEY = chave;
   return env;
+}
+
+// O que o hub no ar diz da propria biblioteca (libremota.py). O 404 vem de um hub de antes
+// do modo remoto, e em HTML: o json fica null e a decisao e do lib-remota.modoDoHub.
+async function statusDaBiblioteca() {
+  try {
+    const r = await fetch(origem + '/api/lib-remota/status', { signal: AbortSignal.timeout(10000) });
+    let json = null;
+    try { json = await r.json(); } catch { /* corpo que nao e JSON */ }
+    return { status: r.status, json };
+  } catch (e) {
+    log.warn('[lib-remota] o hub nao respondeu o status da biblioteca: ' + e.message);
+    return null;
+  }
 }
 
 // So chamada de dentro da fila (emSerie).
@@ -193,8 +218,10 @@ async function subirHub({ porta } = {}) {
   avisoSync = avisos.join(' ');
 
   status('python', 'subindo o hub…');
+  libRemotaNoAr = false;
   if (backend) await backend.stop();              // o anterior sai primeiro (saida esperada)
-  const b = new Backend({ python: PYTHON, workspace: ws, logDir: LOG_DIR, env: envDoHub(ws) });
+  const envHub = envDoHub(ws);
+  const b = new Backend({ python: PYTHON, workspace: ws, logDir: LOG_DIR, env: envHub });
   backend = b;
   backendParado = false;
   let noAr = false;
@@ -209,6 +236,15 @@ async function subirHub({ porta } = {}) {
   origem = b.url();
   if (b.port !== s.port) {
     log.warn(`porta ${s.port} ocupada; o hub subiu na ${b.port} (preferencias do navegador ficam por porta)`);
+  }
+  const remotaPedida = Boolean(envHub.ALTIUMHUB_LIB_REMOTA);
+  libRemotaNoAr = libRemota.modoDoHub(remotaPedida, remotaPedida ? await statusDaBiblioteca() : null);
+  if (libRemotaNoAr) {
+    log.info('[lib-remota] a biblioteca e a do servidor: ' + envHub.ALTIUMHUB_LIB_REMOTA);
+  } else if (remotaPedida) {
+    log.warn('[lib-remota] pedida, mas o hub respondeu que esta no modo local (hub sem libremota.py, ou endereco recusado)');
+    avisoSync = [avisoSync, 'O hub não ligou a biblioteca do servidor: a biblioteca segue a deste PC ' +
+      '(o motivo está em Ajuda › Abrir pasta de logs).'].filter(Boolean).join(' ');
   }
   // O hub cai sozinho no modo DEMO (projetos de mentira) se o /api/index.json falhar
   // (hub.html » API.index). Aquecer aqui garante que a primeira pagina ja o encontra.
@@ -350,14 +386,22 @@ async function rodarImportacao(grupos, progresso) {
   if (!s.setupDone || !s.workspace || !path.isAbsolute(s.workspace)) {
     throw new Error('termine a configuração inicial (pasta de trabalho) antes de importar');
   }
+  // Com a biblioteca do servidor, 'libs' e 'almox' sao do espelho do hub: a tela ja os
+  // desliga, e aqui e a defesa (uma janela aberta antes de a configuracao mudar ainda os manda).
+  const g = libRemota.gruposDaImportacao(grupos, libRemotaNoAr);
+  if (g.recusados.length) log.warn(`[import] biblioteca do servidor: grupos recusados ${g.recusados.join(', ')}`);
+  if (!g.grupos.length) {
+    throw new Error('a biblioteca já é a do servidor: o hub a mantém sozinho, e só projetos e as bibliotecas do almoxarifado para o Altium são importados');
+  }
   importando = new AbortController();
   const p = importer.importar({
-    ws: s.workspace, serverUrl: s.serverUrl, grupos, seedHashes: seedHashes(),
+    ws: s.workspace, serverUrl: s.serverUrl, grupos: g.grupos, seedHashes: seedHashes(),
     progresso, signal: importando.signal,
   });
   importacao = p.catch(() => {});
   try {
     const res = await p;
+    res.recusados = g.recusados;
     log.info(`[import] ${res.novos.length} novos, ${res.atualizados.length} atualizados, ` +
       `${res.conflitos.length} conflitos, ${res.erros.length} erros`);
     return res;
@@ -384,7 +428,13 @@ async function esperaImportacao(wc) {
 // isso, cada PC que sincroniza vira uma segunda autoridade dos part numbers. Importacao em
 // andamento: espera ela terminar (sincronizar no meio dela e justamente numerar do estado
 // velho). Nao deu para trazer o estado: pergunta, como quando o servidor nao responde.
+//
+// Com a biblioteca do servidor nada disso vale: o hub daqui repassa o POST e o sincronismo
+// roda NO servidor, com o livro-razao e o Odoo de la. Trazer o estado antes seria um segundo
+// escritor nos arquivos do espelho, e o "Sincronizar assim mesmo" nao teria o que oferecer
+// (servidor fora, o hub recusa com 503 e nada e gravado).
 async function antesDoSincronismo(d) {
+  if (libRemotaNoAr) return true;
   const s = settings.load();
   if (!s.syncGuard || dev(s.workspace)) return true;
   const wc = d.webContents;
@@ -574,6 +624,7 @@ function sobre() {
       `pasta de trabalho: ${s.workspace}${dev(s.workspace) ? '  (repositório git: modo desenvolvedor)' : ''}`,
       `hub: ${origem || '—'}${s.lan ? '  (compartilhado na rede)' : ''}`,
       `servidor central: ${s.serverUrl}`,
+      `biblioteca: ${libRemotaNoAr ? 'a do servidor (esta pasta guarda a cópia para leitura)' : 'a desta pasta de trabalho'}`,
       `Odoo: ${s.odooUrl} (${s.odooDb})`,
       `última importação: ${importer.ultimaImportacao(s.workspace) || 'nunca'}`,
       '',
@@ -638,6 +689,8 @@ function registrarIpc() {
       versao: b.version,
       commit: b.commit,
       dev: s.workspace ? dev(s.workspace) : false,
+      // a do hub no ar (a importacao segue esta); a caixa das configuracoes mostra libRemota
+      remota: libRemotaNoAr,
       altium: altiumHome.status(s.workspace),
       ultimaImportacao: s.workspace ? importer.ultimaImportacao(s.workspace) : '',
       atualizacao: updater.status(),
@@ -698,6 +751,8 @@ async function salvarConfig(e, d) {
     odooUrl: validarUrl(d.odooUrl, 'Odoo'),
     odooDb: String(d.odooDb || '').trim() || antes.odooDb,
     autoUpdate: Boolean(d.autoUpdate),
+    libRemota: d.libRemota !== false,
+    // guardado mesmo sem efeito (biblioteca do servidor): volta a valer se ela for desligada
     syncGuard: d.syncGuard !== false,
     masterPassword: typeof d.masterPassword === 'string' ? d.masterPassword.trim() : antes.masterPassword,
     setupDone: true,
@@ -728,8 +783,10 @@ async function salvarConfig(e, d) {
   if (d.apagarChaveApi) settings.setSegredo('anthropicKey', '');
   settings.save(novo);
 
+  // serverUrl e libRemota entram no env do hub (ALTIUMHUB_BOM_LINK, ALTIUMHUB_LIB_REMOTA): so
+  // valem num hub novo. A pasta tambem conta, porque decide o modo desenvolvedor.
   const reinicia = setup || ws !== antes.workspace || port !== antes.port || novo.lan !== antes.lan ||
-    novo.serverUrl !== antes.serverUrl ||
+    novo.serverUrl !== antes.serverUrl || novo.libRemota !== (antes.libRemota !== false) ||
     novo.masterPassword !== antes.masterPassword || settings.getSegredo('anthropicKey') !== chaveAntes;
 
   // O home.txt so muda DEPOIS de a pasta ter o AI-GUIDE.md (o HomeValida dos .pas).
@@ -794,6 +851,8 @@ async function smoke() {
       };
     })()`);
     r.hubLog = backend ? backend.tail.slice(-30) : [];
+    // informativo: o build depois do merge do backend deve dizer true (com a configuracao padrao)
+    r.libRemota = libRemotaNoAr;
     r.configPeloMenu = await smokeConfigPeloMenu();
     r.ok = r.page.demo === false && r.page.hubCore === 'object'
       && r.configPeloMenu.principal === true && r.configPeloMenu.semPrincipal === true;

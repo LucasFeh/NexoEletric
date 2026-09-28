@@ -187,6 +187,14 @@ test('relSeguro e recusaDeDado', () => {
   assert.ok(importer.recusaDeDado('Libs/lib-subs.js', Buffer.from('var libSubs = []; alert(1)')));
   assert.ok(importer.recusaDeDado('Libs/lib-subs.js', Buffer.from('window.x = 1')));
   assert.ok(importer.recusaDeDado('Libs/lib-subs.js', Buffer.from('var top = {}')), 'nome fora da lista');
+  // comentario // em linha propria continua aceito, com LF e com CRLF
+  assert.strictEqual(importer.recusaDeDado('Libs/lib-subs.js', Buffer.from('// gerado\nvar libSubs = [];\n')), '');
+  assert.strictEqual(importer.recusaDeDado('Libs/lib-subs.js', Buffer.from('// gerado\r\nvar libSubs = [];\r\n')), '');
+  // mas o JS fecha o comentario tambem em \r, U+2028 e U+2029 e executaria o resto da linha
+  for (const fim of ['\r', ' ', ' ']) {
+    const js = `// nota${fim}window.x=1\nvar libSubs = [];\n`;
+    assert.ok(importer.recusaDeDado('Libs/lib-subs.js', Buffer.from(js)), JSON.stringify(fim));
+  }
 });
 
 test('servidor fora do ar: testar diz o motivo sem travar', async () => {

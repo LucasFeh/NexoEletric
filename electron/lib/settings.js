@@ -27,16 +27,25 @@ const PADRAO = {
   // (tools/deploy/PENDENCIAS.md, grupo 1), e exige senha mestre propria (main.js »
   // salvarConfig). O BOM nao precisa disto: o link copiado e o do servidor (serverUrl).
   lan: false,
-  // O hub central: de onde o "Importar do servidor" puxa projetos e bibliotecas, e o
-  // endereco do link do BOM (ALTIUMHUB_BOM_LINK).
+  // O hub central: a biblioteca (libRemota), de onde o "Importar do servidor" puxa projetos
+  // e as bibliotecas do Altium, e o endereco do link do BOM (ALTIUMHUB_BOM_LINK).
   serverUrl: 'http://192.168.15.192:8100',
+  // A biblioteca e a do servidor (decisao do dono, 1.2.0): o hub daqui recebe
+  // ALTIUMHUB_LIB_REMOTA=serverUrl, repassa ao servidor toda gravacao de biblioteca e deixa
+  // Libs/ como espelho so leitura dele; sem servidor, a biblioteca abre so para leitura.
+  // Desligar volta a biblioteca PROPRIA deste PC, que diverge da do servidor a cada edicao.
+  // Nao vale numa pasta de desenvolvedor (lib/lib-remota.js » servidor).
+  libRemota: true,
   // O Odoo de producao: e o que o sincronismo do almoxarifado consulta. So semeia o
-  // hub-almox.json quando ele ainda nao existe; login e senha o usuario poe no hub.
+  // hub-almox.json quando ele ainda nao existe; login e senha o usuario poe no hub. Com a
+  // biblioteca do servidor, o sincronismo roda LA, com o Odoo e as credenciais de la.
   odooUrl: 'http://192.168.15.192:8070',
   odooDb: 'odoo_db',
   autoUpdate: true,
   // Antes de cada sincronismo do almoxarifado, trazer do servidor o estado que numera
-  // (livro-razao de part numbers). Desligar faz deste PC uma segunda autoridade.
+  // (livro-razao de part numbers). Desligar faz deste PC uma segunda autoridade. Sem efeito
+  // com libRemota (o sincronismo roda no servidor), mas fica guardado: volta a valer se a
+  // biblioteca do servidor for desligada.
   syncGuard: true,
   // Senha mestre do hub (excluir projeto, chat). Vazia = a padrao do hubserver.py.
   masterPassword: '',

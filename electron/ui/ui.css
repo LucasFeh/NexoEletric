@@ -59,6 +59,9 @@ label.check:last-child { margin-bottom: 0; }
 label.check input { margin: 3px 0 0; accent-color: var(--hi); }
 label.check b { font-weight: 500; color: var(--text); display: block; }
 label.check small { color: var(--text-3); font-size: 12px; display: block; }
+/* caixa sem efeito no modo atual (a biblioteca do servidor desliga algumas): continua legivel */
+label.check:has(input:disabled) { cursor: default; }
+label.check:has(input:disabled) > span { opacity: 0.5; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;

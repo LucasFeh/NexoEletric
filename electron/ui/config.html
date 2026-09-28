@@ -8,7 +8,12 @@
   body { overflow: auto; }
   .so-setup, .so-config { display: none; }
   body.setup .so-setup, body.config .so-config { display: block; }
+  /* caixa so do setup: o block acima derrubava o flex e a caixa ficava numa linha e o texto noutra */
+  body.setup label.check.so-setup, body.config label.check.so-config { display: flex; }
   #altHome { word-break: break-all; }
+  /* nota de uma caixa, logo abaixo dela e alinhada ao texto; vazia, nao ocupa espaco */
+  .nota.sob-caixa { margin: -8px 0 12px 26px; }
+  .nota.sob-caixa:empty { display: none; }
 </style>
 </head>
 <body>
@@ -38,7 +43,7 @@
 
   <div class="card">
     <h2>Servidor central</h2>
-    <p>O hub da empresa, de onde vêm os projetos e o estado do almoxarifado. O link do BOM que o app copia também é o dele.</p>
+    <p>O hub da empresa: a biblioteca é a dele, e é de onde vêm os projetos. O link do BOM que o app copia também é o dele.</p>
     <div class="campo">
       <div class="linha">
         <input type="url" id="serverUrl" class="grow" spellcheck="false">
@@ -46,12 +51,17 @@
       </div>
       <div class="nota" id="nServidor"></div>
     </div>
+    <label class="check"><input type="checkbox" id="libRemota">
+      <span><b>Usar a biblioteca do servidor</b>
+      <small>Recomendado. Símbolos, almoxarifado e substituições são lidos e gravados direto no servidor, e esta pasta guarda uma cópia para leitura. Sem o servidor, a biblioteca abre só para leitura. Desligado, este PC tem uma biblioteca própria, que se afasta da do servidor a cada edição.</small></span></label>
+    <div class="nota sob-caixa" id="nLibRemota"></div>
     <label class="check so-setup"><input type="checkbox" id="importar" checked>
       <span><b>Importar projetos e bibliotecas do servidor ao terminar</b>
-      <small>Recomendado. Traz os projetos, as bibliotecas publicadas e o almoxarifado (cerca de 80 MB na primeira vez).</small></span></label>
+      <small id="importarTxt">Recomendado. Traz os projetos, as bibliotecas publicadas e o almoxarifado (cerca de 80 MB na primeira vez).</small></span></label>
     <label class="check"><input type="checkbox" id="syncGuard">
       <span><b>Antes de sincronizar o almoxarifado com o Odoo, atualizar a partir do servidor</b>
       <small>O servidor é quem numera os componentes (Libs/almox-parts.json). Com isso ligado, a numeração daqui continua igual à dele.</small></span></label>
+    <div class="nota sob-caixa" id="nSyncGuard"></div>
     <p class="nota so-config" id="nImport"></p>
   </div>
 
@@ -63,6 +73,7 @@
       <div class="campo" style="width:180px"><span>Base</span><input type="text" id="odooDb" spellcheck="false"></div>
     </div>
     <p class="nota">Vale para uma pasta de trabalho nova. Se a pasta já tem um <code>hub-almox.json</code>, o endereço dele continua valendo.</p>
+    <p class="nota" id="nOdooRemota" style="display:none">Com a biblioteca do servidor, o sincronismo do almoxarifado roda no servidor, com o Odoo e o login de lá: estes campos só valem com ela desligada.</p>
   </div>
 
   <div class="card">

@@ -9,7 +9,8 @@
 //     arquivos (o almox-index.js NAO as lista: medido, ele traz nomes legados).
 //
 // Tres vias, por arquivo: L (local), R (servidor) e B (a base = o que veio do servidor na
-// importacao anterior, ou o que o instalador semeou). Assim se sabe QUEM mudou:
+// importacao anterior, o que o instalador semeou, ou o que o espelho da biblioteca do
+// servidor gravou por ultimo em Libs/). Assim se sabe QUEM mudou:
 //   L == R            nada a fazer
 //   L == B            so o servidor mudou       -> traz
 //   R == B            so o local mudou          -> fica o local
@@ -19,16 +20,27 @@
 //     'projeto', 'lib'  o LOCAL fica e a versao do servidor vai para
 //               .altiumhub/conflitos/<data>/, e o resumo lista cada um. Nada do trabalho
 //               de ninguem some calado.
+//
+// Com a biblioteca do servidor (1.2.0, lib/lib-remota.js), os grupos 'libs' e 'almox' nao
+// chegam aqui: o processo principal os recusa, porque o espelho do hubserver cuida desses
+// arquivos. Ficam 'projetos' e 'almoxLibs' (Libs/Almox, que o Altium le e o espelho nao traz).
+// Desligada a caixa, eles voltam -- e o que o espelho deixou no disco conta como base.
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { MARCA_DIR } = require('./workspace');
+const { gravadosPeloEspelho } = require('./lib-remota');
 
 // Arquivos de um projeto, pelos nomes que ExportBoard/ExportProject/BuildSchematic/
 // ApplyChanges e o hubserver escrevem. Ficam de fora os de BANCADA do servidor
 // (bom-vistos.json, bom-opts.json, odoo-lista.json): sao estado de quem monta a placa la.
 const ARQ_PROJETO = ['board.js', 'schematic.js', 'changes.js', 'annotations.js', 'pcb-list.csv',
   'history.jsonl', 'build-report.txt', 'apply-report.txt'];
+
+// O indice classico dos projetos (hub-classic.html), que os scripts do Altium reescrevem. Vem
+// com os projetos, e nao com as bibliotecas: com a biblioteca do servidor o grupo 'libs' nao
+// existe mais (lib/lib-remota.js), e o indice deixaria de chegar.
+const ARQ_INDICE = ['projects.js'];
 
 // Estado do almoxarifado: o que o gerador (tools/almox, tools/symbols/guardiao.py) LE antes de
 // numerar. Semear isto do servidor antes de sincronizar localmente e o que evita a
@@ -37,9 +49,9 @@ const ARQ_ALMOX = ['Libs/almox-parts.json', 'Libs/lib-ledger.json', 'Libs/almox-
   'Libs/almox-basicos.js', 'Libs/almox-especiais.js', 'Libs/almox-index.js', 'Libs/almox-sync.js',
   'Libs/almox-guardiao.js', 'tools/almox/componentes_odoo.csv'];
 
-// Bibliotecas publicadas (espelhos do Altium, lib da casa, substituicoes, indice classico).
+// Bibliotecas publicadas (espelhos do Altium, lib da casa, substituicoes).
 const ARQ_LIB = ['Libs/schlib.js', 'Libs/pcblib.js', 'Libs/symbols-lib.js', 'Libs/rename-map.js',
-  'Libs/lib-subs.js', 'Libs/libs-report.txt', 'Libs/BIBLIOTECA DE ESQUEMA.SchLib', 'projects.js'];
+  'Libs/lib-subs.js', 'Libs/libs-report.txt', 'Libs/BIBLIOTECA DE ESQUEMA.SchLib'];
 
 // Fora a lista do ledger, o que o gerador escreve em Libs/Almox (almox2lib.py, dblib.py).
 const ARQ_ALMOX_DIR_FIXOS = ['Libs/Almox/FOOTPRINTS ALMOX.PcbLib', 'Libs/Almox/ALMOX.DbLib',
@@ -198,7 +210,12 @@ const VARS_DE_DADOS = new Set(['pcbmirror', 'schematic', 'changes', 'annotations
 
 function recusaDeDado(rel, buf) {
   if (!rel.endsWith('.js')) return '';
-  const s = buf.toString('utf8').replace(/^\ufeff/, '').replace(/^[ \t]*\/\/[^\n]*(\n|$)/gm, '');
+  // O comentario // do JS acaba em \n, \r, U+2028 ou U+2029, e nao so no \n: com
+  // "// nota\rwindow.x=1" o navegador executa o que vem depois do \r. Entao o comentario sai so
+  // ate o primeiro desses terminadores, e o resto da linha fica para cair no JSON invalido
+  // (mesma regra do libremota.py \u00bb recusa).
+  const s = buf.toString('utf8').replace(/^\ufeff/, '')
+    .replace(/^[ \t]*\/\/[^\n\r\u2028\u2029]*(\r?\n|$)/gm, '');
   const m = /^\s*var\s+([A-Za-z_$][\w$]*)\s*=/.exec(s);
   if (!m || !VARS_DE_DADOS.has(m[1])) return 'nao e um arquivo de dados do hub (var <nome> = ...)';
   const corpo = s.slice(m[0].length).trim().replace(/;[\s;]*$/, '').trim().replace(/,\s*([\]}])/g, '$1');
@@ -241,6 +258,26 @@ function chaveAjuste(rel, ctx) {
   return '';
 }
 
+// O ledger que diz QUAIS arquivos de Libs/Almox o servidor tem. Com o grupo almox nesta mesma
+// importacao, e o local, que acabou de vir de la. Sem ele (biblioteca do servidor, em que o
+// grupo nao existe, ou a caixa desmarcada), o local pode ser a semente do instalador ou o
+// espelho de antes do ultimo sincronismo, e a lista sairia velha: le o do servidor em
+// memoria, sem gravar nada (quem grava o Libs/lib-ledger.json e o espelho do hub). Servidor
+// sem o ledger ou com um que nao parseia: fica o local, como antes.
+async function ledgerDaLista(ws, serverUrl, comAlmox, signal) {
+  if (!comAlmox) {
+    try {
+      const r = await pega(urlDe(serverUrl, 'Libs/lib-ledger.json'), { signal });
+      if (r.status === 200) return JSON.parse(r.buf.toString('utf8'));
+    } catch { /* cai no local */ }
+  }
+  try {
+    return JSON.parse(fs.readFileSync(path.join(ws, 'Libs', 'lib-ledger.json'), 'utf8'));
+  } catch {
+    return null;                          // sem ledger: so os fixos
+  }
+}
+
 async function comLimite(itens, n, fn) {
   let i = 0;
   const trab = Array.from({ length: Math.min(n, itens.length) }, async () => {
@@ -257,7 +294,8 @@ async function comLimite(itens, n, fn) {
  * @param {string} o.ws            pasta de trabalho
  * @param {string} o.serverUrl     hub central
  * @param {string[]} o.grupos      subconjunto de ['projetos','libs','almox','almoxLibs']
- * @param {object} o.seedHashes    {rel: sha1 | sha1[]} do que o app semeou (base de 3 vias)
+ * @param {object} o.seedHashes    {rel: sha1 | sha1[]} do que o app semeou (base de 3 vias; o
+ *                                 que o espelho da biblioteca do servidor gravou e lido aqui)
  * @param {(ev:object)=>void} o.progresso
  * @param {AbortSignal} [o.signal]
  */
@@ -270,7 +308,10 @@ async function importar(o) {
   const res = { novos: [], atualizados: [], mantidos: [], conflitos: [], backups: [], erros: [], iguais: 0, ausentes: 0, bytes: 0 };
   const ctx = { ws, serverUrl };
   const seed = o.seedHashes || {};
-  const semeados = (rel) => [].concat(seed[rel] || []);
+  // Lido aqui, e nao pelo chamador: a base tem de conhecer o espelho em todo caminho que
+  // importa (a tela, o guarda antes do sincronismo). Ver lib/lib-remota.js » gravadosPeloEspelho.
+  const espelho = gravadosPeloEspelho(ws);
+  const semeados = (rel) => [].concat(seed[rel] || [], espelho[rel] || []);
 
   progresso({ fase: 'lista', msg: `consultando ${serverUrl}` });
   const lista = [];                      // [{rel, grupo}]
@@ -294,6 +335,7 @@ async function importar(o) {
       vistos.add(n.toLowerCase());
       for (const f of ARQ_PROJETO) lista.push({ rel: `Projects/${n}/${f}`, grupo: 'projeto' });
     }
+    for (const rel of ARQ_INDICE) lista.push({ rel, grupo: 'projeto' });
   }
   if (grupos.has('libs')) for (const rel of ARQ_LIB) lista.push({ rel, grupo: 'lib' });
   if (grupos.has('almox')) for (const rel of ARQ_ALMOX) lista.push({ rel, grupo: 'almox' });
@@ -331,7 +373,8 @@ async function importar(o) {
     // Daqui ate a decisao nao ha await: ela usa o disco de agora.
     L = sha1File(dest);
     const B = base ? (base.localSha1 || base.sha1) : null;
-    // Igual a algo que o proprio app semeou (esta versao ou uma anterior) = ninguem mexeu.
+    // Igual a algo que o proprio app semeou (esta versao ou uma anterior), ou ao que o espelho
+    // da biblioteca do servidor gravou por ultimo = ninguem mexeu.
     const intocado = Boolean(L && ((B && L === B) || semeados(rel).includes(L)));
     const registra = () => estado.set(rel, { sha1: R, localSha1: Rl, etag: r.etag, em: quando, ajuste: aj });
 
@@ -383,10 +426,7 @@ async function importar(o) {
 
     // A lista de Libs/Almox so e conhecida depois do lib-ledger.json (grupo almox) chegar.
     if (grupos.has('almoxLibs') && !(signal && signal.aborted)) {
-      let ledger = null;
-      try {
-        ledger = JSON.parse(fs.readFileSync(path.join(ws, 'Libs', 'lib-ledger.json'), 'utf8'));
-      } catch { /* sem ledger: so os fixos */ }
+      const ledger = await ledgerDaLista(ws, serverUrl, grupos.has('almox'), signal);
       const extra = new Set(ARQ_ALMOX_DIR_FIXOS);
       for (const k of Object.keys((ledger && ledger.arquivos) || {})) {
         if (!k.startsWith('Libs/Almox/')) continue;
@@ -413,4 +453,4 @@ function ultimaImportacao(ws) {
   return new Estado(ws).d.ultimaImportacao || '';
 }
 
-module.exports = { importar, testar, ultimaImportacao, recusaDeDado, relSeguro, ARQ_PROJETO, ARQ_ALMOX, ARQ_LIB };
+module.exports = { importar, testar, ultimaImportacao, recusaDeDado, relSeguro, ARQ_PROJETO, ARQ_INDICE, ARQ_ALMOX, ARQ_LIB };
