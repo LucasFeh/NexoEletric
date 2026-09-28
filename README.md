@@ -1156,6 +1156,94 @@ numa janela. Tudo o que o hub do servidor faz, o app faz, só que nesta máquina
 Build, release, tokens e o porquê de cada escolha estão em
 [electron/README.md](electron/README.md).
 
+## Biblioteca remota (app desktop)
+
+O servidor é a **única** biblioteca. O app desktop não tem biblioteca própria: o hub
+desta máquina lê e grava a do hub central, e a pasta `Libs\` local vira um **espelho**
+dela. Até aqui cada PC editava a sua cópia e nada voltava ao servidor — símbolos
+desenhados no desktop, part numbers numerados em dois lugares. O modo existe para acabar
+com essa segunda autoridade.
+
+**Como liga.** Variável de ambiente `ALTIUMHUB_LIB_REMOTA=<url do hub central>` (por
+exemplo `http://192.168.15.192:8100`), que o app passa ao `hubserver.py` que ele sobe.
+Sem ela o hub se comporta exatamente como antes — o servidor de produção nunca a define,
+e o código é um só para web e desktop (`libremota.py`). Uma url que não seja
+`http(s)://host` é recusada: o hub sobe local e o log diz por quê.
+`GET /api/lib-remota/status` responde sempre: `{"modo":"local"}`, ou, no modo remoto,
+o servidor, se ele está no ar (`online`), a última sincronia, o último erro e os backups.
+
+**O que vai para o servidor** (mesmo método, corpo cru, query string preservada; o hub
+devolve o status e o corpo de lá):
+
+- todo `/api/symbols/*` — salvar símbolo, a ferramenta de símbolos, footprints,
+  excluídos, extração e **Sincronizar almoxarifado**, com os streams repassados evento a
+  evento. O sincronismo roda **no servidor**, com o Odoo e o livro-razão de lá;
+- `/api/almox/config` — as credenciais do Odoo que valem são as do servidor, e ele recusa
+  gravá-las de outra máquina (403), que é o certo;
+- `POST /api/save` **só** para `Libs/lib-subs.js`. Projeto continua local.
+
+A troca de substituição (aba Biblioteca, desfazer escolha na vista Esquema) lê o
+`lib-subs.js` inteiro, junta a escolha e grava o arquivo inteiro. Por isso a leitura
+também vai ao dono do arquivo: o `GET /Libs/lib-subs.js` traz a versão do servidor para o
+espelho antes de servi-la (sem ETag, porque o do Werkzeug é mtime + tamanho). E a gravação
+só segue se a página leu a versão que o servidor tem. Se, conferida na hora, ela mudou (outro
+PC gravou, ou a leitura caiu na cópia velha porque o servidor tinha acabado de voltar), o hub
+responde 409, não grava nada e o espelho recarrega com a versão do servidor. Assim a escolha
+do outro PC não some calada.
+
+A rota antiga `/api/almox/sync` (o `almox2lib.py` cru, sem guardião) é recusada com 409:
+no desktop o almoxarifado se sincroniza pelo botão, no servidor.
+
+Com o hub só nesta máquina (`--host 127.0.0.1`), um pedido com `Host:` fora do loopback não é
+repassado: recebe o mesmo 400 do anti DNS rebinding de sempre. O repasse roda antes das
+rotas, e sem essa guarda uma página qualquer usaria o hub local como ponte para a biblioteca
+do servidor.
+
+**O espelho.** Os arquivos do topo de `Libs\` que o hub, as vistas e os leitores locais
+(envio da lista ao Odoo, chat, índice, o `BuildSchematic` pelo `home.txt`) leem do disco:
+`schlib.js`, `pcblib.js`, `symbols-lib.js`, `rename-map.js`, `lib-subs.js`,
+`libs-report.txt`, `BIBLIOTECA DE ESQUEMA.SchLib`, `almox-parts.json`, `lib-ledger.json`,
+`almox-excluidos.json` e os `almox-*.js`. Cada um vem por GET condicional (ETag/304) e é
+gravado atômico. Atualiza ao subir, a cada aviso do `/__events` do servidor, a cada minuto
+como rede de segurança e — antes de responder à página — depois de cada gravação repassada
+e no fim de cada sincronismo. As abas recarregam pelo mesmo aviso de sempre: o espelho muda
+o arquivo, o hub local vê o mtime.
+
+- `.js` só entra se for `var <nome conhecido> = <JSON>` (a mesma regra do "Importar do
+  servidor"): o `/api/save` do servidor grava `lib-subs.js` sem senha, e um `.js` com
+  código rodaria aqui, na origem do hub local. Comentário `//` só sai se terminar num `\n`:
+  o JS também fecha o comentário em `\r`, U+2028 e U+2029 e executaria o resto da linha.
+  `.json` tem de parsear e a `.SchLib` tem de ter a assinatura CFBF. Arquivo recusado não é
+  gravado e aparece no erro do status.
+- O loopback no `almox-index.js` (o `odooUrl` que o servidor grava) vira o host do servidor.
+- **Nada some calado:** um arquivo local que o espelho não gravou (ou que mudou depois) e
+  que difere do servidor é copiado para `.altiumhub\backup\lib-remota-<data>\Libs\` antes
+  de ser sobrescrito — fora do app, `.lib-remota\backup\`. Os bytes que o próprio app
+  semeou ou importou não contam como mudança. O estado do espelho (ETag e sha1 por
+  arquivo) fica em `.altiumhub\lib-remota.json`.
+
+**Sem servidor.** A biblioteca abre **só para leitura**, com a última cópia do espelho:
+leituras caem no hub local; toda gravação de biblioteca volta 503 com "nada foi gravado".
+Não existe gravar offline e reconciliar depois — é o que produzia a divergência. Quando o
+servidor volta, o hub percebe em segundos e libera a gravação. A primeira resposta boa já
+dispara a atualização do espelho, que assim não fica com a cópia de antes da queda.
+
+**Na tela.** `hub-libremota.js` põe na barra de status do app "Biblioteca do servidor" ou
+"Servidor fora — biblioteca só leitura", com o endereço e a última sincronia no title, e
+avisa quando o servidor cai, quando volta e quando um backup é feito. O backup não depende
+do toast, que some em segundos. O indicador fica em aviso ("cópia local guardada") até o
+usuário clicar nele. O clique abre, no modal da casca, a lista dos arquivos e onde a cópia
+de cada um foi guardada. Na web (modo local) não aparece nada.
+
+**O que fica de fora.** `Libs\Almox\*` — as `.SchLib` do almoxarifado, a PcbLib de
+63 MB e a DbLib que o Altium lê — não passa pelo espelho: continua vindo pelo **Importar
+do servidor** (grupo das bibliotecas do almoxarifado).
+
+**Versão.** O app chama no servidor as rotas da versão dele. Rota que o hub central ainda
+não tem volta como "o hub do servidor ainda não tem <rota>: … Atualize o hub do servidor";
+publique o principal (`git push servidor neoden-ordem-por-bico`) antes de soltar um app
+que dependa de rota nova.
+
 ## Fluxo projeto novo do zero
 
 1. Rode **ExportLibs** no Altium (uma vez, ou quando as bibliotecas mudarem).
