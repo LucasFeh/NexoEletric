@@ -62,22 +62,82 @@ A pasta de dados segue o nome do produto. Na primeira abertura da 1.1.0,
 
 A tela de boas-vindas pede a pasta de trabalho, testa o servidor e, se marcado:
 
-- **importa do servidor**: projetos, bibliotecas publicadas, estado do almoxarifado e
-  `Libs/Almox`, cerca de 100 MB (`lib/import-server.js`, três vias, ETag);
+- **importa do servidor**: os projetos e `Libs/Almox`, cerca de 70 MB
+  (`lib/import-server.js`, três vias, ETag). Com a biblioteca do servidor desligada, também
+  as bibliotecas publicadas e o estado do almoxarifado, cerca de 100 MB;
 - **aponta o Altium** para a pasta, gravando `home=` em
   `C:\ProgramData\AltiumPCBMirror\home.txt`. Depois disso, rode os scripts pelo
   `AltiumPCBMirror.PrjScr` da pasta de trabalho, e não pelo share do servidor.
 
-Login e senha do Odoo são pedidos no próprio hub (**Biblioteca › Almoxarifado**). O app
-só semeia o `hub-almox.json` com `http://192.168.15.192:8070` e `odoo_db`.
+Com a biblioteca do servidor valem o login e a senha do Odoo gravados **no servidor**: o
+`/api/almox/config` vai para lá, e o servidor só aceita gravar a credencial pela máquina
+dele. Com ela desligada, login e senha são pedidos no próprio hub (**Biblioteca ›
+Almoxarifado**). O app só semeia o `hub-almox.json` com `http://192.168.15.192:8070` e
+`odoo_db`.
+
+## Biblioteca do servidor
+
+Desde a 1.2.0 a biblioteca é **uma só: a do servidor** (decisão do dono). Com
+**Configurações › Servidor central › Usar a biblioteca do servidor** ligada (o padrão,
+`libRemota` em `lib/settings.js`), o app sobe o hub com `ALTIUMHUB_LIB_REMOTA=<servidor>`
+(`lib/lib-remota.js`, a decisão única) e o hub daqui, no `libremota.py`:
+
+- **repassa ao servidor toda gravação de biblioteca**: `/api/symbols/*` (com o andamento
+  ao vivo do sincronismo e da extração), `/api/almox/config` e o `/api/save` do
+  `Libs/lib-subs.js`. Projetos continuam locais. A rota antiga `/api/almox/sync` é
+  recusada (409);
+- **mantém o topo de `Libs/` como espelho só leitura do servidor**: `schlib.js`,
+  `pcblib.js`, `symbols-lib.js`, `rename-map.js`, `lib-subs.js`, `libs-report.txt`, a
+  `.SchLib` da casa, `almox-parts.json`, `lib-ledger.json`, `almox-excluidos.json` e os
+  `almox-*.js`. Atualiza ao subir, a cada mudança no servidor (o `/__events` dele), a cada
+  minuto e logo depois de cada gravação repassada. É dele que leem o hub, a lista para o
+  Odoo, o chat e o `BuildSchematic` do Altium desta máquina;
+- **sem servidor, abre a biblioteca com a última cópia e recusa toda gravação** de
+  biblioteca (503, com aviso). Nada é gravado;
+- **não deixa nada sumir calado**: um arquivo de biblioteca mudado só aqui vai para
+  `.altiumhub\backup\lib-remota-<data>\Libs\` antes de o espelho trocá-lo.
+
+O estado está em `GET /api/lib-remota/status`, e o indicador do hub (`hub-libremota.js`)
+o mostra. O app segue o hub **que está no ar**, e não a configuração salva: depois de
+subir, pergunta a ele se o modo ligou. Um hub sem o modo remoto (um app gerado antes do
+merge do backend) responde 404, e o app avisa e se comporta como antes, com o guarda do
+sincronismo e a importação completa.
+
+Nesse modo, o app:
+
+- **não intercepta mais o sincronismo** (o guarda abaixo): ele roda no servidor;
+- **tira da importação** os grupos *Bibliotecas publicadas* e *Estado do almoxarifado*,
+  na tela e no processo principal. O espelho e a importação de três vias nos mesmos
+  arquivos seriam dois escritores, e um desfaria o outro;
+- **reinicia o hub** quando o servidor ou a caixa mudam.
+
+**Desligar a caixa depois de usar o modo** não deixa a cópia órfã. O espelho grava `Libs/`
+sem passar pelo `import-state.json`, então a importação lê o que ele gravou por último
+(`.altiumhub\lib-remota.json`, em `lib-remota.js » gravadosPeloEspelho`) e o conta como
+base das três vias, como a semente do instalador. Esses arquivos se atualizam no próximo
+**Importar do servidor** sem conflito nem backup. O que alguém editou aqui depois do espelho
+deixa de bater com ele e segue protegido como sempre.
+
+**`Libs/Almox` fica fora do espelho.** São as `.SchLib`, a PcbLib de footprints (63 MB)
+e a DbLib que o Altium lê, e continuam vindo por **Arquivo › Importar do servidor ›
+Bibliotecas do almoxarifado para o Altium**. A lista delas sai do `lib-ledger.json` do
+servidor. Depois de um sincronismo, é essa importação que leva as `.SchLib` novas ao
+Altium desta máquina, se o `home.txt` aponta a pasta de trabalho (apontando o servidor, o
+Altium já as lê de lá).
+
+Numa pasta de desenvolvedor (git), o modo não liga: a biblioteca é a do repositório.
 
 ### Numeração do almoxarifado
 
-O servidor é quem numera os componentes (`Libs/almox-parts.json`). Antes de cada
-sincronismo local com o Odoo, o app intercepta o `POST /api/symbols/almox-sync` e traz do
-servidor o estado que numera. Com o mesmo estado e o mesmo Odoo, a numeração daqui sai
-igual à de lá. Com o servidor fora do ar, o app pergunta antes de seguir. Configurável em
-**Configurações › Servidor central**.
+O servidor é quem numera os componentes (`Libs/almox-parts.json`). Com a biblioteca do
+servidor, o **Sincronizar almoxarifado** roda nele, com o Odoo e o login de lá, e a
+numeração é uma só por construção.
+
+Com ela desligada, vale o guarda: antes de cada sincronismo local com o Odoo, o app
+intercepta o `POST /api/symbols/almox-sync` e traz do servidor o estado que numera. Com o
+mesmo estado e o mesmo Odoo, a numeração daqui sai igual à de lá. Com o servidor fora do
+ar, o app pergunta antes de seguir. Configurável em **Configurações › Servidor central**
+(a caixa fica desligada enquanto a biblioteca do servidor vale).
 
 ## Desenvolvimento
 
@@ -85,12 +145,16 @@ igual à de lá. Com o servidor fora do ar, o app pergunta antes de seguir. Conf
 cd electron
 npm install
 npm run build:prep     # build/python (baixa o Python), build/hub (do HEAD), gen/build-info.json
-npm test               # 26 testes; os de backend/importação sobem o hub de verdade
+npm test               # 32 testes; os de backend/importação/biblioteca sobem o hub de verdade
 npm run dev            # abre o app (pasta de dados normal: %APPDATA%\EletricHUB)
 ```
 
 `build/hub` sai do **commit** (`git cat-file --filters`, que aplica o CRLF dos `.pas`), e
 não da árvore suja. Para testar uma mudança no hub, commite antes.
+
+O teste de ponta a ponta da biblioteca do servidor (`test/lib-remota.test.js`: espelho,
+repasse, backup, offline) só liga quando o `build/hub` tem o backend do modo remoto (um
+`.py` com `ALTIUMHUB_LIB_REMOTA`). Antes disso ele aparece como pulado.
 
 Variáveis para teste e automação:
 
