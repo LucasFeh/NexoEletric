@@ -189,8 +189,10 @@ def files(path):
 
 SAVE_BASENAMES = ('changes.js', 'schematic.js', 'annotations.js')
 
-# Libs/ e propriedade do ExportLibs.pas, que sobrescreve schlib.js/pcblib.js inteiros - por
-# isso a substituicao mora em arquivo SEPARADO, o unico de Libs/ que o browser pode gravar.
+# Libs/ e da biblioteca: o symserver (/api/symbols/*) e o guardiao do almoxarifado reescrevem
+# schlib.js, symbols-lib.js e os espelhos inteiros, cada um sob a sua trava. A substituicao de
+# nomes mora num arquivo SEPARADO, o unico de Libs/ que o browser grava direto por aqui. (No
+# app desktop em modo biblioteca remota, este POST vai para o servidor: ver libremota.py.)
 SAVE_LIB_FILES = ('lib-subs.js',)
 
 
@@ -1080,6 +1082,15 @@ sys.path.insert(0, os.path.join(ROOT, 'tools', 'symbols'))
 import symserver                     # noqa: E402
 symserver.registra(app, ROOT)
 
+# ─────────────── biblioteca remota (app desktop) ───────────────
+# Com ALTIUMHUB_LIB_REMOTA=<hub central> a biblioteca e a do SERVIDOR: /api/symbols/*,
+# /api/almox/config e o lib-subs.js vao para la, e Libs/ vira espelho dele para quem le do
+# disco. Sem a variavel (o proprio servidor, a bancada) so existe o status dizendo "local".
+# Fora do try de proposito: sem o modulo, o app subiria local calado -- e a biblioteca
+# voltaria a divergir do servidor, que e o que o modo existe para impedir.
+import libremota                     # noqa: E402
+libremota.registra(app, ROOT, os.environ.get('ALTIUMHUB_LIB_REMOTA'))
+
 # ─────────────────── lista de componentes para o Odoo ───────────────────
 # Sob try: o hub inteiro (laser, BOM, PCB) nao pode deixar de subir porque UM arquivo novo
 # nao viajou no merge -- e o acidente que o CLAUDE.md descreve, e o hubserver.py e o unico
@@ -1151,6 +1162,7 @@ if __name__ == '__main__':
     args = ap.parse_args()
     configura_escuta(args.host)
     threading.Thread(target=_watcher, daemon=True).start()
+    libremota.inicia()           # so faz algo com ALTIUMHUB_LIB_REMOTA
     print('EletricHUB:')
     print('  http://127.0.0.1:%d' % args.port)
     ip = _lan_ip() if _ESCUTA_REDE else None

@@ -70,3 +70,8 @@ venv/
 # lixeira do hub: /api/project/<id>/delete move a pasta do projeto para ca
 # (hubserver.py, TRASH_DIR). E estado de maquina, e o hub SERVE o que esta dentro.
 Trash/
+
+# biblioteca remota (libremota.py) rodando fora do app desktop: o estado do espelho (ETag e
+# sha1 por arquivo) e os backups do que era local e o servidor nao tinha. No app isso mora em
+# .altiumhub/, que nem existe aqui. E estado da maquina, como o Trash/.
+.lib-remota/
