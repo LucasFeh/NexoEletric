@@ -279,6 +279,16 @@ try:
         os.utime(sp, ns=(4000000000, 4000000000))
         assert cli.get('/api/bom/placa-bom/vistos').get_json()['sourceRev'] != rev, \
             'mudanca do esquema nao disparou atualizacao'
+        # footprint VAZIO no esquema (o hub grava assim o componente sem footprint conhecido)
+        # e "defina no Altium", nao "sem footprint": o da placa fica; o comment segue o esquema
+        with io.open(sp, 'w', encoding='utf-8') as f:
+            f.write('var schematic = ' + json.dumps({'items': [
+                {'t': 'comp', 'ref': 'R1', 'comment': '18k', 'footprint': ''}]}) + ';')
+        os.utime(sp, ns=(5000000000, 5000000000))
+        fonte = cli.get('/api/bom/placa-bom/source').get_json()
+        assert fonte['board']['components'][0]['footprint'] == '0603', \
+            'footprint vazio do esquema apagou o da placa'
+        assert fonte['board']['components'][0]['comment'] == '18k'
     finally:
         H.ROOT = antigo
 finally:

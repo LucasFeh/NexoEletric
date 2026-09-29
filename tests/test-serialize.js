@@ -53,6 +53,22 @@ assert.strictEqual(sl[sl.length - 1], ']};');
 const sbad = Core.serializeSchematic({ project:'X', items:[{ t:'comp', sheet:'main', ref:'R1', sym:'RES', x:100, y:100 }] });
 assert.strictEqual(sbad.text, null);
 assert.ok(sbad.errors.some(e => /footprint/.test(e.msg)));
+assert.ok(sbad.errors.some(e => /R1/.test(e.msg)), 'a frase diz QUAL componente trava o arquivo');
+/* ...mas footprint VAZIO e componente sem vinculo, nao arquivo torto (AI-GUIDE: "footprint nao
+   trava"). Era o "Adicionar componentes" de um valor sem footprint conhecido travando o Salvar
+   do esquema inteiro, sem a vista ter como dar footprint ao componente depois */
+const sfpv = Core.serializeSchematic({ project:'X', items:[{ t:'sheet', name:'main', size:'A4' },
+  { t:'comp', sheet:'main', ref:'BT1', sym:'CLIP', x:100, y:100, rot:0, footprint:'' }] });
+assert.deepStrictEqual(sfpv.errors, []);
+assert.ok(sfpv.text.includes('"footprint":""'));
+/* e a validacao da vista o chama de aviso, nao de erro; sem a chave continua erro */
+const libMin = { symbols:[{ name:'CLIP', parts:[{ pins:[] }] }] }, fpMin = { footprints:[] };
+const vfp = (fp) => Core.validateSchematic({ format:'schmirror-v2', project:'X', items:[
+  { t:'sheet', name:'main', size:'A4' },
+  Object.assign({ t:'comp', sheet:'main', ref:'BT1', sym:'CLIP', x:100, y:100, rot:0 }, fp) ] }, libMin, fpMin);
+assert.ok(!vfp({ footprint:'' }).errors.some(e => /footprint/.test(e)), vfp({ footprint:'' }).errors.join(' | '));
+assert.ok(vfp({ footprint:'' }).warnings.some(w => /sem footprint/.test(w)));
+assert.ok(vfp({}).errors.some(e => /footprint/.test(e)));
 /* recusa wire com pts curto */
 assert.ok(Core.serializeSchematic({ project:'X', items:[{ t:'wire', sheet:'main', pts:[[0,0]] }] }).errors.length);
 /* recusa ": no cabecalho */

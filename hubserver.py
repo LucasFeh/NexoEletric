@@ -818,8 +818,14 @@ def _bom_source(d):
             origem = por_ref.get(comp.get('ref'))
             if origem:
                 for campo in ('comment', 'footprint'):
-                    if campo in origem:
-                        comp[campo] = origem[campo]
+                    if campo not in origem:
+                        continue
+                    # footprint VAZIO no esquema e "sem vinculo, defina no Altium" (o hub grava
+                    # assim o componente sem footprint conhecido; ver AI-GUIDE), e nao "a placa
+                    # nao tem footprint": o da placa, que e o que o Altium definiu, fica
+                    if campo == 'footprint' and not origem[campo]:
+                        continue
+                    comp[campo] = origem[campo]
     return board
 
 
