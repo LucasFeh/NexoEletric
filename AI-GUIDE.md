@@ -40,6 +40,9 @@ Duas frentes de trabalho, normalmente nesta ordem para um projeto novo:
 
   `files.schematic:true` e todos os outros `false` até os scripts do Altium gerarem
   `board.js`/`changes.js`/os relatórios (eles regeneram `projects.js` sozinhos depois).
+- `Projects\<nome>\lista-extras.json` são os componentes **fora do esquema** que o usuário
+  junta à lista do Odoo pelo hub (as linhas `EXTRA n`). É do hub — você não precisa editá-lo,
+  e peça dele **não** vai para o `schematic.js`.
 
 **Dois escritores:** o usuário também edita o `schematic.js` pelo hub (vista Esquema). Releia o arquivo antes de cada edição e preserve as linhas dele; após edições, o BuildSchematic deve rodar com limpeza da folha para refletir removidos/alterados. A limpeza apaga fios, rótulos, power ports, junções, No ERC e textos — **componentes não**: eles são reaproveitados pelo designador/parte para preservar o `UniqueID` que o ECO usa. Componente apagado do `schematic.js` continua na folha e precisa ser removido à mão no Altium.
 
@@ -127,8 +130,8 @@ não tem os campos, não muda de comportamento nenhum.
 desenha como se o par não existisse (ele decide onde pousar o texto) e o `BuildSchematic` não
 toca no texto. A diferença é só no barulho: o hub fica quieto e o build registra `[FALHA]`
 nomeando o campo que falta, porque quem escreveu meio par quase sempre queria escrever os dois.
-O `BuildSchematic` também recusa deslocamento absurdo (acima de 50000 mil), pelo mesmo motivo
-por que recusa componente sem footprint: é quase sempre erro de quem escreveu, não intenção.
+O `BuildSchematic` também recusa deslocamento absurdo (acima de 50000 mil): registra `[FALHA]`
+e não move aquele texto, porque é quase sempre erro de quem escreveu, não intenção.
 
 O `ExportProject` lê e emite os quatro campos — a posição do designador **e a do comment**. Ele
 os emite para TODO componente sempre que a sonda responder, porque daqui não dá para saber qual

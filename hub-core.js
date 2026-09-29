@@ -841,7 +841,10 @@ function validateSchematic(schematic, schlib, pcblib){
       if (!sym) { errors.push(`${where}: símbolo "${c.sym}" não existe na schlib`); continue; }
       const part = partOf(sym, c.part);
       if (!part) errors.push(`${where}: parte ${c.part || 1} não existe em "${c.sym}"`);
-      if (!c.footprint) errors.push(`${where}: falta "footprint" (obrigatório em todo componente)`);
+      /* sem a chave e erro; VAZIO e aviso — vai sem vinculo e se resolve no Altium, como o
+         BuildSchematic faz (ver SCH_ITEM_REQUIRED) */
+      if (typeof c.footprint !== 'string') errors.push(`${where}: falta "footprint" (obrigatório em todo componente)`);
+      else if (!c.footprint) warnings.push(`${where}: sem footprint — vai sem vínculo, defina no Altium`);
       else {
         const fp = footprintOf(pcblib, c.footprint);
         if (!fp) errors.push(`${where}: footprint "${c.footprint}" não existe na pcblib`);
@@ -990,7 +993,12 @@ const SCH_ITEM_REQUIRED = {
      obrigatorio para que espelho antigo nao pare de salvar, e um export que trocasse size
      por w/h derrubaria o Salvar do arquivo INTEIRO, nao so o da folha. */
   sheet:    { num:[], str:['name','size'] },
-  comp:     { num:['x','y'], str:['sheet','ref','sym','footprint'] },
+  /* `footprint` e obrigatorio como CHAVE, mas pode ser VAZIO — conferido a parte no
+     serializeSchematic. Decisao do dono (2026-09-23, AI-GUIDE): sem footprint o componente vai
+     sem vinculo e o BuildSchematic avisa ([AVISO] sem footprint). Exigir texto aqui fazia um
+     componente do almoxarifado sem footprint conhecido (784 dos 2545 valores) travar o Salvar
+     do arquivo INTEIRO, e a vista nao tem como dar footprint a um componente ja colocado. */
+  comp:     { num:['x','y'], str:['sheet','ref','sym'] },
   wire:     { num:[], str:['sheet'] },
   netlabel: { num:['x','y'], str:['sheet','net'] },
   power:    { num:['x','y'], str:['sheet','net','style'] },
@@ -1033,6 +1041,8 @@ function serializeSchematic(sch){
       errors.push({ idx:i, msg:'wire: pts precisa de >= 2 pontos' });
     if (it.t === 'comp' && it.rot != null && ![0, 90, 180, 270].includes((((it.rot % 360) + 360) % 360)))
       errors.push({ idx:i, msg:'comp: rot deve ser 0/90/180/270' });
+    if (it.t === 'comp' && typeof it.footprint !== 'string')
+      errors.push({ idx:i, msg:'comp' + (it.ref ? ' ' + it.ref : '') + ': campo "footprint" ausente' });
   });
   if (errors.length) return { text:null, errors, descartados };
   const L = ['var schematic = {'];

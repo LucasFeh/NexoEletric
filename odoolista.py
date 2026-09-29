@@ -10,6 +10,10 @@ gravar nada; so `--aplicar` chama `di_recebe_lista`. A lista nao entra no invent
 quando chega: cai numa fila de aprovacao e alguem do estoque decide. O contrato completo
 do lado do Odoo esta em docs/prompt-altium-envio-de-lista.md.
 
+A lista e o esquema MAIS o que o projetista juntou por fora dele pelo hub (Projects/<p>/
+lista-extras.json): cada peca avulsa vira uma linha 'EXTRA n' depois das do esquema, pela
+mesma cascata de resolucao. Ver linhas_extras e altera_extras.
+
 Credenciais (secao 6 da spec):
   senha  ODOO_LISTA_SENHA -> ODOO_SENHA -> .hub-odoo.json
          NUNCA de hub-almox.json: ate 2026-09-24 o hubserver servia qualquer arquivo da
@@ -28,18 +32,22 @@ de producao: apontar o hub para uma copia de teste so muda a url se o modelo la 
 igual. Os tres METODOS continuam cravados no codigo -- eles sao o contrato da spec, nao
 configuracao, e um metodo errado so aparece no 500 do Odoo.
 """
+import hashlib
 import io
 import json
 import os
 import re
 import socket
 import sys
+import threading
 import xmlrpc.client
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 CFG_LISTA = '.hub-odoo.json'     # o ponto no nome e a protecao: _serve recusa (hubserver.py » _serve)
 CFG_ALMOX = 'hub-almox.json'     # so url/db/login; a senha do envio nunca vem daqui, ver docstring
 RECIBO = 'odoo-lista.json'       # ao lado do projeto, no molde de bom-opts.json
+EXTRAS = 'lista-extras.json'     # componentes FORA do esquema que tambem vao na lista; do hub
+EXTRAS_FORMATO = 'lista-extras-v1'
 
 MODELO = 'di.lista.altium'
 TIMEOUT = 30.0                   # por conexao; nunca socket.setdefaulttimeout (global)
@@ -90,6 +98,12 @@ def carrega_acervo(raiz=RAIZ):
 
     As libs sao saida gerada e gitignorada: num workspace que nunca sincronizou elas nao
     existem, e o indice sai vazio. Isso nao e erro; as linhas so caem para MPN.
+
+    HOMONIMOS. O nome nao e unico: 'Cartão Micro SD' e um valor da familia CONECTOR CARTAO
+    SD (OdooId 910) e outro da CONECTOR SOQUETE (OdooId 149). Pelo nome vale o primeiro,
+    como sempre; os seguintes ficam em `homonimos` na ficha dele, para o resolve() trocar de
+    ficha quando o params do componente disser QUAL dos dois e (ver _ficha_do_params). Sem
+    isso a linha ia com o product_id do soquete e o nome do conector.
     """
     idx = {}
     for rel, _var, titulo in ACERVOS:
@@ -103,10 +117,10 @@ def carrega_acervo(raiz=RAIZ):
         for sy in lib.get('symbols') or []:
             for v in sy.get('valores') or []:
                 nome = (v.get('altium') or '').strip()
-                if not nome or nome in idx:
+                if not nome:
                     continue
                 itens = [it for it in (v.get('itens') or []) if it.get('odoo')]
-                idx[nome] = {
+                ficha = {
                     'itens': itens,
                     'mpn': (v.get('mpn') or '').strip(),
                     'pkgs': [p for p in (v.get('pkgs') or []) if p],
@@ -114,8 +128,38 @@ def carrega_acervo(raiz=RAIZ):
                     'label': (v.get('label') or '').strip(),
                     'familia': (sy.get('familia') or sy.get('name') or '').strip(),
                     'acervo': titulo,
+                    # o ValorId que o paramsDoValor do hub grava: numera por SIMBOLO (o
+                    # livro-razao do almoxarifado), entao se repete entre familias -- so
+                    # desempata entre os homonimos de um mesmo nome, e so se sobrar um
+                    'valor_id': str(v.get('id') or ''),
                 }
+                if nome in idx:
+                    idx[nome].setdefault('homonimos', [idx[nome]]).append(ficha)
+                    continue
+                idx[nome] = ficha
     return idx
+
+
+def _ficha_do_params(ficha, product_id, par):
+    """A ficha do homonimo que o componente e, quando o nome sozinho nao diz.
+
+    Primeiro pelo produto (o OdooId e a verdade da peca: a ficha certa e a unica que o tem
+    entre os itens), depois pelo ValorId. Nenhum dos dois desempata = fica a do nome, como
+    antes. Sem homonimo a ficha volta intacta -- e o caso de 2544 dos 2545 valores."""
+    homs = ficha.get('homonimos')
+    if not homs:
+        return ficha
+    if product_id is not None:
+        certa = [f for f in homs
+                 if any(str(x.get('odoo')) == str(product_id) for x in f.get('itens') or [])]
+        if len(certa) == 1:
+            return certa[0]
+    vid = (par.get('ValorId') or '').strip()
+    if vid:
+        certa = [f for f in homs if f.get('valor_id') == vid]
+        if len(certa) == 1:
+            return certa[0]
+    return ficha
 
 
 # ───────────────────────────── identidade do envio ─────────────────────────────
@@ -293,7 +337,7 @@ def resolve(grupo, acervo):
         linha['product_id'] = odoo_ids[0]
         como = 'OdooId do componente'
 
-    ficha = acervo.get(grupo['sym']) or {}
+    ficha = _ficha_do_params(acervo.get(grupo['sym']) or {}, linha.get('product_id'), par)
     itens = ficha.get('itens') or []
     if 'product_id' not in linha and itens:
         escolha = itens
@@ -336,7 +380,11 @@ def resolve(grupo, acervo):
                     # escolhe por voce: a linha volta como ambigua (spec, secao 2)
                     como += ' (sem encapsulamento)'
 
-    nome = (itens[0].get('nome') if itens else '') or ficha.get('label') or ''
+    # o nome e o do item que vai: com o product_id decidido, o item dele, e nao o primeiro --
+    # num valor ambiguo o primeiro e outra peca
+    item = next((x for x in itens if str(x.get('odoo')) == str(linha.get('product_id'))),
+                itens[0] if itens else {})
+    nome = item.get('nome') or ficha.get('label') or ''
     if not nome:
         nome = grupo['sym']
         if grupo['comment'] and grupo['comment'] != grupo['sym']:
@@ -370,10 +418,46 @@ def resolve(grupo, acervo):
     return linha
 
 
-def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observacao=''):
-    """O payload da spec, secao 2, mais o que a tela precisa saber (campos com _)."""
+def designador_extra(n):
+    """'EXTRA 3'. A tela casa as pendencias que o Odoo devolve pelos designadores da linha,
+    entao o nome nao pode ser o de um componente de verdade: medido nos 16 projetos (1428
+    componentes), nenhum designador comeca por EXTRA. O numero e o id do item, que nunca
+    e reusado -- 'EXTRA 3' removido nao volta como outra peca na lista seguinte."""
+    return 'EXTRA %d' % n
+
+
+def linhas_extras(extras, acervo):
+    """Uma linha por componente fora do esquema, na ordem do id.
+
+    O item tem o MESMO shape de um componente do esquema (sym/comment/footprint/params), e
+    por isso passa pela MESMA cascata: o resolve() nao sabe que a linha e extra. Duas coisas
+    so mudam depois dele -- a quantidade, que e a digitada e nao a contagem de designadores,
+    e o `_extra`, que e o id e so a tela usa (o payload_limpo o tira).
+    """
+    linhas = []
+    for it in sorted(extras or [], key=lambda x: x['id']):
+        grupo = {'sym': str(it.get('sym') or ''), 'comment': _limpo(it.get('comment')),
+                 'footprint': str(it.get('footprint') or ''), 'params': str(it.get('params') or ''),
+                 'refs': [designador_extra(it['id'])], 'semValor': False}
+        ln = resolve(grupo, acervo)
+        ln['quantidade'] = int(it['quantidade'])
+        ln['_extra'] = it['id']
+        linhas.append(ln)
+    return linhas
+
+
+def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observacao='',
+                  extras=None):
+    """O payload da spec, secao 2, mais o que a tela precisa saber (campos com _).
+
+    `extras` sao os itens de lista-extras.json (le_extras): entram DEPOIS das linhas do
+    esquema, uma linha cada. Lista so com extras e lista -- esquema sem componente nenhum
+    ainda pode mandar as pecas avulsas; o que nao pode e nao haver linha nenhuma.
+    """
     grupos, sem_designador = agrupa(schematic)
     linhas = [resolve(g, acervo) for g in grupos]
+    de_fora = linhas_extras(extras, acervo)
+    linhas += de_fora
     return {
         'uid_externo': uid_externo(projeto, revisao),
         'projeto': projeto,
@@ -384,17 +468,54 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
         'linhas': linhas,
         '_sem_designador': sem_designador,
         '_sem_valor': sum(1 for l in linhas if l.get('_semValor')),
+        '_extras': len(de_fora),
     }
 
 
+# O que o XML 1.0 nao tem: os controles C0 (menos tab, LF e CR), as metades de surrogate
+# soltas e U+FFFE/U+FFFF. O xmlrpc.client.dumps os passa crus e o expat do Odoo recusa o corpo
+# INTEIRO -- um VT colado do Word na observacao, ou um controle no comment de um componente
+# vindo do Altium, derrubava todo ensaio e todo envio num 502 que nao dizia o campo.
+_FORA_DO_XML = re.compile(u'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]')
+
+
+def _xml_seguro(v):
+    """O texto sem o que o XML 1.0 recusa (vira espaco); o resto passa intacto."""
+    return _FORA_DO_XML.sub(' ', v) if isinstance(v, str) else v
+
+
 def payload_limpo(payload):
-    """So o que o Odoo entende: os campos de diagnostico com _ ficam deste lado."""
+    """So o que o Odoo entende: os campos de diagnostico com _ ficam deste lado, e todo texto
+    passa pelo _xml_seguro. E o que o Odoo recebe E o que a assinatura assina, entao o ensaio
+    e o envio concordam sobre ele. Idempotente."""
     linhas = []
     for ln in payload.get('linhas') or []:
-        linhas.append({k: v for k, v in ln.items() if not k.startswith('_')})
-    fora = {k: v for k, v in payload.items() if not k.startswith('_') and k != 'linhas'}
+        linhas.append({k: _xml_seguro(v) for k, v in ln.items() if not k.startswith('_')})
+    fora = {k: _xml_seguro(v) for k, v in payload.items() if not k.startswith('_') and k != 'linhas'}
     fora['linhas'] = linhas
     return fora
+
+
+# Quem envia e a observacao ficam FORA da assinatura: sao da MENSAGEM, nao da LISTA. A
+# observacao se digita no modal depois que a conferencia ja voltou (nada a invalida, e nem
+# deve: ela nao muda linha nenhuma), e o enviado_por sai do login configurado. Assinar os
+# dois faria o /envio recusar com "a lista mudou" uma lista que nao mudou -- e o alarme que
+# dispara sem motivo e o que ensina a clicar sem ler.
+FORA_DA_ASSINATURA = ('enviado_por', 'observacao')
+
+
+def assinatura(payload):
+    """sha1 do que o Odoo vai receber, em forma canonica (chaves ordenadas).
+
+    E a conferencia completa de "o que vai e o que foi visto": o total_linhas pega linha que
+    sumiu ou nasceu, mas nao pega a QUANTIDADE de um extra que mudou em outra aba, nem uma
+    peca trocada com a mesma contagem. Aceita o payload cheio ou o limpo -- o payload_limpo
+    e idempotente, e os campos de tela (_) nunca entram.
+    """
+    limpo = payload_limpo(payload)
+    base = {k: v for k, v in limpo.items() if k not in FORA_DA_ASSINATURA}
+    bruto = json.dumps(base, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    return hashlib.sha1(bruto.encode('utf-8')).hexdigest()
 
 
 # ───────────────────────────── credenciais e cliente ─────────────────────────────
@@ -700,6 +821,246 @@ def grava_recibo(nome, dados, raiz=RAIZ):
     return full
 
 
+# ───────────────────────────── componentes fora do esquema ─────────────────────────────
+#
+# Projects/<p>/lista-extras.json: pecas que vao na lista do Odoo sem estar no desenho (a
+# cola, o dissipador, o parafuso, o conector que vem no chicote). Quem escreve e o hub, pelo
+# modal "Enviar para o Odoo" (odoolista_server » /api/lista/extras); a IA nao edita.
+#
+#   {"format":"lista-extras-v1","atualizado":"AAAA-MM-DD HH:MM","proximo":N,"itens":[
+#     {"id":1,"sym":..,"comment":..,"footprint":..,"params":..,"quantidade":4}]}
+#
+# O item tem o shape de um componente do schematic.js (mais a quantidade) para cair na MESMA
+# cascata do resolve(); `id` e estavel e nunca reusado -- `proximo` so cresce, e e ele que da
+# o 'EXTRA n' da linha.
+
+QTD_MAX = 100000
+TETO = {'sym': 200, 'comment': 200, 'footprint': 200, 'params': 2000}
+CAMPOS_PECA = ('sym', 'comment', 'footprint', 'params')
+_CONTROLE = re.compile(r'[\x00-\x1f\x7f]')
+# Metade de um par surrogate, sozinha. O json.loads aceita o escape "\ud800", mas nenhum
+# UTF-8 o escreve: passava pela validacao e estourava na GRAVACAO (UnicodeEncodeError), com
+# 500 em HTML e o .tmp de 0 byte largado na pasta do projeto.
+_SURROGATE = re.compile(u'[\ud800-\udfff]')
+# Os dois nao-caracteres que o XML 1.0 recusa e o UTF-8 escreve sem reclamar. O
+# xmlrpc.client.dumps os passa crus, e o expat do Odoo recusa o corpo INTEIRO: um extra com
+# um deles derrubava todo ensaio e todo envio do projeto num 502 que nao nomeava a peca.
+# Medido: de U+0080 a U+10FFFF, so estes dois quebram o ida-e-volta do xmlrpc.
+_NAO_XML = re.compile(u'[\ufffe\uffff]')
+
+# Ler-alterar-gravar de um arquivo so, que duas abas (ou dois cliques) mexem ao mesmo tempo.
+# Sem a trava, as duas leem a mesma versao e a segunda gravacao apaga a primeira -- e, pior,
+# as duas dao o MESMO id ao item novo. Mora aqui, e nao no Blueprint, para valer para
+# qualquer um que chame altera_extras.
+_EXTRAS_LOCK = threading.Lock()
+
+
+class ExtraAusente(ErroOdoo):
+    """O id pedido nao esta na lista: outra aba ja o tirou, ou nunca existiu. Vira 404."""
+
+
+def _inteiro(v):
+    """int de verdade: bool fora (True seria '1' sem ninguem ter digitado), float so se
+    for inteiro (o JSON do navegador manda 4.0), texto so se for so digito."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    if isinstance(v, str) and re.match(r'^\s*\d{1,9}\s*$', v):
+        return int(v)
+    return None
+
+
+def valida_quantidade(v):
+    q = _inteiro(v)
+    if q is None:
+        raise ErroOdoo('quantidade tem que ser um numero inteiro (recebi %r)' % (v,))
+    if not 1 <= q <= QTD_MAX:
+        raise ErroOdoo('quantidade tem que ir de 1 a %d (recebi %d)' % (QTD_MAX, q))
+    return q
+
+
+def _texto(campo, v, obrigatorio=False):
+    if v is None:
+        v = ''
+    if not isinstance(v, str):
+        raise ErroOdoo('%s tem que ser texto' % campo)
+    v = v.strip()
+    if obrigatorio and not v:
+        raise ErroOdoo('%s nao pode ficar vazio' % campo)
+    if len(v) > TETO[campo]:
+        raise ErroOdoo('%s passa de %d caracteres' % (campo, TETO[campo]))
+    if _CONTROLE.search(v):
+        raise ErroOdoo('%s tem caractere de controle' % campo)
+    if _SURROGATE.search(v):
+        raise ErroOdoo('%s tem caractere que nao existe em UTF-8 (surrogate solto)' % campo)
+    if _NAO_XML.search(v):
+        raise ErroOdoo('%s tem caractere que o XML do Odoo nao aceita (U+FFFE/U+FFFF)' % campo)
+    return v
+
+
+def valida_peca(dados):
+    """Os quatro campos da peca, SEMPRE juntos. `sym` e obrigatorio; os outros podem vir vazios.
+
+    Juntos de proposito: a peca e um conjunto. Trocar so o `sym` de um extra e manter o
+    `params` antigo deixaria o OdooId da peca velha decidindo o product_id (e o degrau 1 do
+    resolve), com o nome da peca nova na tela -- uma quimera que resolve verde.
+    """
+    return {'sym': _texto('sym', dados.get('sym'), obrigatorio=True),
+            'comment': _texto('comment', dados.get('comment')),
+            'footprint': _texto('footprint', dados.get('footprint')),
+            'params': _texto('params', dados.get('params'))}
+
+
+def _defeito(nome, porque):
+    """A frase do arquivo que nao da para ler. Nunca 'lista sem extras' calada: mandar sem as
+    pecas avulsas seria mandar OUTRA lista, e ninguem veria a diferenca no envio."""
+    return ('%s de %s esta com defeito (%s). A lista nao sai sem ele -- sem os componentes '
+            'fora do esquema ela seria outra lista. Arrume o arquivo (ou apague-o, se esses '
+            'componentes nao valem mais) e tente de novo.' % (EXTRAS, nome, porque))
+
+
+def _carrega_extras(caminho, nome):
+    """(proximo, itens) do disco. Ausente e vazio = nada, e nao e erro; o resto e estrito.
+
+    Estrito como o _le_json_estrito, e pelo mesmo motivo: este arquivo e lido tambem por quem
+    vai GRAVAR por cima (altera_extras). Ler um arquivo torto como vazio e gravar o item novo
+    apagaria todos os outros -- e o envio seguinte mandaria a lista sem eles, calado.
+    """
+    if not os.path.isfile(caminho):
+        return 1, []
+    try:
+        with io.open(caminho, encoding='utf-8-sig') as f:
+            bruto = f.read()
+    except UnicodeError as e:
+        # gravado em ANSI (Set-Content do PowerShell 5.1, Bloco de Notas) ou em UTF-16: basta
+        # um acento. UnicodeDecodeError e ValueError, nao OSError -- sem este ramo ele passava
+        # direto e as rotas respondiam 500 em HTML, sem a frase que diz qual arquivo consertar
+        raise ErroOdoo(_defeito(nome, 'o arquivo nao esta em UTF-8: %s' % e))
+    except OSError as e:
+        raise ErroOdoo('nao consegui ler %s de %s: %s' % (EXTRAS, nome, e))
+    if not bruto.strip():
+        return 1, []              # vazio nao guarda nada que se perca; ver _le_json_estrito
+    try:
+        d = json.loads(bruto)
+    except ValueError as e:
+        raise ErroOdoo(_defeito(nome, 'o JSON nao parseia: %s' % e))
+    if not isinstance(d, dict) or not isinstance(d.get('itens'), list):
+        raise ErroOdoo(_defeito(nome, 'esperava um objeto com "itens" em lista'))
+    if d.get('format') not in (None, EXTRAS_FORMATO):
+        raise ErroOdoo(_defeito(nome, 'formato %r, e este hub le %s'
+                                % (d.get('format'), EXTRAS_FORMATO)))
+    itens, vistos = [], set()
+    for pos, it in enumerate(d['itens'], 1):
+        if not isinstance(it, dict):
+            raise ErroOdoo(_defeito(nome, 'o item %d nao e um objeto' % pos))
+        n = it.get('id')
+        if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+            raise ErroOdoo(_defeito(nome, 'o item %d nao tem id inteiro positivo' % pos))
+        if n in vistos:
+            raise ErroOdoo(_defeito(nome, 'o id %d aparece duas vezes' % n))
+        vistos.add(n)
+        try:
+            peca = valida_peca(it)
+            peca['quantidade'] = valida_quantidade(it.get('quantidade'))
+        except ErroOdoo as e:
+            raise ErroOdoo(_defeito(nome, '%s: %s' % (designador_extra(n), e)))
+        peca['id'] = n
+        itens.append(peca)
+    itens.sort(key=lambda x: x['id'])
+    minimo = max(vistos) + 1 if vistos else 1
+    prox = d.get('proximo', minimo)
+    if isinstance(prox, bool) or not isinstance(prox, int) or prox < 1:
+        # um `proximo` torto nao se conserta com max(id)+1 calado: o item removido por ultimo
+        # tinha o id seguinte, e ele voltaria como outra peca
+        raise ErroOdoo(_defeito(nome, '"proximo" tem que ser inteiro positivo'))
+    return max(prox, minimo), itens
+
+
+def le_extras(nome, raiz=RAIZ):
+    """Os componentes fora do esquema do projeto, em ordem de id. Sem arquivo = [].
+
+    A leitura tambem passa pela trava, e por causa do Windows: o os.replace falha com
+    WinError 32 se outro handle estiver com o arquivo aberto, e a previa de uma aba lendo
+    no instante da gravacao de outra fazia o clique de quem gravava voltar como erro 500.
+    """
+    with _EXTRAS_LOCK:
+        return _carrega_extras(os.path.join(raiz, 'Projects', nome, EXTRAS), nome)[1]
+
+
+def _grava_extras(nome, proximo, itens, raiz):
+    """Atomico, no molde de grava_recibo. So os campos do contrato atravessam."""
+    full = os.path.join(pasta_projeto(nome, raiz), EXTRAS)
+    dados = {'format': EXTRAS_FORMATO, 'atualizado': _agora(), 'proximo': proximo,
+             'itens': [{k: it[k] for k in ('id',) + CAMPOS_PECA + ('quantidade',)}
+                       for it in sorted(itens, key=lambda x: x['id'])]}
+    tmp = full + '.tmp'
+    try:
+        with io.open(tmp, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(json.dumps(dados, ensure_ascii=False, indent=1))
+        # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
+        os.replace(tmp, os.path.realpath(full))
+    except (OSError, ValueError):
+        # no Windows basta um antivirus segurando o destino; o .tmp que sobrasse seria lido
+        # por ninguem, mas ficaria no projeto (e no git status) ate alguem apagar a mao. O
+        # ValueError junto: um texto que o UTF-8 nao escreve estoura no f.write, e nao no
+        # disco (o _texto ja o recusa antes; isto e para quem chamar sem passar por ele)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    return full
+
+
+def altera_extras(nome, op, dados, raiz=RAIZ):
+    """add / update / remove, sob a trava. Devolve (itens, id do item tocado).
+
+      add     dados['item'] = {sym, comment, footprint, params, quantidade}
+      update  dados['id'] + quantidade e/ou a peca (os quatro campos: ver valida_peca)
+      remove  dados['id']
+
+    Tudo e validado ANTES de escrever; qualquer ErroOdoo sai sem tocar no arquivo.
+    """
+    with _EXTRAS_LOCK:
+        caminho = os.path.join(pasta_projeto(nome, raiz), EXTRAS)
+        proximo, itens = _carrega_extras(caminho, nome)
+        if op == 'add':
+            item = dados.get('item')
+            if not isinstance(item, dict):
+                raise ErroOdoo('faltou o componente (item) a adicionar')
+            novo = valida_peca(item)
+            novo['quantidade'] = valida_quantidade(item.get('quantidade'))
+            novo['id'] = n = proximo
+            itens.append(novo)
+            proximo += 1
+        elif op in ('update', 'remove'):
+            n = _inteiro(dados.get('id'))
+            if n is None or n < 1:
+                raise ErroOdoo('id tem que ser o numero do componente fora do esquema')
+            alvo = next((it for it in itens if it['id'] == n), None)
+            if alvo is None:
+                raise ExtraAusente('%s nao esta mais na lista (outra aba pode te-lo tirado)'
+                                   % designador_extra(n))
+            if op == 'remove':
+                itens.remove(alvo)
+            else:
+                muda = {}
+                if 'quantidade' in dados:
+                    muda['quantidade'] = valida_quantidade(dados.get('quantidade'))
+                if any(k in dados for k in CAMPOS_PECA):
+                    muda.update(valida_peca(dados))
+                if not muda:
+                    raise ErroOdoo('nada para mudar: mande a quantidade ou a peca')
+                alvo.update(muda)
+        else:
+            raise ErroOdoo('op tem que ser add, update ou remove (recebi %r)' % (op,))
+        _grava_extras(nome, proximo, itens, raiz)
+        return itens, n
+
+
 def recibo_para_disco(payload, recibo, enviado_em):
     """O que vale guardar do envio: tudo recuperavel de volta por di_estado_lista."""
     return {
@@ -752,11 +1113,15 @@ def main(argv=None):
             return 0
 
         payload = monta_payload(args.projeto, rev, le_schematic(args.projeto),
-                                carrega_acervo(), args.enviado_por, args.observacao)
+                                carrega_acervo(), args.enviado_por, args.observacao,
+                                extras=le_extras(args.projeto))
         if not payload['linhas']:
-            raise ErroOdoo('o esquema de %s nao tem componente nenhum' % args.projeto)
+            raise ErroOdoo('o esquema de %s nao tem componente nenhum, e nao ha componente '
+                           'fora do esquema em %s' % (args.projeto, EXTRAS))
         for ref in payload['_sem_designador']:
             print('  ! fora da lista, sem designador anotado: %s' % ref)
+        if payload['_extras']:
+            print('  + %d componente(s) fora do esquema, de %s' % (payload['_extras'], EXTRAS))
 
         cliente = ClienteLista()
         limpo = payload_limpo(payload)

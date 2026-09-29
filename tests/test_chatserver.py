@@ -517,7 +517,10 @@ try:
     print('  ok  o modelo recebeu resumo e diff, sem o texto das linhas nem o carimbo')
 
     sist = fita.pedidos[0]['system']
-    assert 'footprint é OBRIGATÓRIO' in sist and 'orig_*' in sist and 'mil' in sist, sist[:200]
+    # o comp que o chat cria leva footprint; o que o hub gravou vazio pode ser mexido. E nada de
+    # dizer que o BuildSchematic recusa o projeto sem ele: vai sem vinculo, [AVISO]
+    assert 'Escreva SEMPRE um footprint' in sist and 'orig_*' in sist and 'mil' in sist, sist[:200]
+    assert 'recusa o projeto inteiro' not in sist
     assert ABERTO in sist and 'vista=sch' in sist, 'o prompt tem que dizer QUAL projeto está aberto'
     assert [f['name'] for f in fita.pedidos[0]['tools']] == \
         [f['name'] for f in OP.FERRAMENTAS], 'as ferramentas do operador têm que subir inteiras'

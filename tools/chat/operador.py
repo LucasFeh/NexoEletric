@@ -93,9 +93,12 @@ ROT_OK = (0, 90, 180, 270)
 # Duplicadas de propósito: o navegador valida de novo na hora de salvar, e o que o chat
 # propõe tem de passar nos DOIS. Divergir aqui para menos deixaria o usuário clicar em
 # "aplicar" e a tela recusar depois — o pior momento para descobrir o erro.
+# O `footprint` do comp saiu daqui junto com o do hub-core: a CHAVE continua obrigatoria, mas
+# ela pode vir vazia (o hub grava assim o componente sem footprint conhecido, e o
+# BuildSchematic o trata como [AVISO]). Quem confere a chave e o _valida_item_sch / validar.
 SCH_OBRIG = {
     'sheet': ((), ('name', 'size')),
-    'comp': (('x', 'y'), ('sheet', 'ref', 'sym', 'footprint')),
+    'comp': (('x', 'y'), ('sheet', 'ref', 'sym')),
     'wire': ((), ('sheet',)),
     'netlabel': (('x', 'y'), ('sheet', 'net')),
     'power': (('x', 'y'), ('sheet', 'net', 'style')),
@@ -743,6 +746,12 @@ def validar(entrada, ctx):
         rot = it.get('rot') or 0
         if _num(rot) and int(rot) % 360 not in ROT_OK:
             erros.append('%s: rot deve ser 0/90/180/270 (veio %s)' % (onde, rot))
+        # a chave e obrigatoria; vazia e o componente sem vinculo, que o BuildSchematic avisa
+        # e se resolve no Altium — aviso, como na vista Esquema (hub-core » validateSchematic)
+        if not isinstance(it.get('footprint'), str):
+            erros.append('%s: falta "footprint"' % onde)
+        elif not it['footprint']:
+            avisos.append('%s: sem footprint — vai sem vínculo, defina no Altium' % onde)
         for a, b in PARES_COMP:
             if (a in it) != (b in it):
                 erros.append('%s: %s/%s é um par — escreva os dois ou nenhum' % (onde, a, b))
@@ -877,7 +886,11 @@ def ler_arquivo(entrada, ctx):
 # ═══════════════════════════ ferramentas de escrita ══════════════════════════
 # Nenhuma delas escreve. Todas devolvem uma proposta; quem grava é `aplica()`.
 
-def _valida_item_sch(item, onde):
+def _valida_item_sch(item, onde, escreve_fp=False):
+    """`escreve_fp`: o CHAT esta escrevendo o footprint deste item (comp novo, ou trocar com
+    "footprint" nos campos). Ai vazio e recusado — a regra do AI-GUIDE para quem escreve e
+    "escreva sempre um footprint". Um item que ja estava no arquivo com footprint vazio (o hub
+    grava assim o componente sem footprint conhecido) pode ser movido ou girado."""
     t = (item or {}).get('t')
     if t not in SCH_OBRIG:
         raise _Recusa('%s: tipo "%s" desconhecido — os aceitos são %s'
@@ -896,9 +909,13 @@ def _valida_item_sch(item, onde):
             problemas.append('%s: falta "rot" (0/90/180/270)' % onde)
         elif not _num(rot) or int(rot) % 360 not in ROT_OK:
             problemas.append('%s: rot deve ser 0/90/180/270 (veio %s)' % (onde, rot))
-        if not item.get('footprint'):
-            problemas.append('%s: "footprint" é OBRIGATÓRIO em todo comp — o BuildSchematic '
-                             'recusa o projeto inteiro sem ele' % onde)
+        fp = item.get('footprint')
+        if not isinstance(fp, str):
+            problemas.append('%s: falta "footprint" — a chave é obrigatória em todo comp' % onde)
+        elif not fp and escreve_fp:
+            problemas.append('%s: escreva um "footprint" — todo comp que você escreve leva um '
+                             '(AI-GUIDE). Vazio, o componente vai sem vínculo e o BuildSchematic '
+                             'só avisa: é trabalho manual para alguém no Altium' % onde)
         for a, b in PARES_COMP:
             if (a in item) != (b in item):
                 problemas.append('%s: %s/%s é um par — escreva os dois ou nenhum' % (onde, a, b))
@@ -953,7 +970,7 @@ def _planeja(ops, itens, valida, onde_de):
             item = op.get('item')
             if not isinstance(item, dict):
                 raise _Recusa('%s: falta "item"' % onde)
-            novos.append(valida(OrderedDict(item), onde))
+            novos.append(valida(OrderedDict(item), onde, True))
         elif acao == 'remover':
             remocoes.append(_alvo_op(op, itens, onde))
         elif acao in ('mover', 'trocar'):
@@ -971,7 +988,9 @@ def _planeja(ops, itens, valida, onde_de):
                     base.pop(k2, None)      # null apaga o campo: é como se tira um opcional
                 else:
                     base[k2] = v
-            trocas[i] = valida(base, '%s → %s' % (onde, onde_de(itens[i][1])))
+            # o footprint so e "escrito pelo chat" se veio nos campos; mover nao o toca
+            trocas[i] = valida(base, '%s → %s' % (onde, onde_de(itens[i][1])),
+                               'footprint' in campos)
         else:
             raise _Recusa('%s: ação desconhecida — use adicionar, mover, remover ou trocar'
                           % onde)
@@ -1030,7 +1049,9 @@ def editar_esquema(entrada, ctx):
     return _monta(raiz, cam, projeto, ed, resumo)
 
 
-def _valida_op_changes(op, onde):
+def _valida_op_changes(op, onde, _escreve_fp=False):
+    # _escreve_fp: a mesma assinatura do _valida_item_sch (o _planeja chama os dois); o
+    # changes.js nao tem footprint de componente
     o = (op or {}).get('op')
     if o not in CH_OBRIG:
         raise _Recusa('%s: op "%s" desconhecida — as aceitas são %s'
@@ -1247,7 +1268,7 @@ def aplica(raiz, proposta):
 
 # ═════════════════════════ o que a API enxerga ═══════════════════════════════
 # As descrições são o manual do operador: elas é que dizem ao modelo que escrita não grava,
-# que o projeto é um só e que footprint é obrigatório. Texto vago aqui vira ferramenta usada
+# que o projeto é um só e que comp novo leva footprint. Texto vago aqui vira ferramenta usada
 # errada lá.
 
 _PAG = {'inicio': {'type': 'integer',
@@ -1314,8 +1335,10 @@ FERRAMENTAS = [
         'editar_esquema',
         'PROPÕE mudanças no schematic.js. NÃO grava nada: devolve uma proposta com o diff, '
         'que o usuário aprova no hub. Item comp precisa de sheet, ref, sym, x, y, rot '
-        '(0/90/180/270) e footprint — footprint é obrigatório, sem ele o BuildSchematic '
-        'recusa o projeto inteiro. Coordenadas em mil, Y para cima.',
+        '(0/90/180/270) e footprint — escreva sempre um footprint no comp que você cria: '
+        'sem ele o componente vai sem vínculo e alguém tem de resolver no Altium. Comp que já '
+        'está no arquivo com footprint "" pode ser movido e trocado. Coordenadas em mil, Y para '
+        'cima.',
         {'ops': {'type': 'array', 'description': 'as operações, na ordem',
                  'items': {'type': 'object', 'properties': {
                      'acao': {'type': 'string',

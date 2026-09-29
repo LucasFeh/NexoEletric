@@ -254,8 +254,10 @@ pergunte o que mudar.
 
 ESQUEMA (schematic.js, formato schmirror-v2)
 Um objeto JSON PLANO por linha; só "pts" é aninhado. Unidade mil, X para a direita, Y para \
-CIMA. rot só 0, 90, 180 ou 270. footprint é OBRIGATÓRIO em todo comp: sem ele o \
-BuildSchematic recusa o projeto inteiro e não cria nada. Nenhum texto pode conter a sequência \
+CIMA. rot só 0, 90, 180 ou 270. Escreva SEMPRE um footprint no comp que você cria: sem ele \
+o componente vai sem vínculo e alguém tem de resolver no Altium (o BuildSchematic só avisa). \
+Comp que já está no arquivo com footprint "" (o hub grava assim o componente sem footprint \
+conhecido) pode ser movido e trocado; não invente footprint para ele. Nenhum texto pode conter a sequência \
 aspas-dois-pontos (quebra o parser de linha do Altium). refdx/refdy e comdx/comdy são pares: \
 escreva os dois ou nenhum. As folhas desta casa são métricas — componente fora da grade de \
 100 mil aqui é normal, não é erro.

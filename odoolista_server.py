@@ -11,6 +11,10 @@ nao abra solicitacao na fila do estoque por acidente.
 
 O POST de /config grava so de dentro do PC do servidor, pela mesma regra do almoxarifado
 (hubserver.py:585): quem escolhe a credencial que o servidor usa tem que estar sentado nele.
+
+/extras e a lista de componentes FORA do esquema (Projects/<p>/lista-extras.json) que o
+modal junta a do esquema. O /envio confere a `assinatura` que o /ensaio devolveu, porque
+um extra mudado noutra aba muda a lista sem mudar a contagem de linhas.
 """
 import os
 import re
@@ -81,6 +85,12 @@ def _confere_ensaio(payload, data):
     revisao digitada quanto o arquivo podem ter mudado (a IA tambem escreve nele). Sem esta
     conferencia o modal confirma uma lista e o Odoo recebe outra, sob outra chave de
     idempotencia -- medido: ensaio de 54 linhas, envio de 39, sem aviso nenhum.
+
+    A `assinatura` (odoolista.assinatura, devolvida pelo /ensaio) e a conferencia inteira:
+    a contagem de linhas nao ve a QUANTIDADE de um componente fora do esquema mudada noutra
+    aba, nem uma peca trocada por outra com a mesma contagem. Ela e opcional para quem chama
+    -- sem o campo, vale o de antes (uid + total_linhas) --, mas quando vem, manda: valor
+    vazio ou torto tambem e recusa, porque quem mandou o campo pediu a conferencia.
     """
     uid = str(data.get('uid_externo') or '').strip()
     if not uid:
@@ -92,13 +102,23 @@ def _confere_ensaio(payload, data):
                 'enviar: revisao diferente e outra placa no estoque.'
                 % (uid.rsplit(':', 1)[-1] or '(sem revisao)',
                    payload['revisao'] or '(sem revisao)'))
+    assinada = 'assinatura' in data
     try:
         n = int(data.get('total_linhas'))
     except (TypeError, ValueError):
-        return 'envio sem o ensaio: confira a lista antes de enviar'
-    if n != len(payload['linhas']):
-        return ('o esquema mudou depois da conferencia (%d linha(s) viraram %d). Confira de '
-                'novo antes de enviar.' % (n, len(payload['linhas'])))
+        n = None
+        if not assinada:
+            return 'envio sem o ensaio: confira a lista antes de enviar'
+    # a contagem vem antes da assinatura quando as duas estao ai: "54 viraram 39" diz mais
+    # do que "a lista mudou", e a assinatura ainda pega o que a contagem nao ve
+    if n is not None and n != len(payload['linhas']):
+        return ('o esquema mudou depois da conferencia (ou os componentes fora dele): %d '
+                'linha(s) viraram %d. Confira de novo antes de enviar.'
+                % (n, len(payload['linhas'])))
+    if assinada and str(data.get('assinatura') or '') != OL.assinatura(payload):
+        return ('a lista mudou depois da conferencia: alguma linha, quantidade ou peca nao e '
+                'mais a que voce conferiu (o esquema salvo ou os componentes fora do esquema '
+                'mudaram, talvez noutra aba). Confira de novo antes de enviar.')
     return None
 
 
@@ -118,11 +138,19 @@ def _prepara(data):
         schematic = OL.le_schematic(nome, ROOT)
     except OL.ErroOdoo as e:
         return None, str(e), 404
+    try:
+        # arquivo torto e ERRO, nunca "sem extras": a previa, o ensaio e o envio montam daqui,
+        # e seguir sem eles mandaria para o Odoo uma lista que ninguem montou
+        extras = OL.le_extras(nome, ROOT)
+    except OL.ErroOdoo as e:
+        return None, str(e), 400
     payload = OL.monta_payload(nome, rev, schematic, OL.carrega_acervo(ROOT),
                                str(data.get('enviado_por') or '').strip()[:60],
-                               str(data.get('observacao') or '').strip()[:500])
+                               str(data.get('observacao') or '').strip()[:500],
+                               extras=extras)
     if not payload['linhas']:
-        return None, 'o esquema nao tem componente nenhum — lista sem componente nao e lista', 400
+        return None, ('o esquema nao tem componente nenhum e nao ha componente fora do esquema '
+                      '— lista sem componente nao e lista'), 400
     return payload, None, 200
 
 
@@ -260,8 +288,9 @@ def ensaio():
         recibo_odoo = cliente.confere(OL.payload_limpo(payload))
     except OL.ErroOdoo as e:
         return {'ok': False, 'error': str(e)}, 502
+    # a assinatura volta no /envio: e ela que prova que o que vai e o que foi conferido
     return {'ok': True, 'payload': payload, 'recibo': recibo_odoo,
-            'uid_externo': payload['uid_externo']}
+            'uid_externo': payload['uid_externo'], 'assinatura': OL.assinatura(payload)}
 
 
 @bp.route('/envio', methods=['POST'])
@@ -307,6 +336,58 @@ def envio():
                 'gravadoEm': os.path.relpath(gravado, ROOT) if gravado else ''}
     finally:
         _envio_lock.release()
+
+
+@bp.route('/extras', methods=['GET'])
+def extras():
+    """Os componentes fora do esquema do projeto, so do disco. Sem arquivo = lista vazia."""
+    nome = request.args.get('projeto') or ''
+    if not _pasta(nome):
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    try:
+        return {'ok': True, 'itens': OL.le_extras(nome, ROOT)}
+    except OL.ErroOdoo as e:
+        return {'ok': False, 'error': str(e)}, 400
+
+
+@bp.route('/extras', methods=['POST'])
+def extras_altera():
+    """Junta, muda ou tira um componente fora do esquema. Devolve a lista inteira.
+
+    {projeto, op:'add', item:{sym, comment, footprint, params, quantidade}} -> {ok, itens, id}
+    {projeto, op:'update', id, quantidade?, sym?, comment?, footprint?, params?} -> {ok, itens}
+    {projeto, op:'remove', id} -> {ok, itens}
+
+    O projeto passa pelo _pasta() como em todas as rotas daqui: o arquivo e escrito em
+    Projects/<nome>/, e o nome nunca vira caminho sem antes ser uma entrada de Projects/. O
+    ler-alterar-gravar e feito sob a trava de odoolista.altera_extras -- dois cliques (ou
+    duas abas) ao mesmo tempo nao podem dar o mesmo id a duas pecas.
+
+    Nao fala com o Odoo, nao precisa de senha e nao exige o PC do servidor: e edicao do
+    projeto, como salvar o schematic.js. Quem manda para o Odoo continua sendo so o /envio.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return {'ok': False, 'error': 'JSON obrigatorio'}, 400
+    nome = str(data.get('projeto') or '').strip()
+    if not _pasta(nome):
+        return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    op = data.get('op')
+    try:
+        itens, n = OL.altera_extras(nome, op, data, ROOT)
+    except OL.ExtraAusente as e:
+        return {'ok': False, 'error': str(e)}, 404
+    except OL.ErroOdoo as e:
+        # validacao, ou arquivo torto: NADA foi escrito, e a frase ja vem pronta para o toast
+        return {'ok': False, 'error': str(e)}, 400
+    except (OSError, ValueError) as e:
+        # ValueError: texto que o UTF-8 nao escreve estourando no f.write. A validacao ja o
+        # recusa antes; se um dia escapar, a tela recebe a frase em JSON, nao um 500 em HTML
+        return {'ok': False, 'error': 'falha ao gravar %s: %s' % (OL.EXTRAS, e)}, 500
+    resp = {'ok': True, 'itens': itens}
+    if op == 'add':
+        resp['id'] = n
+    return resp
 
 
 @bp.route('/estado', methods=['POST'])

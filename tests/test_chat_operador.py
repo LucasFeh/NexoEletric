@@ -419,6 +419,24 @@ try:
     confere_foto(antes, foto(tmp), 'uma escrita recusada')
     print('(4b) pedido mal formado é recusado com o motivo, e também não escreve ok')
 
+    # FOOTPRINT VAZIO: e o que o hub grava para o componente do almoxarifado sem footprint
+    # conhecido, e o Salvar da vista aceita (hub-core » SCH_ITEM_REQUIRED). O chat tem de poder
+    # mover/girar esse componente — antes ele recusava dizendo que o BuildSchematic recusaria o
+    # projeto, o que e falso (vai sem vinculo, [AVISO]). Escrever vazio ele mesmo, nao.
+    assert 'footprint' not in O.SCH_OBRIG['comp'][1], 'espelho do hub-core: a chave vai a parte'
+    bt = {'t': 'comp', 'sheet': 'main', 'ref': 'BT1', 'sym': 'RES', 'x': 0, 'y': 0, 'rot': 0,
+          'footprint': ''}
+    O._valida_item_sch(dict(bt), 'mover BT1')                       # ja estava assim: passa
+    for caso, item, escreve_fp in (('comp novo com footprint vazio', dict(bt), True),
+                                   ('sem a chave', {k: v for k, v in bt.items() if k != 'footprint'}, False)):
+        try:
+            O._valida_item_sch(item, caso, escreve_fp)
+        except O._Recusa as e:
+            assert 'footprint' in str(e) and 'recusa o projeto' not in str(e), (caso, str(e))
+        else:
+            raise AssertionError('passou: ' + caso)
+    print('(4c) footprint vazio: move e troca o que ja estava assim; o chat nao escreve vazio ok')
+
     # ══════════════════════════════════════════════════════════════════════════
     # 5. aplica() escreve — e só ela
     # ══════════════════════════════════════════════════════════════════════════

@@ -4776,39 +4776,6 @@ document.addEventListener('keydown', e => {
   else if (url.tab) S.tab = url.tab;
   const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;
   await loadProject(id);
-  /* ABERTO PARA EDITAR UM SIMBOLO, numa aba propria. A vista Esquema abre esta pagina com
-     ?edsym=... em vez de trocar a aba dela mesma: assim o modal "Trocar componente" fica de
-     pe do outro lado, e o que for salvo aqui volta para la sozinho pelo SSE do hubserver
-     (ele vigia Libs\ e chama __hubOnChange em TODA aba aberta).
-     Depois do loadProject, senao o painel ainda nao existe para responder. */
-  try {
-    const q = new URLSearchParams(location.search);
-    const fam = q.get('edsym');
-    if (fam) {
-      /* CONSOME E APAGA DA URL. Estes parametros sao uma ordem de UMA vez — "abra este
-         componente agora" —, nao o endereco desta aba. Sem limpar, eles ficam grudados e
-         todo recarregamento volta para o editor.
-
-         E recarregar nao e coisa rara aqui: gravar qualquer coisa em Libs\ faz o SSE do
-         hubserver chamar __hubOnChange em TODA aba aberta. Entao "+ corpo atual" — que
-         grava em Libs\symbols-lib.js — reabria esta aba no mesmo componente, com o mesmo
-         aviso, em loop; e a vista Esquema deixava de ser alcancavel nela. Medido em
-         2026-09-15 com o "ESP32 DEVKIT V1 ESPWROOM32E-H4".
-
-         O replaceState vem ANTES do await de proposito: se o editor falhar ao abrir, a URL
-         ja esta limpa e o F5 seguinte devolve um hub normal em vez de repetir a falha. */
-      const limpa = new URLSearchParams(location.search);
-      ['edsym', 'edcomp', 'edacervo'].forEach(k => limpa.delete(k));
-      const resto = limpa.toString();
-      try {
-        history.replaceState(null, '', location.pathname + (resto ? '?' + resto : '') + location.hash);
-      } catch (e) { /* sem history: a aba continua presa, mas nada aqui pode derrubar o boot */ }
-      const ac = q.get('edacervo');
-      const a = ac ? libSources().find(x => x.id === ac) : null;
-      await window.__hubEditarSimbolo(fam, q.get('edcomp') || null, acervoParaEditor(a));
-    }
-  } catch (e) { toast(String((e && e.message) || e), 'err'); }
-
   /* O OPERADOR. O painel não conhece o hub: ele pergunta tudo por este adaptador, e as
      funções aqui leem o estado VIVO (`proj()`, `S.tab`) em vez de receber uma cópia — um
      projeto desatualizado aqui viraria proposta gravada no projeto errado. */
@@ -4853,8 +4820,15 @@ document.addEventListener('keydown', e => {
         if (!nome || !window.HubSymEd || !HubSymEd.abrir) return;
         const a = libSources().find(x => x.id === libWanted()) || LIB_ALTIUM;
         try {
+          /* a faixa so vai para "Componentes" se o editor ainda estiver na FAMILIA que esta
+             chamada abriu, sem componente: o "Editar símbolo ↗" da vista Esquema abre a mesma
+             familia JA num componente, em paralelo (__hubEditarSimbolo), e este .then chegando
+             depois tirava a faixa da pre-selecao do corpo — ora Simbolos, ora Componentes */
           Promise.resolve(HubSymEd.abrir(nome, false, null, acervoParaEditor(a)))
-            .then(ok => { if (ok && HubSymEd.faixa) HubSymEd.faixa('componentes'); })
+            .then(ok => {
+              const E = HubSymEd.state || {};
+              if (ok && HubSymEd.faixa && E.sel === nome && !E.valSel) HubSymEd.faixa('componentes');
+            })
             .catch(() => {});
         } catch (e) {}
       },
@@ -4863,6 +4837,46 @@ document.addEventListener('keydown', e => {
     /* a vista pedida pela URL (#/libsym) so pode ser aplicada DEPOIS que o painel existe */
     if (vistaPedida && window.__hubLibView) window.__hubLibView.ir(vistaPedida);
   } catch (e) { /* o painel é acessório: sem ele a Biblioteca continua sendo a vista Geral */ }
+
+  /* ABERTO PARA EDITAR UM SIMBOLO, numa aba propria. A vista Esquema abre esta pagina com
+     ?edsym=... em vez de trocar a aba dela mesma: assim o modal "Trocar componente" fica de
+     pe do outro lado, e o que for salvo aqui volta para la sozinho pelo SSE do hubserver
+     (ele vigia Libs\ e chama __hubOnChange em TODA aba aberta).
+     Depois do loadProject, senao o painel ainda nao existe para responder. E DEPOIS DAS
+     VISTAS DA BIBLIOTECA (logo acima): desde que o editor passou a morar em Biblioteca »
+     Simbolos (0511f38), abrir antes delas deixava o editor no acervo padrao, sem a familia, e
+     o ir('simbolos') de cima reabria so a familia — o "Editar símbolo ↗" da vista Esquema
+     parou de cair no componente e ninguem viu (medido: funcionava no 1839ede). */
+  try {
+    const q = new URLSearchParams(location.search);
+    const fam = q.get('edsym');
+    if (fam) {
+      /* CONSOME E APAGA DA URL. Estes parametros sao uma ordem de UMA vez — "abra este
+         componente agora" —, nao o endereco desta aba. Sem limpar, eles ficam grudados e
+         todo recarregamento volta para o editor.
+
+         E recarregar nao e coisa rara aqui: gravar qualquer coisa em Libs\ faz o SSE do
+         hubserver chamar __hubOnChange em TODA aba aberta. Entao "+ corpo atual" — que
+         grava em Libs\symbols-lib.js — reabria esta aba no mesmo componente, com o mesmo
+         aviso, em loop; e a vista Esquema deixava de ser alcancavel nela. Medido em
+         2026-09-15 com o "ESP32 DEVKIT V1 ESPWROOM32E-H4".
+
+         O replaceState vem ANTES do await de proposito: se o editor falhar ao abrir, a URL
+         ja esta limpa e o F5 seguinte devolve um hub normal em vez de repetir a falha. */
+      const limpa = new URLSearchParams(location.search);
+      ['edsym', 'edcomp', 'edacervo'].forEach(k => limpa.delete(k));
+      const resto = limpa.toString();
+      try {
+        history.replaceState(null, '', location.pathname + (resto ? '?' + resto : '') + location.hash);
+      } catch (e) { /* sem history: a aba continua presa, mas nada aqui pode derrubar o boot */ }
+      /* a vista Esquema manda o acervo da PARTE (almox-basicos, almox-especiais), e o hub so
+         lista o combinado (almox-todos): acha-se o que contem a parte */
+      const ac = q.get('edacervo');
+      const a = ac ? (libSources().find(x => x.id === ac)
+                      || libSources().find(x => (x.partes || []).some(p => p.id === ac))) : null;
+      await window.__hubEditarSimbolo(fam, q.get('edcomp') || null, acervoParaEditor(a));
+    }
+  } catch (e) { toast(String((e && e.message) || e), 'err'); }
 
   try {
     /* o retorno e GUARDADO: ele carrega o alterna()/aberto()/empurrao() que a medicao de fora
