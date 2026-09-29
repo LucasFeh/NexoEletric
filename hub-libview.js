@@ -37,8 +37,11 @@ const CSS = `
 .lv-tabs button:hover{background:rgba(255,255,255,.05); color:var(--text,#d8d8d8);}
 .lv-tabs button[aria-pressed="true"]{color:var(--hi,#4fc3f7); border-bottom-color:var(--hi,#4fc3f7);}
 /* o aviso de produto repetido: no fim da faixa, no tom de aviso, e so quando ha */
-.lv-tabs button.lv-dup{margin-left:auto; color:var(--warn,#ffb74d); border-bottom-color:transparent;}
+.lv-tabs .lv-avisos{margin-left:auto; display:flex; gap:2px;}
+.lv-tabs button.lv-dup{color:var(--warn,#ffb74d); border-bottom-color:transparent;}
 .lv-tabs button.lv-dup:hover{color:var(--warn,#ffb74d); background:rgba(255,183,77,.08);}
+.lv-tabs button.lv-fora{border-bottom-color:transparent;}
+.lv-tabs button.lv-fora:hover{color:var(--err,#ff6b6b); background:rgba(255,107,107,.08);}
 .lv-dup-dlg{width:min(820px,100%);}
 .lv-dup-dlg p{font-size:12px; line-height:1.5; color:var(--text-2,#b8b8b8);}
 .lv-dup-lista{max-height:min(52vh,460px); overflow:auto; border:1px solid var(--line,#3a3a3a);
@@ -261,12 +264,23 @@ function pintaAbas(){
     faixa.append(b);
   }
   const n = DUP.j ? DUP.j.grupos.length : 0;
+  /* os avisos da biblioteca INTEIRA moram no fim da faixa, juntos: os produtos repetidos e o
+     "apagar todos os fora" (a seleção por categoria fica no painel de valores, hub-almoxfora.js) */
+  const avisos = el('span', 'lv-avisos');
   if (n){
     const b = el('button', 'lv-dup', '⚠ ' + n + (n === 1 ? ' produto repetido' : ' produtos repetidos'));
     b.title = 'o mesmo produto do Odoo em mais de um componente da biblioteca — clique para ver e limpar';
     b.onclick = abreDups;
-    faixa.append(b);
+    avisos.append(b);
   }
+  if (DUP.fora && typeof HubAlmoxFora !== 'undefined'){
+    const b = el('button', 'lv-fora', 'Apagar fora (' + DUP.fora + ')…');
+    b.title = 'apaga da biblioteca todos os ' + DUP.fora + ' componentes que estão fora do Odoo — '
+      + 'pergunta antes, mostrando onde são usados. Por categoria: selecione no painel de valores.';
+    b.onclick = async () => { await HubAlmoxFora.apagaTodos(); await carregaDups(true); pintaAbas(); };
+    avisos.append(b);
+  }
+  if (avisos.childNodes.length) faixa.append(avisos);
 }
 
 /* ── O MESMO PRODUTO DO ODOO EM MAIS DE UM COMPONENTE ──
@@ -277,19 +291,23 @@ function pintaAbas(){
    servidor (/api/symbols/almox-duplicados), que é quem também apaga — e só apaga o antigo
    cujo produto vive noutro componente. O desenho e o vínculo com o símbolo que estavam no
    antigo o guardião já leva para o vivo no sincronismo. */
-const DUP = { j: null, quando: 0, pedindo: null };
+const DUP = { j: null, fora: 0, quando: 0, pedindo: null };
 const DUP_TTL = 30000;                 /* a faixa repinta a cada desenho da Biblioteca */
+/* os repetidos e a contagem de fora (/api/symbols/almox-fora), numa passada só */
 function carregaDups(forca){
   if (typeof fetch !== 'function') return Promise.resolve(null);
   if (DUP.pedindo) return DUP.pedindo;
   if (!forca && Date.now() - DUP.quando < DUP_TTL) return Promise.resolve(DUP.j);
   DUP.quando = Date.now();
-  DUP.pedindo = fetch('/api/symbols/almox-duplicados').then(r => r.json()).then(j => {
-    const antes = DUP.j ? DUP.j.grupos.length : 0;
-    DUP.j = (j && j.ok && Array.isArray(j.grupos)) ? j : null;
-    if ((DUP.j ? DUP.j.grupos.length : 0) !== antes) pintaAbas();
-    return DUP.j;
-  }).catch(() => null).then(j => { DUP.pedindo = null; return j; });
+  const json = url => fetch(url).then(r => r.json()).catch(() => null);
+  DUP.pedindo = Promise.all([json('/api/symbols/almox-duplicados'), json('/api/symbols/almox-fora')])
+    .then(([j, f]) => {
+      const antes = (DUP.j ? DUP.j.grupos.length : 0) + '/' + DUP.fora;
+      DUP.j = (j && j.ok && Array.isArray(j.grupos)) ? j : null;
+      DUP.fora = (f && f.ok && f.total) || 0;
+      if ((DUP.j ? DUP.j.grupos.length : 0) + '/' + DUP.fora !== antes) pintaAbas();
+      return DUP.j;
+    }).then(j => { DUP.pedindo = null; return j; });
   return DUP.pedindo;
 }
 /* o adaptador da casca para o fluxo de apagar (o mesmo do "Apagar da biblioteca" de um valor:
@@ -370,8 +388,8 @@ async function apagaAntigos(){
     texto += '\n\nEM USO por ' + p.total + ' componente(s) nos projetos:\n'
       + p.usos.map(u => '  · ' + u.projeto + ': ' + u.refs.join(', ')).join('\n')
       + '\n\nQuem tem o id do Odoo no componente a folha leva sozinha para o nome de hoje.'
-      + (p.semId ? ' ' + p.semId + ' não tem (' + p.usos.filter(u => u.semId.length)
-          .map(u => u.projeto + ': ' + u.semId.join(', ')).join('; ') + ') e fica órfão até ser trocado.' : '');
+      + (p.orfaos ? ' ' + p.orfaos + ' não tem (' + p.usos.filter(u => u.orfaos.length)
+          .map(u => u.projeto + ': ' + u.orfaos.join(', ')).join('; ') + ') e fica órfão até ser trocado.' : '');
   }
   const sim = io ? await io.confirm(texto, { title: 'Apagar os antigos', ok: 'Apagar ' + n, danger: true }) : false;
   if (!sim) return;
@@ -807,6 +825,8 @@ function ir(aba){
 }
 
 return { instala, ir, atualiza, estado: ST,
+         /* quem apaga componentes da biblioteca (hub-almoxfora.js) pede a contagem nova da faixa */
+         recontar: () => carregaDups(true),
          pure: { filtra: (fps, q) => (fps || []).filter(f => !q || f.name.toLowerCase().includes(String(q).toLowerCase())) } };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubLibView;

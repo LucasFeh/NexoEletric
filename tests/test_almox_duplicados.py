@@ -99,11 +99,11 @@ try:
              for f in ('almox-basicos.js', 'almox-especiais.js')}
     j = cli.post('/api/symbols/almox-duplicados', json={}).get_json()
     assert j['ok'] and j['previa'] and len(j['antigos']) == 2, j
-    assert j['usos'] == [{'projeto': 'P1', 'refs': ['U1', 'U2'], 'semId': ['U2']}], j['usos']
-    assert j['total'] == 2 and j['semId'] == 1, j
+    assert j['usos'] == [{'projeto': 'P1', 'refs': ['U1', 'U2'], 'orfaos': ['U2']}], j['usos']
+    assert j['total'] == 2 and j['orfaos'] == 1, j
     assert all(open(os.path.join(tmp, 'Libs', f), 'rb').read() == b for f, b in antes.items()), \
         'a previa nao pode mexer no espelho'
-    print('previa ok: usos por nome, e quem nao tem OdooId e contado a parte')
+    print('previa ok: usos por nome, e quem a folha nao leva sozinha e contado a parte')
 
     # ── durante a sincronizacao, 409 ──────────────────────────────────────────
     assert S._sync_lock.acquire(blocking=False)

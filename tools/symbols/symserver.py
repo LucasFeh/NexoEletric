@@ -14,6 +14,8 @@
     POST /api/symbols/almox-excluir/desfazer devolve um item da lista ao almoxarifado
     GET  /api/symbols/almox-duplicados       o mesmo produto do Odoo em mais de um componente (o aviso da Biblioteca)
     POST /api/symbols/almox-duplicados       apaga os antigos (`fora` cujo produto vive noutro); sem `confirmar`, a prévia
+    GET  /api/symbols/almox-fora             quantos componentes `fora` há, no total e por símbolo
+    POST /api/symbols/almox-fora             apaga `fora`: {simbolo[, componentes]} ou {todos:true}; sem `confirmar`, a prévia
 
 O trabalho pesado mora nos irmãos: `sch_leitor` lê, `schlib_patch` grava, `extrair` varre,
 `guardiao` vigia as .SchLib do Altium e envolve o gerador do almoxarifado. Aqui só o HTTP e
@@ -1251,11 +1253,18 @@ def _duplicados(espelhos):
     return grupos, antigos
 
 
-def _usos_por_nome(nomes):
-    """[{'projeto', 'refs', 'semId'}] dos componentes de Projects/*/schematic.js cujo `sym` é um
+def _vivos(espelhos):
+    """os ids do Odoo que vivem em algum componente que NÃO está `fora`"""
+    return {oid for _c, _v, esp in espelhos for s in (esp.get('symbols') or [])
+            for v in (s.get('valores') or []) if not v.get('fora') for oid in A.ids_odoo(v)}
+
+
+def _usos_por_nome(nomes, vivos):
+    """[{'projeto', 'refs', 'orfaos'}] dos componentes de Projects/*/schematic.js cujo `sym` é um
     dos `nomes`. Uma leitura de cada projeto para o lote inteiro — o `_usos_do_valor` relê
-    todos por valor, e 777 valores seriam 10 mil leituras. `semId` são os que NÃO têm OdooId no
-    params: esses a folha não consegue levar para o componente vivo sozinha."""
+    todos por valor, e 777 valores seriam 10 mil leituras. `orfaos` são os que a folha NÃO leva
+    para outro componente sozinha (schframe.js » seguePeloOdoo): sem OdooId no params, ou com
+    um id que não vive em componente nenhum — esses viram quadrado vermelho até alguém trocar."""
     fora, nomes = [], set(nomes)
     base = os.path.join(ROOT, PROJETOS)
     try:
@@ -1278,11 +1287,56 @@ def _usos_por_nome(nomes):
             if ref and ref not in refs:
                 refs.append(ref)
                 params = it.get('params') if isinstance(it.get('params'), str) else ''
-                if not re.search(r'(?:^|;)\s*OdooId=\s*[^;\s]', params):
+                m = re.search(r'(?:^|;)\s*OdooId=([^;]*)', params)
+                if not any(o in vivos for o in (m.group(1).split() if m else [])):
                     sem.append(ref)
         if refs:
-            fora.append({'projeto': nome, 'refs': refs, 'semId': sem})
+            fora.append({'projeto': nome, 'refs': refs, 'orfaos': sem})
     return fora
+
+
+def _apaga_do_espelho(espelhos, alvo):
+    """tira do espelho os valores `alvo` {(símbolo, altium)} e grava cada espelho tocado UMA
+    vez. -> [{simbolo, familia, altium, label}]. Quem chama segura o _lock_almox e releu os
+    espelhos dentro dele."""
+    apagados = []
+    for cam, var, esp in espelhos:
+        mudou = False
+        for s in esp.get('symbols') or []:
+            fica = []
+            for v in s.get('valores') or []:
+                if (s.get('name', ''), v.get('altium', '')) in alvo:
+                    apagados.append(OrderedDict([
+                        ('simbolo', s.get('name', '')), ('familia', s.get('familia', '')),
+                        ('altium', v.get('altium', '')), ('label', v.get('label', ''))]))
+                    mudou = True
+                else:
+                    fica.append(v)
+            s['valores'] = fica
+        if mudou:
+            G.grava_espelho_almox(cam, var, esp)
+    return apagados
+
+
+def _registra_apagados(apagados):
+    """o REGISTRO em Libs/almox-excluidos.json (o que foi apagado e quando). -> avisos: falhar
+    aqui não desfaz o que já saiu do espelho, só perde o histórico."""
+    avisos = []
+    with _lock_excluidos:
+        try:
+            lista = A.carrega_excluidos(ROOT)
+            ja = {(it.get('simbolo'), it.get('altium')) for it in lista['itens']}
+            quando = datetime.now().strftime('%Y-%m-%d %H:%M')
+            for a in apagados:
+                if (a['simbolo'], a['altium']) not in ja:
+                    lista['itens'].append(OrderedDict(list(a.items()) + [('quando', quando)]))
+            A.grava_excluidos(ROOT, lista)
+        except (OSError, ValueError) as e:
+            avisos.append('apaguei da biblioteca, mas não registrei em %s (%s): só o histórico '
+                          'se perde' % (A.EXCLUIDOS, e))
+    avisos.append('eles saem das .SchLib de Libs/Almox no próximo sincronismo do almoxarifado; '
+                  'até lá continuam aparecendo dentro do Altium')
+    return avisos
 
 
 @bp.route('/almox-duplicados', methods=['GET'])
@@ -1338,45 +1392,109 @@ def _apaga_duplicados():
         _grupos, antigos = _duplicados(espelhos)
         alvo = {(a['simbolo'], a['altium']) for a in antigos}
         if not data.get('confirmar'):
-            usos = _usos_por_nome({a['altium'] for a in antigos})
+            usos = _usos_por_nome({a['altium'] for a in antigos}, _vivos(espelhos))
             return {'ok': True, 'previa': True, 'antigos': antigos, 'usos': usos,
                     'total': sum(len(u['refs']) for u in usos),
-                    'semId': sum(len(u['semId']) for u in usos)}
-        apagados = []
+                    'orfaos': sum(len(u['orfaos']) for u in usos)}
         try:
-            for cam, var, esp in espelhos:
-                mudou = False
-                for s in esp.get('symbols') or []:
-                    fica = []
-                    for v in s.get('valores') or []:
-                        if (s.get('name', ''), v.get('altium', '')) in alvo:
-                            apagados.append(OrderedDict([
-                                ('simbolo', s.get('name', '')), ('familia', s.get('familia', '')),
-                                ('altium', v.get('altium', '')), ('label', v.get('label', ''))]))
-                            mudou = True
-                        else:
-                            fica.append(v)
-                    s['valores'] = fica
-                if mudou:
-                    G.grava_espelho_almox(cam, var, esp)
+            apagados = _apaga_do_espelho(espelhos, alvo)
         except (OSError, ValueError) as e:
-            return _erro('não consegui apagar do espelho (%s)' % e, 500, apagados=len(apagados))
-    avisos = []
-    with _lock_excluidos:
+            return _erro('não consegui apagar do espelho (%s)' % e, 500)
+    return {'ok': True, 'apagados': len(apagados), 'avisos': _registra_apagados(apagados)}
+
+
+# ─── os `fora`: por categoria, por seleção ou a biblioteca inteira ─────────────
+# Pedido do dono (2026-09-29): um botão na categoria que seleciona todos os componentes `fora`,
+# e poder apagar os `fora` da biblioteca. Esta rota só apaga `fora` — componente que ainda vem
+# do Odoo voltaria no sincronismo seguinte, e misturar os dois num lote faria o "apagar" mentir.
+# Apagar um `fora` é definitivo para a biblioteca, mas não para o produto: se ele voltar ao
+# Odoo (ou ganhar de novo a marca "é componente eletrônico"), volta com o MESMO número, porque
+# o livro-razão nunca o devolveu (almox2lib » numera_valores).
+@bp.route('/almox-fora', methods=['GET'])
+def api_almox_fora():
+    """quantos `fora` há, no total e por símbolo. Só leitura."""
+    try:
+        espelhos, _idx = _carrega_almox()
+    except _ErroAlmox as e:
+        return _erro(str(e), e.status)
+    por = OrderedDict()
+    for _c, _v, esp in espelhos:
+        for s in esp.get('symbols') or []:
+            n = sum(1 for v in (s.get('valores') or []) if v.get('fora'))
+            if n:
+                por[s.get('name', '')] = n
+    return {'ok': True, 'total': sum(por.values()), 'porSimbolo': por}
+
+
+@bp.route('/almox-fora', methods=['POST'])
+def api_almox_fora_apaga():
+    """(a trava da sincronização em volta do _apaga_fora — ver _toma)"""
+    if not _toma(_sync_lock, _sync_runs):
+        return _erro(SYNC_OCUPADO, 409)
+    try:
+        return _apaga_fora()
+    finally:
+        _sync_lock.release()
+
+
+def _apaga_fora():
+    """{simbolo, componentes?} apaga os `fora` escolhidos daquele símbolo (a seleção da tela) ou,
+    sem `componentes`, todos os `fora` dele; {todos: true} apaga todos os `fora` da biblioteca.
+    Pedido sem nenhum dos dois é 400 — apagar tudo tem de ser dito com todas as letras.
+
+    Componente pedido que NÃO está `fora` (voltou ao Odoo desde que a tela carregou) ou que não
+    existe mais não é apagado: volta em `ignorados`, com o porquê. Sem `confirmar` é a PRÉVIA
+    (quantos e onde são usados); com `confirmar`, o mesmo caminho do "apagar os antigos"."""
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
+    simbolo, comps, todos = data.get('simbolo'), data.get('componentes'), data.get('todos') is True
+    if simbolo is not None and not (isinstance(simbolo, str) and simbolo.strip()):
+        return _erro('simbolo tem de ser o nome de um símbolo', 400)
+    if comps is not None and not (isinstance(comps, list) and all(isinstance(c, str) and c.strip() for c in comps)):
+        return _erro('componentes é uma lista de nomes (valores[].altium)', 400)
+    if comps is not None and not simbolo:
+        return _erro('componentes vêm com o simbolo: o mesmo nome pode existir em outra família', 400)
+    if not simbolo and not todos:
+        return _erro('diga o que apagar: {simbolo[, componentes]} ou {todos: true}', 400)
+    simbolo = simbolo.strip() if simbolo else None
+    pedidos = {c.strip() for c in comps} if comps is not None else None
+    with _lock_almox:
         try:
-            lista = A.carrega_excluidos(ROOT)
-            ja = {(it.get('simbolo'), it.get('altium')) for it in lista['itens']}
-            quando = datetime.now().strftime('%Y-%m-%d %H:%M')
-            for a in apagados:
-                if (a['simbolo'], a['altium']) not in ja:
-                    lista['itens'].append(OrderedDict(list(a.items()) + [('quando', quando)]))
-            A.grava_excluidos(ROOT, lista)
+            espelhos = G.carrega_espelhos_almox(ROOT)
         except (OSError, ValueError) as e:
-            avisos.append('apaguei da biblioteca, mas não registrei em %s (%s): só o histórico '
-                          'se perde' % (A.EXCLUIDOS, e))
-    avisos.append('eles saem das .SchLib de Libs/Almox no próximo sincronismo do almoxarifado; '
-                  'até lá continuam aparecendo dentro do Altium')
-    return {'ok': True, 'apagados': len(apagados), 'avisos': avisos}
+            return _erro('não li os espelhos do almoxarifado: %s' % e, 500)
+        alvos, ignorados, achados = [], [], set()
+        for _c, _v, esp in espelhos:
+            for s in esp.get('symbols') or []:
+                if simbolo and s.get('name') != simbolo:
+                    continue
+                for v in s.get('valores') or []:
+                    alt = v.get('altium', '')
+                    if pedidos is not None:
+                        if alt not in pedidos:
+                            continue
+                        achados.add(alt)
+                    if not v.get('fora'):
+                        if pedidos is not None:
+                            ignorados.append({'altium': alt, 'porque': 'não está fora: voltou ao Odoo'})
+                        continue
+                    alvos.append(OrderedDict([('simbolo', s.get('name', '')), ('altium', alt),
+                                              ('label', v.get('label', '')), ('id', v.get('id'))]))
+        for alt in sorted((pedidos or set()) - achados):
+            ignorados.append({'altium': alt, 'porque': 'não está mais na biblioteca'})
+        if not data.get('confirmar'):
+            usos = _usos_por_nome({a['altium'] for a in alvos}, _vivos(espelhos))
+            return {'ok': True, 'previa': True, 'alvos': alvos, 'ignorados': ignorados, 'usos': usos,
+                    'total': sum(len(u['refs']) for u in usos),
+                    'orfaos': sum(len(u['orfaos']) for u in usos)}
+        try:
+            apagados = _apaga_do_espelho(espelhos, {(a['simbolo'], a['altium']) for a in alvos})
+        except (OSError, ValueError) as e:
+            return _erro('não consegui apagar do espelho (%s)' % e, 500)
+    avisos = _registra_apagados(apagados)
+    avisos.append('se algum produto voltar ao Odoo, a próxima sincronização o traz de volta com o '
+                  'mesmo número')
+    return {'ok': True, 'apagados': len(apagados), 'ignorados': ignorados, 'avisos': avisos}
 
 
 def _salva_footprint(caminho, nome, footprint):

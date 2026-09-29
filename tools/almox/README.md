@@ -261,6 +261,25 @@ Duas consequências, ambas de propósito:
 `--podar` recomeça a numeração do zero e descarta os valores que saíram. Use quando
 ninguém ainda depende dos ids. Ele **não** reescreve as datas de entrada.
 
+#### Apagar os `fora` pela Biblioteca (2026-09-29)
+
+Pedido do dono: selecionar todos os `fora` de uma categoria e poder apagá-los da biblioteca.
+
+- **na categoria** (o painel de valores, ao lado do filtro *Fora*): **Selecionar fora** marca
+  todos os `fora` da categoria, **Ctrl+clique** numa linha tira ou põe um, e **Apagar N…**
+  apaga a seleção. O clique normal continua abrindo o valor;
+- **na biblioteca inteira**: **Apagar fora (N)…**, na faixa Geral/Símbolos/Footprints, ao lado
+  do aviso de produtos repetidos.
+
+Os dois perguntam antes, num modal do hub, dizendo onde cada um é usado nos projetos e quem
+fica órfão na folha (sem `OdooId`, ou com um id que não vive em componente nenhum — o resto a
+folha leva sozinha para o nome de hoje). A rota é `/api/symbols/almox-fora`, e ela **só apaga
+`fora`**: componente que ainda vem do Odoo voltaria no sincronismo seguinte, então o que foi
+pedido e não está fora volta em `ignorados`, com o porquê. Apagar tira do espelho e registra
+em `almox-excluidos.json`, como o excluir de um valor; o número continua reservado no
+livro-razão — se o produto voltar ao Odoo, volta com o **mesmo número**. Durante a
+sincronização a rota responde 409.
+
 ### O que é "novo"
 
 Cada part e cada símbolo guardam `desde` — a data em que **entraram na biblioteca**,
