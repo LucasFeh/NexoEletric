@@ -388,7 +388,66 @@ def conn_do_valor(itens):
     return fora
 
 
-def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpman=None):
+def familia_do_ledger(s):
+    """a familia com que o ledger chaveia os componentes deste simbolo (`protegidos` e
+    `footprints`): a do ARQUIVO do espelho — 'ESPECIAIS' para todo especial. A regra e UMA, a
+    do guardiao, que e quem escreve o ledger; o gerador procurava com a familia do simbolo
+    ('SENSOR', 'CIRCUITO INTEGRADO'), e o footprint escolhido a mao num especial nunca foi
+    achado aqui — sumia em todo sincronismo."""
+    import guardiao as G
+    base = 'almox-especiais.js' if s.get('grupo') in ('e', 'especiais') else 'almox-basicos.js'
+    return G._familia_arquivo({'familia': s.get('familia') or ''}, base)
+
+
+_DESENHOS = {'de': None, 'ix': {}}
+
+
+def desenhos_por_odoo(antes):
+    """{id do produto no Odoo: parts} dos valores VIVOS do espelho anterior que tinham desenho
+    proprio. Id que aparece em dois desenhos diferentes nao e resposta e fica de fora. Uma
+    montagem por espelho (o `antes` e o mesmo para os ~130 simbolos de uma rodada)."""
+    if _DESENHOS['de'] is not antes:
+        ix, duvida = {}, set()
+        for s in (antes or {}).values():
+            for v in (s or {}).get('valores') or []:
+                if not isinstance(v, dict) or v.get('fora') or not v.get('parts'):
+                    continue
+                for oid in ids_odoo(v):
+                    if oid in ix and ix[oid] is not v['parts']:
+                        duvida.add(oid)
+                    ix[oid] = v['parts']
+        for oid in duvida:
+            ix.pop(oid, None)
+        _DESENHOS.update(de=antes, ix=ix)
+    return _DESENHOS['ix']
+
+
+def duplicados_odoo(simbolos_montados):
+    """O MESMO PRODUTO DO ODOO EM MAIS DE UM COMPONENTE da biblioteca:
+    [{'odoo', 'valores': [{simbolo, id, altium, label, fora}]}], em ordem de id do produto.
+
+    Um produto e UMA peca: dois componentes com o mesmo id sao a mesma peca contada duas
+    vezes. O caso real e o zumbi de renomeacao — o TMAG5131A1 (produto 1523) ficou como
+    "Hall / Magnetico" no numero 4 (fora) e "Hall Magnetico" no 46 (vivo), porque o nome
+    mudou no Odoo antes de o gerador saber seguir o id. O gerador nao produz mais isso
+    (`segue_renomeacoes`), mas o que ja existe so sai quando alguem apaga o velho: aqui ele
+    so e APONTADO — o log, o relatorio e a tela avisam, e quem decide e o usuario."""
+    por = collections.OrderedDict()
+    for s in simbolos_montados:
+        for v in s.get('valores') or []:
+            for oid in ids_odoo(v):
+                por.setdefault(oid, []).append(collections.OrderedDict([
+                    ('simbolo', s.get('name', '')), ('id', v.get('id')),
+                    ('altium', v.get('altium', '')), ('label', v.get('label', '')),
+                    ('fora', bool(v.get('fora')))]))
+    fora = [collections.OrderedDict([('odoo', oid), ('valores', vs)])
+            for oid, vs in por.items() if len(vs) > 1]
+    fora.sort(key=lambda d: (len(d['odoo']), d['odoo']))
+    return fora
+
+
+def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpman=None,
+                  fpodoo=None):
     pins, gfx = SY.desenha(s['forma'], s['npin'], rotulo=s['familia'] if s['forma'] == 'box' else '')
     ps = ordena_parts(s)
     x1, y1, x2, y2 = SY.bbox(pins, gfx)
@@ -501,8 +560,16 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpm
         # a peca sobrevive ao que o gerador acha. A chave e (familia do arquivo, nome do
         # componente), a mesma do ledger; ela e montada aqui porque so aqui o nome final do
         # componente existe.
-        if fpman:
-            escolhido = fpman.get((s['familia'], nome_altium))
+        #
+        # PELO ID DO ODOO PRIMEIRO (2026-09-29). O nome e so a segunda tentativa: renomear o
+        # produto no cadastro muda `nome_altium`, e a entrada do ledger so muda de chave no
+        # `guardiao.depois`, DEPOIS deste gerador — a rodada da renomeacao escrevia o footprint
+        # deduzido na .SchLib e a escolha so voltava no sincronismo seguinte.
+        if fpman or fpodoo:
+            por_id = {fpodoo[o] for o in (str(x['odoo_id']).strip() for x in p['itens'])
+                      if o in (fpodoo or {})}
+            escolhido = (por_id.pop() if len(por_id) == 1
+                         else (fpman or {}).get((familia_do_ledger(s), nome_altium)))
             if escolhido:
                 fp = escolhido
         # Nao ha filtro de exclusao aqui, e isso e proposital: o que esta no CSV vira
@@ -579,10 +646,25 @@ def monta_simbolo(s, reais, mapa=None, antes=None, podar=False, recicl=None, fpm
     # O desenho PROPRIO de um valor (o que o /save-almox grava quando um componente foge do
     # desenho da familia) tambem e do HTML: os valores sao remontados do zero a cada rodada,
     # entao sem repor daqui o `parts` do valor sumiria do espelho na sincronizacao seguinte.
+    #
+    # Achado PELO ID DO ODOO, e so depois pelo rotulo. Pelo rotulo sozinho, renomear o produto
+    # no cadastro apagava do espelho o simbolo aplicado a ele: o rotulo novo nao estava no
+    # espelho anterior, e o componente voltava ao desenho da familia — era o "troquei o nome
+    # no Odoo e perdi o simbolo". O id atravessa ate a troca de simbolo (o produto recadastrado
+    # noutra familia), que o rotulo, preso ao simbolo, nunca atravessou.
     velhos_v = {v.get('label'): v for v in ((antes or {}).get(s['nome']) or {}).get('valores', [])
                 if isinstance(v, dict)}
+    desenho_por_id = desenhos_por_odoo(antes)
     for v in valores:
         if v.get('parts'):
+            continue
+        # o `fora` e o componente de ontem, ressuscitado do espelho com o que tinha: pelo id
+        # ele pegaria o desenho do VIVO que carrega o mesmo produto (o zumbi do TMAG ganhava o
+        # simbolo aplicado no componente de verdade)
+        achados = {} if v.get('fora') else {
+            id(desenho_por_id[o]): desenho_por_id[o] for o in ids_odoo(v) if o in desenho_por_id}
+        if len(achados) == 1:
+            v['parts'] = next(iter(achados.values()))
             continue
         antigo = velhos_v.get(v.get('label'))
         if antigo and antigo.get('parts'):
@@ -790,6 +872,17 @@ def chave_do_valor(v):
     return v.get('chave') or v.get('label') or ''
 
 
+def ids_odoo(v):
+    """os ids do produto no Odoo de um valor do ESPELHO (`itens[].odoo`), em ordem e sem
+    repeticao. E a identidade do componente: o nome sai do cadastro e muda com ele; o id nao."""
+    fora = []
+    for it in (v or {}).get('itens') or []:
+        oid = str((it or {}).get('odoo') or '').strip()
+        if oid and oid not in fora:
+            fora.append(oid)
+    return fora
+
+
 def indice_odoo(mapa, antes):
     """{id do produto no Odoo: (simbolo, chave)} — onde cada produto estava na rodada anterior.
 
@@ -797,19 +890,34 @@ def indice_odoo(mapa, antes):
     e versionada e sobrevive a um clone novo. O espelho anterior e so o degradê para o
     primeiro sincronismo depois desta mudança, quando o livro-razao ainda nao tem o indice —
     e ele nao serve sozinho, porque `Libs/almox-*.js` esta no .gitignore e some no clone.
+
+    ONDE O PRODUTO ESTAVA VIVO GANHA DE TUDO (2026-09-29). O indice do livro-razao ate hoje
+    guardava tambem os `fora: true`, e o zumbi de uma renomeacao antiga (o TMAG5131A1, nº 4
+    e nº 46 do mesmo produto 1523) carrega os `itens` do produto que hoje mora com outro
+    nome: por ordem de arquivo, o indice apontava o zumbi. Medido na biblioteca do servidor,
+    isso fazia 49 componentes vivos "renomearem" do zumbi — e herdarem o NUMERO dele, que e
+    renumerar peca em uso. Duplicado antigo e so APONTADO (`duplicados_odoo`); quem o
+    resolve e o usuario. Entao: o livro-razao por baixo, o valor VIVO do espelho por cima, e
+    o `fora` do espelho so onde nao ha outra resposta.
     """
     fora = {}
-    for sym, s in (antes or {}).items():
-        for v in s.get('valores') or []:
-            for it in v.get('itens') or []:
-                oid = str(it.get('odoo') or '').strip()
-                if oid:
-                    fora[oid] = (sym, chave_do_valor(v))
     for sym, reg in (mapa or {}).items():
         if not isinstance(reg, dict):
             continue
         for oid, chave in (reg.get('odoo') or {}).items():
             fora[str(oid)] = (sym, chave)
+    vivos = set()
+    for passo in ('vivo', 'fora'):
+        for sym, s in (antes or {}).items():
+            for v in s.get('valores') or []:
+                if bool(v.get('fora')) != (passo == 'fora'):
+                    continue
+                for oid in ids_odoo(v):
+                    if passo == 'fora' and (oid in vivos or oid in fora):
+                        continue
+                    fora[oid] = (sym, chave_do_valor(v))
+                    if passo == 'vivo':
+                        vivos.add(oid)
     return fora
 
 
@@ -839,6 +947,18 @@ def segue_renomeacoes(simbolos, antes, mapa):
     aparece em `novo`, a chave dele fica em `ids` e ele vira `fora: true`, que e o
     comportamento pedido.
 
+    A CHAVE VELHA SAI SEMPRE, levando o numero ou nao. Ate 2026-09-29 ela so saia quando o
+    numero podia ser levado: se ele ja era de outro valor no simbolo de destino (o produto
+    mudou de simbolo e caiu num numero ocupado), o `continue` deixava a origem no livro-
+    razao — e o `numera_valores` a ressuscitava como zumbi `fora: true`, com os `itens` do
+    produto que continua vivo com outro nome. Eram as "duas versoes do mesmo componente".
+    Sem numero livre, o renomeado tira um novo; a data de entrada vem de qualquer jeito.
+
+    E ORIGEM QUE CONTINUA VIVA NESTA RODADA NAO E ORIGEM. Dois produtos do Odoo que eram um
+    valor so (mesmo rotulo, mesmo encapsulamento) e se separaram: o que mudou de nome aponta
+    para o lugar antigo, mas o outro ainda mora la. Tirar aquela chave renumerava quem nao
+    mudou nada.
+
     Devolve [(de_simbolo, de_chave, para_simbolo, para_chave)], para o relatorio.
     """
     velho = indice_odoo(mapa, antes)
@@ -856,11 +976,14 @@ def segue_renomeacoes(simbolos, antes, mapa):
 
     renomes = []
     for (sym, chave), oids in agora.items():
-        # de onde estes produtos vinham, tirando o proprio lugar
+        # de onde estes produtos vinham, tirando o proprio lugar e os lugares que continuam
+        # ocupados nesta rodada (ver o docstring)
         origens = {velho[o] for o in oids if o in velho}
         origens.discard((sym, chave))
+        origens = {o for o in origens if o not in agora}
         if not origens:
             continue
+        reg = _reg_do_simbolo(mapa, sym)
         # o id mais antigo entre as origens: quando duas linhas do Odoo viram um valor so,
         # o componente herda o numero do mais velho dos dois
         cand = []
@@ -868,21 +991,18 @@ def segue_renomeacoes(simbolos, antes, mapa):
             oreg = mapa.get(osym)
             if isinstance(oreg, dict) and ochave in (oreg.get('ids') or {}):
                 cand.append((oreg['ids'][ochave], osym, ochave))
-        if not cand:
-            continue
-        cand.sort()
-        vid, osym, ochave = cand[0]
-        reg = _reg_do_simbolo(mapa, sym)
-        # os numeros ja tomados AQUI DENTRO — tirando as chaves que estao de saida. Sem essa
-        # exclusao, a renomeacao dentro da MESMA familia se auto-bloqueia: a chave velha
-        # ainda esta em `ids`, entao o numero que ela vai doar aparece como "ja usado" e o
-        # componente renomeado tira numero novo, que e exatamente o que isto evita.
-        saindo = {oc for (osym, oc) in origens if osym == sym}
-        usados = {n for k, n in reg['ids'].items() if k != chave and k not in saindo}
-        if reg['ids'].get(chave) == vid or vid in usados:
-            continue                     # o numero ja e dele, ou ja e de outro aqui dentro
-        reg['ids'][chave] = vid
-        reg['prox'] = max(reg.get('prox', 1), vid + 1)
+        if cand:
+            cand.sort()
+            vid = cand[0][0]
+            # os numeros ja tomados AQUI DENTRO — tirando as chaves que estao de saida. Sem
+            # essa exclusao, a renomeacao dentro da MESMA familia se auto-bloqueia: a chave
+            # velha ainda esta em `ids`, entao o numero que ela vai doar aparece como "ja
+            # usado" e o componente renomeado tira numero novo, que e o que isto evita.
+            saindo = {oc for (osym, oc) in origens if osym == sym}
+            usados = {n for k, n in reg['ids'].items() if k != chave and k not in saindo}
+            if reg['ids'].get(chave) != vid and vid not in usados:
+                reg['ids'][chave] = vid
+                reg['prox'] = max(reg.get('prox', 1), vid + 1)
         # TODAS as origens saem do livro-razao, inclusive as que nao doaram o numero: o que
         # as mantem vivas e justamente o que as ressuscitaria como zumbi
         for (osym2, ochave2) in origens:
@@ -903,16 +1023,23 @@ def grava_indice_odoo(simbolos_montados, mapa):
     E o que faz a renomeacao ser seguida na PROXIMA rodada. Fica aqui, e nao no espelho,
     porque `Libs/almox-parts.json` e versionado de proposito e os espelhos nao (.gitignore):
     num clone novo o espelho nao existe e este indice e a unica memoria de quem era quem.
+
+    O `fora: true` so entra para o produto que nao esta vivo em lugar NENHUM do acervo: o
+    zumbi de uma renomeacao antiga carrega os `itens` do produto que hoje mora com outro nome,
+    e deixa-lo no indice era dizer ao sincronismo seguinte que o produto estava em dois
+    lugares.
     """
+    vivos = {oid for s in simbolos_montados for v in s.get('valores') or [] if not v.get('fora')
+             for oid in ids_odoo(v)}
     for s in simbolos_montados:
         reg = _reg_do_simbolo(mapa, s['name'])
         ix = {}
         for v in s.get('valores') or []:
             ch = chave_do_valor(v)
-            for it in v.get('itens') or []:
-                oid = str(it.get('odoo') or '').strip()
-                if oid:
-                    ix[oid] = ch
+            for oid in ids_odoo(v):
+                if v.get('fora') and oid in vivos:
+                    continue
+                ix[oid] = ch
         if ix:
             reg['odoo'] = ix
         else:
@@ -1251,18 +1378,20 @@ def main(argv=None):
     # sincronismo desfaria em silencio o que alguem decidiu na tela. Ledger ilegivel nao
     # derruba a geracao: segue sem as escolhas e AVISA, porque o silencio aqui seria a
     # escolha do usuario sumindo sem uma linha.
-    fpman = {}
+    fpman, fpodoo = {}, {}
     try:
         import guardiao as _G
-        fpman = _G.footprints_manuais(_G.carrega_ledger(RAIZ))
+        _led = _G.carrega_ledger(RAIZ)
+        fpman = _G.footprints_manuais(_led)
+        fpodoo = _G.footprints_manuais_por_odoo(_led)
         if fpman:
             print('%d footprint(s) escolhido(s) a mao no ledger — o gerador os preserva'
                   % len(fpman))
     except Exception as e:                                          # noqa: BLE001
         print('AVISO: nao li os footprints manuais do ledger (%s: %s) — uma escolha feita '
               'na tela pode ser desfeita nesta rodada' % (type(e).__name__, e))
-    sb = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl, fpman) for s in bas]
-    se = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl, fpman) for s in esp]
+    sb = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl, fpman, fpodoo) for s in bas]
+    se = [monta_simbolo(s, fps_reais, mapa, antes, args.podar, recicl, fpman, fpodoo) for s in esp]
 
     # o nome de cada valor dentro da .SchLib em que ele vai morar (e o que o `sym` do
     # schematic.js guarda): unico, e estavel mesmo quando o homonimo some
@@ -1291,6 +1420,10 @@ def main(argv=None):
     mudou['generated'] = quando
     mudou['fonte'] = fonte
     mudou['odoo'] = stats or {}
+    # o mesmo produto do Odoo em dois componentes: avisar, nunca apagar sozinho
+    dups = duplicados_odoo(sb + se)
+    mudou['duplicados'] = dups
+    mudou['resumo']['duplicados'] = len(dups)
     escreve_js(os.path.join(LIBS, 'almox-sync.js'), 'almoxSync', mudou)
 
     idx = {'generated': quando,
@@ -1345,6 +1478,12 @@ def main(argv=None):
     rel.write('\n=== descartadas por nao serem componente de PCB (%d) ===\n' % len(fora))
     for r_ in fora:
         rel.write('  %s\n' % (r_.get('nome') or '').strip())
+    rel.write('\n=== o mesmo produto do Odoo em mais de um componente (%d) ===\n' % len(dups))
+    rel.write('    apague o antigo pela Biblioteca do hub (o que esta "fora")\n')
+    for d in dups:
+        rel.write('  [%s] %s\n' % (d['odoo'], '  |  '.join(
+            '%s #%s %s%s' % (v['simbolo'], v['id'], v['altium'], ' (fora)' if v['fora'] else '')
+            for v in d['valores'])))
     rel.close()
 
     print('basicos  : %d simbolos, %d valores' % (len(sb), sum(len(s['valores']) for s in sb)))
@@ -1361,6 +1500,15 @@ def main(argv=None):
                  r['estoqueMudou'], r['entrou'], r['saiu']))
     print('numeros de part em uso: %d simbolo(s) no mapa'
           % sum(1 for v in mapa.values() if isinstance(v, dict)))
+    if dups:
+        print('ATENCAO: %d produto(s) do Odoo aparecem em mais de um componente da biblioteca '
+              '(a lista em relatorio.txt; apague o antigo pela Biblioteca do hub):' % len(dups))
+        for d in dups[:10]:
+            print('   [%s] %s' % (d['odoo'], '  |  '.join(
+                '#%s %s%s' % (v['id'], v['altium'], ' (fora)' if v['fora'] else '')
+                for v in d['valores'])))
+        if len(dups) > 10:
+            print('   ... e mais %d' % (len(dups) - 10))
 
     # ---- as .SchLib, escritas direto (sem passar pelo Altium) -----------------
     # Falhar aqui nao pode derrubar a sincronizacao: o espelho do hub ja esta gravado, e

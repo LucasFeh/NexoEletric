@@ -12,6 +12,8 @@
     POST /api/symbols/almox-excluir          tira um VALOR do almoxarifado de vez (sem `confirmar`, só a prévia com os usos)
     GET  /api/symbols/almox-excluidos        a lista de valores excluídos
     POST /api/symbols/almox-excluir/desfazer devolve um item da lista ao almoxarifado
+    GET  /api/symbols/almox-duplicados       o mesmo produto do Odoo em mais de um componente (o aviso da Biblioteca)
+    POST /api/symbols/almox-duplicados       apaga os antigos (`fora` cujo produto vive noutro); sem `confirmar`, a prévia
 
 O trabalho pesado mora nos irmãos: `sch_leitor` lê, `schlib_patch` grava, `extrair` varre,
 `guardiao` vigia as .SchLib do Altium e envolve o gerador do almoxarifado. Aqui só o HTTP e
@@ -643,6 +645,9 @@ def _save_almox():
                 return _erro('o espelho mudou enquanto salvava ("%s" não está mais lá): recarregue e salve '
                              'de novo' % comp, 409)
             esp['symbols'][i2]['valores'][j2]['parts'] = partes
+            # o id do produto vai para a proteção já na criação: é por ele que o desenho acha o
+            # componente quando o nome muda no Odoo antes do próximo sincronismo
+            oids = G.ids_odoo_do_valor(esp['symbols'][i2]['valores'][j2]) or None
             G.grava_espelho_almox(cam_esp, var, esp)
         except (OSError, ValueError) as e:
             return _erro('falha ao gravar o espelho do almoxarifado: %s' % e, 500)
@@ -678,7 +683,7 @@ def _save_almox():
     try:
         with G._lock:
             led = G.carrega_ledger(ROOT)
-            G._poe_prot(led, fam, comp, partes, 'hub', sim_nome)
+            G._poe_prot(led, fam, comp, partes, 'hub', sim_nome, odoo=oids)
             if altium and not sem_arquivo:
                 G.registra_arquivo(ROOT, cam, led, gravar=False)   # senão o próprio save
                                                                    # aparece como "mudou no Altium"
@@ -1214,6 +1219,166 @@ def api_almox_excluir_desfazer():
                        'já foi apagado de vez e isto só limpou o histórico']}
 
 
+# ─── o mesmo produto do Odoo em mais de um componente ─────────────────────────
+# Pedido do dono (2026-09-29): "tudo é vinculado pelo ID do Odoo", e "o sistema deve reconhecer
+# componentes com o ID do Odoo duplicado e avisar". O duplicado que existe é o ZUMBI de uma
+# renomeação feita antes de o gerador seguir o id: o nome velho ficou `fora: true` carregando
+# os `itens` do produto que hoje mora com o nome novo (o TMAG5131A1: nº 4 fora, nº 46 vivo).
+# Medido no servidor nesse dia: 741 produtos, 777 componentes antigos. O gerador não produz
+# mais isso e nunca apaga sozinho (almox2lib » duplicados_odoo); o guardião já leva o desenho
+# e o vínculo com o símbolo do antigo para o vivo. Apagar o antigo é decisão do usuário, e em
+# lote, porque ninguém apaga 777 à mão.
+def _duplicados(espelhos):
+    """(grupos, antigos). `grupos` é o almox2lib.duplicados_odoo do acervo inteiro; `antigos`
+    são os componentes que o "apagar os antigos" leva: `fora`, e com TODO produto que carregam
+    vivo noutro componente — o `fora` que é a última lembrança de um produto que saiu do Odoo
+    não é antigo de ninguém, e fica."""
+    syms = [s for _c, _v, esp in espelhos for s in (esp.get('symbols') or [])]
+    grupos = A.duplicados_odoo(syms)
+    vivos = {oid for s in syms for v in (s.get('valores') or []) if not v.get('fora')
+             for oid in A.ids_odoo(v)}
+    antigos, vistos = [], set()
+    for s in syms:
+        for v in s.get('valores') or []:
+            oids = A.ids_odoo(v)
+            chave = (s.get('name', ''), v.get('altium', ''))
+            if not v.get('fora') or not oids or chave in vistos or not all(o in vivos for o in oids):
+                continue
+            vistos.add(chave)
+            antigos.append(OrderedDict([('simbolo', chave[0]), ('altium', chave[1]),
+                                        ('label', v.get('label', '')), ('id', v.get('id')),
+                                        ('odoo', ' '.join(oids))]))
+    return grupos, antigos
+
+
+def _usos_por_nome(nomes):
+    """[{'projeto', 'refs', 'semId'}] dos componentes de Projects/*/schematic.js cujo `sym` é um
+    dos `nomes`. Uma leitura de cada projeto para o lote inteiro — o `_usos_do_valor` relê
+    todos por valor, e 777 valores seriam 10 mil leituras. `semId` são os que NÃO têm OdooId no
+    params: esses a folha não consegue levar para o componente vivo sozinha."""
+    fora, nomes = [], set(nomes)
+    base = os.path.join(ROOT, PROJETOS)
+    try:
+        pastas = sorted(os.listdir(base))
+    except OSError:
+        return fora
+    for nome in pastas:
+        cam = os.path.join(base, nome, 'schematic.js')
+        if not os.path.isfile(cam):
+            continue
+        try:
+            sch = _le_var(cam)
+        except (OSError, ValueError):
+            continue
+        refs, sem = [], []
+        for it in ((sch or {}).get('items') or []) if isinstance(sch, dict) else []:
+            if not isinstance(it, dict) or it.get('t') != 'comp' or (it.get('sym') or '') not in nomes:
+                continue
+            ref = str(it.get('ref') or '').strip()
+            if ref and ref not in refs:
+                refs.append(ref)
+                params = it.get('params') if isinstance(it.get('params'), str) else ''
+                if not re.search(r'(?:^|;)\s*OdooId=\s*[^;\s]', params):
+                    sem.append(ref)
+        if refs:
+            fora.append({'projeto': nome, 'refs': refs, 'semId': sem})
+    return fora
+
+
+@bp.route('/almox-duplicados', methods=['GET'])
+def api_almox_duplicados():
+    """a lista, para o aviso da Biblioteca. Só leitura."""
+    try:
+        espelhos, _idx = _carrega_almox()
+    except _ErroAlmox as e:
+        return _erro(str(e), e.status)
+    grupos, antigos = _duplicados(espelhos)
+    lote = {(a['simbolo'], a['altium']) for a in antigos}
+    return {'ok': True, 'grupos': grupos, 'antigos': antigos,
+            'soFora': sum(1 for g in grupos if all(v['fora'] for v in g['valores'])),
+            # tem um vivo, mas o antigo carrega TAMBEM um produto que saiu do Odoo: e a
+            # ultima lembranca dele, e fica fora do lote (a tela diz por que o grupo sobrou)
+            'misturados': sum(1 for g in grupos
+                              if any(not v['fora'] for v in g['valores'])
+                              and any(v['fora'] and (v['simbolo'], v['altium']) not in lote
+                                      for v in g['valores']))}
+
+
+@bp.route('/almox-duplicados', methods=['POST'])
+def api_almox_duplicados_apaga():
+    """(a trava da sincronização em volta do _apaga_duplicados — ver _toma)"""
+    if not _toma(_sync_lock, _sync_runs):
+        return _erro(SYNC_OCUPADO, 409)
+    try:
+        return _apaga_duplicados()
+    finally:
+        _sync_lock.release()
+
+
+def _apaga_duplicados():
+    """APAGA OS ANTIGOS: os `fora` cujo produto vive noutro componente (`_duplicados`).
+
+    Sem `confirmar` é a PRÉVIA, que não encosta em arquivo: quantos são e onde são usados.
+    Com `confirmar`, o mesmo que o /almox-excluir faz com um, feito com todos de uma vez:
+      1. saem do espelho — é o passo que apaga, e para o `fora` é definitivo (o espelho
+         anterior era a única fonte dele: almox2lib » numera_valores). O número continua
+         reservado no livro-razão; nada renumera;
+      2. entram em Libs/almox-excluidos.json como registro;
+      3. o ledger NÃO é tocado: a proteção de um antigo cujo vivo não tinha nenhuma já foi para
+         o vivo (guardiao » segue_renomeacoes), e a que sobrou vira órfã guardada, como no
+         excluir de um só;
+      4. as .SchLib só sentem no próximo sincronismo, que as reescreve do espelho."""
+    data = request.get_json(silent=True)
+    data = data if isinstance(data, dict) else {}
+    with _lock_almox:
+        try:
+            espelhos = G.carrega_espelhos_almox(ROOT)
+        except (OSError, ValueError) as e:
+            return _erro('não li os espelhos do almoxarifado: %s' % e, 500)
+        _grupos, antigos = _duplicados(espelhos)
+        alvo = {(a['simbolo'], a['altium']) for a in antigos}
+        if not data.get('confirmar'):
+            usos = _usos_por_nome({a['altium'] for a in antigos})
+            return {'ok': True, 'previa': True, 'antigos': antigos, 'usos': usos,
+                    'total': sum(len(u['refs']) for u in usos),
+                    'semId': sum(len(u['semId']) for u in usos)}
+        apagados = []
+        try:
+            for cam, var, esp in espelhos:
+                mudou = False
+                for s in esp.get('symbols') or []:
+                    fica = []
+                    for v in s.get('valores') or []:
+                        if (s.get('name', ''), v.get('altium', '')) in alvo:
+                            apagados.append(OrderedDict([
+                                ('simbolo', s.get('name', '')), ('familia', s.get('familia', '')),
+                                ('altium', v.get('altium', '')), ('label', v.get('label', ''))]))
+                            mudou = True
+                        else:
+                            fica.append(v)
+                    s['valores'] = fica
+                if mudou:
+                    G.grava_espelho_almox(cam, var, esp)
+        except (OSError, ValueError) as e:
+            return _erro('não consegui apagar do espelho (%s)' % e, 500, apagados=len(apagados))
+    avisos = []
+    with _lock_excluidos:
+        try:
+            lista = A.carrega_excluidos(ROOT)
+            ja = {(it.get('simbolo'), it.get('altium')) for it in lista['itens']}
+            quando = datetime.now().strftime('%Y-%m-%d %H:%M')
+            for a in apagados:
+                if (a['simbolo'], a['altium']) not in ja:
+                    lista['itens'].append(OrderedDict(list(a.items()) + [('quando', quando)]))
+            A.grava_excluidos(ROOT, lista)
+        except (OSError, ValueError) as e:
+            avisos.append('apaguei da biblioteca, mas não registrei em %s (%s): só o histórico '
+                          'se perde' % (A.EXCLUIDOS, e))
+    avisos.append('eles saem das .SchLib de Libs/Almox no próximo sincronismo do almoxarifado; '
+                  'até lá continuam aparecendo dentro do Altium')
+    return {'ok': True, 'apagados': len(apagados), 'avisos': avisos}
+
+
 def _salva_footprint(caminho, nome, footprint):
     """Troca a linha do símbolo `nome` no schlib.js pondo UM footprint — ou nenhum.
 
@@ -1438,6 +1603,9 @@ def api_almox_footprint():
                 esp2['symbols'][i2]['valores'][j2]['footprint'] = fp
             else:
                 esp2['symbols'][i2]['valores'][j2]['footprint'] = ''
+            # a escolha é da PEÇA: o id do produto vai junto, e é por ele que o gerador a acha
+            # quando o nome muda no Odoo (guardiao » footprints_manuais_por_odoo)
+            oids = G.ids_odoo_do_valor(esp2['symbols'][i2]['valores'][j2]) or None
             G.grava_espelho_almox(cam_esp, var2, esp2)
         except (OSError, ValueError) as e:
             return _erro('não gravei no espelho (%s): nada foi alterado' % e, 500)
@@ -1446,7 +1614,7 @@ def api_almox_footprint():
     try:
         with G._lock:
             led = G.carrega_ledger(ROOT)
-            G.poe_footprint(led, fam_arq, comp, fp)
+            G.poe_footprint(led, fam_arq, comp, fp, odoo=oids)
             G.grava_ledger(ROOT, led)
     except Exception as e:                                          # noqa: BLE001
         avisos.append('a escolha está no espelho mas NÃO no ledger (%s): a próxima '
