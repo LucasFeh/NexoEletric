@@ -212,6 +212,38 @@ saldo zero e guardando o número — que é o comportamento pedido. A diferença
 > não há de onde ressuscitar os que saíram — eles somem em vez de virar `fora`. Só acontece
 > quando a família inteira sai do catálogo.
 
+#### Tudo segue o ID, não só o número (2026-09-29)
+
+Pedido do dono: "a partir de agora tudo é vinculado pelo ID do Odoo". O número e a data já
+seguiam; o resto ainda ia pelo nome, e renomear o produto perdia o símbolo aplicado. Agora o
+`product_id` leva junto:
+
+| o quê | onde | como acha o componente renomeado |
+|---|---|---|
+| número e data de entrada | `almox-parts.json` | `almox2lib » segue_renomeacoes` (a chave velha sai **sempre**, levando o número ou não — antes, com o número ocupado no destino, ela ficava e virava zumbi) |
+| desenho próprio do valor (o símbolo aplicado) | espelho, `valores[].parts` | `almox2lib » desenhos_por_odoo`, pelo id antes do rótulo |
+| desenho protegido **e o vínculo com o símbolo** (`lib`) | `lib-ledger.json » protegidos` | `guardiao » segue_renomeacoes`, inclusive quando a proteção ficou presa num zumbi `fora` |
+| footprint escolhido à mão | `lib-ledger.json » footprints` | `guardiao » footprints_manuais_por_odoo`, já na rodada da renomeação |
+| o componente na folha | `schematic.js » sym` | `schframe.js » seguePeloOdoo`, pelo `OdooId` do `params` — a folha troca o nome, marca "Salvar *" e avisa |
+
+Toda entrada nova do ledger (`/save-almox`, `/almox-aplicar`, `/almox-footprint`, o padrão da
+categoria) já nasce com o id. De quebra, o footprint manual de um **especial** passou a ser
+respeitado: o ledger o chaveia por `ESPECIAIS` (a família do arquivo) e o gerador procurava
+pela família do símbolo — a escolha sumia em todo sincronismo.
+
+**Duplicado antigo é apontado, nunca resolvido sozinho.** O que a faxina de nomes deixou antes
+de o gerador seguir o id — o nome velho `fora`, com os `itens` do produto que hoje mora com o
+nome novo (o TMAG5131A1: nº 4 fora, nº 46 vivo) — continua lá até alguém apagar. Resolver no
+gerador daria ao vivo o número do zumbi, e isso é renumerar peça em uso (medido: seriam 49).
+O log e o `relatorio.txt` listam os duplicados; na Biblioteca, a faixa Geral/Símbolos/Footprints
+mostra **⚠ N produtos repetidos**, com a lista e **Apagar os antigos** (só o `fora` cujo produto
+vive noutro componente; o que é a última lembrança de um produto que saiu fica). No editor, o
+tile sai marcado *antigo* ou *duplicado*.
+
+Medido na biblioteca do servidor em 2026-09-29: **741** produtos repetidos, **728** antigos
+apagáveis, e **446** desenhos protegidos presos em nomes antigos — o primeiro sincronismo
+depois desta mudança os devolve aos componentes vivos (o log resume: 20 linhas e o total).
+
 ### O catálogo acumula, não é recriado
 
 O **id** de um valor, uma vez dado, é daquele valor para sempre — `Libs/almox-parts.json`
