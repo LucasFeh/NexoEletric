@@ -404,7 +404,10 @@ precisar de servidor.
   **Adicionar componentes** (`C`) abre um modal igual à aba Biblioteca (busca, seletor de
   acervo, preview do símbolo, lista de valores do almoxarifado ou footprint); cada
   **Adicionar** junta o item numa lista à direita e **Finalizar** coloca tudo na folha ativa,
-  em grade, já selecionado para arrastar.
+  em grade, já selecionado para arrastar. O footprint vem do valor, depois do modelo do
+  símbolo; sem nenhum dos dois, o padrão é **— sem footprint —** (e não o primeiro da PcbLib,
+  que punha um diodo "M7" num clip de bateria sem ninguém escolher). O esquema salva assim, e
+  o `BuildSchematic` avisa o componente sem vínculo para resolver no Altium.
   Dentro da folha há uma **barra de ferramentas** com o pouco que a mão faz aqui: selecionar,
   **Fio** (`W`), a **gaveta dos pousos**, **Adicionar componentes** (`C`) e **libs**. A gaveta
   junta **GND** (`G`), **3V3**, **5V5**, **VIN**, o **rótulo de net** (`L`) e o **No ERC** (`N`)
@@ -1342,6 +1345,58 @@ sempre. A regra agora mora numa função pura, `desfechoDoEnvio`, presa por
 O recibo (`id`, `referencia`, `estado`, pendências) fica em
 `Projects\<nome>\odoo-lista.json`, fora do git: tudo nele volta de
 `di_estado_lista(uid_externo)`.
+
+### Componentes fora do esquema
+
+A lista também leva peças que não estão no desenho — a cola, o dissipador, o parafuso, o
+conector que vem no chicote. No modal, **Adicionar componente fora do esquema** abre o mesmo
+seletor do almoxarifado da vista Esquema, num modo que só escolhe (a folha não muda), e a
+quantidade se digita no próprio modal. A linha aparece como **`EXTRA n`**, com a marca *fora
+do esquema*: a quantidade se edita ali mesmo (Enter ou sair do campo grava, Esc desfaz, as
+setas contam; a roda do mouse não mexe nela), **remover** tira a linha sem perguntar (o aviso
+diz o que saiu) e, na linha pendente, **resolver** troca a peça (a quantidade fica, e o
+seletor abre marcado na peça de hoje). A peça é a do **valor clicado**, não a do nome: há
+valores de mesmo nome em famílias diferentes (o *Cartão Micro SD* do conector e o do
+soquete), e nomes que também são de um símbolo da biblioteca da casa (BC807, TL431). O
+seletor marca e devolve o valor clicado, e a linha sai com o produto, o nome e o
+encapsulamento **desse** valor — o mesmo vale para o componente do esquema.
+
+As mudanças nos extras são gravadas na hora e saem **em fila**, uma de cada vez: dá para
+digitar uma quantidade, ir de Tab para a seguinte e seguir digitando enquanto a anterior grava,
+e a lista se remonta e confere uma vez só no fim. Sair da página com uma mudança ainda na fila
+pede confirmação ao navegador.
+
+Um extra da **mesma peça** de outra linha (o 10K do esquema pedido de novo como
+sobressalente) vai numa linha separada, com a quantidade dele, e leva a marca *mesma peça de
+R1, R2*: aumentar a quantidade assim é legítimo, repetir sem querer se desfaz com o remover.
+
+- Mora em `Projects\<nome>\lista-extras.json` (`lista-extras-v1`), escrito só pelo hub
+  (`/api/lista/extras`). Cada item tem o shape de um componente do `schematic.js` — `sym`,
+  `comment`, `footprint`, `params` — mais a `quantidade`, e por isso resolve pela **mesma
+  cascata** das linhas do esquema (o `OdooId` do `params` primeiro). O `id` nunca é reusado:
+  `EXTRA 3` removido não volta como outra peça.
+- As linhas extras vão **depois** das do esquema, em ordem de id. Lista só de extras
+  (esquema sem componente) é lista. O `odoolista.py` pela linha de comando manda os extras
+  também.
+- Arquivo ilegível — JSON quebrado, ou gravado fora do UTF-8 (o `Set-Content` do PowerShell
+  5.1 grava em ANSI) — **trava** a prévia, o ensaio e o envio com a frase do defeito: seguir
+  sem os extras mandaria outra lista, calada. O botão de adicionar desliga com a mesma frase
+  no *title*; consertado (ou apagado) o arquivo, abrir a lista de novo volta a ler. O texto de
+  cada campo também é conferido: controle, surrogate solto e os não-caracteres U+FFFE/U+FFFF
+  (que o XML do Odoo recusa, derrubando o envio inteiro) são recusados na gravação. Mexer num
+  extra não recarrega as abas abertas (o arquivo fica fora do vigia do `hubserver`, como o
+  recibo).
+- **A assinatura.** O ensaio devolve `assinatura`, o sha1 do que o Odoo vai receber — sem
+  `enviado_por` e `observacao`, que são da mensagem e não da lista —, e o Enviar a manda de
+  volta. O `/envio` refaz a conta com o disco e recusa com 409 (`confiraDeNovo`) se não
+  bater: a contagem de linhas sozinha não via a quantidade de um extra mudada noutra aba.
+  Sem o campo, vale a conferência de antes (uid + contagem). Com a recusa, a tela remonta a
+  lista do disco e confere de novo sozinha — nada foi enviado.
+- **No app desktop**, o *Importar do servidor* traz o `lista-extras.json` junto com o
+  projeto: a mesma revisão tem de montar a mesma lista nas duas interfaces, porque o envio
+  do desktop usa o mesmo `uid_externo` e substitui a solicitação pendente. Se os dois lados
+  mexeram, fica o local e o do servidor vai para `.altiumhub\conflitos\`, como o
+  `annotations.js`.
 
 ### Como uma linha acha o produto
 
