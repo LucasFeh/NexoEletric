@@ -3,6 +3,14 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.1 — 2026-09-29
+
+- **Enviar para o Odoo: componentes fora do esquema.** O botão **Adicionar componente fora do esquema** abre o seletor do almoxarifado num modo que só escolhe (a folha não muda); a quantidade se digita no próprio painel e a peça entra como uma linha **EXTRA n**, com a marca *fora do esquema*. Na linha, a quantidade se edita ali mesmo (Enter ou sair do campo grava, Esc desfaz, as setas contam), **remover** tira a linha sem perguntar e **resolver** troca a peça mantendo a quantidade. As mudanças gravam na hora, em fila, e a lista se reconfere sozinha. Um extra da mesma peça de uma linha do esquema vai numa linha separada, com a marca *mesma peça de R1, R2*. Os extras moram em `lista-extras.json`, ao lado do esquema, e o **Importar do servidor** os traz junto com o projeto.
+- **O envio confere a lista inteira.** Se a lista mudou depois da conferência (uma quantidade mexida noutra aba, o esquema gravado), o envio é recusado sem mandar nada, e a tela remonta e confere de novo. Um caractere que o Odoo não aceita (colado do Word na observação, por exemplo) não derruba mais o envio.
+- **Componentes de mesmo nome** (o *Cartão Micro SD* do conector e o do soquete) não se confundem mais: o seletor marca e grava a peça clicada — no Trocar componente, no resolver da lista do Odoo e nos extras — e a linha sai com o produto, o nome e o encapsulamento dela.
+- **Trocar componente › Editar símbolo ↗ volta a abrir o editor no componente**, e não só na família. O botão já aparece quando o seletor abre.
+- **Adicionar componentes:** valor sem footprint conhecido entra com **— sem footprint —** (antes o seletor pegava o primeiro footprint da biblioteca), e o esquema salva assim; o BuildSchematic avisa para definir no Altium.
+
 ## 1.2.0 — 2026-09-28
 
 - **A biblioteca é a do servidor.** Símbolos, almoxarifado, substituições e a numeração dos componentes são lidos e gravados direto no hub central (http://192.168.15.192:8100). Salvar ou aplicar um símbolo, trocar um footprint, excluir um componente do almoxarifado, escolher uma substituição e sincronizar com o Odoo acontecem no servidor, e o que um PC grava os outros veem. A pasta de trabalho guarda uma cópia para leitura, que o hub atualiza sozinho (ao abrir, a cada mudança no servidor e a cada minuto). O hub, a lista para o Odoo, o chat e o Altium desta máquina leem dela.
