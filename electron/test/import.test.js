@@ -36,6 +36,10 @@ test('importar do servidor: tres vias, 304, conflitos e ajustes locais', { skip:
   escreve(srv, `${P}/annotations.js`, 'var annotations = [];');
   escreve(srv, `${P}/apply-report.txt`, 'ok');
   escreve(srv, `${P}/bom-vistos.json`, '{"R1":true}');           // bancada do servidor: nao vem
+  escreve(srv, `${P}/odoo-lista.json`, '{"estado":"recebida"}');  // recibo do envio: bancada tambem
+  // os componentes fora do esquema: parte da lista do Odoo, viajam com o projeto
+  const EXTRAS_SRV = '{"format":"lista-extras-v1","proximo":2,"itens":[{"id":1,"sym":"DISSIPADOR","comment":"","footprint":"","params":"","quantidade":4}]}';
+  escreve(srv, `${P}/lista-extras.json`, EXTRAS_SRV);
   escreve(srv, 'Libs/lib-ledger.json', JSON.stringify({ arquivos: { 'Libs/Almox/RESISTOR ALMOX.SchLib': {} } }));
   escreve(srv, 'Libs/Almox/RESISTOR ALMOX.SchLib', Buffer.alloc(200000, 7));
   escreve(srv, 'Libs/Almox/RESISTOR ALMOX.LibPkg', 'pkg');
@@ -61,6 +65,9 @@ test('importar do servidor: tres vias, 304, conflitos e ajustes locais', { skip:
   assert.deepStrictEqual(r.erros, []);
   assert.strictEqual(ler(ws, `${P}/changes.js`), 'var changes = [];');
   assert.ok(!fs.existsSync(path.join(ws, P, 'bom-vistos.json')), 'vistos da bancada do servidor nao vem');
+  assert.ok(!fs.existsSync(path.join(ws, P, 'odoo-lista.json')), 'o recibo do envio e da bancada do servidor');
+  assert.strictEqual(ler(ws, `${P}/lista-extras.json`), EXTRAS_SRV,
+    'sem os extras o desktop mandaria ao Odoo a mesma revisao sem as pecas avulsas');
   assert.ok(r.atualizados.includes('Libs/lib-ledger.json'), 'estado semeado do git e trocado pelo do servidor');
   assert.strictEqual(fs.statSync(path.join(ws, 'Libs/Almox/RESISTOR ALMOX.SchLib')).size, 200000, 'lib do almoxarifado da lista do ledger');
   assert.ok(fs.existsSync(path.join(ws, 'Libs/Almox/RESISTOR ALMOX.LibPkg')), 'o .LibPkg vem junto');
@@ -82,6 +89,8 @@ test('importar do servidor: tres vias, 304, conflitos e ajustes locais', { skip:
   escreve(srv, `${P}/schematic.js`, 'var schematic = {"items":[1]};');            // servidor
   escreve(ws, `${P}/annotations.js`, 'var annotations = ["local"];');             // os dois
   escreve(srv, `${P}/annotations.js`, 'var annotations = ["servidor"];');
+  escreve(ws, `${P}/lista-extras.json`, '{"itens":["local"]}');                  // os dois, extras
+  escreve(srv, `${P}/lista-extras.json`, '{"itens":["servidor"]}');
   escreve(ws, 'Libs/almox-parts.json', '{"familias":{"RES":1,"LOCAL":2}}');       // os dois, almox
   escreve(srv, 'Libs/almox-parts.json', '{"familias":{"RES":1,"SERV":3}}');
   r = await imp();
@@ -90,6 +99,10 @@ test('importar do servidor: tres vias, 304, conflitos e ajustes locais', { skip:
   assert.strictEqual(ler(ws, `${P}/schematic.js`), 'var schematic = {"items":[1]};', 'mudanca so do servidor vem');
   assert.strictEqual(ler(ws, `${P}/annotations.js`), 'var annotations = ["local"];', 'conflito de projeto: fica o local');
   assert.ok(r.conflitos.includes(`${P}/annotations.js`));
+  assert.strictEqual(ler(ws, `${P}/lista-extras.json`), '{"itens":["local"]}', 'extras em conflito: fica o local');
+  assert.ok(r.conflitos.includes(`${P}/lista-extras.json`));
+  assert.strictEqual(fs.readFileSync(path.join(r.pastaConflitos, ...`${P}/lista-extras.json`.split('/')), 'utf8'),
+    '{"itens":["servidor"]}', 'e os extras do servidor ficam guardados a parte');
   assert.strictEqual(fs.readFileSync(path.join(r.pastaConflitos, ...`${P}/annotations.js`.split('/')), 'utf8'),
     'var annotations = ["servidor"];', 'a versao do servidor fica guardada a parte');
   assert.strictEqual(ler(ws, 'Libs/almox-parts.json'), '{"familias":{"RES":1,"SERV":3}}', 'livro-razao: o servidor vence');
@@ -172,6 +185,15 @@ test('semente de uma versao ANTERIOR conta como intocada (nao vira conflito depo
   assert.ok(r.atualizados.includes('Libs/schlib.js'), JSON.stringify(r));
   assert.ok(!r.conflitos.includes('Libs/schlib.js'));
   assert.strictEqual(ler(ws, 'Libs/schlib.js'), 'var schlib = {"symbols":["do servidor"]};');
+});
+
+test('os componentes fora do esquema viajam com o projeto; o recibo do Odoo nao', () => {
+  // o mesmo projeto e a mesma revisao montam a mesma lista na web e no desktop so se o
+  // lista-extras.json vier junto: o envio do desktop usa o mesmo uid_externo e SUBSTITUI a
+  // solicitacao pendente
+  assert.ok(importer.ARQ_PROJETO.includes('lista-extras.json'));
+  for (const bancada of ['odoo-lista.json', 'bom-vistos.json', 'bom-opts.json'])
+    assert.ok(!importer.ARQ_PROJETO.includes(bancada), bancada);
 });
 
 test('relSeguro e recusaDeDado', () => {

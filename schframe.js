@@ -591,8 +591,167 @@ function designadorAparece(c, sym, part){
   return !(sym && (sym.parts || []).length > 1 && part && (part.pins || []).length === 1);
 }
 
+/* ── O QUE UM COMPONENTE DO ALMOXARIFADO GRAVA ──
+   `sym`, `comment`, `params` e `footprint` de um valor escolhido. Moram aqui, na parte pura,
+   porque tres caminhos gravam isso e os tres tem de gravar IGUAL: o "Adicionar componentes"
+   (cartAdd), o vinculo que o painel da BoM e a lista do Odoo aplicam na folha
+   (__hubAplicaVinculos) e o componente fora do esquema da lista do Odoo
+   (__hubEscolheParaLista), que nao vai para a folha mas resolve pela MESMA cascata do
+   odoolista.py. Uma segunda implementacao do formato so se descobriria divergente no dia em
+   que divergisse. */
+
+/* os parametros viram um campo plano "K=V;K=V" no schematic.js: o parser do
+   BuildSchematic le linha a linha e nao aguenta objeto aninhado */
+const limpaPar = t => String(t == null ? '' : t).replace(/[;=|]/g, ',').trim();
+function paramsDoValor(v){
+  if (!v) return '';
+  const pares = [];
+  for (const q of (v.params || [])) if (q.v) pares.push(limpaPar(q.n) + '=' + limpaPar(q.v));
+  pares.push('ValorId=' + v.id);
+  return pares.join(';');
+}
+/* footprint: o do VALOR primeiro (um resistor 0805 e um 2512 dividem o mesmo simbolo e nao
+   tem nada a ver na placa), depois os modelos do simbolo. O padrao e o marcado como atual,
+   ou o primeiro — e o que o seletor do "Adicionar componentes" ja vem mostrando. */
+function modelosDeFootprint(s, v){
+  return (v && v.footprint)
+    ? [{ name:v.footprint, current:true }].concat(((s && s.footprints) || []).filter(m => m.name !== v.footprint))
+    : ((s && s.footprints) || []);
+}
+function footprintPadrao(s, v){
+  const models = modelosDeFootprint(s, v);
+  return ((models.find(m => m.current) || models[0] || {}).name) || '';
+}
+/* A sequencia aspas-dois-pontos derruba a gravacao do schematic.js INTEIRO (o parser le
+   linha a linha e corta ali). */
+const quebraGravacao = t => typeof t === 'string' && t.indexOf('":') >= 0;
+/* A identidade de UM VALOR do almoxarifado, tirada dele mesmo — e o que o cartAdd grava: o
+   `sym` e o nome do valor no Altium (v.altium), o comment e o rotulo, o params sai do
+   paramsDoValor e o footprint do footprintPadrao (o do valor, senao os modelos da familia
+   `s`). Recusa so o texto que o gravador do schematic.js nao aguenta. */
+function identidadeDoValor(v, s){
+  if (!v) return { ok:false, porque:'nenhum valor do almoxarifado escolhido' };
+  const comment = String(v.label || '').replace(/"/g, "'");
+  const params = paramsDoValor(v);
+  if (quebraGravacao(comment) || quebraGravacao(params))
+    return { ok:false, porque:'o texto tem a sequencia que o gravador do schematic.js recusa' };
+  return { ok:true, sym: v.altium || (s && s.name) || '', comment, params,
+           footprint: footprintPadrao(s, v), valor: v };
+}
+/* `res` e o HubCore.resolveSym do nome escolhido. Recusa ANTES de gravar qualquer coisa:
+   nome que nenhum acervo resolve viraria quadrado vermelho, e FAMILIA nao e componente —
+   "RESISTOR" nao diz o valor, e sem valor nao ha OdooId nem comment que preste. */
+function identidadeDoComponente(res, nome){
+  if (!(res && res.item))
+    return { ok:false, porque:'nao existe em acervo nenhum aqui — o componente viraria um quadrado vermelho' };
+  const alias = res.item;
+  const valor = (alias.valores && alias.valores.length === 1) ? alias.valores[0] : null;
+  if (!valor)
+    return { ok:false, porque:'"' + nome + '" e uma FAMILIA do almoxarifado, nao um componente: nao da para saber o valor' };
+  const r = identidadeDoValor(valor, alias);
+  /* pelo NOME, grava-se o nome resolvido (o lib-subs.js pode te-lo mandado para outro) */
+  if (r.ok) r.sym = res.name || nome;
+  return r;
+}
+/* O componente escolhido no seletor do almoxarifado (candidatoDoValor). Com o VALOR clicado
+   em maos, a identidade sai DELE, e nao do nome: o nome nao identifica o valor. Medido nos
+   2545 valores reais, dois "Cartão Micro SD" de familias diferentes (OdooId 910 e 149) — pelo
+   nome, escolher o soquete gravava o OdooId do outro, calado —, e nove valores (BC807, TL431,
+   78L05...) cujo nome e tambem o de um simbolo da biblioteca da casa, que vence o alias e nao
+   tem `valores`: pelo nome, eles eram recusados como "FAMILIA". Sem o valor (candidato que
+   nao veio de um clique na lista), vale o caminho pelo nome. `resolve` e o
+   HubCore.resolveSym ja amarrado ao SLIB — parametro para esta funcao ficar pura. */
+function identidadeDoEscolhido(c, resolve){
+  if (c && c.valor) return identidadeDoValor(c.valor, c.familia);
+  const nome = c && c.name;
+  return identidadeDoComponente(nome && resolve ? resolve(nome) : null, nome);
+}
+/* O vinculo ({refs, componente, valor?, familia?} do __hubAplicaVinculos): pelo VALOR clicado
+   quando o seletor o mandou — "Trocar componente" e o "resolver" das linhas do esquema na
+   lista do Odoo —, pelo nome quando nao (o painel da BoM so tem o nome). Sem o valor, o
+   soquete 'Cartão Micro SD' clicado gravava o OdooId do conector de mesmo nome. */
+function identidadeDoVinculo(v, resolve){
+  const nome = String((v && v.componente) || '').trim();
+  return identidadeDoEscolhido({ name: nome, valor: (v && v.valor) || null,
+                                 familia: (v && v.familia) || null }, resolve);
+}
+
+/* Os ids de um params "K=V;K=V": OdooId (um ou varios, separados por espaco — 31 valores do
+   almoxarifado tem mais de um produto) e ValorId. */
+function idsDoParams(p){
+  const s = String(p || '');
+  const od = /(?:^|;)OdooId=([^;]*)/.exec(s), vi = /(?:^|;)ValorId=([^;]*)/.exec(s);
+  return { odoo: od ? od[1].trim().split(/[\s,]+/).filter(Boolean) : [],
+           valorId: vi ? vi[1].trim() : '' };
+}
+/* A PECA DE HOJE no seletor: o valor do almoxarifado que um params gravado descreve. Pela
+   IDENTIDADE, nunca pela string inteira: o params leva Estoque, Local e Custo, que mudam a
+   cada sincronizacao, e a comparacao exata errava a partir do primeiro sync — o seletor
+   voltava ao xara pelo nome e o "Trocar a peça" trocava o soquete pelo conector. Primeiro o
+   OdooId (unico entre os 2545 valores, medido); sem ele, o ValorId, que numera por SIMBOLO e
+   se repete entre familias — so vale entre os valores do MESMO nome, e so se sobrar um.
+   Nada casou: null, e quem chama cai no nome. */
+function pecaDeHoje(grupos, params, nome){
+  const a = idsDoParams(params);
+  if (a.odoo.length)
+    for (const g of grupos || []) for (const it of g.valores){
+      const d = it.v ? idsDoParams(paramsDoValor(it.v)).odoo : [];
+      if (a.odoo.some(o => d.indexOf(o) >= 0)) return { grupo: g, item: it };
+    }
+  if (a.valorId){
+    const c = [];
+    for (const g of grupos || []) for (const it of g.valores)
+      if (it.nome === nome && it.v && String(it.v.id) === a.valorId) c.push({ grupo: g, item: it });
+    if (c.length === 1) return c[0];
+  }
+  return null;
+}
+/* A RECOMENDACAO do seletor, decidida aqui (pura) a partir do que o nome recomendaria
+   (`porNome`, o HubAlmoxPick.recomendado). A peca de hoje (pecaDeHoje) vence o nome. Se o
+   params dizia QUAL era a peca e ela sumiu do almoxarifado, o de mesmo nome so e apontado,
+   nao escolhido, quando o nome tem xara: ele e outra peca, e um clique no Usar/Trocar a peca
+   gravaria o outro produto. Nome sem xara continua escolhido, como sempre foi. */
+function recomendacaoDe(grupos, comp, porNome){
+  const params = comp && comp.params;
+  const hoje = params ? pecaDeHoje(grupos, params, comp.sym) : null;
+  if (hoje) return { grupo: hoje.grupo, item: hoje.item, por: comp.sym, rotulo: '↩ a peça de hoje' };
+  if (!porNome) return null;
+  const ids = idsDoParams(params);
+  if (ids.odoo.length || ids.valorId){
+    let xaras = 0;
+    for (const g of grupos || []) for (const it of g.valores) if (it.nome === porNome.item.nome) xaras++;
+    if (xaras > 1) return Object.assign({}, porNome, { seleciona: false, rotulo: '↩ mesmo nome — outra peça?' });
+  }
+  return porNome;
+}
+/* "Ja e esse componente": o mesmo nome E a mesma peca. Com o valor clicado em maos, a peca
+   de hoje do componente (pecaDeHoje, pela identidade — nunca a string inteira do params, que
+   muda com o saldo a cada sync) tem de ser ESTE valor. Componente sem params recebe a
+   identidade no clique; so pelo nome (sem valor), vale o nome, como sempre. */
+function mesmaPecaDaFolha(grupos, comp, para, valor){
+  if (!comp || comp.sym !== para) return false;
+  if (!valor) return true;
+  if (!comp.params) return false;
+  const hoje = pecaDeHoje(grupos, comp.params, comp.sym);
+  return !!hoje && hoje.item.v === valor;
+}
+/* O valor escolhido, reachado nos grupos NOVOS depois de uma recarga da biblioteca (os objetos
+   mudam). A chave e o simbolo (a familia do valor) + o id, que numera por simbolo, com o nome
+   junto. Sumiu: null — nunca o xara de mesmo nome, que seria OUTRA peca escolhida calada. */
+function reachaValor(grupos, nome, valorAntes, symAntes){
+  if (!valorAntes) return null;
+  const ach = [];
+  for (const g of grupos || []) for (const x of g.valores)
+    if (x.nome === nome && x.v && x.v.id === valorAntes.id
+        && (!symAntes || (x.sym && x.sym.name) === symAntes)) ach.push(x);
+  return ach.length === 1 ? ach[0] : null;
+}
+
 const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca, montaPartsTrocando,
                valorDoComp, tipoDoComp,
+               paramsDoValor, modelosDeFootprint, footprintPadrao, identidadeDoValor,
+               identidadeDoComponente, identidadeDoEscolhido, identidadeDoVinculo,
+               idsDoParams, pecaDeHoje, reachaValor, recomendacaoDe, mesmaPecaDaFolha,
                topologiaFolha, moveSegmento, eixosDoTrecho, apagaSegmento, apagaVertice, espelha, encaixeDaTroca,
                GRADES, gradePorId, snapPasso, MM_MIL, caixaTexto, larguraTexto, designadorAparece,
                ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho };
@@ -2250,16 +2409,8 @@ const qtdFmt = n => (Math.round((n || 0) * 100) / 100).toLocaleString('pt-BR');
    escolhe no modal e o valor, nao a parte. */
 const valoresDe = sy => (sy && sy.valores) || [];
 const estoqueDe = sy => valoresDe(sy).reduce((a, p) => a + (p.estoque || 0), 0);
-/* os parametros viram um campo plano "K=V;K=V" no schematic.js: o parser do
-   BuildSchematic le linha a linha e nao aguenta objeto aninhado */
-const limpaPar = t => String(t == null ? '' : t).replace(/[;=|]/g, ',').trim();
-function paramsDoValor(v){
-  if (!v) return '';
-  const pares = [];
-  for (const q of (v.params || [])) if (q.v) pares.push(limpaPar(q.n) + '=' + limpaPar(q.v));
-  pares.push('ValorId=' + v.id);
-  return pares.join(';');
-}
+/* paramsDoValor e modelosDeFootprint moram na parte pura, la em cima: sao o formato que
+   este modal, o vinculo e a lista do Odoo gravam, e tem de ser um so */
 function buildAddSrc(){
   const s = $('addSrc');
   if (s.options.length) return;
@@ -2409,13 +2560,11 @@ function renderAddPreview(){
     for (let i = 1; i <= nparts; i++){ const o = document.createElement('option'); o.value = i; o.textContent = i + '/' + nparts; if (i === pick.part) o.selected = true; ps.append(o); }
   }
 
-  /* footprint: o do VALOR primeiro (um resistor 0805 e um 2512 dividem o mesmo simbolo e nao
-     tem nada a ver na placa), depois os modelos do simbolo, depois a PcbLib inteira */
+  /* footprint: o do VALOR primeiro, depois os modelos do simbolo (modelosDeFootprint, na
+     parte pura), depois a PcbLib inteira */
   const fpSel = $('addFp'); fpSel.textContent = '';
-  const models = (v && v.footprint)
-    ? [{ name:v.footprint, current:true }].concat((s.footprints || []).filter(m => m.name !== v.footprint))
-    : (s.footprints || []);
-  const want = pick.fpShown || ((models.find(m => m.current) || models[0] || {}).name) || '';
+  const models = modelosDeFootprint(s, v);
+  const want = pick.fpShown || footprintPadrao(s, v);
   const seen = new Set();
   const addOpt = (name, mark) => {
     if (!name || seen.has(name)) return; seen.add(name);
@@ -2423,9 +2572,20 @@ function renderAddPreview(){
     if (name === want) o.selected = true;
     fpSel.append(o);
   };
+  /* SEM FOOTPRINT CONHECIDO, O PADRAO E NENHUM — e dito como opcao. Sem ela nenhuma opcao
+     ficava marcada, o navegador pegava a primeira da PcbLib inteira ("M7", um diodo) e o
+     cartAdd gravava esse footprint em 781 dos 2545 valores do almoxarifado (um clip de
+     bateria, uma chave alavanca) sem ninguem ter escolhido. Vazio e o que o footprintPadrao
+     devolve — e o que o componente fora do esquema da lista do Odoo grava para o mesmo
+     valor —, e o BuildSchematic o trata como aviso a resolver no Altium (AI-GUIDE). O Salvar
+     aceita o vazio (hub-core » SCH_ITEM_REQUIRED): antes ele recusava o arquivo INTEIRO. */
+  if (!want){
+    const o = document.createElement('option'); o.value = ''; o.textContent = '— sem footprint —';
+    o.selected = true; fpSel.append(o);
+  }
   for (const m of models) addOpt(m.name, m.current ? ' ✓' : '');
   for (const f of (PLIB.footprints || [])) addOpt(f.name, '');
-  if (!seen.size){ const o = document.createElement('option'); o.value = ''; o.textContent = '— nenhum —'; fpSel.append(o); }
+  if (!fpSel.options.length){ const o = document.createElement('option'); o.value = ''; o.textContent = '— nenhum —'; fpSel.append(o); }
 
   const fpName = fpSel.value;
   const fp = fpName ? HubCore.footprintOf(PLIB, fpName) : null;
@@ -3992,6 +4152,20 @@ function symAtualizaInfo(){
   const box = $('symInfo');
   if (!box) return;
   box.textContent = '';
+  /* SÓ ESCOLHE (o componente fora do esquema da lista do Odoo): não há folha a mudar, então
+     alcance e pinagem não se aplicam — o "componente de origem" é de mentira, e um aviso de
+     pinagem sobre ele seria alarme falso. Diz-se o que acontece, e só. */
+  if (symOpts && symOpts.escolhe){
+    /* TROCAR A PEÇA de uma linha EXTRA que já existe não pede quantidade: ela continua a
+       mesma (o update do servidor só troca a peça). Prometer o campo que não vem deixava
+       quem trocava esperando por ele. */
+    box.append(el('div', 'li', symOpts.troca
+      ? 'troca a peça desta linha EXTRA da lista do Odoo — a quantidade continua a mesma, '
+        + 'e a folha não muda'
+      : 'não entra na folha: vai só para a lista do Odoo, numa linha '
+        + 'EXTRA — a quantidade você diz em seguida, no próprio painel da lista'));
+    return;
+  }
   const rs = symAlvo ? HubCore.resolveSym(SLIB, symAlvo.sym) : null;
   const d = decideTroca({ sym: rs && rs.item && rs.item.name, how: rs && rs.how,
                           quantos: symQuantos, quantosValor: symQuantosValor, valor: symValor,
@@ -4035,8 +4209,10 @@ function symSelecionar(c){
   symEscolhido = c;
   $('symEscolha').textContent = c ? c.name : 'nenhum componente escolhido';
   $('symUsar').disabled = !c;
+  /* pelo VALOR quando o candidato o tem (o clique), senao pelo nome: com xaras, a marca pelo
+     nome caia na linha de outra peca (hub-almoxpick » renderValores guarda o valor em b._v) */
   for (const b of $('symVals').querySelectorAll('.ap-val'))
-    b.setAttribute('aria-selected', String(!!c && b.dataset.nome === c.name));
+    b.setAttribute('aria-selected', String(!!c && (c.valor ? b._v === c.valor : b.dataset.nome === c.name)));
   /* a parte do COMPONENTE, nao a 1 fixa: previa e contagem de pinos tem de falar da mesma
      parte, senao o aviso de pinagem compara coisas diferentes */
   const parte = (symAlvo && symAlvo.part) || 1;
@@ -4086,7 +4262,8 @@ function symRenderValores(){
   HubAlmoxPick.renderValores($('symVals'), apFam, {
     busca: $('symBusca').value, filtro: apFiltro,
     sel: symEscolhido && symEscolhido.name, rec: apRec,
-    onPick: it => { symSelecionar(candidatoDoValor(it.nome)); symRenderValores(); },
+    selValor: (symEscolhido && symEscolhido.valor) || null,
+    onPick: it => { symSelecionar(candidatoDoValor(it.nome, it)); symRenderValores(); },
     /* BOTAO DIREITO: excluir o valor da biblioteca. O fluxo (previa, pergunta com quem usa,
        exclusao) mora no hub-almoxpick para a aba Biblioteca do hub usar o MESMO — inclusive o
        mesmo texto de pergunta. Aqui entra so o adaptador desta tela. */
@@ -4110,6 +4287,7 @@ function symRenderValores(){
           await window.__hubRecarregaLibs();
           apGrupos = HubAlmoxPick.grupos();
           apFam = apGrupos.find(x => x.familia === (apFam && apFam.familia)) || null;
+          $('symEditar').hidden = !apFam;       /* a familia pode ter saido junto */
           symRenderValores();
         },
       }),
@@ -4124,7 +4302,11 @@ function escolheFamilia(g){
   if (g) b.title = 'abre "' + g.familia + '" na aba Biblioteca » Símbolos'
                  + (symEscolhido ? ', já no componente "' + symEscolhido.name + '"' : '');
   if (!g) return;
-  const dela = symEscolhido && g.valores.some(v => v.nome === symEscolhido.name);
+  /* a escolha fica so se ESTA familia tem o valor escolhido — o mesmo objeto, quando o
+     candidato veio de um clique. Pelo nome, abrir a familia do xara mantinha a peca da
+     familia anterior escolhida, com a linha do xara marcada: 'Escolher' gravava a outra */
+  const dela = symEscolhido && g.valores.some(v => symEscolhido.valor ? v.v === symEscolhido.valor
+                                                                     : v.nome === symEscolhido.name);
   if (!dela) symSelecionar(null);
   if (!symPart) previaDaFamilia(g);
 }
@@ -4145,14 +4327,24 @@ function atualizaModalDaBiblioteca(){
   if (!symModalAberto()) return;
   const famNome = apFam && apFam.familia;
   const escolhido = symEscolhido && symEscolhido.name;
+  /* o valor clicado e o simbolo dele: com xaras, o nome sozinho reacharia o outro */
+  const vAntes = (symEscolhido && symEscolhido.valor) || null;
+  const symAntes = vAntes && symEscolhido.familia ? symEscolhido.familia.name : null;
   apGrupos = HubAlmoxPick.grupos();
   apFam = famNome ? (apGrupos.find(g => g.familia === famNome) || null) : null;
-  if (symAlvo){
-    const rs = HubCore.resolveSym(SLIB, symAlvo.sym);
-    apRec = HubAlmoxPick.recomendado(apGrupos, symAlvo.sym, rs && rs.name);
-  }
-  /* a seleção ANTES do render: quem desenha a lista de valores lê symEscolhido para marcar */
-  const c = escolhido ? candidatoDoValor(escolhido) : null;
+  /* a familia aberta pode ter sumido com a recarga: o "Editar símbolo ↗" some junto, senao
+     fica visivel e mudo (o editarSimboloNoHub sai calado sem familia) */
+  $('symEditar').hidden = !apFam;
+  if (symAlvo) apRec = recomendacaoDoSeletor(symAlvo);
+  /* a seleção ANTES do render: quem desenha a lista de valores lê symEscolhido para marcar.
+     O valor clicado é reachado nos grupos NOVOS (os objetos mudaram com a recarga) pelo
+     símbolo e pelo id (reachaValor). Sumiu, a escolha cai — e NÃO volta pelo nome, que
+     acharia o xará e deixaria outra peça escolhida, com o toast verde. O candidato que nunca
+     teve valor (veio da lista por nome) continua pelo nome, como sempre. */
+  const itNovo = (escolhido && vAntes) ? reachaValor(apGrupos, escolhido, vAntes, symAntes) : null;
+  const c = !escolhido ? null
+          : vAntes ? (itNovo ? candidatoDoValor(escolhido, itNovo) : null)
+          : candidatoDoValor(escolhido, null);
   symSelecionar(c);
   symRenderLista();
   if (!c && apFam) previaDaFamilia(apFam);
@@ -4170,7 +4362,10 @@ function editarSimboloNoHub(){
      Mandar "CONECTOR BLOCO TERMINAL" faz o hub-symed abrir a aba vazia e devolver false —
      sem toast, sem erro, só uma tela em branco. O símbolo sai do componente escolhido; sem
      escolha, do primeiro da lista, que depois da ordenação é o de menor número de vias. */
-  const doItem = (comp && g.valores.find(x => x.nome === comp)) || g.valores[0] || null;
+  /* o item do VALOR clicado quando ele veio (xaras tem o mesmo nome), senao pelo nome */
+  const vEsc = symEscolhido && symEscolhido.valor;
+  const doItem = (comp && g.valores.find(x => vEsc ? x.v === vEsc : x.nome === comp))
+              || (comp && g.valores.find(x => x.nome === comp)) || g.valores[0] || null;
   const q = new URLSearchParams();
   q.set('edsym', (doItem && doItem.sym && doItem.sym.name) || g.familia);
   if (comp) q.set('edcomp', comp);
@@ -4230,9 +4425,26 @@ function previaDaFamilia(g){
 /* o valor escolhido vira o candidato que o resto do modal ja entende: o alias do valor esta
    no SLIB (montaAcervos cria um por valor), entao e ele que a previa desenha e que o
    usarSimboloEscolhido grava no lib-subs.js */
-function candidatoDoValor(nome){
+function candidatoDoValor(nome, it){
   const item = HubCore.symbolOf(SLIB, nome);
-  return item ? { name: nome, item, pontos: 0, porque: [] } : null;
+  if (!item) return null;
+  const c = { name: nome, item, pontos: 0, porque: [] };
+  /* O VALOR CLICADO VIAJA JUNTO (o `it` do hub-almoxpick): o nome nao o identifica — dois
+     valores podem ter o mesmo, e o de um simbolo da casa vence o alias. O modo so escolhe
+     tira a identidade dele (identidadeDoEscolhido); os outros continuam pelo nome. */
+  if (it && it.v){ c.valor = it.v; c.familia = it.sym || null; }
+  return c;
+}
+
+/* A recomendacao do seletor (o valor que abre marcado). Com a peca de hoje em maos — o
+   params de um componente colocado do almoxarifado, ou o de um EXTRA da lista do Odoo —, vale
+   primeiro a IDENTIDADE dela (pecaDeHoje, pelo OdooId): o nome nao separa xaras, e o 'Cartão
+   Micro SD' do soquete abria marcado no do conector, com o 'Trocar a peça'/'Usar' a um clique
+   de gravar o outro produto. Sem params, ou params que nada casa, vale o NOME, como sempre.
+   Depende de apGrupos ja montado. */
+function recomendacaoDoSeletor(comp){
+  const rs = HubCore.resolveSym(SLIB, comp.sym);
+  return recomendacaoDe(apGrupos, comp, HubAlmoxPick.recomendado(apGrupos, comp.sym, rs && rs.name));
 }
 
 /* `opts.vinculo` muda o que o botao Usar faz — ver usarSimboloEscolhido. O modal, a busca,
@@ -4246,8 +4458,7 @@ function abrirEscolhaSimbolo(comp, opts){
   apFiltro = 'all';
   /* o componente de MESMO NOME que o Altium mandou sobe para o topo e ja vem marcado:
      medido, 448 dos 824 componentes dos projetos casam por nome exato */
-  const rsRec = HubCore.resolveSym(SLIB, comp.sym);
-  apRec = HubAlmoxPick.recomendado(apGrupos, comp.sym, rsRec && rsRec.name);
+  apRec = recomendacaoDoSeletor(comp);
   symQuantos = contaSym(comp.sym);
   symQuantosValor = contaTipo(comp);
   symValor = valorDoComp(comp);
@@ -4261,7 +4472,13 @@ function abrirEscolhaSimbolo(comp, opts){
      qual e de onde ele veio: e a pergunta que o modal tem de responder antes de qualquer
      clique. Componente e a entrada da biblioteca; simbolo e so o desenho dela — o modal
      escolhe o primeiro, e a faixa de baixo (quando existir) troca o segundo */
-  $('symTitle').textContent = atual ? 'Trocar componente' : 'Procurar componente';
+  /* o modo SO ESCOLHE (__hubEscolheParaLista) usa o mesmo modal para outra pergunta — "qual
+     peça vai na lista?" — e o cabeçalho e o botão dizem isso, senão prometem mexer na folha */
+  const soEscolhe = !!(symOpts && symOpts.escolhe);
+  $('symTitle').textContent = soEscolhe ? 'Componente fora do esquema'
+                            : atual ? 'Trocar componente' : 'Procurar componente';
+  $('symUsar').textContent = soEscolhe ? (symOpts.troca ? 'Trocar a peça' : 'Escolher para a lista')
+                                       : 'Usar este componente';
   /* o nome sai da prosa e vira um campo proprio, copiavel: e ele que a pessoa leva para a
      busca do acervo logo abaixo. O meta continua com o RESTO — de quem e, o comment e onde
      ja resolveu —, que e contexto para ler, nao texto para levar */
@@ -4287,14 +4504,26 @@ function abrirEscolhaSimbolo(comp, opts){
   const odAtual = odooDoComp(comp);
   const lkAtual = odAtual && odAtual.alvo ? HubOdooLink.link(odAtual.alvo, { nome: odAtual.nome }) : null;
   if (lkAtual){ lkAtual.id = 'symOdoo'; nb.after(lkAtual); }
-  $('symMeta').textContent = comp.ref + ' — o Altium mandou este nome'
-    + (comp.comment ? ' · comment "' + comp.comment + '"' : '')
-    + (atual ? ' · resolvido no componente "' + atual.name + '"'
-             + (rs.how === 'escolha' ? ', por escolha sua' : '') : '');
+  $('symMeta').textContent = soEscolhe
+    ? 'vai só para a lista do Odoo — a folha não muda'
+      + (!comp.sym ? ''
+         : apRec && apRec.seleciona === false
+           ? ' · a peça de hoje saiu do almoxarifado: escolha a nova (a de mesmo nome pode ser outra)'
+           : ' · a peça de hoje é a do nome ao lado')
+    : comp.ref + ' — o Altium mandou este nome'
+      + (comp.comment ? ' · comment "' + comp.comment + '"' : '')
+      + (atual ? ' · resolvido no componente "' + atual.name + '"'
+               + (rs.how === 'escolha' ? ', por escolha sua' : '') : '');
   $('symBusca').value = '';
   $('symmodal').classList.add('on');
   apFam = apRec ? apRec.grupo : null;
-  symSelecionar(apRec ? candidatoDoValor(apRec.item.nome) : null);
+  /* o "Editar símbolo ↗" acompanha a familia aberta: ela vem aberta pela recomendacao, e so o
+     escolheFamilia (clique na lista) o mostrava — abria escondido, e da abertura anterior
+     podia ficar visivel sem familia nenhuma */
+  $('symEditar').hidden = !apFam;
+  /* a recomendacao que so APONTA (seleciona:false — recomendacaoDe) abre a familia e marca a
+     linha, mas nao escolhe: o Usar fica apagado ate um clique */
+  symSelecionar(apRec && apRec.seleciona !== false ? candidatoDoValor(apRec.item.nome, apRec.item) : null);
   if (!apRec) symRenderLista(); else { symRenderLista(); }
   if (!symPart && apFam) previaDaFamilia(apFam);
 }
@@ -4386,10 +4615,38 @@ async function gravaDesenhoNaBiblioteca(emg, para){
 
 async function usarSimboloEscolhido(){
   if (!symAlvo || !symEscolhido) return;
+  /* MODO SÓ ESCOLHE — o componente fora do esquema da lista do Odoo. Nada aqui toca na folha:
+     a identidade sai da MESMA função que o vínculo e o "Adicionar componentes" usam, e vai
+     para quem pediu. Família sem valor único é recusada como o __hubAplicaVinculos recusa. */
+  if (symOpts && symOpts.escolhe){
+    const esc = symEscolhido, nome = esc.name;
+    /* pelo VALOR clicado, quando ele veio (identidadeDoEscolhido): e isso que separa dois
+       valores de mesmo nome, e que deixa entrar o BC807 cujo nome e tambem da lib da casa */
+    const ident = identidadeDoEscolhido(esc, n => HubCore.resolveSym(SLIB, n));
+    if (!ident.ok){
+      await HubDialog.alert(ident.porque, { title: 'não dá para usar este componente' });
+      return;
+    }
+    const aoEscolher = symOpts.aoEscolher;
+    /* a familia e o MPN vao junto so para a tela dizer QUAL peca foi — com dois valores de
+       mesmo nome, o nome sozinho nao diz */
+    const familia = (esc.familia && (esc.familia.familia || esc.familia.name))
+                 || (esc.item && esc.item.familia) || '';
+    fechaSymModal();
+    aoEscolher({ sym: ident.sym, comment: ident.comment, footprint: ident.footprint,
+                 params: ident.params, nome: nome, valor: String(ident.valor.label || ''),
+                 familia: String(familia), mpn: String(ident.valor.mpn || '').trim() });
+    return;
+  }
   const de = symAlvo.sym, para = symEscolhido.name;
   /* medido ANTES da substituicao: depois dela o simbolo resolve e o emprestimo some */
   const emg = HubCore.symbolOf(SLIB, de) ? null : desenhoDeEmergencia(symAlvo);
-  if (de === para && !(symOpts && symOpts.vinculo)){ HubDialog.toast('já é esse componente', 'warn'); return; }
+  /* "ja e esse" so quando nada muda: com o valor clicado em maos, o nome igual nao basta — o
+     conector e o soquete 'Cartão Micro SD' tem o mesmo nome e sao pecas diferentes. E a peca
+     se compara pela IDENTIDADE (mesmaPecaDaFolha), nao pela string do params: o saldo e o
+     custo mudam a cada sync, e o clique nulo passava a regravar o alcance inteiro */
+  const mesmaPeca = mesmaPecaDaFolha(apGrupos, symAlvo, para, symEscolhido.valor || null);
+  if (mesmaPeca && !(symOpts && symOpts.vinculo)){ HubDialog.toast('já é esse componente', 'warn'); return; }
 
   /* MODO VINCULO — o painel "Enviar para o Odoo" abriu este modal para resolver UMA linha
      da lista. O que resolve uma linha NAO e substituicao de simbolo: o lib-subs.js vale
@@ -4431,7 +4688,11 @@ async function usarSimboloEscolhido(){
   const refs = (symOpts && symOpts.vinculo && symOpts.refs && symOpts.refs.length)
     ? symOpts.refs.slice()
     : refsDoAlcance(symAlvo, symEscopo);
-  const res = window.__hubAplicaVinculos([{ refs: refs, componente: para }]);
+  /* o VALOR clicado vai junto (identidadeDoVinculo): pelo nome, o xara clicado gravava o
+     OdooId do outro, e o BC807 da lib da casa era recusado como familia */
+  const res = window.__hubAplicaVinculos([{ refs: refs, componente: para,
+                                            valor: symEscolhido.valor || null,
+                                            familia: symEscolhido.familia || null }]);
   if (!res || !res.ok){
     await HubDialog.alert((res && res.erro) || 'não deu para aplicar a troca.',
                           { title: 'não troquei' });
@@ -4749,6 +5010,31 @@ window.__hubResolveParaLista = function(refs, aoAplicar, aoFechar){
   return true;
 };
 
+/* Ponte para o componente FORA DO ESQUEMA da lista do Odoo: o MESMO seletor do almoxarifado,
+   num modo que SO ESCOLHE — nao toca na folha, nao empilha desfazer, nao acende o Salvar. O
+   que volta e o que o "Adicionar componentes" gravaria na folha para aquele valor, pela
+   mesmas funcoes, a partir do VALOR clicado (identidadeDoEscolhido » identidadeDoValor):
+   { sym, comment, footprint, params, nome, valor, familia, mpn } — os dois ultimos so para a
+   tela dizer qual peca foi. E isso que faz a linha extra resolver no odoolista.py exatamente
+   como resolveria o mesmo componente colocado no esquema.
+
+   `atual` (opcional) e a peca que o extra ja tem — { sym, comment, params } —, para o
+   seletor abrir nela quando se TROCA a peca de um extra; vindo ele, o seletor fala de troca
+   (a quantidade fica), e nao de uma peca nova. Devolve false quando esta vista nao consegue
+   abrir o seletor (sem o modal na pagina, ou sem o almoxarifado). */
+window.__hubEscolheParaLista = function(aoEscolher, aoFechar, atual){
+  if (typeof aoEscolher !== 'function' || !$('symmodal')) return false;
+  if (typeof HubAlmoxPick === 'undefined' || !HubAlmoxPick.grupos().length) return false;
+  const a = atual || {};
+  /* um componente de mentira, so para o seletor ter o que recomendar: ref vazio e nenhuma
+     folha, entao nada do que o modal conta (mesmo tipo, mesmo valor) casa com a folha */
+  const alvo = { ref: '', sym: String(a.sym || ''), comment: String(a.comment || ''),
+                 params: String(a.params || ''), footprint: String(a.footprint || '') };
+  abrirEscolhaSimbolo(alvo, { escolhe: true, troca: atual != null,
+                              aoEscolher: aoEscolher, aoFechar: aoFechar });
+  return true;
+};
+
 window.__hubAplicaVinculos = function(vinculos){
   const lista = Array.isArray(vinculos) ? vinculos : [];
   if (!lista.length) return { ok:false, erro:'nada para aplicar' };
@@ -4759,7 +5045,6 @@ window.__hubAplicaVinculos = function(vinculos){
       if (!porRef.has(c.ref)) porRef.set(c.ref, []);
       porRef.get(c.ref).push(c);
     }
-  const ruim = t => typeof t === 'string' && t.indexOf('":') >= 0;
   const planos = [], recusados = [];
 
   for (const v of lista){
@@ -4770,26 +5055,18 @@ window.__hubAplicaVinculos = function(vinculos){
 
     /* O COMPONENTE E RESOLVIDO AQUI, no espelho desta vista, e nao vem pronto do servidor.
        E o que garante que o vinculo grave exatamente o que o modal "Adicionar componentes"
-       grava: mesmo `sym`, mesmo `comment`, mesmo `params` — pela MESMA funcao. Montar o
-       params do outro lado seria uma segunda implementacao do formato, em outra linguagem,
-       que so se descobre divergente no dia em que divergir. */
-    const res = HubCore.resolveSym(SLIB, nome);
-    if (!(res && res.item)){
-      recusados.push({ componente:nome, porque:'nao existe em acervo nenhum aqui — o componente viraria um quadrado vermelho' });
-      continue;
-    }
-    const alias = res.item;
-    const valor = (alias.valores && alias.valores.length === 1) ? alias.valores[0] : null;
-    if (!valor){
-      recusados.push({ componente:nome, porque:'"' + nome + '" e uma FAMILIA do almoxarifado, nao um componente: nao da para saber o valor' });
-      continue;
-    }
-    const comment = String(valor.label || '').replace(/"/g, "'");
-    const params = paramsDoValor(valor);
-    if (ruim(comment) || ruim(params)){
-      recusados.push({ componente:nome, porque:'o texto tem a sequencia que o gravador do schematic.js recusa' });
-      continue;
-    }
+       grava: mesmo `sym`, mesmo `comment`, mesmo `params` — pela MESMA funcao
+       (identidadeDoVinculo, na parte pura). Montar o params do outro lado seria uma
+       segunda implementacao do formato, em outra linguagem, que so se descobre divergente
+       no dia em que divergir. Com o VALOR clicado no vinculo (o seletor o manda), a
+       identidade sai dele; so pelo nome (o painel da BoM), sai do nome, como sempre. */
+    const resolve = n => HubCore.resolveSym(SLIB, n);
+    const ident = identidadeDoVinculo(v, resolve);
+    if (!ident.ok){ recusados.push({ componente:nome, porque:ident.porque }); continue; }
+    /* o desvio (lib-subs) e medido sobre o que vai ser gravado: pelo nome, o proprio nome
+       pedido; pelo valor, o sym dele */
+    const res = resolve(v && v.valor ? ident.sym : nome);
+    const comment = ident.comment, params = ident.params;
     /* MULTI-PARTE NAO TROCA DE SIMBOLO, e quem decide isso e ESTA funcao, olhando a folha.
        Todo alias de valor do almoxarifado tem uma parte so; um conector desenhado em 16
        partes perderia 15 e a fiacao junto. Grava-se a identidade e o desenho fica.
@@ -4807,13 +5084,13 @@ window.__hubAplicaVinculos = function(vinculos){
     const soParams = !!v.soParams || multiParte;
     planos.push({
       refs, comment, params,
-      sym: soParams ? null : (res.name || nome),
+      sym: soParams ? null : ident.sym,
       soParams: soParams,
       multiParte: multiParte,
       /* resolveu, mas nao pelo nome exato: o lib-subs.js guarda escolhas GLOBAIS por nome e
          elas vencem o nome exato. Gravar "X" e a folha desenhar "Y" nao e erro de gravacao,
          e surpresa — e surpresa tem de sair na tela. */
-      desvio: res.how !== 'exato' ? { como:res.how, vira:res.name } : null,
+      desvio: (res && res.how !== 'exato') ? { como:res.how, vira:res.name } : null,
     });
   }
   if (!planos.length) return { ok:false, erro:'nenhum vinculo passou na conferencia', recusados };

@@ -27,8 +27,12 @@ const { MARCA_DIR } = require('./workspace');
 // Arquivos de um projeto, pelos nomes que ExportBoard/ExportProject/BuildSchematic/
 // ApplyChanges e o hubserver escrevem. Ficam de fora os de BANCADA do servidor
 // (bom-vistos.json, bom-opts.json, odoo-lista.json): sao estado de quem monta a placa la.
+// O lista-extras.json (os componentes fora do esquema da lista do Odoo) NAO e bancada: e
+// parte da lista, como o schematic.js. Sem ele o desktop montava a lista do mesmo projeto e
+// da mesma revisao SEM as pecas avulsas juntadas na web, e o envio -- mesmo uid_externo --
+// substituia calado a solicitacao pendente no Odoo. Conflito segue a regra do annotations.js.
 const ARQ_PROJETO = ['board.js', 'schematic.js', 'changes.js', 'annotations.js', 'pcb-list.csv',
-  'history.jsonl', 'build-report.txt', 'apply-report.txt'];
+  'history.jsonl', 'build-report.txt', 'apply-report.txt', 'lista-extras.json'];
 
 // Estado do almoxarifado: o que o gerador (tools/almox, tools/symbols/guardiao.py) LE antes de
 // numerar. Semear isto do servidor antes de sincronizar localmente e o que evita a

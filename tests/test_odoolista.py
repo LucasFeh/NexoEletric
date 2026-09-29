@@ -1072,11 +1072,14 @@ def test_cli_sem_revisao_nao_inventa_a_do_nome_da_pasta():
     # OL.RAIZ depois do import não muda nada e o teste leria o workspace de verdade (medido:
     # 18 linhas do DMB real em vez das 2 da fixture). Substituir as duas leituras de disco é
     # o que mantém este caso hermético, como manda o cabeçalho desta seção.
-    velho = (OL.ClienteLista, OL.le_schematic, OL.carrega_acervo)
+    # O mesmo vale para os componentes fora do esquema: sem trocar o le_extras, um
+    # lista-extras.json de verdade no DMB entraria na conta das linhas.
+    velho = (OL.ClienteLista, OL.le_schematic, OL.carrega_acervo, OL.le_extras)
     try:
         OL.ClienteLista = ClienteFalso
         OL.le_schematic = lambda nome, raiz=None: esquema(comp('R1', 'SMD 0805 10K 1/8W'))
         OL.carrega_acervo = lambda raiz=None: ACERVO
+        OL.le_extras = lambda nome, raiz=None: []
         OL.main(['--projeto', 'DMB - DI231765_P2'])          # ensaio, sem --revisao
         assert visto['payload']['revisao'] == '', \
             'o CLI inventou a revisão %r' % visto['payload']['revisao']
@@ -1084,7 +1087,7 @@ def test_cli_sem_revisao_nao_inventa_a_do_nome_da_pasta():
             visto['payload']['uid_externo']
         assert len(visto['payload']['linhas']) == 1, 'leu de outro lugar que não a fixture'
     finally:
-        OL.ClienteLista, OL.le_schematic, OL.carrega_acervo = velho
+        OL.ClienteLista, OL.le_schematic, OL.carrega_acervo, OL.le_extras = velho
 
 def main():
     n = 0

@@ -40,7 +40,10 @@ BOM_VISTOS = 'bom-vistos.json'   # o que ja foi montado, COMPARTILHADO entre que
 BOM_OPTS = 'bom-opts.json'       # as opcoes com que a aba gerou, para o link abrir igual
 BOM_STATE_FILES = (BOM_VISTOS, BOM_OPTS)
 ODOO_LISTA = 'odoo-lista.json'  # recibo do envio ao Odoo; muda sem o projeto mudar
-ESTADO_LOCAL = BOM_STATE_FILES + (ODOO_LISTA,)
+# componentes fora do esquema da lista do Odoo (odoolista.EXTRAS): o modal grava a cada
+# quantidade mudada, e nenhuma aba precisa recarregar por isso -- a folha nao muda
+ODOO_EXTRAS = 'lista-extras.json'
+ESTADO_LOCAL = BOM_STATE_FILES + (ODOO_LISTA, ODOO_EXTRAS)
 
 app = Flask(__name__)
 _version = 0           # incrementa a cada mudanca detectada
@@ -92,7 +95,9 @@ def _snapshot():
     for base in ('Libs', 'Projects'):
         for dirpath, _dirnames, filenames in os.walk(os.path.join(ROOT, base)):
             for f in filenames:
-                if f in ESTADO_LOCAL:
+                # o .tmp da gravacao atomica junto: uma varredura que o pegasse no meio da
+                # escrita via um arquivo nascer e sumir, e isso tambem e "mudou"
+                if f in ESTADO_LOCAL or (f.endswith('.tmp') and f[:-4] in ESTADO_LOCAL):
                     continue      # visto marcado nao e mudanca de projeto; ver BOM_VISTOS
                 add(os.path.join(dirpath, f))
     return snap

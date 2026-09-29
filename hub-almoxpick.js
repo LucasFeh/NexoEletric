@@ -532,7 +532,12 @@ function renderValores(box, g, opts){
     const b = el('button', 'ap-val');
     b.type = 'button';
     b.dataset.nome = it.nome;
-    b.setAttribute('aria-selected', String(o.sel === it.nome));
+    /* marcado pelo VALOR quando quem chama o tem (opts.selValor, o objeto do valor clicado), e
+       so pelo nome quando nao: ha xaras — 'Cartão Micro SD' do conector e do soquete —, e
+       pelo nome a linha marcada numa familia era a peca clicada na outra. O objeto fica no
+       botao para quem remarca sem redesenhar (schframe.js » symSelecionar). */
+    b._v = it.v;
+    b.setAttribute('aria-selected', String(o.selValor ? it.v === o.selValor : o.sel === it.nome));
     /* O CONECTOR SE MOSTRA PELOS CAMPOS: "4 vias 3.81 180° femea" em vez de
        "Bloco Terminal MC 1,5/ 4-STF-3,81 (1827729)". É o que se procura numa gaveta, e é o
        pedido. Só quando a linha tem o número de vias, porque sem ele ela vira um "3.81"
@@ -550,7 +555,7 @@ function renderValores(box, g, opts){
        que o part number está nele. */
     const porMpn = !!it.mpn && ts.some(x =>
       !casa(it.rotulo, x.t) && !casa(it.nome, x.t) && casaMpn(it.mpn, x.t, x.sem));
-    if (o.rec && o.rec.item === it) b.append(el('span', 'rec', '↩ mesmo nome'));
+    if (o.rec && o.rec.item === it) b.append(el('span', 'rec', o.rec.rotulo || '↩ mesmo nome'));
     else if (porMpn) b.append(el('span', 'k', it.mpn));
     /* no fim da linha, o código do fabricante — que em conector é o que identifica a peça
        (não existe "encapsulamento 0805" de bloco terminal). Sem ele cai para o encap, como
