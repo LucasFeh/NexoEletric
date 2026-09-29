@@ -20,6 +20,7 @@
      vista Esquema usa — inclusive o texto da pergunta. Duas cópias divergiriam no dia em que
      uma delas ganhasse um aviso a mais. -->
 <script src="hub-almoxpick.js"></script>
+<script src="hub-almoxfora.js"></script>
 <!-- o "Odoo ↗" de todo componente: Biblioteca, editor de símbolos e aba Footprints -->
 <script src="hub-odoolink.js"></script>
 <!-- o operador: o lançador com a marca do Claude se pendura sozinho no <body> e fica por
@@ -3045,6 +3046,7 @@ function renderLibAlmoxPreview() {
   bFora.disabled = !nFora;
   bFora.setAttribute('aria-pressed', String(!!S.lib.soFora));
   bFora.onclick = () => { S.lib.soFora = !S.lib.soFora; renderLibAlmoxPreview(); };
+  if (typeof HubAlmoxFora !== 'undefined') HubAlmoxFora.barra($('#libValBox .alx-bar'), s, parts, renderLibAlmoxPreview);
   const vis = parts.filter(p => (S.lib.soFora ? p.fora : true)).filter(p => !vq ||
     /* o FOOTPRINT entra na busca junto com o encap: são dois nomes para o mesmo
        tamanho ("1206" do Odoo, "CAP 1206" da casa) e quem procura um aceita achar pelo outro */
@@ -3129,6 +3131,7 @@ function renderLibAlmoxPreview() {
               ioExcluirAlmox()) },
       ]);
     };
+    if (typeof HubAlmoxFora !== 'undefined') HubAlmoxFora.linha(b, p, s, renderLibAlmoxPreview);
     /* o "Odoo ↗" fica AO LADO da linha, não dentro: a linha é um <button> (hub-odoolink » faixa) */
     vfrag.append(typeof HubOdooLink !== 'undefined'
       ? HubOdooLink.faixa(b, p, { nome: p.label }) : b);
