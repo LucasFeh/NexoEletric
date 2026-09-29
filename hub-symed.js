@@ -868,6 +868,17 @@ const nomeDoValor = v => (v && (v.altium || v.label)) || '';
 const valorPorNome = (f, n) => valoresDa(f).find(v => nomeDoValor(v) === n) || null;
 /* o valor tem desenho proprio, ou herda o da familia? */
 const valorTemGeo = v => !!(v && v.parts && v.parts.length);
+/* os produtos do Odoo que estão em mais de um componente do acervo aberto (a regra é do
+   HubAlmoxPick.duplicadosOdoo). Refeito só quando a LISTA muda: o loadSchlib troca o array a
+   cada carga, e são ~3500 valores para varrer a cada repintura da faixa. */
+let DUPS = { de: null, m: new Map() };
+function duplicadosDoAcervo() {
+  const syms = symbols();
+  if (DUPS.de !== syms)
+    DUPS = { de: syms, m: (typeof HubAlmoxPick !== 'undefined' && HubAlmoxPick.duplicadosOdoo)
+                          ? HubAlmoxPick.duplicadosOdoo(syms) : new Map() };
+  return DUPS.m;
+}
 const symByName = n => symbols().find(s => s.name === n) || null;
 const libSyms = () => (DATA.symlib && DATA.symlib.symbols) || [];
 const libById = id => libSyms().find(s => s.id === id) || null;
@@ -1079,6 +1090,7 @@ const CSS = `
   font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--hi,#4fc3f7);vertical-align:1px;}
 .symed-libnota{font-size:11px;color:var(--text-4,#7a7a7a);margin:2px 0 8px;line-height:1.45;}
 .symed-comp .mt .lib{color:var(--hi,#4fc3f7);}
+.symed-comp .mt .dup{color:var(--warn,#ffb74d);}
 `;
 let cssPosto = false;
 function poeCss() {
@@ -1694,6 +1706,7 @@ function refreshComponentes(f) {
   UI.tiles.textContent = '';
   if (!rows.length) { UI.tiles.append(el('div', 'symed-empty', q ? 'nada com "' + ST.valQ + '"' : 'sem componentes')); return; }
   const frag = document.createDocumentFragment();
+  const dups = duplicadosDoAcervo();
   rows.forEach(v => {
     const nome = nomeDoValor(v);
     const b = el('button', 'symed-comp'); b.type = 'button';
@@ -1710,6 +1723,19 @@ function refreshComponentes(f) {
     else if (valorTemGeo(v)) meta.append(el('span', 'pill', 'desenho próprio'));
     if (v.footprint) meta.append(el('span', 'fp', v.footprint));
     if (typeof v.estoque === 'number') meta.append(el('span', 'es', v.estoque + ' un'));
+    /* O MESMO PRODUTO DO ODOO NOUTRO COMPONENTE: o antigo (fora) de uma renomeação, ou o vivo
+       que tem um antigo. A lista de todos e o "apagar os antigos" ficam no aviso da faixa da
+       Biblioteca (hub-libview.js). */
+    const gem = typeof HubAlmoxPick !== 'undefined' && HubAlmoxPick.gemeosDe ? HubAlmoxPick.gemeosDe(v, dups) : [];
+    if (gem.length) {
+      const t = el('span', 'dup', v.fora ? '⚠ antigo' : '⚠ duplicado');
+      t.title = 'o mesmo produto do Odoo (id ' + gem[0].odoo + ') também está em:\n'
+        + gem.map(x => '#' + x.v.id + ' ' + (x.v.altium || x.v.label) + (x.v.fora ? ' (fora)' : '')
+                       + (x.sym !== f ? ' — ' + x.sym.name : '')).join('\n')
+        + (v.fora ? '\n\neste é o antigo: o nome saiu do Odoo e o produto vive no outro'
+                  : '\n\neste é o vivo: o outro é o nome antigo, que pode ser apagado');
+      meta.append(t);
+    }
     b.append(meta);
     b.onclick = () => abrirValor(nome);
     /* o "Odoo ↗" ao lado do tile, nunca dentro: o tile é um <button> (hub-odoolink » faixa) */

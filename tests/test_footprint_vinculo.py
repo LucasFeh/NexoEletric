@@ -197,7 +197,9 @@ def test_almox_footprint_sobrevive_ao_sync():
     assert A2.monta_simbolo.__defaults__ is not None
     import inspect
     ps = list(inspect.signature(A2.monta_simbolo).parameters)
-    assert ps[-1] == 'fpman', 'monta_simbolo precisa receber as escolhas manuais: %s' % ps
+    # pelo nome (fpman) e pelo id do produto no Odoo (fpodoo) — o comportamento das duas
+    # chaves, com renomeacao no meio, esta em tests/test_almox_renome.py
+    assert 'fpman' in ps and 'fpodoo' in ps, 'monta_simbolo precisa receber as escolhas manuais: %s' % ps
 
     # desvincular apaga a linha, e a familia vazia nao fica sobrando no arquivo
     G2.poe_footprint(led, 'CAPACITOR CERAMICO', 'SMD 1206 4.7pF 50V C0G', '')

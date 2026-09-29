@@ -735,6 +735,66 @@ function mesmaPecaDaFolha(grupos, comp, para, valor){
   const hoje = pecaDeHoje(grupos, comp.params, comp.sym);
   return !!hoje && hoje.item.v === valor;
 }
+/* ── A FOLHA SEGUE O PRODUTO, NÃO O NOME (2026-09-29) ──
+   Pedido do dono: tudo é vinculado pelo ID do Odoo. O `sym` de um componente do almoxarifado
+   é o NOME do valor (o LibReference na .SchLib), e o nome sai do cadastro: renomear o produto
+   no Odoo deixava a folha apontando para um nome que não existe mais — quadrado vermelho —,
+   ou para o zumbi `fora` que a renomeação deixou para trás, com o desenho da família em vez do
+   símbolo aplicado. O `params` do componente guarda o OdooId, que não muda.
+
+   Segue quando o nome NÃO resolve, resolve para um `fora`, ou resolve (por aproximação ou
+   escolha) para o próprio produto com outro nome. NÃO segue quando o nome resolve para outra
+   peça viva ou para um símbolo da casa: aí o nome é escolha de alguém, e o id no params é
+   sobra — trocar a peça por baixo seria desfazer a escolha. Nem quando o id leva a mais de um
+   componente vivo: dois candidatos não são resposta.
+
+   Troca `sym` e `params` (a identidade do valor de hoje, igual ao "Adicionar componentes"), e
+   o `comment` só quando ele ainda era o rótulo antigo — comment escrito à mão fica. O
+   footprint fica: ele é da peça, e a peça é a mesma. Devolve [{ref, de, para}] e MUDA os
+   itens; quem chama marca a folha como alterada e avisa. `resolve(nome)` é o
+   HubCore.resolveSym já amarrado; `valorDe` o Map nome → {sym, valor} do montaAcervos. */
+function seguePeloOdoo(items, valorDe, resolve){
+  const porId = new Map();
+  for (const [nome, x] of valorDe || []){
+    if (!x || !x.valor || x.valor.fora) continue;
+    for (const it of x.valor.itens || []){
+      const o = String((it && it.odoo) == null ? '' : it.odoo).trim();
+      if (!o) continue;
+      const l = porId.get(o) || [];
+      if (!l.some(y => y.nome === nome)) l.push({ nome, sym: x.sym, valor: x.valor });
+      porId.set(o, l);
+    }
+  }
+  const fora = [];
+  if (!porId.size) return fora;
+  for (const c of items || []){
+    if (!c || c.t !== 'comp' || !c.params) continue;
+    const ids = idsDoParams(c.params).odoo;
+    if (!ids.length) continue;
+    const cand = [];
+    for (const o of ids) for (const y of porId.get(o) || []) if (!cand.some(z => z.nome === y.nome)) cand.push(y);
+    if (cand.length !== 1) continue;
+    const alvo = cand[0];
+    if (alvo.nome === c.sym) continue;
+    const r = resolve ? resolve(c.sym) : null;
+    if (r && r.item){
+      const achou = r.name && valorDe && valorDe.get(r.name);
+      const mesmoProduto = achou && achou.valor === alvo.valor;
+      const zumbi = achou && achou.valor && achou.valor.fora;
+      if (!mesmoProduto && !zumbi) continue;     /* outra peça viva, ou símbolo da casa */
+    }
+    const ident = identidadeDoValor(alvo.valor, alvo.sym);
+    if (!ident.ok) continue;
+    const rotuloVelho = (/(?:^|;)Comment=([^;]*)/.exec(c.params) || [])[1];
+    if (c.comment != null && rotuloVelho != null && String(c.comment).trim() === rotuloVelho.trim())
+      c.comment = ident.comment;
+    fora.push({ ref: c.ref || '', de: c.sym, para: ident.sym });
+    c.sym = ident.sym;
+    c.params = ident.params;
+  }
+  return fora;
+}
+
 /* O valor escolhido, reachado nos grupos NOVOS depois de uma recarga da biblioteca (os objetos
    mudam). A chave e o simbolo (a familia do valor) + o id, que numera por simbolo, com o nome
    junto. Sumiu: null — nunca o xara de mesmo nome, que seria OUTRA peca escolhida calada. */
@@ -751,7 +811,7 @@ const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca, montaParts
                valorDoComp, tipoDoComp,
                paramsDoValor, modelosDeFootprint, footprintPadrao, identidadeDoValor,
                identidadeDoComponente, identidadeDoEscolhido, identidadeDoVinculo,
-               idsDoParams, pecaDeHoje, reachaValor, recomendacaoDe, mesmaPecaDaFolha,
+               idsDoParams, pecaDeHoje, reachaValor, recomendacaoDe, mesmaPecaDaFolha, seguePeloOdoo,
                topologiaFolha, moveSegmento, eixosDoTrecho, apagaSegmento, apagaVertice, espelha, encaixeDaTroca,
                GRADES, gradePorId, snapPasso, MM_MIL, caixaTexto, larguraTexto, designadorAparece,
                ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho };
@@ -870,6 +930,18 @@ function aplicaAcervos(){
   return r;
 }
 aplicaAcervos();
+/* o produto renomeado no Odoo, seguido pelo id (seguePeloOdoo, no bloco puro). Na CARGA a
+   folha só fica marcada como alterada — o schematic.js é de dois escritores e nada vai ao
+   disco sem o Salvar —, e o aviso sai no fim da montagem, quando a tela já existe. */
+const RENOMEADOS_ODOO = seguePeloOdoo(schematic.items, VALOR_DE, n => HubCore.resolveSym(SLIB, n));
+function avisaRenomeados(lista){
+  if (!lista || !lista.length || typeof HubDialog === 'undefined') return;
+  const ex = lista.slice(0, 4).map(x => x.ref + ': ' + x.de + ' → ' + x.para).join('\n');
+  HubDialog.toast(lista.length + (lista.length === 1 ? ' componente mudou' : ' componentes mudaram')
+    + ' de nome no Odoo — a folha seguiu pelo ID do produto:\n' + ex
+    + (lista.length > 4 ? '\n… e mais ' + (lista.length - 4) : '')
+    + '\nSalve para levar o nome novo ao Altium.', 'warn', 12000);
+}
 
 let model = HubCore.buildSchModel(schematic);
 let nets  = HubCore.extractNets(model, SLIB);
@@ -2051,6 +2123,16 @@ window.__hubRecarregaLibs = function(){
   const v = Date.now();
   libRecarga = Promise.all(LIBS.map(l => recarregaLib(l, v))).then(res => {
     aplicaAcervos();
+    /* a sincronização pode ter acabado de renomear um produto: a folha segue pelo id, e isso
+       entra no desfazer como qualquer outra edição */
+    const ren = seguePeloOdoo(schematic.items, VALOR_DE, n => HubCore.resolveSym(SLIB, n));
+    if (ren.length){
+      undoStack.push(JSON.stringify(schematic.items));
+      if (undoStack.length > 60) undoStack.shift();
+      redoStack.length = 0;
+      setSchDirty(true);
+      avisaRenomeados(ren);
+    }
     /* o modelo do esquema e o mesmo; o que mudou foi a biblioteca que o desenho, a
        extracao de nets e a validacao CONSULTAM — e tudo isso passa pelo reapply */
     reapply();
@@ -5394,6 +5476,7 @@ $('btnGrid').addEventListener('click', () => {
 });
 montaGrade();
 renderSheetCards();
+if (RENOMEADOS_ODOO.length){ schDirty = true; avisaRenomeados(RENOMEADOS_ODOO); }
 updateMeta(); updateSaveBtn(); updateSelStatus(); cartRender(); renderProps();
 cam.resize(); cam.fit(fitBBox());
 

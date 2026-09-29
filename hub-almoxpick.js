@@ -580,12 +580,49 @@ function renderValores(box, g, opts){
   }
 }
 
+/* ── O MESMO PRODUTO DO ODOO EM MAIS DE UM COMPONENTE ──
+   Pedido do dono (2026-09-29): tudo é vinculado pelo ID do Odoo, e o produto que aparece
+   duas vezes na biblioteca tem de ser APONTADO. O duplicado que existe é o zumbi de uma
+   renomeação feita antes de o gerador seguir o id: o TMAG5131A1 ficou nº 4 `fora`, com o
+   nome antigo, e nº 46 vivo, com o novo — os dois com o produto 1523 nos `itens`. A mesma
+   regra do servidor (almox2lib.py » duplicados_odoo); aqui ela marca a linha na tela. */
+function idsOdooDoValor(v){
+  const fora = [];
+  for (const it of (v && v.itens) || []){
+    const o = String((it && it.odoo) == null ? '' : it.odoo).trim();
+    if (o && fora.indexOf(o) < 0) fora.push(o);
+  }
+  return fora;
+}
+/* Map(id do produto → [{sym, v}]) só dos produtos que estão em MAIS DE UM componente */
+function duplicadosOdoo(syms){
+  const por = new Map();
+  for (const s of syms || []) for (const v of (s && s.valores) || [])
+    for (const o of idsOdooDoValor(v)){
+      const l = por.get(o);
+      if (l) l.push({ sym: s, v }); else por.set(o, [{ sym: s, v }]);
+    }
+  for (const [o, l] of por) if (l.length < 2) por.delete(o);
+  return por;
+}
+/* os OUTROS componentes que carregam algum produto deste valor — [{sym, v, odoo}] */
+function gemeosDe(v, dups){
+  const fora = [];
+  if (!v || !dups || !dups.size) return fora;
+  for (const o of idsOdooDoValor(v))
+    for (const x of dups.get(o) || [])
+      if (x.v !== v && !fora.some(y => y.v === x.v)) fora.push({ sym: x.sym, v: x.v, odoo: o });
+  return fora;
+}
+
 /* `filtra` e `valorCasa` saem no export por serem PUROS e por serem a regra que mais
    silenciosamente erra: busca que nao acha nao levanta excecao, so devolve vazio e
    parece que a peca nao existe. tests/test-almoxpick.js os exercita em Node. */
 return { grupos, recomendado, contagens, renderFamilias, renderValores, poeCss,
          menu, fechaMenu, excluirValor,
          filtra, valorCasa, semSep,
+         /* puros: o duplicado pelo id do Odoo (tests/test-almoxpick.js) */
+         idsOdooDoValor, duplicadosOdoo, gemeosDe,
          /* puros tambem, e pela mesma razao: `chaveDoGrupo` decide quantas linhas a
             esquerda tem, `linhaConn` e o texto que o usuario le no lugar do rotulo e
             `comparaValor` e a ordem da lista da direita. Errar qualquer um dos tres nao

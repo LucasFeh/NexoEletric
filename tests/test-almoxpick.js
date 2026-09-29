@@ -279,6 +279,29 @@ assert.strictEqual(c.comSaldo + c.zerados + c.fora, c.tudo, 'os tres botoes soma
 assert.deepStrictEqual(vistos(A.filtra(mix, 'odoo', 'fora')), ['saiu do odoo']);
 console.log('(12) o filtro Fora separa quem saiu do Odoo de quem so esta zerado');
 
+/* (13) O MESMO PRODUTO DO ODOO EM MAIS DE UM COMPONENTE (2026-09-29). O TMAG5131A1 ficou nº 4
+   `fora` com o nome antigo e nº 46 vivo com o novo, os dois com o produto 1523. A regra e a do
+   servidor (almox2lib.duplicados_odoo): aqui ela marca a linha. */
+{
+  const zumbi = { id: 4, altium: 'Hall / Magnetico TMAG5131A1', fora: true, itens: [{ odoo: '1523' }] };
+  const vivo = { id: 46, altium: 'Hall Magnetico TMAG5131A1', itens: [{ odoo: 1523 }, { odoo: '1523' }] };
+  const so = { id: 7, altium: 'Sozinho', itens: [{ odoo: '900' }] };
+  const semId = { id: 8, altium: 'Sem id', itens: [{}] };
+  const noutro = { id: 1, altium: 'Outra familia', itens: [{ odoo: '1523' }, { odoo: '77' }] };
+  const syms = [{ name: 'SENSOR', valores: [zumbi, vivo, so, semId] }, { name: 'CI', valores: [noutro] }];
+  assert.deepStrictEqual(A.idsOdooDoValor(vivo), ['1523'], 'numero e texto sao o mesmo id, uma vez so');
+  const d = A.duplicadosOdoo(syms);
+  assert.deepStrictEqual([...d.keys()], ['1523'], 'so o produto que aparece mais de uma vez');
+  assert.strictEqual(d.get('1523').length, 3);
+  assert.deepStrictEqual(A.gemeosDe(zumbi, d).map(x => x.v.id), [46, 1], 'os outros, nunca ele mesmo');
+  assert.deepStrictEqual(A.gemeosDe(noutro, d).map(x => [x.v.id, x.sym.name, x.odoo]),
+                         [[4, 'SENSOR', '1523'], [46, 'SENSOR', '1523']], 'atravessa familia');
+  assert.deepStrictEqual(A.gemeosDe(so, d), [], 'sem gemeo, nada');
+  assert.deepStrictEqual(A.gemeosDe(semId, d), [], 'sem id, nada');
+  assert.strictEqual(A.duplicadosOdoo([]).size, 0);
+  console.log('(13) o mesmo produto do Odoo em dois componentes e apontado, atravessando familia');
+}
+
 
 
 console.log('\ntest-almoxpick OK (MPN na busca com e sem separador, um predicado '

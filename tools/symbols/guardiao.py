@@ -324,12 +324,17 @@ def _fps_manuais(ledger):
     return d
 
 
-def poe_footprint(ledger, fam, comp, footprint):
-    """grava (ou apaga, com footprint vazio) a escolha manual de UM componente"""
+def poe_footprint(ledger, fam, comp, footprint, odoo=None):
+    """grava (ou apaga, com footprint vazio) a escolha manual de UM componente. `odoo`: os ids
+    do produto — é por eles que o gerador acha a escolha quando o nome muda no cadastro
+    (`footprints_manuais_por_odoo`); sem eles fica o da entrada antiga."""
     d = _fps_manuais(ledger)
     fam_d = d.setdefault(fam, OrderedDict())
     if footprint:
+        velho = fam_d.get(comp) if isinstance(fam_d.get(comp), dict) else {}
         fam_d[comp] = OrderedDict([('nome', footprint), ('desde', agora())])
+        if odoo or velho.get('odoo'):
+            fam_d[comp]['odoo'] = odoo or velho.get('odoo')
     else:
         fam_d.pop(comp, None)
     if not fam_d:
@@ -345,6 +350,25 @@ def footprints_manuais(ledger):
             nome = (d or {}).get('nome') if isinstance(d, dict) else d
             if nome:
                 fora[(fam, comp)] = nome
+    return fora
+
+
+def footprints_manuais_por_odoo(ledger):
+    """{id do produto no Odoo: nome} — a mesma escolha, achada pela IDENTIDADE da peça. O
+    gerador consulta isto antes do nome: renomear o produto no cadastro muda o nome do
+    componente, e a entrada só muda de chave no `depois`, que roda DEPOIS do gerador. Id que
+    duas entradas reclamam com footprints diferentes não é resposta e fica de fora."""
+    fora, duvida = {}, set()
+    for comps in (_fps_manuais(ledger) or {}).values():
+        for d in (comps or {}).values():
+            if not isinstance(d, dict) or not d.get('nome'):
+                continue
+            for oid in str(d.get('odoo') or '').split():
+                if oid in fora and fora[oid] != d['nome']:
+                    duvida.add(oid)
+                fora[oid] = d['nome']
+    for oid in duvida:
+        fora.pop(oid, None)
     return fora
 
 
@@ -626,13 +650,30 @@ def indice_almox(espelhos):
     return idx
 
 
+def ids_odoo_do_valor(v):
+    """'id id' — os ids do produto no Odoo de um valor do espelho, na ordem e sem repetição
+    (a forma do campo `odoo` das entradas do ledger)"""
+    fora = []
+    for it in (v or {}).get('itens') or []:
+        oid = str((it or {}).get('odoo') or '').strip()
+        if oid and oid not in fora:
+            fora.append(oid)
+    return ' '.join(fora)
+
+
 def indice_odoo_almox(espelhos):
-    """({id do produto: (família do arquivo, componente)}, {(família, componente): 'id id'})
+    """({id do produto: (família do arquivo, componente)}, {(família, componente): 'id id'},
+    {(família, componente) que está `fora`})
 
     O `product_id` do Odoo é o que não muda quando o nome do produto muda — é por ele que a
     proteção acha o componente que foi renomeado.
+
+    `por_id` só aponta para componente VIVO. O `fora: true` guarda os `itens` da última vez
+    que existiu, e o zumbi de uma renomeação antiga (o TMAG5131A1 no nº 4, fora, e no nº 46,
+    vivo — o mesmo produto 1523) disputava o id com o componente de verdade: por ordem de
+    arquivo, a proteção podia ir parar no zumbi.
     """
-    por_id, do_comp = {}, {}
+    por_id, do_comp, zumbis = {}, {}, set()
     for cam, _var, esp in espelhos:
         base = os.path.basename(cam)
         for sim in esp.get('symbols') or []:
@@ -640,14 +681,20 @@ def indice_odoo_almox(espelhos):
             for v in sim.get('valores') or []:
                 if not v.get('altium'):
                     continue
-                oids = [str(it.get('odoo') or '').strip() for it in (v.get('itens') or [])]
-                oids = [o for o in oids if o]
+                if v.get('fora'):
+                    zumbis.add((fam, v['altium']))
+                oids = ids_odoo_do_valor(v)
                 if not oids:
                     continue
-                do_comp[(fam, v['altium'])] = ' '.join(oids)
-                for o in oids:
+                do_comp[(fam, v['altium'])] = oids
+                if v.get('fora'):
+                    continue
+                for o in oids.split():
                     por_id[o] = (fam, v['altium'])
-    return por_id, do_comp
+    return por_id, do_comp, zumbis
+
+
+LOG_TETO = 20       # linhas por componente no log do sincronismo; o resto vira um total
 
 
 def segue_renomeacoes(ledger, espelhos, idx, log=print):
@@ -663,9 +710,15 @@ def segue_renomeacoes(ledger, espelhos, idx, log=print):
     produto (`odoo`); a entrada que não é mais achada procura por esse id. A primeira metade
     é o que faz a segunda funcionar, e é também a migração: quem já estava no ledger antes
     deste campo o ganha na primeira sincronização em que ainda dá para achá-lo pelo nome.
+
+    ACHADO PELO NOME NÃO BASTA quando o nome é de um ZUMBI (2026-09-29). O componente que o
+    gerador deixou `fora: true` por não ter seguido uma renomeação antiga continua no espelho
+    com o nome velho — então a entrada era "achada", ficava lá, e o componente vivo, com o
+    mesmo produto do Odoo, ficava sem o desenho e sem o vínculo com o símbolo. Entrada que
+    está num `fora` cujo produto vive noutro componente vai para ele.
     """
-    por_id, do_comp = indice_odoo_almox(espelhos)
-    mexidos = []
+    por_id, do_comp, zumbis = indice_odoo_almox(espelhos)
+    mexidos, presos = [], []
     for bloco in ('protegidos', 'footprints'):
         b = ledger.get(bloco) or OrderedDict()
         for fam in list(b):
@@ -677,9 +730,12 @@ def segue_renomeacoes(ledger, espelhos, idx, log=print):
                     oids = do_comp.get((fam, comp))
                     if oids and d.get('odoo') != oids:
                         d['odoo'] = oids          # backfill: é o que salva a próxima rodada
-                    continue
+                    if (fam, comp) not in zumbis:
+                        continue
                 alvo = next((por_id[o] for o in (d.get('odoo') or '').split() if o in por_id),
                             None)
+                if alvo is None and (fam, comp) in idx:
+                    continue                      # fora de verdade: o produto saiu do Odoo
                 if alvo is None:
                     # SEM O ID AINDA: a entrada é de antes deste campo existir e o backfill
                     # nunca chegou nela, porque o que mudou foi a FAMÍLIA e não o nome. É o
@@ -692,9 +748,12 @@ def segue_renomeacoes(ledger, espelhos, idx, log=print):
                 if not alvo or alvo == (fam, comp):
                     continue
                 fam2, comp2 = alvo
+                if comp2 in (b.get(fam2) or {}):
+                    # já há registro no destino: não sobrescreve
+                    if (fam, comp) in zumbis:
+                        presos.append((bloco, fam, comp, fam2, comp2))
+                    continue
                 destino = b.setdefault(fam2, OrderedDict())
-                if comp2 in destino:
-                    continue                      # já há proteção no destino: não sobrescreve
                 d.pop('orfao', None)
                 d['odoo'] = do_comp.get(alvo, d.get('odoo', ''))
                 if bloco == 'protegidos' and d.get('simbolo'):
@@ -706,9 +765,25 @@ def segue_renomeacoes(ledger, espelhos, idx, log=print):
                 if not b[fam]:
                     del b[fam]
                 mexidos.append((bloco, fam, comp, fam2, comp2))
-                log('   renomeado no Odoo: %s / %s  ->  %s / %s (%s preservado)'
-                    % (fam, comp, fam2, comp2,
-                       'desenho' if bloco == 'protegidos' else 'footprint'))
+                if len(mexidos) <= LOG_TETO:
+                    log('   %s: %s / %s  ->  %s / %s (%s preservado)'
+                        % ('do nome antigo (fora) para o vivo' if (fam, comp) in zumbis
+                           else 'renomeado no Odoo', fam, comp, fam2, comp2,
+                           ('desenho' + (' e vínculo com o símbolo' if d.get('lib') else ''))
+                           if bloco == 'protegidos' else 'footprint'))
+    # UM RESUMO, e não uma linha por componente: a primeira rodada depois deste conserto
+    # recolheu 446 desenhos presos em nomes antigos no servidor, e o log do sincronismo é lido
+    # numa janela do hub
+    if len(mexidos) > LOG_TETO:
+        log('   ... e mais %d: %d registro(s) acompanharam o produto do Odoo'
+            % (len(mexidos) - LOG_TETO, len(mexidos)))
+    for x in presos[:5]:
+        log('   duplicado: %s / %s (fora) e %s / %s são o mesmo produto do Odoo e os dois têm %s'
+            ' — vale o do vivo' % (x[1], x[2], x[3], x[4],
+                                  'desenho' if x[0] == 'protegidos' else 'footprint'))
+    if presos:
+        log('   %d componente(s) antigo(s) com registro próprio ao lado do vivo: apague os antigos'
+            ' pela Biblioteca (aviso de duplicados)' % len(presos))
     return mexidos
 
 
@@ -857,7 +932,8 @@ def depois(raiz, ledger, log=print):
             if v is None or v.get('parts') or not s.get('parts'):
                 continue
             prots = ledger['protegidos'].setdefault(fam, prots)
-            _poe_prot(ledger, fam, comp, s['parts'], 'hub', sim[0], lib=(pads[sim[0]] or {}).get('lib'))
+            _poe_prot(ledger, fam, comp, s['parts'], 'hub', sim[0], lib=(pads[sim[0]] or {}).get('lib'),
+                      odoo=ids_odoo_do_valor(v) or None)
             log('   padrão da categoria: %s / %s ganhou o desenho de %s' % (fam, comp, sim[0]))
         a_repor = [c for c in prots if c in comps]
         if a_repor:

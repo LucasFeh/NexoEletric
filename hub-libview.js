@@ -36,6 +36,21 @@ const CSS = `
   border-bottom:2px solid transparent; margin-bottom:-1px;}
 .lv-tabs button:hover{background:rgba(255,255,255,.05); color:var(--text,#d8d8d8);}
 .lv-tabs button[aria-pressed="true"]{color:var(--hi,#4fc3f7); border-bottom-color:var(--hi,#4fc3f7);}
+/* o aviso de produto repetido: no fim da faixa, no tom de aviso, e so quando ha */
+.lv-tabs button.lv-dup{margin-left:auto; color:var(--warn,#ffb74d); border-bottom-color:transparent;}
+.lv-tabs button.lv-dup:hover{color:var(--warn,#ffb74d); background:rgba(255,183,77,.08);}
+.lv-dup-dlg{width:min(820px,100%);}
+.lv-dup-dlg p{font-size:12px; line-height:1.5; color:var(--text-2,#b8b8b8);}
+.lv-dup-lista{max-height:min(52vh,460px); overflow:auto; border:1px solid var(--line,#3a3a3a);
+  border-radius:6px; font:11px Consolas,ui-monospace,monospace;}
+.lv-dup-g{display:flex; gap:10px; padding:3px 10px; border-bottom:1px solid rgba(255,255,255,.04);}
+.lv-dup-g .id{flex:0 0 52px; color:var(--text-4,#7a7a7a); text-align:right;}
+.lv-dup-g .vs{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.lv-dup-g .vivo{color:var(--text,#d8d8d8);}
+.lv-dup-g .fora{color:var(--warn,#ffb74d);}
+.lv-dup-g .sep{color:var(--text-4,#7a7a7a);}
+.lv-dup-mais{padding:6px 10px; color:var(--text-4,#7a7a7a);}
+.lv-dup-dlg .lv-dup-nota{font-size:11px; color:var(--text-4,#7a7a7a);}
 
 /* Fora da vista Geral o centro deixa de ser a grade de quatro painéis e vira faixa + corpo:
    senão as linhas vazias da grade continuariam reservando altura para canvas escondido. */
@@ -245,6 +260,130 @@ function pintaAbas(){
     b.onclick = () => { ST.aba = id; pintaAbas(); trocaCentro(); };
     faixa.append(b);
   }
+  const n = DUP.j ? DUP.j.grupos.length : 0;
+  if (n){
+    const b = el('button', 'lv-dup', '⚠ ' + n + (n === 1 ? ' produto repetido' : ' produtos repetidos'));
+    b.title = 'o mesmo produto do Odoo em mais de um componente da biblioteca — clique para ver e limpar';
+    b.onclick = abreDups;
+    faixa.append(b);
+  }
+}
+
+/* ── O MESMO PRODUTO DO ODOO EM MAIS DE UM COMPONENTE ──
+   Pedido do dono (2026-09-29): tudo é vinculado pelo ID do Odoo, e o produto que aparece duas
+   vezes na biblioteca tem de ser AVISADO. É quase sempre o zumbi de uma renomeação anterior
+   a isso: o nome antigo ficou `fora` e o produto vive no outro componente (o TMAG5131A1, nº 4
+   e nº 46). O aviso mora nesta faixa porque ela é igual nas duas cascas; a lista vem do
+   servidor (/api/symbols/almox-duplicados), que é quem também apaga — e só apaga o antigo
+   cujo produto vive noutro componente. O desenho e o vínculo com o símbolo que estavam no
+   antigo o guardião já leva para o vivo no sincronismo. */
+const DUP = { j: null, quando: 0, pedindo: null };
+const DUP_TTL = 30000;                 /* a faixa repinta a cada desenho da Biblioteca */
+function carregaDups(forca){
+  if (typeof fetch !== 'function') return Promise.resolve(null);
+  if (DUP.pedindo) return DUP.pedindo;
+  if (!forca && Date.now() - DUP.quando < DUP_TTL) return Promise.resolve(DUP.j);
+  DUP.quando = Date.now();
+  DUP.pedindo = fetch('/api/symbols/almox-duplicados').then(r => r.json()).then(j => {
+    const antes = DUP.j ? DUP.j.grupos.length : 0;
+    DUP.j = (j && j.ok && Array.isArray(j.grupos)) ? j : null;
+    if ((DUP.j ? DUP.j.grupos.length : 0) !== antes) pintaAbas();
+    return DUP.j;
+  }).catch(() => null).then(j => { DUP.pedindo = null; return j; });
+  return DUP.pedindo;
+}
+/* o adaptador da casca para o fluxo de apagar (o mesmo do "Apagar da biblioteca" de um valor:
+   modal do hub, toast e recarga). As duas cascas o têm; sem ele, só o toast. */
+function ioDaCasca(){
+  if (API && typeof API.io === 'function') return API.io();
+  return typeof ioExcluirAlmox === 'function' ? ioExcluirAlmox() : null;
+}
+function rotuloDup(v){
+  return '#' + v.id + ' ' + (v.altium || v.label) + (v.fora ? '  (fora)' : '');
+}
+async function abreDups(){
+  const j = await carregaDups(true);
+  if (!j || !j.grupos.length){ aviso('nenhum produto repetido na biblioteca', 'ok'); return; }
+  const raiz = document.getElementById('overlay') || document.body;
+  const bd = el('div', 'backdrop center');
+  const d = el('div', 'dialog lv-dup-dlg');
+  d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true');
+  const nAnt = (j.antigos || []).length;
+  d.append(el('h3', null, 'Produtos repetidos na biblioteca'),
+           el('p', null, j.grupos.length + (j.grupos.length === 1 ? ' produto do Odoo aparece' : ' produtos do Odoo aparecem')
+             + ' em mais de um componente. Quase sempre é o nome antigo de um produto renomeado no Odoo antes de a '
+             + 'biblioteca seguir o ID: o antigo ficou “fora” e o produto vive no outro. O desenho e o vínculo com '
+             + 'o símbolo que estavam no antigo passam para o vivo no sincronismo.'));
+  const lista = el('div', 'lv-dup-lista');
+  const TETO = 300;
+  for (const g of j.grupos.slice(0, TETO)){
+    const lin = el('div', 'lv-dup-g');
+    lin.append(el('span', 'id', g.odoo));
+    const vs = el('span', 'vs');
+    g.valores.forEach((v, i) => {
+      if (i) vs.append(el('span', 'sep', ' · '));
+      const x = el('span', v.fora ? 'fora' : 'vivo', rotuloDup(v));
+      x.title = v.simbolo;
+      vs.append(x);
+    });
+    lin.append(vs);
+    lista.append(lin);
+  }
+  if (j.grupos.length > TETO) lista.append(el('div', 'lv-dup-mais', '+ ' + (j.grupos.length - TETO) + ' não listados'));
+  d.append(lista);
+  if (j.soFora) d.append(el('p', 'lv-dup-nota', j.soFora === 1
+    ? '1 produto saiu do Odoo e ficou repetido só como “fora”: não entra no lote — apague à mão, se quiser.'
+    : j.soFora + ' produtos saíram do Odoo e ficaram repetidos só como “fora”: não entram no lote — apague à mão, se quiser.'));
+  if (j.misturados) d.append(el('p', 'lv-dup-nota', (j.misturados === 1
+    ? '1 componente antigo carrega'
+    : j.misturados + ' componentes antigos carregam')
+    + ' também um produto que saiu do Odoo — é a última lembrança dele, e fica fora do lote. Apague à mão, se quiser.'));
+  const act = el('div', 'acts');
+  const bc = el('button', 'btn btn-ghost', 'Fechar'); bc.type = 'button';
+  const bo = el('button', 'btn btn-danger', nAnt ? 'Apagar os ' + nAnt + ' antigos…' : 'Nada a apagar'); bo.type = 'button';
+  bo.disabled = !nAnt;
+  act.append(bc, bo); d.append(act); bd.append(d);
+  const fecha = () => { document.removeEventListener('keydown', tecla, true); bd.remove(); };
+  const tecla = e => { if (e.key === 'Escape'){ e.preventDefault(); e.stopImmediatePropagation(); fecha(); } };
+  bc.onclick = fecha;
+  bd.onclick = e => { if (e.target === bd) fecha(); };
+  bo.onclick = async () => { fecha(); await apagaAntigos(); };
+  document.addEventListener('keydown', tecla, true);
+  raiz.append(bd);
+  bc.focus();
+}
+async function apagaAntigos(){
+  const io = ioDaCasca();
+  const post = io ? io.post : async (url, body) => (await fetch(url, { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+  let p;
+  try { p = await post('/api/symbols/almox-duplicados', {}); }
+  catch (e){ aviso('não consegui perguntar ao servidor: ' + (e && e.message || e), 'err'); return; }
+  if (!p || !p.ok){ aviso((p && p.error) || 'o servidor recusou', 'err'); return; }
+  const n = (p.antigos || []).length;
+  if (!n){ aviso('nada a apagar: nenhum antigo com o produto vivo noutro componente', 'ok'); return; }
+  let texto = 'Apagar os ' + n + ' componentes antigos da biblioteca?\n\n'
+    + 'Cada um está “fora” com um nome que não existe mais no Odoo, e o produto dele vive noutro '
+    + 'componente. Eles saem do acervo agora; o número de cada um continua reservado, e nada '
+    + 'renumera. Entram na lista de excluídos, como o “Apagar da biblioteca” de um só.';
+  if (p.total){
+    texto += '\n\nEM USO por ' + p.total + ' componente(s) nos projetos:\n'
+      + p.usos.map(u => '  · ' + u.projeto + ': ' + u.refs.join(', ')).join('\n')
+      + '\n\nQuem tem o id do Odoo no componente a folha leva sozinha para o nome de hoje.'
+      + (p.semId ? ' ' + p.semId + ' não tem (' + p.usos.filter(u => u.semId.length)
+          .map(u => u.projeto + ': ' + u.semId.join(', ')).join('; ') + ') e fica órfão até ser trocado.' : '');
+  }
+  const sim = io ? await io.confirm(texto, { title: 'Apagar os antigos', ok: 'Apagar ' + n, danger: true }) : false;
+  if (!sim) return;
+  let r;
+  try { r = await post('/api/symbols/almox-duplicados', { confirmar: true }); }
+  catch (e){ aviso('não consegui apagar: ' + (e && e.message || e), 'err'); return; }
+  if (!r || !r.ok){ aviso((r && r.error) || 'o servidor recusou', 'err'); return; }
+  aviso(r.apagados + (r.apagados === 1 ? ' componente antigo saiu' : ' componentes antigos saíram') + ' da biblioteca', 'ok');
+  for (const a of (r.avisos || [])) aviso(a, 'warn');
+  if (io && io.recarregar) await io.recarregar();
+  await carregaDups(true);
+  pintaAbas();
 }
 
 /* ── a vista Footprints ── */
@@ -621,6 +760,7 @@ async function vincula(nome){
 function aviso(txt, tom){
   if (window.HubDialog && HubDialog.toast) HubDialog.toast(txt, tom || 'info', 6000);
   else if (API && API.toast) API.toast(txt, tom);
+  else { const io = ioDaCasca(); if (io && io.toast) io.toast(txt, tom); }
 }
 
 /* ── o contrato com a casca ──
@@ -632,6 +772,7 @@ function instala(api){
   poeCss();
   pintaAbas();
   trocaCentro();
+  carregaDups(true);
   return { aba: () => ST.aba, ir, atualiza };
 }
 
@@ -645,6 +786,7 @@ let ultimoAberto = null;
 
 function atualiza(){
   pintaAbas();
+  carregaDups(false);                   /* no máximo uma vez a cada 30 s: depois de um sync */
   aplicaVisibilidade();                 /* barato, e desfaz o que o renderLib re-exibiu */
   if (ST.aba === 'footprints'){ pintaFootprints(); return; }
   if (ST.aba !== 'simbolos') return;
