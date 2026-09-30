@@ -141,6 +141,14 @@ assert.strictEqual(t({ linhas: [{ quantidade: 2 }, { quantidade: 1 }] }), '2 lin
 assert.strictEqual(t({ linhas: [{ quantidade: 2 }, { quantidade: 4, _extra: 1 }, { quantidade: 1, _extra: 3 }] }),
                    '3 linha(s) · 7 peça(s) · 2 fora do esquema');
 console.log('(5) o total conta os extras e diz quantos sao ok');
+/* as linhas do esquema TIRADAS da lista (2026-09-30): fora da conta, porque nao vao, e ditas */
+assert.strictEqual(t({ linhas: [{ quantidade: 2 }], _tirados: [{ quantidade: 3 }, { quantidade: 1 }] }),
+                   '1 linha(s) · 2 peça(s) · 2 tiradas da lista');
+assert.strictEqual(t({ linhas: [{ quantidade: 2 }], _tirados: [{ quantidade: 3 }] }),
+                   '1 linha(s) · 2 peça(s) · 1 tirada da lista');
+assert.strictEqual(t({ linhas: [], _tirados: [{ quantidade: 3 }] }), '0 linha(s) · 0 peça(s) · 1 tirada da lista',
+                   'tudo tirado ainda diz o que ficou de fora');
+console.log('(5b) o total diz as tiradas da lista, fora da conta ok');
 
 /* ── 4. as setas do campo de quantidade (texto, nao type=number) ───────────────── */
 const passo = pure.passoQtd;

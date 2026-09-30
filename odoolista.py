@@ -12,7 +12,8 @@ do lado do Odoo esta em docs/prompt-altium-envio-de-lista.md.
 
 A lista e o esquema MAIS o que o projetista juntou por fora dele pelo hub (Projects/<p>/
 lista-extras.json): cada peca avulsa vira uma linha 'EXTRA n' depois das do esquema, pela
-mesma cascata de resolucao. Ver linhas_extras e altera_extras.
+mesma cascata de resolucao. Ver linhas_extras e altera_extras. E MENOS o que ele tirou dela
+(o `fora` do mesmo arquivo): componentes do esquema que nao vao ao Odoo. Ver altera_fora.
 
 Credenciais (secao 6 da spec):
   senha  ODOO_LISTA_SENHA -> ODOO_SENHA -> .hub-odoo.json
@@ -48,6 +49,10 @@ CFG_ALMOX = 'hub-almox.json'     # so url/db/login; a senha do envio nunca vem d
 RECIBO = 'odoo-lista.json'       # ao lado do projeto, no molde de bom-opts.json
 EXTRAS = 'lista-extras.json'     # componentes FORA do esquema que tambem vao na lista; do hub
 EXTRAS_FORMATO = 'lista-extras-v1'
+# o mesmo arquivo com `fora` -- componentes DO esquema tirados da lista. Formato proprio de
+# proposito: o hub de antes le o v1 e ignoraria o campo, mandando ao Odoo as linhas que o
+# projetista tirou; o v2 ele RECUSA, com a frase do arquivo. Sem nada tirado, continua v1.
+EXTRAS_FORMATO_FORA = 'lista-extras-v2'
 
 MODELO = 'di.lista.altium'
 TIMEOUT = 30.0                   # por conexao; nunca socket.setdefaulttimeout (global)
@@ -447,14 +452,32 @@ def linhas_extras(extras, acervo):
 
 
 def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observacao='',
-                  extras=None):
+                  extras=None, fora=None):
     """O payload da spec, secao 2, mais o que a tela precisa saber (campos com _).
 
     `extras` sao os itens de lista-extras.json (le_extras): entram DEPOIS das linhas do
     esquema, uma linha cada. Lista so com extras e lista -- esquema sem componente nenhum
     ainda pode mandar as pecas avulsas; o que nao pode e nao haver linha nenhuma.
+
+    `fora` (le_fora) sao os componentes do esquema TIRADOS da lista: nao vao ao Odoo. Vale o
+    que ainda e o mesmo componente -- designador e sym de hoje iguais aos guardados; trocado
+    por outra peca, ele volta. Os tirados saem em `_tirados`, agrupados e resolvidos como as
+    outras linhas, so para a tela mostrar e devolver: o payload_limpo os deixa deste lado, e a
+    assinatura nem os ve.
     """
-    grupos, sem_designador = agrupa(schematic)
+    guardados = {f['ref']: f['sym'] for f in (fora or [])}
+    saem = set()
+    if guardados:
+        hoje = _sym_por_ref(schematic)
+        saem = {r for r, s in guardados.items() if r in hoje and hoje[r] == s}
+    if saem:
+        eh = lambda it: it.get('t') == 'comp' and str(it.get('ref') or '').strip() in saem  # noqa: E731
+        itens = schematic.get('items') or []
+        vai = dict(schematic, items=[it for it in itens if not eh(it)])
+        tirados = [resolve(g, acervo) for g in agrupa(dict(schematic, items=[it for it in itens if eh(it)]))[0]]
+    else:
+        vai, tirados = schematic, []
+    grupos, sem_designador = agrupa(vai)
     linhas = [resolve(g, acervo) for g in grupos]
     de_fora = linhas_extras(extras, acervo)
     linhas += de_fora
@@ -469,6 +492,7 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
         '_sem_designador': sem_designador,
         '_sem_valor': sum(1 for l in linhas if l.get('_semValor')),
         '_extras': len(de_fora),
+        '_tirados': tirados,
     }
 
 
@@ -833,9 +857,17 @@ def grava_recibo(nome, dados, raiz=RAIZ):
 # O item tem o shape de um componente do schematic.js (mais a quantidade) para cair na MESMA
 # cascata do resolve(); `id` e estavel e nunca reusado -- `proximo` so cresce, e e ele que da
 # o 'EXTRA n' da linha.
+#
+# Com componentes DO esquema tirados da lista (pedido do dono, 2026-09-30: "remover os itens
+# que ja estavam na lista"), o formato e o v2 e ganha `fora`:
+#
+#   {"format":"lista-extras-v2", ..., "fora":[{"ref":"R5","sym":"SMD 0805 10K 1/8W"}]}
+#
+# Cada um e o designador E o componente que ele era: trocado por outra peca, o R5 e outra
+# coisa a comprar, e volta sozinho para a lista (monta_payload). O esquema nao muda.
 
 QTD_MAX = 100000
-TETO = {'sym': 200, 'comment': 200, 'footprint': 200, 'params': 2000}
+TETO = {'sym': 200, 'comment': 200, 'footprint': 200, 'params': 2000, 'ref': 60}
 CAMPOS_PECA = ('sym', 'comment', 'footprint', 'params')
 _CONTROLE = re.compile(r'[\x00-\x1f\x7f]')
 # Metade de um par surrogate, sozinha. O json.loads aceita o escape "\ud800", mas nenhum
@@ -922,15 +954,42 @@ def _defeito(nome, porque):
             'componentes nao valem mais) e tente de novo.' % (EXTRAS, nome, porque))
 
 
+def _ref_valido(v):
+    """Um designador do esquema, como a tela o manda: texto curto, sem controle, sem virgula
+    (a lista junta designadores com virgula) e anotado (o 'R?' nem entra na lista)."""
+    r = _texto('ref', v, obrigatorio=True)
+    if ',' in r or r.endswith('?'):
+        raise ErroOdoo('designador %r nao e de um componente anotado do esquema' % r)
+    return r
+
+
+def _carrega_fora(bruto, nome):
+    """O `fora` do arquivo: [{ref, sym}], sem repetir designador (o ultimo vale). Estrito como o
+    resto: um `fora` torto lido como vazio mandaria ao Odoo as linhas que foram tiradas."""
+    if bruto is None:
+        return []
+    if not isinstance(bruto, list):
+        raise ErroOdoo(_defeito(nome, '"fora" tem que ser uma lista'))
+    por = {}
+    for pos, it in enumerate(bruto, 1):
+        if not isinstance(it, dict):
+            raise ErroOdoo(_defeito(nome, 'o item %d de "fora" nao e um objeto' % pos))
+        try:
+            por[_ref_valido(it.get('ref'))] = _texto('sym', it.get('sym'))
+        except ErroOdoo as e:
+            raise ErroOdoo(_defeito(nome, 'o item %d de "fora": %s' % (pos, e)))
+    return [{'ref': r, 'sym': s} for r, s in sorted(por.items(), key=lambda x: _natural(x[0]))]
+
+
 def _carrega_extras(caminho, nome):
-    """(proximo, itens) do disco. Ausente e vazio = nada, e nao e erro; o resto e estrito.
+    """(proximo, itens, fora) do disco. Ausente e vazio = nada, e nao e erro; o resto e estrito.
 
     Estrito como o _le_json_estrito, e pelo mesmo motivo: este arquivo e lido tambem por quem
     vai GRAVAR por cima (altera_extras). Ler um arquivo torto como vazio e gravar o item novo
     apagaria todos os outros -- e o envio seguinte mandaria a lista sem eles, calado.
     """
     if not os.path.isfile(caminho):
-        return 1, []
+        return 1, [], []
     try:
         with io.open(caminho, encoding='utf-8-sig') as f:
             bruto = f.read()
@@ -942,16 +1001,17 @@ def _carrega_extras(caminho, nome):
     except OSError as e:
         raise ErroOdoo('nao consegui ler %s de %s: %s' % (EXTRAS, nome, e))
     if not bruto.strip():
-        return 1, []              # vazio nao guarda nada que se perca; ver _le_json_estrito
+        return 1, [], []          # vazio nao guarda nada que se perca; ver _le_json_estrito
     try:
         d = json.loads(bruto)
     except ValueError as e:
         raise ErroOdoo(_defeito(nome, 'o JSON nao parseia: %s' % e))
     if not isinstance(d, dict) or not isinstance(d.get('itens'), list):
         raise ErroOdoo(_defeito(nome, 'esperava um objeto com "itens" em lista'))
-    if d.get('format') not in (None, EXTRAS_FORMATO):
-        raise ErroOdoo(_defeito(nome, 'formato %r, e este hub le %s'
-                                % (d.get('format'), EXTRAS_FORMATO)))
+    if d.get('format') not in (None, EXTRAS_FORMATO, EXTRAS_FORMATO_FORA):
+        raise ErroOdoo(_defeito(nome, 'formato %r, e este hub le %s e %s'
+                                % (d.get('format'), EXTRAS_FORMATO, EXTRAS_FORMATO_FORA)))
+    fora = _carrega_fora(d.get('fora'), nome)
     itens, vistos = [], set()
     for pos, it in enumerate(d['itens'], 1):
         if not isinstance(it, dict):
@@ -976,7 +1036,7 @@ def _carrega_extras(caminho, nome):
         # um `proximo` torto nao se conserta com max(id)+1 calado: o item removido por ultimo
         # tinha o id seguinte, e ele voltaria como outra peca
         raise ErroOdoo(_defeito(nome, '"proximo" tem que ser inteiro positivo'))
-    return max(prox, minimo), itens
+    return max(prox, minimo), itens, fora
 
 
 def le_extras(nome, raiz=RAIZ):
@@ -986,16 +1046,32 @@ def le_extras(nome, raiz=RAIZ):
     WinError 32 se outro handle estiver com o arquivo aberto, e a previa de uma aba lendo
     no instante da gravacao de outra fazia o clique de quem gravava voltar como erro 500.
     """
+    return le_lista_extras(nome, raiz)[0]
+
+
+def le_fora(nome, raiz=RAIZ):
+    """Os componentes do esquema tirados da lista: [{ref, sym}]. Sem arquivo = []."""
+    return le_lista_extras(nome, raiz)[1]
+
+
+def le_lista_extras(nome, raiz=RAIZ):
+    """(itens, fora) numa leitura so: montar a lista com os dois de versoes diferentes do
+    arquivo (uma gravacao no meio) daria uma lista que nunca existiu no disco."""
     with _EXTRAS_LOCK:
-        return _carrega_extras(os.path.join(raiz, 'Projects', nome, EXTRAS), nome)[1]
+        _prox, itens, fora = _carrega_extras(os.path.join(raiz, 'Projects', nome, EXTRAS), nome)
+        return itens, fora
 
 
-def _grava_extras(nome, proximo, itens, raiz):
-    """Atomico, no molde de grava_recibo. So os campos do contrato atravessam."""
+def _grava_extras(nome, proximo, itens, raiz, fora=None):
+    """Atomico, no molde de grava_recibo. So os campos do contrato atravessam. Com algo tirado
+    da lista o arquivo e o v2 (ver EXTRAS_FORMATO_FORA); sem nada, continua v1."""
     full = os.path.join(pasta_projeto(nome, raiz), EXTRAS)
-    dados = {'format': EXTRAS_FORMATO, 'atualizado': _agora(), 'proximo': proximo,
+    dados = {'format': EXTRAS_FORMATO_FORA if fora else EXTRAS_FORMATO, 'atualizado': _agora(),
+             'proximo': proximo,
              'itens': [{k: it[k] for k in ('id',) + CAMPOS_PECA + ('quantidade',)}
                        for it in sorted(itens, key=lambda x: x['id'])]}
+    if fora:
+        dados['fora'] = [{'ref': f['ref'], 'sym': f['sym']} for f in fora]
     tmp = full + '.tmp'
     try:
         with io.open(tmp, 'w', encoding='utf-8', newline='\n') as f:
@@ -1026,7 +1102,7 @@ def altera_extras(nome, op, dados, raiz=RAIZ):
     """
     with _EXTRAS_LOCK:
         caminho = os.path.join(pasta_projeto(nome, raiz), EXTRAS)
-        proximo, itens = _carrega_extras(caminho, nome)
+        proximo, itens, fora = _carrega_extras(caminho, nome)
         if op == 'add':
             item = dados.get('item')
             if not isinstance(item, dict):
@@ -1057,8 +1133,62 @@ def altera_extras(nome, op, dados, raiz=RAIZ):
                 alvo.update(muda)
         else:
             raise ErroOdoo('op tem que ser add, update ou remove (recebi %r)' % (op,))
-        _grava_extras(nome, proximo, itens, raiz)
+        _grava_extras(nome, proximo, itens, raiz, fora)
         return itens, n
+
+
+def _sym_por_ref(schematic):
+    """{ref: sym} de cada componente como o agrupa() o ve: o da menor parte, que e a que
+    carrega a identidade. Designador nao anotado ('R?') nao entra -- nem na lista ele vai."""
+    por = {}
+    for it in (schematic.get('items') or []):
+        if it.get('t') != 'comp':
+            continue
+        ref = str(it.get('ref') or '').strip()
+        if not ref or ref.endswith('?'):
+            continue
+        p = it.get('part') or 1
+        if ref not in por or p < por[ref][0]:
+            por[ref] = (p, str(it.get('sym') or ''))
+    return {r: s for r, (_p, s) in por.items()}
+
+
+def altera_fora(nome, op, refs, raiz=RAIZ):
+    """Tira da lista (op 'tira') ou devolve a ela (op 'devolve') componentes DO esquema, pelos
+    designadores de uma linha. Sob a mesma trava e no mesmo arquivo dos extras, que ficam como
+    estao. Devolve (itens, fora).
+
+    O que se guarda e o designador E o componente que ele e HOJE no esquema SALVO (o sym lido
+    do disco, e nao o que a tela diz): trocado por outra peca, e outra coisa a comprar, e ele
+    volta sozinho para a lista. Designador que o esquema salvo nao tem e recusa, e nada e
+    escrito -- tirar o que nao esta no disco nao teria efeito, e a tela diria que tirou."""
+    if not isinstance(refs, list) or not refs:
+        raise ErroOdoo('faltaram os designadores (refs) da linha')
+    pedidos = []
+    for r in refs:
+        r = _ref_valido(r)
+        if r not in pedidos:
+            pedidos.append(r)
+    if op not in ('tira', 'devolve'):
+        raise ErroOdoo('op tem que ser tira ou devolve (recebi %r)' % (op,))
+    with _EXTRAS_LOCK:
+        caminho = os.path.join(pasta_projeto(nome, raiz), EXTRAS)
+        proximo, itens, fora = _carrega_extras(caminho, nome)
+        por = {f['ref']: f['sym'] for f in fora}
+        if op == 'tira':
+            sym = _sym_por_ref(le_schematic(nome, raiz))
+            faltam = [r for r in pedidos if r not in sym]
+            if faltam:
+                raise ErroOdoo('%s nao esta(o) no esquema salvo -- salve o esquema e confira a '
+                               'lista de novo' % ', '.join(faltam))
+            for r in pedidos:
+                por[r] = sym[r]
+        else:
+            for r in pedidos:
+                por.pop(r, None)
+        fora = [{'ref': r, 'sym': s} for r, s in sorted(por.items(), key=lambda x: _natural(x[0]))]
+        _grava_extras(nome, proximo, itens, raiz, fora)
+        return itens, fora
 
 
 def recibo_para_disco(payload, recibo, enviado_em):
@@ -1112,16 +1242,22 @@ def main(argv=None):
             print(json.dumps(ClienteLista().estado(uid), ensure_ascii=False, indent=1))
             return 0
 
+        # os tirados da lista valem aqui tambem: sem eles, a linha de comando mandaria o que o
+        # projetista tirou pela tela
         payload = monta_payload(args.projeto, rev, le_schematic(args.projeto),
                                 carrega_acervo(), args.enviado_por, args.observacao,
-                                extras=le_extras(args.projeto))
+                                extras=le_extras(args.projeto), fora=le_fora(args.projeto))
         if not payload['linhas']:
-            raise ErroOdoo('o esquema de %s nao tem componente nenhum, e nao ha componente '
-                           'fora do esquema em %s' % (args.projeto, EXTRAS))
+            raise ErroOdoo(('todas as linhas de %s foram tiradas da lista (%s)'
+                            % (args.projeto, EXTRAS)) if payload['_tirados'] else
+                           ('o esquema de %s nao tem componente nenhum, e nao ha componente '
+                            'fora do esquema em %s' % (args.projeto, EXTRAS)))
         for ref in payload['_sem_designador']:
             print('  ! fora da lista, sem designador anotado: %s' % ref)
         if payload['_extras']:
             print('  + %d componente(s) fora do esquema, de %s' % (payload['_extras'], EXTRAS))
+        for ln in payload['_tirados']:
+            print('  - tirado da lista: %s' % ln['designadores'])
 
         cliente = ClienteLista()
         limpo = payload_limpo(payload)

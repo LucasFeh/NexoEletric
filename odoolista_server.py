@@ -122,8 +122,12 @@ def _confere_ensaio(payload, data):
     return None
 
 
-def _prepara(data):
-    """Do corpo do POST ao payload pronto. Devolve (payload, erro, status)."""
+def _prepara(data, vazia_ok=False):
+    """Do corpo do POST ao payload pronto. Devolve (payload, erro, status).
+
+    `vazia_ok` e so da /previa: com TODAS as linhas tiradas da lista, a tela ainda precisa da
+    lista montada para mostrar os tirados e devolve-los. O ensaio e o envio continuam
+    recusando lista vazia."""
     if not isinstance(data, dict):
         return None, 'JSON obrigatorio', 400
     nome = str(data.get('projeto') or '').strip()
@@ -140,15 +144,21 @@ def _prepara(data):
         return None, str(e), 404
     try:
         # arquivo torto e ERRO, nunca "sem extras": a previa, o ensaio e o envio montam daqui,
-        # e seguir sem eles mandaria para o Odoo uma lista que ninguem montou
-        extras = OL.le_extras(nome, ROOT)
+        # e seguir sem eles mandaria para o Odoo uma lista que ninguem montou. Os tirados da
+        # lista vem da MESMA leitura (le_lista_extras)
+        extras, fora = OL.le_lista_extras(nome, ROOT)
     except OL.ErroOdoo as e:
         return None, str(e), 400
     payload = OL.monta_payload(nome, rev, schematic, OL.carrega_acervo(ROOT),
                                str(data.get('enviado_por') or '').strip()[:60],
                                str(data.get('observacao') or '').strip()[:500],
-                               extras=extras)
+                               extras=extras, fora=fora)
     if not payload['linhas']:
+        if payload['_tirados'] and vazia_ok:
+            return payload, None, 200
+        if payload['_tirados']:
+            return None, ('todas as linhas foram tiradas da lista — devolva ao menos uma (no fim '
+                          'da lista) antes de conferir ou enviar'), 400
         return None, ('o esquema nao tem componente nenhum e nao ha componente fora do esquema '
                       '— lista sem componente nao e lista'), 400
     return payload, None, 200
@@ -264,7 +274,7 @@ def previa():
     # uma revisao que ninguem digitou, e o uid mostrado na tela mentia.
     sugerida = OL.norm_rev(OL.parse_revisao(nome))
     rev = OL.norm_rev(data.get('revisao'))
-    payload, erro, status = _prepara(dict(data, revisao=rev))
+    payload, erro, status = _prepara(dict(data, revisao=rev), vazia_ok=True)
     if erro:
         return {'ok': False, 'error': erro}, status
     return {'ok': True, 'payload': payload, 'uid_externo': payload['uid_externo'],
@@ -357,6 +367,8 @@ def extras_altera():
     {projeto, op:'add', item:{sym, comment, footprint, params, quantidade}} -> {ok, itens, id}
     {projeto, op:'update', id, quantidade?, sym?, comment?, footprint?, params?} -> {ok, itens}
     {projeto, op:'remove', id} -> {ok, itens}
+    {projeto, op:'tira', refs:[...]} -> {ok, itens, fora}     linha DO esquema sai da lista
+    {projeto, op:'devolve', refs:[...]} -> {ok, itens, fora}  e volta (odoolista.altera_fora)
 
     O projeto passa pelo _pasta() como em todas as rotas daqui: o arquivo e escrito em
     Projects/<nome>/, e o nome nunca vira caminho sem antes ser uma entrada de Projects/. O
@@ -373,6 +385,15 @@ def extras_altera():
     if not _pasta(nome):
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
     op = data.get('op')
+    if op in ('tira', 'devolve'):
+        try:
+            itens, fora = OL.altera_fora(nome, op, data.get('refs'), ROOT)
+        except OL.ErroOdoo as e:
+            # designador fora do esquema salvo, refs tortos ou arquivo ilegivel: nada foi escrito
+            return {'ok': False, 'error': str(e)}, 400
+        except (OSError, ValueError) as e:
+            return {'ok': False, 'error': 'falha ao gravar %s: %s' % (OL.EXTRAS, e)}, 500
+        return {'ok': True, 'itens': itens, 'fora': fora}
     try:
         itens, n = OL.altera_extras(nome, op, data, ROOT)
     except OL.ExtraAusente as e:

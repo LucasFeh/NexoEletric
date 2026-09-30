@@ -104,6 +104,13 @@ const CSS = `
 /* a linha que nao veio do esquema: um fio na borda e a marca junto do designador — discreta,
    porque ela nao e problema, e so procedencia */
 #odoomodal .od-row.extra{box-shadow:inset 2px 0 0 var(--accent,#4fc3f7);}
+/* as linhas do esquema TIRADAS da lista: no fim, apagadas e riscadas, com o devolver aceso —
+   o que nao vai ao Odoo continua a vista, e a um clique de voltar */
+#odoomodal .od-tir-hd{padding:14px 4px 4px; font-size:10px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--fg-dim,#9a9a9a); border-bottom:1px solid var(--border,#3a3a3a);}
+#odoomodal .od-row.tirado > :not(.rs){opacity:.5;}
+#odoomodal .od-row.tirado .nm{text-decoration:line-through;}
+#odoomodal .od-row.tirado .rs{color:var(--fg-dim,#9a9a9a);}
 #odoomodal .od-row .des .od-fora{display:inline-block; margin-left:6px; padding:0 5px;
   border:1px solid var(--border,#3a3a3a); border-radius:3px; white-space:nowrap;
   font-family:var(--font,system-ui,sans-serif); font-size:10px; line-height:1.45; color:var(--fg-dim,#9a9a9a);}
@@ -194,15 +201,21 @@ function repeticoes(linhas){
 }
 
 /* "N linha(s) · M peça(s)", com os extras DENTRO da conta — eles vao para o Odoo como
-   qualquer linha — e ditos a parte, para ninguem estranhar o total maior que o esquema. */
+   qualquer linha — e ditos a parte, para ninguem estranhar o total maior que o esquema. As
+   linhas do esquema TIRADAS da lista ficam FORA da conta (nao vao) e tambem sao ditas, para
+   ninguem estranhar o total menor. */
 function totalDaLista(payload){
   const linhas = (payload && payload.linhas) || [];
-  if (!linhas.length) return '';
+  const tir = ((payload && payload._tirados) || []).length;
+  if (!linhas.length && !tir) return '';
   const pecas = linhas.reduce((a, l) => a + (Number(l.quantidade) || 0), 0);
   const fora = linhas.filter(l => l._extra != null).length;
   return linhas.length + ' linha(s) · ' + pecas + ' peça(s)'
-       + (fora ? ' · ' + fora + ' fora do esquema' : '');
+       + (fora ? ' · ' + fora + ' fora do esquema' : '')
+       + (tir ? ' · ' + tir + (tir === 1 ? ' tirada' : ' tiradas') + ' da lista' : '');
 }
+/* os designadores de uma linha ("R1, R2, R5") como a rota os quer */
+const refsDaLinha = ln => String((ln && ln.designadores) || '').split(',').map(x => x.trim()).filter(Boolean);
 
 /* getJson/postJson nunca estouram: devolvem {ok:false,error}, para a tela nunca ficar com um
    botao morto e nenhuma explicacao. */
@@ -313,6 +326,15 @@ function pintaLista(payload, recibo){
       + 'diferentes. Rode o ExportProject de novo (ele agora traz os parâmetros) ou confira '
       + 'essas linhas peça a peça antes de aprovar.']);
   }
+  /* o que foi tirado da lista e dito no TOPO tambem: a lista pode ser longa, e quem confere
+     antes de enviar tem de saber que ha linha do esquema que nao vai, sem rolar ate o fim */
+  const tirados = (payload && payload._tirados) || [];
+  if (tirados.length){
+    const um = tirados.length === 1;
+    avisos.push(['', tirados.length + (um ? ' linha do esquema foi tirada' : ' linhas do esquema foram tiradas')
+      + ' desta lista e não ' + (um ? 'vai' : 'vão') + ' para o Odoo — ' + (um ? 'está' : 'estão')
+      + ' no fim, com "devolver". O esquema não mudou.']);
+  }
   if (recibo && recibo.linhas_pendentes){
     avisos.push(['', recibo.linhas_pendentes + ' de ' + recibo.total_linhas + ' linha(s) sem produto no Odoo. '
       + 'A fila aceita assim mesmo, mas a lista so pode ser APROVADA quando toda linha apontar '
@@ -380,33 +402,40 @@ function pintaLista(payload, recibo){
          e uma quantidade ou um 'resolver' mexidos na linha que ja esta saindo voltariam como
          "nao esta mais na lista" */
       rm.onclick = ev => {
-        /* PELO TECLADO (Enter/Espaço: click com detail 0), o foco anda ANTES de a linha
-           travar: o botao desabilitado perde o foco para o corpo na repintura, e o Tab seguinte
-           recomecava no topo. Vai para o proximo controle vivo depois desta linha; sem nenhum
-           (era a ultima), para o anterior; sem nenhum, para o "Adicionar componente fora do
-           esquema". PELO MOUSE nao: o clique tambem foca o botao, e levar o foco a quantidade
-           seguinte fazia o primeiro Esc so desfazer o campo em vez de fechar a lista. */
-        if (ev && ev.detail === 0 && document.activeElement === rm){
-          const ctrls = [...$('odooLista').querySelectorAll('[data-extra][data-papel]')];
-          const k = ctrls.indexOf(rm);
-          const vivo = x => x.dataset.extra !== String(ln._extra) && !x.disabled;
-          const extra = $('odooExtra');
-          const prox = ctrls.slice(k + 1).find(vivo) || ctrls.slice(0, k).reverse().find(vivo)
-                    || (extra && !extra.disabled ? extra : null);
-          if (prox) prox.focus();
-        }
+        focoParaOProximo(ev, rm, String(ln._extra));
         for (const x of row.querySelectorAll('[data-extra]')){ x._usado = true; x.disabled = true; }
         removeExtra(ln);
       };
       rs.append(rm);
     }
-    /* so na linha com problema, e so quando esta vista sabe abrir o seletor: o painel roda
-       dentro do schframe, mas a lista vem do disco e pode citar componente de outra folha */
-    else if (r.pend && typeof window.__hubResolveParaLista === 'function'){
-      const b = el('button', 'od-fix', 'resolver');
-      b.title = 'escolher o componente do almoxarifado para ' + ln.designadores;
-      b.onclick = () => resolveLinha(ln);
-      rs.append(b);
+    else {
+      /* so na linha com problema, e so quando esta vista sabe abrir o seletor: o painel roda
+         dentro do schframe, mas a lista vem do disco e pode citar componente de outra folha */
+      if (r.pend && typeof window.__hubResolveParaLista === 'function'){
+        const b = el('button', 'od-fix', 'resolver');
+        b.title = 'escolher o componente do almoxarifado para ' + ln.designadores;
+        b.onclick = () => resolveLinha(ln);
+        rs.append(b);
+      }
+      /* A LINHA DO ESQUEMA TAMBEM SAI DA LISTA (pedido do dono, 2026-09-30: "remover os itens
+         que ja estavam na lista"). Nao vai ao Odoo, o esquema nao muda, e ela desce para o fim,
+         apagada, com o "devolver". Leva `data-extra` como os controles dos extras: e por ele
+         que o envio no ar a trava e que a repintura devolve o foco (a chave e 'esq:' + os
+         designadores, que nao colide com o id numerico de um extra). */
+      if (!ST.semExtras){
+        const chave = 'esq:' + ln.designadores;
+        const tira = el('button', 'od-fix', 'remover');
+        tira.dataset.extra = chave;
+        tira.dataset.papel = 'tirar';
+        tira.title = 'tirar ' + ln.designadores + ' da lista — não vai para o Odoo; o esquema '
+                   + 'não muda, e o "devolver" no fim da lista a põe de volta';
+        tira.onclick = ev => {
+          focoParaOProximo(ev, tira, chave);
+          for (const x of row.querySelectorAll('[data-extra]')){ x._usado = true; x.disabled = true; }
+          tiraLinha(ln);
+        };
+        rs.append(tira);
+      }
     }
     const nm = el('span', 'nm', ln.nome_altium || '');
     nm.title = (ln.nome_altium || '') + (ln.footprint ? '\n' + ln.footprint : '');
@@ -430,6 +459,33 @@ function pintaLista(payload, recibo){
     box.append(row);
   }
 
+  /* AS TIRADAS, no fim: as mesmas colunas, apagadas e riscadas, e o "devolver" — o que nao vai
+     ao Odoo continua na tela, e a um clique de voltar (odoolista.py » monta_payload » _tirados) */
+  if (tirados.length){
+    box.append(el('div', 'od-tir-hd', 'tiradas da lista — não vão para o Odoo'));
+    for (const ln of tirados){
+      const row = el('div', 'od-row tirado');
+      const nm = el('span', 'nm', ln.nome_altium || '');
+      nm.title = (ln.nome_altium || '') + (ln.footprint ? '\n' + ln.footprint : '');
+      const rs = el('span', 'rs');
+      const chave = 'tir:' + ln.designadores;
+      const dv = el('button', 'od-fix', 'devolver');
+      dv.dataset.extra = chave;
+      dv.dataset.papel = 'devolver';
+      dv.title = 'devolver ' + ln.designadores + ' à lista';
+      dv.onclick = ev => {
+        focoParaOProximo(ev, dv, chave);
+        dv._usado = true; dv.disabled = true;
+        devolveLinha(ln);
+      };
+      rs.append(dv);
+      row.append(el('span', 'des', ln.designadores), nm, el('span', 'vl', ln._valor || '—'),
+                 el('span', 'en', ln._encapsulamento || '—'), el('span', 'ac', ln._acervo || '—'),
+                 el('span', 'qt', String(ln.quantidade)), rs);
+      box.append(row);
+    }
+  }
+
   $('odooTot').textContent = totalDaLista(payload);
   travaExtras();
   if (emBotao){
@@ -440,6 +496,24 @@ function pintaLista(payload, recibo){
     }
   }
   devolveFoco(box, emEdicao);
+}
+
+/* O botao que tira a linha (o 'remover' de um extra ou de uma linha do esquema, o 'devolver'
+   de uma tirada): PELO TECLADO (Enter/Espaço: click com detail 0), o foco anda ANTES de a
+   linha travar — o botao desabilitado perde o foco para o corpo na repintura, e o Tab seguinte
+   recomecava no topo. Vai para o proximo controle vivo depois desta linha; sem nenhum (era a
+   ultima), para o anterior; sem nenhum, para o "Adicionar componente fora do esquema". PELO
+   MOUSE nao: o clique tambem foca o botao, e levar o foco a quantidade seguinte fazia o
+   primeiro Esc so desfazer o campo em vez de fechar a lista. `chave` e o data-extra da linha. */
+function focoParaOProximo(ev, botao, chave){
+  if (!(ev && ev.detail === 0 && document.activeElement === botao)) return;
+  const ctrls = [...$('odooLista').querySelectorAll('[data-extra][data-papel]')];
+  const k = ctrls.indexOf(botao);
+  const vivo = x => x.dataset.extra !== chave && !x.disabled;
+  const extra = $('odooExtra');
+  const prox = ctrls.slice(k + 1).find(vivo) || ctrls.slice(0, k).reverse().find(vivo)
+            || (extra && !extra.disabled ? extra : null);
+  if (prox) prox.focus();
 }
 
 /* Os controles de extra da lista (os que levam data-extra e data-papel), do `el` em diante,
@@ -736,7 +810,8 @@ function mexeExtra(corpoOp, aoGravar, aoFalhar){
   ST.conferido = null;
   ST.assinatura = null;
   $('odooEnviar').disabled = true;
-  estadoTxt('gravando o componente fora do esquema…');
+  estadoTxt(corpoOp && (corpoOp.op === 'tira' || corpoOp.op === 'devolve')
+    ? 'gravando a lista…' : 'gravando o componente fora do esquema…');
   const vez = filaExtras.then(() => gravaExtra(corpoOp, aoGravar, aoFalhar));
   filaExtras = vez.catch(() => null);
   return vez;
@@ -752,7 +827,7 @@ async function gravaExtra(corpoOp, aoGravar, aoFalhar){
       ST.extras = j.itens || [];
       if (aoGravar) aoGravar(j);
     } else {
-      HubDialog.toast(j.error || 'não gravou o componente fora do esquema', 'err', 8000);
+      HubDialog.toast(j.error || 'não gravou a mudança da lista', 'err', 8000);
       if (aoFalhar) aoFalhar(j);
     }
   } finally {
@@ -953,6 +1028,21 @@ function removeExtra(ln){
                           + ' × ' + ln.quantidade + '. O esquema não mudou.', 'info', 7000));
 }
 
+/* A linha DO ESQUEMA tambem sai e volta, pela mesma fila e sem perguntar, pelos mesmos
+   motivos do removeExtra — e aqui ainda mais barato: o "devolver" fica na propria lista. O
+   servidor guarda os designadores e o componente que eles sao hoje (odoolista.py »
+   altera_fora); trocado por outra peca, o componente volta sozinho. */
+function tiraLinha(ln){
+  mexeExtra({ op: 'tira', refs: refsDaLinha(ln) },
+    () => HubDialog.toast(ln.designadores + ' saiu da lista: ' + (ln.nome_altium || 'componente')
+                          + ' × ' + ln.quantidade + '. Não vai para o Odoo, e o esquema não mudou — '
+                          + '"devolver" no fim da lista.', 'info', 7000));
+}
+function devolveLinha(ln){
+  mexeExtra({ op: 'devolve', refs: refsDaLinha(ln) },
+    () => HubDialog.toast(ln.designadores + ' voltou para a lista', 'ok', 4000));
+}
+
 /* ------------------------------- as duas acoes ------------------------------- */
 
 function corpo(extra){
@@ -1054,6 +1144,7 @@ async function enviar(){
                      && (loc.revisao || '') === (r.revisao || '');
   const semRev = !String(r.revisao || '').trim();
   const fora = r.linhas.filter(l => l._extra != null).length;
+  const tir = (r._tirados || []).length;
   const ok = await HubDialog.confirm(
     'Enviar ' + n + ' linha(s) de "' + r.projeto
     + (semRev ? '" (sem revisão)' : ' rev ' + r.revisao + '"')
@@ -1061,6 +1152,8 @@ async function enviar(){
     + 'aprovação do Odoo?\n\nA lista não entra no estoque agora: alguém do almoxarifado '
     + 'confere e decide. Enquanto ninguém decidiu, reenviar a mesma revisão substitui as '
     + 'linhas.'
+    + (tir ? '\n\n' + tir + (tir === 1 ? ' linha do esquema foi tirada' : ' linhas do esquema foram tiradas')
+       + ' da lista e não ' + (tir === 1 ? 'vai' : 'vão') + '.' : '')
     + (jaDecidida ? '\n\nEsta revisão já foi ' + loc.estado + ' no Odoo. Pelo comportamento '
        + 'de hoje do módulo de lá, um reenvio dela não altera nada — mas o envio é seu: dá '
        + 'para mandar assim mesmo.' : '')
