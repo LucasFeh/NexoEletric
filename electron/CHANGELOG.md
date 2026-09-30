@@ -3,6 +3,10 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.5 — 2026-09-30
+
+- **Enviar para o Odoo: os botões no fim da linha.** **resolver** e **remover** (e o **devolver** das linhas tiradas) ficam no fim de cada linha, alinhados na lista inteira — o remover sempre na borda, o resolver à esquerda dele. Antes eles vinham colados ao texto da resolução e mudavam de lugar de uma linha para a outra.
+
 ## 1.2.4 — 2026-09-30
 
 - **A parte se troca na ficha, direto na folha.** Clique no componente: se o símbolo tem várias partes, a **Parte** das Propriedades é um seletor com todas elas, como o Part do Altium. Cada opção diz os pinos da parte, se ela já está colocada noutro item do mesmo designador (escolher uma dessas troca os dois) e se os pinos dela não têm pad no footprint. Um Ctrl+Z desfaz. Antes a ficha contava só as partes da folha, e um componente de duas partes com a 1 colocada dizia "1 de 1".
