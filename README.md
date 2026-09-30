@@ -1432,6 +1432,28 @@ R1, R2*: aumentar a quantidade assim é legítimo, repetir sem querer se desfaz 
   mexeram, fica o local e o do servidor vai para `.altiumhub\conflitos\`, como o
   `annotations.js`.
 
+### Tirar da lista uma linha do esquema
+
+Toda linha que vem do esquema também tem **remover** (desde 2026-09-30): ela sai da lista que
+vai ao Odoo — o esquema não muda — e desce para o fim, apagada e riscada, sob **tiradas da
+lista — não vão para o Odoo**, com **devolver**. Um aviso no topo, o total do rodapé e a
+pergunta do Enviar dizem quantas foram tiradas. Como o remover dos extras, não pergunta e
+entra na mesma fila.
+
+- Mora no mesmo `lista-extras.json`, num campo `fora`: cada componente tirado é o designador
+  **e** o componente que ele é hoje no esquema salvo. Trocado por outra peça, ele é outra coisa
+  a comprar e **volta sozinho** para a lista; o que sumiu do esquema não tira nada. Componente
+  de várias partes sai inteiro, contado uma vez.
+- Com algo tirado, o arquivo passa a ser `lista-extras-v2`: um hub de antes, que ignoraria o
+  campo e mandaria as linhas tiradas, **recusa** o arquivo com a frase do defeito. Sem nada
+  tirado, continua v1.
+- É o servidor que monta a lista sem as tiradas (`odoolista.py » monta_payload`), para a
+  prévia, o ensaio, o envio e a linha de comando: o que vai ao Odoo e a assinatura nunca as
+  veem. Com **todas** as linhas tiradas, a prévia ainda monta (para mostrar o que devolver), e
+  o ensaio e o envio recusam — lista sem linha não é lista.
+- A rota é a mesma dos extras: `POST /api/lista/extras` com `op: 'tira'` ou `'devolve'` e os
+  `refs` da linha. Designador que o esquema salvo não tem é recusado, e nada é escrito.
+
 ### Como uma linha acha o produto
 
 Uma linha por componente, com os designadores agrupados — `R1, R2, R5` é **uma** linha com

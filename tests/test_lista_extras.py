@@ -672,6 +672,185 @@ def test_cli_manda_os_extras_tambem():
         OL.ClienteLista, OL.le_schematic, OL.carrega_acervo, OL.le_extras = velho
 
 
+# ──────────────── linhas DO esquema tiradas da lista (2026-09-30) ────────────────
+# Pedido do dono: "na lista de envio para o odoo, tambem quero que seja possivel remover os
+# itens que ja estavam na lista". Elas saem do que vai ao Odoo, continuam a vista (_tirados)
+# e voltam pelo devolve; o esquema nao muda.
+
+C100N = 'SMD 0805 100nF'
+
+
+def _sch(d, nome='P'):
+    return io.open(os.path.join(d, 'Projects', nome, 'schematic.js'), encoding='utf-8').read()
+
+
+def test_tirar_e_devolver_linhas_do_esquema():
+    b = _Bancada(raiz_com('P', comp('R1', R10K), comp('R2', R10K), comp('C1', C100N)))
+    try:
+        OL.altera_extras('P', 'add', {'item': {'sym': CONV, 'quantidade': 2}}, b.d)
+        esquema_antes = _sch(b.d)
+        st, j = b.post('/extras', {'projeto': 'P', 'op': 'tira', 'refs': ['R1', 'R2']})
+        assert st == 200 and j['ok'], j
+        assert j['fora'] == [{'ref': 'R1', 'sym': R10K}, {'ref': 'R2', 'sym': R10K}], j
+        assert [x['id'] for x in j['itens']] == [1], 'tirar mexeu nos extras: %r' % j['itens']
+        disco = json.load(io.open(arq(b.d), encoding='utf-8'))
+        assert disco['format'] == OL.EXTRAS_FORMATO_FORA and len(disco['fora']) == 2, disco
+        assert _sch(b.d) == esquema_antes, 'tirar da lista mexeu no esquema'
+
+        st, j = b.post('/previa', {'projeto': 'P', 'revisao': 'A'})
+        p = j['payload']
+        assert [l['designadores'] for l in p['linhas']] == ['C1', 'EXTRA 1'], p['linhas']
+        assert [(l['designadores'], l['quantidade']) for l in p['_tirados']] == [('R1, R2', 2)], \
+            p['_tirados']
+        assert p['_tirados'][0]['product_id'] == 1891, \
+            'o tirado resolve como qualquer linha: a tela mostra o que ele era'
+
+        # o que chega ao Odoo: nem a linha, nem o campo da tela
+        st, j = b.post('/ensaio', {'projeto': 'P', 'revisao': 'A'})
+        assert st == 200, j
+        enviado = b.falso.visto[-1][1]
+        assert [l['designadores'] for l in enviado['linhas']] == ['C1', 'EXTRA 1'], enviado
+        assert '_tirados' not in enviado, 'o campo da tela foi ao Odoo'
+
+        # mexer num extra depois nao devolve nada
+        OL.altera_extras('P', 'update', {'id': 1, 'quantidade': 3}, b.d)
+        assert [f['ref'] for f in OL.le_fora('P', b.d)] == ['R1', 'R2'], \
+            'mexer num extra apagou os tirados'
+
+        # devolver um so: a linha volta com ele, e o outro continua fora
+        st, j = b.post('/extras', {'projeto': 'P', 'op': 'devolve', 'refs': ['R2']})
+        assert st == 200 and j['fora'] == [{'ref': 'R1', 'sym': R10K}], j
+        st, j = b.post('/previa', {'projeto': 'P', 'revisao': 'A'})
+        assert [l['designadores'] for l in j['payload']['linhas']] == ['C1', 'R2', 'EXTRA 1'], \
+            j['payload']['linhas']
+
+        # devolver o resto: o arquivo volta ao v1, sem o campo (o hub de antes le de novo)
+        st, j = b.post('/extras', {'projeto': 'P', 'op': 'devolve', 'refs': ['R1']})
+        assert st == 200 and j['fora'] == [], j
+        disco = json.load(io.open(arq(b.d), encoding='utf-8'))
+        assert disco['format'] == OL.EXTRAS_FORMATO and 'fora' not in disco, disco
+        st, j = b.post('/previa', {'projeto': 'P', 'revisao': 'A'})
+        assert [l['designadores'] for l in j['payload']['linhas']] == ['C1', 'R1, R2', 'EXTRA 1']
+        assert j['payload']['_tirados'] == []
+        # devolver o que nao esta tirado nao e erro: outra aba pode ter devolvido antes
+        st, j = b.post('/extras', {'projeto': 'P', 'op': 'devolve', 'refs': ['R1']})
+        assert st == 200 and j['fora'] == [], j
+    finally:
+        b.fecha()
+
+
+def test_tirado_volta_quando_o_componente_muda():
+    """Guardado e o designador E o componente: trocado por outra peca, e outra coisa a comprar,
+    e ele volta sozinho. O que sumiu do esquema tambem nao tira nada."""
+    d = raiz_com('P', comp('R1', R10K), comp('C1', C100N))
+    try:
+        OL.altera_fora('P', 'tira', ['R1'], d)
+        fora = OL.le_fora('P', d)
+        p = OL.monta_payload('P', 'A', OL.le_schematic('P', d), ACERVO, fora=fora)
+        assert [l['designadores'] for l in p['linhas']] == ['C1'], p['linhas']
+        trocado = esquema(comp('R1', 'SMD 0805 1K 1/8W'), comp('C1', C100N))
+        p = OL.monta_payload('P', 'A', trocado, ACERVO, fora=fora)
+        assert [l['designadores'] for l in p['linhas']] == ['C1', 'R1'] and p['_tirados'] == [], \
+            'o R1 trocado de peca continuou fora da lista'
+        p = OL.monta_payload('P', 'A', esquema(comp('C1', C100N)), ACERVO, fora=fora)
+        assert [l['designadores'] for l in p['linhas']] == ['C1'] and p['_tirados'] == []
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_multiparte_sai_inteiro():
+    """CN1 em duas partes e UM componente: tirado, saem as duas, e a identidade e a da parte 1."""
+    d = raiz_com('P', comp('CN1', 'CONE', part=2), comp('CN1', 'CONE', part=1), comp('R1', R10K))
+    try:
+        OL.altera_fora('P', 'tira', ['CN1'], d)
+        assert OL.le_fora('P', d) == [{'ref': 'CN1', 'sym': 'CONE'}]
+        p = OL.monta_payload('P', 'A', OL.le_schematic('P', d), ACERVO, fora=OL.le_fora('P', d))
+        assert [l['designadores'] for l in p['linhas']] == ['R1'], p['linhas']
+        assert [(l['designadores'], l['quantidade']) for l in p['_tirados']] == [('CN1', 1)], \
+            'multi-parte tirado tem de contar 1, como na lista'
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_tudo_tirado():
+    """Tudo tirado: a previa ainda monta (a tela precisa mostrar o que devolver), mas o ensaio e
+    o envio recusam -- lista sem linha nao e lista."""
+    b = _Bancada(raiz_com('P', comp('R1', R10K)))
+    try:
+        OL.altera_fora('P', 'tira', ['R1'], b.d)
+        st, j = b.post('/previa', {'projeto': 'P', 'revisao': 'A'})
+        assert st == 200 and j['payload']['linhas'] == [] and len(j['payload']['_tirados']) == 1, j
+        for rota, corpo in (('/ensaio', {}), ('/envio', {'confirmado': True, 'uid_externo': 'altium:P:A',
+                                                         'total_linhas': 0})):
+            st, j = b.post(rota, dict(corpo, projeto='P', revisao='A'))
+            assert st == 400 and 'tiradas' in j['error'], (rota, st, j)
+        assert not b.falso.visto, 'lista vazia chegou ao Odoo'
+    finally:
+        b.fecha()
+
+
+def test_tirar_recusa_o_que_nao_presta():
+    b = _Bancada(raiz_com('P', comp('R1', R10K)))
+    try:
+        for corpo, trecho in (({'refs': ['R9']}, 'R9'), ({'refs': []}, 'refs'), ({}, 'refs'),
+                              ({'refs': ['R?']}, 'anotado'), ({'refs': ['R1, R2']}, 'anotado'),
+                              ({'refs': [5]}, 'texto')):
+            st, j = b.post('/extras', dict(corpo, projeto='P', op='tira'))
+            assert st == 400 and trecho in j['error'], (corpo, st, j)
+        assert not os.path.exists(arq(b.d)), 'a recusa escreveu o arquivo'
+    finally:
+        b.fecha()
+
+
+def test_fora_torto_e_erro():
+    """Um `fora` torto lido como vazio mandaria ao Odoo as linhas que foram tiradas."""
+    d = raiz_com('P', comp('R1', R10K))
+    try:
+        for conteudo, trecho in (('{"format":"lista-extras-v2","itens":[],"fora":{}}', 'lista'),
+                                 ('{"format":"lista-extras-v2","itens":[],"fora":[3]}', 'objeto'),
+                                 ('{"format":"lista-extras-v2","itens":[],"fora":[{"ref":"","sym":"X"}]}',
+                                  'vazio'),
+                                 ('{"format":"lista-extras-v3","itens":[]}', 'lista-extras-v3')):
+            escreve(d, conteudo)
+            try:
+                OL.le_fora('P', d)
+            except OL.ErroOdoo as e:
+                assert trecho in str(e) and OL.EXTRAS in str(e), (conteudo, str(e))
+            else:
+                raise AssertionError('leu sem reclamar: ' + conteudo)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_cli_respeita_os_tirados():
+    """A linha de comando monta a lista pelo mesmo caminho: sem o `fora`, ela mandaria ao Odoo
+    o que o projetista tirou pela tela."""
+    visto = {}
+
+    class ClienteFalso(object):
+        def __init__(self, *a, **kw):
+            pass
+
+        def confere(self, payload):
+            visto['payload'] = payload
+            return {'estado': 'ensaio', 'total_linhas': len(payload['linhas']),
+                    'linhas_pendentes': 0, 'pendencias': []}
+
+    velho = (OL.ClienteLista, OL.le_schematic, OL.carrega_acervo, OL.le_extras, OL.le_fora)
+    try:
+        OL.ClienteLista = ClienteFalso
+        OL.le_schematic = lambda nome, raiz=None: esquema(comp('R1', R10K), comp('C1', C100N))
+        OL.carrega_acervo = lambda raiz=None: ACERVO
+        OL.le_extras = lambda nome, raiz=None: []
+        OL.le_fora = lambda nome, raiz=None: [{'ref': 'R1', 'sym': R10K}]
+        assert OL.main(['--projeto', 'P', '--revisao', 'A']) == 0
+        assert [l['designadores'] for l in visto['payload']['linhas']] == ['C1'], visto['payload']
+        OL.le_fora = lambda nome, raiz=None: [{'ref': 'R1', 'sym': R10K}, {'ref': 'C1', 'sym': C100N}]
+        assert OL.main(['--projeto', 'P']) == 1, 'lista com tudo tirado tinha de falhar'
+    finally:
+        OL.ClienteLista, OL.le_schematic, OL.carrega_acervo, OL.le_extras, OL.le_fora = velho
+
+
 def main():
     n = 0
     for nome, fn in sorted(globals().items()):
