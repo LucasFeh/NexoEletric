@@ -478,10 +478,16 @@ precisar de servidor.
   várias partes na folha troca de desenho quando o componente novo tem todas as partes que
   ele usa; faltando alguma, recebe só a identidade, como antes.
   A aba **Propriedades** do painel é a ficha, no espírito do painel homônimo do Altium
-  (designator e parte são editáveis; o resto é leitura): designator, comment, descrição, símbolo (e em que nome ele foi resolvido),
+  (posição, rotação, designator e parte são editáveis; o resto é leitura): designator, comment, descrição, símbolo (e em que nome ele foi resolvido),
   acervo de origem, footprint, posição/rotação, parâmetros e a tabela de pinos com a net de
-  cada um — com o **símbolo e o footprint desenhados no rodapé**. Não há um campo editável
-  sequer: esta vista serve para olhar e posicionar. A ficha entra quando algo é
+  cada um — com o **símbolo e o footprint desenhados no rodapé**.
+  **A parte se troca na ficha**, direto na folha: clique no componente e, se o símbolo tem
+  várias partes, a **Parte** é um seletor com todas elas, como o Part do Altium. Cada opção
+  diz os pinos da parte, se ela já está colocada noutro item do mesmo designador (escolher uma
+  dessas troca os dois) e se os pinos dela não têm pad no footprint — a parte 57 do CONE
+  PADRAO num conector de 4 vias. Um Ctrl+Z desfaz; componente de uma parte continua "1 de 1".
+  Até 2026-09-30 a ficha contava só as partes da folha, e um componente de duas partes com a
+  1 colocada dizia "1 de 1". A ficha entra quando algo é
   selecionado e dá lugar às Configurações quando a seleção acaba; o painel fechado pela
   divisória vira o botão de painéis no canto inferior esquerdo da folha.
   Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com
