@@ -269,7 +269,10 @@ Pedido do dono: selecionar todos os `fora` de uma categoria e poder apagá-los d
   todos os `fora` da categoria, **Ctrl+clique** numa linha tira ou põe um, e **Apagar N…**
   apaga a seleção. O clique normal continua abrindo o valor;
 - **na biblioteca inteira**: **Apagar fora (N)…**, na faixa Geral/Símbolos/Footprints, ao lado
-  do aviso de produtos repetidos.
+  do aviso de produtos repetidos;
+- **nas Configurações** (aba Projeto, logo abaixo da linha da biblioteca, desde 2026-09-30): a
+  contagem e **Apagar os N fora…** — o mesmo apagar-todos, num lugar que existe em qualquer
+  tela do hub (a faixa só aparece com a Biblioteca aberta).
 
 Os dois perguntam antes, num modal do hub, dizendo onde cada um é usado nos projetos e quem
 fica órfão na folha (sem `OdooId`, ou com um id que não vive em componente nenhum — o resto a
@@ -279,6 +282,12 @@ pedido e não está fora volta em `ignorados`, com o porquê. Apagar tira do esp
 em `almox-excluidos.json`, como o excluir de um valor; o número continua reservado no
 livro-razão — se o produto voltar ao Odoo, volta com o **mesmo número**. Durante a
 sincronização a rota responde 409.
+
+O **Excluir da biblioteca…** do botão direito, num valor só, manda como família a `familia` do
+símbolo. Nos especiais ela não é a do arquivo ("MICROCONTROLADOR [PINAGEM A DEFINIR]" tem
+familia "MICROCONTROLADOR" e mora em ESPECIAIS), e até 2026-09-30 o servidor respondia "não
+está no espelho do almoxarifado" com o item na tela. O `_resolve_almox` aceita hoje os três
+nomes: a família do arquivo, o nome do símbolo e a `familia` dele.
 
 ### O que é "novo"
 

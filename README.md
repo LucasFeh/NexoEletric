@@ -419,6 +419,14 @@ precisar de servidor.
   símbolo; sem nenhum dos dois, o padrão é **— sem footprint —** (e não o primeiro da PcbLib,
   que punha um diodo "M7" num clip de bateria sem ninguém escolher). O esquema salva assim, e
   o `BuildSchematic` avisa o componente sem vínculo para resolver no Altium.
+  Componente de **várias partes** (um relé com bobina e contatos, um amplificador duplo) mostra
+  o seletor **parte** em qualquer acervo: o símbolo da Biblioteca do Altium e também o valor do
+  almoxarifado desenhado em várias partes no editor (o **+ parte**). Cada opção diz quantos
+  pinos a parte tem, e a lista da direita põe a parte na frente do nome. No **Finalizar**, a
+  parte vai para o primeiro designador que já tem a mesma peça (símbolo, footprint e comment) e
+  ainda não tem aquela parte — parte 1 e parte 2 na mesma lista viram **um** U1, como o
+  "completar os existentes" da anotação do Altium. Componente de uma parte só continua
+  ganhando designador novo.
   Dentro da folha há uma **barra de ferramentas** com o pouco que a mão faz aqui: selecionar,
   **Fio** (`W`), a **gaveta dos pousos**, **Adicionar componentes** (`C`) e **libs**. A gaveta
   junta **GND** (`G`), **3V3**, **5V5**, **VIN**, o **rótulo de net** (`L`) e o **No ERC** (`N`)

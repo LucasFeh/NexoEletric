@@ -42,6 +42,22 @@ const _acervo = (g, id, titulo) => (g && g.symbols && g.symbols.length)
   ? { id, titulo: g.title || titulo, syms: g.symbols, almox: id !== 'altium',
       gerado: g.generated || '' } : null;
 
+/* ── AS PARTES DE UM COMPONENTE, em qualquer acervo ──
+   Um componente de várias partes (um relé com bobina e contatos, um amplificador duplo) é uma
+   lista de partes, cada uma com o seu desenho. Na biblioteca do Altium quem tem as partes é o
+   SÍMBOLO. No almoxarifado a família tem uma parte só (tests/test-almoxlib.js), e quem pode ter
+   várias é o VALOR: o "+ parte" do editor de símbolos grava `valores[].parts`. `partesDe` é o
+   desenho que a FOLHA vai usar para aquele componente — o do valor quando ele tem o seu, senão o
+   da família —, e é a mesma regra do alias por valor logo abaixo: o modal que escolhe a parte e a
+   folha que a desenha não podem contar partes diferentes. */
+function partesDe(s, v){
+  return (v ? (v.parts || (s && s.parts)) : (s && s.parts)) || [];
+}
+function nPartes(s, v){
+  if (v) return partesDe(s, v).length || 1;
+  return (s && (s.partcount || (s.parts || []).length)) || 1;
+}
+
 /* Monta a lista de acervos, o indice nome -> acervo e os alias por VALOR a partir dos
    globais que os <script> deixaram.
    `velhos` e a montagem anterior: o acervo cujo arquivo NAO veio agora (404, servidor
@@ -72,12 +88,15 @@ function montaAcervos(globais, velhos){
     if (!a.almox) continue;
     for (const sy of a.syms) for (const v of (sy.valores || [])){
       if (!v.altium || acervoDe.has(v.altium)) continue;
+      /* a geometria da familia, compartilhada — a nao ser que o VALOR traga a dele: e assim
+         que o PNP deixa de ser desenhado com a seta do NPN sem partir a familia em duas. E o
+         partcount e o do desenho que ficou: um valor desenhado em duas partes tem duas, e o 1
+         cravado fazia a ficha e o "Adicionar componentes" esconderem a segunda. */
+      const partes = partesDe(sy, v);
       const alias = {
         name: v.altium, description: (v.itens && v.itens[0] && v.itens[0].nome) || v.label,
-        designator: sy.designator, familia: sy.familia, partcount: 1,
-        /* a geometria da familia, compartilhada — a nao ser que o VALOR traga a dele: e assim
-           que o PNP deixa de ser desenhado com a seta do NPN sem partir a familia em duas */
-        parts: v.parts || sy.parts,
+        designator: sy.designator, familia: sy.familia, partcount: partes.length || 1,
+        parts: partes,
         footprints: v.footprint ? [{ name: v.footprint, current: true, incurrentlib: true }]
                                 : (sy.footprints || []),
         valores: [v], deValor: true,
@@ -591,6 +610,39 @@ function designadorAparece(c, sym, part){
   return !(sym && (sym.parts || []).length > 1 && part && (part.pins || []).length === 1);
 }
 
+/* ── A PARTE QUE ENTRA NA FOLHA ACHA O SEU COMPONENTE ──
+   Um componente de várias partes é UM designador repetido na folha: o U1 do amplificador duplo
+   é a parte 1 e a parte 2, as duas com "U1" (é o par ref/part que a validação exige único). O
+   "Adicionar componentes" dava designador novo a toda peça — e aí a parte 2 escolhida no modal
+   nascia U2, sozinha, e a ficha não a deixava virar U1 (recusa nome já usado). A parte tinha
+   como ser escolhida e não tinha onde se encaixar.
+
+   A regra é o "completar os existentes" da anotação do Altium: a parte vai para o PRIMEIRO
+   designador que já tem a mesma peça (mesmo símbolo, footprint e comment — outro comment é
+   outro valor) e ainda não tem esta parte; não havendo, ganha designador novo. Componente de
+   uma parte só nunca se encaixa em nada, porque todo designador já tem a parte 1 — e por isso
+   ele continua exatamente como era. `comps` são os componentes de TODAS as folhas (o designador
+   é do projeto, não da folha); `novoRef()` dá o próximo livre. Devolve { ref, junto }. */
+function refDaParte(comps, peca, novoRef){
+  const n = (peca && peca.part) || 1;
+  if (peca && (peca.partes || 1) > 1){
+    const mesma = c => c.sym === peca.sym && (c.footprint || '') === (peca.footprint || '')
+                    && (c.comment || '') === (peca.comment || '');
+    const porRef = new Map();
+    for (const c of comps || []){
+      if (!c || !c.ref) continue;
+      if (!porRef.has(c.ref)) porRef.set(c.ref, []);
+      porRef.get(c.ref).push(c);
+    }
+    const livres = [];
+    for (const [ref, l] of porRef)
+      if (l.every(mesma) && !l.some(c => (c.part || 1) === n)) livres.push(ref);
+    livres.sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+    if (livres.length) return { ref: livres[0], junto: true };
+  }
+  return { ref: novoRef(), junto: false };
+}
+
 /* ── O QUE UM COMPONENTE DO ALMOXARIFADO GRAVA ──
    `sym`, `comment`, `params` e `footprint` de um valor escolhido. Moram aqui, na parte pura,
    porque tres caminhos gravam isso e os tres tem de gravar IGUAL: o "Adicionar componentes"
@@ -807,7 +859,7 @@ function reachaValor(grupos, nome, valorAntes, symAntes){
   return ach.length === 1 ? ach[0] : null;
 }
 
-const PURE = { LIBS, ACERVO_DEFS, montaAcervos, carimbo, decideTroca, montaPartsTrocando,
+const PURE = { LIBS, ACERVO_DEFS, montaAcervos, partesDe, nPartes, refDaParte, carimbo, decideTroca, montaPartsTrocando,
                valorDoComp, tipoDoComp,
                paramsDoValor, modelosDeFootprint, footprintPadrao, identidadeDoValor,
                identidadeDoComponente, identidadeDoEscolhido, identidadeDoVinculo,
@@ -2486,9 +2538,10 @@ function acervoAtual(){
   return ACERVOS.find(a => a.id === id) || ACERVOS[0];
 }
 const qtdFmt = n => (Math.round((n || 0) * 100) / 100).toLocaleString('pt-BR');
-/* No acervo do almoxarifado o simbolo tem UMA parte e uma lista de VALORES; cada valor
-   e um conjunto de parametros (Comment, Value, MPN, Mouser, Estoque, Local). O que se
-   escolhe no modal e o valor, nao a parte. */
+/* No acervo do almoxarifado a familia tem UMA parte e uma lista de VALORES; cada valor
+   e um conjunto de parametros (Comment, Value, MPN, Mouser, Estoque, Local) e pode ter o
+   desenho proprio, em varias partes (partesDe). O que se escolhe no modal e o valor — e,
+   quando o desenho dele tem mais de uma, a parte, como na biblioteca do Altium. */
 const valoresDe = sy => (sy && sy.valores) || [];
 const estoqueDe = sy => valoresDe(sy).reduce((a, p) => a + (p.estoque || 0), 0);
 /* paramsDoValor e modelosDeFootprint moram na parte pura, la em cima: sao o formato que
@@ -2626,20 +2679,34 @@ function renderAddPreview(){
   }
   const vals = valoresDe(s);
   const v = vals.find(x => x.id === pick.valorId) || vals[0] || null;
-  const nparts = s.partcount || (s.parts || []).length || 1;
-  /* o simbolo do almoxarifado tem UMA geometria; o valor escolhido e so um conjunto de parametros */
-  const part = vals.length ? (s.parts || [])[0] : HubCore.partOf(s, pick.part || 1);
+  /* AS PARTES, EM QUALQUER ACERVO (pedido do dono, 2026-09-30): as do simbolo na biblioteca do
+     Altium, as do VALOR no almoxarifado — o mesmo desenho que a folha vai usar (partesDe). Ate
+     aqui o seletor so existia para o Altium, e um valor desenhado em duas partes entrava sempre
+     com a primeira. Trocar de valor pode trocar quantas partes ha: a escolhida que nao existe
+     mais volta para a 1. */
+  const partes = { parts: partesDe(s, v) }, nparts = nPartes(s, v);
+  if (!(pick.part >= 1 && pick.part <= nparts)) pick.part = 1;
+  /* o partOf da FOLHA, e nao uma busca daqui: o que o modal mostra e o que ela vai desenhar */
+  const part = HubCore.partOf(partes, pick.part);
   addDrawSym = part || null;
   fitPreview(camSym, part ? D.symBBox(part) : null);
   $('addSymHint').textContent = part && (part.graphics || []).length ? '' : 'sem desenho na biblioteca';
   $('addSymMeta').textContent = s.name + ' · ' + ((part && part.pins) || []).length + ' pinos'
-    + (v ? ' · valor ' + (vals.indexOf(v) + 1) + '/' + vals.length : nparts > 1 ? ' · parte ' + pick.part + '/' + nparts : '');
+    + (v ? ' · valor ' + (vals.indexOf(v) + 1) + '/' + vals.length : '')
+    + (nparts > 1 ? ' · parte ' + pick.part + '/' + nparts : '');
 
-  /* parte: so no simbolo multi-part da schlib do Altium */
-  const pl = $('addPartLab'); pl.hidden = !!vals.length || nparts <= 1;
+  /* a parte: aparece sempre que o componente tem mais de uma, com os pinos de cada uma — e o
+     que separa a bobina (2 pinos) dos contatos (3) de um rele sem abrir o desenho */
+  const pl = $('addPartLab'); pl.hidden = nparts <= 1;
   if (!pl.hidden){
     const ps = $('addPart'); ps.textContent = '';
-    for (let i = 1; i <= nparts; i++){ const o = document.createElement('option'); o.value = i; o.textContent = i + '/' + nparts; if (i === pick.part) o.selected = true; ps.append(o); }
+    for (let i = 1; i <= nparts; i++){
+      const pi = HubCore.partOf(partes, i), np = pi ? (pi.pins || []).length : 0;
+      const o = document.createElement('option'); o.value = i;
+      o.textContent = i + ' de ' + nparts + (pi ? ' · ' + np + (np === 1 ? ' pino' : ' pinos') : '');
+      if (i === pick.part) o.selected = true;
+      ps.append(o);
+    }
   }
 
   /* footprint: o do VALOR primeiro, depois os modelos do simbolo (modelosDeFootprint, na
@@ -2741,16 +2808,19 @@ function cartAdd(){
   if (!pick) return;
   const s = pick.sym, vals = valoresDe(s), v = vals.find(x => x.id === pick.valorId) || vals[0] || null;
   const qtd = Math.max(1, Math.min(99, Math.round(+$('addQtd').value) || 1));
-  const part = v ? 1 : (pick.part || 1);
+  /* a parte vale nos dois acervos: a do simbolo do Altium ou a do desenho do valor */
+  const partes = nPartes(s, v);
+  const part = Math.min(Math.max(1, pick.part || 1), partes);
   const item = {
     /* o nome do componente no Altium: cada valor e um componente proprio na lib da
        familia ("SMD 0805 10K 1/8W"). O espelho do hub continua por familia. */
     sym: (v && v.altium) || s.name,
-    part,
+    part, partes,
     footprint: $('addFp').value,
     comment: ($('addComment').value.trim() || (v && v.label) || '').replace(/"/g, "'"),
     params: paramsDoValor(v),
-    rotulo: (v && v.label) || (s.name + (part > 1 ? ' · parte ' + part : '')),
+    nome: (v && v.label) || s.name,
+    rotulo: ((v && v.label) || s.name) + (partes > 1 ? ' · parte ' + part + ' de ' + partes : ''),
     estoque: v && typeof v.estoque === 'number' ? v.estoque : null,
     qtd,
   };
@@ -2775,7 +2845,10 @@ function cartRender(){
     const row = el('div', 'cart-row');
     const t = el('div', 't'); t.title = c.rotulo;
     if (c.qtd > 1) t.append(el('b', null, c.qtd + '× '));
-    t.append(document.createTextNode(c.rotulo));
+    /* a parte vem NA FRENTE do nome: a linha corta no fim, e com "parte 2 de 3" no fim as
+       duas partes do mesmo rele viravam duas linhas iguais */
+    if (c.partes > 1) t.append(el('b', null, 'parte ' + c.part + '/' + c.partes + ' · '));
+    t.append(document.createTextNode(c.nome || c.rotulo));
     row.append(t,
       mk('−', 'uma a menos', () => { if (--cart[i].qtd <= 0) cart.splice(i, 1); cartRender(); }),
       mk('+', 'uma a mais', () => { cart[i].qtd++; cartRender(); }),
@@ -2799,11 +2872,15 @@ function finalizar(){
     y0 = snapG(minY - 900);
   }
   const PASSO_X = 700, PASSO_Y = 800, LARGURA = 9;
-  let i = 0; const novos = [];
+  let i = 0; const novos = [], juntas = [];
   for (const item of cart){
     for (let k = 0; k < item.qtd; k++){
+      /* a parte de um componente de varias vai para o designador que ainda nao a tem
+         (refDaParte); a de uma parte so ganha designador novo, como sempre */
+      const d = refDaParte(allComps(), item, () => nextRef(item.sym));
+      if (d.junto) juntas.push('parte ' + item.part + ' → ' + d.ref);
       const c = {
-        t: 'comp', sheet: folha.name, ref: nextRef(item.sym), sym: item.sym,
+        t: 'comp', sheet: folha.name, ref: d.ref, sym: item.sym,
         x: snapG(x0 + (i % LARGURA) * PASSO_X),
         y: snapG(y0 - Math.floor(i / LARGURA) * PASSO_Y),
         rot: 0, footprint: item.footprint,
@@ -2823,7 +2900,8 @@ function finalizar(){
   commit();
   const bb = unionBBox(novos);
   if (bb) cam.fit({ x1:bb.x1 - 600, y1:bb.y1 - 600, x2:bb.x2 + 600, y2:bb.y2 + 600 });
-  HubDialog.toast(novos.length + ' componente(s) na folha "' + folha.name + '" — arraste para o lugar e salve', 'ok');
+  HubDialog.toast(novos.length + ' componente(s) na folha "' + folha.name + '"'
+    + (juntas.length ? ' (' + juntas.join(', ') + ')' : '') + ' — arraste para o lugar e salve', 'ok');
 }
 
 $('addSearch').addEventListener('input', () => { buildAddList(); renderAddPreview(); });
@@ -3276,12 +3354,13 @@ function renderProps(){
   const part = HubCore.partOf(sym, it.part);
   const ac = ACERVO_DE.get(it.sym) || (sym && ACERVO_DE.get(sym.name)) || null;
   const nparts = sym ? (sym.partcount || (sym.parts || []).length || 1) : 1;
-  /* QUANTAS PARTES ESTE COMPONENTE TEM, DE VERDADE. Nao basta perguntar ao simbolo: todo
-     alias do almoxarifado tem partcount 1, e uma escolha gravada no lib-subs.js pode
-     apontar um conector de 4 partes para um alias de uma. Nesses casos a ficha dizia
-     '1 de 1' numa peca que a folha usa em 4 partes — e, pior, escondia a parte REAL do
-     item, que continuava sendo 3. A folha e a testemunha: se ha um comp com part 3 neste
-     ref, o componente tem ao menos 3 partes, o simbolo sabendo disso ou nao. */
+  /* QUANTAS PARTES ESTE COMPONENTE TEM, DE VERDADE. Nao basta perguntar ao simbolo: o
+     alias do almoxarifado so conta as partes do desenho do valor (quase sempre uma), e uma
+     escolha gravada no lib-subs.js pode apontar um conector de 4 partes para um alias de
+     uma. Nesses casos a ficha dizia '1 de 1' numa peca que a folha usa em 4 partes — e,
+     pior, escondia a parte REAL do item, que continuava sendo 3. A folha e a testemunha: se
+     ha um comp com part 3 neste ref, o componente tem ao menos 3 partes, o simbolo sabendo
+     disso ou nao. */
   const partesDoRef = sheetItems().filter(x => x.t === 'comp' && x.ref === it.ref);
   const maxNaFolha = partesDoRef.reduce((m, x) => Math.max(m, x.part || 1), 0);
   /* O TOTAL E DO COMPONENTE, NAO DO SIMBOLO. O CONE PADRAO tem 80 partes desenhadas, e um
@@ -5150,8 +5229,8 @@ window.__hubAplicaVinculos = function(vinculos){
     const res = resolve(v && v.valor ? ident.sym : nome);
     const comment = ident.comment, params = ident.params;
     /* MULTI-PARTE NAO TROCA DE SIMBOLO, e quem decide isso e ESTA funcao, olhando a folha.
-       Todo alias de valor do almoxarifado tem uma parte so; um conector desenhado em 16
-       partes perderia 15 e a fiacao junto. Grava-se a identidade e o desenho fica.
+       O alias de valor do almoxarifado quase sempre tem uma parte so; um conector desenhado
+       em 16 partes perderia 15 e a fiacao junto. Grava-se a identidade e o desenho fica.
 
        Isto era responsabilidade de quem chamava, e custou um projeto: o painel da BoM
        calculava `soParams` a partir do grupo, mas o caminho novo de "resolver pela lista do

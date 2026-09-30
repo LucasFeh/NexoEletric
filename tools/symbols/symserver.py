@@ -567,7 +567,18 @@ def _resolve_almox(fam, comp, espelhos=None, idx=None):
         # ARQUIVO ("ESPECIAIS", "RESISTOR"). Os dois só coincidem quando o nome não tem sufixo
         # (DIODO TVS, TRANSISTOR) — e só esses salvavam. Resolve pelo nome do símbolo e segue
         # com a família do arquivo, que é a chave de tudo daqui para a frente.
-        por_nome = next(((f_, v) for (f_, c_), v in idx.items() if c_ == comp and v[0] == fam), None)
+        # O botão direito do painel de valores ("Excluir da biblioteca…") manda ainda um
+        # terceiro nome: a `familia` do símbolo (`s.familia || s.name`). Nos básicos ela É a
+        # do arquivo; nos especiais não — "MICROCONTROLADOR [PINAGEM A DEFINIR]" tem familia
+        # "MICROCONTROLADOR" e mora em ESPECIAIS, e o excluir de um item dele voltava 404
+        # (2026-09-30). A `familia` do símbolo também resolve.
+        def _do_simbolo(v):
+            if v[0] == fam:
+                return True
+            sims = espelhos[v[1]][2].get('symbols') or []
+            return v[2] < len(sims) and (sims[v[2]].get('familia') or '') == fam
+
+        por_nome = next(((f_, v) for (f_, c_), v in idx.items() if c_ == comp and _do_simbolo(v)), None)
         if por_nome:
             fam, achado = por_nome
     if not achado:
