@@ -142,13 +142,46 @@ if (!retomar) {
 run('git', ['-C', REPO, 'push', 'origin', ramo]);
 run('git', ['-C', REPO, 'push', 'origin', tag]);
 
+// A entrada do CHANGELOG desta versao, sem o titulo: vira o texto do release.
+function notasDaVersao() {
+  const clArq = path.join(APP, 'CHANGELOG.md');
+  if (!fs.existsSync(clArq)) return '';
+  const linhas = fs.readFileSync(clArq, 'utf8').split(/\r?\n/);
+  const i = linhas.findIndex((l) => l === `## ${versao}` || l.startsWith(`## ${versao} `));
+  if (i < 0) return '';
+  let j = i + 1;
+  while (j < linhas.length && !linhas[j].startsWith('## ')) j++;
+  return linhas.slice(i + 1, j).join('\n').trim();
+}
+// O RASCUNHO NASCE AQUI, e nao no electron-builder. Ele sobe o .exe e o .blockmap por
+// publicadores diferentes; cada um procura o release da tag (electron-publish »
+// getOrCreateRelease, por tag_name) e, sem achar, cria o seu. Na v1.2.1 sairam DOIS
+// rascunhos -- o .blockmap num, o .exe e o latest.yml no outro -- e a conferencia parou em
+// "falta EletricHUB-Setup-X.exe" com commit, tag e push ja feitos. Com o rascunho ja no
+// GitHub os dois o acham e os tres arquivos caem no mesmo. O de uma rodada anterior
+// (retomada) e reaproveitado.
+async function rascunho() {
+  const lista = await (await api('/releases?per_page=50', ghToken)).json();
+  const doTag = Array.isArray(lista) ? lista.filter((r) => r.tag_name === tag) : [];
+  if (doTag.length > 1) throw new Error(`ha ${doTag.length} releases com a tag ${tag}: junte os arquivos num so e apague os outros`);
+  if (doTag.length) return doTag[0];
+  const notas = notasDaVersao();
+  const r = await api('/releases', ghToken, { method: 'POST', body: JSON.stringify({
+    tag_name: tag, name: `EletricHUB ${versao}`, draft: true, ...(notas ? { body: notas } : {}) }) });
+  if (!r.ok) throw new Error(`o GitHub recusou criar o rascunho ${tag}: HTTP ${r.status}`);
+  return r.json();
+}
+
 // ── 5. publica ──
 try {
   // O commit da versao mudou o package.json: o prepare carimba o commit certo no build-info.
   run('node', ['scripts/prepare.mjs']);
+  const alvo = await rascunho();
   run('npx', ['electron-builder', '--win', '--x64', '--publish', 'always']);
   const lista = await (await api('/releases?per_page=50', ghToken)).json();
-  const rel = Array.isArray(lista) && lista.find((r) => r.tag_name === tag);
+  const doTag = Array.isArray(lista) ? lista.filter((r) => r.tag_name === tag) : [];
+  if (doTag.length > 1) throw new Error(`ha ${doTag.length} releases com a tag ${tag}: junte os arquivos no ${alvo.id} e apague os outros`);
+  const rel = doTag.find((r) => r.id === alvo.id);
   if (!rel) throw new Error(`o release ${tag} nao apareceu no GitHub`);
   const tem = new Set((rel.assets || []).filter((a) => a.state === 'uploaded').map((a) => a.name));
   for (const n of [`EletricHUB-Setup-${versao}.exe`, `EletricHUB-Setup-${versao}.exe.blockmap`, 'latest.yml']) {
