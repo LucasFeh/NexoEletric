@@ -102,4 +102,32 @@ assert.deepStrictEqual(finaliza([], [Object.assign(peca(2), { qtd: 1 }), Object.
 assert.deepStrictEqual(finaliza([], [Object.assign(peca(1), { qtd: 2 }), Object.assign(peca(2), { qtd: 2 })]),
   ['U1/1', 'U2/1', 'U1/2', 'U2/2'], 'duas de cada: dois componentes completos');
 
+/* ── 5. o "Trocar componente" troca a parte do ITEM (trocaDeParte, desenhoCabe) ──
+   Pedido de 2026-09-30: "na troca de componente também quero poder trocar a parte". */
+const k1a = comp('K1', 1), k1b = comp('K1', 2), sozinho = comp('CI1', undefined);
+let t = SF.trocaDeParte([k1a, k1b], k1a, 3);
+assert.deepStrictEqual(t.map(x => [x.item.ref, x.de, x.para]), [['K1', 1, 3]],
+  'parte livre: só o item muda');
+t = SF.trocaDeParte([k1a, k1b], k1a, 2);
+assert.deepStrictEqual(t.map(x => [x.item === k1a ? 'a' : 'b', x.de, x.para]), [['a', 1, 2], ['b', 2, 1]],
+  'a parte pedida já é de outro item do designador: os dois TROCAM, e o par ref/parte continua único');
+assert.deepStrictEqual(SF.trocaDeParte([k1a, k1b], k1a, 1), [], 'a mesma parte: nada muda');
+assert.deepStrictEqual(SF.trocaDeParte([sozinho], sozinho, 2).map(x => [x.de, x.para]), [[1, 2]],
+  'item sem `part` é a parte 1');
+assert.deepStrictEqual(SF.trocaDeParte([sozinho], sozinho, '2').map(x => x.para), [2], 'a parte do <select> vem texto');
+assert.deepStrictEqual(SF.trocaDeParte([sozinho], null, 2), []);
+
+/* o desenho novo só entra no lugar quando tem todas as partes que o designador usa — contadas
+   DEPOIS da troca de parte */
+assert.strictEqual(SF.desenhoCabe([k1a, k1b], 2, []), true, 'rele de 2 partes trocado por outro de 2: troca o desenho');
+assert.strictEqual(SF.desenhoCabe([k1a, k1b], 1, []), false,
+  'um de uma parte só não cabe num designador de duas: fica só a identidade, como sempre');
+assert.strictEqual(SF.desenhoCabe([comp('K2', 3)], 2, []), false, 'a parte 3 não existe num componente de 2');
+const k2 = comp('K2', 3);
+assert.strictEqual(SF.desenhoCabe([k2], 2, SF.trocaDeParte([k2], k2, 1)), true,
+  'o item que vira a parte 1 não conta mais como a 3');
+assert.strictEqual(SF.desenhoCabe([k1a, k1b], 2, SF.trocaDeParte([k1a, k1b], k1a, 3)), false,
+  'pedir a parte 3 num componente de 2 não cabe');
+assert.strictEqual(SF.desenhoCabe([sozinho], 1, []), true, 'o caso de todo dia: uma parte, um desenho de uma');
+
 console.log('test-add-partes: ok');
