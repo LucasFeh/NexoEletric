@@ -468,6 +468,15 @@ precisar de servidor.
   o tanto que devolve o maior número de pinos de mesmo número ao ponto antigo — dizendo no
   aviso quantos voltaram. Sem isso os fios ficavam onde estavam e a ligação se desfazia sem
   uma linha de aviso, porque a extração de nets casa por coordenada exata.
+  **Trocar componente troca a parte.** Com o modal aberto pela ficha de um componente, o
+  seletor **Parte** do rodapé mostra as partes do componente escolhido — ou, sem escolha, as
+  do componente de hoje, e aí o botão vira **Trocar a parte**: é assim que se troca só a
+  parte, inclusive de um símbolo da Biblioteca do Altium, que não aparece na lista do
+  almoxarifado. A parte vale para o item que abriu o modal; os outros designadores do alcance
+  trocam de componente com a parte que têm. Se o designador já tem a parte pedida noutro
+  item, os dois trocam de parte, e o par designador/parte continua único. Um componente de
+  várias partes na folha troca de desenho quando o componente novo tem todas as partes que
+  ele usa; faltando alguma, recebe só a identidade, como antes.
   A aba **Propriedades** do painel é a ficha, no espírito do painel homônimo do Altium
   (designator e parte são editáveis; o resto é leitura): designator, comment, descrição, símbolo (e em que nome ele foi resolvido),
   acervo de origem, footprint, posição/rotação, parâmetros e a tabela de pinos com a net de

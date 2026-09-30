@@ -643,6 +643,34 @@ function refDaParte(comps, peca, novoRef){
   return { ref: novoRef(), junto: false };
 }
 
+/* ── TROCAR A PARTE DE UM ITEM DA FOLHA (o "Trocar componente") ──
+   A parte e do ITEM: U1 parte 1 e U1 parte 2 sao dois itens com o mesmo designador, e o par
+   ref/parte tem de continuar unico (a validacao recusa o repetido). Se o designador ja tem a
+   parte pedida noutro item, os dois TROCAM: o outro fica com a parte que este tinha — pedir a
+   parte 2 para o item que e a 1 e dizer "este e o 2", nao "tenha dois 2". `itensDoRef` sao os
+   itens do designador em TODAS as folhas. Devolve [{ item, de, para }], vazio quando nada muda;
+   quem chama aplica. */
+function trocaDeParte(itensDoRef, item, para){
+  const de = (item && item.part) || 1;
+  const n = Math.trunc(Number(para)) || 1;
+  if (!item || n < 1 || n === de) return [];
+  const outro = (itensDoRef || []).find(c => c && c !== item && (c.part || 1) === n);
+  const fora = [{ item, de, para: n }];
+  if (outro) fora.push({ item: outro, de: n, para: de });
+  return fora;
+}
+/* O desenho novo CABE no designador quando tem todas as partes que ele usa na folha, contadas
+   DEPOIS das `trocas` (trocaDeParte) — o item que vai virar a parte 1 nao conta mais como a 3.
+   Sem caber, trocar o `sym` largaria as partes que o componente novo nao tem (um conector
+   desenhado em 16 partes trocado por um de uma so). */
+function desenhoCabe(itensDoRef, nNovo, trocas){
+  const vira = new Map((trocas || []).map(t => [t.item, t.para]));
+  let maior = 1;
+  for (const c of itensDoRef || [])
+    if (c) maior = Math.max(maior, vira.has(c) ? vira.get(c) : (c.part || 1));
+  return maior <= (nNovo || 1);
+}
+
 /* ── O QUE UM COMPONENTE DO ALMOXARIFADO GRAVA ──
    `sym`, `comment`, `params` e `footprint` de um valor escolhido. Moram aqui, na parte pura,
    porque tres caminhos gravam isso e os tres tem de gravar IGUAL: o "Adicionar componentes"
@@ -859,7 +887,8 @@ function reachaValor(grupos, nome, valorAntes, symAntes){
   return ach.length === 1 ? ach[0] : null;
 }
 
-const PURE = { LIBS, ACERVO_DEFS, montaAcervos, partesDe, nPartes, refDaParte, carimbo, decideTroca, montaPartsTrocando,
+const PURE = { LIBS, ACERVO_DEFS, montaAcervos, partesDe, nPartes, refDaParte, trocaDeParte, desenhoCabe,
+               carimbo, decideTroca, montaPartsTrocando,
                valorDoComp, tipoDoComp,
                paramsDoValor, modelosDeFootprint, footprintPadrao, identidadeDoValor,
                identidadeDoComponente, identidadeDoEscolhido, identidadeDoVinculo,
@@ -4231,6 +4260,8 @@ let symAlvo = null, symEscolhido = null, symCands = [], symOpts = null;
    arquivo nem entrar no script inline do hub.html, que e de outro dono. */
 let apGrupos = null, apFiltro = 'all', apRec = null, apFam = null;
 let symPart = null;
+/* a parte pedida no seletor do rodape (so com o modal aberto pela ficha de UM componente) */
+let symParte = 1;
 /* medidos ao ABRIR o modal, para aparecerem antes do clique em Usar e nao num toast depois
    de gravar: quantos componentes do projeto mudam junto e a pinagem que o componente
    espera (null = o simbolo de origem nao existe em acervo nenhum) */
@@ -4253,7 +4284,7 @@ function fechaSymModal(){
      precisa voltar de qualquer jeito, senao um Esc deixa a tela vazia */
   const aoFechar = symOpts && symOpts.aoFechar;
   symAlvo = null; symEscolhido = null; symCands = []; symPart = null; apFam = null; apRec = null;
-  symOpts = null;
+  symOpts = null; symParte = 1;
   symQuantos = 0; symEsperados = null;
   symQuantosValor = 0; symValor = ''; symEscopo = 'valor';
   if (typeof aoFechar === 'function') aoFechar();
@@ -4307,6 +4338,82 @@ function pinosEsperadosDe(comp){
   return p && p.pins ? p.pins.length : null;
 }
 
+/* ── A PARTE, no "Trocar componente" ──
+   Pedido do dono (2026-09-30): "na troca de componente também quero poder trocar a parte". O
+   seletor so existe com o modal aberto pela ficha de UM componente: na lista do Odoo e na
+   selecao de varios o conjunto veio de fora, e "a parte" nao diria de qual item. Ele mostra as
+   partes do componente escolhido ou, sem escolha, as do componente de hoje — e assim que se
+   troca SO a parte, inclusive de um simbolo da biblioteca do Altium, que nao aparece na lista
+   do almoxarifado e e onde moram hoje os componentes de varias partes. A parte vale para o
+   item que abriu o modal; os outros designadores do alcance trocam de componente e ficam com
+   a parte que tem. */
+const symComParte = () => !!symAlvo && !(symOpts && (symOpts.escolhe || symOpts.vinculo));
+function symDesenhoDeHoje(){
+  const r = symAlvo ? HubCore.resolveSym(SLIB, symAlvo.sym) : null;
+  return (r && r.item) || null;
+}
+const symDaParte = () => symEscolhido ? symEscolhido.item : symDesenhoDeHoje();
+const symParteDeHoje = () => (symAlvo && symAlvo.part) || 1;
+function symNPartes(){ const s = symDaParte(); return s ? nPartes(s, null) : 1; }
+const symParteMuda = () => symComParte() && symNPartes() > 1 && symParte !== symParteDeHoje();
+function itensDoRef(ref){
+  const fora = [];
+  for (const s of model.sheets) for (const c of s.comps) if (c.ref === ref) fora.push(c);
+  return fora;
+}
+/* o seletor do rodape: uma opcao por parte, com os pinos dela — e o que separa a bobina dos
+   contatos de um rele sem abrir o desenho. A escolhida fica quando o componente novo a tem;
+   senao volta a de hoje, ou a 1 */
+function symPintaParte(){
+  const lab = $('symParteLab'), sel = $('symParte');
+  const n = symComParte() ? symNPartes() : 1;
+  lab.hidden = n <= 1;
+  if (!(symParte >= 1 && symParte <= n)) symParte = symParteDeHoje() <= n ? symParteDeHoje() : 1;
+  if (lab.hidden) return;
+  const s = symDaParte();
+  sel.textContent = '';
+  for (let i = 1; i <= n; i++){
+    const p = HubCore.partOf(s, i), np = p ? (p.pins || []).length : 0;
+    const o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = i + ' de ' + n + (p ? ' · ' + np + (np === 1 ? ' pino' : ' pinos') : '')
+                  + (!symEscolhido && i === symParteDeHoje() ? ' (a de hoje)' : '');
+    if (i === symParte) o.selected = true;
+    sel.append(o);
+  }
+}
+/* a previa: a parte escolhida do componente escolhido — ou, sem escolha, a do componente de
+   hoje quando o seletor esta na tela (e ela que muda com o seletor) */
+function symDesenha(){
+  const c = symEscolhido, comParte = symComParte();
+  const alvo = c ? c.item : (comParte && symNPartes() > 1 ? symDesenhoDeHoje() : null);
+  /* a parte do COMPONENTE, nao a 1 fixa: previa e contagem de pinos tem de falar da mesma
+     parte, senao o aviso de pinagem compara coisas diferentes */
+  const parte = comParte ? symParte : symParteDeHoje();
+  symPart = alvo ? (HubCore.partOf(alvo, parte) || HubCore.partOf(alvo, 1) || null) : null;
+  $('symHint').textContent = symPart ? '' : (c ? 'sem geometria para desenhar' : '');
+  fitPreview(camSymEsc, symPart ? D.symBBox(symPart) : null);
+  camSymEsc.resize(); ajustaPreviews([camSymEsc]);
+}
+/* o botao e a linha do rodape: "Trocar a parte" quando so ela muda (nenhum componente
+   escolhido, ou o mesmo de hoje), e a parte dita junto do nome */
+function symAtualizaBotao(){
+  const b = $('symUsar'), c = symEscolhido;
+  if (symOpts && symOpts.escolhe){
+    b.textContent = symOpts.troca ? 'Trocar a peça' : 'Escolher para a lista';
+    b.disabled = !c;
+    $('symEscolha').textContent = c ? c.name : 'nenhum componente escolhido';
+    return;
+  }
+  const muda = symParteMuda();
+  const mesma = !!c && mesmaPecaDaFolha(apGrupos, symAlvo, c.name, c.valor || null);
+  b.textContent = muda && (!c || mesma) ? 'Trocar a parte' : 'Usar este componente';
+  b.disabled = !c && !muda;
+  const n = symComParte() ? symNPartes() : 1;
+  $('symEscolha').textContent = (c ? c.name : (muda ? 'o mesmo componente' : 'nenhum componente escolhido'))
+    + (n > 1 && (c || muda) ? ' · parte ' + symParte + ' de ' + n : '');
+}
+
 /* O aviso que faltava, no pe da previa: pinagem esperada x pinagem do candidato, e quantos
    componentes mudam junto — os dois ANTES do clique. */
 function symAtualizaInfo(){
@@ -4328,11 +4435,27 @@ function symAtualizaInfo(){
     return;
   }
   const rs = symAlvo ? HubCore.resolveSym(SLIB, symAlvo.sym) : null;
+  /* a pinagem se compara quando ha o que vai para a folha: um componente escolhido, ou a parte
+     nova do de hoje. Sem nenhum dos dois, a previa e so da familia aberta, e comparar com ela
+     seria alarme sobre uma escolha que ninguem fez */
+  const muda = symParteMuda();
   const d = decideTroca({ sym: rs && rs.item && rs.item.name, how: rs && rs.how,
                           quantos: symQuantos, quantosValor: symQuantosValor, valor: symValor,
                           escopo: symEscopo, pinosEsperados: symEsperados,
-                          pinosDoCandidato: symPart && symPart.pins ? symPart.pins.length : null });
+                          pinosDoCandidato: (symEscolhido || muda) && symPart && symPart.pins
+                            ? symPart.pins.length : null });
   if (d.pinos)   box.append(el('div', 'li' + (d.pinosAlerta   ? ' alerta' : ''), d.pinos));
+  /* A PARTE, dita antes do clique: de qual para qual, e quem cede a dela quando o designador
+     ja tem a parte pedida noutro item (trocaDeParte). So a parte mudando — sem componente, ou
+     o mesmo de hoje —, o alcance nao se aplica, e a caixa para aqui. */
+  if (muda){
+    const t = trocaDeParte(itensDoRef(symAlvo.ref), symAlvo, symParte);
+    box.append(el('div', 'li', symAlvo.ref + ': parte ' + symParteDeHoje() + ' → ' + symParte
+      + (t.length > 1 ? ' — a parte ' + symParte + ' que já está na folha fica com a ' + symParteDeHoje() : '')));
+    const mesma = !!symEscolhido && mesmaPecaDaFolha(apGrupos, symAlvo, symEscolhido.name,
+                                                     symEscolhido.valor || null);
+    if (!symEscolhido || mesma) return;
+  }
   /* LISTA VINDA DE FORA: o conjunto já foi escolhido (uma linha da lista do Odoo, ou os
      componentes marcados na folha). Aqui não há alcance a decidir — e oferecer um seletor
      que não muda nada seria pior do que não ter nenhum. Diz-se QUEM vai mudar, e só. */
@@ -4364,26 +4487,24 @@ function symAtualizaInfo(){
     l.append(rb, el('span', null, op.rotulo));
     box.append(l);
   }
+  if (muda && d.alcance > 1)
+    box.append(el('div', 'li', 'a parte vale só para ' + symAlvo.ref
+      + '; os outros trocam de componente e ficam com a parte que têm'));
 }
 
 function symSelecionar(c){
   symEscolhido = c;
-  $('symEscolha').textContent = c ? c.name : 'nenhum componente escolhido';
-  $('symUsar').disabled = !c;
   /* pelo VALOR quando o candidato o tem (o clique), senao pelo nome: com xaras, a marca pelo
      nome caia na linha de outra peca (hub-almoxpick » renderValores guarda o valor em b._v) */
   for (const b of $('symVals').querySelectorAll('.ap-val'))
     b.setAttribute('aria-selected', String(!!c && (c.valor ? b._v === c.valor : b.dataset.nome === c.name)));
-  /* a parte do COMPONENTE, nao a 1 fixa: previa e contagem de pinos tem de falar da mesma
-     parte, senao o aviso de pinagem compara coisas diferentes */
-  const parte = (symAlvo && symAlvo.part) || 1;
-  symPart = c ? (HubCore.partOf(c.item, parte) || HubCore.partOf(c.item, 1) || null) : null;
-  $('symHint').textContent = symPart ? '' : (c ? 'sem geometria para desenhar' : '');
+  /* o seletor antes da previa: e ele que diz qual parte desenhar */
+  symPintaParte();
+  symDesenha();
   symAtualizaInfo();
+  symAtualizaBotao();
   if (apFam) $('symEditar').title = 'abre "' + apFam.familia + '" na aba Biblioteca » Símbolos'
     + (c ? ', já no componente "' + c.name + '"' : '');
-  fitPreview(camSymEsc, symPart ? D.symBBox(symPart) : null);
-  camSymEsc.resize(); ajustaPreviews([camSymEsc]);
 }
 
 function symLinha(c, sugerido){
@@ -4469,7 +4590,9 @@ function escolheFamilia(g){
   const dela = symEscolhido && g.valores.some(v => symEscolhido.valor ? v.v === symEscolhido.valor
                                                                      : v.nome === symEscolhido.name);
   if (!dela) symSelecionar(null);
-  if (!symPart) previaDaFamilia(g);
+  /* sem escolha, o desenho e o da familia aberta — mesmo com a parte do componente de hoje na
+     previa (o seletor de parte a pinta ali quando ele tem varias) */
+  if (!symEscolhido) previaDaFamilia(g);
 }
 /* ── ABRIR O EDITOR NUMA ABA PRÓPRIA, mantendo esta ──
    Trocar a aba do hub fecharia este modal, e a comparação "o desenho está certo?" é
@@ -4638,8 +4761,8 @@ function abrirEscolhaSimbolo(comp, opts){
   const soEscolhe = !!(symOpts && symOpts.escolhe);
   $('symTitle').textContent = soEscolhe ? 'Componente fora do esquema'
                             : atual ? 'Trocar componente' : 'Procurar componente';
-  $('symUsar').textContent = soEscolhe ? (symOpts.troca ? 'Trocar a peça' : 'Escolher para a lista')
-                                       : 'Usar este componente';
+  /* o seletor de parte nasce na parte do item; o texto do botao sai do symAtualizaBotao */
+  symParte = comp.part || 1;
   /* o nome sai da prosa e vira um campo proprio, copiavel: e ele que a pessoa leva para a
      busca do acervo logo abaixo. O meta continua com o RESTO — de quem e, o comment e onde
      ja resolveu —, que e contexto para ler, nao texto para levar */
@@ -4686,7 +4809,7 @@ function abrirEscolhaSimbolo(comp, opts){
      linha, mas nao escolhe: o Usar fica apagado ate um clique */
   symSelecionar(apRec && apRec.seleciona !== false ? candidatoDoValor(apRec.item.nome, apRec.item) : null);
   if (!apRec) symRenderLista(); else { symRenderLista(); }
-  if (!symPart && apFam) previaDaFamilia(apFam);
+  if (!symEscolhido && apFam) previaDaFamilia(apFam);
 }
 
 /* Grava RELENDO o disco antes: lib-subs.js e da LAN inteira e a aba Biblioteca do hub
@@ -4774,8 +4897,33 @@ async function gravaDesenhoNaBiblioteca(emg, para){
   await HubDialog.alert(msg, { title: 'não gravou na biblioteca' });
 }
 
+/* SO A PARTE do item muda — nem identidade nem desenho novo. Um passo so do desfazer, e o
+   item que cede a parte pedida (trocaDeParte) vai junto nele. */
+function trocaSoAParte(item, para){
+  const t = trocaDeParte(itensDoRef(item.ref), item, para);
+  fechaSymModal();
+  if (!t.length) return;
+  for (const x of t) x.item.part = x.para;
+  commit();
+  HubDialog.toast(item.ref + ': parte ' + t[0].de + ' → ' + t[0].para
+    + (t.length > 1 ? ' (a parte ' + t[1].de + ' que já estava na folha virou a ' + t[1].para + ')' : '')
+    + '. Ctrl+Z desfaz, e só o Salvar grava.', 'ok');
+}
+
 async function usarSimboloEscolhido(){
-  if (!symAlvo || !symEscolhido) return;
+  if (!symAlvo) return;
+  /* SO A PARTE: nenhum componente escolhido (o seletor mostrava as partes do de hoje), ou o
+     mesmo componente de hoje escolhido na lista. Fora do modo com parte, sem escolha nao ha o
+     que fazer, e o mesmo componente continua sendo "ja e esse". */
+  const parteNova = symParteMuda() ? symParte : null;
+  const soEscolhe = !!(symOpts && symOpts.escolhe);
+  if (!soEscolhe && (!symEscolhido || (!(symOpts && symOpts.vinculo)
+      && mesmaPecaDaFolha(apGrupos, symAlvo, symEscolhido.name, symEscolhido.valor || null)))){
+    if (parteNova){ trocaSoAParte(symAlvo, parteNova); return; }
+    if (symEscolhido) HubDialog.toast('já é esse componente', 'warn');
+    return;
+  }
+  if (!symEscolhido) return;
   /* MODO SÓ ESCOLHE — o componente fora do esquema da lista do Odoo. Nada aqui toca na folha:
      a identidade sai da MESMA função que o vínculo e o "Adicionar componentes" usam, e vai
      para quem pediu. Família sem valor único é recusada como o __hubAplicaVinculos recusa. */
@@ -4799,15 +4947,14 @@ async function usarSimboloEscolhido(){
                  familia: String(familia), mpn: String(ident.valor.mpn || '').trim() });
     return;
   }
-  const de = symAlvo.sym, para = symEscolhido.name;
+  const de = symAlvo.sym, para = symEscolhido.name, refAlvo = symAlvo.ref;
   /* medido ANTES da substituicao: depois dela o simbolo resolve e o emprestimo some */
   const emg = HubCore.symbolOf(SLIB, de) ? null : desenhoDeEmergencia(symAlvo);
-  /* "ja e esse" so quando nada muda: com o valor clicado em maos, o nome igual nao basta — o
-     conector e o soquete 'Cartão Micro SD' tem o mesmo nome e sao pecas diferentes. E a peca
-     se compara pela IDENTIDADE (mesmaPecaDaFolha), nao pela string do params: o saldo e o
-     custo mudam a cada sync, e o clique nulo passava a regravar o alcance inteiro */
-  const mesmaPeca = mesmaPecaDaFolha(apGrupos, symAlvo, para, symEscolhido.valor || null);
-  if (mesmaPeca && !(symOpts && symOpts.vinculo)){ HubDialog.toast('já é esse componente', 'warn'); return; }
+  /* "ja e esse" (la em cima, junto com a troca so de parte) so quando nada muda: com o valor
+     clicado em maos, o nome igual nao basta — o conector e o soquete 'Cartão Micro SD' tem o
+     mesmo nome e sao pecas diferentes. E a peca se compara pela IDENTIDADE (mesmaPecaDaFolha),
+     nao pela string do params: o saldo e o custo mudam a cada sync, e o clique nulo passava a
+     regravar o alcance inteiro */
 
   /* MODO VINCULO — o painel "Enviar para o Odoo" abriu este modal para resolver UMA linha
      da lista. O que resolve uma linha NAO e substituicao de simbolo: o lib-subs.js vale
@@ -4853,7 +5000,8 @@ async function usarSimboloEscolhido(){
      OdooId do outro, e o BC807 da lib da casa era recusado como familia */
   const res = window.__hubAplicaVinculos([{ refs: refs, componente: para,
                                             valor: symEscolhido.valor || null,
-                                            familia: symEscolhido.familia || null }]);
+                                            familia: symEscolhido.familia || null,
+                                            parte: parteNova ? { item: symAlvo, para: parteNova } : null }]);
   if (!res || !res.ok){
     await HubDialog.alert((res && res.erro) || 'não deu para aplicar a troca.',
                           { title: 'não troquei' });
@@ -4875,6 +5023,13 @@ async function usarSimboloEscolhido(){
       + ' pinos voltaram ao mesmo ponto (andou ' + Math.round(en.dx) + ' , ' + Math.round(en.dy) + ' mil)',
       'info', 9000);
   for (const rc of (res.recusados || [])) HubDialog.toast('recusado: ' + rc.porque, 'warn', 9000);
+  for (const pt of (res.partes || []))
+    HubDialog.toast(pt.ref + ': parte ' + pt.de + ' → ' + pt.para, 'info', 6000);
+  /* a parte pedida so vale com o desenho novo na folha: com a identidade apenas (o componente
+     novo nao tem todas as partes que o designador usa), o numero seria de outro desenho */
+  if (res.parteIgnorada)
+    HubDialog.toast(refAlvo + ': a parte ficou como estava — "' + para + '" não tem todas as partes '
+      + 'que ' + refAlvo + ' usa na folha, e só a identidade foi gravada', 'warn', 9000);
   if (typeof aoAplicar === 'function') aoAplicar({ refs: refs, componente: para, res: res });
 
   /* a troca ja vale na folha; agora, se foi pedido la em cima, o desenho vai para a
@@ -4986,6 +5141,10 @@ $('symNome').addEventListener('click', ev => {
 });
 $('symClose').addEventListener('click', fechaSymModal);
 $('symUsar').addEventListener('click', usarSimboloEscolhido);
+$('symParte').addEventListener('change', () => {
+  symParte = +$('symParte').value || 1;
+  symDesenha(); symAtualizaInfo(); symAtualizaBotao();
+});
 $('symBusca').addEventListener('input', symRenderLista);
 $('symEditar').addEventListener('click', editarSimboloNoHub);
 /* O SELETOR PROCURAVA UMA CLASSE QUE NAO EXISTE. Os botoes sao `<button data-f=...>` e o
@@ -5146,11 +5305,12 @@ window.__hubDirty = function(){ return schDirty; };
    repinta folha, painel e miniatura. Um modulo de fora que mexesse em `schematic.items`
    direto perderia os quatro, em silencio.
 
-   Cada vinculo e { refs:[...], sym, comment, params, soParams }. `soParams` e o caminho do
-   componente MULTI-PARTE: todo alias de valor do almoxarifado tem uma parte so, entao trocar
-   o `sym` de um conector desenhado em 16 partes largaria 15 delas e a fiacao junto. Nesses
-   a identidade e gravada (comment + params) e o desenho fica como esta — dito na tela, nao
-   escondido.
+   Cada vinculo e { refs:[...], sym, comment, params, soParams, parte? }. `soParams` e o
+   caminho do componente MULTI-PARTE cujo componente novo nao tem todas as partes que ele usa:
+   trocar o `sym` de um conector desenhado em 16 partes por um valor de uma parte so largaria
+   15 delas e a fiacao junto. Nesses a identidade e gravada (comment + params) e o desenho
+   fica como esta — dito na tela, nao escondido. `parte` ({ item, para }) e a parte que o
+   "Trocar componente" pediu para o item que o abriu.
 
    Recusa ANTES de tocar no modelo, nunca no meio: sym que nenhum acervo resolve viraria
    quadrado vermelho sem nada reclamar (o serializeSchematic so exige string nao vazia), e a
@@ -5237,17 +5397,32 @@ window.__hubAplicaVinculos = function(vinculos){
        Odoo" nao calculava nada — e o CN4 de um DMB, com 4 partes, saiu com 2 (2026-09-15).
        A guarda mudou de lugar: o `porRef` daqui SABE quantas partes cada designador tem, e
        nenhum chamador precisa lembrar de uma regra que a folha ja responde. O `v.soParams`
-       continua valendo para quem quer so a identidade mesmo sendo de uma parte. */
-    let multiParte = false;
-    for (const ref of refs)
-      for (const c of porRef.get(ref))
-        if ((c.part || 1) > 1 || porRef.get(ref).length > 1) multiParte = true;
-    const soParams = !!v.soParams || multiParte;
+       continua valendo para quem quer so a identidade mesmo sendo de uma parte.
+
+       Desde 2026-09-30 o desenho TROCA quando o componente novo tem todas as partes que o
+       designador usa (desenhoCabe) — um rele de duas partes trocado por outro de duas. O
+       conector de 16 partes trocado por um de uma continua recebendo so a identidade.
+
+       `v.parte` = { item, para }: a parte que o "Trocar componente" pediu para UM item (o que
+       abriu o modal). Entra no mesmo passo do desfazer, e so quando o desenho troca — com a
+       identidade apenas, o numero da parte seria de um desenho que nao esta na folha. */
+    const nNovo = (res && res.item) ? nPartes(res.item, null) : 1;
+    const pedido = (v && v.parte && v.parte.item) ? v.parte : null;
+    let multiParte = false, cabe = true;
+    for (const ref of refs){
+      const its = porRef.get(ref);
+      if (its.length > 1 || its.some(c => (c.part || 1) > 1)) multiParte = true;
+      const trocas = (pedido && pedido.item.ref === ref) ? trocaDeParte(its, pedido.item, pedido.para) : [];
+      if (!desenhoCabe(its, nNovo, trocas)) cabe = false;
+    }
+    const soParams = !!v.soParams || (multiParte && !cabe);
     planos.push({
       refs, comment, params,
       sym: soParams ? null : ident.sym,
       soParams: soParams,
       multiParte: multiParte,
+      parte: soParams ? null : pedido,
+      parteIgnorada: !!(soParams && pedido),
       /* resolveu, mas nao pelo nome exato: o lib-subs.js guarda escolhas GLOBAIS por nome e
          elas vencem o nome exato. Gravar "X" e a folha desenhar "Y" nao e erro de gravacao,
          e surpresa — e surpresa tem de sair na tela. */
@@ -5257,23 +5432,31 @@ window.__hubAplicaVinculos = function(vinculos){
   if (!planos.length) return { ok:false, erro:'nenhum vinculo passou na conferencia', recusados };
 
   let itens = 0;
-  const refsTocados = [], encaixes = [];
+  const refsTocados = [], encaixes = [], partes = [];
   for (const p of planos)
     for (const ref of p.refs){
-      for (const c of porRef.get(ref)){
+      const its = porRef.get(ref);
+      /* os pinos de TODAS as partes do designador, medidos antes de qualquer mudanca: a troca
+         de parte mexe em dois itens de uma vez, e o segundo nao pode ser medido ja trocado */
+      const antesDe = new Map(its.map(c => [c, p.sym ? (HubCore.compPinsWorld(c, SLIB) || []) : null]));
+      const trocas = (p.parte && p.parte.item.ref === ref) ? trocaDeParte(its, p.parte.item, p.parte.para) : [];
+      for (const t of trocas){ t.item.part = t.para; partes.push({ ref, de: t.de, para: t.para }); }
+      const outraParte = new Set(trocas.map(t => t.item));
+      for (const c of its){
         /* ── O ENCAIXE ──
            Trocar o componente troca o DESENHO, e desenho novo poe os pinos noutro lugar em
            volta da MESMA ancora: os fios ficam onde estavam e a ligacao se desfaz sem uma
            linha de aviso, porque a extracao de nets casa por coordenada exata. Mede-se onde
            os pinos estavam, troca-se, mede-se de novo, e o componente inteiro anda o tanto
            que devolve o maior numero de pinos ao ponto antigo (encaixeDaTroca, no bloco puro).
-           So faz sentido quando o SIMBOLO muda: com `soParams` o desenho fica o mesmo e nao
-           ha nada a encaixar. */
-        const antes = p.sym ? (HubCore.compPinsWorld(c, SLIB) || []) : null;
+           So faz sentido quando o SIMBOLO muda e a PARTE fica: com `soParams` o desenho e o
+           mesmo, e a parte trocada e outro desenho, com outros pinos — casar os numeros dela
+           com os da parte antiga moveria o componente para um lugar que nao encaixa nada. */
+        const antes = antesDe.get(c);
         if (p.sym) c.sym = p.sym;
         if (p.comment) c.comment = p.comment; else delete c.comment;
         if (p.params) c.params = p.params; else delete c.params;
-        if (antes && antes.length){
+        if (antes && antes.length && !outraParte.has(c)){
           const depois = HubCore.compPinsWorld(c, SLIB) || [];
           const enc = encaixeDaTroca(antes, depois);
           if ((enc.dx || enc.dy) && enc.encaixa > 0){
@@ -5288,8 +5471,9 @@ window.__hubAplicaVinculos = function(vinculos){
     }
   commit();
   limpaSel();
-  return { ok:true, vinculos:planos.length, refs:refsTocados, itens, recusados, encaixes,
-           soIdentidade: planos.filter(p => p.multiParte).map(p => p.refs.join(', ')),
+  return { ok:true, vinculos:planos.length, refs:refsTocados, itens, recusados, encaixes, partes,
+           parteIgnorada: planos.some(p => p.parteIgnorada),
+           soIdentidade: planos.filter(p => p.multiParte && p.soParams).map(p => p.refs.join(', ')),
            desvios: planos.filter(p => p.desvio).map(p => ({ refs:p.refs, sym:p.sym,
                                                              como:p.desvio.como, vira:p.desvio.vira })) };
 };
