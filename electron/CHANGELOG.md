@@ -3,6 +3,13 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.2 — 2026-09-30
+
+- **Adicionar componentes: a parte, em qualquer acervo.** Componente de várias partes (um relé com bobina e contatos, um amplificador duplo) mostra o seletor **Parte** também no almoxarifado — para o componente desenhado em várias partes no editor (**+ parte**) —, e não só na Biblioteca do Altium. Cada opção diz quantos pinos a parte tem, e a lista da direita mostra a parte na frente do nome. No **Finalizar**, a parte vai para o componente que ainda não a tem: parte 1 e parte 2 na mesma lista viram **um** U1, como o "completar os existentes" do Altium. O campo *comment* não fica mais espremido quando o componente tem uma parte só.
+- **Apagar os componentes fora do Odoo.** Em **Configurações › Projeto**, a contagem dos componentes que saíram do Odoo e **Apagar os N fora…**. Na Biblioteca, o painel de valores ganhou **Selecionar fora** (Ctrl+clique marca ou desmarca um) e **Apagar N…**, e a faixa de cima, **Apagar fora (N)…**. Todos perguntam antes, dizendo onde cada componente é usado; se o produto voltar ao Odoo, volta com o mesmo número.
+- **Excluir da biblioteca** (botão direito num valor) volta a funcionar para os componentes da biblioteca Especiais — o hub respondia "não está no espelho do almoxarifado".
+- **Tudo segue o ID do Odoo.** Renomear um produto no Odoo troca só o nome do componente: o desenho, o símbolo aplicado, o footprint escolhido à mão e o componente já colocado na folha acompanham o produto. O produto que aparece em mais de um componente da biblioteca é avisado na Biblioteca (**⚠ N produtos repetidos**), com **Apagar os antigos**.
+
 ## 1.2.1 — 2026-09-29
 
 - **Enviar para o Odoo: componentes fora do esquema.** O botão **Adicionar componente fora do esquema** abre o seletor do almoxarifado num modo que só escolhe (a folha não muda); a quantidade se digita no próprio painel e a peça entra como uma linha **EXTRA n**, com a marca *fora do esquema*. Na linha, a quantidade se edita ali mesmo (Enter ou sair do campo grava, Esc desfaz, as setas contam), **remover** tira a linha sem perguntar e **resolver** troca a peça mantendo a quantidade. As mudanças gravam na hora, em fila, e a lista se reconfere sozinha. Um extra da mesma peça de uma linha do esquema vai numa linha separada, com a marca *mesma peça de R1, R2*. Os extras moram em `lista-extras.json`, ao lado do esquema, e o **Importar do servidor** os traz junto com o projeto.
