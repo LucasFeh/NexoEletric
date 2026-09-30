@@ -3392,11 +3392,9 @@ function renderProps(){
      disso ou nao. */
   const partesDoRef = sheetItems().filter(x => x.t === 'comp' && x.ref === it.ref);
   const maxNaFolha = partesDoRef.reduce((m, x) => Math.max(m, x.part || 1), 0);
-  /* O TOTAL E DO COMPONENTE, NAO DO SIMBOLO. O CONE PADRAO tem 80 partes desenhadas, e um
-     conector de 4 vias que o usa nao deve oferecer 80 opcoes — seria convite para pousar
-     uma parte na 57 e criar um buraco que o ECO do Altium reclama. Quem sabe quantas
-     partes este componente tem e a folha: as que estao nela. O partcount do simbolo entra
-     so como AVISO, mais abaixo, quando ele nao alcanca o que a folha usa. */
+  /* O TOTAL QUE SE LE, quando nao ha o que escolher, e o da folha: as partes que estao nela.
+     O partcount do simbolo entra como AVISO, mais abaixo, quando ele nao alcanca o que a folha
+     usa. Com o simbolo de varias partes a ficha deixa de so ler — ver o seletor da Parte. */
   const totalPartes = Math.max(maxNaFolha, it.part || 1);
   const fpNome = it.footprint || '';
 
@@ -3520,7 +3518,37 @@ function renderProps(){
     HubDialog.toast(antigo + ' \u2192 ' + novo
       + (partesDoRef.length > 1 ? ' (' + partesDoRef.length + ' partes)' : ''), 'ok');
   }, { cls:'mono' });
-  prPar(g, [kRef, ref], ['Parte', el('span', 'pr-ro mono', (it.part || 1) + ' de ' + totalPartes)]);
+  /* A PARTE SE TROCA AQUI, direto na folha (pedido do dono, 2026-09-30: "dentro do esquema eu
+     consigo alterar a parte, so clicar e mudar a parte ja direto no esquema"). Com o simbolo de
+     varias partes o campo vira seletor com TODAS as partes dele, como o Part do Altium. Contar
+     so as da folha escondia justamente o que se queria: o ESP32 desenhado em duas partes, com a
+     1 colocada, dizia "1 de 1". Cada opcao diz os pinos da parte, se ela ja esta colocada noutro
+     item deste designador (escolher uma dessas troca os dois: trocaDeParte) e se os pinos dela
+     nao tem pad no footprint — o cuidado de quando a ficha so contava a folha: o CONE PADRAO tem
+     80 partes, e pousar a 57 num conector de 4 vias abre um buraco que o ECO do Altium reclama.
+     Avisa, nao esconde: sem footprint, ou com o footprint errado, esconder travaria a escolha. */
+  let campoParte = el('span', 'pr-ro mono', (it.part || 1) + ' de ' + totalPartes);
+  if (nparts > 1){
+    const aqui = it.part || 1;
+    const colocadas = new Set(itensDoRef(it.ref).filter(x => x !== it).map(x => x.part || 1));
+    const fp = fpNome ? HubCore.footprintOf(PLIB, fpNome) : null;
+    const pads = fp ? new Set((fp.pads || []).map(p => String(p.name))) : null;
+    const sel = el('select', 'pr-inp mono pr-sel');
+    sel.title = 'a parte deste item — escolher uma já colocada troca as duas de lugar';
+    for (let i = 1; i <= Math.max(nparts, aqui); i++){
+      const p = HubCore.partOf(sym, i), pinos = p ? (p.pins || []) : [];
+      const semPad = !!pads && pinos.length > 0 && !pinos.some(q => pads.has(String(q.num)));
+      const o = el('option', null, i + ' de ' + nparts
+        + (p ? ' · ' + pinos.length + (pinos.length === 1 ? ' pino' : ' pinos') : ' · não desenha')
+        + (colocadas.has(i) ? ' · colocada' : '') + (semPad ? ' · sem pad' : ''));
+      o.value = String(i);
+      if (i === aqui) o.selected = true;
+      sel.append(o);
+    }
+    sel.addEventListener('change', () => trocaParteDoItem(it, +sel.value || 1));
+    campoParte = sel;
+  }
+  prPar(g, [kRef, ref], ['Parte', campoParte]);
   if (nparts < totalPartes)
     prKv(g, '', 'o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham', 'dim');
 
@@ -4898,16 +4926,20 @@ async function gravaDesenhoNaBiblioteca(emg, para){
 }
 
 /* SO A PARTE do item muda — nem identidade nem desenho novo. Um passo so do desfazer, e o
-   item que cede a parte pedida (trocaDeParte) vai junto nele. */
-function trocaSoAParte(item, para){
+   item que cede a parte pedida (trocaDeParte) vai junto nele. E o mesmo gesto pelo seletor
+   da ficha (renderProps) e pelo "Trocar a parte" do modal. */
+function trocaParteDoItem(item, para){
   const t = trocaDeParte(itensDoRef(item.ref), item, para);
-  fechaSymModal();
   if (!t.length) return;
   for (const x of t) x.item.part = x.para;
   commit();
   HubDialog.toast(item.ref + ': parte ' + t[0].de + ' → ' + t[0].para
     + (t.length > 1 ? ' (a parte ' + t[1].de + ' que já estava na folha virou a ' + t[1].para + ')' : '')
     + '. Ctrl+Z desfaz, e só o Salvar grava.', 'ok');
+}
+function trocaSoAParte(item, para){
+  fechaSymModal();
+  trocaParteDoItem(item, para);
 }
 
 async function usarSimboloEscolhido(){
