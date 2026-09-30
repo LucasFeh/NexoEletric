@@ -77,6 +77,10 @@ const CSS = `
   border-radius:3px; background:var(--panel2,#2d2d2d); color:var(--fg,#d8d8d8);
   border:1px solid var(--border,#3a3a3a); cursor:pointer;}
 #odoomodal .od-row .rs .od-fix:hover{border-color:var(--accent,#4fc3f7);}
+/* os botoes da linha no FIM dela, alinhados na lista inteira: a coluna da resolucao e a ultima
+   da grade e vai ate a borda, entao o margin-left:auto encosta o bloco na direita */
+#odoomodal .od-row .rs .od-acoes{margin-left:auto; flex:none; display:flex; align-items:baseline; gap:6px;
+  padding-left:8px;}
 /* a barra do que foi resolvido e ainda nao foi salvo: a lista sai do DISCO, entao ate o
    Salvar ela nao mostra o conserto — dizer isso e o que impede o "resolvi e nao mudou" */
 #odoomodal .od-aviso.od-pend{border-left-color:var(--accent,#4fc3f7); display:flex;
@@ -364,6 +368,10 @@ function pintaLista(payload, recibo){
     const rs = el('span', 'rs' + (r.pend ? ' pend' : ''));
     const rst = el('span', 'rst', r.txt); rst.title = r.txt;
     rs.append(rst);
+    /* os botoes da linha (resolver, remover) moram no FIM dela, alinhados em toda a lista — colados
+       ao texto da resolucao eles andavam de linha em linha com o tamanho dele. O "remover" e
+       sempre o ultimo, entao fica sempre na borda (pedido do dono, 2026-09-30) */
+    const acoes = el('span', 'od-acoes');
     /* a linha que resolveu leva a ficha do produto: o product_id é a variante, e o
        hub-odoolink a traduz para o template, que é o que a URL do Odoo quer */
     if (ln.product_id && typeof HubOdooLink !== 'undefined'){
@@ -392,7 +400,7 @@ function pintaLista(payload, recibo){
         b.dataset.papel = 'resolver';
         b.title = 'trocar a peça de ' + ln.designadores + ' por um componente do almoxarifado';
         b.onclick = () => trocaPecaExtra(ln, controlesDesde(b));
-        rs.append(b);
+        acoes.append(b);
       }
       const rm = el('button', 'od-fix', 'remover');
       rm.dataset.extra = String(ln._extra);
@@ -406,7 +414,7 @@ function pintaLista(payload, recibo){
         for (const x of row.querySelectorAll('[data-extra]')){ x._usado = true; x.disabled = true; }
         removeExtra(ln);
       };
-      rs.append(rm);
+      acoes.append(rm);
     }
     else {
       /* so na linha com problema, e so quando esta vista sabe abrir o seletor: o painel roda
@@ -415,7 +423,7 @@ function pintaLista(payload, recibo){
         const b = el('button', 'od-fix', 'resolver');
         b.title = 'escolher o componente do almoxarifado para ' + ln.designadores;
         b.onclick = () => resolveLinha(ln);
-        rs.append(b);
+        acoes.append(b);
       }
       /* A LINHA DO ESQUEMA TAMBEM SAI DA LISTA (pedido do dono, 2026-09-30: "remover os itens
          que ja estavam na lista"). Nao vai ao Odoo, o esquema nao muda, e ela desce para o fim,
@@ -434,9 +442,10 @@ function pintaLista(payload, recibo){
           for (const x of row.querySelectorAll('[data-extra]')){ x._usado = true; x.disabled = true; }
           tiraLinha(ln);
         };
-        rs.append(tira);
+        acoes.append(tira);
       }
     }
+    if (acoes.childNodes.length) rs.append(acoes);
     const nm = el('span', 'nm', ln.nome_altium || '');
     nm.title = (ln.nome_altium || '') + (ln.footprint ? '\n' + ln.footprint : '');
     /* Valor e encapsulamento saem em toda linha, inclusive nas que nao resolveram: sao
@@ -478,7 +487,10 @@ function pintaLista(payload, recibo){
         dv._usado = true; dv.disabled = true;
         devolveLinha(ln);
       };
-      rs.append(dv);
+      /* no fim da linha, no lugar do "remover" das linhas de cima */
+      const acoes = el('span', 'od-acoes');
+      acoes.append(dv);
+      rs.append(acoes);
       row.append(el('span', 'des', ln.designadores), nm, el('span', 'vl', ln._valor || '—'),
                  el('span', 'en', ln._encapsulamento || '—'), el('span', 'ac', ln._acervo || '—'),
                  el('span', 'qt', String(ln.quantidade)), rs);
