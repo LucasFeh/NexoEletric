@@ -3,6 +3,12 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.4 — 2026-09-30
+
+- **A parte se troca na ficha, direto na folha.** Clique no componente: se o símbolo tem várias partes, a **Parte** das Propriedades é um seletor com todas elas, como o Part do Altium. Cada opção diz os pinos da parte, se ela já está colocada noutro item do mesmo designador (escolher uma dessas troca os dois) e se os pinos dela não têm pad no footprint. Um Ctrl+Z desfaz. Antes a ficha contava só as partes da folha, e um componente de duas partes com a 1 colocada dizia "1 de 1".
+- **Enviar para o Odoo: tirar da lista uma linha do esquema.** Toda linha do esquema tem **remover**: ela não vai para o Odoo, o esquema não muda, e ela desce para o fim, apagada, com **devolver**. Um aviso no topo, o total e a pergunta do Enviar dizem quantas foram tiradas. Trocada por outra peça, a linha volta sozinha para a lista. Com tudo tirado, a lista ainda aparece para devolver, mas conferir e enviar ficam recusados.
+- O `lista-extras.json` de um projeto com linhas tiradas passa a ser o formato v2: um app de versão anterior recusa montar a lista desse projeto, em vez de mandar ao Odoo o que foi tirado — atualize os PCs que usam a lista.
+
 ## 1.2.3 — 2026-09-30
 
 - **Trocar componente: a parte.** No rodapé do **Trocar componente** (aberto pela ficha de um componente), o seletor **Parte** mostra as partes do componente escolhido — ou, sem escolha, as do componente de hoje, e o botão vira **Trocar a parte**: é assim que se troca só a parte, inclusive de um símbolo da Biblioteca do Altium. Cada opção diz quantos pinos a parte tem. A parte vale para o item que abriu o modal; os outros designadores do alcance trocam de componente e ficam com a parte que têm. Se o designador já tem a parte pedida noutro item, os dois trocam de parte. Um Ctrl+Z desfaz tudo.
