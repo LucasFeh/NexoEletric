@@ -16,6 +16,8 @@
  *   <script src="hub-almoxfora.js">;
  *   HubAlmoxFora.barra(barra, s, parts, repinta)  depois de montar o botão "Fora" da barra;
  *   HubAlmoxFora.linha(b, p, s, repinta)          em cada linha, depois do onclick dela.
+ * E uma quarta, nas Configurações (aba Projeto, logo abaixo da linha da biblioteca):
+ *   HubAlmoxFora.pane(pane, { fechar: closeOverlay })
  * O resto (modal, toast, POST, recarga) vem do adaptador que a casca já tem para o excluir de
  * um valor, o `ioExcluirAlmox()` — o mesmo fluxo, o mesmo texto de pergunta.
  */
@@ -30,6 +32,7 @@ const CSS = `
 .alx-bar .af-apaga:hover{background:rgba(255,107,107,.10);}
 .alx-row.af-sel{background:rgba(255,183,77,.13); box-shadow:inset 3px 0 0 var(--warn,#ffb74d);}
 .alx-row.af-sel .ix{color:var(--warn,#ffb74d); font-weight:700;}
+.af-cfg .af-cfg-bt{margin-top:7px;}
 `;
 let cssPosto = false;
 function poeCss(){
@@ -82,8 +85,14 @@ function textoDaPergunta(previa, onde){
   }
   return t;
 }
-
-/* ── o estado: UMA categoria por vez ── */
+/* a linha da contagem nas Configurações, a partir do GET /api/symbols/almox-fora */
+function textoDaContagem(r){
+  if (!r || r.erro) return 'não consegui contar os componentes fora' + (r && r.erro ? ': ' + r.erro : '');
+  const n = r.total || 0, c = r.categorias || 0;
+  if (!n) return 'nenhum componente fora do Odoo na biblioteca';
+  return n + (n === 1 ? ' componente saiu' : ' componentes saíram') + ' do Odoo'
+    + (c ? ', em ' + c + (c === 1 ? ' categoria' : ' categorias') : '');
+}
 const SEL = { sim: null, nomes: new Set() };
 function selecaoDe(s){
   const nome = s ? s.name : null;
@@ -185,7 +194,48 @@ async function apaga(corpo, onde, repinta){
 }
 function apagaTodos(repinta){ return apaga({ todos: true }, 'da biblioteca inteira', repinta); }
 
-return { barra, linha, apaga, apagaTodos,
-         pure: { nomesFora, ajusta, textoDaPergunta } };
+/* ── NAS CONFIGURAÇÕES ──
+   Pedido do dono (2026-09-30): "não tô vendo o botão de apagar itens fora; ele pode ficar
+   escondido no menu de configuração". O "Apagar fora (N)…" da faixa da Biblioteca continua lá;
+   este é o mesmo apagar-todos no lugar onde se procura o que não se usa todo dia, e que existe
+   em qualquer tela do hub — a faixa só aparece com a Biblioteca aberta.
+   `fechar` (o closeOverlay da casca) fecha o modal ANTES de perguntar: a pergunta do hub mora
+   no mesmo #overlay e o esvazia inteiro ao responder. É o mesmo gesto do "Excluir projeto". */
+async function contaFora(){
+  if (typeof fetch !== 'function') return { erro: 'sem servidor' };
+  try {
+    const r = await fetch('/api/symbols/almox-fora');
+    const j = await r.json().catch(() => null);
+    if (!j || !j.ok) return { erro: (j && j.error) || ('HTTP ' + r.status) };
+    return { total: j.total || 0, categorias: Object.keys(j.porSimbolo || {}).length };
+  } catch (e) { return { erro: String((e && e.message) || e) }; }
+}
+function pane(host, opts){
+  poeCss();
+  if (!host) return;
+  const o = opts || {};
+  const box = el('div', 'af-cfg');
+  const lin = el('p', 'cfgm-val sub', 'contando os componentes fora…');
+  const b = el('button', 'btn btn-danger btn-sm af-cfg-bt', 'Apagar os fora…');
+  b.type = 'button';
+  b.disabled = true;
+  b.onclick = () => { if (o.fechar) o.fechar(); apagaTodos(); };
+  box.append(el('div', 'kicker', 'Componentes fora do Odoo'), lin, b,
+             el('p', 'cfgm-hint', 'Saem da biblioteca de uma vez, depois de uma pergunta que mostra onde '
+               + 'eles são usados. Se um produto voltar ao Odoo, a próxima sincronização o traz de volta '
+               + 'com o mesmo número. Para apagar só os de uma categoria: Biblioteca › valores › '
+               + '“Selecionar fora”.'));
+  host.append(box);
+  contaFora().then(r => {
+    lin.textContent = textoDaContagem(r);
+    /* contagem que falhou não trava o botão: a prévia do apagar pergunta ao servidor de novo
+       e diz o que houve — travar esconderia o erro atrás de um botão cinza */
+    b.disabled = !r.erro && !r.total;
+    if (r.total) b.textContent = 'Apagar os ' + r.total + ' fora…';
+  });
+}
+
+return { barra, linha, apaga, apagaTodos, pane,
+         pure: { nomesFora, ajusta, textoDaPergunta, textoDaContagem } };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubAlmoxFora;

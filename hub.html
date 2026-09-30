@@ -4586,6 +4586,8 @@ function cfgPaneProjeto(pane) {
                                            t: LIB.index.odooRows });
     pane.append(q);
   }
+  /* apagar os componentes fora do Odoo, a biblioteca inteira (hub-almoxfora.js) */
+  if (window.HubAlmoxFora) HubAlmoxFora.pane(pane, { fechar: closeOverlay });
 
   /* Destino do envio da lista ao Odoo. Fica aqui pelo mesmo motivo que o combobox de
      acervo logo acima: é configuração da MÁQUINA que a aba Projeto já abriga, e é onde se

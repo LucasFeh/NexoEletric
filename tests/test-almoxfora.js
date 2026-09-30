@@ -42,4 +42,15 @@ t = textoDaPergunta({ alvos: [{}], ignorados: [], usos: [{ projeto: 'P1', refs: 
 assert.ok(/Todos têm o id de um produto que vive noutro componente/.test(t), t);
 console.log('(2) a pergunta diz quantos, quem fica de fora e quem vira órfão');
 
-console.log('\ntest-almoxfora OK (só fora na seleção, limpeza sozinha, texto da pergunta)');
+/* nas Configurações (2026-09-30): a linha que diz quantos há antes do botão */
+const { textoDaContagem } = F.pure;
+assert.strictEqual(textoDaContagem({ total: 803, categorias: 57 }), '803 componentes saíram do Odoo, em 57 categorias');
+assert.strictEqual(textoDaContagem({ total: 1, categorias: 1 }), '1 componente saiu do Odoo, em 1 categoria');
+assert.strictEqual(textoDaContagem({ total: 0, categorias: 0 }), 'nenhum componente fora do Odoo na biblioteca');
+assert.strictEqual(textoDaContagem({ erro: 'HTTP 404' }), 'não consegui contar os componentes fora: HTTP 404',
+  'servidor sem a rota: diz o porquê em vez de "nenhum"');
+assert.ok(/^não consegui contar/.test(textoDaContagem(null)));
+assert.strictEqual(typeof F.pane, 'function', 'o painel das Configurações é exportado para a casca');
+console.log('(3) a contagem das Configurações: plural, zero e erro');
+
+console.log('\ntest-almoxfora OK (só fora na seleção, limpeza sozinha, texto da pergunta, contagem)');
