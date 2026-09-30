@@ -3,6 +3,11 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.3 — 2026-09-30
+
+- **Trocar componente: a parte.** No rodapé do **Trocar componente** (aberto pela ficha de um componente), o seletor **Parte** mostra as partes do componente escolhido — ou, sem escolha, as do componente de hoje, e o botão vira **Trocar a parte**: é assim que se troca só a parte, inclusive de um símbolo da Biblioteca do Altium. Cada opção diz quantos pinos a parte tem. A parte vale para o item que abriu o modal; os outros designadores do alcance trocam de componente e ficam com a parte que têm. Se o designador já tem a parte pedida noutro item, os dois trocam de parte. Um Ctrl+Z desfaz tudo.
+- **Componente de várias partes troca de desenho** quando o componente novo tem todas as partes que ele usa na folha (um relé de duas partes por outro de duas). Faltando alguma, recebe só a identidade, como antes.
+
 ## 1.2.2 — 2026-09-30
 
 - **Adicionar componentes: a parte, em qualquer acervo.** Componente de várias partes (um relé com bobina e contatos, um amplificador duplo) mostra o seletor **Parte** também no almoxarifado — para o componente desenhado em várias partes no editor (**+ parte**) —, e não só na Biblioteca do Altium. Cada opção diz quantos pinos a parte tem, e a lista da direita mostra a parte na frente do nome. No **Finalizar**, a parte vai para o componente que ainda não a tem: parte 1 e parte 2 na mesma lista viram **um** U1, como o "completar os existentes" do Altium. O campo *comment* não fica mais espremido quando o componente tem uma parte só.
