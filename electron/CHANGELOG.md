@@ -3,6 +3,10 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.6 — 2026-10-01
+
+- **A Parte sempre à vista.** Na ficha (Propriedades), a **Parte** aparece como seletor em todo componente: no de uma parte só ela fica travada em "1 de 1", e o *title* diz por quê (desenhar as partes no editor de símbolos, ou trocar por um componente que as tenha). No **Trocar componente**, o **PARTE** do rodapé aparece desde a abertura, travado enquanto o componente tem uma parte, e destrava ao escolher um componente de várias. Antes os dois sumiam no componente de uma parte, e a troca de parte parecia não existir.
+
 ## 1.2.5 — 2026-09-30
 
 - **Enviar para o Odoo: os botões no fim da linha.** **resolver** e **remover** (e o **devolver** das linhas tiradas) ficam no fim de cada linha, alinhados na lista inteira — o remover sempre na borda, o resolver à esquerda dele. Antes eles vinham colados ao texto da resolução e mudavam de lugar de uma linha para a outra.
