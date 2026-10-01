@@ -251,6 +251,9 @@
   /* a Parte na ficha: o mesmo campo discreto, com a seta de escolher */
   select.pr-inp{cursor:pointer;}
   select.pr-inp option{background:var(--panel); color:var(--fg);}
+  /* travado (componente de uma parte so): a seta continua la, apagada — o campo existe */
+  select.pr-inp:disabled{cursor:not-allowed; opacity:.55;}
+  .pr-parte-um{display:block; min-width:0;}
   /* dois campos lado a lado (X e Y; rotação e os espelhos) */
   .pr-par{display:flex; gap:8px; margin:3px 0 1px;}
   .pr-par-c{flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:1px;}
@@ -375,6 +378,7 @@
   /* a parte, colada no botao: e o ultimo ajuste antes do clique (o mesmo rotulo do Adicionar) */
   #symmodal .sym-parte{display:flex; align-items:center; gap:6px; flex:none; font-size:10px;
     letter-spacing:.08em; text-transform:uppercase; color:var(--text-3);}
+  #symmodal .sym-parte select:disabled{opacity:.5; cursor:not-allowed;}
   #symmodal .kicker{font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--text-4);
     padding:9px 9px 3px;}
   #addmodal :focus{outline:none;}

@@ -3547,6 +3547,20 @@ function renderProps(){
     }
     sel.addEventListener('change', () => trocaParteDoItem(it, +sel.value || 1));
     campoParte = sel;
+  } else if (sym && totalPartes <= 1){
+    /* UMA PARTE SO: o seletor aparece assim mesmo, travado em "1 de 1", e diz por que. Sumindo,
+       ele parecia nao existir — o dono procurou a troca de parte num ESP32 de uma parte so
+       (2026-10-01) e concluiu que ela nao tinha chegado. O title mora na caixa e no seletor:
+       sobre um <select> desabilitado o navegador pode nao mostrar o do proprio campo. */
+    const caixa = el('span', 'pr-parte-um');
+    const sel = el('select', 'pr-inp mono pr-sel');
+    sel.append(el('option', null, '1 de 1'));
+    sel.disabled = true;
+    caixa.title = sel.title = 'este componente tem uma parte só — para trocar de parte ele precisa '
+      + 'ter várias: desenhe-as no editor de símbolos (+ parte), ou troque por um componente que '
+      + 'as tenha (Trocar componente…)';
+    caixa.append(sel);
+    campoParte = caixa;
   }
   prPar(g, [kRef, ref], ['Parte', campoParte]);
   if (nparts < totalPartes)
@@ -4395,9 +4409,17 @@ function itensDoRef(ref){
 function symPintaParte(){
   const lab = $('symParteLab'), sel = $('symParte');
   const n = symComParte() ? symNPartes() : 1;
-  lab.hidden = n <= 1;
+  /* A VISTA SEMPRE que o modal abre pela ficha de um componente, e TRAVADO em "1 de 1" quando o
+     componente (o escolhido, ou o de hoje) tem uma parte so. Escondido, ele parecia nao existir:
+     o dono abriu o "Trocar componente" num ESP32 de uma parte (2026-10-01) e nao achou onde
+     trocar a parte — ela so aparecia depois de escolher um componente de varias. */
+  lab.hidden = !symComParte();
   if (!(symParte >= 1 && symParte <= n)) symParte = symParteDeHoje() <= n ? symParteDeHoje() : 1;
   if (lab.hidden) return;
+  sel.disabled = n <= 1;
+  lab.title = n > 1 ? '' : symEscolhido
+    ? 'o componente escolhido tem uma parte só'
+    : 'este componente tem uma parte só — escolha à esquerda um componente de várias partes para trocar a parte';
   const s = symDaParte();
   sel.textContent = '';
   for (let i = 1; i <= n; i++){
