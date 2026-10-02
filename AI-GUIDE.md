@@ -272,7 +272,12 @@ de um projeto que já tinha PCB). Único ajuste: os arquivos vivem em
   do PCB List / Properties do Altium.
 - Rotação: **graus, anti-horário** (0–360). Componentes no bottom usam o valor bruto do Altium
   (não converta nada).
-- Camadas de cobre: `Top` e `Bottom`. Silk: `TopOverlay`/`BottomOverlay`. Pads TH: `Multi`.
+- Camadas (as chaves que o `board.js` e o `changes.js` usam; a tabela é `HubCore.PCB_LAYERS`,
+  na ordem das abas do Altium): cobre `Top`, `Mid1`..`Mid30`, `Bottom` (e `Plane1`..`Plane16`);
+  serigrafia `TopOverlay`/`BottomOverlay`; pasta `TopPaste`/`BottomPaste`; máscara
+  `TopSolder`/`BottomSolder`; `DrillGuide`, `KeepOut`, `DrillDrawing`; mecânicas
+  `Mech1`..`Mech16` (o nome que a placa dá — "Top 3D Body", "Top Courtyard"… — vem em
+  `board.js » layers`); e `Multi` (pad passante e via — nunca camada de desenho).
 - `board.js » board.bbox` dá os limites da placa. Mantenha tudo dentro do contorno (ou use
   `outline_set` para redefini-lo).
 
@@ -301,21 +306,40 @@ var changes = [
 
 | op | obrigatórios | opcionais |
 |---|---|---|
-| `comp_move` | `ref`, `orig_x`, `orig_y`, `orig_rot`, `orig_layer` | `x`, `y`, `rot`, `layer` (mudar layer = flip), `note` |
-| `track_edit` | `id`, `orig_x1..orig_y2`, `orig_w`, `orig_layer` | `x1`,`y1`,`x2`,`y2`,`w`,`layer`,`net`,`note` |
-| `track_add` | `layer` (Top/Bottom), `x1`,`y1`,`x2`,`y2`,`w` | `net`, `note` |
+| `comp_move` | `ref`, `orig_x`, `orig_y`, `orig_rot`, `orig_layer` | `x`, `y`, `rot`, `layer` (`Top`/`Bottom`; mudar = flip), `note` |
+| `track_edit` | `id`, `orig_x1..orig_y2`, `orig_w`, `orig_layer` | `x1`,`y1`,`x2`,`y2`,`w`,`layer` (qualquer, menos `Multi`),`net`,`note` |
+| `track_add` | `layer` (qualquer, menos `Multi`), `x1`,`y1`,`x2`,`y2`,`w` | `net` (só em cobre), `note` |
 | `track_del` | `id`, `orig_x1..orig_y2`, `orig_w`, `orig_layer` | `note` |
 | `via_edit` | `id`, `orig_x`, `orig_y` | `x`,`y`,`size`,`drill`,`note` |
 | `via_add` | `x`,`y`,`size`,`drill` | `net`, `from`, `to`, `note` |
 | `via_del` | `id`, `orig_x`, `orig_y` | `note` |
-| `arc_edit` | `id`, `orig_cx`,`orig_cy`,`orig_r`,`orig_sa`,`orig_ea`,`orig_layer` | `cx`,`cy`,`r`,`sa`,`ea`,`w`,`layer`,`note` |
-| `arc_add` | `layer`, `cx`,`cy`,`r`,`sa`,`ea`,`w` | `net`, `note` |
+| `arc_edit` | `id`, `orig_cx`,`orig_cy`,`orig_r`,`orig_sa`,`orig_ea`,`orig_layer` | `cx`,`cy`,`r`,`sa`,`ea`,`w`,`layer` (qualquer, menos `Multi`),`note` |
+| `arc_add` | `layer` (qualquer, menos `Multi`), `cx`,`cy`,`r`,`sa`,`ea`,`w` | `net` (só em cobre), `note` |
 | `arc_del` | `id`, `orig_cx..orig_ea`, `orig_layer` | `note` |
-| `text_edit` | `id`, `orig_x`, `orig_y`, `orig_text`, `orig_layer` | `text`, `x`, `y`, `h`, `w`, `rot`, `note` |
+| `text_edit` | `id`, `orig_x`, `orig_y`, `orig_text`, `orig_layer` | `text`, `x`, `y`, `h`, `w`, `rot`, `layer`, `mirror`, `note` |
+| `text_add` | `layer`, `text`, `x`, `y` (centro do bbox), `h` | `w` (traço; padrão h/10), `rot`, `mirror`, `note` |
+| `text_del` | `id`, `orig_x`, `orig_y`, `orig_text`, `orig_layer` | `note` |
+| `fill_add` | `layer`, `x1`,`y1`,`x2`,`y2` (cantos SEM rotação) | `rot` (em torno do centro), `net`, `note` |
+| `fill_edit` | `id`, `orig_x1`,`orig_y1`,`orig_x2`,`orig_y2`, `orig_layer` | `x1`,`y1`,`x2`,`y2`,`rot`,`layer`,`net`,`note` |
+| `fill_del` | `id`, `orig_x1..orig_y2`, `orig_layer` | `note` |
+| `region_add` | `layer`, `pts` (`[[x,y],...]` ≥3, numa linha só) | `net`, `cutout` (true = Board Cutout; a camada é ignorada), `note` |
+| `region_del` | `id`, `orig_layer`, `orig_n` (nº de vértices), `orig_x0`, `orig_y0` (1º vértice) | `note` |
 | `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
 | `outline_set` | `pts` (`[[x,y],...]` ≥3, polígono **fechado**, só linhas) | `note` |
 | `comp_attr` | `ref`, `orig_designator`, `orig_comment` | `designator` (novo texto), `comment` (novo texto), `note` |
 
+- **Ordem.** O ApplyChanges aplica o arquivo na ordem e confere cada `orig_*` com o objeto
+  como ele está DEPOIS das linhas anteriores — o motor do hub faz a mesma conta e acusa erro.
+  Então: **uma linha por objeto** (para mexer de novo, edite a linha que já existe), e o
+  `designator_move` de um componente vem **antes** do `comp_move` dele, com x/y no lugar de
+  antes do componente andar.
+- Ids que as ops de edição aceitam: `t…`/`a…` (trilha/arco de cobre), `s…` (linha/arco de
+  serigrafia **sem `owner`**) e `l…` (linha/arco de `lines`, as camadas mecânicas, keep-out,
+  máscara, pasta e furação, sem `owner`). Objeto com `owner` é do componente: anda com ele.
+  `fill_*`, `text_del` e `region_del` também só valem para objeto livre; `region_del` não vale
+  para pedaço de polígono despejado (`poly:true` — o Altium redespeja) nem em espelho antigo.
+- Círculo cheio, triângulo e polígono cheio → `region_add`; retângulo cheio → `fill_add`;
+  contorno de qualquer forma → `track_add` em série (círculo: `arc_add` de 0 a 360).
 - `comp_attr` — aplicado **por último** pelo ApplyChanges (renomear cedo quebraria os `ref` das ops seguintes); renomear na PCB dessincroniza do esquema — o ECO vai acusar.
 - `size` = diâmetro do anel da via; `drill` = diâmetro do furo (`drill < size`).
 - `sa`/`ea` = ângulos inicial/final do arco em graus, anti-horário a partir de +X.
@@ -333,6 +357,36 @@ var changes = [
 - `outline_set` **substitui inteiro** o `Board.BoardOutline` pelo polígono de `pts`; só
   aceita segmentos de linha (contorno com arcos: desenhe no Altium). O `ApplyChanges`
   **pede confirmação explícita do usuário** antes de aplicar (é destrutivo).
+
+### O que o `board.js` traz além do básico (ExportBoard 2026-10 e o leitor de `.PcbDoc`)
+
+Tudo opcional: espelho antigo (sem `"exporter"`) não tem estes campos e continua valendo.
+
+| campo | o quê |
+|---|---|
+| `exporter` | quem gerou ("ExportBoard 2026-10", "pcbdoc2board …"); ausente = espelho antigo |
+| `layers[]` | `{key, name, color, stack}`: nome e cor que a placa dá; `stack` = ordem física do cobre |
+| `rules` | `{sm, pm, clearance, width, viaSize, viaDrill}` em mm (máscara, pasta, folga, largura, via) |
+| `fills[]` | `{id:"f…", layer, x1, y1, x2, y2, rot, net, owner?}` — o QR code e os logos da casa são fills |
+| `lines[]` | linhas/arcos (formato do `silk`) das camadas que não são cobre nem serigrafia; ids `l…` |
+| `keepout:true` | em trilha/arco/fill/region de cobre que é keepout: **não é cobre** |
+| `texts[]` | + `w` (traço), `kind` (stroke/truetype/barcode), `font`, `bold`, `italic`, `inverted`, `ax`/`ay` (âncora) e `polys` (o contorno EXATO do texto, quando veio) |
+| `regions[]` | + `holes` (furos), `poly:true` (pedaço de polígono despejado), `owner`, `keepout` |
+| `cutouts[]` | + `kindn` (o `Kind()` cru do Altium) |
+| pads | + `plated`, `sm`/`pm` (expansão efetiva de máscara/pasta), `tentTop`/`tentBot`, `nopaste`, `bot` (pilha do lado de baixo), `hox`/`hoy` (furo deslocado) |
+| vias | + `sm`, `tentTop`, `tentBot` |
+
+Sem o Altium: `python3 tools/pcbdoc/pcbdoc2board.py <arquivo.PcbDoc> <saida.js>` lê o
+`.PcbDoc` direto e escreve um `board.js` completo (validado item a item contra o do
+ExportBoard). Ele nunca sobrescreve `Projects/*/board.js` sem `--forcar` (e aí faz `.bak`).
+
+### Gerber
+
+A vista PCB gera o Gerber (botão **Gerber**, ou a sub-aba **PCB › Gerber** do hub) a partir da
+placa COM as mudanças — o `hub-gerber.js` escreve o mesmo conjunto X2 mm 4:5 do Altium
+(cobre, pad master, legenda, máscara, pasta, profile e furação PTH/NPTH em Gerber). A IA não
+precisa gerar Gerber; se precisar conferir um, o `hub-gerberview.js` lê X2, RS-274X e
+Excellon em Node (`HubGerberView.parse`).
 
 ### Boas práticas de layout (o DRC final é do Altium)
 
