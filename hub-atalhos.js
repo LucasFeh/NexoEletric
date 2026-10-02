@@ -1,17 +1,31 @@
-/* AltiumPCBMirror v2 - hub-atalhos.js — os atalhos de teclado da vista Esquema.
+/* AltiumPCBMirror v2 - hub-atalhos.js — os atalhos de teclado das vistas Esquema e PCB.
 
-   A tabela, as regras de gravação e o editor das teclas. Morava inteiro no schframe.js, com
+   As tabelas, as regras de gravação e o editor das teclas. Morava inteiro no schframe.js, com
    o editor numa sub-aba "Atalhos" do painel da vista; o editor mudou para as Configurações do
-   hub (aba Atalhos) e a vista ficou só com o teclado. Os dois lados leem daqui:
+   hub (aba Atalhos) e a vista ficou só com o teclado. Desde 2026-10-02 são DUAS tabelas, uma
+   por vista, cada uma com a sua chave no localStorage, o seu padrão e os seus gestos:
 
-   - schframe.js usa a tabela e o mapaAtalhos para saber o que cada tecla faz, e re-exporta
-     as funções puras (os testes em Node as pegam por ele: tests/test-fio-topologia.js);
-   - o hub chama pane() dentro do modal de configuração.
+   - HubAtalhos.sch, e o próprio HubAtalhos (CHAVE, ATALHOS_PADRAO, GESTOS, mapaAtalhos,
+     defineAtalho, carrega, grava), que continua sendo o Esquema: schframe.js usa a tabela e o
+     mapaAtalhos para saber o que cada tecla faz, e re-exporta as funções puras (os testes em
+     Node as pegam por ele: tests/test-fio-topologia.js);
+   - HubAtalhos.pcb, a vista PCB, com a mesma forma (CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS,
+     mapaAtalhos, defineAtalho, carrega, grava);
+   - o hub chama pane() dentro do modal de configuração, e o editor mostra as duas.
 
-   O que o usuário grava fica no localStorage, na MESMA chave de antes (CHAVE), então quem já
-   tinha trocado uma tecla não perde nada. O hub e a vista (um <iframe> da mesma origem)
-   dividem esse localStorage: gravar no modal dispara o evento `storage` na vista aberta, e
-   ela troca o teclado na hora, sem recarregar.
+   Tecla repetida só conta DENTRO da vista: o W é o fio no Esquema e a trilha na PCB.
+
+   O que o usuário grava fica no localStorage (a chave do Esquema é a MESMA de antes, então
+   quem já tinha trocado uma tecla não perde nada). O hub e as vistas (um <iframe> da mesma
+   origem) dividem esse localStorage: gravar no modal dispara o evento `storage` na vista
+   aberta, e ela troca o teclado na hora, sem recarregar. A vista PCB lê assim:
+
+     let ATALHOS = HubAtalhos.pcb.mapaAtalhos(HubAtalhos.pcb.carrega());
+     addEventListener('storage', e => {
+       if (e.key === HubAtalhos.pcb.CHAVE || e.key === null)
+         ATALHOS = HubAtalhos.pcb.mapaAtalhos(HubAtalhos.pcb.carrega());
+     });
+     const acao = ATALHOS.porTecla[HubAtalhos.normalizaTecla(e)];   // no keydown
 
    Autossuficiente como o hub-dialog.js: injeta o próprio CSS e traz os próprios rótulos em
    pt-BR. Em Node vale só a parte pura. */
@@ -22,7 +36,7 @@
   else raiz.HubAtalhos = m;
 })(typeof self !== 'undefined' ? self : this, function () {
 
-const CHAVE = 'altiumhub.sch.atalhos';
+/* ══ A VISTA ESQUEMA ══ */
 
 /* ── ATALHOS: uma tabela so ──
    A dica do painel era uma COPIA escrita a mao, e ja mentia: nao citava Ctrl+Y, Ctrl+A, Ctrl+W
@@ -30,7 +44,7 @@ const CHAVE = 'altiumhub.sch.atalhos';
    editor desenha dela, entao trocar uma tecla troca as duas de uma vez.
    O Escape fica DE FORA de proposito: ele e a saida de emergencia de seis estados e e tratado
    antes da guarda de campo de texto, para funcionar com o foco dentro de um <input>. */
-const ATALHOS_PADRAO = [
+const ATALHOS_SCH = [
   { id:'add',       tecla:'C',      rotulo:'Adicionar componentes' },
   { id:'fio',       tecla:'W',      rotulo:'Ferramenta fio' },
   { id:'terra',     tecla:'G',      rotulo:'Pousar terra (GND)' },
@@ -46,6 +60,115 @@ const ATALHOS_PADRAO = [
   { id:'refazer',   tecla:'Ctrl+Y', rotulo:'Refazer' },
   { id:'tudo',      tecla:'Ctrl+A', rotulo:'Selecionar tudo da folha' },
 ];
+
+/* Os gestos do mouse e as teclas do fio: fixos (o teclado le a tabela de atalhos; estes o
+   canvas trata direto, ANTES do mapa), mas moram na mesma tabela porque respondem a mesma
+   pergunta. `quando` e a coluna Quando do VSCode: o Espaco da vista gira a selecao, e so com o
+   fio na mao (W) ele inverte o canto. Sem `quando`, vale o da vista (QUANDO).
+   Desde 2026-09-24 o fio se pega em dois cliques, como no Altium: o primeiro pega o fio
+   inteiro, o segundo so o trecho (o duplo clique que promovia a fio inteiro saiu). */
+const FIO = 'fio na mão (W)', ARRASTO = 'arrastando';
+const GESTOS_SCH = [
+  { rotulo:'Selecionar (no fio, o fio inteiro)',           teclas:['Clique'] },
+  { rotulo:'Pegar só o trecho do fio (ou o vértice)',      teclas:['Segundo clique'] },
+  { rotulo:'Acender a net',                                teclas:['Alt', 'Clique'] },
+  { rotulo:'Somar à seleção',                              teclas:['Shift', 'Clique'] },
+  { rotulo:'Mover a seleção',                              teclas:['Arrastar'] },
+  { rotulo:'Andar reto no trilho da guia',                 teclas:['Shift'],            quando:ARRASTO },
+  { rotulo:'Soltar as guias',                              teclas:['Ctrl'],             quando:ARRASTO },
+  { rotulo:'Selecionar vários',                            teclas:['Arrastar no vazio'] },
+  { rotulo:'Fixar o canto do fio',                         teclas:['Clique'],           quando:FIO },
+  { rotulo:'Inverter o canto do fio',                      teclas:['Espaço'],           quando:FIO },
+  { rotulo:'Mudar o modo do fio (90°, 45°, livre)',        teclas:['Shift', 'Espaço'],  quando:FIO },
+  { rotulo:'Desfazer o último canto',                      teclas:['Backspace'],        quando:FIO },
+  { rotulo:'Terminar o fio (de novo, larga a ferramenta)', teclas:['Botão direito'],    quando:FIO },
+  { rotulo:'Arrastar a tela',                              teclas:['Botão direito', 'Arrastar'] },
+  { rotulo:'Aproximar e afastar',                          teclas:['Roda do mouse'] },
+  { rotulo:'Largar o que estiver na mão',                  teclas:['Escape'] },
+];
+
+/* ══ A VISTA PCB ══ */
+
+/* Pedido do dono (2026-10-02): W cria trilha nova e Ctrl+2 poe via. Nao sao as do Altium 21 de
+   fabrica (la e Ctrl+W ou P,T para a trilha, que o navegador leva, e P,V para a via; o Ctrl+2 de
+   la e memoria de selecao). O resto segue o Altium 21 onde a tecla cabe na tabela, e o editor de
+   simbolos onde ja havia costume (L linha, A arco, R retangulo, G poligono, T texto): por isso a
+   grade sai do G de antes e vai para o B, como no Esquema, e o T deixa de ser trilha. O que o
+   Altium faz com Shift+letra (Shift+S, camada unica) vira a letra sozinha: o normalizaTecla nao
+   grava Shift em tecla de um caractere. Os ids e as teclas sao o contrato com o pcbframe.js,
+   que programa contra eles. */
+const ATALHOS_PCB = [
+  { id:'trilha',      tecla:'W',      rotulo:'Trilha (roteamento interativo)' },
+  { id:'via',         tecla:'Ctrl+2', rotulo:'Via (com a trilha na mão: via + troca de camada)' },
+  { id:'linha',       tecla:'L',      rotulo:'Linha na camada atual' },
+  { id:'arco',        tecla:'A',      rotulo:'Arco' },
+  { id:'circulo',     tecla:'O',      rotulo:'Círculo' },
+  { id:'retangulo',   tecla:'R',      rotulo:'Retângulo' },
+  { id:'poligono',    tecla:'G',      rotulo:'Polígono' },
+  { id:'texto',       tecla:'T',      rotulo:'Texto' },
+  { id:'preencher',   tecla:'P',      rotulo:'Preencher formas (cheio/contorno)' },
+  { id:'sinalizar',   tecla:'N',      rotulo:'Sinalizar para a IA' },
+  { id:'medir',       tecla:'Ctrl+M', rotulo:'Medir distância' },
+  { id:'unidade',     tecla:'Q',      rotulo:'Trocar a unidade mm/mil' },
+  { id:'camadaUnica', tecla:'S',      rotulo:'Camada única' },
+  { id:'proxCamada',  tecla:'+',      rotulo:'Próxima camada' },
+  { id:'antCamada',   tecla:'-',      rotulo:'Camada anterior' },
+  { id:'outraFace',   tecla:'*',      rotulo:'Top ↔ Bottom (com a trilha na mão: via + troca)' },
+  { id:'virar',       tecla:'V',      rotulo:'Ver por baixo' },
+  { id:'grade',       tecla:'B',      rotulo:'Mostrar/ocultar a grade' },
+  { id:'diff',        tecla:'D',      rotulo:'Fantasmas das mudanças' },
+  { id:'enquadrar',   tecla:'F',      rotulo:'Enquadrar a placa' },
+  { id:'girar',       tecla:'Espaço', rotulo:'Girar 90°' },
+  { id:'espelhoX',    tecla:'X',      rotulo:'Espelhar na horizontal' },
+  { id:'espelhoY',    tecla:'Y',      rotulo:'Espelhar na vertical' },
+  { id:'apagar',      tecla:'Delete', rotulo:'Apagar a seleção' },
+  { id:'desfazer',    tecla:'Ctrl+Z', rotulo:'Desfazer' },
+  { id:'refazer',     tecla:'Ctrl+Y', rotulo:'Refazer' },
+  { id:'tudo',        tecla:'Ctrl+A', rotulo:'Selecionar tudo' },
+  { id:'editar',      tecla:'E',      rotulo:'Travar/destravar a edição' },
+  { id:'salvar',      tecla:'Ctrl+S', rotulo:'Salvar o changes.js' },
+  { id:'ajuda',       tecla:'H',      rotulo:'Ajuda' },
+];
+
+/* Os gestos da PCB, no molde dos do Esquema: o canvas os trata direto, ANTES do mapa.
+   Tres linhas nao sao tecla fixa, sao ACOES do mapa num estado da vista, e trazem `acoes`: com a
+   trilha na mao, a acao via e a outraFace (a tecla que estiver gravada para elas; Ctrl+2 e * no
+   padrao) poem a via E trocam de camada; arrastando, a girar e as de espelhar valem para o que
+   esta na mao. Nessas o editor mostra a tecla GRAVADA, para a tabela nao mentir depois que o
+   usuario troca a tecla; `teclas` e o padrao da primeira acao. O 2 sozinho (via sem trocar de
+   camada) e o L do arrasto (troca de face) sao fixos, como no Altium. */
+const TRILHA = 'trilha na mão (W)';
+const GESTOS_PCB = [
+  { rotulo:'Selecionar',                                teclas:['Clique'] },
+  { rotulo:'Pegar o objeto de baixo, no mesmo ponto',   teclas:['Segundo clique'] },
+  { rotulo:'Somar à seleção ou tirar dela',             teclas:['Shift', 'Clique'] },
+  { rotulo:'Selecionar o que fica dentro da janela',    teclas:['Arrastar no vazio →'] },
+  { rotulo:'Selecionar o que a janela toca',            teclas:['Arrastar no vazio ←'] },
+  { rotulo:'Mover o objeto (ou a seleção)',             teclas:['Arrastar'] },
+  { rotulo:'Mover só a ponta da trilha selecionada',    teclas:['Arrastar a ponta'] },
+  { rotulo:'Arrastar a tela',                           teclas:['Botão direito', 'Arrastar'] },
+  { rotulo:'Abrir o menu (sem arrastar)',               teclas:['Botão direito'] },
+  { rotulo:'Aproximar e afastar, no cursor',            teclas:['Roda do mouse'] },
+  { rotulo:'Andar para o lado',                         teclas:['Shift', 'Roda do mouse'] },
+  { rotulo:'Abrir as Propriedades',                     teclas:['Clique duplo'] },
+  { rotulo:'Fixar o canto da trilha',                   teclas:['Clique'],          quando:TRILHA },
+  { rotulo:'Inverter o canto da trilha',                teclas:['Espaço'],          quando:TRILHA },
+  { rotulo:'Mudar o modo da trilha (45°, 90°, livre)',  teclas:['Shift', 'Espaço'], quando:TRILHA },
+  { rotulo:'Desfazer o último trecho',                  teclas:['Backspace'],       quando:TRILHA },
+  { rotulo:'Via sem trocar de camada',                  teclas:['2'],               quando:TRILHA },
+  { rotulo:'Via e troca de camada',                     teclas:['*'],               quando:TRILHA, acoes:['outraFace', 'via'] },
+  { rotulo:'Largura da trilha no painel',               teclas:['Tab'],             quando:TRILHA },
+  { rotulo:'Terminar a trilha',                         teclas:['Botão direito'],   quando:TRILHA },
+  { rotulo:'Largar a trilha',                           teclas:['Escape'],          quando:TRILHA },
+  { rotulo:'Girar 90°',                                 teclas:['Espaço'],          quando:ARRASTO, acoes:['girar'] },
+  { rotulo:'Trocar de face (componente)',               teclas:['L'],               quando:ARRASTO },
+  { rotulo:'Espelhar',                                  teclas:['X'],               quando:ARRASTO, acoes:['espelhoX', 'espelhoY'] },
+  { rotulo:'Soltar o snap',                             teclas:['Ctrl'],            quando:ARRASTO },
+  { rotulo:'Largar o que estiver na mão',               teclas:['Escape'] },
+];
+
+/* ══ AS REGRAS: as mesmas nas duas vistas ══ */
+
 /* O navegador leva estas antes da pagina ver. Deixar gravar uma delas seria entregar um
    "gravei e nao funciona" sem nenhuma pista de por que. */
 const TECLAS_PROIBIDAS = ['Ctrl+W','Ctrl+T','Ctrl+N','Ctrl+Shift+N','Ctrl+Shift+T','Ctrl+R','Ctrl+P',
@@ -55,7 +178,19 @@ const TECLAS_PROIBIDAS = ['Ctrl+W','Ctrl+T','Ctrl+N','Ctrl+Shift+N','Ctrl+Shift+
    Shift+Escape gravado nunca dispararia. */
 function proibida(t){ return TECLAS_PROIBIDAS.indexOf(t) >= 0 || /(^|\+)Escape$/.test(String(t)); }
 /* A tecla como a tabela a escreve. Shift nao entra em tecla de UM caractere: o navegador ja
-   manda 'X' para Shift+x, e distinguir os dois criaria dois atalhos que a mao nao distingue. */
+   manda 'X' para Shift+x, e distinguir os dois criaria dois atalhos que a mao nao distingue.
+   O mesmo vale para os simbolos que so saem com Shift. Medido em 2026-10-02 com o ToUnicodeEx
+   do Windows (a conta de onde o Chrome tira o e.key) nos dois layouts desta bancada, US (0409)
+   e ABNT (0416): nos dois o * de cima e Shift+8 e o + de cima e Shift+=; no teclado numerico o
+   +, o - e o * saem sem Shift. Os seis caminhos dao '+', '-' e '*'. Com Ctrl o Windows nao da
+   caractere (ou da um de controle, Ctrl+M = U+000D), e o Chrome cai na tecla sem o Ctrl: Ctrl+2,
+   Ctrl+M e Ctrl+S chegam como '2', 'm' e 's' com ctrlKey, e saem 'Ctrl+2', 'Ctrl+M', 'Ctrl+S'.
+   O que NAO da: o 2 do teclado numerico com o NumLock desligado e a seta para baixo (key
+   'ArrowDown'), e sai 'Ctrl+ArrowDown'; o Ctrl+2 e o 2 da trilha pedem o 2 de cima ou o NumLock
+   ligado. E o Ctrl+2 so fica com a pagina se ela chamar preventDefault() no keydown: medido no
+   Chrome (headless, duas abas), sem ele a pagina vai para o fundo e o Chrome mostra a aba 2; com
+   ele, fica. A tecla so chega a quem tem o foco: com o foco na casca do hub, o Ctrl+2 e dela. O
+   EletricHUB nao tem aba nem acelerador de menu em Ctrl+2, Ctrl+M ou Ctrl+S. */
 function normalizaTecla(e){
   if (!e || !e.key) return '';
   let k = e.key;
@@ -69,75 +204,95 @@ function normalizaTecla(e){
   m.push(k);
   return m.join('+');
 }
-/* O padrao, com o que o usuario gravou por cima. Entrada desconhecida, tecla proibida e tecla
-   repetida sao DESCARTADAS em vez de derrubar o mapa: uma chave estragada no localStorage nao
-   pode deixar a vista sem teclado nenhum. */
-function mapaAtalhos(salvos){
-  const porAcao = {}, descartados = [];
-  for (const a of ATALHOS_PADRAO) porAcao[a.id] = a.tecla;
-  const s = salvos && typeof salvos === 'object' ? salvos : {};
-  for (const id of Object.keys(s)){
-    const t = String(s[id] || '');
-    if (!porAcao[id]) { descartados.push(id + ': ação que não existe'); continue; }
-    if (!t || proibida(t)) { descartados.push(id + ': tecla não permitida'); continue; }
-    porAcao[id] = t;
+
+/* ══ UMA VISTA: a tabela, o mapa e a gravacao ══
+   Cada vista tem o proprio mapa, entao a repeticao de tecla so conta dentro dela; as regras
+   (tecla proibida, Esc reservado) sao as mesmas. `nome` e a chave interna do editor. */
+function fazVista(nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS){
+  const ids = new Set(ATALHOS_PADRAO.map(a => a.id));
+  const daTabela = id => ATALHOS_PADRAO.find(a => a.id === id);
+
+  /* O padrao, com o que o usuario gravou por cima. Entrada desconhecida, tecla proibida e tecla
+     repetida sao DESCARTADAS em vez de derrubar o mapa: uma chave estragada no localStorage nao
+     pode deixar a vista sem teclado nenhum. (A acao desconhecida e conferida na lista de ids, e
+     nao no objeto: um "constructor" gravado passaria por acao que existe.) */
+  function mapaAtalhos(salvos){
+    const porAcao = {}, descartados = [];
+    for (const a of ATALHOS_PADRAO) porAcao[a.id] = a.tecla;
+    const s = salvos && typeof salvos === 'object' ? salvos : {};
+    for (const id of Object.keys(s)){
+      const t = String(s[id] || '');
+      if (!ids.has(id)) { descartados.push(id + ': ação que não existe'); continue; }
+      if (!t || proibida(t)) { descartados.push(id + ': tecla não permitida'); continue; }
+      porAcao[id] = t;
+    }
+    const porTecla = {}, repetidas = [];
+    for (const a of ATALHOS_PADRAO){
+      const t = porAcao[a.id];
+      if (porTecla[t]){ repetidas.push(t); porAcao[a.id] = a.tecla; }   /* volta ao padrao do que repetiu */
+      else porTecla[t] = a.id;
+    }
+    /* a volta ao padrao pode ter repetido de novo; o segundo passe resolve sem laço infinito */
+    const finalTecla = {};
+    for (const a of ATALHOS_PADRAO){
+      let t = porAcao[a.id];
+      if (finalTecla[t] && finalTecla[t] !== a.id) t = a.tecla;
+      if (finalTecla[t] && finalTecla[t] !== a.id) continue;
+      porAcao[a.id] = t; finalTecla[t] = a.id;
+    }
+    return { porAcao, porTecla:finalTecla, descartados, repetidas };
   }
-  const porTecla = {}, repetidas = [];
-  for (const a of ATALHOS_PADRAO){
-    const t = porAcao[a.id];
-    if (porTecla[t]){ repetidas.push(t); porAcao[a.id] = a.tecla; }   /* volta ao padrao do que repetiu */
-    else porTecla[t] = a.id;
+  /* Grava uma tecla nova para uma ação; devolve o que a interface tem de dizer. */
+  function defineAtalho(salvos, id, tecla){
+    const a = daTabela(id);
+    if (!a) return { ok:false, erro:'ação desconhecida' };
+    if (!tecla) return { ok:false, erro:'tecla vazia' };
+    if (/(^|\+)Escape$/.test(tecla)) return { ok:false, erro:'o Esc é reservado: larga o que estiver na mão' };
+    if (proibida(tecla)) return { ok:false, erro:'“' + tecla + '” é do navegador — escolha outra' };
+    const m = mapaAtalhos(salvos);
+    const dono = m.porTecla[tecla];
+    if (dono && dono !== id){
+      const r = daTabela(dono);
+      return { ok:false, erro:'“' + tecla + '” já é ' + (r ? r.rotulo.toLowerCase() : dono) };
+    }
+    const novo = Object.assign({}, salvos && typeof salvos === 'object' ? salvos : {});
+    if (a.tecla === tecla) delete novo[id];
+    else novo[id] = tecla;
+    return { ok:true, salvos:novo };
   }
-  /* a volta ao padrao pode ter repetido de novo; o segundo passe resolve sem laço infinito */
-  const finalTecla = {};
-  for (const a of ATALHOS_PADRAO){
-    let t = porAcao[a.id];
-    if (finalTecla[t] && finalTecla[t] !== a.id) t = a.tecla;
-    if (finalTecla[t] && finalTecla[t] !== a.id) continue;
-    porAcao[a.id] = t; finalTecla[t] = a.id;
+
+  /* ── o que esta gravado nesta maquina ──
+     Mesmo molde de toda preferencia de vista: try/catch e o padrao no codigo. Uma chave
+     estragada volta como {} e o mapaAtalhos faz o resto. */
+  function carrega(){
+    try {
+      const v = JSON.parse(localStorage.getItem(CHAVE) || '{}');
+      return v && typeof v === 'object' ? v : {};
+    } catch (e) { return {}; }
   }
-  return { porAcao, porTecla:finalTecla, descartados, repetidas };
-}
-/* Grava uma tecla nova para uma ação; devolve o que a interface tem de dizer. */
-function defineAtalho(salvos, id, tecla){
-  if (!ATALHOS_PADRAO.some(a => a.id === id)) return { ok:false, erro:'ação desconhecida' };
-  if (!tecla) return { ok:false, erro:'tecla vazia' };
-  if (/(^|\+)Escape$/.test(tecla)) return { ok:false, erro:'o Esc é reservado: larga o que estiver na mão' };
-  if (proibida(tecla)) return { ok:false, erro:'“' + tecla + '” é do navegador — escolha outra' };
-  const m = mapaAtalhos(salvos);
-  const dono = m.porTecla[tecla];
-  if (dono && dono !== id){
-    const r = ATALHOS_PADRAO.find(a => a.id === dono);
-    return { ok:false, erro:'“' + tecla + '” já é ' + (r ? r.rotulo.toLowerCase() : dono) };
+  function grava(salvos){
+    try {
+      if (salvos && Object.keys(salvos).length) localStorage.setItem(CHAVE, JSON.stringify(salvos));
+      else localStorage.removeItem(CHAVE);
+    } catch (e) {}
   }
-  const novo = Object.assign({}, salvos && typeof salvos === 'object' ? salvos : {});
-  if (ATALHOS_PADRAO.find(a => a.id === id).tecla === tecla) delete novo[id];
-  else novo[id] = tecla;
-  return { ok:true, salvos:novo };
+
+  return { nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS, mapaAtalhos, defineAtalho, carrega, grava };
 }
 
-/* ── o que esta gravado nesta maquina ──
-   Mesmo molde de toda preferencia de vista: try/catch e o padrao no codigo. Uma chave
-   estragada volta como {} e o mapaAtalhos faz o resto. */
-function carrega(){
-  try {
-    const v = JSON.parse(localStorage.getItem(CHAVE) || '{}');
-    return v && typeof v === 'object' ? v : {};
-  } catch (e) { return {}; }
-}
-function grava(salvos){
-  try {
-    if (salvos && Object.keys(salvos).length) localStorage.setItem(CHAVE, JSON.stringify(salvos));
-    else localStorage.removeItem(CHAVE);
-  } catch (e) {}
-}
+const sch = fazVista('sch', 'altiumhub.sch.atalhos', 'vista Esquema', ATALHOS_SCH, GESTOS_SCH);
+const pcb = fazVista('pcb', 'altiumhub.pcb.atalhos', 'vista PCB', ATALHOS_PCB, GESTOS_PCB);
+const VISTAS = [sch, pcb];
 
 /* ── o editor (aba Atalhos das Configurações do hub) ───────────────────────────────
    No molde do "Keyboard Shortcuts" do VSCode, a pedido do usuario: a busca no topo, uma
    tabela Comando | Atalho | Quando | Origem, as teclas desenhadas como teclinhas, e a troca
    por duplo clique (ou Enter, ou o lapis) numa caixa que diz "pressione a combinacao e depois
    Enter". Os gestos do mouse entram na mesma tabela como linhas FIXAS: e a mesma pergunta
-   ("como eu faco X?") e a resposta tem de estar no mesmo lugar. */
+   ("como eu faco X?") e a resposta tem de estar no mesmo lugar.
+   As duas vistas ficam na mesma tabela, cada uma no seu grupo (com o proprio "Restaurar o
+   padrao", que so mexe na chave dela), e a busca vale para as duas: o Quando diz de que vista
+   e a linha, e a gravacao de teclas acha a tecla nas duas. */
 const CSS = `
 .hat { position: relative; display: flex; flex-direction: column; min-height: 100%; }
 .hat-topo { position: sticky; top: -16px; z-index: 2; margin: -16px -20px 0; padding: 14px 20px 10px;
@@ -154,14 +309,20 @@ const CSS = `
 .hat-grava[aria-pressed="true"] { color: var(--on-hi); background: var(--hi); }
 .hat-grava svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.3;
   stroke-linecap: round; stroke-linejoin: round; }
-.hat-info { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 11.5px; color: var(--text-3); }
-.hat-info .btn { margin-left: auto; }
+.hat-info { display: flex; align-items: center; gap: 10px; min-height: 26px; margin-top: 8px; font-size: 11.5px;
+  color: var(--text-3); }
 .hat-tab { margin-top: 6px; font-size: 12.5px; }
-.hat-cab, .hat-l { display: grid; grid-template-columns: 22px minmax(0, 1.5fr) minmax(0, 1.25fr) 86px 84px;
+.hat-cab, .hat-l { display: grid; grid-template-columns: 22px minmax(0, 1.5fr) minmax(0, 1.25fr) 100px 72px;
   align-items: center; column-gap: 8px; min-height: 26px; padding: 0 6px 0 2px; }
 .hat-cab { position: sticky; top: var(--hat-cab-top, 68px); z-index: 1; font-weight: 600; color: var(--text);
   background: var(--surface-2); border-radius: 4px 4px 0 0; box-shadow: inset 0 -1px 0 var(--line); }
-.hat-l { color: var(--text); border-radius: 3px; cursor: default; outline: none;
+.hat-grupo + .hat-grupo { margin-top: 14px; }
+.hat-g { display: flex; align-items: center; gap: 10px; min-height: 30px; padding: 4px 6px 2px 4px;
+  border-bottom: 1px solid var(--line-soft); }
+.hat-g .nome { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-2); }
+.hat-g .cont { font-size: 11.5px; color: var(--text-3); }
+.hat-g .btn { margin-left: auto; }
+.hat-l { color: var(--text); border-radius: 3px; cursor: default; outline: none; user-select: none;
   scroll-margin-top: calc(var(--hat-cab-top, 68px) + 30px); scroll-margin-bottom: 8px; }
 .hat-l:nth-child(even) { background: rgba(var(--tint), 0.035); }
 .hat-l:hover { background: rgba(var(--tint), 0.07); }
@@ -180,6 +341,7 @@ const CSS = `
   stroke-linecap: round; stroke-linejoin: round; }
 .hat-k { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; min-width: 0; }
 .hat-k .mais { color: var(--text-3); font-size: 11px; }
+.hat-k .ou { color: var(--text-3); font-size: 11px; margin: 0 2px; }
 .hat-k kbd, .hat-caixa kbd { display: inline-block; min-width: 16px; padding: 1px 6px; font: 11px/16px var(--font);
   text-align: center; color: var(--text); background: rgba(var(--tint), 0.08); border: 1px solid var(--line);
   border-bottom-color: rgba(var(--tint), 0.24); border-radius: 3px; box-shadow: inset 0 -1px 0 rgba(var(--tint), 0.10);
@@ -196,9 +358,10 @@ const CSS = `
   margin-top: 12px; padding: 6px; border: 1px solid var(--hi); border-radius: var(--r-sm, 5px); background: var(--bg); }
 .hat-caixa .tecla kbd { font-size: 12.5px; line-height: 20px; padding: 1px 8px; }
 .hat-caixa .tecla .vaz { font-size: 12px; color: var(--text-4); }
-.hat-caixa .msg { min-height: 17px; margin-top: 8px; font-size: 11.5px; color: var(--text-3); }
+.hat-caixa .msg { min-height: 17px; margin-top: 8px; font-size: 11.5px; line-height: 1.45; color: var(--text-3); }
 .hat-caixa .msg.err { color: var(--err); }
 .hat-caixa .msg.ok { color: var(--ok); }
+.hat-caixa .msg.aviso { color: var(--warn); }
 `;
 function estilo(){
   if (document.getElementById('hubAtalhosCss')) return;
@@ -222,33 +385,6 @@ const ICONE = {
 };
 function icone(nome){ const s = el('span'); s.innerHTML = ICONE[nome]; return s.firstChild; }
 
-/* Os gestos do mouse e as teclas do fio: fixos (o teclado le a tabela ATALHOS_PADRAO; estes o
-   canvas trata direto, ANTES do mapa), mas moram na mesma tabela porque respondem a mesma
-   pergunta. `quando` e a coluna Quando do VSCode: o Espaco da vista gira a selecao, e so com o
-   fio na mao (W) ele inverte o canto. Sem `quando`, vale o da vista (QUANDO).
-   Desde 2026-09-24 o fio se pega em dois cliques, como no Altium: o primeiro pega o fio
-   inteiro, o segundo so o trecho (o duplo clique que promovia a fio inteiro saiu). */
-const FIO = 'fio na mão (W)', ARRASTO = 'arrastando';
-const GESTOS = [
-  { rotulo:'Selecionar (no fio, o fio inteiro)',           teclas:['Clique'] },
-  { rotulo:'Pegar só o trecho do fio (ou o vértice)',      teclas:['Segundo clique'] },
-  { rotulo:'Acender a net',                                teclas:['Alt', 'Clique'] },
-  { rotulo:'Somar à seleção',                              teclas:['Shift', 'Clique'] },
-  { rotulo:'Mover a seleção',                              teclas:['Arrastar'] },
-  { rotulo:'Andar reto no trilho da guia',                 teclas:['Shift'],            quando:ARRASTO },
-  { rotulo:'Soltar as guias',                              teclas:['Ctrl'],             quando:ARRASTO },
-  { rotulo:'Selecionar vários',                            teclas:['Arrastar no vazio'] },
-  { rotulo:'Fixar o canto do fio',                         teclas:['Clique'],           quando:FIO },
-  { rotulo:'Inverter o canto do fio',                      teclas:['Espaço'],           quando:FIO },
-  { rotulo:'Mudar o modo do fio (90°, 45°, livre)',        teclas:['Shift', 'Espaço'],  quando:FIO },
-  { rotulo:'Desfazer o último canto',                      teclas:['Backspace'],        quando:FIO },
-  { rotulo:'Terminar o fio (de novo, larga a ferramenta)', teclas:['Botão direito'],    quando:FIO },
-  { rotulo:'Arrastar a tela',                              teclas:['Botão direito', 'Arrastar'] },
-  { rotulo:'Aproximar e afastar',                          teclas:['Roda do mouse'] },
-  { rotulo:'Largar o que estiver na mão',                  teclas:['Escape'] },
-];
-const QUANDO = 'vista Esquema';
-
 /* 'Ctrl+Shift+Z' -> ['Ctrl','Shift','Z']; o '+' como tecla ('Ctrl++') continua sendo uma */
 function partes(t){
   if (!t) return [];
@@ -257,21 +393,33 @@ function partes(t){
   if (t.endsWith('++')) p.splice(p.length - 2, 2, '+');
   return p.filter(x => x !== '');
 }
-function teclinhas(lista){
+/* uma ou mais combinacoes, cada uma em teclinhas, separadas por "ou" ('* ou Ctrl + 2') */
+function teclinhas(lista){ return teclinhasOu([lista]); }
+function teclinhasOu(alts){
   const k = el('span', 'hat-k');
-  lista.forEach((t, i) => {
-    if (i) k.append(el('span', 'mais', '+'));
-    k.append(el('kbd', null, t));
+  alts.forEach((lista, j) => {
+    if (j) k.append(el('span', 'ou', 'ou'));
+    lista.forEach((t, i) => {
+      if (i) k.append(el('span', 'mais', '+'));
+      k.append(el('kbd', null, t));
+    });
   });
   return k;
 }
 const sem = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+/* Um gesto FIXO de um estado da vista que usa esta tecla (o 2 e o Backspace da trilha, o L do
+   arrasto): o canvas o trata antes do mapa, entao a acao gravada nela nao dispara ali. Gravar
+   vale (fora daquele estado ela funciona), mas a caixa avisa. */
+function fixoNoEstado(v, tecla){
+  return v.GESTOS.find(g => g.quando && !g.acoes && g.teclas.join('+') === tecla) || null;
+}
 
 /* Desenha o editor dentro de `box`. `o.toast(texto, tipo)` e quem avisa: o hub passa o dele. */
 function pane(box, o){
   const avisa = (o && o.toast) || function(){};
   estilo();
-  let salvos = carrega();
+  const salvos = {};
+  for (const v of VISTAS) salvos[v.nome] = v.carrega();
   let filtro = '', gravando = false, editando = null;
 
   const raiz = el('div', 'hat');
@@ -289,10 +437,7 @@ function pane(box, o){
   bz.append(busca, grava1);
   const info = el('div', 'hat-info');
   const conta = el('span');
-  const reset = el('button', 'btn btn-ghost btn-sm', 'Restaurar o padrão');
-  reset.type = 'button';
-  reset.title = 'devolve todas as teclas ao padrão';
-  info.append(conta, reset);
+  info.append(conta);
   topo.append(bz, info);
 
   const tab = el('div', 'hat-tab');
@@ -316,35 +461,88 @@ function pane(box, o){
      passa, porque fechar o modal e o que ele faz em toda aba. */
   raiz.addEventListener('keydown', e => { if (e.key !== 'Escape') e.stopPropagation(); });
 
-  /* Outra janela do hub (Nova janela) gravou atalhos: este painel relê, senao a proxima gravacao
-     daqui sobrescreveria a chave inteira com o estado velho. A escuta sai com o modal. */
+  /* Outra janela do hub (Nova janela) gravou atalhos: este painel relê a chave que mudou, senao
+     a proxima gravacao daqui sobrescreveria a chave inteira com o estado velho. A escuta sai com
+     o modal. */
   const deFora = e => {
     if (!box.isConnected){ window.removeEventListener('storage', deFora); return; }
-    if (e.key === CHAVE || e.key === null){ salvos = carrega(); if (!editando) desenha(); }
+    let mudou = false;
+    for (const v of VISTAS) if (e.key === v.CHAVE || e.key === null){ salvos[v.nome] = v.carrega(); mudou = true; }
+    if (mudou && !editando) desenha();
   };
   window.addEventListener('storage', deFora);
 
-  function linhas(){
-    const m = mapaAtalhos(salvos);
-    const out = ATALHOS_PADRAO.map(a => {
+  /* As linhas de uma vista: as teclas dela (com o que o usuario gravou) e os gestos. `alts` e a
+     lista de combinacoes da coluna Atalho; so a linha de gesto com `acoes` tem mais de uma. */
+  function linhas(v){
+    const m = v.mapaAtalhos(salvos[v.nome]);
+    const out = v.ATALHOS_PADRAO.map(a => {
       const t = m.porAcao[a.id];
-      return { id:a.id, rotulo:a.rotulo, tecla:t, teclas:partes(t), padrao:a.tecla,
-               usuario:t !== a.tecla, fixo:false, quando:QUANDO };
+      return { vista:v, chave:v.nome + ':' + a.id, id:a.id, rotulo:a.rotulo, tecla:t, alts:[partes(t)],
+               padrao:a.tecla, usuario:t !== a.tecla, fixo:false, quando:v.QUANDO };
     });
-    for (const g of GESTOS) out.push({ rotulo:g.rotulo, teclas:g.teclas, fixo:true, quando:g.quando || QUANDO });
+    for (const g of v.GESTOS){
+      const alts = g.acoes ? g.acoes.map(id => partes(m.porAcao[id])).filter(p => p.length) : [g.teclas];
+      out.push({ vista:v, rotulo:g.rotulo, alts, fixo:true, quando:g.quando || v.QUANDO, estado:Boolean(g.quando) });
+    }
     return out;
   }
   function passa(l){
     if (!filtro) return true;
-    if (gravando) return !l.fixo && l.tecla === filtro;
+    /* gravando teclas: a linha que dispara com aquela combinacao, gesto fixo inclusive (o 2 da
+       trilha aparece junto de quem mais usa o 2) */
+    if (gravando) return l.fixo ? l.alts.some(a => a.join('+') === filtro) : l.tecla === filtro;
     const q = sem(filtro);
     const origem = l.fixo ? 'fixo' : (l.usuario ? 'usuario' : 'padrao');
-    return [l.rotulo, l.teclas.join('+'), l.teclas.join(' '), l.quando, origem].some(x => sem(x).includes(q));
+    const campos = [l.rotulo, l.quando, l.vista.QUANDO, origem];
+    for (const a of l.alts) campos.push(a.join('+'), a.join(' '));
+    return campos.some(x => sem(x).includes(q));
+  }
+
+  function linhaEl(l){
+    const r = el('div', 'hat-l' + (l.fixo ? ' fixo' : ''));
+    r.setAttribute('role', 'row');
+    const ed = el('span');
+    if (!l.fixo){
+      r.tabIndex = 0;
+      r.dataset.id = l.chave;
+      const b = el('button', 'hat-ed');
+      b.type = 'button'; b.tabIndex = -1;
+      b.title = 'Trocar a tecla (duplo clique na linha também)';
+      b.append(icone('lapis'));
+      b.onclick = e => { e.stopPropagation(); edita(l); };
+      ed.append(b);
+    }
+    const cmd = el('span', 'cmd', l.rotulo); cmd.title = l.rotulo;
+    const org = el('span', 'org' + (l.usuario ? ' usr' : ''), l.fixo ? 'Fixo' : (l.usuario ? 'Usuário' : 'Padrão'));
+    if (l.usuario){
+      const rs = el('button', 'hat-rs');
+      rs.type = 'button'; rs.tabIndex = -1;
+      rs.title = 'Voltar ao padrão (' + l.padrao + ')';
+      rs.append(icone('volta'));
+      rs.onclick = e => { e.stopPropagation(); volta(l); };
+      org.append(rs);
+    }
+    /* o estado (trilha na mao, arrastando) mora numa vista so; a dica diz qual */
+    const qdo = el('span', 'qdo', l.quando);
+    qdo.title = l.estado ? l.vista.QUANDO + ' · ' + l.quando : l.quando;
+    r.append(ed, cmd, teclinhasOu(l.alts), qdo, org);
+    if (!l.fixo){
+      r.ondblclick = () => edita(l);
+      r.onkeydown = e => {
+        if (e.key === 'Enter'){ e.preventDefault(); edita(l); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+          e.preventDefault();
+          const lista = Array.from(tab.querySelectorAll('.hat-l[tabindex="0"]'));
+          const i = lista.indexOf(r) + (e.key === 'ArrowDown' ? 1 : -1);
+          if (lista[i]) lista[i].focus();
+        }
+      };
+    }
+    return r;
   }
 
   function desenha(foco){
-    const todas = linhas();
-    const vis = todas.filter(passa);
     tab.textContent = '';
     const cab = el('div', 'hat-cab');
     cab.setAttribute('role', 'row');
@@ -352,54 +550,37 @@ function pane(box, o){
                el('span', null, 'Quando'), el('span', null, 'Origem'));
     tab.append(cab);
     medeTopo();
-    for (const l of vis){
-      const r = el('div', 'hat-l' + (l.fixo ? ' fixo' : ''));
-      r.setAttribute('role', 'row');
-      const ed = el('span');
-      if (!l.fixo){
-        r.tabIndex = 0;
-        r.dataset.id = l.id;
-        const b = el('button', 'hat-ed');
-        b.type = 'button'; b.tabIndex = -1;
-        b.title = 'Trocar a tecla (duplo clique na linha também)';
-        b.append(icone('lapis'));
-        b.onclick = e => { e.stopPropagation(); edita(l); };
-        ed.append(b);
-      }
-      const cmd = el('span', 'cmd', l.rotulo); cmd.title = l.rotulo;
-      const org = el('span', 'org' + (l.usuario ? ' usr' : ''), l.fixo ? 'Fixo' : (l.usuario ? 'Usuário' : 'Padrão'));
-      if (l.usuario){
-        const rs = el('button', 'hat-rs');
-        rs.type = 'button'; rs.tabIndex = -1;
-        rs.title = 'Voltar ao padrão (' + l.padrao + ')';
-        rs.append(icone('volta'));
-        rs.onclick = e => { e.stopPropagation(); volta(l); };
-        org.append(rs);
-      }
-      const qdo = el('span', 'qdo', l.quando); qdo.title = l.quando;
-      r.append(ed, cmd, teclinhas(l.teclas), qdo, org);
-      if (!l.fixo){
-        r.ondblclick = () => edita(l);
-        r.onkeydown = e => {
-          if (e.key === 'Enter'){ e.preventDefault(); edita(l); }
-          else if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
-            e.preventDefault();
-            const lista = Array.from(tab.querySelectorAll('.hat-l[tabindex="0"]'));
-            const i = lista.indexOf(r) + (e.key === 'ArrowDown' ? 1 : -1);
-            if (lista[i]) lista[i].focus();
-          }
-        };
-      }
-      tab.append(r);
+    let nTodas = 0, nVis = 0, nUsr = 0;
+    for (const v of VISTAS){
+      const todas = linhas(v), vis = todas.filter(passa);
+      const usr = todas.filter(l => l.usuario).length;
+      nTodas += todas.length; nVis += vis.length; nUsr += usr;
+      if (!vis.length) continue;                 /* a busca esconde a vista inteira */
+      const grupo = el('div', 'hat-grupo');
+      grupo.setAttribute('role', 'rowgroup');
+      const g = el('div', 'hat-g');
+      g.setAttribute('role', 'row');
+      const cont = el('span', 'cont', (vis.length === todas.length ? todas.length + ' atalhos' : vis.length + ' de ' + todas.length)
+        + (usr ? ' · ' + usr + ' trocado' + (usr > 1 ? 's' : '') : ''));
+      const rs = el('button', 'btn btn-ghost btn-sm', 'Restaurar o padrão');
+      rs.type = 'button';
+      rs.title = 'devolve as teclas da ' + v.QUANDO + ' ao padrão (a outra vista não muda)';
+      /* com lixo na chave (acao que nao existe, tecla recusada) o botao continua servindo para limpar */
+      rs.disabled = !usr && !Object.keys(salvos[v.nome]).length;
+      rs.onclick = () => {
+        salvos[v.nome] = {}; v.grava({}); desenha();
+        avisa('atalhos da ' + v.QUANDO + ' de volta ao padrão', 'ok');
+      };
+      g.append(el('span', 'nome', v.QUANDO), cont, rs);
+      grupo.append(g);
+      for (const l of vis) grupo.append(linhaEl(l));
+      tab.append(grupo);
     }
-    if (!vis.length) tab.append(el('div', 'hat-vazio', gravando
+    if (!nVis) tab.append(el('div', 'hat-vazio', gravando
       ? 'Nenhum comando usa “' + filtro + '”.'
       : 'Nenhum atalho com “' + filtro + '”.'));
-    const nUsr = todas.filter(l => l.usuario).length;
-    conta.textContent = (vis.length === todas.length ? todas.length + ' atalhos' : vis.length + ' de ' + todas.length)
+    conta.textContent = (nVis === nTodas ? nTodas + ' atalhos nas duas vistas' : nVis + ' de ' + nTodas)
       + (nUsr ? ' · ' + nUsr + ' trocado' + (nUsr > 1 ? 's' : '') + ' por você' : '');
-    /* com lixo na chave (acao que nao existe, tecla recusada) o botao continua servindo para limpar */
-    reset.disabled = !nUsr && !Object.keys(salvos).length;
     if (!foco) return false;
     const r = tab.querySelector('.hat-l[data-id="' + foco + '"]');
     if (r) r.focus();
@@ -407,15 +588,15 @@ function pane(box, o){
   }
   /* devolve o foco para a linha editada; se o filtro a escondeu, para a busca -- foco perdido no
      BODY faria o proximo Esc fechar o modal inteiro em vez de desistir da busca */
-  function volta_foco(id){ if (!desenha(id)) busca.focus(); }
+  function volta_foco(chave){ if (!desenha(chave)) busca.focus(); }
 
   function volta(l){
-    const r = defineAtalho(salvos, l.id, l.padrao);
+    const v = l.vista;
+    const r = v.defineAtalho(salvos[v.nome], l.id, l.padrao);
     if (!r.ok){ avisa('Não voltou ao padrão: ' + r.erro + '. Troque aquela primeiro.', 'warn'); return; }
-    salvos = r.salvos; grava(salvos); volta_foco(l.id);
-    avisa(l.rotulo + ' → ' + l.padrao + ' (padrão)', 'ok');
+    salvos[v.nome] = r.salvos; v.grava(r.salvos); volta_foco(l.chave);
+    avisa(l.rotulo + ' → ' + l.padrao + ' (padrão, ' + v.QUANDO + ')', 'ok');
   }
-  reset.onclick = () => { salvos = {}; grava(salvos); desenha(); avisa('atalhos de volta ao padrão', 'ok'); };
 
   /* ── a busca: texto, ou "gravar teclas" (pesquisa pela combinacao pressionada) ── */
   busca.addEventListener('input', () => { if (!gravando){ filtro = busca.value.trim(); desenha(); } });
@@ -448,13 +629,15 @@ function pane(box, o){
      modal de configuracao, e a letra escolhida nao pode disparar outra coisa por baixo. */
   function edita(l){
     if (editando) return;
+    const v = l.vista;
     let pendente = '';
     const fundo = el('div', 'hat-caixa-fundo');
     const cx = el('div', 'hat-caixa');
     cx.setAttribute('role', 'dialog');
-    cx.setAttribute('aria-label', 'Trocar a tecla de ' + l.rotulo);
+    cx.setAttribute('aria-label', 'Trocar a tecla de ' + l.rotulo + ' (' + v.QUANDO + ')');
     const tit = el('div', 'tit', 'Pressione a combinação desejada e depois Enter');
-    const cmd = el('div', 'cmd', l.rotulo + ' · agora ' + l.tecla + (l.usuario ? ' (padrão ' + l.padrao + ')' : ''));
+    const cmd = el('div', 'cmd', l.rotulo + ' · ' + v.QUANDO + ' · agora ' + l.tecla
+      + (l.usuario ? ' (padrão ' + l.padrao + ')' : ''));
     const visor = el('div', 'tecla');
     const msg = el('div', 'msg', 'Esc desiste');
     cx.append(tit, cmd, visor, msg);
@@ -464,15 +647,19 @@ function pane(box, o){
       visor.textContent = '';
       if (!pendente){ visor.append(el('span', 'vaz', 'aguardando…')); return; }
       visor.append(teclinhas(partes(pendente)));
-      const r = pendente === l.tecla ? { ok:true } : defineAtalho(salvos, l.id, pendente);
-      msg.className = 'msg ' + (r.ok ? 'ok' : 'err');
-      msg.textContent = r.ok ? (pendente === l.tecla ? 'já é esta' : 'Enter grava · Esc desiste') : r.erro;
+      if (pendente === l.tecla){ msg.className = 'msg ok'; msg.textContent = 'já é esta'; return; }
+      const r = v.defineAtalho(salvos[v.nome], l.id, pendente);
+      if (!r.ok){ msg.className = 'msg err'; msg.textContent = r.erro; return; }
+      const f = fixoNoEstado(v, pendente);
+      msg.className = 'msg ' + (f ? 'aviso' : 'ok');
+      msg.textContent = (f ? '“' + pendente + '” continua fixo quando ' + f.quando + ': '
+        + f.rotulo.toLowerCase() + '. ' : '') + 'Enter grava · Esc desiste';
     };
     const fecha = () => {
       window.removeEventListener('keydown', tecla, true);
       fundo.remove();
       editando = null;
-      volta_foco(l.id);
+      volta_foco(l.chave);
     };
     const tecla = ev => {
       /* o modal fechou com a caixa aberta: larga a escuta sem engolir a tecla de ninguem */
@@ -482,11 +669,11 @@ function pane(box, o){
       if (ev.key === 'Escape'){ fecha(); return; }     /* com modificador tambem: Esc nao e tecla gravavel */
       if (ev.key === 'Enter' && sozinha){
         if (!pendente || pendente === l.tecla){ fecha(); return; }
-        const r = defineAtalho(salvos, l.id, pendente);
+        const r = v.defineAtalho(salvos[v.nome], l.id, pendente);
         if (!r.ok){ msg.className = 'msg err'; msg.textContent = r.erro; return; }
-        salvos = r.salvos; grava(salvos);
+        salvos[v.nome] = r.salvos; v.grava(r.salvos);
         fecha();
-        avisa(l.rotulo + ' → ' + pendente, 'ok');
+        avisa(l.rotulo + ' → ' + pendente + ' (' + v.QUANDO + ')', 'ok');
         return;
       }
       const t = normalizaTecla(ev);
@@ -495,7 +682,7 @@ function pane(box, o){
       pinta();
     };
     fundo.addEventListener('mousedown', e => { if (e.target === fundo) fecha(); });
-    editando = l.id;
+    editando = l.chave;
     pinta();
     window.addEventListener('keydown', tecla, true);
   }
@@ -503,6 +690,9 @@ function pane(box, o){
   desenha();
 }
 
-return { CHAVE, ATALHOS_PADRAO, TECLAS_PROIBIDAS, GESTOS, normalizaTecla, mapaAtalhos, defineAtalho,
-         carrega, grava, pane };
+/* O Esquema continua sendo o HubAtalhos de antes (o schframe e o hub dependem desses nomes); as
+   duas vistas, com a mesma forma, em .sch e .pcb. */
+return { CHAVE:sch.CHAVE, ATALHOS_PADRAO:sch.ATALHOS_PADRAO, TECLAS_PROIBIDAS, GESTOS:sch.GESTOS,
+         normalizaTecla, mapaAtalhos:sch.mapaAtalhos, defineAtalho:sch.defineAtalho,
+         carrega:sch.carrega, grava:sch.grava, pane, sch, pcb };
 });
