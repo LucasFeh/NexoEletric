@@ -114,137 +114,539 @@ function sheetSize(s){
 }
 const ORIENT_DIR = { 0:[1,0], 90:[0,1], 180:[-1,0], 270:[0,-1] };
 
+/* ============ PCB: camadas (contrato da vista PCB nova, 2026-10-02) ============ */
+
+/* Chave = a string gravada no board.js e no changes.js. As 7 que o espelho ja usava (Top,
+   Bottom, TopOverlay, BottomOverlay, Multi, Mech1, KeepOut) nao mudam de nome; o resto
+   completa a pilha do Altium. A ORDEM da tabela e a das abas de camada do Altium: sinais
+   (Top, Mid..., Bottom), planos, mecanicas, TopOverlay, BottomOverlay, TopPaste, BottomPaste,
+   TopSolder, BottomSolder, DrillGuide, KeepOut, DrillDrawing, Multi. `altium` e o numero do
+   TLayer (o mesmo do binario do .PcbDoc) e `pair` e o par no flip do componente.
+
+   Cores: as MEDIDAS nos 1.013 Gerbers da casa (o comentario G04 Layer_Color que o Altium
+   escreve; contrato secao 1b, que vale mais que a tabela antiga do pcbframe -- Bottom,
+   BottomOverlay e KeepOut passaram para as do Altium). Mech1, Mech13, KeepOut e BottomSolder
+   tem a MESMA cor (#ff00ff) porque e assim no Altium. O que a medida nao cobre tem paleta
+   propria, documentada aqui porque e escolha nossa:
+   - Mid3..30: matiz andando pelo angulo aureo (137,508 graus) a partir de 30, saturacao 90%,
+     luz alternando 60/48% -- distintas entre si e das duas medidas (Mid1, Mid2);
+   - Plane N: o mesmo passo a partir de 150, saturacao 55%, luz 38% -- mais escuras, como
+     plano costuma aparecer;
+   - as mecanicas sem medida: MECH_CORES, lista fixa escolhida a mao.
+   O board.js novo pode trazer a cor da placa em `layers[].color`; boardLayers() prefere a dele. */
+const MECH_CORES = ['#00ffff', '#ff8000', '#80ff00', '#00ff80', '#0080ff', '#8000ff', '#ff0080',
+                    '#00c0c0', '#c08000', '#80c000', '#00c060', '#4060ff', '#c060ff', '#ff6060', '#60ffc0'];
+const COR_MEDIDA = { Mid1:'#bc8e00', Mid2:'#70dbfa', Mech1:'#ff00ff', Mech13:'#ff00ff', Mech15:'#008000' };
+function hslHex(h, s, l){
+  s /= 100; l /= 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
+  const x = v => ('0' + Math.round(v * 255).toString(16)).slice(-2);
+  return '#' + x(f(0)) + x(f(8)) + x(f(4));
+}
+const PCB_LAYERS = (function(){
+  const L = [];
+  const add = (key, name, kind, side, pair, altium, color) =>
+    L.push(Object.freeze({ key, name, kind, side, pair, altium, color, order:L.length }));
+  add('Top', 'Top Layer', 'signal', 'top', 'Bottom', 1, '#ff0000');
+  for (let i = 1; i <= 30; i++)
+    add('Mid' + i, 'Mid-Layer ' + i, 'signal', null, null, 1 + i,
+        COR_MEDIDA['Mid' + i] || hslHex((30 + (i - 1) * 137.508) % 360, 90, i % 2 ? 60 : 48));
+  add('Bottom', 'Bottom Layer', 'signal', 'bottom', 'Top', 32, '#0000ff');
+  for (let i = 1; i <= 16; i++)
+    add('Plane' + i, 'Internal Plane ' + i, 'plane', null, null, 38 + i,
+        hslHex((150 + (i - 1) * 137.508) % 360, 55, 38));
+  for (let i = 1; i <= 16; i++)
+    add('Mech' + i, 'Mechanical ' + i, 'mech', null, null, 56 + i, COR_MEDIDA['Mech' + i] || MECH_CORES[i - 2]);
+  add('TopOverlay',    'Top Overlay',    'overlay', 'top',    'BottomOverlay', 33, '#ffff00');
+  add('BottomOverlay', 'Bottom Overlay', 'overlay', 'bottom', 'TopOverlay',    34, '#808000');
+  add('TopPaste',      'Top Paste',      'paste',   'top',    'BottomPaste',   35, '#808080');
+  add('BottomPaste',   'Bottom Paste',   'paste',   'bottom', 'TopPaste',      36, '#800000');
+  add('TopSolder',     'Top Solder',     'solder',  'top',    'BottomSolder',  37, '#800080');
+  add('BottomSolder',  'Bottom Solder',  'solder',  'bottom', 'TopSolder',     38, '#ff00ff');
+  add('DrillGuide',    'Drill Guide',    'drill',   null,     null,            55, '#800000');
+  add('KeepOut',       'Keep-Out Layer', 'keepout', null,     null,            56, '#ff00ff');
+  add('DrillDrawing',  'Drill Drawing',  'drill',   null,     null,            73, '#ff002a');
+  add('Multi',         'Multi-Layer',    'multi',   null,     null,            74, '#c0c0c0');
+  return Object.freeze(L);
+})();
+const LAYER_BY_KEY = Object.create(null);
+for (const r of PCB_LAYERS) LAYER_BY_KEY[r.key] = r;
+
+/* a linha da tabela, ou null se a chave nao existe (a tabela e congelada: nao mexa nela) */
+function pcbLayer(key){ return (typeof key === 'string' && LAYER_BY_KEY[key]) || null; }
+/* cobre = sinal ou plano; Multi NAO conta (pad/via passante e outra conversa) */
+function isCopper(key){ const r = pcbLayer(key); return !!r && (r.kind === 'signal' || r.kind === 'plane'); }
+
+/* Pares de camada mecanica DA PLACA (Top/Bottom 3D Body, Courtyard, Assembly...): o Altium
+   deixa o projeto parear mecanicas, e o componente virado leva o desenho de uma para a outra.
+   Vem de board.layers[].pair -- opcional (o ExportBoard de hoje ainda nao escreve) e so entre
+   mecanicas, nos dois sentidos; o primeiro par que cita uma camada ganha. Os pares fixos
+   (Top/Bottom, overlay, paste, solder) sao os da tabela, e a placa nao os muda. */
+function mechPairs(board){
+  const out = Object.create(null);
+  const mec = k => typeof k === 'string' && /^Mech\d+$/.test(k);
+  for (const l of ((board && Array.isArray(board.layers)) ? board.layers : [])){
+    if (!l || !mec(l.key) || !mec(l.pair) || l.key === l.pair || l.key in out || l.pair in out) continue;
+    out[l.key] = l.pair; out[l.pair] = l.key;
+  }
+  return out;
+}
+function flipIn(pares, key){ return (pares && typeof key === 'string' && key in pares) ? pares[key] : flipLayer(key); }
+/* o par no flip do componente (Top<->Bottom, overlay, paste, solder); sem par = a propria
+   chave. `board` (opcional) acrescenta os pares mecanicos daquela placa (mechPairs). */
+function flipLayer(key, board){
+  if (board && typeof board === 'object' && Array.isArray(board.layers)) {
+    const p = mechPairs(board);
+    if (typeof key === 'string' && key in p) return p[key];
+  }
+  const r = pcbLayer(key); return (r && r.pair) || key;
+}
+
+/* A lista de camadas que a tela mostra para ESTA placa. Cada linha e uma copia da tabela com
+   nome/cor do board.layers por cima (quando o espelho novo traz), `inBoard` (a camada esta em
+   board.layers), `stack` (a ordem fisica do cobre, layers[].stack; null sem ela), `pair` (o da
+   tabela, ou o par mecanico que a placa declarou) e `used`/`count` (quantos objetos ha nela).
+   Contagem: tracks, arcs, silk, lines, fills, regions e texts pela propria camada; pad SMD na
+   camada dele e pad passante na Multi; via na Multi. Recorte (cutouts) nao conta: e buraco na
+   placa, nao objeto de camada. Mid/Plane/Mech so entram se estao no board.layers ou tem
+   objeto -- uma placa de 2 camadas nao mostra 30 mids vazias. Chave desconhecida (no
+   board.layers ou num objeto) entra no fim, com kind 'mech' (MechN alem da 16) ou 'other',
+   para nada usado ficar escondido. Passe effectiveBoard(B, model) em vez do board cru para
+   contar o que as mudancas criaram. */
+function boardLayers(board){
+  const B = board || {};
+  const cnt = Object.create(null), vistos = [];
+  const conta = k => { if (typeof k !== 'string' || !k) return; if (!(k in cnt)) { cnt[k] = 0; vistos.push(k); } cnt[k]++; };
+  for (const arr of [B.tracks, B.arcs, B.silk, B.lines, B.fills, B.regions, B.texts])
+    for (const o of (Array.isArray(arr) ? arr : [])) if (o) conta(o.layer);
+  const pad = p => { if (p) conta(p.type === 'th' ? 'Multi' : p.layer); };
+  for (const c of (B.components || [])) for (const p of ((c && c.pads) || [])) pad(p);
+  for (const p of (B.freepads || [])) pad(p);
+  for (const v of (B.vias || [])) if (v) conta('Multi');
+  const doBoard = Object.create(null), ordemBoard = [];
+  for (const l of (Array.isArray(B.layers) ? B.layers : []))
+    if (l && typeof l.key === 'string' && l.key && !(l.key in doBoard)) { doBoard[l.key] = l; ordemBoard.push(l.key); }
+  const pares = mechPairs(B);
+  const corOk = c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
+  const linha = (r, key, order) => {
+    const b = doBoard[key];
+    return { key, name: (b && typeof b.name === 'string' && b.name) ? b.name : r.name,
+             kind: r.kind, side: r.side, pair: (key in pares) ? pares[key] : r.pair, altium: r.altium,
+             color: (b && corOk(b.color)) ? b.color : r.color, order,
+             stack: (b && isNum(b.stack)) ? b.stack : null,
+             used: (cnt[key] || 0) > 0, count: cnt[key] || 0, inBoard: !!b };
+  };
+  const out = [];
+  for (const r of PCB_LAYERS){
+    const opcional = r.kind === 'plane' || r.kind === 'mech' || /^Mid\d+$/.test(r.key);
+    if (opcional && !(r.key in doBoard) && !cnt[r.key]) continue;
+    out.push(linha(r, r.key, r.order));
+  }
+  let extra = PCB_LAYERS.length;
+  for (const key of ordemBoard.concat(vistos)){
+    if (LAYER_BY_KEY[key] || out.some(l => l.key === key)) continue;
+    const r = { name:key, kind: /^Mech\d+$/.test(key) ? 'mech' : 'other', side:null, pair:null, altium:null, color:'#888888' };
+    out.push(linha(r, key, extra++));
+  }
+  return out;
+}
+
 /* ============ PCB: board + changes -> modelo efetivo (port do viewer v1) ============ */
 
+const temProp = (o, k) => o != null && Object.prototype.hasOwnProperty.call(o, k);
+/* [[x,y],...] com pelo menos `n` vertices numericos (region_add aqui e no serializeChanges) */
+function ptsValid(pts, n){
+  return Array.isArray(pts) && pts.length >= n && pts.every(p => Array.isArray(p) && isNum(p[0]) && isNum(p[1]));
+}
+/* copia de um objeto do board.js para o eff: rasa, mas o que e aninhado (points, holes, polys,
+   pads) vira copia tambem -- o eff nunca divide array com o board */
+function copiaEff(o){
+  const e = { ...o };
+  for (const k in e) if (e[k] && typeof e[k] === 'object') e[k] = dcopy(e[k]);
+  return e;
+}
+/* poligono que region_add aceita: sem vertice repetido em seguida (inclusive o ultimo igual ao
+   primeiro, que e o fechamento escrito a mao), >= 3 vertices, area e nenhum lado cortando
+   outro que nao seja vizinho -- o Altium e o Gerber nao aceitam regiao auto-intersectante. */
+function regiaoErro(pts){
+  const mesmo = (a, b) => Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9;
+  const q = [];
+  for (const p of pts) if (!q.length || !mesmo(q[q.length - 1], p)) q.push(p);
+  while (q.length > 1 && mesmo(q[0], q[q.length - 1])) q.pop();
+  if (q.length < 3) return 'região sem área (vértices alinhados ou repetidos)';
+  const n = q.length;
+  const lado = (a, b, c) => { const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); return Math.abs(v) < 1e-12 ? 0 : (v > 0 ? 1 : -1); };
+  const sobre = (a, b, c) => Math.min(a[0], b[0]) - 1e-9 <= c[0] && c[0] <= Math.max(a[0], b[0]) + 1e-9 &&
+                             Math.min(a[1], b[1]) - 1e-9 <= c[1] && c[1] <= Math.max(a[1], b[1]) + 1e-9;
+  const corta = (p1, p2, p3, p4) => {
+    const o1 = lado(p1, p2, p3), o2 = lado(p1, p2, p4), o3 = lado(p3, p4, p1), o4 = lado(p3, p4, p2);
+    if (o1 !== o2 && o3 !== o4) return true;
+    return (o1 === 0 && sobre(p1, p2, p3)) || (o2 === 0 && sobre(p1, p2, p4)) ||
+           (o3 === 0 && sobre(p3, p4, p1)) || (o4 === 0 && sobre(p3, p4, p2));
+  };
+  for (let i = 0; i < n; i++)
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;                 /* o ultimo lado e vizinho do primeiro */
+      if (corta(q[i], q[(i + 1) % n], q[j], q[(j + 1) % n])) return 'região com lados que se cruzam (o Altium e o Gerber não aceitam)';
+    }
+  let s = 0;
+  for (let i = 0; i < n; i++) { const a = q[i], b = q[(i + 1) % n]; s += a[0] * b[1] - b[0] * a[1]; }
+  return Math.abs(s) < 1e-9 ? 'região sem área (vértices alinhados ou repetidos)' : '';
+}
+/* espelho NOVO: o ExportBoard de 2026-10 (ou o leitor de .PcbDoc) carimba `exporter`, e so ele
+   marca poly/owner/keepout nas regions. No espelho antigo uma region pode ser cobre livre,
+   pedaco de poligono despejado ou primitiva de footprint (pad customizado, termico) -- medido:
+   1982 das 3065 regions dos 17 espelhos de hoje caem inteiras dentro de um componente, nenhuma
+   com owner -- e nao ha como saber qual e qual. */
+function espelhoNovo(B){ return !!B && typeof B.exporter === 'string' && B.exporter !== ''; }
+
+/* O modelo que a tela edita. Alem do que ja tinha (comps, tracks/arcs/vias de cobre, texts,
+   added), agora tambem:
+   - silk LIVRE (B.silk sem owner) e linhas LIVRES (B.lines sem owner) entram em model.tracks
+     (item kind 'line') e model.arcs (item kind 'arc'), no MESMO formato dos de cobre
+     {kind:'track'|'arc', src, eff, changed, deleted}. O prefixo do id diz de onde vieram
+     (t/a cobre, s silk, l linhas). Os com owner ficam fora: sao do componente, e a tela os
+     desenha direto do board pelo ownerDelta/xfObject;
+   - fills livres em model.fills e regions livres (sem owner, sem poly, sem keepout, de espelho
+     NOVO) em model.regions; a region de polygon, a de componente, a keepout e TODA region de
+     espelho antigo ficam so para desenho (region_del nelas e erro que diz o porque).
+   Ordem (a do ApplyChanges): as mudancas valem na ordem do arquivo, e o orig_* de cada uma e
+   conferido com o objeto COMO ELE ESTA depois das anteriores -- objeto que uma op anterior tirou
+   de onde o orig_* diz e erro (la ela e recusada); objeto intocado que nao confere continua
+   sendo o aviso de espelho desatualizado. So o comp_attr o ApplyChanges deixa para o fim.
+   Regra do eff para objetos com owner (trilha de cobre do footprint, textos do componente):
+   o eff fica no referencial do board.js, SEM o deslocamento do componente movido -- quem
+   desenha aplica ownerDelta/xfObject, e o effectiveBoard() ja entrega aplicado.
+   O modelo guarda (nao enumeraveis) o `board` de onde saiu e os `pares` mecanicos da placa. */
 function applyPcbChanges(board, changes){
   const B = board || {};
   const CH = Array.isArray(changes) ? changes : [];
-  const model = { comps:[], compByRef:{}, tracks:[], arcs:[], vias:[], texts:[], added:[],
+  const novo = espelhoNovo(B), pares = mechPairs(B);
+  const model = { comps:[], compByRef:{}, tracks:[], arcs:[], vias:[], texts:[], fills:[], regions:[], added:[],
                   validation:[], changeItems:[],
                   outline:((B.board && B.board.outline) || []).slice(), outlineChanged:false };
+  const oculto = (o, k, v) => Object.defineProperty(o, k, { value:v, writable:true, configurable:true, enumerable:false });
+  oculto(model, 'board', board);
+  oculto(model, 'pares', pares);
   for (const c of (B.components || [])) {
     const m = { kind:'comp', src:c, eff:{ x:c.x, y:c.y, rot:c.rot, layer:c.layer }, changed:false, attrChanged:false };
+    oculto(m, 'pares', pares);
     model.comps.push(m); model.compByRef[c.ref] = m;
   }
-  const byId = {};
-  for (const t of (B.tracks || [])) { const m = { kind:'track', src:t, eff:{...t}, changed:false, deleted:false }; model.tracks.push(m); byId[t.id] = m; }
-  for (const a of (B.arcs  || [])) { const m = { kind:'arc',   src:a, eff:{...a}, changed:false, deleted:false }; model.arcs.push(m);  byId[a.id] = m; }
-  for (const v of (B.vias  || [])) { const m = { kind:'via',   src:v, eff:{...v}, changed:false, deleted:false }; model.vias.push(m);  byId[v.id] = m; }
-  for (const x of (B.texts || [])) { const m = { kind:'text',  src:x, eff:{...x}, changed:false }; model.texts.push(m); byId[x.id] = m; }
+  const compDe = ref => (ref != null && temProp(model.compByRef, String(ref))) ? model.compByRef[String(ref)] : null;
+
+  /* Indice por id de TODOS os objetos com id -- inclusive os que ficam fora do modelo (de
+     componente, de poligono, keepout, region de espelho antigo), que entram so como `fora`
+     para o erro dizer por que nao sao editaveis. Id repetido (board.js feito a mao, espelho
+     torto) nao some calado: a op escolhe pelo orig_* e, se nem ele decide, e erro. */
+  const porId = Object.create(null);
+  const indexa = m => { const id = m.src.id; if (id == null) return; const k = String(id); (porId[k] || (porId[k] = [])).push(m); };
+  const entra = (kind, src, list) => { const m = { kind, src, eff:copiaEff(src), changed:false, deleted:false }; list.push(m); indexa(m); };
+  for (const t of (B.tracks || [])) if (t) entra('track', t, model.tracks);
+  for (const a of (B.arcs  || [])) if (a) entra('arc',   a, model.arcs);
+  for (const v of (B.vias  || [])) if (v) entra('via',   v, model.vias);
+  for (const x of (B.texts || [])) if (x) entra('text',  x, model.texts);
+  for (const s of [].concat(B.silk || [], B.lines || [])) {
+    if (!s || (s.kind && s.kind !== 'line' && s.kind !== 'arc')) continue;
+    const kind = s.kind === 'arc' ? 'arc' : 'track';
+    if (s.owner) { indexa({ kind, src:s, fora:'owner' }); continue; }
+    entra(kind, s, kind === 'arc' ? model.arcs : model.tracks);
+  }
+  for (const f of (B.fills || [])) {
+    if (!f) continue;
+    if (f.owner) { indexa({ kind:'fill', src:f, fora:'owner' }); continue; }
+    entra('fill', f, model.fills);
+  }
+  for (const g of (B.regions || [])) {
+    if (!g) continue;
+    const fora = g.owner ? 'owner' : g.poly ? 'poly' : g.keepout ? 'keepout' : !novo ? 'antigo' : '';
+    if (fora) { indexa({ kind:'region', src:g, fora }); continue; }
+    entra('region', g, model.regions);
+  }
+  /* o objeto do id para a op: so os do tipo `kind`; com id repetido, decide quem casa com o
+     orig_* da op (`casa`, comparado com o board.js); nem ele decidindo -> {ambiguo:n} */
+  const achar = (id, kind, casa) => {
+    const L = (id != null && temProp(porId, String(id))) ? porId[String(id)].filter(m => m.kind === kind) : [];
+    if (L.length < 2) return L[0] || null;
+    const c = L.filter(m => casa(m.src));
+    return c.length === 1 ? c[0] : { ambiguo:L.length };
+  };
+  /* camada de destino de um objeto novo/editado: tem de existir na tabela, e Multi e so de
+     pad e via (o Altium nao tem trilha/fill/texto "passante") */
+  const layerErr = (key, what) => {
+    if (typeof key !== 'string' || !key) return 'falta layer';
+    const L = pcbLayer(key);
+    if (!L) return `layer "${key}" não existe (use uma chave da tabela: Top, Bottom, TopOverlay, Mech1...)`;
+    if (L.kind === 'multi') return `${what} não pode ficar na Multi-Layer`;
+    return '';
+  };
+  /* campo presente que nao e numero: o ApplyChanges le 0 (StrToFloatDot de "null"/"abc") e
+     escreveria isso na placa; aqui a op e recusada */
+  const invalido = (ch, keys) => keys.find(k => ch[k] !== undefined && !isNum(ch[k]));
+
+  /* quem mexeu por ultimo em cada objeto (indice da op): `quem` para os objetos, `quemPos`
+     (comp_move) e `quemAttr` (comp_attr) separados no componente */
+  const quem = new Map(), quemPos = new Map(), quemAttr = new Map();
+  /* onde um texto esta AGORA: o eff (referencial do board.js) mais o deslocamento do dono, se
+     uma op anterior ja moveu o componente -- e o que o ApplyChanges acha na placa */
+  const textoAtual = m => {
+    const o = { x:m.eff.x, y:m.eff.y, layer:m.eff.layer, text:m.eff.text };
+    let mexeu = quem.get(m);
+    const dono = m.src.owner ? compDe(m.src.owner) : null;
+    if (dono && dono.changed) {
+      const d = compDelta(dono), q = xfPoint(d, o.x, o.y);
+      o.x = q.x; o.y = q.y;
+      if (d.flip) o.layer = flipIn(pares, o.layer);
+      const k = quemPos.get(dono);
+      if (k !== undefined && (mexeu === undefined || k > mexeu)) mexeu = k;
+    }
+    return { obj:o, mexeu, dono };
+  };
+  /* x/y/rot (e camada/espelho) de uma op de texto valem no lugar ATUAL do texto -- o que o
+     ApplyChanges acha na placa. O eff de texto de componente fica no referencial do board.js
+     (o effectiveBoard poe o deslocamento do dono por cima), entao, se o dono ja andou, a conta
+     do dono e desfeita aqui. Texto livre (ou dono parado): o valor entra como veio. */
+  const escreveTexto = (m, ch, at) => {
+    const d = (at.dono && at.dono.changed) ? compDelta(at.dono) : null;
+    if (isNum(ch.x) || isNum(ch.y)) {
+      const x = isNum(ch.x) ? ch.x : at.obj.x, y = isNum(ch.y) ? ch.y : at.obj.y;
+      const p = d ? xfPointInv(d, x, y) : { x, y };
+      if (d || isNum(ch.x)) m.eff.x = p.x;
+      if (d || isNum(ch.y)) m.eff.y = p.y;
+    }
+    if (isNum(ch.rot)) m.eff.rot = d ? (d.flip ? phiOf(d) + 180 - ch.rot : ch.rot - d.dr) : ch.rot;
+    if (typeof ch.layer === 'string' && ch.layer) m.eff.layer = (d && d.flip) ? flipIn(pares, ch.layer) : ch.layer;
+    if (typeof ch.mirror === 'boolean') m.eff.mirror = (d && d.flip) ? !ch.mirror : ch.mirror;
+  };
+  /* comp_attr: o designator FINAL de cada componente, simulando so os comp_attr na ordem (o
+     ApplyChanges os aplica no fim). Com ele o rename que deixaria dois componentes com o mesmo
+     nome e recusado, e a troca R1<->R2 continua valendo. */
+  const finalRef = new Map();
+  {
+    const nome = new Map(), coment = new Map();
+    for (const ch of CH) {
+      if (!ch || ch.op !== 'comp_attr') continue;
+      const m = compDe(ch.ref);
+      if (!m || typeof ch.orig_designator !== 'string' || typeof ch.orig_comment !== 'string') continue;
+      if (nome.has(m) && (ch.orig_designator !== nome.get(m) || ch.orig_comment !== coment.get(m))) continue;
+      nome.set(m, (typeof ch.designator === 'string' && ch.designator) ? ch.designator : (nome.has(m) ? nome.get(m) : m.src.ref));
+      coment.set(m, typeof ch.comment === 'string' ? ch.comment : (coment.has(m) ? coment.get(m) : (m.src.comment || '')));
+    }
+    for (const [m, n] of nome) finalRef.set(m, n);
+  }
+  const nomeFinal = o => finalRef.has(o) ? finalRef.get(o) : o.src.ref;
+  /* regions sem dono (espelho antigo) e recortes de componente sem dono que caem inteiros na
+     caixa do componente: podem ser dele, mas sem owner ficam no lugar quando ele anda */
+  const semDonoDentro = c => {
+    const b = c.bbox;
+    if (!b || !isNum(b.x1) || !isNum(b.y1) || !isNum(b.x2) || !isNum(b.y2)) return [0, 0];
+    const dentro = pts => Array.isArray(pts) && pts.length > 0 && pts.every(p => Array.isArray(p) &&
+      p[0] >= b.x1 - TOL && p[0] <= b.x2 + TOL && p[1] >= b.y1 - TOL && p[1] <= b.y2 + TOL);
+    let nr = 0, nk = 0;
+    if (!novo) for (const g of (B.regions || [])) if (g && !g.owner && dentro(g.points)) nr++;
+    for (const k of (B.cutouts || [])) if (k && k.incomp && !k.owner && dentro(k.points)) nk++;
+    return [nr, nk];
+  };
 
   let addSeq = 0;
-  CH.forEach((ch, idx) => {
-    const item = { ch, idx, status:'ok', msg:'', target:null };
+  CH.forEach((chIn, idx) => {
+    const ch = (chIn && typeof chIn === 'object') ? chIn : {};
+    const item = { ch:chIn, idx, status:'ok', msg:'', target:null };
     model.changeItems.push(item);
     const bad  = (m) => { item.status='err'; item.msg=m; model.validation.push({ level:'err', msg:`#${idx+1} ${ch.op||'?'}: ${m}`, target:item.target }); };
     const warn = (m) => { if (item.status!=='err') item.status='warn'; item.msg=m; model.validation.push({ level:'warn', msg:`#${idx+1} ${ch.op}: ${m}`, target:item.target }); };
+    /* orig_* x estado atual: confere -> segue; nao confere e uma op anterior mexeu -> erro (o
+       ApplyChanges vai recusar); nao confere e ninguem mexeu -> o aviso de sempre */
+    const conferir = (ok, mexeu, aviso) => {
+      if (ok) return true;
+      if (mexeu !== undefined) {
+        bad(`orig_* não confere com o objeto depois da mudança #${mexeu+1} — o ApplyChanges aplica as mudanças em ordem e vai recusar esta; junte as duas numa linha só`);
+        return false;
+      }
+      warn(aviso);
+      return true;
+    };
+    /* net so faz sentido em cobre: num objeto novo em outra camada ela e descartada do eff */
+    const soCobre = (eff) => {
+      if (isCopper(eff.layer)) return;
+      if (typeof eff.net === 'string' && eff.net) warn(`net "${eff.net}" só vale em camada de cobre — ignorada`);
+      delete eff.net;
+    };
+    /* objeto novo e sempre livre: o ApplyChanges cria primitiva solta, entao dono, poligono e
+       keepout que viessem na op nao valem */
+    const novoLivre = (eff) => {
+      if (eff.owner !== undefined) { if (eff.owner) warn(`owner "${eff.owner}" ignorado — objeto novo é sempre livre`); delete eff.owner; }
+      delete eff.poly; delete eff.keepout;
+      return eff;
+    };
+    const removido = (m, oque) => bad(`${oque} id "${ch.id}" já foi removid${oque === 'via' || oque === 'trilha' || oque === 'região' ? 'a' : 'o'} pela mudança #${quem.get(m)+1}`);
 
     switch (ch.op) {
       case 'comp_move': {
-        const m = model.compByRef[ch.ref];
+        const m = compDe(ch.ref);
         if (!m) return bad(`componente "${ch.ref}" não existe no board.js`);
         item.target = m;
         if (!isNum(ch.orig_x)||!isNum(ch.orig_y)||!isNum(ch.orig_rot)||!ch.orig_layer)
           return bad('faltam orig_x/orig_y/orig_rot/orig_layer (copie do board.js)');
-        if (!near(ch.orig_x,m.src.x)||!near(ch.orig_y,m.src.y)||!nearAng(ch.orig_rot,m.src.rot)||ch.orig_layer!==m.src.layer)
-          warn('orig_* não confere com o board.js — espelho pode estar desatualizado');
-        if (isNum(ch.x)) m.eff.x = ch.x;
-        if (isNum(ch.y)) m.eff.y = ch.y;
-        if (isNum(ch.rot)) m.eff.rot = ch.rot;
-        if (ch.layer) m.eff.layer = ch.layer;
-        m.changed = !(near(m.eff.x,m.src.x)&&near(m.eff.y,m.src.y)&&nearAng(m.eff.rot,m.src.rot)&&m.eff.layer===m.src.layer);
+        /* o ApplyChanges so vira de lado com "Top" ou "Bottom" EXATOS (LayerFromName); qualquer
+           outra coisa ele ignora calado e o componente fica do lado em que estava */
+        if (ch.layer != null && ch.layer !== '' && ch.layer !== 'Top' && ch.layer !== 'Bottom')
+          return bad(`layer "${ch.layer}" inválida para componente — use Top ou Bottom`);
+        const inv = invalido(ch, ['x','y','rot']); if (inv) return bad(`campo "${inv}" inválido`);
+        const e = m.eff;
+        if (!conferir(near(ch.orig_x,e.x)&&near(ch.orig_y,e.y)&&nearAng(ch.orig_rot,e.rot)&&ch.orig_layer===e.layer,
+                      quemPos.get(m), 'orig_* não confere com o board.js — espelho pode estar desatualizado')) return;
+        /* o ApplyChanges faz MoveToXY(x, y) sempre: o eixo que faltar vira 0 la */
+        const falta = ['x','y'].filter(k => !isNum(ch[k]));
+        if (falta.length) warn(`sem ${falta.join(' e ')}: o ApplyChanges leva o componente para ${falta.map(k => k + ' = 0').join(', ')} — escreva x e y`);
+        const lado = (ch.layer === 'Top' || ch.layer === 'Bottom') ? ch.layer : e.layer;
+        if (lado !== e.layer && !isNum(ch.rot))
+          warn('vira de lado sem rot: a rotação final fica por conta do Altium — escreva rot');
+        if (isNum(ch.x)) e.x = ch.x;
+        if (isNum(ch.y)) e.y = ch.y;
+        if (isNum(ch.rot)) e.rot = ch.rot;
+        e.layer = lado;
+        m.changed = !(near(e.x,m.src.x)&&near(e.y,m.src.y)&&nearAng(e.rot,m.src.rot)&&e.layer===m.src.layer);
+        quemPos.set(m, idx);
+        if (m.changed) {
+          const [nr, nk] = semDonoDentro(m.src);
+          if (nr || nk) {
+            const oq = [nr ? `${nr} região(ões)` : '', nk ? `${nk} recorte(s)` : ''].filter(Boolean).join(' e ');
+            warn(`${oq} dentro de ${m.src.ref} sem dono no board.js${nr ? ' (espelho antigo)' : ''}: na prévia e no Gerber ficam no lugar quando o componente anda — reexporte a placa com o ExportBoard novo`);
+          }
+        }
         break;
       }
       case 'comp_attr': {
-        // Nota de design: no motor JS a ordem não importa — compByRef é chaveado pelo ref do board.js
-        // e as demais ops também procuram pelo ref do board; só o .pas precisa aplicar renames por último.
-        const m = model.compByRef[ch.ref];
+        /* O ApplyChanges aplica TODOS os comp_attr no fim (renomear cedo quebraria os refs das
+           outras ops); aqui a ordem entre eles e a mesma, e as outras ops nao mexem em
+           designator/comment -- compByRef e chaveado pelo ref do board.js. */
+        const m = compDe(ch.ref);
         if (!m) return bad(`componente "${ch.ref}" não existe no board.js`);
         item.target = m;
         if (typeof ch.orig_designator !== 'string' || typeof ch.orig_comment !== 'string')
           return bad('faltam orig_designator/orig_comment (copie do board.js)');
-        if (ch.orig_designator !== m.src.ref || ch.orig_comment !== (m.src.comment || ''))
-          warn('orig_* não confere com o board.js — espelho pode estar desatualizado');
-        if (typeof ch.designator === 'string' && ch.designator) m.eff.designator = ch.designator;
+        const desAtual = m.eff.designator !== undefined ? m.eff.designator : m.src.ref;
+        const comAtual = m.eff.comment !== undefined ? m.eff.comment : (m.src.comment || '');
+        if (!conferir(ch.orig_designator === desAtual && ch.orig_comment === comAtual, quemAttr.get(m),
+                      'orig_* não confere com o board.js — espelho pode estar desatualizado')) return;
+        const nome = (typeof ch.designator === 'string' && ch.designator) ? ch.designator : '';
+        if (nome && nome !== desAtual) {
+          const outro = model.comps.find(o => o !== m && nomeFinal(o) === nome);
+          if (outro) return bad(outro.src.ref === nome
+            ? `designator "${nome}" já é de outro componente, que continua com ele — dois componentes com o mesmo nome`
+            : `designator "${nome}" também é o nome novo de ${outro.src.ref} — dois componentes com o mesmo nome`);
+        }
+        if (nome) m.eff.designator = nome;
         if (typeof ch.comment === 'string') m.eff.comment = ch.comment;
         m.attrChanged = (m.eff.designator !== undefined && m.eff.designator !== m.src.ref) ||
                         (m.eff.comment !== undefined && m.eff.comment !== (m.src.comment || ''));
+        quemAttr.set(m, idx);
         break;
       }
       case 'track_edit': case 'track_del': {
-        let m = ch.id ? byId[ch.id] : null;
-        if (m && m.kind!=='track') m = null;
+        /* o id pode ser trilha de cobre (t), silk livre (s) ou linha livre (l) */
+        const casa = s => !!s && ((near(ch.orig_x1,s.x1)&&near(ch.orig_y1,s.y1)&&near(ch.orig_x2,s.x2)&&near(ch.orig_y2,s.y2)) ||
+                                  (near(ch.orig_x1,s.x2)&&near(ch.orig_y1,s.y2)&&near(ch.orig_x2,s.x1)&&near(ch.orig_y2,s.y1)))
+                                 && near(ch.orig_w,s.w) && ch.orig_layer===s.layer;
+        const m = achar(ch.id, 'track', casa);
+        if (m && m.ambiguo) return bad(`trilha id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual — reexporte o espelho`);
         if (!m) return bad(`trilha id "${ch.id}" não existe no board.js`);
+        if (m.fora) return bad(`trilha id "${ch.id}" pertence ao componente ${m.src.owner} (não é editável sozinha)`);
         item.target = m;
+        if (m.src.owner) return bad(`trilha id "${ch.id}" pertence ao componente ${m.src.owner} (não é editável sozinha)`);
+        if (m.deleted) return removido(m, 'trilha');
         for (const k of ['x1','y1','x2','y2','w'])
           if (!isNum(ch['orig_'+k])) return bad('faltam campos orig_* (copie do board.js)');
         if (!ch.orig_layer) return bad('falta orig_layer');
-        const s = m.src;
-        const direct = near(ch.orig_x1,s.x1)&&near(ch.orig_y1,s.y1)&&near(ch.orig_x2,s.x2)&&near(ch.orig_y2,s.y2);
-        const rev    = near(ch.orig_x1,s.x2)&&near(ch.orig_y1,s.y2)&&near(ch.orig_x2,s.x1)&&near(ch.orig_y2,s.y1);
-        if (!(direct||rev) || !near(ch.orig_w,s.w) || ch.orig_layer!==s.layer)
-          warn('orig_* não confere com o board.js');
-        if (ch.op==='track_del'){ m.deleted = true; break; }
+        if (!conferir(casa(m.eff), quem.get(m), 'orig_* não confere com o board.js')) return;
+        if (ch.op==='track_del'){ m.deleted = true; quem.set(m, idx); break; }
+        if (ch.layer) { const e = layerErr(ch.layer, 'trilha'); if (e) return bad(e); }
+        const inv = invalido(ch, ['x1','y1','x2','y2','w']); if (inv) return bad(`campo "${inv}" inválido`);
+        if (isNum(ch.w) && ch.w <= 0) return bad('largura w deve ser > 0');
         for (const k of ['x1','y1','x2','y2','w']) if (isNum(ch[k])) m.eff[k] = ch[k];
         if (ch.layer) m.eff.layer = ch.layer;
-        if (typeof ch.net==='string') m.eff.net = ch.net;
-        m.changed = true;
+        if (typeof ch.net==='string') {
+          if (isCopper(m.eff.layer)) m.eff.net = ch.net;
+          else if (ch.net) warn(`net "${ch.net}" só vale em camada de cobre — ignorada`);
+        }
+        m.changed = true; quem.set(m, idx);
         break;
       }
       case 'track_add': {
         for (const k of ['x1','y1','x2','y2','w']) if (!isNum(ch[k])) return bad(`campo "${k}" ausente/inválido`);
-        if (ch.layer!=='Top' && ch.layer!=='Bottom') return bad('layer deve ser Top ou Bottom');
+        const e = layerErr(ch.layer, 'trilha'); if (e) return bad(e);
         if (ch.w<=0) return bad('largura w deve ser > 0');
         const m = { kind:'track', src:null, eff:{ id:'new-t'+(++addSeq), ...ch }, changed:false, added:true };
         model.added.push(m); item.target = m;
+        novoLivre(m.eff); soCobre(m.eff);
         break;
       }
       case 'via_edit': case 'via_del': {
-        let m = ch.id ? byId[ch.id] : null;
-        if (m && m.kind!=='via') m = null;
+        const casa = s => !!s && near(ch.orig_x,s.x) && near(ch.orig_y,s.y);
+        const m = achar(ch.id, 'via', casa);
+        if (m && m.ambiguo) return bad(`via id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual — reexporte o espelho`);
         if (!m) return bad(`via id "${ch.id}" não existe no board.js`);
         item.target = m;
+        if (m.deleted) return removido(m, 'via');
         if (!isNum(ch.orig_x)||!isNum(ch.orig_y)) return bad('faltam orig_x/orig_y');
-        if (!near(ch.orig_x,m.src.x)||!near(ch.orig_y,m.src.y)) warn('orig_* não confere com o board.js');
-        if (ch.op==='via_del'){ m.deleted = true; break; }
+        if (!conferir(casa(m.eff), quem.get(m), 'orig_* não confere com o board.js')) return;
+        if (ch.op==='via_del'){ m.deleted = true; quem.set(m, idx); break; }
+        const inv = invalido(ch, ['x','y','size','drill']); if (inv) return bad(`campo "${inv}" inválido`);
+        if ((isNum(ch.size) && ch.size <= 0) || (isNum(ch.drill) && ch.drill <= 0)) return bad('size e drill devem ser > 0');
         for (const k of ['x','y','size','drill']) if (isNum(ch[k])) m.eff[k] = ch[k];
-        m.changed = true;
+        if (isNum(m.eff.drill) && isNum(m.eff.size) && m.eff.drill >= m.eff.size) warn('drill >= size (anel nulo)');
+        m.changed = true; quem.set(m, idx);
         break;
       }
       case 'via_add': {
         for (const k of ['x','y','size','drill']) if (!isNum(ch[k])) return bad(`campo "${k}" ausente/inválido`);
-        if (ch.drill>=ch.size) warn('drill >= size (anel nulo)');
+        if (ch.size<=0 || ch.drill<=0) return bad('size e drill devem ser > 0');
         const m = { kind:'via', src:null, eff:{ id:'new-v'+(++addSeq), from:'Top', to:'Bottom', ...ch }, changed:false, added:true };
         model.added.push(m); item.target = m;
+        if (ch.drill>=ch.size) warn('drill >= size (anel nulo)');
+        novoLivre(m.eff);
         break;
       }
       case 'arc_edit': case 'arc_del': {
-        let m = ch.id ? byId[ch.id] : null;
-        if (m && m.kind!=='arc') m = null;
+        /* o id pode ser arco de cobre (a), arco de silk livre (s) ou de linha livre (l) */
+        const casa = s => !!s && near(ch.orig_cx,s.cx) && near(ch.orig_cy,s.cy) && near(ch.orig_r,s.r) &&
+                               nearAng(ch.orig_sa,s.sa) && nearAng(ch.orig_ea,s.ea) && ch.orig_layer===s.layer;
+        const m = achar(ch.id, 'arc', casa);
+        if (m && m.ambiguo) return bad(`arco id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual — reexporte o espelho`);
         if (!m) return bad(`arco id "${ch.id}" não existe no board.js`);
+        if (m.fora) return bad(`arco id "${ch.id}" pertence ao componente ${m.src.owner} (não é editável sozinho)`);
         item.target = m;
+        if (m.src.owner) return bad(`arco id "${ch.id}" pertence ao componente ${m.src.owner} (não é editável sozinho)`);
+        if (m.deleted) return removido(m, 'arco');
         for (const k of ['cx','cy','r','sa','ea']) if (!isNum(ch['orig_'+k])) return bad('faltam campos orig_*');
         if (!ch.orig_layer) return bad('falta orig_layer');
-        const s = m.src;
-        if (!near(ch.orig_cx,s.cx)||!near(ch.orig_cy,s.cy)||!near(ch.orig_r,s.r)||
-            !nearAng(ch.orig_sa,s.sa)||!nearAng(ch.orig_ea,s.ea)||ch.orig_layer!==s.layer)
-          warn('orig_* não confere com o board.js');
-        if (ch.op==='arc_del'){ m.deleted = true; break; }
+        if (!conferir(casa(m.eff), quem.get(m), 'orig_* não confere com o board.js')) return;
+        if (ch.op==='arc_del'){ m.deleted = true; quem.set(m, idx); break; }
+        if (ch.layer) { const e = layerErr(ch.layer, 'arco'); if (e) return bad(e); }
+        const inv = invalido(ch, ['cx','cy','r','sa','ea','w']); if (inv) return bad(`campo "${inv}" inválido`);
+        if (isNum(ch.r) && ch.r <= 0) return bad('raio r deve ser > 0');
+        if (isNum(ch.w) && ch.w <= 0) return bad('largura w deve ser > 0');
         for (const k of ['cx','cy','r','sa','ea','w']) if (isNum(ch[k])) m.eff[k] = ch[k];
         if (ch.layer) m.eff.layer = ch.layer;
-        m.changed = true;
+        m.changed = true; quem.set(m, idx);
         break;
       }
       case 'arc_add': {
         for (const k of ['cx','cy','r','sa','ea','w']) if (!isNum(ch[k])) return bad(`campo "${k}" ausente/inválido`);
-        if (ch.layer!=='Top' && ch.layer!=='Bottom') return bad('layer deve ser Top ou Bottom');
+        const e = layerErr(ch.layer, 'arco'); if (e) return bad(e);
+        if (ch.r<=0) return bad('raio r deve ser > 0');
+        if (ch.w<=0) return bad('largura w deve ser > 0');
         const m = { kind:'arc', src:null, eff:{ id:'new-a'+(++addSeq), ...ch }, changed:false, added:true };
         model.added.push(m); item.target = m;
+        novoLivre(m.eff); soCobre(m.eff);
         break;
       }
       case 'text_edit': {
-        let m = ch.id ? byId[ch.id] : null;
-        if (m && m.kind!=='text') m = null;
+        const casa = s => !!s && near(ch.orig_x,s.x) && near(ch.orig_y,s.y) && ch.orig_layer===s.layer && ch.orig_text===s.text;
+        const m = achar(ch.id, 'text', casa);
+        if (m && m.ambiguo) return bad(`texto id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual — reexporte o espelho`);
         if (!m) return bad(`texto id "${ch.id}" não existe no board.js`);
         item.target = m;
         if (!isNum(ch.orig_x)||!isNum(ch.orig_y)||!ch.orig_layer||typeof ch.orig_text!=='string')
@@ -252,11 +654,125 @@ function applyPcbChanges(board, changes){
         const s = m.src;
         if (s.designator || s.comment)
           return bad('só textos livres podem ser editados (este pertence a um componente)');
-        if (!near(ch.orig_x,s.x)||!near(ch.orig_y,s.y)||ch.orig_layer!==s.layer||ch.orig_text!==s.text)
-          warn('orig_* não confere com o board.js — espelho pode estar desatualizado');
+        if (m.deleted) return removido(m, 'texto');
+        /* texto de componente (nao designator/comment) anda com o dono: depois de um comp_move
+           dele, o ApplyChanges ja nao o acha no orig_* */
+        const at = textoAtual(m);
+        if (!conferir(casa(at.obj), at.mexeu, 'orig_* não confere com o board.js — espelho pode estar desatualizado')) return;
+        if (ch.layer) { const e = layerErr(ch.layer, 'texto'); if (e) return bad(e); }
+        const inv = invalido(ch, ['x','y','h','rot','w']); if (inv) return bad(`campo "${inv}" inválido`);
+        if ((isNum(ch.h) && ch.h <= 0) || (isNum(ch.w) && ch.w <= 0)) return bad('altura h e espessura w devem ser > 0');
         if (typeof ch.text==='string') m.eff.text = ch.text;
-        for (const k of ['x','y','h','rot','w']) if (isNum(ch[k])) m.eff[k] = ch[k];
-        m.changed = true;
+        for (const k of ['h','w']) if (isNum(ch[k])) m.eff[k] = ch[k];
+        escreveTexto(m, ch, at);
+        m.changed = true; quem.set(m, idx);
+        break;
+      }
+      case 'text_add': {
+        /* x,y = CENTRO do bounding box (a convencao do text_edit); fonte stroke (kind, contrato
+           secao 2: `kind` e o tipo de fonte, `font` o nome da TrueType); w padrao h/10 */
+        if (typeof ch.text !== 'string' || !ch.text) return bad('campo "text" ausente/vazio');
+        for (const k of ['x','y','h']) if (!isNum(ch[k])) return bad(`campo "${k}" ausente/inválido`);
+        const e = layerErr(ch.layer, 'texto'); if (e) return bad(e);
+        if (ch.h<=0) return bad('altura h deve ser > 0');
+        if (ch.w!==undefined && !(isNum(ch.w) && ch.w>0)) return bad('espessura w deve ser > 0');
+        if (ch.rot!==undefined && !isNum(ch.rot)) return bad('campo "rot" inválido');
+        const m = { kind:'text', src:null, changed:false, added:true,
+                    eff:{ id:'new-x'+(++addSeq), ...ch, w: isNum(ch.w) ? ch.w : ch.h/10, rot: isNum(ch.rot) ? ch.rot : 0,
+                          mirror: ch.mirror === true, designator:false, comment:false, kind:'stroke' } };
+        delete m.eff.font; delete m.eff.polys; delete m.eff.ax; delete m.eff.ay;
+        model.added.push(m); item.target = m;
+        novoLivre(m.eff);
+        break;
+      }
+      case 'text_del': {
+        const casa = s => !!s && near(ch.orig_x,s.x) && near(ch.orig_y,s.y) && ch.orig_layer===s.layer && ch.orig_text===s.text;
+        const m = achar(ch.id, 'text', casa);
+        if (m && m.ambiguo) return bad(`texto id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual — reexporte o espelho`);
+        if (!m) return bad(`texto id "${ch.id}" não existe no board.js`);
+        item.target = m;
+        const s = m.src;
+        if (s.owner || s.designator || s.comment)
+          return bad(`texto id "${ch.id}" pertence ao componente ${s.owner || '?'} (só textos livres podem ser removidos)`);
+        if (m.deleted) return removido(m, 'texto');
+        if (!isNum(ch.orig_x)||!isNum(ch.orig_y)||!ch.orig_layer||typeof ch.orig_text!=='string')
+          return bad('faltam orig_x/orig_y/orig_text/orig_layer (copie do board.js)');
+        const at = textoAtual(m);
+        if (!conferir(casa(at.obj), at.mexeu, 'orig_* não confere com o board.js — espelho pode estar desatualizado')) return;
+        m.deleted = true; quem.set(m, idx);
+        break;
+      }
+      case 'fill_edit': case 'fill_del': {
+        /* o mesmo retangulo com os cantos trocados e o mesmo fill */
+        const casa = s => !!s && near(Math.min(ch.orig_x1,ch.orig_x2), Math.min(s.x1,s.x2)) && near(Math.max(ch.orig_x1,ch.orig_x2), Math.max(s.x1,s.x2)) &&
+                               near(Math.min(ch.orig_y1,ch.orig_y2), Math.min(s.y1,s.y2)) && near(Math.max(ch.orig_y1,ch.orig_y2), Math.max(s.y1,s.y2)) &&
+                               ch.orig_layer===s.layer;
+        const m = achar(ch.id, 'fill', casa);
+        if (m && m.ambiguo) return bad(`fill id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual — reexporte o espelho`);
+        if (!m) return bad(`fill id "${ch.id}" não existe no board.js`);
+        if (m.fora) return bad(`fill id "${ch.id}" pertence ao componente ${m.src.owner} (não é editável sozinho)`);
+        item.target = m;
+        if (m.deleted) return removido(m, 'fill');
+        for (const k of ['x1','y1','x2','y2']) if (!isNum(ch['orig_'+k])) return bad('faltam campos orig_* (copie do board.js)');
+        if (!ch.orig_layer) return bad('falta orig_layer');
+        if (!conferir(casa(m.eff), quem.get(m), 'orig_* não confere com o board.js')) return;
+        if (ch.op==='fill_del'){ m.deleted = true; quem.set(m, idx); break; }
+        if (ch.layer) { const e = layerErr(ch.layer, 'fill'); if (e) return bad(e); }
+        const inv = invalido(ch, ['x1','y1','x2','y2','rot']); if (inv) return bad(`campo "${inv}" inválido`);
+        const v = k => isNum(ch[k]) ? ch[k] : m.eff[k];
+        if (near(v('x1'), v('x2')) || near(v('y1'), v('y2'))) return bad('fill sem área (x1 = x2 ou y1 = y2)');
+        for (const k of ['x1','y1','x2','y2','rot']) if (isNum(ch[k])) m.eff[k] = ch[k];
+        if (ch.layer) m.eff.layer = ch.layer;
+        if (typeof ch.net==='string') {
+          if (isCopper(m.eff.layer)) m.eff.net = ch.net;
+          else if (ch.net) warn(`net "${ch.net}" só vale em camada de cobre — ignorada`);
+        }
+        m.changed = true; quem.set(m, idx);
+        break;
+      }
+      case 'fill_add': {
+        for (const k of ['x1','y1','x2','y2']) if (!isNum(ch[k])) return bad(`campo "${k}" ausente/inválido`);
+        const e = layerErr(ch.layer, 'fill'); if (e) return bad(e);
+        if (near(ch.x1, ch.x2) || near(ch.y1, ch.y2)) return bad('fill sem área (x1 = x2 ou y1 = y2)');
+        if (ch.rot!==undefined && !isNum(ch.rot)) return bad('campo "rot" inválido');
+        const m = { kind:'fill', src:null, eff:{ id:'new-f'+(++addSeq), ...ch, rot: isNum(ch.rot) ? ch.rot : 0 }, changed:false, added:true };
+        model.added.push(m); item.target = m;
+        novoLivre(m.eff); soCobre(m.eff);
+        break;
+      }
+      case 'region_add': {
+        /* poligono fechado implicito; cutout:true = Board Cutout (a layer e ignorada) */
+        if (!ptsValid(ch.pts, 3)) return bad('pts deve ser [[x,y],...] com >= 3 vértices');
+        const corte = ch.cutout === true;
+        if (!corte) { const e = layerErr(ch.layer, 'região'); if (e) return bad(e); }
+        const ge = regiaoErro(ch.pts); if (ge) return bad(ge);
+        const m = { kind:'region', src:null, changed:false, added:true,
+                    eff:{ id:(corte ? 'new-k' : 'new-g')+(++addSeq), ...ch, points:ch.pts.map(p => [p[0], p[1]]) } };
+        model.added.push(m); item.target = m;
+        novoLivre(m.eff);
+        if (corte) {
+          m.eff.layer = 'Multi'; m.eff.cutout = true;
+          if (typeof ch.net === 'string' && ch.net) warn(`recorte não tem net — "${ch.net}" ignorada`);
+          delete m.eff.net;
+        } else soCobre(m.eff);
+        break;
+      }
+      case 'region_del': {
+        const casa = s => { const p = (s && Array.isArray(s.points)) ? s.points : [], p0 = p[0] || [];
+                            return !!s && ch.orig_layer===s.layer && ch.orig_n===p.length && near(ch.orig_x0,p0[0]) && near(ch.orig_y0,p0[1]); };
+        const m = achar(ch.id, 'region', casa);
+        if (m && m.ambiguo) return bad(`região id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual — reexporte o espelho`);
+        if (!m) return bad(`região id "${ch.id}" não existe no board.js`);
+        if (m.fora === 'owner')   return bad(`região id "${ch.id}" pertence ao componente ${m.src.owner} (não é editável sozinha)`);
+        if (m.fora === 'poly')    return bad(`região id "${ch.id}" é pedaço de polígono despejado — o Altium redespeja; mexa no polígono`);
+        if (m.fora === 'keepout') return bad(`região id "${ch.id}" é keepout — fica só para desenho (remova no Altium)`);
+        if (m.fora === 'antigo')  return bad(`região id "${ch.id}" vem de um espelho antigo (board.js sem "exporter"), que não diz se ela é livre, pedaço de polígono ou do componente — reexporte a placa com o ExportBoard novo`);
+        item.target = m;
+        if (m.deleted) return removido(m, 'região');
+        if (!ch.orig_layer||!isNum(ch.orig_n)||!isNum(ch.orig_x0)||!isNum(ch.orig_y0))
+          return bad('faltam orig_layer/orig_n/orig_x0/orig_y0 (copie do board.js)');
+        if (!conferir(casa(m.eff), quem.get(m), 'orig_* não confere com o board.js')) return;
+        m.deleted = true; quem.set(m, idx);
         break;
       }
       case 'designator_move': {
@@ -265,10 +781,20 @@ function applyPcbChanges(board, changes){
         item.target = m;
         if (!isNum(ch.orig_x)||!isNum(ch.orig_y))
           return bad('faltam orig_x/orig_y (copie do item do designator em board.js » texts)');
-        if (!near(ch.orig_x,m.src.x)||!near(ch.orig_y,m.src.y))
-          warn('orig_* não confere com o board.js — espelho pode estar desatualizado');
-        for (const k of ['x','y','h','rot']) if (isNum(ch[k])) m.eff[k] = ch[k];
-        m.changed = true;
+        /* o designator anda com o componente: depois de um comp_move dele, o ApplyChanges (que
+           aplica em ordem) ja nao acha o designator no orig_* e recusa -- o designator_move tem
+           de vir ANTES do comp_move, com x/y no lugar de antes do componente andar */
+        const at = textoAtual(m);
+        if (!(near(ch.orig_x, at.obj.x) && near(ch.orig_y, at.obj.y))) {
+          if (at.mexeu !== undefined && at.dono && at.mexeu === quemPos.get(at.dono) && at.mexeu !== quem.get(m))
+            return bad(`o designator de ${ch.ref} já terá andado com o comp_move #${at.mexeu+1} — o ApplyChanges aplica em ordem e vai recusar este designator_move; ponha-o antes do comp_move`);
+          if (!conferir(false, at.mexeu, 'orig_* não confere com o board.js — espelho pode estar desatualizado')) return;
+        }
+        const inv = invalido(ch, ['x','y','h','rot']); if (inv) return bad(`campo "${inv}" inválido`);
+        if (isNum(ch.h) && ch.h <= 0) return bad('altura h deve ser > 0');
+        if (isNum(ch.h)) m.eff.h = ch.h;
+        escreveTexto(m, { x:ch.x, y:ch.y, rot:ch.rot }, at);
+        m.changed = true; quem.set(m, idx);
         break;
       }
       case 'outline_set': {
@@ -287,34 +813,447 @@ function applyPcbChanges(board, changes){
         bad(`operação desconhecida "${ch.op}"`);
     }
   });
+  /* Trilha de cobre que foi para outra camada nao leva a net junto: o eff fica com o que a
+     placa e. Feito no fim (e nao no edit) para que dois edits encadeados -- Top -> Overlay e
+     depois Overlay -> Top -- devolvam a net original em vez de perde-la no meio do caminho. */
+  for (const list of [model.tracks, model.arcs, model.fills])
+    for (const m of list) if (m.changed && !isCopper(m.eff.layer) && m.eff.net) delete m.eff.net;
+  /* rede de seguranca do comp_attr: nome repetido que a simulacao nao previu (cadeia torta de
+     renames recusados) vira erro na ultima op que renomeou para ele */
+  const porNome = new Map();
+  for (const m of model.comps) { const n = m.eff.designator || m.src.ref; porNome.set(n, (porNome.get(n) || 0) + 1); }
+  for (const it of model.changeItems)
+    if (it.ch && it.ch.op === 'comp_attr' && it.status !== 'err' && it.target && it.target.eff.designator &&
+        it.target.eff.designator !== it.target.src.ref && porNome.get(it.target.eff.designator) > 1 &&
+        quemAttr.get(it.target) === it.idx) {
+      it.status = 'err'; it.msg = `designator "${it.target.eff.designator}" fica repetido — dois componentes com o mesmo nome`;
+      model.validation.push({ level:'err', msg:`#${it.idx+1} comp_attr: ${it.msg}`, target:it.target });
+    }
   return model;
 }
 
-/* ---- preview de comp movido (vista PCB); model = retorno de applyPcbChanges ---- */
+/* ---- componente movido/virado: a conta UNICA (tela, effectiveBoard, Gerber) ----
+
+   Convencao do Altium, MEDIDA em 2026-10-02 nos board.js do workspace: 247 de 247 componentes
+   de Bottom cujo footprint tambem aparece no Top, e 631 de 632 pads nao redondos, seguem
+     Top,    rotacao r: ponto = O + R(r) * local          angulo do pad = r + a
+     Bottom, rotacao r: ponto = O + R(r) * Sy * local     angulo do pad = r - a
+   (Sy espelha o Y LOCAL do footprint). O ApplyChanges vira a camada e DEPOIS escreve a rotacao
+   alvo, entao vale a convencao do estado FINAL, e nao "o que o flip do Altium faz". Do estado
+   velho (O, r0) para o novo (N, r1):
+     sem flip: p' = N + R(dr)  * (p - O),       dr  = r1 - r0;   angulo a' = a + dr
+     flip:     p' = N + R(phi) * Sy * (p - O),  phi = r1 + r0;   angulo a' = phi - a
+   -- a mesma formula de Top para Bottom e de Bottom para Top, e ida e volta e identidade.
+   Arco no flip: o espelho inverte o sentido, sa' = phi - ea, ea' = phi - sa. Texto no flip: o
+   espelho do texto do Altium e o horizontal (le de tras para a frente, em pe: dos designators
+   de Bottom espelhados, 182 estao em rot 0 e so 2 em 180), entao a' = phi + 180 - a e o mirror
+   inverte. A conta antiga (espelhar o X local e girar dr) so coincidia com esta quando r0 era
+   90/270: virar um componente a 0/180 punha os pads girados 180 graus em torno da origem dele
+   (44,6 mm de erro no CI1 do DMB, 94,9 mm no CN3 do MID). */
 function compDelta(m){
-  const dr = m.eff.rot - m.src.rot;
+  const r0 = isNum(m.src.rot) ? m.src.rot : 0, r1 = isNum(m.eff.rot) ? m.eff.rot : r0;
+  const dr = r1 - r0;
   const flip = m.eff.layer !== m.src.layer;
-  return { ox:m.src.x, oy:m.src.y, nx:m.eff.x, ny:m.eff.y, dr, flip,
-           cos:Math.cos(dr*Math.PI/180), sin:Math.sin(dr*Math.PI/180) };
+  const phi = flip ? r1 + r0 : dr;
+  /* seno/cosseno exatos nos multiplos de 90 (sem o 6e-17 do Math.cos) */
+  const ex = v => Math.abs(v) < 1e-12 ? 0 : Math.abs(Math.abs(v) - 1) < 1e-12 ? Math.sign(v) : v;
+  const d = { ox:m.src.x, oy:m.src.y, nx:m.eff.x, ny:m.eff.y, dr, flip, phi,
+              cos:ex(Math.cos(phi*Math.PI/180)), sin:ex(Math.sin(phi*Math.PI/180)) };
+  if (m.pares) Object.defineProperty(d, 'pares', { value:m.pares, writable:true, configurable:true, enumerable:false });
+  return d;
 }
 function xfPoint(d, x, y){
   let lx = x - d.ox, ly = y - d.oy;
-  if (d.flip) lx = -lx;
+  if (d.flip) ly = -ly;
   return { x: d.nx + lx*d.cos - ly*d.sin, y: d.ny + lx*d.sin + ly*d.cos };
 }
-function xfAngle(d, ang){ return d.flip ? (180 - ang + d.dr) : (ang + d.dr); }
+/* a volta do xfPoint: do lugar efetivo para o referencial do board.js (quem arrasta um objeto
+   de componente movido precisa dela para escrever a op no lugar de antes do componente andar) */
+function xfPointInv(d, x, y){
+  const lx = x - d.nx, ly = y - d.ny;
+  const rx = lx*d.cos + ly*d.sin, ry = -lx*d.sin + ly*d.cos;
+  return { x: d.ox + rx, y: d.oy + (d.flip ? -ry : ry) };
+}
+/* angulo de pad, fill ou trilha (simetricos no espelho); texto tem conta propria (xfTextObj) */
+const phiOf = d => isNum(d.phi) ? d.phi : d.dr;
+function xfAngle(d, ang){ return d.flip ? (phiOf(d) - ang) : (ang + d.dr); }
+/* arco de um componente movido: centro por xfPoint; no flip o espelho inverte o sentido, entao
+   inicio e fim trocam de lugar */
+function xfArc(d, a){
+  const c = xfPoint(d, a.cx, a.cy);
+  return d.flip ? { cx:c.x, cy:c.y, sa:phiOf(d) - a.ea, ea:phiOf(d) - a.sa }
+                : { cx:c.x, cy:c.y, sa:a.sa + d.dr, ea:a.ea + d.dr };
+}
+const compOf = (model, ref) => (model && ref != null && temProp(model.compByRef, String(ref))) ? model.compByRef[String(ref)] : null;
 function ownerDelta(model, ref){
   if (!ref) return null;
-  const m = model.compByRef[ref];
+  const m = compOf(model, ref);
   if (!m || !m.changed) return null;
   return compDelta(m);
 }
+/* a camada de um objeto do componente depois do flip (com os pares mecanicos da placa) */
 function effLayerForOwner(model, ref, layer){
-  const m = ref ? model.compByRef[ref] : null;
+  const m = ref ? compOf(model, ref) : null;
   if (!m || !m.changed) return layer;
   if (m.eff.layer === m.src.layer) return layer;
-  const map = { Top:'Bottom', Bottom:'Top', TopOverlay:'BottomOverlay', BottomOverlay:'TopOverlay' };
-  return map[layer] || layer;
+  return flipIn(m.pares || (model && model.pares), layer);
+}
+const flipBy = (d, key) => flipIn(d && d.pares, key);
+
+/* ============ PCB: a placa efetiva (board + changes assados), no formato do board.js ============
+
+   E o que o Gerber (e qualquer saida futura: PDF, desenho de montagem) consome sem saber que
+   changes existem. Regras:
+   - componente: x/y/rot/layer efetivos (rot em [0,360)), ref = designator efetivo, comment
+     efetivo; pads e bbox transformados (compDelta: a convencao do Altium acima; camada pelo par
+     no flip; no flip o pad troca a pilha de cima pela de baixo -- w/h/shape com bw/bh/bshape, ou
+     com o objeto `bot` -- e tentTop com tentBot; o holerot, que e relativo ao pad (medido no
+     CN1 do DMB), e o hoy do furo deslocado, no referencial do pad, trocam de sinal);
+   - objeto com owner (silk, linha, fill, region, recorte, texto, trilha/arco de cobre do
+     footprint): transformado pelo ownerDelta do dono; o livre sai do eff; removido nao sai;
+     adicionado sai;
+   - trilha/arco: o que nao mudou sai no array de onde veio, identico; o que mudou (ou andou com
+     o componente) e o adicionado vao para o array da camada EFETIVA: cobre -> tracks/arcs
+     (keepout:true incluso -- contrato secao 2: ele FICA no array de cobre e quem gera cobre o
+     pula), overlay -> silk, resto -> lines; silk/lines levam kind 'line'|'arc' e nao levam net,
+     cobre leva net (vazia se nao tinha);
+   - texto: designator/comment com o texto efetivo (a mesma regra da tela); dono renomeado por
+     comp_attr leva o owner novo junto. O contorno exato do Altium (polys) e a ancora (ax/ay)
+     andam com o texto quando so a posicao muda; quando muda o desenho (texto, altura,
+     espessura, rotacao, espelho, fonte) eles saem, e quem desenha cai na HubFont;
+   - outline efetivo; board.bbox recalculado quando o contorno mudou; cutouts + region_add com
+     cutout:true; nets/layers/rules e campos desconhecidos copiados; stats recontado.
+   Coordenada que passou por transformacao sai arredondada em 1e-6 mm e angulo em [0,360); o
+   que nao mudou sai identico ao board.js. O objeto devolvido e todo novo (nada aponta para o
+   board), e passa-lo de novo por applyPcbChanges(eb, []) + effectiveBoard da a MESMA placa.
+   `model` tem de ter saido de applyPcbChanges(board, ...) com ESTE objeto board (o modelo
+   guarda de onde saiu); sem model, vale applyPcbChanges(board, []). */
+const r6 = v => { const x = Math.round(v * 1e6) / 1e6; return x === 0 ? 0 : x; };
+function normAng(a){ const v = r6(((a % 360) + 360) % 360); return v >= 360 ? 0 : v; }
+function dcopy(v){
+  if (Array.isArray(v)) return v.map(dcopy);
+  if (v && typeof v === 'object') { const o = {}; for (const k in v) if (Object.prototype.hasOwnProperty.call(v, k)) o[k] = dcopy(v[k]); return o; }
+  return v;
+}
+/* arco cheio continua cheio (0..360); o resto normaliza as duas pontas */
+function arcAngOut(orig, sa, ea){
+  const cheio = Math.abs(orig.ea - orig.sa) >= 360 - 1e-9 || (orig.ea !== orig.sa && normAng(orig.ea) === normAng(orig.sa));
+  return cheio ? [0, 360] : [normAng(sa), normAng(ea)];
+}
+function swapKeys(o, a, b){
+  const ha = Object.prototype.hasOwnProperty.call(o, a), hb = Object.prototype.hasOwnProperty.call(o, b);
+  const va = o[a], vb = o[b];
+  if (hb) o[a] = vb; else delete o[a];
+  if (ha) o[b] = va; else delete o[b];
+}
+const xfPt6 = (d, p) => { if (!Array.isArray(p) || !isNum(p[0]) || !isNum(p[1])) return p; const q = xfPoint(d, p[0], p[1]); return [r6(q.x), r6(q.y)]; };
+function xfBox(d, b){
+  const c = [[b.x1, b.y1], [b.x2, b.y1], [b.x2, b.y2], [b.x1, b.y2]].map(p => xfPoint(d, p[0], p[1]));
+  return { x1:r6(Math.min(...c.map(p => p.x))), y1:r6(Math.min(...c.map(p => p.y))),
+           x2:r6(Math.max(...c.map(p => p.x))), y2:r6(Math.max(...c.map(p => p.y))) };
+}
+function xfPad(d, p){
+  const o = dcopy(p);
+  if (isNum(p.x) && isNum(p.y)) { const q = xfPoint(d, p.x, p.y); o.x = r6(q.x); o.y = r6(q.y); }
+  if (isNum(p.rot)) o.rot = normAng(xfAngle(d, p.rot));
+  if (d.flip) {
+    if (typeof p.layer === 'string') o.layer = flipBy(d, p.layer);
+    /* a pilha do pad: o que era de cima vai para baixo, nas duas grafias do contrato */
+    if ('bw' in o) swapKeys(o, 'w', 'bw');
+    if ('bh' in o) swapKeys(o, 'h', 'bh');
+    if ('bshape' in o) swapKeys(o, 'shape', 'bshape');
+    if (o.bot && typeof o.bot === 'object' && !Array.isArray(o.bot))
+      for (const k of ['w', 'h', 'shape', 'radius']) if (Object.prototype.hasOwnProperty.call(o.bot, k)) {
+        const temCima = Object.prototype.hasOwnProperty.call(o, k), vc = o[k];
+        o[k] = o.bot[k];
+        if (temCima) o.bot[k] = vc; else delete o.bot[k];
+      }
+    if ('tentTop' in o || 'tentBot' in o) swapKeys(o, 'tentTop', 'tentBot');
+    if (isNum(p.holerot)) o.holerot = normAng(-p.holerot);
+    /* furo deslocado (hox/hoy: XPadOffset/YPadOffset no referencial do pad, antes da rotacao):
+       o espelho do flip inverte o Y local do pad */
+    if (isNum(p.hoy)) o.hoy = p.hoy === 0 ? 0 : -p.hoy;
+  }
+  return o;
+}
+/* objeto de linha/arco (trilha, silk, linha) de um componente movido, no lugar */
+function xfLineObj(d, o, isArc){
+  if (isArc) {
+    const a = xfArc(d, o), ang = arcAngOut(o, a.sa, a.ea);
+    o.cx = r6(a.cx); o.cy = r6(a.cy); o.sa = ang[0]; o.ea = ang[1];
+  } else {
+    const p1 = xfPoint(d, o.x1, o.y1), p2 = xfPoint(d, o.x2, o.y2);
+    o.x1 = r6(p1.x); o.y1 = r6(p1.y); o.x2 = r6(p2.x); o.y2 = r6(p2.y);
+  }
+  if (d.flip && typeof o.layer === 'string') o.layer = flipBy(d, o.layer);
+}
+/* fill: x1..y2 sao os cantos SEM rotacao e rot gira em torno do centro -- o centro anda,
+   o tamanho fica, a rotacao segue o xfAngle (no flip o retangulo espelhado e o mesmo retangulo) */
+function xfFillObj(d, o){
+  const hw = (o.x2 - o.x1) / 2, hh = (o.y2 - o.y1) / 2;
+  const q = xfPoint(d, (o.x1 + o.x2) / 2, (o.y1 + o.y2) / 2);
+  o.x1 = r6(q.x - hw); o.x2 = r6(q.x + hw); o.y1 = r6(q.y - hh); o.y2 = r6(q.y + hh);
+  o.rot = normAng(xfAngle(d, isNum(o.rot) ? o.rot : 0));
+  if (d.flip && typeof o.layer === 'string') o.layer = flipBy(d, o.layer);
+}
+function xfRegionObj(d, o){
+  if (Array.isArray(o.points)) o.points = o.points.map(p => xfPt6(d, p));
+  if (Array.isArray(o.holes)) o.holes = o.holes.map(h => Array.isArray(h) ? h.map(p => xfPt6(d, p)) : h);
+  if (d.flip && typeof o.layer === 'string') o.layer = flipBy(d, o.layer);
+}
+/* texto: x,y (centro do bbox), a ancora ax/ay e o contorno exato (polys) andam como pontos; o
+   angulo segue a conta do texto (no flip: phi + 180 - a, ver a nota do compDelta); no flip o
+   espelho inverte e a camada vira */
+function xfTextObj(d, o){
+  if (isNum(o.x) && isNum(o.y)) { const q = xfPoint(d, o.x, o.y); o.x = r6(q.x); o.y = r6(q.y); }
+  if (isNum(o.ax) && isNum(o.ay)) { const q = xfPoint(d, o.ax, o.ay); o.ax = r6(q.x); o.ay = r6(q.y); }
+  if (Array.isArray(o.polys))
+    o.polys = o.polys.map(pl => (pl && Array.isArray(pl.pts)) ? { ...pl, pts: pl.pts.map(p => xfPt6(d, p)) } : pl);
+  if (isNum(o.rot)) o.rot = normAng(d.flip ? (phiOf(d) + 180 - o.rot) : (o.rot + d.dr));
+  if (d.flip) { o.mirror = !o.mirror; if (typeof o.layer === 'string') o.layer = flipBy(d, o.layer); }
+}
+/* Um objeto de componente no lugar efetivo, para quem desenha nao reimplementar a conta:
+   d = compDelta(m) ou ownerDelta(model, ref) (null = componente parado: devolve so a copia);
+   kind = 'pad' | 'line' (ou 'track': trilha, silk ou linha) | 'arc' | 'fill' | 'region' |
+   'text'. Devolve uma COPIA no formato do board.js (x/y arredondados em 1e-6, angulo em
+   [0,360), camada virada no flip, pilha do pad trocada) -- o mesmo que o effectiveBoard() poe
+   na placa efetiva. Kind desconhecido e erro de programa: lanca TypeError em vez de devolver o
+   objeto parado sem avisar. */
+const XF_KINDS = { pad:1, line:1, track:1, arc:1, fill:1, region:1, text:1 };
+function xfObject(d, o, kind){
+  if (typeof kind !== 'string' || !temProp(XF_KINDS, kind))
+    throw new TypeError(`xfObject: kind "${kind}" desconhecido (use pad, line/track, arc, fill, region ou text)`);
+  if (!o || typeof o !== 'object') return o;
+  if (!d) return dcopy(o);
+  if (kind === 'pad') return xfPad(d, o);
+  const c = dcopy(o);
+  if (kind === 'line' || kind === 'track') xfLineObj(d, c, false);
+  else if (kind === 'arc') xfLineObj(d, c, true);
+  else if (kind === 'fill') xfFillObj(d, c);
+  else if (kind === 'region') xfRegionObj(d, c);
+  else xfTextObj(d, c);
+  return c;
+}
+/* caixa do contorno; arco conta pelos extremos que ele de fato varre (sentido anti-horario) */
+function outlineBBox(segs){
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  const pt = (x, y) => { if (isNum(x) && isNum(y)) { x1 = Math.min(x1, x); y1 = Math.min(y1, y); x2 = Math.max(x2, x); y2 = Math.max(y2, y); } };
+  for (const s of (segs || [])) {
+    if (!s) continue;
+    if (s.kind === 'arc') {
+      if (!isNum(s.cx) || !isNum(s.cy) || !isNum(s.r) || !isNum(s.sa) || !isNum(s.ea)) continue;
+      const sa = normAng(s.sa), sw0 = (((s.ea - s.sa) % 360) + 360) % 360;
+      const sw = (Math.abs(s.ea - s.sa) >= 360 || (sw0 === 0 && s.ea !== s.sa)) ? 360 : sw0;
+      const at = g => pt(s.cx + s.r * Math.cos(g * Math.PI / 180), s.cy + s.r * Math.sin(g * Math.PI / 180));
+      at(sa); at(sa + sw);
+      for (let q = 0; q < 720; q += 90) if (q > sa && q < sa + sw) at(q);
+    } else { pt(s.x1, s.y1); pt(s.x2, s.y2); }
+  }
+  if (x1 > x2) return null;
+  return { x1:r6(x1), y1:r6(y1), x2:r6(x2), y2:r6(y2) };
+}
+const EB_ARRAYS = ['components', 'freepads', 'tracks', 'arcs', 'vias', 'texts', 'silk', 'lines', 'fills', 'regions', 'cutouts'];
+/* o que muda o DESENHO de um texto (e invalida o contorno exato que veio do Altium); o texto
+   em si e conferido a parte (no designator/comment, o que conta e o comp_attr ter mudado) */
+const TEXTO_FORMA = ['h', 'w', 'rot', 'mirror', 'kind', 'font', 'fontname', 'bold', 'italic', 'inverted'];
+
+function effectiveBoard(board, model){
+  const B = board || {};
+  const M = model || applyPcbChanges(board, []);
+  /* o modelo guarda de que objeto board saiu; um model de OUTRO board faria as mudancas
+     sumirem caladas. Modelo sem essa marca (copia por spread, feito a mao) cai na conferencia
+     por identidade: todo src do modelo tem de ser um objeto deste board. */
+  let outro;
+  if (temProp(M, 'board')) outro = M.board !== board;
+  else {
+    const doB = new Set();
+    for (const k of ['components', 'tracks', 'arcs', 'vias', 'texts', 'silk', 'lines', 'fills', 'regions'])
+      for (const o of (Array.isArray(B[k]) ? B[k] : [])) if (o) doB.add(o);
+    outro = [M.comps, M.tracks, M.arcs, M.vias, M.texts, M.fills || [], M.regions || []]
+      .some(list => list.some(m => m.src && !doB.has(m.src)));
+  }
+  if (outro) throw new Error('effectiveBoard: o model não foi gerado deste board (use applyPcbChanges com o mesmo objeto)');
+
+  const out = {};
+  for (const k of Object.keys(B)) if (k !== 'board' && k !== 'stats' && EB_ARRAYS.indexOf(k) < 0) out[k] = dcopy(B[k]);
+  const compOfRef = ref => compOf(M, ref);
+  const deltaOf = ref => compOfRef(ref) ? ownerDelta(M, ref) : null;
+  const mOf = new Map();
+  for (const list of [M.tracks, M.arcs, M.vias, M.texts, M.fills || [], M.regions || []])
+    for (const m of list) if (m.src) mOf.set(m.src, m);
+
+  /* comp_attr que trocou o designator: o owner dos objetos do componente acompanha */
+  const ren = Object.create(null);
+  for (const m of M.comps) {
+    const nd = m.eff.designator;
+    if (typeof nd === 'string' && nd && nd !== m.src.ref) ren[m.src.ref] = nd;
+  }
+  const dono = o => { if (o && typeof o.owner === 'string' && o.owner in ren) o.owner = ren[o.owner]; return o; };
+
+  /* componentes */
+  const components = [];
+  for (const m of M.comps) {
+    const s = m.src, e = m.eff, c = dcopy(s);
+    if (m.changed) {
+      const d = compDelta(m);
+      c.x = e.x; c.y = e.y; c.rot = isNum(e.rot) ? normAng(e.rot) : e.rot; c.layer = e.layer;
+      if (s.bbox && isNum(s.bbox.x1) && isNum(s.bbox.y1) && isNum(s.bbox.x2) && isNum(s.bbox.y2)) c.bbox = xfBox(d, s.bbox);
+      if (Array.isArray(s.pads)) c.pads = s.pads.map(p => p ? xfPad(d, p) : p);
+    }
+    if (typeof e.designator === 'string' && e.designator) c.ref = e.designator;
+    if (e.comment !== undefined) c.comment = e.comment;
+    components.push(c);
+  }
+
+  /* trilhas, arcos, silk e linhas */
+  const dest = { tracks:[], arcs:[], silk:[], lines:[] };
+  const destino = (o, isArc) => {
+    const L = pcbLayer(o.layer), kind = L ? L.kind : '';
+    return (kind === 'signal' || kind === 'plane') ? (isArc ? 'arcs' : 'tracks') : (kind === 'overlay' ? 'silk' : 'lines');
+  };
+  const emite = (o, isArc) => {
+    const k = destino(o, isArc);
+    if (k === 'tracks' || k === 'arcs') { delete o.kind; if (typeof o.net !== 'string') o.net = ''; }
+    else { o.kind = isArc ? 'arc' : 'line'; if (!isCopper(o.layer)) delete o.net; }
+    dest[k].push(dono(o));
+  };
+  const linhaDe = (src, isArc, origem) => {
+    /* kind que o motor nao conhece (nem line nem arc) atravessa intacto, no array de onde veio */
+    if (origem && src.kind && src.kind !== 'line' && src.kind !== 'arc') { dest[origem].push(dono(dcopy(src))); return; }
+    const m = mOf.get(src);
+    if (m && m.deleted) return;
+    const d = src.owner ? deltaOf(src.owner) : null;
+    /* intocado: identico, no array de onde veio (o board.js e a verdade) */
+    if (!d && !(m && m.changed)) { dest[origem || (isArc ? 'arcs' : 'tracks')].push(dono(dcopy(src))); return; }
+    const o = dcopy(m ? m.eff : src);
+    if (d) xfLineObj(d, o, isArc);
+    emite(o, isArc);
+  };
+  for (const t of (B.tracks || [])) if (t) linhaDe(t, false);
+  for (const a of (B.arcs || [])) if (a) linhaDe(a, true);
+  for (const s of (B.silk || [])) if (s) linhaDe(s, s.kind === 'arc', 'silk');
+  for (const s of (B.lines || [])) if (s) linhaDe(s, s.kind === 'arc', 'lines');
+  for (const m of M.added) {
+    const e = m.eff;
+    if (m.kind === 'track') {
+      const o = { id:e.id, layer:e.layer, x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2, w:e.w };
+      if (typeof e.net === 'string') o.net = e.net;
+      emite(o, false);
+    } else if (m.kind === 'arc') {
+      const o = { id:e.id, layer:e.layer, cx:e.cx, cy:e.cy, r:e.r, sa:e.sa, ea:e.ea, w:e.w };
+      if (typeof e.net === 'string') o.net = e.net;
+      emite(o, true);
+    }
+  }
+
+  /* vias */
+  const vias = [];
+  for (const v of (B.vias || [])) {
+    if (!v) continue;
+    const m = mOf.get(v);
+    if (m && m.deleted) continue;
+    vias.push(dcopy(m ? m.eff : v));
+  }
+  for (const m of M.added) if (m.kind === 'via') {
+    const e = m.eff;
+    vias.push({ id:e.id, x:e.x, y:e.y, size:e.size, drill:e.drill, from:e.from || 'Top', to:e.to || 'Bottom',
+                net: typeof e.net === 'string' ? e.net : '' });
+  }
+
+  /* textos: designator/comment com o texto efetivo (a mesma regra do desenho da tela) */
+  const igual = (a, b) => (isNum(a) && isNum(b)) ? Math.abs(a - b) < 1e-9 : a === b;
+  const contorno = (o, src, textoMudou) => {
+    if (!Array.isArray(o.polys) && !isNum(o.ax) && !isNum(o.ay)) return;
+    if (textoMudou || TEXTO_FORMA.some(k => !igual(o[k], src[k]))) { delete o.polys; delete o.ax; delete o.ay; return; }
+    const dx = isNum(o.x) && isNum(src.x) ? o.x - src.x : 0, dy = isNum(o.y) && isNum(src.y) ? o.y - src.y : 0;
+    if (!dx && !dy) return;
+    const anda = p => (Array.isArray(p) && isNum(p[0]) && isNum(p[1])) ? [r6(p[0] + dx), r6(p[1] + dy)] : p;
+    if (isNum(o.ax)) o.ax = r6(o.ax + dx);
+    if (isNum(o.ay)) o.ay = r6(o.ay + dy);
+    if (Array.isArray(o.polys)) o.polys = o.polys.map(pl => (pl && Array.isArray(pl.pts)) ? { ...pl, pts: pl.pts.map(anda) } : pl);
+  };
+  const texts = [];
+  for (const x of (B.texts || [])) {
+    if (!x) continue;
+    const m = mOf.get(x);
+    if (m && m.deleted) continue;
+    const o = dcopy(m ? m.eff : x);
+    const oc = compOfRef(x.owner);
+    /* o texto do designator/comment e o do componente; o contorno so cai se o comp_attr o mudou
+       (o ".Designator" cru de espelho antigo virando o ref nao e mudanca de desenho) */
+    let textoMudou = o.text !== x.text;
+    if (oc && x.designator) { o.text = oc.eff.designator || oc.src.ref; textoMudou = !!oc.eff.designator && oc.eff.designator !== oc.src.ref; }
+    if (oc && x.comment) { o.text = oc.eff.comment !== undefined ? oc.eff.comment : (oc.src.comment || o.text);
+                           textoMudou = oc.eff.comment !== undefined && oc.eff.comment !== (oc.src.comment || ''); }
+    contorno(o, x, textoMudou);
+    const d = x.owner ? deltaOf(x.owner) : null;
+    if (d) xfTextObj(d, o);
+    texts.push(dono(o));
+  }
+  for (const m of M.added) if (m.kind === 'text') {
+    const e = m.eff;
+    texts.push({ id:e.id, layer:e.layer, x:e.x, y:e.y, text:e.text, h:e.h, rot:isNum(e.rot) ? e.rot : 0,
+                 mirror:e.mirror === true, designator:false, comment:false, w:e.w, kind:'stroke' });
+  }
+
+  /* fills, regions e recortes */
+  const fills = [];
+  for (const f of (B.fills || [])) {
+    if (!f) continue;
+    const m = mOf.get(f);
+    if (m && m.deleted) continue;
+    const o = dcopy(m ? m.eff : f);
+    const d = f.owner ? deltaOf(f.owner) : null;
+    if (d) xfFillObj(d, o);
+    fills.push(dono(o));
+  }
+  for (const m of M.added) if (m.kind === 'fill') {
+    const e = m.eff;
+    const o = { id:e.id, layer:e.layer, x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2, rot:isNum(e.rot) ? e.rot : 0 };
+    if (isCopper(o.layer)) o.net = typeof e.net === 'string' ? e.net : '';
+    fills.push(o);
+  }
+  const regions = [];
+  for (const g of (B.regions || [])) {
+    if (!g) continue;
+    const m = mOf.get(g);
+    if (m && m.deleted) continue;
+    const o = dcopy(m ? m.eff : g);
+    const d = g.owner ? deltaOf(g.owner) : null;
+    if (d) xfRegionObj(d, o);
+    regions.push(dono(o));
+  }
+  const cutouts = [];
+  for (const k of (Array.isArray(B.cutouts) ? B.cutouts : [])) {
+    const o = dcopy(k);
+    const d = (k && k.owner) ? deltaOf(k.owner) : null;
+    if (d) xfRegionObj(d, o);
+    cutouts.push(dono(o));
+  }
+  for (const m of M.added) if (m.kind === 'region') {
+    const e = m.eff, pts = dcopy(e.points);
+    if (e.cutout) cutouts.push({ id:e.id, layer:'Multi', incomp:false, points:pts });
+    else {
+      const o = { id:e.id, layer:e.layer, net:typeof e.net === 'string' ? e.net : '', points:pts };
+      if (!isCopper(o.layer)) delete o.net;
+      regions.push(o);
+    }
+  }
+
+  /* contorno e caixa da placa */
+  const bd = dcopy((B.board && typeof B.board === 'object') ? B.board : {});
+  bd.outline = dcopy(M.outline || []);
+  if (M.outlineChanged || !bd.bbox) { const bb = outlineBBox(bd.outline); if (bb) bd.bbox = bb; }
+
+  out.board = bd;
+  out.components = components;
+  out.freepads = dcopy(Array.isArray(B.freepads) ? B.freepads : []);
+  out.tracks = dest.tracks; out.arcs = dest.arcs; out.vias = vias; out.texts = texts;
+  out.silk = dest.silk; out.lines = dest.lines; out.fills = fills; out.regions = regions; out.cutouts = cutouts;
+  const st = dcopy((B.stats && typeof B.stats === 'object') ? B.stats : {});
+  for (const k of EB_ARRAYS) st[k] = out[k].length;
+  out.stats = st;
+  return out;
 }
 
 /* ============ Esquema: libs, transform e extracao de nets (preview) ============ */
@@ -503,7 +1442,7 @@ function sugIndex(list){
 /* Comment do Altium as vezes e uma FORMULA nao resolvida ("=Value + ' ' + Voltage"):
    parece texto, nao identifica peca nenhuma e envenena a busca. Medido em Cap
    Eletrolitico e Cap Poliester dos projetos reais. */
-const FORMULA_RE = /^\s*=|Value|Voltage|Volts/i;
+const FORMULA_RE = /^\s*=|\bValue\b|\bVoltage\b|\bVolts\b/i;
 const ehFormula = c => !c || FORMULA_RE.test(String(c));
 
 const sugToks = s => [...frasToks(s, new Set())];
@@ -920,6 +1859,14 @@ const CH_REQUIRED = {
   text_edit:       { num:['orig_x','orig_y'], str:['id','orig_text','orig_layer'] },
   designator_move: { num:['orig_x','orig_y'], str:['ref'] },
   outline_set:     { num:[], str:[] },
+  fill_add:        { num:['x1','y1','x2','y2'], str:['layer'] },
+  fill_edit:       { num:['orig_x1','orig_y1','orig_x2','orig_y2'], str:['id','orig_layer'] },
+  fill_del:        { num:['orig_x1','orig_y1','orig_x2','orig_y2'], str:['id','orig_layer'] },
+  /* `layer` da region_add e conferida a parte: com cutout:true ela e dispensada */
+  region_add:      { num:[], str:[] },
+  region_del:      { num:['orig_n','orig_x0','orig_y0'], str:['id','orig_layer'] },
+  text_add:        { num:['x','y','h'], str:['layer','text'] },
+  text_del:        { num:['orig_x','orig_y'], str:['id','orig_text','orig_layer'] },
 };
 
 function checkFields(objs, reqOf, kindOf, errors){
@@ -942,6 +1889,18 @@ function serializeChanges(changes){
       errors.push({ idx:i, msg:'outline_set: pts deve ser [[x,y],...] com >= 3 vertices' });
     if (ch.op === 'track_add' && ch.w <= 0) errors.push({ idx:i, msg:'track_add: w deve ser > 0' });
     if (ch.op === 'via_add' && ch.drill >= ch.size) errors.push({ idx:i, msg:'via_add: drill deve ser < size' });
+    if (ch.op === 'region_add'){
+      if (!ptsValid(ch.pts, 3)) errors.push({ idx:i, msg:'region_add: pts deve ser [[x,y],...] com >= 3 vertices' });
+      if (ch.cutout !== true && (typeof ch.layer !== 'string' || !ch.layer))
+        errors.push({ idx:i, msg:'region_add: campo "layer" ausente (ou cutout:true para recorte)' });
+    }
+    if (ch.op === 'text_add'){
+      if (isNum(ch.h) && ch.h <= 0) errors.push({ idx:i, msg:'text_add: h deve ser > 0' });
+      if (ch.w !== undefined && !(isNum(ch.w) && ch.w > 0)) errors.push({ idx:i, msg:'text_add: w deve ser > 0' });
+    }
+    if (ch.op === 'fill_add' && isNum(ch.x1) && isNum(ch.y1) && isNum(ch.x2) && isNum(ch.y2) &&
+        (near(ch.x1, ch.x2) || near(ch.y1, ch.y2)))
+      errors.push({ idx:i, msg:'fill_add: fill sem area (x1 = x2 ou y1 = y2)' });
     if (ch.op === 'comp_attr'){
       if (typeof ch.orig_comment !== 'string') errors.push({ idx:i, msg:'comp_attr: campo "orig_comment" ausente' });
       if (!(typeof ch.designator === 'string' && ch.designator) && typeof ch.comment !== 'string')
@@ -1220,8 +2179,9 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp,
          suggestSym,
          buildSchModel, extractNets, validateSchematic,
-         applyPcbChanges, deriveStatus,
+         applyPcbChanges, effectiveBoard, deriveStatus,
+         PCB_LAYERS, pcbLayer, isCopper, flipLayer, boardLayers,
          serializeChanges, serializeSchematic, serializeAnnotations, serializeLibSubs,
-         compDelta, xfPoint, xfAngle, ownerDelta, effLayerForOwner,
+         compDelta, xfPoint, xfPointInv, xfAngle, xfArc, xfObject, ownerDelta, effLayerForOwner,
          neodenTransform, neodenCsv, neodenKind };
 });
