@@ -134,8 +134,12 @@ D:\MICROCONTROLLER_DEV\AltiumIA\AltiumPCBMirror\
 ├── hub.html                 hub v2 (Projetos, Esquema, PCB, Componentes, Nets, Footprints, Histórico) — servido por hubserver.py; sem servidor abre em modo demonstração
 ├── hub-classic.html         hub clássico (Projetos, Esquema, PCB, Libs) — abre por duplo clique, 100% file://
 ├── schframe.html            vista Esquema (em iframe por hub.html e hub-classic.html)
-├── pcbframe.html            vista PCB (shell fino, em iframe por hub.html e hub-classic.html)
-├── pcbframe.js              lógica da vista PCB (renderer, painéis, PCB List, CSV)
+├── pcbframe.html            vista PCB (casca, em iframe por hub.html e hub-classic.html)
+├── pcbframe.js              lógica da vista PCB (desenho, seleção, ferramentas, teclado, Gerber)
+├── hub-pcbpainel.js         o painel da direita da vista PCB (Propriedades, Camadas, Componentes, Mudanças)
+├── hub-pcbicones.js         os ícones da barra da vista PCB
+├── hub-gerber.js            gerador de Gerber X2 (o conjunto do Altium) e o .zip
+├── hub-gerberview.js        visualizador de Gerber/Excellon (lê X2, RS-274X, CAMtastic, .zip)
 ├── hub-core.js              lógica pura (parsing, validação, nets, motor único de changes)
 ├── hub-draw.js              renderers canvas compartilhados (símbolo, footprint, PCB)
 ├── hub-font.js              fonte vetorial da serigrafia como geometria pura (canvas e SVG)
@@ -481,14 +485,71 @@ precisar de servidor.
   divisória vira o botão de painéis no canto inferior esquerdo da folha.
   Para o Altium refletir edições numa folha já construída, rode o **BuildSchematic com
   limpeza da folha** (confirmação SIM).
-- **PCB** — a vista PCB (`pcbframe.html` + `pcbframe.js`; motor no `hub-core.js`), lendo `Projects\<nome>\board.js` e
-  `changes.js`: render fiel, fantasma tracejado das posições originais, lista de mudanças
-  com validação, tabela PCB List pós-mudança e exportação para CSV.
-  A vista PCB **edita depois de destravar** (botão **Editar**, `E` — igual à do Esquema):
-  arrastar move objetos, `T` desenha trilhas, duplo clique abre propriedades (inclusive
-  designator/comment), `Ctrl+Z` desfaz e **Salvar changes** grava o `changes.js` — com aviso
-  se a IA tiver gravado o arquivo em paralelo. A mesma vista embutida na aba Neoden
-  (`?lean=1`) é só de consulta: lá o botão Editar não aparece e a trava não abre.
+- **PCB** — a vista PCB, no padrão do editor de PCB do Altium 21 (pedido de 2026-10-02:
+  "igual ao da imagem"), uma só na web e no desktop. `pcbframe.html` + `pcbframe.js`, o painel
+  em `hub-pcbpainel.js`, o motor no `hub-core.js`; lê `Projects\<nome>\board.js` e
+  `changes.js` e desenha a placa **efetiva** (com as mudanças) — a mesma que o Gerber recebe.
+  - **Barra de ferramentas flutuando no topo** (a Active Bar): Selecionar, **Trilha (`W`)**
+    com roteamento interativo, **Via (`Ctrl+2`)**, Linha (`L`), Arco (`A`), Círculo (`O`),
+    Retângulo (`R`), Triângulo, Polígono (`G`), Texto (`T`), **Preencher** (`P`: com ele as
+    formas saem cheias — retângulo vira fill, o resto região), Furo de fixação (Board Cutout
+    redondo), Contorno da placa, Medir (`Ctrl+M`), Sinalizar (`N`), Desfazer/Refazer e
+    **Gerber**. O que ainda não existe aparece travado com o porquê (pad avulso, polygon pour,
+    PDF de layout). Todas desenham na **camada atual**; texto na face de baixo nasce espelhado.
+  - **Trilha na mão:** o clique fixa o canto, `Espaço` inverte, `Shift+Espaço` troca 45°/90°/
+    livre, `Backspace` desfaz o último trecho, `2` põe via, `*` ou `Ctrl+2` põe via e troca de
+    camada, `Tab` leva à largura no painel, o botão direito termina (de novo, larga). A
+    trilha gruda em centro de pad, de via e ponta de trilha, herda a net do que tocou e termina
+    sozinha quando chega num ponto elétrico.
+  - **Abas de camada embaixo** (LS + uma aba por camada, com a cor do Altium): clique = camada
+    atual, botão direito = ocultar / só esta, `+`/`-` andam, `S` liga a camada única, `V` vê
+    por baixo. Aparecem todas as camadas do Altium que fazem sentido — cobre (Mid nas placas de
+    4 camadas), serigrafia, pasta, máscara (o anel roxo em volta do pad é a abertura dela),
+    mecânicas com o nome que a placa dá, Keep-Out, furação e Multi-Layer.
+  - **Painel à direita** (Propriedades | Camadas | Componentes | Mudanças), como o Properties
+    do Altium: sem seleção mostra a PLACA (Board Information, filtro de seleção, grade e snap —
+    5 mil por padrão, `Q` troca mm/mil —, vista e saídas); com seleção, a ficha do objeto
+    editável na hora, com a **Camada como primeiro campo** — é assim que se troca a camada de
+    uma trilha (ou pelo menu do botão direito). Componentes é a PCB List com CSV; Mudanças, o
+    `changes.js` com a validação e os sinalizadores. **Salvar** (`Ctrl+S`) fica no topo.
+  - **Seleção como no Esquema:** clique (o 2º no mesmo ponto pega o objeto de baixo),
+    `Shift`+clique, janela (esquerda→direita pega o que está dentro, direita→esquerda o que
+    toca), `Ctrl+A`; arrastar move (`Espaço` gira, `L` vira o componente de face, `X`/`Y`
+    espelham), arrastar a ponta de uma trilha selecionada move só a ponta; botão direito
+    arrasta a tela e, parado, abre o menu.
+  - A vista abre **travada** (`E`), para o arrasto acidental não mexer na placa; escolher uma
+    ferramenta ou mudar um campo destrava. As teclas são editáveis nas Configurações do hub,
+    aba Atalhos (tabela da vista PCB). A mesma vista embutida na aba Neoden (`?lean=1`) é só
+    a placa, de consulta.
+
+### PCB » Gerber — o pacote da JLCPCB
+
+A sub-aba **PCB › Gerber** (ou o botão **Gerber** da vista PCB) gera o Gerber a partir da
+placa com as mudanças — inclusive as ainda não salvas — e o mostra no visualizador
+(`hub-gerberview.js`): camadas na cor do Altium, vista de cima/de baixo, modo realista
+(máscara verde, cobre exposto dourado, serigrafia branca, furos vazados), e **Comparar com…**
+outro conjunto (o da pasta FABRICAÇÃO, por exemplo: arraste os `.gbr` ou um `.zip`).
+
+- **O que sai** (`hub-gerber.js`): o mesmo conjunto que o Altium 21 gera para a casa — Gerber
+  X2 mm 4:5, `Copper_Signal_Top/Bot` (e `_<n>` das internas), `Pads_Top/Bot`, `Legend_Top/Bot`,
+  `Soldermask_Top/Bot`, `Paste_Top/Bot`, `Profile`, `PTH_Drill` e `NPTH_Drill` (furação em
+  Gerber, como os pacotes da casa). Conferido contra o X2 do Altium do DMB, da mesma revisão
+  da placa: XOR zero em 10 das 13 camadas; o cobre de cima difere 0,01 mm² (o Altium funde
+  regiões sobrepostas) e as duas legendas só nos textos stroke, porque a fonte do hub não é a
+  do Altium.
+- **Empacotamento:** por padrão como a pasta FABRICAÇÃO — nomes em minúsculas
+  (`pdmb_-_di231765_p2_copper_signal_top.gbr`) e camada vazia fora do pacote; há as opções
+  nomes do Altium (Project Outputs), legenda `.gto`/`.gbo` e sem atributos X2.
+- **Baixar .zip** monta o pacote para subir na JLCPCB; **Salvar no projeto** grava em
+  `Projects\<nome>\Gerber\` (o conjunto anterior sai) com um `gerber.json`; **Ver salvo**
+  reabre o último para comparar.
+- **Avisos.** Espelho antigo (sem `"exporter"`) sai com aviso alto: ele não traz os fills (o
+  QR code e os logos), a expansão de máscara por pad, o tenting, `plated` nem os furos das
+  regiões — o Gerber usa as regras padrão da casa (máscara de 4 mil). Reexporte a placa com o
+  ExportBoard novo antes de mandar para a fábrica.
+- **Sem o Altium:** `python3 tools/pcbdoc/pcbdoc2board.py <arquivo.PcbDoc> <saida.js>` lê o
+  `.PcbDoc` direto e escreve um `board.js` completo (fills, máscara por pad, mecânicas, furos
+  de região, contorno exato dos textos TrueType).
 
 ### Laser — arte para o LightBurn
 
@@ -699,7 +760,7 @@ lugar. Três decisões de projeto:
 O formato de `lib-subs.js` é um objeto JSON **plano por linha**, com chaves fixas e não-ASCII
 em `\uXXXX` — exatamente o que o `JGet` dos `.pas` consegue ler e o que o `TStringList` do
 Delphi não corrompe. Em `file://` (sem servidor) a gravação degrada para **download**, igual
-ao botão "Salvar changes".
+ao **Salvar** da vista PCB.
 
 > **O espelho não tem tudo que a lib mestra tem.** Conferído direto na `.SchLib`/`.PcbLib` de
 > `Y:\Biblioteca\ALTIUM LIBRARY ------ LUCAS\`: a lib real tem **404 símbolos** e o espelho
@@ -1306,17 +1367,24 @@ esquema do zero, veja [AI-GUIDE.md](AI-GUIDE.md), Parte A.
 
 | Objeto | Operações em `changes.js` |
 |---|---|
-| Componente | `comp_move` (x, y, rot, layer/flip) |
-| Trilha | `track_edit`, `track_add`, `track_del` |
+| Componente | `comp_move` (x, y, rot, layer/flip), `comp_attr` (designator e comment) |
+| Trilha e linha — em qualquer camada menos a Multi: cobre, serigrafia, mecânicas, Keep-Out… | `track_edit` (inclusive trocar a camada), `track_add`, `track_del` |
+| Arco, idem | `arc_edit`, `arc_add`, `arc_del` |
 | Via (furo metalizado) | `via_edit`, `via_add`, `via_del` |
-| Arco de cobre | `arc_edit`, `arc_add`, `arc_del` |
+| Texto livre | `text_add`, `text_edit` (texto, posição, altura, traço, rotação, camada, espelho), `text_del` |
+| Designator | `designator_move` |
+| Fill (retângulo cheio) | `fill_add`, `fill_edit`, `fill_del` |
+| Região (polígono cheio) e furo de fixação (*Board Cutout*) | `region_add` (com `cutout:true` vira recorte da placa), `region_del` |
 | Contorno da placa | `outline_set` (substitui o `Board.BoardOutline` por um polígono fechado de vértices; pede confirmação do usuário no apply) |
-| Designator/Comment (texto) | comp_attr (editar pelo duplo clique no hub) |
 
-Polígonos/planos, regiões, keepouts, textos e regras são exportados para **visualização**,
-mas não são editáveis nesta versão. Furo de fixação feito como **recorte da placa** (*Board
-Cutout*) aparece em `cutouts` — sai como furo de verdade na vista PCB e na arte a laser;
-furo NPTH feito como pad aparece em `freepads`.
+Linha, arco, fill, região e texto **de componente** são do footprint e não se editam um a um.
+Ainda não são editáveis: polygon pour (o despejo aparece e vai para o Gerber, mas o hub não
+redespeja — região que é pedaço de polígono não se apaga), pads, regras e a posição do
+comment. Furo de fixação feito como **recorte da placa** (*Board Cutout*) aparece em
+`cutouts` — sai como furo de verdade na vista PCB, no Gerber e na arte a laser; furo NPTH feito
+como pad aparece em `freepads`. A lista completa de campos está na Parte B do
+[AI-GUIDE.md](AI-GUIDE.md); o que falta para largar o Altium está em
+[docs/PCB-MIGRACAO.md](docs/PCB-MIGRACAO.md).
 
 ## Enviar a lista de componentes para o Odoo
 
@@ -1576,11 +1644,20 @@ Altium cria o arquivo vazio uma única vez e nunca o sobrescreve.
 
 **PCB:**
 
-- **DRC é do Altium** — o hub não checa clearance; sempre rode o DRC depois de aplicar.
-- Texto de silkscreen é renderizado com fonte vetorial aproximada (posição/altura/rotação fiéis).
+- **DRC é do Altium** — o hub não checa clearance; sempre rode o DRC depois de aplicar, e
+  antes de mandar um Gerber gerado no hub para a fábrica.
+- **Polygon pour e teardrops não são refeitos pelo hub.** Mover trilha ou via perto deles deixa
+  o cobre antigo no lugar, na tela e no Gerber: redespeje no Altium.
+- Texto stroke sai com a fonte do hub, que não é a do Altium: altura, lugar e rotação fiéis,
+  desenho da letra diferente (na tela e no Gerber). Texto que o espelho traz com o contorno
+  exato (`texts[].polys`: o TrueType pelo `pcbdoc2board.py`; os demais quando a sonda do
+  ExportBoard novo pegar) sai com o contorno do Altium.
+- **Os `.pas` de 2026-10 ainda não rodaram no Altium.** Nome de API que o Altium não conhece é
+  erro de compilação: o bloco SONDAS do `ExportBoard.pas` e o APOSTAS do `ApplyChanges.pas`
+  listam cada nome novo e o que apagar se ele reclamar.
 - Os `id`s (`t1`, `v2`...) valem para **um ciclo** export → apply; após aplicar, re-exporte.
-- Flip de componente (`layer` diferente em `comp_move`) usa a operação nativa do Altium; o
-  preview do hub é uma aproximação — confira no Altium após aplicar.
+- Flip de componente (`layer` diferente em `comp_move`) usa a operação nativa do Altium; a conta
+  do hub (tela e Gerber) foi medida contra ela em 232 de 233 componentes de bottom do acervo.
 - `outline_set` só aceita polígono de **linhas** (contorno com arcos: desenhe no Altium).
 - Salve o projeto **antes** de rodar `ApplyChanges` ou `BuildSchematic` (são edições
   normais, com undo, mas backup nunca fez mal a ninguém).
