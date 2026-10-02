@@ -1,1306 +1,3643 @@
-/* AltiumPCBMirror v2 - pcbframe.js — vista PCB (le globals: pcbmirror, changes).
-   Motor de changes: HubCore.applyPcbChanges (hub-core.js). Aqui: so renderer + UI. */
+/* AltiumPCBMirror v2 - pcbframe.js — a vista PCB, no padrao do Altium 21.
+
+   Pedido do dono (2026-10-02): "a interface da criacao de pcb igual ao da imagem [Altium 21],
+   menu de configuracao apenas na lateral, W cria trilha nova, ctrl + 2 adiciona via nova, uma
+   barra de ferramenta em cima ... circulo, triangulo, retangulo, igual a dos simbolos, texto,
+   tudo, eu posso clicar em cima da trilha e mudar a camada que ela pertence" -- e criar e ver
+   o Gerber dali mesmo.
+
+   Quem faz o que:
+   - o MOTOR e o hub-core.js: applyPcbChanges (board + changes -> modelo) e effectiveBoard (a
+     placa com as mudancas assadas, no formato do board.js). A tela desenha a placa EFETIVA --
+     a mesma que o Gerber recebe --, entao componente movido/virado sai pela conta unica dele;
+   - este arquivo: desenho, selecao, arrasto, ferramentas, teclado e a escrita das ops do
+     changes.js (sempre com os orig_* do board.js, e o designator_move antes do comp_move);
+   - o painel da direita e o hub-pcbpainel.js (ficha, camadas, componentes, mudancas): ele le
+     e age pela API `V` montada no fim deste arquivo;
+   - os icones da barra: hub-pcbicones.js; o traçado com cantos 45/90/livre: hub-fio.js; o
+     teclado: a tabela da PCB do hub-atalhos.js (HubAtalhos.pcb), com a mesma tabela embutida
+     aqui enquanto ela nao existir;
+   - Gerber: hub-gerber.js (gerar/zip) e hub-gerberview.js (o visualizador, num overlay).
+   Uma vista so para a web e o desktop, no tema do hub. lean=1 (aba Neoden) e so a placa. */
 "use strict";
 (function(){
+
 /* ============================== dados de entrada ============================== */
 
-const fatal = (m)=>{ const f=document.getElementById('fatal'); f.style.display='flex'; f.textContent=m; };
+const $ = id => document.getElementById(id);
+const fatal = (m) => { const f = $('fatal'); if (f){ f.style.display = 'flex'; f.textContent = m; } };
+const QS = new URLSearchParams(location.search);
+const PROJ = QS.get('p');
+const LEAN = QS.has('lean');
+const MODO = QS.get('modo') || '';
+if (LEAN) document.body.classList.add('lean');
 if (typeof pcbmirror === 'undefined') {
-  fatal('board.js não encontrado (ou inválido). Rode o ExportBoard no Altium nesta pasta.');
+  fatal('board.js não encontrado (ou inválido). Rode o ExportBoard no Altium (ou o leitor de .PcbDoc) para este projeto.');
   throw new Error('no board.js');
 }
 const B = pcbmirror;
 const CH = (typeof changes !== 'undefined' && Array.isArray(changes)) ? changes : [];
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
+const HC = HubCore;
+const isNum = HC.isNum, distSeg = HC.distSeg, near = HC.near, nearAng = HC.nearAng;
+
+/* ============================== cores e constantes ============================== */
+
+/* O CANVAS FICA FORA DO TEMA, como no Altium: fundo preto e as cores de camada medidas nos
+   Gerbers da casa (HubCore.PCB_LAYERS, contrato 1b). Cor de interface mora no CSS. */
+/* fora da placa o cinza da area de trabalho do Altium, a placa preta (o print do dono) */
+const COR = {
+  fundo:'#6b6b6b', placa:'#000000', contorno:'#a8a8a8', grade:'#1c1c1c', grade2:'#303030',
+  origem:'#e0e0e0', furo:'#000000', sel:'#ffffff', add:'#00e676', del:'#ff5252', seta:'#ffd54f',
+  medida:'#4fc3f7', snap:'#00e5ff', dentro:'#3d8bff', toca:'#00c853',
+};
+/* cor da bandeira NO DESENHO (a lista do painel repete o azul da nota) */
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
-/* ------- travamento de edicao -------
-   A vista abre em LEITURA. Editar exige clicar em "Editar" na barra de ferramentas.
-   lean=1 (placa embutida na aba Neoden do hub) nunca libera: la a vista e so consulta.
-   O bloqueio fica nos pontos de ENTRADA (ferramentas, arrasto, duplo clique, teclado),
-   nao no commit — assim nada chega a ser mexido na tela para depois ser recusado. */
-const LEAN = new URLSearchParams(location.search).has('lean');
+const MM_MIL = 1 / 0.0254;                 /* mil por mm */
+const RAD = Math.PI / 180;
+/* as mesmas regras do hub-gerber.js: a tela mostra a mascara e a pasta que o Gerber gera */
+const MASCARA_PADRAO = 0.1016;             /* SolderMaskExpansion de 4 mil (110 de 111 projetos) */
+const SEM_PASTA = -500;                    /* expansao de pasta <= -500 mm = "sem pasta" do Altium */
+const TT_ALTURA = 0.52, TT_TRACO = 0.12;   /* TrueType sem contorno na HubFont */
+const TRACO_TEXTO = 0.15;                  /* texto sem w: traco = h x 0,15 */
+const PASSO_LINHA = 1.765;                 /* texto de varias linhas: passo = h x 1,765 (DMB) */
+const BASE_HUBFONT = 0.047619;
+
+const r6 = v => { const x = Math.round(v * 1e6) / 1e6; return x === 0 ? 0 : x; };
+function normAng(a){ const v = r6((((+a || 0) % 360) + 360) % 360); return v >= 360 ? 0 : v; }
+/* cosseno/seno com os multiplos de 90 exatos */
+function cs(g){
+  const a = (((+g || 0) % 360) + 360) % 360;
+  if (a === 0) return [1, 0]; if (a === 90) return [0, 1];
+  if (a === 180) return [-1, 0]; if (a === 270) return [0, -1];
+  return [Math.cos(a * RAD), Math.sin(a * RAD)];
+}
+function gira(x, y, g){ const c = cs(g); return [x * c[0] - y * c[1], x * c[1] + y * c[0]]; }
+/* texto do usuario vai para uma linha JSON lida linha a linha pelo Altium: sem aspas duplas
+   (a sequencia aspas-dois-pontos quebra o parser) */
+const limpaTxt = s => String(s == null ? '' : s).replace(/"/g, "'");
+
+/* ============================== preferencias desta maquina ============================== */
+
+const PREF = 'altiumhub.pcb.';
+function lePref(k, d){ try { const v = localStorage.getItem(PREF + k); return v === null ? d : v; } catch (e) { return d; } }
+function gravaPref(k, v){ try { localStorage.setItem(PREF + k, String(v)); } catch (e) {} }
+
+/* ============================== grade ============================== */
+
+/* 5 mil e o snap do Altium em 61% das placas da casa; a unidade de tela e mm em 86% */
+const GRADES = [
+  { id:'1mil',    mm:0.0254, rot:'1 mil' },   { id:'5mil',   mm:0.127, rot:'5 mil' },
+  { id:'10mil',   mm:0.254,  rot:'10 mil' },  { id:'25mil',  mm:0.635, rot:'25 mil' },
+  { id:'50mil',   mm:1.27,   rot:'50 mil' },  { id:'100mil', mm:2.54,  rot:'100 mil' },
+  { id:'0.001mm', mm:0.001,  rot:'0,001 mm' },{ id:'0.01mm', mm:0.01,  rot:'0,01 mm' },
+  { id:'0.05mm',  mm:0.05,   rot:'0,05 mm' }, { id:'0.1mm',  mm:0.1,   rot:'0,1 mm' },
+  { id:'0.25mm',  mm:0.25,   rot:'0,25 mm' }, { id:'0.5mm',  mm:0.5,   rot:'0,5 mm' },
+  { id:'1mm',     mm:1,      rot:'1 mm' },
+];
+const gradePorId = id => GRADES.find(g => g.id === id) || GRADES[1];
+const snapV = (v, passo) => passo > 0 ? r6(Math.round(v / passo) * passo) : r6(v);
+
+/* ============================== teclado ==============================
+   A tabela da PCB mora no hub-atalhos.js (HubAtalhos.pcb, chave propria no localStorage) e o
+   editor dela nas Configuracoes do hub. Enquanto o modulo nao a traz, vale esta copia -- com os
+   MESMOS ids, entao a tecla trocada pelo usuario continua valendo quando ela chegar. */
+const PCB_PADRAO = [
+  { id:'trilha',      tecla:'W',      rotulo:'Trilha (roteamento interativo)' },
+  { id:'via',         tecla:'Ctrl+2', rotulo:'Via (com a trilha na mão: via + troca de camada)' },
+  { id:'linha',       tecla:'L',      rotulo:'Linha na camada atual' },
+  { id:'arco',        tecla:'A',      rotulo:'Arco' },
+  { id:'circulo',     tecla:'O',      rotulo:'Círculo' },
+  { id:'retangulo',   tecla:'R',      rotulo:'Retângulo' },
+  { id:'poligono',    tecla:'G',      rotulo:'Polígono' },
+  { id:'texto',       tecla:'T',      rotulo:'Texto' },
+  { id:'preencher',   tecla:'P',      rotulo:'Preencher formas (cheio/contorno)' },
+  { id:'sinalizar',   tecla:'N',      rotulo:'Sinalizar para a IA' },
+  { id:'medir',       tecla:'Ctrl+M', rotulo:'Medir distância' },
+  { id:'unidade',     tecla:'Q',      rotulo:'Trocar a unidade mm/mil' },
+  { id:'camadaUnica', tecla:'S',      rotulo:'Camada única' },
+  { id:'proxCamada',  tecla:'+',      rotulo:'Próxima camada' },
+  { id:'antCamada',   tecla:'-',      rotulo:'Camada anterior' },
+  { id:'outraFace',   tecla:'*',      rotulo:'Top ↔ Bottom (com a trilha na mão: via + troca)' },
+  { id:'virar',       tecla:'V',      rotulo:'Ver por baixo' },
+  { id:'grade',       tecla:'B',      rotulo:'Mostrar/ocultar a grade' },
+  { id:'diff',        tecla:'D',      rotulo:'Fantasmas das mudanças' },
+  { id:'enquadrar',   tecla:'F',      rotulo:'Enquadrar a placa' },
+  { id:'girar',       tecla:'Espaço', rotulo:'Girar 90°' },
+  { id:'espelhoX',    tecla:'X',      rotulo:'Espelhar na horizontal' },
+  { id:'espelhoY',    tecla:'Y',      rotulo:'Espelhar na vertical' },
+  { id:'apagar',      tecla:'Delete', rotulo:'Apagar a seleção' },
+  { id:'desfazer',    tecla:'Ctrl+Z', rotulo:'Desfazer' },
+  { id:'refazer',     tecla:'Ctrl+Y', rotulo:'Refazer' },
+  { id:'tudo',        tecla:'Ctrl+A', rotulo:'Selecionar tudo' },
+  { id:'editar',      tecla:'E',      rotulo:'Travar/destravar a edição' },
+  { id:'salvar',      tecla:'Ctrl+S', rotulo:'Salvar o changes.js' },
+  { id:'ajuda',       tecla:'H',      rotulo:'Ajuda' },
+];
+/* os gestos fixos (nao gravaveis): o canvas os trata antes do mapa */
+const TRILHA = 'trilha na mão (W)', ARRASTO = 'arrastando';
+const GESTOS_PCB = [
+  { rotulo:'Selecionar (2º clique no mesmo ponto pega o objeto de baixo)', teclas:['Clique'] },
+  { rotulo:'Somar/tirar da seleção',                     teclas:['Shift', 'Clique'] },
+  { rotulo:'Janela: esquerda→direita pega o que está DENTRO', teclas:['Arrastar no vazio'] },
+  { rotulo:'Janela: direita→esquerda pega o que TOCA',   teclas:['Arrastar no vazio'] },
+  { rotulo:'Mover',                                      teclas:['Arrastar'] },
+  { rotulo:'Mover só a ponta de uma trilha selecionada', teclas:['Arrastar a ponta'] },
+  { rotulo:'Arrastar a tela',                            teclas:['Botão direito', 'Arrastar'] },
+  { rotulo:'Menu',                                       teclas:['Botão direito'] },
+  { rotulo:'Aproximar e afastar (no cursor)',            teclas:['Roda do mouse'] },
+  { rotulo:'Andar para os lados',                        teclas:['Shift', 'Roda do mouse'] },
+  { rotulo:'Propriedades',                               teclas:['Duplo clique'] },
+  { rotulo:'Fixar o canto',                              teclas:['Clique'],           quando:TRILHA },
+  { rotulo:'Inverter o canto',                           teclas:['Espaço'],           quando:TRILHA },
+  { rotulo:'Modo 45° / 90° / livre',                     teclas:['Shift', 'Espaço'],  quando:TRILHA },
+  { rotulo:'Desfazer o último trecho',                   teclas:['Backspace'],        quando:TRILHA },
+  { rotulo:'Via sem trocar de camada',                   teclas:['2'],                quando:TRILHA },
+  { rotulo:'Via e troca de camada',                      teclas:['*'],                quando:TRILHA },
+  { rotulo:'Via e troca de camada',                      teclas:['Ctrl', '2'],        quando:TRILHA },
+  { rotulo:'Largura no painel',                          teclas:['Tab'],              quando:TRILHA },
+  { rotulo:'Terminar a trilha (de novo, larga a ferramenta)', teclas:['Botão direito'], quando:TRILHA },
+  { rotulo:'Girar',                                      teclas:['Espaço'],           quando:ARRASTO },
+  { rotulo:'Trocar de face (componente)',                teclas:['L'],                quando:ARRASTO },
+  { rotulo:'Espelhar (texto e forma)',                   teclas:['X / Y'],            quando:ARRASTO },
+  { rotulo:'Soltar o snap',                              teclas:['Ctrl'],             quando:ARRASTO },
+  { rotulo:'Largar o que estiver na mão',                teclas:['Escape'] },
+];
+const HA = (typeof HubAtalhos !== 'undefined') ? HubAtalhos : null;
+const HAP = HA && HA.pcb && typeof HA.pcb === 'object' ? HA.pcb : null;
+const TECLADO = {
+  padrao: (HAP && Array.isArray(HAP.ATALHOS_PADRAO) && HAP.ATALHOS_PADRAO.length) ? HAP.ATALHOS_PADRAO : PCB_PADRAO,
+  chave:  (HAP && typeof HAP.CHAVE === 'string' && HAP.CHAVE) || 'altiumhub.pcb.atalhos',
+  gestos: (HAP && Array.isArray(HAP.GESTOS) && HAP.GESTOS.length) ? HAP.GESTOS : GESTOS_PCB,
+};
+const PROIBIDAS = (HA && Array.isArray(HA.TECLAS_PROIBIDAS)) ? HA.TECLAS_PROIBIDAS
+  : ['Ctrl+W','Ctrl+T','Ctrl+N','Ctrl+Shift+N','Ctrl+Shift+T','Ctrl+R','Ctrl+P','F5','F11','F12','Escape','Tab','Ctrl+Tab'];
+/* a mesma regra do hub-atalhos.js » normalizaTecla (copia so para quando ele nao carregou) */
+function normalizaLocal(e){
+  if (!e || !e.key) return '';
+  let k = e.key;
+  if (k === 'Control' || k === 'Shift' || k === 'Alt' || k === 'Meta') return '';
+  if (k === ' ' || k === 'Spacebar') k = 'Espaço';
+  else if (k.length === 1) k = k.toUpperCase();
+  const m = [];
+  if (e.ctrlKey || e.metaKey) m.push('Ctrl');
+  if (e.altKey) m.push('Alt');
+  if (e.shiftKey && k.length > 1 && k !== 'Espaço') m.push('Shift');
+  m.push(k);
+  return m.join('+');
+}
+const normalizaTecla = (HA && typeof HA.normalizaTecla === 'function') ? HA.normalizaTecla : normalizaLocal;
+/* o mapa padrao + o gravado; o mesmo algoritmo do mapaAtalhos do Esquema, sobre a tabela da PCB */
+function mapaLocal(tabela, salvos){
+  const porAcao = {};
+  for (const a of tabela) porAcao[a.id] = a.tecla;
+  const s = salvos && typeof salvos === 'object' ? salvos : {};
+  for (const id of Object.keys(s)){
+    const t = String(s[id] || '');
+    if (!porAcao[id] || !t || PROIBIDAS.indexOf(t) >= 0 || /(^|\+)Escape$/.test(t)) continue;
+    porAcao[id] = t;
+  }
+  const porTecla = {};
+  for (const a of tabela){
+    let t = porAcao[a.id];
+    if (porTecla[t] && porTecla[t] !== a.id) t = a.tecla;
+    if (porTecla[t] && porTecla[t] !== a.id) continue;
+    porAcao[a.id] = t; porTecla[t] = a.id;
+  }
+  return { porAcao, porTecla };
+}
+function leSalvos(){
+  if (HAP && typeof HAP.carrega === 'function') { try { return HAP.carrega() || {}; } catch (e) {} }
+  try { const v = JSON.parse(localStorage.getItem(TECLADO.chave) || '{}'); return v && typeof v === 'object' ? v : {}; }
+  catch (e) { return {}; }
+}
+function montaMapa(){
+  if (HAP && typeof HAP.mapaAtalhos === 'function') {
+    try { const m = HAP.mapaAtalhos(leSalvos()); if (m && m.porTecla && m.porAcao) return m; } catch (e) {}
+  }
+  return mapaLocal(TECLADO.padrao, leSalvos());
+}
+let ATALHOS = montaMapa();
+const teclaDe = id => (ATALHOS.porAcao && ATALHOS.porAcao[id]) || '';
+const comTecla = (txt, id) => { const t = teclaDe(id); return t ? txt + ' (' + t + ')' : txt; };
+
+/* ============================== estado da vista ============================== */
+
+let model = null, EB = null;
+let LAYERS = [], LBYK = Object.create(null);
+const view = { scale:10, cx:0, cy:0, flip:false };
+const show = { grid:true, ghost:true, unica:false, layers:Object.create(null) };
+let cur = 'Top';                              /* a camada atual (aba ativa embaixo) */
+let unidade = lePref('unidade', 'mm') === 'mil' ? 'mil' : 'mm';
+let grade = gradePorId(lePref('grade', '5mil'));
+/* snap a objetos: 'todas' as camadas visiveis, so a 'atual', ou 'off' */
+let snapObj = ['todas', 'atual', 'off'].indexOf(lePref('snapobj', 'todas')) >= 0 ? lePref('snapobj', 'todas') : 'todas';
+/* o Selection Filter do Altium; Corpos 3D e Rooms nao vem no espelho e ficam travados no painel */
+const FILTROS = [
+  ['comp', 'Componentes'], ['track', 'Trilhas'], ['arc', 'Arcos'], ['pad', 'Pads'], ['via', 'Vias'],
+  ['region', 'Regiões'], ['poly', 'Polígonos'], ['fill', 'Fills'], ['text', 'Textos'],
+  ['keepout', 'Keepouts'], ['outros', 'Outros'],
+];
+const filtro = (() => {
+  const f = {}; for (const [k] of FILTROS) f[k] = true;
+  try { const s = JSON.parse(lePref('filtro', '{}')); for (const k in s) if (k in f) f[k] = !!s[k]; } catch (e) {}
+  return f;
+})();
 let editOn = false;
-
-/* ------- ferramenta Sinalizar + persistencia ------- */
-let annTool = false, annDirty = false, annPending = null, staleWorkspace = false;
-
-function setAnnDirty(v){
-  annDirty = v;
-  const b = document.getElementById('btnAnnSave');
-  b.classList.toggle('active', v);
-  b.textContent = v ? 'Salvar sinaliz. *' : 'Salvar sinaliz.';
-}
-function setAnnTool(v){
-  if (v && !editOn) return;
-  if (v) setTool('select');
-  annTool = v;
-  document.getElementById('btnAnn').classList.toggle('active', v);
-  cv.style.cursor = v ? 'copy' : 'crosshair';
-  if (!v) hideAnnForm();
-}
-function hideAnnForm(){ document.getElementById('annform').style.display = 'none'; annPending = null; }
-function openAnnForm(w){
-  annPending = { x: +w.x.toFixed(4), y: +w.y.toFixed(4) };
-  document.getElementById('anntext').value = '';
-  document.getElementById('annform').style.display = 'block';
-  document.getElementById('anntext').focus();
-}
-function annNextId(){
-  let mx = 0;
-  for (const a of ANN){ const n = parseInt(String(a.id || '').replace(/^n/, ''), 10); if (isFinite(n) && n > mx) mx = n; }
-  return 'n' + (mx + 1);
-}
-function nowStr(){
-  const d = new Date(), p = n => String(n).padStart(2, '0');
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
-}
-document.getElementById('annok').addEventListener('click', () => {
-  const msg = document.getElementById('anntext').value.trim().replace(/"/g, "'");
-  if (!msg || !annPending) return;
-  ANN.push({ id: annNextId(), view: 'pcb', x: annPending.x, y: annPending.y,
-             layer: view.flip ? 'Bottom' : 'Top', severity: document.getElementById('annsev').value,
-             msg, ref: '', status: 'open', created: nowStr(), reply: '' });
-  hideAnnForm(); annChanged();
-});
-document.getElementById('anncancel').addEventListener('click', hideAnnForm);
-
-/* as perguntas de seguranca dos dois escritores viram modal; o resultado, notificacao */
-const SOBRESCREVER = { title:'Salvar', ok:'Sobrescrever', danger:true };
-async function falhaSalvar(err, nome, texto){
-  if (await HubDialog.confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?',
-      { title:'Falha ao salvar', ok:'Baixar' }))
-    HubIO.download(nome, texto);
-}
-async function saveAnnotations(){
-  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o annotations.js do disco. Continuar?', SOBRESCREVER))) return;
-  const out = HubCore.serializeAnnotations(ANN);
-  if (!out.text){ await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Sinalizadores inválidos' }); return; }
-  const rel = PCB_P ? 'Projects/' + PCB_P + '/annotations.js' : 'annotations.js';
-  try {
-    const r = await HubIO.saveFile(rel, out.text);
-    setAnnDirty(false);
-    staleWorkspace = false;
-    if (r.mode === 'server') HubDialog.toast('sinalizadores salvos', 'ok');
-    else HubDialog.toast('arquivo baixado — substitua ' + rel, 'warn');
-  } catch (err) { await falhaSalvar(err, 'annotations.js', out.text); }
-}
-document.getElementById('btnAnn').addEventListener('click', () => setAnnTool(!annTool));
-document.getElementById('btnAnnSave').addEventListener('click', saveAnnotations);
-document.getElementById('btnChSave').addEventListener('click', saveChanges);
-
-/* reload escopado do hubserver + aviso ao fechar com trabalho nao salvo */
-window.__hubOnChange = function(){
-  if (!annDirty && !chDirty){ location.reload(); return; }
-  staleWorkspace = true;
-  document.getElementById('annmsg').textContent = '⚠ workspace mudou — salve e recarregue (F5)';
-  HubDialog.toast('O workspace mudou com edições pendentes aqui — salve e recarregue (F5).', 'warn', 0);
+let tool = 'select';
+let preencher = lePref('preencher', '0') === '1';
+const RULES = (B.rules && typeof B.rules === 'object') ? B.rules : {};
+/* o que as ferramentas usam; a trilha e a via pela regra do espelho quando ele a traz */
+const CFG = {
+  wTrilha: (isNum(RULES.width) && RULES.width > 0) ? RULES.width : 0.254,
+  viaSize: (isNum(RULES.viaSize) && RULES.viaSize > 0) ? RULES.viaSize : 0.6,
+  viaDrill: (isNum(RULES.viaDrill) && RULES.viaDrill > 0) ? RULES.viaDrill : 0.3,
+  viaNet: '',
+  wLinha: 0.254, hTexto: 1.524, wTexto: 0.254, furo: 3.2,
+  modo: '45',
 };
-window.__hubDirty = function(){ return annDirty || chDirty; };
-window.__hubSelectComp = function(ref){ const m = model.compByRef[ref]; if (m){ selected = m; showInfo(m); syncTableSel(); zoomToObj(m); } };
-window.addEventListener('beforeunload', e => { if (annDirty || chDirty){ e.preventDefault(); e.returnValue = ''; } });
+if (!(CFG.viaDrill < CFG.viaSize)) CFG.viaDrill = r6(CFG.viaSize / 2);
+let chDirty = false, annDirty = false, staleWorkspace = false;
 
-const MM2MIL = 1/0.0254;
-const isNum = HubCore.isNum, distSeg = HubCore.distSeg;
-const near = HubCore.near, nearAng = HubCore.nearAng;
+/* ============================== modelo efetivo ==============================
+   model = board + changes (o motor); EB = a placa efetiva no formato do board.js, a MESMA que o
+   Gerber recebe. A tela desenha o EB; o que edita e o model (os itens com src/eff). */
+const IDX = { item:new Map(), compNome:new Map(), ebComp:new Map(), ebPorId:new Map() };
+function recalcula(){
+  model = HC.applyPcbChanges(B, CH);
+  EB = HC.effectiveBoard(B, model);
+  montaCamadas();
+  montaIndices();
+  montaAlvos();
+  pathPlacaCache = null;
+  cacheSujo = true;
+}
+/* As abas: a lista do motor (com nome/cor do board.layers quando o espelho novo traz) e a
+   Mechanical 1 sempre -- ela existe em toda placa do Altium e e onde a casa desenha cota e
+   contorno a mao (86% das placas); sem ela na lista nao haveria onde desenhar. */
+function montaCamadas(){
+  const L = HC.boardLayers(EB).slice();
+  if (!L.some(l => l.key === 'Mech1')) {
+    const r = HC.pcbLayer('Mech1');
+    L.push({ key:r.key, name:r.name, kind:r.kind, side:r.side, pair:r.pair, altium:r.altium, color:r.color,
+             order:r.order, stack:null, used:false, count:0, inBoard:false });
+    L.sort((a, b) => a.order - b.order);
+  }
+  /* sinal na ordem fisica (layers[].stack) quando o espelho diz; senao a da tabela */
+  const sinal = L.filter(l => l.kind === 'signal');
+  if (sinal.some(l => isNum(l.stack))) {
+    const ord = sinal.slice().sort((a, b) => (isNum(a.stack) ? a.stack : 99 + a.order) - (isNum(b.stack) ? b.stack : 99 + b.order));
+    let i = 0;
+    for (let k = 0; k < L.length; k++) if (L[k].kind === 'signal') L[k] = ord[i++];
+  }
+  LAYERS = L;
+  LBYK = Object.create(null);
+  let n = 0;
+  for (const l of L) {
+    LBYK[l.key] = l;
+    l.num = l.kind === 'signal' ? ++n : 0;              /* o [1] Top Layer, [2] Bottom Layer das abas */
+    if (!(l.key in show.layers)) show.layers[l.key] = true;
+  }
+  if (!LBYK[cur]) cur = LBYK.Top ? 'Top' : (L[0] ? L[0].key : 'Top');
+}
+const corDe = k => (LBYK[k] && LBYK[k].color) || (HC.pcbLayer(k) || {}).color || '#888888';
+const nomeDe = k => (LBYK[k] && LBYK[k].name) || (HC.pcbLayer(k) || {}).name || k;
+const cobre = k => HC.isCopper(k);
+const camadasCobre = () => LAYERS.filter(l => l.kind === 'signal' || l.kind === 'plane');
 
-/* modelo efetivo (board + changes) — motor unico, testado em tests/test-apply.js */
-let model = HubCore.applyPcbChanges(B, CH);
-
-/* ------- infra de edicao: reapply, undo/redo, dirty, salvar ------- */
-let chDirty = false;
-const undoStack = [JSON.stringify(CH)], redoStack = [];
-function r4(v){ return +v.toFixed(4); }
-
-function selKey(m){
+function montaIndices(){
+  IDX.item = new Map(); IDX.compNome = new Map(); IDX.ebComp = new Map(); IDX.ebPorId = new Map();
+  for (const list of [model.tracks, model.arcs, model.vias, model.texts, model.fills, model.regions])
+    for (const m of list) if (m.src && m.src.id != null && !IDX.item.has(String(m.src.id))) IDX.item.set(String(m.src.id), m);
+  for (const m of model.added) if (m.eff && m.eff.id != null) IDX.item.set(String(m.eff.id), m);
+  model.comps.forEach((m, i) => {
+    IDX.compNome.set(String(m.eff.designator || m.src.ref), m);
+    IDX.ebComp.set(m, EB.components[i]);
+  });
+  for (const k of ['tracks', 'arcs', 'vias', 'texts', 'fills', 'regions', 'silk', 'lines', 'cutouts'])
+    for (const o of (EB[k] || [])) if (o && o.id != null && !IDX.ebPorId.has(String(o.id))) IDX.ebPorId.set(String(o.id), o);
+  /* o que cada componente leva junto (pelo nome efetivo: o owner do EB ja sai renomeado) */
+  IDX.donos = new Map();
+  const poeDono = (o, kind) => {
+    if (!o || o.owner == null || o.owner === '') return;
+    const k = String(o.owner);
+    let l = IDX.donos.get(k);
+    if (!l) { l = []; IDX.donos.set(k, l); }
+    l.push({ kind, o });
+  };
+  for (const o of EB.tracks || []) poeDono(o, 'line');
+  for (const o of EB.arcs || []) poeDono(o, 'arc');
+  for (const o of EB.silk || []) poeDono(o, o && o.kind === 'arc' ? 'arc' : 'line');
+  for (const o of EB.lines || []) poeDono(o, o && o.kind === 'arc' ? 'arc' : 'line');
+  for (const o of EB.fills || []) poeDono(o, 'fill');
+  for (const o of EB.regions || []) poeDono(o, 'region');
+  for (const o of EB.texts || []) poeDono(o, 'text');
+  for (const o of EB.cutouts || []) poeDono(o, 'region');
+}
+const compDoDono = owner => (owner != null && IDX.compNome.has(String(owner))) ? IDX.compNome.get(String(owner)) : null;
+/* a linha do changes.js que criou um objeto adicionado */
+function opDe(m){
   if (!m) return null;
-  if (m.kind === 'ann') return { kind:'ann', id:m.ann.id };
-  if (m.kind === 'pad') return { kind:'pad', ref:m.comp.src.ref, name:m.pad.name };
-  if (m.kind === 'comp') return { kind:'comp', ref:m.src.ref };
-  return { kind:m.kind, id:(m.added ? m.eff.id : m.src.id), added:!!m.added };
+  const it = model.changeItems.find(i => i.target === m);
+  return it ? it.ch : null;
 }
-function findBySelKey(k){
-  if (!k) return null;
-  if (k.kind === 'ann'){ const a = ANN.find(x => x.id === k.id); return a ? { kind:'ann', ann:a } : null; }
-  if (k.kind === 'comp') return model.compByRef[k.ref] || null;
-  if (k.kind === 'pad'){
-    const c = model.compByRef[k.ref]; if (!c) return null;
-    const p = c.src.pads.find(p => p.name === k.name);
-    return p ? { kind:'pad', pad:p, comp:c, x:p.x, y:p.y } : null;
+/* o objeto efetivo (EB) de um item do modelo */
+function ebDe(m){ if (!m) return null; const id = m.added ? m.eff.id : m.src.id; return IDX.ebPorId.get(String(id)) || null; }
+
+/* ============================== geometria basica ============================== */
+
+function bbPts(pts){
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const p of pts) if (p && isNum(p[0]) && isNum(p[1])) {
+    if (p[0] < x1) x1 = p[0]; if (p[0] > x2) x2 = p[0]; if (p[1] < y1) y1 = p[1]; if (p[1] > y2) y2 = p[1];
   }
-  if (k.added) return model.added.find(m => m.kind === k.kind && m.eff.id === k.id) || null;
-  const pool = { track:model.tracks, via:model.vias, arc:model.arcs, text:model.texts }[k.kind] || [];
-  return pool.find(m => m.src.id === k.id) || null;
+  return x1 > x2 ? null : [x1, y1, x2, y2];
 }
+function dentroPoli(pts, x, y){
+  let d = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], b = pts[j];
+    if (((a[1] > y) !== (b[1] > y)) && (x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0])) d = !d;
+  }
+  return d;
+}
+function pertoPoli(pts, x, y, tol){
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++)
+    if (distSeg(x, y, pts[j][0], pts[j][1], pts[i][0], pts[i][1]) <= tol) return true;
+  return false;
+}
+/* o arco (sa -> ea, anti-horario) passa pelo angulo g? */
+function noArco(sa, ea, g){
+  if (Math.abs(ea - sa) >= 359.999) return true;
+  const sw = (((ea - sa) % 360) + 360) % 360;
+  const d = (((g - sa) % 360) + 360) % 360;
+  return d <= sw + 1e-9;
+}
+const arcoCheio = o => Math.abs(o.ea - o.sa) >= 359.999;
+function pontaArco(o, qual){ const g = qual ? o.ea : o.sa; const c = cs(g); return [o.cx + o.r * c[0], o.cy + o.r * c[1]]; }
+/* os 4 cantos de um retangulo centrado em (cx,cy), W x H, girado */
+function cantos(cx, cy, W, H, rot){
+  return [[-W / 2, -H / 2], [W / 2, -H / 2], [W / 2, H / 2], [-W / 2, H / 2]].map(q => { const g = gira(q[0], q[1], rot); return [cx + g[0], cy + g[1]]; });
+}
+const fillCentro = f => [(f.x1 + f.x2) / 2, (f.y1 + f.y2) / 2];
+const fillCantos = f => { const c = fillCentro(f); return cantos(c[0], c[1], Math.abs(f.x2 - f.x1), Math.abs(f.y2 - f.y1), isNum(f.rot) ? f.rot : 0); };
 
-function reapply(){
-  const k = selKey(selected);
-  model = HubCore.applyPcbChanges(B, CH);
-  selected = findBySelKey(k);
-  buildChangePanel();
-  renderTable();
-  showInfo(selected);
-  draw();
+/* ---- pads: as convencoes do hub-gerber.js, para a tela e o Gerber nao discordarem ---- */
+const ehTH = p => p.layer === 'Multi' || (!p.layer && p.type === 'th');
+function formaLado(p, lado){
+  if (lado === 'bottom' && ehTH(p)) {
+    const b = p.bot && typeof p.bot === 'object' ? p.bot : null;
+    if (b) return { shape:b.shape || p.shape, w:isNum(b.w) ? b.w : p.w, h:isNum(b.h) ? b.h : p.h, radius:isNum(b.radius) ? b.radius : p.radius };
+    if ('bw' in p || 'bh' in p || 'bshape' in p)
+      return { shape:p.bshape || p.shape, w:isNum(p.bw) ? p.bw : p.w, h:isNum(p.bh) ? p.bh : p.h, radius:isNum(p.bradius) ? p.bradius : p.radius };
+  }
+  return { shape:p.shape, w:p.w, h:p.h, radius:p.radius };
 }
-function setChDirty(v){
-  chDirty = v;
-  const b = document.getElementById('btnChSave');
-  b.classList.toggle('active', v);
-  b.textContent = v ? 'Salvar changes *' : 'Salvar changes';
+/* o furo fica em (x,y); o "furo deslocado" desloca o COBRE, no referencial do pad */
+function centroCobre(p){
+  if ((isNum(p.hox) && p.hox) || (isNum(p.hoy) && p.hoy)) { const q = gira(p.hox || 0, p.hoy || 0, p.rot || 0); return [p.x + q[0], p.y + q[1]]; }
+  return [p.x, p.y];
 }
-function commit(){
-  undoStack.push(JSON.stringify(CH));
-  if (undoStack.length > 60) undoStack.shift();
-  redoStack.length = 0;
-  setChDirty(true);
-  reapply();
-}
-function restoreCH(json){
-  CH.length = 0;
-  for (const c of JSON.parse(json)) CH.push(c);
-  setChDirty(true);
-  reapply();
-}
-function undo(){ if (undoStack.length < 2) return; redoStack.push(undoStack.pop()); restoreCH(undoStack[undoStack.length - 1]); }
-function redo(){ if (!redoStack.length) return; const s = redoStack.pop(); undoStack.push(s); restoreCH(s); }
+const tampado = (o, lado) => lado === 'bottom' ? o.tentBot === true : o.tentTop === true;
+const expMascara = o => isNum(o.sm) ? o.sm : (isNum(RULES.sm) ? RULES.sm : MASCARA_PADRAO);
+const expPasta = p => isNum(p.pm) ? p.pm : (isNum(RULES.pm) ? RULES.pm : 0);
+const ladoDaVista = () => view.flip ? 'bottom' : 'top';
 
-/* dois escritores: snapshot do changes.js em disco para detectar a IA gravando em paralelo */
-let chDiskSnapshot = null;
-const CH_REL = PCB_P ? 'Projects/' + PCB_P + '/changes.js' : 'changes.js';
-(async () => { if (HubIO.canPost) try { chDiskSnapshot = await HubIO.fetchText(CH_REL); } catch (e) {} })();
-
-/* preserva comentarios // que a IA (ou o usuario) escreveu a mao no changes.js em disco;
-   a serializacao normal so conhece o array CH, entao essas linhas seriam perdidas no save do hub */
-function extraCommentLines(diskText){
-  if (!diskText) return [];
+/* ---- texto: com o contorno exato do Altium (polys) quando ele ainda esta em cima do texto;
+   senao a HubFont com a largura w -- a mesma regra (e as mesmas medidas) do hub-gerber.js ---- */
+function polysDoTexto(t){
+  const P = (Array.isArray(t.polys) ? t.polys : []).filter(q => q && Array.isArray(q.pts) && q.pts.length >= 3);
+  if (!P.length) return null;
+  const todos = [];
+  for (const q of P) if (!q.hole) for (const p of q.pts) todos.push(p);
+  const bb = bbPts(todos);
+  if (!bb) return null;
+  if (isNum(t.x) && isNum(t.y) && Math.hypot((bb[0] + bb[2]) / 2 - t.x, (bb[1] + bb[3]) / 2 - t.y) > Math.max(1, isNum(t.h) ? t.h : 0)) return null;
+  return { P, bb };
+}
+function geoTexto(t){
+  if (!t || t.hidden) return null;
+  /* A GEOMETRIA E A DO GERBER: o hub-gerber.js monta o texto (contorno exato, ou a HubFont com os
+     glifos que faltam nela, posicionada pela tinta, com moldura de varias linhas) e a tela desenha
+     exatamente aquilo -- o que se ve aqui e o que vai para a fabrica. A conta local abaixo so vale
+     quando o gerador nao carregou. */
+  if (typeof HubGerber !== 'undefined' && typeof HubGerber.geometriaTexto === 'function') {
+    let g = null;
+    try { g = HubGerber.geometriaTexto(t); } catch (e) { g = null; }
+    if (!g) return null;
+    if (g.regioes) {
+      const pts = [];
+      for (const q of g.regioes) if (!q.hole) for (const p of q.pts) pts.push(p);
+      const bb = bbPts(pts);
+      if (!bb) return null;
+      return { polys:g.regioes, linhas:null, w:0, caixa:[[bb[0], bb[1]], [bb[2], bb[1]], [bb[2], bb[3]], [bb[0], bb[3]]], inv:false };
+    }
+    /* a caixa de selecao: a tinta no referencial do texto (justa mesmo girado), mais meio traco */
+    const w = g.w > 0 ? g.w : 0, rot = isNum(t.rot) ? t.rot : 0, ox = t.x, oy = t.y;
+    const loc = [];
+    for (const s of g.tracos) for (const p of s) loc.push(gira(p[0] - ox, p[1] - oy, -rot));
+    const bb = bbPts(loc);
+    if (!bb) return null;
+    const m = w / 2;
+    const caixa = [[bb[0] - m, bb[1] - m], [bb[2] + m, bb[1] - m], [bb[2] + m, bb[3] + m], [bb[0] - m, bb[3] + m]]
+      .map(q => { const r = gira(q[0], q[1], rot); return [ox + r[0], oy + r[1]]; });
+    return { polys:null, linhas:g.tracos, w, caixa, inv:!!t.inverted, h:t.h };
+  }
+  const pl = polysDoTexto(t);
+  if (pl) {
+    const bb = pl.bb;
+    return { polys:pl.P, linhas:null, w:0, caixa:[[bb[0], bb[1]], [bb[2], bb[1]], [bb[2], bb[3]], [bb[0], bb[3]]], inv:false };
+  }
+  const txt = t.text == null ? '' : String(t.text);
+  if (!txt.trim() || !(t.h > 0) || !isNum(t.x) || !isNum(t.y)) return null;
+  const tipo = t.kind || (/^(stroke|truetype|barcode)$/.test(t.font) ? t.font : null);
+  let h = t.h, w = t.w;
+  if (tipo === 'truetype') { h = t.h * TT_ALTURA; w = t.h * TT_TRACO; }
+  else if (!(w > 0)) w = t.h * TRACO_TEXTO;
+  const rot = isNum(t.rot) ? t.rot : 0, esp = t.mirror ? -1 : 1;
   const out = [];
-  for (const ln of diskText.split('\n')){
-    const t = ln.trim();
-    if (t.indexOf('//') === 0 && t.indexOf('// AltiumPCBMirror') !== 0 && t.indexOf('// Edite ESTE arquivo') !== 0) out.push(ln);
-  }
-  return out;
-}
-async function saveChanges(){
-  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o changes.js do disco. Continuar?', SOBRESCREVER))) return;
-  const out = HubCore.serializeChanges(CH);
-  if (!out.text){ await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Mudanças inválidas' }); return; }
-  let cur = null;
-  if (HubIO.canPost){
-    try { cur = await HubIO.fetchText(CH_REL); } catch (e) {}
-    if (cur !== null && (chDiskSnapshot === null || cur !== chDiskSnapshot) &&
-        !(await HubDialog.confirm('changes.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?', SOBRESCREVER))) return;
-  }
-  const extra = extraCommentLines(cur !== null ? cur : chDiskSnapshot);
-  const text = extra.length ? out.text.replace('var changes = [', extra.join('\n') + '\nvar changes = [') : out.text;
-  try {
-    const r = await HubIO.saveFile(CH_REL, text);
-    setChDirty(false);
-    chDiskSnapshot = text;
-    staleWorkspace = false;
-    if (r.mode === 'server') HubDialog.toast('changes.js salvo', 'ok');
-    else HubDialog.toast('arquivo baixado — substitua ' + CH_REL, 'warn');
-  } catch (err) { await falhaSalvar(err, 'changes.js', text); }
-}
-
-/* ------- snap e commits de edicao ------- */
-function gridStep(){
-  const steps = [0.1, 0.5, 1, 5, 10, 25, 50];
-  for (const s of steps){ if (s * view.scale >= 12) return s; }
-  return 50;
-}
-function snapVal(v, ev){ const g = gridStep(); return (ev && ev.ctrlKey) ? v : Math.round(v / g) * g; }
-
-function sameCompPos(c, s){
-  return near(c.x, s.x) && near(c.y, s.y) && nearAng(c.rot, s.rot) && c.layer === s.layer;
-}
-function commitCompMove(m){
-  const e = m.eff, s = m.src;
-  let c = CH.find(c => c.op === 'comp_move' && c.ref === s.ref);
-  if (sameCompPos(e, s)){                       /* voltou ao original: remove a change */
-    if (c) CH.splice(CH.indexOf(c), 1);
-    commit(); return;
-  }
-  if (!c){
-    c = { op:'comp_move', ref:s.ref, x:0, y:0, rot:s.rot, layer:s.layer,
-          orig_x:s.x, orig_y:s.y, orig_rot:s.rot, orig_layer:s.layer, note:'editado no hub' };
-    CH.push(c);
-  }
-  c.x = r4(e.x); c.y = r4(e.y); c.rot = r4(e.rot); c.layer = e.layer;
-  commit();
-}
-function upsertEdit(m, op, patch, origFields){
-  if (m.added){                                  /* objeto do editor: edita a propria linha *_add */
-    const item = model.changeItems.find(it => it.target === m);
-    if (item) Object.assign(item.ch, patch);
-    commit(); return;
-  }
-  let c = CH.find(c => c.op === op && c.id === m.src.id);
-  if (!c){
-    c = { op, id:m.src.id, note:'editado no hub' };
-    for (const k of origFields) c['orig_' + k] = m.src[k];
-    CH.push(c);
-  }
-  Object.assign(c, patch);
-  commit();
-}
-function commitTrackEdit(m){
-  const e = m.eff;
-  upsertEdit(m, 'track_edit', { x1:r4(e.x1), y1:r4(e.y1), x2:r4(e.x2), y2:r4(e.y2) },
-             ['x1','y1','x2','y2','w','layer']);
-}
-function commitViaEdit(m){
-  const e = m.eff;
-  upsertEdit(m, 'via_edit', { x:r4(e.x), y:r4(e.y) }, ['x','y']);
-}
-function commitArcEdit(m){
-  const e = m.eff;
-  upsertEdit(m, 'arc_edit', { cx:r4(e.cx), cy:r4(e.cy) }, ['cx','cy','r','sa','ea','layer']);
-}
-function deleteSelected(){
-  const m = selected;
-  if (!m || m.kind === 'pad' || m.kind === 'ann' || m.kind === 'comp' || m.kind === 'text') return;
-  if (m.added){
-    const item = model.changeItems.find(it => it.target === m);
-    if (item) CH.splice(item.idx, 1);
+  const poe = (locais, ox, oy) => out.push(locais.map(q => { const g = gira(q[0] * esp, q[1], rot); return [ox + g[0], oy + g[1]]; }));
+  const linhas = txt.split(/\r\n|\r|\n/);
+  while (linhas.length > 1 && !linhas[linhas.length - 1].trim()) linhas.pop();
+  let cx, ox, oy;
+  if (linhas.length === 1) {
+    for (const poly of HubFont.textPolylines(linhas[0], h)) poe(poly, t.x, t.y);
+    const W = HubFont.textWidth(linhas[0], h);
+    cx = [-W / 2 - w / 2, -h / 2 - w / 2, W / 2 + w / 2, h / 2 + w / 2]; ox = t.x; oy = t.y;
   } else {
-    const iEdit = CH.findIndex(c => c.op === m.kind + '_edit' && c.id === m.src.id);
-    if (iEdit >= 0) CH.splice(iEdit, 1);
-    const s = m.src, del = { op:m.kind + '_del', id:s.id, note:'removido no hub' };
-    if (m.kind === 'track'){ del.orig_x1=s.x1; del.orig_y1=s.y1; del.orig_x2=s.x2; del.orig_y2=s.y2; del.orig_w=s.w; del.orig_layer=s.layer; }
-    else if (m.kind === 'via'){ del.orig_x=s.x; del.orig_y=s.y; }
-    else if (m.kind === 'arc'){ del.orig_cx=s.cx; del.orig_cy=s.cy; del.orig_r=s.r; del.orig_sa=s.sa; del.orig_ea=s.ea; del.orig_layer=s.layer; }
-    else return;
-    CH.push(del);
+    const n = linhas.length, passo = h * PASSO_LINHA;
+    const larg = linhas.map(l => HubFont.textWidth(l, h)), W = Math.max.apply(null, larg);
+    let ancora = isNum(t.ax) && isNum(t.ay);
+    if (ancora) {
+      const q = gira(t.x - t.ax, t.y - t.ay, -rot), lx = q[0] * esp, ly = q[1];
+      if (lx < -h || lx > W + w + h || ly < -h || ly > (n - 1) * passo + h + w + h) ancora = false;
+    }
+    ox = ancora ? t.ax : t.x; oy = ancora ? t.ay : t.y;
+    linhas.forEach((l, i) => {
+      if (!l.trim()) return;
+      const dx = ancora ? larg[i] / 2 + w : larg[i] / 2 - W / 2;
+      const dy = ancora ? h / 2 - BASE_HUBFONT * h + w + (n - 1 - i) * passo : ((n - 1) / 2 - i) * passo;
+      for (const poly of HubFont.textPolylines(l, h)) poe(poly.map(q => [q[0] + dx, q[1] + dy]), ox, oy);
+    });
+    cx = ancora ? [0, 0, W + 2 * w, (n - 1) * passo + h + 2 * w]
+                : [-W / 2 - w / 2, -(n - 1) / 2 * passo - h / 2 - w / 2, W / 2 + w / 2, (n - 1) / 2 * passo + h / 2 + w / 2];
   }
-  selected = null;
-  commit();
+  const caixa = [[cx[0], cx[1]], [cx[2], cx[1]], [cx[2], cx[3]], [cx[0], cx[3]]]
+    .map(q => { const g = gira(q[0] * esp, q[1], rot); return [ox + g[0], oy + g[1]]; });
+  return { polys:null, linhas:out, w, caixa, inv:!!t.inverted, h };
 }
 
-/* transformacao de preview p/ primitivas de componente movido (HubCore) */
-const compDelta = HubCore.compDelta, xfPoint = HubCore.xfPoint, xfAngle = HubCore.xfAngle;
-const ownerDelta = (ref) => HubCore.ownerDelta(model, ref);
-const effLayerForOwner = (ref, layer) => HubCore.effLayerForOwner(model, ref, layer);
-/* Cores padrão do ambiente 2D do Altium */
-const LAYER_COLORS = {
-  Top:'#ff0000', Bottom:'#0a0aff', TopOverlay:'#ffff00', BottomOverlay:'#b4b400',
-  Multi:'#c0c0c0', Mech1:'#ff00ff', KeepOut:'#c800c8'
-};
-const COLOR_BOARD='#101010', COLOR_OUTLINE='#9e9e9e', COLOR_GRID='#262626', COLOR_GRID2='#333333',
-      COLOR_ORIGIN='#e0e0e0', COLOR_HOLE='#000000', COLOR_ADD='#00e676', COLOR_DEL='#ff5252',
-      COLOR_SEL='#ffffff';
+/* a caixa de um componente: a bbox do board.js transformada (retangulo girado, nao a caixa
+   alinhada do effectiveBoard, que engorda o componente girado a 45 graus) */
+function caixaComp(m){
+  const b = m.src.bbox;
+  if (!b || !isNum(b.x1) || !isNum(b.y1) || !isNum(b.x2) || !isNum(b.y2)) return null;
+  const c = [[b.x1, b.y1], [b.x2, b.y1], [b.x2, b.y2], [b.x1, b.y2]];
+  if (!m.changed) return c;
+  const d = HC.compDelta(m);
+  return c.map(p => { const q = HC.xfPoint(d, p[0], p[1]); return [q.x, q.y]; });
+}
 
-/* ============================== fonte vetorial (stroke) ============================== */
-/* A fonte vetorial mora no hub-font.js (HubFont), compartilhada com o hub-laser.js. */
-/* Aqui fica so o desenho no canvas; a geometria dos glifos e pura e vive la. */
+/* ============================== alvos de selecao ==============================
+   alvo = o que a selecao guarda e o painel mostra:
+     {t:'comp', m}                                   componente
+     {t:'pad', comp, pad, eb}                        pad (de componente ou livre: comp null)
+     {t:'track'|'arc'|'via'|'fill'|'region'|'text', m}  item do modelo (o texto pode ser o
+                                                     designator/comment do componente)
+     {t:'regiao-ro', eb, motivo}                     region so de desenho
+     {t:'recorte', eb, m?}                           recorte da placa (m: o que o hub pos)
+     {t:'ann', ann}                                  sinalizador
+   Cada um tem uma CHAVE estavel: a selecao sobrevive ao recalculo (commit, desfazer). */
+const opNum = new WeakMap(); let opSeq = 0;
+function numDoOp(op){ if (!op) return 0; let n = opNum.get(op); if (!n) { n = ++opSeq; opNum.set(op, n); } return n; }
+function chave(a){
+  switch (a.t) {
+    case 'comp': return 'c:' + a.m.src.ref;
+    case 'pad': return 'p:' + (a.comp ? a.comp.src.ref : '~') + ':' + (a.pad.id || a.pad.name);
+    case 'ann': return 'n:' + a.ann.id;
+    case 'regiao-ro': return 'g:' + a.eb.id;
+    case 'recorte': return a.m ? 'o:' + numDoOp(opDe(a.m)) : 'k:' + a.eb.id;
+    default: return a.m.added ? 'o:' + numDoOp(opDe(a.m)) : a.m.kind + ':' + a.m.src.id;
+  }
+}
+let HITS = [], PORCHAVE = new Map(), ALVO_COMP = new Map();
+const alvoAnn = new Map();
+function annAlvo(a){ let x = alvoAnn.get(a); if (!x) { x = { t:'ann', ann:a }; alvoAnn.set(a, x); } return x; }
+/* o tipo do Selection Filter de cada objeto */
+function tipoFiltro(o, base){
+  if (o && (o.keepout || o.layer === 'KeepOut')) return 'keepout';
+  return base;
+}
+function montaAlvos(){
+  HITS = []; PORCHAVE = new Map(); ALVO_COMP = new Map();
+  const reg = a => { const k = chave(a); if (!PORCHAVE.has(k)) PORCHAVE.set(k, a); return PORCHAVE.get(k); };
+  const push = (a, t, layer, bb, hit, prio, o) => { if (bb) HITS.push({ a, t, layer, bb, hit, prio, o }); };
+  /* componentes e pads */
+  model.comps.forEach((m, i) => {
+    const a = reg({ t:'comp', m });
+    ALVO_COMP.set(m, a);
+    const caixa = caixaComp(m);
+    if (caixa) push(a, 'comp', m.eff.layer === 'Bottom' ? 'Bottom' : 'Top', bbPts(caixa),
+                    (x, y, tol) => dentroPoli(caixa, x, y) || pertoPoli(caixa, x, y, tol), 9, null);
+    const ec = EB.components[i];
+    (ec && ec.pads || []).forEach((p, j) => {
+      if (!p || !isNum(p.x) || !isNum(p.y)) return;
+      const ap = reg({ t:'pad', comp:m, pad:(m.src.pads || [])[j] || p, eb:p });
+      entradaPad(ap, p, push);
+    });
+  });
+  for (const p of (EB.freepads || [])) {
+    if (!p || !isNum(p.x) || !isNum(p.y)) continue;
+    entradaPad(reg({ t:'pad', comp:null, pad:p, eb:p }), p, push);
+  }
+  /* o que tem dono seleciona o componente (como no Altium); o livre, ele mesmo */
+  const doDono = o => { const mc = compDoDono(o.owner); return mc ? ALVO_COMP.get(mc) : null; };
+  const doItem = o => { const m = IDX.item.get(String(o.id)); return m ? reg({ t:m.kind, m }) : null; };
+  const linha = (o, isArc) => {
+    if (!o || !isNum(isArc ? o.cx : o.x1)) return;
+    const a = o.owner ? doDono(o) : doItem(o);
+    if (!a) return;
+    const t = o.owner ? 'comp' : tipoFiltro(o, isArc ? 'arc' : 'track');
+    const w2 = (o.w > 0 ? o.w : 0) / 2;
+    if (isArc) {
+      const bb = [o.cx - o.r - w2, o.cy - o.r - w2, o.cx + o.r + w2, o.cy + o.r + w2];
+      push(a, t, o.layer, bb, (x, y, tol) => {
+        const d = Math.hypot(x - o.cx, y - o.cy);
+        if (Math.abs(d - o.r) > w2 + tol) return false;
+        return arcoCheio(o) || noArco(o.sa, o.ea, Math.atan2(y - o.cy, x - o.cx) / RAD);
+      }, 3, o);
+    } else {
+      const bb = [Math.min(o.x1, o.x2) - w2, Math.min(o.y1, o.y2) - w2, Math.max(o.x1, o.x2) + w2, Math.max(o.y1, o.y2) + w2];
+      push(a, t, o.layer, bb, (x, y, tol) => distSeg(x, y, o.x1, o.y1, o.x2, o.y2) <= w2 + tol, 3, o);
+    }
+  };
+  for (const o of EB.tracks || []) linha(o, false);
+  for (const o of EB.arcs || []) linha(o, true);
+  for (const o of EB.silk || []) linha(o, o && o.kind === 'arc');
+  for (const o of EB.lines || []) linha(o, o && o.kind === 'arc');
+  for (const v of EB.vias || []) {
+    if (!v || !isNum(v.x)) continue;
+    const a = doItem(v); if (!a) continue;
+    const r = (v.size || 0) / 2;
+    push(a, 'via', 'Multi', [v.x - r, v.y - r, v.x + r, v.y + r], (x, y, tol) => Math.hypot(x - v.x, y - v.y) <= r + tol, 0, v);
+  }
+  for (const t of EB.texts || []) {
+    const g = geoTexto(t); if (!g) continue;
+    let a;
+    if (t.designator || t.comment) a = doItem(t);
+    else a = t.owner ? doDono(t) : doItem(t);
+    if (!a) continue;
+    const ft = (t.owner && !t.designator && !t.comment) ? 'comp' : 'text';
+    push(a, ft, t.layer, bbPts(g.caixa), (x, y, tol) => dentroPoli(g.caixa, x, y) || pertoPoli(g.caixa, x, y, tol), 2, t);
+  }
+  for (const f of EB.fills || []) {
+    if (!f || !isNum(f.x1)) continue;
+    const a = f.owner ? doDono(f) : doItem(f); if (!a) continue;
+    const c = fillCantos(f);
+    push(a, f.owner ? 'comp' : tipoFiltro(f, 'fill'), f.layer, bbPts(c), (x, y, tol) => dentroPoli(c, x, y) || pertoPoli(c, x, y, tol), 4, f);
+  }
+  for (const g of EB.regions || []) {
+    if (!g || !Array.isArray(g.points) || g.points.length < 3) continue;
+    let a = g.owner ? doDono(g) : doItem(g), t;
+    if (g.owner) t = 'comp';
+    else {
+      t = g.keepout ? 'keepout' : g.poly ? 'poly' : 'region';
+      if (!a) a = reg({ t:'regiao-ro', eb:g, motivo: g.poly ? 'pedaço de polígono despejado: o Altium redespeja — mexa no polígono lá'
+                       : g.keepout ? 'keepout: fica só para desenho (remova no Altium)'
+                       : 'espelho antigo (board.js sem "exporter"): não dá para saber se é livre, pedaço de polígono ou do componente — reexporte a placa' });
+    }
+    if (!a) continue;
+    const pts = g.points, holes = Array.isArray(g.holes) ? g.holes : [];
+    push(a, t, g.layer, bbPts(pts), (x, y, tol) => {
+      if (pertoPoli(pts, x, y, tol)) return true;
+      if (!dentroPoli(pts, x, y)) return false;
+      return !holes.some(h => Array.isArray(h) && h.length > 2 && dentroPoli(h, x, y));
+    }, 5, g);
+  }
+  for (const k of recortesDaTela()) {
+    const pts = k.pts;
+    const m = IDX.item.get(String(k.o.id));
+    const a = reg(m && m.added ? { t:'recorte', eb:k.o, m } : { t:'recorte', eb:k.o });
+    push(a, 'outros', '_placa', bbPts(pts), (x, y, tol) => dentroPoli(pts, x, y) || pertoPoli(pts, x, y, tol), 6, k.o);
+  }
+}
+function entradaPad(ap, p, push){
+  const f = formaLado(p, ladoDaVista()), c = centroCobre(p);
+  const W = Math.max(f.w || 0, p.drill || 0), H = Math.max(f.h || 0, p.drill || 0);
+  const rot = p.rot || 0, redondo = /^(circle|round)$/i.test(String(f.shape || '')) && Math.abs(W - H) < 1e-9;
+  const r = Math.hypot(W, H) / 2;
+  push(ap, 'pad', ehTH(p) ? 'Multi' : p.layer, [c[0] - r, c[1] - r, c[0] + r, c[1] + r], (x, y, tol) => {
+    if (redondo) return Math.hypot(x - c[0], y - c[1]) <= W / 2 + tol;
+    const q = gira(x - c[0], y - c[1], -rot);
+    return Math.abs(q[0]) <= W / 2 + tol && Math.abs(q[1]) <= H / 2 + tol;
+  }, 1, p);
+}
+/* Recortes da placa = a regra do hub-gerber.js (recortesDaPlaca): sai o recorte de poligono
+   (kindn 1, ou o de camada de cobre no espelho antigo) e a regiao da placa (kindn -1); o resto
+   passa pelo HubLaser.boardCutouts, que tira o do tamanho da placa. A tela mostra como furo o
+   que o Gerber corta. Devolve [{o, pts}] (o: o recorte do EB). */
+let recortesCache = null;
+function recortesDaTela(){
+  if (recortesCache && recortesCache.eb === EB) return recortesCache.lista;
+  const lista = [];
+  const bd = (EB.board && typeof EB.board === 'object') ? EB.board : {};
+  for (const k of EB.cutouts || []) {
+    if (!k || !Array.isArray(k.points) || k.points.length < 3) continue;
+    if (isNum(k.kindn) && (k.kindn === -1 || k.kindn === 1)) continue;
+    if (!isNum(k.kindn) && typeof k.layer === 'string' && (cobre(k.layer))) continue;
+    const furos = (typeof HubLaser !== 'undefined')
+      ? HubLaser.boardCutouts({ board:{ bbox:bd.bbox, outline:bd.outline || [] }, cutouts:[k] }) : [k.points];
+    if (furos.length) lista.push({ o:k, pts:furos[0] });
+  }
+  recortesCache = { eb:EB, lista };
+  return lista;
+}
 
-/* ============================== estado de vista / canvas ============================== */
+/* ============================== selecao ============================== */
 
-const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
-let DPR = window.devicePixelRatio || 1, CW = 0, CHH = 0;
-const view = { scale: 10, cx: 0, cy: 0, flip:false };
-const show = { grid:true, ghost:true, layers:{} };
-for (const k of Object.keys(LAYER_COLORS)) show.layers[k]=true;
-let selected = null, hover = null;
+let SEL = [];
+const selTem = a => SEL.indexOf(a) >= 0;
+function selSo(lista, dePainel){ SEL = (lista || []).filter(Boolean); aoMudarSel(dePainel); }
+function selSoma(a){ if (a && !selTem(a)) SEL.push(a); aoMudarSel(); }
+function selTira(a){ SEL = SEL.filter(x => x !== a); aoMudarSel(); }
+function selLimpa(){ if (SEL.length) { SEL = []; aoMudarSel(); } }
+/* resolve a selecao pelas chaves depois de um recalculo */
+function reSeleciona(chaves){
+  SEL = chaves.map(k => k.indexOf('n:') === 0 ? (ANN.find(a => 'n:' + a.id === k) ? annAlvo(ANN.find(a => 'n:' + a.id === k)) : null)
+                                              : PORCHAVE.get(k)).filter(Boolean);
+}
+let selChaveAntes = '';
+function aoMudarSel(dePainel){
+  const ch = SEL.map(chave).join('|');
+  const mudou = ch !== selChaveAntes;
+  selChaveAntes = ch;
+  pintaStatusSel();
+  /* selecionar na tela leva o painel para Propriedades (como a ficha do Esquema); vindo de
+     uma lista do proprio painel, ele fica onde a pessoa esta */
+  if (painel) { if (mudou && SEL.length && !dePainel) painel.mostra('props'); painel.atualiza(); }
+  pede();
+}
 
-function resize(){
+/* ============================== caminhos (Path2D, em mm) ==============================
+   Tudo que e cheio sai ANTI-HORARIO e todo furo HORARIO, e a pintura e nonzero: assim regions
+   que se sobrepoem (teardrop sobre o pad, pedacos de poligono) somam em vez de se cancelar, e o
+   furo de uma region (e o miolo de uma letra) continua furo. */
+const area2 = pts => { let s = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) s += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1]; return s; };
+function pPoli(P, pts, horario){
+  if (!pts || pts.length < 3) return;
+  let q = pts;
+  const a = area2(pts);
+  if ((a < 0) !== !!horario) q = pts.slice().reverse();
+  P.moveTo(q[0][0], q[0][1]);
+  for (let i = 1; i < q.length; i++) P.lineTo(q[i][0], q[i][1]);
+  P.closePath();
+}
+function pRoundRect(P, cx, cy, hw, hh, rot, r){
+  const cantosR = [[hw - r, -hh + r, -90, 0], [hw - r, hh - r, 0, 90], [-hw + r, hh - r, 90, 180], [-hw + r, -hh + r, 180, 270]];
+  let primeiro = true;
+  for (const [lx, ly, a0, a1] of cantosR) {
+    const c = gira(lx, ly, rot);
+    const s = gira(lx + r * Math.cos(a0 * RAD), ly + r * Math.sin(a0 * RAD), rot);
+    if (primeiro) { P.moveTo(cx + s[0], cy + s[1]); primeiro = false; } else P.lineTo(cx + s[0], cy + s[1]);
+    if (r > 0) P.arc(cx + c[0], cy + c[1], r, (a0 + rot) * RAD, (a1 + rot) * RAD, false);
+  }
+  P.closePath();
+}
+/* a forma de um pad (ou fill), W x H inteiros, centrada e girada; radius so no roundrect */
+function pForma(P, cx, cy, W, H, rot, shape, radius){
+  if (!(W > 0) || !(H > 0) || !isNum(cx) || !isNum(cy)) return;
+  const s = String(shape || 'rect').toLowerCase(), hw = W / 2, hh = H / 2;
+  rot = isNum(rot) ? rot : 0;
+  if ((s === 'circle' || s === 'round') && Math.abs(W - H) < 1e-9) { P.moveTo(cx + hw, cy); P.arc(cx, cy, hw, 0, 2 * Math.PI, false); P.closePath(); return; }
+  if (s === 'circle' || s === 'round' || s === 'oval' || s === 'oblong' || s === 'obround') { pRoundRect(P, cx, cy, hw, hh, rot, Math.min(hw, hh)); return; }
+  if (s === 'roundrect') {
+    const r = Math.min(isNum(radius) ? radius : Math.min(W, H) / 8, Math.min(hw, hh));
+    if (r > 0) { pRoundRect(P, cx, cy, hw, hh, rot, r); return; }
+  }
+  if (s === 'octagon') {
+    const c = Math.min(hw, hh) * 0.4142;
+    const L = [[-hw + c, -hh], [hw - c, -hh], [hw, -hh + c], [hw, hh - c], [hw - c, hh], [-hw + c, hh], [-hw, hh - c], [-hw, -hh + c]];
+    pPoli(P, L.map(q => { const g = gira(q[0], q[1], rot); return [cx + g[0], cy + g[1]]; }));
+    return;
+  }
+  pPoli(P, cantos(cx, cy, W, H, rot));
+}
+/* o furo do pad: redondo, retangular ou oblongo (drillw ao longo do X do pad), girado pela
+   rotacao do pad + holerot (relativo ao pad, medido no CN1 do DMB -- como o Gerber faz) */
+function pFuro(P, p){
+  const d = p.drill;
+  if (!(d > 0) || !isNum(p.x) || !isNum(p.y)) return;
+  const forma = String(p.drillshape || 'circle').toLowerCase(), dw = p.drillw;
+  const rot = (isNum(p.rot) ? p.rot : 0) + (isNum(p.holerot) ? p.holerot : 0);
+  if ((forma === 'rect' || forma === 'square') && dw > 0) { pForma(P, p.x, p.y, dw, d, rot, 'rect'); return; }
+  if ((forma === 'oblong' || forma === 'slot') && dw > 0) { pForma(P, p.x, p.y, dw, d, rot, 'oval'); return; }
+  P.moveTo(p.x + d / 2, p.y); P.arc(p.x, p.y, d / 2, 0, 2 * Math.PI, false); P.closePath();
+}
+function pLinha(P, o){ P.moveTo(o.x1, o.y1); P.lineTo(o.x2, o.y2); }
+function pArco(P, o){
+  const a0 = o.sa * RAD, a1 = arcoCheio(o) ? a0 + 2 * Math.PI : o.ea * RAD;
+  P.moveTo(o.cx + o.r * Math.cos(a0), o.cy + o.r * Math.sin(a0));
+  P.arc(o.cx, o.cy, o.r, a0, a1, false);
+}
+function pRegiao(P, g){
+  if (!Array.isArray(g.points) || g.points.length < 3) return;
+  pPoli(P, g.points);
+  for (const h of (Array.isArray(g.holes) ? g.holes : [])) if (Array.isArray(h) && h.length >= 3) pPoli(P, h, true);
+}
+function pTextoPolys(P, polys){ for (const q of polys) pPoli(P, q.pts, !!q.hole); }
+function pPolilinha(P, pts){ if (!pts.length) return; P.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) P.lineTo(pts[i][0], pts[i][1]); }
+
+/* ============================== cache por camada ==============================
+   Cada camada vira uns poucos Path2D (os cheios e um por largura de traco): o DMB tem 2902
+   linhas de silk, 310 trilhas e 392 fills, e redesenhar objeto a objeto a cada quadro do pan
+   engasgava. O cache refaz so quando o modelo muda (commit) ou a vista vira; durante um
+   arrasto, o que esta na mao sai do cache (EXCLUI) e e desenhado por cima a cada quadro. */
+let CACHE = null, cacheSujo = true, EXCLUI = null;
+function novaCam(){ return { cheios:new Path2D(), tracos:new Map(), kCheios:new Path2D(), kTracos:new Map(), inv:[], k:false }; }
+function camC(k){ let c = CACHE.cam.get(k); if (!c) { c = novaCam(); CACHE.cam.set(k, c); } return c; }
+function tracoEm(map, w){ const q = Math.max(1, Math.round((w > 0 ? w : 0) * 1e4)); let p = map.get(q); if (!p) { p = new Path2D(); map.set(q, p); } return p; }
+function montaCache(){
+  CACHE = { cam:new Map(), furos:new Path2D() };
+  const pula = o => EXCLUI && EXCLUI.has(o);
+  for (const o of EB.tracks || []) if (o && !pula(o)) cacheLinha(o, false);
+  for (const o of EB.arcs || []) if (o && !pula(o)) cacheLinha(o, true);
+  for (const o of EB.silk || []) if (o && !pula(o)) cacheLinha(o, o.kind === 'arc');
+  for (const o of EB.lines || []) if (o && !pula(o)) cacheLinha(o, o.kind === 'arc');
+  for (const f of EB.fills || []) if (f && !pula(f)) cacheFill(f);
+  for (const g of EB.regions || []) if (g && !pula(g)) cacheRegiao(g);
+  for (const t of EB.texts || []) if (t && !pula(t)) cacheTexto(t);
+  for (const c of EB.components || []) for (const p of (c && c.pads) || []) if (p && !pula(p)) cachePad(p);
+  for (const p of EB.freepads || []) if (p && !pula(p)) cachePad(p);
+  for (const v of EB.vias || []) if (v && !pula(v)) cacheVia(v);
+  cacheSujo = false;
+}
+function linhaValida(o, isArc){
+  return isArc ? (isNum(o.cx) && isNum(o.cy) && o.r > 0 && isNum(o.sa) && isNum(o.ea))
+               : (isNum(o.x1) && isNum(o.y1) && isNum(o.x2) && isNum(o.y2));
+}
+function cacheLinha(o, isArc){
+  if (typeof o.layer !== 'string' || !linhaValida(o, isArc)) return;
+  const c = camC(o.layer);
+  if (o.keepout) c.k = true;
+  const P = tracoEm(o.keepout ? c.kTracos : c.tracos, o.w);
+  if (isArc) pArco(P, o); else pLinha(P, o);
+}
+function cacheFill(f){
+  if (typeof f.layer !== 'string' || ![f.x1, f.y1, f.x2, f.y2].every(isNum)) return;
+  const c = camC(f.layer), cc = fillCentro(f);
+  if (f.keepout) c.k = true;
+  pForma(f.keepout ? c.kCheios : c.cheios, cc[0], cc[1], Math.abs(f.x2 - f.x1), Math.abs(f.y2 - f.y1), f.rot || 0, 'rect');
+}
+function cacheRegiao(g){
+  if (typeof g.layer !== 'string') return;
+  const c = camC(g.layer);
+  if (g.keepout) c.k = true;
+  pRegiao(g.keepout ? c.kCheios : c.cheios, g);
+}
+function cacheTexto(t){
+  if (typeof t.layer !== 'string') return;
+  const g = geoTexto(t);
+  if (!g) return;
+  const c = camC(t.layer);
+  if (g.inv) { c.inv.push(g); return; }
+  if (g.polys) { pTextoPolys(c.cheios, g.polys); return; }
+  const P = tracoEm(c.tracos, g.w);
+  for (const l of g.linhas) pPolilinha(P, l);
+}
+function cachePad(p){
+  if (!isNum(p.x) || !isNum(p.y)) return;
+  const cc = centroCobre(p);
+  const raio = (f, e) => (String(f.shape || '').toLowerCase() === 'roundrect')
+    ? (isNum(f.radius) ? f.radius : Math.min(f.w, f.h) / 8) + e : f.radius;
+  if (ehTH(p)) {
+    const f = formaLado(p, ladoDaVista());
+    pForma(camC('Multi').cheios, cc[0], cc[1], f.w, f.h, p.rot, f.shape, f.radius);
+    pFuro(CACHE.furos, p);
+    for (const [lado, cam] of [['top', 'TopSolder'], ['bottom', 'BottomSolder']]) {
+      if (tampado(p, lado)) continue;
+      const fl = formaLado(p, lado), e = expMascara(p);
+      pForma(camC(cam).cheios, cc[0], cc[1], fl.w + 2 * e, fl.h + 2 * e, p.rot, fl.shape, raio(fl, e));
+    }
+    return;
+  }
+  if (typeof p.layer !== 'string') return;
+  const f = formaLado(p, 'top');
+  pForma(camC(p.layer).cheios, cc[0], cc[1], f.w, f.h, p.rot, f.shape, f.radius);
+  const lado = p.layer === 'Bottom' ? 'bottom' : p.layer === 'Top' ? 'top' : null;
+  if (!lado) return;
+  if (!tampado(p, lado)) {
+    const e = expMascara(p);
+    pForma(camC(lado === 'top' ? 'TopSolder' : 'BottomSolder').cheios, cc[0], cc[1], f.w + 2 * e, f.h + 2 * e, p.rot, f.shape, raio(f, e));
+  }
+  if (!(p.nopaste === true || (isNum(p.pm) && p.pm <= SEM_PASTA))) {
+    const e = expPasta(p);
+    if (f.w + 2 * e > 0 && f.h + 2 * e > 0)
+      pForma(camC(lado === 'top' ? 'TopPaste' : 'BottomPaste').cheios, cc[0], cc[1], f.w + 2 * e, f.h + 2 * e, p.rot, f.shape, raio(f, e));
+  }
+}
+function cacheVia(v){
+  if (!isNum(v.x) || !isNum(v.y) || !(v.size > 0)) return;
+  pForma(camC('Multi').cheios, v.x, v.y, v.size, v.size, 0, 'circle');
+  if (v.drill > 0) { CACHE.furos.moveTo(v.x + v.drill / 2, v.y); CACHE.furos.arc(v.x, v.y, v.drill / 2, 0, 2 * Math.PI, false); CACHE.furos.closePath(); }
+  for (const [lado, cam] of [['top', 'TopSolder'], ['bottom', 'BottomSolder']]) {
+    if (tampado(v, lado)) continue;
+    const d = v.size + 2 * expMascara(v);
+    if (d > 0) pForma(camC(cam).cheios, v.x, v.y, d, d, 0, 'circle');
+  }
+}
+
+/* ============================== ordem de desenho ==============================
+   Opaco, como no Altium, e a camada ATUAL por ultimo (por cima de tudo). Do lado de la para o
+   de ca: pasta, mascara, cobre e serigrafia de cada face -- a mascara POR BAIXO do cobre e o que
+   deixa ver o anel roxo em volta do pad (o print do dono) --, as internas no meio, a Multi
+   (pad passante e via) logo acima do cobre de ca, e as mecanicas e o keepout por cima. */
+let ORDEM = [], ORDEM_IDX = Object.create(null);
+function calculaOrdem(){
+  const P = view.flip ? 'Top' : 'Bottom', Q = view.flip ? 'Bottom' : 'Top';
+  const seq = [];
+  const add = k => { if (LBYK[k] && seq.indexOf(k) < 0) seq.push(k); };
+  add(P + 'Paste'); add(P + 'Solder'); add(P); add(P + 'Overlay');
+  const internas = LAYERS.filter(l => (l.kind === 'signal' && l.key !== 'Top' && l.key !== 'Bottom') || l.kind === 'plane')
+    .sort((a, b) => (a.num || 100 + a.order) - (b.num || 100 + b.order));
+  if (!view.flip) internas.reverse();
+  for (const l of internas) add(l.key);
+  add('DrillGuide'); add('DrillDrawing');
+  add(Q + 'Paste'); add(Q + 'Solder'); add(Q); add('Multi'); add(Q + 'Overlay');
+  for (const l of LAYERS) if (l.kind === 'mech') add(l.key);
+  add('KeepOut');
+  for (const l of LAYERS) add(l.key);
+  const i = seq.indexOf(cur);
+  if (i >= 0) { seq.splice(i, 1); seq.push(cur); }
+  ORDEM = seq;
+  ORDEM_IDX = Object.create(null);
+  seq.forEach((k, j) => { ORDEM_IDX[k] = j; });
+}
+function camVisivel(k){
+  if (k === '_placa') return true;
+  if (show.layers[k] === false) return false;
+  if (!show.unica) return true;
+  return k === cur || (k === 'Multi' && cobre(cur));
+}
+
+/* ============================== canvas ============================== */
+
+const cv = $('cv'), ctx = cv.getContext('2d');
+let DPR = 1, CW = 0, CHH = 0, agendado = 0;
+function mede(){
   DPR = window.devicePixelRatio || 1;
   CW = cv.clientWidth; CHH = cv.clientHeight;
-  cv.width = Math.round(CW*DPR); cv.height = Math.round(CHH*DPR);
-  draw();
+  const w = Math.max(1, Math.round(CW * DPR)), h = Math.max(1, Math.round(CHH * DPR));
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
 }
-window.addEventListener('resize', resize);
-
-function fitBoard(){
-  const bb = B.board && B.board.bbox;
-  if (!bb) return;
-  const w = Math.max(bb.x2-bb.x1, 1), h = Math.max(bb.y2-bb.y1, 1);
-  view.cx = (bb.x1+bb.x2)/2; view.cy = (bb.y1+bb.y2)/2;
-  view.scale = Math.min(CW/(w*1.15), CHH/(h*1.15));
-}
-function worldTransform(){
+function pede(){ if (!agendado) agendado = requestAnimationFrame(draw); }
+function transformaMundo(){
   const fx = view.flip ? -1 : 1;
-  ctx.setTransform(DPR*view.scale*fx, 0, 0, -DPR*view.scale,
-    DPR*(CW/2 - view.cx*view.scale*fx), DPR*(CHH/2 + view.cy*view.scale));
+  ctx.setTransform(DPR * view.scale * fx, 0, 0, -DPR * view.scale,
+                   DPR * (CW / 2 - view.cx * view.scale * fx), DPR * (CHH / 2 + view.cy * view.scale));
 }
-function screenToWorld(sx, sy){
+function telaParaMundo(sx, sy){
   const fx = view.flip ? -1 : 1;
-  return { x:(sx - CW/2)/(view.scale*fx) + view.cx, y:(CHH/2 - sy)/view.scale + view.cy };
+  return { x:(sx - CW / 2) / (view.scale * fx) + view.cx, y:(CHH / 2 - sy) / view.scale + view.cy };
 }
-
-/* ============================== desenho ============================== */
-
-function layerAlpha(layer){
-  const topSide = ['Top','TopOverlay'], botSide=['Bottom','BottomOverlay'];
-  if (layer==='Multi'||layer==='Mech1'||layer==='KeepOut') return 1;
-  const nearSide = view.flip ? botSide : topSide;
-  return nearSide.includes(layer) ? 1 : 0.45;
+function mundoParaTela(x, y){
+  const fx = view.flip ? -1 : 1;
+  return { x:CW / 2 + (x - view.cx) * view.scale * fx, y:CHH / 2 - (y - view.cy) * view.scale };
 }
-function lcolor(layer){ return LAYER_COLORS[layer] || '#888888'; }
+const px = n => n / view.scale;               /* n pixels de tela, em mm */
 
-/* O contorno inclui os RECORTES da placa (Board Cutout: furo de fixacao, janela, rasgo),
-   como sub-caminhos proprios. Quem preenche este path usa par-impar, para o recorte sair
-   como buraco de verdade em vez de ser pintado por cima - e o traco do contorno passa a
-   contornar o furo tambem, que e o que o torna visivel sobre o fundo.
-   A regra de o que e recorte mora no hub-laser.js: a tela nao pode discordar do laser. */
-function outlinePath(){
-  ctx.beginPath();
-  let started=false;
-  for (const s of (model.outline || B.board.outline || [])) {
-    if (s.kind==='line') {
-      if (!started){ ctx.moveTo(s.x1,s.y1); started=true; }
-      ctx.lineTo(s.x1,s.y1); ctx.lineTo(s.x2,s.y2);
-    } else {
-      ctx.arc(s.cx, s.cy, s.r, s.sa*Math.PI/180, s.ea*Math.PI/180, false);
-      started=true;
-    }
+let pathPlacaCache = null;
+function pathPlaca(){
+  if (pathPlacaCache) return pathPlacaCache;
+  const P = new Path2D(), segs = [];
+  for (const s of ((EB.board && EB.board.outline) || [])) {
+    if (!s) continue;
+    if (s.kind === 'arc') { if ([s.cx, s.cy, s.r, s.sa, s.ea].every(isNum) && typeof HubLaser !== 'undefined') segs.push(HubLaser.arcPts(s.cx, s.cy, s.r, s.sa, s.ea)); }
+    else if ([s.x1, s.y1, s.x2, s.y2].every(isNum)) segs.push([[s.x1, s.y1], [s.x2, s.y2]]);
   }
-  if (started) ctx.closePath();
-  for (const r of HubLaser.boardCutouts(B)) {
-    ctx.moveTo(r[0][0], r[0][1]);
-    for (let i=1; i<r.length; i++) ctx.lineTo(r[i][0], r[i][1]);
-    ctx.closePath();
-  }
+  const lacos = (typeof HubLaser !== 'undefined' && HubLaser.chainSegments) ? HubLaser.chainSegments(segs) : segs;
+  let algum = false;
+  for (const l of lacos) if (l.length >= 3) { pPoli(P, l); algum = true; }
+  const bb = EB.board && EB.board.bbox;
+  if (!algum && bb && [bb.x1, bb.y1, bb.x2, bb.y2].every(isNum))
+    pPoli(P, [[bb.x1, bb.y1], [bb.x2, bb.y1], [bb.x2, bb.y2], [bb.x1, bb.y2]]);
+  for (const k of recortesDaTela()) pPoli(P, k.pts, true);
+  pathPlacaCache = P;
+  return P;
 }
 
-function drawGrid(){
-  if (!show.grid) return;
-  const bb=B.board.bbox, pad=10;
-  const steps=[0.1,0.5,1,5,10,25,50];
-  let step=steps[steps.length-1];
-  for (const s of steps){ if (s*view.scale >= 12){ step=s; break; } }
-  ctx.lineWidth = 1/(view.scale*DPR)*DPR; /* ~1px */
-  const x0=Math.floor((bb.x1-pad)/step)*step, x1=bb.x2+pad, y0=Math.floor((bb.y1-pad)/step)*step, y1=bb.y2+pad;
-  ctx.beginPath();
-  for (let x=x0;x<=x1;x+=step){ ctx.moveTo(x,bb.y1-pad); ctx.lineTo(x,y1); }
-  for (let y=y0;y<=y1;y+=step){ ctx.moveTo(bb.x1-pad,y); ctx.lineTo(x1,y); }
-  ctx.strokeStyle = COLOR_GRID; ctx.stroke();
-  /* origem */
-  ctx.beginPath();
-  ctx.moveTo(-2,0); ctx.lineTo(2,0); ctx.moveTo(0,-2); ctx.lineTo(0,2);
-  ctx.strokeStyle=COLOR_ORIGIN; ctx.lineWidth=2/view.scale; ctx.stroke();
-  ctx.beginPath(); ctx.arc(0,0,1.2,0,Math.PI*2); ctx.stroke();
+function desenhaGrade(){
+  let passo = grade.mm, n = 0;
+  while (passo * view.scale < 7 && n < 30) { passo *= (n % 2 === 0) ? 5 : 2; n++; }
+  const a = telaParaMundo(0, 0), b = telaParaMundo(CW, CHH);
+  const x1 = Math.min(a.x, b.x), x2 = Math.max(a.x, b.x), y1 = Math.min(a.y, b.y), y2 = Math.max(a.y, b.y);
+  const k0 = Math.floor(x1 / passo), k1 = Math.ceil(x2 / passo), j0 = Math.floor(y1 / passo), j1 = Math.ceil(y2 / passo);
+  if (k1 - k0 > 600 || j1 - j0 > 600) return;
+  const fino = new Path2D(), grosso = new Path2D();
+  for (let k = k0; k <= k1; k++) { const P = (k % 10 === 0) ? grosso : fino; P.moveTo(k * passo, y1); P.lineTo(k * passo, y2); }
+  for (let j = j0; j <= j1; j++) { const P = (j % 10 === 0) ? grosso : fino; P.moveTo(x1, j * passo); P.lineTo(x2, j * passo); }
+  ctx.lineWidth = px(1);
+  ctx.strokeStyle = COR.grade; ctx.stroke(fino);
+  ctx.strokeStyle = COR.grade2; ctx.stroke(grosso);
+}
+/* a origem da placa (fica por cima da grade e fora do recorte dela) */
+function desenhaOrigem(){
+  const r = px(9);
+  ctx.beginPath(); ctx.moveTo(-r, 0); ctx.lineTo(r, 0); ctx.moveTo(0, -r); ctx.lineTo(0, r);
+  ctx.strokeStyle = COR.origem; ctx.lineWidth = px(1.2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.55, 0, 2 * Math.PI); ctx.stroke();
 }
 
-function strokeSeg(x1,y1,x2,y2,w){
-  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2);
-  ctx.lineWidth=Math.max(w,0.01); ctx.lineCap='round'; ctx.stroke();
-}
-function strokeArc(cx,cy,r,sa,ea,w){
-  ctx.beginPath(); ctx.arc(cx,cy,r,sa*Math.PI/180,ea*Math.PI/180,false);
-  ctx.lineWidth=Math.max(w,0.01); ctx.lineCap='round'; ctx.stroke();
-}
-
-function drawTrackObj(m){
-  const e=m.eff;
-  if (!show.layers[e.layer]) return;
-  if (m.deleted){ if (show.ghost){ ctx.save(); ctx.globalAlpha=0.5; ctx.strokeStyle=COLOR_DEL;
-      ctx.setLineDash([0.6,0.4]); strokeSeg(e.x1,e.y1,e.x2,e.y2,e.w); ctx.restore(); } return; }
-  ctx.save();
-  ctx.globalAlpha=layerAlpha(e.layer);
-  ctx.strokeStyle=lcolor(e.layer);
-  strokeSeg(e.x1,e.y1,e.x2,e.y2,e.w);
-  if (m.added){ ctx.globalAlpha=1; ctx.strokeStyle=COLOR_ADD; ctx.setLineDash([0.4,0.3]);
-    strokeSeg(e.x1,e.y1,e.x2,e.y2,Math.max(e.w*0.3,0.05)); }
-  ctx.restore();
-  if (m.changed && show.ghost && m.src){
-    ctx.save(); ctx.globalAlpha=0.45; ctx.strokeStyle=lcolor(m.src.layer);
-    ctx.setLineDash([0.6,0.4]); strokeSeg(m.src.x1,m.src.y1,m.src.x2,m.src.y2,m.src.w); ctx.restore();
-  }
-}
-function drawArcObj(m){
-  const e=m.eff;
-  if (!show.layers[e.layer]) return;
-  if (m.deleted){ if (show.ghost){ ctx.save(); ctx.globalAlpha=0.5; ctx.strokeStyle=COLOR_DEL;
-      ctx.setLineDash([0.6,0.4]); strokeArc(e.cx,e.cy,e.r,e.sa,e.ea,e.w); ctx.restore(); } return; }
-  ctx.save();
-  ctx.globalAlpha=layerAlpha(e.layer);
-  ctx.strokeStyle=lcolor(e.layer);
-  strokeArc(e.cx,e.cy,e.r,e.sa,e.ea,e.w);
-  if (m.added){ ctx.globalAlpha=1; ctx.strokeStyle=COLOR_ADD; ctx.setLineDash([0.4,0.3]);
-    strokeArc(e.cx,e.cy,e.r,e.sa,e.ea,Math.max(e.w*0.3,0.05)); }
-  ctx.restore();
-  if (m.changed && show.ghost && m.src){
-    ctx.save(); ctx.globalAlpha=0.45; ctx.strokeStyle=lcolor(m.src.layer);
-    ctx.setLineDash([0.6,0.4]); strokeArc(m.src.cx,m.src.cy,m.src.r,m.src.sa,m.src.ea,m.src.w); ctx.restore();
-  }
-}
-function drawViaObj(m){
-  const e=m.eff;
-  if (m.deleted){ if (show.ghost){ ctx.save(); ctx.globalAlpha=0.6; ctx.strokeStyle=COLOR_DEL;
-      ctx.lineWidth=0.08; ctx.beginPath(); ctx.arc(e.x,e.y,e.size/2,0,Math.PI*2); ctx.stroke();
-      const r=e.size/2; ctx.beginPath(); ctx.moveTo(e.x-r,e.y-r); ctx.lineTo(e.x+r,e.y+r);
-      ctx.moveTo(e.x-r,e.y+r); ctx.lineTo(e.x+r,e.y-r); ctx.stroke(); ctx.restore(); } return; }
-  ctx.save();
-  ctx.fillStyle=lcolor('Multi');
-  ctx.beginPath(); ctx.arc(e.x,e.y,e.size/2,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle=COLOR_HOLE;
-  ctx.beginPath(); ctx.arc(e.x,e.y,e.drill/2,0,Math.PI*2); ctx.fill();
-  if (m.added){ ctx.strokeStyle=COLOR_ADD; ctx.lineWidth=0.07; ctx.setLineDash([0.3,0.25]);
-    ctx.beginPath(); ctx.arc(e.x,e.y,e.size/2+0.12,0,Math.PI*2); ctx.stroke(); }
-  ctx.restore();
-  if (m.changed && show.ghost && m.src){
-    ctx.save(); ctx.globalAlpha=0.5; ctx.strokeStyle=lcolor('Multi'); ctx.setLineDash([0.4,0.3]);
-    ctx.lineWidth=0.07; ctx.beginPath(); ctx.arc(m.src.x,m.src.y,m.src.size/2,0,Math.PI*2); ctx.stroke(); ctx.restore();
-  }
-}
-
-function padPath(x,y,w,h,rot,shape,radius){
-  /* o caminho fica gravado ja transformado; o restore antes do fill e seguro */
-  ctx.save();
-  ctx.translate(x,y); ctx.rotate(rot*Math.PI/180);
-  ctx.beginPath();
-  const hw=w/2, hh=h/2;
-  if (shape==='circle'){ ctx.arc(0,0,Math.max(hw,hh),0,Math.PI*2); }
-  else if (shape==='oval'){ const r=Math.min(hw,hh);
-    roundRectPath(-hw,-hh,w,h,r); }
-  else if (shape==='roundrect'){ roundRectPath(-hw,-hh,w,h,Math.min(radius||Math.min(hw,hh)*0.25, Math.min(hw,hh))); }
-  else if (shape==='octagon'){ const c=Math.min(hw,hh)*0.4142;
-    ctx.moveTo(-hw+c,-hh); ctx.lineTo(hw-c,-hh); ctx.lineTo(hw,-hh+c); ctx.lineTo(hw,hh-c);
-    ctx.lineTo(hw-c,hh); ctx.lineTo(-hw+c,hh); ctx.lineTo(-hw,hh-c); ctx.lineTo(-hw,-hh+c); ctx.closePath(); }
-  else { ctx.rect(-hw,-hh,w,h); }
-  ctx.restore();
-}
-function roundRectPath(x,y,w,h,r){
-  ctx.moveTo(x+r,y);
-  ctx.lineTo(x+w-r,y); ctx.arcTo(x+w,y,x+w,y+r,r);
-  ctx.lineTo(x+w,y+h-r); ctx.arcTo(x+w,y+h,x+w-r,y+h,r);
-  ctx.lineTo(x+r,y+h); ctx.arcTo(x,y+h,x,y+h-r,r);
-  ctx.lineTo(x,y+r); ctx.arcTo(x,y,x+r,y,r);
-  ctx.closePath();
-}
-function drawPad(p, d, ownerRef){
-  let x=p.x, y=p.y, rot=p.rot, layer=p.layer;
-  if (d){ const q=xfPoint(d,p.x,p.y); x=q.x; y=q.y; rot=xfAngle(d,p.rot); layer=effLayerForOwner(ownerRef,p.layer); }
-  const isTH = p.type==='th' || layer==='Multi';
-  const color = isTH ? lcolor('Multi') : lcolor(layer);
-  if (!isTH && !show.layers[layer]) return;
-  if (isTH && !show.layers['Multi']) return;
-  ctx.save();
-  ctx.globalAlpha = isTH ? 1 : layerAlpha(layer);
-  padPath(x,y,p.w,p.h,rot,p.shape,p.radius);
-  ctx.fillStyle=color; ctx.fill();
-  ctx.restore();
-  if (isTH && p.drill){
+function pintaCamada(k){
+  const c = CACHE.cam.get(k);
+  if (!c) return;
+  const cor = corDe(k), min = px(1);
+  ctx.fillStyle = cor; ctx.strokeStyle = cor;
+  ctx.fill(c.cheios);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const [q, P] of c.tracos) { ctx.lineWidth = Math.max(q / 1e4, min); ctx.stroke(P); }
+  if (c.k) {
+    /* keepout: translucido e tracejado -- e regra, nao cobre */
     ctx.save();
-    ctx.translate(x,y); ctx.rotate(((p.holerot!=null?p.holerot:rot))*Math.PI/180);
-    ctx.fillStyle=COLOR_HOLE;
-    ctx.beginPath();
-    if (p.drillshape==='oblong' && p.drillw){
-      const dw=p.drillw, dh=p.drill; const r=Math.min(dw,dh)/2;
-      roundRectPath(-dw/2,-dh/2,dw,dh,r);
-    } else if (p.drillshape==='rect' && p.drillw){
-      ctx.rect(-p.drillw/2,-p.drill/2,p.drillw,p.drill);
-    } else {
-      ctx.arc(0,0,p.drill/2,0,Math.PI*2);
-    }
-    ctx.fill();
+    ctx.globalAlpha = 0.35; ctx.fill(c.kCheios);
+    ctx.globalAlpha = 0.9; ctx.setLineDash([px(6), px(4)]); ctx.lineWidth = px(1.2); ctx.stroke(c.kCheios);
+    for (const [q, P] of c.kTracos) { ctx.lineWidth = Math.max(q / 1e4, min); ctx.stroke(P); }
     ctx.restore();
   }
-}
-
-function drawSilkItem(s){
-  const d = ownerDelta(s.owner);
-  const layer = d ? effLayerForOwner(s.owner, s.layer) : s.layer;
-  if (!show.layers[layer]) return;
-  ctx.save();
-  ctx.globalAlpha=layerAlpha(layer);
-  ctx.strokeStyle=lcolor(layer);
-  if (s.kind==='line'){
-    let p1={x:s.x1,y:s.y1}, p2={x:s.x2,y:s.y2};
-    if (d){ p1=xfPoint(d,s.x1,s.y1); p2=xfPoint(d,s.x2,s.y2); }
-    strokeSeg(p1.x,p1.y,p2.x,p2.y,s.w);
-  } else {
-    let c={x:s.cx,y:s.cy}, sa=s.sa, ea=s.ea;
-    if (d){ c=xfPoint(d,s.cx,s.cy);
-      if (d.flip){ const t=180-ea+d.dr; ea=180-sa+d.dr; sa=t; } else { sa+=d.dr; ea+=d.dr; } }
-    strokeArc(c.x,c.y,s.r,sa,ea,s.w);
-  }
-  ctx.restore();
-}
-
-const textWidth = (txt,h) => HubFont.textWidth(txt,h);
-function drawStrokeText(txt, x, y, h, rot, mirror, color, alpha, w){
-  ctx.save();
-  ctx.translate(x,y);
-  ctx.rotate(rot*Math.PI/180);
-  if (mirror) ctx.scale(-1,1);
-  ctx.strokeStyle=color; ctx.globalAlpha=alpha!=null?alpha:1;
-  /* w = espessura do traco (stroke) em mm, como no Altium; sem w cai no padrao antigo */
-  ctx.lineWidth=(w>0? w : h*0.13); ctx.lineCap='round'; ctx.lineJoin='round';
-  /* HubFont ja devolve local, centrado em x e Y para cima - igual ao que era feito aqui */
-  for (const poly of HubFont.textPolylines(txt, h)){
-    ctx.beginPath();
-    poly.forEach((pt,i)=>{ if (i===0) ctx.moveTo(pt[0], pt[1]); else ctx.lineTo(pt[0], pt[1]); });
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawTextItem(t){
-  const d = ownerDelta(t.owner);
-  const layer = d ? effLayerForOwner(t.owner, t.layer) : t.layer;
-  if (!show.layers[layer]) return;
-  let x=t.x, y=t.y, rot=t.rot, mirror=t.mirror;
-  if (d){ const q=xfPoint(d,t.x,t.y); x=q.x; y=q.y; rot=xfAngle(d,t.rot);
-    if (d.flip) mirror=!mirror; }
-  let txt=t.text||'';
-  const ownerComp = t.owner ? model.compByRef[t.owner] : null;
-  if (t.designator && ownerComp) txt = ownerComp.eff.designator || ownerComp.src.ref;
-  if (t.comment && ownerComp) txt = (ownerComp.eff.comment !== undefined ? ownerComp.eff.comment : (ownerComp.src.comment || txt));
-  if (!txt) return;
-  drawStrokeText(txt, x, y, t.h||1, rot, mirror, lcolor(layer), layerAlpha(layer), t.w);
-}
-
-function drawTextObj(m){
-  /* texto do modelo efetivo; se mudou, fantasma do original + seta ate o novo centro */
-  if (m.changed && show.ghost){
-    let gt = m.src.text||'';
-    const oc = m.src.owner ? model.compByRef[m.src.owner] : null;
-    if (m.src.designator && oc) gt = oc.src.ref;
-    if (m.src.comment && oc) gt = oc.src.comment || gt;
-    if (gt){
-      drawStrokeText(gt, m.src.x, m.src.y, m.src.h||1, m.src.rot||0, m.src.mirror,
-                     lcolor(m.src.layer), 0.25*layerAlpha(m.src.layer));
-      ctx.save();
-      ctx.beginPath(); ctx.moveTo(m.src.x,m.src.y); ctx.lineTo(m.eff.x,m.eff.y);
-      ctx.globalAlpha=0.7; ctx.strokeStyle=COLOR_CHGARROW; ctx.lineWidth=0.06; ctx.stroke();
-      ctx.restore();
-    }
-  }
-  drawTextItem(m.eff);
-}
-
-function drawRegion(g){
-  if (!show.layers[g.layer]) return;
-  if (!g.points || g.points.length<3) return;
-  ctx.save();
-  ctx.globalAlpha=0.28*layerAlpha(g.layer);
-  ctx.fillStyle=lcolor(g.layer);
-  ctx.beginPath();
-  g.points.forEach((p,i)=>{ if(i===0) ctx.moveTo(p[0],p[1]); else ctx.lineTo(p[0],p[1]); });
-  ctx.closePath(); ctx.fill();
-  ctx.globalAlpha=0.6*layerAlpha(g.layer);
-  ctx.lineWidth=0.03; ctx.strokeStyle=lcolor(g.layer); ctx.stroke();
-  ctx.restore();
-}
-
-function drawCompOverlay(m){
-  /* bbox fantasma do original + destaque do movido */
-  if (!m.changed) return;
-  const b=m.src.bbox, d=compDelta(m);
-  if (show.ghost && b){
-    ctx.save();
-    ctx.strokeStyle=lcolor(m.src.layer==='Top'?'Top':'Bottom');
-    ctx.globalAlpha=0.55; ctx.setLineDash([0.7,0.5]); ctx.lineWidth=0.08;
-    ctx.strokeRect(b.x1,b.y1,b.x2-b.x1,b.y2-b.y1);
-    ctx.setLineDash([]);
-    /* seta origem -> destino */
-    ctx.beginPath(); ctx.moveTo(m.src.x,m.src.y); ctx.lineTo(m.eff.x,m.eff.y);
-    ctx.globalAlpha=0.7; ctx.strokeStyle=COLOR_CHGARROW; ctx.lineWidth=0.06; ctx.stroke();
-    ctx.restore();
-  }
-  if (b){
-    /* bbox transformado na posicao nova */
-    const corners=[[b.x1,b.y1],[b.x2,b.y1],[b.x2,b.y2],[b.x1,b.y2]].map(p=>xfPoint(d,p[0],p[1]));
-    ctx.save();
-    ctx.strokeStyle=COLOR_CHGARROW; ctx.globalAlpha=0.9; ctx.lineWidth=0.06;
-    ctx.beginPath();
-    corners.forEach((p,i)=>{ if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y); });
-    ctx.closePath(); ctx.stroke();
-    ctx.restore();
-  }
-}
-const COLOR_CHGARROW = '#ffd54f';
-
-function drawSelection(){
-  const m = selected;
-  if (!m) return;
-  ctx.save();
-  ctx.strokeStyle=COLOR_SEL; ctx.lineWidth=0.06; ctx.setLineDash([0.35,0.25]);
-  ctx.globalAlpha=0.95;
-  if (m.kind==='comp'){
-    const b=m.src.bbox, d=m.changed?compDelta(m):null;
-    const corners=[[b.x1,b.y1],[b.x2,b.y1],[b.x2,b.y2],[b.x1,b.y2]]
-      .map(p=> d? xfPoint(d,p[0],p[1]) : {x:p[0],y:p[1]});
-    ctx.beginPath();
-    corners.forEach((p,i)=>{ if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y); });
-    ctx.closePath(); ctx.stroke();
-  } else if (m.kind==='track'){
-    const e=m.eff; strokeSeg(e.x1,e.y1,e.x2,e.y2,e.w+0.15);
-  } else if (m.kind==='via'){
-    const e=m.eff; ctx.beginPath(); ctx.arc(e.x,e.y,e.size/2+0.15,0,Math.PI*2); ctx.stroke();
-  } else if (m.kind==='arc'){
-    const e=m.eff; strokeArc(e.cx,e.cy,e.r,e.sa,e.ea,e.w+0.15);
-  } else if (m.kind==='pad'){
-    const p=m.pad; ctx.beginPath(); ctx.arc(m.x,m.y,Math.max(p.w,p.h)/2+0.15,0,Math.PI*2); ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function drawAnnotations(){
-  for (const a of ANN){
-    if (a.view !== 'pcb') continue;
-    const c = ANN_COLORS[a.severity] || ANN_COLORS.info;
-    const s = 14 / view.scale;                      /* tamanho ~constante em px */
-    ctx.save();
-    ctx.globalAlpha = a.status === 'resolved' ? 0.45 : 1;
-    ctx.strokeStyle = c; ctx.fillStyle = c;
-    ctx.lineWidth = 2.2 / view.scale; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x, a.y + s * 1.6); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(a.x, a.y + s * 1.6); ctx.lineTo(a.x + s * 1.1, a.y + s * 1.25);
-    ctx.lineTo(a.x, a.y + s * 0.9); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.arc(a.x, a.y, 2.5 / view.scale, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
+  for (const g of c.inv) {
+    /* texto invertido sem o contorno exato: a moldura cheia e as letras vazadas na cor da placa */
+    const m = Math.max(g.w, g.h * 0.2) * 0.5, cx = g.caixa;
+    const cxm = cx[0][0] + cx[2][0], cym = cx[0][1] + cx[2][1];
+    const P = new Path2D();
+    pPoli(P, cx.map(q => { const dx = q[0] - cxm / 2, dy = q[1] - cym / 2, L = Math.hypot(dx, dy) || 1; return [q[0] + dx / L * m, q[1] + dy / L * m]; }));
+    ctx.fillStyle = cor; ctx.fill(P);
+    const T = new Path2D(); for (const l of g.linhas) pPolilinha(T, l);
+    ctx.strokeStyle = COR.placa; ctx.lineWidth = Math.max(g.w, min); ctx.stroke(T);
+    ctx.strokeStyle = cor;
   }
 }
 
 function draw(){
-  ctx.setTransform(1,0,0,1,0,0);
-  ctx.fillStyle='#000000';
-  ctx.fillRect(0,0,cv.width,cv.height);
-  worldTransform();
+  agendado = 0;
+  if (!EB || !CW) return;
+  if (cacheSujo || !CACHE) montaCache();
+  calculaOrdem();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = COR.fundo; ctx.fillRect(0, 0, cv.width, cv.height);
+  transformaMundo();
+  ctx.fillStyle = COR.placa; ctx.fill(pathPlaca(), 'evenodd');
+  /* a grade so na placa: fora dela e a area de trabalho cinza, como no Altium */
+  if (show.grid) { ctx.save(); ctx.clip(pathPlaca(), 'evenodd'); desenhaGrade(); ctx.restore(); }
+  desenhaOrigem();
+  for (const k of ORDEM) if (camVisivel(k)) pintaCamada(k);
+  ctx.fillStyle = COR.furo; ctx.fill(CACHE.furos);
+  ctx.strokeStyle = COR.contorno; ctx.lineWidth = px(1.3); ctx.setLineDash([]); ctx.stroke(pathPlaca());
+  if (show.ghost) desenhaFantasmas();
+  desenhaArrasto();
+  desenhaSelecao();
+  desenhaHover();
+  desenhaAnotacoes();
+  desenhaFerramenta();
+  desenhaJanela();
+}
 
-  /* placa */
-  outlinePath();
-  ctx.fillStyle=COLOR_BOARD; ctx.fill('evenodd');   /* par-impar: o recorte vira buraco */
-  drawGrid();
+/* ============================== desenho avulso (fantasma, arrasto, previa) ============================== */
 
-  /* zonas de cobre */
-  for (const g of (B.regions||[])) drawRegion(g);
-
-  /* cobre: lado oposto primeiro */
-  const far = view.flip ? 'Top':'Bottom', nearL = view.flip? 'Bottom':'Top';
-  for (const m of model.tracks) if (m.eff.layer===far) drawTrackObj(m);
-  for (const m of model.arcs)  if (m.eff.layer===far) drawArcObj(m);
-  for (const m of model.tracks) if (m.eff.layer===nearL) drawTrackObj(m);
-  for (const m of model.arcs)  if (m.eff.layer===nearL) drawArcObj(m);
+/* um objeto no formato do board.js, desenhado na hora (sem cache) */
+function pathDoObj(kind, o){
+  const P = new Path2D();
+  if (kind === 'track' || kind === 'line') pLinha(P, o);
+  else if (kind === 'arc') pArco(P, o);
+  else if (kind === 'fill') { const c = fillCentro(o); pForma(P, c[0], c[1], Math.abs(o.x2 - o.x1), Math.abs(o.y2 - o.y1), o.rot || 0, 'rect'); }
+  else if (kind === 'region') pRegiao(P, o);
+  else if (kind === 'via') pForma(P, o.x, o.y, o.size, o.size, 0, 'circle');
+  else if (kind === 'pad') { const f = formaLado(o, ladoDaVista()), c = centroCobre(o); pForma(P, c[0], c[1], f.w, f.h, o.rot, f.shape, f.radius); }
+  return P;
+}
+const ehTraco = kind => kind === 'track' || kind === 'line' || kind === 'arc';
+function desenhaObj(kind, o, cor, opt){
+  opt = opt || {};
+  ctx.save();
+  if (opt.alpha != null) ctx.globalAlpha = opt.alpha;
+  ctx.setLineDash(opt.dash ? [px(opt.dash[0]), px(opt.dash[1])] : []);
+  ctx.strokeStyle = cor; ctx.fillStyle = cor; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (kind === 'text') {
+    const g = geoTexto(o);
+    if (g) {
+      if (g.polys) { const P = new Path2D(); pTextoPolys(P, g.polys); if (opt.contorno) { ctx.lineWidth = px(1); ctx.stroke(P); } else ctx.fill(P); }
+      else { const P = new Path2D(); for (const l of g.linhas) pPolilinha(P, l); ctx.lineWidth = Math.max(g.w, px(1)); ctx.stroke(P); }
+    }
+  } else {
+    const P = pathDoObj(kind, o);
+    if (ehTraco(kind)) { ctx.lineWidth = Math.max(opt.larg != null ? opt.larg : (o.w || 0), px(1)); ctx.stroke(P); }
+    else if (opt.contorno) { ctx.lineWidth = px(opt.linha || 1.2); ctx.stroke(P); }
+    else ctx.fill(P);
+  }
+  ctx.restore();
+}
+function seta(x1, y1, x2, y2){
+  if (Math.hypot(x2 - x1, y2 - y1) < 1e-6) return;
+  ctx.save();
+  ctx.strokeStyle = COR.seta; ctx.globalAlpha = 0.75; ctx.lineWidth = px(1.3); ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  const a = Math.atan2(y2 - y1, x2 - x1), L = px(8);
+  ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(x2 - L * Math.cos(a - 0.4), y2 - L * Math.sin(a - 0.4));
+  ctx.moveTo(x2, y2); ctx.lineTo(x2 - L * Math.cos(a + 0.4), y2 - L * Math.sin(a + 0.4)); ctx.stroke();
+  ctx.restore();
+}
+const kindDoItem = m => m.kind === 'track' ? 'track' : m.kind;
+/* Diff: o original tracejado, o removido em vermelho, o adicionado com o contorno verde, e a
+   seta do lugar de antes ate o de agora -- so o hub tem, e fica */
+function desenhaFantasmas(){
+  for (const list of [model.tracks, model.arcs, model.vias, model.fills, model.regions]) {
+    for (const m of list) {
+      if (!m.src || (!m.changed && !m.deleted)) continue;
+      const k = kindDoItem(m), lay = m.kind === 'via' ? 'Multi' : m.src.layer;
+      if (lay && !camVisivel(lay)) continue;
+      /* o fantasma de trilha e fino: com a largura cheia ele pintava por cima da trilha nova */
+      const fino = ehTraco(k) ? Math.max((m.src.w || 0) * 0.3, px(1.5)) : undefined;
+      if (m.deleted) desenhaObj(k, m.src, COR.del, { alpha:0.8, dash:[5, 3], contorno:true, larg:fino });
+      else desenhaObj(k, m.src, corDe(lay), { alpha:0.6, dash:[5, 3], contorno:true, larg:fino });
+    }
+  }
+  for (const m of model.texts) {
+    if (!m.src || (!m.changed && !m.deleted)) continue;
+    const e = ebDe(m);
+    if (m.deleted) { desenhaObj('text', m.src, COR.del, { alpha:0.6 }); continue; }
+    desenhaObj('text', Object.assign({}, m.src, { text: e ? e.text : m.src.text }), corDe(m.src.layer), { alpha:0.3 });
+    if (e) seta(m.src.x, m.src.y, e.x, e.y);
+  }
   for (const m of model.added) {
-    if (m.kind==='track') drawTrackObj(m);
-    else if (m.kind==='arc') drawArcObj(m);
+    const e = m.eff;
+    if (m.kind === 'via') desenhaObj('via', { x:e.x, y:e.y, size:e.size + px(5) }, COR.add, { dash:[4, 3], contorno:true });
+    else if (m.kind === 'track' || m.kind === 'arc') desenhaObj(m.kind, e, COR.add, { dash:[4, 3], larg:Math.max((e.w || 0) * 0.3, px(1)) });
+    else if (m.kind === 'fill') desenhaObj('fill', e, COR.add, { dash:[4, 3], contorno:true });
+    else if (m.kind === 'region') desenhaObj('region', e, COR.add, { dash:[4, 3], contorno:true });
+    else if (m.kind === 'text') { const g = geoTexto(e); if (g) { const P = new Path2D(); pPoli(P, g.caixa); ctx.save(); ctx.strokeStyle = COR.add; ctx.setLineDash([px(4), px(3)]); ctx.lineWidth = px(1); ctx.stroke(P); ctx.restore(); } }
   }
-
-  /* pads (componentes + livres) */
-  for (const m of model.comps){
-    const d = m.changed ? compDelta(m) : null;
-    for (const p of m.src.pads) drawPad(p, d, m.src.ref);
+  for (const m of model.comps) {
+    if (!m.changed) continue;
+    const b = m.src.bbox;
+    if (b && [b.x1, b.y1, b.x2, b.y2].every(isNum)) {
+      ctx.save(); ctx.strokeStyle = corDe(m.src.layer === 'Bottom' ? 'Bottom' : 'Top'); ctx.globalAlpha = 0.55;
+      ctx.setLineDash([px(6), px(4)]); ctx.lineWidth = px(1.2); ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1); ctx.restore();
+    }
+    seta(m.src.x, m.src.y, m.eff.x, m.eff.y);
+    const c = caixaComp(m);
+    if (c) { const P = new Path2D(); pPoli(P, c); ctx.save(); ctx.strokeStyle = COR.seta; ctx.globalAlpha = 0.9; ctx.lineWidth = px(1.2); ctx.stroke(P); ctx.restore(); }
   }
-  for (const p of (B.freepads||[])) drawPad(p, null, null);
+  if (model.outlineChanged) {
+    ctx.save(); ctx.strokeStyle = COR.seta; ctx.setLineDash([px(6), px(4)]); ctx.lineWidth = px(1.5);
+    const P = new Path2D();
+    for (const s of ((B.board && B.board.outline) || [])) if (s && s.kind === 'line') pLinha(P, s); else if (s && s.kind === 'arc') pArco(P, s);
+    ctx.globalAlpha = 0.6; ctx.stroke(P); ctx.restore();
+  }
+}
 
-  /* vias */
-  for (const m of model.vias) drawViaObj(m);
-  for (const m of model.added) if (m.kind==='via') drawViaObj(m);
+/* a forma de destaque de um alvo (selecao e hover) */
+function realcaAlvo(a, cor, forte){
+  ctx.save();
+  ctx.strokeStyle = cor; ctx.fillStyle = cor; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const contorno = P => { ctx.globalAlpha = forte ? 0.95 : 0.7; ctx.setLineDash(forte ? [px(5), px(3)] : []); ctx.lineWidth = px(1.4); ctx.stroke(P); };
+  const veu = P => { ctx.globalAlpha = forte ? 0.22 : 0.12; ctx.fill(P); };
+  const traco = (kind, o) => {
+    const P = pathDoObj(kind, o);
+    ctx.globalAlpha = forte ? 0.45 : 0.3; ctx.lineWidth = Math.max((o.w || 0) + px(4), px(3)); ctx.stroke(P);
+  };
+  const poli = pts => { const P = new Path2D(); pPoli(P, pts); veu(P); contorno(P); };
+  switch (a.t) {
+    case 'comp': { const c = caixaComp(a.m); if (c) poli(c); break; }
+    case 'pad': { const P = pathDoObj('pad', a.eb); veu(P); contorno(P); break; }
+    case 'track': case 'arc': { const o = ebDe(a.m); if (o) traco(a.t, o); break; }
+    case 'via': { const o = ebDe(a.m); if (o) { const P = pathDoObj('via', { x:o.x, y:o.y, size:o.size + px(4) }); veu(P); contorno(P); } break; }
+    case 'fill': { const o = ebDe(a.m); if (o) poli(fillCantos(o)); break; }
+    case 'region': { const o = ebDe(a.m); if (o) { const P = new Path2D(); pRegiao(P, o); veu(P); contorno(P); } break; }
+    case 'regiao-ro': { const P = new Path2D(); pRegiao(P, a.eb); veu(P); contorno(P); break; }
+    case 'recorte': { const k = recortesDaTela().find(x => x.o === a.eb); if (k) poli(k.pts); break; }
+    case 'text': { const o = ebDe(a.m); const g = o && geoTexto(o); if (g) poli(g.caixa); break; }
+    case 'ann': { ctx.globalAlpha = 0.9; ctx.lineWidth = px(1.5); ctx.beginPath(); ctx.arc(a.ann.x, a.ann.y, px(9), 0, 2 * Math.PI); ctx.stroke(); break; }
+  }
+  ctx.restore();
+}
+function desenhaSelecao(){
+  if (arrasto && arrasto.moveu) return;           /* o que esta na mao ja aparece no lugar novo */
+  for (const a of SEL) realcaAlvo(a, COR.sel, true);
+}
+let HOVER = null;
+function desenhaHover(){ if (HOVER && !selTem(HOVER) && tool === 'select' && !arrasto && !janela) realcaAlvo(HOVER, COR.sel, false); }
 
-  /* silkscreen + textos */
-  for (const s of (B.silk||[])) drawSilkItem(s);
-  for (const m of model.texts) drawTextObj(m);
-
-  /* contorno */
-  outlinePath();
-  ctx.strokeStyle=COLOR_OUTLINE; ctx.lineWidth=0.06; ctx.stroke();
-
-  /* overlays de mudanca de componentes */
-  if (true) for (const m of model.comps) drawCompOverlay(m);
-
-  drawSelection();
-  drawAnnotations();
-  if (tool === 'track' && trackChain && hoverW){
+function desenhaAnotacoes(){
+  for (const a of ANN) {
+    if (a.view !== 'pcb' || !isNum(a.x) || !isNum(a.y)) continue;
+    const c = ANN_COLORS[a.severity] || ANN_COLORS.info, s = px(14);
     ctx.save();
-    ctx.strokeStyle = lcolor(document.getElementById('activelayer').value);
-    ctx.globalAlpha = 0.6; ctx.setLineDash([0.5, 0.35]);
-    strokeSeg(trackChain.last.x, trackChain.last.y, hoverW.x, hoverW.y, +document.getElementById('trackw').value || 0.3);
+    ctx.setLineDash([]);
+    ctx.globalAlpha = a.status === 'resolved' ? 0.45 : 1;
+    ctx.strokeStyle = c; ctx.fillStyle = c; ctx.lineWidth = px(2.2); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.x, a.y + s * 1.6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x, a.y + s * 1.6); ctx.lineTo(a.x + s * 1.1, a.y + s * 1.25); ctx.lineTo(a.x, a.y + s * 0.9); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(a.x, a.y, px(2.5), 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 }
 
-/* ============================== interação ============================== */
+/* ============================== mudancas: commit, desfazer, refazer ============================== */
 
-let dragging=false, dragMoved=false, lastX=0, lastY=0;
-let objDrag = null; /* { m, startW, base, moved } */
-/* ------- ferramentas Trilha e Via ------- */
-let tool = 'select';
-let trackChain = null;   /* { last:{x,y}, net } */
-let hoverW = null;       /* posicao do mouse em mundo, p/ rubber-band */
-let viaPending = null;
-
-function setTool(t){
-  if (t !== 'select' && !editOn) return;
-  if (t !== 'select' && annTool) setAnnTool(false);
-  tool = t;
-  trackChain = null; viaPending = null;
-  document.getElementById('viaform').style.display = 'none';
-  for (const [id, name] of [['toolSelect','select'],['toolTrack','track'],['toolVia','via']])
-    document.getElementById(id).classList.toggle('active', tool === name);
-  cv.style.cursor = tool === 'select' ? 'crosshair' : 'copy';
-  draw();
-}
-document.getElementById('toolSelect').addEventListener('click', () => setTool('select'));
-document.getElementById('toolTrack').addEventListener('click', () => setTool('track'));
-document.getElementById('toolVia').addEventListener('click', () => setTool('via'));
-
-/* liga/desliga o modo edicao e reflete o estado em tudo que edita */
-function setEdit(v){
-  editOn = !!v && !LEAN;
-  if (!editOn){
-    if (tool !== 'select') setTool('select');
-    if (annTool) setAnnTool(false);
-    objDrag = null;                 /* trancar no meio de um arrasto nao pode virar commit */
-  }
-  const b = document.getElementById('btnEdit');
-  if (b){
-    b.classList.toggle('active', editOn);
-    b.textContent = editOn ? 'Editando' : 'Editar';
-    b.title = editOn ? 'Voltar para leitura' : 'Destravar edicao (trilha, via, arrasto, sinalizar)';
-  }
-  /* os Salvar ficam de fora de proposito: a trava e para NAO deixar alterar, e travar de
-     volta com alteracoes pendentes nao pode impedir de grava-las. */
-  for (const id of ['toolTrack','toolVia','btnAnn'])
-    { const x = document.getElementById(id); if (x) x.disabled = !editOn; }
-  draw();
-}
-{ const b = document.getElementById('btnEdit'); if (b) b.addEventListener('click', () => setEdit(!editOn)); }
-
-function padSnap(w){   /* centro de pad proximo (prioridade sobre a grade) */
-  const tolp = 8 / view.scale;
-  for (const m of model.comps){
-    const d = m.changed ? compDelta(m) : null;
-    for (const p of m.src.pads){
-      let px = p.x, py = p.y;
-      if (d){ const q = xfPoint(d, p.x, p.y); px = q.x; py = q.y; }
-      if (Math.hypot(w.x - px, w.y - py) <= Math.max(p.w, p.h) / 2 + tolp)
-        return { x:r4(px), y:r4(py), net:p.net || '' };
+const undoStack = [JSON.stringify(CH)], redoStack = [];
+let selDepois = null;              /* ops cujo objeto vira a selecao depois do proximo recalculo */
+function reaplica(){
+  const ks = SEL.map(chave), kh = HOVER && HOVER.t !== 'ann' ? chave(HOVER) : null;
+  recalcula();
+  reSeleciona(ks);
+  HOVER = kh ? (PORCHAVE.get(kh) || null) : null;     /* o alvo velho apontaria para o modelo de antes */
+  if (selDepois) {
+    const alvos = [];
+    for (const op of selDepois) {
+      const it = model.changeItems.find(i => i.ch === op);
+      if (it && it.target) { const k = chave(it.target.kind === 'region' && it.target.eff && it.target.eff.cutout
+        ? { t:'recorte', m:it.target } : { t:it.target.kind, m:it.target }); const a = PORCHAVE.get(k); if (a) alvos.push(a); }
     }
+    selDepois = null;
+    if (alvos.length) SEL = alvos;
+  }
+  selChaveAntes = SEL.map(chave).join('|');
+  if (painel) painel.atualiza();
+  pintaAbas(); pintaStatusSel(); pintaBarra();
+  pede();
+}
+function commit(){
+  undoStack.push(JSON.stringify(CH));
+  if (undoStack.length > 80) undoStack.shift();
+  redoStack.length = 0;
+  setChDirty(true);
+  reaplica();
+}
+function restauraCH(json){
+  CH.length = 0;
+  for (const c of JSON.parse(json)) CH.push(c);
+  setChDirty(true);
+  reaplica();
+}
+function desfaz(){ if (undoStack.length < 2) return false; encerraDraft(true); redoStack.push(undoStack.pop()); restauraCH(undoStack[undoStack.length - 1]); return true; }
+function refaz(){ if (!redoStack.length) return false; encerraDraft(true); const s = redoStack.pop(); undoStack.push(s); restauraCH(s); return true; }
+function setChDirty(v){ chDirty = !!v; if (painel) painel.atualizaSalvar(); }
+function setAnnDirty(v){ annDirty = !!v; if (painel) painel.atualizaSalvar(); }
+
+/* ============================== escrever as ops ==============================
+   Regra de sempre: um objeto PLANO por linha, orig_* copiados do board.js (a trava do
+   ApplyChanges), e mexer de novo no mesmo objeto edita a MESMA linha em vez de empilhar
+   outra -- o motor exige que a segunda op traga o orig_* do estado que a primeira deixou. Voltar
+   o objeto ao lugar original tira a linha. */
+const NOTA = 'editado no hub';
+function ultimoOp(pred){ for (let i = CH.length - 1; i >= 0; i--) if (CH[i] && pred(CH[i])) return CH[i]; return null; }
+const EDITA = {
+  track: { op:'track_edit', orig:['x1', 'y1', 'x2', 'y2', 'w', 'layer'], campos:['x1', 'y1', 'x2', 'y2', 'w', 'layer', 'net'] },
+  arc:   { op:'arc_edit',   orig:['cx', 'cy', 'r', 'sa', 'ea', 'layer'], campos:['cx', 'cy', 'r', 'sa', 'ea', 'w', 'layer', 'net'] },
+  via:   { op:'via_edit',   orig:['x', 'y'], campos:['x', 'y', 'size', 'drill'] },
+  fill:  { op:'fill_edit',  orig:['x1', 'y1', 'x2', 'y2', 'layer'], campos:['x1', 'y1', 'x2', 'y2', 'rot', 'layer', 'net'] },
+  text:  { op:'text_edit',  orig:['x', 'y', 'text', 'layer'], campos:['text', 'x', 'y', 'h', 'w', 'rot', 'layer', 'mirror'] },
+};
+const CAMPOS_ADD = {
+  track:['x1', 'y1', 'x2', 'y2', 'w', 'layer', 'net'], arc:['cx', 'cy', 'r', 'sa', 'ea', 'w', 'layer', 'net'],
+  via:['x', 'y', 'size', 'drill', 'net'], fill:['x1', 'y1', 'x2', 'y2', 'rot', 'layer', 'net'],
+  text:['text', 'x', 'y', 'h', 'w', 'rot', 'layer', 'mirror'], region:['layer', 'net'],
+};
+const ANGULARES = { rot:1, sa:1, ea:1 };
+function mesmoValor(k, a, b){
+  if (k === 'net') return (a || '') === (b || '');
+  if (k === 'mirror') return !!a === !!b;
+  if (typeof a === 'number' && typeof b === 'number') return ANGULARES[k] ? nearAng(a, b) : near(a, b);
+  if (k === 'rot' && (a === undefined || b === undefined)) return normAng(a || 0) === normAng(b || 0);
+  return a === b;
+}
+/* objeto adicionado pelo hub: edita a propria linha *_add */
+function patchAdd(op, kind, patch){
+  for (const k of (CAMPOS_ADD[kind] || [])) if (k in patch) op[k] = patch[k];
+  if (kind === 'region' && Array.isArray(patch.points)) op.pts = patch.points.map(p => [r6(p[0]), r6(p[1])]);
+  if (op.layer && !cobre(op.layer)) delete op.net;
+  if (op.net === '') delete op.net;
+}
+function editaItem(m, patch){
+  if (m.added) { const op = opDe(m); if (op) patchAdd(op, m.kind, patch); return !!op; }
+  const E = EDITA[m.kind];
+  if (!E) return false;
+  let c = ultimoOp(x => x.op === E.op && x.id === m.src.id);
+  const novo = !c;
+  if (novo) { c = { op:E.op, id:m.src.id }; for (const k of E.orig) c['orig_' + k] = m.src[k]; }
+  for (const k of Object.keys(patch)) if (E.campos.indexOf(k) >= 0) c[k] = patch[k];
+  if (!cobre(c.layer || m.src.layer)) delete c.net;
+  if (c.net === '' && !m.src.net) delete c.net;
+  /* voltou ao original (e a linha e a primeira desse objeto): sai do arquivo */
+  const origDoSrc = E.orig.every(k => mesmoValor(k, c['orig_' + k], m.src[k]));
+  const igual = E.campos.every(k => !(k in c) || mesmoValor(k, c[k], m.src[k]));
+  if (origDoSrc && igual) { if (!novo) CH.splice(CH.indexOf(c), 1); return true; }
+  if (novo) { c.note = NOTA; CH.push(c); }
+  return true;
+}
+function moveComp(m, g){
+  let c = ultimoOp(x => x.op === 'comp_move' && x.ref === m.src.ref);
+  const novo = !c;
+  if (novo) c = { op:'comp_move', ref:m.src.ref, x:0, y:0, rot:m.src.rot, layer:m.src.layer,
+                  orig_x:m.src.x, orig_y:m.src.y, orig_rot:m.src.rot, orig_layer:m.src.layer };
+  c.x = r6(g.x); c.y = r6(g.y); c.rot = normAng(g.rot); c.layer = g.layer === 'Bottom' ? 'Bottom' : 'Top';
+  const origDoSrc = near(c.orig_x, m.src.x) && near(c.orig_y, m.src.y) && nearAng(c.orig_rot, m.src.rot) && c.orig_layer === m.src.layer;
+  const volta = near(c.x, m.src.x) && near(c.y, m.src.y) && nearAng(c.rot, m.src.rot) && c.layer === m.src.layer;
+  if (origDoSrc && volta) { if (!novo) CH.splice(CH.indexOf(c), 1); return; }
+  if (novo) { c.note = NOTA; CH.push(c); }
+}
+/* O designator anda com o componente, e o ApplyChanges aplica as mudancas EM ORDEM: o
+   designator_move vai ANTES do comp_move do mesmo componente, com x/y/rot no referencial de
+   antes do componente andar (xfPointInv) -- e o que o motor exige (hubcore-api). */
+function moveDesignator(m, g){
+  const ref = m.src.owner, comp = ref != null ? model.compByRef[ref] : null;
+  const d = comp && comp.changed ? HC.compDelta(comp) : null;
+  let c = ultimoOp(x => x.op === 'designator_move' && x.ref === ref);
+  const novo = !c;
+  if (novo) c = { op:'designator_move', ref, orig_x:m.src.x, orig_y:m.src.y };
+  c.orig_x = m.src.x; c.orig_y = m.src.y;
+  if (isNum(g.x) && isNum(g.y)) { const p = d ? HC.xfPointInv(d, g.x, g.y) : { x:g.x, y:g.y }; c.x = r6(p.x); c.y = r6(p.y); }
+  else if (!isNum(c.x) || !isNum(c.y)) { c.x = r6(m.eff.x); c.y = r6(m.eff.y); }
+  if (isNum(g.rot)) c.rot = normAng(d ? (d.flip ? d.phi + 180 - g.rot : g.rot - d.dr) : g.rot);
+  if (isNum(g.h) && g.h > 0) c.h = r6(g.h);
+  if (!novo) CH.splice(CH.indexOf(c), 1);
+  const volta = near(c.x, m.src.x) && near(c.y, m.src.y) && (c.rot === undefined || nearAng(c.rot, m.src.rot || 0)) &&
+                (c.h === undefined || near(c.h, m.src.h));
+  if (volta) return;
+  if (novo) c.note = 'designator no hub';
+  const iMove = CH.findIndex(x => x && x.op === 'comp_move' && x.ref === ref);
+  if (iMove >= 0) CH.splice(iMove, 0, c); else CH.push(c);
+}
+function attrComp(m, campo, valor){
+  let c = ultimoOp(x => x.op === 'comp_attr' && x.ref === m.src.ref);
+  const novo = !c;
+  if (novo) c = { op:'comp_attr', ref:m.src.ref, orig_designator:m.src.ref, orig_comment:m.src.comment || '' };
+  if (campo === 'designator') { const v = limpaTxt(valor).trim(); if (v && v !== m.src.ref) c.designator = v; else delete c.designator; }
+  if (campo === 'comment') { const v = limpaTxt(valor); if (v !== (m.src.comment || '')) c.comment = v; else delete c.comment; }
+  if (!c.designator && c.comment === undefined) { if (!novo) CH.splice(CH.indexOf(c), 1); return; }
+  if (novo) { c.note = 'atributos no hub'; CH.push(c); }
+}
+/* region nao tem region_edit: mover ou trocar de camada e apagar e recriar (a do hub so
+   reescreve a propria linha). Region com furo nao viaja assim -- o region_add nao leva furo. */
+function editaRegiao(m, g){
+  if (m.added) { const op = opDe(m); if (op) patchAdd(op, 'region', g); return !!op; }
+  const s = m.src;
+  if (Array.isArray(s.holes) && s.holes.length) { HubDialog.toast('região com furo: o region_add não leva furo — mexa nela no Altium', 'warn'); return false; }
+  const del = { op:'region_del', id:s.id, orig_layer:s.layer, orig_n:s.points.length, orig_x0:s.points[0][0], orig_y0:s.points[0][1], note:'movida no hub (apaga e recria)' };
+  const lay = g.layer || s.layer;
+  const add = { op:'region_add', layer:lay, pts:(g.points || s.points).map(p => [r6(p[0]), r6(p[1])]), note:'movida no hub' };
+  const net = g.net !== undefined ? g.net : s.net;
+  if (cobre(lay) && net) add.net = net;
+  CH.push(del, add);
+  (selDepois || (selDepois = [])).push(add);
+  return true;
+}
+function apagaItem(m){
+  if (m.added) { const op = opDe(m); if (!op) return false; CH.splice(CH.indexOf(op), 1); return true; }
+  const s = m.src, kind = m.kind;
+  for (let i = CH.length - 1; i >= 0; i--) { const c = CH[i]; if (c && c.id === s.id && c.op === kind + '_edit') CH.splice(i, 1); }
+  const del = { op:kind + '_del', id:s.id };
+  if (kind === 'track') Object.assign(del, { orig_x1:s.x1, orig_y1:s.y1, orig_x2:s.x2, orig_y2:s.y2, orig_w:s.w, orig_layer:s.layer });
+  else if (kind === 'arc') Object.assign(del, { orig_cx:s.cx, orig_cy:s.cy, orig_r:s.r, orig_sa:s.sa, orig_ea:s.ea, orig_layer:s.layer });
+  else if (kind === 'via') Object.assign(del, { orig_x:s.x, orig_y:s.y });
+  else if (kind === 'fill') Object.assign(del, { orig_x1:s.x1, orig_y1:s.y1, orig_x2:s.x2, orig_y2:s.y2, orig_layer:s.layer });
+  else if (kind === 'text') Object.assign(del, { orig_x:s.x, orig_y:s.y, orig_text:s.text, orig_layer:s.layer });
+  else if (kind === 'region') Object.assign(del, { orig_layer:s.layer, orig_n:s.points.length, orig_x0:s.points[0][0], orig_y0:s.points[0][1] });
+  else return false;
+  del.note = 'removido no hub';
+  CH.push(del);
+  return true;
+}
+/* Delete: o que tem op de apagar sai; o resto diz por que fica */
+function apagaSelecao(){
+  if (!SEL.length) return;
+  let n = 0, annMexeu = false;
+  const fica = [];
+  for (const a of SEL) {
+    if (a.t === 'ann') { const i = ANN.indexOf(a.ann); if (i >= 0) { ANN.splice(i, 1); annMexeu = true; n++; } continue; }
+    if (a.t === 'comp') { fica.push(a.m.src.ref + ' (componente sai pelo esquema e o ECO)'); continue; }
+    if (a.t === 'pad') { fica.push('pad (é do componente)'); continue; }
+    if (a.t === 'regiao-ro') { fica.push('região: ' + a.motivo); continue; }
+    if (a.t === 'recorte') { if (a.m && apagaItem(a.m)) n++; else fica.push('recorte do Altium (apague no Altium)'); continue; }
+    if (a.t === 'text' && a.m.src && (a.m.src.designator || a.m.src.comment || a.m.src.owner)) { fica.push('texto do componente ' + (a.m.src.owner || '')); continue; }
+    if (a.m && apagaItem(a.m)) n++;
+  }
+  SEL = [];
+  if (annMexeu) annChanged();
+  if (n) commit(); else aoMudarSel();
+  if (fica.length) HubDialog.toast('Não apagado: ' + fica.slice(0, 4).join('; ') + (fica.length > 4 ? ' …' : ''), 'warn', 5000);
+}
+
+/* ============================== geometria editavel de um alvo ==============================
+   O "geo" e o alvo no referencial EFETIVO (o que a tela mostra): o arrasto, o giro e o
+   espelho trabalham nele, e escreveGeo o devolve como op. */
+function geoDe(a){
+  switch (a.t) {
+    case 'comp': return { x:a.m.eff.x, y:a.m.eff.y, rot:isNum(a.m.eff.rot) ? a.m.eff.rot : 0, layer:a.m.eff.layer };
+    case 'track': { const e = a.m.eff; return { x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2 }; }
+    case 'arc': { const e = a.m.eff; return { cx:e.cx, cy:e.cy, r:e.r, sa:e.sa, ea:e.ea }; }
+    case 'via': return { x:a.m.eff.x, y:a.m.eff.y };
+    case 'fill': { const e = a.m.eff; return { x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2, rot:isNum(e.rot) ? e.rot : 0 }; }
+    case 'region': return { points:(a.m.eff.points || []).map(p => [p[0], p[1]]) };
+    case 'recorte': return a.m ? { points:(a.m.eff.points || []).map(p => [p[0], p[1]]) } : null;
+    case 'text': { const e = ebDe(a.m) || a.m.eff; return { x:e.x, y:e.y, rot:isNum(e.rot) ? e.rot : 0, mirror:!!e.mirror }; }
+    case 'ann': return { x:a.ann.x, y:a.ann.y };
   }
   return null;
 }
-function toolPoint(w, ev){
-  const ps = padSnap(w);
-  if (ps) return ps;
-  return { x:r4(snapVal(w.x, ev)), y:r4(snapVal(w.y, ev)), net:'' };
+/* o ponto que a grade prende num arrasto */
+function refDoGeo(t, g){
+  if (!g) return null;
+  if (t === 'track') return [g.x1, g.y1];
+  if (t === 'arc') return [g.cx, g.cy];
+  if (t === 'fill') return [Math.min(g.x1, g.x2), Math.min(g.y1, g.y2)];
+  if (t === 'region' || t === 'recorte') return g.points[0] ? [g.points[0][0], g.points[0][1]] : null;
+  return [g.x, g.y];
 }
-function trackClick(w, ev){
-  const p = toolPoint(w, ev);
-  if (!trackChain){ trackChain = { last:p, net:p.net }; draw(); return; }
-  const c = { op:'track_add', layer:document.getElementById('activelayer').value,
-              x1:trackChain.last.x, y1:trackChain.last.y, x2:p.x, y2:p.y,
-              w:+document.getElementById('trackw').value || 0.3, note:'desenhada no hub' };
-  const net = trackChain.net || p.net;
-  if (net) c.net = net;
-  CH.push(c);
-  trackChain = { last:p, net:net };
-  commit();
+function transladaGeo(t, g, dx, dy){
+  const n = Object.assign({}, g);
+  if (t === 'track') { n.x1 += dx; n.y1 += dy; n.x2 += dx; n.y2 += dy; }
+  else if (t === 'arc') { n.cx += dx; n.cy += dy; }
+  else if (t === 'fill') { n.x1 += dx; n.x2 += dx; n.y1 += dy; n.y2 += dy; }
+  else if (t === 'region' || t === 'recorte') n.points = g.points.map(p => [p[0] + dx, p[1] + dy]);
+  else { n.x += dx; n.y += dy; }
+  return n;
 }
-function viaClick(w, ev){
-  viaPending = toolPoint(w, ev);
-  document.getElementById('vianet').value = viaPending.net || '';
-  document.getElementById('viaform').style.display = 'block';
-  document.getElementById('viasize').focus();
+/* gira 90 graus anti-horario em volta do pivo */
+function giraGeo(t, g, pv){
+  const R = (x, y) => [pv[0] - (y - pv[1]), pv[1] + (x - pv[0])];
+  const n = Object.assign({}, g);
+  if (t === 'track') { const a = R(g.x1, g.y1), b = R(g.x2, g.y2); n.x1 = a[0]; n.y1 = a[1]; n.x2 = b[0]; n.y2 = b[1]; }
+  else if (t === 'arc') { const c = R(g.cx, g.cy); n.cx = c[0]; n.cy = c[1]; if (!arcoCheio(g)) { n.sa = normAng(g.sa + 90); n.ea = normAng(g.ea + 90); } }
+  else if (t === 'fill') {
+    const c = R((g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2), hw = Math.abs(g.x2 - g.x1) / 2, hh = Math.abs(g.y2 - g.y1) / 2;
+    n.x1 = c[0] - hw; n.x2 = c[0] + hw; n.y1 = c[1] - hh; n.y2 = c[1] + hh; n.rot = normAng((g.rot || 0) + 90);
+  }
+  else if (t === 'region' || t === 'recorte') n.points = g.points.map(p => R(p[0], p[1]));
+  else { const p = R(g.x, g.y); n.x = p[0]; n.y = p[1]; if (t === 'comp' || t === 'text') n.rot = normAng((g.rot || 0) + 90); }
+  return n;
 }
-document.getElementById('viaok').addEventListener('click', () => {
-  if (!viaPending) return;
-  const c = { op:'via_add', x:viaPending.x, y:viaPending.y,
-              size:+document.getElementById('viasize').value || 0.6,
-              drill:+document.getElementById('viadrill').value || 0.3, note:'via adicionada no hub' };
-  const net = document.getElementById('vianet').value.trim();
-  if (net) c.net = net;
-  document.getElementById('viaform').style.display = 'none';
-  viaPending = null;
-  CH.push(c);
-  commit();
-});
-document.getElementById('viacancel').addEventListener('click', () => {
-  document.getElementById('viaform').style.display = 'none'; viaPending = null;
-});
+/* espelha no eixo vertical ('x') ou horizontal ('y') que passa pelo pivo */
+function espelhaGeo(t, g, eixo, pv){
+  const M = (x, y) => eixo === 'x' ? [2 * pv[0] - x, y] : [x, 2 * pv[1] - y];
+  const n = Object.assign({}, g);
+  if (t === 'track') { const a = M(g.x1, g.y1), b = M(g.x2, g.y2); n.x1 = a[0]; n.y1 = a[1]; n.x2 = b[0]; n.y2 = b[1]; }
+  else if (t === 'arc') {
+    const c = M(g.cx, g.cy); n.cx = c[0]; n.cy = c[1];
+    if (!arcoCheio(g)) { if (eixo === 'x') { n.sa = normAng(180 - g.ea); n.ea = normAng(180 - g.sa); } else { n.sa = normAng(-g.ea); n.ea = normAng(-g.sa); } }
+  }
+  else if (t === 'fill') {
+    const c = M((g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2), hw = Math.abs(g.x2 - g.x1) / 2, hh = Math.abs(g.y2 - g.y1) / 2;
+    n.x1 = c[0] - hw; n.x2 = c[0] + hw; n.y1 = c[1] - hh; n.y2 = c[1] + hh; n.rot = normAng(-(g.rot || 0));
+  }
+  else if (t === 'region' || t === 'recorte') n.points = g.points.map(p => M(p[0], p[1]));
+  else if (t === 'text') { const p = M(g.x, g.y); n.x = p[0]; n.y = p[1]; n.mirror = !g.mirror; n.rot = normAng(eixo === 'x' ? -(g.rot || 0) : 180 - (g.rot || 0)); }
+  else { const p = M(g.x, g.y); n.x = p[0]; n.y = p[1]; }
+  return n;
+}
+/* L: o componente troca de face espelhando na vertical que passa pelo pivo (a placa vista
+   pelo outro lado) -- a rotacao vira 180 - r, como o flip do Altium */
+function viraGeo(g, pv){
+  const n = Object.assign({}, g);
+  n.x = 2 * pv[0] - g.x;
+  n.layer = g.layer === 'Bottom' ? 'Top' : 'Bottom';
+  n.rot = normAng(180 - (g.rot || 0));
+  return n;
+}
+function escreveGeo(a, g){
+  if (!g) return false;
+  switch (a.t) {
+    case 'comp': moveComp(a.m, g); return true;
+    case 'track': return editaItem(a.m, { x1:r6(g.x1), y1:r6(g.y1), x2:r6(g.x2), y2:r6(g.y2) });
+    case 'arc': {
+      const p = { cx:r6(g.cx), cy:r6(g.cy) };
+      if (!arcoCheio(g)) { p.sa = normAng(g.sa); p.ea = normAng(g.ea); }
+      return editaItem(a.m, p);
+    }
+    case 'via': return editaItem(a.m, { x:r6(g.x), y:r6(g.y) });
+    case 'fill': return editaItem(a.m, { x1:r6(Math.min(g.x1, g.x2)), y1:r6(Math.min(g.y1, g.y2)), x2:r6(Math.max(g.x1, g.x2)), y2:r6(Math.max(g.y1, g.y2)), rot:normAng(g.rot || 0) });
+    case 'region': return editaRegiao(a.m, { points:g.points });
+    case 'recorte': {
+      if (!a.m) return false;
+      const op = opDe(a.m); if (!op) return false;
+      op.pts = g.points.map(p => [r6(p[0]), r6(p[1])]); return true;
+    }
+    case 'text': {
+      const s = a.m.src;
+      if (s && s.designator) { moveDesignator(a.m, { x:g.x, y:g.y, rot:g.rot }); return true; }
+      if (s && (s.comment || s.owner)) return false;
+      return editaItem(a.m, { x:r6(g.x), y:r6(g.y), rot:normAng(g.rot), mirror:!!g.mirror });
+    }
+    case 'ann': a.ann.x = r6(g.x); a.ann.y = r6(g.y); annChanged(); return false;
+  }
+  return false;
+}
+/* o que pode andar: componente, trilha/arco/via/fill/region livres, recorte do hub, texto
+   livre, designator e sinalizador. Pad arrasta o componente dele. */
+function movivel(a){
+  if (!a) return null;
+  if (a.t === 'pad') return a.comp ? ALVO_COMP.get(a.comp) : null;
+  if (a.t === 'regiao-ro') return null;
+  if (a.t === 'recorte') return a.m ? a : null;
+  if (a.t === 'text') { const s = a.m.src; if (s && s.comment) return null; if (s && s.owner && !s.designator) return null; }
+  if (a.m && a.m.deleted) return null;
+  return a;
+}
+/* o pivo do giro/espelho: o proprio ponto de um objeto so; o centro da selecao, na grade, de varios */
+function pivoDe(alvos, bases){
+  if (alvos.length === 1) {
+    const a = alvos[0], g = bases.get(a);
+    if (a.t === 'comp' || a.t === 'text' || a.t === 'via' || a.t === 'ann') return [g.x, g.y];
+    if (a.t === 'arc') return [g.cx, g.cy];
+    if (a.t === 'fill') return [(g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2];
+  }
+  const pts = [];
+  for (const a of alvos) {
+    const g = bases.get(a); if (!g) continue;
+    if (a.t === 'track') pts.push([g.x1, g.y1], [g.x2, g.y2]);
+    else if (a.t === 'arc') pts.push([g.cx - g.r, g.cy - g.r], [g.cx + g.r, g.cy + g.r]);
+    else if (a.t === 'fill') pts.push([g.x1, g.y1], [g.x2, g.y2]);
+    else if (g.points) for (const p of g.points) pts.push(p);
+    else pts.push([g.x, g.y]);
+  }
+  const bb = bbPts(pts);
+  if (!bb) return [0, 0];
+  return [snapV((bb[0] + bb[2]) / 2, grade.mm), snapV((bb[1] + bb[3]) / 2, grade.mm)];
+}
+/* Espaco/X/Y/L fora do arrasto: valem na selecao, uma mudanca so no desfazer */
+function transformaSelecao(como){
+  if (!garanteEdicao()) return false;
+  const alvos = [];
+  for (const a of SEL) { const m = movivel(a); if (m && alvos.indexOf(m) < 0) alvos.push(m); }
+  if (!alvos.length) return false;
+  if (como === 'vira' && !alvos.some(a => a.t === 'comp')) { HubDialog.toast('L vira de face só componente', 'info'); return false; }
+  if ((como === 'x' || como === 'y') && alvos.every(a => a.t === 'comp')) { HubDialog.toast('componente não se espelha: L vira de face', 'info'); return false; }
+  const bases = new Map(alvos.map(a => [a, geoDe(a)]));
+  const pv = pivoDe(alvos, bases);
+  let annMexeu = false;
+  for (const a of alvos) {
+    let g = bases.get(a);
+    if (como === 'gira') g = giraGeo(a.t, g, pv);
+    else if (como === 'vira') { if (a.t !== 'comp') continue; g = viraGeo(g, pv); }
+    else { if (a.t === 'comp') continue; g = espelhaGeo(a.t, g, como, pv); }
+    if (a.t === 'ann') annMexeu = true;
+    escreveGeo(a, g);
+  }
+  if (alvos.some(a => a.t !== 'ann')) commit(); else if (annMexeu) pede();
+  return true;
+}
 
-/* ------- propriedades (duplo clique) ------- */
-let propTarget = null;
-function escAttr(v){ return String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
-function propRow(key, label, value, type){
-  return `<label><span>${label}</span><input data-k="${key}" type="${type || 'number'}" step="any" value="${escAttr(value)}"></label>`;
+/* ============================== snap ==============================
+   Centro de pad, centro de via e ponta de trilha/arco ganham da grade, como no Altium (Snap
+   Options: Pad Centers, Via Centers, Track Vertices); fora deles, a grade. Ctrl solta tudo.
+   O alcance e de 9 px na tela -- ou o pad inteiro, se ele for maior. */
+let SNAP = null;
+function snapPonto(w, ev, op){
+  op = op || {};
+  if (ev && ev.ctrlKey) return { x:r6(w.x), y:r6(w.y), net:'', tipo:'livre' };
+  if (snapObj !== 'off' && !op.soGrade) {
+    const tol = px(9);
+    let melhor = null, dm = Infinity;
+    const ve = (x, y, net, tipo, layer, alcance) => {
+      if (!isNum(x) || !isNum(y)) return;
+      if (!camVisivel(layer)) return;
+      if (snapObj === 'atual' && layer !== cur && !(layer === 'Multi' && cobre(cur))) return;
+      if (op.camada && layer !== op.camada && !(layer === 'Multi' && cobre(op.camada))) return;
+      const d = Math.hypot(w.x - x, w.y - y);
+      if (d <= Math.max(tol, alcance || 0) && d < dm) { dm = d; melhor = { x:r6(x), y:r6(y), net:net || '', tipo }; }
+    };
+    const fora = o => EXCLUI && EXCLUI.has(o);       /* o que esta na mao nao e alvo de si mesmo */
+    const pad = p => { if (!p || !isNum(p.x) || fora(p)) return; const c = centroCobre(p); ve(c[0], c[1], p.net, 'pad', ehTH(p) ? 'Multi' : p.layer, Math.min(p.w || 0, p.h || 0) / 2); };
+    for (const c of EB.components || []) for (const p of (c && c.pads) || []) pad(p);
+    for (const p of EB.freepads || []) pad(p);
+    for (const v of EB.vias || []) if (v && !fora(v)) ve(v.x, v.y, v.net, 'via', 'Multi', (v.size || 0) / 2);
+    const pontas = list => { for (const o of list || []) { if (!o || o.keepout || fora(o)) continue;
+      if (o.kind === 'arc' || isNum(o.cx)) { if (!linhaValida(o, true) || arcoCheio(o)) continue; const a = pontaArco(o, 0), b = pontaArco(o, 1); ve(a[0], a[1], o.net, 'ponta', o.layer); ve(b[0], b[1], o.net, 'ponta', o.layer); }
+      else if (linhaValida(o, false)) { ve(o.x1, o.y1, o.net, 'ponta', o.layer); ve(o.x2, o.y2, o.net, 'ponta', o.layer); } } };
+    pontas(EB.tracks); pontas(EB.arcs);
+    if (op.camada && !cobre(op.camada)) { pontas(EB.silk); pontas(EB.lines); }
+    if (melhor) return melhor;
+  }
+  return { x:snapV(w.x, grade.mm), y:snapV(w.y, grade.mm), net:'', tipo:'grade' };
 }
-function propSelect(key, label, value, opts){
-  return `<label><span>${label}</span><select data-k="${key}">` +
-    opts.map(o => `<option${o === value ? ' selected' : ''}>${o}</option>`).join('') + '</select></label>';
+
+/* ============================== ferramentas ==============================
+   Todas desenham na CAMADA ATUAL (a aba ativa embaixo), como no Altium. Escolher uma destrava
+   a edicao. O que cada uma escreve:
+     trilha   track_add em serie (e via_add no 2, no * e no Ctrl+2)   via       via_add
+     linha    track_add em serie na camada atual                      arco      arc_add
+     circulo  region_add (cheio) ou arc_add 0-360 (contorno)          retangulo fill_add ou 4 track_add
+     triangulo/poligono  region_add ou track_add em volta            texto     text_add (espelhado embaixo)
+     furo     region_add com cutout:true                              contorno  outline_set (com pergunta)
+     medir e sinalizar nao escrevem no changes.js. */
+const FERRAMENTA_ROT = {
+  select:'Selecionar', trilha:'Trilha', via:'Via', linha:'Linha', arco:'Arco', circulo:'Círculo', retangulo:'Retângulo',
+  triangulo:'Triângulo', poligono:'Polígono', texto:'Texto', furo:'Furo de fixação', contorno:'Contorno da placa',
+  medir:'Medir', sinalizar:'Sinalizar',
+};
+let draft = null;          /* o gesto da ferramenta em curso */
+let cursorW = null;        /* o cursor no mundo (cru) */
+let lembraCanto = { p90:'v', p45:'diag' };
+const ladoBaixo = k => !!(LBYK[k] && LBYK[k].side === 'bottom') || /^Bottom/.test(k);
+function setTool(t){
+  if (t !== 'select' && LEAN) return;
+  encerraDraft(true);
+  if (t !== 'select' && t !== 'medir') garanteEdicao();
+  if (t === 'trilha' && !cobre(cur)) {
+    const c = camadasCobre()[0];
+    if (c) { cur = c.key; pintaAbas(); HubDialog.toast('trilha é em cobre — camada atual: ' + nomeDe(cur), 'info'); }
+  }
+  tool = t;
+  fechaCaixaTexto(); fechaAnnForm(); fechaMenu();
+  cv.style.cursor = t === 'select' ? 'default' : 'crosshair';
+  pintaBarra(); pintaStatus();
+  if (painel) { if (t !== 'select') painel.mostra('props'); painel.atualiza(); }
+  pede();
 }
-function openProps(m){
-  propTarget = m;
-  const rows = document.getElementById('proprows');
-  const title = document.getElementById('proptitle');
-  const e = m.eff;
-  if (m.kind === 'comp'){
-    title.textContent = 'Componente ' + m.src.ref;
-    rows.innerHTML = propRow('designator', 'designator', e.designator || m.src.ref, 'text') +
-      propRow('comment', 'comment', (e.comment !== undefined ? e.comment : (m.src.comment || '')), 'text') +
-      propRow('x', 'x (mm)', e.x) + propRow('y', 'y (mm)', e.y) + propRow('rot', 'rot (°)', e.rot) +
-      propSelect('layer', 'camada', e.layer, ['Top', 'Bottom']);
-  } else if (m.kind === 'track'){
-    title.textContent = 'Trilha ' + (m.added ? e.id : m.src.id);
-    rows.innerHTML = propRow('x1','x1',e.x1) + propRow('y1','y1',e.y1) + propRow('x2','x2',e.x2) +
-      propRow('y2','y2',e.y2) + propRow('w','largura',e.w) + propSelect('layer','camada',e.layer,['Top','Bottom']) +
-      propRow('net','net',e.net || '','text');
-  } else if (m.kind === 'via'){
-    title.textContent = 'Via ' + (m.added ? e.id : m.src.id);
-    rows.innerHTML = propRow('x','x',e.x) + propRow('y','y',e.y) + propRow('size','size',e.size) + propRow('drill','drill',e.drill);
-  } else if (m.kind === 'arc'){
-    title.textContent = 'Arco ' + (m.added ? e.id : m.src.id);
-    rows.innerHTML = propRow('cx','cx',e.cx) + propRow('cy','cy',e.cy) + propRow('r','raio',e.r) +
-      propRow('sa','âng. inicial',e.sa) + propRow('ea','âng. final',e.ea) + propRow('w','largura',e.w) +
-      propSelect('layer','camada',e.layer,['Top','Bottom']);
-  } else if (m.kind === 'text' && !m.src.designator && !m.src.comment){
-    title.textContent = 'Texto ' + m.src.id;
-    rows.innerHTML = propRow('text','texto',e.text || '','text') + propRow('x','x (centro)',e.x) +
-      propRow('y','y (centro)',e.y) + propRow('h','altura',e.h || 1) + propRow('rot','rot (°)',e.rot || 0);
-  } else if (m.kind === 'text' && m.src.designator){
-    title.textContent = 'Designator de ' + m.src.owner;
-    rows.innerHTML = propRow('x','x (centro)',e.x) + propRow('y','y (centro)',e.y) +
-      propRow('h','altura',e.h || 1) + propRow('rot','rot (°)',e.rot || 0);
-  } else return;   /* comment de componente: posicao nao editavel (sem op) */
-  document.getElementById('propform').style.display = 'block';
+/* larga o gesto em curso; o que ja foi fixado (trilha, linha) ja esta no changes.js */
+function encerraDraft(){
+  if (draft && draft.tipo === 'medida') { draft = null; return; }
+  draft = null;
+  SNAP = null;
 }
-function propValues(){
-  const out = {};
-  document.querySelectorAll('#proprows [data-k]').forEach(el => { out[el.dataset.k] = el.value; });
+function garanteEdicao(){
+  if (LEAN) return false;
+  if (!editOn) { setEdit(true); HubDialog.toast('edição destravada (' + (teclaDe('editar') || 'E') + ' trava de novo)', 'info', 2600); }
+  return true;
+}
+function camadaDesenho(){
+  if (cur === 'Multi') { HubDialog.toast('a Multi-Layer é só de pad e via — escolha outra camada nas abas', 'warn'); return null; }
+  return cur;
+}
+function proximaCobre(k, passo){
+  const L = camadasCobre().map(l => l.key);
+  if (!L.length) return k;
+  const i = L.indexOf(k);
+  return L[((i < 0 ? 0 : i) + (passo || 1) + L.length) % L.length];
+}
+
+/* ---- trilha e linha: o traçado do hub-fio.js (o mesmo do fio do Esquema), em mm ---- */
+function novaRota(){
+  const lay = tool === 'trilha' ? (cobre(cur) ? cur : proximaCobre('Top', 0)) : camadaDesenho();
+  if (!lay) return null;
+  return { tipo:'rota', est:null, layer:lay, w:tool === 'trilha' ? CFG.wTrilha : CFG.wLinha, net:'', passos:[] };
+}
+function opSegmento(a, b){
+  const op = { op:'track_add', layer:draft.layer, x1:r6(a[0]), y1:r6(a[1]), x2:r6(b[0]), y2:r6(b[1]), w:r6(draft.w) };
+  if (tool === 'trilha' && draft.net && cobre(draft.layer)) op.net = draft.net;
+  op.note = tool === 'trilha' ? 'trilha do hub' : 'linha do hub';
+  return op;
+}
+/* a net que a trilha encontrou no caminho vale para os trechos que ela ja tinha posto */
+function propagaNet(net){
+  if (!net || draft.net || tool !== 'trilha') return;
+  draft.net = net;
+  for (const p of draft.passos) for (const op of p.ops) if (op.op === 'track_add' && cobre(op.layer) && !op.net) op.net = net;
+}
+function segmentosNovos(antes, depois){
+  const ops = [];
+  for (let i = antes.pts.length; i < depois.pts.length; i++) ops.push(opSegmento(depois.pts[i - 1], depois.pts[i]));
+  return ops;
+}
+function rotaClique(w, ev){
+  if (!draft || draft.tipo !== 'rota') draft = novaRota();
+  if (!draft) return;
+  const p = snapPonto(w, ev, { camada:draft.layer });
+  if (!draft.est) {
+    draft.est = HubFio.novo([p.x, p.y], CFG.modo, CFG.modo === '45' ? lembraCanto.p45 : lembraCanto.p90);
+    draft.passos = [];
+    if (tool === 'trilha') draft.net = p.net || '';
+    pintaStatus(); pede(); return;
+  }
+  const eletrico = tool === 'trilha' && (p.tipo === 'pad' || p.tipo === 'via' || p.tipo === 'ponta');
+  const antes = draft.est;
+  const depois = eletrico ? HubFio.completa(antes, [p.x, p.y]) : HubFio.fixa(antes, [p.x, p.y]);
+  if (depois.pts.length === antes.pts.length) return;
+  propagaNet(p.net);
+  const ops = segmentosNovos(antes, depois);
+  for (const op of ops) CH.push(op);
+  draft.passos.push({ ops, est:antes, layer:draft.layer });
+  draft.est = depois;
+  if (eletrico) { draft.est = null; draft.passos = []; draft.net = ''; }   /* chegou num ponto eletrico: a trilha acaba ali */
+  commit();
+  pintaStatus();
+}
+function rotaBackspace(){
+  if (!draft || draft.tipo !== 'rota' || !draft.est) return false;
+  const ult = draft.passos.pop();
+  if (!ult) { draft.est = null; pintaStatus(); pede(); return true; }
+  for (const op of ult.ops) { const i = CH.indexOf(op); if (i >= 0) CH.splice(i, 1); }
+  draft.est = ult.est;
+  if (ult.layer && ult.layer !== draft.layer) { draft.layer = ult.layer; cur = ult.layer; }
+  commit();
+  pintaStatus();
+  return true;
+}
+/* 2: via sem trocar de camada; * e Ctrl+2: via e a trilha segue na outra camada de cobre.
+   A via cai no ponto do cursor (o L ate ele e completado), como no Altium. */
+function rotaVia(trocaCamada){
+  if (!draft || draft.tipo !== 'rota' || !draft.est || tool !== 'trilha') return false;
+  const p = snapPonto(cursorW || { x:draft.est.pts[draft.est.pts.length - 1][0], y:draft.est.pts[draft.est.pts.length - 1][1] }, null, { camada:draft.layer });
+  const antes = draft.est;
+  const depois = HubFio.completa(antes, [p.x, p.y]);
+  propagaNet(p.net);
+  const ops = segmentosNovos(antes, depois);
+  const via = { op:'via_add', x:r6(p.x), y:r6(p.y), size:r6(CFG.viaSize), drill:r6(CFG.viaDrill) };
+  if (draft.net) via.net = draft.net;
+  via.note = trocaCamada ? 'via da trilha (troca de camada)' : 'via da trilha';
+  ops.push(via);
+  for (const op of ops) CH.push(op);
+  const layerAntes = draft.layer;
+  draft.passos.push({ ops, est:antes, layer:layerAntes });
+  if (trocaCamada) { draft.layer = proximaCobre(draft.layer); cur = draft.layer; }
+  draft.est = HubFio.novo([p.x, p.y], depois.modo, depois.primeiro);
+  commit();
+  pintaStatus();
+  return true;
+}
+function rotaTermina(){
+  if (draft && draft.tipo === 'rota' && draft.est) { draft.est = null; draft.passos = []; draft.net = ''; pintaStatus(); pede(); return true; }
+  return false;
+}
+function rotaEspaco(shift){
+  if (!draft || draft.tipo !== 'rota') draft = novaRota();
+  if (!draft) return;
+  if (!draft.est) {
+    if (shift) { CFG.modo = HubFio.MODOS[(HubFio.MODOS.indexOf(CFG.modo) + 1) % HubFio.MODOS.length]; }
+    else if (CFG.modo === '45') lembraCanto.p45 = HubFio.inverte('45', lembraCanto.p45);
+    else if (CFG.modo === '90') lembraCanto.p90 = HubFio.inverte('90', lembraCanto.p90);
+  } else {
+    draft.est = shift ? HubFio.trocaModo(draft.est, lembraCanto) : HubFio.trocaCanto(draft.est);
+    CFG.modo = draft.est.modo;
+    if (draft.est.modo === '45') lembraCanto.p45 = draft.est.primeiro;
+    if (draft.est.modo === '90') lembraCanto.p90 = draft.est.primeiro;
+  }
+  pintaStatus(); if (painel) painel.atualiza(); pede();
+}
+
+/* ---- formas e o resto ---- */
+const circuloPts = (cx, cy, r, n) => { const out = []; for (let i = 0; i < n; i++) { const a = 2 * Math.PI * i / n; out.push([r6(cx + r * Math.cos(a)), r6(cy + r * Math.sin(a))]); } return out; };
+const nCirculo = r => Math.max(24, Math.min(96, Math.ceil(2 * Math.PI * r / 0.2)));
+/* lados que se cruzam: o Altium e o Gerber nao aceitam region assim (o motor recusaria) */
+function seCruza(pts){
+  const n = pts.length;
+  const lado = (a, b, c) => { const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); return Math.abs(v) < 1e-12 ? 0 : (v > 0 ? 1 : -1); };
+  for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) {
+    if (i === 0 && j === n - 1) continue;
+    const p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[j], p4 = pts[(j + 1) % n];
+    if (lado(p1, p2, p3) * lado(p1, p2, p4) < 0 && lado(p3, p4, p1) * lado(p3, p4, p2) < 0) return true;
+  }
+  return Math.abs(area2(pts)) < 1e-9;
+}
+function poeForma(pts, fechada, nota){
+  const lay = camadaDesenho(); if (!lay) return false;
+  if (preencher && fechada) {
+    if (seCruza(pts)) { HubDialog.toast('polígono com lados que se cruzam (ou sem área) — o Altium e o Gerber não aceitam', 'warn'); return false; }
+    const op = { op:'region_add', layer:lay, pts:pts.map(p => [r6(p[0]), r6(p[1])]), note:nota };
+    CH.push(op); (selDepois = [op]);
+  } else {
+    const n = pts.length, ops = [];
+    for (let i = 0; i < (fechada ? n : n - 1); i++) {
+      const a = pts[i], b = pts[(i + 1) % n];
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6) continue;
+      ops.push({ op:'track_add', layer:lay, x1:r6(a[0]), y1:r6(a[1]), x2:r6(b[0]), y2:r6(b[1]), w:r6(CFG.wLinha), note:nota });
+    }
+    if (!ops.length) return false;
+    for (const op of ops) CH.push(op);
+    selDepois = ops;
+  }
+  commit();
+  return true;
+}
+function cliqueFerramenta(w, ev){
+  if (tool === 'trilha' || tool === 'linha') { rotaClique(w, ev); return; }
+  if (tool === 'medir') {
+    const p = snapPonto(w, ev);
+    if (!draft || draft.tipo !== 'medida' || draft.b) draft = { tipo:'medida', a:p, b:null };
+    else draft.b = p;
+    pintaStatus(); pede(); return;
+  }
+  if (tool === 'sinalizar') { abreAnnForm(snapPonto(w, ev, { soGrade:true })); return; }
+  if (tool === 'texto') { const lay = camadaDesenho(); if (lay) abreCaixaTexto(snapPonto(w, ev, { soGrade:true })); return; }
+  if (tool === 'via') {
+    const p = snapPonto(w, ev);
+    const op = { op:'via_add', x:p.x, y:p.y, size:r6(CFG.viaSize), drill:r6(CFG.viaDrill) };
+    const net = p.net || CFG.viaNet;
+    if (net) op.net = net;
+    op.note = 'via do hub';
+    CH.push(op); selDepois = [op]; commit(); return;
+  }
+  if (tool === 'furo') {
+    const p = snapPonto(w, ev, { soGrade:true }), r = CFG.furo / 2;
+    const op = { op:'region_add', cutout:true, pts:circuloPts(p.x, p.y, r, 36), note:'furo de fixação ' + fmtNum(CFG.furo, 2) + ' mm' };
+    CH.push(op); selDepois = [op]; commit(); return;
+  }
+  const p = snapPonto(w, ev);
+  if (tool === 'arco') {
+    if (!draft || draft.tipo !== 'arco') { draft = { tipo:'arco', c:p, ini:null }; pede(); return; }
+    if (!draft.ini) { if (Math.hypot(p.x - draft.c.x, p.y - draft.c.y) < 1e-4) return; draft.ini = p; pede(); return; }
+    const lay = camadaDesenho(); if (!lay) return;
+    const r = Math.hypot(draft.ini.x - draft.c.x, draft.ini.y - draft.c.y);
+    const sa = normAng(Math.atan2(draft.ini.y - draft.c.y, draft.ini.x - draft.c.x) / RAD);
+    let ea = normAng(Math.atan2(p.y - draft.c.y, p.x - draft.c.x) / RAD);
+    if (Math.abs(ea - sa) < 1e-6) ea = sa + 360;
+    const op = { op:'arc_add', layer:lay, cx:draft.c.x, cy:draft.c.y, r:r6(r), sa, ea:r6(ea), w:r6(CFG.wLinha), note:'arco do hub' };
+    draft = null; CH.push(op); selDepois = [op]; commit(); return;
+  }
+  if (tool === 'circulo') {
+    if (!draft || draft.tipo !== 'circulo') { draft = { tipo:'circulo', c:p }; pede(); return; }
+    const r = Math.hypot(p.x - draft.c.x, p.y - draft.c.y), c = draft.c;
+    if (r < 1e-4) return;
+    draft = null;
+    if (preencher) { poeForma(circuloPts(c.x, c.y, r, nCirculo(r)), true, 'círculo cheio do hub'); return; }
+    const lay = camadaDesenho(); if (!lay) return;
+    const op = { op:'arc_add', layer:lay, cx:c.x, cy:c.y, r:r6(r), sa:0, ea:360, w:r6(CFG.wLinha), note:'círculo do hub' };
+    CH.push(op); selDepois = [op]; commit(); return;
+  }
+  if (tool === 'retangulo' || tool === 'triangulo') {
+    if (!draft || draft.tipo !== tool) { draft = { tipo:tool, a:p }; pede(); return; }
+    const a = draft.a;
+    if (Math.abs(p.x - a.x) < 1e-4 || Math.abs(p.y - a.y) < 1e-4) return;
+    draft = null;
+    if (tool === 'retangulo') {
+      if (preencher) {
+        const lay = camadaDesenho(); if (!lay) return;
+        const op = { op:'fill_add', layer:lay, x1:r6(Math.min(a.x, p.x)), y1:r6(Math.min(a.y, p.y)), x2:r6(Math.max(a.x, p.x)), y2:r6(Math.max(a.y, p.y)), rot:0, note:'retângulo cheio do hub' };
+        CH.push(op); selDepois = [op]; commit(); return;
+      }
+      poeForma([[a.x, a.y], [p.x, a.y], [p.x, p.y], [a.x, p.y]], true, 'retângulo do hub'); return;
+    }
+    poeForma(verticesTriangulo(a, p), true, preencher ? 'triângulo cheio do hub' : 'triângulo do hub'); return;
+  }
+  if (tool === 'poligono' || tool === 'contorno') {
+    if (!draft || draft.tipo !== tool) { draft = { tipo:tool, pts:[[p.x, p.y]] }; pede(); return; }
+    const pts = draft.pts, p0 = pts[0], ult = pts[pts.length - 1];
+    if (pts.length >= 3 && Math.hypot(p.x - p0[0], p.y - p0[1]) <= px(8)) { fechaPoligono(); return; }
+    if (Math.hypot(p.x - ult[0], p.y - ult[1]) < 1e-6) return;
+    pts.push([p.x, p.y]); pede(); return;
+  }
+}
+/* o triangulo cabe na caixa dos dois cliques: base no primeiro clique, bico no meio da outra borda */
+function verticesTriangulo(a, b){ return [[a.x, a.y], [b.x, a.y], [(a.x + b.x) / 2, b.y]]; }
+async function fechaPoligono(){
+  if (!draft || (draft.tipo !== 'poligono' && draft.tipo !== 'contorno')) return false;
+  const pts = draft.pts.slice(), tipo = draft.tipo;
+  if (pts.length < 3) { HubDialog.toast('o polígono precisa de pelo menos 3 vértices', 'warn'); return true; }
+  draft = null; pede();
+  if (tipo === 'poligono') { poeForma(pts, true, preencher ? 'polígono cheio do hub' : 'polígono do hub'); return true; }
+  if (seCruza(pts)) { HubDialog.toast('contorno com lados que se cruzam — desenhe de novo', 'warn'); return true; }
+  const ok = await HubDialog.confirm('Trocar o contorno da placa pelo polígono de ' + pts.length + ' vértices?\n\nO outline_set SUBSTITUI o contorno inteiro no Altium (o ApplyChanges ainda pergunta de novo antes de aplicar). Contorno com arco se desenha no Altium.',
+    { title:'Contorno da placa', ok:'Trocar o contorno', danger:true });
+  if (!ok) return true;
+  const ant = ultimoOp(x => x.op === 'outline_set');
+  const op = { op:'outline_set', pts:pts.map(p => [r6(p[0]), r6(p[1])]), note:'contorno desenhado no hub' };
+  if (ant) CH.splice(CH.indexOf(ant), 1, op); else CH.push(op);
+  commit();
+  HubDialog.toast('contorno trocado (' + pts.length + ' vértices) — salve para gravar o changes.js', 'ok');
+  return true;
+}
+function desfazPontoPoligono(){
+  if (!draft) return false;
+  if ((draft.tipo === 'poligono' || draft.tipo === 'contorno') && draft.pts.length) {
+    draft.pts.pop(); if (!draft.pts.length) draft = null; pede(); return true;
+  }
+  if (draft.tipo === 'arco' && draft.ini) { draft.ini = null; pede(); return true; }
+  if (draft.tipo === 'arco' || draft.tipo === 'circulo' || draft.tipo === 'retangulo' || draft.tipo === 'triangulo') { draft = null; pede(); return true; }
+  return false;
+}
+
+/* ---- texto: a caixa de digitar no proprio canvas (nada de prompt) ---- */
+let caixaPonto = null;
+function abreCaixaTexto(p){
+  const box = $('txtbox'), inp = $('txtinp');
+  if (!box || !inp) return;
+  caixaPonto = { x:p.x, y:p.y, layer:cur };
+  const s = mundoParaTela(p.x, p.y);
+  box.style.left = Math.round(s.x) + 'px'; box.style.top = Math.round(s.y) + 'px';
+  box.hidden = false;
+  inp.value = '';
+  $('txtdica').textContent = nomeDe(cur) + (ladoBaixo(cur) ? ' · espelhado (face de baixo)' : '') + ' · Enter grava · Esc desiste';
+  setTimeout(() => inp.focus(), 0);
+}
+function fechaCaixaTexto(){ const box = $('txtbox'); if (box) box.hidden = true; caixaPonto = null; }
+function gravaCaixaTexto(){
+  if (!caixaPonto) return;
+  const s = limpaTxt($('txtinp').value).replace(/[\r\n]+/g, ' ').trim();
+  const p = caixaPonto;
+  fechaCaixaTexto();
+  if (!s) return;
+  const op = { op:'text_add', layer:p.layer, text:s, x:r6(p.x), y:r6(p.y), h:r6(CFG.hTexto), w:r6(CFG.wTexto), rot:0 };
+  if (ladoBaixo(p.layer)) op.mirror = true;
+  op.note = 'texto do hub';
+  CH.push(op); selDepois = [op]; commit();
+}
+
+/* ---- sinalizador: o formulario de sempre, no tema ---- */
+let annPendente = null;
+function abreAnnForm(p){
+  annPendente = { x:r6(p.x), y:r6(p.y) };
+  $('anntext').value = '';
+  $('annform').hidden = false;
+  setTimeout(() => $('anntext').focus(), 0);
+}
+function fechaAnnForm(){ const f = $('annform'); if (f) f.hidden = true; annPendente = null; }
+function annProxId(){
+  let mx = 0;
+  for (const a of ANN) { const n = parseInt(String(a.id || '').replace(/^n/, ''), 10); if (isFinite(n) && n > mx) mx = n; }
+  return 'n' + (mx + 1);
+}
+function agoraTxt(){
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function gravaAnn(){
+  const msg = $('anntext').value.trim().replace(/"/g, "'");
+  if (!msg || !annPendente) return;
+  const sevs = $('annsev').value;
+  const a = { id:annProxId(), view:'pcb', x:annPendente.x, y:annPendente.y, layer:cur, severity:sevs,
+              msg, ref:'', status:'open', created:agoraTxt(), reply:'' };
+  ANN.push(a);
+  fechaAnnForm();
+  annChanged();
+  selSo([annAlvo(a)]);
+}
+function annChanged(){ setAnnDirty(true); if (painel) painel.atualiza(); pede(); }
+
+/* ============================== previas ============================== */
+
+function desenhaFerramenta(){
+  /* o ponto de snap num objeto: o anel ciano */
+  if (SNAP && tool !== 'select' && (SNAP.tipo === 'pad' || SNAP.tipo === 'via' || SNAP.tipo === 'ponta')) {
+    ctx.save(); ctx.strokeStyle = COR.snap; ctx.lineWidth = px(1.5); ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(SNAP.x, SNAP.y, px(7), 0, 2 * Math.PI); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(SNAP.x - px(10), SNAP.y); ctx.lineTo(SNAP.x + px(10), SNAP.y); ctx.moveTo(SNAP.x, SNAP.y - px(10)); ctx.lineTo(SNAP.x, SNAP.y + px(10)); ctx.stroke();
+    ctx.restore();
+  }
+  const c = SNAP || (cursorW ? { x:cursorW.x, y:cursorW.y } : null);
+  if (!c) return;
+  const lay = draft && draft.layer ? draft.layer : cur, cor = corDe(lay);
+  if (draft && draft.tipo === 'rota' && draft.est) {
+    const pe = HubFio.pernas(draft.est, [c.x, c.y]);
+    ctx.save(); ctx.strokeStyle = cor; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(draft.w, px(1));
+    if (pe.perna1) { ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.moveTo(pe.perna1[0][0], pe.perna1[0][1]); ctx.lineTo(pe.perna1[1][0], pe.perna1[1][1]); ctx.stroke(); }
+    if (pe.perna2) { ctx.globalAlpha = 0.6; ctx.setLineDash([px(6), px(4)]); ctx.beginPath(); ctx.moveTo(pe.perna2[0][0], pe.perna2[0][1]); ctx.lineTo(pe.perna2[1][0], pe.perna2[1][1]); ctx.stroke(); }
+    ctx.restore();
+    return;
+  }
+  ctx.save();
+  ctx.strokeStyle = cor; ctx.fillStyle = cor; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const wl = Math.max(CFG.wLinha, px(1));
+  if (tool === 'via' || (tool === 'trilha' && !(draft && draft.est))) {
+    if (tool === 'via') { ctx.globalAlpha = 0.6; ctx.fillStyle = corDe('Multi'); ctx.beginPath(); ctx.arc(c.x, c.y, CFG.viaSize / 2, 0, 2 * Math.PI); ctx.fill(); ctx.fillStyle = COR.furo; ctx.beginPath(); ctx.arc(c.x, c.y, CFG.viaDrill / 2, 0, 2 * Math.PI); ctx.fill(); }
+  } else if (tool === 'furo') {
+    ctx.globalAlpha = 0.9; ctx.strokeStyle = COR.contorno; ctx.lineWidth = px(1.3); ctx.setLineDash([px(4), px(3)]);
+    ctx.beginPath(); ctx.arc(c.x, c.y, CFG.furo / 2, 0, 2 * Math.PI); ctx.stroke();
+  } else if (draft && draft.tipo === 'arco') {
+    ctx.globalAlpha = 0.8; ctx.lineWidth = px(1); ctx.setLineDash([px(4), px(3)]);
+    const ini = draft.ini || c, r = Math.hypot(ini.x - draft.c.x, ini.y - draft.c.y);
+    ctx.beginPath(); ctx.moveTo(draft.c.x, draft.c.y); ctx.lineTo(ini.x, ini.y); ctx.stroke();
+    ctx.beginPath(); ctx.arc(draft.c.x, draft.c.y, px(3), 0, 2 * Math.PI); ctx.stroke();
+    if (draft.ini && r > 0) {
+      const sa = Math.atan2(draft.ini.y - draft.c.y, draft.ini.x - draft.c.x), ea = Math.atan2(c.y - draft.c.y, c.x - draft.c.x);
+      ctx.setLineDash([]); ctx.lineWidth = wl; ctx.beginPath(); ctx.arc(draft.c.x, draft.c.y, r, sa, ea === sa ? sa + 2 * Math.PI : ea, false); ctx.stroke();
+    }
+  } else if (draft && draft.tipo === 'circulo') {
+    const r = Math.hypot(c.x - draft.c.x, c.y - draft.c.y);
+    ctx.beginPath(); ctx.arc(draft.c.x, draft.c.y, r, 0, 2 * Math.PI);
+    if (preencher) { ctx.globalAlpha = 0.5; ctx.fill(); } else { ctx.globalAlpha = 0.85; ctx.lineWidth = wl; ctx.stroke(); }
+  } else if (draft && (draft.tipo === 'retangulo' || draft.tipo === 'triangulo')) {
+    const pts = draft.tipo === 'retangulo' ? [[draft.a.x, draft.a.y], [c.x, draft.a.y], [c.x, c.y], [draft.a.x, c.y]] : verticesTriangulo(draft.a, c);
+    const P = new Path2D(); pPoli(P, pts);
+    if (preencher) { ctx.globalAlpha = 0.5; ctx.fill(P); } else { ctx.globalAlpha = 0.85; ctx.lineWidth = wl; ctx.stroke(P); }
+  } else if (draft && (draft.tipo === 'poligono' || draft.tipo === 'contorno')) {
+    const pts = draft.pts.concat([[c.x, c.y]]);
+    if (draft.tipo === 'contorno') { ctx.strokeStyle = COR.seta; ctx.lineWidth = px(1.6); }
+    else ctx.lineWidth = wl;
+    if (preencher && draft.tipo === 'poligono' && pts.length >= 3) { const P = new Path2D(); pPoli(P, pts); ctx.globalAlpha = 0.4; ctx.fill(P); }
+    ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) ctx.lineTo(q[0], q[1]); ctx.stroke();
+    if (pts.length >= 3) { ctx.setLineDash([px(4), px(3)]); ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(pts[0][0], pts[0][1]); ctx.stroke(); }
+    ctx.setLineDash([]); ctx.fillStyle = COR.seta; for (const q of draft.pts) { ctx.beginPath(); ctx.arc(q[0], q[1], px(2.5), 0, 2 * Math.PI); ctx.fill(); }
+  } else if (draft && draft.tipo === 'medida') {
+    const a = draft.a, b = draft.b || c;
+    ctx.strokeStyle = COR.medida; ctx.fillStyle = COR.medida; ctx.lineWidth = px(1.4); ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    for (const q of [a, b]) { ctx.beginPath(); ctx.arc(q.x, q.y, px(3), 0, 2 * Math.PI); ctx.fill(); }
+    const d = Math.hypot(b.x - a.x, b.y - a.y), s = mundoParaTela((a.x + b.x) / 2, (a.y + b.y) / 2);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.font = '600 12px ' + (getComputedStyle(document.body).fontFamily || 'sans-serif');
+    const txt = fmtDist(d) + ' ' + unidade + '  (dX ' + fmtDist(Math.abs(b.x - a.x)) + ', dY ' + fmtDist(Math.abs(b.y - a.y)) + ')';
+    const tw = ctx.measureText(txt).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(s.x + 8, s.y - 22, tw + 10, 18);
+    ctx.fillStyle = COR.medida; ctx.fillText(txt, s.x + 13, s.y - 9);
+    transformaMundo();
+  }
+  ctx.restore();
+}
+
+/* ============================== arrasto e janela ============================== */
+
+let arrasto = null;      /* {alvos, bases:Map, inicio, dx, dy, moveu, girou, ref, pivo} ou {ponta:{alvo, qual}, base, ...} */
+let janela = null;       /* {a:{x,y}, b:{x,y}, shift} em coordenadas de tela */
+function objetosDoComp(m){
+  const out = [], nome = String(m.eff.designator || m.src.ref), ec = IDX.ebComp.get(m);
+  for (const p of (ec && ec.pads) || []) out.push({ kind:'pad', o:p });
+  for (const x of (IDX.donos.get(nome) || [])) out.push(x);
   return out;
 }
-document.getElementById('propok').addEventListener('click', () => {
-  const badField = Array.from(document.querySelectorAll('#proprows input[type=number]'))
-    .find(el => el.value.trim() === '' || !isFinite(+el.value));
-  if (badField){ HubDialog.alert('Valor numérico inválido no campo "' + badField.dataset.k + '".', { title:'Propriedades' }); return; }
-  const m = propTarget, v = propValues();
-  document.getElementById('propform').style.display = 'none';
-  if (!m) return;
-  const num = k => +v[k];
-  if (m.kind === 'comp'){
-    m.eff.x = num('x'); m.eff.y = num('y'); m.eff.rot = num('rot'); m.eff.layer = v.layer;
-    commitCompMove(m);                                   /* ja faz commit() */
-    const newDes = v.designator.trim().replace(/"/g, "'");
-    const newCom = v.comment.replace(/"/g, "'");
-    const desChanged = newDes && newDes !== m.src.ref, comChanged = newCom !== (m.src.comment || '');
-    let c = CH.find(c => c.op === 'comp_attr' && c.ref === m.src.ref);
-    if (!desChanged && !comChanged){ if (c){ CH.splice(CH.indexOf(c), 1); commit(); } }
-    else {
-      if (!c){ c = { op:'comp_attr', ref:m.src.ref, orig_designator:m.src.ref, orig_comment:(m.src.comment || ''), note:'atributos no hub' }; CH.push(c); }
-      if (desChanged) c.designator = newDes; else delete c.designator;
-      c.comment = newCom;
-      commit();
-    }
-  } else if (m.kind === 'track'){
-    upsertEdit(m, 'track_edit', { x1:r4(num('x1')), y1:r4(num('y1')), x2:r4(num('x2')), y2:r4(num('y2')),
-      w:num('w'), layer:v.layer, ...(v.net.trim() ? { net:v.net.trim() } : {}) }, ['x1','y1','x2','y2','w','layer']);
-  } else if (m.kind === 'via'){
-    upsertEdit(m, 'via_edit', { x:r4(num('x')), y:r4(num('y')), size:num('size'), drill:num('drill') }, ['x','y']);
-  } else if (m.kind === 'arc'){
-    upsertEdit(m, 'arc_edit', { cx:r4(num('cx')), cy:r4(num('cy')), r:num('r'), sa:num('sa'), ea:num('ea'),
-      w:num('w'), layer:v.layer }, ['cx','cy','r','sa','ea','layer']);
-  } else if (m.kind === 'text' && !m.src.designator && !m.src.comment){
-    let c = CH.find(c => c.op === 'text_edit' && c.id === m.src.id);
-    if (!c){ c = { op:'text_edit', id:m.src.id, orig_x:m.src.x, orig_y:m.src.y, orig_text:m.src.text, orig_layer:m.src.layer, note:'texto no hub' }; CH.push(c); }
-    c.text = v.text.replace(/"/g, "'"); c.x = r4(num('x')); c.y = r4(num('y')); c.h = num('h'); c.rot = num('rot');
-    commit();
-  } else if (m.kind === 'text' && m.src.designator){
-    let c = CH.find(c => c.op === 'designator_move' && c.ref === m.src.owner);
-    if (!c){ c = { op:'designator_move', ref:m.src.owner, orig_x:m.src.x, orig_y:m.src.y, note:'designator no hub' }; CH.push(c); }
-    c.x = r4(num('x')); c.y = r4(num('y')); c.h = num('h'); c.rot = num('rot');
-    commit();
+function excluiDoArrasto(alvos){
+  const S = new Set();
+  for (const a of alvos) {
+    if (a.t === 'comp') { for (const x of objetosDoComp(a.m)) S.add(x.o); }
+    else if (a.m) { const o = ebDe(a.m); if (o) S.add(o); }
+    else if (a.t === 'recorte') S.add(a.eb);
   }
-  propTarget = null;
-});
-document.getElementById('propcancel').addEventListener('click', () => {
-  document.getElementById('propform').style.display = 'none'; propTarget = null; reapply();
-});
-cv.addEventListener('dblclick', e => {
-  if (!editOn || tool !== 'select' || annTool) return;
-  const w = screenToWorld(e.offsetX, e.offsetY);
-  const h = hitTest(w.x, w.y);
-  if (h && h.kind !== 'pad' && h.kind !== 'ann') openProps(h);
-});
-cv.addEventListener('mousedown', e => {
-  dragging = false; dragMoved = false; lastX = e.offsetX; lastY = e.offsetY;
-  if (!editOn || annTool || tool !== 'select' || e.button !== 0){ dragging = true; return; }
-  const w = screenToWorld(e.offsetX, e.offsetY);
-  const h = hitTest(w.x, w.y);
-  if (h && ['comp','track','via','arc'].includes(h.kind) && !h.deleted){
-    objDrag = { m:h, startW:w, base:JSON.parse(JSON.stringify(h.eff)), moved:false };
-  } else dragging = true;
-});
-window.addEventListener('mouseup', e => {
-  dragging = false;
-  if (objDrag){
-    const d = objDrag; objDrag = null;
-    if (d.moved){
-      if (d.m.kind === 'comp') commitCompMove(d.m);
-      else if (d.m.kind === 'track') commitTrackEdit(d.m);
-      else if (d.m.kind === 'via') commitViaEdit(d.m);
-      else if (d.m.kind === 'arc') commitArcEdit(d.m);
-    }
-  }
-});
-cv.addEventListener('mousemove', e=>{
-  const w = screenToWorld(e.offsetX, e.offsetY);
-  hoverW = w;
-  document.getElementById('sx').textContent = w.x.toFixed(4);
-  document.getElementById('sy').textContent = w.y.toFixed(4);
-  document.getElementById('sxm').textContent = (w.x*MM2MIL).toFixed(2);
-  document.getElementById('sym').textContent = (w.y*MM2MIL).toFixed(2);
-  if (tool === 'track' && trackChain) draw();
-  if (objDrag){
-    const d = objDrag, m = d.m, dx = w.x - d.startW.x, dy = w.y - d.startW.y;
-    if (Math.abs(dx) + Math.abs(dy) > 0.01 || d.moved){
-      d.moved = true; dragMoved = true;
-      if (m.kind === 'comp'){ m.eff.x = snapVal(d.base.x + dx, e); m.eff.y = snapVal(d.base.y + dy, e); m.changed = true; }
-      else if (m.kind === 'track'){ const sx = snapVal(d.base.x1 + dx, e) - d.base.x1, sy = snapVal(d.base.y1 + dy, e) - d.base.y1;
-        m.eff.x1 = d.base.x1 + sx; m.eff.y1 = d.base.y1 + sy; m.eff.x2 = d.base.x2 + sx; m.eff.y2 = d.base.y2 + sy; m.changed = true; }
-      else if (m.kind === 'via'){ m.eff.x = snapVal(d.base.x + dx, e); m.eff.y = snapVal(d.base.y + dy, e); m.changed = true; }
-      else if (m.kind === 'arc'){ m.eff.cx = snapVal(d.base.cx + dx, e); m.eff.cy = snapVal(d.base.cy + dy, e); m.changed = true; }
-      draw();
-    }
-    return;
-  }
-  if (dragging){
-    const fx = view.flip ? -1 : 1;
-    view.cx -= (e.offsetX-lastX)/(view.scale*fx);
-    view.cy += (e.offsetY-lastY)/view.scale;
-    lastX=e.offsetX; lastY=e.offsetY; dragMoved=true;
-    draw();
-    return;
-  }
-  hover = hitTest(w.x, w.y);
-  document.getElementById('shover').textContent = hover ? hoverLabel(hover) : '';
-  cv.style.cursor = hover ? 'pointer' : 'crosshair';
-});
-cv.addEventListener('wheel', e=>{
-  e.preventDefault();
-  /* Shift + roda: anda para os lados, sem ampliar */
-  if (e.shiftKey){
-    const d = (e.deltaX || e.deltaY) * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
-    view.cx += d / (view.scale * (view.flip ? -1 : 1));
-    updateZoomLabel(); draw();
-    return;
-  }
-  const w = screenToWorld(e.offsetX, e.offsetY);
-  const f = e.deltaY<0 ? 1.18 : 1/1.18;
-  view.scale *= f;
-  /* mantem o ponto sob o cursor */
-  const fx = view.flip ? -1 : 1;
-  view.cx = w.x - (e.offsetX - CW/2)/(view.scale*fx);
-  view.cy = w.y + (e.offsetY - CHH/2)/view.scale;
-  updateZoomLabel(); draw();
-}, {passive:false});
-cv.addEventListener('click', e=>{
-  if (dragMoved) return;
-  if (annTool){ openAnnForm(screenToWorld(e.offsetX, e.offsetY)); return; }
-  if (tool === 'track'){ trackClick(screenToWorld(e.offsetX, e.offsetY), e); return; }
-  if (tool === 'via'){ viaClick(screenToWorld(e.offsetX, e.offsetY), e); return; }
-  const w = screenToWorld(e.offsetX, e.offsetY);
-  selected = hitTest(w.x, w.y);
-  showInfo(selected);
-  syncTableSel();
-  draw();
-});
-cv.addEventListener('contextmenu', e => { e.preventDefault(); if (trackChain){ trackChain = null; draw(); } });
-
-function hitTest(x,y){
-  for (const a of ANN){
-    if (a.view === 'pcb' && Math.hypot(x - a.x, y - a.y) <= 12 / view.scale)
-      return { kind:'ann', ann:a };
-  }
-  const tol = 6/view.scale;
-  /* pads primeiro (mais especificos) */
-  for (const m of model.comps){
-    const d = m.changed ? compDelta(m) : null;
-    for (const p of m.src.pads){
-      let px=p.x, py=p.y;
-      if (d){ const q=xfPoint(d,p.x,p.y); px=q.x; py=q.y; }
-      if (Math.hypot(x-px,y-py) <= Math.max(p.w,p.h)/2+tol*0.3)
-        return {kind:'pad', pad:p, comp:m, x:px, y:py};
-    }
-  }
-  for (const m of model.vias){ if (m.deleted) continue;
-    if (Math.hypot(x-m.eff.x,y-m.eff.y) <= m.eff.size/2+tol*0.3) return m; }
-  for (const m of model.added){ if (m.kind==='via' &&
-    Math.hypot(x-m.eff.x,y-m.eff.y) <= m.eff.size/2+tol*0.3) return m; }
-  const trackHit = (m)=> !m.deleted && show.layers[m.eff.layer] &&
-    distSeg(x,y,m.eff.x1,m.eff.y1,m.eff.x2,m.eff.y2) <= m.eff.w/2+tol*0.5;
-  for (const m of model.tracks) if (trackHit(m)) return m;
-  for (const m of model.added) if (m.kind==='track' && trackHit(m)) return m;
-  for (const m of model.arcs){ if (m.deleted) continue;
-    const e=m.eff;
-    if (Math.abs(Math.hypot(x-e.cx,y-e.cy)-e.r) <= e.w/2+tol*0.5) return m; }
-  for (const m of model.texts){
-    const e = m.eff, oc = m.src.owner ? model.compByRef[m.src.owner] : null;
-    let txt = e.text || '';
-    if (m.src.designator && oc) txt = oc.eff.designator || oc.src.ref;
-    if (m.src.comment && oc) txt = (oc.eff.comment !== undefined ? oc.eff.comment : (oc.src.comment || txt));
-    const d = ownerDelta(m.src.owner);
-    let tx = e.x, ty = e.y;
-    if (d){ const q = xfPoint(d, e.x, e.y); tx = q.x; ty = q.y; }
-    const tlayer = d ? effLayerForOwner(m.src.owner, e.layer) : e.layer;
-    if (!txt || !show.layers[tlayer]) continue;
-    const hw = textWidth(txt, e.h || 1) / 2, hh = (e.h || 1) / 2;   /* bbox sem rotacao (aproximacao) */
-    if (x >= tx - hw - tol && x <= tx + hw + tol && y >= ty - hh - tol && y <= ty + hh + tol) return m;
-  }
-  /* componentes por bbox */
-  for (const m of model.comps){
-    const b=m.src.bbox; if (!b) continue;
-    if (m.changed){
-      const d=compDelta(m);
-      /* teste no referencial original */
-      let lx=x-d.nx, ly=y-d.ny;
-      const c=Math.cos(-d.dr*Math.PI/180), s=Math.sin(-d.dr*Math.PI/180);
-      let rx=lx*c-ly*s, ry=lx*s+ly*c;
-      if (d.flip) rx=-rx;
-      rx+=d.ox; ry+=d.oy;
-      if (rx>=b.x1-tol&&rx<=b.x2+tol&&ry>=b.y1-tol&&ry<=b.y2+tol) return m;
-    } else {
-      if (x>=b.x1-tol&&x<=b.x2+tol&&y>=b.y1-tol&&y<=b.y2+tol) return m;
-    }
-  }
-  return null;
+  return S;
 }
-function hoverLabel(m){
-  if (m.kind==='comp') return `${m.src.ref} (${m.src.footprint})`;
-  if (m.kind==='pad') return `${m.comp.src.ref}.${m.pad.name} ${m.pad.net?'· '+m.pad.net:''}`;
-  if (m.kind==='track') return `${m.eff.id||'trilha nova'} ${m.eff.net?'· '+m.eff.net:''}`;
-  if (m.kind==='via') return `${m.eff.id||'via nova'} ${m.eff.net?'· '+m.eff.net:''}`;
-  if (m.kind==='arc') return `${m.eff.id||'arco novo'} ${m.eff.net?'· '+m.eff.net:''}`;
-  if (m.kind==='ann') return `⚑ ${m.ann.id}: ${m.ann.msg}`;
-  if (m.kind==='text') return m.src.designator ? `designator ${m.src.owner}` : (m.src.comment ? `comment ${m.src.owner}` : `texto ${m.src.id}`);
+function geoAtual(a){ const b = arrasto.bases.get(a); return b ? transladaGeo(a.t, b, arrasto.dx || 0, arrasto.dy || 0) : null; }
+function desenhaArrasto(){
+  if (!arrasto || (!arrasto.moveu && !arrasto.girou)) return;
+  if (arrasto.ponta) {
+    const a = arrasto.ponta.alvo, o = Object.assign({}, ebDe(a.m) || a.m.eff, arrasto.pontaGeo || {});
+    desenhaObj('track', o, corDe(o.layer), {});
+    realcaPonta(o, arrasto.ponta.qual);
+    return;
+  }
+  for (const a of arrasto.alvos) {
+    const g = geoAtual(a);
+    if (!g) continue;
+    if (a.t === 'comp') { previaComp(a.m, g); continue; }
+    if (a.t === 'ann') continue;
+    const e = ebDe(a.m) || (a.m && a.m.eff) || a.eb;
+    if (!e) continue;
+    if (a.t === 'text') {
+      const o = Object.assign({}, e, { x:g.x, y:g.y, rot:g.rot, mirror:g.mirror });
+      if (Array.isArray(e.polys)) {
+        if (nearAng(g.rot, e.rot || 0) && !!g.mirror === !!e.mirror) { const dx = g.x - e.x, dy = g.y - e.y; o.polys = e.polys.map(q => ({ hole:q.hole, pts:q.pts.map(p => [p[0] + dx, p[1] + dy]) })); }
+        else delete o.polys;
+      }
+      desenhaObj('text', o, corDe(e.layer), {});
+      continue;
+    }
+    const kind = a.t === 'recorte' ? 'region' : a.t;
+    const o = Object.assign({}, e, g);
+    const cor = a.t === 'via' ? corDe('Multi') : a.t === 'recorte' ? COR.contorno : corDe(e.layer);
+    desenhaObj(kind, o, cor, a.t === 'recorte' ? { contorno:true } : {});
+    if (a.t === 'via' && e.drill > 0) desenhaObj('via', { x:g.x, y:g.y, size:e.drill }, COR.furo, {});
+  }
+  if (arrasto.ima) {
+    ctx.save(); ctx.strokeStyle = COR.snap; ctx.lineWidth = px(1.5);
+    ctx.beginPath(); ctx.arc(arrasto.ima.x, arrasto.ima.y, px(7), 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
+  }
+}
+function realcaPonta(o, qual){
+  const x = qual === 1 ? o.x1 : o.x2, y = qual === 1 ? o.y1 : o.y2;
+  ctx.save(); ctx.strokeStyle = COR.sel; ctx.lineWidth = px(1.5);
+  ctx.beginPath(); ctx.arc(x, y, Math.max((o.w || 0) / 2, px(4)), 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
+}
+/* o componente na mao: os objetos dele pelo xfObject do motor, do lugar efetivo para o novo
+   (o flip e o giro saem pela mesma conta que o Gerber usa) */
+function previaComp(m, g){
+  const fake = { src:{ x:m.eff.x, y:m.eff.y, rot:isNum(m.eff.rot) ? m.eff.rot : 0, layer:m.eff.layer },
+                 eff:{ x:g.x, y:g.y, rot:g.rot, layer:g.layer } };
+  if (m.pares) Object.defineProperty(fake, 'pares', { value:m.pares, enumerable:false });
+  const d = HC.compDelta(fake);
+  const lado = ladoDaVista();
+  for (const { kind, o } of objetosDoComp(m)) {
+    const t = HC.xfObject(d, o, kind === 'track' ? 'line' : kind);
+    if (!t) continue;
+    if (kind === 'pad') {
+      const th = ehTH(t), lay = th ? 'Multi' : t.layer;
+      if (!camVisivel(lay)) continue;
+      const f = formaLado(t, lado), c = centroCobre(t), P = new Path2D();
+      pForma(P, c[0], c[1], f.w, f.h, t.rot, f.shape, f.radius);
+      ctx.save(); ctx.fillStyle = corDe(lay); ctx.fill(P);
+      if (th && t.drill > 0) { const F = new Path2D(); pFuro(F, t); ctx.fillStyle = COR.furo; ctx.fill(F); }
+      ctx.restore();
+      continue;
+    }
+    if (!camVisivel(t.layer)) continue;
+    const k = kind === 'line' ? 'track' : kind;
+    desenhaObj(k, t, corDe(t.layer), k === 'region' ? {} : {});
+  }
+  const ca = m.src.bbox;
+  if (ca && [ca.x1, ca.y1, ca.x2, ca.y2].every(isNum)) {
+    const c = [[ca.x1, ca.y1], [ca.x2, ca.y1], [ca.x2, ca.y2], [ca.x1, ca.y2]].map(p => {
+      const q0 = m.changed ? HC.xfPoint(HC.compDelta(m), p[0], p[1]) : { x:p[0], y:p[1] };
+      const q = HC.xfPoint(d, q0.x, q0.y); return [q.x, q.y]; });
+    const P = new Path2D(); pPoli(P, c);
+    ctx.save(); ctx.strokeStyle = COR.sel; ctx.setLineDash([px(5), px(3)]); ctx.lineWidth = px(1.2); ctx.stroke(P); ctx.restore();
+  }
+}
+function desenhaJanela(){
+  if (!janela) return;
+  const a = telaParaMundo(janela.a.x, janela.a.y), b = telaParaMundo(janela.b.x, janela.b.y);
+  const dentro = janela.b.x >= janela.a.x;
+  ctx.save();
+  const cor = dentro ? COR.dentro : COR.toca;
+  ctx.fillStyle = cor; ctx.strokeStyle = cor; ctx.globalAlpha = 0.12;
+  ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+  ctx.globalAlpha = 0.9; ctx.lineWidth = px(1); ctx.setLineDash(dentro ? [] : [px(5), px(3)]);
+  ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+  ctx.restore();
+}
+
+/* ============================== unidade e numeros ============================== */
+
+function fmtNum(v, dec){
+  if (!isNum(v)) return '—';
+  let s = v.toFixed(dec);
+  if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  if (s === '-0') s = '0';
+  return s.replace('.', ',');
+}
+const emUnid = mm => unidade === 'mil' ? mm * MM_MIL : mm;
+const fmtDist = mm => fmtNum(emUnid(mm), unidade === 'mil' ? 2 : 4);
+const fmtFixo = mm => isNum(mm) ? emUnid(mm).toFixed(unidade === 'mil' ? 1 : 3).replace('.', ',') : '—';
+/* "12,7", "12.7", "500mil", "0,254 mm": sem sufixo vale a unidade da tela */
+function parseDist(s){
+  const t = String(s == null ? '' : s).trim().toLowerCase().replace(',', '.');
+  const m = t.match(/^(-?\d*\.?\d+(?:e-?\d+)?)\s*(mm|mil)?$/);
+  if (!m) return null;
+  const v = parseFloat(m[1]);
+  if (!isFinite(v)) return null;
+  return (m[2] || unidade) === 'mil' ? v / MM_MIL : v;
+}
+function parseNum(s){
+  const t = String(s == null ? '' : s).trim().replace(',', '.').replace(/°$/, '').trim();
+  if (!/^-?\d*\.?\d+(?:e-?\d+)?$/.test(t)) return null;
+  const v = parseFloat(t);
+  return isFinite(v) ? v : null;
+}
+function setUnidade(u){
+  unidade = u === 'mil' ? 'mil' : 'mm';
+  gravaPref('unidade', unidade);
+  pintaStatus(); if (painel) painel.atualiza(); pede();
+  HubDialog.toast('unidade: ' + unidade, 'info', 1600);
+}
+function setGrade(id){
+  grade = gradePorId(id);
+  gravaPref('grade', grade.id);
+  pintaStatus(); if (painel) painel.atualiza(); pede();
+}
+
+/* ============================== trava de edicao ==============================
+   A vista abre em LEITURA: o arrasto acidental nao mexe na placa. Escolher uma ferramenta ou
+   mudar um campo do painel destrava (com aviso); E trava de novo. lean=1 nunca destrava. */
+function setEdit(v){
+  editOn = !!v && !LEAN;
+  if (!editOn) {
+    if (tool !== 'select') { tool = 'select'; encerraDraft(); cv.style.cursor = 'default'; }
+    if (arrasto) cancelaArrasto();
+  }
+  pintaBarra();
+  if (painel) painel.atualiza();
+  pede();
+}
+
+/* ============================== barra de status ============================== */
+
+let ultimoCursor = null;
+function pintaCursor(w){
+  ultimoCursor = w;
+  const el = $('sxy'); if (!el) return;
+  el.textContent = w ? 'X ' + fmtFixo(w.x) + '  Y ' + fmtFixo(w.y) + ' ' + unidade : '—';
+}
+function pintaStatus(){
+  if (LEAN) return;
+  const g = $('sgrade');
+  if (g) g.textContent = 'grade ' + grade.rot + (unidade === 'mil' ? ' (' + fmtNum(grade.mm * MM_MIL, 2) + ' mil)' : ' (' + fmtNum(grade.mm, 4) + ' mm)');
+  const sw = $('scamsw'), sn = $('scamn');
+  if (sw) sw.style.background = corDe(cur);
+  if (sn) sn.textContent = nomeDe(cur) + (show.unica ? ' · camada única' : '') + (view.flip ? ' · vista de baixo' : '');
+  const r = $('srota');
+  if (r) {
+    let s = '';
+    if (tool === 'trilha' || tool === 'linha') {
+      const modo = draft && draft.est ? HubFio.nomeDoModo(draft.est) : (CFG.modo === 'livre' ? 'ângulo livre' : CFG.modo + '°');
+      s = (tool === 'trilha' ? 'trilha ' : 'linha ') + modo + ' · W ' + fmtDist(tool === 'trilha' ? CFG.wTrilha : CFG.wLinha);
+      if (tool === 'trilha' && draft && draft.net) s += ' · ' + draft.net;
+      if (tool === 'trilha') s += ' · via ' + fmtDist(CFG.viaSize) + '/' + fmtDist(CFG.viaDrill);
+    } else if (tool === 'medir' && draft && draft.tipo === 'medida' && draft.b) {
+      const a = draft.a, b = draft.b;
+      s = 'medida ' + fmtDist(Math.hypot(b.x - a.x, b.y - a.y)) + ' ' + unidade + ' · dX ' + fmtDist(Math.abs(b.x - a.x)) + ' · dY ' + fmtDist(Math.abs(b.y - a.y));
+    } else if (tool !== 'select') s = FERRAMENTA_ROT[tool] + (preencher && /circulo|retangulo|triangulo|poligono/.test(tool) ? ' · cheio' : '');
+    r.textContent = s;
+  }
+  pintaCursor(ultimoCursor);
+}
+function rotuloAlvo(a){
+  if (!a) return '';
+  switch (a.t) {
+    case 'comp': return (a.m.eff.designator || a.m.src.ref) + ' · ' + (a.m.src.footprint || '') + ' · ' + a.m.eff.layer;
+    case 'pad': return (a.comp ? (a.comp.eff.designator || a.comp.src.ref) + '.' : 'pad ') + (a.pad.name || '') + (a.eb.net ? ' · ' + a.eb.net : '');
+    case 'track': { const e = a.m.eff; return (cobre(e.layer) ? 'trilha ' : 'linha ') + (a.m.added ? 'nova' : a.m.src.id) + ' · ' + nomeDe(e.layer) + (e.net ? ' · ' + e.net : '') + ' · W ' + fmtDist(e.w); }
+    case 'arc': { const e = a.m.eff; return 'arco ' + (a.m.added ? 'novo' : a.m.src.id) + ' · ' + nomeDe(e.layer) + (e.net ? ' · ' + e.net : ''); }
+    case 'via': { const e = a.m.eff; return 'via ' + (a.m.added ? 'nova' : a.m.src.id) + (e.net ? ' · ' + e.net : '') + ' · ' + fmtDist(e.size) + '/' + fmtDist(e.drill); }
+    case 'fill': return 'fill ' + (a.m.added ? 'novo' : a.m.src.id) + ' · ' + nomeDe(a.m.eff.layer);
+    case 'region': return 'região ' + (a.m.added ? 'nova' : a.m.src.id) + ' · ' + nomeDe(a.m.eff.layer);
+    case 'regiao-ro': return 'região ' + a.eb.id + ' · ' + nomeDe(a.eb.layer) + (a.eb.poly ? ' · polígono' : '');
+    case 'recorte': return 'recorte da placa' + (a.m ? ' (novo)' : ' ' + a.eb.id);
+    case 'text': { const s = a.m.src || {}; const e = ebDe(a.m) || a.m.eff;
+      return s.designator ? 'designator ' + s.owner : s.comment ? 'comment ' + s.owner : 'texto "' + String(e.text || '').slice(0, 30) + '" · ' + nomeDe(e.layer); }
+    case 'ann': return '⚑ ' + a.ann.id + ': ' + a.ann.msg;
+  }
   return '';
 }
-function showInfo(m){
-  const el=document.getElementById('infopanel');
-  if (!m){ el.textContent='— clique em um objeto —'; return; }
-  let obj;
-  if (m.kind==='pad') obj={ tipo:'pad', comp:m.comp.src.ref, ...m.pad };
-  else if (m.kind==='ann') obj={ tipo:'sinalizador', ...m.ann };
-  else obj={ tipo:m.kind, ...(m.eff||{}), ...(m.added?{ADICIONADO:true}:{}),
-             ...(m.deleted?{REMOVIDO:true}:{}),
-             ...(m.changed&&m.src?{original:m.src}:{}) };
-  el.textContent = JSON.stringify(obj, null, 1);
+function pintaStatusSel(){
+  const el = $('ssel'); if (!el) return;
+  if (!SEL.length) { el.textContent = ''; return; }
+  if (SEL.length === 1) { el.textContent = 'sel.: ' + rotuloAlvo(SEL[0]); return; }
+  el.textContent = SEL.length + ' selecionados';
 }
+function avisoRodape(t){ const el = $('smsg'); if (el) el.textContent = t || ''; }
 
-/* ============================== paineis laterais ============================== */
-
-function buildLayerPanel(){
-  const sec=document.getElementById('layersec');
-  for (const k of Object.keys(LAYER_COLORS)){
-    const row=document.createElement('label'); row.className='layerrow';
-    const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=true;
-    cb.addEventListener('change',()=>{ show.layers[k]=cb.checked; draw(); });
-    const sw=document.createElement('span'); sw.className='swatch'; sw.style.background=LAYER_COLORS[k];
-    const tx=document.createElement('span'); tx.textContent=k;
-    row.append(cb,sw,tx); sec.appendChild(row);
+/* ============================== a barra flutuante (Active Bar) ==============================
+   Tudo a vista, nada escondido em gaveta (pedido do dono: o controle escondido "nao chegou");
+   o que ainda nao existe aparece TRAVADO, com o porque no title. */
+const BARRA = [
+  { id:'editar', ic:'cadeado', acao:'editar', at:'editar' }, '|',
+  { id:'select', ic:'select', tool:'select', titulo:'Selecionar e mover (Esc) — arrastar no vazio: janela (esq→dir dentro, dir→esq toca)' }, '|',
+  { id:'trilha', ic:'trilha', tool:'trilha', at:'trilha', titulo:'Trilha — roteamento interativo: clique fixa o canto, Espaço inverte, Shift+Espaço 45°/90°/livre, Backspace desfaz o trecho, 2 via, * ou Ctrl+2 via e troca de camada, Tab largura, botão direito termina' },
+  { id:'via', ic:'via', tool:'via', at:'via', titulo:'Via — diâmetro e furo no painel' }, '|',
+  { id:'linha', ic:'linha', tool:'linha', at:'linha', titulo:'Linha na camada atual — cliques encadeados, botão direito termina' },
+  { id:'arco', ic:'arco', tool:'arco', at:'arco', titulo:'Arco — centro, início e fim' },
+  { id:'circulo', ic:'circulo', tool:'circulo', at:'circulo', titulo:'Círculo — centro e raio (com Preencher: região cheia)' },
+  { id:'retangulo', ic:'retangulo', tool:'retangulo', at:'retangulo', titulo:'Retângulo — dois cantos (com Preencher: fill)' },
+  { id:'triangulo', ic:'triangulo', tool:'triangulo', titulo:'Triângulo — dois cantos da caixa (com Preencher: região cheia)' },
+  { id:'poligono', ic:'poligono', tool:'poligono', at:'poligono', titulo:'Polígono — um clique por vértice; duplo clique, Enter ou botão direito fecha (com Preencher: região cheia)' },
+  { id:'texto', ic:'texto', tool:'texto', at:'texto', titulo:'Texto — clique e digite (Enter grava); na face de baixo nasce espelhado' },
+  { id:'preencher', ic:'preencher', acao:'preencher', at:'preencher', titulo:'Preencher — ligado: círculo, triângulo e polígono viram região cheia e o retângulo vira fill; desligado: contorno de trilhas' }, '|',
+  { id:'furo', ic:'furo', tool:'furo', titulo:'Furo de fixação — Board Cutout redondo (diâmetro no painel)' },
+  { id:'contorno', ic:'contorno', tool:'contorno', titulo:'Contorno da placa — polígono que substitui o contorno (pergunta antes)' },
+  { id:'pad', ic:'pad', trava:'Pad avulso — travado: falta pad_add no ApplyChanges' },
+  { id:'pour', ic:'pour', trava:'Polygon pour — travado: o hub ainda não despeja polígono' }, '|',
+  { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Medir distância — dois cliques' },
+  { id:'sinalizar', ic:'sinalizar', tool:'sinalizar', at:'sinalizar', titulo:'Sinalizar um problema para a IA (annotations.js)' }, '|',
+  { id:'desfazer', ic:'desfazer', acao:'desfazer', at:'desfazer', titulo:'Desfazer' },
+  { id:'refazer', ic:'refazer', acao:'refazer', at:'refazer', titulo:'Refazer' }, '|',
+  { id:'gerber', ic:'gerber', acao:'gerber', rotulo:'Gerber', titulo:'Gerar e ver o Gerber (o pacote que vai para a JLCPCB)' },
+  { id:'pdf', ic:'pdf', trava:'PDF de layout — travado: próxima etapa' },
+];
+function montaBarra(){
+  const tb = $('pcbtb');
+  if (!tb || LEAN) return;
+  tb.textContent = '';
+  for (const b of BARRA) {
+    if (b === '|') { const s = document.createElement('span'); s.className = 'sep'; tb.append(s); continue; }
+    const el = document.createElement('button');
+    el.type = 'button'; el.id = 'tb-' + b.id; el.dataset.id = b.id;
+    el.append(HubPcbIcones.icone(b.ic));
+    if (b.rotulo) { const l = document.createElement('span'); l.className = 'lb'; l.textContent = b.rotulo; el.append(l); }
+    if (b.trava) { el.disabled = true; el.title = b.trava; el.setAttribute('aria-label', b.trava); }
+    else el.addEventListener('click', () => acaoDaBarra(b));
+    if (b.tool || b.id === 'preencher' || b.id === 'editar') el.setAttribute('aria-pressed', 'false');
+    tb.append(el);
+  }
+  pintaBarra();
+}
+function acaoDaBarra(b){
+  fechaMenu();
+  if (b.tool) { setTool(tool === b.tool && b.tool !== 'select' ? 'select' : b.tool); return; }
+  fazAcao(b.acao);
+}
+function pintaBarra(){
+  if (LEAN) return;
+  for (const b of BARRA) {
+    if (b === '|' || b.trava) continue;
+    const el = $('tb-' + b.id); if (!el) continue;
+    let tit = b.titulo || '';
+    if (b.id === 'editar') {
+      tit = editOn ? 'Edição destravada — clique (ou ' + (teclaDe('editar') || 'E') + ') para travar' : 'Só leitura — clique (ou ' + (teclaDe('editar') || 'E') + ') para destravar; escolher uma ferramenta também destrava';
+      el.setAttribute('aria-pressed', String(editOn));
+      el.replaceChildren(HubPcbIcones.icone(editOn ? 'cadeadoAb' : 'cadeado'));
+    } else if (b.tool) el.setAttribute('aria-pressed', String(tool === b.tool));
+    else if (b.id === 'preencher') el.setAttribute('aria-pressed', String(preencher));
+    if (b.id === 'desfazer') el.disabled = undoStack.length < 2;
+    if (b.id === 'refazer') el.disabled = !redoStack.length;
+    const t = b.at ? teclaDe(b.at) : (b.id === 'select' ? '' : '');
+    el.title = t && b.id !== 'editar' ? tit + ' (' + t + ')' : tit;
+    el.setAttribute('aria-label', el.title);
   }
 }
-function zoomToObj(m){
-  if (!m) return;
-  let x,y,r=4;
-  if (m.kind==='comp'){ const b=m.src.bbox; const d=m.changed?compDelta(m):null;
-    if (d){ const q=xfPoint(d,(b.x1+b.x2)/2,(b.y1+b.y2)/2); x=q.x; y=q.y; }
-    else { x=(b.x1+b.x2)/2; y=(b.y1+b.y2)/2; }
-    r=Math.max(b.x2-b.x1,b.y2-b.y1)*1.6+2; }
-  else if (m.kind==='track'){ x=(m.eff.x1+m.eff.x2)/2; y=(m.eff.y1+m.eff.y2)/2;
-    r=Math.hypot(m.eff.x2-m.eff.x1,m.eff.y2-m.eff.y1)*1.6+2; }
-  else if (m.kind==='via'){ x=m.eff.x; y=m.eff.y; r=m.eff.size*8+2; }
-  else if (m.kind==='arc'){ x=m.eff.cx; y=m.eff.cy; r=m.eff.r*2.6+2; }
-  else if (m.kind==='pad'){ x=m.x; y=m.y; r=Math.max(m.pad.w,m.pad.h)*8+1; }
-  else if (m.kind==='text'){ x=m.eff.x; y=m.eff.y; r=(m.eff.h||1)*8+2; }
-  else if (m.kind==='ann'){ x=m.ann.x; y=m.ann.y; r=8; }
-  else return;
-  view.cx=x; view.cy=y;
-  view.scale=Math.min(CW,CHH)/Math.max(r,0.5);
-  updateZoomLabel(); draw();
+function togglePreencher(){
+  preencher = !preencher;
+  gravaPref('preencher', preencher ? '1' : '0');
+  pintaBarra(); pintaStatus(); if (painel) painel.atualiza(); pede();
+  HubDialog.toast(preencher ? 'Preencher ligado: formas cheias (região/fill)' : 'Preencher desligado: contorno de trilhas', 'info', 2200);
+}
+
+/* ============================== abas de camada (embaixo do canvas) ============================== */
+
+function setCur(k){
+  if (!LBYK[k] || k === cur) return;
+  if (draft && draft.tipo === 'rota') rotaTermina();
+  cur = k;
+  if (show.layers[k] === false) show.layers[k] = true;
+  pintaAbas(); pintaStatus(); if (painel) painel.atualiza(); pede();
+}
+function rotuloAba(l){ return (l.num ? '[' + l.num + '] ' : '') + l.name; }
+function pintaAbas(){
+  const box = $('abaslista'); if (!box || LEAN) return;
+  box.textContent = '';
+  for (const l of LAYERS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'aba'; b.dataset.k = l.key;
+    if (l.key === cur) b.classList.add('on');
+    if (show.layers[l.key] === false) b.classList.add('oculta');
+    if (!l.used && !l.inBoard) b.classList.add('vazia');
+    b.style.setProperty('--cor', l.color);
+    const sw = document.createElement('i'); sw.className = 'sw'; sw.style.background = l.color;
+    const nm = document.createElement('span'); nm.textContent = rotuloAba(l);
+    b.append(sw, nm);
+    b.title = l.name + ' (' + l.key + ') — ' + (l.count ? l.count + ' objeto(s)' : 'sem objeto no espelho') +
+      (show.layers[l.key] === false ? ' — oculta' : '') + '\nclique: camada atual · botão direito: ocultar / só esta';
+    box.append(b);
+  }
+  const on = box.querySelector('.aba.on');
+  if (on && on.scrollIntoView) { try { on.scrollIntoView({ block:'nearest', inline:'nearest' }); } catch (e) {} }
+  const ls = $('lsBtn'); if (ls) ls.classList.toggle('unica', show.unica);
+}
+function soEsta(k){ for (const l of LAYERS) show.layers[l.key] = l.key === k; setCur(k); pintaAbas(); if (painel) painel.atualiza(); pede(); }
+function mostraTodas(){ for (const l of LAYERS) show.layers[l.key] = true; show.unica = false; pintaAbas(); pintaStatus(); if (painel) painel.atualiza(); pede(); }
+function setVisivel(k, v){ show.layers[k] = !!v; pintaAbas(); if (painel) painel.atualiza(); pede(); }
+const CONJUNTOS = {
+  todas:{ rot:'Todas as camadas', f:() => true },
+  sinal:{ rot:'Sinal (cobre e Multi)', f:l => l.kind === 'signal' || l.kind === 'plane' || l.kind === 'multi' },
+  naosinal:{ rot:'Não-sinal (serigrafia, máscara, pasta, furação, keep-out)', f:l => /overlay|solder|paste|drill|keepout/.test(l.kind) },
+  mecanicas:{ rot:'Mecânicas', f:l => l.kind === 'mech' },
+  cima:{ rot:'Lado de cima', f:l => l.side === 'top' || l.kind === 'multi' },
+  baixo:{ rot:'Lado de baixo', f:l => l.side === 'bottom' || l.kind === 'multi' },
+};
+function conjunto(nome){
+  const c = CONJUNTOS[nome]; if (!c) return;
+  for (const l of LAYERS) show.layers[l.key] = !!c.f(l);
+  show.unica = false;
+  if (show.layers[cur] === false) { const p = LAYERS.find(l => show.layers[l.key]); if (p) cur = p.key; }
+  pintaAbas(); pintaStatus(); if (painel) painel.atualiza(); pede();
+}
+function camadaVizinha(passo){
+  const vis = LAYERS.filter(l => show.layers[l.key] !== false);
+  if (!vis.length) return;
+  const i = vis.findIndex(l => l.key === cur);
+  setCur(vis[((i < 0 ? 0 : i) + passo + vis.length) % vis.length].key);
+}
+function setUnica(v){ show.unica = v === undefined ? !show.unica : !!v; pintaAbas(); pintaStatus(); if (painel) painel.atualiza(); pede(); }
+function setFlip(v){ view.flip = v === undefined ? !view.flip : !!v; cacheSujo = true; montaAlvos(); pintaStatus(); if (painel) painel.atualiza(); pede(); }
+
+/* ============================== menu (botao direito e LS) ============================== */
+
+function fechaMenu(){ const m = $('menu'); if (m) { m.hidden = true; m.textContent = ''; } }
+function abreMenu(itens, sx, sy){
+  const m = $('menu'); if (!m) return;
+  m.textContent = '';
+  for (const it of itens) {
+    if (it === '-') { const s = document.createElement('div'); s.className = 'msep'; m.append(s); continue; }
+    if (it.titulo) { const t = document.createElement('div'); t.className = 'mtit'; t.textContent = it.titulo; m.append(t); continue; }
+    const b = document.createElement('button');
+    b.type = 'button';
+    if (it.cor) { const i = document.createElement('i'); i.className = 'sw'; i.style.background = it.cor; b.append(i); }
+    const s = document.createElement('span'); s.textContent = it.rot; b.append(s);
+    if (it.tecla) { const k = document.createElement('kbd'); k.textContent = it.tecla; b.append(k); }
+    if (it.off) { b.disabled = true; if (it.porque) b.title = it.porque; }
+    else b.addEventListener('click', () => { fechaMenu(); it.f(); });
+    m.append(b);
+  }
+  m.hidden = false;
+  const r = m.getBoundingClientRect();
+  const x = Math.min(sx, window.innerWidth - r.width - 6), y = Math.min(sy, window.innerHeight - r.height - 6);
+  m.style.left = Math.max(4, x) + 'px'; m.style.top = Math.max(4, y) + 'px';
+}
+function menuCamada(k, sx, sy){
+  const vis = show.layers[k] !== false;
+  abreMenu([
+    { titulo:nomeDe(k) },
+    { rot:'Tornar a camada atual', f:() => setCur(k) },
+    { rot:vis ? 'Ocultar' : 'Mostrar', f:() => setVisivel(k, !vis), off:vis && k === cur, porque:'a camada atual não se oculta' },
+    { rot:'Mostrar só esta', f:() => soEsta(k) },
+    { rot:'Mostrar todas', f:mostraTodas },
+  ], sx, sy);
+}
+function menuLS(sx, sy){
+  const itens = [{ titulo:'Conjuntos de camadas' }];
+  for (const nome of Object.keys(CONJUNTOS)) itens.push({ rot:CONJUNTOS[nome].rot, f:() => conjunto(nome) });
+  itens.push('-');
+  itens.push({ rot:(show.unica ? 'Desligar' : 'Ligar') + ' a camada única', tecla:teclaDe('camadaUnica'), f:() => setUnica() });
+  itens.push({ rot:view.flip ? 'Ver por cima' : 'Ver por baixo', tecla:teclaDe('virar'), f:() => setFlip() });
+  abreMenu(itens, sx, sy);
+}
+function menuContexto(sx, sy, w){
+  const lista = hitsEm(w.x, w.y);
+  if (lista.length && !selTem(lista[0])) selSo([lista[0]]);
+  const itens = [];
+  const temSel = SEL.length > 0;
+  const mudaCamada = SEL.filter(a => (a.t === 'track' || a.t === 'arc' || a.t === 'fill' || (a.t === 'text' && a.m.src && !a.m.src.owner && !a.m.src.designator && !a.m.src.comment) || (a.t === 'text' && a.m.added)));
+  if (temSel) {
+    itens.push({ titulo:SEL.length === 1 ? rotuloAlvo(SEL[0]).slice(0, 48) : SEL.length + ' objetos' });
+    itens.push({ rot:'Propriedades', f:() => { if (painel) { painel.mostra('props'); painel.foca(); } } });
+    if (mudaCamada.length) {
+      itens.push('-'); itens.push({ titulo:'Camada' });
+      for (const l of LAYERS) if (l.kind !== 'multi') itens.push({ rot:rotuloAba(l), cor:l.color, f:() => editarCampo('layer', l.key) });
+    }
+    if (SEL.some(a => a.t === 'comp')) { itens.push('-'); itens.push({ rot:'Virar de face', tecla:'L', f:() => transformaSelecao('vira') }); }
+    itens.push('-');
+    itens.push({ rot:'Girar 90°', tecla:teclaDe('girar'), f:() => transformaSelecao('gira') });
+    itens.push({ rot:'Apagar', tecla:teclaDe('apagar'), f:() => { if (garanteEdicao()) apagaSelecao(); } });
+    itens.push({ rot:'Enquadrar a seleção', f:() => enquadraAlvos(SEL) });
+  }
+  itens.push('-');
+  itens.push({ rot:'Sinalizar aqui', tecla:teclaDe('sinalizar'), f:() => { garanteEdicao(); abreAnnForm(snapPonto(w, null, { soGrade:true })); } });
+  itens.push({ rot:'Enquadrar a placa', tecla:teclaDe('enquadrar'), f:enquadra });
+  abreMenu(itens, sx, sy);
+}
+
+/* ============================== enquadrar ============================== */
+
+function enquadraCaixa(bb, folga){
+  if (!bb || !CW || !CHH) return;
+  const w = Math.max(bb[2] - bb[0], 0.5), h = Math.max(bb[3] - bb[1], 0.5);
+  view.cx = (bb[0] + bb[2]) / 2; view.cy = (bb[1] + bb[3]) / 2;
+  view.scale = Math.min(CW / (w * (folga || 1.15)), CHH / (h * (folga || 1.15)));
+  pede();
+}
+function enquadra(){
+  const bb = EB.board && EB.board.bbox;
+  if (bb && [bb.x1, bb.y1, bb.x2, bb.y2].every(isNum)) enquadraCaixa([bb.x1, bb.y1, bb.x2, bb.y2], 1.12);
+  else { const b = bbPts(HITS.flatMap(h => [[h.bb[0], h.bb[1]], [h.bb[2], h.bb[3]]])); if (b) enquadraCaixa(b, 1.12); }
+}
+function caixaDoAlvo(a){
+  const h = HITS.filter(x => x.a === a);
+  if (a.t === 'ann') return [a.ann.x - 4, a.ann.y - 4, a.ann.x + 4, a.ann.y + 4];
+  if (!h.length) return null;
+  let bb = null;
+  for (const x of h) if (a.t !== 'comp' || x.prio === 9) bb = bb ? [Math.min(bb[0], x.bb[0]), Math.min(bb[1], x.bb[1]), Math.max(bb[2], x.bb[2]), Math.max(bb[3], x.bb[3])] : x.bb.slice();
+  return bb || h[0].bb.slice();
+}
+function enquadraAlvos(lista){
+  let bb = null;
+  for (const a of lista) { const b = caixaDoAlvo(a); if (b) bb = bb ? [Math.min(bb[0], b[0]), Math.min(bb[1], b[1]), Math.max(bb[2], b[2]), Math.max(bb[3], b[3])] : b; }
+  if (!bb) return;
+  const m = Math.max(bb[2] - bb[0], bb[3] - bb[1]);
+  const c = [(bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2], r = Math.max(m * 1.6, 3);
+  enquadraCaixa([c[0] - r / 2, c[1] - r / 2, c[0] + r / 2, c[1] + r / 2], 1);
+}
+
+/* ============================== teste de toque ============================== */
+
+function visivelHit(h){
+  if (h.layer === '_placa') return true;
+  if (h.prio === 9) return camVisivel(h.layer) || camVisivel(h.layer + 'Overlay');
+  return camVisivel(h.layer);
+}
+const noLadoAtual = k => k === cur || (k === 'Multi' && cobre(cur));
+/* todos os alvos sob o ponto, o de cima primeiro: a camada atual, depois a ordem de desenho
+   (o desenhado por ultimo esta por cima), depois o tipo (via e pad antes de trilha, componente
+   por ultimo). O 2o clique no mesmo ponto anda nesta lista. */
+function hitsEm(x, y){
+  const tol = px(4), out = [], vistos = new Set();
+  if (filtro.outros) for (const a of ANN) if (a.view === 'pcb' && isNum(a.x) && Math.hypot(x - a.x, y - a.y) <= px(12)) {
+    const al = annAlvo(a); if (!vistos.has(al)) { vistos.add(al); out.push({ a:al, k:-1e9 }); } }
+  const cand = [];
+  for (const h of HITS) {
+    if (!filtro[h.t] || !visivelHit(h)) continue;
+    if (x < h.bb[0] - tol || x > h.bb[2] + tol || y < h.bb[1] - tol || y > h.bb[3] + tol) continue;
+    if (!h.hit(x, y, tol)) continue;
+    const k = (noLadoAtual(h.layer) ? 0 : 1e6) - (ORDEM_IDX[h.layer] || 0) * 100 + h.prio;
+    cand.push({ a:h.a, k });
+  }
+  cand.sort((p, q) => p.k - q.k);
+  for (const c of cand) if (!vistos.has(c.a)) { vistos.add(c.a); out.push(c); }
+  return out.map(c => c.a);
+}
+function selecionaTudo(){
+  const S = new Set();
+  for (const h of HITS) if (filtro[h.t] && visivelHit(h)) S.add(h.a);
+  if (filtro.outros) for (const a of ANN) if (a.view === 'pcb') S.add(annAlvo(a));
+  selSo(Array.from(S));
+  HubDialog.toast(SEL.length + ' objeto(s) selecionado(s) (respeitando o filtro e as camadas visíveis)', 'info', 2200);
+}
+function selecionaJanela(j, shift){
+  const a = telaParaMundo(j.a.x, j.a.y), b = telaParaMundo(j.b.x, j.b.y);
+  const r = [Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y)];
+  const dentro = j.b.x >= j.a.x;
+  const S = new Set(shift ? SEL : []);
+  const porAlvo = new Map();
+  for (const h of HITS) {
+    if (!filtro[h.t] || !visivelHit(h)) continue;
+    const bb = h.bb;
+    const inteiro = bb[0] >= r[0] && bb[2] <= r[2] && bb[1] >= r[1] && bb[3] <= r[3];
+    const toca = bb[0] <= r[2] && bb[2] >= r[0] && bb[1] <= r[3] && bb[3] >= r[1];
+    if (dentro) {
+      /* componente so entra inteiro: vale a caixa dele, nao um pedaco de silk que coube */
+      if (h.a.t === 'comp' && h.prio !== 9) continue;
+      if (inteiro) S.add(h.a);
+    } else if (toca) {
+      if (h.o && (h.a.t === 'track' || (h.a.t === 'comp' && h.o.x1 !== undefined)) && isNum(h.o.x1) && !segTocaRet(h.o, r)) continue;
+      S.add(h.a);
+    }
+    porAlvo.set(h.a, true);
+  }
+  if (filtro.outros) for (const n of ANN) if (n.view === 'pcb' && n.x >= r[0] && n.x <= r[2] && n.y >= r[1] && n.y <= r[3]) S.add(annAlvo(n));
+  selSo(Array.from(S));
+}
+function segTocaRet(o, r){
+  const dentro = (x, y) => x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3];
+  if (dentro(o.x1, o.y1) || dentro(o.x2, o.y2)) return true;
+  const L = [[r[0], r[1], r[2], r[1]], [r[2], r[1], r[2], r[3]], [r[2], r[3], r[0], r[3]], [r[0], r[3], r[0], r[1]]];
+  const cruza = (a, b, c, d) => {
+    const o1 = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]), o2 = (b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0]);
+    const o3 = (d[0] - c[0]) * (a[1] - c[1]) - (d[1] - c[1]) * (a[0] - c[0]), o4 = (d[0] - c[0]) * (b[1] - c[1]) - (d[1] - c[1]) * (b[0] - c[0]);
+    return o1 * o2 <= 0 && o3 * o4 <= 0;
+  };
+  return L.some(s => cruza([o.x1, o.y1], [o.x2, o.y2], [s[0], s[1]], [s[2], s[3]]));
+}
+
+/* ============================== mouse ==============================
+   Como na vista Esquema: o esquerdo seleciona e arrasta (no vazio, a janela de selecao), o
+   direito arrasta a tela e, parado, abre o menu (ou termina a trilha), a roda da zoom no
+   cursor e Shift+roda anda de lado. Ctrl+Shift+roda troca a camada atual, como no Altium. */
+let gesto = null;            /* o gesto do botao esquerdo em curso */
+let pan = null;              /* o arrasto da tela pelo direito (ou o do meio) */
+let engoleClique = false;    /* o click que fecha um arrasto/janela nao e clique */
+let ultimoClique = null;     /* para o 2o clique no mesmo ponto pegar o objeto de baixo */
+function pontoTela(e){ const r = cv.getBoundingClientRect(); return { x:e.clientX - r.left, y:e.clientY - r.top }; }
+function opcoesSnap(){
+  if (tool === 'trilha') return { camada:(draft && draft.layer) || cur };
+  if (tool === 'linha') return { camada:cur };
+  if (tool === 'sinalizar' || tool === 'texto' || tool === 'furo') return { soGrade:true };
+  return {};
+}
+let avisouTrava = false;
+function avisoTrava(){
+  avisoRodape('só leitura — ' + (teclaDe('editar') || 'E') + ' (ou escolher uma ferramenta) destrava a edição');
+  if (!avisouTrava) { avisouTrava = true; HubDialog.toast('Só leitura: ' + (teclaDe('editar') || 'E') + ' destrava a edição (escolher uma ferramenta também).', 'info', 3500); }
+}
+
+cv.addEventListener('mousedown', e => {
+  fechaMenu();
+  const s = pontoTela(e), w = telaParaMundo(s.x, s.y);
+  if (e.button === 2 || e.button === 1) { pan = { x:e.clientX, y:e.clientY, moveu:false }; if (e.button === 1) e.preventDefault(); return; }
+  if (e.button !== 0) return;
+  engoleClique = false;
+  if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur &&
+      !(document.activeElement.closest && document.activeElement.closest('#txtbox, #annform'))) document.activeElement.blur();
+  if (tool !== 'select') { gesto = { modo:'ferramenta', s }; return; }
+  if (editOn && !LEAN) {
+    for (const a of SEL) {
+      if (a.t !== 'track' || a.m.deleted) continue;
+      const o = ebDe(a.m) || a.m.eff, tolP = Math.max((o.w || 0) / 2, px(6));
+      if (Math.hypot(w.x - o.x1, w.y - o.y1) <= tolP) { gesto = { modo:'ponta', alvo:a, qual:1, inicio:w, s }; return; }
+      if (Math.hypot(w.x - o.x2, w.y - o.y2) <= tolP) { gesto = { modo:'ponta', alvo:a, qual:2, inicio:w, s }; return; }
+    }
+  }
+  const lista = hitsEm(w.x, w.y);
+  if (lista.length) { gesto = { modo:(editOn && !LEAN) ? 'mover' : 'nada', s, inicio:w, topo:lista[0], pegaSel:lista.some(selTem), shift:e.shiftKey }; return; }
+  gesto = { modo:'janela', s, shift:e.shiftKey };
+});
+window.addEventListener('mousemove', e => {
+  if (pan) {
+    const dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+    if (!pan.moveu && Math.hypot(dx, dy) > 3) { pan.moveu = true; cv.style.cursor = 'grabbing'; }
+    if (pan.moveu) { const fx = view.flip ? -1 : 1; view.cx -= dx / (view.scale * fx); view.cy += dy / view.scale; pan.x = e.clientX; pan.y = e.clientY; pede(); }
+    return;
+  }
+  const s = pontoTela(e), w = telaParaMundo(s.x, s.y);
+  if (gesto) { moveGesto(e, s, w); return; }
+  if (e.target !== cv) return;
+  cursorW = w; pintaCursor(w);
+  if (tool === 'select') {
+    const h = hitsEm(w.x, w.y)[0] || null;
+    if (h !== HOVER) { HOVER = h; $('shover').textContent = h ? rotuloAlvo(h) : ''; pede(); }
+  } else {
+    SNAP = snapPonto(w, e, opcoesSnap());
+    $('shover').textContent = SNAP && (SNAP.tipo === 'pad' || SNAP.tipo === 'via' || SNAP.tipo === 'ponta') ? '⊙ ' + SNAP.tipo + (SNAP.net ? ' · ' + SNAP.net : '') : '';
+    if (tool === 'medir' && draft && draft.tipo === 'medida' && !draft.b) pintaMedidaAoVivo();
+    pede();
+  }
+});
+cv.addEventListener('mouseleave', () => { if (!gesto && HOVER) { HOVER = null; $('shover').textContent = ''; pede(); } });
+function pintaMedidaAoVivo(){
+  const r = $('srota'); if (!r || !draft || !draft.a) return;
+  const b = SNAP || cursorW, a = draft.a;
+  r.textContent = 'medida ' + fmtDist(Math.hypot(b.x - a.x, b.y - a.y)) + ' ' + unidade + ' · dX ' + fmtDist(Math.abs(b.x - a.x)) + ' · dY ' + fmtDist(Math.abs(b.y - a.y));
+}
+function moveGesto(e, s, w){
+  const g = gesto, longe = Math.hypot(s.x - g.s.x, s.y - g.s.y) > 3;
+  cursorW = w; pintaCursor(w);
+  if (g.modo === 'janela') { if (longe || janela) { janela = { a:g.s, b:s }; pede(); } return; }
+  if (g.modo === 'nada') { if (longe && !g.avisou) { g.avisou = true; avisoTrava(); } return; }
+  if (g.modo === 'ponta') { if (!arrasto && !longe) return; if (!arrasto) iniciaPonta(g); atualizaPonta(e, w); return; }
+  if (g.modo === 'mover') { if (!arrasto && !longe) return; if (!arrasto && !iniciaArrasto(g)) return; atualizaArrasto(e, w); return; }
+  if (g.modo === 'ferramenta') { SNAP = snapPonto(w, e, opcoesSnap()); pede(); }
+}
+function iniciaArrasto(g){
+  let alvos;
+  if (g.pegaSel && !g.shift) alvos = SEL.slice();
+  else { if (!g.shift) selSo([g.topo]); else selSoma(g.topo); alvos = g.shift ? SEL.slice() : [g.topo]; }
+  const movs = [];
+  for (const a of alvos) { const m = movivel(a); if (m && movs.indexOf(m) < 0) movs.push(m); }
+  if (!movs.length) {
+    g.modo = 'nada';
+    const t = g.topo;
+    HubDialog.toast(t && t.t === 'regiao-ro' ? 'Esta região não anda daqui: ' + t.motivo
+      : t && t.t === 'text' ? 'O comment não tem op de posição (comment_move ainda não existe) — mova pelo Altium'
+      : 'Isto não se move daqui', 'info', 4000);
+    return false;
+  }
+  const bases = new Map(movs.map(a => [a, geoDe(a)]));
+  const principal = movs.indexOf(movivel(g.topo)) >= 0 ? movivel(g.topo) : movs[0];
+  arrasto = { alvos:movs, bases, inicio:g.inicio, dx:0, dy:0, moveu:false, girou:false, principal,
+              ref:refDoGeo(principal.t, bases.get(principal)), annBase:new Map() };
+  for (const a of movs) if (a.t === 'ann') arrasto.annBase.set(a, { x:a.ann.x, y:a.ann.y });
+  EXCLUI = excluiDoArrasto(movs); cacheSujo = true;
+  return true;
+}
+function atualizaArrasto(e, w){
+  const a = arrasto;
+  let dx = w.x - a.inicio.x, dy = w.y - a.inicio.y;
+  a.ima = null;
+  if (a.ref && !e.ctrlKey) {
+    const alvo = { x:a.ref[0] + dx, y:a.ref[1] + dy };
+    /* trilha, arco e via grudam em pad/via/ponta (a ligacao); o resto, na grade */
+    const eletrico = a.alvos.length === 1 && (a.principal.t === 'via' || a.principal.t === 'track' || a.principal.t === 'arc');
+    const p = snapPonto(alvo, e, eletrico ? {} : { soGrade:true });
+    if (p.tipo === 'pad' || p.tipo === 'via' || p.tipo === 'ponta') a.ima = p;
+    dx = p.x - a.ref[0]; dy = p.y - a.ref[1];
+  }
+  a.dx = dx; a.dy = dy; a.moveu = true;
+  for (const [al, b] of a.annBase) { al.ann.x = b.x + dx; al.ann.y = b.y + dy; }
+  avisoRodape('dX ' + fmtDist(dx) + '  dY ' + fmtDist(dy) + ' ' + unidade + ' · Espaço gira · L vira · X/Y espelha · Ctrl solta o snap · Esc desiste');
+  pede();
+}
+function giraNoArrasto(como){
+  const a = arrasto;
+  if (!a || a.ponta) return;
+  if (como === 'vira' && !a.alvos.some(x => x.t === 'comp')) return;
+  const pv = pivoDe(a.alvos, a.bases);
+  for (const al of a.alvos) {
+    let g = a.bases.get(al);
+    if (como === 'gira') g = giraGeo(al.t, g, pv);
+    else if (como === 'vira') { if (al.t !== 'comp') continue; g = viraGeo(g, pv); }
+    else { if (al.t === 'comp') continue; g = espelhaGeo(al.t, g, como, pv); }
+    a.bases.set(al, g);
+  }
+  a.ref = refDoGeo(a.principal.t, a.bases.get(a.principal));
+  a.girou = true;
+  pede();
+}
+function iniciaPonta(g){
+  arrasto = { ponta:{ alvo:g.alvo, qual:g.qual }, pontaGeo:null, moveu:true, alvos:[], bases:new Map() };
+  const o = ebDe(g.alvo.m);
+  EXCLUI = new Set(o ? [o] : []); cacheSujo = true;
+}
+function atualizaPonta(e, w){
+  const a = arrasto, m = a.ponta.alvo.m;
+  const p = snapPonto(w, e, { camada:m.eff.layer });
+  a.ima = (p.tipo === 'pad' || p.tipo === 'via' || p.tipo === 'ponta') ? p : null;
+  a.pontaGeo = a.ponta.qual === 1 ? { x1:p.x, y1:p.y } : { x2:p.x, y2:p.y };
+  pede();
+}
+function terminaArrasto(){
+  const a = arrasto;
+  arrasto = null; EXCLUI = null; cacheSujo = true;
+  avisoRodape('');
+  if (a.ponta) {
+    if (a.pontaGeo) {
+      const m = a.ponta.alvo.m, e = m.eff;
+      const g = Object.assign({ x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2 }, a.pontaGeo);
+      if (Math.hypot(g.x2 - g.x1, g.y2 - g.y1) < 1e-6) { HubDialog.toast('a trilha ficaria com comprimento zero', 'warn'); pede(); return; }
+      editaItem(m, { x1:r6(g.x1), y1:r6(g.y1), x2:r6(g.x2), y2:r6(g.y2) });
+      commit();
+    } else pede();
+    return;
+  }
+  if (!a.moveu && !a.girou) { pede(); return; }
+  let mexeu = false, ann = false;
+  for (const al of a.alvos) {
+    const g = transladaGeo(al.t, a.bases.get(al), a.dx, a.dy);
+    if (al.t === 'ann') { ann = true; al.ann.x = r6(g.x); al.ann.y = r6(g.y); continue; }
+    if (escreveGeo(al, g)) mexeu = true;
+  }
+  if (ann) annChanged();
+  if (mexeu) commit(); else pede();
+}
+function cancelaArrasto(){
+  const a = arrasto;
+  if (!a) return;
+  arrasto = null; EXCLUI = null; cacheSujo = true;
+  for (const [al, b] of (a.annBase || new Map())) { al.ann.x = b.x; al.ann.y = b.y; }
+  gesto = null; engoleClique = true;
+  avisoRodape('');
+  pede();
+}
+window.addEventListener('mouseup', e => {
+  if (e.button !== 0) { if (e.button === 1) { pan = null; cv.style.cursor = tool === 'select' ? 'default' : 'crosshair'; } return; }
+  const g = gesto; gesto = null;
+  if (!g) return;
+  if (arrasto) { engoleClique = true; terminaArrasto(); return; }
+  if (g.modo === 'janela' && janela) { const j = janela; janela = null; engoleClique = true; selecionaJanela(j, g.shift); pede(); return; }
+  if (g.modo === 'nada' && g.avisou) engoleClique = true;
+  janela = null;
+});
+cv.addEventListener('click', e => {
+  if (engoleClique) { engoleClique = false; return; }
+  const s = pontoTela(e), w = telaParaMundo(s.x, s.y);
+  if (tool !== 'select') { cliqueFerramenta(w, e); pintaStatus(); return; }
+  const lista = hitsEm(w.x, w.y);
+  if (!lista.length) { if (!e.shiftKey) selLimpa(); ultimoClique = null; return; }
+  let i = 0;
+  const mesma = ultimoClique && Math.hypot(s.x - ultimoClique.sx, s.y - ultimoClique.sy) <= 4 &&
+                ultimoClique.lista.length === lista.length && ultimoClique.lista.every((a, k) => a === lista[k]);
+  if (mesma && !e.shiftKey) i = (ultimoClique.i + 1) % lista.length;
+  ultimoClique = { sx:s.x, sy:s.y, lista, i };
+  const a = lista[i];
+  if (e.shiftKey) { if (selTem(a)) selTira(a); else selSoma(a); }
+  else selSo([a]);
+  if (mesma && lista.length > 1) avisoRodape('objeto ' + (i + 1) + ' de ' + lista.length + ' neste ponto — clique de novo para o próximo');
+  else avisoRodape('');
+});
+cv.addEventListener('dblclick', e => {
+  if (tool === 'poligono' || tool === 'contorno') { fechaPoligono(); return; }
+  if (tool === 'trilha' || tool === 'linha') { rotaTermina(); return; }
+  if (tool !== 'select') return;
+  const s = pontoTela(e), w = telaParaMundo(s.x, s.y), h = hitsEm(w.x, w.y)[0];
+  if (!h) return;
+  if (!selTem(h)) selSo([h]);
+  if (painel) { painel.mostra('props'); painel.foca(); }
+});
+cv.addEventListener('contextmenu', e => e.preventDefault());
+window.addEventListener('contextmenu', e => {
+  if (!pan) return;
+  e.preventDefault();
+  const moveu = pan.moveu;
+  pan = null;
+  cv.style.cursor = tool === 'select' ? 'default' : 'crosshair';
+  if (moveu || e.target !== cv) return;
+  const s = pontoTela(e), w = telaParaMundo(s.x, s.y);
+  if (LEAN) return;
+  if (tool === 'trilha' || tool === 'linha') { if (!rotaTermina()) setTool('select'); return; }
+  if (tool === 'poligono' || tool === 'contorno') {
+    if (draft && draft.pts && draft.pts.length >= 3) fechaPoligono();
+    else if (draft) { draft = null; pede(); } else setTool('select');
+    return;
+  }
+  if (tool !== 'select') { if (draft && draft.tipo !== 'medida') { draft = null; pede(); } else setTool('select'); return; }
+  menuContexto(e.clientX, e.clientY, w);
+});
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (e.ctrlKey && e.shiftKey) { if (!LEAN) camadaVizinha(e.deltaY > 0 ? 1 : -1); return; }
+  if (e.shiftKey) {
+    const d = (e.deltaX || e.deltaY) * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+    view.cx += d / (view.scale * (view.flip ? -1 : 1)); pede(); return;
+  }
+  if (!e.deltaY) return;
+  const s = pontoTela(e), w = telaParaMundo(s.x, s.y);
+  view.scale = Math.min(Math.max(view.scale * (e.deltaY < 0 ? 1.18 : 1 / 1.18), 0.3), 30000);
+  const fx = view.flip ? -1 : 1;
+  view.cx = w.x - (s.x - CW / 2) / (view.scale * fx);
+  view.cy = w.y + (s.y - CHH / 2) / view.scale;
+  pede();
+}, { passive:false });
+document.addEventListener('mousedown', e => { const m = $('menu'); if (m && !m.hidden && !m.contains(e.target)) fechaMenu(); }, true);
+window.addEventListener('blur', () => { if (arrasto) cancelaArrasto(); gesto = null; pan = null; janela = null; fechaMenu(); });
+
+/* ============================== teclado ============================== */
+
+function ehCampo(t){ return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); }
+function escape(){
+  const m = $('menu');
+  if (m && !m.hidden) { fechaMenu(); return; }
+  if (caixaPonto) { fechaCaixaTexto(); return; }
+  if (annPendente) { fechaAnnForm(); return; }
+  if (arrasto) { cancelaArrasto(); return; }
+  if (janela || gesto) { janela = null; gesto = null; pede(); return; }
+  if (tool !== 'select') { setTool('select'); return; }
+  if (SEL.length) { selLimpa(); return; }
+  avisoRodape('');
+}
+window.addEventListener('keydown', e => {
+  if (gerberAberto()) { if (e.key === 'Escape') { e.preventDefault(); fechaGerber(); } return; }
+  if (ajudaAberta()) { if (e.key === 'Escape' || normalizaTecla(e) === teclaDe('ajuda')) { e.preventDefault(); toggleAjuda(false); } return; }
+  if (e.key === 'Escape') { if (!ehCampo(e.target) || e.target.closest('#txtbox, #annform')) escape(); return; }
+  if (ehCampo(e.target)) return;
+  const k = normalizaTecla(e);
+  if (LEAN) { if (k === (teclaDe('enquadrar') || 'F')) enquadra(); return; }
+  /* o Chrome entrega Ctrl+1..8 a pagina antes de trocar de aba so se a pagina segurar */
+  if (k === 'Ctrl+2' || k === 'Ctrl+S' || k === 'Ctrl+M' || k === 'Ctrl+A' || k === 'Ctrl+Z' || k === 'Ctrl+Y') e.preventDefault();
+  if (arrasto && !arrasto.ponta) {
+    if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); giraNoArrasto('gira'); return; }
+    if (k === 'L') { giraNoArrasto('vira'); return; }
+    if (k === 'X') { giraNoArrasto('x'); return; }
+    if (k === 'Y') { giraNoArrasto('y'); return; }
+  }
+  if (tool === 'trilha' || tool === 'linha') {
+    if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); rotaEspaco(e.shiftKey); return; }
+    if (e.key === 'Backspace') { e.preventDefault(); rotaBackspace(); return; }
+    if (tool === 'trilha' && draft && draft.est) {
+      if (e.key === '2' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); rotaVia(false); return; }
+      if (e.key === '*' || k === 'Ctrl+2' || k === teclaDe('via') || k === teclaDe('outraFace')) { e.preventDefault(); rotaVia(true); return; }
+    }
+  }
+  if (tool !== 'select' && e.key === 'Tab') {
+    e.preventDefault();
+    if (painel) { painel.mostra('props'); painel.foca(tool === 'trilha' ? 'tool.wTrilha' : null); }
+    return;
+  }
+  if ((tool === 'poligono' || tool === 'contorno') && e.key === 'Enter') { e.preventDefault(); fechaPoligono(); return; }
+  if (tool !== 'select' && tool !== 'trilha' && tool !== 'linha' && e.key === 'Backspace' && desfazPontoPoligono()) { e.preventDefault(); return; }
+  const acao = ATALHOS.porTecla[k];
+  if (!acao) return;
+  if (k === 'Espaço') { if (!SEL.length) return; e.preventDefault(); }
+  fazAcao(acao);
+});
+/* o que cada acao da tabela faz (a tabela da a tecla; aqui, o efeito) */
+function fazAcao(id){
+  fechaMenu();
+  switch (id) {
+    case 'trilha': setTool(tool === 'trilha' ? 'select' : 'trilha'); return;
+    case 'via':
+      if (tool === 'trilha' && draft && draft.est) { rotaVia(true); return; }
+      setTool(tool === 'via' ? 'select' : 'via'); return;
+    case 'linha': case 'arco': case 'circulo': case 'retangulo': case 'poligono': case 'texto':
+    case 'triangulo': case 'furo': case 'contorno':
+      setTool(tool === id ? 'select' : id); return;
+    case 'medir': setTool(tool === 'medir' ? 'select' : 'medir'); return;
+    case 'sinalizar': setTool(tool === 'sinalizar' ? 'select' : 'sinalizar'); return;
+    case 'preencher': togglePreencher(); return;
+    case 'unidade': setUnidade(unidade === 'mm' ? 'mil' : 'mm'); return;
+    case 'camadaUnica': setUnica(); HubDialog.toast(show.unica ? 'camada única: ' + nomeDe(cur) : 'todas as camadas', 'info', 1600); return;
+    case 'proxCamada': camadaVizinha(1); return;
+    case 'antCamada': camadaVizinha(-1); return;
+    case 'outraFace': {
+      if (tool === 'trilha' && draft && draft.est) { rotaVia(true); return; }
+      const par = HC.flipLayer(cur, B);
+      setCur(par !== cur && LBYK[par] ? par : proximaCobre(cobre(cur) ? cur : 'Top'));
+      return;
+    }
+    case 'virar': setFlip(); HubDialog.toast(view.flip ? 'vista de baixo (como o Flip Board do Altium)' : 'vista de cima', 'info', 1600); return;
+    case 'grade': show.grid = !show.grid; if (painel) painel.atualiza(); pede(); return;
+    case 'diff': show.ghost = !show.ghost; if (painel) painel.atualiza(); pede(); HubDialog.toast(show.ghost ? 'fantasmas das mudanças: ligados' : 'fantasmas das mudanças: desligados', 'info', 1600); return;
+    case 'enquadrar': enquadra(); return;
+    case 'girar': if (arrasto) giraNoArrasto('gira'); else transformaSelecao('gira'); return;
+    case 'espelhoX': if (arrasto) giraNoArrasto('x'); else transformaSelecao('x'); return;
+    case 'espelhoY': if (arrasto) giraNoArrasto('y'); else transformaSelecao('y'); return;
+    case 'apagar': if (!SEL.length) return; if (!editOn) { avisoTrava(); return; } apagaSelecao(); return;
+    case 'desfazer': if (!desfaz()) HubDialog.toast('nada para desfazer', 'info', 1400); return;
+    case 'refazer': if (!refaz()) HubDialog.toast('nada para refazer', 'info', 1400); return;
+    case 'tudo': selecionaTudo(); return;
+    case 'editar': setEdit(!editOn); HubDialog.toast(editOn ? 'edição destravada' : 'edição travada (só leitura)', 'info', 1600); return;
+    case 'salvar': salvar(); return;
+    case 'ajuda': toggleAjuda(); return;
+    case 'gerber': abreGerber(); return;
+  }
+}
+
+/* ============================== ajuda ============================== */
+
+function ajudaAberta(){ const h = $('help'); return !!h && !h.hidden; }
+function toggleAjuda(v){
+  const h = $('help'); if (!h) return;
+  const abrir = v === undefined ? h.hidden : !!v;
+  if (abrir) montaAjuda();
+  h.hidden = !abrir;
+}
+function montaAjuda(){
+  const h = $('help');
+  const linha = (rot, teclas, quando) => {
+    const tr = document.createElement('tr');
+    const a = document.createElement('td'); a.textContent = rot;
+    const b = document.createElement('td');
+    teclas.forEach((t, i) => { if (i) b.append(' + '); const k = document.createElement('kbd'); k.textContent = t; b.append(k); });
+    const c = document.createElement('td'); c.className = 'q'; c.textContent = quando || '';
+    tr.append(a, b, c); return tr;
+  };
+  h.textContent = '';
+  const t1 = document.createElement('h2'); t1.textContent = 'Vista PCB — teclas e gestos';
+  const p = document.createElement('p');
+  p.textContent = 'Espelho da placa exportada do Altium, em mm (ou mil, Q), Y para cima, relativo à origem da placa. ' +
+    'O que se desenha e edita aqui vira linhas do changes.js, que o ApplyChanges leva ao Altium. As teclas trocam-se nas Configurações do hub, aba Atalhos.';
+  const tab = document.createElement('table');
+  for (const a of TECLADO.padrao) tab.append(linha(a.rotulo, [teclaDe(a.id) || a.tecla], 'vista PCB'));
+  for (const g of TECLADO.gestos) tab.append(linha(g.rotulo, g.teclas || [], g.quando || 'vista PCB'));
+  const leg = document.createElement('p');
+  leg.className = 'leg';
+  leg.textContent = 'Fantasmas (D): tracejado = como era; contorno verde = adicionado; vermelho = removido; seta amarela = de onde para onde andou.';
+  const fim = document.createElement('p'); fim.className = 'leg'; fim.textContent = 'Feche com Esc, ' + (teclaDe('ajuda') || 'H') + ' ou clicando aqui.';
+  h.append(t1, p, tab, leg, fim);
+}
+
+/* ============================== a ficha (o que o painel mostra e edita) ==============================
+   O painel (hub-pcbpainel.js) so desenha: a ficha diz QUAIS campos, com que valor e tipo, e a
+   volta vem por editarCampo(chave, valor). Tipos: camada/enum (select), net, dist (mm, mostrado na
+   unidade da tela), ang (graus), texto, bool, ro (so leitura). A CAMADA e sempre o primeiro campo:
+   e o "clico na trilha e mudo a camada" do dono. */
+const NETS = Array.isArray(B.nets) ? B.nets.filter(n => typeof n === 'string' && n) : [];
+function opcCamadas(f){ return LAYERS.filter(l => l.kind !== 'multi' && (!f || f(l))).map(l => ({ v:l.key, rot:rotuloAba(l), cor:l.color })); }
+const opcFaces = () => ['Top', 'Bottom'].filter(k => LBYK[k]).map(k => ({ v:k, rot:rotuloAba(LBYK[k]), cor:corDe(k) }));
+function opcNets(atual){
+  const L = [{ v:'', rot:'(sem net)' }].concat(NETS.map(n => ({ v:n, rot:n })));
+  if (atual && NETS.indexOf(atual) < 0) L.push({ v:atual, rot:atual + ' (não está nas nets do espelho)' });
+  return L;
+}
+const par = (rot, a, b) => ({ par:[a, b], rot });
+const ESTADO = m => m.added ? 'novo (changes.js)' : m.deleted ? 'removido' : m.changed ? 'editado' : '';
+function fichaDe(a){
+  switch (a.t) {
+    case 'comp': {
+      const m = a.m, e = m.eff, s = m.src;
+      return { titulo:'Componente ' + (e.designator || s.ref), sub:[s.footprint, m.changed ? 'movido' : '', m.attrChanged ? 'atributos mudados' : ''].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Camada', tipo:'enum', v:e.layer, opc:opcFaces(), dica:'trocar de face espelha o componente como olhar a placa por baixo (a rotação vira 180 − r), igual ao L no arrasto' },
+        { k:'designator', rot:'Designator', tipo:'texto', v:e.designator || s.ref, dica:'renomear na PCB dessincroniza do esquema — o ECO vai acusar' },
+        { k:'comment', rot:'Comment', tipo:'texto', v:e.comment !== undefined ? e.comment : (s.comment || '') },
+        { k:'footprint', rot:'Footprint', tipo:'ro', v:s.footprint || '—' },
+        par('Posição', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
+        { k:'rot', rot:'Rotação', tipo:'ang', v:e.rot },
+        { botoes:[{ id:'girar', rot:'Girar 90°' }, { id:'virar', rot:'Virar de face' }, { id:'enquadrar', rot:'Enquadrar' }] },
+        { sec:'Pads (' + (s.pads || []).length + ')' },
+        { tab:{ cab:['Pad', 'Net'], linhas:(s.pads || []).map(p => [p.name, p.net || '—']) } },
+      ] };
+    }
+    case 'pad': {
+      const p = a.eb, f = formaLado(p, ladoDaVista());
+      return { titulo:'Pad ' + (a.comp ? (a.comp.eff.designator || a.comp.src.ref) + '.' : '') + (p.name || ''), sub:a.comp ? 'do componente — arraste o pad para mover o componente' : 'pad livre (pad_add ainda não existe)', campos:[
+        { k:'layer', rot:'Camada', tipo:'ro', v:ehTH(p) ? 'Multi-Layer (passante)' : nomeDe(p.layer) },
+        { k:'net', rot:'Net', tipo:'ro', v:p.net || '—' },
+        { k:'shape', rot:'Forma', tipo:'ro', v:String(f.shape || 'rect') },
+        par('Tamanho', { k:'w', rot:'X', tipo:'ro', v:fmtDist(f.w) + ' ' + unidade }, { k:'h', rot:'Y', tipo:'ro', v:fmtDist(f.h) + ' ' + unidade }),
+        { k:'drill', rot:'Furo', tipo:'ro', v:p.drill > 0 ? fmtDist(p.drill) + ' ' + unidade + (p.drillw > 0 ? ' × ' + fmtDist(p.drillw) : '') + (p.plated === false ? ' · NPTH' : '') : '—' },
+        par('Posição', { k:'x', rot:'X', tipo:'ro', v:fmtDist(p.x) }, { k:'y', rot:'Y', tipo:'ro', v:fmtDist(p.y) }),
+        { k:'rot', rot:'Rotação', tipo:'ro', v:fmtNum(p.rot || 0, 3) + '°' },
+        { k:'sm', rot:'Máscara', tipo:'ro', v:(tampado(p, 'top') && tampado(p, 'bottom')) ? 'tampado' : '+' + fmtDist(expMascara(p)) + ' ' + unidade + (isNum(p.sm) ? '' : ' (regra)') },
+      ] };
+    }
+    case 'track': {
+      const m = a.m, e = m.eff, cu = cobre(e.layer);
+      return { titulo:(cu ? 'Trilha ' : 'Linha ') + (m.added ? '(nova)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:'qualquer camada menos a Multi-Layer; fora do cobre a net cai' },
+        cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
+        { k:'w', rot:'Largura', tipo:'dist', v:e.w },
+        par('Início', { k:'x1', rot:'X', tipo:'dist', v:e.x1 }, { k:'y1', rot:'Y', tipo:'dist', v:e.y1 }),
+        par('Fim', { k:'x2', rot:'X', tipo:'dist', v:e.x2 }, { k:'y2', rot:'Y', tipo:'dist', v:e.y2 }),
+        { k:'len', rot:'Comprimento', tipo:'ro', v:fmtDist(Math.hypot(e.x2 - e.x1, e.y2 - e.y1)) + ' ' + unidade },
+      ] };
+    }
+    case 'arc': {
+      const m = a.m, e = m.eff, cu = cobre(e.layer);
+      return { titulo:'Arco ' + (m.added ? '(novo)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas() },
+        cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
+        par('Centro', { k:'cx', rot:'X', tipo:'dist', v:e.cx }, { k:'cy', rot:'Y', tipo:'dist', v:e.cy }),
+        { k:'r', rot:'Raio', tipo:'dist', v:e.r },
+        par('Ângulos', { k:'sa', rot:'Início', tipo:'ang', v:e.sa }, { k:'ea', rot:'Fim', tipo:'ang', v:e.ea }),
+        { k:'w', rot:'Largura', tipo:'dist', v:e.w },
+      ] };
+    }
+    case 'via': {
+      const m = a.m, e = m.eff;
+      return { titulo:'Via ' + (m.added ? '(nova)' : m.src.id), sub:ESTADO(m), campos:[
+        par('Posição', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
+        { k:'size', rot:'Diâmetro', tipo:'dist', v:e.size },
+        { k:'drill', rot:'Furo', tipo:'dist', v:e.drill },
+        { k:'net', rot:'Net', tipo:'ro', v:e.net || '—', dica:'via_edit ainda não troca a net' },
+        { k:'span', rot:'De / para', tipo:'ro', v:(e.from || 'Top') + ' → ' + (e.to || 'Bottom') },
+      ] };
+    }
+    case 'fill': {
+      const m = a.m, e = m.eff, cu = cobre(e.layer);
+      return { titulo:'Fill ' + (m.added ? '(novo)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas() },
+        cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
+        par('Canto 1', { k:'x1', rot:'X', tipo:'dist', v:e.x1 }, { k:'y1', rot:'Y', tipo:'dist', v:e.y1 }),
+        par('Canto 2', { k:'x2', rot:'X', tipo:'dist', v:e.x2 }, { k:'y2', rot:'Y', tipo:'dist', v:e.y2 }),
+        { k:'rot', rot:'Rotação', tipo:'ang', v:e.rot || 0 },
+      ] };
+    }
+    case 'region': {
+      const m = a.m, e = m.eff, cu = cobre(e.layer);
+      const ar = Math.abs(area2(e.points || [])) / 2;
+      return { titulo:'Região ' + (m.added ? '(nova)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:m.added ? '' : 'trocar a camada de uma região do espelho é apagar e recriar (region_del + region_add)' },
+        cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
+        { k:'n', rot:'Vértices', tipo:'ro', v:String((e.points || []).length) },
+        { k:'area', rot:'Área', tipo:'ro', v:fmtNum(ar, 3) + ' mm²' },
+      ] };
+    }
+    case 'regiao-ro': {
+      const g = a.eb;
+      return { titulo:'Região ' + (g.id || ''), sub:nomeDe(g.layer) + (g.poly ? ' · polígono' : '') + (g.keepout ? ' · keepout' : ''), aviso:a.motivo, campos:[
+        { k:'layer', rot:'Camada', tipo:'ro', v:nomeDe(g.layer) },
+        { k:'net', rot:'Net', tipo:'ro', v:g.net || '—' },
+        { k:'n', rot:'Vértices', tipo:'ro', v:String((g.points || []).length) + (Array.isArray(g.holes) && g.holes.length ? ' · ' + g.holes.length + ' furo(s)' : '') },
+      ] };
+    }
+    case 'recorte': {
+      const k = recortesDaTela().find(x => x.o === a.eb), bb = k ? bbPts(k.pts) : null;
+      return { titulo:'Recorte da placa', sub:a.m ? 'furo de fixação do hub (region_add cutout) — Delete tira' : 'Board Cutout do Altium', campos:[
+        { k:'tam', rot:'Tamanho', tipo:'ro', v:bb ? fmtDist(bb[2] - bb[0]) + ' × ' + fmtDist(bb[3] - bb[1]) + ' ' + unidade : '—' },
+        { k:'c', rot:'Centro', tipo:'ro', v:bb ? fmtDist((bb[0] + bb[2]) / 2) + ' ; ' + fmtDist((bb[1] + bb[3]) / 2) : '—' },
+      ] };
+    }
+    case 'text': {
+      const m = a.m, s = m.src || {}, e = ebDe(m) || m.eff;
+      if (s.designator) return { titulo:'Designator de ' + s.owner, sub:ESTADO(m), campos:[
+        par('Posição (centro)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
+        { k:'h', rot:'Altura', tipo:'dist', v:e.h },
+        { k:'rot', rot:'Rotação', tipo:'ang', v:e.rot || 0 },
+        { nota:'O designator_move vai antes do comp_move do componente no changes.js (o ApplyChanges aplica em ordem).' },
+      ] };
+      if (s.comment) return { titulo:'Comment de ' + s.owner, sub:'', campos:[
+        { k:'comment', rot:'Comment', tipo:'texto', v:e.text || '' },
+        par('Posição', { k:'x', rot:'X', tipo:'ro', v:fmtDist(e.x) }, { k:'y', rot:'Y', tipo:'ro', v:fmtDist(e.y) }),
+        { nota:'A posição do comment ainda não tem op (comment_move): mova pelo Altium.' },
+      ] };
+      return { titulo:'Texto ' + (m.added ? '(novo)' : s.id), sub:[nomeDe(e.layer), ESTADO(m), e.kind === 'truetype' ? 'TrueType' : ''].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:'na face de baixo o texto fica espelhado, como no Altium' },
+        { k:'text', rot:'Texto', tipo:'texto', v:e.text || '' },
+        par('Posição (centro)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
+        par('Tamanho', { k:'h', rot:'Altura', tipo:'dist', v:e.h }, { k:'w', rot:'Traço', tipo:'dist', v:e.w > 0 ? e.w : (e.h || 0) * TRACO_TEXTO }),
+        { k:'rot', rot:'Rotação', tipo:'ang', v:e.rot || 0 },
+        { k:'mirror', rot:'Espelhado', tipo:'bool', v:!!e.mirror },
+      ] };
+    }
+    case 'ann': {
+      const n = a.ann;
+      return { titulo:'Sinalizador ' + n.id, sub:(n.created || '') + (n.status === 'resolved' ? ' · resolvido' : ''), campos:[
+        { k:'msg', rot:'Mensagem', tipo:'texto', v:n.msg || '' },
+        { k:'severity', rot:'Cor', tipo:'enum', v:n.severity, opc:[{ v:'err', rot:'vermelho (erro)', cor:ANN_COLORS.err }, { v:'warn', rot:'amarelo (atenção)', cor:ANN_COLORS.warn }, { v:'info', rot:'azul (nota)', cor:ANN_COLORS.info }] },
+        { k:'status', rot:'Situação', tipo:'enum', v:n.status || 'open', opc:[{ v:'open', rot:'aberto' }, { v:'resolved', rot:'resolvido' }] },
+        { k:'reply', rot:'Resposta', tipo:'ro', v:n.reply || '—' },
+      ] };
+    }
+  }
+  return { titulo:'?', campos:[] };
+}
+const CAMADA_LIVRE = a => a.t === 'track' || a.t === 'arc' || a.t === 'fill' || a.t === 'region' ||
+  (a.t === 'text' && a.m && (!a.m.src || (!a.m.src.owner && !a.m.src.designator && !a.m.src.comment)));
+function fichaMulti(lista){
+  const n = {};
+  for (const a of lista) n[a.t] = (n[a.t] || 0) + 1;
+  const nomes = { comp:'componente', track:'trilha/linha', arc:'arco', via:'via', fill:'fill', region:'região', text:'texto', pad:'pad', 'regiao-ro':'região (só desenho)', recorte:'recorte', ann:'sinalizador' };
+  const campos = [];
+  const comCamada = lista.filter(a => a.t === 'comp' || CAMADA_LIVRE(a));
+  if (comCamada.length === lista.length) {
+    const soFaces = lista.some(a => a.t === 'comp');
+    const vals = new Set(lista.map(a => a.t === 'comp' ? a.m.eff.layer : a.m.eff.layer));
+    campos.push({ k:'layer', rot:'Camada', tipo:'camada', v:vals.size === 1 ? Array.from(vals)[0] : '', misto:vals.size > 1, opc:soFaces ? opcFaces() : opcCamadas(),
+                  dica:soFaces ? 'com componente na seleção, só Top/Bottom (componente vira de face)' : '' });
+  }
+  if (lista.every(a => a.t === 'track' || a.t === 'arc')) {
+    const ws = new Set(lista.map(a => r6(a.m.eff.w)));
+    campos.push({ k:'w', rot:'Largura', tipo:'dist', v:ws.size === 1 ? Array.from(ws)[0] : null, misto:ws.size > 1 });
+  }
+  if (lista.every(a => (a.t === 'track' || a.t === 'arc' || a.t === 'fill') && cobre(a.m.eff.layer))) {
+    const ns = new Set(lista.map(a => a.m.eff.net || ''));
+    campos.push({ k:'net', rot:'Net', tipo:'net', v:ns.size === 1 ? Array.from(ns)[0] : '', misto:ns.size > 1, opc:opcNets() });
+  }
+  campos.push({ botoes:[{ id:'girar', rot:'Girar 90°' }, { id:'apagar', rot:'Apagar' }, { id:'enquadrar', rot:'Enquadrar' }] });
+  return { titulo:lista.length + ' objetos selecionados', sub:Object.keys(n).map(k => n[k] + ' ' + (nomes[k] || k)).join(' · '), campos };
+}
+function fichaFerramenta(){
+  const F = { titulo:FERRAMENTA_ROT[tool] || tool, sub:'camada atual: ' + nomeDe(cur), campos:[], ferramenta:tool };
+  const camada = f => ({ k:'tool.camada', rot:'Camada', tipo:'camada', v:cur, opc:opcCamadas(f) });
+  const larg = { k:'tool.wLinha', rot:'Largura', tipo:'dist', v:CFG.wLinha };
+  const cheio = { k:'tool.preencher', rot:'Preencher', tipo:'bool', v:preencher, dica:'ligado: região cheia (retângulo: fill); desligado: contorno de trilhas' };
+  switch (tool) {
+    case 'trilha':
+      F.campos.push(camada(l => l.kind === 'signal' || l.kind === 'plane'),
+        { k:'tool.wTrilha', rot:'Largura', tipo:'dist', v:CFG.wTrilha, dica:isNum(RULES.width) ? 'regra Width do espelho: ' + fmtDist(RULES.width) + ' ' + unidade : 'o espelho não trouxe a regra Width: 10 mil' },
+        { k:'tool.modo', rot:'Canto', tipo:'enum', v:CFG.modo, opc:[{ v:'45', rot:'45°' }, { v:'90', rot:'90°' }, { v:'livre', rot:'ângulo livre' }] },
+        { k:'net', rot:'Net', tipo:'ro', v:(draft && draft.net) || '— (vem do pad, via ou trilha em que começar)' },
+        par('Via', { k:'tool.viaSize', rot:'Diâmetro', tipo:'dist', v:CFG.viaSize }, { k:'tool.viaDrill', rot:'Furo', tipo:'dist', v:CFG.viaDrill }),
+        { nota:'Clique fixa o canto · Espaço inverte · Shift+Espaço 45°/90°/livre · Backspace desfaz o trecho · 2 via · * ou Ctrl+2 via e troca de camada · botão direito termina · Esc larga.' });
+      break;
+    case 'via':
+      F.campos.push(par('Via', { k:'tool.viaSize', rot:'Diâmetro', tipo:'dist', v:CFG.viaSize }, { k:'tool.viaDrill', rot:'Furo', tipo:'dist', v:CFG.viaDrill }),
+        { k:'tool.viaNet', rot:'Net', tipo:'net', v:CFG.viaNet, opc:opcNets(CFG.viaNet), dica:'clicando num pad/trilha a via pega a net dele' },
+        { nota:isNum(RULES.viaSize) ? 'Padrão pela regra RoutingVias do espelho.' : 'O espelho não trouxe a regra de via: 0,6/0,3 mm.' });
+      break;
+    case 'linha': case 'arco': F.campos.push(camada(), larg); break;
+    case 'circulo': case 'retangulo': case 'triangulo': case 'poligono': F.campos.push(camada(), larg, cheio); break;
+    case 'texto':
+      F.campos.push(camada(), par('Tamanho', { k:'tool.hTexto', rot:'Altura', tipo:'dist', v:CFG.hTexto }, { k:'tool.wTexto', rot:'Traço', tipo:'dist', v:CFG.wTexto }),
+        { nota:'Fonte de traço (stroke). Na face de baixo (' + (ladoBaixo(cur) ? 'como agora' : 'Bottom, Bottom Overlay…') + ') o texto nasce espelhado.' });
+      break;
+    case 'furo':
+      F.campos.push({ k:'tool.furo', rot:'Diâmetro', tipo:'dist', v:CFG.furo }, { nota:'Board Cutout redondo (region_add com cutout:true): o furo de fixação da casa.' });
+      break;
+    case 'contorno':
+      F.campos.push({ nota:'Um clique por vértice; duplo clique, Enter ou botão direito fecha. Substitui o contorno inteiro (outline_set), só com retas — pergunta antes.' });
+      break;
+    case 'medir': {
+      const m = draft && draft.tipo === 'medida' && draft.b ? draft : null;
+      F.campos.push({ k:'d', rot:'Distância', tipo:'ro', v:m ? fmtDist(Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y)) + ' ' + unidade : '— (dois cliques)' });
+      if (m) F.campos.push(par('Δ', { k:'dx', rot:'dX', tipo:'ro', v:fmtDist(Math.abs(m.b.x - m.a.x)) }, { k:'dy', rot:'dY', tipo:'ro', v:fmtDist(Math.abs(m.b.y - m.a.y)) }));
+      break;
+    }
+    case 'sinalizar': F.campos.push({ nota:'Clique no ponto do problema e escreva o que a IA deve corrigir (annotations.js).' }); break;
+  }
+  return F;
+}
+function ficha(){
+  if (tool !== 'select') return Object.assign({ tipo:'ferramenta' }, fichaFerramenta());
+  if (!SEL.length) return { tipo:'placa' };
+  if (SEL.length === 1) return Object.assign({ tipo:'objeto' }, fichaDe(SEL[0]));
+  return Object.assign({ tipo:'multi' }, fichaMulti(SEL));
+}
+
+/* ============================== edicao pelo painel ============================== */
+
+function configTool(k, v){
+  const pos = x => isNum(x) && x > 0;
+  switch (k) {
+    case 'camada': setCur(v); if (draft && draft.tipo === 'rota') draft.layer = cur; break;
+    case 'wTrilha': if (pos(v)) { CFG.wTrilha = r6(v); if (draft && draft.tipo === 'rota' && tool === 'trilha') draft.w = CFG.wTrilha; } break;
+    case 'wLinha': if (pos(v)) { CFG.wLinha = r6(v); if (draft && draft.tipo === 'rota' && tool === 'linha') draft.w = CFG.wLinha; } break;
+    case 'viaSize': if (pos(v)) CFG.viaSize = r6(v); if (CFG.viaDrill >= CFG.viaSize) HubDialog.toast('furo >= diâmetro: a via fica sem anel', 'warn'); break;
+    case 'viaDrill': if (pos(v)) CFG.viaDrill = r6(v); if (CFG.viaDrill >= CFG.viaSize) HubDialog.toast('furo >= diâmetro: a via fica sem anel', 'warn'); break;
+    case 'viaNet': CFG.viaNet = String(v || ''); break;
+    case 'modo':
+      if (HubFio.MODOS.indexOf(v) >= 0) {
+        CFG.modo = v;
+        if (draft && draft.tipo === 'rota' && draft.est) draft.est = Object.assign({}, draft.est, { modo:v, primeiro:v === '45' ? lembraCanto.p45 : v === '90' ? lembraCanto.p90 : draft.est.primeiro });
+      }
+      break;
+    case 'hTexto': if (pos(v)) CFG.hTexto = r6(v); break;
+    case 'wTexto': if (pos(v)) CFG.wTexto = r6(v); break;
+    case 'furo': if (pos(v)) CFG.furo = r6(v); break;
+    case 'preencher': if (!!v !== preencher) togglePreencher(); break;
+  }
+  pintaStatus(); if (painel) painel.atualiza(); pede();
+}
+function campoNoAlvo(a, k, v){
+  const pos = x => isNum(x) && x > 0;
+  switch (a.t) {
+    case 'comp': {
+      const g = geoDe(a);
+      if (k === 'layer') { if ((v !== 'Top' && v !== 'Bottom') || v === g.layer) return false; moveComp(a.m, viraGeo(g, [g.x, g.y])); return true; }
+      if (k === 'x' || k === 'y' || k === 'rot') { if (!isNum(v)) return false; g[k] = k === 'rot' ? normAng(v) : v; moveComp(a.m, g); return true; }
+      if (k === 'designator' || k === 'comment') { attrComp(a.m, k, v); return true; }
+      return false;
+    }
+    case 'track': case 'arc': case 'fill': {
+      const e = a.m.eff;
+      if (k === 'layer') { if (!LBYK[v] || v === 'Multi' || v === e.layer) return false; return editaItem(a.m, { layer:v }); }
+      if (k === 'net') { if (!cobre(e.layer)) return false; return editaItem(a.m, { net:String(v || '') }); }
+      if ((k === 'w' || k === 'r') && !pos(v)) { HubDialog.toast((k === 'w' ? 'largura' : 'raio') + ' tem de ser maior que zero', 'warn'); return false; }
+      if (!isNum(v)) return false;
+      if (a.t === 'fill' && /^[xy][12]$/.test(k)) {
+        const n = Object.assign({}, e, { [k]:v });
+        if (near(n.x1, n.x2) || near(n.y1, n.y2)) { HubDialog.toast('o fill ficaria sem área', 'warn'); return false; }
+      }
+      return editaItem(a.m, { [k]:(k === 'rot' || k === 'sa' || k === 'ea') ? normAng(v) : r6(v) });
+    }
+    case 'via': {
+      if (!isNum(v)) return false;
+      if ((k === 'size' || k === 'drill') && !pos(v)) return false;
+      const ok = editaItem(a.m, { [k]:r6(v) });
+      const e = a.m.eff, s = k === 'size' ? v : e.size, d = k === 'drill' ? v : e.drill;
+      if (d >= s) HubDialog.toast('furo >= diâmetro: a via fica sem anel', 'warn');
+      return ok;
+    }
+    case 'region': {
+      const e = a.m.eff;
+      if (k === 'layer') { if (!LBYK[v] || v === 'Multi' || v === e.layer) return false; return editaRegiao(a.m, { layer:v, points:e.points, net:cobre(v) ? e.net : '' }); }
+      if (k === 'net') { if (!cobre(e.layer)) return false; return editaRegiao(a.m, { net:String(v || ''), points:e.points, layer:e.layer }); }
+      return false;
+    }
+    case 'text': {
+      const s = a.m.src || {}, e = ebDe(a.m) || a.m.eff;
+      if (s.designator) {
+        if (k === 'h') { if (!pos(v)) return false; moveDesignator(a.m, { h:v }); return true; }
+        if (k === 'rot') { if (!isNum(v)) return false; moveDesignator(a.m, { rot:v }); return true; }
+        if (k === 'x' || k === 'y') { if (!isNum(v)) return false; moveDesignator(a.m, { x:k === 'x' ? v : e.x, y:k === 'y' ? v : e.y }); return true; }
+        return false;
+      }
+      if (s.comment) {
+        if (k === 'comment') { const c = model.compByRef[s.owner]; if (!c) return false; attrComp(c, 'comment', v); return true; }
+        return false;
+      }
+      if (s.owner && !a.m.added) return false;
+      if (k === 'layer') {
+        if (!LBYK[v] || v === 'Multi' || v === e.layer) return false;
+        const p = { layer:v };
+        if (ladoBaixo(v) !== ladoBaixo(e.layer)) p.mirror = ladoBaixo(v);
+        return editaItem(a.m, p);
+      }
+      if (k === 'text') { const t = limpaTxt(v); if (!t.trim()) { HubDialog.toast('texto vazio: para tirar o texto, Delete', 'warn'); return false; } return editaItem(a.m, { text:t }); }
+      if (k === 'mirror') return editaItem(a.m, { mirror:!!v });
+      if ((k === 'h' || k === 'w') && !pos(v)) return false;
+      if (!isNum(v)) return false;
+      return editaItem(a.m, { [k]:k === 'rot' ? normAng(v) : r6(v) });
+    }
+    case 'ann': {
+      const n = a.ann;
+      if (k === 'msg') { const t = String(v || '').replace(/"/g, "'").trim(); if (!t) return false; n.msg = t; }
+      else if (k === 'severity' && ANN_COLORS[v]) n.severity = v;
+      else if (k === 'status' && (v === 'open' || v === 'resolved')) n.status = v;
+      else return false;
+      return 'ann';
+    }
+  }
+  return false;
+}
+function editarCampo(k, v){
+  if (String(k).indexOf('tool.') === 0) { configTool(String(k).slice(5), v); return; }
+  if (!SEL.length || LEAN) return;
+  if (!garanteEdicao()) return;
+  let mexeu = false, ann = false;
+  for (const a of SEL.slice()) {
+    const r = campoNoAlvo(a, k, v);
+    if (r === 'ann') ann = true; else if (r) mexeu = true;
+  }
+  if (ann) annChanged();
+  if (mexeu) commit(); else if (painel) painel.atualiza();
+}
+function acaoPainel(id){
+  switch (id) {
+    case 'girar': transformaSelecao('gira'); return;
+    case 'virar': transformaSelecao('vira'); return;
+    case 'apagar': if (garanteEdicao()) apagaSelecao(); return;
+    case 'enquadrar': enquadraAlvos(SEL); return;
+    case 'enquadrar_placa': enquadra(); return;
+  }
+  fazAcao(id);
+}
+
+/* ============================== o que o painel lista ============================== */
+
+function infoPlaca(){
+  const bb = EB.board && EB.board.bbox;
+  const W = bb ? bb.x2 - bb.x1 : 0, H = bb ? bb.y2 - bb.y1 : 0;
+  let area = 0;
+  try {
+    const segs = [];
+    for (const s of ((EB.board && EB.board.outline) || [])) {
+      if (s && s.kind === 'arc' && [s.cx, s.cy, s.r, s.sa, s.ea].every(isNum)) segs.push(HubLaser.arcPts(s.cx, s.cy, s.r, s.sa, s.ea));
+      else if (s && [s.x1, s.y1, s.x2, s.y2].every(isNum)) segs.push([[s.x1, s.y1], [s.x2, s.y2]]);
+    }
+    for (const l of HubLaser.chainSegments(segs)) area = Math.max(area, Math.abs(area2(l)) / 2);
+    for (const k of recortesDaTela()) area -= Math.abs(area2(k.pts)) / 2;
+  } catch (e) { area = W * H; }
+  const comps = EB.components || [];
+  const conta = (arr, f) => (arr || []).filter(f || (() => true)).length;
+  const reta = o => o && o.kind !== 'arc', curva = o => o && o.kind === 'arc';
+  let pads = conta(EB.freepads);
+  for (const c of comps) pads += ((c && c.pads) || []).length;
+  return {
+    fonte:String(B.source || '').split(/[\\/]/).pop() || '—', gerado:B.generated || '?',
+    exporter:B.exporter || '', novo:!!B.exporter,
+    W, H, area,
+    comps:comps.length, top:conta(comps, c => c.layer !== 'Bottom'), bottom:conta(comps, c => c.layer === 'Bottom'),
+    trilhas:conta(EB.tracks) + conta(EB.silk, reta) + conta(EB.lines, reta), cobre:conta(EB.tracks),
+    arcos:conta(EB.arcs) + conta(EB.silk, curva) + conta(EB.lines, curva),
+    pads, vias:conta(EB.vias), fills:conta(EB.fills), regioes:conta(EB.regions), textos:conta(EB.texts),
+    recortes:recortesDaTela().length, nets:NETS.length,
+    camadas:LAYERS.filter(l => l.used || l.inBoard).length, sinal:camadasCobre().length,
+    regras:RULES,
+  };
 }
 function chLabel(ch){
-  switch(ch.op){
-    case 'comp_move': return `mover ${ch.ref} → (${fmt(ch.x)}, ${fmt(ch.y)}) rot ${fmt(ch.rot)}${ch.layer?' '+ch.layer:''}`;
-    case 'comp_attr': return `atributos ${ch.ref}${ch.designator ? ` → ${ch.designator}` : ''}${typeof ch.comment === 'string' ? ` (${ch.comment})` : ''}`;
-    case 'track_edit': return `editar trilha ${ch.id}`;
-    case 'track_add': return `nova trilha ${ch.layer} (${fmt(ch.x1)},${fmt(ch.y1)})–(${fmt(ch.x2)},${fmt(ch.y2)})`;
-    case 'track_del': return `remover trilha ${ch.id}`;
-    case 'via_edit': return `editar via ${ch.id}`;
-    case 'via_add': return `nova via (${fmt(ch.x)}, ${fmt(ch.y)})`;
-    case 'via_del': return `remover via ${ch.id}`;
-    case 'arc_edit': return `editar arco ${ch.id}`;
-    case 'text_edit': return `editar texto ${ch.id}${typeof ch.text==='string'?` → "${ch.text}"`:''} (${fmt(ch.x)}, ${fmt(ch.y)})`;
-    case 'designator_move': return `designator ${ch.ref} → (${fmt(ch.x)}, ${fmt(ch.y)})`;
-    case 'arc_add': return `novo arco ${ch.layer}`;
-    case 'arc_del': return `remover arco ${ch.id}`;
-    case 'outline_set': return `novo contorno da placa (${Array.isArray(ch.pts)?ch.pts.length:'?'} vértices)`;
-    default: return `?? ${ch.op}`;
+  const f = v => fmtNum(v, 4);
+  switch (ch && ch.op) {
+    case 'comp_move': return 'mover ' + ch.ref + ' → (' + f(ch.x) + ', ' + f(ch.y) + ') rot ' + f(ch.rot) + (ch.layer ? ' ' + ch.layer : '');
+    case 'comp_attr': return 'atributos ' + ch.ref + (ch.designator ? ' → ' + ch.designator : '') + (typeof ch.comment === 'string' ? ' (' + ch.comment + ')' : '');
+    case 'track_edit': return 'editar trilha ' + ch.id + (ch.layer ? ' → ' + ch.layer : '');
+    case 'track_add': return 'nova ' + (cobre(ch.layer) ? 'trilha' : 'linha') + ' ' + ch.layer + ' (' + f(ch.x1) + ',' + f(ch.y1) + ')–(' + f(ch.x2) + ',' + f(ch.y2) + ')';
+    case 'track_del': return 'remover trilha ' + ch.id;
+    case 'via_edit': return 'editar via ' + ch.id;
+    case 'via_add': return 'nova via (' + f(ch.x) + ', ' + f(ch.y) + ')' + (ch.net ? ' ' + ch.net : '');
+    case 'via_del': return 'remover via ' + ch.id;
+    case 'arc_edit': return 'editar arco ' + ch.id + (ch.layer ? ' → ' + ch.layer : '');
+    case 'arc_add': return 'novo arco ' + ch.layer + (Math.abs((ch.ea || 0) - (ch.sa || 0)) >= 360 ? ' (círculo)' : '');
+    case 'arc_del': return 'remover arco ' + ch.id;
+    case 'text_edit': return 'editar texto ' + ch.id + (typeof ch.text === 'string' ? ' → "' + ch.text + '"' : '');
+    case 'text_add': return 'novo texto "' + ch.text + '" ' + ch.layer;
+    case 'text_del': return 'remover texto ' + ch.id;
+    case 'designator_move': return 'designator ' + ch.ref + ' → (' + f(ch.x) + ', ' + f(ch.y) + ')';
+    case 'fill_add': return 'novo fill ' + ch.layer;
+    case 'fill_edit': return 'editar fill ' + ch.id + (ch.layer ? ' → ' + ch.layer : '');
+    case 'fill_del': return 'remover fill ' + ch.id;
+    case 'region_add': return ch.cutout ? 'novo recorte (' + (Array.isArray(ch.pts) ? ch.pts.length : '?') + ' vértices)' : 'nova região ' + ch.layer;
+    case 'region_del': return 'remover região ' + ch.id;
+    case 'outline_set': return 'novo contorno da placa (' + (Array.isArray(ch.pts) ? ch.pts.length : '?') + ' vértices)';
+    default: return '?? ' + (ch && ch.op);
   }
 }
-function fmt(v){ return isNum(v) ? (+v.toFixed(4)).toString() : '—'; }
-function buildChangePanel(){
-  document.getElementById('chcount').textContent = CH.length;
-  const list = document.getElementById('changelist');
-  list.innerHTML = CH.length ? '' : '<div style="color:var(--fg-dim)">nenhuma — edite na tela ou no changes.js</div>';
-  for (const item of model.changeItems){
-    const div=document.createElement('div');
-    div.className='changeitem '+item.status;
-    div.textContent = chLabel(item.ch) + (item.msg? ' ⚠ '+item.msg : '');
-    div.addEventListener('click',()=>{ if(item.target){ selected=item.target; showInfo(selected); syncTableSel(); zoomToObj(item.target);} });
-    list.appendChild(div);
-  }
-  const val=document.getElementById('vallist');
-  val.innerHTML = model.validation.length ? '' : '<div style="color:var(--ok)">✓ sem problemas</div>';
-  for (const v of model.validation){
-    const div=document.createElement('div'); div.className='valitem '+v.level;
-    div.textContent=v.msg;
-    div.addEventListener('click',()=>{ if(v.target){ selected=v.target; zoomToObj(v.target);} });
-    val.appendChild(div);
-  }
-}
-function buildAnnPanel(){
-  const list = document.getElementById('annlist');
-  const mine = ANN.filter(a => a.view === 'pcb');
-  document.getElementById('anncount').textContent = mine.length;
-  list.innerHTML = mine.length ? '' : '<div style="color:var(--fg-dim)">nenhum — use a ferramenta Sinalizar</div>';
-  for (const a of mine){
-    const div = document.createElement('div');
-    div.className = 'annitem ' + a.severity + (a.status === 'resolved' ? ' resolved' : '');
-    const x = document.createElement('span');
-    x.className = 'annx'; x.textContent = '✕'; x.title = 'apagar sinalizador';
-    x.addEventListener('click', ev => { ev.stopPropagation(); annDelete(a); });
-    div.appendChild(x);
-    div.appendChild(document.createTextNode(
-      `${a.id}: ${a.msg}` + (a.status === 'resolved' ? (a.reply ? ` ✓ ${a.reply}` : ' ✓') : '')));
-    if (a.status === 'resolved'){
-      const rb = document.createElement('span');
-      rb.className = 'annx'; rb.textContent = '↺'; rb.title = 'reabrir';
-      rb.addEventListener('click', ev => { ev.stopPropagation(); if (!editOn) return; a.status = 'open'; a.reply = ''; annChanged(); });
-      div.appendChild(rb);
-    }
-    div.addEventListener('click', () => { selected = { kind:'ann', ann:a }; showInfo(selected); zoomToObj(selected); });
-    list.appendChild(div);
-  }
-}
-function annDelete(a){ if (!editOn) return; ANN.splice(ANN.indexOf(a), 1); annChanged(); }
-function annChanged(){ setAnnDirty(true); buildAnnPanel(); draw(); }
-
-/* ============================== PCB List (tabela) ============================== */
-
-let sortKey='ref', sortAsc=true;
-function natCmp(a,b){
-  return String(a).localeCompare(String(b), undefined, {numeric:true, sensitivity:'base'});
-}
-function tableRows(){
-  const f=(document.getElementById('filter').value||'').toLowerCase();
-  let rows = model.comps.map(m=>({
-    m, ref:(m.eff.designator || m.src.ref), footprint:m.src.footprint,
-    comment:(m.eff.comment !== undefined ? m.eff.comment : m.src.comment),
-    layer:m.eff.layer, x:m.eff.x, y:m.eff.y, rot:m.eff.rot
+function linhasComponentes(){
+  return model.comps.map(m => ({
+    ref:m.eff.designator || m.src.ref, srcRef:m.src.ref, footprint:m.src.footprint || '',
+    comment:m.eff.comment !== undefined ? m.eff.comment : (m.src.comment || ''),
+    layer:m.eff.layer, x:m.eff.x, y:m.eff.y, rot:m.eff.rot,
+    mudou:{ ref:!!(m.attrChanged && m.eff.designator), comment:!!(m.attrChanged && m.eff.comment !== undefined),
+            layer:m.changed && m.eff.layer !== m.src.layer, x:m.changed && !near(m.eff.x, m.src.x),
+            y:m.changed && !near(m.eff.y, m.src.y), rot:m.changed && !nearAng(m.eff.rot, m.src.rot) },
+    movido:m.changed || m.attrChanged,
+    sel:SEL.some(a => a.t === 'comp' && a.m === m),
   }));
-  if (f) rows=rows.filter(r=> (r.ref+' '+r.footprint+' '+r.comment).toLowerCase().includes(f));
-  rows.sort((a,b)=>{
-    const va=a[sortKey], vb=b[sortKey];
-    const c = (typeof va==='number'&&typeof vb==='number') ? va-vb : natCmp(va,vb);
-    return sortAsc? c : -c;
-  });
-  return rows;
 }
-function renderTable(){
-  const tb=document.querySelector('#pcblist tbody');
-  tb.innerHTML='';
-  for (const r of tableRows()){
-    const tr=document.createElement('tr');
-    if (r.m===selected) tr.className='sel';
-    if (r.m.changed || r.m.attrChanged) tr.classList.add('moved');
-    const cells=[
-      ['ref',r.ref, r.m.attrChanged && r.m.eff.designator],['footprint',r.footprint,false],
-      ['comment',r.comment, r.m.attrChanged && r.m.eff.comment !== undefined],
-      ['layer',r.layer, r.m.changed && r.m.eff.layer!==r.m.src.layer],
-      ['x',r.x.toFixed(4), r.m.changed && !near(r.m.eff.x,r.m.src.x)],
-      ['y',r.y.toFixed(4), r.m.changed && !near(r.m.eff.y,r.m.src.y)],
-      ['rot',fmt(r.rot), r.m.changed && !nearAng(r.m.eff.rot,r.m.src.rot)]
-    ];
-    for (const [k,v,chg] of cells){
-      const td=document.createElement('td');
-      td.textContent=v;
-      if (['x','y','rot'].includes(k)) td.className='num';
-      if (chg) td.classList.add('chg');
-      tr.appendChild(td);
-    }
-    tr.addEventListener('click',()=>{ selected=r.m; showInfo(r.m); zoomToObj(r.m); renderTable(); draw(); });
-    tb.appendChild(tr);
-  }
-}
-function syncTableSel(){ renderTable(); }
-document.getElementById('filter').addEventListener('input', renderTable);
-document.querySelectorAll('#pcblist th').forEach(th=>{
-  th.addEventListener('click',()=>{
-    const k=th.dataset.k;
-    if (sortKey===k) sortAsc=!sortAsc; else { sortKey=k; sortAsc=true; }
-    renderTable();
-  });
-});
-
 function exportCsv(){
-  const lines=['Designator\tFootprint\tComment\tLayer\tX_mm\tY_mm\tRotation'];
-  for (const m of model.comps)
-    lines.push([m.src.ref,m.src.footprint,m.src.comment,m.eff.layer,
-      m.eff.x.toFixed(4),m.eff.y.toFixed(4),fmt(m.eff.rot)].join('\t'));
-  const blob=new Blob([lines.join('\r\n')],{type:'text/tab-separated-values'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob); a.download='pcb-list-updated.csv'; a.click();
-  URL.revokeObjectURL(a.href);
+  const L = ['Designator\tFootprint\tComment\tLayer\tX_mm\tY_mm\tRotation'];
+  for (const r of linhasComponentes()) L.push([r.ref, r.footprint, r.comment, r.layer, (+r.x).toFixed(4), (+r.y).toFixed(4), fmtNum(r.rot, 4).replace(',', '.')].join('\t'));
+  const blob = new Blob([L.join('\r\n')], { type:'text/tab-separated-values' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'pcb-list-updated.csv'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+function irPara(alvo, dePainel){ if (!alvo) return; selSo([alvo], dePainel); enquadraAlvos([alvo]); }
+const V = {
+  LEAN, PROJ,
+  get B(){ return B; }, get model(){ return model; }, get EB(){ return EB; }, get CH(){ return CH; }, ANN,
+  camadas:() => LAYERS.map(l => ({ key:l.key, nome:l.name, rot:rotuloAba(l), cor:l.color, count:l.count, usada:!!(l.used || l.inBoard),
+                                   vis:show.layers[l.key] !== false, atual:l.key === cur, kind:l.kind })),
+  cur:() => cur, setCur, setVisivel, soEsta, mostraTodas, conjunto,
+  conjuntos:() => Object.keys(CONJUNTOS).map(k => ({ id:k, rot:CONJUNTOS[k].rot })),
+  show:() => ({ grid:show.grid, ghost:show.ghost, unica:show.unica, flip:view.flip }),
+  setShow(k, v){
+    if (k === 'grid') show.grid = !!v; else if (k === 'ghost') show.ghost = !!v;
+    else if (k === 'unica') { setUnica(!!v); return; } else if (k === 'flip') { setFlip(!!v); return; }
+    if (painel) painel.atualiza(); pede();
+  },
+  unidade:() => unidade, setUnidade, grades:() => GRADES, grade:() => grade.id, setGrade,
+  snapObj:() => snapObj, setSnapObj(v){ if (['todas', 'atual', 'off'].indexOf(v) >= 0) { snapObj = v; gravaPref('snapobj', v); if (painel) painel.atualiza(); } },
+  filtros:() => FILTROS.map(([k, rot]) => ({ k, rot, on:!!filtro[k] })),
+  setFiltro(k, v){
+    if (k === '*') { for (const [f] of FILTROS) filtro[f] = !!v; }
+    else if (k in filtro) filtro[k] = !!v;
+    gravaPref('filtro', JSON.stringify(filtro));
+    if (painel) painel.atualiza(); pede();
+  },
+  info:infoPlaca, ficha, editar:editarCampo, acao:acaoPainel,
+  fmtDist, fmtNum, parseDist, parseNum,
+  componentes:linhasComponentes,
+  selComp(srcRef){ const m = model.compByRef[srcRef]; if (m) irPara(ALVO_COMP.get(m), true); },
+  mudancas:() => model.changeItems.map((it, i) => ({ i, rot:chLabel(it.ch), status:it.status, msg:it.msg, temAlvo:!!it.target, nota:(it.ch && it.ch.note) || '' })),
+  irMudanca(i){
+    const it = model.changeItems[i]; if (!it || !it.target) return;
+    const m = it.target;
+    let a = null;
+    if (m.kind === 'comp') a = ALVO_COMP.get(m);
+    else if (m.kind === 'region' && m.eff && m.eff.cutout) a = PORCHAVE.get(chave({ t:'recorte', m }));
+    else if (m.kind) a = PORCHAVE.get(chave({ t:m.kind, m }));
+    if (a) irPara(a, true);
+  },
+  tiraMudanca(i){
+    const it = model.changeItems[i]; if (!it) return;
+    if (!garanteEdicao()) return;
+    const k = CH.indexOf(it.ch); if (k < 0) return;
+    CH.splice(k, 1); commit();
+    HubDialog.toast('mudança tirada (Ctrl+Z devolve)', 'info', 2200);
+  },
+  validacao:() => model.validation.map(v => ({ level:v.level, msg:v.msg })),
+  sinalizadores:() => ANN.filter(a => a.view === 'pcb'),
+  irAnn(a){ irPara(annAlvo(a), true); },
+  annDel(a){ if (!garanteEdicao()) return; const i = ANN.indexOf(a); if (i >= 0) { ANN.splice(i, 1); SEL = SEL.filter(x => x.ann !== a); annChanged(); } },
+  annReabre(a){ if (!garanteEdicao()) return; a.status = 'open'; a.reply = ''; annChanged(); },
+  editOn:() => editOn, setEdit(v){ setEdit(v); },
+  sujo:() => ({ ch:chDirty, ann:annDirty }), salvar:() => salvar(), csv:exportCsv,
+  gerber:() => abreGerber(), verGerberSalvo:() => verGerberSalvo(), temGerber:() => typeof HubGerber !== 'undefined' && typeof HubGerberView !== 'undefined',
+  teclaDe, podeGravar:HubIO.canPost && !!PROJ,
+  sel:() => SEL.slice(), tool:() => tool, ajuda:() => toggleAjuda(true),
+  rotaAtiva:() => !!(draft && draft.tipo === 'rota' && draft.est), preencher:() => preencher,
+};
 
-/* ============================== toolbar / teclado ============================== */
-
-function updateZoomLabel(){
-  document.getElementById('szoom').textContent = view.scale.toFixed(1)+' px/mm';
+/* ============================== Gerber ==============================
+   O visualizador (hub-gerberview.js) abre POR CIMA da vista, com o conjunto gerado agora pelo
+   hub-gerber.js a partir da placa EFETIVA (board.js + changes.js de agora) -- o mesmo motor que
+   a tela desenha. Na barra dele: Gerar de novo, Baixar .zip, Salvar no projeto (POST
+   /api/gerber -> Projects/<p>/Gerber/) e Ver salvo (o ultimo conjunto gravado, para comparar). */
+let GV = null, gerIdx = -1, gerUltimo = null;
+const gerOpc = {
+  nomes:lePref('gerber.nomes', 'fabricacao') === 'altium' ? 'altium' : 'fabricacao',
+  vazias:lePref('gerber.vazias', '0') === '1',
+  gtoGbo:lePref('gerber.gtogbo', '0') === '1',
+  x2:lePref('gerber.x2', '1') !== '0',
+};
+function gerberAberto(){ const o = $('gerber'); return !!o && !o.hidden; }
+function baseDoPcbDoc(){
+  const n = String(B.source || '').split(/[\\/]/).pop().replace(/\.pcbdoc$/i, '');
+  return n || PROJ || 'placa';
 }
-function toggleFlip(){
-  view.flip=!view.flip;
-  document.getElementById('btnFlip').textContent = 'Vista: ' + (view.flip?'Bottom':'Top');
-  draw();
-}
-document.getElementById('btnFit').addEventListener('click',()=>{ fitBoard(); updateZoomLabel(); draw(); });
-document.getElementById('btnFlip').addEventListener('click',toggleFlip);
-document.getElementById('btnGrid').addEventListener('click',e=>{ show.grid=!show.grid; e.target.classList.toggle('active'); draw(); });
-document.getElementById('btnGhost').addEventListener('click',e=>{ show.ghost=!show.ghost; e.target.classList.toggle('active'); draw(); });
-document.getElementById('btnCsv').addEventListener('click',exportCsv);
-const helpEl=document.getElementById('help');
-function toggleHelp(){ helpEl.style.display = helpEl.style.display==='block'?'none':'block'; }
-document.getElementById('btnHelp').addEventListener('click',toggleHelp);
-helpEl.addEventListener('click',toggleHelp);
-window.addEventListener('keydown',e=>{
-  if (e.key === 'Escape') {
-    const pf = document.getElementById('propform');
-    if (pf && pf.style.display === 'block'){ pf.style.display = 'none'; propTarget = null; reapply(); return; }
-    if (objDrag){ objDrag = null; reapply(); } setAnnTool(false); setTool('select'); return;
+function abreGerber(){
+  fechaMenu();
+  if (LEAN) return;
+  if (typeof HubGerberView === 'undefined') {
+    HubDialog.alert('O visualizador de Gerber (hub-gerberview.js) não carregou nesta página. Atualize o hub (F5); se continuar, o arquivo não chegou nesta instalação.', { title:'Gerber' });
+    return;
   }
-  if (e.key === ' ' && objDrag && objDrag.m.kind === 'comp'){ e.preventDefault(); objDrag.m.eff.rot = (objDrag.m.eff.rot + 90) % 360; objDrag.moved = true; dragMoved = true; draw(); return; }
-  if (e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.tagName==='SELECT') return;
-  const k=e.key.toLowerCase();
-  if (e.ctrlKey && k === 'z'){ e.preventDefault(); if (editOn) undo(); return; }
-  if (e.ctrlKey && k === 'y'){ e.preventDefault(); if (editOn) redo(); return; }
-  if (k === 'e'){ setEdit(!editOn); return; }
-  if (k==='f'){ fitBoard(); updateZoomLabel(); draw(); }
-  else if (k==='v') toggleFlip();
-  else if (k==='g'){ show.grid=!show.grid; document.getElementById('btnGrid').classList.toggle('active'); draw(); }
-  else if (k==='d'){ show.ghost=!show.ghost; document.getElementById('btnGhost').classList.toggle('active'); draw(); }
-  else if (k==='h') toggleHelp();
-  else if (k==='n') setAnnTool(!annTool);
-  else if (k === 't') setTool(tool === 'track' ? 'select' : 'track');
-  else if (e.key === 'Delete'){ if (editOn) deleteSelected(); }
+  $('gerber').hidden = false;
+  /* o visualizador tem o rodape dele (X/Y, zoom): o da vista sai enquanto ele esta aberto */
+  document.body.classList.add('gerber-on');
+  if (!GV) montaGerberView();
+  if (gerIdx < 0) regeraGerber(true);
+  else { pintaGerberTopo(); GV.redesenhar(); }
+}
+function fechaGerber(){ const o = $('gerber'); if (o) o.hidden = true; document.body.classList.remove('gerber-on'); try { cv.focus(); } catch (e) {} pede(); }
+function montaGerberView(){
+  GV = HubGerberView.montar($('gerberVista'), {
+    conjuntos:[],
+    aoFechar:() => fechaGerber(),
+    barraExtra:[
+      { rotulo:'Gerar de novo', titulo:'Gera de novo a partir da placa com as mudanças de agora (inclusive as ainda não salvas)', primario:true, acao:() => regeraGerber(false) },
+      { rotulo:'Baixar .zip', titulo:'Baixa o pacote num .zip com o nome do .PcbDoc', acao:() => baixaZipGerber() },
+      { rotulo:'Salvar no projeto', titulo:V.podeGravar ? 'Grava em Projects/' + PROJ + '/Gerber/ (o conjunto anterior sai da pasta)' : 'Só com o hubserver e um projeto aberto (?p=)', desabilitado:!V.podeGravar, acao:() => salvaGerber() },
+      { rotulo:'Ver salvo', titulo:V.podeGravar ? 'Abre o último conjunto gravado em Projects/' + PROJ + '/Gerber/ ao lado do gerado, para comparar' : 'Só com o hubserver e um projeto aberto', desabilitado:!V.podeGravar, acao:() => verGerberSalvo() },
+    ],
+  });
+}
+function geraGerber(){
+  if (typeof HubGerber === 'undefined' || typeof HubGerber.gerar !== 'function')
+    throw new Error('o gerador de Gerber (hub-gerber.js) não carregou nesta página — o visualizador abre, mas não há o que gerar');
+  const eb = HC.effectiveBoard(B, model);
+  gerUltimo = HubGerber.gerar(eb, { base:baseDoPcbDoc(), nomes:gerOpc.nomes, vazias:gerOpc.vazias, gtoGbo:gerOpc.gtoGbo, x2:gerOpc.x2, software:'EletricHUB' });
+  return gerUltimo;
+}
+function regeraGerber(primeiro){
+  let r;
+  try { r = geraGerber(); }
+  catch (e) { pintaGerberTopo(String(e && e.message || e)); if (!primeiro) HubDialog.toast('Gerber: ' + (e && e.message || e), 'err', 0); return; }
+  const conj = { titulo:'Gerado agora' + (chDirty ? ' (com mudanças não salvas)' : '') + ' — ' + r.resumo.base, arquivos:r.arquivos.map(a => ({ nome:a.nome, texto:a.texto })) };
+  if (gerIdx >= 0 && GV.estado.conjuntos[gerIdx]) GV.substituir(gerIdx, conj);
+  else { GV.adicionar(conj, GV.estado.conjuntos.length > 0, r.avisos); gerIdx = GV.estado.conjuntos.length - 1; }
+  pintaGerberTopo();
+  if (!primeiro) HubDialog.toast('Gerber gerado: ' + r.arquivos.length + ' arquivo(s)', 'ok');
+}
+function pintaGerberTopo(erro){
+  const meta = $('gbMeta'), av = $('gbAvisos');
+  if (!meta || !av) return;
+  av.textContent = '';
+  if (erro) { meta.textContent = erro; av.hidden = true; return; }
+  const r = gerUltimo;
+  if (!r) { meta.textContent = ''; av.hidden = true; return; }
+  const desc = (r.resumo.descartadas || []).length;
+  meta.textContent = r.resumo.base + ' · ' + r.arquivos.length + ' arquivo(s)' + (desc ? ' · ' + desc + ' camada(s) vazia(s) fora do pacote' : '') +
+    ' · ' + (gerOpc.x2 ? 'Gerber X2' : 'RS-274X sem atributos') + ' mm 4:5' + (B.exporter ? '' : ' · espelho antigo');
+  const lista = r.avisos || [];
+  if (!lista.length) { av.hidden = true; return; }
+  av.hidden = false;
+  const alto = lista.filter(a => /^ATEN/i.test(a));
+  const sum = document.createElement('summary');
+  sum.textContent = '⚠ ' + lista.length + ' aviso(s) do gerador' + (alto.length ? ' — ' + alto[0] : '');
+  av.append(sum);
+  const ul = document.createElement('ul');
+  for (const a of lista) { const li = document.createElement('li'); li.textContent = a; ul.append(li); }
+  av.append(ul);
+}
+function opcaoGerber(k, v){
+  gerOpc[k] = v;
+  gravaPref('gerber.' + k.toLowerCase(), k === 'nomes' ? v : (v ? '1' : '0'));
+  if (GV) regeraGerber(false);
+}
+async function baixaZipGerber(){
+  if (!gerUltimo) regeraGerber(false);
+  const r = gerUltimo;
+  if (!r) return;
+  if (typeof HubGerber.zip !== 'function') throw new Error('o hub-gerber.js desta instalação não monta .zip');
+  const bytes = await HubGerber.zip(r.arquivos);
+  const blob = new Blob([bytes], { type:'application/zip' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = r.resumo.zip || (baseDoPcbDoc() + '.zip');
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  HubDialog.toast('baixado ' + a.download + ' (' + Math.max(1, Math.round(bytes.length / 1024)) + ' KB, ' + r.arquivos.length + ' arquivos)', 'ok');
+}
+async function salvaGerber(){
+  if (!V.podeGravar) { HubDialog.toast('Salvar no projeto só funciona com o hubserver e um projeto aberto', 'warn'); return; }
+  if (!gerUltimo) regeraGerber(false);
+  const r = gerUltimo;
+  if (!r) return;
+  const corpo = { proj:PROJ, arquivos:r.arquivos.map(a => ({ nome:a.nome, texto:a.texto })),
+    manifesto:{ base:r.resumo.base, opcoes:Object.assign({}, gerOpc), avisos:(r.avisos || []).slice(0, 60), software:'EletricHUB',
+                origem:'vista PCB', mudancas:CH.length, changesSalvo:!chDirty } };
+  const resp = await fetch('/api/gerber', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(corpo) });
+  let j = null;
+  try { j = await resp.json(); } catch (e) {}
+  if (!resp.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + resp.status));
+  HubDialog.toast('Gerber salvo em ' + j.pasta + ' — ' + (j.arquivos || []).length + ' arquivo(s)' +
+    ((j.removidos || []).length ? '; saíram ' + j.removidos.length + ' de antes' : '') + (chDirty ? '. Atenção: inclui mudanças ainda não salvas no changes.js.' : ''), chDirty ? 'warn' : 'ok', 7000);
+}
+async function verGerberSalvo(){
+  if (!V.podeGravar) { HubDialog.toast('Ver o Gerber salvo só funciona com o hubserver e um projeto aberto', 'warn'); return; }
+  if (typeof HubGerberView === 'undefined') { abreGerber(); return; }
+  const base = 'Projects/' + PROJ + '/Gerber/';
+  let man;
+  try { man = JSON.parse(await HubIO.fetchText(base + 'gerber.json')); }
+  catch (e) { HubDialog.toast('Nenhum Gerber salvo neste projeto ainda (' + base + 'gerber.json)', 'warn', 5000); return; }
+  const arquivos = [];
+  for (const a of (man && man.arquivos) || []) {
+    try { arquivos.push({ nome:a.nome, texto:await HubIO.fetchText(base + encodeURIComponent(a.nome)) }); } catch (e) {}
+  }
+  if (!arquivos.length) { HubDialog.toast('O gerber.json não lista arquivo legível em ' + base, 'warn'); return; }
+  $('gerber').hidden = false;
+  document.body.classList.add('gerber-on');
+  if (!GV) montaGerberView();
+  GV.adicionar({ titulo:'Salvo em ' + (man.gerado || '?') + ' — ' + (man.base || ''), arquivos }, GV.estado.conjuntos.length > 0);
+  pintaGerberTopo();
+  HubDialog.toast('conjunto salvo aberto' + (GV.estado.conjuntos.length > 1 ? ' para comparar com o gerado (C alterna)' : ''), 'info');
+}
+
+/* ============================== salvar ==============================
+   Dois escritores (a IA e esta tela): guarda o que veio do disco e pergunta antes de passar por
+   cima de uma gravacao de fora; os comentarios // do changes.js em disco sao preservados. */
+const CH_REL = PROJ ? 'Projects/' + PROJ + '/changes.js' : 'changes.js';
+const ANN_REL = PROJ ? 'Projects/' + PROJ + '/annotations.js' : 'annotations.js';
+const BOARD_REL = PROJ ? 'Projects/' + PROJ + '/board.js' : 'board.js';
+let chDisco = null, annDisco = null, boardSig = null;
+async function assinaturaBoard(){
+  try {
+    const r = await fetch('/' + BOARD_REL.split('/').map(encodeURIComponent).join('/'), { method:'HEAD', cache:'no-store' });
+    if (!r.ok) return null;
+    return [r.headers.get('etag'), r.headers.get('last-modified'), r.headers.get('content-length')].join('|');
+  } catch (e) { return null; }
+}
+if (HubIO.canPost) (async () => {
+  try { chDisco = await HubIO.fetchText(CH_REL); } catch (e) {}
+  try { annDisco = await HubIO.fetchText(ANN_REL); } catch (e) {}
+  boardSig = await assinaturaBoard();
+})();
+const SOBRESCREVER = { title:'Salvar', ok:'Sobrescrever', danger:true };
+async function falhaSalvar(err, nome, texto){
+  if (await HubDialog.confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?', { title:'Falha ao salvar', ok:'Baixar' }))
+    HubIO.download(nome, texto);
+}
+function comentariosDoDisco(txt){
+  if (!txt) return [];
+  const out = [];
+  for (const ln of txt.split('\n')) {
+    const t = ln.trim();
+    if (t.indexOf('//') === 0 && t.indexOf('// AltiumPCBMirror') !== 0 && t.indexOf('// Edite ESTE arquivo') !== 0) out.push(ln.replace(/\r$/, ''));
+  }
+  return out;
+}
+async function salvaChanges(){
+  if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o changes.js do disco. Continuar?', SOBRESCREVER))) return false;
+  const out = HC.serializeChanges(CH);
+  if (!out.text) { await HubDialog.alert(out.errors.map(e => '#' + (e.idx + 1) + ' ' + e.msg).join('\n'), { title:'Mudanças inválidas — nada foi gravado' }); return false; }
+  let atual = null;
+  if (HubIO.canPost) {
+    try { atual = await HubIO.fetchText(CH_REL); } catch (e) {}
+    if (atual !== null && (chDisco === null || atual !== chDisco) &&
+        !(await HubDialog.confirm('O changes.js mudou no disco desde o carregamento (outro escritor — a IA?). Sobrescrever mesmo assim?', SOBRESCREVER))) return false;
+  }
+  const extra = comentariosDoDisco(atual !== null ? atual : chDisco);
+  const texto = extra.length ? out.text.replace('var changes = [', extra.join('\n') + '\nvar changes = [') : out.text;
+  try {
+    const r = await HubIO.saveFile(CH_REL, texto);
+    chDisco = texto; staleWorkspace = false; setChDirty(false);
+    avisoRodape('');
+    HubDialog.toast(r.mode === 'server' ? 'changes.js salvo (' + CH.length + ' mudança' + (CH.length === 1 ? '' : 's') + ')' : 'arquivo baixado — substitua ' + CH_REL, r.mode === 'server' ? 'ok' : 'warn');
+    return true;
+  } catch (err) { await falhaSalvar(err, 'changes.js', texto); return false; }
+}
+async function salvaAnnotations(){
+  const out = HC.serializeAnnotations(ANN);
+  if (!out.text) { await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Sinalizadores inválidos' }); return false; }
+  try {
+    const r = await HubIO.saveFile(ANN_REL, out.text);
+    annDisco = out.text; setAnnDirty(false);
+    HubDialog.toast(r.mode === 'server' ? 'sinalizadores salvos' : 'arquivo baixado — substitua ' + ANN_REL, r.mode === 'server' ? 'ok' : 'warn');
+    return true;
+  } catch (err) { await falhaSalvar(err, 'annotations.js', out.text); return false; }
+}
+let salvando = false;
+async function salvar(){
+  if (salvando || LEAN) return;
+  if (!chDirty && !annDirty) { HubDialog.toast('nada a salvar', 'info', 1500); return; }
+  salvando = true;
+  try {
+    if (chDirty) await salvaChanges();
+    if (annDirty) await salvaAnnotations();
+  } finally { salvando = false; if (painel) painel.atualizaSalvar(); }
+}
+
+/* ============================== o hub (iframe) ============================== */
+
+/* O aviso do hubserver e so um contador: ele chega tambem quando ESTA vista acabou de gravar.
+   Recarrega so se o changes.js, o annotations.js ou o board.js do disco nao sao os nossos. */
+async function discoMudou(){
+  if (!HubIO.canPost) return [];
+  const m = [];
+  try { const t = await HubIO.fetchText(CH_REL); if (chDisco === null) chDisco = t; else if (t !== chDisco) m.push('changes.js'); } catch (e) {}
+  try { const t = await HubIO.fetchText(ANN_REL); if (annDisco === null) annDisco = t; else if (t !== annDisco) m.push('annotations.js'); } catch (e) {}
+  const s = await assinaturaBoard();
+  if (s !== null) { if (boardSig === null) boardSig = s; else if (s !== boardSig) m.push('board.js'); }
+  return m;
+}
+window.__hubOnChange = function(){
+  discoMudou().then(lista => {
+    if (!lista.length) return;
+    if (!chDirty && !annDirty) { HubDialog.ocioso().then(() => location.reload()); return; }
+    staleWorkspace = true;
+    avisoRodape('⚠ ' + lista.join(', ') + ' mudou no disco — salve e recarregue (F5)');
+    HubDialog.toast(lista.join(', ') + ' mudou no disco com edições pendentes aqui — salve e recarregue (F5).', 'warn', 0);
+  });
+};
+window.__hubDirty = function(){ return chDirty || annDirty; };
+let enquadrarPendente = null;
+window.__hubSelectComp = function(ref){
+  if (!model) return false;
+  const m = model.compByRef[ref] || IDX.compNome.get(String(ref));
+  if (!m) return false;
+  const a = ALVO_COMP.get(m);
+  selSo([a], true);
+  if (CW && CHH) enquadraAlvos([a]); else enquadrarPendente = [a];
+  return true;
+};
+window.addEventListener('beforeunload', e => { if (chDirty || annDirty) { e.preventDefault(); e.returnValue = ''; } });
+
+/* ============================== divisoria do painel ============================== */
+
+const SIDE_SNAP = 90, SIDE_VIEW_MIN = 260;
+function montaDivisoria(){
+  const sp = $('splitR'), el = $('props');
+  if (!sp || !el) return;
+  let larg = 340;
+  try { const v = localStorage.getItem('pcbframe.propsW'); if (v !== null && isFinite(+v)) larg = Math.max(0, +v); } catch (e) {}
+  const aplica = () => {
+    document.documentElement.style.setProperty('--props-w', larg + 'px');
+    el.style.display = larg ? '' : 'none';
+    const bp = $('btnPaineis'); if (bp) bp.hidden = larg > 0;
+  };
+  const salva = () => { try { localStorage.setItem('pcbframe.propsW', String(larg)); } catch (e) {} };
+  sp.addEventListener('pointerdown', e => {
+    const total = $('main').getBoundingClientRect().width;
+    const teto = Math.max(SIDE_SNAP, total - SIDE_VIEW_MIN - 12);
+    const x0 = e.clientX, w0 = larg;
+    sp.classList.add('on'); sp.setPointerCapture(e.pointerId);
+    const move = ev => { const w = w0 - (ev.clientX - x0); larg = w < SIDE_SNAP ? 0 : Math.min(w, teto); aplica(); };
+    const up = () => { sp.classList.remove('on'); sp.removeEventListener('pointermove', move); sp.removeEventListener('pointerup', up); sp.removeEventListener('pointercancel', up); salva(); };
+    sp.addEventListener('pointermove', move); sp.addEventListener('pointerup', up); sp.addEventListener('pointercancel', up);
+    e.preventDefault();
+  });
+  sp.addEventListener('dblclick', () => { larg = larg ? 0 : 340; aplica(); salva(); });
+  const bp = $('btnPaineis');
+  if (bp) { bp.replaceChildren(HubPcbIcones.icone('paineis')); bp.addEventListener('click', () => { larg = 340; aplica(); salva(); }); }
+  aplica();
+}
+
+/* ============================== inicio ============================== */
+
+let painel = null;
+function liga(){
+  /* formularios da pagina */
+  const on = (id, ev, fn) => { const x = $(id); if (x) x.addEventListener(ev, fn); };
+  on('annok', 'click', gravaAnn);
+  on('anncancel', 'click', fechaAnnForm);
+  on('anntext', 'keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); gravaAnn(); } });
+  on('txtinp', 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); gravaCaixaTexto(); } });
+  on('txtinp', 'blur', () => { if (caixaPonto && $('txtinp').value.trim()) gravaCaixaTexto(); else fechaCaixaTexto(); });
+  on('help', 'click', () => toggleAjuda(false));
+  on('lsBtn', 'click', e => { const r = e.currentTarget.getBoundingClientRect(); menuLS(r.left, r.top - 8 - 220); });
+  on('lsBtn', 'contextmenu', e => { e.preventDefault(); menuLS(e.clientX, e.clientY - 220); });
+  const ab = $('abaslista');
+  if (ab) {
+    ab.addEventListener('click', e => { const b = e.target.closest('.aba'); if (b) setCur(b.dataset.k); });
+    ab.addEventListener('contextmenu', e => { const b = e.target.closest('.aba'); if (!b) return; e.preventDefault(); menuCamada(b.dataset.k, e.clientX, e.clientY - 150); });
+    ab.addEventListener('wheel', e => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { ab.scrollLeft += e.deltaY; e.preventDefault(); } }, { passive:false });
+  }
+  for (const [id, k] of [['gbNomes', 'nomes']]) on(id, 'change', e => opcaoGerber(k, e.target.value));
+  for (const [id, k] of [['gbVazias', 'vazias'], ['gbGto', 'gtoGbo'], ['gbX2', 'x2']]) on(id, 'change', e => opcaoGerber(k, !!e.target.checked));
+  const sel = $('gbNomes'); if (sel) sel.value = gerOpc.nomes;
+  const ck = (id, v) => { const x = $(id); if (x) x.checked = v; };
+  ck('gbVazias', gerOpc.vazias); ck('gbGto', gerOpc.gtoGbo); ck('gbX2', gerOpc.x2);
+  /* a tecla trocada nas Configuracoes do hub vale na hora (o hub e a vista dividem o localStorage) */
+  window.addEventListener('storage', e => { if (e.key === TECLADO.chave || e.key === null) { ATALHOS = montaMapa(); pintaBarra(); if (painel) painel.atualiza(); } });
+  /* o canvas acompanha a divisoria e a janela */
+  const ro = new ResizeObserver(() => {
+    mede();
+    if (CW && CHH && enquadrarPendente) { const p = enquadrarPendente; enquadrarPendente = null; if (p === 'placa') enquadra(); else enquadraAlvos(p); }
+    pede();
+  });
+  ro.observe($('cvwrap'));
+  window.addEventListener('resize', () => { mede(); pede(); });
+}
+function inicia(){
+  recalcula();
+  mede();
+  liga();
+  if (!LEAN) {
+    montaBarra();
+    pintaAbas();
+    montaDivisoria();
+    if (typeof HubPcbPainel !== 'undefined') painel = HubPcbPainel.instala($('props'), V);
+    else { const p = $('props'); if (p) p.textContent = 'O painel (hub-pcbpainel.js) não carregou — atualize a página.'; }
+  }
+  if (CW && CHH) enquadra(); else enquadrarPendente = 'placa';
+  setEdit(false);
+  pintaStatus();
+  if (painel) painel.atualiza();
+  draw();
+  if (MODO === 'gerber' && !LEAN) abreGerber();
+}
+try { inicia(); }
+catch (e) { fatal('A vista PCB não abriu: ' + (e && e.message || e)); throw e; }
+/* gancho de teste (o smoke por CDP le e age por aqui): a mesma API que o painel usa, mais o que
+   a tela tem de estado. Nao e contrato com o hub -- o hub fala por __hubSelectComp/__hubOnChange. */
+window.__hubPcb = Object.assign(Object.create(V), {
+  estado:() => ({ tool, editOn, cur, unidade, grade:grade.id, flip:view.flip, unica:show.unica, preencher,
+                  sel:SEL.map(chave), ch:CH.length, chDirty, annDirty, view:Object.assign({}, view), draft:draft ? draft.tipo : null }),
+  telaDe:(x, y) => mundoParaTela(x, y), mundoDe:(sx, sy) => telaParaMundo(sx, sy),
+  setTool, fazAcao, hitsEm:(x, y) => hitsEm(x, y).map(chave),
+  snap:(x, y) => snapPonto({ x, y }, null, {}),
+  setView(cx, cy, scale){ view.cx = cx; view.cy = cy; if (scale > 0) view.scale = scale; pede(); },
 });
-
-/* ============================== init ============================== */
-
-document.getElementById('meta').textContent =
-  `${B.source||''} · exportado ${B.generated||'?'} · ${(B.components||[]).length} comps, ` +
-  `${(B.tracks||[]).length} trilhas, ${(B.vias||[]).length} vias · ${CH.length} mudanças`;
-
-document.getElementById('netlist-dl').innerHTML = (B.nets || []).map(n => '<option value="' + n + '">').join('');
-buildLayerPanel();
-buildChangePanel();
-buildAnnPanel();
-renderTable();
-resize();
-fitBoard();
-updateZoomLabel();
-setEdit(false);   /* abre travado; tambem ja desabilita as ferramentas de edicao */
-draw();
 
 })();
