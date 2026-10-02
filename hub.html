@@ -950,6 +950,7 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
     <!-- Esquema / PCB compartilham a mesma casca -->
     <div class="pane" data-pane="esquema"></div>
     <div class="pane" data-pane="pcb"></div>
+    <div class="pane" data-pane="gerber"></div>
 
     <div class="pane" data-pane="comp">
       <div class="comp-grid">
@@ -1427,6 +1428,9 @@ const TABS = [
   { id:'esquema', key:'tab.esquema' },
   { id:'pcb', key:'tab.pcb', sub:[
       { id:'pcb',  key:'tab.pcb.placa' },
+      /* a mesma vista PCB aberta no modo Gerber (pcbframe.html?modo=gerber): gera o pacote da
+         JLCPCB a partir da placa com as mudancas e mostra as camadas */
+      { id:'gerber', key:'tab.pcb.gerber' },
       { id:'comp', key:'tab.comp', count:d=>d.components.length },
       { id:'nets', key:'tab.nets', count:d=>d.nets.length },
   ]},
@@ -1626,9 +1630,9 @@ function canvasPane(kind) {
   const empty = kind === 'esquema' ? p.noSchematic : (p.stats.tracks === 0 && p.stages[2] === 0);
   const wrap = el('div', 'canvas-wrap');
   const bar = el('div', 'canvas-bar');
-  bar.append(el('span', 'ttl', t(kind === 'pcb' ? 'view.pcb' : 'view.sch')),
-    el('span', 'meta', kind === 'pcb'
-      ? t('view.pcbMeta', { t: p.stats.tracks, v: p.stats.vias })
+  bar.append(el('span', 'ttl', t(kind === 'gerber' ? 'view.gerber' : kind === 'pcb' ? 'view.pcb' : 'view.sch')),
+    el('span', 'meta', kind === 'gerber' ? t('view.gerberMeta')
+      : kind === 'pcb' ? t('view.pcbMeta', { t: p.stats.tracks, v: p.stats.vias })
       : t('view.schMeta', { s: p.stats.sheets, c: p.stats.comps, n: p.stats.nets })));
   const right = el('div', 'right');
   let frame = null;
@@ -1647,7 +1651,8 @@ function canvasPane(kind) {
     const vp = el('div', 'viewport');
     frame = document.createElement('iframe');
     frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;background:transparent';
-    frame.src = (kind === 'pcb' ? 'pcbframe.html' : 'schframe.html') + '?p=' + encodeURIComponent(proj().name);
+    frame.src = (kind === 'esquema' ? 'schframe.html' : 'pcbframe.html') + '?p=' + encodeURIComponent(proj().name) +
+      (kind === 'gerber' ? '&modo=gerber' : '');
     frame.dataset.kind = kind;
     vp.append(frame); wrap.append(vp);
   }
@@ -3480,7 +3485,7 @@ function renderPanes() {
      mesma casca de tres colunas, so muda o que a lista traz */
   document.querySelectorAll('.pane').forEach(p =>
     p.classList.toggle('on', p.dataset.pane.split(' ').indexOf(S.tab) >= 0));
-  if (S.tab === 'esquema' || S.tab === 'pcb') {
+  if (S.tab === 'esquema' || S.tab === 'pcb' || S.tab === 'gerber') {
     const pane = document.querySelector('.pane[data-pane="' + S.tab + '"]');
     if (pane.dataset.proj !== S.projId) {
       pane.textContent = '';
