@@ -24,9 +24,14 @@ porta, com `--host 127.0.0.1`.
 
 **As cascas são diferentes de propósito** (pedido do dono em 2026-09-24: "a interface do
 software desktop e da aplicação web vão ser diferentes mesmo por hora"). O desktop tem a
-casca EletricHUB e a vista PCB no tema do hub. São da interface, e ficam diferentes nos dois
-branches: `hub.html`, `hub-classic.html` e `pcbframe.html`. Lógica, backend, `.pas` e testes
-são um código só.
+casca EletricHUB. São da interface, e ficam diferentes nos dois branches: `hub.html` e
+`hub-classic.html`. Lógica, backend, `.pas` e testes são um código só.
+
+**A vista PCB também é uma só desde 2026-10-02** (pedido do dono: a criação de PCB "igual ao
+Altium", e toda mudança vale nos dois): `pcbframe.html`, `pcbframe.js`, `hub-pcbpainel.js`,
+`hub-pcbicones.js`, `hub-gerber.js` e `hub-gerberview.js` são idênticos nos dois branches, no
+tema do hub. Até então o `pcbframe.html` era casca divergente; no merge que trouxe a vista
+nova o conflito se resolveu ficando com a do principal.
 
 **A vista Esquema é uma só desde 2026-09-25** (pedido do dono: "o menu precisa ser igual ao
 do electron", e "toda modificação aplica nos dois"). `schframe.html`, `schframe.js` e os
@@ -67,6 +72,27 @@ encosta nele. Vale a regra que nasceu para os agentes não fazerem fila e que ta
   casca (cabeçalho, abas, rodapé, config).
 - **README**: a seção de um assunto vai num commit separado, só do README.
   Conflito em commit isolado se resolve em segundos; misturado com código, não.
+
+## A vista PCB, o motor e o Gerber
+
+- **Um motor só.** `hub-core.js` faz board + changes → modelo (`applyPcbChanges`) e a placa
+  efetiva no formato do `board.js` (`effectiveBoard`). A tela desenha a placa efetiva e o
+  `hub-gerber.js` gera dela: componente movido ou virado sai pela mesma conta (a do flip foi
+  medida em 232 de 233 componentes de bottom do acervo). Camadas: `HubCore.PCB_LAYERS`, com as
+  cores medidas nos Gerbers da casa.
+- **A tela e a fábrica não discordam.** O texto da tela é o `HubGerber.geometriaTexto`; o furo
+  retangular/oblongo gira com o pad (`rot` + `holerot`, relativo) na tela, no laser, no BOM e
+  no Gerber (`HubLaser.drillPrim`); recorte da placa é a regra do `HubLaser.boardCutouts`.
+- **O Gerber salvo** vai para `Projects/<p>/Gerber/` pela rota `/api/gerber`, fora do vigia do
+  `hubserver.py` — senão gravar recarregaria a vista que acabou de gerar.
+- **Os `.pas` não rodam daqui.** No DelphiScript, nome de API que não existe é erro de
+  COMPILAÇÃO: o `try` não segura e o script inteiro para (o `ApplyProject`, que também constrói
+  o esquema, junto). Cada nome novo ainda não medido está listado nos blocos SONDAS
+  (`ExportBoard.pas`) e APOSTAS (`ApplyChanges.pas`), com o que apagar se o Altium recusar.
+- **Teste de ouro do Gerber:** `tools/pcbdoc` lê o `.PcbDoc` da MESMA revisão de um X2 do
+  Altium (o History guarda as versões) → `hub-gerber` → comparação camada a camada com o X2
+  dele. No DMB (v94) deu XOR zero em 10 de 13 camadas; as outras três são a fusão de regiões do
+  Altium (0,01 mm² no cobre de cima) e a fonte dos textos stroke nas duas legendas.
 
 ## Nunca `alert()`, `confirm()` ou `prompt()`
 

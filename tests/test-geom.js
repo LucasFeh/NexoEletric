@@ -10,13 +10,14 @@ const d = Core.compDelta(moved.compByRef['R1']);
 assert.strictEqual(d.ox, 10); assert.strictEqual(d.nx, 30);
 assert.strictEqual(d.dr, 90); assert.strictEqual(d.flip, true);
 
-// ponto 1mm a direita do centro: flip inverte X local -> (-1,0); rot 90 -> (0,-1)
+// ponto 1mm a direita do centro: flip espelha o Y local -> (1,0); gira phi = rotNova + rotVelha = 90 -> (0,1)
+// (convencao do Altium medida em 232 de 233 componentes de bottom: pad = O + R(rot).Sy.local)
 const p = Core.xfPoint(d, 11, 20);
 assert.ok(Math.abs(p.x - 30) < 1e-9, 'x esperado 30, veio ' + p.x);
-assert.ok(Math.abs(p.y - 39) < 1e-9, 'y esperado 39, veio ' + p.y);
+assert.ok(Math.abs(p.y - 41) < 1e-9, 'y esperado 41, veio ' + p.y);
 
-// angulo com flip: 180 - ang + dr
-assert.strictEqual(Core.xfAngle(d, 0), 270);
+// angulo com flip: phi - ang
+assert.strictEqual(Core.xfAngle(d, 0), 90);
 
 // ownerDelta: null p/ ref vazio, null p/ comp nao movido, delta p/ movido
 assert.strictEqual(Core.ownerDelta(moved, ''), null);

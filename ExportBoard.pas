@@ -6,6 +6,11 @@
 { .    - changes.js     : arquivo de mudancas (criado vazio apenas se nao existir - NUNCA sobrescrito)                . }
 { .    - AI-GUIDE.md    : guia para a sessao de IA (copiado de SCRIPT_HOME)                                           . }
 { .    - pcb-list.csv   : snapshot tipo "PCB List" (TSV: Designator/Footprint/Comment/Layer/X/Y/Rotation)             . }
+{ .    - export-report.txt : o mesmo texto do dialogo final (contagens + sondas que o Altium recusou)                 . }
+{ .                                                                                                                   . }
+{ .  Desde 2026-10 (EXPORTER_ID) o board.js traz tambem, TUDO opcional: layers, rules, fills, lines, a segunda       . }
+{ .  passada (Mid/Plane/mecanicas/Keep-Out/mascara/pasta/furacao), texto com tipo/fonte/largura/ancora/contorno,      . }
+{ .  region com furos, mascara/pasta/tenting/metalizacao por pad e via. Ver o bloco SONDAS antes de mexer.           . }
 { .                                                                                                                   . }
 { .  CONTRATO DE COORDENADAS (fidelidade com o Altium - NAO ALTERAR):                                                 . }
 { .    - mm, eixo Y PARA CIMA, relativo a origem da placa (Board.XOrigin/YOrigin)                                     . }
@@ -25,6 +30,17 @@ const
   // Marca que prova que um caminho e MESMO o workspace, e nao so uma pasta que existe.
   HOME_MARCA = 'AI-GUIDE.md';
   FORMAT_ID = 'pcbmirror-v1';
+  // Marca do espelho com os campos de 2026-10. O formato continua pcbmirror-v1 - tudo o que e
+  // novo e opcional -; a marca e o que deixa a tela separar "o Altium nao deixou ler este
+  // campo" de "este espelho e de antes do campo existir".
+  EXPORTER_ID = 'ExportBoard 2026-10';
+  // Sonda que falhou isto de vezes sem NUNCA ter respondido e nome que este Altium nao tem:
+  // dali em diante ela nao e mais tentada (SondaAindaVale). Uma excecao por objeto pesa numa placa
+  // de 20 mil trilhas.
+  SONDA_DESISTE = 200;
+  // Texto cujo contorno exato passa disto de vertices sai sem "polys" (a tela usa a fonte do
+  // hub com a largura "w"): o board.js nao pode virar megabytes por causa de um texto.
+  POLY_TEXTO_MAX = 4000;
 
 var
   // Preenchidas por HubHome(0) na PRIMEIRA linha do procedimento principal. Eram const,
@@ -36,6 +52,23 @@ var
   Board: IPCB_Board;
   ScanInfo: String; // diagnostico do ultimo ListProjectDirs (aparece nos dialogos)
   Nets: TStringList;
+  // ---- espelho de 2026-10 (ver o bloco SONDAS). Tudo preenchido no comeco do ExportPcb.
+  SondaNomes: TStringList;   // cada sonda que ja falhou, uma vez so
+  SondaQtd: TStringList;     // quantas vezes ela falhou (mesma posicao, como texto)
+  SondaOk: TStringList;      // as sondas que ja responderam ao menos uma vez
+  CamadasOk: Boolean;        // a numeracao de camadas e a documentada? (CamadasConferem)
+  PilhaObj: TObject;         // Board.LayerStack (nil = a sonda nao respondeu)
+  Usadas: TStringList;       // chaves de camada com objeto exportado na segunda passada
+  RegraSuspeita: Boolean;    // a ordem suposta dos tipos de regra (13/14) nao conferiu
+  RegrasLidas: TStringList;  // de qual regra saiu cada valor de "rules" (so no relatorio)
+  RgSm, RgPm, RgClear, RgWidth, RgViaSize, RgViaDrill: String; // mm; '' = nao saiu
+  RgSmP, RgPmP, RgClearP, RgWidthP, RgViaP: Integer;           // prioridade da regra usada
+  // contagens do dialogo final e do export-report.txt
+  NPads, NPadsTh, NPadsPlated, NPadsSm, NPadsSmd, NPadsPm, NPadsTent: Integer;
+  NViasSm, NViasTent: Integer;
+  NTextos, NTextosTipo, NTextosW, NTextosAncora, NTextosPoly, NTextosPolyGrande: Integer;
+  NTextosPolyVazio: Integer; // MakeContour respondeu, mas sem contorno nenhum
+  NRegioesFuro, NKeepout, NPilha: Integer;
 
 { ..................................................................................................................... }
 { .                                              Helpers JSON / numeros                                               . }
@@ -108,6 +141,33 @@ begin
   Result := JF(CoordToMMs(v));
 end;
 
+// A numeracao de camadas deste Altium e a documentada? As sete constantes que este arquivo ja
+// usava sao as ancoras: Top 1, Bottom 32, TopOverlay 33, BottomOverlay 34, KeepOut 56, Mech1
+// 57, Multi 74. Se elas estao no lugar, as do meio tambem estao, porque a conta fecha: 30 mids
+// entre Top e Bottom; TopPaste, BottomPaste, TopSolder, BottomSolder, 16 planos e Drill Guide
+// entre BottomOverlay e KeepOut; 16 mecanicas e Drill Drawing entre KeepOut e Multi.
+// Tem parametro de proposito: some do menu Run Script.
+function CamadasConferem(Dummy: Integer): Boolean;
+begin
+  Result := False;
+  try
+    Result := (eTopLayer = 1) and (eBottomLayer = 32) and (eTopOverlay = 33) and
+              (eBottomOverlay = 34) and (eKeepOutLayer = 56) and (eMechanical1 = 57) and
+              (eMultiLayer = 74);
+  except
+    Result := False;
+  end;
+end;
+
+// Chave de camada do board.js - a tabela do contrato (hub-core.js >> PCB_LAYERS).
+// As 7 de sempre saem como sempre sairam. As outras saem pela POSICAO no TLayer, contada a
+// partir das constantes que este arquivo ja usava, e NAO por eMidLayer1, eTopPaste,
+// eInternalPlane1...: constante que nao existisse neste Altium seria erro de COMPILACAO e
+// derrubaria o script inteiro (foi o que ePortLeft custou ao ExportProject). A posicao e a
+// documentada (Top 1, Mid1..30 = 2..31, Bottom 32, TopOverlay 33, BottomOverlay 34, TopPaste
+// 35, BottomPaste 36, TopSolder 37, BottomSolder 38, Plane1..16 = 39..54, DrillGuide 55,
+// KeepOut 56, Mech1..16 = 57..72, DrillDrawing 73, Multi 74) e CamadasConferem a confere no
+// comeco da rodada. Nao conferiu: essas camadas saem 'L<n>', como sempre sairam.
 function LayerNameOf(L: TLayer): String;
 begin
   if L = eTopLayer then
@@ -124,8 +184,69 @@ begin
     Result := 'Mech1'
   else if L = eKeepOutLayer then
     Result := 'KeepOut'
+  else if not CamadasOk then
+    Result := 'L' + IntToStr(L)
+  else if (L > eTopLayer) and (L < eBottomLayer) then
+    Result := 'Mid' + IntToStr(L - eTopLayer)
+  else if L = eBottomOverlay + 1 then
+    Result := 'TopPaste'
+  else if L = eBottomOverlay + 2 then
+    Result := 'BottomPaste'
+  else if L = eBottomOverlay + 3 then
+    Result := 'TopSolder'
+  else if L = eBottomOverlay + 4 then
+    Result := 'BottomSolder'
+  else if (L >= eBottomOverlay + 5) and (L <= eBottomOverlay + 20) then
+    Result := 'Plane' + IntToStr(L - eBottomOverlay - 4)
+  else if L = eKeepOutLayer - 1 then
+    Result := 'DrillGuide'
+  else if (L > eMechanical1) and (L <= eMechanical1 + 15) then
+    Result := 'Mech' + IntToStr(L - eMechanical1 + 1)
+  else if L = eMultiLayer - 1 then
+    Result := 'DrillDrawing'
   else
     Result := 'L' + IntToStr(L);
+end;
+
+// Cobre de sinal ou plano (Top, Mid<n>, Plane<n>, Bottom), pela chave.
+function EhCobreKey(Chave: String): Boolean;
+begin
+  Result := (Chave = 'Top') or (Chave = 'Bottom') or (Pos('Mid', Chave) = 1) or
+            (Pos('Plane', Chave) = 1);
+end;
+
+// As cinco camadas que a primeira passada (a de sempre) le. A segunda le o resto.
+function EhPrimeiraPassada(L: TLayer): Boolean;
+begin
+  Result := (L = eTopLayer) or (L = eBottomLayer) or (L = eTopOverlay) or
+            (L = eBottomOverlay) or (L = eMultiLayer);
+end;
+
+// TColor do Delphi e BGR (o byte BAIXO e o vermelho) -> '#RRGGBB'. A mesma conta do HexDeCor
+// do ExportProject, que ja rodou no Altium (as cores das ports do DMB chegaram certas).
+function HexDeCorBGR(c: Integer): String;
+begin
+  Result := '#' + IntToHex(c and $FF, 2) +
+                  IntToHex((c shr 8) and $FF, 2) +
+                  IntToHex((c shr 16) and $FF, 2);
+end;
+
+// Nome da forma de pad pelo codigo do Altium - a mesma tabela do PadJSON (1 redondo/oval,
+// 2 retangulo, 3 octogono, 9 roundrect). Serve a pilha do Bottom.
+function NomeDaForma(Codigo: Integer; W, H: String): String;
+begin
+  Result := 'circle';
+  if Codigo = 1 then
+  begin
+    if W <> H then
+      Result := 'oval';
+  end
+  else if Codigo = 2 then
+    Result := 'rect'
+  else if Codigo = 3 then
+    Result := 'octagon'
+  else if Codigo = 9 then
+    Result := 'roundrect';
 end;
 
 function NetNameOf(Prim: TObject): String;
@@ -743,6 +864,1193 @@ begin
 end;
 { ===================== fim PROJ-HELPERS ===================== }
 
+{ ======================================== SONDAS ======================================== }
+{ O espelho de 2026-10 le propriedades do PCB API que este arquivo nunca tinha lido. Cada    }
+{ leitura nova mora numa funcao Sonda* (ou num ajudante dela) e vai dentro de try/except: se }
+{ a propriedade nao responder NAQUELE objeto, o campo opcional nao sai, a sonda entra na     }
+{ lista de falhas (dialogo final e export-report.txt, com quantas vezes) e o export segue.   }
+{ Campo ausente no board.js quer dizer "nao sabido" - nunca um valor inventado no lugar.     }
+{                                                                                            }
+{ O QUE O TRY NAO SEGURA: nome que nao existe em LUGAR NENHUM do API. O DelphiScript confere }
+{ os nomes na COMPILACAO, e um nome desconhecido impede o script INTEIRO de rodar, com try   }
+{ ou sem try. Foi o que IPCB_Region.IsBoardCutout fez aqui em 2026-08 (commit a4db644: "nao  }
+{ compila, e try/except nao protege") e o que ePortLeft fez ao ExportProject. Por isso:      }
+{   - nenhuma constante nova de camada: as camadas novas saem pela POSICAO no TLayer,        }
+{     contada das sete que ja eram usadas (LayerNameOf e CamadasConferem);                   }
+{   - tipo de regra, modo de mascara, pilha do pad e Kind da region viram INTEIRO pela       }
+{     atribuicao a uma variavel Integer (como o ShapeCode do PadJSON sempre fez com o        }
+{     TShape), nunca por eRule_*, eCacheManual, ePadMode_*;                                  }
+{   - um nome por aposta: UseTTFonts e nao tambem TextKind; LayerObject.Name e nao tambem    }
+{     Board.LayerName ou Layer2String (o nome padrao da camada o hub ja tem na tabela dele); }
+{   - cada nome novo mora numa funcao so.                                                    }
+{ SE O ALTIUM RECUSAR com "Undeclared identifier: X": ache X na lista abaixo, apague o(s)    }
+{ try daquela funcao (fica o Result do comeco, que e o "nao sabido") e rode de novo. O resto }
+{ do espelho sai igual, so sem aquele campo.                                                 }
+{                                                                                            }
+{   eFillObject ............................ ExportPcb, segunda passada: SAO DOIS lugares -  }
+{                                            tire-o do MkSet E troque o teste               }
+{                                            "Prim.ObjectId = eFillObject" por False.        }
+{                                            (Um DelphiScript de terceiros que esta no Y:,  }
+{                                            o InteractiveHTMLBOM4Altium2, ja usa o nome.)  }
+{   eRuleObject ............................ LeRegrasDaPlaca                                }
+{   IsKeepout .............................. SondaKeepout                                   }
+{   X1Location Y1Location X2Location Y2Location ............ SondaFill                      }
+{   UseTTFonts ............................. SondaTipoTexto. Recusado: em vez de apagar,    }
+{                                            troque por "Prim.TextKind = 1" (0 = stroke,    }
+{                                            1 = TrueType - e como aquele script do Y: le). }
+{   FontName ............................... SondaFonteTexto                                }
+{   Bold Italic ............................ SondaNegritoItalico                            }
+{   Inverted ............................... SondaInvertido                                 }
+{   PCBContourMaker MakeContour ............ SondaContornoTexto                             }
+{   Contour ................................ ContornoDoPoligono                             }
+{   IsHole ................................. EhFuroDoPoligono                               }
+{   HoleCount .............................. SondaFurosRegiao                               }
+{   Holes .................................. FuroDaRegiao                                   }
+{   Plated ................................. SondaMetalizado                                }
+{   GetState_Cache SolderMaskExpansionValid SolderMaskExpansion PasteMaskExpansionValid    }
+{   PasteMaskExpansion FindDominantRuleForObject Expansion ...... SondaExpansao            }
+{   IsTenting_Top IsTenting_Bottom ......... SondaTenting                                   }
+{   Mode ................................... SondaPilhaPad                                  }
+{   XPadOffset YPadOffset .................. SondaFuroDeslocado                             }
+{   LayerStack ............................. CamadasJSON                                    }
+{   FirstLayer NextLayer LayerID ........... SondaPilhaCobre                                }
+{   LayerObject ............................ ObjCamada                                      }
+{   MechanicalLayerEnabled ................. SondaMecHabilitada                             }
+{   LayerColor ............................. SondaCorCamada                                 }
+{   RuleKind Enabled Scope1Expression Scope2Expression Priority Gap FavoredWidth           }
+{   PreferedWidth PreferedHoleWidth Expansion ............... LeRegra                       }
+{ Ja usados neste repositorio e so lidos agora em objeto novo (o try e pelo objeto): Width e }
+{ XLocation/YLocation de texto (ApplyChanges), Kind(), Component, Name, Count, BotXSize...   }
+
+// Anota uma falha de sonda: o nome entra uma vez so e a contagem sobe. A lista sai no dialogo
+// final e no export-report.txt.
+procedure AnotaFalhaDeSonda(Nome: String);
+var
+  i, n: Integer;
+begin
+  i := SondaNomes.IndexOf(Nome);
+  if i < 0 then
+  begin
+    SondaNomes.Add(Nome);
+    SondaQtd.Add('1');
+  end
+  else
+  begin
+    n := SafeStrToInt(SondaQtd[i]);
+    try
+      SondaQtd[i] := IntToStr(n + 1);
+    except
+      // a contagem e so informativa: se nem a escrita na lista der, fica o numero que estava
+    end;
+  end;
+end;
+
+// Anota que a sonda respondeu - uma vez basta. E o que separa, no relatorio e no SondaAindaVale,
+// "nome que este Altium nao tem" de "objeto em que essa leitura nao se aplica".
+procedure AnotaRespostaDeSonda(Nome: String);
+begin
+  if SondaOk.IndexOf(Nome) < 0 then
+    SondaOk.Add(Nome);
+end;
+
+// Ainda vale tentar? Sim, a menos que a sonda ja tenha falhado SONDA_DESISTE vezes sem NUNCA
+// ter respondido: ai e nome que este Altium nao tem, e insistir so custaria uma excecao por
+// objeto.
+function SondaAindaVale(Nome: String): Boolean;
+var
+  i: Integer;
+begin
+  Result := True;
+  if SondaOk.IndexOf(Nome) >= 0 then
+    Exit;
+  i := SondaNomes.IndexOf(Nome);
+  if i >= 0 then
+    Result := SafeStrToInt(SondaQtd[i]) < SONDA_DESISTE;
+end;
+
+// Dono (designator) de region e fill. Component ja e lido aqui em trilha, arco e texto; so o
+// tipo de objeto e novo, entao o try e pelo objeto, nao pelo nome.
+function DonoDoObjeto(Prim: TObject): String;
+begin
+  Result := '';
+  try
+    Result := OwnerRefOf(Prim);
+  except
+    Result := '';
+    AnotaFalhaDeSonda('Component (dono de region/fill)');
+  end;
+end;
+
+// ',"keepout":true' no objeto que e keepout (Prim.IsKeepout). Keepout de cobre continua no
+// array de hoje (tracks/arcs/regions), com a marca: tira-lo de la renumeraria os ids das
+// placas que ja tem changes.js. Quem gera cobre (Gerber, tela) o pula.
+function SondaKeepout(Prim: TObject): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := 'IsKeepout';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    if Prim.IsKeepout then
+      Result := ',"keepout":true';
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if Result <> '' then
+    NKeepout := NKeepout + 1;
+end;
+
+// Geometria do fill: os cantos SEM rotacao (X1Location..Y2Location) e a rotacao em torno do
+// centro - o contrato do board.js. '' = a sonda nao respondeu, e o fill nao sai.
+function SondaFill(Prim: TObject): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := 'Fill.X1Location/Y1Location/X2Location/Y2Location/Rotation';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := ',"x1":' + CX(Prim.X1Location) + ',"y1":' + CY(Prim.Y1Location) +
+      ',"x2":' + CX(Prim.X2Location) + ',"y2":' + CY(Prim.Y2Location) +
+      ',"rot":' + JF(Prim.Rotation);
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// Espessura do traco do texto (Text.Width), em mm: o "w" que a tela ja le. O text_edit do
+// ApplyChanges escreve esta propriedade desde 2026-08; ler e que e novo.
+function SondaTextoW(Prim: TObject): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := 'Text.Width';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := ',"w":' + CW(Prim.Width);
+    AnotaRespostaDeSonda(Nm);
+    NTextosW := NTextosW + 1;
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// Tipo do texto: 'truetype' | 'stroke' | '' (nao sabido), por Text.UseTTFonts - a propriedade
+// classica, do DXP em diante. TextKind (que separaria tambem o codigo de barras) ficou de fora
+// DE PROPOSITO: seria um segundo nome apostado na compilacao, e codigo de barras nao aparece
+// em nenhum dos 444 PcbDoc da casa.
+function SondaTipoTexto(Prim: TObject): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := 'Text.UseTTFonts';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    if Prim.UseTTFonts then
+      Result := 'truetype'
+    else
+      Result := 'stroke';
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// Nome da fonte TrueType (Text.FontName) - "Arial Rounded MT Bold" nos rotulos do ESP32.
+// So e chamada para texto TrueType: no stroke o registro diz "Arial" e a letra nao e Arial.
+function SondaFonteTexto(Prim: TObject): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := 'Text.FontName';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := ',"font":' + JS(Prim.FontName);
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// Negrito e italico do TrueType (Text.Bold, Text.Italic).
+function SondaNegritoItalico(Prim: TObject): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := 'Text.Bold/Italic';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := ',"bold":' + JB(Prim.Bold) + ',"italic":' + JB(Prim.Italic);
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// Texto invertido (Text.Inverted): a letra vazada num retangulo cheio.
+function SondaInvertido(Prim: TObject): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := 'Text.Inverted';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := ',"inverted":' + JB(Prim.Inverted);
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// Ancora do texto (XLocation/YLocation): o ponto que o Altium guarda. O "x"/"y" do board.js e
+// o centro do retangulo de selecao, que nao bate com a tinta em texto de varias linhas (1,2 mm
+// no "DS" do DMB). Os dois nomes ja foram lidos em IPCB_Text pelo ApplyChanges.
+function SondaAncoraTexto(Prim: TObject): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := 'Text.XLocation/YLocation';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := ',"ax":' + CX(Prim.XLocation) + ',"ay":' + CY(Prim.YLocation);
+    AnotaRespostaDeSonda(Nm);
+    NTextosAncora := NTextosAncora + 1;
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// '[x,y],[x,y],...' de um IPCB_Contour, pelo mesmo Count/GetState_PointX/Y que o contorno
+// principal das regions ja usa. '' se a leitura falhar ou se o contorno vier vazio.
+function PontosDoContorno(C: TObject): String;
+var
+  k, n: Integer;
+  s: String;
+begin
+  Result := '';
+  s := '';
+  try
+    n := C.Count;
+    for k := 0 to n - 1 do
+    begin
+      if k > 0 then
+        s := s + ',';
+      s := s + '[' + CX(C.GetState_PointX(k)) + ',' + CY(C.GetState_PointY(k)) + ']';
+    end;
+    Result := s;
+  except
+    Result := '';
+    AnotaFalhaDeSonda('Contour.Count/GetState_PointX/GetState_PointY');
+  end;
+end;
+
+// Contorno i de um IPCB_GeometricPolygon: Contour[i], e Contour(i) se o colchete nao servir.
+// Propriedade indexada: este arquivo le Segments[i] com colchete e CornerRadius(L) com
+// parenteses, e daqui nao da para saber qual dos dois o Altium aceita nesta.
+function ContornoDoPoligono(GP: TObject; i: Integer): TObject;
+var
+  Nm: String;
+  Leu: Boolean;
+begin
+  Result := nil;
+  Leu := False;
+  Nm := 'GeometricPolygon.Contour[i]';
+  if SondaAindaVale(Nm) then
+  begin
+    try
+      Result := GP.Contour[i];
+      Leu := True;
+      AnotaRespostaDeSonda(Nm);
+    except
+      Result := nil;
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+  Nm := 'GeometricPolygon.Contour(i)';
+  if (not Leu) and SondaAindaVale(Nm) then
+  begin
+    try
+      Result := GP.Contour(i);
+      AnotaRespostaDeSonda(Nm);
+    except
+      Result := nil;
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+end;
+
+// O contorno i e furo? GeometricPolygon.IsHole[i], e IsHole(i) se o colchete nao servir.
+// Falhou vira True quando nenhuma das duas responde.
+function EhFuroDoPoligono(GP: TObject; i: Integer; var Falhou: Boolean): Boolean;
+var
+  Nm: String;
+  Leu: Boolean;
+begin
+  Result := False;
+  Leu := False;
+  Nm := 'GeometricPolygon.IsHole[i]';
+  if SondaAindaVale(Nm) then
+  begin
+    try
+      Result := GP.IsHole[i];
+      Leu := True;
+      AnotaRespostaDeSonda(Nm);
+    except
+      Result := False;
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+  Nm := 'GeometricPolygon.IsHole(i)';
+  if (not Leu) and SondaAindaVale(Nm) then
+  begin
+    try
+      Result := GP.IsHole(i);
+      Leu := True;
+      AnotaRespostaDeSonda(Nm);
+    except
+      Result := False;
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+  if not Leu then
+    Falhou := True;
+end;
+
+// CONTORNO EXATO DO TEXTO (texts[].polys): a letra como o Altium a desenha, em poligonos
+// (contorno externo e furos), pelo mesmo fabricante de contorno que o Altium usa para afastar
+// cobre - PCBServer.PCBContourMaker.MakeContour(texto, 0, camada), que devolve um
+// IPCB_GeometricPolygon (Count, Contour[i], IsHole[i]). Com ele a tela e o Gerber deixam de
+// depender da fonte do hub (IoU 0,38 contra a stroke do Altium) e o TrueType sai igual.
+// Tudo ou nada: um contorno que nao pode ser lido derruba os polys DESTE texto (letra com um
+// pedaco a menos e pior que a fonte do hub). Passou de POLY_TEXTO_MAX vertices: sem polys.
+function SondaContornoTexto(Prim: TObject): String;
+var
+  Nm, Polys, Pts: String;
+  Srv, GP, C: TObject;
+  n, i, Total: Integer;
+  Furo, Falhou, Respondeu: Boolean;
+begin
+  Result := '';
+  Nm := 'PCBServer.PCBContourMaker.MakeContour';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  GP := nil;
+  Respondeu := False;
+  try
+    Srv := PCBServer;
+    GP := Srv.PCBContourMaker.MakeContour(Prim, 0, Prim.Layer);
+    Respondeu := True;
+    AnotaRespostaDeSonda(Nm);
+  except
+    GP := nil;
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if not Respondeu then
+    Exit;
+  if GP = nil then
+  begin
+    NTextosPolyVazio := NTextosPolyVazio + 1;
+    Exit;
+  end;
+  Nm := 'GeometricPolygon.Count';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  n := -1;
+  try
+    n := GP.Count;
+    AnotaRespostaDeSonda(Nm);
+  except
+    n := -1;
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if n = 0 then
+    NTextosPolyVazio := NTextosPolyVazio + 1;
+  if n <= 0 then
+    Exit;
+  // 1) conta os vertices ANTES de escrever: o limite e por texto
+  Total := 0;
+  Falhou := False;
+  for i := 0 to n - 1 do
+  begin
+    C := ContornoDoPoligono(GP, i);
+    if C = nil then
+      Falhou := True
+    else
+    begin
+      try
+        Total := Total + C.Count;
+      except
+        Falhou := True;
+        AnotaFalhaDeSonda('Contour.Count (contorno do texto)');
+      end;
+    end;
+  end;
+  if Falhou then
+    Exit;
+  if Total > POLY_TEXTO_MAX then
+  begin
+    NTextosPolyGrande := NTextosPolyGrande + 1;
+    Exit;
+  end;
+  // 2) escreve: cada contorno com a sua marca de furo
+  Polys := '';
+  for i := 0 to n - 1 do
+  begin
+    C := ContornoDoPoligono(GP, i);
+    Pts := '';
+    if C <> nil then
+      Pts := PontosDoContorno(C);
+    if Pts = '' then
+      Falhou := True
+    else
+    begin
+      Furo := EhFuroDoPoligono(GP, i, Falhou);
+      if Polys <> '' then
+        Polys := Polys + ',';
+      Polys := Polys + '{"hole":' + JB(Furo) + ',"pts":[' + Pts + ']}';
+    end;
+  end;
+  if Falhou or (Polys = '') then
+    Exit;
+  Result := ',"polys":[' + Polys + ']';
+  NTextosPoly := NTextosPoly + 1;
+end;
+
+// Furo h de uma region: Holes[h], e Holes(h) se o colchete nao servir. nil = sem resposta.
+function FuroDaRegiao(R: TObject; h: Integer): TObject;
+var
+  Nm: String;
+  Leu: Boolean;
+begin
+  Result := nil;
+  Leu := False;
+  Nm := 'Region.Holes[i]';
+  if SondaAindaVale(Nm) then
+  begin
+    try
+      Result := R.Holes[h];
+      Leu := True;
+      AnotaRespostaDeSonda(Nm);
+    except
+      Result := nil;
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+  Nm := 'Region.Holes(i)';
+  if (not Leu) and SondaAindaVale(Nm) then
+  begin
+    try
+      Result := R.Holes(h);
+      AnotaRespostaDeSonda(Nm);
+    except
+      Result := nil;
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+end;
+
+// FUROS DA REGION (regions[].holes): o miolo que o polygon despejado deixa em volta de pad e
+// trilha de outra net. Sem eles o cobre do Gerber fecha curto - 28 arquivos de cobre do acervo
+// tem polygon com furo. O GetMainContour de sempre so traz o contorno externo.
+// Tudo ou nada: region com UM furo a menos e curto no Gerber, entao, se algum furo nao puder
+// ser lido, a region sai como saia ate hoje (sem "holes") e o relatorio diz.
+function SondaFurosRegiao(R: TObject): String;
+var
+  Nm, Furos, Pts: String;
+  n, h: Integer;
+  F: TObject;
+  Falhou: Boolean;
+begin
+  Result := '';
+  Nm := 'Region.HoleCount';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  n := 0;
+  try
+    n := R.HoleCount;
+    AnotaRespostaDeSonda(Nm);
+  except
+    n := 0;
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if n <= 0 then
+    Exit;
+  Furos := '';
+  Falhou := False;
+  for h := 0 to n - 1 do
+  begin
+    F := FuroDaRegiao(R, h);
+    Pts := '';
+    if F <> nil then
+      Pts := PontosDoContorno(F);
+    if Pts = '' then
+      Falhou := True
+    else
+    begin
+      if Furos <> '' then
+        Furos := Furos + ',';
+      Furos := Furos + '[' + Pts + ']';
+    end;
+  end;
+  if Falhou then
+  begin
+    AnotaFalhaDeSonda('Region.Holes (algum furo nao pode ser lido: a region saiu sem holes)');
+    Exit;
+  end;
+  Result := ',"holes":[' + Furos + ']';
+  NRegioesFuro := NRegioesFuro + 1;
+end;
+
+// O inteiro do Kind() da region (cutouts[].kindn): separa Board Cutout, recorte de polygon e a
+// regiao do tamanho da placa, que hoje caem juntos em cutouts. O que cada numero quer dizer
+// nao foi medido - a primeira rodada no Altium diz (o furo de fixacao e o de layer Multi com
+// incomp false; a regiao da placa cobre o bbox inteiro).
+function SondaKindN(R: TObject): String;
+var
+  Nm: String;
+  K: Integer;
+begin
+  Result := '';
+  Nm := 'Region.Kind() (inteiro)';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    K := R.Kind();
+    Result := ',"kindn":' + IntToStr(K);
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// Furo metalizado (Pad.Plated): decide entre PTH e NPTH no Gerber. So pad passante.
+function SondaMetalizado(Pad: TObject): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := 'Pad.Plated';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := ',"plated":' + JB(Pad.Plated);
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// O nome da regra contradiz o tipo suposto pelo inteiro? So vale para o par que tem a MESMA
+// propriedade (Expansion): mascara de solda (13) e de pasta (14). Os nomes padrao do Altium
+// sao "SolderMaskExpansion" e "PasteMaskExpansion".
+function NomeContradiz(NomeMaiusc: String; Tipo: Integer): Boolean;
+begin
+  Result := False;
+  if Tipo = 13 then
+    Result := (Pos('PASTE', NomeMaiusc) > 0)
+  else if Tipo = 14 then
+    Result := (Pos('SOLDER', NomeMaiusc) > 0);
+end;
+
+// Expansao EFETIVA de mascara (Solda = True) ou de pasta (Solda = False) de pad ou via, em
+// Coord: a manual do proprio objeto quando ele esta em modo manual, senao a da regra que manda
+// nele (Board.FindDominantRuleForObject). False = nao deu para saber, e o campo nao sai -
+// "regra" e "nao sei" nunca viram o mesmo numero. E o caso dos 40 pads do DMB com mascara
+// manual 0, que a regra de 4 mil abriria.
+//
+// MODO: o registro de cache do objeto (GetState_Cache), campo ...ExpansionValid. O TCacheState
+// documentado e (eCacheInvalid, eCacheValid, eCacheManual): 2 = manual, comparado pelo
+// INTEIRO. O .PcbDoc do DMB grava o mesmo numero (1 = regra em 99 pads, 2 = manual em 40). O
+// registro e lido direto da chamada (sem guardar numa variavel), que e como ele chega aqui.
+// REGRA: o tipo vai pelo inteiro (13 SolderMaskExpansion, 14 PasteMaskExpansion - a ordem do
+// TRuleKind, ver RegrasJSON) e o nome da regra devolvida ainda e conferido (NomeContradiz).
+// Quem ('Pad' ou 'Via') entra no nome da sonda: pad e via sao objetos diferentes no API, e uma
+// leitura que so a via recusasse sairia no relatorio como "respondeu em outros objetos" e seria
+// tentada de novo em cada via, sem nunca desistir.
+function SondaExpansao(Prim: TObject; Quem: String; Solda: Boolean; var Valor: Integer): Boolean;
+var
+  B, R: TObject;
+  Nm: String;
+  Modo, Tipo: Integer;
+  Contradiz: Boolean;
+begin
+  Result := False;
+  Valor := 0;
+  if Solda then
+    Nm := Quem + '.GetState_Cache.SolderMaskExpansionValid/SolderMaskExpansion'
+  else
+    Nm := Quem + '.GetState_Cache.PasteMaskExpansionValid/PasteMaskExpansion';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  Modo := -1;
+  try
+    if Solda then
+    begin
+      Modo := Prim.GetState_Cache.SolderMaskExpansionValid;
+      if Modo = 2 then
+        Valor := Prim.GetState_Cache.SolderMaskExpansion;
+    end
+    else
+    begin
+      Modo := Prim.GetState_Cache.PasteMaskExpansionValid;
+      if Modo = 2 then
+        Valor := Prim.GetState_Cache.PasteMaskExpansion;
+    end;
+    AnotaRespostaDeSonda(Nm);
+  except
+    Modo := -1;
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if Modo = 2 then
+  begin
+    Result := True;
+    Exit;
+  end;
+  // sem o modo nao da para saber se o objeto e manual: melhor nao sair nada que sair a regra
+  if (Modo < 0) or RegraSuspeita then
+    Exit;
+  Tipo := 14;
+  if Solda then
+    Tipo := 13;
+  Nm := Quem + ': Board.FindDominantRuleForObject/Rule.Expansion';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  Contradiz := False;
+  try
+    B := Board;
+    R := B.FindDominantRuleForObject(Prim, Tipo);
+    if R <> nil then
+    begin
+      Contradiz := NomeContradiz(UpperCase(R.Name), Tipo);
+      if not Contradiz then
+      begin
+        Valor := R.Expansion;
+        Result := True;
+      end;
+    end;
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := False;
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if Contradiz then
+  begin
+    Result := False;
+    RegraSuspeita := True;
+    AnotaFalhaDeSonda('RuleKind 13/14 (FindDominantRuleForObject devolveu regra de outro tipo)');
+  end;
+end;
+
+// Tenting por face (IsTenting_Top/IsTenting_Bottom): true = sem abertura de mascara naquele
+// lado. O DMB tem 33 vias abertas; um gerador que tampasse via por padrao apagaria 66 janelas.
+// Quem ('Pad' ou 'Via') separa as duas sondas, pelo mesmo motivo do SondaExpansao.
+function SondaTenting(Prim: TObject; Quem: String): String;
+var
+  Nm: String;
+begin
+  Result := '';
+  Nm := Quem + '.IsTenting_Top/IsTenting_Bottom';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := ',"tentTop":' + JB(Prim.IsTenting_Top) + ',"tentBot":' + JB(Prim.IsTenting_Bottom);
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// Pilha do pad passante: Mode 0 = simples (uma forma so), 1 = top-mid-bottom, 2 = pilha
+// completa (a ordem do TPadMode documentado, pelo inteiro). So quando a pilha NAO e simples E o
+// Bottom difere do Top sai "bot":{w,h,shape,radius} - numa pilha simples os campos Bot podem
+// guardar lixo de uma pilha antiga e nao podem ser lidos. BotXSize/BotYSize/BotShape e
+// CornerRadius(L) ja sao lidos por este arquivo (pad SMD no Bottom); o nome novo e Mode.
+function SondaPilhaPad(Pad: TObject): String;
+var
+  Nm, BW, BH, Raio: String;
+  Modo, Codigo: Integer;
+  Igual: Boolean;
+begin
+  Result := '';
+  Nm := 'Pad.Mode';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  Modo := -1;
+  try
+    Modo := Pad.Mode;
+    AnotaRespostaDeSonda(Nm);
+  except
+    Modo := -1;
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if Modo <= 0 then
+    Exit;
+  try
+    Igual := (Pad.BotXSize = Pad.TopXSize) and (Pad.BotYSize = Pad.TopYSize) and
+             (Pad.BotShape = Pad.TopShape);
+    if not Igual then
+    begin
+      BW := CW(Pad.BotXSize);
+      BH := CW(Pad.BotYSize);
+      Codigo := Pad.BotShape;
+      Raio := '';
+      if Codigo = 9 then
+        Raio := ',"radius":' + CW(Pad.CornerRadius(eBottomLayer));
+      Result := ',"bot":{"w":' + BW + ',"h":' + BH + ',"shape":' + JS(NomeDaForma(Codigo, BW, BH)) +
+        Raio + '}';
+    end;
+  except
+    Result := '';
+    AnotaFalhaDeSonda('Pad.BotXSize/BotYSize/BotShape (pilha do passante)');
+  end;
+end;
+
+// Furo deslocado do pad passante (o "Offset From Hole Center" do Altium): XPadOffset/YPadOffset
+// do Top, em mm, no referencial do pad (antes da rotacao). So sai quando nao e zero.
+function SondaFuroDeslocado(Pad: TObject): String;
+var
+  Nm: String;
+  OX, OY: Integer;
+  Leu: Boolean;
+begin
+  Result := '';
+  Leu := False;
+  OX := 0;
+  OY := 0;
+  Nm := 'Pad.XPadOffset[L]/YPadOffset[L]';
+  if SondaAindaVale(Nm) then
+  begin
+    try
+      OX := Pad.XPadOffset[eTopLayer];
+      OY := Pad.YPadOffset[eTopLayer];
+      Leu := True;
+      AnotaRespostaDeSonda(Nm);
+    except
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+  Nm := 'Pad.XPadOffset(L)/YPadOffset(L)';
+  if (not Leu) and SondaAindaVale(Nm) then
+  begin
+    try
+      OX := Pad.XPadOffset(eTopLayer);
+      OY := Pad.YPadOffset(eTopLayer);
+      Leu := True;
+      AnotaRespostaDeSonda(Nm);
+    except
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+  if Leu and ((OX <> 0) or (OY <> 0)) then
+    Result := ',"hox":' + CW(OX) + ',"hoy":' + CW(OY);
+end;
+
+// IPCB_LayerObject de uma camada: Board.LayerStack.LayerObject[L], e LayerObject(L) se o
+// colchete nao servir. nil = sem pilha ou sem resposta.
+function ObjCamada(Camada: Integer): TObject;
+var
+  Nm: String;
+  Leu: Boolean;
+begin
+  Result := nil;
+  if PilhaObj = nil then
+    Exit;
+  Leu := False;
+  Nm := 'LayerStack.LayerObject[L]';
+  if SondaAindaVale(Nm) then
+  begin
+    try
+      Result := PilhaObj.LayerObject[Camada];
+      Leu := True;
+      AnotaRespostaDeSonda(Nm);
+    except
+      Result := nil;
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+  Nm := 'LayerStack.LayerObject(L)';
+  if (not Leu) and SondaAindaVale(Nm) then
+  begin
+    try
+      Result := PilhaObj.LayerObject(Camada);
+      AnotaRespostaDeSonda(Nm);
+    except
+      Result := nil;
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+end;
+
+// Nome da camada como ESTA placa a chama ("Top Layer", "Top 3D Body"...): LayerObject.Name.
+function SondaNomeCamada(Camada: Integer): String;
+var
+  LO: TObject;
+  Nm: String;
+begin
+  Result := '';
+  LO := ObjCamada(Camada);
+  if LO = nil then
+    Exit;
+  Nm := 'LayerObject.Name';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := LO.Name;
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := '';
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// Cor da camada: Board.LayerColor[L] (e LayerColor(L) se o colchete nao servir), TColor BGR
+// -> '#RRGGBB'. Cor de sistema (bit alto ligado) ou fora de 24 bits nao sai.
+function SondaCorCamada(Camada: Integer): String;
+var
+  B: TObject;
+  Nm: String;
+  C: Integer;
+  Leu: Boolean;
+begin
+  Result := '';
+  Leu := False;
+  C := -1;
+  B := Board;
+  Nm := 'Board.LayerColor[L]';
+  if SondaAindaVale(Nm) then
+  begin
+    try
+      C := B.LayerColor[Camada];
+      Leu := True;
+      AnotaRespostaDeSonda(Nm);
+    except
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+  Nm := 'Board.LayerColor(L)';
+  if (not Leu) and SondaAindaVale(Nm) then
+  begin
+    try
+      C := B.LayerColor(Camada);
+      Leu := True;
+      AnotaRespostaDeSonda(Nm);
+    except
+      AnotaFalhaDeSonda(Nm);
+    end;
+  end;
+  if Leu and (C >= 0) and (C <= $FFFFFF) then
+    Result := HexDeCorBGR(C);
+end;
+
+// Mecanica habilitada? (LayerObject.MechanicalLayerEnabled). False tambem quando nao se sabe:
+// a mecanica com objeto entra na lista de camadas de qualquer jeito (ver CamadasJSON).
+function SondaMecHabilitada(Camada: Integer): Boolean;
+var
+  LO: TObject;
+  Nm: String;
+begin
+  Result := False;
+  LO := ObjCamada(Camada);
+  if LO = nil then
+    Exit;
+  Nm := 'LayerObject.MechanicalLayerEnabled';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  try
+    Result := LO.MechanicalLayerEnabled;
+    AnotaRespostaDeSonda(Nm);
+  except
+    Result := False;
+    AnotaFalhaDeSonda(Nm);
+  end;
+end;
+
+// {"key","name","color","stack"} de uma camada. NomePilha = o nome que a pilha ja deu ('' =
+// perguntar ao LayerObject); Pilha = posicao fisica no cobre (0 = o campo nao sai). Camada sem
+// nome nem cor ainda sai, so com a chave: e o que diz "esta placa tem esta camada".
+function CamadaJSON(Camada: Integer; Chave, NomePilha: String; Pilha: Integer): String;
+var
+  Nome, Cor: String;
+begin
+  Nome := NomePilha;
+  if Nome = '' then
+    Nome := SondaNomeCamada(Camada);
+  Cor := SondaCorCamada(Camada);
+  Result := '{"key":' + JS(Chave);
+  if Nome <> '' then
+    Result := Result + ',"name":' + JS(Nome);
+  if Cor <> '' then
+    Result := Result + ',"color":' + JS(Cor);
+  if Pilha > 0 then
+    Result := Result + ',"stack":' + IntToStr(Pilha);
+  Result := Result + '}';
+end;
+
+// Cobre na ordem FISICA da pilha (Board.LayerStack: FirstLayer/NextLayer), Top = 1 ... Bottom
+// = N: e a ordem que numera o _Copper_Signal_L<n> do Gerber. Itens prontos em Itens, chaves em
+// Chaves. True = a pilha foi lida inteira E vai do Top ao Bottom; senao nada dela e usado,
+// porque numero de pilha errado e pior que numero nenhum.
+function SondaPilhaCobre(Itens: TStringList; Chaves: TStringList): Boolean;
+var
+  Nm, Chave, Nome, Primeira, Ultima: String;
+  LO: TObject;
+  Camada, n, Pilha: Integer;
+  Leu: Boolean;
+begin
+  Result := False;
+  Itens.Clear;
+  Chaves.Clear;
+  if PilhaObj = nil then
+    Exit;
+  Nm := 'LayerStack.FirstLayer/NextLayer/LayerID';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  Pilha := 0;
+  n := 0;
+  Primeira := '';
+  Ultima := '';
+  Leu := False;
+  try
+    LO := PilhaObj.FirstLayer;
+    while (LO <> nil) and (n < 200) do
+    begin
+      Camada := LO.LayerID;
+      Chave := LayerNameOf(Camada);
+      if EhCobreKey(Chave) and (Chaves.IndexOf(Chave) < 0) then
+      begin
+        Pilha := Pilha + 1;
+        if Primeira = '' then
+          Primeira := Chave;
+        Ultima := Chave;
+        Nome := '';
+        try
+          Nome := LO.Name;
+        except
+          Nome := '';
+        end;
+        Itens.Add(CamadaJSON(Camada, Chave, Nome, Pilha));
+        Chaves.Add(Chave);
+      end;
+      LO := PilhaObj.NextLayer(LO);
+      n := n + 1;
+    end;
+    Leu := True;
+    AnotaRespostaDeSonda(Nm);
+  except
+    Leu := False;
+    AnotaFalhaDeSonda(Nm);
+  end;
+  Result := Leu and (Pilha >= 2) and (Primeira = 'Top') and (Ultima = 'Bottom');
+  if Leu and (not Result) then
+    AnotaFalhaDeSonda('LayerStack (a ordem lida nao vai do Top ao Bottom: sem "stack")');
+  if not Result then
+  begin
+    Itens.Clear;
+    Chaves.Clear;
+  end;
+end;
+
+// Uma regra do iterador (RegrasJSON): guarda o valor dela se for de um dos cinco tipos lidos,
+// ativa, de escopo All (a regra da placa) e de prioridade melhor que a ja guardada (1 = a mais
+// forte). O tipo vem pelo INTEIRO de RuleKind - ver a ordem e as travas em RegrasJSON.
+procedure LeRegra(R: TObject);
+var
+  Tipo, Prio: Integer;
+  Ativa, Leu: Boolean;
+  Esc1, Esc2, Nome, V1, V2, Nm: String;
+begin
+  Nm := 'Rule.RuleKind';
+  if not SondaAindaVale(Nm) then
+    Exit;
+  Tipo := -1;
+  try
+    Tipo := R.RuleKind;
+    AnotaRespostaDeSonda(Nm);
+  except
+    Tipo := -1;
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if (Tipo <> 0) and (Tipo <> 2) and (Tipo <> 11) and (Tipo <> 13) and (Tipo <> 14) then
+    Exit;
+  Leu := False;
+  Ativa := False;
+  Esc1 := '';
+  Prio := 1000000;
+  Nome := '';
+  Nm := 'Rule.Enabled/Scope1Expression/Priority/Name';
+  try
+    Ativa := R.Enabled;
+    Esc1 := Trim(R.Scope1Expression);
+    Prio := R.Priority;
+    Nome := R.Name;
+    Leu := True;
+    AnotaRespostaDeSonda(Nm);
+  except
+    Leu := False;
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if (not Leu) or (not Ativa) or (UpperCase(Esc1) <> 'ALL') then
+    Exit;
+  // Clearance e regra de DOIS escopos: a da placa e a "All" x "All"
+  if Tipo = 0 then
+  begin
+    Esc2 := 'All';
+    try
+      Esc2 := Trim(R.Scope2Expression);
+    except
+      Esc2 := 'All';
+      AnotaFalhaDeSonda('Rule.Scope2Expression');
+    end;
+    if UpperCase(Esc2) <> 'ALL' then
+      Exit;
+  end;
+  if NomeContradiz(UpperCase(Nome), Tipo) then
+  begin
+    RegraSuspeita := True;
+    AnotaFalhaDeSonda('RuleKind 13/14 (a regra "' + Nome + '" nao e do tipo suposto)');
+    Exit;
+  end;
+  V1 := '';
+  V2 := '';
+  if Tipo = 13 then
+  begin
+    if Prio < RgSmP then
+    begin
+      try
+        V1 := CW(R.Expansion);
+      except
+        V1 := '';
+        AnotaFalhaDeSonda('Rule.Expansion');
+      end;
+      if V1 <> '' then
+      begin
+        RgSm := V1;
+        RgSmP := Prio;
+        RegrasLidas.Add('   sm = ' + V1 + ' mm   <- regra "' + Nome + '" (RuleKind 13, prioridade ' +
+          IntToStr(Prio) + ')');
+      end;
+    end;
+  end
+  else if Tipo = 14 then
+  begin
+    if Prio < RgPmP then
+    begin
+      try
+        V1 := CW(R.Expansion);
+      except
+        V1 := '';
+        AnotaFalhaDeSonda('Rule.Expansion');
+      end;
+      if V1 <> '' then
+      begin
+        RgPm := V1;
+        RgPmP := Prio;
+        RegrasLidas.Add('   pm = ' + V1 + ' mm   <- regra "' + Nome + '" (RuleKind 14, prioridade ' +
+          IntToStr(Prio) + ')');
+      end;
+    end;
+  end
+  else if Tipo = 0 then
+  begin
+    if Prio < RgClearP then
+    begin
+      try
+        V1 := CW(R.Gap);
+      except
+        V1 := '';
+        AnotaFalhaDeSonda('Rule.Gap');
+      end;
+      if V1 <> '' then
+      begin
+        RgClear := V1;
+        RgClearP := Prio;
+        RegrasLidas.Add('   clearance = ' + V1 + ' mm   <- regra "' + Nome + '" (RuleKind 0, prioridade ' +
+          IntToStr(Prio) + ')');
+      end;
+    end;
+  end
+  else if Tipo = 2 then
+  begin
+    if Prio < RgWidthP then
+    begin
+      try
+        V1 := CW(R.FavoredWidth[eTopLayer]);
+      except
+        V1 := '';
+        AnotaFalhaDeSonda('Rule.FavoredWidth[L]');
+      end;
+      if V1 = '' then
+      begin
+        try
+          V1 := CW(R.FavoredWidth(eTopLayer));
+        except
+          V1 := '';
+          AnotaFalhaDeSonda('Rule.FavoredWidth(L)');
+        end;
+      end;
+      if V1 <> '' then
+      begin
+        RgWidth := V1;
+        RgWidthP := Prio;
+        RegrasLidas.Add('   width = ' + V1 + ' mm (Top)   <- regra "' + Nome + '" (RuleKind 2, prioridade ' +
+          IntToStr(Prio) + ')');
+      end;
+    end;
+  end
+  else if Tipo = 11 then
+  begin
+    if Prio < RgViaP then
+    begin
+      try
+        V1 := CW(R.PreferedWidth);
+        V2 := CW(R.PreferedHoleWidth);
+      except
+        V1 := '';
+        V2 := '';
+        AnotaFalhaDeSonda('Rule.PreferedWidth/PreferedHoleWidth');
+      end;
+      if (V1 <> '') and (V2 <> '') then
+      begin
+        RgViaSize := V1;
+        RgViaDrill := V2;
+        RgViaP := Prio;
+        RegrasLidas.Add('   via = ' + V1 + ' / ' + V2 + ' mm   <- regra "' + Nome +
+          '" (RuleKind 11, prioridade ' + IntToStr(Prio) + ')');
+      end;
+    end;
+  end;
+end;
+
+{ ====================================== fim SONDAS ====================================== }
+
 { ..................................................................................................................... }
 { .                                            Serializacao de primitivas                                             . }
 { ..................................................................................................................... }
@@ -754,6 +2062,8 @@ var
   W, H: String;
   ShapeCode: Integer;
   Radius: String;
+  Expa: Integer;
+  Extra: String;
 begin
   Radius := '';
 
@@ -833,6 +2143,45 @@ begin
   end;
 
   s := s + ',"net":' + JS(NetNameOf(Pad));
+
+  // ---- campos de 2026-10, todos opcionais (ver SONDAS). Ausente = nao sabido.
+  NPads := NPads + 1;
+  if PadType = 'th' then
+  begin
+    NPadsTh := NPadsTh + 1;
+    Extra := SondaMetalizado(Pad);
+    if Extra <> '' then
+      NPadsPlated := NPadsPlated + 1;
+    s := s + Extra;
+  end;
+  // mascara: todo pad (o passante abre nas duas faces com a mesma expansao)
+  if SondaExpansao(Pad, 'Pad', True, Expa) then
+  begin
+    s := s + ',"sm":' + CW(Expa);
+    NPadsSm := NPadsSm + 1;
+  end;
+  // pasta: so pad SMD - o Altium nao poe pasta em pad passante (73 de 73 no Gerber do DMB)
+  if PadType = 'smd' then
+  begin
+    NPadsSmd := NPadsSmd + 1;
+    if SondaExpansao(Pad, 'Pad', False, Expa) then
+    begin
+      s := s + ',"pm":' + CW(Expa);
+      // -1000 mm e o jeito do Altium dizer "sem pasta neste pad" (61 pads no acervo)
+      if CoordToMMs(Expa) <= -500 then
+        s := s + ',"nopaste":true';
+      NPadsPm := NPadsPm + 1;
+    end;
+  end;
+  Extra := SondaTenting(Pad, 'Pad');
+  if Extra <> '' then
+    NPadsTent := NPadsTent + 1;
+  s := s + Extra;
+  if PadType = 'th' then
+  begin
+    s := s + SondaPilhaPad(Pad);
+    s := s + SondaFuroDeslocado(Pad);
+  end;
   s := s + '}';
   Result := s;
 end;
@@ -894,6 +2243,8 @@ begin
   Owner := OwnerRefOf(Prim);
   if Owner <> '' then
     s := s + ',"owner":' + JS(Owner);
+  // keepout de cobre fica AQUI, com a marca (2026-10): tira-lo renumeraria os t<n>
+  s := s + SondaKeepout(Prim);
   s := s + '}';
   Result := s;
 end;
@@ -914,13 +2265,16 @@ begin
   Owner := OwnerRefOf(Prim);
   if Owner <> '' then
     s := s + ',"owner":' + JS(Owner);
+  // keepout de cobre fica AQUI, com a marca (2026-10): tira-lo renumeraria os a<n>
+  s := s + SondaKeepout(Prim);
   s := s + '}';
   Result := s;
 end;
 
 function ViaJSON(Prim: TObject; Id: String): String;
 var
-  s: String;
+  s, Extra: String;
+  Expa: Integer;
 begin
   s := '{"id":' + JS(Id);
   s := s + ',"x":' + CX(Prim.x);
@@ -930,13 +2284,23 @@ begin
   s := s + ',"from":' + JS(LayerNameOf(Prim.LowLayer));
   s := s + ',"to":' + JS(LayerNameOf(Prim.HighLayer));
   s := s + ',"net":' + JS(NetNameOf(Prim));
+  // ---- campos de 2026-10 (ver SONDAS): mascara efetiva e tenting por face
+  if SondaExpansao(Prim, 'Via', True, Expa) then
+  begin
+    s := s + ',"sm":' + CW(Expa);
+    NViasSm := NViasSm + 1;
+  end;
+  Extra := SondaTenting(Prim, 'Via');
+  if Extra <> '' then
+    NViasTent := NViasTent + 1;
+  s := s + Extra;
   s := s + '}';
   Result := s;
 end;
 
 function TextJSON(Prim: TObject; Id: String): String;
 var
-  s, Owner: String;
+  s, Owner, Tipo: String;
   X1, Y1, X2, Y2: Double;
 begin
   X1 := CoordToMMs(Prim.BoundingRectangleForSelection.Left - Board.XOrigin);
@@ -958,11 +2322,30 @@ begin
   Owner := OwnerRefOf(Prim);
   if Owner <> '' then
     s := s + ',"owner":' + JS(Owner);
+
+  // ---- campos de 2026-10, todos opcionais (ver SONDAS). Ausente = nao sabido.
+  NTextos := NTextos + 1;
+  s := s + SondaTextoW(Prim);
+  Tipo := SondaTipoTexto(Prim);
+  if Tipo <> '' then
+  begin
+    s := s + ',"kind":' + JS(Tipo);
+    NTextosTipo := NTextosTipo + 1;
+  end;
+  // fonte, negrito e italico so existem no TrueType
+  if Tipo = 'truetype' then
+    s := s + SondaFonteTexto(Prim) + SondaNegritoItalico(Prim);
+  s := s + SondaInvertido(Prim);
+  s := s + SondaAncoraTexto(Prim);
+  // o contorno vai por ultimo: e o campo grande da linha
+  s := s + SondaContornoTexto(Prim);
   s := s + '}';
   Result := s;
 end;
 
-function SilkLineJSON(Prim: TObject; Id: String): String;
+// Linha de silk (e, desde 2026-10, de "lines": mecanica, Keep-Out, mascara, pasta, furacao -
+// o MESMO formato). Extra entra antes do fecho: '' no silk, a marca de keepout nas linhas.
+function SilkLineJSON(Prim: TObject; Id, Extra: String): String;
 var
   s, Owner: String;
 begin
@@ -977,11 +2360,13 @@ begin
   Owner := OwnerRefOf(Prim);
   if Owner <> '' then
     s := s + ',"owner":' + JS(Owner);
+  s := s + Extra;
   s := s + '}';
   Result := s;
 end;
 
-function SilkArcJSON(Prim: TObject; Id: String): String;
+// Arco de silk (e de "lines"): o mesmo arranjo do SilkLineJSON.
+function SilkArcJSON(Prim: TObject; Id, Extra: String): String;
 var
   s, Owner: String;
 begin
@@ -997,14 +2382,17 @@ begin
   Owner := OwnerRefOf(Prim);
   if Owner <> '' then
     s := s + ',"owner":' + JS(Owner);
+  s := s + Extra;
   s := s + '}';
   Result := s;
 end;
 
-// Contorno principal de uma region (ou de cada region-filha de um poligono)
-function ContourJSON(RegionPrim: TObject; Id, NetStr: String): String;
+// Contorno principal de uma region (ou de cada region-filha de um poligono). Desde 2026-10
+// tambem os furos ("holes"), a marca de pedaco de polygon despejado ("poly":true - EhPoly), o
+// dono e a marca de keepout.
+function ContourJSON(RegionPrim: TObject; Id, NetStr: String; EhPoly: Boolean): String;
 var
-  s: String;
+  s, Owner: String;
   contour: IPCB_Contour;
   k: Integer;
 begin
@@ -1019,7 +2407,16 @@ begin
       s := s + ',';
     s := s + '[' + CX(contour.GetState_PointX(k)) + ',' + CY(contour.GetState_PointY(k)) + ']';
   end;
-  s := s + ']}';
+  s := s + ']';
+  // ---- campos de 2026-10 (ver SONDAS)
+  s := s + SondaFurosRegiao(RegionPrim);
+  if EhPoly then
+    s := s + ',"poly":true';
+  Owner := DonoDoObjeto(RegionPrim);
+  if Owner <> '' then
+    s := s + ',"owner":' + JS(Owner);
+  s := s + SondaKeepout(RegionPrim);
+  s := s + '}';
   Result := s;
 end;
 
@@ -1045,7 +2442,33 @@ begin
       s := s + ',';
     s := s + '[' + CX(contour.GetState_PointX(k)) + ',' + CY(contour.GetState_PointY(k)) + ']';
   end;
-  s := s + ']}';
+  s := s + ']';
+  // 2026-10: o inteiro do Kind(), que separa os tres que caem aqui (ver SondaKindN)
+  s := s + SondaKindN(RegionPrim);
+  s := s + '}';
+  Result := s;
+end;
+
+// Fill (retangulo cheio) - o QR code e o logo do silk da casa sao feitos deles (392 no DMB,
+// 70% dos projetos). "x1".."y2" sao os cantos SEM rotacao e "rot" gira em torno do centro.
+// '' = a sonda da geometria nao respondeu, e o fill nao sai.
+function FillJSON(Prim: TObject; Id: String): String;
+var
+  s, Geo, Owner: String;
+begin
+  Result := '';
+  Geo := SondaFill(Prim);
+  if Geo = '' then
+    Exit;
+  s := '{"id":' + JS(Id);
+  s := s + ',"layer":' + JS(LayerNameOf(Prim.Layer));
+  s := s + Geo;
+  s := s + ',"net":' + JS(NetNameOf(Prim));
+  Owner := DonoDoObjeto(Prim);
+  if Owner <> '' then
+    s := s + ',"owner":' + JS(Owner);
+  s := s + SondaKeepout(Prim);
+  s := s + '}';
   Result := s;
 end;
 
@@ -1110,11 +2533,195 @@ begin
     if Child.ObjectId = eRegionObject then
     begin
       RegionIdx := RegionIdx + 1;
-      AddItem(RegionL, ContourJSON(Child, 'g' + IntToStr(RegionIdx), NetStr));
+      AddItem(RegionL, ContourJSON(Child, 'g' + IntToStr(RegionIdx), NetStr, True));
     end;
     Child := GIter.NextPCBObject;
   end;
   Poly.GroupIterator_Destroy(GIter);
+end;
+
+{ ..................................................................................................................... }
+{ .                                        Camadas e regras da placa (2026-10)                                        . }
+{ ..................................................................................................................... }
+
+// board.js >> layers: {"key","name","color","stack"} das camadas desta placa:
+//   - cobre na ordem FISICA da pilha, com "stack" (Top = 1 ... Bottom = N); sem a pilha, Top e
+//     Bottom e as Mid/Plane que tem objeto, sem "stack";
+//   - mecanicas habilitadas (MechanicalLayerEnabled) ou com objeto exportado;
+//   - as especiais, sempre: overlays, pastas, mascaras, Drill Guide, Keep-Out, Drill Drawing,
+//     Multi. Com a numeracao de camadas sem conferir (CamadasOk) so saem as 7 de sempre.
+// Nome e cor sao sondas; a chave sai sempre.
+procedure CamadasJSON(Saida: TStringList);
+var
+  Itens, Chaves: TStringList;
+  i, Camada: Integer;
+  Chave, Nm: String;
+  B: TObject;
+begin
+  PilhaObj := nil;
+  Nm := 'Board.LayerStack';
+  try
+    // Pela variavel TObject, como SondaCorCamada e SondaExpansao: lido direto em Board (que e
+    // IPCB_Board declarado) o nome teria de existir NAQUELA interface para compilar - e o caso
+    // que o bloco APOSTAS do ApplyChanges registra (IPCB_Region.ArcResolution, AD24). Pela
+    // variavel TObject basta o nome existir no API.
+    B := Board;
+    PilhaObj := B.LayerStack;
+    AnotaRespostaDeSonda(Nm);
+  except
+    PilhaObj := nil;
+    AnotaFalhaDeSonda(Nm);
+  end;
+
+  // 1) cobre
+  Itens := TStringList.Create;
+  Chaves := TStringList.Create;
+  NPilha := 0;
+  if SondaPilhaCobre(Itens, Chaves) then
+  begin
+    NPilha := Itens.Count;
+    for i := 0 to Itens.Count - 1 do
+      AddItem(Saida, Itens[i]);
+  end
+  else
+  begin
+    AddItem(Saida, CamadaJSON(eTopLayer, 'Top', '', 0));
+    if CamadasOk then
+    begin
+      for Camada := eTopLayer + 1 to eBottomLayer - 1 do
+        if Usadas.IndexOf(LayerNameOf(Camada)) >= 0 then
+          AddItem(Saida, CamadaJSON(Camada, LayerNameOf(Camada), '', 0));
+      for Camada := eBottomOverlay + 5 to eBottomOverlay + 20 do
+        if Usadas.IndexOf(LayerNameOf(Camada)) >= 0 then
+          AddItem(Saida, CamadaJSON(Camada, LayerNameOf(Camada), '', 0));
+    end;
+    AddItem(Saida, CamadaJSON(eBottomLayer, 'Bottom', '', 0));
+  end;
+  Itens.Free;
+  Chaves.Free;
+
+  // 2) mecanicas
+  for i := 0 to 15 do
+  begin
+    Camada := eMechanical1 + i;
+    if (i = 0) or CamadasOk then
+    begin
+      Chave := LayerNameOf(Camada);
+      if (Usadas.IndexOf(Chave) >= 0) or SondaMecHabilitada(Camada) then
+        AddItem(Saida, CamadaJSON(Camada, Chave, '', 0));
+    end;
+  end;
+
+  // 3) especiais, na ordem das abas do Altium
+  AddItem(Saida, CamadaJSON(eTopOverlay, 'TopOverlay', '', 0));
+  AddItem(Saida, CamadaJSON(eBottomOverlay, 'BottomOverlay', '', 0));
+  if CamadasOk then
+  begin
+    for Camada := eBottomOverlay + 1 to eBottomOverlay + 4 do
+      AddItem(Saida, CamadaJSON(Camada, LayerNameOf(Camada), '', 0));
+    AddItem(Saida, CamadaJSON(eKeepOutLayer - 1, 'DrillGuide', '', 0));
+  end;
+  AddItem(Saida, CamadaJSON(eKeepOutLayer, 'KeepOut', '', 0));
+  if CamadasOk then
+    AddItem(Saida, CamadaJSON(eMultiLayer - 1, 'DrillDrawing', '', 0));
+  AddItem(Saida, CamadaJSON(eMultiLayer, 'Multi', '', 0));
+end;
+
+// Acrescenta "chave":valor a uma lista de campos JSON - so se o valor saiu ('' = nao sabido).
+procedure CampoNum(var Acc: String; Chave, Valor: String);
+begin
+  if Valor = '' then
+    Exit;
+  if Acc <> '' then
+    Acc := Acc + ',';
+  Acc := Acc + '"' + Chave + '":' + Valor;
+end;
+
+// Le as regras da placa (board.js >> rules): o valor da regra de escopo "All" (a regra da
+// placa) de cada tipo - sm = SolderMaskExpansion, pm = PasteMaskExpansion, clearance =
+// Clearance (Gap), width = Width (a preferida, no Top), viaSize/viaDrill = RoutingVias (os
+// preferidos) -, guardados em Rg*. Roda ANTES dos pads: e aqui que a ordem suposta dos tipos de
+// regra e conferida pela primeira vez (RegraSuspeita). O JSON sai depois, em RegrasJSON.
+//
+// O TIPO DA REGRA VEM PELO INTEIRO de RuleKind, e nao pelas constantes eRule_*: constante que
+// este arquivo nunca usou e erro de COMPILACAO se nao existir. A ordem do TRuleKind e a
+// documentada:
+//    0 Clearance, 1 ParallelSegment, 2 MaxMinWidth, 3 MaxMinLength, 4 MatchedLengths,
+//    5 DaisyChainStubLength, 6 PowerPlaneConnectStyle, 7 RoutingTopology, 8 RoutingPriority,
+//    9 RoutingLayers, 10 RoutingCornerStyle, 11 RoutingVias, 12 PowerPlaneClearance,
+//   13 SolderMaskExpansion, 14 PasteMaskExpansion, ...
+// e NAO foi medida neste Altium. Tres travas contra ela estar errada: (1) cada valor so sai se
+// a propriedade PROPRIA do tipo responder (Gap, FavoredWidth, PreferedHoleWidth...); (2) as duas
+// de mascara, que tem a MESMA propriedade Expansion, conferem o nome da regra (NomeContradiz) -
+// e se nao conferir, nem a regra nem a mascara por pad saem; (3) o export-report.txt lista de
+// qual regra saiu cada valor, para a primeira rodada conferir a olho.
+// Tem parametro de proposito: some do menu Run Script.
+procedure LeRegrasDaPlaca(Dummy: Integer);
+var
+  Iter, R: TObject;
+  Nm: String;
+begin
+  RgSm := '';
+  RgPm := '';
+  RgClear := '';
+  RgWidth := '';
+  RgViaSize := '';
+  RgViaDrill := '';
+  RgSmP := 1000000;
+  RgPmP := 1000000;
+  RgClearP := 1000000;
+  RgWidthP := 1000000;
+  RgViaP := 1000000;
+  Nm := 'eRuleObject (iterador de regras)';
+  Iter := nil;
+  try
+    Iter := Board.BoardIterator_Create;
+    Iter.AddFilter_ObjectSet(MkSet(eRuleObject));
+    Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+    Iter.AddFilter_Method(eProcessAll);
+    R := Iter.FirstPCBObject;
+    while R <> nil do
+    begin
+      LeRegra(R);
+      R := Iter.NextPCBObject;
+    end;
+    AnotaRespostaDeSonda(Nm);
+  except
+    AnotaFalhaDeSonda(Nm);
+  end;
+  if Iter <> nil then
+    Board.BoardIterator_Destroy(Iter);
+end;
+
+// O conteudo de "rules":{...} a partir do que LeRegrasDaPlaca guardou. Montado DEPOIS das duas
+// passadas porque a trava da ordem dos tipos (RegraSuspeita) tambem pode disparar num pad: se
+// disparou em qualquer ponto, sm e pm da regra nao saem.
+// Tem parametro de proposito: some do menu Run Script.
+function RegrasJSON(Dummy: Integer): String;
+var
+  Acc: String;
+begin
+  if RegraSuspeita then
+  begin
+    RgSm := '';
+    RgPm := '';
+  end;
+  Acc := '';
+  CampoNum(Acc, 'sm', RgSm);
+  CampoNum(Acc, 'pm', RgPm);
+  CampoNum(Acc, 'clearance', RgClear);
+  CampoNum(Acc, 'width', RgWidth);
+  CampoNum(Acc, 'viaSize', RgViaSize);
+  CampoNum(Acc, 'viaDrill', RgViaDrill);
+  Result := Acc;
+end;
+
+// Uma linha no export-report.txt E no texto do dialogo final: sao o mesmo texto (o arquivo so
+// ganha o cabecalho e o detalhe das regras).
+procedure Relata(Rel: TStringList; var Txt: String; Linha: String);
+begin
+  Rel.Add(Linha);
+  Txt := Txt + Linha + #13#10;
 end;
 
 { ..................................................................................................................... }
@@ -1131,6 +2738,12 @@ var
   i: Integer;
   s, Id: String;
   Gravou: Boolean;
+  // ---- espelho de 2026-10
+  FillL, LineL, LayerL, Rel: TStringList;
+  FillIdx, LineIdx: Integer;
+  TrackAntes, ArcAntes, TextAntes, RegionAntes, CutoutAntes: Integer; // fim da primeira passada
+  NNome, NCor: Integer;
+  Chave, Linha, RegrasStr: String;
 begin
   // Raiz do workspace DESTA maquina: PRIMEIRA coisa do procedimento, porque tudo abaixo
   // depende dela (ResolveProjectDir, ListProjectDirs, o indice projects.js).
@@ -1177,6 +2790,48 @@ begin
   SilkIdx := 0;
   RegionIdx := 0;
   CutoutIdx := 0;
+
+  // ---- espelho de 2026-10: o estado das sondas e as contagens nascem ANTES da primeira
+  //      passada, porque ela ja sonda (mascara dos pads, tipo dos textos, furos das regions).
+  SondaNomes := TStringList.Create;
+  SondaQtd := TStringList.Create;
+  SondaOk := TStringList.Create;
+  Usadas := TStringList.Create;
+  Usadas.Sorted := True;
+  Usadas.Duplicates := dupIgnore;
+  RegrasLidas := TStringList.Create;
+  FillL := TStringList.Create;
+  LineL := TStringList.Create;
+  LayerL := TStringList.Create;
+  CamadasOk := CamadasConferem(0);
+  PilhaObj := nil;
+  RegraSuspeita := False;
+  FillIdx := 0;
+  LineIdx := 0;
+  NPads := 0;
+  NPadsTh := 0;
+  NPadsPlated := 0;
+  NPadsSm := 0;
+  NPadsSmd := 0;
+  NPadsPm := 0;
+  NPadsTent := 0;
+  NViasSm := 0;
+  NViasTent := 0;
+  NTextos := 0;
+  NTextosTipo := 0;
+  NTextosW := 0;
+  NTextosAncora := 0;
+  NTextosPoly := 0;
+  NTextosPolyGrande := 0;
+  NTextosPolyVazio := 0;
+  NRegioesFuro := 0;
+  NKeepout := 0;
+  NPilha := 0;
+
+  // ------------------------------------------------------------------ regras da placa (2026-10)
+  // ANTES dos pads: e aqui que a ordem suposta dos tipos de regra e conferida primeiro
+  // (RegraSuspeita) - se nao conferir, nenhum pad le mascara por regra.
+  LeRegrasDaPlaca(0);
 
   // ------------------------------------------------------------------ componentes
   CsvL.Add('Designator' + #9 + 'Footprint' + #9 + 'Comment' + #9 + 'Layer' + #9 + 'X_mm' + #9 + 'Y_mm' + #9 + 'Rotation');
@@ -1235,7 +2890,7 @@ begin
           else if (Prim.Layer = eTopOverlay) or (Prim.Layer = eBottomOverlay) then
           begin
             SilkIdx := SilkIdx + 1;
-            AddItem(SilkL, SilkLineJSON(Prim, 's' + IntToStr(SilkIdx)));
+            AddItem(SilkL, SilkLineJSON(Prim, 's' + IntToStr(SilkIdx), ''));
           end;
         end;
       eArcObject:
@@ -1248,7 +2903,7 @@ begin
           else if (Prim.Layer = eTopOverlay) or (Prim.Layer = eBottomOverlay) then
           begin
             SilkIdx := SilkIdx + 1;
-            AddItem(SilkL, SilkArcJSON(Prim, 's' + IntToStr(SilkIdx)));
+            AddItem(SilkL, SilkArcJSON(Prim, 's' + IntToStr(SilkIdx), ''));
           end;
         end;
       eViaObject:
@@ -1275,7 +2930,7 @@ begin
           if (Prim.Kind() = eRegionKind_Copper) and (not Prim.InPolygon()) then
           begin
             RegionIdx := RegionIdx + 1;
-            AddItem(RegionL, ContourJSON(Prim, 'g' + IntToStr(RegionIdx), NetNameOf(Prim)));
+            AddItem(RegionL, ContourJSON(Prim, 'g' + IntToStr(RegionIdx), NetNameOf(Prim), False));
           end
           else if Prim.Kind() <> eRegionKind_Copper then
           begin
@@ -1296,10 +2951,117 @@ begin
   end;
   Board.BoardIterator_Destroy(Iter);
 
+  TrackAntes := TrackIdx;
+  ArcAntes := ArcIdx;
+  TextAntes := TextIdx;
+  RegionAntes := RegionIdx;
+  CutoutAntes := CutoutIdx;
+
+  // ------------------------------------------------------------------ segunda passada (2026-10)
+  // O que a primeira passada nunca leu: fill de TODAS as camadas; trilha, arco, texto e region
+  // das camadas que ela deixava de fora (Mid, Plane, mecanicas, Keep-Out, mascara, pasta, Drill
+  // Guide/Drawing); polygon fora de Top/Bottom. Vem DEPOIS, numa volta propria, para os ids de
+  // hoje nao mudarem: a numeracao de t/a/x/g/k continua de onde a primeira parou, e f<n> e l<n>
+  // sao secoes novas. Um changes.js escrito contra o board.js antigo continua casando id por id.
+  // O que e da primeira passada fica de fora pela CAMADA (EhPrimeiraPassada): medido nos 18
+  // board.js do repositorio, ela so devolve objeto dessas cinco camadas.
+  //   trilha/arco de cobre (Mid, Plane) -> tracks/arcs; de outra camada -> lines (formato do silk)
+  //   region de cobre fora de polygon -> regions; region que nao e de cobre -> cutouts
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+  Iter.AddFilter_ObjectSet(MkSet(eTrackObject, eArcObject, eTextObject, eRegionObject, ePolyObject, eFillObject));
+  Iter.AddFilter_Method(eProcessAll);
+  Prim := Iter.FirstPCBObject;
+  while Prim <> nil do
+  begin
+    Chave := LayerNameOf(Prim.Layer);
+    if Prim.ObjectId = eFillObject then
+    begin
+      s := FillJSON(Prim, 'f' + IntToStr(FillIdx + 1));
+      if s <> '' then
+      begin
+        FillIdx := FillIdx + 1;
+        AddItem(FillL, s);
+        Usadas.Add(Chave);
+      end;
+    end
+    else if Prim.ObjectId = ePolyObject then
+    begin
+      if (Prim.Layer <> eTopLayer) and (Prim.Layer <> eBottomLayer) then
+      begin
+        Iter2PolyRegions(Prim, RegionL, RegionIdx);
+        Usadas.Add(Chave);
+      end;
+    end
+    else if not EhPrimeiraPassada(Prim.Layer) then
+    begin
+      if Prim.ObjectId = eTrackObject then
+      begin
+        if EhCobreKey(Chave) then
+        begin
+          TrackIdx := TrackIdx + 1;
+          AddItem(TrackL, TrackJSON(Prim, 't' + IntToStr(TrackIdx)));
+        end
+        else
+        begin
+          LineIdx := LineIdx + 1;
+          AddItem(LineL, SilkLineJSON(Prim, 'l' + IntToStr(LineIdx), SondaKeepout(Prim)));
+        end;
+        Usadas.Add(Chave);
+      end
+      else if Prim.ObjectId = eArcObject then
+      begin
+        if EhCobreKey(Chave) then
+        begin
+          ArcIdx := ArcIdx + 1;
+          AddItem(ArcL, ArcJSON(Prim, 'a' + IntToStr(ArcIdx)));
+        end
+        else
+        begin
+          LineIdx := LineIdx + 1;
+          AddItem(LineL, SilkArcJSON(Prim, 'l' + IntToStr(LineIdx), SondaKeepout(Prim)));
+        end;
+        Usadas.Add(Chave);
+      end
+      else if Prim.ObjectId = eTextObject then
+      begin
+        if not Prim.IsHidden then
+        begin
+          TextIdx := TextIdx + 1;
+          AddItem(TextL, TextJSON(Prim, 'x' + IntToStr(TextIdx)));
+          Usadas.Add(Chave);
+        end;
+      end
+      else if Prim.ObjectId = eRegionObject then
+      begin
+        if (Prim.Kind() = eRegionKind_Copper) and (not Prim.InPolygon()) then
+        begin
+          RegionIdx := RegionIdx + 1;
+          AddItem(RegionL, ContourJSON(Prim, 'g' + IntToStr(RegionIdx), NetNameOf(Prim), False));
+          Usadas.Add(Chave);
+        end
+        else if Prim.Kind() <> eRegionKind_Copper then
+        begin
+          CutoutIdx := CutoutIdx + 1;
+          AddItem(CutoutL, CutoutJSON(Prim, 'k' + IntToStr(CutoutIdx)));
+        end;
+      end;
+    end;
+    Prim := Iter.NextPCBObject;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+
+  // ------------------------------------------------------------------ camadas e regras (2026-10)
+  // Depois das duas passadas: a lista de camadas inclui as mecanicas/Mid que tem objeto, e as
+  // regras ja sabem se a trava da ordem dos tipos disparou em algum pad.
+  CamadasJSON(LayerL);
+  RegrasStr := RegrasJSON(0);
+
   // ------------------------------------------------------------------ montagem do board.js
   OutL := TStringList.Create;
   OutL.Add('var pcbmirror = {');
   OutL.Add('"format":' + JS(FORMAT_ID) + ',');
+  OutL.Add('"exporter":' + JS(EXPORTER_ID) + ',');
   OutL.Add('"generated":' + JS(DateTimeToStr(Now)) + ',');
   OutL.Add('"source":' + JS(Board.FileName) + ',');
   OutL.Add('"units":"mm",');
@@ -1321,6 +3083,12 @@ begin
       OutL.Add(JS(Nets[i]));
   end;
   OutL.Add('],');
+
+  OutL.Add('"layers":[');
+  OutL.AddStrings(LayerL);
+  OutL.Add('],');
+
+  OutL.Add('"rules":{' + RegrasStr + '},');
 
   OutL.Add('"components":[');
   OutL.AddStrings(CompL);
@@ -1358,11 +3126,110 @@ begin
   OutL.AddStrings(CutoutL);
   OutL.Add('],');
 
+  OutL.Add('"fills":[');
+  OutL.AddStrings(FillL);
+  OutL.Add('],');
+
+  OutL.Add('"lines":[');
+  OutL.AddStrings(LineL);
+  OutL.Add('],');
+
   OutL.Add('"stats":{"components":' + IntToStr(CompIdx) + ',"freepads":' + IntToStr(PadIdx) +
     ',"tracks":' + IntToStr(TrackIdx) + ',"arcs":' + IntToStr(ArcIdx) + ',"vias":' + IntToStr(ViaIdx) +
     ',"texts":' + IntToStr(TextIdx) + ',"silk":' + IntToStr(SilkIdx) + ',"regions":' + IntToStr(RegionIdx) +
-    ',"cutouts":' + IntToStr(CutoutIdx) + '}');
+    ',"cutouts":' + IntToStr(CutoutIdx) + ',"fills":' + IntToStr(FillIdx) + ',"lines":' + IntToStr(LineIdx) + '}');
   OutL.Add('};');
+
+  // ------------------------------------------------------------------ relatorio (dialogo + export-report.txt)
+  // O dialogo final e o export-report.txt sao o MESMO texto (Relata escreve nos dois); o arquivo
+  // ganha so o cabecalho e, no fim, de qual regra saiu cada valor de "rules".
+  NNome := 0;
+  NCor := 0;
+  for i := 0 to LayerL.Count - 1 do
+  begin
+    if Pos('"name":', LayerL[i]) > 0 then
+      NNome := NNome + 1;
+    if Pos('"color":', LayerL[i]) > 0 then
+      NCor := NCor + 1;
+  end;
+  Rel := TStringList.Create;
+  Rel.Add('EletricHUB - relatorio do ExportBoard (' + EXPORTER_ID + ')');
+  Rel.Add('Placa: ' + Board.FileName);
+  Rel.Add('Data:  ' + DateTimeToStr(Now));
+  Rel.Add('');
+  s := '';
+  Relata(Rel, s, 'Exportacao concluida em:');
+  Relata(Rel, s, OutDir);
+  Relata(Rel, s, '');
+  Relata(Rel, s, 'Componentes: ' + IntToStr(CompIdx));
+  Relata(Rel, s, 'Trilhas: ' + IntToStr(TrackIdx) + '   Arcos: ' + IntToStr(ArcIdx) + '   Vias: ' + IntToStr(ViaIdx));
+  Relata(Rel, s, 'Silk: ' + IntToStr(SilkIdx) + '   Textos: ' + IntToStr(TextIdx) + '   Regioes: ' + IntToStr(RegionIdx));
+  Relata(Rel, s, 'Pads livres: ' + IntToStr(PadIdx));
+  Relata(Rel, s, '');
+  Relata(Rel, s, 'Novo neste espelho (' + EXPORTER_ID + '):');
+  Relata(Rel, s, 'Fills: ' + IntToStr(FillIdx) + '   Linhas (mecanica, keep-out, mascara, pasta, furacao): ' +
+    IntToStr(LineIdx) + '   Camadas: ' + IntToStr(LayerL.Count));
+  Relata(Rel, s, 'Segunda passada: +' + IntToStr(TrackIdx - TrackAntes) + ' trilhas e +' +
+    IntToStr(ArcIdx - ArcAntes) + ' arcos de cobre (Mid/Plane), +' + IntToStr(TextIdx - TextAntes) +
+    ' textos, +' + IntToStr(RegionIdx - RegionAntes) + ' regioes, +' + IntToStr(CutoutIdx - CutoutAntes) + ' recortes');
+  Linha := 'Camadas com nome: ' + IntToStr(NNome) + '   com cor: ' + IntToStr(NCor) + '   pilha de cobre: ';
+  if NPilha > 0 then
+    Linha := Linha + IntToStr(NPilha) + ' (Top ao Bottom)'
+  else
+    Linha := Linha + 'nao lida (sem "stack")';
+  Relata(Rel, s, Linha);
+  if RegrasStr = '' then
+    Relata(Rel, s, 'Regras da placa: nenhuma lida')
+  else
+    Relata(Rel, s, 'Regras da placa (mm): ' + RegrasStr);
+  Relata(Rel, s, 'Pads: ' + IntToStr(NPads) + '   mascara efetiva: ' + IntToStr(NPadsSm) +
+    '   pasta efetiva: ' + IntToStr(NPadsPm) + ' de ' + IntToStr(NPadsSmd) + ' SMD' +
+    '   metalizacao: ' + IntToStr(NPadsPlated) + ' de ' + IntToStr(NPadsTh) + ' passantes' +
+    '   tenting: ' + IntToStr(NPadsTent));
+  Relata(Rel, s, 'Vias: ' + IntToStr(ViaIdx) + '   mascara efetiva: ' + IntToStr(NViasSm) +
+    '   tenting: ' + IntToStr(NViasTent));
+  Relata(Rel, s, 'Textos: ' + IntToStr(NTextos) + '   tipo: ' + IntToStr(NTextosTipo) +
+    '   largura: ' + IntToStr(NTextosW) + '   ancora: ' + IntToStr(NTextosAncora) +
+    '   contorno exato: ' + IntToStr(NTextosPoly) + '   grandes demais para o contorno: ' +
+    IntToStr(NTextosPolyGrande) + '   contorno vazio: ' + IntToStr(NTextosPolyVazio));
+  Relata(Rel, s, 'Regioes com furo: ' + IntToStr(NRegioesFuro) + '   objetos marcados keepout: ' + IntToStr(NKeepout));
+  if not CamadasOk then
+    Relata(Rel, s, 'ATENCAO: a numeracao de camadas deste Altium nao e a documentada - as camadas fora das 7 de sempre sairam como L<n>.');
+  if RegraSuspeita then
+    Relata(Rel, s, 'ATENCAO: o tipo de regra 13/14 nao conferiu com o nome da regra - mascara e pasta pela regra NAO sairam.');
+  Relata(Rel, s, '');
+  if SondaNomes.Count = 0 then
+    Relata(Rel, s, 'Sondas que falharam: nenhuma')
+  else
+  begin
+    Relata(Rel, s, 'Sondas que falharam (' + IntToStr(SondaNomes.Count) + '). Sem resposta, o campo nao saiu; [i] e (i)' +
+      ' sao duas formas do mesmo campo, e vale a que respondeu:');
+    for i := 0 to SondaNomes.Count - 1 do
+    begin
+      Linha := '   ' + SondaNomes[i] + ': ' + SondaQtd[i] + ' vez(es)';
+      if SondaOk.IndexOf(SondaNomes[i]) >= 0 then
+        Linha := Linha + ', mas respondeu em outros objetos'
+      else if SafeStrToInt(SondaQtd[i]) >= SONDA_DESISTE then
+        Linha := Linha + ', nunca respondeu - desisti dela'
+      else
+        Linha := Linha + ', nunca respondeu';
+      Relata(Rel, s, Linha);
+    end;
+  end;
+  Relata(Rel, s, '');
+  Relata(Rel, s, 'Confira no hub.html (vista PCB).');
+  // so no arquivo: de onde saiu cada valor de "rules", para conferir a olho na primeira rodada
+  Rel.Add('');
+  if RegrasLidas.Count = 0 then
+    Rel.Add('Regras lidas: nenhuma.')
+  else
+  begin
+    Rel.Add('Regras lidas (vale a de prioridade menor de cada tipo):');
+    Rel.AddStrings(RegrasLidas);
+  end;
+  Rel.Add('');
+  Rel.Add('Campo ausente no board.js = nao sabido: a tela e o Gerber caem no padrao e avisam.');
+  Rel.Add('Se o Altium recusar o script com "Undeclared identifier: X", veja o bloco SONDAS do ExportBoard.pas.');
 
   // O board.js e o primeiro arquivo a ir para o disco: raiz errada aparece AQUI.
   // Os tres seguintes so sao tentados se este passou - senao seriam quatro dialogos
@@ -1395,15 +3262,13 @@ begin
   if Gravou then
     Gravou := SalvaOuExplica(CsvL, OutDir + '\pcb-list.csv');
 
+  // ------------------------------------------------------------------ export-report.txt
+  if Gravou then
+    Gravou := SalvaOuExplica(Rel, OutDir + '\export-report.txt');
+
   if Gravou then
     RegenerateProjectsIndex(ProjName);
 
-  s := 'Exportacao concluida em:' + #13#10 + OutDir + #13#10#13#10 +
-    'Componentes: ' + IntToStr(CompIdx) + #13#10 +
-    'Trilhas: ' + IntToStr(TrackIdx) + '   Arcos: ' + IntToStr(ArcIdx) + '   Vias: ' + IntToStr(ViaIdx) + #13#10 +
-    'Silk: ' + IntToStr(SilkIdx) + '   Textos: ' + IntToStr(TextIdx) + '   Regioes: ' + IntToStr(RegionIdx) + #13#10 +
-    'Pads livres: ' + IntToStr(PadIdx) + #13#10#13#10 +
-    'Confira no hub.html (vista PCB).';
   // Falhou alguma gravacao: SalvaOuExplica ja explicou. Nao anuncia sucesso por cima.
   if Gravou then
     ShowMessage(s);
@@ -1420,4 +3285,13 @@ begin
   CsvL.Free;
   OutL.Free;
   Nets.Free;
+  FillL.Free;
+  LineL.Free;
+  LayerL.Free;
+  Rel.Free;
+  Usadas.Free;
+  RegrasLidas.Free;
+  SondaNomes.Free;
+  SondaQtd.Free;
+  SondaOk.Free;
 end;

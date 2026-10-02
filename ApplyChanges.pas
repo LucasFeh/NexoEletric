@@ -2,8 +2,13 @@
 { .  AltiumPCBMirror - ApplyChanges.pas                                                                               . }
 { .                                                                                                                   . }
 { .  Le Projects\<nome do projeto>\changes.js e aplica as mudancas na placa:                                          . }
-{ .    comp_move | track_edit | track_add | track_del | via_edit | via_add | via_del | arc_edit | arc_add |           . }
-{ .    arc_del | text_edit | designator_move | outline_set                                                            . }
+{ .    comp_move | comp_attr | track_edit | track_add | track_del | via_edit | via_add | via_del |                    . }
+{ .    arc_edit | arc_add | arc_del | text_edit | text_add | text_del | designator_move | outline_set |               . }
+{ .    fill_add | fill_edit | fill_del | region_add | region_del                                                      . }
+{ .  Trilha, arco, fill, region e texto vao para qualquer camada do contrato menos a Multi (ver "Camadas").           . }
+{ .  Toda chamada de API que este arquivo ainda nao tinha provado vai em try/except: a RECUSA em tempo de execucao    . }
+{ .  vira FALHA ou AVISO no relatorio, dizendo qual chamada. Nome que esta versao do Altium NAO CONHECE e outra       . }
+{ .  conversa: derruba a compilacao do arquivo inteiro, com try ou sem try - ver o bloco APOSTAS.                     . }
 { .                                                                                                                   . }
 { .  Seguranca:                                                                                                       . }
 { .    - Toda edicao/remocao exige campos orig_* (copiados do board.js). O objeto real so e alterado se casar         . }
@@ -16,6 +21,34 @@
 { .  Como executar: DXP >> Run Script >> ApplyChanges  (com o .PcbDoc aberto e focado)                                . }
 { ..................................................................................................................... }
 
+{ ======================================== APOSTAS ======================================== }
+{ O DelphiScript confere os NOMES na compilacao. Um nome que esta versao do Altium nao tem -  }
+{ constante ou membro, depois do ponto inclusive - impede este arquivo INTEIRO de rodar, e o  }
+{ try/except nao ajuda, porque nada rodou ainda. Foi o que IPCB_Region.IsBoardCutout fez ao   }
+{ ExportBoard (commit a4db644) e ePortLeft ao ExportProject. E aqui o custo e maior: o        }
+{ ApplyProject mora neste arquivo e e a UNICA entrada do menu tambem para o BuildSchematic -  }
+{ um nome recusado aqui tira do dono o esquema junto com a placa. Por isso:                   }
+{   - nenhuma constante nova: as camadas novas (os CAM_), o tipo fill (OBJ_FILL) e o Kind do  }
+{     recorte saem por NUMERO, conferido no comeco da rodada contra as constantes que ja      }
+{     rodaram (CamadasNumeradas, ObjetosNumerados);                                           }
+{   - objeto e contorno novos em variavel TObject: o nome do membro so precisa existir no     }
+{     API, e nao numa interface declarada (IPCB_Region.ArcResolution nao compila no AD24,     }
+{     apesar de o nome existir noutra interface);                                             }
+{   - cada nome novo mora em poucas funcoes, listadas abaixo.                                 }
+{ SE O ALTIUM RECUSAR com "Undeclared identifier: X": ache X abaixo, apague o bloco try da    }
+{ funcao indicada (fica o Result do comeco, que e "recusado") e rode de novo. So aquela       }
+{ operacao passa a sair como FALHA; o resto - inclusive o esquema - volta a rodar.            }
+{                                                                                             }
+{   SetOutlineContour ................................. MontaContorno (region_add)           }
+{   X1Location Y1Location X2Location Y2Location ....... LeCantosFill e GravaCantosFill       }
+{   UseTTFonts ........................................ FonteStroke (text_add)               }
+{                                                                                             }
+{ Ja rodaram neste repositorio, entao o nome compila (o que falta medir e so o comportamento):}
+{ XLocation/YLocation de texto (este arquivo, 2026-08), PCBObjectFactory e Layer (este        }
+{ arquivo), Replicate (BuildSchematic), MirrorFlag, Kind(), Component, ObjectId,              }
+{ GetMainContour, GetState_PointX/Y, Count, InPolygon, eTextObject, eRegionObject e           }
+{ eRegionKind_Copper (ExportBoard).                                                           }
+
 const
   // Onde ESTA MAQUINA diz qual e a raiz do workspace (ver o bloco HOME mais abaixo).
   // SCRIPT_HOME e PROJECTS_DIR sairam do const e viraram var, preenchidas no comeco
@@ -26,6 +59,33 @@ const
   // Marca que prova que um caminho e MESMO o workspace, e nao so uma pasta que existe.
   HOME_MARCA = 'AI-GUIDE.md';
   TOL_MM = 0.001;
+  // Numero (TLayer) das camadas que nao tem constante provada neste engine - o porque esta na
+  // secao "Camadas". Mid1..Mid30 = 2..31, Plane1..Plane16 = 39..54, Mech1..Mech16 = 57..72.
+  CAM_MID1 = 2;
+  CAM_TOPPASTE = 35;
+  CAM_BOTTOMPASTE = 36;
+  CAM_TOPSOLDER = 37;
+  CAM_BOTTOMSOLDER = 38;
+  CAM_PLANE1 = 39;
+  CAM_DRILLGUIDE = 55;
+  CAM_MECH1 = 57;
+  CAM_DRILLDRAWING = 73;
+  // Kind de um Board Cutout quando a placa nao tem nenhum recorte de onde copiar o numero: a
+  // posicao dele na lista TRegionKind (Copper 0, Cutout 1, NamedRegion 2, BoardCutout 3,
+  // Cavity 4). Medido no AD24 por quem grava uma region de cada Kind e le o arquivo de volta: o
+  // KIND salvo vai 0, 1, 2 e 4 - o 3 e o recorte da placa, que o arquivo guarda como KIND=0 com
+  // ISBOARDCUTOUT=TRUE (igual aos PcbDoc da casa). NAO foi conferido no Altium 21 - ver
+  // KindDoRecorte.
+  KIND_RECORTE_PADRAO = 3;
+  // Kind do recorte de POLYGON (Polygon Pour Cutout): KIND=1 no arquivo. Ele tambem pode morar
+  // na Multi - medido: o PCBM-DI261904 (CBM - DI251876) tem 28 regions na MultiLayer, 18 board
+  // cutouts e 10 recortes de polygon -, e nao e furo na placa: KindDoRecorte o deixa de fora.
+  KIND_RECORTE_POLIGONO = 1;
+  // Numero (TObjectId) do fill, pela POSICAO na lista do PCB API (eNoObject 0, eArcObject 1,
+  // ePadObject 2, eViaObject 3, eTrackObject 4, eTextObject 5, eFillObject 6, eConnectionObject
+  // 7, eNetObject 8, eComponentObject 9, ePolyObject 10, eRegionObject 11), e nao pelo nome
+  // eFillObject: ver APOSTAS. Quem confere a numeracao e ObjetosNumerados, no comeco da rodada.
+  OBJ_FILL = 6;
 
 var
   // Preenchidas por HubHome(0) na PRIMEIRA linha do procedimento principal. Eram const,
@@ -37,7 +97,22 @@ var
   Board: IPCB_Board;
   Report: TStringList;
   OkCount, FailCount: Integer;
+  // [AVISO] do relatorio: nao conta como falha, mas o dialogo final diz quantos sao - e por
+  // eles que o dono fica sabendo das sondas desta rodada (ver ApplyChangesInto).
+  AvisoCount: Integer;
   ScanInfo: String; // diagnostico do ultimo ListProjectDirs (aparece nos dialogos)
+  // Sonda da numeracao das camadas (ver "Camadas"); preenchida no comeco do ApplyChangesInto.
+  CamadasNumeradas: Boolean;
+  // Sonda da numeracao dos tipos de objeto (OBJ_FILL); preenchida no comeco do ApplyChangesInto.
+  ObjetosNumerados: Boolean;
+  // O que uma busca nova (FindFill, FindRegion) teve recusado pelo Altium; '' = nada.
+  SondaFalhou: String;
+  // Kind do Board Cutout desta rodada (KindDoRecorte), perguntado UMA vez: -2 = ainda nao.
+  // Uma vez so de proposito: depois do primeiro region_add com cutout, a placa ja tem o
+  // recorte que ESTE script criou, e "copiar o numero dele" conferiria o chute com ele mesmo.
+  KindRecorteN: Integer;
+  KindRecorteOrigem: String;
+  KindRecorteConferido: Boolean;
 
 { ..................................................................................................................... }
 { .                                          Parsing de JSON plano por linha                                          . }
@@ -173,6 +248,21 @@ end;
 function JNum(Line, Key: String): Double;
 begin
   Result := StrToFloatDot(JGet(Line, Key));
+end;
+
+// Booleano JSON cru: so a palavra true vale (ausente, false ou outra coisa = False).
+function JBool(Line, Key: String): Boolean;
+begin
+  Result := JGet(Line, Key) = 'true';
+end;
+
+// Campo presente E nao vazio. E o "if (ch.layer)" do HubCore: layer:"" num edit quer dizer
+// "nao troca a camada", e nao "camada invalida".
+function TemValor(Line, Key: String): Boolean;
+begin
+  Result := False;
+  if JHas(Line, Key) then
+    Result := JGet(Line, Key) <> '';
 end;
 
 function JB(v: Boolean): String;
@@ -860,6 +950,17 @@ begin
   end;
 end;
 
+// x e y de um vertice 'x|y' do ParsePts
+function PtX(P: String): Double;
+begin
+  Result := StrToFloatDot(Copy(P, 1, Pos('|', P) - 1));
+end;
+
+function PtY(P: String): Double;
+begin
+  Result := StrToFloatDot(Copy(P, Pos('|', P) + 1, 255));
+end;
+
 { ..................................................................................................................... }
 { .                                        Conversoes e comparacoes de geometria                                      . }
 { ..................................................................................................................... }
@@ -903,7 +1004,69 @@ begin
   Result := d <= 0.01;
 end;
 
+// [a1,a2] e [b1,b2] sao o mesmo intervalo, com as pontas em qualquer ordem (tolerancia TOL_MM).
+// E como o fill e achado: o mesmo retangulo escrito com os cantos trocados e o mesmo fill.
+function MesmoIntervalo(a1, a2, b1, b2: Double): Boolean;
+var
+  amin, amax, bmin, bmax: Double;
+begin
+  amin := a1;
+  amax := a2;
+  if a2 < a1 then
+  begin
+    amin := a2;
+    amax := a1;
+  end;
+  bmin := b1;
+  bmax := b2;
+  if b2 < b1 then
+  begin
+    bmin := b2;
+    bmax := b1;
+  end;
+  Result := NearMM(amin, bmin) and NearMM(amax, bmax);
+end;
+
+{ ..................................................................................................................... }
+{ .                                                     Camadas                                                       . }
+{ ..................................................................................................................... }
+
+// As chaves sao as do contrato (board.js / changes.js), as mesmas do HubCore.PCB_LAYERS:
+//   Top, Mid1..Mid30, Bottom, Plane1..Plane16, TopOverlay, BottomOverlay, TopPaste, BottomPaste,
+//   TopSolder, BottomSolder, DrillGuide, KeepOut, DrillDrawing, Multi, Mech1..Mech16.
+//
+// As 7 de sempre (Top, Bottom, TopOverlay, BottomOverlay, Multi, Mech1, KeepOut) continuam pelas
+// constantes nomeadas que este arquivo ja usava: comportamento identico ao de antes.
+//
+// As outras saem POR CONTA, do numero da camada: o TLayer do Altium e o mesmo id de camada do
+// .PcbDoc (Top 1, Mid 2..31, Bottom 32, TopOverlay 33, BottomOverlay 34, Paste 35/36, Solder
+// 37/38, Plane 39..54, DrillGuide 55, KeepOut 56, Mech 57..72, DrillDrawing 73, Multi 74). Por
+// conta, e nao por eMidLayer1/eInternalPlane1/eTopPaste...: constante nomeada que esta versao
+// nao declare e "Undeclared identifier" NA COMPILACAO - derrubaria o script inteiro, inclusive
+// as ops que sempre funcionaram (foi o que aconteceu com as constantes da port no esquema).
+// A conta so vale se a numeracao for mesmo essa, e quem confere e CamadasNumeradas, no comeco
+// do ApplyChangesInto, pelas 7 constantes provadas. Se alguma nao bater, as camadas novas
+// ficam recusadas (LayerFromName devolve 0) e o relatorio abre com um [AVISO] dizendo por que.
+
+// Numero no fim de uma chave ('Mid12' a partir da posicao 4 -> 12). 0 = nao e numero, ou
+// comeca com zero ('Mid01' nao e chave da tabela).
+function NumDaChave(Name: String; Desde: Integer): Integer;
+var
+  s: String;
+begin
+  Result := 0;
+  s := Copy(Name, Desde, Length(Name));
+  if s = '' then
+    Exit;
+  if s[1] = '0' then
+    Exit;
+  Result := SafeStrToInt(s);
+end;
+
+// Chave do contrato -> TLayer. 0 = chave desconhecida (ou camada nova com a numeracao recusada).
 function LayerFromName(Name: String): TLayer;
+var
+  n: Integer;
 begin
   Result := 0;
   if Name = 'Top' then
@@ -920,8 +1083,45 @@ begin
     Result := eMechanical1
   else if Name = 'KeepOut' then
     Result := eKeepOutLayer;
+  if Result <> 0 then
+    Exit;
+  if not CamadasNumeradas then
+    Exit;
+
+  if Name = 'TopPaste' then
+    Result := CAM_TOPPASTE
+  else if Name = 'BottomPaste' then
+    Result := CAM_BOTTOMPASTE
+  else if Name = 'TopSolder' then
+    Result := CAM_TOPSOLDER
+  else if Name = 'BottomSolder' then
+    Result := CAM_BOTTOMSOLDER
+  else if Name = 'DrillGuide' then
+    Result := CAM_DRILLGUIDE
+  else if Name = 'DrillDrawing' then
+    Result := CAM_DRILLDRAWING
+  else if Copy(Name, 1, 3) = 'Mid' then
+  begin
+    n := NumDaChave(Name, 4);
+    if (n >= 1) and (n <= 30) then
+      Result := CAM_MID1 + n - 1;
+  end
+  else if Copy(Name, 1, 5) = 'Plane' then
+  begin
+    n := NumDaChave(Name, 6);
+    if (n >= 1) and (n <= 16) then
+      Result := CAM_PLANE1 + n - 1;
+  end
+  else if Copy(Name, 1, 4) = 'Mech' then
+  begin
+    // Mech1 ja saiu la em cima, pela constante provada
+    n := NumDaChave(Name, 5);
+    if (n >= 2) and (n <= 16) then
+      Result := CAM_MECH1 + n - 1;
+  end;
 end;
 
+// TLayer -> chave do contrato. Camada fora da tabela sai 'L<numero>', como sempre saiu.
 function LayerNameOf(L: TLayer): String;
 begin
   if L = eTopLayer then
@@ -938,8 +1138,54 @@ begin
     Result := 'Mech1'
   else if L = eKeepOutLayer then
     Result := 'KeepOut'
+  else if not CamadasNumeradas then
+    Result := 'L' + IntToStr(L)
+  else if (L >= CAM_MID1) and (L <= CAM_MID1 + 29) then
+    Result := 'Mid' + IntToStr(L - CAM_MID1 + 1)
+  else if L = CAM_TOPPASTE then
+    Result := 'TopPaste'
+  else if L = CAM_BOTTOMPASTE then
+    Result := 'BottomPaste'
+  else if L = CAM_TOPSOLDER then
+    Result := 'TopSolder'
+  else if L = CAM_BOTTOMSOLDER then
+    Result := 'BottomSolder'
+  else if (L >= CAM_PLANE1) and (L <= CAM_PLANE1 + 15) then
+    Result := 'Plane' + IntToStr(L - CAM_PLANE1 + 1)
+  else if L = CAM_DRILLGUIDE then
+    Result := 'DrillGuide'
+  else if (L > CAM_MECH1) and (L <= CAM_MECH1 + 15) then
+    Result := 'Mech' + IntToStr(L - CAM_MECH1 + 1)
+  else if L = CAM_DRILLDRAWING then
+    Result := 'DrillDrawing'
   else
     Result := 'L' + IntToStr(L);
+end;
+
+// Cobre = sinal (Top, Mid1..30, Bottom) ou plano (Plane1..16), como o HubCore.isCopper. A Multi
+// NAO conta: pad e via passante sao outra conversa. E so no cobre que net faz sentido.
+function EhCobre(L: TLayer): Boolean;
+begin
+  Result := (L = eTopLayer) or (L = eBottomLayer);
+  if Result then
+    Exit;
+  if not CamadasNumeradas then
+    Exit;
+  Result := ((L >= CAM_MID1) and (L <= CAM_MID1 + 29)) or ((L >= CAM_PLANE1) and (L <= CAM_PLANE1 + 15));
+end;
+
+// Filtro de camada dos iteradores de busca. Top, Bottom, TopOverlay e BottomOverlay continuam
+// pelo MkSet(L), o caminho de sempre (o unico que ja rodou neste engine com trilha, arco e
+// texto). As outras vao pelo AllLayers - o filtro do FindVia e do FindComponent - e quem separa
+// a camada e o laco de cada busca, por Prim.Layer = L: um MkSet de camada mecanica, de pasta ou
+// de mascara nunca rodou aqui, e um filtro que nao devolvesse nada seria indistinguivel de "o
+// objeto nao esta na placa".
+procedure FiltraCamada(Iter: TObject; L: TLayer);
+begin
+  if (L = eTopLayer) or (L = eBottomLayer) or (L = eTopOverlay) or (L = eBottomOverlay) then
+    Iter.AddFilter_LayerSet(MkSet(L))
+  else
+    Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
 end;
 
 { ..................................................................................................................... }
@@ -992,28 +1238,58 @@ begin
   Board.BoardIterator_Destroy(Iter);
 end;
 
-// Trilha cujo (x1,y1)-(x2,y2)/largura/camada casam com os orig_* (qualquer direcao)
-function FindTrack(L: TLayer; X1, Y1, X2, Y2, W: Double): IPCB_Track;
+// Designator do componente dono do primitivo; '' = solto. E o Prim.Component que o ExportBoard
+// le para o "owner" de trilha, arco e texto. Em try porque fill e region nunca passaram por ele
+// aqui: se o Altium recusar, o primitivo vale como solto - que e como FindTrack, FindArc e
+// FindFreeText sempre trataram todo mundo.
+function DonoDe(Prim: TObject): String;
+var
+  C: TObject;
+begin
+  Result := '';
+  try
+    C := Prim.Component;
+    if C <> nil then
+    begin
+      Result := C.Name.Text;
+      if Result = '' then
+        Result := '?';
+    end;
+  except
+    Result := '';
+  end;
+end;
+
+// Trilha cujo (x1,y1)-(x2,y2)/largura/camada casam com os orig_* (qualquer direcao).
+// SoLivre: so trilha solta, fora de componente (ver RequireTrackOrig).
+function FindTrack(L: TLayer; X1, Y1, X2, Y2, W: Double; SoLivre: Boolean): IPCB_Track;
 var
   Iter, Prim: TObject;
   ax1, ay1, ax2, ay2: Double;
-  DirectHit, ReverseHit: Boolean;
+  DirectHit, ReverseHit, Casa: Boolean;
 begin
   Result := nil;
   Iter := Board.BoardIterator_Create;
   Iter.AddFilter_ObjectSet(MkSet(eTrackObject));
-  Iter.AddFilter_LayerSet(MkSet(L));
+  FiltraCamada(Iter, L);
   Iter.AddFilter_Method(eProcessAll);
   Prim := Iter.FirstPCBObject;
   while Prim <> nil do
   begin
-    ax1 := XMM(Prim.X1);
-    ay1 := YMM(Prim.Y1);
-    ax2 := XMM(Prim.X2);
-    ay2 := YMM(Prim.Y2);
-    DirectHit := NearMM(ax1, X1) and NearMM(ay1, Y1) and NearMM(ax2, X2) and NearMM(ay2, Y2);
-    ReverseHit := NearMM(ax1, X2) and NearMM(ay1, Y2) and NearMM(ax2, X1) and NearMM(ay2, Y1);
-    if (DirectHit or ReverseHit) and NearMM(CoordToMMs(Prim.Width), W) then
+    Casa := False;
+    if Prim.Layer = L then
+    begin
+      ax1 := XMM(Prim.X1);
+      ay1 := YMM(Prim.Y1);
+      ax2 := XMM(Prim.X2);
+      ay2 := YMM(Prim.Y2);
+      DirectHit := NearMM(ax1, X1) and NearMM(ay1, Y1) and NearMM(ax2, X2) and NearMM(ay2, Y2);
+      ReverseHit := NearMM(ax1, X2) and NearMM(ay1, Y2) and NearMM(ax2, X1) and NearMM(ay2, Y1);
+      Casa := (DirectHit or ReverseHit) and NearMM(CoordToMMs(Prim.Width), W);
+      if Casa and SoLivre then
+        Casa := DonoDe(Prim) = '';
+    end;
+    if Casa then
     begin
       Result := Prim;
       break;
@@ -1045,21 +1321,30 @@ begin
   Board.BoardIterator_Destroy(Iter);
 end;
 
-function FindArc(L: TLayer; cx, cy, r, sa, ea: Double): IPCB_Arc;
+// Arco cujo centro/raio/angulos/camada casam com os orig_*. SoLivre: como no FindTrack.
+function FindArc(L: TLayer; cx, cy, r, sa, ea: Double; SoLivre: Boolean): IPCB_Arc;
 var
   Iter, Prim: TObject;
+  Casa: Boolean;
 begin
   Result := nil;
   Iter := Board.BoardIterator_Create;
   Iter.AddFilter_ObjectSet(MkSet(eArcObject));
-  Iter.AddFilter_LayerSet(MkSet(L));
+  FiltraCamada(Iter, L);
   Iter.AddFilter_Method(eProcessAll);
   Prim := Iter.FirstPCBObject;
   while Prim <> nil do
   begin
-    if NearMM(XMM(Prim.XCenter), cx) and NearMM(YMM(Prim.YCenter), cy) and
-      NearMM(CoordToMMs(Prim.Radius), r) and NearAngle(Prim.StartAngle, sa) and
-      NearAngle(Prim.EndAngle, ea) then
+    Casa := False;
+    if Prim.Layer = L then
+    begin
+      Casa := NearMM(XMM(Prim.XCenter), cx) and NearMM(YMM(Prim.YCenter), cy) and
+        NearMM(CoordToMMs(Prim.Radius), r) and NearAngle(Prim.StartAngle, sa) and
+        NearAngle(Prim.EndAngle, ea);
+      if Casa and SoLivre then
+        Casa := DonoDe(Prim) = '';
+    end;
+    if Casa then
     begin
       Result := Prim;
       break;
@@ -1070,33 +1355,354 @@ begin
 end;
 
 // Texto livre (nao designator/comment de footprint) cujo CENTRO do bounding box e o
-// conteudo casam com os orig_* do board.js (o x/y exportado e o centro do bounding box)
-function FindFreeText(L: TLayer; X, Y: Double; Txt: String): IPCB_Text;
+// conteudo casam com os orig_* do board.js (o x/y exportado e o centro do bounding box).
+// SoLivre: so texto fora de componente. O text_edit passa False (texto extra de footprint que
+// nao e designator nem comment sempre foi editavel); o text_del passa True.
+function FindFreeText(L: TLayer; X, Y: Double; Txt: String; SoLivre: Boolean): IPCB_Text;
 var
   Iter, Prim: TObject;
   cx, cy: Double;
+  Casa: Boolean;
 begin
   Result := nil;
   Iter := Board.BoardIterator_Create;
   Iter.AddFilter_ObjectSet(MkSet(eTextObject));
-  Iter.AddFilter_LayerSet(MkSet(L));
+  FiltraCamada(Iter, L);
   Iter.AddFilter_Method(eProcessAll);
   Prim := Iter.FirstPCBObject;
   while Prim <> nil do
   begin
-    if (not Prim.IsDesignator) and (not Prim.IsComment) and (Prim.Text = Txt) then
+    Casa := False;
+    if (Prim.Layer = L) and (not Prim.IsDesignator) and (not Prim.IsComment) and (Prim.Text = Txt) then
     begin
       cx := (XMM(Prim.BoundingRectangleForSelection.Left) + XMM(Prim.BoundingRectangleForSelection.Right)) / 2;
       cy := (YMM(Prim.BoundingRectangleForSelection.Bottom) + YMM(Prim.BoundingRectangleForSelection.Top)) / 2;
-      if NearMM(cx, X) and NearMM(cy, Y) then
-      begin
-        Result := Prim;
-        break;
-      end;
+      Casa := NearMM(cx, X) and NearMM(cy, Y);
+      if Casa and SoLivre then
+        Casa := DonoDe(Prim) = '';
+    end;
+    if Casa then
+    begin
+      Result := Prim;
+      break;
     end;
     Prim := Iter.NextPCBObject;
   end;
   Board.BoardIterator_Destroy(Iter);
+end;
+
+// APOSTA (ver APOSTAS): os cantos de um fill SEM rotacao, em mm relativos a origem - os
+// X1Location..Y2Location que o ExportBoard grava em x1..y2. False = o Altium recusou a leitura.
+// Estes quatro nomes moram so aqui e em GravaCantosFill.
+function LeCantosFill(Fill: TObject; var X1, Y1, X2, Y2: Double): Boolean;
+begin
+  Result := False;
+  try
+    X1 := XMM(Fill.X1Location);
+    Y1 := YMM(Fill.Y1Location);
+    X2 := XMM(Fill.X2Location);
+    Y2 := YMM(Fill.Y2Location);
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+// APOSTA (ver APOSTAS): escreve os cantos de um fill. False = o Altium recusou a escrita.
+function GravaCantosFill(Fill: TObject; X1, Y1, X2, Y2: Double): Boolean;
+begin
+  Result := False;
+  try
+    Fill.X1Location := MMX(X1);
+    Fill.Y1Location := MMY(Y1);
+    Fill.X2Location := MMX(X2);
+    Fill.Y2Location := MMY(Y2);
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+// Fill pela camada + os dois cantos SEM rotacao (X1Location..Y2Location), em qualquer ordem: o
+// mesmo retangulo escrito ao contrario e o mesmo fill (como no HubCore). A rotacao nao entra na
+// busca - o contrato nao tem orig_rot. Ler os cantos de um fill e novo neste arquivo: uma recusa
+// interrompe o laco e fica em SondaFalhou, para quem chamou dizer o que foi. O tipo fill vai pelo
+// numero (OBJ_FILL), e so quando a sonda ObjetosNumerados confirmou a numeracao.
+function FindFill(L: TLayer; X1, Y1, X2, Y2: Double; SoLivre: Boolean): TObject;
+var
+  Iter, Prim: TObject;
+  Casa, Recusou: Boolean;
+  ax1, ay1, ax2, ay2: Double;
+begin
+  Result := nil;
+  if not ObjetosNumerados then
+  begin
+    SondaFalhou := 'o numero do tipo fill (a numeracao dos tipos de objeto desta versao nao e a ' +
+      'esperada - ver o [AVISO] no comeco do relatorio)';
+    Exit;
+  end;
+  Recusou := False;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(OBJ_FILL));
+  FiltraCamada(Iter, L);
+  Iter.AddFilter_Method(eProcessAll);
+  try
+    Prim := Iter.FirstPCBObject;
+    while Prim <> nil do
+    begin
+      Casa := False;
+      if Prim.Layer = L then
+      begin
+        if LeCantosFill(Prim, ax1, ay1, ax2, ay2) then
+        begin
+          Casa := MesmoIntervalo(ax1, ax2, X1, X2) and MesmoIntervalo(ay1, ay2, Y1, Y2);
+          if Casa and SoLivre then
+            Casa := DonoDe(Prim) = '';
+        end
+        else
+          Recusou := True;
+      end;
+      if Casa or Recusou then
+      begin
+        if Casa then
+          Result := Prim;
+        Prim := nil;
+      end
+      else
+        Prim := Iter.NextPCBObject;
+    end;
+  except
+    Result := nil;
+    Recusou := True;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+  if Recusou then
+  begin
+    Result := nil;
+    SondaFalhou := 'a leitura dos cantos do fill (X1Location..Y2Location)';
+  end;
+end;
+
+// Kind da region como inteiro; -1 = a leitura foi recusada. Prim.Kind() e a leitura que o
+// ExportBoard ja faz em toda region.
+function LeKind(Prim: TObject): Integer;
+begin
+  Result := -1;
+  try
+    Result := Prim.Kind();
+  except
+    Result := -1;
+  end;
+end;
+
+// Region "livre": solida (Kind de cobre - que e o Kind de toda region normal, seja de cobre,
+// de silk ou de mascara), fora de polygon despejado e fora de componente.
+function RegionLivre(Prim: TObject): Boolean;
+begin
+  Result := False;
+  if LeKind(Prim) <> eRegionKind_Copper then
+    Exit;
+  if Prim.InPolygon() then
+    Exit;
+  Result := DonoDe(Prim) = '';
+end;
+
+// Por que uma region que casou com os orig_* nao pode ser apagada por aqui.
+function MotivoRegionPresa(Prim: TObject): String;
+var
+  Dono: String;
+begin
+  Result := 'nao e region livre';
+  Dono := DonoDe(Prim);
+  try
+    if Prim.InPolygon() then
+      Result := 'e pedaco de polygon despejado - o Altium redespeja; apague ou edite o polygon no Altium'
+    else if Dono <> '' then
+      Result := 'pertence ao componente ' + Dono + ' (edite o footprint no Altium)'
+    else if LeKind(Prim) <> eRegionKind_Copper then
+      Result := 'nao e region solida (Kind ' + IntToStr(LeKind(Prim)) +
+        ': recorte, cavidade...) - remova no Altium';
+  except
+    Result := 'nao e region livre';
+  end;
+end;
+
+// Region pela camada + numero de vertices + 1o vertice do contorno principal: o board.js grava
+// o GetMainContour inteiro em "points", e o contrato manda orig_n (quantos) e orig_x0/orig_y0
+// (o primeiro). SoLivre: so region livre (RegionLivre). As leituras sao as do ExportBoard, mas
+// o laco vai em try do mesmo jeito: uma recusa aqui nao pode derrubar a aplicacao inteira.
+function FindRegion(L: TLayer; N: Integer; X0, Y0: Double; SoLivre: Boolean): TObject;
+var
+  Iter, Prim: TObject;
+  C: IPCB_Contour;
+  Casa: Boolean;
+begin
+  Result := nil;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(eRegionObject));
+  FiltraCamada(Iter, L);
+  Iter.AddFilter_Method(eProcessAll);
+  try
+    Prim := Iter.FirstPCBObject;
+    while Prim <> nil do
+    begin
+      Casa := False;
+      if Prim.Layer = L then
+      begin
+        C := Prim.GetMainContour();
+        if C.Count = N then
+          Casa := NearMM(XMM(C.GetState_PointX(0)), X0) and NearMM(YMM(C.GetState_PointY(0)), Y0);
+        if Casa and SoLivre then
+          Casa := RegionLivre(Prim);
+      end;
+      if Casa then
+      begin
+        Result := Prim;
+        Prim := nil;
+      end
+      else
+        Prim := Iter.NextPCBObject;
+    end;
+  except
+    Result := nil;
+    SondaFalhou := 'a leitura do contorno das regions (GetMainContour)';
+  end;
+  Board.BoardIterator_Destroy(Iter);
+end;
+
+// A "Board Region" (a forma da placa, do storage BoardRegions) chega neste API como region na
+// Multi com Kind diferente de cobre - igual a um recorte -, e nao e furo: e a placa inteira
+// (nos board.js de hoje, o "recorte" de 4 a 173 pontos do tamanho do contorno). Separa pelo
+// tamanho: o contorno principal cobre pelo menos 90% da largura E da altura da placa.
+function EhRegiaoDaPlaca(Prim: TObject): Boolean;
+var
+  C: IPCB_Contour;
+  k: Integer;
+  x, y, MinX, MinY, MaxX, MaxY, BW, BH: Double;
+begin
+  Result := False;
+  C := Prim.GetMainContour();
+  if C.Count < 1 then
+    Exit;
+  MinX := XMM(C.GetState_PointX(0));
+  MaxX := MinX;
+  MinY := YMM(C.GetState_PointY(0));
+  MaxY := MinY;
+  for k := 1 to C.Count - 1 do
+  begin
+    x := XMM(C.GetState_PointX(k));
+    y := YMM(C.GetState_PointY(k));
+    if x < MinX then
+      MinX := x;
+    if x > MaxX then
+      MaxX := x;
+    if y < MinY then
+      MinY := y;
+    if y > MaxY then
+      MaxY := y;
+  end;
+  BW := CoordToMMs(Board.BoardOutline.BoundingRectangle.Right - Board.BoardOutline.BoundingRectangle.Left);
+  BH := CoordToMMs(Board.BoardOutline.BoundingRectangle.Top - Board.BoardOutline.BoundingRectangle.Bottom);
+  if (BW <= 0) or (BH <= 0) then
+    Exit;
+  Result := ((MaxX - MinX) >= 0.9 * BW) and ((MaxY - MinY) >= 0.9 * BH);
+end;
+
+// O inteiro do Kind de um Board Cutout NESTA instalacao. A pergunta existe porque este API nao
+// tem IsBoardCutout (ver ExportBoard) e a constante nomeada do Kind de recorte nunca foi
+// conferida aqui - e constante que nao existe derruba o script inteiro na compilacao.
+//
+//   1) copia de um recorte que JA esta na placa: region na Multi (e la que este API reporta o
+//      Board Cutout, apesar de LAYER=KEEPOUT no arquivo - ver ExportBoard), Kind diferente de
+//      cobre e do recorte de polygon (KIND_RECORTE_POLIGONO, que tambem mora na Multi em placa
+//      da casa), fora de componente e MENOR que a placa (EhRegiaoDaPlaca);
+//   2) placa sem recorte: KIND_RECORTE_PADRAO, a posicao do Board Cutout na lista TRegionKind.
+//      Conferido = False, e o relatorio diz isso na linha da op.
+// Recortes da placa com Kinds diferentes entre si: vale o KIND_RECORTE_PADRAO se algum deles o
+// tem (o numero esperado, e a placa o confirma); senao -1, que nao ha como escolher sem chutar.
+function KindDoRecorte(var Origem: String; var Conferido: Boolean): Integer;
+var
+  Iter, Prim: TObject;
+  k, Primeiro, Iguais, Outros, ComPadrao, DePoligono: Integer;
+  Leu: Boolean;
+  Nota: String;
+begin
+  Result := -1;
+  Conferido := False;
+  Primeiro := -1;
+  Iguais := 0;
+  Outros := 0;
+  ComPadrao := 0;
+  DePoligono := 0;
+  Leu := True;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(eRegionObject));
+  Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+  Iter.AddFilter_Method(eProcessAll);
+  try
+    Prim := Iter.FirstPCBObject;
+    while Prim <> nil do
+    begin
+      if Prim.Layer = eMultiLayer then
+      begin
+        k := LeKind(Prim);
+        if k = KIND_RECORTE_POLIGONO then
+          DePoligono := DePoligono + 1
+        else if (k >= 0) and (k <> eRegionKind_Copper) and (DonoDe(Prim) = '') then
+        begin
+          if not EhRegiaoDaPlaca(Prim) then
+          begin
+            if k = KIND_RECORTE_PADRAO then
+              ComPadrao := ComPadrao + 1;
+            if Primeiro < 0 then
+              Primeiro := k;
+            if k = Primeiro then
+              Iguais := Iguais + 1
+            else
+              Outros := Outros + 1;
+          end;
+        end;
+      end;
+      Prim := Iter.NextPCBObject;
+    end;
+  except
+    Leu := False;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+
+  Nota := '';
+  if DePoligono > 0 then
+    Nota := ' (' + IntToStr(DePoligono) + ' recorte(s) de polygon na Multi ficaram de fora: nao sao furo na placa)';
+  if not Leu then
+  begin
+    Result := KIND_RECORTE_PADRAO;
+    Origem := 'Kind ' + IntToStr(Result) + ' NAO conferido: a leitura dos recortes da placa foi recusada';
+  end
+  else if Iguais = 0 then
+  begin
+    Result := KIND_RECORTE_PADRAO;
+    Origem := 'Kind ' + IntToStr(Result) + ' NAO conferido: a placa nao tinha recorte de onde copiar o numero' +
+      Nota;
+  end
+  else if Outros = 0 then
+  begin
+    Result := Primeiro;
+    Conferido := True;
+    Origem := 'Kind ' + IntToStr(Result) + ', copiado de ' + IntToStr(Iguais) + ' recorte(s) da placa' + Nota;
+  end
+  else if ComPadrao > 0 then
+  begin
+    Result := KIND_RECORTE_PADRAO;
+    Conferido := True;
+    Origem := 'Kind ' + IntToStr(Result) + ', o de ' + IntToStr(ComPadrao) + ' recorte(s) da placa (outros ' +
+      IntToStr(Iguais + Outros - ComPadrao) + ' com Kind diferente)' + Nota;
+  end
+  else
+  begin
+    Result := -1;
+    Origem := IntToStr(Iguais) + ' recorte(s) da placa com Kind ' + IntToStr(Primeiro) + ' e ' +
+      IntToStr(Outros) + ' com outro Kind - nao ha como escolher sem chutar' + Nota;
+  end;
 end;
 
 { ..................................................................................................................... }
@@ -1113,6 +1719,86 @@ procedure LogFail(Msg: String);
 begin
   FailCount := FailCount + 1;
   Report.Add('[FALHA] ' + Msg);
+end;
+
+// Aviso nao conta como falha: a mudanca foi aplicada, com uma ressalva que o usuario precisa ler.
+// O dialogo final mostra quantos foram (AvisoCount), para ninguem deixar de abrir o relatorio.
+procedure LogAviso(Msg: String);
+begin
+  AvisoCount := AvisoCount + 1;
+  Report.Add('[AVISO] ' + Msg);
+end;
+
+// Junta mais um problema na lista de uma op ("a; b; c"), para o relatorio dizer numa linha so
+// tudo o que nao pegou.
+procedure MaisProblema(var Lista: String; Msg: String);
+begin
+  if Lista <> '' then
+    Lista := Lista + '; ';
+  Lista := Lista + Msg;
+end;
+
+{ ..................................................................................................................... }
+{ .                                Objetos novos: camada de destino, espelho, fonte                                   . }
+{ ..................................................................................................................... }
+
+// Camada de destino de um objeto novo ou editado: tem de ser chave da tabela, e a Multi e so
+// de pad e via - o Altium nao tem trilha, fill, region ou texto "passante" (o HubCore recusa
+// igual). 0 = recusada, e a FALHA ja saiu no relatorio com o nome da op.
+function CamadaDeDestino(Nome, What, Oque: String): TLayer;
+var
+  Nota: String;
+begin
+  Result := LayerFromName(Nome);
+  if Result = 0 then
+  begin
+    Nota := '';
+    if not CamadasNumeradas then
+      Nota := ' - nesta versao do Altium so Top, Bottom, TopOverlay, BottomOverlay, Mech1 e KeepOut ' +
+        'estao liberadas (ver o [AVISO] no comeco do relatorio)';
+    LogFail(What + ': camada invalida "' + Nome + '" (use uma chave da tabela: Top, Bottom, Mid1..30, ' +
+      'Plane1..16, TopOverlay, BottomOverlay, TopPaste, BottomPaste, TopSolder, BottomSolder, DrillGuide, ' +
+      'KeepOut, DrillDrawing, Mech1..16)' + Nota);
+    Exit;
+  end;
+  if Result = eMultiLayer then
+  begin
+    LogFail(What + ': ' + Oque + ' nao pode ficar na Multi-Layer (ela e so de pad e via)');
+    Result := 0;
+  end;
+end;
+
+// Espelho do texto. LER o MirrorFlag e provado (o ExportBoard le); ESCREVER e novo, entao vai em
+// try e e conferido relendo. So escreve quando o pedido difere do que o texto ja tem.
+// False = o texto NAO ficou como pedido.
+function AplicaEspelho(Txt: TObject; Quer: Boolean): Boolean;
+begin
+  Result := False;
+  try
+    if Txt.MirrorFlag <> Quer then
+      Txt.MirrorFlag := Quer;
+    Result := Txt.MirrorFlag = Quer;
+  except
+    Result := False;
+  end;
+end;
+
+// Objeto que saiu da fabrica e NAO vai para a placa (uma etapa foi recusada) fica so na memoria
+// ate o Altium fechar: fora da placa, sem registro no undo, sem efeito nenhum no PcbDoc. Nao ha
+// "descarte" de proposito - PCBServer.DestroyPCBObject seria um nome novo (aposta de
+// compilacao, ver APOSTAS) para ganho nenhum.
+
+// APOSTA (ver APOSTAS): fonte stroke num texto novo. O eCreate_Default traz a fonte das
+// Preferences > Default Primitives, que pode estar em TrueType. False = recusado.
+function FonteStroke(Txt: TObject): Boolean;
+begin
+  Result := False;
+  try
+    Txt.UseTTFonts := False;
+    Result := not Txt.UseTTFonts;
+  except
+    Result := False;
+  end;
 end;
 
 { ..................................................................................................................... }
@@ -1171,6 +1857,8 @@ end;
 function RequireTrackOrig(Line, What: String): IPCB_Track;
 var
   L: TLayer;
+  X1, Y1, X2, Y2, W: Double;
+  Dono: IPCB_Track;
 begin
   Result := nil;
   if not (JHas(Line, 'orig_x1') and JHas(Line, 'orig_y1') and JHas(Line, 'orig_x2') and
@@ -1185,24 +1873,54 @@ begin
     LogFail(What + ': orig_layer invalida "' + JGet(Line, 'orig_layer') + '"');
     Exit;
   end;
-  Result := FindTrack(L, JNum(Line, 'orig_x1'), JNum(Line, 'orig_y1'), JNum(Line, 'orig_x2'),
-    JNum(Line, 'orig_y2'), JNum(Line, 'orig_w'));
-  if Result = nil then
-    LogFail(What + ': trilha original nao encontrada na placa (re-exporte o espelho)');
+  X1 := JNum(Line, 'orig_x1');
+  Y1 := JNum(Line, 'orig_y1');
+  X2 := JNum(Line, 'orig_x2');
+  Y2 := JNum(Line, 'orig_y2');
+  W := JNum(Line, 'orig_w');
+  // A solta primeiro. Sem solta, a do componente: no COBRE ela vale, como sempre valeu (o hub
+  // de antes mandava track_edit de trilha de footprint, e changes.js antigo nao pode deixar de
+  // aplicar); FORA do cobre o contrato a recusa - silk e linha mecanica de footprint sao do
+  // componente, e mexer numa delas sozinha desmancha o desenho dele.
+  Result := FindTrack(L, X1, Y1, X2, Y2, W, True);
+  if Result <> nil then
+    Exit;
+  Dono := FindTrack(L, X1, Y1, X2, Y2, W, False);
+  if Dono = nil then
+    LogFail(What + ': trilha original nao encontrada na placa (re-exporte o espelho)')
+  else if EhCobre(L) then
+    Result := Dono
+  else
+    LogFail(What + ': a trilha pertence ao componente ' + DonoDe(Dono) +
+      ' (so linha solta e editavel sozinha; edite o footprint no Altium)');
 end;
 
 procedure DoTrackEdit(Line: String);
 var
   Track: IPCB_Track;
-  What: String;
-  L: TLayer;
+  What, NetStr: String;
+  Destino: TLayer;
   Net: IPCB_Net;
+  CamadaOk: Boolean;
 begin
   What := 'track_edit ' + JGet(Line, 'id');
+  // A camada nova e conferida ANTES de mexer em qualquer coisa: camada recusada recusa a
+  // mudanca inteira, em vez de mover a trilha e deixa-la na camada velha. (layer:"" e "nao
+  // troca", como no HubCore - ver TemValor.)
+  Destino := 0;
+  if TemValor(Line, 'layer') then
+  begin
+    Destino := CamadaDeDestino(JGet(Line, 'layer'), What, 'trilha');
+    if Destino = 0 then
+      Exit;
+  end;
   Track := RequireTrackOrig(Line, What);
   if Track = nil then
     Exit;
+  if Destino = 0 then
+    Destino := Track.Layer;
 
+  CamadaOk := True;
   PCBServer.SendMessageToRobots(Track.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
   if JHas(Line, 'x1') then
     Track.X1 := MMX(JNum(Line, 'x1'));
@@ -1214,21 +1932,45 @@ begin
     Track.Y2 := MMY(JNum(Line, 'y2'));
   if JHas(Line, 'w') then
     Track.Width := MMsToCoord(JNum(Line, 'w'));
-  if JHas(Line, 'layer') then
+  // Top/Bottom e o caminho de sempre; as outras camadas sao numero calculado (ver "Camadas"),
+  // entao a escrita vai protegida - e conferida relendo, no fim.
+  if TemValor(Line, 'layer') then
   begin
-    L := LayerFromName(JGet(Line, 'layer'));
-    if (L = eTopLayer) or (L = eBottomLayer) then
-      Track.Layer := L;
+    try
+      Track.Layer := Destino;
+    except
+      CamadaOk := False;
+    end;
   end;
+  // Net so no cobre. A net que a trilha ja tinha fica com ela quando ela sai do cobre: o Altium
+  // nao liga objeto fora das camadas eletricas, e o HubCore tambem nao apaga a net do eff.
   if JHas(Line, 'net') then
   begin
-    Net := FindNet(JGet(Line, 'net'));
-    if Net <> nil then
-      Track.Net := Net;
+    NetStr := JGet(Line, 'net');
+    if not EhCobre(Destino) then
+    begin
+      if NetStr <> '' then
+        LogAviso(What + ': net "' + NetStr + '" so vale em camada de cobre - ignorada');
+    end
+    else
+    begin
+      Net := FindNet(NetStr);
+      if Net <> nil then
+        Track.Net := Net
+      else if NetStr <> '' then
+        LogAviso(What + ': net "' + NetStr + '" nao existe na placa - a trilha ficou com a net que tinha');
+    end;
   end;
   PCBServer.SendMessageToRobots(Track.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
   Track.GraphicallyInvalidate;
-  LogOk(What);
+  if not CamadaOk then
+    LogFail(What + ': o Altium recusou a camada ' + JGet(Line, 'layer') + ' - o resto da mudanca foi ' +
+      'aplicado e a trilha ficou na ' + LayerNameOf(Track.Layer))
+  else if TemValor(Line, 'layer') and (Track.Layer <> Destino) then
+    LogFail(What + ': a camada nao pegou (pedida ' + JGet(Line, 'layer') + ', ficou ' +
+      LayerNameOf(Track.Layer) + ') - o resto da mudanca foi aplicado')
+  else
+    LogOk(What);
 end;
 
 procedure DoTrackAdd(Line: String);
@@ -1237,13 +1979,12 @@ var
   L: TLayer;
   Net: IPCB_Net;
   NetStr: String;
+  CamadaOk: Boolean;
 begin
-  L := LayerFromName(JGet(Line, 'layer'));
-  if (L <> eTopLayer) and (L <> eBottomLayer) then
-  begin
-    LogFail('track_add: camada invalida "' + JGet(Line, 'layer') + '" (use Top ou Bottom)');
+  // qualquer camada da tabela menos a Multi (o contrato); net so no cobre
+  L := CamadaDeDestino(JGet(Line, 'layer'), 'track_add', 'trilha');
+  if L = 0 then
     Exit;
-  end;
   if not (JHas(Line, 'x1') and JHas(Line, 'y1') and JHas(Line, 'x2') and JHas(Line, 'y2') and JHas(Line, 'w')) then
   begin
     LogFail('track_add: faltam campos x1/y1/x2/y2/w');
@@ -1256,16 +1997,36 @@ begin
   Track.X2 := MMX(JNum(Line, 'x2'));
   Track.Y2 := MMY(JNum(Line, 'y2'));
   Track.Width := MMsToCoord(JNum(Line, 'w'));
-  Track.Layer := L;
+  // Top/Bottom e o caminho de sempre; as outras camadas sao numero calculado: escrita protegida
+  // e conferida relendo, antes de a trilha ir para a placa
+  CamadaOk := True;
+  try
+    Track.Layer := L;
+    CamadaOk := Track.Layer = L;
+  except
+    CamadaOk := False;
+  end;
+  if not CamadaOk then
+  begin
+    // a trilha so nao vai para a placa (objeto fora da placa nao tem efeito - ver o comentario
+    // antes de FonteStroke)
+    LogFail('track_add: o Altium recusou a camada ' + JGet(Line, 'layer') + ' (ou ela nao pegou) - nada foi criado');
+    Exit;
+  end;
 
   NetStr := JGet(Line, 'net');
   if NetStr <> '' then
   begin
-    Net := FindNet(NetStr);
-    if Net <> nil then
-      Track.Net := Net
+    if not EhCobre(L) then
+      LogAviso('track_add: net "' + NetStr + '" so vale em camada de cobre - ignorada')
     else
-      Report.Add('[AVISO] track_add: net "' + NetStr + '" nao existe na placa - trilha criada sem net');
+    begin
+      Net := FindNet(NetStr);
+      if Net <> nil then
+        Track.Net := Net
+      else
+        LogAviso('track_add: net "' + NetStr + '" nao existe na placa - trilha criada sem net');
+    end;
   end;
 
   Board.AddPCBObject(Track);
@@ -1359,7 +2120,7 @@ begin
     if Net <> nil then
       Via.Net := Net
     else
-      Report.Add('[AVISO] via_add: net "' + NetStr + '" nao existe na placa - via criada sem net');
+      LogAviso('via_add: net "' + NetStr + '" nao existe na placa - via criada sem net');
   end;
 
   Board.AddPCBObject(Via);
@@ -1384,6 +2145,8 @@ end;
 function RequireArcOrig(Line, What: String): IPCB_Arc;
 var
   L: TLayer;
+  cx, cy, r, sa, ea: Double;
+  Dono: IPCB_Arc;
 begin
   Result := nil;
   if not (JHas(Line, 'orig_cx') and JHas(Line, 'orig_cy') and JHas(Line, 'orig_r') and
@@ -1398,23 +2161,46 @@ begin
     LogFail(What + ': orig_layer invalida "' + JGet(Line, 'orig_layer') + '"');
     Exit;
   end;
-  Result := FindArc(L, JNum(Line, 'orig_cx'), JNum(Line, 'orig_cy'), JNum(Line, 'orig_r'),
-    JNum(Line, 'orig_sa'), JNum(Line, 'orig_ea'));
-  if Result = nil then
-    LogFail(What + ': arco original nao encontrado na placa (re-exporte o espelho)');
+  cx := JNum(Line, 'orig_cx');
+  cy := JNum(Line, 'orig_cy');
+  r := JNum(Line, 'orig_r');
+  sa := JNum(Line, 'orig_sa');
+  ea := JNum(Line, 'orig_ea');
+  // a mesma regra do RequireTrackOrig: solto primeiro; o do componente so vale no cobre
+  Result := FindArc(L, cx, cy, r, sa, ea, True);
+  if Result <> nil then
+    Exit;
+  Dono := FindArc(L, cx, cy, r, sa, ea, False);
+  if Dono = nil then
+    LogFail(What + ': arco original nao encontrado na placa (re-exporte o espelho)')
+  else if EhCobre(L) then
+    Result := Dono
+  else
+    LogFail(What + ': o arco pertence ao componente ' + DonoDe(Dono) +
+      ' (so arco solto e editavel sozinho; edite o footprint no Altium)');
 end;
 
 procedure DoArcEdit(Line: String);
 var
   Arc: IPCB_Arc;
   What: String;
-  L: TLayer;
+  Destino: TLayer;
+  CamadaOk: Boolean;
 begin
   What := 'arc_edit ' + JGet(Line, 'id');
+  // camada nova conferida antes de mexer (ver DoTrackEdit)
+  Destino := 0;
+  if TemValor(Line, 'layer') then
+  begin
+    Destino := CamadaDeDestino(JGet(Line, 'layer'), What, 'arco');
+    if Destino = 0 then
+      Exit;
+  end;
   Arc := RequireArcOrig(Line, What);
   if Arc = nil then
     Exit;
 
+  CamadaOk := True;
   PCBServer.SendMessageToRobots(Arc.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
   if JHas(Line, 'cx') then
     Arc.XCenter := MMX(JNum(Line, 'cx'));
@@ -1428,15 +2214,26 @@ begin
     Arc.EndAngle := JNum(Line, 'ea');
   if JHas(Line, 'w') then
     Arc.LineWidth := MMsToCoord(JNum(Line, 'w'));
-  if JHas(Line, 'layer') then
+  // camada: escrita protegida e conferida relendo, como no DoTrackEdit (o arc_edit do contrato
+  // nao tem net; a que o arco ja tinha fica com ele)
+  if TemValor(Line, 'layer') then
   begin
-    L := LayerFromName(JGet(Line, 'layer'));
-    if (L = eTopLayer) or (L = eBottomLayer) then
-      Arc.Layer := L;
+    try
+      Arc.Layer := Destino;
+    except
+      CamadaOk := False;
+    end;
   end;
   PCBServer.SendMessageToRobots(Arc.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
   Arc.GraphicallyInvalidate;
-  LogOk(What);
+  if not CamadaOk then
+    LogFail(What + ': o Altium recusou a camada ' + JGet(Line, 'layer') + ' - o resto da mudanca foi ' +
+      'aplicado e o arco ficou na ' + LayerNameOf(Arc.Layer))
+  else if TemValor(Line, 'layer') and (Arc.Layer <> Destino) then
+    LogFail(What + ': a camada nao pegou (pedida ' + JGet(Line, 'layer') + ', ficou ' +
+      LayerNameOf(Arc.Layer) + ') - o resto da mudanca foi aplicado')
+  else
+    LogOk(What);
 end;
 
 procedure DoArcAdd(Line: String);
@@ -1445,13 +2242,12 @@ var
   L: TLayer;
   Net: IPCB_Net;
   NetStr: String;
+  CamadaOk: Boolean;
 begin
-  L := LayerFromName(JGet(Line, 'layer'));
-  if (L <> eTopLayer) and (L <> eBottomLayer) then
-  begin
-    LogFail('arc_add: camada invalida "' + JGet(Line, 'layer') + '" (use Top ou Bottom)');
+  // qualquer camada da tabela menos a Multi (o contrato); net so no cobre
+  L := CamadaDeDestino(JGet(Line, 'layer'), 'arc_add', 'arco');
+  if L = 0 then
     Exit;
-  end;
   if not (JHas(Line, 'cx') and JHas(Line, 'cy') and JHas(Line, 'r') and JHas(Line, 'sa') and
     JHas(Line, 'ea') and JHas(Line, 'w')) then
   begin
@@ -1466,16 +2262,33 @@ begin
   Arc.StartAngle := JNum(Line, 'sa');
   Arc.EndAngle := JNum(Line, 'ea');
   Arc.LineWidth := MMsToCoord(JNum(Line, 'w'));
-  Arc.Layer := L;
+  // camada: escrita protegida e conferida relendo, como no DoTrackAdd
+  CamadaOk := True;
+  try
+    Arc.Layer := L;
+    CamadaOk := Arc.Layer = L;
+  except
+    CamadaOk := False;
+  end;
+  if not CamadaOk then
+  begin
+    LogFail('arc_add: o Altium recusou a camada ' + JGet(Line, 'layer') + ' (ou ela nao pegou) - nada foi criado');
+    Exit;
+  end;
 
   NetStr := JGet(Line, 'net');
   if NetStr <> '' then
   begin
-    Net := FindNet(NetStr);
-    if Net <> nil then
-      Arc.Net := Net
+    if not EhCobre(L) then
+      LogAviso('arc_add: net "' + NetStr + '" so vale em camada de cobre - ignorada')
     else
-      Report.Add('[AVISO] arc_add: net "' + NetStr + '" nao existe na placa - arco criado sem net');
+    begin
+      Net := FindNet(NetStr);
+      if Net <> nil then
+        Arc.Net := Net
+      else
+        LogAviso('arc_add: net "' + NetStr + '" nao existe na placa - arco criado sem net');
+    end;
   end;
 
   Board.AddPCBObject(Arc);
@@ -1500,12 +2313,16 @@ end;
 // igual ao board.js: aplica texto/altura/rot primeiro, mede o bounding box NOVO e
 // desloca a ancora para o centro cair exatamente em x/y - centralizacao exata
 // independente da largura do texto (1 vs 10).
+// layer e mirror (contrato 2026-10): entram no MESMO ciclo do estilo - o espelho muda o
+// bounding box, e a centralizacao (2) mede depois dele. Escrever Layer e MirrorFlag em texto e
+// novo neste arquivo: vai em try, e o relatorio (3) confere os dois relendo.
 procedure DoTextEdit(Line: String);
 var
   Txt: IPCB_Text;
-  What: String;
-  L: TLayer;
+  What, Problemas: String;
+  L, Destino: TLayer;
   cx, cy, dx, dy: Double;
+  CamadaOk: Boolean;
 begin
   What := 'text_edit ' + JGet(Line, 'id');
   if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y') and JHas(Line, 'orig_text') and
@@ -1520,7 +2337,15 @@ begin
     LogFail(What + ': orig_layer invalida "' + JGet(Line, 'orig_layer') + '"');
     Exit;
   end;
-  Txt := FindFreeText(L, JNum(Line, 'orig_x'), JNum(Line, 'orig_y'), JGet(Line, 'orig_text'));
+  // camada nova conferida antes de mexer (ver DoTrackEdit)
+  Destino := 0;
+  if TemValor(Line, 'layer') then
+  begin
+    Destino := CamadaDeDestino(JGet(Line, 'layer'), What, 'texto');
+    if Destino = 0 then
+      Exit;
+  end;
+  Txt := FindFreeText(L, JNum(Line, 'orig_x'), JNum(Line, 'orig_y'), JGet(Line, 'orig_text'), False);
   if Txt = nil then
   begin
     LogFail(What + ': texto original nao encontrado na placa (re-exporte o espelho)');
@@ -1530,6 +2355,8 @@ begin
   // 1) Estilo num ciclo proprio: o engine so recalcula o bounding box no EndModify.
   //    (Medir e ajustar a ancora no MESMO ciclo devolvia o box velho e o ajuste de
   //    XLocation era descartado - os textos nunca saiam do lugar.)
+  Problemas := '';
+  CamadaOk := True;
   PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
   if JHas(Line, 'text') then
     Txt.Text := JGet(Line, 'text');
@@ -1539,6 +2366,19 @@ begin
     Txt.Width := MMsToCoord(JNum(Line, 'w'));
   if JHas(Line, 'rot') then
     Txt.Rotation := JNum(Line, 'rot');
+  if Destino <> 0 then
+  begin
+    try
+      Txt.Layer := Destino;
+    except
+      CamadaOk := False;
+    end;
+    if not CamadaOk then
+      MaisProblema(Problemas, 'o Altium recusou a camada ' + JGet(Line, 'layer'));
+  end;
+  if JHas(Line, 'mirror') then
+    if not AplicaEspelho(Txt, JBool(Line, 'mirror')) then
+      MaisProblema(Problemas, 'o espelho (MirrorFlag) nao ficou ' + JGet(Line, 'mirror'));
   PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
   Txt.GraphicallyInvalidate;
 
@@ -1560,15 +2400,217 @@ begin
     Txt.GraphicallyInvalidate;
   end;
 
-  // 3) Relatorio honesto: mede o centro DEPOIS de tudo e confere com o alvo.
+  // 3) Relatorio honesto: mede o centro DEPOIS de tudo e confere com o alvo - e a camada
+  //    nova, relendo (aceitar a escrita nao e o mesmo que ela pegar).
   cx := (XMM(Txt.BoundingRectangleForSelection.Left) + XMM(Txt.BoundingRectangleForSelection.Right)) / 2;
   cy := (YMM(Txt.BoundingRectangleForSelection.Bottom) + YMM(Txt.BoundingRectangleForSelection.Top)) / 2;
+  if CamadaOk and (Destino <> 0) then
+    if Txt.Layer <> Destino then
+      MaisProblema(Problemas, 'a camada nao pegou (pedida ' + JGet(Line, 'layer') + ', ficou ' +
+        LayerNameOf(Txt.Layer) + ')');
   if (JHas(Line, 'x') and (Abs(cx - JNum(Line, 'x')) > 0.01)) or
      (JHas(Line, 'y') and (Abs(cy - JNum(Line, 'y')) > 0.01)) then
-    LogFail(What + ': centro medido (' + FloatToStr(cx) + ',' + FloatToStr(cy) +
-      ') nao chegou no alvo (' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')')
+    MaisProblema(Problemas, 'centro medido (' + FloatToStr(cx) + ',' + FloatToStr(cy) +
+      ') nao chegou no alvo (' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')');
+  if Problemas <> '' then
+    LogFail(What + ': ' + Problemas)
   else
     LogOk(What + ' -> texto=' + Txt.Text + ' centro medido=(' + FloatToStr(cx) + ',' + FloatToStr(cy) + ')');
+end;
+
+// text_add: texto livre novo, fonte stroke. x/y = CENTRO do bounding box, como no text_edit: o
+// texto nasce, vai para a placa e so entao e medido e deslocado para o centro cair em x/y (a
+// largura de "1" e a de "10" sao diferentes, e quem sabe a largura e o Altium). Medicao honesta
+// no fim, como no DoTextEdit. w ausente = h/10 (o contrato).
+// Txt e TObject, e nao IPCB_Text, de proposito (ver APOSTAS): com a interface declarada o
+// DelphiScript confere cada membro NELA na compilacao, e UseTTFonts nunca compilou aqui.
+procedure DoTextAdd(Line: String);
+var
+  Txt: TObject;
+  What, Etapa, Texto, Problemas: String;
+  L: TLayer;
+  H, W, cx, cy, dx, dy: Double;
+  Ok, Ancorou: Boolean;
+begin
+  Texto := JGet(Line, 'text');
+  What := 'text_add "' + Texto + '"';
+  L := CamadaDeDestino(JGet(Line, 'layer'), What, 'texto');
+  if L = 0 then
+    Exit;
+  if Texto = '' then
+  begin
+    LogFail('text_add: campo "text" ausente ou vazio');
+    Exit;
+  end;
+  if not (JHas(Line, 'x') and JHas(Line, 'y') and JHas(Line, 'h')) then
+  begin
+    LogFail(What + ': faltam campos x/y/h');
+    Exit;
+  end;
+  H := JNum(Line, 'h');
+  if H <= 0 then
+  begin
+    LogFail(What + ': altura h deve ser > 0');
+    Exit;
+  end;
+  W := H / 10;
+  if JHas(Line, 'w') then
+    W := JNum(Line, 'w');
+  if W <= 0 then
+  begin
+    LogFail(What + ': espessura w deve ser > 0');
+    Exit;
+  end;
+
+  // 1) O objeto. A fabrica de texto e o Layer de texto sao novos aqui; Text, Size, Width e
+  //    Rotation sao os que o DoTextEdit ja escreve. Cada passo diz o nome se for recusado.
+  Txt := nil;
+  Ok := False;
+  Etapa := 'PCBServer.PCBObjectFactory(eTextObject)';
+  try
+    Txt := PCBServer.PCBObjectFactory(eTextObject, eNoDimension, eCreate_Default);
+    if Txt <> nil then
+    begin
+      Etapa := 'IPCB_Text.Layer';
+      Txt.Layer := L;
+      Etapa := 'IPCB_Text.Text/Size/Width/Rotation';
+      Txt.Text := Texto;
+      Txt.Size := MMsToCoord(H);
+      Txt.Width := MMsToCoord(W);
+      if JHas(Line, 'rot') then
+        Txt.Rotation := JNum(Line, 'rot');
+      Ok := True;
+    end;
+  except
+    Ok := False;
+  end;
+  if not Ok then
+  begin
+    // o texto nao vai para a placa (objeto fora da placa nao tem efeito - ver FonteStroke)
+    LogFail(What + ': o Altium recusou ' + Etapa + ' - nada foi criado');
+    Exit;
+  end;
+
+  // 2) Fonte stroke (o contrato). Sonda (FonteStroke): recusa vira AVISO e o texto nasce com
+  //    a fonte padrao das Preferences - o desenho dele so muda de fonte, nao de lugar.
+  if not FonteStroke(Txt) then
+    LogAviso(What + ': o Altium recusou IPCB_Text.UseTTFonts - o texto ficou com a fonte padrao das Preferences');
+
+  // 3) Espelho. Texto do lado de baixo sem espelho sai de tras para frente na placa: aqui a
+  //    recusa e FALHA, e o texto nao e criado.
+  if JHas(Line, 'mirror') then
+    if not AplicaEspelho(Txt, JBool(Line, 'mirror')) then
+    begin
+      LogFail(What + ': o Altium recusou o espelho (IPCB_Text.MirrorFlag) - nada foi criado');
+      Exit;
+    end;
+
+  // 4) Ancora inicial no alvo. Escrever XLocation em texto que JA esta na placa e ignorado
+  //    neste engine (ver DoTextEdit); num objeto novo e o que o exemplo do proprio Altium faz.
+  //    Se nao pegar, tanto faz: a centralizacao (6) leva o texto ao lugar pela medida.
+  Ancorou := True;
+  try
+    Txt.XLocation := MMX(JNum(Line, 'x'));
+    Txt.YLocation := MMY(JNum(Line, 'y'));
+  except
+    Ancorou := False;
+  end;
+
+  // 5) Para a placa.
+  Ok := False;
+  try
+    Board.AddPCBObject(Txt);
+    PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Txt.I_ObjectAddress);
+    Ok := True;
+  except
+    Ok := False;
+  end;
+  if not Ok then
+  begin
+    LogFail(What + ': o Altium recusou Board.AddPCBObject - confira se o texto ficou na placa');
+    Exit;
+  end;
+
+  // 6) Centraliza. Um ciclo de modificacao antes de medir (o bounding box so e recalculado no
+  //    EndModify - ver DoTextEdit), depois mede e desloca com MoveByXY, como o DoTextEdit.
+  PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Txt.GraphicallyInvalidate;
+  cx := (XMM(Txt.BoundingRectangleForSelection.Left) + XMM(Txt.BoundingRectangleForSelection.Right)) / 2;
+  cy := (YMM(Txt.BoundingRectangleForSelection.Bottom) + YMM(Txt.BoundingRectangleForSelection.Top)) / 2;
+  dx := JNum(Line, 'x') - cx;
+  dy := JNum(Line, 'y') - cy;
+  PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  Txt.MoveByXY(MMsToCoord(dx), MMsToCoord(dy));
+  PCBServer.SendMessageToRobots(Txt.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Txt.GraphicallyInvalidate;
+
+  // 7) Relatorio honesto: a camada relida e o centro medido DEPOIS de tudo.
+  cx := (XMM(Txt.BoundingRectangleForSelection.Left) + XMM(Txt.BoundingRectangleForSelection.Right)) / 2;
+  cy := (YMM(Txt.BoundingRectangleForSelection.Bottom) + YMM(Txt.BoundingRectangleForSelection.Top)) / 2;
+  Problemas := '';
+  if Txt.Layer <> L then
+    MaisProblema(Problemas, 'a camada nao pegou (pedida ' + JGet(Line, 'layer') + ', ficou ' +
+      LayerNameOf(Txt.Layer) + ')');
+  if (Abs(cx - JNum(Line, 'x')) > 0.01) or (Abs(cy - JNum(Line, 'y')) > 0.01) then
+  begin
+    if Ancorou then
+      MaisProblema(Problemas, 'o centro medido (' + FloatToStr(cx) + ',' + FloatToStr(cy) +
+        ') nao chegou no alvo (' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')')
+    else
+      MaisProblema(Problemas, 'o centro medido (' + FloatToStr(cx) + ',' + FloatToStr(cy) +
+        ') nao chegou no alvo (' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ') - e a ancora inicial ' +
+        '(XLocation/YLocation) tinha sido recusada');
+  end;
+  if Problemas <> '' then
+    LogFail(What + ': criado, mas ' + Problemas)
+  else
+    LogOk(What + ' ' + JGet(Line, 'layer') + ' -> centro medido=(' + FloatToStr(cx) + ',' + FloatToStr(cy) + ')');
+end;
+
+// text_del: remove um texto LIVRE - nao designator/comment, e fora de componente.
+procedure DoTextDel(Line: String);
+var
+  Txt: IPCB_Text;
+  What: String;
+  L: TLayer;
+  Ok: Boolean;
+begin
+  What := 'text_del ' + JGet(Line, 'id');
+  if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y') and JHas(Line, 'orig_text') and
+    JHas(Line, 'orig_layer')) then
+  begin
+    LogFail(What + ': faltam campos orig_x/orig_y/orig_text/orig_layer (copie do board.js)');
+    Exit;
+  end;
+  L := LayerFromName(JGet(Line, 'orig_layer'));
+  if L = 0 then
+  begin
+    LogFail(What + ': orig_layer invalida "' + JGet(Line, 'orig_layer') + '"');
+    Exit;
+  end;
+  Txt := FindFreeText(L, JNum(Line, 'orig_x'), JNum(Line, 'orig_y'), JGet(Line, 'orig_text'), True);
+  if Txt = nil then
+  begin
+    // so para a mensagem dizer o motivo certo: existe, mas e de um componente?
+    Txt := FindFreeText(L, JNum(Line, 'orig_x'), JNum(Line, 'orig_y'), JGet(Line, 'orig_text'), False);
+    if Txt <> nil then
+      LogFail(What + ': o texto pertence ao componente ' + DonoDe(Txt) +
+        ' (so texto livre pode ser removido; edite o footprint no Altium)')
+    else
+      LogFail(What + ': texto original nao encontrado na placa (re-exporte o espelho)');
+    Exit;
+  end;
+  Ok := True;
+  try
+    Board.RemovePCBObject(Txt);
+  except
+    Ok := False;
+  end;
+  if Ok then
+    LogOk(What + ' "' + JGet(Line, 'orig_text') + '"')
+  else
+    LogFail(What + ': o Altium recusou a remocao do texto');
 end;
 
 // designator_move: reposiciona o texto do designator de um componente (ref). x/y do
@@ -1730,6 +2772,738 @@ begin
 end;
 
 { ..................................................................................................................... }
+{ .                                     Fill (retangulo cheio) e region (poligono cheio)                              . }
+{ ..................................................................................................................... }
+
+// Os cantos e a rotacao que o fill GUARDOU, conferidos contra o pedido (cantos em qualquer
+// ordem; a rotacao so quando TemRot). Lido = o que foi lido, para o relatorio. False tambem
+// quando a leitura e recusada.
+function FillConfere(Fill: TObject; X1, Y1, X2, Y2, Rot: Double; TemRot: Boolean; var Lido: String): Boolean;
+var
+  ax1, ay1, ax2, ay2, ar: Double;
+begin
+  Result := False;
+  Lido := '(leitura recusada)';
+  if not LeCantosFill(Fill, ax1, ay1, ax2, ay2) then
+    Exit;
+  try
+    ar := Fill.Rotation;
+    Lido := '(' + FloatToStr(ax1) + ',' + FloatToStr(ay1) + ')-(' + FloatToStr(ax2) + ',' +
+      FloatToStr(ay2) + ') rot=' + FloatToStr(ar);
+    Result := MesmoIntervalo(ax1, ax2, X1, X2) and MesmoIntervalo(ay1, ay2, Y1, Y2);
+    if Result and TemRot then
+      Result := NearAngle(ar, Rot);
+  except
+    Result := False;
+  end;
+end;
+
+// O fill dos orig_* (camada + cantos), so se for SOLTO. Fill de componente (o footprint pode
+// ter) e recusado com o nome do dono, como o HubCore faz.
+function RequireFillOrig(Line, What: String): TObject;
+var
+  L: TLayer;
+  X1, Y1, X2, Y2: Double;
+  Dono: TObject;
+begin
+  Result := nil;
+  if not (JHas(Line, 'orig_x1') and JHas(Line, 'orig_y1') and JHas(Line, 'orig_x2') and
+    JHas(Line, 'orig_y2') and JHas(Line, 'orig_layer')) then
+  begin
+    LogFail(What + ': faltam campos orig_x1/orig_y1/orig_x2/orig_y2/orig_layer (copie do board.js)');
+    Exit;
+  end;
+  L := LayerFromName(JGet(Line, 'orig_layer'));
+  if L = 0 then
+  begin
+    LogFail(What + ': orig_layer invalida "' + JGet(Line, 'orig_layer') + '"');
+    Exit;
+  end;
+  X1 := JNum(Line, 'orig_x1');
+  Y1 := JNum(Line, 'orig_y1');
+  X2 := JNum(Line, 'orig_x2');
+  Y2 := JNum(Line, 'orig_y2');
+  SondaFalhou := '';
+  Result := FindFill(L, X1, Y1, X2, Y2, True);
+  if Result <> nil then
+    Exit;
+  if SondaFalhou <> '' then
+  begin
+    LogFail(What + ': o Altium recusou ' + SondaFalhou + ' - nada foi mudado');
+    Exit;
+  end;
+  Dono := FindFill(L, X1, Y1, X2, Y2, False);
+  if Dono <> nil then
+    LogFail(What + ': o fill pertence ao componente ' + DonoDe(Dono) +
+      ' (so fill solto e editavel sozinho; edite o footprint no Altium)')
+  else
+    LogFail(What + ': fill original nao encontrado na placa (re-exporte o espelho)');
+end;
+
+// Net de um fill novo ou editado: so no cobre (fora dele e AVISO e fica sem net), e so se a
+// net existir na placa. Fill.Net e escrita nova aqui: vai em try.
+procedure NetNoFill(Fill: TObject; L: TLayer; NetStr, What: String);
+var
+  Net: IPCB_Net;
+  Ok: Boolean;
+begin
+  if NetStr = '' then
+    Exit;
+  if not EhCobre(L) then
+  begin
+    LogAviso(What + ': net "' + NetStr + '" so vale em camada de cobre - ignorada');
+    Exit;
+  end;
+  Net := FindNet(NetStr);
+  if Net = nil then
+  begin
+    LogAviso(What + ': net "' + NetStr + '" nao existe na placa - o fill ficou sem ela');
+    Exit;
+  end;
+  Ok := True;
+  try
+    Fill.Net := Net;
+  except
+    Ok := False;
+  end;
+  if not Ok then
+    LogAviso(What + ': o Altium recusou a net no fill (IPCB_Fill.Net) - o fill ficou sem ela');
+end;
+
+// fill_add: retangulo cheio. x1..y2 = os cantos SEM rotacao (X1Location..Y2Location do Altium)
+// e rot gira em torno do centro - o formato do board.js. A fabrica e as propriedades do fill sao
+// novas neste arquivo: cada passo em try, e o fill so vai para a placa depois de conferido
+// (cantos e rotacao lidos de volta) - um fill que nao guardou o retangulo seria lixo no PcbDoc.
+// O tipo vai pelo numero (OBJ_FILL), conferido pela sonda ObjetosNumerados, e o objeto criado e
+// conferido de novo pelo ObjectId antes de qualquer escrita.
+procedure DoFillAdd(Line: String);
+var
+  Fill: TObject;
+  What, Etapa, Lido: String;
+  L: TLayer;
+  x1, y1, x2, y2, Rot: Double;
+  Ok: Boolean;
+begin
+  What := 'fill_add ' + JGet(Line, 'layer');
+  if not ObjetosNumerados then
+  begin
+    LogFail(What + ': a numeracao dos tipos de objeto desta versao do Altium nao e a esperada, e o ' +
+      'tipo fill vai pelo numero (ver o [AVISO] no comeco do relatorio) - nada foi criado');
+    Exit;
+  end;
+  L := CamadaDeDestino(JGet(Line, 'layer'), 'fill_add', 'fill');
+  if L = 0 then
+    Exit;
+  if not (JHas(Line, 'x1') and JHas(Line, 'y1') and JHas(Line, 'x2') and JHas(Line, 'y2')) then
+  begin
+    LogFail('fill_add: faltam campos x1/y1/x2/y2');
+    Exit;
+  end;
+  x1 := JNum(Line, 'x1');
+  y1 := JNum(Line, 'y1');
+  x2 := JNum(Line, 'x2');
+  y2 := JNum(Line, 'y2');
+  if NearMM(x1, x2) or NearMM(y1, y2) then
+  begin
+    LogFail('fill_add: fill sem area (x1 = x2 ou y1 = y2)');
+    Exit;
+  end;
+  Rot := 0;
+  if JHas(Line, 'rot') then
+    Rot := JNum(Line, 'rot');
+
+  // Em todo "nada foi criado" abaixo o fill so nao vai para a placa: objeto fora da placa nao
+  // tem efeito no PcbDoc (ver o comentario antes de FonteStroke).
+  Fill := nil;
+  Ok := False;
+  Etapa := 'PCBServer.PCBObjectFactory (tipo fill = ' + IntToStr(OBJ_FILL) + ')';
+  try
+    Fill := PCBServer.PCBObjectFactory(OBJ_FILL, eNoDimension, eCreate_Default);
+    if Fill <> nil then
+    begin
+      Etapa := 'o ObjectId do objeto criado (devia ser ' + IntToStr(OBJ_FILL) + ', o fill)';
+      Ok := Fill.ObjectId = OBJ_FILL;
+    end;
+  except
+    Ok := False;
+  end;
+  if Ok then
+  begin
+    Etapa := 'IPCB_Fill.X1Location..Y2Location';
+    Ok := GravaCantosFill(Fill, x1, y1, x2, y2);
+  end;
+  if Ok then
+  begin
+    try
+      Etapa := 'IPCB_Fill.Rotation';
+      Fill.Rotation := Rot;
+      Etapa := 'IPCB_Fill.Layer';
+      Fill.Layer := L;
+    except
+      Ok := False;
+    end;
+  end;
+  if not Ok then
+  begin
+    LogFail(What + ': o Altium recusou ' + Etapa + ' - nada foi criado');
+    Exit;
+  end;
+  if not FillConfere(Fill, x1, y1, x2, y2, Rot, True, Lido) then
+  begin
+    LogFail(What + ': o fill nao guardou o retangulo pedido (lido ' + Lido + ') - nada foi criado');
+    Exit;
+  end;
+  Ok := False;
+  try
+    Ok := Fill.Layer = L;
+  except
+    Ok := False;
+  end;
+  if not Ok then
+  begin
+    LogFail(What + ': o fill nao ficou na camada pedida - nada foi criado');
+    Exit;
+  end;
+
+  NetNoFill(Fill, L, JGet(Line, 'net'), 'fill_add');
+
+  Ok := False;
+  try
+    Board.AddPCBObject(Fill);
+    PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Fill.I_ObjectAddress);
+    Ok := True;
+  except
+    Ok := False;
+  end;
+  if Ok then
+    LogOk(What + ' (' + JGet(Line, 'x1') + ',' + JGet(Line, 'y1') + ')-(' + JGet(Line, 'x2') + ',' +
+      JGet(Line, 'y2') + ') rot=' + FloatToStr(Rot))
+  else
+    LogFail(What + ': o Altium recusou Board.AddPCBObject - confira se o fill ficou na placa');
+end;
+
+// fill_edit: cantos, rotacao, camada e net de um fill SOLTO. O retangulo final (o pedido por
+// cima do que o fill ja tem) e conferido antes - fill sem area recusa a mudanca inteira - e
+// relido no fim.
+procedure DoFillEdit(Line: String);
+var
+  Fill: TObject;
+  What, Etapa, Lido: String;
+  Destino: TLayer;
+  x1, y1, x2, y2, Rot: Double;
+  Ok: Boolean;
+begin
+  What := 'fill_edit ' + JGet(Line, 'id');
+  // camada nova conferida antes de mexer (ver DoTrackEdit)
+  Destino := 0;
+  if TemValor(Line, 'layer') then
+  begin
+    Destino := CamadaDeDestino(JGet(Line, 'layer'), What, 'fill');
+    if Destino = 0 then
+      Exit;
+  end;
+  Fill := RequireFillOrig(Line, What);
+  if Fill = nil then
+    Exit;
+
+  // o retangulo de agora (a busca acabou de ler os cantos; Rotation e Layer sao leituras novas)
+  Ok := LeCantosFill(Fill, x1, y1, x2, y2);
+  if Ok then
+  begin
+    try
+      Rot := Fill.Rotation;
+      if Destino = 0 then
+        Destino := Fill.Layer;
+    except
+      Ok := False;
+    end;
+  end;
+  if not Ok then
+  begin
+    LogFail(What + ': o Altium recusou a leitura do fill (cantos/Rotation/Layer) - nada foi mudado');
+    Exit;
+  end;
+  if JHas(Line, 'x1') then
+    x1 := JNum(Line, 'x1');
+  if JHas(Line, 'y1') then
+    y1 := JNum(Line, 'y1');
+  if JHas(Line, 'x2') then
+    x2 := JNum(Line, 'x2');
+  if JHas(Line, 'y2') then
+    y2 := JNum(Line, 'y2');
+  if JHas(Line, 'rot') then
+    Rot := JNum(Line, 'rot');
+  if NearMM(x1, x2) or NearMM(y1, y2) then
+  begin
+    LogFail(What + ': fill sem area (x1 = x2 ou y1 = y2) - nada foi mudado');
+    Exit;
+  end;
+
+  Etapa := 'IPCB_Fill.X1Location..Y2Location';
+  PCBServer.SendMessageToRobots(Fill.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  Ok := GravaCantosFill(Fill, x1, y1, x2, y2);
+  if Ok then
+  begin
+    try
+      Etapa := 'IPCB_Fill.Rotation';
+      if JHas(Line, 'rot') then
+        Fill.Rotation := Rot;
+      Etapa := 'IPCB_Fill.Layer';
+      if TemValor(Line, 'layer') then
+        Fill.Layer := Destino;
+    except
+      Ok := False;
+    end;
+  end;
+  // net: so no cobre; a que o fill ja tinha fica com ele ao sair do cobre (ver DoTrackEdit)
+  if Ok and JHas(Line, 'net') then
+    NetNoFill(Fill, Destino, JGet(Line, 'net'), What);
+  PCBServer.SendMessageToRobots(Fill.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Fill.GraphicallyInvalidate;
+
+  if not Ok then
+    LogFail(What + ': o Altium recusou ' + Etapa + ' - o fill pode ter mudado so em parte (confira na placa)')
+  else if not FillConfere(Fill, x1, y1, x2, y2, Rot, JHas(Line, 'rot'), Lido) then
+    LogFail(What + ': o fill nao ficou com o retangulo pedido (lido ' + Lido + ')')
+  else if TemValor(Line, 'layer') and (Fill.Layer <> Destino) then
+    LogFail(What + ': a camada nao pegou (pedida ' + JGet(Line, 'layer') + ', ficou ' +
+      LayerNameOf(Fill.Layer) + ') - o retangulo foi aplicado')
+  else
+    LogOk(What + ' -> ' + Lido);
+end;
+
+procedure DoFillDel(Line: String);
+var
+  Fill: TObject;
+  What: String;
+  Ok: Boolean;
+begin
+  What := 'fill_del ' + JGet(Line, 'id');
+  Fill := RequireFillOrig(Line, What);
+  if Fill = nil then
+    Exit;
+  Ok := True;
+  try
+    Board.RemovePCBObject(Fill);
+  except
+    Ok := False;
+  end;
+  if Ok then
+    LogOk(What)
+  else
+    LogFail(What + ': o Altium recusou a remocao do fill');
+end;
+
+// APOSTA (ver APOSTAS): grava o contorno da region pelo caminho que o script de referencia do
+// AD24 (altium-designer-mcp, GenerateSamples.pas) chama de provado - copiado do FP_AddPoly do
+// UltraLibrarian: o contorno principal REPLICADO, Count, os vertices em X[i]/Y[i] e
+// SetOutlineContour. NAO pelo PCBServer.PCBContourFactory + AddPoint: na documentacao do Altium
+// a fabrica pede um parametro (AArcResolution) que nao tem valor padrao, e AddPoint nao aparece
+// em script nenhum que se tenha visto rodar.
+//
+// A BASE do X[i] e sonda. La ela e 1 (X[1]..X[N]); aqui a leitura provada, GetState_PointX(k),
+// e base 0 (k de 0 a Count-1: foi assim que o board.js do DMB bateu vertice a vertice com o
+// PcbDoc). Gravar X[N] numa base 0 seria escrever fora do contorno, e uma violacao de acesso
+// dentro do Altium o try nao segura. Entao so o 1o vertice vai primeiro, em X[1] (indice valido
+// nas duas bases, com N >= 3), e a leitura provada diz onde ele caiu: no 0, base 1; no 1, base 0.
+// Os vertices sao os N primeiros de Pts. False = recusado; Etapa diz qual chamada e Base sai
+// com a base achada (-1 = nao achou). Variavel TObject de proposito (ver APOSTAS).
+function MontaContorno(Region: TObject; Pts: TStringList; N: Integer; var Etapa: String; var Base: Integer): Boolean;
+var
+  Contorno: TObject;
+  k, Alvo: Integer;
+begin
+  Result := False;
+  Base := -1;
+  try
+    Etapa := 'IPCB_Region.GetMainContour().Replicate';
+    Contorno := Region.GetMainContour();
+    Contorno := Contorno.Replicate;
+    Etapa := 'IPCB_Contour.Count/X[1]';
+    Contorno.Count := N;
+    Alvo := MMX(PtX(Pts[0]));
+    Contorno.X[1] := Alvo;
+    Etapa := 'IPCB_Contour.GetState_PointX (a sonda da base de X[])';
+    if Abs(Contorno.GetState_PointX(0) - Alvo) < 2 then
+      Base := 1
+    else if Abs(Contorno.GetState_PointX(1) - Alvo) < 2 then
+      Base := 0;
+    if Base < 0 then
+      Etapa := 'IPCB_Contour.X[] (o vertice gravado em X[1] nao apareceu em GetState_PointX(0) nem (1))'
+    else
+    begin
+      Etapa := 'IPCB_Contour.X[i]/Y[i] (base ' + IntToStr(Base) + ')';
+      for k := 0 to N - 1 do
+      begin
+        Contorno.X[k + Base] := MMX(PtX(Pts[k]));
+        Contorno.Y[k + Base] := MMY(PtY(Pts[k]));
+      end;
+      Etapa := 'IPCB_Region.SetOutlineContour';
+      Region.SetOutlineContour(Contorno);
+      Result := True;
+    end;
+  except
+    Result := False;
+  end;
+end;
+
+// O contorno que a region GUARDOU e o pedido? Lido como o ExportBoard le (GetState_PointX/Y de
+// 0 a Count-1, a leitura que bateu vertice a vertice com o binario do DMB): pelo menos 3
+// vertices, e todo vertice guardado e um dos pedidos. A ordem e o ponto de partida nao entram (o
+// Altium pode comecar noutro vertice). E a segunda rede da sonda da base em MontaContorno: um
+// X[i]/Y[i] gravado com a base errada deixa um vertice zerado ou fora do lugar, e e isso que
+// esta conferencia pega. Lidos = Count, ou -1 se a releitura foi recusada.
+function ContornoConfere(Region: TObject; Pts: TStringList; N: Integer; var Lidos: Integer): Boolean;
+var
+  C: TObject;
+  k, j: Integer;
+  x, y: Double;
+  Achou, Todos: Boolean;
+begin
+  Result := False;
+  Lidos := -1;
+  try
+    C := Region.GetMainContour();
+    Lidos := C.Count;
+    Todos := Lidos >= 3;
+    k := 0;
+    while Todos and (k < Lidos) do
+    begin
+      x := XMM(C.GetState_PointX(k));
+      y := YMM(C.GetState_PointY(k));
+      Achou := False;
+      j := 0;
+      while (not Achou) and (j < N) do
+      begin
+        if NearMM(x, PtX(Pts[j])) and NearMM(y, PtY(Pts[j])) then
+          Achou := True;
+        j := j + 1;
+      end;
+      Todos := Achou;
+      k := k + 1;
+    end;
+    Result := Todos;
+  except
+    Result := False;
+  end;
+end;
+
+// region_add: region solida (cheia) na camada pedida ou - com cutout:true - um recorte da placa
+// (Board Cutout: e assim que a casa faz furo de fixacao). Poligono fechado implicito: o ultimo
+// vertice liga no primeiro, e um ultimo vertice repetindo o primeiro e ignorado.
+//
+// A ordem e a do script de referencia do AD24 (AddRegionCutout, conferido la): camada e Kind
+// primeiro, contorno depois (MontaContorno). Toda chamada nova vai em try: recusa = FALHA
+// dizendo QUAL chamada, e nada entra na placa. Antes de ir para a placa a region e relida
+// (ContornoConfere e, no recorte, o Kind): region que nao guardou o pedido seria lixo no PcbDoc.
+//
+// Recorte: o Kind sai de KindDoRecorte (o porque esta la) e e escrito como inteiro na propriedade
+// Kind - a atribuicao direta, que e a que o AD24 aceita -, relido antes do contorno, depois dele
+// e depois de ir para a placa. Se nao pegar, a FALHA e "recorte nao suportado nesta versao". A
+// camada e a Multi, a dos recortes que a casa desenha (V7_LAYER=MULTILAYER nos PcbDoc).
+procedure DoRegionAdd(Line: String);
+var
+  Pts: TStringList;
+  Region: TObject;
+  Net: IPCB_Net;
+  What, NetStr, Etapa, Origem, Vertices: String;
+  L: TLayer;
+  N, KindLido, Medidos, BaseX: Integer;
+  Corte, Ok, Conferido, CamadaOk: Boolean;
+begin
+  Corte := JBool(Line, 'cutout');
+  if Corte then
+    What := 'region_add (recorte)'
+  else
+    What := 'region_add ' + JGet(Line, 'layer');
+
+  // N = quantos vertices de Pts valem: um ultimo igual ao primeiro e o fechamento escrito a mao
+  Pts := ParsePts(Line);
+  N := Pts.Count;
+  if N > 1 then
+    if NearMM(PtX(Pts[N - 1]), PtX(Pts[0])) and NearMM(PtY(Pts[N - 1]), PtY(Pts[0])) then
+      N := N - 1;
+  if N < 3 then
+  begin
+    LogFail(What + ': pts precisa de pelo menos 3 vertices [[x,y],...]');
+    Pts.Free;
+    Exit;
+  end;
+
+  if Corte then
+  begin
+    L := eMultiLayer;
+    if JGet(Line, 'net') <> '' then
+      LogAviso(What + ': recorte nao tem net - "' + JGet(Line, 'net') + '" ignorada');
+    if KindRecorteN = -2 then
+    begin
+      // por variaveis locais: parametro var so foi provado aqui com local (Iter2PolyRegions)
+      Origem := '';
+      Conferido := False;
+      KindRecorteN := KindDoRecorte(Origem, Conferido);
+      KindRecorteOrigem := Origem;
+      KindRecorteConferido := Conferido;
+    end;
+    if KindRecorteN < 0 then
+    begin
+      LogFail(What + ': recorte nao suportado nesta versao: desenhe o Board Cutout no Altium (' +
+        KindRecorteOrigem + ') - nada foi criado');
+      Pts.Free;
+      Exit;
+    end;
+  end
+  else
+  begin
+    L := CamadaDeDestino(JGet(Line, 'layer'), What, 'region');
+    if L = 0 then
+    begin
+      Pts.Free;
+      Exit;
+    end;
+  end;
+
+  // Em todo "nada foi criado" abaixo a region so nao vai para a placa: objeto fora da placa nao
+  // tem efeito no PcbDoc (ver o comentario antes de FonteStroke).
+
+  // 1) a region
+  Region := nil;
+  Ok := False;
+  Etapa := 'PCBServer.PCBObjectFactory(eRegionObject)';
+  try
+    Region := PCBServer.PCBObjectFactory(eRegionObject, eNoDimension, eCreate_Default);
+    Ok := Region <> nil;
+  except
+    Ok := False;
+  end;
+  if not Ok then
+  begin
+    LogFail(What + ': o Altium recusou ' + Etapa + ' - nada foi criado');
+    Pts.Free;
+    Exit;
+  end;
+
+  // 2) a camada (escrita nova em region, conferida relendo). Region solida: recusa e FALHA.
+  //    Recorte: a Multi; recusa aqui so AVISA (quem faz o recorte e o Kind), e ela e tentada de
+  //    novo depois do Kind, caso o Altium so aceite a Multi numa region que ja e recorte.
+  CamadaOk := True;
+  try
+    Region.Layer := L;
+    CamadaOk := Region.Layer = L;
+  except
+    CamadaOk := False;
+  end;
+  if (not CamadaOk) and (not Corte) then
+  begin
+    LogFail(What + ': o Altium recusou a camada ' + JGet(Line, 'layer') + ' na region (ou ela nao pegou) - ' +
+      'nada foi criado');
+    Pts.Free;
+    Exit;
+  end;
+
+  // 3) recorte: o Kind, escrito e relido; depois a Multi, se ainda nao pegou
+  if Corte then
+  begin
+    Ok := True;
+    try
+      Region.Kind := KindRecorteN;
+    except
+      Ok := False;
+    end;
+    KindLido := LeKind(Region);
+    if KindLido <> KindRecorteN then
+    begin
+      if Ok then
+        Etapa := 'nao pegou'
+      else
+        Etapa := 'foi recusado na escrita (Region.Kind)';
+      LogFail(What + ': recorte nao suportado nesta versao: desenhe o Board Cutout no Altium (o Kind ' +
+        IntToStr(KindRecorteN) + ' ' + Etapa + ': a region ficou com Kind ' + IntToStr(KindLido) +
+        ') - nada foi criado');
+      Pts.Free;
+      Exit;
+    end;
+    if not CamadaOk then
+    begin
+      try
+        Region.Layer := eMultiLayer;
+        CamadaOk := Region.Layer = eMultiLayer;
+      except
+        CamadaOk := False;
+      end;
+      if not CamadaOk then
+        LogAviso(What + ': o Altium recusou por o recorte na Multi - ele ficou na camada que a fabrica deu');
+    end;
+  end;
+
+  // 4) o contorno, gravado e relido
+  if not MontaContorno(Region, Pts, N, Etapa, BaseX) then
+  begin
+    LogFail(What + ': o Altium recusou ' + Etapa + ' - nada foi criado');
+    Pts.Free;
+    Exit;
+  end;
+  if not ContornoConfere(Region, Pts, N, Medidos) then
+  begin
+    if Medidos < 0 then
+      LogFail(What + ': o Altium recusou a releitura do contorno (GetMainContour) - nada foi criado')
+    else
+      LogFail(What + ': o contorno que a region guardou (' + IntToStr(Medidos) + ' vertice(s)) nao e o ' +
+        'pedido (' + IntToStr(N) + ' vertices) - nada foi criado');
+    Pts.Free;
+    Exit;
+  end;
+
+  // 5) recorte: o Kind de novo (gravar o contorno nao pode te-lo desfeito). Region solida: a net,
+  //    so no cobre.
+  if Corte then
+  begin
+    KindLido := LeKind(Region);
+    if KindLido <> KindRecorteN then
+    begin
+      LogFail(What + ': recorte nao suportado nesta versao: desenhe o Board Cutout no Altium (o Kind ' +
+        IntToStr(KindRecorteN) + ' se perdeu ao gravar o contorno: a region ficou com Kind ' +
+        IntToStr(KindLido) + ') - nada foi criado');
+      Pts.Free;
+      Exit;
+    end;
+  end
+  else
+  begin
+    NetStr := JGet(Line, 'net');
+    if NetStr <> '' then
+    begin
+      if not EhCobre(L) then
+        LogAviso(What + ': net "' + NetStr + '" so vale em camada de cobre - ignorada')
+      else
+      begin
+        Net := FindNet(NetStr);
+        if Net = nil then
+          LogAviso(What + ': net "' + NetStr + '" nao existe na placa - region criada sem net')
+        else
+        begin
+          Ok := True;
+          try
+            Region.Net := Net;
+          except
+            Ok := False;
+          end;
+          if not Ok then
+            LogAviso(What + ': o Altium recusou a net na region (IPCB_Region.Net) - region criada sem net');
+        end;
+      end;
+    end;
+  end;
+
+  // 6) para a placa
+  Ok := False;
+  try
+    Board.AddPCBObject(Region);
+    PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Region.I_ObjectAddress);
+    Ok := True;
+  except
+    Ok := False;
+  end;
+  // a base de X[] que a sonda achou vai junto: e a medida que falta para o proximo script
+  Vertices := IntToStr(Medidos) + ' vertices';
+  if Medidos <> N then
+    Vertices := Vertices + ' (pedidos ' + IntToStr(N) + ')';
+  Vertices := Vertices + ' [sonda: X[] base ' + IntToStr(BaseX) + ']';
+  if not Ok then
+    LogFail(What + ': o Altium recusou Board.AddPCBObject - confira se a region ficou na placa')
+  else if Corte then
+  begin
+    // 7) o recorte ja na placa: o Kind ficou? Se nao ficou, a region ESTA na placa - por isso a
+    //    mensagem diz como tira-la.
+    KindLido := LeKind(Region);
+    if KindLido <> KindRecorteN then
+      LogFail(What + ': foi para a placa, mas ficou com Kind ' + IntToStr(KindLido) + ' em vez de ' +
+        IntToStr(KindRecorteN) + ' - NAO e recorte: apague essa region no Altium (ou desfaca a aplicacao ' +
+        'inteira com um Ctrl+Z) e desenhe o Board Cutout la')
+    else
+    begin
+      LogOk(What + ': ' + Vertices + ', ' + KindRecorteOrigem);
+      if not KindRecorteConferido then
+        LogAviso(What + ': o Kind ' + IntToStr(KindRecorteN) + ' NAO foi conferido nesta placa - confira no ' +
+          'Altium se virou Board Cutout (o furo aparece no 3D e some do cobre). Se nao virou, desfaca a ' +
+          'aplicacao (um Ctrl+Z desfaz tudo) e desenhe o recorte no Altium; o Kind certo sai no proximo ' +
+          'ExportPcb, no "kindn" dos cutouts');
+    end;
+  end
+  else
+    LogOk(What + ': ' + Vertices);
+  // Menos vertices do que o pedido, todos eles dos pedidos: o Altium pode ter tirado vertice
+  // alinhado (a forma e a mesma) - ou nao. A forma so se confere olhando.
+  if Ok and (Medidos < N) then
+    LogAviso(What + ': a region guardou ' + IntToStr(Medidos) + ' dos ' + IntToStr(N) + ' vertices pedidos ' +
+      '(todos os guardados sao dos pedidos) - confira a forma no Altium');
+  Pts.Free;
+end;
+
+// region_del: remove uma region LIVRE, achada pela camada + numero de vertices + 1o vertice do
+// contorno (orig_n, orig_x0, orig_y0). Pedaco de polygon despejado, region de componente ou
+// region que nao e solida (recorte, cavidade) sao recusados dizendo qual dos tres.
+procedure DoRegionDel(Line: String);
+var
+  Region: TObject;
+  What: String;
+  L: TLayer;
+  N: Integer;
+  X0, Y0: Double;
+  Ok: Boolean;
+begin
+  What := 'region_del ' + JGet(Line, 'id');
+  if not (JHas(Line, 'orig_layer') and JHas(Line, 'orig_n') and JHas(Line, 'orig_x0') and
+    JHas(Line, 'orig_y0')) then
+  begin
+    LogFail(What + ': faltam orig_layer/orig_n/orig_x0/orig_y0 (copie do board.js)');
+    Exit;
+  end;
+  L := LayerFromName(JGet(Line, 'orig_layer'));
+  if L = 0 then
+  begin
+    LogFail(What + ': orig_layer invalida "' + JGet(Line, 'orig_layer') + '"');
+    Exit;
+  end;
+  N := Round(JNum(Line, 'orig_n'));
+  if N < 3 then
+  begin
+    LogFail(What + ': orig_n invalido "' + JGet(Line, 'orig_n') + '" (o numero de vertices de "points" no board.js)');
+    Exit;
+  end;
+  X0 := JNum(Line, 'orig_x0');
+  Y0 := JNum(Line, 'orig_y0');
+
+  SondaFalhou := '';
+  Region := FindRegion(L, N, X0, Y0, True);
+  if Region = nil then
+  begin
+    if SondaFalhou <> '' then
+    begin
+      LogFail(What + ': o Altium recusou ' + SondaFalhou + ' - nada foi removido');
+      Exit;
+    end;
+    // so para a mensagem dizer o motivo certo
+    Region := FindRegion(L, N, X0, Y0, False);
+    if Region <> nil then
+      LogFail(What + ': ' + MotivoRegionPresa(Region))
+    else
+      LogFail(What + ': region original nao encontrada na placa (re-exporte o espelho; pedaco de ' +
+        'polygon despejado se apaga mexendo no polygon, no Altium)');
+    Exit;
+  end;
+  Ok := True;
+  try
+    Board.RemovePCBObject(Region);
+  except
+    Ok := False;
+  end;
+  if Ok then
+    LogOk(What)
+  else
+    LogFail(What + ': o Altium recusou a remocao da region');
+end;
+
+{ ..................................................................................................................... }
 { .                                                Rotina principal                                                   . }
 { ..................................................................................................................... }
 
@@ -1759,14 +3533,47 @@ begin
     Exit;
   end;
 
+  // Sonda da numeracao das camadas (ver "Camadas"): as 7 constantes que este arquivo sempre
+  // usou dizem se a conta das camadas novas vale nesta versao do Altium.
+  CamadasNumeradas := (eTopLayer = 1) and (eBottomLayer = 32) and (eTopOverlay = 33) and
+    (eBottomOverlay = 34) and (eKeepOutLayer = 56) and (eMechanical1 = CAM_MECH1) and (eMultiLayer = 74);
+  // Sonda da numeracao dos tipos de objeto (OBJ_FILL, ver APOSTAS): os tipos que ja rodaram neste
+  // repositorio tem de estar na posicao da lista do PCB API. Com o texto no 5 e a net no 8, o 6
+  // e o fill (o 7 e a conexao do ratsnest); o ObjectId do fill criado e conferido de novo.
+  ObjetosNumerados := (eArcObject = 1) and (ePadObject = 2) and (eViaObject = 3) and (eTrackObject = 4) and
+    (eTextObject = 5) and (eNetObject = 8) and (eComponentObject = 9);
+  SondaFalhou := '';
+  KindRecorteN := -2;
+  KindRecorteOrigem := '';
+  KindRecorteConferido := False;
+  OkCount := 0;
+  FailCount := 0;
+  AvisoCount := 0;
+  Recognized := 0;
+
   Report := TStringList.Create;
   Report.Add('EletricHUB - relatorio de aplicacao');
   Report.Add('Placa: ' + Board.FileName);
   Report.Add('Data:  ' + DateTimeToStr(Now));
   Report.Add('');
-  OkCount := 0;
-  FailCount := 0;
-  Recognized := 0;
+  if not CamadasNumeradas then
+  begin
+    LogAviso('A numeracao das camadas desta versao do Altium nao e a esperada (Top=' +
+      IntToStr(eTopLayer) + ' Bottom=' + IntToStr(eBottomLayer) + ' KeepOut=' + IntToStr(eKeepOutLayer) +
+      ' Mech1=' + IntToStr(eMechanical1) + ' Multi=' + IntToStr(eMultiLayer) + ').');
+    Report.Add('        Nesta rodada valem so Top, Bottom, TopOverlay, BottomOverlay, Multi, Mech1 e KeepOut;');
+    Report.Add('        as outras (Mid, Plane, Mech2..16, Paste, Solder, DrillGuide, DrillDrawing) sao recusadas.');
+    Report.Add('');
+  end;
+  if not ObjetosNumerados then
+  begin
+    LogAviso('A numeracao dos tipos de objeto desta versao do Altium nao e a esperada (arco=' +
+      IntToStr(eArcObject) + ' trilha=' + IntToStr(eTrackObject) + ' texto=' + IntToStr(eTextObject) +
+      ' net=' + IntToStr(eNetObject) + ' componente=' + IntToStr(eComponentObject) + ').');
+    Report.Add('        Nesta rodada fill_add, fill_edit e fill_del sao recusados: o tipo fill vai pelo numero');
+    Report.Add('        (OBJ_FILL = ' + IntToStr(OBJ_FILL) + '), e a conta so vale com essa numeracao.');
+    Report.Add('');
+  end;
 
   Src := TStringList.Create;
   AttrLines := TStringList.Create;
@@ -1785,41 +3592,71 @@ begin
     Recognized := Recognized + 1;
     Op := JGet(Line, 'op');
 
-    if Op = 'comp_move' then
-      DoCompMove(Line)
-    else if Op = 'track_edit' then
-      DoTrackEdit(Line)
-    else if Op = 'track_add' then
-      DoTrackAdd(Line)
-    else if Op = 'track_del' then
-      DoTrackDel(Line)
-    else if Op = 'via_edit' then
-      DoViaEdit(Line)
-    else if Op = 'via_add' then
-      DoViaAdd(Line)
-    else if Op = 'via_del' then
-      DoViaDel(Line)
-    else if Op = 'arc_edit' then
-      DoArcEdit(Line)
-    else if Op = 'arc_add' then
-      DoArcAdd(Line)
-    else if Op = 'arc_del' then
-      DoArcDel(Line)
-    else if Op = 'text_edit' then
-      DoTextEdit(Line)
-    else if Op = 'designator_move' then
-      DoDesignatorMove(Line)
-    else if Op = 'outline_set' then
-      DoOutlineSet(Line)
-    else if Op = 'comp_attr' then
-      AttrLines.Add(Line)   // renames por ultimo: FindComponent casa por Name.Text
-    else
-      LogFail('operacao desconhecida: "' + Op + '"');
+    // REDE DE SEGURANCA: um erro do Altium no meio de UMA operacao vira FALHA dela, e as outras
+    // seguem. Sem isto o erro derrubava o script entre o PreProcess e o PostProcess - placa
+    // aplicada pela metade, sem relatorio, e o undo da aplicacao inteira quebrado. Cada chamada
+    // nova ja tem o seu try (com a mensagem certa); este pega o que ninguem previu.
+    try
+      if Op = 'comp_move' then
+        DoCompMove(Line)
+      else if Op = 'track_edit' then
+        DoTrackEdit(Line)
+      else if Op = 'track_add' then
+        DoTrackAdd(Line)
+      else if Op = 'track_del' then
+        DoTrackDel(Line)
+      else if Op = 'via_edit' then
+        DoViaEdit(Line)
+      else if Op = 'via_add' then
+        DoViaAdd(Line)
+      else if Op = 'via_del' then
+        DoViaDel(Line)
+      else if Op = 'arc_edit' then
+        DoArcEdit(Line)
+      else if Op = 'arc_add' then
+        DoArcAdd(Line)
+      else if Op = 'arc_del' then
+        DoArcDel(Line)
+      else if Op = 'text_edit' then
+        DoTextEdit(Line)
+      else if Op = 'text_add' then
+        DoTextAdd(Line)
+      else if Op = 'text_del' then
+        DoTextDel(Line)
+      else if Op = 'designator_move' then
+        DoDesignatorMove(Line)
+      else if Op = 'outline_set' then
+        DoOutlineSet(Line)
+      else if Op = 'fill_add' then
+        DoFillAdd(Line)
+      else if Op = 'fill_edit' then
+        DoFillEdit(Line)
+      else if Op = 'fill_del' then
+        DoFillDel(Line)
+      else if Op = 'region_add' then
+        DoRegionAdd(Line)
+      else if Op = 'region_del' then
+        DoRegionDel(Line)
+      else if Op = 'comp_attr' then
+        AttrLines.Add(Line)   // renames por ultimo: FindComponent casa por Name.Text
+      else
+        LogFail('operacao desconhecida: "' + Op + '"');
+    except
+      LogFail(Op + ' (linha ' + IntToStr(i + 1) + ' do changes.js): o Altium deu erro no meio da operacao - ' +
+        'ela pode ter ficado pela metade; confira esse objeto na placa. As outras mudancas seguiram.');
+    end;
   end;
 
   // comp_attr aplicado por ultimo (renomear designator cedo quebraria refs das ops seguintes)
   for i := 0 to AttrLines.Count - 1 do
-    DoCompAttr(AttrLines[i]);
+  begin
+    try
+      DoCompAttr(AttrLines[i]);
+    except
+      LogFail('comp_attr ' + JGet(AttrLines[i], 'ref') + ': o Altium deu erro no meio da operacao - ' +
+        'confira o componente na placa. As outras mudancas seguiram.');
+    end;
+  end;
 
   PCBServer.PostProcess;
 
@@ -1829,19 +3666,25 @@ begin
   Report.Add('Mudancas reconhecidas: ' + IntToStr(Recognized));
   Report.Add('Aplicadas com sucesso: ' + IntToStr(OkCount));
   Report.Add('Falhas:                ' + IntToStr(FailCount));
+  Report.Add('Avisos:                ' + IntToStr(AvisoCount));
   // As mudancas ja estao na placa; so o relatorio depende da raiz do workspace.
   Gravou := SalvaOuExplica(Report, OutDir + '\apply-report.txt');
   if Gravou then
     RelTxt := 'Relatorio: ' + OutDir + '\apply-report.txt'
   else
     RelTxt := 'O relatorio NAO pode ser gravado (o aviso anterior diz por que).';
+  // Os [AVISO] sao o resultado das sondas desta rodada (camadas, tipo fill, Kind do recorte,
+  // fonte do texto...): o dialogo diz quantos sao, para o relatorio ser aberto.
+  if Gravou and (AvisoCount > 0) then
+    RelTxt := IntToStr(AvisoCount) + ' aviso(s) [AVISO] no relatorio - leia antes de seguir.' + #13#10 + RelTxt;
 
   if Gravou then
     RegenerateProjectsIndex(ExtractFileName(OutDir));
 
   ShowMessage('Aplicacao concluida.' + #13#10#13#10 +
     'Reconhecidas: ' + IntToStr(Recognized) + #13#10 +
-    'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + #13#10#13#10 +
+    'OK: ' + IntToStr(OkCount) + '   Falhas: ' + IntToStr(FailCount) + '   Avisos: ' + IntToStr(AvisoCount) +
+    #13#10#13#10 +
     RelTxt + #13#10#13#10 +
     'IMPORTANTE: confira o resultado, rode o DRC do Altium e re-execute o ExportPcb para atualizar o espelho.');
 

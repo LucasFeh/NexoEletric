@@ -3,316 +3,237 @@
 <head>
 <meta charset="utf-8">
 <title>PCB — EletricHUB</title>
-<!-- a mesma Inter do hub, para a fonte escolhida nas Configuracoes valer aqui tambem; se a rede
-     nao responder, cai no system-ui sem quebrar nada -->
+<!-- a mesma Inter do hub e da vista Esquema; sem rede, cai no system-ui sem quebrar nada -->
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
-<!-- o tema do hub: os tokens (hub-tema.css) e quem escolhe o tema antes da primeira pintura e
-     o troca ao vivo quando ele muda nas Configuracoes do hub (hub-tema.js, sincrono) -->
+<!-- o tema do hub: os tokens (hub-tema.css) e quem escolhe o tema antes da primeira pintura e o
+     troca ao vivo quando ele muda nas Configuracoes do hub (hub-tema.js, sincrono) -->
 <link rel="stylesheet" href="hub-tema.css">
 <script src="hub-tema.js"></script>
 <style>
-  /* PONTE PARA O TEMA DO HUB. Esta vista tinha um escuro proprio e ficava avulsa quando o tema
-     do hub mudava; agora os nomes dela apontam para os tokens do hub-tema.css. --bg, --scroll,
-     --ok, --warn, --err, --font e o color-scheme sao os do proprio hub. Cor fixa (hex) nesta
-     folha so a da legenda da bandeira azul (.annitem.info, a mesma ANN_COLORS.info que o canvas
-     pinta); as cores de camada e o fundo preto da placa moram no pcbframe.js e ficam fora do
-     tema, como no Altium. */
+  /* UMA VISTA SO para a web e o desktop (EletricHUB), como a vista Esquema desde 2026-09-25: a
+     casca e a do hub, no tema dele. PONTE PARA O TEMA: os nomes desta vista apontam para os
+     tokens do hub-tema.css. Cor fixa (hex) aqui so a do DESENHO, que nao segue tema: o canvas
+     fica preto com as cores de camada do Altium em qualquer tema (pcbframe.js). */
   :root{
     --panel:var(--surface-2); --panel2:var(--surface); --border:var(--edge);
-    --fg:var(--text); --fg-dim:var(--text-2); --accent:var(--hi);
-    --chg:var(--warn);     /* o que o changes.js mexeu: o amarelo de aviso do tema */
+    --fg:var(--text); --fg-dim:var(--text-2); --fg2:var(--text-2); --accent:var(--hi);
   }
   *{box-sizing:border-box; margin:0; padding:0;}
+  [hidden]{display:none !important;}
   html,body{height:100%; overflow:hidden;}
-  /* barra de rolagem no tema da pagina — a mesma receita do hub e da vista Esquema: polegar
-     arredondado com uma borda da cor do painel, trilho invisivel. O Chrome ignora os
-     ::-webkit-scrollbar quando scrollbar-color esta definido, por isso a forma padrao
-     (Firefox) fica atras do @supports. */
   ::-webkit-scrollbar{width:10px; height:10px;}
   ::-webkit-scrollbar-thumb{background:var(--scroll); border-radius:8px; border:3px solid var(--panel);}
   ::-webkit-scrollbar-thumb:hover{background:var(--fg-dim);}
   ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner{background:transparent;}
-  @supports not selector(::-webkit-scrollbar){
-    *{scrollbar-width:thin; scrollbar-color:var(--scroll) transparent;}
-  }
-  /* foco no destaque do tema, como no hub (o anel azul do navegador ficava avulso) */
-  /* checkbox e radio nativos nao mostram border-color: eles levam o anel, como os botoes */
-  button:focus-visible, input[type=checkbox]:focus-visible, input[type=radio]:focus-visible{
-    outline:2px solid var(--accent); outline-offset:1px;}
-  input:not([type=checkbox]):not([type=radio]):focus-visible, select:focus-visible, textarea:focus-visible{
-    outline:none; border-color:var(--accent);}
-  body{background:var(--bg); color:var(--fg); font:13px/1.45 var(--font);}
-  /* o navegador da aos controles a fonte do sistema; aqui eles seguem a fonte do tema */
-  button,input,select,textarea{font-family:inherit;}
+  @supports not selector(::-webkit-scrollbar){ *{scrollbar-width:thin; scrollbar-color:var(--scroll) transparent;} }
+  body{background:var(--bg); color:var(--fg); font:13px/1.45 var(--font); display:flex; flex-direction:column;}
+  button, input, select, textarea{font-family:inherit;}
+  button:focus-visible, input[type=checkbox]:focus-visible{outline:2px solid var(--accent); outline-offset:1px;}
 
-  #header{display:flex; align-items:center; gap:10px; height:42px; padding:0 12px;
-    background:var(--panel); border-bottom:1px solid var(--border);}
-  #header h1{font-size:14px; font-weight:600; color:var(--accent); white-space:nowrap;}
-  #header .meta{color:var(--fg-dim); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  #header .spacer{flex:1;}
-  button{background:var(--panel2); color:var(--fg); border:1px solid var(--border);
-    border-radius:3px; padding:4px 10px; font-size:12px; cursor:pointer; white-space:nowrap;}
-  button:hover{border-color:var(--accent); color:var(--fg);}
-  /* ligado (ferramenta, Grade, Diff) e "tem o que salvar": o destaque do tema preenchido */
-  button.active{background:var(--hi); border-color:var(--hi); color:var(--on-hi);}
-  select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px;}
+  #main{flex:1; display:flex; min-height:0; position:relative;}
+  #centro{flex:1; display:flex; flex-direction:column; min-width:0;}
+  #cvwrap{flex:1; position:relative; min-height:0; background:#000;}
+  canvas#cv{position:absolute; inset:0; width:100%; height:100%; display:block; outline:none; cursor:default;}
+  /* a divisoria do painel: a mesma peca do Esquema (arrastar redimensiona, duplo clique fecha/abre) */
+  .split{flex:0 0 6px; cursor:col-resize; position:relative; touch-action:none; background:var(--panel); border-left:1px solid var(--border);}
+  .split::after{content:''; position:absolute; top:0; bottom:0; left:50%; width:2px; transform:translateX(-50%);
+    background:transparent; transition:background .12s;}
+  .split:hover::after, .split.on::after{background:var(--accent);}
+  #props{width:var(--props-w, 340px); flex:none; min-width:0; min-height:0; overflow:hidden;}
 
-  #main{display:flex; height:calc(100% - 76px);}
+  /* ── a Active Bar: flutua no topo-centro do canvas, como no Altium 21 ── */
+  /* centrada por left/right 0 + margin auto (com left:50% e translate a caixa so podia usar a
+     metade da largura e a barra quebrava em duas linhas) */
+  #pcbtb{position:absolute; top:8px; left:0; right:0; margin:0 auto; width:fit-content; z-index:12; display:flex; flex-wrap:wrap;
+    justify-content:center; align-items:center; gap:2px; padding:3px 4px; max-width:calc(100% - 16px);
+    background:var(--panel); border:1px solid var(--border); border-radius:6px; box-shadow:var(--shadow-menu);}
+  #pcbtb .sep{width:1px; height:20px; background:var(--border); margin:0 3px;}
+  #pcbtb button{display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 6px; border:1px solid transparent;
+    background:transparent; color:var(--fg-dim); border-radius:4px; cursor:pointer;}
+  #pcbtb button:hover:not(:disabled){color:var(--fg); background:rgba(var(--tint),0.08); border-color:var(--border);}
+  #pcbtb button[aria-pressed="true"]{background:var(--hi); border-color:var(--hi); color:var(--on-hi);}
+  #pcbtb button:disabled{opacity:.35; cursor:not-allowed;}
+  #pcbtb svg{width:18px; height:18px; flex:none;}
+  #pcbtb .lb{font-size:11px; letter-spacing:.02em;}
 
-  /* lean: embutido em outra vista (aba Neoden do hub) — so barra de ferramentas + canvas,
-     e sem o botao Editar: la a vista e de consulta e a edicao nunca destrava. */
-  body.lean #header, body.lean #left, body.lean #right, body.lean #btnEdit{display:none;}
-  body.lean #main{height:calc(100% - 34px);}
+  /* ── as abas de camada, embaixo do canvas: LS + uma aba por camada, com a amostra de cor ── */
+  #abas{flex:none; display:flex; align-items:stretch; height:28px; background:var(--panel); border-top:1px solid var(--border); min-width:0;}
+  #lsBtn{flex:none; padding:0 11px; font-size:11px; font-weight:600; letter-spacing:.05em; background:transparent; border:0;
+    border-right:1px solid var(--border); color:var(--fg-dim); cursor:pointer;}
+  #lsBtn:hover{color:var(--fg); background:rgba(var(--tint),0.06);}
+  #lsBtn.unica{color:var(--hi); box-shadow:inset 0 -2px 0 var(--hi);}
+  #abaslista{flex:1; display:flex; overflow-x:auto; overflow-y:hidden; scrollbar-width:none; min-width:0;}
+  #abaslista::-webkit-scrollbar{display:none;}
+  .aba{flex:none; display:inline-flex; align-items:center; gap:6px; padding:0 10px; font-size:11.5px; background:transparent;
+    border:0; border-right:1px solid var(--border); color:var(--fg-dim); cursor:pointer; white-space:nowrap;}
+  .aba .sw{width:11px; height:11px; border-radius:2px; box-shadow:0 0 0 1px var(--line); flex:none;}
+  .aba:hover{color:var(--fg); background:rgba(var(--tint),0.06);}
+  .aba.on{color:var(--fg); font-weight:600; background:rgba(var(--tint),0.09); box-shadow:inset 0 -2px 0 var(--cor, var(--hi));}
+  .aba.vazia{opacity:.55;}
+  .aba.oculta span{text-decoration:line-through;}
+  .aba.oculta .sw{opacity:.3;}
 
-  button:disabled{opacity:.4; cursor:not-allowed;}
-  button:disabled:hover{border-color:var(--border); color:var(--fg);}
+  /* ── barra de status ── */
+  #status{height:24px; flex:none; display:flex; gap:14px; align-items:center; padding:0 10px; background:var(--panel);
+    border-top:1px solid var(--border); font:12px var(--mono); color:var(--fg-dim); white-space:nowrap; overflow:hidden;}
+  #sxy{color:var(--fg); min-width:210px;}
+  #scam{display:inline-flex; align-items:center; gap:5px;}
+  #scam b{color:var(--fg); font-weight:normal;}
+  #scamsw{display:inline-block; width:10px; height:10px; border-radius:2px; box-shadow:0 0 0 1px var(--line);}
+  #srota{color:var(--fg);}
+  #ssel{overflow:hidden; text-overflow:ellipsis;}
+  #smsg{margin-left:auto; color:var(--warn); overflow:hidden; text-overflow:ellipsis;}
 
-  #toolbar{display:flex; align-items:center; gap:8px; height:34px; padding:0 12px;
-    background:var(--panel); border-bottom:1px solid var(--border); font-size:12px;}
-  #toolbar .sep{width:1px; height:18px; background:var(--border);}
-  #toolbar label{color:var(--fg-dim); display:flex; align-items:center; gap:4px;}
-  #toolbar input[type=number]{width:60px; background:var(--panel2); color:var(--fg);
-    border:1px solid var(--border); border-radius:3px; padding:2px 4px;}
-  #toolbar select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px;}
+  /* ── o que flutua sobre o canvas ── */
+  #txtbox{position:absolute; z-index:14; transform:translate(-8px, -50%); display:flex; flex-direction:column; gap:3px;}
+  #txtbox input{width:220px; padding:4px 7px; font:13px var(--font); color:var(--fg); background:var(--panel2);
+    border:1px solid var(--accent); border-radius:4px; box-shadow:var(--shadow-menu); outline:none;}
+  #txtdica{font-size:10.5px; color:var(--fg-dim); background:var(--panel); padding:1px 6px; border-radius:3px; align-self:flex-start;}
+  #annform{position:absolute; top:52px; right:12px; z-index:15; width:270px; background:var(--panel2); border:1px solid var(--border);
+    border-radius:6px; padding:8px; box-shadow:var(--shadow-menu);}
+  #annform textarea{width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:4px;
+    font:12px var(--font); padding:5px; resize:vertical;}
+  #annform textarea:focus{outline:none; border-color:var(--accent);}
+  #annform .l{display:flex; gap:6px; margin-top:6px; align-items:center;}
+  #annform select{background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px; font-size:12px;}
+  #annform button{background:transparent; color:var(--fg); border:1px solid var(--border); border-radius:4px; padding:3px 10px; font-size:12px; cursor:pointer;}
+  #annform button:hover{border-color:var(--accent);}
+  #annform button.ok{color:var(--hi); border-color:var(--hi);}
+  #annform .t{font-size:11px; color:var(--fg-dim); margin-bottom:5px;}
+  #menu{position:fixed; z-index:60; min-width:200px; max-height:72vh; overflow:auto; padding:4px; background:var(--panel);
+    border:1px solid var(--border); border-radius:6px; box-shadow:var(--shadow-menu);}
+  #menu button{display:flex; align-items:center; gap:8px; width:100%; text-align:left; padding:5px 8px; font-size:12px;
+    background:transparent; border:0; border-radius:4px; color:var(--fg); cursor:pointer;}
+  #menu button:hover:not(:disabled){background:rgba(var(--tint),0.09);}
+  #menu button:disabled{opacity:.4; cursor:not-allowed;}
+  #menu kbd{margin-left:auto; font:10.5px var(--mono); color:var(--fg-dim);}
+  #menu .sw{width:10px; height:10px; border-radius:2px; flex:none; box-shadow:0 0 0 1px var(--line);}
+  #menu .msep{height:1px; background:var(--border); margin:3px 4px;}
+  #menu .mtit{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); padding:5px 8px 2px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:260px;}
+  #btnPaineis{position:absolute; right:8px; bottom:8px; z-index:12; width:30px; height:30px; padding:0; display:inline-flex;
+    align-items:center; justify-content:center; background:var(--panel); border:1px solid var(--border); border-radius:5px;
+    color:var(--fg-dim); box-shadow:var(--shadow-menu); cursor:pointer;}
+  #btnPaineis:hover{color:var(--fg); border-color:var(--accent);}
+  #btnPaineis svg{width:17px; height:17px;}
+  #help{position:absolute; inset:24px; z-index:30; overflow:auto; padding:20px 26px; background:var(--panel2);
+    border:1px solid var(--border); border-radius:8px; box-shadow:var(--shadow-menu); cursor:pointer;}
+  #help h2{font-size:15px; color:var(--fg); margin-bottom:8px; font-weight:600;}
+  #help p{color:var(--fg-dim); font-size:12.5px; margin:6px 0 10px; max-width:860px;}
+  #help p.leg{font-size:11.5px;}
+  #help table{border-collapse:collapse; font-size:12px;}
+  #help td{padding:2px 14px 2px 0; color:var(--fg); vertical-align:top;}
+  #help td.q{color:var(--fg-dim); font-size:11px;}
+  #help kbd{font:11px var(--mono); background:var(--panel); border:1px solid var(--border); border-radius:3px; padding:0 5px; color:var(--fg);}
+  #fatal{position:absolute; inset:0; display:none; align-items:center; justify-content:center; color:var(--err); font-size:15px;
+    text-align:center; padding:40px; z-index:50; background:var(--bg);}
 
-  #left{width:240px; min-width:240px; background:var(--panel); border-right:1px solid var(--border);
-    display:flex; flex-direction:column; overflow-y:auto;}
-  .section{padding:8px 10px; border-bottom:1px solid var(--border);}
-  .section h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); margin-bottom:6px;}
-  .layerrow{display:flex; align-items:center; gap:7px; padding:2px 0; cursor:pointer; user-select:none;}
-  .layerrow input{accent-color:var(--accent);}
-  /* a amostra e a cor da camada (desenho, fica); o contorno do tema a separa do painel claro,
-     onde o Multi cinza e o overlay amarelo quase sumiam */
-  .swatch{width:14px; height:10px; border-radius:2px; display:inline-block; box-shadow:0 0 0 1px var(--line);}
-  .changeitem,.valitem{padding:4px 6px; margin:2px 0; border-radius:3px; background:var(--panel2);
-    cursor:pointer; font-size:12px; border-left:3px solid transparent; word-break:break-word;}
-  .changeitem:hover,.valitem:hover{background:rgba(var(--tint),0.08);}
-  .changeitem.ok{border-left-color:var(--ok);}
-  .changeitem.warn,.valitem.warn{border-left-color:var(--warn);}
-  .changeitem.err,.valitem.err{border-left-color:var(--err);}
-  .annitem{padding:4px 6px; margin:2px 0; border-radius:3px; background:var(--panel2);
-    cursor:pointer; font-size:12px; border-left:3px solid transparent; word-break:break-word;}
-  .annitem:hover{background:rgba(var(--tint),0.08);}
-  .annitem.err{border-left-color:var(--err);}
-  .annitem.warn{border-left-color:var(--warn);}
-  /* a nota e a bandeira AZUL da placa (ANN_COLORS.info no pcbframe.js); o destaque do tema
-     seria ambar no Altium e confundiria com o amarelo de atencao */
-  .annitem.info{border-left-color:#4fc3f7;}
-  .annitem.resolved{opacity:.5;}
-  .annitem .annx{float:right; color:var(--fg-dim); padding:0 4px; cursor:pointer;}
-  .annitem .annx:hover{color:var(--err);}
-  #infopanel{font-family:var(--mono); font-size:11px; white-space:pre-wrap; word-break:break-all; color:var(--fg);}
+  /* ── Gerber: o visualizador por cima da vista (hub-gerberview.js), com o que o gerador avisou em cima ── */
+  #gerber{position:absolute; inset:0; z-index:40; display:flex; flex-direction:column; background:var(--bg);}
+  .gb-topo{flex:none; display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:6px 12px; border-bottom:1px solid var(--border);
+    background:var(--panel); font-size:12px; color:var(--fg-dim);}
+  .gb-topo b{color:var(--fg); font-weight:600;}
+  .gb-topo label{display:inline-flex; align-items:center; gap:5px; cursor:pointer;}
+  .gb-topo select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px; font-size:12px;}
+  .gb-topo input{accent-color:var(--accent);}
+  #gbMeta{color:var(--fg);}
+  #gbAvisos{flex-basis:100%; color:var(--warn); font-size:11.5px;}
+  #gbAvisos summary{cursor:pointer;}
+  #gbAvisos ul{margin:4px 0 2px 18px; color:var(--fg-dim); max-height:22vh; overflow:auto;}
+  #gerberVista{flex:1; min-height:0; position:relative;}
 
-  #center{flex:1; display:flex; flex-direction:column; min-width:0;}
-  #canvaswrap{flex:1; position:relative; min-height:0;}
-  canvas{position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair;}
-  #statusbar{height:26px; display:flex; align-items:center; gap:18px; padding:0 12px;
-    background:var(--panel); border-top:1px solid var(--border); font-family:var(--mono);
-    font-size:12px; color:var(--fg-dim); white-space:nowrap; overflow:hidden;}
-  #statusbar b{color:var(--fg); font-weight:normal;}
-
-  #right{width:400px; min-width:300px; background:var(--panel); border-left:1px solid var(--border);
-    display:flex; flex-direction:column;}
-  #right .tools{display:flex; gap:6px; padding:8px; border-bottom:1px solid var(--border); align-items:center;}
-  #filter{flex:1; background:var(--panel2); border:1px solid var(--border); color:var(--fg);
-    border-radius:3px; padding:4px 8px; font-size:12px; min-width:0;}
-  #tablewrap{flex:1; overflow:auto;}
-  table{border-collapse:collapse; width:100%; font-size:12px;}
-  th,td{padding:3px 7px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap;}
-  th{position:sticky; top:0; background:var(--panel2); cursor:pointer; user-select:none; z-index:1;}
-  th:hover{color:var(--accent);}
-  tbody tr{cursor:pointer;}
-  tbody tr:hover{background:rgba(var(--tint),0.06);}
-  /* linha selecionada como a arvore do hub: veu + filete do destaque na quina */
-  tbody tr.sel{background:rgba(var(--tint),0.12); box-shadow:inset 2px 0 0 var(--hi);}
-  td.num{text-align:right; font-family:var(--mono);}
-  td.chg{background:var(--warn-soft); color:var(--chg);}
-  tbody tr.moved td:first-child{color:var(--chg);}
-
-  #proprows label{display:flex; align-items:center; gap:6px; margin:3px 0; font-size:12px; color:var(--fg-dim);}
-  #proprows label span{width:80px;}
-  #proprows input, #proprows select{flex:1; background:var(--panel); color:var(--fg);
-    border:1px solid var(--border); border-radius:3px; padding:3px 5px; font-size:12px; min-width:0;}
-
-  #help{position:absolute; inset:30px; background:var(--panel2); border:1px solid var(--border);
-    border-radius:6px; padding:24px 30px; overflow:auto; display:none; z-index:10; box-shadow:var(--shadow-menu);}
-  #help h2{color:var(--accent); margin-bottom:10px;}
-  #help h3{color:var(--fg); margin:14px 0 4px;}
-  #help p,#help li{color:var(--fg-dim); font-size:13px;}
-  #help ul{padding-left:20px;}
-  #help kbd{background:var(--panel); border:1px solid var(--border); border-radius:3px; padding:0 5px;
-    font-family:var(--mono); font-size:12px; color:var(--fg);}
-  #fatal{position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-    color:var(--err); font-size:15px; text-align:center; padding:40px; z-index:20; background:var(--bg);}
+  /* com o Gerber aberto, o rodape e o do visualizador (X/Y e zoom dele) */
+  body.gerber-on #status{display:none !important;}
+  /* lean: embutido na aba Neoden do hub -- so a placa, nunca edita */
+  body.lean #pcbtb, body.lean #abas, body.lean #splitR, body.lean #props, body.lean #status, body.lean #btnPaineis{display:none !important;}
 </style>
 </head>
 <body>
-<div id="header">
-  <h1>EletricHUB</h1>
-  <span class="meta" id="meta"></span>
-  <span class="spacer"></span>
-  <button id="btnFit"   title="Enquadrar a placa (F)">Fit</button>
-  <button id="btnFlip"  title="Ver pelo lado de baixo, como View &gt;&gt; Flip Board (V)">Vista: Top</button>
-  <button id="btnGrid"  class="active" title="Grade (G)">Grade</button>
-  <button id="btnGhost" class="active" title="Mostrar original das mudancas (D)">Diff</button>
-  <button id="btnAnn"     title="Sinalizar problema para a IA (N)">⚑ Sinalizar</button>
-  <button id="btnAnnSave" title="Salvar sinalizadores (annotations.js)">Salvar sinaliz.</button>
-  <button id="btnChSave" title="Salvar changes.js (mudanças de PCB)">Salvar changes</button>
-  <button id="btnCsv"   title="Baixar PCB List pos-mudancas (TSV)">CSV PCB List</button>
-  <button id="btnHelp"  title="Ajuda (H)">?</button>
-</div>
-
-<div id="toolbar">
-  <button id="btnEdit" title="Destravar edicao (E)">Editar</button>
-  <span class="sep"></span>
-  <button id="toolSelect" class="active" title="Selecionar/arrastar (Esc)">Selecionar</button>
-  <button id="toolTrack" title="Desenhar trilhas (T)">Trilha</button>
-  <button id="toolVia" title="Adicionar via">Via</button>
-  <span class="sep"></span>
-  <label>W <input id="trackw" type="number" step="0.05" min="0.05" value="0.3" title="largura da trilha (mm)"></label>
-  <label>Camada <select id="activelayer"><option>Top</option><option>Bottom</option></select></label>
-</div>
-
 <div id="main">
-  <aside id="left">
-    <div class="section" id="layersec"><h2>Camadas</h2></div>
-    <div class="section"><h2>Mudanças (<span id="chcount">0</span>)</h2><div id="changelist"></div></div>
-    <div class="section"><h2>Validação</h2><div id="vallist"></div></div>
-    <div class="section"><h2>Sinalizadores (<span id="anncount">0</span>)</h2><div id="annlist"></div></div>
-    <div class="section"><h2>Objeto selecionado</h2><div id="infopanel">— clique em um objeto —</div></div>
-  </aside>
-
-  <div id="center">
-    <div id="canvaswrap">
-      <canvas id="cv"></canvas>
-      <div id="help">
-        <h2>EletricHUB — Viewer</h2>
-        <p>Espelho fiel da PCB exportada do Altium. Coordenadas em <b>mm</b>, relativas à origem da
-           placa, <b>Y para cima</b> — os mesmos números do PCB List / Properties do Altium.</p>
-        <h3>Navegação</h3>
-        <ul>
-          <li>Roda do mouse: zoom no cursor &nbsp;·&nbsp; arrastar: pan &nbsp;·&nbsp; clique: selecionar objeto</li>
-          <li><kbd>F</kbd> enquadrar &nbsp; <kbd>V</kbd> vista top/bottom &nbsp; <kbd>G</kbd> grade &nbsp; <kbd>D</kbd> diff &nbsp; <kbd>H</kbd> esta ajuda</li>
-        </ul>
-        <h3>Edição</h3>
-        <ul>
-          <li>Arrastar objeto move (solte para gravar a mudança) · <kbd>Espaço</kbd> rotaciona componente durante o arrasto · <kbd>Ctrl</kbd> desliga o snap</li>
-          <li><kbd>T</kbd> trilha (cliques encadeados; botão direito/<kbd>Esc</kbd> encerra) · botão Via · <kbd>Delete</kbd> remove · duplo clique: propriedades</li>
-          <li><kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> desfazer/refazer · <b>Salvar changes</b> grava o changes.js</li>
-        </ul>
-        <h3>Arquivos</h3>
-        <ul>
-          <li><b>board.js</b> — espelho exportado do Altium (não edite)</li>
-          <li><b>changes.js</b> — mudanças a aplicar (editado pela IA / por você)</li>
-        </ul>
-        <h3>Diff</h3>
-        <ul>
-          <li>Tracejado — posição/geometria original de objeto alterado</li>
-          <li>Contorno <span style="color:var(--ok)">verde</span> — objeto adicionado</li>
-          <li><span style="color:var(--err)">Vermelho</span> — objeto removido</li>
-        </ul>
-        <p style="margin-top:14px">Feche com <kbd>H</kbd> ou clicando aqui.</p>
-      </div>
-      <div id="fatal"></div>
-      <div id="annform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
-           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:240px;
-           box-shadow:var(--shadow-menu);">
-        <textarea id="anntext" rows="2" placeholder="problema (ex: trilha muito proxima)"
-          style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-                 border-radius:3px; font:12px var(--font); padding:4px; resize:vertical;"></textarea>
-        <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
-          <select id="annsev" style="background:var(--panel); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px;">
+  <div id="centro">
+    <div id="cvwrap">
+      <canvas id="cv" tabindex="-1"></canvas>
+      <!-- a barra de ferramentas (pcbframe.js » montaBarra): tudo a vista, o que falta travado com o porque -->
+      <div id="pcbtb" role="toolbar" aria-label="Ferramentas da PCB"></div>
+      <!-- o texto se digita no proprio canvas (nada de prompt) -->
+      <div id="txtbox" hidden><input id="txtinp" type="text" autocomplete="off" spellcheck="false" placeholder="texto"><div id="txtdica"></div></div>
+      <div id="annform" hidden>
+        <div class="t">sinalizador para a IA (annotations.js)</div>
+        <textarea id="anntext" rows="2" placeholder="problema (ex.: trilha muito próxima)"></textarea>
+        <div class="l">
+          <select id="annsev">
             <option value="err">vermelho (erro)</option>
             <option value="warn">amarelo (atenção)</option>
             <option value="info">azul (nota)</option>
           </select>
           <span style="flex:1"></span>
-          <button id="annok">OK</button>
-          <button id="anncancel">Cancelar</button>
+          <button id="annok" class="ok" type="button">OK</button>
+          <button id="anncancel" type="button">Cancelar</button>
         </div>
       </div>
-      <div id="viaform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
-           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:220px;
-           box-shadow:var(--shadow-menu);">
-        <div style="display:flex; gap:6px; margin-bottom:6px;">
-          <label style="flex:1">size <input id="viasize" type="number" step="0.05" min="0.1" value="0.6"
-            style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-                   border-radius:3px; font:12px var(--font); padding:4px;"></label>
-          <label style="flex:1">drill <input id="viadrill" type="number" step="0.05" min="0.05" value="0.3"
-            style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-                   border-radius:3px; font:12px var(--font); padding:4px;"></label>
-        </div>
-        <input id="vianet" list="netlist-dl" placeholder="net (opcional)"
-          style="width:100%; margin-bottom:6px; background:var(--panel); color:var(--fg); border:1px solid var(--border);
-                 border-radius:3px; font:12px var(--font); padding:4px;">
-        <datalist id="netlist-dl"></datalist>
-        <div style="display:flex; gap:6px; justify-content:flex-end;">
-          <button id="viaok">OK</button>
-          <button id="viacancel">Cancelar</button>
-        </div>
-      </div>
-      <div id="propform" style="display:none; position:absolute; top:10px; right:10px; z-index:16;
-           background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:250px;
-           box-shadow:var(--shadow-menu);">
-        <div id="proptitle" style="color:var(--accent); font-size:12px; margin-bottom:6px;"></div>
-        <div id="proprows"></div>
-        <div style="display:flex; gap:6px; justify-content:flex-end; margin-top:6px;">
-          <button id="propok">OK</button>
-          <button id="propcancel">Cancelar</button>
-        </div>
-      </div>
+      <button id="btnPaineis" type="button" hidden title="Abrir o painel de propriedades"></button>
+      <div id="help" hidden></div>
+      <div id="fatal"></div>
     </div>
-    <div id="statusbar">
-      <span>X: <b id="sx">—</b>  Y: <b id="sy">—</b> mm</span>
-      <span>X: <b id="sxm">—</b>  Y: <b id="sym">—</b> mil</span>
-      <span>Zoom: <b id="szoom">—</b></span>
-      <span id="shover"></span>
-      <span id="annmsg" style="color:var(--warn);"></span>
-    </div>
+    <div id="abas"><button id="lsBtn" type="button" title="Conjuntos de camadas (LS), camada única e ver por baixo">LS</button><div id="abaslista"></div></div>
   </div>
-
-  <aside id="right">
-    <div class="tools">
-      <b style="font-size:12px; color:var(--fg-dim);">PCB&nbsp;List</b>
-      <input id="filter" placeholder="filtrar (ref, footprint, comment...)">
+  <div id="splitR" class="split" title="arraste para redimensionar · duplo clique fecha/abre"></div>
+  <aside id="props"></aside>
+  <div id="gerber" hidden>
+    <div class="gb-topo">
+      <b>Gerber</b><span id="gbMeta"></span>
+      <label title="Como os arquivos se chamam no pacote">Nomes
+        <select id="gbNomes">
+          <option value="fabricacao">FABRICAÇÃO (minúsculas, como vai para a JLCPCB)</option>
+          <option value="altium">Altium (Project Outputs)</option>
+        </select></label>
+      <label title="Camada sem objeto sai do pacote (padrão), como no pacote da casa"><input type="checkbox" id="gbVazias"> camadas vazias</label>
+      <label title="Legenda com extensão .gto/.gbo (172 de 282 pacotes da casa renomeiam)"><input type="checkbox" id="gbGto"> legenda .gto/.gbo</label>
+      <label title="Atributos X2 (TF/TA e o MD5), como o Altium 21; desligado, como o CAMtastic reexporta"><input type="checkbox" id="gbX2"> atributos X2</label>
+      <details id="gbAvisos" hidden></details>
     </div>
-    <div id="tablewrap">
-      <table id="pcblist">
-        <thead><tr>
-          <th data-k="ref">Designator</th><th data-k="footprint">Footprint</th>
-          <th data-k="comment">Comment</th><th data-k="layer">Layer</th>
-          <th data-k="x">X (mm)</th><th data-k="y">Y (mm)</th><th data-k="rot">Rot</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </aside>
+    <div id="gerberVista"></div>
+  </div>
 </div>
+<div id="status">
+  <span id="sxy">—</span>
+  <span id="sgrade"></span>
+  <span id="scam"><i id="scamsw"></i><b id="scamn"></b></span>
+  <span id="srota"></span>
+  <span id="shover"></span>
+  <span id="ssel"></span>
+  <span id="smsg"></span>
+</div>
+<div id="menu" hidden></div>
 
 <script>
-  var PCB_Q = new URLSearchParams(location.search);
-  var PCB_P = PCB_Q.get('p');
-  if (PCB_Q.has('lean')) document.body.classList.add('lean');
-  if (PCB_P) {
-    document.write('<script src="Projects/' + PCB_P + '/board.js"><\/script>');
-    document.write('<script src="Projects/' + PCB_P + '/changes.js"><\/script>');
-    document.write('<script src="Projects/' + PCB_P + '/annotations.js"><\/script>');
-  } else {
-    document.write('<script src="board.js"><\/script>');
-    document.write('<script src="changes.js"><\/script>');
-    document.write('<script src="annotations.js"><\/script>');
-  }
+  /* os dados do projeto: o espelho (board.js), as mudancas (changes.js) e os sinalizadores */
+  (function () {
+    var p = new URLSearchParams(location.search).get('p');
+    var base = p ? 'Projects/' + encodeURIComponent(p) + '/' : '';
+    ['board.js', 'changes.js', 'annotations.js'].forEach(function (f) {
+      document.write('<script src="' + base + f + '"><\/script>');
+    });
+  })();
 </script>
 <script src="hub-core.js"></script>
-<script src="hub-draw.js"></script>
 <script src="hub-font.js"></script>
-<!-- so pela regra de recorte da placa (HubLaser.boardCutouts): o que a tela mostra como
-     furo tem que ser exatamente o que o laser vai cortar -->
+<!-- a regra de o que e furo da placa (HubLaser.boardCutouts) e o encadeamento do contorno:
+     a tela, o laser e o Gerber concordam -->
 <script src="hub-laser.js"></script>
 <script src="hub-io.js"></script>
 <!-- modal e notificacao no tema da pagina: nada de alert()/confirm() do navegador -->
 <script src="hub-dialog.js"></script>
+<!-- a tabela de teclas (HubAtalhos.pcb) e o editor dela nas Configuracoes do hub -->
+<script src="hub-atalhos.js"></script>
+<!-- o traçado com cantos 45/90/livre, o mesmo do fio do Esquema -->
+<script src="hub-fio.js"></script>
+<!-- Gerber: o gerador (depois do hub-font e do hub-laser, que ele usa) e o visualizador -->
+<script src="hub-gerber.js"></script>
+<script src="hub-gerberview.js"></script>
+<script src="hub-pcbicones.js"></script>
+<script src="hub-pcbpainel.js"></script>
 <script src="pcbframe.js"></script>
 </body>
 </html>

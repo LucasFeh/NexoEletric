@@ -19,6 +19,7 @@ import threading
 import time
 
 from flask import Flask, Response, abort, request, send_from_directory
+from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.utils import safe_join
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -44,6 +45,12 @@ ODOO_LISTA = 'odoo-lista.json'  # recibo do envio ao Odoo; muda sem o projeto mu
 # quantidade mudada, e nenhuma aba precisa recarregar por isso -- a folha nao muda
 ODOO_EXTRAS = 'lista-extras.json'
 ESTADO_LOCAL = BOM_STATE_FILES + (ODOO_LISTA, ODOO_EXTRAS)
+# O Gerber que a vista PCB grava (POST /api/gerber) mora em Projects/<nome>/Gerber/, e a pasta
+# inteira fica FORA do _snapshot() pela mesma razao do estado acima: e saida gerada, nao
+# projeto. Vista pelo vigia, gravar o Gerber recarregaria todas as paginas abertas -- inclusive
+# a vista que acabou de gerar e ainda esta mostrando o conjunto. Nenhuma pagina desenha a
+# partir dela.
+GERBER_DIR = 'Gerber'
 
 app = Flask(__name__)
 _version = 0           # incrementa a cada mudanca detectada
@@ -93,7 +100,13 @@ def _snapshot():
 
     add(os.path.join(ROOT, 'projects.js'))
     for base in ('Libs', 'Projects'):
-        for dirpath, _dirnames, filenames in os.walk(os.path.join(ROOT, base)):
+        topo = os.path.join(ROOT, base)
+        for dirpath, dirnames, filenames in os.walk(topo):
+            if base == 'Projects' and os.path.dirname(dirpath) == topo:
+                # dentro de Projects/<nome>/ (um projeto chamado "Gerber" continua visto):
+                # nao desce na pasta do Gerber gerado; ver GERBER_DIR
+                dirnames[:] = [d for d in dirnames
+                               if os.path.normcase(d) != os.path.normcase(GERBER_DIR)]
             for f in filenames:
                 # o .tmp da gravacao atomica junto: uma varredura que o pegasse no meio da
                 # escrita via um arquivo nascer e sumir, e isso tambem e "mudou"
@@ -267,6 +280,201 @@ def api_laser_open():
     except OSError as e:
         return {'ok': False, 'error': 'arquivo gravado, mas nada associado a .lbrn: %s' % e}, 500
     return {'ok': True, 'path': os.path.join(LASER_DIR, name)}
+
+
+# ─────────────────────── Gerber gerado pela vista PCB ───────────────────────
+# A vista PCB gera o Gerber no navegador (hub-gerber.js, sobre o board.js com as mudancas ja
+# aplicadas) e o "Salvar no projeto" manda o conjunto para ca. Ele vai para
+# Projects/<nome>/Gerber/ (GERBER_DIR, fora do vigia), e a pasta e o ULTIMO conjunto gerado, nao
+# um arquivo morto: o que nao veio no conjunto novo sai, para ninguem mandar a fabrica uma
+# camada que sobrou de outra geracao. O gerber.json ao lado diz quando saiu, com que opcoes e o
+# md5 de cada arquivo. A pasta e servida como qualquer arquivo do projeto
+# (/Projects/<nome>/Gerber/...) e, no servidor, aparece no compartilhamento de rede.
+GERBER_MANIFESTO = 'gerber.json'
+GERBER_EXTS = ('.gbr', '.gtl', '.gbl', '.gto', '.gbo', '.gts', '.gbs', '.gtp', '.gbp', '.gko',
+               '.gm1', '.drl', '.txt')
+# Sai da pasta mesmo sem estar no gerber.json anterior: camada e furacao. Um .txt pode ser
+# anotacao de alguem, e so sai se foi o hub que o gravou.
+GERBER_SEMPRE_SAI = ('.gbr', '.drl')
+GERBER_MAX_BYTES = 30 * 1024 * 1024     # soma dos arquivos; o X2 do DMB tem ~650 KB
+# O corpo do POST e maior que os arquivos (o JSON escapa o CRLF de cada linha). Este limite so
+# impede ler para a memoria um corpo sem fim; quem decide e o de cima.
+GERBER_MAX_CORPO = 2 * GERBER_MAX_BYTES + 1024 * 1024
+GERBER_MAX_ARQUIVOS = 100               # o do Altium tem 13; 30 Mid e as mecanicas cabem
+GERBER_MAX_MANIFESTO = 64 * 1024
+_GERBER_NOME = re.compile(r'[A-Za-z0-9 _.()+-]+')
+# CON, NUL, COM1...: no Windows o nome e o DISPOSITIVO, com extensao ou sem (gravar CON.gbr
+# escreve no console). A bancada e o app desktop sao Windows.
+_NOME_RESERVADO = re.compile(r'(con|prn|aux|nul|com[0-9]|lpt[0-9]) *\.', re.I)
+_gerber_lock = threading.Lock()         # duas abas salvando juntas nao misturam dois conjuntos
+
+
+def _gerber_nome_ruim(nome):
+    """Por que este nome nao pode virar arquivo em Gerber/, ou '' se pode. O nome vem do
+    navegador e vira caminho no disco do servidor: so basename, e nada que o Windows ou o Linux
+    leiam como outra coisa."""
+    if not isinstance(nome, str) or not nome:
+        return 'falta o nome do arquivo'
+    if len(nome) > 150:
+        return 'nome comprido demais'
+    if nome.startswith('.') or nome != nome.strip() or not _GERBER_NOME.fullmatch(nome):
+        return 'nome invalido: so letras sem acento, numeros, espaco e _ . ( ) + -'
+    if os.path.splitext(nome)[1].lower() not in GERBER_EXTS:
+        return 'extensao nao aceita (so %s)' % ' '.join(GERBER_EXTS)
+    if _NOME_RESERVADO.match(nome):
+        return 'nome reservado do Windows'
+    return ''
+
+
+def _gerber_projeto(proj):
+    """(pasta do projeto, '') ou (None, motivo).
+
+    O nome tem de ser EXATAMENTE o de uma pasta de Projects/ -- comparado com o listdir, nunca
+    montado com o que veio do cliente (o cuidado do _proj_dir_by_id): nao passa '..', nem o
+    apelido que o Windows aceita para a mesma pasta (caixa, ponto ou espaco no fim), nem fluxo
+    alternativo do NTFS.
+    """
+    pdir = os.path.join(ROOT, 'Projects')
+    try:
+        achou = isinstance(proj, str) and not proj.startswith('.') and proj in os.listdir(pdir)
+    except OSError:
+        achou = False
+    d = os.path.join(pdir, proj) if achou else None
+    if d is None or not os.path.isdir(d):
+        return None, 'projeto nao encontrado'
+    if not os.path.isfile(os.path.join(d, 'board.js')):
+        return None, 'o projeto ainda nao tem board.js -- rode o ExportPcb no Altium'
+    return d, ''
+
+
+def _gerber_anteriores(gdir):
+    """Os nomes que o hub gravou da ultima vez, pelo gerber.json. Validados de novo: o arquivo
+    vem do disco, e cada nome dele vira caminho de os.remove."""
+    try:
+        with open(os.path.join(gdir, GERBER_MANIFESTO), encoding='utf-8') as f:
+            lista = json.load(f).get('arquivos')
+    except (OSError, ValueError, AttributeError):
+        return set()
+    if not isinstance(lista, list):
+        return set()
+    return {a['nome'] for a in lista
+            if isinstance(a, dict) and not _gerber_nome_ruim(a.get('nome'))}
+
+
+def _gerber_troca(gdir, novos, anteriores):
+    """Poe o conjunto novo no lugar do anterior e devolve os nomes que sairam da pasta.
+
+    Primeiro TODOS os .tmp, so depois as trocas: disco cheio no meio da escrita deixa o
+    conjunto anterior inteiro, em vez de meia placa nova com meia velha.
+    """
+    pares = [(os.path.join(gdir, nome) + '.tmp', os.path.join(gdir, nome)) for nome, _c in novos]
+    try:
+        for (tmp, _full), (_nome, corpo) in zip(pares, novos):
+            with open(tmp, 'wb') as f:          # binario: o CRLF do gerador chega intacto
+                f.write(corpo)
+        for tmp, full in pares:
+            # Segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger), mas
+            # so quando o destino E link: no Windows o realpath devolve tambem a caixa do arquivo
+            # que ja existe, e trocar so a caixa (a.gbr -> A.GBR) deixaria o nome velho na pasta.
+            os.replace(tmp, os.path.realpath(full) if os.path.islink(full) else full)
+    finally:
+        for tmp, _full in pares:                # so sobra .tmp quando algo falhou no meio
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    # Sai a camada e a furacao (.gbr/.drl) que nao vieram agora, e tudo o que o proprio hub
+    # gravou da outra vez (gerber.json anterior) -- e isso que pega a legenda .gto/.gbo de
+    # quando a opcao estava ligada. Anotacao de alguem e subpasta ficam. normcase: no Windows a
+    # caixa nao separa arquivo (o pdmb_x.gbr novo E o PDMB_X.gbr de antes, ja trocado); no Linux
+    # separa, e o de outra caixa e sobra.
+    ficam = {os.path.normcase(nome) for nome, _c in novos}
+    feitos = {os.path.normcase(nome) for nome in anteriores}
+    removidos = []
+    for f in sorted(os.listdir(gdir)):
+        chave = os.path.normcase(f)
+        if chave in ficam or not os.path.isfile(os.path.join(gdir, f)):
+            continue
+        if os.path.splitext(f)[1].lower() in GERBER_SEMPRE_SAI or chave in feitos:
+            os.remove(os.path.join(gdir, f))
+            removidos.append(f)
+    return removidos
+
+
+@app.route('/api/gerber', methods=['POST'])
+def api_gerber():
+    """Grava o conjunto Gerber da vista PCB em Projects/<proj>/Gerber/.
+
+    Corpo: {proj, arquivos:[{nome, texto}], manifesto?:{base, opcoes, ...}}; proj e o nome da
+    pasta (o ?p= da vista). Resposta: {ok, pasta, arquivos:[{nome, bytes, md5}], removidos}.
+    A validacao e tudo ou nada: um nome recusado nao deixa gravar os outros. Como o /api/save,
+    nao e so-localhost -- a vista PCB abre de qualquer maquina da rede, e o que entra aqui fica
+    preso a pasta Gerber/ de um projeto que ja existe.
+    """
+    grande = ({'ok': False, 'error': 'conjunto grande demais (o limite e %d MB)'
+               % (GERBER_MAX_BYTES // (1024 * 1024))}, 413)
+    # Vale tambem para corpo sem Content-Length (chunked): desde o Flask 3.1 o limite e por
+    # requisicao, e passar dele levanta 413 em vez de ler tudo para a memoria.
+    request.max_content_length = GERBER_MAX_CORPO
+    try:
+        data = request.get_json(silent=True)
+    except RequestEntityTooLarge:
+        return grande
+    if not isinstance(data, dict) or not isinstance(data.get('arquivos'), list):
+        return {'ok': False, 'error': 'JSON {proj, arquivos:[{nome, texto}]} obrigatorio'}, 400
+    d, motivo = _gerber_projeto(data.get('proj'))
+    if d is None:
+        return {'ok': False, 'error': motivo}, 404
+    manifesto = data.get('manifesto')
+    if manifesto is None:
+        manifesto = {}
+    if not isinstance(manifesto, dict) or len(json.dumps(manifesto)) > GERBER_MAX_MANIFESTO:
+        return {'ok': False, 'error': 'manifesto tem que ser um objeto pequeno'}, 400
+    if not data['arquivos'] or len(data['arquivos']) > GERBER_MAX_ARQUIVOS:
+        return {'ok': False, 'error': 'o conjunto tem de ter de 1 a %d arquivos'
+                % GERBER_MAX_ARQUIVOS}, 400
+    novos, vistos, total = [], set(), 0
+    for a in data['arquivos']:
+        if not isinstance(a, dict) or not isinstance(a.get('texto'), str):
+            return {'ok': False, 'error': 'cada arquivo e {nome, texto}, com o texto em string'}, 400
+        nome = a.get('nome')
+        motivo = _gerber_nome_ruim(nome)
+        if motivo:
+            return {'ok': False, 'error': '%s: %s' % (repr(nome)[:120], motivo)}, 403
+        # A caixa nao separa arquivo no Windows: A.gbr e a.gbr seriam um so, e o segundo
+        # apagaria o primeiro calado.
+        if nome.lower() in vistos:
+            return {'ok': False, 'error': 'nome repetido no conjunto: %s' % nome}, 400
+        vistos.add(nome.lower())
+        try:
+            corpo = a['texto'].encode('utf-8')
+        except UnicodeEncodeError:
+            return {'ok': False, 'error': '%s: o texto tem caractere invalido' % nome}, 400
+        total += len(corpo)
+        if total > GERBER_MAX_BYTES:
+            return grande
+        novos.append((nome, corpo))
+    lista = [{'nome': n, 'bytes': len(c), 'md5': hashlib.md5(c).hexdigest()} for n, c in novos]
+    # O que a vista mandou alem disso (avisos do gerador, resumo...) vai junto. arquivos e gerado
+    # sao sempre do servidor: o md5 e o do que foi para o disco, e a hora e a do relogio que data
+    # os outros arquivos do projeto.
+    man = dict(manifesto)
+    man.update({
+        'gerado': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'base': manifesto['base'] if isinstance(manifesto.get('base'), str) else '',
+        'opcoes': manifesto['opcoes'] if isinstance(manifesto.get('opcoes'), dict) else {},
+        'arquivos': lista,
+    })
+    gdir = os.path.join(d, GERBER_DIR)
+    with _gerber_lock:
+        try:
+            os.makedirs(gdir, exist_ok=True)
+            removidos = _gerber_troca(gdir, novos, _gerber_anteriores(gdir))
+            _bom_json_write(gdir, GERBER_MANIFESTO, man)     # o mesmo gravador atomico do BOM
+        except OSError as e:
+            return {'ok': False, 'error': 'falha ao gravar o Gerber: %s' % e}, 500
+    return {'ok': True, 'pasta': 'Projects/%s/%s' % (os.path.basename(d), GERBER_DIR),
+            'arquivos': lista, 'removidos': removidos}
 
 
 # ─────────────────────────── configuracao do hub ───────────────────────────

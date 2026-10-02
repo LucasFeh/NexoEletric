@@ -234,14 +234,17 @@ function padPrim(p, warnings){
 /* Furo de pad/via, com as MESMAS regras do pcbframe.drawPad:
    - so em through-hole (type 'th' ou camada Multi) - pad SMD nunca e furado;
    - a forma vem de drillshape: 'rect' e 'oblong' usam drillw x drill, o resto e circulo;
-   - o furo gira por holerot, e sem holerot herda a rotacao do PAD.
+   - o furo gira com o PAD, e o holerot e RELATIVO a ele: rot do pad + holerot. Medido no X2 do
+     Altium do DMB (CN1: pad a 270, holerot 0, drill 0,4 x drillw 1,6 -> R 0,40 X 1,60, de pe),
+     e e a conta do gerador de Gerber e do flip do hub-core. Tratar o holerot como absoluto
+     deitava o rasgo dos pads girados.
    A marca de centro e sempre um ponto: e uma marca de broca, nao a forma do furo. */
 /* A forma REAL do furo. Sai sempre, independente da opcao `holes`: a camada de furos
    (para furar de verdade) e a subtracao do furo no cobre sao coisas ortogonais. */
 function drillPrim(src, isTH){
   const drill = src.drill;
   if (!isTH || !(drill > 0)) return null;
-  const rot = (src.holerot != null ? src.holerot : src.rot) || 0;
+  const rot = ((src.rot || 0) + (src.holerot || 0)) % 360;
   const dw = src.drillw;
   if (src.drillshape === 'oblong' && dw > 0)
     return { k:'rect', cx:src.x, cy:src.y, w:dw, h:drill, rot, r:Math.min(dw, drill)/2 };

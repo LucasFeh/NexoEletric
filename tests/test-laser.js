@@ -96,6 +96,15 @@ const hHerda = Laser.collect(padFuro({ drillshape:'rect', drillw:1.2, rot:35 }),
                              { side:'Top', holes:'drill' }).holes;
 assert.strictEqual(hHerda[0].rot, 35, 'sem holerot o furo gira com o pad');
 
+/* o holerot e RELATIVO ao pad: o CN1 do DMB tem pad a 270 com holerot 0 e rasgo 0,4 x 1,6, e o X2
+   do Altium o escreve de pe (R 0,40 X 1,60). Com holerot 90 num pad a 270 o furo fica a 0. */
+const hCn1 = Laser.collect(padFuro({ drillshape:'rect', drillw:1.6, drill:0.4, rot:270, holerot:0 }),
+                           { side:'Top', holes:'drill' }).holes;
+assert.strictEqual(hCn1[0].rot, 270, 'furo gira com o pad (holerot relativo)');
+const hSoma = Laser.collect(padFuro({ drillshape:'rect', drillw:1.2, rot:270, holerot:90 }),
+                            { side:'Top', holes:'drill' }).holes;
+assert.strictEqual(hSoma[0].rot, 0, 'rot do pad + holerot, modulo 360');
+
 /* furo circular continua disco, e a marca de centro e sempre um disco */
 assert.strictEqual(Laser.collect(padFuro({ drillshape:'circle' }), { side:'Top', holes:'drill' }).holes[0].k, 'disc');
 const hMk = Laser.collect(padFuro({ drillshape:'rect', drillw:1.2, holerot:90 }),
