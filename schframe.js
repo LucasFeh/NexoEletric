@@ -343,6 +343,25 @@ function distPS(px, py, x1, y1, x2, y2){
   t = t < 0 ? 0 : t > 1 ? 1 : t;
   return Math.hypot(px - (x1 + t*dx), py - (y1 + t*dy));
 }
+/* O fio debaixo do ponto: o primeiro trecho a ate max(tol,20) mil, e o vertice quando o ponto
+   esta a ate max(tol,22) de uma ponta DESSE trecho. O vertice ganha do trecho porque a alcinha
+   e menor e quem a mira esta querendo justamente o canto. Morava dentro do hitTest; saiu para
+   ca porque o modo "so fios" da barra usa a MESMA conta sem o resto da fila (pino, designador,
+   corpo), e a fila do modo normal tem de continuar pegando exatamente o fio que pegava.
+   Devolve { wi, seg, vert } (vert = null fora da alcinha) ou null. */
+function fioNoPonto(wires, x, y, tol){
+  const rs = Math.max(tol || 0, 20), rv = Math.max(tol || 0, 22);
+  for (let wi = 0; wi < (wires || []).length; wi++){
+    const pts = wires[wi].pts || [];
+    for (let i = 0; i < pts.length - 1; i++)
+      if (distPS(x, y, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1]) <= rs){
+        const vert = Math.hypot(x - pts[i][0], y - pts[i][1]) <= rv ? i
+                   : Math.hypot(x - pts[i+1][0], y - pts[i+1][1]) <= rv ? i + 1 : null;
+        return { wi, seg:i, vert };
+      }
+  }
+  return null;
+}
 /* a tolerancia do esquema e o balde de ponto do HubCore (round(v*2)), copiados pelo mesmo
    motivo: o desenho e a extracao de nets tem de concordar sobre o que e "o mesmo ponto",
    senao a folha desenha bolinha onde a net nao existe */
@@ -894,6 +913,7 @@ const PURE = { LIBS, ACERVO_DEFS, montaAcervos, partesDe, nPartes, refDaParte, t
                identidadeDoComponente, identidadeDoEscolhido, identidadeDoVinculo,
                idsDoParams, pecaDeHoje, reachaValor, recomendacaoDe, mesmaPecaDaFolha, seguePeloOdoo,
                topologiaFolha, moveSegmento, eixosDoTrecho, apagaSegmento, apagaVertice, espelha, encaixeDaTroca,
+               fioNoPonto,
                GRADES, gradePorId, snapPasso, MM_MIL, caixaTexto, larguraTexto, designadorAparece,
                ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho };
 /* Em Node o arquivo acaba aqui: dali para baixo e tudo DOM. */
@@ -1601,6 +1621,10 @@ function deleteSel(){
    um terra, um trilho de alimentacao, um rotulo de net ou um No ERC. Texto, junção e troca de
    valor/footprint sao da IA, no schematic.js — por isso nao existem botoes para eles. */
 let tool = 'select';        /* 'select' | 'wire' | 'power' | 'label' | 'noerc' */
+/* "So fios" nao e um valor de `tool`: e um filtro DENTRO da seleção, e os muitos testes de
+   tool === 'select' (o clique, o arrasto, o duplo clique, o ima, o Esc) valem nele sem mudar.
+   So vale com tool === 'select'; o setTool o desliga e a vista sempre abre sem ele. */
+let soFio = false;
 let toolPower = null;       /* { net, style, rot } quando tool === 'power' */
 let toolNet = '';           /* a palavra na mao quando tool === 'label' */
 let wireDraw = null;        /* o fio em curso: o estado do hub-fio.js ({ pts, modo, primeiro, ult }) + ligado */
@@ -2145,8 +2169,9 @@ function setTool(t, pw){
      falando de uma ferramenta que ja foi largada */
   if (tool === 'wire' && t !== 'wire') $('shover').textContent = '';
   tool = t; toolPower = pw || null; wireDraw = null; snapHit = null; fioCursor = null;
+  soFio = false;        /* toda troca de ferramenta larga o "so fios" — quem o quer liga depois (setSoFio) */
   if (t !== 'label') toolNet = '';
-  $('tbSel').setAttribute('aria-pressed', String(t === 'select'));
+  pintaSelecao();
   $('tbWire').setAttribute('aria-pressed', String(t === 'wire'));
   $('tbNet').setAttribute('aria-pressed', String(t === 'label'));
   $('tbNoErc').setAttribute('aria-pressed', String(t === 'noerc'));
@@ -2157,7 +2182,22 @@ function setTool(t, pw){
   if (t === 'wire') statusDoFio();
   cam.draw();
 }
+/* Selecionar e "so fios" sao dois botoes da mesma ferramenta: um aceso por vez */
+function pintaSelecao(){
+  $('tbSel').setAttribute('aria-pressed', String(tool === 'select' && !soFio));
+  $('tbSoFio').setAttribute('aria-pressed', String(tool === 'select' && soFio));
+}
+/* O modo "so fios" num lugar so. Ligar passa pelo setTool('select'), que grava o fio em curso
+   e larga o pouso como qualquer troca; desligar fica no Selecionar normal. */
+function setSoFio(on){
+  if (on && tool !== 'select') setTool('select');
+  soFio = !!on;
+  pintaSelecao();
+  $('shover').textContent = soFio ? 'só fios: clique num fio' : '';
+  cam.draw();
+}
 $('tbSel').addEventListener('click', () => setTool('select'));
+$('tbSoFio').addEventListener('click', () => setSoFio(!soFio));
 $('tbWire').addEventListener('click', () => setTool(tool === 'wire' ? 'select' : 'wire'));
 $('tbNoErc').addEventListener('click', () => setTool(tool === 'noerc' ? 'select' : 'noerc'));
 for (const b of document.querySelectorAll('#schtb .pw'))
@@ -2472,8 +2512,9 @@ function leftUp(e){
     if (!d.shift) sel.clear();
     /* O RETANGULO CONTINUA PEGANDO ITEM INTEIRO. E de proposito: o gesto de laço serve para
        pegar um pedaço da folha e arrasta-lo junto, e um laço que devolvesse trechos soltos
-       partiria os fios ao mover. O trecho e coisa do clique; o laço e coisa do bloco. */
-    for (const it of sheetItems()){ const bb = itemBBox(it); if (inteiro ? bbInside(bb, n) : bbTouch(bb, n)) selAdd(alvoAll(it)); }
+       partiria os fios ao mover. O trecho e coisa do clique; o laço e coisa do bloco.
+       Com o "so fios" o laço passa por cima dos componentes e pega so os fios. */
+    for (const it of soFio ? model.sheets[sheetIdx].wires : sheetItems()){ const bb = itemBBox(it); if (inteiro ? bbInside(bb, n) : bbTouch(bb, n)) selAdd(alvoAll(it)); }
     aplicaSel('');     /* selecao de varios nao tem uma net so: apaga o foco anterior */
     return;
   }
@@ -4168,10 +4209,11 @@ const cam = D.mkCamera(cv, drawWorld, {
     const h = hitTest(w.x, w.y);
     /* o hover diz o que o clique vai pegar — com o trecho, o numero do trecho, senao a mao
        marca uma coisa e a barra de status anuncia outra */
+    /* (no "so fios" o hitTest so devolve fio; sem fio debaixo, a barra lembra o modo) */
     $('shover').textContent =
       h ? (h.kind === 'pin' ? `${h.ref}-${h.num} · ${nets.pinNet[h.ref + '-' + h.num] || 'sem net'}`
          : h.kind === 'wire' ? (describe(alvoDoHit(h)) + ' · ' + (nets.wireNet[sheetIdx][h.wi] || 'sem net'))
-                             : describe(alvoDoHit(h))) : '';
+                             : describe(alvoDoHit(h))) : soFio ? 'só fios: clique num fio' : '';
     cv.style.cursor = 'default';   /* seta normal; so o pan (agarrando) muda */
   }
 });
@@ -4184,9 +4226,18 @@ const cam = D.mkCamera(cv, drawWorld, {
 function refazGesto(){ if (mouse && mouse.mode === 'move' && mouse.moved && mouse.ult) leftMove(mouse.ult); }
 cv.addEventListener('wheel', refazGesto);
 
+function hitDoFio(s, x, y, tol){
+  const f = fioNoPonto(s.wires, x, y, tol);
+  return f ? { kind:'wire', wi:f.wi, item:s.wires[f.wi], seg:f.seg, vert:f.vert } : null;
+}
 function hitTest(x, y){
   const s = model.sheets[sheetIdx];
   const tol = 8 / cam.cam.scale;
+  /* SO FIOS (o botao da barra): o clique pega o fio mesmo com pino, designador ou corpo de
+     componente por cima — a fila abaixo nunca deixaria. A junção sai junto: clicar na bolinha
+     pega o fio que passa por ela. O resto do gesto (inteiro, trecho, vertice, arrasto) e o
+     mesmo, porque o que sai daqui tem a forma de sempre. */
+  if (soFio) return hitDoFio(s, x, y, tol);
   /* o No ERC vem ANTES do pino, e so: ele fica EM CIMA da ponta quente, entao com o
      pino primeiro o X nunca poderia ser selecionado — nem apagado. O raio e curto (30
      mil, o tamanho do desenho), entao clicar um fio de distancia ao lado ainda pega o
@@ -4228,18 +4279,9 @@ function hitTest(x, y){
   }
   /* O FIO DEVOLVE O TRECHO, e o vertice quando o cursor esta em cima da alcinha. O indice do
      segmento ja era calculado aqui e jogado fora no return — era so isso que faltava para
-     "selecionar o trecho e nao a polilinha inteira". O vertice ganha do trecho porque a
-     alcinha e menor e quem a mira esta querendo justamente o canto. */
-  for (let wi = 0; wi < s.wires.length; wi++) {
-    const pts = s.wires[wi].pts || [];
-    for (let i = 0; i < pts.length - 1; i++)
-      if (HubCore.distSeg(x, y, pts[i][0], pts[i][1], pts[i+1][0], pts[i+1][1]) <= Math.max(tol, 20)){
-        const rv = Math.max(tol, 22);
-        const vert = Math.hypot(x - pts[i][0], y - pts[i][1]) <= rv ? i
-                   : Math.hypot(x - pts[i+1][0], y - pts[i+1][1]) <= rv ? i + 1 : null;
-        return { kind:'wire', wi, item:s.wires[wi], seg:i, vert };
-      }
-  }
+     "selecionar o trecho e nao a polilinha inteira". */
+  const hf = hitDoFio(s, x, y, tol);
+  if (hf) return hf;
   /* pela caixa do corpo como ele esta na folha (girado/espelhado), e nao por um circulo em
      volta da ancora: o RES da casa vai de -150 a +50 mil, e o circulo errava o corpo de um
      lado e acertava o vazio do outro */
@@ -5244,6 +5286,8 @@ window.addEventListener('keydown', e => {
     /* Escape e o botao de panico: larga a selecao E o foco de net. Enquanto largava so a
        selecao, a folha ficava laranja sem nada marcado — a "cor travada". */
     if (sel.size || selNet) limpaSel();
+    /* sem nada para largar, o Esc seguinte larga o "so fios" e volta ao Selecionar normal */
+    else if (soFio) setSoFio(false);
     return;
   }
   const tag = e.target.tagName;

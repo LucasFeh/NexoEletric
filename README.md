@@ -390,6 +390,16 @@ precisar de servidor.
   inteiro, e o laço de seleção continua pegando fios inteiros. Até 2026-09-24 era o contrário
   (o clique pegava o trecho e o duplo clique promovia), e num fio comprido não havia como
   pegar só a perninha.
+  **Selecionar só fios.** O botão logo depois do Selecionar, na barra (a seta encostada num
+  fio), é o mesmo Selecionar com um filtro: o clique e o laço só pegam **fio**. Pino,
+  designador, comment, rótulo, power, port, junção e corpo de componente por cima do fio são
+  ignorados — no Selecionar normal quase todos vêm antes do fio e levam o clique, e o fio que
+  passa rente a um pino ou debaixo de um designador não se pegava. O resto é igual: fio inteiro
+  no primeiro clique, trecho ou vértice no segundo, arrastar move, `Shift` soma e `Alt` acende
+  a net; clicar num componente longe de fio não pega nada. `Esc` com seleção limpa a seleção e,
+  sem seleção, desliga o modo; Selecionar, Fio (`W`), um pouso ou o próprio botão também
+  desligam. Não tem tecla, a vista sempre abre no Selecionar normal, e `Ctrl+A` e `Del` não
+  mudam (pegam e apagam o que estiver selecionado, como antes).
   **Mover um componente não leva o fio**, a não ser que o fio (ou o trecho dele) esteja
   selecionado junto: aí a ponta que estava no pino fica presa ao pino, inclusive se ele girar
   no meio do arrasto. Sem o fio na seleção, a net se desfaz quando o pino sai da ponta — e as
