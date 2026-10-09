@@ -1673,6 +1673,17 @@ Três coisas **nunca** são recomendadas, por mais pontos que o resto some: tipo
 (um varistor 1206 não substitui um LED 1206), valor diferente e SMD por PTH. Quando o valor
 exato não existe no almoxarifado, a linha diz qual é o mais próximo — e não o escolhe.
 
+**Jumper tem regra própria** (pedido do dono, 2026-10-09). Componente com `JUMPER` no
+símbolo, no footprint ou no comment só tem três destinos: a **barra de pinos** com as mesmas
+vias, o **resistor 0R** ou **nenhuma peça**, porque o jumper é na solda. O footprint escolhe
+qual vem escolhido: com `SMD` no nome (`JUMPER 2 VIAS SMD`, dois pads de solda) a linha vem
+com *nenhuma peça*, desmarcada e com a pílula **solda**; sem `SMD` (`JUMPER 2 VIAS PTH`,
+`JUMPER_2VIAS`, barra de 2,54 mm) vem a barra, marcada; footprint de resistor (`0805`) pede o
+0R do mesmo tamanho. As outras opções ficam no seletor, e qualquer outra peça se procura pelo
+*escolher outro…*. O jumper de 3 pinos recebe a barra de 3 e nunca o 0R, que perderia uma
+ligação. Antes da regra o designador `J` fazia do jumper um conector: 27 dos 41 jumpers do
+corpus vinham com um conector baioneta.
+
 Vêm **marcadas** só as linhas de confiança alta e média; as de confiança baixa aparecem com
 a sugestão, desmarcadas. Componente cujo comment é uma fórmula do Altium
 (`=Value + ' - ' + Potência`) e cujo `Value` não veio no export nunca passa de baixa: sem o

@@ -250,7 +250,10 @@ function perfilDoComp(c){
   const sym = String((c && c.sym) || '');
   const fp = String((c && c.footprint) || '');
   const comment = String((c && c.comment) || '');
-  const tipo = tipoDoRef(ref) || tipoDoTexto(sym, fp, comment);
+  /* o jumper tem regra própria (jumperDe, logo antes do sugere) e tipo próprio: pelo prefixo
+     ele seria J, um conector como outro qualquer */
+  const jumper = jumperDe(sym, fp, comment, p.MONTAGEM);
+  const tipo = jumper ? 'JP' : (tipoDoRef(ref) || tipoDoTexto(sym, fp, comment));
   /* o comment do Altium pode ser uma FÓRMULA ("=Value + ' - ' + Potência"): ela se resolve
      na folha, não aqui, e o valor de verdade está no params. Medido: 89 componentes. */
   const valorTxt = (comment.charAt(0) === '=' ? (p.VALUE || '') : (p.VALUE || comment));
@@ -267,6 +270,7 @@ function perfilDoComp(c){
     mont: montagemDe(p.MONTAGEM, fp, sym, comment),
     vias: viasDe(comment, sym, fp),
     pn: pareceMPN(p.MPN) || pareceMPN(comment) || pareceMPN(sym),
+    jumper,
   };
 }
 
@@ -353,6 +357,7 @@ const PESO = { mpn: 120, pn: 55, valor: 60, encap: 40, encap2: 26, familia: 35, 
    ordenada por acaso não é. */
 const MINIMO = 25;
 function pontua(a, b){
+  if (a.jumper) return pontuaJumper(a, b);
   const motivos = [];
   let pts = 0;
 
@@ -444,6 +449,62 @@ function confiancaDe(motivos, pts){
   return 'baixa';
 }
 
+/* ── o jumper: três destinos, e só três ──
+   Pedido do dono (2026-10-09): jumper vindo do Altium vira uma BARRA DE PINOS de 2 vias (o
+   jumper de verdade, que recebe o shunt), um RESISTOR 0R, ou NENHUMA PEÇA, porque o jumper é na
+   solda. Qualquer outra coisa a pessoa procura à mão — o "escolher outro…" continua lá.
+
+   Pelo recomendador genérico ele era conector: todo jumper dos projetos usa designador J, o
+   prefixo decide o tipo antes do nome, e "conector de 2 vias" casava com baioneta, KK, borne e
+   circular MIL, todos com a mesma nota. Medido: 41 jumpers em 7 projetos.
+
+   QUAL DOS TRÊS VEM ESCOLHIDO, o footprint diz — a casa tem dois desenhos de jumper:
+     - com SMD no nome ("JUMPER 2 VIAS SMD", "JUMPER_2VIAS_SMD"): dois pads ovais de 0,5×1 mm a
+       1,27 mm, fechados com solda. Não cabe peça → nenhuma peça;
+     - sem SMD ("JUMPER 2 VIAS PTH", "JUMPER_2VIAS", "JUMPER_3VIAS"): barra PTH de 2,54 mm, o
+       furo da barra de pinos do almoxarifado → a barra;
+     - footprint do tamanho de um resistor ("0805") → o 0R desse tamanho.
+   As outras duas opções ficam na lista, com a confiança dizendo quando a placa muda.
+
+   AS VIAS SÃO AS DO JUMPER. O de 3 pinos (o seletor 1-2/2-3 do TCMS_Reader) recebe a barra de 3,
+   e o 0R sai da lista: dois terminais no lugar de três pinos perdem uma ligação. O sublinhado
+   vira espaço antes de ler, senão "JUMPER_3VIAS" não tem palavra nenhuma; e "[02V]" e "3V" são
+   vias — num jumper não há tensão a confundir. */
+const JUMPER = /\bJUMPER\b/;
+const BARRA = /\bBARRA DE PINOS?\b/;
+function jumperDe(sym, fp, comment, montagem){
+  const [s, f, c] = [sym, fp, comment].map(t => CX(t).replace(/_/g, ' '));
+  if (!JUMPER.test(s) && !JUMPER.test(f) && !JUMPER.test(c)) return null;
+  const emV = t => { const m = t.match(/(?<![0-9.,])0*(\d+)\s*V\b/); return m ? parseInt(m[1], 10) : null; };
+  const vias = viasDe(f, s) || emV(f) || emV(s) || viasDe(c) || 2;
+  /* o que não diz SMD é PTH: os jumpers sem SMD no nome são todos barra de 2,54 mm */
+  const mont = montagemDe(montagem, f, s, c) || 'PTH';
+  const m = f.match(IMPERIAL);
+  const encap = m ? m[1] : '';
+  const solda = (mont === 'SMD' && !encap) || /\bSOLDA|\bSOLDER/.test(s + ' ' + f + ' ' + c);
+  return { vias, mont, encap, solda };
+}
+const NOTA_JUMPER = { alta: 100, media: 70, baixa: 40 };
+function pontuaJumper(a, b){
+  const j = a.jumper;
+  const motivos = [];
+  let conf;
+  if (BARRA.test(b.familiaBase || '') && b.vias === j.vias){
+    motivos.push('jumper → barra de pinos', j.vias + ' vias');
+    if (j.mont === 'SMD'){ motivos.push('a placa muda: o jumper é SMD'); conf = 'baixa'; }
+    else { motivos.push('PTH'); conf = 'alta'; }
+  } else if (j.vias === 2 && b.tipo === 'R' && b.valor && b.valor.classe === 'R' && b.valor.n === 0){
+    motivos.push('jumper → resistor 0R');
+    const iEnc = j.encap ? (b.encaps || []).findIndex(e => mesmoEncap(j.encap, e)) : -1;
+    if (iEnc === 0){ motivos.push('encap ' + b.encaps[0]); conf = 'alta'; }
+    else if (iEnc > 0){ motivos.push('encap ' + b.encaps[iEnc] + ' (o 2º dele)'); conf = 'media'; }
+    else if (j.encap){ motivos.push('a placa muda: o jumper é ' + j.encap); conf = 'baixa'; }
+    else if (j.mont === 'PTH' && b.mont !== 'PTH'){ motivos.push('a placa muda: o jumper é PTH'); conf = 'baixa'; }
+    else conf = 'media';
+  } else return null;
+  return { pts: NOTA_JUMPER[conf] + (b.saldo > 0 ? PESO.saldo : 0), motivos, confianca: conf };
+}
+
 /* as sugestões de UM componente, da melhor para a pior */
 function sugere(perfil, cands, quantas){
   const fora = [];
@@ -490,6 +551,8 @@ function varre(comps, cands, jaAlmox){
     if (!ln.almox){
       ln.sugestoes = sugere(ln.perfil, cands, 8);
       ln.escolha = ln.sugestoes.length ? ln.sugestoes[0] : null;
+      /* jumper de solda: a recomendação é nenhuma peça, e a barra e o 0R ficam na lista */
+      if (ln.perfil.jumper && ln.perfil.jumper.solda) ln.escolha = null;
       /* SÓ alta e média vêm marcadas. Uma recomendação de confiança baixa é um ponto de
          partida para a busca, não uma resposta — se ela viesse marcada, um "Aplicar tudo"
          trocaria o projeto inteiro por palpites, e desfazer isso é reabrir 300 linhas. */
@@ -688,6 +751,9 @@ const CSS = `
 #cvmodal .pill.media{border-color:var(--warn,#ef6c00); color:var(--warn,#ffb74d);}
 #cvmodal .pill.baixa{border-color:rgba(var(--tint,109,76,65),.28); color:var(--fg-dim,#bcaaa4);}
 #cvmodal .pill.nada{border-color:var(--err,#b71c1c); color:var(--err,#ef9a9a);}
+/* jumper na solda: nenhuma peça é uma das três respostas da regra, não a falta de uma -- a cor
+   é a da decisão tomada, e não a do alarme */
+#cvmodal .pill.solda{border-color:var(--ok,#2e7d32); color:var(--ok,#81c784);}
 #cvmodal .cv-vazio{padding:26px 6px; text-align:center; color:var(--fg-dim,#9a9a9a); font-size:12px;}
 #cvmodal .cv-aviso{font-size:11px; padding:7px 9px; border-radius:4px; margin:9px 0;
   border:1px solid var(--border,#3a3a3a); border-left:3px solid var(--warn,#ffd54f);
@@ -792,10 +858,15 @@ function varreFolha(){
 }
 
 /* ── pintura ── */
+/* o jumper sem peça: é uma das três respostas da regra (jumperDe) — a recomendação do jumper de
+   solda, ou a escolha da pessoa entre as três —, e não a falta de sugestão. Só é "nada" quando
+   o jumper pede peça e o almoxarifado não tem nem a barra nem o 0R. */
+const naSolda = ln => !ln.almox && !ln.escolha && !!ln.perfil.jumper
+  && (ln.perfil.jumper.solda || ln.sugestoes.length > 0);
 const PASSA = {
   pend: ln => !ln.almox,
   marc: ln => !ln.almox && ln.marcado && ln.escolha,
-  sem: ln => !ln.almox && !ln.escolha,
+  sem: ln => !ln.almox && !ln.escolha && !naSolda(ln),
   tudo: () => true,
 };
 function visiveis(){
@@ -906,8 +977,8 @@ function linha(ln){
   row.append(vai);
 
   const conf = el('div', 'cv-conf');
-  conf.append(el('span', 'pill ' + (ln.almox ? 'ja' : ln.escolha ? ln.escolha.confianca : 'nada'),
-                 ln.almox ? 'almox' : ln.escolha ? ln.escolha.confianca : 'nada'));
+  const pill = ln.almox ? 'ja' : ln.escolha ? ln.escolha.confianca : naSolda(ln) ? 'solda' : 'nada';
+  conf.append(el('span', 'pill ' + pill, ln.almox ? 'almox' : pill));
   row.append(conf);
   return row;
 }
@@ -1016,7 +1087,8 @@ function seletor(ln){
     const cx = el('div', cls);
     const b = el('button', 'cv-esc');
     b.type = 'button';
-    b.append(alvo ? opcaoRow(alvo) : el('span', 'nada', '— não trocar —'));
+    b.append(alvo ? opcaoRow(alvo)
+      : el('span', 'nada', ln.perfil.jumper ? '— nenhuma peça: jumper na solda —' : '— não trocar —'));
     /* DEPOIS do append da linha: o `extra` acrescenta a seta, e ela tem de ser o último
        filho. Rodando antes, a seta virava o primeiro item da faixa e subia para cima do
        nome — que foi exatamente o que aconteceu na primeira tentativa. */
@@ -1073,6 +1145,16 @@ function seletor(ln){
 
 function semSugestao(ln){
   const box = el('div', 'pq');
+  const j = ln.perfil.jumper;
+  if (j){
+    /* o "mais perto" não vale para o jumper: fora das três opções, só a busca à mão */
+    const opcoes = 'barra de pinos de ' + j.vias + ' vias' + (j.vias === 2 ? ' ou resistor 0R' : '');
+    box.textContent = !naSolda(ln)
+      ? 'o almoxarifado não tem ' + opcoes + ' — procure abaixo ou deixe na solda'
+      : ln.sugestoes.length ? 'jumper na solda: não leva peça. Se levar: ' + opcoes + ', na lista'
+      : 'jumper na solda: não leva peça';
+    return box;
+  }
   const perto = aproxima(ln.perfil, ST.cands, 3);
   if (!perto.length){
     box.textContent = 'nada compatível no almoxarifado — procure abaixo ou deixe como está';
@@ -1167,7 +1249,7 @@ function atualizaRodape(){
   cont('cvCont', ST.linhas.length + ' tipos · '
        + ST.linhas.reduce((x, l) => x + l.partes, 0) + ' componentes · '
        + (ja ? ja + ' já do almoxarifado · ' : '')
-       + fora.filter(l => !l.escolha).length + ' sem sugestão');
+       + fora.filter(l => !l.escolha && !naSolda(l)).length + ' sem sugestão');
   cont('cvEstado', marc.length
     ? marc.length + (marc.length === 1 ? ' linha marcada' : ' linhas marcadas')
       + ' · ' + comps + (comps === 1 ? ' componente' : ' componentes')
