@@ -342,4 +342,30 @@ for (const lixo of [null, undefined, 'nada', 42, [], { naoExiste:'K' }, { fio:''
   }
 }
 
+/* ── o fio debaixo do clique: a conta do hitTest, e a do botão "só fios" da barra ──
+   (o modo só fios ignora pino, designador e corpo, mas tem de pegar o fio do MESMO jeito que o
+   modo normal pega quando não há nada por cima) */
+{
+  const W = [fio([[0,0],[1000,0],[1000,500]]), fio([[2000,0],[2000,800]])];
+  assert.deepStrictEqual(SF.fioNoPonto(W, 500, 10, 0), { wi:0, seg:0, vert:null },
+    'no meio do trecho: o fio e o trecho, sem vértice');
+  assert.deepStrictEqual(SF.fioNoPonto(W, 1010, 300, 0), { wi:0, seg:1, vert:null }, 'o segundo trecho');
+  assert.deepStrictEqual(SF.fioNoPonto(W, 2005, 400, 0), { wi:1, seg:0, vert:null }, 'o segundo fio');
+  /* no canto, os dois trechos estão a menos de 20: o primeiro achado manda, e o vértice ganha */
+  assert.deepStrictEqual(SF.fioNoPonto(W, 995, 5, 0), { wi:0, seg:0, vert:1 }, 'na alcinha do canto: o vértice');
+  assert.deepStrictEqual(SF.fioNoPonto(W, 3, -4, 0), { wi:0, seg:0, vert:0 }, 'na ponta inicial: o vértice 0');
+  assert.deepStrictEqual(SF.fioNoPonto(W, 1000, 512, 0), { wi:0, seg:1, vert:2 }, 'na ponta final: o último vértice');
+  /* as tolerâncias: 20 para o trecho, 22 para o vértice, ou o que o zoom pedir se for mais */
+  assert.ok(SF.fioNoPonto(W, 500, 20, 0), '20 mil do trecho ainda pega');
+  assert.strictEqual(SF.fioNoPonto(W, 500, 21, 0), null, '21 mil do trecho não pega');
+  assert.strictEqual(SF.fioNoPonto(W, 500, 40, 0), null, 'longe de todo fio: null');
+  assert.ok(SF.fioNoPonto(W, 500, 40, 50), 'com o zoom afastado a tolerância cresce');
+  assert.strictEqual(SF.fioNoPonto(W, 21, 0, 0).vert, 0, 'a 21 da ponta: dentro dos 22 do vértice');
+  assert.strictEqual(SF.fioNoPonto(W, 23, 0, 0).vert, null, 'a 23 da ponta: só o trecho');
+  /* folha sem fio, fio de um ponto só e lista ausente não quebram */
+  assert.strictEqual(SF.fioNoPonto([], 0, 0, 0), null);
+  assert.strictEqual(SF.fioNoPonto([fio([[0,0]])], 0, 0, 0), null, 'fio de um ponto não tem trecho');
+  assert.strictEqual(SF.fioNoPonto(undefined, 0, 0, 0), null);
+}
+
 console.log('test-fio-topologia: OK');

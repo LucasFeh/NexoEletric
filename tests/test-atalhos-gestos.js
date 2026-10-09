@@ -27,6 +27,14 @@ const doFio = G.filter(g => g.teclas.some(t => t === 'Espaço' || t === 'Backspa
 assert.ok(doFio.length >= 3, 'as teclas do fio estão na tabela');
 for (const g of doFio) assert.ok(/fio na mão/.test(g.quando || ''), g.rotulo + ': quando = fio na mão');
 for (const g of G) assert.ok(g.quando === undefined || (typeof g.quando === 'string' && g.quando), g.rotulo + ': quando é texto');
+/* o "só fios" é um botão da barra: o clique e o laço dele valem SÓ com ele ligado — sem o
+   `quando`, a tabela diria que todo clique passa por cima do componente */
+{
+  const so = G.filter(g => /só fios/.test(g.quando || ''));
+  assert.ok(so.some(g => /fio/.test(g.rotulo) && g.teclas.join('+') === 'Clique'), 'só fios: o clique pega o fio');
+  assert.ok(so.some(g => g.teclas.join('+') === 'Arrastar no vazio'), 'só fios: o laço');
+  assert.ok(!G.some(g => /componente por cima/.test(g.rotulo) && !g.quando), 'pegar o fio por baixo do componente não é gesto do Selecionar normal');
+}
 
 /* ══ AS DUAS VISTAS ══ */
 
