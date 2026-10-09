@@ -53,6 +53,8 @@ const ATALHOS_SCH = [
   { id:'girar',     tecla:'Espaço', rotulo:'Girar 90°' },
   { id:'espelhoX',  tecla:'X',      rotulo:'Espelhar na horizontal' },
   { id:'espelhoY',  tecla:'Y',      rotulo:'Espelhar na vertical' },
+  /* so no meio do arrasto (schframe.js » rotearNoArrasto); parado, a tecla nao faz nada */
+  { id:'rotear',    tecla:'D',      rotulo:'Rotear o componente arrastado até os fios alinhados' },
   { id:'apagar',    tecla:'Delete', rotulo:'Apagar a seleção' },
   { id:'enquadrar', tecla:'F',      rotulo:'Enquadrar a folha' },
   { id:'grade',     tecla:'B',      rotulo:'Mostrar/ocultar a grade' },
