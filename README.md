@@ -770,11 +770,21 @@ ao **Salvar** da vista PCB.
 > nada quebra quando isso acontecer.
 
 
-### Biblioteca » Símbolos — editar o símbolo e gravar na SchLib do Altium
+### Biblioteca » Componentes e Símbolos — o editor de símbolos
 
-A sub-aba **Símbolos** (ao lado de Footprints) é um editor de símbolos de esquema sobre o
-espelho do Altium, com a gramática do próprio Altium. À esquerda, a lista e a busca dos
-componentes do espelho (a mesma da sub-aba Sch Lib); no meio, o canvas; à direita, as
+A Biblioteca tem quatro sub-abas: **Geral · Componentes · Footprints · Símbolos**.
+**Componentes** e **Símbolos** são o mesmo editor de símbolos de esquema, com a gramática do
+próprio Altium, em dois modos (pedido do dono em 2026-10-09):
+
+- **Componentes** (até 2026-10-09 se chamava Símbolos) edita o desenho de um **componente** e
+  aplica a ele um símbolo da biblioteca. A lista e a busca são as da esquerda da Biblioteca,
+  as mesmas da Geral e da Footprints. É para ela que o `#/libsym` e o *Editar símbolo ↗* da
+  vista Esquema levam, já na família e no componente.
+- **Símbolos** serve só para criar e editar os **símbolos** da biblioteca de símbolos
+  (detalhes abaixo). A lista da esquerda da Biblioteca sai, e no lugar dela fica a lista dos
+  símbolos.
+
+Nos dois, o meio é o canvas e, à direita, ficam as
 ferramentas em ícones (selecionar, linha, retângulo, polilinha, polígono, arco, elipse,
 texto, pino, excluir; girar, espelhar, enquadrar, grade) e a ficha no estilo do painel
 Properties: o tipo e o nome, os ícones de virar pino/linha (`K`), duplicar e excluir, X e Y
@@ -794,16 +804,19 @@ casas, que é o que o Altium e o espelho falam. O pino é desenhado como no Alti
 grosso e a marca "::" na ponta quente) e a ficha avisa quando a ponta quente está fora do
 snap escolhido.
 
-Embaixo do canvas fica a **Biblioteca de símbolos**: um acervo só de desenhos — sem valor,
-sem footprint. **Símbolo não é componente**: o símbolo é o desenho; o componente é a peça do
-almoxarifado que o *usa*, e a linha da lista da esquerda (`CAPACITOR ELETROLITICO [PTH]`) é a
-**categoria** que agrupa os componentes. Arraste um símbolo para o canvas (numa parte vazia ele
-entra na origem; numa parte com desenho, entra onde soltou, selecionado, renumerando os pinos
-que colidem) ou use **Aplicar**, cujo texto diz onde o desenho vai cair:
+Na aba Componentes, embaixo do canvas fica a **Biblioteca de símbolos**: um acervo só de
+desenhos — sem valor, sem footprint. **Símbolo não é componente**: o símbolo é o desenho; o
+componente é a peça do almoxarifado que o *usa*, e a linha da lista da esquerda
+(`CAPACITOR ELETROLITICO [PTH]`) é a **categoria** que agrupa os componentes. Arraste um
+símbolo para o canvas (numa parte vazia ele entra na origem; numa parte com desenho, entra onde
+soltou, selecionado, renumerando os pinos que colidem) ou use um dos dois botões da faixa — os
+únicos dela, que nunca somem: travados, o *title* diz por quê (nenhum símbolo marcado, nenhum
+componente aberto, categoria sem componentes, hub sem servidor):
 
-- **Aplicar ao componente** — com um componente aberto (aba *Componentes* da faixa): troca o
-  desenho dele no canvas; *Salvar* grava.
-- **Aplicar à categoria…** — com a categoria aberta: abre a lista dos componentes dela, todos
+- **Aplicar símbolo ao componente** — com um componente aberto (aba *Componentes* da faixa, ou
+  um símbolo do espelho do Altium, que é o próprio componente): troca o desenho dele no canvas;
+  *Salvar* grava. O duplo clique num símbolo faz o mesmo.
+- **Aplicar símbolo à categoria…** — com a categoria aberta: abre a lista dos componentes dela, todos
   marcados, para conferir e desmarcar, e grava todos de uma vez (espelho, `.SchLib` da família
   e `lib-ledger.json`, numa passada só: `POST /api/symbols/almox-aplicar`). As outras linhas da
   mesma família (o `[SMD]` do `[PTH]`) aparecem embaixo, desmarcadas, a um clique. Componente
@@ -825,18 +838,31 @@ gerador** (o PNP da família TRANSISTOR, o conector por vias) também vem desmar
 **pinagem nunca muda calada**: componente com outra contagem de pinos só recebe o símbolo se for
 marcado à mão, e o servidor recusa sem esse pedido.
 
-O **botão direito** num símbolo abre o cardápio dele: *Editar símbolo*, *Aplicar…*,
-*Renomear…* e *Excluir símbolo…*. **Editar** abre o desenho do símbolo no canvas (a marca
-SÍMBOLO no topo diz que não é um componente) e *Salvar símbolo* grava na biblioteca; se ele já
-estava aplicado, o hub pergunta se leva o desenho novo aos componentes que ainda têm o desenho
-de antes (salvar só a descrição não pergunta nada; quem teria a pinagem trocada fica de fora, e
-o hub diz quantos) — o vínculo fica no ledger (`protegidos[família][componente].lib` e
-`padroes[categoria]`), e salvar um componente à mão desfaz o vínculo dele. **+ Novo símbolo**
-começa um símbolo em branco, com nome, que entra na biblioteca no primeiro *Salvar símbolo*;
-**Guardar como símbolo** guarda o desenho que está no canvas como um símbolo novo. **Excluir**
-tira o símbolo da biblioteca de vez — a extração não o traz de volta — e os componentes que o
-usavam ficam com o desenho, só sem o vínculo; a categoria de que ele era o padrão continua com
-esse desenho como padrão.
+O **botão direito** num símbolo da faixa tem os mesmos dois aplicar (travados com o porquê
+quando não valem) e **Editar na aba Símbolos**, que troca de aba com aquele símbolo aberto.
+
+**Na aba Símbolos**, a esquerda é a lista da biblioteca de símbolos: a miniatura e o nome de cada um, com um filtro
+que acha por nome, apelido, tipo (genérico ou CI) e descrição — a mesma busca da faixa da aba
+Componentes. **+ Novo símbolo**, no topo, começa um símbolo em branco, com nome, que entra na
+biblioteca no primeiro *Salvar símbolo*. Clicar numa linha abre o desenho no canvas (a marca
+SÍMBOLO no topo diz que não é um componente), e a ficha da direita é a do símbolo.
+
+*Salvar símbolo* grava na biblioteca; se ele já estava aplicado, o hub pergunta se leva o
+desenho novo aos componentes que ainda têm o desenho de antes (salvar só a descrição não
+pergunta nada; quem teria a pinagem trocada fica de fora, e o hub diz quantos) — o vínculo fica
+no ledger (`protegidos[família][componente].lib` e `padroes[categoria]`), e salvar um
+componente à mão desfaz o vínculo dele. **Salvar como…** grava o desenho do canvas como um
+símbolo novo, com outro nome, e passa a editar a cópia; o de origem fica como estava gravado.
+A biblioteca guarda cada desenho uma vez só, então uma cópia idêntica é recusada: mude o
+desenho antes. **Renomear…** e **Excluir…** ficam na ficha, e os três também no botão direito
+da linha. **Excluir** tira o símbolo da biblioteca de vez — a extração não o traz de volta — e
+os componentes que o usavam ficam com o desenho, só sem o vínculo; a categoria de que ele era o
+padrão continua com esse desenho como padrão. Excluir o símbolo aberto o deixa no canvas como
+símbolo novo não salvo, para quem excluiu por engano salvá-lo de volta.
+
+Trocar entre Componentes e Símbolos com edição não salva pergunta antes, num modal; cancelar
+deixa a aba e o desenho onde estavam. Nada do canvas atravessa a troca, e voltar à aba Símbolos
+reabre o último símbolo aberto nela.
 
 Aplicar e salvar componente são recusados (409) enquanto a **sincronização** do almoxarifado
 roda, e editar a biblioteca de símbolos enquanto a **extração** roda: as duas são subprocessos
@@ -844,7 +870,7 @@ que regravam no fim o que leram no começo, e desfariam a gravação calados. De
 sincronização, o componente protegido pelo hub cujo desenho o gerador refez (conector por vias,
 PNP) volta ao desenho do hub também no espelho — antes só a `.SchLib` o recebia.
 
-**Salvar** grava em dois lugares de uma vez: `Libs/schlib.js` (o espelho que o hub desenha) e,
+Na aba Componentes, **Salvar** grava em dois lugares de uma vez: `Libs/schlib.js` (o espelho que o hub desenha) e,
 com a caixa *Altium* marcada, a SchLib da casa — a viva, resolvida pela ordem de
 **Onde está a biblioteca da casa**; onde só existe a cópia publicada (o servidor), esse
 segundo passo é recusado com **409** e só o espelho é gravado —,
