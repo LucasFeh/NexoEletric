@@ -1,8 +1,16 @@
-/* AltiumPCBMirror v2 - hub-libview.js — as 3 vistas da aba Biblioteca.
+/* AltiumPCBMirror v2 - hub-libview.js — as 4 vistas da aba Biblioteca.
  *
- *   GERAL       o que a aba sempre mostrou: o símbolo em cima, o footprint embaixo.
- *   SÍMBOLOS    o editor de símbolos, mas dirigido pela MESMA busca das outras duas.
- *   FOOTPRINTS  a lista de footprints, para vincular UM a um componente.
+ *   GERAL        o que a aba sempre mostrou: o símbolo em cima, o footprint embaixo.
+ *   COMPONENTES  o editor de símbolos no modo componente, dirigido pela MESMA busca da Geral
+ *                e da Footprints. Até 2026-10-09 esta vista se chamava Símbolos.
+ *   FOOTPRINTS   a lista de footprints, para vincular UM a um componente.
+ *   SÍMBOLOS     o MESMO editor, no modo símbolo: só para criar e editar os símbolos da
+ *                biblioteca de símbolos (Libs/symbols-lib.js), com a lista deles à esquerda.
+ *
+ * COMPONENTES E SÍMBOLOS SÃO UM EDITOR SÓ (pedido do dono, 2026-10-09: "a aba Símbolos serve
+ * única e exclusivamente para editar símbolos"). O HubSymEd é singleton, então as duas abas
+ * são MODOS dele (HubSymEd.modo), e trocar de uma para a outra com edição não salva pergunta
+ * antes — quem decide é o editor, que é quem sabe se há o que perder.
  *
  * A REGRA QUE DEU ORIGEM A ISTO (pedido do dono, 2026-09-17): todo componente da biblioteca
  * tem EXATAMENTE UM footprint vinculado. Ela é garantida no servidor
@@ -22,7 +30,9 @@
  * A BUSCA NÃO É DAQUI. Ela continua sendo a da esquerda, do `hub.html`, exatamente como
  * antes — foi pedido explícito ("a busca pelos componentes continua exatamente como é
  * hoje"). Trocar de sub-aba muda só o CENTRO; a lista da esquerda e o que está selecionado
- * nela atravessam a troca.
+ * nela atravessam a troca. A exceção é a vista Símbolos: a lista da casca é de COMPONENTES,
+ * e ali o que se escolhe é um símbolo — ela some (com a coluna dela) e o editor mostra a
+ * lista própria, a da biblioteca de símbolos.
  */
 "use strict";
 var HubLibView = (function () {
@@ -61,30 +71,35 @@ const CSS = `
 /* FORA DA GERAL, SÓ A VISTA DA VEZ — declarativo, e não a disputa de hidden que eu vinha
    perdendo. O hub.html tem vários donos do hidden dessas peças (libPainelDeBaixo, os ~16
    chamadores de renderLib, e o próprio redesenha que este módulo dispara ao vincular), e
-   cada um deles reexibia a caixa de valores por cima da vista Símbolos. Com a regra na
+   cada um deles reexibia a caixa de valores por cima da vista Componentes. Com a regra na
    CLASSE que este módulo controla, todos os caminhos fecham de uma vez — inclusive os que
    alguém escrever amanhã. O laço de aplicaVisibilidade fica como cinto e suspensório. */
 .lib-view.lv-outra > :not(.lv-tabs):not(#symed):not(#lvFootprints){display:none !important;}
 /* o footprint é desenhado em fundo escuro, como na vista Geral — ver desenhaTile */
 .lv-fp .symed-tile canvas{background:var(--sunken,#14161a);}
 
-/* A FICHA DA DIREITA SÓ EXISTE NA VISTA GERAL. Em Símbolos o editor já tem o painel dele
-   (e os dois mostravam componentes DIFERENTES, porque o editor abre o seu e a ficha segue a
-   seleção da lista); em Footprints o cabeçalho "vincular a X" já diz o alvo. Esconder o
-   aside não basta: a coluna dele é uma faixa fixa do grid e continuaria reservada, deixando
-   um buraco — por isso a grade perde a terceira coluna junto. */
+/* A FICHA DA DIREITA SÓ EXISTE NA VISTA GERAL. Em Componentes e Símbolos o editor já tem o
+   painel dele (e os dois mostravam componentes DIFERENTES, porque o editor abre o seu e a
+   ficha segue a seleção da lista); em Footprints o cabeçalho "vincular a X" já diz o alvo.
+   Esconder o aside não basta: a coluna dele é uma faixa fixa do grid e continuaria
+   reservada, deixando um buraco — por isso a grade perde a terceira coluna junto. */
 .lib-grid.lv-sem-ficha{grid-template-columns:minmax(300px,0.95fr) minmax(320px,1.25fr);}
 #libDetail[hidden]{display:none !important;}
+/* NA VISTA SÍMBOLOS A LISTA DA CASCA SAI, com a coluna dela, pelo mesmo motivo da ficha: a
+   lista de símbolos é a do editor, que ocupa a grade inteira. Depois da regra de cima de
+   propósito: as duas valem juntas fora da Geral, e com a mesma força ganha a última. */
+.lib-grid.lv-sem-lista{grid-template-columns:minmax(0,1fr);}
+.lib-grid.lv-sem-lista > .lib-left{display:none !important;}
 
-/* UMA BUSCA SÓ. Dentro da Biblioteca o editor de símbolos perde a coluna de busca dele: a
-   lista da esquerda serve as três vistas, e duas caixas "Buscar símbolo" na mesma tela era
-   justamente o que o dono mandou tirar. A coluna e a divisória somem juntas, e os trilhos 1
-   e 2 fecham em zero — o .symed-grid prende cada filho ao seu grid-column, então deixar a
-   faixa aberta deixaria um vão.
-   Só aqui dentro: aberto pela aba própria, o editor continua com a busca dele. */
-.lib-view #symed .symed-grid{grid-template-columns:0 0 minmax(240px,1fr) 6px var(--symed-r, var(--aside-w));}
-.lib-view #symed .symed-grid > .lib-left,
-.lib-view #symed .symed-grid > [data-split="l"]{display:none !important;}
+/* UMA BUSCA SÓ. Na vista Componentes o editor perde a coluna de busca dele: a lista da
+   esquerda serve Geral, Componentes e Footprints, e duas caixas "Buscar símbolo" na mesma
+   tela era justamente o que o dono mandou tirar. A coluna e a divisória somem juntas, e os
+   trilhos 1 e 2 fecham em zero — o .symed-grid prende cada filho ao seu grid-column, então
+   deixar a faixa aberta deixaria um vão.
+   No modo símbolos (a vista Símbolos) a coluna volta: é nela que mora a lista de símbolos. */
+.lib-view #symed:not(.symed-modo-simbolos) .symed-grid{grid-template-columns:0 0 minmax(240px,1fr) 6px var(--symed-r, var(--aside-w));}
+.lib-view #symed:not(.symed-modo-simbolos) .symed-grid > .lib-left,
+.lib-view #symed:not(.symed-modo-simbolos) .symed-grid > [data-split="l"]{display:none !important;}
 
 /* o centro da sub-aba Footprints */
 .lv-fp{display:flex; flex-direction:column; height:100%; min-height:0;}
@@ -167,7 +182,13 @@ function el(tag, cls, txt){
   return n;
 }
 
-const ABAS = [['geral', 'Geral'], ['simbolos', 'Símbolos'], ['footprints', 'Footprints']];
+/* "simbolos" mudou de dono em 2026-10-09: era o id da vista que hoje é Componentes. Quem
+   chamava ir('simbolos') para chegar no componente (o #/libsym do hub.html) passou a pedir
+   'componentes'; 'simbolos' agora é a vista nova, a do editor de símbolos. */
+const ABAS = [['geral', 'Geral'], ['componentes', 'Componentes'], ['footprints', 'Footprints'],
+              ['simbolos', 'Símbolos']];
+/* as duas vistas que mostram o editor (#symed), cada uma num modo dele */
+const DO_EDITOR = { componentes: true, simbolos: true };
 
 const ST = {
   aba: 'geral',
@@ -180,7 +201,7 @@ const ST = {
 
 let API = null;       /* o que a casca entregou no instala() */
 
-/* ── as três vistas do centro ──
+/* ── as quatro vistas do centro ──
    Só uma fica visível. As peças da vista GERAL são as que o hub.html já desenha (os dois
    canvas e a caixa de valores): não se recria nada, só se esconde — o `renderLib` da casca
    continua mandando nelas, e assim voltar para Geral não precisa redesenhar. */
@@ -188,11 +209,11 @@ function trocaCentro(){
   const centro = API && API.centro && API.centro();
   if (!centro) return;
 
-  /* A vista SÍMBOLOS traz o `#symed` para dentro do centro (a casca move o nó). Ele fica
-     aqui depois de vir, então a partir da segunda vez é só mostrar/esconder — por isso as
-     peças da vista Geral são reconhecidas por exclusão, e não por uma lista de ids que
-     envelheceria junto com o hub.html. */
-  if (ST.aba === 'simbolos' && API.montaEditor) API.montaEditor(centro);
+  /* As vistas COMPONENTES e SÍMBOLOS trazem o `#symed` para dentro do centro (a casca move o
+     nó). Ele fica aqui depois de vir, então a partir da segunda vez é só mostrar/esconder —
+     por isso as peças da vista Geral são reconhecidas por exclusão, e não por uma lista de
+     ids que envelheceria junto com o hub.html. */
+  if (DO_EDITOR[ST.aba] && API.montaEditor) API.montaEditor(centro);
   else if (API.escondeEditor) API.escondeEditor();
 
   let meu = centro.querySelector('#lvFootprints');
@@ -205,7 +226,9 @@ function trocaCentro(){
     pintaFootprints();
     if (ST.fps === null && !ST.carregando) carregaFps();
   }
-  if (ST.aba === 'simbolos' && API.abreEditor){
+  /* só a vista Componentes abre no editor o que está selecionado na lista da casca: na
+     Símbolos a lista é a do editor, e abrir a categoria ali jogaria fora o símbolo em edição */
+  if (ST.aba === 'componentes' && API.abreEditor){
     const s = API.sel && API.sel();
     if (s && (s.k === 'sym' || s.k === 'gone-sym')){ ultimoAberto = s.name; API.abreEditor(s.name); }
   }
@@ -217,7 +240,8 @@ function trocaCentro(){
    Precisa rodar sempre porque o `renderLib` do hub.html RE-EXIBE as peças da vista Geral
    (o #libValBox e a barra de footprint) a cada desenho: ele não sabe que existe uma vista
    por cima. Sem reaplicar, bastava digitar na busca da esquerda para a caixa de valores
-   reaparecer no topo da vista Símbolos, empilhada com o editor — que foi o que o dono viu. */
+   reaparecer no topo da vista Componentes (então Símbolos), empilhada com o editor — que
+   foi o que o dono viu. */
 function aplicaVisibilidade(){
   const centro = API && API.centro && API.centro();
   if (!centro) return;
@@ -233,14 +257,18 @@ function aplicaVisibilidade(){
   const meu = centro.querySelector('#lvFootprints');
   if (meu) meu.hidden = (ST.aba !== 'footprints');
   const ed = document.getElementById('symed');
-  if (ed && ed.closest('.lib-view')) ed.hidden = (ST.aba !== 'simbolos');
+  if (ed && ed.closest('.lib-view')) ed.hidden = !DO_EDITOR[ST.aba];
   /* a grade de 4 painéis só faz sentido na vista Geral (ver .lv-outra no CSS) */
   centro.classList.toggle('lv-outra', !soGeral);
   /* e a ficha da direita idem — com a coluna dela, senão sobra o buraco */
   const aside = API.detalhe && API.detalhe();
   if (aside) aside.hidden = !soGeral;
   const grade = centro.parentElement;
-  if (grade && grade.classList) grade.classList.toggle('lv-sem-ficha', !soGeral);
+  if (grade && grade.classList){
+    grade.classList.toggle('lv-sem-ficha', !soGeral);
+    /* na vista Símbolos a lista da casca sai também: ela é de componentes (ver o CSS) */
+    grade.classList.toggle('lv-sem-lista', ST.aba === 'simbolos');
+  }
 }
 
 /* ── as sub-abas, no topo do CENTRO ──
@@ -260,7 +288,7 @@ function pintaAbas(){
   for (const [id, rotulo] of ABAS){
     const b = el('button', null, rotulo);
     b.setAttribute('aria-pressed', String(ST.aba === id));
-    b.onclick = () => { ST.aba = id; pintaAbas(); trocaCentro(); };
+    b.onclick = () => ir(id);
     faixa.append(b);
   }
   const n = DUP.j ? DUP.j.grupos.length : 0;
@@ -791,7 +819,23 @@ function instala(api){
   pintaAbas();
   trocaCentro();
   carregaDups(true);
+  if (!ouvindo && typeof document !== 'undefined'){
+    document.addEventListener('hub:editar-simbolo', pedidoDeEdicao);
+    ouvindo = true;
+  }
   return { aba: () => ST.aba, ir, atualiza };
+}
+
+/* "EDITAR NA ABA SÍMBOLOS" (o botão direito num tile da vista Componentes). O editor não
+   conhece esta faixa: ele só avisa, por evento, que alguém quer editar o símbolo `id`. Aqui
+   se troca de vista e se abre o símbolo. O preventDefault é o recibo — sem ninguém ouvindo, o
+   editor troca de modo sozinho (hub-symed.js » pedeEdicao). */
+let ouvindo = false;
+function pedidoDeEdicao(e){
+  const id = e && e.detail && e.detail.id;
+  if (!id || typeof HubSymEd === 'undefined' || !HubSymEd.editarLib) return;
+  e.preventDefault();
+  Promise.resolve(ir('simbolos')).then(ok => { if (ok) HubSymEd.editarLib(id); });
 }
 
 /* a casca chama quando a seleção da esquerda muda: o alvo do vínculo é aquela seleção */
@@ -807,7 +851,8 @@ function atualiza(){
   carregaDups(false);                   /* no máximo uma vez a cada 30 s: depois de um sync */
   aplicaVisibilidade();                 /* barato, e desfaz o que o renderLib re-exibiu */
   if (ST.aba === 'footprints'){ pintaFootprints(); return; }
-  if (ST.aba !== 'simbolos') return;
+  /* na vista Símbolos a seleção da casca não manda no editor: a lista dali é outra */
+  if (ST.aba !== 'componentes') return;
   /* abrir no editor é CARO (carrega a schlib, redesenha a faixa), então só quando o
      componente selecionado realmente mudou — senão cada tecla digitada na busca da
      esquerda reabriria o símbolo e o editor piscaria. */
@@ -818,10 +863,24 @@ function atualiza(){
   if (API.abreEditor) API.abreEditor(nome);
 }
 
+/* TROCAR DE VISTA PASSA PELO EDITOR quando o destino é uma das duas dele: ele é quem sabe se
+   há edição não salva, e a vista só muda se ele aceitar trocar de modo. O HubSymEd.modo
+   responde `true` NA HORA quando não precisa perguntar, e só devolve Promise quando abre o
+   modal. É de propósito: quem chama ir() pelo hub.html (o #/libsym, o "Editar símbolo" da
+   vista Esquema) segue logo com HubSymEd.abrir, e uma troca adiada para depois dele faria o
+   render da vista trocar o acervo por baixo da abertura.
+   Devolve true/false, ou a Promise disso quando houve pergunta. */
 function ir(aba){
   if (!ABAS.some(([id]) => id === aba)) return false;
+  const m = (DO_EDITOR[aba] && typeof HubSymEd !== 'undefined' && HubSymEd.modo) ? HubSymEd.modo(aba) : true;
+  const fim = ok => { if (ok) entra(aba); else pintaAbas(); return !!ok; };
+  return (m === true || m === false) ? fim(m) : Promise.resolve(m).then(fim, () => fim(false));
+}
+function entra(aba){
+  /* voltar para Componentes reabre a categoria da esquerda: o editor esvaziou a mesa ao
+     trocar de modo, e o atualiza() acha que ela continua aberta se o nome não mudou */
+  if (aba === 'componentes' && ST.aba !== 'componentes') ultimoAberto = null;
   ST.aba = aba; pintaAbas(); trocaCentro();
-  return true;
 }
 
 return { instala, ir, atualiza, estado: ST,

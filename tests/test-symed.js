@@ -770,9 +770,59 @@ assert.strictEqual(busca('  esp  ')('ESP32 30pin', ''), true, 'a consulta vem ap
 assert.strictEqual(P.filtroBusca('esp', null)('ESP32 30pin', ''), true);
 assert.strictEqual(P.filtroBusca(BS, null)('ESP32 30pin', ''), false);
 
+/* ── busca da biblioteca de símbolos: a MESMA regra na faixa e na lista da vista Símbolos ──
+   nome, apelidos, kind e descrição, sem caixa; sem consulta passa tudo; a ordem de entrada
+   fica (é a ordem da lista na tela). */
+{
+  const LIB = [
+    { id: 's0001', name: 'Resistor', kind: 'generico', aliases: ['RES', 'R'], description: 'resistor de 2 pinos' },
+    { id: 's0002', name: 'CMP-0694-00003-2', kind: 'ci', aliases: [], description: 'transceptor RS-485' },
+    { id: 's0003', name: 'LED', kind: 'generico', desc: 'diodo emissor de luz' },          /* só o desc do symlib-v1 */
+    { id: 's0004', name: 'ATmega328P', kind: 'ci' },                                       /* sem aliases nem descrição */
+  ];
+  const ids = (q) => P.filtraSimbolos(LIB, q).map(s => s.id);
+  assert.deepStrictEqual(ids(''), ['s0001', 's0002', 's0003', 's0004'], 'sem consulta passa tudo, na ordem');
+  assert.deepStrictEqual(ids('   '), ['s0001', 's0002', 's0003', 's0004'], 'só espaço é o mesmo que nada');
+  assert.deepStrictEqual(ids(null), ['s0001', 's0002', 's0003', 's0004']);
+  assert.deepStrictEqual(ids('resistor'), ['s0001'], 'pelo nome');
+  assert.deepStrictEqual(ids('RES'), ['s0001'], 'pelo apelido, sem caixa');
+  assert.deepStrictEqual(ids('rs-485'), ['s0002'], 'pela descrição: o nome é código de catálogo e não diz nada');
+  assert.deepStrictEqual(ids('emissor'), ['s0003'], 'a descrição que só tem o desc do symlib-v1 também acha');
+  assert.deepStrictEqual(ids('ci'), ['s0002', 's0004'], 'pelo kind');
+  assert.deepStrictEqual(ids('  atmega  '), ['s0004'], 'a consulta vem aparada');
+  assert.deepStrictEqual(ids('nada-disso'), []);
+  assert.deepStrictEqual(P.filtraSimbolos(null, 'x'), [], 'lista ausente não explode');
+  const copia = P.filtraSimbolos(LIB, '');
+  assert.notStrictEqual(copia, LIB, 'devolve lista nova: quem filtra depois não mexe na biblioteca');
+}
+
+/* ── os dois modos do editor (as vistas Componentes e Símbolos da Biblioteca) ──
+   Sem edição não salva a troca é NA HORA (true, não Promise): o hub-libview.js troca a vista
+   no mesmo instante. Nada da mesa atravessa a troca. (Com edição, a pergunta é um modal — o
+   navegador prova.) */
+{
+  const S = M.state;
+  assert.strictEqual(S.modo, 'componentes', 'nasce no modo componentes');
+  assert.strictEqual(M.modo('qualquer'), false, 'modo desconhecido é recusado');
+  S.sel = 'X'; S.draft = { name: 'X', parts: [{ part: 1, pins: [], graphics: [] }] }; S.dirty = false;
+  assert.strictEqual(M.modo('componentes'), true, 'o mesmo modo: nada a fazer');
+  assert.strictEqual(S.draft.name, 'X', 'e a mesa fica');
+  assert.strictEqual(M.modo('simbolos'), true, 'sem edição, troca na hora');
+  assert.strictEqual(S.modo, 'simbolos');
+  assert.strictEqual(S.draft, null, 'o componente não atravessa para o modo símbolos');
+  assert.strictEqual(S.sel, null);
+  S.libEd = { id: 's0001' }; S.draft = { name: 'Resistor', parts: [{ part: 1, pins: [], graphics: [] }] };
+  assert.strictEqual(M.modo('componentes'), true);
+  assert.strictEqual(S.libEd, null, 'no modo componentes não existe símbolo em edição');
+  assert.strictEqual(S.ultimoLib, 's0001', 'o símbolo aberto é lembrado para a volta');
+  assert.strictEqual(M.dirty(), false);
+  S.ultimoLib = null;
+}
+
 /* ── os modais existem como função (o navegador prova o resto) ── */
 assert.strictEqual(typeof M.confirmar, 'function');
 assert.strictEqual(typeof M.pedirTexto, 'function');
+assert.strictEqual(typeof M.editarLib, 'function');
 assert.strictEqual(M.cam(), null, 'sem canvas não há câmera');
 
-console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum, itemsInBox, moveItems, duplicateItems, seleção × apagar/desfazer, mm↔mil, snap em mm, linha↔pino, insertLibSymbol, pinSnapOf mmc, len do pino, 30 setas/duplicações sem deriva, Preencher, cores, busca da lista)');
+console.log('test-symed OK (snap, hitTest, moveItem, rotateAll, mirrorAll, serializeSymbol, applyLibSymbol, nextPinNum, itemsInBox, moveItems, duplicateItems, seleção × apagar/desfazer, mm↔mil, snap em mm, linha↔pino, insertLibSymbol, pinSnapOf mmc, len do pino, 30 setas/duplicações sem deriva, Preencher, cores, busca da lista, busca da biblioteca de símbolos, modos do editor)');

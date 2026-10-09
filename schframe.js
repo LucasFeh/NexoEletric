@@ -4553,7 +4553,7 @@ function symSelecionar(c){
   symDesenha();
   symAtualizaInfo();
   symAtualizaBotao();
-  if (apFam) $('symEditar').title = 'abre "' + apFam.familia + '" na aba Biblioteca » Símbolos'
+  if (apFam) $('symEditar').title = 'abre "' + apFam.familia + '" na aba Biblioteca » Componentes'
     + (c ? ', já no componente "' + c.name + '"' : '');
 }
 
@@ -4631,7 +4631,7 @@ function escolheFamilia(g){
   apFam = g;
   const b = $('symEditar');
   b.hidden = !g;
-  if (g) b.title = 'abre "' + g.familia + '" na aba Biblioteca » Símbolos'
+  if (g) b.title = 'abre "' + g.familia + '" na aba Biblioteca » Componentes'
                  + (symEscolhido ? ', já no componente "' + symEscolhido.name + '"' : '');
   if (!g) return;
   /* a escolha fica so se ESTA familia tem o valor escolhido — o mesmo objeto, quando o
@@ -4893,13 +4893,13 @@ async function perguntaAtribuir(emg, para){
   const ac = ACERVO_DE.get(para);
   if (ac && ac.almox){
     HubDialog.toast('"' + para + '" é do almoxarifado: o desenho dele vem do sincronismo — '
-                    + 'para gravar, use a aba Biblioteca » Símbolos', 'warn', 7000);
+                    + 'para gravar, use a aba Biblioteca » Componentes', 'warn', 7000);
     return;
   }
   const nPartes = (alvo.parts || []).length || 1;
   if (nPartes > 1){
     HubDialog.toast('"' + para + '" tem ' + nPartes + ' partes — atribuir o desenho de uma só '
-                    + 'apagaria as outras; use a aba Biblioteca » Símbolos', 'warn', 7000);
+                    + 'apagaria as outras; use a aba Biblioteca » Componentes', 'warn', 7000);
     return;
   }
   const atual = HubCore.partOf(alvo, 1) || { pins:[], graphics:[] };

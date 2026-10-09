@@ -27,7 +27,7 @@
      cima de tudo, inclusive do iframe das vistas. Por isso UM lançador aqui cobre todas as
      telas, e nada precisa ser duplicado dentro do schframe/pcbframe. -->
 <script src="hub-chat.js"></script>
-<!-- editor de símbolos (sub-aba Símbolos da Biblioteca) -->
+<!-- editor de símbolos (sub-abas Componentes e Símbolos da Biblioteca) -->
 <script src="hub-symed.js"></script>
 <script src="hub-libview.js"></script>
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
@@ -1393,17 +1393,18 @@ function renderPipeline() {
   pend.hidden = !p.pending; pend.textContent = t('proj.pending', { n: p.pending });
 }
 
-/* "libsym" NAO E MAIS UMA ABA -- virou a vista Simbolos dentro da Biblioteca (2026-09-17).
-   Continua sendo aceito como APELIDO porque ele existe fora deste arquivo: o menu de
-   contexto do acervo, o "editar simbolo" da vista Esquema e as duas janelas novas que
-   abrem com #/libsym (aqui e no schframe). Sem a traducao, goTab punha S.tab num id que
-   nao esta em TABS -- nenhuma aba acendia, e o pane `data-pane="libsym"` aparecia VAZIO,
-   porque o #symed dele foi movido para dentro da Biblioteca. Era o "clico em editar e nao
-   leva pra tela de edicao". */
+/* "libsym" NAO E MAIS UMA ABA -- virou uma vista dentro da Biblioteca (2026-09-17), que
+   desde 2026-10-09 se chama Componentes (a vista Simbolos de hoje e o editor de simbolos da
+   biblioteca, outra coisa). Continua sendo aceito como APELIDO porque ele existe fora deste
+   arquivo: o menu de contexto do acervo, o "editar simbolo" da vista Esquema e as duas
+   janelas novas que abrem com #/libsym (aqui e no schframe). Sem a traducao, goTab punha
+   S.tab num id que nao esta em TABS -- nenhuma aba acendia, e o pane `data-pane="libsym"`
+   aparecia VAZIO, porque o #symed dele foi movido para dentro da Biblioteca. Era o "clico
+   em editar e nao leva pra tela de edicao". */
 function goTab(id) {
   if (id === 'libsym') {
     S.tab = 'lib'; syncURL(); renderTabs(); renderPanes();
-    if (window.__hubLibView) { try { window.__hubLibView.ir('simbolos'); } catch (e) {} }
+    if (window.__hubLibView) { try { window.__hubLibView.ir('componentes'); } catch (e) {} }
     return;
   }
   S.tab = id; syncURL(); renderTabs(); renderPanes();
@@ -4347,7 +4348,7 @@ function menuSimbolo(x, y, nome) {
   const tem = (window.HubSymEd && HubSymEd.conhece) ? HubSymEd.conhece(nome) : null;
   menuNoPonto(x, y, [
     { l: 'Editar símbolo',
-      c: tem === false ? 'não está no espelho do Altium' : 'abre "' + nome + '" na aba Símbolos',
+      c: tem === false ? 'não está no espelho do Altium' : 'abre "' + nome + '" em Biblioteca › Componentes',
       off: tem === false, on: () => editarSimbolo(nome) },
   ]);
 }
@@ -4777,12 +4778,12 @@ document.addEventListener('keydown', e => {
   /* indice dos acervos: leve, e sem ele o combobox de biblioteca nasce com uma opcao so */
   await loadLibTabelas();
   const url = readURL();
-  /* "libsym" e apelido de "lib + vista Simbolos" (ver goTab). No boot ele nao pode ficar em
-     S.tab: nenhuma aba de TABS casa com esse id, e o pane dele esta vazio desde que o
+  /* "libsym" e apelido de "lib + vista Componentes" (ver goTab). No boot ele nao pode ficar
+     em S.tab: nenhuma aba de TABS casa com esse id, e o pane dele esta vazio desde que o
      #symed passou a morar dentro da Biblioteca. Traduz aqui, e pede a vista depois que o
      painel existir. */
   let vistaPedida = null;
-  if (url.tab === 'libsym') { S.tab = 'lib'; vistaPedida = 'simbolos'; }
+  if (url.tab === 'libsym') { S.tab = 'lib'; vistaPedida = 'componentes'; }
   else if (url.tab) S.tab = url.tab;
   const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;
   await loadProject(id);
@@ -4802,7 +4803,8 @@ document.addEventListener('keydown', e => {
          e não de um fetch porque o espelho já está em memória — são 3,2 MB de pcblib.js. */
       footprint: nome => (LIB.fpBy && LIB.fpBy.get(nome)) || null,
       redesenha: () => { try { renderLib(); } catch (e) {} },
-      /* A vista Símbolos é o MESMO editor de sempre — o `#symed`, que vivia num pane próprio
+      /* As vistas Componentes e Símbolos são o MESMO editor de sempre, em dois modos dele
+         (HubSymEd.modo, trocado pelo hub-libview.js) — o `#symed`, que vivia num pane próprio
          e agora é MOVIDO para dentro do centro da Biblioteca. Mover, e não clonar: o
          HubSymEd guarda referências para os nós dele, e uma cópia deixaria o editor vivo
          mandando num DOM que ninguém vê. O seletor de acervo continua sendo o da esquerda. */
@@ -4854,8 +4856,9 @@ document.addEventListener('keydown', e => {
      (ele vigia Libs\ e chama __hubOnChange em TODA aba aberta).
      Depois do loadProject, senao o painel ainda nao existe para responder. E DEPOIS DAS
      VISTAS DA BIBLIOTECA (logo acima): desde que o editor passou a morar em Biblioteca »
-     Simbolos (0511f38), abrir antes delas deixava o editor no acervo padrao, sem a familia, e
-     o ir('simbolos') de cima reabria so a familia — o "Editar símbolo ↗" da vista Esquema
+     Componentes (0511f38, quando ainda se chamava Simbolos), abrir antes delas deixava o
+     editor no acervo padrao, sem a familia, e
+     o ir('componentes') de cima reabria so a familia — o "Editar símbolo ↗" da vista Esquema
      parou de cair no componente e ninguem viu (medido: funcionava no 1839ede). */
   try {
     const q = new URLSearchParams(location.search);

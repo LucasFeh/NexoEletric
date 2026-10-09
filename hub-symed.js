@@ -1,10 +1,14 @@
-/* AltiumPCBMirror v2 - hub-symed.js — editor de símbolos (sub-aba Símbolos da Biblioteca).
+/* AltiumPCBMirror v2 - hub-symed.js — editor de símbolos (sub-abas Componentes e Símbolos da
+   Biblioteca: um editor só, em dois modos — ver `modo`).
 
    Três colunas com divisórias arrastáveis (o mkSplits da casca, como nas abas Laser e BOM):
-   a lista do espelho do Altium à esquerda, o editor no meio e, à direita, a caixa de
-   ferramentas em ícones e a ficha. O meio empilha o canvas e, embaixo, a Biblioteca de
-   símbolos (Libs/symbols-lib.js) — corpos genéricos e de CI que se aplicam ao símbolo aberto
-   com um clique, porque o que mais se quer aqui é TROCAR O DESENHO sem mexer na pinagem.
+   a lista à esquerda, o editor no meio e, à direita, a caixa de ferramentas em ícones e a
+   ficha. No modo COMPONENTES a lista é a do espelho (que a Biblioteca esconde: ali manda a
+   lista da casca) e o meio empilha o canvas e, embaixo, a Biblioteca de símbolos
+   (Libs/symbols-lib.js) — corpos genéricos e de CI que se aplicam ao componente aberto com um
+   clique, porque o que mais se quer ali é TROCAR O DESENHO sem mexer na pinagem. No modo
+   SÍMBOLOS a lista da esquerda é a própria biblioteca de símbolos, a faixa de baixo some e o
+   canvas edita o desenho de um símbolo dela.
 
    Mouse igual ao da vista Esquema: o esquerdo seleciona (Shift acrescenta), arrasta os
    selecionados ou, em área vazia, desenha a caixa de seleção; direito e meio arrastam a
@@ -627,6 +631,20 @@ function filtroBusca(q, plain) {
   };
 }
 
+/* ── busca da biblioteca de símbolos (Libs/symbols-lib.js) ──
+   UMA regra para os dois lugares que listam a biblioteca: a faixa de baixo da vista
+   Componentes e a lista da esquerda da vista Símbolos — senão a mesma consulta acharia uma
+   coisa num e outra no outro. Casa nome, apelidos, kind e descrição, sem caixa. A descrição
+   entra porque é o único jeito de achar símbolo cujo NOME é código de catálogo:
+   "CMP-0694-00003-2" não diz nada, "RS-485" acha. Devolve uma lista nova, na ordem de entrada. */
+function filtraSimbolos(syms, q) {
+  const t = String(q == null ? '' : q).trim().toLowerCase();
+  const todos = syms || [];
+  if (!t) return todos.slice();
+  return todos.filter(s => s && ((s.name || '') + ' ' + (s.aliases || []).join(' ') + ' ' + (s.kind || '')
+    + ' ' + (s.description || s.desc || '')).toLowerCase().includes(t));
+}
+
 /* ── a faixa dirigida de fora: índice e cascata (puras, provadas em Node) ──
    DUAS PASSADAS de propósito: todo `name` primeiro, `aliases` só depois. Numa passada só, o
    apelido de um símbolo sequestra o nome próprio de outro — "Jumper" cairia em "Conector 2
@@ -664,7 +682,7 @@ function alvoNaFaixa(idx, nomes) {
 }
 
 const pure = { snap, pinHot, pinSnapOf, pinsOffGrid, segDist, pointInPoly, angleIn, labelBox, hitTest, hitGraphic,
-               filtroBusca,
+               filtroBusca, filtraSimbolos,
                moveItem, moveVertex, rotateAll, mirrorAll, bbox, serializeSymbol, applyLibSymbol, nextPinNum, novoPino,
                casaPinos, rotuloPino, planoCategoria,
                comPadraoDeVisibilidade, montaIdxLib, alvoNaFaixa,
@@ -736,11 +754,15 @@ const ST = {
   cam: null,          /* o {scale,cx,cy} da câmera, para quem quer conferir o pan por fora */
   box: null,          /* caixa de seleção em curso (mundo) */
   gesto: null,        /* gesto do botão esquerdo em curso */
+  /* o MODO do editor, que é a sub-aba da Biblioteca em que ele está (ver `modo`):
+     'componentes' (categoria/componente no canvas) | 'simbolos' (símbolo da biblioteca) */
+  modo: 'componentes',
+  qSim: '',           /* o filtro da lista de símbolos (modo símbolos); o ST.q é o da outra */
+  ultimoLib: null,    /* o símbolo que estava aberto ao sair do modo símbolos: volta com ele */
   /* EDITANDO UM SÍMBOLO DA BIBLIOTECA (Libs/symbols-lib.js), e não um componente: o canvas
      mostra o desenho do símbolo e o Salvar grava na biblioteca (/api/symbols/lib). Símbolo
      não é componente (o dono, 2026-09-25): o componente só RECEBE o desenho, pelo Aplicar.
-     { id: 'sNNNN' | null (novo, ainda não salvo), volta: {sel, valor} | null — a categoria
-     (e o componente) que estava aberta, para o "voltar" da ficha e o "Aplicar à categoria" } */
+     Só existe no modo símbolos. { id: 'sNNNN' | null (novo, ainda não salvo) } */
   libEd: null,
   edicoes: 0,         /* conta cada edição (touched): o salvarLib sabe se mexeram durante o POST */
 };
@@ -751,7 +773,23 @@ const DATA = { schlib: null, symlib: null, loading: null, libLoading: null, bust
                /* quem usa cada símbolo da biblioteca, pelo ledger (/api/symbols/lib-vinculos):
                   { porLib: Map(id → {n, cats:Set}), porComp: Map(categoria␁componente → id),
                     pads: {categoria: id} }. `vincVer` entra na chave do cache dos tiles. */
-               vinc: null, vincVer: 0 };
+               vinc: null, vincVer: 0,
+               /* a promessa do reload() em curso (null fora dele) — ver aposRecarga */
+               recarga: null };
+/* A RECARGA QUE A PRÓPRIA GRAVAÇÃO DISPARA: a casca chama reload() a cada escrita em Libs\, e
+   por cerca de um segundo a biblioteca e a mesa estão voltando. Os botões de aplicar continuam
+   destravados (a faixa é a de antes), e um clique nesse meio achava o tile marcado sem símbolo
+   e saía calado — medido: o "Aplicar à categoria" logo depois de um Salvar não abria nada.
+   O clique espera a recarga e então age sobre o que voltou. Espera TODAS: uma gravação escreve
+   vários arquivos (a .SchLib, o ledger, o backup), a casca pode recarregar mais de uma vez em
+   seguida, e agir entre uma e outra é cair de novo na biblioteca zerada. */
+const aposRecarga = fn => async (...a) => {
+  for (let r = DATA.recarga; r; r = DATA.recarga) {
+    await r.catch(() => {});
+    if (DATA.recarga === r) break;        /* a mesma: o fim dela é que zera o campo */
+  }
+  return fn(...a);
+};
 let O = null;      /* opts do último render: root, toast, onSaved, splits... */
 let UI = null;     /* nós do DOM criados uma vez */
 let CAM = null;
@@ -786,7 +824,7 @@ function loadSchlib() {
   DATA.loadingId = a.id;
   /* ACERVO COMBINADO ("Almoxarifado — Todos"): não tem arquivo próprio — carrega o de cada
      parte e concatena numa lista só, a mesma receita da aba Biblioteca (hub.html » carregaSch).
-     Sem isto o editor recebia `file: null`, o loadVarScript falhava e a aba Símbolos dizia
+     Sem isto o editor recebia `file: null`, o loadVarScript falhava e a aba Símbolos (hoje Componentes) dizia
      "não carregou" justamente no acervo que junta básicos e especiais. */
   const partes = (a.partes && a.partes.length) ? a.partes : null;
   const vem = partes
@@ -818,7 +856,9 @@ function setAcervo(a) {
   DATA.schlibErro = '';
   DATA.loading = null; DATA.loadingId = null;
   listKey = '';
-  /* o simbolo aberto e de outro acervo: nao faz sentido continuar com ele na tela */
+  /* o simbolo aberto e de outro acervo: nao faz sentido continuar com ele na tela. O simbolo
+     da BIBLIOTECA (modo simbolos) nao e de acervo nenhum: esse fica, com a edicao dele */
+  if (ST.modo === 'simbolos') return true;
   ST.sel = null; ST.draft = null; ST.selection = []; ST.undo = []; ST.redo = []; ST.dirty = false;
   return true;
 }
@@ -853,14 +893,17 @@ function familiaAberta() {
   const nome = ST.familia || ST.sel;
   return nome ? symByName(nome) : null;
 }
-/* a categoria em que se está trabalhando: a aberta, ou — editando um símbolo da biblioteca —
-   a que estava aberta quando se foi editá-lo. É o alvo do "Aplicar à categoria". */
+/* a categoria em que se está trabalhando — o alvo do "Aplicar símbolo à categoria". Até
+   2026-10-09 podia ser também a de onde se tinha vindo editar um símbolo; desde que editar
+   símbolo virou a vista Símbolos, aplicar só existe na vista Componentes, com ela aberta. */
 function familiaDoContexto() {
-  const f = familiaAberta();
-  if (f) return f;
-  const v = ST.libEd && ST.libEd.volta;
-  return v && v.sel ? symByName(v.sel) : null;
+  return familiaAberta();
 }
+/* há um COMPONENTE no canvas para receber o desenho de um símbolo? No almoxarifado é o valor
+   aberto (ST.familia); na biblioteca da casa o símbolo do espelho É o componente. A categoria
+   do almoxarifado sozinha não conta: ela recebe pelo "Aplicar símbolo à categoria". */
+const componenteAberto = () => ST.modo === 'componentes' && !ST.libEd && !!ST.draft
+  && (!!ST.familia || acervoGravavel());
 /* o nome do que está no canvas, para as perguntas ("há edição não salva em X") */
 const nomeAberto = () => (ST.draft && ST.draft.name) || ST.sel || '';
 const valoresDa = f => (f && f.valores) || [];
@@ -1091,6 +1134,19 @@ const CSS = `
 .symed-libnota{font-size:11px;color:var(--text-4,#7a7a7a);margin:2px 0 8px;line-height:1.45;}
 .symed-comp .mt .lib{color:var(--hi,#4fc3f7);}
 .symed-comp .mt .dup{color:var(--warn,#ffb74d);}
+/* MODO SIMBOLOS (a vista Simbolos da Biblioteca): a faixa de baixo some. A lista da esquerda
+   e a biblioteca de simbolos, e aplicar desenho a componente e coisa da vista Componentes */
+.symed-modo-simbolos .symed-libbar,.symed-modo-simbolos .symed-tiles{display:none !important;}
+/* a linha da lista de simbolos: a miniatura (o mesmo desenho do tile da faixa) e o nome */
+.symed-librow{gap:9px;padding:3px 8px;}
+.symed-librow canvas{flex:none;width:54px;height:36px;border-radius:3px;background:var(--sheet,#fff);
+  box-shadow:inset 0 0 0 1px var(--edge,rgba(255,255,255,.08));}
+.symed-librow.editado .nm::after{content:" ●";color:var(--warn,#ffb74d);}
+.symed-librow.novo .nm{font-style:italic;}
+.symed-novosim{white-space:nowrap;}
+/* o .btn tem display proprio, que ganharia do atributo hidden (a armadilha do .seg na casca) */
+.symed-novosim[hidden]{display:none !important;}
+.symed-libacts{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;}
 `;
 let cssPosto = false;
 function poeCss() {
@@ -1168,13 +1224,17 @@ function build(rootEl) {
   try { const u = localStorage.getItem(UNIT_KEY); if (u === 'mm' || u === 'mil') { ST.unit = u; ST.snap = UNIT_DEFAULT[u]; } } catch (e) {}
   const grid = el('div', 'symed-grid');
 
-  /* ── esquerda: busca · recorte · kicker · resumo · lista ── */
+  /* ── esquerda: busca · recorte · kicker · resumo · lista ──
+     A mesma coluna serve aos dois modos, cada um com o seu filtro: no modo componentes é a
+     lista do espelho (que a Biblioteca esconde) e no modo símbolos a da biblioteca de
+     símbolos, com o "+ Novo símbolo" no lugar do recorte Tudo/Sem fp/Modificados. */
   const left = el('div', 'lib-left');
   const bar = el('div', 'lib-bar');
-  UI.q = el('input', 'input'); UI.q.type = 'text'; UI.q.placeholder = 'Buscar símbolo…'; UI.q.value = ST.q;
-  UI.q.oninput = () => { ST.q = UI.q.value; refreshList(); };
+  UI.q = el('input', 'input'); UI.q.type = 'text';
+  UI.q.oninput = () => { if (ST.modo === 'simbolos') ST.qSim = UI.q.value; else ST.q = UI.q.value; refreshList(); };
   UI.seg = el('div', 'seg');
-  bar.append(UI.q, UI.seg);
+  UI.bNovoSim = btn('btn-primary btn-sm symed-novosim', '+ Novo símbolo', novoSimbolo, '');
+  bar.append(UI.q, UI.seg, UI.bNovoSim);
   UI.sum = el('div', 'lib-sum');
   UI.list = el('div', 'scroll lib-list');
   UI.kicker = el('div', 'kicker symed-kicker', 'componentes do espelho do Altium');
@@ -1228,17 +1288,13 @@ function build(rootEl) {
   };
   UI.libCount = el('span', 'count', '');
   const lr = el('div', 'right');
-  /* A FERRAMENTA DE SÍMBOLOS (pedido do dono, 2026-09-25): criar do zero, editar, excluir e
-     aplicar a uma categoria inteira. Os tiles têm o mesmo cardápio no botão direito. O texto
-     do Aplicar muda com o que está aberto (rotuloAplicar): símbolo não é componente, e o
-     botão diz em QUEM o desenho vai cair. */
-  UI.bLibNovo = btn('btn-secondary btn-sm', '+ Novo símbolo', novoSimbolo, 'cria um símbolo em branco na biblioteca de símbolos e abre no canvas para desenhar');
-  UI.bLibAdd = btn('btn-secondary btn-sm', 'Guardar como símbolo', adicionarCorpo, 'guarda o desenho que está no canvas como um símbolo novo da biblioteca');
-  UI.bLibApply = btn('btn-primary btn-sm', 'Aplicar', aplicarLib, '');
-  UI.bLibEdit = btn('btn-secondary btn-sm', 'Editar', () => editarLib(ST.libSel), 'abre o símbolo escolhido no canvas para editar o desenho dele');
-  UI.bLibRen = btn('btn-secondary btn-sm', 'Renomear', renomearLib);
-  UI.bLibDel = btn('btn-secondary btn-sm', 'Excluir', excluirLib);
-  lr.append(UI.bLibNovo, UI.bLibAdd, UI.bLibApply, UI.bLibEdit, UI.bLibRen, UI.bLibDel);
+  /* NESTA FAIXA SÓ SE APLICA (pedido do dono, 2026-10-09: "o único botão na aba do menu
+     central agora é aplicar símbolo ao componente e aplicar símbolo à categoria"). Criar,
+     editar, renomear e excluir símbolo moraram aqui de 2026-09-25 até então e foram para a
+     vista Símbolos. Os dois botões nunca somem: travados, dizem por quê (pintaBotoesLib). */
+  UI.bLibApply = btn('btn-primary btn-sm', 'Aplicar símbolo ao componente', aposRecarga(aplicarLib), '');
+  UI.bLibCat = btn('btn-secondary btn-sm', 'Aplicar símbolo à categoria…', aposRecarga(() => abrirAplicarCategoria(libById(ST.libSel))), '');
+  lr.append(UI.bLibApply, UI.bLibCat);
   /* sub-aba da faixa: "Símbolos" (os corpos prontos) x "Componentes" (os valores da
      familia aberta). Sem ela nao havia como chegar num componente especifico: a lista da
      esquerda mostra a FAMILIA, e a familia nao e o que se monta na placa. */
@@ -1277,10 +1333,15 @@ function build(rootEl) {
     lados: { l: { v: '--symed-l', sel: '.symed-grid > .lib-left' }, r: { v: '--symed-r', sel: '.symed-grid > aside' } },
     onResize: () => { if (CAM) CAM.resize(); },
   }) : null;
-  /* miniaturas só quando aparecem: 400 canvases de uma vez travam a aba */
-  UI.io = typeof IntersectionObserver === 'function'
-    ? new IntersectionObserver(ents => ents.forEach(e => { if (e.isIntersecting) drawTile(e.target); }), { root: UI.tiles })
+  /* miniaturas só quando aparecem: 400 canvases de uma vez travam a aba. Um observador para a
+     faixa e outro para a lista da vista Símbolos (~900 linhas), cada um com a sua raiz */
+  const io = (raiz, margem) => typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver(ents => ents.forEach(e => { if (e.isIntersecting) drawTile(e.target); }), { root: raiz, rootMargin: margem || '0px' })
     : null;
+  UI.io = io(UI.tiles);
+  /* a lista rola mais depressa que a faixa: a margem deixa a linha chegar já desenhada */
+  UI.ioList = io(UI.list, '160px');
+  pintaModo();
   document.addEventListener('keydown', onKey);
 }
 
@@ -1291,10 +1352,11 @@ function refreshAll() { refreshList(); refreshBar(); refreshAside(); refreshLib(
 let listKey = '';
 function refreshList() {
   if (!UI) return;
+  if (ST.modo === 'simbolos') return refreshListaSimbolos();
   const syms = symbols();
   /* o acervo ENTRA na chave: sem ele, trocar de acervo nao redesenha a lista, e duas
      bibliotecas podem ter a mesma contagem de simbolos e passar batido */
-  const key = [acervoAtual().id, ST.q, ST.kind, ST.sel, nMod(), syms.length, ST.dirty, DATA.schlib ? 1 : 0, DATA.schlibErro].join(SEP);
+  const key = ['comp', acervoAtual().id, ST.q, ST.kind, ST.sel, nMod(), syms.length, ST.dirty, DATA.schlib ? 1 : 0, DATA.schlibErro].join(SEP);
   if (key === listKey) return;
   listKey = key;
   const semFp = s => !(s.footprints || []).some(f => f.incurrentlib);
@@ -1342,6 +1404,137 @@ function refreshList() {
   UI.list.append(frag);
 }
 
+/* A LISTA DA VISTA SÍMBOLOS: a biblioteca de símbolos (Libs/symbols-lib.js), cada linha com a
+   miniatura e o nome — o pedido foi "ícone + nome, em forma de lista; você seleciona, edita ou
+   salva, ou cria um símbolo novo". A busca é a mesma da faixa (filtraSimbolos). A miniatura só
+   é desenhada quando a linha aparece (UI.ioList): são ~900 símbolos.
+   A linha aberta é marcada por atributo (marcaLinhaSimbolo), fora da chave: abrir outro
+   símbolo não refaz 900 linhas. Renomear, salvar e excluir zeram listKey — o nome ou o
+   desenho mudam sem a contagem mudar. */
+function refreshListaSimbolos() {
+  const all = libSyms(), le = ST.libEd, d = ST.draft;
+  const novo = le && !le.id && d ? d.name : '';
+  const key = ['sim', ST.qSim, all.length, DATA.symlib ? 1 : 0, DATA.symlibMissing ? 1 : 0, novo, DATA.vincVer, semServidor() ? 1 : 0].join(SEP);
+  if (key === listKey) { marcaLinhaSimbolo(); return; }
+  listKey = key;
+  pintaModo();
+  if (UI.kicker) UI.kicker.textContent = 'símbolos · biblioteca de símbolos';
+  UI.sum.textContent = '';
+  const stat = (n, rot) => { const s = el('span'); s.append(el('b', null, String(n)), document.createTextNode(' ' + rot)); UI.sum.append(s); };
+  const emUso = DATA.vinc ? all.filter(s => usoDoSimbolo(s.id)).length : null;
+  stat(all.length, 'símbolos');
+  if (emUso != null) stat(emUso, 'aplicados a componentes');
+  UI.sum.title = DATA.symlib ? 'Libs/symbols-lib.js (' + (DATA.symlib.generated || '—') + ')' : '';
+  if (UI.ioList) UI.ioList.disconnect();
+  /* refazer por salvar ou renomear não pode jogar a lista para o topo: com o mesmo filtro, a
+     rolagem volta para onde estava (com outro, o topo é o certo) */
+  const topo = listaFiltro === ST.qSim ? UI.list.scrollTop : 0;
+  listaFiltro = ST.qSim;
+  UI.list.textContent = '';
+  const rows = filtraSimbolos(all, ST.qSim);
+  const frag = document.createDocumentFragment();
+  /* o símbolo novo ainda não salvo não está na biblioteca, mas está no canvas: a linha dele
+     vem primeiro, para a lista não negar o que se está desenhando */
+  if (novo) {
+    frag.append(el('div', 'lib-head', 'novo, ainda não salvo'));
+    const b = el('button', 'lib-row symed-librow novo'); b.type = 'button';
+    b.setAttribute('aria-selected', 'true');
+    b.title = '"' + novo + '" ainda não está na biblioteca: ele entra no primeiro Salvar';
+    b.append(el('span', 'nm', novo), el('span', 'pill', 'não salvo'));
+    frag.append(b);
+  }
+  if (!DATA.symlib) frag.append(el('div', 'lib-head', DATA.symlibMissing
+    ? 'a biblioteca de símbolos ainda não foi gerada (Libs/symbols-lib.js não carregou)'
+    : 'carregando a biblioteca de símbolos…'));
+  else if (!rows.length) frag.append(el('div', 'lib-head', ST.qSim.trim() ? 'nada com "' + ST.qSim.trim() + '"' : 'biblioteca vazia'));
+  else frag.append(el('div', 'lib-head', 'símbolos (' + rows.length + (rows.length !== all.length ? ' de ' + all.length : '') + ')'));
+  const pend = [];
+  rows.forEach(s => {
+    const b = el('button', 'lib-row symed-librow'); b.type = 'button'; b.dataset.id = s.id;
+    const uso = usoDoSimbolo(s.id);
+    b.title = s.name + (s.description ? '\n' + s.description : '') + '\n' + (s.pins || []).length + ' pinos · '
+      + (s.kind === 'ci' ? 'CI' : 'genérico') + (uso ? '\naplicado a ' + uso : '')
+      + ((s.aliases || []).length ? '\n' + s.aliases.join(', ') : '')
+      + '\n(botão direito: renomear, salvar como, excluir)';
+    const cv = el('canvas'); cv.width = 54; cv.height = 36;
+    cv.dataset.id = s.id; cv.dataset.w = '54'; cv.dataset.h = '36';
+    b.append(cv, el('span', 'nm', s.name), el('span', 'mt', (s.kind === 'ci' ? 'CI' : 'gen.') + ' · ' + (s.pins || []).length + 'p'));
+    /* clicar no que já está aberto não pergunta nada nem reabre: é o mesmo símbolo */
+    b.onclick = () => { if (!(ST.libEd && ST.libEd.id === s.id)) editarLib(s.id); };
+    b.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); menuDaLinha(e.clientX, e.clientY, s); });
+    frag.append(b);
+    pend.push(cv);
+  });
+  UI.list.append(frag);
+  if (topo) UI.list.scrollTop = topo;
+  /* observar DEPOIS de entrar no documento: dentro do fragmento a linha não tem caixa */
+  pend.forEach(cv => { if (UI.ioList) UI.ioList.observe(cv); else drawTile(cv); });
+  marcaUlt = null;
+  marcaLinhaSimbolo();
+}
+let listaFiltro = null;     /* o filtro com que a lista de símbolos foi montada da última vez */
+/* a linha do símbolo aberto: marcada, com o ● de edição não salva, e trazida para a vista
+   quando o símbolo foi aberto de fora da lista ("Editar na aba Símbolos") — rolando SÓ a
+   lista, como o consomeScroll da faixa. Barato: só mexe quando o aberto ou o sujo mudaram.
+   Rola uma vez por símbolo aberto (rolouPara), e não a cada refiltro: digitar no filtro
+   refaz a lista, e ela pularia para a linha aberta a cada tecla. */
+let marcaUlt = null, rolouPara = null;
+function marcaLinhaSimbolo() {
+  if (!UI || ST.modo !== 'simbolos') return;
+  const id = (ST.libEd && ST.libEd.id) || '';
+  const k = id + SEP + (ST.dirty ? 1 : 0);
+  if (k === marcaUlt) return;
+  marcaUlt = k;
+  let alvo = null;
+  UI.list.querySelectorAll('.symed-librow[data-id]').forEach(r => {
+    const eu = !!id && r.dataset.id === id;
+    r.setAttribute('aria-selected', String(eu));
+    r.classList.toggle('editado', eu && ST.dirty);
+    if (eu) alvo = r;
+  });
+  if (alvo && rolouPara !== id) {
+    /* com o editor escondido (a vista ainda não apareceu) a lista mede 0: fica para o
+       render() da vista, que zera marcaUlt e passa por aqui de novo */
+    const cx = UI.list.getBoundingClientRect(), r = alvo.getBoundingClientRect();
+    if (cx.height) {
+      rolouPara = id;
+      if (r.top < cx.top || r.bottom > cx.bottom) UI.list.scrollTop += (r.top - cx.top) - cx.height / 3;
+    }
+  }
+}
+/* o botão direito numa linha da lista de símbolos. "Salvar como…" é do desenho do CANVAS: na
+   linha de outro símbolo ele fica travado, dizendo por quê — copiar um símbolo sem mexer não
+   tem como, porque a biblioteca guarda cada desenho uma vez só (o servidor recusa o repetido). */
+function menuDaLinha(x, y, s) {
+  if (typeof HubAlmoxPick === 'undefined' || !HubAlmoxPick.menu) return;
+  const aberto = !!(ST.libEd && ST.libEd.id === s.id);
+  const sv = semServidor() ? 'abra o hub pelo hubserver.py para gravar' : '';
+  const acoes = [
+    { rotulo: 'Renomear…', off: sv, onEscolher: () => renomearLib(s) },
+    { rotulo: 'Salvar como…', off: sv || (aberto ? '' : 'abra o símbolo e mude o desenho: "Salvar como" grava o desenho do canvas, e uma cópia idêntica a biblioteca recusa'),
+      onEscolher: salvarComo },
+    { rotulo: 'Excluir símbolo…', perigo: true, off: sv, onEscolher: () => excluirLib(s) },
+  ];
+  const uso = usoDoSimbolo(s.id);
+  HubAlmoxPick.menu(x, y, s.name + (uso ? ' · aplicado a ' + uso : ''), acoes);
+}
+/* O QUE MUDA NA TELA COM O MODO: a classe da raiz (o CSS esconde a faixa no modo símbolos e a
+   Biblioteca abre a coluna da esquerda), o filtro e o texto da busca, e o que fica ao lado
+   dela — o recorte da lista do espelho, ou o "+ Novo símbolo". */
+function pintaModo() {
+  if (!UI) return;
+  const sim = ST.modo === 'simbolos';
+  UI.root.classList.toggle('symed-modo-simbolos', sim);
+  const q = sim ? ST.qSim : ST.q;
+  if (UI.q.value !== q) UI.q.value = q;
+  UI.q.placeholder = sim ? 'filtrar símbolos (nome, apelido, tipo, descrição)…' : 'Buscar símbolo…';
+  UI.seg.hidden = sim;
+  UI.bNovoSim.hidden = !sim;
+  UI.bNovoSim.disabled = semServidor();
+  UI.bNovoSim.title = semServidor() ? 'abra o hub pelo hubserver.py para gravar'
+    : 'cria um símbolo em branco na biblioteca de símbolos e abre no canvas para desenhar';
+}
+
 function cursorPadrao() {
   if (!UI) return;
   UI.cv.style.cursor = !ST.draft ? 'default' : ST.tool === 'select' ? 'default' : ST.tool === 'delete' ? 'pointer' : 'crosshair';
@@ -1364,12 +1557,16 @@ function refreshBar() {
   UI.bRot.disabled = UI.bMir.disabled = UI.bFit.disabled = !d;
   UI.bGrid.setAttribute('aria-pressed', String(ST.grid));
   UI.bGrid.title = 'Grade (' + (ST.grid ? 'ligada' : 'desligada') + ')';
-  UI.hint.textContent = !DATA.schlib ? (DATA.schlibErro || 'carregando o espelho…')
-    : !d ? 'escolha uma categoria na lista, ou edite um símbolo da biblioteca aqui embaixo'
-    : (!p.graphics.length && !p.pins.length
-       ? (ST.libEd ? 'símbolo vazio — desenhe com as ferramentas à direita (linha, retângulo, arco, pino…) e salve'
-                   : 'parte vazia — desenhe, ou aplique um símbolo da biblioteca')
-       : '');
+  const vazio = !!d && !p.graphics.length && !p.pins.length;
+  /* no modo símbolos o espelho do acervo não importa: o que se espera é a biblioteca de símbolos */
+  UI.hint.textContent = ST.modo === 'simbolos'
+    ? (!d ? (!DATA.symlib ? (DATA.symlibMissing ? 'a biblioteca de símbolos não carregou (Libs/symbols-lib.js)' : 'carregando a biblioteca de símbolos…')
+                          : 'escolha um símbolo à esquerda, ou crie um novo com "+ Novo símbolo"')
+          : vazio ? 'símbolo vazio — desenhe com as ferramentas à direita (linha, retângulo, arco, pino…) e salve' : '')
+    : !DATA.schlib ? (DATA.schlibErro || 'carregando o espelho…')
+    : !d ? 'escolha uma categoria na lista da esquerda — criar ou editar um símbolo da biblioteca é na aba Símbolos'
+    : vazio ? 'parte vazia — desenhe, ou aplique um símbolo da biblioteca' : '';
+  marcaLinhaSimbolo();
   if (!panning) cursorPadrao();
   UI.status2.textContent = ST.draw ? drawHint() : (ST.tool === 'pin' ? 'pino a ' + ST.pinRot + '° — R gira' : '');
 }
@@ -1393,9 +1590,15 @@ function refreshAside() {
   const d = ST.draft;
   if (!d) {
     a.append(el('div', 'kicker', 'editor de símbolos'));
-    const p = el('p', null, 'Escolha um símbolo do espelho para editar a geometria e os pinos. Salvar grava no espelho '
-      + '(Libs/schlib.js) e, marcando Altium, na SchLib real — com backup. A biblioteca de símbolos embaixo do '
-      + 'canvas guarda corpos prontos: clique num e aplique, ou arraste um para o canvas.');
+    const p = el('p', null, ST.modo === 'simbolos'
+      ? 'Escolha um símbolo na lista da esquerda para editar o desenho dele, ou crie um com "+ Novo símbolo". '
+        + 'Salvar grava na biblioteca de símbolos (Libs/symbols-lib.js). Os componentes recebem o desenho na aba '
+        + 'Componentes ("Aplicar símbolo ao componente" ou "à categoria"); se o símbolo já está aplicado, o Salvar '
+        + 'pergunta se leva o desenho novo a eles.'
+      : 'Escolha um componente para editar a geometria e os pinos. Salvar grava no espelho '
+        + '(Libs/schlib.js) e, marcando Altium, na SchLib real — com backup. A biblioteca de símbolos embaixo do '
+        + 'canvas guarda corpos prontos: clique num e aplique, ou arraste um para o canvas. Criar ou editar um '
+        + 'símbolo da biblioteca é na aba Símbolos.');
     p.style.cssText = 'font-size:12px;color:var(--text-3);margin:6px 0 12px;line-height:1.5';
     a.append(p);
     return;
@@ -1449,16 +1652,29 @@ function refreshAside() {
     : ST.libEd ? 'grava o desenho na biblioteca de símbolos (Libs/symbols-lib.js) — os componentes só mudam quando você aplica'
     : 'grava no espelho (Libs/schlib.js) e, se marcado, na SchLib do Altium');
   UI.bSave.disabled = semServidor() || !ST.dirty || ST.saving;
+  /* "Salvar como…" só no modo símbolo: o desenho do canvas vira um símbolo NOVO (salvarComo) */
+  let bComo = null;
+  if (ST.libEd) {
+    const vz = !part.pins.length && !part.graphics.length;
+    const porque = semServidor() ? 'abra o hub pelo hubserver.py para gravar'
+      : ST.saving ? 'gravando…'
+      : vz ? 'o símbolo está vazio — desenhe alguma coisa antes de salvar' : '';
+    bComo = btn('btn-secondary', 'Salvar como…', salvarComo, porque
+      || 'grava o desenho do canvas como um símbolo NOVO, com outro nome, e passa a editar a cópia — o símbolo de origem fica como está gravado. A biblioteca guarda cada desenho uma vez só: uma cópia idêntica é recusada');
+    bComo.disabled = !!porque;
+  }
   const lab = el('label'); UI.altium = el('input'); UI.altium.type = 'checkbox'; UI.altium.checked = UI.altiumChecked !== false;
   UI.altium.onchange = () => { UI.altiumChecked = UI.altium.checked; };
   lab.append(UI.altium, document.createTextNode('Altium'));
   /* NO MODO SÍMBOLO A CAIXA FICA À VISTA: o símbolo da biblioteca não tem .SchLib, mas ela
-     decide se o desenho levado aos componentes (Aplicar à categoria, Atualizar quem usa)
+     decide se o desenho levado aos componentes (o "Atualizar quem usa" depois do Salvar)
      também vai para a .SchLib. Escondida, ela continuava mandando no lote sem ninguém ver */
   lab.title = ST.libEd
-    ? 'quando o desenho for levado aos componentes (Aplicar / Atualizar quem usa), grava também a .SchLib deles; desmarcada, só o hub, e a .SchLib recebe no próximo sincronismo'
+    ? 'quando o Salvar levar o desenho novo aos componentes que usam este símbolo (Atualizar quem usa), grava também a .SchLib deles; desmarcada, só o hub, e a .SchLib recebe no próximo sincronismo'
     : 'também grava na SchLib real (BIBLIOTECA DE ESQUEMA.SchLib), com backup';
-  sv.append(UI.bSave, lab);
+  sv.append(UI.bSave);
+  if (bComo) sv.append(bComo);
+  sv.append(lab);
   a.append(sv);
   UI.status = el('div', 'symed-status' + (UI.statusKind ? ' ' + UI.statusKind : ''), UI.statusMsg || (ST.dirty ? 'edição não salva' : ''));
   a.append(UI.status);
@@ -1781,12 +1997,12 @@ function preSelecionarNaFaixa(familia, componente) {
   } else if (!r) {
     ST.libSel = null;
     ST.faixaNota = vale
-      ? 'nenhum corpo com o nome "' + quem + '" na biblioteca — escolha um abaixo '
-        + 'ou guarde este com "+ corpo atual"' : '';
+      ? 'nenhum corpo com o nome "' + quem + '" na biblioteca — escolha um abaixo, '
+        + 'ou desenhe um na aba Símbolos' : '';
     if (vale && O && O.toast) O.toast(ST.faixaNota, 'warn', 7000);
   } else if (r.how === 'ambiguo') {
-    /* EMPATE: mostra os dois e NÃO escolhe. "Aplicar ao símbolo" só destrava com libSel,
-       então ele não nasce armado com um chute. Só o filtro por id junta os dois: o filtro de
+    /* EMPATE: mostra os dois e NÃO escolhe. "Aplicar símbolo ao componente" só destrava com
+       libSel, então ele não nasce armado com um chute. Só o filtro por id junta os dois: o filtro de
        texto é substring e não dobra acento. */
     ST.libIds = r.cands.map(x => x.id);
     ST.libSel = null; ST.faixaScroll = r.cands[0].id;
@@ -1820,6 +2036,9 @@ function consomeScroll() {
 
 function refreshLib() {
   if (!UI) return;
+  /* no modo simbolos a faixa nao aparece (CSS): refazer ~900 tiles escondidos a cada clique
+     nao serve a ninguem. O trocaModo zera libKey, e a volta para Componentes a refaz */
+  if (ST.modo === 'simbolos') return;
   /* a faixa de componentes so existe onde ha valores: no espelho do Altium um simbolo
      nao tem componentes por baixo dele */
   const f = familiaAberta();
@@ -1853,12 +2072,10 @@ function refreshLib() {
     return;
   }
   const q = ST.libQ.trim().toLowerCase();
-  /* a descrição entra na busca porque é o único jeito de achar símbolo cujo NOME é código de
-     catálogo: "CMP-0694-00003-2" não diz nada, "RS-485" acha. São 727 dos 897 com descrição. */
+  /* a busca é a mesma da lista da vista Símbolos (filtraSimbolos: nome, apelidos, kind e
+     descrição — 727 dos 897 símbolos têm descrição) */
   const ids = (ST.libIds && ST.libIds.length) ? new Set(ST.libIds) : null;
-  const rows = all.filter(s => (!ids || ids.has(s.id))
-    && (!q || (s.name + ' ' + (s.aliases || []).join(' ') + ' ' + (s.kind || '')
-               + ' ' + (s.description || '')).toLowerCase().includes(q)));
+  const rows = filtraSimbolos(all, ST.libQ).filter(s => !ids || ids.has(s.id));
   UI.libCount.textContent = rows.length + (rows.length !== all.length ? ' de ' + all.length : '')
     + ' símbolo' + (all.length === 1 ? '' : 's') + (ST.faixaNota ? ' — ' + ST.faixaNota : '');
   if (!rows.length) { UI.tiles.append(el('div', 'symed-empty', q ? 'nada com "' + ST.libQ + '"' : 'biblioteca vazia')); return; }
@@ -1872,14 +2089,16 @@ function refreshLib() {
     t.title = s.name + (s.description ? '\n' + s.description : '') + '\n' + (s.pins || []).length + ' pinos · ' + (s.kind || '') + (s.usos ? ' · ' + s.usos + ' usos' : '')
       + (uso ? '\naplicado a ' + uso : '')
       + ((s.aliases || []).length ? '\n' + s.aliases.join(', ') : '')
-      + '\n(botão direito: editar, aplicar, renomear, excluir)';
+      + '\n(botão direito: aplicar ao componente, aplicar à categoria, editar na aba Símbolos)';
     const cv = el('canvas'); cv.width = 96; cv.height = 64; cv.dataset.id = s.id;
     t.append(cv, el('span', 'nm', s.name), el('span', 'k', (s.kind === 'ci' ? 'CI' : 'genérico') + ' · ' + (s.pins || []).length + 'p'));
     t.onclick = () => { if (tileDragged) { tileDragged = false; return; }
       /* so refaz o DOM quando ha nota a apagar — com 897 tiles, refazer a cada clique e o que trava */
       if (ST.faixaNota) { ST.faixaNota = ''; libKey = ''; }
       ST.libSel = ST.libSel === s.id ? null : s.id; refreshLib(); };
-    t.ondblclick = () => { ST.libSel = s.id; aplicarLib(); };
+    /* duplo clique aplica ao componente aberto — e só a ele: sem componente não faz nada (o
+       botão travado da faixa diz por quê), nunca abre o lote da categoria por conta própria */
+    t.ondblclick = aposRecarga(() => { ST.libSel = s.id; markLibSel(); pintaBotoesLib(false); if (componenteAberto()) aplicarLib(); });
     /* o botão direito marca o tile e abre o cardápio dele (menuDoSimbolo) */
     t.addEventListener('contextmenu', e => {
       e.preventDefault(); e.stopPropagation();
@@ -1899,11 +2118,13 @@ function markLibSel() {
   if (!UI) return;
   UI.tiles.querySelectorAll('.symed-tile').forEach(t => t.setAttribute('aria-selected', String(t.dataset.id === ST.libSel)));
 }
+/* a miniatura de um símbolo da biblioteca: o tile da faixa (96×64) e a linha da lista da vista
+   Símbolos (54×36, em data-w/data-h) são o mesmo desenho em tamanhos diferentes */
 function drawTile(cv) {
   if (cv.dataset.drawn) return;
   const s = libById(cv.dataset.id); if (!s) return;
   cv.dataset.drawn = '1';
-  const DPR = window.devicePixelRatio || 1, W = 96, H = 64;
+  const DPR = window.devicePixelRatio || 1, W = Number(cv.dataset.w) || 96, H = Number(cv.dataset.h) || 64;
   cv.width = W * DPR; cv.height = H * DPR;
   const ctx = cv.getContext('2d');
   ctx.fillStyle = tok('--sheet') || HubDraw.SCH.sheet; ctx.fillRect(0, 0, cv.width, cv.height);
@@ -2494,11 +2715,11 @@ async function salvar() {
      dela nasce do gerador, e o que se grava por componente e o `valores[].parts`. */
   if (!acervoGravavel() && !ST.familia) {
     /* a CATEGORIA não se salva desenhando nela: o desenho vai para os componentes. O
-       caminho é escolher um símbolo na faixa e "Aplicar à categoria…" (que troca também o
-       padrão dela), ou abrir um componente na aba Componentes */
+       caminho é escolher um símbolo na faixa e "Aplicar símbolo à categoria…" (que troca
+       também o padrão dela), ou abrir um componente na faixa Componentes */
     setStatus('a categoria não se salva pelo canvas: escolha um símbolo na faixa de baixo e use '
-              + '"Aplicar à categoria…", ou abra um componente na aba Componentes', 'err');
-    if (O && O.toast) O.toast('para trocar o desenho da categoria inteira, use um símbolo da biblioteca e "Aplicar à categoria…"', 'warn', 7000);
+              + '"Aplicar símbolo à categoria…", ou abra um componente na faixa Componentes', 'err');
+    if (O && O.toast) O.toast('para trocar o desenho da categoria inteira, use um símbolo da biblioteca e "Aplicar símbolo à categoria…"', 'warn', 7000);
     return;
   }
   const sym = serializeSymbol(d);
@@ -2556,52 +2777,119 @@ async function salvar() {
   listKey = ''; refreshList(); refreshBar(); refreshAside();
 }
 
+/* "Aplicar símbolo ao componente" (e o duplo clique no tile): troca o desenho do componente
+   aberto pelo do símbolo marcado. Só no rascunho — o Salvar grava. A categoria tem o botão
+   dela (abrirAplicarCategoria); até 2026-10-09 este mesmo botão virava "Aplicar à categoria…"
+   ou "Aplicar ao símbolo em edição" conforme o que estava aberto, e agora diz uma coisa só. */
 function aplicarLib() {
-  const s = libById(ST.libSel); if (!s) return;
-  /* com a CATEGORIA aberta (almoxarifado, sem componente), aplicar é escolher quais
-     componentes dela recebem o símbolo — e gravar todos (abrirAplicarCategoria) */
-  if (!ST.libEd && !ST.familia && !acervoGravavel() && familiaAberta()) { abrirAplicarCategoria(s); return; }
+  const s = libById(ST.libSel); if (!s || !componenteAberto()) return;
   const p = curPart(); if (!p) return;
   pushUndo();
   const r = applyLibSymbol(p, s);
   p.pins = r.part.pins; p.graphics = r.part.graphics;
   ST.note = r.note; ST.selection = []; touched(); afterEdit(); fit();
 }
-async function adicionarCorpo() {
-  const p = curPart(); if (!p || semServidor()) return;
-  if (!p.pins.length && !p.graphics.length) { O.toast('a parte está vazia — nada para guardar', 'warn'); return; }
-  const sugerido = ST.draft.name.replace(/\[\s*(SMD|PTH)\s*\]/gi, '').replace(/\s+/g, ' ').trim();
-  const name = await pedirTexto('Guardar corpo na biblioteca', 'Nome do corpo na biblioteca de símbolos', sugerido);
-  if (name == null || !name.trim()) return;
-  const sym = serializeSymbol({ name, parts: [p] }).parts[0];
-  const { status, j } = await api('lib', { op: 'add', symbol: { name: name.trim(), kind: sym.pins.length <= 4 ? 'generico' : 'ci', pins: sym.pins, graphics: sym.graphics } });
-  if (j && j.ok && j.symbol) {
-    if (!DATA.symlib) { DATA.symlib = { symbols: [] }; DATA.symlibMissing = false; }
-    DATA.symlib.symbols.push(j.symbol); IDXLIB = null; ST.libSel = j.symbol.id; ST.libQ = ''; UI.libQ.value = '';
-    refreshLib(); O.toast('"' + j.symbol.name + '" entrou na biblioteca de símbolos', 'ok');
+/* "SALVAR COMO…" (vista Símbolos): o desenho do canvas vira um símbolo NOVO, com outro nome, e
+   o canvas passa a editar a cópia — como em qualquer editor. O símbolo de origem fica como
+   estava gravado: a edição não salva vai só para a cópia. É a rota do primeiro Salvar de um
+   símbolo novo (op add), com o kind do de origem. Geometria igual à de outro símbolo o
+   servidor recusa (409): a biblioteca guarda cada desenho uma vez só, e copiar sem mexer não
+   tem como — o toast diz com quem colidiu.
+   Até 2026-10-09 existia o "Guardar como símbolo", que capturava o desenho de um COMPONENTE;
+   ele saiu junto com a faixa de botões da vista Componentes. */
+async function salvarComo() {
+  const d = ST.draft, le = ST.libEd; if (!d || !le || semServidor() || ST.saving) return;
+  const p = serializeSymbol({ name: d.name, parts: [d.parts[0] || { part: 1, pins: [], graphics: [] }] }).parts[0];
+  if (!p.pins.length && !p.graphics.length) { setStatus('o símbolo está vazio — desenhe alguma coisa antes de salvar', 'err'); return; }
+  const nome = await pedirTexto('Salvar como', 'Nome do símbolo novo (o "' + d.name + '" fica como está gravado)', d.name + ' (cópia)');
+  if (nome == null || !nome.trim()) return;
+  const n = nome.trim();
+  if (libSyms().some(x => x.name === n)) { O.toast('já existe um símbolo chamado "' + n + '" — escolha outro nome', 'warn'); return; }
+  /* o rascunho pode ter mudado enquanto o nome era pedido: grava-se o que está na mesa agora */
+  if (ST.draft !== d || ST.libEd !== le) return;
+  const g = serializeSymbol({ name: n, parts: [d.parts[0] || { part: 1, pins: [], graphics: [] }] }).parts[0];
+  const orig = le.id ? libById(le.id) : null;
+  ST.saving = true; refreshAside();
+  setStatus('salvando "' + n + '" na biblioteca de símbolos…', '');
+  /* o canvas continua editável durante o POST (como no salvarLib): a marca diz se mexeram */
+  const marca = ST.edicoes;
+  let r;
+  try {
+    r = await api('lib', { op: 'add', symbol: Object.assign({ name: n, desc: d.description || '', pins: g.pins, graphics: g.graphics },
+                                                          orig && orig.kind ? { kind: orig.kind } : {}) });
+  } finally { ST.saving = false; }
+  const { status, j } = r;
+  if (!j || !j.ok || !j.symbol) {
+    const msg = (j && j.error) || ('HTTP ' + status);
+    setStatus('não salvou: ' + msg, 'err');
+    O.toast('não salvou: ' + msg, status === 409 ? 'warn' : 'err');
+    refreshAside();
     return;
   }
-  if (status === 409 && j && j.symbol) { ST.libSel = j.symbol.id; refreshLib(); }
-  O.toast((j && j.error) || ('não guardou (HTTP ' + status + ')'), status === 409 ? 'warn' : 'err');
+  const s = j.symbol;
+  if (s.desc && !s.description) s.description = s.desc;
+  if (!DATA.symlib) { DATA.symlib = { symbols: [] }; DATA.symlibMissing = false; }
+  DATA.symlib.symbols.push(s);
+  IDXLIB = null; libKey = ''; listKey = '';
+  const criado = 'símbolo "' + s.name + '" criado na biblioteca' + (orig ? ' a partir de "' + orig.name + '"' : '');
+  /* SÓ COM A MESA INTACTA o canvas passa para a cópia, no desenho que o servidor gravou
+     (arredondado e ordenado). Se mexeram durante o POST, ou abriram outra coisa (outro
+     símbolo, a vista Componentes), a cópia só entra na lista — trocar o canvas por baixo
+     jogaria fora a edição nova, ou poria um símbolo no modo componentes */
+  const intacto = ST.modo === 'simbolos' && ST.libEd === le && ST.draft === d && ST.edicoes === marca && !ST.gesto && !ST.draw;
+  if (!intacto) {
+    refreshList(); refreshAside();          /* a ficha destrava o "Salvar como…" (gravando…) */
+    if (ST.libEd === le) setStatus('a cópia "' + s.name + '" foi gravada SEM a sua última edição: o canvas continua em "'
+                                   + d.name + '", com ela ainda não salva', 'err');
+    O.toast(criado + ' — está na lista, à esquerda', 'ok');
+    return;
+  }
+  abreNoCanvasComoSimbolo({ id: s.id }, { name: s.name, description: s.description || '', footprints: [],
+                                          parts: [{ part: 1, pins: clone(s.pins || []), graphics: clone(s.graphics || []) }] });
+  setStatus('salvo como "' + s.name + '" ' + new Date().toLocaleTimeString('pt-BR')
+            + (orig ? ' — "' + orig.name + '" ficou como estava gravado' : ''), 'ok');
+  O.toast(criado, 'ok');
 }
+/* renomear/excluir recebem SEMPRE o símbolo: a queda para o tile marcado da faixa era dos
+   botões da faixa, que saíram — e, chamada da ficha durante uma recarga, apagaria outro */
 async function renomearLib(alvo) {
-  const s = (alvo && alvo.id) ? alvo : libById(ST.libSel); if (!s || semServidor()) return;
+  const s = (alvo && alvo.id) ? alvo : null; if (!s || semServidor()) return;
   const name = await pedirTexto('Renomear símbolo', 'Novo nome', s.name);
   if (name == null || !name.trim() || name.trim() === s.name) return;
   const { status, j } = await api('lib', { op: 'rename', id: s.id, name: name.trim() });
   if (j && j.ok) {
-    s.name = (j.symbol && j.symbol.name) || name.trim(); IDXLIB = null; libKey = '';
-    /* o símbolo que está no canvas é este: o nome no topo acompanha */
-    if (ST.libEd && ST.libEd.id === s.id && ST.draft) { ST.draft.name = s.name; refreshBar(); refreshAside(); }
-    refreshLib(); O.toast('renomeado para "' + s.name + '"', 'ok'); return;
+    /* o objeto da lista pode ter sido trocado por uma recarga durante o POST: o nome vai nos dois */
+    const novo = (j.symbol && j.symbol.name) || name.trim();
+    s.name = novo; const vivo = libById(s.id); if (vivo) vivo.name = novo;
+    IDXLIB = null; libKey = ''; listKey = '';
+    /* o símbolo que está no canvas é este: o nome no topo acompanha, e o status também — o
+       "salvo como X" de antes continuaria falando de um nome que não existe mais */
+    if (ST.libEd && ST.libEd.id === s.id && ST.draft) {
+      ST.draft.name = s.name;
+      setStatus('renomeado para "' + s.name + '" ' + new Date().toLocaleTimeString('pt-BR'), 'ok');
+      refreshBar(); refreshAside();
+    }
+    refreshLib(); refreshList(); O.toast('renomeado para "' + s.name + '"', 'ok'); return;
   }
   O.toast((j && j.error) || ('não renomeou (HTTP ' + status + ')'), status === 409 ? 'warn' : 'err');
+}
+/* "Renomear…" da ficha: o símbolo aberto. O que já está na biblioteca vai pelo servidor; o
+   símbolo NOVO ainda não salvo só troca o nome do rascunho — ele entra com esse nome no Salvar */
+async function renomearAberto() {
+  const le = ST.libEd, d = ST.draft; if (!le || !d) return;
+  if (le.id) { const s = libById(le.id); if (s) await renomearLib(s); return; }
+  const nome = await pedirTexto('Renomear símbolo novo', 'Nome do símbolo (ele entra na biblioteca com este nome no Salvar)', d.name);
+  if (nome == null || !nome.trim() || nome.trim() === d.name || ST.draft !== d) return;
+  const n = nome.trim();
+  if (libSyms().some(x => x.name === n)) { O.toast('já existe um símbolo chamado "' + n + '" — escolha outro nome', 'warn'); return; }
+  d.name = n; listKey = '';
+  refreshList(); refreshBar(); refreshAside();
 }
 /* EXCLUIR UM SÍMBOLO — não um componente. Os componentes que receberam o desenho dele ficam
    com o desenho (é cópia, na .SchLib e no espelho); só deixam de estar ligados a ele. E ele
    não volta: o servidor guarda o fingerprint em `excluidos`, que a extração respeita. */
 async function excluirLib(alvo) {
-  const s = (alvo && alvo.id) ? alvo : libById(ST.libSel); if (!s || semServidor()) return;
+  const s = (alvo && alvo.id) ? alvo : null; if (!s || semServidor()) return;
   const uso = usoDoSimbolo(s.id);
   const pads = DATA.vinc ? Object.keys(DATA.vinc.pads).filter(k => DATA.vinc.pads[k] === s.id) : [];
   const ok = await confirmar('Excluir o símbolo "' + s.name + '" da biblioteca de símbolos?'
@@ -2616,13 +2904,18 @@ async function excluirLib(alvo) {
     if (DATA.symlib) DATA.symlib.symbols = libSyms().filter(x => x.id !== s.id);
     IDXLIB = null;
     if (ST.libSel === s.id) ST.libSel = null;
-    libKey = '';
+    if (ST.ultimoLib === s.id) ST.ultimoLib = null;
+    libKey = ''; listKey = '';
     /* era o símbolo aberto no canvas: o que está lá vira um símbolo NOVO, ainda não salvo —
        quem excluiu por engano ainda pode salvá-lo de volta. Só com rascunho na mesa: sem
        ele, marcar "edição não salva" deixava o editor sujo sem ter o que salvar */
-    if (ST.libEd && ST.libEd.id === s.id && ST.draft) { ST.libEd.id = null; ST.dirty = true; refreshBar(); refreshAside(); }
+    if (ST.libEd && ST.libEd.id === s.id && ST.draft) {
+      ST.libEd.id = null; ST.dirty = true;
+      setStatus('"' + s.name + '" saiu da biblioteca — o desenho continua aqui, como símbolo novo: Salvar o põe de volta', '');
+      refreshBar(); refreshAside();
+    }
     carregaVinculos(true);
-    refreshLib();
+    refreshLib(); refreshList();
     O.toast('símbolo "' + s.name + '" excluído' + (j.desvinculados ? ' — ' + j.desvinculados + ' vínculo(s) desfeito(s)' : ''), 'ok');
     return;
   }
@@ -2635,89 +2928,139 @@ async function excluirLib(alvo) {
    O símbolo é um desenho da Biblioteca de símbolos (Libs/symbols-lib.js); o componente é a
    peça do almoxarifado que o USA. Editar um símbolo abre o desenho dele no canvas e o Salvar
    grava na biblioteca (ST.libEd); aplicar copia o desenho para os componentes e deixa o
-   vínculo no ledger — editar o símbolo depois oferece levar o desenho novo a eles. */
+   vínculo no ledger — editar o símbolo depois oferece levar o desenho novo a eles.
+   Desde 2026-10-09 (pedido do dono) editar é a vista Símbolos e aplicar é a vista
+   Componentes: um modo do editor cada uma (abaixo). */
 
-/* de onde se veio, para o "voltar" da ficha e para o "Aplicar à categoria" saber qual é */
-function voltaAtual() {
-  if (ST.libEd) return ST.libEd.volta;
-  if (ST.familia) return { sel: ST.familia, valor: ST.sel };
-  return ST.sel ? { sel: ST.sel, valor: null } : null;
+/* ═══ OS DOIS MODOS DO EDITOR ═══
+   A vista Componentes da Biblioteca aplica símbolos a componentes; a vista Símbolos "serve
+   única e exclusivamente para editar símbolos". O editor é um só (o UI e o ST são deste
+   módulo), então as duas vistas são MODOS dele:
+     'componentes'  o canvas mostra uma categoria ou um componente; a faixa de baixo tem os
+                    símbolos da biblioteca e os dois "Aplicar". ST.libEd nunca existe aqui.
+     'simbolos'     o canvas mostra um símbolo da biblioteca (ST.libEd); a coluna da esquerda
+                    lista a biblioteca de símbolos, e a faixa de baixo some.
+   Nada atravessa a troca: o que estava na mesa é de um modo só. Com edição não salva, o
+   modal do tema pergunta antes, e cancelar deixa tudo onde estava.
+   Responde `true` NA HORA quando não precisa perguntar, e só devolve Promise quando abre o
+   modal: o hub-libview.js troca a vista no mesmo instante em que o editor troca de modo, e
+   quem pediu a troca (o #/libsym do hub.html) segue logo com HubSymEd.abrir. */
+function modo(m) {
+  if (m !== 'componentes' && m !== 'simbolos') return false;
+  if (ST.modo === m) return true;
+  if (!ST.dirty) { trocaModo(m); return true; }
+  return confirmar('Há edição não salva em "' + nomeAberto() + '". Descartar e ir para a aba '
+                   + (m === 'simbolos' ? 'Símbolos' : 'Componentes') + '?',
+                   { title: 'Descartar edição?', ok: 'Descartar', danger: true })
+    .then(ok => { if (ok && ST.modo !== m) trocaModo(m); return ok; });
 }
+function trocaModo(m) {
+  /* o símbolo aberto volta junto quando se voltar para a vista Símbolos */
+  if (ST.modo === 'simbolos') ST.ultimoLib = (ST.libEd && ST.libEd.id) || null;
+  ST.modo = m;
+  ST.libEd = null; ST.familia = null; ST.valSel = null; ST.sel = null; ST.draft = null; ST.part = 1;
+  ST.undo = []; ST.redo = []; ST.dirty = false; ST.selection = []; ST.draw = null; ST.note = '';
+  ST.gesto = null; ST.box = null;
+  /* listaFiltro: a rolagem da lista é a do OUTRO modo, e não volta */
+  listKey = ''; libKey = ''; marcaUlt = null; listaFiltro = null; rolouPara = null;
+  if (UI) { pintaModo(); setStatus('', ''); UI.list.scrollTop = 0; }
+  refreshAll();
+  const volta = m === 'simbolos' ? ST.ultimoLib : null;
+  if (volta && libById(volta)) editarLib(volta, true);
+}
+/* "Editar na aba Símbolos" (o botão direito num tile da vista Componentes). Quem troca de
+   vista é a Biblioteca (hub-libview.js), que ouve o evento e responde com preventDefault —
+   este módulo não a conhece. Sem ninguém ouvindo, o editor troca de modo ele mesmo. */
+function pedeEdicao(id) {
+  if (!id) return;
+  let ev = null;
+  try { ev = new CustomEvent('hub:editar-simbolo', { detail: { id }, cancelable: true }); } catch (e) {}
+  if (ev && typeof document !== 'undefined' && !document.dispatchEvent(ev)) return;
+  Promise.resolve(modo('simbolos')).then(ok => { if (ok) editarLib(id); });
+}
+/* Só existe no modo símbolos. NÃO zera listKey nem libKey: abrir outro símbolo só remarca a
+   linha (a chave da lista já muda sozinha quando entra ou sai o símbolo novo não salvo), e a
+   faixa está escondida neste modo — o trocaModo a refaz na volta para Componentes. Zerar as
+   duas aqui refazia ~900 linhas e ~900 tiles a cada clique, com as miniaturas piscando. */
 function abreNoCanvasComoSimbolo(le, draft, manter) {
   ST.libEd = le;
   ST.familia = null; ST.valSel = null; ST.sel = null;
   ST.draft = draft; ST.part = 1;
   ST.undo = []; ST.redo = []; ST.dirty = false; ST.selection = []; ST.draw = null; ST.note = '';
-  ST.faixa = 'simbolos'; ST.libIds = null; ST.faixaNota = ''; libKey = ''; listKey = '';
+  ST.faixa = 'simbolos'; ST.libIds = null; ST.faixaNota = '';
   limpaStatusSe(true, manter);
   ST.fitPending = true;
   refreshAll(); fitSeNecessario();
 }
-/* "Editar" (botão da faixa e botão direito no tile): o símbolo no canvas */
+/* o símbolo no canvas: a linha da lista da vista Símbolos, ou o "Editar na aba Símbolos" do
+   tile (pelo pedeEdicao, que antes troca o modo). Só vale no modo símbolos — no outro, quem
+   chama é a casca ou um teste, e o pedido vai pelo mesmo caminho do tile */
 async function editarLib(id, force, manter) {
+  if (ST.modo !== 'simbolos') { pedeEdicao(id); return false; }
   /* a biblioteca pode estar RECARREGANDO (a casca chama reload() a cada gravação em Libs/ —
      inclusive a do Aplicar de um segundo atrás): os tiles continuam na tela, mas DATA.symlib
      está vazio. Esperar a carga em curso, em vez de não achar o símbolo e não fazer nada */
   if (!libById(id) && DATA.libLoading) await DATA.libLoading;
+  /* durante a espera pode-se ter ido para a vista Componentes: lá não existe símbolo em
+     edição (o Salvar de lá gravaria na biblioteca de símbolos) */
+  if (ST.modo !== 'simbolos') return false;
   const s = libById(id);
   if (!s) { if (O && O.toast) O.toast('o símbolo não está mais na biblioteca', 'warn'); return false; }
   if (ST.dirty && !force) {
     const ok = await confirmar('Há edição não salva em "' + nomeAberto() + '". Descartar e editar o símbolo "' + s.name + '"?',
                                { title: 'Descartar edição?', ok: 'Descartar', danger: true });
-    if (!ok) return false;
+    if (!ok || ST.modo !== 'simbolos') return false;
   }
-  if (!manter) ST.libSel = s.id;
-  abreNoCanvasComoSimbolo({ id: s.id, volta: voltaAtual() },
+  /* aberto de fora da lista ("Editar na aba Símbolos", a volta à vista) com um filtro que o
+     esconde: o filtro sai, senão a linha dele não existe e nada fica marcado */
+  if (ST.qSim.trim() && !filtraSimbolos([s], ST.qSim).length) {
+    ST.qSim = ''; if (UI && UI.q) UI.q.value = ''; listKey = '';
+  }
+  abreNoCanvasComoSimbolo({ id: s.id },
     { name: s.name, description: s.description || '', footprints: [],
       parts: [{ part: 1, pins: clone(s.pins || []), graphics: clone(s.graphics || []) }] }, manter);
   return true;
 }
-/* "+ Novo símbolo": um símbolo em branco, com nome, para desenhar do zero. Ele só entra na
-   biblioteca no primeiro Salvar — um símbolo vazio não tem o que guardar. */
+/* "+ Novo símbolo" (topo da lista da vista Símbolos): um símbolo em branco, com nome, para
+   desenhar do zero. Ele só entra na biblioteca no primeiro Salvar — um símbolo vazio não tem
+   o que guardar. */
 async function novoSimbolo() {
-  if (semServidor()) return;
+  if (semServidor() || ST.modo !== 'simbolos') return;
   const nome = await pedirTexto('Novo símbolo', 'Nome do símbolo (é o que a busca da biblioteca acha)', '');
   if (nome == null || !nome.trim()) return;
   const n = nome.trim();
   if (libSyms().some(x => x.name === n)) { O.toast('já existe um símbolo chamado "' + n + '" — escolha outro nome', 'warn'); return; }
   if (ST.dirty && !(await confirmar('Há edição não salva em "' + nomeAberto() + '". Descartar e começar o símbolo "' + n + '"?',
                                     { title: 'Descartar edição?', ok: 'Descartar', danger: true }))) return;
-  ST.libSel = null;
-  abreNoCanvasComoSimbolo({ id: null, volta: voltaAtual() },
+  abreNoCanvasComoSimbolo({ id: null },
     { name: n, description: '', footprints: [], parts: [{ part: 1, pins: [], graphics: [] }] });
   O.toast('símbolo novo "' + n + '": desenhe e salve — ele entra na biblioteca de símbolos', 'ok');
 }
-/* sai do símbolo e volta para a categoria (e o componente) de onde se veio */
-async function sairDaLib() {
-  const v = ST.libEd && ST.libEd.volta;
-  if (ST.dirty && !(await confirmar('Há edição não salva no símbolo "' + nomeAberto() + '". Descartar?',
-                                    { title: 'Descartar edição?', ok: 'Descartar', danger: true }))) return;
-  ST.dirty = false;
-  if (!v || !v.sel || !symByName(v.sel)) {
-    ST.libEd = null; ST.draft = null; ST.selection = []; listKey = ''; refreshAll(); return;
-  }
-  ST.draft = null;
-  await openSymbol(v.sel, true);
-  if (v.valor) await abrirValor(v.valor);
-}
-/* a ficha do símbolo em edição: o que ele é, quem o usa e o caminho de volta */
+/* a ficha do símbolo em edição: o que ele é, quem o usa, e Renomear/Excluir (Salvar e
+   "Salvar como…" ficam no pé da ficha, com o Salvar de sempre). O "voltar para a categoria"
+   de antes saiu em 2026-10-09: editar símbolo virou uma vista própria, e a categoria está na
+   vista Componentes, a um clique na faixa da Biblioteca. */
 function fichaDoSimbolo() {
   const box = el('div');
   const le = ST.libEd;
   box.append(el('div', 'symed-libnota', le.id
-    ? 'Símbolo da biblioteca — não é um componente. Salvar grava o desenho na biblioteca; os componentes só mudam quando você aplica (e, se ele já está aplicado, o hub pergunta se leva o desenho novo a eles).'
+    ? 'Símbolo da biblioteca — não é um componente. Salvar grava o desenho na biblioteca; os componentes só mudam quando recebem o desenho na aba Componentes (e, se ele já está aplicado, o hub pergunta se leva o desenho novo a eles).'
     : 'Símbolo novo, ainda fora da biblioteca: ele entra no primeiro Salvar.'));
   const uso = le.id ? usoDoSimbolo(le.id) : '';
   if (uso) box.append(el('div', 'symed-libnota', 'Aplicado a ' + uso + '.'));
-  if (le.volta && le.volta.sel) {
-    const via = el('div', 'symed-viafam');
-    via.append(document.createTextNode('voltar para '));
-    const b = el('button', null, le.volta.valor || le.volta.sel); b.type = 'button';
-    b.title = 'fecha o símbolo e reabre ' + (le.volta.valor ? 'o componente' : 'a categoria');
-    b.onclick = sairDaLib;
-    via.append(b);
-    box.append(via);
-  }
+  const acts = el('div', 'symed-libacts');
+  const sv = semServidor() ? 'abra o hub pelo hubserver.py para gravar' : '';
+  const bRen = btn('btn-secondary btn-sm', 'Renomear…', renomearAberto, le.id
+    ? (sv || 'troca o nome do símbolo na biblioteca — quem o usa continua ligado a ele')
+    : 'troca o nome do símbolo novo — ele entra na biblioteca com este nome no Salvar');
+  bRen.disabled = !!(le.id && sv);
+  if (bRen.disabled) bRen.title = sv;
+  const porqueDel = sv || (le.id ? '' : 'símbolo novo, ainda fora da biblioteca: não há o que excluir');
+  const bDel = btn('btn-secondary btn-sm', 'Excluir…', () => { const s = libById(le.id); if (s) excluirLib(s); }, porqueDel
+    || 'exclui o símbolo da biblioteca — quem o usa fica com o desenho; o canvas o guarda como símbolo novo, para desfazer salvando');
+  bDel.disabled = !!porqueDel;
+  acts.append(bRen, bDel);
+  box.append(acts);
   return box;
 }
 /* Salvar no modo símbolo: add (novo) ou update (existente) na biblioteca de símbolos */
@@ -2749,10 +3092,10 @@ async function salvarLib(opts) {
   if (!DATA.symlib) { DATA.symlib = { symbols: [] }; DATA.symlibMissing = false; }
   const lst = DATA.symlib.symbols, i = lst.findIndex(x => x.id === s.id);
   if (i >= 0) lst[i] = s; else lst.push(s);
-  IDXLIB = null; libKey = ''; le.id = s.id;
+  /* listKey também: o desenho (a miniatura) e o nome mudam sem a contagem da lista mudar */
+  IDXLIB = null; libKey = ''; listKey = ''; le.id = s.id;
   const intacto = ST.libEd === le && ST.draft === d && ST.edicoes === marca && !ST.gesto && !ST.draw;
   if (intacto) {
-    ST.libSel = s.id;
     /* o canvas passa a mostrar o que foi GRAVADO: o servidor arredonda a 1 mil e ordena os
        pinos, e é essa a versão que os componentes vão receber */
     d.name = s.name; d.description = s.description || '';
@@ -2994,44 +3337,52 @@ async function abrirAplicarCategoria(s) {
   if (!r || !r.alvos.length) return;
   await aplicarEmLote(s, r.alvos, r.padroes);
 }
-/* O BOTÃO DIREITO NUM SÍMBOLO da faixa. O menu é o HubAlmoxPick.menu (hub-almoxpick.js, que
-   as duas cascas carregam); sem ele, os botões da faixa fazem o mesmo. */
+/* O BOTÃO DIREITO NUM SÍMBOLO da faixa (vista Componentes). O menu é o HubAlmoxPick.menu
+   (hub-almoxpick.js, que as duas cascas carregam); sem ele, os botões da faixa fazem o mesmo.
+   Os dois aplicar aparecem SEMPRE, travados com o porquê quando não valem — o mesmo dos
+   botões. Renomear e excluir moram na vista Símbolos, para onde o "Editar" leva. */
 function menuDoSimbolo(x, y, s) {
-  if (typeof HubAlmoxPick === 'undefined' || !HubAlmoxPick.menu) return;
-  const acoes = [{ rotulo: 'Editar símbolo', onEscolher: () => editarLib(s.id) }];
+  if (typeof HubAlmoxPick === 'undefined' || !HubAlmoxPick.menu || !s) return;
+  const pq = porquesAplicar(s, false);
   const fam = familiaDoContexto();
-  if (ST.draft && (ST.libEd || ST.familia || acervoGravavel())) {
-    const [rot] = rotuloAplicar();
-    acoes.push({ rotulo: rot, onEscolher: () => { ST.libSel = s.id; aplicarLib(); } });
-  }
-  if (fam && valoresDa(fam).length && !semServidor()) {
-    acoes.push({ rotulo: 'Aplicar à categoria ' + fam.name + '…', onEscolher: () => abrirAplicarCategoria(s) });
-  }
-  if (!semServidor()) {
-    acoes.push({ rotulo: 'Renomear…', onEscolher: () => renomearLib(s) });
-    acoes.push({ rotulo: 'Excluir símbolo…', perigo: true, onEscolher: () => excluirLib(s) });
-  }
+  const acoes = [
+    { rotulo: 'Aplicar símbolo ao componente', off: pq.comp,
+      onEscolher: aposRecarga(() => { ST.libSel = s.id; markLibSel(); aplicarLib(); pintaBotoesLib(false); }) },
+    { rotulo: 'Aplicar símbolo à categoria' + (fam && valoresDa(fam).length ? ' ' + fam.name : '') + '…', off: pq.cat,
+      onEscolher: aposRecarga(() => abrirAplicarCategoria(libById(s.id) || s)) },
+    { rotulo: 'Editar na aba Símbolos', onEscolher: () => pedeEdicao(s.id) },
+  ];
   const uso = usoDoSimbolo(s.id);
   HubAlmoxPick.menu(x, y, s.name + (uso ? ' · aplicado a ' + uso : ''), acoes);
 }
-/* o rótulo do Aplicar diz em QUEM o desenho vai cair */
-function rotuloAplicar() {
-  if (ST.libEd) return ['Aplicar ao símbolo em edição', 'troca o desenho que está no canvas pelo do símbolo escolhido (só no rascunho: Salvar símbolo grava)'];
-  if (ST.familia || (ST.draft && acervoGravavel())) return ['Aplicar ao componente', 'troca o desenho do componente aberto pelo do símbolo escolhido — a pinagem fica quando a contagem bate; Salvar grava'];
-  const f = familiaAberta();
-  if (f && valoresDa(f).length) return ['Aplicar à categoria…', 'escolhe quais componentes da categoria recebem o símbolo e grava todos de uma vez'];
-  return ['Aplicar', 'abra uma categoria na lista da esquerda'];
+/* POR QUE cada aplicar não vale agora ('' = vale), na ordem em que o usuário resolve: o
+   símbolo, o componente (ou a categoria), o servidor. Os botões da faixa e o botão direito do
+   tile leem daqui, para os dois dizerem a mesma coisa. */
+function porquesAplicar(s, emComponentes) {
+  const semSim = emComponentes ? 'volte à faixa Símbolos e marque um símbolo'
+    : !s ? 'nenhum símbolo marcado — clique num símbolo da faixa' : '';
+  const comp = semSim || (componenteAberto() ? ''
+    : acervoGravavel() ? 'nenhum componente aberto — escolha um na lista da esquerda'
+    : 'nenhum componente aberto — escolha um na faixa Componentes (a categoria inteira recebe pelo "Aplicar símbolo à categoria")');
+  const f = familiaDoContexto();
+  const cat = semSim
+    || (!f ? 'nenhuma categoria aberta — escolha uma na lista da esquerda'
+        : !valoresDa(f).length ? 'a categoria "' + f.name + '" não tem componentes por baixo (só as do almoxarifado têm)'
+        : semServidor() ? 'abra o hub pelo hubserver.py para gravar' : '');
+  return { comp, cat, f };
 }
+/* OS DOIS APLICAR DA FAIXA: nunca somem — travados, o title diz por quê; destravados, diz em
+   QUEM o desenho vai cair */
 function pintaBotoesLib(emComponentes) {
   if (!UI || !UI.bLibApply) return;
-  const sel = !emComponentes && libById(ST.libSel);
-  const [rot, tit] = rotuloAplicar();
-  UI.bLibApply.textContent = rot; UI.bLibApply.title = tit;
-  UI.bLibApply.disabled = !sel || rot === 'Aplicar' || (rot === 'Aplicar à categoria…' && semServidor());
-  UI.bLibEdit.disabled = !sel;
-  UI.bLibRen.disabled = UI.bLibDel.disabled = !sel || semServidor();
-  UI.bLibAdd.disabled = !ST.draft || semServidor();
-  UI.bLibNovo.disabled = semServidor();
+  const s = libById(ST.libSel);
+  const pq = porquesAplicar(s, emComponentes);
+  UI.bLibApply.disabled = !!pq.comp;
+  UI.bLibApply.title = pq.comp || ('troca o desenho de "' + nomeAberto() + '" pelo do símbolo "' + s.name
+    + '" — a pinagem fica quando a contagem bate; Salvar grava');
+  UI.bLibCat.disabled = !!pq.cat;
+  UI.bLibCat.title = pq.cat || ('escolhe quais componentes de "' + pq.f.name + '" recebem o símbolo "' + s.name
+    + '" e grava todos de uma vez');
 }
 
 /* ── quem usa cada símbolo (o ledger, por /api/symbols/lib-vinculos) ── */
@@ -3050,7 +3401,8 @@ function carregaVinculos(forca) {
     }
     DATA.vinc = { porLib, porComp, pads: j.padroes || {} };
     DATA.vincVer++; libKey = '';
-    if (UI) { refreshLib(); if (ST.libEd) refreshAside(); }
+    /* a lista da vista Símbolos tem o vincVer na chave: "aplicados a componentes" e os tooltips */
+    if (UI) { refreshLib(); refreshList(); if (ST.libEd) refreshAside(); }
     return DATA.vinc;
   }).catch(() => null);
   return vincCarga;
@@ -3116,13 +3468,16 @@ function render(opts) {
      aparece por cima dele, nao mudava nada aqui: a armadilha visual. */
   if (O.acervo) setAcervo(O.acervo);
   if (!DATA.schlib && !DATA.loading) loadSchlib().then(() => { listKey = ''; refreshAll(); if (ST.sel && !ST.draft) openSymbol(ST.sel, true); });
-  if (!DATA.symlib && !DATA.libLoading) loadSymlib().then(() => { libKey = ''; refreshLib(); });
+  /* a lista da vista Símbolos e a dica do canvas também esperam por esta carga: sem elas, se
+     o espelho chegasse antes, as duas ficavam em "carregando…" até alguém trocar de aba */
+  if (!DATA.symlib && !DATA.libLoading) loadSymlib().then(() => { libKey = ''; listKey = ''; refreshLib(); refreshList(); refreshBar(); });
   if (!DATA.vinc) carregaVinculos();
   /* a casca chama render() por troca de idioma, mudança no disco, goTab… se o usuário está
      digitando na ficha, refazer a aside apagaria o que ainda não passou pelo onchange. Um
      botão da toolbox com foco não conta: aí a ficha pode e deve acompanhar a seleção */
   const ae = document.activeElement;
   const digitando = !!ae && UI.aside.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+  marcaUlt = null;            /* a linha aberta da lista de símbolos se remarca (e rola, se ainda não rolou) */
   refreshList(); refreshBar(); if (!digitando) refreshAside(); refreshLib();
   /* as larguras guardadas das colunas, depois o canvas mede e enquadra */
   if (UI.splits) UI.splits.aplica();
@@ -3135,8 +3490,8 @@ const dirty = () => !!ST.dirty;
 const actions = {
   novaParte, excluirParte, deleteSelection, duplicarSelecao, undo, redo, nudge, pushUndo, virar, setUnit,
   /* a ferramenta de símbolos — também o que o teste da página (CDP) aperta */
-  editarLib, novoSimbolo, sairDaLib, salvar, aplicarLib, abrirAplicarCategoria, aplicarEmLote, carregaVinculos,
-  menuDoSimbolo };
+  editarLib, novoSimbolo, salvar, salvarComo, renomearAberto, renomearLib, excluirLib, aplicarLib,
+  abrirAplicarCategoria, aplicarEmLote, carregaVinculos, menuDoSimbolo, pedeEdicao, modo };
 
 /* o Libs/schlib.js em disco mudou por fora desta aba (uma sincronizacao, um /save de outra
    janela): zera a carga e reabre o simbolo que estava na tela ja com a versao nova. Edicao nao
@@ -3163,6 +3518,9 @@ function reload() {
      passa `manter`. Guardá-la aqui e devolvê-la no fim trazia de volta o "aplicando…" por cima
      do resultado do lote, que chega enquanto este reload carrega */
   const fam = ST.familia, val = ST.familia ? ST.sel : null, sel = ST.libSel;
+  /* o modo de agora: se ele mudar enquanto a carga voa (trocou-se de vista logo depois de
+     salvar), o que estava aberto é de outro modo e não volta — reabri-lo puxaria a vista */
+  const modo0 = ST.modo;
   ST.draft = null; ST.dirty = false; ST.selection = []; ST.undo = []; ST.redo = []; ST.draw = null;
   carregaVinculos(true);
   if (!UI) return Promise.resolve();
@@ -3172,18 +3530,18 @@ function reload() {
   const devolve = () => {
     if (sel && libById(sel) && ST.libSel !== sel) { ST.libSel = sel; libKey = ''; refreshLib(); }
   };
-  return Promise.all([loadSchlib(), loadSymlib()]).then(async () => {
+  const p = Promise.all([loadSchlib(), loadSymlib()]).then(async () => {
     listKey = ''; libKey = ''; refreshAll();
     /* ALGUÉM ABRIU OUTRA COISA ENQUANTO ISTO CARREGAVA (o "Editar" logo depois de um Aplicar,
        que dispara este reload): é o que o usuário pediu por último, e reabrir o de antes por
        cima dele desfazia o clique */
-    if (ST.draft) return;
-    if (le && le.id && libById(le.id)) { ST.libEd = le; await editarLib(le.id, true, true); devolve(); return; }   /* le.volta segue */
+    if (ST.draft || ST.modo !== modo0) return;
+    if (le && le.id && libById(le.id)) { ST.libEd = le; await editarLib(le.id, true, true); devolve(); return; }
     if (le && rasc) {
       /* o símbolo sumiu da biblioteca enquanto isto carregava (excluído agora): o desenho da
          mesa fica, como símbolo novo não salvo — quem excluiu por engano ainda o salva */
       const sumiu = !!le.id;
-      abreNoCanvasComoSimbolo({ id: null, volta: le.volta }, rasc, true);
+      abreNoCanvasComoSimbolo({ id: null }, rasc, true);
       if (sumiu) { ST.dirty = true; refreshBar(); refreshAside(); }
       devolve(); return;
     }
@@ -3195,6 +3553,10 @@ function reload() {
     }
     if (ST.sel) { await openSymbol(ST.sel, true, true); devolve(); }
   });
+  DATA.recarga = p;
+  const fim = () => { if (DATA.recarga === p) DATA.recarga = null; };
+  p.then(fim, fim);
+  return p;
 }
 
 /* Abrir um simbolo VINDO DE FORA (o "editar simbolo" do menu de contexto da aba Sch Lib).
@@ -3205,6 +3567,14 @@ function reload() {
    para perguntar se descarta a edicao nao salva: quem chama nao pode assumir que abriu. */
 async function abrir(name, force, componente, acervo) {
   if (!name) return false;
+  /* ABRIR CATEGORIA/COMPONENTE É DO MODO COMPONENTES. Quem chama de fora (o #/libsym, o
+     "Editar símbolo ↗" da vista Esquema) já pediu a vista Componentes antes, e aí isto não
+     faz nada; se o modo ainda é o outro, a troca está esperando a resposta do usuário (ou
+     foi recusada) — e abrir por cima misturaria uma categoria com a lista de símbolos */
+  if (ST.modo !== 'componentes') {
+    const ok = await modo('componentes');
+    if (!ok || ST.modo !== 'componentes') return false;
+  }
   /* ACERVO PRIMEIRO. Uma familia do almoxarifado nao existe no espelho do Altium: sem trocar
      o acervo, o openSymbol nao acha nada e o sintoma engana — a aba abre, ST.sel fica com o
      nome certo e o desenho vem VAZIO. O setAcervo limpa a selecao de proposito, entao ele
@@ -3215,11 +3585,17 @@ async function abrir(name, force, componente, acervo) {
      schlib: nenhuma das duas espera a outra, e o loadSymlib devolve a mesma promessa se ja
      houver carga em voo. */
   const libPronta = loadSymlib().catch(() => null);
+  /* E DE NOVO DEPOIS DE CADA ESPERA: a carga do acervo leva segundos (3,2 MB no Almoxarifado
+     — Todos), e nesse meio o usuário pode ter ido para a vista Símbolos — que, sem edição,
+     troca na hora. Abrir a categoria ali jogaria fora o símbolo que ela acabou de reabrir. */
+  const outroModo = () => ST.modo !== 'componentes';
   /* loadSchlib() devolve a MESMA promessa quando ja ha uma carga em voo, entao isto
      cobre os dois casos: nunca carregou, e carregando agora. */
   if (!DATA.schlib) await loadSchlib().catch(() => {});
+  if (outroModo()) return false;
   listKey = '';
   await openSymbol(String(name), force);
+  if (outroModo()) return false;
   const ok = ST.sel === String(name) && !!ST.draft;
   /* COMPONENTE do almoxarifado (um `valores[].altium`): o abrirValor le familiaAberta(),
      entao a familia precisa ja estar aberta — por isso ele vem DEPOIS do openSymbol, e
@@ -3228,6 +3604,7 @@ async function abrir(name, force, componente, acervo) {
   let okv = true;
   if (ok && componente) okv = await abrirValor(String(componente));
   await libPronta;
+  if (outroModo()) return false;
   /* POR ULTIMO: o abrirValor chama refreshAll(), que chama refreshLib — o que a pre-selecao
      escrevesse antes dele seria desfeito pelo cache de DOM. */
   if (ok) preSelecionarNaFaixa(String(name), okv ? componente : null);
@@ -3236,7 +3613,7 @@ async function abrir(name, force, componente, acervo) {
 
 /* TRES estados, de proposito: true = existe no espelho, false = nao existe, null = a
    schlib ainda nao foi carregada e portanto NAO DA PARA SABER. Um booleano so fazia a
-   casca desabilitar "editar simbolo" toda vez que a aba Simbolos nunca tivesse sido
+   casca desabilitar "editar simbolo" toda vez que a aba Componentes nunca tivesse sido
    aberta — que e justamente o caso comum de quem vem pelo menu de contexto. */
 const conhece = name => (DATA.schlib ? !!symByName(String(name || '')) : null);
 
@@ -3258,5 +3635,8 @@ function faixa(qual) {
   return ST.faixa === qual;      /* false = a família não tinha valores e ele voltou */
 }
 
-return { render, dirty, reload, pure, abrir, conhece, faixa, state: ST, actions, cam: () => (CAM ? CAM.cam : null), confirmar, pedirTexto };
+/* `modo` e `editarLib` são o que a Biblioteca (hub-libview.js) usa para as vistas Componentes
+   e Símbolos: trocar o modo antes de trocar a vista, e abrir um símbolo na vista Símbolos */
+return { render, dirty, reload, pure, abrir, conhece, faixa, modo, editarLib, state: ST, actions,
+         cam: () => (CAM ? CAM.cam : null), confirmar, pedirTexto };
 });
