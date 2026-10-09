@@ -51,6 +51,14 @@ assert.strictEqual(typeof A.normalizaTecla, 'function');
 assert.strictEqual(typeof A.pane, 'function');
 assert.ok(Array.isArray(A.TECLAS_PROIBIDAS));
 assert.strictEqual(S.QUANDO, 'vista Esquema');
+/* o D do arrasto (pedido de 2026-10-09): rotear o componente arrastado até os fios alinhados. No
+   Esquema o D estava livre; na PCB ele é o diff, e tecla repetida só conta dentro da vista */
+assert.strictEqual(S.mapaAtalhos({}).porTecla.D, 'rotear', 'D = rotear, no Esquema');
+{
+  const m = S.mapaAtalhos({ rotear:'R' });
+  assert.strictEqual(m.porTecla.R, 'rotear', 'o D se troca nas Configurações como os outros');
+  assert.ok(!m.porTecla.D, 'e a tecla antiga fica livre');
+}
 
 /* a PCB tem a mesma forma, com chave e Quando próprios */
 assert.strictEqual(P.CHAVE, 'altiumhub.pcb.atalhos');

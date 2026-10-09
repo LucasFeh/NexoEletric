@@ -525,6 +525,179 @@ function apagaVertice(pts, i){
   return out.length >= 2 ? out : null;
 }
 
+/* ── O D: O COMPONENTE ARRASTADO VAI ATE OS FIOS ALINHADOS ──
+   Pedido do dono (2026-10-09): "se quando eu estiver movimentando um componente entre 2 trilhas
+   e o canvas identificar que existe centralizacao entre os pinos e as 2 trilhas eu posso aperta
+   'D' no teclado e o componente e roteado automaticamente". A centralizacao e a guia pino↔fio
+   que o arrasto ja mostra: o pino no mesmo X ou no mesmo Y da PONTA SOLTA de um fio. O D pousa
+   o componente e estica cada fio ate o seu pino, num trecho reto. Nao ha desvio de obstaculo
+   nem L ate pino desalinhado: ai e a mao que sabe o caminho.
+   Tres contas: as pontas soltas (uma vez por gesto), os pares (a cada quadro, no pouso) e o fio
+   esticado (no D). */
+
+/* As pontas SOLTAS: pts[0] e pts[n-1] de cada fio que nao encostam em nada eletrico. Isso exclui
+   pino, juncao, power e port (`pontos`, que o chamador entrega) e vertice ou trecho de fio,
+   inclusive do proprio: o fio fechado em anel nao tem ponta solta. Rotulo de net nao liga, e por
+   isso nao vem em `pontos`. `fios` sao so os PARADOS, porque o que viaja no gesto nao e ponta de
+   ninguem. Devolve { wi, i, x, y }: o indice do fio em `fios`, o da ponta e onde ela esta.
+   Roda no primeiro quadro de cada arrasto, e toda ponta contra todo trecho custava 50 ms na folha
+   maior do acervo (SHP2, 722 fios): ponto e trecho vao num balde de 1000 mil, como na
+   topologiaFolha, cada um em toda celula que a sua caixa alargada de STOL_SCH toca. Assim tudo o
+   que encosta numa ponta esta na celula dela. */
+function pontasSoltas(fios, pontos){
+  const out = [], F = fios || [], CEL = 1000, balde = new Map();
+  const poe = (x1, y1, x2, y2, v) => {
+    for (let cx = Math.floor((x1 - STOL_SCH) / CEL); cx <= Math.floor((x2 + STOL_SCH) / CEL); cx++)
+      for (let cy = Math.floor((y1 - STOL_SCH) / CEL); cy <= Math.floor((y2 + STOL_SCH) / CEL); cy++){
+        const k = cx + ':' + cy;
+        let l = balde.get(k); if (!l){ l = []; balde.set(k, l); }
+        l.push(v);
+      }
+  };
+  for (const q of pontos || []) poe(q.x, q.y, q.x, q.y, { q });
+  F.forEach((w, wi) => {
+    const o = (w && w.pts) || [];
+    for (let s = 0; s < o.length - 1; s++){
+      const a = o[s], b = o[s+1];
+      poe(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]), { wi, s, a, b });
+    }
+  });
+  F.forEach((w, wi) => {
+    const pts = (w && w.pts) || [], n = pts.length;
+    if (n < 2) return;
+    for (const i of [0, n - 1]){
+      const p = pts[i], meu = i === 0 ? 0 : n - 2;     /* o trecho que termina nesta ponta */
+      const ligada = (balde.get(Math.floor(p[0] / CEL) + ':' + Math.floor(p[1] / CEL)) || []).some(v => v.q
+        ? pertoDe(v.q.x, v.q.y, p[0], p[1])
+        : !(v.wi === wi && v.s === meu) && distPS(p[0], p[1], v.a[0], v.a[1], v.b[0], v.b[1]) <= STOL_SCH);
+      if (!ligada) out.push({ wi, i, x:p[0], y:p[1] });
+    }
+  });
+  return out;
+}
+
+/* o trecho reto (a,b) entra no MIOLO da caixa? A borda nao conta: e nela que a ponta do pino mora */
+function entraNaCaixa(ax, ay, bx, by, c){
+  const t = STOL_SCH;
+  return Math.max(ax, bx) > c.x1 + t && Math.min(ax, bx) < c.x2 - t
+      && Math.max(ay, by) > c.y1 + t && Math.min(ay, by) < c.y2 - t;
+}
+/* Os pares pino ↔ ponta que um trecho RETO liga. `pinos` sao as pontas quentes do que viaja, ja
+   no pouso: { x, y, ref, num, caixa, ox, oy }. `caixa` e o indice em `caixas` (a caixa do proprio
+   componente, tambem no pouso) e ox/oy e a direcao do pino, do corpo para fora. Um par existe
+   quando:
+     - pino e ponta estao no mesmo X ou no mesmo Y (ate STOL_SCH), a mais de STOL_SCH e ate
+       `alcance` um do outro;
+     - a ponta fica DO LADO DE FORA. O trecho que sai do pino na direcao dele e de fora por
+       construcao, e o que volta contra ela atravessa o pino. Nas outras direcoes ele nao pode
+       entrar na caixa de nenhum componente que viaja. A caixa sozinha nao basta: 139 dos 1781
+       desenhos da biblioteca tem um texto que a alarga alem da ponta do pino, e o fio que sai
+       reto do pino seria recusado por causa de um texto;
+     - o trecho nao encosta em mais nada eletrico: outro pino do que viaja ou um dos `pontos`
+       (pino parado, juncao, power, port, vertice de fio). Nem o pino pode pousar no meio de um
+       dos `fios` parados: ali ele ja esta ligado, e o D juntaria duas nets.
+   Guloso pelo mais perto: cada pino e cada ponta entram em no maximo um par. Devolve
+   [{ pino, ponta, d }] na ordem dos pinos.
+   A conta roda a cada quadro do arrasto, e com 2/3 da folha maior do acervo na mao, no zoom da
+   folha inteira, levava 12 ms. Duas podas a trazem para baixo sem mudar o resultado:
+     - de cada pino so conta a ponta MAIS PERTO em cada direcao. O trecho ate a de tras passaria
+       pela da frente, que e vertice de fio, e vertice de fio esta em `pontos`;
+     - o que pode encostar num trecho reto esta na faixa de STOL_SCH em volta da linha dele, e a
+       faixa sai de uma busca binaria nos pontos em ordem de X e de Y, e nao da folha inteira.
+   E o distPS so roda dentro da caixa do trecho: era ele que pesava, contra cada trecho de fio da
+   folha para cada pino. A ordem dos pontos fica guardada pela identidade da lista, que e a mesma
+   o gesto inteiro (rotaDoGesto). */
+const ORDEM_DOS_PONTOS = new WeakMap();
+function paresDeRota(pinos, pontas, caixas, pontos, alcance, fios){
+  const L = pinos || [], P = pontas || [], C = caixas || [], Q = pontos || [];
+  const lim = alcance > 0 ? alcance : Infinity, T = STOL_SCH;
+  let ordem = ORDEM_DOS_PONTOS.get(Q);
+  if (!ordem){
+    ordem = { x:Q.slice().sort((a, b) => a.x - b.x), y:Q.slice().sort((a, b) => a.y - b.y) };
+    ORDEM_DOS_PONTOS.set(Q, ordem);
+  }
+  /* algum ponto de `arr` (em ordem de k) entre lo e hi faz `f` responder true? */
+  const naFaixa = (arr, k, lo, hi, f) => {
+    let a = 0, b = arr.length;
+    while (a < b){ const m = (a + b) >> 1; if (arr[m][k] < lo) a = m + 1; else b = m; }
+    for (let i = a; i < arr.length && arr[i][k] <= hi; i++) if (f(arr[i])) return true;
+    return false;
+  };
+  /* (px,py) encosta no trecho (x1,y1)-(x2,y2)? A caixa primeiro, que e barata */
+  const encosta = (px, py, x1, y1, x2, y2) =>
+    px >= Math.min(x1, x2) - T && px <= Math.max(x1, x2) + T && py >= Math.min(y1, y2) - T && py <= Math.max(y1, y2) + T
+    && distPS(px, py, x1, y1, x2, y2) <= T;
+  const pousado = pn => {
+    if (naFaixa(ordem.y, 'y', pn.y - T, pn.y + T, q => pertoDe(q.x, q.y, pn.x, pn.y))) return true;
+    for (const w of fios || []){
+      const o = (w && w.pts) || [];
+      for (let s = 0; s < o.length - 1; s++) if (encosta(pn.x, pn.y, o[s][0], o[s][1], o[s+1][0], o[s+1][1])) return true;
+    }
+    return false;
+  };
+  const deFora = (pn, pt) => {
+    const sx = pt.x - pn.x, sy = pt.y - pn.y, ol = Math.hypot(pn.ox || 0, pn.oy || 0);
+    const cos = ol ? (sx * pn.ox + sy * pn.oy) / (Math.hypot(sx, sy) * ol) : 0;
+    if (cos < -0.999) return false;
+    for (let k = 0; k < C.length; k++)
+      if (!(k === pn.caixa && cos > 0.999) && entraNaCaixa(pn.x, pn.y, pt.x, pt.y, C[k])) return false;
+    return true;
+  };
+  const livre = (a, pn, pt) => {
+    const bate = q => !pertoDe(q.x, q.y, pt.x, pt.y) && encosta(q.x, q.y, pn.x, pn.y, pt.x, pt.y);
+    if (Math.abs(pt.y - pn.y) <= T ? naFaixa(ordem.y, 'y', Math.min(pn.y, pt.y) - T, Math.max(pn.y, pt.y) + T, bate)
+                                   : naFaixa(ordem.x, 'x', Math.min(pn.x, pt.x) - T, Math.max(pn.x, pt.x) + T, bate)) return false;
+    for (let k = 0; k < L.length; k++)
+      if (k !== a && encosta(L[k].x, L[k].y, pn.x, pn.y, pt.x, pt.y)) return false;
+    return true;
+  };
+  const cand = [];
+  for (let a = 0; a < L.length; a++){
+    const pn = L[a], frente = {};
+    for (let b = 0; b < P.length; b++){
+      const pt = P[b];
+      const deitado = Math.abs(pt.y - pn.y) <= STOL_SCH;
+      if (!deitado && Math.abs(pt.x - pn.x) > STOL_SCH) continue;
+      const d = Math.hypot(pt.x - pn.x, pt.y - pn.y);
+      if (d <= STOL_SCH || d > lim) continue;
+      const dir = deitado ? (pt.x > pn.x ? '+x' : '-x') : (pt.y > pn.y ? '+y' : '-y');
+      if (!frente[dir] || d < frente[dir].d) frente[dir] = { b, d };
+    }
+    const dirs = Object.keys(frente);
+    /* o pino ja ligado so e conferido quando ha ponta alinhada: e a conta cara */
+    if (!dirs.length || pousado(pn)) continue;
+    for (const k of dirs){
+      const { b, d } = frente[k];
+      if (deFora(pn, P[b]) && livre(a, pn, P[b])) cand.push({ a, b, d });
+    }
+  }
+  cand.sort((u, v) => u.d - v.d || u.a - v.a || u.b - v.b);
+  const usouPino = new Set(), usouPonta = new Set(), par = [];
+  for (const c of cand){
+    if (usouPino.has(c.a) || usouPonta.has(c.b)) continue;
+    usouPino.add(c.a); usouPonta.add(c.b);
+    par.push(c);
+  }
+  return par.sort((u, v) => u.a - v.a).map(c => ({ pino:L[c.a], ponta:P[c.b], d:c.d }));
+}
+/* O fio esticado ate o pino em (x,y); i e a ponta (0 ou n-1). Se o ultimo trecho ja esta no eixo
+   do pino e aponta para ele, a ponta ANDA ate o pino e o fio continua com os mesmos vertices.
+   Senao entra um vertice novo depois da ponta (o canto do L, ou o trecho que continua um fio
+   diagonal). Devolve os pts novos. Quem chama ainda passa o resultado pelo HubFio.limpa. */
+function ligaPonta(pts, i, x, y){
+  const out = (pts || []).map(p => [p[0], p[1]]), n = out.length;
+  if (n < 2 || (i !== 0 && i !== n - 1)) return out;
+  const p = out[i], q = out[i === 0 ? 1 : n - 2];
+  const vx = p[0] - q[0], vy = p[1] - q[1];          /* o ultimo trecho, de dentro para a ponta */
+  const sx = x - p[0], sy = y - p[1];               /* o trecho novo, da ponta ate o pino */
+  const mesmoEixo = (Math.abs(vy) <= STOL_SCH && Math.abs(sy) <= STOL_SCH)
+                 || (Math.abs(vx) <= STOL_SCH && Math.abs(sx) <= STOL_SCH);
+  if (mesmoEixo && vx * sx + vy * sy > 0) out[i] = [x, y];
+  else if (i === 0) out.unshift([x, y]);
+  else out.push([x, y]);
+  return out;
+}
+
 /* ── ESPELHO NA TELA, NOS DOIS EIXOS ──
    O formato tem um booleano `mirror` (espelho em X aplicado ANTES da rotacao) e rot 0/90/180/
    270. Nao ha terceiro campo a inventar — o Altium tambem so tem IsMirrored + Orientation —,
@@ -913,7 +1086,7 @@ const PURE = { LIBS, ACERVO_DEFS, montaAcervos, partesDe, nPartes, refDaParte, t
                identidadeDoComponente, identidadeDoEscolhido, identidadeDoVinculo,
                idsDoParams, pecaDeHoje, reachaValor, recomendacaoDe, mesmaPecaDaFolha, seguePeloOdoo,
                topologiaFolha, moveSegmento, eixosDoTrecho, apagaSegmento, apagaVertice, espelha, encaixeDaTroca,
-               fioNoPonto,
+               fioNoPonto, pontasSoltas, paresDeRota, ligaPonta,
                GRADES, gradePorId, snapPasso, MM_MIL, caixaTexto, larguraTexto, designadorAparece,
                ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho };
 /* Em Node o arquivo acaba aqui: dali para baixo e tudo DOM. */
@@ -1976,6 +2149,121 @@ function dicaDoShift(f){
   if (f.x && f.y) return 'Shift: mova para escolher a direção';
   return f.x ? 'Shift: só na vertical' : 'Shift: só na horizontal';
 }
+/* ── O POUSO ──
+   Onde o gesto cai se a mao soltar AGORA. O ima manda: e ele que faz o pino cair em cima da ponta
+   do fio, e 100 mil de grade contados da posicao antiga jogariam o pino fora dela de novo. Sem
+   ima, cada eixo pousa onde a guia mandou (a MESMA conta que desenhou as medidas durante o
+   arrasto: o numero que se viu e o que fica), e o eixo que nenhuma guia pegou cai na grade
+   contada da posicao original, ou no trilho do Shift, que vale no soltar tambem.
+   Tres lugares precisam do mesmo numero: o leftUp (que pousa), a previa da rota no leftMove e a
+   tecla D (que pousa e liga os fios). Com uma conta em cada um, a previa podia prometer um fio
+   que o D nao faz. O leftMove ja tem as pecas na mao (o ima e a guia do quadro) e usa so o
+   pousoDe; com o ima pegando, a guia dele veio com trava, mas ai quem decide e o ima. */
+function pousoDe(m, g, fixo, fx, fy, rx, ry){
+  if (m) return { dx:m.dx, dy:m.dy };
+  if (g) return { dx:g.lx, dy:g.ly };
+  return { dx: fixo && fixo.x ? fx : snapG(rx), dy: fixo && fixo.y ? fy : snapG(ry) };
+}
+function pousoDoArrasto(d, e){
+  const w = e ? worldOf(e) : d.start;
+  const rx = w.x - d.start.x, ry = w.y - d.start.y;
+  const fixo = fixoDoShift(d, rx, ry, e);
+  const fx = fixo && fixo.x ? fixo.x.delta : rx, fy = fixo && fixo.y ? fixo.y.delta : ry;
+  const m = imaDoArrasto(d.ima, fx, fy, fixo);
+  return pousoDe(m, m ? null : guiasDoArrasto(d, fx, fy, e, null, fixo), fixo, fx, fy, rx, ry);
+}
+/* ── O D: ROTEAR ATE OS FIOS ALINHADOS (a conta e o pontasSoltas/paresDeRota/ligaPonta) ──
+   A folha PARADA e medida uma vez por gesto, no primeiro quadro, como as guias: os fios que nao
+   viajam, as pontas soltas deles e os pontos eletricos. Rotulo de net nao liga e fica de fora.
+   O que viaja e o que tem geometria andando: arrastar so o designador deixa os pinos onde estao. */
+const ELETRICO = { junction:1, power:1, port:1 };
+function rotaDoGesto(base){
+  const s = model.sheets[sheetIdx], anda = new Set();
+  for (const b of base.values()) if (b.a.k !== 'ref' && b.a.k !== 'com') anda.add(b.a.it);
+  const fios = s.wires.filter(w => !anda.has(w)), pontos = [];
+  for (const c of s.comps){
+    if (anda.has(c)) continue;
+    for (const p of (HubCore.compPinsWorld(c, SLIB) || [])) pontos.push({ x:p.x, y:p.y });
+  }
+  for (const arr of [s.junctions, s.powers, s.ports])
+    for (const it of arr) if (!anda.has(it)) pontos.push({ x:it.x, y:it.y });
+  /* para o trecho novo, o vertice de fio parado tambem e ponto eletrico */
+  const eletricos = pontos.slice();
+  for (const w of fios) for (const p of (w.pts || [])) eletricos.push({ x:p[0], y:p[1] });
+  return { fios, pontas: pontasSoltas(fios, pontos), eletricos };
+}
+/* as pontas quentes de um componente com a direcao de cada pino, do corpo para fora */
+function pinosComDirecao(c){
+  const quentes = HubCore.compPinsWorld(c, SLIB) || [];
+  if (!quentes.length) return [];
+  const part = HubCore.partOf(HubCore.symbolOf(SLIB, c.sym), c.part);
+  const tf = HubCore.compTransform(c), pins = (part && part.pins) || [];
+  return quentes.map((p, k) => {
+    const corpo = pins[k] ? tf.map(pins[k].x, pins[k].y) : p;
+    return { x:p.x, y:p.y, ref:c.ref, num:p.num, ox:p.x - corpo.x, oy:p.y - corpo.y };
+  });
+}
+/* Os pares do D com o gesto no pouso `p`. DEIXA A BASE NO POUSO: o leftMove a devolve para onde
+   a mao esta logo depois, e o D a deixa la. So o componente que viaja INTEIRO tem pinos que andam.
+   O alcance e o das guias (o que esta a vista), com piso de 100 mil. */
+function rotasNoPouso(d, p){
+  const viaja = [];
+  for (const b of d.base.values()) if (b.a.k === 'all' && b.a.it.t === 'comp') viaja.push(b.a.it);
+  if (!viaja.length) return [];
+  if (!d.rota) d.rota = rotaDoGesto(d.base);
+  if (!d.rota.pontas.length) return [];
+  applyMove(d.base, p.dx, p.dy);
+  const pinos = [], caixas = [], extra = [];
+  viaja.forEach((c, k) => {
+    caixas.push(compBBox(c));
+    for (const q of pinosComDirecao(c)) pinos.push(Object.assign(q, { caixa:k }));
+  });
+  /* o resto do que viaja (fio, power, port, juncao) tambem e obstaculo, onde ele pousa */
+  for (const b of d.base.values()){
+    const it = b.a.it;
+    if (it.t === 'wire') for (const q of (it.pts || [])) extra.push({ x:q[0], y:q[1] });
+    else if (b.a.k === 'all' && ELETRICO[it.t]) extra.push({ x:it.x, y:it.y });
+  }
+  const alcance = Math.max((GUIAS ? GUIAS.ALCANCE_PX : 600) / cam.cam.scale, 100);
+  return paresDeRota(pinos, d.rota.pontas, caixas, extra.length ? d.rota.eletricos.concat(extra) : d.rota.eletricos,
+                     alcance, d.rota.fios);
+}
+/* a frase da barra, com a tecla que estiver gravada (o D e o padrao). Os pinos vao em ordem de
+   designador e numero: a ordem do desenho poe o pino 2 antes do 1 em muito resistor da casa */
+function fraseDaRota(rotas){
+  if (!rotas || !rotas.length) return '';
+  const nomes = rotas.map(r => r.pino.ref + '-' + r.pino.num)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric:true, sensitivity:'base' }));
+  return (ATALHOS.porAcao.rotear || 'D') + ': rotear ' + nomes.join(', ');
+}
+/* A TECLA D no meio do arrasto: pousa a selecao onde o soltar pousaria, estica cada fio ate o seu
+   pino e encerra o gesto, tudo num passo so de desfazer. Sem par, avisa e o arrasto continua.
+   Fora do arrasto nao faz nada (false: o teclado segue adiante). */
+function rotearNoArrasto(){
+  const d = mouse;
+  if (!d || d.mode !== 'move' || !d.moved || !d.ult) return false;
+  const rotas = rotasNoPouso(d, pousoDoArrasto(d, d.ult));
+  if (!rotas.length){
+    refazGesto();      /* a conta pode ter deixado a peca no pouso: ela volta para baixo da mao */
+    HubDialog.toast('nenhum pino alinhado com ponta de fio', 'warn');
+    return;
+  }
+  /* a peca ja esta no pouso; o fio estica. As duas pontas do mesmo fio podem entrar: o indice da
+     ultima e medido na hora, porque esticar a primeira pode ter posto um vertice na frente */
+  const mexidos = new Set();
+  for (const r of rotas){
+    const w = d.rota.fios[r.ponta.wi];
+    w.pts = ligaPonta(w.pts, r.ponta.i === 0 ? 0 : w.pts.length - 1, r.pino.x, r.pino.y);
+    mexidos.add(w);
+  }
+  for (const w of mexidos) w.pts = HubFio.limpa(w.pts);
+  /* o gesto acaba aqui: o mouseup que vem depois nao acha gesto, e o click e engolido */
+  mouse = null; moveIma = null; swallowClick = true;
+  $('shover').textContent = '';
+  commit();
+  const refs = Array.from(new Set(rotas.map(r => r.pino.ref))).join(', ');
+  HubDialog.toast(refs + ': ' + rotas.length + (rotas.length === 1 ? ' pino roteado' : ' pinos roteados'), 'ok');
+}
 /* ── O FIO, COMO NO ALTIUM (hub-fio.js tem a regra; aqui e so o mouse, o teclado e a folha) ──
    Pedido de 2026-09-24, com um video do Altium: "quero que a construcao de trilha funcione
    assim no esquema, igualzinho". Do ultimo ponto fixado saem duas pernas em L ate o cursor; o
@@ -2456,9 +2744,13 @@ function leftMove(e){
     /* a ultima posicao do cursor, com o Ctrl e o Shift: quem refaz o gesto sem o mouse andar
        (as teclas, o giro, o zoom da roda) refaz com o que a mao estava fazendo */
     d.ult = { clientX:e.clientX, clientY:e.clientY, ctrlKey:!!e.ctrlKey, shiftKey:!!e.shiftKey };
+    /* a rota do D e medida onde o gesto POUSARIA, que e onde o D o poe; o rotasNoPouso deixa a
+       peca la, e o applyMove logo abaixo a devolve para debaixo da mao */
+    d.rotas = rotasNoPouso(d, pousoDe(moveIma, g, fixo, fx, fy, dx, dy));
     applyMove(d.base, moveIma ? moveIma.dx : g ? g.dx : fx, moveIma ? moveIma.dy : g ? g.dy : fy);
-    const frase = [dicaDoShift(fixo), g && g.rotulo ? g.rotulo + ' · Ctrl solta a guia' : ''].filter(Boolean).join(' · ');
-    $('shover').textContent = moveIma ? '⊙ ' + moveIma.label + (fixo ? ' · ' + dicaDoShift(fixo) : '') : frase;
+    const rota = fraseDaRota(d.rotas);
+    const frase = [dicaDoShift(fixo), g && g.rotulo ? g.rotulo + ' · Ctrl solta a guia' : '', rota].filter(Boolean).join(' · ');
+    $('shover').textContent = moveIma ? '⊙ ' + moveIma.label + (fixo ? ' · ' + dicaDoShift(fixo) : '') + (rota ? ' · ' + rota : '') : frase;
     desenhaNoQuadro();
   }
   else if (d.mode === 'box'){ boxRect = { x1:d.start.x, y1:d.start.y, x2:w.x, y2:w.y }; desenhaNoQuadro(); }
@@ -2472,22 +2764,9 @@ function leftUp(e){
   mouse = null;
   swallowClick = d.moved;
   if (d.mode === 'move' && d.moved){
-    /* ao soltar: sem ima, o deslocamento pousa na grade de 100 mil contada da posicao
-       original — com ima, quem manda e ele (veja imaDoArrasto) */
-    const w = e ? worldOf(e) : d.start;
-    const rx = w.x - d.start.x, ry = w.y - d.start.y;
-    /* o ima MANDA sobre a grade: e ele que faz o pino cair em cima da ponta do fio, e
-       100 mil de grade contados da posicao antiga jogariam o pino fora dela de novo */
-    /* o trilho do Shift vale no soltar tambem: o eixo preso pousa no trilho, e nao na grade */
-    const fixo = fixoDoShift(d, rx, ry, e);
-    const fx = fixo && fixo.x ? fixo.x.delta : rx, fy = fixo && fixo.y ? fixo.y.delta : ry;
-    const m = imaDoArrasto(d.ima, fx, fy, fixo);
-    /* sem ima, cada eixo pousa onde a guia mandou — e o eixo que nenhuma guia pegou, na grade.
-       E a MESMA conta que desenhou as medidas durante o arrasto: o numero que se viu e o que fica */
-    const g = m ? null : guiasDoArrasto(d, fx, fy, e, null, fixo);
-    if (m) applyMove(d.base, m.dx, m.dy);
-    else if (g) applyMove(d.base, g.lx, g.ly);
-    else applyMove(d.base, fixo && fixo.x ? fx : snapG(rx), fixo && fixo.y ? fy : snapG(ry));
+    /* ao soltar: ima > guia > grade (ou o trilho do Shift) — a conta e o pousoDoArrasto */
+    const p = pousoDoArrasto(d, e);
+    applyMove(d.base, p.dx, p.dy);
     moveIma = null; $('shover').textContent = '';
     /* Arrasto que voltou para a mesma grade nao e mudanca — nao entra no undo.
        A conta olhava SO o pts[0] do fio: arrastar um vertice do meio (que agora e um gesto de
@@ -4024,6 +4303,19 @@ function drawFerramenta(ctx, cam){
   /* as guias do arrasto, por baixo do alvo do ima */
   if (GUIAS && mouse && mouse.mode === 'move' && mouse.moved && mouse.cena)
     GUIAS.desenha(ctx, mouse.cena, { escala:cam.scale, fmt:fmtMedida });
+  /* a rota do D: o trecho que cada fio ganharia, tracejado na cor das guias, e um anel no pino.
+     Os dois pontos sao os do POUSO, entao o tracejado termina onde o D vai por o pino */
+  if (mouse && mouse.mode === 'move' && mouse.moved && mouse.rotas && mouse.rotas.length){
+    ctx.save();
+    ctx.strokeStyle = GUIAS ? GUIAS.COR : '#e0197d'; ctx.lineWidth = 2 * px; ctx.lineCap = 'butt';
+    ctx.setLineDash([6 * px, 4 * px]);
+    ctx.beginPath();
+    for (const r of mouse.rotas){ ctx.moveTo(r.ponta.x, r.ponta.y); ctx.lineTo(r.pino.x, r.pino.y); }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    for (const r of mouse.rotas){ ctx.beginPath(); ctx.arc(r.pino.x, r.pino.y, 4 * px, 0, 2 * Math.PI); ctx.stroke(); }
+    ctx.restore();
+  }
   /* o ima: alvo laranja no ponto de conexao que vai grudar (o fio tem o X vermelho dele) */
   const ima = tool === 'wire' ? null : tool !== 'select' ? snapHit : moveIma;
   if (ima){
@@ -5331,6 +5623,7 @@ function fazAcao(id){
     case 'desfazer':  undo(); return;
     case 'refazer':   redo(); return;
     case 'tudo':      selectOnly(sheetItems()); return;
+    case 'rotear':    return rotearNoArrasto();
   }
   return false;
 }
