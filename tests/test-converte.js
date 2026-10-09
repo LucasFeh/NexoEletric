@@ -171,9 +171,10 @@ assert.ok(conta.nada <= 40, 'muita linha sem sugestão nenhuma: ' + conta.nada);
 for (const l of fora)
   if (l.marcado) assert.notStrictEqual(l.escolha.confianca, 'baixa',
     'linha de confiança baixa veio marcada: ' + l.refs.join(',') + ' → ' + l.escolha.alvo.nome);
-/* e nenhuma linha marcada pode trocar o tipo da peça */
+/* e nenhuma linha marcada pode trocar o tipo da peça — menos o jumper, que troca por regra: o
+   destino dele é uma barra de pinos (J) ou um resistor 0R (R), e quem o prende é a seção 12 */
 for (const l of fora)
-  if (l.marcado && l.perfil.tipo && l.escolha.alvo.tipo)
+  if (l.marcado && l.perfil.tipo && l.escolha.alvo.tipo && !l.perfil.jumper)
     assert.strictEqual(l.perfil.tipo, l.escolha.alvo.tipo,
       'troca de tipo marcada: ' + l.refs.join(',') + ' (' + l.perfil.tipo + ') → '
       + l.escolha.alvo.nome + ' (' + l.escolha.alvo.tipo + ')');
@@ -286,5 +287,83 @@ for (const c of CANDS){
 assert.deepStrictEqual(suspeitos, [], 'trocou grau fora de contexto de conector: ' + suspeitos.join(' | '));
 console.log('    graus: ' + trocados + ' nomes do acervo ganharam o simbolo, 0 fora de contexto');
 console.log('(10) "180g" vira grau, e codigo de peca fica intacto ok');
+
+/* ── 12. o jumper: barra de pinos, resistor 0R ou nenhuma peça ───────────────
+   Pedido do dono (2026-10-09): jumper vindo do Altium só tem três destinos — a barra de pinos
+   de 2 vias, o resistor 0R, ou nenhuma peça, porque o jumper é na solda. Pelo recomendador
+   genérico ele era conector (todo jumper do corpus usa designador J) e recebia baioneta, KK,
+   borne e circular MIL. O footprint escolhe qual dos três vem escolhido: com SMD no nome são
+   pads de solda, sem SMD é barra de 2,54 mm, e footprint de resistor pede o 0R do tamanho dele. */
+{
+  const ehBarra = b => /BARRA DE PINOS/i.test(b.familia);
+  const eh0R = b => b.tipo === 'R' && !!b.valor && b.valor.n === 0;
+  const umaLinha = c => P.varre([c], CANDS, () => false)[0];
+  assert.ok(CANDS.some(b => ehBarra(b) && b.vias === 2) && CANDS.some(b => ehBarra(b) && b.vias === 3)
+            && CANDS.some(eh0R), 'o acervo precisa ter barra de 2 e de 3 vias e resistor 0R');
+
+  /* o corpus inteiro: nenhum jumper recebe nada fora das três */
+  const jumpers = COMPS.filter(c => /jumper/i.test([c.sym, c.footprint, c.comment].join(' ')));
+  assert.ok(jumpers.length >= 40, 'o corpus tem 41 jumpers em 7 projetos; vieram ' + jumpers.length);
+  const L = P.varre(jumpers, CANDS, () => false);
+  for (const l of L){
+    assert.ok(l.perfil.jumper, 'jumper não reconhecido: ' + l.refs.join(',') + ' ' + l.perfil.fp);
+    assert.ok(l.sugestoes.length, 'jumper sem opção nenhuma: ' + l.refs.join(','));
+    for (const s of l.sugestoes)
+      assert.ok(ehBarra(s.alvo) || eh0R(s.alvo),
+        'jumper recebeu outra coisa: ' + l.refs.join(',') + ' → ' + s.alvo.familia + ' :: ' + s.alvo.nome);
+  }
+
+  /* PTH: a barra de 2 vias, marcada; o 0R fica na lista, desmarcado de saída */
+  const pth = umaLinha({ ref: 'J1', sym: 'JUMPER [02V]', footprint: 'JUMPER 2 VIAS PTH',
+                         comment: 'Fechado = terminador CAN' });
+  assert.ok(pth.escolha && ehBarra(pth.escolha.alvo) && pth.escolha.alvo.vias === 2,
+            'jumper PTH vira a barra de 2 vias: veio ' + (pth.escolha && pth.escolha.alvo.nome));
+  assert.strictEqual(pth.escolha.confianca, 'alta');
+  assert.strictEqual(pth.marcado, true);
+  assert.ok(pth.sugestoes.some(s => eh0R(s.alvo)), 'o 0R fica na lista do jumper PTH');
+  /* o "JUMPER_2VIAS" do TCMS_Reader não diz PTH e é barra do mesmo jeito (medido na placa) */
+  assert.ok(ehBarra(umaLinha({ ref: 'J3', sym: 'Jumper 2', footprint: 'JUMPER_2VIAS',
+                               comment: 'Jumper' }).escolha.alvo));
+
+  /* SMD: pads de solda — nenhuma peça, desmarcada, com a barra e o 0R à mão na lista */
+  for (const fp of ['JUMPER 2 VIAS SMD', 'JUMPER_2VIAS_SMD']){
+    const s = umaLinha({ ref: 'J2', sym: 'Jumper 2', footprint: fp, comment: 'JUMPER' });
+    assert.strictEqual(s.perfil.jumper.solda, true, fp + ' é jumper de solda');
+    assert.strictEqual(s.escolha, null, fp + ': a recomendação é nenhuma peça');
+    assert.strictEqual(s.marcado, false);
+    assert.ok(s.sugestoes.some(x => ehBarra(x.alvo)) && s.sugestoes.some(x => eh0R(x.alvo)),
+              fp + ': a barra e o 0R ficam na lista');
+  }
+
+  /* 3 pinos: a barra de 3, e nunca o 0R — dois terminais no lugar de três perdem uma ligação */
+  const tres = umaLinha({ ref: 'J5', sym: 'JUMPER 3Q', footprint: 'JUMPER_3VIAS',
+                          comment: 'Jumper de 3 pinos' });
+  assert.strictEqual(tres.perfil.jumper.vias, 3);
+  assert.ok(tres.escolha && ehBarra(tres.escolha.alvo) && tres.escolha.alvo.vias === 3,
+            'jumper de 3 pinos vira barra de 3: veio ' + (tres.escolha && tres.escolha.alvo.nome));
+  for (const s of tres.sugestoes) assert.ok(!eh0R(s.alvo), 'jumper de 3 pinos não aceita 0R');
+  assert.strictEqual(P.perfilDoComp({ ref: 'J1', sym: 'JUMPER [03V]', footprint: 'JUMPER 3V REFORCADO',
+                                      comment: '' }).jumper.vias, 3, '"3V" num jumper é vias');
+
+  /* footprint de resistor: o 0R do mesmo tamanho */
+  const r = umaLinha({ ref: 'JP1', sym: 'JUMPER', footprint: 'JUMPER 0805', comment: 'JUMPER' });
+  assert.ok(r.escolha && eh0R(r.escolha.alvo) && r.escolha.alvo.encaps[0] === '0805',
+            'jumper 0805 vira 0R 0805: veio ' + (r.escolha && r.escolha.alvo.nome));
+  assert.strictEqual(r.escolha.confianca, 'alta');
+
+  /* fora das três é escolha à mão: o recomendador não dá nota a um KK de 2 vias */
+  const kk = CANDS.find(b => /\bKK\b/i.test(b.familia) && b.vias === 2);
+  assert.ok(kk, 'o acervo precisa ter um KK de 2 vias');
+  assert.strictEqual(P.pontua(pth.perfil, kk), null, 'KK não é recomendação para jumper');
+  /* e o que não é jumper segue o caminho de sempre */
+  assert.strictEqual(P.perfilDoComp({ ref: 'J9', sym: 'CONECTOR', footprint: 'BARRA 2 VIAS',
+                                      comment: '2 vias' }).jumper, null);
+
+  const nSolda = L.filter(l => !l.escolha).reduce((a, l) => a + l.partes, 0);
+  const nBarra = L.filter(l => l.escolha && ehBarra(l.escolha.alvo)).reduce((a, l) => a + l.partes, 0);
+  console.log('    jumpers: ' + jumpers.length + ' no corpus, ' + nBarra + ' viram barra de pinos, '
+    + nSolda + ' ficam na solda, 0 fora das três');
+}
+console.log('(12) jumper: barra de pinos, resistor 0R ou nenhuma peça ok');
 
 console.log('test-converte OK (o portão é tipo, valor e montagem; o resto é ordem)');
