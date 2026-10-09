@@ -393,6 +393,16 @@ precisar de servidor.
   selecionado junto: aí a ponta que estava no pino fica presa ao pino, inclusive se ele girar
   no meio do arrasto. Sem o fio na seleção, a net se desfaz quando o pino sai da ponta — e as
   guias alinham o pino com o fio que ele deixou, que é como se volta a encostar nele.
+  **`D` roteia até os fios alinhados.** No meio do arrasto, quando um pino fica no mesmo X ou
+  no mesmo Y da **ponta solta** de um fio (a guia pino↔fio de cima), a barra anuncia
+  "D: rotear R1-1, R1-2" e o trecho que falta aparece tracejado em magenta. O `D` pousa o
+  componente onde o soltar pousaria e **estica cada fio até o seu pino**: a ponta anda, ou o
+  fio ganha o canto do L se chegava pelo outro eixo. Tudo volta num `Ctrl+Z` só. Sem pino
+  alinhado o `D` só avisa e o arrasto continua; com o componente parado, não faz nada. Não
+  entram a ponta já ligada (pino, junção, power, port ou outro fio; rótulo de net não conta
+  como ligação), a ponta do lado de dentro do componente e o trecho que passaria por outro
+  ponto elétrico. É sempre um trecho reto: não desvia de nada e não faz L até pino desalinhado.
+  A tecla se troca na aba **Atalhos**, como as outras.
   **O passo da grade é escolhido** na aba Configurações do painel — 100/50/25/10 mil e também
   1 mm / 0,5 mm / 0,25 mm. O métrico está ali porque as folhas desta casa snapam em 1 mm ou
   0,3 mm dentro do próprio Altium: quase todo vértice de fio dos projetos reais está fora da
