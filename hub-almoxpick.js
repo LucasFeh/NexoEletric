@@ -48,6 +48,9 @@ const CSS = `
 .ap-menu button:hover{background:rgba(var(--tint,255,255,255),.09);}
 .ap-menu button.perigo{color:var(--err,#ff6b6b);}
 .ap-menu button.perigo:hover{background:var(--err-soft,rgba(255,107,107,.12));}
+/* a acao que existe mas nao vale agora: a vista, apagada, e o porque no title */
+.ap-menu button:disabled{opacity:.45; cursor:default;}
+.ap-menu button:disabled:hover{background:transparent;}
 .ap-menu .ap-menu-alvo{font-size:10px; color:var(--text-4,#7a7a7a); padding:5px 10px 6px;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:260px;}
 /* o valor: e ele o COMPONENTE que vai para a folha */
@@ -422,6 +425,9 @@ function menu(x, y, titulo, acoes){
   for (const a of acoes){
     const b = el('button', a.perigo ? 'perigo' : null, a.rotulo);
     b.type = 'button';
+    /* `off`: o motivo de a acao nao valer agora. Ela fica no menu, travada, dizendo por que --
+       a acao que some quando nao se aplica parece que nunca existiu */
+    if (a.off){ b.disabled = true; b.title = String(a.off); }
     b.onclick = ev => { ev.stopPropagation(); fechaMenu(); a.onEscolher(); };
     m.append(b);
   }
