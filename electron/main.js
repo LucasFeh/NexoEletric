@@ -16,7 +16,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell, clipboard } = require('electron');
 
 // Testes/automacao: pasta de dados propria ANTES de qualquer uso do userData.
 if (process.env.ALTIUMHUB_USERDATA) {
@@ -558,6 +558,7 @@ function montarMenu() {
         { label: 'Abrir log do hub', click: () => shell.openPath(path.join(LOG_DIR, 'hub.log')) },
         { label: 'Abrir pasta de logs', click: () => shell.openPath(LOG_DIR) },
         { type: 'separator' },
+        { label: 'Conectar IA (MCP)…', click: () => conectarIA() },
         { label: 'Sobre o EletricHUB', click: () => sobre() },
       ],
     },
@@ -609,6 +610,33 @@ async function abrirConfigDoHub() {
     await new Promise((r) => setTimeout(r, 300));
     if (await tentaConfigDoHub(w)) return;
   }
+}
+
+/* O MCP do EletricHUB (mcp/ do hub): da a IA (Claude Code, Claude Desktop) as ferramentas para
+   operar projeto, esquema, PCB, regras/DRC, pour, ECO, Gerber e PDF. O servidor roda no proprio
+   Electron como Node (ELECTRON_RUN_AS_NODE), sobre a pasta de trabalho do app. */
+function conectarIA() {
+  const ws = settings.load().workspace;
+  let c = null, erro = '';
+  try {
+    const reg = require(path.join(ws, 'mcp', 'registrar.js'));
+    c = reg.configuracoes({ electron: true, node: process.execPath, root: ws, hub: 'http://127.0.0.1:8200' });
+  } catch (e) { erro = String(e && e.message || e); }
+  const w = focada();
+  if (!c) {
+    dialog.showMessageBox(w, { type: 'warning', title: 'Conectar IA (MCP)', message: 'O MCP ainda não está na pasta de trabalho.',
+      detail: 'Falta ' + path.join(ws, 'mcp', 'registrar.js') + ' — atualize o app.\n\n' + erro, buttons: ['Fechar'] });
+    return;
+  }
+  dialog.showMessageBox(w, {
+    type: 'info', title: 'Conectar IA (MCP)', message: 'Registrar o EletricHUB como servidor MCP',
+    detail: 'Claude Code (cole num terminal):\n' + c.claudeCode +
+      '\n\nClaude Desktop: acrescente em ' + c.claudeDesktopArquivo + ':\n' + JSON.stringify(c.claudeDesktop, null, 2),
+    buttons: ['Copiar comando do Claude Code', 'Copiar JSON do Claude Desktop', 'Fechar'], defaultId: 0, cancelId: 2,
+  }).then(r => {
+    if (r.response === 0) clipboard.writeText(c.claudeCode);
+    else if (r.response === 1) clipboard.writeText(JSON.stringify(c.claudeDesktop, null, 2));
+  });
 }
 
 function sobre() {
