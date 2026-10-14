@@ -42,7 +42,8 @@
        opacity, modelUrl, placeholder?, origem}]
        eb      a placa efetiva (formato do board.js)
        d3      o pcbmirror3d (ou null: tudo vira biblioteca/placeholder)
-       opcoes  {pcblib3d (o var pcblib3d, se carregado), base ('Projects/<p>/', prefixo do
+       opcoes  {pcblib3d (o var pcblib3d, se carregado), pcblib3dHub (HubFpLib.lib3d: os corpos que o
+               editor de footprint do hub pos -- passam na frente do board3d e do pcblib3d), base ('Projects/<p>/', prefixo do
                modelUrl do board3d), baseLib ('Libs/', prefixo do modelUrl da biblioteca),
                thickness (sobrepoe a do d3), placeholder (false = nao inventa caixa),
                alturas ({smdPassivo, ci, th, semPad} em mm), board (o board.js ORIGINAL: acha o
@@ -255,7 +256,7 @@ function corpos(eb, d3, opcoes){
   opcoes = opcoes || {};
   const esp = isNum(opcoes.thickness) ? opcoes.thickness : (d3 && isNum(d3.thickness) ? d3.thickness : ESPESSURA_PADRAO);
   const base = opcoes.base || '', baseLib = opcoes.baseLib === undefined ? 'Libs/' : opcoes.baseLib;
-  const lib = opcoes.pcblib3d || null;
+  const lib = opcoes.pcblib3d || null, hub = opcoes.pcblib3dHub || null;
   const origem = (d3 && d3.componentes) || {};
   const porDono = Object.create(null);
   const livres = [];
@@ -275,6 +276,17 @@ function corpos(eb, d3, opcoes){
   const tem = (o, k) => o && Object.prototype.hasOwnProperty.call(o, k);
   for (const c of ((eb && eb.components) || [])) {
     if (!c) continue;
+    /* o corpo que o editor de footprint do hub pos (Libs/pcblib-hub.js) vale mais que o do PcbDoc:
+       foi escolhido DEPOIS, de proposito */
+    const fh = hub && hub.footprints && tem(hub.footprints, c.footprint) ? hub.footprints[c.footprint] : null;
+    if (fh && Array.isArray(fh.bodies) && fh.bodies.length) {
+      const P = matPose(c, esp), lado = ladoDe(c);
+      for (const b of fh.bodies) {
+        const ladoB = ladoDe(b) === 'bottom' ? (lado === 'top' ? 'bottom' : 'top') : lado;
+        out.push(leva(b, P, ladoB, esp, hub.models, baseLib, 'hub', c.ref));
+      }
+      continue;
+    }
     const refO = tem(ren, c.ref) ? ren[c.ref] : c.ref;
     const o = tem(origem, refO) ? origem[refO] : null;
     const doD3 = o && porDono[refO] && (!o.footprint || !c.footprint || o.footprint === c.footprint);

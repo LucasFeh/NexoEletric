@@ -297,3 +297,35 @@ componente, as configurações das ferramentas e os atalhos —, mantendo a cara
 - **Painel Properties**: a ficha do componente nas seções do Altium (Location, Properties,
   Footprint, Primitives) e os campos das outras fichas com os nomes do Altium (Layer, Width,
   Start/End (X/Y), Hole Size...).
+
+## Vista 3D e editor de footprint (2026-10-14)
+
+- **View » 3D Layout Mode (tecla 3; 2 volta)** — `hub-pcb3d-vista.js`, WebGL com o Three.js de
+  `vendor/three` carregado só quando o 3D abre. A placa é a de verdade (contorno, recortes e furos
+  vazados, 1,6 mm ou a espessura do `board3d.js`); as duas faces são pintadas com o MESMO cache da
+  vista 2D (máscara, cobre sob ela, metal onde ela abre, serigrafia). Os corpos vêm do
+  `HubPcb3dModelo.corpos`, nesta ordem: o que o editor de footprint do hub prendeu ao footprint
+  (`Libs/pcblib-hub.js`), o `board3d.js` do PcbDoc (`tools/pcb3d/extrai3d.py`), o
+  `Libs/pcblib-3d.js` (`tools/pcb3d/pcblib3d.py`); sem nenhum, a caixa de placeholder. Navegação
+  do Altium: Shift+botão direito (ou arrastar) gira, botão direito arrasta, roda aproxima; o
+  **3D View Control** do menu Exibir (0 topo, Ctrl+0 base, 8 isométrica, 9 gira 90°, setas giram
+  30°) só vale no 3D. Clique escolhe o componente (a mesma seleção do 2D); ferramenta de desenho
+  chamada no 3D volta ao 2D.
+- **Editor de footprint** — `hub-fpeditor.js`, o "PCB Library" do Altium por cima da vista PCB e
+  do Esquema: painel de footprints (filtro, Add / Duplicate / Delete), área de trabalho 2D com as
+  camadas Top / Bottom / Multi-Layer / Top Overlay / Mechanical (3D), Properties do objeto
+  (Designator, Layer, Location, Size and Shape, Hole Information; Track/Arc; 3D Body). Teclas do
+  Altium: P,P pad, P,L linha, P,A arco, **P,B 3D Body (STEP)**, P,E Extruded, Espaço gira, setas
+  andam, Ctrl+Z/Y, Q mm/mil, G grade, 3/2 alterna a vista do footprint em 3D. O STEP (do
+  fabricante) sobe por `POST /api/fp3d` para `Libs/3d-hub/<sha1>.step`; "Encaixar nos pads"
+  centraliza o modelo sobre os pads e o assenta na placa; Rotation X/Y/Z e Z Offset acertam o
+  resto. Soltar um .step na área de trabalho é o mesmo que P,B.
+- **Biblioteca do hub** — `hub-fplib.js`, `Libs/pcblib-hub.js` (fora do git: é estado do
+  servidor). O `Libs/pcblib.js` do Altium não muda; o footprint do hub com o mesmo nome passa na
+  frente dele na ficha do Esquema, no ECO e no `comp_add`. Gravou com pads diferentes: a vista PCB
+  oferece o "Update PCB With" (comp_del + comp_add no mesmo lugar, mesmas nets por nome de pad).
+  No modo biblioteca remota do desktop, o arquivo e os STEP moram no servidor (`libremota.py`).
+- **Esquema » Properties » Footprint** — o footprint de todas as partes do designador (lista da
+  PcbLib + biblioteca do hub), o que ele tem (pads, modelo 3D), os pinos do símbolo sem pad (o
+  Unknown Pin do ECO), e "Editar footprint…" / "Ver em 3D". Tools » Footprint Manager... abre o
+  editor no componente selecionado. A PCB recebe no Design » Update PCB.
