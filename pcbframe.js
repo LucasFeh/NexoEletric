@@ -2034,7 +2034,9 @@ function rodaDrc(){
   pede();
   return DRC_RES;
 }
+let drcAbertoEm = 0;
 function abreDrc(){
+  drcAbertoEm = Date.now();
   if (!HDRC || !HRUI) { HubDialog.alert('O DRC (hub-pcbdrc.js) não carregou nesta página. Atualize o hub (F5).', { title:'Design Rule Check' }); return; }
   drcPainel = HRUI.abrirDrc({
     rodar:() => rodaDrc(),
@@ -3837,6 +3839,13 @@ window.addEventListener('keydown', e => {
   if ((tool === 'poligono' || tool === 'contorno' || tool === 'pour') && e.key === 'Enter') { e.preventDefault(); fechaPoligono(); return; }
   if (tool !== 'select' && tool !== 'trilha' && tool !== 'linha' && e.key === 'Backspace' && desfazPontoPoligono()) { e.preventDefault(); return; }
   if (k === 'Espaço') { if (!SEL.length || LEITOR.pendente()) return; e.preventDefault(); }
+  /* T, D, R do Altium: o R logo depois de abrir o DRC e o "Run Design Rule Check" do dialogo */
+  if (k === 'R' && drcPainel && Date.now() - drcAbertoEm < 4000) {
+    e.preventDefault(); drcAbertoEm = 0;
+    const r = rodaDrc(); if (r && typeof drcPainel.mostra === 'function') drcPainel.mostra(r);
+    HubDialog.toast('DRC: ' + (r ? (r.violacoes || []).length + ' violação(ões)' : 'não rodou'), r && (r.violacoes || []).length ? 'warn' : 'ok', 2200);
+    return;
+  }
   /* a letra que nao e de nenhuma acao abre o menu do Altium dela no cursor (T Tools, D Design...) */
   if (ALT && /^[A-Z]$/.test(k) && !LEITOR.pendente() && !ATALHOS.porTecla[k] && !(ATALHOS.prefixos && ATALHOS.prefixos.has(k)) && ALT.temPopup(k)) {
     e.preventDefault(); popupDoLeitor(k); return;
