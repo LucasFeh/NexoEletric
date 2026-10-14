@@ -3366,7 +3366,7 @@ function extrasDoHub(w){
   }
   if (compsDaSel().length) it.push({ rot:'Virar de face', tecla:'L', f:() => transformaSelecao('vira') });
   if (SEL.length) it.push({ rot:'Girar 90°', tecla:teclaDe('girar'), f:() => transformaSelecao('gira') });
-  it.push({ rot:'Sinalizar aqui (para a IA)', tecla:teclaDe('sinalizar'), f:() => { garanteEdicao(); abreAnnForm(snapPonto(w, null, { soGrade:true })); } });
+  /* o Sinalizar aqui saiu: o Comment... do Altium, logo acima, e ele (a nota para a IA) */
   it.push({ rot:editOn ? 'Travar a edição' : 'Destravar a edição', tecla:teclaDe('editar'), f:() => fazAcao('editar') });
   return it;
 }

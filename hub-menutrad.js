@@ -247,6 +247,7 @@ Decrease Horizontal Spacing|Diminuir espaçamento horizontal
 Decrease Mask Level|Diminuir nível da máscara
 Decrease Vertical Spacing|Diminuir espaçamento vertical
 Default Prints...|Impressões padrão...
+DeSelect|Desmarcar
 Defaults...|Padrões...
 Define Bending Line|Definir linha de dobra
 Define Board Cutout|Definir recorte da placa
