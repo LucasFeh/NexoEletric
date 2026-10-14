@@ -339,8 +339,14 @@ function instala(V) {
     return limpaSep(out);
   }
   function limpaSep(l) {
-    const o = [];
-    for (const x of l) { if (x === '-' && (!o.length || o[o.length - 1] === '-')) continue; o.push(x); }
+    const o = [], vistos = new Set();
+    for (const x of l) {
+      if (x === '-' && (!o.length || o[o.length - 1] === '-')) continue;
+      /* o Altium mostra so uma das variantes de mesmo nome (Save to Server..., Discard Local Changes) */
+      if (x !== '-' && !x.filhos && x.off && vistos.has(x.rot)) continue;
+      if (x !== '-') vistos.add(x.rot);
+      o.push(x);
+    }
     while (o.length && o[o.length - 1] === '-') o.pop();
     return o;
   }
