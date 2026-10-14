@@ -3837,6 +3837,10 @@ window.addEventListener('keydown', e => {
   if ((tool === 'poligono' || tool === 'contorno' || tool === 'pour') && e.key === 'Enter') { e.preventDefault(); fechaPoligono(); return; }
   if (tool !== 'select' && tool !== 'trilha' && tool !== 'linha' && e.key === 'Backspace' && desfazPontoPoligono()) { e.preventDefault(); return; }
   if (k === 'Espaço') { if (!SEL.length || LEITOR.pendente()) return; e.preventDefault(); }
+  /* a letra que nao e de nenhuma acao abre o menu do Altium dela no cursor (T Tools, D Design...) */
+  if (ALT && /^[A-Z]$/.test(k) && !LEITOR.pendente() && !ATALHOS.porTecla[k] && !(ATALHOS.prefixos && ATALHOS.prefixos.has(k)) && ALT.temPopup(k)) {
+    e.preventDefault(); popupDoLeitor(k); return;
+  }
   if (LEITOR.tecla(k)) e.preventDefault();
 });
 /* o que cada acao da tabela faz (a tabela da a tecla; aqui, o efeito) */
@@ -4812,7 +4816,14 @@ function inicia(){
         camadas:() => LAYERS.map(l => ({ key:l.key, rot:rotuloAba(l), padrao:l.corPadrao || l.color })),
         toast:(t, tipo, ms) => HubDialog.toast(t, tipo || 'info', ms), fmtDist, parseDist, unidade:() => unidade,
       });
-      ALT.barra($('menubar'));
+      /* embutida no hub do desktop, os menus sobem para a barra do topo (hub-menubar.js), junto
+         com Arquivo/Exibir/Ajuda do app; aberta sozinha, a barra e a dela */
+      window.__hubMenus = { vista:'pcb', itens:() => ALT.itensBarra(), popup:(l, x, y) => ALT.popup(l, x, y) };
+      let doTopo = false;
+      try { doTopo = window.parent !== window && !!window.parent.EletricMenubar; } catch (e) {}
+      if (doTopo) { const mb = $('menubar'); if (mb) mb.hidden = true; try { window.parent.EletricMenubar.vistaPronta(window); } catch (e) {} }
+      else ALT.barra($('menubar'));
+      window.addEventListener('storage', e => { if (e.key === 'altiumhub.lang' && !doTopo) ALT.redesenhaBarra(); });
     }
     if (typeof HubPcbPainel !== 'undefined') painel = HubPcbPainel.instala($('props'), V);
     else { const p = $('props'); if (p) p.textContent = 'O painel (hub-pcbpainel.js) não carregou — atualize a página.'; }

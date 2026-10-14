@@ -15,6 +15,15 @@ var HubI18n = (function () {
 const DICT = {
 
 'pt-BR': {
+  /* a barra de menus do topo (hub-menubar.js): os itens do app; os do Altium vem do hub-menutrad.js */
+  'mb.file':'Arquivo', 'mb.view':'Exibir', 'mb.help':'Ajuda',
+  'mb.novaJanela':'Nova janela', 'mb.abrirPasta':'Abrir pasta de trabalho', 'mb.importar':'Importar do servidor…',
+  'mb.configHub':'Configurações do hub…', 'mb.configApp':'Configurações do aplicativo…', 'mb.sair':'Sair',
+  'mb.recarregar':'Recarregar', 'mb.recarregarSemCache':'Recarregar sem cache', 'mb.zoomMais':'Aumentar zoom',
+  'mb.zoomMenos':'Diminuir zoom', 'mb.zoom0':'Tamanho original', 'mb.painelProjetos':'Painel Projetos',
+  'mb.telaCheia':'Tela cheia', 'mb.devtools':'Ferramentas do desenvolvedor', 'mb.atualizacoes':'Verificar atualizações…',
+  'mb.log':'Abrir log do hub', 'mb.pastaLogs':'Abrir pasta de logs', 'mb.conectarIA':'Conectar IA (MCP)…', 'mb.sobre':'Sobre o EletricHUB',
+  'mb.app':'EletricHUB',
   /* cabecalho */
   'hdr.search':      'Buscar projeto…',
   'hdr.noProject':   'nenhum projeto',
@@ -222,6 +231,14 @@ const DICT = {
 },
 
 'en': {
+  'mb.file':'File', 'mb.view':'View', 'mb.help':'Help',
+  'mb.novaJanela':'New Window', 'mb.abrirPasta':'Open Workspace Folder', 'mb.importar':'Import from Server…',
+  'mb.configHub':'Hub Settings…', 'mb.configApp':'Application Settings…', 'mb.sair':'Exit',
+  'mb.recarregar':'Reload', 'mb.recarregarSemCache':'Reload Without Cache', 'mb.zoomMais':'Zoom In (Window)',
+  'mb.zoomMenos':'Zoom Out (Window)', 'mb.zoom0':'Actual Size', 'mb.painelProjetos':'Projects Panel',
+  'mb.telaCheia':'Full Screen', 'mb.devtools':'Developer Tools', 'mb.atualizacoes':'Check for Updates…',
+  'mb.log':'Open Hub Log', 'mb.pastaLogs':'Open Logs Folder', 'mb.conectarIA':'Connect AI (MCP)…', 'mb.sobre':'About EletricHUB',
+  'mb.app':'EletricHUB',
   'hdr.search':      'Search project…',
   'hdr.noProject':   'no project',
   'hdr.projects':    '{n} projects',

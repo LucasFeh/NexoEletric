@@ -227,12 +227,14 @@ assert.strictEqual(N({ key:'ArrowDown', code:'Numpad2', location:3, ctrlKey:true
     assert.strictEqual(mem.get('altiumhub.pcb.atalhos'), '{"trilha":"K"}');
     assert.ok(!mem.has('altiumhub.sch.atalhos'), 'gravar a PCB não toca o Esquema');
     assert.deepStrictEqual(P.carrega(), { trilha:'K' });
-    assert.deepStrictEqual(A.carrega(), {});
+    /* 2026-10-14: sem nada gravado, o padrao e o Padrao Altium */
+    assert.deepStrictEqual(A.carrega(), A.sch.predefinicao('altium'), 'sem chave: Padrão Altium');
     A.grava({ fio:'K' });
     assert.deepStrictEqual(A.carrega(), { fio:'K' });
     assert.deepStrictEqual(P.carrega(), { trilha:'K' }, 'gravar o Esquema não toca a PCB');
     P.grava({});
-    assert.ok(!mem.has('altiumhub.pcb.atalhos'), 'restaurar a PCB apaga só a chave dela');
+    assert.strictEqual(mem.get('altiumhub.pcb.atalhos'), '{}', 'Padrão EletricHUB grava {} e fica');
+    assert.deepStrictEqual(P.carrega(), {});
     assert.deepStrictEqual(A.carrega(), { fio:'K' });
     mem.set('altiumhub.pcb.atalhos', '{estragado');
     assert.deepStrictEqual(P.carrega(), {}, 'chave estragada volta vazia');

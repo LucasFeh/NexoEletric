@@ -23,6 +23,8 @@
   /* as preferencias da casca ficam junto das do hub (mesmo prefixo de localStorage) */
   const LS_DOCK = 'altiumhub.shell.dock';       // '0' = painel Projetos recolhido na faixa
   const LS_DOCK_W = 'altiumhub.shell.dockW';
+  const LS_SO_ATUAL = 'altiumhub.shell.soAtual';   // '1' = o painel mostra so o projeto aberto
+  let soAtual = ler(LS_SO_ATUAL) === '1';
   const DOCK_MIN = 200, DOCK_MAX = 520, DOCK_PADRAO = 268;
   const FAIXA_W = 34;                            // o painel recolhido: so o cabecalho, em pe
 
@@ -82,6 +84,10 @@
 
   /* ── CSS da casca: so tokens do tema do hub, entao vale para todos os temas ───── */
   const CSS = `
+  .eh-seg{display:inline-flex; gap:1px; margin-left:auto; padding:1px; border-radius:4px; box-shadow:inset 0 0 0 1px var(--edge);}
+  .eh-seg button{border:0; background:transparent; color:var(--text-2); font:11px var(--font); padding:2px 7px; border-radius:3px; cursor:pointer;}
+  .eh-seg button[aria-pressed="true"]{background:rgba(var(--tint),0.14); color:var(--text);}
+
 body.eh-shell #app {
   grid-template-columns: var(--eh-dock-w, ${DOCK_PADRAO}px) minmax(var(--page-min), 1fr);
   grid-template-rows: auto auto auto 1fr auto;
@@ -308,7 +314,10 @@ body.eh-shell .tab[aria-selected="true"]::after {
     const ativo = typeof proj === 'function' ? proj() : null;
     const aba = abaAtual();
     const q = filtro.trim().toLowerCase();
-    const lista = (S.projects || []).filter((p) => !q || p.name.toLowerCase().includes(q));
+    /* "Só o atual" (pedido do dono, 2026-10-14: "mostrar todos os projetos, ou apenas o projeto
+       que deseja ... pra não ficar tão poluído"): a busca continua procurando em todos */
+    const lista = (S.projects || []).filter((p) => q ? p.name.toLowerCase().includes(q) : (!soAtual || (ativo && ativo.id === p.id)));
+    if (soAtual && !q && ativo) abertos.add(ativo.id);
     const frag = document.createDocumentFragment();
 
     const raiz = linha(0, 'grupo', [caret(true), icone('grupo'), el('span', 'nm', 'Projetos'),
@@ -547,6 +556,22 @@ body.eh-shell .tab[aria-selected="true"]::after {
     fecharTodos.append(icone('fecharTodos'), document.createTextNode('Fechar todos os projetos'));
     fecharTodos.onclick = () => { abertos.clear(); renderArvore(); };
     tools.append(fecharTodos);
+    /* Todos | Só o atual */
+    const seg = el('div', 'eh-seg');
+    const opSeg = (rot, valor, titulo) => {
+      const b = el('button', null, rot);
+      b.type = 'button'; b.title = titulo;
+      b.setAttribute('aria-pressed', String(soAtual === valor));
+      b.onclick = () => {
+        soAtual = valor; grava(LS_SO_ATUAL, valor ? '1' : '0');
+        seg.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        renderArvore();
+      };
+      seg.append(b);
+    };
+    opSeg('Todos', false, 'Mostra todos os projetos da pasta de trabalho');
+    opSeg('Só o atual', true, 'Mostra só o projeto aberto (a busca ainda procura em todos)');
+    tools.append(seg);
 
     const bz = el('div', 'eh-busca');
     busca = el('input');
