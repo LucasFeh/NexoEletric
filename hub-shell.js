@@ -24,7 +24,6 @@
   const LS_DOCK = 'altiumhub.shell.dock';       // '0' = painel Projetos recolhido na faixa
   const LS_DOCK_W = 'altiumhub.shell.dockW';
   const LS_SO_ATUAL = 'altiumhub.shell.soAtual';   // '1' = o painel mostra so o projeto aberto
-  let soAtual = ler(LS_SO_ATUAL) === '1';
   const DOCK_MIN = 200, DOCK_MAX = 520, DOCK_PADRAO = 268;
   const FAIXA_W = 34;                            // o painel recolhido: so o cabecalho, em pe
 
@@ -35,6 +34,7 @@
 
   const ler = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
   const grava = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* sem storage */ } };
+  let soAtual = ler(LS_SO_ATUAL) === '1';
   const el = (tag, cls, txt) => {
     const n = document.createElement(tag);
     if (cls) n.className = cls;
