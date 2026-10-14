@@ -93,7 +93,7 @@ const MAPA = {
   'PLPCB:MeasureDistance': A('medir'), 'PLPCB:ReportBoardSpecs': A('boardInfo'),
   'PLPCB:PopupRightMouseProperties': A('propriedades'),
   /* Toolbars » Customize e Help */
-  'PLClient:CustomizeResources': A('atalhos'), 'PLClient:HelpShortcutKeys': A('ajuda'), 'PLClient:HelpAbout': A('sobre'),
+  'PLClient:CustomizeResources': A('atalhos'), 'PLClient:HelpShortcutKeys': A('ajuda'),
 };
 /* a vista Esquema (schframe.js » fazAcao): os comandos do Altium que ela ja faz */
 const MAPA_SCH = {
