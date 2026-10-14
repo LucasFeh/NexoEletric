@@ -143,6 +143,7 @@ function criarJanela() {
     settings.save({ window: { ...b, maximized: esta.isMaximized() } });
   });
   esta.on('closed', () => { if (janela === esta) janela = null; });
+  menuNativoSoForaDoHub(esta);
   esta.webContents.on('page-title-updated', (e, t) => {
     e.preventDefault();
     // o hub (hub-shell.js) ja poe "Projeto · Documento — EletricHUB" no titulo
@@ -508,6 +509,42 @@ function focada() {
   return BrowserWindow.getFocusedWindow() || janela;
 }
 
+/* Pedido do dono (2026-10-14): o menu do app (Arquivo, Exibir, Ajuda) vai para o topo da pagina,
+   fundido com os menus do Altium da vista aberta e no tema do hub (hub-menubar.js). A barra nativa
+   do Windows nao segue tema: ela some enquanto a janela mostra o hub e volta na tela de abertura
+   (file://), onde nao ha barra na pagina. O menu continua registrado -- e dele que vem F5, F11,
+   Ctrl+, e Ctrl+Shift+I. */
+function menuNativoSoForaDoHub(w) {
+  const ajusta = (url) => { if (!w.isDestroyed()) w.setMenuBarVisibility(!(origem && String(url || '').startsWith(origem))); };
+  w.webContents.on('did-navigate', (_e, url) => ajusta(url));
+  ajusta(w.webContents.getURL());
+}
+
+/* os comandos do menu, por nome: o menu nativo e a barra da pagina chamam os mesmos */
+function acoesDoMenu() {
+  const wc = () => { const w = focada(); return w ? w.webContents : null; };
+  const zoom = (d) => { const c = wc(); if (c) c.setZoomLevel(d === 0 ? 0 : c.getZoomLevel() + d); };
+  return {
+    novaJanela: () => novaJanela(),
+    abrirPasta: () => shell.openPath(settings.load().workspace),
+    importar: () => abrirImportacao(),
+    configHub: () => abrirConfigDoHub(),
+    configApp: () => abrirConfig(),
+    sair: () => app.quit(),
+    recarregar: () => { const c = wc(); if (c) c.reload(); },
+    recarregarSemCache: () => { const c = wc(); if (c) c.reloadIgnoringCache(); },
+    zoomMais: () => zoom(0.5), zoomMenos: () => zoom(-0.5), zoom0: () => zoom(0),
+    painelProjetos: () => { const c = wc(); if (c) c.executeJavaScript('window.EletricShell && EletricShell.alternarProjetos()').catch(() => {}); },
+    telaCheia: () => { const w = focada(); if (w) w.setFullScreen(!w.isFullScreen()); },
+    devtools: () => { const c = wc(); if (c) c.toggleDevTools(); },
+    atualizacoes: () => verificarAtualizacoes(),
+    log: () => shell.openPath(path.join(LOG_DIR, 'hub.log')),
+    pastaLogs: () => shell.openPath(LOG_DIR),
+    conectarIA: () => conectarIA(),
+    sobre: () => sobre(),
+  };
+}
+
 function montarMenu() {
   const wc = () => { const w = focada(); return w ? w.webContents : null; };
   const zoom = (d) => { const c = wc(); if (c) c.setZoomLevel(d === 0 ? 0 : c.getZoomLevel() + d); };
@@ -570,8 +607,9 @@ function novaJanela() {
   if (!origem) return null;
   const w = new BrowserWindow({
     width: 1400, height: 900, icon: web.ICONE, backgroundColor: '#14161a',
-    webPreferences: web.webPreferencesHub(),
+    webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
   });
+  menuNativoSoForaDoHub(w);
   w.loadURL(origem + '/');
   return w;
 }
@@ -704,6 +742,14 @@ function handle(canal, fn) {
 }
 
 function registrarIpc() {
+  ipcMain.handle('menu:acao', (e, id) => {
+    const url = (e.senderFrame && e.senderFrame.url) || '';
+    if (!origem || !url.startsWith(origem)) throw new Error('chamada recusada: ' + url);
+    const f = acoesDoMenu()[id];
+    if (typeof f !== 'function') throw new Error('comando desconhecido: ' + id);
+    f();
+    return true;
+  });
   handle('boot:estado', () => bootStatus);
   handle('boot:tentar', () => { boot(); return true; });
   handle('boot:log', () => shell.openPath(path.join(LOG_DIR, 'hub.log')));

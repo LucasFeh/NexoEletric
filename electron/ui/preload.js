@@ -34,3 +34,19 @@ if (location.protocol === 'file:') {
     },
   });
 }
+
+// A barra de menus da pagina do hub (hub-menubar.js, 2026-10-14): o menu do app saiu da barra
+// nativa para o topo da pagina. A pagina do hub (http://127.0.0.1) ganha UMA chamada, com os
+// nomes da lista fechada abaixo e sem argumento -- recarregar, zoom, tela cheia, abrir as
+// configuracoes, sair: nada que leia ou grave arquivo. O main.js confere a origem de novo.
+const MENU = new Set([
+  'novaJanela', 'abrirPasta', 'importar', 'configHub', 'configApp', 'sair',
+  'recarregar', 'recarregarSemCache', 'zoomMais', 'zoomMenos', 'zoom0', 'painelProjetos',
+  'telaCheia', 'devtools', 'atualizacoes', 'log', 'pastaLogs', 'conectarIA', 'sobre',
+]);
+if ((location.protocol === 'http:' || location.protocol === 'https:') &&
+    (location.hostname === '127.0.0.1' || location.hostname === 'localhost')) {
+  contextBridge.exposeInMainWorld('eletricApp', {
+    menu: (id) => (MENU.has(id) ? ipcRenderer.invoke('menu:acao', id) : Promise.reject(new Error('comando desconhecido: ' + id))),
+  });
+}
