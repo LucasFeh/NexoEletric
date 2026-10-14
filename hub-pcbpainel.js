@@ -77,6 +77,14 @@ const CSS = `
 .pp .btn.on{background:var(--hi); color:var(--on-hi); border-color:var(--hi);}
 .pp .wide{width:100%; justify-content:flex-start; margin-top:6px;}
 .pp .pr-sec .wide:first-of-type{margin-top:0;}
+.pp .sf-cab{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;}
+.pp .sf-cab h3{margin:0;}
+.pp .sf-all{font:11px var(--font); padding:1px 8px; border-radius:3px; border:1px solid var(--border); background:transparent; color:var(--fg-dim); cursor:pointer;}
+.pp .sf-all.on{color:var(--fg); border-color:var(--accent);}
+.pp .sf{display:flex; flex-wrap:wrap; gap:3px;}
+.pp .sf-b{font:11px var(--font); line-height:16px; padding:1px 6px; border-radius:3px; border:1px solid var(--border); background:transparent; color:var(--fg-dim); cursor:pointer;}
+.pp .sf-b:hover{border-color:var(--accent);}
+.pp .sf-b[aria-pressed="true"]{background:rgba(var(--tint),0.14); color:var(--fg); border-color:var(--accent);}
 .pp .chips{display:flex; flex-wrap:wrap; gap:4px;}
 .pp .chip{font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--border); background:transparent; color:var(--fg-dim); cursor:pointer; font-family:inherit;}
 .pp .chip[aria-pressed="true"]{background:rgba(var(--tint),0.12); color:var(--fg); border-color:var(--accent);}
@@ -362,48 +370,33 @@ function instala(aside, V) {
     return wrap;
   }
   function desenhaPlaca(pag) {
-    const I = V.info();
-    const s1 = sec(pag, 'Placa');
-    const t = el('div', 'pr-kv');
-    kv(t, 'Arquivo', I.fonte);
-    kv(t, 'Exportado', I.gerado);
-    kv(t, 'Espelho', I.novo ? 'novo (' + I.exporter + ')' : 'antigo — sem fills, mecânicas, máscara por pad e furos de região; reexporte com o ExportBoard novo', I.novo ? '' : 'warn');
-    kv(t, 'Tamanho', V.fmtDist(I.W) + ' × ' + V.fmtDist(I.H) + ' ' + V.unidade());
-    kv(t, 'Área', V.fmtNum(I.area / 100, 2) + ' cm²');
-    kv(t, 'Componentes', I.comps + ' (Top ' + I.top + ' · Bottom ' + I.bottom + ')');
-    kv(t, 'Trilhas', I.trilhas + ' (' + I.cobre + ' de cobre)');
-    kv(t, 'Arcos', String(I.arcos));
-    kv(t, 'Pads', String(I.pads));
-    kv(t, 'Vias', String(I.vias));
-    kv(t, 'Fills', String(I.fills));
-    kv(t, 'Regiões', String(I.regioes));
-    kv(t, 'Textos', String(I.textos));
-    kv(t, 'Recortes', String(I.recortes));
-    kv(t, 'Nets', String(I.nets));
-    kv(t, 'Camadas', I.camadas + ' com objeto · ' + I.sinal + ' de sinal');
-    const R = I.regras || {};
-    const reg = [R.width != null ? 'largura ' + V.fmtDist(R.width) : '', R.clearance != null ? 'clearance ' + V.fmtDist(R.clearance) : '',
-                 R.viaSize != null ? 'via ' + V.fmtDist(R.viaSize) + '/' + V.fmtDist(R.viaDrill) : '', R.sm != null ? 'máscara +' + V.fmtDist(R.sm) : ''].filter(Boolean);
-    kv(t, 'Regras', reg.length ? reg.join(' · ') + ' ' + V.unidade() : '— (o espelho não trouxe)');
-    s1.append(t);
-
-    const s2 = sec(pag, 'Filtro de seleção');
-    const ch = el('div', 'chips');
-    for (const f of V.filtros()) {
-      const b = el('button', 'chip', f.rot);
+    /* Pedido do dono (2026-10-14): o que ficava acima do filtro (Placa: arquivo, tamanho, contagens)
+       saiu, e o filtro ficou como o Selection Filter do Altium: um "All - On/Off" e um botao pequeno
+       por tipo, na ordem e com os nomes do Altium */
+    const s2 = sec(pag);
+    const cab = el('div', 'sf-cab');
+    cab.append(el('h3', null, 'Selection Filter'));
+    const fs = V.filtros();
+    const todosOn = fs.every(f => f.on);
+    const all = el('button', 'sf-all' + (todosOn ? ' on' : ''), todosOn ? 'All - On' : 'All - Off');
+    all.type = 'button';
+    all.title = todosOn ? 'Tira todos os tipos da seleção' : 'Põe todos os tipos na seleção';
+    all.addEventListener('click', () => V.setFiltro('*', !todosOn));
+    cab.append(all);
+    s2.append(cab);
+    const NOMES = { comp:'Components', keepout:'Keepouts', track:'Tracks', arc:'Arcs', pad:'Pads', via:'Vias',
+                    region:'Regions', poly:'Polygons', fill:'Fills', text:'Texts', outros:'Other' };
+    const ORDEM = ['comp', 'keepout', 'track', 'arc', 'pad', 'via', 'region', 'poly', 'fill', 'text', 'outros'];
+    const grade = el('div', 'sf');
+    for (const k of ORDEM) {
+      const f = fs.find(x => x.k === k); if (!f) continue;
+      const b = el('button', 'sf-b', NOMES[k] || f.rot);
       b.type = 'button'; b.setAttribute('aria-pressed', String(f.on));
-      b.title = (f.on ? 'Selecionável' : 'Fora da seleção') + ' — clique para trocar';
+      b.title = f.rot + (f.on ? ' — selecionável (clique tira)' : ' — fora da seleção (clique põe)');
       b.addEventListener('click', () => V.setFiltro(f.k, !f.on));
-      ch.append(b);
+      grade.append(b);
     }
-    for (const [rot, porque] of [['Corpos 3D', 'não vêm no espelho'], ['Rooms', 'não vêm no espelho']]) {
-      const b = el('button', 'chip', rot); b.type = 'button'; b.disabled = true; b.title = rot + ' — ' + porque; ch.append(b);
-    }
-    s2.append(ch);
-    const lt = el('div', 'linha');
-    const tudo = el('button', 'btn', 'Todos'); tudo.type = 'button'; tudo.addEventListener('click', () => V.setFiltro('*', true));
-    const nada = el('button', 'btn', 'Nenhum'); nada.type = 'button'; nada.addEventListener('click', () => V.setFiltro('*', false));
-    lt.append(tudo, nada); s2.append(lt);
+    s2.append(grade);
 
     const s3 = sec(pag, 'Grade e snap');
     const l1 = el('div', 'linha');
@@ -455,7 +448,7 @@ function instala(aside, V) {
     bC.addEventListener('click', () => V.csv());
     const bP = el('button', 'btn wide'); bP.type = 'button'; bP.append(ic('pdf'), el('span', null, 'PDF de layout'));
     bP.disabled = true; bP.title = 'PDF de layout (A4 com carimbo) — travado: próxima etapa';
-    s5.append(bG, bS, bC, bP);
+    s5.append(bS, bC);     /* Gerar o Gerber e o PDF ficam so no Arquivo (pedido do dono, 2026-10-14) */
   }
 
   /* ============================== Camadas ============================== */
