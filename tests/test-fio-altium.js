@@ -138,7 +138,29 @@ const F = require('../hub-fio.js');
   assert.strictEqual(F.trocaModo(F.novo([0, 0], '90', 'v'), { p45:'xyz' }).primeiro, 'diag');
 }
 
-/* ── 11. nada muda o estado de quem chamou ── */
+/* ── 11. o depoisDe exportado: a vista PCB fixa de uma vez os trechos do contorno (roteador) e
+   pergunta a ele de que lado a perna seguinte sai — tem de ser a mesma regra do fixa ── */
+{
+  assert.strictEqual(typeof F.depoisDe, 'function', 'depoisDe exportado');
+  /* 90°: depois de um trecho horizontal a perna sai vertical, e vice-versa */
+  assert.strictEqual(F.depoisDe('90', [0, 0], [300, 0], 'h'), 'v');
+  assert.strictEqual(F.depoisDe('90', [0, 0], [0, -200], 'v'), 'h');
+  /* 45°: depois de uma diagonal, a reta; depois de uma reta, a diagonal */
+  assert.strictEqual(F.depoisDe('45', [0, 0], [100, 100], 'diag'), 'orto');
+  assert.strictEqual(F.depoisDe('45', [0, 0], [-100, 100], 'diag'), 'orto', 'diagonal em qualquer quadrante');
+  assert.strictEqual(F.depoisDe('45', [0, 0], [500, 0], 'orto'), 'diag');
+  assert.strictEqual(F.depoisDe('45', [0, 0], [0, 500], 'orto'), 'diag');
+  /* livre: não há lado, fica o que estava */
+  assert.strictEqual(F.depoisDe('livre', [0, 0], [30, 70], 'v'), 'v');
+  /* é a MESMA conta do fixa: o lado que o fixa deixa é o que o depoisDe dá para o trecho fixado */
+  for (const [modo, pr, C] of [['90', 'v', [300, -200]], ['90', 'h', [300, -200]], ['45', 'diag', [300, 100]],
+                               ['45', 'orto', [300, 100]], ['45', 'diag', [500, 0]], ['45', 'orto', [300, 300]]]) {
+    const e = F.fixa(F.novo([0, 0], modo, pr), C), n = e.pts.length;
+    assert.strictEqual(F.depoisDe(modo, e.pts[n - 2], e.pts[n - 1], pr), e.primeiro, modo + '/' + pr + ' até ' + C);
+  }
+}
+
+/* ── 12. nada muda o estado de quem chamou ── */
 {
   const e = F.novo([0, 0], '90', 'v'), antes = JSON.stringify(e);
   F.fixa(e, [100, 100]); F.completa(e, [100, 100]); F.trocaCanto(e); F.trocaModo(e);

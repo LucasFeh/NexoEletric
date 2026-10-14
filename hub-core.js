@@ -301,6 +301,325 @@ function regiaoErro(pts){
    com owner -- e nao ha como saber qual e qual. */
 function espelhoNovo(B){ return !!B && typeof B.exporter === 'string' && B.exporter !== ''; }
 
+/* ══════════ placa nova e ECO (2026-10-13): footprint, net, contorno com arco ══════════
+
+   O comp_add (o "Design » Update PCB Document" do Altium) poe na placa um componente que ela nao
+   tinha. O changes.js e uma linha plana por objeto -- nao cabe o footprint dentro --, entao o
+   motor busca a geometria, nesta ordem:
+     1. opts.pcblib do applyPcbChanges, ou a lib registrada com setPcbLib (o Libs/pcblib.js),
+        pela cascata de nomes do resolveFp (substituicao, exato, rename-map, chave);
+     2. board.footprints[] -- a biblioteca EMBUTIDA da placa (o PcbDoc do Altium guarda a dele;
+        a placa mestra do hub tambem: o HubPcbNova.consolida grava ali os que usou);
+     3. um componente da propria placa com o MESMO footprint: a geometria local sai dele pela
+        conta inversa do compDelta (e o que o Altium faz quando o footprint ja esta no PcbDoc).
+   Nenhum dos tres: a op e recusada dizendo isso -- footprint que falta e erro de validacao, nao
+   crash, e o componente nao entra sem pad nenhum. */
+let PCBLIB = null;
+function setPcbLib(lib){ PCBLIB = (lib && Array.isArray(lib.footprints)) ? lib : null; }
+const pcbLibAtual = () => PCBLIB;
+
+/* geometria LOCAL (o formato do pcblib.js: pads/silk/bbox em mm em torno da origem, rot 0, Top)
+   de um componente ja colocado: a volta do compDelta (O, r, lado) -> (0, 0, 0, Top) */
+function fpDoComponente(c, board){
+  if (!c || !isNum(c.x) || !isNum(c.y)) return null;
+  const m = { src:{ x:c.x, y:c.y, rot:isNum(c.rot) ? c.rot : 0, layer:c.layer === 'Bottom' ? 'Bottom' : 'Top' },
+              eff:{ x:0, y:0, rot:0, layer:'Top' } };
+  m.pares = mechPairs(board);
+  const d = compDelta(m);
+  const limpa = o => { delete o.id; delete o.net; delete o.owner; return o; };
+  const pads = (Array.isArray(c.pads) ? c.pads : []).filter(Boolean).map(p => limpa(xfPad(d, p)));
+  const silk = [];
+  for (const s of ((board && board.silk) || [])) {
+    if (!s || s.owner !== c.ref || (s.kind !== 'line' && s.kind !== 'arc')) continue;
+    const o = dcopy(s); xfLineObj(d, o, s.kind === 'arc');
+    if (o.layer !== 'TopOverlay') continue;           /* so a serigrafia do lado do componente */
+    limpa(o); delete o.layer; silk.push(o);
+  }
+  const b = c.bbox;
+  const bbox = (b && [b.x1, b.y1, b.x2, b.y2].every(isNum)) ? xfBox(d, b) : null;
+  return { name:c.footprint || '', description:'', bbox, pads, silk };
+}
+/* a geometria do footprint `nome` para esta placa: {fp, fonte} ou null (ver o cabecalho acima) */
+function footprintGeom(nome, board, opts){
+  const nm = typeof nome === 'string' ? nome : '';
+  if (!nm) return null;
+  const lib = (opts && opts.pcblib) || PCBLIB;
+  if (lib) { const r = resolveFp(lib, nm); if (r && r.item) return { fp:r.item, fonte:'pcblib' + (r.how && r.how !== 'exato' ? ' (' + r.how + ': ' + r.name + ')' : '') }; }
+  const emb = board && Array.isArray(board.footprints) ? board.footprints : null;
+  if (emb && emb.length) { const r = resolveLib(emb, nm, 'fp'); if (r && r.item) return { fp:r.item, fonte:'board.footprints' }; }
+  for (const c of ((board && board.components) || []))
+    if (c && c.footprint === nm && Array.isArray(c.pads) && c.pads.length) {
+      const fp = fpDoComponente(c, board);
+      if (fp) return { fp, fonte:'placa (' + c.ref + ')' };
+    }
+  return null;
+}
+/* "1=GND;2=VCC;3=" -> {"1":"GND","2":"VCC","3":""}; null = mal formado. Campo PLANO de
+   proposito: o parser do ApplyChanges le linha a linha e nao aguenta objeto aninhado. */
+function parseNetsCampo(s){
+  if (s === undefined || s === null || s === '') return {};
+  if (typeof s !== 'string') return null;
+  const out = {};
+  for (const par of s.split(';')) {
+    if (!par) continue;
+    const i = par.indexOf('=');
+    if (i <= 0) return null;
+    out[par.slice(0, i)] = par.slice(i + 1);
+  }
+  return out;
+}
+function netsCampo(map){
+  return Object.keys(map || {}).map(k => k + '=' + map[k]).join(';');
+}
+
+/* Contorno com arco: cada vertice do `pts` do outline_set e [x,y] (reta ate o proximo) ou
+   [x,y,b], com b = BULGE, a convencao do DXF: tan(angulo varrido / 4), positivo = anti-horario
+   do vertice para o proximo, negativo = horario, 0 = reta. Um campo a mais por vertice, sem
+   aninhamento -- o ParsePts do ApplyChanges continua lendo a linha. Canto arredondado de 90 graus
+   = b de +-0,414214 (tan 22,5); meia-volta = +-1. */
+const BULGE_MAX = 1e3;
+function bulgeArco(x1, y1, x2, y2, b){
+  const c = Math.hypot(x2 - x1, y2 - y1);
+  if (!(c > 1e-9) || !isNum(b) || Math.abs(b) < 1e-12) return null;
+  const th = 4 * Math.atan(b);                         /* varredura com sinal */
+  const r = c / (2 * Math.sin(Math.abs(th) / 2));
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+  const ux = (x2 - x1) / c, uy = (y2 - y1) / c;         /* direcao da corda */
+  const s = (c / 2) * (1 - b * b) / (2 * b);            /* distancia (com sinal) do centro a corda, a esquerda */
+  const cx = mx - uy * s, cy = my + ux * s;
+  const ang = (x, y) => normAng(Math.atan2(y - cy, x - cx) * 180 / Math.PI);
+  const a1 = ang(x1, y1), a2 = ang(x2, y2);
+  /* o segmento do board.js e sempre anti-horario de sa para ea */
+  return b > 0 ? { kind:'arc', cx:r6(cx), cy:r6(cy), r:r6(r), sa:a1, ea:a2 }
+               : { kind:'arc', cx:r6(cx), cy:r6(cy), r:r6(r), sa:a2, ea:a1 };
+}
+/* pts (com bulge) -> segmentos do board.js » board.outline; null = pts invalido */
+function ptsToOutline(pts){
+  if (!Array.isArray(pts) || pts.length < 2) return null;
+  for (const p of pts)
+    if (!Array.isArray(p) || !isNum(p[0]) || !isNum(p[1]) || (p.length > 2 && p[2] !== undefined && p[2] !== null && !isNum(p[2]))) return null;
+  const segs = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length], bg = isNum(a[2]) ? a[2] : 0;
+    const arco = bg ? bulgeArco(a[0], a[1], b[0], b[1], bg) : null;
+    segs.push(arco || { kind:'line', x1:a[0], y1:a[1], x2:b[0], y2:b[1] });
+  }
+  return segs;
+}
+/* a volta: segmentos do board.outline (retas e arcos, como o ExportBoard os escreve, em ordem)
+   -> pts com bulge, para editar no hub o contorno que veio do Altium. O arco do board.js nao diz
+   o sentido em que o contorno o percorre: decide a continuidade com o vizinho. null = os
+   segmentos nao fecham uma volta. */
+function outlineToPts(segs){
+  const S = (Array.isArray(segs) ? segs : []).filter(s => s && (s.kind === 'line' || s.kind === 'arc'));
+  if (S.length < 2) return null;
+  const T = 1e-3;
+  const pontas = s => {
+    if (s.kind === 'line') return [[s.x1, s.y1], [s.x2, s.y2]];
+    const p = g => [s.cx + s.r * Math.cos(g * Math.PI / 180), s.cy + s.r * Math.sin(g * Math.PI / 180)];
+    return [p(s.sa), p(s.ea)];
+  };
+  const igual = (a, b) => Math.abs(a[0] - b[0]) <= T && Math.abs(a[1] - b[1]) <= T;
+  const P = S.map(pontas);
+  /* sentido do primeiro: o que termina onde o segundo comeca (em qualquer sentido) */
+  const dir = new Array(S.length).fill(1);
+  if (!(igual(P[0][1], P[1][0]) || igual(P[0][1], P[1][1]))) dir[0] = -1;
+  const fim = i => dir[i] > 0 ? P[i][1] : P[i][0];
+  const ini = i => dir[i] > 0 ? P[i][0] : P[i][1];
+  for (let i = 1; i < S.length; i++) {
+    if (igual(P[i][0], fim(i - 1))) dir[i] = 1;
+    else if (igual(P[i][1], fim(i - 1))) dir[i] = -1;
+    else return null;
+  }
+  if (!igual(fim(S.length - 1), ini(0))) return null;
+  return S.map((s, i) => {
+    const p = ini(i), v = [r6(p[0]), r6(p[1])];
+    if (s.kind === 'arc') {
+      let sw = (((s.ea - s.sa) % 360) + 360) % 360;
+      if (sw === 0) sw = 360;
+      const b = Math.tan(sw * Math.PI / 180 / 4) * dir[i];
+      v.push(Math.round(b * 1e9) / 1e9);
+    }
+    return v;
+  });
+}
+
+/* Designator de componente novo: 1 mm de altura (a moda do acervo: 426 dos 711 designators dos 16
+   board.js do workspace), traco 0,15, centrado em cima da caixa do componente, como o
+   AutoPosition do Altium deixa; no Bottom, espelhado na BottomOverlay. O comment nao ganha texto:
+   nos 16 espelhos nao ha UM comment visivel (o padrao da casa e o Comment desligado). */
+const DESIG_H = 1, DESIG_W = 0.15, DESIG_FOLGA = 0.3;
+/* O componente que o comp_add poe na placa, no formato do board.js: o footprint (local) pela
+   MESMA conta do comp_move (compDelta da origem, rot 0, Top, para o lugar pedido), pads com id
+   e net, a serigrafia (TopOverlay no footprint, virada no Bottom) e o designator. Pad passante
+   do pcblib nao diz se e metalizado: cobre maior que o furo = metalizado (PTH); cobre do tamanho
+   do furo = NPTH, o furo de fixacao feito como pad. */
+function sintetizaComp(fp, a, cid){
+  const d = compDelta({ src:{ x:0, y:0, rot:0, layer:'Top' }, eff:{ x:a.x, y:a.y, rot:a.rot, layer:a.layer } });
+  const nets = a.nets || {};
+  const pads = (fp.pads || []).filter(Boolean).map((p, i) => {
+    const q = xfPad(d, p);
+    const o = { id:cid + 'p' + (i + 1) };
+    for (const k in q) if (k !== 'id' && k !== 'net') o[k] = q[k];
+    if (o.type === 'th' && o.plated === undefined && isNum(o.drill))
+      o.plated = !(isNum(o.w) && isNum(o.h) && o.w <= o.drill + 1e-6 && o.h <= o.drill + 1e-6);
+    o.net = temProp(nets, String(p.name)) ? nets[String(p.name)] : '';
+    return o;
+  });
+  let bbox = null;
+  const b = fp.bbox;
+  if (b && [b.x1, b.y1, b.x2, b.y2].every(isNum)) bbox = xfBox(d, b);
+  else if (pads.length) {
+    const xs = [], ys = [];
+    for (const p of pads) { const r = Math.max(p.w || 0, p.h || 0) / 2; xs.push(p.x - r, p.x + r); ys.push(p.y - r, p.y + r); }
+    bbox = { x1:r6(Math.min(...xs)), y1:r6(Math.min(...ys)), x2:r6(Math.max(...xs)), y2:r6(Math.max(...ys)) };
+  }
+  const comp = { id:cid, ref:a.ref, footprint:a.footprint, comment:a.comment || '', layer:a.layer, x:a.x, y:a.y, rot:a.rot };
+  if (bbox) comp.bbox = bbox;
+  comp.pads = pads;
+  const silk = [];
+  (fp.silk || []).forEach((s, i) => {
+    if (!s || (s.kind !== 'line' && s.kind !== 'arc')) return;
+    const o = dcopy(s); o.layer = 'TopOverlay';
+    xfLineObj(d, o, s.kind === 'arc');
+    const obj = { id:cid + 's' + (i + 1), layer:o.layer, kind:s.kind };
+    if (s.kind === 'arc') Object.assign(obj, { cx:o.cx, cy:o.cy, r:o.r, sa:o.sa, ea:o.ea });
+    else Object.assign(obj, { x1:o.x1, y1:o.y1, x2:o.x2, y2:o.y2 });
+    obj.w = o.w; obj.owner = a.ref;
+    silk.push(obj);
+  });
+  const bx = bbox || { x1:a.x, y1:a.y, x2:a.x, y2:a.y };
+  const texts = [{ id:cid + 'x', layer:a.layer === 'Bottom' ? 'BottomOverlay' : 'TopOverlay',
+                   x:r6((bx.x1 + bx.x2) / 2), y:r6(bx.y2 + DESIG_FOLGA + DESIG_H / 2), text:a.ref, h:DESIG_H, rot:0,
+                   mirror:a.layer === 'Bottom', designator:true, comment:false, owner:a.ref, w:DESIG_W, kind:'stroke' }];
+  return { comp, silk, texts };
+}
+
+/* Pad solto (pad_add / pad_edit): valida a op e devolve os campos do pad no formato do
+   board.js » freepads. `base` = o pad atual (edit) ou null (add). type da op: smd | th | npth;
+   no board.js o NPTH e type 'th' com plated:false (como o ExportBoard le o Pad.Plated). */
+const PAD_FORMAS = ['circle', 'rect', 'oval', 'roundrect', 'octagon'];
+const FURO_FORMAS = ['circle', 'rect', 'oblong'];
+function padDaOp(ch, base){
+  const avisos = [], erro = m => ({ erro:m, avisos });
+  const num = ['x', 'y', 'w', 'h', 'rot', 'drill', 'drillw', 'holerot', 'radius'];
+  const ruim = num.find(k => ch[k] !== undefined && !isNum(ch[k]));
+  if (ruim) return erro(`campo "${ruim}" inválido`);
+  if (!base) for (const k of ['x', 'y', 'w', 'h']) if (!isNum(ch[k])) return erro(`campo "${k}" ausente/inválido`);
+  const tipoBase = base ? (base.type === 'smd' ? 'smd' : (base.plated === false ? 'npth' : 'th')) : null;
+  const tipo = ch.type !== undefined ? ch.type : tipoBase;
+  if (!['smd', 'th', 'npth'].includes(tipo)) return erro('type deve ser smd, th ou npth');
+  if (base && tipo !== tipoBase) return erro(`troca de tipo (${tipoBase} -> ${tipo}) não é edição: pad_del + pad_add`);
+  const v = k => ch[k] !== undefined ? ch[k] : (base ? base[k] : undefined);
+  const shape = v('shape') !== undefined ? v('shape') : 'circle';
+  if (!PAD_FORMAS.includes(shape)) return erro(`shape "${shape}" inválida (${PAD_FORMAS.join(', ')})`);
+  const w = v('w'), h = v('h');
+  if (!(w > 0) || !(h > 0)) return erro('w e h devem ser > 0');
+  const p = {};
+  if (typeof ch.name === 'string' || !base) p.name = typeof ch.name === 'string' ? ch.name : '';
+  if (tipo === 'smd') {
+    const L = ch.layer !== undefined && ch.layer !== '' ? ch.layer : (base ? base.layer : 'Top');
+    if (L !== 'Top' && L !== 'Bottom') return erro('pad SMD fica no Top ou no Bottom');
+    p.layer = L;
+  } else {
+    if (ch.layer !== undefined && ch.layer !== '' && ch.layer !== 'Multi') avisos.push(`pad passante fica na Multi-Layer — layer "${ch.layer}" ignorada`);
+    p.layer = 'Multi';
+  }
+  if (!base) p.type = tipo === 'smd' ? 'smd' : 'th';
+  for (const k of ['x', 'y', 'w', 'h']) if (isNum(ch[k])) p[k] = ch[k];
+  p.shape = shape;
+  if (isNum(ch.rot) || !base) p.rot = isNum(ch.rot) ? normAng(ch.rot) : 0;
+  if (shape === 'roundrect') {
+    const r = v('radius');
+    if (r !== undefined && !(r >= 0)) return erro('radius deve ser >= 0');
+    if (isNum(r)) p.radius = r;
+  }
+  if (tipo !== 'smd') {
+    const drill = v('drill');
+    if (!(drill > 0)) return erro('drill (diâmetro do furo) obrigatório e > 0');
+    const ds = v('drillshape') !== undefined ? v('drillshape') : 'circle';
+    if (!FURO_FORMAS.includes(ds)) return erro(`drillshape "${ds}" inválida (${FURO_FORMAS.join(', ')})`);
+    p.drillshape = ds; p.drill = drill;
+    if (ds !== 'circle') {
+      const dw = v('drillw');
+      if (!(dw > 0)) return erro('furo rect/oblong precisa de drillw > 0 (o comprimento, ao longo do X do pad)');
+      p.drillw = dw;
+    }
+    if (isNum(ch.holerot) || !base) p.holerot = isNum(ch.holerot) ? normAng(ch.holerot) : 0;
+    if (!base) p.plated = tipo === 'th';
+    if (tipo === 'th' && drill >= Math.min(w, h) - 1e-9) avisos.push('furo >= cobre do pad: anel nulo (o DRC do Altium acusa)');
+  }
+  if (typeof ch.net === 'string') {
+    if (tipo === 'npth') { if (ch.net) avisos.push(`furo NPTH não tem net — "${ch.net}" ignorada`); p.net = ''; }
+    else p.net = ch.net;
+  } else if (!base) p.net = '';
+  return { pad:p, avisos };
+}
+
+/* Polygon Pour: a DEFINICAO (o despejo e do hub-pcbpour / do Altium), no formato de
+   board.js » polygons:
+     {id:'pg…', nome, layer, net, pts:[[x,y]...], pour:'solid'|'hatch'|'none', removeDead, minArea,
+      ordem, conexao:{tipo:'relief'|'direct', condutores, largura, gap, angulo}, clearance,
+      hatch?:{grade, largura}}
+   O id comeca com 'pg' (e nao so 'p') porque 'p…' ja e o id dos pads soltos do board.js.
+   A op e plana (o parser do ApplyChanges le linha a linha): conexao e hatch viajam como
+   con_tipo, con_condutores, con_largura, con_gap, con_angulo, hatch_grade, hatch_largura.
+   Padroes = os do Altium para polygon novo: solido, Remove Dead Copper ligado, ilhas abaixo de
+   2500 mil² fora (1,6129 mm²), conexao de 4 condutores a 90 graus, 10 mil de condutor e 10 mil
+   de gap -- DIRECT, a regra Polygon Connect do template da casa (o de fabrica do Altium e
+   Relief; medido pelo hub-pcbregras); clearance = o da placa (rules.clearance) ou 10 mil.
+   Campos do motor de despejo (hub-pcbpour) que atravessam como vieram, se a op os trouxer:
+   pourOver ('all'|'polygons'|'none'), removeNecks (bool), neck, arco e clearanceBorda (mm). */
+const POUR = ['solid', 'hatch', 'none'];
+function montaPoly(ch, base, ctx){
+  const avisos = [], erro = m => ({ erro:m, avisos });
+  const numK = ['minArea', 'ordem', 'clearance', 'con_condutores', 'con_largura', 'con_gap', 'con_angulo', 'hatch_grade', 'hatch_largura', 'neck', 'arco', 'clearanceBorda'];
+  const ruim = numK.find(k => ch[k] !== undefined && !isNum(ch[k]));
+  if (ruim) return erro(`campo "${ruim}" inválido`);
+  const p = base ? dcopy(base) : { nome:'', layer:'', net:'', pts:[], pour:'solid', removeDead:true, minArea:1.6129,
+                                   ordem:ctx.ordem, conexao:{ tipo:'direct', condutores:4, largura:0.254, gap:0.254, angulo:90 },
+                                   clearance:ctx.clearance };
+  if (ch.layer !== undefined && ch.layer !== '' || !base) {
+    const L = pcbLayer(ch.layer);
+    if (!L) return erro(typeof ch.layer === 'string' && ch.layer ? `layer "${ch.layer}" não existe` : 'falta layer');
+    if (!isCopper(ch.layer)) return erro('polygon pour só em camada de cobre (Top, Bottom, Mid…, Plane…)');
+    p.layer = ch.layer;
+  }
+  if (ch.pts !== undefined || !base) {
+    if (!ptsValid(ch.pts, 3)) return erro('pts deve ser [[x,y],...] com >= 3 vértices');
+    const ge = regiaoErro(ch.pts); if (ge) return erro(ge.replace('região', 'polígono'));
+    p.pts = ch.pts.map(q => [q[0], q[1]]);
+  }
+  if (typeof ch.net === 'string') p.net = ch.net;
+  if (typeof ch.nome === 'string') p.nome = ch.nome;
+  if (ch.pour !== undefined) { if (!POUR.includes(ch.pour)) return erro(`pour deve ser ${POUR.join(', ')}`); p.pour = ch.pour; }
+  if (ch.removeDead !== undefined) { if (typeof ch.removeDead !== 'boolean') return erro('removeDead deve ser true/false'); p.removeDead = ch.removeDead; }
+  if (isNum(ch.minArea)) { if (ch.minArea < 0) return erro('minArea deve ser >= 0'); p.minArea = ch.minArea; }
+  if (isNum(ch.ordem)) { if (ch.ordem < 0 || ch.ordem !== Math.floor(ch.ordem)) return erro('ordem deve ser inteiro >= 0'); p.ordem = ch.ordem; }
+  if (isNum(ch.clearance)) { if (ch.clearance < 0) return erro('clearance deve ser >= 0'); p.clearance = ch.clearance; }
+  const c = p.conexao = Object.assign({ tipo:'direct', condutores:4, largura:0.254, gap:0.254, angulo:90 }, p.conexao || {});
+  if (ch.pourOver !== undefined) { if (!['all', 'polygons', 'none'].includes(ch.pourOver)) return erro('pourOver deve ser all, polygons ou none'); p.pourOver = ch.pourOver; }
+  if (ch.removeNecks !== undefined) { if (typeof ch.removeNecks !== 'boolean') return erro('removeNecks deve ser true/false'); p.removeNecks = ch.removeNecks; }
+  for (const k of ['neck', 'arco', 'clearanceBorda']) if (ch[k] !== undefined) {
+    if (!isNum(ch[k]) || ch[k] < 0) return erro(`${k} deve ser número >= 0`);
+    p[k] = ch[k];
+  }
+  if (ch.con_tipo !== undefined) { if (!['relief', 'direct', 'none'].includes(ch.con_tipo)) return erro('con_tipo deve ser relief, direct ou none'); c.tipo = ch.con_tipo; }
+  if (isNum(ch.con_condutores)) { if (ch.con_condutores !== 2 && ch.con_condutores !== 4) return erro('con_condutores deve ser 2 ou 4'); c.condutores = ch.con_condutores; }
+  if (isNum(ch.con_largura)) { if (!(ch.con_largura > 0)) return erro('con_largura deve ser > 0'); c.largura = ch.con_largura; }
+  if (isNum(ch.con_gap)) { if (!(ch.con_gap > 0)) return erro('con_gap deve ser > 0'); c.gap = ch.con_gap; }
+  if (isNum(ch.con_angulo)) { if (ch.con_angulo !== 45 && ch.con_angulo !== 90) return erro('con_angulo deve ser 45 ou 90'); c.angulo = ch.con_angulo; }
+  if (p.pour === 'hatch') {
+    const hb = Object.assign({ grade:0.508, largura:0.254 }, p.hatch || {});
+    if (isNum(ch.hatch_grade)) { if (!(ch.hatch_grade > 0)) return erro('hatch_grade deve ser > 0'); hb.grade = ch.hatch_grade; }
+    if (isNum(ch.hatch_largura)) { if (!(ch.hatch_largura > 0)) return erro('hatch_largura deve ser > 0'); hb.largura = ch.hatch_largura; }
+    if (hb.largura >= hb.grade) avisos.push('hatch: trilha >= grade — o despejo sai sólido');
+    p.hatch = hb;
+  } else delete p.hatch;
+  if (!p.net && p.pour !== 'none') avisos.push('polígono sem net: o cobre despejado fica solto (No Net)');
+  return { poly:p, avisos };
+}
+
 /* O modelo que a tela edita. Alem do que ja tinha (comps, tracks/arcs/vias de cobre, texts,
    added), agora tambem:
    - silk LIVRE (B.silk sem owner) e linhas LIVRES (B.lines sem owner) entram em model.tracks
@@ -318,23 +637,45 @@ function espelhoNovo(B){ return !!B && typeof B.exporter === 'string' && B.expor
    Regra do eff para objetos com owner (trilha de cobre do footprint, textos do componente):
    o eff fica no referencial do board.js, SEM o deslocamento do componente movido -- quem
    desenha aplica ownerDelta/xfObject, e o effectiveBoard() ja entrega aplicado.
-   O modelo guarda (nao enumeraveis) o `board` de onde saiu e os `pares` mecanicos da placa. */
-function applyPcbChanges(board, changes){
+   O modelo guarda (nao enumeraveis) o `board` de onde saiu e os `pares` mecanicos da placa.
+
+   Placa nova e ECO (2026-10-13):
+   - comp_add entra em model.comps (added:true) com um `src` SINTETIZADO do footprint, no formato
+     do board.js, ja no lugar pedido -- comp_move, designator_move e pad_net seguintes valem nele
+     como num componente que veio do Altium. A serigrafia e o designator dele moram em
+     model.extra (nao enumeravel) e o effectiveBoard os emite como objetos do componente;
+   - comp_del TIRA o componente de model.comps (model.comps[i] continua casando com
+     effectiveBoard().components[i], que a tela usa) e o guarda em model.compsRemovidos; os
+     objetos com owner dele somem da placa efetiva. compByRef continua apontando para ele, para
+     a op seguinte dizer "foi removido" em vez de "nao existe";
+   - pads soltos (freepads) em model.pads, polygon pours (a DEFINICAO, nao o cobre despejado) em
+     model.polygons, nets em model.nets (a lista efetiva) com model.netsRenomeadas/Removidas;
+   - `opts` (opcional): { pcblib } -- a biblioteca de onde o comp_add tira o footprint (sem ela
+     vale a registrada com setPcbLib, a embutida no board e a dos componentes ja colocados). */
+function applyPcbChanges(board, changes, opts){
   const B = board || {};
   const CH = Array.isArray(changes) ? changes : [];
   const novo = espelhoNovo(B), pares = mechPairs(B);
   const model = { comps:[], compByRef:{}, tracks:[], arcs:[], vias:[], texts:[], fills:[], regions:[], added:[],
+                  pads:[], polygons:[], compsRemovidos:[],
+                  nets:(Array.isArray(B.nets) ? B.nets.filter(n => typeof n === 'string') : []), netsChanged:false,
+                  netsRenomeadas:{}, netsRemovidas:[],
                   validation:[], changeItems:[],
                   outline:((B.board && B.board.outline) || []).slice(), outlineChanged:false };
   const oculto = (o, k, v) => Object.defineProperty(o, k, { value:v, writable:true, configurable:true, enumerable:false });
   oculto(model, 'board', board);
   oculto(model, 'pares', pares);
+  /* o que o comp_add sintetizou: {silk:[], texts:[]} e, por objeto, o componente dono */
+  oculto(model, 'extra', { silk:[], texts:[], dono:new Map() });
   for (const c of (B.components || [])) {
     const m = { kind:'comp', src:c, eff:{ x:c.x, y:c.y, rot:c.rot, layer:c.layer }, changed:false, attrChanged:false };
     oculto(m, 'pares', pares);
     model.comps.push(m); model.compByRef[c.ref] = m;
   }
   const compDe = ref => (ref != null && temProp(model.compByRef, String(ref))) ? model.compByRef[String(ref)] : null;
+  /* nets: o conjunto efetivo enquanto as ops andam (net_add/net_del/net_rename) */
+  const netSet = new Set(model.nets);
+  const netConhecida = n => typeof n !== 'string' || n === '' || netSet.has(n);
 
   /* Indice por id de TODOS os objetos com id -- inclusive os que ficam fora do modelo (de
      componente, de poligono, keepout, region de espelho antigo), que entram so como `fora`
@@ -364,6 +705,9 @@ function applyPcbChanges(board, changes){
     if (fora) { indexa({ kind:'region', src:g, fora }); continue; }
     entra('region', g, model.regions);
   }
+  for (const p of (B.freepads || [])) if (p) entra('pad', p, model.pads);
+  for (const g of (Array.isArray(B.polygons) ? B.polygons : [])) if (g) entra('poly', g, model.polygons);
+  const temNets = Array.isArray(B.nets);
   /* o objeto do id para a op: so os do tipo `kind`; com id repetido, decide quem casa com o
      orig_* da op (`casa`, comparado com o board.js); nem ele decidindo -> {ambiguo:n} */
   const achar = (id, kind, casa) => {
@@ -449,6 +793,27 @@ function applyPcbChanges(board, changes){
     return [nr, nk];
   };
 
+  /* comp_del: refs dos componentes DO BOARD removidos (os objetos com owner deles saem da placa
+     efetiva) e quem mexeu por ultimo em cada pad (pad_net), por componente */
+  const refsBoardRemovidos = new Set();
+  const textoMorto = t => {
+    const d = model.extra.dono.get(t.src);
+    if (d) return !!d.deleted;
+    return !!(t.src.owner && refsBoardRemovidos.has(t.src.owner));
+  };
+  const quemPad = new Map();
+  const netsRemovidas = new Set();
+  /* a net de um objeto do board AGORA (depois dos net_rename/net_del ja aplicados) */
+  const netAgora = n => {
+    let x = n;
+    for (let i = 0; i < 64 && typeof x === 'string' && temProp(model.netsRenomeadas, x) && !netSet.has(x); i++) x = model.netsRenomeadas[x];
+    return (typeof x === 'string' && netsRemovidas.has(x) && !netSet.has(x)) ? '' : x;
+  };
+  oculto(model, 'netAgora', netAgora);
+  const polyDaOp = (ch, base) => montaPoly(ch, base, {
+    clearance: (B.rules && isNum(B.rules.clearance)) ? B.rules.clearance : 0.254,
+    ordem: model.polygons.reduce((mx, p) => Math.max(mx, isNum(p.eff.ordem) ? p.eff.ordem + 1 : 0), 0) });
+
   let addSeq = 0;
   CH.forEach((chIn, idx) => {
     const ch = (chIn && typeof chIn === 'object') ? chIn : {};
@@ -486,6 +851,7 @@ function applyPcbChanges(board, changes){
       case 'comp_move': {
         const m = compDe(ch.ref);
         if (!m) return bad(`componente "${ch.ref}" não existe no board.js`);
+        if (m.deleted) return bad(`componente "${ch.ref}" foi removido pela mudança #${m.removidoEm + 1}`);
         item.target = m;
         if (!isNum(ch.orig_x)||!isNum(ch.orig_y)||!isNum(ch.orig_rot)||!ch.orig_layer)
           return bad('faltam orig_x/orig_y/orig_rot/orig_layer (copie do board.js)');
@@ -524,6 +890,7 @@ function applyPcbChanges(board, changes){
            designator/comment -- compByRef e chaveado pelo ref do board.js. */
         const m = compDe(ch.ref);
         if (!m) return bad(`componente "${ch.ref}" não existe no board.js`);
+        if (m.deleted) return bad(`componente "${ch.ref}" foi removido pela mudança #${m.removidoEm + 1}`);
         item.target = m;
         if (typeof ch.orig_designator !== 'string' || typeof ch.orig_comment !== 'string')
           return bad('faltam orig_designator/orig_comment (copie do board.js)');
@@ -775,12 +1142,19 @@ function applyPcbChanges(board, changes){
         m.deleted = true; quem.set(m, idx);
         break;
       }
-      case 'designator_move': {
-        const m = model.texts.find(t => t.src.designator && t.src.owner === ch.ref);
-        if (!m) return bad(`designator do componente "${ch.ref}" não existe no board.js`);
+      case 'designator_move': case 'comment_move': {
+        /* o designator (ou o comment) do componente VIVO: o texto de um componente removido nao
+           conta -- e o que o ApplyChanges acha na placa pelo FindComponent */
+        const qual = ch.op === 'designator_move' ? 'designator' : 'comment';
+        const dono = compDe(ch.ref);
+        if (dono && dono.deleted) return bad(`componente "${ch.ref}" foi removido pela mudança #${dono.removidoEm + 1}`);
+        const m = model.texts.find(t => t.src[qual] && t.src.owner === ch.ref && !textoMorto(t));
+        if (!m) return bad(qual === 'designator' ? `designator do componente "${ch.ref}" não existe no board.js`
+          : (dono ? `o comment de ${ch.ref} não está visível no board.js (Comment desligado no Altium: ligue-o lá e reexporte)`
+                  : `componente "${ch.ref}" não existe no board.js`));
         item.target = m;
         if (!isNum(ch.orig_x)||!isNum(ch.orig_y))
-          return bad('faltam orig_x/orig_y (copie do item do designator em board.js » texts)');
+          return bad(`faltam orig_x/orig_y (copie do item do ${qual} em board.js » texts)`);
         /* o designator anda com o componente: depois de um comp_move dele, o ApplyChanges (que
            aplica em ordem) ja nao acha o designator no orig_* e recusa -- o designator_move tem
            de vir ANTES do comp_move, com x/y no lugar de antes do componente andar */
@@ -798,15 +1172,176 @@ function applyPcbChanges(board, changes){
         break;
       }
       case 'outline_set': {
-        if (!Array.isArray(ch.pts) || ch.pts.length < 3 ||
-            ch.pts.some(p => !Array.isArray(p) || !isNum(p[0]) || !isNum(p[1])))
-          return bad('pts deve ser [[x,y],...] com >= 3 vértices');
-        const segs = [];
-        for (let i = 0; i < ch.pts.length; i++) {
-          const a = ch.pts[i], b = ch.pts[(i+1) % ch.pts.length];
-          segs.push({ kind:'line', x1:a[0], y1:a[1], x2:b[0], y2:b[1] });
-        }
+        /* vertice [x,y] = reta ate o proximo; [x,y,b] = arco de bulge b (ver ptsToOutline) */
+        const segs = ptsToOutline(ch.pts);
+        const temArco = !!segs && segs.some(s => s.kind === 'arc');
+        if (!segs || ch.pts.length < (temArco ? 2 : 3))
+          return bad('pts deve ser [[x,y],...] com >= 3 vértices (ou [x,y,bulge] no vértice que começa um arco; 2 vértices bastam com arco)');
+        if (ch.pts.some(p => isNum(p[2]) && Math.abs(p[2]) > BULGE_MAX)) return bad(`bulge fora de faixa (|b| <= ${BULGE_MAX})`);
         model.outline = segs; model.outlineChanged = true;
+        break;
+      }
+      case 'comp_add': {
+        if (typeof ch.ref !== 'string' || !ch.ref) return bad('campo "ref" ausente');
+        if (typeof ch.footprint !== 'string' || !ch.footprint) return bad('campo "footprint" ausente');
+        for (const k of ['x','y']) if (!isNum(ch[k])) return bad(`campo "${k}" ausente/inválido`);
+        const inv = invalido(ch, ['rot']); if (inv) return bad(`campo "${inv}" inválido`);
+        if (ch.layer != null && ch.layer !== '' && ch.layer !== 'Top' && ch.layer !== 'Bottom')
+          return bad(`layer "${ch.layer}" inválida para componente — use Top ou Bottom`);
+        const ja = compDe(ch.ref);
+        if (ja && !ja.deleted) return bad(`componente "${ch.ref}" já existe na placa — para trocar o footprint, comp_del antes`);
+        if (model.comps.some(o => o.eff.designator === ch.ref)) return bad(`designator "${ch.ref}" já é o nome novo de outro componente`);
+        const nets = parseNetsCampo(ch.nets);
+        if (nets === null) return bad('campo "nets" mal formado — use "pad=net;pad=net" (texto plano)');
+        const g = footprintGeom(ch.footprint, B, opts);
+        if (!g) return bad(`footprint "${ch.footprint}" não encontrado — nem na pcblib (${((opts && opts.pcblib) || PCBLIB) ? 'carregada' : 'não carregada: HubCore.setPcbLib'}), nem embutido no board.js (footprints), nem em componente da placa`);
+        const lado = ch.layer === 'Bottom' ? 'Bottom' : 'Top', rot = isNum(ch.rot) ? normAng(ch.rot) : 0;
+        const cid = 'new-c' + (++addSeq);
+        const sc = sintetizaComp(g.fp, { ref:ch.ref, footprint:ch.footprint, comment:typeof ch.comment === 'string' ? ch.comment : '',
+                                         x:ch.x, y:ch.y, rot, layer:lado, nets }, cid);
+        const m = { kind:'comp', src:sc.comp, eff:{ x:ch.x, y:ch.y, rot, layer:lado }, changed:false, attrChanged:false, added:true };
+        oculto(m, 'pares', pares);
+        oculto(m, 'fonte', g.fonte);
+        model.comps.push(m); model.compByRef[ch.ref] = m; item.target = m;
+        quemPos.set(m, idx);
+        for (const s of sc.silk) { model.extra.silk.push(s); model.extra.dono.set(s, m); indexa({ kind:s.kind === 'arc' ? 'arc' : 'track', src:s, fora:'owner' }); }
+        for (const t of sc.texts) {
+          model.extra.texts.push(t); model.extra.dono.set(t, m);
+          const mt = { kind:'text', src:t, eff:copiaEff(t), changed:false, deleted:false };
+          model.texts.push(mt); indexa(mt);
+        }
+        if (!sc.comp.pads.length) warn(`footprint "${ch.footprint}" sem pad nenhum`);
+        const nomes = new Set(sc.comp.pads.map(p => String(p.name)));
+        const sobra = Object.keys(nets).filter(k => !nomes.has(k));
+        if (sobra.length) warn(`nets: pad(s) ${sobra.join(', ')} não existe(m) no footprint ${ch.footprint}`);
+        const semNet = temNets ? [...new Set(Object.values(nets).filter(n => n && !netSet.has(n)))] : [];
+        if (semNet.length) warn(`net(s) ${semNet.join(', ')} não existe(m) na placa — crie com net_add antes (o ApplyChanges deixa o pad sem net)`);
+        break;
+      }
+      case 'comp_del': {
+        const m = compDe(ch.ref);
+        if (!m) return bad(`componente "${ch.ref}" não existe no board.js`);
+        if (m.deleted) return bad(`componente "${ch.ref}" já foi removido pela mudança #${m.removidoEm + 1}`);
+        item.target = m;
+        if (!isNum(ch.orig_x)||!isNum(ch.orig_y)||!isNum(ch.orig_rot)||!ch.orig_layer)
+          return bad('faltam orig_x/orig_y/orig_rot/orig_layer (copie do board.js)');
+        const e = m.eff;
+        const fpOk = ch.orig_footprint === undefined || ch.orig_footprint === (m.src.footprint || '');
+        if (!conferir(near(ch.orig_x,e.x)&&near(ch.orig_y,e.y)&&nearAng(ch.orig_rot,e.rot)&&ch.orig_layer===e.layer&&fpOk,
+                      quemPos.get(m), 'orig_* não confere com o board.js — espelho pode estar desatualizado')) return;
+        m.deleted = true; m.removidoEm = idx;
+        const i = model.comps.indexOf(m);
+        if (i >= 0) model.comps.splice(i, 1);
+        model.compsRemovidos.push(m);
+        if (!m.added) refsBoardRemovidos.add(m.src.ref);
+        break;
+      }
+      case 'pad_net': {
+        const m = compDe(ch.ref);
+        if (!m) return bad(`componente "${ch.ref}" não existe no board.js`);
+        if (m.deleted) return bad(`componente "${ch.ref}" foi removido pela mudança #${m.removidoEm + 1}`);
+        item.target = m;
+        if (typeof ch.pad !== 'string' || !ch.pad) return bad('campo "pad" ausente (o nome do pad = o número do pino)');
+        if (typeof ch.net !== 'string') return bad('campo "net" ausente ("" tira o pad da net)');
+        if (typeof ch.orig_net !== 'string') return bad('falta orig_net (a net atual do pad, copie do board.js; "" = sem net)');
+        const pads = (m.src.pads || []).filter(p => p && String(p.name) === ch.pad);
+        if (!pads.length) return bad(`pad "${ch.pad}" não existe em ${ch.ref}`);
+        const pn = m.padNets || (m.padNets = {});
+        const atual = temProp(pn, ch.pad) ? pn[ch.pad] : (pads[0].net || '');
+        const qp = quemPad.get(m) || {};
+        const mexeu = temProp(qp, ch.pad) ? qp[ch.pad] : (m.added ? quemPos.get(m) : undefined);
+        if (!conferir(ch.orig_net === atual || ch.orig_net === netAgora(atual), mexeu, 'orig_net não confere com o board.js — espelho pode estar desatualizado')) return;
+        if (temNets && ch.net && !netSet.has(ch.net)) warn(`net "${ch.net}" não existe na placa — crie com net_add antes (o ApplyChanges deixa o pad sem net)`);
+        pn[ch.pad] = ch.net;
+        qp[ch.pad] = idx; quemPad.set(m, qp);
+        m.padChanged = true;
+        break;
+      }
+      case 'net_add': {
+        if (typeof ch.net !== 'string' || !ch.net) return bad('campo "net" ausente');
+        if (netSet.has(ch.net)) return bad(`net "${ch.net}" já existe na placa`);
+        netSet.add(ch.net); model.nets.push(ch.net); netsRemovidas.delete(ch.net); model.netsChanged = true;
+        break;
+      }
+      case 'net_del': {
+        if (typeof ch.net !== 'string' || !ch.net) return bad('campo "net" ausente');
+        if (!netSet.has(ch.net)) return bad(`net "${ch.net}" não existe na placa`);
+        netSet.delete(ch.net); model.nets = model.nets.filter(n => n !== ch.net); netsRemovidas.add(ch.net); model.netsChanged = true;
+        break;
+      }
+      case 'net_rename': {
+        if (typeof ch.net !== 'string' || !ch.net) return bad('campo "net" (o nome novo) ausente');
+        if (typeof ch.orig_net !== 'string' || !ch.orig_net) return bad('campo "orig_net" (o nome atual) ausente');
+        if (!netSet.has(ch.orig_net)) return bad(`net "${ch.orig_net}" não existe na placa`);
+        if (ch.net === ch.orig_net) return bad('nome novo igual ao atual');
+        if (netSet.has(ch.net)) return bad(`net "${ch.net}" já existe — duas nets com o mesmo nome (para juntar, mova os pads com pad_net)`);
+        netSet.delete(ch.orig_net); netSet.add(ch.net);
+        model.nets = model.nets.map(n => n === ch.orig_net ? ch.net : n);
+        for (const k of Object.keys(model.netsRenomeadas)) if (model.netsRenomeadas[k] === ch.orig_net) model.netsRenomeadas[k] = ch.net;
+        model.netsRenomeadas[ch.orig_net] = ch.net; model.netsChanged = true;
+        break;
+      }
+      case 'pad_add': {
+        const r = padDaOp(ch, null);
+        if (r.erro) return bad(r.erro);
+        const m = { kind:'pad', src:null, eff:{ id:'new-p'+(++addSeq), ...r.pad }, changed:false, added:true };
+        model.added.push(m); item.target = m;
+        r.avisos.forEach(warn);
+        if (temNets && m.eff.net && !netSet.has(m.eff.net)) warn(`net "${m.eff.net}" não existe na placa — crie com net_add antes`);
+        break;
+      }
+      case 'pad_edit': case 'pad_del': {
+        const casa = s => !!s && near(ch.orig_x,s.x) && near(ch.orig_y,s.y);
+        const m = achar(ch.id, 'pad', casa);
+        if (m && m.ambiguo) return bad(`pad id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual — reexporte o espelho`);
+        if (!m) {
+          const dono = (B.components || []).find(c => c && (c.pads || []).some(p => p && String(p.id) === String(ch.id)));
+          return bad(dono ? `pad id "${ch.id}" é do componente ${dono.ref}: a forma vem do footprint; para a net use pad_net`
+                          : `pad id "${ch.id}" não existe no board.js (freepads)`);
+        }
+        item.target = m;
+        if (m.deleted) return removido(m, 'pad');
+        if (!isNum(ch.orig_x)||!isNum(ch.orig_y)) return bad('faltam orig_x/orig_y');
+        if (!conferir(casa(m.eff), quem.get(m), 'orig_* não confere com o board.js')) return;
+        if (ch.op === 'pad_del') { m.deleted = true; quem.set(m, idx); break; }
+        const r = padDaOp(ch, m.eff);
+        if (r.erro) return bad(r.erro);
+        m.eff = { ...m.eff, ...r.pad };
+        if (m.eff.shape !== 'roundrect') delete m.eff.radius;
+        if (m.eff.drillshape === 'circle') delete m.eff.drillw;
+        r.avisos.forEach(warn);
+        if (temNets && typeof ch.net === 'string' && ch.net && !netSet.has(ch.net)) warn(`net "${ch.net}" não existe na placa — crie com net_add antes`);
+        m.changed = true; quem.set(m, idx);
+        break;
+      }
+      case 'poly_add': {
+        const r = polyDaOp(ch, null);
+        if (r.erro) return bad(r.erro);
+        const m = { kind:'poly', src:null, eff:{ id:'new-pg'+(++addSeq), ...r.poly }, changed:false, deleted:false, added:true };
+        if (!m.eff.nome) m.eff.nome = ((pcbLayer(m.eff.layer) || {}).name || m.eff.layer) + '-' + (m.eff.net || 'No Net');
+        model.polygons.push(m); item.target = m;
+        r.avisos.forEach(warn);
+        if (temNets && m.eff.net && !netSet.has(m.eff.net)) warn(`net "${m.eff.net}" não existe na placa — crie com net_add antes`);
+        break;
+      }
+      case 'poly_edit': case 'poly_del': {
+        const casa = s => { const p = (s && Array.isArray(s.pts)) ? s.pts : [], p0 = p[0] || [];
+                            return !!s && ch.orig_layer===s.layer && ch.orig_n===p.length && near(ch.orig_x0,p0[0]) && near(ch.orig_y0,p0[1]); };
+        const m = achar(ch.id, 'poly', casa) || model.polygons.find(p => p.added && p.eff.id === ch.id) || null;
+        if (m && m.ambiguo) return bad(`polígono id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual`);
+        if (!m) return bad(`polígono id "${ch.id}" não existe (board.js » polygons)`);
+        item.target = m;
+        if (m.deleted) return removido(m, 'polígono');
+        if (!ch.orig_layer||!isNum(ch.orig_n)||!isNum(ch.orig_x0)||!isNum(ch.orig_y0))
+          return bad('faltam orig_layer/orig_n/orig_x0/orig_y0 (copie do board.js » polygons)');
+        if (!conferir(casa(m.eff), quem.get(m), 'orig_* não confere com o board.js')) return;
+        if (ch.op === 'poly_del') { m.deleted = true; quem.set(m, idx); break; }
+        const r = polyDaOp(ch, m.eff);
+        if (r.erro) return bad(r.erro);
+        m.eff = r.poly;
+        r.avisos.forEach(warn);
+        if (temNets && typeof ch.net === 'string' && ch.net && !netSet.has(ch.net)) warn(`net "${ch.net}" não existe na placa — crie com net_add antes`);
+        m.changed = true; quem.set(m, idx);
         break;
       }
       default:
@@ -818,6 +1353,8 @@ function applyPcbChanges(board, changes){
      depois Overlay -> Top -- devolvam a net original em vez de perde-la no meio do caminho. */
   for (const list of [model.tracks, model.arcs, model.fills])
     for (const m of list) if (m.changed && !isCopper(m.eff.layer) && m.eff.net) delete m.eff.net;
+  model.netsRemovidas = [...netsRemovidas].filter(n => !netSet.has(n));
+  oculto(model, 'netSet', netSet);
   /* rede de seguranca do comp_attr: nome repetido que a simulacao nao previu (cadeia torta de
      renames recusados) vira erro na ultima op que renomeou para ele */
   const porNome = new Map();
@@ -1089,6 +1626,13 @@ function effectiveBoard(board, model){
     if (typeof nd === 'string' && nd && nd !== m.src.ref) ren[m.src.ref] = nd;
   }
   const dono = o => { if (o && typeof o.owner === 'string' && o.owner in ren) o.owner = ren[o.owner]; return o; };
+  /* comp_del: o que tinha owner num componente DO BOARD removido sai da placa efetiva; o que o
+     comp_add sintetizou (M.extra) sai com o componente dele */
+  const removidos = new Set();
+  for (const m of (M.compsRemovidos || [])) if (!m.added && m.src) removidos.add(m.src.ref);
+  const morto = o => !!(o && typeof o.owner === 'string' && removidos.has(o.owner));
+  const EX = M.extra || { silk:[], texts:[], dono:new Map() };
+  const extraVivo = list => (list || []).filter(o => { const d = EX.dono.get(o); return !(d && d.deleted); });
 
   /* componentes */
   const components = [];
@@ -1102,6 +1646,9 @@ function effectiveBoard(board, model){
     }
     if (typeof e.designator === 'string' && e.designator) c.ref = e.designator;
     if (e.comment !== undefined) c.comment = e.comment;
+    /* pad_net: a net nova vale em todo pad com aquele nome */
+    if (m.padNets && Array.isArray(c.pads))
+      for (const p of c.pads) if (p && temProp(m.padNets, String(p.name))) p.net = m.padNets[String(p.name)];
     components.push(c);
   }
 
@@ -1117,11 +1664,14 @@ function effectiveBoard(board, model){
     else { o.kind = isArc ? 'arc' : 'line'; if (!isCopper(o.layer)) delete o.net; }
     dest[k].push(dono(o));
   };
-  const linhaDe = (src, isArc, origem) => {
+  const linhaDe = (src, isArc, origem0) => {
+    /* 'extra' = serigrafia sintetizada pelo comp_add: vai para o silk, e nao e do board */
+    const origem = origem0 === 'extra' ? 'silk' : origem0;
     /* kind que o motor nao conhece (nem line nem arc) atravessa intacto, no array de onde veio */
     if (origem && src.kind && src.kind !== 'line' && src.kind !== 'arc') { dest[origem].push(dono(dcopy(src))); return; }
     const m = mOf.get(src);
     if (m && m.deleted) return;
+    if (origem0 !== 'extra' && morto(src)) return;
     const d = src.owner ? deltaOf(src.owner) : null;
     /* intocado: identico, no array de onde veio (o board.js e a verdade) */
     if (!d && !(m && m.changed)) { dest[origem || (isArc ? 'arcs' : 'tracks')].push(dono(dcopy(src))); return; }
@@ -1133,6 +1683,7 @@ function effectiveBoard(board, model){
   for (const a of (B.arcs || [])) if (a) linhaDe(a, true);
   for (const s of (B.silk || [])) if (s) linhaDe(s, s.kind === 'arc', 'silk');
   for (const s of (B.lines || [])) if (s) linhaDe(s, s.kind === 'arc', 'lines');
+  for (const s of extraVivo(EX.silk)) linhaDe(s, s.kind === 'arc', 'extra');
   for (const m of M.added) {
     const e = m.eff;
     if (m.kind === 'track') {
@@ -1173,10 +1724,11 @@ function effectiveBoard(board, model){
     if (Array.isArray(o.polys)) o.polys = o.polys.map(pl => (pl && Array.isArray(pl.pts)) ? { ...pl, pts: pl.pts.map(anda) } : pl);
   };
   const texts = [];
-  for (const x of (B.texts || [])) {
+  for (const x of (B.texts || []).concat(extraVivo(EX.texts))) {
     if (!x) continue;
     const m = mOf.get(x);
     if (m && m.deleted) continue;
+    if (!EX.dono.has(x) && morto(x)) continue;
     const o = dcopy(m ? m.eff : x);
     const oc = compOfRef(x.owner);
     /* o texto do designator/comment e o do componente; o contorno so cai se o comp_attr o mudou
@@ -1199,7 +1751,7 @@ function effectiveBoard(board, model){
   /* fills, regions e recortes */
   const fills = [];
   for (const f of (B.fills || [])) {
-    if (!f) continue;
+    if (!f || morto(f)) continue;
     const m = mOf.get(f);
     if (m && m.deleted) continue;
     const o = dcopy(m ? m.eff : f);
@@ -1215,7 +1767,7 @@ function effectiveBoard(board, model){
   }
   const regions = [];
   for (const g of (B.regions || [])) {
-    if (!g) continue;
+    if (!g || morto(g)) continue;
     const m = mOf.get(g);
     if (m && m.deleted) continue;
     const o = dcopy(m ? m.eff : g);
@@ -1225,6 +1777,7 @@ function effectiveBoard(board, model){
   }
   const cutouts = [];
   for (const k of (Array.isArray(B.cutouts) ? B.cutouts : [])) {
+    if (morto(k)) continue;
     const o = dcopy(k);
     const d = (k && k.owner) ? deltaOf(k.owner) : null;
     if (d) xfRegionObj(d, o);
@@ -1247,12 +1800,38 @@ function effectiveBoard(board, model){
 
   out.board = bd;
   out.components = components;
-  out.freepads = dcopy(Array.isArray(B.freepads) ? B.freepads : []);
+  /* pads soltos: o do board (editado ou nao, sem o removido) e os do pad_add */
+  const padM = new Map();
+  for (const m of (M.pads || [])) if (m.src) padM.set(m.src, m);
+  out.freepads = [];
+  for (const p of (Array.isArray(B.freepads) ? B.freepads : [])) {
+    const m = p ? padM.get(p) : null;
+    if (m && m.deleted) continue;
+    out.freepads.push(dcopy(m && m.changed ? m.eff : p));
+  }
+  for (const m of M.added) if (m.kind === 'pad') out.freepads.push(dcopy(m.eff));
   out.tracks = dest.tracks; out.arcs = dest.arcs; out.vias = vias; out.texts = texts;
   out.silk = dest.silk; out.lines = dest.lines; out.fills = fills; out.regions = regions; out.cutouts = cutouts;
   const st = dcopy((B.stats && typeof B.stats === 'object') ? B.stats : {});
   for (const k of EB_ARRAYS) st[k] = out[k].length;
   out.stats = st;
+  /* polygon pour: a DEFINICAO (board.js » polygons, poly_add/poly_edit/poly_del). Sai sempre,
+     vazio quando a placa nao tem -- o despejo (hub-pcbpour) le daqui */
+  out.polygons = [];
+  if (Array.isArray(M.polygons) && M.polygons.length) {
+    for (const m of M.polygons) if (!m.deleted) out.polygons.push(dcopy(m.changed || m.added ? m.eff : m.src));
+  } else if (Array.isArray(B.polygons)) out.polygons = dcopy(B.polygons);
+  /* nets: a lista efetiva e, com net_rename/net_del, a net de cada objeto acompanha (renomeada
+     segue o nome novo; removida fica sem net) -- so quando houve op de net, para o resto sair
+     identico ao board.js */
+  if (M.netsChanged) {
+    out.nets = (M.nets || []).slice();
+    const ok = new Set(out.nets);
+    const ag = typeof M.netAgora === 'function' ? M.netAgora : (n => n);
+    const mapa = o => { if (o && typeof o.net === 'string' && o.net && !ok.has(o.net)) { const n = ag(o.net); if (n !== o.net) o.net = n; } };
+    for (const k of ['tracks', 'arcs', 'vias', 'fills', 'regions', 'freepads', 'polygons']) for (const o of out[k]) mapa(o);
+    for (const c of out.components) for (const p of (c.pads || [])) mapa(p);
+  }
   return out;
 }
 
@@ -1867,6 +2446,20 @@ const CH_REQUIRED = {
   region_del:      { num:['orig_n','orig_x0','orig_y0'], str:['id','orig_layer'] },
   text_add:        { num:['x','y','h'], str:['layer','text'] },
   text_del:        { num:['orig_x','orig_y'], str:['id','orig_text','orig_layer'] },
+  /* placa nova e ECO (2026-10-13). net/orig_net do pad_net podem ser "" (sem net): conferidos a parte */
+  comp_add:        { num:['x','y'], str:['ref','footprint'] },
+  comp_del:        { num:['orig_x','orig_y','orig_rot'], str:['ref','orig_layer'] },
+  pad_net:         { num:[], str:['ref','pad'] },
+  net_add:         { num:[], str:['net'] },
+  net_del:         { num:[], str:['net'] },
+  net_rename:      { num:[], str:['net','orig_net'] },
+  pad_add:         { num:['x','y','w','h'], str:['type'] },
+  pad_edit:        { num:['orig_x','orig_y'], str:['id'] },
+  pad_del:         { num:['orig_x','orig_y'], str:['id'] },
+  comment_move:    { num:['orig_x','orig_y'], str:['ref'] },
+  poly_add:        { num:[], str:['layer'] },
+  poly_edit:       { num:['orig_n','orig_x0','orig_y0'], str:['id','orig_layer'] },
+  poly_del:        { num:['orig_n','orig_x0','orig_y0'], str:['id','orig_layer'] },
 };
 
 function checkFields(objs, reqOf, kindOf, errors){
@@ -1884,9 +2477,21 @@ function serializeChanges(changes){
   const errors = [];
   checkFields(list, ch => CH_REQUIRED[ch.op], ch => ch.op || '?', errors);
   list.forEach((ch, i) => {
-    if (ch.op === 'outline_set' && (!Array.isArray(ch.pts) || ch.pts.length < 3 ||
-        ch.pts.some(p => !Array.isArray(p) || !isNum(p[0]) || !isNum(p[1]))))
-      errors.push({ idx:i, msg:'outline_set: pts deve ser [[x,y],...] com >= 3 vertices' });
+    if (ch.op === 'outline_set') {
+      const sg = ptsToOutline(ch.pts);
+      if (!sg || ch.pts.length < (sg.some(x => x.kind === 'arc') ? 2 : 3))
+        errors.push({ idx:i, msg:'outline_set: pts deve ser [[x,y],...] com >= 3 vertices (ou [x,y,bulge])' });
+    }
+    if (ch.op === 'pad_net') {
+      if (typeof ch.net !== 'string') errors.push({ idx:i, msg:'pad_net: campo "net" ausente ("" = sem net)' });
+      if (typeof ch.orig_net !== 'string') errors.push({ idx:i, msg:'pad_net: campo "orig_net" ausente ("" = sem net)' });
+    }
+    if (ch.op === 'comp_add' && parseNetsCampo(ch.nets) === null)
+      errors.push({ idx:i, msg:'comp_add: "nets" deve ser texto "pad=net;pad=net"' });
+    if (ch.op === 'poly_add' && !ptsValid(ch.pts, 3))
+      errors.push({ idx:i, msg:'poly_add: pts deve ser [[x,y],...] com >= 3 vertices' });
+    if ((ch.op === 'pad_add' || ch.op === 'pad_edit') && ch.type !== undefined && !['smd', 'th', 'npth'].includes(ch.type))
+      errors.push({ idx:i, msg:ch.op + ': type deve ser smd, th ou npth' });
     if (ch.op === 'track_add' && ch.w <= 0) errors.push({ idx:i, msg:'track_add: w deve ser > 0' });
     if (ch.op === 'via_add' && ch.drill >= ch.size) errors.push({ idx:i, msg:'via_add: drill deve ser < size' });
     if (ch.op === 'region_add'){
@@ -2183,5 +2788,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          PCB_LAYERS, pcbLayer, isCopper, flipLayer, boardLayers,
          serializeChanges, serializeSchematic, serializeAnnotations, serializeLibSubs,
          compDelta, xfPoint, xfPointInv, xfAngle, xfArc, xfObject, ownerDelta, effLayerForOwner,
-         neodenTransform, neodenCsv, neodenKind };
+         neodenTransform, neodenCsv, neodenKind,
+         setPcbLib, pcbLibAtual, footprintGeom, parseNetsCampo, netsCampo, ptsToOutline, outlineToPts, bulgeArco,
+         outlineBBox, normAng, PAD_FORMAS, FURO_FORMAS, POUR };
 });

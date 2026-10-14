@@ -149,6 +149,9 @@ function nomeDoModo(est){
   return '90° · ' + (est.primeiro === 'h' ? 'sai na horizontal' : 'sai na vertical');
 }
 
-return { MODOS, canto, pernas, novo, fixa, completa, desfaz, trocaCanto, trocaModo, limpa, nomeDoModo, inverte };
+/* o depoisDe sai também: a vista PCB fixa de uma vez os trechos que o roteador achou em volta de
+   um obstáculo (pcbframe.js » fixaRota e estDepois) e precisa da MESMA regra para a perna seguinte
+   sair perpendicular ao último trecho fixado */
+return { MODOS, canto, pernas, novo, fixa, completa, desfaz, trocaCanto, trocaModo, limpa, nomeDoModo, inverte, depoisDe };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubFio;

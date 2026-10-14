@@ -61,7 +61,25 @@ const ATALHOS_SCH = [
   { id:'desfazer',  tecla:'Ctrl+Z', rotulo:'Desfazer' },
   { id:'refazer',   tecla:'Ctrl+Y', rotulo:'Refazer' },
   { id:'tudo',      tecla:'Ctrl+A', rotulo:'Selecionar tudo da folha' },
+  /* 2026-10-13, o DNA do Altium (hub-altiumdna.js): acréscimos, sem mexer nas de cima. As duas
+     moram no menu Options do Altium, que o O abre (o O estava livre aqui): O,D = Document
+     Options, O,S = Sheet (formato e template da folha). No Altium o template também é o D,T
+     (Design » Sheet Templates), mas o D já é o rotear e uma tecla não pode ser ação e começo de
+     sequência: o D,T fica para a predefinição "Padrão Altium" (PADRAO_ALTIUM_SCH). */
+  { id:'template',  tecla:'O,S',    rotulo:'Template da folha (Design » Sheet Templates)', altium:'PLSch:SetTemplateFromLocal' },
+  { id:'folha',     tecla:'O,D',    rotulo:'Propriedades da folha (Document Options)',     altium:'PLSch:DocumentPreferencesSchDocumentOptions' },
 ];
+/* A predefinição "Padrão Altium" do Esquema: as teclas do Altium 21 de fábrica (os aceleradores
+   de menu, P,W = Place » Wire, e as teclas diretas), tiradas do advsch.rcs pelo hub-altiumdna.js e
+   conferidas contra ele no tests/test-altiumdna.js. A tabela da casa continua sendo o padrão; esta
+   só entra quando a pessoa escolhe "Padrão Altium" no editor. O Ctrl+W (Interactive Routing) e o
+   Ctrl+PgDn (Fit All) o navegador leva: ficam os aceleradores P,W e V,F. O rotear não existe no
+   Altium e vai para o R, livre ali. */
+const PADRAO_ALTIUM_SCH = {
+  add:'P,P', fio:'P,W', terra:'P,O', rotulo:'P,N', noerc:'P,V,N', girar:'Espaço', espelhoX:'X', espelhoY:'Y',
+  rotear:'R', apagar:'Delete', enquadrar:'V,F', grade:'Ctrl+Shift+G', desfazer:'Ctrl+Z', refazer:'Ctrl+Y',
+  tudo:'Ctrl+A', template:'D,T', folha:'O,D',
+};
 
 /* Os gestos do mouse e as teclas do fio: fixos (o teclado le a tabela de atalhos; estes o
    canvas trata direto, ANTES do mapa), mas moram na mesma tabela porque respondem a mesma
@@ -134,7 +152,74 @@ const ATALHOS_PCB = [
   { id:'editar',      tecla:'E',      rotulo:'Travar/destravar a edição' },
   { id:'salvar',      tecla:'Ctrl+S', rotulo:'Salvar o changes.js' },
   { id:'ajuda',       tecla:'H',      rotulo:'Ajuda' },
+  /* 2026-10-13, o DNA do Altium (hub-altiumdna.js): ações novas, acrescentadas no fim para não
+     mexer em nada de cima. `altium` é o comando do Altium que a ação espelha (o plid do AdvPcb.rcs);
+     o hub-altiumdna.js diz o caminho no menu e a tecla de lá.
+     A tecla da casa é a do Altium quando ela cabe sem tirar ninguém do lugar: Ctrl+C/X/V e os
+     alinhamentos com Ctrl+Shift (o normalizaTecla agora guarda o Shift quando há Ctrl ou Alt). O
+     Shift+C do realcarNet chegaria como C, e o C fica livre na casa (é o exemplo de "tecla do
+     Esquema que vale na PCB" do teste): ele vai para a predefinição. O Ctrl+clique que acende a
+     net é gesto (GESTOS_PCB). As que no Altium são sequência de menu (T,D, P,G, D,R...) começam
+     por uma letra que AQUI já é ferramenta (o T é o texto, o P o preencher, o D os fantasmas, o A o
+     arco, o F o enquadrar): uma tecla não pode ser ação e começo de sequência ao mesmo tempo (seria
+     esperar para saber qual das duas, ou disparar a errada), então na tabela da casa elas ficam sem
+     tecla e a predefinição "Padrão Altium" (PADRAO_ALTIUM_PCB) as põe no lugar do Altium.
+     O duplicar é o Rubber Stamp do Altium, Ctrl+R lá -- que aqui recarrega a página (TECLAS_
+     PROIBIDAS); fica o Ctrl+D, que é o Duplicate do próprio Altium no Esquema (PLSCH:Duplicate).
+     O Ctrl+Shift+R (alinhar à direita) e o Ctrl+Shift+T (ao topo) também são do navegador: no
+     Altium elas têm o A,R e o A,T, que vão para a predefinição. */
+  { id:'copiar',         tecla:'Ctrl+C',       rotulo:'Copiar',                               altium:'PLPCB:Copy' },
+  { id:'recortar',       tecla:'Ctrl+X',       rotulo:'Recortar',                             altium:'PLPCB:Cut' },
+  { id:'colar',          tecla:'Ctrl+V',       rotulo:'Colar',                                altium:'PLPCB:Paste' },
+  { id:'duplicar',       tecla:'Ctrl+D',       rotulo:'Duplicar (o Rubber Stamp do Altium)',  altium:'PLPCB:RubberStamp' },
+  { id:'alinharEsq',     tecla:'Ctrl+Shift+L', rotulo:'Alinhar à esquerda',                   altium:'PLPCB:AlignComponentsLeft' },
+  { id:'alinharDir',     tecla:'',             rotulo:'Alinhar à direita',                    altium:'PLPCB:AlignComponentsRight' },
+  { id:'alinharTopo',    tecla:'',             rotulo:'Alinhar ao topo',                      altium:'PLPCB:AlignComponentsTop' },
+  { id:'alinharBase',    tecla:'Ctrl+Shift+B', rotulo:'Alinhar à base',                       altium:'PLPCB:AlignComponentsBottom' },
+  { id:'alinharCentroH', tecla:'',             rotulo:'Alinhar os centros na horizontal',     altium:'PLPCB:AlignComponentsCenterHorizontal' },
+  { id:'alinharCentroV', tecla:'',             rotulo:'Alinhar os centros na vertical',       altium:'PLPCB:AlignComponentsCenterVertical' },
+  { id:'distribuirH',    tecla:'Ctrl+Shift+H', rotulo:'Distribuir na horizontal',             altium:'PLPCB:AlignComponentsSpreadHorizontal' },
+  { id:'distribuirV',    tecla:'Ctrl+Shift+V', rotulo:'Distribuir na vertical',               altium:'PLPCB:AlignComponentsSpreadVertical' },
+  { id:'ratsnest',       tecla:'',             rotulo:'Linhas de conexão (ratsnest)',         altium:'PLPCB:PopupShowConnectionsAll' },
+  { id:'realcarNet',     tecla:'',             rotulo:'Limpar o realce da net (Shift+C)',     altium:'PLPCB:ClearFilter' },
+  { id:'drc',            tecla:'',             rotulo:'Verificar as regras (DRC)',            altium:'PLPCB:DesignRuleCheck' },
+  { id:'regras',         tecla:'',             rotulo:'Regras de projeto',                    altium:'PLPCB:DesignRules' },
+  { id:'pour',           tecla:'',             rotulo:'Polygon pour',                         altium:'PLPCB:PlacePolygonPlane' },
+  { id:'repour',         tecla:'',             rotulo:'Despejar de novo todos os polígonos',  altium:'PLPCB:RepourAllPolygonsNoContext' },
+  { id:'teardrops',      tecla:'',             rotulo:'Teardrops',                            altium:'PLPCB:TearDrops' },
+  { id:'pad',            tecla:'',             rotulo:'Pad avulso',                           altium:'PLPCB:PlacePad' },
+  { id:'atualizarPcb',   tecla:'',             rotulo:'Trazer as mudanças do esquema (ECO)',  altium:'PLPCB:CompareAndUpdateMe' },
+  { id:'pdf',            tecla:'',             rotulo:'PDF do layout',                        altium:'PLWorkspaceManager:ExportToPDF' },
+  { id:'novaPlaca',      tecla:'',             rotulo:'Nova placa',                           altium:'PLWorkspaceManager:NewPCB' },
 ];
+/* Os comandos de cima que já existiam também espelham um comando do Altium: anotado aqui, e não
+   na linha, para a tabela de antes ficar como era. */
+const ALTIUM_PCB = { trilha:'PLManRoute:Track', via:'PLPCB:PlaceVia', linha:'PLManRoute:PlaceLine',
+  arco:'PLPCB:PlaceArcCenter', circulo:'PLPCB:PlaceFullCircle', retangulo:'PLPCB:PlaceRectangle',
+  poligono:'PLPCB:PlaceSolidRegion', texto:'PLPCB:PlaceString', medir:'PLPCB:MeasureDistance',
+  unidade:'PLPCB:ToggleUnits', camadaUnica:'PLPCB:ToggleSingleLayerMode', proxCamada:'PLPCB:NextLayer',
+  antCamada:'PLPCB:PreviousLayer', outraFace:'PLPCB:NextSignalLayer', virar:'PLPCB:FlipBoard',
+  grade:'PLPCB:ToggleVisibleGridKind', enquadrar:'PLPCB:ViewFitBoard', apagar:'PLPCB:DeleteObjectsFocused',
+  desfazer:'PLPCB:Undo', refazer:'PLPCB:Redo', tudo:'PLPCB:SelectAll', salvar:'PLWorkspaceManager:SaveDocument' };
+const ALTIUM_SCH = { add:'PLSch:PlacePart', fio:'PLSch:PlaceWire', terra:'PLSch:PlacePowerPort',
+  rotulo:'PLSch:PlaceNetLabel', noerc:'PLSch:PlaceNoERCGeneric', girar:'PLSch:RotateSelectedObjectsCCW',
+  enquadrar:'PLSch:ZoomAll', grade:'PLSch:ToggleVisibleGrid', desfazer:'PLSch:Undo', refazer:'PLSch:Redo',
+  tudo:'PLSch:SelectAllObjects' };
+/* A predefinição "Padrão Altium" da PCB: TODA ação com tecla, as do Altium 21 de fábrica onde há
+   (conferidas contra o hub-altiumdna.js no tests/test-altiumdna.js). As que só existem no hub
+   (preencher, sinalizar, fantasmas, travar a edição, ajuda) vão para letras que o Altium não usa
+   como começo de sequência neste mapa. A tabela da casa continua sendo o padrão. */
+const PADRAO_ALTIUM_PCB = {
+  trilha:'P,T', via:'P,V', linha:'P,L', arco:'P,A,A', circulo:'P,A,U', retangulo:'P,E', poligono:'P,R',
+  texto:'P,S', preencher:'I', sinalizar:'K', medir:'Ctrl+M', unidade:'Q', camadaUnica:'S', proxCamada:'+',
+  antCamada:'-', outraFace:'*', virar:'Ctrl+F', grade:'V,G,V', diff:'B', enquadrar:'V,F', girar:'Espaço',
+  espelhoX:'X', espelhoY:'Y', apagar:'Delete', desfazer:'Ctrl+Z', refazer:'Ctrl+Y', tudo:'Ctrl+A', editar:'E',
+  salvar:'Ctrl+S', ajuda:'H',
+  copiar:'Ctrl+C', recortar:'Ctrl+X', colar:'Ctrl+V', duplicar:'Ctrl+D', alinharEsq:'Ctrl+Shift+L',
+  alinharDir:'A,R', alinharTopo:'A,T', alinharBase:'Ctrl+Shift+B', alinharCentroH:'A,C', alinharCentroV:'A,V',
+  distribuirH:'Ctrl+Shift+H', distribuirV:'Ctrl+Shift+V', ratsnest:'N', realcarNet:'C', drc:'T,D', regras:'D,R',
+  pour:'P,G', repour:'T,G,A', teardrops:'T,E', pad:'P,P', atualizarPcb:'D,I', pdf:'F,M', novaPlaca:'F,N,P',
+};
 
 /* Os gestos da PCB, no molde dos do Esquema: o canvas os trata direto, ANTES do mapa.
    Tres linhas nao sao tecla fixa, sao ACOES do mapa num estado da vista, e trazem `acoes`: com a
@@ -142,13 +227,19 @@ const ATALHOS_PCB = [
    padrao) poem a via E trocam de camada; arrastando, a girar e as de espelhar valem para o que
    esta na mao. Nessas o editor mostra a tecla GRAVADA, para a tabela nao mentir depois que o
    usuario troca a tecla; `teclas` e o padrao da primeira acao. O 2 sozinho (via sem trocar de
-   camada) e o L do arrasto (troca de face) sao fixos, como no Altium. */
+   camada) e o L do arrasto (troca de face) sao fixos, como no Altium. O Shift+R tambem (o modo de
+   conflito do roteamento interativo do Altium: contornar, parar no obstaculo ou ignorar): o
+   normalizaTecla nao grava Shift em tecla de um caractere, entao no mapa ele chegaria como R, o
+   Retangulo -- o canvas o trata antes do mapa, e so com a ferramenta Trilha. */
 const TRILHA = 'trilha na mão (W)';
 const GESTOS_PCB = [
   { rotulo:'Selecionar',                                teclas:['Clique'] },
   { rotulo:'Pegar o objeto de baixo, no mesmo ponto',   teclas:['Segundo clique'] },
   { rotulo:'Somar à seleção ou tirar dela',             teclas:['Shift', 'Clique'] },
-  { rotulo:'Selecionar o que fica dentro da janela',    teclas:['Arrastar no vazio →'] },
+  /* o Ctrl+clique do Altium (2026-10-13): acende a net do que está sob o cursor; a ação
+     realcarNet (C, o Shift+C do Altium) limpa */
+  { rotulo:'Acender a net',                             teclas:['Ctrl', 'Clique'] },
+  { rotulo:'Selecionar o que fica dentro da janela',   teclas:['Arrastar no vazio →'] },
   { rotulo:'Selecionar o que a janela toca',            teclas:['Arrastar no vazio ←'] },
   { rotulo:'Mover o objeto (ou a seleção)',             teclas:['Arrastar'] },
   { rotulo:'Mover só a ponta da trilha selecionada',    teclas:['Arrastar a ponta'] },
@@ -160,6 +251,7 @@ const GESTOS_PCB = [
   { rotulo:'Fixar o canto da trilha',                   teclas:['Clique'],          quando:TRILHA },
   { rotulo:'Inverter o canto da trilha',                teclas:['Espaço'],          quando:TRILHA },
   { rotulo:'Mudar o modo da trilha (45°, 90°, livre)',  teclas:['Shift', 'Espaço'], quando:TRILHA },
+  { rotulo:'Conflito: contornar, parar no obstáculo ou ignorar', teclas:['Shift', 'R'], quando:TRILHA },
   { rotulo:'Desfazer o último trecho',                  teclas:['Backspace'],       quando:TRILHA },
   { rotulo:'Via sem trocar de camada',                  teclas:['2'],               quando:TRILHA },
   { rotulo:'Via e troca de camada',                     teclas:['*'],               quando:TRILHA, acoes:['outraFace', 'via'] },
@@ -178,11 +270,51 @@ const GESTOS_PCB = [
 /* O navegador leva estas antes da pagina ver. Deixar gravar uma delas seria entregar um
    "gravei e nao funciona" sem nenhuma pista de por que. */
 const TECLAS_PROIBIDAS = ['Ctrl+W','Ctrl+T','Ctrl+N','Ctrl+Shift+N','Ctrl+Shift+T','Ctrl+R','Ctrl+P',
-                          'F5','F11','F12','Escape','Tab','Ctrl+Tab'];
+                          'F5','F11','F12','Escape','Tab','Ctrl+Tab',
+                          /* desde que o normalizaTecla guarda o Shift com Ctrl (2026-10-13): recarregar
+                             sem cache, fechar a janela e as ferramentas do desenvolvedor */
+                          'Ctrl+Shift+R','Ctrl+Shift+W','Ctrl+Shift+I','Ctrl+Shift+J'];
 /* Proibida: a lista acima, e qualquer combinacao que TERMINE em Escape. A vista trata todo
    e.key === 'Escape' antes de olhar o mapa (e a saida de emergencia de seis estados), entao um
-   Shift+Escape gravado nunca dispararia. */
-function proibida(t){ return TECLAS_PROIBIDAS.indexOf(t) >= 0 || /(^|\+)Escape$/.test(String(t)); }
+   Shift+Escape gravado nunca dispararia. Numa sequencia (P,T) vale para cada tecla dela. */
+function proibida(t){
+  const p = acordes(t);
+  if (p.length > 1) return p.length > MAX_ACORDES || p.some(proibida);
+  return TECLAS_PROIBIDAS.indexOf(t) >= 0 || /(^|\+)Escape$/.test(String(t));
+}
+
+/* ── SEQUENCIAS: o P,T do Altium ──
+   No Altium a letra sozinha abre um menu no cursor (P = Place) e a seguinte escolhe pela letra
+   sublinhada (&Track): P,T e a trilha, T,G,A o Repour All. A tabela escreve assim, com virgula,
+   como o Altium escreve; cada pedaco e uma tecla no formato do normalizaTecla ('Ctrl+K,Ctrl+S'
+   tambem vale). A virgula como TECLA continua escrevivel: ',' sozinha e uma tecla, 'P,,' e P
+   seguido da virgula, 'Ctrl+,' e o Ctrl com a virgula.
+   A regra que segura tudo: uma tecla NAO pode ser acao e comeco de sequencia ao mesmo tempo. Se o
+   T e o texto, T,D nao pode ser o DRC -- seria esperar um tempo para saber qual das duas a pessoa
+   quis (o texto ficaria lerdo) ou disparar o texto e depois o DRC por cima. O mapaAtalhos trata
+   essa colisao como trata tecla repetida, e o defineAtalho a recusa dizendo com quem bate. */
+const MAX_ACORDES = 4;                         /* F,N,L,I do Altium tem quatro */
+function acordes(t){
+  const s = String(t == null ? '' : t);
+  if (!s) return [];
+  const out = [];
+  let cur = '';
+  for (const ch of s){
+    if (ch === ',' && cur !== '' && !cur.endsWith('+')){ out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  if (cur !== '') out.push(cur);
+  return out;
+}
+const ehSequencia = t => acordes(t).length > 1;
+/* duas teclas colidem se sao a mesma ou se uma e o comeco da outra (P e P,T; P,A e P,A,A) */
+function colide(a, b){
+  const x = acordes(a), y = acordes(b);
+  if (!x.length || !y.length) return false;
+  const n = Math.min(x.length, y.length);
+  for (let i = 0; i < n; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
 /* A tecla como a tabela a escreve. Shift nao entra em tecla de UM caractere: o navegador ja
    manda 'X' para Shift+x, e distinguir os dois criaria dois atalhos que a mao nao distingue.
    O mesmo vale para os simbolos que so saem com Shift. Medido em 2026-10-02 com o ToUnicodeEx
@@ -196,7 +328,13 @@ function proibida(t){ return TECLAS_PROIBIDAS.indexOf(t) >= 0 || /(^|\+)Escape$/
    ligado. E o Ctrl+2 so fica com a pagina se ela chamar preventDefault() no keydown: medido no
    Chrome (headless, duas abas), sem ele a pagina vai para o fundo e o Chrome mostra a aba 2; com
    ele, fica. A tecla so chega a quem tem o foco: com o foco na casca do hub, o Ctrl+2 e dela. O
-   EletricHUB nao tem aba nem acelerador de menu em Ctrl+2, Ctrl+M ou Ctrl+S. */
+   EletricHUB nao tem aba nem acelerador de menu em Ctrl+2, Ctrl+M ou Ctrl+S.
+   Desde 2026-10-13 o Shift FICA quando ha Ctrl ou Alt junto: Ctrl+Shift+L sai 'Ctrl+Shift+L', e
+   nao mais 'Ctrl+L' (os alinhamentos do Altium sao Shift+Ctrl+L/B/H/V). Com Ctrl a mao distingue
+   o Shift, e o Windows nao troca a tecla (Ctrl+Shift+L chega com key 'L'). Sozinho continua como
+   era: Shift+X e X. Quem ja tinha gravado 'Ctrl+L' nao perde nada: o mapaAtalhos deixa o
+   Ctrl+Shift+L cair no Ctrl+L quando nenhuma acao e dona do Ctrl+Shift+L (o porTecla herda, ver
+   la). */
 function normalizaTecla(e){
   if (!e || !e.key) return '';
   let k = e.key;
@@ -206,22 +344,32 @@ function normalizaTecla(e){
   const m = [];
   if (e.ctrlKey || e.metaKey) m.push('Ctrl');
   if (e.altKey) m.push('Alt');
-  if (e.shiftKey && k.length > 1 && k !== 'Espaço') m.push('Shift');
+  if (e.shiftKey && k !== 'Espaço' && (k.length > 1 || m.length)) m.push('Shift');
   m.push(k);
   return m.join('+');
+}
+/* 'Ctrl+Shift+L' -> 'Ctrl+L': a tecla como o normalizaTecla de antes a escrevia (o Shift caia
+   em tecla de um caractere). '' quando nao muda. */
+function semShiftAntigo(t){
+  const m = /^((?:Ctrl\+)?(?:Alt\+)?)Shift\+(.)$/.exec(String(t));
+  return m && m[1] ? m[1] + m[2] : '';
 }
 
 /* ══ UMA VISTA: a tabela, o mapa e a gravacao ══
    Cada vista tem o proprio mapa, entao a repeticao de tecla so conta dentro dela; as regras
    (tecla proibida, Esc reservado) sao as mesmas. `nome` e a chave interna do editor. */
-function fazVista(nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS){
+function fazVista(nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS, ALTIUM, PADRAO_ALTIUM){
   const ids = new Set(ATALHOS_PADRAO.map(a => a.id));
   const daTabela = id => ATALHOS_PADRAO.find(a => a.id === id);
 
   /* O padrao, com o que o usuario gravou por cima. Entrada desconhecida, tecla proibida e tecla
      repetida sao DESCARTADAS em vez de derrubar o mapa: uma chave estragada no localStorage nao
      pode deixar a vista sem teclado nenhum. (A acao desconhecida e conferida na lista de ids, e
-     nao no objeto: um "constructor" gravado passaria por acao que existe.) */
+     nao no objeto: um "constructor" gravado passaria por acao que existe.)
+     Desde 2026-10-13: a acao pode nascer SEM tecla (tecla '' na tabela: fica fora do porTecla e
+     o editor mostra "sem tecla"), a tecla pode ser sequencia (P,T), e "repetida" passou a ser
+     COLIDIR -- a mesma tecla, ou uma ser o comeco da outra (colide). `prefixos` e o conjunto dos
+     comecos de sequencia, que o leitor usa para esperar a tecla seguinte. */
   function mapaAtalhos(salvos){
     const porAcao = {}, descartados = [];
     for (const a of ATALHOS_PADRAO) porAcao[a.id] = a.tecla;
@@ -232,40 +380,92 @@ function fazVista(nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS){
       if (!t || proibida(t)) { descartados.push(id + ': tecla não permitida'); continue; }
       porAcao[id] = t;
     }
-    const porTecla = {}, repetidas = [];
+    const dono = (lista, t) => { for (const [x, id] of lista) if (colide(x, t)) return id; return null; };
+    const primeira = [], repetidas = [];
     for (const a of ATALHOS_PADRAO){
       const t = porAcao[a.id];
-      if (porTecla[t]){ repetidas.push(t); porAcao[a.id] = a.tecla; }   /* volta ao padrao do que repetiu */
-      else porTecla[t] = a.id;
+      if (!t) continue;
+      if (dono(primeira, t)){ repetidas.push(t); porAcao[a.id] = a.tecla; }   /* volta ao padrao do que repetiu */
+      else primeira.push([t, a.id]);
     }
     /* a volta ao padrao pode ter repetido de novo; o segundo passe resolve sem laço infinito */
-    const finalTecla = {};
+    const final = [];
     for (const a of ATALHOS_PADRAO){
       let t = porAcao[a.id];
-      if (finalTecla[t] && finalTecla[t] !== a.id) t = a.tecla;
-      if (finalTecla[t] && finalTecla[t] !== a.id) continue;
-      porAcao[a.id] = t; finalTecla[t] = a.id;
+      if (!t) continue;
+      let d = dono(final, t);
+      if (d && d !== a.id){ t = a.tecla; d = t ? dono(final, t) : null; }
+      if (!t || (d && d !== a.id)){ porAcao[a.id] = ''; continue; }   /* sem tecla, mas o mapa fica de pe */
+      porAcao[a.id] = t; final.push([t, a.id]);
     }
-    return { porAcao, porTecla:finalTecla, descartados, repetidas };
+    /* O porTecla tem SO as teclas de verdade como chaves proprias (Object.keys conta uma por
+       acao), e herda de um objeto escondido o Ctrl+Shift+X -> Ctrl+X: e a escrita antiga do
+       normalizaTecla, entao quem gravou Ctrl+L (ou o padrao que for Ctrl+Z) segue disparando
+       quando a mao aperta tambem o Shift -- a nao ser que outra acao seja dona do Ctrl+Shift+X. */
+    const herdado = Object.create(null), finalTecla = Object.create(herdado), prefixos = new Set();
+    for (const [t, id] of final){
+      finalTecla[t] = id;
+      const p = acordes(t);
+      for (let i = 1; i < p.length; i++) prefixos.add(p.slice(0, i).join(','));
+    }
+    for (const [t] of final){
+      const m = /^((?:Ctrl\+)?(?:Alt\+)?)(.)$/.exec(t);
+      if (m && m[1]){
+        const com = m[1] + 'Shift+' + m[2];
+        if (!(com in finalTecla)) herdado[com] = finalTecla[t];
+      }
+    }
+    return { porAcao, porTecla:finalTecla, descartados, repetidas, prefixos };
   }
-  /* Grava uma tecla nova para uma ação; devolve o que a interface tem de dizer. */
+  /* Grava uma tecla nova para uma ação; devolve o que a interface tem de dizer. A tecla vazia so
+     vale para voltar ao padrao de uma acao que nasce sem tecla. */
   function defineAtalho(salvos, id, tecla){
     const a = daTabela(id);
     if (!a) return { ok:false, erro:'ação desconhecida' };
-    if (!tecla) return { ok:false, erro:'tecla vazia' };
-    if (/(^|\+)Escape$/.test(tecla)) return { ok:false, erro:'o Esc é reservado: larga o que estiver na mão' };
-    if (proibida(tecla)) return { ok:false, erro:'“' + tecla + '” é do navegador — escolha outra' };
-    const m = mapaAtalhos(salvos);
-    const dono = m.porTecla[tecla];
-    if (dono && dono !== id){
-      const r = daTabela(dono);
-      return { ok:false, erro:'“' + tecla + '” já é ' + (r ? r.rotulo.toLowerCase() : dono) };
-    }
     const novo = Object.assign({}, salvos && typeof salvos === 'object' ? salvos : {});
+    if (!tecla){
+      if (a.tecla === '') { delete novo[id]; return { ok:true, salvos:novo }; }
+      return { ok:false, erro:'tecla vazia' };
+    }
+    const p = acordes(tecla);
+    if (p.some(x => /(^|\+)Escape$/.test(x))) return { ok:false, erro:'o Esc é reservado: larga o que estiver na mão' };
+    if (p.length > MAX_ACORDES) return { ok:false, erro:'sequência de no máximo ' + MAX_ACORDES + ' teclas' };
+    const ruim = p.find(x => proibida(x));
+    if (ruim) return { ok:false, erro:'“' + ruim + '” é do navegador — escolha outra' };
+    const m = mapaAtalhos(salvos);
+    for (const [t, dono] of Object.entries(m.porTecla)){
+      if (dono === id || !colide(t, tecla)) continue;
+      const r = daTabela(dono), nomeDono = r ? r.rotulo.toLowerCase() : dono;
+      if (t === tecla) return { ok:false, erro:'“' + tecla + '” já é ' + nomeDono };
+      if (acordes(t).length > p.length) return { ok:false, erro:'“' + tecla + '” começa a sequência ' + t + ' (' + nomeDono + ')' };
+      return { ok:false, erro:'“' + tecla + '” começa com ' + t + ', que já é ' + nomeDono };
+    }
     if (a.tecla === tecla) delete novo[id];
     else novo[id] = tecla;
     return { ok:true, salvos:novo };
   }
+  /* A predefinicao: 'casa' (a tabela, o padrao de sempre) ou 'altium' (as teclas do Altium 21).
+     Devolve o que gravar -- so o que difere da tabela, como o editor grava. */
+  function predefinicao(qual){
+    if (qual !== 'altium' || !PADRAO_ALTIUM) return {};
+    const out = {};
+    for (const a of ATALHOS_PADRAO){
+      const t = PADRAO_ALTIUM[a.id];
+      if (t != null && t !== a.tecla) out[a.id] = t;
+    }
+    return out;
+  }
+  /* o que esta gravado bate com uma predefinicao inteira? ('casa', 'altium' ou '') */
+  function qualPredefinicao(salvos){
+    const m = mapaAtalhos(salvos);
+    for (const q of ['casa', 'altium']){
+      const p = mapaAtalhos(predefinicao(q));
+      if (ATALHOS_PADRAO.every(a => p.porAcao[a.id] === m.porAcao[a.id])) return q;
+    }
+    return '';
+  }
+  /* o comando do Altium que a acao espelha (plid do .rcs; o hub-altiumdna.js diz o resto) */
+  const altiumDe = id => { const a = daTabela(id); return (a && a.altium) || (ALTIUM && ALTIUM[id]) || ''; };
 
   /* ── o que esta gravado nesta maquina ──
      Mesmo molde de toda preferencia de vista: try/catch e o padrao no codigo. Uma chave
@@ -283,12 +483,58 @@ function fazVista(nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS){
     } catch (e) {}
   }
 
-  return { nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS, mapaAtalhos, defineAtalho, carrega, grava };
+  return { nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS, PADRAO_ALTIUM, mapaAtalhos, defineAtalho, carrega, grava,
+           predefinicao, qualPredefinicao, altiumDe };
 }
 
-const sch = fazVista('sch', 'altiumhub.sch.atalhos', 'vista Esquema', ATALHOS_SCH, GESTOS_SCH);
-const pcb = fazVista('pcb', 'altiumhub.pcb.atalhos', 'vista PCB', ATALHOS_PCB, GESTOS_PCB);
+const sch = fazVista('sch', 'altiumhub.sch.atalhos', 'vista Esquema', ATALHOS_SCH, GESTOS_SCH, ALTIUM_SCH, PADRAO_ALTIUM_SCH);
+const pcb = fazVista('pcb', 'altiumhub.pcb.atalhos', 'vista PCB', ATALHOS_PCB, GESTOS_PCB, ALTIUM_PCB, PADRAO_ALTIUM_PCB);
 const VISTAS = [sch, pcb];
+
+/* ── O LEITOR DE SEQUENCIAS: o que a vista chama no keydown no lugar do porTecla direto ──
+   Puro (sem DOM; o relogio e o setTimeout de quem chama), para os testes em Node.
+
+     const leitor = HubAtalhos.leitor(() => ATALHOS, fazAcao, { aoEsperar: seq => status(seq) });
+     // no keydown, depois dos gestos fixos do estado (trilha, arrasto):
+     if (leitor.tecla(HubAtalhos.normalizaTecla(e))) e.preventDefault();
+     // no Esc, e ao trocar de ferramenta: leitor.cancela();
+
+   tecla(t) devolve true quando a tecla foi do mapa (disparou uma acao ou abriu/continuou uma
+   sequencia) e false quando nao e de ninguem. Sem sequencia gravada ele e exatamente o
+   `porTecla[t]` de antes. Numa sequencia aberta (P, ...), a tecla que nao continua nenhuma
+   fecha a espera e vale sozinha -- como o menu do Altium que some quando a letra nao e de
+   ninguem. A espera tambem cai sozinha depois de `o.espera` ms (1500), e o `aoEsperar(seq)`
+   avisa a vista para mostrar "P, …" no rodape ('' quando acaba). `tecla(t, {direto:true})`
+   ignora sequencias: para um estado que tem as proprias teclas (o arrasto do rotear). */
+function leitor(mapa, dispara, o){
+  o = o || {};
+  const espera = o.espera > 0 ? o.espera : 1500;
+  const aviso = typeof o.aoEsperar === 'function' ? o.aoEsperar : () => {};
+  let aberta = '', timer = null;
+  const pega = () => (typeof mapa === 'function' ? mapa() : mapa) || { porTecla:{} };
+  function fecha(){ if (timer) { clearTimeout(timer); timer = null; } if (aberta){ aberta = ''; aviso(''); } }
+  function abre(seq){
+    aberta = seq; aviso(seq);
+    if (timer) clearTimeout(timer);
+    if (typeof setTimeout === 'function') timer = setTimeout(() => { timer = null; aberta = ''; aviso(''); }, espera);
+  }
+  function tecla(t, o2){
+    if (!t) return false;
+    const m = pega(), pref = m.prefixos instanceof Set ? m.prefixos : new Set();
+    if (o2 && o2.direto){ fecha(); const id = m.porTecla[t]; if (id){ dispara(id, t); return true; } return false; }
+    if (aberta){
+      const seq = aberta + ',' + t;
+      if (Object.prototype.hasOwnProperty.call(m.porTecla, seq)){ fecha(); dispara(m.porTecla[seq], seq); return true; }
+      if (pref.has(seq)){ abre(seq); return true; }
+      fecha();                                   /* nao continua nada: vale sozinha */
+    }
+    if (pref.has(t)){ abre(t); return true; }
+    const id = m.porTecla[t];
+    if (id){ dispara(id, t); return true; }
+    return false;
+  }
+  return { tecla, cancela: fecha, pendente: () => aberta };
+}
 
 /* ── o editor (aba Atalhos das Configurações do hub) ───────────────────────────────
    No molde do "Keyboard Shortcuts" do VSCode, a pedido do usuario: a busca no topo, uma
@@ -348,6 +594,8 @@ const CSS = `
 .hat-k { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; min-width: 0; }
 .hat-k .mais { color: var(--text-3); font-size: 11px; }
 .hat-k .ou { color: var(--text-3); font-size: 11px; margin: 0 2px; }
+.hat-k .seq { color: var(--text-3); font-size: 11px; margin: 0 1px 0 -1px; }
+.hat-k .sem { color: var(--text-4); font-size: 11px; }
 .hat-k kbd, .hat-caixa kbd { display: inline-block; min-width: 16px; padding: 1px 6px; font: 11px/16px var(--font);
   text-align: center; color: var(--text); background: rgba(var(--tint), 0.08); border: 1px solid var(--line);
   border-bottom-color: rgba(var(--tint), 0.24); border-radius: 3px; box-shadow: inset 0 -1px 0 rgba(var(--tint), 0.10);
@@ -399,14 +647,24 @@ function partes(t){
   if (t.endsWith('++')) p.splice(p.length - 2, 2, '+');
   return p.filter(x => x !== '');
 }
-/* uma ou mais combinacoes, cada uma em teclinhas, separadas por "ou" ('* ou Ctrl + 2') */
+/* a sequencia (P,T) em teclinhas: os acordes separados por SEQ, que o desenho troca pela virgula */
+const SEQ = '\u0000,';
+function partesSeq(t){
+  const out = [];
+  acordes(t).forEach((a, i) => { if (i) out.push(SEQ); out.push(...partes(a)); });
+  return out;
+}
+/* uma ou mais combinacoes, cada uma em teclinhas, separadas por "ou" ('* ou Ctrl + 2'); a
+   combinacao vazia e a acao sem tecla */
 function teclinhas(lista){ return teclinhasOu([lista]); }
 function teclinhasOu(alts){
   const k = el('span', 'hat-k');
-  alts.forEach((lista, j) => {
+  if (!alts.some(l => l.length)) { k.append(el('span', 'sem', 'sem tecla')); return k; }
+  alts.filter(l => l.length).forEach((lista, j) => {
     if (j) k.append(el('span', 'ou', 'ou'));
     lista.forEach((t, i) => {
-      if (i) k.append(el('span', 'mais', '+'));
+      if (t === SEQ) { k.append(el('span', 'seq', ',')); return; }
+      if (i && lista[i - 1] !== SEQ) k.append(el('span', 'mais', '+'));
       k.append(el('kbd', null, t));
     });
   });
@@ -418,6 +676,18 @@ const sem = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowe
    vale (fora daquele estado ela funciona), mas a caixa avisa. */
 function fixoNoEstado(v, tecla){
   return v.GESTOS.find(g => g.quando && !g.acoes && g.teclas.join('+') === tecla) || null;
+}
+/* "Altium: Place » Track · P,T" -- a dica da linha, quando a página carregou o hub-altiumdna.js;
+   sem ele, o plid cru (ainda serve para procurar) */
+function noAltium(v, id){
+  const plid = v.altiumDe(id);
+  if (!plid) return '';
+  const D = typeof HubAltiumDNA !== 'undefined' ? HubAltiumDNA : null;
+  if (!D) return 'Altium: ' + plid;
+  try {
+    const cam = D.caminho(v.nome, plid), ac = D.acelerador(v.nome, plid), tk = D.teclas(v.nome, plid);
+    return 'Altium: ' + (cam.length ? cam.join(' » ') : plid) + [ac].concat(tk).filter(Boolean).map(x => ' · ' + x).join('');
+  } catch (e) { return 'Altium: ' + plid; }
 }
 
 /* Desenha o editor dentro de `box`. `o.toast(texto, tipo)` e quem avisa: o hub passa o dele. */
@@ -484,11 +754,11 @@ function pane(box, o){
     const m = v.mapaAtalhos(salvos[v.nome]);
     const out = v.ATALHOS_PADRAO.map(a => {
       const t = m.porAcao[a.id];
-      return { vista:v, chave:v.nome + ':' + a.id, id:a.id, rotulo:a.rotulo, tecla:t, alts:[partes(t)],
-               padrao:a.tecla, usuario:t !== a.tecla, fixo:false, quando:v.QUANDO };
+      return { vista:v, chave:v.nome + ':' + a.id, id:a.id, rotulo:a.rotulo, tecla:t, alts:[partesSeq(t)],
+               padrao:a.tecla, usuario:t !== a.tecla, fixo:false, quando:v.QUANDO, altium:noAltium(v, a.id) };
     });
     for (const g of v.GESTOS){
-      const alts = g.acoes ? g.acoes.map(id => partes(m.porAcao[id])).filter(p => p.length) : [g.teclas];
+      const alts = g.acoes ? g.acoes.map(id => partesSeq(m.porAcao[id])).filter(p => p.length) : [g.teclas];
       out.push({ vista:v, rotulo:g.rotulo, alts, fixo:true, quando:g.quando || v.QUANDO, estado:Boolean(g.quando) });
     }
     return out;
@@ -497,11 +767,13 @@ function pane(box, o){
     if (!filtro) return true;
     /* gravando teclas: a linha que dispara com aquela combinacao, gesto fixo inclusive (o 2 da
        trilha aparece junto de quem mais usa o 2) */
-    if (gravando) return l.fixo ? l.alts.some(a => a.join('+') === filtro) : l.tecla === filtro;
+    if (gravando) return l.fixo ? l.alts.some(a => a.join('+') === filtro)
+      : (l.tecla === filtro || acordes(l.tecla)[0] === filtro);   /* e a sequencia que ela abre (P -> P,T) */
     const q = sem(filtro);
     const origem = l.fixo ? 'fixo' : (l.usuario ? 'usuario' : 'padrao');
     const campos = [l.rotulo, l.quando, l.vista.QUANDO, origem];
     for (const a of l.alts) campos.push(a.join('+'), a.join(' '));
+    if (!l.fixo) campos.push(l.tecla || 'sem tecla', l.altium || '');
     return campos.some(x => sem(x).includes(q));
   }
 
@@ -519,12 +791,12 @@ function pane(box, o){
       b.onclick = e => { e.stopPropagation(); edita(l); };
       ed.append(b);
     }
-    const cmd = el('span', 'cmd', l.rotulo); cmd.title = l.rotulo;
+    const cmd = el('span', 'cmd', l.rotulo); cmd.title = l.rotulo + (l.altium ? ' — ' + l.altium : '');
     const org = el('span', 'org' + (l.usuario ? ' usr' : ''), l.fixo ? 'Fixo' : (l.usuario ? 'Usuário' : 'Padrão'));
     if (l.usuario){
       const rs = el('button', 'hat-rs');
       rs.type = 'button'; rs.tabIndex = -1;
-      rs.title = 'Voltar ao padrão (' + l.padrao + ')';
+      rs.title = 'Voltar ao padrão (' + (l.padrao || 'sem tecla') + ')';
       rs.append(icone('volta'));
       rs.onclick = e => { e.stopPropagation(); volta(l); };
       org.append(rs);
@@ -577,7 +849,24 @@ function pane(box, o){
         salvos[v.nome] = {}; v.grava({}); desenha();
         avisa('atalhos da ' + v.QUANDO + ' de volta ao padrão', 'ok');
       };
-      g.append(el('span', 'nome', v.QUANDO), cont, rs);
+      g.append(el('span', 'nome', v.QUANDO), cont);
+      /* a predefinicao "Padrao Altium" (2026-10-13): troca as teclas da vista pelas do Altium 21
+         de fabrica (P,T, T,D...). Acrescimo: a tabela da casa continua sendo o padrao, e o
+         "Restaurar o padrao" ao lado volta para ela. */
+      if (v.PADRAO_ALTIUM){
+        const pa = el('button', 'btn btn-ghost btn-sm', 'Padrão Altium');
+        pa.type = 'button';
+        pa.title = 'troca as teclas da ' + v.QUANDO + ' pelas do Altium Designer 21 (P,T trilha, T,D DRC…); '
+          + '“Restaurar o padrão” volta para as da casa';
+        pa.disabled = v.qualPredefinicao(salvos[v.nome]) === 'altium';
+        pa.onclick = () => {
+          const p = v.predefinicao('altium');
+          salvos[v.nome] = p; v.grava(p); desenha();
+          avisa('atalhos da ' + v.QUANDO + ': padrão Altium', 'ok');
+        };
+        g.append(pa);
+      }
+      g.append(rs);
       grupo.append(g);
       for (const l of vis) grupo.append(linhaEl(l));
       tab.append(grupo);
@@ -601,7 +890,7 @@ function pane(box, o){
     const r = v.defineAtalho(salvos[v.nome], l.id, l.padrao);
     if (!r.ok){ avisa('Não voltou ao padrão: ' + r.erro + '. Troque aquela primeiro.', 'warn'); return; }
     salvos[v.nome] = r.salvos; v.grava(r.salvos); volta_foco(l.chave);
-    avisa(l.rotulo + ' → ' + l.padrao + ' (padrão, ' + v.QUANDO + ')', 'ok');
+    avisa(l.rotulo + ' → ' + (l.padrao || 'sem tecla') + ' (padrão, ' + v.QUANDO + ')', 'ok');
   }
 
   /* ── a busca: texto, ou "gravar teclas" (pesquisa pela combinacao pressionada) ── */
@@ -636,14 +925,14 @@ function pane(box, o){
   function edita(l){
     if (editando) return;
     const v = l.vista;
-    let pendente = '';
+    let pendente = '', seguinte = false;
     const fundo = el('div', 'hat-caixa-fundo');
     const cx = el('div', 'hat-caixa');
     cx.setAttribute('role', 'dialog');
     cx.setAttribute('aria-label', 'Trocar a tecla de ' + l.rotulo + ' (' + v.QUANDO + ')');
     const tit = el('div', 'tit', 'Pressione a combinação desejada e depois Enter');
-    const cmd = el('div', 'cmd', l.rotulo + ' · ' + v.QUANDO + ' · agora ' + l.tecla
-      + (l.usuario ? ' (padrão ' + l.padrao + ')' : ''));
+    const cmd = el('div', 'cmd', l.rotulo + ' · ' + v.QUANDO + ' · agora ' + (l.tecla || 'sem tecla')
+      + (l.usuario ? ' (padrão ' + (l.padrao || 'sem tecla') + ')' : ''));
     const visor = el('div', 'tecla');
     const msg = el('div', 'msg', 'Esc desiste');
     cx.append(tit, cmd, visor, msg);
@@ -652,14 +941,15 @@ function pane(box, o){
     const pinta = () => {
       visor.textContent = '';
       if (!pendente){ visor.append(el('span', 'vaz', 'aguardando…')); return; }
-      visor.append(teclinhas(partes(pendente)));
+      visor.append(teclinhas(partesSeq(pendente)));
+      if (seguinte){ msg.className = 'msg'; msg.textContent = 'agora a tecla seguinte da sequência'; return; }
       if (pendente === l.tecla){ msg.className = 'msg ok'; msg.textContent = 'já é esta'; return; }
       const r = v.defineAtalho(salvos[v.nome], l.id, pendente);
       if (!r.ok){ msg.className = 'msg err'; msg.textContent = r.erro; return; }
       const f = fixoNoEstado(v, pendente);
       msg.className = 'msg ' + (f ? 'aviso' : 'ok');
       msg.textContent = (f ? '“' + pendente + '” continua fixo quando ' + f.quando + ': '
-        + f.rotulo.toLowerCase() + '. ' : '') + 'Enter grava · Esc desiste';
+        + f.rotulo.toLowerCase() + '. ' : '') + 'Enter grava · vírgula emenda uma sequência (P, T) · Esc desiste';
     };
     const fecha = () => {
       window.removeEventListener('keydown', tecla, true);
@@ -684,7 +974,12 @@ function pane(box, o){
       }
       const t = normalizaTecla(ev);
       if (!t) return;                       /* so o modificador: continua esperando */
-      pendente = t;
+      /* A SEQUENCIA (P,T do Altium): a virgula depois de uma tecla emenda a proxima, e a caixa
+         escreve como o Altium escreve. Sem a virgula tudo fica como era: a tecla nova troca a
+         anterior. A virgula como primeira tecla continua sendo a tecla virgula. */
+      if (t === ',' && pendente && !seguinte && acordes(pendente).length < MAX_ACORDES){ seguinte = true; pinta(); return; }
+      pendente = seguinte ? pendente + ',' + t : t;
+      seguinte = false;
       pinta();
     };
     fundo.addEventListener('mousedown', e => { if (e.target === fundo) fecha(); });
@@ -700,5 +995,7 @@ function pane(box, o){
    duas vistas, com a mesma forma, em .sch e .pcb. */
 return { CHAVE:sch.CHAVE, ATALHOS_PADRAO:sch.ATALHOS_PADRAO, TECLAS_PROIBIDAS, GESTOS:sch.GESTOS,
          normalizaTecla, mapaAtalhos:sch.mapaAtalhos, defineAtalho:sch.defineAtalho,
-         carrega:sch.carrega, grava:sch.grava, pane, sch, pcb };
+         carrega:sch.carrega, grava:sch.grava, pane, sch, pcb,
+         /* 2026-10-13: as sequencias (P,T) e a predefinicao Padrao Altium */
+         leitor, acordes, colide, ehSequencia, semShiftAntigo, MAX_ACORDES };
 });

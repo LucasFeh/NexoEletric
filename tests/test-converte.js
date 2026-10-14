@@ -288,6 +288,125 @@ assert.deepStrictEqual(suspeitos, [], 'trocou grau fora de contexto de conector:
 console.log('    graus: ' + trocados + ' nomes do acervo ganharam o simbolo, 0 fora de contexto');
 console.log('(10) "180g" vira grau, e codigo de peca fica intacto ok');
 
+/* ── 11. o rascunho: fechar o painel não desfaz o que a pessoa decidiu ────────
+   O abre() refazia a varredura do zero a cada vez: a escolha feita à mão voltava a ser a
+   recomendação, a linha desmarcada voltava marcada. O rascunho guarda SÓ o que a pessoa mudou,
+   pela chave da linha, com a peça pelo id do Odoo. O ciclo inteiro roda aqui contra o corpus e
+   o acervo reais, com um JSON no meio — é o que o localStorage devolve. */
+{
+  const tem = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  const porChave = L => new Map(L.map(l => [l.chave, l]));
+  const ida = o => JSON.parse(JSON.stringify(o));
+
+  const L1 = P.varre(COMPS, CANDS, detecta);
+  assert.deepStrictEqual(P.rascunhoDe(L1), {},
+    'uma varredura sem mão nenhuma não tem rascunho — senão toda abertura gravaria lixo');
+  const pend = L1.filter(l => !l.almox);
+  const desmarcada = pend.find(l => l.escolha && l.marcado);
+  const trocada = pend.find(l => l !== desmarcada && l.sugestoes.length >= 2);
+  const semTroca = pend.find(l => l !== desmarcada && l !== trocada && l.escolha);
+  const aMao = pend.find(l => l !== desmarcada && l !== trocada && l !== semTroca);
+  assert.ok(desmarcada && trocada && semTroca && aMao, 'o corpus precisa de quatro linhas a converter');
+  /* a peça à mão: fora das sugestões da linha, viva e de id único no acervo — senão o caso do
+     renome acharia um gêmeo pelo mesmo id e passaria por sorte */
+  const quantosId = new Map();
+  for (const b of CANDS) if (b.odooId) quantosId.set(b.odooId, (quantosId.get(b.odooId) || 0) + 1);
+  const outra = CANDS.find(b => b.odooId && quantosId.get(b.odooId) === 1 && !b.fora
+    && !aMao.sugestoes.some(s => s.alvo === b));
+  assert.ok(outra, 'o acervo precisa de uma peça viva de id único');
+
+  /* as quatro decisões da tela: desmarcar, trocar de opção, "não trocar" e escolher à mão */
+  desmarcada.marcado = false;
+  trocada.escolha = trocada.sugestoes[1];
+  trocada.marcado = true;
+  semTroca.escolha = null;
+  semTroca.marcado = false;
+  const esc = P.escolhaPara(aMao.perfil, outra);
+  aMao.sugestoes = [esc].concat(aMao.sugestoes);
+  aMao.escolha = esc;
+  aMao.marcado = true;
+  const R = ida(P.rascunhoDe(L1));
+  assert.strictEqual(Object.keys(R).length, 4, 'só as quatro linhas mexidas entram: ' + Object.keys(R).length);
+
+  /* reabrir: varredura nova, objetos novos — da primeira só sobrevive o JSON */
+  const L2 = P.varre(COMPS, CANDS, detecta);
+  const r2 = P.aplicaRascunho(L2, R, CANDS);
+  assert.strictEqual(r2.restauradas, 4);
+  assert.deepStrictEqual(r2.perdidas, []);
+  const M2 = porChave(L2);
+  const d2 = M2.get(desmarcada.chave), t2 = M2.get(trocada.chave);
+  const s2 = M2.get(semTroca.chave), m2 = M2.get(aMao.chave);
+  assert.strictEqual(d2.marcado, false, 'a linha desmarcada voltou marcada');
+  assert.strictEqual(d2.escolha.alvo, desmarcada.escolha.alvo);
+  assert.strictEqual(t2.escolha.alvo, trocada.escolha.alvo, 'a outra opção escolhida não voltou');
+  assert.strictEqual(t2.marcado, true);
+  assert.strictEqual(s2.escolha, null, 'o "não trocar" não voltou');
+  assert.strictEqual(s2.marcado, false);
+  assert.strictEqual(m2.escolha.alvo, outra, 'a peça escolhida à mão não voltou');
+  assert.strictEqual(m2.marcado, true);
+  assert.strictEqual(m2.sugestoes[0], m2.escolha, 'a peça à mão volta para a lista de opções');
+  for (const l of L2) if (!tem(R, l.chave)){
+    assert.strictEqual(l.escolha, l.padrao.escolha, 'linha que ninguém mexeu mudou: ' + l.refs.join(','));
+    assert.strictEqual(l.marcado, l.padrao.marcado);
+  }
+  assert.deepStrictEqual(ida(P.rascunhoDe(L2)), R, 'a ida e volta mudou o rascunho');
+
+  /* o produto renomeado no Odoo: mesmo id, outro nome — a escolha segue o id, e a entrada
+     passa a guardar o nome novo */
+  const renomeada = Object.assign({}, outra, { nome: outra.nome + ' (renomeado)' });
+  const C3 = CANDS.map(b => b === outra ? renomeada : b);
+  const L3 = P.varre(COMPS, C3, detecta);
+  P.aplicaRascunho(L3, R, C3);
+  assert.strictEqual(porChave(L3).get(aMao.chave).escolha.alvo, renomeada, 'renomear no Odoo perdeu a escolha');
+  assert.strictEqual(P.rascunhoDe(L3)[aMao.chave].e.n, renomeada.nome);
+
+  /* a peça que não está no acervo: a linha fica desmarcada e diz qual era, e a escolha NÃO sai
+     do rascunho — volta inteira quando a peça voltar */
+  const C4 = CANDS.filter(b => b.odooId !== outra.odooId && b.nome !== outra.nome);
+  const L4 = P.varre(COMPS, C4, detecta);
+  const r4 = P.aplicaRascunho(L4, R, C4);
+  const m4 = porChave(L4).get(aMao.chave);
+  assert.deepStrictEqual(r4.perdidas.map(p => p.nome), [outra.nome]);
+  assert.strictEqual(m4.marcado, false, 'sem a peça, a linha não pode ficar marcada');
+  assert.strictEqual(m4.perdida, outra.nome);
+  assert.deepStrictEqual(ida(P.rascunhoDe(L4))[aMao.chave], R[aMao.chave],
+    'a escolha saiu do rascunho por falta da peça');
+  const L5 = P.varre(COMPS, CANDS, detecta);
+  P.aplicaRascunho(L5, ida(P.rascunhoDe(L4)), CANDS);
+  assert.strictEqual(porChave(L5).get(aMao.chave).escolha.alvo, outra, 'a peça voltou e a escolha não');
+  assert.strictEqual(porChave(L5).get(aMao.chave).marcado, true);
+
+  /* o acervo que não carregou: nenhuma decisão pode sair do rascunho — nem o "não trocar", que
+     fica IGUAL à recomendação quando não há recomendação, e sairia se fosse medido de novo */
+  const L6 = P.varre(COMPS, [], detecta);
+  P.aplicaRascunho(L6, R, []);
+  assert.deepStrictEqual(ida(P.rascunhoDe(L6)), R, 'o acervo vazio apagou decisões do rascunho');
+
+  /* o "Trocar": o componente trocado ganha outro sym e outros params, muda de chave, e a
+     decisão sobre ele sai sozinha; as que ficaram de fora da troca continuam */
+  const alvoT = trocada.escolha.alvo;
+  const depois = COMPS.map(c => P.chaveDoComp(c) === trocada.chave
+    ? Object.assign({}, c, { sym: alvoT.nome, params: 'OdooId=' + alvoT.odooId }) : c);
+  const L7 = P.varre(depois, CANDS, detecta);
+  P.aplicaRascunho(L7, R, CANDS);
+  const R7 = P.rascunhoDe(L7);
+  assert.ok(!tem(R7, trocada.chave), 'a linha trocada continuou no rascunho');
+  assert.deepStrictEqual(Object.keys(R7).sort(),
+    [desmarcada.chave, semTroca.chave, aMao.chave].sort(), 'a troca levou decisões que não eram dela');
+
+  /* com o id repetido, a peça viva ganha do duplicado antigo ("fora"); o nome sozinho vale
+     quando o id não acha nada; e o lixo não restaura nada */
+  const zumbi = Object.assign({}, outra, { nome: outra.nome + ' (antigo)', fora: true });
+  assert.strictEqual(P.achaAlvo({ n: zumbi.nome, o: outra.odooId }, [zumbi, outra]), outra);
+  assert.strictEqual(P.achaAlvo({ n: outra.nome, o: '' }, [zumbi, outra]), outra);
+  assert.strictEqual(P.achaAlvo({ n: 'nao existe', o: 'nao existe' }, CANDS), null);
+  assert.strictEqual(P.achaAlvo(null, CANDS), null);
+  assert.strictEqual(P.aplicaRascunho(L2, 'lixo', CANDS).restauradas, 0);
+  assert.strictEqual(P.aplicaRascunho(L2, { [aMao.chave]: 'lixo' }, CANDS).restauradas, 0);
+  console.log('    rascunho: 4 decisões, ' + pend.length + ' linhas a converter no corpus');
+}
+console.log('(11) o rascunho: fecha, reabre, renomeia, some, volta e troca sem perder decisão ok');
+
 /* ── 12. o jumper: barra de pinos, resistor 0R ou nenhuma peça ───────────────
    Pedido do dono (2026-10-09): jumper vindo do Altium só tem três destinos — a barra de pinos
    de 2 vias, o resistor 0R, ou nenhuma peça, porque o jumper é na solda. Pelo recomendador

@@ -67,6 +67,15 @@ const ICONES = {
   apagar:     'M3 4.5 H13 M6.5 4.5 V3 H9.5 V4.5 M4.5 4.5 L5.2 13.5 H10.8 L11.5 4.5 M7 7 V11 M9 7 V11',
   ajuda:      'c:8,8,6|M6.2 6.2 A1.9 1.9 0 1 1 8 8.4 V9.6|M8 11.8 V11.9',
   paineis:    'r:2,2.5,12,11|M10 2.5 V13.5',
+  /* o que veio do Altium: regras, DRC, conexoes, teardrop, ECO, placa nova, alinhar, colar */
+  regras:     'r:2.5,2,11,12|M5 5.5 H11 M5 8 H11 M5 10.5 H8.5',
+  drc:        'M8 1.8 L13.5 4 V8 C13.5 11 11 13.3 8 14.3 C5 13.3 2.5 11 2.5 8 V4 Z|M5.5 8 L7.3 9.8 L10.7 6.2',
+  ratsnest:   'c:3,12,1.3|c:13,4,1.3|c:12,12.5,1.3|M4 11.2 L12 4.8 M4.3 12.1 H10.7',
+  teardrop:   'M2 8 H6.5|M6.5 6.5 L10 4.4 M6.5 9.5 L10 11.6|c:11.5,8,3.5',
+  eco:        'r:1.5,2,5.5,5|r:9,9,5.5,5|M7 4.5 H11.5 V8 M10 6.5 L11.5 8 L13 6.5',
+  novaPlaca:  'r:2,3,10,10|M13 1.5 V6.5 M10.5 4 H15.5',
+  alinhar:    'M2.5 2 V14|r:4.5,3.5,8,3|r:4.5,9.5,5,3',
+  colar:      'r:3,3,10,11.5|M6 3 V1.8 H10 V3|M5.5 7.5 H10.5 M5.5 10 H9',
 };
 
 const SVG = 'http://www.w3.org/2000/svg';

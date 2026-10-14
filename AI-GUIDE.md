@@ -20,6 +20,13 @@ Duas frentes de trabalho, normalmente nesta ordem para um projeto novo:
   pelo ECO do Altium (ou para um projeto que já tinha PCB), posicionar/rotear a placa —
   fluxo idêntico ao v1, só que os arquivos agora vivem em `Projects\<nome>\`.
 
+**Pelo MCP (recomendado):** o servidor `mcp/eletrichub-mcp.js` dá à IA as ferramentas do hub
+inteiro — projeto, esquema, PCB (com os `orig_*` preenchidos sozinhos a partir do `board.js`),
+regras/DRC, ratsnest, polygon pour, teardrops, ECO, placa nova, Gerber, PDF e sinalizadores —
+e cada escrita valida antes de gravar. Registro: `node mcp/registrar.js` (ou, no app, Ajuda »
+Conectar IA). `list_commands` lista tudo; o `mcp/README.md` explica. Este documento continua
+sendo o contrato dos arquivos, que é o que as ferramentas escrevem.
+
 ---
 
 ## Parte A — Esquema (`schematic.js`)
@@ -171,6 +178,22 @@ fariam o `schematic.js` mudar sem que nada do desenho tenha mudado.
 Ele é **opcional e é omitido quando vazio** — `schematic.js` de projeto antigo não o tem, e
 componente da biblioteca da casa nunca vai ter. Sem ele a lista de materiais ainda sai,
 mas a linha só pode casar por MPN ou voltar para conferência humana.
+
+### Template de folha (`sheet`, opcional)
+
+Cada item `sheet` pode levar dois campos. Folha sem `template` desenha como sempre desenhou.
+- `"template":"<id>"`: o id do template, de `Libs/sch-templates.js` (os do Altium: `altium:Standard`, `ISO A3 Landscape`…) ou de `Libs/sch-templates-casa.js` (o da casa: `casa:A4_DiEletrons`).
+- `"params":"Chave=Valor;…"`: os parâmetros do carimbo da folha. O cabeçalho do arquivo pode levar o mesmo `params` para os parâmetros do projeto.
+
+Texto do carimbo `=Nome` (sem diferenciar maiúsculas) se resolve nesta ordem:
+1. a folha;
+2. o projeto;
+3. o sistema: `SheetNumber`, `SheetTotal`, `CurrentDate`, `DocumentName`, `ProjectName`.
+
+Os nomes da casa valem como apelidos dos do Altium: `Desenhista_DiEletrons`=`DrawnBy`,
+`Verificador_DiEletrons`=`CheckedBy`, `Aprovador_DiEletrons`=`ApprovedBy`,
+`Revisao`=`Revision`, `Arquivo`=`DocumentNumber`, `Equipamento_linha_um`=`Title`. O
+`BuildSchematic.pas` ignora esses campos.
 
 ### Regras de conectividade (como o Altium)
 
@@ -327,6 +350,44 @@ var changes = [
 | `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
 | `outline_set` | `pts` (`[[x,y],...]` ≥3, polígono **fechado**, só linhas) | `note` |
 | `comp_attr` | `ref`, `orig_designator`, `orig_comment` | `designator` (novo texto), `comment` (novo texto), `note` |
+| `comp_add` | `ref`, `footprint`, `x`, `y` | `rot`, `layer` (Top/Bottom), `comment`, `nets` (texto plano `"1=GND;2=VCC"`), `note` |
+| `comp_del` | `ref`, `orig_x`, `orig_y`, `orig_rot`, `orig_layer` | `orig_footprint`, `note` |
+| `pad_net` | `ref`, `pad` (nome do pad), `net` (`""` = sem net), `orig_net` | `note` |
+| `net_add` / `net_del` | `net` | `note` |
+| `net_rename` | `net` (novo), `orig_net` | `note` |
+| `pad_add` | `type` (smd/th/npth), `x`, `y`, `w`, `h`; furo: `drill` | `shape` (circle/rect/oval/roundrect/octagon), `rot`, `layer` (SMD: Top/Bottom), `name`, `net`, `radius`, `drillshape` (circle/rect/oblong), `drillw`, `holerot`, `note` |
+| `pad_edit` | `id` (pad solto `p…`), `orig_x`, `orig_y` | os campos do `pad_add`, menos `type` |
+| `pad_del` | `id`, `orig_x`, `orig_y` | `note` |
+| `comment_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
+| `poly_add` | `layer` (cobre), `pts` | `net`, `pour` (solid/hatch/none), `removeDead`, `minArea`, `ordem`, `clearance`, `nome`, `con_tipo`/`con_condutores`/`con_largura`/`con_gap`/`con_angulo`, `pourOver`, `removeNecks`, `neck`, `arco`, `clearanceBorda`, `note` |
+| `poly_edit` / `poly_del` | `id` (`pg…`), `orig_layer`, `orig_n`, `orig_x0`, `orig_y0` | (edit) os do `poly_add` |
+
+**Ops da placa nova (2026-10-13).**
+- `comp_add` acha o footprint no `Libs/pcblib.js`, depois na biblioteca embutida da placa
+  (`board.footprints`), depois num componente da placa com o mesmo footprint. Se não achar
+  nenhum, é erro de validação.
+- `outline_set` também aceita arco: cada vértice é `[x,y]` ou `[x,y,b]`, com `b` = bulge
+  (tan(varredura/4), positivo anti-horário).
+- O polígono (`poly_*`) é despejado pelo hub (`hub-pcbpour.js`) na tela, no Gerber e no PDF.
+  O cobre despejado pelo Altium fica como veio.
+- O padrão da casa é conexão Direct e ilha mínima de 1,6129 mm².
+- No Altium, essas ops entram pelo bloco APOSTAS do `ApplyChanges.pas`: confira o
+  `apply-report.txt` na primeira rodada.
+
+**Regras e DRC.**
+- As regras do projeto ficam em `Projects/<nome>/rules.js`: `var pcbrules = {"format":"pcbrules-v1", …}`,
+  uma regra por linha, em mm, com escopo na query do Altium (`InNet('GND')`,
+  `InNetClass(…)`, `OnLayer('Top')`, `IsVia`…).
+- Sem esse arquivo, valem as que o `board.js` trouxe sobre o padrão da casa (clearance 10 mil).
+- O DRC (`hub-pcbdrc.js`, botão DRC da vista PCB, ou a ferramenta `drc_rodar` do MCP)
+  confere clearance, curto, largura, via, furo, furo a furo, ponte de máscara, silk,
+  contorno e net não roteada.
+- Rode o DRC depois de rotear; não entregue placa com violação sem dizer qual e por quê.
+
+**Também vem do Altium (só na tela e nas saídas, sem op própria).**
+- Linhas de conexão (ratsnest): o que falta ligar por net.
+- Teardrop refeito quando a trilha ou a via anda; teardrop novo é `region_add` (botão Teardrops).
+- O PDF de layout (`LO -`) com o carimbo DIEletrons, gravado em `Projects/<nome>/PDF/`.
 
 - **Ordem.** O ApplyChanges aplica o arquivo na ordem e confere cada `orig_*` com o objeto
   como ele está DEPOIS das linhas anteriores — o motor do hub faz a mesma conta e acusa erro.

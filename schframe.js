@@ -26,6 +26,10 @@ const LIBS = [
   { src:'Libs/lib-subs.js',        nome:'libSubs' },
   /* NAO e acervo (nao esta em ACERVO_DEFS): entra so para o resgate de desenho abaixo */
   { src:'Libs/symbols-lib.js',     nome:'symbolsLib' },
+  /* NAO sao acervo: os templates de folha (hub-schtemplate.js le os globais a cada desenho).
+     Recarregar traz o template que outra pessoa acabou de salvar no editor */
+  { src:'Libs/sch-templates.js',      nome:'schtemplates' },
+  { src:'Libs/sch-templates-casa.js', nome:'schtemplatesCasa' },
 ];
 
 /* ------- acervos -------
@@ -3570,6 +3574,13 @@ function secFolha(){
      usuário descobre que o export chamou de "A4" a folha A3 dele */
   prKv(s, 'size no arquivo', (sh.size || '—') + (casa && casa.name !== sh.size ? '  (mede ' + casa.name + ')' : ''),
        casa && casa.name !== sh.size ? 'warn' : 'mono');
+  /* TEMPLATE e PARÂMETROS da folha (o Document Options do Altium): a seção inteira, o editor
+     de template e a gravação moram no hub-schtemplate-ui.js; daqui ele só recebe as alças */
+  if (typeof HubSchTemplateUI !== 'undefined') s.append(HubSchTemplateUI.secao({
+    schematic, nome: sh.name, indice: sheetIdx, total: model.sheets.length,
+    item: () => itemFolha(sh.name), medida: () => HubCore.sheetSize(sh),
+    commit, sujo: () => setSchDirty(true), redesenha: () => { cam.draw(); pintaMiniaturas(); },
+    enquadra: () => cam.fit(fitBBox()), contaFora: med => contaFora(sheetIdx, med) }));
   return s;
 }
 function renderProps(){
@@ -4117,6 +4128,19 @@ function topologiaDe(si){
   topoCache.set(k, r);
   return r;
 }
+/* O TEMPLATE DE FOLHA (moldura, zonas, carimbo — o .SchDot do Altium): só quando o item `sheet`
+   traz `template`. Folha sem o campo desenha exatamente como antes; o motor inteiro mora no
+   hub-schtemplate.js, e sem ele carregado isto não faz nada. Campo sem valor sai em branco
+   (o Altium mostraria o "*" da semente; na tela, vazio lê melhor). */
+function desenhaTemplate(ctx, si, esc){
+  const T = typeof HubSchTemplate !== 'undefined' ? HubSchTemplate : null;
+  const s = model.sheets[si];
+  if (!T || !s) return;
+  const d = T.daFolha(schematic, s.name);
+  if (!d.tpl) return;
+  d.ctxo.faltante = '';
+  T.desenha(ctx, d.tpl, HubCore.sheetSize(s), d.ctxo, { esc, aoChegarImagem: () => { cam.draw(); pintaMiniaturas(); } });
+}
 function desenhaFolha(ctx, si, o){
   const s = model.sheets[si];
   const foco = o.foco, esc = o.esc;
@@ -4141,6 +4165,7 @@ function desenhaFolha(ctx, si, o){
   }
   ctx.strokeStyle = D.SCH.border; ctx.lineWidth = 8;
   ctx.strokeRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
+  desenhaTemplate(ctx, si, esc);
   /* o que tem de ficar POR BAIXO dos fios e dos simbolos (a cruz do cursor do fio) */
   if (o.antesDosFios) o.antesDosFios(ctx);
 
@@ -5589,7 +5614,16 @@ window.addEventListener('keydown', e => {
      Espaco inverte o canto (nao gira a selecao), Shift+Espaco troca o modo, Backspace desfaz */
   if (tool === 'wire' && (e.key === ' ' || e.code === 'Space')){ e.preventDefault(); espacoDoFio(e.shiftKey); return; }
   if (tool === 'wire' && wireDraw && e.key === 'Backspace'){ e.preventDefault(); backspaceDoFio(); return; }
-  const acao = ATALHOS.porTecla[normalizaTecla(e)];
+  /* as sequencias do Altium (O,D; O,S e as da predefinicao "Padrao Altium"): o leitor do
+     hub-atalhos.js segura o comeco e o mostra no rodape; tecla simples sai igual a antes */
+  const tk = normalizaTecla(e);
+  let acao = ATALHOS.porTecla[tk];
+  const ld = leitorSch();
+  if (ld) {
+    if (ld.pendente() || (ATALHOS.prefixos instanceof Set && ATALHOS.prefixos.has(tk))) {
+      e.preventDefault(); ld.tecla(tk); return;
+    }
+  }
   if (!acao) return;
   /* O ESPACO COM UM BOTAO EM FOCO ja se resolve sozinho, e MEDIDO no Chrome: com selecao, o
      `e.preventDefault()` da linha de girar cancela a ativacao nativa do botao (o componente
@@ -5618,6 +5652,8 @@ function fazAcao(id){
     case 'espelhoX':  if (sel.size) mirrorSel('x'); else return false; return;
     case 'espelhoY':  if (sel.size) mirrorSel('y'); else return false; return;
     case 'apagar':    deleteSel(); return;
+    case 'template':  if (typeof HubSchTemplateUI !== 'undefined') HubSchTemplateUI.abreEditor(); return;
+    case 'folha':     if (typeof HubSchTemplateUI !== 'undefined') HubSchTemplateUI.abreParametros(); return;
     case 'enquadrar': cam.fit(fitBBox()); refazGesto(); return;
     case 'grade':     $('btnGrid').click(); return;
     case 'desfazer':  undo(); return;
@@ -5994,6 +6030,12 @@ function desenhaMiniatura(cvm, si){
    mesma origem) dividem o localStorage: quando o modal grava, o evento `storage` chega aqui e
    o teclado troca na hora, sem recarregar a folha. `key === null` e o localStorage.clear(). */
 let ATALHOS = mapaAtalhos(HA.carrega());
+let LEITOR_SCH = null;
+function leitorSch(){
+  if (!LEITOR_SCH && typeof HA.leitor === 'function')
+    LEITOR_SCH = HA.leitor(() => ATALHOS, id => fazAcao(id), { aoEsperar:seq => { const el = $('shover'); if (el) el.textContent = seq ? seq + ', …' : ''; } });
+  return LEITOR_SCH;
+}
 window.addEventListener('storage', e => {
   if (e.key === HA.CHAVE || e.key === null) ATALHOS = mapaAtalhos(HA.carrega());
 });

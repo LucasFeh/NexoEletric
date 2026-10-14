@@ -5,6 +5,7 @@ Uso: python hubserver.py [--port 8000]
 Aditivo: nao altera nenhum arquivo do hub; abrir hub.html por duplo clique segue igual.
 """
 import argparse
+import base64
 import hashlib
 import hmac
 import json
@@ -51,6 +52,8 @@ ESTADO_LOCAL = BOM_STATE_FILES + (ODOO_LISTA, ODOO_EXTRAS)
 # a vista que acabou de gerar e ainda esta mostrando o conjunto. Nenhuma pagina desenha a
 # partir dela.
 GERBER_DIR = 'Gerber'
+# o PDF de layout da vista PCB (/api/pdf): fora do vigia, como o Gerber
+PDF_DIR = 'PDF'
 
 app = Flask(__name__)
 _version = 0           # incrementa a cada mudanca detectada
@@ -106,7 +109,8 @@ def _snapshot():
                 # dentro de Projects/<nome>/ (um projeto chamado "Gerber" continua visto):
                 # nao desce na pasta do Gerber gerado; ver GERBER_DIR
                 dirnames[:] = [d for d in dirnames
-                               if os.path.normcase(d) != os.path.normcase(GERBER_DIR)]
+                               if os.path.normcase(d) not in (os.path.normcase(GERBER_DIR),
+                                                              os.path.normcase(PDF_DIR))]
             for f in filenames:
                 # o .tmp da gravacao atomica junto: uma varredura que o pegasse no meio da
                 # escrita via um arquivo nascer e sumir, e isso tambem e "mudou"
@@ -205,13 +209,16 @@ def files(path):
     return _serve(path)
 
 
-SAVE_BASENAMES = ('changes.js', 'schematic.js', 'annotations.js')
+# rules.js: as regras de projeto da vista PCB (hub-pcbregras.js), o Rules and Constraints Editor
+SAVE_BASENAMES = ('changes.js', 'schematic.js', 'annotations.js', 'rules.js')
 
 # Libs/ e da biblioteca: o symserver (/api/symbols/*) e o guardiao do almoxarifado reescrevem
 # schlib.js, symbols-lib.js e os espelhos inteiros, cada um sob a sua trava. A substituicao de
 # nomes mora num arquivo SEPARADO, o unico de Libs/ que o browser grava direto por aqui. (No
 # app desktop em modo biblioteca remota, este POST vai para o servidor: ver libremota.py.)
-SAVE_LIB_FILES = ('lib-subs.js',)
+# sch-templates-casa.js: os templates de folha criados no hub (hub-schtemplate-ui.js); os do
+# Altium ficam no Libs/sch-templates.js, que e codigo e nao se grava daqui
+SAVE_LIB_FILES = ('lib-subs.js', 'sch-templates-casa.js')
 
 
 @app.route('/api/save', methods=['POST'])
@@ -226,7 +233,8 @@ def api_save():
     ok_lib = len(parts) == 2 and parts[0] == 'Libs' and parts[1] in SAVE_LIB_FILES
     if not (ok_proj or ok_lib):
         return {'ok': False,
-                'error': 'so Projects/<nome>/{changes,schematic,annotations}.js ou Libs/lib-subs.js'}, 403
+                'error': 'so Projects/<nome>/{changes,schematic,annotations,rules}.js ou '
+                         'Libs/{lib-subs,sch-templates-casa}.js'}, 403
     full = safe_join(ROOT, *parts)
     if full is None or not os.path.isdir(os.path.dirname(full)):
         return {'ok': False, 'error': 'pasta inexistente'}, 404
@@ -475,6 +483,59 @@ def api_gerber():
             return {'ok': False, 'error': 'falha ao gravar o Gerber: %s' % e}, 500
     return {'ok': True, 'pasta': 'Projects/%s/%s' % (os.path.basename(d), GERBER_DIR),
             'arquivos': lista, 'removidos': removidos}
+
+
+PDF_MAX_BYTES = 40 * 1024 * 1024        # a pagina realista leva imagem; o vetorial tem ~200 KB
+_PDF_NOME = re.compile(r'[A-Za-z0-9 _.()+,-]+')
+
+
+@app.route('/api/pdf', methods=['POST'])
+def api_pdf():
+    """Grava o PDF de layout da vista PCB (hub-pcbpdf.js) em Projects/<proj>/PDF/<nome>.pdf.
+
+    Corpo: {proj, nome, base64}. O nome e so o arquivo (sem pasta), com ou sem .pdf; o conteudo
+    tem de comecar com %PDF-. Mesma regra do /api/gerber para o projeto: so pasta que ja existe
+    em Projects/ e que tem board.js. Grava por cima do PDF de mesmo nome (o LO - da revisao).
+    """
+    request.max_content_length = PDF_MAX_BYTES * 2 + 1024 * 1024
+    try:
+        data = request.get_json(silent=True)
+    except RequestEntityTooLarge:
+        return {'ok': False, 'error': 'PDF grande demais'}, 413
+    if not isinstance(data, dict) or not isinstance(data.get('base64'), str):
+        return {'ok': False, 'error': 'JSON {proj, nome, base64} obrigatorio'}, 400
+    d, motivo = _gerber_projeto(data.get('proj'))
+    if d is None:
+        return {'ok': False, 'error': motivo}, 404
+    nome = data.get('nome')
+    if not isinstance(nome, str):
+        return {'ok': False, 'error': 'nome obrigatorio'}, 400
+    nome = nome.strip()
+    if nome.lower().endswith('.pdf'):
+        nome = nome[:-4].rstrip()
+    if (not nome or len(nome) > 150 or nome.startswith('.') or nome.endswith('.')
+            or not _PDF_NOME.fullmatch(nome)):
+        return {'ok': False, 'error': 'nome de arquivo invalido'}, 403
+    try:
+        corpo = base64.b64decode(data['base64'], validate=True)
+    except ValueError:
+        return {'ok': False, 'error': 'base64 invalido'}, 400
+    if not corpo.startswith(b'%PDF-'):
+        return {'ok': False, 'error': 'o conteudo nao e um PDF'}, 400
+    if len(corpo) > PDF_MAX_BYTES:
+        return {'ok': False, 'error': 'PDF grande demais'}, 413
+    pdir = os.path.join(d, PDF_DIR)
+    full = os.path.join(pdir, nome + '.pdf')
+    try:
+        os.makedirs(pdir, exist_ok=True)
+        tmp = full + '.tmp'
+        with open(tmp, 'wb') as f:
+            f.write(corpo)
+        os.replace(tmp, os.path.realpath(full))
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao gravar o PDF: %s' % e}, 500
+    return {'ok': True, 'arquivo': 'Projects/%s/%s/%s.pdf' % (os.path.basename(d), PDF_DIR, nome),
+            'bytes': len(corpo)}
 
 
 # ─────────────────────────── configuracao do hub ───────────────────────────
@@ -1309,6 +1370,26 @@ symserver.registra(app, ROOT)
 # voltaria a divergir do servidor, que e o que o modo existe para impedir.
 import libremota                     # noqa: E402
 libremota.registra(app, ROOT, os.environ.get('ALTIUMHUB_LIB_REMOTA'))
+
+# ─────────────────── placa nova (vista PCB » Placa nova) ───────────────────
+# POST /api/board-novo: cria Projects/<nome>/ com o board.js MESTRE do hub-pcbnova.js. Nunca
+# sobrescreve espelho do Altium (409). Sob try pelo mesmo motivo do Odoo abaixo.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import board_novo              # noqa: E402
+    board_novo.registra(app, lambda: ROOT)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: placa nova desligada (%s) — falta tools/rotas/board_novo.py.' % _e)
+
+# ─────────────────── MCP: o canal da IA com a vista aberta (mcp/) ───────────────────
+# /api/mcp/{status,pedido,pedidos,resposta/<id>}: o servidor MCP (mcp/eletrichub-mcp.js) pede
+# screenshot/foco/comando a vista aberta; fila em memoria, nada em disco.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'mcp'))
+    import rotas_hub as _mcp_rotas  # noqa: E402
+    _mcp_rotas.registra(app, ROOT)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: rotas do MCP desligadas (%s) — falta mcp/rotas_hub.py.' % _e)
 
 # ─────────────────── lista de componentes para o Odoo ───────────────────
 # Sob try: o hub inteiro (laser, BOM, PCB) nao pode deixar de subir porque UM arquivo novo

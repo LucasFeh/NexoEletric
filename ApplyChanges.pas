@@ -4,7 +4,9 @@
 { .  Le Projects\<nome do projeto>\changes.js e aplica as mudancas na placa:                                          . }
 { .    comp_move | comp_attr | track_edit | track_add | track_del | via_edit | via_add | via_del |                    . }
 { .    arc_edit | arc_add | arc_del | text_edit | text_add | text_del | designator_move | outline_set |               . }
-{ .    fill_add | fill_edit | fill_del | region_add | region_del                                                      . }
+{ .    fill_add | fill_edit | fill_del | region_add | region_del |                                                    . }
+{ .    comp_add | comp_del | pad_net | net_add | net_del | net_rename | pad_add | pad_edit | pad_del |                 . }
+{ .    comment_move | poly_add | poly_edit | poly_del   (placa nova e ECO, 2026-10-13; outline_set aceita arco)       . }
 { .  Trilha, arco, fill, region e texto vao para qualquer camada do contrato menos a Multi (ver "Camadas").           . }
 { .  Toda chamada de API que este arquivo ainda nao tinha provado vai em try/except: a RECUSA em tempo de execucao    . }
 { .  vira FALHA ou AVISO no relatorio, dizendo qual chamada. Nome que esta versao do Altium NAO CONHECE e outra       . }
@@ -42,6 +44,24 @@
 {   SetOutlineContour ................................. MontaContorno (region_add)           }
 {   X1Location Y1Location X2Location Y2Location ....... LeCantosFill e GravaCantosFill       }
 {   UseTTFonts ........................................ FonteStroke (text_add)               }
+{   --- placa nova e ECO (2026-10-13) ---                                                     }
+{   Pattern (escrita), LoadCompFromLibrary,                                                   }
+{     LoadCompFromLibraryWithFileName ................. CarregaFootprint (comp_add) - os dois  }
+{                                                       metodos MEDIDOS so como nome, na      }
+{                                                       tabela do Advpcb.dll do AD21          }
+{   Pad.TopXSize/TopYSize/TopShape/BotXSize/BotYSize/BotShape/HoleSize/HoleType/HoleWidth/    }
+{     HoleRotation/Name (ESCRITA; a leitura roda no ExportBoard) ... GravaPad (pad_add/edit)  }
+{   Pad.Plated (escrita) .............................. GravaMetalizado (pad_add npth)        }
+{   ChangeCommentAutoposition ......................... CommentManual (comment_move)          }
+{   ArcTan, Sqrt (as primeiras contas de trigonometria dos .pas) ... AnguloDe e ArcoDoBulge    }
+{                                                       (outline_set e poly_* com arco)       }
+{   Seg.cx/cy/Radius/Angle1/Angle2 (ESCRITA; a leitura roda no ExportBoard) ... GravaSegmentos}
+{   PolyHatchStyle, Grid, TrackSize, RemoveDead, PourIndex, Name do polygon ... PropsDoPoligono}
+{   Rebuild de polygon (o do BoardOutline ja roda) .... DoPolyAdd, DoPolyEdit                 }
+{ Os numeros novos (sem constante, ver acima): SEG_ARCO (TPolySegmentType, conferido contra o  }
+{ ePolySegmentLine = 0 no comeco da rodada) e HATCH_* (TPolyHatchStyle, NAO conferido - a      }
+{ ordem e a da documentacao). Pad.Net := nil (tirar o pad da net) e comportamento, nao nome:   }
+{ esta no try do DoPadNet.                                                                     }
 {                                                                                             }
 { Ja rodaram neste repositorio, entao o nome compila (o que falta medir e so o comportamento):}
 { XLocation/YLocation de texto (este arquivo, 2026-08), PCBObjectFactory e Layer (este        }
@@ -86,6 +106,15 @@ const
   // 7, eNetObject 8, eComponentObject 9, ePolyObject 10, eRegionObject 11), e nao pelo nome
   // eFillObject: ver APOSTAS. Quem confere a numeracao e ObjetosNumerados, no comeco da rodada.
   OBJ_FILL = 6;
+  // Segmento de arco do contorno (TPolySegmentType: Line 0, Arc 1), pelo numero: ver APOSTAS.
+  SEG_ARCO = 1;
+  // TPolyHatchStyle pela ordem da documentacao (Hatch90 0, Hatch45 1, VHatch 2, HHatch 3,
+  // NoHatch 4, Solid 5) - NAO medido: ver APOSTAS.
+  HATCH_90 = 0;
+  HATCH_45 = 1;
+  HATCH_NENHUM = 4;
+  HATCH_SOLIDO = 5;
+  PI_ = 3.14159265358979;
 
 var
   // Preenchidas por HubHome(0) na PRIMEIRA linha do procedimento principal. Eram const,
@@ -113,6 +142,8 @@ var
   KindRecorteN: Integer;
   KindRecorteOrigem: String;
   KindRecorteConferido: Boolean;
+  // Sonda da numeracao do segmento de contorno (SEG_ARCO); preenchida no comeco do ApplyChangesInto.
+  SegmentosNumerados: Boolean;
 
 { ..................................................................................................................... }
 { .                                          Parsing de JSON plano por linha                                          . }
@@ -2727,23 +2758,144 @@ begin
   LogOk('comp_attr ' + Ref + ' -> designator=' + JGet(Line, 'designator') + ' comment=' + JGet(Line, 'comment'));
 end;
 
+{ ---- contorno com arco (bulge) ---- }
+
+// APOSTA (ver APOSTAS): ArcTan e Sqrt - as primeiras contas de trigonometria dos .pas.
+// Angulo de (dx,dy) em graus, 0..360 (o atan2 feito com ArcTan, que e o que o Pascal tem).
+function AnguloDe(dx, dy: Double): Double;
+begin
+  if Abs(dx) < 1E-12 then
+  begin
+    if dy >= 0 then
+      Result := 90
+    else
+      Result := 270;
+    Exit;
+  end;
+  Result := ArcTan(dy / dx) * 180 / PI_;
+  if dx < 0 then
+    Result := Result + 180;
+  if Result < 0 then
+    Result := Result + 360;
+  if Result >= 360 then
+    Result := Result - 360;
+end;
+
+// O arco de bulge B que vai de (x1,y1) a (x2,y2) - a mesma conta do HubCore.bulgeArco, so com
+// algebra e ArcTan: raio = c(1+b^2)/(4|b|), centro a (c/2)(1-b^2)/(2b) da corda, a esquerda.
+// Sai anti-horario de A1 para A2 (como o ExportBoard le Angle1/Angle2).
+procedure ArcoDoBulge(x1, y1, x2, y2, B: Double; var cx, cy, r, A1, A2: Double);
+var
+  c, ux, uy, s, t: Double;
+begin
+  c := Sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+  ux := (x2 - x1) / c;
+  uy := (y2 - y1) / c;
+  r := c * (1 + B * B) / (4 * Abs(B));
+  s := (c / 2) * (1 - B * B) / (2 * B);
+  cx := (x1 + x2) / 2 - uy * s;
+  cy := (y1 + y2) / 2 + ux * s;
+  A1 := AnguloDe(x1 - cx, y1 - cy);
+  A2 := AnguloDe(x2 - cx, y2 - cy);
+  if B < 0 then
+  begin
+    t := A1;
+    A1 := A2;
+    A2 := t;
+  end;
+end;
+
+// 'x|y' ou 'x|y,b' (o ParsePts deixa o terceiro numero colado no y) -> y e bulge
+function PtYSo(P: String): Double;
+var
+  s: String;
+  k: Integer;
+begin
+  s := Copy(P, Pos('|', P) + 1, 255);
+  k := Pos(',', s);
+  if k > 0 then
+    s := Copy(s, 1, k - 1);
+  Result := StrToFloatDot(s);
+end;
+
+function PtBulge(P: String): Double;
+var
+  s: String;
+  k: Integer;
+begin
+  Result := 0;
+  s := Copy(P, Pos('|', P) + 1, 255);
+  k := Pos(',', s);
+  if k > 0 then
+    Result := StrToFloatDot(Copy(s, k + 1, 255));
+end;
+
+// Os segmentos de um contorno (BoardOutline ou polygon) a partir do pts com bulge. Arco por
+// NUMERO (SEG_ARCO, conferido no comeco da rodada contra o ePolySegmentLine que ja roda); os
+// campos cx/cy/Radius/Angle1/Angle2 sao os que o ExportBoard le do BoardOutline.
+procedure GravaSegmentos(BO: TObject; Pts: TStringList);
+var
+  i, j: Integer;
+  Seg: TPolySegment;
+  B, cx, cy, r, A1, A2: Double;
+begin
+  BO.PointCount := Pts.Count;
+  for i := 0 to Pts.Count - 1 do
+  begin
+    j := (i + 1) mod Pts.Count;
+    Seg := BO.Segments[i];
+    B := PtBulge(Pts[i]);
+    Seg.vx := MMX(PtX(Pts[i]));
+    Seg.vy := MMY(PtYSo(Pts[i]));
+    if (Abs(B) > 1E-12) and SegmentosNumerados then
+    begin
+      ArcoDoBulge(PtX(Pts[i]), PtYSo(Pts[i]), PtX(Pts[j]), PtYSo(Pts[j]), B, cx, cy, r, A1, A2);
+      Seg.Kind := SEG_ARCO;
+      Seg.cx := MMX(cx);
+      Seg.cy := MMY(cy);
+      Seg.Radius := MMsToCoord(r);
+      Seg.Angle1 := A1;
+      Seg.Angle2 := A2;
+    end
+    else
+      Seg.Kind := ePolySegmentLine;
+    BO.Segments[i] := Seg;
+  end;
+end;
+
+// quantos vertices do pts tem arco (bulge <> 0)
+function ContaArcos(Pts: TStringList): Integer;
+var
+  i: Integer;
+begin
+  Result := 0;
+  for i := 0 to Pts.Count - 1 do
+    if Abs(PtBulge(Pts[i])) > 1E-12 then
+      Result := Result + 1;
+end;
+
+// Vertice [x,y] = reta ate o proximo; [x,y,b] = arco de bulge b (o HubCore.ptsToOutline). O
+// arco vai por GravaSegmentos (ver APOSTAS); sem a numeracao do segmento conferida, o contorno
+// sai so com as retas entre os vertices, e o relatorio diz.
 procedure DoOutlineSet(Line: String);
 var
   Pts: TStringList;
-  i, p: Integer;
   BO: TObject;
-  Seg: TPolySegment;
-  x, y: Double;
+  NArcos: Integer;
 begin
   Pts := ParsePts(Line);
-  if Pts.Count < 3 then
+  NArcos := ContaArcos(Pts);
+  if (Pts.Count < 3) and not ((Pts.Count = 2) and (NArcos > 0)) then
   begin
-    LogFail('outline_set: pts precisa de pelo menos 3 vertices [[x,y],...]');
+    LogFail('outline_set: pts precisa de pelo menos 3 vertices [[x,y],...] (2 com arco)');
     Pts.Free;
     Exit;
   end;
+  if (NArcos > 0) and not SegmentosNumerados then
+    LogAviso('outline_set: a numeracao do segmento de contorno nao e a esperada (ePolySegmentLine = ' +
+      IntToStr(ePolySegmentLine) + ') - os ' + IntToStr(NArcos) + ' arco(s) saem como reta');
   if not ConfirmNoYes('outline_set: substituir o CONTORNO DA PLACA por um poligono de ' +
-    IntToStr(Pts.Count) + ' vertices?') then
+    IntToStr(Pts.Count) + ' vertices (' + IntToStr(NArcos) + ' com arco)?') then
   begin
     LogFail('outline_set: cancelado pelo usuario');
     Pts.Free;
@@ -2752,18 +2904,7 @@ begin
   BO := Board.BoardOutline;
   PCBServer.SendMessageToRobots(BO.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
   BO.Invalidate;
-  BO.PointCount := Pts.Count;
-  for i := 0 to Pts.Count - 1 do
-  begin
-    p := Pos('|', Pts[i]);
-    x := StrToFloatDot(Copy(Pts[i], 1, p - 1));
-    y := StrToFloatDot(Copy(Pts[i], p + 1, 255));
-    Seg := BO.Segments[i];
-    Seg.Kind := ePolySegmentLine;
-    Seg.vx := MMX(x);
-    Seg.vy := MMY(y);
-    BO.Segments[i] := Seg;
-  end;
+  GravaSegmentos(BO, Pts);
   BO.Rebuild;
   BO.Validate;
   PCBServer.SendMessageToRobots(BO.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
@@ -3504,6 +3645,874 @@ begin
 end;
 
 { ..................................................................................................................... }
+{ .                     Placa nova e ECO (2026-10-13): componente, pad, net, comment, polygon                         . }
+{ ..................................................................................................................... }
+
+// Net de um primitivo ('' = sem net). Em try: o ExportBoard le Prim.Net.Name de pad, trilha e
+// via; aqui ele vale tambem para o pad de componente novo, que nunca passou por ele.
+function NetDe(Prim: TObject): String;
+begin
+  Result := '';
+  try
+    if Prim.Net <> nil then
+      Result := Prim.Net.Name;
+  except
+    Result := '';
+  end;
+end;
+
+// Quantos pads o componente tem (o GroupIterator de pads e o do ExportBoard).
+function ContaPads(Comp: TObject): Integer;
+var
+  Iter, Pad: TObject;
+begin
+  Result := 0;
+  Iter := Comp.GroupIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(ePadObject));
+  Iter.AddFilter_LayerSet(AllLayers);
+  Pad := Iter.FirstPCBObject;
+  while Pad <> nil do
+  begin
+    Result := Result + 1;
+    Pad := Iter.NextPCBObject;
+  end;
+  Comp.GroupIterator_Destroy(Iter);
+end;
+
+// Pads do componente com o nome PadNome. Conferir: quantos sao e se TODOS estao em OrigNet
+// (Diverge = algum nao esta). Gravar: poe todos em Net (nil = sem net) e devolve quantos.
+function NetNosPads(Comp: TObject; PadNome: String; Gravar: Boolean; Net: TObject; OrigNet: String;
+  var Diverge: Boolean): Integer;
+var
+  Iter, Pad: TObject;
+begin
+  Result := 0;
+  Diverge := False;
+  Iter := Comp.GroupIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(ePadObject));
+  Iter.AddFilter_LayerSet(AllLayers);
+  Pad := Iter.FirstPCBObject;
+  while Pad <> nil do
+  begin
+    if Pad.Name = PadNome then
+    begin
+      Result := Result + 1;
+      if not Gravar then
+      begin
+        if NetDe(Pad) <> OrigNet then
+          Diverge := True;
+      end
+      else
+      begin
+        PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+        Pad.Net := Net;
+        PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+      end;
+    end;
+    Pad := Iter.NextPCBObject;
+  end;
+  Comp.GroupIterator_Destroy(Iter);
+end;
+
+// APOSTA (ver APOSTAS): o footprint da biblioteca no componente novo. Comp.Pattern (escrita) e
+// LoadCompFromLibrary / LoadCompFromLibraryWithFileName - os dois nomes foram MEDIDOS no
+// Advpcb.dll do AD21 (metodos do componente, na tabela ao lado de AutoPosition_NameComment e
+// GetState_PadByName), mas nada disto rodou. Primeiro as bibliotecas instaladas no Altium; nao
+// vindo pad nenhum, o arquivo da chave pcblib do home.txt (a mesma do BuildSchematic). False =
+// recusado ou sem pad; Etapa diz onde.
+function CarregaFootprint(Comp: TObject; Fp: String; var Etapa: String): Boolean;
+var
+  Lib: String;
+begin
+  Result := False;
+  try
+    Etapa := 'IPCB_Component.Pattern';
+    Comp.Pattern := Fp;
+    Etapa := 'IPCB_Component.LoadCompFromLibrary';
+    Comp.LoadCompFromLibrary(True);
+    Result := ContaPads(Comp) > 0;
+    if not Result then
+    begin
+      Lib := HomeCfgGet('pcblib');
+      if Lib <> '' then
+      begin
+        Etapa := 'IPCB_Component.LoadCompFromLibraryWithFileName(' + Lib + ')';
+        Comp.LoadCompFromLibraryWithFileName(Lib);
+        Result := ContaPads(Comp) > 0;
+      end
+      else
+        Etapa := Etapa + ' (sem pad; o home.txt nao tem a chave pcblib para tentar o arquivo)';
+    end;
+  except
+    Result := False;
+  end;
+end;
+
+// "1=GND;2=VCC" (o campo nets do comp_add) -> cada pad na sua net. Devolve o que nao pegou.
+function AplicaNetsDoCampo(Comp: TObject; Campo: String): String;
+var
+  Resto, Par, PadNome, NetNome: String;
+  p, n: Integer;
+  Net: TObject;
+  Difere: Boolean;
+begin
+  Result := '';
+  Resto := Campo;
+  while Resto <> '' do
+  begin
+    p := Pos(';', Resto);
+    if p > 0 then
+    begin
+      Par := Copy(Resto, 1, p - 1);
+      Resto := Copy(Resto, p + 1, Length(Resto));
+    end
+    else
+    begin
+      Par := Resto;
+      Resto := '';
+    end;
+    p := Pos('=', Par);
+    if p > 1 then
+    begin
+      PadNome := Copy(Par, 1, p - 1);
+      NetNome := Copy(Par, p + 1, Length(Par));
+      if NetNome <> '' then
+      begin
+        Net := FindNet(NetNome);
+        if Net = nil then
+          MaisProblema(Result, 'net "' + NetNome + '" nao existe (pad ' + PadNome + ' sem net)')
+        else
+        begin
+          n := NetNosPads(Comp, PadNome, True, Net, '', Difere);
+          if n = 0 then
+            MaisProblema(Result, 'pad "' + PadNome + '" nao existe no footprint');
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure DoCompAdd(Line: String);
+var
+  Comp: TObject;
+  Ref, Fp, What, Etapa, Prob: String;
+begin
+  Ref := JGet(Line, 'ref');
+  Fp := JGet(Line, 'footprint');
+  What := 'comp_add ' + Ref + ' (' + Fp + ')';
+  if (Ref = '') or (Fp = '') or not (JHas(Line, 'x') and JHas(Line, 'y')) then
+  begin
+    LogFail(What + ': faltam campos ref/footprint/x/y');
+    Exit;
+  end;
+  if FindComponent(Ref) <> nil then
+  begin
+    LogFail(What + ': ja existe um componente com esse designator (para trocar o footprint, comp_del antes)');
+    Exit;
+  end;
+  Comp := PCBServer.PCBObjectFactory(eComponentObject, eNoDimension, eCreate_Default);
+  Etapa := '';
+  if not CarregaFootprint(Comp, Fp, Etapa) then
+  begin
+    LogFail(What + ': o Altium nao carregou o footprint (' + Etapa + ') - confira se a PcbLib da casa esta ' +
+      'instalada; senao coloque este pelo Design >> Update PCB Document');
+    Exit;
+  end;
+  Comp.Name.Text := Ref;
+  if JHas(Line, 'comment') then
+    Comp.Comment.Text := JGet(Line, 'comment');
+  Board.AddPCBObject(Comp);
+  PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Comp.I_ObjectAddress);
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if JGet(Line, 'layer') = 'Bottom' then
+    Comp.Layer := eBottomLayer;
+  if JHas(Line, 'rot') then
+    Comp.Rotation := JNum(Line, 'rot');
+  Comp.MoveToXY(MMX(JNum(Line, 'x')), MMY(JNum(Line, 'y')));
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Comp.GraphicallyInvalidate;
+  Prob := '';
+  if JHas(Line, 'nets') then
+    Prob := AplicaNetsDoCampo(Comp, JGet(Line, 'nets'));
+  if Prob <> '' then
+    LogAviso(What + ': colocado, mas ' + Prob);
+  LogOk(What + ' -> x=' + JGet(Line, 'x') + ' y=' + JGet(Line, 'y') + ' rot=' + JGet(Line, 'rot') +
+    ' (' + IntToStr(ContaPads(Comp)) + ' pads)');
+end;
+
+procedure DoCompDel(Line: String);
+var
+  Ref, What: String;
+  Comp: IPCB_Component;
+begin
+  Ref := JGet(Line, 'ref');
+  What := 'comp_del ' + Ref;
+  Comp := FindComponent(Ref);
+  if Comp = nil then
+  begin
+    LogFail(What + ': componente nao encontrado');
+    Exit;
+  end;
+  if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y') and JHas(Line, 'orig_rot') and JHas(Line, 'orig_layer')) then
+  begin
+    LogFail(What + ': faltam campos orig_* (copie do board.js)');
+    Exit;
+  end;
+  if not (NearMM(XMM(Comp.x), JNum(Line, 'orig_x')) and NearMM(YMM(Comp.y), JNum(Line, 'orig_y')) and
+    NearAngle(Comp.Rotation, JNum(Line, 'orig_rot')) and (LayerNameOf(Comp.Layer) = JGet(Line, 'orig_layer'))) then
+  begin
+    LogFail(What + ': estado atual da placa nao casa com orig_* (re-exporte o espelho)');
+    Exit;
+  end;
+  if JHas(Line, 'orig_footprint') and (Comp.Pattern <> JGet(Line, 'orig_footprint')) then
+  begin
+    LogFail(What + ': o footprint na placa e "' + Comp.Pattern + '", nao "' + JGet(Line, 'orig_footprint') + '"');
+    Exit;
+  end;
+  Board.RemovePCBObject(Comp);
+  LogOk(What);
+end;
+
+procedure DoPadNet(Line: String);
+var
+  Ref, PadNome, NetNome, What: String;
+  Comp: IPCB_Component;
+  Net: TObject;
+  n: Integer;
+  Difere: Boolean;
+begin
+  Ref := JGet(Line, 'ref');
+  PadNome := JGet(Line, 'pad');
+  NetNome := JGet(Line, 'net');
+  What := 'pad_net ' + Ref + '-' + PadNome + ' -> "' + NetNome + '"';
+  Comp := FindComponent(Ref);
+  if Comp = nil then
+  begin
+    LogFail(What + ': componente nao encontrado');
+    Exit;
+  end;
+  if not JHas(Line, 'orig_net') then
+  begin
+    LogFail(What + ': falta orig_net (a net atual do pad)');
+    Exit;
+  end;
+  n := NetNosPads(Comp, PadNome, False, nil, JGet(Line, 'orig_net'), Difere);
+  if n = 0 then
+  begin
+    LogFail(What + ': o componente nao tem pad "' + PadNome + '"');
+    Exit;
+  end;
+  if Difere then
+  begin
+    LogFail(What + ': o pad nao esta na net "' + JGet(Line, 'orig_net') + '" (re-exporte o espelho)');
+    Exit;
+  end;
+  Net := nil;
+  if NetNome <> '' then
+  begin
+    Net := FindNet(NetNome);
+    if Net = nil then
+      LogAviso(What + ': a net nao existe na placa - o pad fica sem net');
+  end;
+  try
+    n := NetNosPads(Comp, PadNome, True, Net, '', Difere);
+    LogOk(What + ' (' + IntToStr(n) + ' pad(s))');
+  except
+    LogFail(What + ': o Altium recusou trocar a net do pad (Pad.Net)');
+  end;
+end;
+
+procedure DoNetAdd(Line: String);
+var
+  Nome, What: String;
+  Net: TObject;
+begin
+  Nome := JGet(Line, 'net');
+  What := 'net_add "' + Nome + '"';
+  if Nome = '' then
+  begin
+    LogFail('net_add: falta o nome (net)');
+    Exit;
+  end;
+  if FindNet(Nome) <> nil then
+  begin
+    LogFail(What + ': a net ja existe');
+    Exit;
+  end;
+  try
+    Net := PCBServer.PCBObjectFactory(eNetObject, eNoDimension, eCreate_Default);
+    Net.Name := Nome;
+    Board.AddPCBObject(Net);
+    if FindNet(Nome) <> nil then
+      LogOk(What)
+    else
+      LogFail(What + ': criada, mas o FindNet nao a acha (o Altium nao registrou a net)');
+  except
+    LogFail(What + ': o Altium recusou criar a net (PCBObjectFactory eNetObject / Name)');
+  end;
+end;
+
+procedure DoNetDel(Line: String);
+var
+  Nome, What: String;
+  Net: TObject;
+begin
+  Nome := JGet(Line, 'net');
+  What := 'net_del "' + Nome + '"';
+  Net := FindNet(Nome);
+  if Net = nil then
+  begin
+    LogFail(What + ': a net nao existe na placa');
+    Exit;
+  end;
+  try
+    Board.RemovePCBObject(Net);
+    LogOk(What + ' (os objetos dela ficam sem net)');
+  except
+    LogFail(What + ': o Altium recusou remover a net');
+  end;
+end;
+
+procedure DoNetRename(Line: String);
+var
+  Velho, Novo, What: String;
+  Net: TObject;
+begin
+  Velho := JGet(Line, 'orig_net');
+  Novo := JGet(Line, 'net');
+  What := 'net_rename "' + Velho + '" -> "' + Novo + '"';
+  Net := FindNet(Velho);
+  if Net = nil then
+  begin
+    LogFail(What + ': a net nao existe na placa');
+    Exit;
+  end;
+  if (Novo = '') or (FindNet(Novo) <> nil) then
+  begin
+    LogFail(What + ': o nome novo e vazio ou ja e de outra net');
+    Exit;
+  end;
+  try
+    Net.Name := Novo;
+    if FindNet(Novo) <> nil then
+      LogOk(What)
+    else
+      LogFail(What + ': o nome nao pegou (releitura)');
+  except
+    LogFail(What + ': o Altium recusou renomear (Net.Name)');
+  end;
+end;
+
+// formato do pad -> o numero do TopShape que o ExportBoard le (1 redondo, 2 retangulo,
+// 3 octogono, 9 retangulo arredondado; oval e o redondo com w <> h)
+function FormaDoPad(Nome: String): Integer;
+begin
+  Result := 1;
+  if Nome = 'rect' then
+    Result := 2
+  else if Nome = 'octagon' then
+    Result := 3
+  else if Nome = 'roundrect' then
+    Result := 9;
+end;
+
+// furo -> o numero do HoleType que o ExportBoard le (0 redondo, 1 retangular, 2 slot)
+function TipoDoFuro(Nome: String): Integer;
+begin
+  Result := 0;
+  if Nome = 'rect' then
+    Result := 1
+  else if Nome = 'oblong' then
+    Result := 2;
+end;
+
+// APOSTA (ver APOSTAS): grava no pad os campos PRESENTES na linha. Os nomes sao os que o
+// ExportBoard LE (TopXSize/TopYSize/TopShape, BotXSize..., HoleSize, HoleType, HoleWidth,
+// HoleRotation, Plated, Rotation, Name); a escrita nao rodou. Pad passante: a pilha de baixo
+// recebe o mesmo (modo simples). False = recusado; Etapa diz onde.
+function GravaPad(Pad: TObject; Line: String; Passante: Boolean; var Etapa: String): Boolean;
+begin
+  Result := False;
+  try
+    Etapa := 'Pad.x/y';
+    if JHas(Line, 'x') then
+      Pad.x := MMX(JNum(Line, 'x'));
+    if JHas(Line, 'y') then
+      Pad.y := MMY(JNum(Line, 'y'));
+    Etapa := 'Pad.TopXSize/TopYSize/TopShape';
+    if JHas(Line, 'w') then
+      Pad.TopXSize := MMsToCoord(JNum(Line, 'w'));
+    if JHas(Line, 'h') then
+      Pad.TopYSize := MMsToCoord(JNum(Line, 'h'));
+    if JHas(Line, 'shape') then
+      Pad.TopShape := FormaDoPad(JGet(Line, 'shape'));
+    if Passante then
+    begin
+      Etapa := 'Pad.BotXSize/BotYSize/BotShape';
+      Pad.BotXSize := Pad.TopXSize;
+      Pad.BotYSize := Pad.TopYSize;
+      Pad.BotShape := Pad.TopShape;
+      Etapa := 'Pad.HoleSize/HoleType/HoleWidth/HoleRotation';
+      if JHas(Line, 'drill') then
+        Pad.HoleSize := MMsToCoord(JNum(Line, 'drill'));
+      if JHas(Line, 'drillshape') then
+        Pad.HoleType := TipoDoFuro(JGet(Line, 'drillshape'));
+      if JHas(Line, 'drillw') then
+        Pad.HoleWidth := MMsToCoord(JNum(Line, 'drillw'));
+      if JHas(Line, 'holerot') then
+        Pad.HoleRotation := JNum(Line, 'holerot');
+    end;
+    Etapa := 'Pad.Rotation';
+    if JHas(Line, 'rot') then
+      Pad.Rotation := JNum(Line, 'rot');
+    Etapa := 'Pad.Name';
+    if JHas(Line, 'name') then
+      Pad.Name := JGet(Line, 'name');
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+// APOSTA (ver APOSTAS): furo nao metalizado. Ler Pad.Plated e sonda do ExportBoard; escrever nao rodou.
+function GravaMetalizado(Pad: TObject; Quer: Boolean): Boolean;
+begin
+  Result := False;
+  try
+    Pad.Plated := Quer;
+    Result := Pad.Plated = Quer;
+  except
+    Result := False;
+  end;
+end;
+
+procedure DoPadAdd(Line: String);
+var
+  Pad, Net: TObject;
+  Tipo, What, Etapa, NetNome: String;
+  L: TLayer;
+begin
+  Tipo := JGet(Line, 'type');
+  What := 'pad_add ' + Tipo + ' (' + JGet(Line, 'x') + ',' + JGet(Line, 'y') + ')';
+  if not (JHas(Line, 'x') and JHas(Line, 'y') and JHas(Line, 'w') and JHas(Line, 'h')) then
+  begin
+    LogFail(What + ': faltam campos x/y/w/h');
+    Exit;
+  end;
+  L := eMultiLayer;
+  if Tipo = 'smd' then
+  begin
+    L := eTopLayer;
+    if JGet(Line, 'layer') = 'Bottom' then
+      L := eBottomLayer;
+  end
+  else if not ((Tipo = 'th') or (Tipo = 'npth')) then
+  begin
+    LogFail(What + ': type deve ser smd, th ou npth');
+    Exit;
+  end;
+  Pad := PCBServer.PCBObjectFactory(ePadObject, eNoDimension, eCreate_Default);
+  Pad.Layer := L;
+  Etapa := '';
+  if not GravaPad(Pad, Line, Tipo <> 'smd', Etapa) then
+  begin
+    LogFail(What + ': o Altium recusou ' + Etapa);
+    Exit;
+  end;
+  if (Tipo = 'npth') and not GravaMetalizado(Pad, False) then
+    LogAviso(What + ': o Altium recusou desligar a metalizacao (Pad.Plated) - o furo ficou PTH; desligue no Properties');
+  NetNome := JGet(Line, 'net');
+  if (NetNome <> '') and (Tipo <> 'npth') then
+  begin
+    Net := FindNet(NetNome);
+    if Net <> nil then
+      Pad.Net := Net
+    else
+      LogAviso(What + ': net "' + NetNome + '" nao existe na placa - pad sem net');
+  end;
+  if (JGet(Line, 'shape') = 'roundrect') and JHas(Line, 'radius') then
+    LogAviso(What + ': o raio do canto (radius) fica o padrao do Altium - ajuste no Properties');
+  Board.AddPCBObject(Pad);
+  PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Pad.I_ObjectAddress);
+  LogOk(What);
+end;
+
+// Pad SOLTO (fora de componente) em (X, Y).
+function FindFreePad(X, Y: Double): TObject;
+var
+  Iter, Prim: TObject;
+begin
+  Result := nil;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(ePadObject));
+  Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+  Iter.AddFilter_Method(eProcessAll);
+  Prim := Iter.FirstPCBObject;
+  while Prim <> nil do
+  begin
+    if NearMM(XMM(Prim.x), X) and NearMM(YMM(Prim.y), Y) and (DonoDe(Prim) = '') then
+    begin
+      Result := Prim;
+      break;
+    end;
+    Prim := Iter.NextPCBObject;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+end;
+
+procedure DoPadEdit(Line: String);
+var
+  Pad, Net: TObject;
+  What, Etapa, NetNome: String;
+begin
+  What := 'pad_edit ' + JGet(Line, 'id');
+  if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y')) then
+  begin
+    LogFail(What + ': faltam orig_x/orig_y');
+    Exit;
+  end;
+  Pad := FindFreePad(JNum(Line, 'orig_x'), JNum(Line, 'orig_y'));
+  if Pad = nil then
+  begin
+    LogFail(What + ': nenhum pad solto em orig_x/orig_y (re-exporte o espelho)');
+    Exit;
+  end;
+  PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if JHas(Line, 'layer') and (Pad.Layer <> eMultiLayer) then
+  begin
+    if JGet(Line, 'layer') = 'Bottom' then
+      Pad.Layer := eBottomLayer
+    else if JGet(Line, 'layer') = 'Top' then
+      Pad.Layer := eTopLayer;
+  end;
+  Etapa := '';
+  if not GravaPad(Pad, Line, Pad.Layer = eMultiLayer, Etapa) then
+    LogFail(What + ': o Altium recusou ' + Etapa + ' (o pad pode ter ficado pela metade)')
+  else
+  begin
+    if JHas(Line, 'net') then
+    begin
+      NetNome := JGet(Line, 'net');
+      Net := nil;
+      if NetNome <> '' then
+        Net := FindNet(NetNome);
+      if (NetNome <> '') and (Net = nil) then
+        LogAviso(What + ': net "' + NetNome + '" nao existe na placa - a net do pad nao mudou')
+      else
+        Pad.Net := Net;
+    end;
+    LogOk(What);
+  end;
+  PCBServer.SendMessageToRobots(Pad.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  Pad.GraphicallyInvalidate;
+end;
+
+procedure DoPadDel(Line: String);
+var
+  Pad: TObject;
+  What: String;
+begin
+  What := 'pad_del ' + JGet(Line, 'id');
+  Pad := FindFreePad(JNum(Line, 'orig_x'), JNum(Line, 'orig_y'));
+  if Pad = nil then
+  begin
+    LogFail(What + ': nenhum pad solto em orig_x/orig_y (re-exporte o espelho)');
+    Exit;
+  end;
+  Board.RemovePCBObject(Pad);
+  LogOk(What);
+end;
+
+// APOSTA (ver APOSTAS): Comment do componente em Manual (o par do ChangeNameAutoposition, que
+// ja rodou no designator_move). False = recusado (o comment se move, mas o Altium pode re-ancorar).
+function CommentManual(Comp: TObject): Boolean;
+begin
+  Result := False;
+  try
+    Comp.ChangeCommentAutoposition(eAutoPos_Manual);
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+procedure DoCommentMove(Line: String);
+var
+  Comp: IPCB_Component;
+  Cm: IPCB_Text;
+  What, Ref: String;
+  cx, cy, dx, dy: Double;
+begin
+  Ref := JGet(Line, 'ref');
+  What := 'comment_move ' + Ref;
+  if not (JHas(Line, 'orig_x') and JHas(Line, 'orig_y')) then
+  begin
+    LogFail(What + ': faltam campos orig_x/orig_y (copie do item do comment em board.js >> texts)');
+    Exit;
+  end;
+  Comp := FindComponent(Ref);
+  if Comp = nil then
+  begin
+    LogFail(What + ': componente nao encontrado');
+    Exit;
+  end;
+  Cm := Comp.Comment;
+  cx := (XMM(Cm.BoundingRectangleForSelection.Left) + XMM(Cm.BoundingRectangleForSelection.Right)) / 2;
+  cy := (YMM(Cm.BoundingRectangleForSelection.Bottom) + YMM(Cm.BoundingRectangleForSelection.Top)) / 2;
+  if not (NearMM(cx, JNum(Line, 'orig_x')) and NearMM(cy, JNum(Line, 'orig_y'))) then
+  begin
+    LogFail(What + ': comment atual nao casa com orig_* (re-exporte o espelho)');
+    Exit;
+  end;
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if not CommentManual(Comp) then
+    LogAviso(What + ': o Altium recusou o autoposition Manual do comment - ele pode voltar para o lugar automatico');
+  PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  if JHas(Line, 'h') or JHas(Line, 'rot') then
+  begin
+    PCBServer.SendMessageToRobots(Cm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+    if JHas(Line, 'h') then
+      Cm.Size := MMsToCoord(JNum(Line, 'h'));
+    if JHas(Line, 'rot') then
+      Cm.Rotation := JNum(Line, 'rot');
+    PCBServer.SendMessageToRobots(Cm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  end;
+  if JHas(Line, 'x') or JHas(Line, 'y') then
+  begin
+    cx := (XMM(Cm.BoundingRectangleForSelection.Left) + XMM(Cm.BoundingRectangleForSelection.Right)) / 2;
+    cy := (YMM(Cm.BoundingRectangleForSelection.Bottom) + YMM(Cm.BoundingRectangleForSelection.Top)) / 2;
+    dx := 0;
+    dy := 0;
+    if JHas(Line, 'x') then
+      dx := JNum(Line, 'x') - cx;
+    if JHas(Line, 'y') then
+      dy := JNum(Line, 'y') - cy;
+    PCBServer.SendMessageToRobots(Cm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+    Cm.MoveByXY(MMsToCoord(dx), MMsToCoord(dy));
+    PCBServer.SendMessageToRobots(Cm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  end;
+  Comp.GraphicallyInvalidate;
+  cx := (XMM(Cm.BoundingRectangleForSelection.Left) + XMM(Cm.BoundingRectangleForSelection.Right)) / 2;
+  cy := (YMM(Cm.BoundingRectangleForSelection.Bottom) + YMM(Cm.BoundingRectangleForSelection.Top)) / 2;
+  if (JHas(Line, 'x') and (Abs(cx - JNum(Line, 'x')) > 0.01)) or (JHas(Line, 'y') and (Abs(cy - JNum(Line, 'y')) > 0.01)) then
+    LogFail(What + ': centro medido (' + FloatToStr(cx) + ',' + FloatToStr(cy) + ') nao chegou no alvo')
+  else
+    LogOk(What + ' -> centro medido=(' + FloatToStr(cx) + ',' + FloatToStr(cy) + ')');
+end;
+
+{ ---- polygon pour (a definicao; o Altium despeja no Rebuild) ---- }
+
+// APOSTA (ver APOSTAS): as propriedades do polygon que o hub manda. PolyHatchStyle por NUMERO
+// (TPolyHatchStyle na ordem da documentacao do Altium: Hatch90 0, Hatch45 1, VHatch 2, HHatch 3,
+// NoHatch 4, Solid 5 - ordem NAO medida), RemoveDead, PourIndex (a ordem), Name, e no hachurado
+// Grid/TrackSize. False = alguma foi recusada; Etapa diz qual.
+function PropsDoPoligono(Poly: TObject; Line: String; var Etapa: String): Boolean;
+var
+  Pour: String;
+begin
+  Result := False;
+  try
+    if JHas(Line, 'pour') then
+    begin
+      Etapa := 'Polygon.PolyHatchStyle';
+      Pour := JGet(Line, 'pour');
+      if Pour = 'solid' then
+        Poly.PolyHatchStyle := HATCH_SOLIDO
+      else if Pour = 'none' then
+        Poly.PolyHatchStyle := HATCH_NENHUM
+      else if JGet(Line, 'con_angulo') = '45' then
+        Poly.PolyHatchStyle := HATCH_45
+      else
+        Poly.PolyHatchStyle := HATCH_90;
+    end;
+    if JHas(Line, 'hatch_grade') then
+    begin
+      Etapa := 'Polygon.Grid';
+      Poly.Grid := MMsToCoord(JNum(Line, 'hatch_grade'));
+    end;
+    if JHas(Line, 'hatch_largura') then
+    begin
+      Etapa := 'Polygon.TrackSize';
+      Poly.TrackSize := MMsToCoord(JNum(Line, 'hatch_largura'));
+    end;
+    if JHas(Line, 'removeDead') then
+    begin
+      Etapa := 'Polygon.RemoveDead';
+      Poly.RemoveDead := JBool(Line, 'removeDead');
+    end;
+    if JHas(Line, 'ordem') then
+    begin
+      Etapa := 'Polygon.PourIndex';
+      Poly.PourIndex := Trunc(JNum(Line, 'ordem'));
+    end;
+    if JHas(Line, 'nome') then
+    begin
+      Etapa := 'Polygon.Name';
+      Poly.Name := JGet(Line, 'nome');
+    end;
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+procedure AvisoRegrasDoPoligono(What, Line: String);
+begin
+  if JHas(Line, 'con_tipo') or JHas(Line, 'clearance') or JHas(Line, 'minArea') then
+    LogAviso(What + ': conexao (Relief/Direct), clearance e ilha minima sao REGRAS no Altium ' +
+      '(Polygon Connect Style, Clearance) - confira as regras; o polygon nao as carrega');
+end;
+
+procedure DoPolyAdd(Line: String);
+var
+  Poly, Net: TObject;
+  Pts: TStringList;
+  L: TLayer;
+  What, Etapa: String;
+begin
+  What := 'poly_add ' + JGet(Line, 'layer') + ' ' + JGet(Line, 'net');
+  L := CamadaDeDestino(JGet(Line, 'layer'), What, 'o polygon');
+  if L = 0 then
+    Exit;
+  if not EhCobre(L) then
+  begin
+    LogFail(What + ': polygon pour so em camada de cobre');
+    Exit;
+  end;
+  Pts := ParsePts(Line);
+  if Pts.Count < 3 then
+  begin
+    LogFail(What + ': pts precisa de pelo menos 3 vertices');
+    Pts.Free;
+    Exit;
+  end;
+  Poly := PCBServer.PCBObjectFactory(ePolyObject, eNoDimension, eCreate_Default);
+  Poly.Layer := L;
+  if JGet(Line, 'net') <> '' then
+  begin
+    Net := FindNet(JGet(Line, 'net'));
+    if Net <> nil then
+      Poly.Net := Net
+    else
+      LogAviso(What + ': net nao existe na placa - polygon sem net');
+  end;
+  GravaSegmentos(Poly, Pts);
+  Pts.Free;
+  Etapa := '';
+  if not PropsDoPoligono(Poly, Line, Etapa) then
+    LogAviso(What + ': o Altium recusou ' + Etapa + ' - confira as propriedades do polygon');
+  Board.AddPCBObject(Poly);
+  PCBServer.SendMessageToRobots(Board.I_ObjectAddress, c_Broadcast, PCBM_BoardRegisteration, Poly.I_ObjectAddress);
+  try
+    Poly.Rebuild;
+  except
+    LogAviso(What + ': o despejo (Rebuild) foi recusado - rode Tools >> Polygon Pours >> Repour All');
+  end;
+  AvisoRegrasDoPoligono(What, Line);
+  LogOk(What);
+end;
+
+// Polygon de camada L com N vertices e o 1o em (X0,Y0) (a trava orig_* do poly_edit/poly_del)
+function FindPoly(L: TLayer; N: Integer; X0, Y0: Double): TObject;
+var
+  Iter, Prim: TObject;
+begin
+  Result := nil;
+  Iter := Board.BoardIterator_Create;
+  Iter.AddFilter_ObjectSet(MkSet(ePolyObject));
+  Iter.AddFilter_IPCB_LayerSet(LayerSet.AllLayers);
+  Iter.AddFilter_Method(eProcessAll);
+  Prim := Iter.FirstPCBObject;
+  while Prim <> nil do
+  begin
+    if (Prim.Layer = L) and (Prim.PointCount = N) then
+      if NearMM(XMM(Prim.Segments[0].vx), X0) and NearMM(YMM(Prim.Segments[0].vy), Y0) then
+      begin
+        Result := Prim;
+        break;
+      end;
+    Prim := Iter.NextPCBObject;
+  end;
+  Board.BoardIterator_Destroy(Iter);
+end;
+
+function RequirePolyOrig(Line, What: String): TObject;
+var
+  L: TLayer;
+begin
+  Result := nil;
+  if not (JHas(Line, 'orig_layer') and JHas(Line, 'orig_n') and JHas(Line, 'orig_x0') and JHas(Line, 'orig_y0')) then
+  begin
+    LogFail(What + ': faltam orig_layer/orig_n/orig_x0/orig_y0 (copie do board.js >> polygons)');
+    Exit;
+  end;
+  L := LayerFromName(JGet(Line, 'orig_layer'));
+  Result := FindPoly(L, Trunc(JNum(Line, 'orig_n')), JNum(Line, 'orig_x0'), JNum(Line, 'orig_y0'));
+  if Result = nil then
+    LogFail(What + ': nenhum polygon casa com orig_* (re-exporte o espelho)');
+end;
+
+procedure DoPolyEdit(Line: String);
+var
+  Poly, Net: TObject;
+  Pts: TStringList;
+  L: TLayer;
+  What, Etapa: String;
+begin
+  What := 'poly_edit ' + JGet(Line, 'id');
+  Poly := RequirePolyOrig(Line, What);
+  if Poly = nil then
+    Exit;
+  PCBServer.SendMessageToRobots(Poly.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+  if TemValor(Line, 'layer') then
+  begin
+    L := CamadaDeDestino(JGet(Line, 'layer'), What, 'o polygon');
+    if (L <> 0) and EhCobre(L) then
+      Poly.Layer := L;
+  end;
+  if JHas(Line, 'net') then
+  begin
+    Net := nil;
+    if JGet(Line, 'net') <> '' then
+      Net := FindNet(JGet(Line, 'net'));
+    Poly.Net := Net;
+  end;
+  if JHas(Line, 'pts') then
+  begin
+    Pts := ParsePts(Line);
+    if Pts.Count >= 3 then
+      GravaSegmentos(Poly, Pts)
+    else
+      LogAviso(What + ': pts com menos de 3 vertices - o contorno nao mudou');
+    Pts.Free;
+  end;
+  Etapa := '';
+  if not PropsDoPoligono(Poly, Line, Etapa) then
+    LogAviso(What + ': o Altium recusou ' + Etapa);
+  PCBServer.SendMessageToRobots(Poly.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+  try
+    Poly.Rebuild;
+  except
+    LogAviso(What + ': o despejo (Rebuild) foi recusado - rode Tools >> Polygon Pours >> Repour All');
+  end;
+  AvisoRegrasDoPoligono(What, Line);
+  LogOk(What);
+end;
+
+procedure DoPolyDel(Line: String);
+var
+  Poly: TObject;
+  What: String;
+begin
+  What := 'poly_del ' + JGet(Line, 'id');
+  Poly := RequirePolyOrig(Line, What);
+  if Poly = nil then
+    Exit;
+  Board.RemovePCBObject(Poly);
+  LogOk(What + ' (o cobre despejado sai junto)');
+end;
+
+{ ..................................................................................................................... }
 { .                                                Rotina principal                                                   . }
 { ..................................................................................................................... }
 
@@ -3543,6 +4552,7 @@ begin
   ObjetosNumerados := (eArcObject = 1) and (ePadObject = 2) and (eViaObject = 3) and (eTrackObject = 4) and
     (eTextObject = 5) and (eNetObject = 8) and (eComponentObject = 9);
   SondaFalhou := '';
+  SegmentosNumerados := ePolySegmentLine = 0;
   KindRecorteN := -2;
   KindRecorteOrigem := '';
   KindRecorteConferido := False;
@@ -3637,6 +4647,32 @@ begin
         DoRegionAdd(Line)
       else if Op = 'region_del' then
         DoRegionDel(Line)
+      else if Op = 'comp_add' then
+        DoCompAdd(Line)
+      else if Op = 'comp_del' then
+        DoCompDel(Line)
+      else if Op = 'pad_net' then
+        DoPadNet(Line)
+      else if Op = 'net_add' then
+        DoNetAdd(Line)
+      else if Op = 'net_del' then
+        DoNetDel(Line)
+      else if Op = 'net_rename' then
+        DoNetRename(Line)
+      else if Op = 'pad_add' then
+        DoPadAdd(Line)
+      else if Op = 'pad_edit' then
+        DoPadEdit(Line)
+      else if Op = 'pad_del' then
+        DoPadDel(Line)
+      else if Op = 'comment_move' then
+        DoCommentMove(Line)
+      else if Op = 'poly_add' then
+        DoPolyAdd(Line)
+      else if Op = 'poly_edit' then
+        DoPolyEdit(Line)
+      else if Op = 'poly_del' then
+        DoPolyDel(Line)
       else if Op = 'comp_attr' then
         AttrLines.Add(Line)   // renames por ultimo: FindComponent casa por Name.Text
       else

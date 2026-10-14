@@ -146,10 +146,13 @@
   /* com o Gerber aberto, o rodape e o do visualizador (X/Y e zoom dele) */
   body.gerber-on #status{display:none !important;}
   /* lean: embutido na aba Neoden do hub -- so a placa, nunca edita */
-  body.lean #pcbtb, body.lean #abas, body.lean #splitR, body.lean #props, body.lean #status, body.lean #btnPaineis{display:none !important;}
+  body.lean #menubar, body.lean #pcbtb, body.lean #abas, body.lean #splitR, body.lean #props, body.lean #status, body.lean #btnPaineis{display:none !important;}
 </style>
 </head>
 <body>
+<!-- a barra de menus do Altium (File Edit View Project Place Design Tools Route Reports Window Help):
+     hub-pcbaltium.js a monta das arvores do AdvPcb.rcs (hub-altiumdna.js) -->
+<div id="menubar"></div>
 <div id="main">
   <div id="centro">
     <div id="cvwrap">
@@ -212,7 +215,7 @@
   (function () {
     var p = new URLSearchParams(location.search).get('p');
     var base = p ? 'Projects/' + encodeURIComponent(p) + '/' : '';
-    ['board.js', 'changes.js', 'annotations.js'].forEach(function (f) {
+    ['board.js', 'changes.js', 'annotations.js', 'rules.js'].forEach(function (f) {
       document.write('<script src="' + base + f + '"><\/script>');
     });
   })();
@@ -229,11 +232,39 @@
 <script src="hub-atalhos.js"></script>
 <!-- o traçado com cantos 45/90/livre, o mesmo do fio do Esquema -->
 <script src="hub-fio.js"></script>
+<!-- o roteador: trilha de outra net nao se encontra -- a Trilha contorna o obstaculo (Walkaround do
+     Altium) e a edicao que faria nets diferentes se encontrarem e recusada. Sem ele a vista abre
+     igual, so sem conferir (pcbframe.js » motorLigado) -->
+<script src="hub-roteador.js"></script>
+<!-- o que veio do Altium, cada um no seu modulo (sem ele a vista abre igual, so sem o recurso):
+     conectividade/ratsnest/realce de net e os teardrops -->
+<script src="hub-pcbnets.js"></script>
+<script src="hub-pcbteardrop.js"></script>
+<!-- polygon pour (o Clipper de Angus Johnson, licenca Boost, e o motor de despejo) e a placa nova + ECO -->
+<script src="hub-clipper.js"></script>
+<script src="hub-pcbpour.js"></script>
+<script src="hub-pcbeco.js"></script>
+<script src="hub-pcbnova.js"></script>
+<script src="hub-pcbeco-ui.js"></script>
 <!-- Gerber: o gerador (depois do hub-font e do hub-laser, que ele usa) e o visualizador -->
 <script src="hub-gerber.js"></script>
 <script src="hub-gerberview.js"></script>
+<!-- PDF de layout (o "LO -" do Draftsman da casa): o escritor, o carimbo DIEletrons, o gerador e o dialogo -->
+<!-- regras de projeto e DRC (Design » Rules e Tools » Design Rule Check) -->
+<script src="hub-pcbregras.js"></script>
+<script src="hub-pcbdrc.js"></script>
+<script src="hub-pcbregrasui.js"></script>
+<script src="hub-pdfwriter.js"></script>
+<script src="hub-pcbpdf-carimbo.js"></script>
+<script src="hub-pcbpdf.js"></script>
+<script src="hub-pcbpdfui.js"></script>
 <script src="hub-pcbicones.js"></script>
+<!-- os menus, o botao direito e as Preferences do PCB Editor do Altium (o dado: hub-altiumdna.js) -->
+<script src="hub-altiumdna.js"></script>
+<script src="hub-pcbaltium.js"></script>
 <script src="hub-pcbpainel.js"></script>
 <script src="pcbframe.js"></script>
+<!-- o canal do MCP (mcp/): a IA pede screenshot, foco e comando a esta vista -->
+<script src="mcp/hub-mcpvista.js"></script>
 </body>
 </html>
