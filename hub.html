@@ -1274,8 +1274,8 @@ const TABS = [
       /* a mesma vista PCB aberta no modo Gerber (pcbframe.html?modo=gerber): gera o pacote da
          JLCPCB a partir da placa com as mudancas e mostra as camadas */
       { id:'gerber', key:'tab.pcb.gerber' },
-      { id:'comp', key:'tab.comp', count:d=>d.components.length },
-      { id:'nets', key:'tab.nets', count:d=>d.nets.length },
+      /* Componentes e Nets sairam da PCB (pedido do dono, 2026-10-14): a vista PCB ja tem a lista
+         de componentes no painel e o realce de net no Ctrl+clique */
   ]},
   /* Biblioteca nao depende do projeto: o contador vem das libs, nao do detalhe.
      UMA aba so, desde 2026-09-17: as quatro sub-abas viraram tres VISTAS do mesmo acervo,
@@ -1408,6 +1408,7 @@ function renderPipeline() {
    aparecia VAZIO, porque o #symed dele foi movido para dentro da Biblioteca. Era o "clico
    em editar e nao leva pra tela de edicao". */
 function goTab(id) {
+  if (id === 'comp' || id === 'nets') id = 'pcb';     /* as sub-abas que sairam (link ou URL antigos) */
   if (id === 'libsym') {
     S.tab = 'lib'; syncURL(); renderTabs(); renderPanes();
     if (window.__hubLibView) { try { window.__hubLibView.ir('componentes'); } catch (e) {} }
@@ -4790,7 +4791,7 @@ document.addEventListener('keydown', e => {
      painel existir. */
   let vistaPedida = null;
   if (url.tab === 'libsym') { S.tab = 'lib'; vistaPedida = 'componentes'; }
-  else if (url.tab) S.tab = url.tab;
+  else if (url.tab) S.tab = (url.tab === 'comp' || url.tab === 'nets') ? 'pcb' : url.tab;
   const id = S.projects.some(p => p.id === url.id) ? url.id : S.projects[0].id;
   await loadProject(id);
   /* O OPERADOR. O painel não conhece o hub: ele pergunta tudo por este adaptador, e as
