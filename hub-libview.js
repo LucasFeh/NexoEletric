@@ -139,6 +139,16 @@ const CSS = `
   border-bottom:1px solid var(--line,#3a3a3a);}
 .lv-acts .esc{font-size:11px; color:var(--text-4,#7a7a7a); margin-left:auto;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.lv-acts .sep{width:1px; height:18px; background:var(--line,#3a3a3a); margin:0 2px;}
+/* O EDITOR DE FOOTPRINT MORA AQUI (hub-fpeditor.js embutido): editando, a galeria e a lista de
+   componentes saem e o editor ocupa o corpo da vista; o cabecalho "vincular a X" fica, porque e
+   nele que o "Aplicar a X" do editor vai mexer. Fechar o editor volta para a galeria. */
+.lv-fp-ed{flex:1; min-height:0; min-width:0; display:flex; overflow:hidden;}
+.lv-fp{min-width:0;}
+.lv-fp-ed[hidden]{display:none !important;}
+.lv-fp.lv-editando > :not(.lv-alvo):not(.lv-fp-ed){display:none !important;}
+.lv-fp .symed-tile .hubtag{font-size:9px; padding:0 5px; border-radius:8px; margin-left:4px;
+  background:var(--hi,#4fc3f7); color:var(--on-hi,#000); text-transform:none;}
 
 /* A LISTA DE COMPONENTES DA CATEGORIA — o espelho da faixa "Componentes" do editor, e a
    peça que faltava: a categoria ("CAPACITOR CERAMICO [SMD]") é só o agrupador da esquerda;
@@ -197,6 +207,8 @@ const ST = {
   sel: null,          /* o footprint marcado na galeria */
   comp: null,         /* o COMPONENTE da categoria que vai receber o footprint */
   carregando: false,
+  hub: null,          /* a biblioteca de footprints do hub (HubFpLib, Libs/pcblib-hub.js) */
+  ed: null,           /* o editor de footprint aberto nesta vista (o ctrl do HubFpEditor) */
 };
 
 let API = null;       /* o que a casca entregou no instala() */
@@ -456,26 +468,94 @@ function montaFootprints(){
   const bDes = el('button', 'btn'); bDes.id = 'lvDesvincular';
   bDes.textContent = 'Desvincular'; bDes.onclick = () => vincula('');
   const esc = el('span', 'esc'); esc.id = 'lvEscolhido';
-  acts.append(bAp, bDes, esc);
+  /* CRIAR E EDITAR FOOTPRINT, aqui mesmo (pedido do dono, 2026-10-14: "todo o mecanismo de
+     edição e criação de footprint do Altium ... no layout do footprint atual do eletrichub").
+     Até então esta vista só escolhia ("o hub escolhe, nunca cria"). O editor é o
+     hub-fpeditor.js, o mesmo da vista PCB e do Esquema, embutido no corpo da vista; grava em
+     Libs/pcblib-hub.js, que passa na frente do pcblib.js do Altium com o mesmo nome. */
+  const bNovo = el('button', 'btn'); bNovo.id = 'lvNovoFp'; bNovo.type = 'button';
+  bNovo.textContent = 'Novo footprint…';
+  bNovo.title = 'desenha um footprint novo: pads, serigrafia e corpo 3D (STEP) — P,P pad · P,L linha · P,B STEP';
+  bNovo.onclick = () => abreEditorFp(null, true);
+  const bEd = el('button', 'btn'); bEd.id = 'lvEditarFp'; bEd.type = 'button';
+  bEd.textContent = 'Editar footprint';
+  bEd.title = 'abre o escolhido (ou o vinculado) no editor — botão direito num tile também abre';
+  bEd.onclick = () => { const n = ST.sel || (fpAtualDe() || {}).name; if (n) abreEditorFp(n); };
+  acts.append(bAp, bDes, el('span', 'sep'), bNovo, bEd, esc);
 
   const lista = el('div', 'symed-tiles'); lista.id = 'lvLista';
 
-  /* NAO EXISTE "criar footprint" AQUI, e isso e a regra, nao uma limitacao: o footprint e a
-     UNICA coisa cuja verdade mora na lib do Altium (a .PcbLib, espelhada em Libs/pcblib.js).
-     Todo o resto -- simbolo, valores, parametros, nomes -- nasce no hub e vai para o Altium;
-     o footprint faz o caminho inverso, e por isso o hub so ESCOLHE entre os que ja existem
-     la. Havia aqui um "Cadastrar e vincular" que aceitava um nome novo: ele fazia um
-     footprint nascer no hub, que e exatamente o que nao pode. Saiu em 2026-09-17, junto com
-     a recusa no servidor. Footprint que falta se desenha no Altium e chega pelo sincronismo.
-  */
+  /* O FOOTPRINT TAMBÉM NASCE NO HUB desde 2026-10-14. Até ali a regra era o contrário (só a
+     PcbLib do Altium criava, e o servidor recusava nome que ela não tinha); o dono pediu o
+     editor do Altium aqui. O servidor aceita os nomes das duas bibliotecas
+     (symserver.py » _nomes_footprint) e continua recusando nome que não está em nenhuma. */
   const novo = el('div', 'lv-nota');
-  novo.textContent = 'os footprints vêm da biblioteca do Altium — para criar um novo, '
-                   + 'desenhe na PcbLib e sincronize.';
+  novo.textContent = 'footprints do Altium (Libs/pcblib.js) e do hub (marca hub, criados ou editados aqui). '
+                   + 'Duplo clique aplica ao componente; botão direito edita.';
 
   const tit = el('div', 'lv-titulo'); tit.id = 'lvTitulo';
   const comps = el('div', 'lv-comps'); comps.id = 'lvComps';
-  box.append(alvo, tit, comps, bar, acts, lista, novo);
+  const ed = el('div', 'lv-fp-ed'); ed.id = 'lvFpEd'; ed.hidden = true;
+  box.append(alvo, tit, comps, bar, acts, lista, novo, ed);
   return box;
+}
+
+/* ── o editor de footprint, embutido ──
+   Abre no corpo da vista Footprints, no lugar da galeria. Fica aberto ao trocar de sub-aba
+   (o estado é dele; voltar à Footprints volta para o desenho), e fecha no "← Galeria". */
+function fpDoHub(nome){
+  return (ST.hub && typeof HubFpLib !== 'undefined') ? HubFpLib.acha(ST.hub, nome) : null;
+}
+function fpParaDesenho(nome){ return fpDoHub(nome) || (API.footprint && API.footprint(nome)) || null; }
+
+async function abreEditorFp(nome, novo){
+  if (typeof HubFpEditor === 'undefined' || !HubFpEditor.abre){
+    aviso('o editor de footprint (hub-fpeditor.js) não carregou nesta página', 'err'); return;
+  }
+  const box = document.getElementById('lvFootprints');
+  const host = document.getElementById('lvFpEd');
+  if (!box || !host) return;
+  if (ST.ed){
+    /* já aberto: troca o footprint dentro dele (o editor pergunta se há o que perder) */
+    if (nome && ST.ed.fp() && ST.ed.fp().name === nome) return;
+    if (!(await ST.ed.podeSair())) return;
+    if (novo) ST.ed.carregaFp(null); else ST.ed.carregaFp(nome, API.footprint && API.footprint(nome));
+    if (novo) ST.ed.novo();
+    return;
+  }
+  box.classList.add('lv-editando');
+  host.hidden = false;
+  const alvoNome = () => { const c = componenteAtual(); return c && c.nome; };
+  HubFpEditor.abre({
+    host, semLista: true, fechaTxt: '← Galeria', titulo: 'Footprint',
+    nome: nome || null,
+    fp: nome ? (API.footprint && API.footprint(nome)) || null : null,
+    pcblib: { footprints: (API.footprintsAltium && API.footprintsAltium()) || [] },
+    botoes: [{
+      txt: 'Aplicar ao componente', pri: false,
+      titulo: 'salva (se preciso) e vincula este footprint ao componente do cabeçalho',
+      rotulo: () => { const n = alvoNome(); return n ? 'Aplicar a ' + (n.length > 28 ? n.slice(0, 27) + '…' : n) : 'Aplicar ao componente'; },
+      ativo: () => !!alvoNome(),
+      fn: async ctrl => {
+        if (!alvoNome()){ aviso('escolha um componente na lista da esquerda primeiro.', 'warn'); return; }
+        if (ctrl.sujo() && !(await ctrl.salvar())) return;
+        await vincula(ctrl.fp().name);
+      },
+    }],
+    aoMontar: ctrl => { ST.ed = ctrl; if (novo) ctrl.novo(); },
+    aoSalvar: async (fp, lib) => {
+      ST.hub = lib;
+      if (API.footprintsHub) { try { API.footprintsHub(lib); } catch (e) { /* a vista Geral relê depois */ } }
+      await carregaFps();
+    },
+  }).then(r => {
+    ST.ed = null;
+    if (r && r.lib) ST.hub = r.lib;
+    box.classList.remove('lv-editando');
+    host.hidden = true; host.textContent = '';
+    if (r && r.salvos && r.salvos.length){ ST.sel = r.salvos[r.salvos.length - 1]; carregaFps(); }
+    else pintaFootprints();
+  });
 }
 
 /* A CATEGORIA selecionada na esquerda. Ela não recebe footprint — é o agrupador. */
@@ -646,7 +726,7 @@ function pintaLista(){
   if (cnt) cnt.textContent = vis.length + ' de ' + ST.fps.length;
   if (!vis.length){
     lista.append(el('div', 'lv-vazio', q
-      ? 'nada com "' + ST.q + '" na biblioteca do Altium.'
+      ? 'nada com "' + ST.q + '" nas bibliotecas de footprint (Altium e hub).'
       : 'nenhum footprint.'));
     return;
   }
@@ -654,7 +734,7 @@ function pintaLista(){
   const frag = document.createDocumentFragment();
   const pendentes = [];
   for (const f of vis.slice(0, 400)){
-    const obj = API.footprint && API.footprint(f.name);
+    const obj = fpParaDesenho(f.name);
     const t = el('button', 'symed-tile' + (f.desenhado ? '' : ' nao'));
     t.type = 'button';
     /* marcado = o escolhido agora; se ninguém escolheu ainda, o que já está vinculado */
@@ -663,14 +743,18 @@ function pintaLista(){
     t.title = f.name + '\n' + (f.desenhado ? ((obj && (obj.pads || []).length) || 0) + ' pads'
                                            : 'ainda não desenhado na PcbLib')
       + (f.usos ? '\n' + f.usos + (f.usos === 1 ? ' componente usa' : ' componentes usam') : '')
-      + (atual && atual.name === f.name ? '\n— é o vinculado hoje' : '');
+      + (atual && atual.name === f.name ? '\n— é o vinculado hoje' : '')
+      + (f.hub ? '\nbiblioteca do hub (Libs/pcblib-hub.js)' + (obj && (obj.bodies || []).length ? ' · com corpo 3D' : '') : '')
+      + '\nbotão direito: editar';
     const cv = el('canvas'); cv.width = 96; cv.height = 64;
     const nm = el('span', 'nm', f.name);
     const k = el('span', f.desenhado ? 'pads' : 'nd',
                  f.desenhado ? (((obj && (obj.pads || []).length) || 0) + ' pads'
                                 + (f.usos ? ' · ' + f.usos + ' uso' + (f.usos === 1 ? '' : 's') : ''))
                              : 'não desenhado');
+    if (f.hub) k.append(el('span', 'hubtag', (obj && (obj.bodies || []).length) ? 'hub · 3D' : 'hub'));
     t.append(cv, nm, k);
+    t.oncontextmenu = e => { e.preventDefault(); ST.sel = f.name; abreEditorFp(f.name); };
     t.onclick = () => { ST.sel = (ST.sel === f.name) ? null : f.name; pintaLista(); pintaAcoes(); };
     t.ondblclick = () => vincula(f.name);
     frag.append(t);
@@ -741,20 +825,29 @@ function pintaAcoes(){
   const atual = fpAtualDe();
   if (b) b.disabled = !sim || !ST.sel || (!!atual && atual.name === ST.sel);
   if (d) d.disabled = !sim || !atual;
+  const ed = document.getElementById('lvEditarFp');
+  if (ed) ed.disabled = !(ST.sel || atual);
   if (e) e.textContent = !sim ? 'nenhum componente selecionado'
     : ST.sel ? 'escolhido: ' + ST.sel
     : 'escolha um footprint na galeria';
 }
 
-function pintaFootprints(){ pintaAlvo(); pintaComponentes(); pintaLista(); }
+function pintaFootprints(){
+  pintaAlvo();
+  if (ST.ed){ try { ST.ed.atualiza(); } catch (e) { /* o editor fechou no meio */ } return; }
+  pintaComponentes(); pintaLista();
+}
 
 async function carregaFps(){
   ST.carregando = true;
   pintaLista();
   try {
-    const r = await fetch('/api/symbols/footprints');
-    const j = await r.json();
+    const [j, hub] = await Promise.all([
+      fetch('/api/symbols/footprints').then(r => r.json()),
+      /* os do hub com a geometria, para o tile: o /footprints so traz o nome */
+      typeof HubFpLib !== 'undefined' ? HubFpLib.carrega().catch(() => null) : Promise.resolve(null)]);
     ST.fps = (j && j.ok && j.footprints) || null;
+    if (hub) ST.hub = hub;
   } catch (e){
     ST.fps = null;
   }

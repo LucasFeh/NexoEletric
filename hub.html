@@ -30,6 +30,8 @@
 <!-- editor de símbolos (sub-abas Componentes e Símbolos da Biblioteca) -->
 <script src="hub-symed.js"></script>
 <script src="hub-libview.js"></script>
+<!-- editor de footprint embutido na Biblioteca » Footprints (o mesmo da PCB e do Esquema), com o 3D -->
+<script src="hub-fplib.js"></script><script src="hub-pcb3d-modelo.js"></script><script src="hub-pcb3d-step.js"></script><script src="hub-pcb3d-vista.js"></script><script src="hub-fpeditor.js"></script>
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
 <script src="hub-odoocfg.js"></script>
 <script src="hub-atalhos.js"></script>
@@ -1882,7 +1884,9 @@ function loadLibs() {
   if (LIB.loading) return LIB.loading;
   LIB.ready = false;
 
-  LIB.loading = loadLibTabelas().then(() => {
+  /* a biblioteca de footprints do hub (Libs/pcblib-hub.js) vem junto: os dela passam na frente */
+  LIB.loading = Promise.all([loadLibTabelas(),
+                             window.HubFpLib ? HubFpLib.carrega().catch(() => null) : null]).then(() => {
     const s = libSources().find(x => x.id === libWanted()) || LIB_ALTIUM;
     const pronto = LIB.cache[s.id];
     if (pronto) return pronto;
@@ -1916,7 +1920,8 @@ function loadLibs() {
     LIB.srcId = c.src.id;
     LIB.almox = c.src.almox || null;
     LIB.syms = c.syms;
-    LIB.fps = c.fps;
+    LIB.fpsAltium = c.fps;
+    LIB.fps = window.HubFpLib ? HubFpLib.mescla({ footprints: c.fps }, window.pcblibHub).footprints : c.fps;
     LIB.symBy = new Map(LIB.syms.map(x => [x.name, x]));
     LIB.fpBy  = new Map(LIB.fps.map(x => [x.name, x]));
     LIB.src = c.origem;
@@ -4809,6 +4814,14 @@ document.addEventListener('keydown', e => {
       /* o footprint COM os pads e o bbox: é o que a galeria desenha em cada tile. Vem daqui
          e não de um fetch porque o espelho já está em memória — são 3,2 MB de pcblib.js. */
       footprint: nome => (LIB.fpBy && LIB.fpBy.get(nome)) || null,
+      /* o editor de footprint embutido na vista Footprints: a lista do Altium sem os do hub, e a
+         volta dele quando grava (a vista Geral passa a desenhar o footprint novo) */
+      footprintsAltium: () => LIB.fpsAltium || LIB.fps || [],
+      footprintsHub: lib => {
+        if (!window.HubFpLib || !LIB.fpsAltium) return;
+        LIB.fps = HubFpLib.mescla({ footprints: LIB.fpsAltium }, lib).footprints;
+        LIB.fpBy = new Map(LIB.fps.map(x => [x.name, x]));
+      },
       redesenha: () => { try { renderLib(); } catch (e) {} },
       /* As vistas Componentes e Símbolos são o MESMO editor de sempre, em dois modos dele
          (HubSymEd.modo, trocado pelo hub-libview.js) — o `#symed`, que vivia num pane próprio
