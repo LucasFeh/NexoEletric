@@ -80,6 +80,8 @@ const PCB = {
   alinharTopo:'', alinharBase:'Ctrl+Shift+B', alinharCentroH:'', alinharCentroV:'', distribuirH:'Ctrl+Shift+H',
   distribuirV:'Ctrl+Shift+V', ratsnest:'', realcarNet:'', drc:'', regras:'', pour:'', repour:'', teardrops:'', pad:'',
   atualizarPcb:'', pdf:'', novaPlaca:'',
+  /* 2026-10-14: a vista 3D, com as teclas do Altium (2 e 3 estavam livres) */
+  vista2d:'2', vista3d:'3',
 };
 assert.deepStrictEqual(P.ATALHOS_PADRAO.map(a => a.id), Object.keys(PCB), 'os ids da PCB, na ordem');
 for (const a of P.ATALHOS_PADRAO){
@@ -156,7 +158,9 @@ assert.strictEqual(N({ key:'ArrowDown', code:'Numpad2', location:3, ctrlKey:true
     [{ key:'S', shiftKey:true }, 'camadaUnica'], [{ key:' ' }, 'girar'], [{ key:'Delete' }, 'apagar'],
   ];
   for (const [ev, id] of casos) assert.strictEqual(m.porTecla[N(ev)], id, JSON.stringify(ev) + ' → ' + id);
-  assert.strictEqual(m.porTecla['2'], undefined, 'o 2 sozinho não é ação: é o gesto fixo da trilha (via sem trocar de camada)');
+  /* 2026-10-14: o 2 sozinho e o 2D Layout Mode do Altium; com a trilha na mao o pcbframe trata o 2
+     (via sem trocar de camada) ANTES do mapa, como o Altium faz */
+  assert.strictEqual(m.porTecla['2'], 'vista2d', 'o 2 sozinho e o 2D Layout Mode');
 }
 
 /* ══ REPETIÇÃO: SÓ DENTRO DA MESMA VISTA ══ */

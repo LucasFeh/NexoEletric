@@ -30,6 +30,9 @@ const LIBS = [
      Recarregar traz o template que outra pessoa acabou de salvar no editor */
   { src:'Libs/sch-templates.js',      nome:'schtemplates' },
   { src:'Libs/sch-templates-casa.js', nome:'schtemplatesCasa' },
+  /* NAO e acervo: os footprints do editor de footprint do hub, que passam na frente dos do
+     Altium com o mesmo nome (aplicaAcervos » PLIB) */
+  { src:'Libs/pcblib-hub.js',       nome:'pcblibHub', opcional:true },
 ];
 
 /* ------- acervos -------
@@ -1201,6 +1204,9 @@ function aplicaAcervos(){
   /* a PcbLib nao tem acervo: ou veio agora, ou fica a de antes — um 404 no meio de uma
      recarga nao pode zerar a lista de footprints da ficha */
   if (window.pcblib && window.pcblib.footprints) PLIB = window.pcblib;
+  /* os footprints do editor de footprint do hub (Libs/pcblib-hub.js) passam na frente dos do
+     Altium com o mesmo nome -- o mesmo que a vista PCB e o ECO enxergam */
+  if (typeof HubFpLib !== 'undefined' && window.pcblibHub) PLIB = HubFpLib.mescla(PLIB, HubFpLib.normaliza(window.pcblibHub));
   /* antes de qualquer symbolOf: sem as tabelas o resolvedor casa so por nome exato e por
      chave, e metade dos componentes viraria quadrado vermelho na folha */
   HubCore.setLibTables(window.renameMap || null, window.libSubs || null);
@@ -2556,7 +2562,7 @@ window.__hubRecarregaLibs = function(){
     if ($('symmodal').classList.contains('on')) symRenderLista();
     return { mudou: carimbo(ACERVOS) !== antes,
              acervos: ACERVOS.length, simbolos: SLIB.symbols.length,
-             falhas: res.filter(r => !r.ok).map(r => r.l.src),
+             falhas: res.filter(r => !r.ok && !r.l.opcional).map(r => r.l.src),
              caidos: ACERVOS.filter(a => a.caiu).map(a => a.titulo) };
   }).then(r => { libRecarga = null; return r; },
           e => { libRecarga = null; throw e; });
@@ -3396,6 +3402,87 @@ function prCor(box, rotulo, it, chave, padrao){
   wrap.append(c, x);
   prKvEl(box, rotulo, wrap);
 }
+/* ── FOOTPRINT, no esquema, antes da PCB (pedido do dono, 2026-10-14: "poder configurar o
+   footprint no esquema antes de importar pra pcb") ──
+   A secao "Footprint" do painel Properties do Altium: o nome (com a lista da PcbLib + a
+   biblioteca do hub), o que ele tem (pads, corpo 3D), se os pinos do simbolo tem pad nele (o
+   "Unknown Pin" que o ECO acusaria), e o editor de footprint do hub (o PCB Library) para criar,
+   alterar e prender o modelo 3D. Vale para TODAS as partes do designador; a PCB recebe no
+   Design » Update PCB (ECO), que ja troca o footprint de quem ja esta na placa. */
+function listaFootprints(){
+  let dl = document.getElementById('prFpLista');
+  if (!dl){ dl = document.createElement('datalist'); dl.id = 'prFpLista'; document.body.append(dl); }
+  const n = (PLIB.footprints || []).length;
+  if (dl.dataset.n === String(n) && dl.dataset.lib === String(!!PLIB.hub)) return dl;
+  dl.textContent = '';
+  for (const f of (PLIB.footprints || [])) if (f && f.name){ const o = document.createElement('option'); o.value = f.name; dl.append(o); }
+  dl.dataset.n = String(n); dl.dataset.lib = String(!!PLIB.hub);
+  return dl;
+}
+function poeFootprint(ref, nome){
+  const partes = itensDoRef(ref);
+  for (const x of partes){ if (nome) x.footprint = nome; else delete x.footprint; }
+  commit();
+  HubDialog.toast(ref + ': footprint ' + (nome || '(nenhum)') + (partes.length > 1 ? ' (' + partes.length + ' partes)' : '')
+    + ' — vai para a PCB no Design » Update PCB', 'ok', 3200);
+}
+async function abreFootprint(it, o){
+  if (typeof HubFpEditor === 'undefined'){ HubDialog.alert('O editor de footprint (hub-fpeditor.js) não carregou. Atualize a página (F5).', { title:'Footprint' }); return; }
+  const antes = it ? (it.footprint || '') : '';
+  await HubFpEditor.abre(Object.assign({ nome:antes || null, pcblib:window.pcblib || PLIB, titulo:'PCB Library',
+    async aoSalvar(fp, lib){
+      window.pcblibHub = lib;
+      PLIB = HubFpLib.mescla(window.pcblib || PLIB, lib);
+      if (it && fp.name !== (it.footprint || '') &&
+          await HubDialog.confirm('Usar "' + fp.name + '" em ' + it.ref + '?', { title:'Footprint', ok:'Usar' }))
+        poeFootprint(it.ref, fp.name);
+    } }, o || {}));
+  if (typeof HubFpLib !== 'undefined'){
+    const lib = await HubFpLib.carrega();
+    window.pcblibHub = lib;
+    PLIB = HubFpLib.mescla(window.pcblib || PLIB, lib);
+  }
+  renderProps();
+}
+function secFootprint(it, sym, fpNome){
+  const s = prSec('footprint');
+  listaFootprints();
+  const campo = prCampo(fpNome, 'o footprint deste componente (todas as partes). Escolha da lista ou digite; '
+    + 'a PCB recebe no Design » Update PCB', async c => {
+      const novo = String(c.value || '').trim();
+      if (novo === fpNome) return;
+      if (novo && !HubCore.footprintOf(PLIB, novo) &&
+          !(await HubDialog.confirm('"' + novo + '" não está na PcbLib nem na biblioteca do hub. O ECO vai recusar o componente até ele existir. Usar mesmo assim?', { title:'Footprint', ok:'Usar' }))){
+        c.value = fpNome; return;
+      }
+      poeFootprint(it.ref, novo);
+    }, { cls:'mono' });
+  campo.setAttribute('list', 'prFpLista');
+  campo.placeholder = '— sem footprint —';
+  prKvEl(s, 'Footprint', campo);
+  const fp = fpNome ? HubCore.footprintOf(PLIB, fpNome) : null;
+  const hub = fp && PLIB.hub && typeof HubFpLib !== 'undefined' && window.pcblibHub ? HubFpLib.acha(window.pcblibHub, fp.name) : null;
+  if (fpNome && !fp) prKv(s, '', 'não está na PcbLib espelhada nem na biblioteca do hub — crie no editor (Novo…)', 'warn');
+  if (fp){
+    const corpos = (fp.bodies || []).length;
+    prKv(s, 'Origem', hub ? 'biblioteca do hub' + (hub.hub && hub.hub.base ? ' (alterado do Altium)' : '') : 'PcbLib do Altium', 'dim');
+    prKv(s, 'Pads', String((fp.pads || []).length), 'mono');
+    prKv(s, 'Modelo 3D', corpos ? corpos + ' corpo(s)' : 'nenhum — prenda o STEP no editor', corpos ? null : 'dim');
+    /* os pinos do simbolo (todas as partes) que nao tem pad: o Unknown Pin do ECO */
+    if (sym && Array.isArray(sym.parts)){
+      const pads = new Set((fp.pads || []).map(p => String(p.name)));
+      const falta = [];
+      for (const p of sym.parts) for (const q of (p.pins || [])) if (q && q.num != null && !pads.has(String(q.num)) && falta.indexOf(String(q.num)) < 0) falta.push(String(q.num));
+      if (falta.length) prKv(s, 'Sem pad', falta.slice(0, 12).join(', ') + (falta.length > 12 ? '…' : '') + ' — pinos sem pad no footprint (o ECO acusa)', 'warn');
+    }
+  }
+  const linha = el('div', 'pr-fpacoes');
+  const b = (rot, titulo, fn) => { const x = el('button', 'wide sutil', rot); x.type = 'button'; x.title = titulo; x.onclick = fn; linha.append(x); };
+  b(fp ? 'Editar footprint…' : 'Abrir o editor de footprint…', 'o PCB Library do Altium, no hub: pads, serigrafia e o corpo 3D (STEP). Grava na biblioteca do hub', () => abreFootprint(it));
+  if (fp) b('Ver em 3D', 'o footprint com o modelo 3D, no editor', () => abreFootprint(it, { modo3d:true }));
+  s.append(linha);
+  return s;
+}
 /* os parametros viajam num campo plano "K=V;K=V" (o parser do BuildSchematic le linha a linha) */
 function prParams(s){
   const out = [];
@@ -3945,6 +4032,7 @@ function renderProps(){
     g.append(bUndo);
   }
   paneG.append(g);
+  paneG.append(secFootprint(it, sym, fpNome));
 
   /* O TEXTO, quando e ele que esta marcado. A posicao do designador e um deslocamento em
      relacao ao lugar de origem (embaixo/em cima do corpo): mostrar o deslocamento, e nao a
@@ -5652,6 +5740,7 @@ window.addEventListener('keydown', e => {
 function fazAcao(id){
   gavAbre(false);     /* um atalho que age fecha a gaveta: senao ela sobrava atras do modal */
   switch (id){
+    case 'footprints': { const a = selAlvos().find(x => x.it && x.it.t === 'comp'); abreFootprint(a ? a.it : null); return; }
     case 'add':       openAdd(); return;
     case 'fio':       setTool(tool === 'wire' ? 'select' : 'wire'); return;
     case 'terra':     setTool(tool === 'power' && toolPower && toolPower.net === 'GND' ? 'select' : 'power',

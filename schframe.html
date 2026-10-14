@@ -230,6 +230,7 @@
      a mao sem gritar — quem esta vendo o desenho certo nao precisa de um botao em destaque */
   .wide.sutil{background:transparent; color:var(--fg-dim); font-size:11px; padding:4px 10px;}
   .wide.sutil:hover{color:var(--fg); background:var(--panel2);}
+  .pr-fpacoes{display:flex; flex-direction:column; gap:2px; margin-top:4px;}
   .hint{font-size:11px; color:var(--fg-dim); margin-top:6px; line-height:1.4;}
   .meta{color:var(--fg-dim); font-size:12px;}
   /* painel estreito: sem o min-width:0 o nowrap de "Configuracoes" empurra e a outra aba sai
@@ -788,6 +789,8 @@
 <script src="hub-draw.js"></script>
 <script src="Libs/schlib.js"></script>
 <script src="Libs/pcblib.js"></script>
+<!-- a biblioteca de footprints do hub (o editor de footprint grava nela); pode nao existir ainda -->
+<script src="Libs/pcblib-hub.js" onerror="this.remove()"></script>
 <!-- acervos do almoxarifado: o modal escolhe de qual biblioteca vem o simbolo -->
 <script src="Libs/almox-basicos.js"></script>
 <script src="Libs/almox-especiais.js"></script>
@@ -827,6 +830,12 @@
 <script src="Libs/sch-templates-casa.js"></script>
 <script src="hub-schtemplate.js"></script>
 <script src="hub-schtemplate-ui.js"></script>
+<!-- o editor de footprint (o PCB Library do Altium) e a vista 3D dele -->
+<script src="hub-fplib.js"></script>
+<script src="hub-pcb3d-modelo.js"></script>
+<script src="hub-pcb3d-step.js"></script>
+<script src="hub-pcb3d-vista.js"></script>
+<script src="hub-fpeditor.js"></script>
 <script src="schframe.js"></script>
 <!-- o canal do MCP (mcp/): a IA pede screenshot e recarga a esta vista -->
 <script src="mcp/hub-mcpvista.js"></script>

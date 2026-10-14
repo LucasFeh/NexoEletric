@@ -71,6 +71,18 @@ const MAPA = {
   'PLPCB:DifferenceOverlayShowHide': A('diff'),
   'PLPCB:ToggleSingleLayerMode': A('camadaUnica'),
   'PLPCB:PopupSnapGridOther': A('painelGrade'), 'PLPCB:RunGridPropertiesEditor': A('painelGrade'),
+  /* View » 2D/3D Layout Mode e 3D View Control (hub-pcb3d-vista.js); as poses so valem no 3D */
+  'PLPCB:ViewSwitchTo2D': A('vista2d'), 'PLPCB:ViewSwitchTo3D': A('vista3d'),
+  'PLPCB:ViewTopSide': A('v3topo', '3d'), 'PLPCB:ViewBottomSide': A('v3base', '3d'),
+  'PLPCB:ViewFrontSide': A('v3frente', '3d'), 'PLPCB:ViewBackSide': A('v3tras', '3d'),
+  'PLPCB:ViewLeftEdge': A('v3esq', '3d'), 'PLPCB:ViewRightEdge': A('v3dir', '3d'),
+  'PLPCB:Rotate30Left': A('v3girarEsq', '3d'), 'PLPCB:Rotate30Right': A('v3girarDir', '3d'),
+  'PLPCB:Rotate30Up': A('v3subir', '3d'), 'PLPCB:Rotate30Down': A('v3descer', '3d'),
+  'PLPCB:IsometricRotation': A('v3iso', '3d'), 'PLPCB:FlippedIsometricRotation': A('v3isoVirada', '3d'),
+  'PLPCB:ViewZeroRotation90': A('v3gira90', '3d'),
+  /* Tools » Component 3D Body Manager: no hub, o editor de footprint do componente (os corpos 3D
+     sao do footprint) */
+  'PLPCB:RunComponentBodyManager': A('editarFp', 'comp'),
   /* Place */
   'PLManRoute:Track': A('trilha', 'edit'), 'PLManRoute:AdvancedRouting': A('trilha', 'edit'),
   'PLPCB:PlaceVia': A('via', 'edit'), 'PLManRoute:PlaceLine': A('linha', 'edit'),
@@ -106,6 +118,8 @@ const MAPA_SCH = {
   'PLSch:PlacePart': A('add'), 'PLSch:PlacePowerPort': A('terra'), 'PLSch:PlaceWire': A('fio'),
   'PLSch:PlaceNetLabel': A('rotulo'), 'PLSch:PlaceNoERCGeneric': A('noerc'),
   'PLSch:SetTemplateFromLocal': A('template'), 'PLSch:DocumentPreferencesSchDocumentOptions': A('folha'),
+  /* Tools » Footprint Manager...: o editor de footprint do hub, no componente selecionado */
+  'PLWorkspaceManager:PCBLIBImplementationManagement': A('footprints'),
 };
 /* o rotulo no idioma do hub (hub-menutrad.js); sem o modulo, o do Altium */
 const TR = r => (typeof HubMenuTrad !== 'undefined' ? HubMenuTrad.t(r) : r);
@@ -269,6 +283,7 @@ function instala(V) {
     if (q === 'comp') return !!c.comp;
     if (q === 'net') return !!c.net;
     if (q === 'edit') return !c.lean;
+    if (q === '3d') return !!c.tres;
     return true;
   }
   function gradeDoPlid(plid) {
@@ -296,7 +311,7 @@ function instala(V) {
       it.tecla = t.indexOf(',') >= 0 ? '' : t;          /* a sequencia ja e a letra sublinhada; a coluna e da tecla direta, como no Altium */
       it.acao = m.a;
       if (ok) it.f = () => V.fazAcao(m.a);
-      else { it.off = true; it.dica = m.q === 'sel' ? 'precisa de uma seleção' : m.q === 'comp' ? 'precisa de um componente' : m.q === 'net' ? 'precisa de um objeto com net' : 'só no editor'; }
+      else { it.off = true; it.dica = m.q === 'sel' ? 'precisa de uma seleção' : m.q === 'comp' ? 'precisa de um componente' : m.q === 'net' ? 'precisa de um objeto com net' : m.q === '3d' ? 'só no modo 3D (tecla 3)' : 'só no editor'; }
       if (m.a === 'conexoesOn') it.check = c.conexoes;
       if (m.a === 'diff') it.check = c.ghost;
       if (m.a === 'virar') it.check = c.flip;

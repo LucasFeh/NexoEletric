@@ -150,6 +150,8 @@ const PCB_PADRAO = [
   { id:'recortar',    tecla:'Ctrl+X', rotulo:'Recortar' },
   { id:'colar',       tecla:'Ctrl+V', rotulo:'Colar (clique larga)' },
   { id:'duplicar',    tecla:'Ctrl+D', rotulo:'Duplicar — o Rubber Stamp (Ctrl+R no Altium)' },
+  { id:'vista2d',     tecla:'2',      rotulo:'2D Layout Mode' },
+  { id:'vista3d',     tecla:'3',      rotulo:'3D Layout Mode' },
 ];
 /* os gestos fixos (nao gravaveis): o canvas os trata antes do mapa */
 const TRILHA = 'trilha na mão (W)', ARRASTO = 'arrastando';
@@ -371,6 +373,7 @@ function recalcula(){
   montaAlvos();
   pathPlacaCache = null;
   cacheSujo = true;
+  if (typeof refaz3d === 'function') refaz3d();
 }
 /* As abas: a lista do motor (com nome/cor do board.layers quando o espelho novo traz) e a
    Mechanical 1 sempre -- ela existe em toda placa do Altium e e onde a casa desenha cota e
@@ -794,6 +797,7 @@ function reSeleciona(chaves){
 }
 let selChaveAntes = '';
 function aoMudarSel(dePainel){
+  if (modo3d && V3) V3.realca(refsDaSel());
   const ch = SEL.map(chave).join('|');
   const mudou = ch !== selChaveAntes;
   selChaveAntes = ch;
@@ -1981,7 +1985,9 @@ async function abreEco(){
     globalDe('renameMap', 'Libs/rename-map.js'), globalDe('libSubs', 'Libs/lib-subs.js')]);
   if (typeof HC.setLibTables === 'function') HC.setLibTables(rm, ls);
   if (pcblib && typeof HC.setPcbLib === 'function') HC.setPcbLib(pcblib);
-  await HubPcbEcoUI.eco({ board:B, changes:CH, schematic:sch, schlib, pcblib,
+  if (typeof HubFpLib !== 'undefined') { HUBLIB = await HubFpLib.carrega(); registraLibHub(); }
+  const pcblibEco = (typeof HubFpLib !== 'undefined' && HUBLIB) ? HubFpLib.mescla(pcblib, HUBLIB) : pcblib;
+  await HubPcbEcoUI.eco({ board:B, changes:CH, schematic:sch, schlib, pcblib:pcblibEco,
     gravar:async (linhas) => {
       if (!linhas || !linhas.length) return true;
       if (!garanteEdicao()) return false;
@@ -3365,6 +3371,9 @@ function extrasDoHub(w){
     it.push({ rot:'Camada', filhos:LAYERS.filter(l => l.kind !== 'multi').map(l => ({ rot:rotuloAba(l), check:ks.size === 1 && ks.has(l.key), f:() => editarCampo('layer', l.key) })) });
   }
   if (compsDaSel().length) it.push({ rot:'Virar de face', tecla:'L', f:() => transformaSelecao('vira') });
+  if (compsDaSel().length === 1) it.push({ rot:'Editar footprint…', f:() => fazAcao('editarFp') });
+  it.push(modo3d ? { rot:'Voltar ao 2D', tecla:teclaDe('vista2d') || '2', f:() => fazAcao('vista2d') }
+                 : { rot:'Ver em 3D', tecla:teclaDe('vista3d') || '3', f:() => fazAcao('vista3d') });
   if (SEL.length) it.push({ rot:'Girar 90°', tecla:teclaDe('girar'), f:() => transformaSelecao('gira') });
   /* o Sinalizar aqui saiu: o Comment... do Altium, logo acima, e ele (a nota para a IA) */
   it.push({ rot:editOn ? 'Travar a edição' : 'Destravar a edição', tecla:teclaDe('editar'), f:() => fazAcao('editar') });
@@ -3410,7 +3419,7 @@ function aplicaPrefs(p){
 }
 function ctxAltium(){
   return { sel:SEL.length, comp:compsDaSel().length > 0, poly:SEL.some(a => a.t === 'regiao-ro' && a.eb && a.eb.poly), net:netDaSel(), lean:LEAN, edit:editOn, grade:grade.id,
-           conexoes:conexoesLigadas(), ghost:show.ghost, flip:view.flip, unica:show.unica };
+           conexoes:conexoesLigadas(), ghost:show.ghost, flip:view.flip, unica:show.unica, tres:modo3d };
 }
 
 /* ============================== enquadrar ============================== */
@@ -3810,6 +3819,11 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (LEITOR.pendente()) { LEITOR.cancela(); return; } if (!ehCampo(e.target) || e.target.closest('#txtbox, #annform')) escape(); return; }
   if (ehCampo(e.target)) return;
   const k = normalizaTecla(e);
+  if (modo3d && V3 && !LEITOR.pendente()) {
+    const v3 = { '0':'v3topo', 'Ctrl+0':'v3base', '8':'v3iso', 'Ctrl+8':'v3isoVirada', '9':'v3gira90' }[k]
+      || (!e.ctrlKey && !e.altKey ? { ArrowLeft:'v3girarEsq', ArrowRight:'v3girarDir', ArrowUp:'v3subir', ArrowDown:'v3descer' }[e.key] : null);
+    if (v3) { e.preventDefault(); fazAcao(v3); return; }
+  }
   if (LEAN) { if (k === (teclaDe('enquadrar') || 'F')) enquadra(); return; }
   /* o Chrome entrega Ctrl+1..8 a pagina antes de trocar de aba so se a pagina segurar */
   if (k === 'Ctrl+2' || k === 'Ctrl+S' || k === 'Ctrl+M' || k === 'Ctrl+A' || k === 'Ctrl+Z' || k === 'Ctrl+Y' || k === 'Ctrl+D' ||
@@ -3852,10 +3866,208 @@ window.addEventListener('keydown', e => {
   }
   if (LEITOR.tecla(k)) e.preventDefault();
 });
+/* ============================== vista 3D (View » 3D Layout Mode, tecla 3) ==============================
+   A placa em WebGL (hub-pcb3d-vista.js): contorno, recortes e furos vazados, as faces pintadas com
+   o MESMO cache da vista 2D (mascara, cobre sob ela, metal onde ela abre, serigrafia) e os corpos
+   dos componentes pelo HubPcb3dModelo -- o STEP/extrudado que o editor de footprint do hub prendeu
+   ao footprint (Libs/pcblib-hub.js) vale primeiro, depois o board3d.js do PcbDoc, depois o
+   pcblib-3d.js; sem nenhum, a caixa de placeholder. A tecla 2 volta ao 2D. Ferramenta de desenho
+   chamada no 3D volta ao 2D antes, como no Altium. */
+let V3 = null, modo3d = false, HUBLIB = null, D3 = undefined, LIB3D = undefined, v3Agendado = 0;
+const SO_2D = new Set(['trilha', 'via', 'linha', 'arco', 'circulo', 'retangulo', 'poligono', 'texto', 'triangulo', 'furo',
+  'contorno', 'medir', 'sinalizar', 'pad', 'pour', 'fill', 'solidRegion', 'retanguloContorno', 'colar', 'duplicar',
+  'espelhoX', 'espelhoY', 'camadaUnica', 'proxCamada', 'antCamada', 'outraFace', 'grade', 'diff', 'gradeId', 'zoomIn', 'zoomOut',
+  'enquadrarSel', 'painelGrade']);
+function hubLib(){
+  if (HUBLIB) return HUBLIB;
+  if (typeof HubFpLib === 'undefined') return null;
+  HUBLIB = HubFpLib.normaliza(typeof pcblibHub !== 'undefined' ? pcblibHub : null);
+  return HUBLIB;
+}
+/* o comp_add (ECO, Update PCB) acha o footprint do hub antes do do Altium com o mesmo nome */
+function registraLibHub(){
+  const h = hubLib();
+  if (typeof HubFpLib === 'undefined' || !h) return;
+  const alt = typeof pcblib !== 'undefined' ? pcblib : null;
+  if (h.footprints.length) HC.setPcbLib(HubFpLib.mescla(alt, h));
+  else if (alt) HC.setPcbLib(alt);
+}
+const refDoComp = m => { const i = model.comps.indexOf(m); return i >= 0 && EB.components[i] ? EB.components[i].ref : (m.src && m.src.ref); };
+/* o 3D Body do footprint, para a ficha do componente */
+function corpos3dDe(nome){
+  const h = hubLib(), f = h && typeof HubFpLib !== 'undefined' ? HubFpLib.acha(h, nome) : null;
+  const n = f ? (f.bodies || []).length : 0;
+  if (n) return n + ' corpo(s) — biblioteca do hub';
+  if (D3 && (D3.bodies || []).length) return 'do PcbDoc (board3d.js)';
+  return 'nenhum — caixa no 3D (Edit Footprint… prende o STEP)';
+}
+function refsDaSel(){ return compsDaSel().map(refDoComp).filter(Boolean); }
+function alvoDoRef(ref){
+  const i = (EB.components || []).findIndex(c => c && c.ref === ref);
+  return i >= 0 && model.comps[i] ? ALVO_COMP.get(model.comps[i]) : null;
+}
+/* a face da placa para a textura: o cache da vista 2D, com as cores do 3D do Altium */
+function pintaFace3d(c, lado){
+  if (cacheSujo || !CACHE) montaCache();
+  const L = lado === 'top' ? 'Top' : 'Bottom';
+  const pinta = (k, cor) => {
+    const cc = CACHE.cam.get(k); if (!cc) return;
+    c.fillStyle = cor; c.strokeStyle = cor; c.fill(cc.cheios);
+    c.lineCap = 'round'; c.lineJoin = 'round';
+    for (const [q, P] of cc.tracos) { c.lineWidth = q / 1e4; c.stroke(P); }
+  };
+  c.fillStyle = '#1b6233'; c.fill(pathPlaca(), 'evenodd');
+  pinta(L, '#2c8446'); pinta('Multi', '#2c8446');
+  const sm = CACHE.cam.get(L + 'Solder');
+  if (sm) {
+    c.save(); c.clip(sm.cheios);
+    c.fillStyle = '#b8a76f'; c.fill(pathPlaca(), 'evenodd');
+    pinta(L, '#d9d6cf'); pinta('Multi', '#d9d6cf');
+    c.restore();
+  }
+  pinta(L + 'Overlay', '#f4f4f4');
+}
+async function cena3d(){
+  if (!V3) return;
+  if (D3 === undefined) D3 = PROJ ? await globalDe('pcbmirror3d', 'Projects/' + encodeURIComponent(PROJ) + '/board3d.js') : null;
+  if (LIB3D === undefined) LIB3D = await globalDe('pcblib3d', 'Libs/pcblib-3d.js');
+  const esp = (D3 && isNum(D3.thickness) && D3.thickness > 0) ? D3.thickness : 1.6;
+  const furos = [];
+  const furo = p => { if (p && p.drill > 0 && isNum(p.x) && isNum(p.y)) furos.push({ x:p.x, y:p.y, r:p.drill / 2 }); };
+  for (const c of (EB.components || [])) for (const p of ((c && c.pads) || [])) furo(p);
+  for (const p of (EB.freepads || [])) furo(p);
+  for (const v of (EB.vias || [])) furo(v);
+  const h = hubLib();
+  let corpos = [];
+  if (typeof HubPcb3dModelo !== 'undefined') {
+    try {
+      corpos = HubPcb3dModelo.corpos(EB, D3 || null, { pcblib3d:LIB3D || null, pcblib3dHub:h && typeof HubFpLib !== 'undefined' ? HubFpLib.lib3d(h) : null,
+        base:'Projects/' + encodeURIComponent(PROJ || '') + '/', baseLib:'Libs/', thickness:esp, board:B });
+    } catch (e) { console.warn('3D: corpos', e); }
+  }
+  V3.cena({ lacos:lacosDe(EB), recortes:recortesDaTela().map(k => k.pts), furos, esp,
+            bbox:EB.board && EB.board.bbox, pintaFace:pintaFace3d, corpos, realce:refsDaSel() });
+}
+function refaz3d(){ if (!modo3d || !V3 || v3Agendado) return; v3Agendado = setTimeout(() => { v3Agendado = 0; cena3d(); }, 120); }
+async function entra3d(){
+  if (modo3d) return;
+  if (typeof HubPcb3dVista === 'undefined' || !HubPcb3dVista.disponivel()) { HubDialog.toast('esta máquina não tem WebGL: a vista 3D não abre', 'warn', 4000); return; }
+  if (tool !== 'select') setTool('select');
+  const host = $('v3d');
+  modo3d = true; host.hidden = false;
+  if (!V3) {
+    try {
+      V3 = await HubPcb3dVista.cria(host, {
+        aoClicar(ref, ev){
+          const a = ref ? alvoDoRef(ref) : null;
+          if (!a) { if (!ev.shiftKey) selLimpa(); }
+          else if (ev.shiftKey) { if (selTem(a)) selTira(a); else selSoma(a); }
+          else selSo([a]);
+        },
+        aoMenu(ref, ev){
+          const a = ref ? alvoDoRef(ref) : null;
+          if (a && !selTem(a)) selSo([a]);
+          if (ALT) ALT.contexto(ev.clientX, ev.clientY, { primitivo:!!a, extras:extrasDoHub(null) });
+        },
+      });
+    } catch (e) {
+      modo3d = false; host.hidden = true;
+      HubDialog.toast('a vista 3D não abriu: ' + (e && e.message || e), 'err', 5000); return;
+    }
+  }
+  await cena3d();
+  V3.pose(view.flip ? 'base' : 'topo');
+  avisoRodape('3D — Shift+botão direito (ou arrastar) gira · botão direito arrasta · 0 topo · 8 isométrica · 9 gira 90° · 2 volta ao 2D');
+  try { V3.canvas.focus(); } catch (e) { /* ok */ }
+}
+function sai3d(){
+  if (!modo3d) return;
+  modo3d = false;
+  $('v3d').hidden = true;
+  avisoRodape('');
+  try { cv.focus(); } catch (e) { /* ok */ }
+  pede();
+}
+
+/* ============================== editor de footprint (o PCB Library do Altium) ==============================
+   hub-fpeditor.js, por cima da vista. Gravou: a biblioteca do hub e registrada de novo (o proximo
+   comp_add ja usa), o 3D refaz, e -- se os pads/serigrafia mudaram -- oferece o "Update PCB With"
+   do Altium: os componentes da placa com esse footprint saem e voltam (comp_del + comp_add, no
+   mesmo lugar, com as mesmas nets por nome de pad). Gravou com OUTRO nome a partir de um
+   componente: oferece trocar o footprint dele. */
+function opsTrocaFp(m, fpNome, nota){
+  const i = model.comps.indexOf(m), c = EB.components[i];
+  if (!c) return [];
+  const nets = {};
+  for (const p of (c.pads || [])) if (p && p.name != null && p.net) nets[String(p.name)] = p.net;
+  const add = { op:'comp_add', ref:c.ref, footprint:fpNome, x:c.x, y:c.y, rot:isNum(c.rot) ? c.rot : 0, layer:c.layer === 'Bottom' ? 'Bottom' : 'Top' };
+  if (c.comment) add.comment = c.comment;
+  const n = HC.netsCampo(nets); if (n) add.nets = n;
+  add.note = nota;
+  return [{ op:'comp_del', ref:m.src.ref, orig_x:c.x, orig_y:c.y, orig_rot:isNum(c.rot) ? c.rot : 0, orig_layer:c.layer,
+            orig_footprint:m.src.footprint || '', note:nota }, add];
+}
+async function editaFootprint(m){
+  if (typeof HubFpEditor === 'undefined' || typeof HubFpLib === 'undefined') { HubDialog.alert('O editor de footprint (hub-fpeditor.js) não carregou nesta página. Atualize o hub (F5).', { title:'Footprint' }); return; }
+  const i = m ? model.comps.indexOf(m) : -1;
+  const ec = i >= 0 ? EB.components[i] : null;
+  const nome = ec ? (ec.footprint || '') : '';
+  const alt = await globalDe('pcblib', 'Libs/pcblib.js');
+  HUBLIB = await HubFpLib.carrega();
+  registraLibHub();
+  /* reserva: o footprint que so existe na placa (embutido ou tirado do componente) */
+  let reserva = null;
+  if (nome && !HubFpLib.acha(HUBLIB, nome) && !(alt && (alt.footprints || []).some(f => f && f.name === nome))) {
+    try { const g = HC.footprintGeom(nome, B, {}); if (g && g.fp) reserva = Object.assign(JSON.parse(JSON.stringify(g.fp)), { name:nome }); } catch (e) { /* sem geometria */ }
+  }
+  const geo = f => f ? JSON.stringify([f.pads || [], f.silk || []]) : '';
+  const antes = new Map();
+  const fpDe = n => HubFpLib.acha(HUBLIB, n) || (alt && (alt.footprints || []).find(f => f && f.name === n)) || (n === nome ? reserva : null);
+  await HubFpEditor.abre({ nome, fp:reserva, pcblib:alt, titulo:'PCB Library',
+    async aoSalvar(fp, lib){
+      HUBLIB = lib; registraLibHub();
+      if (!antes.has(fp.name)) antes.set(fp.name, geo(fpDe(fp.name) || (fp.name === nome ? reserva : null)));
+      const usam = model.comps.filter((c, j) => EB.components[j] && EB.components[j].footprint === fp.name);
+      const mudouGeo = antes.get(fp.name) !== geo(fp);
+      antes.set(fp.name, geo(fp));
+      let ops = [];
+      if (m && ec && fp.name !== nome && model.comps.indexOf(m) >= 0 &&
+          await HubDialog.confirm('Trocar o footprint de ' + ec.ref + ' de "' + nome + '" para "' + fp.name + '"?', { title:'Footprint', ok:'Trocar' })) {
+        ops = ops.concat(opsTrocaFp(m, fp.name, 'footprint trocado no editor de footprint do hub'));
+      }
+      if (mudouGeo && usam.length &&
+          await HubDialog.confirm(usam.length + ' componente(s) da placa usam "' + fp.name + '". Atualizar com os pads novos? (o "Update PCB With" do Altium: saem e voltam no mesmo lugar, com as mesmas nets)', { title:'Update PCB', ok:'Atualizar' })) {
+        for (const c of usam) if (!(m && c === m && ops.length)) ops = ops.concat(opsTrocaFp(c, fp.name, 'footprint atualizado no editor de footprint do hub'));
+      }
+      if (ops.length && garanteEdicao()) { for (const op of ops) CH.push(op); commit(); HubDialog.toast(ops.length / 2 + ' componente(s) atualizados', 'ok'); }
+      refaz3d();
+    } });
+  HUBLIB = await HubFpLib.carrega(); registraLibHub();
+  refaz3d();
+}
+
 /* o que cada acao da tabela faz (a tabela da a tecla; aqui, o efeito) */
 function fazAcao(id, arg){
   fechaMenu();
+  if (modo3d && SO_2D.has(id)) sai3d();
+  if (modo3d && V3) {
+    switch (id) {
+      case 'enquadrar': V3.enquadra(); return;
+      case 'virar': V3.vira(); return;
+    }
+  }
   switch (id) {
+    case 'vista3d': entra3d(); return;
+    case 'vista2d': sai3d(); return;
+    case 'v3topo': case 'v3base': case 'v3frente': case 'v3tras': case 'v3esq': case 'v3dir': case 'v3iso': case 'v3isoVirada':
+      if (!modo3d) { entra3d().then(() => { if (V3 && modo3d) fazAcao(id); }); return; }
+      V3.pose({ v3topo:'topo', v3base:'base', v3frente:'frente', v3tras:'tras', v3esq:'esq', v3dir:'dir', v3iso:'iso', v3isoVirada:'isoVirada' }[id]); return;
+    case 'v3girarEsq': if (V3 && modo3d) V3.gira(-30); return;
+    case 'v3girarDir': if (V3 && modo3d) V3.gira(30); return;
+    case 'v3subir': if (V3 && modo3d) V3.inclina(30); return;
+    case 'v3descer': if (V3 && modo3d) V3.inclina(-30); return;
+    case 'v3gira90': if (V3 && modo3d) V3.gira(90); return;
+    case 'editarFp': { const L = compsDaSel(); editaFootprint(L.length === 1 ? L[0] : null); return; }
     case 'gradeId': setGrade(arg); HubDialog.toast('grade ' + grade.rot, 'info', 1400); return;
     case 'desselecionar': selLimpa(); return;
     case 'selNet': { const n = netDaSel(); if (n) selecionaNets(new Set([n])); return; }
@@ -4017,7 +4229,9 @@ function fichaDe(a){
         { sec:'Footprint' },
         { k:'footprint', rot:'Footprint Name', tipo:'ro', v:s.footprint || '—' },
         { k:'dim', rot:'Dimensions', tipo:'ro', v:bb && isNum(bb.x1) ? fmtDist(bb.x2 - bb.x1) + ' × ' + fmtDist(bb.y2 - bb.y1) + ' ' + unidade : '—' },
+        { k:'corpo3d', rot:'3D Body', tipo:'ro', v:corpos3dDe(s.footprint) },
         { botoes:[{ id:'girar', rot:'Rotate 90°' }, { id:'virar', rot:'Flip Component' }, { id:'enquadrar', rot:'Zoom' }] },
+        { botoes:[{ id:'editarFp', rot:'Edit Footprint…' }, { id:'vista3d', rot:'View 3D' }] },
         { sec:'Primitives — Pads (' + (s.pads || []).length + ')' },
         { tab:{ cab:['Pad', 'Net'], linhas:(s.pads || []).map(p => [p.name, p.net || '—']) } },
       ] };
@@ -4810,6 +5024,7 @@ function liga(){
   window.addEventListener('resize', () => { mede(); pede(); });
 }
 function inicia(){
+  registraLibHub();
   recalcula();
   mede();
   liga();

@@ -75,3 +75,8 @@ Trash/
 # sha1 por arquivo) e os backups do que era local e o servidor nao tinha. No app isso mora em
 # .altiumhub/, que nem existe aqui. E estado da maquina, como o Trash/.
 .lib-remota/
+
+# a biblioteca de footprints do hub (o editor de footprint, hub-fplib.js) e os STEP dela: sao
+# estado da biblioteca de cada servidor/maquina, gravado pelo hub -- nao viaja no push
+Libs/pcblib-hub.js
+Libs/3d-hub/

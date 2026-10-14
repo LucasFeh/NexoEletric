@@ -191,6 +191,10 @@ const ATALHOS_PCB = [
   { id:'atualizarPcb',   tecla:'',             rotulo:'Trazer as mudanças do esquema (ECO)',  altium:'PLPCB:CompareAndUpdateMe' },
   { id:'pdf',            tecla:'',             rotulo:'PDF do layout',                        altium:'PLWorkspaceManager:ExportToPDF' },
   { id:'novaPlaca',      tecla:'',             rotulo:'Nova placa',                           altium:'PLWorkspaceManager:NewPCB' },
+  /* 2026-10-14: a vista 3D (View » 2D/3D Layout Mode). O 2 e o 3 sao as teclas do Altium e
+     estavam livres na casa; com a trilha na mao o 2 continua sendo a via (gesto, antes do mapa) */
+  { id:'vista2d',        tecla:'2',            rotulo:'2D Layout Mode (vista 2D)',             altium:'PLPCB:ViewSwitchTo2D' },
+  { id:'vista3d',        tecla:'3',            rotulo:'3D Layout Mode (vista 3D)',             altium:'PLPCB:ViewSwitchTo3D' },
 ];
 /* Os comandos de cima que já existiam também espelham um comando do Altium: anotado aqui, e não
    na linha, para a tabela de antes ficar como era. */
@@ -219,6 +223,7 @@ const PADRAO_ALTIUM_PCB = {
   alinharDir:'A,R', alinharTopo:'A,T', alinharBase:'Ctrl+Shift+B', alinharCentroH:'A,C', alinharCentroV:'A,V',
   distribuirH:'Ctrl+Shift+H', distribuirV:'Ctrl+Shift+V', ratsnest:'N', realcarNet:'C', drc:'T,D', regras:'D,R',
   pour:'P,G', repour:'T,G,A', teardrops:'T,E', pad:'P,P', atualizarPcb:'D,I', pdf:'F,M', novaPlaca:'F,N,P',
+  vista2d:'2', vista3d:'3',
 };
 
 /* Os gestos da PCB, no molde dos do Esquema: o canvas os trata direto, ANTES do mapa.

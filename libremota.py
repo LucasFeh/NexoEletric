@@ -48,7 +48,7 @@ ARQUIVOS = (
     'schlib.js', 'symbols-lib.js', 'lib-subs.js', 'rename-map.js', 'pcblib.js',
     'almox-basicos.js', 'almox-especiais.js', 'almox-index.js', 'almox-sync.js',
     'almox-guardiao.js', 'almox-parts.json', 'lib-ledger.json', 'almox-excluidos.json',
-    'libs-report.txt', 'BIBLIOTECA DE ESQUEMA.SchLib',
+    'libs-report.txt', 'BIBLIOTECA DE ESQUEMA.SchLib', 'pcblib-hub.js',
 )
 
 # Mesma lista do electron/lib/import-server.js (VARS_DE_DADOS). Os .js do espelho rodam com
@@ -58,7 +58,7 @@ ARQUIVOS = (
 VARS_DE_DADOS = frozenset((
     'pcbmirror', 'schematic', 'changes', 'annotations', 'schlib', 'pcblib', 'symbolsLib',
     'renameMap', 'libSubs', 'projects', 'almoxIndex', 'almoxSync', 'almoxBasicos',
-    'almoxEspeciais', 'almoxGuardiao'))
+    'almoxEspeciais', 'almoxGuardiao', 'pcblibHub'))
 
 CFBF = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'   # assinatura de todo .SchLib (OLE/CFBF)
 
@@ -217,6 +217,20 @@ def _json(corpo, status):
 
 def _e_done(evento):
     return any(linha.strip() in (b'event: done', b'event:done') for linha in evento.split(b'\n'))
+
+
+def _e_save_de(nome):
+    """O POST /api/save grava Libs/<nome>?"""
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return False
+    partes = [seg for seg in str(data.get('path', '')).replace('\\', '/').split('/') if seg]
+    return partes == ['Libs', nome]
+
+
+# a biblioteca de footprints do hub (hub-fplib.js): o arquivo e os STEP moram no servidor, como o
+# resto da biblioteca; o POST /api/fp3d sobe o STEP la
+FP_HUB_NOME = 'pcblib-hub.js'
 
 
 def _e_lib_subs():
@@ -386,6 +400,21 @@ class Remota:
             recusado = self._confere_lib_subs()
             if recusado is not None:
                 return recusado
+        elif caminho == '/api/save' and metodo == 'POST' and _e_save_de(FP_HUB_NOME):
+            pass
+        elif caminho == '/api/fp3d' and metodo == 'POST':
+            pass
+        elif caminho.lower().startswith('/libs/3d-hub/') and metodo in ('GET', 'HEAD'):
+            pass
+        elif caminho.lower() == '/libs/' + FP_HUB_NOME and metodo in ('GET', 'HEAD'):
+            if not self._fora_confirmado():
+                try:
+                    self._sincroniza(FP_HUB_NOME, espera=T_CONEXAO)
+                except Fora:
+                    pass
+                except (OSError, http.client.HTTPException) as e:
+                    _log('Libs/%s: nao conferi com o servidor (%s); fica o espelho' % (FP_HUB_NOME, _motivo(e)))
+            return None
         elif caminho.lower() == '/' + LIB_SUBS.lower() and metodo in ('GET', 'HEAD'):
             self._le_lib_subs()
             return None                         # o handler local serve o espelho, agora em dia

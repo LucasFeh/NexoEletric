@@ -46,6 +46,11 @@ ODOO_LISTA = 'odoo-lista.json'  # recibo do envio ao Odoo; muda sem o projeto mu
 # quantidade mudada, e nenhuma aba precisa recarregar por isso -- a folha nao muda
 ODOO_EXTRAS = 'lista-extras.json'
 ESTADO_LOCAL = BOM_STATE_FILES + (ODOO_LISTA, ODOO_EXTRAS)
+# a biblioteca de footprints do hub (Libs/pcblib-hub.js) e os STEP dela (Libs/3d-hub/): o editor de
+# footprint grava de dentro do Esquema e da PCB, e quem usa relê na hora de abrir (hub-fplib.js »
+# carrega). Vistos pelo vigia, gravar um footprint recarregaria a pagina onde o editor esta aberto.
+FP_HUB = ("pcblib-hub.js",)
+FP3D_PASTA = "3d-hub"
 # O Gerber que a vista PCB grava (POST /api/gerber) mora em Projects/<nome>/Gerber/, e a pasta
 # inteira fica FORA do _snapshot() pela mesma razao do estado acima: e saida gerada, nao
 # projeto. Vista pelo vigia, gravar o Gerber recarregaria todas as paginas abertas -- inclusive
@@ -105,6 +110,8 @@ def _snapshot():
     for base in ('Libs', 'Projects'):
         topo = os.path.join(ROOT, base)
         for dirpath, dirnames, filenames in os.walk(topo):
+            if base == 'Libs' and os.path.normcase(dirpath) == os.path.normcase(topo):
+                dirnames[:] = [d for d in dirnames if d != FP3D_PASTA]
             if base == 'Projects' and os.path.dirname(dirpath) == topo:
                 # dentro de Projects/<nome>/ (um projeto chamado "Gerber" continua visto):
                 # nao desce na pasta do Gerber gerado; ver GERBER_DIR
@@ -114,6 +121,8 @@ def _snapshot():
             for f in filenames:
                 # o .tmp da gravacao atomica junto: uma varredura que o pegasse no meio da
                 # escrita via um arquivo nascer e sumir, e isso tambem e "mudou"
+                if base == 'Libs' and (f in FP_HUB or (f.endswith('.tmp') and f[:-4] in FP_HUB)):
+                    continue
                 if f in ESTADO_LOCAL or (f.endswith('.tmp') and f[:-4] in ESTADO_LOCAL):
                     continue      # visto marcado nao e mudanca de projeto; ver BOM_VISTOS
                 add(os.path.join(dirpath, f))
@@ -218,7 +227,9 @@ SAVE_BASENAMES = ('changes.js', 'schematic.js', 'annotations.js', 'rules.js')
 # app desktop em modo biblioteca remota, este POST vai para o servidor: ver libremota.py.)
 # sch-templates-casa.js: os templates de folha criados no hub (hub-schtemplate-ui.js); os do
 # Altium ficam no Libs/sch-templates.js, que e codigo e nao se grava daqui
-SAVE_LIB_FILES = ('lib-subs.js', 'sch-templates-casa.js')
+# pcblib-hub.js: os footprints criados/alterados no editor de footprint do hub (hub-fplib.js); o
+# espelho do Altium (Libs/pcblib.js) continua so leitura
+SAVE_LIB_FILES = ('lib-subs.js', 'sch-templates-casa.js', 'pcblib-hub.js')
 
 
 @app.route('/api/save', methods=['POST'])
@@ -247,6 +258,39 @@ def api_save():
     except OSError as e:
         return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
     return {'ok': True}
+
+
+# ── o STEP dos corpos 3D do editor de footprint (hub-fplib.js » sobeStep) ──
+# O corpo do POST e o arquivo cru; o nome no disco e o sha1 do conteudo (o mesmo modelo subido
+# duas vezes nao duplica) em Libs/3d-hub/, que o hub serve como arquivo estatico.
+FP3D_DIR = os.path.join('Libs', '3d-hub')
+FP3D_MAX = 120 * 1024 * 1024
+
+
+@app.route('/api/fp3d', methods=['POST'])
+def api_fp3d():
+    from urllib.parse import unquote
+    request.max_content_length = FP3D_MAX
+    try:
+        dados = request.get_data(cache=False)
+    except RequestEntityTooLarge:
+        return {'ok': False, 'error': 'STEP maior que %d MB' % (FP3D_MAX // (1024 * 1024))}, 413
+    if not dados or not dados[:64].lstrip().startswith(b'ISO-10303-21'):
+        return {'ok': False, 'error': 'o arquivo nao e STEP (nao comeca com ISO-10303-21)'}, 400
+    sha = hashlib.sha1(dados).hexdigest()
+    nome = os.path.basename(unquote(request.headers.get('X-Nome', '')).replace('\\', '/'))[:120] or 'modelo.step'
+    pasta = os.path.join(ROOT, FP3D_DIR)
+    alvo = os.path.join(pasta, sha + '.step')
+    try:
+        os.makedirs(pasta, exist_ok=True)
+        if not os.path.isfile(alvo):
+            tmp = alvo + '.tmp'
+            with open(tmp, 'wb') as f:
+                f.write(dados)
+            os.replace(tmp, alvo)
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
+    return {'ok': True, 'id': sha, 'file': '3d-hub/' + sha + '.step', 'name': nome, 'bytes': len(dados)}
 
 
 LASER_DIR = 'Laser'
