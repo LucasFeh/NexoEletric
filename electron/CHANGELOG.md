@@ -3,6 +3,15 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.7 — 2026-10-14
+
+- **A vista PCB com os menus do Altium.** Barra de menus **File · Edit · View · Project · Place · Design · Tools · Route · Reports · Window · Help** em cima da placa, com a mesma ordem e os mesmos nomes do Altium Designer 21 (lidos do próprio Altium). F10, ou Alt + a letra, abre pelo teclado. O que o hub ainda não faz aparece cinza, com o porquê.
+- **Botão direito igual ao do Altium.** Sobre um objeto, o menu "Right Mouse Click Primitive" (Place, Component Actions, Net Actions, Align, Cut/Copy/Paste, Comment, Preferences, Properties...); no vazio, o "Free Space". Component Actions aparece no componente e no pad dele (Select Component Nets, Move Component Origin To Grid...). Camada, Virar de face e Sinalizar continuam no fim do menu.
+- **Teclas que abrem menu.** Com a predefinição **Padrão Altium** dos atalhos, P, D, T, U, V... abrem o menu no cursor e a letra seguinte escolhe (P,T trilha · D,R regras · T,D DRC), como no Altium.
+- **Tools › Preferences (T,P).** A janela de Preferences do PCB Editor do Altium: General (Online DRC, Cursor Type, duplo clique), Display, Interactive Routing (modos de conflito do Shift+R, largura pela trilha existente, Default/Preferred), Mouse Wheel Configuration (com Padrão Altium), Defaults (largura, via, pad, texto), Layer Colors e **Keyboard Shortcuts**. O padrão é o comportamento de antes.
+- **Properties do componente no formato do Altium:** Location, Properties, Footprint e Primitives; os campos das outras fichas com os nomes do Altium (Layer, Width, Hole Size...).
+- **Ajuda › Conectar IA (MCP)** e os módulos da vista PCB (DRC, regras, polygon pour, ECO, roteador, PDF de layout) entram no app.
+
 ## 1.2.6 — 2026-10-01
 
 - **A Parte sempre à vista.** Na ficha (Propriedades), a **Parte** aparece como seletor em todo componente: no de uma parte só ela fica travada em "1 de 1", e o *title* diz por quê (desenhar as partes no editor de símbolos, ou trocar por um componente que as tenha). No **Trocar componente**, o **PARTE** do rodapé aparece desde a abertura, travado enquanto o componente tem uma parte, e destrava ao escolher um componente de várias. Antes os dois sumiam no componente de uma parte, e a troca de parte parecia não existir.
