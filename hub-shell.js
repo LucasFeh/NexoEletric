@@ -84,7 +84,8 @@
 
   /* ── CSS da casca: so tokens do tema do hub, entao vale para todos os temas ───── */
   const CSS = `
-  .eh-seg{display:inline-flex; gap:1px; margin-left:auto; padding:1px; border-radius:4px; box-shadow:inset 0 0 0 1px var(--edge);}
+  .eh-seg-linha{display:flex; align-items:center; gap:8px; padding:2px 12px 6px; font:11px var(--font); color:var(--text-2);}
+  .eh-seg{display:inline-flex; gap:1px; padding:1px; border-radius:4px; box-shadow:inset 0 0 0 1px var(--edge);}
   .eh-seg button{border:0; background:transparent; color:var(--text-2); font:11px var(--font); padding:2px 7px; border-radius:3px; cursor:pointer;}
   .eh-seg button[aria-pressed="true"]{background:rgba(var(--tint),0.14); color:var(--text);}
 
@@ -571,7 +572,8 @@ body.eh-shell .tab[aria-selected="true"]::after {
     };
     opSeg('Todos', false, 'Mostra todos os projetos da pasta de trabalho');
     opSeg('Só o atual', true, 'Mostra só o projeto aberto (a busca ainda procura em todos)');
-    tools.append(seg);
+    const linhaSeg = el('div', 'eh-seg-linha');
+    linhaSeg.append(el('span', 'rot', 'Mostrar'), seg);
 
     const bz = el('div', 'eh-busca');
     busca = el('input');
@@ -606,7 +608,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
       rz.addEventListener('pointerup', soltar, { once: true });
     });
 
-    dock.append(hd, tools, bz, tree, tabsDoPainel, rz);
+    dock.append(hd, tools, bz, linhaSeg, tree, tabsDoPainel, rz);
 
     // barra de status: o que muda a cada render (info, servidor) e o que o HUB desenha
     // (estagio e pendencias: renderPipeline escreve em #pipeline/#pending, movidos para ca)
