@@ -22,6 +22,9 @@ Opcoes:
   --sem-contornos  nao grava texts[].polys. Por padrao, todo texto TrueType de uma linha cuja
                    fonte o Windows tem sai com o contorno exato (fontTools; calibrado contra o
                    Gerber X2 do DMB, IoU 0,98) -- o Gerber e a tela usam o contorno quando existe
+  --regras ARQ     grava tambem as regras de projeto inteiras (Rules6 + Classes6 crus) no rules.js
+                   que o hub le (Projects/<p>/rules.js); o hub-pcbregras.js traduz. Mesmas travas
+                   do board.js: nunca em disco de rede, e Projects/*/rules.js so com --forcar (.bak)
   --forcar         permite sobrescrever Projects/*/board.js (com copia .bak antes)
   --gerado TXT     o campo "generated" (padrao: agora, dd/mm/aaaa hh:mm:ss)
   -q               sem o resumo
@@ -61,6 +64,29 @@ def eh_board_de_projeto(caminho):
     return len(p) >= 3 and p[-1].lower() == 'board.js' and p[-3].lower() == 'projects'
 
 
+def eh_de_projeto(caminho, nome):
+    """Projects/<qualquer>/<nome>"""
+    p = os.path.abspath(caminho).replace(os.sep, '/').split('/')
+    return len(p) >= 3 and p[-1].lower() == nome and p[-3].lower() == 'projects'
+
+
+def grava(caminho, texto, q):
+    """grava com .bak do anterior quando e arquivo de projeto, e troca atomica (segue symlink)"""
+    pasta = os.path.dirname(os.path.abspath(caminho))
+    os.makedirs(pasta, exist_ok=True)
+    if os.path.exists(caminho) and (eh_board_de_projeto(caminho) or eh_de_projeto(caminho, 'rules.js')):
+        bak = caminho + '.bak'
+        if os.path.exists(bak):
+            bak = caminho + '.bak-' + datetime.now().strftime('%Y%m%d-%H%M%S')
+        shutil.copy2(caminho, bak)
+        if not q:
+            print('copia do anterior: %s' % bak)
+    tmp = caminho + '.tmp'
+    with open(tmp, 'w', encoding='ascii', newline='\n') as f:
+        f.write(texto)
+    os.replace(tmp, os.path.realpath(caminho))
+
+
 def caminho_windows(caminho):
     p = os.path.abspath(caminho)
     return p.replace('/', '\\') if os.name == 'nt' else p
@@ -75,12 +101,20 @@ def main(argv):
     ap.add_argument('--sem-parametros', action='store_true')
     ap.add_argument('--sem-contornos', action='store_true')
     ap.add_argument('--forcar', action='store_true')
+    ap.add_argument('--regras')
     ap.add_argument('--gerado')
     ap.add_argument('-q', action='store_true')
     a = ap.parse_args(argv)
 
     if disco_de_rede(a.saida):
         print('RECUSADO: %s fica num disco de rede -- a saida e sempre local (o acervo e so leitura).' % a.saida)
+        return 2
+    if a.regras and disco_de_rede(a.regras):
+        print('RECUSADO: %s fica num disco de rede -- a saida e sempre local (o acervo e so leitura).' % a.regras)
+        return 2
+    if a.regras and os.path.exists(a.regras) and eh_de_projeto(a.regras, 'rules.js') and not a.forcar:
+        print('RECUSADO: %s ja existe e e o rules.js de um projeto (o usuario edita pelo hub). '
+              'Use --forcar para sobrescrever (o anterior vai para rules.js.bak antes).' % a.regras)
         return 2
     if os.path.exists(a.saida) and eh_board_de_projeto(a.saida) and not a.forcar:
         print('RECUSADO: %s ja existe e e o espelho de um projeto.\n'
@@ -135,6 +169,11 @@ def main(argv):
     # segue o symlink antes de trocar: no servidor Projects/ e estado compartilhado por link, e o
     # os.replace sobre o link trocaria O LINK (tests/test_symlink_sobrevive.py)
     os.replace(tmp, os.path.realpath(a.saida))
+
+    if a.regras:
+        grava(a.regras, L.regras_js(P, caminho_windows(a.pcbdoc)), a.q)
+        if not a.q:
+            print('regras: %d (+%d classes) -> %s' % (len(P.regras), len(P.classes), a.regras))
 
     if not a.q:
         s = B['stats']

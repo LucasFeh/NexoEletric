@@ -10,8 +10,9 @@
    agrupa os iguais (mesmo símbolo + footprint + comment viram UMA linha, com todos os
    designadores) e, para cada linha, recomenda componentes do almoxarifado que servem de
    substituto — a partir do comment, dos parâmetros, do valor e do footprint, nesta ordem de
-   força. Quem decide é a pessoa: a recomendação vem escolhida mas trocável, e nada é gravado
-   antes do "Aplicar".
+   força. Quem decide é a pessoa: a recomendação vem escolhida mas trocável, e nada muda no
+   esquema antes do "Aplicar". O que ela decide fica guardado até o "Trocar" — fechar o painel
+   ou recarregar a página não desfaz a conferência (o rascunho, logo depois da varredura).
 
    QUEM GRAVA NÃO É ESTE ARQUIVO. A gravação é a ponte `__hubAplicaVinculos` do schframe.js —
    a MESMA que o painel da BoM e o "Enviar para o Odoo" usam. É ela que resolve o símbolo,
@@ -540,7 +541,8 @@ function varre(comps, cands, jaAlmox){
       const achou = ehAlmox(c, perfil);
       ln = { chave: k, comp: c, perfil: perfil, refs: [], partes: 0,
              almox: !!achou, almoxNome: (typeof achou === 'string' ? achou : ''),
-             sugestoes: [], escolha: null, marcado: false, alerta: '' };
+             sugestoes: [], escolha: null, marcado: false, alerta: '', perdida: '',
+             guardado: null };
       linhas.set(k, ln);
     }
     ln.partes++;
@@ -563,6 +565,9 @@ function varre(comps, cands, jaAlmox){
           : 'o projeto nao diz o valor desta peca')
           + ' — da para escolher o encapsulamento, nao o valor';
     }
+    /* o que a varredura recomendou, antes de qualquer mao: e contra isto que o rascunho mede
+       o que a pessoa mudou */
+    ln.padrao = { escolha: ln.escolha, marcado: ln.marcado };
     fora.push(ln);
   }
   fora.sort((a, b) => (a.almox - b.almox)
@@ -591,9 +596,112 @@ function aproxima(perfil, cands, quantos){
   return fora.slice(0, quantos || 5);
 }
 
+/* ── o rascunho: o que a pessoa decidiu e ainda não trocou ──
+   Fechar o painel jogava fora a conferência inteira. O abre() refazia a varredura do zero a
+   cada vez: a escolha feita à mão voltava a ser a recomendação, e a linha desmarcada voltava
+   marcada. E fechar é o que mais acontece aqui — o Esc, o clique fora da caixa e, sobretudo, o
+   designador, que FECHA o painel para mostrar a peça na folha. Conferir três linhas custava
+   refazer as outras trinta. O pedido do dono (2026-09-29) foi que as alterações ficassem até o
+   "Trocar", fechando de propósito ou sem querer.
+
+   SÓ ENTRA O QUE A PESSOA MUDOU. A linha que está como o conversor recomendou fica de fora e
+   volta com a recomendação do dia, que pode ter melhorado com o acervo. A que entra leva a
+   marcação e a escolha juntas, porque "não trocar esta" foi decidido olhando aquela peça.
+
+   A CHAVE É A DA LINHA (chaveDoComp), e não o designador: é ela que define a peça, e é ela que
+   some quando a troca acontece — o componente trocado ganha outro sym e outros params, cai
+   noutra linha, e a decisão sobre ele deixa de casar com qualquer coisa. É isso que faz o
+   "Trocar" consumir o rascunho: o que foi trocado sai dele, e o que ficou de fora da troca
+   continua como a pessoa deixou (desmarcada não volta marcada).
+
+   A PEÇA VAI PELO ID DO ODOO, com o nome de reserva: renomear o produto no Odoo troca o nome do
+   valor no acervo e mais nada (tools/almox/README.md, "Tudo segue o ID"), e uma escolha guardada
+   só pelo nome se perderia no primeiro sincronismo depois do renome.
+
+   O RASCUNHO SÓ MUDA PELA MÃO DA PESSOA. A linha que voltou dele guarda a entrada em
+   `guardado` e a devolve como veio até alguém mexer nela — em vez de ser medida de novo
+   contra a recomendação do dia. Medir de novo parecia equivalente e não é: com o acervo sem
+   carregar (servidor fora, espelho ainda chegando), a recomendação do dia é "nada", o "não
+   trocar esta" fica igual a ela e sai do rascunho; quando o acervo volta, a linha volta
+   MARCADA. Uma falha de rede não pode desfazer uma decisão. */
+const alvoRef = a => a ? { n: String(a.nome || ''), o: String(a.odooId || '') } : null;
+function mexida(ln){
+  if (!ln || ln.almox || !ln.padrao) return false;
+  if (ln.guardado) return true;
+  const a = ln.escolha ? ln.escolha.alvo : null;
+  const b = ln.padrao.escolha ? ln.padrao.escolha.alvo : null;
+  return a !== b || !!ln.marcado !== !!ln.padrao.marcado;
+}
+function rascunhoDe(linhas){
+  const fora = {};
+  for (const ln of linhas || [])
+    if (mexida(ln))
+      fora[ln.chave] = ln.guardado || { m: !!ln.marcado, e: alvoRef(ln.escolha && ln.escolha.alvo) };
+  return fora;
+}
+/* a peça guardada, de volta entre os candidatos de hoje. O id manda, porque o nome muda e o id
+   não; com o id repetido, a peça viva ganha da marcada "fora" (o duplicado antigo, que o acervo
+   só aponta e nunca renumera); o nome sozinho vale quando o id não acha nada. */
+function achaAlvo(q, cands){
+  if (!q || (!q.n && !q.o)) return null;
+  let melhor = null, nota = 0;
+  for (const b of cands || []){
+    const id = !!q.o && String(b.odooId || '') === q.o;
+    const nome = !!q.n && String(b.nome || '') === q.n;
+    if (!id && !nome) continue;
+    const n = (id ? 4 : 0) + (b.fora ? 0 : 2) + (nome ? 1 : 0);
+    if (n > nota){ melhor = b; nota = n; }
+  }
+  return melhor;
+}
+/* a escolha de uma peça qualquer para a linha — a conta do "escolher outro…": a nota do
+   recomendador quando ele aceita a peça, "escolhido à mão" quando ele a recusaria */
+function escolhaPara(perfil, b){
+  const n = pontua(perfil, b);
+  return n ? { alvo: b, pts: n.pts, motivos: n.motivos, confianca: n.confianca }
+           : { alvo: b, pts: 0, motivos: ['escolhido à mão'], confianca: 'baixa' };
+}
+/* devolve o rascunho às linhas de uma varredura nova, e só mexe nas linhas que estão nele. A
+   peça que não está no acervo agora não é trocada por outra: a linha fica DESMARCADA, com a
+   recomendação de hoje à vista e o nome da que falta em `perdida` — trocar em silêncio uma
+   escolha da pessoa pelo palpite do dia é o erro que este painel inteiro evita. A escolha
+   continua no rascunho (`guardado`) e volta sozinha quando a peça voltar. */
+function aplicaRascunho(linhas, rasc, cands){
+  const fora = { restauradas: 0, perdidas: [] };
+  if (!rasc || typeof rasc !== 'object') return fora;
+  for (const ln of linhas || []){
+    if (ln.almox || !Object.prototype.hasOwnProperty.call(rasc, ln.chave)) continue;
+    const d = rasc[ln.chave];
+    if (!d || typeof d !== 'object') continue;
+    if (d.e){
+      const b = achaAlvo(d.e, cands);
+      if (!b){
+        ln.marcado = false;
+        ln.perdida = String(d.e.n || d.e.o || '');
+        ln.guardado = { m: !!d.m, e: { n: String(d.e.n || ''), o: String(d.e.o || '') } };
+        fora.perdidas.push({ refs: ln.refs.slice(), nome: ln.perdida });
+        continue;
+      }
+      let esc = ln.sugestoes.find(s => s.alvo === b);
+      if (!esc){ esc = escolhaPara(ln.perfil, b); ln.sugestoes = [esc].concat(ln.sugestoes); }
+      ln.escolha = esc;
+      ln.marcado = !!d.m;
+      /* com o nome de HOJE: achada pelo id depois de um renome, a entrada sai com o nome novo */
+      ln.guardado = { m: ln.marcado, e: alvoRef(b) };
+    } else {
+      ln.escolha = null;
+      ln.marcado = false;
+      ln.guardado = { m: false, e: null };
+    }
+    fora.restauradas++;
+  }
+  return fora;
+}
+
 const PURO = { paramsPlanos, normValor, mesmoValor, tensaoDe, encapDe, montagemDe, viasDe,
                pareceMPN, tipoDoRef, tipoDoTexto, perfilDoComp, perfilDoValor, pontua, sugere,
-               varre, aproxima, chaveDoComp, semSep, CX, comGraus, MINIMO };
+               varre, aproxima, chaveDoComp, semSep, CX, comGraus, MINIMO,
+               mexida, rascunhoDe, achaAlvo, escolhaPara, aplicaRascunho };
 
 /* ══════════════════ TELA ══════════════════ */
 if (typeof document === 'undefined') return { pure: PURO };
@@ -781,8 +889,10 @@ function el(tag, cls, text){
 }
 const proj = () => (typeof SCH_P === 'string' && SCH_P) || '';
 
+/* `carregado`: as linhas já receberam o rascunho (a trava do guarda()); `vista`: filtro, busca
+   e rolagem de quando o painel fechou nesta página */
 const ST = { aberto: false, rodando: false, linhas: [], cands: [], filtro: 'pend', busca: '',
-             aplicados: 0, aberta: null };
+             aplicados: 0, aberta: null, carregado: false, vista: null };
 
 /* os candidatos: SÓ o almoxarifado, pelo mesmo caminho que o seletor da folha usa. A
    biblioteca da casa fica de fora de propósito — é dela que se está saindo. */
@@ -857,6 +967,80 @@ function varreFolha(){
   return comps.length;
 }
 
+/* ── o rascunho no navegador ──
+   No localStorage, por projeto, e não só na memória: a vista Esquema recarrega inteira mais
+   vezes do que parece. Ir para a PCB e voltar troca o src do iframe (hub.html), e o
+   __hubOnChange dá location.reload() quando outro escritor muda o schematic.js — nos dois
+   casos a memória morre com a página. A cópia de memória fica de reserva para o navegador que
+   recusa o localStorage (modo privado, cota cheia), e é ela que vale depois de uma gravação
+   que falhou, porque é a mais nova.
+
+   É do navegador de quem confere, de propósito: marcação é conferência de uma pessoa, e não
+   estado do projeto — ninguém recebe pela metade a lista que outra pessoa marcava. */
+const RASC_V = 1;
+const chaveRasc = () => 'altiumhub.converte.' + proj();
+let rascMem = null, rascDisco = true;
+function leRascunho(){
+  if (rascDisco){
+    try {
+      const t = localStorage.getItem(chaveRasc());
+      if (t === null) return null;
+      const r = JSON.parse(t);
+      return (r && r.v === RASC_V && r.linhas && typeof r.linhas === 'object') ? r.linhas : null;
+    } catch (e) { /* recusado ou estragado: vale a memória */ }
+  }
+  return rascMem;
+}
+function guarda(){
+  /* NUNCA com linhas que não receberam o rascunho: gravar a partir delas grava a recomendação
+     por cima do que a pessoa tinha feito, e o dano não aparece — ela só descobre ao reabrir.
+     Folha sem componente nenhum também não grava: não há decisão a guardar, e uma leitura
+     vazia não pode apagar as que existem. */
+  if (!ST.carregado || !ST.linhas.length) return;
+  const linhas = rascunhoDe(ST.linhas);
+  rascMem = Object.keys(linhas).length ? linhas : null;
+  try {
+    if (rascMem) localStorage.setItem(chaveRasc(), JSON.stringify({ v: RASC_V, linhas: rascMem }));
+    else localStorage.removeItem(chaveRasc());
+    rascDisco = true;
+  } catch (e) { rascDisco = false; }
+}
+/* varredura nova COM o rascunho por cima — o único jeito de refazer as linhas. A varreFolha
+   sozinha devolve tudo à recomendação, e o próximo guarda() gravaria isso por cima. */
+function recarrega(){
+  const conta = varreFolha();
+  const r = aplicaRascunho(ST.linhas, leRascunho(), ST.cands);
+  ST.carregado = true;
+  /* "saiu do almoxarifado" seria mentira quando ele só não carregou: com zero peças, o aviso é
+     outro — e as escolhas esperam por ele, guardadas */
+  if (r.perdidas.length && !ST.cands.length)
+    HubDialog.toast('O almoxarifado não carregou nesta página — as escolhas guardadas ficam '
+      + 'esperando por ele, desmarcadas.', 'warn', 9000);
+  else if (r.perdidas.length){
+    const p = r.perdidas[0];
+    const refs = p.refs.slice(0, 3).join(', ') + (p.refs.length > 3 ? '…' : '');
+    HubDialog.toast(r.perdidas.length === 1
+      ? 'A peça escolhida para ' + refs + ' (' + comGraus(p.nome) + ') não está no almoxarifado '
+        + 'agora — a linha ficou desmarcada até ela voltar ou você escolher outra.'
+      : r.perdidas.length + ' peças escolhidas não estão no almoxarifado agora — as linhas delas '
+        + 'ficaram desmarcadas até elas voltarem ou você escolher outras.',
+      'warn', 9000);
+  }
+  return conta;
+}
+/* TODA decisão da pessoa passa por aqui, e daqui vai para o rascunho: um caminho que mudasse a
+   linha sem o guarda() seria a alteração que some ao fechar — o defeito que o rascunho existe
+   para acabar */
+function decide(ln, escolha, marcado){
+  ln.escolha = escolha;
+  ln.marcado = !!escolha && !!marcado;
+  /* a pessoa reviu a linha: a entrada que veio do rascunho deixa de valer como veio, e a linha
+     passa a ser medida pelo que está na tela */
+  ln.perdida = '';
+  ln.guardado = null;
+  guarda();
+}
+
 /* ── pintura ── */
 /* o jumper sem peça: é uma das três respostas da regra (jumperDe) — a recomendação do jumper de
    solda, ou a escolha da pessoa entre as três —, e não a falta de sugestão. Só é "nada" quando
@@ -893,6 +1077,9 @@ function pinta(){
     box.append(el('div', 'cv-vazio', ST.linhas.length
       ? 'nenhuma linha neste filtro.'
       : 'esta folha não tem componentes.'));
+    /* o rodapé conta o projeto, não o filtro: o "Descartar" num filtro vazio continuava
+       dizendo as alterações de antes dele */
+    atualizaRodape();
     return;
   }
   for (const ln of lista) box.append(linha(ln));
@@ -907,7 +1094,7 @@ function linha(ln){
   cb.checked = !!ln.marcado;
   cb.disabled = ln.almox || !ln.escolha;
   cb.title = ln.almox ? 'já é do almoxarifado' : 'trocar estes componentes';
-  cb.addEventListener('change', () => { ln.marcado = cb.checked; atualizaRodape(); });
+  cb.addEventListener('change', () => { decide(ln, ln.escolha, cb.checked); atualizaRodape(); });
   row.append(cb);
 
   /* os designadores levam à peça na folha: conferir o que se vai trocar é metade do
@@ -971,6 +1158,9 @@ function linha(ln){
        pediu — repetir na linha de motivos era dizer duas vezes a mesma coisa */
     if (ln.escolha) vai.append(el('div', 'pq', ln.escolha.motivos.join(' · ')));
     if (ln.alerta) vai.append(el('div', 'alerta', '⚠ ' + ln.alerta));
+    if (ln.perdida) vai.append(el('div', 'alerta', '⚠ a peça que você tinha escolhido ('
+      + comGraus(ln.perdida) + ') não está no almoxarifado agora — a linha fica desmarcada até '
+      + 'ela voltar ou você escolher outra'));
     if (!ln.escolha) vai.append(semSugestao(ln));
     vai.append(busca(ln));
   }
@@ -1124,8 +1314,7 @@ function seletor(ln){
   const lista = el('div', 'cv-opcoes');
   lista.setAttribute('role', 'listbox');
   const poe = (alvo, escolha) => lista.append(faixa(alvo, () => {
-    ln.escolha = escolha;
-    ln.marcado = !!escolha;
+    decide(ln, escolha, !!escolha);
     ST.aberta = null;
     pinta();
   }, 'cv-opb', b => {
@@ -1213,15 +1402,10 @@ function busca(ln){
       bt.append(document.createTextNode(b.nome + '  '));
       bt.append(el('span', 'fam', b.familia + (b.saldo > 0 ? '  ·  ' + b.saldo : '  ·  0')));
       bt.addEventListener('click', () => {
-        const n = pontua(ln.perfil, b);
-        const escolha = { alvo: b, pts: n ? n.pts : 0,
-                          motivos: n ? n.motivos : ['escolhido à mão'],
-                          confianca: n ? n.confianca : 'baixa' };
-        if (!n) escolha.motivos = ['escolhido à mão'];
+        const escolha = escolhaPara(ln.perfil, b);
         ln.sugestoes = [escolha].concat(ln.sugestoes.filter(s => s.alvo !== b));
-        ln.escolha = escolha;
-        ln.marcado = true;
         ln.busca = '';
+        decide(ln, escolha, true);
         pinta();
       });
       achados.append(bt);
@@ -1256,6 +1440,32 @@ function atualizaRodape(){
     : 'nada marcado');
   const b = $('cvAplicar');
   if (b) b.disabled = !marc.length || ST.rodando;
+  const d = $('cvDescarta');
+  if (d){
+    const n = ST.linhas.filter(mexida).length;
+    d.disabled = !n || ST.rodando;
+    d.textContent = n ? 'Descartar ' + n + (n === 1 ? ' alteração' : ' alterações')
+                      : 'Descartar alterações';
+  }
+}
+
+/* ── descartar ──
+   Com o rascunho, fechar e reabrir deixou de ser o jeito de voltar às recomendações — era o
+   único que havia. Este é o que sobra, e ele pergunta antes: o que ele apaga é trabalho de
+   conferência, que não tem desfazer. */
+async function descarta(){
+  if (ST.rodando) return;
+  const n = ST.linhas.filter(mexida).length;
+  if (!n) return;
+  const ok = await HubDialog.confirm(
+    (n === 1 ? 'A linha que você mudou volta' : 'As ' + n + ' linhas que você mudou voltam')
+    + ' ao que o conversor recomenda: as escolhas feitas à mão e as marcações mudadas se perdem.',
+    { title: 'descartar as alterações', ok: 'Descartar', danger: true });
+  if (!ok) return;
+  varreFolha();
+  guarda();
+  ST.aberta = null;
+  if (ST.aberto) pinta();
 }
 
 /* ── aplicar ── */
@@ -1289,7 +1499,10 @@ async function aplica(){
     return;
   }
   ST.aplicados += r.itens || 0;
-  const conta = varreFolha();
+  /* o rascunho por cima da folha nova, e gravado de volta: as linhas trocadas somem dele
+     sozinhas (mudaram de chave), e a que ficou de fora continua como a pessoa a deixou */
+  const conta = recarrega();
+  guarda();
   pinta();
   relatorio(r, conta);
 }
@@ -1351,20 +1564,34 @@ function abre(){
     return;
   }
   const t0 = Date.now();
-  const conta = varreFolha();
-  ST.filtro = 'pend';
-  ST.busca = '';
-  $('cvBusca').value = '';
+  /* a folha é relida toda vez (ela pode ter mudado com o painel fechado) e o rascunho vem por
+     cima; a vista volta como estava quando o painel fechou nesta página. Numa página nova ela
+     começa limpa — o que atravessa a recarga é a decisão, não a tela: um filtro esquecido de
+     ontem esconderia linhas sem dizer por quê. */
+  const conta = recarrega();
+  const v = ST.vista || { filtro: 'pend', busca: '', rolagem: 0 };
+  ST.filtro = v.filtro;
+  ST.busca = v.busca;
+  ST.aberta = null;
+  $('cvBusca').value = ST.busca;
   marcaSeg();
   $('cvAlvo').textContent = proj() + ' · ' + conta + ' componentes · '
     + ST.cands.length + ' peças no almoxarifado · ' + (Date.now() - t0) + 'ms';
   ST.aberto = true;
   $('cvmodal').classList.add('on');
   pinta();
+  /* depois do pinta, com a lista montada, senão não há o que rolar */
+  $('cvCorpo').scrollTop = v.rolagem || 0;
+  /* regrava já: o que foi trocado ou apagado da folha com o painel fechado sai do rascunho, e a
+     peça achada pelo id depois de um renome passa a ser guardada com o nome novo */
+  guarda();
 }
 function fecha(quieto){
   if (!ST.aberto || ST.rodando) return;
+  /* o scrollTop se perde com o display:none — é lido antes de esconder */
+  ST.vista = { filtro: ST.filtro, busca: ST.busca, rolagem: $('cvCorpo').scrollTop };
   ST.aberto = false;
+  ST.aberta = null;
   $('cvmodal').classList.remove('on');
   if (!quieto && ST.aplicados && window.__hubDirty && window.__hubDirty())
     HubDialog.toast(ST.aplicados + ' troca(s) ainda sem salvar', 'warn', 6000);
@@ -1417,9 +1644,12 @@ function montaDom(){
     +     '<input type="text" id="cvBusca" placeholder="filtrar por designador, símbolo, valor…">'
     +     '<span class="cv-cont" id="cvCont"></span>'
     +   '</div>'
-    +   '<div class="cv-body"><div id="cvLista"></div></div>'
+    +   '<div class="cv-body" id="cvCorpo"><div id="cvLista"></div></div>'
     +   '<div class="cv-foot">'
     +     '<button type="button" id="cvMarcaTudo">Marcar as de confiança alta</button>'
+    +     '<button type="button" id="cvDescarta" disabled title="volta as linhas que você mudou'
+    +       ' ao que o conversor recomenda. Sem isto, o que você muda fica guardado até o'
+    +       ' Trocar, mesmo fechando o painel">Descartar alterações</button>'
     +     '<span class="est" id="cvEstado"></span>'
     +     '<button type="button" class="pri" id="cvAplicar" disabled>Aplicar</button>'
     +   '</div>'
@@ -1434,9 +1664,10 @@ function montaDom(){
     bt.addEventListener('click', () => { ST.filtro = bt.dataset.f; marcaSeg(); pinta(); });
   $('cvMarcaTudo').addEventListener('click', () => {
     for (const ln of ST.linhas)
-      if (!ln.almox && ln.escolha && ln.escolha.confianca === 'alta') ln.marcado = true;
+      if (!ln.almox && ln.escolha && ln.escolha.confianca === 'alta') decide(ln, ln.escolha, true);
     pinta();
   });
+  $('cvDescarta').addEventListener('click', descarta);
 
   /* Na BOLHA do document: os atalhos da folha (W, G, L, Del) moram num listener de window e
      só recebem a tecla depois daqui — e o HubDialog, que é de captura, continua ganhando

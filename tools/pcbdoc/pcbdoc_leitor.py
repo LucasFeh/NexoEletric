@@ -630,6 +630,14 @@ class Placa(object):
         self.polys = [props(b) for b in it_props(A.dados('Polygons6'))]
         self.classes = [props(b) for b in it_props(A.dados('Classes6'))]
         self.regras = [props(b) for b in it_props(A.dados('Rules6'), 2)]
+        # o "Rules To Check" do DRC (RULESETTOCHECK = lote, ONLINERULESETTOCHECK = online): indices
+        # na tabela de RULEKIND do AD21 -- quem traduz e o HubPcbRegras (KINDS_AD21)
+        self.drc_opcoes = OrderedDict()
+        try:
+            for b in it_props(A.dados('Design Rule Checker Options6')):
+                self.drc_opcoes.update(props(b))
+        except Exception:
+            self.drc_opcoes = OrderedDict()
         self.trilhas = [le_trilha(p) for _, p in it_simples(A.dados('Tracks6'), 'Tracks6')]
         self.arcos = [le_arco(p) for _, p in it_simples(A.dados('Arcs6'), 'Arcs6')]
         self.vias = [le_via(p) for _, p in it_simples(A.dados('Vias6'), 'Vias6')]
@@ -1029,6 +1037,11 @@ class _Escopo(object):
                 if a != ',':
                     args.append(a.strip("'\"").replace("''", "'"))
             self.i += 1
+        if self._pega() in ('=', '<>', '<', '>', '<=', '>='):
+            self.i += 2
+            if (self._pega() or '').lower() in ('asmils', 'asmm', 'asinches'):
+                self.i += 1
+            return None
         a0 = args[0] if args else ''
         tipo = obj.get('tipo')
         if nome == 'all':
@@ -1091,7 +1104,12 @@ class Regras(object):
         for pri, kind, esc, r in self.lista:
             if kind != tipo_regra:
                 continue
-            v = esc.avalia(o) if esc is not None else None
+            try:
+                v = esc.avalia(o) if esc is not None else None
+            except (ValueError, IndexError):
+                # escopo que o avaliador nao segue ate o fim (comparacao com unidade, como
+                # "Width > 10 AsMils" do MIRBC): a regra fica de fora, com aviso -- nunca exceção
+                v = None
             if v is None:
                 chave = (kind, r.get('NAME'))
                 if chave not in self._avisados:
@@ -1652,6 +1670,40 @@ class _Montador(object):
                                   ('regions', len(regions)), ('cutouts', len(cutouts)), ('fills', len(fills)),
                                   ('lines', len(lines))])
         return B
+
+
+# ─── as regras inteiras (o rules.js do hub) ───────────────────────────────────
+def regras_js(P, fonte=''):
+    """O Rules6 e o Classes6 CRUS, no rules.js que o hub le (Projects/<p>/rules.js):
+
+        var pcbrules = {"format":"pcbrules-v1", "origem":..., "altium":[{registro}, ...], "classes":[...],
+                        "drc":{RULESETTOCHECK, ONLINERULESETTOCHECK, MAXVIOLATIONCOUNT}};
+
+    Um registro por linha, os campos como o Altium os grava (|CHAVE=VALOR|). A traducao para o
+    modelo do hub (mm, nomes de campo, matriz de folgas) mora num lugar so, o
+    HubPcbRegras.deAltium do hub-pcbregras.js: quando o hub abre um rules.js com "altium" e sem
+    "rules", ele traduz; quando grava pelo editor, grava "rules" ja traduzido."""
+    import json
+    lin = ['// regras de projeto lidas do .PcbDoc (Rules6/Classes6 crus; o hub traduz: HubPcbRegras.deAltium)',
+           'var pcbrules = {',
+           '"format":"pcbrules-v1",',
+           '"origem":%s,' % json.dumps('Rules6 de ' + (fonte or 'PcbDoc') + ' (' + EXPORTER + ')'),
+           '"altium":[']
+    regs = [OrderedDict((k, v) for k, v in r.items()) for r in P.regras if r]
+    for i, r in enumerate(regs):
+        lin.append(json.dumps(r) + (',' if i < len(regs) - 1 else ''))
+    lin.append('],')
+    cls = [OrderedDict((k, v) for k, v in c.items()) for c in P.classes if c]
+    lin.append('"classes":[')
+    for i, c in enumerate(cls):
+        lin.append(json.dumps(c) + (',' if i < len(cls) - 1 else ''))
+    lin.append('],')
+    drc = OrderedDict((k, v) for k, v in getattr(P, 'drc_opcoes', {}).items()
+                      if k in ('RULESETTOCHECK', 'ONLINERULESETTOCHECK', 'MAXVIOLATIONCOUNT'))
+    lin.append('"drc":%s' % json.dumps(drc))
+    lin.append('};')
+    lin.append('')
+    return '\n'.join(lin)
 
 
 # ─── contorno exato do texto TrueType (texts[].polys) ─────────────────────────

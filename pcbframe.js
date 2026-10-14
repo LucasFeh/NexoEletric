@@ -17,6 +17,12 @@
    - os icones da barra: hub-pcbicones.js; o traçado com cantos 45/90/livre: hub-fio.js; o
      teclado: a tabela da PCB do hub-atalhos.js (HubAtalhos.pcb), com a mesma tabela embutida
      aqui enquanto ela nao existir;
+   - o roteador: hub-roteador.js. Pedido do dono (2026-10-02): "trilha de mesma camada nao podem
+     se cruzar ... e tenta fazer sozinho a curva em um caminho possivel ate o outro lado, mas sem
+     mexer na trilha que ja ta colocada" e "elas so se encontram se forem trilhas de mesma NET".
+     A Trilha (W) contorna o cobre de outra net (o Walkaround do Altium; Shift+R troca para parar
+     no obstaculo ou ignorar), e a edicao que faria nets diferentes se encontrarem e recusada.
+     Sem ele a vista abre igual, so sem conferir (motorLigado);
    - Gerber: hub-gerber.js (gerar/zip) e hub-gerberview.js (o visualizador, num overlay).
    Uma vista so para a web e o desktop, no tema do hub. lean=1 (aba Neoden) e so a placa. */
 "use strict";
@@ -40,6 +46,11 @@ const CH = (typeof changes !== 'undefined' && Array.isArray(changes)) ? changes 
 const ANN = (typeof annotations !== 'undefined' && Array.isArray(annotations))
   ? annotations.map(a => ({ ...a })) : [];
 const HC = HubCore;
+/* O que veio do Altium e mora em modulo proprio: sem o arquivo a vista abre igual, so sem o recurso.
+   hub-pcbnets.js: conectividade, linhas de conexao (ratsnest) e realce de net;
+   hub-pcbteardrop.js: o teardrop orfao do espelho sai e o do mesmo par pad/trilha e refeito. */
+const HN = (typeof HubPcbNets !== 'undefined' && HubPcbNets && typeof HubPcbNets.conexoes === 'function') ? HubPcbNets : null;
+const HTD = (typeof HubPcbTeardrop !== 'undefined' && HubPcbTeardrop && typeof HubPcbTeardrop.refaz === 'function') ? HubPcbTeardrop : null;
 const isNum = HC.isNum, distSeg = HC.distSeg, near = HC.near, nearAng = HC.nearAng;
 
 /* ============================== cores e constantes ============================== */
@@ -51,6 +62,7 @@ const COR = {
   fundo:'#6b6b6b', placa:'#000000', contorno:'#a8a8a8', grade:'#1c1c1c', grade2:'#303030',
   origem:'#e0e0e0', furo:'#000000', sel:'#ffffff', add:'#00e676', del:'#ff5252', seta:'#ffd54f',
   medida:'#4fc3f7', snap:'#00e5ff', dentro:'#3d8bff', toca:'#00c853',
+  conexao:'#c8c8c8',           /* a linha de conexao do Altium (Connection Lines) */
 };
 /* cor da bandeira NO DESENHO (a lista do painel repete o azul da nota) */
 const ANN_COLORS = { err:'#ff5252', warn:'#ffd54f', info:'#4fc3f7' };
@@ -89,12 +101,12 @@ function gravaPref(k, v){ try { localStorage.setItem(PREF + k, String(v)); } cat
 /* 5 mil e o snap do Altium em 61% das placas da casa; a unidade de tela e mm em 86% */
 const GRADES = [
   { id:'1mil',    mm:0.0254, rot:'1 mil' },   { id:'5mil',   mm:0.127, rot:'5 mil' },
-  { id:'10mil',   mm:0.254,  rot:'10 mil' },  { id:'25mil',  mm:0.635, rot:'25 mil' },
+  { id:'10mil',   mm:0.254,  rot:'10 mil' },  { id:'20mil',  mm:0.508, rot:'20 mil' },  { id:'25mil',  mm:0.635, rot:'25 mil' },
   { id:'50mil',   mm:1.27,   rot:'50 mil' },  { id:'100mil', mm:2.54,  rot:'100 mil' },
   { id:'0.001mm', mm:0.001,  rot:'0,001 mm' },{ id:'0.01mm', mm:0.01,  rot:'0,01 mm' },
-  { id:'0.05mm',  mm:0.05,   rot:'0,05 mm' }, { id:'0.1mm',  mm:0.1,   rot:'0,1 mm' },
+  { id:'0.025mm', mm:0.025,  rot:'0,025 mm' }, { id:'0.05mm',  mm:0.05,   rot:'0,05 mm' }, { id:'0.1mm',  mm:0.1,   rot:'0,1 mm' },
   { id:'0.25mm',  mm:0.25,   rot:'0,25 mm' }, { id:'0.5mm',  mm:0.5,   rot:'0,5 mm' },
-  { id:'1mm',     mm:1,      rot:'1 mm' },
+  { id:'1mm',     mm:1,      rot:'1 mm' },     { id:'2.5mm',   mm:2.5,    rot:'2,5 mm' },
 ];
 const gradePorId = id => GRADES.find(g => g.id === id) || GRADES[1];
 const snapV = (v, passo) => passo > 0 ? r6(Math.round(v / passo) * passo) : r6(v);
@@ -134,6 +146,10 @@ const PCB_PADRAO = [
   { id:'editar',      tecla:'E',      rotulo:'Travar/destravar a edição' },
   { id:'salvar',      tecla:'Ctrl+S', rotulo:'Salvar o changes.js' },
   { id:'ajuda',       tecla:'H',      rotulo:'Ajuda' },
+  { id:'copiar',      tecla:'Ctrl+C', rotulo:'Copiar (referência no cursor)' },
+  { id:'recortar',    tecla:'Ctrl+X', rotulo:'Recortar' },
+  { id:'colar',       tecla:'Ctrl+V', rotulo:'Colar (clique larga)' },
+  { id:'duplicar',    tecla:'Ctrl+D', rotulo:'Duplicar — o Rubber Stamp (Ctrl+R no Altium)' },
 ];
 /* os gestos fixos (nao gravaveis): o canvas os trata antes do mapa */
 const TRILHA = 'trilha na mão (W)', ARRASTO = 'arrastando';
@@ -152,6 +168,7 @@ const GESTOS_PCB = [
   { rotulo:'Fixar o canto',                              teclas:['Clique'],           quando:TRILHA },
   { rotulo:'Inverter o canto',                           teclas:['Espaço'],           quando:TRILHA },
   { rotulo:'Modo 45° / 90° / livre',                     teclas:['Shift', 'Espaço'],  quando:TRILHA },
+  { rotulo:'Conflito: contornar, parar no obstáculo ou ignorar', teclas:['Shift', 'R'], quando:TRILHA },
   { rotulo:'Desfazer o último trecho',                   teclas:['Backspace'],        quando:TRILHA },
   { rotulo:'Via sem trocar de camada',                   teclas:['2'],                quando:TRILHA },
   { rotulo:'Via e troca de camada',                      teclas:['*'],                quando:TRILHA },
@@ -219,6 +236,20 @@ function montaMapa(){
   return mapaLocal(TECLADO.padrao, leSalvos());
 }
 let ATALHOS = montaMapa();
+/* as sequencias do Altium (P,T; T,D...) na predefinicao "Padrao Altium" do editor de atalhos: o
+   leitor do hub-atalhos.js segura o comeco e mostra "P, …" no rodape. Sem ele, so teclas simples */
+/* os menus do Altium (hub-pcbaltium.js): a barra, o botao direito, a tecla que abre menu (P, D,
+   T, U... com a predefinicao Padrao Altium) e as Preferences */
+let ALT = null, ultimoMouse = null;
+function popupDoLeitor(seq){
+  if (!seq || seq.indexOf(',') >= 0 || !ALT || !ALT.temPopup(seq)) return;
+  const r = cv.getBoundingClientRect();
+  const p = ultimoMouse || { x:r.left + r.width / 2, y:r.top + r.height / 2 };
+  if (ALT.popup(seq, p.x, p.y)) setTimeout(() => LEITOR.cancela(), 0);
+}
+const LEITOR = (HA && typeof HA.leitor === 'function')
+  ? HA.leitor(() => ATALHOS, id => fazAcao(id), { aoEsperar:seq => { avisoRodape(seq ? seq + ', …' : ''); popupDoLeitor(seq); } })
+  : { tecla:(t) => { const id = ATALHOS.porTecla[t]; if (id) { fazAcao(id); return true; } return false; }, cancela(){}, pendente:() => '' };
 const teclaDe = id => (ATALHOS.porAcao && ATALHOS.porAcao[id]) || '';
 const comTecla = (txt, id) => { const t = teclaDe(id); return t ? txt + ' (' + t + ')' : txt; };
 
@@ -248,6 +279,11 @@ let editOn = false;
 let tool = 'select';
 let preencher = lePref('preencher', '0') === '1';
 const RULES = (B.rules && typeof B.rules === 'object') ? B.rules : {};
+/* Os modos de conflito do roteamento interativo do Altium (Shift+R cicla): contornar e o
+   Walkaround (o padrao, o pedido do dono), parar e o Stop At First Obstacle e ignorar e o Ignore
+   Obstacles -- o comportamento de antes do roteador, o escape para caso especial. Push e
+   HugNPush ficam de fora de proposito: nada que ja esta na placa se mexe. */
+const CONFLITOS = ['contornar', 'parar', 'ignorar'];
 /* o que as ferramentas usam; a trilha e a via pela regra do espelho quando ele a traz */
 const CFG = {
   wTrilha: (isNum(RULES.width) && RULES.width > 0) ? RULES.width : 0.254,
@@ -255,18 +291,81 @@ const CFG = {
   viaDrill: (isNum(RULES.viaDrill) && RULES.viaDrill > 0) ? RULES.viaDrill : 0.3,
   viaNet: '',
   wLinha: 0.254, hTexto: 1.524, wTexto: 0.254, furo: 3.2,
+  padW: 1.524, padFuro: 0.762,            /* o pad padrao do Altium: 60 mil, furo 30 mil */
   modo: '45',
+  conflito: CONFLITOS.indexOf(lePref('conflito', 'contornar')) >= 0 ? lePref('conflito', 'contornar') : 'contornar',
 };
 if (!(CFG.viaDrill < CFG.viaSize)) CFG.viaDrill = r6(CFG.viaSize / 2);
+/* ============================== Preferences (Tools » Preferences, T,P) ==============================
+   As paginas "PCB Editor" do Altium (hub-pcbaltium.js desenha; aqui mora o que cada uma faz).
+   O padrao e o comportamento de antes: nada muda ate a pessoa mexer. */
+const CFG_REGRA = { wTrilha:CFG.wTrilha, viaSize:CFG.viaSize, viaDrill:CFG.viaDrill };
+const TEM_REGRA = { w:isNum(RULES.width) && RULES.width > 0, via:isNum(RULES.viaSize) && RULES.viaSize > 0 };
+const PREFS_PADRAO = () => ({
+  drcOnline:false, duploClique:true, cursor:'small90',
+  grade:true, conexoes:true, fantasmas:true,
+  conflitosCiclo:CONFLITOS.slice(), conflito:'contornar', larguraDaTrilha:true, larguraModo:'regra', viaModo:'regra', canto:'45',
+  roda:{ zoom:'', vertical:'Alt', horizontal:'Shift', camada:'Ctrl+Shift' },
+  defaults:{ wTrilha:0.254, wLinha:0.254, viaSize:0.6, viaDrill:0.3, padW:1.524, padFuro:0.762, hTexto:1.524, wTexto:0.254, furo:3.2 },
+  cores:{},
+});
+function normalizaPrefs(p){
+  const ok = p && typeof p === 'object';
+  const o = Object.assign(PREFS_PADRAO(), ok ? p : {});
+  o.roda = Object.assign(PREFS_PADRAO().roda, ok && p.roda);
+  o.defaults = Object.assign(PREFS_PADRAO().defaults, ok && p.defaults);
+  for (const k of Object.keys(o.defaults)) if (!(isNum(o.defaults[k]) && o.defaults[k] > 0)) o.defaults[k] = PREFS_PADRAO().defaults[k];
+  o.cores = (ok && p.cores && typeof p.cores === 'object') ? p.cores : {};
+  o.conflitosCiclo = (Array.isArray(o.conflitosCiclo) ? o.conflitosCiclo : []).filter(v => CONFLITOS.indexOf(v) >= 0);
+  if (!o.conflitosCiclo.length) o.conflitosCiclo = CONFLITOS.slice();
+  if (['small90', 'large90', 'small45', 'tiny45'].indexOf(o.cursor) < 0) o.cursor = 'small90';
+  if (['45', '90', 'livre'].indexOf(o.canto) < 0) o.canto = '45';
+  return o;
+}
+let PREFS = (() => { try { return normalizaPrefs(JSON.parse(lePref('prefs', 'null'))); } catch (e) { return normalizaPrefs(null); } })();
+/* as larguras e a via com que as ferramentas nascem: Default (a pagina Defaults) ou Preferred (a regra) */
+function aplicaDefaults(){
+  const d = PREFS.defaults;
+  CFG.wTrilha = PREFS.larguraModo === 'regra' && TEM_REGRA.w ? CFG_REGRA.wTrilha : d.wTrilha;
+  if (PREFS.viaModo === 'regra' && TEM_REGRA.via) { CFG.viaSize = CFG_REGRA.viaSize; CFG.viaDrill = CFG_REGRA.viaDrill; }
+  else { CFG.viaSize = d.viaSize; CFG.viaDrill = d.viaDrill < d.viaSize ? d.viaDrill : r6(d.viaSize / 2); }
+  CFG.wLinha = d.wLinha; CFG.hTexto = d.hTexto; CFG.wTexto = d.wTexto; CFG.furo = d.furo; CFG.padW = d.padW; CFG.padFuro = d.padFuro;
+  CFG.modo = PREFS.canto;
+}
+aplicaDefaults();
+show.grid = PREFS.grade !== false; show.ghost = PREFS.fantasmas !== false;
 let chDirty = false, annDirty = false, staleWorkspace = false;
 
 /* ============================== modelo efetivo ==============================
    model = board + changes (o motor); EB = a placa efetiva no formato do board.js, a MESMA que o
    Gerber recebe. A tela desenha o EB; o que edita e o model (os itens com src/eff). */
-const IDX = { item:new Map(), compNome:new Map(), ebComp:new Map(), ebPorId:new Map() };
+const IDX = { item:new Map(), compNome:new Map(), ebComp:new Map(), ebPorId:new Map(), opItem:new Map() };
+/* O roteador (hub-roteador.js) le a placa efetiva por uma CENA: o EB com um indice espacial por
+   camada de cobre, montado so na primeira consulta de cada camada. O EB mudou, a cena e outra.
+   A conferencia de uma edicao (editaConferindo) ja monta o modelo, o EB e a cena de DEPOIS da
+   edicao: o commit que vem logo em seguida os adota em vez de calcular tudo de novo (preCalc,
+   com a assinatura do changes.js para nao adotar estado de outro changes). ROTA e a ultima rota
+   calculada para a trilha na mao (o memo da previa: o clique reaproveita a mesma). */
+let CENA = null, CENA_EB = null, preCalc = null, ebSeq = 0, ROTA = null;
+let CONEX = null, REALCE = null, verConexoes = null;   /* ratsnest (cache por EB) e a net realcada */
 function recalcula(){
-  model = HC.applyPcbChanges(B, CH);
-  EB = HC.effectiveBoard(B, model);
+  const pre = preCalc;
+  preCalc = null;
+  if (pre && pre.sig === JSON.stringify(CH)) { model = pre.model; EB = pre.eb; }
+  else { model = HC.applyPcbChanges(B, CH); EB = HC.effectiveBoard(B, model); }
+  /* teardrop orfao (a trilha ou a via andou): sai da tela e do Gerber, e o do mesmo par e refeito.
+     Placa sem mudanca nao troca de EB (o acervo inteiro da 0 removido e 0 gerado) */
+  if (HTD) {
+    try { const r = HTD.refaz(EB, B); if (r && r.eb && ((r.removidos || []).length || (r.gerados || []).length)) EB = r.eb; }
+    catch (e) { console.warn('teardrops:', e); }
+  }
+  EB = comDespejo(EB);
+  CONEX = null;
+  if (typeof drcDepoisDaEdicao === 'function') drcDepoisDaEdicao();
+  CENA = pre && pre.eb === EB ? pre.cena : null;
+  CENA_EB = CENA ? EB : null;
+  ebSeq++;
+  ROTA = null;
   montaCamadas();
   montaIndices();
   montaAlvos();
@@ -291,6 +390,11 @@ function montaCamadas(){
     let i = 0;
     for (let k = 0; k < L.length; k++) if (L[k].kind === 'signal') L[k] = ord[i++];
   }
+  /* Preferences » Layer Colors: a cor trocada pela pessoa; a de fabrica fica em corPadrao */
+  for (let k = 0; k < L.length; k++) {
+    const base = L[k].corPadrao || L[k].color, c = PREFS.cores[L[k].key];
+    L[k] = Object.assign({}, L[k], { corPadrao:base, color:/^#[0-9a-f]{6}$/i.test(c || '') ? c : base });
+  }
   LAYERS = L;
   LBYK = Object.create(null);
   let n = 0;
@@ -307,7 +411,9 @@ const cobre = k => HC.isCopper(k);
 const camadasCobre = () => LAYERS.filter(l => l.kind === 'signal' || l.kind === 'plane');
 
 function montaIndices(){
-  IDX.item = new Map(); IDX.compNome = new Map(); IDX.ebComp = new Map(); IDX.ebPorId = new Map();
+  IDX.item = new Map(); IDX.compNome = new Map(); IDX.ebComp = new Map(); IDX.ebPorId = new Map(); IDX.opItem = new Map();
+  /* a linha do changes.js -> o item do modelo que ela fez (o id do objeto adicionado no EB) */
+  for (const it of model.changeItems) if (it && it.ch && !IDX.opItem.has(it.ch)) IDX.opItem.set(it.ch, it);
   for (const list of [model.tracks, model.arcs, model.vias, model.texts, model.fills, model.regions])
     for (const m of list) if (m.src && m.src.id != null && !IDX.item.has(String(m.src.id))) IDX.item.set(String(m.src.id), m);
   for (const m of model.added) if (m.eff && m.eff.id != null) IDX.item.set(String(m.eff.id), m);
@@ -416,6 +522,19 @@ function polysDoTexto(t){
   if (isNum(t.x) && isNum(t.y) && Math.hypot((bb[0] + bb[2]) / 2 - t.x, (bb[1] + bb[3]) / 2 - t.y) > Math.max(1, isNum(t.h) ? t.h : 0)) return null;
   return { P, bb };
 }
+/* O contorno exato (regioes) do HubGerber.geometriaTexto sai nas unidades do Gerber (0,00001 mm:
+   ele passa pelo limpaContorno -> unid) e os tracos saem em mm. A tela desenha em mm: sem a volta,
+   o texto com contorno exato (os polys do ExportBoard 2026-10) ia parar 100 mil vezes longe do
+   lugar. A escala vem da posicao -- a mesma regra do roteador (hub-roteador.js » poeTexto) --,
+   para nao quebrar no dia em que o gerador devolver mm. */
+function regioesEmMm(regioes, t){
+  let sx = 0, sy = 0, n = 0;
+  for (const q of regioes) for (const p of (q && q.pts) || []) if (Array.isArray(p) && isNum(p[0]) && isNum(p[1])) { sx += p[0]; sy += p[1]; n++; }
+  if (!n || !isNum(t.x) || !isNum(t.y)) return regioes;
+  const cx = sx / n, cy = sy / n, lim = Math.max(10, 10 * (isNum(t.h) ? t.h : 0));
+  if (!(Math.hypot(cx - t.x, cy - t.y) > 1000 && Math.hypot(cx * 1e-5 - t.x, cy * 1e-5 - t.y) < lim)) return regioes;
+  return regioes.map(q => ({ pts:((q && q.pts) || []).map(p => [p[0] * 1e-5, p[1] * 1e-5]), hole:!!(q && q.hole) }));
+}
 function geoTexto(t){
   if (!t || t.hidden) return null;
   /* A GEOMETRIA E A DO GERBER: o hub-gerber.js monta o texto (contorno exato, ou a HubFont com os
@@ -427,11 +546,12 @@ function geoTexto(t){
     try { g = HubGerber.geometriaTexto(t); } catch (e) { g = null; }
     if (!g) return null;
     if (g.regioes) {
+      const regioes = regioesEmMm(g.regioes, t);
       const pts = [];
-      for (const q of g.regioes) if (!q.hole) for (const p of q.pts) pts.push(p);
+      for (const q of regioes) if (!q.hole) for (const p of q.pts) pts.push(p);
       const bb = bbPts(pts);
       if (!bb) return null;
-      return { polys:g.regioes, linhas:null, w:0, caixa:[[bb[0], bb[1]], [bb[2], bb[1]], [bb[2], bb[3]], [bb[0], bb[3]]], inv:false };
+      return { polys:regioes, linhas:null, w:0, caixa:[[bb[0], bb[1]], [bb[2], bb[1]], [bb[2], bb[3]], [bb[0], bb[3]]], inv:false };
     }
     /* a caixa de selecao: a tinta no referencial do texto (justa mesmo girado), mais meio traco */
     const w = g.w > 0 ? g.w : 0, rot = isNum(t.rot) ? t.rot : 0, ox = t.x, oy = t.y;
@@ -636,13 +756,13 @@ function entradaPad(ap, p, push){
 /* Recortes da placa = a regra do hub-gerber.js (recortesDaPlaca): sai o recorte de poligono
    (kindn 1, ou o de camada de cobre no espelho antigo) e a regiao da placa (kindn -1); o resto
    passa pelo HubLaser.boardCutouts, que tira o do tamanho da placa. A tela mostra como furo o
-   que o Gerber corta. Devolve [{o, pts}] (o: o recorte do EB). */
+   que o Gerber corta. Devolve [{o, pts}] (o: o recorte do EB). O roteador recebe os mesmos furos:
+   a trilha fica longe do que a fabrica corta, e so disso. */
 let recortesCache = null;
-function recortesDaTela(){
-  if (recortesCache && recortesCache.eb === EB) return recortesCache.lista;
+function recortesDe(eb){
   const lista = [];
-  const bd = (EB.board && typeof EB.board === 'object') ? EB.board : {};
-  for (const k of EB.cutouts || []) {
+  const bd = (eb.board && typeof eb.board === 'object') ? eb.board : {};
+  for (const k of eb.cutouts || []) {
     if (!k || !Array.isArray(k.points) || k.points.length < 3) continue;
     if (isNum(k.kindn) && (k.kindn === -1 || k.kindn === 1)) continue;
     if (!isNum(k.kindn) && typeof k.layer === 'string' && (cobre(k.layer))) continue;
@@ -650,6 +770,11 @@ function recortesDaTela(){
       ? HubLaser.boardCutouts({ board:{ bbox:bd.bbox, outline:bd.outline || [] }, cutouts:[k] }) : [k.points];
     if (furos.length) lista.push({ o:k, pts:furos[0] });
   }
+  return lista;
+}
+function recortesDaTela(){
+  if (recortesCache && recortesCache.eb === EB) return recortesCache.lista;
+  const lista = recortesDe(EB);
   recortesCache = { eb:EB, lista };
   return lista;
 }
@@ -907,20 +1032,25 @@ function mundoParaTela(x, y){
 const px = n => n / view.scale;               /* n pixels de tela, em mm */
 
 let pathPlacaCache = null;
-function pathPlaca(){
-  if (pathPlacaCache) return pathPlacaCache;
-  const P = new Path2D(), segs = [];
-  for (const s of ((EB.board && EB.board.outline) || [])) {
+/* os lacos fechados do contorno (o maior e a placa); sem contorno, o bbox. A tela pinta a placa
+   com eles e o roteador os recebe como a borda: a mesma conta, uma placa so */
+function lacosDe(eb){
+  const segs = [];
+  for (const s of ((eb.board && eb.board.outline) || [])) {
     if (!s) continue;
     if (s.kind === 'arc') { if ([s.cx, s.cy, s.r, s.sa, s.ea].every(isNum) && typeof HubLaser !== 'undefined') segs.push(HubLaser.arcPts(s.cx, s.cy, s.r, s.sa, s.ea)); }
     else if ([s.x1, s.y1, s.x2, s.y2].every(isNum)) segs.push([[s.x1, s.y1], [s.x2, s.y2]]);
   }
-  const lacos = (typeof HubLaser !== 'undefined' && HubLaser.chainSegments) ? HubLaser.chainSegments(segs) : segs;
-  let algum = false;
-  for (const l of lacos) if (l.length >= 3) { pPoli(P, l); algum = true; }
-  const bb = EB.board && EB.board.bbox;
-  if (!algum && bb && [bb.x1, bb.y1, bb.x2, bb.y2].every(isNum))
-    pPoli(P, [[bb.x1, bb.y1], [bb.x2, bb.y1], [bb.x2, bb.y2], [bb.x1, bb.y2]]);
+  const lacos = ((typeof HubLaser !== 'undefined' && HubLaser.chainSegments) ? HubLaser.chainSegments(segs) : segs).filter(l => l.length >= 3);
+  if (lacos.length) return lacos;
+  const bb = eb.board && eb.board.bbox;
+  if (bb && [bb.x1, bb.y1, bb.x2, bb.y2].every(isNum)) return [[[bb.x1, bb.y1], [bb.x2, bb.y1], [bb.x2, bb.y2], [bb.x1, bb.y2]]];
+  return [];
+}
+function pathPlaca(){
+  if (pathPlacaCache) return pathPlacaCache;
+  const P = new Path2D();
+  for (const l of lacosDe(EB)) pPoli(P, l);
   for (const k of recortesDaTela()) pPoli(P, k.pts, true);
   pathPlacaCache = P;
   return P;
@@ -992,13 +1122,35 @@ function draw(){
   for (const k of ORDEM) if (camVisivel(k)) pintaCamada(k);
   ctx.fillStyle = COR.furo; ctx.fill(CACHE.furos);
   ctx.strokeStyle = COR.contorno; ctx.lineWidth = px(1.3); ctx.setLineDash([]); ctx.stroke(pathPlaca());
+  desenhaRealce();
+  desenhaConexoes();
+  desenhaDrc();
   if (show.ghost) desenhaFantasmas();
   desenhaArrasto();
   desenhaSelecao();
   desenhaHover();
   desenhaAnotacoes();
   desenhaFerramenta();
+  desenhaCursorAltium();
   desenhaJanela();
+}
+/* Preferences » General » Cursor Type: Small 90 e a cruz do sistema; Large 90 cruza a tela
+   inteira; Small 45 e Tiny 45 sao o X do Altium */
+function cursorFerramenta(){ return PREFS.cursor === 'small45' || PREFS.cursor === 'tiny45' ? 'none' : 'crosshair'; }
+function desenhaCursorAltium(){
+  if (tool === 'select' || !cursorW || PREFS.cursor === 'small90' || pan) return;
+  const c = SNAP || cursorW;
+  ctx.save(); ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 0.9; ctx.lineWidth = px(1); ctx.setLineDash([]);
+  ctx.beginPath();
+  if (PREFS.cursor === 'large90') {
+    const a = telaParaMundo(0, 0), b = telaParaMundo(CW, CHH);
+    ctx.moveTo(Math.min(a.x, b.x), c.y); ctx.lineTo(Math.max(a.x, b.x), c.y);
+    ctx.moveTo(c.x, Math.min(a.y, b.y)); ctx.lineTo(c.x, Math.max(a.y, b.y));
+  } else {
+    const r = px(PREFS.cursor === 'tiny45' ? 5 : 10);
+    ctx.moveTo(c.x - r, c.y - r); ctx.lineTo(c.x + r, c.y + r); ctx.moveTo(c.x - r, c.y + r); ctx.lineTo(c.x + r, c.y - r);
+  }
+  ctx.stroke(); ctx.restore();
 }
 
 /* ============================== desenho avulso (fantasma, arrasto, previa) ============================== */
@@ -1473,23 +1625,460 @@ function transformaSelecao(como){
   if ((como === 'x' || como === 'y') && alvos.every(a => a.t === 'comp')) { HubDialog.toast('componente não se espelha: L vira de face', 'info'); return false; }
   const bases = new Map(alvos.map(a => [a, geoDe(a)]));
   const pv = pivoDe(alvos, bases);
-  let annMexeu = false;
+  const novas = new Map();
   for (const a of alvos) {
     let g = bases.get(a);
     if (como === 'gira') g = giraGeo(a.t, g, pv);
     else if (como === 'vira') { if (a.t !== 'comp') continue; g = viraGeo(g, pv); }
     else { if (a.t === 'comp') continue; g = espelhaGeo(a.t, g, como, pv); }
-    if (a.t === 'ann') annMexeu = true;
-    escreveGeo(a, g);
+    novas.set(a, g);
   }
-  if (alvos.some(a => a.t !== 'ann')) commit(); else if (annMexeu) pede();
+  /* girar/espelhar trilha ou via para cima de outra net tambem nao passa (editaConferindo); so o
+     que de fato muda e conferido -- no L a trilha selecionada fica, e o componente nao se confere */
+  const r = editaConferindo(Array.from(novas.keys()), () => {
+    for (const [a, g] of novas) if (a.t !== 'ann') escreveGeo(a, g);
+    return alvos.some(a => a.t !== 'ann');
+  }, 'não deixa');
+  if (r === null) { pede(); return true; }
+  let annMexeu = false;
+  for (const [a, g] of novas) if (a.t === 'ann') { annMexeu = true; escreveGeo(a, g); }
+  if (r) commit(); else if (annMexeu) pede();
   return true;
+}
+
+/* ============================== copiar, colar, duplicar e alinhar ==============================
+   O Edit do Altium: Ctrl+C copia a selecao com o ponto de referencia no cursor, Ctrl+V a traz
+   presa ao cursor e um clique a larga (Esc desiste); duplicar e o Rubber Stamp (Ctrl+R no
+   Altium, que no navegador recarrega a pagina): cada clique larga mais uma copia. Colar escreve
+   ops de ADICAO (track_add, arc_add, via_add, fill_add, region_add, text_add) com a net de
+   origem, como o Paste do Altium. Componente entra pelo ECO; designator, comment, pedaco de
+   poligono e recorte do Altium nao se copiam.
+   Alinhar e distribuir (Edit » Align) movem pelo mesmo escreveGeo do arrasto. */
+let CLIP = null;           /* {itens:[{kind, o}], ref:[x, y], fora:[motivos]} */
+function itemDeCopia(a){
+  if (!a || !a.m || a.m.deleted) return null;
+  if (['track', 'arc', 'via', 'fill', 'region', 'text'].indexOf(a.t) < 0) return null;
+  const o = ebDe(a.m) || a.m.eff;
+  if (!o) return null;
+  if (a.t === 'text' && (o.designator || o.comment || o.owner)) return null;
+  if (a.t === 'region' && (o.poly || o.cutout)) return null;
+  return { kind:a.t, o:JSON.parse(JSON.stringify(o)) };
+}
+function bbItem(it){
+  const o = it.o;
+  if (it.kind === 'track') { const w = (o.w || 0) / 2; return [Math.min(o.x1, o.x2) - w, Math.min(o.y1, o.y2) - w, Math.max(o.x1, o.x2) + w, Math.max(o.y1, o.y2) + w]; }
+  if (it.kind === 'arc') { const r = o.r + (o.w || 0) / 2; return [o.cx - r, o.cy - r, o.cx + r, o.cy + r]; }
+  if (it.kind === 'via') { const r = (o.size || 0) / 2; return [o.x - r, o.y - r, o.x + r, o.y + r]; }
+  if (it.kind === 'fill') return [Math.min(o.x1, o.x2), Math.min(o.y1, o.y2), Math.max(o.x1, o.x2), Math.max(o.y1, o.y2)];
+  if (it.kind === 'region') return bbPts(o.points || []);
+  if (it.kind === 'text') { const g = geoTexto(o); return g ? bbPts(g.caixa) : [o.x, o.y, o.x, o.y]; }
+  return null;
+}
+function copiaSelecao(recortar){
+  const itens = [], fora = [];
+  for (const a of SEL) {
+    if (a.t === 'comp') { fora.push(a.m.src.ref + ' (componente entra pelo ECO)'); continue; }
+    const it = itemDeCopia(a);
+    if (it) itens.push(it); else if (a.t !== 'ann' && a.t !== 'pad') fora.push(a.t === 'regiao-ro' ? 'região do Altium' : a.t);
+  }
+  if (!itens.length) { HubDialog.toast(SEL.length ? 'nada copiável na seleção' + (fora.length ? ': ' + fora.slice(0, 3).join('; ') : '') : 'selecione o que copiar', 'info', 3000); return false; }
+  let ref;
+  if (cursorW && !recortar) ref = [snapV(cursorW.x, grade.mm), snapV(cursorW.y, grade.mm)];
+  else {
+    const bb = itens.map(bbItem).filter(Boolean).reduce((s, b) => [Math.min(s[0], b[0]), Math.min(s[1], b[1]), Math.max(s[2], b[2]), Math.max(s[3], b[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+    ref = [snapV((bb[0] + bb[2]) / 2, grade.mm), snapV((bb[1] + bb[3]) / 2, grade.mm)];
+  }
+  CLIP = { itens, ref, fora };
+  if (recortar) {
+    if (!garanteEdicao()) return false;
+    SEL = SEL.filter(a => itemDeCopia(a));
+    apagaSelecao();
+  }
+  HubDialog.toast((recortar ? 'recortado' : 'copiado') + ': ' + itens.length + ' objeto(s)' + (fora.length ? ' — ficou de fora: ' + fora.slice(0, 3).join('; ') : ''), fora.length ? 'warn' : 'ok', 2600);
+  return true;
+}
+/* as ops de adicao da copia deslocada de (dx, dy) */
+function opsDaCopia(dx, dy){
+  const ops = [], nota = 'colado no hub';
+  const comNet = (op, o) => { if (o.net && cobre(op.layer)) op.net = o.net; return op; };
+  for (const { kind, o } of CLIP.itens) {
+    if (kind === 'track') ops.push(comNet({ op:'track_add', layer:o.layer, x1:r6(o.x1 + dx), y1:r6(o.y1 + dy), x2:r6(o.x2 + dx), y2:r6(o.y2 + dy), w:r6(o.w || CFG.wLinha), note:nota }, o));
+    else if (kind === 'arc') ops.push(comNet({ op:'arc_add', layer:o.layer, cx:r6(o.cx + dx), cy:r6(o.cy + dy), r:r6(o.r), sa:r6(o.sa), ea:r6(o.ea), w:r6(o.w || CFG.wLinha), note:nota }, o));
+    else if (kind === 'via') { const op = { op:'via_add', x:r6(o.x + dx), y:r6(o.y + dy), size:r6(o.size), drill:r6(o.drill), note:nota }; if (o.net) op.net = o.net; ops.push(op); }
+    else if (kind === 'fill') ops.push(comNet({ op:'fill_add', layer:o.layer, x1:r6(Math.min(o.x1, o.x2) + dx), y1:r6(Math.min(o.y1, o.y2) + dy), x2:r6(Math.max(o.x1, o.x2) + dx), y2:r6(Math.max(o.y1, o.y2) + dy), rot:r6(o.rot || 0), note:nota }, o));
+    else if (kind === 'region') ops.push(comNet({ op:'region_add', layer:o.layer, pts:(o.points || []).map(p => [r6(p[0] + dx), r6(p[1] + dy)]), note:nota }, o));
+    else if (kind === 'text') {
+      const op = { op:'text_add', layer:o.layer, text:String(o.text || ''), x:r6(o.x + dx), y:r6(o.y + dy), h:r6(o.h || CFG.hTexto), rot:r6(o.rot || 0), note:nota };
+      if (o.w > 0) op.w = r6(o.w);
+      if (o.mirror) op.mirror = true;
+      ops.push(op);
+    }
+  }
+  return ops;
+}
+function comecaColar(multiplas){
+  if (!CLIP || !CLIP.itens.length) { HubDialog.toast('a área de transferência está vazia (' + (teclaDe('copiar') || 'Ctrl+C') + ' copia)', 'info', 2400); return; }
+  setTool('colar');
+  draft = { tipo:'colar', multiplas:!!multiplas };
+  avisoRodape(multiplas ? 'Duplicar: cada clique larga uma cópia; Esc ou botão direito termina' : 'Colar: clique onde largar (Esc desiste)');
+  pede();
+}
+function duplicaSelecao(){ if (SEL.length && !copiaSelecao(false)) return; comecaColar(true); }
+function colaNoPonto(w, ev){
+  if (!CLIP || !draft || draft.tipo !== 'colar') { setTool('select'); return; }
+  const p = snapPonto(w, ev, { soGrade:true });
+  const ops = opsDaCopia(p.x - CLIP.ref[0], p.y - CLIP.ref[1]);
+  if (!ops.length) return;
+  for (const op of ops) CH.push(op);
+  selDepois = ops.slice();
+  const multiplas = draft.multiplas;
+  commit();
+  if (!multiplas) { setTool('select'); HubDialog.toast(ops.length + ' objeto(s) colado(s)', 'ok', 1800); }
+  else draft = { tipo:'colar', multiplas:true };
+}
+function desenhaColagem(c){
+  if (!CLIP) return;
+  const dx = c.x - CLIP.ref[0], dy = c.y - CLIP.ref[1];
+  for (const { kind, o } of CLIP.itens) {
+    const n = JSON.parse(JSON.stringify(o));
+    if (kind === 'track') { n.x1 += dx; n.x2 += dx; n.y1 += dy; n.y2 += dy; }
+    else if (kind === 'arc') { n.cx += dx; n.cy += dy; }
+    else if (kind === 'fill') { n.x1 += dx; n.x2 += dx; n.y1 += dy; n.y2 += dy; }
+    else if (kind === 'region') n.points = (o.points || []).map(q => [q[0] + dx, q[1] + dy]);
+    else { n.x += dx; n.y += dy; }
+    desenhaObj(kind, n, kind === 'via' ? corDe('Multi') : corDe(o.layer), { alpha:0.55 });
+  }
+  ctx.save(); ctx.strokeStyle = COR.seta; ctx.lineWidth = px(1); ctx.beginPath();
+  ctx.moveTo(c.x - px(8), c.y); ctx.lineTo(c.x + px(8), c.y); ctx.moveTo(c.x, c.y - px(8)); ctx.lineTo(c.x, c.y + px(8)); ctx.stroke(); ctx.restore();
+}
+/* a caixa de um alvo: a uniao das caixas que o hit-test usa (o componente: a caixa dele) */
+function caixaDoAlvo(a){
+  let bb = null;
+  for (const h of HITS) if (h.a === a && h.bb) bb = bb ? [Math.min(bb[0], h.bb[0]), Math.min(bb[1], h.bb[1]), Math.max(bb[2], h.bb[2]), Math.max(bb[3], h.bb[3])] : h.bb.slice();
+  return bb;
+}
+const ALINHA_ROT = {
+  alinharEsq:'à esquerda', alinharDir:'à direita', alinharTopo:'pelo topo', alinharBase:'pela base',
+  alinharCentroH:'pelos centros (horizontal)', alinharCentroV:'pelos centros (vertical)',
+  distribuirH:'distribuídos na horizontal', distribuirV:'distribuídos na vertical',
+};
+function alinhaSelecao(modo){
+  if (!garanteEdicao()) return false;
+  const alvos = [];
+  for (const a of SEL) { const m = movivel(a); if (m && m.t !== 'ann' && alvos.indexOf(m) < 0) alvos.push(m); }
+  const distrib = /^distribuir/.test(modo);
+  const cx = alvos.map(a => ({ a, bb:caixaDoAlvo(a), g:geoDe(a) })).filter(x => x.bb && x.g);
+  if (cx.length < (distrib ? 3 : 2)) { HubDialog.toast(distrib ? 'distribuir pede 3 ou mais objetos selecionados' : 'alinhar pede 2 ou mais objetos selecionados', 'info', 2400); return false; }
+  const desl = new Map();
+  const min = i => Math.min(...cx.map(x => x.bb[i])), max = i => Math.max(...cx.map(x => x.bb[i]));
+  if (modo === 'alinharEsq') { const v = min(0); for (const x of cx) desl.set(x, [v - x.bb[0], 0]); }
+  else if (modo === 'alinharDir') { const v = max(2); for (const x of cx) desl.set(x, [v - x.bb[2], 0]); }
+  else if (modo === 'alinharBase') { const v = min(1); for (const x of cx) desl.set(x, [0, v - x.bb[1]]); }
+  else if (modo === 'alinharTopo') { const v = max(3); for (const x of cx) desl.set(x, [0, v - x.bb[3]]); }
+  else if (modo === 'alinharCentroH') { const v = (min(1) + max(3)) / 2; for (const x of cx) desl.set(x, [0, v - (x.bb[1] + x.bb[3]) / 2]); }
+  else if (modo === 'alinharCentroV') { const v = (min(0) + max(2)) / 2; for (const x of cx) desl.set(x, [v - (x.bb[0] + x.bb[2]) / 2, 0]); }
+  else if (distrib) {
+    /* como o Altium: os das pontas ficam, e o vao entre as caixas vizinhas fica igual */
+    const i0 = modo === 'distribuirH' ? 0 : 1, i1 = i0 + 2;
+    const ord = cx.slice().sort((p, q) => (p.bb[i0] + p.bb[i1]) - (q.bb[i0] + q.bb[i1]));
+    const ocup = ord.reduce((s, x) => s + (x.bb[i1] - x.bb[i0]), 0);
+    const vao = (ord[ord.length - 1].bb[i1] - ord[0].bb[i0] - ocup) / (ord.length - 1);
+    let pos = ord[0].bb[i0];
+    for (const x of ord) { const d = pos - x.bb[i0]; desl.set(x, i0 === 0 ? [d, 0] : [0, d]); pos += (x.bb[i1] - x.bb[i0]) + vao; }
+  } else return false;
+  const novas = new Map();
+  for (const [x, d] of desl) if (Math.abs(d[0]) > 1e-9 || Math.abs(d[1]) > 1e-9) novas.set(x.a, transladaGeo(x.a.t, x.g, r6(d[0]), r6(d[1])));
+  if (!novas.size) { HubDialog.toast('já estão ' + (ALINHA_ROT[modo] || 'alinhados'), 'info', 1800); return true; }
+  const r = editaConferindo(Array.from(novas.keys()), () => { for (const [a, g] of novas) escreveGeo(a, g); return true; }, 'não alinha');
+  if (r === null) { pede(); return true; }
+  if (r) { commit(); HubDialog.toast(novas.size + ' objeto(s) ' + (ALINHA_ROT[modo] || ''), 'ok', 1800); }
+  return true;
+}
+
+/* ============================== linhas de conexao e realce de net ==============================
+   O Show Connections do Altium: o que falta ligar em cada net, pela arvore minima entre as ilhas de
+   cobre (HubPcbNets.conexoes, o modo Shortest), em linha fina que nao engrossa com o zoom. Ctrl+clique
+   num cobre realca a net dele (escurece o resto, como o mascaramento do Altium); Esc limpa. */
+function conexoesLigadas(){ if (verConexoes === null) verConexoes = lePref('conexoes', '1') !== '0'; return verConexoes; }
+function toggleConexoes(){
+  verConexoes = !conexoesLigadas(); gravaPref('conexoes', verConexoes ? '1' : '0'); pede();
+  const r = verConexoes ? conexoes() : null;
+  HubDialog.toast(verConexoes ? 'linhas de conexão ligadas' + (r ? ' — ' + r.linhas.length + ' ligação(ões) por fazer' : '') : 'linhas de conexão desligadas', 'info', 2200);
+}
+function conexoes(){
+  if (!HN || !EB) return null;
+  if (!CONEX || CONEX.eb !== EB) { let r = null; try { r = HN.conexoes(EB); } catch (e) { console.warn('conexões:', e); } CONEX = { eb:EB, r }; }
+  return CONEX.r;
+}
+function desenhaConexoes(){
+  if (!conexoesLigadas()) return;
+  const r = conexoes(); if (!r || !r.linhas || !r.linhas.length) return;
+  ctx.save(); ctx.strokeStyle = COR.conexao; ctx.lineWidth = px(1); ctx.setLineDash([]); ctx.globalAlpha = 0.9;
+  ctx.beginPath();
+  for (const l of r.linhas) { if (REALCE && l.net !== REALCE.net) continue; ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); }
+  ctx.stroke(); ctx.restore();
+}
+function realcaNet(net){
+  if (!HN || !net) { limpaRealce(); return; }
+  let o = null; try { o = HN.objetosDaNet(EB, net); } catch (e) { console.warn('realce:', e); }
+  REALCE = { net, ids:new Set(((o && o.ids) || []).map(String)) };
+  avisoRodape('net ' + net + ': ' + REALCE.ids.size + ' objeto(s) — Esc limpa');
+  pede();
+}
+function limpaRealce(){ if (!REALCE) return false; REALCE = null; avisoRodape(''); pede(); return true; }
+function realcaNetEm(w){
+  if (!HN) { HubDialog.toast('realce de net: o hub-pcbnets.js não carregou nesta página', 'warn'); return; }
+  let r = null; try { r = HN.netEm(EB, null, w.x, w.y); } catch (e) { console.warn('realce:', e); }
+  if (!r || !r.net) { limpaRealce(); return; }
+  realcaNet(r.net);
+}
+function desenhaRealce(){
+  if (!REALCE) return;
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(0,0,0,0.62)'; ctx.fillRect(0, 0, cv.width, cv.height); ctx.restore();
+  const tem = o => o && o.id != null && REALCE.ids.has(String(o.id));
+  const pinta = (kind, o) => {
+    const lay = (kind === 'via' || (kind === 'pad' && ehTH(o))) ? 'Multi' : o.layer;
+    if (!camVisivel(lay)) return;
+    desenhaObj(kind, o, corDe(lay), {});
+    if (!ehTraco(kind)) desenhaObj(kind, o, '#ffffff', { contorno:true, linha:1, alpha:0.85 });
+  };
+  for (const o of EB.regions || []) if (tem(o)) pinta('region', o);
+  for (const o of EB.fills || []) if (tem(o)) pinta('fill', o);
+  for (const o of EB.tracks || []) if (tem(o)) pinta('track', o);
+  for (const o of EB.arcs || []) if (tem(o)) pinta('arc', o);
+  for (const o of EB.vias || []) if (tem(o)) pinta('via', o);
+  for (const c of EB.components || []) for (const o of (c && c.pads) || []) if (tem(o)) pinta('pad', o);
+  for (const o of EB.freepads || []) if (tem(o)) pinta('pad', o);
+}
+/* Tools » Teardrops: os que faltam (onde a trilha e mais fina que o pad/via e ainda nao ha
+   teardrop) entram como region_add -- o Gerber e o Altium os recebem como regiao de cobre */
+function poeTeardrops(){
+  if (!HTD) { HubDialog.toast('teardrops: o hub-pcbteardrop.js não carregou nesta página', 'warn'); return; }
+  if (!garanteEdicao()) return;
+  let novos = [];
+  try {
+    const pula = new Set((HTD.reconhece(EB) || []).map(t => (t.de && t.de.id) + '|' + t.trilha + '|' + t.layer));
+    novos = HTD.gera(EB, { pula }) || [];
+  } catch (e) { console.warn('teardrops:', e); HubDialog.toast('teardrops: ' + (e && e.message || e), 'err'); return; }
+  if (!novos.length) { HubDialog.toast('nenhum teardrop por pôr: todo pad e via com trilha mais fina já tem o seu', 'info', 2600); return; }
+  const ops = novos.map(g => ({ op:'region_add', layer:g.layer, net:g.net || '', pts:g.points.map(q => [r6(q[0]), r6(q[1])]), note:'teardrop do hub' }));
+  for (const op of ops) { if (!op.net) delete op.net; CH.push(op); }
+  commit();
+  HubDialog.toast(ops.length + ' teardrop(s) postos', 'ok', 2400);
+}
+
+/* ============================== PDF de layout ==============================
+   O dialogo (hub-pcbpdfui.js) recebe a placa EFETIVA de agora -- a mesma da tela e do Gerber,
+   com as mudancas nao salvas e os teardrops refeitos -- e grava em Projects/<p>/PDF/ (/api/pdf). */
+function abrePdf(){
+  fechaMenu();
+  if (LEAN) return;
+  if (typeof HubPcbPdfUi === 'undefined' || typeof HubPcbPdf === 'undefined') {
+    HubDialog.alert('O gerador de PDF (hub-pcbpdf.js) não carregou nesta página. Atualize o hub (F5); se continuar, o arquivo não chegou nesta instalação.', { title:'PDF de layout' });
+    return;
+  }
+  HubPcbPdfUi.abrir({ placa:() => EB, projeto:PROJ, podeSalvar:HubIO.canPost && !!PROJ, sujo:chDirty });
+}
+
+/* ============================== placa nova, ECO, pad avulso e polygon pour ==============================
+   O que faz placa nascer no hub (pedido do dono: "fazer placa do zero sem o Altium"):
+   - Design » Update PCB (o ECO): hub-pcbeco.js compara o schematic.js com a placa e o dialogo do
+     hub-pcbeco-ui.js devolve as linhas (comp_add, net_add, pad_net...) que entram no changes.js;
+   - File » New » PCB (o Board Wizard da casa): hub-pcbnova.js gera o board.js MESTRE e a rota
+     /api/board-novo (tools/rotas/board_novo.py) cria o projeto;
+   - Place » Pad: pad_add passante redondo (o padrao do Altium: 60 mil, furo 30 mil);
+   - Place » Polygon Pour: o poligono (poly_add) e despejado pelo hub-pcbpour.js na tela, no
+     Gerber e no PDF -- so o que o hub definiu; o cobre que veio despejado do Altium fica como
+     veio. O despejo fica guardado pela assinatura do que o afeta: editar longe nao redespeja. */
+const HPP = (typeof HubPcbPour !== 'undefined' && HubPcbPour && typeof HubPcbPour.despeja === 'function') ? HubPcbPour : null;
+const despejoCache = new Map();      /* id do poligono -> {hash, regioes} */
+function comDespejo(eb){
+  const pols = (eb.polygons || []).filter(p => p && p.id && p.pour !== 'none' && Array.isArray(p.pts) && p.pts.length >= 3);
+  if (!HPP || !pols.length) return eb;
+  const ids = new Set(pols.map(p => String(p.id)));
+  let novas = [];
+  try {
+    const ord = pols.slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+    for (const pol of ord) {
+      const h = HPP.assinatura(eb, pol);
+      let c = despejoCache.get(pol.id);
+      if (!c || c.hash !== h) {
+        const r = HPP.despeja(eb, pol);
+        c = { hash:h, regioes:(r && (r.regioes || r)) || [] };
+        if (!Array.isArray(c.regioes)) c.regioes = [];
+        despejoCache.set(pol.id, c);
+      }
+      novas = novas.concat(c.regioes);
+    }
+  } catch (e) { console.warn('polygon pour:', e); return eb; }
+  const out = Object.assign({}, eb);
+  out.regions = (eb.regions || []).filter(g => !(g && g.poly && g.de != null && ids.has(String(g.de))))
+    .concat(novas.map((g, i) => {
+      const o = { id:'q:' + g.de + ':' + i, layer:g.layer, net:g.net, points:g.pts || g.points, poly:true, de:g.de };
+      if (g.holes && g.holes.length) o.holes = g.holes;
+      return o;
+    }));
+  return out;
+}
+function repour(){
+  despejoCache.clear();
+  const n = (EB.polygons || []).length;
+  if (!n) { HubDialog.toast('a placa não tem polígono definido no hub (Place » Polygon Pour cria um)', 'info', 2800); return; }
+  reaplica();
+  HubDialog.toast(n + ' polígono(s) redespejado(s)', 'ok', 1800);
+}
+/* depois de fechar o poligono: a net no menu (o dialogo do Altium pergunta a net na hora) */
+function poePour(pts, sx, sy){
+  const lay = cobre(cur) ? cur : 'Top';
+  const nets = Array.from(new Set((B.nets || []).map(n => typeof n === 'string' ? n : (n && n.name) || '').filter(Boolean)));
+  nets.sort((a, b) => (/^(GND|0V|AGND|DGND)$/i.test(b) ? 1 : 0) - (/^(GND|0V|AGND|DGND)$/i.test(a) ? 1 : 0) || a.localeCompare(b));
+  const cria = net => {
+    if (!garanteEdicao()) return;
+    const op = { op:'poly_add', layer:lay, pts:pts.map(p => [r6(p[0]), r6(p[1])]), pour:'solid', note:'polígono do hub' };
+    if (net) op.net = net;
+    CH.push(op); selDepois = [op]; commit();
+    HubDialog.toast('polígono despejado em ' + nomeDe(lay) + (net ? ' — net ' + net : ' — sem net'), 'ok', 2400);
+  };
+  const itens = [{ titulo:'Net do polígono (' + nomeDe(lay) + ')' }];
+  for (const n of nets.slice(0, 40)) itens.push({ rot:n, f:() => cria(n) });
+  if (nets.length > 40) itens.push({ rot:'… ' + (nets.length - 40) + ' nets a mais: selecione um cobre da net e use o menu', off:true });
+  itens.push('-'); itens.push({ rot:'Sem net', f:() => cria('') });
+  const r = cv.getBoundingClientRect();
+  abreMenu(itens, sx != null ? sx : r.left + r.width / 2, sy != null ? sy : r.top + r.height / 2);
+}
+function poePad(w, ev){
+  const p = snapPonto(w, ev, { soGrade:true });
+  const op = { op:'pad_add', type:'th', shape:'circle', x:p.x, y:p.y, w:r6(CFG.padW), h:r6(CFG.padW), drill:r6(CFG.padFuro), note:'pad do hub' };
+  CH.push(op); selDepois = [op]; commit();
+}
+/* carrega um .js do workspace sob demanda (o esquema e as bibliotecas so quando o ECO pede) */
+function carregaScript(src){
+  return new Promise((ok, falha) => {
+    const s = document.createElement('script');
+    s.src = src + (src.indexOf('?') < 0 ? '?t=' : '&t=') + Date.now();
+    s.onload = () => ok(); s.onerror = () => falha(new Error('não carregou ' + src));
+    document.head.append(s);
+  });
+}
+async function globalDe(nome, src, deNovo){
+  if (!deNovo && typeof window[nome] !== 'undefined') return window[nome];
+  try { await carregaScript(src); } catch (e) { return null; }
+  return typeof window[nome] !== 'undefined' ? window[nome] : null;
+}
+async function postJson(url, corpo){
+  const r = await fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(corpo) });
+  let j = null; try { j = await r.json(); } catch (e) {}
+  return j || { ok:false, error:'HTTP ' + r.status };
+}
+async function abreEco(){
+  if (typeof HubPcbEcoUI === 'undefined' || typeof HubPcbEco === 'undefined') { HubDialog.alert('O ECO (hub-pcbeco.js) não carregou nesta página. Atualize o hub (F5).', { title:'Atualizar a PCB' }); return; }
+  if (!PROJ) { HubDialog.toast('abra a vista pela lista de projetos do hub', 'warn'); return; }
+  const base = 'Projects/' + encodeURIComponent(PROJ) + '/';
+  const sch = await globalDe('schematic', base + 'schematic.js', true);
+  if (!sch) { HubDialog.alert('Este projeto não tem schematic.js — o ECO compara o esquema com a placa.', { title:'Atualizar a PCB' }); return; }
+  const [schlib, pcblib, rm, ls] = await Promise.all([
+    globalDe('schlib', 'Libs/schlib.js'), globalDe('pcblib', 'Libs/pcblib.js'),
+    globalDe('renameMap', 'Libs/rename-map.js'), globalDe('libSubs', 'Libs/lib-subs.js')]);
+  if (typeof HC.setLibTables === 'function') HC.setLibTables(rm, ls);
+  if (pcblib && typeof HC.setPcbLib === 'function') HC.setPcbLib(pcblib);
+  await HubPcbEcoUI.eco({ board:B, changes:CH, schematic:sch, schlib, pcblib,
+    gravar:async (linhas) => {
+      if (!linhas || !linhas.length) return true;
+      if (!garanteEdicao()) return false;
+      for (const op of linhas) CH.push(op);
+      commit();
+      if (HubIO.canPost) await salvar();
+      return true;
+    } });
+}
+async function abreNovaPlaca(){
+  if (typeof HubPcbEcoUI === 'undefined' || typeof HubPcbNova === 'undefined') { HubDialog.alert('O assistente de placa nova (hub-pcbnova.js) não carregou nesta página. Atualize o hub (F5).', { title:'Placa nova' }); return; }
+  if (!HubIO.canPost) { HubDialog.toast('placa nova precisa do hub com gravação (abra pelo servidor ou pelo app)', 'warn'); return; }
+  const pr = await globalDe('projects', 'projects.js', true);
+  const existentes = Array.isArray(pr) ? pr.map(p => typeof p === 'string' ? p : (p && (p.name || p.id || p.dir)) || '').filter(Boolean) : [];
+  let criado = '';
+  const r = await HubPcbEcoUI.novaPlaca({ projeto:PROJ, existentes,
+    gravar:async ({ proj, conteudo, regrasJs }) => {
+      const j = await postJson('/api/board-novo', { proj, conteudo });
+      if (!j.ok) return j.error || 'o servidor recusou';
+      if (regrasJs) await postJson('/api/save', { path:'Projects/' + proj + '/rules.js', content:regrasJs });
+      criado = proj; return true;
+    } });
+  if (!r || !criado) return;
+  const abrir = await HubDialog.confirm('Placa "' + criado + '" criada. Abrir agora? Depois, Design » Update PCB traz os componentes do esquema.', { title:'Placa nova', ok:'Abrir' });
+  if (abrir) location.href = location.pathname + '?p=' + encodeURIComponent(criado);
+}
+
+/* ============================== regras de projeto e DRC ==============================
+   Design » Rules (o PCB Rules and Constraints Editor) e Tools » Design Rule Check, no hub:
+   hub-pcbregras.js (o modelo e a query do Altium), hub-pcbdrc.js (o motor) e hub-pcbregrasui.js
+   (o editor e o painel Messages). As regras vem do rules.js do projeto; sem ele, das que o espelho
+   trouxe (board.rules) sobre o padrao da casa. Depois do primeiro DRC, cada edicao confere de novo
+   (o online do Altium) e os marcadores acompanham. */
+const HRG = (typeof HubPcbRegras !== 'undefined' && HubPcbRegras && typeof HubPcbRegras.ler === 'function') ? HubPcbRegras : null;
+const HDRC = (typeof HubPcbDrc !== 'undefined' && HubPcbDrc && typeof HubPcbDrc.rodar === 'function') ? HubPcbDrc : null;
+const HRUI = (typeof HubPcbRegrasUI !== 'undefined' && HubPcbRegrasUI) ? HubPcbRegrasUI : null;
+let REGRAS = null, DRC_RES = null, drcPainel = null, drcTimer = null;
+function regrasAtuais(){
+  if (!REGRAS && HRG) {
+    try { REGRAS = (typeof pcbrules !== 'undefined' && pcbrules) ? HRG.ler(pcbrules) : HRG.doBoard(B); }
+    catch (e) { console.warn('regras:', e); REGRAS = HRG.padroes(); }
+  }
+  return REGRAS;
+}
+function rodaDrc(){
+  if (!HDRC || !regrasAtuais()) return null;
+  const tg = (typeof HubGerber !== 'undefined' && typeof HubGerber.geometriaTexto === 'function') ? (t => HubGerber.geometriaTexto(t)) : undefined;
+  try { DRC_RES = HDRC.rodar(EB, REGRAS, { textoGeo:tg }); }
+  catch (e) { console.warn('DRC:', e); HubDialog.toast('DRC: ' + (e && e.message || e), 'err'); DRC_RES = null; }
+  pede();
+  return DRC_RES;
+}
+function abreDrc(){
+  if (!HDRC || !HRUI) { HubDialog.alert('O DRC (hub-pcbdrc.js) não carregou nesta página. Atualize o hub (F5).', { title:'Design Rule Check' }); return; }
+  drcPainel = HRUI.abrirDrc({
+    rodar:() => rodaDrc(),
+    irPara:(x, y, ids) => {
+      view.cx = x; view.cy = y; if (view.scale < 20) view.scale = 20;
+      const alvos = (ids || []).map(id => { const m = IDX.item.get(String(id)); return m ? PORCHAVE.get(chave({ t:m.kind, m })) : null; }).filter(Boolean);
+      if (alvos.length) selSo(alvos);
+      pede();
+    },
+    arquivo:baseDoPcbDoc(),
+    aoFechar:() => { drcPainel = null; DRC_RES = null; pede(); },
+  });
+  const r = rodaDrc();
+  if (drcPainel && r && typeof drcPainel.mostra === 'function') drcPainel.mostra(r);
+}
+/* depois de cada edicao, com o DRC aberto: confere de novo (com folga para o arrasto acabar) */
+function drcDepoisDaEdicao(){
+  if (!(DRC_RES && drcPainel) && !PREFS.drcOnline) return;
+  clearTimeout(drcTimer);
+  drcTimer = setTimeout(() => { const r = rodaDrc(); if (r && drcPainel && typeof drcPainel.mostra === 'function') drcPainel.mostra(r); }, 250);
+}
+function desenhaDrc(){
+  if (!DRC_RES || !HRUI || typeof HRUI.desenhaMarcadores !== 'function') return;
+  try { HRUI.desenhaMarcadores(ctx, DRC_RES.violacoes || [], { px:n => px(n), sel:drcPainel && drcPainel.selecionada ? drcPainel.selecionada() : null }); }
+  catch (e) { console.warn('marcadores do DRC:', e); }
+}
+function abreRegras(){
+  if (!HRUI || !HRG) { HubDialog.alert('O editor de regras (hub-pcbregrasui.js) não carregou nesta página. Atualize o hub (F5).', { title:'Regras de projeto' }); return; }
+  HRUI.abrirEditor({ regras:regrasAtuais(), placa:EB, unidade, salvar:async (conj, txt) => {
+    REGRAS = conj;
+    if (DRC_RES) drcDepoisDaEdicao();
+    if (!HubIO.canPost || !PROJ) { HubDialog.toast('regras valendo nesta sessão (sem gravação neste hub)', 'warn', 3000); return true; }
+    const j = await postJson('/api/save', { path:'Projects/' + PROJ + '/rules.js', content:txt });
+    if (!j.ok) { HubDialog.toast('não gravei o rules.js: ' + (j.error || ''), 'err', 4000); return false; }
+    HubDialog.toast('regras gravadas no rules.js', 'ok', 2000);
+    return true;
+  } });
 }
 
 /* ============================== snap ==============================
    Centro de pad, centro de via e ponta de trilha/arco ganham da grade, como no Altium (Snap
    Options: Pad Centers, Via Centers, Track Vertices); fora deles, a grade. Ctrl solta tudo.
-   O alcance e de 9 px na tela -- ou o pad inteiro, se ele for maior. */
+   O alcance e de 9 px na tela -- ou o pad inteiro, se ele for maior. O id e o do objeto em que
+   prendeu (a via que cai num pad sem net nao e conflito com ele: conflitosDaViaNova). */
 let SNAP = null;
 function snapPonto(w, ev, op){
   op = op || {};
@@ -1497,22 +2086,22 @@ function snapPonto(w, ev, op){
   if (snapObj !== 'off' && !op.soGrade) {
     const tol = px(9);
     let melhor = null, dm = Infinity;
-    const ve = (x, y, net, tipo, layer, alcance) => {
+    const ve = (x, y, net, tipo, layer, alcance, id) => {
       if (!isNum(x) || !isNum(y)) return;
       if (!camVisivel(layer)) return;
       if (snapObj === 'atual' && layer !== cur && !(layer === 'Multi' && cobre(cur))) return;
       if (op.camada && layer !== op.camada && !(layer === 'Multi' && cobre(op.camada))) return;
       const d = Math.hypot(w.x - x, w.y - y);
-      if (d <= Math.max(tol, alcance || 0) && d < dm) { dm = d; melhor = { x:r6(x), y:r6(y), net:net || '', tipo }; }
+      if (d <= Math.max(tol, alcance || 0) && d < dm) { dm = d; melhor = { x:r6(x), y:r6(y), net:net || '', tipo, id:id == null ? '' : String(id) }; }
     };
     const fora = o => EXCLUI && EXCLUI.has(o);       /* o que esta na mao nao e alvo de si mesmo */
-    const pad = p => { if (!p || !isNum(p.x) || fora(p)) return; const c = centroCobre(p); ve(c[0], c[1], p.net, 'pad', ehTH(p) ? 'Multi' : p.layer, Math.min(p.w || 0, p.h || 0) / 2); };
+    const pad = p => { if (!p || !isNum(p.x) || fora(p)) return; const c = centroCobre(p); ve(c[0], c[1], p.net, 'pad', ehTH(p) ? 'Multi' : p.layer, Math.min(p.w || 0, p.h || 0) / 2, p.id); };
     for (const c of EB.components || []) for (const p of (c && c.pads) || []) pad(p);
     for (const p of EB.freepads || []) pad(p);
-    for (const v of EB.vias || []) if (v && !fora(v)) ve(v.x, v.y, v.net, 'via', 'Multi', (v.size || 0) / 2);
+    for (const v of EB.vias || []) if (v && !fora(v)) ve(v.x, v.y, v.net, 'via', 'Multi', (v.size || 0) / 2, v.id);
     const pontas = list => { for (const o of list || []) { if (!o || o.keepout || fora(o)) continue;
-      if (o.kind === 'arc' || isNum(o.cx)) { if (!linhaValida(o, true) || arcoCheio(o)) continue; const a = pontaArco(o, 0), b = pontaArco(o, 1); ve(a[0], a[1], o.net, 'ponta', o.layer); ve(b[0], b[1], o.net, 'ponta', o.layer); }
-      else if (linhaValida(o, false)) { ve(o.x1, o.y1, o.net, 'ponta', o.layer); ve(o.x2, o.y2, o.net, 'ponta', o.layer); } } };
+      if (o.kind === 'arc' || isNum(o.cx)) { if (!linhaValida(o, true) || arcoCheio(o)) continue; const a = pontaArco(o, 0), b = pontaArco(o, 1); ve(a[0], a[1], o.net, 'ponta', o.layer, 0, o.id); ve(b[0], b[1], o.net, 'ponta', o.layer, 0, o.id); }
+      else if (linhaValida(o, false)) { ve(o.x1, o.y1, o.net, 'ponta', o.layer, 0, o.id); ve(o.x2, o.y2, o.net, 'ponta', o.layer, 0, o.id); } } };
     pontas(EB.tracks); pontas(EB.arcs);
     if (op.camada && !cobre(op.camada)) { pontas(EB.silk); pontas(EB.lines); }
     if (melhor) return melhor;
@@ -1532,7 +2121,7 @@ function snapPonto(w, ev, op){
 const FERRAMENTA_ROT = {
   select:'Selecionar', trilha:'Trilha', via:'Via', linha:'Linha', arco:'Arco', circulo:'Círculo', retangulo:'Retângulo',
   triangulo:'Triângulo', poligono:'Polígono', texto:'Texto', furo:'Furo de fixação', contorno:'Contorno da placa',
-  medir:'Medir', sinalizar:'Sinalizar',
+  medir:'Medir', sinalizar:'Sinalizar', colar:'Colar', pad:'Pad', pour:'Polygon Pour',
 };
 let draft = null;          /* o gesto da ferramenta em curso */
 let cursorW = null;        /* o cursor no mundo (cru) */
@@ -1548,7 +2137,7 @@ function setTool(t){
   }
   tool = t;
   fechaCaixaTexto(); fechaAnnForm(); fechaMenu();
-  cv.style.cursor = t === 'select' ? 'default' : 'crosshair';
+  cv.style.cursor = t === 'select' ? 'default' : cursorFerramenta();
   pintaBarra(); pintaStatus();
   if (painel) { if (t !== 'select') painel.mostra('props'); painel.atualiza(); }
   pede();
@@ -1587,16 +2176,360 @@ function opSegmento(a, b){
   op.note = tool === 'trilha' ? 'trilha do hub' : 'linha do hub';
   return op;
 }
-/* a net que a trilha encontrou no caminho vale para os trechos que ela ja tinha posto */
+/* a net que a trilha encontrou no caminho vale para os trechos que ela ja tinha posto -- e para
+   as vias dela (a via posta antes de a trilha ter net ficava sem net, e a via sem net encosta em
+   tudo para o roteador) */
 function propagaNet(net){
   if (!net || draft.net || tool !== 'trilha') return;
   draft.net = net;
-  for (const p of draft.passos) for (const op of p.ops) if (op.op === 'track_add' && cobre(op.layer) && !op.net) op.net = net;
+  for (const p of draft.passos) for (const op of p.ops)
+    if (((op.op === 'track_add' && cobre(op.layer)) || op.op === 'via_add') && !op.net) op.net = net;
 }
 function segmentosNovos(antes, depois){
   const ops = [];
   for (let i = antes.pts.length; i < depois.pts.length; i++) ops.push(opSegmento(depois.pts[i - 1], depois.pts[i]));
   return ops;
+}
+
+/* ============================== o roteador ==============================
+   "trilha de mesma camada nao podem se cruzar, se forem se cruzar o software nao deixa, e tenta
+   fazer sozinho a curva em um caminho possivel ate o outro lado, mas sem mexer na trilha que ja
+   ta colocada" e "na vdd elas so se encontram se forem trilhas de mesma NET" (o dono, 2026-10-02).
+   O motor (hub-roteador.js) e puro: a cena, as folgas exatas e o caminho. Aqui so se liga: a
+   previa e o clique da Trilha, a via da trilha, a ferramenta Via e a conferencia das edicoes.
+   So a Trilha usa o motor -- a Linha continua desenho livre, como o Place Line do Altium. Com o
+   conflito em 'ignorar' (o escape), no lean ou sem o motor, tudo e como era antes dele. */
+const HR = (typeof HubRoteador !== 'undefined' && HubRoteador && typeof HubRoteador.cena === 'function' &&
+            typeof HubRoteador.rota === 'function') ? HubRoteador : null;
+let motorQuebrado = false;
+const CONFLITO_ROT = { contornar:'contornar (Walkaround)', parar:'parar no obstáculo', ignorar:'ignorar (não confere)' };
+const CONFLITO_FRASE = {
+  contornar:'trilha de outra net é contornada',
+  parar:'a trilha para antes da outra net',
+  ignorar:'não confere nada — nets diferentes podem se encontrar',
+};
+/* a folga entre cobres de nets diferentes: a regra Clearance do espelho; sem ela, 10 mil (a regra
+   de 95 de 111 projetos da casa) */
+const FOLGA = (isNum(RULES.clearance) && RULES.clearance > 0) ? RULES.clearance : 0.254;
+const motorEdicao = () => !!HR && !motorQuebrado && !LEAN && CFG.conflito !== 'ignorar';
+const motorLigado = () => tool === 'trilha' && motorEdicao();
+const eletricoP = p => !!p && (p.tipo === 'pad' || p.tipo === 'via' || p.tipo === 'ponta');
+/* motor com defeito nao derruba a vista: avisa uma vez e a sessao segue como antes dele */
+function falhaMotor(e){
+  if (motorQuebrado) return;
+  motorQuebrado = true;
+  try { console.error('hub-roteador:', e); } catch (x) {}
+  HubDialog.toast('O roteador falhou (' + String(e && e.message || e) + '): a trilha e as edições seguem SEM conferir conflito até recarregar a página.', 'err', 0);
+  pintaStatus();
+}
+function setConflito(v){
+  if (CONFLITOS.indexOf(v) < 0) return false;
+  CFG.conflito = v;
+  gravaPref('conflito', v);
+  ROTA = null;
+  return true;
+}
+function cicloConflito(){
+  const ciclo = PREFS.conflitosCiclo.length ? PREFS.conflitosCiclo : CONFLITOS;
+  setConflito(ciclo[(ciclo.indexOf(CFG.conflito) + 1) % ciclo.length]);
+  pintaStatus(); if (painel) painel.atualiza(); pede();
+  HubDialog.toast('conflito: ' + CFG.conflito + ' — ' + CONFLITO_FRASE[CFG.conflito] +
+    (HR ? '' : ' (o roteador não carregou: nada é conferido)'), CFG.conflito === 'ignorar' ? 'warn' : 'info', 2600);
+}
+
+/* ---- a cena: a placa efetiva com o contorno, os furos e a geometria de texto da tela ---- */
+function opcoesCena(eb){
+  const o = { clearance:FOLGA, placa:{ lacos:lacosDe(eb), recortes:(eb === EB ? recortesDaTela() : recortesDe(eb)).map(k => k.pts) } };
+  /* texto em camada de cobre e cobre: a geometria e a do Gerber (a mesma que a tela desenha);
+     oculto nao vai para a fabrica e nao e obstaculo */
+  if (typeof HubGerber !== 'undefined' && typeof HubGerber.geometriaTexto === 'function')
+    o.textoGeo = t => { if (!t || t.hidden) return null; try { return HubGerber.geometriaTexto(t); } catch (e) { return null; } };
+  return o;
+}
+function cenaAtual(){
+  if (!HR) return null;
+  if (CENA && CENA_EB === EB) return CENA;
+  CENA = HR.cena(EB, opcoesCena(EB));
+  CENA_EB = EB;
+  return CENA;
+}
+const folgaDaCena = () => (CENA && isNum(CENA.clearance) && CENA.clearance > 0) ? CENA.clearance : FOLGA;
+/* a net do cobre sob o ponto na camada ('' = nenhum) */
+function netNoPonto(layer, x, y){
+  if (!HR || typeof HR.netEm !== 'function') return '';
+  try { const n = HR.netEm(cenaAtual(), layer, x, y); return typeof n === 'string' ? n : ''; }
+  catch (e) { falhaMotor(e); return ''; }
+}
+
+/* ---- as palavras do que barrou ---- */
+const NOME_OBST = { trilha:'trilha', arco:'arco', pad:'pad', via:'via', fill:'fill', regiao:'região', texto:'texto', keepout:'keepout', borda:'borda da placa' };
+function descObstaculo(b){
+  if (!b) return 'um obstáculo';
+  const t = NOME_OBST[b.tipo] || String(b.tipo || 'obstáculo');
+  if (b.tipo === 'keepout' || b.tipo === 'borda') return t;
+  return t + (b.net ? ' de ' + b.net : ' sem net');
+}
+function porqueObstaculo(b){
+  if (b && b.tipo === 'borda') return 'o cobre fica dentro da placa, longe da borda';
+  if (b && b.tipo === 'keepout') return 'keepout não deixa passar cobre';
+  if (b && !b.net) return 'cobre sem net não encosta em net nenhuma';
+  return 'trilhas de nets diferentes não se encontram';
+}
+/* O que barrou. O `bloqueio` do motor e o primeiro obstaculo do L direto; contornando, quando o
+   alvo e um pad/via/ponta de OUTRA net, quem impede a chegada e o proprio alvo -- a rota da a
+   volta no resto e para antes dele. */
+function bloqueioDaRota(r, p, netTrilha){
+  if (r && !r.completa && r.motivo !== 'bloqueado' && eletricoP(p) && p.net && netTrilha && p.net !== netTrilha)
+    return { tipo:p.tipo === 'ponta' ? 'trilha' : p.tipo, net:p.net };
+  return r ? r.bloqueio : null;
+}
+function textoParou(r, b){
+  if (!b) return r && r.motivo === 'orcamento' ? 'não achou passagem perto daqui — clique mais perto do caminho que quer'
+                                              : 'não achou passagem até aqui — ' + porqueObstaculo(null);
+  return 'parou antes de ' + descObstaculo(b) + ' — ' + porqueObstaculo(b);
+}
+/* a folga de verdade de um conflito, em mm (negativa = os cobres se sobrepoem) */
+const folgaDoConflito = c => isNum(c && c.dist) ? c.dist : 0;
+function textoConflito(c){
+  const d = descObstaculo(c) + (c && c.layer ? ' na ' + nomeDe(c.layer) : ''), f = folgaDoConflito(c);
+  if (f < -1e-6) return 'cruzaria ' + d;
+  return 'encostaria em ' + d + ' (folga ' + fmtDist(Math.max(0, f)) + ' < ' + fmtDist(folgaDaCena()) + ' ' + unidade + ')';
+}
+/* o porque da recusa fica no rodape ate a proxima rota ou edicao aceita -- e so ele sai: o rodape
+   tambem guarda aviso de outra origem (o changes.js que mudou no disco) */
+let avisoDoRoteador = '';
+function avisoRota(t){ avisoDoRoteador = t; avisoRodape(t); }
+function limpaAvisoRota(){ const el = $('smsg'); if (avisoDoRoteador && el && el.textContent === avisoDoRoteador) avisoRodape(''); avisoDoRoteador = ''; }
+function avisaConflito(prefixo, cs){
+  const pior = cs.slice().sort((a, b) => folgaDoConflito(a) - folgaDoConflito(b))[0];
+  /* "e mais N" conta obstaculos: a via encosta no mesmo pad passante em cada camada */
+  const outros = new Set(cs.map(c => String(c.tipo) + ':' + String(c.id))).size - 1;
+  const t = prefixo + ': ' + textoConflito(pior) + (outros > 0 ? ' — e mais ' + outros : '');
+  avisoRota(t);
+  HubDialog.toast(t, 'warn', 5000);
+}
+
+/* ---- a trilha na mao ---- */
+/* os objetos que a trilha em curso ja pos (as linhas dos passos dela): nao sao obstaculo dela
+   mesma -- sem isso a propria trilha sem net a barraria */
+function idsDaTrilha(){
+  const ids = [];
+  if (!draft || !Array.isArray(draft.passos)) return ids;
+  for (const ps of draft.passos) for (const op of ps.ops || []) {
+    const it = IDX.opItem.get(op);
+    if (it && it.target && it.target.eff && it.target.eff.id != null) ids.push(String(it.target.eff.id));
+  }
+  return ids;
+}
+/* A rota da trilha na mao ate o ponto p (o snap), com memo pelo que a muda: o alvo (x/y/tipo/net),
+   o estado do HubFio, o modo de conflito, a largura, a camada, a net e o EB (ebSeq; os passos da
+   trilha so mudam com commit). Mexer o mouse dentro do mesmo ponto de grade nao recalcula, e o
+   clique reaproveita a rota da previa: o que se ve e o que se fixa. null = sem motor (a trilha
+   segue como antes dele). */
+function calculaRota(p){
+  if (!motorLigado() || !p || !draft || draft.tipo !== 'rota' || !draft.est) return null;
+  const est = draft.est, A = est.pts[est.pts.length - 1], elet = eletricoP(p);
+  const chave = [ebSeq, CFG.conflito, draft.layer, draft.w, draft.net || '', est.modo, est.primeiro, A[0], A[1],
+                 p.x, p.y, elet ? p.tipo : '', elet ? (p.net || '') : ''].join('|');
+  if (ROTA && ROTA.chave === chave && ROTA.est === est) return ROTA.res;
+  const req = { layer:draft.layer, w:draft.w, net:draft.net || '', de:[A[0], A[1]], ate:[p.x, p.y],
+                alvo:{ eletrico:elet, net:elet ? (p.net || '') : '' }, modo:est.modo, primeiro:est.primeiro,
+                conflito:CFG.conflito, ignora:idsDaTrilha() };
+  let res = null;
+  try {
+    res = HR.rota(cenaAtual(), req);
+    if (!res || !Array.isArray(res.pts)) throw new Error('a rota veio sem pontos');
+    /* sem ponto nenhum (entrada que o motor recusou): parada na partida, nunca o L sem conferir */
+    if (!res.pts.length) res = Object.assign({}, res, { pts:[[A[0], A[1]]], completa:false });
+  } catch (e) { falhaMotor(e); res = null; }
+  ROTA = { chave, est, req, res, alvo:p };
+  pintaStatus();
+  return res;
+}
+/* a rota vigente da trilha na mao (para a barra de status) */
+const rotaVigente = () => (ROTA && ROTA.res && draft && draft.tipo === 'rota' && draft.est && ROTA.est === draft.est) ? ROTA.res : null;
+/* a barra de status: o modo de conflito e, com a trilha na mao, o que o roteador esta fazendo */
+function statusConflito(){
+  if (!HR) return 'conflito: não confere (o roteador não carregou)';
+  if (motorQuebrado) return 'conflito: não confere (o roteador falhou)';
+  let s = 'conflito: ' + CFG.conflito;
+  const r = CFG.conflito !== 'ignorar' ? rotaVigente() : null;
+  if (r && !r.completa) s += ' · sem passagem: ' + descObstaculo(bloqueioDaRota(r, ROTA.alvo, ROTA.req.net));
+  else if (r && r.motivo === 'contorno') s += ' · contornando ' + descObstaculo(r.bloqueio);
+  return s;
+}
+/* O lado da perna seguinte: perpendicular ao ultimo trecho fixado, a regra do HubFio.fixa. A
+   copia so vale para um hub-fio.js antigo no cache do navegador. */
+const depoisDe = (typeof HubFio !== 'undefined' && typeof HubFio.depoisDe === 'function') ? HubFio.depoisDe : function(modo, A, B2, pr){
+  if (modo === '90') return Math.abs(B2[0] - A[0]) > 1e-6 ? 'v' : 'h';
+  if (modo === '45') { const dx = Math.abs(B2[0] - A[0]), dy = Math.abs(B2[1] - A[1]); return dx > 1e-6 && Math.abs(dx - dy) <= 1e-6 ? 'orto' : 'diag'; }
+  return pr;
+};
+/* o estado do HubFio depois de fixar `novos` (os vertices depois do ultimo ponto fixado). Os
+   vertices vao no r6 do changes.js: a rota sai com ruido de float (15.600000000000001) e a
+   partida da perna seguinte tem de ser a ponta que foi gravada, nao a que a conta deu */
+function estDepois(antes, novos, ult){
+  const pts = antes.pts.map(q => [q[0], q[1]]).concat(novos.map(q => [r6(q[0]), r6(q[1])]));
+  const n = pts.length;
+  const primeiro = n >= 2 ? depoisDe(antes.modo, pts[n - 2], pts[n - 1], antes.primeiro) : antes.primeiro;
+  return { pts, modo:antes.modo, primeiro, inicial:antes.inicial, ult:[ult[0], ult[1]] };
+}
+/* O clique com a rota do motor -- o que a previa mostrou e o que fica:
+   - chegou num ponto eletrico: fixa tudo e a trilha acaba ali (como antes);
+   - chegou num ponto qualquer: fixa tudo menos o ultimo trecho, que vira a perna de antecipacao
+     (com um trecho so, fixa ele: o que o HubFio.fixa sempre fez);
+   - nao chegou (completa:false): fixa ate onde chegou e diz o porque.
+   Um clique e UM passo do Backspace, quantos trechos ele fixe. */
+function fixaRota(p, r){
+  const elet = eletricoP(p), P = r.pts, n = P.length - 1;
+  /* defesa: rota que diz ter chegado num ponto eletrico de OUTRA net juntaria as duas */
+  if (r.completa && elet && draft.net && p.net && p.net !== draft.net) {
+    const t = 'não deixa: ' + descObstaculo({ tipo:p.tipo === 'ponta' ? 'trilha' : p.tipo, net:p.net }) + ' é outra net — ' + porqueObstaculo({ net:p.net });
+    avisoRota(t); HubDialog.toast(t, 'warn'); return;
+  }
+  const fim = (!r.completa || elet || n <= 1) ? n : n - 1;
+  if (!r.completa) {
+    const t = textoParou(r, bloqueioDaRota(r, p, draft.net));
+    avisoRota(t);
+    HubDialog.toast(fim ? t : 'a trilha não sai daqui: ' + t, 'warn', 4500);
+  } else limpaAvisoRota();
+  if (!fim) { pintaStatus(); pede(); return; }
+  if (r.completa && elet) propagaNet(p.net);
+  const antes = draft.est, novos = P.slice(1, fim + 1);
+  const pontos = [antes.pts[antes.pts.length - 1]].concat(novos);
+  const ops = [];
+  for (let i = 1; i < pontos.length; i++) ops.push(opSegmento(pontos[i - 1], pontos[i]));
+  for (const op of ops) CH.push(op);
+  draft.passos.push({ ops, est:antes, layer:draft.layer });
+  draft.est = estDepois(antes, novos, [p.x, p.y]);
+  if (r.completa && elet) { draft.est = null; draft.passos = []; draft.net = ''; }   /* chegou num ponto eletrico: a trilha acaba ali */
+  commit();
+  pintaStatus();
+}
+
+/* ---- a via nova (a da trilha e a da ferramenta Via) ---- */
+/* Os conflitos de uma via que ainda nao existe, no ponto p. O objeto sem net em que o snap prendeu
+   nao conta: ligar num pad sem net nao junta duas nets (a mesma excecao da chegada da trilha).
+   null = o motor falhou (a via segue como antes). */
+function conflitosDaViaNova(p, size, net, ignora){
+  let r;
+  try { r = HR.folgaVia(cenaAtual(), { x:p.x, y:p.y, size }, { net:net || '', ignora:ignora || [] }); }
+  catch (e) { falhaMotor(e); return null; }
+  const preso = eletricoP(p) && p.id ? String(p.id) : '';
+  return ((r && r.conflitos) || []).filter(c => !(preso && String(c.id) === preso && !c.net));
+}
+/* a previa da ferramenta Via: os conflitos no ponto do cursor (memo pelo ponto, net e EB) */
+let VIA_PREVIA = null;
+function conflitosNaPrevia(p){
+  if (!motorEdicao() || !p) return null;
+  const net = netDaViaNova(p);
+  const chave = [ebSeq, p.x, p.y, net, CFG.viaSize, eletricoP(p) ? p.id : ''].join('|');
+  if (VIA_PREVIA && VIA_PREVIA.chave === chave) return VIA_PREVIA.cs;
+  VIA_PREVIA = { chave, cs:conflitosDaViaNova(p, CFG.viaSize, net, []) };
+  return VIA_PREVIA.cs;
+}
+/* A net da via da ferramenta Via: a do snap (pad, via, ponta); senao a ESCOLHIDA no painel -- a
+   via e da net que a mao pediu, e em cima do cobre de outra net ela nao entra (a regra do dono);
+   sem net no painel, a do cobre em que ela cai, como a partida da Trilha (o Altium da a via a net
+   do cobre em que ela cai): a camada atual primeiro, depois as outras de cobre -- a via atravessa
+   todas. Antes a do cobre vinha na frente da do painel, e a via "de GND" posta em cima de uma
+   trilha de 5V virava de 5V calada. */
+function netDaViaNova(p){
+  if (p.net) return p.net;
+  if (CFG.viaNet) return CFG.viaNet;
+  if (motorEdicao() && !eletricoP(p)) {
+    const camadas = camadasCobre().map(l => l.key).sort((a, b) => (b === cur) - (a === cur));
+    for (const k of camadas) { const n = netNoPonto(k, p.x, p.y); if (n) return n; }
+  }
+  return '';
+}
+
+/* ---- a edicao que faria nets diferentes se encontrarem: recusada ---- */
+/* os campos do painel que mudam o cobre de uma trilha, de um arco ou de uma via */
+const CAMPOS_COBRE = {
+  track:{ layer:1, w:1, net:1, x1:1, y1:1, x2:1, y2:1 },
+  arc:{ layer:1, w:1, net:1, cx:1, cy:1, r:1, sa:1, ea:1 },
+  via:{ x:1, y:1, size:1, net:1 },
+};
+/* o que a regra confere: trilha e arco de cobre e via. Componente nao, como no Altium; keepout
+   nao e cobre; linha de outra camada so conta se a edicao a leva para o cobre. */
+const alvoConferido = a => !!a && !!a.m && !a.m.deleted && (a.t === 'track' || a.t === 'arc' || a.t === 'via');
+function cobreConferido(o, t){
+  if (!o) return false;
+  if (t === 'via') return isNum(o.x) && isNum(o.y) && o.size > 0;
+  return typeof o.layer === 'string' && cobre(o.layer) && !o.keepout && linhaValida(o, t === 'arc');
+}
+const chaveConflito = c => String(c.tipo) + ':' + String(c.id);
+/* os conflitos de um objeto do EB na cena (ele mesmo nao conta), por obstaculo */
+function conflitosDoObjeto(cn, o, t){
+  const op = { net:typeof o.net === 'string' ? o.net : '', ignora:[String(o.id)] };
+  const r = t === 'via' ? HR.folgaVia(cn, { x:o.x, y:o.y, size:o.size }, op)
+          : t === 'arc' ? HR.folgaArco(cn, o.layer, { cx:o.cx, cy:o.cy, r:o.r, sa:o.sa, ea:o.ea, w:o.w }, op)
+          : HR.folgaTrilha(cn, o.layer, { x1:o.x1, y1:o.y1, x2:o.x2, y2:o.y2, w:o.w }, op);
+  const M = new Map();
+  for (const c of (r && r.conflitos) || []) M.set(chaveConflito(c), c);
+  return M;
+}
+/* o id que o objeto de um item tem no EB de outro modelo (o mesmo changes.js com a edicao) */
+function idDepois(m, m2){
+  if (!m.added) return m.src ? m.src.id : null;
+  const op = opDe(m);
+  const it = op ? m2.changeItems.find(i => i.ch === op) : null;
+  return it && it.target && it.target.eff ? it.target.eff.id : null;
+}
+/* o changes.js antes da edicao, com a identidade das linhas: o Backspace da trilha e a selecao
+   (chave 'o:') apontam para os objetos-linha, e desfazer uma edicao recusada nao pode troca-los */
+function fotoCH(){ return CH.map(op => [op, JSON.parse(JSON.stringify(op))]); }
+function voltaCH(foto){
+  CH.length = 0;
+  for (const [op, era] of foto) {
+    for (const k of Object.keys(op)) if (!(k in era)) delete op[k];
+    Object.assign(op, era);
+    CH.push(op);
+  }
+}
+/* "O software nao deixa": a edicao de trilha/arco de cobre e de via e conferida como ficaria --
+   o objeto de depois contra a placa de depois (o modelo, o EB e a cena montados com a edicao ja
+   escrita no changes.js), entao o que anda junto (o grupo arrastado, a selecao do painel, o
+   componente que vira com a trilha) conta onde fica, e nao onde estava. Conflito NOVO, com um
+   obstaculo que o objeto nao tocava antes, desfaz tudo o que a edicao escreveu e avisa; conflito
+   que ja existia (placa antiga com DRC sujo) nao trava -- senao nada que ja nasceu encostado
+   poderia andar. aplica() escreve no CH e diz se mexeu. Devolve true (escrito: falta o commit),
+   false (nada escrito) ou null (recusado: nada escrito, o aviso ja foi dado). */
+function editaConferindo(alvos, aplica, prefixo){
+  const conf = motorEdicao() ? (alvos || []).filter(alvoConferido) : [];
+  if (!conf.length) return !!aplica();
+  let antes;
+  try {
+    const cn = cenaAtual();
+    antes = conf.map(a => { const o = ebDe(a.m); return cobreConferido(o, a.t) ? conflitosDoObjeto(cn, o, a.t) : new Map(); });
+  } catch (e) { falhaMotor(e); return !!aplica(); }
+  const foto = fotoCH(), selAntes = selDepois;
+  if (!aplica()) return false;
+  const novos = [];
+  let pre;
+  try {
+    const m2 = HC.applyPcbChanges(B, CH), eb2 = HC.effectiveBoard(B, m2), cn2 = HR.cena(eb2, opcoesCena(eb2));
+    const porId = new Map();
+    for (const [lista, t] of [[eb2.tracks, 'track'], [eb2.arcs, 'arc'], [eb2.vias, 'via']])
+      for (const o of lista || []) if (o && o.id != null && !porId.has(t + ':' + o.id)) porId.set(t + ':' + o.id, o);
+    conf.forEach((a, i) => {
+      const id = idDepois(a.m, m2);
+      const o2 = id == null ? null : porId.get(a.t + ':' + id);
+      if (!cobreConferido(o2, a.t)) return;
+      for (const [k, c] of conflitosDoObjeto(cn2, o2, a.t)) if (!antes[i].has(k)) novos.push(c);
+    });
+    pre = { sig:JSON.stringify(CH), model:m2, eb:eb2, cena:cn2 };
+  } catch (e) { falhaMotor(e); return true; }
+  if (novos.length) {
+    voltaCH(foto);
+    selDepois = selAntes;
+    avisaConflito(prefixo || 'não deixa', novos);
+    return null;
+  }
+  preCalc = pre;
+  limpaAvisoRota();
+  return true;
 }
 function rotaClique(w, ev){
   if (!draft || draft.tipo !== 'rota') draft = novaRota();
@@ -1605,9 +2538,19 @@ function rotaClique(w, ev){
   if (!draft.est) {
     draft.est = HubFio.novo([p.x, p.y], CFG.modo, CFG.modo === '45' ? lembraCanto.p45 : lembraCanto.p90);
     draft.passos = [];
-    if (tool === 'trilha') draft.net = p.net || '';
+    if (tool === 'trilha') {
+      draft.net = p.net || '';
+      /* Pickup Track Width From Existing Routes: comecar na ponta de uma trilha pega a largura dela */
+      draft.w = CFG.wTrilha;
+      if (PREFS.larguraDaTrilha && p.tipo === 'ponta' && p.id) { const m = IDX.item.get(String(p.id)); const e = m && m.eff; if (e && e.w > 0 && cobre(e.layer)) draft.w = e.w; }
+      /* partida no meio de uma trilha (ou fill, regiao...): a net dela -- o Altium comeca a rota
+         de qualquer ponto do cobre, e a trilha sem net seria barrada pela propria origem */
+      if (!draft.net && !eletricoP(p) && motorLigado()) draft.net = netNoPonto(draft.layer, p.x, p.y);
+    }
     pintaStatus(); pede(); return;
   }
+  /* a Trilha com o roteador: a rota que a previa mostrou (ou null, e segue como antes) */
+  if (motorLigado()) { const r = calculaRota(p); if (r) { fixaRota(p, r); return; } }
   const eletrico = tool === 'trilha' && (p.tipo === 'pad' || p.tipo === 'via' || p.tipo === 'ponta');
   const antes = draft.est;
   const depois = eletrico ? HubFio.completa(antes, [p.x, p.y]) : HubFio.fixa(antes, [p.x, p.y]);
@@ -1633,12 +2576,27 @@ function rotaBackspace(){
   return true;
 }
 /* 2: via sem trocar de camada; * e Ctrl+2: via e a trilha segue na outra camada de cobre.
-   A via cai no ponto do cursor (o L ate ele e completado), como no Altium. */
+   A via cai no ponto do cursor (o L ate ele e completado), como no Altium. Com o roteador, o
+   caminho ate ela e o da previa, e ela so entra se a rota chegou ao cursor e a via ali nao
+   encosta em cobre de outra net -- senao nada e fixado. */
 function rotaVia(trocaCamada){
   if (!draft || draft.tipo !== 'rota' || !draft.est || tool !== 'trilha') return false;
   const p = snapPonto(cursorW || { x:draft.est.pts[draft.est.pts.length - 1][0], y:draft.est.pts[draft.est.pts.length - 1][1] }, null, { camada:draft.layer });
   const antes = draft.est;
-  const depois = HubFio.completa(antes, [p.x, p.y]);
+  let depois = null;
+  const r = motorLigado() ? calculaRota(p) : null;
+  if (r) {
+    const elet = eletricoP(p);
+    if (!r.completa) { const t = 'via não posta: ' + textoParou(r, bloqueioDaRota(r, p, draft.net)); avisoRota(t); HubDialog.toast(t, 'warn', 4500); pintaStatus(); return true; }
+    if (elet && draft.net && p.net && p.net !== draft.net) {
+      const t = 'via não posta: ' + descObstaculo({ tipo:p.tipo === 'ponta' ? 'trilha' : p.tipo, net:p.net }) + ' é outra net — ' + porqueObstaculo({ net:p.net });
+      avisoRota(t); HubDialog.toast(t, 'warn'); return true;
+    }
+    const cs = conflitosDaViaNova(p, CFG.viaSize, draft.net || (elet ? p.net : '') || '', idsDaTrilha());
+    if (cs && cs.length) { avisaConflito('via não posta', cs); pintaStatus(); return true; }
+    if (cs) { depois = estDepois(antes, r.pts.slice(1), [p.x, p.y]); limpaAvisoRota(); }
+  }
+  if (!depois) depois = HubFio.completa(antes, [p.x, p.y]);
   propagaNet(p.net);
   const ops = segmentosNovos(antes, depois);
   const via = { op:'via_add', x:r6(p.x), y:r6(p.y), size:r6(CFG.viaSize), drill:r6(CFG.viaDrill) };
@@ -1709,6 +2667,8 @@ function poeForma(pts, fechada, nota){
   return true;
 }
 function cliqueFerramenta(w, ev){
+  if (tool === 'colar') { colaNoPonto(w, ev); return; }
+  if (tool === 'pad') { poePad(w, ev); return; }
   if (tool === 'trilha' || tool === 'linha') { rotaClique(w, ev); return; }
   if (tool === 'medir') {
     const p = snapPonto(w, ev);
@@ -1721,8 +2681,10 @@ function cliqueFerramenta(w, ev){
   if (tool === 'via') {
     const p = snapPonto(w, ev);
     const op = { op:'via_add', x:p.x, y:p.y, size:r6(CFG.viaSize), drill:r6(CFG.viaDrill) };
-    const net = p.net || CFG.viaNet;
+    const net = motorEdicao() ? netDaViaNova(p) : (p.net || CFG.viaNet);
     if (net) op.net = net;
+    /* via encostada em cobre de outra net nao entra (o conflito em ignorar e o escape) */
+    if (motorEdicao()) { const cs = conflitosDaViaNova(p, CFG.viaSize, net, []); if (cs && cs.length) { avisaConflito('via não posta', cs); return; } limpaAvisoRota(); }
     op.note = 'via do hub';
     CH.push(op); selDepois = [op]; commit(); return;
   }
@@ -1768,7 +2730,7 @@ function cliqueFerramenta(w, ev){
     }
     poeForma(verticesTriangulo(a, p), true, preencher ? 'triângulo cheio do hub' : 'triângulo do hub'); return;
   }
-  if (tool === 'poligono' || tool === 'contorno') {
+  if (tool === 'poligono' || tool === 'contorno' || tool === 'pour') {
     if (!draft || draft.tipo !== tool) { draft = { tipo:tool, pts:[[p.x, p.y]] }; pede(); return; }
     const pts = draft.pts, p0 = pts[0], ult = pts[pts.length - 1];
     if (pts.length >= 3 && Math.hypot(p.x - p0[0], p.y - p0[1]) <= px(8)) { fechaPoligono(); return; }
@@ -1779,11 +2741,12 @@ function cliqueFerramenta(w, ev){
 /* o triangulo cabe na caixa dos dois cliques: base no primeiro clique, bico no meio da outra borda */
 function verticesTriangulo(a, b){ return [[a.x, a.y], [b.x, a.y], [(a.x + b.x) / 2, b.y]]; }
 async function fechaPoligono(){
-  if (!draft || (draft.tipo !== 'poligono' && draft.tipo !== 'contorno')) return false;
+  if (!draft || (draft.tipo !== 'poligono' && draft.tipo !== 'contorno' && draft.tipo !== 'pour')) return false;
   const pts = draft.pts.slice(), tipo = draft.tipo;
   if (pts.length < 3) { HubDialog.toast('o polígono precisa de pelo menos 3 vértices', 'warn'); return true; }
   draft = null; pede();
   if (tipo === 'poligono') { poeForma(pts, true, preencher ? 'polígono cheio do hub' : 'polígono do hub'); return true; }
+  if (tipo === 'pour') { if (seCruza(pts)) { HubDialog.toast('polígono com lados que se cruzam — desenhe de novo', 'warn'); return true; } poePour(pts); return true; }
   if (seCruza(pts)) { HubDialog.toast('contorno com lados que se cruzam — desenhe de novo', 'warn'); return true; }
   const ok = await HubDialog.confirm('Trocar o contorno da placa pelo polígono de ' + pts.length + ' vértices?\n\nO outline_set SUBSTITUI o contorno inteiro no Altium (o ApplyChanges ainda pergunta de novo antes de aplicar). Contorno com arco se desenha no Altium.',
     { title:'Contorno da placa', ok:'Trocar o contorno', danger:true });
@@ -1797,7 +2760,7 @@ async function fechaPoligono(){
 }
 function desfazPontoPoligono(){
   if (!draft) return false;
-  if ((draft.tipo === 'poligono' || draft.tipo === 'contorno') && draft.pts.length) {
+  if ((draft.tipo === 'poligono' || draft.tipo === 'contorno' || draft.tipo === 'pour') && draft.pts.length) {
     draft.pts.pop(); if (!draft.pts.length) draft = null; pede(); return true;
   }
   if (draft.tipo === 'arco' && draft.ini) { draft.ini = null; pede(); return true; }
@@ -1864,6 +2827,32 @@ function annChanged(){ setAnnDirty(true); if (painel) painel.atualiza(); pede();
 
 /* ============================== previas ============================== */
 
+/* A rota do roteador: o que o clique fixa em linha cheia e o ultimo trecho tracejado (a perna de
+   antecipacao de sempre, que o clique num ponto qualquer nao fixa). Rota que nao chega (completa
+   false) e toda cheia -- o clique fixa ate ali --, com um X vermelho onde parou e uma linha fina
+   vermelha tracejada ate o cursor. */
+function desenhaRota(r, c, cor){
+  const P = r.pts, n = P.length - 1;
+  const tracejaUlt = r.completa && n >= 2, cheios = tracejaUlt ? n - 1 : n;
+  ctx.save(); ctx.strokeStyle = cor; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(draft.w, px(1));
+  if (cheios > 0) {
+    ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]);
+    for (let i = 1; i <= cheios; i++) ctx.lineTo(P[i][0], P[i][1]);
+    ctx.stroke();
+  }
+  if (tracejaUlt) { ctx.globalAlpha = 0.6; ctx.setLineDash([px(6), px(4)]); ctx.beginPath(); ctx.moveTo(P[n - 1][0], P[n - 1][1]); ctx.lineTo(P[n][0], P[n][1]); ctx.stroke(); }
+  ctx.restore();
+  if (r.completa) return;
+  const f = P[n], s = px(5);
+  ctx.save(); ctx.strokeStyle = COR.del; ctx.lineCap = 'round';
+  if (Math.hypot(c.x - f[0], c.y - f[1]) > 1e-9) {
+    ctx.globalAlpha = 0.8; ctx.lineWidth = px(1); ctx.setLineDash([px(4), px(3)]);
+    ctx.beginPath(); ctx.moveTo(f[0], f[1]); ctx.lineTo(c.x, c.y); ctx.stroke();
+  }
+  ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineWidth = px(2);
+  ctx.beginPath(); ctx.moveTo(f[0] - s, f[1] - s); ctx.lineTo(f[0] + s, f[1] + s); ctx.moveTo(f[0] - s, f[1] + s); ctx.lineTo(f[0] + s, f[1] - s); ctx.stroke();
+  ctx.restore();
+}
 function desenhaFerramenta(){
   /* o ponto de snap num objeto: o anel ciano */
   if (SNAP && tool !== 'select' && (SNAP.tipo === 'pad' || SNAP.tipo === 'via' || SNAP.tipo === 'ponta')) {
@@ -1876,6 +2865,9 @@ function desenhaFerramenta(){
   if (!c) return;
   const lay = draft && draft.layer ? draft.layer : cur, cor = corDe(lay);
   if (draft && draft.tipo === 'rota' && draft.est) {
+    /* a Trilha com o roteador: a rota ate o snap (sem motor, ou no ignorar, as pernas de sempre) */
+    const r = tool === 'trilha' ? calculaRota(c) : null;
+    if (r) { desenhaRota(r, c, cor); return; }
     const pe = HubFio.pernas(draft.est, [c.x, c.y]);
     ctx.save(); ctx.strokeStyle = cor; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = Math.max(draft.w, px(1));
     if (pe.perna1) { ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.moveTo(pe.perna1[0][0], pe.perna1[0][1]); ctx.lineTo(pe.perna1[1][0], pe.perna1[1][1]); ctx.stroke(); }
@@ -1883,11 +2875,17 @@ function desenhaFerramenta(){
     ctx.restore();
     return;
   }
+  if (tool === 'colar') { desenhaColagem(c); return; }
   ctx.save();
   ctx.strokeStyle = cor; ctx.fillStyle = cor; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   const wl = Math.max(CFG.wLinha, px(1));
   if (tool === 'via' || (tool === 'trilha' && !(draft && draft.est))) {
-    if (tool === 'via') { ctx.globalAlpha = 0.6; ctx.fillStyle = corDe('Multi'); ctx.beginPath(); ctx.arc(c.x, c.y, CFG.viaSize / 2, 0, 2 * Math.PI); ctx.fill(); ctx.fillStyle = COR.furo; ctx.beginPath(); ctx.arc(c.x, c.y, CFG.viaDrill / 2, 0, 2 * Math.PI); ctx.fill(); }
+    if (tool === 'via') {
+      ctx.globalAlpha = 0.6; ctx.fillStyle = corDe('Multi'); ctx.beginPath(); ctx.arc(c.x, c.y, CFG.viaSize / 2, 0, 2 * Math.PI); ctx.fill(); ctx.fillStyle = COR.furo; ctx.beginPath(); ctx.arc(c.x, c.y, CFG.viaDrill / 2, 0, 2 * Math.PI); ctx.fill();
+      /* a via que o clique recusaria (encosta em cobre de outra net): o anel vermelho avisa antes */
+      const cs = conflitosNaPrevia(c);
+      if (cs && cs.length) { ctx.globalAlpha = 0.95; ctx.strokeStyle = COR.del; ctx.lineWidth = px(2); ctx.setLineDash([]); ctx.beginPath(); ctx.arc(c.x, c.y, CFG.viaSize / 2 + px(3), 0, 2 * Math.PI); ctx.stroke(); }
+    }
   } else if (tool === 'furo') {
     ctx.globalAlpha = 0.9; ctx.strokeStyle = COR.contorno; ctx.lineWidth = px(1.3); ctx.setLineDash([px(4), px(3)]);
     ctx.beginPath(); ctx.arc(c.x, c.y, CFG.furo / 2, 0, 2 * Math.PI); ctx.stroke();
@@ -1908,7 +2906,7 @@ function desenhaFerramenta(){
     const pts = draft.tipo === 'retangulo' ? [[draft.a.x, draft.a.y], [c.x, draft.a.y], [c.x, c.y], [draft.a.x, c.y]] : verticesTriangulo(draft.a, c);
     const P = new Path2D(); pPoli(P, pts);
     if (preencher) { ctx.globalAlpha = 0.5; ctx.fill(P); } else { ctx.globalAlpha = 0.85; ctx.lineWidth = wl; ctx.stroke(P); }
-  } else if (draft && (draft.tipo === 'poligono' || draft.tipo === 'contorno')) {
+  } else if (draft && (draft.tipo === 'poligono' || draft.tipo === 'contorno' || draft.tipo === 'pour')) {
     const pts = draft.pts.concat([[c.x, c.y]]);
     if (draft.tipo === 'contorno') { ctx.strokeStyle = COR.seta; ctx.lineWidth = px(1.6); }
     else ctx.lineWidth = wl;
@@ -2115,7 +3113,7 @@ function pintaStatus(){
       const modo = draft && draft.est ? HubFio.nomeDoModo(draft.est) : (CFG.modo === 'livre' ? 'ângulo livre' : CFG.modo + '°');
       s = (tool === 'trilha' ? 'trilha ' : 'linha ') + modo + ' · W ' + fmtDist(tool === 'trilha' ? CFG.wTrilha : CFG.wLinha);
       if (tool === 'trilha' && draft && draft.net) s += ' · ' + draft.net;
-      if (tool === 'trilha') s += ' · via ' + fmtDist(CFG.viaSize) + '/' + fmtDist(CFG.viaDrill);
+      if (tool === 'trilha') s += ' · via ' + fmtDist(CFG.viaSize) + '/' + fmtDist(CFG.viaDrill) + ' · ' + statusConflito();
     } else if (tool === 'medir' && draft && draft.tipo === 'medida' && draft.b) {
       const a = draft.a, b = draft.b;
       s = 'medida ' + fmtDist(Math.hypot(b.x - a.x, b.y - a.y)) + ' ' + unidade + ' · dX ' + fmtDist(Math.abs(b.x - a.x)) + ' · dY ' + fmtDist(Math.abs(b.y - a.y));
@@ -2156,7 +3154,7 @@ function avisoRodape(t){ const el = $('smsg'); if (el) el.textContent = t || '';
 const BARRA = [
   { id:'editar', ic:'cadeado', acao:'editar', at:'editar' }, '|',
   { id:'select', ic:'select', tool:'select', titulo:'Selecionar e mover (Esc) — arrastar no vazio: janela (esq→dir dentro, dir→esq toca)' }, '|',
-  { id:'trilha', ic:'trilha', tool:'trilha', at:'trilha', titulo:'Trilha — roteamento interativo: clique fixa o canto, Espaço inverte, Shift+Espaço 45°/90°/livre, Backspace desfaz o trecho, 2 via, * ou Ctrl+2 via e troca de camada, Tab largura, botão direito termina' },
+  { id:'trilha', ic:'trilha', tool:'trilha', at:'trilha', titulo:'Trilha — roteamento interativo: clique fixa o canto, Espaço inverte, Shift+Espaço 45°/90°/livre, Shift+R contorna, para no obstáculo ou ignora (trilhas de nets diferentes não se encontram), Backspace desfaz o trecho, 2 via, * ou Ctrl+2 via e troca de camada, Tab largura, botão direito termina' },
   { id:'via', ic:'via', tool:'via', at:'via', titulo:'Via — diâmetro e furo no painel' }, '|',
   { id:'linha', ic:'linha', tool:'linha', at:'linha', titulo:'Linha na camada atual — cliques encadeados, botão direito termina' },
   { id:'arco', ic:'arco', tool:'arco', at:'arco', titulo:'Arco — centro, início e fim' },
@@ -2168,14 +3166,20 @@ const BARRA = [
   { id:'preencher', ic:'preencher', acao:'preencher', at:'preencher', titulo:'Preencher — ligado: círculo, triângulo e polígono viram região cheia e o retângulo vira fill; desligado: contorno de trilhas' }, '|',
   { id:'furo', ic:'furo', tool:'furo', titulo:'Furo de fixação — Board Cutout redondo (diâmetro no painel)' },
   { id:'contorno', ic:'contorno', tool:'contorno', titulo:'Contorno da placa — polígono que substitui o contorno (pergunta antes)' },
-  { id:'pad', ic:'pad', trava:'Pad avulso — travado: falta pad_add no ApplyChanges' },
-  { id:'pour', ic:'pour', trava:'Polygon pour — travado: o hub ainda não despeja polígono' }, '|',
+  { id:'pad', ic:'pad', tool:'pad', at:'pad', titulo:'Pad avulso (Place » Pad) — passante redondo de 60 mil, furo 30 mil' },
+  { id:'pour', ic:'pour', tool:'pour', at:'pour', titulo:'Polygon Pour — um clique por vértice; fechar pergunta a net (sólido, conexão direta, cobre morto removido)' },
+  { id:'teardrops', ic:'teardrop', acao:'teardrops', at:'teardrops', titulo:'Teardrops (Tools » Teardrops) — põe os que faltam nos pads e vias' }, '|',
   { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Medir distância — dois cliques' },
-  { id:'sinalizar', ic:'sinalizar', tool:'sinalizar', at:'sinalizar', titulo:'Sinalizar um problema para a IA (annotations.js)' }, '|',
+  { id:'sinalizar', ic:'sinalizar', tool:'sinalizar', at:'sinalizar', titulo:'Sinalizar um problema para a IA (annotations.js)' },
+  { id:'ratsnest', ic:'ratsnest', acao:'ratsnest', at:'ratsnest', titulo:'Linhas de conexão (ratsnest) — Ctrl+clique num cobre realça a net, Esc limpa' }, '|',
   { id:'desfazer', ic:'desfazer', acao:'desfazer', at:'desfazer', titulo:'Desfazer' },
   { id:'refazer', ic:'refazer', acao:'refazer', at:'refazer', titulo:'Refazer' }, '|',
+  { id:'regras', ic:'regras', acao:'regras', at:'regras', titulo:'Regras de projeto (Design » Rules)' },
+  { id:'drc', ic:'drc', acao:'drc', at:'drc', rotulo:'DRC', titulo:'Design Rule Check (Tools » Design Rule Check) — o relatório no painel Messages' },
+  { id:'eco', ic:'eco', acao:'atualizarPcb', at:'atualizarPcb', titulo:'Atualizar a PCB pelo esquema (Design » Update PCB Document: o ECO)' },
+  { id:'novaPlaca', ic:'novaPlaca', acao:'novaPlaca', at:'novaPlaca', titulo:'Placa nova (o Board Wizard no padrão da casa)' }, '|',
   { id:'gerber', ic:'gerber', acao:'gerber', rotulo:'Gerber', titulo:'Gerar e ver o Gerber (o pacote que vai para a JLCPCB)' },
-  { id:'pdf', ic:'pdf', trava:'PDF de layout — travado: próxima etapa' },
+  { id:'pdf', ic:'pdf', acao:'pdf', at:'pdf', rotulo:'PDF', titulo:'PDF de layout — as vistas de montagem de cima e de baixo com o carimbo DIEletrons (o "LO -" do Draftsman)' },
 ];
 function montaBarra(){
   const tb = $('pcbtb');
@@ -2327,6 +3331,7 @@ function menuLS(sx, sy){
 function menuContexto(sx, sy, w){
   const lista = hitsEm(w.x, w.y);
   if (lista.length && !selTem(lista[0])) selSo([lista[0]]);
+  if (ALT) { ALT.contexto(sx, sy, { primitivo:lista.length > 0, extras:extrasDoHub(w) }); return; }
   const itens = [];
   const temSel = SEL.length > 0;
   const mudaCamada = SEL.filter(a => (a.t === 'track' || a.t === 'arc' || a.t === 'fill' || (a.t === 'text' && a.m.src && !a.m.src.owner && !a.m.src.designator && !a.m.src.comment) || (a.t === 'text' && a.m.added)));
@@ -2347,6 +3352,63 @@ function menuContexto(sx, sy, w){
   itens.push({ rot:'Sinalizar aqui', tecla:teclaDe('sinalizar'), f:() => { garanteEdicao(); abreAnnForm(snapPonto(w, null, { soGrade:true })); } });
   itens.push({ rot:'Enquadrar a placa', tecla:teclaDe('enquadrar'), f:enquadra });
   abreMenu(itens, sx, sy);
+}
+
+/* o que so o hub tem, no fim do menu do Altium (o formato do hub-pcbaltium.js) */
+function extrasDoHub(w){
+  const it = [];
+  const muda = SEL.filter(CAMADA_LIVRE);
+  if (muda.length) {
+    const ks = new Set(muda.map(a => a.m.eff.layer));
+    it.push({ rot:'Camada', filhos:LAYERS.filter(l => l.kind !== 'multi').map(l => ({ rot:rotuloAba(l), check:ks.size === 1 && ks.has(l.key), f:() => editarCampo('layer', l.key) })) });
+  }
+  if (compsDaSel().length) it.push({ rot:'Virar de face', tecla:'L', f:() => transformaSelecao('vira') });
+  if (SEL.length) it.push({ rot:'Girar 90°', tecla:teclaDe('girar'), f:() => transformaSelecao('gira') });
+  it.push({ rot:'Sinalizar aqui (para a IA)', tecla:teclaDe('sinalizar'), f:() => { garanteEdicao(); abreAnnForm(snapPonto(w, null, { soGrade:true })); } });
+  it.push({ rot:editOn ? 'Travar a edição' : 'Destravar a edição', tecla:teclaDe('editar'), f:() => fazAcao('editar') });
+  return it;
+}
+/* o componente da selecao: o proprio, ou o dono do pad clicado (o Component Actions do Altium vale no pad) */
+function compsDaSel(){
+  const L = [];
+  for (const a of SEL) { const m = a.t === 'comp' ? a.m : (a.t === 'pad' ? a.comp : null); if (m && L.indexOf(m) < 0) L.push(m); }
+  return L;
+}
+function netDaSel(){
+  for (const a of SEL) {
+    const n = a.t === 'pad' ? (a.eb && a.eb.net) : (a.m && a.m.eff && a.m.eff.net);
+    if (n) return n;
+  }
+  return '';
+}
+/* Edit » Select » Net e Component Nets: o cobre livre das nets (trilha, arco, via, fill, regiao) */
+function selecionaNets(nets){
+  const S = new Set();
+  for (const h of HITS) if (h.o && nets.has(h.o.net) && ['track', 'arc', 'via', 'fill', 'region'].indexOf(h.a.t) >= 0) S.add(h.a);
+  selSo(Array.from(S)); pede();
+  HubDialog.toast(S.size + ' objeto(s) de ' + Array.from(nets).slice(0, 4).join(', ') + (nets.size > 4 ? '…' : ''), 'info', 2200);
+}
+function zoomCentro(f){ view.scale = Math.min(Math.max(view.scale * f, 0.3), 30000); pede(); }
+/* Preferences: aplica o que o dialogo devolveu (OK/Apply) e grava */
+function aplicaPrefs(p){
+  const coresAntes = JSON.stringify(PREFS.cores);
+  PREFS = normalizaPrefs(p);
+  const guarda = Object.assign({}, PREFS); delete guarda.conflito; delete guarda.conexoes;
+  gravaPref('prefs', JSON.stringify(guarda));
+  show.grid = !!PREFS.grade; show.ghost = !!PREFS.fantasmas;
+  if (conexoesLigadas() !== !!PREFS.conexoes) { verConexoes = !!PREFS.conexoes; gravaPref('conexoes', verConexoes ? '1' : '0'); }
+  if (PREFS.conflitosCiclo.indexOf(p.conflito) >= 0) setConflito(p.conflito);
+  else if (PREFS.conflitosCiclo.indexOf(CFG.conflito) < 0) setConflito(PREFS.conflitosCiclo[0]);
+  aplicaDefaults();
+  if (JSON.stringify(PREFS.cores) !== coresAntes) { montaCamadas(); cacheSujo = true; pintaAbas(); }
+  if (PREFS.drcOnline) { if (HDRC) rodaDrc(); } else if (!drcPainel) DRC_RES = null;
+  cv.style.cursor = tool === 'select' ? 'default' : cursorFerramenta();
+  pintaStatus(); if (painel) painel.atualiza(); pede();
+  HubDialog.toast('Preferences aplicadas', 'ok', 1500);
+}
+function ctxAltium(){
+  return { sel:SEL.length, comp:compsDaSel().length > 0, poly:SEL.some(a => a.t === 'regiao-ro' && a.eb && a.eb.poly), net:netDaSel(), lean:LEAN, edit:editOn, grade:grade.id,
+           conexoes:conexoesLigadas(), ghost:show.ghost, flip:view.flip, unica:show.unica };
 }
 
 /* ============================== enquadrar ============================== */
@@ -2480,6 +3542,8 @@ cv.addEventListener('mousedown', e => {
   if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur &&
       !(document.activeElement.closest && document.activeElement.closest('#txtbox, #annform'))) document.activeElement.blur();
   if (tool !== 'select') { gesto = { modo:'ferramenta', s }; return; }
+  /* Ctrl+clique: realca a net do cobre (o do Altium) */
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !LEAN) { realcaNetEm(w); return; }
   if (editOn && !LEAN) {
     for (const a of SEL) {
       if (a.t !== 'track' || a.m.deleted) continue;
@@ -2502,6 +3566,7 @@ window.addEventListener('mousemove', e => {
   const s = pontoTela(e), w = telaParaMundo(s.x, s.y);
   if (gesto) { moveGesto(e, s, w); return; }
   if (e.target !== cv) return;
+  ultimoMouse = { x:e.clientX, y:e.clientY };
   cursorW = w; pintaCursor(w);
   if (tool === 'select') {
     const h = hitsEm(w.x, w.y)[0] || null;
@@ -2595,6 +3660,9 @@ function atualizaPonta(e, w){
   a.pontaGeo = a.ponta.qual === 1 ? { x1:p.x, y1:p.y } : { x2:p.x, y2:p.y };
   pede();
 }
+/* Soltar: a edicao que faria cobre de nets diferentes se encontrarem volta tudo para o lugar
+   (editaConferindo) -- trilha, arco e via, sozinhos ou no grupo, e a ponta da trilha; o
+   componente nao e conferido, como no Altium. */
 function terminaArrasto(){
   const a = arrasto;
   arrasto = null; EXCLUI = null; cacheSujo = true;
@@ -2604,20 +3672,27 @@ function terminaArrasto(){
       const m = a.ponta.alvo.m, e = m.eff;
       const g = Object.assign({ x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2 }, a.pontaGeo);
       if (Math.hypot(g.x2 - g.x1, g.y2 - g.y1) < 1e-6) { HubDialog.toast('a trilha ficaria com comprimento zero', 'warn'); pede(); return; }
-      editaItem(m, { x1:r6(g.x1), y1:r6(g.y1), x2:r6(g.x2), y2:r6(g.y2) });
-      commit();
+      const r = editaConferindo([a.ponta.alvo], () => editaItem(m, { x1:r6(g.x1), y1:r6(g.y1), x2:r6(g.x2), y2:r6(g.y2) }), 'não deixa');
+      if (r) commit(); else pede();
     } else pede();
     return;
   }
   if (!a.moveu && !a.girou) { pede(); return; }
-  let mexeu = false, ann = false;
+  const r = editaConferindo(a.alvos, () => {
+    let mexeu = false;
+    for (const al of a.alvos) if (al.t !== 'ann' && escreveGeo(al, transladaGeo(al.t, a.bases.get(al), a.dx, a.dy))) mexeu = true;
+    return mexeu;
+  }, 'não deixa');
+  /* recusado: o sinalizador que andava junto volta tambem (o arrasto inteiro nao aconteceu) */
+  if (r === null) { for (const [al, b] of (a.annBase || new Map())) { al.ann.x = b.x; al.ann.y = b.y; } pede(); return; }
+  let ann = false;
   for (const al of a.alvos) {
+    if (al.t !== 'ann') continue;
     const g = transladaGeo(al.t, a.bases.get(al), a.dx, a.dy);
-    if (al.t === 'ann') { ann = true; al.ann.x = r6(g.x); al.ann.y = r6(g.y); continue; }
-    if (escreveGeo(al, g)) mexeu = true;
+    ann = true; al.ann.x = r6(g.x); al.ann.y = r6(g.y);
   }
   if (ann) annChanged();
-  if (mexeu) commit(); else pede();
+  if (r) commit(); else pede();
 }
 function cancelaArrasto(){
   const a = arrasto;
@@ -2629,7 +3704,7 @@ function cancelaArrasto(){
   pede();
 }
 window.addEventListener('mouseup', e => {
-  if (e.button !== 0) { if (e.button === 1) { pan = null; cv.style.cursor = tool === 'select' ? 'default' : 'crosshair'; } return; }
+  if (e.button !== 0) { if (e.button === 1) { pan = null; cv.style.cursor = tool === 'select' ? 'default' : cursorFerramenta(); } return; }
   const g = gesto; gesto = null;
   if (!g) return;
   if (arrasto) { engoleClique = true; terminaArrasto(); return; }
@@ -2655,9 +3730,10 @@ cv.addEventListener('click', e => {
   else avisoRodape('');
 });
 cv.addEventListener('dblclick', e => {
-  if (tool === 'poligono' || tool === 'contorno') { fechaPoligono(); return; }
+  if (tool === 'poligono' || tool === 'contorno' || tool === 'pour') { fechaPoligono(); return; }
   if (tool === 'trilha' || tool === 'linha') { rotaTermina(); return; }
   if (tool !== 'select') return;
+  if (!PREFS.duploClique) return;
   const s = pontoTela(e), w = telaParaMundo(s.x, s.y), h = hitsEm(w.x, w.y)[0];
   if (!h) return;
   if (!selTem(h)) selSo([h]);
@@ -2669,12 +3745,12 @@ window.addEventListener('contextmenu', e => {
   e.preventDefault();
   const moveu = pan.moveu;
   pan = null;
-  cv.style.cursor = tool === 'select' ? 'default' : 'crosshair';
+  cv.style.cursor = tool === 'select' ? 'default' : cursorFerramenta();
   if (moveu || e.target !== cv) return;
   const s = pontoTela(e), w = telaParaMundo(s.x, s.y);
   if (LEAN) return;
   if (tool === 'trilha' || tool === 'linha') { if (!rotaTermina()) setTool('select'); return; }
-  if (tool === 'poligono' || tool === 'contorno') {
+  if (tool === 'poligono' || tool === 'contorno' || tool === 'pour') {
     if (draft && draft.pts && draft.pts.length >= 3) fechaPoligono();
     else if (draft) { draft = null; pede(); } else setTool('select');
     return;
@@ -2682,13 +3758,23 @@ window.addEventListener('contextmenu', e => {
   if (tool !== 'select') { if (draft && draft.tipo !== 'medida') { draft = null; pede(); } else setTool('select'); return; }
   menuContexto(e.clientX, e.clientY, w);
 });
+/* Preferences » Mouse Wheel Configuration: a combinacao exata escolhe a acao; a que nao esta na
+   tabela cai no zoom (o de sempre) */
+function acaoDaRoda(e){
+  const mods = [(e.ctrlKey || e.metaKey) ? 'Ctrl' : '', e.shiftKey ? 'Shift' : '', e.altKey ? 'Alt' : ''].filter(Boolean).join('+');
+  for (const id of ['zoom', 'vertical', 'horizontal', 'camada']) if ((PREFS.roda[id] || '') === mods) return id;
+  return 'zoom';
+}
 cv.addEventListener('wheel', e => {
   e.preventDefault();
-  if (e.ctrlKey && e.shiftKey) { if (!LEAN) camadaVizinha(e.deltaY > 0 ? 1 : -1); return; }
-  if (e.shiftKey) {
-    const d = (e.deltaX || e.deltaY) * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+  const acao = acaoDaRoda(e);
+  const escala = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+  if (acao === 'camada') { if (!LEAN) camadaVizinha((e.deltaY || e.deltaX) > 0 ? 1 : -1); return; }
+  if (acao === 'horizontal') {
+    const d = (e.deltaX || e.deltaY) * escala;
     view.cx += d / (view.scale * (view.flip ? -1 : 1)); pede(); return;
   }
+  if (acao === 'vertical') { const d = (e.deltaY || e.deltaX) * escala; view.cy -= d / view.scale; pede(); return; }
   if (!e.deltaY) return;
   const s = pontoTela(e), w = telaParaMundo(s.x, s.y);
   view.scale = Math.min(Math.max(view.scale * (e.deltaY < 0 ? 1.18 : 1 / 1.18), 0.3), 30000);
@@ -2711,18 +3797,21 @@ function escape(){
   if (arrasto) { cancelaArrasto(); return; }
   if (janela || gesto) { janela = null; gesto = null; pede(); return; }
   if (tool !== 'select') { setTool('select'); return; }
+  if (limpaRealce()) return;
   if (SEL.length) { selLimpa(); return; }
   avisoRodape('');
 }
 window.addEventListener('keydown', e => {
+  if (e.target && e.target.closest && e.target.closest('.apf-fundo')) return;
   if (gerberAberto()) { if (e.key === 'Escape') { e.preventDefault(); fechaGerber(); } return; }
   if (ajudaAberta()) { if (e.key === 'Escape' || normalizaTecla(e) === teclaDe('ajuda')) { e.preventDefault(); toggleAjuda(false); } return; }
-  if (e.key === 'Escape') { if (!ehCampo(e.target) || e.target.closest('#txtbox, #annform')) escape(); return; }
+  if (e.key === 'Escape') { if (LEITOR.pendente()) { LEITOR.cancela(); return; } if (!ehCampo(e.target) || e.target.closest('#txtbox, #annform')) escape(); return; }
   if (ehCampo(e.target)) return;
   const k = normalizaTecla(e);
   if (LEAN) { if (k === (teclaDe('enquadrar') || 'F')) enquadra(); return; }
   /* o Chrome entrega Ctrl+1..8 a pagina antes de trocar de aba so se a pagina segurar */
-  if (k === 'Ctrl+2' || k === 'Ctrl+S' || k === 'Ctrl+M' || k === 'Ctrl+A' || k === 'Ctrl+Z' || k === 'Ctrl+Y') e.preventDefault();
+  if (k === 'Ctrl+2' || k === 'Ctrl+S' || k === 'Ctrl+M' || k === 'Ctrl+A' || k === 'Ctrl+Z' || k === 'Ctrl+Y' || k === 'Ctrl+D' ||
+      k === 'Ctrl+C' || k === 'Ctrl+X' || k === 'Ctrl+V' || /^Ctrl\+Shift\+[A-Z]$/.test(k)) e.preventDefault();
   if (arrasto && !arrasto.ponta) {
     if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); giraNoArrasto('gira'); return; }
     if (k === 'L') { giraNoArrasto('vira'); return; }
@@ -2732,6 +3821,9 @@ window.addEventListener('keydown', e => {
   if (tool === 'trilha' || tool === 'linha') {
     if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); rotaEspaco(e.shiftKey); return; }
     if (e.key === 'Backspace') { e.preventDefault(); rotaBackspace(); return; }
+    /* Shift+R: o modo de conflito, como no Altium. Antes do mapa: o normalizaTecla larga o Shift
+       de tecla de um caractere, e no mapa ele chegaria como R (o Retangulo) */
+    if (tool === 'trilha' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'R' || e.key === 'r')) { e.preventDefault(); cicloConflito(); return; }
     if (tool === 'trilha' && draft && draft.est) {
       if (e.key === '2' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); rotaVia(false); return; }
       if (e.key === '*' || k === 'Ctrl+2' || k === teclaDe('via') || k === teclaDe('outraFace')) { e.preventDefault(); rotaVia(true); return; }
@@ -2742,17 +3834,53 @@ window.addEventListener('keydown', e => {
     if (painel) { painel.mostra('props'); painel.foca(tool === 'trilha' ? 'tool.wTrilha' : null); }
     return;
   }
-  if ((tool === 'poligono' || tool === 'contorno') && e.key === 'Enter') { e.preventDefault(); fechaPoligono(); return; }
+  if ((tool === 'poligono' || tool === 'contorno' || tool === 'pour') && e.key === 'Enter') { e.preventDefault(); fechaPoligono(); return; }
   if (tool !== 'select' && tool !== 'trilha' && tool !== 'linha' && e.key === 'Backspace' && desfazPontoPoligono()) { e.preventDefault(); return; }
-  const acao = ATALHOS.porTecla[k];
-  if (!acao) return;
-  if (k === 'Espaço') { if (!SEL.length) return; e.preventDefault(); }
-  fazAcao(acao);
+  if (k === 'Espaço') { if (!SEL.length || LEITOR.pendente()) return; e.preventDefault(); }
+  if (LEITOR.tecla(k)) e.preventDefault();
 });
 /* o que cada acao da tabela faz (a tabela da a tecla; aqui, o efeito) */
-function fazAcao(id){
+function fazAcao(id, arg){
   fechaMenu();
   switch (id) {
+    case 'gradeId': setGrade(arg); HubDialog.toast('grade ' + grade.rot, 'info', 1400); return;
+    case 'desselecionar': selLimpa(); return;
+    case 'selNet': { const n = netDaSel(); if (n) selecionaNets(new Set([n])); return; }
+    case 'selNetsComp': {
+      const s = new Set();
+      for (const m of compsDaSel()) for (const p of m.src.pads || []) if (p.net) s.add(p.net);
+      if (s.size) selecionaNets(s); else HubDialog.toast('o componente não tem net', 'info');
+      return;
+    }
+    case 'virarSel': transformaSelecao('vira'); return;
+    case 'compNaGrade': {
+      /* Move Component Origin To Grid / Align To Grid: a origem do componente cai no passo da grade */
+      const L = compsDaSel(); if (!L.length || !garanteEdicao()) return;
+      let n = 0;
+      for (const m of L) {
+        const g = { x:m.eff.x, y:m.eff.y, rot:isNum(m.eff.rot) ? m.eff.rot : 0, layer:m.eff.layer };
+        const nx = snapV(g.x, grade.mm), ny = snapV(g.y, grade.mm);
+        if (near(nx, g.x) && near(ny, g.y)) continue;
+        g.x = nx; g.y = ny; moveComp(m, g); n++;
+      }
+      if (n) commit();
+      HubDialog.toast(n ? n + ' componente(s) na grade ' + grade.rot : 'já estão na grade ' + grade.rot, 'info', 2000);
+      return;
+    }
+    case 'enquadrarSel': if (SEL.length) enquadraAlvos(SEL); return;
+    case 'zoomIn': zoomCentro(1.4); return;
+    case 'zoomOut': zoomCentro(1 / 1.4); return;
+    case 'conexoesOn': if (!conexoesLigadas()) toggleConexoes(); return;
+    case 'conexoesOff': if (conexoesLigadas()) toggleConexoes(); return;
+    case 'limparFiltro': limpaRealce(); return;
+    case 'fill': if (!preencher) togglePreencher(); setTool('retangulo'); return;
+    case 'solidRegion': if (!preencher) togglePreencher(); setTool('poligono'); return;
+    case 'retanguloContorno': if (preencher) togglePreencher(); setTool('retangulo'); return;
+    case 'propriedades': if (painel) { painel.mostra('props'); painel.foca(); } return;
+    case 'painelGrade': case 'boardInfo': if (tool !== 'select') setTool('select'); selLimpa(); if (painel) painel.mostra('props'); return;
+    case 'preferencias': if (ALT) ALT.preferencias(); return;
+    case 'atalhos': if (ALT) ALT.preferencias('Shortcuts'); return;
+    case 'sobre': HubDialog.toast('EletricHUB — vista PCB no padrão do Altium Designer 21', 'info', 3000); return;
     case 'trilha': setTool(tool === 'trilha' ? 'select' : 'trilha'); return;
     case 'via':
       if (tool === 'trilha' && draft && draft.est) { rotaVia(true); return; }
@@ -2788,6 +3916,24 @@ function fazAcao(id){
     case 'salvar': salvar(); return;
     case 'ajuda': toggleAjuda(); return;
     case 'gerber': abreGerber(); return;
+    case 'pdf': abrePdf(); return;
+    case 'pad': setTool(tool === 'pad' ? 'select' : 'pad'); return;
+    case 'pour': setTool(tool === 'pour' ? 'select' : 'pour'); return;
+    case 'repour': repour(); return;
+    case 'atualizarPcb': abreEco(); return;
+    case 'drc': abreDrc(); return;
+    case 'regras': abreRegras(); return;
+    case 'novaPlaca': abreNovaPlaca(); return;
+    case 'ratsnest': toggleConexoes(); return;
+    case 'realcarNet': if (!limpaRealce() && SEL.length === 1 && SEL[0].m && SEL[0].m.eff && SEL[0].m.eff.net) realcaNet(SEL[0].m.eff.net); return;
+    case 'teardrops': poeTeardrops(); return;
+    case 'copiar': copiaSelecao(false); return;
+    case 'recortar': if (!SEL.length) return; copiaSelecao(true); return;
+    case 'colar': comecaColar(false); return;
+    case 'duplicar': duplicaSelecao(); return;
+    case 'alinharEsq': case 'alinharDir': case 'alinharTopo': case 'alinharBase':
+    case 'alinharCentroH': case 'alinharCentroV': case 'distribuirH': case 'distribuirV':
+      alinhaSelecao(id); return;
   }
 }
 
@@ -2843,119 +3989,126 @@ const ESTADO = m => m.added ? 'novo (changes.js)' : m.deleted ? 'removido' : m.c
 function fichaDe(a){
   switch (a.t) {
     case 'comp': {
-      const m = a.m, e = m.eff, s = m.src;
-      return { titulo:'Componente ' + (e.designator || s.ref), sub:[s.footprint, m.changed ? 'movido' : '', m.attrChanged ? 'atributos mudados' : ''].filter(Boolean).join(' · '), campos:[
-        { k:'layer', rot:'Camada', tipo:'enum', v:e.layer, opc:opcFaces(), dica:'trocar de face espelha o componente como olhar a placa por baixo (a rotação vira 180 − r), igual ao L no arrasto' },
+      /* o Properties do Altium para Component: Location, Properties, Footprint e Primitives */
+      const m = a.m, e = m.eff, s = m.src, bb = s.bbox;
+      const est = [m.changed ? 'movido' : '', m.attrChanged ? 'atributos mudados' : ''].filter(Boolean).join(' · ');
+      return { titulo:'Component', sub:(e.designator || s.ref) + (est ? ' · ' + est : ''), campos:[
+        { sec:'Location' },
+        par('(X/Y)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
+        { k:'rot', rot:'Rotation', tipo:'ang', v:e.rot },
+        { sec:'Properties' },
+        { k:'layer', rot:'Layer', tipo:'enum', v:e.layer, opc:opcFaces(), dica:'trocar de face espelha o componente como olhar a placa por baixo (a rotação vira 180 − r), igual ao L no arrasto' },
         { k:'designator', rot:'Designator', tipo:'texto', v:e.designator || s.ref, dica:'renomear na PCB dessincroniza do esquema — o ECO vai acusar' },
         { k:'comment', rot:'Comment', tipo:'texto', v:e.comment !== undefined ? e.comment : (s.comment || '') },
-        { k:'footprint', rot:'Footprint', tipo:'ro', v:s.footprint || '—' },
-        par('Posição', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
-        { k:'rot', rot:'Rotação', tipo:'ang', v:e.rot },
-        { botoes:[{ id:'girar', rot:'Girar 90°' }, { id:'virar', rot:'Virar de face' }, { id:'enquadrar', rot:'Enquadrar' }] },
-        { sec:'Pads (' + (s.pads || []).length + ')' },
+        { k:'tipo', rot:'Type', tipo:'ro', v:'Standard' },
+        { sec:'Footprint' },
+        { k:'footprint', rot:'Footprint Name', tipo:'ro', v:s.footprint || '—' },
+        { k:'dim', rot:'Dimensions', tipo:'ro', v:bb && isNum(bb.x1) ? fmtDist(bb.x2 - bb.x1) + ' × ' + fmtDist(bb.y2 - bb.y1) + ' ' + unidade : '—' },
+        { botoes:[{ id:'girar', rot:'Rotate 90°' }, { id:'virar', rot:'Flip Component' }, { id:'enquadrar', rot:'Zoom' }] },
+        { sec:'Primitives — Pads (' + (s.pads || []).length + ')' },
         { tab:{ cab:['Pad', 'Net'], linhas:(s.pads || []).map(p => [p.name, p.net || '—']) } },
       ] };
     }
     case 'pad': {
       const p = a.eb, f = formaLado(p, ladoDaVista());
       return { titulo:'Pad ' + (a.comp ? (a.comp.eff.designator || a.comp.src.ref) + '.' : '') + (p.name || ''), sub:a.comp ? 'do componente — arraste o pad para mover o componente' : 'pad livre (pad_add ainda não existe)', campos:[
-        { k:'layer', rot:'Camada', tipo:'ro', v:ehTH(p) ? 'Multi-Layer (passante)' : nomeDe(p.layer) },
+        { k:'layer', rot:'Layer', tipo:'ro', v:ehTH(p) ? 'Multi-Layer (passante)' : nomeDe(p.layer) },
         { k:'net', rot:'Net', tipo:'ro', v:p.net || '—' },
-        { k:'shape', rot:'Forma', tipo:'ro', v:String(f.shape || 'rect') },
-        par('Tamanho', { k:'w', rot:'X', tipo:'ro', v:fmtDist(f.w) + ' ' + unidade }, { k:'h', rot:'Y', tipo:'ro', v:fmtDist(f.h) + ' ' + unidade }),
-        { k:'drill', rot:'Furo', tipo:'ro', v:p.drill > 0 ? fmtDist(p.drill) + ' ' + unidade + (p.drillw > 0 ? ' × ' + fmtDist(p.drillw) : '') + (p.plated === false ? ' · NPTH' : '') : '—' },
-        par('Posição', { k:'x', rot:'X', tipo:'ro', v:fmtDist(p.x) }, { k:'y', rot:'Y', tipo:'ro', v:fmtDist(p.y) }),
-        { k:'rot', rot:'Rotação', tipo:'ro', v:fmtNum(p.rot || 0, 3) + '°' },
-        { k:'sm', rot:'Máscara', tipo:'ro', v:(tampado(p, 'top') && tampado(p, 'bottom')) ? 'tampado' : '+' + fmtDist(expMascara(p)) + ' ' + unidade + (isNum(p.sm) ? '' : ' (regra)') },
+        { k:'shape', rot:'Shape', tipo:'ro', v:String(f.shape || 'rect') },
+        par('Size (X/Y)', { k:'w', rot:'X', tipo:'ro', v:fmtDist(f.w) + ' ' + unidade }, { k:'h', rot:'Y', tipo:'ro', v:fmtDist(f.h) + ' ' + unidade }),
+        { k:'drill', rot:'Hole Size', tipo:'ro', v:p.drill > 0 ? fmtDist(p.drill) + ' ' + unidade + (p.drillw > 0 ? ' × ' + fmtDist(p.drillw) : '') + (p.plated === false ? ' · NPTH' : '') : '—' },
+        par('Location (X/Y)', { k:'x', rot:'X', tipo:'ro', v:fmtDist(p.x) }, { k:'y', rot:'Y', tipo:'ro', v:fmtDist(p.y) }),
+        { k:'rot', rot:'Rotation', tipo:'ro', v:fmtNum(p.rot || 0, 3) + '°' },
+        { k:'sm', rot:'Solder Mask', tipo:'ro', v:(tampado(p, 'top') && tampado(p, 'bottom')) ? 'tampado' : '+' + fmtDist(expMascara(p)) + ' ' + unidade + (isNum(p.sm) ? '' : ' (regra)') },
       ] };
     }
     case 'track': {
       const m = a.m, e = m.eff, cu = cobre(e.layer);
-      return { titulo:(cu ? 'Trilha ' : 'Linha ') + (m.added ? '(nova)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
-        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:'qualquer camada menos a Multi-Layer; fora do cobre a net cai' },
+      return { titulo:(cu ? 'Track ' : 'Line ') + (m.added ? '(nova)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Layer', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:'qualquer camada menos a Multi-Layer; fora do cobre a net cai' },
         cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
-        { k:'w', rot:'Largura', tipo:'dist', v:e.w },
-        par('Início', { k:'x1', rot:'X', tipo:'dist', v:e.x1 }, { k:'y1', rot:'Y', tipo:'dist', v:e.y1 }),
-        par('Fim', { k:'x2', rot:'X', tipo:'dist', v:e.x2 }, { k:'y2', rot:'Y', tipo:'dist', v:e.y2 }),
-        { k:'len', rot:'Comprimento', tipo:'ro', v:fmtDist(Math.hypot(e.x2 - e.x1, e.y2 - e.y1)) + ' ' + unidade },
+        { k:'w', rot:'Width', tipo:'dist', v:e.w },
+        par('Start (X/Y)', { k:'x1', rot:'X', tipo:'dist', v:e.x1 }, { k:'y1', rot:'Y', tipo:'dist', v:e.y1 }),
+        par('End (X/Y)', { k:'x2', rot:'X', tipo:'dist', v:e.x2 }, { k:'y2', rot:'Y', tipo:'dist', v:e.y2 }),
+        { k:'len', rot:'Length', tipo:'ro', v:fmtDist(Math.hypot(e.x2 - e.x1, e.y2 - e.y1)) + ' ' + unidade },
       ] };
     }
     case 'arc': {
       const m = a.m, e = m.eff, cu = cobre(e.layer);
-      return { titulo:'Arco ' + (m.added ? '(novo)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
-        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas() },
+      return { titulo:'Arc ' + (m.added ? '(novo)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Layer', tipo:'camada', v:e.layer, opc:opcCamadas() },
         cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
-        par('Centro', { k:'cx', rot:'X', tipo:'dist', v:e.cx }, { k:'cy', rot:'Y', tipo:'dist', v:e.cy }),
-        { k:'r', rot:'Raio', tipo:'dist', v:e.r },
-        par('Ângulos', { k:'sa', rot:'Início', tipo:'ang', v:e.sa }, { k:'ea', rot:'Fim', tipo:'ang', v:e.ea }),
-        { k:'w', rot:'Largura', tipo:'dist', v:e.w },
+        par('Center (X/Y)', { k:'cx', rot:'X', tipo:'dist', v:e.cx }, { k:'cy', rot:'Y', tipo:'dist', v:e.cy }),
+        { k:'r', rot:'Radius', tipo:'dist', v:e.r },
+        par('Angles', { k:'sa', rot:'Start', tipo:'ang', v:e.sa }, { k:'ea', rot:'End', tipo:'ang', v:e.ea }),
+        { k:'w', rot:'Width', tipo:'dist', v:e.w },
       ] };
     }
     case 'via': {
       const m = a.m, e = m.eff;
       return { titulo:'Via ' + (m.added ? '(nova)' : m.src.id), sub:ESTADO(m), campos:[
-        par('Posição', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
-        { k:'size', rot:'Diâmetro', tipo:'dist', v:e.size },
-        { k:'drill', rot:'Furo', tipo:'dist', v:e.drill },
+        par('Location (X/Y)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
+        { k:'size', rot:'Diameter', tipo:'dist', v:e.size },
+        { k:'drill', rot:'Hole Size', tipo:'dist', v:e.drill },
         { k:'net', rot:'Net', tipo:'ro', v:e.net || '—', dica:'via_edit ainda não troca a net' },
-        { k:'span', rot:'De / para', tipo:'ro', v:(e.from || 'Top') + ' → ' + (e.to || 'Bottom') },
+        { k:'span', rot:'From - To', tipo:'ro', v:(e.from || 'Top') + ' → ' + (e.to || 'Bottom') },
       ] };
     }
     case 'fill': {
       const m = a.m, e = m.eff, cu = cobre(e.layer);
       return { titulo:'Fill ' + (m.added ? '(novo)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
-        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas() },
+        { k:'layer', rot:'Layer', tipo:'camada', v:e.layer, opc:opcCamadas() },
         cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
-        par('Canto 1', { k:'x1', rot:'X', tipo:'dist', v:e.x1 }, { k:'y1', rot:'Y', tipo:'dist', v:e.y1 }),
-        par('Canto 2', { k:'x2', rot:'X', tipo:'dist', v:e.x2 }, { k:'y2', rot:'Y', tipo:'dist', v:e.y2 }),
-        { k:'rot', rot:'Rotação', tipo:'ang', v:e.rot || 0 },
+        par('Corner 1', { k:'x1', rot:'X', tipo:'dist', v:e.x1 }, { k:'y1', rot:'Y', tipo:'dist', v:e.y1 }),
+        par('Corner 2', { k:'x2', rot:'X', tipo:'dist', v:e.x2 }, { k:'y2', rot:'Y', tipo:'dist', v:e.y2 }),
+        { k:'rot', rot:'Rotation', tipo:'ang', v:e.rot || 0 },
       ] };
     }
     case 'region': {
       const m = a.m, e = m.eff, cu = cobre(e.layer);
       const ar = Math.abs(area2(e.points || [])) / 2;
-      return { titulo:'Região ' + (m.added ? '(nova)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
-        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:m.added ? '' : 'trocar a camada de uma região do espelho é apagar e recriar (region_del + region_add)' },
+      return { titulo:'Region ' + (m.added ? '(nova)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Layer', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:m.added ? '' : 'trocar a camada de uma região do espelho é apagar e recriar (region_del + region_add)' },
         cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
-        { k:'n', rot:'Vértices', tipo:'ro', v:String((e.points || []).length) },
-        { k:'area', rot:'Área', tipo:'ro', v:fmtNum(ar, 3) + ' mm²' },
+        { k:'n', rot:'Vertices', tipo:'ro', v:String((e.points || []).length) },
+        { k:'area', rot:'Area', tipo:'ro', v:fmtNum(ar, 3) + ' mm²' },
       ] };
     }
     case 'regiao-ro': {
       const g = a.eb;
-      return { titulo:'Região ' + (g.id || ''), sub:nomeDe(g.layer) + (g.poly ? ' · polígono' : '') + (g.keepout ? ' · keepout' : ''), aviso:a.motivo, campos:[
-        { k:'layer', rot:'Camada', tipo:'ro', v:nomeDe(g.layer) },
+      return { titulo:'Region ' + (g.id || ''), sub:nomeDe(g.layer) + (g.poly ? ' · polígono' : '') + (g.keepout ? ' · keepout' : ''), aviso:a.motivo, campos:[
+        { k:'layer', rot:'Layer', tipo:'ro', v:nomeDe(g.layer) },
         { k:'net', rot:'Net', tipo:'ro', v:g.net || '—' },
-        { k:'n', rot:'Vértices', tipo:'ro', v:String((g.points || []).length) + (Array.isArray(g.holes) && g.holes.length ? ' · ' + g.holes.length + ' furo(s)' : '') },
+        { k:'n', rot:'Vertices', tipo:'ro', v:String((g.points || []).length) + (Array.isArray(g.holes) && g.holes.length ? ' · ' + g.holes.length + ' furo(s)' : '') },
       ] };
     }
     case 'recorte': {
       const k = recortesDaTela().find(x => x.o === a.eb), bb = k ? bbPts(k.pts) : null;
-      return { titulo:'Recorte da placa', sub:a.m ? 'furo de fixação do hub (region_add cutout) — Delete tira' : 'Board Cutout do Altium', campos:[
-        { k:'tam', rot:'Tamanho', tipo:'ro', v:bb ? fmtDist(bb[2] - bb[0]) + ' × ' + fmtDist(bb[3] - bb[1]) + ' ' + unidade : '—' },
-        { k:'c', rot:'Centro', tipo:'ro', v:bb ? fmtDist((bb[0] + bb[2]) / 2) + ' ; ' + fmtDist((bb[1] + bb[3]) / 2) : '—' },
+      return { titulo:'Board Cutout', sub:a.m ? 'furo de fixação do hub (region_add cutout) — Delete tira' : 'Board Cutout do Altium', campos:[
+        { k:'tam', rot:'Size', tipo:'ro', v:bb ? fmtDist(bb[2] - bb[0]) + ' × ' + fmtDist(bb[3] - bb[1]) + ' ' + unidade : '—' },
+        { k:'c', rot:'Center', tipo:'ro', v:bb ? fmtDist((bb[0] + bb[2]) / 2) + ' ; ' + fmtDist((bb[1] + bb[3]) / 2) : '—' },
       ] };
     }
     case 'text': {
       const m = a.m, s = m.src || {}, e = ebDe(m) || m.eff;
-      if (s.designator) return { titulo:'Designator de ' + s.owner, sub:ESTADO(m), campos:[
-        par('Posição (centro)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
-        { k:'h', rot:'Altura', tipo:'dist', v:e.h },
-        { k:'rot', rot:'Rotação', tipo:'ang', v:e.rot || 0 },
+      if (s.designator) return { titulo:'Designator — ' + s.owner, sub:ESTADO(m), campos:[
+        par('Location (X/Y)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
+        { k:'h', rot:'Text Height', tipo:'dist', v:e.h },
+        { k:'rot', rot:'Rotation', tipo:'ang', v:e.rot || 0 },
         { nota:'O designator_move vai antes do comp_move do componente no changes.js (o ApplyChanges aplica em ordem).' },
       ] };
-      if (s.comment) return { titulo:'Comment de ' + s.owner, sub:'', campos:[
+      if (s.comment) return { titulo:'Comment — ' + s.owner, sub:'', campos:[
         { k:'comment', rot:'Comment', tipo:'texto', v:e.text || '' },
-        par('Posição', { k:'x', rot:'X', tipo:'ro', v:fmtDist(e.x) }, { k:'y', rot:'Y', tipo:'ro', v:fmtDist(e.y) }),
+        par('Location (X/Y)', { k:'x', rot:'X', tipo:'ro', v:fmtDist(e.x) }, { k:'y', rot:'Y', tipo:'ro', v:fmtDist(e.y) }),
         { nota:'A posição do comment ainda não tem op (comment_move): mova pelo Altium.' },
       ] };
-      return { titulo:'Texto ' + (m.added ? '(novo)' : s.id), sub:[nomeDe(e.layer), ESTADO(m), e.kind === 'truetype' ? 'TrueType' : ''].filter(Boolean).join(' · '), campos:[
-        { k:'layer', rot:'Camada', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:'na face de baixo o texto fica espelhado, como no Altium' },
-        { k:'text', rot:'Texto', tipo:'texto', v:e.text || '' },
-        par('Posição (centro)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
-        par('Tamanho', { k:'h', rot:'Altura', tipo:'dist', v:e.h }, { k:'w', rot:'Traço', tipo:'dist', v:e.w > 0 ? e.w : (e.h || 0) * TRACO_TEXTO }),
-        { k:'rot', rot:'Rotação', tipo:'ang', v:e.rot || 0 },
-        { k:'mirror', rot:'Espelhado', tipo:'bool', v:!!e.mirror },
+      return { titulo:'Text ' + (m.added ? '(novo)' : s.id), sub:[nomeDe(e.layer), ESTADO(m), e.kind === 'truetype' ? 'TrueType' : ''].filter(Boolean).join(' · '), campos:[
+        { k:'layer', rot:'Layer', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:'na face de baixo o texto fica espelhado, como no Altium' },
+        { k:'text', rot:'Text', tipo:'texto', v:e.text || '' },
+        par('Location (X/Y)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
+        par('Size', { k:'h', rot:'Height', tipo:'dist', v:e.h }, { k:'w', rot:'Stroke', tipo:'dist', v:e.w > 0 ? e.w : (e.h || 0) * TRACO_TEXTO }),
+        { k:'rot', rot:'Rotation', tipo:'ang', v:e.rot || 0 },
+        { k:'mirror', rot:'Mirror', tipo:'bool', v:!!e.mirror },
       ] };
     }
     case 'ann': {
@@ -3001,18 +4154,27 @@ function fichaFerramenta(){
   const larg = { k:'tool.wLinha', rot:'Largura', tipo:'dist', v:CFG.wLinha };
   const cheio = { k:'tool.preencher', rot:'Preencher', tipo:'bool', v:preencher, dica:'ligado: região cheia (retângulo: fill); desligado: contorno de trilhas' };
   switch (tool) {
-    case 'trilha':
+    case 'trilha': {
+      const regra = isNum(RULES.clearance) && RULES.clearance > 0;
       F.campos.push(camada(l => l.kind === 'signal' || l.kind === 'plane'),
         { k:'tool.wTrilha', rot:'Largura', tipo:'dist', v:CFG.wTrilha, dica:isNum(RULES.width) ? 'regra Width do espelho: ' + fmtDist(RULES.width) + ' ' + unidade : 'o espelho não trouxe a regra Width: 10 mil' },
         { k:'tool.modo', rot:'Canto', tipo:'enum', v:CFG.modo, opc:[{ v:'45', rot:'45°' }, { v:'90', rot:'90°' }, { v:'livre', rot:'ângulo livre' }] },
+        { k:'tool.conflito', rot:'Conflito', tipo:'enum', v:CFG.conflito, opc:CONFLITOS.map(v => ({ v, rot:CONFLITO_ROT[v] })),
+          dica:'Shift+R troca · ' + CONFLITO_FRASE[CFG.conflito] + ' · folga ' + fmtDist(FOLGA) + ' ' + unidade + (regra ? ' (regra Clearance do espelho)' : ' (o espelho não trouxe a regra Clearance: 10 mil)') },
         { k:'net', rot:'Net', tipo:'ro', v:(draft && draft.net) || '— (vem do pad, via ou trilha em que começar)' },
         par('Via', { k:'tool.viaSize', rot:'Diâmetro', tipo:'dist', v:CFG.viaSize }, { k:'tool.viaDrill', rot:'Furo', tipo:'dist', v:CFG.viaDrill }),
-        { nota:'Clique fixa o canto · Espaço inverte · Shift+Espaço 45°/90°/livre · Backspace desfaz o trecho · 2 via · * ou Ctrl+2 via e troca de camada · botão direito termina · Esc larga.' });
+        { nota:'Clique fixa o canto · Espaço inverte · Shift+Espaço 45°/90°/livre · Shift+R contornar/parar/ignorar · Backspace desfaz o trecho · 2 via · * ou Ctrl+2 via e troca de camada · botão direito termina · Esc larga.' },
+        { nota:'Trilhas de nets diferentes não se encontram (folga ' + fmtDist(FOLGA) + ' ' + unidade + '): contornar dá a volta no obstáculo sem mexer no que já está na placa; parar no obstáculo para antes dele; ignorar não confere nada. A mesma regra recusa arrastar ou editar trilha, arco e via para cima de outra net.' });
+      if (!HR) F.aviso = 'O roteador (hub-roteador.js) não carregou: a trilha não confere conflito — atualize a página (F5).';
+      else if (motorQuebrado) F.aviso = 'O roteador falhou nesta sessão: nada é conferido até recarregar a página (F5).';
       break;
+    }
     case 'via':
       F.campos.push(par('Via', { k:'tool.viaSize', rot:'Diâmetro', tipo:'dist', v:CFG.viaSize }, { k:'tool.viaDrill', rot:'Furo', tipo:'dist', v:CFG.viaDrill }),
-        { k:'tool.viaNet', rot:'Net', tipo:'net', v:CFG.viaNet, opc:opcNets(CFG.viaNet), dica:'clicando num pad/trilha a via pega a net dele' },
-        { nota:isNum(RULES.viaSize) ? 'Padrão pela regra RoutingVias do espelho.' : 'O espelho não trouxe a regra de via: 0,6/0,3 mm.' });
+        { k:'tool.viaNet', rot:'Net', tipo:'net', v:CFG.viaNet, opc:opcNets(CFG.viaNet), dica:'vazio: a via pega a net do pad/trilha em que cair; com uma net aqui, a via é dela — e não entra em cima de cobre de outra net' },
+        { nota:isNum(RULES.viaSize) ? 'Padrão pela regra RoutingVias do espelho.' : 'O espelho não trouxe a regra de via: 0,6/0,3 mm.' },
+        { nota:CFG.conflito === 'ignorar' ? 'Conflito em ignorar (ficha da Trilha, Shift+R): a via não é conferida.'
+              : 'A via não entra encostada em cobre de outra net (folga ' + fmtDist(FOLGA) + ' ' + unidade + '): o anel vermelho avisa antes do clique.' });
       break;
     case 'linha': case 'arco': F.campos.push(camada(), larg); break;
     case 'circulo': case 'retangulo': case 'triangulo': case 'poligono': F.campos.push(camada(), larg, cheio); break;
@@ -3064,6 +4226,7 @@ function configTool(k, v){
     case 'wTexto': if (pos(v)) CFG.wTexto = r6(v); break;
     case 'furo': if (pos(v)) CFG.furo = r6(v); break;
     case 'preencher': if (!!v !== preencher) togglePreencher(); break;
+    case 'conflito': setConflito(String(v || '')); break;
   }
   pintaStatus(); if (painel) painel.atualiza(); pede();
 }
@@ -3143,13 +4306,21 @@ function editarCampo(k, v){
   if (String(k).indexOf('tool.') === 0) { configTool(String(k).slice(5), v); return; }
   if (!SEL.length || LEAN) return;
   if (!garanteEdicao()) return;
-  let mexeu = false, ann = false;
-  for (const a of SEL.slice()) {
-    const r = campoNoAlvo(a, k, v);
-    if (r === 'ann') ann = true; else if (r) mexeu = true;
-  }
+  let ann = false;
+  const alvos = SEL.slice();
+  /* camada, largura, pontas, centro, raio, angulos ou net de trilha/arco, e posicao ou diametro de
+     via: a mudanca que faria cobre de nets diferentes se encontrarem nao entra (editaConferindo) */
+  const conferir = alvos.filter(a => CAMPOS_COBRE[a.t] && CAMPOS_COBRE[a.t][k]);
+  const r = editaConferindo(conferir, () => {
+    let mexeu = false;
+    for (const a of alvos) {
+      const x = campoNoAlvo(a, k, v);
+      if (x === 'ann') ann = true; else if (x) mexeu = true;
+    }
+    return mexeu;
+  }, 'não deixa');
   if (ann) annChanged();
-  if (mexeu) commit(); else if (painel) painel.atualiza();
+  if (r) commit(); else if (painel) painel.atualiza();
 }
 function acaoPainel(id){
   switch (id) {
@@ -3299,6 +4470,21 @@ const V = {
   rotaAtiva:() => !!(draft && draft.tipo === 'rota' && draft.est), preencher:() => preencher,
 };
 
+/* os ganchos do MCP (mcp/hub-mcpvista.js): a IA foca um ponto, seleciona por id/ref e roda
+   qualquer acao da barra/teclado pelo nome (drc, gerber, pdf, repour...) */
+window.HubMcpVista = {
+  focar(x, y, zoom){ if (isNum(x) && isNum(y)) { view.cx = x; view.cy = y; if (isNum(zoom) && zoom > 0) view.scale = zoom; pede(); } return true; },
+  selecionar(o){
+    o = o || {};
+    const alvos = [];
+    for (const id of o.ids || []) { const m = IDX.item.get(String(id)); const a = m ? PORCHAVE.get(chave({ t:m.kind, m })) : null; if (a) alvos.push(a); }
+    for (const r of o.refs || []) { const m = model.compByRef[r]; const a = m ? ALVO_COMP.get(m) : null; if (a) alvos.push(a); }
+    selSo(alvos); pede(); return alvos.length;
+  },
+  comando(nome){ if (typeof nome !== 'string' || !nome) return false; fazAcao(nome); return true; },
+  captura(){ return cv; },
+};
+
 /* ============================== Gerber ==============================
    O visualizador (hub-gerberview.js) abre POR CIMA da vista, com o conjunto gerado agora pelo
    hub-gerber.js a partir da placa EFETIVA (board.js + changes.js de agora) -- o mesmo motor que
@@ -3346,7 +4532,8 @@ function montaGerberView(){
 function geraGerber(){
   if (typeof HubGerber === 'undefined' || typeof HubGerber.gerar !== 'function')
     throw new Error('o gerador de Gerber (hub-gerber.js) não carregou nesta página — o visualizador abre, mas não há o que gerar');
-  const eb = HC.effectiveBoard(B, model);
+  /* a placa da TELA: com os teardrops refeitos e os poligonos do hub despejados (recalcula) */
+  const eb = EB || HC.effectiveBoard(B, model);
   gerUltimo = HubGerber.gerar(eb, { base:baseDoPcbDoc(), nomes:gerOpc.nomes, vazias:gerOpc.vazias, gtoGbo:gerOpc.gtoGbo, x2:gerOpc.x2, software:'EletricHUB' });
   return gerUltimo;
 }
@@ -3617,6 +4804,16 @@ function inicia(){
     montaBarra();
     pintaAbas();
     montaDivisoria();
+    if (typeof HubPcbAltium !== 'undefined') {
+      ALT = HubPcbAltium.instala({
+        fazAcao:(id, arg) => fazAcao(id, arg), teclaDe, ctx:ctxAltium, grades:() => GRADES,
+        prefs:() => Object.assign(JSON.parse(JSON.stringify(PREFS)), { grade:show.grid, fantasmas:show.ghost, conexoes:conexoesLigadas(), conflito:CFG.conflito }),
+        aplicaPrefs, prefsPadrao:PREFS_PADRAO,
+        camadas:() => LAYERS.map(l => ({ key:l.key, rot:rotuloAba(l), padrao:l.corPadrao || l.color })),
+        toast:(t, tipo, ms) => HubDialog.toast(t, tipo || 'info', ms), fmtDist, parseDist, unidade:() => unidade,
+      });
+      ALT.barra($('menubar'));
+    }
     if (typeof HubPcbPainel !== 'undefined') painel = HubPcbPainel.instala($('props'), V);
     else { const p = $('props'); if (p) p.textContent = 'O painel (hub-pcbpainel.js) não carregou — atualize a página.'; }
   }
@@ -3633,11 +4830,16 @@ catch (e) { fatal('A vista PCB não abriu: ' + (e && e.message || e)); throw e; 
    a tela tem de estado. Nao e contrato com o hub -- o hub fala por __hubSelectComp/__hubOnChange. */
 window.__hubPcb = Object.assign(Object.create(V), {
   estado:() => ({ tool, editOn, cur, unidade, grade:grade.id, flip:view.flip, unica:show.unica, preencher,
-                  sel:SEL.map(chave), ch:CH.length, chDirty, annDirty, view:Object.assign({}, view), draft:draft ? draft.tipo : null }),
+                  sel:SEL.map(chave), ch:CH.length, chDirty, annDirty, view:Object.assign({}, view), draft:draft ? draft.tipo : null,
+                  conflito:CFG.conflito, roteador:!!HR && !motorQuebrado }),
   telaDe:(x, y) => mundoParaTela(x, y), mundoDe:(sx, sy) => telaParaMundo(sx, sy),
   setTool, fazAcao, hitsEm:(x, y) => hitsEm(x, y).map(chave),
   snap:(x, y) => snapPonto({ x, y }, null, {}),
   setView(cx, cy, scale){ view.cx = cx; view.cy = cy; if (scale > 0) view.scale = scale; pede(); },
+  /* o roteador: a ultima rota calculada (previa ou clique) e o modo de conflito */
+  rota:() => ROTA ? ROTA.res : null,
+  conflito:() => CFG.conflito,
+  setConflito(v){ const ok = setConflito(v); pintaStatus(); if (painel) painel.atualiza(); pede(); return ok; },
 });
 
 })();

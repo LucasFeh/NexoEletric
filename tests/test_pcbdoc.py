@@ -230,6 +230,56 @@ def test_escopo():
     print('  escopo de regra ok')
 
 
+def test_regras():
+    """o rules.js cru (pcbdoc2board --regras) e o escopo com comparacao/unidade (o MIRBC tem
+    "AsMils(X1) >= 6669.9799"): a regra fica de fora com aviso, nunca excecao"""
+    av = []
+    R = L.Regras([{'RULEKIND': 'Width', 'NAME': 'mirbc', 'PRIORITY': '1',
+                   'SCOPE1EXPRESSION': "(IsVia And (InNet('COM') And ((AsMils(X1) >= 6669.9799) And (AsMils(Y1) <= 290.0201))))"},
+                  {'RULEKIND': 'Width', 'NAME': 'cmp', 'PRIORITY': '2', 'SCOPE1EXPRESSION': 'Width > 10 AsMils'},
+                  {'RULEKIND': 'Width', 'NAME': 'geral', 'PRIORITY': '3', 'SCOPE1EXPRESSION': 'All'}], [], av)
+    assert R.dominante('Width', {'tipo': 'via', 'net': 'COM'})['NAME'] == 'geral'
+    assert R.dominante('Width', {'tipo': 'via', 'net': 'X'})['NAME'] == 'geral'
+    assert any('mirbc' in a for a in av), av
+
+    class P(object):
+        regras = [{'RULEKIND': 'Clearance', 'NAME': 'Clearance', 'PRIORITY': '1', 'ENABLED': 'TRUE', 'GAP': '7.874mil',
+                   'SCOPE1EXPRESSION': 'All', 'SCOPE2EXPRESSION': 'All', 'NETSCOPE': 'DifferentNets'},
+                  {'RULEKIND': 'Width', 'NAME': 'Terra', 'PRIORITY': '1', 'ENABLED': 'TRUE', 'MINLIMIT': '15.748mil',
+                   'PREFEREDWIDTH': '39.3701mil', 'MAXLIMIT': '78.7402mil', 'SCOPE1EXPRESSION': "InNet('0V')"}]
+        classes = [{'KIND': '0', 'NAME': 'POWER', 'SUPERCLASS': 'FALSE', 'M0': '0V', 'M1': '5V'}]
+        drc_opcoes = {'RULESETTOCHECK': '0,2,15', 'ONLINERULESETTOCHECK': '0,24', 'DOMAKEDRCFILE': 'TRUE'}
+    txt = L.regras_js(P(), 'C:\\placa.PcbDoc')
+    assert txt.startswith('// ') and 'var pcbrules = {' in txt and txt.rstrip().endswith('};')
+    assert '"drc":{"RULESETTOCHECK": "0,2,15", "ONLINERULESETTOCHECK": "0,24"}' in txt, txt
+    assert 'DOMAKEDRCFILE' not in txt
+    # o hub traduz (HubPcbRegras.ler): a traducao mora num lugar so
+    node = shutil.which('node')
+    if not node:
+        print('  regras ok (traducao pelo hub PULADA: sem node)')
+        return
+    d = tempfile.mkdtemp(prefix='regras-')
+    try:
+        rj = os.path.join(d, 'rules.js')
+        with open(rj, 'w', encoding='ascii', newline='\n') as f:
+            f.write(txt)
+        script = os.path.join(d, 'le.cjs')
+        with open(script, 'w', encoding='utf-8') as f:
+            f.write("const R=require(%s);const S=R.ler(require('fs').readFileSync(%s,'utf8'));\n"
+                    "const c=S.rules.find(r=>r.kind==='Clearance'),w=S.rules.find(r=>r.kind==='Width');\n"
+                    "console.log(JSON.stringify({gap:c.gap,w:[w.min,w.pref,w.max],cl:S.classes.net,v:S.verificar}));\n"
+                    % (json.dumps(os.path.join(RAIZ, 'hub-pcbregras.js')), json.dumps(rj)))
+        r = subprocess.run([node, script], capture_output=True, text=True, timeout=60)
+        assert r.returncode == 0, r.stderr[-800:]
+        res = json.loads(r.stdout.strip().splitlines()[-1])
+        assert res['gap'] == 0.2 and res['w'] == [0.4, 1, 2], res
+        assert res['cl'] == {'POWER': ['0V', '5V']}, res
+        assert res['v'] == {'lote': ['Clearance', 'Width', 'ShortCircuit'], 'online': ['Clearance', 'ComponentClearance']}, res
+        print('  regras ok (rules.js cru -> HubPcbRegras: %s)' % res['w'])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 # ─── (b) registros ────────────────────────────────────────────────────────────
 def test_registros():
     t = L.le_trilha(trilha('Bottom', 1, 2, 3, 4, 5, net=7, comp=1, f2=2))
@@ -646,6 +696,7 @@ def main():
     test_numeros()
     test_nets_e_especiais()
     test_escopo()
+    test_regras()
     test_registros()
     js = test_pcbdoc_inteiro()
     test_cli()
