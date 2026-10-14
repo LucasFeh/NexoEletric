@@ -3,6 +3,13 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.3.1 — 2026-10-14
+
+- **Criar e editar footprint na Biblioteca › Footprints**, no layout de sempre da aba. **Novo footprint…** e **Editar footprint** ficam na fileira de ações (o botão direito num footprint da galeria também edita). O editor abre no lugar da galeria, com o mesmo desenho da vista de footprint do hub: pads, serigrafia, arco e o corpo 3D (STEP, extrudado, cilindro), com 2D/3D e as teclas do Altium (P,P, P,L, P,A, P,B). **Aplicar a <componente>** salva e vincula o footprint ao componente escolhido; **← Galeria** volta.
+- **A galeria mostra os footprints do hub** (marca "hub", "hub · 3D" quando têm modelo) junto com os do Altium, e a vista Geral passa a desenhá-los.
+- **Footprint criado no hub pode ser vinculado a componente** da biblioteca e do almoxarifado. Antes o servidor só aceitava os da PcbLib do Altium.
+- **Esquema: Trocar footprint… abre a galeria**, com o desenho, os pads, a origem (Altium ou hub), o modelo 3D e o teste "todos os pinos do símbolo têm pad". O filtro **só os que servem** deixa só os footprints compatíveis com o símbolo. Ferramentas › Gerenciador de footprints com um componente marcado abre a mesma galeria. A PCB recebe no Design › Update PCB.
+
 ## 1.3.0 — 2026-10-14
 
 - **Vista 3D na PCB, como no Altium: tecla 3** (2 volta ao 2D; também em Exibir › Modo de layout 3D). A placa aparece com os furos, a máscara, o cobre, a serigrafia e os componentes. Componente sem modelo 3D aparece como uma caixa. Gira com **Shift + botão direito** (ou arrastando), arrasta com o botão direito, aproxima com a roda. Exibir › **Controle da vista 3D** tem as poses do Altium: 0 topo, Ctrl+0 base, 8 isométrica, 9 gira 90°, setas giram 30°. Ctrl+F vira a placa. Clicar num componente o seleciona.
