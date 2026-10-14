@@ -3,6 +3,13 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.9 — 2026-10-14
+
+- **Menus só com o que o EletricHUB faz.** Comando do Altium que o hub não executa saiu dos menus (barra de cima, botão direito e menus das letras), em vez de ficar cinza; menus que ficaram vazios (Projeto, Janela...) sumiram. As Preferences também mostram só as opções que funcionam.
+- **Gerber e PDF só no Arquivo:** Arquivo › Saídas de fabricação › Arquivos Gerber e Arquivo › Smart PDF. Saíram da barra de ferramentas da PCB.
+- **PCB sem as sub-abas Componentes e Nets.**
+- **Painel da placa mais limpo:** o bloco Placa (arquivo, tamanho, contagens) saiu, e o filtro virou o **Selection Filter** do Altium: All - On/Off e um botão pequeno por tipo.
+
 ## 1.2.8 — 2026-10-14
 
 - **Uma barra de menus só, no topo da janela, no tema do hub.** Arquivo, Exibir e Ajuda do app se juntaram aos menus do Altium: em **Arquivo** fica tudo do File, em **Exibir** tudo do View, em **Ajuda** o Help — e o Sair no fim do Arquivo. A barra nativa do Windows sumiu (ela não seguia o modo escuro/claro); os atalhos dela (F5, F11, Ctrl+,) continuam valendo.
