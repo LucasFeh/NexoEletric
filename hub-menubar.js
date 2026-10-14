@@ -92,6 +92,7 @@
     background:var(--surface-2); border-bottom:1px solid var(--edge); font:12.5px var(--font); color:var(--text); user-select:none;}
   #ehMenubar .apb{padding:0 10px; border:0; background:transparent; color:var(--text); cursor:default; font:inherit; border-radius:4px; margin:3px 0;}
   #ehMenubar .apb:hover, #ehMenubar .apb.on{background:rgba(var(--tint),0.10);}
+  body.eh-menubar #app{height:calc(100vh - 28px) !important;}
   #ehMenubar .vista{margin-left:auto; align-self:center; font-size:11px; color:var(--text-2); padding:0 8px;}
   `;
   let motor = null, barraEl = null, rotuloVista = null, assinatura = '';
@@ -113,6 +114,7 @@
     barraEl = document.createElement('div');
     barraEl.id = 'ehMenubar';
     document.body.prepend(barraEl);
+    document.body.classList.add('eh-menubar');
     rotuloVista = document.createElement('span'); rotuloVista.className = 'vista';
     motor = HubPcbAltium.instala({
       vista:'app', fazAcao:() => {}, teclaDe:() => '', ctx:() => ({}), grades:() => [],
