@@ -3,6 +3,14 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.2.8 — 2026-10-14
+
+- **Uma barra de menus só, no topo da janela, no tema do hub.** Arquivo, Exibir e Ajuda do app se juntaram aos menus do Altium: em **Arquivo** fica tudo do File, em **Exibir** tudo do View, em **Ajuda** o Help — e o Sair no fim do Arquivo. A barra nativa do Windows sumiu (ela não seguia o modo escuro/claro); os atalhos dela (F5, F11, Ctrl+,) continuam valendo.
+- **Os menus mudam com a vista, como no Altium.** No Esquema, os menus do editor de esquema (com Simulador); na PCB, os do editor de placa (com Rotear); nas outras abas, só Arquivo, Exibir e Ajuda.
+- **No idioma do sistema.** Em português os menus vêm traduzidos (Colocar, Ferramentas, Relatórios…); em inglês, os nomes do Altium. Troca junto com o idioma das Configurações.
+- **Atalhos do Altium como padrão.** As letras abrem os menus como no Altium: **T, D, R** = Ferramentas › Verificação de regras › Rodar; **P, T** = trilha; **D, R** = regras. Vale nas duas vistas. As teclas de antes continuam em Configurações › Atalhos › **Padrão EletricHUB**.
+- **Painel Projetos: Todos | Só o atual.** Mostra todos os projetos da pasta ou só o aberto (a busca continua procurando em todos).
+
 ## 1.2.7 — 2026-10-14
 
 - **A vista PCB com os menus do Altium.** Barra de menus **File · Edit · View · Project · Place · Design · Tools · Route · Reports · Window · Help** em cima da placa, com a mesma ordem e os mesmos nomes do Altium Designer 21 (lidos do próprio Altium). F10, ou Alt + a letra, abre pelo teclado. O que o hub ainda não faz aparece cinza, com o porquê.

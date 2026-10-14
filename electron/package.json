@@ -1,7 +1,7 @@
 {
   "name": "altiumhub-desktop",
   "productName": "EletricHUB",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "private": true,
   "description": "EletricHUB: o hub do AltiumPCBMirror como aplicativo desktop",
   "author": "Dieletrons <engenharia@dieletrons.com>",
