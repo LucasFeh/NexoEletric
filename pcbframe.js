@@ -3179,9 +3179,9 @@ const BARRA = [
   { id:'regras', ic:'regras', acao:'regras', at:'regras', titulo:'Regras de projeto (Design » Rules)' },
   { id:'drc', ic:'drc', acao:'drc', at:'drc', rotulo:'DRC', titulo:'Design Rule Check (Tools » Design Rule Check) — o relatório no painel Messages' },
   { id:'eco', ic:'eco', acao:'atualizarPcb', at:'atualizarPcb', titulo:'Atualizar a PCB pelo esquema (Design » Update PCB Document: o ECO)' },
-  { id:'novaPlaca', ic:'novaPlaca', acao:'novaPlaca', at:'novaPlaca', titulo:'Placa nova (o Board Wizard no padrão da casa)' }, '|',
-  { id:'gerber', ic:'gerber', acao:'gerber', rotulo:'Gerber', titulo:'Gerar e ver o Gerber (o pacote que vai para a JLCPCB)' },
-  { id:'pdf', ic:'pdf', acao:'pdf', at:'pdf', rotulo:'PDF', titulo:'PDF de layout — as vistas de montagem de cima e de baixo com o carimbo DIEletrons (o "LO -" do Draftsman)' },
+  { id:'novaPlaca', ic:'novaPlaca', acao:'novaPlaca', at:'novaPlaca', titulo:'Placa nova (o Board Wizard no padrão da casa)' },
+  /* Gerber e PDF sairam daqui (pedido do dono, 2026-10-14): ficam so no Arquivo, como no Altium
+     (File » Fabrication Outputs » Gerber Files e File » Smart PDF) */
 ];
 function montaBarra(){
   const tb = $('pcbtb');

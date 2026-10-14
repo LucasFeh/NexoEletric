@@ -109,6 +109,9 @@ const MAPA_SCH = {
 };
 /* o rotulo no idioma do hub (hub-menutrad.js); sem o modulo, o do Altium */
 const TR = r => (typeof HubMenuTrad !== 'undefined' ? HubMenuTrad.t(r) : r);
+/* Pedido do dono (2026-10-14, segunda rodada): "tudo que nao tem no eletric mas tem no menu, pode
+   remover". Comando sem acao no hub nao aparece (nem cinza); submenu e menu de cima que ficam
+   vazios somem. Cinza so fica o que o hub FAZ mas precisa de selecao (Copy sem nada selecionado). */
 /* o porque do cinza, quando nao e so "ainda nao existe" */
 const PORQUE = {
   'PLPCB:PlaceComponent': 'componente entra pelo esquema: Design » Import Changes (D,I)',
@@ -283,7 +286,7 @@ function instala(V) {
     const gid = gradeDoPlid(n.plid);
     if (gid !== null) {
       if (gid) { it.f = () => V.fazAcao('gradeId', gid); it.check = V.ctx().grade === gid; }
-      else { it.off = true; it.dica = 'passo de grade que o hub não tem'; }
+      else return null;
       return it;
     }
     const m = MAP[n.plid];
@@ -298,12 +301,7 @@ function instala(V) {
       if (m.a === 'diff') it.check = c.ghost;
       if (m.a === 'virar') it.check = c.flip;
       if (m.a === 'camadaUnica') it.check = c.unica;
-    } else {
-      it.off = true;
-      it.dica = PORQUE[n.plid] || NAO_TEM;
-      const t = (n.teclas || [])[0];
-      if (t && modo !== 'contexto') it.teclaAltium = t;
-    }
+    } else return null;
     return it;
   }
   /* converte uma lista do DNA; `modo` 'barra' (tudo, o que nao funciona cinza) ou 'contexto' (o
@@ -329,12 +327,14 @@ function instala(V) {
         }
         filhos = limpaSep(filhos);
         const vivos = filhos.filter(x => x !== '-' && !x.off);
+        if (!filhos.some(x => x !== '-')) continue;
         if (modo === 'contexto' && !vivos.length) continue;
         out.push({ rot, letra:ultimaLetra(n.acelerador), filhos });
         continue;
       }
       if (!n.plid || OCULTOS.has(n.plid) || INTERNO(n.rotulo)) continue;
-      out.push(itemDoPlid(n, c, modo));
+      const it = itemDoPlid(n, c, modo);
+      if (it) out.push(it);
     }
     return limpaSep(out);
   }
@@ -552,6 +552,7 @@ function instala(V) {
     fecha();
     porTeclado = true;
     const itens = converte(n.filhos, V.ctx(), 'barra');
+    if (!itens.length) return false;
     const r = mostraNivel(itens, sx, sy, { titulo:produto(TR(n.rotulo)) });
     primeiro(r);
     return true;
@@ -564,7 +565,8 @@ function instala(V) {
   function itensBarra() {
     if (!DNA) return [];
     return (DNA.menu(VISTA, 'principal') || []).map(n => ({ ing:produto(n.rotulo), rot:produto(TR(n.rotulo)),
-      letra:ultimaLetra(n.acelerador) || n.rotulo[0], filhos:converte(n.filhos, V.ctx(), 'barra') }));
+      letra:ultimaLetra(n.acelerador) || n.rotulo[0], filhos:converte(n.filhos, V.ctx(), 'barra') }))
+      .filter(x => x.filhos.length || x.ing === 'File' || x.ing === 'View' || x.ing === 'Help');
   }
   /* fonte: funcao que devolve a lista de cima (o topo do hub passa a sua); sem ela, a da vista */
   function barra(box, fonte) {
@@ -652,22 +654,20 @@ function instala(V) {
       const sc = el('div', 'no folha' + (st.pagina === 'Shortcuts' ? ' on' : ''), 'Keyboard Shortcuts');
       sc.addEventListener('click', () => vai('Shortcuts'));
       arv.append(sc);
-      for (const nome of ['Data Management', 'Schematic']) pasta(nome, false, true).title = 'Fora da vista PCB';
       pasta('PCB Editor', true);
-      for (const p of PAGINAS) {
+      for (const p of PAGINAS.filter(x => !x.cinza)) {
         const n = el('div', 'no folha' + (p.cinza ? ' cinza' : '') + (st.pagina === p.id ? ' on' : ''), p.rot);
         if (p.cinza) n.title = NAO_TEM;
         else n.addEventListener('click', () => vai(p.id));
         arv.append(n);
       }
-      for (const nome of ['Text Editors', 'Scripting System', 'CAM Editor', 'Simulation', 'Draftsman', 'Multi-board Schematic', 'Multi-board Assembly'])
-        pasta(nome, false, true).title = 'Fora da vista PCB';
     }
     function vai(p) { st.pagina = p; arvore(); desenha(); }
     /* pecas de pagina */
     const grupo = (titulo) => { const g = el('div', 'apf-grp'); if (titulo) g.append(el('div', 'gt', titulo)); pag.append(g); return g; };
     const caixa = (box, rot, chave, o) => {
       o = o || {};
+      if (o.off) return null;                  /* opcao que o hub nao tem: nao aparece */
       const l = el('label', 'ck' + (o.off ? ' off' : ''));
       const i = el('input'); i.type = 'checkbox';
       i.checked = o.off ? !!o.valor : !!P[chave]; i.disabled = !!o.off;
@@ -680,7 +680,7 @@ function instala(V) {
     const linha = (box, rot, ctrl, un) => { const l = el('div', 'lin'); l.append(el('span', 'k', rot), ctrl, el('span', 'un', un || '')); box.append(l); return l; };
     const escolha = (opcoes, valor, muda) => {
       const s = el('select');
-      for (const [v, r, off] of opcoes) { const o = el('option', null, r); o.value = v; if (off) { o.disabled = true; o.textContent = r + ' — ' + NAO_TEM; } if (v === valor) o.selected = true; s.append(o); }
+      for (const [v, r, off] of opcoes) { if (off) continue; const o = el('option', null, r); o.value = v; if (off) { o.disabled = true; o.textContent = r + ' — ' + NAO_TEM; } if (v === valor) o.selected = true; s.append(o); }
       s.addEventListener('change', () => { muda(s.value); marcaSujo(); });
       return s;
     };
@@ -694,7 +694,7 @@ function instala(V) {
       });
       return i;
     };
-    function desenha() {
+    let desenha = function () {
       pag.textContent = '';
       const nomePag = st.pagina === 'Shortcuts' ? 'System – Keyboard Shortcuts' : 'PCB Editor – ' + st.pagina;
       pag.append(el('h2', null, nomePag));
@@ -717,9 +717,9 @@ function instala(V) {
           caixa(c1, 'Double Click Runs Interactive Properties', 'duploClique', { dica:'duplo clique num objeto abre o painel Properties nele' });
           caixa(c1, 'Display popup selection dialog', 'x', { off:true, dica:'o 2º clique no mesmo ponto pega o objeto de baixo' });
           const g2 = grupo('Other');
-          linha(g2, 'Rotation Step', (() => { const i = el('input'); i.type = 'text'; i.value = '90.000'; i.disabled = true; i.title = 'o hub gira de 90° em 90°'; return i; })(), '°');
+
           linha(g2, 'Cursor Type', escolha(CURSORES.map(([v, r]) => [v, r]), P.cursor, v => { P.cursor = v; }));
-          linha(g2, 'Comp Drag', escolha([['nada', 'None'], ['trilhas', 'Connected Tracks', true]], 'nada', () => {}));
+
           const g3 = grupo('Autopan Options');
           caixa(g3, 'Enable Auto Pan', 'x', { off:true });
           const g4 = grupo('Polygon Rebuild');
@@ -747,8 +747,8 @@ function instala(V) {
         case 'Interactive Routing': {
           const g1 = grupo('Routing Conflict Resolution');
           const c1 = el('div', 'apf-col'); g1.append(c1);
-          for (const [v, r] of CONFLITO_ALTIUM) {
-            const tem = CONFLITO_TEM.has(v);
+          for (const [v, r] of CONFLITO_ALTIUM.filter(x => CONFLITO_TEM.has(x[0]))) {
+            const tem = true;
             const l = el('label', 'ck' + (tem ? '' : ' off'));
             const i = el('input'); i.type = 'checkbox';
             i.checked = tem && P.conflitosCiclo.indexOf(v) >= 0; i.disabled = !tem;
@@ -876,6 +876,9 @@ function instala(V) {
         }
       }
     }
+    /* depois de cada pagina: grupo sem nenhum controle (so opcoes que o hub nao tem) some */
+    const desenhaPagina = desenha;
+    desenha = function () { desenhaPagina(); pag.querySelectorAll('.apf-grp').forEach(g => { if (!g.querySelector('input, select, table, button')) g.remove(); }); };
     function aplica() { V.aplicaPrefs(JSON.parse(JSON.stringify(P))); sujo = false; apply.disabled = true; }
     function sai() { fundo.remove(); document.removeEventListener('keydown', teclaPref, true); prefAberta = null; }
     function teclaPref(e) {
@@ -904,7 +907,7 @@ function instala(V) {
     vai(st.pagina);
   }
 
-  return { contexto, popup, aberto, fecha, preferencias, barra, redesenhaBarra, itensBarra, tecla, temPopup:l => !!popupDaTecla(l),
+  return { contexto, popup, aberto, fecha, preferencias, barra, redesenhaBarra, itensBarra, tecla, temPopup:l => { const n = popupDaTecla(l); return !!n && converte(n.filhos, V.ctx(), 'barra').length > 0; },
            abre:(itens, x, y, opt) => { fecha(); return mostraNivel(itens, x, y, opt || {}); }, vista:VISTA };
 }
 
