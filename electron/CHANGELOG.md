@@ -3,6 +3,15 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.3.0 — 2026-10-14
+
+- **Vista 3D na PCB, como no Altium: tecla 3** (2 volta ao 2D; também em Exibir › Modo de layout 3D). A placa aparece com os furos, a máscara, o cobre, a serigrafia e os componentes. Componente sem modelo 3D aparece como uma caixa. Gira com **Shift + botão direito** (ou arrastando), arrasta com o botão direito, aproxima com a roda. Exibir › **Controle da vista 3D** tem as poses do Altium: 0 topo, Ctrl+0 base, 8 isométrica, 9 gira 90°, setas giram 30°. Ctrl+F vira a placa. Clicar num componente o seleciona.
+- **Editor de footprint (o PCB Library do Altium) dentro do EletricHUB.** Abre pelo botão direito no componente (**Editar footprint…**), pela ficha dele, por Ferramentas › Gerenciador de corpos 3D na PCB e por Ferramentas › Gerenciador de footprints no Esquema. Tem a lista de footprints e as camadas Top, Bottom, Multi-Layer, Top Overlay e Mechanical (3D). As Properties seguem as do Altium (Designator, Layer, Size and Shape, Hole Information). Teclas do Altium: **P,P** pad, **P,L** linha, **P,A** arco, **P,B** corpo 3D, Espaço gira, Ctrl+Z desfaz. Tecla 3 mostra o footprint em 3D.
+- **Corpo 3D no footprint: o STEP do fabricante.** P,B (ou soltar o .step na área de trabalho) prende o modelo ao footprint. "Encaixar nos pads" centraliza e assenta o modelo na placa; Rotation X/Y/Z e Z Offset acertam o resto. Também há corpo extrudado (caixa) e cilindro. O modelo aparece na PCB em 3D em todos os componentes com esse footprint.
+- **Os footprints editados ficam numa biblioteca do hub** (Libs/pcblib-hub.js); a PcbLib do Altium não muda. O do hub vale no lugar do de mesmo nome do Altium. Salvar com pads diferentes oferece atualizar os componentes que já estão na placa (o "Update PCB With" do Altium), no mesmo lugar e com as mesmas nets.
+- **Esquema: o footprint se escolhe na ficha do componente**, antes de levar para a PCB. Mostra pads e modelo 3D e avisa quais pinos do símbolo não têm pad, que o ECO acusaria. Tem "Editar footprint…" e "Ver em 3D". A PCB recebe no Design › Update PCB.
+- Com a biblioteca do servidor, os footprints e os STEP ficam no servidor, como o resto da biblioteca. O servidor precisa estar nesta versão do hub para aceitar o STEP.
+
 ## 1.2.9 — 2026-10-14
 
 - **Menus só com o que o EletricHUB faz.** Comando do Altium que o hub não executa saiu dos menus (barra de cima, botão direito e menus das letras), em vez de ficar cinza; menus que ficaram vazios (Projeto, Janela...) sumiram. As Preferences também mostram só as opções que funcionam.

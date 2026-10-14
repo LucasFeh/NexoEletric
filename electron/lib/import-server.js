@@ -54,8 +54,10 @@ const ARQ_ALMOX = ['Libs/almox-parts.json', 'Libs/lib-ledger.json', 'Libs/almox-
   'Libs/almox-guardiao.js', 'tools/almox/componentes_odoo.csv'];
 
 // Bibliotecas publicadas (espelhos do Altium, lib da casa, substituicoes).
+// pcblib-hub.js (1.3.0): os footprints do editor de footprint do hub; os STEP dele (Libs/3d-hub/)
+// vem depois, pela lista de modelos do proprio arquivo (stepsDoHub)
 const ARQ_LIB = ['Libs/schlib.js', 'Libs/pcblib.js', 'Libs/symbols-lib.js', 'Libs/rename-map.js',
-  'Libs/lib-subs.js', 'Libs/libs-report.txt', 'Libs/BIBLIOTECA DE ESQUEMA.SchLib'];
+  'Libs/lib-subs.js', 'Libs/libs-report.txt', 'Libs/BIBLIOTECA DE ESQUEMA.SchLib', 'Libs/pcblib-hub.js'];
 
 // Fora a lista do ledger, o que o gerador escreve em Libs/Almox (almox2lib.py, dblib.py).
 const ARQ_ALMOX_DIR_FIXOS = ['Libs/Almox/FOOTPRINTS ALMOX.PcbLib', 'Libs/Almox/ALMOX.DbLib',
@@ -210,7 +212,23 @@ function relSeguro(rel) {
 // `var location = "javascript:..."` e JSON valido depois do "=" e navegaria a pagina.
 const VARS_DE_DADOS = new Set(['pcbmirror', 'schematic', 'changes', 'annotations', 'schlib', 'pcblib',
   'symbolsLib', 'renameMap', 'libSubs', 'projects', 'almoxIndex', 'almoxSync', 'almoxBasicos',
-  'almoxEspeciais', 'almoxGuardiao']);
+  'almoxEspeciais', 'almoxGuardiao', 'pcblibHub']);
+
+// Os STEP que o Libs/pcblib-hub.js (ja no disco) cita: Libs/3d-hub/<sha1>.step. O nome e o sha1 do
+// conteudo, entao arquivo que ja existe nao muda -- so o que falta vem.
+function stepsDoHub(ws) {
+  let txt = '';
+  try { txt = fs.readFileSync(path.join(ws, 'Libs', 'pcblib-hub.js'), 'utf8'); } catch { return []; }
+  if (recusaDeDado('Libs/pcblib-hub.js', Buffer.from(txt))) return [];
+  let lib = null;
+  try { lib = JSON.parse(txt.replace(/^﻿/, '').replace(/^\s*var\s+pcblibHub\s*=/, '').trim().replace(/;[\s;]*$/, '')); } catch { return []; }
+  const out = [];
+  for (const m of Object.values((lib && lib.models) || {})) {
+    const f = m && typeof m.file === 'string' ? m.file : '';
+    if (/^3d-hub\/[0-9a-f]{40}\.step$/.test(f)) out.push('Libs/' + f);
+  }
+  return out;
+}
 
 function recusaDeDado(rel, buf) {
   if (!rel.endsWith('.js')) return '';
@@ -428,6 +446,13 @@ async function importar(o) {
   try {
     await comLimite(lista, PARALELO, um);
 
+    // os STEP da biblioteca do hub: so se conhecem depois do pcblib-hub.js chegar
+    if (grupos.has('libs') && !(signal && signal.aborted)) {
+      const lote = stepsDoHub(ws).filter((rel) => !fs.existsSync(path.join(ws, ...rel.split('/')))).map((rel) => ({ rel, grupo: 'lib' }));
+      lista.push(...lote);
+      await comLimite(lote, PARALELO, um);
+    }
+
     // A lista de Libs/Almox so e conhecida depois do lib-ledger.json (grupo almox) chegar.
     if (grupos.has('almoxLibs') && !(signal && signal.aborted)) {
       const ledger = await ledgerDaLista(ws, serverUrl, grupos.has('almox'), signal);
@@ -457,4 +482,4 @@ function ultimaImportacao(ws) {
   return new Estado(ws).d.ultimaImportacao || '';
 }
 
-module.exports = { importar, testar, ultimaImportacao, recusaDeDado, relSeguro, ARQ_PROJETO, ARQ_INDICE, ARQ_ALMOX, ARQ_LIB };
+module.exports = { importar, testar, ultimaImportacao, recusaDeDado, relSeguro, stepsDoHub, ARQ_PROJETO, ARQ_INDICE, ARQ_ALMOX, ARQ_LIB };
