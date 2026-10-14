@@ -3444,6 +3444,21 @@ async function abreFootprint(it, o){
   }
   renderProps();
 }
+/* TROCAR na galeria, e nao so no campo de texto: o desenho, os pads, se e do hub e se os pinos
+   do simbolo tem pad (hub-fppick.js, a mesma galeria da Biblioteca » Footprints do hub) */
+async function trocaFootprint(it, sym){
+  if (typeof HubFpPick === 'undefined'){ HubDialog.alert('A galeria de footprints (hub-fppick.js) não carregou. Atualize a página (F5).', { title:'Footprint' }); return; }
+  const pinos = [];
+  if (sym && Array.isArray(sym.parts))
+    for (const p of sym.parts) for (const q of (p.pins || [])) if (q && q.num != null && pinos.indexOf(String(q.num)) < 0) pinos.push(String(q.num));
+  const hub = ((window.pcblibHub && window.pcblibHub.footprints) || []).map(f => f && f.name).filter(Boolean);
+  const r = await HubFpPick.escolhe({ footprints:PLIB.footprints || [], atual:it.footprint || '', ref:it.ref, pinos, hub, titulo:'Trocar footprint' });
+  if (!r) return;
+  if (r.acao === 'usar') poeFootprint(it.ref, r.nome);
+  else if (r.acao === 'tirar') poeFootprint(it.ref, '');
+  else if (r.acao === 'editar') abreFootprint(it, { nome:r.nome });
+  else if (r.acao === 'novo') abreFootprint(it, { nome:null, aoMontar:c => c.novo() });
+}
 function secFootprint(it, sym, fpNome){
   const s = prSec('footprint');
   listaFootprints();
@@ -3478,6 +3493,7 @@ function secFootprint(it, sym, fpNome){
   }
   const linha = el('div', 'pr-fpacoes');
   const b = (rot, titulo, fn) => { const x = el('button', 'wide sutil', rot); x.type = 'button'; x.title = titulo; x.onclick = fn; linha.append(x); };
+  b('Trocar footprint…', 'a galeria de footprints (PcbLib do Altium + biblioteca do hub), com o desenho e o teste dos pinos — a PCB recebe no Design » Update PCB', () => trocaFootprint(it, sym));
   b(fp ? 'Editar footprint…' : 'Abrir o editor de footprint…', 'o PCB Library do Altium, no hub: pads, serigrafia e o corpo 3D (STEP). Grava na biblioteca do hub', () => abreFootprint(it));
   if (fp) b('Ver em 3D', 'o footprint com o modelo 3D, no editor', () => abreFootprint(it, { modo3d:true }));
   s.append(linha);
@@ -5740,7 +5756,9 @@ window.addEventListener('keydown', e => {
 function fazAcao(id){
   gavAbre(false);     /* um atalho que age fecha a gaveta: senao ela sobrava atras do modal */
   switch (id){
-    case 'footprints': { const a = selAlvos().find(x => x.it && x.it.t === 'comp'); abreFootprint(a ? a.it : null); return; }
+    /* com um componente marcado: a galeria para trocar o footprint dele; sem nada, o editor */
+    case 'footprints': { const a = selAlvos().find(x => x.it && x.it.t === 'comp');
+      if (a) trocaFootprint(a.it, HubCore.symbolOf(SLIB, a.it.sym)); else abreFootprint(null); return; }
     case 'add':       openAdd(); return;
     case 'fio':       setTool(tool === 'wire' ? 'select' : 'wire'); return;
     case 'terra':     setTool(tool === 'power' && toolPower && toolPower.net === 'GND' ? 'select' : 'power',

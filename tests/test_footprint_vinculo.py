@@ -82,7 +82,7 @@ try:
 
     real_root = H.ROOT
     H.ROOT = S.ROOT = tmp
-    S._pcblib_cache['mtime'] = 0          # o cache é por mtime; a raiz mudou
+    S._pcblib_cache.clear()               # o cache é por arquivo e mtime; a raiz mudou
     cli = H.app.test_client()
 
     def le_sym(nome):
@@ -159,6 +159,22 @@ try:
     assert len(j['footprints']) == 3, \
         'os 3 da pcblib, e nada mais; vieram %d: %s' % (len(j['footprints']), sorted(porn))
     print('(7) GET /footprints lista os da PcbLib, sem colher nome de pad ok')
+
+    # ── 7b. o footprint criado no editor do hub (Libs/pcblib-hub.js) também vale ──
+    # Desde 2026-10-14 o footprint pode nascer no hub (Biblioteca » Footprints » Novo
+    # footprint): ele entra na lista, marcado `hub`, e se vincula como um do Altium.
+    with io.open(os.path.join(tmp, 'Libs', 'pcblib-hub.js'), 'w', encoding='utf-8') as f:
+        f.write('var pcblibHub = {\n"format":"pcblib-hub-v1",\n"units":"mm",\n"models":{},\n"footprints":[\n')
+        f.write('{"name":' + json.dumps(FP_NOVO) + ',"pads":[{"name":"1","type":"smd"}],"bodies":[]}\n')
+        f.write(']};\n')
+    porn = {f['name']: f for f in cli.get('/api/symbols/footprints').get_json()['footprints']}
+    assert porn[FP_NOVO]['hub'] is True and porn[FP_NOVO]['desenhado'] is True, porn.get(FP_NOVO)
+    assert porn['DO-214AC']['hub'] is False
+    j = cli.post('/api/symbols/footprint', json={'simbolo': ALVO, 'footprint': FP_NOVO}).get_json()
+    assert j['ok'] and j['desenhado'], j
+    assert [x['name'] for x in le_sym(ALVO)['footprints']] == [FP_NOVO], le_sym(ALVO)['footprints']
+    assert le_sym(ALVO)['footprints'][0]['incurrentlib'] is True
+    print('(7b) footprint da biblioteca do hub aparece na lista e se vincula ok')
 
     print('test_footprint_vinculo OK (um componente, um footprint — garantido no servidor)')
 finally:

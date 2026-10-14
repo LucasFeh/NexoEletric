@@ -1541,7 +1541,7 @@ def _salva_footprint(caminho, nome, footprint):
     fps = []
     if footprint:
         fps = [OrderedDict([('name', footprint),
-                            ('incurrentlib', footprint in _nomes_pcblib()),
+                            ('incurrentlib', footprint in _nomes_footprint()),
                             ('current', True)])]
     novo = OrderedDict([
         ('name', velho.get('name', nome)),
@@ -1560,18 +1560,20 @@ def _salva_footprint(caminho, nome, footprint):
     return novo, None
 
 
-_pcblib_cache = {'mtime': 0, 'nomes': frozenset()}
+_pcblib_cache = {}
 
 
-def _nomes_pcblib():
-    """Os nomes de footprint que a PcbLib espelhada tem. Em cache pelo mtime: o arquivo tem
-    3,2 MB e esta rota pode ser chamada uma vez por vínculo."""
-    p = os.path.join(ROOT, 'Libs', 'pcblib.js')
+def _nomes_lib(arquivo):
+    """Os nomes de footprint de uma biblioteca de footprints no formato do pcblib.js (um
+    footprint por linha). Em cache pelo mtime: o espelho do Altium tem 3,2 MB e esta rota
+    pode ser chamada uma vez por vínculo."""
+    p = os.path.join(ROOT, 'Libs', arquivo)
     try:
         st = os.stat(p)
     except OSError:
         return frozenset()
-    if _pcblib_cache['mtime'] != st.st_mtime_ns:
+    c = _pcblib_cache.get(p)
+    if not c or c['mtime'] != st.st_mtime_ns:
         try:
             txt = io.open(p, encoding='utf-8', errors='replace').read()
         except OSError:
@@ -1586,9 +1588,25 @@ def _nomes_pcblib():
             m = re.match(r'\{\s*"name"\s*:\s*"((?:[^"\\]|\\.)*)"', corpo)
             if m:
                 nomes.add(m.group(1))
-        _pcblib_cache['nomes'] = frozenset(nomes)
-        _pcblib_cache['mtime'] = st.st_mtime_ns
-    return _pcblib_cache['nomes']
+        c = _pcblib_cache[p] = {'mtime': st.st_mtime_ns, 'nomes': frozenset(nomes)}
+    return c['nomes']
+
+
+def _nomes_pcblib():
+    """Os nomes de footprint que a PcbLib espelhada do Altium (Libs/pcblib.js) tem."""
+    return _nomes_lib('pcblib.js')
+
+
+def _nomes_pcblib_hub():
+    """Os footprints criados ou alterados no editor de footprint do hub (Libs/pcblib-hub.js,
+    hub-fplib.js). Desde 2026-10-14 o footprint pode nascer no hub (pedido do dono): estes
+    valem para vincular tanto quanto os do Altium, e passam na frente dele com o mesmo nome."""
+    return _nomes_lib('pcblib-hub.js')
+
+
+def _nomes_footprint():
+    """Todo footprint que se pode vincular: o do Altium e o do hub."""
+    return _nomes_pcblib() | _nomes_pcblib_hub()
 
 
 @bp.route('/footprints', methods=['GET'])
@@ -1599,7 +1617,8 @@ def api_footprints():
     coisas que o espelho não junta: quantos símbolos usam cada footprint hoje, e os nomes
     que alguém já vinculou mas que a PcbLib ainda não tem (cadastrados para desenhar depois).
     """
-    reais = sorted(_nomes_pcblib())
+    hub = _nomes_pcblib_hub()
+    reais = sorted(_nomes_pcblib() | hub)
     usos = {}
     try:
         caminho = os.path.join(ROOT, ESPELHO)
@@ -1617,7 +1636,7 @@ def api_footprints():
         pass
     nomes = sorted(set(reais) | set(usos))
     return {'ok': True, 'total': len(nomes),
-            'footprints': [{'name': n, 'desenhado': n in reais, 'usos': usos.get(n, 0)}
+            'footprints': [{'name': n, 'desenhado': n in reais, 'hub': n in hub, 'usos': usos.get(n, 0)}
                            for n in nomes]}
 
 
@@ -1645,15 +1664,14 @@ def api_footprint():
         return _erro('um componente tem exatamente um footprint: vieram %d'
                      % len(data['footprints']), 400)
 
-    # O FOOTPRINT VEM DO ALTIUM, E SO DE LA. Essa e a unica excecao ao fluxo do projeto:
-    # simbolo, valores, parametros e nomes nascem aqui e vao para o Altium; o footprint faz
-    # o caminho inverso, e por isso o hub so pode ESCOLHER entre os que a .PcbLib ja tem
-    # (espelhada em Libs/pcblib.js). Aceitar um nome que ela nao tem era fazer um footprint
-    # nascer no hub -- e o componente iria para o Altium apontando para nada.
-    # Vazio continua valendo: e desvincular, nao criar.
-    if fp and fp not in _nomes_pcblib():
-        return _erro('"%s" nao esta na biblioteca de footprints do Altium. O footprint vem '
-                     'de la: desenhe na PcbLib e sincronize. (Vazio desvincula.)' % fp, 400)
+    # O footprint vem da PcbLib do Altium (Libs/pcblib.js) OU da biblioteca do hub
+    # (Libs/pcblib-hub.js, o editor de footprint). Ate 2026-10-14 so a do Altium valia ("o hub
+    # escolhe, nunca cria"); o dono pediu criar e editar footprint no hub, e o que o editor
+    # grava vai para o Altium como o resto. Nome que nao esta em nenhuma das duas continua
+    # recusado: o componente iria para a placa apontando para nada. Vazio desvincula.
+    if fp and fp not in _nomes_footprint():
+        return _erro('"%s" nao esta na biblioteca de footprints (nem na do Altium nem na do hub). '
+                     'Crie em Biblioteca » Footprints » Novo footprint. (Vazio desvincula.)' % fp, 400)
     caminho = os.path.join(ROOT, ESPELHO)
     if not os.path.isfile(caminho):
         return _erro('%s não existe neste workspace' % ESPELHO, 404)
@@ -1665,7 +1683,7 @@ def api_footprint():
     if erro:
         return _erro(erro, 404)
     return {'ok': True, 'simbolo': sim, 'footprint': fp,
-            'desenhado': bool(fp) and fp in _nomes_pcblib(),
+            'desenhado': bool(fp) and fp in _nomes_footprint(),
             'footprints': novo.get('footprints') or [],
             'avisos': []}
 
@@ -1705,15 +1723,14 @@ def api_almox_footprint():
     fam, comp, fp = fam.strip(), comp.strip(), (fp or '').strip()
 
 
-    # O FOOTPRINT VEM DO ALTIUM, E SO DE LA. Essa e a unica excecao ao fluxo do projeto:
-    # simbolo, valores, parametros e nomes nascem aqui e vao para o Altium; o footprint faz
-    # o caminho inverso, e por isso o hub so pode ESCOLHER entre os que a .PcbLib ja tem
-    # (espelhada em Libs/pcblib.js). Aceitar um nome que ela nao tem era fazer um footprint
-    # nascer no hub -- e o componente iria para o Altium apontando para nada.
-    # Vazio continua valendo: e desvincular, nao criar.
-    if fp and fp not in _nomes_pcblib():
-        return _erro('"%s" nao esta na biblioteca de footprints do Altium. O footprint vem '
-                     'de la: desenhe na PcbLib e sincronize. (Vazio desvincula.)' % fp, 400)
+    # O footprint vem da PcbLib do Altium (Libs/pcblib.js) OU da biblioteca do hub
+    # (Libs/pcblib-hub.js, o editor de footprint). Ate 2026-10-14 so a do Altium valia ("o hub
+    # escolhe, nunca cria"); o dono pediu criar e editar footprint no hub, e o que o editor
+    # grava vai para o Altium como o resto. Nome que nao esta em nenhuma das duas continua
+    # recusado: o componente iria para a placa apontando para nada. Vazio desvincula.
+    if fp and fp not in _nomes_footprint():
+        return _erro('"%s" nao esta na biblioteca de footprints (nem na do Altium nem na do hub). '
+                     'Crie em Biblioteca » Footprints » Novo footprint. (Vazio desvincula.)' % fp, 400)
     try:
         espelhos, fam_arq, sim_nome, k, i, j = _resolve_almox(fam, comp)
     except _ErroAlmox as e:
@@ -1752,7 +1769,7 @@ def api_almox_footprint():
     avisos.append('o Altium só vê o footprint novo no próximo sincronismo do almoxarifado '
                   '(as .SchLib são reescritas inteiras a partir do espelho)')
     return {'ok': True, 'familia': fam_arq, 'simbolo': sim_nome, 'componente': comp,
-            'footprint': fp, 'desenhado': bool(fp) and fp in _nomes_pcblib(),
+            'footprint': fp, 'desenhado': bool(fp) and fp in _nomes_footprint(),
             'avisos': avisos}
 
 

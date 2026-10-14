@@ -21,6 +21,14 @@
        nome    o footprint a abrir (da biblioteca do hub; senao do Altium; senao `fp`)
        fp      geometria de reserva (o footprint tirado do componente na placa)
        pcblib  o espelho do Altium (Libs/pcblib.js) para a lista; sem ele, so os do hub
+       host    EMBUTIDO: o editor mora dentro deste elemento (a sub-aba Biblioteca » Footprints do
+               hub), sem o fundo escuro por cima da tela; o desenho segue a vista de footprint do
+               hub (fundo --sunken, cores do HubDraw). Sem host e o modal de sempre (PCB e Esquema).
+       semLista  esconde o painel PCB Library da esquerda (no hub a lista e a galeria da sub-aba)
+       fechaTxt  o rotulo do botao de fechar (embutido: "Voltar a galeria")
+       botoes  [{txt, titulo, pri, fn(ctrl)}] botoes a mais na barra de titulo (ex.: Aplicar ao
+               componente); ctrl = {fp(), sujo(), salvar(), fechar()}
+       aoMontar(ctrl)  chamado com o controle assim que o editor existe
 */
 (function (root) {
 'use strict';
@@ -102,10 +110,21 @@ const CSS = `
 .fpe-menu button{display:flex; width:100%; gap:8px; padding:5px 8px; border:0; border-radius:4px; background:transparent; color:var(--text); text-align:left; cursor:pointer; font-size:12px;}
 .fpe-menu button:hover{background:rgba(var(--tint),.09);}
 .fpe-menu kbd{margin-left:auto; font:10.5px var(--mono); color:var(--text-2);}
+/* EMBUTIDO na sub-aba Footprints da Biblioteca: ocupa o corpo da vista, sem moldura de janela */
+.fpe-embut{display:flex; flex:1; min-height:0; min-width:0;}
+.fpe-embut[hidden]{display:none !important;}
+.fpe-lib[hidden]{display:none !important;}
+.fpe-embut > .fpe{min-width:0; max-width:100%;}
+.fpe-embut .fpe-tit{flex-wrap:wrap; row-gap:4px;}
+.fpe-embut .fpe-tit .dir{flex-wrap:wrap; justify-content:flex-end;}
+.fpe-embut .fpe-prop{width:270px;}
+.fpe-embut > .fpe{border:0; border-radius:0; box-shadow:none;}
+.fpe-embut .fpe-vp{background:var(--sunken, #1b1b1b);}
+.fpe-embut .fpe-x{width:auto; padding:0 10px; font-size:12px; border:1px solid var(--edge);}
 `;
 
 /* as cores das camadas sao as de fabrica do Altium (o desenho nao segue o tema, como a vista PCB) */
-const COR = { fundo:'#000000', grade:'#1f1f1f', gradeF:'#333333', Top:'#ff0000', Bottom:'#0000ff', Multi:'#c0c0c0',
+const CORES = { fundo:'#000000', grade:'#1f1f1f', gradeF:'#333333', Top:'#ff0000', Bottom:'#0000ff', Multi:'#c0c0c0',
               furo:'#3a3a3a', silk:'#ffff00', corpo:'#00c8d2', sel:'#ffffff', origem:'#ffffff', janela:'#3d8bff' };
 const CAMADAS = [['Top', 'Top Layer'], ['Bottom', 'Bottom Layer'], ['Multi', 'Multi-Layer'], ['TopOverlay', 'Top Overlay'], ['Corpo', 'Mechanical (3D)']];
 const GRADES = [[0.01, '0.01 mm'], [0.05, '0.05 mm'], [0.1, '0.1 mm'], [0.25, '0.25 mm'], [0.5, '0.5 mm'], [1, '1 mm'],
@@ -119,6 +138,14 @@ function bt(cls, txt, fn, titulo){ const b = el('button', cls, txt); b.type = 'b
 const dlg = () => (typeof HubDialog !== 'undefined' ? HubDialog : null);
 const toast = (m, k, ms) => { const d = dlg(); if (d) d.toast(m, k || 'info', ms || 2400); };
 
+function corDoHub(){
+  const tk = n => { try { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); } catch (e) { return ; } };
+  const P = (root.HubDraw && root.HubDraw.PCB) || {};
+  return Object.assign({}, CORES, { fundo:tk('--sunken') || P.bg || '#1b1b1b', grade:'rgba(255,255,255,0.06)', gradeF:'rgba(255,255,255,0.13)',
+    Top:P.Top || CORES.Top, Bottom:P.Bottom || CORES.Bottom, Multi:P.Multi || CORES.Multi, silk:P.TopOverlay || CORES.silk,
+    janela:tk('--hi') || CORES.janela });
+}
+
 let cssPosto = false;
 function poeCss(){ if (cssPosto) return; cssPosto = true; const s = el('style'); s.textContent = CSS; document.head.append(s); }
 
@@ -131,6 +158,10 @@ function abre(opcoes){
 
 async function inicia(o, resolve){
   const HF = root.HubFpLib;
+  const embutido = !!(o.host && o.host.nodeType === 1);
+  /* embutido, o desenho e o da vista de footprint do hub (hub.html » libFpCv): fundo --sunken e
+     as camadas do HubDraw; no modal fica o preto de fabrica do Altium, como a vista PCB */
+  const COR = embutido ? corDoHub() : CORES;
   const lib = HF ? await HF.carrega() : { footprints:[], models:{} };
   const alt = o.pcblib || root.pcblib || { footprints:[] };
   const salvos = [];
@@ -145,7 +176,7 @@ async function inicia(o, resolve){
   try { const g = parseFloat(localStorage.getItem('altiumhub.fpe.grade')); if (g > 0) E.grade = g; if (localStorage.getItem('altiumhub.fpe.unid') === 'mil') E.unid = 'mil'; } catch (e) { /* sem storage */ }
 
   /* ---------- DOM ---------- */
-  const fundo = el('div', 'fpe-fundo');
+  const fundo = el('div', embutido ? 'fpe-embut' : 'fpe-fundo');
   const caixa = el('div', 'fpe'); fundo.append(caixa);
   const tit = el('div', 'fpe-tit');
   const tNome = el('span', 'nm');
@@ -154,8 +185,18 @@ async function inicia(o, resolve){
   seg.append(b2, b3);
   const bSalvar = bt('fpe-b pri', 'Salvar', () => salvar(), 'Grava na biblioteca do hub (Ctrl+S)');
   const bSalvarComo = bt('fpe-b', 'Salvar como…', () => salvarComo());
-  const bFecha = bt('fpe-x', '✕', () => fechar(), 'Fechar');
-  const dir = el('div', 'dir'); dir.append(seg, bSalvarComo, bSalvar, bFecha);
+  const bFecha = bt('fpe-x', o.fechaTxt || '✕', () => fechar(), embutido ? 'Fecha o editor e volta para a galeria de footprints' : 'Fechar');
+  const dir = el('div', 'dir'); dir.append(seg, bSalvarComo, bSalvar);
+  const ctrl = { fp:() => E.fp, sujo:() => E.sujo, salvar:n => salvar(n), fechar:() => fechar(), podeSair:() => podeSair(),
+                 carregaFp:(n, reserva) => carregaFp(n, reserva), novo:() => novoFp(), modo:m => modo(m), host:o.host || null,
+                 atualiza:() => { titulo(); status(); }, lib:() => lib };
+  const bExtras = [];
+  for (const x of (o.botoes || [])) {
+    if (!x || !x.txt) continue;
+    const b = bt('fpe-b' + (x.pri ? ' pri' : ''), x.txt, () => x.fn && x.fn(ctrl), x.titulo || '');
+    b._x = x; bExtras.push(b); dir.append(b);
+  }
+  dir.append(bFecha);
   tit.append(el('b', null, o.titulo || 'PCB Library'), tNome, dir);
 
   const corpo = el('div', 'fpe-corpo');
@@ -186,9 +227,10 @@ async function inicia(o, resolve){
   centro.append(barra, vp, abas, st);
   /* propriedades */
   const pr = el('div', 'fpe-prop');
+  if (o.semLista) pl.hidden = true;
   corpo.append(pl, centro, pr);
   caixa.append(tit, corpo);
-  document.body.append(fundo);
+  (embutido ? o.host : document.body).append(fundo);
   const arquivo = el('input'); arquivo.type = 'file'; arquivo.accept = '.step,.stp,.STEP,.STP'; arquivo.hidden = true; caixa.append(arquivo);
 
   /* ---------- barra de ferramentas ---------- */
@@ -1083,6 +1125,10 @@ async function inicia(o, resolve){
     stGrade.textContent = 'Grade ' + (GRADES.find(g => Math.abs(g[0] - E.grade) < 1e-9) || [0, fmt(E.grade)])[1];
     stCont.textContent = E.fp.pads.length + ' pads · ' + E.fp.bodies.length + ' corpo(s) 3D';
     bSalvar.disabled = !E.sujo;
+    for (const b of bExtras) {
+      if (typeof b._x.rotulo === 'function') { try { b.textContent = b._x.rotulo(ctrl); } catch (e) { /* ok */ } }
+      if (typeof b._x.ativo === 'function') { try { b.disabled = !b._x.ativo(ctrl); } catch (e) { /* ok */ } }
+    }
   }
 
   /* ---------- salvar / fechar ---------- */
@@ -1116,20 +1162,24 @@ async function inicia(o, resolve){
     if (!nome) return;
     await salvar(nome);
   }
-  async function fechar(){
-    if (!(await podeSair())) return;
+  async function fechar(forca){
+    if (forca !== true && !(await podeSair())) return false;
     document.removeEventListener('keydown', tecla, true);
     if (root.HubFpEditor.atual && root.HubFpEditor.atual.E === E) root.HubFpEditor.atual = null;
     if (ro) ro.disconnect();
     if (E.v3) E.v3.destroi();
     fundo.remove();
     resolve({ salvos, lib });
+    return true;
   }
 
   /* ---------- teclado (captura: a vista de baixo nao ve nada enquanto o editor esta aberto) ---------- */
   function tecla(e){
     const scrim = document.querySelector('.hd-scrim');
     if (scrim && !scrim.hidden) return;                  /* um modal do hub por cima: e dele */
+    /* embutido, o resto do hub continua na tela: so e do editor a tecla com o foco DENTRO dele
+       (o canvas pega o foco no clique) -- a busca da esquerda e as outras abas seguem com as suas */
+    if (embutido && (!fundo.isConnected || fundo.hidden || !fundo.contains(document.activeElement))) return;
     e.stopPropagation();
     const t = e.target;
     const campoTxt = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT');
@@ -1192,6 +1242,7 @@ async function inicia(o, resolve){
   mede(); enquadra();
   setTimeout(() => cv.focus(), 30);
   if (o.modo3d) modo('3d');
+  if (typeof o.aoMontar === 'function') { try { o.aoMontar(ctrl); } catch (e) { console.warn('aoMontar', e); } }
   /* gancho de teste (o smoke por CDP), como o __hubPcb da vista PCB: nao e contrato */
   root.HubFpEditor.atual = { E, recebeStep, modo, salvar, fechar, ferramenta, carregaFp:n => carregaFp(n),
     estado:() => ({ nome:E.fp.name, sujo:E.sujo, modo:E.modo, tool:E.tool, pads:E.fp.pads.length, silk:E.fp.silk.length,

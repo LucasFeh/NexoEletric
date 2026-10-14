@@ -138,7 +138,9 @@ function repetidos(fp){
 function serializa(lib){
   const L = normaliza(JSON.parse(JSON.stringify(lib)));
   for (const f of L.footprints) { f.bbox = bbox(f); if (!Array.isArray(f.bodies)) f.bodies = []; }
-  const fps = L.footprints.map(f => JSON.stringify(f));
+  /* o `name` PRIMEIRO na linha: o servidor acha o footprint pelo primeiro {"name": da linha
+     (symserver.py » _nomes_lib), e os pads tambem tem `name` */
+  const fps = L.footprints.map(f => JSON.stringify(Object.assign({ name:f.name }, f)));
   return 'var pcblibHub = {\n"format":' + JSON.stringify(FORMATO) + ',\n"units":"mm",\n"generated":' +
     JSON.stringify(new Date().toISOString()) + ',\n"models":' + JSON.stringify(L.models) + ',\n"footprints":[\n' +
     fps.join('\n,') + '\n]};\n';
