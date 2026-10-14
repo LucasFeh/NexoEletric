@@ -95,6 +95,20 @@ const MAPA = {
   /* Toolbars » Customize e Help */
   'PLClient:CustomizeResources': A('atalhos'), 'PLClient:HelpShortcutKeys': A('ajuda'), 'PLClient:HelpAbout': A('sobre'),
 };
+/* a vista Esquema (schframe.js » fazAcao): os comandos do Altium que ela ja faz */
+const MAPA_SCH = {
+  'PLWorkspaceManager:SaveDocument': A('salvar'), 'PLWorkspaceManager:SaveAll': A('salvar'),
+  'PLSch:Undo': A('desfazer'), 'PLSch:Redo': A('refazer'),
+  'PLSch:SelectAllObjects': A('tudo'), 'PLSch:DeleteObjects': A('apagar', 'sel'),
+  'PLSch:RotateSelectedObjectsCCW': A('girar', 'sel'),
+  'PLSch:ZoomAll': A('enquadrar'), 'PLSch:ZoomDocument': A('enquadrar'),
+  'PLSch:ToggleVisibleGrid': A('grade'),
+  'PLSch:PlacePart': A('add'), 'PLSch:PlacePowerPort': A('terra'), 'PLSch:PlaceWire': A('fio'),
+  'PLSch:PlaceNetLabel': A('rotulo'), 'PLSch:PlaceNoERCGeneric': A('noerc'),
+  'PLSch:SetTemplateFromLocal': A('template'), 'PLSch:DocumentPreferencesSchDocumentOptions': A('folha'),
+};
+/* o rotulo no idioma do hub (hub-menutrad.js); sem o modulo, o do Altium */
+const TR = r => (typeof HubMenuTrad !== 'undefined' ? HubMenuTrad.t(r) : r);
 /* o porque do cinza, quando nao e so "ainda nao existe" */
 const PORQUE = {
   'PLPCB:PlaceComponent': 'componente entra pelo esquema: Design » Import Changes (D,I)',
@@ -116,12 +130,12 @@ const DINAMICOS = {
 
 /* ============================== CSS (no tema do hub) ============================== */
 const CSS = `
-#apMenubar{flex:none; display:flex; align-items:stretch; height:26px; padding:0 4px; background:var(--panel, var(--surface-2));
+#apMenubar, .apbarra{flex:none; display:flex; align-items:stretch; height:26px; padding:0 4px; background:var(--panel, var(--surface-2));
   border-bottom:1px solid var(--border, var(--edge)); user-select:none; font:12.5px var(--font);}
-#apMenubar .apb{padding:0 9px; border:0; background:transparent; color:var(--fg, var(--text)); cursor:default; font:inherit; border-radius:3px; margin:2px 0;}
-#apMenubar .apb:hover, #apMenubar .apb.on{background:rgba(var(--tint),0.10);}
-#apMenubar .apb u{text-decoration:none;}
-#apMenubar.alt .apb u{text-decoration:underline;}
+.apbarra .apb{padding:0 9px; border:0; background:transparent; color:var(--fg, var(--text)); cursor:default; font:inherit; border-radius:3px; margin:2px 0;}
+.apbarra .apb:hover, .apbarra .apb.on{background:rgba(var(--tint),0.10);}
+.apbarra .apb u{text-decoration:none;}
+.apbarra.alt .apb u{text-decoration:underline;}
 .apm{position:fixed; z-index:70; min-width:220px; max-width:420px; max-height:calc(100vh - 12px); overflow-y:auto; padding:3px;
   background:var(--panel, var(--surface-2)); border:1px solid var(--border, var(--edge)); border-radius:5px;
   box-shadow:var(--shadow-menu); font:12.5px var(--font); color:var(--fg, var(--text)); user-select:none;}
@@ -240,6 +254,8 @@ const CONFLITO_TEM = new Set(['ignorar', 'contornar', 'parar']);
 function instala(V) {
   poeCss();
   const DNA = (typeof HubAltiumDNA !== 'undefined') ? HubAltiumDNA : null;
+  const VISTA = V.vista || 'pcb';
+  const MAP = VISTA === 'sch' ? MAPA_SCH : MAPA;
   const pilha = [];                 /* os niveis abertos: {el, itens, idx} */
   let barraEl = null, barraAberta = -1, porTeclado = false;
 
@@ -262,7 +278,7 @@ function instala(V) {
     return g ? g.id : '';
   }
   function itemDoPlid(n, c, modo) {
-    const rot = produto(n.rotulo);
+    const rot = produto(TR(n.rotulo));
     const it = { rot, letra:ultimaLetra(n.acelerador), plid:n.plid, dica:'' };
     const gid = gradeDoPlid(n.plid);
     if (gid !== null) {
@@ -270,7 +286,7 @@ function instala(V) {
       else { it.off = true; it.dica = 'passo de grade que o hub não tem'; }
       return it;
     }
-    const m = MAPA[n.plid];
+    const m = MAP[n.plid];
     if (m) {
       const ok = condicaoOk(m.q, c);
       const t = V.teclaDe(m.a) || '';
@@ -298,17 +314,17 @@ function instala(V) {
       if (n.separador) { if (out.length && out[out.length - 1] !== '-') out.push('-'); continue; }
       if (n.dinamico) continue;
       if (n.filhos) {
-        const rot = produto(n.rotulo);
+        const ing = produto(n.rotulo), rot = produto(TR(n.rotulo));
         if (modo === 'contexto') {
-          if (rot === 'Component Actions' && !c.comp) continue;
-          if (rot === 'Net Actions' && !c.net) continue;
-          if (rot === 'Polygon Actions' && !c.poly) continue;
-          if (rot === 'Align' && !c.sel) continue;
+          if (ing === 'Component Actions' && !c.comp) continue;
+          if (ing === 'Net Actions' && !c.net) continue;
+          if (ing === 'Polygon Actions' && !c.poly) continue;
+          if (ing === 'Align' && !c.sel) continue;
         }
         let filhos = converte(n.filhos, c, modo);
-        const din = DINAMICOS[rot];
+        const din = VISTA === 'pcb' ? DINAMICOS[ing] : null;
         if (din) {
-          const extra = din.map(d => ({ rot:d.rotulo, f:() => V.fazAcao(d.acao), tecla:V.teclaDe(d.acao) || '', acao:d.acao }));
+          const extra = din.map(d => ({ rot:TR(d.rotulo), f:() => V.fazAcao(d.acao), tecla:V.teclaDe(d.acao) || '', acao:d.acao }));
           filhos = extra.concat(filhos.length && filhos[0] !== '-' ? ['-'] : [], filhos);
         }
         filhos = limpaSep(filhos);
@@ -404,6 +420,15 @@ function instala(V) {
 
   /* ---------------- teclado com menu aberto: setas, Enter, Esc e a letra sublinhada ---------------- */
   let altSolo = false;
+  /* a vista embutida no hub do desktop nao tem barra propria: Alt+letra e F10 abrem a do topo */
+  function paraOTopo(e) {
+    if (!(e.key === 'F10' || (e.altKey && !e.ctrlKey && !e.metaKey && e.key.length === 1))) return false;
+    let topo = null;
+    try { topo = window.parent !== window && window.parent.EletricMenubar; } catch (er) { topo = null; }
+    if (!topo || !topo.tecla(e)) return false;
+    e.preventDefault(); e.stopPropagation();
+    return true;
+  }
   function modoAlt(v) { if (barraEl) barraEl.classList.toggle('alt', !!v); }
   document.addEventListener('keyup', e => {
     if (e.key === 'Alt' && altSolo && barraEl && !pilha.length) { e.preventDefault(); modoAlt(!barraEl.classList.contains('alt')); }
@@ -412,12 +437,12 @@ function instala(V) {
   function tecla(e) {
     altSolo = e.key === 'Alt' && !e.ctrlKey && !e.shiftKey && !e.metaKey;
     if (!pilha.length) {
-      if (!barraEl) return false;
+      if (!barraEl) return paraOTopo(e);
       if (e.key === 'F10' && !e.ctrlKey && !e.altKey) { e.preventDefault(); porTeclado = true; abreBarra(0, true); return true; }
       const naAlt = barraEl.classList.contains('alt');
       if ((naAlt || (e.altKey && !e.ctrlKey)) && e.key.length === 1) {
         const L = e.key.toUpperCase();
-        const i = botoesBarra.findIndex(x => (ultimaLetra(x.n.acelerador) || x.n.rotulo[0]).toUpperCase() === L);
+        const i = botoesBarra.findIndex(x => (x.n.letra || '').toUpperCase() === L);
         modoAlt(false);
         if (i >= 0) { e.preventDefault(); e.stopPropagation(); porTeclado = true; abreBarra(i, true); return true; }
         return false;
@@ -479,7 +504,7 @@ function instala(V) {
   /* ---------------- o botao direito ---------------- */
   function arvore(qual, rotulo) {
     if (!DNA) return null;
-    const pop = DNA.menu('pcb', 'popups') || [];
+    const pop = DNA.menu(VISTA, 'popups') || [];
     const n = pop.find(x => x.rotulo === rotulo);
     return n ? n.filhos : null;
   }
@@ -507,10 +532,10 @@ function instala(V) {
       }
       return null;
     };
-    const principal = DNA.menu('pcb', 'principal') || [];
+    const principal = DNA.menu(VISTA, 'principal') || [];
     let n = principal.find(x => String(x.popup || '').toUpperCase() === L) || null;
     if (!n) {
-      const pops = (DNA.menu('pcb', 'popups') || []).filter(x => !/^Right Mouse/.test(x.rotulo));
+      const pops = (DNA.menu(VISTA, 'popups') || []).filter(x => !/^Right Mouse/.test(x.rotulo));
       n = busca(pops) || busca(principal);
     }
     return n;
@@ -521,36 +546,53 @@ function instala(V) {
     fecha();
     porTeclado = true;
     const itens = converte(n.filhos, V.ctx(), 'barra');
-    const r = mostraNivel(itens, sx, sy, { titulo:produto(n.rotulo) });
+    const r = mostraNivel(itens, sx, sy, { titulo:produto(TR(n.rotulo)) });
     primeiro(r);
     return true;
   }
 
   /* ---------------- a barra de menus (File Edit View Project Place Design Tools Route Reports Window Help) ---------------- */
-  let botoesBarra = [];
-  function barra(box) {
-    if (!box || !DNA) return;
+  let botoesBarra = [], fonteBarra = null;
+  /* os menus de cima da vista: [{ ing, rot, letra, filhos }] -- 'ing' e o nome do Altium (a chave
+     da fusao com os menus do app), 'rot' o do idioma da vez, 'letra' a do Altium (F, E, V...) */
+  function itensBarra() {
+    if (!DNA) return [];
+    return (DNA.menu(VISTA, 'principal') || []).map(n => ({ ing:produto(n.rotulo), rot:produto(TR(n.rotulo)),
+      letra:ultimaLetra(n.acelerador) || n.rotulo[0], filhos:converte(n.filhos, V.ctx(), 'barra') }));
+  }
+  /* fonte: funcao que devolve a lista de cima (o topo do hub passa a sua); sem ela, a da vista */
+  function barra(box, fonte) {
+    if (!box) return;
     barraEl = box;
-    box.id = 'apMenubar';
-    box.textContent = '';
+    fonteBarra = typeof fonte === 'function' ? fonte : itensBarra;
+    box.id = box.id || 'apMenubar';
+    box.classList.add('apbarra');
     box.setAttribute('role', 'menubar');
-    botoesBarra = (DNA.menu('pcb', 'principal') || []).map((n, i) => {
+    redesenhaBarra();
+  }
+  function redesenhaBarra() {
+    if (!barraEl) return;
+    fecha();
+    barraEl.textContent = '';
+    botoesBarra = (fonteBarra() || []).map((x, i) => {
       const b = el('button', 'apb');
       b.type = 'button';
-      b.append(rotuloComLetra(produto(n.rotulo), ultimaLetra(n.acelerador) || n.rotulo[0]));
+      b.append(rotuloComLetra(x.rot, x.letra));
+      if (x.letra && x.rot.toUpperCase().indexOf(x.letra.toUpperCase()) < 0) b.title = 'Alt+' + x.letra + ' (' + x.ing + ')';
       b.addEventListener('mousedown', e => { e.preventDefault(); if (barraAberta === i) fecha(); else { porTeclado = false; abreBarra(i, false); } });
       b.addEventListener('mouseenter', () => { if (barraAberta >= 0 && barraAberta !== i) abreBarra(i, false); });
-      box.append(b);
-      return { b, n };
+      barraEl.append(b);
+      return { b, n:x };
     });
   }
   function abreBarra(i, teclado) {
     fechaDe(0);
+    const lista = fonteBarra ? fonteBarra() : [];
+    const x = botoesBarra[i], dado = lista[i]; if (!x || !dado) return;
     barraAberta = i;
     pintaBarra();
-    const x = botoesBarra[i]; if (!x) return;
     const r = x.b.getBoundingClientRect();
-    const reg = mostraNivel(converte(x.n.filhos, V.ctx(), 'barra'), r.left, r.bottom + 1);
+    const reg = mostraNivel(dado.filhos || [], r.left, r.bottom + 1);
     if (teclado) primeiro(reg);
   }
   function pintaBarra() { botoesBarra.forEach((x, k) => x.b.classList.toggle('on', k === barraAberta)); }
@@ -856,8 +898,9 @@ function instala(V) {
     vai(st.pagina);
   }
 
-  return { contexto, popup, aberto, fecha, preferencias, barra, tecla, temPopup:l => !!popupDaTecla(l) };
+  return { contexto, popup, aberto, fecha, preferencias, barra, redesenhaBarra, itensBarra, tecla, temPopup:l => !!popupDaTecla(l),
+           abre:(itens, x, y, opt) => { fecha(); return mostraNivel(itens, x, y, opt || {}); }, vista:VISTA };
 }
 
-return { instala, MAPA, RODA, RODA_CASA, RODA_ALTIUM, CURSORES, CONFLITO_ALTIUM };
+return { instala, MAPA, MAPA_SCH, RODA, RODA_CASA, RODA_ALTIUM, CURSORES, CONFLITO_ALTIUM };
 });

@@ -5619,8 +5619,18 @@ window.addEventListener('keydown', e => {
   const tk = normalizaTecla(e);
   let acao = ATALHOS.porTecla[tk];
   const ld = leitorSch();
+  /* a letra que abre menu no Altium (P Place, D Design, T Tools...): o menu do Esquema no
+     cursor e a letra seguinte escolhe -- quando ela nao e de nenhuma acao, ou e so o comeco de
+     uma sequencia (a predefinicao Padrao Altium) */
+  const comeco = ATALHOS.prefixos instanceof Set && ATALHOS.prefixos.has(tk);
+  if (ALT_SCH && /^[A-Z]$/.test(tk) && !(ld && ld.pendente()) && (!acao || comeco) && ALT_SCH.temPopup(tk)) {
+    e.preventDefault();
+    const p = ultimoMouseSch || { x:innerWidth / 2, y:innerHeight / 2 };
+    ALT_SCH.popup(tk, p.x, p.y);
+    return;
+  }
   if (ld) {
-    if (ld.pendente() || (ATALHOS.prefixos instanceof Set && ATALHOS.prefixos.has(tk))) {
+    if (ld.pendente() || comeco) {
       e.preventDefault(); ld.tecla(tk); return;
     }
   }
@@ -5660,6 +5670,7 @@ function fazAcao(id){
     case 'refazer':   redo(); return;
     case 'tudo':      selectOnly(sheetItems()); return;
     case 'rotear':    return rotearNoArrasto();
+    case 'salvar':    saveAll(); return;
   }
   return false;
 }
@@ -6039,6 +6050,22 @@ function leitorSch(){
 window.addEventListener('storage', e => {
   if (e.key === HA.CHAVE || e.key === null) ATALHOS = mapaAtalhos(HA.carrega());
 });
+/* ------- os menus do Altium do Esquema -------
+   Pedido do dono (2026-10-14): os menus mudam com a vista, como no Altium. A arvore e a
+   MNSchematicMenu do advsch.rcs (hub-altiumdna.js), no idioma do hub (hub-menutrad.js); o
+   desenho e o teclado sao os do hub-pcbaltium.js. Embutida no hub do desktop, a barra de cima e
+   a do topo (hub-menubar.js); aqui ficam as letras que abrem menu no cursor. */
+let ALT_SCH = null, ultimoMouseSch = null;
+window.addEventListener('mousemove', e => { ultimoMouseSch = { x:e.clientX, y:e.clientY }; }, true);
+if (typeof HubPcbAltium !== 'undefined' && typeof HubAltiumDNA !== 'undefined') {
+  ALT_SCH = HubPcbAltium.instala({
+    vista:'sch', fazAcao:id => fazAcao(id), teclaDe:id => (ATALHOS.porAcao && ATALHOS.porAcao[id]) || '',
+    ctx:() => ({ sel:sel.size, lean:false }), grades:() => [],
+    toast:(t, tipo, ms) => { if (typeof HubDialog !== 'undefined') HubDialog.toast(t, tipo || 'info', ms); },
+  });
+  window.__hubMenus = { vista:'sch', itens:() => ALT_SCH.itensBarra(), popup:(l, x, y) => ALT_SCH.popup(l, x, y) };
+  try { if (window.parent !== window && window.parent.EletricMenubar) window.parent.EletricMenubar.vistaPronta(window); } catch (e) {}
+}
 /* ------- o tema -------
    Pelo mesmo `storage`, o hub-tema.js troca o tema do CSS sozinho e avisa com 'hubtema'. O
    que o CSS nao alcanca e o que esta pintado em canvas: a mesa (leMesa, la em cima). */

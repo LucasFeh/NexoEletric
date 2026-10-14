@@ -470,16 +470,20 @@ function fazVista(nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS, ALTIUM, PADRAO_AL
   /* ── o que esta gravado nesta maquina ──
      Mesmo molde de toda preferencia de vista: try/catch e o padrao no codigo. Uma chave
      estragada volta como {} e o mapaAtalhos faz o resto. */
+  /* 2026-10-14, pedido do dono: o padrao e o do ALTIUM ("T, D, R abre o rule check, quero que
+     essa identidade venha do altium"). Sem nada gravado nesta maquina vale a predefinicao Padrao
+     Altium; o botao "Padrao EletricHUB" grava '{}' (a tabela da casa) e ela fica. */
   function carrega(){
     try {
-      const v = JSON.parse(localStorage.getItem(CHAVE) || '{}');
+      const cru = localStorage.getItem(CHAVE);
+      if (cru === null && PADRAO_ALTIUM) return predefinicao('altium');
+      const v = JSON.parse(cru || '{}');
       return v && typeof v === 'object' ? v : {};
     } catch (e) { return {}; }
   }
   function grava(salvos){
     try {
-      if (salvos && Object.keys(salvos).length) localStorage.setItem(CHAVE, JSON.stringify(salvos));
-      else localStorage.removeItem(CHAVE);
+      localStorage.setItem(CHAVE, JSON.stringify(salvos && typeof salvos === 'object' ? salvos : {}));
     } catch (e) {}
   }
 
@@ -840,14 +844,14 @@ function pane(box, o){
       g.setAttribute('role', 'row');
       const cont = el('span', 'cont', (vis.length === todas.length ? todas.length + ' atalhos' : vis.length + ' de ' + todas.length)
         + (usr ? ' · ' + usr + ' trocado' + (usr > 1 ? 's' : '') : ''));
-      const rs = el('button', 'btn btn-ghost btn-sm', 'Restaurar o padrão');
+      const rs = el('button', 'btn btn-ghost btn-sm', 'Padrão EletricHUB');
       rs.type = 'button';
-      rs.title = 'devolve as teclas da ' + v.QUANDO + ' ao padrão (a outra vista não muda)';
+      rs.title = 'as teclas de antes do EletricHUB na ' + v.QUANDO + ' (W trilha, T texto…; a outra vista não muda)';
       /* com lixo na chave (acao que nao existe, tecla recusada) o botao continua servindo para limpar */
-      rs.disabled = !usr && !Object.keys(salvos[v.nome]).length;
+      rs.disabled = v.qualPredefinicao(salvos[v.nome]) === 'casa' && !Object.keys(salvos[v.nome]).length;
       rs.onclick = () => {
         salvos[v.nome] = {}; v.grava({}); desenha();
-        avisa('atalhos da ' + v.QUANDO + ' de volta ao padrão', 'ok');
+        avisa('atalhos da ' + v.QUANDO + ': padrão EletricHUB', 'ok');
       };
       g.append(el('span', 'nome', v.QUANDO), cont);
       /* a predefinicao "Padrao Altium" (2026-10-13): troca as teclas da vista pelas do Altium 21
@@ -857,7 +861,7 @@ function pane(box, o){
         const pa = el('button', 'btn btn-ghost btn-sm', 'Padrão Altium');
         pa.type = 'button';
         pa.title = 'troca as teclas da ' + v.QUANDO + ' pelas do Altium Designer 21 (P,T trilha, T,D DRC…); '
-          + '“Restaurar o padrão” volta para as da casa';
+          + '“Padrão EletricHUB” volta para as da casa';
         pa.disabled = v.qualPredefinicao(salvos[v.nome]) === 'altium';
         pa.onclick = () => {
           const p = v.predefinicao('altium');
