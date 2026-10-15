@@ -19,6 +19,9 @@
 
    API
      HubPcb3dVista.cria(host, {aoClicar, aoMenu, fundo}) -> Promise<vista>
+       aoMenu(ref, ev, corpo): corpo = o corpo 3D sob o cursor ({kind, model, modeloChave, modelUrl,
+       origem, nexo, name}, o que o HubPcb3dModelo.corpos deu) ou null; cada grupo de corpo guarda
+       o mesmo em userData.corpo
        vista.cena({lacos, recortes, furos:[{x,y,r}], esp, bbox, pintaFace(ctx, lado), corpos, realce})
        vista.corpos(lista)          troca so os corpos (o componente andou)
        vista.realca(refs)           acende os corpos destes refs
@@ -258,7 +261,7 @@ async function cria(host, opcoes){
     if (a.andou) return;
     if (a.b === 0 && ED && selRef && !refSob(ev) && marcaPad(ev)) return;
     if (a.b === 0 && o.aoClicar) o.aoClicar(refSob(ev), ev);
-    if (a.b === 2 && !a.girar && o.aoMenu) o.aoMenu(refSob(ev), ev);
+    if (a.b === 2 && !a.girar && o.aoMenu) { const q = sobCursor(ev); o.aoMenu(q.ref, ev, q.corpo); }
   };
   cv.addEventListener('pointerup', solta);
   cv.addEventListener('pointercancel', () => { arr = null; });
@@ -270,13 +273,18 @@ async function cria(host, opcoes){
     orb.dist = Math.max(0.5, Math.min(50000, orb.dist * f));
     pede();
   }, { passive:false });
-  function refSob(ev){
+  function refSob(ev){ return sobCursor(ev).ref; }
+  /* o componente e o CORPO sob o cursor ({ref, corpo}): corpo = o userData.corpo do grupo
+     ({kind, model, modeloChave, modelUrl, origem, nexo, name, footprint?}) */
+  function sobCursor(ev){
     posiciona(); ray.setFromCamera(ndc(ev), cam);
     const hit = ray.intersectObjects([gCorpos], true)[0];
     let ob = hit && hit.object;
     while (ob && !(ob.userData && ob.userData.ref)) ob = ob.parent;
-    return ob ? ob.userData.ref : null;
+    return ob ? { ref:ob.userData.ref, corpo:ob.userData.corpo || null } : { ref:null, corpo:null };
   }
+  const infoCorpo = b => ({ kind:b.kind, owner:b.owner || '', model:b.model || '', modeloChave:b.modeloChave || '', modelUrl:b.modelUrl || '',
+    origem:b.origem || '', nexo:b.nexo || '', name:b.name || '', footprint:b.footprint || '', placeholder:!!b.placeholder });
 
   /* ---------- a placa ---------- */
   function limpa(g){
@@ -469,6 +477,7 @@ async function cria(host, opcoes){
       else if (b.kind === 'step') {
         const g = new T.Group();
         g.userData.ref = b.owner || '';
+        g.userData.corpo = infoCorpo(b);
         gCorpos.add(g);
         est.corpos++;
         if (!b.modelUrl) { est.falhas.push((b.owner || '?') + ': modelo sem arquivo'); continue; }
@@ -488,6 +497,7 @@ async function cria(host, opcoes){
       if (!m) continue;
       const sup = new T.Group();
       sup.userData.ref = b.owner || '';
+      sup.userData.corpo = infoCorpo(b);
       sup.add(m);
       gCorpos.add(sup);
       est.corpos++;

@@ -3372,6 +3372,8 @@ function extrasDoHub(w){
   }
   if (compsDaSel().length) it.push({ rot:'Virar de face', tecla:'L', f:() => transformaSelecao('vira') });
   if (compsDaSel().length === 1) it.push({ rot:'Editar footprint…', f:() => fazAcao('editarFp') });
+  if (compsDaSel().length === 1 && typeof HubNexo !== 'undefined') it.push({ rot:'Editar 3D no NexoCAD', f:() => fazAcao('nexoEditar3d') });
+  if (modo3d && typeof HubNexoPacote !== 'undefined') it.push({ rot:'Enviar placa ao NexoCAD', f:() => fazAcao('nexoPlaca') });
   it.push(modo3d ? { rot:'Voltar ao 2D', tecla:teclaDe('vista2d') || '2', f:() => fazAcao('vista2d') }
                  : { rot:'Ver em 3D', tecla:teclaDe('vista3d') || '3', f:() => fazAcao('vista3d') });
   if (SEL.length) it.push({ rot:'Girar 90°', tecla:teclaDe('girar'), f:() => transformaSelecao('gira') });
@@ -3927,24 +3929,58 @@ function pintaFace3d(c, lado){
   }
   pinta(L + 'Overlay', '#f4f4f4');
 }
-async function cena3d(){
-  if (!V3) return;
+/* os corpos 3D da placa efetiva, com a biblioteca do NexoCAD por cima (hub-nexo.js): a vista 3D,
+   o "Editar 3D no NexoCAD" e o pacote da placa usam a MESMA lista */
+async function corpos3d(){
   if (D3 === undefined) D3 = PROJ ? await globalDe('pcbmirror3d', 'Projects/' + encodeURIComponent(PROJ) + '/board3d.js') : null;
   if (LIB3D === undefined) LIB3D = await globalDe('pcblib3d', 'Libs/pcblib-3d.js');
   const esp = (D3 && isNum(D3.thickness) && D3.thickness > 0) ? D3.thickness : 1.6;
-  const furos = [];
-  const furo = p => { if (p && p.drill > 0 && isNum(p.x) && isNum(p.y)) furos.push({ x:p.x, y:p.y, r:p.drill / 2 }); };
-  for (const c of (EB.components || [])) for (const p of ((c && c.pads) || [])) furo(p);
-  for (const p of (EB.freepads || [])) furo(p);
-  for (const v of (EB.vias || [])) furo(v);
+  if (typeof HubNexo !== 'undefined') { try { await HubNexo.carrega(); } catch (e) { /* sem a biblioteca: as fontes de sempre */ } }
   const h = hubLib();
   let corpos = [];
   if (typeof HubPcb3dModelo !== 'undefined') {
     try {
       corpos = HubPcb3dModelo.corpos(EB, D3 || null, { pcblib3d:LIB3D || null, pcblib3dHub:h && typeof HubFpLib !== 'undefined' ? HubFpLib.lib3d(h) : null,
-        base:'Projects/' + encodeURIComponent(PROJ || '') + '/', baseLib:'Libs/', thickness:esp, board:B });
+        base:'Projects/' + encodeURIComponent(PROJ || '') + '/', baseLib:'Libs/', thickness:esp, board:B,
+        nexo:typeof HubNexo !== 'undefined' ? HubNexo.resolvedor() : null, projeto:PROJ || '' });
     } catch (e) { console.warn('3D: corpos', e); }
   }
+  return { corpos, esp };
+}
+/* Editar 3D no NexoCAD: o corpo STEP sob o cursor (no 3D) ou o primeiro do componente; sem STEP,
+   um item novo vinculado ao footprint. Salvou no NexoCAD: o HubNexo.aoMudar refaz o 3D */
+let CORPO_MENU = null, nexoDesliga = null;
+async function editar3dNexo(m){
+  if (typeof HubNexo === 'undefined') return;
+  const i = m ? model.comps.indexOf(m) : -1, ec = i >= 0 ? EB.components[i] : null;
+  if (!ec) { HubDialog.toast('escolha um componente', 'info'); return; }
+  const { corpos } = await corpos3d();
+  const meus = corpos.filter(b => b && b.owner === ec.ref);
+  const sob = CORPO_MENU && CORPO_MENU.owner === ec.ref && CORPO_MENU.kind === 'step' ? CORPO_MENU : null;
+  const b = sob || meus.find(x => x.kind === 'step' && (x.modelUrl || x.nexo)) || null;
+  const geometria = HubNexo.geometriaDeComp(ec);
+  const fp = ec.footprint || '';
+  if (b && b.nexo) return HubNexo.editar({ id:b.nexo });
+  if (b && b.modelUrl) return HubNexo.editar({ chave:b.modeloChave || '', url:b.modelUrl, nome:b.name || (fp + '.step'), footprint:fp, geometria });
+  return HubNexo.editar({ novo:true, footprint:fp, nome:fp || ec.ref, geometria });
+}
+async function enviaPlacaNexo(){
+  if (typeof HubNexoPacote === 'undefined' || typeof HubNexo === 'undefined') { HubDialog.toast('o envio ao NexoCAD (hub-nexopacote.js) não carregou nesta página', 'warn'); return; }
+  const { corpos, esp } = await corpos3d();
+  let r;
+  try { r = HubNexoPacote.monta(EB, { projeto:PROJ || '', espessura:esp, corpos, laser:typeof HubLaser !== 'undefined' ? HubLaser : null }); }
+  catch (e) { HubDialog.toast('não montei o pacote da placa: ' + (e && e.message || e), 'err', 5000); return; }
+  if (r.avisos.length) console.warn('NexoCAD: pacote', r.avisos);
+  return HubNexo.enviarPlaca(r.pacote);
+}
+async function cena3d(){
+  if (!V3) return;
+  const { corpos, esp } = await corpos3d();
+  const furos = [];
+  const furo = p => { if (p && p.drill > 0 && isNum(p.x) && isNum(p.y)) furos.push({ x:p.x, y:p.y, r:p.drill / 2 }); };
+  for (const c of (EB.components || [])) for (const p of ((c && c.pads) || [])) furo(p);
+  for (const p of (EB.freepads || [])) furo(p);
+  for (const v of (EB.vias || [])) furo(v);
   V3.cena({ lacos:lacosDe(EB), recortes:recortesDaTela().map(k => k.pts), furos, esp,
             bbox:EB.board && EB.board.bbox, pintaFace:pintaFace3d, corpos, realce:refsDaSel() });
 }
@@ -3964,7 +4000,8 @@ async function entra3d(){
           else if (ev.shiftKey) { if (selTem(a)) selTira(a); else selSoma(a); }
           else selSo([a]);
         },
-        aoMenu(ref, ev){
+        aoMenu(ref, ev, corpo){
+          CORPO_MENU = corpo || null;
           const a = ref ? alvoDoRef(ref) : null;
           if (a && !selTem(a)) selSo([a]);
           if (ALT) ALT.contexto(ev.clientX, ev.clientY, { primitivo:!!a, extras:extrasDoHub(null) });
@@ -3975,6 +4012,8 @@ async function entra3d(){
       HubDialog.toast('a vista 3D não abriu: ' + (e && e.message || e), 'err', 5000); return;
     }
   }
+  /* salvou no NexoCAD (a revisao da biblioteca mudou): o 3D se refaz, sem recarregar a pagina */
+  if (typeof HubNexo !== 'undefined' && !nexoDesliga) nexoDesliga = HubNexo.aoMudar(() => refaz3d());
   await cena3d();
   V3.pose(view.flip ? 'base' : 'topo');
   avisoRodape('3D — Shift+botão direito (ou arrastar) gira · botão direito arrasta · 0 topo · 8 isométrica · 9 gira 90° · 2 volta ao 2D');
@@ -3983,6 +4022,7 @@ async function entra3d(){
 function sai3d(){
   if (!modo3d) return;
   modo3d = false;
+  if (nexoDesliga) { nexoDesliga(); nexoDesliga = null; }
   $('v3d').hidden = true;
   avisoRodape('');
   try { cv.focus(); } catch (e) { /* ok */ }
@@ -4068,6 +4108,8 @@ function fazAcao(id, arg){
     case 'v3descer': if (V3 && modo3d) V3.inclina(-30); return;
     case 'v3gira90': if (V3 && modo3d) V3.gira(90); return;
     case 'editarFp': { const L = compsDaSel(); editaFootprint(L.length === 1 ? L[0] : null); return; }
+    case 'nexoEditar3d': { const L = compsDaSel(); const c = CORPO_MENU; editar3dNexo(L.length === 1 ? L[0] : null).finally(() => { if (CORPO_MENU === c) CORPO_MENU = null; }); return; }
+    case 'nexoPlaca': enviaPlacaNexo(); return;
     case 'gradeId': setGrade(arg); HubDialog.toast('grade ' + grade.rot, 'info', 1400); return;
     case 'desselecionar': selLimpa(); return;
     case 'selNet': { const n = netDaSel(); if (n) selecionaNets(new Set([n])); return; }

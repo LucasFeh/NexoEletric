@@ -142,7 +142,7 @@ const OCULTOS = new Set(['PLPCB:TASKINGPinSwap', 'PLPCB:ConvertToGeneric']);
 const DINAMICOS = {
   'Fabrication Outputs': [{ rotulo:'Gerber Files', acao:'gerber' }, { rotulo:'NC Drill Files', acao:'gerber' }],
   'Assembly Outputs': [{ rotulo:'Assembly Drawings', acao:'pdf' }],
-  'Export': [{ rotulo:'Gerber (.zip)', acao:'gerber' }, { rotulo:'PDF (layout)', acao:'pdf' }],
+  'Export': [{ rotulo:'Gerber (.zip)', acao:'gerber' }, { rotulo:'PDF (layout)', acao:'pdf' }, { rotulo:'Placa para o NexoCAD…', acao:'nexoPlaca' }],
 };
 
 /* ============================== CSS (no tema do hub) ============================== */
