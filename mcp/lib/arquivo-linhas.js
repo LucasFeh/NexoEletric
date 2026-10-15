@@ -1,4 +1,4 @@
-/* EletricHUB MCP - arquivo-linhas.js
+/* NexoEletric MCP - arquivo-linhas.js
    Os tres arquivos que a IA edita (changes.js, schematic.js, annotations.js) tem a mesma forma:
    um cabecalho, a abertura do array, UM OBJETO JSON POR LINHA e o fecho. O parser do Altium
    (DelphiScript) le linha a linha, e o usuario escreve no mesmo arquivo pelo hub. Por isso a

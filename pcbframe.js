@@ -4150,7 +4150,7 @@ function fazAcao(id, arg){
     case 'painelGrade': case 'boardInfo': if (tool !== 'select') setTool('select'); selLimpa(); if (painel) painel.mostra('props'); return;
     case 'preferencias': if (ALT) ALT.preferencias(); return;
     case 'atalhos': if (ALT) ALT.preferencias('Shortcuts'); return;
-    case 'sobre': HubDialog.toast('EletricHUB — vista PCB no padrão do Altium Designer 21', 'info', 3000); return;
+    case 'sobre': HubDialog.toast('NexoEletric — vista PCB no padrão do Altium Designer 21', 'info', 3000); return;
     case 'trilha': setTool(tool === 'trilha' ? 'select' : 'trilha'); return;
     case 'via':
       if (tool === 'trilha' && draft && draft.est) { rotaVia(true); return; }
@@ -4815,7 +4815,7 @@ function geraGerber(){
     throw new Error('o gerador de Gerber (hub-gerber.js) não carregou nesta página — o visualizador abre, mas não há o que gerar');
   /* a placa da TELA: com os teardrops refeitos e os poligonos do hub despejados (recalcula) */
   const eb = EB || HC.effectiveBoard(B, model);
-  gerUltimo = HubGerber.gerar(eb, { base:baseDoPcbDoc(), nomes:gerOpc.nomes, vazias:gerOpc.vazias, gtoGbo:gerOpc.gtoGbo, x2:gerOpc.x2, software:'EletricHUB' });
+  gerUltimo = HubGerber.gerar(eb, { base:baseDoPcbDoc(), nomes:gerOpc.nomes, vazias:gerOpc.vazias, gtoGbo:gerOpc.gtoGbo, x2:gerOpc.x2, software:'NexoEletric' });
   return gerUltimo;
 }
 function regeraGerber(primeiro){
@@ -4873,7 +4873,7 @@ async function salvaGerber(){
   const r = gerUltimo;
   if (!r) return;
   const corpo = { proj:PROJ, arquivos:r.arquivos.map(a => ({ nome:a.nome, texto:a.texto })),
-    manifesto:{ base:r.resumo.base, opcoes:Object.assign({}, gerOpc), avisos:(r.avisos || []).slice(0, 60), software:'EletricHUB',
+    manifesto:{ base:r.resumo.base, opcoes:Object.assign({}, gerOpc), avisos:(r.avisos || []).slice(0, 60), software:'NexoEletric',
                 origem:'vista PCB', mudancas:CH.length, changesSalvo:!chDirty } };
   const resp = await fetch('/api/gerber', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify(corpo) });
   let j = null;

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* EletricHUB MCP - o servidor MCP do hub (AltiumPCBMirror / EletricHUB desktop).
+/* NexoEletric MCP - o servidor MCP do hub (AltiumPCBMirror / NexoEletric desktop).
 
    Uso:
      node mcp/eletrichub-mcp.js [--root <pasta do hub>]                      (stdio)
@@ -7,7 +7,7 @@
      node mcp/eletrichub-mcp.js --listar                                      (imprime as ferramentas)
 
    --root   a pasta do hub: o repo (padrao: a pasta acima deste script) ou a pasta de trabalho do
-            app desktop (C:\EletricHUB). Tambem por ELETRICHUB_ROOT.
+            app desktop (C:\NexoEletric). Tambem por ELETRICHUB_ROOT.
    --hub    URL do hub HTTP ja no ar (ex.: http://192.168.15.192:8100), para hub_status e
             vista_screenshot; sem ela procura 127.0.0.1 nas portas 8200, 8000, 8100 e 8001.
    --http   sobe o transporte HTTP Streamable em POST /mcp (a resposta e JSON; sem SSE do

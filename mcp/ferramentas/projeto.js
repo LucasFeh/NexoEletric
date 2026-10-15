@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "projeto": listar, criar, resumir, ler arquivos, desfazer. */
+/* NexoEletric MCP - grupo "projeto": listar, criar, resumir, ler arquivos, desfazer. */
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -108,7 +108,7 @@ module.exports = {
         }
         if (a.projeto) { const e = nomeDePastaOk(a.projeto); if (e) throw new ErroMcp('nome de projeto inválido: ' + e); }
         const hub = await hubNoAr(ctx);
-        if (!hub) throw new ErroMcp('o hub não está no ar: abrir o .SchDoc passa pelo hubserver (abra o EletricHUB)');
+        if (!hub) throw new ErroMcp('o hub não está no ar: abrir o .SchDoc passa pelo hubserver (abra o NexoEletric)');
         const r = await fetch(hub.url + '/api/altium/abrir', { method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ caminhos: lista, projeto: a.projeto || undefined, substituir: !!a.substituir }), signal: AbortSignal.timeout(180000) });
         let j = null; try { j = await r.json(); } catch (_) { /* sem corpo */ }
@@ -139,7 +139,7 @@ module.exports = {
         if (!tam) throw new ErroMcp(`folha "${a.folha}" desconhecida (use A4, A3, A2, A1, A0, A, B, C, D, E)`);
         const agora = new Date();
         const quando = agora.toLocaleDateString('pt-BR') + ' ' + agora.toLocaleTimeString('pt-BR');
-        const sch = { format: 'schmirror-v2', project: a.nome, generated: quando + ' (EletricHUB MCP)', units: 'mil',
+        const sch = { format: 'schmirror-v2', project: a.nome, generated: quando + ' (NexoEletric MCP)', units: 'mil',
                       items: [{ t: 'sheet', name: a.nome_folha || 'ESQUEMA_1', size: (a.folha || 'A4').toUpperCase(), w: tam[0], h: tam[1] }] };
         const s = hc.serializeSchematic(sch);
         if (!s.text) throw new ErroMcp('schematic inválido: ' + s.errors.map(e => e.msg).join('; '));

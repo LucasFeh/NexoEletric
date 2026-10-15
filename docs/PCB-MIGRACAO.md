@@ -187,6 +187,6 @@ uma separação:
   - O bloco lista cada um e o que trocar se o Altium reclamar.
 - **Primeira rodada:** rodar o ExportBoard num projeto pequeno e ler o `export-report.txt`; depois
   um ApplyChanges com uma mudança de cada tipo novo.
-- **Ctrl+2:** no Chrome a tecla chega à página (medido). No EletricHUB, o menu do app não usa
+- **Ctrl+2:** no Chrome a tecla chega à página (medido). No NexoEletric, o menu do app não usa
   Ctrl+2 (conferido no `electron/main.js`), então ela chega do mesmo jeito; falta só apertá-la no
   app instalado.

@@ -1,4 +1,4 @@
-/* hub-menubar.js — a barra de menus do topo do EletricHUB desktop.
+/* hub-menubar.js — a barra de menus do topo do NexoEletric desktop.
 
    Pedido do dono (2026-10-14): "a area de file, edit, view precisa ficar no topo da pagina,
    junto com arquivo, exibir, ajuda e fazer uma fusao ... esses menus mudam de acordo com a

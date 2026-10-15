@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "saidas": Gerber, PDF de layout e lista de materiais.
+/* NexoEletric MCP - grupo "saidas": Gerber, PDF de layout e lista de materiais.
 
    O Gerber sai do MESMO gerador da vista PCB (hub-gerber.js) a partir da placa com as mudancas, e
    vai para a MESMA pasta e manifesto que a rota /api/gerber do hubserver.py usa
@@ -94,7 +94,7 @@ module.exports = {
             ebG = P.placaSemDespejoVelho(eb, d.regioes); pour = { poligonos: eb.polygons.length, regioes: (d.regioes || []).length, avisos: d.avisos };
           } catch (e) { pour = { erro: e.message }; }
         }
-        const r = G.gerar(ebG, Object.assign({ base: a.base || baseDoPcbDoc(board, p.nome), software: 'EletricHUB' }, opc));
+        const r = G.gerar(ebG, Object.assign({ base: a.base || baseDoPcbDoc(board, p.nome), software: 'NexoEletric' }, opc));
         const out = { base: r.resumo.base, arquivos: r.arquivos.map(x => ({ nome: x.nome, camada: x.camada, funcao: x.funcao, bytes: Buffer.byteLength(x.texto), contagens: x.contagens })),
                       descartadas: r.resumo.descartadas, avisos: r.avisos, mudancas_incluidas: changes.length, pour: pour || undefined };
         if (a.salvar === false) return out;
@@ -110,7 +110,7 @@ module.exports = {
         const lista = novos.map(([nome, c]) => ({ nome, bytes: c.length, md5: crypto.createHash('md5').update(c).digest('hex') }));
         const removidos = gravaConjunto(gdir, novos, anteriores(gdir));
         const d = new Date(), z = n => String(n).padStart(2, '0');
-        const man = { base: r.resumo.base, opcoes: opc, avisos: (r.avisos || []).slice(0, 60), software: 'EletricHUB', origem: 'MCP (gerber_gerar)',
+        const man = { base: r.resumo.base, opcoes: opc, avisos: (r.avisos || []).slice(0, 60), software: 'NexoEletric', origem: 'MCP (gerber_gerar)',
                       mudancas: changes.length, changesSalvo: true, arquivos: lista,
                       gerado: `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}` };
         const mf = path.join(gdir, MANIFESTO);

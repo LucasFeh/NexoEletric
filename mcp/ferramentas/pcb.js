@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "pcb": ler a placa efetiva e escrever o changes.js.
+/* NexoEletric MCP - grupo "pcb": ler a placa efetiva e escrever o changes.js.
 
    Regras do AI-GUIDE (Parte B) que as ferramentas cumprem sozinhas:
      - o board.js nunca e editado; tudo vira op no changes.js, uma por linha;

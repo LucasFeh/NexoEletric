@@ -1,9 +1,9 @@
 {
   "name": "altiumhub-desktop",
-  "productName": "EletricHUB",
+  "productName": "NexoEletric",
   "version": "1.8.1",
   "private": true,
-  "description": "EletricHUB: o hub do AltiumPCBMirror como aplicativo desktop",
+  "description": "NexoEletric: o hub do AltiumPCBMirror como aplicativo desktop",
   "author": "Dieletrons <engenharia@dieletrons.com>",
   "license": "UNLICENSED",
   "homepage": "https://github.com/LucasFeh/AltiumPCBMirror",
@@ -35,9 +35,9 @@
   },
   "build": {
     "appId": "com.dieletrons.altiumhub",
-    "productName": "EletricHUB",
+    "productName": "NexoEletric",
     "copyright": "Dieletrons",
-    "artifactName": "EletricHUB-Setup-${version}.${ext}",
+    "artifactName": "NexoEletric-Setup-${version}.${ext}",
     "directories": {
       "output": "dist",
       "buildResources": "assets"
@@ -78,7 +78,7 @@
         }
       ],
       "icon": "assets/icon.ico",
-      "executableName": "EletricHUB"
+      "executableName": "NexoEletric"
     },
     "nsis": {
       "oneClick": true,
@@ -86,7 +86,7 @@
       "allowElevation": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "EletricHUB",
+      "shortcutName": "NexoEletric",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
       "installerIcon": "assets/icon.ico",

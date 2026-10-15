@@ -1,6 +1,6 @@
 /* AltiumPCBMirror v2 - hub-pdfwriter.js
    Escritor de PDF vetorial proprio do hub, sem biblioteca: o hub roda offline (o servidor .192 e o
-   EletricHUB) e o PDF de layout tem que sair dele como o Gerber sai do hub-gerber.js.
+   NexoEletric) e o PDF de layout tem que sair dele como o Gerber sai do hub-gerber.js.
 
    Logica pura, sem DOM: navegador (global HubPdfWriter) e node (tests/test-pcbpdf.js).
 
@@ -363,7 +363,7 @@ function montaBytes(doc, deflate) {
   poe(paginas, '<< /Type /Pages /Kids [' + kids.map(k => k + ' 0 R').join(' ') + '] /Count ' + kids.length + ' >>');
   poe(catalogo, '<< /Type /Catalog /Pages ' + paginas + ' 0 R >>');
   const m = doc.meta || {}, agora = dataPdf(m.data instanceof Date ? m.data : new Date());
-  poe(info, '<< /Producer ' + stringPdf('EletricHUB hub-pdfwriter') + ' /Creator ' + stringPdf(m.criador || 'EletricHUB') +
+  poe(info, '<< /Producer ' + stringPdf('NexoEletric hub-pdfwriter') + ' /Creator ' + stringPdf(m.criador || 'NexoEletric') +
             (m.titulo ? ' /Title ' + stringPdf(m.titulo) : '') + (m.autor ? ' /Author ' + stringPdf(m.autor) : '') +
             (m.assunto ? ' /Subject ' + stringPdf(m.assunto) : '') + ' /CreationDate ' + stringPdf(agora) + ' >>');
 

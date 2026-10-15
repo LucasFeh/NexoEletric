@@ -1,4 +1,4 @@
-/* EletricHUB MCP - util.js: pecas pequenas que varios grupos usam. */
+/* NexoEletric MCP - util.js: pecas pequenas que varios grupos usam. */
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');

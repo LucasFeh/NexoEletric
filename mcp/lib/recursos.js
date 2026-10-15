@@ -1,4 +1,4 @@
-/* EletricHUB MCP - recursos.js
+/* NexoEletric MCP - recursos.js
    Recursos (resources/*) e prompts (prompts/*). O AI-GUIDE.md e o contrato de como a IA edita
    os arquivos do projeto; ele vai como recurso para o cliente MCP poder anexa-lo ao contexto.
    Os formatos (ops do changes.js, camadas, itens do schmirror-v2) sao gerados do PROPRIO

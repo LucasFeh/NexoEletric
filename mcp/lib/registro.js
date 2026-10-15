@@ -1,4 +1,4 @@
-/* EletricHUB MCP - registro.js
+/* NexoEletric MCP - registro.js
    O REGISTRO de ferramentas. Cada arquivo de mcp/ferramentas/*.js e um GRUPO:
 
      module.exports = {

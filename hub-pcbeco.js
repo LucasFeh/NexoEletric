@@ -394,7 +394,7 @@ function aplica(eco, opts){
 
 /* Report Changes: o relatorio de texto, agrupado */
 function relatorio(eco){
-  const L = ['Engineering Change Order — EletricHUB', ''];
+  const L = ['Engineering Change Order — NexoEletric', ''];
   const r = eco.resumo || {};
   L.push(`Ações: ${r.total || 0}  marcadas: ${r.ativas || 0}  ok: ${r.ok || 0}  avisos: ${r.avisos || 0}  erros: ${r.erros || 0}`, '');
   for (const g of GRUPOS) {

@@ -1,4 +1,4 @@
-// Publica uma versao do EletricHUB desktop no GitHub (releases do LucasFeh/AltiumPCBMirror).
+// Publica uma versao do NexoEletric desktop no GitHub (releases do LucasFeh/AltiumPCBMirror).
 //
 //   npm run release -- 1.0.0            versao exata (a primeira foi assim)
 //   npm run release -- patch            1.0.0 -> 1.0.1   (minor, major tambem)
@@ -101,7 +101,7 @@ const ramo = git('rev-parse', '--abbrev-ref', 'HEAD');
 const tagExiste = Boolean(git('tag', '--list', tag));
 const retomar = tagExiste && pkg.version === versao && git('rev-parse', `${tag}^{commit}`) === git('rev-parse', 'HEAD');
 if (tagExiste && !retomar) erro(`a tag ${tag} ja existe e nao e o HEAD desta arvore`);
-console.log(`\nEletricHUB ${pkg.version} -> ${versao} (branch ${ramo})${DRY ? '  [dry-run]' : ''}${retomar ? '  [retomando a publicacao]' : ''}\n`);
+console.log(`\nNexoEletric ${pkg.version} -> ${versao} (branch ${ramo})${DRY ? '  [dry-run]' : ''}${retomar ? '  [retomando a publicacao]' : ''}\n`);
 
 if (!retomar) {
   // ── 2. versao e CHANGELOG ──
@@ -111,7 +111,7 @@ if (!retomar) {
   const commits = git('log', '--no-merges', '--format=- %s (%h)', ...(anterior ? [`${anterior}..HEAD`] : ['HEAD', '--', 'electron']))
     .split('\n').filter(Boolean);
   const clArq = path.join(APP, 'CHANGELOG.md');
-  const cl = fs.existsSync(clArq) ? fs.readFileSync(clArq, 'utf8') : '# Changelog — EletricHUB desktop\n';
+  const cl = fs.existsSync(clArq) ? fs.readFileSync(clArq, 'utf8') : '# Changelog — NexoEletric desktop\n';
   const hoje = new Date().toISOString().slice(0, 10);
   // Entrada escrita a mao para esta versao vence a gerada (a 1.0.0 foi assim).
   if (!new RegExp(`^## ${versao.replace(/\./g, '\\.')}\\b`, 'm').test(cl)) {
@@ -137,7 +137,7 @@ if (!retomar) {
   // ── 4. commit, tag, push ──
   git('add', 'electron/package.json', 'electron/package-lock.json', 'electron/CHANGELOG.md');
   if (git('diff', '--cached', '--name-only')) git('commit', '-m', `desktop: ${tag}`);
-  git('tag', '-a', tag, '-m', `EletricHUB desktop ${versao}`);
+  git('tag', '-a', tag, '-m', `NexoEletric desktop ${versao}`);
 }
 run('git', ['-C', REPO, 'push', 'origin', ramo]);
 run('git', ['-C', REPO, 'push', 'origin', tag]);
@@ -157,7 +157,7 @@ function notasDaVersao() {
 // publicadores diferentes; cada um procura o release da tag (electron-publish »
 // getOrCreateRelease, por tag_name) e, sem achar, cria o seu. Na v1.2.1 sairam DOIS
 // rascunhos -- o .blockmap num, o .exe e o latest.yml no outro -- e a conferencia parou em
-// "falta EletricHUB-Setup-X.exe" com commit, tag e push ja feitos. Com o rascunho ja no
+// "falta NexoEletric-Setup-X.exe" com commit, tag e push ja feitos. Com o rascunho ja no
 // GitHub os dois o acham e os tres arquivos caem no mesmo. O de uma rodada anterior
 // (retomada) e reaproveitado.
 async function rascunho() {
@@ -167,7 +167,7 @@ async function rascunho() {
   if (doTag.length) return doTag[0];
   const notas = notasDaVersao();
   const r = await api('/releases', ghToken, { method: 'POST', body: JSON.stringify({
-    tag_name: tag, name: `EletricHUB ${versao}`, draft: true, ...(notas ? { body: notas } : {}) }) });
+    tag_name: tag, name: `NexoEletric ${versao}`, draft: true, ...(notas ? { body: notas } : {}) }) });
   if (!r.ok) throw new Error(`o GitHub recusou criar o rascunho ${tag}: HTTP ${r.status}`);
   return r.json();
 }
@@ -184,7 +184,7 @@ try {
   const rel = doTag.find((r) => r.id === alvo.id);
   if (!rel) throw new Error(`o release ${tag} nao apareceu no GitHub`);
   const tem = new Set((rel.assets || []).filter((a) => a.state === 'uploaded').map((a) => a.name));
-  for (const n of [`EletricHUB-Setup-${versao}.exe`, `EletricHUB-Setup-${versao}.exe.blockmap`, 'latest.yml']) {
+  for (const n of [`NexoEletric-Setup-${versao}.exe`, `NexoEletric-Setup-${versao}.exe.blockmap`, 'latest.yml']) {
     if (!tem.has(n)) throw new Error(`falta ${n} no release ${tag}`);
   }
   if (rel.draft) {

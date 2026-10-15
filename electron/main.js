@@ -1,5 +1,5 @@
 'use strict';
-// EletricHUB desktop: o hub do AltiumPCBMirror numa janela propria.
+// NexoEletric desktop: o hub do AltiumPCBMirror numa janela propria.
 //
 // O que o app faz, na ordem:
 //   1. garante a pasta de trabalho (lib/workspace.js): o codigo do hub que veio neste
@@ -22,15 +22,17 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell, clipboard } =
 if (process.env.ALTIUMHUB_USERDATA) {
   app.setPath('userData', process.env.ALTIUMHUB_USERDATA);
 } else {
-  // O app se chamava AltiumHub ate a 1.0.2, e o userData segue o nome do produto: sem isto a
-  // atualizacao abriria como instalacao nova -- sem a pasta de trabalho configurada e sem as
-  // preferencias do hub (o localStorage mora ali). A pasta antiga muda de nome uma vez; se
-  // o Windows recusar (algo ainda segurando um arquivo), o app continua usando a antiga.
+  // O app se chamou AltiumHub ate a 1.0.2 e EletricHUB ate a 1.8.x, e o userData segue o nome
+  // do produto: sem isto a atualizacao abriria como instalacao nova -- sem a pasta de trabalho
+  // configurada e sem as preferencias do hub (o localStorage mora ali). A pasta mais recente
+  // dos nomes antigos muda de nome uma vez; se o Windows recusar (algo ainda segurando um
+  // arquivo), o app continua usando a antiga.
   const appData = app.getPath('appData');
-  const nova = path.join(appData, app.getName());                                   // EletricHUB
-  const antiga = path.join(appData, app.getName().replace(/^EletricHUB/, 'AltiumHub')); // AltiumHub
+  const nova = path.join(appData, app.getName());                                   // NexoEletric
+  const antigas = ['EletricHUB', 'AltiumHub'].map((n) => path.join(appData, n)).filter((d) => d !== nova);
+  const antiga = antigas.find((d) => fs.existsSync(d));
   try {
-    if (antiga !== nova && !fs.existsSync(nova) && fs.existsSync(antiga)) fs.renameSync(antiga, nova);
+    if (antiga && !fs.existsSync(nova)) fs.renameSync(antiga, nova);
   } catch {
     app.setPath('userData', antiga);
   }
@@ -129,7 +131,7 @@ function criarJanela() {
     x: w.x, y: w.y, width: w.width || 1480, height: w.height || 940,
     minWidth: 900, minHeight: 600,
     show: false,
-    title: 'EletricHUB',
+    title: 'NexoEletric',
     icon: web.ICONE,
     backgroundColor: '#14161a',
     webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
@@ -146,8 +148,8 @@ function criarJanela() {
   menuNativoSoForaDoHub(esta);
   esta.webContents.on('page-title-updated', (e, t) => {
     e.preventDefault();
-    // o hub (hub-shell.js) ja poe "Projeto · Documento — EletricHUB" no titulo
-    esta.setTitle(t ? (/EletricHUB/.test(t) ? t : `${t} — EletricHUB`) : 'EletricHUB');
+    // o hub (hub-shell.js) ja poe "Projeto · Documento — NexoEletric" no titulo
+    esta.setTitle(t ? (/NexoEletric/.test(t) ? t : `${t} — NexoEletric`) : 'NexoEletric');
   });
   esta.webContents.on('render-process-gone', (_e, d) => {
     log.error('renderer caiu: ' + d.reason);
@@ -210,11 +212,11 @@ async function subirHub({ porta } = {}) {
   const avisos = [];
   if (r.falhas.length) {
     avisos.push(`${r.falhas.length} arquivo(s) do hub não foram atualizados por estarem em uso ` +
-      `(${r.falhas.slice(0, 3).join(', ')}${r.falhas.length > 3 ? '…' : ''}). Feche o Altium e reabra o EletricHUB.`);
+      `(${r.falhas.slice(0, 3).join(', ')}${r.falhas.length > 3 ? '…' : ''}). Feche o Altium e reabra o NexoEletric.`);
   }
   if (r.maisNova) {
     avisos.push(`a pasta de trabalho está com o código da versão ${r.maisNova}, mais nova que este app ` +
-      `(${app.getVersion()}): atualize o EletricHUB nesta conta do Windows.`);
+      `(${app.getVersion()}): atualize o NexoEletric nesta conta do Windows.`);
   }
   avisoSync = avisos.join(' ');
 
@@ -343,7 +345,7 @@ function abrirConfig() {
   if (janelaConfig && !janelaConfig.isDestroyed()) { janelaConfig.focus(); return; }
   janelaConfig = new BrowserWindow({
     parent: janela || undefined, modal: false, width: 760, height: 860, minWidth: 620, minHeight: 600,
-    title: 'Configurações — EletricHUB', icon: web.ICONE, backgroundColor: '#14161a', show: false,
+    title: 'Configurações — NexoEletric', icon: web.ICONE, backgroundColor: '#14161a', show: false,
     autoHideMenuBar: true,
     webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
   });
@@ -354,7 +356,7 @@ function abrirConfig() {
 }
 
 function aviso(message, detail) {
-  dialog.showMessageBox(janela || undefined, { type: 'info', title: 'EletricHUB', message, detail, buttons: ['OK'], noLink: true });
+  dialog.showMessageBox(janela || undefined, { type: 'info', title: 'NexoEletric', message, detail, buttons: ['OK'], noLink: true });
 }
 
 function abrirImportacao(opts = {}) {
@@ -371,7 +373,7 @@ function abrirImportacao(opts = {}) {
   if (janelaImport && !janelaImport.isDestroyed()) { janelaImport.focus(); return; }
   janelaImport = new BrowserWindow({
     parent: janela || undefined, width: 720, height: 620, minWidth: 560, minHeight: 420,
-    title: 'Importar do servidor — EletricHUB', icon: web.ICONE, backgroundColor: '#14161a', show: false,
+    title: 'Importar do servidor — NexoEletric', icon: web.ICONE, backgroundColor: '#14161a', show: false,
     webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
   });
   janelaImport.removeMenu();
@@ -441,7 +443,7 @@ async function antesDoSincronismo(d) {
   const wc = d.webContents;
   const win = (wc && BrowserWindow.fromWebContents(wc)) || janela;
   const pergunta = (message, detail) => dialog.showMessageBox(win, {
-    type: 'warning', title: 'EletricHUB', message,
+    type: 'warning', title: 'NexoEletric', message,
     detail: `${detail}\n\nSincronizar agora usa só o estado local do almoxarifado. ` +
       'Componentes novos no Odoo podem receber part numbers diferentes dos que o servidor daria.',
     buttons: ['Sincronizar assim mesmo', 'Cancelar'], defaultId: 1, cancelId: 1, noLink: true,
@@ -596,7 +598,7 @@ function montarMenu() {
         { label: 'Abrir pasta de logs', click: () => shell.openPath(LOG_DIR) },
         { type: 'separator' },
         { label: 'Conectar IA (MCP)…', click: () => conectarIA() },
-        { label: 'Sobre o EletricHUB', click: () => sobre() },
+        { label: 'Sobre o NexoEletric', click: () => sobre() },
       ],
     },
   ];
@@ -641,7 +643,7 @@ async function abrirConfigDoHub() {
   }
   const w = novaJanela();
   if (!w) {
-    aviso('O hub não está rodando.', 'Reinicie o EletricHUB para abrir as configurações do hub.');
+    aviso('O hub não está rodando.', 'Reinicie o NexoEletric para abrir as configurações do hub.');
     return;
   }
   for (let i = 0; i < 40 && !w.isDestroyed(); i++) {
@@ -650,7 +652,7 @@ async function abrirConfigDoHub() {
   }
 }
 
-/* O MCP do EletricHUB (mcp/ do hub): da a IA (Claude Code, Claude Desktop) as ferramentas para
+/* O MCP do NexoEletric (mcp/ do hub): da a IA (Claude Code, Claude Desktop) as ferramentas para
    operar projeto, esquema, PCB, regras/DRC, pour, ECO, Gerber e PDF. O servidor roda no proprio
    Electron como Node (ELECTRON_RUN_AS_NODE), sobre a pasta de trabalho do app. */
 function conectarIA() {
@@ -667,7 +669,7 @@ function conectarIA() {
     return;
   }
   dialog.showMessageBox(w, {
-    type: 'info', title: 'Conectar IA (MCP)', message: 'Registrar o EletricHUB como servidor MCP',
+    type: 'info', title: 'Conectar IA (MCP)', message: 'Registrar o NexoEletric como servidor MCP',
     detail: 'Claude Code (cole num terminal):\n' + c.claudeCode +
       '\n\nClaude Desktop: acrescente em ' + c.claudeDesktopArquivo + ':\n' + JSON.stringify(c.claudeDesktop, null, 2),
     buttons: ['Copiar comando do Claude Code', 'Copiar JSON do Claude Desktop', 'Fechar'], defaultId: 0, cancelId: 2,
@@ -682,7 +684,7 @@ function sobre() {
   const s = settings.load();
   const u = updater.status();
   dialog.showMessageBox(focada(), {
-    type: 'info', title: 'Sobre o EletricHUB', message: `EletricHUB ${b.version}`,
+    type: 'info', title: 'Sobre o NexoEletric', message: `NexoEletric ${b.version}`,
     detail: [
       `commit ${b.commit ? b.commit.slice(0, 10) : '?'}${b.builtAt ? ` · build ${b.builtAt.slice(0, 16).replace('T', ' ')}` : ''}`,
       `Python ${b.python || '3.12 (embutido)'} · Electron ${process.versions.electron}`,
@@ -722,7 +724,7 @@ async function verificarAtualizacoes() {
     verificando: ['Verificando…', ''],
   }[st.fase] || [st.fase, st.erro];
   const botoes = st.fase === 'sem-token' ? ['Abrir configurações', 'Fechar'] : ['OK'];
-  const r = await dialog.showMessageBox(w, { type: st.fase === 'erro' ? 'warning' : 'info', title: 'EletricHUB', message: msg[0], detail: msg[1], buttons: botoes, noLink: true });
+  const r = await dialog.showMessageBox(w, { type: st.fase === 'erro' ? 'warning' : 'info', title: 'NexoEletric', message: msg[0], detail: msg[1], buttons: botoes, noLink: true });
   if (st.fase === 'sem-token' && r.response === 0) abrirConfig();
 }
 
@@ -773,7 +775,7 @@ function registrarIpc() {
   });
   handle('config:escolherPasta', async (e, atual) => {
     const r = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender), {
-      title: 'Pasta de trabalho do EletricHUB', defaultPath: atual || settings.workspacePadrao(),
+      title: 'Pasta de trabalho do NexoEletric', defaultPath: atual || settings.workspacePadrao(),
       properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
     });
     return r.canceled ? '' : r.filePaths[0];
@@ -895,7 +897,7 @@ async function salvarConfig(e, d) {
     const ok = await reiniciarHub();
     if (!ok) {
       aviso('Configurações salvas, mas o hub não foi reiniciado.',
-        'Há edições não salvas numa vista. Salve-as e reabra o EletricHUB para aplicar a mudança.');
+        'Há edições não salvas numa vista. Salve-as e reabra o NexoEletric para aplicar a mudança.');
     }
     return { ok: true, reiniciou: ok };
   }

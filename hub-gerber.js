@@ -30,7 +30,7 @@
        opts.gtoGbo   false (padrao) | true: legenda com extensao .gto/.gbo
        opts.x2       true (padrao: atributos TF/TA e o %TF.MD5) | false (sem atributos, como o
                      CAMtastic reexporta)
-       opts.software 'EletricHUB'      opts.guid  o TF.SameCoordinates (o teste fixa; sem ele, um
+       opts.software 'NexoEletric'      opts.guid  o TF.SameCoordinates (o teste fixa; sem ele, um
                                                    GUID novo por geracao, como o Altium)
      HubGerber.zip(arquivos, {deflate, data}) -> Promise<Uint8Array>   (.zip proprio, crc32 proprio;
        deflate pelo CompressionStream('deflate-raw') quando existe, senao store)
@@ -1120,7 +1120,7 @@ function gerar(board, opts) {
     vazias: opts.vazias === true,
     gtoGbo: opts.gtoGbo === true,
     x2: opts.x2 !== false,
-    software: valorAtributo(opts.software || 'EletricHUB') || 'EletricHUB',
+    software: valorAtributo(opts.software || 'NexoEletric') || 'NexoEletric',
     guid: valorAtributo(opts.guid || novoGuid()).toUpperCase(),
   };
   const av = criaAvisos();

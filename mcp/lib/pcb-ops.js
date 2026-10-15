@@ -1,4 +1,4 @@
-/* EletricHUB MCP - pcb-ops.js
+/* NexoEletric MCP - pcb-ops.js
    A IA diz o que quer ("mova R5 para 12,8", "apague t12") e este arquivo escreve a op do
    changes.js como o AI-GUIDE (Parte B) exige:
      - os orig_* copiados EXATAMENTE do board.js (o objeto, nunca arredondado);

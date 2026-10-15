@@ -1,4 +1,4 @@
-/* EletricHUB MCP - protocolo.js
+/* NexoEletric MCP - protocolo.js
    O Model Context Protocol em JSON-RPC 2.0, sem dependencia nenhuma (o app desktop leva um Node
    sem node_modules, e o servidor da rede um Python sem npm). Independe do transporte: o stdio e
    o HTTP chamam `atende(msg)` e mandam de volta o que ele devolver (null = notificacao, sem
@@ -15,7 +15,7 @@ const { ErroMcp } = require('./contexto.js');
 const ERR = { PARSE: -32700, REQ: -32600, METODO: -32601, PARAMS: -32602, INTERNO: -32603 };
 
 const INSTRUCOES = [
-  'EletricHUB (AltiumPCBMirror): esquema e PCB no DNA do Altium Designer. Esquema em mil (Y para cima, grade de 100 mil); PCB em mm (Y para cima, rotação anti-horária).',
+  'NexoEletric (AltiumPCBMirror): esquema e PCB no DNA do Altium Designer. Esquema em mil (Y para cima, grade de 100 mil); PCB em mm (Y para cima, rotação anti-horária).',
   'Comece por projeto_listar → projeto_resumo {projeto}. Leia os sinalizadores abertos (sinal_listar) antes de mexer: são pendências do usuário.',
   'ESQUEMA (schematic.js): sch_buscar_simbolo → sch_simbolo (pinos e footprint) → sch_adicionar {itens} → sch_ligar (fio entre pinos "R1.1"→"C1.2") → sch_nets / sch_validar.',
   'PCB: a placa espelhada (board.js) nunca é editada; toda mudança vai para o changes.js, uma op por linha. As ferramentas pcb_* preenchem os orig_* sozinhas a partir do board.js — você só diz o que quer (pcb_mover R5 para x,y; pcb_apagar t12; pcb_trilha; pcb_rotear contornando obstáculos).',
@@ -68,7 +68,7 @@ class Servidor {
           protocolVersion: this.versaoProtocolo,
           capabilities: { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false },
                           prompts: { listChanged: false }, logging: {} },
-          serverInfo: { name: 'eletrichub', title: 'EletricHUB', version: this.versao },
+          serverInfo: { name: 'nexoeletric', title: 'NexoEletric', version: this.versao },
           instructions: INSTRUCOES,
         };
       }

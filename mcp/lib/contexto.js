@@ -1,6 +1,6 @@
-/* EletricHUB MCP - contexto.js
+/* NexoEletric MCP - contexto.js
    O que toda ferramenta precisa: a raiz do hub (o repo, ou a pasta de trabalho do app desktop,
-   C:\EletricHUB), os modulos do hub carregados em Node (hub-core.js e companhia), as bibliotecas
+   C:\NexoEletric), os modulos do hub carregados em Node (hub-core.js e companhia), as bibliotecas
    espelhadas (so LEITURA: Libs/ e do hub, do almoxarifado e do Altium -- o MCP nunca grava la),
    os arquivos de cada projeto e a pilha de desfazer da sessao.
 
@@ -29,7 +29,7 @@ class Contexto {
     const padrao = path.resolve(__dirname, '..', '..');
     this.root = path.resolve(o.root || process.env.ELETRICHUB_ROOT || padrao);
     if (!pareceHub(this.root))
-      throw new Error(`"${this.root}" não parece a pasta do hub (falta hub-core.js e Projects/ ou Libs/). Use --root <pasta do hub>, ex.: C:\\EletricHUB`);
+      throw new Error(`"${this.root}" não parece a pasta do hub (falta hub-core.js e Projects/ ou Libs/). Use --root <pasta do hub>, ex.: C:\\NexoEletric`);
     /* Projects/ pode morar fora da raiz (os testes usam uma copia temporaria; nunca os reais) */
     this.projetosDir = o.projetos ? path.resolve(o.projetos) : (process.env.ELETRICHUB_PROJETOS ? path.resolve(process.env.ELETRICHUB_PROJETOS) : path.join(this.root, 'Projects'));
     this.hubUrl = o.hubUrl || process.env.ELETRICHUB_URL || '';

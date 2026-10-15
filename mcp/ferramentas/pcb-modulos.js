@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "pcbmod": as ferramentas que vem dos modulos novos da vista PCB
+/* NexoEletric MCP - grupo "pcbmod": as ferramentas que vem dos modulos novos da vista PCB
    (regras/DRC, conectividade, polygon pour, teardrops, ECO), pela API que cada um declara no
    cabecalho:
      HubPcbRegras  ler(rules.js) / doBoard(board) / serializa / normaliza / resolvedor

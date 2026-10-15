@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "nexo": a integracao com o NexoCAD (contrato: docs/INTEGRACAO-NEXOCAD.md).
+/* NexoEletric MCP - grupo "nexo": a integracao com o NexoCAD (contrato: docs/INTEGRACAO-NEXOCAD.md).
 
    A biblioteca compartilhada (o "BD") e do NexoCAD: aqui ela so e LIDA, direto do disco
    (DIELETRONS_BIBLIOTECA > ponteiro C:\Users\Public\Dieletrons\biblioteca.json > o padrao
@@ -261,7 +261,7 @@ module.exports = {
         if (alvo.novo) params.novo = true;
         else {
           const f = urlParaDisco(ctx, null, alvo.url);
-          if (!f || !fs.existsSync(f)) throw new ErroMcp(`o STEP ${alvo.url} não está no disco (o 3D da PcbLib sai dela sob demanda): abra o EletricHUB e tente de novo`);
+          if (!f || !fs.existsSync(f)) throw new ErroMcp(`o STEP ${alvo.url} não está no disco (o 3D da PcbLib sai dela sob demanda): abra o NexoEletric e tente de novo`);
           params.step_path = f;
         }
         const r = await rpc('biblioteca_editar_modelo', params);

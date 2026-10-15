@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "biblioteca": consulta (SO LEITURA) ao almoxarifado espelhado do Odoo
+/* NexoEletric MCP - grupo "biblioteca": consulta (SO LEITURA) ao almoxarifado espelhado do Odoo
    (Libs/almox-basicos.js, Libs/almox-especiais.js). Regra do dono: biblioteca, almoxarifado,
    simbolos e integracao com o Odoo ficam como estao -- o MCP so le. O componente escolhido entra
    no esquema com sch_adicionar usando o `comp` pronto que esta ferramenta devolve: o sym e o nome

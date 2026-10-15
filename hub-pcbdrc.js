@@ -1238,7 +1238,7 @@ function relatorioHtml(res, info){
     if (c.cortadas) h += '<tr><td></td><td class="z">... e mais ' + c.cortadas + '</td><td></td></tr>';
     h += '</table>';
   }
-  h += '<p class="z">Gerado pelo EletricHUB (HubPcbDrc) em ' + res.tempoMs + ' ms.</p></body></html>';
+  h += '<p class="z">Gerado pelo NexoEletric (HubPcbDrc) em ' + res.tempoMs + ' ms.</p></body></html>';
   return h;
 }
 

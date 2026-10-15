@@ -1,4 +1,4 @@
-/* EletricHUB MCP - geometria.js
+/* NexoEletric MCP - geometria.js
    Contas pequenas sobre a placa EFETIVA (HubCore.effectiveBoard): forma de pad, ponto no
    poligono, e a conectividade de reserva que o nets_ratsnest usa enquanto o hub-pcbnets.js
    (HubPcbNets, o motor de verdade) nao chega.

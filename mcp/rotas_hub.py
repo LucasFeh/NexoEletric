@@ -1,4 +1,4 @@
-"""EletricHUB MCP - rotas_hub.py: o canal entre o servidor MCP e a VISTA ABERTA no hub.
+"""NexoEletric MCP - rotas_hub.py: o canal entre o servidor MCP e a VISTA ABERTA no hub.
 
 O MCP grava os arquivos do projeto direto no disco, e o vigia do hubserver.py ja recarrega a
 pagina aberta sozinho. O que falta e o caminho de volta: a IA ver a tela de verdade (screenshot)

@@ -129,10 +129,10 @@ const TR = r => (typeof HubMenuTrad !== 'undefined' ? HubMenuTrad.t(r) : r);
 /* o porque do cinza, quando nao e so "ainda nao existe" */
 const PORQUE = {
   'PLPCB:PlaceComponent': 'componente entra pelo esquema: Design » Import Changes (D,I)',
-  'PLPCB:FindSimilarObjects': 'ainda não existe no EletricHUB — use o filtro de seleção do painel',
-  'PLPCB:FindSimilarObjectsUnderCursor': 'ainda não existe no EletricHUB — use o filtro de seleção do painel',
+  'PLPCB:FindSimilarObjects': 'ainda não existe no NexoEletric — use o filtro de seleção do painel',
+  'PLPCB:FindSimilarObjectsUnderCursor': 'ainda não existe no NexoEletric — use o filtro de seleção do painel',
 };
-const NAO_TEM = 'ainda não existe no EletricHUB';
+const NAO_TEM = 'ainda não existe no NexoEletric';
 /* comandos que o Altium so mostra em situacao propria (o rotulo e o nome interno, sem espaco:
    DeleteWIP, NewRTF, AddImporter...) -- la eles nao aparecem no uso comum, aqui tambem nao */
 const INTERNO = r => /^[A-Z][a-z]+[A-Z]\w*$/.test(r) && r !== 'ActiveRoute';
@@ -235,7 +235,7 @@ function el(tag, cls, txt) {
   if (txt != null) n.textContent = txt;
   return n;
 }
-const produto = s => String(s || '').replace(/%PRODUCTNAME%/gi, 'EletricHUB');
+const produto = s => String(s || '').replace(/%PRODUCTNAME%/gi, 'NexoEletric');
 /* o rotulo com a letra do acelerador sublinhada (a primeira ocorrencia, como o & do Windows) */
 function rotuloComLetra(rot, letra) {
   const f = document.createDocumentFragment();
@@ -660,7 +660,7 @@ function instala(V) {
     corpo.append(arv, pag);
     const rod = el('div', 'apf-rod');
     const padroes = el('button', 'btn', 'Set To Defaults'); padroes.type = 'button';
-    padroes.title = 'Volta esta página para o padrão do EletricHUB';
+    padroes.title = 'Volta esta página para o padrão do NexoEletric';
     const esp = el('span', 'esp');
     const ok = el('button', 'btn pri', 'OK'), cancel = el('button', 'btn', 'Cancel'), apply = el('button', 'btn', 'Apply');
     [ok, cancel, apply].forEach(b => { b.type = 'button'; });
@@ -835,7 +835,7 @@ function instala(V) {
           }
           g.append(t);
           const bt = el('div'); bt.style.cssText = 'display:flex; gap:8px; margin-top:10px;';
-          const casa = el('button', 'btn', 'Padrão EletricHUB'), alt = el('button', 'btn', 'Padrão Altium');
+          const casa = el('button', 'btn', 'Padrão NexoEletric'), alt = el('button', 'btn', 'Padrão Altium');
           casa.type = alt.type = 'button';
           casa.title = 'roda = zoom · Shift = para o lado · Ctrl+Shift = camada';
           alt.title = 'Ctrl+roda = zoom · roda = rolar · Shift = para o lado';

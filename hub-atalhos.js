@@ -333,7 +333,7 @@ function colide(a, b){
    ligado. E o Ctrl+2 so fica com a pagina se ela chamar preventDefault() no keydown: medido no
    Chrome (headless, duas abas), sem ele a pagina vai para o fundo e o Chrome mostra a aba 2; com
    ele, fica. A tecla so chega a quem tem o foco: com o foco na casca do hub, o Ctrl+2 e dela. O
-   EletricHUB nao tem aba nem acelerador de menu em Ctrl+2, Ctrl+M ou Ctrl+S.
+   NexoEletric nao tem aba nem acelerador de menu em Ctrl+2, Ctrl+M ou Ctrl+S.
    Desde 2026-10-13 o Shift FICA quando ha Ctrl ou Alt junto: Ctrl+Shift+L sai 'Ctrl+Shift+L', e
    nao mais 'Ctrl+L' (os alinhamentos do Altium sao Shift+Ctrl+L/B/H/V). Com Ctrl a mao distingue
    o Shift, e o Windows nao troca a tecla (Ctrl+Shift+L chega com key 'L'). Sozinho continua como
@@ -477,7 +477,7 @@ function fazVista(nome, CHAVE, QUANDO, ATALHOS_PADRAO, GESTOS, ALTIUM, PADRAO_AL
      estragada volta como {} e o mapaAtalhos faz o resto. */
   /* 2026-10-14, pedido do dono: o padrao e o do ALTIUM ("T, D, R abre o rule check, quero que
      essa identidade venha do altium"). Sem nada gravado nesta maquina vale a predefinicao Padrao
-     Altium; o botao "Padrao EletricHUB" grava '{}' (a tabela da casa) e ela fica. */
+     Altium; o botao "Padrao NexoEletric" grava '{}' (a tabela da casa) e ela fica. */
   function carrega(){
     try {
       const cru = localStorage.getItem(CHAVE);
@@ -849,14 +849,14 @@ function pane(box, o){
       g.setAttribute('role', 'row');
       const cont = el('span', 'cont', (vis.length === todas.length ? todas.length + ' atalhos' : vis.length + ' de ' + todas.length)
         + (usr ? ' · ' + usr + ' trocado' + (usr > 1 ? 's' : '') : ''));
-      const rs = el('button', 'btn btn-ghost btn-sm', 'Padrão EletricHUB');
+      const rs = el('button', 'btn btn-ghost btn-sm', 'Padrão NexoEletric');
       rs.type = 'button';
-      rs.title = 'as teclas de antes do EletricHUB na ' + v.QUANDO + ' (W trilha, T texto…; a outra vista não muda)';
+      rs.title = 'as teclas de antes do NexoEletric na ' + v.QUANDO + ' (W trilha, T texto…; a outra vista não muda)';
       /* com lixo na chave (acao que nao existe, tecla recusada) o botao continua servindo para limpar */
       rs.disabled = v.qualPredefinicao(salvos[v.nome]) === 'casa' && !Object.keys(salvos[v.nome]).length;
       rs.onclick = () => {
         salvos[v.nome] = {}; v.grava({}); desenha();
-        avisa('atalhos da ' + v.QUANDO + ': padrão EletricHUB', 'ok');
+        avisa('atalhos da ' + v.QUANDO + ': padrão NexoEletric', 'ok');
       };
       g.append(el('span', 'nome', v.QUANDO), cont);
       /* a predefinicao "Padrao Altium" (2026-10-13): troca as teclas da vista pelas do Altium 21
@@ -866,7 +866,7 @@ function pane(box, o){
         const pa = el('button', 'btn btn-ghost btn-sm', 'Padrão Altium');
         pa.type = 'button';
         pa.title = 'troca as teclas da ' + v.QUANDO + ' pelas do Altium Designer 21 (P,T trilha, T,D DRC…); '
-          + '“Padrão EletricHUB” volta para as da casa';
+          + '“Padrão NexoEletric” volta para as da casa';
         pa.disabled = v.qualPredefinicao(salvos[v.nome]) === 'altium';
         pa.onclick = () => {
           const p = v.predefinicao('altium');

@@ -1616,7 +1616,7 @@ def _lan_ip():
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(description='Servidor local do EletricHUB (AltiumPCBMirror)')
+    ap = argparse.ArgumentParser(description='Servidor local do NexoEletric (AltiumPCBMirror)')
     ap.add_argument('--port', type=int, default=8000)
     # O padrao continua sendo a rede toda: e o que o servidor e a bancada usam. O app desktop
     # (electron/) passa 127.0.0.1 quando o usuario nao liga "compartilhar na rede".
@@ -1625,7 +1625,7 @@ if __name__ == '__main__':
     configura_escuta(args.host)
     threading.Thread(target=_watcher, daemon=True).start()
     libremota.inicia()           # so faz algo com ALTIUMHUB_LIB_REMOTA
-    print('EletricHUB:')
+    print('NexoEletric:')
     print('  http://127.0.0.1:%d' % args.port)
     ip = _lan_ip() if _ESCUTA_REDE else None
     if ip:

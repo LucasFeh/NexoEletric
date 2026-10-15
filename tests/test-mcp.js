@@ -1,4 +1,4 @@
-/* O servidor MCP do EletricHUB (mcp/), provado como um cliente o usaria.
+/* O servidor MCP do NexoEletric (mcp/), provado como um cliente o usaria.
 
    1. Conversa JSON-RPC COMPLETA por stdio com o servidor num processo filho:
       initialize -> notifications/initialized -> tools/list -> tools/call -> resources -> prompts.
@@ -76,7 +76,7 @@ const texto = r => JSON.parse(r.result.content[0].text);
   /* ---- 1. handshake ---- */
   const ini = await c.pede('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'teste', version: '0' } });
   assert.strictEqual(ini.result.protocolVersion, '2025-06-18');
-  assert.strictEqual(ini.result.serverInfo.name, 'eletrichub');
+  assert.strictEqual(ini.result.serverInfo.name, 'nexoeletric');
   assert.ok(ini.result.capabilities.tools && ini.result.capabilities.resources && ini.result.capabilities.prompts);
   assert.ok(/changes\.js/.test(ini.result.instructions));
   c.avisa('notifications/initialized', {});

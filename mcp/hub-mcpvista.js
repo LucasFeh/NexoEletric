@@ -1,4 +1,4 @@
-/* EletricHUB MCP - hub-mcpvista.js: o lado da PAGINA do canal MCP <-> vista aberta.
+/* NexoEletric MCP - hub-mcpvista.js: o lado da PAGINA do canal MCP <-> vista aberta.
    Entra nas vistas com UMA linha (o integrador poe no pcbframe.html e no schframe.html):
 
      <script src="mcp/hub-mcpvista.js"></script>

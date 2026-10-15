@@ -202,7 +202,7 @@ for (const a of res.arquivos) porCamada[a.camada] = a;
   const t = porCamada.Mid1.texto;
   assert.ok(!/[^\r]\n/.test(t) && t.endsWith('M02*\r\n'), 'CRLF em todas as linhas');
   assert.deepStrictEqual(linhas(t).slice(0, 11), [
-    '%TF.GenerationSoftware,Dieletrons,EletricHUB,' + G.VERSAO + '*%',
+    '%TF.GenerationSoftware,Dieletrons,NexoEletric,' + G.VERSAO + '*%',
     'G04 Layer_Physical_Order=2*',
     'G04 Layer_Color=' + (0x008EBC) + '*',                /* #BC8E00 do board.layers em COLORREF */
     '%FSLAX45Y45*%', '%MOMM*%',

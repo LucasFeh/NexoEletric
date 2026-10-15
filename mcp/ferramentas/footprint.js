@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "footprint": o editor de footprint do hub (hub-fpeditor.js) para a IA.
+/* NexoEletric MCP - grupo "footprint": o editor de footprint do hub (hub-fpeditor.js) para a IA.
 
    Le os footprints das duas bibliotecas -- a do Altium (Libs/pcblib.js, so leitura, com os corpos 3D
    de Libs/pcblib-3d.js) e a do hub (Libs/pcblib-hub.js) -- e GRAVA so na do hub, pelo mesmo
@@ -250,7 +250,7 @@ module.exports = {
         if (!(a.simbolo || (a.familia && a.componente))) throw new ErroMcp('passe {familia, componente} (almoxarifado) ou {simbolo}');
         if (a.footprint && !(await acha(ctx, a.footprint))) throw new ErroMcp(`footprint "${a.footprint}" não existe (fp_buscar)`);
         const hub = await hubNoAr(ctx);
-        if (!hub) throw new ErroMcp('o hub não está no ar: vincular passa pelo servidor da biblioteca (abra o EletricHUB)');
+        if (!hub) throw new ErroMcp('o hub não está no ar: vincular passa pelo servidor da biblioteca (abra o NexoEletric)');
         const valor = !!(a.familia && a.componente);
         const corpo = valor ? { familia: a.familia, componente: a.componente, footprint: a.footprint } : { simbolo: a.simbolo, footprint: a.footprint };
         const r = await fetch(hub.url + (valor ? '/api/symbols/almox-footprint' : '/api/symbols/footprint'), {

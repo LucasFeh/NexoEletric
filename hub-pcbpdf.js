@@ -656,7 +656,7 @@ function monta(eb, opcoes) {
   const campos = camposCarimbo(eb, o);
   if (!campos.escala) campos.escala = P.rotulo;
   const base = baseDoPcbDoc(eb) || 'placa';
-  const doc = W.novo({ titulo: 'LO - ' + base, assunto: 'Layout (montagem) — ' + base, criador: 'EletricHUB (hub-pcbpdf)', autor: campos.desenhista || undefined, data: o.data });
+  const doc = W.novo({ titulo: 'LO - ' + base, assunto: 'Layout (montagem) — ' + base, criador: 'NexoEletric (hub-pcbpdf)', autor: campos.desenhista || undefined, data: o.data });
   const logo = Car().imagens.map(im => {
     try { return doc.imagem({ w: im.pw, h: im.ph, flate: base64(im.rgbFlate) }); } catch (_) { return null; }
   });

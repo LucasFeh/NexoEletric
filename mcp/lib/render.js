@@ -1,4 +1,4 @@
-/* EletricHUB MCP - render.js
+/* NexoEletric MCP - render.js
    Uma imagem PNG da placa EFETIVA, desenhada aqui mesmo em Node (sem canvas, sem dependencia):
    e o "screenshot" que sempre funciona, com ou sem o hub aberto. Rasteriza poligonos (pad,
    trilha como capsula, via, fill, regiao com furos, texto pela geometria do Gerber) nas cores

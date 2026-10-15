@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "hub": o proprio hub (status, ajuda, modulos, vista aberta).
+/* NexoEletric MCP - grupo "hub": o proprio hub (status, ajuda, modulos, vista aberta).
 
    A vista ao vivo: o hubserver.py recarrega sozinho a pagina aberta quando o arquivo do projeto
    muda (o vigia), entao a IA nao precisa "mandar recarregar" depois de gravar. Para o
@@ -95,7 +95,7 @@ module.exports = {
         const out = { raiz_mcp: ctx.root, projetos_em: ctx.dirProjetos(), hubs };
         if (a.projeto) { const p = ctx.projeto(a.projeto); out.vistas = no ? urlsDaVista(no.url, p.nome) : null; }
         out.nota = no ? (no.mcp ? 'vista ao vivo disponível (vista_screenshot)' : 'hub no ar sem as rotas do MCP: a vista recarrega sozinha ao gravar, mas não há screenshot da tela (use pcb_render)')
-                      : 'nenhum hub no ar: as gravações valem do mesmo jeito; abra o EletricHUB para ver ao vivo';
+                      : 'nenhum hub no ar: as gravações valem do mesmo jeito; abra o NexoEletric para ver ao vivo';
         return out;
       },
     },
@@ -129,7 +129,7 @@ module.exports = {
     },
     {
       nome: 'vista_screenshot', titulo: 'Screenshot da vista aberta', leitura: true,
-      descricao: 'Captura a imagem da vista PCB ou Esquema ABERTA no hub (navegador ou app EletricHUB) para o projeto — exige o hub no ar com as rotas do MCP e a vista aberta. Se não houver vista aberta, desenha a placa aqui (pcb_render) e avisa.',
+      descricao: 'Captura a imagem da vista PCB ou Esquema ABERTA no hub (navegador ou app NexoEletric) para o projeto — exige o hub no ar com as rotas do MCP e a vista aberta. Se não houver vista aberta, desenha a placa aqui (pcb_render) e avisa.',
       entrada: { type: 'object', properties: { projeto: PROJETO, vista: { type: 'string', enum: ['pcb', 'sch'], description: 'padrão pcb' } }, required: ['projeto'] },
       executa: async (a, ctx, srv) => {
         const p = ctx.projeto(a.projeto);

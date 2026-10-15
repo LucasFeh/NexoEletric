@@ -1,10 +1,10 @@
-/* EletricHUB MCP - registrar.js
+/* NexoEletric MCP - registrar.js
    Gera os trechos de configuracao para registrar este servidor MCP nos clientes, ja com os
    caminhos DESTA instalacao. O integrador poe um item no menu do app ("Conectar a IA (MCP)") e
    nas Configuracoes do hub que mostra/copia isto.
 
      const { configuracoes } = require('./mcp/registrar.js');
-     configuracoes({ root: 'C:\\EletricHUB', node: process.execPath })
+     configuracoes({ root: 'C:\\NexoEletric', node: process.execPath })
        -> { claudeCode, claudeDesktop, claudeDesktopArquivo, http, chatCli, comandoStdio }
 
    Em linha de comando: node mcp/registrar.js [--root <pasta>] [--node <node.exe>] [--json]
@@ -23,7 +23,7 @@ function configuracoes(opts) {
   const script = path.resolve(o.script || path.join(__dirname, 'eletrichub-mcp.js'));
   const root = path.resolve(o.root || path.join(__dirname, '..'));
   const node = o.node || 'node';
-  const nome = o.nome || 'eletrichub';
+  const nome = o.nome || 'nexoeletric';
   const env = o.electron ? { ELECTRON_RUN_AS_NODE: '1' } : undefined;
   const args = [script, '--root', root].concat(o.hub ? ['--hub', o.hub] : []);
   const porta = o.porta || 8765;
@@ -58,7 +58,7 @@ if (require.main === module) {
   const c = configuracoes({ root: val('--root'), node: val('--node'), hub: val('--hub') });
   if (a.includes('--json')) { process.stdout.write(JSON.stringify(c, null, 2) + '\n'); process.exit(0); }
   process.stdout.write([
-    'EletricHUB MCP — como registrar',
+    'NexoEletric MCP — como registrar',
     '',
     'Claude Code (terminal):',
     '  ' + c.claudeCode,

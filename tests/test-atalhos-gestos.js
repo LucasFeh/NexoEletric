@@ -237,7 +237,7 @@ assert.strictEqual(N({ key:'ArrowDown', code:'Numpad2', location:3, ctrlKey:true
     assert.deepStrictEqual(A.carrega(), { fio:'K' });
     assert.deepStrictEqual(P.carrega(), { trilha:'K' }, 'gravar o Esquema não toca a PCB');
     P.grava({});
-    assert.strictEqual(mem.get('altiumhub.pcb.atalhos'), '{}', 'Padrão EletricHUB grava {} e fica');
+    assert.strictEqual(mem.get('altiumhub.pcb.atalhos'), '{}', 'Padrão NexoEletric grava {} e fica');
     assert.deepStrictEqual(P.carrega(), {});
     assert.deepStrictEqual(A.carrega(), { fio:'K' });
     mem.set('altiumhub.pcb.atalhos', '{estragado');

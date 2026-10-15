@@ -1,4 +1,4 @@
-/* hub-shell.js — a casca de "ambiente de CAD" do EletricHUB.
+/* hub-shell.js — a casca de "ambiente de CAD" do NexoEletric.
 
    O que ela acrescenta EM VOLTA do hub, sem mexer no que ele faz:
      - o painel "Projetos" na esquerda: a arvore projeto -> documentos (Esquema, PCB, BOM,
@@ -432,7 +432,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
     if (!hub()) return;
     const p = typeof proj === 'function' ? proj() : null;
     const tb = TABS.find((x) => x.id === abaAtual());
-    document.title = p ? `${p.name} · ${tb ? tr(tb.key, tb.id) : ''} — EletricHUB` : 'EletricHUB';
+    document.title = p ? `${p.name} · ${tb ? tr(tb.key, tb.id) : ''} — NexoEletric` : 'NexoEletric';
   }
 
   function tudo() {

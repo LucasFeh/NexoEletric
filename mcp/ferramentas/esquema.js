@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "esquema": o schematic.js (schmirror-v2, AI-GUIDE Parte A).
+/* NexoEletric MCP - grupo "esquema": o schematic.js (schmirror-v2, AI-GUIDE Parte A).
    Coordenadas em mil, Y para cima, grade de 100 mil, rot 0/90/180/270. As bibliotecas sao so
    LIDAS (Libs/ e do hub e do almoxarifado; o MCP nunca grava la). */
 'use strict';

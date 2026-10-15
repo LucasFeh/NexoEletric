@@ -1,4 +1,4 @@
-/* EletricHUB MCP - grupo "sinal": os sinalizadores do usuario (annotations.js, AI-GUIDE Parte C).
+/* NexoEletric MCP - grupo "sinal": os sinalizadores do usuario (annotations.js, AI-GUIDE Parte C).
    Contrato: a IA LE os abertos antes de mexer, corrige, e so muda status/reply. Nunca apaga nem
    renumera; quem apaga ou reabre e o usuario, pelo hub. A IA pode CRIAR um sinalizador para
    chamar a atencao do usuario (id novo, nunca reaproveitado). */

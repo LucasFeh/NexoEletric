@@ -1,5 +1,5 @@
 'use strict';
-// Configuracao da MAQUINA, em %APPDATA%\EletricHUB\settings.json.
+// Configuracao da MAQUINA, em %APPDATA%\NexoEletric\settings.json.
 //
 // Fica fora da pasta de trabalho de proposito: e ela que diz ONDE a pasta de trabalho
 // esta. Os segredos (token de atualizacao, chave da API do chat) vao cifrados com o
@@ -11,7 +11,7 @@ const { app, safeStorage } = require('electron');
 
 const PADRAO = {
   // Pasta de trabalho: o equivalente ao "current" do servidor. Codigo do hub + Projects/,
-  // Libs/, credenciais. C:\EletricHUB, e nao o perfil do usuario, por tres motivos:
+  // Libs/, credenciais. C:\NexoEletric, e nao o perfil do usuario, por tres motivos:
   //   - o C:\ProgramData\AltiumPCBMirror\home.txt dos scripts do Altium e UM por maquina,
   //     entao a pasta que ele aponta tambem tem de ser da maquina, nao de um usuario;
   //   - caminho sem acento: um perfil "C:\Users\João" entraria no ALMOX.DbLib e no
@@ -64,7 +64,7 @@ function arquivo() {
 }
 
 function workspacePadrao() {
-  return path.join(process.env.SystemDrive ? process.env.SystemDrive + '\\' : 'C:\\', 'EletricHUB');
+  return path.join(process.env.SystemDrive ? process.env.SystemDrive + '\\' : 'C:\\', 'NexoEletric');
 }
 
 function load() {

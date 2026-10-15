@@ -10,20 +10,44 @@
 ; Nada disso roda na atualizacao automatica (o app chama o instalador com --updated) nem
 ; em instalacao silenciosa (/S): la ninguem esta olhando para clicar.
 ;
-; Em qualquer caso, projetos, bibliotecas, a pasta de trabalho (C:\EletricHUB) e as
-; configuracoes (%APPDATA%\EletricHUB) ficam como estao: a troca e so do programa.
+; Em qualquer caso, projetos, bibliotecas, a pasta de trabalho (C:\EletricHUB ou
+; C:\NexoEletric) e as configuracoes (%APPDATA%\NexoEletric) ficam como estao: a troca e so
+; do programa.
+;
+; EletricHUB -> NexoEletric (1.9.0). O appId nao mudou, entao a chave de desinstalacao (o GUID
+; dele) e a mesma: o electron-builder acha o EletricHUB instalado e roda o desinstalador dele
+; em silencio (uninstallOldVersion, com --updated: os dados ficam) antes de copiar o novo, e
+; troca o atalho EletricHUB.lnk pelo NexoEletric.lnk. Nao fica nada lado a lado. So a PASTA
+; ficaria com o nome antigo, porque o instalador reaproveita a InstallLocation gravada: o
+; customInit troca "...\EletricHUB" por "...\NexoEletric" (o desinstalador antigo continua
+; recebendo a pasta antiga, que ele mesmo le do registro).
 
 !include "WordFunc.nsh"
+!include "FileFunc.nsh"
 
 ; Com um customCheckAppRunning definido, o electron-builder deixa de incluir o que o
 ; _CHECK_APP_RUNNING padrao usa (allowOnlyOneInstallerInstance.nsh): declarado aqui.
 !include "getProcessInfo.nsh"
 Var pid
+Var nexoPastaAntiga
 
 !macro customInit
+  ; a pasta do EletricHUB (ate a 1.8.x) vira a do NexoEletric
+  StrCpy $nexoPastaAntiga ""
+  ${GetFileName} "$INSTDIR" $R7
+  ${if} $R7 == "EletricHUB"
+  ${andIf} "${APP_FILENAME}" != "EletricHUB"
+    StrCpy $nexoPastaAntiga "$INSTDIR"
+    ${GetParent} "$INSTDIR" $R6
+    StrCpy $INSTDIR "$R6\${APP_FILENAME}"
+  ${endIf}
   ${ifNot} ${isUpdated}
   ${andIfNot} ${Silent}
-    ReadRegStr $R9 HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+    ; instalacao por maquina grava em HKLM; por usuario, em HKCU
+    ReadRegStr $R9 HKLM "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+    ${if} $R9 == ""
+      ReadRegStr $R9 HKCU "${UNINSTALL_REGISTRY_KEY}" "DisplayVersion"
+    ${endIf}
     ${if} $R9 != ""
       ${VersionCompare} "$R9" "${VERSION}" $R8
       ${if} $R8 == 0
@@ -55,6 +79,13 @@ Var pid
 ; depois de parar o hub. So se ele continuar aberto e que o padrao entra.
 !macro customCheckAppRunning
   !insertmacro IS_POWERSHELL_AVAILABLE
+  ; o EletricHUB.exe da pasta antiga (troca de nome): pede para fechar como o X da janela e
+  ; espera ate 20 s; o que sobrar, o desinstalador antigo fecha do jeito dele
+  ${if} $nexoPastaAntiga != ""
+  ${andIf} $IsPowerShellAvailable == 0
+    nsExec::Exec `"$PowerShellPath" -C "$$p = @(Get-CimInstance -ClassName Win32_Process | ? {$$_.Path -and $$_.Path.StartsWith('$nexoPastaAntiga', 'CurrentCultureIgnoreCase') -and $$_.Name -eq 'EletricHUB.exe'}); $$p | % { taskkill.exe /PID $$_.ProcessId }; $$n = 0; while (($$n -lt 40) -and ($$p | ? { Get-Process -Id $$_.ProcessId -ErrorAction SilentlyContinue })) { Start-Sleep -Milliseconds 500; $$n++ }"`
+    Pop $R2
+  ${endIf}
   ${ifNot} ${isUpdated}
     !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
     ${if} $R0 == 0
