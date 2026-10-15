@@ -1,7 +1,15 @@
-# Changelog — EletricHUB desktop
+# Changelog — NexoEletric desktop
 
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
-commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
+commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
+app se chamava EletricHUB.
+
+## 1.9.0 — 2026-10-15
+
+- **O EletricHUB agora se chama NexoEletric.** O instalador troca o EletricHUB instalado pelo NexoEletric, sem deixar os dois. Configurações, preferências, projetos e a pasta de trabalho (`C:EletricHUB`) continuam como estão; numa instalação nova a pasta padrão é `C:NexoEletric`.
+- **Na rede Nexo Hub.** A biblioteca 3D e as placas vão sozinhas para o Nexo Hub, o banco comum aos programas da casa: cada modelo 3D dos footprints aparece na biblioteca do NexoCAD, e cada placa também. Roda ao abrir e sempre que um footprint ou uma placa muda, em segundo plano. Para forçar: **Arquivo › Nexo Hub: sincronizar agora**; o estado está em **Ajuda › Sobre o NexoEletric**.
+- **Editar 3D no NexoCAD** e **Enviar placa ao NexoCAD** passam pelo Nexo Hub: o NexoCAD abre o próprio item, e o que for salvo lá aparece aqui no 3D, como antes.
+- **MCP:** o servidor se chama `nexoeletric` (o registro antigo continua valendo) e ganha `nexo_sincronizar`.
 
 ## 1.8.1 — 2026-10-15
 
