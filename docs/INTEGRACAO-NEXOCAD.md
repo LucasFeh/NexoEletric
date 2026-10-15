@@ -111,7 +111,7 @@ O índice é relido e alterado dentro da `.lock`.
 | `biblioteca_listar` | `categoria?, texto?, limite?` | itens do índice |
 | `biblioteca_item` | `id` | o item, com caminhos absolutos |
 | `biblioteca_abrir` | `id` | abre o `modelo.nexo` numa aba. Salvar a aba (Ctrl+S) grava de volta na biblioteca: `.nexo` + `.step` + miniatura + `rev++` |
-| `biblioteca_editar_modelo` | `step_path` (arquivo local) **ou** `step_url` (URL http local), `chave`, `nome`, `footprint?`, `categoria?` (padrão `Eletrônicos`) | acha o item cujo `substitui` contém a `chave`. Se não houver, cria um, importando o STEP: `origem.step`, `orientacao:"z-up"`, `substitui:[chave]`, `eletronico.footprints:[footprint]`. Depois abre para edição. Devolve `{id, criado}` |
+| `biblioteca_editar_modelo` | `id?`, `chave?`, `step_path?` (arquivo local), `step_url?` (URL http local), `nome?`, `footprint?`, `categoria?` (padrão `Eletrônicos`), `novo?`, `geometria?` | acha o item cujo `substitui` contém a `chave`. Se não houver, cria um, importando o STEP: `origem.step`, `orientacao:"z-up"`, `substitui:[chave]`, `eletronico.footprints:[footprint]`. Sem STEP e com `novo:true`: cria um item **vazio** (`orientacao:"y-up"`, `eletronico.footprints:[footprint]`, `substitui:[chave]` se veio chave). Com `geometria`, desenha os pads como esboço de referência no plano Superior ao criar. Depois abre para edição. Devolve `{id, nome, criado, aberto}` |
 | `biblioteca_importar_step` | `path`, `nome?`, `categoria?` | cria um item a partir de um STEP |
 | `biblioteca_salvar_ativo` | `id?`, `nome?`, `categoria?`, `footprint?` | grava o documento ativo na biblioteca (novo item, ou por cima do `id`) |
 | `biblioteca_editar_item` | `id`, `nome?`, `categoria?`, `descricao?`, `tags?`, `eletronico?`, `substitui?` | metadados |
@@ -130,8 +130,20 @@ desta máquina.
 | `GET /api/nexo/revisao` | `{revisao, mtime}`. Barata: só o `stat` + leitura do índice. As páginas consultam a cada 1,5 s |
 | `GET /api/nexo/biblioteca?categoria=Eletrônicos` | o índice filtrado; o padrão são os itens `Eletrônicos` |
 | `GET /api/nexo/arquivo/<id>/<modelo.step\|thumb.png>` | o arquivo do item |
-| `POST /api/nexo/editar` | `{chave, url, nome, footprint}` ou `{id}`. Abre o NexoCAD se precisar e chama `biblioteca_editar_modelo` / `biblioteca_abrir`. A `url` é a URL do STEP no próprio hub (`/Libs/3d-hub/...`); o servidor baixa de si mesmo para um temporário e passa o `step_path` |
+| `POST /api/nexo/editar` | `{chave, url, nome, footprint, geometria?}`, `{novo:true, footprint, nome, chave?, geometria?}` (o footprint não tem STEP: item vazio) ou `{id}`. Abre o NexoCAD se precisar e chama `biblioteca_editar_modelo` / `biblioteca_abrir` (a `chave` que um item já `substitui` abre esse item). A `url` é a URL do STEP no próprio hub (`/Libs/3d-hub/...`); o servidor baixa de si mesmo para um temporário e passa o `step_path`. A `geometria` segue sem mudança. Devolve `{ok, result, id?, criado?}` |
 | `POST /api/nexo/placa` | `{pacote}` (seção 4). Grava em `%TEMP%\eletrichub-nexo\<projeto>-<hora>\placa.json` + `modelos/*.step`, abre o NexoCAD e chama `pcb_importar` |
+
+**`geometria`** (opcional, quando o footprint é conhecido): `{"pads":[{"nome":"1","x":0,"y":0,"w":1.2,"h":0.6,"rot":0,"forma":"rect|circle|oval|roundrect","furo":0}], "contorno":[[x,y],...]}`
+em mm, no referencial LOCAL do footprint (origem dele, Y para cima, vista de cima). `contorno` (opcional) é o
+polígono da caixa dos pads/serigrafia.
+
+**`POST /api/nexo/placa`:** cada `modelos[chave]` do pacote enviado traz também `url` (o caminho do STEP no hub). O
+servidor baixa cada um, grava em `modelos/` e tira o `url` do `placa.json`. Modelo que não baixou sai do pacote
+junto com os corpos que o usavam, e a resposta lista em `avisos`. Resposta: `{ok, result, dir, path, avisos}`.
+
+**Chave `nexo:<id>`:** o editor de footprint do hub pode prender um item da biblioteca direto ao footprint. O
+corpo STEP fica com `model:"nexo:<id>"` e o modelo `{file:"nexo:<id>", name, nexo:"<id>"}`; o hub desenha o
+`modelo.step` do item, com a matriz do corpo.
 
 **Cache no navegador:** a chave do cache de malha (IndexedDB) de um corpo da biblioteca é
 `nexo:<id>@<rev>`. Assim, salvar no NexoCAD troca a malha na hora.

@@ -15,7 +15,7 @@ Rotas:
   GET  /api/nexo/revisao                      {revisao, mtime} (barata: as paginas consultam a cada 1,5 s)
   GET  /api/nexo/biblioteca?categoria=&texto= o indice filtrado (padrao: Eletronicos; categoria=* = todas)
   GET  /api/nexo/arquivo/<id>/<modelo.step|thumb.png>
-  POST /api/nexo/editar   {chave, url, nome, footprint} | {id} | {novo:true, footprint, nome, chave?}
+  POST /api/nexo/editar   {chave, url, nome, footprint, geometria?} | {id} | {novo:true, footprint, nome, chave?, geometria?}
   POST /api/nexo/placa    {pacote}  (eletrichub-placa-v1)
 Os POST so aceitam pedidos desta maquina.
 
@@ -503,6 +503,10 @@ def registra(app, root, eh_local=None):
             params = {'chave': chave, 'nome': a.get('nome') or '', 'footprint': a.get('footprint') or ''}
             if a.get('categoria'):
                 params['categoria'] = a['categoria']
+            # os pads do footprint (mm, referencial LOCAL do footprint, vista de cima): o NexoCAD
+            # desenha o esboco de referencia no plano Superior ao criar o item. Vai como veio.
+            if isinstance(a.get('geometria'), dict):
+                params['geometria'] = a['geometria']
             if a.get('url'):
                 destino = os.path.join(pasta_temp(), '%s-%s.step' % (
                     nome_seguro(os.path.splitext(a.get('nome') or 'modelo')[0])[:60],

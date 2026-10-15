@@ -220,9 +220,12 @@ try:
     st, j = post('/api/nexo/editar', {'chave': 'k', 'url': 'http://exemplo.com/a.step'})
     confere(st == 400, 'editar: url de outro host recusada')
 
-    st, j = post('/api/nexo/editar', {'novo': True, 'footprint': 'SOIC8', 'nome': 'SOIC8'})
+    geo = {'pads': [{'nome': '1', 'x': -2.7, 'y': 1.9, 'w': 1.5, 'h': 0.6, 'rot': 0, 'forma': 'rect', 'furo': 0}],
+           'contorno': [[-3, -2.5], [3, -2.5], [3, 2.5], [-3, 2.5]]}
+    st, j = post('/api/nexo/editar', {'novo': True, 'footprint': 'SOIC8', 'nome': 'SOIC8', 'geometria': geo})
     p = recebidos[-1]['params']
     confere(j['ok'] and p.get('novo') is True and 'step_path' not in p and p['footprint'] == 'SOIC8', 'editar {novo:true}: item vazio')
+    confere(p.get('geometria') == geo, 'editar: geometria vai ao NexoCAD como veio')
 
     # placa
     pac = {'format': 'eletrichub-placa-v1', 'projeto': 'Teste/Placa', 'espessura': 1.6,
