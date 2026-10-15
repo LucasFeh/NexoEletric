@@ -33,11 +33,12 @@
 })(typeof self !== 'undefined' ? self : this, function (root) {
 'use strict';
 
-const VERSAO = 1;                         /* muda quando o formato da malha no cache muda */
+const VERSAO = 2;                         /* muda quando o formato da malha no cache muda (2: tesselacao mais fina) */
 const BANCO = 'eletrichub-pcb3d', LOJA = 'malhas';
 /* deflexao: fracao da caixa do modelo (o padrao do occt e 0,001 da caixa, fino demais para uma
-   placa com 300 componentes; 0,003 ainda deixa o pino redondo) e angulo em rad */
-let DEFLEXAO = { linearUnit: 'millimeter', linearDeflectionType: 'bounding_box_ratio', linearDeflection: 0.003, angularDeflection: 0.5 };
+   placa com 300 componentes; 0,003 ainda deixa o pino redondo) e angulo em rad. 0,5 rad punha uns
+   12 lados num cilindro e o Real View mostrava as facetas: 0,3 (uns 21 lados) e o meio-termo */
+let DEFLEXAO = { linearUnit: 'millimeter', linearDeflectionType: 'bounding_box_ratio', linearDeflection: 0.003, angularDeflection: 0.3 };
 
 const ehWorker = typeof importScripts === 'function' && typeof document === 'undefined' && typeof module === 'undefined';
 
