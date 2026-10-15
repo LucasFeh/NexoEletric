@@ -83,8 +83,8 @@
     },
     "nsis": {
       "oneClick": true,
-      "perMachine": false,
-      "allowElevation": false,
+      "perMachine": true,
+      "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "NexoEletric",
