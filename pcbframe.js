@@ -4649,6 +4649,15 @@ const V = {
   cur:() => cur, setCur, setVisivel, soEsta, mostraTodas, conjunto,
   conjuntos:() => Object.keys(CONJUNTOS).map(k => ({ id:k, rot:CONJUNTOS[k].rot })),
   show:() => ({ grid:show.grid, ghost:show.ghost, unica:show.unica, flip:view.flip }),
+  /* Real View do 3D: o icone do painel Vista liga (abrindo o 3D) e desliga */
+  realView:() => !!(typeof HubPcb3dVista !== 'undefined' && (V3 ? V3.realView() : HubPcb3dVista.preferido())),
+  setRealView(on){
+    if (typeof HubPcb3dVista === 'undefined') return;
+    HubPcb3dVista.prefere(!!on);
+    if (V3) V3.realView(!!on);
+    if (on && !modo3d) entra3d();
+    if (painel) painel.atualiza();
+  },
   setShow(k, v){
     if (k === 'grid') show.grid = !!v; else if (k === 'ghost') show.ghost = !!v;
     else if (k === 'unica') { setUnica(!!v); return; } else if (k === 'flip') { setFlip(!!v); return; }

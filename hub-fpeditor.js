@@ -241,6 +241,7 @@ const ICONES = {
   pasta:svgI('M1.5 4h4.5l1.5 1.5h7v7.5h-13z'),
   mede:svgI('M1.5 11.5l10-10 3 3-10 10zM4 9l1.5 1.5M6.5 6.5L8 8M9 4l1.5 1.5'),
   ref:svgI('M8 1.5v13M1.5 8h13M5 8a3 3 0 1 0 6 0a3 3 0 1 0-6 0'),
+  realview:svgI('M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0M4.8 7a3.4 3.4 0 0 1 3.8-2.4'),
   wiz:svgI('M2 14l8-8M9.5 1.5v2M13 3l-1.4 1.4M14.5 6.5h-2M13 10l-1.4-1.4M5.5 2.5l.8 1.6'),
 };
 
@@ -425,9 +426,11 @@ async function inicia(o, resolve){
                 ibt('cyl', 'Corpo 3D cilíndrico (capacitor eletrolítico, LED)', () => poeCorpo('cylinder')),
                 ibt('del', 'Apagar a seleção (Delete)', () => apaga()));
       const tb2 = el('div', 'symed-tb');
+      bReal = ibt('realview', 'Real View: o 3D com materiais, reflexo e sombra realistas (liga o 3D)', () => alternaReal());
       tb2.append(ibt('rot', 'Girar a seleção 90° (Espaço)', () => gira90()),
                  ibt('dup', 'Duplicar a seleção (Ctrl+D)', () => duplica()),
-                 ibt('fit', 'Enquadrar (F)', () => enquadra()));
+                 ibt('fit', 'Enquadrar (F)', () => enquadra()), bReal);
+      marcaReal();
       barra.append(tb, tb2);
       if (uSel) uSel.value = E.unid;
       if (gSel) { const g = GRADES.find(x => Math.abs(x[0] - E.grade) < 1e-9); gSel.value = g ? String(g[0]) : String(E.grade); }
@@ -451,6 +454,20 @@ async function inicia(o, resolve){
     barra.append(sg);
     barra.append(bt('', E.unid === 'mm' ? 'mm' : 'mil', () => trocaUnid(), 'Unidade (Q)'));
     barra.append(bt('', 'Enquadrar', () => enquadra(), 'View » Fit Document (F)'));
+    bReal = bt('', 'Real View', () => alternaReal(), 'Real View: o 3D com materiais, reflexo e sombra realistas (liga o 3D)');
+    barra.append(bReal); marcaReal();
+  }
+  /* Real View do 3D (hub-pcb3d-vista.js): o icone liga (abrindo o 3D) e desliga */
+  let bReal = null;
+  function realLigado(){ const V = root.HubPcb3dVista; return !!(V && (E.v3 ? E.v3.realView() : V.preferido())); }
+  function marcaReal(){ if (!bReal) return; const on = realLigado(); bReal.setAttribute('aria-pressed', String(on)); bReal.classList.toggle('on', on); }
+  function alternaReal(){
+    const V = root.HubPcb3dVista; if (!V) return;
+    const on = !realLigado();
+    V.prefere(on);
+    if (E.v3) E.v3.realView(on);
+    if (on && E.modo !== '3d') modo('3d');
+    marcaReal();
   }
   function gravaPref(){ try { localStorage.setItem('altiumhub.fpe.grade', String(E.grade)); localStorage.setItem('altiumhub.fpe.unid', E.unid); } catch (e) { /* ok */ } }
   function trocaUnid(){ E.unid = E.unid === 'mm' ? 'mil' : 'mm'; gravaPref(); montaBarra(); props(); status(); }
