@@ -3,6 +3,15 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.6.0 — 2026-10-15
+
+- **3D realista: Real View e Render.** No canto da vista 3D (PCB e editor de footprint) há um seletor **Padrão · Real View · Render**:
+  - **Real View** (o do SolidWorks): materiais físicos com reflexo de estúdio e sombra macia no piso. Pinos e terminais em estanho, ouro ou cobre de verdade; corpo de CI em epóxi acetinado; plásticos com verniz ou foscos.
+  - **Render** (o do Blender): parado, a imagem vai se limpando em 128 amostras, com sombra de luz de área, oclusão nos cantos e serrilhado zero.
+  - **Ambiente e acabamento:** escolha o ambiente (Estúdio ou Interior) e o acabamento dos pads, Estanho (HASL) ou Ouro (ENIG).
+- **A placa com textura:** máscara com verniz, trilhas em relevo sob a máscara, serigrafia fosca e a borda de FR4 com a trama da fibra de vidro.
+- **Modelos 3D mais lisos:** as curvas do STEP agora saem arredondadas, sem facetas, e os cilindros têm o dobro de lados.
+
 ## 1.5.0 — 2026-10-15
 
 - **Esquema do Altium aberto direto no hub, sem o Altium.** Use **Arquivo › Abrir documento do Altium (.SchDoc / .PrjPcb)…** e escolha o .PrjPcb junto com as folhas; o projeto abre na aba Esquema. Vem tudo, como o ExportProject traria:
