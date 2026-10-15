@@ -3373,7 +3373,8 @@ function extrasDoHub(w){
   if (compsDaSel().length) it.push({ rot:'Virar de face', tecla:'L', f:() => transformaSelecao('vira') });
   if (compsDaSel().length === 1) it.push({ rot:'Editar footprint…', f:() => fazAcao('editarFp') });
   if (compsDaSel().length === 1 && typeof HubNexo !== 'undefined') it.push({ rot:'Editar 3D no NexoCAD', f:() => fazAcao('nexoEditar3d') });
-  if (modo3d && typeof HubNexoPacote !== 'undefined') it.push({ rot:'Enviar placa ao NexoCAD', f:() => fazAcao('nexoPlaca') });
+  /* a placa inteira para o NexoCAD (a caixa em volta): no 2D e no 3D */
+  if (typeof HubNexoPacote !== 'undefined') it.push({ rot:'Enviar placa ao NexoCAD', f:() => fazAcao('nexoPlaca') });
   it.push(modo3d ? { rot:'Voltar ao 2D', tecla:teclaDe('vista2d') || '2', f:() => fazAcao('vista2d') }
                  : { rot:'Ver em 3D', tecla:teclaDe('vista3d') || '3', f:() => fazAcao('vista3d') });
   if (SEL.length) it.push({ rot:'Girar 90°', tecla:teclaDe('girar'), f:() => transformaSelecao('gira') });

@@ -3,6 +3,10 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.8.1 — 2026-10-15
+
+- **Enviar placa ao NexoCAD à vista:** na vista PCB, direto no menu **Arquivo**, logo abaixo de Exportar (que também o tem), e no botão direito da placa também no 2D, não só no 3D.
+
 ## 1.8.0 — 2026-10-15
 
 - **Ligado ao NexoCAD.** Os dois programas usam a mesma biblioteca 3D (`C:\Users\Public\Dieletrons\Biblioteca`).

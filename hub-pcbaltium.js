@@ -581,7 +581,17 @@ function instala(V) {
     if (!DNA) return [];
     return (DNA.menu(VISTA, 'principal') || []).map(n => ({ ing:produto(n.rotulo), rot:produto(TR(n.rotulo)),
       letra:ultimaLetra(n.acelerador) || n.rotulo[0], filhos:converte(n.filhos, V.ctx(), 'barra') }))
+      .map(x => (x.ing === 'File' ? Object.assign(x, { filhos:comNexo(x.filhos) }) : x))
       .filter(x => x.filhos.length || x.ing === 'File' || x.ing === 'View' || x.ing === 'Help');
+  }
+  /* Pedido do dono (2026-10-15): o envio da placa ao NexoCAD a vista no Arquivo, logo abaixo do Exportar
+     (que tambem o tem), e nao so dentro do submenu */
+  function comNexo(filhos) {
+    if (VISTA !== 'pcb') return filhos;
+    const i = filhos.findIndex(x => x && x.filhos && x.filhos.some(f => f && f.acao === 'nexoPlaca'));
+    if (i < 0) return filhos;
+    const item = { rot:TR('Enviar placa ao NexoCAD…'), f:() => V.fazAcao('nexoPlaca'), tecla:V.teclaDe('nexoPlaca') || '', acao:'nexoPlaca' };
+    return filhos.slice(0, i + 1).concat([item], filhos.slice(i + 1));
   }
   /* fonte: funcao que devolve a lista de cima (o topo do hub passa a sua); sem ela, a da vista */
   function barra(box, fonte) {
