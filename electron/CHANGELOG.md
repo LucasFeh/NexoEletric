@@ -3,6 +3,14 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.8.0 — 2026-10-15
+
+- **Ligado ao NexoCAD.** Os dois programas usam a mesma biblioteca 3D (`C:\Users\Public\Dieletrons\Biblioteca`).
+- **Editar 3D no NexoCAD:** botão direito num componente na PCB (2D ou 3D), ou no corpo 3D do editor de footprint. O NexoCAD abre o modelo, com os pads do footprint como referência. Ao salvar lá (Ctrl+S), o 3D se atualiza aqui na hora, sem recarregar.
+- **Adicionar componente 3D** também lista os componentes eletrônicos da biblioteca do NexoCAD, com miniatura.
+- **Enviar placa ao NexoCAD:** em Arquivo › Exportar, ou com o botão direito no 3D. A placa vai com contorno, furos, espessura e componentes; no NexoCAD dá para criar a caixa em volta dela, com as aberturas dos conectores.
+- **MCP:** grupo nexo, para a IA mandar coisas de um programa para o outro: nexo_estado, nexo_biblioteca, nexo_editar_modelo, nexo_enviar_placa, nexo_vincular_footprint.
+
 ## 1.7.1 — 2026-10-15
 
 - **Arrastar o componente 3D direto com o mouse** no editor de footprint: clique em cima e arraste, sem precisar das setas (elas continuam para mover num eixo só). O ímã nas pernas e nos pads continua valendo.
