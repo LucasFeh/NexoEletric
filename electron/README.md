@@ -1,24 +1,25 @@
-# EletricHUB desktop (Electron)
+# NexoEletric desktop (Electron)
 
 O hub do AltiumPCBMirror como aplicativo do Windows. Faz o mesmo que o hub do servidor
 (192.168.15.192:8100), porque **é** o mesmo hub: o app sobe o `hubserver.py` deste
 repositório com um Python embutido e o mostra numa janela.
 
 ```
-EletricHUB.exe (Electron)
+NexoEletric.exe (Electron)
  ├─ resources/python/        CPython 3.12.10 embeddable + Flask/Werkzeug/olefile
  ├─ resources/hub/           o hub do commit do build (git ls-files, sem segredos)
  └─ main.js
-      1. sincroniza resources/hub -> pasta de trabalho (C:\EletricHUB)
+      1. sincroniza resources/hub -> pasta de trabalho (C:\NexoEletric; C:\EletricHUB nas de antes)
       2. python hubserver.py --port 8200 --host 127.0.0.1   (cwd = pasta de trabalho)
       3. janela em http://127.0.0.1:8200/
 ```
 
 ## O nome
 
-Desde a 1.1.0 o sistema se chama **EletricHUB**: app, janela, instalador, atalhos e a
-marca do hub. Alguns identificadores internos continuam com o nome antigo, e isso é de
-propósito, porque trocá-los quebraria o que já está instalado:
+Desde a 1.9.0 o sistema se chama **NexoEletric** (EletricHUB da 1.1.0 à 1.8.1, AltiumHub antes):
+app, janela, instalador, atalhos, a marca do hub e o servidor MCP (`nexoeletric`). Alguns
+identificadores internos continuam com os nomes antigos, e isso é de propósito, porque trocá-los
+quebraria o que já está instalado:
 
 - **`appId` `com.dieletrons.altiumhub` e pacote `altiumhub-desktop`.** São o que faz o
   instalador reconhecer a instalação existente (a chave de desinstalação e a pasta
@@ -27,9 +28,37 @@ propósito, porque trocá-los quebraria o que já está instalado:
 - **As variáveis `ALTIUMHUB_*`** e o caminho `C:\ProgramData\AltiumPCBMirror\home.txt`,
   lido pelos scripts do Altium.
 - **O marcador `// AltiumPCBMirror` dos arquivos que o hub lê de volta.**
+- **`window.eletricApp`, os `hub-*.js`, `mcp/eletrichub-mcp.js`, as URIs `eletrichub://`, o
+  `exporter` do `board.js`, o formato `eletrichub-placa-v1` e o `source:"eletrichub"` do `/rpc` do NexoCAD.**
 
-A pasta de dados segue o nome do produto. Na primeira abertura da 1.1.0,
-`%APPDATA%\AltiumHub` vira `%APPDATA%\EletricHUB` (`main.js`, antes de tudo).
+A pasta de dados segue o nome do produto. Na primeira abertura da 1.9.0, `%APPDATA%\EletricHUB`
+(ou `%APPDATA%\AltiumHub`, de quem pulou versões) vira `%APPDATA%\NexoEletric` (`main.js`, antes de
+tudo); se o Windows recusar, o app continua na pasta antiga. A pasta de trabalho gravada nas
+configurações não muda: só a das instalações novas é `C:\NexoEletric`.
+
+**O instalador com o EletricHUB instalado.** O appId é o mesmo, então a chave de desinstalação (o GUID
+dele) também: o electron-builder acha o EletricHUB e roda o desinstalador dele em silêncio, guardando os
+dados, antes de copiar o NexoEletric, e troca o atalho. Não fica nada lado a lado. Sozinho ele
+reaproveitaria a pasta `...\EletricHUB` gravada no registro; o `assets/installer.nsh` (`customInit`) a
+troca por `...\NexoEletric` e pede para o `EletricHUB.exe` aberto fechar antes, como o X da janela.
+
+## Nexo Hub
+
+O app publica a biblioteca 3D e as placas no Nexo Hub, o banco da rede (`lib/nexohub-sync.js`; o
+contrato é o `..\nexohub\docs\CONTRATO.md` e o `docs/INTEGRACAO-NEXOCAD.md`):
+
+- o trabalho é do `mcp/lib/nexohub-sync.js` da pasta de trabalho, o mesmo do MCP, rodado num processo
+  Node à parte (o próprio exe com `ELECTRON_RUN_AS_NODE`), para a janela não travar na primeira vez
+  (uns 650 modelos);
+- roda depois que o hub sobe (o 3D da PcbLib sai do hubserver sob demanda), de novo quando
+  `Libs/pcblib-hub.js`, `Libs/pcblib-3d.js` ou `Libs/3d-hub/` mudam (só a biblioteca) e quando
+  `Projects/<p>/board.js` ou `changes.js` mudam (só aquela placa), com 4 s de espera;
+- fora do ar, tenta de novo a cada 2 min; o andamento vai para o log (`[nexohub]`) e o estado para
+  **Ajuda › Sobre**. À mão: **Arquivo › Nexo Hub: sincronizar agora**;
+- a conexão e a presença (`/clientes/ping`) são do cliente oficial, `lib/nexohub-cliente.mjs` (cópia do
+  repositório nexohub);
+- `NEXOHUB_DESLIGADO=1` desliga; nos testes e na automação (`ALTIUMHUB_SMOKE`, `ALTIUMHUB_USERDATA`) fica
+  desligado a menos que `NEXOHUB_URL` diga para onde, para um teste nunca publicar no Nexo Hub de verdade.
 
 ## Por que é assim
 
@@ -146,7 +175,7 @@ cd electron
 npm install
 npm run build:prep     # build/python (baixa o Python), build/hub (do HEAD), gen/build-info.json
 npm test               # 32 testes; os de backend/importação/biblioteca sobem o hub de verdade
-npm run dev            # abre o app (pasta de dados normal: %APPDATA%\EletricHUB)
+npm run dev            # abre o app (pasta de dados normal: %APPDATA%\NexoEletric)
 ```
 
 `build/hub` sai do **commit** (`git cat-file --filters`, que aplica o CRLF dos `.pas`), e
@@ -172,7 +201,7 @@ Rode com `env -u ELECTRON_RUN_AS_NODE` (Git Bash) ou limpe a variável.
 ## Instalador e release
 
 ```powershell
-npm run dist                       # electron/dist/EletricHUB-Setup-X.Y.Z.exe, sem publicar
+npm run dist                       # electron/dist/NexoEletric-Setup-X.Y.Z.exe, sem publicar
 $env:GH_TOKEN = "<token de PUBLICAR>"
 $env:ALTIUMHUB_UPDATE_TOKEN = "<token de LER, vai dentro do .exe>"
 npm run release -- patch           # ou minor, major, X.Y.Z; --dry-run para ensaiar

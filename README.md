@@ -1270,16 +1270,17 @@ máquina da rede local), rode na raiz do workspace:
 
 ## App desktop (Windows)
 
-`electron/` empacota este hub como aplicativo do Windows, o **EletricHUB** (o nome do
-sistema desde 2026-09-24; o hub também se apresenta assim). Não é uma
+`electron/` empacota este hub como aplicativo do Windows, o **NexoEletric** (EletricHUB de
+2026-09-24 até a 1.8.1; o hub também se apresenta assim). Não é uma
 reescrita: o app sobe o próprio `hubserver.py` com um Python 3.12 embutido e o mostra
 numa janela. Tudo o que o hub do servidor faz, o app faz, só que nesta máquina.
 
-- **Instalação:** `EletricHUB-Setup-X.Y.Z.exe`, por usuário e sem administrador. O
+- **Instalação:** `NexoEletric-Setup-X.Y.Z.exe` (o mesmo appId do EletricHUB: o instalador troca
+  o EletricHUB instalado pelo NexoEletric, sem deixar os dois). O
   instalador não é assinado, então o Windows SmartScreen pede **Mais informações ›
   Executar assim mesmo** na primeira vez.
-- **Pasta de trabalho** (padrão `C:\EletricHUB`; instalações de antes da 1.1.0 seguem em
-  `C:\AltiumHub`): recebe o código do hub e o estado da
+- **Pasta de trabalho** (padrão `C:\NexoEletric` nas instalações novas; as de antes da 1.9.0 seguem
+  em `C:\EletricHUB`, e as de antes da 1.1.0 em `C:\AltiumHub`): recebe o código do hub e o estado da
   máquina (`Projects\`, `Libs\`, credenciais). A cada atualização o app repõe só o
   código, pelas mesmas regras do `tools/deploy/deploy.sh`.
 - **Importar do servidor** (Arquivo › Importar do servidor): traz projetos, bibliotecas
@@ -1388,44 +1389,55 @@ não tem volta como "o hub do servidor ainda não tem <rota>: … Atualize o hub
 publique o principal (`git push servidor neoden-ordem-por-bico`) antes de soltar um app
 que dependa de rota nova.
 
-## NexoCAD (a biblioteca 3D compartilhada)
+## NexoCAD e o Nexo Hub (a biblioteca 3D compartilhada)
 
-O NexoCAD é o CAD da casa. Os dois programas usam **uma biblioteca** de modelos 3D, o "BD",
-e conversam por HTTP local. O contrato é o `docs/INTEGRACAO-NEXOCAD.md`, com uma cópia igual
-no NexoCAD.
+O NexoCAD é o CAD da casa. Desde a 1.9.0 os dois programas usam **uma biblioteca**, o **Nexo Hub**:
+o banco da rede "Nexo Hub", comum a todos os programas da casa (hoje nesta máquina, com os dados em
+`D:\NexoHub`; amanhã num servidor, mudando só a URL). Ninguém abre o banco direto, tudo passa pela
+API HTTP. O contrato do banco é o `..\nexohub\docs\CONTRATO.md`; o lado do NexoEletric é o
+`docs/INTEGRACAO-NEXOCAD.md`.
 
-**A biblioteca.** Fica em `C:\Users\Public\Dieletrons\Biblioteca`, ou na pasta que o ponteiro
-`C:\Users\Public\Dieletrons\biblioteca.json` indicar. A variável `DIELETRONS_BIBLIOTECA` passa
-por cima dos dois. **Só o NexoCAD grava** a biblioteca. O hub só lê, pelas rotas
-`/api/nexo/*` (`tools/rotas/nexocad.py`). Para gravar, ele pede ao NexoCAD pelo `/rpc` do
-`session.json`. Se o NexoCAD estiver fechado, o hub abre o programa e espera até 60 s.
+**Onde está o Nexo Hub:** `NEXOHUB_URL` > `C:\Users\Public\NexoHub\conexao.json` (o app Nexo Hub
+grava) > `http://127.0.0.1:47800`.
 
-**O 3D da placa** troca o corpo de um componente pelo item da biblioteca, nesta ordem:
-1. o item que **substitui** aquela chave de modelo (`3d-hub/…`, `3d/…`, `projeto:<p>/…`);
-2. o item **vinculado ao footprint** (`eletronico.footprints`);
+**O que o NexoEletric publica** (`mcp/lib/nexohub-sync.js`; o app roda ao abrir e quando algo muda,
+num processo à parte; à mão: **Arquivo › Nexo Hub: sincronizar agora**, ou `nexo_sincronizar` no MCP):
+- **a biblioteca 3D:** cada modelo de `Libs/pcblib-hub.js` e da PcbLib da casa vira um item `modelo3d`
+  (`eletronicos/modelos-3d`), com a chave `nexoeletric-modelo` = o `file` do modelo, os footprints que
+  o usam e a revisão 1 com o STEP. Só sobe o que falta; um modelo que já existe nunca ganha revisão
+  daqui (a 2 em diante é do NexoCAD). A primeira vez sobe uns 650 modelos, em segundo plano;
+- **as placas:** cada projeto com `board.js` vira um item `placa`, com o pacote da placa efetiva e os
+  modelos apontando os itens. Revisão nova só quando a placa muda.
+
+**O 3D da placa** troca o corpo de um componente pelo item do Nexo Hub, nesta ordem:
+1. o item que **substitui** aquela chave de modelo (`3d-hub/…`, `3d/…`, `projeto:<p>/…`): o item com
+   aquela chave e **revisão maior que 1** (editado no NexoCAD);
+2. o item `componente` **vinculado ao footprint** (`atributos.footprints`);
 3. as fontes de sempre (biblioteca do hub, `board3d.js`, PcbLib, a caixa).
 
-A vista consulta `/api/nexo/revisao` a cada 1,5 s, e só com o 3D ou o editor de footprint
-abertos. Salvou no NexoCAD, o modelo troca sem recarregar a página. A chave do cache de malha é
-`nexo:<id>@<rev>`.
+O hubserver acompanha o Nexo Hub pelo SSE (`/api/v1/eventos`) e a vista consulta `/api/nexo/revisao`
+a cada 1,5 s, só com o 3D ou o editor de footprint abertos. Salvou no NexoCAD, o modelo troca sem
+recarregar a página. A chave do cache de malha é `nexo:<id>@<rev>`.
 
 **Na tela:**
-- **Botão direito num componente** (2D ou 3D) › *Editar 3D no NexoCAD*. Abre o item que já
-  substitui o STEP dele. Se não houver, o NexoCAD importa o STEP num item novo, vinculado ao
-  footprint e com os pads como esboço. Footprint sem STEP vira um item vazio (`novo:true`).
+- **Botão direito num componente** (2D ou 3D) › *Editar 3D no NexoCAD*. O NexoCAD abre o item do
+  modelo (publicado antes, se ainda não estava), com os pads como esboço. Footprint sem STEP vira um
+  item vazio (`novo:true`).
 - **Botão direito no 3D** › *Enviar placa ao NexoCAD*. Ou **File › Export › Placa para o
-  NexoCAD…**. O `hub-nexopacote.js` monta o `placa.json` da placa efetiva: contorno com
-  arcos, recortes, furos e os corpos 3D, com Z = 0 na face de baixo. O NexoCAD monta a
-  placa e grava em *Placas*.
+  NexoCAD…**. O `hub-nexopacote.js` monta o pacote da placa efetiva: contorno com arcos, recortes,
+  furos e os corpos 3D, com Z = 0 na face de baixo. O hub publica o item `placa` no Nexo Hub e o
+  NexoCAD monta a placa a partir dele.
 - **Editor de footprint:** *Editar no NexoCAD* nas Ações do corpo STEP e na lista 3D Bodies.
-  O *Adicionar componente 3D* lista também os itens Eletrônicos da biblioteca, com a
-  miniatura. O corpo fica com `model:"nexo:<id>"`.
+  O *Adicionar componente 3D* lista também os itens eletrônicos do Nexo Hub, com a miniatura. O
+  corpo fica com `model:"nexo:<id>"`.
 
 As rotas que mandam algo ao NexoCAD só aceitam pedidos desta máquina. No modo biblioteca
 remota elas não vão ao servidor central. A IA usa o grupo `nexo` do MCP (`mcp/README.md`).
 
-Testes: `python tests/test_nexocad_rotas.py`, `node tests/test-nexo.js`,
-`node tests/test-nexopacote.js`, `node tests/test-mcp-nexo.js`. Os testes não abrem o NexoCAD
+Testes: `python tests/test_nexocad_rotas.py` (com `NEXOHUB_TESTE_REAL=1`, contra o servidor de
+verdade), `node tests/test-nexohub-sync.js`, `node tests/test-nexohub-real.js`, `node tests/test-nexo.js`,
+`node tests/test-nexopacote.js`, `node tests/test-mcp-nexo.js`. O Nexo Hub dos testes é o
+`tests/nexohub-falso.js` (em memória) ou o de verdade numa pasta temporária; nenhum abre o NexoCAD
 instalado (`NEXOCAD_NAO_ABRIR=1`).
 
 ## Fluxo projeto novo do zero
