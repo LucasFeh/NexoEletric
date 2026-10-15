@@ -16,7 +16,7 @@ são dois branches, cada um com a sua interface:
 | worktree | branch | o que é | porta |
 |---|---|---|---|
 | `AltiumPCBMirror` (principal) | `neoden-ordem-por-bico` | o hub **web** (o servidor .192); é daqui que sai o deploy | 8000 |
-| `../APM-homologacao` | `electron` | o app **desktop** EletricHUB (`electron/`), com casca própria | 8001 |
+| `../APM-homologacao` | `electron` | o app **desktop** NexoEletric (antes EletricHUB; `electron/`), com casca própria | 8001 |
 
 O branch `homologacao` continua existindo, sem worktree. Suba o servidor na porta do
 worktree: `python hubserver.py --port 800X`. A 8000 é a do dono — teste seu vai noutra
@@ -24,7 +24,7 @@ porta, com `--host 127.0.0.1`.
 
 **As cascas são diferentes de propósito** (pedido do dono em 2026-09-24: "a interface do
 software desktop e da aplicação web vão ser diferentes mesmo por hora"). O desktop tem a
-casca EletricHUB. São da interface, e ficam diferentes nos dois branches: `hub.html` e
+casca NexoEletric. São da interface, e ficam diferentes nos dois branches: `hub.html` e
 `hub-classic.html`. Lógica, backend, `.pas` e testes são um código só.
 
 **A vista PCB também é uma só desde 2026-10-02** (pedido do dono: a criação de PCB "igual ao

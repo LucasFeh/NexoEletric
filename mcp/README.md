@@ -1,4 +1,8 @@
-# MCP do EletricHUB
+# MCP do NexoEletric
+
+Desde a 1.9.0 o servidor se apresenta como **`nexoeletric`** (antes `eletrichub`). Um registro antigo com o
+nome `eletrichub` continua funcionando: o arquivo (`mcp/eletrichub-mcp.js`), os argumentos e as URIs
+`eletrichub://` não mudaram; só o nome sugerido para registrar.
 
 Servidor **MCP** (Model Context Protocol) do hub: dá a uma IA (Claude Code, Claude Desktop, o
 chat do hub) as ferramentas para criar e editar esquema e placa, gerar as saídas e conferir o que
@@ -23,7 +27,7 @@ fez — o mesmo motor da tela (`hub-core.js`) e os mesmos arquivos que o hub e o
 
 ```
 node mcp/eletrichub-mcp.js                         # stdio, raiz = a pasta acima de mcp/
-node mcp/eletrichub-mcp.js --root C:\EletricHUB    # a pasta de trabalho do app desktop
+node mcp/eletrichub-mcp.js --root C:\NexoEletric    # a pasta de trabalho do app desktop
 node mcp/eletrichub-mcp.js --http 8765             # HTTP em http://127.0.0.1:8765/mcp
 node mcp/eletrichub-mcp.js --listar                # imprime as ferramentas por grupo
 ```
@@ -43,25 +47,25 @@ num item de menu "Conectar a IA (MCP)" que mostra/copia isto.
 
 **Claude Code**
 ```
-claude mcp add --transport stdio --scope user eletrichub -- node <repo>\mcp\eletrichub-mcp.js --root <pasta do hub>
+claude mcp add --transport stdio --scope user nexoeletric -- node <repo>\mcp\eletrichub-mcp.js --root <pasta do hub>
 ```
 
 **Claude Desktop** — `%APPDATA%\Claude\claude_desktop_config.json`:
 ```json
-{ "mcpServers": { "eletrichub": { "command": "node",
-  "args": ["<repo>\\mcp\\eletrichub-mcp.js", "--root", "C:\\EletricHUB"] } } }
+{ "mcpServers": { "nexoeletric": { "command": "node",
+  "args": ["<repo>\\mcp\\eletrichub-mcp.js", "--root", "C:\\NexoEletric"] } } }
 ```
-No app desktop, sem Node no PATH: `"command": "<EletricHUB.exe>"` com
+No app desktop, sem Node no PATH: `"command": "<NexoEletric.exe>"` com
 `"env": {"ELECTRON_RUN_AS_NODE": "1"}` (o `configuracoes({electron:true, node:process.execPath})`
 já gera assim).
 
 **HTTP** (outro cliente, ou o servidor da rede):
 ```
 node mcp/eletrichub-mcp.js --root <pasta> --http 8765
-claude mcp add --transport http eletrichub http://127.0.0.1:8765/mcp
+claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 ```
 
-## Ferramentas (73, por grupo)
+## Ferramentas (74, por grupo)
 
 `list_commands` lista tudo com descrição; cada ferramenta diz na descrição o fluxo de uso.
 
@@ -73,7 +77,7 @@ claude mcp add --transport http eletrichub http://127.0.0.1:8765/mcp
 | footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |
 | pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
 | pcbmod | `regras_ler`, `regras_definir` (`hub-pcbregras.js`), `drc_rodar` (`hub-pcbdrc.js`), `nets_ratsnest` (`hub-pcbnets.js`, com reserva própria), `pour_definir`, `pour_despejar` (`hub-pcbpour.js`), `teardrop_aplicar` (`hub-pcbteardrop.js`), `eco_comparar`, `eco_aplicar` (`hub-pcbeco.js`) |
-| nexo | `nexo_estado` (a biblioteca compartilhada e o NexoCAD), `nexo_biblioteca` (lista/busca os itens, lida do disco), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou um item, aberto no NexoCAD; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (a placa efetiva montada no NexoCAD, `hub-nexopacote.js`), `nexo_vincular_footprint` (pelo `biblioteca_editar_item` do NexoCAD: o hub não grava a biblioteca). Com o hub no ar vai pelas rotas `/api/nexo/*`; sem ele, direto no `/rpc` do NexoCAD. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
+| nexo | `nexo_estado` (o Nexo Hub e o NexoCAD), `nexo_biblioteca` (lista/busca os itens do Nexo Hub no formato do hub; `id` traz revisões e vínculos), `nexo_sincronizar` (publica a biblioteca 3D e as placas no Nexo Hub: o mesmo `lib/nexohub-sync.js` do app), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou de um item, aberto no NexoCAD sempre por um item do Nexo Hub; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (publica o item placa e pede `pcb_importar {item}`; `so_publicar`, `so_pacote`), `nexo_vincular_footprint` (direto no Nexo Hub: `atributos.footprints` + vínculo). Conexão: `NEXOHUB_URL` > `C:UsersPublicNexoHubconexao.json` > `127.0.0.1:47800`. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
 | saidas | `gerber_gerar` (grava `Projects/<p>/Gerber/` + `gerber.json`, como a rota `/api/gerber`; redespeja os polígonos antes), `gerber_salvo` (relê com o `hub-gerberview.js`), `pdf_layout` (`hub-pcbpdf.js` → `PDF/LO - <base>.pdf`), `bom_listar` |
 | sinal | `sinal_listar`, `sinal_responder` (só status/reply, AI-GUIDE Parte C), `sinal_criar` |
 | hub | `list_commands`, `hub_status`, `hub_modulos`, `hub_modulo_chamar` (qualquer função de qualquer módulo, com `$placa`, `$esquema`, `$regras`...), `vista_screenshot`, `vista_comando`, `altium_comandos` (`hub-altiumdna.js`), `hub_recarregar_ferramentas` |
@@ -146,7 +150,10 @@ objeto; `{_imagem:{base64, mime}}` vira imagem; `ok:false` vira `isError`.
 ```
 node tests/test-mcp.js          # stdio com processo filho, HTTP, e as ferramentas numa CÓPIA de "LM555 astável"
 python tests/test_mcp_rotas.py  # as rotas da vista ao vivo
-node tests/test-mcp-nexo.js     # o grupo nexo, com uma biblioteca e um NexoCAD de mentira
+node tests/test-mcp-nexo.js     # o grupo nexo, com um Nexo Hub (tests/nexohub-falso.js) e um NexoCAD de mentira
+node tests/test-nexohub-sync.js # o sincronizador (lib/nexohub-sync.js) contra o Nexo Hub de mentira
+node tests/test-nexohub-real.js # o mesmo contra o servidor de verdade (..
+exohub), se existir
 ```
 
 Os testes nunca gravam nos `Projects/` reais (conferem isso no fim).
@@ -164,6 +171,8 @@ Os testes nunca gravam nos `Projects/` reais (conferem isso no fim).
 | `lib/pcb-ops.js` | orig_* automáticos, uma linha por objeto, transação validada |
 | `lib/geometria.js` | pad/polígono e a conectividade de reserva |
 | `lib/render.js` | PNG da placa sem dependência |
+| `lib/nexohub.js` | o cliente do Nexo Hub (conexão, API v1) e o item do Nexo Hub no formato do `hub-nexo.js` |
+| `lib/nexohub-sync.js` | o sincronizador da biblioteca 3D e das placas (também a CLI que o app desktop roda) |
 | `lib/recursos.js`, `lib/util.js` | recursos/prompts; peças comuns |
 | `ferramentas/*.js` | os grupos |
 | `rotas_hub.py`, `hub-mcpvista.js` | o canal com a vista aberta (para o integrador ligar) |
