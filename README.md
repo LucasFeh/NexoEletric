@@ -1388,6 +1388,46 @@ não tem volta como "o hub do servidor ainda não tem <rota>: … Atualize o hub
 publique o principal (`git push servidor neoden-ordem-por-bico`) antes de soltar um app
 que dependa de rota nova.
 
+## NexoCAD (a biblioteca 3D compartilhada)
+
+O NexoCAD é o CAD da casa. Os dois programas usam **uma biblioteca** de modelos 3D, o "BD",
+e conversam por HTTP local. O contrato é o `docs/INTEGRACAO-NEXOCAD.md`, com uma cópia igual
+no NexoCAD.
+
+**A biblioteca.** Fica em `C:\Users\Public\Dieletrons\Biblioteca`, ou na pasta que o ponteiro
+`C:\Users\Public\Dieletrons\biblioteca.json` indicar. A variável `DIELETRONS_BIBLIOTECA` passa
+por cima dos dois. **Só o NexoCAD grava** a biblioteca. O hub só lê, pelas rotas
+`/api/nexo/*` (`tools/rotas/nexocad.py`). Para gravar, ele pede ao NexoCAD pelo `/rpc` do
+`session.json`. Se o NexoCAD estiver fechado, o hub abre o programa e espera até 60 s.
+
+**O 3D da placa** troca o corpo de um componente pelo item da biblioteca, nesta ordem:
+1. o item que **substitui** aquela chave de modelo (`3d-hub/…`, `3d/…`, `projeto:<p>/…`);
+2. o item **vinculado ao footprint** (`eletronico.footprints`);
+3. as fontes de sempre (biblioteca do hub, `board3d.js`, PcbLib, a caixa).
+
+A vista consulta `/api/nexo/revisao` a cada 1,5 s, e só com o 3D ou o editor de footprint
+abertos. Salvou no NexoCAD, o modelo troca sem recarregar a página. A chave do cache de malha é
+`nexo:<id>@<rev>`.
+
+**Na tela:**
+- **Botão direito num componente** (2D ou 3D) › *Editar 3D no NexoCAD*. Abre o item que já
+  substitui o STEP dele. Se não houver, o NexoCAD importa o STEP num item novo, vinculado ao
+  footprint e com os pads como esboço. Footprint sem STEP vira um item vazio (`novo:true`).
+- **Botão direito no 3D** › *Enviar placa ao NexoCAD*. Ou **File › Export › Placa para o
+  NexoCAD…**. O `hub-nexopacote.js` monta o `placa.json` da placa efetiva: contorno com
+  arcos, recortes, furos e os corpos 3D, com Z = 0 na face de baixo. O NexoCAD monta a
+  placa e grava em *Placas*.
+- **Editor de footprint:** *Editar no NexoCAD* nas Ações do corpo STEP e na lista 3D Bodies.
+  O *Adicionar componente 3D* lista também os itens Eletrônicos da biblioteca, com a
+  miniatura. O corpo fica com `model:"nexo:<id>"`.
+
+As rotas que mandam algo ao NexoCAD só aceitam pedidos desta máquina. No modo biblioteca
+remota elas não vão ao servidor central. A IA usa o grupo `nexo` do MCP (`mcp/README.md`).
+
+Testes: `python tests/test_nexocad_rotas.py`, `node tests/test-nexo.js`,
+`node tests/test-nexopacote.js`, `node tests/test-mcp-nexo.js`. Os testes não abrem o NexoCAD
+instalado (`NEXOCAD_NAO_ABRIR=1`).
+
 ## Fluxo projeto novo do zero
 
 1. Rode **ExportLibs** no Altium (uma vez, ou quando as bibliotecas mudarem).
