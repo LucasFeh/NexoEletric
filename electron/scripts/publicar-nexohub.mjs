@@ -15,7 +15,8 @@ const tool = path.join(repo, "tools", "publicar-instalador.mjs");
 if (!existsSync(tool)) { console.warn(`[nexohub] ${tool} não existe — instalador não publicado`); process.exit(0); }
 
 const nome = `NexoEletric-Setup-${versao}.exe`;
-const pastas = process.argv[2] ? [path.resolve(process.argv[2])] : readdirSync(ELECTRON).filter((d) => /^dist/.test(d)).map((d) => path.join(ELECTRON, d));
+const pastaArg = process.argv.slice(2).find((a) => !a.startsWith("-"));
+const pastas = pastaArg ? [path.resolve(pastaArg)] : readdirSync(ELECTRON).filter((d) => /^dist/.test(d)).map((d) => path.join(ELECTRON, d));
 const achados = pastas.map((d) => path.join(d, nome)).filter(existsSync).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
 if (!achados.length) { console.warn(`[nexohub] ${nome} não encontrado em dist*/`); process.exit(0); }
 
