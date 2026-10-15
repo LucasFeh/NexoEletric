@@ -1,6 +1,6 @@
 /* AltiumPCBMirror - hub-pcb3d-real.js (modulo ES, importado pelo hub-pcb3d-vista.js)
-   O 3D "de verdade" da vista 3D do hub: o RealView do SolidWorks e o Render do Blender, em WebGL
-   com o three.js do vendor (r186), sem addon nenhum.
+   O 3D "de verdade" da vista 3D do hub: o RealView do SolidWorks, em WebGL com o three.js do vendor
+   (r186), sem addon nenhum.
 
    DE ONDE VEM CADA NUMERO (medido nos programas instalados nesta maquina, 2026-10-15, pelo metodo
    do REA -- evidencia do artefato instalado, nao palpite):
@@ -25,8 +25,7 @@
    Blender 5.2, datafiles/studiolights/world/*.exr: as HDRIs do Look Dev, CC0 (Poly Haven, Greg Zaal;
    vendor/hdri/LICENSE-CC0.txt). Convertidas pelo proprio Blender (--background --python) para
    vendor/hdri/<nome>.rgbe: "RGBE" + u32 largura + u32 altura + pixels RGBE (Radiance, 4 bytes),
-   linhas de cima para baixo. O Blender usa a curva AgX por padrao (View Transform): o Render daqui
-   tambem.
+   linhas de cima para baixo.
 
    API
      MATERIAIS                       a tabela acima, ja em PBR
@@ -34,8 +33,7 @@
      material(T, cor, opac, temCor)  -> MeshPhysicalMaterial
      ambiente(T, ren, nome)          -> Promise<Texture PMREM> (cache por renderer + nome)
      mapasDaFace(T, canvas, acab)    -> {map, orm, coat, bump} da face pintada pela vista
-     bordaFR4(T)                     -> material da borda da placa (fibra de vidro)
-     Acumulador(T, ren)              o render progressivo (sombras macias e AO por amostragem) */
+     bordaFR4(T)                     -> material da borda da placa (fibra de vidro) */
 
 export const MATERIAIS = {
   estanho:   { cor:[0.80, 0.81, 0.83], metal:1, rough:0.24 },          /* satin silver: HASL, pinos estanhados */
@@ -104,7 +102,7 @@ function ruido(T, chave, celula, contraste){
 /* por classe: [celulas no ladrilho, contraste, repeticoes por UV (UV = 0,5 por mm), bump, faixa de rugosidade] */
 /* sem relevo: o bump do ruido aparecia como uma grade de pontos no corpo da peca; a variacao de
    rugosidade sozinha ja quebra o reflexo "de plastico de brinquedo" sem desenhar padrao */
-const GRAO = { epoxi:[96, 0.35, 2.5, 0, 0], fosco:[96, 0.3, 3, 0, 0], brilho:[96, 0.15, 3, 0, 0] };
+const GRAO = { epoxi:[128, 0.12, 4, 0, 0], fosco:[128, 0.12, 4, 0, 0], brilho:[128, 0.06, 4, 0, 0] };
 
 export function material(T, cor, opac, temCor){
   const k = classifica(cor.r, cor.g, cor.b, temCor);
@@ -187,7 +185,7 @@ const CLASSES = [
   { de:['#1b6233', '#1d6b34', '#1d5e33'], cor:[0.06, 0.29, 0.15], rough:0.42, metal:0, coat:1, alt:60 },    /* mascara verde */
   { de:['#2c8446'],                       cor:[0.13, 0.42, 0.22], rough:0.38, metal:0, coat:1, alt:150 },   /* cobre sob a mascara */
   { de:['#b8a76f', '#c9b98a'],            cor:[0.78, 0.71, 0.52], rough:0.82, metal:0, coat:0, alt:0 },     /* FR4 exposto */
-  { de:['#d9d6cf', '#d7d9de', '#d0d2d4'], cor:null,               rough:0.22, metal:1, coat:0, alt:140, pad:true },
+  { de:['#d9d6cf', '#d7d9de', '#d0d2d4'], cor:null,               rough:0.34, metal:1, coat:0, alt:140, pad:true },
   { de:['#f4f4f4', '#ffffff'],            cor:[0.93, 0.93, 0.90], rough:0.88, metal:0, coat:0, alt:200 },   /* serigrafia */
 ];
 const ACABAMENTO = { hasl:[0.80, 0.81, 0.83], enig:[0.98, 0.80, 0.50], osp:[0.92, 0.58, 0.44] };
@@ -242,54 +240,4 @@ export function bordaFR4(T){
   const t = new T.CanvasTexture(tramaCv);
   t.colorSpace = T.SRGBColorSpace; t.wrapS = t.wrapT = T.RepeatWrapping; t.repeat.set(0.6, 0.6);
   return new T.MeshPhysicalMaterial({ map:t, roughness:0.78, metalness:0, color:0xffffff });
-}
-
-/* ---------- o render progressivo (o "Render" do Blender) ----------
-   Cada quadro parado sorteia: um ponto da luz principal dentro de um disco (luz de area: sombra
-   macia), uma luz de ceu num ponto do hemisferio (somadas, dao a oclusao ambiente dos cantos) e um
-   deslocamento de subpixel da camera (antialias). A media dos quadros converge para a imagem
-   limpa -- o mesmo principio das amostras do Cycles, com o rasterizador. */
-export class Acumulador {
-  constructor(T, ren){
-    this.T = T; this.ren = ren; this.n = 0; this.w = 0; this.h = 0;
-    const op = { type:T.HalfFloatType, depthBuffer:true, samples:0 };
-    this.rtCena = new T.WebGLRenderTarget(1, 1, op);
-    this.rtA = new T.WebGLRenderTarget(1, 1, { type:T.HalfFloatType, depthBuffer:false });
-    this.rtB = new T.WebGLRenderTarget(1, 1, { type:T.HalfFloatType, depthBuffer:false });
-    this.cam = new T.OrthographicCamera(-1, 1, 1, -1, 0, 1); this.cam.position.z = 0.5;
-    this.mistura = new T.ShaderMaterial({
-      uniforms:{ tA:{ value:null }, tB:{ value:null }, k:{ value:0 } },
-      vertexShader:'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-      fragmentShader:'uniform sampler2D tA; uniform sampler2D tB; uniform float k; varying vec2 vUv;'
-        + ' void main(){ gl_FragColor = mix(texture2D(tA, vUv), texture2D(tB, vUv), k); }',
-      depthTest:false, depthWrite:false,
-    });
-    /* sem mistura: a media ja e pre-multiplicada (fundo de alfa 0), e o canvas do hub e transparente sobre o degrade */
-    this.mostra = new T.MeshBasicMaterial({ map:null, depthTest:false, depthWrite:false, toneMapped:true, transparent:true, blending:T.NoBlending });
-    this.quad = new T.Mesh(new T.PlaneGeometry(2, 2), this.mistura);
-    this.cena = new T.Scene(); this.cena.add(this.quad);
-  }
-  tamanho(w, h){ if (w !== this.w || h !== this.h) { this.w = w; this.h = h; for (const r of [this.rtCena, this.rtA, this.rtB]) r.setSize(w, h); this.n = 0; } }
-  zera(){ this.n = 0; }
-  /* um quadro: desenha a cena (ja sorteada por quem chama) e mistura na media */
-  soma(cena, camera){
-    const { ren } = this;
-    ren.setRenderTarget(this.rtCena); ren.clear(); ren.render(cena, camera);
-    this.mistura.uniforms.tA.value = this.rtA.texture;
-    this.mistura.uniforms.tB.value = this.rtCena.texture;
-    this.mistura.uniforms.k.value = 1 / (this.n + 1);
-    this.quad.material = this.mistura;
-    ren.setRenderTarget(this.rtB); ren.render(this.cena, this.cam);
-    const t = this.rtA; this.rtA = this.rtB; this.rtB = t;
-    this.n++;
-    ren.setRenderTarget(null);
-  }
-  /* a media na tela, com a curva de tom e o sRGB do renderer */
-  exibe(){
-    this.mostra.map = this.rtA.texture;
-    this.quad.material = this.mostra;
-    this.ren.setRenderTarget(null);
-    this.ren.render(this.cena, this.cam);
-  }
-  dispose(){ for (const r of [this.rtCena, this.rtA, this.rtB]) r.dispose(); this.mistura.dispose(); this.mostra.dispose(); this.quad.geometry.dispose(); }
 }

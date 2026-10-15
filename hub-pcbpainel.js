@@ -431,6 +431,8 @@ function instala(aside, V) {
     ibtn('fantasma', 'Fantasmas das mudanças (' + (V.teclaDe('diff') || 'D') + ')', sh.ghost, () => V.setShow('ghost', !sh.ghost));
     ibtn('unica', 'Camada única (' + (V.teclaDe('camadaUnica') || 'S') + ')', sh.unica, () => V.setShow('unica', !sh.unica));
     ibtn('virar', 'Ver por baixo (' + (V.teclaDe('virar') || 'V') + ')', sh.flip, () => V.setShow('flip', !sh.flip));
+    /* o Real View do 3D (hub-pcb3d-vista.js): ligar abre o 3D */
+    if (typeof V.realView === 'function') { const rv = V.realView(); ibtn('realview', 'Real View: o 3D com materiais, reflexo e sombra realistas (liga o 3D)', rv, () => V.setRealView(!rv)); }
     ibtn('ajuda', 'Ajuda: teclas e gestos (' + (V.teclaDe('ajuda') || 'H') + ')', null, () => V.ajuda());
     s4.append(ib);
     s4.append(el('div', 'hint', 'Os atalhos desta vista ficam nas Configurações do hub, aba Atalhos.'));

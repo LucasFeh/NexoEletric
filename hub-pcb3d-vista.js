@@ -27,14 +27,13 @@
        vista.redimensiona() vista.destroi() vista.estado() -> {steps, falhas, corpos}
      HubPcb3dVista.disponivel() -> bool (WebGL)
 
-   MODOS DE VISTA (o seletor no canto da propria vista 3D; a escolha fica gravada na maquina):
-     Padrao     o de sempre: cores chapadas, rapido
-     Real View  o RealView do SolidWorks: materiais fisicos (PBR) calibrados nos .p2m do SolidWorks,
-                reflexo do estudio (HDRI do Blender, CC0), sombras macias no piso, mascara com
-                verniz, pads de estanho ou ouro, serigrafia fosca, cobre em relevo sob a mascara
-     Render     o Render do Blender: o Real View parado acumula amostras (luz de area, ceu e
-                antialias) ate a imagem limpa, com a curva AgX do Blender
-   O modulo hub-pcb3d-real.js (ES) so e carregado quando um dos dois modos realistas e escolhido.
+   REAL VIEW (o RealView do SolidWorks): materiais fisicos (PBR) calibrados nos .p2m do SolidWorks,
+   reflexo do estudio (HDRI do Blender, CC0), sombra macia no piso, mascara com verniz, pads de
+   estanho, serigrafia fosca, cobre em relevo sob a mascara. Liga e desliga pelo icone da barra
+   lateral de quem usa a vista (vista PCB » painel Vista; editor de footprint » Ferramentas):
+     vista.realView(true|false) -> bool          liga/desliga nesta vista (e grava a preferencia)
+     HubPcb3dVista.preferido() / prefere(bool)   a preferencia da maquina (vale para a proxima vista)
+   O modulo hub-pcb3d-real.js (ES) so e carregado quando o Real View e ligado.
 */
 (function (root) {
 'use strict';
@@ -56,17 +55,8 @@ function real(){
 const PREF = 'altiumhub.v3d';
 function lePref(){ try { return JSON.parse(localStorage.getItem(PREF) || '{}') || {}; } catch (e) { return {}; } }
 function gravaPref(p){ try { localStorage.setItem(PREF, JSON.stringify(p)); } catch (e) { /* sem storage */ } }
-const CSS_MODO = `
-.v3d-modo{position:absolute; bottom:10px; right:10px; z-index:3; flex-wrap:wrap-reverse; justify-content:flex-end; max-width:calc(100% - 20px); display:flex; align-items:center; gap:6px; font:12px var(--font, sans-serif);}
-.v3d-modo .seg{display:inline-flex; border:1px solid var(--edge, #555); border-radius:6px; overflow:hidden; background:var(--surface-2, #2a2d33);}
-.v3d-modo .seg button{border:0; background:transparent; color:var(--text-2, #ccc); padding:4px 10px; cursor:pointer; font:inherit;}
-.v3d-modo .seg button.on{background:var(--hi, #e8a33d); color:var(--on-hi, #111);}
-.v3d-modo select{height:24px; border:1px solid var(--edge, #555); border-radius:6px; background:var(--surface-2, #2a2d33); color:var(--text, #eee); font:inherit;}
-.v3d-modo select[hidden]{display:none;}
-.v3d-prog{font:11px var(--mono, monospace); color:#fff; text-shadow:0 1px 2px #000; pointer-events:none; padding:0 4px;}
-.v3d-prog:empty{display:none;}
-`;
-let cssModo = false;
+function preferido(){ return lePref().modo === 'real' || lePref().modo === 'render'; }
+function prefere(on){ gravaPref({ modo:on ? 'real' : 'padrao' }); }
 function disponivel(){
   try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); }
   catch (e) { return false; }
@@ -113,16 +103,12 @@ async function cria(host, opcoes){
   const hemi = new T.HemisphereLight(0xffffff, 0x3a3f4a, 1.6); cena.add(hemi);
   const sol = new T.DirectionalLight(0xffffff, 1.5); sol.position.set(0.6, -0.8, 1.6); cena.add(sol); cena.add(sol.target);
   const contra = new T.DirectionalLight(0xffffff, 0.7); contra.position.set(-0.7, 0.9, -1.4); cena.add(contra);
-  /* so no Render: a luz de ceu sorteada a cada amostra (a oclusao ambiente) */
-  const ceu = new T.DirectionalLight(0xffffff, 0); cena.add(ceu); cena.add(ceu.target);
   /* o piso de estudio que so recebe sombra (o "shadow floor" das cenas do SolidWorks) */
   const piso = new T.Mesh(new T.PlaneGeometry(1, 1), new T.ShadowMaterial({ opacity:0.32 }));
   piso.receiveShadow = true; piso.visible = false; cena.add(piso);
   const fundoPadrao = o.fundo || 'linear-gradient(180deg,#4a5262 0%,#262a33 55%,#15171c 100%)';
-  const pref = lePref();
-  let modo = ['padrao', 'real', 'render'].indexOf(pref.modo) >= 0 ? pref.modo : 'padrao';
-  let ambNome = pref.amb === 'interior' ? 'interior' : 'studio', acab = pref.acab === 'enig' ? 'enig' : 'hasl';
-  let acum = null;
+  let modo = preferido() ? 'real' : 'padrao';
+  const ambNome = 'studio', acab = 'hasl';
   const gPlaca = new T.Group(), gCorpos = new T.Group();
   cena.add(gPlaca); cena.add(gCorpos);
 
@@ -147,42 +133,7 @@ async function cria(host, opcoes){
   function desenha(){
     agendado = 0; if (!vivo) return;
     posiciona();
-    if (acum) acum.zera();
-    ren.setRenderTarget(null);
     ren.render(cena, cam);
-    if (modo === 'render') agendaRender(); else mostraProg('');
-  }
-  /* ---------- Render: as amostras com a camera parada ---------- */
-  const AMOSTRAS = 128;
-  let rTimer = 0, rLoop = 0, semente = 99991;
-  const rnd = () => { semente = (semente * 16807) % 2147483647; return semente / 2147483647; };
-  function agendaRender(){
-    clearTimeout(rTimer); cancelAnimationFrame(rLoop);
-    rTimer = setTimeout(() => { rLoop = requestAnimationFrame(passoRender); }, 250);
-  }
-  function passoRender(){
-    if (!vivo || modo !== 'render' || agendado || !R) return;
-    if (!acum) acum = new R.Acumulador(T, ren);
-    const w = ren.domElement.width, h = ren.domElement.height;
-    acum.tamanho(w, h);
-    if (acum.n >= AMOSTRAS) { acum.exibe(); mostraProg('Render ' + AMOSTRAS + '/' + AMOSTRAS); return; }
-    posiciona();
-    cam.setViewOffset(w, h, rnd() - 0.5, rnd() - 0.5, w, h);
-    const s0 = sol.position.clone(), cx = (BB.x1 + BB.x2) / 2, cy = (BB.y1 + BB.y2) / 2, tam = Math.max(BB.x2 - BB.x1, BB.y2 - BB.y1, 10);
-    /* a luz principal: um ponto num disco de raio ~ 12% da distancia (luz de area do estudio) */
-    const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * tam * 0.35;
-    sol.position.set(s0.x + Math.cos(a) * r, s0.y + Math.sin(a) * r, s0.z);
-    /* o ceu: um ponto do hemisferio de cima, com a densidade do coseno */
-    const u = rnd(), v = rnd(), th = 2 * Math.PI * v, z = Math.sqrt(u);
-    const rr = Math.sqrt(1 - u);
-    ceu.position.set(cx + rr * Math.cos(th) * tam * 3, cy + rr * Math.sin(th) * tam * 3, Math.max(0.55, z) * tam * 3);   /* ceu abaixo de ~35 graus fazia rastro comprido no piso */
-    ceu.target.position.set(cx, cy, -ESP / 2);
-    acum.soma(cena, cam);
-    sol.position.copy(s0);
-    cam.clearViewOffset();
-    acum.exibe();
-    mostraProg('Render ' + acum.n + '/' + AMOSTRAS);
-    rLoop = requestAnimationFrame(passoRender);
   }
   function redimensiona(){
     const w = host.clientWidth || 1, h = host.clientHeight || 1;
@@ -548,14 +499,9 @@ async function cria(host, opcoes){
     const um = m => (m && m.userData && m.userData.real) ? R.material(T, m.userData.real.cor, m.userData.real.opac, m.userData.real.temCor) : m;
     return Array.isArray(mp) ? mp.map(um) : um(mp);
   }
-  /* os mapas da face dependem do acabamento: trocar o acabamento refaz so a placa */
-  function refazPlaca(){
-    gPlaca.traverse(x => { if (x.isMesh && x.userData.face && x.userData.mReal) { const m = x.userData.mReal; for (const k of ['map', 'roughnessMap', 'clearcoatMap', 'bumpMap']) if (m[k]) m[k].dispose(); m.dispose(); x.userData.mReal = null; } });
-    materiaisDoModo(gPlaca);
-  }
   function ajustaLuzes(){
     const cx = (BB.x1 + BB.x2) / 2, cy = (BB.y1 + BB.y2) / 2, tam = Math.max(BB.x2 - BB.x1, BB.y2 - BB.y1, 10);
-    for (const L of [sol, ceu]) {
+    for (const L of [sol]) {
       L.target.position.set(cx, cy, -ESP / 2);
       const c = L.shadow.camera, m = tam * 1.2;
       c.left = -m; c.right = m; c.top = m; c.bottom = -m; c.near = 0.1; c.far = tam * 8;
@@ -563,37 +509,32 @@ async function cria(host, opcoes){
       L.shadow.bias = -0.0004; L.shadow.normalBias = tam * 0.0004;
     }
     sol.position.set(cx + tam * 0.9, cy - tam * 1.2, tam * 2.4);
-    sol.shadow.mapSize.set(2048, 2048); ceu.shadow.mapSize.set(1024, 1024);
+    sol.shadow.mapSize.set(2048, 2048);
     sol.shadow.radius = 4;
     piso.scale.set(tam * 12, tam * 12, 1); piso.position.set(cx, cy, -ESP - Math.max(0.05, tam * 0.004));
   }
   async function trocaModo(novo){
-    if (['padrao', 'real', 'render'].indexOf(novo) < 0) return;
-    modo = novo; gravaPref({ modo, amb:ambNome, acab });
-    pintaSeletor();
-    clearTimeout(rTimer); cancelAnimationFrame(rLoop);
+    if (novo !== 'padrao' && novo !== 'real') return;
+    modo = novo; prefere(modo === 'real');
     if (modo === 'padrao') {
       ren.toneMapping = T.NoToneMapping; ren.shadowMap.enabled = false; cena.environment = null;
-      hemi.intensity = 1.6; sol.intensity = 1.5; contra.intensity = 0.7; ceu.intensity = 0; sol.castShadow = false; ceu.castShadow = false;
+      hemi.intensity = 1.6; sol.intensity = 1.5; contra.intensity = 0.7; sol.castShadow = false;
       piso.visible = false; host.style.background = fundoPadrao;
-      materiaisDoModo(gPlaca); materiaisDoModo(gCorpos); mostraProg(''); pede();
+      materiaisDoModo(gPlaca); materiaisDoModo(gCorpos); pede();
       return;
     }
-    mostraProg('preparando o ' + (modo === 'render' ? 'Render' : 'Real View') + '…');
     try { await real(); }
-    catch (e) { mostraProg('Real View indisponivel: ' + (e && e.message || e)); return; }
+    catch (e) { console.warn('3D: Real View indisponivel', e); modo = 'padrao'; return; }
     let env = null;
     try { env = await R.ambiente(T, ren, ambNome); } catch (e) { console.warn('3D: HDRI', e); }
     if (!vivo || modo === 'padrao') return;
     cena.environment = env;
     cena.environmentRotation.set(Math.PI / 2, 0, 0);     /* a placa e Z para cima; o HDRI do three, Y */
-    cena.environmentIntensity = ambNome === 'interior' ? 0.9 : 1.05;
-    ren.toneMapping = modo === 'render' ? T.AgXToneMapping : T.NeutralToneMapping;
-    ren.toneMappingExposure = modo === 'render' ? 1.15 : 1.0;
+    cena.environmentIntensity = 1.05;
+    ren.toneMapping = T.NeutralToneMapping; ren.toneMappingExposure = 1.0;
     ren.shadowMap.enabled = true; ren.shadowMap.needsUpdate = true;
     hemi.intensity = env ? 0.15 : 0.9; contra.intensity = 0.25;
-    sol.intensity = modo === 'render' ? 1.6 : 1.9; sol.castShadow = true;
-    ceu.intensity = modo === 'render' ? 0.9 : 0; ceu.castShadow = modo === 'render';
+    sol.intensity = 1.9; sol.castShadow = true;
     piso.visible = true;
     /* o fundo de estudio do SolidWorks ("Soft Neutral"): claro, sem competir com a peca */
     host.style.background = 'radial-gradient(ellipse at 50% 35%, #f4f5f7 0%, #d9dce1 55%, #b6bbc3 100%)';
@@ -602,39 +543,8 @@ async function cria(host, opcoes){
     cena.traverse(x => { const ms = x.material ? (Array.isArray(x.material) ? x.material : [x.material]) : []; for (const m of ms) m.needsUpdate = true; });
     materiaisDoModo(gPlaca); materiaisDoModo(gCorpos);
     aplicaRealce();
-    if (acum) acum.zera();
     pede();
   }
-  /* o seletor, no canto da propria vista */
-  if (!cssModo) { cssModo = true; const st = document.createElement('style'); st.textContent = CSS_MODO; document.head.append(st); }
-  const caixaModo = document.createElement('div'); caixaModo.className = 'v3d-modo';
-  const seg = document.createElement('div'); seg.className = 'seg';
-  const BOT = {};
-  for (const [k, rot, dica] of [['padrao', 'Padrão', 'Cores chapadas, a vista rápida'],
-                                ['real', 'Real View', 'Materiais físicos, reflexo de estúdio e sombra (o RealView do SolidWorks)'],
-                                ['render', 'Render', 'Real View com amostras acumuladas até a imagem limpa (o Render do Blender)']]) {
-    const b = document.createElement('button'); b.type = 'button'; b.textContent = rot; b.title = dica;
-    b.addEventListener('click', ev => { ev.stopPropagation(); trocaModo(k); });
-    BOT[k] = b; seg.append(b);
-  }
-  const selAmb = document.createElement('select'); selAmb.title = 'Ambiente (HDRI)';
-  for (const [v, r] of [['studio', 'Estúdio'], ['interior', 'Interior']]) { const op = document.createElement('option'); op.value = v; op.textContent = r; selAmb.append(op); }
-  selAmb.addEventListener('change', () => { ambNome = selAmb.value; trocaModo(modo); });
-  const selAcab = document.createElement('select'); selAcab.title = 'Acabamento dos pads';
-  for (const [v, r] of [['hasl', 'Estanho (HASL)'], ['enig', 'Ouro (ENIG)']]) { const op = document.createElement('option'); op.value = v; op.textContent = r; selAcab.append(op); }
-  selAcab.addEventListener('change', () => { acab = selAcab.value; gravaPref({ modo, amb:ambNome, acab }); refazPlaca(); if (acum) acum.zera(); pede(); });
-  for (const e of [caixaModo, selAmb, selAcab]) e.addEventListener('pointerdown', ev => ev.stopPropagation());
-  const prog = document.createElement('div'); prog.className = 'v3d-prog';
-  /* no canto de BAIXO: em cima ficam o Active Bar da vista PCB e a barra do editor de footprint */
-  caixaModo.append(prog, seg, selAmb, selAcab);
-  host.append(caixaModo);
-  function pintaSeletor(){
-    for (const k in BOT) BOT[k].classList.toggle('on', k === modo);
-    selAmb.value = ambNome; selAcab.value = acab;
-    selAmb.hidden = selAcab.hidden = modo === 'padrao';
-  }
-  function mostraProg(t){ prog.textContent = t || ''; }
-  pintaSeletor();
 
   const vista = {
     cena(c){
@@ -652,13 +562,10 @@ async function cria(host, opcoes){
     pose, gira, inclina, vira, enquadra, redimensiona,
     canvas:cv,
     _cena:cena,   /* gancho de teste (CDP), nao e contrato */
-    modo(m){ if (m) trocaModo(m); return modo; },
-    estado(){ return { steps:est.steps, falhas:est.falhas.slice(), corpos:est.corpos, az:orb.az / RAD, el:orb.el / RAD, dist:orb.dist, modo, amostras:acum ? acum.n : 0 }; },
+    realView(on){ if (on != null) trocaModo(on ? 'real' : 'padrao'); return modo === 'real'; },
+    estado(){ return { steps:est.steps, falhas:est.falhas.slice(), corpos:est.corpos, az:orb.az / RAD, el:orb.el / RAD, dist:orb.dist, realView:modo === 'real' }; },
     destroi(){
       vivo = false;
-      clearTimeout(rTimer); cancelAnimationFrame(rLoop);
-      if (acum) acum.dispose();
-      caixaModo.remove();
       if (ro) ro.disconnect();
       limpa(gPlaca); limpa(gCorpos);
       ren.dispose();
@@ -671,5 +578,5 @@ async function cria(host, opcoes){
   return vista;
 }
 
-root.HubPcb3dVista = { cria, disponivel, tres };
+root.HubPcb3dVista = { cria, disponivel, tres, preferido, prefere };
 })(typeof self !== 'undefined' ? self : this);
