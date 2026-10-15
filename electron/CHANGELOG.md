@@ -3,6 +3,19 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.7.0 — 2026-10-15
+
+- **Posicionar o modelo 3D direto na vista 3D do editor de footprint**, como nos programas de CAD:
+  - **Selecionar:** clique no corpo; a ficha dele abre ao lado.
+  - **Mover num eixo:** arraste uma das setas, **X** (vermelha), **Y** (verde) ou **Z** (azul, sobe e desce).
+  - **Mover livre no plano:** arraste o quadrado amarelo ou o próprio corpo.
+  - **Pelo teclado:** setas movem em X e Y; **PageUp/PageDown** sobem e descem (com Shift, 10 passos).
+- **Ímã:**
+  - **Pernas nos pads:** perto deles, as pernas do modelo encaixam no centro, na posição que põe mais pernas sobre pads ao mesmo tempo. A barra de baixo mostra quantas encaixaram.
+  - **Altura:** o corpo assenta na placa, ou a perna atravessa até a face de baixo.
+  - **Fora do alcance:** vale o passo da grade.
+  - **Shift:** segurado durante o arraste, solta o ímã.
+
 ## 1.6.1 — 2026-10-15
 
 - **Real View pelo ícone da barra lateral:** na placa, no painel **Vista** (ao lado de "Ver por baixo"); no editor de footprint, nas **Ferramentas**. Ligar abre o 3D já no Real View; clicar de novo volta às cores de sempre. A escolha fica gravada.
