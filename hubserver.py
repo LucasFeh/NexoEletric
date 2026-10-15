@@ -1533,6 +1533,16 @@ try:
 except Exception as _e:            # noqa: BLE001
     print('AVISO: placa nova desligada (%s) — falta tools/rotas/board_novo.py.' % _e)
 
+# ─────────────────── NexoCAD: a biblioteca compartilhada e o CAD (tools/rotas/nexocad.py) ───────────────────
+# /api/nexo/{estado,revisao,biblioteca,arquivo/<id>/<nome>} leem a biblioteca do disco (so leitura);
+# POST /api/nexo/{editar,placa} pedem ao NexoCAD (so desta maquina). Contrato: docs/INTEGRACAO-NEXOCAD.md.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import nexocad as _nexocad     # noqa: E402
+    _nexocad.registra(app, ROOT, _is_local)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: integracao com o NexoCAD desligada (%s) — falta tools/rotas/nexocad.py.' % _e)
+
 # ─────────────────── MCP: o canal da IA com a vista aberta (mcp/) ───────────────────
 # /api/mcp/{status,pedido,pedidos,resposta/<id>}: o servidor MCP (mcp/eletrichub-mcp.js) pede
 # screenshot/foco/comando a vista aberta; fila em memoria, nada em disco.

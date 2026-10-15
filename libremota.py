@@ -392,6 +392,8 @@ class Remota:
         caminho, metodo = request.path, request.method
         if request.headers.get(CAB_REPASSE):
             return None                         # ja e um repasse: nao salta de novo
+        if caminho.startswith('/api/nexo/'):
+            return None                         # NexoCAD e biblioteca compartilhada: desta maquina, nunca do servidor
         if caminho == '/api/almox/sync' or caminho.startswith('/api/almox/sync/'):
             return _json({'ok': False, 'error': LEGADO}, 409)
         if caminho.startswith('/api/symbols/') or caminho == '/api/almox/config':
