@@ -115,12 +115,27 @@ async function cria(host, opcoes){
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(redimensiona) : null;
   if (ro) ro.observe(host);
 
+  /* a placa E os corpos: um componente alto numa placa pequena (o editor de footprint) nao fica cortado */
+  let mexeu = false;
   function enquadra(){
-    const w = BB.x2 - BB.x1, h = BB.y2 - BB.y1;
-    orb.alvo.set((BB.x1 + BB.x2) / 2, (BB.y1 + BB.y2) / 2, -ESP / 2);
+    let x1 = BB.x1, y1 = BB.y1, x2 = BB.x2, y2 = BB.y2, z0 = -ESP, z1 = 0;
+    gCorpos.updateMatrixWorld(true);
+    const cb = new T.Box3().setFromObject(gCorpos);
+    if (!cb.isEmpty()) {
+      x1 = Math.min(x1, cb.min.x); y1 = Math.min(y1, cb.min.y); x2 = Math.max(x2, cb.max.x); y2 = Math.max(y2, cb.max.y);
+      z0 = Math.min(z0, cb.min.z); z1 = Math.max(z1, cb.max.z);
+    }
+    const w = x2 - x1, h = y2 - y1;
+    orb.alvo.set((x1 + x2) / 2, (y1 + y2) / 2, cb.isEmpty() ? -ESP / 2 : (z0 + z1) / 2);
     const fov = cam.fov * RAD, asp = cam.aspect || 1;
     const dV = (h / 2) / Math.tan(fov / 2), dH = (w / 2) / (Math.tan(fov / 2) * asp);
-    orb.dist = Math.max(dV, dH, 5) * 1.25 + ESP;
+    let d = Math.max(dV, dH, 5) * 1.25 + ESP;
+    if (orb.el < 80 * RAD && !cb.isEmpty()) {
+      const r = Math.hypot(w, h, z1 - z0) / 2, fovMin = Math.min(fov, 2 * Math.atan(Math.tan(fov / 2) * asp));
+      d = Math.max(d, r / Math.sin(fovMin / 2) * 1.05);
+    }
+    orb.dist = d;
+    mexeu = false;
     pede();
   }
   const POSES = {
@@ -151,7 +166,7 @@ async function cria(host, opcoes){
   let arr = null;
   cv.addEventListener('contextmenu', ev => ev.preventDefault());
   cv.addEventListener('pointerdown', ev => {
-    cv.focus();
+    cv.focus(); mexeu = true;
     const girar = ev.button === 1 || (ev.button === 2 && ev.shiftKey) || (ev.button === 0 && !ev.ctrlKey);
     arr = { x:ev.clientX, y:ev.clientY, b:ev.button, girar, andou:false, id:ev.pointerId };
     if (girar) {
@@ -191,7 +206,7 @@ async function cria(host, opcoes){
   cv.addEventListener('pointerup', solta);
   cv.addEventListener('pointercancel', () => { arr = null; });
   cv.addEventListener('wheel', ev => {
-    ev.preventDefault();
+    ev.preventDefault(); mexeu = true;
     const f = Math.pow(1.0018, ev.deltaY);
     const p = noPlano(ev);
     if (p && f < 1) orb.alvo.lerp(p, 1 - f);
@@ -351,6 +366,7 @@ async function cria(host, opcoes){
           const mg = malhaDoStep(r.malhas, b);
           g.add(mg); est.steps++;
           if (realce.has(g.userData.ref)) acende(g, true);
+          if (!mexeu) enquadra();   /* o modelo chegou e ninguem mexeu na camera: enquadra com ele */
           pede();
         }).catch(e => { est.falhas.push((b.owner || '?') + ': ' + (e && e.message || e)); });
         continue;

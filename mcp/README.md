@@ -14,8 +14,10 @@ fez — o mesmo motor da tela (`hub-core.js`) e os mesmos arquivos que o hub e o
 - **Os `orig_*` do changes.js saem sozinhos** do `board.js`: a IA diz "mova R5 para 12,8" e a
   ferramenta escreve o `comp_move` com os orig certos. Mexer de novo no mesmo objeto edita a
   linha que já existe (uma linha por objeto, como o AI-GUIDE exige).
-- **Bibliotecas só leitura**: `Libs/`, almoxarifado, símbolos e Odoo ficam como estão; o MCP só
-  lê.
+- **Bibliotecas só leitura**, menos a de footprints do hub: `Libs/` do Altium, almoxarifado,
+  símbolos e Odoo ficam como estão. O grupo `footprint` grava só em `Libs/pcblib-hub.js` (a
+  biblioteca do editor de footprint, que passa na frente da do Altium com o mesmo nome) e vincula
+  footprint a componente pelo servidor do hub, como a aba Biblioteca faz.
 
 ## Rodar
 
@@ -59,7 +61,7 @@ node mcp/eletrichub-mcp.js --root <pasta> --http 8765
 claude mcp add --transport http eletrichub http://127.0.0.1:8765/mcp
 ```
 
-## Ferramentas (59, por grupo)
+## Ferramentas (67, por grupo)
 
 `list_commands` lista tudo com descrição; cada ferramenta diz na descrição o fluxo de uso.
 
@@ -68,6 +70,7 @@ claude mcp add --transport http eletrichub http://127.0.0.1:8765/mcp
 | projeto | `projeto_listar`, `projeto_resumo`, `projeto_ler_arquivo`, `projeto_criar` (pasta + schematic.js; com `placa` cria o board.js mestre pelo `hub-pcbnova.js` e o rules.js da casa), `projeto_desfazer` |
 | esquema | `sch_ler`, `sch_componentes` (ponta quente dos pinos + net), `sch_nets`, `sch_adicionar` (ref "R?" = próximo livre, footprint do símbolo), `sch_editar`, `sch_apagar`, `sch_ligar` ("R1.2" → "C1.1"), `sch_validar`, `sch_buscar_simbolo`, `sch_simbolo`, `sch_buscar_footprint`, `sch_template` (`hub-schtemplate.js`) |
 | biblioteca | `almox_buscar` (estoque, local, Odoo; devolve o `comp` pronto para `sch_adicionar`) |
+| footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |
 | pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
 | pcbmod | `regras_ler`, `regras_definir` (`hub-pcbregras.js`), `drc_rodar` (`hub-pcbdrc.js`), `nets_ratsnest` (`hub-pcbnets.js`, com reserva própria), `pour_definir`, `pour_despejar` (`hub-pcbpour.js`), `teardrop_aplicar` (`hub-pcbteardrop.js`), `eco_comparar`, `eco_aplicar` (`hub-pcbeco.js`) |
 | saidas | `gerber_gerar` (grava `Projects/<p>/Gerber/` + `gerber.json`, como a rota `/api/gerber`; redespeja os polígonos antes), `gerber_salvo` (relê com o `hub-gerberview.js`), `pdf_layout` (`hub-pcbpdf.js` → `PDF/LO - <base>.pdf`), `bom_listar` |

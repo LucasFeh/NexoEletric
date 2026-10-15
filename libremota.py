@@ -406,6 +406,8 @@ class Remota:
             pass
         elif caminho.lower().startswith('/libs/3d-hub/') and metodo in ('GET', 'HEAD'):
             pass
+        elif (caminho.lower() == '/libs/pcblib-3d.js' or caminho.lower().startswith('/libs/3d/')) and metodo in ('GET', 'HEAD'):
+            pass                                # os 3D da PcbLib da casa: o servidor os tira dela
         elif caminho.lower() == '/libs/' + FP_HUB_NOME and metodo in ('GET', 'HEAD'):
             if not self._fora_confirmado():
                 try:

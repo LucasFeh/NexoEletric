@@ -215,7 +215,29 @@ def index():
 
 @app.route('/<path:path>')
 def files(path):
+    p = path.replace('\\', '/')
+    if (p == 'Libs/pcblib-3d.js' or p.startswith('Libs/3d/')) and not os.path.isfile(os.path.join(ROOT, *p.split('/'))):
+        return _serve_lib3d(p[len('Libs/'):])
     return _serve(path)
+
+
+# os corpos 3D da PcbLib da casa (Libs/pcblib-3d.js e Libs/3d/*.step): quando nao foram gerados
+# na raiz, saem da propria PcbLib, extraidos uma vez para um cache local (tools/pcb3d/lib3d_servidor.py)
+def _serve_lib3d(rel):
+    try:
+        pasta = os.path.join(ROOT, 'tools', 'pcb3d')
+        if pasta not in sys.path:
+            sys.path.insert(0, pasta)
+        import lib3d_servidor
+        r = lib3d_servidor.arquivo(ROOT, rel)
+    except Exception as e:   # PcbLib ilegivel: o hub segue sem 3D (as caixas de placeholder)
+        print('[lib3d] %s: %s' % (rel, e), file=sys.stderr)
+        r = None
+    if not r:
+        abort(404)
+    resp = send_from_directory(r[0], r[1])
+    resp.headers['Cache-Control'] = 'max-age=86400' if rel.startswith('3d/') else 'no-cache'
+    return resp
 
 
 # rules.js: as regras de projeto da vista PCB (hub-pcbregras.js), o Rules and Constraints Editor
