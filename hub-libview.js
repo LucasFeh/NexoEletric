@@ -65,6 +65,15 @@ const CSS = `
 .lv-dup-mais{padding:6px 10px; color:var(--text-4,#7a7a7a);}
 .lv-dup-dlg .lv-dup-nota{font-size:11px; color:var(--text-4,#7a7a7a);}
 
+/* A FAIXA NO TOPO DA GRADE INTEIRA (pintaAbas): uma linha a mais na .lib-grid, a faixa cobrindo
+   as colunas, e o centro perde a linha que era dela */
+.lib-grid.lv-faixa-cima{grid-template-rows:auto minmax(0,1fr);}
+.lib-grid.lv-faixa-cima > .lv-tabs{grid-column:1 / -1;}
+.lib-grid.lv-faixa-cima > .lib-view{grid-template-rows:auto minmax(0,1fr) auto minmax(0,1fr) minmax(0,0.85fr);}
+.lib-grid.lv-faixa-cima > .lib-view.lv-outra{grid-template-rows:minmax(0,1fr);}
+/* a busca da esquerda como a da vista Símbolos: o campo primeiro, o segmentado desce de linha */
+.lib-grid > .lib-left .lib-bar{flex-wrap:wrap; row-gap:6px;}
+.lib-grid > .lib-left .lib-bar .input{flex:1 1 140px;}
 /* Fora da vista Geral o centro deixa de ser a grade de quatro painéis e vira faixa + corpo:
    senão as linhas vazias da grade continuariam reservando altura para canvas escondido. */
 .lib-view.lv-outra{grid-template-rows:auto minmax(0,1fr);}
@@ -75,6 +84,17 @@ const CSS = `
    CLASSE que este módulo controla, todos os caminhos fecham de uma vez — inclusive os que
    alguém escrever amanhã. O laço de aplicaVisibilidade fica como cinto e suspensório. */
 .lib-view.lv-outra > :not(.lv-tabs):not(#symed):not(#lvFootprints){display:none !important;}
+.lib-view.lv-outra > #lvFootprints{height:100%; min-height:0;}
+/* AS MESMAS COLUNAS EM TODAS AS VISTAS: a lista da esquerda e o painel da direita com a largura
+   dos da vista Símbolos (o --aside-w do hub), o meio com o resto. Depois das regras de ficha e
+   de lista de propósito: com a mesma força, ganha a última. */
+.lib-grid.lv-faixa-cima{grid-template-columns:var(--symed-l, var(--aside-w)) minmax(0,1fr) var(--symed-r, var(--aside-w));}
+.lib-grid.lv-faixa-cima.lv-sem-ficha{grid-template-columns:var(--symed-l, var(--aside-w)) minmax(0,1fr);}
+.lib-grid.lv-faixa-cima.lv-sem-lista{grid-template-columns:minmax(0,1fr);}
+.lib-grid.lv-faixa-cima > *{min-width:0;}
+.lib-grid.lv-faixa-cima > .lib-left{overflow:hidden; box-shadow:inset -1px 0 0 var(--line);}
+.lib-grid.lv-faixa-cima > .lib-view{padding-left:6px;}
+.lib-grid > .lib-left .lib-bar .seg{flex-wrap:wrap; max-width:100%;}
 /* o footprint é desenhado em fundo escuro, como na vista Geral — ver desenhaTile */
 .lv-fp .symed-tile canvas{background:var(--sunken,#14161a);}
 
@@ -234,10 +254,7 @@ function trocaCentro(){
     centro.append(meu);
   }
   aplicaVisibilidade();
-  if (ST.aba === 'footprints'){
-    pintaFootprints();
-    if (ST.fps === null && !ST.carregando) carregaFps();
-  }
+  if (ST.aba === 'footprints' && !ST.ed) abreEditorFp(null);
   /* só a vista Componentes abre no editor o que está selecionado na lista da casca: na
      Símbolos a lista é a do editor, e abrir a categoria ali jogaria fora o símbolo em edição */
   if (ST.aba === 'componentes' && API.abreEditor){
@@ -279,23 +296,26 @@ function aplicaVisibilidade(){
   if (grade && grade.classList){
     grade.classList.toggle('lv-sem-ficha', !soGeral);
     /* na vista Símbolos a lista da casca sai também: ela é de componentes (ver o CSS) */
-    grade.classList.toggle('lv-sem-lista', ST.aba === 'simbolos');
+    grade.classList.toggle('lv-sem-lista', ST.aba === 'simbolos' || ST.aba === 'footprints');
   }
 }
 
 /* ── as sub-abas, no topo do CENTRO ──
    Elas são a primeira linha da grade do `.lib-view`, e não do aside da direita: quem troca
    é a janela do meio, e a faixa tem de estar em cima do que ela troca. */
+/* DESDE 2026-10-14 A FAIXA É A PRIMEIRA LINHA DA GRADE INTEIRA (.lib-grid), por cima das três
+   colunas, em todas as vistas — como a vista Símbolos sempre mostrou (ali a lista da casca sai e
+   o centro ocupa tudo). Pedido do dono: "todas as abas em Biblioteca sigam o exemplo da de
+   Símbolos, subabas na parte de cima". Dentro do centro, na Geral e na Componentes ela ficava
+   só em cima da coluna do meio, e a busca da esquerda subia ao lado dela. */
 function pintaAbas(){
   const centro = API && API.centro && API.centro();
   if (!centro) return;
-  let faixa = centro.querySelector('.lv-tabs');
-  if (!faixa){
-    faixa = el('div', 'lv-tabs');
-    centro.prepend(faixa);
-  } else if (faixa !== centro.firstElementChild){
-    centro.prepend(faixa);          /* um redesenho da casca pode tê-la empurrado para baixo */
-  }
+  const grade = centro.parentElement || centro;
+  let faixa = grade.querySelector(':scope > .lv-tabs') || centro.querySelector('.lv-tabs');
+  if (!faixa) faixa = el('div', 'lv-tabs');
+  if (faixa !== grade.firstElementChild) grade.prepend(faixa);   /* um redesenho da casca pode tê-la empurrado */
+  grade.classList.add('lv-faixa-cima');
   faixa.textContent = '';
   for (const [id, rotulo] of ABAS){
     const b = el('button', null, rotulo);
@@ -444,367 +464,83 @@ async function apagaAntigos(){
   pintaAbas();
 }
 
-/* ── a vista Footprints ── */
+/* ── a vista Footprints: O EDITOR DE FOOTPRINT, no molde da vista Símbolos ──
+   Pedido do dono, 2026-10-14: "deixe todas as abas idênticas à aba de símbolo em questão de
+   layout, inclusive o footprints, precisa ter uma área de edição do footprint igual à dos
+   símbolos". A vista é o hub-fpeditor.js no layout 'hub': lista com busca e "+ Novo footprint"
+   à esquerda, editor no meio, FERRAMENTAS e a ficha à direita. Ele fica aberto ao trocar de
+   sub-aba (o estado é dele) e grava em Libs/pcblib-hub.js.
+
+   VINCULAR NÃO É AQUI. Como o símbolo, o footprint se aplica PELO COMPONENTE: na vista
+   Componentes, faixa "Footprints", "Aplicar footprint ao componente" (hub-symed.js). Esta vista
+   só cria e edita; o que ela entrega à outra é o HubLibView.fp (lista, desenho, vincular). */
 function montaFootprints(){
   const box = el('div', 'lv-fp'); box.id = 'lvFootprints';
-
-  const alvo = el('div', 'lv-alvo'); alvo.id = 'lvAlvo';
-  const bar = el('div', 'lv-fp-bar');
-  const inp = el('input', 'input'); inp.id = 'lvBusca'; inp.type = 'text';
-  inp.placeholder = 'buscar footprint…';
-  inp.value = ST.q;
-  inp.addEventListener('input', () => { ST.q = inp.value; pintaLista(); });
-  const cnt = el('span', 'count'); cnt.id = 'lvCount';
-  bar.append(inp, cnt);
-
-  /* A fileira de ações, no molde da do editor: escolher é uma coisa, aplicar é outra. O
-     fluxo pedido é "seleciona o componente → escolhe o footprint → aplica no componente",
-     e um clique que já grava não tem esse meio-passo. Duplo clique aplica direto, como o
-     tile de símbolo faz. */
-  const acts = el('div', 'lv-acts');
-  const bAp = el('button', 'btn pri'); bAp.id = 'lvAplicar';
-  bAp.textContent = 'Aplicar ao componente'; bAp.disabled = true;
-  bAp.onclick = () => { if (ST.sel) vincula(ST.sel); };
-  const bDes = el('button', 'btn'); bDes.id = 'lvDesvincular';
-  bDes.textContent = 'Desvincular'; bDes.onclick = () => vincula('');
-  const esc = el('span', 'esc'); esc.id = 'lvEscolhido';
-  /* CRIAR E EDITAR FOOTPRINT, aqui mesmo (pedido do dono, 2026-10-14: "todo o mecanismo de
-     edição e criação de footprint do Altium ... no layout do footprint atual do eletrichub").
-     Até então esta vista só escolhia ("o hub escolhe, nunca cria"). O editor é o
-     hub-fpeditor.js, o mesmo da vista PCB e do Esquema, embutido no corpo da vista; grava em
-     Libs/pcblib-hub.js, que passa na frente do pcblib.js do Altium com o mesmo nome. */
-  const bNovo = el('button', 'btn'); bNovo.id = 'lvNovoFp'; bNovo.type = 'button';
-  bNovo.textContent = 'Novo footprint…';
-  bNovo.title = 'desenha um footprint novo: pads, serigrafia e corpo 3D (STEP) — P,P pad · P,L linha · P,B STEP';
-  bNovo.onclick = () => abreEditorFp(null, true);
-  const bEd = el('button', 'btn'); bEd.id = 'lvEditarFp'; bEd.type = 'button';
-  bEd.textContent = 'Editar footprint';
-  bEd.title = 'abre o escolhido (ou o vinculado) no editor — botão direito num tile também abre';
-  bEd.onclick = () => { const n = ST.sel || (fpAtualDe() || {}).name; if (n) abreEditorFp(n); };
-  acts.append(bAp, bDes, el('span', 'sep'), bNovo, bEd, esc);
-
-  const lista = el('div', 'symed-tiles'); lista.id = 'lvLista';
-
-  /* O FOOTPRINT TAMBÉM NASCE NO HUB desde 2026-10-14. Até ali a regra era o contrário (só a
-     PcbLib do Altium criava, e o servidor recusava nome que ela não tinha); o dono pediu o
-     editor do Altium aqui. O servidor aceita os nomes das duas bibliotecas
-     (symserver.py » _nomes_footprint) e continua recusando nome que não está em nenhuma. */
-  const novo = el('div', 'lv-nota');
-  novo.textContent = 'footprints do Altium (Libs/pcblib.js) e do hub (marca hub, criados ou editados aqui). '
-                   + 'Duplo clique aplica ao componente; botão direito edita.';
-
-  const tit = el('div', 'lv-titulo'); tit.id = 'lvTitulo';
-  const comps = el('div', 'lv-comps'); comps.id = 'lvComps';
-  const ed = el('div', 'lv-fp-ed'); ed.id = 'lvFpEd'; ed.hidden = true;
-  box.append(alvo, tit, comps, bar, acts, lista, novo, ed);
+  const ed = el('div', 'lv-fp-ed'); ed.id = 'lvFpEd';
+  box.append(ed);
   return box;
 }
 
-/* ── o editor de footprint, embutido ──
-   Abre no corpo da vista Footprints, no lugar da galeria. Fica aberto ao trocar de sub-aba
-   (o estado é dele; voltar à Footprints volta para o desenho), e fecha no "← Galeria". */
 function fpDoHub(nome){
   return (ST.hub && typeof HubFpLib !== 'undefined') ? HubFpLib.acha(ST.hub, nome) : null;
 }
 function fpParaDesenho(nome){ return fpDoHub(nome) || (API.footprint && API.footprint(nome)) || null; }
 
-async function abreEditorFp(nome, novo){
-  if (typeof HubFpEditor === 'undefined' || !HubFpEditor.abre){
-    aviso('o editor de footprint (hub-fpeditor.js) não carregou nesta página', 'err'); return;
-  }
-  const box = document.getElementById('lvFootprints');
-  const host = document.getElementById('lvFpEd');
-  if (!box || !host) return;
+let abrindo = null;
+function abreEditorFp(nome, novo){
   if (ST.ed){
-    /* já aberto: troca o footprint dentro dele (o editor pergunta se há o que perder) */
-    if (nome && ST.ed.fp() && ST.ed.fp().name === nome) return;
-    if (!(await ST.ed.podeSair())) return;
-    if (novo) ST.ed.carregaFp(null); else ST.ed.carregaFp(nome, API.footprint && API.footprint(nome));
-    if (novo) ST.ed.novo();
-    return;
+    if (nome && ST.ed.fp() && ST.ed.fp().name === nome && !ST.ed.fp().__vazio) return Promise.resolve();
+    return Promise.resolve(ST.ed.podeSair()).then(ok => {
+      if (!ok) return;
+      if (novo) { ST.ed.carregaFp(null); ST.ed.novo(); }
+      else ST.ed.carregaFp(nome, API.footprint && API.footprint(nome));
+    });
   }
-  box.classList.add('lv-editando');
-  host.hidden = false;
-  const alvoNome = () => { const c = componenteAtual(); return c && c.nome; };
-  HubFpEditor.abre({
-    host, semLista: true, fechaTxt: '← Galeria', titulo: 'Footprint',
-    nome: nome || null,
-    fp: nome ? (API.footprint && API.footprint(nome)) || null : null,
-    pcblib: { footprints: (API.footprintsAltium && API.footprintsAltium()) || [] },
-    botoes: [{
-      txt: 'Aplicar ao componente', pri: false,
-      titulo: 'salva (se preciso) e vincula este footprint ao componente do cabeçalho',
-      rotulo: () => { const n = alvoNome(); return n ? 'Aplicar a ' + (n.length > 28 ? n.slice(0, 27) + '…' : n) : 'Aplicar ao componente'; },
-      ativo: () => !!alvoNome(),
-      fn: async ctrl => {
-        if (!alvoNome()){ aviso('escolha um componente na lista da esquerda primeiro.', 'warn'); return; }
-        if (ctrl.sujo() && !(await ctrl.salvar())) return;
-        await vincula(ctrl.fp().name);
+  if (abrindo) return abrindo;
+  if (typeof HubFpEditor === 'undefined' || !HubFpEditor.abre){
+    aviso('o editor de footprint (hub-fpeditor.js) não carregou nesta página', 'err'); return Promise.resolve();
+  }
+  const host = document.getElementById('lvFpEd');
+  if (!host) return Promise.resolve();
+  abrindo = new Promise(pronto => {
+    HubFpEditor.abre({
+      host, layout: 'hub', titulo: 'Footprint',
+      nome: nome || null,
+      fp: nome ? (API.footprint && API.footprint(nome)) || null : null,
+      pcblib: { footprints: (API.footprintsAltium && API.footprintsAltium()) || [] },
+      aoMontar: ctrl => { ST.ed = ctrl; abrindo = null; pronto(); if (novo) ctrl.novo(); },
+      aoSalvar: async (fp, lib) => {
+        ST.hub = lib;
+        if (API.footprintsHub) { try { API.footprintsHub(lib); } catch (e) { /* a vista Geral relê depois */ } }
+        await carregaFps();
+        if (API.redesenha) API.redesenha();
       },
-    }],
-    aoMontar: ctrl => { ST.ed = ctrl; if (novo) ctrl.novo(); },
-    aoSalvar: async (fp, lib) => {
-      ST.hub = lib;
-      if (API.footprintsHub) { try { API.footprintsHub(lib); } catch (e) { /* a vista Geral relê depois */ } }
-      await carregaFps();
-    },
-  }).then(r => {
-    ST.ed = null;
-    if (r && r.lib) ST.hub = r.lib;
-    box.classList.remove('lv-editando');
-    host.hidden = true; host.textContent = '';
-    if (r && r.salvos && r.salvos.length){ ST.sel = r.salvos[r.salvos.length - 1]; carregaFps(); }
-    else pintaFootprints();
+    }).then(() => { ST.ed = null; host.textContent = ''; });
   });
+  return abrindo;
 }
 
-/* A CATEGORIA selecionada na esquerda. Ela não recebe footprint — é o agrupador. */
-function categoriaAtual(){
-  const s = API && API.sel && API.sel();
-  if (!s || (s.k !== 'sym' && s.k !== 'gone-sym')) return null;
-  return s.name;
+/* ── o que a vista Componentes (hub-symed.js, faixa "Footprints") usa daqui ── */
+async function carregaFps(){
+  ST.carregando = true;
+  try {
+    const [j, hub] = await Promise.all([
+      fetch('/api/symbols/footprints').then(r => r.json()),
+      /* os do hub com a geometria, para a miniatura: o /footprints só traz o nome */
+      typeof HubFpLib !== 'undefined' ? HubFpLib.carrega().catch(() => null) : Promise.resolve(null)]);
+    ST.fps = (j && j.ok && j.footprints) || null;
+    if (hub) ST.hub = hub;
+  } catch (e){
+    ST.fps = null;
+  }
+  ST.carregando = false;
+  try { document.dispatchEvent(new CustomEvent('hub:footprints-mudou')); } catch (e) { /* sem CustomEvent */ }
+  return ST.fps;
 }
 
-/* OS COMPONENTES da categoria: no almoxarifado são os `valores` (cada um é uma peça de
-   verdade, "SMD 1206 4.7pF 50V C0G"); na biblioteca da casa a categoria É o componente, e
-   a lista tem um item só. As duas viram a mesma coisa daqui para cima. */
-function componentesDa(cat){
-  const s = cat && API.simbolo && API.simbolo(cat);
-  if (!s) return [];
-  const vals = s.valores;
-  if (Array.isArray(vals) && vals.length){
-    /* `sym`: o valor tem desenho? O dele (`parts` próprio) ou, na falta, o da família.
-       Sem nenhum dos dois, o componente vai para o Altium sem símbolo — e é isso que a tag
-       vermelha diz. */
-    const temFam = !!(s.parts && s.parts.length);
-    /* UM encap por componente, como o resto do hub: a peça tem um tamanho só. Havendo mais
-       de um no Odoo, quem desempata é o footprint — "CAP 1206" carrega "1206". */
-    const encapDe = v => {
-      const pk = v.pkgs || [];
-      if (pk.length <= 1) return pk[0] || '';
-      const fp = String(v.footprint || '').toLowerCase();
-      return pk.find(x => fp.includes(String(x).toLowerCase())) || pk[0];
-    };
-    return vals.map(v => ({ nome: v.altium, rotulo: v.label || v.altium, fp: v.footprint || '',
-                            sym: !!(v.parts && v.parts.length) || temFam,
-                            proprio: !!(v.parts && v.parts.length),
-                            estoque: v.estoque, pkgs: encapDe(v), valor: true,
-                            /* o valor inteiro, para o "Odoo ↗" achar o `tmpl` dos itens */
-                            v }));
-  }
-  const fps = s.footprints || [];
-  return [{ nome: s.name, rotulo: s.name, fp: (fps[0] && fps[0].name) || '',
-            sym: !!(s.parts && s.parts.length), proprio: false,
-            estoque: null, pkgs: '', valor: false }];
-}
-
-/* o componente escolhido agora — ou o primeiro da categoria, para a tela nunca abrir sem
-   alvo (e o cabeçalho poder dizer em quem o clique vai mexer) */
-function componenteAtual(){
-  const cat = categoriaAtual();
-  if (!cat) return null;
-  const lista = componentesDa(cat);
-  if (!lista.length) return null;
-  const achado = ST.comp && lista.find(c => c.nome === ST.comp);
-  return achado || lista[0];
-}
-
-function fpAtualDe(){
-  const c = componenteAtual();
-  return c && c.fp ? { name: c.fp } : null;
-}
-
-function pintaAlvo(){
-  const cx = document.getElementById('lvAlvo');
-  if (!cx) return;
-  cx.textContent = '';
-  const cat = categoriaAtual();
-  if (!cat){
-    cx.append(el('span', 'q', 'escolha uma categoria na lista da esquerda.'));
-    return;
-  }
-  const c = componenteAtual();
-  const l1 = el('div');
-  if (!c){
-    l1.append(el('span', 'q', 'a categoria '), el('b', null, cat),
-              el('span', 'q', ' não tem componentes.'));
-    cx.append(l1);
-    return;
-  }
-  l1.append(el('span', 'q', 'vincular a '), el('b', null, c.nome));
-  cx.append(l1);
-  const l2 = el('div', 'atual');
-  if (c.fp){
-    l2.append(el('span', null, '↳ ' + c.fp));
-    const x = el('button', 'x', '✕ desvincular');
-    x.title = 'tirar o footprint deste componente';
-    x.onclick = () => vincula('');
-    l2.append(x);
-  } else {
-    l2.className = 'atual nenhum';
-    l2.append(el('span', null, '↳ sem footprint vinculado'));
-  }
-  cx.append(l2);
-}
-
-/* A LISTA DE COMPONENTES da categoria. É o que faltava para o fluxo fechar: sem ela a tela
-   sabia a categoria e não sabia em QUEM aplicar. Cada linha é .symed-comp — a mesma do
-   editor — e mostra o footprint que o componente já tem, porque é isso que se está vindo
-   trocar. */
-function pintaComponentes(){
-  const box = document.getElementById('lvComps');
-  const tit = document.getElementById('lvTitulo');
-  if (!box) return;
-  box.textContent = '';
-  const cat = categoriaAtual();
-  const lista = cat ? componentesDa(cat) : [];
-  const atual = componenteAtual();
-  if (tit){
-    tit.textContent = '';
-    tit.append(el('span', null, 'componentes'));
-    if (cat) tit.append(el('span', 'cat', cat));
-    tit.append(el('span', 'n', lista.length
-      ? lista.length + (lista.length === 1 ? ' item' : ' itens')
-        + ' · ' + lista.filter(c => !c.fp).length + ' sem footprint'
-        + (lista.filter(c => !c.sym).length
-           ? ' · ' + lista.filter(c => !c.sym).length + ' sem símbolo' : '')
-      : ''));
-  }
-  if (!cat){ box.append(el('div', 'lv-vazio', 'escolha uma categoria na lista da esquerda.')); return; }
-  if (!lista.length){ box.append(el('div', 'lv-vazio', 'sem componentes nesta categoria.')); return; }
-  const frag = document.createDocumentFragment();
-  for (const c of lista){
-    const b = el('button', 'symed-comp'); b.type = 'button';
-    b.setAttribute('aria-selected', String(!!atual && atual.nome === c.nome));
-    b.title = c.nome + (c.fp ? '\nfootprint: ' + c.fp : '\nsem footprint')
-            + (c.pkgs ? '\nencapsulamento: ' + c.pkgs : '');
-    b.append(el('span', 'nm', c.rotulo));
-    const meta = el('span', 'mt');
-    /* o ENCAP primeiro, do mesmo jeito da lista de valores da vista Geral: é a ponte entre
-       o que veio do Odoo ("1206") e o footprint da casa ("CAP 1206") */
-    if (c.pkgs){
-      const e = el('span', 'enc', c.pkgs);
-      e.title = 'encapsulamento ' + c.pkgs + ' (do Odoo)';
-      meta.append(e);
-    }
-    /* O QUE FALTA VEM DEPOIS, em vermelho e com o nome da coisa que falta — as mesmas
-       tags da categoria (hub.html » .pill.falta), para a lista e o agrupador dizerem a
-       mesma coisa do mesmo jeito. Tendo footprint, mostra QUAL: é o que se veio trocar. */
-    if (!c.fp){
-      const t = el('span', 'pill falta', 'footprint');
-      t.title = 'sem footprint vinculado';
-      meta.append(t);
-    } else {
-      meta.append(el('span', 'fpat', c.fp));
-    }
-    if (!c.sym){
-      const t = el('span', 'pill falta', 'símbolo');
-      t.title = 'sem desenho: nem próprio nem o da categoria';
-      meta.append(t);
-    } else if (c.proprio){
-      meta.append(el('span', 'pill', 'desenho próprio'));
-    }
-    if (typeof c.estoque === 'number') meta.append(el('span', 'es', c.estoque + ' un'));
-    b.append(meta);
-    b.onclick = () => { ST.comp = c.nome; ST.sel = null; pintaFootprints(); };
-    /* o "Odoo ↗" ao lado da linha, não dentro dela (hub-odoolink » faixa) */
-    frag.append(typeof HubOdooLink !== 'undefined'
-      ? HubOdooLink.faixa(b, c.v, { nome: c.rotulo }) : b);
-  }
-  box.append(frag);
-}
-
-function pintaLista(){
-  const lista = document.getElementById('lvLista');
-  const cnt = document.getElementById('lvCount');
-  if (!lista) return;
-  lista.textContent = '';
-  if (ST.carregando){ lista.append(el('div', 'lv-vazio', 'carregando…')); return; }
-  if (ST.fps === null){ lista.append(el('div', 'lv-vazio', 'não consegui ler a lista de footprints.')); return; }
-  const q = ST.q.trim().toLowerCase();
-  const vis = ST.fps.filter(f => !q || f.name.toLowerCase().includes(q));
-  if (cnt) cnt.textContent = vis.length + ' de ' + ST.fps.length;
-  if (!vis.length){
-    lista.append(el('div', 'lv-vazio', q
-      ? 'nada com "' + ST.q + '" nas bibliotecas de footprint (Altium e hub).'
-      : 'nenhum footprint.'));
-    return;
-  }
-  const atual = fpAtualDe();
-  const frag = document.createDocumentFragment();
-  const pendentes = [];
-  for (const f of vis.slice(0, 400)){
-    const obj = fpParaDesenho(f.name);
-    const t = el('button', 'symed-tile' + (f.desenhado ? '' : ' nao'));
-    t.type = 'button';
-    /* marcado = o escolhido agora; se ninguém escolheu ainda, o que já está vinculado */
-    const marcado = ST.sel ? (ST.sel === f.name) : (!!atual && atual.name === f.name);
-    t.setAttribute('aria-selected', String(marcado));
-    t.title = f.name + '\n' + (f.desenhado ? ((obj && (obj.pads || []).length) || 0) + ' pads'
-                                           : 'ainda não desenhado na PcbLib')
-      + (f.usos ? '\n' + f.usos + (f.usos === 1 ? ' componente usa' : ' componentes usam') : '')
-      + (atual && atual.name === f.name ? '\n— é o vinculado hoje' : '')
-      + (f.hub ? '\nbiblioteca do hub (Libs/pcblib-hub.js)' + (obj && (obj.bodies || []).length ? ' · com corpo 3D' : '') : '')
-      + '\nbotão direito: editar';
-    const cv = el('canvas'); cv.width = 96; cv.height = 64;
-    const nm = el('span', 'nm', f.name);
-    const k = el('span', f.desenhado ? 'pads' : 'nd',
-                 f.desenhado ? (((obj && (obj.pads || []).length) || 0) + ' pads'
-                                + (f.usos ? ' · ' + f.usos + ' uso' + (f.usos === 1 ? '' : 's') : ''))
-                             : 'não desenhado');
-    if (f.hub) k.append(el('span', 'hubtag', (obj && (obj.bodies || []).length) ? 'hub · 3D' : 'hub'));
-    t.append(cv, nm, k);
-    t.oncontextmenu = e => { e.preventDefault(); ST.sel = f.name; abreEditorFp(f.name); };
-    t.onclick = () => { ST.sel = (ST.sel === f.name) ? null : f.name; pintaLista(); pintaAcoes(); };
-    t.ondblclick = () => vincula(f.name);
-    frag.append(t);
-    if (obj){ cv._fp = obj; pendentes.push(cv); }
-  }
-  lista.append(frag);
-  /* DESENHAR SÓ DEPOIS DE ENTRAR NO DOCUMENTO. Dentro do fragmento o canvas tem
-     clientWidth 0, e o resize() da câmera monta uma transformação vazia: o tile ficava
-     preenchido com o fundo e mais nada — foi o "as miniaturas estão brancas". O
-     IntersectionObserver é o mesmo remédio da galeria de símbolos (hub-symed.js), e de
-     quebra não pinta 400 canvas de uma vez: só os que estão à vista. */
-  observa(lista, pendentes);
-  if (vis.length > 400){
-    lista.append(el('div', 'symed-empty', '… e mais ' + (vis.length - 400)
-      + '. Refine a busca — a galeria para em 400 para a rolagem não travar.'));
-  }
-  pintaAcoes();
-}
-
-/* o desenho do footprint no tile. Mesmo motor da vista Geral (HubDraw), mesma moldura dos
-   tiles de símbolo — footprint sem pads (o só-cadastrado) fica com o quadro vazio, que é a
-   verdade dele. */
-/* O FUNDO ESCURO NÃO É ENFEITE. Sem `bg`, o mkCamera pinta BRANCO (hub-draw.js:345) e o
-   footprint — cobre e furo, cores feitas para fundo escuro — some no branco: foi o "as
-   miniaturas estão brancas, não aparece nada". A vista Geral sempre passou `--sunken` no
-   canvas de footprint (hub.html:2397); o tile passa o mesmo, e o CSS do .symed-tile canvas,
-   que é `--sheet` (a folha clara do símbolo), é sobrescrito junto. */
+/* o desenho do footprint no tile. Mesmo motor da vista Geral (HubDraw), no fundo escuro dela:
+   sem `bg` o mkCamera pinta BRANCO e o cobre some ("as miniaturas estão brancas") */
 const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-
-let IO = null;
-
-/* Pinta cada canvas quando ele entra na área visível da galeria. `rootMargin` generoso para
-   o tile já chegar desenhado, e `unobserve` depois de pintar porque o desenho não muda. */
-function observa(raiz, canvases){
-  if (!canvases.length) return;
-  if (IO) IO.disconnect();
-  if (typeof IntersectionObserver !== 'function'){
-    for (const cv of canvases) desenhaTile(cv, cv._fp);
-    return;
-  }
-  IO = new IntersectionObserver(entradas => {
-    for (const e of entradas){
-      if (!e.isIntersecting) continue;
-      desenhaTile(e.target, e.target._fp);
-      IO.unobserve(e.target);
-    }
-  }, { root: raiz, rootMargin: '160px' });
-  for (const cv of canvases) IO.observe(cv);
-}
-
 function desenhaTile(cv, fp){
   if (!fp) return;
   if (!window.HubDraw || !HubDraw.mkCamera) return;
@@ -816,85 +552,41 @@ function desenhaTile(cv, fp){
   } catch (e) { /* um tile sem preview é melhor que a galeria inteira sem aparecer */ }
 }
 
-function pintaAcoes(){
-  const b = document.getElementById('lvAplicar');
-  const d = document.getElementById('lvDesvincular');
-  const e = document.getElementById('lvEscolhido');
-  const c = componenteAtual();
-  const sim = c && c.nome;
-  const atual = fpAtualDe();
-  if (b) b.disabled = !sim || !ST.sel || (!!atual && atual.name === ST.sel);
-  if (d) d.disabled = !sim || !atual;
-  const ed = document.getElementById('lvEditarFp');
-  if (ed) ed.disabled = !(ST.sel || atual);
-  if (e) e.textContent = !sim ? 'nenhum componente selecionado'
-    : ST.sel ? 'escolhido: ' + ST.sel
-    : 'escolha um footprint na galeria';
-}
-
-function pintaFootprints(){
-  pintaAlvo();
-  if (ST.ed){ try { ST.ed.atualiza(); } catch (e) { /* o editor fechou no meio */ } return; }
-  pintaComponentes(); pintaLista();
-}
-
-async function carregaFps(){
-  ST.carregando = true;
-  pintaLista();
-  try {
-    const [j, hub] = await Promise.all([
-      fetch('/api/symbols/footprints').then(r => r.json()),
-      /* os do hub com a geometria, para o tile: o /footprints so traz o nome */
-      typeof HubFpLib !== 'undefined' ? HubFpLib.carrega().catch(() => null) : Promise.resolve(null)]);
-    ST.fps = (j && j.ok && j.footprints) || null;
-    if (hub) ST.hub = hub;
-  } catch (e){
-    ST.fps = null;
+/* VINCULAR UM footprint a um componente. Duas rotas, porque são dois mundos: no almoxarifado
+   o alvo é um VALOR dentro da categoria (vai ao ledger para sobreviver ao sincronismo); na
+   biblioteca da casa o símbolo É o componente. `footprint` vazio desvincula. A regra de um-só
+   e a de o nome existir (Altium ou hub) são do servidor. */
+async function vinculaAlvo(alvo, nome){
+  if (!alvo || !(alvo.componente || alvo.simbolo)) throw new Error('nenhum componente aberto');
+  const corpo = alvo.valor
+    ? { familia: alvo.familia, componente: alvo.componente, footprint: nome || '' }
+    : { simbolo: alvo.simbolo, footprint: nome || '' };
+  const r = await fetch(alvo.valor ? '/api/symbols/almox-footprint' : '/api/symbols/footprint', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+  const j = await r.json();
+  if (!j || !j.ok) throw new Error((j && j.error) || 'não deu para vincular');
+  /* o espelho em memória da casca anda junto, senão a lista da esquerda mostra o vínculo velho
+     até alguém recarregar a página */
+  const fam = API.simbolo && API.simbolo(alvo.valor ? alvo.familia : alvo.simbolo);
+  if (alvo.valor && fam && Array.isArray(fam.valores)){
+    const v = fam.valores.find(x => x.altium === alvo.componente);
+    if (v) v.footprint = nome || '';
+  } else if (fam){
+    fam.footprints = j.footprints || [];
   }
-  ST.carregando = false;
-  pintaLista();
+  if (API.redesenha) API.redesenha();
+  return j;
 }
-
-/* UM footprint. A rota recusa mais de um, e aqui nem se oferece: clicar troca, e o ✕
-   desvincula. Não existe "adicionar mais um" nesta tela de propósito. */
-async function vincula(nome){
-  const c = componenteAtual();
-  const sim = c && c.nome;
-  if (!sim){ aviso('escolha um componente na lista acima primeiro.', 'warn'); return; }
-  try {
-    /* DUAS ROTAS, porque sao dois mundos. No almoxarifado o alvo e um VALOR dentro da
-       familia, e a escolha precisa ir ao ledger para sobreviver ao sincronismo; na
-       biblioteca da casa o simbolo E o componente e o vinculo mora no proprio schlib.js.
-       `c.valor` diz de qual dos dois se trata — quem monta a lista ja sabe. */
-    const corpo = c.valor
-      ? { familia: categoriaAtual(), componente: sim, footprint: nome }
-      : { simbolo: sim, footprint: nome };
-    const r = await fetch(c.valor ? '/api/symbols/almox-footprint' : '/api/symbols/footprint', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(corpo),
-    });
-    const j = await r.json();
-    if (!j || !j.ok){ aviso((j && j.error) || 'não deu para vincular', 'err'); return; }
-    /* o espelho em memória da casca tem de andar junto, senão a tela mostra o vínculo velho
-       até alguém recarregar a página */
-    /* o espelho em memoria da casca anda junto, senao a tela mostra o vinculo velho ate
-       alguem recarregar a pagina */
-    const fam = API.simbolo && API.simbolo(categoriaAtual());
-    if (c.valor && fam && Array.isArray(fam.valores)){
-      const v = fam.valores.find(x => x.altium === sim);
-      if (v) v.footprint = nome;
-    } else if (fam){
-      fam.footprints = j.footprints || [];
-    }
-    ST.sel = null;
-    aviso(nome ? ('“' + sim + '” → ' + nome) : ('“' + sim + '” ficou sem footprint'), 'ok');
-    for (const a of (j.avisos || [])) aviso(a, 'warn');
-    pintaFootprints();
-    if (API.redesenha) API.redesenha();
-  } catch (e){
-    aviso('não consegui falar com o servidor: ' + (e && e.message || e), 'err');
-  }
-}
+const FP = {
+  lista: () => { if (ST.fps === null && !ST.carregando) carregaFps(); return ST.fps; },
+  carrega: () => carregaFps(),
+  geo: nome => fpParaDesenho(nome),
+  ehHub: nome => !!fpDoHub(nome),
+  desenha: (cv, nome) => desenhaTile(cv, fpParaDesenho(nome)),
+  vincula: vinculaAlvo,
+  /* "Editar footprint" no botão direito de um tile da vista Componentes */
+  editar: nome => Promise.resolve(ir('footprints')).then(ok => { if (ok) return abreEditorFp(nome); }),
+};
 
 function aviso(txt, tom){
   if (window.HubDialog && HubDialog.toast) HubDialog.toast(txt, tom || 'info', 6000);
@@ -943,7 +635,7 @@ function atualiza(){
   pintaAbas();
   carregaDups(false);                   /* no máximo uma vez a cada 30 s: depois de um sync */
   aplicaVisibilidade();                 /* barato, e desfaz o que o renderLib re-exibiu */
-  if (ST.aba === 'footprints'){ pintaFootprints(); return; }
+  if (ST.aba === 'footprints') return;
   /* na vista Símbolos a seleção da casca não manda no editor: a lista dali é outra */
   if (ST.aba !== 'componentes') return;
   /* abrir no editor é CARO (carrega a schlib, redesenha a faixa), então só quando o
@@ -974,9 +666,12 @@ function entra(aba){
      trocar de modo, e o atualiza() acha que ela continua aberta se o nome não mudou */
   if (aba === 'componentes' && ST.aba !== 'componentes') ultimoAberto = null;
   ST.aba = aba; pintaAbas(); trocaCentro();
+  /* a Geral volta com os desenhos dela refeitos: um redesenho que aconteceu com ela escondida
+     (aplicar um footprint na Componentes, por exemplo) mediu os canvas com zero de largura */
+  if (aba === 'geral' && API && API.redesenha) requestAnimationFrame(() => API.redesenha());
 }
 
-return { instala, ir, atualiza, estado: ST,
+return { instala, ir, atualiza, estado: ST, fp: FP,
          /* quem apaga componentes da biblioteca (hub-almoxfora.js) pede a contagem nova da faixa */
          recontar: () => carregaDups(true),
          pure: { filtra: (fps, q) => (fps || []).filter(f => !q || f.name.toLowerCase().includes(String(q).toLowerCase())) } };

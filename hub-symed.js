@@ -742,6 +742,7 @@ const ST = {
   /* faixa de baixo: 'simbolos' = os corpos prontos da symbols-lib; 'componentes' = os
      VALORES da familia aberta (so faz sentido num acervo do almoxarifado) */
   faixa: 'simbolos', valSel: null, valQ: '',
+  fpQ: '', fpSel: null,          /* a faixa Footprints: a busca e o footprint marcado */
   /* a faixa dirigida de fora, pelo "Editar simbolo" da vista Esquema */
   libIds: null,       /* restringe a faixa a estes ids (empate); null = biblioteca inteira */
   faixaNota: '',      /* a frase ao lado da contagem: por que ESTE tile esta marcado */
@@ -1139,6 +1140,8 @@ const CSS = `
 .symed-modo-simbolos .symed-libbar,.symed-modo-simbolos .symed-tiles{display:none !important;}
 /* a linha da lista de simbolos: a miniatura (o mesmo desenho do tile da faixa) e o nome */
 .symed-librow{gap:9px;padding:3px 8px;}
+.symed-fptile canvas{background:var(--sunken,#14161a) !important;}
+.symed-fptile.atual .nm{color:var(--hi,#4fc3f7);}
 .symed-librow canvas{flex:none;width:54px;height:36px;border-radius:3px;background:var(--sheet,#fff);
   box-shadow:inset 0 0 0 1px var(--edge,rgba(255,255,255,.08));}
 .symed-librow.editado .nm::after{content:" ●";color:var(--warn,#ffb74d);}
@@ -1283,7 +1286,9 @@ function build(rootEl) {
   UI.libQ.oninput = () => {
     /* quem digita quer a biblioteca inteira de volta: o filtro por id e a nota saem */
     ST.libIds = null; ST.faixaNota = '';
-    if (ST.faixa === 'componentes') ST.valQ = UI.libQ.value; else ST.libQ = UI.libQ.value;
+    if (ST.faixa === 'componentes') ST.valQ = UI.libQ.value;
+    else if (ST.faixa === 'footprints') ST.fpQ = UI.libQ.value;
+    else ST.libQ = UI.libQ.value;
     libKey = ''; refreshLib();
   };
   UI.libCount = el('span', 'count', '');
@@ -1294,19 +1299,24 @@ function build(rootEl) {
      vista Símbolos. Os dois botões nunca somem: travados, dizem por quê (pintaBotoesLib). */
   UI.bLibApply = btn('btn-primary btn-sm', 'Aplicar símbolo ao componente', aposRecarga(aplicarLib), '');
   UI.bLibCat = btn('btn-secondary btn-sm', 'Aplicar símbolo à categoria…', aposRecarga(() => abrirAplicarCategoria(libById(ST.libSel))), '');
-  lr.append(UI.bLibApply, UI.bLibCat);
+  /* A FAIXA FOOTPRINTS (2026-10-14): o footprint se vincula PELO COMPONENTE, como o símbolo —
+     pedido do dono: "para vincular o footprint a um componente faz na aba de componente igual
+     ao símbolo". Criar e editar footprint é na vista Footprints (hub-fpeditor.js). */
+  UI.bFpApply = btn('btn-primary btn-sm', 'Aplicar footprint ao componente', () => aplicarFp(), '');
+  UI.bFpTira = btn('btn-secondary btn-sm', 'Desvincular footprint', () => aplicarFp(''), '');
+  lr.append(UI.bLibApply, UI.bLibCat, UI.bFpApply, UI.bFpTira);
   /* sub-aba da faixa: "Símbolos" (os corpos prontos) x "Componentes" (os valores da
      familia aberta). Sem ela nao havia como chegar num componente especifico: a lista da
      esquerda mostra a FAMILIA, e a familia nao e o que se monta na placa. */
   UI.faixaTabs = el('div', 'symed-faixatabs');
   UI.faixaTabs.setAttribute('role', 'tablist');
-  [['simbolos', 'Símbolos'], ['componentes', 'Componentes']].forEach(([k, rot]) => {
+  [['simbolos', 'Símbolos'], ['componentes', 'Componentes'], ['footprints', 'Footprints']].forEach(([k, rot]) => {
     const b = el('button', null, rot); b.type = 'button'; b.dataset.faixa = k;
     b.setAttribute('role', 'tab');
     b.onclick = () => {
       if (ST.faixa === k) return;
       ST.faixa = k; ST.libIds = null; ST.faixaNota = ''; libKey = '';
-      UI.libQ.value = (k === 'componentes' ? ST.valQ : ST.libQ) || '';
+      UI.libQ.value = (k === 'componentes' ? ST.valQ : k === 'footprints' ? ST.fpQ : ST.libQ) || '';
       refreshLib();
     };
     UI.faixaTabs.append(b);
@@ -2048,11 +2058,14 @@ function refreshLib() {
     for (const b of UI.faixaTabs.children) {
       const dele = b.dataset.faixa;
       b.disabled = (dele === 'componentes') && !podeComp;
+      if (dele === 'footprints') b.title = 'os footprints da biblioteca (Altium e hub): marque um e aplique ao componente aberto';
       b.title = b.disabled ? 'este símbolo não tem componentes por baixo (só o almoxarifado tem)' : '';
       b.setAttribute('aria-selected', String(ST.faixa === dele));
     }
   }
   if (ST.faixa === 'componentes' && !podeComp) ST.faixa = 'simbolos';
+  mostraBotoesFaixa();
+  if (ST.faixa === 'footprints') return refreshFootprintsFaixa();
   if (ST.faixa === 'componentes') return refreshComponentes(f);
   const L = DATA.symlib, all = libSyms();
   /* a seleção fica fora da chave: com 400+ tiles, refazer tudo a cada clique é o que trava */
@@ -2113,6 +2126,115 @@ function refreshLib() {
   UI.tiles.append(frag);
   consomeScroll();
 }
+/* ── a faixa FOOTPRINTS ──
+   Os footprints vêm do HubLibView.fp (a lista do servidor, com os do hub, e o desenho deles):
+   esta faixa só escolhe e aplica. O alvo é o COMPONENTE aberto — o valor do almoxarifado (um
+   "SMD 1206 4.7pF 50V C0G", aberto na faixa Componentes) ou, na biblioteca da casa, o próprio
+   símbolo. A categoria do almoxarifado não recebe footprint: cada peça tem o seu tamanho. */
+const fpApi = () => (typeof HubLibView !== 'undefined' && HubLibView.fp) ? HubLibView.fp : null;
+function alvoFootprint() {
+  if (ST.modo !== 'componentes' || ST.libEd) return null;
+  const f = familiaAberta(); if (!f) return null;
+  if (ST.familia && ST.valSel) {
+    const v = valorPorNome(f, ST.valSel);
+    return v ? { valor: true, familia: f.name, componente: nomeDoValor(v), nome: nomeDoValor(v), atual: v.footprint || '', v } : null;
+  }
+  if (valoresDa(f).length) return null;
+  const fps = f.footprints || [];
+  return { valor: false, simbolo: f.name, nome: f.name, atual: ((fps.find(x => x && x.current) || fps[0]) || {}).name || '' };
+}
+function porqueSemAlvoFp() {
+  const f = familiaAberta();
+  if (!f) return 'nenhum componente aberto — escolha um na lista da esquerda';
+  if (valoresDa(f).length && !ST.valSel) return 'abra um componente de "' + f.name + '" na faixa Componentes — o footprint é de cada peça, não da categoria';
+  return 'nenhum componente aberto';
+}
+function mostraBotoesFaixa() {
+  if (!UI || !UI.bFpApply) return;
+  const emFp = ST.faixa === 'footprints';
+  UI.bLibApply.style.display = UI.bLibCat.style.display = emFp ? 'none' : '';
+  UI.bFpApply.style.display = UI.bFpTira.style.display = emFp ? '' : 'none';
+}
+function pintaBotoesFp() {
+  if (!UI || !UI.bFpApply) return;
+  const alvo = alvoFootprint();
+  UI.bFpApply.disabled = !alvo || !ST.fpSel || alvo.atual === ST.fpSel;
+  UI.bFpApply.title = !alvo ? porqueSemAlvoFp()
+    : !ST.fpSel ? 'marque um footprint na faixa (duplo clique aplica direto)'
+    : alvo.atual === ST.fpSel ? '"' + alvo.nome + '" já usa "' + ST.fpSel + '"'
+    : 'vincula "' + ST.fpSel + '" a "' + alvo.nome + '"' + (alvo.atual ? ' (no lugar de "' + alvo.atual + '")' : '');
+  UI.bFpTira.disabled = !alvo || !alvo.atual;
+  UI.bFpTira.title = !alvo ? porqueSemAlvoFp() : alvo.atual ? 'tira "' + alvo.atual + '" de "' + alvo.nome + '"' : '"' + alvo.nome + '" está sem footprint';
+}
+function refreshFootprintsFaixa() {
+  const F = fpApi();
+  UI.libQ.placeholder = 'buscar footprint…';
+  pintaBotoesFp();
+  const alvo = alvoFootprint();
+  const lista = F ? F.lista() : null;
+  const q = (ST.fpQ || '').trim().toLowerCase();
+  const key = ['fp', q, lista ? lista.length : -1, alvo ? alvo.nome + '>' + alvo.atual : '', F ? 1 : 0, DATA.fpVer || 0].join(SEP);
+  if (key === libKey) { markFpSel(); return; }
+  libKey = key;
+  if (UI.io) UI.io.disconnect();
+  UI.tiles.textContent = '';
+  if (!F) { UI.libCount.textContent = ''; UI.tiles.append(el('div', 'symed-empty', 'a lista de footprints (hub-libview.js) não está nesta página')); return; }
+  if (!lista) { UI.libCount.textContent = ''; libKey = ''; UI.tiles.append(el('div', 'symed-empty', 'carregando os footprints…')); return; }
+  const rows = lista.filter(x => x && x.name && (!q || x.name.toLowerCase().includes(q)));
+  /* o vinculado hoje primeiro: é o que se veio trocar */
+  if (alvo && alvo.atual) rows.sort((a, b) => (b.name === alvo.atual) - (a.name === alvo.atual));
+  UI.libCount.textContent = rows.length + (rows.length !== lista.length ? ' de ' + lista.length : '') + ' footprints'
+    + (alvo ? ' — ' + alvo.nome + (alvo.atual ? ' usa ' + alvo.atual : ' está sem footprint') : '');
+  if (!rows.length) { UI.tiles.append(el('div', 'symed-empty', q ? 'nada com "' + ST.fpQ + '"' : 'nenhum footprint')); return; }
+  const MAX = 400, NL = String.fromCharCode(10);
+  const frag = document.createDocumentFragment();
+  rows.slice(0, MAX).forEach(x => {
+    const g = F.geo(x.name), hub = F.ehHub(x.name);
+    const t = el('button', 'symed-tile symed-fptile' + (alvo && alvo.atual === x.name ? ' atual' : '')); t.type = 'button';
+    t.dataset.fp = x.name;
+    t.setAttribute('aria-selected', String(ST.fpSel === x.name));
+    const nPads = ((g && g.pads) || []).length;
+    t.title = x.name + NL + nPads + ' pads' + (hub ? ' · biblioteca do hub' + ((g && g.bodies || []).length ? ' · com modelo 3D' : '') : ' · PcbLib do Altium')
+      + (x.usos ? NL + x.usos + (x.usos === 1 ? ' símbolo usa' : ' símbolos usam') : '')
+      + (alvo && alvo.atual === x.name ? NL + '— é o de "' + alvo.nome + '" hoje' : '')
+      + NL + '(duplo clique: aplicar ao componente · botão direito: editar na vista Footprints)';
+    const cv = el('canvas'); cv.width = 96; cv.height = 64; cv.dataset.fp = x.name;
+    t.append(cv, el('span', 'nm', x.name), el('span', 'k', (hub ? ((g && g.bodies || []).length ? 'hub · 3D · ' : 'hub · ') : '') + nPads + ' pads'));
+    t.onclick = () => { ST.fpSel = ST.fpSel === x.name ? null : x.name; markFpSel(); pintaBotoesFp(); };
+    t.ondblclick = () => { ST.fpSel = x.name; aplicarFp(); };
+    t.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); F.editar(x.name); });
+    frag.append(t);
+    if (UI.io) UI.io.observe(cv); else drawTile(cv);
+  });
+  if (rows.length > MAX) frag.append(el('div', 'symed-empty', '… e mais ' + (rows.length - MAX) + ' — refine a busca'));
+  UI.tiles.append(frag);
+}
+function markFpSel() {
+  if (!UI) return;
+  UI.tiles.querySelectorAll('.symed-fptile').forEach(t => t.setAttribute('aria-selected', String(t.dataset.fp === ST.fpSel)));
+}
+async function aplicarFp(nome) {
+  const F = fpApi(), alvo = alvoFootprint();
+  const fp = nome === undefined ? ST.fpSel : nome;
+  if (!F || !alvo) { if (O && O.toast) O.toast(porqueSemAlvoFp(), 'warn'); return; }
+  if (fp == null || (fp && fp === alvo.atual)) return;
+  let j;
+  try { j = await F.vincula(alvo, fp); }
+  catch (e) { if (O && O.toast) O.toast(String((e && e.message) || e), 'err', 7000); return; }
+  /* o espelho DESTE editor anda junto (o da casca o HubLibView já acertou) */
+  if (alvo.valor && alvo.v) alvo.v.footprint = fp;
+  else { const f = familiaAberta(); if (f) f.footprints = j.footprints || []; }
+  if (ST.draft) ST.draft.footprints = fp ? [{ name: fp, current: true }] : [];
+  ST.fpSel = null; libKey = ''; listKey = '';
+  if (O && O.toast) {
+    O.toast(fp ? '“' + alvo.nome + '” → ' + fp : '“' + alvo.nome + '” ficou sem footprint', 'ok');
+    for (const a of (j.avisos || [])) O.toast(a, 'warn', 7000);
+  }
+  refreshLib(); refreshList(); refreshAside();
+}
+if (typeof document !== 'undefined' && document.addEventListener)
+  document.addEventListener('hub:footprints-mudou', () => { DATA.fpVer = (DATA.fpVer || 0) + 1; if (UI && ST.faixa === 'footprints') { libKey = ''; refreshLib(); } });
+
 /* só o destaque muda de tile: atributo em vez de reconstrução */
 function markLibSel() {
   if (!UI) return;
@@ -2122,6 +2244,7 @@ function markLibSel() {
    Símbolos (54×36, em data-w/data-h) são o mesmo desenho em tamanhos diferentes */
 function drawTile(cv) {
   if (cv.dataset.drawn) return;
+  if (cv.dataset.fp) { cv.dataset.drawn = '1'; const F = fpApi(); if (F) F.desenha(cv, cv.dataset.fp); return; }
   const s = libById(cv.dataset.id); if (!s) return;
   cv.dataset.drawn = '1';
   const DPR = window.devicePixelRatio || 1, W = Number(cv.dataset.w) || 96, H = Number(cv.dataset.h) || 64;
@@ -3491,7 +3614,7 @@ const actions = {
   novaParte, excluirParte, deleteSelection, duplicarSelecao, undo, redo, nudge, pushUndo, virar, setUnit,
   /* a ferramenta de símbolos — também o que o teste da página (CDP) aperta */
   editarLib, novoSimbolo, salvar, salvarComo, renomearAberto, renomearLib, excluirLib, aplicarLib,
-  abrirAplicarCategoria, aplicarEmLote, carregaVinculos, menuDoSimbolo, pedeEdicao, modo };
+  abrirAplicarCategoria, aplicarEmLote, carregaVinculos, menuDoSimbolo, pedeEdicao, modo, aplicarFp };
 
 /* o Libs/schlib.js em disco mudou por fora desta aba (uma sincronizacao, um /save de outra
    janela): zera a carga e reabre o simbolo que estava na tela ja com a versao nova. Edicao nao
@@ -3628,7 +3751,7 @@ const conhece = name => (DATA.schlib ? !!symByName(String(name || '')) : null);
    Família sem valores não tem o que mostrar, e o próprio refreshLib já devolve para
    "simbolos" nesse caso — então aqui não se checa nada: quem manda é ele. */
 function faixa(qual) {
-  if (qual !== 'simbolos' && qual !== 'componentes') return false;
+  if (qual !== 'simbolos' && qual !== 'componentes' && qual !== 'footprints') return false;
   if (ST.faixa === qual) return true;
   ST.faixa = qual; ST.libIds = null; ST.faixaNota = ''; libKey = '';
   refreshLib();
