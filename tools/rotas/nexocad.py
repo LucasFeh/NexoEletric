@@ -354,6 +354,9 @@ def para_item(it, porid):
          'atualizado': it.get('atualizado_em') or '', 'bbox': it.get('bbox'),
          'arquivos': dict((p, p) for p in ('step', 'nexo', 'thumb', 'origem', 'placa') if ar.get(p)),
          'substitui': modelo if rev > 1 else [], 'chaves': modelo}
+    th = ar.get('thumb')
+    if isinstance(th, dict) and th.get('sha256'):
+        o['thumb_v'] = str(th['sha256'])[:12]   # versao da miniatura na URL (o navegador nao guarda a velha)
     if it.get('tipo') == 'componente':
         o['eletronico'] = {'footprints': [str(f) for f in (at.get('footprints') or [])], 'mpn': at.get('mpn') or '',
                            'fabricante': at.get('fabricante') or '', 'encapsulamento': at.get('encapsulamento') or ''}

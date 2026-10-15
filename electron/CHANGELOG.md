@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.9.1 — 2026-10-15
+
+- **Adicionar componente 3D com a biblioteca do Nexo Hub:** os componentes aparecem em cards, cada um com a miniatura do modelo, o nome e o footprint que o usa. O mesmo modelo aparece uma vez só, e os que foram editados no NexoCAD vêm marcados.
+- As miniaturas são geradas pelo próprio Nexo Hub (1.0.1) para todo componente, inclusive os da PcbLib da casa, e também aparecem no catálogo do Nexo Hub.
+
 ## 1.9.0 — 2026-10-15
 
 - **O EletricHUB agora se chama NexoEletric.** O instalador troca o EletricHUB instalado pelo NexoEletric, sem deixar os dois. Configurações, preferências, projetos e a pasta de trabalho (`C:EletricHUB`) continuam como estão; numa instalação nova a pasta padrão é `C:NexoEletric`.

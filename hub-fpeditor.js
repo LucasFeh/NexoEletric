@@ -193,6 +193,14 @@ const CSS = `
 .fpe-modal .lst button.nexo img{grid-row:1 / span 2; width:40px; height:40px; object-fit:contain; border-radius:4px; background:rgba(var(--tint),.06);}
 .fpe-modal .lst button.nexo .u{grid-column:2 / -1;}
 .fpe-modal .lst .u{grid-column:1 / -1; font-size:11px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.fpe-modal .lst.grade{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; padding:8px; max-height:60vh; align-content:start;}
+.fpe-modal .lst.grade button{display:flex; flex-direction:column; gap:3px; padding:6px; border:1px solid var(--edge); border-radius:6px;}
+.fpe-modal .lst.grade button.on{box-shadow:0 0 0 2px var(--hi) inset;}
+.fpe-modal .lst.grade .fig{aspect-ratio:1; border-radius:4px; background:radial-gradient(circle at 50% 40%, rgba(var(--tint),.10), rgba(var(--tint),.02)); display:grid; place-items:center; overflow:hidden;}
+.fpe-modal .lst.grade .fig img{width:100%; height:100%; object-fit:contain;}
+.fpe-modal .lst.grade .fig.vazio::after{content:'3D'; font:600 13px var(--mono); color:var(--text-2); opacity:.5;}
+.fpe-modal .lst.grade .n{font:600 11.5px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.fpe-modal .lst.grade .u, .fpe-modal .lst.grade .t{font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .fpe-modal .nota{font-size:11.5px; color:var(--text-2); margin-top:8px;}
 `;
 
@@ -1929,8 +1937,10 @@ async function inicia(o, resolve){
     });
   }
 
-  /* Place » 3D Body: o modelo STEP da PcbLib da casa (os 330 modelos dos footprints do Altium) ou um
-     ja usado no hub; "do computador" sobe um STEP novo. Com trocar, troca o modelo de um corpo. */
+  /* Place » 3D Body: os componentes da biblioteca do Nexo Hub (o banco da rede: a PcbLib da casa
+     sincronizada pelo NexoEletric, os modelos do hub e os componentes feitos no NexoCAD), em cards com a
+     miniatura; o mesmo modelo aparece uma vez só. "do computador" sobe um STEP novo. Com trocar, troca o
+     modelo de um corpo. */
   async function escolheModelo(trocar){
     if (!L3) { stMsg.textContent = 'lendo os modelos 3D da PcbLib…'; await p3; stMsg.textContent = ''; }
     const usos = new Map();
@@ -1938,43 +1948,59 @@ async function inicia(o, resolve){
     conta(L3 && L3.footprints);
     const fh = {}; for (const f of (lib.footprints || [])) if (f) fh[f.name] = f; conta(fh);
     const todos = new Map();
-    for (const src of [L3 && L3.models, lib.models]) for (const id of Object.keys(src || {})) { const m = src[id]; if (m && m.file) todos.set(id, m); }
-    /* a biblioteca compartilhada do NexoCAD (os itens Eletronicos, com a miniatura) */
-    if (NX) { try { await NX.carrega(); } catch (e) { /* sem ela */ } }
-    for (const it of (NX ? NX.itens() : [])) {
-      const inf = NX.infoDe(it);
-      if (inf) todos.set('nexo:' + it.id, { file:'nexo:' + it.id, name:it.nome || it.id, nexo:it.id, thumb:it.arquivos && it.arquivos.thumb ? NX.thumb(it.id) : '',
-        fps:((it.eletronico || {}).footprints || []) });
+    for (const src of [L3 && L3.models, lib.models]) for (const id of Object.keys(src || {})) { const m = src[id]; if (m && m.file && !/^nexo:/.test(m.file)) todos.set(id, Object.assign({}, m)); }
+    /* o Nexo Hub: o item que espelha um modelo (chave = o file do modelo) empresta nome e miniatura ao card;
+       o que nao espelha nada (componente feito no NexoCAD, modelo de outro lugar) vira um card 'nexo:<id>' */
+    let online = false;
+    if (NX) { try { await NX.carrega(); const ind = NX.indice(); online = !!ind && ind.online !== false && !ind.erro; } catch (e) { /* sem ele */ } }
+    const espelho = new Map(), porId = new Map();
+    for (const it of (NX ? NX.itens('*') : [])) {
+      if (!it || !NX.infoDe(it) || it.tipo === 'placa' || it.tipo === 'caixa') continue;
+      porId.set(it.id, it);
+      const ks = (it.chaves || []).filter(k => k);
+      let casou = false;
+      for (const [id, m] of todos) if (ks.indexOf(m.file) >= 0 || ks.indexOf(id) >= 0) { espelho.set(id, it); casou = true; }
+      if (casou) continue;
+      const fps = ((it.eletronico || it.modelo || {}).footprints) || [];
+      todos.set('nexo:' + it.id, { file:'nexo:' + it.id, name:it.nome || it.id, nexo:it.id, fps });
+    }
+    for (const [id, m] of todos) {
+      const it = m.nexo ? porId.get(m.nexo) : espelho.get(id);
+      if (!it) continue;
+      m.item = it;
+      if (it.arquivos && it.arquivos.thumb) m.thumb = NX.thumb(it.id, it.thumb_v);
+      if (it.nome && !m.nexo) m.titulo = it.nome;
     }
     const nomeAtual = E.fp ? E.fp.name : '';
     const itens = [...todos].map(([id, m]) => ({ id, m, usos:(usos.get(id) || []).concat((m.fps || []).filter(f => (usos.get(id) || []).indexOf(f) < 0)) }))
-      .sort((a, b) => ((b.usos.indexOf(nomeAtual) >= 0) - (a.usos.indexOf(nomeAtual) >= 0)) || String(a.m.name || '').localeCompare(String(b.m.name || '')));
-    const J = janela(trocar ? 'Trocar o modelo 3D' : 'Place 3D Body — modelo STEP', 640);
-    const q = el('input'); q.type = 'text'; q.placeholder = 'filtrar pelo modelo ou pelo footprint que o usa (ex.: SOT-23, 0805, TO-220)';
-    const lst = el('div', 'lst');
+      .sort((a, b) => ((b.usos.indexOf(nomeAtual) >= 0) - (a.usos.indexOf(nomeAtual) >= 0)) || (!!b.m.thumb - !!a.m.thumb) || String(a.m.titulo || a.m.name || '').localeCompare(String(b.m.titulo || b.m.name || '')));
+    const J = janela(trocar ? 'Trocar o modelo 3D' : 'Adicionar componente 3D — biblioteca Nexo Hub', 900);
+    const q = el('input'); q.type = 'text'; q.placeholder = 'filtrar pelo componente ou pelo footprint que o usa (ex.: SOT-23, 0805, TO-220)';
+    const lst = el('div', 'lst grade');
     const nota = el('div', 'nota');
     J.corpo.append(q, lst, nota);
     let sel = null;
     const tam = b => !b ? '' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
     function pinta(){
       const t = q.value.trim().toLowerCase();
-      const f = itens.filter(it => !t || String(it.m.name || '').toLowerCase().indexOf(t) >= 0 || it.usos.some(u => u.toLowerCase().indexOf(t) >= 0));
+      const f = itens.filter(it => !t || String(it.m.titulo || '').toLowerCase().indexOf(t) >= 0 || String(it.m.name || '').toLowerCase().indexOf(t) >= 0 || it.usos.some(u => u.toLowerCase().indexOf(t) >= 0));
       lst.textContent = '';
-      for (const it of f.slice(0, 300)) {
+      for (const it of f.slice(0, 240)) {
         const b = el('button'); b.type = 'button';
         if (sel === it) b.classList.add('on');
-        if (it.m.nexo) {
-          b.classList.add('nexo');
-          if (it.m.thumb) { const im = el('img'); im.src = it.m.thumb; im.alt = ''; im.loading = 'lazy'; im.onerror = () => im.remove(); b.append(im); }
-        }
-        b.append(el('span', 'n', it.m.name || it.id), el('span', 't', it.m.nexo ? 'biblioteca NexoCAD' : tam(it.m.bytes)),
-                 el('span', 'u', it.usos.length ? 'em ' + it.usos.slice(0, 6).join(', ') + (it.usos.length > 6 ? ' e mais ' + (it.usos.length - 6) : '') : 'nenhum footprint usa'));
+        const fig = el('div', 'fig');
+        if (it.m.thumb) { const im = el('img'); im.src = it.m.thumb; im.alt = ''; im.loading = 'lazy'; im.onerror = () => { im.remove(); fig.classList.add('vazio'); }; fig.append(im); }
+        else fig.classList.add('vazio');
+        b.append(fig, el('span', 'n', it.m.titulo || it.m.name || it.id),
+                 el('span', 'u', it.usos.length ? it.usos.slice(0, 3).join(', ') + (it.usos.length > 3 ? ' +' + (it.usos.length - 3) : '') : 'nenhum footprint usa'),
+                 el('span', 't', it.m.item ? 'Nexo Hub' + (it.m.item.rev > 1 ? ' · editado (rev ' + it.m.item.rev + ')' : '') : tam(it.m.bytes)));
+        b.title = (it.m.titulo || it.m.name || it.id) + (it.usos.length ? '\nusado em: ' + it.usos.join(', ') : '');
         b.addEventListener('click', () => { sel = it; for (const x of lst.children) x.classList.toggle('on', x === b); });
         b.addEventListener('dblclick', () => { sel = it; usa(); });
         lst.append(b);
       }
-      nota.textContent = itens.length ? (f.length + ' de ' + itens.length + ' modelos' + (f.length > 300 ? ' (mostrando 300: refine o filtro)' : '') + ' · da PcbLib da casa, da biblioteca do hub' + (NX ? ' e da biblioteca do NexoCAD' : ''))
-        : 'Nenhum modelo 3D disponível (a PcbLib não foi lida). Use "STEP do computador…".';
+      nota.textContent = itens.length ? (f.length + ' de ' + itens.length + ' componentes' + (f.length > 240 ? ' (mostrando 240: refine o filtro)' : '') + ' · biblioteca do Nexo Hub' + (online ? '' : ' (fora do ar: só os modelos locais, sem miniatura)'))
+        : 'Nenhum modelo 3D disponível (a PcbLib não foi lida e o Nexo Hub não respondeu). Use "STEP do computador…".';
     }
     const usa = () => { if (!sel) { toast('escolha um modelo na lista', 'info'); return; } const it = sel; J.fecha(true); prendeModelo(it, trocar); };
     q.addEventListener('input', pinta);

@@ -49,7 +49,7 @@ const tem = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
 const semAcento = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const urlStep = id => API + 'arquivo/' + encodeURIComponent(id) + '/modelo.step';
-const thumb = id => API + 'arquivo/' + encodeURIComponent(id) + '/thumb.png';
+const thumb = (id, v) => API + 'arquivo/' + encodeURIComponent(id) + '/thumb.png' + (v ? '?v=' + encodeURIComponent(v) : '');
 
 /* ---------- puro: o indice -> o resolvedor ---------- */
 function infoDe(it){
