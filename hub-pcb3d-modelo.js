@@ -47,13 +47,18 @@
                modelUrl do board3d), baseLib ('Libs/', prefixo do modelUrl da biblioteca),
                thickness (sobrepoe a do d3), placeholder (false = nao inventa caixa),
                alturas ({smdPassivo, ci, th, semPad} em mm), board (o board.js ORIGINAL: acha o
-               componente renomeado por comp_attr pelo id), renomes ({refNovo: refAntigo})}
+               componente renomeado por comp_attr pelo id), renomes ({refNovo: refAntigo}),
+               nexo (HubNexo.resolvedor(): a biblioteca do NexoCAD por cima de tudo -- `substitui`
+               troca o STEP de um corpo, o vinculo pelo footprint troca todos os corpos dele),
+               projeto (o nome do projeto: a chave 'projeto:<p>/<file>' dos modelos do board3d)}
+       Todo corpo STEP sai com modeloChave (a chave de modelo do contrato do NexoCAD); o que veio da
+       biblioteca do NexoCAD sai com origem 'nexo', nexo:<id> e chave:'nexo:<id>@<rev>' (cache)
        Saida, por kind:
          extruded: pts (ja movidos), holes?, standoff, height, z0/z1 (a faixa Z ABSOLUTA na placa:
                    Top [standoff, height]; Bottom [-esp-height, -esp-standoff]) e matrix identidade
          step:     model, matrix (FINAL), modelUrl ('' se o modelo nao esta embutido)
          cylinder/sphere: radius, height?, matrix (final)
-       origem: 'board3d' | 'biblioteca' | 'placeholder'
+       origem: 'hub' | 'board3d' | 'biblioteca' | 'placeholder' | 'nexo'
      HubPcb3dModelo.matrizCorpo(raw, comp) -> [16] coluna-maior
        raw  {x2d, y2d, rot2d, rotx, roty, rotz, dz}
        comp {side|layer, thickness, orig?:{x,y,rot,layer}, eff?:{x,y,rot,layer}}: com orig e eff,
@@ -232,9 +237,17 @@ function inversa(M){
 /* ---- um corpo (do board3d ou da biblioteca) levado pela matriz D ---- */
 function urlDe(models, base, id){
   const m = models && Object.prototype.hasOwnProperty.call(models, id) ? models[id] : null;
+  if (m && /^nexo:/.test(m.file || '')) return '';      /* item da biblioteca do NexoCAD: so pelo opcoes.nexo */
   return m && m.file ? (base || '') + m.file : '';
 }
-function leva(b, D, lado, esp, models, base, origem, owner){
+/* a chave de modelo do contrato do NexoCAD (docs/INTEGRACAO-NEXOCAD.md): o `file` do modelo;
+   do board3d.js, 'projeto:<p>/<file>' */
+function chaveDe(models, id, prefixo){
+  const m = models && Object.prototype.hasOwnProperty.call(models, id) ? models[id] : null;
+  if (m && m.file) return /^nexo:/.test(m.file) ? m.file : (prefixo || '') + m.file;
+  return /^nexo:/.test(String(id || '')) ? String(id) : '';
+}
+function leva(b, D, lado, esp, models, base, origem, owner, prefixo){
   if (b.kind === 'extruded') {
     return extrudado(Object.assign({}, b, { owner }), D, lado, esp, { origem });
   }
@@ -244,7 +257,7 @@ function leva(b, D, lado, esp, models, base, origem, owner){
   const M0 = b.raw && isNum(b.raw.x2d) ? matCorpoBruta(b.raw, ladoDe(b), esp)
            : Array.isArray(b.matrix) && b.matrix.length === 16 ? deColMaior(b.matrix) : I4();
   o.matrix = colMaior(mul4(D, M0));
-  if (b.kind === 'step') { o.model = b.model; o.name = b.name || ''; o.modelUrl = urlDe(models, base, b.model); }
+  if (b.kind === 'step') { o.model = b.model; o.name = b.name || ''; o.modelUrl = urlDe(models, base, b.model); o.modeloChave = chaveDe(models, b.model, prefixo); }
   if (isNum(b.radius)) o.radius = b.radius;
   if (b.kind === 'cylinder' && isNum(b.height)) o.height = b.height;
   if (b.raw) o.raw = b.raw;
@@ -274,8 +287,39 @@ function corpos(eb, d3, opcoes){
   }
   const out = [];
   const tem = (o, k) => o && Object.prototype.hasOwnProperty.call(o, k);
+  const nx = opcoes.nexo || null;
+  const prefD3 = opcoes.projeto ? 'projeto:' + opcoes.projeto + '/' : '';
   for (const c of ((eb && eb.components) || [])) {
     if (!c) continue;
+    const ini = out.length;
+    corposDoComp(c);
+    if (nx) aplicaNexo(c, ini);
+  }
+  /* a biblioteca do NexoCAD (opcoes.nexo, o HubNexo.resolvedor()), pela prioridade do contrato:
+     `substitui` troca so aquele corpo STEP (mesma matriz) > o item vinculado ao footprint entra no
+     lugar de TODOS os corpos dele (um STEP na identidade do footprint) > as fontes de sempre */
+  function aplicaNexo(c, ini){
+    let trocou = false;
+    for (let i = ini; i < out.length; i++) {
+      const o = out[i];
+      if (o.kind !== 'step') continue;
+      const k = o.modeloChave || '';
+      const r = /^nexo:/.test(k) ? nx.porId(k.slice(5)) : (k ? nx.porChave(k) : null);
+      if (/^nexo:/.test(k)) trocou = true;
+      if (!r) continue;
+      trocou = true;
+      o.modelUrl = r.url; o.chave = r.chave; o.nexo = r.id; o.origemAntes = o.origem; o.origem = 'nexo';
+      if (!o.name) o.name = r.nome || '';
+    }
+    if (trocou) return;
+    const f = c.footprint && nx.porFootprint(c.footprint);
+    if (!f) return;
+    const P = matPose(c, esp);
+    out.splice(ini, out.length - ini, { owner:c.ref || '', side:ladoDe(c), kind:'step', layer:'', color:'#9a9a9a', opacity:1,
+      origem:'nexo', vinculo:'footprint', model:'nexo:' + f.id, name:f.nome || '', modeloChave:'nexo:' + f.id, nexo:f.id,
+      modelUrl:f.url, chave:f.chave, matrix:colMaior(P) });
+  }
+  function corposDoComp(c){
     /* o corpo que o editor de footprint do hub pos (Libs/pcblib-hub.js) vale mais que o do PcbDoc:
        foi escolhido DEPOIS, de proposito */
     const fh = hub && hub.footprints && tem(hub.footprints, c.footprint) ? hub.footprints[c.footprint] : null;
@@ -285,7 +329,7 @@ function corpos(eb, d3, opcoes){
         const ladoB = ladoDe(b) === 'bottom' ? (lado === 'top' ? 'bottom' : 'top') : lado;
         out.push(leva(b, P, ladoB, esp, hub.models, baseLib, 'hub', c.ref));
       }
-      continue;
+      return;
     }
     const refO = tem(ren, c.ref) ? ren[c.ref] : c.ref;
     const o = tem(origem, refO) ? origem[refO] : null;
@@ -296,9 +340,9 @@ function corpos(eb, d3, opcoes){
       for (const b of porDono[refO]) {
         /* o corpo de Bottom num componente de Top (raro, mas o Altium deixa) vira junto */
         const ladoB = ladoDe(o) === ladoDe(c) ? ladoDe(b) : (ladoDe(b) === 'top' ? 'bottom' : 'top');
-        out.push(leva(b, D, ladoB || lado, esp, d3.models, base, 'board3d', c.ref));
+        out.push(leva(b, D, ladoB || lado, esp, d3.models, base, 'board3d', c.ref, prefD3));
       }
-      continue;
+      return;
     }
     const fp = lib && lib.footprints && tem(lib.footprints, c.footprint) ? lib.footprints[c.footprint] : null;
     if (fp && Array.isArray(fp.bodies) && fp.bodies.length) {
@@ -307,11 +351,16 @@ function corpos(eb, d3, opcoes){
         const ladoB = ladoDe(b) === 'bottom' ? (lado === 'top' ? 'bottom' : 'top') : lado;
         out.push(leva(b, P, ladoB, esp, lib.models, baseLib, 'biblioteca', c.ref));
       }
-      continue;
+      return;
     }
     if (opcoes.placeholder !== false) out.push(placeholder(c, eb, { thickness: esp, alturas: opcoes.alturas }));
   }
-  for (const b of livres) out.push(leva(b, I4(), ladoDe(b), esp, d3.models, base, 'board3d', ''));
+  for (const b of livres) {
+    const o = leva(b, I4(), ladoDe(b), esp, d3.models, base, 'board3d', '', prefD3);
+    const r = nx && o.kind === 'step' && o.modeloChave ? nx.porChave(o.modeloChave) : null;
+    if (r) { o.modelUrl = r.url; o.chave = r.chave; o.nexo = r.id; o.origemAntes = o.origem; o.origem = 'nexo'; }
+    out.push(o);
+  }
   return out;
 }
 
