@@ -1424,9 +1424,16 @@ async function inicia(o, resolve){
     if (m === E.modo && (m === '2d' || E.v3)) return;
     if (m === '3d') {
       if (typeof HubPcb3dVista === 'undefined' || !HubPcb3dVista.disponivel()) { toast('esta máquina não tem WebGL: a vista 3D não abre', 'warn', 4000); return; }
-      E.modo = '3d'; cv.hidden = true; v3host.hidden = false; dica.textContent = 'arrastar gira · botão direito arrasta · roda aproxima · 0 topo · 8 isométrica · 2 volta ao 2D';
+      E.modo = '3d'; cv.hidden = true; v3host.hidden = false; dica.textContent = 'clique no corpo e arraste as setas (X, Y, Z) · PageUp/PageDown sobe/desce · Shift solta o ímã · arrastar no vazio gira · 2 volta ao 2D';
       if (!E.v3) {
-        try { E.v3 = await HubPcb3dVista.cria(v3host, {}); }
+        try { E.v3 = await HubPcb3dVista.cria(v3host, { aoClicar:ref => clica3d(ref), edita:{
+          pads:() => E.fp.pads.map(p => [p.x, p.y]),
+          grade:() => E.grade,
+          aoArrastar:(ref, d, info) => { stMsg.textContent = 'ΔX ' + fmt(d.x) + ' · ΔY ' + fmt(d.y) + ' · ΔZ ' + fmt(d.z)
+            + (info && info.encaixe ? ' · encaixado: ' + info.encaixe.pernas + ' de ' + info.encaixe.de + ' pernas nos pads' : '')
+            + (info && info.assento ? ' · ' + info.assento : ''); },
+          aoMover:(ref, d) => moveCorpo3d(ref, d),
+        } }); }
         catch (e) { toast('a vista 3D não abriu: ' + (e && e.message || e), 'err', 5000); E.modo = '2d'; cv.hidden = false; v3host.hidden = true; return; }
       }
       cena3d(); E.v3.pose('iso');
@@ -1446,6 +1453,8 @@ async function inicia(o, resolve){
     const comp = { ref:'FP', footprint:'__fpe__', x:0, y:0, rot:0, layer:'Top', pads:fp.pads };
     const corpos = HubPcb3dModelo.corpos({ components:[comp] }, null, {
       pcblib3dHub:{ footprints:{ __fpe__:{ bodies:fp.bodies } }, models:Object.assign({}, L3 && L3.models, lib.models) }, baseLib:'Libs/', placeholder:false });
+    /* um ref por corpo (b0, b1...): o clique e o arrasto no 3D dizem QUAL corpo do footprint */
+    corpos.forEach((c, i) => { if (c) c.owner = 'b' + i; });
     E.v3.cena({
       lacos:[[[B.x1, B.y1], [B.x2, B.y1], [B.x2, B.y2], [B.x1, B.y2]]], esp:1.6, bbox:B,
       furos:fp.pads.filter(p => p.drill > 0).map(p => ({ x:p.x, y:p.y, r:p.drill / 2 })),
@@ -1460,6 +1469,32 @@ async function inicia(o, resolve){
       },
       corpos,
     });
+    const sel = [...E.sel].find(x => tipo(x) === 'body');
+    if (E.v3.seleciona) E.v3.seleciona(sel ? 'b' + E.fp.bodies.indexOf(sel) : null);
+  }
+  /* o 3D do editor: clicar num corpo o seleciona (a ficha dele abre ao lado); arrastar o gizmo move */
+  function clica3d(ref){
+    const i = /^b([0-9]+)$/.test(ref || '') ? +ref.slice(1) : -1, b = i >= 0 ? E.fp.bodies[i] : null;
+    E.sel = new Set(b ? [b] : []);
+    if (E.v3 && E.v3.seleciona) E.v3.seleciona(b ? ref : null);
+    props(); pede();
+  }
+  function moveCorpo3d(ref, d){
+    const i = /^b([0-9]+)$/.test(ref || '') ? +ref.slice(1) : -1, b = i >= 0 ? E.fp.bodies[i] : null;
+    if (!b) return;
+    antes();
+    if (d.x || d.y) move(b, r4(d.x), r4(d.y));
+    if (d.z) sobeCorpo(b, d.z);
+    E.sel = new Set([b]);
+    stMsg.textContent = '';
+    mudou();
+  }
+  /* subir/descer: o Z Offset do STEP (e do cilindro/esfera) ou a faixa do extrudado */
+  function sobeCorpo(b, dz){
+    delete b.outline;
+    if (b.kind === 'extruded') { b.standoff = r4((b.standoff || 0) + dz); b.height = r4((b.height || 0) + dz); }
+    else { b.raw = b.raw || {}; b.raw.dz = r4((b.raw.dz || 0) + dz); }
+    if (b.kind === 'step') { const bb = E.bbStep.get(b); if (bb) E.bbStep.set(b, Object.assign({}, bb, { z0:bb.z0 + dz, z1:bb.z1 + dz })); }
   }
 
   /* ---------- status ---------- */
@@ -1587,6 +1622,13 @@ async function inicia(o, resolve){
     if (L === 'Q') { trocaUnid(); return; }
     if (L === 'G') { const i = GRADES.findIndex(g => Math.abs(g[0] - E.grade) < 1e-9); E.grade = GRADES[(i + 1) % GRADES.length][0]; gravaPref(); montaBarra(); status(); pede(); return; }
     if (k === ' ') { e.preventDefault(); gira90(); return; }
+    /* PageUp/PageDown: sobe/desce o corpo 3D selecionado um passo da grade (Shift: 10) */
+    if ((k === 'PageUp' || k === 'PageDown') && [...E.sel].some(x => tipo(x) === 'body')) {
+      e.preventDefault(); antes();
+      const dz = (k === 'PageUp' ? 1 : -1) * E.grade * (e.shiftKey ? 10 : 1);
+      for (const x of E.sel) if (tipo(x) === 'body') sobeCorpo(x, dz);
+      mudou(); return;
+    }
     if (k === 'Delete' || k === 'Backspace') { e.preventDefault(); apaga(); return; }
     if (k === 'Tab' && E.tool !== 'sel') { e.preventDefault(); const f = pr.querySelector('input, select'); if (f) f.focus(); return; }
     const setas = { ArrowLeft:[-1, 0], ArrowRight:[1, 0], ArrowUp:[0, 1], ArrowDown:[0, -1] };
