@@ -118,6 +118,39 @@ const CSS = `
 .fpe-embut .fpe-tit{flex-wrap:wrap; row-gap:4px;}
 .fpe-embut .fpe-tit .dir{flex-wrap:wrap; justify-content:flex-end;}
 .fpe-embut .fpe-prop{width:270px;}
+/* LAYOUT HUB (Biblioteca » Footprints): a grade e as pecas sao as do editor de simbolos
+   (hub.html: .symed-grid, .lib-left, .symed-mid, .symed-toolbox, .symed-ib); aqui so o que e do
+   footprint -- o fundo escuro do desenho e a ficha no tom do aside */
+.fpe-hub > .fpe-hubbox{flex:1; min-width:0; display:block;}
+.fpe-hubbox .fpe-grid{height:100%;}
+.fpe-hubbox .symed-mid{grid-template-rows:auto minmax(0,1fr) auto auto;}
+.fpe-hubbox .fpe-vp{position:relative; background:var(--sunken,#1b1b1b); border-radius:var(--r-md,6px); overflow:hidden;}
+.fpe-hubbox .fpe-vazio{color:var(--text-3);}
+.fpe-hubbox .fpe-vazio[hidden]{display:none;}
+.fpe-hubbox .fpe-abas{margin:2px 12px 0; height:24px; background:transparent; border-top:0;}
+.fpe-hubbox .fpe-abas button{border-right:0; border-radius:var(--r-sm,4px);}
+.fpe-hubbox .symed-foot .m{color:var(--warn);}
+.fpe-hubbox .fpe-seg2 button{padding:2px 9px;}
+.fpe-hubbox .symed-hist{display:flex; align-items:center;}
+.fpe-hubbox .symed-name .sujo{color:var(--warn);}
+.fpe-lista-hub .fpe-row canvas{flex:none; width:54px; height:36px; border-radius:3px; background:var(--sunken,#14161a);}
+.fpe-lista-hub .fpe-row .pill.hub{color:var(--hi);}
+.fpe-aside .symed-toolbox .symed-tb + .symed-tb{margin-top:4px;}
+.fpe-prop-hub{width:auto; border:0; background:transparent; overflow:visible;}
+.fpe-prop-hub .cab{padding:2px 0 4px; border:0; font-size:10px; letter-spacing:.1em; text-transform:uppercase; font-weight:normal; color:var(--text-3);}
+.fpe-prop-hub .cab .k{text-transform:none; letter-spacing:0;}
+.fpe-prop-hub .fpe-ajuda{font-size:12px; line-height:1.5; color:var(--text-2); margin:6px 0 0;}
+.fpe-aside .fpe-esconde{display:none !important;}
+.fpe-prop-hub .cab .k{font-size:12px; color:var(--text-3);}
+.fpe-prop-hub .fpe-sec{border:0;}
+.fpe-prop-hub .fpe-sec > .st{padding:10px 0 4px; background:transparent; font-size:10px; letter-spacing:.1em; color:var(--text-3);}
+.fpe-prop-hub .fpe-sec > .cx{padding:2px 0; grid-template-columns:96px minmax(0,1fr);}
+.fpe-prop-hub .fpe-sec label{font-size:11px; color:var(--text-3);}
+.fpe-prop-hub .fpe-sec input, .fpe-prop-hub .fpe-sec select{min-height:26px; height:26px; border-color:var(--line,var(--edge)); border-radius:var(--r-sm,4px);}
+.fpe-prop-hub .fpe-corpos .c{padding:4px 0;}
+.fpe-prop-hub .fpe-corpos .vazio{padding:4px 0; font-size:12px;}
+.fpe-prop-hub .fpe-corpos > div[style]{padding:6px 0 4px !important;}
+.fpe-acoes-hub{display:flex; flex-wrap:wrap; gap:6px; margin-top:2px;}
 .fpe-embut > .fpe{border:0; border-radius:0; box-shadow:none;}
 .fpe-embut .fpe-vp{background:var(--sunken, #1b1b1b);}
 .fpe-embut .fpe-x{width:auto; padding:0 10px; font-size:12px; border:1px solid var(--edge);}
@@ -145,6 +178,20 @@ function corDoHub(){
     Top:P.Top || CORES.Top, Bottom:P.Bottom || CORES.Bottom, Multi:P.Multi || CORES.Multi, silk:P.TopOverlay || CORES.silk,
     janela:tk('--hi') || CORES.janela });
 }
+
+/* os icones da caixa FERRAMENTAS (layout hub): 16 px, traco na cor do texto, como os do
+   editor de simbolos */
+const svgI = (d, cheio) => '<svg width="16" height="16" viewBox="0 0 16 16" fill="' + (cheio ? 'currentColor' : 'none') +
+  '" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="' + d + '"/></svg>';
+const ICONES = {
+  sel:svgI('M3.5 2l8.5 5-3.8 1.1L6.4 13z'), pad:svgI('M4 4h8v8H4z', true), linha:svgI('M3 13L13 3'),
+  arco:svgI('M3 13a10 10 0 0 1 10-10'), step:svgI('M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7zM2.5 4.5L8 7.5l5.5-3M8 7.5v7'),
+  extrude:svgI('M2.5 6h8v7.5h-8zM2.5 6l3-3h8l-3 3M13.5 3v7.5l-3 3'),
+  cyl:svgI('M3 4a5 2 0 1 0 10 0a5 2 0 1 0-10 0M3 4v8a5 2 0 0 0 10 0V4'),
+  del:svgI('M3 4.5h10M6 4.5V2.5h4v2M4.5 4.5l.7 9h5.6l.7-9'), rot:svgI('M13 8a5 5 0 1 1-1.5-3.6M12.5 1.8v3h-3'),
+  dup:svgI('M5.5 5.5h8v8h-8zM3 10.5V2.5h8'), fit:svgI('M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4'),
+  undo:svgI('M6 4L2.5 7.5 6 11M3 7.5h7a3.5 3.5 0 0 1 0 7H8'), redo:svgI('M10 4l3.5 3.5L10 11M13 7.5H6a3.5 3.5 0 0 0 0 7h2'),
+};
 
 let cssPosto = false;
 function poeCss(){ if (cssPosto) return; cssPosto = true; const s = el('style'); s.textContent = CSS; document.head.append(s); }
@@ -176,70 +223,140 @@ async function inicia(o, resolve){
   try { const g = parseFloat(localStorage.getItem('altiumhub.fpe.grade')); if (g > 0) E.grade = g; if (localStorage.getItem('altiumhub.fpe.unid') === 'mil') E.unid = 'mil'; } catch (e) { /* sem storage */ }
 
   /* ---------- DOM ---------- */
-  const fundo = el('div', embutido ? 'fpe-embut' : 'fpe-fundo');
-  const caixa = el('div', 'fpe'); fundo.append(caixa);
-  const tit = el('div', 'fpe-tit');
-  const tNome = el('span', 'nm');
-  const seg = el('div', 'fpe-seg');
+  /* DOIS LAYOUTS. O de sempre (modal da PCB e do Esquema, o "PCB Library" do Altium: lista a
+     esquerda, barra de ferramentas em cima, Properties a direita) e o HUB, o da Biblioteca »
+     Footprints: o MESMO molde da vista Simbolos (hub-symed.js) -- busca e "+ Novo footprint" no
+     topo da coluna da esquerda com a lista (miniatura + nome), o editor no meio com desfazer e
+     refazer no canto da barra e unidade/grade no rodape, e a direita a caixa FERRAMENTAS de
+     botoes-icone com a ficha embaixo. Pedido do dono, 2026-10-14: "deixe todas as abas
+     identicas a aba de simbolo em questao de layout, inclusive o footprints". As classes sao
+     as do hub.html (symed-grid, lib-left, symed-mid, symed-ib...), nao copias delas. */
+  const HUB = embutido && o.layout === 'hub';
+  const fundo = el('div', embutido ? 'fpe-embut' + (HUB ? ' fpe-hub' : '') : 'fpe-fundo');
+  const caixa = el('div', HUB ? 'fpe-hubbox' : 'fpe'); fundo.append(caixa);
+  const tNome = el('span', HUB ? 'meta symed-name' : 'nm');
   const b2 = bt('', '2D', () => modo('2d'), 'Modo 2D (2)'), b3 = bt('', '3D', () => modo('3d'), 'Modo 3D (3)');
-  seg.append(b2, b3);
-  const bSalvar = bt('fpe-b pri', 'Salvar', () => salvar(), 'Grava na biblioteca do hub (Ctrl+S)');
-  const bSalvarComo = bt('fpe-b', 'Salvar como…', () => salvarComo());
-  const bFecha = bt('fpe-x', o.fechaTxt || '✕', () => fechar(), embutido ? 'Fecha o editor e volta para a galeria de footprints' : 'Fechar');
-  const dir = el('div', 'dir'); dir.append(seg, bSalvarComo, bSalvar);
-  const ctrl = { fp:() => E.fp, sujo:() => E.sujo, salvar:n => salvar(n), fechar:() => fechar(), podeSair:() => podeSair(),
+  const bSalvar = bt(HUB ? 'btn btn-primary' : 'fpe-b pri', 'Salvar', () => salvar(), 'Grava na biblioteca do hub (Ctrl+S)');
+  const bSalvarComo = bt(HUB ? 'btn btn-secondary' : 'fpe-b', 'Salvar como…', () => salvarComo());
+  const bFecha = bt('fpe-x', o.fechaTxt || '✕', () => fechar(), embutido ? 'Fecha o editor' : 'Fechar');
+  const ctrl = { fp:() => E.fp, sujo:() => E.sujo, salvar:n => salvar(n), fechar:f => fechar(f), podeSair:() => podeSair(),
                  carregaFp:(n, reserva) => carregaFp(n, reserva), novo:() => novoFp(), modo:m => modo(m), host:o.host || null,
-                 atualiza:() => { titulo(); status(); }, lib:() => lib };
+                 atualiza:() => { titulo(); status(); }, lib:() => lib, recarregaLista:() => { listaChave = ''; montaLista(); } };
   const bExtras = [];
   for (const x of (o.botoes || [])) {
     if (!x || !x.txt) continue;
-    const b = bt('fpe-b' + (x.pri ? ' pri' : ''), x.txt, () => x.fn && x.fn(ctrl), x.titulo || '');
-    b._x = x; bExtras.push(b); dir.append(b);
+    const b = bt((HUB ? 'btn' : 'fpe-b') + (x.pri ? (HUB ? ' btn-primary' : ' pri') : ''), x.txt, () => x.fn && x.fn(ctrl), x.titulo || '');
+    b._x = x; bExtras.push(b);
   }
-  dir.append(bFecha);
-  tit.append(el('b', null, o.titulo || 'PCB Library'), tNome, dir);
-
-  const corpo = el('div', 'fpe-corpo');
-  /* painel da biblioteca */
-  const pl = el('div', 'fpe-lib');
-  const plCab = el('div', 'cab');
-  const busca = el('input'); busca.placeholder = 'Mask (filtrar footprints)'; busca.type = 'text';
-  const acoes = el('div', 'acoes');
-  acoes.append(bt('fpe-b peq', 'Add', () => novoFp(), 'Novo footprint vazio'),
-               bt('fpe-b peq', 'Duplicate', () => duplicarFp(), 'Cópia do footprint aberto, com outro nome'),
-               bt('fpe-b peq', 'Delete', () => apagarFp(), 'Apaga da biblioteca do hub (o do Altium volta a valer)'));
-  plCab.append(el('div', 't', 'Footprints'), busca, acoes);
-  const lista = el('div', 'fpe-lista');
-  const plRod = el('div', 'rod');
-  pl.append(plCab, lista, plRod);
-  /* centro */
-  const centro = el('div', 'fpe-centro');
-  const barra = el('div', 'fpe-barra');
-  const vp = el('div', 'fpe-vp');
+  const busca = el('input', HUB ? 'input' : null); busca.type = 'text';
+  busca.placeholder = HUB ? 'filtrar footprints (nome)' : 'Mask (filtrar footprints)';
+  const lista = el('div', HUB ? 'scroll lib-list fpe-lista-hub' : 'fpe-lista');
+  const plRod = el('div', HUB ? 'lib-sum' : 'rod');
+  const barra = el('div', HUB ? 'symed-toolbox' : 'fpe-barra');
+  const vp = el('div', HUB ? 'viewport fpe-vp' : 'fpe-vp');
   const cv = el('canvas', 'c2'); cv.tabIndex = 0;
   const v3host = el('div', 'fpe-v3'); v3host.hidden = true;
   const dica = el('div', 'fpe-dica');
-  vp.append(cv, v3host, dica);
+  const vazioHint = el('div', 'hint fpe-vazio', 'escolha um footprint à esquerda, ou crie um com "+ Novo footprint"'); vazioHint.hidden = true;
+  vp.append(cv, v3host, dica, vazioHint);
   const abas = el('div', 'fpe-abas');
-  const st = el('div', 'fpe-st');
+  const st = el('div', HUB ? 'symed-foot' : 'fpe-st');
   const stXY = el('span'), stGrade = el('span'), stCont = el('span'), stMsg = el('span', 'm');
-  st.append(stXY, stGrade, stCont, stMsg);
-  centro.append(barra, vp, abas, st);
-  /* propriedades */
-  const pr = el('div', 'fpe-prop');
-  if (o.semLista) pl.hidden = true;
-  corpo.append(pl, centro, pr);
-  caixa.append(tit, corpo);
+  const pr = el('div', HUB ? 'fpe-prop fpe-prop-hub' : 'fpe-prop');
+  const arquivo = el('input'); arquivo.type = 'file'; arquivo.accept = '.step,.stp,.STEP,.STP'; arquivo.hidden = true;
+  let uSel = null, gSel = null, bUndo = null, bRedo = null;
+  if (!HUB) {
+    const tit = el('div', 'fpe-tit');
+    const seg = el('div', 'fpe-seg'); seg.append(b2, b3);
+    const dir = el('div', 'dir'); dir.append(seg, bSalvarComo, bSalvar, ...bExtras, bFecha);
+    tit.append(el('b', null, o.titulo || 'PCB Library'), tNome, dir);
+    const corpo = el('div', 'fpe-corpo');
+    const pl = el('div', 'fpe-lib');
+    const plCab = el('div', 'cab');
+    const acoes = el('div', 'acoes');
+    acoes.append(bt('fpe-b peq', 'Add', () => novoFp(), 'Novo footprint vazio'),
+                 bt('fpe-b peq', 'Duplicate', () => duplicarFp(), 'Cópia do footprint aberto, com outro nome'),
+                 bt('fpe-b peq', 'Delete', () => apagarFp(), 'Apaga da biblioteca do hub (o do Altium volta a valer)'));
+    plCab.append(el('div', 't', 'Footprints'), busca, acoes);
+    pl.append(plCab, lista, plRod);
+    const centro = el('div', 'fpe-centro');
+    st.append(stXY, stGrade, stCont, stMsg);
+    centro.append(barra, vp, abas, st);
+    if (o.semLista) pl.hidden = true;
+    corpo.append(pl, centro, pr);
+    caixa.append(tit, corpo, arquivo);
+  } else {
+    const grid = el('div', 'symed-grid fpe-grid');
+    /* esquerda: busca e "+ Novo footprint" · kicker · resumo · lista */
+    const left = el('div', 'lib-left');
+    const bar = el('div', 'lib-bar');
+    bar.append(busca, bt('btn btn-primary btn-sm', '+ Novo footprint', () => novoFp(), 'desenha um footprint novo: pads, serigrafia e corpo 3D (STEP)'));
+    left.append(bar, el('div', 'kicker symed-kicker', 'footprints · biblioteca de footprints'), plRod, lista);
+    /* meio: barra (editor · nome · 2D/3D · desfazer/refazer) · canvas · camadas · rodape */
+    const mid = el('div', 'symed-mid');
+    const cb = el('div', 'canvas-bar');
+    const hist = el('div', 'right symed-hist');
+    const seg = el('div', 'seg fpe-seg2'); seg.append(b2, b3);
+    bUndo = ibt('undo', 'Desfazer (Ctrl+Z)', () => volta(E.undo, E.redo));
+    bRedo = ibt('redo', 'Refazer (Ctrl+Y)', () => volta(E.redo, E.undo));
+    hist.append(seg, bUndo, bRedo);
+    cb.append(el('span', 'ttl', 'editor'), tNome, hist);
+    const fr = el('div', 'right');
+    uSel = el('select', 'input'); uSel.title = 'unidade (Q)';
+    for (const u of ['mm', 'mil']) { const op = el('option', null, u); op.value = u; uSel.append(op); }
+    uSel.addEventListener('change', () => { if (uSel.value !== E.unid) trocaUnid(); });
+    gSel = el('select', 'input'); gSel.title = 'grade (G)';
+    for (const [v, r] of GRADES) { const op = el('option', null, r); op.value = String(v); gSel.append(op); }
+    gSel.addEventListener('change', () => { E.grade = +gSel.value; gravaPref(); pede(); status(); });
+    fr.append(el('span', null, 'unidade'), uSel, el('span', null, 'grade'), gSel);
+    st.append(stXY, stCont, stMsg, fr);
+    mid.append(cb, vp, abas, st);
+    /* direita: FERRAMENTAS (montaBarra) · a ficha · salvar */
+    const aside = el('aside', 'symed-aside fpe-aside');
+    const sv = el('div', 'symed-save');
+    sv.append(bSalvar, bSalvarComo);
+    const ac = el('div', 'fpe-acoes-hub');
+    ac.append(bt('btn btn-secondary btn-sm', 'Duplicar…', () => duplicarFp(), 'cópia do footprint aberto, com outro nome'),
+              bt('btn btn-secondary btn-sm', 'Apagar', () => apagarFp(), 'apaga da biblioteca do hub (o do Altium com o mesmo nome volta a valer)'),
+              ...bExtras);
+    aside.append(barra, pr, sv, ac);
+    const split = l => { const s = el('div', 'split'); s.dataset.split = l; return s; };
+    grid.append(left, split('l'), mid, split('r'), aside);
+    caixa.append(grid, arquivo);
+  }
   (embutido ? o.host : document.body).append(fundo);
-  const arquivo = el('input'); arquivo.type = 'file'; arquivo.accept = '.step,.stp,.STEP,.STP'; arquivo.hidden = true; caixa.append(arquivo);
 
   /* ---------- barra de ferramentas ---------- */
   const FERR = [
     ['sel', 'Selecionar', 'Esc'], ['pad', 'Pad', 'P,P'], ['linha', 'Linha', 'P,L'], ['arco', 'Arco', 'P,A'],
   ];
   const bTool = {};
+  function ibt(ic, titulo, fn){
+    const b = el('button', 'symed-ib'); b.type = 'button'; b.title = titulo; b.addEventListener('click', fn);
+    b.innerHTML = ICONES[ic] || ''; return b;
+  }
   function montaBarra(){
     barra.textContent = '';
+    if (HUB) {
+      barra.append(el('div', 'kicker', 'ferramentas'));
+      const tb = el('div', 'symed-tb');
+      for (const [id, rot, k] of FERR) {
+        const b = ibt(id, rot + ' (' + k + ')', () => ferramenta(id));
+        b.setAttribute('aria-pressed', String(E.tool === id)); bTool[id] = b; tb.append(b);
+      }
+      tb.append(ibt('step', 'Corpo 3D: o modelo STEP do fabricante (P,B)', () => poeStep()),
+                ibt('extrude', 'Corpo 3D extrudado: uma caixa com o contorno dos pads (P,E)', () => poeCorpo('extruded')),
+                ibt('cyl', 'Corpo 3D cilíndrico (capacitor eletrolítico, LED)', () => poeCorpo('cylinder')),
+                ibt('del', 'Apagar a seleção (Delete)', () => apaga()));
+      const tb2 = el('div', 'symed-tb');
+      tb2.append(ibt('rot', 'Girar a seleção 90° (Espaço)', () => gira90()),
+                 ibt('dup', 'Duplicar a seleção (Ctrl+D)', () => duplica()),
+                 ibt('fit', 'Enquadrar (F)', () => enquadra()));
+      barra.append(tb, tb2);
+      if (uSel) uSel.value = E.unid;
+      if (gSel) { const g = GRADES.find(x => Math.abs(x[0] - E.grade) < 1e-9); gSel.value = g ? String(g[0]) : String(E.grade); }
+      return;
+    }
     for (const [id, rot, k] of FERR) {
       const b = bt(E.tool === id ? 'on' : '', '', () => ferramenta(id), rot + ' (' + k + ')');
       b.append(document.createTextNode(rot), el('kbd', null, k));
@@ -293,6 +410,9 @@ async function inicia(o, resolve){
     if (!E.fp.name) E.fp.name = nome || 'NOVO_FOOTPRINT';
     for (const k of ['pads', 'silk', 'bodies']) if (!Array.isArray(E.fp[k])) E.fp[k] = [];
     E.nome0 = E.fp.name; E.deHub = !!h;
+    /* no layout hub o editor nasce sem nada aberto, como o de simbolos: a dica no canvas pede
+       para escolher na lista ou criar. Desenhar ali mesmo vira um footprint novo. */
+    E.vazio = HUB && !fonte;
     E.sel.clear(); E.undo = []; E.redo = []; E.sujo = !h && !a && !!reserva;
     E.bbStep.clear();
     for (const b of E.fp.bodies) if (b && b.kind === 'step') medeStep(b);
@@ -300,17 +420,78 @@ async function inicia(o, resolve){
   }
   function titulo(){
     tNome.textContent = '';
+    if (HUB) {
+      if (E.vazio) { tNome.textContent = '—'; return; }
+      tNome.append(document.createTextNode(E.fp.name + (E.deHub ? ' · biblioteca do hub' : acharAlt(E.fp.name) ? ' · do Altium (salvar cria a cópia do hub)' : ' · novo')));
+      if (E.sujo) tNome.append(el('span', 'sujo', '  ● não salvo'));
+      return;
+    }
     tNome.append(document.createTextNode(E.fp.name + (E.deHub ? ' — biblioteca do hub' : acharAlt(E.fp.name) ? ' — do Altium (salvar cria a cópia do hub)' : ' — novo')));
     if (E.sujo) tNome.append(el('span', 'sujo', '  ● não salvo'));
   }
 
   /* ---------- lista da biblioteca ---------- */
+  let listaChave = '', listaIO = null, listaFiltro = null;
+  const geoDe = n => (HF && HF.acha(lib, n)) || acharAlt(n);
+  /* a miniatura da linha (54x36, como a da lista de simbolos), no fundo escuro do footprint */
+  function desenhaMini(c, fp){
+    const DPR = window.devicePixelRatio || 1, W = 54 * DPR, H = 36 * DPR;
+    c.width = W; c.height = H;
+    const x = c.getContext('2d');
+    x.fillStyle = COR.fundo; x.fillRect(0, 0, W, H);
+    if (!fp || !root.HubDraw) return;
+    const bb = fp.bbox || (HF ? HF.bbox(fp) : null); if (!bb) return;
+    const w = Math.max(bb.x2 - bb.x1, 0.1), h = Math.max(bb.y2 - bb.y1, 0.1);
+    const k = Math.min(W / (w * 1.25), H / (h * 1.25));
+    x.setTransform(k, 0, 0, -k, W / 2 - k * (bb.x1 + bb.x2) / 2, H / 2 + k * (bb.y1 + bb.y2) / 2);
+    try { root.HubDraw.drawFootprint(x, fp, { showPadNames:false }); } catch (e) { /* miniatura vazia */ }
+  }
+  function marcaLinha(){
+    for (const b of lista.querySelectorAll('.fpe-row')) b.setAttribute('aria-selected', String(!E.vazio && !!E.fp && b.dataset.n === E.fp.name));
+  }
+  function montaListaHub(it, q){
+    const hubs = lib.footprints || [];
+    const chave = [q, it.length, hubs.map(f => f.name + ':' + (f.pads || []).length + ':' + (f.bodies || []).length).join('|')].join('§');
+    if (chave === listaChave) { marcaLinha(); return; }
+    listaChave = chave;
+    const total = new Set([...hubs.map(f => f.name), ...((alt.footprints) || []).filter(Boolean).map(f => f.name)]).size;
+    plRod.textContent = '';
+    const stat = (n, r) => { const sp = el('span'); sp.append(el('b', null, String(n)), document.createTextNode(' ' + r)); plRod.append(sp); };
+    stat(total, 'footprints'); stat(hubs.length, 'do hub'); stat(hubs.filter(f => (f.bodies || []).length).length, 'com modelo 3D');
+    const topo = listaFiltro === q ? lista.scrollTop : 0;
+    listaFiltro = q;
+    if (listaIO) listaIO.disconnect();
+    listaIO = typeof IntersectionObserver === 'function'
+      ? new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { desenhaMini(e.target, geoDe(e.target._n)); listaIO.unobserve(e.target); } }, { root:lista, rootMargin:'160px' })
+      : null;
+    lista.textContent = '';
+    const frag = document.createDocumentFragment();
+    frag.append(el('div', 'lib-head', it.length ? 'footprints (' + it.length + (it.length !== total ? ' de ' + total : '') + ')'
+                                                : (q ? 'nada com "' + E.filtro.trim() + '"' : 'biblioteca vazia')));
+    const pend = [];
+    for (const [n, i] of it) {
+      const g = geoDe(n);
+      const b = el('button', 'lib-row symed-librow fpe-row'); b.type = 'button'; b.dataset.n = n;
+      const c = el('canvas'); c.width = 54; c.height = 36; c._n = n;
+      b.append(c, el('span', 'nm', n));
+      if (i.hub) b.append(el('span', 'pill hub', i.d3 ? 'hub · 3D' : 'hub'));
+      b.append(el('span', 'mt', ((g && g.pads) || []).length + ' pads'));
+      b.title = n + (g && g.description ? '\n' + g.description : '') + (i.hub ? '\nbiblioteca do hub (Libs/pcblib-hub.js)' : '\nPcbLib do Altium (Libs/pcblib.js)');
+      b.addEventListener('click', () => trocaPara(n));
+      frag.append(b); pend.push(c);
+    }
+    lista.append(frag);
+    for (const c of pend) { if (listaIO) listaIO.observe(c); else desenhaMini(c, geoDe(c._n)); }
+    if (topo) lista.scrollTop = topo;
+    marcaLinha();
+  }
   function montaLista(){
     const q = E.filtro.trim().toLowerCase();
     const nomes = new Map();
     for (const f of (lib.footprints || [])) if (f && f.name) nomes.set(f.name, { hub:true, d3:(f.bodies || []).length > 0 });
     for (const f of (alt.footprints || [])) if (f && f.name && !nomes.has(f.name)) nomes.set(f.name, { hub:false, d3:false });
     const it = [...nomes].filter(([n]) => !q || n.toLowerCase().indexOf(q) >= 0).sort((a, b) => (b[1].hub - a[1].hub) || a[0].localeCompare(b[0]));
+    if (HUB) return montaListaHub(it, q);
     lista.textContent = '';
     const MAX = 400;
     for (const [n, i] of it.slice(0, MAX)) {
@@ -388,7 +569,7 @@ async function inicia(o, resolve){
 
   /* ---------- desfazer ---------- */
   function antes(){ E.undo.push(JSON.stringify(E.fp)); if (E.undo.length > 200) E.undo.shift(); E.redo = []; }
-  function mudou(){ E.sujo = true; titulo(); props(); status(); pede(); if (E.modo === '3d') cena3d(); }
+  function mudou(){ E.vazio = false; E.sujo = true; titulo(); props(); status(); pede(); if (E.modo === '3d') cena3d(); }
   function volta(de, para){
     if (!de.length) return;
     para.push(JSON.stringify(E.fp));
@@ -679,7 +860,7 @@ async function inicia(o, resolve){
   function ferramenta(id){
     E.tool = id; E.draft = null;
     if (id !== 'sel') E.sel.clear();
-    for (const k in bTool) bTool[k].classList.toggle('on', k === id);
+    for (const k in bTool) { bTool[k].classList.toggle('on', k === id); bTool[k].setAttribute('aria-pressed', String(k === id)); }
     cv.style.cursor = id === 'sel' ? 'default' : 'crosshair';
     dica.textContent = id === 'pad' ? 'clique põe o pad · Espaço gira · Tab: as propriedades do pad · Esc larga'
       : id === 'linha' ? 'clique começa · cliques seguintes encadeiam · botão direito/Esc termina'
@@ -939,6 +1120,13 @@ async function inicia(o, resolve){
       campo(b, 'Width', mostra(E.linhaW), v => { const x = le(v); if (!(x > 0)) return false; E.linhaW = x; return true; });
       campo(b, 'Layer', 'Top Overlay', () => true, { off:true });
     }
+    else if (!sel.length && E.vazio) {
+      cab.append(document.createTextNode('editor de footprints'));
+      pr.append(el('p', 'fpe-ajuda', 'Escolha um footprint na lista da esquerda para editar os pads, a serigrafia e o modelo 3D, '
+        + 'ou crie um com "+ Novo footprint". Salvar grava na biblioteca de footprints do hub (Libs/pcblib-hub.js); o '
+        + 'footprint do Altium com o mesmo nome continua no Libs/pcblib.js e o do hub passa na frente dele. Os componentes '
+        + 'recebem o footprint na aba Componentes, faixa Footprints ("Aplicar footprint ao componente").'));
+    }
     else if (!sel.length) { cab.append(document.createTextNode('Footprint')); propsFp(); }
     else if (sel.length > 1) { cab.append(document.createTextNode(sel.length + ' objetos')); const b = sec('Seleção'); b.append(el('div', 'nota', 'Espaço gira, Delete apaga, setas andam um passo da grade. Clique num só para ver as propriedades.')); }
     else {
@@ -1095,6 +1283,8 @@ async function inicia(o, resolve){
       E.modo = '2d'; cv.hidden = false; v3host.hidden = true; dica.textContent = ''; ferramenta(E.tool); mede(); pede();
     }
     b2.classList.toggle('on', E.modo === '2d'); b3.classList.toggle('on', E.modo === '3d');
+    b2.setAttribute('aria-pressed', String(E.modo === '2d')); b3.setAttribute('aria-pressed', String(E.modo === '3d'));
+    status();
   }
   function cena3d(){
     if (!E.v3 || typeof HubPcb3dModelo === 'undefined') return;
@@ -1125,6 +1315,11 @@ async function inicia(o, resolve){
     stGrade.textContent = 'Grade ' + (GRADES.find(g => Math.abs(g[0] - E.grade) < 1e-9) || [0, fmt(E.grade)])[1];
     stCont.textContent = E.fp.pads.length + ' pads · ' + E.fp.bodies.length + ' corpo(s) 3D';
     bSalvar.disabled = !E.sujo;
+    if (bUndo) bUndo.disabled = !E.undo.length;
+    if (bRedo) bRedo.disabled = !E.redo.length;
+    vazioHint.hidden = !E.vazio || E.modo === '3d';
+    if (HUB) for (const x of caixa.querySelectorAll('.symed-save, .fpe-acoes-hub')) x.classList.toggle('fpe-esconde', !!E.vazio);
+    if (HUB) marcaLinha();
     for (const b of bExtras) {
       if (typeof b._x.rotulo === 'function') { try { b.textContent = b._x.rotulo(ctrl); } catch (e) { /* ok */ } }
       if (typeof b._x.ativo === 'function') { try { b.disabled = !b._x.ativo(ctrl); } catch (e) { /* ok */ } }
@@ -1237,7 +1432,7 @@ async function inicia(o, resolve){
 
   /* ---------- comeco ---------- */
   montaBarra(); montaAbas();
-  b2.classList.add('on');
+  b2.classList.add('on'); b2.setAttribute('aria-pressed', 'true'); b3.setAttribute('aria-pressed', 'false');
   carregaFp(o.nome || (o.fp && o.fp.name) || null, o.fp || null);
   mede(); enquadra();
   setTimeout(() => cv.focus(), 30);
