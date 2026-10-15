@@ -3,6 +3,16 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.5.0 — 2026-10-15
+
+- **Esquema do Altium aberto direto no hub, sem o Altium.** Use **Arquivo › Abrir documento do Altium (.SchDoc / .PrjPcb)…** e escolha o .PrjPcb junto com as folhas; o projeto abre na aba Esquema. Vem tudo, como o ExportProject traria:
+  - componentes, com footprint, parâmetros e posição do designador e do comentário;
+  - fios, rótulos, power, ports, junções, No ERC e textos;
+  - o template da folha e os parâmetros do carimbo.
+  O símbolo que só existe dentro do .SchDoc aparece desenhado, e não mais como quadrado vermelho. O .SchDoc só é lido, nunca alterado.
+- **Componente espelhado e girado 90°/270° no Esquema:** o hub girava e espelhava na ordem inversa da do Altium e punha os pinos trocados, o que quebrava as ligações nesses pinos. Agora segue a ordem do Altium.
+- **MCP:** `projeto_abrir_altium` faz o mesmo pela IA.
+
 ## 1.4.0 — 2026-10-15
 
 - **Editor de footprint com a barra do Altium (Active Bar)** no alto da área de trabalho, cada botão com as variantes no triângulo:
