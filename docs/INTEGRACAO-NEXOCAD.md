@@ -126,9 +126,9 @@ desta máquina.
 
 | rota | o quê |
 |---|---|
-| `GET /api/nexo/estado` | `{ok, dir, existe, revisao, nexocad:{aberto, versao, exe}}` |
+| `GET /api/nexo/estado` | `{ok, dir, existe, indice, itens, revisao, nexocad:{aberto, versao, exe}}` (`indice`: o `biblioteca.json` foi lido; `itens`: quantos) |
 | `GET /api/nexo/revisao` | `{revisao, mtime}`. Barata: só o `stat` + leitura do índice. As páginas consultam a cada 1,5 s |
-| `GET /api/nexo/biblioteca?categoria=Eletrônicos` | o índice filtrado; o padrão são os itens `Eletrônicos` |
+| `GET /api/nexo/biblioteca?categoria=Eletrônicos&texto=` | `{ok, dir, existe, revisao, categorias, itens}`: o índice filtrado; o padrão são os itens `Eletrônicos`, `categoria=*` traz todos; `texto` busca em id, nome, descrição, tags, footprints, MPN e fabricante |
 | `GET /api/nexo/arquivo/<id>/<modelo.step\|thumb.png>` | o arquivo do item |
 | `POST /api/nexo/editar` | `{chave, url, nome, footprint, geometria?}`, `{novo:true, footprint, nome, chave?, geometria?}` (o footprint não tem STEP: item vazio) ou `{id}`. Abre o NexoCAD se precisar e chama `biblioteca_editar_modelo` / `biblioteca_abrir` (a `chave` que um item já `substitui` abre esse item). A `url` é a URL do STEP no próprio hub (`/Libs/3d-hub/...`); o servidor baixa de si mesmo para um temporário e passa o `step_path`. A `geometria` segue sem mudança. Devolve `{ok, result, id?, criado?}` |
 | `POST /api/nexo/placa` | `{pacote}` (seção 4). Grava em `%TEMP%\eletrichub-nexo\<projeto>-<hora>\placa.json` + `modelos/*.step`, abre o NexoCAD e chama `pcb_importar` |
