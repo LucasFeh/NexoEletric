@@ -154,6 +154,43 @@ const CSS = `
 .fpe-embut > .fpe{border:0; border-radius:0; box-shadow:none;}
 .fpe-embut .fpe-vp{background:var(--sunken, #1b1b1b);}
 .fpe-embut .fpe-x{width:auto; padding:0 10px; font-size:12px; border:1px solid var(--edge);}
+/* o Active Bar do Altium: a barra de ferramentas no alto da area de trabalho, cada botao com o
+   triangulo que abre as variantes (clique no triangulo, ou botao direito no botao) */
+.fpe-ab{position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:4; width:max-content; display:flex; align-items:center; gap:1px; padding:3px;
+  max-width:calc(100% - 16px); flex-wrap:wrap; justify-content:center;
+  background:var(--surface-2); border:1px solid var(--edge); border-radius:7px; box-shadow:var(--shadow-menu); font:12px var(--font);}
+.fpe-ab[hidden]{display:none;}
+.fpe-ab .g{position:relative; display:flex; align-items:stretch;}
+.fpe-ab button{border:0; background:transparent; color:var(--text-2); cursor:pointer; padding:0; border-radius:4px;}
+.fpe-ab button.b{width:28px; height:28px; display:grid; place-items:center;}
+.fpe-ab button.v{width:11px; display:grid; place-items:center; margin-left:-2px; opacity:.75;}
+.fpe-ab button:hover{background:rgba(var(--tint),.10); color:var(--text);}
+.fpe-ab button.b.on{background:var(--hi); color:var(--on-hi);}
+.fpe-ab .sep{width:1px; height:20px; background:var(--edge); margin:0 4px;}
+.fpe-menu .ic{display:inline-grid; place-items:center; width:16px; height:16px; color:var(--text-2);}
+.fpe-menu button:disabled{opacity:.4; cursor:default;}
+/* janelas do editor (Place 3D Body, Move by X/Y, assistente) */
+.fpe-modal{position:fixed; inset:0; z-index:96; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center;}
+.fpe-modal-cx{max-width:calc(100vw - 32px); max-height:calc(100vh - 48px); display:flex; flex-direction:column; background:var(--surface); color:var(--text);
+  border:1px solid var(--edge); border-radius:8px; box-shadow:var(--shadow-menu); font:12.5px/1.4 var(--font);}
+.fpe-modal-cab{display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--edge);}
+.fpe-modal-cab b{flex:1; font-weight:600;}
+.fpe-modal-corpo{flex:1; min-height:0; overflow:auto; padding:12px;}
+.fpe-modal-pe{display:flex; gap:6px; align-items:center; padding:10px 12px; border-top:1px solid var(--edge);}
+.fpe-modal-pe .esp{flex:1;}
+.fpe-modal .grade{display:grid; grid-template-columns:minmax(150px,auto) minmax(0,1fr); gap:6px 10px; align-items:center;}
+.fpe-modal label{color:var(--text-2);}
+.fpe-modal input, .fpe-modal select{height:28px; padding:0 8px; background:var(--surface-2); color:var(--text); border:1px solid var(--edge); border-radius:4px; font:12px var(--font); min-width:0; width:100%;}
+.fpe-modal input:focus, .fpe-modal select:focus{outline:none; border-color:var(--hi);}
+.fpe-modal .lst{display:flex; flex-direction:column; border:1px solid var(--edge); border-radius:6px; max-height:50vh; overflow:auto; margin-top:8px;}
+.fpe-modal .lst button{display:grid; grid-template-columns:minmax(0,1fr) auto; gap:1px 10px; text-align:left; padding:6px 10px; border:0; border-bottom:1px solid var(--edge);
+  background:transparent; color:var(--text); cursor:pointer; font:12px var(--font);}
+.fpe-modal .lst button:hover{background:rgba(var(--tint),.07);}
+.fpe-modal .lst button.on{background:rgba(var(--tint),.14); box-shadow:inset 2px 0 0 var(--hi);}
+.fpe-modal .lst .n{font:12px var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.fpe-modal .lst .t{font-size:11px; color:var(--text-2);}
+.fpe-modal .lst .u{grid-column:1 / -1; font-size:11px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.fpe-modal .nota{font-size:11.5px; color:var(--text-2); margin-top:8px;}
 `;
 
 /* as cores das camadas sao as de fabrica do Altium (o desenho nao segue o tema, como a vista PCB) */
@@ -191,9 +228,40 @@ const ICONES = {
   del:svgI('M3 4.5h10M6 4.5V2.5h4v2M4.5 4.5l.7 9h5.6l.7-9'), rot:svgI('M13 8a5 5 0 1 1-1.5-3.6M12.5 1.8v3h-3'),
   dup:svgI('M5.5 5.5h8v8h-8zM3 10.5V2.5h8'), fit:svgI('M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4'),
   undo:svgI('M6 4L2.5 7.5 6 11M3 7.5h7a3.5 3.5 0 0 1 0 7H8'), redo:svgI('M10 4l3.5 3.5L10 11M13 7.5H6a3.5 3.5 0 0 0 0 7h2'),
+  selTudo:svgI('M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3M6 6h4v4H6z'), inv:svgI('M2.5 2.5h11v11h-11zM2.5 13.5l11-11'), nada:svgI('M4 4l8 8M12 4l-8 8'),
+  mover:svgI('M8 1.5v13M1.5 8h13M6 3.5l2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2'),
+  rotAng:svgI('M13 8a5 5 0 1 1-1.5-3.6M12.5 1.8v3h-3M8 8l2.5-1.5'),
+  espX:svgI('M8 1.5v13M6 4L2 8l4 4zM10 4l4 4-4 4z'), espY:svgI('M1.5 8h13M4 6l4-4 4 4zM4 10l4 4 4-4z'),
+  alEsq:svgI('M2.5 2v12M5 4.5h8M5 10.5h5'), alDir:svgI('M13.5 2v12M3 4.5h8M6 10.5h5'), alTopo:svgI('M2 2.5h12M4.5 5v8M10.5 5v5'),
+  alBase:svgI('M2 13.5h12M4.5 3v8M10.5 6v5'), alCh:svgI('M8 2v12M3.5 4.5h9M5.5 10.5h5'), alCv:svgI('M2 8h12M4.5 3.5v9M10.5 5.5v5'),
+  diH:svgI('M2 2v12M14 2v12M6 5v6M10 5v6'), diV:svgI('M2 2h12M2 14h12M5 6h6M5 10h6'),
+  ret:svgI('M2.5 4h11v8h-11z'), circulo:svgI('M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0'),
+  esfera:svgI('M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0M2.5 8a5.5 2 0 0 0 11 0'),
+  lib3d:svgI('M8 1.5l5.5 3v7L8 14.5l-5.5-3v-7zM2.5 4.5L8 7.5l5.5-3M8 7.5v7M11 10.5h4M13 8.5v4'),
+  pasta:svgI('M1.5 4h4.5l1.5 1.5h7v7.5h-13z'),
+  mede:svgI('M1.5 11.5l10-10 3 3-10 10zM4 9l1.5 1.5M6.5 6.5L8 8M9 4l1.5 1.5'),
+  ref:svgI('M8 1.5v13M1.5 8h13M5 8a3 3 0 1 0 6 0a3 3 0 1 0-6 0'),
+  wiz:svgI('M2 14l8-8M9.5 1.5v2M13 3l-1.4 1.4M14.5 6.5h-2M13 10l-1.4-1.4M5.5 2.5l.8 1.6'),
 };
 
 let cssPosto = false;
+/* Libs/pcblib-3d.js: os corpos 3D da PcbLib do Altium (o hubserver os tira da propria PcbLib na
+   primeira vez, tools/pcb3d/lib3d_servidor.py). Carregado uma vez, sob demanda; sem ele (hub aberto
+   do disco, PcbLib ilegivel) o editor segue com os corpos do hub so. */
+let lib3dP = null;
+function carregaLib3d(){
+  if (root.pcblib3d) return Promise.resolve(root.pcblib3d);
+  if (lib3dP) return lib3dP;
+  if (typeof document === 'undefined' || (typeof location !== 'undefined' && location.protocol === 'file:')) return Promise.resolve(null);
+  lib3dP = new Promise(ok => {
+    const sc = document.createElement('script');
+    sc.src = 'Libs/pcblib-3d.js';
+    sc.onload = () => ok(root.pcblib3d || null);
+    sc.onerror = () => { lib3dP = null; ok(null); };
+    document.head.append(sc);
+  });
+  return lib3dP;
+}
 function poeCss(){ if (cssPosto) return; cssPosto = true; const s = el('style'); s.textContent = CSS; document.head.append(s); }
 
 /* ======================================================================================== */
@@ -211,6 +279,14 @@ async function inicia(o, resolve){
   const COR = embutido ? corDoHub() : CORES;
   const lib = HF ? await HF.carrega() : { footprints:[], models:{} };
   const alt = o.pcblib || root.pcblib || { footprints:[] };
+  /* os corpos 3D da PcbLib do Altium: o footprint do Altium abre com o modelo dele, como no PCB
+     Library; ao salvar no hub o corpo vai junto (o modelo continua o da PcbLib, Libs/3d/) */
+  let L3 = root.pcblib3d || null;
+  const p3 = L3 ? Promise.resolve(L3) : carregaLib3d().then(x => { L3 = x; return x; });
+  const temProp = (ob, k) => !!ob && Object.prototype.hasOwnProperty.call(ob, k);
+  const modelo = id => (temProp(lib.models, id) && lib.models[id]) || (L3 && temProp(L3.models, id) && L3.models[id]) || null;
+  const temCorpoAlt = n => !!(L3 && temProp(L3.footprints, n) && ((L3.footprints[n] || {}).bodies || []).length);
+  const corposAlt = n => temCorpoAlt(n) ? JSON.parse(JSON.stringify(L3.footprints[n].bodies)) : [];
   const salvos = [];
 
   /* ---------- estado ---------- */
@@ -344,7 +420,7 @@ async function inicia(o, resolve){
         const b = ibt(id, rot + ' (' + k + ')', () => ferramenta(id));
         b.setAttribute('aria-pressed', String(E.tool === id)); bTool[id] = b; tb.append(b);
       }
-      tb.append(ibt('step', 'Corpo 3D: o modelo STEP do fabricante (P,B)', () => poeStep()),
+      tb.append(ibt('step', 'Corpo 3D: um modelo STEP da biblioteca ou do computador (P,B)', () => escolheModelo()),
                 ibt('extrude', 'Corpo 3D extrudado: uma caixa com o contorno dos pads (P,E)', () => poeCorpo('extruded')),
                 ibt('cyl', 'Corpo 3D cilíndrico (capacitor eletrolítico, LED)', () => poeCorpo('cylinder')),
                 ibt('del', 'Apagar a seleção (Delete)', () => apaga()));
@@ -363,7 +439,7 @@ async function inicia(o, resolve){
       bTool[id] = b; barra.append(b);
     }
     barra.append(el('span', 'sep'));
-    const b3d = bt('', '', () => poeStep(), 'Place » 3D Body: um modelo STEP preso ao footprint (P,B)');
+    const b3d = bt('', '', () => escolheModelo(), 'Place » 3D Body: um modelo STEP da biblioteca ou do computador (P,B)');
     b3d.append(document.createTextNode('3D Body (STEP)'), el('kbd', null, 'P,B'));
     const bEx = bt('', '', () => poeCorpo('extruded'), 'Place » Extruded 3D Body: uma caixa com o contorno dos pads (P,E)');
     bEx.append(document.createTextNode('Extruded'), el('kbd', null, 'P,E'));
@@ -409,6 +485,7 @@ async function inicia(o, resolve){
     E.fp = fonte ? JSON.parse(JSON.stringify(fonte)) : { name:nome || 'NOVO_FOOTPRINT', description:'', pads:[], silk:[], bodies:[] };
     if (!E.fp.name) E.fp.name = nome || 'NOVO_FOOTPRINT';
     for (const k of ['pads', 'silk', 'bodies']) if (!Array.isArray(E.fp[k])) E.fp[k] = [];
+    if (!h && a && !E.fp.bodies.length) E.fp.bodies = corposAlt(E.fp.name);
     E.nome0 = E.fp.name; E.deHub = !!h;
     /* no layout hub o editor nasce sem nada aberto, como o de simbolos: a dica no canvas pede
        para escolher na lista ou criar. Desenhar ali mesmo vira um footprint novo. */
@@ -451,13 +528,15 @@ async function inicia(o, resolve){
   }
   function montaListaHub(it, q){
     const hubs = lib.footprints || [];
-    const chave = [q, it.length, hubs.map(f => f.name + ':' + (f.pads || []).length + ':' + (f.bodies || []).length).join('|')].join('§');
+    const chave = [q, it.length, L3 ? 1 : 0, hubs.map(f => f.name + ':' + (f.pads || []).length + ':' + (f.bodies || []).length).join('|')].join('§');
     if (chave === listaChave) { marcaLinha(); return; }
     listaChave = chave;
     const total = new Set([...hubs.map(f => f.name), ...((alt.footprints) || []).filter(Boolean).map(f => f.name)]).size;
     plRod.textContent = '';
     const stat = (n, r) => { const sp = el('span'); sp.append(el('b', null, String(n)), document.createTextNode(' ' + r)); plRod.append(sp); };
-    stat(total, 'footprints'); stat(hubs.length, 'do hub'); stat(hubs.filter(f => (f.bodies || []).length).length, 'com modelo 3D');
+    const nomesHub = new Set(hubs.map(f => f.name));
+    const n3d = hubs.filter(f => (f.bodies || []).length).length + ((alt.footprints) || []).filter(f => f && !nomesHub.has(f.name) && temCorpoAlt(f.name)).length;
+    stat(total, 'footprints'); stat(hubs.length, 'do hub'); stat(n3d, 'com modelo 3D');
     const topo = listaFiltro === q ? lista.scrollTop : 0;
     listaFiltro = q;
     if (listaIO) listaIO.disconnect();
@@ -475,6 +554,7 @@ async function inicia(o, resolve){
       const c = el('canvas'); c.width = 54; c.height = 36; c._n = n;
       b.append(c, el('span', 'nm', n));
       if (i.hub) b.append(el('span', 'pill hub', i.d3 ? 'hub · 3D' : 'hub'));
+      else if (i.d3) b.append(el('span', 'pill', '3D'));
       b.append(el('span', 'mt', ((g && g.pads) || []).length + ' pads'));
       b.title = n + (g && g.description ? '\n' + g.description : '') + (i.hub ? '\nbiblioteca do hub (Libs/pcblib-hub.js)' : '\nPcbLib do Altium (Libs/pcblib.js)');
       b.addEventListener('click', () => trocaPara(n));
@@ -489,7 +569,7 @@ async function inicia(o, resolve){
     const q = E.filtro.trim().toLowerCase();
     const nomes = new Map();
     for (const f of (lib.footprints || [])) if (f && f.name) nomes.set(f.name, { hub:true, d3:(f.bodies || []).length > 0 });
-    for (const f of (alt.footprints || [])) if (f && f.name && !nomes.has(f.name)) nomes.set(f.name, { hub:false, d3:false });
+    for (const f of (alt.footprints || [])) if (f && f.name && !nomes.has(f.name)) nomes.set(f.name, { hub:false, d3:temCorpoAlt(f.name) });
     const it = [...nomes].filter(([n]) => !q || n.toLowerCase().indexOf(q) >= 0).sort((a, b) => (b[1].hub - a[1].hub) || a[0].localeCompare(b[0]));
     if (HUB) return montaListaHub(it, q);
     lista.textContent = '';
@@ -605,8 +685,10 @@ async function inicia(o, resolve){
     if (!W) mede();
     const b = caixaFp();
     const w = Math.max(2, b.x2 - b.x1), h = Math.max(2, b.y2 - b.y1);
-    E.view.cx = (b.x1 + b.x2) / 2; E.view.cy = (b.y1 + b.y2) / 2;
-    E.view.s = Math.max(2, Math.min(400, Math.min((W || 600) / (w * 1.35), (H || 400) / (h * 1.35))));
+    /* o Active Bar cobre o alto da area de trabalho: o footprint enquadra abaixo dele */
+    const topo = ab.isConnected && !ab.hidden ? ab.offsetHeight + 12 : 0, Hu = Math.max(80, (H || 400) - topo);
+    E.view.s = Math.max(2, Math.min(400, Math.min((W || 600) / (w * 1.35), Hu / (h * 1.35))));
+    E.view.cx = (b.x1 + b.x2) / 2; E.view.cy = (b.y1 + b.y2) / 2 + (topo / 2) / E.view.s;
     pede();
   }
 
@@ -654,6 +736,7 @@ async function inicia(o, resolve){
     }
     const bb = E.bbStep.get(b);
     if (bb) return [[bb.x1, bb.y1], [bb.x2, bb.y1], [bb.x2, bb.y2], [bb.x1, bb.y2]];
+    if (Array.isArray(b.outline) && b.outline.length >= 3) return b.outline.map(p => [p[0], p[1]]);
     return [[x - 0.5, y - 0.5], [x + 0.5, y - 0.5], [x + 0.5, y + 0.5], [x - 0.5, y + 0.5]];
   }
   function desenha(){
@@ -715,6 +798,14 @@ async function inicia(o, resolve){
         ctx.stroke(); ctx.restore();
       }
     }
+    /* a regua do Medir (Ctrl+M) */
+    const regua = (a, b) => {
+      ctx.save(); ctx.globalAlpha = 1; ctx.strokeStyle = COR.janela; ctx.lineWidth = px(1.5);
+      ctx.setLineDash([px(5), px(3)]); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.setLineDash([]);
+      for (const q of [a, b]) { ctx.beginPath(); ctx.arc(q[0], q[1], px(3), 0, 2 * Math.PI); ctx.stroke(); }
+      ctx.restore();
+    };
+    if (E.medida) regua(E.medida.a, E.medida.b);
     /* rascunho da ferramenta */
     const d = E.draft;
     if (d && E.mouse) {
@@ -727,6 +818,9 @@ async function inicia(o, resolve){
         else ctx.arc(d.c[0], d.c[1], r, 0, 2 * Math.PI);
         ctx.stroke();
       }
+      if (E.tool === 'ret' && d.p0) { ctx.beginPath(); ctx.rect(d.p0[0], d.p0[1], E.mouse[0] - d.p0[0], E.mouse[1] - d.p0[1]); ctx.stroke(); }
+      if (E.tool === 'circulo' && d.c) { ctx.beginPath(); ctx.arc(d.c[0], d.c[1], Math.hypot(E.mouse[0] - d.c[0], E.mouse[1] - d.c[1]), 0, 2 * Math.PI); ctx.stroke(); }
+      if (E.tool === 'mede' && d.p0) regua(d.p0, E.mouse);
       ctx.globalAlpha = 1;
     }
     if (E.tool === 'pad' && E.mouse) {
@@ -801,6 +895,7 @@ async function inicia(o, resolve){
     if (t === 'pad') { x.x = r4(x.x + dx); x.y = r4(x.y + dy); }
     else if (t === 'silk') { if (x.kind === 'arc') { x.cx = r4(x.cx + dx); x.cy = r4(x.cy + dy); } else { x.x1 = r4(x.x1 + dx); x.y1 = r4(x.y1 + dy); x.x2 = r4(x.x2 + dx); x.y2 = r4(x.y2 + dy); } }
     else if (t === 'body') {
+      delete x.outline;
       if (x.kind === 'extruded') x.pts = x.pts.map(p => [r4(p[0] + dx), r4(p[1] + dy)]);
       else { x.raw = x.raw || {}; x.raw.x2d = r4((x.raw.x2d || 0) + dx); x.raw.y2d = r4((x.raw.y2d || 0) + dy); }
       if (x.kind === 'step') { const bb = E.bbStep.get(x); if (bb) E.bbStep.set(x, { x1:bb.x1 + dx, y1:bb.y1 + dy, x2:bb.x2 + dx, y2:bb.y2 + dy, z0:bb.z0, z1:bb.z1 }); }
@@ -821,7 +916,7 @@ async function inicia(o, resolve){
         else { [x.x1, x.y1] = g(x.x1, x.y1); [x.x2, x.y2] = g(x.x2, x.y2); }
       } else if (t === 'body') {
         if (x.kind === 'extruded') x.pts = x.pts.map(p => g(p[0], p[1]));
-        else { x.raw = x.raw || {}; [x.raw.x2d, x.raw.y2d] = g(x.raw.x2d || 0, x.raw.y2d || 0); x.raw.rotz = (((x.raw.rotz || 0) + 90) % 360); if (x.kind === 'step') medeStep(x); }
+        else { delete x.outline; x.raw = x.raw || {}; [x.raw.x2d, x.raw.y2d] = g(x.raw.x2d || 0, x.raw.y2d || 0); x.raw.rotz = (((x.raw.rotz || 0) + 90) % 360); if (x.kind === 'step') medeStep(x); }
       }
     }
     mudou();
@@ -859,14 +954,23 @@ async function inicia(o, resolve){
   }
   function ferramenta(id){
     E.tool = id; E.draft = null;
+    if (id !== 'mede') E.medida = null;
     if (id !== 'sel') E.sel.clear();
     for (const k in bTool) { bTool[k].classList.toggle('on', k === id); bTool[k].setAttribute('aria-pressed', String(k === id)); }
     cv.style.cursor = id === 'sel' ? 'default' : 'crosshair';
     dica.textContent = id === 'pad' ? 'clique põe o pad · Espaço gira · Tab: as propriedades do pad · Esc larga'
       : id === 'linha' ? 'clique começa · cliques seguintes encadeiam · botão direito/Esc termina'
       : id === 'arco' ? 'clique no centro · clique no começo do arco · clique no fim'
+      : id === 'ret' ? 'clique num canto · clique no canto oposto · Esc larga'
+      : id === 'circulo' ? 'clique no centro · clique no raio · Esc larga'
+      : id === 'mede' ? 'clique no primeiro ponto · clique no segundo · Esc larga'
+      : id === 'refloc' ? 'clique onde fica a origem do footprint (Set Reference » Location)'
       : '';
-    props(); pede();
+    marcaAB(); props(); pede();
+  }
+  function mostraMedida(a, b){
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    stMsg.textContent = 'ΔX ' + fmt(dx) + ' · ΔY ' + fmt(dy) + ' · distância ' + fmt(Math.hypot(dx, dy));
   }
 
   /* ---------- mouse ---------- */
@@ -902,6 +1006,29 @@ async function inicia(o, resolve){
       E.fp.silk.push({ kind:'arc', cx:d.c[0], cy:d.c[1], r:d.r, sa:d.sa, ea:ea < d.sa ? ea + 360 : ea, w:E.linhaW });
       E.draft = null; mudou(); return;
     }
+    if (E.tool === 'ret') {
+      if (!E.draft || !E.draft.p0) { E.draft = { p0:g }; pede(); return; }
+      const a = E.draft.p0;
+      if (a[0] === g[0] || a[1] === g[1]) return;
+      antes();
+      const lw = E.linhaW;
+      E.fp.silk.push({ kind:'line', x1:a[0], y1:a[1], x2:g[0], y2:a[1], w:lw }, { kind:'line', x1:g[0], y1:a[1], x2:g[0], y2:g[1], w:lw },
+                     { kind:'line', x1:g[0], y1:g[1], x2:a[0], y2:g[1], w:lw }, { kind:'line', x1:a[0], y1:g[1], x2:a[0], y2:a[1], w:lw });
+      E.draft = null; mudou(); return;
+    }
+    if (E.tool === 'circulo') {
+      if (!E.draft || !E.draft.c) { E.draft = { c:g }; pede(); return; }
+      const r = r4(Math.hypot(g[0] - E.draft.c[0], g[1] - E.draft.c[1]));
+      if (!(r > 0)) return;
+      antes();
+      E.fp.silk.push({ kind:'arc', cx:E.draft.c[0], cy:E.draft.c[1], r, sa:0, ea:360, w:E.linhaW });
+      E.draft = null; mudou(); return;
+    }
+    if (E.tool === 'mede') {
+      if (!E.draft || !E.draft.p0) { E.draft = { p0:g }; E.medida = null; pede(); return; }
+      E.medida = { a:E.draft.p0, b:g }; E.draft = null; mostraMedida(E.medida.a, E.medida.b); pede(); return;
+    }
+    if (E.tool === 'refloc') { referencia('local', g); ferramenta('sel'); return; }
     /* selecionar / arrastar */
     const em = sob(w[0], w[1]);
     let alvo = null;
@@ -927,6 +1054,7 @@ async function inicia(o, resolve){
     const [sx, sy] = ptDe(ev), w = mundo(sx, sy), g = [snap(w[0]), snap(w[1])];
     E.mouse = E.tool === 'sel' ? w : g;
     stXY.textContent = 'X ' + fmt(g[0]) + '  Y ' + fmt(g[1]);
+    if (E.tool === 'mede' && E.draft && E.draft.p0) mostraMedida(E.draft.p0, g);
     const a = E.arr;
     if (a && a.pan) {
       if (Math.hypot(sx - a.sx, sy - a.sy) > 3) a.andou = true;
@@ -977,7 +1105,8 @@ async function inicia(o, resolve){
     item('Place Pad', 'P,P', () => ferramenta('pad'));
     item('Place Line', 'P,L', () => ferramenta('linha'));
     item('Place Arc', 'P,A', () => ferramenta('arco'));
-    item('Place 3D Body (STEP)…', 'P,B', () => poeStep());
+    item('Place Full Circle', 'P,U', () => ferramenta('circulo'));
+    item('Place 3D Body…', 'P,B', () => escolheModelo());
     item('Place Extruded 3D Body', 'P,E', () => poeCorpo('extruded'));
     m.append(sepMenu());
     item('Rotate Selection', 'Espaço', gira90, !E.sel.size);
@@ -985,6 +1114,7 @@ async function inicia(o, resolve){
     item('Delete', 'Delete', apaga, !E.sel.size);
     item('Select All', 'Ctrl+A', () => { E.sel = new Set([...E.fp.pads, ...E.fp.silk, ...E.fp.bodies]); props(); pede(); });
     m.append(sepMenu());
+    item('Measure Distance', 'Ctrl+M', () => ferramenta('mede'));
     item('Fit Document', 'F', enquadra);
     item('3D Layout Mode', '3', () => modo('3d'));
     m.style.left = Math.min(ev.clientX, innerWidth - 220) + 'px'; m.style.top = Math.min(ev.clientY, innerHeight - 330) + 'px';
@@ -1007,6 +1137,9 @@ async function inicia(o, resolve){
                 standoff:0, height:1, color:'#2b2b2b', opacity:1 };
     } else if (kind === 'cylinder') {
       corpo = { kind:'cylinder', side:'top', radius:r4(Math.max(0.5, Math.min(b.x2 - b.x1, b.y2 - b.y1) / 2)), height:8, raw:{ x2d:c.x, y2d:c.y, rot2d:0, rotx:0, roty:0, rotz:0, dz:0 }, color:'#2a3f8c', opacity:1 };
+    } else if (kind === 'sphere') {
+      const r = r4(Math.max(0.3, Math.min(b.x2 - b.x1, b.y2 - b.y1) / 2));
+      corpo = { kind:'sphere', side:'top', radius:r, raw:{ x2d:c.x, y2d:c.y, rot2d:0, rotx:0, roty:0, rotz:0, dz:r }, color:'#c8c8c8', opacity:1 };
     } else return;
     E.fp.bodies.push(corpo);
     E.sel = new Set([corpo]);
@@ -1050,8 +1183,8 @@ async function inicia(o, resolve){
   const malhasStep = new Map();
   async function medeStep(b, buffer, encaixa){
     if (!b || b.kind !== 'step' || typeof HubPcb3dStep === 'undefined') return;
-    const m = lib.models[b.model];
-    if (!m) return;
+    const m = modelo(b.model);
+    if (!m || !m.file) return;
     let malhas = malhasStep.get(b.model);
     if (!malhas) {
       try {
@@ -1114,8 +1247,8 @@ async function inicia(o, resolve){
     const cab = el('div', 'cab');
     pr.append(cab);
     if (!sel.length && E.tool === 'pad') { cab.append(document.createTextNode('Pad (modelo)')); cab.append(el('span', 'k', 'o próximo pad')); propsPad(E.padModelo, true); }
-    else if (!sel.length && (E.tool === 'linha' || E.tool === 'arco')) {
-      cab.append(document.createTextNode(E.tool === 'linha' ? 'Line (modelo)' : 'Arc (modelo)'));
+    else if (!sel.length && (E.tool === 'linha' || E.tool === 'arco' || E.tool === 'ret' || E.tool === 'circulo')) {
+      cab.append(document.createTextNode({ linha:'Line', arco:'Arc', ret:'Rectangle', circulo:'Full Circle' }[E.tool] + ' (modelo)'));
       const b = sec('Properties');
       campo(b, 'Width', mostra(E.linhaW), v => { const x = le(v); if (!(x > 0)) return false; E.linhaW = x; return true; });
       campo(b, 'Layer', 'Top Overlay', () => true, { off:true });
@@ -1152,13 +1285,13 @@ async function inicia(o, resolve){
     E.fp.bodies.forEach((c, i) => {
       const d = el('div', 'c');
       const sw = el('span', 'sw'); sw.style.background = c.color || '#888';
-      const n = c.kind === 'step' ? (c.name || (lib.models[c.model] || {}).name || 'STEP') : c.kind === 'extruded' ? 'Extruded' : c.kind === 'cylinder' ? 'Cylinder' : 'Sphere';
+      const n = c.kind === 'step' ? (c.name || (modelo(c.model) || {}).name || 'STEP') : c.kind === 'extruded' ? 'Extruded' : c.kind === 'cylinder' ? 'Cylinder' : 'Sphere';
       d.append(sw, el('span', 'n', (i + 1) + '. ' + n));
       d.addEventListener('click', () => { E.sel = new Set([c]); props(); pede(); });
       s.append(d);
     });
     const l = el('div'); l.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap;padding:6px 10px 10px;';
-    l.append(bt('fpe-b peq', '+ STEP…', () => poeStep()), bt('fpe-b peq', '+ Extruded', () => poeCorpo('extruded')), bt('fpe-b peq', '+ Cylinder', () => poeCorpo('cylinder')));
+    l.append(bt('fpe-b peq', '+ Modelo 3D…', () => escolheModelo()), bt('fpe-b peq', '+ STEP do PC…', () => poeStep()), bt('fpe-b peq', '+ Extruded', () => poeCorpo('extruded')), bt('fpe-b peq', '+ Cylinder', () => poeCorpo('cylinder')));
     s.append(l);
   }
   function repetidosPads(){ return HF ? HF.repetidos(E.fp) : []; }
@@ -1213,13 +1346,13 @@ async function inicia(o, resolve){
     const b = sec('3D Model Type');
     campo(b, 'Type', c.kind, () => true, { opcoes:tipos, off:true });
     if (c.kind === 'step') {
-      const m = lib.models[c.model] || {};
+      const m = modelo(c.model) || {};
       b.append(el('div', 'nota', (c.name || m.name || c.model) + (m.bytes ? ' · ' + (m.bytes >= 1048576 ? (m.bytes / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(m.bytes / 1024)) + ' KB') : '')));
       const bb = E.bbStep.get(c);
       if (bb) b.append(el('div', 'nota', 'Caixa: ' + fmt(bb.x2 - bb.x1) + ' × ' + fmt(bb.y2 - bb.y1) + ' × ' + fmt(bb.z1 - bb.z0) + ' (altura)'));
     }
     const raw = c.raw || (c.raw = { x2d:0, y2d:0, rot2d:0, rotx:0, roty:0, rotz:0, dz:0 });
-    const re = () => { if (c.kind === 'step') medeStep(c); };
+    const re = () => { delete c.outline; if (c.kind === 'step') medeStep(c); };
     const numR = (k) => v => { const x = le(v); if (!isNum(x)) return false; antes(); raw[k] = x; re(); mudou(); return true; };
     const angR = (k) => v => { const x = parseFloat(String(v).replace(',', '.')); if (!isFinite(x)) return false; antes(); raw[k] = r4(((x % 360) + 360) % 360); re(); mudou(); return true; };
     if (c.kind === 'extruded') {
@@ -1251,7 +1384,8 @@ async function inicia(o, resolve){
         const ln = el('div', 'lin');
         const gira = (k) => () => { antes(); raw[k] = ((raw[k] || 0) + 90) % 360; medeStep(c).then(() => mudou()); };
         ln.append(bt('fpe-b peq', 'X +90°', gira('rotx')), bt('fpe-b peq', 'Y +90°', gira('roty')), bt('fpe-b peq', 'Z +90°', gira('rotz')),
-          bt('fpe-b peq', 'Encaixar nos pads', () => { antes(); medeStep(c, null, true).then(() => mudou()); }));
+          bt('fpe-b peq', 'Encaixar nos pads', () => { antes(); medeStep(c, null, true).then(() => mudou()); }),
+          bt('fpe-b peq', 'Trocar modelo…', () => escolheModelo(c)));
         r.append(ln);
         r.append(el('div', 'nota', '"Encaixar" centraliza o modelo sobre os pads e o assenta na placa (o Z mínimo vira 0).'));
       } else {
@@ -1282,6 +1416,7 @@ async function inicia(o, resolve){
     } else {
       E.modo = '2d'; cv.hidden = false; v3host.hidden = true; dica.textContent = ''; ferramenta(E.tool); mede(); pede();
     }
+    ab.hidden = E.modo === '3d';
     b2.classList.toggle('on', E.modo === '2d'); b3.classList.toggle('on', E.modo === '3d');
     b2.setAttribute('aria-pressed', String(E.modo === '2d')); b3.setAttribute('aria-pressed', String(E.modo === '3d'));
     status();
@@ -1293,7 +1428,7 @@ async function inicia(o, resolve){
     const fp = E.fp;
     const comp = { ref:'FP', footprint:'__fpe__', x:0, y:0, rot:0, layer:'Top', pads:fp.pads };
     const corpos = HubPcb3dModelo.corpos({ components:[comp] }, null, {
-      pcblib3dHub:{ footprints:{ __fpe__:{ bodies:fp.bodies } }, models:lib.models }, baseLib:'Libs/', placeholder:false });
+      pcblib3dHub:{ footprints:{ __fpe__:{ bodies:fp.bodies } }, models:Object.assign({}, L3 && L3.models, lib.models) }, baseLib:'Libs/', placeholder:false });
     E.v3.cena({
       lacos:[[[B.x1, B.y1], [B.x2, B.y1], [B.x2, B.y2], [B.x1, B.y2]]], esp:1.6, bbox:B,
       furos:fp.pads.filter(p => p.drill > 0).map(p => ({ x:p.x, y:p.y, r:p.drill / 2 })),
@@ -1342,6 +1477,12 @@ async function inicia(o, resolve){
     if (!fp.hub.criado) fp.hub.criado = agora;
     if (!fp.hub.base && acharAlt(E.nome0)) fp.hub.base = E.nome0;
     fp.bbox = HF.bbox(fp);
+    /* o corpo que veio da PcbLib do Altium (ou que escolheu um modelo dela) leva o modelo para o
+       indice do hub: o arquivo continua o Libs/3d/<checksum>.step que o hubserver tira da PcbLib */
+    for (const b of fp.bodies) if (b && b.kind === 'step' && b.model && !temProp(lib.models, b.model)) {
+      const m = modelo(b.model);
+      if (m && m.file) lib.models[b.model] = { file:m.file, name:m.name || b.name || '', bytes:m.bytes || 0 };
+    }
     HF.poe(lib, fp);
     try { await HF.grava(lib); }
     catch (e) { if (d) await d.alert('Não gravou o Libs/pcblib-hub.js: ' + (e && e.message || e), { title:'Salvar' }); return false; }
@@ -1396,17 +1537,28 @@ async function inicia(o, resolve){
     if (ctrl && (k === 'y' || k === 'Y')) { e.preventDefault(); volta(E.redo, E.undo); return; }
     if (ctrl && (k === 'a' || k === 'A')) { e.preventDefault(); E.sel = new Set([...E.fp.pads, ...E.fp.silk, ...E.fp.bodies]); props(); pede(); return; }
     if (ctrl && (k === 'd' || k === 'D')) { e.preventDefault(); duplica(); return; }
+    if (ctrl && (k === 'm' || k === 'M')) { e.preventDefault(); ferramenta('mede'); return; }
     if (ctrl) return;
     const L = k.length === 1 ? k.toUpperCase() : k;
     /* as sequencias do Altium: P,P P,L P,A P,B P,E e V,F */
     if (E.prefixo) {
       const p = E.prefixo; E.prefixo = null; stMsg.textContent = '';
       e.preventDefault();
-      if (p === 'P') { if (L === 'P') ferramenta('pad'); else if (L === 'L') ferramenta('linha'); else if (L === 'A') ferramenta('arco'); else if (L === 'B') poeStep(); else if (L === 'E') poeCorpo('extruded'); }
+      if (p === 'P') {
+        if (L === 'P') ferramenta('pad'); else if (L === 'L') ferramenta('linha'); else if (L === 'A') ferramenta('arco');
+        else if (L === 'U') ferramenta('circulo'); else if (L === 'R') ferramenta('ret');
+        else if (L === 'B') escolheModelo(); else if (L === 'E') poeCorpo('extruded');
+      }
       else if (p === 'V' && L === 'F') enquadra();
+      else if (p === 'E' && L === 'F') { E.prefixo = 'EF'; stMsg.textContent = 'E, F, …'; }
+      else if (p === 'EF') { if (L === 'P') referencia('pino1'); else if (L === 'C') referencia('centro'); else if (L === 'L') ferramenta('refloc'); }
+      else if (p === 'M' && L === 'X') moverPor();
+      else if (p === 'A') { const m = { L:'esq', R:'dir', T:'topo', B:'base', C:'ch', E:'cv', D:'dh', S:'dv' }[L]; if (m) alinha(m); }
+      else if (p === 'T' && L === 'W') assistente();
       return;
     }
-    if (L === 'P' || L === 'V') { E.prefixo = L; stMsg.textContent = L + ', …'; e.preventDefault(); return; }
+    if (L === 'P' || L === 'V' || L === 'E' || L === 'M' || L === 'A' || L === 'T') { E.prefixo = L; stMsg.textContent = L + ', …'; e.preventDefault(); return; }
+    if ((L === 'X' || L === 'Y') && E.sel.size && E.modo === '2d') { e.preventDefault(); espelha(L === 'X' ? 'x' : 'y'); return; }
     if (E.modo === '3d' && E.v3) {
       if (k === '0') { E.v3.pose('topo'); return; }
       if (k === '8') { E.v3.pose('iso'); return; }
@@ -1430,16 +1582,394 @@ async function inicia(o, resolve){
   }
   document.addEventListener('keydown', tecla, true);
 
+  /* ---------- Active Bar (o do Altium: no alto da area de trabalho) ---------- */
+  const ab = el('div', 'fpe-ab');
+  ab.addEventListener('pointerdown', ev => ev.stopPropagation());
+  const abGrupos = [];
+  const SETA = '<svg width="7" height="7" viewBox="0 0 8 8"><path d="M1 2.5h6L4 6.5z" fill="currentColor"/></svg>';
+  function abGrupo(itens, lembra){
+    const g = { itens, ult:0, lembra:!!lembra };
+    const box = el('div', 'g');
+    const b = el('button', 'b'); b.type = 'button';
+    g.pinta = () => { const it = itens[g.ult]; b.innerHTML = ICONES[it.ic] || ''; b.title = it.rot + (it.k ? ' (' + it.k + ')' : ''); b.setAttribute('aria-label', it.rot); };
+    b.addEventListener('click', () => { const it = itens[g.ult]; if (!(it.off && it.off())) it.fn(); else toast(it.semSel || 'selecione antes', 'info'); });
+    b.addEventListener('contextmenu', ev => { ev.preventDefault(); if (itens.length > 1) abMenu(g, box); });
+    box.append(b);
+    if (itens.filter(x => !x.sep).length > 1) {
+      const v = el('button', 'v'); v.type = 'button'; v.title = 'as outras opções'; v.innerHTML = SETA;
+      v.addEventListener('click', ev => { ev.stopPropagation(); abMenu(g, box); });
+      box.append(v);
+    }
+    g.b = b; g.pinta(); abGrupos.push(g); ab.append(box);
+  }
+  function abMenu(g, box){
+    fechaMenu();
+    const m = el('div', 'fpe-menu');
+    g.itens.forEach((it, i) => {
+      if (it.sep) { m.append(sepMenu()); return; }
+      const b = bt('', '', () => { fechaMenu(); if (g.lembra) { g.ult = i; g.pinta(); } it.fn(); });
+      const ic = el('span', 'ic'); ic.innerHTML = ICONES[it.ic] || '';
+      b.append(ic, document.createTextNode(it.rot));
+      if (it.k) b.append(el('kbd', null, it.k));
+      if (it.off && it.off()) b.disabled = true;
+      m.append(b);
+    });
+    const r = box.getBoundingClientRect();
+    m.style.left = Math.max(4, Math.min(r.left, innerWidth - 260)) + 'px'; m.style.top = (r.bottom + 4) + 'px';
+    fundo.append(m); menuAberto = m;
+  }
+  function montaAB(){
+    ab.textContent = ''; abGrupos.length = 0;
+    const sep = () => ab.append(el('span', 'sep'));
+    const semSel = () => !E.sel.size, menos = n => () => E.sel.size < n;
+    abGrupo([
+      { ic:'sel', rot:'Selecionar', k:'Esc', fn:() => ferramenta('sel'), tool:'sel' },
+      { ic:'selTudo', rot:'Selecionar tudo', k:'Ctrl+A', fn:() => selec('tudo') },
+      { ic:'pad', rot:'Selecionar os pads', fn:() => selec('pads') },
+      { ic:'linha', rot:'Selecionar a serigrafia', fn:() => selec('silk') },
+      { ic:'step', rot:'Selecionar os corpos 3D', fn:() => selec('corpos') },
+      { ic:'inv', rot:'Inverter a seleção', fn:() => selec('inverte') },
+      { ic:'nada', rot:'Limpar a seleção', fn:() => selec('nada') },
+    ]);
+    abGrupo([
+      { ic:'mover', rot:'Mover a seleção por X, Y…', k:'M,X', fn:moverPor, off:semSel },
+      { ic:'rot', rot:'Girar a seleção 90°', k:'Espaço', fn:gira90, off:semSel },
+      { ic:'rotAng', rot:'Girar a seleção por um ângulo…', fn:giraPor, off:semSel },
+      { ic:'espX', rot:'Espelhar em X', k:'X', fn:() => espelha('x'), off:semSel },
+      { ic:'espY', rot:'Espelhar em Y', k:'Y', fn:() => espelha('y'), off:semSel },
+      { sep:true },
+      { ic:'dup', rot:'Duplicar', k:'Ctrl+D', fn:duplica, off:semSel },
+      { ic:'del', rot:'Apagar', k:'Delete', fn:apaga, off:semSel },
+    ]);
+    abGrupo([
+      { ic:'alEsq', rot:'Alinhar à esquerda', k:'A,L', fn:() => alinha('esq'), off:menos(2), semSel:'selecione 2 objetos ou mais' },
+      { ic:'alDir', rot:'Alinhar à direita', k:'A,R', fn:() => alinha('dir'), off:menos(2) },
+      { ic:'alTopo', rot:'Alinhar pelo topo', k:'A,T', fn:() => alinha('topo'), off:menos(2) },
+      { ic:'alBase', rot:'Alinhar pela base', k:'A,B', fn:() => alinha('base'), off:menos(2) },
+      { ic:'alCh', rot:'Centralizar no mesmo X', k:'A,C', fn:() => alinha('ch'), off:menos(2) },
+      { ic:'alCv', rot:'Centralizar no mesmo Y', k:'A,E', fn:() => alinha('cv'), off:menos(2) },
+      { sep:true },
+      { ic:'diH', rot:'Distribuir na horizontal', k:'A,D', fn:() => alinha('dh'), off:menos(3) },
+      { ic:'diV', rot:'Distribuir na vertical', k:'A,S', fn:() => alinha('dv'), off:menos(3) },
+    ], true);
+    sep();
+    abGrupo([{ ic:'pad', rot:'Pad', k:'P,P', fn:() => ferramenta('pad'), tool:'pad' }]);
+    abGrupo([
+      { ic:'linha', rot:'Linha', k:'P,L', fn:() => ferramenta('linha'), tool:'linha' },
+      { ic:'ret', rot:'Retângulo', k:'P,R', fn:() => ferramenta('ret'), tool:'ret' },
+    ], true);
+    abGrupo([
+      { ic:'arco', rot:'Arco (pelo centro)', k:'P,A', fn:() => ferramenta('arco'), tool:'arco' },
+      { ic:'circulo', rot:'Círculo', k:'P,U', fn:() => ferramenta('circulo'), tool:'circulo' },
+    ], true);
+    sep();
+    abGrupo([
+      { ic:'lib3d', rot:'Corpo 3D: modelo STEP da biblioteca…', k:'P,B', fn:() => escolheModelo() },
+      { ic:'pasta', rot:'Corpo 3D: STEP do computador…', fn:() => poeStep() },
+      { ic:'extrude', rot:'Corpo 3D extrudado', k:'P,E', fn:() => poeCorpo('extruded') },
+      { ic:'cyl', rot:'Corpo 3D cilíndrico', fn:() => poeCorpo('cylinder') },
+      { ic:'esfera', rot:'Corpo 3D esférico', fn:() => poeCorpo('sphere') },
+    ]);
+    sep();
+    abGrupo([{ ic:'mede', rot:'Medir distância', k:'Ctrl+M', fn:() => ferramenta('mede'), tool:'mede' }]);
+    abGrupo([
+      { ic:'ref', rot:'Origem no pino 1', k:'E,F,P', fn:() => referencia('pino1') },
+      { ic:'ref', rot:'Origem no centro', k:'E,F,C', fn:() => referencia('centro') },
+      { ic:'ref', rot:'Origem num ponto (clique)', k:'E,F,L', fn:() => ferramenta('refloc'), tool:'refloc' },
+    ]);
+    abGrupo([{ ic:'wiz', rot:'Assistente de footprint (IPC)…', k:'T,W', fn:() => assistente() }]);
+    sep();
+    abGrupo([{ ic:'fit', rot:'Enquadrar', k:'F', fn:() => enquadra() }]);
+    marcaAB();
+  }
+  function marcaAB(){
+    for (const g of abGrupos) {
+      const i = g.itens.findIndex(it => it.tool && it.tool === E.tool);
+      if (i >= 0 && g.lembra && g.ult !== i) { g.ult = i; g.pinta(); }
+      g.b.classList.toggle('on', i >= 0);
+      g.b.setAttribute('aria-pressed', String(i >= 0));
+    }
+  }
+  function selec(m){
+    if (E.tool !== 'sel') ferramenta('sel');
+    const todos = [...E.fp.pads, ...E.fp.silk, ...E.fp.bodies];
+    E.sel = new Set(m === 'tudo' ? todos : m === 'pads' ? E.fp.pads : m === 'silk' ? E.fp.silk : m === 'corpos' ? E.fp.bodies
+      : m === 'inverte' ? todos.filter(x => !E.sel.has(x)) : []);
+    props(); pede();
+  }
+  function caixaDe(itens){
+    const xs = [], ys = [];
+    for (const x of itens) for (const p of contornoDe(x)) { xs.push(p[0]); ys.push(p[1]); }
+    return xs.length ? { x1:Math.min(...xs), y1:Math.min(...ys), x2:Math.max(...xs), y2:Math.max(...ys) } : null;
+  }
+  function giraItens(itens, ang, cx, cy){
+    const c = Math.cos(ang * RAD), s_ = Math.sin(ang * RAD);
+    const g = (x, y) => [r4(cx + (x - cx) * c - (y - cy) * s_), r4(cy + (x - cx) * s_ + (y - cy) * c)];
+    const na = v => r4(((((v || 0) + ang) % 360) + 360) % 360);
+    for (const x of itens) {
+      const t = tipo(x);
+      if (t === 'pad') { [x.x, x.y] = g(x.x, x.y); x.rot = na(x.rot); }
+      else if (t === 'silk') {
+        if (x.kind === 'arc') { const d = x.ea - x.sa; [x.cx, x.cy] = g(x.cx, x.cy); x.sa = na(x.sa); x.ea = r4(x.sa + d); }
+        else { [x.x1, x.y1] = g(x.x1, x.y1); [x.x2, x.y2] = g(x.x2, x.y2); }
+      } else if (t === 'body') {
+        delete x.outline;
+        if (x.kind === 'extruded') x.pts = x.pts.map(p => g(p[0], p[1]));
+        else { x.raw = x.raw || {}; [x.raw.x2d, x.raw.y2d] = g(x.raw.x2d || 0, x.raw.y2d || 0); x.raw.rotz = na(x.raw.rotz); if (x.kind === 'step') medeStep(x); }
+      }
+    }
+  }
+  async function giraPor(){
+    if (!E.sel.size) return;
+    const v = await formulario('Girar a seleção', [{ k:'a', rot:'Ângulo (graus, anti-horário)', v:'45' }], 'Girar');
+    if (!v) return;
+    const a = parseFloat(String(v.a).replace(',', '.'));
+    if (!isFinite(a) || !a) return;
+    const b = caixaDe([...E.sel]);
+    antes(); giraItens([...E.sel], a, snap((b.x1 + b.x2) / 2), snap((b.y1 + b.y2) / 2)); mudou();
+  }
+  async function moverPor(){
+    if (!E.sel.size) { toast('selecione o que vai mover', 'info'); return; }
+    const v = await formulario('Mover a seleção por X, Y', [{ k:'dx', rot:'X (' + E.unid + ')', v:'0' }, { k:'dy', rot:'Y (' + E.unid + ')', v:'0' }], 'Mover');
+    if (!v) return;
+    const dx = le(v.dx), dy = le(v.dy);
+    if (!isNum(dx) || !isNum(dy) || (!dx && !dy)) return;
+    antes(); for (const x of E.sel) move(x, dx, dy); mudou();
+  }
+  function espelha(eixo){
+    if (!E.sel.size) return;
+    const itens = [...E.sel];
+    if (itens.some(x => tipo(x) === 'body' && x.kind !== 'extruded')) toast('modelo 3D não espelha: o corpo fica como está (gire-o em Properties)', 'warn', 3500);
+    antes();
+    const b = caixaDe(itens), cx = (b.x1 + b.x2) / 2, cy = (b.y1 + b.y2) / 2;
+    const fx = v => r4(2 * cx - v), fy = v => r4(2 * cy - v), n360 = v => r4(((v % 360) + 360) % 360);
+    for (const x of itens) {
+      const t = tipo(x);
+      if (t === 'pad') { if (eixo === 'x') x.x = fx(x.x); else x.y = fy(x.y); x.rot = n360(-(x.rot || 0)); }
+      else if (t === 'silk') {
+        if (x.kind === 'arc') { const sa = x.sa, ea = x.ea; if (eixo === 'x') { x.cx = fx(x.cx); x.sa = n360(180 - ea); } else { x.cy = fy(x.cy); x.sa = n360(-ea); } x.ea = r4(x.sa + (ea - sa)); }
+        else if (eixo === 'x') { x.x1 = fx(x.x1); x.x2 = fx(x.x2); } else { x.y1 = fy(x.y1); x.y2 = fy(x.y2); }
+      } else if (t === 'body' && x.kind === 'extruded') x.pts = x.pts.map(p => eixo === 'x' ? [fx(p[0]), p[1]] : [p[0], fy(p[1])]);
+    }
+    mudou();
+  }
+  function alinha(m){
+    const itens = [...E.sel], dist = m === 'dh' || m === 'dv';
+    if (itens.length < (dist ? 3 : 2)) { toast(dist ? 'distribuir pede 3 objetos ou mais' : 'alinhar pede 2 objetos ou mais', 'info'); return; }
+    const os = itens.map(x => ({ x, b:caixaDe([x]) })).filter(q => q.b), T = caixaDe(itens);
+    antes();
+    if (dist) {
+      const h = m === 'dh', c = q => h ? (q.b.x1 + q.b.x2) / 2 : (q.b.y1 + q.b.y2) / 2;
+      os.sort((a, b) => c(a) - c(b));
+      const c0 = c(os[0]), passo = (c(os[os.length - 1]) - c0) / (os.length - 1);
+      os.forEach((q, i) => { const d = r4(c0 + passo * i - c(q)); if (d) move(q.x, h ? d : 0, h ? 0 : d); });
+    } else for (const q of os) {
+      const b = q.b;
+      const d = m === 'esq' ? [T.x1 - b.x1, 0] : m === 'dir' ? [T.x2 - b.x2, 0] : m === 'topo' ? [0, T.y2 - b.y2] : m === 'base' ? [0, T.y1 - b.y1]
+              : m === 'ch' ? [(T.x1 + T.x2) / 2 - (b.x1 + b.x2) / 2, 0] : [0, (T.y1 + T.y2) / 2 - (b.y1 + b.y2) / 2];
+      if (d[0] || d[1]) move(q.x, r4(d[0]), r4(d[1]));
+    }
+    mudou();
+  }
+  /* Edit » Set Reference do Altium: a origem do footprint vai para o pino 1, o centro ou um ponto */
+  function referencia(m, pt){
+    let p = pt;
+    if (m === 'pino1') {
+      const q = E.fp.pads.find(x => String(x.name) === '1') || E.fp.pads[0];
+      if (!q) { toast('o footprint não tem pad', 'info'); return; }
+      p = [q.x, q.y];
+    } else if (m === 'centro') {
+      if (!E.fp.pads.length && !E.fp.silk.length) return;
+      const b = HF ? HF.bbox({ pads:E.fp.pads, silk:E.fp.silk }) : caixaDe([...E.fp.pads, ...E.fp.silk]);
+      if (!b) return;
+      p = [r4((b.x1 + b.x2) / 2), r4((b.y1 + b.y2) / 2)];
+    }
+    if (!p || (Math.abs(p[0]) < 1e-9 && Math.abs(p[1]) < 1e-9)) { toast('a origem já está aí', 'info'); return; }
+    antes();
+    for (const x of [...E.fp.pads, ...E.fp.silk, ...E.fp.bodies]) move(x, -p[0], -p[1]);
+    E.view.cx -= p[0]; E.view.cy -= p[1];
+    mudou();
+    toast('origem do footprint movida (Set Reference)', 'ok');
+  }
+
+  /* as janelas do editor */
+  function janela(titulo, largura, aoCancelar){
+    const vel = el('div', 'fpe-modal'), cx = el('div', 'fpe-modal-cx');
+    cx.style.width = largura + 'px';
+    const cab = el('div', 'fpe-modal-cab'), corpo = el('div', 'fpe-modal-corpo'), pe = el('div', 'fpe-modal-pe');
+    let aberta = true;
+    const fecha = ok => { if (!aberta) return; aberta = false; vel.remove(); if (!ok && aoCancelar) aoCancelar(); };
+    cab.append(el('b', null, titulo), bt('fpe-x', '✕', () => fecha(false), 'Fechar (Esc)'));
+    cx.append(cab, corpo, pe); vel.append(cx);
+    vel.addEventListener('pointerdown', ev => { if (ev.target === vel) fecha(false); });
+    vel.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Escape') { ev.preventDefault(); fecha(false); } });
+    (embutido ? document.body : fundo).append(vel);
+    return { corpo, pe, fecha, vel };
+  }
+  function formulario(titulo, campos, okTxt, aoMudar){
+    return new Promise(ok => {
+      const J = janela(titulo, 440, () => ok(null));
+      const g = el('div', 'grade'); J.corpo.append(g);
+      const val = () => { const o = {}; for (const c of campos) o[c.k] = c.v; return o; };
+      const confirma = () => { J.fecha(true); ok(val()); };
+      const monta = () => {
+        g.textContent = '';
+        let primeiro = null;
+        for (const c of campos) {
+          if (c.oculto && c.oculto(val())) continue;
+          let i;
+          if (c.opcoes) { i = el('select'); for (const [v, r] of c.opcoes) { const op = el('option', null, r); op.value = v; i.append(op); } }
+          else { i = el('input'); i.type = 'text'; }
+          i.value = c.v;
+          i.addEventListener('input', () => { c.v = i.value; });
+          i.addEventListener('change', () => { c.v = i.value; if (aoMudar && aoMudar(c.k, val(), campos)) monta(); });
+          i.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); c.v = i.value; confirma(); } });
+          const lb = el('label', null, c.rot); if (c.dica) lb.title = c.dica;
+          g.append(lb, i);
+          if (!primeiro && !c.opcoes) primeiro = i;
+        }
+        if (primeiro) setTimeout(() => { primeiro.focus(); primeiro.select(); }, 20);
+      };
+      monta();
+      J.pe.append(el('span', 'esp'), bt('fpe-b', 'Cancelar', () => J.fecha(false)), bt('fpe-b pri', okTxt || 'OK', confirma));
+    });
+  }
+
+  /* Place » 3D Body: o modelo STEP da PcbLib da casa (os 330 modelos dos footprints do Altium) ou um
+     ja usado no hub; "do computador" sobe um STEP novo. Com trocar, troca o modelo de um corpo. */
+  async function escolheModelo(trocar){
+    if (!L3) { stMsg.textContent = 'lendo os modelos 3D da PcbLib…'; await p3; stMsg.textContent = ''; }
+    const usos = new Map();
+    const conta = fps => { for (const n of Object.keys(fps || {})) for (const b of (((fps[n] || {}).bodies) || [])) if (b && b.kind === 'step' && b.model) { const u = usos.get(b.model) || []; if (u.indexOf(n) < 0) u.push(n); usos.set(b.model, u); } };
+    conta(L3 && L3.footprints);
+    const fh = {}; for (const f of (lib.footprints || [])) if (f) fh[f.name] = f; conta(fh);
+    const todos = new Map();
+    for (const src of [L3 && L3.models, lib.models]) for (const id of Object.keys(src || {})) { const m = src[id]; if (m && m.file) todos.set(id, m); }
+    const nomeAtual = E.fp ? E.fp.name : '';
+    const itens = [...todos].map(([id, m]) => ({ id, m, usos:usos.get(id) || [] }))
+      .sort((a, b) => ((b.usos.indexOf(nomeAtual) >= 0) - (a.usos.indexOf(nomeAtual) >= 0)) || String(a.m.name || '').localeCompare(String(b.m.name || '')));
+    const J = janela(trocar ? 'Trocar o modelo 3D' : 'Place 3D Body — modelo STEP', 640);
+    const q = el('input'); q.type = 'text'; q.placeholder = 'filtrar pelo modelo ou pelo footprint que o usa (ex.: SOT-23, 0805, TO-220)';
+    const lst = el('div', 'lst');
+    const nota = el('div', 'nota');
+    J.corpo.append(q, lst, nota);
+    let sel = null;
+    const tam = b => !b ? '' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+    function pinta(){
+      const t = q.value.trim().toLowerCase();
+      const f = itens.filter(it => !t || String(it.m.name || '').toLowerCase().indexOf(t) >= 0 || it.usos.some(u => u.toLowerCase().indexOf(t) >= 0));
+      lst.textContent = '';
+      for (const it of f.slice(0, 300)) {
+        const b = el('button'); b.type = 'button';
+        if (sel === it) b.classList.add('on');
+        b.append(el('span', 'n', it.m.name || it.id), el('span', 't', tam(it.m.bytes)),
+                 el('span', 'u', it.usos.length ? 'em ' + it.usos.slice(0, 6).join(', ') + (it.usos.length > 6 ? ' e mais ' + (it.usos.length - 6) : '') : 'nenhum footprint usa'));
+        b.addEventListener('click', () => { sel = it; for (const x of lst.children) x.classList.toggle('on', x === b); });
+        b.addEventListener('dblclick', () => { sel = it; usa(); });
+        lst.append(b);
+      }
+      nota.textContent = itens.length ? (f.length + ' de ' + itens.length + ' modelos' + (f.length > 300 ? ' (mostrando 300: refine o filtro)' : '') + ' · da PcbLib da casa e da biblioteca do hub')
+        : 'Nenhum modelo 3D disponível (a PcbLib não foi lida). Use "STEP do computador…".';
+    }
+    const usa = () => { if (!sel) { toast('escolha um modelo na lista', 'info'); return; } const it = sel; J.fecha(true); prendeModelo(it, trocar); };
+    q.addEventListener('input', pinta);
+    q.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); if (!sel && lst.firstChild) lst.firstChild.click(); usa(); } });
+    J.pe.append(bt('fpe-b', 'STEP do computador…', () => { J.fecha(true); poeStep(); }), el('span', 'esp'),
+                bt('fpe-b', 'Cancelar', () => J.fecha(false)), bt('fpe-b pri', trocar ? 'Trocar' : 'Pôr no footprint', usa));
+    pinta();
+    setTimeout(() => q.focus(), 20);
+  }
+  async function prendeModelo(it, trocar){
+    antes();
+    /* a rotacao com que o footprint de origem usa o modelo (o STEP do fabricante raramente vem
+       deitado do jeito da placa); o encaixe acerta X, Y e Z depois */
+    let base = null;
+    for (const n of it.usos) {
+      const fs_ = (L3 && temProp(L3.footprints, n) ? L3.footprints[n].bodies : null) || ((HF && HF.acha(lib, n)) || {}).bodies || [];
+      base = fs_.find(b => b && b.kind === 'step' && b.model === it.id && b.raw) || null;
+      if (base) break;
+    }
+    let corpo = trocar && E.fp.bodies.indexOf(trocar) >= 0 ? trocar : null;
+    const rot = base ? { rotx:base.raw.rotx || 0, roty:base.raw.roty || 0, rotz:base.raw.rotz || 0 } : { rotx:0, roty:0, rotz:0 };
+    if (corpo) {
+      corpo.kind = 'step'; corpo.model = it.id; corpo.name = it.m.name || ''; delete corpo.outline; delete corpo.matrix;
+      corpo.raw = Object.assign({}, corpo.raw || {}, rot);
+    } else {
+      const c = centroPads();
+      corpo = { kind:'step', model:it.id, name:it.m.name || '', side:'top', raw:Object.assign({ x2d:c.x, y2d:c.y, rot2d:0, dz:0 }, rot), color:'#9a9a9a', opacity:1 };
+      E.fp.bodies.push(corpo);
+    }
+    E.sel = new Set([corpo]);
+    stMsg.textContent = 'lendo o STEP…';
+    await medeStep(corpo, null, true);
+    stMsg.textContent = '';
+    mudou();
+    toast('modelo ' + (it.m.name || '') + ' no footprint — confira a rotação em Properties', 'ok', 3500);
+  }
+
+  /* Tools » Footprint Wizard: o pacote inteiro dos parametros (hub-fppacote.js) */
+  async function assistente(){
+    const PK = root.HubFpPacote;
+    if (!PK) { toast('o assistente (hub-fppacote.js) não carregou nesta página', 'warn'); return; }
+    if (!(await podeSair())) return;
+    const D = (t) => PK.padrao(t);
+    const mm = v => mostra(v);
+    const campos = [
+      { k:'tipo', rot:'Pacote', v:'soic', opcoes:Object.keys(PK.TIPOS).map(t => [t, PK.TIPOS[t].rot]) },
+      { k:'nome', rot:'Nome do footprint', v:PK.nome('soic', {}) },
+      { k:'n', rot:'Pinos', v:'8' },
+      { k:'fil', rot:'Fileiras (1 ou 2)', v:'1', oculto:o => o.tipo !== 'header' },
+      { k:'passo', rot:'Passo entre pinos (' + E.unid + ')', v:'', dica:'chip: de centro a centro dos 2 pads' },
+      { k:'span', rot:'Entre fileiras, centro a centro (' + E.unid + ')', v:'', oculto:o => o.tipo === 'chip' || o.tipo === 'header' },
+      { k:'padX', rot:'Pad: comprimento (' + E.unid + ')', v:'', dica:'no sentido que sai do corpo' },
+      { k:'padY', rot:'Pad: largura (' + E.unid + ')', v:'', dica:'no sentido da fileira' },
+      { k:'furo', rot:'Furo (' + E.unid + ')', v:'', oculto:o => o.tipo !== 'dip' && o.tipo !== 'header' },
+      { k:'cx', rot:'Corpo: comprimento (' + E.unid + ')', v:'', oculto:o => o.tipo === 'header' },
+      { k:'cy', rot:'Corpo: largura (' + E.unid + ')', v:'', oculto:o => o.tipo === 'header' },
+      { k:'alt', rot:'Corpo: altura do 3D (' + E.unid + ')', v:'' },
+    ];
+    const enche = t => { const d = D(t); for (const c of campos) if (c.k !== 'tipo' && c.k !== 'nome') c.v = (c.k === 'n' || c.k === 'fil') ? String(d[c.k]) : mm(d[c.k]); };
+    const lidos = o => { const P = {}; for (const k of ['passo', 'span', 'padX', 'padY', 'furo', 'cx', 'cy', 'alt']) P[k] = le(o[k]); P.n = parseInt(o.n, 10); P.fil = parseInt(o.fil, 10); return P; };
+    enche('soic');
+    let nomeAuto = true;
+    const v = await formulario('Assistente de footprint', campos, 'Criar o footprint', (k, o) => {
+      if (k === 'tipo') { enche(o.tipo); campos[1].v = PK.nome(o.tipo, {}); nomeAuto = true; return true; }
+      if (k === 'nome') { nomeAuto = false; return false; }
+      if (nomeAuto) { try { campos[1].v = PK.nome(o.tipo, lidos(o)); return true; } catch (e) { return false; } }
+      return false;
+    });
+    if (!v) return;
+    let fp;
+    try { fp = PK.gera(v.tipo, lidos(v), String(v.nome || '').trim() || null); }
+    catch (e) { const d = dlg(); if (d) d.alert(String(e && e.message || e), { title:'Assistente de footprint' }); return; }
+    if (existe(fp.name)) { toast('já existe um footprint "' + fp.name + '": mude o nome', 'warn', 3500); return; }
+    carregaFp(null, fp);
+    E.fp.name = fp.name; E.nome0 = fp.name; E.sujo = true; E.vazio = false;
+    titulo(); props(); status(); enquadra();
+    toast('footprint ' + fp.name + ' criado — confira e salve (Ctrl+S)', 'ok', 3500);
+  }
+
   /* ---------- comeco ---------- */
+  montaAB(); vp.append(ab);
   montaBarra(); montaAbas();
   b2.classList.add('on'); b2.setAttribute('aria-pressed', 'true'); b3.setAttribute('aria-pressed', 'false');
   carregaFp(o.nome || (o.fp && o.fp.name) || null, o.fp || null);
   mede(); enquadra();
+  p3.then(() => {
+    if (!L3) return;
+    listaChave = ''; montaLista();
+    if (E.fp && !E.deHub && !E.sujo && !E.fp.bodies.length && acharAlt(E.fp.name) && temCorpoAlt(E.fp.name)) {
+      E.fp.bodies = corposAlt(E.fp.name);
+      for (const b of E.fp.bodies) if (b.kind === 'step') medeStep(b);
+      props(); status(); pede(); if (E.modo === '3d') cena3d();
+    }
+  });
   setTimeout(() => cv.focus(), 30);
   if (o.modo3d) modo('3d');
   if (typeof o.aoMontar === 'function') { try { o.aoMontar(ctrl); } catch (e) { console.warn('aoMontar', e); } }
   /* gancho de teste (o smoke por CDP), como o __hubPcb da vista PCB: nao e contrato */
   root.HubFpEditor.atual = { E, recebeStep, modo, salvar, fechar, ferramenta, carregaFp:n => carregaFp(n),
+    escolheModelo, prendeModelo, assistente, alinha, espelha, referencia, selec, giraItens, lib3d:() => L3, ab,
     estado:() => ({ nome:E.fp.name, sujo:E.sujo, modo:E.modo, tool:E.tool, pads:E.fp.pads.length, silk:E.fp.silk.length,
                     corpos:E.fp.bodies.map(b => ({ kind:b.kind, raw:b.raw, model:b.model, bb:E.bbStep.get(b) || null })),
                     v3:E.v3 ? E.v3.estado() : null }) };

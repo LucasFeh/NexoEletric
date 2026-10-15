@@ -406,6 +406,8 @@ class Remota:
             pass
         elif caminho.lower().startswith('/libs/3d-hub/') and metodo in ('GET', 'HEAD'):
             pass
+        elif (caminho.lower() == '/libs/pcblib-3d.js' or caminho.lower().startswith('/libs/3d/')) and metodo in ('GET', 'HEAD'):
+            pass                                # os 3D da PcbLib da casa: o servidor os tira dela
         elif caminho.lower() == '/libs/' + FP_HUB_NOME and metodo in ('GET', 'HEAD'):
             if not self._fora_confirmado():
                 try:
@@ -525,6 +527,8 @@ class Remota:
                 return None
             return _json({'ok': False, 'error': CORTOU % (self.url, _motivo(e))}, 504)
         c.close()
+        if le and r.status == 404 and (caminho.lower() == '/libs/pcblib-3d.js' or caminho.lower().startswith('/libs/3d/')):
+            return None                         # servidor sem os 3D (mais velho que o app): a PcbLib desta maquina
         if (r.status in (404, 405) and caminho.startswith('/api/symbols/') and not stream
                 and 'json' not in tipo.lower()):
             # 404 em HTML e o do Flask para rota que nao existe: o servidor e mais velho que o
