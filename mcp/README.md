@@ -61,13 +61,13 @@ node mcp/eletrichub-mcp.js --root <pasta> --http 8765
 claude mcp add --transport http eletrichub http://127.0.0.1:8765/mcp
 ```
 
-## Ferramentas (67, por grupo)
+## Ferramentas (68, por grupo)
 
 `list_commands` lista tudo com descrição; cada ferramenta diz na descrição o fluxo de uso.
 
 | grupo | ferramentas |
 |---|---|
-| projeto | `projeto_listar`, `projeto_resumo`, `projeto_ler_arquivo`, `projeto_criar` (pasta + schematic.js; com `placa` cria o board.js mestre pelo `hub-pcbnova.js` e o rules.js da casa), `projeto_desfazer` |
+| projeto | `projeto_listar`, `projeto_resumo`, `projeto_ler_arquivo`, `projeto_abrir_altium` (o .PrjPcb/.SchDoc do Altium vira o schematic.js, sem o Altium: `tools/schdoc/schdoc2sch.py`), `projeto_criar` (pasta + schematic.js; com `placa` cria o board.js mestre pelo `hub-pcbnova.js` e o rules.js da casa), `projeto_desfazer` |
 | esquema | `sch_ler`, `sch_componentes` (ponta quente dos pinos + net), `sch_nets`, `sch_adicionar` (ref "R?" = próximo livre, footprint do símbolo), `sch_editar`, `sch_apagar`, `sch_ligar` ("R1.2" → "C1.1"), `sch_validar`, `sch_buscar_simbolo`, `sch_simbolo`, `sch_buscar_footprint`, `sch_template` (`hub-schtemplate.js`) |
 | biblioteca | `almox_buscar` (estoque, local, Odoo; devolve o `comp` pronto para `sch_adicionar`) |
 | footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |

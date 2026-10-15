@@ -315,6 +315,92 @@ def api_fp3d():
     return {'ok': True, 'id': sha, 'file': '3d-hub/' + sha + '.step', 'name': nome, 'bytes': len(dados)}
 
 
+# ── abrir documento do Altium (.SchDoc / .PrjPcb) direto no hub ──
+# O hub manda os arquivos (base64 no JSON: o .PrjPcb e as folhas, soltos) ou, so do proprio PC,
+# os caminhos no disco; tools/schdoc/schdoc2sch.py grava Projects/<projeto>/schematic.js no
+# formato do ExportProject.pas. O .SchDoc so e LIDO. Projeto que ja tem schematic.js so com
+# "substituir" (e o anterior fica em schematic.js.bak-<data>).
+ALTIUM_MAX = 200 * 1024 * 1024
+ALTIUM_EXT = ('.schdoc', '.prjpcb')
+_NOME_RUIM = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
+
+
+def _nome_projeto_ok(nome):
+    if not isinstance(nome, str) or not nome.strip() or nome != nome.strip() or nome.endswith('.') or nome.startswith('.'):
+        return False
+    if len(nome) > 120 or _NOME_RUIM.search(nome) or '":' in nome:
+        return False
+    return not re.match(r'^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$', nome, re.I)
+
+
+@app.route('/api/altium/abrir', methods=['POST'])
+def api_altium_abrir():
+    import tempfile
+    request.max_content_length = ALTIUM_MAX * 2
+    try:
+        data = request.get_json(silent=True) or {}
+    except RequestEntityTooLarge:
+        return {'ok': False, 'error': 'arquivos grandes demais'}, 413
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'schdoc'))
+    import schdoc2sch as SD
+    tmp = None
+    try:
+        entradas = []
+        if data.get('caminhos'):
+            if not _is_local(request):
+                return {'ok': False, 'error': 'caminho no disco so do proprio PC; mande os arquivos'}, 403
+            for c in data['caminhos']:
+                if not isinstance(c, str) or not c.lower().endswith(ALTIUM_EXT) or not os.path.isfile(c):
+                    return {'ok': False, 'error': 'arquivo invalido: %s' % c}, 400
+                entradas.append(c)
+        else:
+            tmp = tempfile.mkdtemp(prefix='altium-abrir-')
+            total = 0
+            for a in data.get('arquivos') or []:
+                nome = os.path.basename(str(a.get('nome') or '').replace('\\', '/'))
+                if not nome.lower().endswith(ALTIUM_EXT) or nome.startswith('.'):
+                    return {'ok': False, 'error': 'so .SchDoc e .PrjPcb: %s' % nome}, 400
+                try:
+                    dados = base64.b64decode(a.get('b64') or '', validate=True)
+                except (ValueError, TypeError):
+                    return {'ok': False, 'error': 'arquivo corrompido no envio: %s' % nome}, 400
+                total += len(dados)
+                if total > ALTIUM_MAX:
+                    return {'ok': False, 'error': 'arquivos grandes demais'}, 413
+                with open(os.path.join(tmp, nome), 'wb') as f:
+                    f.write(dados)
+                entradas.append(os.path.join(tmp, nome))
+        if not entradas:
+            return {'ok': False, 'error': 'nenhum arquivo'}, 400
+        # o .PrjPcb manda na ordem das folhas; sem ele, as folhas na ordem em que vieram
+        prj = [e for e in entradas if e.lower().endswith('.prjpcb')]
+        folhas = [e for e in entradas if e.lower().endswith('.schdoc')]
+        usar = prj[:1] if prj else folhas
+        projeto = data.get('projeto') or os.path.splitext(os.path.basename(usar[0]))[0]
+        if not _nome_projeto_ok(projeto):
+            return {'ok': False, 'error': 'nome de projeto invalido: %s' % projeto}, 400
+        avisos = []
+        try:
+            texto, resumo = SD.converte(usar, projeto, True, avisos)
+        except SD.SchDocErro as e:
+            return {'ok': False, 'error': str(e)}, 422
+        pasta = os.path.join(ROOT, 'Projects', projeto)
+        saida = os.path.join(pasta, 'schematic.js')
+        if os.path.exists(saida) and not data.get('substituir'):
+            return {'ok': False, 'existe': True, 'projeto': projeto,
+                    'error': 'o projeto "%s" ja tem esquema' % projeto}, 409
+        try:
+            SD.grava(saida, texto, forcar=True, permite_rede=True)
+        except OSError as e:
+            return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
+        resumo['avisos'] = avisos
+        resumo['faltam'] = [os.path.basename(x) for x in resumo.get('faltam') or []]
+        return {'ok': True, 'projeto': projeto, 'resumo': resumo}
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 LASER_DIR = 'Laser'
 
 
