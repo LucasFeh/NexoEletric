@@ -3,6 +3,13 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.3.2 — 2026-10-15
+
+- **As quatro vistas da Biblioteca no molde da Símbolos.** Geral, Componentes, Footprints e Símbolos têm as sub-abas no alto, a lista com a busca à esquerda, a área de trabalho no meio e o painel (Ferramentas / ficha) à direita, com as mesmas larguras.
+- **Footprints virou o editor de footprint**, igual ao editor de símbolos: lista com miniatura e "+ Novo footprint" à esquerda; editor com 2D/3D, desfazer/refazer, camadas, unidade e grade no meio; Ferramentas em ícones (pad, linha, arco, STEP, extrudado, cilindro…), propriedades e Salvar / Salvar como / Duplicar / Apagar à direita.
+- **O footprint se vincula pela aba Componentes**, como o símbolo: a faixa de baixo ganhou **Footprints**, com **Aplicar footprint ao componente** e **Desvincular footprint** (duplo clique aplica; botão direito abre no editor).
+- A vista Geral volta a desenhar o símbolo e o footprint depois de mexer nas outras vistas.
+
 ## 1.3.1 — 2026-10-14
 
 - **Criar e editar footprint na Biblioteca › Footprints**, no layout de sempre da aba. **Novo footprint…** e **Editar footprint** ficam na fileira de ações (o botão direito num footprint da galeria também edita). O editor abre no lugar da galeria, com o mesmo desenho da vista de footprint do hub: pads, serigrafia, arco e o corpo 3D (STEP, extrudado, cilindro), com 2D/3D e as teclas do Altium (P,P, P,L, P,A, P,B). **Aplicar a <componente>** salva e vincula o footprint ao componente escolhido; **← Galeria** volta.
