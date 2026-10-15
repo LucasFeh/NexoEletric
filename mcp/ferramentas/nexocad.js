@@ -217,9 +217,10 @@ module.exports = {
           const { board, eb } = ctx.placa(p);
           const c = (eb.components || []).find(x => x && x.ref === a.ref);
           if (!c) throw new ErroMcp(`${a.ref} não está na placa de ${p.nome}`);
-          const { corpos } = await corposDaPlaca(ctx, p, eb, board);
+          const { corpos, esp } = await corposDaPlaca(ctx, p, eb, board);
           const b = corpos.find(x => x && x.owner === c.ref && x.kind === 'step' && (x.modelUrl || x.nexo));
           const geometria = HN.geometriaDeComp(c);
+          if (b && !b.nexo && geometria) geometria.corpo = ctx.exige('hub-pcb3d-modelo.js', 'HubPcb3dModelo').matrizLocal(b.matrix, c, esp);
           if (b && b.nexo) alvo = { id: b.nexo };
           else if (b) alvo = { chave: b.modeloChave, url: '/' + b.modelUrl, nome: b.name || c.footprint + '.step', footprint: c.footprint || '', geometria };
           else if (a.novo) alvo = { novo: true, footprint: c.footprint || '', nome: c.footprint || c.ref, geometria };
@@ -229,15 +230,17 @@ module.exports = {
           const hub = HF ? HF.normaliza(JSON.parse(JSON.stringify(ctx.lib('pcblib-hub.js', 'pcblibHub') || {}))) : null;
           const alt = ctx.lib('pcblib.js', 'pcblib') || { footprints: [] };
           const fp = a.footprint ? ((HF && hub && HF.acha(hub, a.footprint)) || (alt.footprints || []).find(f => f && f.name === a.footprint) || null) : null;
-          let chave = a.chave || '', nome = '';
+          let chave = a.chave || '', nome = '', corpoFp = null;
           if (!chave && fp) {
             const b = (fp.bodies || []).find(x => x && x.kind === 'step' && x.model);
+            corpoFp = b || null;
             const L3 = b && !(hub && tem(hub.models, b.model)) ? await lib3d(ctx) : null;
             const m = b ? ((hub && tem(hub.models, b.model) && hub.models[b.model]) || (L3 && tem(L3.models, b.model) && L3.models[b.model]) || null) : null;
             if (m && m.file) { chave = m.file; nome = m.name || b.name || ''; }
             if (!m && L3 === null && b) throw new ErroMcp('o corpo do footprint é da PcbLib e os 3D dela só vêm com o hub no ar');
           }
           const geometria = fp ? HN.geometriaDe(fp) : undefined;
+          if (geometria && corpoFp && chave) geometria.corpo = ctx.exige('hub-pcb3d-modelo.js', 'HubPcb3dModelo').matrizCorpo(corpoFp.raw || {}, { side: corpoFp.side || 'top', thickness: 1.6 });
           const ja = chave ? (res.porChave(chave) || (/^nexo:/.test(chave) ? res.porId(chave.slice(5)) : null)) : null;
           if (ja) alvo = { id: ja.id };
           else if (chave) {

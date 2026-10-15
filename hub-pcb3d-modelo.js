@@ -63,6 +63,7 @@
        raw  {x2d, y2d, rot2d, rotx, roty, rotz, dz}
        comp {side|layer, thickness, orig?:{x,y,rot,layer}, eff?:{x,y,rot,layer}}: com orig e eff,
             ja aplica o deslocamento/giro/flip do componente
+     HubPcb3dModelo.matrizLocal(matriz, comp, esp) -> [16] a do corpo no referencial do footprint
      HubPcb3dModelo.placeholder(comp, eb, opcoes) -> corpo extrudado (placeholder:true)
      e para os testes: deltaComp, matPose, mul4, aplica, colMaior, ALTURAS
 
@@ -150,6 +151,14 @@ function matrizCorpo(raw, comp){
   let M = matCorpoBruta(raw || {}, lado, esp);
   if (comp.orig && comp.eff) M = mul4(deltaComp(comp.orig, comp.eff, esp), M);
   return colMaior(M);
+}
+
+/* API: a matriz do corpo no referencial LOCAL do footprint (origem dele, Z para cima, Z = 0 na face
+   de cima, vista de cima): desfaz a pose do componente. matriz = a final do corpo na placa
+   (coluna-maior, a do corpos()); comp = o componente efetivo. E o `geometria.corpo` do NexoCAD. */
+function matrizLocal(matriz, comp, esp){
+  const e = isNum(esp) ? esp : espDe(comp);
+  return colMaior(mul4(inversa(matPose(comp, e)), deColMaior(matriz)));
 }
 
 /* ---- extrudado ---- */
@@ -364,6 +373,6 @@ function corpos(eb, d3, opcoes){
   return out;
 }
 
-return { corpos, matrizCorpo, placeholder, deltaComp, matPose, mul4, aplica, colMaior, deColMaior,
+return { corpos, matrizCorpo, matrizLocal, placeholder, deltaComp, matPose, mul4, aplica, colMaior, deColMaior,
          ALTURAS, ESPESSURA_PADRAO, VERSAO };
 });

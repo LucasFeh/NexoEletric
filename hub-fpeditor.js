@@ -1334,6 +1334,8 @@ async function inicia(o, resolve){
     const m = modelo(c.model);
     if (!m || !m.file) { toast('o corpo não tem arquivo STEP', 'warn'); return; }
     const geometria = NX.geometriaDe(E.fp);
+    /* geometria.corpo: modelo (STEP) -> footprint, a matriz que o hub usa para este corpo */
+    if (geometria && root.HubPcb3dModelo) geometria.corpo = root.HubPcb3dModelo.matrizCorpo(c.raw || {}, { side:c.side || 'top', thickness:1.6 });
     if (m.nexo) return NX.editar({ id:m.nexo }, { toast });
     return NX.editar({ chave:m.file, url:'Libs/' + m.file, nome:m.name || c.name || (E.fp.name + '.step'), footprint:E.fp.name, geometria }, { toast });
   }

@@ -79,8 +79,12 @@ O índice é relido e alterado dentro da `.lock`.
 - Z sobe, a partir da face de cima da placa.
 - No NexoCAD (Y para cima, como no SW) a peça é modelada com o plano Superior como a placa.
   O NexoCAD gira na exportação: (x, y, z) do NexoCAD → (x, −z, y) no STEP.
-- Item importado de um STEP (`origem.step`) mantém o referencial original e fica com
-  `"orientacao":"z-up"`. Item modelado no NexoCAD fica com `"orientacao":"y-up"`.
+- Item importado de um STEP (`origem.step`, guardado sem mudança): o recurso Corpo STEP do NexoCAD gira o
+  arquivo (x, y, z) → (x, z, −y) ao abrir, e a exportação desfaz o giro. O referencial do STEP original se mantém
+  exatamente (ida e volta medida com a mesma caixa envolvente). Todo item fica com `"orientacao":"y-up"` (o .nexo).
+- Até o 1º salvamento no NexoCAD, o `modelo.step` de um item importado é o próprio arquivo original (com as cores).
+- Cores: o NexoCAD guarda as cores do STEP original como sondas e pinta cada face pela mais próxima (inclusive as
+  faces novas de cortes e furos). O STEP salvo leva cor por face (XCAF).
 - O STEP gravado na biblioteca está **sempre** em Z para cima.
 
 **Vínculo pelo footprint:** quando um item `Eletrônicos` lista um footprint em
@@ -111,7 +115,7 @@ O índice é relido e alterado dentro da `.lock`.
 | `biblioteca_listar` | `categoria?, texto?, limite?` | itens do índice |
 | `biblioteca_item` | `id` | o item, com caminhos absolutos |
 | `biblioteca_abrir` | `id` | abre o `modelo.nexo` numa aba. Salvar a aba (Ctrl+S) grava de volta na biblioteca: `.nexo` + `.step` + miniatura + `rev++` |
-| `biblioteca_editar_modelo` | `id?`, `chave?`, `step_path?` (arquivo local), `step_url?` (URL http local), `nome?`, `footprint?`, `categoria?` (padrão `Eletrônicos`), `novo?`, `geometria?` | acha o item cujo `substitui` contém a `chave`. Se não houver, cria um, importando o STEP: `origem.step`, `orientacao:"z-up"`, `substitui:[chave]`, `eletronico.footprints:[footprint]`. Sem STEP e com `novo:true`: cria um item **vazio** (`orientacao:"y-up"`, `eletronico.footprints:[footprint]`, `substitui:[chave]` se veio chave). Com `geometria`, desenha os pads como esboço de referência no plano Superior ao criar. Depois abre para edição. Devolve `{id, nome, criado, aberto}` |
+| `biblioteca_editar_modelo` | `id?`, `chave?`, `step_path?` (arquivo local), `step_url?` (URL http local), `nome?`, `footprint?`, `categoria?` (padrão `Eletrônicos`), `novo?`, `geometria?` | acha o item cujo `substitui` contém a `chave`. Se não houver, cria um, importando o STEP: `origem.step`, `substitui:[chave]`, `eletronico.footprints:[footprint]`. Sem STEP e com `novo:true`: cria um item **vazio** (`orientacao:"y-up"`, `eletronico.footprints:[footprint]`, `substitui:[chave]` se veio chave). Com `geometria`, desenha os pads como esboço de referência no plano Superior ao criar. Depois abre para edição. Devolve `{id, nome, criado, aberto}` |
 | `biblioteca_importar_step` | `path`, `nome?`, `categoria?` | cria um item a partir de um STEP |
 | `biblioteca_salvar_ativo` | `id?`, `nome?`, `categoria?`, `footprint?` | grava o documento ativo na biblioteca (novo item, ou por cima do `id`) |
 | `biblioteca_editar_item` | `id`, `nome?`, `categoria?`, `descricao?`, `tags?`, `eletronico?`, `substitui?` | metadados |
@@ -136,6 +140,12 @@ desta máquina.
 **`geometria`** (opcional, quando o footprint é conhecido): `{"pads":[{"nome":"1","x":0,"y":0,"w":1.2,"h":0.6,"rot":0,"forma":"rect|circle|oval|roundrect","furo":0}], "contorno":[[x,y],...]}`
 em mm, no referencial LOCAL do footprint (origem dele, Y para cima, vista de cima). `contorno` (opcional) é o
 polígono da caixa dos pads/serigrafia.
+- `corpo`: matriz 4x4 coluna-principal modelo → footprint (16 números). Leva o ponto do STEP (o referencial
+  do arquivo) ao referencial LOCAL do footprint (Z para cima, Z = 0 na face de cima da placa, vista de cima).
+  É a matriz que o hub usa para aquele corpo: T(x2d, y2d, dz) · Rz(rotz) · Ry(roty) · Rx(rotx), antes da
+  pose do componente (posição, giro, lado). Só vem ao editar um corpo STEP; falta em `novo:true` e no item
+  vinculado pelo footprint (vale a identidade). O NexoCAD desenha o esboço dos pads no referencial do modelo
+  com a inversa dela.
 
 **`POST /api/nexo/placa`:** cada `modelos[chave]` do pacote enviado traz também `url` (o caminho do STEP no hub). O
 servidor baixa cada um, grava em `modelos/` e tira o `url` do `placa.json`. Modelo que não baixou sai do pacote

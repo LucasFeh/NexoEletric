@@ -3954,13 +3954,15 @@ async function editar3dNexo(m){
   if (typeof HubNexo === 'undefined') return;
   const i = m ? model.comps.indexOf(m) : -1, ec = i >= 0 ? EB.components[i] : null;
   if (!ec) { HubDialog.toast('escolha um componente', 'info'); return; }
-  const { corpos } = await corpos3d();
+  const { corpos, esp } = await corpos3d();
   const meus = corpos.filter(b => b && b.owner === ec.ref);
   const sob = CORPO_MENU && CORPO_MENU.owner === ec.ref && CORPO_MENU.kind === 'step' ? CORPO_MENU : null;
   const b = sob || meus.find(x => x.kind === 'step' && (x.modelUrl || x.nexo)) || null;
   const geometria = HubNexo.geometriaDeComp(ec);
   const fp = ec.footprint || '';
   if (b && b.nexo) return HubNexo.editar({ id:b.nexo });
+  /* geometria.corpo: modelo (STEP) -> footprint, para o NexoCAD por o esboco dos pads no referencial do modelo */
+  if (b && b.modelUrl && geometria && Array.isArray(b.matrix) && typeof HubPcb3dModelo !== 'undefined') geometria.corpo = HubPcb3dModelo.matrizLocal(b.matrix, ec, esp);
   if (b && b.modelUrl) return HubNexo.editar({ chave:b.modeloChave || '', url:b.modelUrl, nome:b.name || (fp + '.step'), footprint:fp, geometria });
   return HubNexo.editar({ novo:true, footprint:fp, nome:fp || ec.ref, geometria });
 }

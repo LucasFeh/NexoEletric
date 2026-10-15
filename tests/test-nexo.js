@@ -84,6 +84,16 @@ assert.strictEqual(de(com, 'U3')[0].vinculo, undefined, 'corpo nexo: direto nao 
 /* substitui vale mais que o vinculo: R0805 tem os dois, fica o corpo substituido (nao o da identidade) */
 assert.notDeepStrictEqual(r1[0].matrix, M3.colMaior(M3.matPose(eb.components[0], 1.6)));
 
+/* geometria.corpo: a matriz do corpo na placa, sem a pose do componente, e a do footprint (raw), Top e Bottom */
+for (const [layer, rot] of [['Top', 90], ['Bottom', 30], ['Bottom', 180]]) {
+  const ebX = { components:[{ ref:'Q1', footprint:'R0805', x:3, y:-2, rot, layer, pads:[] }] };
+  const b = M3.corpos(ebX, null, { pcblib3dHub:hub3d, thickness:1.6 })[0];
+  const L = M3.matrizLocal(b.matrix, ebX.components[0], 1.6);
+  const esperado = M3.matrizCorpo(ident, { side:'top', thickness:1.6 });
+  L.forEach((v, i) => assert.ok(Math.abs(v - esperado[i]) < 1e-6, layer + ' ' + rot + ': matriz local [' + i + '] ' + v + ' != ' + esperado[i]));
+  assert.ok(Math.abs(L[14] - 0.1) < 1e-6, 'o dz do corpo fica na matriz local');
+}
+
 /* geometria: a do componente na placa volta ao referencial do footprint */
 const fp = { name:'SOT23', pads:[
   { name:'1', x:-0.95, y:-1.1, w:0.6, h:0.7, rot:0, shape:'rect', type:'smd' },
