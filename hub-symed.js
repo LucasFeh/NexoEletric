@@ -1310,7 +1310,7 @@ function build(rootEl) {
      esquerda mostra a FAMILIA, e a familia nao e o que se monta na placa. */
   UI.faixaTabs = el('div', 'symed-faixatabs');
   UI.faixaTabs.setAttribute('role', 'tablist');
-  [['simbolos', 'Símbolos'], ['componentes', 'Componentes'], ['footprints', 'Footprints']].forEach(([k, rot]) => {
+  [['componentes', 'Componentes'], ['simbolos', 'Símbolos'], ['footprints', 'Footprints']].forEach(([k, rot]) => {
     const b = el('button', null, rot); b.type = 'button'; b.dataset.faixa = k;
     b.setAttribute('role', 'tab');
     b.onclick = () => {
