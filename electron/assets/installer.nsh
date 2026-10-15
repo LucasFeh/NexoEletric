@@ -29,7 +29,10 @@
 ; _CHECK_APP_RUNNING padrao usa (allowOnlyOneInstallerInstance.nsh): declarado aqui.
 !include "getProcessInfo.nsh"
 Var pid
-Var nexoPastaAntiga
+; so no instalador: o desinstalador nunca o usa (variavel sem uso e erro no NSIS do electron-builder)
+!ifndef BUILD_UNINSTALLER
+  Var nexoPastaAntiga
+!endif
 
 !macro customInit
   ; a pasta do EletricHUB (ate a 1.8.x) vira a do NexoEletric
@@ -81,11 +84,13 @@ Var nexoPastaAntiga
   !insertmacro IS_POWERSHELL_AVAILABLE
   ; o EletricHUB.exe da pasta antiga (troca de nome): pede para fechar como o X da janela e
   ; espera ate 20 s; o que sobrar, o desinstalador antigo fecha do jeito dele
+  !ifndef BUILD_UNINSTALLER
   ${if} $nexoPastaAntiga != ""
   ${andIf} $IsPowerShellAvailable == 0
     nsExec::Exec `"$PowerShellPath" -C "$$p = @(Get-CimInstance -ClassName Win32_Process | ? {$$_.Path -and $$_.Path.StartsWith('$nexoPastaAntiga', 'CurrentCultureIgnoreCase') -and $$_.Name -eq 'EletricHUB.exe'}); $$p | % { taskkill.exe /PID $$_.ProcessId }; $$n = 0; while (($$n -lt 40) -and ($$p | ? { Get-Process -Id $$_.ProcessId -ErrorAction SilentlyContinue })) { Start-Sleep -Milliseconds 500; $$n++ }"`
     Pop $R2
   ${endIf}
+  !endif
   ${ifNot} ${isUpdated}
     !insertmacro FIND_PROCESS "${APP_EXECUTABLE_FILENAME}" $R0
     ${if} $R0 == 0
