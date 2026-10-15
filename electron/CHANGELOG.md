@@ -3,6 +3,10 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.3.3 — 2026-10-15
+
+- Biblioteca › Componentes: a faixa de baixo fica na ordem **Componentes | Símbolos | Footprints**.
+
 ## 1.3.2 — 2026-10-15
 
 - **As quatro vistas da Biblioteca no molde da Símbolos.** Geral, Componentes, Footprints e Símbolos têm as sub-abas no alto, a lista com a busca à esquerda, a área de trabalho no meio e o painel (Ferramentas / ficha) à direita, com as mesmas larguras.
