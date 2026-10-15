@@ -34,6 +34,18 @@
      vista.realView(true|false) -> bool          liga/desliga nesta vista (e grava a preferencia)
      HubPcb3dVista.preferido() / prefere(bool)   a preferencia da maquina (vale para a proxima vista)
    O modulo hub-pcb3d-real.js (ES) so e carregado quando o Real View e ligado.
+
+   EDICAO (editor de footprint: opcoes.edita = {pads() -> [[x,y]...], grade() -> mm,
+   aoArrastar(ref, {x,y,z}, info), aoMover(ref, {x,y,z})}):
+     vista.seleciona(ref|null)   o corpo selecionado ganha as setas do CAD: X vermelha, Y verde,
+                                 Z azul (arrastar a seta move so naquele eixo) e o quadrado
+                                 amarelo (arrastar livre no plano da placa); arrastar o proprio
+                                 corpo tambem move no plano
+     magnetismo                  as pernas do modelo (a fatia mais baixa da malha, agrupada em
+                                 pontos) puxam para o centro dos pads: vale o encaixe que poe MAIS
+                                 pernas em pads ao mesmo tempo; no Z, o corpo assenta na placa (o
+                                 ponto mais baixo em 0) ou a perna atravessa ate a face de baixo;
+                                 fora do alcance, o passo da grade. Shift solta o magnetismo.
 */
 (function (root) {
 'use strict';
@@ -133,6 +145,7 @@ async function cria(host, opcoes){
   function desenha(){
     agendado = 0; if (!vivo) return;
     posiciona();
+    if (gGiz.visible) gGiz.scale.setScalar(orb.dist * 0.11);
     ren.render(cena, cam);
   }
   function redimensiona(){
@@ -196,6 +209,12 @@ async function cria(host, opcoes){
   cv.addEventListener('contextmenu', ev => ev.preventDefault());
   cv.addEventListener('pointerdown', ev => {
     cv.focus(); mexeu = true;
+    if (ED && ev.button === 0 && !ev.ctrlKey && comecaArrasto(ev)) {
+      arr = null;
+      try { cv.setPointerCapture(ev.pointerId); } catch (e) { /* ok */ }
+      ev.preventDefault();
+      return;
+    }
     const girar = ev.button === 1 || (ev.button === 2 && ev.shiftKey) || (ev.button === 0 && !ev.ctrlKey);
     arr = { x:ev.clientX, y:ev.clientY, b:ev.button, girar, andou:false, id:ev.pointerId };
     if (girar) {
@@ -212,6 +231,7 @@ async function cria(host, opcoes){
     ev.preventDefault();
   });
   cv.addEventListener('pointermove', ev => {
+    if (drag) { arrasta(ev); return; }
     if (!arr) return;
     const dx = ev.clientX - arr.x, dy = ev.clientY - arr.y;
     if (!arr.andou && Math.hypot(dx, dy) < 3) return;
@@ -225,6 +245,7 @@ async function cria(host, opcoes){
     pede();
   });
   const solta = ev => {
+    if (drag) { terminaArrasto(ev); return; }
     if (!arr) return;
     const a = arr; arr = null;
     try { cv.releasePointerCapture(a.id); } catch (e) { /* ok */ }
@@ -452,13 +473,16 @@ async function cria(host, opcoes){
           materiaisDoModo(mg);
           if (realce.has(g.userData.ref)) acende(g, true);
           if (!mexeu) enquadra();   /* o modelo chegou e ninguem mexeu na camera: enquadra com ele */
+          if (g.userData.ref && g.userData.ref === selRef) poeGizmo();
           pede();
         }).catch(e => { est.falhas.push((b.owner || '?') + ': ' + (e && e.message || e)); });
         continue;
       }
       if (!m) continue;
-      m.userData.ref = b.owner || '';
-      gCorpos.add(m);
+      const sup = new T.Group();
+      sup.userData.ref = b.owner || '';
+      sup.add(m);
+      gCorpos.add(sup);
       est.corpos++;
     }
     materiaisDoModo(gCorpos);
@@ -472,6 +496,206 @@ async function cria(host, opcoes){
     });
   }
   function aplicaRealce(){ for (const c of gCorpos.children) acende(c, realce.has(c.userData.ref)); pede(); }
+
+  /* ---------- edicao: selecionar e mover um corpo (o gizmo de translacao dos CAD) ---------- */
+  const ED = o.edita || null;
+  let selRef = null, drag = null;
+  const gGiz = new T.Group(); gGiz.visible = false; gGiz.renderOrder = 999; cena.add(gGiz);
+  const gMarca = new T.Group(); cena.add(gMarca);
+  const EIXO = { x:new T.Vector3(1, 0, 0), y:new T.Vector3(0, 1, 0), z:new T.Vector3(0, 0, 1) };
+  const COR_EIXO = { x:0xe53935, y:0x43a047, z:0x1e88e5, xy:0xffc107 };
+  function matGiz(cor, op){ return new T.MeshBasicMaterial({ color:cor, depthTest:false, depthWrite:false, transparent:true, opacity:op || 0.95, toneMapped:false }); }
+  (function montaGizmo(){
+    for (const e of ['x', 'y', 'z']) {
+      const g = new T.Group(), m = matGiz(COR_EIXO[e]);
+      const haste = new T.Mesh(new T.CylinderGeometry(0.03, 0.03, 0.78, 12), m); haste.position.y = 0.39;
+      const ponta = new T.Mesh(new T.ConeGeometry(0.09, 0.24, 20), m); ponta.position.y = 0.9;
+      const pega = new T.Mesh(new T.CylinderGeometry(0.11, 0.11, 1.05, 8), new T.MeshBasicMaterial({ visible:false })); pega.position.y = 0.52;
+      g.add(haste, ponta, pega);
+      if (e === 'x') g.rotation.z = -Math.PI / 2; else if (e === 'z') g.rotation.x = Math.PI / 2;
+      g.traverse(x => { x.userData.eixo = e; x.renderOrder = 999; });
+      g.userData.mat = m;
+      gGiz.add(g);
+    }
+    const mq = matGiz(COR_EIXO.xy, 0.55);
+    const q = new T.Mesh(new T.PlaneGeometry(0.26, 0.26), mq); q.position.set(0.24, 0.24, 0);
+    mq.side = T.DoubleSide;
+    q.userData.eixo = 'xy'; q.renderOrder = 999; q.userData.mat = mq;
+    gGiz.add(q);
+  })();
+  const suporteDe = ref => gCorpos.children.find(c => c.userData.ref === ref) || null;
+  function poeGizmo(){
+    const h = selRef && suporteDe(selRef);
+    if (!ED || !h) { gGiz.visible = false; pede(); return; }
+    h.updateMatrixWorld(true);
+    const bb = new T.Box3().setFromObject(h);
+    if (bb.isEmpty()) { gGiz.visible = false; pede(); return; }
+    const c = bb.getCenter(new T.Vector3());
+    gGiz.position.set(c.x, c.y, c.z);   /* no meio do corpo: no topo a seta Z de peca alta saia da tela */
+    gGiz.visible = true;
+    pede();
+  }
+  function seleciona(ref){
+    selRef = ref || null;
+    realce = new Set(selRef ? [selRef] : []);
+    aplicaRealce();
+    poeGizmo();
+  }
+  function raioDe(ev){ posiciona(); ray.setFromCamera(ndc(ev), cam); return ray.ray.clone(); }
+  /* o ponto da reta do eixo mais perto do raio do mouse: o t do eixo */
+  function tNoEixo(r, O, u){
+    const w0 = new T.Vector3().subVectors(O, r.origin);
+    const b = u.dot(r.direction), c = r.direction.dot(r.direction), d = u.dot(w0), e = r.direction.dot(w0);
+    const den = c - b * b;
+    return Math.abs(den) < 1e-9 ? 0 : (b * e - c * d) / den;
+  }
+  function noPlanoZ(r, z){ const p = new T.Vector3(); return r.intersectPlane(new T.Plane(new T.Vector3(0, 0, 1), -z), p) ? p : null; }
+  /* as pernas do modelo: os triangulos da fatia mais baixa da malha (no mundo), unidos pelos
+     vertices que dividem -- a ponta de cada perna e um pedaco conexo da malha, entao pernas de
+     passo fino (QFP 0,5 mm) nao se fundem e a ponta larga de uma perna PTH nao se parte */
+  function pernasDe(h){
+    h.updateMatrixWorld(true);
+    let zmin = Infinity, zmax = -Infinity;
+    const v = new T.Vector3(), malhas = [];
+    h.traverse(x => {
+      if (!x.isMesh || !x.geometry || !x.geometry.attributes.position) return;
+      const P = x.geometry.attributes.position, W = new Float32Array(P.count * 3);
+      for (let i = 0; i < P.count; i++) {
+        v.fromBufferAttribute(P, i).applyMatrix4(x.matrixWorld);
+        W[i * 3] = v.x; W[i * 3 + 1] = v.y; W[i * 3 + 2] = v.z;
+        if (v.z < zmin) zmin = v.z; if (v.z > zmax) zmax = v.z;
+      }
+      malhas.push({ W, I:x.geometry.index ? x.geometry.index.array : null, n:P.count });
+    });
+    if (!malhas.length || !isFinite(zmin)) return { pts:[], zmin:0, zmax:0 };
+    const fatia = zmin + Math.max(0.12, (zmax - zmin) * 0.03);
+    const pai = new Map(), soma = new Map();
+    const chave = (W, k) => Math.round(W[k * 3] * 1e3) + ',' + Math.round(W[k * 3 + 1] * 1e3) + ',' + Math.round(W[k * 3 + 2] * 1e3);
+    const acha = a => { while (pai.get(a) !== a) { pai.set(a, pai.get(pai.get(a))); a = pai.get(a); } return a; };
+    const novo = (k, W, i) => { if (!pai.has(k)) { pai.set(k, k); soma.set(k, [W[i * 3], W[i * 3 + 1]]); } };
+    for (const m of malhas) {
+      const nt = m.I ? m.I.length / 3 : m.n / 3;
+      for (let t = 0; t < nt; t++) {
+        const a = m.I ? m.I[t * 3] : t * 3, b = m.I ? m.I[t * 3 + 1] : t * 3 + 1, c = m.I ? m.I[t * 3 + 2] : t * 3 + 2;
+        if (m.W[a * 3 + 2] > fatia || m.W[b * 3 + 2] > fatia || m.W[c * 3 + 2] > fatia) continue;
+        const ka = chave(m.W, a), kb = chave(m.W, b), kc = chave(m.W, c);
+        novo(ka, m.W, a); novo(kb, m.W, b); novo(kc, m.W, c);
+        const ra = acha(ka), rb = acha(kb), rc = acha(kc);
+        pai.set(rb, ra); pai.set(acha(rc), ra);
+      }
+    }
+    const grupos = new Map();
+    for (const k of pai.keys()) {
+      const r = acha(k), p = soma.get(k);
+      const g = grupos.get(r) || [0, 0, 0]; g[0] += p[0]; g[1] += p[1]; g[2]++; grupos.set(r, g);
+    }
+    const pts = [...grupos.values()].map(g => [g[0] / g[2], g[1] / g[2]]);
+    return { pts, zmin, zmax };
+  }
+  function comecaArrasto(ev){
+    if (!selRef) return false;
+    const r = raioDe(ev);
+    let eixo = null;
+    if (gGiz.visible) {
+      ray.ray.copy(r);
+      /* o quadrado do plano ganha das setas: a area de pegar da seta Z cobre o quadrado em muitas poses */
+      const hits = ray.intersectObject(gGiz, true).filter(h => h.object.userData.eixo);
+      const hq = hits.find(h => h.object.userData.eixo === 'xy');
+      if (hq || hits[0]) eixo = (hq || hits[0]).object.userData.eixo;
+    }
+    if (!eixo) {
+      /* arrastar o proprio corpo selecionado: no plano da placa */
+      ray.ray.copy(r);
+      const hit = ray.intersectObjects([gCorpos], true)[0];
+      let ob = hit && hit.object;
+      while (ob && !(ob.userData && ob.userData.ref)) ob = ob.parent;
+      if (!ob || ob.userData.ref !== selRef) return false;
+      eixo = 'xy';
+    }
+    const h = suporteDe(selRef);
+    if (!h) return false;
+    const O = gGiz.position.clone();
+    drag = { eixo, h, O, pos0:h.position.clone(), giz0:gGiz.position.clone(), d:new T.Vector3(), andou:false, x:ev.clientX, y:ev.clientY, pernas:pernasDe(h) };
+    if (eixo === 'xy') drag.p0 = noPlanoZ(r, O.z);
+    else drag.t0 = tNoEixo(r, O, EIXO[eixo]);
+    if (eixo === 'xy' && !drag.p0) { drag = null; return false; }
+    for (const g of gGiz.children) if (g.userData.mat) g.userData.mat.opacity = (g.userData.eixo === eixo ? 1 : 0.35);
+    pede();
+    return true;
+  }
+  /* o encaixe: pernas no centro dos pads (o que poe MAIS pernas em pads ao mesmo tempo) */
+  function encaixa(d, eixo){
+    const pads = ED.pads ? (ED.pads() || []) : [];
+    const pe = drag.pernas.pts;
+    if (!pads.length || !pe.length || eixo === 'z') return null;
+    const alcance = Math.max(0.35, orb.dist * 0.012), tol = 0.12;
+    let melhor = null;
+    for (const p of pe) {
+      const px = p[0] + d.x, py = p[1] + d.y;
+      for (const q of pads) {
+        let cx = q[0] - p[0], cy = q[1] - p[1];
+        if (eixo === 'x') cy = d.y; else if (eixo === 'y') cx = d.x;
+        if (Math.hypot(cx - d.x, cy - d.y) > alcance) continue;
+        let n = 0; const casados = [];
+        for (const r of pe) {
+          const rx = r[0] + cx, ry = r[1] + cy;
+          if (pads.some(t => Math.abs(t[0] - rx) <= tol && Math.abs(t[1] - ry) <= tol)) { n++; casados.push([rx, ry]); }
+        }
+        if (!n) continue;
+        const dist = Math.hypot(cx - d.x, cy - d.y);
+        if (!melhor || n > melhor.n || (n === melhor.n && dist < melhor.dist)) melhor = { n, dist, x:cx, y:cy, casados };
+      }
+    }
+    return melhor;
+  }
+  function marca(pontos, z){
+    for (const c of gMarca.children.slice()) { gMarca.remove(c); c.geometry.dispose(); c.material.dispose(); }
+    const r = Math.max(0.12, orb.dist * 0.006);
+    for (const p of pontos || []) {
+      const m = new T.Mesh(new T.RingGeometry(r * 0.6, r, 24), matGiz(0x00e676, 1));
+      m.material.side = T.DoubleSide; m.position.set(p[0], p[1], z + 0.01); m.renderOrder = 1000;
+      gMarca.add(m);
+    }
+  }
+  function arrasta(ev){
+    if (!drag) return;
+    if (!drag.andou && Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) < 3) return;
+    drag.andou = true;
+    const r = raioDe(ev), d = new T.Vector3();
+    if (drag.eixo === 'xy') { const p = noPlanoZ(r, drag.O.z); if (!p) return; d.subVectors(p, drag.p0); d.z = 0; }
+    else d.copy(EIXO[drag.eixo]).multiplyScalar(tNoEixo(r, drag.O, EIXO[drag.eixo]) - drag.t0);
+    const g = (ED.grade && ED.grade()) || 0;
+    const naGrade = v => g > 0 ? Math.round(v / g) * g : v;
+    let info = { encaixe:null };
+    let enc = ev.shiftKey ? null : encaixa(d, drag.eixo);
+    if (enc) { d.x = enc.x; d.y = enc.y; info.encaixe = { pernas:enc.n, de:drag.pernas.pts.length }; marca(enc.casados, 0); }
+    else {
+      marca([], 0);
+      if (drag.eixo !== 'z') { d.x = naGrade(d.x); d.y = naGrade(d.y); }
+    }
+    if (drag.eixo === 'z') {
+      /* assentar: o ponto mais baixo na placa (SMD) ou a ponta da perna na face de baixo (PTH) */
+      const z0 = drag.pernas.zmin, alcance = Math.max(0.25, orb.dist * 0.01);
+      const alvos = [0, -ESP];
+      let fez = false;
+      if (!ev.shiftKey) for (const a of alvos) if (Math.abs(z0 + d.z - a) <= alcance) { d.z = a - z0; info.assento = a === 0 ? 'na placa' : 'atravessa a placa'; fez = true; break; }
+      if (!fez) d.z = naGrade(d.z);
+    }
+    drag.d.copy(d);
+    drag.h.position.copy(drag.pos0).add(d);
+    gGiz.position.copy(drag.giz0).add(d);
+    if (ED.aoArrastar) { try { ED.aoArrastar(selRef, { x:d.x, y:d.y, z:d.z }, info); } catch (e) { /* ok */ } }
+    pede();
+  }
+  function terminaArrasto(ev){
+    const a = drag; drag = null;
+    try { cv.releasePointerCapture(ev.pointerId); } catch (e) { /* ok */ }
+    for (const g of gGiz.children) if (g.userData.mat) g.userData.mat.opacity = g.userData.eixo === 'xy' ? 0.55 : 0.95;
+    marca([], 0);
+    if (a && a.andou && (a.d.x || a.d.y || a.d.z) && ED.aoMover) ED.aoMover(selRef, { x:a.d.x, y:a.d.y, z:a.d.z });
+    else if (a && !a.andou && o.aoClicar) o.aoClicar(selRef, ev);
+    pede();
+  }
 
   /* ---------- os modos de vista ---------- */
   function materiaisDoModo(raiz){
@@ -554,6 +778,8 @@ async function cria(host, opcoes){
       ajustaLuzes();
       if (c.realce) realce = new Set(c.realce);
       poeCorpos(c.corpos || []);
+      if (selRef && !suporteDe(selRef)) selRef = null;
+      poeGizmo();
       redimensiona();
       return vista;
     },
@@ -561,7 +787,9 @@ async function cria(host, opcoes){
     realca(refs){ realce = new Set(refs || []); aplicaRealce(); },
     pose, gira, inclina, vira, enquadra, redimensiona,
     canvas:cv,
-    _cena:cena,   /* gancho de teste (CDP), nao e contrato */
+    _cena:cena, _cam:cam, _giz:gGiz,   /* gancho de teste (CDP), nao e contrato */
+    seleciona,
+    selecionado:() => selRef,
     realView(on){ if (on != null) trocaModo(on ? 'real' : 'padrao'); return modo === 'real'; },
     estado(){ return { steps:est.steps, falhas:est.falhas.slice(), corpos:est.corpos, az:orb.az / RAD, el:orb.el / RAD, dist:orb.dist, realView:modo === 'real' }; },
     destroi(){
