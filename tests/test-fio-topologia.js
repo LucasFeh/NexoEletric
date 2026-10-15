@@ -186,13 +186,28 @@ function corta(pts, alvos){
 
 /* ── 5. ESPELHO NOS DOIS EIXOS ── */
 
-/* o formato só tem `mirror` (espelho em X ANTES da rotação) + rot 0/90/180/270; espelhar o que
-   se vê é composição. Medido em Node contra o HubCore.compTransform antes de virar código. */
+/* o formato só tem `mirror` + rot 0/90/180/270, na ordem do Altium (gira e DEPOIS espelha em X:
+   HubCore.rotEfetiva, medido nos pinos absolutos do .SchDoc); espelhar o que se vê é composição. */
 assert.deepStrictEqual(SF.espelha(0, false, 'y'), { rot:180, mirror:true }, 'Y em rot 0');
 assert.deepStrictEqual(SF.espelha(0, false, 'x'), { rot:0,   mirror:true }, 'X em rot 0 é o de sempre');
-assert.deepStrictEqual(SF.espelha(90, false, 'x'), { rot:270, mirror:true }, 'X em rot 90 NÃO é só o booleano');
-assert.deepStrictEqual(SF.espelha(90, false, 'y'), { rot:90,  mirror:true }, 'Y em rot 90');
-assert.deepStrictEqual(SF.espelha(270, true, 'y'), { rot:270, mirror:false });
+assert.deepStrictEqual(SF.espelha(90, false, 'x'), { rot:90, mirror:true }, 'X em rot 90: na ordem do Altium o giro fica');
+assert.deepStrictEqual(SF.espelha(90, false, 'y'), { rot:270,  mirror:true }, 'Y em rot 90');
+assert.deepStrictEqual(SF.espelha(270, true, 'y'), { rot:90, mirror:false });
+/* e a prova geométrica: depois de espelhar em X, todo ponto do símbolo cai no espelho (em torno do
+   eixo vertical da âncora) de onde estava; em Y, do eixo horizontal -- pelo compTransform, que é
+   quem põe os pinos para as nets */
+{
+  const HC = require(require('path').join(__dirname, '..', 'hub-core.js'));
+  const amostra = [[100, 0], [0, 50], [-30, 70]];
+  for (const r of [0, 90, 180, 270]) for (const m of [true, false]) for (const e of ['x', 'y']){
+    const c0 = { x:0, y:0, rot:r, mirror:m }, c1 = Object.assign({ x:0, y:0 }, SF.espelha(r, m, e));
+    for (const [x, y] of amostra){
+      const p = HC.compTransform(c0).map(x, y), q = HC.compTransform(c1).map(x, y);
+      const esperado = e === 'x' ? [-p.x, p.y] : [p.x, -p.y];
+      assert.ok(Math.abs(q.x - esperado[0]) < 1e-9 && Math.abs(q.y - esperado[1]) < 1e-9, 'espelho ' + e + ' em rot ' + r + (m ? ' espelhado' : ''));
+    }
+  }
+}
 /* espelhar duas vezes no mesmo eixo volta ao começo, em qualquer rotação — é o que faz a tecla
    ser um interruptor e não um caminho de ida */
 for (const r of [0, 90, 180, 270]) for (const m of [true, false]) for (const e of ['x', 'y']){

@@ -2146,9 +2146,20 @@ function pinHot(pin){
   const d = ORIENT_DIR[((pin.orient % 360) + 360) % 360] || [1, 0];
   return { x: pin.x + d[0]*pin.len, y: pin.y + d[1]*pin.len };
 }
-/* transform local->mundo de um componente: espelha X, rotaciona anti-horario, translada */
+/* A ORDEM DO ALTIUM: gira (Orientation) e DEPOIS espelha em X (IsMirrored). Medido no .SchDoc
+   (tools/symbols/sch_leitor.py, os 104 componentes espelhados a 270 graus do DMB, e de novo nos
+   pinos absolutos da folha pelo tools/schdoc/schdoc2sch.py): so essa ordem poe os pinos onde a
+   folha os tem. "Gira e depois espelha" e o mesmo que "espelha e depois gira com o angulo
+   oposto" -- entao o hub segue espelhando o DADO primeiro (hub-draw.mirrorPart) e so troca o
+   angulo do componente espelhado por 360 - rot. Em 0/180 as duas ordens coincidem; em 90/270
+   espelhado o hub punha os pinos trocados, e as nets nesses pinos caiam. */
+function rotEfetiva(comp){
+  const r = ((((comp && comp.rot) || 0) % 360) + 360) % 360;
+  return comp && comp.mirror ? (360 - r) % 360 : r;
+}
+/* transform local->mundo de um componente: espelha X, rotaciona anti-horario (rotEfetiva), translada */
 function compTransform(comp){
-  const rot = (((comp.rot || 0) % 360) + 360) % 360;
+  const rot = rotEfetiva(comp);
   const cos = Math.cos(rot * Math.PI/180), sin = Math.sin(rot * Math.PI/180);
   const mx = comp.mirror ? -1 : 1;
   return {
@@ -2780,7 +2791,7 @@ function deriveStatus(entry, loaded){
 return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          SHEET_SIZES, SHEET_ISO, SHEET_PRESETS, SHEET_TOL,
          sheetSize, sheetPreset, sheetMatch, sheetLabel,
-         symbolOf, partOf, footprintOf, pinHot, compTransform, compPinsWorld,
+         symbolOf, partOf, footprintOf, pinHot, rotEfetiva, compTransform, compPinsWorld,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp,
          suggestSym,
          buildSchModel, extractNets, validateSchematic,

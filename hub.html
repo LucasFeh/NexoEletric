@@ -40,6 +40,7 @@
 <script src="hub-libremota.js"></script>
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
 <script src="hub-i18n.js"></script>
+<script src="hub-altiumabrir.js"></script>
 <script src="hub-shell.js" defer></script>
 <!-- a barra de menus do topo: Arquivo/Exibir/Ajuda do app fundidos com os menus do Altium da vista aberta -->
 <script src="hub-menutrad.js"></script>
@@ -4657,6 +4658,16 @@ function movePickerIdx(delta) {
 /* ═══ EVENTOS ══════════════════════════════════════════════════ */
 $('#pickerBtn').onclick = () => { if (S.pickerOpen) { S.pickerOpen = false; renderHeader(); } else { openPicker(); } };
 $('#pickerCatcher').onclick = () => { S.pickerOpen = false; renderHeader(); };
+/* Arquivo » Abrir documento do Altium: converte no servidor e abre o projeto na aba Esquema */
+window.__hubAbrirAltium = () => {
+  S.pickerOpen = false; renderHeader();
+  if (typeof HubAltiumAbrir === 'undefined') return;
+  return HubAltiumAbrir.abre({ aoAbrir: async nome => {
+    const idx = await API.index(); S.projects = idx.projects; renderHeader();
+    const x = S.projects.find(p => p.name === nome);
+    if (x) { await selectProject(x.id); goTab('esquema'); }
+  } });
+};
 $('#pickerSearch').oninput = e => { S.q = e.target.value; S.pickerIdx = 0; renderHeader(); $('#pickerSearch').focus(); };
 $('#pickerSearch').addEventListener('keydown', e => {
   if (e.key === 'ArrowDown') { e.preventDefault(); movePickerIdx(1); }

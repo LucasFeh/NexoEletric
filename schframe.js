@@ -706,18 +706,21 @@ function ligaPonta(pts, i, x, y){
 }
 
 /* ── ESPELHO NA TELA, NOS DOIS EIXOS ──
-   O formato tem um booleano `mirror` (espelho em X aplicado ANTES da rotacao) e rot 0/90/180/
-   270. Nao ha terceiro campo a inventar — o Altium tambem so tem IsMirrored + Orientation —,
-   entao espelhar o que se VE e composicao:
-       horizontal (vira esquerda/direita):  rot' = 360 - rot,  mirror' = !mirror
-       vertical   (vira em cima/embaixo):   rot' = 180 - rot,  mirror' = !mirror
+   O formato tem um booleano `mirror` e rot 0/90/180/270, na ordem do Altium: gira e DEPOIS
+   espelha em X (HubCore.rotEfetiva). Nao ha terceiro campo a inventar — o Altium tambem so tem
+   IsMirrored + Orientation —, entao espelhar o que se VE e composicao (F = espelho na tela,
+   M = espelho em X, R = giro; F_x = M, F_y = R180.M, e M.R(a) = R(-a).M):
+       horizontal (vira esquerda/direita):  rot' = rot,        mirror' = !mirror
+       vertical   (vira em cima/embaixo):   rot' = rot + 180,  mirror' = !mirror
+   (Ate 2026-10 a conta era 360 - rot / 180 - rot, certa para a ordem "espelha e depois gira",
+   que o hub usava e o Altium nao.)
    Ate aqui o X trocava so o booleano, que e o espelho no eixo LOCAL do componente: num
    componente girado 90 a tecla X espelhava na vertical, e a mesma tecla fazia coisas
    diferentes conforme a rotacao. Com a conta acima X e sempre horizontal e Y e sempre
    vertical, em qualquer rotacao. */
 function espelha(rot, mirror, eixo){
   const r = (((rot || 0) % 360) + 360) % 360;
-  const base = (eixo === 'y' ? 180 - r : 360 - r);
+  const base = (eixo === 'y' ? r + 180 : r);
   return { rot: ((base % 360) + 360) % 360, mirror: !mirror };
 }
 
@@ -1210,6 +1213,18 @@ function aplicaAcervos(){
   /* antes de qualquer symbolOf: sem as tabelas o resolvedor casa so por nome exato e por
      chave, e metade dos componentes viraria quadrado vermelho na folha */
   HubCore.setLibTables(window.renameMap || null, window.libSubs || null);
+  /* OS SIMBOLOS DE DENTRO DO .SchDoc. O esquema aberto direto do Altium (tools/schdoc/
+     schdoc2sch.py) traz em `schematic.symbols` o desenho de cada simbolo como a folha o guarda
+     -- o .SchDoc carrega uma copia do simbolo em cada componente. Entram SO onde nenhum acervo
+     resolve o nome: a biblioteca da casa continua mandando, e o que ela nao tem deixa de ser
+     quadrado vermelho. Nao e palpite como o resgate de baixo: e o simbolo daquele componente,
+     entao vale tambem para as nets. Array NOVO, como acima. */
+  const doDoc = (typeof schematic !== 'undefined' && schematic && Array.isArray(schematic.symbols)) ? schematic.symbols : [];
+  if (doDoc.length) {
+    const extras = doDoc.filter(s => s && s.name && Array.isArray(s.parts) && !HubCore.symbolOf(SLIB, s.name))
+                        .map(s => Object.assign({}, s, { doDocumento:true }));
+    if (extras.length) SLIB.symbols = SLIB.symbols.concat(extras);
+  }
   montaEmergencia();
   return r;
 }
@@ -4337,14 +4352,14 @@ function desenhaFolha(ctx, si, o){
     const part = HubCore.partOf(sym, c.part);
     ctx.save();
     ctx.translate(c.x, c.y);
-    ctx.rotate(((((c.rot||0)%360)+360)%360) * Math.PI/180);
+    ctx.rotate(HubCore.rotEfetiva(c) * Math.PI/180);   /* a ordem do Altium: ver HubCore.rotEfetiva */
     /* espelho pelo DADO (opts.mirror), e nao por um ctx.scale(-1,1): o scale virava a
        LETRA do nome e do numero do pino junto com o corpo. hub-draw.js » mirrorPart. */
     const emg = part ? null : desenhoDeEmergencia(c);
-    if (part) D.drawSymbolPart(ctx, part, { mirror: !!c.mirror, honraOlho: !showState.pinos, rot: c.rot || 0 });
+    if (part) D.drawSymbolPart(ctx, part, { mirror: !!c.mirror, honraOlho: !showState.pinos, rot: HubCore.rotEfetiva(c) });
     /* desenho emprestado sai INTEIRO em ambar, e nao no azul da casa: ele esta ali para a
        folha ser legivel, nao para passar por simbolo resolvido — a cor e o aviso */
-    else if (emg) D.drawSymbolPart(ctx, emg.part, { mirror: !!c.mirror, honraOlho: !showState.pinos, stroke: EMERG_COR, rot: c.rot || 0 });
+    else if (emg) D.drawSymbolPart(ctx, emg.part, { mirror: !!c.mirror, honraOlho: !showState.pinos, stroke: EMERG_COR, rot: HubCore.rotEfetiva(c) });
     else { ctx.strokeStyle = '#ff5252'; ctx.strokeRect(-100, -100, 200, 200); }
     ctx.restore();
     /* designador e comment: ancora medida pelo textoComp (caixa NA FOLHA + o deslocamento que
