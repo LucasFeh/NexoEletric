@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.9.2 — 2026-10-15
+
+- **Editar no NexoCAD com confirmação:** o aviso "✔ Enviado ao NexoCAD: <nome>" fica 6 segundos na tela, e a janela do NexoCAD (0.8.1) vem para a frente com o item aberto.
+- O componente vai sozinho, sem o desenho dos pads do footprint junto.
+
 ## 1.9.1 — 2026-10-15
 
 - **Adicionar componente 3D com a biblioteca do Nexo Hub:** os componentes aparecem em cards, cada um com a miniatura do modelo, o nome e o footprint que o usa. O mesmo modelo aparece uma vez só, e os que foram editados no NexoCAD vêm marcados.

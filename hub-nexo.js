@@ -227,7 +227,9 @@ async function editar(alvo, opcoes){
   try { j = await posta('editar', corpo); }
   catch (e) { avisa(opcoes, 'NexoCAD: ' + (e && e.message || e), 'err', 6000); return { ok:false, error:String(e && e.message || e) }; }
   if (!j.ok) { avisa(opcoes, 'NexoCAD: ' + (j.error || 'não abriu'), 'err', 6000); return j; }
-  avisa(opcoes, (j.criado ? 'Modelo novo criado na biblioteca' : 'Aberto no NexoCAD') + ' — salve lá (Ctrl+S) e o 3D daqui se atualiza', 'ok', 4500);
+  const nome = (j.result && j.result.nome) || alvo.nome || '';
+  avisa(opcoes, '✔ Enviado ao NexoCAD' + (nome ? ': ' + String(nome).replace(/\.(step|stp)$/i, '') : '') + (j.criado ? ' (novo na biblioteca)' : '') +
+    ' — a janela do NexoCAD abriu com o item; salve lá (Ctrl+S) e o 3D daqui se atualiza', 'ok', 6000);
   return j;
 }
 async function enviarPlaca(pacote, opcoes){
