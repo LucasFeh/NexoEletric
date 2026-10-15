@@ -67,6 +67,7 @@ os.environ['DIELETRONS_BIBLIOTECA'] = BIB
 os.environ['DIELETRONS_PONTEIRO'] = os.path.join(tmp, 'nao-existe.json')
 os.environ['NEXOCAD_SESSION'] = os.path.join(tmp, 'session.json')
 os.environ.pop('NEXOCAD_EXE', None)
+os.environ['NEXOCAD_NAO_ABRIR'] = '1'      # nunca o NexoCAD instalado nesta maquina
 
 import nexocad as N  # noqa: E402
 # NUNCA o exe de verdade: nesta maquina o NexoCAD esta instalado e o teste o abriria

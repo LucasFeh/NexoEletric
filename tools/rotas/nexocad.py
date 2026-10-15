@@ -24,7 +24,8 @@ A `url` do STEP (e as dos modelos do pacote) e um caminho do PROPRIO hub (/Libs/
 em que atende. Assim vale o mesmo caminho que a pagina usa -- o 3D da PcbLib tirado sob demanda e,
 no app desktop em modo biblioteca remota, o repasse ao servidor central.
 
-Para os testes: NEXOCAD_SESSION troca o caminho do session.json; DIELETRONS_PONTEIRO, o do ponteiro.
+Para os testes: NEXOCAD_SESSION troca o caminho do session.json; DIELETRONS_PONTEIRO, o do ponteiro;
+NEXOCAD_NAO_ABRIR=1 nunca abre o exe (o NexoCAD instalado na maquina do teste).
 
 No hubserver.py (o molde dos outros registraveis):
 
@@ -207,6 +208,8 @@ def le_sessao():
 
 def acha_exe():
     """Contrato §2: Program Files, depois %LOCALAPPDATA%\\Programs, depois NEXOCAD_EXE."""
+    if os.environ.get('NEXOCAD_NAO_ABRIR') == '1':      # testes: nunca o exe instalado na maquina
+        return ''
     cands = [r'C:\Program Files\NexoCAD\NexoCAD.exe']
     la = os.environ.get('LOCALAPPDATA')
     if la:
