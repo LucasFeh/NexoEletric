@@ -25,7 +25,7 @@ const nx = HN.resolvedorDe(indice);
 /* o resolvedor */
 assert.strictEqual(nx.porChave('3d-hub/abc.step').id, 'el-subst');
 assert.strictEqual(nx.porChave('3d-hub/abc.step').chave, 'nexo:el-subst@4', 'chave do cache = nexo:<id>@<rev>');
-assert.strictEqual(nx.porChave('3d-hub/abc.step').url, '/api/nexo/arquivo/el-subst/modelo.step');
+assert.strictEqual(nx.porChave('3d-hub/abc.step').url, '/api/nexo/arquivo/el-subst/modelo.step?rev=4', 'a url leva a revisao');
 assert.strictEqual(nx.porFootprint('SOT23').id, 'el-sot');
 assert.strictEqual(nx.porChave('3d/zz.step'), null, 'item sem STEP gerado nao substitui nada');
 assert.strictEqual(nx.porFootprint('DIP8'), null, 'vinculo por footprint so vale para Eletronicos');
@@ -78,7 +78,7 @@ assert.strictEqual(u1[0].side, 'bottom');
 /* U2: board3d substituido pela chave projeto: */
 assert.strictEqual(de(com, 'U2')[0].nexo, 'el-d3');
 /* U3: preso direto ao item */
-assert.strictEqual(de(com, 'U3')[0].modelUrl, '/api/nexo/arquivo/el-sot/modelo.step');
+assert.strictEqual(de(com, 'U3')[0].modelUrl, '/api/nexo/arquivo/el-sot/modelo.step?rev=2');
 assert.strictEqual(de(com, 'U3')[0].vinculo, undefined, 'corpo nexo: direto nao e trocado pelo vinculo');
 
 /* substitui vale mais que o vinculo: R0805 tem os dois, fica o corpo substituido (nao o da identidade) */

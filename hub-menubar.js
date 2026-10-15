@@ -39,7 +39,7 @@
     const file = [it('novaJanela', 'Ctrl+Shift+N')];
     /* o esquema do Altium aberto direto no hub (hub-altiumabrir.js) */
     if (typeof window.__hubAbrirAltium === 'function') file.push({ rot:T('mb.abrirAltium'), tecla:'', f:() => window.__hubAbrirAltium() });
-    if (P) file.push('-', it('abrirPasta'), it('importar'));
+    if (P) file.push('-', it('abrirPasta'), it('importar'), it('nexoSync'));
     file.push('-', it('configHub'));
     if (P) file.push(it('configApp', 'Ctrl+,'));
     const view = [it('recarregar', 'F5')];

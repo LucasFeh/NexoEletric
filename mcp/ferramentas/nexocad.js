@@ -1,53 +1,41 @@
-/* NexoEletric MCP - grupo "nexo": a integracao com o NexoCAD (contrato: docs/INTEGRACAO-NEXOCAD.md).
+/* NexoEletric MCP - grupo "nexo": o Nexo Hub (o banco da rede) e o NexoCAD.
 
-   A biblioteca compartilhada (o "BD") e do NexoCAD: aqui ela so e LIDA, direto do disco
-   (DIELETRONS_BIBLIOTECA > ponteiro C:\Users\Public\Dieletrons\biblioteca.json > o padrao
-   C:\Users\Public\Dieletrons\Biblioteca). Tudo o que grava -- editar um modelo, montar a placa,
-   vincular um footprint -- e PEDIDO ao NexoCAD: pelo hub no ar (as rotas /api/nexo/*, que baixam os
-   STEP do proprio hub, inclusive o 3D da PcbLib tirado sob demanda) ou, sem o hub, direto no /rpc
-   do NexoCAD (session.json; abre o exe e espera ate 60 s), com os STEP lidos do disco. */
+   Desde a 1.9.0 a biblioteca compartilhada e o NEXO HUB (contrato: ..\nexohub\docs\CONTRATO.md; o
+   lado do NexoEletric em docs/INTEGRACAO-NEXOCAD.md). A conexao: NEXOHUB_URL > o
+   C:\Users\Public\NexoHub\conexao.json > http://127.0.0.1:47800 (lib/nexohub.js).
+   - Ler a biblioteca: direto na API do Nexo Hub.
+   - Publicar (a biblioteca 3D e as placas): lib/nexohub-sync.js, o mesmo codigo que o app desktop roda.
+   - Editar um modelo / montar a placa: PEDIDO ao NexoCAD (/rpc do session.json; abre o exe e
+     espera ate 60 s), sempre por um item do Nexo Hub: o modelo que ainda nao esta la e publicado antes. */
 'use strict';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { ErroMcp } = require('../lib/contexto.js');
-const { avaliaVar } = require('../lib/arquivo-linhas.js');
 const { PROJETO, hubNoAr } = require('../lib/util.js');
+const NH = require('../lib/nexohub.js');
+const SY = require('../lib/nexohub-sync.js');
 
-const PADRAO_DIR = 'C:\\Users\\Public\\Dieletrons\\Biblioteca';
-const PONTEIRO = 'C:\\Users\\Public\\Dieletrons\\biblioteca.json';
 const CATEGORIA = 'Eletrônicos';
-const semAcento = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const semAcento = NH.semAcento;
 const tem = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
 const lerJson = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8').replace(/^\uFEFF/, '')); } catch (_) { return null; } };
+const cliente = () => NH.cliente();
+function errNH(e) { return e instanceof ErroMcp ? e : new ErroMcp(String(e && e.message || e)); }
 
-/* ---------- a biblioteca (so leitura) ---------- */
-function raiz() {
-  if (process.env.DIELETRONS_BIBLIOTECA) return path.resolve(process.env.DIELETRONS_BIBLIOTECA);
-  const p = lerJson(process.env.DIELETRONS_PONTEIRO || PONTEIRO);
-  if (p && typeof p.dir === 'string' && p.dir.trim()) return path.resolve(p.dir.trim());
-  return PADRAO_DIR;
+/* ---------- o Nexo Hub ---------- */
+async function indice(c) {
+  try { return await SY.indiceDoNexoHub(c || cliente()); }
+  catch (e) { throw errNH(e); }
 }
-function indice() {
-  const dir = raiz();
-  const ind = lerJson(path.join(dir, 'biblioteca.json'));
-  return { dir, existe: fs.existsSync(dir), ind: ind && typeof ind === 'object' ? ind : null };
-}
-const itensDe = ind => ((ind && ind.itens) || []).filter(i => i && i.id);
-function arquivoItem(dir, it, tipo) {
-  const rel = (it && it.arquivos && it.arquivos[tipo]) || (it ? `itens/${it.id}/${tipo === 'step' ? 'modelo.step' : tipo === 'thumb' ? 'thumb.png' : 'modelo.nexo'}` : '');
-  if (!rel || /(^|[\\/])\.\.([\\/]|$)/.test(rel) || /:/.test(rel)) return '';
-  const f = path.join(dir, ...rel.split(/[\\/]+/).filter(Boolean));
-  const r = path.relative(dir, f);
-  return r.startsWith('..') || path.isAbsolute(r) ? '' : f;
-}
-function resumo(dir, it) {
-  const el = it.eletronico || null;
-  const step = arquivoItem(dir, it, 'step');
-  return { id: it.id, nome: it.nome, categoria: it.categoria, subcategoria: it.subcategoria || '', rev: it.rev, descricao: it.descricao || '',
-           tags: it.tags || [], footprints: el ? (el.footprints || []) : [], mpn: el ? el.mpn || '' : '', substitui: it.substitui || [],
-           bbox: it.bbox || null, step: step && fs.existsSync(step) ? step : '', atualizado: it.atualizado || '' };
+function resumo(it, url) {
+  const el = it.eletronico || it.modelo || {};
+  return { id: it.id, nome: it.nome, tipo: it.tipo, categoria: it.categoria, subcategoria: it.subcategoria || '', rev: it.rev,
+           descricao: it.descricao || '', tags: it.tags || [], footprints: el.footprints || [], veste_footprint: !!it.eletronico,
+           mpn: el.mpn || '', chaves: it.chaves || [], substitui: it.substitui || [], arquivos: Object.keys(it.arquivos || {}),
+           bbox: it.bbox || null, atualizado: it.atualizado || '',
+           step: it.arquivos && it.arquivos.step ? `${url}/api/v1/itens/${encodeURIComponent(it.id)}/arquivo/step` : '' };
 }
 
 /* ---------- o NexoCAD (cliente do /rpc) ---------- */
@@ -101,130 +89,104 @@ async function rpc(command, params, ms) {
   return j.result;
 }
 
-/* ---------- o hub no ar, com as rotas /api/nexo ---------- */
-async function hubNexo(ctx) {
-  const hub = await hubNoAr(ctx);
-  if (!hub) return null;
-  try {
-    const r = await fetch(hub.url + '/api/nexo/revisao', { signal: AbortSignal.timeout(1500) });
-    return r.ok ? hub : null;
-  } catch (_) { return null; }
-}
-async function postaHub(hub, rota, corpo) {
-  const r = await fetch(hub.url + '/api/nexo/' + rota, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(corpo), signal: AbortSignal.timeout(600000) });
-  let j = null; try { j = await r.json(); } catch (_) { /* sem corpo */ }
-  if (!j) throw new ErroMcp(`o hub não respondeu /api/nexo/${rota} (HTTP ${r.status})`);
-  if (!j.ok) throw new ErroMcp(j.error || `o hub recusou /api/nexo/${rota}`);
-  return j;
-}
+/* ---------- o hub no ar (o 3D da PcbLib sai dele sob demanda) ---------- */
+async function urlDoHub(ctx) { const h = await hubNoAr(ctx).catch(() => null); return h ? h.url : ''; }
+async function lib3d(ctx) { return SY.lib3dDe(ctx, await urlDoHub(ctx)); }
 
-/* ---------- os corpos 3D da placa (o que a vista 3D desenha) ---------- */
-let cache3d = null;
-async function lib3d(ctx) {
-  const local = ctx.lib('pcblib-3d.js', 'pcblib3d');
-  if (local) return local;
-  if (cache3d && Date.now() - cache3d.quando < 5 * 60 * 1000) return cache3d.v;
-  const hub = await hubNoAr(ctx);
-  if (!hub) return null;
+/* o item do Nexo Hub para uma chave de modelo (publica o modelo se faltar) */
+async function itemDaChave(ctx, c, chave, nome, footprint) {
+  const hubUrl = await urlDoHub(ctx);
+  const origem = /^projeto:/.test(chave) ? 'projeto' : /^3d-hub\//.test(chave) ? 'pcblib-hub' : /^3d\//.test(chave) ? 'pcblib-3d' : 'nexoeletric';
+  const ler = m => SY.lerModelo(m.file, { root: ctx.root, projetosDir: ctx.dirProjetos(), hubUrl });
   try {
-    const r = await fetch(hub.url + '/Libs/pcblib-3d.js', { signal: AbortSignal.timeout(60000) });
-    if (!r.ok) return null;
-    const v = avaliaVar(await r.text(), 'pcblib3d');
-    cache3d = { quando: Date.now(), v };
-    return v;
-  } catch (_) { return null; }
+    return await SY.garanteModelo(c, { file: chave, nome: nome || chave.split('/').pop(), origem, footprints: footprint ? [footprint] : [] }, ler,
+      `importado do NexoEletric (${origem}, editar no NexoCAD)`);
+  } catch (e) { throw errNH(e); }
 }
-async function corposDaPlaca(ctx, p, eb, board) {
-  const M3 = ctx.exige('hub-pcb3d-modelo.js', 'HubPcb3dModelo');
-  const HN = ctx.exige('hub-nexo.js', 'HubNexo');
-  const HF = ctx.modulo('hub-fplib.js');
-  const d3f = p.arq('board3d.js');
-  const d3 = fs.existsSync(d3f) ? (ctx.lerVarCache(d3f, 'pcbmirror3d') || null) : null;
-  const hub = ctx.lib('pcblib-hub.js', 'pcblibHub');
-  const esp = d3 && d3.thickness > 0 ? d3.thickness : 1.6;
-  const { ind } = indice();
-  const corpos = M3.corpos(eb, d3, { pcblib3d: await lib3d(ctx), pcblib3dHub: hub && HF ? HF.lib3d(HF.normaliza(JSON.parse(JSON.stringify(hub)))) : null,
-    base: `Projects/${p.nome}/`, baseLib: 'Libs/', thickness: esp, board, nexo: HN.resolvedorDe(ind), projeto: p.nome });
-  return { corpos, esp };
-}
-/* a url do hub de um modelo -> o arquivo no disco (o caminho direto, sem o hub) */
-function urlParaDisco(ctx, p, url) {
-  const u = decodeURIComponent(String(url || '').replace(/^\//, '').replace(/\?.*$/, ''));
-  const m = /^api\/nexo\/arquivo\/([^/]+)\/modelo\.step$/.exec(u);
-  if (m) { const { dir, ind } = indice(); const it = itensDe(ind).find(i => i.id === m[1]); return it ? arquivoItem(dir, it, 'step') : ''; }
-  const partes = u.split('/').filter(Boolean);
-  if (!partes.length || partes.some(s => s === '..')) return '';
-  if (partes[0] === 'Projects') return path.join(ctx.dirProjetos(), ...partes.slice(1));
-  return path.join(ctx.root, ...partes);
-}
-const nomeSeguro = s => String(s || 'placa').replace(/[<>:"/\\|?*\x00-\x1f]+/g, '_').replace(/^[ .]+|[ .]+$/g, '').slice(0, 80) || 'placa';
 
 module.exports = {
-  grupo: 'nexo', ordem: 47, titulo: 'NexoCAD — a biblioteca 3D compartilhada e o CAD da casa',
+  grupo: 'nexo', ordem: 47, titulo: 'Nexo Hub e NexoCAD — a biblioteca 3D e as placas no banco da rede, e o CAD da casa',
   modulos: ['hub-nexo.js', 'hub-nexopacote.js', 'hub-pcb3d-modelo.js'],
   ferramentas: [
     {
-      nome: 'nexo_estado', titulo: 'Estado do NexoCAD', leitura: true,
-      descricao: 'Onde está a biblioteca compartilhada (a pasta, se existe, a revisão, quantos itens), se o NexoCAD está aberto (versão) e onde está o executável, e se o hub no ar tem as rotas /api/nexo. Use antes das outras ferramentas do grupo.',
+      nome: 'nexo_estado', titulo: 'Estado do Nexo Hub e do NexoCAD', leitura: true,
+      descricao: 'O Nexo Hub (URL, se está no ar, versão, revisão = seq do último evento, quantos itens) e o NexoCAD (aberto, versão, onde está o executável). Use antes das outras ferramentas do grupo.',
       entrada: { type: 'object', properties: {} },
       executa: async (_a, ctx) => {
-        const { dir, existe, ind } = indice();
+        const c = cliente();
+        let nh = { url: c.url, online: false };
+        try {
+          const s = await c.saude();
+          const L = await c.itens({ limite: 1 });
+          nh = { url: c.url, online: true, versao: s.versao || '', revisao: s.revisao || 0, itens: L.total || 0, dados: s.dados || '' };
+        } catch (e) { nh.erro = e.message; }
         const h = await saude();
-        const hub = await hubNexo(ctx).catch(() => null);
-        return { ok: true, dir, existe, indice: !!ind, revisao: ind ? ind.revisao || 0 : 0, itens: itensDe(ind).length,
-                 categorias: (ind && ind.categorias) || [], nexocad: { aberto: h.aberto, versao: h.versao, exe: achaExe(), sessao: caminhoSessao() },
-                 hub: hub ? hub.url : null };
+        return { ok: true, nexohub: nh, nexocad: { aberto: h.aberto, versao: h.versao, exe: achaExe(), sessao: caminhoSessao() }, hub: (await urlDoHub(ctx)) || null };
       },
     },
     {
-      nome: 'nexo_biblioteca', titulo: 'Listar a biblioteca do NexoCAD', leitura: true,
-      descricao: 'Lista/busca os itens da biblioteca compartilhada (lida do disco, só leitura). Padrão: a categoria Eletrônicos; categoria "*" = todas. texto busca no nome, descrição, tags, footprints, MPN e fabricante; id devolve um item com os caminhos absolutos. Cada item Eletrônicos diz os footprints do hub que ele veste (o vínculo) e as chaves de modelo que ele substitui.',
+      nome: 'nexo_biblioteca', titulo: 'Listar a biblioteca do Nexo Hub', leitura: true,
+      descricao: 'Lista/busca os itens do Nexo Hub no formato do NexoEletric. Padrão: a categoria Eletrônicos (inclui os Modelos 3D da PcbLib); categoria "*" = todas, ou o nome/id (Mecânicos, placas, eletronicos/modelos-3d). texto busca no nome, descrição, tags, footprints, chaves e MPN; id devolve o item completo (revisões, vínculos). Cada item diz as chaves de modelo do hub que ele representa (nexoeletric-modelo), as que ele SUBSTITUI no 3D (só a partir da rev 2, editado no NexoCAD) e, num item componente, os footprints que ele veste.',
       entrada: { type: 'object', properties: {
-        categoria: { type: 'string', description: 'Eletrônicos (padrão), Mecânicos, Fixadores, Caixas, Placas, Outros ou "*"' },
+        categoria: { type: 'string', description: 'Eletrônicos (padrão), Mecânicos, Fixadores, Caixas, Placas, Outros, um id (eletronicos/modelos-3d) ou "*"' },
         texto: { type: 'string' }, id: { type: 'string' }, limite: { type: 'integer', minimum: 1, maximum: 500 } } },
       executa: async (a) => {
-        const { dir, existe, ind } = indice();
-        if (!ind) return { ok: true, dir, existe, itens: [], nota: existe ? 'a pasta existe mas não tem biblioteca.json (o NexoCAD cria ao gravar o primeiro item)' : 'a biblioteca não existe ainda' };
+        const c = cliente();
         if (a.id) {
-          const it = itensDe(ind).find(i => i.id === a.id);
-          if (!it) throw new ErroMcp(`item "${a.id}" não está na biblioteca`);
-          return { ok: true, dir, item: Object.assign({}, it, { caminhos: { step: arquivoItem(dir, it, 'step'), nexo: arquivoItem(dir, it, 'nexo'), thumb: arquivoItem(dir, it, 'thumb') } }) };
+          let it;
+          try { it = await c.item(a.id); } catch (e) { throw errNH(e); }
+          let revisoes = null;
+          try { const r = await c.pede('GET', `/api/v1/itens/${encodeURIComponent(a.id)}/revisoes`); revisoes = r.revisoes || r; } catch (_) { /* opcional */ }
+          return { ok: true, nexohub: c.url, item: Object.assign({}, NH.paraItem(it, await c.categorias().catch(() => [])), { atributos: it.atributos, vinculos: it.vinculos || [], arquivos_nexohub: it.arquivos || {} }), revisoes };
         }
-        let L = itensDe(ind);
+        const ind = await indice(c);
+        let L = ind.itens;
         const cat = a.categoria || CATEGORIA;
-        if (cat !== '*') L = L.filter(i => semAcento(i.categoria) === semAcento(cat));
+        if (cat !== '*') L = L.filter(i => semAcento(i.categoria) === semAcento(cat) || semAcento(i.categoria_id).startsWith(semAcento(cat)));
         if (a.texto) {
           const t = semAcento(a.texto);
-          L = L.filter(i => { const el = i.eletronico || {}; return [i.id, i.nome, i.descricao, i.subcategoria, (i.tags || []).join(' '), (el.footprints || []).join(' '), el.mpn, el.fabricante, el.encapsulamento].some(x => x && semAcento(x).includes(t)); });
+          L = L.filter(i => { const el = i.eletronico || i.modelo || {}; return [i.id, i.nome, i.descricao, i.subcategoria, (i.tags || []).join(' '), (el.footprints || []).join(' '), (i.chaves || []).join(' '), el.mpn, el.fabricante].some(x => x && semAcento(x).includes(t)); });
         }
-        return { ok: true, dir, revisao: ind.revisao || 0, total: L.length, itens: L.slice(0, a.limite || 50).map(i => resumo(dir, i)) };
+        return { ok: true, nexohub: c.url, revisao: ind.revisao, total: L.length, itens: L.slice(0, a.limite || 50).map(i => resumo(i, c.url)) };
+      },
+    },
+    {
+      nome: 'nexo_sincronizar', titulo: 'Sincronizar com o Nexo Hub', destrutiva: false,
+      descricao: 'Publica no Nexo Hub o que o NexoEletric tem: a biblioteca 3D (cada modelo de Libs/pcblib-hub.js e da PcbLib da casa vira um item modelo3d, revisão 1 com o STEP) e as placas (cada projeto com board.js vira um item placa com o pacote eletrichub-placa-v1). É o mesmo que o app desktop faz sozinho ao abrir. Idempotente: só sobe o que falta, nunca cria revisão de um modelo que já existe (as revisões 2+ são do NexoCAD) e só cria revisão de placa quando o pacote mudou. modelos:false pula a biblioteca; placas:false pula as placas, ou uma lista de projetos.',
+      entrada: { type: 'object', properties: { modelos: { type: 'boolean' }, placas: { oneOf: [{ type: 'boolean' }, { type: 'array', items: { type: 'string' } }] } } },
+      executa: async (a, ctx) => {
+        const logs = [];
+        try {
+          const r = await SY.sincroniza({ ctx, cliente: cliente(), hubUrl: await urlDoHub(ctx), modelos: a.modelos !== false,
+            placas: Array.isArray(a.placas) ? a.placas.map(n => ctx.projeto(n).nome) : a.placas !== false, log: (n, m) => logs.push(m) });
+          return { ok: true, resumo: r, log: logs.slice(-20) };
+        } catch (e) { throw errNH(e); }
       },
     },
     {
       nome: 'nexo_editar_modelo', titulo: 'Editar um modelo 3D no NexoCAD',
-      descricao: 'Abre um corpo 3D no NexoCAD para editar, como o "Editar 3D no NexoCAD" da vista PCB. Diga {projeto, ref} (o corpo STEP que a vista 3D desenha para o componente), {footprint} (o corpo STEP do footprint na biblioteca do hub), {chave} (a chave do modelo: "3d-hub/<sha>.step", "3d/<checksum>.step", "projeto:<p>/<arquivo>") ou {id} (um item da biblioteca). Se algum item já substitui aquela chave, abre o item; senão o NexoCAD cria um item importando o STEP, vinculado ao footprint, e o abre. Sem STEP (footprint só com caixa), novo:true cria um item vazio vinculado ao footprint. Salvar no NexoCAD (Ctrl+S) grava na biblioteca e a vista 3D do hub troca o modelo sozinha.',
+      descricao: 'Abre um corpo 3D no NexoCAD para editar, como o "Editar 3D no NexoCAD" da vista PCB, sempre por um item do Nexo Hub. Diga {projeto, ref} (o corpo STEP que a vista 3D desenha para o componente), {footprint} (o corpo STEP do footprint na biblioteca do hub), {chave} (a chave do modelo: "3d-hub/<sha>.step", "3d/<checksum>.step", "projeto:<p>/<arquivo>") ou {id} (um item do Nexo Hub). A chave que ainda não está no Nexo Hub é publicada antes (item modelo3d, revisão 1 com o STEP). O NexoCAD recebe o id do item, a geometria dos pads (esboço de referência) e a matriz do corpo. Sem STEP (footprint só com caixa), novo:true cria um item vazio vinculado ao footprint. Salvar no NexoCAD (Ctrl+S) cria a revisão seguinte e a vista 3D do hub troca o modelo sozinha.',
       entrada: { type: 'object', properties: { projeto: PROJETO, ref: { type: 'string' }, footprint: { type: 'string' }, chave: { type: 'string' }, id: { type: 'string' },
         novo: { type: 'boolean', description: 'sem STEP: cria um item vazio vinculado ao footprint' } } },
       executa: async (a, ctx) => {
         const HN = ctx.exige('hub-nexo.js', 'HubNexo');
-        const { ind } = indice();
-        const res = HN.resolvedorDe(ind);
+        const M3 = () => ctx.exige('hub-pcb3d-modelo.js', 'HubPcb3dModelo');
+        const c = cliente();
         let alvo = null;
         if (a.id) alvo = { id: a.id };
         else if (a.projeto && a.ref) {
           const p = ctx.projeto(a.projeto);
           const { board, eb } = ctx.placa(p);
-          const c = (eb.components || []).find(x => x && x.ref === a.ref);
-          if (!c) throw new ErroMcp(`${a.ref} não está na placa de ${p.nome}`);
-          const { corpos, esp } = await corposDaPlaca(ctx, p, eb, board);
-          const b = corpos.find(x => x && x.owner === c.ref && x.kind === 'step' && (x.modelUrl || x.nexo));
-          const geometria = HN.geometriaDeComp(c);
-          if (b && !b.nexo && geometria) geometria.corpo = ctx.exige('hub-pcb3d-modelo.js', 'HubPcb3dModelo').matrizLocal(b.matrix, c, esp);
+          const comp = (eb.components || []).find(x => x && x.ref === a.ref);
+          if (!comp) throw new ErroMcp(`${a.ref} não está na placa de ${p.nome}`);
+          const { corpos, esp } = SY.corposDaPlaca(ctx, p, eb, board, { lib3d: await lib3d(ctx), indice: await indice(c) });
+          const b = corpos.find(x => x && x.owner === comp.ref && x.kind === 'step' && (x.modelUrl || x.nexo));
+          const geometria = HN.geometriaDeComp(comp);
+          if (b && !b.nexo && geometria) geometria.corpo = M3().matrizLocal(b.matrix, comp, esp);
           if (b && b.nexo) alvo = { id: b.nexo };
-          else if (b) alvo = { chave: b.modeloChave, url: '/' + b.modelUrl, nome: b.name || c.footprint + '.step', footprint: c.footprint || '', geometria };
-          else if (a.novo) alvo = { novo: true, footprint: c.footprint || '', nome: c.footprint || c.ref, geometria };
-          else throw new ErroMcp(`${c.ref} (${c.footprint}) não tem corpo STEP; passe novo:true para criar um item vazio vinculado ao footprint`);
+          else if (b) alvo = { chave: b.modeloChave, nome: b.name || comp.footprint + '.step', footprint: comp.footprint || '', geometria };
+          else if (a.novo) alvo = { novo: true, footprint: comp.footprint || '', nome: comp.footprint || comp.ref, geometria };
+          else throw new ErroMcp(`${comp.ref} (${comp.footprint}) não tem corpo STEP; passe novo:true para criar um item vazio vinculado ao footprint`);
         } else if (a.footprint || a.chave) {
           const HF = ctx.modulo('hub-fplib.js');
           const hub = HF ? HF.normaliza(JSON.parse(JSON.stringify(ctx.lib('pcblib-hub.js', 'pcblibHub') || {}))) : null;
@@ -239,84 +201,76 @@ module.exports = {
             if (m && m.file) { chave = m.file; nome = m.name || b.name || ''; }
             if (!m && L3 === null && b) throw new ErroMcp('o corpo do footprint é da PcbLib e os 3D dela só vêm com o hub no ar');
           }
+          if (!chave && fp && !(fp.bodies || []).some(x => x && x.kind === 'step')) {
+            /* footprint do Altium: os corpos 3D estao na PcbLib 3D */
+            const L3 = await lib3d(ctx);
+            const f3 = L3 && tem(L3.footprints, a.footprint) ? L3.footprints[a.footprint] : null;
+            const b = f3 && (f3.bodies || []).find(x => x && x.kind === 'step' && tem(L3.models, x.model));
+            if (b) { chave = L3.models[b.model].file; nome = L3.models[b.model].name || ''; corpoFp = b; }
+          }
           const geometria = fp ? HN.geometriaDe(fp) : undefined;
-          if (geometria && corpoFp && chave) geometria.corpo = ctx.exige('hub-pcb3d-modelo.js', 'HubPcb3dModelo').matrizCorpo(corpoFp.raw || {}, { side: corpoFp.side || 'top', thickness: 1.6 });
-          const ja = chave ? (res.porChave(chave) || (/^nexo:/.test(chave) ? res.porId(chave.slice(5)) : null)) : null;
-          if (ja) alvo = { id: ja.id };
-          else if (chave) {
-            const mp = /^projeto:([^/]+)\/(.+)$/.exec(chave);
-            const url = mp ? `/Projects/${mp[1]}/${mp[2]}` : '/Libs/' + chave;
-            alvo = { chave, url, nome: nome || chave.split('/').pop(), footprint: a.footprint || '', geometria };
-          } else if (a.novo && a.footprint) alvo = { novo: true, footprint: a.footprint, nome: a.footprint, geometria };
+          if (geometria && corpoFp && chave) geometria.corpo = M3().matrizCorpo(corpoFp.raw || {}, { side: corpoFp.side || 'top', thickness: 1.6 });
+          if (/^nexo:/.test(chave)) alvo = { id: chave.slice(5).replace(/@.*$/, '') };
+          else if (chave) alvo = { chave, nome: nome || chave.split('/').pop(), footprint: a.footprint || '', geometria };
+          else if (a.novo && a.footprint) alvo = { novo: true, footprint: a.footprint, nome: a.footprint, geometria };
           else throw new ErroMcp(a.footprint ? `o footprint "${a.footprint}" não tem corpo STEP; passe novo:true para criar um item vazio vinculado a ele` : 'informe chave, footprint, {projeto, ref} ou id');
         } else throw new ErroMcp('informe {projeto, ref}, footprint, chave ou id');
 
-        if (alvo.geometria == null) delete alvo.geometria;
-        const hubN = await hubNexo(ctx);
-        if (hubN) { const j = await postaHub(hubN, 'editar', alvo); return { ok: true, via: 'hub', id: j.id, criado: j.criado, resultado: j.result }; }
-        /* sem o hub: direto no NexoCAD, com o STEP do disco */
-        if (alvo.id) return { ok: true, via: 'nexocad', resultado: await rpc('biblioteca_abrir', { id: alvo.id }), id: alvo.id };
-        const params = { chave: alvo.chave || '', nome: alvo.nome || '', footprint: alvo.footprint || '' };
+        if (alvo.id) return { ok: true, id: alvo.id, resultado: await rpc('biblioteca_abrir', { id: alvo.id }) };
+        const params = { nome: alvo.nome || '', footprint: alvo.footprint || '' };
         if (alvo.geometria) params.geometria = alvo.geometria;
-        if (alvo.novo) params.novo = true;
-        else {
-          const f = urlParaDisco(ctx, null, alvo.url);
-          if (!f || !fs.existsSync(f)) throw new ErroMcp(`o STEP ${alvo.url} não está no disco (o 3D da PcbLib sai dela sob demanda): abra o NexoEletric e tente de novo`);
-          params.step_path = f;
+        if (alvo.novo) {
+          params.novo = true;
+          const r = await rpc('biblioteca_editar_modelo', params);
+          return { ok: true, id: r && r.id, criado: r && r.criado, resultado: r };
         }
+        const g = await itemDaChave(ctx, c, alvo.chave, alvo.nome, alvo.footprint);
+        Object.assign(params, { id: g.id, chave: alvo.chave });
         const r = await rpc('biblioteca_editar_modelo', params);
-        return { ok: true, via: 'nexocad', id: r && r.id, criado: r && r.criado, resultado: r };
+        return { ok: true, id: g.id, rev: g.rev, publicado: g.criado || g.enviado, resultado: r };
       },
     },
     {
       nome: 'nexo_enviar_placa', titulo: 'Enviar a placa ao NexoCAD', modulo: 'hub-nexopacote.js',
-      descricao: 'Monta a placa no NexoCAD (montagem: a placa com contorno, recortes e furos, e um componente por corpo 3D), como Arquivo » Exportar » Placa para o NexoCAD da vista PCB. Usa a placa efetiva (board.js + changes.js) e os mesmos corpos 3D da vista 3D, com a biblioteca do NexoCAD por cima. O NexoCAD grava o resultado na categoria Placas (base para o pcb_caixa dele). vias:true inclui as vias nos furos.',
-      entrada: { type: 'object', properties: { projeto: PROJETO, vias: { type: 'boolean' }, so_pacote: { type: 'boolean', description: 'só devolve o pacote (não envia)' } }, required: ['projeto'] },
+      descricao: 'Publica a placa no Nexo Hub (item placa do projeto, revisão nova só se o pacote mudou; os modelos 3D apontam itens do Nexo Hub) e pede ao NexoCAD para montá-la (pcb_importar {item}): a placa com contorno, recortes e furos, e um componente por corpo 3D. Usa a placa efetiva (board.js + changes.js) e os mesmos corpos 3D da vista 3D. vias:true inclui as vias nos furos. so_publicar:true só publica (não abre o NexoCAD); so_pacote:true só devolve o pacote montado.',
+      entrada: { type: 'object', properties: { projeto: PROJETO, vias: { type: 'boolean' }, so_publicar: { type: 'boolean' }, so_pacote: { type: 'boolean', description: 'só devolve o pacote (não publica nem envia)' } }, required: ['projeto'] },
       executa: async (a, ctx) => {
-        const NP = ctx.exige('hub-nexopacote.js', 'HubNexoPacote');
         const p = ctx.projeto(a.projeto);
-        const { board, eb } = ctx.placa(p);
-        const { corpos, esp } = await corposDaPlaca(ctx, p, eb, board);
-        const { pacote, avisos } = NP.monta(eb, { projeto: p.nome, espessura: esp, corpos, vias: !!a.vias, laser: ctx.modulo('hub-laser.js') });
-        if (a.so_pacote) return { ok: true, pacote, avisos };
-        const hubN = await hubNexo(ctx);
-        if (hubN) {
-          const j = await postaHub(hubN, 'placa', { pacote });
-          return { ok: true, via: 'hub', dir: j.dir, componentes: pacote.componentes.length, modelos: Object.keys(pacote.modelos).length, avisos: avisos.concat(j.avisos || []), resultado: j.result };
+        const c = cliente();
+        if (a.so_pacote) {
+          const NP = ctx.exige('hub-nexopacote.js', 'HubNexoPacote');
+          const { board, eb } = ctx.placa(p);
+          let ind = null; try { ind = await indice(c); } catch (_) { /* sem Nexo Hub: as fontes de sempre */ }
+          const { corpos, esp } = SY.corposDaPlaca(ctx, p, eb, board, { lib3d: await lib3d(ctx), indice: ind });
+          const { pacote, avisos } = NP.monta(eb, { projeto: p.nome, espessura: esp, corpos, vias: !!a.vias, laser: ctx.modulo('hub-laser.js') });
+          return { ok: true, pacote, avisos };
         }
-        /* sem o hub: grava o pacote com os STEP do disco e chama o pcb_importar */
-        const hora = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
-        const dir = path.join(os.tmpdir(), 'eletrichub-nexo', `${nomeSeguro(p.nome)}-${hora}`);
-        fs.mkdirSync(path.join(dir, 'modelos'), { recursive: true });
-        const falhos = new Set();
-        for (const [k, m] of Object.entries(pacote.modelos)) {
-          const f = urlParaDisco(ctx, p, m.url);
-          if (!f || !fs.existsSync(f)) { avisos.push(`${k}: STEP fora do disco (${m.url}); com o hub no ar ele vai`); falhos.add(k); delete pacote.modelos[k]; continue; }
-          fs.copyFileSync(f, path.join(dir, ...m.arquivo.split('/')));
-          delete m.url;
-        }
-        if (falhos.size) for (const c of pacote.componentes) c.corpos = c.corpos.filter(b => !(b.tipo === 'step' && falhos.has(b.modelo)));
-        const arq = path.join(dir, 'placa.json');
-        fs.writeFileSync(arq + '.tmp', JSON.stringify(pacote, null, 1)); fs.renameSync(arq + '.tmp', arq);
-        const r = await rpc('pcb_importar', { path: arq });
-        return { ok: true, via: 'nexocad', dir, componentes: pacote.componentes.length, modelos: Object.keys(pacote.modelos).length, avisos, resultado: r };
+        let pub;
+        try { pub = await SY.publicaPlaca({ ctx, cliente: c, projeto: p, hubUrl: await urlDoHub(ctx), vias: !!a.vias, nota: 'placa do NexoEletric (MCP)' }); }
+        catch (e) { throw errNH(e); }
+        const out = { ok: true, item: pub.item, rev: pub.rev, mudou: pub.mudou, componentes: pub.pacote.componentes.length, modelos: Object.keys(pub.pacote.modelos).length, avisos: pub.avisos };
+        if (a.so_publicar) return out;
+        out.resultado = await rpc('pcb_importar', { item: pub.item });
+        return out;
       },
     },
     {
-      nome: 'nexo_vincular_footprint', titulo: 'Vincular item do NexoCAD a um footprint', destrutiva: true,
-      descricao: 'Liga (ou, com remover:true, desliga) um item Eletrônicos da biblioteca do NexoCAD a um footprint do hub/Altium: o hub passa a desenhar o modelo do item no lugar dos corpos 3D de todo componente com esse footprint (na identidade do footprint). O hub não grava a biblioteca: o pedido vai ao NexoCAD (biblioteca_editar_item), que precisa estar instalado.',
+      nome: 'nexo_vincular_footprint', titulo: 'Vincular item do Nexo Hub a um footprint', destrutiva: true,
+      descricao: 'Liga (ou, com remover:true, desliga) um item do Nexo Hub a um footprint do hub/Altium: atributos.footprints + o vínculo "footprint". Num item componente, o hub passa a desenhar o modelo do item no lugar dos corpos 3D de todo componente com esse footprint (na identidade do footprint); num modelo3d o vínculo só registra quem usa o corpo (o 3D segue pela chave).',
       entrada: { type: 'object', properties: { item: { type: 'string', description: 'id do item (nexo_biblioteca)' }, footprint: { type: 'string' }, remover: { type: 'boolean' } }, required: ['item', 'footprint'] },
       executa: async (a) => {
-        const { ind } = indice();
-        const it = itensDe(ind).find(i => i.id === a.item);
-        if (!it) throw new ErroMcp(`item "${a.item}" não está na biblioteca (nexo_biblioteca lista)`);
-        if (semAcento(it.categoria) !== semAcento(CATEGORIA)) throw new ErroMcp(`"${it.nome}" é da categoria ${it.categoria}: só item Eletrônicos veste footprint`);
-        const el = Object.assign({}, it.eletronico || {});
-        const fps = (el.footprints || []).filter(f => f !== a.footprint);
+        const c = cliente();
+        let it;
+        try { it = await c.item(a.item); } catch (e) { throw errNH(e); }
+        const fps = ((it.atributos || {}).footprints || []).map(String).filter(f => f !== a.footprint);
         if (!a.remover) fps.push(a.footprint);
-        el.footprints = fps;
-        const r = await rpc('biblioteca_editar_item', { id: it.id, eletronico: el });
-        return { ok: true, id: it.id, footprints: fps, resultado: r };
+        try {
+          await c.alteraItem(it.id, { atributos: { footprints: fps } });
+          if (!a.remover) await c.vincula({ de_item: it.id, relacao: 'footprint', para_ref: a.footprint });
+          else for (const v of (it.vinculos || [])) if (v && v.relacao === 'footprint' && v.para_ref === a.footprint && v.id != null) await c.pede('DELETE', '/api/v1/vinculos/' + v.id);
+        } catch (e) { throw errNH(e); }
+        return { ok: true, id: it.id, tipo: it.tipo, footprints: fps,
+                 nota: it.tipo === 'componente' ? 'o 3D do hub passa a usar este item nesses footprints' : 'item ' + it.tipo + ': o vínculo é registrado, mas só item componente veste o footprint inteiro no 3D' };
       },
     },
   ],

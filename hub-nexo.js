@@ -1,8 +1,9 @@
 /* AltiumPCBMirror - hub-nexo.js
    O lado do navegador da integracao com o NexoCAD (contrato: docs/INTEGRACAO-NEXOCAD.md).
 
-   A biblioteca compartilhada (o "BD") e do NexoCAD: o hub so a LE, pelas rotas /api/nexo/* do
-   hubserver (tools/rotas/nexocad.py), e pede ao NexoCAD para gravar. Este modulo:
+   A biblioteca compartilhada e o NEXO HUB (o banco da rede Nexo Hub, desde a 1.9.0): o hub a LE pelas
+   rotas /api/nexo/* do hubserver (tools/rotas/nexocad.py), que a trazem do Nexo Hub no formato de
+   sempre, e pede ao NexoCAD para gravar. Este modulo:
      - carrega o indice (cache; relido quando a `revisao` muda);
      - resolve o corpo 3D de um componente pela prioridade do contrato:
          `substitui` (troca so aquele corpo STEP, mesma matriz)
@@ -20,7 +21,7 @@
      HubNexo.indice() -> o ultimo indice carregado (ou null)
      HubNexo.resolvedor() -> resolvedor do indice atual (ou null)
      HubNexo.resolvedorDe(indice) -> {porChave(chave), porFootprint(nome), porId(id), item(id)}
-         cada um devolve {id, rev, nome, url:'/api/nexo/arquivo/<id>/modelo.step',
+         cada um devolve {id, rev, nome, url:'/api/nexo/arquivo/<id>/modelo.step?rev=<rev>',
          chave:'nexo:<id>@<rev>', item} ou null
      HubNexo.resolveCorpo(body, footprint, res?) -> {url, chave, id, por:'substitui'|'id'} | null
          body = um corpo STEP com `modeloChave` (o `file` do modelo: '3d-hub/<sha>.step',
@@ -56,7 +57,8 @@ function infoDe(it){
   const a = it.arquivos || {};
   if (tem(it, 'arquivos') && !a.step) return null;          /* item sem STEP gerado: nada a desenhar */
   const rev = it.rev == null ? 0 : it.rev;
-  return { id:it.id, rev, nome:it.nome || it.id, url:urlStep(it.id), chave:'nexo:' + it.id + '@' + rev, item:it };
+  /* ?rev=: a malha da revisao certa, mesmo com o cache do navegador */
+  return { id:it.id, rev, nome:it.nome || it.id, url:urlStep(it.id) + '?rev=' + rev, chave:'nexo:' + it.id + '@' + rev, item:it };
 }
 function resolvedorDe(ind){
   const porId = new Map(), porChave = new Map(), porFp = new Map();

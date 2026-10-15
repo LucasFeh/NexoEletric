@@ -54,8 +54,12 @@ const altiumHome = require('./lib/altium-home');
 const libRemota = require('./lib/lib-remota');
 const web = require('./lib/web');
 const buildInfo = require('./lib/build-info');
+const { NexoHubSync } = require('./lib/nexohub-sync');
 
 web.registrarEsquemas();
+
+// A rede Nexo Hub: a biblioteca 3D e as placas publicadas no banco comum (lib/nexohub-sync.js)
+const nexoSync = new NexoHubSync({ log, versao: app.getVersion() });
 
 const UI_DIR = path.join(__dirname, 'ui');
 const UI_URL = pathToFileURL(UI_DIR).href;
@@ -257,6 +261,8 @@ async function subirHub({ porta } = {}) {
   } catch (e) {
     log.warn('aquecimento do indice falhou: ' + e.message);
   }
+  // o sincronizador precisa do hub no ar (o 3D da PcbLib sai do hubserver sob demanda)
+  nexoSync.iniciar(ws, origem);
 }
 
 // So chamada de dentro da fila.
@@ -543,6 +549,7 @@ function acoesDoMenu() {
     log: () => shell.openPath(path.join(LOG_DIR, 'hub.log')),
     pastaLogs: () => shell.openPath(LOG_DIR),
     conectarIA: () => conectarIA(),
+    nexoSync: () => sincronizarNexoHub(),
     sobre: () => sobre(),
   };
 }
@@ -558,6 +565,7 @@ function montarMenu() {
         { type: 'separator' },
         { label: 'Abrir pasta de trabalho', click: () => shell.openPath(settings.load().workspace) },
         { label: 'Importar do servidor…', click: () => abrirImportacao() },
+        { label: 'Nexo Hub: sincronizar agora', click: () => sincronizarNexoHub() },
         { type: 'separator' },
         { label: 'Configurações do hub…', click: () => abrirConfigDoHub() },
         { label: 'Configurações do aplicativo…', accelerator: 'CmdOrCtrl+,', click: () => abrirConfig() },
@@ -679,6 +687,16 @@ function conectarIA() {
   });
 }
 
+// Arquivo › Nexo Hub: sincronizar agora. O resultado vai na notificacao do hub e no log.
+async function sincronizarNexoHub() {
+  const wc = focada() && focada().webContents;
+  toastNoHub(wc, 'Nexo Hub: sincronizando a biblioteca 3D e as placas…', 'info');
+  const r = await nexoSync.agora();
+  const m = r.resumo && r.resumo.modelos, p = r.resumo && r.resumo.placas;
+  if (r.ok) toastNoHub(wc, 'Nexo Hub: ' + (m ? m.total + ' modelos (' + m.enviados + ' enviados)' : '') + (p ? ', ' + p.total + ' placas (' + p.publicadas + ' revisões novas)' : ''), 'ok');
+  else toastNoHub(wc, 'Nexo Hub: ' + (r.erro || 'não sincronizou'), 'warn');
+}
+
 function sobre() {
   const b = buildInfo.get();
   const s = settings.load();
@@ -694,6 +712,7 @@ function sobre() {
       `servidor central: ${s.serverUrl}`,
       `biblioteca: ${libRemotaNoAr ? 'a do servidor (esta pasta guarda a cópia para leitura)' : 'a desta pasta de trabalho'}`,
       `Odoo: ${s.odooUrl} (${s.odooDb})`,
+      `Nexo Hub: ${nexoSync.resumoTexto()}`,
       `última importação: ${importer.ultimaImportacao(s.workspace) || 'nunca'}`,
       '',
       `atualização: ${u.fase}${u.versao ? ' ' + u.versao : ''}${u.erro ? ' — ' + u.erro : ''}`,
@@ -992,6 +1011,7 @@ app.on('window-all-closed', () => app.quit());
 // nao teria onde salvar. O will-quit so vem quando todas aceitaram fechar. So entao o hub
 // para e, se "Reiniciar agora" foi pedido, o instalador da atualizacao roda.
 app.on('will-quit', (e) => {
+  nexoSync.parar();
   if (backendParado || !backend) {
     updater.instalarSePedido();
     return;

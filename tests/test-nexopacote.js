@@ -78,7 +78,7 @@ assert.strictEqual(Object.keys(P2.modelos).length, 2, 'um modelo por chave, nao 
 assert.strictEqual(P2.modelos['3d-hub/abc.step'].url, '/Libs/3d-hub/abc.step');
 assert.ok(/^modelos\/R0805\.step$/.test(P2.modelos['3d-hub/abc.step'].arquivo));
 assert.strictEqual(cr('U1').corpos[0].modelo, 'nexo:el-x', 'U1 pelo vinculo do footprint');
-assert.strictEqual(P2.modelos['nexo:el-x'].url, '/api/nexo/arquivo/el-x/modelo.step');
+assert.strictEqual(P2.modelos['nexo:el-x'].url, '/api/nexo/arquivo/el-x/modelo.step?rev=3');
 assert.strictEqual(cr('K1').conector, true, 'pad passante que passa da borda');
 assert.deepStrictEqual(P2.recortes, [[[10, 10], [12, 10], [12, 12], [10, 12]]], 'o recorte da placa inteira (kindn -1) fica de fora');
 assert.deepStrictEqual(P2.furos.find(f => f.x === 3.5), { x:3.5, y:3.5, d:3.2, tipo:'npth' }, 'furo do tamanho do cobre = fixacao (npth)');

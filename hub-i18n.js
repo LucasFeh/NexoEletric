@@ -17,7 +17,7 @@ const DICT = {
 'pt-BR': {
   /* a barra de menus do topo (hub-menubar.js): os itens do app; os do Altium vem do hub-menutrad.js */
   'mb.file':'Arquivo', 'mb.view':'Exibir', 'mb.help':'Ajuda',
-  'mb.novaJanela':'Nova janela', 'mb.abrirPasta':'Abrir pasta de trabalho', 'mb.importar':'Importar do servidor…', 'mb.abrirAltium':'Abrir documento do Altium (.SchDoc / .PrjPcb)…',
+  'mb.novaJanela':'Nova janela', 'mb.abrirPasta':'Abrir pasta de trabalho', 'mb.importar':'Importar do servidor…', 'mb.nexoSync':'Nexo Hub: sincronizar agora', 'mb.abrirAltium':'Abrir documento do Altium (.SchDoc / .PrjPcb)…',
   'mb.configHub':'Configurações do hub…', 'mb.configApp':'Configurações do aplicativo…', 'mb.sair':'Sair',
   'mb.recarregar':'Recarregar', 'mb.recarregarSemCache':'Recarregar sem cache', 'mb.zoomMais':'Aumentar zoom',
   'mb.zoomMenos':'Diminuir zoom', 'mb.zoom0':'Tamanho original', 'mb.painelProjetos':'Painel Projetos',
@@ -232,7 +232,7 @@ const DICT = {
 
 'en': {
   'mb.file':'File', 'mb.view':'View', 'mb.help':'Help',
-  'mb.novaJanela':'New Window', 'mb.abrirPasta':'Open Workspace Folder', 'mb.importar':'Import from Server…', 'mb.abrirAltium':'Open Altium Document (.SchDoc / .PrjPcb)…',
+  'mb.novaJanela':'New Window', 'mb.abrirPasta':'Open Workspace Folder', 'mb.importar':'Import from Server…', 'mb.nexoSync':'Nexo Hub: Sync Now', 'mb.abrirAltium':'Open Altium Document (.SchDoc / .PrjPcb)…',
   'mb.configHub':'Hub Settings…', 'mb.configApp':'Application Settings…', 'mb.sair':'Exit',
   'mb.recarregar':'Reload', 'mb.recarregarSemCache':'Reload Without Cache', 'mb.zoomMais':'Zoom In (Window)',
   'mb.zoomMenos':'Zoom Out (Window)', 'mb.zoom0':'Actual Size', 'mb.painelProjetos':'Projects Panel',

@@ -1533,9 +1533,9 @@ try:
 except Exception as _e:            # noqa: BLE001
     print('AVISO: placa nova desligada (%s) — falta tools/rotas/board_novo.py.' % _e)
 
-# ─────────────────── NexoCAD: a biblioteca compartilhada e o CAD (tools/rotas/nexocad.py) ───────────────────
-# /api/nexo/{estado,revisao,biblioteca,arquivo/<id>/<nome>} leem a biblioteca do disco (so leitura);
-# POST /api/nexo/{editar,placa} pedem ao NexoCAD (so desta maquina). Contrato: docs/INTEGRACAO-NEXOCAD.md.
+# ─────────────────── Nexo Hub e NexoCAD: a biblioteca da rede e o CAD (tools/rotas/nexocad.py) ───────────────────
+# /api/nexo/{estado,revisao,biblioteca,arquivo/<id>/<papel>} leem a biblioteca do Nexo Hub (o banco da rede);
+# POST /api/nexo/{editar,placa} publicam no Nexo Hub e pedem ao NexoCAD (so desta maquina). Contrato: docs/INTEGRACAO-NEXOCAD.md.
 try:
     sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
     import nexocad as _nexocad     # noqa: E402

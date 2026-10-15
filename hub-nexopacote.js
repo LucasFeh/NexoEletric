@@ -17,6 +17,8 @@
                  o mesmo filtro de recorte da tela; sem ele, o filtro local igual)}
        pacote.modelos[chave] = {arquivo:'modelos/<nome>.step', nome, url}: `url` e o caminho do STEP
        no hub (o servidor baixa e o tira do placa.json; ver POST /api/nexo/placa)
+       No Nexo Hub (o item placa, papel `placa`) cada modelo vira {item:'<id>', rev:N, nome}, sem arquivo/url:
+       o publicador e o mcp/lib/nexohub-sync.js » publicaPacote (e o tools/rotas/nexocad.py » publica_pacote)
      HubNexoPacote.contornoDe(outline) -> [laco] com [x,y] / [x,y,bulge]
      HubNexoPacote.conector(comp, contorno) -> bool
      e para os testes: lacos, furosDe, recortesDe, sobeZ */
