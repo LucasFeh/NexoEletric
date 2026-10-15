@@ -3,6 +3,12 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.7.1 — 2026-10-15
+
+- **Arrastar o componente 3D direto com o mouse** no editor de footprint: clique em cima e arraste, sem precisar das setas (elas continuam para mover num eixo só). O ímã nas pernas e nos pads continua valendo.
+- **Sincronizar pino e pad.** Clique no componente, depois na perna do pino 1 e depois no pad 1, e aperte **S**. O componente vai para o lugar com aquele pino no centro do pad e já gira (0/90/180/270°) para pôr o máximo de pernas sobre os pads. A barra de baixo mostra o resultado, por exemplo "8 de 8 pernas nos pads".
+- **Barra de ferramentas mais enxuta:** sobra um ícone, **Adicionar componente 3D** (P,B). Saíram as ferramentas de criar e girar corpo 3D (extrudado, cilindro, esfera, +90°, encaixar e trocar modelo). Os componentes 3D vão vir do NexoCAD.
+
 ## 1.7.0 — 2026-10-15
 
 - **Posicionar o modelo 3D direto na vista 3D do editor de footprint**, como nos programas de CAD:
