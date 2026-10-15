@@ -189,6 +189,9 @@ const CSS = `
 .fpe-modal .lst button.on{background:rgba(var(--tint),.14); box-shadow:inset 2px 0 0 var(--hi);}
 .fpe-modal .lst .n{font:12px var(--mono); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .fpe-modal .lst .t{font-size:11px; color:var(--text-2);}
+.fpe-modal .lst button.nexo{grid-template-columns:40px minmax(0,1fr) auto;}
+.fpe-modal .lst button.nexo img{grid-row:1 / span 2; width:40px; height:40px; object-fit:contain; border-radius:4px; background:rgba(var(--tint),.06);}
+.fpe-modal .lst button.nexo .u{grid-column:2 / -1;}
 .fpe-modal .lst .u{grid-column:1 / -1; font-size:11px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .fpe-modal .nota{font-size:11.5px; color:var(--text-2); margin-top:8px;}
 `;
@@ -285,7 +288,17 @@ async function inicia(o, resolve){
   let L3 = root.pcblib3d || null;
   const p3 = L3 ? Promise.resolve(L3) : carregaLib3d().then(x => { L3 = x; return x; });
   const temProp = (ob, k) => !!ob && Object.prototype.hasOwnProperty.call(ob, k);
-  const modelo = id => (temProp(lib.models, id) && lib.models[id]) || (L3 && temProp(L3.models, id) && L3.models[id]) || null;
+  /* a biblioteca do NexoCAD (hub-nexo.js): o item preso direto ao footprint e o modelo 'nexo:<id>' */
+  const NX = root.HubNexo || null;
+  const nexoDe = id => { const m = /^nexo:(.+)$/.exec(String(id || '')); const r = m && NX && NX.resolvedor(); return r ? r.porId(m[1]) : null; };
+  const modelo = id => (temProp(lib.models, id) && lib.models[id]) || (L3 && temProp(L3.models, id) && L3.models[id])
+    || (nexoDe(id) ? { file:id, name:nexoDe(id).nome, nexo:nexoDe(id).id } : null);
+  let nexoDesliga = null;
+  if (NX) {
+    NX.carrega().catch(() => null);
+    /* salvou no NexoCAD: o 3D do editor se refaz com o modelo novo */
+    nexoDesliga = NX.aoMudar(() => { for (const k of Array.from(malhasStep.keys())) if (/^nexo:/.test(k)) malhasStep.delete(k); if (E.modo === '3d') cena3d(); });
+  }
   const temCorpoAlt = n => !!(L3 && temProp(L3.footprints, n) && ((L3.footprints[n] || {}).bodies || []).length);
   const corposAlt = n => temCorpoAlt(n) ? JSON.parse(JSON.stringify(L3.footprints[n].bodies)) : [];
   const salvos = [];
@@ -1197,10 +1210,12 @@ async function inicia(o, resolve){
     if (!b || b.kind !== 'step' || typeof HubPcb3dStep === 'undefined') return;
     const m = modelo(b.model);
     if (!m || !m.file) return;
+    const nx = m.nexo ? nexoDe('nexo:' + m.nexo) : null;
+    if (m.nexo && !nx) return;
     let malhas = malhasStep.get(b.model);
     if (!malhas) {
       try {
-        const r = await HubPcb3dStep.carrega('Libs/' + m.file, { chave:b.model, buffer:buffer ? buffer.slice(0) : undefined });
+        const r = await HubPcb3dStep.carrega(nx ? nx.url : 'Libs/' + m.file, { chave:nx ? nx.chave : b.model, buffer:buffer ? buffer.slice(0) : undefined });
         malhas = r.malhas; malhasStep.set(b.model, malhas);
       } catch (e) { stMsg.textContent = 'STEP: ' + (e && e.message || e); return; }
     }
@@ -1304,7 +1319,23 @@ async function inicia(o, resolve){
     });
     const l = el('div'); l.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap;padding:6px 10px 10px;';
     l.append(bt('fpe-b peq', '+ Componente 3D…', () => escolheModelo()));
+    const steps = E.fp.bodies.filter(c => c && c.kind === 'step');
+    if (NX && steps.length) {
+      const alvo = () => steps.find(c => E.sel.has(c)) || steps[0];
+      l.append(bt('fpe-b peq', 'Editar no NexoCAD', () => editaNexo(alvo()), steps.length > 1 ? 'Edita o corpo STEP selecionado (sem seleção, o primeiro)' : ''));
+    }
     s.append(l);
+  }
+  /* o STEP do corpo no NexoCAD: o item da biblioteca que ja o substitui (ou o preso direto), senao
+     um item novo importado do STEP, vinculado a este footprint */
+  async function editaNexo(c){
+    if (!NX || !c || c.kind !== 'step') return;
+    await NX.carrega();
+    const m = modelo(c.model);
+    if (!m || !m.file) { toast('o corpo não tem arquivo STEP', 'warn'); return; }
+    const geometria = NX.geometriaDe(E.fp);
+    if (m.nexo) return NX.editar({ id:m.nexo }, { toast });
+    return NX.editar({ chave:m.file, url:'Libs/' + m.file, nome:m.name || c.name || (E.fp.name + '.step'), footprint:E.fp.name, geometria }, { toast });
   }
   function repetidosPads(){ return HF ? HF.repetidos(E.fp) : []; }
   function propsPad(p, modelo){
@@ -1404,6 +1435,7 @@ async function inicia(o, resolve){
     campo(a, 'Opacity', String(isNum(c.opacity) ? Math.round(c.opacity * 100) : 100), v => { const x = parseFloat(v); if (!isFinite(x)) return false; antes(); c.opacity = Math.max(0.05, Math.min(1, x / 100)); mudou(); return true; }, { dica:'0 a 100 %' });
     const d = sec('Ações');
     const ln = el('div', 'lin'); ln.append(bt('fpe-b peq', 'Apagar o corpo', () => { E.sel = new Set([c]); apaga(); }), bt('fpe-b peq', 'Ver em 3D', () => modo('3d')));
+    if (NX && c.kind === 'step') ln.append(bt('fpe-b peq', 'Editar no NexoCAD', () => editaNexo(c)));
     d.append(ln);
   }
 
@@ -1442,7 +1474,8 @@ async function inicia(o, resolve){
     const fp = E.fp;
     const comp = { ref:'FP', footprint:'__fpe__', x:0, y:0, rot:0, layer:'Top', pads:fp.pads };
     const corpos = HubPcb3dModelo.corpos({ components:[comp] }, null, {
-      pcblib3dHub:{ footprints:{ __fpe__:{ bodies:fp.bodies } }, models:Object.assign({}, L3 && L3.models, lib.models) }, baseLib:'Libs/', placeholder:false });
+      pcblib3dHub:{ footprints:{ __fpe__:{ bodies:fp.bodies } }, models:Object.assign({}, L3 && L3.models, lib.models) }, baseLib:'Libs/', placeholder:false,
+      nexo:NX ? NX.resolvedor() : null });
     /* um ref por corpo (b0, b1...): o clique e o arrasto no 3D dizem QUAL corpo do footprint */
     corpos.forEach((c, i) => { if (c) c.owner = 'b' + i; });
     E.v3.cena({
@@ -1534,7 +1567,7 @@ async function inicia(o, resolve){
        indice do hub: o arquivo continua o Libs/3d/<checksum>.step que o hubserver tira da PcbLib */
     for (const b of fp.bodies) if (b && b.kind === 'step' && b.model && !temProp(lib.models, b.model)) {
       const m = modelo(b.model);
-      if (m && m.file) lib.models[b.model] = { file:m.file, name:m.name || b.name || '', bytes:m.bytes || 0 };
+      if (m && m.file) lib.models[b.model] = Object.assign({ file:m.file, name:m.name || b.name || '', bytes:m.bytes || 0 }, m.nexo ? { nexo:m.nexo } : {});
     }
     HF.poe(lib, fp);
     try { await HF.grava(lib); }
@@ -1555,6 +1588,7 @@ async function inicia(o, resolve){
     if (forca !== true && !(await podeSair())) return false;
     document.removeEventListener('keydown', tecla, true);
     if (root.HubFpEditor.atual && root.HubFpEditor.atual.E === E) root.HubFpEditor.atual = null;
+    if (nexoDesliga) { nexoDesliga(); nexoDesliga = null; }
     if (ro) ro.disconnect();
     if (E.v3) E.v3.destroi();
     fundo.remove();
@@ -1903,8 +1937,15 @@ async function inicia(o, resolve){
     const fh = {}; for (const f of (lib.footprints || [])) if (f) fh[f.name] = f; conta(fh);
     const todos = new Map();
     for (const src of [L3 && L3.models, lib.models]) for (const id of Object.keys(src || {})) { const m = src[id]; if (m && m.file) todos.set(id, m); }
+    /* a biblioteca compartilhada do NexoCAD (os itens Eletronicos, com a miniatura) */
+    if (NX) { try { await NX.carrega(); } catch (e) { /* sem ela */ } }
+    for (const it of (NX ? NX.itens() : [])) {
+      const inf = NX.infoDe(it);
+      if (inf) todos.set('nexo:' + it.id, { file:'nexo:' + it.id, name:it.nome || it.id, nexo:it.id, thumb:it.arquivos && it.arquivos.thumb ? NX.thumb(it.id) : '',
+        fps:((it.eletronico || {}).footprints || []) });
+    }
     const nomeAtual = E.fp ? E.fp.name : '';
-    const itens = [...todos].map(([id, m]) => ({ id, m, usos:usos.get(id) || [] }))
+    const itens = [...todos].map(([id, m]) => ({ id, m, usos:(usos.get(id) || []).concat((m.fps || []).filter(f => (usos.get(id) || []).indexOf(f) < 0)) }))
       .sort((a, b) => ((b.usos.indexOf(nomeAtual) >= 0) - (a.usos.indexOf(nomeAtual) >= 0)) || String(a.m.name || '').localeCompare(String(b.m.name || '')));
     const J = janela(trocar ? 'Trocar o modelo 3D' : 'Place 3D Body — modelo STEP', 640);
     const q = el('input'); q.type = 'text'; q.placeholder = 'filtrar pelo modelo ou pelo footprint que o usa (ex.: SOT-23, 0805, TO-220)';
@@ -1920,13 +1961,17 @@ async function inicia(o, resolve){
       for (const it of f.slice(0, 300)) {
         const b = el('button'); b.type = 'button';
         if (sel === it) b.classList.add('on');
-        b.append(el('span', 'n', it.m.name || it.id), el('span', 't', tam(it.m.bytes)),
+        if (it.m.nexo) {
+          b.classList.add('nexo');
+          if (it.m.thumb) { const im = el('img'); im.src = it.m.thumb; im.alt = ''; im.loading = 'lazy'; im.onerror = () => im.remove(); b.append(im); }
+        }
+        b.append(el('span', 'n', it.m.name || it.id), el('span', 't', it.m.nexo ? 'biblioteca NexoCAD' : tam(it.m.bytes)),
                  el('span', 'u', it.usos.length ? 'em ' + it.usos.slice(0, 6).join(', ') + (it.usos.length > 6 ? ' e mais ' + (it.usos.length - 6) : '') : 'nenhum footprint usa'));
         b.addEventListener('click', () => { sel = it; for (const x of lst.children) x.classList.toggle('on', x === b); });
         b.addEventListener('dblclick', () => { sel = it; usa(); });
         lst.append(b);
       }
-      nota.textContent = itens.length ? (f.length + ' de ' + itens.length + ' modelos' + (f.length > 300 ? ' (mostrando 300: refine o filtro)' : '') + ' · da PcbLib da casa e da biblioteca do hub')
+      nota.textContent = itens.length ? (f.length + ' de ' + itens.length + ' modelos' + (f.length > 300 ? ' (mostrando 300: refine o filtro)' : '') + ' · da PcbLib da casa, da biblioteca do hub' + (NX ? ' e da biblioteca do NexoCAD' : ''))
         : 'Nenhum modelo 3D disponível (a PcbLib não foi lida). Use "STEP do computador…".';
     }
     const usa = () => { if (!sel) { toast('escolha um modelo na lista', 'info'); return; } const it = sel; J.fecha(true); prendeModelo(it, trocar); };
@@ -1949,6 +1994,19 @@ async function inicia(o, resolve){
     }
     let corpo = trocar && E.fp.bodies.indexOf(trocar) >= 0 ? trocar : null;
     const rot = base ? { rotx:base.raw.rotx || 0, roty:base.raw.roty || 0, rotz:base.raw.rotz || 0 } : { rotx:0, roty:0, rotz:0 };
+    /* item da biblioteca do NexoCAD: o STEP dele ja esta no referencial do footprint (contrato §1),
+       entra na identidade, sem o encaixe nos pads */
+    if (it.m && it.m.nexo) {
+      lib.models[it.id] = { file:it.m.file, name:it.m.name || '', nexo:it.m.nexo };
+      const raw = { x2d:0, y2d:0, rot2d:0, rotx:0, roty:0, rotz:0, dz:0 };
+      if (corpo) { corpo.kind = 'step'; corpo.model = it.id; corpo.name = it.m.name || ''; delete corpo.outline; delete corpo.matrix; corpo.raw = raw; }
+      else { corpo = { kind:'step', model:it.id, name:it.m.name || '', side:'top', raw, color:'#9a9a9a', opacity:1 }; E.fp.bodies.push(corpo); }
+      E.sel = new Set([corpo]);
+      await medeStep(corpo, null, false);
+      mudou();
+      toast('item ' + (it.m.name || '') + ' da biblioteca do NexoCAD no footprint', 'ok', 3500);
+      return;
+    }
     if (corpo) {
       corpo.kind = 'step'; corpo.model = it.id; corpo.name = it.m.name || ''; delete corpo.outline; delete corpo.matrix;
       corpo.raw = Object.assign({}, corpo.raw || {}, rot);
