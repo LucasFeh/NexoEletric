@@ -140,7 +140,7 @@ async function garanteModelo(cliente, m, ler, nota) {
   const dados = await ler(m);
   const b = await cliente.sobeBlob(dados, m.nome || m.file.split('/').pop());
   try {
-    const j = await cliente.novaRevisao(r.id, { arquivos: { step: b.sha256, origem: b.sha256 }, base: 0, nota: nota || 'importado do NexoEletric' });
+    const j = await cliente.novaRevisao(r.id, { arquivos: { step: { sha256: b.sha256, nome: m.nome || '' }, origem: { sha256: b.sha256, nome: m.nome || '' } }, base: 0, nota: nota || 'importado do NexoEletric' });
     return { id: r.id, rev: Number(j.numero) || 1, criado, enviado: true };
   } catch (e) {
     if (e.status === 409) { const x = (await cliente.resolver(NH.SIS_MODELO, [m.file]))[m.file]; return { id: r.id, rev: x ? x.rev : 1, criado, enviado: false }; }
@@ -280,11 +280,11 @@ async function publicaPacote(o) {
   if (revAtual >= 1 && (it.atributos || {}).pacote_sha === sha) return { item: it.id, rev: revAtual, mudou: false, avisos, pacote, sha };
   const b = await cliente.sobeBlob(Buffer.from(JSON.stringify(pacote, null, 1), 'utf8'), 'placa.json');
   let numero;
-  try { numero = (await cliente.novaRevisao(it.id, { arquivos: { placa: b.sha256 }, base: revAtual, nota: o.nota || 'placa do NexoEletric' })).numero; }
+  try { numero = (await cliente.novaRevisao(it.id, { arquivos: { placa: { sha256: b.sha256, nome: 'placa.json' } }, base: revAtual, nota: o.nota || 'placa do NexoEletric' })).numero; }
   catch (e) {
     if (e.status !== 409) throw e;
     const x = await cliente.item(it.id);
-    numero = (await cliente.novaRevisao(it.id, { arquivos: { placa: b.sha256 }, base: Number(x.rev != null ? x.rev : x.rev_atual) || 0, nota: o.nota || 'placa do NexoEletric' })).numero;
+    numero = (await cliente.novaRevisao(it.id, { arquivos: { placa: { sha256: b.sha256, nome: 'placa.json' } }, base: Number(x.rev != null ? x.rev : x.rev_atual) || 0, nota: o.nota || 'placa do NexoEletric' })).numero;
   }
   await cliente.alteraItem(it.id, { atributos: { projeto, pacote_sha: sha, componentes: (pacote.componentes || []).length, modelos: Object.keys(saida).length } });
   const usados = [...new Set(Object.values(saida).map(m => m.item))];

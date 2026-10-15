@@ -722,7 +722,7 @@ def garante_modelo(chave, nome, footprints, ler, nota=None):
     dados = ler()
     b = nh_sobe_blob(dados, nome or chave.split('/')[-1])
     try:
-        j = nh_revisao(r['id'], {'arquivos': {'step': b['sha256'], 'origem': b['sha256']}, 'base': 0,
+        j = nh_revisao(r['id'], {'arquivos': {'step': {'sha256': b['sha256'], 'nome': nome or ''}, 'origem': {'sha256': b['sha256'], 'nome': nome or ''}}, 'base': 0,
                                  'nota': nota or 'importado do NexoEletric'})
         return r['id'], int(j.get('numero') or 1), criado
     except ErroNexo as e:
@@ -846,11 +846,11 @@ def publica_pacote(pacote, porta):
         return {'item': it['id'], 'rev': rev_atual, 'mudou': False, 'avisos': avisos}
     b = nh_sobe_blob(json.dumps(pac, ensure_ascii=False, indent=1).encode('utf-8'), 'placa.json')
     try:
-        j = nh_revisao(it['id'], {'arquivos': {'placa': b['sha256']}, 'base': rev_atual, 'nota': 'placa do NexoEletric'})
+        j = nh_revisao(it['id'], {'arquivos': {'placa': {'sha256': b['sha256'], 'nome': 'placa.json'}}, 'base': rev_atual, 'nota': 'placa do NexoEletric'})
     except ErroNexo as e:
         if getattr(e, 'http', 0) != 409:
             raise
-        j = nh_revisao(it['id'], {'arquivos': {'placa': b['sha256']}, 'base': _rev(nh_item(it['id'])), 'nota': 'placa do NexoEletric'})
+        j = nh_revisao(it['id'], {'arquivos': {'placa': {'sha256': b['sha256'], 'nome': 'placa.json'}}, 'base': _rev(nh_item(it['id'])), 'nota': 'placa do NexoEletric'})
     nh('PATCH', '/api/v1/itens/%s' % _q(it['id']), {'atributos': {'projeto': projeto, 'pacote_sha': sha,
                                                                  'componentes': len(pac.get('componentes') or []),
                                                                  'modelos': len(saida)}})
