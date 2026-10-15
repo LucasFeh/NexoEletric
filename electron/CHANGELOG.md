@@ -3,6 +3,23 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.4.0 — 2026-10-15
+
+- **Editor de footprint com a barra do Altium (Active Bar)** no alto da área de trabalho, cada botão com as variantes no triângulo:
+  - **Seleção:** tudo, só pads, só serigrafia, só corpos 3D, inverter e limpar.
+  - **Mover e girar:** mover por X,Y (M,X), girar 90° ou por ângulo, espelhar em X e Y, duplicar e apagar.
+  - **Alinhar e distribuir:** A,L / A,R / A,T / A,B / A,C / A,E / A,D / A,S.
+  - **Desenho:** pad, linha e retângulo (P,R), arco e círculo (P,U).
+  - **Corpo 3D:** da biblioteca, STEP do computador, extrudado, cilindro e esfera.
+  - **Medir distância:** Ctrl+M.
+  - **Origem do footprint (Set Reference):** no pino 1 (E,F,P), no centro (E,F,C) ou num ponto (E,F,L).
+  - **Assistente de footprint:** T,W.
+  - **Enquadrar.**
+- **Os modelos 3D da BIBLIOTECA DE FOOTPRINT do Altium no hub.** O footprint do Altium abre com o modelo dele (tecla 3 mostra em 3D), e a lista marca "3D" nos que têm modelo. **Place 3D Body** (P,B) escolhe entre os 330 modelos STEP da PcbLib, procurando pelo nome do modelo ou do footprint que o usa, e já traz a rotação com que esse footprint o usa. Os modelos saem da própria PcbLib, sob demanda; nada é copiado para o repositório.
+- **Assistente de footprint:** chip (2 terminais), SOIC/SOP, QFP/LQFP, DIP, SOT-23 (3, 5 e 6 pinos) e barra de pinos (1 ou 2 fileiras). A numeração segue a do Altium, a serigrafia leva a marca do pino 1 e o corpo 3D vem do tamanho do corpo.
+- **A vista 3D enquadra também os componentes**, e peça alta numa placa pequena não fica mais cortada.
+- **MCP: a IA edita footprint.** Grupo novo com 8 ferramentas: `fp_buscar`, `fp_ler`, `fp_salvar`, `fp_pacote` (o assistente), `fp_modelos3d`, `fp_corpo3d` (prende um STEP), `fp_apagar` e `fp_vincular` (footprint a componente). As ferramentas gravam só na biblioteca de footprints do hub.
+
 ## 1.3.3 — 2026-10-15
 
 - Biblioteca › Componentes: a faixa de baixo fica na ordem **Componentes | Símbolos | Footprints**.
