@@ -3,6 +3,11 @@
 Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega o hub do
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o EletricHUB**.
 
+## 1.6.1 — 2026-10-15
+
+- **Real View pelo ícone da barra lateral:** na placa, no painel **Vista** (ao lado de "Ver por baixo"); no editor de footprint, nas **Ferramentas**. Ligar abre o 3D já no Real View; clicar de novo volta às cores de sempre. A escolha fica gravada.
+- Saíram o modo **Render** e o seletor do canto da vista 3D; o Real View usa o estúdio e pads de estanho.
+
 ## 1.6.0 — 2026-10-15
 
 - **3D realista: Real View e Render.** No canto da vista 3D (PCB e editor de footprint) há um seletor **Padrão · Real View · Render**:
