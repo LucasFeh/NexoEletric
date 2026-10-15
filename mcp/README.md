@@ -61,7 +61,7 @@ node mcp/eletrichub-mcp.js --root <pasta> --http 8765
 claude mcp add --transport http eletrichub http://127.0.0.1:8765/mcp
 ```
 
-## Ferramentas (68, por grupo)
+## Ferramentas (73, por grupo)
 
 `list_commands` lista tudo com descrição; cada ferramenta diz na descrição o fluxo de uso.
 
@@ -73,6 +73,7 @@ claude mcp add --transport http eletrichub http://127.0.0.1:8765/mcp
 | footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |
 | pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
 | pcbmod | `regras_ler`, `regras_definir` (`hub-pcbregras.js`), `drc_rodar` (`hub-pcbdrc.js`), `nets_ratsnest` (`hub-pcbnets.js`, com reserva própria), `pour_definir`, `pour_despejar` (`hub-pcbpour.js`), `teardrop_aplicar` (`hub-pcbteardrop.js`), `eco_comparar`, `eco_aplicar` (`hub-pcbeco.js`) |
+| nexo | `nexo_estado` (a biblioteca compartilhada e o NexoCAD), `nexo_biblioteca` (lista/busca os itens, lida do disco), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou um item, aberto no NexoCAD; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (a placa efetiva montada no NexoCAD, `hub-nexopacote.js`), `nexo_vincular_footprint` (pelo `biblioteca_editar_item` do NexoCAD: o hub não grava a biblioteca). Com o hub no ar vai pelas rotas `/api/nexo/*`; sem ele, direto no `/rpc` do NexoCAD. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
 | saidas | `gerber_gerar` (grava `Projects/<p>/Gerber/` + `gerber.json`, como a rota `/api/gerber`; redespeja os polígonos antes), `gerber_salvo` (relê com o `hub-gerberview.js`), `pdf_layout` (`hub-pcbpdf.js` → `PDF/LO - <base>.pdf`), `bom_listar` |
 | sinal | `sinal_listar`, `sinal_responder` (só status/reply, AI-GUIDE Parte C), `sinal_criar` |
 | hub | `list_commands`, `hub_status`, `hub_modulos`, `hub_modulo_chamar` (qualquer função de qualquer módulo, com `$placa`, `$esquema`, `$regras`...), `vista_screenshot`, `vista_comando`, `altium_comandos` (`hub-altiumdna.js`), `hub_recarregar_ferramentas` |
@@ -145,6 +146,7 @@ objeto; `{_imagem:{base64, mime}}` vira imagem; `ok:false` vira `isError`.
 ```
 node tests/test-mcp.js          # stdio com processo filho, HTTP, e as ferramentas numa CÓPIA de "LM555 astável"
 python tests/test_mcp_rotas.py  # as rotas da vista ao vivo
+node tests/test-mcp-nexo.js     # o grupo nexo, com uma biblioteca e um NexoCAD de mentira
 ```
 
 Os testes nunca gravam nos `Projects/` reais (conferem isso no fim).
