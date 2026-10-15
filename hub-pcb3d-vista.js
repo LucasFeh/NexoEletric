@@ -46,6 +46,12 @@
                                  pernas em pads ao mesmo tempo; no Z, o corpo assenta na placa (o
                                  ponto mais baixo em 0) ou a perna atravessa ate a face de baixo;
                                  fora do alcance, o passo da grade. Shift solta o magnetismo.
+     sincronizar pino e pad      com o corpo selecionado: clique numa perna dele (marca o pino,
+                                 anel verde), clique no pad (anel amarelo) e chame
+                                 vista.sincroniza(): o corpo vai com aquele pino no centro do pad,
+                                 no giro (0/90/180/270 em torno do pino) que poe mais pernas em
+                                 pads. edita.aoSincronizar(ref, {pivo, alvo, ang}) grava;
+                                 edita.aviso(texto) conta o passo a passo.
 */
 (function (root) {
 'use strict';
@@ -250,6 +256,7 @@ async function cria(host, opcoes){
     const a = arr; arr = null;
     try { cv.releasePointerCapture(a.id); } catch (e) { /* ok */ }
     if (a.andou) return;
+    if (a.b === 0 && ED && selRef && !refSob(ev) && marcaPad(ev)) return;
     if (a.b === 0 && o.aoClicar) o.aoClicar(refSob(ev), ev);
     if (a.b === 2 && !a.girar && o.aoMenu) o.aoMenu(refSob(ev), ev);
   };
@@ -536,6 +543,7 @@ async function cria(host, opcoes){
     pede();
   }
   function seleciona(ref){
+    if ((ref || null) !== selRef) { sinc.pino = sinc.pad = null; mostraSinc(); }
     selRef = ref || null;
     realce = new Set(selRef ? [selRef] : []);
     aplicaRealce();
@@ -593,10 +601,9 @@ async function cria(host, opcoes){
     return { pts, zmin, zmax };
   }
   function comecaArrasto(ev){
-    if (!selRef) return false;
     const r = raioDe(ev);
     let eixo = null;
-    if (gGiz.visible) {
+    if (selRef && gGiz.visible) {
       ray.ray.copy(r);
       /* o quadrado do plano ganha das setas: a area de pegar da seta Z cobre o quadrado em muitas poses */
       const hits = ray.intersectObject(gGiz, true).filter(h => h.object.userData.eixo);
@@ -604,18 +611,25 @@ async function cria(host, opcoes){
       if (hq || hits[0]) eixo = (hq || hits[0]).object.userData.eixo;
     }
     if (!eixo) {
-      /* arrastar o proprio corpo selecionado: no plano da placa */
+      /* clicar e arrastar QUALQUER corpo: ele e selecionado e anda no plano da placa, sem passar
+         pelas setas (que continuam la para mover num eixo so) */
       ray.ray.copy(r);
       const hit = ray.intersectObjects([gCorpos], true)[0];
       let ob = hit && hit.object;
       while (ob && !(ob.userData && ob.userData.ref)) ob = ob.parent;
-      if (!ob || ob.userData.ref !== selRef) return false;
+      if (!ob) return false;
+      var jaSel = ob.userData.ref === selRef, ponto = hit.point.clone();
+      if (ob.userData.ref !== selRef) {
+        seleciona(ob.userData.ref);
+        if (o.aoClicar) { try { o.aoClicar(ob.userData.ref, ev); } catch (e) { /* ok */ } }
+      }
       eixo = 'xy';
     }
     const h = suporteDe(selRef);
     if (!h) return false;
     const O = gGiz.position.clone();
-    drag = { eixo, h, O, pos0:h.position.clone(), giz0:gGiz.position.clone(), d:new T.Vector3(), andou:false, x:ev.clientX, y:ev.clientY, pernas:pernasDe(h) };
+    drag = { eixo, h, O, pos0:h.position.clone(), giz0:gGiz.position.clone(), d:new T.Vector3(), andou:false, x:ev.clientX, y:ev.clientY, pernas:pernasDe(h),
+             jaSel:!!jaSel, ponto:ponto || null };
     if (eixo === 'xy') drag.p0 = noPlanoZ(r, O.z);
     else drag.t0 = tNoEixo(r, O, EIXO[eixo]);
     if (eixo === 'xy' && !drag.p0) { drag = null; return false; }
@@ -639,7 +653,7 @@ async function cria(host, opcoes){
         let n = 0; const casados = [];
         for (const r of pe) {
           const rx = r[0] + cx, ry = r[1] + cy;
-          if (pads.some(t => Math.abs(t[0] - rx) <= tol && Math.abs(t[1] - ry) <= tol)) { n++; casados.push([rx, ry]); }
+          if (pads.some(t => noPad(rx, ry, t))) { n++; casados.push([rx, ry]); }
         }
         if (!n) continue;
         const dist = Math.hypot(cx - d.x, cy - d.y);
@@ -647,6 +661,14 @@ async function cria(host, opcoes){
       }
     }
     return melhor;
+  }
+  /* a perna (o pe dela) cai DENTRO do pad: [x, y, w, h, rot] (w/h trocam a 90/270); sem tamanho,
+     a 0,15 mm do centro */
+  function noPad(x, y, q){
+    if (!(q[2] > 0 && q[3] > 0)) return Math.abs(q[0] - x) <= 0.15 && Math.abs(q[1] - y) <= 0.15;
+    const r = (((q[4] || 0) % 180) + 180) % 180, deitado = Math.abs(r - 90) < 1;
+    const hw = (deitado ? q[3] : q[2]) / 2 + 0.02, hh = (deitado ? q[2] : q[3]) / 2 + 0.02;
+    return Math.abs(x - q[0]) <= hw && Math.abs(y - q[1]) <= hh;
   }
   function marca(pontos, z){
     for (const c of gMarca.children.slice()) { gMarca.remove(c); c.geometry.dispose(); c.material.dispose(); }
@@ -692,9 +714,72 @@ async function cria(host, opcoes){
     try { cv.releasePointerCapture(ev.pointerId); } catch (e) { /* ok */ }
     for (const g of gGiz.children) if (g.userData.mat) g.userData.mat.opacity = g.userData.eixo === 'xy' ? 0.55 : 0.95;
     marca([], 0);
-    if (a && a.andou && (a.d.x || a.d.y || a.d.z) && ED.aoMover) ED.aoMover(selRef, { x:a.d.x, y:a.d.y, z:a.d.z });
+    if (a && a.andou && (a.d.x || a.d.y || a.d.z) && ED.aoMover) { sinc.pino = sinc.pad = null; mostraSinc(); ED.aoMover(selRef, { x:a.d.x, y:a.d.y, z:a.d.z }); }
+    else if (a && !a.andou && a.jaSel && a.ponto) marcaPino(a);
     else if (a && !a.andou && o.aoClicar) o.aoClicar(selRef, ev);
     pede();
+  }
+  /* ---------- sincronizar: o pino marcado no centro do pad marcado ---------- */
+  const sinc = { pino:null, pad:null };
+  const gSinc = new T.Group(); cena.add(gSinc);
+  const avisa = t => { if (ED && ED.aviso) { try { ED.aviso(t); } catch (e) { /* ok */ } } };
+  function anel(x, y, z, cor){
+    const r = Math.max(0.18, orb.dist * 0.008);
+    const m = new T.Mesh(new T.RingGeometry(r * 0.55, r, 28), matGiz(cor, 1));
+    m.material.side = T.DoubleSide; m.position.set(x, y, z + 0.02); m.renderOrder = 1001;
+    return m;
+  }
+  function mostraSinc(){
+    for (const c of gSinc.children.slice()) { gSinc.remove(c); c.geometry.dispose(); c.material.dispose(); }
+    if (sinc.pino) gSinc.add(anel(sinc.pino[0], sinc.pino[1], sinc.pino[2], 0x00e676));
+    if (sinc.pad) gSinc.add(anel(sinc.pad[0], sinc.pad[1], 0.01, 0xffc107));
+    pede();
+  }
+  /* o clique (sem arrastar) no corpo ja selecionado marca a perna mais perto do ponto clicado */
+  function marcaPino(a){
+    const pe = a.pernas.pts;
+    if (!pe.length) { avisa('o modelo nao tem pernas reconheciveis'); return; }
+    let m = null, dm = Infinity;
+    for (const p of pe) { const d = Math.hypot(p[0] - a.ponto.x, p[1] - a.ponto.y); if (d < dm) { dm = d; m = p; } }
+    sinc.pino = [m[0], m[1], a.pernas.zmin];
+    mostraSinc();
+    avisa(sinc.pad ? 'pino e pad marcados: S sincroniza' : 'pino marcado: agora clique no pad');
+  }
+  /* o clique na placa (sem arrastar), com um corpo selecionado, marca o pad mais perto */
+  function marcaPad(ev){
+    posiciona(); ray.setFromCamera(ndc(ev), cam);
+    const hit = ray.intersectObjects([gPlaca], true)[0];
+    if (!hit) return false;
+    const pads = ED.pads ? (ED.pads() || []) : [];
+    if (!pads.length) return false;
+    let m = null, dm = Infinity;
+    for (const q of pads) { const d = Math.hypot(q[0] - hit.point.x, q[1] - hit.point.y); if (d < dm) { dm = d; m = q; } }
+    sinc.pad = [m[0], m[1]];
+    mostraSinc();
+    avisa(sinc.pino ? 'pino e pad marcados: S sincroniza' : 'pad marcado: agora clique no pino do componente');
+    return true;
+  }
+  function sincroniza(){
+    if (!selRef) { avisa('clique no componente primeiro'); return null; }
+    if (!sinc.pino || !sinc.pad) { avisa(!sinc.pino ? 'clique no pino do componente' : 'clique no pad'); return null; }
+    const h = suporteDe(selRef); if (!h) return null;
+    const pe = pernasDe(h).pts, pads = ED.pads ? (ED.pads() || []) : [];
+    const [px, py] = sinc.pino, [ax, ay] = sinc.pad, tol = 0.15;
+    let melhor = null;
+    for (const ang of [0, 90, 180, 270]) {
+      const c = Math.cos(ang * RAD), s_ = Math.sin(ang * RAD);
+      let n = 0;
+      for (const p of pe) {
+        const dx = p[0] - px, dy = p[1] - py;
+        const x = ax + dx * c - dy * s_, y = ay + dx * s_ + dy * c;
+        if (pads.some(q => noPad(x, y, q))) n++;
+      }
+      if (!melhor || n > melhor.n) melhor = { ang, n };
+    }
+    const r = { pivo:[px, py], alvo:[ax, ay], ang:melhor.ang, pernas:melhor.n, de:pe.length };
+    sinc.pino = sinc.pad = null; mostraSinc();
+    if (ED.aoSincronizar) ED.aoSincronizar(selRef, r);
+    return r;
   }
 
   /* ---------- os modos de vista ---------- */
@@ -787,9 +872,10 @@ async function cria(host, opcoes){
     realca(refs){ realce = new Set(refs || []); aplicaRealce(); },
     pose, gira, inclina, vira, enquadra, redimensiona,
     canvas:cv,
-    _cena:cena, _cam:cam, _giz:gGiz,   /* gancho de teste (CDP), nao e contrato */
+    _cena:cena, _cam:cam, _giz:gGiz, _pernas:() => (selRef && suporteDe(selRef) ? pernasDe(suporteDe(selRef)) : null),   /* gancho de teste (CDP), nao e contrato */
     seleciona,
     selecionado:() => selRef,
+    sincroniza,
     realView(on){ if (on != null) trocaModo(on ? 'real' : 'padrao'); return modo === 'real'; },
     estado(){ return { steps:est.steps, falhas:est.falhas.slice(), corpos:est.corpos, az:orb.az / RAD, el:orb.el / RAD, dist:orb.dist, realView:modo === 'real' }; },
     destroi(){

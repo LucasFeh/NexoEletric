@@ -421,9 +421,7 @@ async function inicia(o, resolve){
         const b = ibt(id, rot + ' (' + k + ')', () => ferramenta(id));
         b.setAttribute('aria-pressed', String(E.tool === id)); bTool[id] = b; tb.append(b);
       }
-      tb.append(ibt('step', 'Corpo 3D: um modelo STEP da biblioteca ou do computador (P,B)', () => escolheModelo()),
-                ibt('extrude', 'Corpo 3D extrudado: uma caixa com o contorno dos pads (P,E)', () => poeCorpo('extruded')),
-                ibt('cyl', 'Corpo 3D cilíndrico (capacitor eletrolítico, LED)', () => poeCorpo('cylinder')),
+      tb.append(ibt('lib3d', 'Adicionar componente 3D (P,B)', () => escolheModelo()),
                 ibt('del', 'Apagar a seleção (Delete)', () => apaga()));
       const tb2 = el('div', 'symed-tb');
       bReal = ibt('realview', 'Real View: o 3D com materiais, reflexo e sombra realistas (liga o 3D)', () => alternaReal());
@@ -442,11 +440,9 @@ async function inicia(o, resolve){
       bTool[id] = b; barra.append(b);
     }
     barra.append(el('span', 'sep'));
-    const b3d = bt('', '', () => escolheModelo(), 'Place » 3D Body: um modelo STEP da biblioteca ou do computador (P,B)');
-    b3d.append(document.createTextNode('3D Body (STEP)'), el('kbd', null, 'P,B'));
-    const bEx = bt('', '', () => poeCorpo('extruded'), 'Place » Extruded 3D Body: uma caixa com o contorno dos pads (P,E)');
-    bEx.append(document.createTextNode('Extruded'), el('kbd', null, 'P,E'));
-    barra.append(b3d, bEx, bt('', 'Cylinder', () => poeCorpo('cylinder'), 'Corpo 3D cilíndrico (capacitor eletrolítico, LED)'));
+    const b3d = bt('', '', () => escolheModelo(), 'Adicionar componente 3D (P,B)');
+    b3d.append(document.createTextNode('+ Componente 3D'), el('kbd', null, 'P,B'));
+    barra.append(b3d);
     barra.append(el('span', 'sep'));
     const sg = el('select'); sg.title = 'Grade (G)';
     for (const [v, r] of GRADES) { const op = el('option', null, r); op.value = String(v); if (Math.abs(v - E.grade) < 1e-9) op.selected = true; sg.append(op); }
@@ -1124,7 +1120,6 @@ async function inicia(o, resolve){
     item('Place Arc', 'P,A', () => ferramenta('arco'));
     item('Place Full Circle', 'P,U', () => ferramenta('circulo'));
     item('Place 3D Body…', 'P,B', () => escolheModelo());
-    item('Place Extruded 3D Body', 'P,E', () => poeCorpo('extruded'));
     m.append(sepMenu());
     item('Rotate Selection', 'Espaço', gira90, !E.sel.size);
     item('Duplicate', 'Ctrl+D', duplica, !E.sel.size);
@@ -1308,7 +1303,7 @@ async function inicia(o, resolve){
       s.append(d);
     });
     const l = el('div'); l.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap;padding:6px 10px 10px;';
-    l.append(bt('fpe-b peq', '+ Modelo 3D…', () => escolheModelo()), bt('fpe-b peq', '+ STEP do PC…', () => poeStep()), bt('fpe-b peq', '+ Extruded', () => poeCorpo('extruded')), bt('fpe-b peq', '+ Cylinder', () => poeCorpo('cylinder')));
+    l.append(bt('fpe-b peq', '+ Componente 3D…', () => escolheModelo()));
     s.append(l);
   }
   function repetidosPads(){ return HF ? HF.repetidos(E.fp) : []; }
@@ -1398,13 +1393,6 @@ async function inicia(o, resolve){
         campo(r, 'Rotation X', String(raw.rotx || 0), angR('rotx'));
         campo(r, 'Rotation Y', String(raw.roty || 0), angR('roty'));
         campo(r, 'Rotation Z', String(raw.rotz || 0), angR('rotz'));
-        const ln = el('div', 'lin');
-        const gira = (k) => () => { antes(); raw[k] = ((raw[k] || 0) + 90) % 360; medeStep(c).then(() => mudou()); };
-        ln.append(bt('fpe-b peq', 'X +90°', gira('rotx')), bt('fpe-b peq', 'Y +90°', gira('roty')), bt('fpe-b peq', 'Z +90°', gira('rotz')),
-          bt('fpe-b peq', 'Encaixar nos pads', () => { antes(); medeStep(c, null, true).then(() => mudou()); }),
-          bt('fpe-b peq', 'Trocar modelo…', () => escolheModelo(c)));
-        r.append(ln);
-        r.append(el('div', 'nota', '"Encaixar" centraliza o modelo sobre os pads e o assenta na placa (o Z mínimo vira 0).'));
       } else {
         const s = sec('Size');
         campo(s, 'Radius', mostra(c.radius), num(c, 'radius', x => Math.max(0.01, x)));
@@ -1424,15 +1412,17 @@ async function inicia(o, resolve){
     if (m === E.modo && (m === '2d' || E.v3)) return;
     if (m === '3d') {
       if (typeof HubPcb3dVista === 'undefined' || !HubPcb3dVista.disponivel()) { toast('esta máquina não tem WebGL: a vista 3D não abre', 'warn', 4000); return; }
-      E.modo = '3d'; cv.hidden = true; v3host.hidden = false; dica.textContent = 'clique no corpo e arraste as setas (X, Y, Z) · PageUp/PageDown sobe/desce · Shift solta o ímã · arrastar no vazio gira · 2 volta ao 2D';
+      E.modo = '3d'; cv.hidden = true; v3host.hidden = false; dica.textContent = 'arraste o corpo (ou as setas X, Y, Z) · PageUp/PageDown sobe/desce · Shift solta o ímã · sincronizar: clique no corpo, no pino, no pad e S · arrastar no vazio gira';
       if (!E.v3) {
         try { E.v3 = await HubPcb3dVista.cria(v3host, { aoClicar:ref => clica3d(ref), edita:{
-          pads:() => E.fp.pads.map(p => [p.x, p.y]),
+          pads:() => E.fp.pads.map(p => [p.x, p.y, p.w, p.h, p.rot || 0]),
           grade:() => E.grade,
           aoArrastar:(ref, d, info) => { stMsg.textContent = 'ΔX ' + fmt(d.x) + ' · ΔY ' + fmt(d.y) + ' · ΔZ ' + fmt(d.z)
             + (info && info.encaixe ? ' · encaixado: ' + info.encaixe.pernas + ' de ' + info.encaixe.de + ' pernas nos pads' : '')
             + (info && info.assento ? ' · ' + info.assento : ''); },
           aoMover:(ref, d) => moveCorpo3d(ref, d),
+          aviso:t => { stMsg.textContent = t; },
+          aoSincronizar:(ref, r) => sincCorpo3d(ref, r),
         } }); }
         catch (e) { toast('a vista 3D não abriu: ' + (e && e.message || e), 'err', 5000); E.modo = '2d'; cv.hidden = false; v3host.hidden = true; return; }
       }
@@ -1488,6 +1478,17 @@ async function inicia(o, resolve){
     E.sel = new Set([b]);
     stMsg.textContent = '';
     mudou();
+  }
+  /* S: o pino marcado no centro do pad marcado, no giro que poe mais pernas em pads */
+  function sincCorpo3d(ref, r){
+    const i = /^b([0-9]+)$/.test(ref || '') ? +ref.slice(1) : -1, b = i >= 0 ? E.fp.bodies[i] : null;
+    if (!b) return;
+    antes();
+    if (r.ang) giraItens([b], r.ang, r.pivo[0], r.pivo[1]);
+    move(b, r4(r.alvo[0] - r.pivo[0]), r4(r.alvo[1] - r.pivo[1]));
+    E.sel = new Set([b]);
+    mudou();
+    stMsg.textContent = 'sincronizado: ' + r.pernas + ' de ' + r.de + ' pernas nos pads' + (r.ang ? ' (girou ' + r.ang + '°)' : '');
   }
   /* subir/descer: o Z Offset do STEP (e do cilindro/esfera) ou a faixa do extrudado */
   function sobeCorpo(b, dz){
@@ -1599,7 +1600,7 @@ async function inicia(o, resolve){
       if (p === 'P') {
         if (L === 'P') ferramenta('pad'); else if (L === 'L') ferramenta('linha'); else if (L === 'A') ferramenta('arco');
         else if (L === 'U') ferramenta('circulo'); else if (L === 'R') ferramenta('ret');
-        else if (L === 'B') escolheModelo(); else if (L === 'E') poeCorpo('extruded');
+        else if (L === 'B') escolheModelo();
       }
       else if (p === 'V' && L === 'F') enquadra();
       else if (p === 'E' && L === 'F') { E.prefixo = 'EF'; stMsg.textContent = 'E, F, …'; }
@@ -1622,6 +1623,8 @@ async function inicia(o, resolve){
     if (L === 'Q') { trocaUnid(); return; }
     if (L === 'G') { const i = GRADES.findIndex(g => Math.abs(g[0] - E.grade) < 1e-9); E.grade = GRADES[(i + 1) % GRADES.length][0]; gravaPref(); montaBarra(); status(); pede(); return; }
     if (k === ' ') { e.preventDefault(); gira90(); return; }
+    /* S no 3D: sincroniza o pino marcado com o pad marcado */
+    if (L === 'S' && E.modo === '3d' && E.v3 && E.v3.sincroniza) { e.preventDefault(); E.v3.sincroniza(); return; }
     /* PageUp/PageDown: sobe/desce o corpo 3D selecionado um passo da grade (Shift: 10) */
     if ((k === 'PageUp' || k === 'PageDown') && [...E.sel].some(x => tipo(x) === 'body')) {
       e.preventDefault(); antes();
@@ -1723,11 +1726,7 @@ async function inicia(o, resolve){
     ], true);
     sep();
     abGrupo([
-      { ic:'lib3d', rot:'Corpo 3D: modelo STEP da biblioteca…', k:'P,B', fn:() => escolheModelo() },
-      { ic:'pasta', rot:'Corpo 3D: STEP do computador…', fn:() => poeStep() },
-      { ic:'extrude', rot:'Corpo 3D extrudado', k:'P,E', fn:() => poeCorpo('extruded') },
-      { ic:'cyl', rot:'Corpo 3D cilíndrico', fn:() => poeCorpo('cylinder') },
-      { ic:'esfera', rot:'Corpo 3D esférico', fn:() => poeCorpo('sphere') },
+      { ic:'lib3d', rot:'Adicionar componente 3D…', k:'P,B', fn:() => escolheModelo() },
     ]);
     sep();
     abGrupo([{ ic:'mede', rot:'Medir distância', k:'Ctrl+M', fn:() => ferramenta('mede'), tool:'mede' }]);
