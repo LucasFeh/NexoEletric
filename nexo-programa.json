@@ -1,0 +1,60 @@
+{
+  "id": "nexoeletric",
+  "nome": "NexoEletric",
+  "descricao": "Esquema e PCB estilo Altium (antigo EletricHUB); publica a biblioteca 3D e as placas no Nexo Hub.",
+  "windows": [
+    "NexoEletric",
+    "EletricHUB"
+  ],
+  "instalacao": "C:\\Program Files\\NexoEletric",
+  "mcp": {
+    "nome": "nexoeletric",
+    "comando": "{instalacao}\\NexoEletric.exe",
+    "args": [
+      "{instalacao}\\resources\\hub\\mcp\\eletrichub-mcp.js",
+      "--root",
+      "C:\\NexoEletric"
+    ],
+    "env": {
+      "ELECTRON_RUN_AS_NODE": "1"
+    },
+    "descricao": "Esquema, PCB, footprints, biblioteca e saídas do NexoEletric"
+  },
+  "dev": {
+    "repositorio": "C:\\Users\\Lucas\\APM-build",
+    "branch": "nexocad-integracao",
+    "remotos": [
+      {
+        "remoto": "origin",
+        "ref": "nexocad-integracao",
+        "url": "https://github.com/LucasFeh/AltiumPCBMirror"
+      },
+      {
+        "remoto": "https://github.com/LucasFeh/NexoEletric.git",
+        "ref": "main",
+        "url": "https://github.com/LucasFeh/NexoEletric"
+      }
+    ],
+    "versao": "electron/package.json",
+    "notas": "electron/CHANGELOG.md (seção ## <versão>)",
+    "testes": "",
+    "build": {
+      "pasta": "electron",
+      "comando": "npm run dist",
+      "env": {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "safe.directory",
+        "GIT_CONFIG_VALUE_0": "*"
+      }
+    },
+    "semVersao": [
+      "docs/",
+      "tests/",
+      "electron/test/",
+      "README.md",
+      "build.log",
+      "electron/scripts/publicar-nexohub.mjs"
+    ],
+    "git": "git -c safe.directory=*; autor Lucas Ferreira <70298160+LucasFeh@users.noreply.github.com> por GIT_AUTHOR_*/GIT_COMMITTER_* (sem mexer no config global). Mudanças só como acréscimo; não mexer no tema, Odoo, Libs e símbolos."
+  }
+}
