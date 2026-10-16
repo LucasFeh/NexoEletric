@@ -321,8 +321,13 @@ for (const g of GP.filter(x => x.acoes)){
    valeria na vista inteira ANTES do mapa, e brigaria calada com a ação gravada nela. */
 const DE_MOUSE = new Set(['Clique', 'Segundo clique', 'Clique duplo', 'Arrastar', 'Arrastar no vazio →', 'Arrastar no vazio ←',
   'Arrastar a ponta', 'Botão direito', 'Roda do mouse', 'Shift', 'Ctrl', 'Alt', 'Escape']);
+/* A exceção é a tecla que NINGUÉM grava (TECLAS_PROIBIDAS): ela não briga com ação nenhuma. É o
+   Ctrl+W do Altium (2026-10-16), que pega a Trilha no app desktop, ao lado do W gravável. */
 for (const g of GP.filter(x => !x.quando))
-  assert.ok(g.teclas.every(t => DE_MOUSE.has(t)), g.rotulo + ': gesto da vista toda é de mouse, não tecla');
+  assert.ok(g.teclas.every(t => DE_MOUSE.has(t)) || A.TECLAS_PROIBIDAS.includes(g.teclas.join('+')),
+    g.rotulo + ': gesto da vista toda é de mouse (ou tecla que ninguém grava), não tecla');
+assert.ok(gesto(/^Trilha .Interactive Routing/, 'Ctrl+W'), 'Ctrl+W = a Trilha, como no Altium');
+assert.ok(A.TECLAS_PROIBIDAS.includes('Ctrl+W'), 'o Ctrl+W não se grava: o gesto fixo não briga com ação');
 /* as teclas de verdade dos estados (Espaço, Backspace, 2, L...) têm estado */
 for (const g of GP.filter(x => x.teclas.some(t => ['Espaço', 'Backspace', '2', 'L', 'Tab', 'X', '*'].includes(t))))
   assert.ok(g.quando, g.rotulo + ': tecla de estado tem quando');

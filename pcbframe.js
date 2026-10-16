@@ -161,6 +161,7 @@ const GESTOS_PCB = [
   { rotulo:'Janela: esquerda→direita pega o que está DENTRO', teclas:['Arrastar no vazio'] },
   { rotulo:'Janela: direita→esquerda pega o que TOCA',   teclas:['Arrastar no vazio'] },
   { rotulo:'Mover',                                      teclas:['Arrastar'] },
+  { rotulo:'Trilha (Interactive Routing do Altium, no app desktop)', teclas:['Ctrl', 'W'] },
   { rotulo:'Mover só a ponta de uma trilha selecionada', teclas:['Arrastar a ponta'] },
   { rotulo:'Arrastar a tela',                            teclas:['Botão direito', 'Arrastar'] },
   { rotulo:'Menu',                                       teclas:['Botão direito'] },
@@ -180,7 +181,7 @@ const GESTOS_PCB = [
   { rotulo:'Girar',                                      teclas:['Espaço'],           quando:ARRASTO },
   { rotulo:'Trocar de face (componente)',                teclas:['L'],                quando:ARRASTO },
   { rotulo:'Espelhar (texto e forma)',                   teclas:['X / Y'],            quando:ARRASTO },
-  { rotulo:'Soltar o snap',                              teclas:['Ctrl'],             quando:ARRASTO },
+  { rotulo:'Soltar o snap e as guias',                   teclas:['Ctrl'],             quando:ARRASTO },
   { rotulo:'Largar o que estiver na mão',                teclas:['Escape'] },
 ];
 const HA = (typeof HubAtalhos !== 'undefined') ? HubAtalhos : null;
@@ -2989,6 +2990,7 @@ function desenhaArrasto(){
     desenhaObj(kind, o, cor, a.t === 'recorte' ? { contorno:true } : {});
     if (a.t === 'via' && e.drill > 0) desenhaObj('via', { x:g.x, y:g.y, size:e.drill }, COR.furo, {});
   }
+  if (arrasto.cena && GUIAS) GUIAS.desenha(ctx, arrasto.cena, { escala:view.scale, fmt:fmtGuia });
   if (arrasto.ima) {
     ctx.save(); ctx.strokeStyle = COR.snap; ctx.lineWidth = px(1.5);
     ctx.beginPath(); ctx.arc(arrasto.ima.x, arrasto.ima.y, px(7), 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
@@ -3629,10 +3631,106 @@ function iniciaArrasto(g){
   EXCLUI = excluiDoArrasto(movs); cacheSujo = true;
   return true;
 }
+/* ── AS GUIAS DO ARRASTO (hub-guias.js, as mesmas do Esquema) ──
+   Pedido do dono (2026-10-16): "tenha auxilio tipo que tem no esquema, pra ajudar a alinhar os
+   componentes, centro de pad, essas coisas". O motor e o do Esquema; aqui so se diz o que anda e o
+   que esta parado, no mundo da placa (mm):
+     caixa    a caixa do componente (a bbox do board.js, girada): borda com borda, centro com centro
+     pontos   o centro de COBRE de cada pad, o centro da via e as pontas da trilha: pad alinha com
+              pad, via e ponta de trilha dos vizinhos -- e o que deixa a trilha reta
+     medidas  o vao ate o componente vizinho de cada lado, e o espaco igual da fileira
+   O centro da placa (a caixa do contorno) vale como o centro da folha do Esquema. A guia gruda
+   fora da grade se preciso (o ima com travada do Esquema); o eixo sem guia pousa na grade como
+   sempre, contada a partir da posicao ABSOLUTA do ponto de referencia (gradeX/gradeY). O ima
+   eletrico de antes (trilha e via pegando pad, via, ponta) continua mandando: com ele pegando, a
+   guia so mostra. Ctrl solta tudo, como ja soltava o snap.
+   Medido UMA vez por gesto, na posicao de partida (e de novo depois de girar no arrasto). */
+const GUIAS = (typeof HubGuias !== 'undefined' && HubGuias && typeof HubGuias.prepara === 'function') ? HubGuias : null;
+const nomeComp = m => String(m.eff.designator || m.src.ref || '');
+/* os centros de cobre dos pads e a caixa de um componente que estaria em g (o geo do arrasto) --
+   a mesma transformacao da previaComp */
+function geoDoComp(m, g){
+  const fake = { src:{ x:m.eff.x, y:m.eff.y, rot:isNum(m.eff.rot) ? m.eff.rot : 0, layer:m.eff.layer },
+                 eff:{ x:g.x, y:g.y, rot:g.rot, layer:g.layer } };
+  if (m.pares) Object.defineProperty(fake, 'pares', { value:m.pares, enumerable:false });
+  const d = HC.compDelta(fake), pads = [], ref = nomeComp(m);
+  for (const { kind, o } of objetosDoComp(m)) {
+    if (kind !== 'pad') continue;
+    const t = HC.xfObject(d, o, 'pad');
+    if (!t || !isNum(t.x) || !isNum(t.y)) continue;
+    const c = centroCobre(t);
+    pads.push({ x:c[0], y:c[1], nome:ref + '-' + (o.name || '') });
+  }
+  let caixa = null;
+  const ca = m.src.bbox;
+  if (ca && [ca.x1, ca.y1, ca.x2, ca.y2].every(isNum)) {
+    const c = [[ca.x1, ca.y1], [ca.x2, ca.y1], [ca.x2, ca.y2], [ca.x1, ca.y2]].map(p => {
+      const q0 = m.changed ? HC.xfPoint(HC.compDelta(m), p[0], p[1]) : { x:p[0], y:p[1] };
+      const q = HC.xfPoint(d, q0.x, q0.y); return [q.x, q.y]; });
+    caixa = bbPts(c);
+  }
+  if (!caixa && pads.length) caixa = bbPts(pads.map(p => [p.x, p.y]));
+  return { pads, caixa };
+}
+function guiasDaPlaca(a){
+  const anda = new Set(), pontos = [];
+  let caixa = null;
+  const soma = b => { if (!b) return; caixa = !caixa ? { x1:b[0], y1:b[1], x2:b[2], y2:b[3] }
+    : { x1:Math.min(caixa.x1, b[0]), y1:Math.min(caixa.y1, b[1]), x2:Math.max(caixa.x2, b[2]), y2:Math.max(caixa.y2, b[3]) }; };
+  for (const al of a.alvos) {
+    const g = a.bases.get(al);
+    if (!g) continue;
+    if (al.t === 'comp') { anda.add(al.m); const q = geoDoComp(al.m, g); soma(q.caixa); pontos.push(...q.pads); }
+    else if (al.t === 'via') pontos.push({ x:g.x, y:g.y, nome:'via' });
+    else if (al.t === 'track') pontos.push({ x:g.x1, y:g.y1, nome:'ponta da trilha' }, { x:g.x2, y:g.y2, nome:'ponta da trilha' });
+  }
+  if (!caixa && !pontos.length) return null;
+  const fixos = { caixas:[], pontos:[], sempre:[], folha:null };
+  for (const m of model.comps) {
+    if (anda.has(m) || m.deleted) continue;
+    const ec = IDX.ebComp.get(m), ref = nomeComp(m);
+    const pads = ((ec && ec.pads) || []).filter(p => p && isNum(p.x) && isNum(p.y))
+      .map(p => { const c = centroCobre(p); return { x:c[0], y:c[1], nome:ref + '-' + (p.name || '') }; });
+    const c = caixaComp(m), b = c ? bbPts(c) : null;
+    if (b) fixos.caixas.push({ x1:b[0], y1:b[1], x2:b[2], y2:b[3], nome:ref, tipo:'comp', pontos:pads });
+    else for (const p of pads) fixos.pontos.push(p);
+  }
+  const fora = o => EXCLUI && EXCLUI.has(o);
+  for (const p of EB.freepads || []) if (p && isNum(p.x) && isNum(p.y) && !fora(p)) { const c = centroCobre(p); fixos.pontos.push({ x:c[0], y:c[1], nome:'pad ' + (p.name || '') }); }
+  for (const v of EB.vias || []) if (v && isNum(v.x) && isNum(v.y) && !fora(v)) fixos.pontos.push({ x:v.x, y:v.y, nome:'via' + (v.net ? ' ' + v.net : '') });
+  for (const t of EB.tracks || []) {
+    if (!t || t.keepout || fora(t) || !cobre(t.layer) || ![t.x1, t.y1, t.x2, t.y2].every(isNum)) continue;
+    const n = 'trilha' + (t.net ? ' ' + t.net : '');
+    fixos.pontos.push({ x:t.x1, y:t.y1, nome:n }, { x:t.x2, y:t.y2, nome:n });
+  }
+  const bb = EB.board && EB.board.bbox;
+  if (caixa && bb && [bb.x1, bb.y1, bb.x2, bb.y2].every(isNum)) fixos.folha = { x1:bb.x1, y1:bb.y1, x2:bb.x2, y2:bb.y2, rotulo:'no centro da placa' };
+  const principal = a.principal && a.principal.t === 'comp' ? nomeComp(a.principal.m) : '';
+  return GUIAS.prepara({ caixa, tipoCaixa:'comp', nome:principal, pontos }, fixos, { eps:1e-3 });
+}
+const fmtGuia = v => fmtDist(v) + ' ' + unidade;
+/* o deslocamento passado pelas guias: null quando nao ha guia (o hub-guias.js nao carregou, o
+   gesto so leva o que nao tem guia, ou o motor falhou -- ai o arrasto e o de sempre) */
+function guiasDoArrasto(a, rx, ry, e){
+  if (!GUIAS || !a.ref || a.guiasFalhou) return null;
+  try {
+    if (a.guias === undefined) a.guias = guiasDaPlaca(a);
+    if (!a.guias || !a.guias.box0) return null;
+    const ref = a.ref, passo = grade.mm;
+    return GUIAS.resolve(a.guias, rx, ry, { escala:view.scale, fmt:fmtGuia, desliga:!!e.ctrlKey,
+      gradeX: d => snapV(ref[0] + d, passo) - ref[0], gradeY: d => snapV(ref[1] + d, passo) - ref[1],
+      trava: a.ima ? { dx:a.ima.x - ref[0], dy:a.ima.y - ref[1] } : null });
+  } catch (err) {
+    a.guiasFalhou = true;
+    try { console.error('hub-guias:', err); } catch (x) {}
+    return null;
+  }
+}
 function atualizaArrasto(e, w){
   const a = arrasto;
   let dx = w.x - a.inicio.x, dy = w.y - a.inicio.y;
-  a.ima = null;
+  const rx = dx, ry = dy;
+  a.ima = null; a.cena = null;
   if (a.ref && !e.ctrlKey) {
     const alvo = { x:a.ref[0] + dx, y:a.ref[1] + dy };
     /* trilha, arco e via grudam em pad/via/ponta (a ligacao); o resto, na grade */
@@ -3641,9 +3739,15 @@ function atualizaArrasto(e, w){
     if (p.tipo === 'pad' || p.tipo === 'via' || p.tipo === 'ponta') a.ima = p;
     dx = p.x - a.ref[0]; dy = p.y - a.ref[1];
   }
+  let guia = '';
+  const g = guiasDoArrasto(a, rx, ry, e);
+  if (g) {
+    if (!e.ctrlKey) { dx = g.lx; dy = g.ly; }
+    a.cena = g.cena; guia = g.rotulo || '';
+  }
   a.dx = dx; a.dy = dy; a.moveu = true;
   for (const [al, b] of a.annBase) { al.ann.x = b.x + dx; al.ann.y = b.y + dy; }
-  avisoRodape('dX ' + fmtDist(dx) + '  dY ' + fmtDist(dy) + ' ' + unidade + ' · Espaço gira · L vira · X/Y espelha · Ctrl solta o snap · Esc desiste');
+  avisoRodape('dX ' + fmtDist(dx) + '  dY ' + fmtDist(dy) + ' ' + unidade + (guia ? ' · ' + guia : '') + ' · Espaço gira · L vira · X/Y espelha · Ctrl solta o snap e as guias · Esc desiste');
   pede();
 }
 function giraNoArrasto(como){
@@ -3660,6 +3764,7 @@ function giraNoArrasto(como){
   }
   a.ref = refDoGeo(a.principal.t, a.bases.get(a.principal));
   a.girou = true;
+  a.guias = undefined; a.cena = null;     /* girou: os pads e a caixa sao outros, as guias se medem de novo */
   pede();
 }
 function iniciaPonta(g){
@@ -3831,6 +3936,17 @@ window.addEventListener('keydown', e => {
   /* o Chrome entrega Ctrl+1..8 a pagina antes de trocar de aba so se a pagina segurar */
   if (k === 'Ctrl+2' || k === 'Ctrl+S' || k === 'Ctrl+M' || k === 'Ctrl+A' || k === 'Ctrl+Z' || k === 'Ctrl+Y' || k === 'Ctrl+D' ||
       k === 'Ctrl+C' || k === 'Ctrl+X' || k === 'Ctrl+V' || /^Ctrl\+Shift\+[A-Z]$/.test(k)) e.preventDefault();
+  /* Ctrl+W: o Interactive Routing do Altium (pedido do dono, 2026-10-16: "apertando Ctrl+W você
+     desenha trilha igual ao Altium"). E a mesma Trilha do W -- o roteador que contorna a outra net
+     sem mexer no que ja esta na placa --, fixa e ao lado do W, que continua (e continua trocavel
+     nas Configuracoes). No app desktop a tecla chega a vista: o menu do app nao tem Fechar com
+     Ctrl+W. No navegador ela fecha a aba antes de a pagina ver, e fica o W. Com a trilha ja na mao
+     nao faz nada (a acao do W alterna e largaria a trilha). */
+  if (k === 'Ctrl+W') {
+    e.preventDefault();
+    if (tool !== 'trilha' && !LEITOR.pendente() && !(arrasto && !arrasto.ponta)) fazAcao('trilha');
+    return;
+  }
   if (arrasto && !arrasto.ponta) {
     if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); giraNoArrasto('gira'); return; }
     if (k === 'L') { giraNoArrasto('vira'); return; }

@@ -339,7 +339,9 @@ async function inicia(o, resolve){
   const bFecha = bt('fpe-x', o.fechaTxt || '✕', () => fechar(), embutido ? 'Fecha o editor' : 'Fechar');
   const ctrl = { fp:() => E.fp, sujo:() => E.sujo, salvar:n => salvar(n), fechar:f => fechar(f), podeSair:() => podeSair(),
                  carregaFp:(n, reserva) => carregaFp(n, reserva), novo:() => novoFp(), modo:m => modo(m), host:o.host || null,
-                 atualiza:() => { titulo(); status(); }, lib:() => lib, recarregaLista:() => { listaChave = ''; montaLista(); } };
+                 atualiza:() => { titulo(); status(); }, lib:() => lib, recarregaLista:() => { listaChave = ''; montaLista(); },
+                 /* o ponto do footprint (mm) em px do canvas, e o contrário: para quem dirige o editor de fora */
+                 tela:(x, y) => tela(x, y), mundo:(sx, sy) => mundo(sx, sy) };
   const bExtras = [];
   for (const x of (o.botoes || [])) {
     if (!x || !x.txt) continue;
@@ -840,6 +842,8 @@ async function inicia(o, resolve){
       ctx.restore();
     };
     if (E.medida) regua(E.medida.a, E.medida.b);
+    /* as guias do arrasto (alinhamento, espaço igual e o vão até o pad vizinho) */
+    if (GU && E.arr && E.arr.mover && E.arr.cena) GU.desenha(ctx, E.arr.cena, { escala:s, fmt });
     /* rascunho da ferramenta */
     const d = E.draft;
     if (d && E.mouse) {
@@ -921,6 +925,75 @@ async function inicia(o, resolve){
     for (const o of E.fp.silk) { const q = o.kind === 'arc' ? [[o.cx - o.r, o.cy], [o.cx + o.r, o.cy], [o.cx, o.cy - o.r], [o.cx, o.cy + o.r]] : [[o.x1, o.y1], [o.x2, o.y2]]; if (toca ? algum(q) : dentro(q)) out.push(o); }
     for (const b of E.fp.bodies) { const q = contornoCorpo(b); if (q.length && (toca ? algum(q) : dentro(q))) out.push(b); }
     return out;
+  }
+
+  /* ---------- 2D: as guias do arrasto (hub-guias.js, as mesmas do Esquema e da PCB) ----------
+     Pedido do dono (2026-10-16): "no footprint também tenha a mesma coisa, magnetismo com centro a
+     centro, auxílio mostrando distância entre as coisas". Cada pad parado é uma caixa com o centro
+     dele como ponto de ligação: o pad que anda gruda borda com borda, centro com centro (nos dois
+     eixos: em cima do centro do outro, se a mão for lá), no espaço igual da fileira (o passo
+     repetido) e na origem do footprint; o vão até o pad vizinho de cada lado aparece na pílula, e
+     a barra de status diz o centro a centro até o pad mais perto. A linha e o arco da serigrafia
+     grudam ponta com ponta e com o centro dos pads. O eixo que nenhuma guia pegou cai na grade,
+     como antes; o Ctrl solta as guias. */
+  const GU = (typeof root.HubGuias !== 'undefined' && root.HubGuias && typeof root.HubGuias.prepara === 'function') ? root.HubGuias
+    : (typeof HubGuias !== 'undefined' && HubGuias && typeof HubGuias.prepara === 'function') ? HubGuias : null;
+  function caixaPad(p){
+    const q = HF ? HF.cantosPad(p) : [[p.x - p.w / 2, p.y - p.h / 2], [p.x + p.w / 2, p.y + p.h / 2]];
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    for (const c of q) { x1 = Math.min(x1, c[0]); y1 = Math.min(y1, c[1]); x2 = Math.max(x2, c[0]); y2 = Math.max(y2, c[1]); }
+    return { x1, y1, x2, y2 };
+  }
+  const nomePad = p => 'pad ' + (p.name || '?');
+  const pontosSilk = o => o.kind === 'arc' ? [{ x:o.cx, y:o.cy, nome:'centro do arco' }]
+    : [{ x:o.x1, y:o.y1, nome:'ponta da linha' }, { x:o.x2, y:o.y2, nome:'ponta da linha' }];
+  function guiasDoGesto(){
+    let caixa = null;
+    const pontos = [], pads = [];
+    for (const x of E.sel) {
+      const t = tipo(x);
+      if (t === 'pad') {
+        pads.push(x);
+        const b = caixaPad(x);
+        caixa = !caixa ? b : { x1:Math.min(caixa.x1, b.x1), y1:Math.min(caixa.y1, b.y1), x2:Math.max(caixa.x2, b.x2), y2:Math.max(caixa.y2, b.y2) };
+        pontos.push({ x:x.x, y:x.y, nome:nomePad(x) });
+      } else if (t === 'silk') pontos.push(...pontosSilk(x));
+    }
+    if (!caixa && !pontos.length) return null;
+    const fixos = { caixas:[], pontos:[], sempre:[], folha:null };
+    for (const p of E.fp.pads) if (!E.sel.has(p)) fixos.caixas.push(Object.assign(caixaPad(p), { nome:nomePad(p), tipo:'comp', pontos:[{ x:p.x, y:p.y, nome:nomePad(p) }] }));
+    for (const o of E.fp.silk) if (!E.sel.has(o)) fixos.pontos.push(...pontosSilk(o));
+    /* a origem do footprint: o centro do pad (ou do grupo) grudando nela */
+    if (caixa) fixos.folha = { x1:0, y1:0, x2:0, y2:0, rotulo:'na origem do footprint' };
+    fixos.sempre.push({ x:0, y:0, nome:'origem' });
+    return { G:GU.prepara({ caixa, tipoCaixa:'comp', nome:pads.length === 1 ? nomePad(pads[0]) : 'seleção', pontos }, fixos, { eps:1e-4 }),
+             pad:pads.length === 1 ? pads[0] : null };
+  }
+  function guiasDoArrasto(a, w, ev){
+    if (!GU || a.guiasFalhou) return null;
+    try {
+      if (a.guias === undefined) a.guias = guiasDoGesto();
+      if (!a.guias || !a.guias.G.box0) return null;
+      const wc = a.wc, g0 = a.w0;
+      return GU.resolve(a.guias.G, w[0] - wc[0], w[1] - wc[1], { escala:E.view.s, fmt, desliga:!!ev.ctrlKey,
+        gradeX: d => r4(snap(wc[0] + d) - g0[0]), gradeY: d => r4(snap(wc[1] + d) - g0[1]) });
+    } catch (e) {
+      a.guiasFalhou = true;
+      try { console.error('hub-guias:', e); } catch (x) { /* ok */ }
+      return null;
+    }
+  }
+  /* o centro a centro do pad que anda ate o pad parado mais perto (a barra de status) */
+  function centroACentro(p){
+    let melhor = null, dm = Infinity;
+    for (const q of E.fp.pads) {
+      if (q === p || E.sel.has(q)) continue;
+      const d = Math.hypot(q.x - p.x, q.y - p.y);
+      if (d < dm) { dm = d; melhor = q; }
+    }
+    if (!melhor) return '';
+    const dx = Math.abs(melhor.x - p.x), dy = Math.abs(melhor.y - p.y);
+    return 'centro a centro com ' + nomePad(melhor) + ': ' + fmt(dm) + (dx > 1e-6 && dy > 1e-6 ? ' (ΔX ' + fmt(dx) + ' · ΔY ' + fmt(dy) + ')' : '');
   }
 
   /* ---------- 2D: mexer ---------- */
@@ -1075,7 +1148,7 @@ async function inicia(o, resolve){
     if (alvo) {
       if (ev.shiftKey) { if (E.sel.has(alvo)) E.sel.delete(alvo); else E.sel.add(alvo); }
       else if (!E.sel.has(alvo)) { E.sel.clear(); E.sel.add(alvo); }
-      E.arr = { mover:true, w0:g, ult:g, andou:false, id:ev.pointerId };
+      E.arr = { mover:true, w0:g, wc:w, ap:[0, 0], andou:false, id:ev.pointerId };
     } else {
       if (!ev.shiftKey) E.sel.clear();
       E.janela = null;
@@ -1095,8 +1168,18 @@ async function inicia(o, resolve){
       E.view.cx = a.cx - (sx - a.sx) / E.view.s; E.view.cy = a.cy + (sy - a.sy) / E.view.s; pede(); return;
     }
     if (a && a.mover) {
-      const dx = r4(g[0] - a.ult[0]), dy = r4(g[1] - a.ult[1]);
-      if (dx || dy) { if (!a.andou) { antes(); a.andou = true; } for (const x of E.sel) move(x, dx, dy); a.ult = g; E.sujo = true; titulo(); pede(); }
+      /* o deslocamento TOTAL desde o comeco do gesto: a grade (como antes) ou a guia que pegou */
+      let dx = r4(g[0] - a.w0[0]), dy = r4(g[1] - a.w0[1]);
+      const r = guiasDoArrasto(a, w, ev);
+      a.cena = r ? r.cena : null;
+      if (r && !ev.ctrlKey) { dx = r4(r.lx); dy = r4(r.ly); }
+      const ddx = r4(dx - a.ap[0]), ddy = r4(dy - a.ap[1]);
+      if (ddx || ddy) { if (!a.andou) { antes(); a.andou = true; } for (const x of E.sel) move(x, ddx, ddy); a.ap = [dx, dy]; E.sujo = true; titulo(); }
+      if (a.andou) {
+        const cc = a.guias && a.guias.pad ? centroACentro(a.guias.pad) : '';
+        stMsg.textContent = [r && r.rotulo, cc, 'Ctrl solta as guias'].filter(Boolean).join(' · ');
+      }
+      pede();
       return;
     }
     if (a && a.janela) { E.janela = { x0:a.w0[0], y0:a.w0[1], x1:w[0], y1:w[1] }; pede(); return; }
@@ -1110,6 +1193,7 @@ async function inicia(o, resolve){
       if (E.tool !== 'sel') { if (E.draft) { E.draft = null; pede(); } else ferramenta('sel'); return; }
       menu(ev); return;
     }
+    if (a.mover) { stMsg.textContent = ''; pede(); }
     if (a.mover && a.andou) { mudou(); return; }
     if (a.janela && E.janela) {
       const j = E.janela; E.janela = null;

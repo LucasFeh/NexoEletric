@@ -454,4 +454,30 @@ const perto = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, (msg || '') + ' �
   assert.ok(porMov < 2, 'um movimento tem de caber folgado num quadro: ' + porMov + ' ms');
 }
 
+/* ── A GRADE POR EIXO e o centro com nome próprio (a vista PCB e o editor de footprint, 2026-10-16) ──
+   A PCB prende na grade a posição ABSOLUTA do ponto de referência, que não começa na grade: cada
+   eixo tem a sua conta (gradeX/gradeY). O eixo sem guia pousa nela; o eixo com guia, na guia. E o
+   centro da "folha" lá é o centro da placa (ou a origem do footprint): o rótulo vem de quem chama. */
+{
+  /* referência em (7, 13); grade de 10 contada a partir do absoluto */
+  const gx = d => Math.round((7 + d) / 10) * 10 - 7, gy = d => Math.round((13 + d) / 10) * 10 - 13;
+  const G = HG.prepara({ caixa:{ x1:500, y1:500, x2:540, y2:540 }, tipoCaixa:'comp', nome:'U1' },
+                       { caixas:[], folha:{ x1:0, y1:0, x2:2000, y2:1000, rotulo:'no centro da placa' } }, { eps:1e-3 });
+  /* longe de tudo: os dois eixos na grade ABSOLUTA (7+24 = 31 -> 30; 13+31 = 44 -> 40) */
+  let r = HG.resolve(G, 24, 31, { escala:1, gradeX:gx, gradeY:gy, fmt:String });
+  assert.strictEqual(r.gx || r.gy, false);
+  perto(r.lx, 23, 'X na grade absoluta'); perto(r.ly, 27, 'Y na grade absoluta');
+  /* o centro da caixa (520) a 2 do centro da placa em X (1000): gruda, e o Y continua na grade dele */
+  r = HG.resolve(G, 478, 31, { escala:1, gradeX:gx, gradeY:gy, fmt:String });
+  assert.strictEqual(r.gx, true, 'o X gruda no centro da placa');
+  perto(r.lx, 480, 'pouso do X = a guia'); perto(r.ly, 27, 'o Y segue a grade dele');
+  assert.strictEqual(r.rotulo, 'no centro da placa', 'o rótulo vem de quem chama: ' + r.rotulo);
+  /* sem gradeX/gradeY vale a `grade` de sempre, nos dois eixos */
+  r = HG.resolve(G, 24, 31, { escala:1, grade:v => Math.round(v / 10) * 10, fmt:String });
+  perto(r.lx, 20); perto(r.ly, 30);
+  /* e sem rótulo, o de antes */
+  const G2 = HG.prepara({ caixa:{ x1:500, y1:500, x2:540, y2:540 }, tipoCaixa:'comp' }, { folha:{ x1:0, y1:0, x2:2000, y2:1000 } }, { eps:1e-3 });
+  assert.strictEqual(HG.resolve(G2, 478, 0, { escala:1, fmt:String }).rotulo, 'no centro da folha');
+}
+
 console.log('test-guias OK');

@@ -4,6 +4,12 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.10.0 — 2026-10-16
+
+- **Guias na vista PCB, como no Esquema.** Ao arrastar um componente, ele gruda borda com borda e centro com centro nos vizinhos e no centro da placa. O centro de cada pad gruda no centro dos pads vizinhos, nas vias e nas pontas de trilha, para a trilha sair reta. Também acha o espaço igual da fileira e mostra numa pílula o vão até o componente vizinho de cada lado. A barra de status diz qual guia pegou, e o **Ctrl** solta as guias junto com o snap. Via e trilha arrastadas também alinham pelo centro e pelas pontas.
+- **Guias no editor de footprint.** O pad arrastado gruda centro a centro com os outros pads (nos dois eixos), borda com borda, no passo igual da fileira e na origem do footprint. As pílulas mostram o vão até o pad vizinho, e a barra de status mostra a distância centro a centro até o pad mais perto. A linha e o arco da serigrafia grudam nas pontas e no centro dos pads. O **Ctrl** solta as guias.
+- **Ctrl+W desenha trilha, como no Altium (Interactive Routing).** É a mesma Trilha do W: trilha de outra net nunca se encontra com ela. O roteador acha sozinho o caminho em volta do obstáculo, sem deformar o que já está na placa (Shift+R troca para parar no obstáculo ou ignorar). O W continua valendo.
+
 ## 1.9.2 — 2026-10-15
 
 - **Editar no NexoCAD com confirmação:** o aviso "✔ Enviado ao NexoCAD: <nome>" fica 6 segundos na tela, e a janela do NexoCAD (0.8.1) vem para a frente com o item aberto.

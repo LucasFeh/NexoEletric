@@ -163,8 +163,8 @@ function prepara(mov, fixos, opts){
   }
   if (temVis && fixos.folha){
     const f = fixos.folha;
-    G.folha = { fx:[{ v:(f.x1 + f.x2) / 2, cls:'vis', qual:'centro', lo:f.y1, hi:f.y2, nome:'folha', semMarca:true }],
-                fy:[{ v:(f.y1 + f.y2) / 2, cls:'vis', qual:'centro', lo:f.x1, hi:f.x2, nome:'folha', semMarca:true }] };
+    G.folha = { fx:[{ v:(f.x1 + f.x2) / 2, cls:'vis', qual:'centro', lo:f.y1, hi:f.y2, nome:'folha', rotulo:f.rotulo, semMarca:true }],
+                fy:[{ v:(f.y1 + f.y2) / 2, cls:'vis', qual:'centro', lo:f.x1, hi:f.x2, nome:'folha', rotulo:f.rotulo, semMarca:true }] };
   }
   return G;
 }
@@ -351,7 +351,7 @@ function rotuloDe(c, fmt){
     if (c.como === 'centro') return 'centralizado entre ' + c.A.nome + ' e ' + c.B.nome;
     return 'mesmo vão de ' + c.A.nome + '–' + c.B.nome + (fmt ? ': ' + fmt(c.g) : '');
   }
-  if (c.f.nome === 'folha') return 'no centro da folha';
+  if (c.f.nome === 'folha') return c.f.rotulo || 'no centro da folha';
   if (c.f.cls === 'el') return (c.m.nome || 'ponto') + ' alinhado com ' + c.f.nome;
   return (c.m.qual === 'centro' ? 'centro alinhado com ' : 'alinhado com ') + c.f.nome;
 }
@@ -385,11 +385,15 @@ function porQue(c){
 function resolve(G, dx, dy, o){
   o = o || {};
   const grade = typeof o.grade === 'function' ? o.grade : null;
+  /* a grade POR EIXO (gradeX/gradeY), para quem prende a posicao ABSOLUTA na grade, e nao o
+     deslocamento: a vista PCB prende o ponto de referencia do objeto, que nao precisa estar na
+     grade no comeco do gesto. Sem elas, a `grade` vale nos dois eixos, como sempre */
+  const gX = typeof o.gradeX === 'function' ? o.gradeX : grade, gY = typeof o.gradeY === 'function' ? o.gradeY : grade;
   /* o eixo fixo (Shift) entra ANTES de tudo: o cursor naquele eixo deixa de existir */
   const fixo = o.fixo || {};
   if (fixo.x) dx = fixo.x.delta;
   if (fixo.y) dy = fixo.y.delta;
-  const out = { dx, dy, lx:fixo.x || !grade ? dx : grade(dx), ly:fixo.y || !grade ? dy : grade(dy),
+  const out = { dx, dy, lx:fixo.x || !gX ? dx : gX(dx), ly:fixo.y || !gY ? dy : gY(dy),
                 gx:false, gy:false, porX:null, porY:null, guia:{ x:null, y:null }, cena:null, rotulo:'' };
   if (!G || !G.box0 || o.desliga){ if (G) G.preso = null; return out; }
   const esc = o.escala > 0 ? o.escala : 1;
@@ -422,13 +426,13 @@ function resolve(G, dx, dy, o){
          esta: o outro eixo sem guia vai para a grade ao soltar, e uma fila medida no cursor
          anunciava "centralizado entre L e R" com L fora da fila no pouso. Duas voltas: se o
          espaco igual decidiu um eixo, o pouso desse eixo mudou e a fila do outro e refeita. */
-      const pouso = (c, d) => c ? c.delta : grade ? grade(d) : d;
+      const pouso = (c, d, g) => c ? c.delta : g ? g(d) : d;
       /* o espaco igual preso e conferido de novo com o raio de soltar, e so ELE (mesmo `como`,
          mesmos vizinhos): se a fila mudou, ele deixou de existir e solta sozinho */
       const espacoPreso = (p, eixo, M) =>
         p && p.tipo === 'espaco' ? melhorEspaco(G, eixo, M, solta, alcance, p) : null;
       for (let volta = 0; volta < 2; volta++){
-        const Mx = desloca(G.caixa, dx, pouso(by, dy)), My = desloca(G.caixa, pouso(bx, dx), dy);
+        const Mx = desloca(G.caixa, dx, pouso(by, dy, gY)), My = desloca(G.caixa, pouso(bx, dx, gX), dy);
         const sx = comTrava(melhorEspaco(G, 'x', Mx, tol, alcance), espacoPreso(preso.x, 'x', Mx));
         const sy = comTrava(melhorEspaco(G, 'y', My, tol, alcance), espacoPreso(preso.y, 'y', My));
         const nx = escolhe(ax, sx), ny = escolhe(ay, sy);
@@ -443,7 +447,7 @@ function resolve(G, dx, dy, o){
          mesma medida deixava "centralizado entre B1 e T2" com T2 fora da coluna). Cada passe so
          TIRA espaco igual, entao termina em no maximo tres. */
       for (let passe = 0; passe < 3; passe++){
-        const med = medidasEm(G, desloca(G.caixa, pouso(bx, dx), pouso(by, dy)), alcance);
+        const med = medidasEm(G, desloca(G.caixa, pouso(bx, dx, gX), pouso(by, dy, gY)), alcance);
         const sem = eixo => !med.some(m => m.eixo === eixo && m.igual);
         if (bx && bx !== ax && bx.tipo === 'espaco' && sem('x')) bx = ax;
         else if (by && by !== ay && by.tipo === 'espaco' && sem('y')) by = ay;

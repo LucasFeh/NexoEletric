@@ -253,6 +253,10 @@ const GESTOS_PCB = [
   { rotulo:'Aproximar e afastar, no cursor',            teclas:['Roda do mouse'] },
   { rotulo:'Andar para o lado',                         teclas:['Shift', 'Roda do mouse'] },
   { rotulo:'Abrir as Propriedades',                     teclas:['Clique duplo'] },
+  /* 2026-10-16, pedido do dono: o Ctrl+W do Altium (Interactive Routing) pega a mesma Trilha do W.
+     Fixo, ao lado da ação trilha (que continua no W e trocável): a vista o trata antes do mapa.
+     Só no app desktop: no navegador o Ctrl+W fecha a aba (TECLAS_PROIBIDAS) */
+  { rotulo:'Trilha (Interactive Routing do Altium, no app desktop)', teclas:['Ctrl', 'W'] },
   { rotulo:'Fixar o canto da trilha',                   teclas:['Clique'],          quando:TRILHA },
   { rotulo:'Inverter o canto da trilha',                teclas:['Espaço'],          quando:TRILHA },
   { rotulo:'Mudar o modo da trilha (45°, 90°, livre)',  teclas:['Shift', 'Espaço'], quando:TRILHA },
@@ -266,7 +270,7 @@ const GESTOS_PCB = [
   { rotulo:'Girar 90°',                                 teclas:['Espaço'],          quando:ARRASTO, acoes:['girar'] },
   { rotulo:'Trocar de face (componente)',               teclas:['L'],               quando:ARRASTO },
   { rotulo:'Espelhar',                                  teclas:['X'],               quando:ARRASTO, acoes:['espelhoX', 'espelhoY'] },
-  { rotulo:'Soltar o snap',                             teclas:['Ctrl'],            quando:ARRASTO },
+  { rotulo:'Soltar o snap e as guias',                  teclas:['Ctrl'],            quando:ARRASTO },
   { rotulo:'Largar o que estiver na mão',               teclas:['Escape'] },
 ];
 
