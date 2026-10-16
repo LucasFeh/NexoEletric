@@ -62,6 +62,11 @@ const corposDe = c => M.corpos({ components:[c] }, null, { pcblib3dHub:L3, place
   const out = M.corpos({ components:[comp('J5', 'SEM', 'Top')] }, null, { pcblib3dHub:L3, solda:n => n === 'SEM' });
   assert.ok(out.some(b => b.kind === 'solda'));
 }
+/* a caixa da tela (opcoes.solda) decide SOZINHA: desmarcada, nem o footprint marcado mostra solda */
+{
+  const out = M.corpos({ components:[comp('J6', 'CONN', 'Top')] }, null, { pcblib3dHub:L3, solda:() => false });
+  assert.ok(out.every(b => b.kind !== 'solda' && !b.corte), 'caixa desmarcada: o pino passa normal');
+}
 /* footprint só SMD: corte sim (nada atravessa mesmo), solda não */
 {
   const c = Object.assign(comp('U1', 'CONN', 'Top'), { pads:[pads[2]] });

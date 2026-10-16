@@ -475,6 +475,17 @@ async function inicia(o, resolve){
     barra.append(bt('', 'Enquadrar', () => enquadra(), 'View » Fit Document (F)'));
     bReal = bt('', 'Real View', () => alternaReal(), 'Real View: o 3D com materiais, reflexo e sombra realistas (liga o 3D)');
     barra.append(bReal); marcaReal();
+    /* Solda embaixo: so visualizacao, a MESMA caixa do painel Vista da PCB (HubPcb3dVista.soldaLigada) */
+    const V = root.HubPcb3dVista;
+    if (V && typeof V.soldaLigada === 'function') {
+      const l = el('label'), cb = el('input');
+      cb.type = 'checkbox'; cb.checked = V.soldaLigada();
+      l.title = 'Só visualização do 3D (aqui e na placa, em todos os componentes): o pino não passa da placa e embaixo de cada pad passante aparece o ponto de solda. Não altera o footprint.';
+      l.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin-left:6px;cursor:pointer;white-space:nowrap;';
+      cb.addEventListener('change', () => { V.soldaPrefere(cb.checked); if (cb.checked && E.modo !== '3d') modo('3d'); else if (E.modo === '3d') cena3d(); });
+      l.append(cb, document.createTextNode('Solda embaixo'));
+      barra.append(l);
+    }
   }
   /* Real View do 3D (hub-pcb3d-vista.js): o icone liga (abrindo o 3D) e desliga */
   let bReal = null;
@@ -1394,16 +1405,6 @@ async function inicia(o, resolve){
     campo(b, 'Name', E.fp.name, v => { v = String(v).trim(); if (!v || /["\\]/.test(v)) return false; if (v !== E.fp.name && existe(v) && v !== E.nome0) { toast('já existe "' + v + '"', 'warn'); return false; } antes(); E.fp.name = v; mudou(); return true; },
       { dica:'Mudar o nome cria outro footprint ao salvar; o de antes continua onde estava' });
     campo(b, 'Description', E.fp.description || '', v => { antes(); E.fp.description = v; mudou(); return true; });
-    /* a solda na outra face (pedido do dono, 2026-10-16): no 3D o pino so aparece do lado do
-       componente, e embaixo de cada pad passante fica o ponto de solda -- aqui e na placa */
-    const nTH = E.fp.pads.filter(p => p.drill > 0).length;
-    campo(b, 'Solda embaixo', E.fp.solda ? 'sim' : 'nao', v => {
-      antes();
-      if (v === 'sim') E.fp.solda = true; else delete E.fp.solda;
-      mudou(); return true;
-    }, { opcoes:[['nao', 'Não: o pino atravessa a placa'], ['sim', 'Sim: pino só em cima, solda embaixo']],
-         dica:'No 3D (aqui e na placa): o pino do componente só aparece do lado dele; na face de baixo, cada pad passante mostra o ponto de solda' +
-              (nTH ? '' : '. Este footprint não tem pad passante: não aparece solda nenhuma') });
     const bb = HF ? HF.bbox(E.fp) : null;
     if (bb) b.append(el('div', 'nota', 'Pads: ' + E.fp.pads.length + ' · Linhas: ' + E.fp.silk.length + ' · Caixa ' + fmt(bb.x2 - bb.x1) + ' × ' + fmt(bb.y2 - bb.y1)));
     const r = repetidosPads();
@@ -1571,6 +1572,7 @@ async function inicia(o, resolve){
     b2.setAttribute('aria-pressed', String(E.modo === '2d')); b3.setAttribute('aria-pressed', String(E.modo === '3d'));
     status();
   }
+  const soldaVista = () => { const V = root.HubPcb3dVista; return !!(V && typeof V.soldaLigada === 'function' && V.soldaLigada()); };
   function cena3d(){
     if (!E.v3 || typeof HubPcb3dModelo === 'undefined') return;
     const bb = caixaFp(), m = 1.5;
@@ -1578,7 +1580,8 @@ async function inicia(o, resolve){
     const fp = E.fp;
     const comp = { ref:'FP', footprint:'__fpe__', x:0, y:0, rot:0, layer:'Top', pads:fp.pads };
     const corpos = HubPcb3dModelo.corpos({ components:[comp] }, null, {
-      pcblib3dHub:{ footprints:{ __fpe__:Object.assign({ bodies:fp.bodies }, fp.solda ? { solda:true } : {}) }, models:Object.assign({}, L3 && L3.models, lib.models) }, baseLib:'Libs/', placeholder:false,
+      pcblib3dHub:{ footprints:{ __fpe__:{ bodies:fp.bodies } }, models:Object.assign({}, L3 && L3.models, lib.models) }, baseLib:'Libs/', placeholder:false,
+      solda:() => soldaVista(),   /* a caixa "Solda embaixo" (so visualizacao) decide */
       nexo:NX ? NX.resolvedor() : null });
     /* um ref por corpo (b0, b1...): o clique e o arrasto no 3D dizem QUAL corpo do footprint */
     corpos.forEach((c, i) => { if (c && c.kind !== 'solda') c.owner = 'b' + i; });

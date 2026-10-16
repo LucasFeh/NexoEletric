@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.11.1 — 2026-10-16
+
+- **Solda embaixo virou uma caixa de visualização, para a placa inteira.** Na vista PCB, painel **Vista**, a caixa **Solda embaixo no 3D**: desmarcada, o pino passa normal; marcada, o pino de todo componente para na placa e cada pad passante mostra o ponto de solda na outra face. Não altera footprint nem placa, e o 3D enviado ao NexoCAD continua com o pino inteiro. A mesma caixa fica na barra do editor de footprint (marcar numa vale na outra).
+- Sai a opção por footprint da 1.11.0 (o campo no painel do editor e a ferramenta `fp_solda` do MCP): a caixa decide sozinha.
+
 ## 1.11.0 — 2026-10-16
 
 - **Solda embaixo no 3D.** O footprint ganhou a opção **Solda embaixo** (editor de footprint, painel Footprint). Ligada, o pino do componente só aparece do lado dele: o que passaria da face de baixo é cortado. Embaixo de cada pad passante aparece o ponto de solda, um cone de estanho que vai do tamanho do pad até a ponta do pino. Vale no 3D do editor e no 3D da placa, nos modos Padrão e Real View. Componente montado embaixo fica com a solda em cima.

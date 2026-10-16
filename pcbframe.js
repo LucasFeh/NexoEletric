@@ -4048,7 +4048,7 @@ function pintaFace3d(c, lado){
 }
 /* os corpos 3D da placa efetiva, com a biblioteca do NexoCAD por cima (hub-nexo.js): a vista 3D,
    o "Editar 3D no NexoCAD" e o pacote da placa usam a MESMA lista */
-async function corpos3d(){
+async function corpos3d(vista){
   if (D3 === undefined) D3 = PROJ ? await globalDe('pcbmirror3d', 'Projects/' + encodeURIComponent(PROJ) + '/board3d.js') : null;
   if (LIB3D === undefined) LIB3D = await globalDe('pcblib3d', 'Libs/pcblib-3d.js');
   const esp = (D3 && isNum(D3.thickness) && D3.thickness > 0) ? D3.thickness : 1.6;
@@ -4059,9 +4059,13 @@ async function corpos3d(){
     try {
       corpos = HubPcb3dModelo.corpos(EB, D3 || null, { pcblib3d:LIB3D || null, pcblib3dHub:h && typeof HubFpLib !== 'undefined' ? HubFpLib.lib3d(h) : null,
         base:'Projects/' + encodeURIComponent(PROJ || '') + '/', baseLib:'Libs/', thickness:esp, board:B,
-        nexo:typeof HubNexo !== 'undefined' ? HubNexo.resolvedor() : null, projeto:PROJ || '' });
+        nexo:typeof HubNexo !== 'undefined' ? HubNexo.resolvedor() : null, projeto:PROJ || '',
+        solda:() => !!vista && soldaNo3d() });
     } catch (e) { console.warn('3D: corpos', e); }
   }
+  /* a solda e so de visualizacao: fora da tela (o pacote da placa para o NexoCAD, o Editar 3D) o
+     corpo vai inteiro e sem o ponto de solda */
+  if (!vista) corpos = corpos.filter(b => b && b.kind !== 'solda').map(b => { if (!b.corte) return b; const c = Object.assign({}, b); delete c.corte; return c; });
   return { corpos, esp };
 }
 /* Editar 3D no NexoCAD: o corpo STEP sob o cursor (no 3D) ou o primeiro do componente; sem STEP,
@@ -4092,9 +4096,11 @@ async function enviaPlacaNexo(){
   if (r.avisos.length) console.warn('NexoCAD: pacote', r.avisos);
   return HubNexo.enviarPlaca(r.pacote);
 }
+/* a caixa "Solda embaixo" do painel Vista (HubPcb3dVista.soldaLigada: a mesma do editor de footprint) */
+const soldaNo3d = () => !!(typeof HubPcb3dVista !== 'undefined' && typeof HubPcb3dVista.soldaLigada === 'function' && HubPcb3dVista.soldaLigada());
 async function cena3d(){
   if (!V3) return;
-  const { corpos, esp } = await corpos3d();
+  const { corpos, esp } = await corpos3d(true);
   const furos = [];
   const furo = p => { if (p && p.drill > 0 && isNum(p.x) && isNum(p.y)) furos.push({ x:p.x, y:p.y, r:p.drill / 2 }); };
   for (const c of (EB.components || [])) for (const p of ((c && c.pads) || [])) furo(p);
@@ -4817,6 +4823,15 @@ const V = {
     HubPcb3dVista.prefere(!!on);
     if (V3) V3.realView(!!on);
     if (on && !modo3d) entra3d();
+    if (painel) painel.atualiza();
+  },
+  /* Solda embaixo (so visualizacao): marcada, no 3D o pino de todo componente para na placa e a
+     outra face mostra o ponto de solda de cada pad passante */
+  solda:() => soldaNo3d(),
+  setSolda(on){
+    if (typeof HubPcb3dVista === 'undefined' || typeof HubPcb3dVista.soldaPrefere !== 'function') return;
+    HubPcb3dVista.soldaPrefere(!!on);
+    if (V3) cena3d();
     if (painel) painel.atualiza();
   },
   setShow(k, v){

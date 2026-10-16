@@ -339,7 +339,8 @@ function corpos(eb, d3, opcoes){
      na face oposta, em cada pad passante, o ponto de solda (o corpo kind 'solda'). */
   function comSolda(c){
     if (!c || !c.footprint) return false;
-    if (typeof opcoes.solda === 'function') { try { if (opcoes.solda(c.footprint)) return true; } catch (e) { /* segue */ } }
+    /* com a funcao (a caixa "Solda embaixo" da tela), ela decide sozinha: e opcao de visualizacao */
+    if (typeof opcoes.solda === 'function') { try { return !!opcoes.solda(c.footprint); } catch (e) { return false; } }
     const fh = hub && hub.footprints && tem(hub.footprints, c.footprint) ? hub.footprints[c.footprint] : null;
     return !!(fh && fh.solda);
   }

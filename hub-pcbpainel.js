@@ -435,6 +435,16 @@ function instala(aside, V) {
     if (typeof V.realView === 'function') { const rv = V.realView(); ibtn('realview', 'Real View: o 3D com materiais, reflexo e sombra realistas (liga o 3D)', rv, () => V.setRealView(!rv)); }
     ibtn('ajuda', 'Ajuda: teclas e gestos (' + (V.teclaDe('ajuda') || 'H') + ')', null, () => V.ajuda());
     s4.append(ib);
+    /* Solda embaixo: so visualizacao do 3D, para a placa inteira (o pino nao passa; o ponto de solda) */
+    if (typeof V.solda === 'function') {
+      const l = el('label', 'pr-bool'), cb = el('input');
+      cb.type = 'checkbox'; cb.checked = !!V.solda();
+      cb.addEventListener('change', () => V.setSolda(cb.checked));
+      l.title = 'Só visualização do 3D, em todos os componentes: o pino não passa da placa, e embaixo de cada pad passante aparece o ponto de solda. Não altera footprint nem placa.';
+      l.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;';
+      l.append(cb, el('span', null, 'Solda embaixo no 3D (o pino não passa da placa)'));
+      s4.append(l);
+    }
     s4.append(el('div', 'hint', 'Os atalhos desta vista ficam nas Configurações do hub, aba Atalhos.'));
 
     const s5 = sec(pag, 'Saídas');

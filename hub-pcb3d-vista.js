@@ -35,6 +35,9 @@
    estanho, serigrafia fosca, cobre em relevo sob a mascara. Liga e desliga pelo icone da barra
    lateral de quem usa a vista (vista PCB » painel Vista; editor de footprint » Ferramentas):
      vista.realView(true|false) -> bool          liga/desliga nesta vista (e grava a preferencia)
+     HubPcb3dVista.soldaLigada() / soldaPrefere(bool)  a caixa "Solda embaixo" (o pino nao passa da
+                                 placa; o ponto de solda na outra face): quem monta os corpos passa
+                                 opcoes.solda ao HubPcb3dModelo.corpos quando ela esta marcada
      HubPcb3dVista.preferido() / prefere(bool)   a preferencia da maquina (vale para a proxima vista)
    O modulo hub-pcb3d-real.js (ES) so e carregado quando o Real View e ligado.
 
@@ -78,6 +81,13 @@ function lePref(){ try { return JSON.parse(localStorage.getItem(PREF) || '{}') |
 function gravaPref(p){ try { localStorage.setItem(PREF, JSON.stringify(p)); } catch (e) { /* sem storage */ } }
 function preferido(){ return lePref().modo === 'real' || lePref().modo === 'render'; }
 function prefere(on){ gravaPref({ modo:on ? 'real' : 'padrao' }); }
+/* A SOLDA EMBAIXO E OPCAO DE VISUALIZACAO, da maquina (pedido do dono, 2026-10-16: "pode ser so uma
+   caixa, desmarcada o pino passa normal e marcada ele nao passa; e so uma opcao de visualizacao; o
+   ideal e que fique na PCB, pra eu nao precisar alterar um por um"). Marcada, vale para TODO
+   componente no 3D da placa e do editor de footprint; nao mexe em footprint nenhum. */
+const PREF_SOLDA = 'altiumhub.v3d.solda';
+function soldaLigada(){ try { return localStorage.getItem(PREF_SOLDA) === '1'; } catch (e) { return false; } }
+function soldaPrefere(on){ try { localStorage.setItem(PREF_SOLDA, on ? '1' : '0'); } catch (e) { /* sem storage */ } }
 function disponivel(){
   try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')); }
   catch (e) { return false; }
@@ -956,5 +966,5 @@ async function cria(host, opcoes){
   return vista;
 }
 
-root.HubPcb3dVista = { cria, disponivel, tres, preferido, prefere };
+root.HubPcb3dVista = { cria, disponivel, tres, preferido, prefere, soldaLigada, soldaPrefere };
 })(typeof self !== 'undefined' ? self : this);
