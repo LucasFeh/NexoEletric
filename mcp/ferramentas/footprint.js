@@ -92,8 +92,8 @@ async function salva(ctx, fp, opcoes, ferramenta) {
 
 const FP_SCHEMA = {
   type: 'object',
-  description: 'mm, origem do footprint, Top. pads:[{name, type:"smd"|"th", shape:"rect"|"roundrect"|"circle"|"oval"|"octagon", x, y, w, h, rot, layer:"Top"|"Bottom"|"Multi", drill (th), radius (roundrect)}]; silk (Top Overlay):[{kind:"line", x1,y1,x2,y2,w} | {kind:"arc", cx,cy,r,sa,ea,w}] (ângulos em graus, anti-horário; círculo = sa 0, ea 360); bodies:[{kind:"step", model:<id>, raw:{x2d,y2d,rotx,roty,rotz,dz}} | {kind:"extruded", pts:[[x,y]...], standoff, height} | {kind:"cylinder", radius, height, raw} | {kind:"sphere", radius, raw}] (color "#rrggbb", opacity 0..1)',
-  properties: { name: { type: 'string' }, description: { type: 'string' }, pads: { type: 'array' }, silk: { type: 'array' }, bodies: { type: 'array' } },
+  description: 'mm, origem do footprint, Top. pads:[{name, type:"smd"|"th", shape:"rect"|"roundrect"|"circle"|"oval"|"octagon", x, y, w, h, rot, layer:"Top"|"Bottom"|"Multi", drill (th), radius (roundrect)}]; silk (Top Overlay):[{kind:"line", x1,y1,x2,y2,w} | {kind:"arc", cx,cy,r,sa,ea,w}] (ângulos em graus, anti-horário; círculo = sa 0, ea 360); bodies:[{kind:"step", model:<id>, raw:{x2d,y2d,rotx,roty,rotz,dz}} | {kind:"extruded", pts:[[x,y]...], standoff, height} | {kind:"cylinder", radius, height, raw} | {kind:"sphere", radius, raw}] (color "#rrggbb", opacity 0..1); solda:true = no 3D o pino só do lado do componente e o ponto de solda na face oposta de cada pad passante (fp_solda)',
+  properties: { name: { type: 'string' }, description: { type: 'string' }, pads: { type: 'array' }, silk: { type: 'array' }, bodies: { type: 'array' }, solda: { type: 'boolean' } },
   required: ['name', 'pads'],
 };
 
@@ -225,6 +225,23 @@ module.exports = {
         fp.bodies.push({ kind: 'step', model: id, name: m.name || '', side: 'top', raw, color: '#9a9a9a', opacity: 1 });
         const s = await salva(ctx, fp, { substituir: true }, 'fp_corpo3d');
         return Object.assign(s, { modelo: { id, nome: m.name || '' }, raw, rotacaoDe: base ? 'do footprint que já usa o modelo' : 'zero (nenhum footprint usa o modelo)' });
+      },
+    },
+    {
+      /* pedido do dono (2026-10-16): no 3D, o pino do componente só do lado dele e o ponto de solda
+         embaixo de cada pad passante -- a mesma opção "Solda embaixo" do editor de footprint */
+      nome: 'fp_solda', titulo: 'Solda na outra face (3D)', destrutiva: true, modulo: 'hub-fplib.js',
+      descricao: 'Liga (solda:true) ou desliga a "Solda embaixo" de um footprint e salva na biblioteca do hub: no 3D da placa e do editor, o pino do componente só aparece do lado dele (o que passaria da face oposta é cortado) e cada pad passante ganha, na face oposta, o ponto de solda (um cone de estanho côncavo, do tamanho do pad até a ponta do pino). Footprint sem pad passante não mostra solda. Confira com vista_screenshot no 3D.',
+      entrada: { type: 'object', properties: { footprint: { type: 'string' }, solda: { type: 'boolean', description: 'true liga (padrão), false desliga' } }, required: ['footprint'] },
+      executa: async (a, ctx) => {
+        const r = await acha(ctx, a.footprint);
+        if (!r) throw new ErroMcp(`footprint "${a.footprint}" não existe (fp_buscar)`);
+        const fp = r.fp, liga = a.solda !== false;
+        if (liga) fp.solda = true; else delete fp.solda;
+        const s = await salva(ctx, fp, { substituir: true }, 'fp_solda');
+        const th = (fp.pads || []).filter(p => p && p.drill > 0).length;
+        return Object.assign(s, { solda: liga, padsPassantes: th,
+          aviso: liga && !th ? 'o footprint não tem pad passante: nenhuma solda aparece' : undefined });
       },
     },
     {

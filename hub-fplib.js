@@ -6,7 +6,7 @@
 
    Formato (o do pcblib.js, mais os corpos 3D no contrato do pcblib-3d.js):
      var pcblibHub = {format:'pcblib-hub-v1', units:'mm',
-       footprints:[{name, description, bbox, pads:[...], silk:[...], bodies:[...],
+       footprints:[{name, description, bbox, pads:[...], silk:[...], bodies:[...], solda?,
                     hub:{criado, editado, base}}],          base = o footprint do Altium de onde saiu
        models:{<id>:{file:'3d-hub/<id>.step', name, bytes}}}
    pads/silk/bbox: mm em torno da origem do footprint, rot 0, Top -- o mesmo do pcblib.js.
@@ -14,6 +14,8 @@
      {kind:'step', model:<id>, name, side:'top', raw:{x2d, y2d, rot2d:0, rotx, roty, rotz, dz}, color, opacity}
      {kind:'extruded', side:'top', pts:[[x,y]...], standoff, height, color, opacity}
      {kind:'cylinder', radius, height, raw:{...}, color} | {kind:'sphere', radius, raw:{...}, color}
+   solda: true = no 3D o pino so aparece do lado do componente, e na outra face cada pad passante
+   ganha o ponto de solda (o cone de estanho do HubPcb3dVista). Ausente = o pino atravessa, como antes.
    O STEP sobe por POST /api/fp3d (hubserver) e fica em Libs/3d-hub/<sha1>.step.
 
    Puro onde da (node: tests/test-fplib.js); carrega/grava/sobeStep so no navegador.
@@ -74,7 +76,13 @@ function mescla(altium, hub){
 }
 function lib3d(hub){
   const fps = {};
-  for (const f of ((hub && hub.footprints) || [])) if (f && f.name && Array.isArray(f.bodies) && f.bodies.length) fps[f.name] = { bodies:f.bodies };
+  for (const f of ((hub && hub.footprints) || [])) {
+    if (!f || !f.name) continue;
+    const temCorpo = Array.isArray(f.bodies) && f.bodies.length;
+    /* solda:true -- o pino so do lado do componente, o ponto de solda na outra face (HubPcb3dModelo).
+       Vale tambem sem corpo proprio: o corpo continua vindo do PcbDoc ou da biblioteca */
+    if (temCorpo || f.solda) fps[f.name] = Object.assign({ bodies:temCorpo ? f.bodies : [] }, f.solda ? { solda:true } : {});
+  }
   return { format:'pcblib3d-v1', footprints:fps, models:(hub && hub.models) || {} };
 }
 

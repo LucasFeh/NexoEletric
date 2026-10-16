@@ -58,6 +58,10 @@
                    Top [standoff, height]; Bottom [-esp-height, -esp-standoff]) e matrix identidade
          step:     model, matrix (FINAL), modelUrl ('' se o modelo nao esta embutido)
          cylinder/sphere: radius, height?, matrix (final)
+         solda:    o ponto de solda do footprint marcado com a solda na outra face (fp.solda no
+                   editor de footprint, ou opcoes.solda(nome) -> bool): {owner, side (o do componente),
+                   esp, furos:[{x, y, r, rf}]}; e os corpos desse componente saem com corte:'abaixo'
+                   (componente em cima: o pino some abaixo da face de baixo) ou 'acima'
        origem: 'hub' | 'board3d' | 'biblioteca' | 'placeholder' | 'nexo'
      HubPcb3dModelo.matrizCorpo(raw, comp) -> [16] coluna-maior
        raw  {x2d, y2d, rot2d, rotx, roty, rotz, dz}
@@ -274,6 +278,25 @@ function leva(b, D, lado, esp, models, base, origem, owner, prefixo){
 }
 
 /* ---- API principal ---- */
+/* O ponto de solda de um componente com a solda na outra face: um corpo {kind:'solda', owner, side
+   (o lado do COMPONENTE), esp, furos:[{x, y, r, rf}]} -- um por pad passante, no centro do cobre
+   (o furo deslocado desloca o cobre), r = o raio do pad do lado da solda (o menor lado; nunca menor
+   que o furo) e rf = o raio do furo. A vista desenha o menisco de estanho na face oposta. */
+function soldaDoComp(c, esp){
+  const embaixo = ladoDe(c) !== 'bottom', furos = [];
+  for (const p of (c.pads || [])) {
+    if (!p || !(num(p.drill) > 0) || !isNum(p.x) || !isNum(p.y)) continue;
+    let x = p.x, y = p.y;
+    if (num(p.hox) || num(p.hoy)) { const [co, si] = cs(num(p.rot)); x += num(p.hox) * co - num(p.hoy) * si; y += num(p.hox) * si + num(p.hoy) * co; }
+    /* o pad da face da solda: a pilha de baixo (bw/bh) quando o componente esta em cima */
+    const w = embaixo && isNum(p.bw) ? p.bw : p.w, h = embaixo && isNum(p.bh) ? p.bh : p.h;
+    const rf = num(p.drill) / 2;
+    const r = Math.max(rf + 0.05, Math.min(num(w, 2 * rf), num(h, 2 * rf)) / 2);
+    furos.push({ x:r6(x), y:r6(y), r:r6(r), rf:r6(rf) });
+  }
+  if (!furos.length) return null;
+  return { owner:c.ref || '', side:ladoDe(c), kind:'solda', esp, furos, origem:'solda', footprint:c.footprint || '', color:'#c9ced4', opacity:1 };
+}
 function corpos(eb, d3, opcoes){
   opcoes = opcoes || {};
   const esp = isNum(opcoes.thickness) ? opcoes.thickness : (d3 && isNum(d3.thickness) ? d3.thickness : ESPESSURA_PADRAO);
@@ -303,6 +326,22 @@ function corpos(eb, d3, opcoes){
     const ini = out.length;
     corposDoComp(c);
     if (nx) aplicaNexo(c, ini);
+    if (comSolda(c)) {
+      /* o pino so do lado do componente: cada corpo dele e cortado na face oposta da placa */
+      const corte = ladoDe(c) === 'bottom' ? 'acima' : 'abaixo';
+      for (let i = ini; i < out.length; i++) if (out[i]) out[i].corte = corte;
+      const sd = soldaDoComp(c, esp);
+      if (sd) out.push(sd);
+    }
+  }
+  /* SOLDA NA OUTRA FACE (pedido do dono, 2026-10-16): o footprint marcado (fp.solda, do editor de
+     footprint do hub; ou opcoes.solda(nome) -> bool) mostra o pino so do lado do componente, e
+     na face oposta, em cada pad passante, o ponto de solda (o corpo kind 'solda'). */
+  function comSolda(c){
+    if (!c || !c.footprint) return false;
+    if (typeof opcoes.solda === 'function') { try { if (opcoes.solda(c.footprint)) return true; } catch (e) { /* segue */ } }
+    const fh = hub && hub.footprints && tem(hub.footprints, c.footprint) ? hub.footprints[c.footprint] : null;
+    return !!(fh && fh.solda);
   }
   /* a biblioteca do NexoCAD (opcoes.nexo, o HubNexo.resolvedor()), pela prioridade do contrato:
      `substitui` troca so aquele corpo STEP (mesma matriz) > o item vinculado ao footprint entra no
@@ -373,6 +412,6 @@ function corpos(eb, d3, opcoes){
   return out;
 }
 
-return { corpos, matrizCorpo, matrizLocal, placeholder, deltaComp, matPose, mul4, aplica, colMaior, deColMaior,
+return { corpos, soldaDoComp, matrizCorpo, matrizLocal, placeholder, deltaComp, matPose, mul4, aplica, colMaior, deColMaior,
          ALTURAS, ESPESSURA_PADRAO, VERSAO };
 });

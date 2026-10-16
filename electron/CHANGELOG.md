@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.11.0 — 2026-10-16
+
+- **Solda embaixo no 3D.** O footprint ganhou a opção **Solda embaixo** (editor de footprint, painel Footprint). Ligada, o pino do componente só aparece do lado dele: o que passaria da face de baixo é cortado. Embaixo de cada pad passante aparece o ponto de solda, um cone de estanho que vai do tamanho do pad até a ponta do pino. Vale no 3D do editor e no 3D da placa, nos modos Padrão e Real View. Componente montado embaixo fica com a solda em cima.
+- **MCP:** a ferramenta `fp_solda` liga e desliga a opção, e o `fp_salvar` aceita `solda:true`.
+
 ## 1.10.0 — 2026-10-16
 
 - **Guias na vista PCB, como no Esquema.** Ao arrastar um componente, ele gruda borda com borda e centro com centro nos vizinhos e no centro da placa. O centro de cada pad gruda no centro dos pads vizinhos, nas vias e nas pontas de trilha, para a trilha sair reta. Também acha o espaço igual da fileira e mostra numa pílula o vão até o componente vizinho de cada lado. A barra de status diz qual guia pegou, e o **Ctrl** solta as guias junto com o snap. Via e trilha arrastadas também alinham pelo centro e pelas pontas.

@@ -117,7 +117,8 @@ async function cria(host, opcoes){
   cv.tabIndex = 0;
   host.append(cv);
   host.style.background = o.fundo || 'linear-gradient(180deg,#4a5262 0%,#262a33 55%,#15171c 100%)';
-  ren.shadowMap.type = T.PCFShadowMap;   /* r186: o PCFSoft saiu; o PCF com shadow.radius faz a borda macia */
+  ren.shadowMap.type = T.PCFShadowMap;
+  ren.localClippingEnabled = true;       /* o corte do pino do footprint com a solda na outra face */   /* r186: o PCFSoft saiu; o PCF com shadow.radius faz a borda macia */
 
   const cena = new T.Scene();
   const cam = new T.PerspectiveCamera(30, 1, 0.1, 20000);
@@ -460,6 +461,55 @@ async function cria(host, opcoes){
     }
     return g;
   }
+  /* ---------- a solda na outra face (pedido do dono, 2026-10-16) ----------
+     "o pino do componente só aparece na parte de cima; na parte de baixo do pad vai mostrar no 3D
+     uma solda, um triângulo em 3D simulando o ponto de solda". O HubPcb3dModelo marca os corpos do
+     componente com corte ('abaixo': componente em cima, o pino some abaixo da face de baixo;
+     'acima': o contrario) e manda um corpo kind 'solda' com os pads passantes. Aqui: o corte e um
+     plano de recorte no material de cada malha do corpo (no Padrao e no Real View), e a solda e um
+     menisco de estanho por pad -- a base do tamanho do pad, colada na face, afinando ate a ponta do
+     pino (o perfil concavo de uma solda de verdade, que de lado e o triangulo). */
+  function planoDoCorte(b){
+    const esp = isNum(b.esp) && b.esp > 0 ? b.esp : ESP;
+    if (b.corte === 'abaixo') return new T.Plane(new T.Vector3(0, 0, 1), esp);   /* fica z >= -esp */
+    if (b.corte === 'acima') return new T.Plane(new T.Vector3(0, 0, -1), 0);     /* fica z <= 0 */
+    return null;
+  }
+  function clipDe(x){ for (let p = x; p && p !== gCorpos; p = p.parent) if (p.userData && p.userData.clip) return p.userData.clip; return null; }
+  function aplicaCortes(raiz){
+    raiz.traverse(x => {
+      if (!x.isMesh) return;
+      const c = clipDe(x);
+      if (!c) return;
+      for (const q of [x.material, x.userData.mPadrao, x.userData.mReal])
+        for (const m of (Array.isArray(q) ? q : (q ? [q] : []))) if (!m.clippingPlanes || m.clippingPlanes[0] !== c) { m.clippingPlanes = [c]; m.clipShadows = true; m.needsUpdate = true; }
+    });
+  }
+  const PERFIL_SOLDA = 14;
+  function malhaSolda(b){
+    const g = new T.Group();
+    const esp = isNum(b.esp) && b.esp > 0 ? b.esp : ESP;
+    const embaixo = b.side !== 'bottom';            /* componente em cima: a solda na face de baixo */
+    /* estanho: claro e acetinado (metal polido demais vira espelho escuro sem ambiente, e no Real View reflete o estudio inteiro) */
+    const mp = new T.MeshStandardMaterial({ color:new T.Color(b.color || '#c9ced4'), metalness:0.35, roughness:0.38, side:T.DoubleSide });
+    const mr = new T.MeshPhysicalMaterial({ color:0xdfe3e8, metalness:0.9, roughness:0.42, side:T.DoubleSide });
+    for (const f of (b.furos || [])) {
+      if (!(f.r > 0)) continue;
+      const rb = f.r, rp = Math.max(0.12, Math.min(rb * 0.6, (f.rf > 0 ? f.rf : rb / 2) * 0.7));
+      const h = Math.max(0.5, Math.min(1.8, rb * 1.3));
+      /* o perfil: da borda do pad (r = rb, na face) ate a ponta do pino (r = rp, a h da face), concavo */
+      const pts = [];
+      for (let i = 0; i <= PERFIL_SOLDA; i++) { const t = i / PERFIL_SOLDA; pts.push(new T.Vector2(rp + (rb - rp) * Math.pow(1 - t, 1.6), t * h)); }
+      pts.push(new T.Vector2(0, h));
+      const geo = new T.LatheGeometry(pts, 36);
+      geo.rotateX(embaixo ? -Math.PI / 2 : Math.PI / 2);   /* o eixo do torno (Y) vira -Z (para baixo) ou +Z */
+      geo.translate(f.x, f.y, embaixo ? -esp - 0.004 : 0.004);
+      const m = new T.Mesh(geo, mp);
+      m.userData.mPadrao = mp; m.userData.mReal = mr;
+      g.add(m);
+    }
+    return g.children.length ? g : null;
+  }
   let geracao = 0;
   function poeCorpos(lista){
     const minha = ++geracao;
@@ -474,10 +524,12 @@ async function cria(host, opcoes){
         geo.rotateX(Math.PI / 2); geo.translate(0, 0, Math.max(0.01, b.height || 1) / 2);
         m = comMatriz(geo, b);
       } else if (b.kind === 'sphere' && b.radius > 0) m = comMatriz(new T.SphereGeometry(b.radius, 24, 16), b);
+      else if (b.kind === 'solda') m = malhaSolda(b);
       else if (b.kind === 'step') {
         const g = new T.Group();
         g.userData.ref = b.owner || '';
         g.userData.corpo = infoCorpo(b);
+        const pc = planoDoCorte(b); if (pc) g.userData.clip = pc;
         gCorpos.add(g);
         est.corpos++;
         if (!b.modelUrl) { est.falhas.push((b.owner || '?') + ': modelo sem arquivo'); continue; }
@@ -498,6 +550,7 @@ async function cria(host, opcoes){
       const sup = new T.Group();
       sup.userData.ref = b.owner || '';
       sup.userData.corpo = infoCorpo(b);
+      const pc = planoDoCorte(b); if (pc) sup.userData.clip = pc;
       sup.add(m);
       gCorpos.add(sup);
       est.corpos++;
@@ -794,7 +847,7 @@ async function cria(host, opcoes){
 
   /* ---------- os modos de vista ---------- */
   function materiaisDoModo(raiz){
-    if (modo !== 'padrao' && !R) return;
+    if (modo !== 'padrao' && !R) { aplicaCortes(raiz); return; }
     raiz.traverse(x => {
       if (!x.isMesh || x === piso) return;
       x.castShadow = true; x.receiveShadow = true;
@@ -803,6 +856,7 @@ async function cria(host, opcoes){
       if (!x.userData.mReal) x.userData.mReal = realDe(x);
       x.material = x.userData.mReal;
     });
+    aplicaCortes(raiz);
   }
   function realDe(x){
     const mp = x.userData.mPadrao;
