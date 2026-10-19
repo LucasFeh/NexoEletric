@@ -3996,7 +3996,7 @@ window.addEventListener('keydown', e => {
    o MESMO cache da vista 2D (mascara, cobre sob ela, metal onde ela abre, serigrafia) e os corpos
    dos componentes pelo HubPcb3dModelo -- o STEP/extrudado que o editor de footprint do hub prendeu
    ao footprint (Libs/pcblib-hub.js) vale primeiro, depois o board3d.js do PcbDoc, depois o
-   pcblib-3d.js; sem nenhum, a caixa de placeholder. A tecla 2 volta ao 2D. Ferramenta de desenho
+   pcblib-3d.js; sem nenhum, so o footprint (nada de caixa inventada). A tecla 2 volta ao 2D. Ferramenta de desenho
    chamada no 3D volta ao 2D antes, como no Altium. */
 let V3 = null, modo3d = false, HUBLIB = null, D3 = undefined, LIB3D = undefined, v3Agendado = 0;
 /* O 3D PRONTO DE ANTEMAO (pedido do dono, 2026-10-19: "aperto 3 vai pro 3D, aperto de novo sai, mas
@@ -4032,7 +4032,7 @@ function corpos3dDe(nome){
   const n = f ? (f.bodies || []).length : 0;
   if (n) return n + ' corpo(s) — biblioteca do hub';
   if (D3 && (D3.bodies || []).length) return 'do PcbDoc (board3d.js)';
-  return 'nenhum — caixa no 3D (Edit Footprint… prende o STEP)';
+  return 'nenhum — no 3D aparece só o footprint (Edit Footprint… prende o STEP)';
 }
 function refsDaSel(){ return compsDaSel().map(refDoComp).filter(Boolean); }
 function alvoDoRef(ref){
@@ -4074,7 +4074,9 @@ async function corpos3d(vista){
       corpos = HubPcb3dModelo.corpos(EB, D3 || null, { pcblib3d:LIB3D || null, pcblib3dHub:h && typeof HubFpLib !== 'undefined' ? HubFpLib.lib3d(h) : null,
         base:'Projects/' + encodeURIComponent(PROJ || '') + '/', baseLib:'Libs/', thickness:esp, board:B,
         nexo:typeof HubNexo !== 'undefined' ? HubNexo.resolvedor() : null, projeto:PROJ || '',
-        solda:() => !!vista && soldaNo3d() });
+        solda:() => !!vista && soldaNo3d(),
+        /* na tela, componente sem 3D fica so com o footprint (pedido do dono, 2026-10-19: nada de caixa inventada) */
+        placeholder:!vista });
     } catch (e) { console.warn('3D: corpos', e); }
   }
   /* a solda e so de visualizacao: fora da tela (o pacote da placa para o NexoCAD, o Editar 3D) o

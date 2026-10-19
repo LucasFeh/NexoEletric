@@ -4,6 +4,10 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.12.1 — 2026-10-19
+
+- **Sem 3D inventado na PCB.** Componente que não tem modelo 3D aparece no 3D da placa só com o footprint (pads e serigrafia), sem a caixa genérica que o hub punha no lugar. Na ficha do componente, o 3D Body diz "nenhum — no 3D aparece só o footprint".
+
 ## 1.12.0 — 2026-10-19
 
 - **Vista 3D da PCB instantânea, como no Altium.** O 3D da placa é montado sozinho, escondido, logo que a vista PCB abre, e se refaz em segundo plano depois de cada mudança, quando a tela para. A tecla **3** só mostra o 3D e a **2** só esconde: não há mais a espera a cada troca. A câmera fica onde estava entre uma ida e outra (o Flip Board recoloca).
