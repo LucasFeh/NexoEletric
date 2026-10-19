@@ -2189,17 +2189,17 @@ function refreshFootprintsFaixa() {
   const MAX = 400, NL = String.fromCharCode(10);
   const frag = document.createDocumentFragment();
   rows.slice(0, MAX).forEach(x => {
-    const g = F.geo(x.name), hub = F.ehHub(x.name);
+    const g = F.geo(x.name);
     const t = el('button', 'symed-tile symed-fptile' + (alvo && alvo.atual === x.name ? ' atual' : '')); t.type = 'button';
     t.dataset.fp = x.name;
     t.setAttribute('aria-selected', String(ST.fpSel === x.name));
     const nPads = ((g && g.pads) || []).length;
-    t.title = x.name + NL + nPads + ' pads' + (hub ? ' · biblioteca do hub' + ((g && g.bodies || []).length ? ' · com modelo 3D' : '') : ' · PcbLib do Altium')
+    t.title = x.name + NL + nPads + ' pads' + ((g && g.bodies || []).length ? ' · com modelo 3D' : '')
       + (x.usos ? NL + x.usos + (x.usos === 1 ? ' símbolo usa' : ' símbolos usam') : '')
       + (alvo && alvo.atual === x.name ? NL + '— é o de "' + alvo.nome + '" hoje' : '')
       + NL + '(duplo clique: aplicar ao componente · botão direito: editar na vista Footprints)';
     const cv = el('canvas'); cv.width = 96; cv.height = 64; cv.dataset.fp = x.name;
-    t.append(cv, el('span', 'nm', x.name), el('span', 'k', (hub ? ((g && g.bodies || []).length ? 'hub · 3D · ' : 'hub · ') : '') + nPads + ' pads'));
+    t.append(cv, el('span', 'nm', x.name), el('span', 'k', ((g && g.bodies || []).length ? '3D · ' : '') + nPads + ' pads'));
     t.onclick = () => { ST.fpSel = ST.fpSel === x.name ? null : x.name; markFpSel(); pintaBotoesFp(); };
     t.ondblclick = () => { ST.fpSel = x.name; aplicarFp(); };
     t.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); F.editar(x.name); });

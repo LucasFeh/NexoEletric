@@ -91,12 +91,17 @@ class Contexto {
      reaproveita o desenho da familia. So leitura. */
   libs() {
     const schlib = this.lib('schlib.js', 'schlib') || { symbols: [] };
-    const pcblib = this.lib('pcblib.js', 'pcblib') || { footprints: [] };
+    /* os footprints como a tela os ve: uma biblioteca so (os de Libs/pcblib-hub.js -- criados no
+       editor, pela IA ou vindos do NexoCAD -- na frente dos do Altium, HubFpLib.mescla) */
+    const pcblibAltium = this.lib('pcblib.js', 'pcblib') || { footprints: [] };
+    const pcblibHub = this.lib('pcblib-hub.js', 'pcblibHub') || null;
+    const HF = pcblibHub ? this.modulo('hub-fplib.js') : null;
+    const pcblib = HF && HF.mescla ? HF.mescla(pcblibAltium, pcblibHub) : pcblibAltium;
     const basicos = this.lib('almox-basicos.js', 'almoxBasicos');
     const especiais = this.lib('almox-especiais.js', 'almoxEspeciais');
     const renameMap = this.lib('rename-map.js', 'renameMap') || null;
     const libSubs = this.lib('lib-subs.js', 'libSubs') || null;
-    const chave = [schlib, pcblib, basicos, especiais, renameMap, libSubs];
+    const chave = [schlib, pcblibAltium, pcblibHub, basicos, especiais, renameMap, libSubs];
     if (this._libs && this._libs.chave.every((v, i) => v === chave[i])) { this._aplicaTabelas(); return this._libs.v; }
     const acervos = [{ id: 'altium', titulo: 'Biblioteca do Altium', g: schlib, almox: false },
                      { id: 'almox-basicos', titulo: 'Almoxarifado — Básicos', g: basicos, almox: true },

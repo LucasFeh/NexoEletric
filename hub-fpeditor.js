@@ -546,11 +546,11 @@ async function inicia(o, resolve){
     tNome.textContent = '';
     if (HUB) {
       if (E.vazio) { tNome.textContent = '—'; return; }
-      tNome.append(document.createTextNode(E.fp.name + (E.deHub ? ' · biblioteca do hub' : acharAlt(E.fp.name) ? ' · do Altium (salvar cria a cópia do hub)' : ' · novo')));
+      tNome.append(document.createTextNode(E.fp.name + (E.deHub ? '' : acharAlt(E.fp.name) ? ' · do Altium' : ' · novo')));
       if (E.sujo) tNome.append(el('span', 'sujo', '  ● não salvo'));
       return;
     }
-    tNome.append(document.createTextNode(E.fp.name + (E.deHub ? ' — biblioteca do hub' : acharAlt(E.fp.name) ? ' — do Altium (salvar cria a cópia do hub)' : ' — novo')));
+    tNome.append(document.createTextNode(E.fp.name + (E.deHub ? '' : acharAlt(E.fp.name) ? ' — do Altium' : ' — novo')));
     if (E.sujo) tNome.append(el('span', 'sujo', '  ● não salvo'));
   }
 
@@ -583,7 +583,7 @@ async function inicia(o, resolve){
     const stat = (n, r) => { const sp = el('span'); sp.append(el('b', null, String(n)), document.createTextNode(' ' + r)); plRod.append(sp); };
     const nomesHub = new Set(hubs.map(f => f.name));
     const n3d = hubs.filter(f => (f.bodies || []).length).length + ((alt.footprints) || []).filter(f => f && !nomesHub.has(f.name) && temCorpoAlt(f.name)).length;
-    stat(total, 'footprints'); stat(hubs.length, 'do hub'); stat(n3d, 'com modelo 3D');
+    stat(total, 'footprints'); stat(n3d, 'com modelo 3D');
     const topo = listaFiltro === q ? lista.scrollTop : 0;
     listaFiltro = q;
     if (listaIO) listaIO.disconnect();
@@ -600,10 +600,10 @@ async function inicia(o, resolve){
       const b = el('button', 'lib-row symed-librow fpe-row'); b.type = 'button'; b.dataset.n = n;
       const c = el('canvas'); c.width = 54; c.height = 36; c._n = n;
       b.append(c, el('span', 'nm', n));
-      if (i.hub) b.append(el('span', 'pill hub', i.d3 ? 'hub · 3D' : 'hub'));
-      else if (i.d3) b.append(el('span', 'pill', '3D'));
+      /* uma biblioteca so (1.13): sem marca de origem; "3D" quando tem modelo */
+      if (i.d3) b.append(el('span', 'pill', '3D'));
       b.append(el('span', 'mt', ((g && g.pads) || []).length + ' pads'));
-      b.title = n + (g && g.description ? '\n' + g.description : '') + (i.hub ? '\nbiblioteca do hub (Libs/pcblib-hub.js)' : '\nPcbLib do Altium (Libs/pcblib.js)');
+      b.title = n + (g && g.description ? '\n' + g.description : '');
       b.addEventListener('click', () => trocaPara(n));
       frag.append(b); pend.push(c);
     }
@@ -617,7 +617,7 @@ async function inicia(o, resolve){
     const nomes = new Map();
     for (const f of (lib.footprints || [])) if (f && f.name) nomes.set(f.name, { hub:true, d3:(f.bodies || []).length > 0 });
     for (const f of (alt.footprints || [])) if (f && f.name && !nomes.has(f.name)) nomes.set(f.name, { hub:false, d3:temCorpoAlt(f.name) });
-    const it = [...nomes].filter(([n]) => !q || n.toLowerCase().indexOf(q) >= 0).sort((a, b) => (b[1].hub - a[1].hub) || a[0].localeCompare(b[0]));
+    const it = [...nomes].filter(([n]) => !q || n.toLowerCase().indexOf(q) >= 0).sort((a, b) => a[0].localeCompare(b[0]));
     if (HUB) return montaListaHub(it, q);
     lista.textContent = '';
     const MAX = 400;
@@ -625,8 +625,7 @@ async function inicia(o, resolve){
       const d = el('div', 'fpe-it' + (E.fp && n === E.fp.name ? ' on' : ''));
       d.append(el('span', 'n', n));
       if (i.d3) d.append(el('span', 'tag d3', '3D'));
-      if (i.hub) d.append(el('span', 'tag hub', 'hub'));
-      d.title = n + (i.hub ? '\nna biblioteca do hub' : '\ndo Altium (Libs/pcblib.js)');
+      d.title = n;
       d.addEventListener('click', () => trocaPara(n));
       lista.append(d);
     }
@@ -1664,7 +1663,11 @@ async function inicia(o, resolve){
     if (erros.length) { if (d) await d.alert(erros.join('\n'), { title:'O footprint não pode ser salvo' }); return false; }
     const ja = HF.acha(lib, fp.name);
     if (fp.name !== E.nome0 && (ja || acharAlt(fp.name)) && d &&
-        !(await d.confirm('Já existe um footprint "' + fp.name + '"' + (ja ? ' na biblioteca do hub' : ' no Altium') + '. Substituir no hub?', { title:'Salvar', ok:'Substituir' }))) return false;
+        !(await d.confirm('Já existe um footprint "' + fp.name + '" na biblioteca. Substituir?', { title:'Salvar', ok:'Substituir' }))) return false;
+    /* outro escritor (a IA pelo MCP, os componentes do NexoCAD) pode ter gravado desde que o editor
+       abriu: parte do arquivo atual e poe so este footprint por cima */
+    try { const atual = await HF.carrega(); for (const k of Object.keys(lib.models || {})) if (!temProp(atual.models, k)) atual.models[k] = lib.models[k]; lib.footprints = atual.footprints; lib.models = atual.models; }
+    catch (e) { /* sem o arquivo: segue com o da memoria */ }
     const agora = new Date().toISOString();
     fp.hub = Object.assign({}, fp.hub || {}, { editado:agora });
     if (!fp.hub.criado) fp.hub.criado = agora;
@@ -1682,7 +1685,7 @@ async function inicia(o, resolve){
     E.fp = fp; E.nome0 = fp.name; E.deHub = true; E.sujo = false; E.sel.clear();
     salvos.push(fp.name);
     titulo(); montaLista(); props(); status();
-    toast('footprint "' + fp.name + '" salvo na biblioteca do hub', 'ok');
+    toast('footprint "' + fp.name + '" salvo na biblioteca de footprints', 'ok');
     if (typeof o.aoSalvar === 'function') { try { await o.aoSalvar(fp, lib); } catch (e) { console.warn('aoSalvar', e); } }
     return true;
   }

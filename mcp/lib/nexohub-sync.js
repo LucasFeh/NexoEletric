@@ -25,7 +25,8 @@
 
    CLI (o que o app desktop roda):
      node mcp/lib/nexohub-sync.js --root <pasta do hub> --hub <url do hub no ar>
-          [--nexohub <url>] [--token <t>] [--sem-modelos] [--sem-placas] [--placas "A|B"]
+          [--nexohub <url>] [--token <t>] [--sem-modelos] [--sem-placas] [--placas "A|B"] [--sem-componentes]
+     (os componentes do NexoCAD entram na biblioteca de footprints em toda rodada: trazComponentes)
    Uma linha JSON por evento no stdout: {ev:'log',nivel,msg} {ev:'progresso',fase,feitos,total}
    {ev:'fim',ok,resumo|erro}. */
 'use strict';
@@ -198,6 +199,87 @@ async function sincronizaModelos(o) {
   return resumo;
 }
 
+/* ---------- componentes do NexoCAD -> a biblioteca de footprints ----------
+   Uma biblioteca so: cada item `componente` do Nexo Hub (o NexoCAD cria e edita) com
+   atributos.footprints = ['X'] entra no footprint X da biblioteca do NexoEletric (Libs/pcblib-hub.js,
+   a mesma que o editor e o fp_salvar gravam) com o corpo 3D `nexo:<id>` -- o que o editor faz em
+   "Adicionar componente 3D" com um item do NexoCAD (corpo na identidade, contrato §1). O footprint
+   que so existe no Altium entra como copia dele (pads e silk do Altium); o que ja tem o corpo do
+   item fica como esta (idempotente: so grava quando muda). Footprint que nao existe em lugar nenhum
+   nao se inventa (pads nao saem de um STEP): fica em `semFootprint` para a IA criar (fp_pacote /
+   fp_salvar) e o proximo ciclo prende o 3D. Footprint que ja tem o corpo de OUTRO item do NexoCAD
+   nao troca sozinho (`conflitos`). */
+const NEXO_RAW = () => ({ x2d: 0, y2d: 0, rot2d: 0, rotx: 0, roty: 0, rotz: 0, dz: 0 });
+function poeComponentes(libHub, pcblib, itens, hf) {
+  const lib = hf.normaliza(JSON.parse(JSON.stringify(libHub || null)));
+  const altium = new Map(((pcblib && pcblib.footprints) || []).filter(f => f && f.name).map(f => [f.name, f]));
+  const r = { componentes: 0, adicionados: [], jaEstavam: 0, semFootprint: [], conflitos: [], mudou: false };
+  const agora = new Date().toISOString();
+  for (const it of itens) {
+    if (!it || it.tipo !== 'componente' || it.apagado) continue;   // modelo3d e do proprio NexoEletric (so veste pela chave)
+    const fps = [...new Set(((it.atributos || {}).footprints || []).map(String).filter(Boolean))];
+    if (!fps.length || !(Number(it.rev != null ? it.rev : it.rev_atual) >= 1)) continue;
+    r.componentes++;
+    const mid = 'nexo:' + it.id;
+    for (const nome of fps) {
+      const h = hf.acha(lib, nome), a = altium.get(nome);
+      if (!h && !a) { r.semFootprint.push({ item: it.id, nome: it.nome || it.id, footprint: nome }); continue; }
+      const corpos = (h ? h.bodies : null) || [];
+      if (corpos.some(b => b && b.kind === 'step' && b.model === mid)) { r.jaEstavam++; continue; }
+      const outro = corpos.find(b => b && b.kind === 'step' && /^nexo:/.test(String(b.model)));
+      if (outro) { r.conflitos.push({ item: it.id, nome: it.nome || it.id, footprint: nome, ja: String(outro.model).slice(5) }); continue; }
+      const fp = JSON.parse(JSON.stringify(h || a));
+      for (const k of ['pads', 'silk']) if (!Array.isArray(fp[k])) fp[k] = [];
+      if (typeof fp.description !== 'string') fp.description = '';
+      /* o item do NexoCAD e o 3D do componente inteiro: entra no lugar dos corpos STEP (o resto fica) */
+      fp.bodies = (Array.isArray(fp.bodies) ? fp.bodies : []).filter(b => b && b.kind !== 'step');
+      fp.bodies.push({ kind: 'step', model: mid, name: it.nome || '', side: 'top', raw: NEXO_RAW(), color: '#9a9a9a', opacity: 1 });
+      lib.models[mid] = { file: mid, name: it.nome || '', nexo: it.id };
+      fp.hub = Object.assign({}, (h && h.hub) || {}, { editado: agora, por: 'nexocad', nexo: it.id });
+      if (!fp.hub.criado) fp.hub.criado = agora;
+      if (!fp.hub.base && a) fp.hub.base = nome;
+      fp.bbox = hf.bbox(fp);
+      hf.poe(lib, fp);
+      r.adicionados.push({ item: it.id, nome: it.nome || it.id, footprint: nome, doAltium: !h });
+      r.mudou = true;
+    }
+  }
+  return { lib, resumo: r };
+}
+
+/* le os componentes do Nexo Hub e grava o que mudou em Libs/pcblib-hub.js */
+async function trazComponentes(o) {
+  const { ctx, cliente } = o;
+  const log = o.log || (() => {});
+  const hf = ctx.exige('hub-fplib.js', 'HubFpLib');
+  const itens = o.itens || (await cliente.todos({ tipo: 'componente' })).itens;
+  const { lib, resumo } = poeComponentes(libHubDe(ctx), ctx.lib('pcblib.js', 'pcblib'), itens, hf);
+  if (resumo.mudou) {
+    const abs = path.join(ctx.root, 'Libs', 'pcblib-hub.js');
+    ctx.grava(abs, hf.serializa(lib), o.ferramenta || 'nexo_componentes');
+    log('info', `componentes do NexoCAD: ${resumo.adicionados.length} na biblioteca de footprints (${resumo.adicionados.map(a => a.footprint).join(', ')})`);
+  }
+  if (resumo.semFootprint.length) log('warn', `componentes do NexoCAD sem footprint na biblioteca: ${resumo.semFootprint.map(s => `${s.nome} → ${s.footprint}`).slice(0, 5).join('; ')}`);
+  delete resumo.mudou;
+  return resumo;
+}
+
+/* desfaz: tira o corpo nexo:<id> do footprint (o footprint fica na biblioteca) */
+function tiraComponente(ctx, id, footprint, ferramenta) {
+  const hf = ctx.exige('hub-fplib.js', 'HubFpLib');
+  const lib = hf.normaliza(JSON.parse(JSON.stringify(libHubDe(ctx) || null)));
+  const fp = hf.acha(lib, footprint);
+  const mid = 'nexo:' + id;
+  if (!fp || !(fp.bodies || []).some(b => b && b.model === mid)) return false;
+  fp.bodies = fp.bodies.filter(b => !(b && b.model === mid));
+  fp.hub = Object.assign({}, fp.hub || {}, { editado: new Date().toISOString() });
+  delete fp.hub.nexo;
+  hf.poe(lib, fp);
+  if (!lib.footprints.some(f => (f.bodies || []).some(b => b && b.model === mid))) delete lib.models[mid];
+  ctx.grava(path.join(ctx.root, 'Libs', 'pcblib-hub.js'), hf.serializa(lib), ferramenta || 'nexo_vincular_footprint');
+  return true;
+}
+
 /* ---------- placas ---------- */
 /* o JSON canonico: chaves em ordem, sem espaco */
 function canonico(v) {
@@ -352,7 +434,12 @@ async function sincroniza(o) {
   const ctx = o.ctx || new Contexto({ root: o.root, hubUrl: o.hubUrl, projetos: o.projetosDir });
   const cliente = o.cliente || NH.cliente(o.nexohub || {});
   const s = await cliente.saude();
-  const resumo = { nexohub: cliente.url, versao: s && s.versao, modelos: null, placas: null };
+  const resumo = { nexohub: cliente.url, versao: s && s.versao, componentes: null, modelos: null, placas: null };
+  /* primeiro os componentes do NexoCAD (entram na biblioteca de footprints); os modelos nexo: nao voltam ao Nexo Hub */
+  if (o.componentes !== false) {
+    try { resumo.componentes = await trazComponentes({ ctx, cliente, log }); }
+    catch (e) { if (e && e.codigo === 'fora_do_ar') throw e; log('warn', 'componentes do NexoCAD: ' + (e && e.message || e)); resumo.componentes = { erro: String(e && e.message || e) }; }
+  }
   if (o.modelos !== false) {
     const lib3d = await lib3dDe(ctx, o.hubUrl, log);
     const modelos = coletaModelos(libHubDe(ctx), lib3d);
@@ -363,7 +450,7 @@ async function sincroniza(o) {
   return resumo;
 }
 
-module.exports = { sincroniza, sincronizaModelos, sincronizaPlacas, publicaPlaca, publicaPacote, garanteModelo, coletaModelos,
+module.exports = { sincroniza, trazComponentes, poeComponentes, tiraComponente, sincronizaModelos, sincronizaPlacas, publicaPlaca, publicaPacote, garanteModelo, coletaModelos,
                    lerModelo, lib3dDe, libHubDe, corposDaPlaca, indiceDoNexoHub, projetosComPlaca, canonico, shaPacote, idDaChave, emLotes };
 
 /* ---------- CLI (o app desktop) ---------- */
@@ -377,7 +464,7 @@ if (require.main === module) {
   const placas = a.includes('--sem-placas') ? false : (val('--placas') ? val('--placas').split('|').filter(Boolean) : true);
   sincroniza({
     root: val('--root') || path.resolve(__dirname, '..', '..'), hubUrl: val('--hub') || '', nexohub,
-    modelos: !a.includes('--sem-modelos'), placas,
+    modelos: !a.includes('--sem-modelos'), placas, componentes: !a.includes('--sem-componentes'),
     log: (nivel, msg) => sai({ ev: 'log', nivel, msg }),
     progresso: p => sai(Object.assign({ ev: 'progresso' }, p)),
   }).then(resumo => { sai({ ev: 'fim', ok: true, resumo }); process.exit(0); },

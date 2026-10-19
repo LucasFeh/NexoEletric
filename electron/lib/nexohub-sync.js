@@ -8,6 +8,8 @@
 //   - roda depois que o hub sobe (precisa dele: o 3D da PcbLib sai do hubserver sob demanda);
 //   - de novo quando Libs/pcblib-hub.js, Libs/pcblib-3d.js ou Libs/3d-hub/ mudam (modelos) e
 //     quando Projects/<p>/board.js ou changes.js mudam (so aquela placa), com espera de 4 s;
+//   - a cada minuto olha se os componentes do Nexo Hub mudaram (o NexoCAD criou ou editou um):
+//     mudou, roda so a parte "componentes" (entram na biblioteca de footprints, Libs/pcblib-hub.js);
 //   - um processo por vez; o que chegar durante entra no proximo;
 //   - Nexo Hub fora do ar: tenta de novo a cada 2 min, calado (o log diz).
 // A conexao e a do contrato (NEXOHUB_URL > C:\Users\Public\NexoHub\conexao.json > 127.0.0.1:47800),
@@ -25,6 +27,7 @@ const { pathToFileURL } = require('node:url');
 const ESPERA = 4000;
 const RETENTA = 120000;
 const PRIMEIRA = 3000;
+const OLHA_COMPONENTES = 60000;
 
 function desligado(env = process.env) {
   if (env.NEXOHUB_DESLIGADO === '1') return 'NEXOHUB_DESLIGADO=1';
@@ -49,7 +52,9 @@ class NexoHubSync {
     this.vigias = [];
     this.timer = null;
     this.retenta = null;
-    this.pend = { modelos: false, placas: new Set(), tudo: false };
+    this.pend = { modelos: false, placas: new Set(), tudo: false, componentes: false };
+    this.olha = null;
+    this.marcaComponentes = '';
     this.est = { fase: 'parado', url: '', erro: '', ultimo: '', resumo: null, progresso: null, motivo: desligado() };
     this.parado = false;
   }
@@ -64,6 +69,7 @@ class NexoHubSync {
     this.ws = ws;
     this.hubUrl = hubUrl;
     if (outra) { this.vigiar(); this.agendar({ tudo: true }, PRIMEIRA); }
+    if (!this.olha) this.olha = setInterval(() => this.olharComponentes(), OLHA_COMPONENTES);
     this.conexao().then((c) => { this.est.url = c.url; }).catch(() => {});
   }
 
@@ -95,11 +101,27 @@ class NexoHubSync {
     });
   }
 
+  // os componentes do Nexo Hub mudaram desde a ultima olhada? (uma consulta pequena, sem processo)
+  async olharComponentes() {
+    if (this.parado || this.est.motivo || !this.ws || this.filho) return;
+    try {
+      const c = await this.conexao();
+      const r = await fetch(c.url.replace(/\/+$/, '') + '/api/v1/itens?tipo=componente&limite=200',
+        { headers: c.token ? { Authorization: 'Bearer ' + c.token } : {}, signal: AbortSignal.timeout(5000) });
+      if (!r.ok) return;
+      const j = await r.json();
+      const marca = (j.itens || []).map((it) => `${it.id}:${it.rev != null ? it.rev : it.rev_atual}:${((it.atributos || {}).footprints || []).join(',')}`).sort().join('|') + '#' + (j.total || 0);
+      if (this.marcaComponentes && marca !== this.marcaComponentes) this.agendar({ componentes: true }, 0);
+      this.marcaComponentes = marca;
+    } catch { /* fora do ar: a rodada normal cuida */ }
+  }
+
   agendar(o, ms = ESPERA) {
     if (this.parado || this.est.motivo || !this.ws) return;
     if (o.tudo) this.pend.tudo = true;
     if (o.modelos) this.pend.modelos = true;
     if (o.placa) this.pend.placas.add(o.placa);
+    if (o.componentes) this.pend.componentes = true;
     clearTimeout(this.timer);
     this.timer = setTimeout(() => this.rodar(), ms);
   }
@@ -115,8 +137,8 @@ class NexoHubSync {
   rodar() {
     if (this.filho || this.parado) return;
     const p = this.pend;
-    if (!p.tudo && !p.modelos && !p.placas.size) return;
-    this.pend = { modelos: false, placas: new Set(), tudo: false };
+    if (!p.tudo && !p.modelos && !p.placas.size && !p.componentes) return;
+    this.pend = { modelos: false, placas: new Set(), tudo: false, componentes: false };
     const script = this.script();
     if (!fs.existsSync(script)) {
       this.est = { ...this.est, fase: 'erro', erro: 'a pasta de trabalho não tem mcp/lib/nexohub-sync.js (hub antigo)' };
@@ -128,7 +150,7 @@ class NexoHubSync {
     if (!p.tudo && p.placas.size) args.push('--placas', [...p.placas].join('|'));
     else if (!p.tudo) args.push('--sem-placas');
     this.est = { ...this.est, fase: 'sincronizando', erro: '', progresso: null };
-    this.log.info(`[nexohub] sincronizando: ${p.tudo ? 'tudo' : [p.modelos ? 'modelos' : '', p.placas.size ? 'placas ' + [...p.placas].join(', ') : ''].filter(Boolean).join(' + ')}`);
+    this.log.info(`[nexohub] sincronizando: ${p.tudo ? 'tudo' : [p.componentes ? 'componentes do NexoCAD' : '', p.modelos ? 'modelos' : '', p.placas.size ? 'placas ' + [...p.placas].join(', ') : ''].filter(Boolean).join(' + ')}`);
     const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
     let filho;
     try {
@@ -159,7 +181,8 @@ class NexoHubSync {
       const quando = new Date().toISOString();
       if (fim && fim.ok) {
         this.est = { ...this.est, fase: 'ok', erro: '', ultimo: quando, resumo: fim.resumo, progresso: null, url: (fim.resumo && fim.resumo.nexohub) || this.est.url };
-        const m = fim.resumo.modelos, pl = fim.resumo.placas;
+        const m = fim.resumo.modelos, pl = fim.resumo.placas, co = fim.resumo.componentes;
+        if (co && co.adicionados && co.adicionados.length) this.log.info(`[nexohub] componentes do NexoCAD na biblioteca de footprints: ${co.adicionados.map((a) => a.footprint).join(', ')}`);
         this.log.info(`[nexohub] pronto: ${m ? `${m.total} modelos (${m.enviados} enviados, ${m.falhas.length} falhas)` : 'modelos —'}; ` +
           `${pl ? `${pl.total} placas (${pl.publicadas} revisões novas, ${pl.falhas.length} falhas)` : 'placas —'}`);
         this.ping();
@@ -176,7 +199,7 @@ class NexoHubSync {
       const cb = this.aoFim; this.aoFim = null;
       if (cb) cb({ ok: this.est.fase === 'ok', erro: this.est.erro, resumo: this.est.resumo });
       // o que chegou durante este processo
-      if (this.est.fase === 'ok' && (this.pend.tudo || this.pend.modelos || this.pend.placas.size)) this.agendar({}, ESPERA);
+      if (this.est.fase === 'ok' && (this.pend.tudo || this.pend.modelos || this.pend.placas.size || this.pend.componentes)) this.agendar({}, ESPERA);
     });
   }
 
@@ -193,6 +216,7 @@ class NexoHubSync {
     this.parado = true;
     clearTimeout(this.timer);
     clearTimeout(this.retenta);
+    clearInterval(this.olha); this.olha = null;
     for (const v of this.vigias) { try { v.close(); } catch { /* */ } }
     this.vigias = [];
     if (this.filho) { try { this.filho.kill(); } catch { /* */ } }

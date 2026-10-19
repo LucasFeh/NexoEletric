@@ -4,6 +4,13 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.13.0 — 2026-10-19
+
+- **Uma biblioteca de footprints só.** Os footprints criados no editor, pela IA (MCP) ou vindos do NexoCAD ficam na mesma biblioteca que os do Altium, sem a marca "hub" / "hub · 3D": a galeria, o editor de footprint, a troca de footprint no Esquema e a faixa de Footprints da Biblioteca mostram tudo junto, em ordem alfabética, com a marca "3D" quando o footprint tem modelo.
+- **As peças do NexoCAD entram direto na biblioteca de footprints.** Componente eletrônico criado ou editado no NexoCAD (item componente do Nexo Hub com footprint) vira o 3D desse footprint na biblioteca do NexoEletric, sem passar pelo editor. O app olha o Nexo Hub a cada minuto; o footprint que só existia no Altium entra junto, com os pads dele. Componente cujo footprint ainda não existe fica avisado no log (crie o footprint e ele entra sozinho).
+- **MCP:** ferramenta nova `nexo_componentes` (traz agora e diz o que entrou, o que falta footprint e os conflitos); o `nexo_vincular_footprint` já põe (ou tira) o 3D do footprint na hora; o `nexo_sincronizar` traz os componentes antes de publicar. As ferramentas de esquema (`sch_buscar_footprint`, `sch_simbolo`, `sch_validar`) e o ECO passam a ver os footprints que a IA criou com o `fp_salvar`.
+- O editor de footprint relê a biblioteca antes de salvar: o que a IA ou o NexoCAD gravou enquanto ele estava aberto não se perde.
+
 ## 1.12.1 — 2026-10-19
 
 - **Sem 3D inventado na PCB.** Componente que não tem modelo 3D aparece no 3D da placa só com o footprint (pads e serigrafia), sem a caixa genérica que o hub punha no lugar. Na ficha do componente, o 3D Body diz "nenhum — no 3D aparece só o footprint".

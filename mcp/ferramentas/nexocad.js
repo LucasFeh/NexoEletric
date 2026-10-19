@@ -152,7 +152,7 @@ module.exports = {
     },
     {
       nome: 'nexo_sincronizar', titulo: 'Sincronizar com o Nexo Hub', destrutiva: false,
-      descricao: 'Publica no Nexo Hub o que o NexoEletric tem: a biblioteca 3D (cada modelo de Libs/pcblib-hub.js e da PcbLib da casa vira um item modelo3d, revisão 1 com o STEP) e as placas (cada projeto com board.js vira um item placa com o pacote eletrichub-placa-v1). É o mesmo que o app desktop faz sozinho ao abrir. Idempotente: só sobe o que falta, nunca cria revisão de um modelo que já existe (as revisões 2+ são do NexoCAD) e só cria revisão de placa quando o pacote mudou. modelos:false pula a biblioteca; placas:false pula as placas, ou uma lista de projetos.',
+      descricao: 'Primeiro traz os componentes do NexoCAD para a biblioteca de footprints (como nexo_componentes). Depois publica no Nexo Hub o que o NexoEletric tem: a biblioteca 3D (cada modelo de Libs/pcblib-hub.js e da PcbLib da casa vira um item modelo3d, revisão 1 com o STEP) e as placas (cada projeto com board.js vira um item placa com o pacote eletrichub-placa-v1). É o mesmo que o app desktop faz sozinho ao abrir. Idempotente: só sobe o que falta, nunca cria revisão de um modelo que já existe (as revisões 2+ são do NexoCAD) e só cria revisão de placa quando o pacote mudou. modelos:false pula a biblioteca; placas:false pula as placas, ou uma lista de projetos.',
       entrada: { type: 'object', properties: { modelos: { type: 'boolean' }, placas: { oneOf: [{ type: 'boolean' }, { type: 'array', items: { type: 'string' } }] } } },
       executa: async (a, ctx) => {
         const logs = [];
@@ -255,10 +255,22 @@ module.exports = {
       },
     },
     {
+      nome: 'nexo_componentes', titulo: 'Trazer os componentes do NexoCAD para a biblioteca de footprints', destrutiva: true,
+      descricao: 'Uma biblioteca só: cada item componente do Nexo Hub (criado/editado no NexoCAD) com footprints (atributos.footprints) entra na biblioteca de footprints do NexoEletric como o corpo 3D desses footprints (nexo:<id>, na identidade, como o "Adicionar componente 3D" do editor). Footprint que só existe no Altium entra como cópia dele. O app desktop faz isso sozinho a cada minuto; aqui é na hora. Resposta: adicionados, semFootprint (o footprint não existe: crie com fp_pacote/fp_salvar e rode de novo) e conflitos (o footprint já tem o corpo de outro item: troque com nexo_vincular_footprint remover no outro). item = só esse.',
+      entrada: { type: 'object', properties: { item: { type: 'string', description: 'só este item (id); vazio = todos os componentes' } } },
+      executa: async (a, ctx) => {
+        const c = cliente();
+        try {
+          const itens = a.item ? [await c.item(a.item)] : undefined;
+          return Object.assign({ ok: true }, await SY.trazComponentes({ ctx, cliente: c, itens }));
+        } catch (e) { throw errNH(e); }
+      },
+    },
+    {
       nome: 'nexo_vincular_footprint', titulo: 'Vincular item do Nexo Hub a um footprint', destrutiva: true,
       descricao: 'Liga (ou, com remover:true, desliga) um item do Nexo Hub a um footprint do hub/Altium: atributos.footprints + o vínculo "footprint". Num item componente, o hub passa a desenhar o modelo do item no lugar dos corpos 3D de todo componente com esse footprint (na identidade do footprint); num modelo3d o vínculo só registra quem usa o corpo (o 3D segue pela chave).',
       entrada: { type: 'object', properties: { item: { type: 'string', description: 'id do item (nexo_biblioteca)' }, footprint: { type: 'string' }, remover: { type: 'boolean' } }, required: ['item', 'footprint'] },
-      executa: async (a) => {
+      executa: async (a, ctx) => {
         const c = cliente();
         let it;
         try { it = await c.item(a.item); } catch (e) { throw errNH(e); }
@@ -269,8 +281,14 @@ module.exports = {
           if (!a.remover) await c.vincula({ de_item: it.id, relacao: 'footprint', para_ref: a.footprint });
           else for (const v of (it.vinculos || [])) if (v && v.relacao === 'footprint' && v.para_ref === a.footprint && v.id != null) await c.pede('DELETE', '/api/v1/vinculos/' + v.id);
         } catch (e) { throw errNH(e); }
-        return { ok: true, id: it.id, tipo: it.tipo, footprints: fps,
-                 nota: it.tipo === 'componente' ? 'o 3D do hub passa a usar este item nesses footprints' : 'item ' + it.tipo + ': o vínculo é registrado, mas só item componente veste o footprint inteiro no 3D' };
+        /* uma biblioteca so: o componente entra (ou sai) do footprint na biblioteca de footprints agora */
+        let biblioteca = null;
+        if (it.tipo === 'componente') {
+          if (a.remover) biblioteca = { tirado: SY.tiraComponente(ctx, it.id, a.footprint) };
+          else biblioteca = await SY.trazComponentes({ ctx, cliente: c, itens: [Object.assign({}, it, { atributos: Object.assign({}, it.atributos || {}, { footprints: fps }) })], ferramenta: 'nexo_vincular_footprint' });
+        }
+        return { ok: true, id: it.id, tipo: it.tipo, footprints: fps, biblioteca,
+                 nota: it.tipo === 'componente' ? (a.remover ? 'o corpo do item saiu do footprint' : 'o item está na biblioteca de footprints, como o 3D desses footprints') : 'item ' + it.tipo + ': o vínculo é registrado, mas só item componente veste o footprint inteiro no 3D' };
       },
     },
   ],

@@ -7,7 +7,7 @@
 
    O que a galeria diz que o campo de texto nao dizia:
      - o desenho de cada footprint, e quantos pads tem
-     - de onde vem: PcbLib do Altium ou biblioteca do hub (marca "hub", "3D" se tem corpo)
+     - "3D" quando o footprint tem modelo (desde a 1.13 sem marca de origem: uma biblioteca so)
      - se os pinos do simbolo tem pad nele (o "Unknown Pin" que o ECO acusaria): o filtro
        "so os que servem" deixa so os footprints onde TODO pino do simbolo tem pad
 
@@ -99,10 +99,9 @@ function desenha(cv, fp, margem){
 function escolhe(opcoes){
   const o = opcoes || {};
   poeCss();
-  const hub = new Set(o.hub || []);
   const pinos = (o.pinos || []).map(String);
   const todos = (o.footprints || []).filter(f => f && f.name).slice().sort((a, b) =>
-    (hub.has(b.name) - hub.has(a.name)) || a.name.localeCompare(b.name));
+    a.name.localeCompare(b.name));   // uma biblioteca so (1.13): em ordem alfabetica, sem separar a origem
   const por = new Map(todos.map(f => [f.name, f]));
   let sel = o.atual && por.has(o.atual) ? o.atual : null;
   let soServe = false;
@@ -163,7 +162,7 @@ function escolhe(opcoes){
         const k = el('span', 'k');
         k.append(document.createTextNode((f.pads || []).length + ' pads'));
         if (pinos.length && !serve(f, pinos)) k.append(el('span', 'ruim', '≠ pinos'));
-        if (hub.has(f.name)) k.append(el('span', 'hub', (f.bodies || []).length ? 'hub · 3D' : 'hub'));
+        if ((f.bodies || []).length) k.append(el('span', 'hub', '3D'));
         t.title = f.name + (f.name === o.atual ? '\n— é o de hoje' : '') + '\nduplo clique: usar';
         t.append(cv, el('span', 'nm', f.name), k);
         t.onclick = () => { sel = f.name; for (const x of tiles.querySelectorAll('.fpk-tile')) x.setAttribute('aria-selected', String(x === t)); mostra(); };
@@ -186,7 +185,6 @@ function escolhe(opcoes){
       if (!f) { cvG.getContext('2d').clearRect(0, 0, cvG.width, cvG.height); kv('', 'escolha um footprint na galeria'); return; }
       desenha(cvG, f, 1.15);
       kv('Nome', f.name);
-      kv('Origem', hub.has(f.name) ? 'biblioteca do hub' : 'PcbLib do Altium');
       kv('Pads', String((f.pads || []).length));
       if (f.bbox) kv('Tamanho', (Math.round((f.bbox.x2 - f.bbox.x1) * 100) / 100) + ' × ' + (Math.round((f.bbox.y2 - f.bbox.y1) * 100) / 100) + ' mm');
       kv('Modelo 3D', (f.bodies || []).length ? (f.bodies || []).length + ' corpo(s)' : 'nenhum', (f.bodies || []).length ? null : 'warn');

@@ -30,6 +30,14 @@ para o banco.
     categoria `placas`), com o papel `placa` = o pacote da §4. Revisão nova só quando o pacote muda
     (`atributos.pacote_sha`), com vínculos `usa` para cada item de modelo.
 - O NexoCAD grava as revisões dos modelos (Ctrl+S) e os itens que ele cria.
+- **Uma biblioteca só (1.13):** o NexoEletric traz do Nexo Hub cada item `componente` com
+  `atributos.footprints` para a sua biblioteca de footprints (`Libs/pcblib-hub.js`, a mesma do editor e do
+  `fp_salvar`): o footprint ganha o corpo `{kind:'step', model:'nexo:<id>', raw:<identidade>}` e o índice
+  `models['nexo:<id>'] = {file:'nexo:<id>', name, nexo:<id>}`, como o "Adicionar componente 3D" do editor. Footprint
+  que só existe no Altium entra como cópia dele; footprint que não existe não é inventado (fica em
+  `semFootprint`); footprint que já veste outro item não troca (`conflitos`). Roda em toda sincronização, a cada
+  minuto quando os componentes do Nexo Hub mudam (app desktop), no `nexo_componentes` e no
+  `nexo_vincular_footprint` (MCP). Os modelos `nexo:` não voltam ao Nexo Hub como `modelo3d`.
 
 **Do item do Nexo Hub ao que o hub desenha** (`/api/nexo/biblioteca`, no formato que o `hub-nexo.js` lê):
 
