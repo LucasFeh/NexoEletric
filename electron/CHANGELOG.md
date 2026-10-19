@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.12.0 — 2026-10-19
+
+- **Vista 3D da PCB instantânea, como no Altium.** O 3D da placa é montado sozinho, escondido, logo que a vista PCB abre, e se refaz em segundo plano depois de cada mudança, quando a tela para. A tecla **3** só mostra o 3D e a **2** só esconde: não há mais a espera a cada troca. A câmera fica onde estava entre uma ida e outra (o Flip Board recoloca).
+- **A silhueta do 3D na placa.** O contorno azul que o editor de footprint mostra de cada corpo 3D aparece também na vista PCB, em todo componente que tem modelo 3D (STEP, extrudado, cilindro ou esfera). A silhueta é do componente: não se seleciona nem se move sozinha. Clicar ou arrastar nela pega o componente inteiro, e ela anda junto no arrasto. Segue a visibilidade da camada Top Overlay ou Bottom Overlay do lado do componente.
+
 ## 1.11.1 — 2026-10-16
 
 - **Solda embaixo virou uma caixa de visualização, para a placa inteira.** Na vista PCB, painel **Vista**, a caixa **Solda embaixo no 3D**: desmarcada, o pino passa normal; marcada, o pino de todo componente para na placa e cada pad passante mostra o ponto de solda na outra face. Não altera footprint nem placa, e o 3D enviado ao NexoCAD continua com o pino inteiro. A mesma caixa fica na barra do editor de footprint (marcar numa vale na outra).

@@ -665,6 +665,9 @@ function montaAlvos(){
     if (caixa) push(a, 'comp', m.eff.layer === 'Bottom' ? 'Bottom' : 'Top', bbPts(caixa),
                     (x, y, tol) => dentroPoli(caixa, x, y) || pertoPoli(caixa, x, y, tol), 9, null);
     const ec = EB.components[i];
+    /* a silhueta do 3D pega o componente inteiro (prio 10: perde para tudo, ate para a caixa de outro) */
+    for (const q of silhuetasDe(ec)) push(a, 'comp', m.eff.layer === 'Bottom' ? 'Bottom' : 'Top', bbPts(q),
+                    (x, y, tol) => dentroPoli(q, x, y) || pertoPoli(q, x, y, tol), 10, null);
     (ec && ec.pads || []).forEach((p, j) => {
       if (!p || !isNum(p.x) || !isNum(p.y)) return;
       const ap = reg({ t:'pad', comp:m, pad:(m.src.pads || [])[j] || p, eb:p });
@@ -1127,6 +1130,7 @@ function draw(){
   for (const k of ORDEM) if (camVisivel(k)) pintaCamada(k);
   ctx.fillStyle = COR.furo; ctx.fill(CACHE.furos);
   ctx.strokeStyle = COR.contorno; ctx.lineWidth = px(1.3); ctx.setLineDash([]); ctx.stroke(pathPlaca());
+  desenhaSilhuetas();
   desenhaRealce();
   desenhaConexoes();
   desenhaDrc();
@@ -3009,6 +3013,8 @@ function previaComp(m, g){
   if (m.pares) Object.defineProperty(fake, 'pares', { value:m.pares, enumerable:false });
   const d = HC.compDelta(fake);
   const lado = ladoDaVista();
+  { const ec = EB.components[model.comps.indexOf(m)];
+    pintaSilhuetas(silhuetasDe(ec).map(q => q.map(p => { const r = HC.xfPoint(d, p[0], p[1]); return [r.x, r.y]; })), g.layer); }
   for (const { kind, o } of objetosDoComp(m)) {
     const t = HC.xfObject(d, o, kind === 'track' ? 'line' : kind);
     if (!t) continue;
@@ -3993,6 +3999,14 @@ window.addEventListener('keydown', e => {
    pcblib-3d.js; sem nenhum, a caixa de placeholder. A tecla 2 volta ao 2D. Ferramenta de desenho
    chamada no 3D volta ao 2D antes, como no Altium. */
 let V3 = null, modo3d = false, HUBLIB = null, D3 = undefined, LIB3D = undefined, v3Agendado = 0;
+/* O 3D PRONTO DE ANTEMAO (pedido do dono, 2026-10-19: "aperto 3 vai pro 3D, aperto de novo sai, mas
+   precisa ser instantaneo igual ao do Altium; talvez carregar o 3D assim que entra na pagina"). A
+   vista e criada logo que a pagina fica ociosa, escondida com visibility:hidden (tem tamanho: compila
+   os shaders e sobe as texturas na GPU), e depois de cada mudanca a cena se refaz em segundo plano,
+   quando a tela para. A tecla 3 so mostra; a 2 so esconde. */
+let sujo3d = true, prepara3dP = null, fundo3d = 0, cena3dSeq = 0, poseFlip = null;
+const v3Esconde = h => { h.hidden = false; h.style.visibility = 'hidden'; h.style.pointerEvents = 'none'; };
+const v3Mostra = h => { h.hidden = false; h.style.visibility = ''; h.style.pointerEvents = ''; };
 const SO_2D = new Set(['trilha', 'via', 'linha', 'arco', 'circulo', 'retangulo', 'poligono', 'texto', 'triangulo', 'furo',
   'contorno', 'medir', 'sinalizar', 'pad', 'pour', 'fill', 'solidRegion', 'retanguloContorno', 'colar', 'duplicar',
   'espelhoX', 'espelhoY', 'camadaUnica', 'proxCamada', 'antCamada', 'outraFace', 'grade', 'diff', 'gradeId', 'zoomIn', 'zoomOut',
@@ -4100,7 +4114,10 @@ async function enviaPlacaNexo(){
 const soldaNo3d = () => !!(typeof HubPcb3dVista !== 'undefined' && typeof HubPcb3dVista.soldaLigada === 'function' && HubPcb3dVista.soldaLigada());
 async function cena3d(){
   if (!V3) return;
+  const seq = ++cena3dSeq;
+  sujo3d = false;
   const { corpos, esp } = await corpos3d(true);
+  if (seq !== cena3dSeq || !V3) return;   /* outra mudanca chegou durante a espera: vale a dela */
   const furos = [];
   const furo = p => { if (p && p.drill > 0 && isNum(p.x) && isNum(p.y)) furos.push({ x:p.x, y:p.y, r:p.drill / 2 }); };
   for (const c of (EB.components || [])) for (const p of ((c && c.pads) || [])) furo(p);
@@ -4109,14 +4126,32 @@ async function cena3d(){
   V3.cena({ lacos:lacosDe(EB), recortes:recortesDaTela().map(k => k.pts), furos, esp,
             bbox:EB.board && EB.board.bbox, pintaFace:pintaFace3d, corpos, realce:refsDaSel() });
 }
-function refaz3d(){ if (!modo3d || !V3 || v3Agendado) return; v3Agendado = setTimeout(() => { v3Agendado = 0; cena3d(); }, 120); }
-async function entra3d(){
-  if (modo3d) return;
-  if (typeof HubPcb3dVista === 'undefined' || !HubPcb3dVista.disponivel()) { HubDialog.toast('esta máquina não tem WebGL: a vista 3D não abre', 'warn', 4000); return; }
-  if (tool !== 'select') setTool('select');
+/* a placa mudou: na tela 3D refaz ja; escondida, fica para quando a tela parar (agendaFundo3d) */
+function refaz3d(){
+  agendaSilhuetas();
+  if (!V3) return;
+  sujo3d = true;
+  if (!modo3d) { agendaFundo3d(); return; }
+  if (!v3Agendado) v3Agendado = setTimeout(() => { v3Agendado = 0; cena3d(); }, 120);
+}
+function agendaFundo3d(){
+  clearTimeout(fundo3d);
+  fundo3d = setTimeout(() => {
+    fundo3d = 0;
+    if (!V3 || modo3d || !sujo3d) return;
+    if (arrasto || draft || pan) { agendaFundo3d(); return; }   /* no meio de um gesto: espera ele acabar */
+    const vai = () => { if (V3 && !modo3d && sujo3d) cena3d(); };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(vai, { timeout:4000 }); else vai();
+  }, 1500);
+}
+/* cria a vista escondida e monta a cena: na carga da pagina (ocioso) ou na primeira tecla 3 */
+function prepara3d(){
+  if (V3) return Promise.resolve(V3);
+  if (prepara3dP) return prepara3dP;
+  if (typeof HubPcb3dVista === 'undefined' || !HubPcb3dVista.disponivel()) return Promise.resolve(null);
   const host = $('v3d');
-  modo3d = true; host.hidden = false;
-  if (!V3) {
+  if (!modo3d) v3Esconde(host);
+  prepara3dP = (async () => {
     try {
       V3 = await HubPcb3dVista.cria(host, {
         aoClicar(ref, ev){
@@ -4133,25 +4168,160 @@ async function entra3d(){
         },
       });
     } catch (e) {
-      modo3d = false; host.hidden = true;
+      prepara3dP = null;
+      if (!modo3d) host.hidden = true;
+      throw e;
+    }
+    /* salvou no NexoCAD (a revisao da biblioteca mudou): o 3D se refaz, sem recarregar a pagina */
+    if (typeof HubNexo !== 'undefined' && !nexoDesliga) nexoDesliga = HubNexo.aoMudar(() => refaz3d());
+    await cena3d();
+    poseFlip = view.flip;
+    V3.pose(view.flip ? 'base' : 'topo');
+    return V3;
+  })();
+  return prepara3dP;
+}
+function agendaPrepara3d(){
+  const vai = () => { prepara3d().catch(e => console.warn('3D: pre-carga', e)); };
+  setTimeout(() => { if (typeof requestIdleCallback === 'function') requestIdleCallback(vai, { timeout:3000 }); else vai(); }, 400);
+}
+async function entra3d(){
+  if (modo3d) return;
+  if (typeof HubPcb3dVista === 'undefined' || !HubPcb3dVista.disponivel()) { HubDialog.toast('esta máquina não tem WebGL: a vista 3D não abre', 'warn', 4000); return; }
+  if (tool !== 'select') setTool('select');
+  const host = $('v3d');
+  modo3d = true; v3Mostra(host);
+  avisoRodape('3D — Shift+botão direito (ou arrastar) gira · botão direito arrasta · 0 topo · 8 isométrica · 9 gira 90° · 2 volta ao 2D');
+  if (!V3) {
+    try { await prepara3d(); }
+    catch (e) {
+      modo3d = false; host.hidden = true; avisoRodape('');
       HubDialog.toast('a vista 3D não abriu: ' + (e && e.message || e), 'err', 5000); return;
     }
-  }
-  /* salvou no NexoCAD (a revisao da biblioteca mudou): o 3D se refaz, sem recarregar a pagina */
-  if (typeof HubNexo !== 'undefined' && !nexoDesliga) nexoDesliga = HubNexo.aoMudar(() => refaz3d());
-  await cena3d();
-  V3.pose(view.flip ? 'base' : 'topo');
-  avisoRodape('3D — Shift+botão direito (ou arrastar) gira · botão direito arrasta · 0 topo · 8 isométrica · 9 gira 90° · 2 volta ao 2D');
+    if (!V3 || !modo3d) return;
+  } else if (sujo3d) { clearTimeout(fundo3d); fundo3d = 0; cena3d(); }   /* a cena de antes aparece ja; a nova entra por cima */
+  /* a camera fica onde estava, como no Altium; so o Flip Board (outra face) recoloca */
+  if (poseFlip !== view.flip) { poseFlip = view.flip; V3.pose(view.flip ? 'base' : 'topo'); }
+  V3.realca(refsDaSel());
+  V3.redimensiona();
   try { V3.canvas.focus(); } catch (e) { /* ok */ }
 }
 function sai3d(){
   if (!modo3d) return;
   modo3d = false;
-  if (nexoDesliga) { nexoDesliga(); nexoDesliga = null; }
-  $('v3d').hidden = true;
+  v3Esconde($('v3d'));
+  if (sujo3d) agendaFundo3d();
   avisoRodape('');
   try { cv.focus(); } catch (e) { /* ok */ }
   pede();
+}
+
+/* ============================== a silhueta do 3D na placa ==============================
+   Pedido do dono (2026-10-19): o contorno azul que o editor de footprint mostra de cada corpo 3D
+   aparece tambem na vista PCB, em cada componente. E do componente: nao se seleciona nem anda
+   sozinha -- clicar ou arrastar nela pega o componente inteiro. A conta e a do editor: o STEP vira o
+   retangulo que o envolve no referencial do componente (o giro dele), o extrudado o proprio
+   contorno, o cilindro e a esfera o circulo; a caixa de placeholder (sem 3D nenhum) nao tem silhueta.
+   Cada silhueta guarda a pose do componente em que foi medida: o componente andou (arrasto,
+   comp_move) e ela vai junto pela conta do motor (HC.compDelta), sem esperar a proxima medida. */
+let SILH = new Map(), silhSeq = 0, silhAgendado = 0;
+const STEP_PTS = new Map();   /* chave do modelo -> amostra dos vertices da malha (x,y,z em serie) */
+const poseDe = c => ({ x:c.x, y:c.y, rot:isNum(c.rot) ? c.rot : 0, layer:c.layer === 'Bottom' ? 'Bottom' : 'Top' });
+function agendaSilhuetas(){
+  if (LEAN || silhAgendado) return;
+  silhAgendado = setTimeout(() => { silhAgendado = 0; atualizaSilhuetas().catch(e => console.warn('silhueta 3D', e)); }, 200);
+}
+function amostraStep(malhas){
+  let n = 0;
+  for (const mm of malhas || []) n += mm && mm.pos ? mm.pos.length / 3 : 0;
+  const passo = Math.max(1, Math.floor(n / 6000)), out = [];
+  for (const mm of malhas || []) {
+    const P = mm && mm.pos; if (!P) continue;
+    for (let i = 0; i + 2 < P.length; i += 3 * passo) out.push(P[i], P[i + 1], P[i + 2]);
+  }
+  return out;
+}
+function ptsDoStep(b){
+  const k = b.chave || b.model || b.modelUrl;
+  if (STEP_PTS.has(k)) return STEP_PTS.get(k);
+  if (typeof HubPcb3dStep === 'undefined' || !b.modelUrl) return null;
+  const p = HubPcb3dStep.carrega(b.modelUrl, { chave:k }).then(r => { const a = amostraStep(r && r.malhas); STEP_PTS.set(k, a); return a; },
+                                                               () => { STEP_PTS.set(k, null); return null; });
+  STEP_PTS.set(k, p);
+  return p;
+}
+/* o retangulo que envolve os pontos (x,y) no referencial girado de `rot` graus */
+function retanguloGirado(xy, rot){
+  const a = rot * RAD, c = Math.cos(a), s = Math.sin(a);
+  let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity;
+  for (const [x, y] of xy) { const u = x * c + y * s, v = -x * s + y * c; if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v; }
+  if (!isFinite(u0)) return null;
+  return [[u0, v0], [u1, v0], [u1, v1], [u0, v1]].map(([u, v]) => [u * c - v * s, u * s + v * c]);
+}
+async function silhuetaDe(b, comp){
+  const m = Array.isArray(b.matrix) && b.matrix.length === 16 ? b.matrix : null;
+  if (b.kind === 'extruded') return (b.pts || []).length >= 3 ? b.pts.map(p => [p[0], p[1]]) : null;
+  if ((b.kind === 'cylinder' || b.kind === 'sphere') && b.radius > 0 && m) {
+    const q = []; for (let i = 0; i < 24; i++) q.push([m[12] + b.radius * Math.cos(i * Math.PI / 12), m[13] + b.radius * Math.sin(i * Math.PI / 12)]);
+    return q;
+  }
+  if (b.kind !== 'step' || !m) return null;
+  const P = await ptsDoStep(b);
+  if (!P || !P.length) return null;
+  const xy = [];
+  for (let i = 0; i < P.length; i += 3) { const x = P[i], y = P[i + 1], z = P[i + 2]; xy.push([m[0] * x + m[4] * y + m[8] * z + m[12], m[1] * x + m[5] * y + m[9] * z + m[13]]); }
+  return retanguloGirado(xy, comp && isNum(comp.rot) ? comp.rot : 0);
+}
+async function atualizaSilhuetas(){
+  const seq = ++silhSeq;
+  const { corpos } = await corpos3d();
+  if (seq !== silhSeq) return;
+  const porRef = new Map();
+  for (const c of (EB.components || [])) if (c && c.ref) porRef.set(c.ref, c);
+  const novo = new Map();
+  await Promise.all(corpos.map(async b => {
+    if (!b || !b.owner || b.placeholder || b.kind === 'solda') return;
+    const c = porRef.get(b.owner);
+    if (!c) return;
+    let q = null;
+    try { q = await silhuetaDe(b, c); } catch (e) { q = null; }
+    if (!q || q.length < 3) return;
+    let s = novo.get(b.owner);
+    if (!s) { s = { pose:poseDe(c), polys:[] }; novo.set(b.owner, s); }
+    s.polys.push(q);
+  }));
+  if (seq !== silhSeq) return;
+  SILH = novo;
+  montaAlvos();
+  pede();
+}
+/* as silhuetas de um componente da placa efetiva, na pose de agora */
+function silhuetasDe(ec){
+  const s = ec && SILH.get(ec.ref);
+  if (!s) return [];
+  const p = poseDe(ec), o = s.pose;
+  if (Math.abs(p.x - o.x) < 1e-9 && Math.abs(p.y - o.y) < 1e-9 && Math.abs(p.rot - o.rot) < 1e-9 && p.layer === o.layer) return s.polys;
+  const d = HC.compDelta({ src:o, eff:p });
+  return s.polys.map(q => q.map(pt => { const r = HC.xfPoint(d, pt[0], pt[1]); return [r.x, r.y]; }));
+}
+function pintaSilhuetas(polys, lado){
+  if (!polys.length || !camVisivel(lado === 'Bottom' ? 'BottomOverlay' : 'TopOverlay')) return;
+  const P = new Path2D();
+  for (const q of polys) pPoli(P, q);
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,200,210,0.10)'; ctx.fill(P);
+  ctx.strokeStyle = '#00c8d2'; ctx.lineWidth = px(1.2); ctx.setLineDash([px(6), px(4)]); ctx.stroke(P);
+  ctx.restore();
+}
+function desenhaSilhuetas(){
+  if (!SILH.size) return;
+  const naMao = new Set();
+  if (arrasto && !arrasto.ponta && (arrasto.moveu || arrasto.girou)) for (const a of arrasto.alvos) if (a.t === 'comp') naMao.add(a.m);
+  model.comps.forEach((m, i) => {
+    const ec = EB.components[i];
+    if (!ec || naMao.has(m) || !SILH.has(ec.ref)) return;
+    pintaSilhuetas(silhuetasDe(ec), ec.layer);
+  });
 }
 
 /* ============================== editor de footprint (o PCB Library do Altium) ==============================
@@ -5243,6 +5413,7 @@ function inicia(){
   if (painel) painel.atualiza();
   draw();
   if (MODO === 'gerber' && !LEAN) abreGerber();
+  if (!LEAN) { agendaSilhuetas(); agendaPrepara3d(); }
 }
 try { inicia(); }
 catch (e) { fatal('A vista PCB não abriu: ' + (e && e.message || e)); throw e; }
