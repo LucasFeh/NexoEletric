@@ -171,9 +171,11 @@ export function criarCliente({ url, token, app = "" } = {}) {
     return pedir("POST", `/api/v1/itens/${enc(id)}/revisoes`, { json: corpo });
   }
   /** Anexa um arquivo a uma revisão existente (o servidor só aceita papel 'thumb'). sha pode ser bytes. */
-  async function anexar(id, n, papel, sha) {
-    if (!(typeof sha === "string" && SHA_OK.test(sha))) sha = (await enviarBlob(sha, `${papel}.png`)).sha256;
-    return pedir("PUT", `/api/v1/itens/${enc(id)}/revisoes/${Number(n)}/arquivos/${enc(papel)}`, { json: { sha } });
+  /** Anexa a uma revisão já feita a miniatura ('thumb') ou uma saída gerada dela ('saida/...', com o nome do arquivo). */
+  async function anexar(id, n, papel, sha, nome) {
+    const nm = nome ?? (papel === "thumb" ? "thumb.png" : String(papel).split("/").pop());
+    if (!(typeof sha === "string" && SHA_OK.test(sha))) sha = (await enviarBlob(sha, nm)).sha256;
+    return pedir("PUT", `/api/v1/itens/${enc(id)}/revisoes/${Number(n)}/arquivos/${enc(papel)}`, { json: { sha, nome: nm } });
   }
 
   /** O item dono da chave, ou null. */
@@ -270,11 +272,24 @@ export function criarCliente({ url, token, app = "" } = {}) {
   }
   const clientes = async () => (await pedir("GET", "/api/v1/clientes")).clientes;
   const backup = () => pedir("POST", "/api/v1/admin/backup");
+  // central de instalação: programas da rede e as versões publicadas (instaladores)
+  const programas = async () => (await pedir("GET", "/api/v1/programas")).programas;
+  /** Sobe o instalador e publica a versão: {versao, bytes|caminho já lido, arquivo, notas?, commit?, substituir?}. */
+  async function publicarVersao(programa, { versao, bytes, arquivo, notas, commit, nome, descricao, substituir } = {}) {
+    const b = await enviarBlob(bytes, arquivo);
+    return pedir("POST", `/api/v1/programas/${enc(programa)}/versoes`, { json: { versao, sha256: b.sha256, arquivo, notas, commit, nome, descricao, substituir } });
+  }
+  const apagarVersao = (programa, versao) => pedir("DELETE", `/api/v1/programas/${enc(programa)}/versoes/${enc(versao)}`);
+  /** Atmosfera Nexo: entra/atualiza o manifesto do programa (nexo-programa.json) e lê os programas + a skill. */
+  const registrarPrograma = (programa, manifesto) => pedir("PUT", `/api/v1/programas/${enc(programa)}`, { json: manifesto });
+  const atmosfera = () => pedir("GET", "/api/v1/atmosfera");
+  const urlInstalador = async (programa, versao) => `${(await destino()).url}/api/v1/programas/${enc(programa)}/versoes/${enc(versao)}/instalador`;
 
   return {
     conexao: destino, saude, categorias, criarCategoria, itens, item, criarItem, alterarItem, apagarItem, restaurarItem, revisoes,
     temBlob, enviarBlob, blob, baixar, novaRevisao, anexar, chave, resolverChaves, definirChave, apagarChave,
     vincular, desvincular, vinculos, eventos, eventosDesde, ping, clientes, backup,
+    programas, publicarVersao, apagarVersao, urlInstalador, registrarPrograma, atmosfera,
   };
 }
 
@@ -299,7 +314,7 @@ export const enviarBlob = (b, nome) => p().enviarBlob(b, nome);
 export const blob = (sha) => p().blob(sha);
 export const baixar = (id, papel, rev) => p().baixar(id, papel, rev);
 export const novaRevisao = (id, c) => p().novaRevisao(id, c);
-export const anexar = (id, n, papel, sha) => p().anexar(id, n, papel, sha);
+export const anexar = (id, n, papel, sha, nome) => p().anexar(id, n, papel, sha, nome);
 export const chave = (s, c) => p().chave(s, c);
 export const resolverChaves = (s, cs) => p().resolverChaves(s, cs);
 export const definirChave = (s, c, id) => p().definirChave(s, c, id);
@@ -312,3 +327,8 @@ export const eventosDesde = (desde, lim) => p().eventosDesde(desde, lim);
 export const ping = (info) => p().ping(info);
 export const clientes = () => p().clientes();
 export const backup = () => p().backup();
+
+export const programas = () => p().programas();
+export const publicarVersao = (prog, op) => p().publicarVersao(prog, op);
+export const apagarVersao = (prog, v) => p().apagarVersao(prog, v);
+export const urlInstalador = (prog, v) => p().urlInstalador(prog, v);
