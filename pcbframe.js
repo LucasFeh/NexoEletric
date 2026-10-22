@@ -2149,7 +2149,7 @@ const ladoBaixo = k => !!(LBYK[k] && LBYK[k].side === 'bottom') || /^Bottom/.tes
 function setTool(t){
   if (t !== 'select' && LEAN) return;
   /* a ferramenta Furo com circulo(s) selecionado(s): eles viram furo de fixacao na hora */
-  if (t === 'furo') { const cs = SEL.filter(circuloDoAlvo); if (cs.length) { furosDosCirculos(cs); return; } }
+  if (t === 'furo') { const cs = marcacoesSemFuro(SEL.filter(circuloDoAlvo)); if (cs.length) { furosDosCirculos(cs, true); return; } }
   encerraDraft(true);
   if (t !== 'select' && t !== 'medir') garanteEdicao();
   if (t === 'trilha' && !cobre(cur)) {
@@ -2712,7 +2712,7 @@ function cliqueFerramenta(w, ev){
   if (tool === 'furo') {
     /* clicou num circulo desenhado (serigrafia, mecanica, cobre...): ele vira o furo de fixacao */
     const circ = hitsEm(w.x, w.y).find(circuloDoAlvo);
-    if (circ) { furosDosCirculos([circ]); return; }
+    if (circ) { if (marcacoesSemFuro([circ]).length) furosDosCirculos([circ], true); else HubDialog.toast('essa marcação já tem furo', 'info'); return; }
     const p = snapPonto(w, ev, { soGrade:true }), r = CFG.furo / 2;
     const op = { op:'region_add', cutout:true, pts:circuloPts(p.x, p.y, r, 36), note:'furo de fixação ' + fmtNum(CFG.furo, 2) + ' mm' };
     CH.push(op); selDepois = [op]; commit(); return;
@@ -3389,7 +3389,10 @@ function extrasDoHub(w){
     const ks = new Set(muda.map(a => a.m.eff.layer));
     it.push({ rot:'Camada', filhos:LAYERS.filter(l => l.kind !== 'multi').map(l => ({ rot:rotuloAba(l), cor:l.color, check:ks.size === 1 && ks.has(l.key), f:() => editarCampo('layer', l.key) })) });
   }
-  if (SEL.some(circuloDoAlvo)) it.push({ rot:'Virar furo de fixação', dica:'o círculo vira um furo de fixação (Board Cutout) do mesmo diâmetro', f:() => fazAcao('furoDoCirculo') });
+  if (SEL.some(circuloDoAlvo)) {
+    it.push({ rot:'Gerar fixação em cima', dica:'um furo de fixação (Board Cutout) do diâmetro do círculo, em cima dele; o círculo fica', f:() => fazAcao('fixacaoMarcacoes') });
+    it.push({ rot:'Virar furo de fixação', dica:'o círculo vira o furo de fixação e o desenho sai', f:() => fazAcao('furoDoCirculo') });
+  }
   if (compsDaSel().length) it.push({ rot:'Virar de face', tecla:'L', f:() => transformaSelecao('vira') });
   if (compsDaSel().length === 1) it.push({ rot:'Editar footprint…', f:() => fazAcao('editarFp') });
   if (compsDaSel().length === 1 && typeof HubNexo !== 'undefined') it.push({ rot:'Editar 3D no NexoCAD', f:() => fazAcao('nexoEditar3d') });
@@ -4462,7 +4465,8 @@ function fazAcao(id, arg){
       if (tool === 'trilha' && draft && draft.est) { rotaVia(true); return; }
       setTool(tool === 'via' ? 'select' : 'via'); return;
     case 'linha': case 'arco': case 'circulo': case 'retangulo': case 'poligono': case 'texto':
-    case 'furo': { const cs = SEL.filter(circuloDoAlvo); if (cs.length) { furosDosCirculos(cs); return; } setTool('furo'); return; }
+    case 'furo': setTool('furo'); return;
+    case 'fixacaoMarcacoes': fixacaoNasMarcacoes(); return;
     case 'furoDoCirculo': { const cs = SEL.filter(circuloDoAlvo); if (cs.length) furosDosCirculos(cs); else HubDialog.toast('selecione um círculo (arco de 360°) para virar furo de fixação', 'info'); return; }
     case 'triangulo': case 'contorno':
       setTool(tool === id ? 'select' : id); return;
@@ -4651,11 +4655,13 @@ function campoDoPad(a, k, v){
   if (k === 'drill' && tipoDoPad(p) === 'th' && v >= Math.min(p.w, p.h)) HubDialog.toast('furo >= cobre do pad: o pad fica sem anel', 'warn');
   return editaItem(m, { [k]:(k === 'rot' || k === 'holerot') ? normAng(v) : r6(v) });
 }
-/* ---- circulo -> furo de fixacao ----
+/* ---- marcacao redonda -> furo de fixacao ----
    Um circulo desenhado (arco de 360 graus em qualquer camada: serigrafia, mecanica, cobre) ou uma
-   regiao redonda (o circulo preenchido) vira o furo de fixacao do hub: um Board Cutout redondo do
-   mesmo diametro (region_add cutout, como a ferramenta Furo), e o desenho sai. O diametro e o do
-   circulo como esta desenhado (o centro da linha); o painel do furo ajusta depois. */
+   regiao redonda (o circulo preenchido) ganha o furo de fixacao do hub EM CIMA: um Board Cutout
+   redondo do mesmo diametro (region_add cutout, como a ferramenta Furo). A marcacao fica (pedido do
+   dono: "gerar fixacao em cima da marcacao"); o "Virar furo" do painel e o que tira o desenho. O
+   diametro e o do circulo como esta desenhado (o centro da linha); o painel do furo ajusta depois.
+   Marcacao que ja tem furo no mesmo centro nao ganha outro. */
 function circuloDePts(pts){
   if (!Array.isArray(pts) || pts.length < 12) return null;
   let cx = 0, cy = 0;
@@ -4671,20 +4677,40 @@ function circuloDoAlvo(a){
   if (a.t === 'region') return circuloDePts(a.m.eff.points);
   return null;
 }
-function furosDosCirculos(alvos){
+/* os centros dos furos que a placa ja tem (do Altium e do hub) */
+function centrosDeFuros(){
+  const L = [];
+  for (const k of recortesDaTela()) { const c = circuloDePts(k.pts); if (c) L.push(c); else { const bb = bbPts(k.pts); L.push({ cx:(bb[0] + bb[2]) / 2, cy:(bb[1] + bb[3]) / 2, r:Math.max(bb[2] - bb[0], bb[3] - bb[1]) / 2 }); } }
+  return L;
+}
+const temFuroEm = (c, furos) => furos.some(f => Math.hypot(f.cx - c.cx, f.cy - c.cy) < Math.max(0.05, Math.min(f.r, c.r) * 0.25));
+/* as marcacoes que podem ganhar furo: as selecionadas; sem selecao, todo circulo solto que nao e de
+   cobre (serigrafia, mecanica, keep-out...) e ainda nao tem furo no centro */
+function marcacoesSemFuro(alvos){
+  const furos = centrosDeFuros();
+  const lista = alvos || [...PORCHAVE.values()].filter(a => a.t === 'arc' && !(a.m.eff && cobre(a.m.eff.layer)));
+  return lista.filter(a => { const c = circuloDoAlvo(a); return c && !temFuroEm(c, furos); });
+}
+function fixacaoNasMarcacoes(){
+  const sel = SEL.filter(circuloDoAlvo);
+  const alvos = marcacoesSemFuro(sel.length ? sel : null);
+  if (!alvos.length) { HubDialog.toast(sel.length ? 'as marcações selecionadas já têm furo' : 'nenhuma marcação redonda sem furo (círculo de serigrafia ou mecânica)', 'info'); return; }
+  furosDosCirculos(alvos, true);
+}
+function furosDosCirculos(alvos, manter){
   if (!garanteEdicao()) return;
   const novos = [];
   for (const a of alvos) {
     const c = circuloDoAlvo(a);
-    if (!c || !apagaItem(a.m)) continue;
-    const op = { op:'region_add', cutout:true, pts:circuloPts(c.cx, c.cy, c.r, 36), note:'furo de fixação ' + fmtNum(2 * c.r, 2) + ' mm (de um círculo)' };
+    if (!c || (!manter && !apagaItem(a.m))) continue;
+    const op = { op:'region_add', cutout:true, pts:circuloPts(c.cx, c.cy, c.r, 36), note:'furo de fixação ' + fmtNum(2 * c.r, 2) + ' mm (' + (manter ? 'em cima da marcação' : 'de um círculo') + ')' };
     CH.push(op); novos.push(op);
   }
   if (!novos.length) return;
   selDepois = novos;
   if (tool !== 'select') setTool('select');
   commit();
-  HubDialog.toast(novos.length + (novos.length === 1 ? ' círculo virou furo de fixação' : ' círculos viraram furos de fixação') + ' — o diâmetro se ajusta no painel', 'ok');
+  HubDialog.toast((novos.length === 1 ? '1 furo de fixação gerado' : novos.length + ' furos de fixação gerados') + (manter ? ' em cima da marcação' : ' (a marcação saiu)') + ' — o diâmetro se ajusta no painel', 'ok');
 }
 function fichaDe(a){
   switch (a.t) {
@@ -4748,7 +4774,7 @@ function fichaDe(a){
         { k:'r', rot:'Radius', tipo:'dist', v:e.r },
         cheio ? { k:'diam', rot:'Diameter', tipo:'dist', v:2 * e.r } : par('Angles', { k:'sa', rot:'Start', tipo:'ang', v:e.sa }, { k:'ea', rot:'End', tipo:'ang', v:e.ea }),
         { k:'w', rot:'Width', tipo:'dist', v:e.w },
-        cheio ? { botoes:[{ id:'furoDoCirculo', rot:'Virar furo de fixação' }] } : null,
+        cheio ? { botoes:[{ id:'fixacaoMarcacoes', rot:'Gerar fixação em cima' }, { id:'furoDoCirculo', rot:'Virar furo (tira o desenho)' }] } : null,
       ].filter(Boolean) };
     }
     case 'via': {
@@ -4858,6 +4884,7 @@ function fichaMulti(lista){
     campos.push({ k:'net', rot:'Net', tipo:'net', v:ns.size === 1 ? Array.from(ns)[0] : '', misto:ns.size > 1, opc:opcNets() });
   }
   campos.push({ botoes:[{ id:'girar', rot:'Girar 90°' }, { id:'apagar', rot:'Apagar' }, { id:'enquadrar', rot:'Enquadrar' }] });
+  if (lista.some(circuloDoAlvo)) campos.push({ botoes:[{ id:'fixacaoMarcacoes', rot:'Gerar fixação nas marcações' }] });
   return { titulo:lista.length + ' objetos selecionados', sub:Object.keys(n).map(k => n[k] + ' ' + (nomes[k] || k)).join(' · '), campos };
 }
 function fichaFerramenta(){
@@ -4895,7 +4922,7 @@ function fichaFerramenta(){
         { nota:'Fonte de traço (stroke). Na face de baixo (' + (ladoBaixo(cur) ? 'como agora' : 'Bottom, Bottom Overlay…') + ') o texto nasce espelhado.' });
       break;
     case 'furo':
-      F.campos.push({ k:'tool.furo', rot:'Diâmetro', tipo:'dist', v:CFG.furo }, { nota:'Clique num lugar vazio: um furo novo deste diâmetro. Clique num CÍRCULO já desenhado (serigrafia, mecânica, cobre): ele vira o furo de fixação, com o diâmetro dele. Board Cutout redondo (region_add com cutout:true), o furo de fixação da casa.' });
+      F.campos.push({ k:'tool.furo', rot:'Diâmetro', tipo:'dist', v:CFG.furo }, { nota:'Clique num lugar vazio: um furo novo deste diâmetro. Clique numa MARCAÇÃO redonda (círculo de serigrafia, mecânica, cobre): o furo de fixação sai em cima dela, com o diâmetro dela, e a marcação fica. Board Cutout redondo (region_add com cutout:true), o furo de fixação da casa.' }, { botoes:[{ id:'fixacaoMarcacoes', rot:'Gerar fixação em todas as marcações' }] });
       break;
     case 'contorno':
       F.campos.push({ nota:'Um clique por vértice; duplo clique, Enter ou botão direito fecha. Substitui o contorno inteiro (outline_set), só com retas — pergunta antes.' });
@@ -5155,6 +5182,7 @@ function exportCsv(){
 function irPara(alvo, dePainel){ if (!alvo) return; selSo([alvo], dePainel); enquadraAlvos([alvo]); }
 const V = {
   LEAN, PROJ,
+  marcacoes:() => { try { return marcacoesSemFuro(null).length; } catch (e) { return 0; } },
   get B(){ return B; }, get model(){ return model; }, get EB(){ return EB; }, get CH(){ return CH; }, ANN,
   camadas:() => LAYERS.map(l => ({ key:l.key, nome:l.name, rot:rotuloAba(l), cor:l.color, count:l.count, usada:!!(l.used || l.inBoard),
                                    vis:show.layers[l.key] !== false, atual:l.key === cur, kind:l.kind })),

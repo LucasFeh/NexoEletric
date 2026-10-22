@@ -468,6 +468,20 @@ function instala(aside, V) {
     }
     s2.append(grade);
 
+    /* furos de fixacao em cima das marcacoes redondas (pedido do dono, 2026-10-22): o circulo de
+       serigrafia/mecanica que marca o parafuso ganha o Board Cutout do diametro dele, e fica */
+    const sf = sec(pag, 'Furos de fixação');
+    const nm = typeof V.marcacoes === 'function' ? V.marcacoes() : 0;
+    const lf = el('div', 'linha');
+    const bf = el('button', 'btn', nm ? 'Gerar fixação nas marcações (' + nm + ')' : 'Gerar fixação nas marcações');
+    bf.type = 'button'; bf.disabled = !nm;
+    bf.title = nm ? 'Põe um furo de fixação (Board Cutout) em cima de cada marcação redonda sem furo, com o diâmetro dela; a marcação fica'
+                  : 'Nenhuma marcação redonda sem furo: desenhe um círculo (O) na serigrafia ou numa mecânica onde vai o parafuso';
+    bf.addEventListener('click', () => V.acao('fixacaoMarcacoes'));
+    lf.append(bf); sf.append(lf);
+    sf.append(el('div', 'hint', nm ? nm + (nm === 1 ? ' marcação redonda sem furo.' : ' marcações redondas sem furo.') + ' Com círculos selecionados, só neles.'
+                                  : 'Marcação = círculo desenhado solto (serigrafia, mecânica…). Com a ferramenta Furo, clicar numa marcação também gera.'));
+
     const s3 = sec(pag, 'Grade e snap');
     const l1 = el('div', 'linha');
     l1.append(el('label', null, 'Passo'));

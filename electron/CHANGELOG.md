@@ -4,6 +4,16 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.20.0 — 2026-10-22
+
+- **Gerar fixação em cima da marcação.** Na barra lateral da PCB (Propriedades, sem nada selecionado), a seção
+  **Furos de fixação** tem o botão **Gerar fixação nas marcações (N)**: cada marcação redonda sem furo (círculo de
+  serigrafia, mecânica…) ganha um furo de fixação (Board Cutout) do diâmetro dela, e a marcação fica. Com círculos
+  selecionados, só neles; marcação que já tem furo não ganha outro. O mesmo botão aparece com o círculo selecionado,
+  na seleção de vários, no painel da ferramenta Furo e no clique direito.
+- A ferramenta **Furo** clicada numa marcação também gera o furo em cima dela, mantendo o desenho. Quem quer tirar o
+  desenho usa **Virar furo (tira o desenho)**.
+
 ## 1.19.0 — 2026-10-22
 
 - **A versão na barra de cima.** O título de toda janela do app mostra a versão instalada: "Projeto · Documento —
