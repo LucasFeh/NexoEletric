@@ -4,22 +4,6 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
-## 1.17.0 — 2026-10-22
-
-- **Skills da casa no MCP.** As regras de projeto da Dieletrons agora moram em `mcp/skills/*.md` e chegam a qualquer IA
-  que use o MCP do NexoEletric: resumo nas instruções do servidor, recursos `eletrichub://skill/<nome>`, prompts
-  `skill_<nome>` e as ferramentas `skills_listar` / `skill_ler`. As três primeiras:
-  - **pcb-parafusos-isolados** — furo de parafuso/fixação dentro de um quadrado sem cobre nenhum (furo + 3 mm), nas
-    duas camadas;
-  - **pcb-plano-folga-pads** — plano de terra a 1,0 mm dos pads de outra net (a fileira de pads fica numa faixa limpa),
-    pinos do plano com alívio térmico;
-  - **pcb-serigrafia-livre** — overlay nunca em cima de pad, via, furo, trilha, outra serigrafia ou da borda.
-- **`regras_casa_verificar`** confere a placa (com os planos redespejados) contra as três regras e diz cada
-  violação com posição e objeto, e quais são os furos de parafuso com o quadrado de cada um.
-- **Polígono:** o `poly_add`/`poly_edit` aceita `clearanceTipo` (folga por tipo de objeto — ex. `{th:1, smd:1}` afasta
-  o plano só dos pads), `clearanceNet` e o objeto `conexao` ({tipo, condutores, largura, gap, angulo}), que o
-  despejo do hub já entendia mas o changes.js descartava.
-
 ## 1.18.0 — 2026-10-22
 
 PCB mais perto do Properties do Altium:
@@ -39,6 +23,22 @@ PCB mais perto do Properties do Altium:
 - A net de um arco que já existia não aparece mais como editável (o ApplyChanges não a troca; antes a mudança se
   perdia calada); no arco novo continua editável. A lista de Mudanças dá nome a todas as ops (pad, polígono,
   componente, net…), sem os "??".
+
+## 1.17.0 — 2026-10-22
+
+- **Skills da casa no MCP.** As regras de projeto da Dieletrons agora moram em `mcp/skills/*.md` e chegam a qualquer IA
+  que use o MCP do NexoEletric: resumo nas instruções do servidor, recursos `eletrichub://skill/<nome>`, prompts
+  `skill_<nome>` e as ferramentas `skills_listar` / `skill_ler`. As três primeiras:
+  - **pcb-parafusos-isolados** — furo de parafuso/fixação dentro de um quadrado sem cobre nenhum (furo + 3 mm), nas
+    duas camadas;
+  - **pcb-plano-folga-pads** — plano de terra a 1,0 mm dos pads de outra net (a fileira de pads fica numa faixa limpa),
+    pinos do plano com alívio térmico;
+  - **pcb-serigrafia-livre** — overlay nunca em cima de pad, via, furo, trilha, outra serigrafia ou da borda.
+- **`regras_casa_verificar`** confere a placa (com os planos redespejados) contra as três regras e diz cada
+  violação com posição e objeto, e quais são os furos de parafuso com o quadrado de cada um.
+- **Polígono:** o `poly_add`/`poly_edit` aceita `clearanceTipo` (folga por tipo de objeto — ex. `{th:1, smd:1}` afasta
+  o plano só dos pads), `clearanceNet` e o objeto `conexao` ({tipo, condutores, largura, gap, angulo}), que o
+  despejo do hub já entendia mas o changes.js descartava.
 
 ## 1.16.0 — 2026-10-22
 
