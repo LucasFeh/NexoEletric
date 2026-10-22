@@ -10,7 +10,9 @@ import { fileURLToPath } from "node:url";
 
 const ELECTRON = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const versao = JSON.parse(readFileSync(path.join(ELECTRON, "package.json"), "utf8")).version;
-const repo = process.env.NEXOHUB_REPO ?? path.join(os.homedir(), "nexohub");
+// NEXOHUB_REPO, C:\Users\<voce>\nexohub, ou o repositório ao lado deste (D:\Pessoal\NexoHub)
+const repo = [process.env.NEXOHUB_REPO, path.join(os.homedir(), "nexohub"), path.resolve(ELECTRON, "..", "..", "NexoHub")]
+  .filter(Boolean).find((d) => existsSync(path.join(d, "tools", "publicar-instalador.mjs"))) ?? path.join(os.homedir(), "nexohub");
 const tool = path.join(repo, "tools", "publicar-instalador.mjs");
 if (!existsSync(tool)) { console.warn(`[nexohub] ${tool} não existe — instalador não publicado`); process.exit(0); }
 
