@@ -110,6 +110,22 @@ function apagaSessao() {
   try { const s = JSON.parse(fs.readFileSync(ARQ_SESSAO, 'utf8')); if (s.pid === process.pid) fs.rmSync(ARQ_SESSAO, { force: true }); } catch { /* ja saiu */ }
 }
 
+// A versao na barra de cima de TODA janela do app (a principal, Nova janela, as vistas abertas a
+// parte, configuracoes): "Projeto · Documento — NexoEletric 1.19.0". O hub (hub-shell.js) ja poe
+// "Projeto · Documento — NexoEletric" no titulo da pagina; aqui so entra o numero.
+const VERSAO_APP = app.getVersion();
+function tituloComVersao(t) {
+  const s = String(t || '').trim();
+  if (!s) return `NexoEletric ${VERSAO_APP}`;
+  if (/NexoEletric \d/.test(s)) return s;
+  if (/NexoEletric/.test(s)) return s.replace(/NexoEletric/, `NexoEletric ${VERSAO_APP}`);
+  return `${s} — NexoEletric ${VERSAO_APP}`;
+}
+app.on('browser-window-created', (_e, w) => {
+  w.setTitle(tituloComVersao(w.getTitle()));
+  w.webContents.on('page-title-updated', (e, t) => { e.preventDefault(); if (!w.isDestroyed()) w.setTitle(tituloComVersao(t)); });
+});
+
 // ───────────────────────────── instancia unica ─────────────────────────────
 // Duas copias disputariam a mesma porta e a mesma pasta de trabalho. Com a janela
 // principal fechada e um pop-up do hub ainda aberto, o atalho traz o pop-up.
@@ -173,11 +189,6 @@ function criarJanela() {
   });
   esta.on('closed', () => { if (janela === esta) janela = null; });
   menuNativoSoForaDoHub(esta);
-  esta.webContents.on('page-title-updated', (e, t) => {
-    e.preventDefault();
-    // o hub (hub-shell.js) ja poe "Projeto · Documento — NexoEletric" no titulo
-    esta.setTitle(t ? (/NexoEletric/.test(t) ? t : `${t} — NexoEletric`) : 'NexoEletric');
-  });
   esta.webContents.on('render-process-gone', (_e, d) => {
     log.error('renderer caiu: ' + d.reason);
     if (d.reason !== 'clean-exit' && origem && !esta.isDestroyed()) esta.loadURL(origem + '/');

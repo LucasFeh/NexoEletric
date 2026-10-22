@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.19.0 — 2026-10-22
+
+- **A versão na barra de cima.** O título de toda janela do app mostra a versão instalada: "Projeto · Documento —
+  NexoEletric 1.19.0" (a janela principal, Nova janela, as vistas abertas à parte e as configurações).
+
 ## 1.18.0 — 2026-10-22
 
 PCB mais perto do Properties do Altium:
