@@ -41,6 +41,7 @@
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
 <script src="hub-i18n.js"></script>
 <script src="hub-altiumabrir.js"></script>
+<script src="hub-mcp.js"></script>
 <script src="hub-shell.js" defer></script>
 <!-- a barra de menus do topo: Arquivo/Exibir/Ajuda do app fundidos com os menus do Altium da vista aberta -->
 <script src="hub-menutrad.js"></script>
@@ -785,6 +786,7 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
       <span class="server"><span class="dot dot-sm" id="serverDot"></span><span id="serverLabel">sem servidor</span></span>
       <!-- a casa do lancador do operador: o hub-chat.js poe o botao aqui dentro. Um vao vazio
            e nada mais -- o desenho, a cor e o estado sao dele. -->
+      <span id="mcpLanc"></span>
       <span id="chatLanc"></span>
     </div>
   </header>
@@ -4668,6 +4670,8 @@ window.__hubAbrirAltium = (arquivos) => {
     if (x) { await selectProject(x.id); goTab(r && r.esquema === false ? 'pcb' : 'esquema'); }
   } });
 };
+/* a IA (MCP) pede para abrir um projeto numa aba (hub-mcp.js, vista_abrir) */
+window.__hubAbrirProjeto = async (nome, aba) => { const idx = await API.index(); S.projects = idx.projects; renderHeader(); const x = S.projects.find(p => p.name === nome); if (!x) return false; await selectProject(x.id); if (aba) goTab(aba); return true; };
 $('#pickerSearch').oninput = e => { S.q = e.target.value; S.pickerIdx = 0; renderHeader(); $('#pickerSearch').focus(); };
 $('#pickerSearch').addEventListener('keydown', e => {
   if (e.key === 'ArrowDown') { e.preventDefault(); movePickerIdx(1); }

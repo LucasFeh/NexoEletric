@@ -11,14 +11,12 @@
     "nome": "nexoeletric",
     "comando": "{instalacao}\\NexoEletric.exe",
     "args": [
-      "{instalacao}\\resources\\hub\\mcp\\eletrichub-mcp.js",
-      "--root",
-      "C:\\NexoEletric"
+      "{instalacao}\\resources\\hub\\mcp\\eletrichub-mcp.js"
     ],
     "env": {
       "ELECTRON_RUN_AS_NODE": "1"
     },
-    "descricao": "Esquema, PCB, footprints, biblioteca e saídas do NexoEletric"
+    "descricao": "Esquema, símbolo, footprint e 3D, PCB, regras/DRC, Gerber/PDF, projetos no NexoBD e a ponte com o NexoCAD — ao vivo no NexoEletric aberto"
   },
   "dev": {
     "repositorio": "D:\\Pessoal\\NexoEletric",

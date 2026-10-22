@@ -201,7 +201,7 @@ function resumoValidacao(model, max) {
    fn devolve a lista dos objetos tocados (os que estao em arq.itens). */
 function transacao(ctx, p, fn, opts) {
   const o = opts || {};
-  const hc = ctx.hc;
+  const hc = ctx.pcbPronto();
   const board = ctx.board(p);
   const arq = ArquivoLinhas.abrir('changes', p.arq('changes.js'));
   const antes = hc.applyPcbChanges(board, arq.itens.slice());

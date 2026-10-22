@@ -60,7 +60,7 @@
         return { recarregando: true };
       case 'focar':
         if (typeof g.focar !== 'function') throw new Error('esta vista ainda não oferece focar (window.HubMcpVista.focar)');
-        return { feito: g.focar(a.x, a.y, a.zoom) !== false };
+        return { feito: g.focar(a.x, a.y, a.zoom, a) !== false };
       case 'selecionar':
         if (typeof g.selecionar !== 'function') throw new Error('esta vista ainda não oferece selecionar (window.HubMcpVista.selecionar)');
         return { feito: g.selecionar(a) !== false };

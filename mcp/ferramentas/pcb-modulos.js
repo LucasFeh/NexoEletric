@@ -174,7 +174,7 @@ module.exports = {
       entrada: { type: 'object', properties: { projeto: PROJETO, relatorio: { type: 'boolean' } }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        const sch = ctx.schematic(p), L = ctx.libs();
+        const sch = ctx.schematic(p), L = ctx.libsDe(sch);
         const E = ctx.modulo('hub-pcbeco.js');
         if (E) {
           const pl = ctx.temBoard(p) ? ctx.placa(p) : null;
@@ -208,7 +208,7 @@ module.exports = {
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const E = ctx.exige('hub-pcbeco.js', 'HubPcbEco');
-        const sch = ctx.schematic(p), L = ctx.libs();
+        const sch = ctx.schematic(p), L = ctx.libsDe(sch);
         if (!ctx.temBoard(p)) throw new ErroMcp('o projeto não tem board.js: crie a placa antes (projeto_criar com placa, ou o assistente de placa nova da vista)');
         const pl = ctx.placa(p);
         let eco = E.compara(sch, pl.board, { schlib: L.schlib, pcblib: L.pcblib, changes: pl.changes, eb: pl.eb });

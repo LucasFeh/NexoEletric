@@ -95,6 +95,21 @@ let avisoSync = '';             // o que a sincronizacao da pasta de trabalho pr
 // pendente) deixa as duas diferentes, e um hub sem o libremota.py ignora a variavel.
 let libRemotaNoAr = false;
 
+// O app aberto, para o MCP (mcp/lib/contexto.js » sessaoDoApp): a pasta de trabalho e o hub no ar,
+// em ~/.nexoeletric/session.json -- a mesma mecanica do ~/.nexocad/session.json do NexoCAD. Sem
+// isso o MCP precisa de --root e acha o hub so sondando portas.
+const ARQ_SESSAO = path.join(app.getPath('home'), '.nexoeletric', 'session.json');
+function gravaSessao(ws) {
+  try {
+    fs.mkdirSync(path.dirname(ARQ_SESSAO), { recursive: true });
+    fs.writeFileSync(ARQ_SESSAO, JSON.stringify({ app: 'nexoeletric', versao: app.getVersion(), hub: origem, root: ws,
+      pid: process.pid, mcp: path.join(ws, 'mcp', 'eletrichub-mcp.js'), exe: process.execPath, iniciado: new Date().toISOString() }, null, 2));
+  } catch (e) { log.warn('[mcp] session.json: ' + e.message); }
+}
+function apagaSessao() {
+  try { const s = JSON.parse(fs.readFileSync(ARQ_SESSAO, 'utf8')); if (s.pid === process.pid) fs.rmSync(ARQ_SESSAO, { force: true }); } catch { /* ja saiu */ }
+}
+
 // ───────────────────────────── instancia unica ─────────────────────────────
 // Duas copias disputariam a mesma porta e a mesma pasta de trabalho. Com a janela
 // principal fechada e um pop-up do hub ainda aberto, o atalho traz o pop-up.
@@ -289,6 +304,7 @@ async function subirHub({ porta } = {}) {
   }
   // o sincronizador precisa do hub no ar (o 3D da PcbLib sai do hubserver sob demanda)
   nexoSync.iniciar(ws, origem);
+  if (!SMOKE) gravaSessao(ws);
 }
 
 // So chamada de dentro da fila.
@@ -1074,6 +1090,7 @@ app.on('window-all-closed', () => app.quit());
 // nao teria onde salvar. O will-quit so vem quando todas aceitaram fechar. So entao o hub
 // para e, se "Reiniciar agora" foi pedido, o instalador da atualizacao roda.
 app.on('will-quit', (e) => {
+  apagaSessao();
   nexoSync.parar();
   armazem.parar();
   if (backendParado || !backend) {

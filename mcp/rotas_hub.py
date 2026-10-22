@@ -11,6 +11,16 @@ memoria:
     MCP  --GET  /api/mcp/resposta/<id>?espera=8---------->  hub  (espera a resposta ate N s)
     GET /api/mcp/status -> {ok, root, versao, vistas}         (o hub_status do MCP le)
 
+O alvo "hub" (proj "*") e a pagina principal (hub-mcp.js): abre um projeto numa aba, para a IA
+mostrar ao usuario o que fez (vista_abrir do MCP).
+
+E o que a IA esta fazendo, para o indicador "IA" no topo do hub (hub-mcp.js), a mesma ideia do
+NexoCAD (os comandos da IA aparecem no app e o "Conectar IA" mostra o historico):
+
+    MCP  --POST /api/mcp/ola {sessao, cliente, versao, raiz, ferramentas, pid}-->  presenca (20 s)
+    MCP  --POST /api/mcp/atividade {sessao, ferramenta, ok, erro, ms, projeto, resumo, escrita}
+    pagina --GET /api/mcp/atividade?desde=<seq> -> {seq, sessoes, itens}
+
 A pagina so precisa carregar mcp/hub-mcpvista.js (um <script src>). Pedido so entra vindo DESTA
 maquina (o MCP roda ao lado do hub; o pedido faz a pagina de alguem tirar foto da tela): da
 rede e 403. Nada aqui grava em disco.
@@ -35,13 +45,22 @@ VERSAO = '1.0.0'
 VALIDADE = 30.0          # segundos que um pedido espera uma vista pegar
 VISTA_VIVA = 10.0        # vista que nao pergunta ha mais que isso e dada como fechada
 ESPERA_MAX = 20.0
-ACOES = ('screenshot', 'recarregar', 'focar', 'selecionar', 'comando')
-ALVOS = ('pcb', 'sch')
+ACOES = ('screenshot', 'recarregar', 'focar', 'selecionar', 'comando', 'abrir')
+ALVOS = ('pcb', 'sch', 'hub')
+SESSAO_VIVA = 60.0       # IA que nao da sinal ha mais que isso e dada como desconectada
+MAX_ATIVIDADE = 300
 MAX_RESPOSTA = 30 * 1024 * 1024   # o PNG da tela vem em base64
 
 _lock = threading.Condition()
 _pedidos = {}            # id -> {id, alvo, proj, acao, args, criado, pego, resposta}
 _vistas = {}             # (alvo, proj) -> ultima pergunta (time)
+_sessoes = {}            # sessao -> {sessao, cliente, versao, raiz, ferramentas, desde, visto, chamadas}
+_atividade = []          # [{seq, t, sessao, cliente, ferramenta, titulo, ok, erro, ms, projeto, resumo, escrita}]
+_seq = [0]
+
+
+def _texto(v, n):
+    return v[:n] if isinstance(v, str) else ''
 
 
 def _local(req):
@@ -79,7 +98,7 @@ def registra(app, root):
             return {'ok': False, 'error': 'JSON {alvo, proj, acao, args} obrigatorio'}, 400
         alvo, proj, acao = d.get('alvo'), d.get('proj'), d.get('acao')
         if alvo not in ALVOS or acao not in ACOES or not isinstance(proj, str) or not proj:
-            return {'ok': False, 'error': 'alvo (pcb|sch), proj e acao (%s) obrigatorios' % '|'.join(ACOES)}, 400
+            return {'ok': False, 'error': 'alvo (pcb|sch|hub), proj e acao (%s) obrigatorios' % '|'.join(ACOES)}, 400
         args = d.get('args') if isinstance(d.get('args'), dict) else {}
         agora = time.time()
         with _lock:
@@ -144,5 +163,60 @@ def registra(app, root):
                                      else 'nenhuma vista aberta deste projeto pegou o pedido '
                                           '(a pagina precisa do mcp/hub-mcpvista.js)')}
                 _lock.wait(falta)
+
+    @app.route('/api/mcp/ola', methods=['POST'])
+    def mcp_ola():
+        if not _local(request):
+            return {'ok': False, 'error': 'so desta maquina'}, 403
+        d = request.get_json(silent=True)
+        if not isinstance(d, dict) or not isinstance(d.get('sessao'), str) or not d['sessao']:
+            return {'ok': False, 'error': 'JSON {sessao, cliente, ...} obrigatorio'}, 400
+        agora = time.time()
+        with _lock:
+            s = _sessoes.get(d['sessao'])
+            if s is None:
+                s = _sessoes[d['sessao']] = {'sessao': d['sessao'][:64], 'desde': agora, 'chamadas': 0}
+            s.update({'cliente': _texto(d.get('cliente'), 80) or 'IA', 'versao': _texto(d.get('versao'), 20),
+                      'raiz': _texto(d.get('raiz'), 260), 'visto': agora,
+                      'ferramentas': d.get('ferramentas') if isinstance(d.get('ferramentas'), int) else 0})
+            for k in [k for k, v in _sessoes.items() if agora - v['visto'] > 3600]:
+                del _sessoes[k]
+        return {'ok': True}
+
+    @app.route('/api/mcp/atividade', methods=['GET', 'POST'])
+    def mcp_atividade():
+        agora = time.time()
+        if request.method == 'POST':
+            if not _local(request):
+                return {'ok': False, 'error': 'so desta maquina'}, 403
+            d = request.get_json(silent=True)
+            if not isinstance(d, dict) or not isinstance(d.get('ferramenta'), str):
+                return {'ok': False, 'error': 'JSON {sessao, ferramenta, ok, ...} obrigatorio'}, 400
+            with _lock:
+                ses = _sessoes.get(d.get('sessao') or '')
+                if ses is not None:
+                    ses['visto'] = agora
+                    ses['chamadas'] = ses.get('chamadas', 0) + 1
+                _seq[0] += 1
+                _atividade.append({
+                    'seq': _seq[0], 't': agora, 'sessao': _texto(d.get('sessao'), 64),
+                    'cliente': ses['cliente'] if ses else 'IA',
+                    'ferramenta': d['ferramenta'][:64], 'titulo': _texto(d.get('titulo'), 80),
+                    'ok': bool(d.get('ok')), 'erro': _texto(d.get('erro'), 300),
+                    'ms': d.get('ms') if isinstance(d.get('ms'), (int, float)) else 0,
+                    'projeto': _texto(d.get('projeto'), 120), 'resumo': _texto(d.get('resumo'), 200),
+                    'escrita': bool(d.get('escrita'))})
+                del _atividade[:-MAX_ATIVIDADE]
+            return {'ok': True, 'seq': _seq[0]}
+        try:
+            desde = int(request.args.get('desde', '0'))
+        except ValueError:
+            desde = 0
+        with _lock:
+            itens = [a for a in _atividade if a['seq'] > desde][-100:]
+            sessoes = [dict(s, ha_segundos=round(agora - s['visto'], 1)) for s in _sessoes.values()
+                       if agora - s['visto'] <= SESSAO_VIVA]
+            seq = _seq[0]
+        return {'ok': True, 'seq': seq, 'agora': agora, 'sessoes': sessoes, 'itens': itens}
 
     return app

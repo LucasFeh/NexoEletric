@@ -23,16 +23,61 @@ function pareceHub(d) {
   catch (_) { return false; }
 }
 
+/* O app desktop aberto: %USERPROFILE%\.nexoeletric\session.json = {hub, root, pid, versao}, gravado
+   pelo electron/main.js quando o hub sobe e apagado quando o app fecha (a mesma mecanica do
+   ~/.nexocad/session.json do NexoCAD). null se nao existe ou se o processo ja morreu. */
+const ARQ_SESSAO = () => process.env.NEXOELETRIC_SESSION || path.join(process.env.USERPROFILE || process.env.HOME || '', '.nexoeletric', 'session.json');
+function sessaoDoApp() {
+  try {
+    const s = JSON.parse(fs.readFileSync(ARQ_SESSAO(), 'utf8'));
+    if (!s || typeof s !== 'object') return null;
+    if (s.pid) { try { process.kill(s.pid, 0); } catch (e) { if (e.code === 'ESRCH') return null; } }
+    return s;
+  } catch (_) { return null; }
+}
+/* a pasta de trabalho configurada no app (%APPDATA%\NexoEletric\settings.json » workspace) */
+function workspaceDoApp() {
+  const base = process.env.APPDATA || path.join(process.env.HOME || '', '.config');
+  for (const nome of ['NexoEletric', 'EletricHUB', 'AltiumHub']) {
+    try { const s = JSON.parse(fs.readFileSync(path.join(base, nome, 'settings.json'), 'utf8')); if (s && s.workspace) return s.workspace; } catch (_) { /* proximo */ }
+  }
+  return '';
+}
+/* A raiz do MCP, na ordem: --root (se for a pasta do hub), ELETRICHUB_ROOT, a do app aberto
+   (session.json), a pasta de trabalho configurada no app, e a pasta acima deste script (o repo).
+   Um --root que nao e pasta do hub (o C:\NexoEletric de um registro antigo, num PC cuja pasta e
+   outra) nao derruba o servidor: cai no proximo, e o aviso diz o que foi ignorado.
+   -> {root, origem, aviso} */
+function resolveRaiz(pedida) {
+  const cands = [];
+  if (pedida) cands.push([pedida, '--root']);
+  if (process.env.ELETRICHUB_ROOT) cands.push([process.env.ELETRICHUB_ROOT, 'ELETRICHUB_ROOT']);
+  const s = sessaoDoApp();
+  if (s && s.root) cands.push([s.root, 'app aberto (session.json)']);
+  const w = workspaceDoApp();
+  if (w) cands.push([w, 'pasta de trabalho do app (settings.json)']);
+  cands.push([path.resolve(__dirname, '..', '..'), 'pasta do servidor']);
+  const ruins = [];
+  for (const [d, origem] of cands) {
+    const abs = path.resolve(d);
+    if (pareceHub(abs)) return { root: abs, origem, aviso: ruins.length ? `ignorado: ${ruins.join('; ')}` : '' };
+    ruins.push(`${origem} ${abs} não é a pasta do hub`);
+  }
+  return { root: path.resolve(pedida || cands[0][0]), origem: 'nenhuma', aviso: ruins.join('; ') };
+}
+
 class Contexto {
   constructor(opts) {
     const o = opts || {};
-    const padrao = path.resolve(__dirname, '..', '..');
-    this.root = path.resolve(o.root || process.env.ELETRICHUB_ROOT || padrao);
+    const r = resolveRaiz(o.root);
+    this.root = r.root;
+    this.origemRaiz = r.origem;
+    this.avisoRaiz = r.aviso;
     if (!pareceHub(this.root))
-      throw new Error(`"${this.root}" não parece a pasta do hub (falta hub-core.js e Projects/ ou Libs/). Use --root <pasta do hub>, ex.: C:\\NexoEletric`);
+      throw new Error(`nenhuma pasta do hub encontrada (${r.aviso}). Abra o NexoEletric uma vez ou use --root <pasta de trabalho>`);
     /* Projects/ pode morar fora da raiz (os testes usam uma copia temporaria; nunca os reais) */
     this.projetosDir = o.projetos ? path.resolve(o.projetos) : (process.env.ELETRICHUB_PROJETOS ? path.resolve(process.env.ELETRICHUB_PROJETOS) : path.join(this.root, 'Projects'));
-    this.hubUrl = o.hubUrl || process.env.ELETRICHUB_URL || '';
+    this._hubUrlFixo = o.hubUrl || process.env.ELETRICHUB_URL || '';
     this.portas = o.portas || [8200, 8000, 8100, 8001];
     this._mods = new Map();
     this._cache = new Map();
@@ -136,6 +181,30 @@ class Contexto {
     try { this.hc.setLibTables(v ? v.renameMap : null, v ? v.libSubs : null); } catch (_) { /* hub-core velho */ }
   }
   symbolsLib() { return this.lib('symbols-lib.js', 'symbolsLib') || { symbols: [] }; }
+  /* As bibliotecas para UM esquema: as de sempre + os simbolos guardados no proprio schematic.js
+     (`symbols`: os da folha do Altium, ou os que a IA criou com sym_salvar destino "projeto"). Como na
+     vista (schframe.js » aplicaAcervos), so entram os nomes que nenhum acervo resolve, e valem
+     tambem para as nets. */
+  libsDe(sch) {
+    const v = this.libs();
+    const doc = sch && Array.isArray(sch.symbols) ? sch.symbols : null;
+    if (!doc || !doc.length) return v;
+    if (this._libsDoc && this._libsDoc.base === v && this._libsDoc.doc === doc) return this._libsDoc.v;
+    const hc = this.hc;
+    const extras = doc.filter(s => s && s.name && Array.isArray(s.parts) && !hc.symbolOf(v.schlib, s.name))
+      .map(s => Object.assign({ partcount: s.parts.length }, s, { doDocumento: true }));
+    const out = extras.length ? Object.assign({}, v, { schlib: Object.assign({}, v.schlib, { symbols: v.schlib.symbols.concat(extras) }) }) : v;
+    this._libsDoc = { base: v, doc, v: out };
+    return out;
+  }
+  /* o hub HTTP do app: --hub/ELETRICHUB_URL, senao o do app aberto (session.json) desta mesma
+     pasta, senao '' (sondaHub procura nas portas de sempre) */
+  get hubUrl() {
+    if (this._hubUrlFixo) return this._hubUrlFixo;
+    const s = sessaoDoApp();
+    return s && s.hub && (!s.root || path.resolve(s.root).toLowerCase() === this.root.toLowerCase()) ? String(s.hub) : '';
+  }
+  set hubUrl(v) { this._hubUrlFixo = v || ''; }
 
   /* ---------------- projetos ---------------- */
   dirProjetos() { return this.projetosDir; }
@@ -172,9 +241,16 @@ class Contexto {
   }
   temBoard(p) { return fs.existsSync(p.arq('board.js')); }
   changes(p) { return ArquivoLinhas.abrir('changes', p.arq('changes.js')).itens; }
+  /* o motor com a biblioteca de footprints registrada (a do hub na frente da do Altium, como a vista
+     PCB faz em pcbframe.js): sem isso o comp_add so acha footprint que ja esta na placa */
+  pcbPronto() {
+    const hc = this.hc;
+    try { const L = this.libs(); if (L.pcblib && typeof hc.setPcbLib === 'function') hc.setPcbLib(L.pcblib); } catch (_) { /* sem Libs: vale o da placa */ }
+    return hc;
+  }
   /* a placa com as mudancas: {board, changes, model, eb} -- o mesmo motor da tela */
   placa(p, changes) {
-    const hc = this.hc;
+    const hc = this.pcbPronto();
     const board = this.board(p);
     const ch = changes || this.changes(p);
     const model = hc.applyPcbChanges(board, ch);
@@ -209,4 +285,4 @@ class Contexto {
   rel(abs) { return path.relative(this.root, abs).split(path.sep).join('/'); }
 }
 
-module.exports = { Contexto, ErroMcp, pareceHub };
+module.exports = { Contexto, ErroMcp, pareceHub, resolveRaiz, sessaoDoApp, workspaceDoApp, ARQ_SESSAO };

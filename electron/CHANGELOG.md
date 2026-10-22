@@ -4,6 +4,27 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.16.0 — 2026-10-22
+
+- **A IA no topo do app.** Um indicador **IA** no canto de cima (ao lado do chat, na fileira das abas), como no
+  NexoCAD: cinza sem IA, verde com quem está conectado ("IA · Claude Code"), laranja pulsando com o comando que ela
+  acabou de rodar. Cada comando que muda algo aparece num aviso no canto, e o clique abre o painel com a conexão, o
+  botão **Conectar IA (MCP)…** e a **atividade recente da IA** (hora, ferramenta, projeto, o que mudou ou o erro).
+- **O MCP conecta sozinho.** O registro antigo apontava para `C:\NexoEletric`, que não existe em todo PC, e o MCP
+  nem subia. Agora ele acha a pasta: a do app aberto (o app grava `~/.nexoeletric/session.json`, a mesma mecânica do
+  NexoCAD), senão a pasta de trabalho configurada. O manifesto não leva mais `--root`.
+- **MCP completo (90 ferramentas):**
+  - **símbolo:** `sym_ler`, `sym_gerar` (CI/conector a partir da lista de pinos), `sym_salvar` (no esquema do projeto,
+    na Biblioteca de símbolos ou redesenhando um da SchLib da casa), `sym_renomear`, `sym_apagar`;
+  - **3D:** `fp_3d_importar` (STEP do disco no footprint) e `fp_3d_nexo` (modelo da biblioteca da rede Nexo);
+  - **placa:** `pcb_colocar` (footprint como componente novo, com as nets) — e o `comp_add` passa a achar os
+    footprints da biblioteca (antes só os que já estavam na placa);
+  - **app:** `app_status`, `app_abrir` (abre o NexoEletric e espera), `vista_abrir` (mostra o projeto ao usuário) e
+    `lote` (vários comandos numa chamada, como o batch do NexoCAD);
+  - **NexoBD:** `nexo_projetos`, `nexo_projeto_historico` e `nexo_projeto_restaurar` (volta uma revisão);
+  - **Esquema ao vivo:** a IA foca, seleciona (componente, net, folha) e roda ações na vista Esquema aberta, como já
+    fazia na PCB; `projeto_abrir_altium` traz esquema e PCB.
+
 ## 1.15.0 — 2026-10-22
 
 - **Abrir projeto do Altium com esquema E PCB.** Arquivo › **Abrir projeto do Altium** (ou arraste o arquivo para a

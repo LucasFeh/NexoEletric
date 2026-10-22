@@ -147,7 +147,7 @@ module.exports = {
     },
     {
       nome: 'vista_comando', titulo: 'Mandar comando para a vista aberta',
-      descricao: 'Pede algo à vista aberta no hub: "recarregar" (relê os arquivos; normalmente desnecessário, o vigia do hub já recarrega), "focar" {x, y, zoom?} (centra a vista no ponto), "selecionar" {ids|refs}, ou um comando do Altium {comando} quando o hub-altiumdna.js estiver na página. Exige o hub com as rotas do MCP e a página com mcp/hub-mcpvista.js.',
+      descricao: 'Pede algo à vista aberta no hub, para mostrar ao usuário: "recarregar" (normalmente desnecessário, o vigia do hub já recarrega), "focar" {x, y, zoom?} (PCB: mm; Esquema: mil, zoom = meia largura) ou {ref} no Esquema, "selecionar" {refs} (PCB também {ids}; Esquema também {net} e {folha}), "comando" {comando} = uma ação da barra/teclado da vista (PCB: drc, gerber, pdf, repour, vista3d...; Esquema: enquadrar, girar, apagar, salvar...). Exige o app aberto com a vista do projeto (vista_abrir abre).',
       entrada: { type: 'object', properties: { projeto: PROJETO, vista: { type: 'string', enum: ['pcb', 'sch'] }, acao: { type: 'string', enum: ['recarregar', 'focar', 'selecionar', 'comando'] }, args: { type: 'object', additionalProperties: true } }, required: ['projeto', 'acao'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);

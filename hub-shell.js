@@ -124,7 +124,7 @@ body.eh-shell #app > .eh-topo {
   grid-column: 2; grid-row: 2; justify-self: end; align-self: stretch; z-index: 3;
   display: flex; align-items: center; gap: 4px; padding: 0 10px 0 6px;
 }
-.eh-topo #chatLanc { display: inline-flex; align-items: center; }
+.eh-topo #chatLanc, .eh-topo #mcpLanc { display: inline-flex; align-items: center; }
 .eh-topo .eh-bt { width: 28px; height: 28px; }
 .eh-topo .eh-bt .eh-ico { width: 16px; height: 16px; }
 
@@ -628,8 +628,8 @@ body.eh-shell .tab[aria-selected="true"]::after {
     // canto direito da fileira das abas: o chat (hub-chat.js ja pos o botao no #chatLanc) e,
     // so no navegador, as configuracoes do hub -- no app elas ficam no menu Arquivo (NO_APP)
     const topo = el('div', 'eh-topo');
-    const lanc = document.getElementById('chatLanc');
-    if (lanc) topo.append(lanc);
+    // a IA (MCP, hub-mcp.js) mora no mesmo canto, antes do chat: e o "em cima" que nao some
+    for (const id of ['mcpLanc', 'chatLanc']) { const n = document.getElementById(id); if (n) topo.append(n); }
     if (!NO_APP) {
       const cfg = el('button', 'eh-bt');
       cfg.type = 'button';

@@ -27,16 +27,17 @@ fez — o mesmo motor da tela (`hub-core.js`) e os mesmos arquivos que o hub e o
 
 ```
 node mcp/eletrichub-mcp.js                         # stdio, raiz = a pasta acima de mcp/
-node mcp/eletrichub-mcp.js --root C:\NexoEletric    # a pasta de trabalho do app desktop
+node mcp/eletrichub-mcp.js                         # acha a pasta sozinho (app aberto ou a configurada)
+node mcp/eletrichub-mcp.js --root C:\AltiumHub      # uma pasta de trabalho dada
 node mcp/eletrichub-mcp.js --http 8765             # HTTP em http://127.0.0.1:8765/mcp
 node mcp/eletrichub-mcp.js --listar                # imprime as ferramentas por grupo
 ```
 
 | opção | o quê |
 |---|---|
-| `--root <pasta>` | a pasta do hub (tem `hub-core.js` e `Projects/`). Também `ELETRICHUB_ROOT` |
+| `--root <pasta>` | a pasta do hub (tem `hub-core.js` e `Projects/`). Opcional: sem ela, ou se ela não for a pasta do hub (um registro antigo com `C:\NexoEletric`), vale `ELETRICHUB_ROOT`, a do app aberto (`%USERPROFILE%\.nexoeletric\session.json`, que o NexoEletric grava ao subir, como o `~/.nexocad/session.json` do NexoCAD), a pasta de trabalho do app (`%APPDATA%\NexoEletric\settings.json`) e por fim a pasta acima do script. O que foi ignorado sai no log |
 | `--projetos <pasta>` | `Projects/` em outro lugar (os testes usam uma cópia temporária) |
-| `--hub <url>` | o hub HTTP no ar, para `hub_status`/`vista_*`; sem ela procura 127.0.0.1 nas portas 8200 (desktop), 8000, 8100 e 8001 |
+| `--hub <url>` | o hub HTTP no ar, para `hub_status`/`vista_*`; sem ela vale o do app aberto (session.json) e depois procura 127.0.0.1 nas portas 8200 (desktop), 8000, 8100 e 8001 |
 | `--http <porta>` `--host` `--token` | HTTP Streamable. Fora do loopback **exige** `--token` (Bearer): as ferramentas gravam nos projetos. No loopback, `Origin` de fora é recusado (DNS rebinding) |
 
 ## Registrar no cliente
@@ -65,19 +66,22 @@ node mcp/eletrichub-mcp.js --root <pasta> --http 8765
 claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 ```
 
-## Ferramentas (74, por grupo)
+## Ferramentas (90, por grupo)
 
 `list_commands` lista tudo com descrição; cada ferramenta diz na descrição o fluxo de uso.
 
 | grupo | ferramentas |
 |---|---|
-| projeto | `projeto_listar`, `projeto_resumo`, `projeto_ler_arquivo`, `projeto_abrir_altium` (o .PrjPcb/.SchDoc do Altium vira o schematic.js, sem o Altium: `tools/schdoc/schdoc2sch.py`), `projeto_criar` (pasta + schematic.js; com `placa` cria o board.js mestre pelo `hub-pcbnova.js` e o rules.js da casa), `projeto_desfazer` |
+| app | `app_status` (o app está aberto? qual pasta, qual hub, quais vistas), `app_abrir` (abre o NexoEletric e espera o hub, como o `gui_open` do NexoCAD; com `projeto` já o mostra), `vista_abrir` (mostra um projeto ao usuário na aba pedida), `lote` (vários passos numa chamada, `$id.campo` usa o resultado de um passo anterior, como o `batch` do NexoCAD) |
+| projeto | `projeto_listar`, `projeto_resumo`, `projeto_ler_arquivo`, `projeto_abrir_altium` (o .PrjPcb do Altium vira o projeto inteiro, sem o Altium: esquema, `board.js` da .PcbDoc, regras, 3D), `projeto_criar` (pasta + schematic.js; com `placa` cria o board.js mestre pelo `hub-pcbnova.js` e o rules.js da casa), `projeto_desfazer` |
 | esquema | `sch_ler`, `sch_componentes` (ponta quente dos pinos + net), `sch_nets`, `sch_adicionar` (ref "R?" = próximo livre, footprint do símbolo), `sch_editar`, `sch_apagar`, `sch_ligar` ("R1.2" → "C1.1"), `sch_validar`, `sch_buscar_simbolo`, `sch_simbolo`, `sch_buscar_footprint`, `sch_template` (`hub-schtemplate.js`) |
+| simbolo | `sym_ler` (o desenho inteiro, de qualquer acervo), `sym_gerar` (CI/conector a partir da lista de pinos), `sym_salvar` (destino `projeto` = no `symbols` do schematic.js, vale na hora e para as nets; `biblioteca` = Biblioteca de símbolos do hub, `/api/symbols/lib`; `altium` = redesenha um símbolo da SchLib da casa, `/api/symbols/save`), `sym_renomear`, `sym_apagar` |
 | biblioteca | `almox_buscar` (estoque, local, Odoo; devolve o `comp` pronto para `sch_adicionar`) |
-| footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |
-| pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
+| footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_3d_importar` (STEP do disco → `Libs/3d-hub`), `fp_3d_nexo` (o STEP de um item da biblioteca da rede Nexo), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |
+| pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos), `pcb_colocar` (footprint como componente novo, com as nets dos pads), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
 | pcbmod | `regras_ler`, `regras_definir` (`hub-pcbregras.js`), `drc_rodar` (`hub-pcbdrc.js`), `nets_ratsnest` (`hub-pcbnets.js`, com reserva própria), `pour_definir`, `pour_despejar` (`hub-pcbpour.js`), `teardrop_aplicar` (`hub-pcbteardrop.js`), `eco_comparar`, `eco_aplicar` (`hub-pcbeco.js`) |
-| nexo | `nexo_estado` (o Nexo Hub e o NexoCAD), `nexo_biblioteca` (lista/busca os itens do Nexo Hub no formato do hub; `id` traz revisões e vínculos), `nexo_sincronizar` (publica a biblioteca 3D e as placas no Nexo Hub: o mesmo `lib/nexohub-sync.js` do app), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou de um item, aberto no NexoCAD sempre por um item do Nexo Hub; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (publica o item placa e pede `pcb_importar {item}`; `so_publicar`, `so_pacote`), `nexo_vincular_footprint` (direto no Nexo Hub: `atributos.footprints` + vínculo; num componente já põe o 3D no footprint), `nexo_componentes` (uma biblioteca só: os componentes do NexoCAD com footprint entram na biblioteca de footprints como o 3D deles; o app faz sozinho a cada minuto). Conexão: `NEXOHUB_URL` > `C:UsersPublicNexoHubconexao.json` > `127.0.0.1:47800`. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
+| nexo | `nexo_estado` (o Nexo Hub e o NexoCAD), `nexo_biblioteca` (lista/busca os itens do Nexo Hub no formato do hub; `id` traz revisões e vínculos), `nexo_sincronizar` (publica a biblioteca 3D e as placas no Nexo Hub: o mesmo `lib/nexohub-sync.js` do app), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou de um item, aberto no NexoCAD sempre por um item do Nexo Hub; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (publica o item placa e pede `pcb_importar {item}`; `so_publicar`, `so_pacote`), `nexo_vincular_footprint` (direto no Nexo Hub: `atributos.footprints` + vínculo; num componente já põe o 3D no footprint), `nexo_componentes` (uma biblioteca só: os componentes do NexoCAD com footprint entram na biblioteca de footprints como o 3D deles; o app faz sozinho a cada minuto). Conexão: `NEXOHUB_URL` > `C:\Users\Public\NexoHub\conexao.json` > `127.0.0.1:47800`. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
+| nexobd | `nexo_projetos` (os projetos guardados no NexoBD, fora do catálogo), `nexo_projeto_historico` (revisões: quando, de qual programa, o que mudou), `nexo_projeto_restaurar` (os arquivos de uma revisão antiga voltam para a pasta; o app sobe como revisão nova) |
 | saidas | `gerber_gerar` (grava `Projects/<p>/Gerber/` + `gerber.json`, como a rota `/api/gerber`; redespeja os polígonos antes), `gerber_salvo` (relê com o `hub-gerberview.js`), `pdf_layout` (`hub-pcbpdf.js` → `PDF/LO - <base>.pdf`), `bom_listar` |
 | sinal | `sinal_listar`, `sinal_responder` (só status/reply, AI-GUIDE Parte C), `sinal_criar` |
 | hub | `list_commands`, `hub_status`, `hub_modulos`, `hub_modulo_chamar` (qualquer função de qualquer módulo, com `$placa`, `$esquema`, `$regras`...), `vista_screenshot`, `vista_comando`, `altium_comandos` (`hub-altiumdna.js`), `hub_recarregar_ferramentas` |
@@ -89,6 +93,21 @@ Recursos (`resources/*`): o AI-GUIDE, o CLAUDE.md, o PCB-MIGRACAO, este README, 
 do changes.js e a tabela de camadas (gerados do `hub-core`), e os arquivos de cada projeto
 (`eletrichub://projeto/{projeto}/{arquivo}`). Prompts: `fluxo_pcb`, `fluxo_esquema`,
 `resolver_sinalizadores`.
+
+## A IA no topo do app (o que ela está fazendo)
+
+Como no NexoCAD (os comandos da IA aparecem no app e o "Conectar IA" mostra o histórico): o MCP
+conta ao hub o que fez (`lib/relato.js` → `POST /api/mcp/ola` no `initialize` e a cada 20 s, e
+`POST /api/mcp/atividade` a cada ferramenta), e o `hub-mcp.js` da página mostra:
+
+- o indicador **IA** no canto de cima (no app, ao lado do chat, na fileira das abas): cinza sem IA,
+  verde com o nome do cliente conectado ("IA · Claude Code"), laranja pulsando com o comando que
+  acabou de rodar;
+- um aviso no canto a cada comando que **muda** algo (ou todos, ou nenhum: escolha no painel);
+- o painel do clique: quem está conectado, "Conectar IA (MCP)…" e a **atividade recente** (hora,
+  ferramenta, projeto, resumo dos argumentos ou o erro).
+
+Sem o hub no ar o relato não faz nada (as ferramentas seguem). `ELETRICHUB_SEM_RELATO=1` desliga.
 
 ## A vista ao vivo (screenshot e comandos)
 
@@ -149,6 +168,7 @@ objeto; `{_imagem:{base64, mime}}` vira imagem; `ok:false` vira `isError`.
 
 ```
 node tests/test-mcp.js          # stdio com processo filho, HTTP, e as ferramentas numa CÓPIA de "LM555 astável"
+node tests/test-mcp-completo.js # raiz automática, símbolos, 3D do disco, pcb_colocar, lote e o relato ao hub
 python tests/test_mcp_rotas.py  # as rotas da vista ao vivo
 node tests/test-mcp-nexo.js     # o grupo nexo, com um Nexo Hub (tests/nexohub-falso.js) e um NexoCAD de mentira
 node tests/test-nexohub-sync.js # o sincronizador (lib/nexohub-sync.js) contra o Nexo Hub de mentira

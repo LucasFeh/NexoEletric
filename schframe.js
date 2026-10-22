@@ -6052,6 +6052,35 @@ window.__hubComponentes = function(){
 window.__hubSelectComp = function(ref){
   for (const s of model.sheets){ const c = s.comps.find(c => c.ref === ref); if (c){ focusComp(c); return; } }
 };
+/* os ganchos do MCP (mcp/hub-mcpvista.js), os mesmos da vista PCB: a IA mostra ao usuario o que fez.
+   focar {x, y, zoom (meia largura em mil, padrao 800) | ref}; selecionar {refs, net, folha};
+   comando = qualquer acao da barra/teclado (fazAcao: enquadrar, girar, apagar, salvar...); captura. */
+window.HubMcpVista = {
+  focar(x, y, zoom, a){
+    if (a && a.ref){ window.__hubSelectComp(a.ref); return true; }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const r = Number.isFinite(zoom) && zoom > 0 ? zoom : 800;
+    cam.fit({ x1:x - r, y1:y - r, x2:x + r, y2:y + r });
+    return true;
+  },
+  selecionar(o){
+    o = o || {};
+    if (Number.isFinite(o.folha) && o.folha >= 0 && o.folha < model.sheets.length) setSheet(o.folha);
+    const refs = (o.refs || []).map(String);
+    if (refs.length){
+      const sh = model.sheets.findIndex(s => s.comps.some(c => refs.indexOf(c.ref) >= 0));
+      if (sh < 0) return 0;
+      const comps = model.sheets[sh].comps.filter(c => refs.indexOf(c.ref) >= 0);
+      if (comps.length === 1) focusComp(comps[0]);
+      else { if (sh !== sheetIdx) setSheet(sh); selSo(comps.map(alvoAll)); aplicaSel(''); }
+      return comps.length;
+    }
+    if (o.net){ aplicaSel(String(o.net)); return 1; }
+    return 0;
+  },
+  comando(nome){ if (typeof nome !== 'string' || !nome) return false; return fazAcao(nome) !== false; },
+  captura(){ return cv; },
+};
 window.addEventListener('beforeunload', e => { if (schDirty){ e.preventDefault(); e.returnValue = ''; } });
 
 /* ---------- paineis ---------- */

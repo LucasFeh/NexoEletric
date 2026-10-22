@@ -248,6 +248,35 @@ module.exports = {
       },
     },
     {
+      nome: 'pcb_colocar', titulo: 'Colocar componente na placa',
+      descricao: 'Põe um footprint na placa como componente NOVO (op comp_add): ref, footprint (da biblioteca: fp_buscar; o do hub ou o do Altium), posição, rotação, lado e as nets de cada pad. Para trazer TODOS os componentes do esquema de uma vez use eco_aplicar; esta é a peça avulsa (furo de fixação, conector extra, logo, jumper). O footprint precisa existir na biblioteca ou na placa.',
+      entrada: { type: 'object', properties: Object.assign({
+        projeto: PROJETO, ref: { type: 'string', description: 'designador novo, ex.: "J9", "MH1"' }, footprint: { type: 'string' },
+        x: { type: 'number' }, y: { type: 'number' }, rot: { type: 'number', description: 'graus anti-horário (padrão 0)' },
+        layer: { type: 'string', enum: ['Top', 'Bottom'] }, comment: { type: 'string' },
+        nets: { anyOf: [{ type: 'object', additionalProperties: { type: 'string' } }, { type: 'string' }], description: '{"1":"GND","2":"VCC"} ou "1=GND;2=VCC" (pad=net)' },
+      }, COMUNS), required: ['projeto', 'ref', 'footprint', 'x', 'y'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const board = ctx.board(p);
+        if ((board.components || []).some(c => c.ref === a.ref)) throw new ErroMcp(`a placa já tem um ${a.ref}: escolha outro designador (ou pcb_mover para mexer no que existe)`);
+        let nets = a.nets;
+        if (nets && typeof nets === 'object') nets = Object.entries(nets).map(([pad, n]) => `${pad}=${n}`).join(';');
+        const op = { op: 'comp_add', ref: a.ref, footprint: a.footprint, x: a.x, y: a.y, rot: isNum(a.rot) ? a.rot : 0, layer: a.layer || 'Top' };
+        if (a.comment) op.comment = a.comment;
+        if (nets) op.nets = String(nets).replace(/":/g, '" :');
+        comNote(op, a);
+        const est = await ops.transacao(ctx, p, arq => [ops.mescla(arq, op).obj], { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_colocar' });
+        if (est && est.gravado) {
+          try {
+            const c = (ctx.placa(p).eb.components || []).find(x => x.ref === a.ref);
+            if (c) est.componente = { ref: c.ref, x: c.x, y: c.y, rot: c.rot, layer: c.layer, bbox: c.bbox, pads: (c.pads || []).map(q => ({ name: q.name, x: r4(q.x), y: r4(q.y), net: q.net || '' })) };
+          } catch (_) { /* a resposta da transacao ja diz o essencial */ }
+        }
+        return est;
+      },
+    },
+    {
       nome: 'pcb_editar', titulo: 'Editar objeto por id',
       descricao: 'Edita um objeto da placa pelo id (trilha t…/s…/l…, arco a…, via v…, texto x…, fill f…, pad livre, polígono): passe só os campos novos (ex.: {"w":0.5} ou {"x1":10,"y1":5}). A op certa (track_edit, arc_edit, via_edit, text_edit, fill_edit) e os orig_* saem do board.js.',
       entrada: { type: 'object', properties: Object.assign({

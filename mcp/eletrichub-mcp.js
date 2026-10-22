@@ -6,8 +6,9 @@
      node mcp/eletrichub-mcp.js --http 8765 [--host 127.0.0.1] [--token X]    (HTTP Streamable)
      node mcp/eletrichub-mcp.js --listar                                      (imprime as ferramentas)
 
-   --root   a pasta do hub: o repo (padrao: a pasta acima deste script) ou a pasta de trabalho do
-            app desktop (C:\NexoEletric). Tambem por ELETRICHUB_ROOT.
+   --root   a pasta do hub. Opcional: sem ela (ou se ela nao for a pasta do hub) vale ELETRICHUB_ROOT,
+            a do app aberto (%USERPROFILE%\.nexoeletric\session.json), a pasta de trabalho do app
+            (%APPDATA%\NexoEletric\settings.json) e por fim a pasta acima deste script (o repo).
    --hub    URL do hub HTTP ja no ar (ex.: http://192.168.15.192:8100), para hub_status e
             vista_screenshot; sem ela procura 127.0.0.1 nas portas 8200, 8000, 8100 e 8001.
    --http   sobe o transporte HTTP Streamable em POST /mcp (a resposta e JSON; sem SSE do
@@ -24,8 +25,9 @@ const { Contexto } = require('./lib/contexto.js');
 const { Registro } = require('./lib/registro.js');
 const { Servidor } = require('./lib/protocolo.js');
 const recursos = require('./lib/recursos.js');
+const { Relato } = require('./lib/relato.js');
 
-const VERSAO = '1.0.0';
+const VERSAO = '1.1.0';
 
 function args(argv) {
   const a = { root: null, http: null, host: '127.0.0.1', token: process.env.ELETRICHUB_MCP_TOKEN || '', hub: null, listar: false };
@@ -49,8 +51,13 @@ function montaServidor(opts) {
   const ctx = new Contexto({ root: opts.root, projetos: opts.projetos, hubUrl: opts.hub, log: opts.log || log });
   const reg = new Registro().carregar();
   for (const e of reg.erros) log('ferramenta não registrada: ' + e);
-  const srv = new Servidor(ctx, reg, { versao: VERSAO, recursos: recursos.recursos(ctx), prompts: recursos.prompts(ctx) });
+  /* o que a IA faz aparece no hub aberto (o indicador "IA" no topo e os avisos: hub-mcp.js) */
+  const relato = opts.semRelato ? null : new Relato(ctx, { versao: VERSAO });
+  const srv = new Servidor(ctx, reg, { versao: VERSAO, recursos: recursos.recursos(ctx), prompts: recursos.prompts(ctx),
+    aoIniciar: relato ? (cli, n) => relato.ola(cli, n) : null,
+    aoChamar: relato ? (f, a, r, ms) => relato.chamada(f, a, r, ms) : null });
   srv.registro = reg;
+  srv.relato = relato;
   return srv;
 }
 
@@ -133,7 +140,8 @@ if (require.main === module) {
     }
     process.exit(0);
   }
-  log(`raiz ${srv.ctx.root} · ${srv.registro.todas().length} ferramentas`);
+  log(`raiz ${srv.ctx.root} (${srv.ctx.origemRaiz}) · ${srv.registro.todas().length} ferramentas`);
+  if (srv.ctx.avisoRaiz) log(srv.ctx.avisoRaiz);
   if (a.http) servidorHttp(srv, a);
   else stdio(srv);
 }

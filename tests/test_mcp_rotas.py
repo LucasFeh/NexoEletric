@@ -105,6 +105,40 @@ class TestRotasMcp(unittest.TestCase):
         rotas_hub._pedidos[pid]['criado'] -= rotas_hub.VALIDADE + 1
         self.assertEqual(c.get('/api/mcp/pedidos?alvo=pcb&proj=Z').get_json()['pedidos'], [])
 
+    def test_presenca_e_atividade(self):
+        """o que o indicador "IA" no topo do hub mostra (hub-mcp.js): quem esta conectado e o que fez"""
+        c = novo_app()
+        rotas_hub._sessoes.clear()
+        del rotas_hub._atividade[:]
+        j = c.get('/api/mcp/atividade').get_json()
+        self.assertEqual((j['sessoes'], j['itens']), ([], []))
+        self.assertEqual(c.post('/api/mcp/ola', json={'sessao': 's1', 'cliente': 'claude-code 2.1', 'versao': '1.1.0', 'ferramentas': 90}).status_code, 200)
+        c.post('/api/mcp/atividade', json={'sessao': 's1', 'ferramenta': 'pcb_mover', 'ok': True, 'ms': 12, 'projeto': 'LM555', 'resumo': 'ref R5', 'escrita': True})
+        c.post('/api/mcp/atividade', json={'sessao': 's1', 'ferramenta': 'sch_ligar', 'ok': False, 'erro': 'pino 9 não existe'})
+        j = c.get('/api/mcp/atividade').get_json()
+        self.assertEqual(len(j['sessoes']), 1)
+        self.assertEqual(j['sessoes'][0]['cliente'], 'claude-code 2.1')
+        self.assertEqual(j['sessoes'][0]['chamadas'], 2)
+        self.assertEqual([a['ferramenta'] for a in j['itens']], ['pcb_mover', 'sch_ligar'])
+        self.assertEqual(j['itens'][0]['cliente'], 'claude-code 2.1')
+        self.assertFalse(j['itens'][1]['ok'])
+        # so o que e novo desde o ultimo seq
+        novos = c.get('/api/mcp/atividade?desde=%d' % j['itens'][0]['seq']).get_json()['itens']
+        self.assertEqual([a['ferramenta'] for a in novos], ['sch_ligar'])
+        # de outra maquina nao entra
+        r = c.post('/api/mcp/atividade', json={'ferramenta': 'x'}, environ_base={'REMOTE_ADDR': '10.9.9.9'})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(c.post('/api/mcp/atividade', json={'ok': True}).status_code, 400)
+
+    def test_alvo_hub_abre_projeto(self):
+        """a IA pede para abrir um projeto na janela do usuario (vista_abrir): a pagina do hub pega"""
+        c = novo_app()
+        j = c.post('/api/mcp/pedido', json={'alvo': 'hub', 'proj': '*', 'acao': 'abrir', 'args': {'projeto': 'LM555', 'aba': 'pcb'}}).get_json()
+        self.assertTrue(j['ok'])
+        p = c.get('/api/mcp/pedidos?alvo=hub&proj=*').get_json()['pedidos']
+        self.assertEqual(p[0]['acao'], 'abrir')
+        self.assertEqual(p[0]['args'], {'projeto': 'LM555', 'aba': 'pcb'})
+
 
 if __name__ == '__main__':
     unittest.main()

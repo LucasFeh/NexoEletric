@@ -37,8 +37,9 @@ function pinosDe(hc, sym, part) {
 /* ---------- transacao no schematic.js ---------- */
 function transacao(ctx, p, fn, opts) {
   const o = opts || {};
-  const hc = ctx.hc, L = ctx.libs();
+  const hc = ctx.hc;
   const arq = ArquivoLinhas.abrir('schematic', p.arq('schematic.js'));
+  const L = ctx.libsDe(arq.valor);
   if (arq.valor === undefined) throw new ErroMcp(`o projeto "${p.nome}" não tem schematic.js (projeto_criar faz um)`);
   const cab = Object.assign({}, arq.valor); delete cab.items;
   const antes = hc.validateSchematic(Object.assign({}, cab, { items: arq.itens.slice() }), L.schlib, L.pcblib);
@@ -145,7 +146,7 @@ module.exports = {
       entrada: { type: 'object', properties: { projeto: PROJETO, ref: { type: 'string' } }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        const s = ctx.schematic(p), L = ctx.libs(), hc = ctx.hc;
+        const s = ctx.schematic(p), L = ctx.libsDe(s), hc = ctx.hc;
         let pinNet = {};
         try { pinNet = hc.extractNets(s, L.schlib).pinNet || {}; } catch (_) { /* esquema quebrado: segue sem nets */ }
         const comps = (s.items || []).map((it, indice) => ({ it, indice })).filter(x => x.it.t === 'comp' && (!a.ref || x.it.ref === a.ref));
@@ -163,7 +164,8 @@ module.exports = {
       entrada: { type: 'object', properties: { projeto: PROJETO, net: { type: 'string' } }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        const r = ctx.hc.extractNets(ctx.schematic(p), ctx.libs().schlib);
+        const s0 = ctx.schematic(p);
+        const r = ctx.hc.extractNets(s0, ctx.libsDe(s0).schlib);
         const nets = r.nets.filter(n => !a.net || n.name === a.net);
         return { total: r.nets.length, nets, avisos: r.warnings, juncoes_automaticas: (r.autoJunctions || []).length };
       },
@@ -245,7 +247,7 @@ module.exports = {
       entrada: { type: 'object', properties: { projeto: PROJETO }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        const s = ctx.schematic(p), L = ctx.libs();
+        const s = ctx.schematic(p), L = ctx.libsDe(s);
         const v = ctx.hc.validateSchematic(s, L.schlib, L.pcblib);
         const ser = ctx.hc.serializeSchematic(s);
         return { ok: !v.errors.length && !ser.errors.length, erros: v.errors, avisos: v.warnings, formato: ser.errors.map(e => e.msg), descartados: (ser.descartados || []).length };
@@ -254,9 +256,9 @@ module.exports = {
     {
       nome: 'sch_buscar_simbolo', titulo: 'Buscar símbolo na biblioteca', leitura: true,
       descricao: 'Procura símbolos nas bibliotecas que a vista Esquema usa (SchLib do Altium + almoxarifado, inclusive cada valor do almoxarifado como componente próprio) por nome, descrição, família ou designador. Devolve nome (o "sym" do comp), acervo, pinos e footprint padrão.',
-      entrada: { type: 'object', properties: { busca: { type: 'string', description: 'palavras, ex.: "resistor 0805 10k", "NE555", "conector 2 vias"' }, limite: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['busca'] },
+      entrada: { type: 'object', properties: { busca: { type: 'string', description: 'palavras, ex.: "resistor 0805 10k", "NE555", "conector 2 vias"' }, projeto: Object.assign({}, PROJETO, { description: 'opcional: inclui os símbolos guardados no próprio esquema do projeto (os da folha do Altium e os criados com sym_salvar destino "projeto")' }), limite: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['busca'] },
       executa: async (a, ctx) => {
-        const L = ctx.libs();
+        const L = a.projeto ? ctx.libsDe(ctx.schematic(ctx.projeto(a.projeto))) : ctx.libs();
         const termos = norm(a.busca).split(/\s+/).filter(Boolean);
         const r = [];
         for (const s of L.schlib.symbols) { const pt = pontua(s, termos); if (pt) r.push([pt, s]); }
@@ -268,20 +270,20 @@ module.exports = {
         resgate.sort((x, y) => y[0] - x[0]);
         return { acervos: L.acervos, total: r.length,
                  resgate: resgate.length ? { nota: 'só no acervo de resgate (symbols-lib.js, desenhos vistos em projetos): a vista desenha, mas o Altium só acha se o símbolo existir na biblioteca dele', simbolos: resgate.slice(0, 10).map(([, s]) => ({ nome: s.name, descricao: s.desc || '', fontes: (s.fontes || []).slice(0, 3), usos: s.usos })) } : undefined, simbolos: r.slice(0, a.limite || 25).map(([pt, s]) => ({
-          sym: s.name, descricao: s.description || s.desc || '', acervo: L.acervoDe.get(s.name), designador: s.designator, partes: s.partcount || (s.parts || []).length || 1,
+          sym: s.name, descricao: s.description || s.desc || '', acervo: s.doDocumento ? 'projeto' : L.acervoDe.get(s.name), designador: s.designator, partes: s.partcount || (s.parts || []).length || 1,
           pinos: ((ctx.hc.partOf(s, 1) || {}).pins || []).length, footprint: footprintAtual(s), pontos: pt })) };
       },
     },
     {
       nome: 'sch_simbolo', titulo: 'Detalhe de um símbolo', leitura: true,
       descricao: 'Um símbolo da biblioteca: partes, pinos (número, nome, tipo, ponta do corpo e PONTA QUENTE em coordenada local), footprints associados (e se existem na PcbLib) e os pads do footprint padrão para conferir pino x pad.',
-      entrada: { type: 'object', properties: { nome: { type: 'string' }, part: { type: 'integer', minimum: 1 } }, required: ['nome'] },
+      entrada: { type: 'object', properties: { nome: { type: 'string' }, part: { type: 'integer', minimum: 1 }, projeto: Object.assign({}, PROJETO, { description: 'opcional: vale também símbolo guardado no esquema do projeto' }) }, required: ['nome'] },
       executa: async (a, ctx) => {
-        const L = ctx.libs(), hc = ctx.hc;
+        const L = a.projeto ? ctx.libsDe(ctx.schematic(ctx.projeto(a.projeto))) : ctx.libs(), hc = ctx.hc;
         const s = hc.symbolOf(L.schlib, a.nome);
         if (!s) throw new ErroMcp(`símbolo "${a.nome}" não existe (sch_buscar_simbolo)`);
         const fp = footprintAtual(s), F = fp ? hc.footprintOf(L.pcblib, fp) : null;
-        return { sym: s.name, descricao: s.description || '', acervo: L.acervoDe.get(s.name), designador: s.designator,
+        return { sym: s.name, descricao: s.description || '', acervo: s.doDocumento ? 'projeto' : L.acervoDe.get(s.name), designador: s.designator,
                  partes: (s.parts || []).map(pt => ({ part: pt.part, pinos: pinosDe(hc, s, pt.part).length })),
                  pinos: pinosDe(hc, s, a.part || 1),
                  footprints: (s.footprints || []).map(f => ({ name: f.name, padrao: !!f.current, na_pcblib: !!hc.footprintOf(L.pcblib, f.name) })),

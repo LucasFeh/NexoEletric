@@ -92,10 +92,10 @@ module.exports = {
       },
     },
     {
-      nome: 'projeto_abrir_altium', titulo: 'Abrir esquema do Altium', destrutiva: true,
-      descricao: 'Abre um esquema do Altium no hub sem o Altium: lê o .PrjPcb (ou os .SchDoc) do disco e grava Projects/<projeto>/schematic.js no formato do ExportProject (componentes com footprint e parâmetros, fios, rótulos, power, ports, junções, No ERC, textos, o template e os parâmetros do carimbo) e os símbolos que a folha traz. Passa pelo hub no ar (POST /api/altium/abrir, tools/schdoc/schdoc2sch.py). Projeto que já tem esquema só com substituir:true (o anterior fica em .bak). Depois: sch_ler / sch_validar / vista_screenshot.',
+      nome: 'projeto_abrir_altium', titulo: 'Abrir projeto do Altium (esquema e PCB)', destrutiva: true,
+      descricao: 'Abre um projeto do Altium no NexoEletric sem o Altium, como o arrastar-e-soltar da janela: com o .PrjPcb as folhas e a placa saem do próprio projeto. Grava Projects/<projeto>/ como ExportProject + ExportBoard: schematic.js (componentes, fios, rótulos, power, ports, junções, No ERC, textos, template e carimbo, e os símbolos da folha), board.js da .PcbDoc, rules.js, o 3D (board3d.js + modelos) e changes.js/annotations.js vazios. Aceita também .SchDoc ou .PcbDoc soltos. Passa pelo hub no ar (POST /api/altium/abrir). Projeto que já existe só com substituir:true (o anterior fica em .bak). Depois: projeto_resumo / sch_validar / pcb_resumo / vista_abrir.',
       entrada: { type: 'object', properties: {
-        caminhos: { type: 'array', items: { type: 'string' }, description: 'o .PrjPcb do projeto (as folhas saem dele, na ordem dele) ou os .SchDoc, caminhos no disco desta máquina' },
+        caminhos: { type: 'array', items: { type: 'string' }, description: 'o .PrjPcb do projeto (as folhas e a placa saem dele) ou .SchDoc/.PcbDoc, caminhos no disco desta máquina' },
         projeto: { type: 'string', description: 'nome no hub (padrão: o do .PrjPcb ou da primeira folha)' },
         substituir: { type: 'boolean' },
       }, required: ['caminhos'] },
@@ -103,20 +103,20 @@ module.exports = {
         const lista = (a.caminhos || []).map(c => path.resolve(String(c)));
         if (!lista.length) throw new ErroMcp('passe o .PrjPcb ou os .SchDoc em "caminhos"');
         for (const c of lista) {
-          if (!/\.(prjpcb|schdoc)$/i.test(c)) throw new ErroMcp('só .PrjPcb e .SchDoc: ' + c);
+          if (!/\.(prjpcb|schdoc|pcbdoc)$/i.test(c)) throw new ErroMcp('só .PrjPcb, .SchDoc e .PcbDoc: ' + c);
           if (!fs.existsSync(c)) throw new ErroMcp('arquivo não existe: ' + c);
         }
         if (a.projeto) { const e = nomeDePastaOk(a.projeto); if (e) throw new ErroMcp('nome de projeto inválido: ' + e); }
         const hub = await hubNoAr(ctx);
-        if (!hub) throw new ErroMcp('o hub não está no ar: abrir o .SchDoc passa pelo hubserver (abra o NexoEletric)');
+        if (!hub) throw new ErroMcp('o hub não está no ar: abrir o projeto do Altium passa pelo hubserver (app_abrir abre o NexoEletric)');
         const r = await fetch(hub.url + '/api/altium/abrir', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ caminhos: lista, projeto: a.projeto || undefined, substituir: !!a.substituir }), signal: AbortSignal.timeout(180000) });
+          body: JSON.stringify({ caminhos: lista, projeto: a.projeto || undefined, substituir: !!a.substituir }), signal: AbortSignal.timeout(600000) });
         let j = null; try { j = await r.json(); } catch (_) { /* sem corpo */ }
         if (!j || !j.ok) {
-          if (j && j.existe) throw new ErroMcp(`o projeto "${j.projeto}" já tem esquema: passe substituir:true (o atual vai para schematic.js.bak)`);
+          if (j && j.existe) throw new ErroMcp(`o projeto "${j.projeto}" já existe: passe substituir:true (o atual vai para .bak)`);
           throw new ErroMcp((j && j.error) || ('o hub recusou (HTTP ' + r.status + ')' + (r.status === 404 ? ': o hubserver é anterior a esta versão' : '')));
         }
-        return { ok: true, projeto: j.projeto, resumo: j.resumo, urls: urlsDaVista(hub.url, j.projeto) };
+        return { ok: true, projeto: j.projeto, esquema: j.esquema !== false ? j.resumo : null, placa: j.placa || null, avisos: (j.resumo || {}).avisos, urls: urlsDaVista(hub.url, j.projeto) };
       },
     },
     {

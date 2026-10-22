@@ -10,6 +10,8 @@
    Os 3D da PcbLib (Libs/pcblib-3d.js) quase nunca estao no disco: o hubserver os tira da PcbLib sob
    demanda. Sem o arquivo, o MCP pede ao hub no ar. */
 'use strict';
+const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const { ErroMcp } = require('../lib/contexto.js');
 const { avaliaVar } = require('../lib/arquivo-linhas.js');
@@ -72,7 +74,7 @@ async function salva(ctx, fp, opcoes, ferramenta) {
   for (const b of fp.bodies) if (b && b.kind === 'step') {
     if (!b.model) throw new ErroMcp('corpo STEP sem "model" (o id do modelo: fp_modelos3d lista)');
     if (!tem(lib.models, b.model)) {
-      const m = modeloDe(lib, L3, b.model);
+      const m = (o.modelos && o.modelos[b.model]) || modeloDe(lib, L3, b.model);
       if (!m || !m.file) throw new ErroMcp(`modelo 3D "${b.model}" não existe na PcbLib nem na biblioteca do hub (fp_modelos3d lista os ids)`);
       lib.models[b.model] = { file: m.file, name: m.name || b.name || '', bytes: m.bytes || 0 };
     }
@@ -89,6 +91,43 @@ async function salva(ctx, fp, opcoes, ferramenta) {
   return { salvo: fp.name, arquivo: ctx.rel(abs), substituiu: !!ja, passaNaFrenteDoAltium: doAltium,
            pads: fp.pads.length, silk: fp.silk.length, corpos3d: fp.bodies.length, bbox: fp.bbox };
 }
+
+/* Um STEP novo na biblioteca do hub: Libs/3d-hub/<sha1>.step, o mesmo nome e lugar do POST
+   /api/fp3d (o mesmo modelo duas vezes nao duplica). -> {id, file, name, bytes} */
+function poeStep(ctx, bytes, nome) {
+  const b = Buffer.from(bytes);
+  if (!b.slice(0, 64).toString('latin1').trimStart().startsWith('ISO-10303-21')) throw new ErroMcp('o arquivo não é STEP (não começa com ISO-10303-21)');
+  if (b.length > 120 * 1024 * 1024) throw new ErroMcp('STEP maior que 120 MB');
+  const sha = crypto.createHash('sha1').update(b).digest('hex');
+  const abs = path.join(ctx.root, 'Libs', '3d-hub', sha + '.step');
+  if (!fs.existsSync(abs)) {
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs + '.tmp', b);
+    fs.renameSync(abs + '.tmp', abs);
+  }
+  return { id: sha, file: '3d-hub/' + sha + '.step', name: path.basename(String(nome || 'modelo.step').replace(/\\/g, '/')).slice(0, 120), bytes: b.length };
+}
+/* prende um modelo (ja no disco) ao footprint, com a posicao/rotacao pedidas (sem x/y: o centro dos pads) */
+async function prende(ctx, a, modelo, ferramenta) {
+  const r = await acha(ctx, a.footprint);
+  if (!r) throw new ErroMcp(`footprint "${a.footprint}" não existe (fp_buscar; ou crie com fp_pacote/fp_salvar)`);
+  const fp = r.fp;
+  const bb = fp.pads.length ? HF(ctx).bbox({ pads: fp.pads, silk: [] }) : { x1: 0, y1: 0, x2: 0, y2: 0 };
+  const num = (v, p) => typeof v === 'number' && isFinite(v) ? v : p;
+  const raw = { x2d: num(a.x, Math.round((bb.x1 + bb.x2) / 2 * 1e4) / 1e4), y2d: num(a.y, Math.round((bb.y1 + bb.y2) / 2 * 1e4) / 1e4), rot2d: 0,
+                rotx: num(a.rotx, 0), roty: num(a.roty, 0), rotz: num(a.rotz, 0), dz: num(a.dz, 0) };
+  if (a.substituir_corpos !== false) fp.bodies = (fp.bodies || []).filter(b => b && b.kind !== 'step');
+  fp.bodies.push({ kind: 'step', model: modelo.id, name: modelo.name || '', side: 'top', raw, color: '#9a9a9a', opacity: 1 });
+  const s = await salva(ctx, fp, { substituir: true, modelos: { [modelo.id]: { file: modelo.file, name: modelo.name, bytes: modelo.bytes } } }, ferramenta);
+  return Object.assign(s, { modelo, raw, dica: 'Confira a rotação no editor (Biblioteca » Footprints, tecla 3) ou vista_screenshot; ajuste com rotx/roty/rotz/dz e chame de novo.' });
+}
+
+const ROT3D = {
+  x: { type: 'number', description: 'mm: onde a origem do modelo cai (padrão: centro dos pads)' }, y: { type: 'number' },
+  dz: { type: 'number', description: 'mm: altura da origem do modelo sobre a placa' },
+  rotx: { type: 'number', description: 'graus (o STEP do fabricante costuma vir em pé: rotx 90)' }, roty: { type: 'number' }, rotz: { type: 'number' },
+  substituir_corpos: { type: 'boolean', description: 'padrão true: tira os STEP que o footprint tinha (false = acrescenta)' },
+};
 
 const FP_SCHEMA = {
   type: 'object',
@@ -225,6 +264,34 @@ module.exports = {
         fp.bodies.push({ kind: 'step', model: id, name: m.name || '', side: 'top', raw, color: '#9a9a9a', opacity: 1 });
         const s = await salva(ctx, fp, { substituir: true }, 'fp_corpo3d');
         return Object.assign(s, { modelo: { id, nome: m.name || '' }, raw, rotacaoDe: base ? 'do footprint que já usa o modelo' : 'zero (nenhum footprint usa o modelo)' });
+      },
+    },
+    {
+      nome: 'fp_3d_importar', titulo: 'Importar STEP do disco para o footprint', destrutiva: true, modulo: 'hub-fplib.js',
+      descricao: 'Lê um arquivo .step/.stp do disco (o do fabricante, um baixado, um exportado do NexoCAD), guarda na biblioteca 3D do hub (Libs/3d-hub, sobe para o NexoBD com a biblioteca) e prende ao footprint. Sem rotação, entra como veio: confira e ajuste.',
+      entrada: { type: 'object', properties: Object.assign({ footprint: { type: 'string' }, arquivo: { type: 'string', description: 'caminho completo do .step no disco' } }, ROT3D), required: ['footprint', 'arquivo'] },
+      executa: async (a, ctx) => {
+        let bytes;
+        try { bytes = fs.readFileSync(a.arquivo); } catch (e) { throw new ErroMcp(`não li ${a.arquivo}: ${e.code || e.message}`); }
+        return prende(ctx, a, poeStep(ctx, bytes, a.arquivo), 'fp_3d_importar');
+      },
+    },
+    {
+      nome: 'fp_3d_nexo', titulo: 'Usar modelo 3D do NexoBD no footprint', destrutiva: true, modulo: 'hub-fplib.js',
+      descricao: 'Pega o STEP de um item da biblioteca da rede Nexo (NexoBD: modelo3d ou componente feito no NexoCAD — nexo_biblioteca lista os ids) e prende ao footprint, guardando uma cópia na biblioteca 3D do hub. rev opcional (padrão: a atual).',
+      entrada: { type: 'object', properties: Object.assign({ footprint: { type: 'string' }, item: { type: 'string', description: 'id do item no NexoBD (ex.: el-r0603-ab12)' }, rev: { type: 'integer', minimum: 1 } }, ROT3D), required: ['footprint', 'item'] },
+      executa: async (a, ctx) => {
+        const NH = require('../lib/nexohub.js');
+        const c = NH.cliente({ app: 'nexoeletric-mcp' });
+        let it;
+        try { it = await c.item(a.item); } catch (e) { throw new ErroMcp(String(e.message || e)); }
+        const arqs = it.arquivos || {};
+        const papel = arqs.step ? 'step' : Object.keys(arqs).find(p => /\.(step|stp)$/i.test((arqs[p] && arqs[p].nome) || p));
+        if (!papel) throw new ErroMcp(`o item ${a.item} (${it.nome}) não tem STEP: papéis ${Object.keys(arqs).join(', ') || '(nenhum)'}`);
+        const bytes = await c.baixa(a.item, papel, a.rev);
+        const m = poeStep(ctx, bytes, (arqs[papel] && arqs[papel].nome) || (it.nome + '.step'));
+        const r = await prende(ctx, a, m, 'fp_3d_nexo');
+        return Object.assign(r, { nexo: { item: it.id, nome: it.nome, tipo: it.tipo, rev: a.rev || it.rev } });
       },
     },
     {
