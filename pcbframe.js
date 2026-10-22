@@ -418,7 +418,7 @@ function montaIndices(){
   IDX.item = new Map(); IDX.compNome = new Map(); IDX.ebComp = new Map(); IDX.ebPorId = new Map(); IDX.opItem = new Map();
   /* a linha do changes.js -> o item do modelo que ela fez (o id do objeto adicionado no EB) */
   for (const it of model.changeItems) if (it && it.ch && !IDX.opItem.has(it.ch)) IDX.opItem.set(it.ch, it);
-  for (const list of [model.tracks, model.arcs, model.vias, model.texts, model.fills, model.regions])
+  for (const list of [model.tracks, model.arcs, model.vias, model.texts, model.fills, model.regions, model.pads || []])
     for (const m of list) if (m.src && m.src.id != null && !IDX.item.has(String(m.src.id))) IDX.item.set(String(m.src.id), m);
   for (const m of model.added) if (m.eff && m.eff.id != null) IDX.item.set(String(m.eff.id), m);
   model.comps.forEach((m, i) => {
@@ -638,7 +638,7 @@ function numDoOp(op){ if (!op) return 0; let n = opNum.get(op); if (!n) { n = ++
 function chave(a){
   switch (a.t) {
     case 'comp': return 'c:' + a.m.src.ref;
-    case 'pad': return 'p:' + (a.comp ? a.comp.src.ref : '~') + ':' + (a.pad.id || a.pad.name);
+    case 'pad': return (!a.comp && a.m && a.m.added) ? 'o:' + numDoOp(opDe(a.m)) : 'p:' + (a.comp ? a.comp.src.ref : '~') + ':' + (a.pad.id || a.pad.name);
     case 'ann': return 'n:' + a.ann.id;
     case 'regiao-ro': return 'g:' + a.eb.id;
     case 'recorte': return a.m ? 'o:' + numDoOp(opDe(a.m)) : 'k:' + a.eb.id;
@@ -676,7 +676,8 @@ function montaAlvos(){
   });
   for (const p of (EB.freepads || [])) {
     if (!p || !isNum(p.x) || !isNum(p.y)) continue;
-    entradaPad(reg({ t:'pad', comp:null, pad:p, eb:p }), p, push);
+    const mp = p.id != null ? IDX.item.get(String(p.id)) : null;
+    entradaPad(reg({ t:'pad', comp:null, pad:p, eb:p, m:mp && mp.kind === 'pad' ? mp : null }), p, push);
   }
   /* o que tem dono seleciona o componente (como no Altium); o livre, ele mesmo */
   const doDono = o => { const mc = compDoDono(o.owner); return mc ? ALVO_COMP.get(mc) : null; };
@@ -1353,7 +1354,8 @@ const NOTA = 'editado no hub';
 function ultimoOp(pred){ for (let i = CH.length - 1; i >= 0; i--) if (CH[i] && pred(CH[i])) return CH[i]; return null; }
 const EDITA = {
   track: { op:'track_edit', orig:['x1', 'y1', 'x2', 'y2', 'w', 'layer'], campos:['x1', 'y1', 'x2', 'y2', 'w', 'layer', 'net'] },
-  arc:   { op:'arc_edit',   orig:['cx', 'cy', 'r', 'sa', 'ea', 'layer'], campos:['cx', 'cy', 'r', 'sa', 'ea', 'w', 'layer', 'net'] },
+  arc:   { op:'arc_edit',   orig:['cx', 'cy', 'r', 'sa', 'ea', 'layer'], campos:['cx', 'cy', 'r', 'sa', 'ea', 'w', 'layer'] },
+  pad:   { op:'pad_edit',   orig:['x', 'y'], campos:['x', 'y', 'w', 'h', 'rot', 'shape', 'radius', 'drill', 'drillshape', 'drillw', 'holerot', 'net', 'name', 'layer'] },
   via:   { op:'via_edit',   orig:['x', 'y'], campos:['x', 'y', 'size', 'drill'] },
   fill:  { op:'fill_edit',  orig:['x1', 'y1', 'x2', 'y2', 'layer'], campos:['x1', 'y1', 'x2', 'y2', 'rot', 'layer', 'net'] },
   text:  { op:'text_edit',  orig:['x', 'y', 'text', 'layer'], campos:['text', 'x', 'y', 'h', 'w', 'rot', 'layer', 'mirror'] },
@@ -1362,6 +1364,7 @@ const CAMPOS_ADD = {
   track:['x1', 'y1', 'x2', 'y2', 'w', 'layer', 'net'], arc:['cx', 'cy', 'r', 'sa', 'ea', 'w', 'layer', 'net'],
   via:['x', 'y', 'size', 'drill', 'net'], fill:['x1', 'y1', 'x2', 'y2', 'rot', 'layer', 'net'],
   text:['text', 'x', 'y', 'h', 'w', 'rot', 'layer', 'mirror'], region:['layer', 'net'],
+  pad:['x', 'y', 'w', 'h', 'rot', 'shape', 'radius', 'drill', 'drillshape', 'drillw', 'holerot', 'net', 'name', 'layer'],
 };
 const ANGULARES = { rot:1, sa:1, ea:1 };
 function mesmoValor(k, a, b){
@@ -1375,7 +1378,7 @@ function mesmoValor(k, a, b){
 function patchAdd(op, kind, patch){
   for (const k of (CAMPOS_ADD[kind] || [])) if (k in patch) op[k] = patch[k];
   if (kind === 'region' && Array.isArray(patch.points)) op.pts = patch.points.map(p => [r6(p[0]), r6(p[1])]);
-  if (op.layer && !cobre(op.layer)) delete op.net;
+  if (kind !== 'pad' && op.layer && !cobre(op.layer)) delete op.net;
   if (op.net === '') delete op.net;
 }
 function editaItem(m, patch){
@@ -1386,7 +1389,7 @@ function editaItem(m, patch){
   const novo = !c;
   if (novo) { c = { op:E.op, id:m.src.id }; for (const k of E.orig) c['orig_' + k] = m.src[k]; }
   for (const k of Object.keys(patch)) if (E.campos.indexOf(k) >= 0) c[k] = patch[k];
-  if (!cobre(c.layer || m.src.layer)) delete c.net;
+  if (m.kind !== 'pad' && !cobre(c.layer || m.src.layer)) delete c.net;
   if (c.net === '' && !m.src.net) delete c.net;
   /* voltou ao original (e a linha e a primeira desse objeto): sai do arquivo */
   const origDoSrc = E.orig.every(k => mesmoValor(k, c['orig_' + k], m.src[k]));
@@ -1463,6 +1466,7 @@ function apagaItem(m){
   else if (kind === 'fill') Object.assign(del, { orig_x1:s.x1, orig_y1:s.y1, orig_x2:s.x2, orig_y2:s.y2, orig_layer:s.layer });
   else if (kind === 'text') Object.assign(del, { orig_x:s.x, orig_y:s.y, orig_text:s.text, orig_layer:s.layer });
   else if (kind === 'region') Object.assign(del, { orig_layer:s.layer, orig_n:s.points.length, orig_x0:s.points[0][0], orig_y0:s.points[0][1] });
+  else if (kind === 'pad') Object.assign(del, { orig_x:s.x, orig_y:s.y });
   else return false;
   del.note = 'removido no hub';
   CH.push(del);
@@ -1476,7 +1480,7 @@ function apagaSelecao(){
   for (const a of SEL) {
     if (a.t === 'ann') { const i = ANN.indexOf(a.ann); if (i >= 0) { ANN.splice(i, 1); annMexeu = true; n++; } continue; }
     if (a.t === 'comp') { fica.push(a.m.src.ref + ' (componente sai pelo esquema e o ECO)'); continue; }
-    if (a.t === 'pad') { fica.push('pad (é do componente)'); continue; }
+    if (a.t === 'pad' && !a.m) { fica.push('pad ' + (a.comp ? (a.comp.eff.designator || a.comp.src.ref) + '.' : '') + (a.pad.name || '') + ' (é do componente: mude pelo footprint)'); continue; }
     if (a.t === 'regiao-ro') { fica.push('região: ' + a.motivo); continue; }
     if (a.t === 'recorte') { if (a.m && apagaItem(a.m)) n++; else fica.push('recorte do Altium (apague no Altium)'); continue; }
     if (a.t === 'text' && a.m.src && (a.m.src.designator || a.m.src.comment || a.m.src.owner)) { fica.push('texto do componente ' + (a.m.src.owner || '')); continue; }
@@ -1497,6 +1501,7 @@ function geoDe(a){
     case 'track': { const e = a.m.eff; return { x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2 }; }
     case 'arc': { const e = a.m.eff; return { cx:e.cx, cy:e.cy, r:e.r, sa:e.sa, ea:e.ea }; }
     case 'via': return { x:a.m.eff.x, y:a.m.eff.y };
+    case 'pad': return a.m ? { x:a.m.eff.x, y:a.m.eff.y } : null;
     case 'fill': { const e = a.m.eff; return { x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2, rot:isNum(e.rot) ? e.rot : 0 }; }
     case 'region': return { points:(a.m.eff.points || []).map(p => [p[0], p[1]]) };
     case 'recorte': return a.m ? { points:(a.m.eff.points || []).map(p => [p[0], p[1]]) } : null;
@@ -1575,6 +1580,7 @@ function escreveGeo(a, g){
       return editaItem(a.m, p);
     }
     case 'via': return editaItem(a.m, { x:r6(g.x), y:r6(g.y) });
+    case 'pad': return a.m ? editaItem(a.m, { x:r6(g.x), y:r6(g.y) }) : false;
     case 'fill': return editaItem(a.m, { x1:r6(Math.min(g.x1, g.x2)), y1:r6(Math.min(g.y1, g.y2)), x2:r6(Math.max(g.x1, g.x2)), y2:r6(Math.max(g.y1, g.y2)), rot:normAng(g.rot || 0) });
     case 'region': return editaRegiao(a.m, { points:g.points });
     case 'recorte': {
@@ -1596,7 +1602,7 @@ function escreveGeo(a, g){
    livre, designator e sinalizador. Pad arrasta o componente dele. */
 function movivel(a){
   if (!a) return null;
-  if (a.t === 'pad') return a.comp ? ALVO_COMP.get(a.comp) : null;
+  if (a.t === 'pad') return a.comp ? ALVO_COMP.get(a.comp) : (a.m && !a.m.deleted ? a : null);
   if (a.t === 'regiao-ro') return null;
   if (a.t === 'recorte') return a.m ? a : null;
   if (a.t === 'text') { const s = a.m.src; if (s && s.comment) return null; if (s && s.owner && !s.designator) return null; }
@@ -2142,6 +2148,8 @@ let lembraCanto = { p90:'v', p45:'diag' };
 const ladoBaixo = k => !!(LBYK[k] && LBYK[k].side === 'bottom') || /^Bottom/.test(k);
 function setTool(t){
   if (t !== 'select' && LEAN) return;
+  /* a ferramenta Furo com circulo(s) selecionado(s): eles viram furo de fixacao na hora */
+  if (t === 'furo') { const cs = SEL.filter(circuloDoAlvo); if (cs.length) { furosDosCirculos(cs); return; } }
   encerraDraft(true);
   if (t !== 'select' && t !== 'medir') garanteEdicao();
   if (t === 'trilha' && !cobre(cur)) {
@@ -2702,6 +2710,9 @@ function cliqueFerramenta(w, ev){
     CH.push(op); selDepois = [op]; commit(); return;
   }
   if (tool === 'furo') {
+    /* clicou num circulo desenhado (serigrafia, mecanica, cobre...): ele vira o furo de fixacao */
+    const circ = hitsEm(w.x, w.y).find(circuloDoAlvo);
+    if (circ) { furosDosCirculos([circ]); return; }
     const p = snapPonto(w, ev, { soGrade:true }), r = CFG.furo / 2;
     const op = { op:'region_add', cutout:true, pts:circuloPts(p.x, p.y, r, 36), note:'furo de fixação ' + fmtNum(CFG.furo, 2) + ' mm' };
     CH.push(op); selDepois = [op]; commit(); return;
@@ -3376,8 +3387,9 @@ function extrasDoHub(w){
   const muda = SEL.filter(CAMADA_LIVRE);
   if (muda.length) {
     const ks = new Set(muda.map(a => a.m.eff.layer));
-    it.push({ rot:'Camada', filhos:LAYERS.filter(l => l.kind !== 'multi').map(l => ({ rot:rotuloAba(l), check:ks.size === 1 && ks.has(l.key), f:() => editarCampo('layer', l.key) })) });
+    it.push({ rot:'Camada', filhos:LAYERS.filter(l => l.kind !== 'multi').map(l => ({ rot:rotuloAba(l), cor:l.color, check:ks.size === 1 && ks.has(l.key), f:() => editarCampo('layer', l.key) })) });
   }
+  if (SEL.some(circuloDoAlvo)) it.push({ rot:'Virar furo de fixação', dica:'o círculo vira um furo de fixação (Board Cutout) do mesmo diâmetro', f:() => fazAcao('furoDoCirculo') });
   if (compsDaSel().length) it.push({ rot:'Virar de face', tecla:'L', f:() => transformaSelecao('vira') });
   if (compsDaSel().length === 1) it.push({ rot:'Editar footprint…', f:() => fazAcao('editarFp') });
   if (compsDaSel().length === 1 && typeof HubNexo !== 'undefined') it.push({ rot:'Editar 3D no NexoCAD', f:() => fazAcao('nexoEditar3d') });
@@ -4450,7 +4462,9 @@ function fazAcao(id, arg){
       if (tool === 'trilha' && draft && draft.est) { rotaVia(true); return; }
       setTool(tool === 'via' ? 'select' : 'via'); return;
     case 'linha': case 'arco': case 'circulo': case 'retangulo': case 'poligono': case 'texto':
-    case 'triangulo': case 'furo': case 'contorno':
+    case 'furo': { const cs = SEL.filter(circuloDoAlvo); if (cs.length) { furosDosCirculos(cs); return; } setTool('furo'); return; }
+    case 'furoDoCirculo': { const cs = SEL.filter(circuloDoAlvo); if (cs.length) furosDosCirculos(cs); else HubDialog.toast('selecione um círculo (arco de 360°) para virar furo de fixação', 'info'); return; }
+    case 'triangulo': case 'contorno':
       setTool(tool === id ? 'select' : id); return;
     case 'medir': setTool(tool === 'medir' ? 'select' : 'medir'); return;
     case 'sinalizar': setTool(tool === 'sinalizar' ? 'select' : 'sinalizar'); return;
@@ -4550,6 +4564,128 @@ function opcNets(atual){
 }
 const par = (rot, a, b) => ({ par:[a, b], rot });
 const ESTADO = m => m.added ? 'novo (changes.js)' : m.deleted ? 'removido' : m.changed ? 'editado' : '';
+/* ---- o pad no painel ----
+   Pad de COMPONENTE: a forma vem do footprint (muda no editor de footprint), mas clicar nele e o
+   jeito mais comum de "clicar no componente" -- entao a ficha traz o componente editavel em cima
+   (comp.x, comp.y, comp.rot, comp.layer), como o Altium deixa a partir do pad.
+   Pad SOLTO (o do Altium sem componente, ou o que a ferramenta Pad pos): tudo editavel, pelo
+   pad_edit do motor (ou a propria linha pad_add, se e do hub). Trocar o tipo (SMD / passante / NPTH)
+   nao e edicao no contrato: vira pad_del + pad_add no mesmo lugar. */
+const PAD_FORMAS_OPC = [['circle', 'Round'], ['rect', 'Rectangular'], ['roundrect', 'Rounded Rectangle'], ['oval', 'Oval'], ['octagon', 'Octagonal']].map(([v, rot]) => ({ v, rot }));
+const FURO_OPC = [['circle', 'Round'], ['rect', 'Rectangle'], ['oblong', 'Slot']].map(([v, rot]) => ({ v, rot }));
+const TIPO_PAD_OPC = [{ v:'smd', rot:'SMD (uma face)' }, { v:'th', rot:'Passante (metalizado)' }, { v:'npth', rot:'Furo NPTH (sem cobre)' }];
+const tipoDoPad = p => p.type === 'smd' ? 'smd' : (p.plated === false ? 'npth' : 'th');
+function camposDoPadRo(p){
+  const f = formaLado(p, ladoDaVista());
+  return [
+    { k:'layer', rot:'Layer', tipo:'ro', v:ehTH(p) ? 'Multi-Layer (passante)' : nomeDe(p.layer) },
+    { k:'net', rot:'Net', tipo:'ro', v:p.net || '—' },
+    { k:'shape', rot:'Shape', tipo:'ro', v:String(f.shape || 'rect') },
+    par('Size (X/Y)', { k:'w', rot:'X', tipo:'ro', v:fmtDist(f.w) + ' ' + unidade }, { k:'h', rot:'Y', tipo:'ro', v:fmtDist(f.h) + ' ' + unidade }),
+    { k:'drill', rot:'Hole Size', tipo:'ro', v:p.drill > 0 ? fmtDist(p.drill) + ' ' + unidade + (p.drillw > 0 ? ' × ' + fmtDist(p.drillw) : '') + (p.plated === false ? ' · NPTH' : '') : '—' },
+    par('Location (X/Y)', { k:'x', rot:'X', tipo:'ro', v:fmtDist(p.x) }, { k:'y', rot:'Y', tipo:'ro', v:fmtDist(p.y) }),
+    { k:'rot', rot:'Rotation', tipo:'ro', v:fmtNum(p.rot || 0, 3) + '°' },
+    { k:'sm', rot:'Solder Mask', tipo:'ro', v:(tampado(p, 'top') && tampado(p, 'bottom')) ? 'tampado' : '+' + fmtDist(expMascara(p)) + ' ' + unidade + (isNum(p.sm) ? '' : ' (regra)') },
+  ];
+}
+function fichaPadDoComp(a){
+  const m = a.comp, e = m.eff, ref = e.designator || m.src.ref, p = a.eb;
+  return { titulo:'Pad ' + ref + '.' + (p.name || ''), sub:'do componente ' + ref + ' — a forma do pad vem do footprint', campos:[
+    { sec:'Component ' + ref },
+    par('Location (X/Y)', { k:'comp.x', rot:'X', tipo:'dist', v:e.x }, { k:'comp.y', rot:'Y', tipo:'dist', v:e.y }),
+    { k:'comp.rot', rot:'Rotation', tipo:'ang', v:e.rot || 0 },
+    { k:'comp.layer', rot:'Layer', tipo:'enum', v:e.layer, opc:opcFaces() },
+    { k:'comp.comment', rot:'Comment', tipo:'texto', v:e.comment !== undefined ? e.comment : (m.src.comment || '') },
+    { botoes:[{ id:'selComp', rot:'Select Component' }, { id:'girar', rot:'Rotate 90°' }, { id:'virar', rot:'Flip' }] },
+    { botoes:[{ id:'editarFp', rot:'Edit Footprint…' }] },
+    { sec:'Pad ' + (p.name || '') },
+  ].concat(camposDoPadRo(p)) };
+}
+function fichaPadSolto(a){
+  const m = a.m, p = m.eff, t = tipoDoPad(p), furo = t !== 'smd';
+  return { titulo:(t === 'npth' ? 'Hole ' : 'Pad ') + (p.name || '') , sub:['pad livre', ESTADO(m)].filter(Boolean).join(' · '), campos:[
+    { k:'type', rot:'Type', tipo:'enum', v:t, opc:TIPO_PAD_OPC },
+    t === 'smd' ? { k:'layer', rot:'Layer', tipo:'camada', v:p.layer, opc:opcFaces() } : { k:'layer', rot:'Layer', tipo:'ro', v:'Multi-Layer' },
+    t === 'npth' ? { k:'net', rot:'Net', tipo:'ro', v:'— (furo sem cobre)' } : { k:'net', rot:'Net', tipo:'net', v:p.net || '', opc:opcNets(p.net) },
+    { k:'name', rot:'Designator', tipo:'texto', v:p.name || '' },
+    { sec:'Size and Shape' },
+    { k:'shape', rot:'Shape', tipo:'enum', v:p.shape || 'circle', opc:PAD_FORMAS_OPC },
+    par('Size (X/Y)', { k:'w', rot:'X', tipo:'dist', v:p.w }, { k:'h', rot:'Y', tipo:'dist', v:p.h }),
+    p.shape === 'roundrect' ? { k:'radius', rot:'Corner Radius', tipo:'dist', v:isNum(p.radius) ? p.radius : 0 } : null,
+    furo ? { sec:'Hole' } : null,
+    furo ? { k:'drill', rot:'Hole Size', tipo:'dist', v:p.drill, dica:'diâmetro do furo' } : null,
+    furo ? { k:'drillshape', rot:'Hole Shape', tipo:'enum', v:p.drillshape || 'circle', opc:FURO_OPC } : null,
+    furo && p.drillshape && p.drillshape !== 'circle' ? { k:'drillw', rot:'Hole Length', tipo:'dist', v:p.drillw } : null,
+    { sec:'Location' },
+    par('(X/Y)', { k:'x', rot:'X', tipo:'dist', v:p.x }, { k:'y', rot:'Y', tipo:'dist', v:p.y }),
+    { k:'rot', rot:'Rotation', tipo:'ang', v:p.rot || 0 },
+  ].filter(Boolean) };
+}
+function campoDoPad(a, k, v){
+  const m = a.m, p = m.eff, pos = x => isNum(x) && x > 0;
+  if (k === 'type') {
+    const novo = String(v), atual = tipoDoPad(p);
+    if (novo === atual || !['smd', 'th', 'npth'].includes(novo)) return false;
+    const op = { op:'pad_add', type:novo, x:r6(p.x), y:r6(p.y), w:r6(p.w), h:r6(p.h), shape:p.shape || 'circle', rot:normAng(p.rot || 0), note:'pad ' + novo + ' (tipo trocado no hub)' };
+    if (p.name) op.name = p.name;
+    if (novo === 'smd') op.layer = p.layer === 'Bottom' ? 'Bottom' : 'Top';
+    else op.drill = r6(pos(p.drill) ? p.drill : Math.min(p.w, p.h) / 2);
+    if (novo !== 'npth' && p.net) op.net = p.net;
+    if (!apagaItem(m)) return false;
+    CH.push(op); selDepois = [op];
+    return true;
+  }
+  if (k === 'layer') { if (tipoDoPad(p) !== 'smd' || (v !== 'Top' && v !== 'Bottom') || v === p.layer) return false; return editaItem(m, { layer:v }); }
+  if (k === 'net') return editaItem(m, { net:String(v || '') });
+  if (k === 'name') return editaItem(m, { name:String(v || '').replace(/":/g, '" :') });
+  if (k === 'shape') return PAD_FORMAS_OPC.some(o => o.v === v) ? editaItem(m, { shape:v }) : false;
+  if (k === 'drillshape') {
+    if (!FURO_OPC.some(o => o.v === v)) return false;
+    const patch = { drillshape:v };
+    if (v !== 'circle' && !pos(p.drillw)) patch.drillw = r6(Math.max(p.drill * 2, p.drill + 0.5));
+    return editaItem(m, patch);
+  }
+  if (!isNum(v)) return false;
+  if ((k === 'w' || k === 'h' || k === 'drill' || k === 'drillw') && !pos(v)) { HubDialog.toast('o valor tem de ser maior que zero', 'warn'); return false; }
+  if (k === 'radius' && v < 0) return false;
+  if (k === 'drill' && tipoDoPad(p) === 'th' && v >= Math.min(p.w, p.h)) HubDialog.toast('furo >= cobre do pad: o pad fica sem anel', 'warn');
+  return editaItem(m, { [k]:(k === 'rot' || k === 'holerot') ? normAng(v) : r6(v) });
+}
+/* ---- circulo -> furo de fixacao ----
+   Um circulo desenhado (arco de 360 graus em qualquer camada: serigrafia, mecanica, cobre) ou uma
+   regiao redonda (o circulo preenchido) vira o furo de fixacao do hub: um Board Cutout redondo do
+   mesmo diametro (region_add cutout, como a ferramenta Furo), e o desenho sai. O diametro e o do
+   circulo como esta desenhado (o centro da linha); o painel do furo ajusta depois. */
+function circuloDePts(pts){
+  if (!Array.isArray(pts) || pts.length < 12) return null;
+  let cx = 0, cy = 0;
+  for (const p of pts) { cx += p[0]; cy += p[1]; }
+  cx /= pts.length; cy /= pts.length;
+  const ds = pts.map(p => Math.hypot(p[0] - cx, p[1] - cy)), r = ds.reduce((s, d) => s + d, 0) / ds.length;
+  if (!(r > 0) || ds.some(d => Math.abs(d - r) > Math.max(0.002, r * 0.02))) return null;
+  return { cx, cy, r };
+}
+function circuloDoAlvo(a){
+  if (!a || !a.m || a.m.deleted) return null;
+  if (a.t === 'arc' && arcoCheio(a.m.eff) && !(a.m.src && a.m.src.owner)) return { cx:a.m.eff.cx, cy:a.m.eff.cy, r:a.m.eff.r };
+  if (a.t === 'region') return circuloDePts(a.m.eff.points);
+  return null;
+}
+function furosDosCirculos(alvos){
+  if (!garanteEdicao()) return;
+  const novos = [];
+  for (const a of alvos) {
+    const c = circuloDoAlvo(a);
+    if (!c || !apagaItem(a.m)) continue;
+    const op = { op:'region_add', cutout:true, pts:circuloPts(c.cx, c.cy, c.r, 36), note:'furo de fixação ' + fmtNum(2 * c.r, 2) + ' mm (de um círculo)' };
+    CH.push(op); novos.push(op);
+  }
+  if (!novos.length) return;
+  selDepois = novos;
+  if (tool !== 'select') setTool('select');
+  commit();
+  HubDialog.toast(novos.length + (novos.length === 1 ? ' círculo virou furo de fixação' : ' círculos viraram furos de fixação') + ' — o diâmetro se ajusta no painel', 'ok');
+}
 function fichaDe(a){
   switch (a.t) {
     case 'comp': {
@@ -4576,8 +4712,10 @@ function fichaDe(a){
       ] };
     }
     case 'pad': {
+      if (a.comp) return fichaPadDoComp(a);
+      if (a.m && !a.m.deleted) return fichaPadSolto(a);
       const p = a.eb, f = formaLado(p, ladoDaVista());
-      return { titulo:'Pad ' + (a.comp ? (a.comp.eff.designator || a.comp.src.ref) + '.' : '') + (p.name || ''), sub:a.comp ? 'do componente — arraste o pad para mover o componente' : 'pad livre (pad_add ainda não existe)', campos:[
+      return { titulo:'Pad ' + (p.name || ''), sub:'pad livre', campos:[
         { k:'layer', rot:'Layer', tipo:'ro', v:ehTH(p) ? 'Multi-Layer (passante)' : nomeDe(p.layer) },
         { k:'net', rot:'Net', tipo:'ro', v:p.net || '—' },
         { k:'shape', rot:'Shape', tipo:'ro', v:String(f.shape || 'rect') },
@@ -4600,15 +4738,18 @@ function fichaDe(a){
       ] };
     }
     case 'arc': {
-      const m = a.m, e = m.eff, cu = cobre(e.layer);
-      return { titulo:'Arc ' + (m.added ? '(novo)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
+      const m = a.m, e = m.eff, cu = cobre(e.layer), cheio = arcoCheio(e);
+      return { titulo:(cheio ? 'Circle ' : 'Arc ') + (m.added ? '(novo)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
         { k:'layer', rot:'Layer', tipo:'camada', v:e.layer, opc:opcCamadas() },
-        cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
+        !cu ? { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' }
+          : m.added ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) }
+          : { k:'net', rot:'Net', tipo:'ro', v:(e.net || '—'), dica:'o arc_edit do Altium não troca a net de um arco que já existe (a do arco fica)' },
         par('Center (X/Y)', { k:'cx', rot:'X', tipo:'dist', v:e.cx }, { k:'cy', rot:'Y', tipo:'dist', v:e.cy }),
         { k:'r', rot:'Radius', tipo:'dist', v:e.r },
-        par('Angles', { k:'sa', rot:'Start', tipo:'ang', v:e.sa }, { k:'ea', rot:'End', tipo:'ang', v:e.ea }),
+        cheio ? { k:'diam', rot:'Diameter', tipo:'dist', v:2 * e.r } : par('Angles', { k:'sa', rot:'Start', tipo:'ang', v:e.sa }, { k:'ea', rot:'End', tipo:'ang', v:e.ea }),
         { k:'w', rot:'Width', tipo:'dist', v:e.w },
-      ] };
+        cheio ? { botoes:[{ id:'furoDoCirculo', rot:'Virar furo de fixação' }] } : null,
+      ].filter(Boolean) };
     }
     case 'via': {
       const m = a.m, e = m.eff;
@@ -4650,7 +4791,12 @@ function fichaDe(a){
     }
     case 'recorte': {
       const k = recortesDaTela().find(x => x.o === a.eb), bb = k ? bbPts(k.pts) : null;
-      return { titulo:'Board Cutout', sub:a.m ? 'furo de fixação do hub (region_add cutout) — Delete tira' : 'Board Cutout do Altium', campos:[
+      const circ = a.m ? circuloDePts((a.m.eff.points || []).map(p => [p[0], p[1]])) : null;
+      if (circ) return { titulo:'Furo de fixação', sub:'Board Cutout redondo do hub — Delete tira', campos:[
+        { k:'diam', rot:'Diameter', tipo:'dist', v:2 * circ.r, dica:'o furo da fábrica (Gerber, laser, 3D)' },
+        par('Center (X/Y)', { k:'cx', rot:'X', tipo:'dist', v:circ.cx }, { k:'cy', rot:'Y', tipo:'dist', v:circ.cy }),
+      ] };
+      return { titulo:'Board Cutout', sub:a.m ? 'recorte do hub (region_add cutout) — Delete tira' : 'Board Cutout do Altium (mude no Altium)', campos:[
         { k:'tam', rot:'Size', tipo:'ro', v:bb ? fmtDist(bb[2] - bb[0]) + ' × ' + fmtDist(bb[3] - bb[1]) + ' ' + unidade : '—' },
         { k:'c', rot:'Center', tipo:'ro', v:bb ? fmtDist((bb[0] + bb[2]) / 2) + ' ; ' + fmtDist((bb[1] + bb[3]) / 2) : '—' },
       ] };
@@ -4749,7 +4895,7 @@ function fichaFerramenta(){
         { nota:'Fonte de traço (stroke). Na face de baixo (' + (ladoBaixo(cur) ? 'como agora' : 'Bottom, Bottom Overlay…') + ') o texto nasce espelhado.' });
       break;
     case 'furo':
-      F.campos.push({ k:'tool.furo', rot:'Diâmetro', tipo:'dist', v:CFG.furo }, { nota:'Board Cutout redondo (region_add com cutout:true): o furo de fixação da casa.' });
+      F.campos.push({ k:'tool.furo', rot:'Diâmetro', tipo:'dist', v:CFG.furo }, { nota:'Clique num lugar vazio: um furo novo deste diâmetro. Clique num CÍRCULO já desenhado (serigrafia, mecânica, cobre): ele vira o furo de fixação, com o diâmetro dele. Board Cutout redondo (region_add com cutout:true), o furo de fixação da casa.' });
       break;
     case 'contorno':
       F.campos.push({ nota:'Um clique por vértice; duplo clique, Enter ou botão direito fecha. Substitui o contorno inteiro (outline_set), só com retas — pergunta antes.' });
@@ -4798,7 +4944,18 @@ function configTool(k, v){
 }
 function campoNoAlvo(a, k, v){
   const pos = x => isNum(x) && x > 0;
+  /* o pad de componente mostra o componente em cima ("comp.x"...): a edicao vai para ele */
+  if (a.t === 'pad' && a.comp && String(k).indexOf('comp.') === 0) { const c = ALVO_COMP.get(a.comp); return c ? campoNoAlvo(c, String(k).slice(5), v) : false; }
   switch (a.t) {
+    case 'pad': return a.m ? campoDoPad(a, k, v) : false;
+    case 'recorte': {
+      if (!a.m) return false;
+      const op = opDe(a.m), c = circuloDePts((a.m.eff.points || []).map(p => [p[0], p[1]]));
+      if (!op || !c || !isNum(v)) return false;
+      if (k === 'diam') { if (!pos(v)) { HubDialog.toast('diâmetro tem de ser maior que zero', 'warn'); return false; } op.pts = circuloPts(c.cx, c.cy, v / 2, 36); op.note = 'furo de fixação ' + fmtNum(v, 2) + ' mm'; return true; }
+      if (k === 'cx' || k === 'cy') { op.pts = circuloPts(k === 'cx' ? v : c.cx, k === 'cy' ? v : c.cy, c.r, 36); return true; }
+      return false;
+    }
     case 'comp': {
       const g = geoDe(a);
       if (k === 'layer') { if ((v !== 'Top' && v !== 'Bottom') || v === g.layer) return false; moveComp(a.m, viraGeo(g, [g.x, g.y])); return true; }
@@ -4808,6 +4965,8 @@ function campoNoAlvo(a, k, v){
     }
     case 'track': case 'arc': case 'fill': {
       const e = a.m.eff;
+      if (a.t === 'arc' && k === 'diam') { if (!pos(v)) { HubDialog.toast('diâmetro tem de ser maior que zero', 'warn'); return false; } return editaItem(a.m, { r:r6(v / 2) }); }
+      if (a.t === 'arc' && k === 'net' && !a.m.added) return false;
       if (k === 'layer') { if (!LBYK[v] || v === 'Multi' || v === e.layer) return false; return editaItem(a.m, { layer:v }); }
       if (k === 'net') { if (!cobre(e.layer)) return false; return editaItem(a.m, { net:String(v || '') }); }
       if ((k === 'w' || k === 'r') && !pos(v)) { HubDialog.toast((k === 'w' ? 'largura' : 'raio') + ' tem de ser maior que zero', 'warn'); return false; }
@@ -4895,6 +5054,7 @@ function acaoPainel(id){
     case 'apagar': if (garanteEdicao()) apagaSelecao(); return;
     case 'enquadrar': enquadraAlvos(SEL); return;
     case 'enquadrar_placa': enquadra(); return;
+    case 'selComp': { const cs = compsDaSel(); if (cs.length) { selSo(cs.map(m => ALVO_COMP.get(m)).filter(Boolean)); aoMudarSel(); pede(); } return; }
   }
   fazAcao(id);
 }
@@ -4956,6 +5116,19 @@ function chLabel(ch){
     case 'region_add': return ch.cutout ? 'novo recorte (' + (Array.isArray(ch.pts) ? ch.pts.length : '?') + ' vértices)' : 'nova região ' + ch.layer;
     case 'region_del': return 'remover região ' + ch.id;
     case 'outline_set': return 'novo contorno da placa (' + (Array.isArray(ch.pts) ? ch.pts.length : '?') + ' vértices)';
+    case 'pad_add': return 'novo pad ' + (ch.type === 'npth' ? 'NPTH ' : ch.type === 'smd' ? 'SMD ' : '') + (ch.name || '') + ' (' + f(ch.x) + ', ' + f(ch.y) + ')';
+    case 'pad_edit': return 'editar pad ' + ch.id;
+    case 'pad_del': return 'remover pad ' + ch.id;
+    case 'pad_net': return 'net do pad ' + ch.ref + '.' + ch.pad + ' → ' + (ch.net || '(sem net)');
+    case 'comp_add': return 'novo componente ' + ch.ref + ' (' + ch.footprint + ')';
+    case 'comp_del': return 'remover componente ' + ch.ref;
+    case 'comment_move': return 'comment ' + ch.ref + ' → (' + f(ch.x) + ', ' + f(ch.y) + ')';
+    case 'poly_add': return 'novo polígono ' + ch.layer + (ch.net ? ' ' + ch.net : '');
+    case 'poly_edit': return 'editar polígono ' + ch.id;
+    case 'poly_del': return 'remover polígono ' + ch.id;
+    case 'net_add': return 'nova net ' + ch.net;
+    case 'net_del': return 'remover net ' + ch.net;
+    case 'net_rename': return 'renomear net ' + ch.orig_net + ' → ' + ch.net;
     default: return '?? ' + (ch && ch.op);
   }
 }
@@ -5433,6 +5606,10 @@ window.__hubPcb = Object.assign(Object.create(V), {
   rota:() => ROTA ? ROTA.res : null,
   conflito:() => CFG.conflito,
   setConflito(v){ const ok = setConflito(v); pintaStatus(); if (painel) painel.atualiza(); pede(); return ok; },
+  /* o smoke do painel de propriedades (pad, furo, cores): os alvos e as fichas sem clicar na tela */
+  alvos:() => [...PORCHAVE.values()], selecionar(lista){ selSo(lista); aoMudarSel(); }, fichaDe, arcoCheio, circuloDePts,
+  changes:() => CH, fazAcao, destravar(){ editOn = true; pintaBarra(); },
+  valida:() => HC.applyPcbChanges(B, CH).changeItems.map(i => ({ op:i.ch.op, status:i.status, msg:i.msg || '' })),
 });
 
 })();

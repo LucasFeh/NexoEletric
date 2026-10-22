@@ -60,6 +60,16 @@ const CSS = `
 .pp .pr-inp::placeholder{color:var(--fg-dim); font-style:italic;}
 .pp select.pr-inp{cursor:pointer;}
 .pp select.pr-inp option{background:var(--panel); color:var(--fg);}
+.pp .pr-cor{display:flex; align-items:center; gap:6px; text-align:left; cursor:pointer; font:inherit;}
+.pp .pr-cor .rt{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.pp .pr-cor .sw, .pr-lista .sw{flex:none; width:12px; height:12px; border-radius:2px; box-shadow:0 0 0 1px var(--line, rgba(255,255,255,.2));}
+.pp .pr-cor .cv{flex:none; font-size:9px; color:var(--fg-dim);}
+.pr-lista{position:fixed; z-index:2147480000; max-height:340px; overflow:auto; padding:3px 0; border-radius:6px;
+  background:var(--panel, #1a1a1d); color:var(--fg, #ddd); border:1px solid var(--border, #333); box-shadow:0 10px 28px rgba(0,0,0,.55);
+  font:12px var(--font, system-ui, sans-serif);}
+.pr-lista .op{display:flex; align-items:center; gap:7px; padding:4px 10px 4px 6px; cursor:pointer; white-space:nowrap;}
+.pr-lista .op .ck{flex:none; width:12px; text-align:center; color:var(--accent, #ff8a1f); font-size:11px;}
+.pr-lista .op.at, .pr-lista .op:hover{background:var(--panel2, #26262a);}
 .pp .pr-ro{color:var(--fg-dim); font-size:11px; padding:2px 4px; word-break:break-word;}
 .pp .pr-par{display:grid; grid-template-columns:86px minmax(0,1fr) minmax(0,1fr); gap:2px 8px; align-items:center; margin:2px 0; font-size:12px;}
 .pp .pr-par > .k{color:var(--fg-dim); font-size:11px;}
@@ -311,9 +321,69 @@ function instala(aside, V) {
   }
   /* um campo: o valor mostrado na unidade da tela; grava no Enter ou ao sair do campo, e so se
      o texto mudou (sair de um campo intocado nao pode escrever 0,00002 mm de arredondamento) */
+  /* a lista com cor (camada, face): o <select> nativo nao pinta a opcao, e escolher a camada pela
+     cor e o que o Altium ensina. Botao com a amostra + nome; a lista abre por cima de tudo, com
+     setas/Enter/Esc e a primeira letra pulando para a camada. */
+  let listaAberta = null;
+  function fechaLista() { if (listaAberta) { listaAberta.remove(); listaAberta = null; } }
+  function listaCor(c, wrap) {
+    const atual = (c.opc || []).find(o => !c.misto && o.v === c.v) || null;
+    const b = el('button', 'pr-inp pr-cor');
+    b.type = 'button'; b.dataset.k = c.k;
+    if (c.dica) b.title = c.dica;
+    const sw = el('span', 'sw'); sw.style.background = (atual && atual.cor) || 'transparent';
+    b.append(sw, el('span', 'rt', atual ? atual.rot : (c.misto ? 'vários' : '—')), el('span', 'cv', '▾'));
+    const abre = () => {
+      fechaLista();
+      const L = el('div', 'pr-lista');
+      L.setAttribute('role', 'listbox');
+      const ops = [];
+      let idx = Math.max(0, (c.opc || []).findIndex(o => atual && o.v === atual.v));
+      const marca = i => { idx = Math.max(0, Math.min(ops.length - 1, i)); ops.forEach((d, j) => d.classList.toggle('at', j === idx)); if (ops[idx]) ops[idx].scrollIntoView({ block:'nearest' }); };
+      const escolhe = i => { const o = c.opc[i]; fechaLista(); b.focus(); if (o && (!atual || o.v !== atual.v)) V.editar(c.k, o.v); };
+      (c.opc || []).forEach((o, i) => {
+        const d = el('div', 'op'); d.setAttribute('role', 'option');
+        const s = el('span', 'sw'); s.style.background = o.cor || 'transparent';
+        d.append(el('span', 'ck', atual && o.v === atual.v ? '✓' : ''), s, el('span', null, o.rot));
+        d.addEventListener('mousedown', e => e.preventDefault());
+        d.addEventListener('click', () => escolhe(i));
+        d.addEventListener('mouseenter', () => marca(i));
+        ops.push(d); L.append(d);
+      });
+      document.body.append(L);
+      const R = b.getBoundingClientRect(), H = L.offsetHeight;
+      L.style.minWidth = Math.max(R.width, 180) + 'px';
+      L.style.left = Math.max(4, Math.min(window.innerWidth - L.offsetWidth - 4, R.left)) + 'px';
+      L.style.top = (R.bottom + H + 4 <= window.innerHeight ? R.bottom + 2 : Math.max(4, R.top - H - 2)) + 'px';
+      listaAberta = L;
+      marca(idx);
+      L._tecla = e => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); marca(idx + 1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); marca(idx - 1); }
+        else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); escolhe(idx); }
+        else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); fechaLista(); b.focus(); }
+        else if (e.key.length === 1) {
+          const t = e.key.toLowerCase(), n = c.opc.length;
+          for (let k = 1; k <= n; k++) { const j = (idx + k) % n; if (String(c.opc[j].rot).replace(/^\[\d+\]\s*/, '').toLowerCase().startsWith(t)) { marca(j); break; } }
+        }
+      };
+    };
+    b.addEventListener('click', e => { e.stopPropagation(); if (listaAberta) fechaLista(); else abre(); });
+    b.addEventListener('keydown', e => {
+      if (listaAberta && listaAberta._tecla) { e.stopPropagation(); listaAberta._tecla(e); return; }
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); abre(); }
+      else if (e.key === 'Escape') { e.stopPropagation(); b.blur(); }
+    });
+    b.addEventListener('blur', () => setTimeout(() => { if (listaAberta && document.activeElement !== b) fechaLista(); }, 150));
+    wrap.append(b);
+    return wrap;
+  }
+  document.addEventListener('mousedown', e => { if (listaAberta && !listaAberta.contains(e.target)) fechaLista(); }, true);
+  window.addEventListener('resize', fechaLista);
   function controle(c, curto) {
     const wrap = el('div', 'pr-campo');
     if (c.tipo === 'ro') { wrap.append(el('span', 'pr-ro', c.v == null ? '—' : String(c.v))); return wrap; }
+    if ((c.tipo === 'camada' || c.tipo === 'enum') && (c.opc || []).some(o => o.cor)) return listaCor(c, wrap);
     if (c.tipo === 'camada' || c.tipo === 'enum' || c.tipo === 'net') {
       const s = el('select', 'pr-inp');
       s.dataset.k = c.k;

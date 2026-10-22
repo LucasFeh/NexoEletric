@@ -159,6 +159,7 @@ const CSS = `
 .apm .api{display:grid; grid-template-columns:18px minmax(0,1fr) auto 12px; align-items:center; gap:6px; padding:3px 6px 3px 4px;
   border-radius:3px; white-space:nowrap; cursor:default; line-height:18px;}
 .apm .api .ck{font-size:11px; text-align:center; color:var(--hi);}
+.apm .api .ck.sw{width:12px; height:12px; border-radius:2px; box-shadow:0 0 0 1px var(--line, rgba(255,255,255,.25)); font-size:9px; line-height:12px; color:#fff; text-shadow:0 0 2px #000; justify-self:center;}
 .apm .api .rt{overflow:hidden; text-overflow:ellipsis;}
 .apm .api .tk{font:11px var(--mono); color:var(--fg-dim, var(--text-2)); padding-left:18px;}
 .apm .api .sb{font-size:9px; color:var(--fg-dim, var(--text-2)); text-align:right;}
@@ -384,7 +385,10 @@ function instala(V) {
       if (it === '-') { m.append(el('div', 'aps')); continue; }
       const d = el('div', 'api' + (it.off ? ' off' : ''));
       d.setAttribute('role', 'menuitem');
-      d.append(el('span', 'ck', it.check ? '✓' : ''));
+      /* a camada no menu: a amostra da cor no lugar do ✓ (com o ✓ por cima quando e a atual) */
+      const ck = el('span', 'ck' + (it.cor ? ' sw' : ''), it.check ? '✓' : '');
+      if (it.cor) ck.style.background = it.cor;
+      d.append(ck);
       const r = el('span', 'rt'); r.append(rotuloComLetra(it.rot, it.letra)); d.append(r);
       d.append(el('span', 'tk', it.filhos ? '' : (it.tecla || '')));
       d.append(el('span', 'sb', it.filhos ? '▶' : ''));

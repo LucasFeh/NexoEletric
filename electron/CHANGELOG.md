@@ -20,6 +20,26 @@ app se chamava EletricHUB.
   o plano só dos pads), `clearanceNet` e o objeto `conexao` ({tipo, condutores, largura, gap, angulo}), que o
   despejo do hub já entendia mas o changes.js descartava.
 
+## 1.17.0 — 2026-10-22
+
+PCB mais perto do Properties do Altium:
+
+- **Clicar no componente edita o componente.** Clicar num pad do componente (o jeito mais comum de "clicar no
+  componente") agora mostra o componente editável em cima: posição X/Y, rotação, lado (Top/Bottom) e comentário, com
+  Selecionar componente, Girar 90°, Virar e Editar footprint. Os dados do pad continuam embaixo.
+- **Pad solto editável inteiro:** tipo (SMD, passante, furo NPTH), lado, net, designador, forma, tamanho X/Y, raio
+  do canto, furo (diâmetro, forma e comprimento do oblongo), posição e rotação — e agora ele anda no arrasto e sai
+  com Delete. Vale para o pad posto pela ferramenta Pad e para o pad solto do Altium.
+- **Círculo vira furo de fixação.** Selecione um círculo desenhado (serigrafia, mecânica, cobre) e clique na
+  ferramenta **Furo**, ou, com a ferramenta Furo na mão, clique no círculo: ele vira o furo de fixação (Board Cutout
+  redondo) do mesmo diâmetro. Também no botão "Virar furo de fixação" do painel e no clique direito.
+- **Furo de fixação editável:** diâmetro e centro no painel. O círculo mostra o diâmetro também.
+- **As cores das camadas no seletor de camada** (trilha, retângulo, círculo, texto, região, ferramentas e o lado do
+  componente): a lista mostra a amostra da cor de cada camada, e o menu "Camada" do clique direito também.
+- A net de um arco que já existia não aparece mais como editável (o ApplyChanges não a troca; antes a mudança se
+  perdia calada); no arco novo continua editável. A lista de Mudanças dá nome a todas as ops (pad, polígono,
+  componente, net…), sem os "??".
+
 ## 1.16.0 — 2026-10-22
 
 - **A IA no topo do app.** Um indicador **IA** no canto de cima (ao lado do chat, na fileira das abas), como no
