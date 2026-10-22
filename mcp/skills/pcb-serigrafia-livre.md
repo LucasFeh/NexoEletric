@@ -1,0 +1,33 @@
+---
+nome: pcb-serigrafia-livre
+titulo: Serigrafia (overlay) sem passar por cima de nada
+descricao: Regra da casa — texto e desenho de overlay nunca ficam por cima de pad, via, furo, trilha, outra serigrafia ou da borda da placa. Use ao escrever textos/legendas na TopOverlay/BottomOverlay, mover designadores ou revisar uma placa.
+---
+
+# Serigrafia sem passar por cima de nada (regra da casa)
+
+**Por quê:** tinta de serigrafia em cima de pad/via atrapalha a solda; em cima de trilha ou de outra legenda
+fica ilegível e confunde a montagem e a manutenção.
+
+## A regra
+
+Nenhum objeto de overlay (texto, designador, linha, arco, contorno de componente) pode encostar em:
+
+1. **Pad e via** (cobre exposto): folga ≥ expansão da máscara + 0,254 mm.
+2. **Furo / recorte** (inclusive furo de parafuso e o quadrado isolado em volta dele): folga ≥ 0,254 mm.
+3. **Trilha, fill e região de cobre do mesmo lado** (Top para TopOverlay, Bottom para BottomOverlay):
+   folga ≥ 0,1 mm — o texto vai na faixa livre entre as trilhas, não em cima delas.
+4. **Outra serigrafia** (outro texto, contorno de outro componente): folga ≥ 0,254 mm.
+5. **Borda da placa:** ≥ 0,3 mm para dentro.
+
+Só o plano de terra despejado pode ficar embaixo do texto (não há como fugir dele).
+Altura mínima 1,0 mm e traço ≥ 0,15 mm para sair legível.
+
+## Como fazer no NexoEletric (MCP)
+
+- Escreva com `pcb_aplicar` (`text_add` com x,y = CENTRO do texto, `h`, `rot`, `layer:"TopOverlay"`).
+- Antes de escolher a posição, olhe o que tem em volta: `pcb_consultar {tipo:"trilhas", caixa:{...}}` e
+  `{tipo:"pads"}` na região; prefira colunas sem trilha (ex.: coluna de pino de GND, ponta da fileira).
+- **Conferir sempre:** `regras_casa_verificar {projeto}` — a regra "serigrafia" lista cada texto que encosta em
+  algo, com o objeto e a posição; mova (`pcb_mudanca_editar` no `text_add`, ou `pcb_editar` no texto do board)
+  até zerar. `drc_rodar` cobre silk×pad e silk×silk; o verificador da casa cobre também trilha e furo.

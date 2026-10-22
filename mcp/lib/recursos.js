@@ -6,6 +6,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const skills = require('./skills.js');
 
 const DOCS = [
   { uri: 'eletrichub://guia/ai-guide', arq: 'AI-GUIDE.md', nome: 'AI-GUIDE', descricao: 'Contrato da IA: schematic.js (Parte A), changes.js (Parte B), annotations.js (Parte C)' },
@@ -39,6 +40,8 @@ function recursos(ctx) {
         .map(d => ({ uri: d.uri, name: d.nome, title: d.nome, description: d.descricao, mimeType: 'text/markdown' }));
       r.push({ uri: 'eletrichub://formato/changes', name: 'formato-changes', title: 'Ops do changes.js', description: 'Campos obrigatórios por op (do hub-core)', mimeType: 'text/markdown' });
       r.push({ uri: 'eletrichub://formato/camadas', name: 'camadas', title: 'Camadas PCB', description: 'HubCore.PCB_LAYERS: as chaves de camada aceitas', mimeType: 'application/json' });
+      for (const s of skills.listar())
+        r.push({ uri: `eletrichub://skill/${s.nome}`, name: `skill-${s.nome}`, title: s.titulo, description: 'Regra da casa: ' + s.descricao, mimeType: 'text/markdown' });
       for (const p of ctx.listaProjetos())
         for (const f of ['schematic.js', 'changes.js', 'annotations.js'])
           if (fs.existsSync(path.join(ctx.dirProjetos(), p, f)))
@@ -58,6 +61,8 @@ function recursos(ctx) {
       }
       if (uri === 'eletrichub://formato/changes') return { uri, mimeType: 'text/markdown', text: formatoChanges(ctx) };
       if (uri === 'eletrichub://formato/camadas') return { uri, mimeType: 'application/json', text: camadas(ctx) };
+      const sk = /^eletrichub:\/\/skill\/([^/]+)$/.exec(uri || '');
+      if (sk) { const s = skills.ler(decodeURIComponent(sk[1])); return s ? { uri, mimeType: 'text/markdown', text: s.texto } : null; }
       const m = /^eletrichub:\/\/projeto\/([^/]+)\/([^/]+)$/.exec(uri || '');
       if (m) {
         const p = ctx.projeto(decodeURIComponent(m[1]));
@@ -75,7 +80,7 @@ function recursos(ctx) {
 const PROMPTS = [
   { name: 'fluxo_pcb', title: 'Trabalhar na PCB', description: 'Roteiro para posicionar/rotear uma placa pelo changes.js',
     arguments: [{ name: 'projeto', description: 'nome da pasta em Projects/', required: true }],
-    texto: a => `Projeto "${a.projeto}". 1) sinal_listar e resolva os abertos primeiro. 2) projeto_resumo e pcb_resumo. 3) nets_ratsnest para ver o que falta ligar. 4) pcb_mover / pcb_trilha / pcb_rotear / pcb_via / pcb_apagar — confira "erros" em cada resposta. 5) drc_rodar (se o módulo existir) e pcb_render para ver. 6) gerber_gerar quando estiver pronta. Escreva "note" em cada mudança.` },
+    texto: a => `Projeto "${a.projeto}". 1) sinal_listar e resolva os abertos primeiro. 2) projeto_resumo e pcb_resumo. 3) nets_ratsnest para ver o que falta ligar. 4) pcb_mover / pcb_trilha / pcb_rotear / pcb_via / pcb_apagar — confira "erros" em cada resposta. 5) drc_rodar (se o módulo existir) e pcb_render para ver. 6) Regras da casa: skills_listar e skill_ler de cada uma (parafuso isolado, plano afastado dos pads, serigrafia livre) e regras_casa_verificar até zerar. 7) gerber_gerar quando estiver pronta. Escreva "note" em cada mudança.` },
   { name: 'fluxo_esquema', title: 'Montar um esquema', description: 'Roteiro para criar/editar o schematic.js',
     arguments: [{ name: 'projeto', description: 'nome do projeto (novo ou existente)', required: true }, { name: 'circuito', description: 'o que o circuito faz', required: false }],
     texto: a => `Projeto "${a.projeto}"${a.circuito ? ' — ' + a.circuito : ''}. Se não existe: projeto_criar. Para cada peça: sch_buscar_simbolo → sch_simbolo (pinos, footprint) → sch_adicionar (comp com footprint). Ligue com sch_ligar ("R1.2" → "C1.1") e nomeie com netlabel/power. Termine com sch_validar e sch_nets.` },
@@ -83,11 +88,18 @@ const PROMPTS = [
     arguments: [{ name: 'projeto', required: true, description: 'projeto' }],
     texto: a => `Projeto "${a.projeto}": sinal_listar {status:"open"}. Para cada um, corrija (pcb_* com note "nX: ..."), depois sinal_responder {id, reply}. Nunca apague nem renumere sinalizadores.` },
 ];
+/* cada skill da casa vira um prompt skill_<nome> (o texto inteiro da skill, para o cliente anexar) */
+function promptsDasSkills() {
+  return skills.listar().map(s => ({ name: 'skill_' + s.nome.replace(/[^a-z0-9_]/gi, '_'), title: 'Regra da casa: ' + s.titulo, description: s.descricao,
+    arguments: [{ name: 'projeto', description: 'projeto em que a regra vai ser aplicada (opcional)', required: false }],
+    texto: a => (a.projeto ? `Projeto "${a.projeto}". Aplique esta regra da casa e confira com regras_casa_verificar.\n\n` : '') + s.texto }));
+}
 function prompts() {
+  const todos = () => PROMPTS.concat(promptsDasSkills());
   return {
-    listar: () => PROMPTS.map(p => ({ name: p.name, title: p.title, description: p.description, arguments: p.arguments })),
+    listar: () => todos().map(p => ({ name: p.name, title: p.title, description: p.description, arguments: p.arguments })),
     obter: (nome, a) => {
-      const p = PROMPTS.find(x => x.name === nome);
+      const p = todos().find(x => x.name === nome);
       if (!p) return null;
       return { description: p.description, messages: [{ role: 'user', content: { type: 'text', text: p.texto(a || {}) } }] };
     },

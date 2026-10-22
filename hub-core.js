@@ -604,6 +604,40 @@ function montaPoly(ch, base, ctx){
     if (!isNum(ch[k]) || ch[k] < 0) return erro(`${k} deve ser número >= 0`);
     p[k] = ch[k];
   }
+  /* conexao como objeto (o formato do hub-pcbpour.js: {tipo, condutores, largura, gap, angulo}); os
+     con_* abaixo continuam valendo e mandam se vierem juntos */
+  if (ch.conexao !== undefined) {
+    const o = ch.conexao;
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return erro('conexao deve ser {tipo, condutores, largura, gap, angulo}');
+    if (o.tipo !== undefined) { if (!['relief', 'direct', 'none'].includes(o.tipo)) return erro('conexao.tipo deve ser relief, direct ou none'); c.tipo = o.tipo; }
+    if (o.condutores !== undefined) { if (o.condutores !== 2 && o.condutores !== 4) return erro('conexao.condutores deve ser 2 ou 4'); c.condutores = o.condutores; }
+    if (o.largura !== undefined) { if (!(isNum(o.largura) && o.largura > 0)) return erro('conexao.largura deve ser > 0'); c.largura = o.largura; }
+    if (o.gap !== undefined) { if (!(isNum(o.gap) && o.gap > 0)) return erro('conexao.gap deve ser > 0'); c.gap = o.gap; }
+    if (o.angulo !== undefined) { if (o.angulo !== 45 && o.angulo !== 90) return erro('conexao.angulo deve ser 45 ou 90'); c.angulo = o.angulo; }
+  }
+  /* folga por tipo de objeto e por net (a matriz OBJECTCLEARANCES e a regra por net do Altium) --
+     ex.: {th:1, smd:1} afasta o plano dos pads sem mexer na folga das trilhas. null tira. */
+  const TIPOS_FOLGA = ['track', 'arc', 'smd', 'th', 'via', 'fill', 'region', 'text', 'poly'];
+  const folgas = (o, nome, chaves) => {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return `${nome} deve ser um objeto {tipo: mm}`;
+    for (const [k, v] of Object.entries(o)) {
+      if (chaves && !chaves.includes(k)) return `${nome}: tipo "${k}" desconhecido (${chaves.join(', ')})`;
+      if (!isNum(v) || v < 0) return `${nome}.${k} deve ser número >= 0`;
+    }
+    return null;
+  };
+  if (ch.clearanceTipo !== undefined) {
+    if (ch.clearanceTipo === null) delete p.clearanceTipo;
+    else { const e = folgas(ch.clearanceTipo, 'clearanceTipo', TIPOS_FOLGA); if (e) return erro(e); p.clearanceTipo = Object.assign({}, ch.clearanceTipo); }
+  }
+  if (ch.clearanceNet !== undefined) {
+    if (ch.clearanceNet === null) delete p.clearanceNet;
+    else {
+      if (!ch.clearanceNet || typeof ch.clearanceNet !== 'object' || Array.isArray(ch.clearanceNet)) return erro('clearanceNet deve ser {net: {tipo: mm, "*": mm}}');
+      for (const [n, o] of Object.entries(ch.clearanceNet)) { const e = folgas(o, 'clearanceNet[' + n + ']', TIPOS_FOLGA.concat('*')); if (e) return erro(e); }
+      p.clearanceNet = JSON.parse(JSON.stringify(ch.clearanceNet));
+    }
+  }
   if (ch.con_tipo !== undefined) { if (!['relief', 'direct', 'none'].includes(ch.con_tipo)) return erro('con_tipo deve ser relief, direct ou none'); c.tipo = ch.con_tipo; }
   if (isNum(ch.con_condutores)) { if (ch.con_condutores !== 2 && ch.con_condutores !== 4) return erro('con_condutores deve ser 2 ou 4'); c.condutores = ch.con_condutores; }
   if (isNum(ch.con_largura)) { if (!(ch.con_largura > 0)) return erro('con_largura deve ser > 0'); c.largura = ch.con_largura; }

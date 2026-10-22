@@ -11,6 +11,7 @@
 'use strict';
 const VERSOES = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const { ErroMcp } = require('./contexto.js');
+const skills = require('./skills.js');
 
 const ERR = { PARSE: -32700, REQ: -32600, METODO: -32601, PARAMS: -32602, INTERNO: -32603 };
 
@@ -29,6 +30,13 @@ const INSTRUCOES = [
   'Saídas: gerber_gerar (grava Projects/<p>/Gerber/), pdf_layout, bom_listar. Regras/DRC, ratsnest, polygon pour, teardrops e ECO usam os módulos do hub quando presentes (hub_modulos mostra o que existe).',
   'list_commands lista tudo por grupo; projeto_desfazer volta a última gravação da sessão.',
 ].join('\n');
+
+/* as INSTRUCOES fixas + o resumo das skills da casa (mcp/skills/*.md), lido na hora: skill nova entra sem reiniciar */
+function instrucoes() {
+  let r = '';
+  try { r = skills.resumo(); } catch (_) { r = ''; }
+  return r ? INSTRUCOES + '\n' + r : INSTRUCOES;
+}
 
 class Servidor {
   constructor(ctx, registro, opts) {
@@ -75,7 +83,7 @@ class Servidor {
           capabilities: { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false },
                           prompts: { listChanged: false }, logging: {} },
           serverInfo: { name: 'nexoeletric', title: 'NexoEletric', version: this.versao },
-          instructions: INSTRUCOES,
+          instructions: instrucoes(),
         };
       }
       case 'ping': return {};
