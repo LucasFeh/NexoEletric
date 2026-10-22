@@ -20,7 +20,7 @@ app se chamava EletricHUB.
   o plano só dos pads), `clearanceNet` e o objeto `conexao` ({tipo, condutores, largura, gap, angulo}), que o
   despejo do hub já entendia mas o changes.js descartava.
 
-## 1.17.0 — 2026-10-22
+## 1.18.0 — 2026-10-22
 
 PCB mais perto do Properties do Altium:
 
