@@ -83,7 +83,7 @@ claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 | nexo | `nexo_estado` (o Nexo Hub e o NexoCAD), `nexo_biblioteca` (lista/busca os itens do Nexo Hub no formato do hub; `id` traz revisões e vínculos), `nexo_sincronizar` (publica a biblioteca 3D e as placas no Nexo Hub: o mesmo `lib/nexohub-sync.js` do app), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou de um item, aberto no NexoCAD sempre por um item do Nexo Hub; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (publica o item placa e pede `pcb_importar {item}`; `so_publicar`, `so_pacote`), `nexo_vincular_footprint` (direto no Nexo Hub: `atributos.footprints` + vínculo; num componente já põe o 3D no footprint), `nexo_componentes` (uma biblioteca só: os componentes do NexoCAD com footprint entram na biblioteca de footprints como o 3D deles; o app faz sozinho a cada minuto). Conexão: `NEXOHUB_URL` > `C:\Users\Public\NexoHub\conexao.json` > `127.0.0.1:47800`. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
 | nexobd | `nexo_projetos` (os projetos guardados no NexoBD, fora do catálogo), `nexo_projeto_historico` (revisões: quando, de qual programa, o que mudou), `nexo_projeto_restaurar` (os arquivos de uma revisão antiga voltam para a pasta; o app sobe como revisão nova) |
 | saidas | `gerber_gerar` (grava `Projects/<p>/Gerber/` + `gerber.json`, como a rota `/api/gerber`; redespeja os polígonos antes), `gerber_salvo` (relê com o `hub-gerberview.js`), `pdf_layout` (`hub-pcbpdf.js` → `PDF/LO - <base>.pdf`), `bom_listar` |
-| casa | `skills_listar`, `skill_ler` (as skills da casa de `mcp/skills/*.md`), `regras_casa_verificar` (parafuso isolado, plano a 1,0 mm dos pads, serigrafia sem passar por cima de nada) |
+| casa | `skills_listar`, `skill_ler` (as skills da casa de `mcp/skills/*.md`), `regras_casa_verificar` (cobre de outra net no pad, trilha por cima de pad, parafuso isolado, plano a 1,0 mm dos pads, serigrafia sem passar por cima de nada) |
 | sinal | `sinal_listar`, `sinal_responder` (só status/reply, AI-GUIDE Parte C), `sinal_criar` |
 | hub | `list_commands`, `hub_status`, `hub_modulos`, `hub_modulo_chamar` (qualquer função de qualquer módulo, com `$placa`, `$esquema`, `$regras`...), `vista_screenshot`, `vista_comando`, `altium_comandos` (`hub-altiumdna.js`), `hub_recarregar_ferramentas` |
 
@@ -161,6 +161,7 @@ module.exports = {
 ```
 
 `ctx` dá: `root`, `projeto(nome)`, `board(p)`, `placa(p)` → `{board, changes, model, eb}`,
+`placaDespejada(p)` → o mesmo com os planos despejados como a tela (+ `despejo`),
 `schematic(p)`, `libs()` (as bibliotecas como a vista Esquema as monta), `modulo(arq)`/
 `exige(arq, global)`, `grava(arquivo, texto, ferramenta)` (atômico, com desfazer). Retorne um
 objeto; `{_imagem:{base64, mime}}` vira imagem; `ok:false` vira `isError`.
@@ -172,6 +173,18 @@ cabeçalho `---` (`nome`, `titulo`, `descricao`) e o texto (a regra, o porquê e
 Arquivo novo na pasta entra sozinho (lido pelo mtime) e chega ao cliente por quatro caminhos: o resumo nas
 `instructions` do initialize, o recurso `eletrichub://skill/<nome>`, o prompt `skill_<nome>` e as ferramentas
 `skills_listar` / `skill_ler`. `regras_casa_verificar {projeto}` confere as regras que dá para medir.
+
+| skill | o que manda | conferida por |
+|---|---|---|
+| `pcb-cobre-sem-curto` | cobre de outra net nunca em cima/perto de pad ou via (pad passante vale em todas as camadas); trilha no meio do vão; trilha da mesma net termina no pad; faixa não tapa o alívio térmico | `regras_casa_verificar` » `pad_outra_net`, `trilha_sobre_pad`; `drc_rodar` |
+| `pcb-boas-praticas` | checklist pesquisado (IPC-2221, DFM): folga por tensão, largura por corrente, anel, furo-cobre, borda, ângulo agudo, alívio, costura, serigrafia, teardrop | regras do `rules.js` + `drc_rodar` |
+| `pcb-verificar-antes-de-entregar` | a sequência antes de dizer "pronto" e o que fazer com a foto de um problema | — |
+| `pcb-parafusos-isolados` | quadrado sem cobre de furo + 3 mm em volta do parafuso | `parafuso` |
+| `pcb-plano-folga-pads` | plano a 1,0 mm dos pads de outra net, alívio térmico | `plano_pad` |
+| `pcb-serigrafia-livre` | overlay nunca em cima de nada | `serigrafia` |
+
+`drc_rodar`, `nets_ratsnest` e `pcb_render` usam a placa como a tela mostra (`ctx.placaDespejada(p)`: os polígonos
+do hub redespejados); `despejar:false` volta ao jeito antigo (sem o cobre dos planos).
 
 ## Testes
 

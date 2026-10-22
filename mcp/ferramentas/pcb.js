@@ -452,17 +452,18 @@ module.exports = {
     },
     {
       nome: 'pcb_render', titulo: 'Imagem da placa', leitura: true,
-      descricao: 'Desenha a placa efetiva (com as mudanças) num PNG: cobre nas cores do Altium, pads, vias, furos, serigrafia, contorno. Opções: lado bottom (vista de baixo), caixa (zoom numa região em mm), camadas (só estas), net (destaca uma net), ratsnest (linhas do que falta ligar), marcas [[x,y]]. Use para CONFERIR o que fez.',
+      descricao: 'Desenha a placa efetiva (com as mudanças e os planos despejados) num PNG: cobre nas cores do Altium, pads, vias, furos, serigrafia, contorno. Para conferir curto/folga olhe UMA camada de cobre por vez (camadas:["Top","Multi"] e depois ["Bottom","Multi"]) com zoom (caixa). Opções: lado bottom (vista de baixo), caixa (zoom numa região em mm), camadas (só estas), net (destaca uma net), ratsnest (linhas do que falta ligar), marcas [[x,y]]. Use para CONFERIR o que fez.',
       entrada: { type: 'object', properties: {
         projeto: PROJETO, largura: { type: 'integer', minimum: 200, maximum: 2400, description: 'pixels (padrão 1000)' },
         lado: { type: 'string', enum: ['top', 'bottom'] },
         caixa: { type: 'object', properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' } } },
         camadas: { type: 'array', items: { type: 'string' } }, net: { type: 'string' }, ratsnest: { type: 'boolean' },
         marcas: { type: 'array', items: PT },
+        despejar: { type: 'boolean', description: 'padrão true: desenha os planos (polígonos) despejados, como a tela' },
       }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        const { eb } = ctx.placa(p);
+        const { eb } = a.despejar === false ? ctx.placa(p) : ctx.placaDespejada(p);
         let rats = [];
         if (a.ratsnest) {
           const N = ctx.modulo('hub-pcbnets.js');

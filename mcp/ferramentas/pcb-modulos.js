@@ -86,20 +86,22 @@ module.exports = {
     },
     {
       nome: 'drc_rodar', titulo: 'DRC (verificação de regras)', leitura: true, modulo: 'hub-pcbdrc.js',
-      descricao: 'Roda o DRC do hub (hub-pcbdrc.js) na placa COM as mudanças, com as regras do projeto: clearance, curto, net não roteada, largura, via, furo, furo-a-furo, ponte de máscara, silk, contorno, antena. Devolve as violações (regra, msg, x/y, camada, ids dos objetos) e a contagem por regra. ids = DRC online só nos objetos dados; tipos = só essas checagens; relatorio:true traz o texto do "DRC Report".',
+      descricao: 'Roda o DRC do hub (hub-pcbdrc.js) na placa COM as mudanças e COM os planos despejados (como a tela do app), com as regras do projeto: clearance, curto, net não roteada, largura, via, furo, furo-a-furo, ponte de máscara, silk, contorno, antena. Devolve as violações (regra, msg, x/y, camada, ids dos objetos) e a contagem por regra. ids = DRC online só nos objetos dados; tipos = só essas checagens; relatorio:true traz o texto do "DRC Report"; despejar:false roda sem redespejar os polígonos (aí o plano não conta e o GND aparece "não roteado").',
       entrada: { type: 'object', properties: { projeto: PROJETO, ids: { type: 'array', items: { type: 'string' } }, tipos: { type: 'array', items: { type: 'string' } },
-        limite: { type: 'integer', minimum: 1, maximum: 5000, description: 'violações listadas (padrão 200)' }, relatorio: { type: 'boolean' } }, required: ['projeto'] },
+        limite: { type: 'integer', minimum: 1, maximum: 5000, description: 'violações listadas (padrão 200)' }, relatorio: { type: 'boolean' },
+        despejar: { type: 'boolean', description: 'padrão true: redespeja os polígonos (poly_add) antes, como a vista PCB faz' } }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const D = ctx.exige('hub-pcbdrc.js', 'HubPcbDrc');
-        const { eb } = ctx.placa(p);
+        const { eb, despejo } = a.despejar === false ? ctx.placa(p) : ctx.placaDespejada(p);
         const { conjunto, fonte } = ctx.modulo('hub-pcbregras.js') ? regras(ctx, p) : { conjunto: undefined, fonte: 'padrão do DRC' };
         const o = { textoGeo: textoGeo(ctx) };
         if (a.ids) o.ids = a.ids;
         if (a.tipos) o.tipos = a.tipos;
         const r = D.rodar(eb, conjunto, o);
         const lim = a.limite || 200;
-        const out = { aprovado: !r.total, total: r.total, regras_de: fonte, porRegra: (r.porRegra || []).filter(x => x.n), avisos: r.avisos, tempoMs: r.tempoMs,
+        const out = { aprovado: !r.total, total: r.total, regras_de: fonte, despejo: despejo || (a.despejar === false ? 'sem redespejo (despejar:false)' : 'sem polígono'),
+                      porRegra: (r.porRegra || []).filter(x => x.n), avisos: r.avisos, tempoMs: r.tempoMs,
                       violacoes: (r.violacoes || []).slice(0, lim), cortadas: Math.max(0, (r.violacoes || []).length - lim) };
         if (a.relatorio && typeof D.relatorioTexto === 'function') out.relatorio = D.relatorioTexto(r, { projeto: p.nome });
         return out;
@@ -107,11 +109,12 @@ module.exports = {
     },
     {
       nome: 'nets_ratsnest', titulo: 'Ratsnest / nets não roteadas', leitura: true,
-      descricao: 'O que falta ligar (as linhas de conexão do Altium): por net, as ilhas de cobre ainda separadas e as ligações que faltam (x1,y1 → x2,y2 e de/para), mais os curtos entre nets. Usa o hub-pcbnets.js (o motor da vista); sem ele, a reserva do MCP. Desenhe com pcb_render {ratsnest:true}; ligue com pcb_rotear.',
-      entrada: { type: 'object', properties: { projeto: PROJETO, net: { type: 'string' }, so_pendentes: { type: 'boolean', description: 'padrão true' } }, required: ['projeto'] },
+      descricao: 'O que falta ligar (as linhas de conexão do Altium): por net, as ilhas de cobre ainda separadas e as ligações que faltam (x1,y1 → x2,y2 e de/para), mais os curtos entre nets. Conta o cobre dos planos despejados (como a tela; despejar:false ignora os polígonos). Usa o hub-pcbnets.js (o motor da vista); sem ele, a reserva do MCP. Desenhe com pcb_render {ratsnest:true}; ligue com pcb_rotear.',
+      entrada: { type: 'object', properties: { projeto: PROJETO, net: { type: 'string' }, so_pendentes: { type: 'boolean', description: 'padrão true' },
+        despejar: { type: 'boolean', description: 'padrão true: redespeja os polígonos antes' } }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        const { eb } = ctx.placa(p);
+        const { eb } = a.despejar === false ? ctx.placa(p) : ctx.placaDespejada(p);
         const N = ctx.modulo('hub-pcbnets.js');
         if (!N) {
           const c = geo.conectividade(ctx.hc, eb);

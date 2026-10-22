@@ -2,6 +2,10 @@
      skills_listar / skill_ler    as regras de projeto da Dieletrons, para a IA seguir
      regras_casa_verificar        confere a placa EFETIVA (board.js + changes.js, com os planos
                                   redespejados pelo hub-pcbpour.js) contra as regras:
+       pad_outra_net    cobre de outra net em cima de pad/via (curto) ou a menos da Clearance
+                        do projeto -- pad passante conta em todas as camadas de cobre
+       trilha_sobre_pad trilha da mesma net cruzando o pad sem terminar nele; regiao/faixa
+                        tapando o pad e o alivio termico do plano
        parafuso    nenhum cobre (plano, trilha, via, pad, fill, regiao) no quadrado em volta de
                    cada furo de parafuso, em todas as camadas de cobre
        plano_pad   cobre de plano despejado a menos de `folga_plano_pad` de pad de outra net
@@ -9,6 +13,7 @@
                    cobre do mesmo lado, outra serigrafia ou saindo da placa
    A geometria e a do Clipper do hub (hub-clipper.js), em 0,1 um, a mesma do pour e do Gerber. */
 'use strict';
+const fs = require('node:fs');
 const { ErroMcp } = require('../lib/contexto.js');
 const geo = require('../lib/geometria.js');
 const skills = require('../lib/skills.js');
@@ -26,6 +31,49 @@ function textoGeo(ctx) {
 function circulo(cx, cy, r, n) { const P = [], k = n || 24; for (let i = 0; i < k; i++) { const a = i * 2 * Math.PI / k; P.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); } return P; }
 function caixaPts(pts) { const b = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity }; for (const [x, y] of pts) { if (x < b.x1) b.x1 = x; if (x > b.x2) b.x2 = x; if (y < b.y1) b.y1 = y; if (y > b.y2) b.y2 = y; } return b; }
 const cruza = (a, b, m) => a.x1 - m <= b.x2 && b.x1 - m <= a.x2 && a.y1 - m <= b.y2 && b.y1 - m <= a.y2;
+function dentroPoly(pt, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+function dPS(px, py, a, b) {
+  const vx = b[0] - a[0], vy = b[1] - a[1], L = vx * vx + vy * vy;
+  let t = L ? ((px - a[0]) * vx + (py - a[1]) * vy) / L : 0; t = Math.max(0, Math.min(1, t));
+  return Math.hypot(a[0] + t * vx - px, a[1] + t * vy - py);
+}
+/* grade de vizinhança por caixa (mm) para nao comparar tudo com tudo */
+function grade(lista, passo) {
+  const G = new Map(), C = passo || 2;
+  for (const o of lista) for (let gx = Math.floor(o.bb.x1 / C); gx <= Math.floor(o.bb.x2 / C); gx++) for (let gy = Math.floor(o.bb.y1 / C); gy <= Math.floor(o.bb.y2 / C); gy++) {
+    const k = gx + ',' + gy; let l = G.get(k); if (!l) G.set(k, l = []); l.push(o);
+  }
+  return { G, C };
+}
+function vizinhos(g, bb, m) {
+  const s = new Set();
+  for (let gx = Math.floor((bb.x1 - m) / g.C); gx <= Math.floor((bb.x2 + m) / g.C); gx++) for (let gy = Math.floor((bb.y1 - m) / g.C); gy <= Math.floor((bb.y2 + m) / g.C); gy++) {
+    const l = g.G.get(gx + ',' + gy); if (l) for (const o of l) s.add(o);
+  }
+  return [...s];
+}
+/* a folga da regra Clearance geral (All × All) do projeto, senao 0,254 mm (10 mil) */
+function folgaDoProjeto(ctx, p) {
+  try {
+    const R = ctx.modulo('hub-pcbregras.js'), f = p.arq('rules.js');
+    if (R && fs.existsSync(f)) {
+      const c = R.ler(fs.readFileSync(f, 'utf8'));
+      const L = (c.rules || c.regras || []).filter(r => (r.kind || r.tipo) === 'Clearance' && r.enabled !== false && isNum(r.gap) &&
+        /^all$/i.test(String(r.scope1 || 'All').trim()) && /^all$/i.test(String(r.scope2 || 'All').trim()));
+      if (L.length) return Math.min(...L.map(r => r.gap));
+    }
+  } catch (_) { /* sem regras legiveis: o padrao */ }
+  return 0.254;
+}
+const nomeOb = ob => ob.tipo === 'pad' ? `pad ${ob.ref ? ob.ref + '.' + ob.nome : (ob.nome || ob.id)}` : `${ob.tipo} ${ob.id}`;
+const netDe = ob => ob.net ? ob.net : 'sem net';
 const uniao = (a, b) => ({ x1: Math.min(a.x1, b.x1), y1: Math.min(a.y1, b.y1), x2: Math.max(a.x2, b.x2), y2: Math.max(a.y2, b.y2) });
 
 function kit(C) {
@@ -52,16 +100,16 @@ function kit(C) {
 function cobreDa(K, eb, L, hc, buracoPad) {
   const out = [];
   const poe = (tipo, o, pts, extra) => { if (pts && pts.length >= 3) out.push(Object.assign({ tipo, id: o.id || '', net: o.net || '', paths: [K.paraC(pts)], bb: caixaPts(pts) }, extra || {})); };
-  const traco = (tipo, o, pts, w) => { const paths = K.offset([K.paraC(pts)], Math.max(w, 0.01) / 2, true); if (paths.length) out.push({ tipo, id: o.id || '', net: o.net || '', paths, bb: K.caixa(paths) }); };
+  const traco = (tipo, o, pts, w) => { const paths = K.offset([K.paraC(pts)], Math.max(w, 0.01) / 2, true); if (paths.length) out.push({ tipo, id: o.id || '', net: o.net || '', paths, bb: K.caixa(paths), linha: pts, w: Math.max(w, 0.01) }); };
   for (const t of eb.tracks || []) if (t && t.layer === L && [t.x1, t.y1, t.x2, t.y2].every(isNum)) traco('trilha', t, [[t.x1, t.y1], [t.x2, t.y2]], t.w || 0.254);
   for (const a of eb.arcs || []) if (a && a.layer === L && isNum(a.r)) traco('arco', a, geo.pontosArco(a, 5), a.w || 0.254);
-  for (const v of eb.vias || []) if (v && isNum(v.x) && isNum(v.size)) poe('via', v, circulo(v.x, v.y, v.size / 2));
+  for (const v of eb.vias || []) if (v && isNum(v.x) && isNum(v.size)) poe('via', v, circulo(v.x, v.y, v.size / 2), { cx: v.x, cy: v.y });
   for (const c of eb.components || []) for (const p of (c && c.pads) || []) {
     if (!p || !isNum(p.x) || buracoPad(p)) continue;
     const th = p.type === 'th' || p.layer === 'Multi' || p.drill > 0;
-    if (th || p.layer === L) poe('pad', p, geo.poligonoPad(p, 6), { ref: c.ref, nome: p.name });
+    if (th || p.layer === L) { const pts = geo.poligonoPad(p, 6); poe('pad', p, pts, { ref: c.ref, nome: p.name, cx: p.x, cy: p.y, pts, th }); }
   }
-  for (const p of eb.freepads || []) if (p && isNum(p.x) && !buracoPad(p) && (p.layer === 'Multi' || p.drill > 0 || p.layer === L)) poe('pad', p, geo.poligonoPad(p, 6), { nome: p.name });
+  for (const p of eb.freepads || []) if (p && isNum(p.x) && !buracoPad(p) && (p.layer === 'Multi' || p.drill > 0 || p.layer === L)) { const pts = geo.poligonoPad(p, 6); poe('pad', p, pts, { nome: p.name, cx: p.x, cy: p.y, pts, th: p.layer === 'Multi' || p.drill > 0 }); }
   for (const f of eb.fills || []) if (f && f.layer === L && [f.x1, f.y1, f.x2, f.y2].every(isNum)) {
     const cx = (f.x1 + f.x2) / 2, cy = (f.y1 + f.y2) / 2, a = (f.rot || 0) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
     const w = Math.abs(f.x2 - f.x1) / 2, h = Math.abs(f.y2 - f.y1) / 2;
@@ -70,7 +118,7 @@ function cobreDa(K, eb, L, hc, buracoPad) {
   for (const g of eb.regions || []) {
     if (!g || g.layer !== L || g.keepout || g.cutout || !Array.isArray(g.points) || g.points.length < 3) continue;
     const paths = [K.paraC(g.points)].concat((g.holes || []).filter(h => Array.isArray(h) && h.length >= 3).map(h => K.paraC(h)));
-    out.push({ tipo: g.poly ? 'plano' : 'regiao', id: g.id || g.de || '', net: g.net || '', paths, bb: caixaPts(g.points), eo: true });
+    out.push({ tipo: g.poly ? 'plano' : 'regiao', id: g.id || g.de || '', net: g.net || '', paths, bb: caixaPts(g.points), eo: true, de: g.de != null ? String(g.de) : undefined });
   }
   return out;
 }
@@ -81,15 +129,12 @@ function verifica(ctx, a) {
   const K = kit(C);
   const o = Object.assign({}, PAD, a.parametros || {});
   ['parafuso', 'plano_pad', 'silk', 'silk_cobre', 'silk_borda', 'furo_min'].forEach(k => { if (isNum(a[k])) o[k] = a[k]; });
-  const { eb: eb0 } = ctx.placa(p);
-  let eb = eb0, despejo = 'sem polígono';
-  const Pour = ctx.modulo('hub-pcbpour.js');
-  const tg = textoGeo(ctx);
-  if (Pour && (eb0.polygons || []).length) {
-    const d = Pour.despejaTodos(eb0, tg ? { texto: tg } : {});
-    eb = Pour.placaSemDespejoVelho(eb0, d.regioes);
-    despejo = (eb0.polygons || []).length + ' polígono(s) redespejado(s)';
-  }
+  /* a placa como a tela mostra (planos do hub redespejados; cobre despejado do Altium sem poligono fica) */
+  const pdp = ctx.placaDespejada(p);
+  const eb = pdp.eb, tg = textoGeo(ctx);
+  const velhas = pdp.despejo ? pdp.despejo.altium_sem_poligono : [];
+  const despejo = pdp.despejo ? pdp.despejo.poligonos + ' polígono(s) redespejado(s) como na tela' +
+    (velhas.length ? `; ${velhas.length} região(ões) despejada(s) no Altium sem polígono no hub (${velhas.slice(0, 8).join(', ')}) ficam como vieram` : '') : 'sem polígono';
   const hc = ctx.hc;
   const camadas = [...new Set(['Top', 'Bottom'].concat((eb.tracks || []).map(t => t.layer), (eb.regions || []).map(g => g.layer)))].filter(k => k && hc.isCopper(k));
   /* pad que e so furo (fixacao sem anel, sem net) */
@@ -149,6 +194,101 @@ function verifica(ctx, a) {
           objeto: { tipo: 'pad', ref: k, net: melhor ? melhor.net : '' } });
       }
       viol.push(...porPad.values());
+    }
+  }
+
+  /* ---------- cobre de OUTRA net em cima ou perto de pad/via (curto) ----------
+     Pad passante existe em TODAS as camadas de cobre: trilha do Top passando por cima de pad TH de
+     outra net e curto, mesmo que o pad "seja do Bottom". Folga = a Clearance geral do projeto. */
+  const folga = isNum(a.folga_cobre) ? a.folga_cobre : folgaDoProjeto(ctx, p);
+  if (quer('pad_outra_net')) for (const L of camadas) {
+    const obs = cobre[L];
+    const alvos = obs.filter(x => x.tipo === 'pad' || x.tipo === 'via');
+    const g = grade(obs.filter(x => x.tipo !== 'plano'), 2);
+    const visto = new Set();
+    for (const al of alvos) {
+      let ex = null;
+      for (const ob of vizinhos(g, al.bb, folga + 0.01)) {
+        if (ob === al || (ob.net && ob.net === al.net)) continue;
+        if (ob.tipo === 'pad' && al.tipo === 'pad' && ob.ref && ob.ref === al.ref) continue;     // o footprint e da biblioteca
+        if (!cruza(ob.bb, al.bb, folga + 0.01)) continue;
+        const k = [L, ob.tipo + ob.id + (ob.ref || '') + (ob.nome || ''), al.tipo + al.id + (al.ref || '') + (al.nome || '')].sort().join('|');
+        if (visto.has(k)) continue; visto.add(k);
+        const toca = K.area(K.inter(ob.paths, al.paths, ob.eo)) > 1e-6;
+        if (!toca) { ex = ex || K.offset(al.paths, Math.max(0, folga - 0.002), false); if (K.area(K.inter(ob.paths, ex, ob.eo)) < 1e-6) continue; }
+        viol.push({ regra: 'pad_outra_net', camada: L, x: r3(al.cx), y: r3(al.cy),
+          msg: toca ? `CURTO: ${nomeOb(ob)} (${netDe(ob)}) passa por cima do ${nomeOb(al)} (${netDe(al)})`
+                    : `${nomeOb(ob)} (${netDe(ob)}) a menos de ${folga} mm do ${nomeOb(al)} (${netDe(al)})`,
+          objeto: { tipo: al.tipo, id: al.id, ref: al.ref ? al.ref + '.' + al.nome : undefined, net: al.net },
+          contra: { tipo: ob.tipo, id: ob.id, ref: ob.ref ? ob.ref + '.' + ob.nome : undefined, net: ob.net } });
+      }
+    }
+    /* plano despejado (ou poligono vindo do Altium) de outra net em cima/perto do pad ou via */
+    const planos = obs.filter(x => x.tipo === 'plano');
+    for (const net of [...new Set(planos.map(x => x.net))]) {
+      const suj = [].concat(...planos.filter(x => x.net === net).map(x => x.paths));
+      const bbP = planos.filter(x => x.net === net).reduce((b, x) => uniao(b, x.bb), { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity });
+      const ps = alvos.filter(x => !(net && x.net === net) && cruza(x.bb, bbP, folga));
+      if (!ps.length || !suj.length) continue;
+      const clip = [];
+      for (const pd of ps) clip.push(...K.offset(pd.paths, Math.max(0, folga - 0.002), false));
+      const it = K.inter(suj, K.uniaoC(clip), true);
+      const ja = new Set();
+      for (const peca of it) {
+        if (Math.abs(C.Clipper.Area(peca)) / (E * E) < 1e-6) continue;
+        const bb = K.caixa([peca]), cx = (bb.x1 + bb.x2) / 2, cy = (bb.y1 + bb.y2) / 2;
+        let melhor = null, dm = Infinity;
+        for (const pd of ps) { const dd = Math.hypot(pd.cx - cx, pd.cy - cy); if (dd < dm) { dm = dd; melhor = pd; } }
+        if (!melhor || ja.has(melhor)) continue; ja.add(melhor);
+        const toca = K.area(K.inter(suj, melhor.paths, true)) > 1e-6;
+        viol.push({ regra: 'pad_outra_net', camada: L, x: r3(melhor.cx), y: r3(melhor.cy),
+          msg: (toca ? 'CURTO: plano ' : 'plano ') + `${net || 'sem net'} ${toca ? 'por cima do' : 'a menos de ' + folga + ' mm do'} ${nomeOb(melhor)} (${netDe(melhor)})`,
+          objeto: { tipo: melhor.tipo, id: melhor.id, ref: melhor.ref ? melhor.ref + '.' + melhor.nome : undefined, net: melhor.net }, contra: { tipo: 'plano', net } });
+      }
+    }
+  }
+
+  /* ---------- trilha / cobre da MESMA net passando por cima do pad ----------
+     Trilha que cruza o pad sem terminar nele (entra de um lado e sai do outro) esconde a ligacao e,
+     na tela, parece curto; regiao/fill/faixa solida tapando o pad que o plano liga com alivio termico
+     anula o alivio (a solda nao pega) e tambem parece trilha por cima do pad. Trilha que TERMINA no
+     pad e sai pelo outro lado (barramento de backplane, pino a pino) e ligacao normal: nao conta. */
+  if (quer('trilha_sobre_pad')) {
+    const relief = (eb.polygons || []).filter(q => q && q.net && Array.isArray(q.pts) && q.pts.length >= 3 && q.pour !== 'none' &&
+      ((q.conexao && q.conexao.tipo === 'relief') || q.con_tipo === 'relief'));
+    for (const L of camadas) {
+      const obs = cobre[L];
+      const g = grade(obs.filter(x => x.tipo === 'trilha' || x.tipo === 'arco' || x.tipo === 'regiao' || x.tipo === 'fill' || (x.tipo === 'plano' && !x.de)), 2);
+      for (const pd of obs.filter(x => x.tipo === 'pad')) {
+        const viz = vizinhos(g, pd.bb, 0.6).filter(ob => ob.net && ob.net === pd.net && cruza(ob.bb, pd.bb, 0.6));
+        if (!viz.length) continue;
+        const rel = relief.find(q => q.layer === L && q.net === pd.net && dentroPoly([pd.cx, pd.cy], q.pts));
+        let rIn = Infinity;
+        for (let i = 0; i < pd.pts.length; i++) rIn = Math.min(rIn, dPS(pd.cx, pd.cy, pd.pts[i], pd.pts[(i + 1) % pd.pts.length]));
+        for (const ob of viz) {
+          if (ob.linha) {
+            const lin = ob.linha, ini = lin[0], fim = lin[lin.length - 1];
+            const dI = dentroPoly(ini, pd.pts), dF = dentroPoly(fim, pd.pts);
+            if (!dI && !dF) {
+              let dm = Infinity;
+              for (let i = 0; i + 1 < lin.length; i++) dm = Math.min(dm, dPS(pd.cx, pd.cy, lin[i], lin[i + 1]));
+              if (dm < rIn - 0.01) viol.push({ regra: 'trilha_sobre_pad', camada: L, x: r3(pd.cx), y: r3(pd.cy),
+                msg: `${nomeOb(ob)} (${netDe(ob)}) passa reto por cima do ${nomeOb(pd)} sem terminar nele — termine a trilha no pad (ou desvie) e saia com outra`,
+                objeto: { tipo: 'pad', id: pd.id, ref: pd.ref ? pd.ref + '.' + pd.nome : undefined, net: pd.net }, contra: { tipo: ob.tipo, id: ob.id, net: ob.net } });
+            }
+          } else if (rel && pd.th) {
+            const gap = (rel.conexao && isNum(rel.conexao.gap)) ? rel.conexao.gap : (isNum(rel.con_gap) ? rel.con_gap : 0.3);
+            const anel = K.offset(pd.paths, Math.max(gap, 0.1), false);
+            const aAnel = K.area(anel) - K.area(pd.paths);
+            const cob = K.area(K.inter(ob.paths, anel, ob.eo)) - K.area(K.inter(ob.paths, pd.paths, ob.eo));
+            if (aAnel > 0 && cob > 0.5 * aAnel) viol.push({ regra: 'trilha_sobre_pad', camada: L, x: r3(pd.cx), y: r3(pd.cy),
+              msg: ob.tipo === 'plano'
+                ? `faixa ${ob.id} (${netDe(ob)}) do polygon pour do Altium tapa o ${nomeOb(pd)} e o alívio térmico do plano ${rel.nome || rel.id} — na tela é cobre passando por cima do pad; esse cobre vem de um polígono do Altium (o hub não apaga pedaço de polígono despejado): apague ou recorte o polígono no Altium`
+                : `${ob.tipo} ${ob.id} (${netDe(ob)}) tapa o ${nomeOb(pd)} e o alívio térmico do plano ${rel.nome || rel.id} — o cobre passa por cima do pad; tire a ${ob.tipo} (pcb_apagar) e deixe o plano ligar`,
+              objeto: { tipo: 'pad', id: pd.id, ref: pd.ref ? pd.ref + '.' + pd.nome : undefined, net: pd.net }, contra: { tipo: ob.tipo, id: ob.id, net: ob.net } });
+          }
+        }
+      }
     }
   }
 
@@ -218,7 +358,7 @@ function verifica(ctx, a) {
   for (const v of viol) por[v.regra] = (por[v.regra] || 0) + 1;
   const lim = a.limite || 200;
   return { projeto: p.nome, ok: viol.length === 0, total: viol.length, por_regra: por, despejo,
-    parametros: o, camadas, furos_parafuso: furos,
+    parametros: Object.assign({ folga_cobre: folga }, o), camadas, furos_parafuso: furos,
     violacoes: viol.slice(0, lim), cortadas: Math.max(0, viol.length - lim),
     skills: skills.listar().map(s => s.nome),
     nota: viol.length ? 'Corrija e rode de novo até zerar (skill_ler {nome} explica cada regra).' : 'Placa dentro das regras da casa.' };
@@ -227,8 +367,8 @@ function verifica(ctx, a) {
 module.exports = {
   grupo: 'casa',
   ordem: 45,
-  titulo: 'Regras da casa — skills (parafuso isolado, plano afastado dos pads, serigrafia livre) e o verificador',
-  modulos: ['hub-clipper.js', 'hub-pcbpour.js', 'hub-gerber.js'],
+  titulo: 'Regras da casa — skills (nada de cobre de outra net no pad, trilha não passa por cima de pad, parafuso isolado, plano afastado dos pads, serigrafia livre, boas práticas) e o verificador',
+  modulos: ['hub-clipper.js', 'hub-pcbpour.js', 'hub-gerber.js', 'hub-pcbregras.js'],
   ferramentas: [
     {
       nome: 'skills_listar', titulo: 'Skills da casa', leitura: true,
@@ -248,9 +388,10 @@ module.exports = {
     },
     {
       nome: 'regras_casa_verificar', titulo: 'Verificar as regras da casa', leitura: true, modulo: 'hub-clipper.js',
-      descricao: 'Confere a placa (com as mudanças e os planos redespejados) contra as skills da casa e lista cada violação com posição e objeto: "parafuso" = cobre dentro do quadrado isolado de um furo de parafuso (furo + 3 mm, todas as camadas); "plano_pad" = plano despejado a menos de 1,0 mm de pad de outra net; "serigrafia" = overlay encostando em pad/via, furo, quadrado de parafuso, trilha do mesmo lado, outra serigrafia ou borda. Devolve também os furos de parafuso achados com o quadrado de cada um. Rode antes de entregar a placa e zere.',
+      descricao: 'Confere a placa (com as mudanças e os planos redespejados) contra as skills da casa e lista cada violação com posição e objeto: "pad_outra_net" = cobre de OUTRA net (trilha, arco, via, pad, fill, região, plano) passando por cima de um pad/via (CURTO) ou a menos da Clearance do projeto — pad passante vale em todas as camadas; "trilha_sobre_pad" = trilha da mesma net cruzando o pad sem terminar nele, ou região/faixa tapando o pad e o alívio térmico do plano; "parafuso" = cobre dentro do quadrado isolado de um furo de parafuso (furo + 3 mm, todas as camadas); "plano_pad" = plano despejado a menos de 1,0 mm de pad de outra net; "serigrafia" = overlay encostando em pad/via, furo, quadrado de parafuso, trilha do mesmo lado, outra serigrafia ou borda. A placa conferida é a da tela (planos do hub redespejados). Devolve também os furos de parafuso achados com o quadrado de cada um. Rode antes de entregar a placa e zere.',
       entrada: { type: 'object', properties: { projeto: PROJETO,
-        regras: { type: 'array', items: { type: 'string', enum: ['parafuso', 'plano_pad', 'serigrafia'] }, description: 'só estas (padrão: todas)' },
+        regras: { type: 'array', items: { type: 'string', enum: ['pad_outra_net', 'trilha_sobre_pad', 'parafuso', 'plano_pad', 'serigrafia'] }, description: 'só estas (padrão: todas)' },
+        folga_cobre: { type: 'number', description: 'folga mínima cobre × pad/via de outra net, mm (padrão: a Clearance All×All do rules.js, senão 0,254)' },
         parafuso: { type: 'number', description: 'folga do quadrado além do furo, mm (padrão 3)' },
         plano_pad: { type: 'number', description: 'folga mínima plano × pad de outra net, mm (padrão 1,0)' },
         silk: { type: 'number', description: 'folga da serigrafia para pad/via/furo/outra serigrafia, mm (padrão 0,254; pad e via somam a expansão da máscara)' },

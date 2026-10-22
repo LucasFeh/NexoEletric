@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.21.0 — 2026-10-22
+
+Boas práticas de PCB no MCP (pedido do dono: "trilha passando por cima de pad com net diferente não pode acontecer
+de forma alguma"):
+
+- **Três skills novas da casa** (chegam a toda IA que conecta no MCP): `pcb-cobre-sem-curto` (cobre de outra net
+  nunca em cima nem perto de pad/via — pad passante vale no Top e no Bottom; trilha no meio do vão entre pinos;
+  trilha da mesma net termina no pad; faixa não tapa o alívio térmico), `pcb-boas-praticas` (checklist pesquisado:
+  IPC-2221, DFM de fabricantes e do Altium — folga por tensão, largura por corrente, anel, furo-cobre, borda, ângulo
+  agudo, alívio, costura, serigrafia, teardrop) e `pcb-verificar-antes-de-entregar` (a sequência antes de dizer
+  "pronto" e o que fazer com a foto de um problema).
+- **`regras_casa_verificar` confere duas regras novas:** `pad_outra_net` (trilha, arco, via, pad, fill, região ou
+  plano de outra net por cima de um pad/via = CURTO, ou mais perto que a Clearance do projeto) e
+  `trilha_sobre_pad` (trilha da mesma net cruzando o pad sem terminar nele; faixa/região tapando o pad e o alívio
+  térmico do plano). A placa conferida é a da tela.
+- **`drc_rodar`, `nets_ratsnest` e `pcb_render` com os planos despejados, como a tela do app.** Antes o DRC do MCP
+  não via o cobre dos polígonos (`poly_add`): o GND aparecia "não roteado" e um curto com o plano passava em branco.
+  `despejar:false` volta ao jeito antigo. Novo `ctx.placaDespejada(p)` para as ferramentas.
+
 ## 1.20.0 — 2026-10-22
 
 - **Gerar fixação em cima da marcação.** Na barra lateral da PCB (Propriedades, sem nada selecionado), a seção

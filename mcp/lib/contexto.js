@@ -264,6 +264,40 @@ class Contexto {
     }
     return { board, changes: ch, model, eb };
   }
+  /* a placa como a TELA mostra (pcbframe.js » comDespejo): a de placa() com os poligonos do hub
+     (board.js » polygons + poly_add) despejados pelo hub-pcbpour.js, um a um na ordem; sai so o
+     despejo velho DESSES poligonos (regiao poly com `de`) e o cobre que veio despejado do Altium
+     sem poligono definido fica como veio. Sem isso o DRC, o ratsnest e a imagem nao veem o plano
+     (GND "nao roteado", curto com o plano invisivel).
+     despejo = {poligonos, regioes, avisos, ms, altium_sem_poligono:[ids]} ou null.
+     altium_sem_poligono: regioes de polygon pour do Altium sem poligono no hub -- ficam como
+     vieram (o hub nao as redespeja nem apaga: region_del recusa pedaco de poligono despejado). */
+  placaDespejada(p, changes) {
+    const r = this.placa(p, changes);
+    const P = this.modulo('hub-pcbpour.js');
+    const pols = (r.eb.polygons || []).filter(q => q && q.id && q.pour !== 'none' && Array.isArray(q.pts) && q.pts.length >= 3);
+    if (!P || typeof P.despeja !== 'function' || !pols.length) return Object.assign(r, { despejo: null });
+    const t0 = Date.now();
+    const ids = new Set(pols.map(q => String(q.id)));
+    let novas = [];
+    const avisos = [];
+    for (const pol of pols.slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0))) {
+      const d = P.despeja(r.eb, pol);
+      const reg = (d && (d.regioes || d)) || [];
+      if (Array.isArray(reg)) novas = novas.concat(reg);
+      for (const a of (d && d.avisos) || []) avisos.push(a);
+    }
+    const velhas = (r.eb.regions || []).filter(g => g && g.poly && !(g.de != null && ids.has(String(g.de))));
+    const eb = Object.assign({}, r.eb);
+    eb.regions = (r.eb.regions || []).filter(g => !(g && g.poly && g.de != null && ids.has(String(g.de))))
+      .concat(novas.map((g, i) => {
+        const o = { id: 'q:' + g.de + ':' + i, layer: g.layer, net: g.net, points: g.pts || g.points, poly: true, de: g.de };
+        if (g.holes && g.holes.length) o.holes = g.holes;
+        return o;
+      }));
+    return Object.assign(r, { eb, ebSemDespejo: r.eb, despejo: { poligonos: pols.length, regioes: novas.length, avisos, ms: Date.now() - t0,
+      altium_sem_poligono: velhas.map(g => g.id || '?') } });
+  }
   schematic(p) {
     const s = this.lerVarCache(p.arq('schematic.js'), 'schematic');
     if (s === undefined) throw new ErroMcp(`o projeto "${p.nome}" não tem schematic.js`);
