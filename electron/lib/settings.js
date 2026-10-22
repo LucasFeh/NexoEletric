@@ -36,6 +36,12 @@ const PADRAO = {
   // Desligar volta a biblioteca PROPRIA deste PC, que diverge da do servidor a cada edicao.
   // Nao vale numa pasta de desenvolvedor (lib/lib-remota.js » servidor).
   libRemota: true,
+  // 1.14.0: o NexoEletric nao guarda nada. Projetos, biblioteca e scripts do Altium moram no
+  // NexoBD, pelo Nexo Hub da maquina (lib/armazem.js), e a pasta de trabalho vira copia. Ligado,
+  // a biblioteca do servidor (libRemota), o "Importar do servidor" e o home.txt do Altium ficam
+  // de fora: o Altium trabalha na pasta do Altium do Nexo Hub. Nao vale numa pasta de
+  // desenvolvedor (git).
+  nexobd: true,
   // O Odoo de producao: e o que o sincronismo do almoxarifado consulta. So semeia o
   // hub-almox.json quando ele ainda nao existe; login e senha o usuario poe no hub. Com a
   // biblioteca do servidor, o sincronismo roda LA, com o Odoo e as credenciais de la.

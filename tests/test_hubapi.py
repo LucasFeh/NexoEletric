@@ -102,9 +102,16 @@ try:
     r = cli.post('/api/project/zz-teste/delete', json={})
     assert r.status_code == 403, 'sem senha barra'
     assert os.path.isdir(alvo), 'sem senha nao move nada'
-    r = cli.post('/api/project/zz-teste/delete', json={'password': H.MASTER_PASSWORD})
+    nota = os.path.join(tmp, '.altiumhub', 'nexobd-apagar.json')
+    os.environ['ALTIUMHUB_NEXOBD'] = '1'    # app desktop com o NexoBD: anota para o armazem apagar la
+    try:
+        r = cli.post('/api/project/zz-teste/delete', json={'password': H.MASTER_PASSWORD})
+    finally:
+        del os.environ['ALTIUMHUB_NEXOBD']
     assert r.status_code == 200, 'senha certa passa'
     assert not os.path.exists(alvo), 'saiu de Projects'
+    with open(nota, encoding='utf-8') as f:
+        assert json.load(f) == ['ZZ_Teste'], 'o nome da pasta fica anotado para apagar no NexoBD'
     lixo = os.path.join(tmp, r.get_json()['trash'])
     assert os.path.isfile(os.path.join(lixo, 'board.js')), 'a pasta inteira foi para o Trash'
     assert not any(p['id'] == 'zz-teste' for p in H.build_index(tmp)['projects']), 'sumiu do indice'

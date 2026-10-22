@@ -1,7 +1,7 @@
 {
   "id": "nexoeletric",
   "nome": "NexoEletric",
-  "descricao": "Esquema e PCB estilo Altium (antigo EletricHUB); publica a biblioteca 3D e as placas no Nexo Hub.",
+  "descricao": "Esquema e PCB estilo Altium (antigo EletricHUB); guarda projetos, biblioteca e scripts do Altium no NexoBD e publica a biblioteca 3D e as placas.",
   "windows": [
     "NexoEletric",
     "EletricHUB"
@@ -21,18 +21,18 @@
     "descricao": "Esquema, PCB, footprints, biblioteca e saídas do NexoEletric"
   },
   "dev": {
-    "repositorio": "C:\\Users\\Lucas\\APM-build",
-    "branch": "nexocad-integracao",
+    "repositorio": "D:\\Pessoal\\NexoEletric",
+    "branch": "main",
     "remotos": [
       {
         "remoto": "origin",
-        "ref": "nexocad-integracao",
-        "url": "https://github.com/LucasFeh/AltiumPCBMirror"
-      },
-      {
-        "remoto": "https://github.com/LucasFeh/NexoEletric.git",
         "ref": "main",
         "url": "https://github.com/LucasFeh/NexoEletric"
+      },
+      {
+        "remoto": "altium",
+        "ref": "nexocad-integracao",
+        "url": "https://github.com/LucasFeh/AltiumPCBMirror"
       }
     ],
     "versao": "electron/package.json",
@@ -55,6 +55,6 @@
       "build.log",
       "electron/scripts/publicar-nexohub.mjs"
     ],
-    "git": "git -c safe.directory=*; autor Lucas Ferreira <70298160+LucasFeh@users.noreply.github.com> por GIT_AUTHOR_*/GIT_COMMITTER_* (sem mexer no config global). Mudanças só como acréscimo; não mexer no tema, Odoo, Libs e símbolos."
+    "git": "git -c safe.directory=*; autor Lucas Ferreira <70298160+LucasFeh@users.noreply.github.com> por GIT_AUTHOR_*/GIT_COMMITTER_* (sem mexer no config global). Mudanças só como acréscimo; não mexer no tema. Projetos, Libs/símbolos (Odoo) e scripts do Altium moram no NexoBD (electron/lib/armazem.js)."
   }
 }

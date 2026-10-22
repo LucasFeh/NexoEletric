@@ -4,6 +4,26 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.14.0 — 2026-10-22
+
+- **Nada mora mais no NexoEletric: tudo vai para o NexoBD.** Projetos, biblioteca e os scripts do Altium ficam no
+  NexoBD, pelo Nexo Hub desta máquina. A pasta de trabalho passa a ser só uma cópia: o que você salva (esquema, PCB,
+  regras, sinalizadores, Gerber, PDF) sobe sozinho uns segundos depois; o que mudou no NexoBD (o Altium exportou, outra
+  máquina salvou) chega aqui e o hub recarrega. Apagar a pasta não apaga nada: ela volta do NexoBD na abertura. Sem o
+  NexoBD, o hub abre com a última cópia e o que você salvar sobe quando ele voltar.
+- **Projetos:** um item por projeto no NexoBD, fora do catálogo (NexoBD 1.5.0): aparecem só aqui. "Excluir projeto"
+  (senha mestre) manda a pasta para o Trash e apaga o projeto no NexoBD.
+- **Biblioteca:** os símbolos, os footprints e o almoxarifado sincronizado com o Odoo (com as `.SchLib`, a `.PcbLib` e
+  o `ALMOX.DbLib` do Altium) são um item do NexoBD; cada sincronismo do Odoo vira uma revisão. Antes de sincronizar, o
+  app traz a versão do NexoBD. A biblioteca do servidor (192.168.15.192) e o "Importar do servidor" saem de cena
+  (voltam se o NexoBD for desligado nas configurações). O login do Odoo agora fica neste PC: Biblioteca › Almoxarifado.
+- **Altium:** os scripts (ExportProject, ExportBoard, BuildSchematic, ApplyChanges) vão para o NexoBD a cada versão, e
+  o **Nexo Hub 2.7.0** os põe na pasta do Altium dele, aponta o `home.txt` para ela e sobe o que o Altium exportar. O
+  app não mexe mais no `home.txt` (a caixa "Apontar o Altium" sai das configurações).
+- Arquivo › **NexoBD: sincronizar agora**; Ajuda › Sobre mostra o estado. Conflito (o mesmo arquivo mudou aqui e no
+  NexoBD) fica com o daqui, e o do NexoBD é guardado em `.altiumhub/conflitos-nexobd`.
+- Precisa do **NexoBD 1.5.0** e do **Nexo Hub 2.7.0**: instale nessa ordem, e o NexoEletric por último.
+
 ## 1.13.0 — 2026-10-19
 
 - **Uma biblioteca de footprints só.** Os footprints criados no editor, pela IA (MCP) ou vindos do NexoCAD ficam na mesma biblioteca que os do Altium, sem a marca "hub" / "hub · 3D": a galeria, o editor de footprint, a troca de footprint no Esquema e a faixa de Footprints da Biblioteca mostram tudo junto, em ordem alfabética, com a marca "3D" quando o footprint tem modelo.

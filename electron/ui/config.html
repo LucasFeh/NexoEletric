@@ -10,6 +10,10 @@
   body.setup .so-setup, body.config .so-config { display: block; }
   /* caixa so do setup: o block acima derrubava o flex e a caixa ficava numa linha e o texto noutra */
   body.setup label.check.so-setup, body.config label.check.so-config { display: flex; }
+  /* 1.14.0: com o NexoBD, a biblioteca do servidor, a importacao e o home.txt do Altium nao sao mais do app */
+  .so-nexobd { display: none; }
+  body.nexobd .so-nexobd { display: block; }
+  body.nexobd .fora-nexobd { display: none !important; }
   #altHome { word-break: break-all; }
   /* nota de uma caixa, logo abaixo dela e alinhada ao texto; vazia, nao ocupa espaco */
   .nota.sob-caixa { margin: -8px 0 12px 26px; }
@@ -41,6 +45,13 @@
     </div>
   </div>
 
+  <div class="card so-nexobd">
+    <h2>NexoBD</h2>
+    <p>Os projetos, a biblioteca (símbolos, footprints e o almoxarifado do Odoo) e os scripts do Altium ficam no <b>NexoBD</b>, pelo Nexo Hub desta máquina. A pasta de trabalho é só uma cópia: o que você salva sobe sozinho, e apagar a pasta não apaga nada.</p>
+    <p class="mono" id="nexobdEstado"></p>
+    <p class="nota">O Altium desta máquina trabalha na pasta do Altium do <b>Nexo Hub</b> (painel do Nexo Hub › engrenagem › Altium): é lá que estão os scripts, e é o Hub que aponta o <code>home.txt</code> para ela.</p>
+  </div>
+
   <div class="card">
     <h2>Servidor central</h2>
     <p>O hub da empresa: a biblioteca é a dele, e é de onde vêm os projetos. O link do BOM que o app copia também é o dele.</p>
@@ -51,18 +62,18 @@
       </div>
       <div class="nota" id="nServidor"></div>
     </div>
-    <label class="check"><input type="checkbox" id="libRemota">
+    <label class="check fora-nexobd"><input type="checkbox" id="libRemota">
       <span><b>Usar a biblioteca do servidor</b>
       <small>Recomendado. Símbolos, almoxarifado e substituições são lidos e gravados direto no servidor, e esta pasta guarda uma cópia para leitura. Sem o servidor, a biblioteca abre só para leitura. Desligado, este PC tem uma biblioteca própria, que se afasta da do servidor a cada edição.</small></span></label>
-    <div class="nota sob-caixa" id="nLibRemota"></div>
-    <label class="check so-setup"><input type="checkbox" id="importar" checked>
+    <div class="nota sob-caixa fora-nexobd" id="nLibRemota"></div>
+    <label class="check so-setup fora-nexobd"><input type="checkbox" id="importar" checked>
       <span><b>Importar projetos e bibliotecas do servidor ao terminar</b>
       <small id="importarTxt">Recomendado. Traz os projetos, as bibliotecas publicadas e o almoxarifado (cerca de 80 MB na primeira vez).</small></span></label>
-    <label class="check"><input type="checkbox" id="syncGuard">
+    <label class="check fora-nexobd"><input type="checkbox" id="syncGuard">
       <span><b>Antes de sincronizar o almoxarifado com o Odoo, atualizar a partir do servidor</b>
       <small>O servidor é quem numera os componentes (Libs/almox-parts.json). Com isso ligado, a numeração daqui continua igual à dele.</small></span></label>
-    <div class="nota sob-caixa" id="nSyncGuard"></div>
-    <p class="nota so-config" id="nImport"></p>
+    <div class="nota sob-caixa fora-nexobd" id="nSyncGuard"></div>
+    <p class="nota so-config fora-nexobd" id="nImport"></p>
   </div>
 
   <div class="card">
@@ -76,7 +87,7 @@
     <p class="nota" id="nOdooRemota" style="display:none">Com a biblioteca do servidor, o sincronismo do almoxarifado roda no servidor, com o Odoo e o login de lá: estes campos só valem com ela desligada.</p>
   </div>
 
-  <div class="card">
+  <div class="card fora-nexobd">
     <h2>Altium</h2>
     <p>Os scripts do Altium (ExportPcb, ExportSch, BuildSchematic, ApplyProject) procuram a pasta de trabalho no arquivo <code id="altArq"></code>. Hoje ele aponta para:</p>
     <p class="mono" id="altHome"></p>

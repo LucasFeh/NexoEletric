@@ -983,7 +983,31 @@ def api_project_delete(proj_id):
     except OSError as e:
         return {'ok': False, 'error': 'falha ao mover para o Trash: %s' % e}, 500
     build_index(ROOT)                   # o cache id->nome nao pode apontar para o que saiu
+    _anota_apagar_nexobd(name)
     return {'ok': True, 'trash': os.path.relpath(dst, ROOT)}
+
+
+def _anota_apagar_nexobd(name):
+    """No app desktop (ALTIUMHUB_NEXOBD=1) o projeto mora no NexoBD e Projects\\ e so a copia:
+    sem esta nota, a proxima rodada do electron/lib/armazem.js o baixaria de volta. Ela le a
+    lista, apaga o item no NexoBD e tira o nome daqui."""
+    if os.environ.get('ALTIUMHUB_NEXOBD') != '1':
+        return
+    arq = os.path.join(ROOT, '.altiumhub', 'nexobd-apagar.json')
+    try:
+        with open(arq, encoding='utf-8') as f:
+            lista = json.load(f)
+        if not isinstance(lista, list):
+            lista = []
+    except (OSError, ValueError):
+        lista = []
+    if name not in lista:
+        lista.append(name)
+    os.makedirs(os.path.dirname(arq), exist_ok=True)
+    tmp = arq + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(lista, f)
+    os.replace(tmp, arq)
 
 
 @app.route('/api/run', methods=['POST'])

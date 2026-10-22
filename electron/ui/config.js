@@ -80,6 +80,10 @@ function mostraAtualizacao(u) {
 
 async function carrega() {
   cfg = await api.chamar('config:ler');
+  if (cfg.nexobd) {
+    document.body.classList.add('nexobd');
+    $('nexobdEstado').textContent = cfg.nexobdEstado || '';
+  }
   $('versao').textContent = `versão ${cfg.versao}${cfg.commit ? ' · ' + cfg.commit.slice(0, 10) : ''}`;
   $('workspace').value = cfg.workspace || cfg.workspacePadrao;
   $('serverUrl').value = cfg.serverUrl;
