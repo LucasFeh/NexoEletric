@@ -4,6 +4,12 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.21.1 — 2026-10-22
+
+- O instalador da 1.21.0 saiu sem as dependências do atualizador automático (`electron-updater`: o
+  `node_modules` do build era um atalho para outra pasta e o empacotador não as achou). Mesmo código da 1.21.0,
+  instalador refeito com as dependências dentro. Instale esta no lugar da 1.21.0.
+
 ## 1.21.0 — 2026-10-22
 
 Boas práticas de PCB no MCP (pedido do dono: "trilha passando por cima de pad com net diferente não pode acontecer
