@@ -315,13 +315,15 @@ def api_fp3d():
     return {'ok': True, 'id': sha, 'file': '3d-hub/' + sha + '.step', 'name': nome, 'bytes': len(dados)}
 
 
-# ── abrir documento do Altium (.SchDoc / .PrjPcb) direto no hub ──
-# O hub manda os arquivos (base64 no JSON: o .PrjPcb e as folhas, soltos) ou, so do proprio PC,
-# os caminhos no disco; tools/schdoc/schdoc2sch.py grava Projects/<projeto>/schematic.js no
-# formato do ExportProject.pas. O .SchDoc so e LIDO. Projeto que ja tem schematic.js so com
-# "substituir" (e o anterior fica em schematic.js.bak-<data>).
-ALTIUM_MAX = 200 * 1024 * 1024
-ALTIUM_EXT = ('.schdoc', '.prjpcb')
+# ── abrir documento do Altium (.SchDoc / .PcbDoc / .PrjPcb) direto no hub ──
+# O hub manda os arquivos (base64 no JSON: o .PrjPcb, as folhas e a placa, soltos) ou, so do
+# proprio PC, os caminhos no disco (o app desktop, com o arquivo arrastado para a janela): com o
+# caminho do .PrjPcb, as folhas e o .PcbDoc sao achados pelo proprio projeto. Sai o projeto como o
+# ExportProject + ExportBoard o deixariam: schematic.js (tools/schdoc/schdoc2sch.py), board.js,
+# rules.js e o 3D (tools/pcbdoc/abrir_placa.py), e o changes.js/annotations.js vazios. O Altium so
+# e LIDO. Projeto que ja tem schematic.js ou board.js so com "substituir" (o anterior vira .bak).
+ALTIUM_MAX = 400 * 1024 * 1024
+ALTIUM_EXT = ('.schdoc', '.prjpcb', '.pcbdoc')
 _NOME_RUIM = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
@@ -359,7 +361,7 @@ def api_altium_abrir():
             for a in data.get('arquivos') or []:
                 nome = os.path.basename(str(a.get('nome') or '').replace('\\', '/'))
                 if not nome.lower().endswith(ALTIUM_EXT) or nome.startswith('.'):
-                    return {'ok': False, 'error': 'so .SchDoc e .PrjPcb: %s' % nome}, 400
+                    return {'ok': False, 'error': 'so .SchDoc, .PcbDoc e .PrjPcb: %s' % nome}, 400
                 try:
                     dados = base64.b64decode(a.get('b64') or '', validate=True)
                 except (ValueError, TypeError):
@@ -372,30 +374,54 @@ def api_altium_abrir():
                 entradas.append(os.path.join(tmp, nome))
         if not entradas:
             return {'ok': False, 'error': 'nenhum arquivo'}, 400
-        # o .PrjPcb manda na ordem das folhas; sem ele, as folhas na ordem em que vieram
+        # o .PrjPcb manda na ordem das folhas e diz qual e a placa; sem ele, o que veio
+        sys.path.insert(0, os.path.join(ROOT, 'tools', 'pcbdoc'))
+        import abrir_placa as AP
         prj = [e for e in entradas if e.lower().endswith('.prjpcb')]
         folhas = [e for e in entradas if e.lower().endswith('.schdoc')]
+        placas = [e for e in entradas if e.lower().endswith('.pcbdoc')]
+        if prj and not placas:
+            placas = AP.placas_do_prjpcb(prj[0])
+        tem_folhas = bool(folhas) or bool(prj and SD.folhas_do_prjpcb(prj[0]))
         usar = prj[:1] if prj else folhas
-        projeto = data.get('projeto') or os.path.splitext(os.path.basename(usar[0]))[0]
+        projeto = data.get('projeto') or os.path.splitext(os.path.basename((usar or placas)[0]))[0]
         if not _nome_projeto_ok(projeto):
             return {'ok': False, 'error': 'nome de projeto invalido: %s' % projeto}, 400
-        avisos = []
-        try:
-            texto, resumo = SD.converte(usar, projeto, True, avisos)
-        except SD.SchDocErro as e:
-            return {'ok': False, 'error': str(e)}, 422
+        if not tem_folhas and not placas:
+            return {'ok': False, 'error': 'nenhuma folha (.SchDoc) nem placa (.PcbDoc) no que veio'}, 400
         pasta = os.path.join(ROOT, 'Projects', projeto)
         saida = os.path.join(pasta, 'schematic.js')
-        if os.path.exists(saida) and not data.get('substituir'):
+        ja = [n for n in ('schematic.js', 'board.js') if os.path.exists(os.path.join(pasta, n))]
+        if ja and not data.get('substituir'):
             return {'ok': False, 'existe': True, 'projeto': projeto,
-                    'error': 'o projeto "%s" ja tem esquema' % projeto}, 409
-        try:
-            SD.grava(saida, texto, forcar=True, permite_rede=True)
-        except OSError as e:
-            return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
+                    'error': 'o projeto "%s" ja tem %s' % (projeto, ' e '.join(ja))}, 409
+        avisos = []
+        resumo = {}
+        texto = None
+        if tem_folhas:
+            try:
+                texto, resumo = SD.converte(usar, projeto, True, avisos)
+            except SD.SchDocErro as e:
+                return {'ok': False, 'error': str(e)}, 422
+        placa = None
+        if placas:
+            if len(placas) > 1:
+                avisos.append('o projeto tem %d placas; abri a primeira (%s)' % (len(placas), os.path.basename(placas[0])))
+            try:
+                placa = AP.abre_placa(placas[0], pasta, prj[0] if prj else None, avisos)
+            except AP.ErroPlaca as e:
+                if texto is None:
+                    return {'ok': False, 'error': 'PCB: %s' % e}, 422
+                avisos.append('PCB nao aberta: %s' % e)
+        if texto is not None:
+            try:
+                SD.grava(saida, texto, forcar=True, permite_rede=True)
+            except OSError as e:
+                return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
         resumo['avisos'] = avisos
         resumo['faltam'] = [os.path.basename(x) for x in resumo.get('faltam') or []]
-        return {'ok': True, 'projeto': projeto, 'resumo': resumo}
+        build_index(ROOT)
+        return {'ok': True, 'projeto': projeto, 'resumo': resumo, 'esquema': texto is not None, 'placa': placa}
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)

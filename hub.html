@@ -4658,14 +4658,14 @@ function movePickerIdx(delta) {
 /* ═══ EVENTOS ══════════════════════════════════════════════════ */
 $('#pickerBtn').onclick = () => { if (S.pickerOpen) { S.pickerOpen = false; renderHeader(); } else { openPicker(); } };
 $('#pickerCatcher').onclick = () => { S.pickerOpen = false; renderHeader(); };
-/* Arquivo » Abrir documento do Altium: converte no servidor e abre o projeto na aba Esquema */
-window.__hubAbrirAltium = () => {
+/* Arquivo » Abrir documento do Altium (ou o arquivo solto na janela): converte no servidor e abre o projeto */
+window.__hubAbrirAltium = (arquivos) => {
   S.pickerOpen = false; renderHeader();
   if (typeof HubAltiumAbrir === 'undefined') return;
-  return HubAltiumAbrir.abre({ aoAbrir: async nome => {
+  return HubAltiumAbrir.abre({ arquivos: Array.isArray(arquivos) ? arquivos : undefined, aoAbrir: async (nome, r) => {
     const idx = await API.index(); S.projects = idx.projects; renderHeader();
     const x = S.projects.find(p => p.name === nome);
-    if (x) { await selectProject(x.id); goTab('esquema'); }
+    if (x) { await selectProject(x.id); goTab(r && r.esquema === false ? 'pcb' : 'esquema'); }
   } });
 };
 $('#pickerSearch').oninput = e => { S.q = e.target.value; S.pickerIdx = 0; renderHeader(); $('#pickerSearch').focus(); };

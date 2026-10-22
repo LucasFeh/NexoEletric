@@ -9,7 +9,7 @@
 //
 // Nada de expor `module`, `require` ou `process`: os hub-*.js sao UMD e mudariam de
 // comportamento ao ver qualquer um deles.
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const CHAMADAS = new Set([
   'boot:estado', 'boot:tentar', 'boot:log', 'boot:config',
@@ -42,11 +42,16 @@ if (location.protocol === 'file:') {
 const MENU = new Set([
   'novaJanela', 'abrirPasta', 'importar', 'configHub', 'configApp', 'sair',
   'recarregar', 'recarregarSemCache', 'zoomMais', 'zoomMenos', 'zoom0', 'painelProjetos',
-  'telaCheia', 'devtools', 'atualizacoes', 'log', 'pastaLogs', 'conectarIA', 'sobre',
+  'telaCheia', 'devtools', 'atualizacoes', 'log', 'pastaLogs', 'conectarIA', 'sobre', 'nexoSync', 'nexobd',
 ]);
 if ((location.protocol === 'http:' || location.protocol === 'https:') &&
     (location.hostname === '127.0.0.1' || location.hostname === 'localhost')) {
   contextBridge.exposeInMainWorld('eletricApp', {
     menu: (id) => (MENU.has(id) ? ipcRenderer.invoke('menu:acao', id) : Promise.reject(new Error('comando desconhecido: ' + id))),
+    // O caminho no disco de um arquivo que a pessoa ARRASTOU ou ESCOLHEU (File da pagina): e o que
+    // deixa o .PrjPcb abrir com as folhas e a placa que ele cita (hub-altiumabrir.js). So le o
+    // nome que o Chromium ja tem; quem abre o arquivo e o hubserver, que so aceita caminho de
+    // .SchDoc/.PcbDoc/.PrjPcb vindo do proprio PC.
+    caminho: (arquivo) => { try { return webUtils.getPathForFile(arquivo) || ''; } catch { return ''; } },
   });
 }

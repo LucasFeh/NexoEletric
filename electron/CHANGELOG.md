@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.15.0 — 2026-10-22
+
+- **Abrir projeto do Altium com esquema E PCB.** Arquivo › **Abrir projeto do Altium** (ou arraste o arquivo para a
+  janela) e escolha só o **.PrjPcb**: o NexoEletric acha as folhas e a placa pelo próprio projeto e cria tudo sozinho,
+  como o ExportProject + ExportBoard deixariam — o esquema (`schematic.js`), a PCB (`board.js`), as regras da placa
+  (`rules.js`), o 3D (`board3d.js` + os modelos) e o `changes.js`/`annotations.js` vazios. O Altium nem precisa estar
+  instalado, e os arquivos do Altium só são lidos (podem estar no W:). Também aceita um `.SchDoc` ou um `.PcbDoc`
+  soltos. Projeto que já existe pergunta antes de substituir (o anterior fica como `.bak`). O projeto novo sobe para o
+  NexoBD como os outros.
+- **Arrastar e soltar:** solte o `.PrjPcb` (ou `.SchDoc`/`.PcbDoc`) em qualquer lugar da janela, inclusive em cima do
+  Esquema ou da PCB; o aviso "Solte o projeto do Altium…" aparece enquanto o arquivo está sobre a janela.
+- Na barra de menus da página, **NexoBD: sincronizar agora** no lugar de "Importar do servidor", e o
+  "Nexo Hub: sincronizar agora" dali volta a funcionar.
+
 ## 1.14.0 — 2026-10-22
 
 - **Nada mora mais no NexoEletric: tudo vai para o NexoBD.** Projetos, biblioteca e os scripts do Altium ficam no

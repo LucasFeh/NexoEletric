@@ -37,9 +37,9 @@
   function menusDoApp() {
     const P = temPonte();
     const file = [it('novaJanela', 'Ctrl+Shift+N')];
-    /* o esquema do Altium aberto direto no hub (hub-altiumabrir.js) */
+    /* o projeto do Altium (esquema e PCB) aberto direto no hub (hub-altiumabrir.js); arrastar o .PrjPcb tambem abre */
     if (typeof window.__hubAbrirAltium === 'function') file.push({ rot:T('mb.abrirAltium'), tecla:'', f:() => window.__hubAbrirAltium() });
-    if (P) file.push('-', it('abrirPasta'), it('importar'), it('nexoSync'));
+    if (P) file.push('-', it('abrirPasta'), it('nexobd'), it('nexoSync'));
     file.push('-', it('configHub'));
     if (P) file.push(it('configApp', 'Ctrl+,'));
     const view = [it('recarregar', 'F5')];
