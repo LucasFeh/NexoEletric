@@ -35,6 +35,7 @@
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
 <script src="hub-odoocfg.js"></script>
 <script src="hub-atalhos.js"></script>
+<script src="hub-pcbdesfazer.js"></script>
 <!-- os comandos, menus e teclas do Altium (tools/altiumdna): a dica "Altium: Place » Track · P,T" no editor de atalhos -->
 <script src="hub-altiumdna.js"></script>
 <script src="hub-libremota.js"></script>
@@ -1466,6 +1467,7 @@ function renderSubtabs() {
     b.onclick = () => goTab(sb.id);
     nav.append(b);
   });
+  if (window.HubPcbDesfazer) HubPcbDesfazer.poe(nav, grupo.id === 'pcb');   /* ↶ ↷ da vista PCB no fim da fileira */
   /* O libPicker NAO mora mais aqui — ver renderTabs. Esta funcao sai cedo quando a aba de
      cima nao tem filhas (`nav.hidden`), e desde que a Biblioteca virou UMA aba so (as
      quatro sub-abas viraram tres vistas do aside, em 2026-09-17) ela cai exatamente nesse

@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.27.0 — 2026-10-23
+
+- **Enviar pra JLC sem "Claude".** O botão nunca chamou o Claude, mas o IntegrateBrowser mostrava toda automação na
+  janela "IntegrateBrowser — Claude", no grupo laranja "Claude". Agora a guia abre na **sua** janela do IntegrateBrowser,
+  como uma guia normal, que vem para a frente. Precisa do Nexo Hub 2.12.0; num Nexo Hub mais velho ela abre na sua
+  janela, mas ainda marcada como do Claude. As ferramentas `jlc_*` do MCP, que são o Claude de verdade, continuam na
+  janela dele.
+- **Fechar o navegador no meio do envio cancela na hora.** Antes o envio ficava esperando a guia fechada (até 5 minutos
+  no login) e o botão continuava desabilitado. Agora vem o aviso "o navegador foi fechado — envio cancelado" e o botão
+  volta.
+- **Desfazer/Refazer no fim da fileira Placa | Gerber.** Os ícones ↶ ↷ saíram da barra de ferramentas da PCB e foram
+  para o canto direito da fileira de sub-abas. Eles acendem quando há o que desfazer ou refazer. Ctrl+Z, Ctrl+Y e o menu
+  Editar continuam valendo, inclusive com o foco fora da vista (depois de clicar numa aba, por exemplo).
+
 ## 1.26.0 — 2026-10-23
 
 O Gerber sem a faixa de cima (pedido do dono: "pegue essa área toda bagunçada, cheia de informação, e transforma em um

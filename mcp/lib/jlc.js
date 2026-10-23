@@ -124,10 +124,15 @@ async function conexao() {
   throw new Error('o Nexo Hub não abriu o IntegrateBrowser em 30 s — abra o Nexo Hub e tente de novo');
 }
 
+/* a guia (ou o navegador inteiro) foi fechada no meio do envio: não adianta esperar -- o envio para
+   na hora (pedido do dono: fechado o navegador, o botão ficava desabilitado até as esperas acabarem) */
+const FECHOU = /foi fechada|não existe mais|Nenhuma guia aberta|não tem nenhuma janela|fetch failed|ECONNREFUSED|ECONNRESET|recusou o token|proibido/i;
+const erroFechou = () => Object.assign(new Error('o navegador foi fechado — envio cancelado'), { fechou: true });
+
 /* uma guia só, a deste envio: toda ferramenta vai nela (aba), para não mexer na guia que a IA ou a
    pessoa estão usando */
 class Guia {
-  constructor(c) { this.c = c; this.aba = null; }
+  constructor(c, programa) { this.c = c; this.aba = null; this.programa = programa || ''; }
   async chama(nome, params) {
     const p = Object.assign({}, params || {});
     if (this.aba && !p.aba && nome !== 'janela') p.aba = this.aba;
@@ -136,19 +141,28 @@ class Guia {
       r = await fetch(this.c.url + '/ferramenta', { method: 'POST', headers: { authorization: 'Bearer ' + this.c.token, 'content-type': 'application/json' },
         body: JSON.stringify({ nome, params: p }), signal: AbortSignal.timeout(3 * 60000) });
       j = await r.json();
-    } catch (e) { throw new Error('IntegrateBrowser (' + nome + '): ' + (e && e.message || e)); }
-    if (!j.ok) throw new Error('IntegrateBrowser (' + nome + '): ' + (j.erro || 'HTTP ' + r.status));
+    } catch (e) {
+      const m = String(e && (e.cause && e.cause.code || e.message) || e);
+      if (this.aba && FECHOU.test(m)) throw erroFechou();
+      throw new Error('IntegrateBrowser (' + nome + '): ' + m);
+    }
+    if (!j.ok) {
+      if (this.aba && FECHOU.test(String(j.erro || ''))) throw erroFechou();
+      throw new Error('IntegrateBrowser (' + nome + '): ' + (j.erro || 'HTTP ' + r.status));
+    }
     const res = j.resultado;
     if (res && res.aba && !this.aba) this.aba = res.aba;
     return res;
   }
+  /* a janela do navegador na tela: a do Claude (a IA) -- a guia de um programa já abre na janela da pessoa */
+  async mostra() { if (this.programa) return; try { await this.chama('janela', { mostrar: true }); } catch (e) { if (e.fechou) throw e; } }
   js(codigo) { return this.chama('js', { codigo }).then(r => r && r.resultado); }
   url() { return this.js('location.href'); }
   async ate(codigo, ms, passo) {
     const t0 = Date.now();
     for (;;) {
       let v = null;
-      try { v = await this.js(codigo); } catch (_) { v = null; }
+      try { v = await this.js(codigo); } catch (e) { if (e.fechou) throw e; v = null; }
       if (v) return v;
       if (Date.now() - t0 > ms) return null;
       await espera(passo || 800);
@@ -158,9 +172,14 @@ class Guia {
     try { const r = await this.chama('captura', {}); return r && r.__imagem ? { base64: r.__imagem, mime: r.mime || 'image/jpeg' } : null; } catch (_) { return null; }
   }
 }
-async function abreGuia(url, mostrar) {
-  const g = new Guia(await conexao());
-  if (mostrar) { try { await g.chama('janela', { mostrar: true }); } catch (_) { /* modo leve */ } }
+/* programa: quem automatiza é o NexoEletric (o botão), não a IA -- a guia abre na janela da pessoa,
+   como uma guia dela, fora do grupo "Claude" do IntegrateBrowser (aba_nova {programa}, Nexo Hub
+   2.12.0; um Nexo Hub mais velho ignora o campo e abre na janela da pessoa do mesmo jeito). Sem
+   programa (as ferramentas jlc_* do MCP: a IA de verdade), na janela do Claude. */
+async function abreGuia(url, mostrar, programa) {
+  const g = new Guia(await conexao(), programa);
+  if (programa) { await g.chama('aba_nova', { url, janela: 'pessoa', programa }); return g; }
+  if (mostrar) await g.mostra();
   await g.chama('navegar', { url, nova: true });
   return g;
 }
@@ -209,7 +228,8 @@ function qtdPerto(n) {
 
 /* Sobe o .zip, confere as camadas, põe a quantidade e salva no carrinho.
    o = {zip, camadas (as de cobre do Gerber), quantidade, mostrar, esperaLogin (ms: com a janela
-        aberta, espera a pessoa entrar e refaz), progresso(fn)}
+        aberta, espera a pessoa entrar e refaz), programa (quem automatiza, quando não é a IA: a
+        guia vai para a janela da pessoa), progresso(fn)}. Fechou a guia ou o navegador: erro na hora.
    -> {etapa:'carrinho'|'login'|'conferir', detectado, camadas, quantidade, preco, url, avisos, imagem} */
 async function enviar(o) {
   const avisos = [], prog = o.progresso || (() => {});
@@ -219,7 +239,7 @@ async function enviar(o) {
   const alvo = camadasJlc(Number(o.camadas) || 0);
   for (let volta = 0; volta < 2; volta++) {
     prog('abrindo o orçamento da JLC');
-    const g = await abreGuia(QUOTE, o.mostrar);
+    const g = await abreGuia(QUOTE, o.mostrar, o.programa);
     if (!await g.ate(`!!document.querySelector('#uploadFile')`, 40000)) throw new Error('a página de orçamento da JLC não abriu o campo de upload (mudou? confira em ' + QUOTE + ')');
     prog('subindo o Gerber');
     await g.chama('enviar_arquivo', { seletor: '#uploadFile', arquivos: [path.resolve(o.zip)] });
@@ -250,7 +270,7 @@ async function enviar(o) {
     if (destino === 'login') {
       if (o.esperaLogin && volta === 0) {
         prog('entre na sua conta da JLC na janela do IntegrateBrowser');
-        try { await g.chama('janela', { mostrar: true }); } catch (_) { /* segue */ }
+        await g.mostra();
         const ok = await g.ate(`!/passport\\.jlcpcb\\.com/.test(location.href) && /jlcpcb\\.com/.test(location.href)`, o.esperaLogin, 2000);
         if (!ok) return Object.assign(res, { etapa: 'login', url: await g.url(), aviso: 'o login não terminou a tempo' });
         avisos.push('entrou na conta: o Gerber foi enviado de novo (o orçamento recomeça depois do login)');
@@ -276,7 +296,7 @@ async function enviar(o) {
 async function login(o) {
   const usuario = String(o && o.usuario || '').trim(), senha = String(o && o.senha || '');
   if (!usuario || !senha) throw new Error('faltam o usuário (ou e-mail) e a senha da JLC');
-  const g = await abreGuia(LOGIN, o.mostrar);
+  const g = await abreGuia(LOGIN, o.mostrar, o.programa);
   const campo = await g.ate(`(() => { const p = document.querySelector('input[type=password]'); const u = [...document.querySelectorAll('input')].find(i => i.type !== 'password' && i.type !== 'checkbox' && i.type !== 'hidden' && i.offsetParent);
     if (!p || !u) return ''; u.setAttribute('data-nexo-jlc', 'usuario'); p.setAttribute('data-nexo-jlc', 'senha');
     const b = [...document.querySelectorAll('button')].find(x => /^\\s*Sign In\\s*$/i.test(x.textContent)); if (b) b.setAttribute('data-nexo-jlc', 'entrar'); return 'ok'; })()`, 30000);
@@ -292,7 +312,7 @@ async function login(o) {
   if (saiu) return { etapa: 'logado', url: await g.url() };
   const msg = String(await g.js(`(() => { const e = [...document.querySelectorAll('.el-form-item__error,.el-message,[class*=error],[class*=tip]')].find(x => x.offsetParent && x.textContent.trim().length > 3); return e ? e.textContent.trim().slice(0, 200) : ''; })()`) || '');
   const captcha = await g.js(`[...document.querySelectorAll('iframe')].some(f => /recaptcha|captcha|geetest/i.test(f.src) && f.offsetParent && f.getBoundingClientRect().height > 100)`);
-  try { await g.chama('janela', { mostrar: true }); } catch (_) { /* segue */ }
+  await g.mostra();
   return { etapa: captcha ? 'captcha' : 'erro', mensagem: msg.replace(senha, '•••'), url: await g.url(), imagem: await g.captura(),
            aviso: captcha ? 'a JLC pediu a verificação (captcha): resolva na janela do IntegrateBrowser' : 'a JLC não aceitou o login' + (msg ? ': ' + msg.replace(senha, '•••') : '') };
 }
@@ -315,7 +335,7 @@ if (require.main === module && process.argv.includes('--cli')) {
       const p = await preparar(a.gdir, { nome: a.nome });
       diz({ preparado: { camadas: p.camadas, camadasJlc: p.camadasJlc, arquivos: p.arquivos, zip: p.zip } });
       const r = await enviar({ zip: p.zip, camadas: p.camadas, quantidade: a.quantidade, mostrar: a.mostrar !== false,
-                               esperaLogin: a.esperaLogin || 0, progresso: t => diz({ progresso: t }) });
+                               esperaLogin: a.esperaLogin || 0, programa: a.programa || 'NexoEletric', progresso: t => diz({ progresso: t }) });
       delete r.imagem;
       diz({ fim: Object.assign(r, { zip: p.zip }) });
     } catch (e) { diz({ erro: String(e && e.message || e) }); }

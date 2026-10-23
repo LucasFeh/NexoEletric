@@ -3562,8 +3562,8 @@ const BARRA = [
   { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Medir distância — dois cliques' },
   { id:'sinalizar', ic:'sinalizar', tool:'sinalizar', at:'sinalizar', titulo:'Sinalizar um problema para a IA (annotations.js)' },
   { id:'ratsnest', ic:'ratsnest', acao:'ratsnest', at:'ratsnest', titulo:'Linhas de conexão (ratsnest) — Ctrl+clique num cobre realça a net, Esc limpa' }, '|',
-  { id:'desfazer', ic:'desfazer', acao:'desfazer', at:'desfazer', titulo:'Desfazer' },
-  { id:'refazer', ic:'refazer', acao:'refazer', at:'refazer', titulo:'Refazer' }, '|',
+  /* Desfazer/Refazer sairam daqui (pedido do dono, 2026-10-23): moram no fim da fileira "Placa |
+     Gerber" do hub (hub-pcbdesfazer.js), e Ctrl+Z/Ctrl+Y e o menu Editar continuam valendo */
   { id:'regras', ic:'regras', acao:'regras', at:'regras', titulo:'Regras de projeto (Design » Rules)' },
   { id:'drc', ic:'drc', acao:'drc', at:'drc', rotulo:'DRC', titulo:'Design Rule Check (Tools » Design Rule Check) — o relatório no painel Messages' },
   { id:'eco', ic:'eco', acao:'atualizarPcb', at:'atualizarPcb', titulo:'Atualizar a PCB pelo esquema (Design » Update PCB Document: o ECO)' },
@@ -3663,12 +3663,15 @@ function pintaBarra(){
       el.replaceChildren(HubPcbIcones.icone(editOn ? 'cadeadoAb' : 'cadeado'));
     } else if (b.tool) el.setAttribute('aria-pressed', String(tool === b.tool));
     else if (b.id === 'preencher') el.setAttribute('aria-pressed', String(preencher));
-    if (b.id === 'desfazer') el.disabled = undoStack.length < 2;
-    if (b.id === 'refazer') el.disabled = !redoStack.length;
     const t = b.at ? teclaDe(b.at) : (b.id === 'select' ? '' : '');
     el.title = t && b.id !== 'editar' ? tit + ' (' + t + ')' : tit;
     el.setAttribute('aria-label', el.title);
   }
+  avisaHistorico();
+}
+/* conta a casca (hub-pcbdesfazer.js) se ha o que desfazer/refazer: os botoes da fileira Placa | Gerber */
+function avisaHistorico(){
+  try { if (window.parent !== window && window.parent.HubPcbDesfazer) window.parent.HubPcbDesfazer.estado(undoStack.length > 1, redoStack.length > 0); } catch (e) {}
 }
 function togglePreencher(){
   preencher = !preencher;
@@ -5927,6 +5930,7 @@ async function enviaJlc(){
     if (passo && passo !== ultimo) { ultimo = passo; aviso.close(); aviso = HubDialog.toast('JLC: ' + passo + '…', 'info', 0); }
     if (e.fim) {
       aviso.close();
+      if (e.erro && /navegador foi fechado/.test(e.erro)) { HubDialog.toast('Enviar pra JLC: o navegador foi fechado — envio cancelado', 'info', 4000); return; }
       if (e.erro) throw new Error(e.erro);
       const s = e.resultado || {};
       const av = (s.avisos || []).length ? '\n\nAvisos:\n• ' + s.avisos.join('\n• ') : '';
@@ -6213,6 +6217,7 @@ window.__hubPcb = Object.assign(Object.create(V), {
   /* o smoke do painel de propriedades (pad, furo, cores): os alvos e as fichas sem clicar na tela */
   alvos:() => [...PORCHAVE.values()], selecionar(lista){ selSo(lista); aoMudarSel(); }, fichaDe, arcoCheio, circuloDePts,
   changes:() => CH, fazAcao, destravar(){ editOn = true; pintaBarra(); },
+  historico:() => ({ desfazer:undoStack.length > 1, refazer:redoStack.length > 0 }),
   valida:() => HC.applyPcbChanges(B, CH).changeItems.map(i => ({ op:i.ch.op, status:i.status, msg:i.msg || '' })),
 });
 

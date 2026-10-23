@@ -65,6 +65,8 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   ws.onmessage = m => {
     const d = JSON.parse(m.data);
     if (d.id && pend.has(d.id)) { pend.get(d.id)(d); pend.delete(d.id); }
+    /* o "sair sem salvar?" da vista (beforeunload) ao trocar de página: aceita */
+    else if (d.method === 'Page.javascriptDialogOpening') ws.send(JSON.stringify({ id: ++id, method: 'Page.handleJavaScriptDialog', params: { accept: true } }));
     else if (d.method === 'Runtime.exceptionThrown') erros.push('exceção: ' + JSON.stringify(d.params.exceptionDetails).slice(0, 400));
     else if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') erros.push(d.params.args.map(a => a.value || a.description).join(' ').slice(0, 300));
   };
@@ -209,6 +211,46 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
 
   /* 4. sem erro de script */
   assert.deepStrictEqual(erros, [], 'erros na página: ' + erros.join(' || '));
+  /* 7. a casca (hub.html, aba PCB): ↶ ↷ no fim da fileira Placa | Gerber, fora da barra da vista; o botão
+     e o Ctrl+Z/Ctrl+Y com o foco na casca desfazem e refazem na vista */
+  const errosAntes = erros.length;
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORTA}/hub.html#` + encodeURIComponent(PROJ) + '/pcb' });
+  const quadro = `document.querySelector('iframe[data-kind="pcb"]')`;
+  let pronto = false;
+  for (let i = 0; i < 80 && !pronto; i++) { await espera(250); pronto = await js(`!!(${quadro} && ${quadro}.contentWindow.__hubPcb && document.querySelector('#subtabs .pcb-desfazer'))`).catch(() => false); }
+  assert.ok(pronto, 'a casca abre a aba PCB com o desfazer na fileira Placa | Gerber');
+  await espera(1500);
+  const V2 = `${quadro}.contentWindow.__hubPcb`;
+  assert.ok(!(await js(`!!${quadro}.contentDocument.getElementById('tb-desfazer')`)), 'o desfazer saiu da barra de ferramentas da vista');
+  const bts = () => js(`[...document.querySelectorAll('#subtabs .pcb-desfazer button')].map(b => b.disabled)`);
+  await js(`${V2}.destravar()`);
+  const n0 = (await js(`${V2}.changes().length`));
+  /* uma mudança de verdade pela tela: uma via num canto da placa */
+  await js(`${V2}.setTool("via")`);
+  const bb2 = B.board.bbox, [vx, vy] = [bb2.x1 + 2, bb2.y2 - 2];
+  await js(`${V2}.setView(${vx}, ${vy}, 20)`);
+  await espera(200);
+  const r2 = await js(`(() => { const f = ${quadro}.getBoundingClientRect(); const s = ${V2}.telaDe(${vx}, ${vy}); const c = ${quadro}.contentDocument.getElementById('cv').getBoundingClientRect(); return { x: f.left + c.left + s.x, y: f.top + c.top + s.y }; })()`);
+  await mouse('mouseMoved', r2.x, r2.y); await espera(80);
+  await mouse('mousePressed', r2.x, r2.y, 'left'); await mouse('mouseReleased', r2.x, r2.y, 'left');
+  await espera(400);
+  await js(`${V2}.setTool("select")`);
+  const n1 = await js(`${V2}.changes().length`);
+  assert.ok(n1 > n0, 'a via entrou (' + n0 + ' -> ' + n1 + ')');
+  assert.deepStrictEqual(await bts(), [false, true], 'com mudança: desfazer aceso, refazer apagado');
+  await print('7-casca-desfazer');
+  await js(`document.querySelector('#subtabs .pcb-desfazer button').click()`);
+  await espera(300);
+  assert.strictEqual(await js(`${V2}.changes().length`), n0, 'o ↶ da fileira desfez na vista');
+  assert.deepStrictEqual((await bts())[1], false, 'refazer acende');
+  await js(`document.body.focus(); document.activeElement && document.activeElement.blur && document.activeElement.blur()`);
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'y', code: 'KeyY', windowsVirtualKeyCode: 89, modifiers: 2 });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'y', code: 'KeyY', windowsVirtualKeyCode: 89, modifiers: 2 });
+  await espera(300);
+  assert.strictEqual(await js(`${V2}.changes().length`), n1, 'Ctrl+Y com o foco na casca refez na vista');
+  const meus = erros.slice(errosAntes).filter(x => /desfazer|HubPcbDesfazer|avisaHistorico/i.test(x));
+  assert.deepStrictEqual(meus, [], 'sem erro do desfazer na casca');
+
   console.log(`smoke-vista-pcb OK (${CH.filter(o => o.op === 'track_add').length} trilhas feitas na tela, largura e net pela regra, DRC limpo)`);
   ws.close();
   fim(0);

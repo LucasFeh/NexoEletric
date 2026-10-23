@@ -46,7 +46,8 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
       const c = params.codigo || '';
       switch (nome) {
         case 'janela': return ok({});
-        case 'navegar': est.url = params.url; return ok({ aba: 'g9', url: params.url });
+        case 'navegar': est.url = params.url; est.guia = 'claude'; return ok({ aba: 'g9', url: params.url });
+        case 'aba_nova': est.url = params.url; est.guia = params.janela + ':' + params.programa; return ok({ aba: 'g9', url: params.url });
         case 'enviar_arquivo': est.subiu = params.arquivos[0]; return ok({ aba: 'g9' });
         case 'digitar': est.digitado.push(params.seletor); if (params.seletor.includes('senha')) est.senhaDigitada = params.texto; return ok({ aba: 'g9' });
         case 'captura': return ok({ __imagem: 'AAAA', mime: 'image/jpeg' });
@@ -56,6 +57,7 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
           if (params.seletor === '[data-nexo-jlc=entrar]') { est.logado = est.senhaDigitada === SENHA; if (est.logado) est.url = 'https://jlcpcb.com/'; }
           return ok({ aba: 'g9' });
         case 'js': {
+          if (est.fechada) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ ok: false, erro: 'A guia g9 não existe mais (veja abas)' })); }
           let r = null;
           if (c === 'location.href') r = est.url;
           else if (c.includes("querySelector('#uploadFile')")) r = /quote/.test(est.url);
@@ -101,6 +103,21 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
   assert.strictEqual(r2.etapa, 'carrinho'); assert.strictEqual(r2.noCarrinho, true);
   assert.ok(r2.imagem && r2.imagem.base64, 'a captura volta para conferir');
   console.log('  envio: quantidade da lista, 4 camadas, login, carrinho e a captura ok');
+
+  /* o botão do NexoEletric (programa): a guia abre na janela da pessoa, não na do Claude */
+  est.subiu = null;
+  const rp = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 5, programa: 'NexoEletric' });
+  assert.strictEqual(rp.etapa, 'carrinho');
+  assert.strictEqual(est.guia, 'pessoa:NexoEletric', 'o botão não usa a janela do Claude');
+  assert.ok(!est.chamadas.slice(-12).includes('janela'), 'nem mostra a janela do Claude');
+  /* fechou o navegador no meio: o envio para na hora (o botão não fica desabilitado esperando) */
+  est.logado = false; est.subiu = null;
+  const t0 = Date.now();
+  setTimeout(() => { est.fechada = true; }, 50);
+  await assert.rejects(JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 5, programa: 'NexoEletric', esperaLogin: 60000 }), e => e.fechou === true && /navegador foi fechado/.test(e.message));
+  assert.ok(Date.now() - t0 < 8000, 'parou na hora: ' + (Date.now() - t0) + ' ms');
+  est.fechada = false; est.logado = true;
+  console.log('  botão como programa (janela da pessoa) e navegador fechado no meio ok');
 
   /* 3 camadas de cobre: a JLC recebe 4, e o aviso diz */
   est.camada = '2';
