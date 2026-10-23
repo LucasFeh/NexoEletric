@@ -383,6 +383,19 @@ var changes = [
   confere clearance, curto, largura, via, furo, furo a furo, ponte de máscara, silk,
   contorno e net não roteada.
 - Rode o DRC depois de rotear; não entregue placa com violação sem dizer qual e por quê.
+- O roteador usa as mesmas regras do DRC (`pcb_rotear` e a Trilha da vista):
+  - folga de cada par pela Clearance vencedora (escopo, prioridade e matriz de objetos);
+  - contorno pela Board Outline Clearance;
+  - camada proibida pela Routing Layers (`motivo: camada-proibida`).
+- Largura e via, como o "Rule Preferred" do Altium:
+  - sem `w`/`size`, saem da preferida da Width / Routing Via Style da net;
+  - valor fora da faixa da regra vira o limite (`largura_ajustada` / `via_ajustada` na resposta).
+- `pcb_via` recusa via encostada em cobre de outra net (como a vista); `forcar:true` passa.
+- `pcb_rotear` não grava rota que sairia abaixo da folga, e responde `motivo: partida-em-conflito`
+  com as `violacoes`. Acontece quando a partida já está perto demais, por exemplo pad de passo fino
+  com a largura da regra. Diminua `w` dentro da faixa, ou parta de outro ponto.
+- Pad SMD só se liga na camada dele. Rotear em outra camada responde `pad-em-outra-camada`: desça por
+  via (trilha até um ponto livre na camada do pad, `pcb_via`, e siga na outra camada).
 
 **Também vem do Altium (só na tela e nas saídas, sem op própria).**
 - Linhas de conexão (ratsnest): o que falta ligar por net.

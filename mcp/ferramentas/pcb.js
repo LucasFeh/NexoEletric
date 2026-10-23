@@ -73,10 +73,40 @@ function textoGeo(ctx) {
   const G = ctx.modulo('hub-gerber.js');
   return G && G.geometriaTexto ? (t => { if (!t || t.hidden) return null; try { return G.geometriaTexto(t); } catch (_) { return null; } }) : null;
 }
-function cena(ctx, eb) {
+/* os recortes que são furo (Board Cutout), como o DRC os lê: o do tamanho da placa é a forma dela */
+function recortesDe(eb) {
+  const bb = eb.board && eb.board.bbox, out = [];
+  for (const k of eb.cutouts || []) {
+    if (!k || !Array.isArray(k.points) || k.points.length < 3 || k.kindn === -1) continue;
+    const xs = k.points.map(q => q[0]), ys = k.points.map(q => q[1]);
+    if (bb && Math.min(...xs) <= bb.x1 + 1e-3 && Math.max(...xs) >= bb.x2 - 1e-3 && Math.min(...ys) <= bb.y1 + 1e-3 && Math.max(...ys) >= bb.y2 - 1e-3) continue;
+    out.push({ id: k.id, pts: k.points });
+  }
+  return out;
+}
+/* a cena do roteador com as REGRAS DO PROJETO (as mesmas do drc_rodar): folga por par, contorno,
+   largura/via/camada pela regra da net. `p` = o projeto; sem ele (ou sem o hub-pcbregras.js), a
+   folga única do board.rules */
+function cena(ctx, eb, p) {
   const R = ctx.exige('hub-roteador.js', 'HubRoteador');
   const rules = eb.rules || {};
-  return R.cena(eb, { clearance: rules.clearance > 0 ? rules.clearance : R.FOLGA_PADRAO, placa: { lacos: lacosDe(ctx, eb), recortes: [] }, textoGeo: textoGeo(ctx) });
+  const o = { placa: { lacos: lacosDe(ctx, eb), recortes: recortesDe(eb) }, textoGeo: textoGeo(ctx) };
+  const S = p ? ops.regrasDoProjeto(ctx, p) : null;
+  if (S) o.regras = S.conjunto; else o.clearance = rules.clearance > 0 ? rules.clearance : R.FOLGA_PADRAO;
+  return R.cena(eb, o);
+}
+
+/* a largura e a via que as regras do projeto pedem para a net (o roteador resolve: é a mesma conta
+   da vista); sem o roteador ou sem regras, o board.rules */
+function larguraDaNet(ctx, eb, p, net, layer, board) {
+  const R = ctx.modulo('hub-roteador.js');
+  if (R && R.larguraDaRegra && ctx.hc.isCopper(layer)) return R.larguraDaRegra(cena(ctx, eb, p), net || '', layer).pref;
+  return board.rules && board.rules.width > 0 ? board.rules.width : 0.254;
+}
+function viaDaNet(ctx, eb, p, net, rules) {
+  const R = ctx.modulo('hub-roteador.js');
+  if (R && R.viaDaRegra) return R.viaDaRegra(cena(ctx, eb, p), net || '');
+  return { size: rules.viaSize || 0.6, drill: rules.viaDrill || 0.3 };
 }
 
 /* o pad do componente "R1.2" (ou {ref, pad}) na placa efetiva */
@@ -87,8 +117,17 @@ function padDe(eb, alvo) {
   const c = (eb.components || []).find(x => x.ref === s.slice(0, i));
   return c ? (c.pads || []).find(p => String(p.name) === s.slice(i + 1)) || null : null;
 }
-function ponto(eb, v, nome) {
-  if (Array.isArray(v) && v.length === 2 && v.every(isNum)) return { x: v[0], y: v[1], net: '', pad: null };
+function ponto(eb, v, nome, layer) {
+  if (Array.isArray(v) && v.length === 2 && v.every(isNum)) {
+    /* com a camada: o pad sob o ponto (o snap do Altium) — o passante ou o SMD da camada primeiro,
+       senão o SMD de outra camada, que a rota não pode ligar */
+    if (layer) {
+      const sob = TIPOS.pads(eb).filter(q => geo.noPad(q, v[0], v[1], 1e-6));
+      const q = sob.find(q => q.type === 'th' || q.layer === 'Multi' || q.layer === layer) || sob[0];
+      if (q) return { x: v[0], y: v[1], net: q.net || '', pad: q };
+    }
+    return { x: v[0], y: v[1], net: '', pad: null };
+  }
   const p = padDe(eb, v);
   if (!p) throw new ErroMcp(`${nome}: use [x,y] em mm ou "REF.PINO" (ex.: "R1.2"); "${v}" não achado`);
   return { x: p.x, y: p.y, net: p.net || '', pad: p };
@@ -220,7 +259,18 @@ module.exports = {
           rot: isNum(a.rot) ? ((a.rot % 360) + 360) % 360 : (((c.rot + (a.drot || 0)) % 360) + 360) % 360,
           layer: a.layer || c.layer };
         comNote(op, a);
-        const est = ops.transacao(ctx, p, (arq, board) => [ops.mescla(arq, ops.origDe(op, board)).obj], { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_mover' });
+        const est = ops.transacao(ctx, p, (arq, board) => {
+          /* componente que chegou pelo ECO (ou pelo pcb_componente) ainda é um comp_add no
+             changes.js: mover é editar a linha dele (uma linha por objeto, como a vista faz) */
+          if (!(board.components || []).some(k => k.ref === a.ref)) {
+            const i = arq.itens.findIndex(x => x && x.op === 'comp_add' && x.ref === a.ref);
+            if (i < 0) throw new ErroMcp(`componente "${a.ref}" não está no board.js nem num comp_add do changes.js`);
+            const novo = Object.assign({}, arq.itens[i], { x: op.x, y: op.y, rot: op.rot, layer: op.layer }, op.note ? { note: op.note } : {});
+            arq.substitui(i, novo);
+            return [novo];
+          }
+          return [ops.mescla(arq, ops.origDe(op, board)).obj];
+        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_mover' });
         const depois = ctx.placa(p);
         const c2 = (depois.eb.components || []).find(x => x.ref === a.ref);
         if (est.gravado && c2) {
@@ -310,7 +360,7 @@ module.exports = {
     },
     {
       nome: 'pcb_trilha', titulo: 'Desenhar trilha (polilinha)',
-      descricao: 'Desenha uma trilha por vários pontos (um track_add por trecho). Pontos em mm, ou "REF.PINO" para começar/terminar no centro de um pad (a net do pad é usada se você não der net). Largura padrão: a regra do board.js (rules.width) ou 0,254 mm. Em camada que não é cobre (TopOverlay, Mech1, KeepOut) vira linha de desenho.',
+      descricao: 'Desenha uma trilha por vários pontos (um track_add por trecho). Pontos em mm, ou "REF.PINO" para começar/terminar no centro de um pad (a net do pad é usada se você não der net). Largura padrão: a preferida da regra Width que vence para a net e a camada (rules.js do projeto, como o Rule Preferred do Altium). Em camada que não é cobre (TopOverlay, Mech1, KeepOut) vira linha de desenho.',
       entrada: { type: 'object', properties: Object.assign({
         projeto: PROJETO, layer: { type: 'string', description: 'Top, Bottom, Mid1..., TopOverlay, Mech1, KeepOut...' },
         pts: { type: 'array', minItems: 2, items: { oneOf: [PT, { type: 'string' }] }, description: '[[x,y], [x,y], ...] ou "R1.1" nas pontas' },
@@ -321,7 +371,10 @@ module.exports = {
         const { eb, board } = ctx.placa(p);
         const P = a.pts.map((v, i) => ponto(eb, v, 'pts[' + i + ']'));
         const net = a.net != null ? a.net : (P.find(x => x.net) || {}).net || '';
-        const w = a.w || (board.rules && board.rules.width > 0 ? board.rules.width : 0.254);
+        let w = a.w || larguraDaNet(ctx, eb, p, net, a.layer, board);
+        const RT = ctx.modulo('hub-roteador.js');
+        const lim = a.w && RT && RT.limitaLargura && ctx.hc.isCopper(a.layer) ? RT.limitaLargura(cena(ctx, eb, p), net, a.layer, a.w) : null;
+        if (lim && lim.ajustada) w = lim.w;
         const L = [];
         for (let i = 1; i < P.length; i++) {
           if (P[i - 1].x === P[i].x && P[i - 1].y === P[i].y) continue;
@@ -329,7 +382,9 @@ module.exports = {
           if (net && ctx.hc.isCopper(a.layer)) o.net = net;
           L.push(comNote(o, a));
         }
-        return ops.transacao(ctx, p, arq => L.map(o => ops.mescla(arq, o).obj), { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_trilha' });
+        const est = ops.transacao(ctx, p, arq => L.map(o => ops.mescla(arq, o).obj), { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_trilha' });
+        if (lim && lim.ajustada) est.largura_ajustada = `w ${a.w} fora da regra ${lim.regra} (${lim.min}..${lim.max} mm): usei ${r4(w)}`;
+        return est;
       },
     },
     {
@@ -346,13 +401,34 @@ module.exports = {
         const p = ctx.projeto(a.projeto);
         const { eb, board } = ctx.placa(p);
         const R = ctx.exige('hub-roteador.js', 'HubRoteador');
-        const A = ponto(eb, a.de, 'de'), B = ponto(eb, a.ate, 'ate');
+        const A = ponto(eb, a.de, 'de', a.layer), B = ponto(eb, a.ate, 'ate', a.layer);
         const net = a.net || A.net || B.net || '';
-        const w = a.w || (board.rules && board.rules.width > 0 ? board.rules.width : 0.254);
-        const C = cena(ctx, eb);
+        /* pad SMD só existe na camada dele: a trilha de outra camada terminaria em cima dele sem
+           ligar nada (o ratsnest continuaria lá) — como no Altium, a rota até ele é na camada dele */
+        const smdFora = q => q.pad && !(q.pad.type === 'th' || q.pad.layer === 'Multi') && q.pad.layer && q.pad.layer !== a.layer ? q.pad : null;
+        const pf = smdFora(A) || smdFora(B);
+        if (pf) return { completa: false, motivo: 'pad-em-outra-camada', pontos: [], bloqueio: null, net,
+                         nota: `o pad SMD ${A.pad === pf ? a.de : a.ate} está no ${pf.layer}: rotee no ${pf.layer} (ou chegue nele por via)` };
+        const C = cena(ctx, eb, p);
+        /* sem w: a Width vencedora para a net e a camada (Rule Preferred), a mesma que o DRC confere */
+        let w = a.w || (R.larguraDaRegra ? R.larguraDaRegra(C, net, a.layer).pref : (board.rules && board.rules.width > 0 ? board.rules.width : 0.254));
+        /* o w dado fora da faixa da regra vira o limite dela, como a rota do Altium */
+        const lim = a.w && R.limitaLargura ? R.limitaLargura(C, net, a.layer, a.w) : null;
+        if (lim && lim.ajustada) w = lim.w;
         const r = R.rota(C, { layer: a.layer, w, net, de: [A.x, A.y], ate: [B.x, B.y], modo: a.modo || '45',
                               alvo: { eletrico: !!B.pad, net: B.net }, conflito: 'contornar' });
         const out = { completa: r.completa, motivo: r.motivo, pontos: (r.pts || []).map(q => [r4(q[0]), r4(q[1])]), bloqueio: r.bloqueio, net, w, ms: r.ms };
+        if (lim && lim.ajustada) out.largura_ajustada = `w ${a.w} fora da regra ${lim.regra} (${lim.min}..${lim.max} mm): usei ${r4(w)}`;
+        if (r.motivo === 'camada-proibida') out.nota = `a regra Routing Layers da net ${net || '(sem net)'} não permite ${a.layer}: rotee em outra camada`;
+        /* a partida já estava perto demais de outro cobre (pad de passo fino com a largura da regra,
+           ponta antiga encostada em outra net): o roteador sai sem piorar, mas o caminho fica abaixo
+           da folga e o DRC acusa. No Walkaround do Altium essa rota não sai: aqui ela só é gravada
+           com forcar */
+        if ((r.violacoes || []).length) {
+          out.violacoes = r.violacoes.slice(0, 10).map(c => ({ id: c.id, net: c.net, tipo: c.tipo, dist: r4(Math.max(0, c.dist)), folga: r4(c.folga) }));
+          out.nota = `a partida já está a menos da folga da regra de ${r.violacoes.map(c => c.tipo + ' ' + c.id).slice(0, 3).join(', ')}: a rota sairia com violação de Clearance — use w menor (a faixa da regra Width), parta de outro ponto, ou forcar:true`;
+          if (!a.forcar) { out.completa = false; out.motivo = 'partida-em-conflito'; return out; }
+        }
         if (a.aplicar === false || !r.pts || r.pts.length < 2) return out;
         const L = [];
         for (let i = 1; i < r.pts.length; i++) {
@@ -366,7 +442,7 @@ module.exports = {
     },
     {
       nome: 'pcb_via', titulo: 'Colocar via',
-      descricao: 'Coloca uma via (via_add). size = diâmetro do anel, drill = furo (padrão: rules.viaSize/viaDrill do board.js, senão 0,6/0,3 mm). A net, se omitida, sai do pad/trilha no ponto. Para trocar de camada: trilha até [x,y] numa camada, via em [x,y], trilha da outra camada saindo de [x,y].',
+      descricao: 'Coloca uma via (via_add). size = diâmetro do anel, drill = furo (padrão: a preferida da regra Routing Via Style que vence para a net). A net, se omitida, sai do pad/trilha no ponto. Para trocar de camada: trilha até [x,y] numa camada, via em [x,y], trilha da outra camada saindo de [x,y].',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, x: { type: 'number' }, y: { type: 'number' },
         size: { type: 'number' }, drill: { type: 'number' }, net: { type: 'string' } }, COMUNS), required: ['projeto', 'x', 'y'] },
       executa: async (a, ctx) => {
@@ -379,9 +455,26 @@ module.exports = {
           const q = TIPOS.pads(eb).find(q => q.net && geo.noPad(q, a.x, a.y, 0));
           net = (t && t.net) || (q && q.net) || '';
         }
-        const op = { op: 'via_add', x: a.x, y: a.y, size: a.size || R.viaSize || 0.6, drill: a.drill || R.viaDrill || 0.3 };
+        /* sem size/drill: a Routing Via Style vencedora para a net (o "Rule Preferred" do Altium) */
+        const vd = viaDaNet(ctx, eb, p, net, R);
+        const op = { op: 'via_add', x: a.x, y: a.y, size: a.size || vd.size, drill: a.drill || vd.drill };
         if (net) op.net = net;
-        return ops.transacao(ctx, p, arq => [ops.mescla(arq, comNote(op, a)).obj], { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_via' });
+        /* size/drill dados fora da faixa da Routing Via Style viram o limite dela */
+        const RL = ctx.modulo('hub-roteador.js');
+        const limV = (a.size || a.drill) && RL && RL.limitaVia ? RL.limitaVia(cena(ctx, eb, p), net, op.size, op.drill) : null;
+        if (limV && limV.ajustada) { op.size = r4(limV.size); op.drill = r4(limV.drill); }
+        /* via encostada em cobre de outra net não entra — a mesma conferência da vista (e a folga da
+           regra do par, a mesma do DRC). forcar:true passa por cima */
+        const RT = ctx.modulo('hub-roteador.js');
+        if (RT && RT.folgaVia && !a.forcar) {
+          const f = RT.folgaVia(cena(ctx, eb, p), { x: a.x, y: a.y, size: op.size }, { net });
+          if (!f.ok) return { ok: false, gravado: false, motivo: 'conflito',
+                              erro: 'via não posta: ' + f.conflitos.slice(0, 5).map(c => `${c.tipo} ${c.id}${c.net ? ' (' + c.net + ')' : ''} no ${c.layer} a ${r4(Math.max(0, c.dist))} mm (a regra pede ${r4(c.folga)})`).join('; '),
+                              conflitos: f.conflitos.slice(0, 20) };
+        }
+        const est = ops.transacao(ctx, p, arq => [ops.mescla(arq, comNote(op, a)).obj], { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_via' });
+        if (limV && limV.ajustada) est.via_ajustada = `fora da regra ${limV.regra}: usei ${op.size}/${op.drill} mm`;
+        return est;
       },
     },
     {

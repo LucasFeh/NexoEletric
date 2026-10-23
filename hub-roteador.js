@@ -6,28 +6,46 @@
    trilhas de mesma NET, caso contrario não". Em regra de software:
 
      - cobre de nets DIFERENTES nunca se encontra na mesma camada: nem cruza, nem fica mais perto
-       que a folga da regra (board.rules.clearance; sem ela, 0,254 mm = 10 mil, a regra de 95 de
-       111 projetos da casa);
-     - da MESMA net pode encontrar, encostar e cruzar — é ligação;
+       que a folga da regra;
+     - da MESMA net pode encontrar, encostar e cruzar — é ligação; sem net contra sem net também
+       não tem folga (o DRC não confere esse par), só o furo NPTH continua obstáculo;
      - com a trilha na mão, se o L direto até o cursor violaria a regra, o motor acha sozinho um
        caminho em volta do obstáculo. Nada que já está na placa se mexe (nada de Push/HugNPush);
      - sem caminho, a trilha para ANTES do obstáculo.
 
+   AS REGRAS SÃO AS DO DRC (2026-10-22, pedido do dono: "as regras precisam ser a mesma, a lógica de
+   roteamento também"). Com o conjunto de regras na cena (opts.regras, o rules.js do projeto), cada
+   par (o que está na mão, o objeto da placa) tem a folga da Clearance VENCEDORA para ele — escopo,
+   prioridade e matriz de objetos, pela mesma conta do hub-pcbdrc.js (HubPcbRegras.folgaEntre) —; o
+   contorno e os recortes, a da Board Outline Clearance; a largura e a via da rota, a preferida da
+   Width / Routing Via Style da net (o "Rule Preferred" do Altium, presa à faixa da regra quando
+   alguém escolhe outro valor); e a camada que a Routing Layers da net não permite não recebe rota.
+   tests/test-roteador-regras.js confere roteador x DRC par a par, também nas placas do acervo. Sem
+   opts.regras, a folga única de antes (opts.clearance, board.rules.clearance ou 10 mil, a regra de
+   95 de 111 projetos da casa).
+
    Este arquivo é PURO — não conhece tela, mouse nem DOM — e por isso roda em Node
    (tests/test-roteador.js). Quem liga ao mouse e desenha é o pcbframe.js.
 
-   API (contrato de 2026-10-02):
+   API (contrato de 2026-10-02, regras em 2026-10-22):
      cena(eb, opts)                    a placa efetiva (HubCore.effectiveBoard) pronta para consulta;
-                                       opts {clearance, placa:{lacos, recortes}, textoGeo, res}
+                                       opts {regras, clearance, placa:{lacos, recortes}, textoGeo, res}
      netEm(cena, layer, x, y)          a net do cobre que CONTÉM o ponto ('' se nenhum)
      folgaTrilha(cena, layer, seg, o)  seg {x1,y1,x2,y2,w}; o {net, ignora}
      folgaArco(cena, layer, arco, o)   arco {cx,cy,r,sa,ea,w}
      folgaVia(cena, via, o)            via {x,y,size}, em toda camada de cobre
-                                       -> {ok, conflitos:[{id, net, tipo, dist(, layer)}]}
+                                       -> {ok, conflitos:[{id, net, tipo, dist, folga(, layer)}]}
                                        `dist` é a FOLGA de cobre a cobre que sobrou, em mm
-                                       (negativa = os cobres se sobrepõem); conflito é dist <
-                                       clearance. A lista vem da pior folga para a melhor.
-     rota(cena, req)                   o caminho da trilha na mão até o cursor (ver `rota`)
+                                       (negativa = os cobres se sobrepõem); `folga` é a que a regra
+                                       pede para o par; conflito é dist < folga. A lista vem da pior
+                                       folga para a melhor.
+     rota(cena, req)                   o caminho da trilha na mão até o cursor (ver `rota`); sem
+                                       req.w, a largura da regra Width da net
+     larguraDaRegra(cena, net, layer)  {pref, min, max, regra}  a Width vencedora
+     viaDaRegra(cena, net)             {size, drill, ..., regra}  a Routing Via Style vencedora
+     limitaLargura(cena, net, layer, w) / limitaVia(cena, net, size, drill)
+                                       o valor escolhido preso à faixa da regra ({..., ajustada})
+     camadaPermitida(cena, net, layer) a Routing Layers da net deixa?
 
    AS FOLGAS SÃO EXATAS. Cada obstáculo vira primitivas com distância fechada: cápsula (trilha,
    traço de texto, aresta de região/borda com raio 0), arco de verdade, caixa girada de cantos
@@ -373,10 +391,14 @@ function idDaNet(cena, net, cria){
    arrays tipados e monta os baldes. Um OBSTÁCULO é um objeto da placa (trilha, pad, região...):
    tem id, net, tipo, e uma ou mais primitivas. */
 function novoMontador(cena){ return { cena, kind: [], dono: [], geo: [], caixa: [], obst: [], areas: [], oBorda: -1 }; }
-function novoObst(M, id, net, tipo, sempre){
+/* `desc` é o descritor de query do objeto, NO FORMATO DO DRC (hub-pcbdrc.js » descritor): é com
+   ele que a regra de Clearance do par se resolve, e o mesmo par tem de dar a mesma folga aqui e lá */
+function novoObst(M, id, net, tipo, sempre, desc){
   const s = typeof net === 'string' ? net : '';
-  M.obst.push({ id: id == null ? tipo + '#' + M.obst.length : String(id), net: sempre ? '' : s,
-                netId: sempre ? 0 : idDaNet(M.cena, s, true), tipo, sempre: !!sempre, prims: [] });
+  const ident = id == null ? tipo + '#' + M.obst.length : String(id);
+  M.obst.push({ id: ident, net: sempre ? '' : s,
+                netId: sempre ? 0 : idDaNet(M.cena, s, true), tipo, sempre: !!sempre, prims: [],
+                desc: desc ? Object.assign({ net: '', layer: '', comp: '', footprint: '', smd: false, poly: false, pad: '', keepout: false, id: ident }, desc) : null });
   return M.obst.length - 1;
 }
 function poePrim(M, oi, k, geo, x1, y1, x2, y2){
@@ -471,25 +493,36 @@ function centroCobre(p){
   }
   return [p.x, p.y];
 }
-function poePad(M, p, layer){
+function poePad(M, p, layer, comp){
   if (!p || !isNum(p.x) || !isNum(p.y)) return;
   const th = ehTH(p);
   if (!th && p.layer !== layer) return;
-  const oi = novoObst(M, p.id, p.net, 'pad', false);
+  const ref = comp && comp.ref ? String(comp.ref) : '', fp = comp && comp.footprint ? String(comp.footprint) : '';
+  /* o pad SEM anel de cobre (NPTH) é, para a regra, um objeto "Hole" sem net — como o DRC o monta */
+  const fTopo = caixaDaForma(formaLado(p, false));
+  const anel = !th || !(p.drill > 0) ? !!fTopo : !!fTopo && (fTopo.rr < fTopo.hx || fTopo.hx !== fTopo.hy || fTopo.hx > p.drill / 2 + 1e-6);
+  if (th && !anel) {
+    const oh = novoObst(M, p.id, '', 'furo', false, { tipo: 'hole', layer: 'Multi', comp: ref, footprint: fp });
+    poeFuro(M, oh, p, null);
+    return;
+  }
+  const oi = novoObst(M, p.id, p.net, 'pad', false, { tipo: 'pad', net: p.net || '', layer: th ? 'Multi' : p.layer, comp: ref, footprint: fp,
+                                                    smd: !th, pad: ref + '-' + (p.name != null ? p.name : '') });
   const c = centroCobre(p), f = caixaDaForma(formaLado(p, th && layer === 'Bottom'));
   if (f) addCaixa(M, oi, c[0], c[1], f.hx, f.hy, f.rr, p.rot || 0);
-  /* o furo também é obstáculo (cobre não passa por cima de furo): no pad metalizado ele já está
-     dentro do cobre, mas o pad NPTH (e o de cobre menor que o furo) só tem o furo */
-  if (th && p.drill > 0) {
-    const d = p.drill, dw = p.drillw, forma = String(p.drillshape || 'circle').toLowerCase();
-    const rot = (isNum(p.rot) ? p.rot : 0) + (isNum(p.holerot) ? p.holerot : 0);
-    if ((forma === 'rect' || forma === 'square') && dw > 0) addCaixa(M, oi, p.x, p.y, dw / 2, d / 2, 0, rot);
-    else if ((forma === 'oblong' || forma === 'slot') && dw > 0) addCaixa(M, oi, p.x, p.y, dw / 2, d / 2, Math.min(dw, d) / 2, rot);
-    else {
-      const g = M.geo, k = M.obst[oi].prims[0];
-      const dentro = f && k !== undefined && sdPontoCaixa(g, k * G, p.x, p.y) <= -d / 2;
-      if (!dentro) addCaixa(M, oi, p.x, p.y, d / 2, d / 2, d / 2, 0);
-    }
+  if (th && p.drill > 0) poeFuro(M, oi, p, f);
+}
+/* o furo também é obstáculo (cobre não passa por cima de furo): no pad metalizado ele já está
+   dentro do cobre, mas o de cobre menor que o furo só tem o furo */
+function poeFuro(M, oi, p, f){
+  const d = p.drill, dw = p.drillw, forma = String(p.drillshape || 'circle').toLowerCase();
+  const rot = (isNum(p.rot) ? p.rot : 0) + (isNum(p.holerot) ? p.holerot : 0);
+  if ((forma === 'rect' || forma === 'square') && dw > 0) addCaixa(M, oi, p.x, p.y, dw / 2, d / 2, 0, rot);
+  else if ((forma === 'oblong' || forma === 'slot') && dw > 0) addCaixa(M, oi, p.x, p.y, dw / 2, d / 2, Math.min(dw, d) / 2, rot);
+  else {
+    const g = M.geo, k = M.obst[oi].prims[0];
+    const dentro = f && k !== undefined && sdPontoCaixa(g, k * G, p.x, p.y) <= -d / 2;
+    if (!dentro) addCaixa(M, oi, p.x, p.y, d / 2, d / 2, d / 2, 0);
   }
 }
 /* texto: a geometria do HubGerber.geometriaTexto (quem chama passa em opts.textoGeo). O contorno
@@ -499,7 +532,7 @@ function poeTexto(M, t, textoGeo){
   let g = null;
   try { g = textoGeo(t); } catch (e) { g = null; }
   if (!g) return;
-  const oi = novoObst(M, t.id, '', 'texto', false);
+  const oi = novoObst(M, t.id, '', 'texto', false, { tipo: 'text', layer: t.layer, comp: t.owner || '' });
   if (Array.isArray(g.regioes) && g.regioes.length) {
     let k = 1;
     if (isNum(t.x) && isNum(t.y)) {
@@ -538,33 +571,35 @@ function montaCamada(cena, layer){
     cena.recortes.forEach((k, i) => addArea(M, novoObst(M, k.id || 'recorte' + (i + 1), '', 'borda', true), [k.pts], []));
     /* keepout: a camada KeepOut barra todo cobre; o keepout:true, só a camada dele */
     const ko = (o, mesma) => o && (o.layer === 'KeepOut' || (mesma && o.layer === layer && o.keepout));
+    const dK = (tipo, o) => ({ tipo, net: '', layer: o.layer, comp: o.owner || '', keepout: true });
+    const dC = (tipo, o, extra) => Object.assign({ tipo, net: o.net || '', layer: o.layer, comp: o.owner || '' }, extra || {});
     for (const s of E.lines || []) if (ko(s, true)) {
-      const oi = novoObst(M, s.id, '', 'keepout', true);
+      const oi = novoObst(M, s.id, '', 'keepout', true, dK(s.kind === 'arc' ? 'arc' : 'track', s));
       if (s.kind === 'arc') addArco(M, oi, s.cx, s.cy, s.r, s.sa, s.ea, (s.w || 0) / 2);
       else addSeg(M, oi, s.x1, s.y1, s.x2, s.y2, (s.w || 0) / 2);
     }
     for (const t of E.tracks || []) if (t && (t.layer === layer || ko(t, false))) {
-      const k = ko(t, true), oi = novoObst(M, t.id, t.net, k ? 'keepout' : 'trilha', k);
+      const k = ko(t, true), oi = novoObst(M, t.id, t.net, k ? 'keepout' : 'trilha', k, k ? dK('track', t) : dC('track', t));
       addSeg(M, oi, t.x1, t.y1, t.x2, t.y2, (t.w || 0) / 2);
     }
     for (const a of E.arcs || []) if (a && (a.layer === layer || ko(a, false))) {
-      const k = ko(a, true), oi = novoObst(M, a.id, a.net, k ? 'keepout' : 'arco', k);
+      const k = ko(a, true), oi = novoObst(M, a.id, a.net, k ? 'keepout' : 'arco', k, k ? dK('arc', a) : dC('arc', a));
       addArco(M, oi, a.cx, a.cy, a.r, a.sa, a.ea, (a.w || 0) / 2);
     }
     for (const f of E.fills || []) if (f && (f.layer === layer || ko(f, false)) && [f.x1, f.y1, f.x2, f.y2].every(isNum)) {
-      const k = ko(f, true), oi = novoObst(M, f.id, f.net, k ? 'keepout' : 'fill', k);
+      const k = ko(f, true), oi = novoObst(M, f.id, f.net, k ? 'keepout' : 'fill', k, k ? dK('fill', f) : dC('fill', f));
       addCaixa(M, oi, (f.x1 + f.x2) / 2, (f.y1 + f.y2) / 2, Math.abs(f.x2 - f.x1) / 2, Math.abs(f.y2 - f.y1) / 2, 0, f.rot || 0);
     }
     for (const g of E.regions || []) if (g && (g.layer === layer || ko(g, false)) && Array.isArray(g.points)) {
-      const k = ko(g, true), oi = novoObst(M, g.id, g.net, k ? 'keepout' : 'regiao', k);
+      const k = ko(g, true), oi = novoObst(M, g.id, g.net, k ? 'keepout' : 'regiao', k, k ? dK('region', g) : dC('region', g, { poly: !!g.poly }));
       addArea(M, oi, [g.points], Array.isArray(g.holes) ? g.holes : []);
     }
     if (typeof cena.textoGeo === 'function')
       for (const t of E.texts || []) if (t && t.layer === layer && !t.hidden) poeTexto(M, t, cena.textoGeo);
-    for (const c of E.components || []) for (const p of (c && c.pads) || []) poePad(M, p, layer);
-    for (const p of E.freepads || []) poePad(M, p, layer);
+    for (const c of E.components || []) for (const p of (c && c.pads) || []) poePad(M, p, layer, c);
+    for (const p of E.freepads || []) poePad(M, p, layer, null);
     for (const v of E.vias || []) if (v && isNum(v.x) && isNum(v.y) && v.size > 0) {
-      const oi = novoObst(M, v.id, v.net, 'via', false);
+      const oi = novoObst(M, v.id, v.net, 'via', false, { tipo: 'via', net: v.net || '', layer: 'Multi' });
       addCaixa(M, oi, v.x, v.y, v.size / 2, v.size / 2, v.size / 2, 0);
     }
   }
@@ -575,7 +610,8 @@ function finaliza(M, cena, layer){
   const L = { nome: layer, n, kind: Uint8Array.from(M.kind), dono: Int32Array.from(M.dono), geo: Float64Array.from(M.geo),
               cx: Float64Array.from(M.caixa), areas: M.areas, oBorda: M.oBorda, marca: new Int32Array(n), qid: 0,
               marca2: new Int32Array(n), qid2: 0,
-              obst: M.obst.map(o => ({ id: o.id, net: o.net, netId: o.netId, tipo: o.tipo, sempre: o.sempre })) };
+              obst: M.obst.map(o => ({ id: o.id, net: o.net, netId: o.netId, tipo: o.tipo, sempre: o.sempre, desc: o.desc })),
+              _gaps: new Map() };
   /* as primitivas de cada obstáculo (CSR): a distância com sinal do OBJETO é a menor delas */
   const oIni = new Int32Array(nObs + 1);
   for (let i = 0; i < nObs; i++) oIni[i + 1] = oIni[i] + M.obst[i].prims.length;
@@ -848,15 +884,68 @@ function foraRelaxado(R, ax, ay, bx, by, l){
 /* A REGRA de uma consulta: quem bloqueia (`bloq` por obstáculo) e a que distância (`lim`, do
    EIXO da trilha ao cobre do obstáculo: meia largura + folga, ou menos pela regra de não piorar).
    `limBorda` é o limiar do lado de fora da placa. */
+/* quem bloqueia a mão de net N: a borda e o keepout sempre; cobre de outra net; cobre sem net
+   contra a mão com net. Sem net contra sem net só o furo bloqueia — o DRC não confere folga entre
+   dois cobres sem net (hub-pcbdrc.js: o logotipo de trilhas soltas se toca de propósito) */
 function bloqueia(o, N, ig){
   if (ig && ig.has(o.id)) return false;
-  return o.sempre || o.netId === 0 || o.netId !== N;
+  if (o.sempre) return true;
+  if (o.netId === 0) return N !== 0 || o.tipo === 'furo';
+  return o.netId !== N;
 }
-function regraBase(cena, L, N, ig, T){
+/* O QUE ESTÁ NA MÃO (a trilha, o arco ou a via que se roteia), como descritor de query:
+   {tipo:'track'|'arc'|'via', net, layer}. É o "objeto A" do par da regra. */
+function descMao(tipo, net, layer){
+  return { tipo: tipo || 'track', net: typeof net === 'string' ? net : '', layer: tipo === 'via' ? 'Multi' : (layer || ''),
+           comp: '', footprint: '', smd: false, poly: false, pad: '', keepout: false, id: '' };
+}
+/* abaixo disto dois cobres de nets com nome estão "se tocando" para o DRC (hub-pcbdrc.js » TOQUE):
+   folga 0 pela regra ainda não deixa encostar */
+const TOQUE_DRC = 1e-4;
+/* AS FOLGAS DA REGRA, por obstáculo, para o que está na mão: o mesmo par (mão, obstáculo) que o DRC
+   resolve, pela mesma conta (hub-pcbregras.js » folgaEntre: a Clearance vencedora do par, com a
+   matriz de objetos). Sem conjunto de regras na cena, a folga única de antes (cena.clearance). O
+   contorno e os recortes vão pela Board Outline Clearance da mão — a mesma que o DRC confere.
+   Fica guardado na camada por mão (tipo|net|camada): o DRC pergunta pelos mesmos pares milhares
+   de vezes, e a rota também. */
+function folgasDaMao(cena, L, mao){
+  const chave = mao.tipo + '|' + mao.net + '|' + mao.layer;
+  let F = L._gaps.get(chave);
+  if (F) return F;
+  const nObs = L.obst.length, gap = new Float64Array(nObs);
+  const RES = cena.regras;
+  let borda = cena.clearance;
+  if (!RES) gap.fill(cena.clearance);
+  else {
+    const rB = RES.regraPara('BoardOutlineClearance', mao);
+    borda = rB && isNum(rB.gap) && rB.gap > 0 ? rB.gap : 0;
+    const RG = cena.RG;
+    for (let i = 0; i < nObs; i++) {
+      const o = L.obst[i];
+      if (o.tipo === 'borda') { gap[i] = borda; continue; }
+      if (!o.desc) { gap[i] = cena.clearance; continue; }
+      const f = RG.folgaEntre(RES, mao, o.desc);
+      let g = f && isNum(f.gap) ? f.gap : 0;
+      if (g < TOQUE_DRC * 2) g = TOQUE_DRC * 2;
+      gap[i] = g;
+    }
+  }
+  if (L._gaps.size > 64) L._gaps.clear();
+  F = { gap, borda };
+  L._gaps.set(chave, F);
+  return F;
+}
+function regraBase(cena, L, N, ig, meia, mao){
   const nObs = L.obst.length, bloq = new Uint8Array(nObs), lim = new Float64Array(nObs);
-  for (let i = 0; i < nObs; i++) { bloq[i] = bloqueia(L.obst[i], N, ig) ? 1 : 0; lim[i] = T; }
+  const F = folgasDaMao(cena, L, mao || descMao('track', '', L.nome));
+  let T = meia + F.borda;
+  for (let i = 0; i < nObs; i++) {
+    bloq[i] = bloqueia(L.obst[i], N, ig) ? 1 : 0;
+    lim[i] = meia + F.gap[i];
+    if (bloq[i] && lim[i] > T) T = lim[i];
+  }
   const bordaFora = L.oBorda >= 0 && !(ig && ig.has('borda'));
-  return { cena, L, P: bordaFora ? cena.placa : null, bloq, lim, T, m: 0, limBorda: T };
+  return { cena, L, P: bordaFora ? cena.placa : null, bloq, lim, T, m: 0, limBorda: meia + F.borda };
 }
 function conjunto(v){
   if (!v) return null;
@@ -963,10 +1052,12 @@ function conflitosArco(R, Q, achados){
   return achados;
 }
 /* Map obstáculo -> distância do EIXO  =>  [{id, net, tipo, dist}], dist = folga de cobre a cobre */
-function listaConflitos(L, achados, meia, layer){
+function listaConflitos(L, achados, meia, layer, R){
   const out = [];
   for (const [oi, d] of achados) {
     const o = L.obst[oi], c = { id: o.id, net: o.net, tipo: o.tipo, dist: d - meia };
+    /* a folga que a regra pede para este par (a do contorno, na borda) */
+    if (R) c.folga = (oi === L.oBorda ? R.limBorda : R.lim[oi]) - meia;
     if (layer) c.layer = layer;
     out.push(c);
   }
@@ -991,32 +1082,32 @@ function netEm(cena, layer, x, y){
   return net;
 }
 function folgaTrilha(cena, layer, seg, o){
-  const s = seg || {}, w = s.w > 0 ? s.w : 0, T = w / 2 + cena.clearance;
+  const s = seg || {}, w = s.w > 0 ? s.w : 0;
   if (!ehCobre(layer) || ![s.x1, s.y1, s.x2, s.y2].every(isNum)) return { ok: true, conflitos: [] };
-  const L = camada(cena, layer), R = regraBase(cena, L, idDaNet(cena, o && o.net, false), conjunto(o && o.ignora), T);
-  const c = listaConflitos(L, conflitosSeg(R, s.x1, s.y1, s.x2, s.y2, new Map()), w / 2).sort(porDist);
+  const L = camada(cena, layer), R = regraBase(cena, L, idDaNet(cena, o && o.net, false), conjunto(o && o.ignora), w / 2, descMao('track', o && o.net, layer));
+  const c = listaConflitos(L, conflitosSeg(R, s.x1, s.y1, s.x2, s.y2, new Map()), w / 2, null, R).sort(porDist);
   return { ok: !c.length, conflitos: c };
 }
 function folgaArco(cena, layer, arco, o){
-  const a = arco || {}, w = a.w > 0 ? a.w : 0, T = w / 2 + cena.clearance;
+  const a = arco || {}, w = a.w > 0 ? a.w : 0;
   const Q = ehCobre(layer) ? arcoDe(a.cx, a.cy, a.r, a.sa, a.ea) : null;
   if (!Q) return { ok: true, conflitos: [] };
-  const L = camada(cena, layer), R = regraBase(cena, L, idDaNet(cena, o && o.net, false), conjunto(o && o.ignora), T);
-  const c = listaConflitos(L, conflitosArco(R, Q, new Map()), w / 2).sort(porDist);
+  const L = camada(cena, layer), R = regraBase(cena, L, idDaNet(cena, o && o.net, false), conjunto(o && o.ignora), w / 2, descMao('arc', o && o.net, layer));
+  const c = listaConflitos(L, conflitosArco(R, Q, new Map()), w / 2, null, R).sort(porDist);
   return { ok: !c.length, conflitos: c };
 }
 function folgaVia(cena, via, o){
   const v = via || {};
   if (!isNum(v.x) || !isNum(v.y)) return { ok: true, conflitos: [] };
-  const meia = v.size > 0 ? v.size / 2 : 0, T = meia + cena.clearance, ig = conjunto(o && o.ignora);
+  const meia = v.size > 0 ? v.size / 2 : 0, ig = conjunto(o && o.ignora), mao = descMao('via', o && o.net);
   /* todas as camadas montadas ANTES de traduzir a net: uma net que só existe numa camada ainda
      não montada sairia como "net de ninguém" e o cobre dela bloquearia a própria via */
   for (const layer of cena.camadas) camada(cena, layer);
   const N = idDaNet(cena, o && o.net, false);
   let c = [];
   for (const layer of cena.camadas) {
-    const L = camada(cena, layer), R = regraBase(cena, L, N, ig, T);
-    c = c.concat(listaConflitos(L, conflitosPonto(R, v.x, v.y, new Map()), meia, layer));
+    const L = camada(cena, layer), R = regraBase(cena, L, N, ig, meia, mao);
+    c = c.concat(listaConflitos(L, conflitosPonto(R, v.x, v.y, new Map()), meia, layer, R));
   }
   c.sort(porDist);
   return { ok: !c.length, conflitos: c };
@@ -1027,10 +1118,12 @@ function folgaVia(cena, via, o){
 /* O CONTEXTO é tudo o que decide se um nó da grade é livre: camada, net efetiva, largura, ponto
    de partida, o que se ignora e os isentos da chegada. Enquanto ele não muda (o mouse andando no
    mesmo trecho), o estado dos nós já testados vale e a busca seguinte não o refaz. */
-function contexto(cena, L, layer, N, w, de, ig, isentos){
-  const chave = layer + '|' + N + '|' + w + '|' + de[0] + ',' + de[1] + '|' + (ig ? [...ig].sort().join(',') : '') + '|' + isentos.join(',');
+function contexto(cena, L, layer, N, w, de, ig, isentos, net){
+  /* a net vai pelo NOME na chave: duas nets que nenhum objeto tem dividem o id -1, mas não as
+     regras (a Clearance de InNet('HV') não é a da net ao lado) */
+  const chave = layer + '|' + N + '|' + (net || '') + '|' + w + '|' + de[0] + ',' + de[1] + '|' + (ig ? [...ig].sort().join(',') : '') + '|' + isentos.join(',');
   if (cena._ctx && cena._ctx.chave === chave) return cena._ctx;
-  const T = w / 2 + cena.clearance, R = regraBase(cena, L, N, ig, T);
+  const R = regraBase(cena, L, N, ig, w / 2, descMao('track', net, layer)), T = R.T;
   for (const oi of isentos) R.bloq[oi] = 0;
   /* PARTIDA. Objeto sem net que contém `de` (a trilha começou nele) não bloqueia este trecho. O
      que já viola a folga em `de` vale pela regra de NÃO PIORAR: o caminho pode ficar à mesma
@@ -1042,17 +1135,16 @@ function contexto(cena, L, layer, N, w, de, ig, isentos){
   for (const oi of perto) {
     const o = L.obst[oi], d0 = sdObst(L, R.P || cena.placa, oi, de[0], de[1]);
     if (!o.sempre && o.netId === 0 && d0 <= TOL) { R.bloq[oi] = 0; continue; }
-    if (d0 < T - TOL) {
-      R.lim[oi] = d0;
-      if (oi === L.oBorda) R.limBorda = d0;
-    }
+    if (oi === L.oBorda) {
+      if (d0 < R.limBorda - TOL) { R.lim[oi] = d0; R.limBorda = d0; }
+    } else if (d0 < R.lim[oi] - TOL) R.lim[oi] = d0;
   }
   /* a grade: ancorada em `de`, cobrindo a caixa da cena (e o próprio `de`, se ele está fora) */
   const res = cena.res, gb = cena.bbox;
   const iMin = Math.min(0, Math.floor((gb.x1 - de[0]) / res)), iMax = Math.max(0, Math.ceil((gb.x2 - de[0]) / res));
   const jMin = Math.min(0, Math.floor((gb.y1 - de[1]) / res)), jMax = Math.max(0, Math.ceil((gb.y2 - de[1]) / res));
   const NI = iMax - iMin + 1, NJ = jMax - jMin + 1;
-  const ctx = Object.assign(R, { chave, layer, N, w, res, m: res * SQ2 / 2, dx: de[0], dy: de[1],
+  const ctx = Object.assign(R, { chave, layer, N, netNome: net || '', w, res, m: res * SQ2 / 2, dx: de[0], dy: de[1],
                                  iMin, jMin, NI, NJ, s0: (0 - jMin) * NI + (0 - iMin), B: null });
   cena._ctx = ctx;
   return ctx;
@@ -1473,35 +1565,41 @@ function limpa(pts){
    pad adota a net dele). Pad/via/ponta de OUTRA net no alvo é obstáculo: a rota para antes.
    req = {layer, w, net, de:[x,y], ate:[x,y], alvo:{eletrico, net}, modo:'45'|'90'|'livre',
           primeiro (o do HubFio), conflito:'contornar'|'parar'|'ignorar', ignora, orcamento}
-   ->   {pts, completa, motivo:'livre'|'contorno'|'bloqueado'|'sem-caminho'|'orcamento'|'ignorado',
+   ->   {pts, completa, motivo:'livre'|'contorno'|'bloqueado'|'sem-caminho'|'orcamento'|'ignorado'|
+                                'camada-proibida' (a Routing Layers da net não deixa),
          bloqueio:{id, net, tipo, x, y} (o 1o obstáculo do L direto; x,y = o ponto do L em que ele
-         passa a encostar) | null, nos (expandidos pelo A*), ms} */
+         passa a encostar) | null, nos (expandidos pelo A*), ms,
+         violacoes:[conflito] — o que o caminho leva abaixo da folga da regra por causa da partida
+         que já estava em conflito (a regra de não piorar); [] = limpo para o DRC} */
 function rota(cena, req){
   const t0 = agora(), r = req || {};
   const de = [Number(r.de && r.de[0]), Number(r.de && r.de[1])], ate = [Number(r.ate && r.ate[0]), Number(r.ate && r.ate[1])];
   const modo = r.modo === '45' || r.modo === 'livre' ? r.modo : '90';
   const primeiro = r.primeiro || (modo === '45' ? 'diag' : 'v');
   const conflito = r.conflito === 'parar' || r.conflito === 'ignorar' ? r.conflito : 'contornar';
-  const fim = o => { o.nos = o.nos || 0; o.ms = agora() - t0; return o; };
+  const fim = o => { o.nos = o.nos || 0; o.ms = agora() - t0; if (!o.violacoes) o.violacoes = []; return o; };
   if (![de[0], de[1], ate[0], ate[1]].every(isNum)) return fim({ pts: [], completa: false, motivo: 'sem-caminho', bloqueio: null });
   const L0 = limpa(lDireto(de, ate, modo, primeiro));
   if (conflito === 'ignorar') return fim({ pts: L0, completa: true, motivo: 'ignorado', bloqueio: null });
   if (!ehCobre(r.layer)) return fim({ pts: L0, completa: true, motivo: 'livre', bloqueio: null });
 
-  const rules = (cena.eb && cena.eb.rules) || {};
-  const w = r.w > 0 ? r.w : (rules.width > 0 ? rules.width : LARGURA_PADRAO);
   const alvo = r.alvo || {};
   const net = (typeof r.net === 'string' && r.net) ? r.net : (alvo.eletrico && typeof alvo.net === 'string' ? alvo.net : '');
+  /* Routing Layers: a camada que a regra da net não permite não recebe trilha (o Altium nem deixa
+     começar a rota nela) */
+  if (!camadaPermitida(cena, net, r.layer)) return fim({ pts: [[de[0], de[1]]], completa: false, motivo: 'camada-proibida', bloqueio: null });
+  const w = r.w > 0 ? r.w : larguraDaRegra(cena, net, r.layer).pref;
   const ig = conjunto(r.ignora), L = camada(cena, r.layer), N = idDaNet(cena, net, false);
   const isentos = alvo.eletrico ? isentosChegada(cena, L, N, ig, ate) : [];
-  const ctx = contexto(cena, L, r.layer, N, w, de, ig, isentos);
+  const ctx = contexto(cena, L, r.layer, N, w, de, ig, isentos, net);
 
-  if (caminhoLivre(ctx, L0)) return fim({ pts: L0, completa: true, motivo: 'livre', bloqueio: null });
+  if (caminhoLivre(ctx, L0)) return fim({ pts: L0, completa: true, motivo: 'livre', bloqueio: null, violacoes: violacoesHerdadas(cena, ctx, L0) });
   const pre = prefixoLivre(ctx, L0);
   const bloqueio = pre ? pre.bloqueio : null;
   if (conflito === 'parar') {
     const s = pre ? Math.floor(pre.s / ctx.res + 1e-9) * ctx.res : 0;
-    return fim({ pts: limpa(corta(L0, Math.min(s, pre ? pre.s : 0))), completa: false, motivo: 'bloqueado', bloqueio });
+    const pp = limpa(corta(L0, Math.min(s, pre ? pre.s : 0)));
+    return fim({ pts: pp, completa: false, motivo: 'bloqueado', bloqueio, violacoes: violacoesHerdadas(cena, ctx, pp) });
   }
 
   /* contornar. A partida muito longe da placa (a grade iria dela até a placa inteira) não tem
@@ -1509,7 +1607,7 @@ function rota(cena, req){
   const orc = r.orcamento > 0 ? r.orcamento : ORCAMENTO, oito = modo !== '90', NI = ctx.NI, NJ = ctx.NJ;
   const normal = (Math.ceil((cena.bbox.x2 - cena.bbox.x1) / ctx.res) + 1) * (Math.ceil((cena.bbox.y2 - cena.bbox.y1) / ctx.res) + 1);
   if (NI * NJ > normal * 1.25 + 1e5)
-    return fim({ pts: limpa(corta(L0, pre ? pre.s : 0)), completa: false, motivo: 'sem-caminho', bloqueio });
+    { const pp = limpa(corta(L0, pre ? pre.s : 0)); return fim({ pts: pp, completa: false, motivo: 'sem-caminho', bloqueio, violacoes: violacoesHerdadas(cena, ctx, pp) }); }
   posse(ctx);
   let ti = Math.round((ate[0] - de[0]) / ctx.res) - ctx.iMin, tj = Math.round((ate[1] - de[1]) / ctx.res) - ctx.jMin;
   ti = ti < 0 ? 0 : ti >= NI ? NI - 1 : ti; tj = tj < 0 ? 0 : tj >= NJ ? NJ - 1 : tj;
@@ -1537,17 +1635,127 @@ function rota(cena, req){
   const pts = limpa(tiraDegraus(ctx, limpa(sv.pts), modo, DEGRAU * ctx.res));
   const completa = chegouNo && sv.chegou;
   const motivo = completa ? 'contorno' : (b.achou || b.esgotou ? 'sem-caminho' : (b.nos >= orc ? 'orcamento' : 'sem-caminho'));
-  return fim({ pts, completa, motivo, bloqueio, nos: b.nos });
+  return fim({ pts, completa, motivo, bloqueio, nos: b.nos, violacoes: violacoesHerdadas(cena, ctx, pts) });
+}
+/* O QUE A ROTA LEVA DE VIOLAÇÃO PELA REGRA DE NÃO PIORAR: a partida que já estava perto demais de
+   outro cobre (o pad de passo fino com a largura da regra que não cabe entre os vizinhos, a ponta
+   antiga encostada em outra net) sai à mesma distância — a rota não piora, mas também não fica
+   dentro da regra, e o DRC acusa. A lista é a dos obstáculos que o caminho deixa abaixo da folga
+   da regra, conferida SEM o alívio da partida: [] = a rota é limpa para o DRC. */
+function violacoesHerdadas(cena, ctx, pts){
+  if (!ctx || !pts || pts.length < 2) return [];
+  /* a mesma regra do contexto (quem bloqueia já tem o ignora e as isenções da partida e da
+     chegada), com os limites de antes do alívio */
+  const R = regraBase(cena, ctx.L, ctx.N, null, ctx.w / 2, descMao('track', ctx.netNome || '', ctx.layer));
+  let relaxou = false;
+  for (let i = 0; i < R.lim.length; i++) {
+    R.bloq[i] = ctx.bloq[i];
+    if (ctx.lim[i] < R.lim[i] - TOL) relaxou = true;
+  }
+  if (ctx.limBorda < R.limBorda - TOL) relaxou = true;
+  if (!relaxou) return [];
+  const ach = new Map();
+  for (let k = 1; k < pts.length; k++) conflitosSeg(R, pts[k - 1][0], pts[k - 1][1], pts[k][0], pts[k][1], ach);
+  return listaConflitos(ctx.L, ach, ctx.w / 2, null, R).sort(porDist);
+}
+
+/* ============================== API: o que a regra pede para a mão ============================== */
+
+/* O "Rule Preferred" do Altium (Preferences » Interactive Routing » Track Width / Via Size Mode):
+   a largura e a via de uma rota nova saem da regra Width / Routing Via Style VENCEDORA para a net
+   (e a camada) que se roteia, e não de um valor da placa inteira. Sem conjunto de regras na cena,
+   o board.rules do espelho. Devolvem também a regra, para quem quer mostrar de onde veio. */
+function larguraDaRegra(cena, net, layer){
+  const R = cena && cena.regras, eb = (cena && cena.eb) || {};
+  const r = R ? R.regraPara('Width', descMao('track', net, layer)) : null;
+  if (r) {
+    const pc = (r.porCamada && r.porCamada[layer]) || {};
+    const mn = isNum(pc.min) ? pc.min : r.min, mx = isNum(pc.max) ? pc.max : r.max;
+    let p = isNum(pc.pref) ? pc.pref : (isNum(r.pref) ? r.pref : mn);
+    if (isNum(mn) && p < mn) p = mn;
+    if (isNum(mx) && p > mx) p = mx;
+    if (p > 0) return { pref: p, min: isNum(mn) ? mn : null, max: isNum(mx) ? mx : null, regra: r.name };
+  }
+  const w = eb.rules && eb.rules.width > 0 ? eb.rules.width : LARGURA_PADRAO;
+  return { pref: w, min: null, max: null, regra: null };
+}
+function viaDaRegra(cena, net){
+  const R = cena && cena.regras, eb = (cena && cena.eb) || {};
+  const r = R ? R.regraPara('RoutingVias', descMao('via', net)) : null;
+  if (r && r.pref > 0) {
+    const size = r.pref, drill = r.holePref > 0 && r.holePref < size ? r.holePref : size / 2;
+    return { size, drill, min: r.min, max: r.max, holeMin: r.holeMin, holeMax: r.holeMax, regra: r.name };
+  }
+  const rr = eb.rules || {};
+  const size = rr.viaSize > 0 ? rr.viaSize : 0.6, drill = rr.viaDrill > 0 && rr.viaDrill < size ? rr.viaDrill : Math.min(0.3, size / 2);
+  return { size, drill, regra: null };
+}
+/* a largura / via que o usuário escolheu, presa à faixa da regra da net (o Altium não deixa a rota
+   sair da faixa da Width / Routing Via Style: o valor digitado fora dela vira o limite) */
+function limitaLargura(cena, net, layer, w){
+  const r = larguraDaRegra(cena, net, layer);
+  let v = w > 0 ? w : r.pref;
+  if (isNum(r.min) && v < r.min) v = r.min;
+  if (isNum(r.max) && v > r.max) v = r.max;
+  return { w: v, ajustada: Math.abs(v - (w > 0 ? w : r.pref)) > 1e-9, regra: r.regra, min: r.min, max: r.max };
+}
+function limitaVia(cena, net, size, drill){
+  const r = viaDaRegra(cena, net);
+  let s = size > 0 ? size : r.size, d = drill > 0 ? drill : r.drill;
+  if (isNum(r.min) && s < r.min) s = r.min;
+  if (isNum(r.max) && s > r.max) s = r.max;
+  if (isNum(r.holeMin) && d < r.holeMin) d = r.holeMin;
+  if (isNum(r.holeMax) && d > r.holeMax) d = r.holeMax;
+  /* presa nas pontas, a via pode ficar sem anel (o padrão da casa tem diâmetro e furo mínimos
+     iguais, 0,1 mm): mantém o anel da via preferida da regra, crescendo o diâmetro ou, no teto,
+     encolhendo o furo */
+  if (d >= s) {
+    const anel = r.size > r.drill ? r.size - r.drill : 0.2;
+    s = isNum(r.max) ? Math.min(r.max, d + anel) : d + anel;
+    if (d >= s) d = Math.max(isNum(r.holeMin) ? r.holeMin : 0, s - anel);
+  }
+  const ajustada = Math.abs(s - (size > 0 ? size : r.size)) > 1e-9 || Math.abs(d - (drill > 0 ? drill : r.drill)) > 1e-9;
+  return { size: s, drill: d, ajustada, regra: r.regra };
+}
+function camadaPermitida(cena, net, layer){
+  const R = cena && cena.regras;
+  if (!R || !ehCobre(layer)) return true;
+  const r = R.regraPara('RoutingLayers', descMao('track', net, layer));
+  return !(r && r.layers && r.layers[layer] === false);
 }
 
 /* ============================== API: a cena ============================== */
 
+/* o hub-pcbregras.js: global no navegador, require no Node; sem ele a cena fica na folga única */
+function moduloRegras(){
+  if (typeof HubPcbRegras !== 'undefined' && HubPcbRegras && typeof HubPcbRegras.resolvedor === 'function') return HubPcbRegras;
+  try { if (typeof require === 'function') return require('./hub-pcbregras.js'); } catch (e) { /* sem o módulo */ }
+  return null;
+}
+
 /* A CENA: o EB e as opções, com o índice de cada camada montado só na primeira consulta dela.
-   É descartável — o EB mudou, cena nova. */
+   É descartável — o EB mudou, cena nova.
+   opts.regras = o conjunto de regras do projeto (HubPcbRegras: o rules.js lido, ou o doBoard) ou um
+   resolvedor já montado. Com ele, cada par (mão, obstáculo) tem a folga da Clearance vencedora com
+   a matriz de objetos, o contorno a da Board Outline Clearance, e a largura/via/camada da rota
+   saem das regras Width / Routing Via Style / Routing Layers — as MESMAS que o DRC confere. Sem
+   ele, a folga única (opts.clearance, ou board.rules.clearance, ou 10 mil) vale para tudo, como
+   antes. */
 function cena(eb, opts){
   const E = eb || {}, o = opts || {}, regras = (E.rules && typeof E.rules === 'object') ? E.rules : {};
-  const clearance = isNum(o.clearance) && o.clearance >= 0 ? o.clearance
-                  : (isNum(regras.clearance) && regras.clearance > 0 ? regras.clearance : FOLGA_PADRAO);
+  let RES = null, RG = null;
+  if (o.regras && typeof o.regras === 'object') {
+    RG = moduloRegras();
+    if (RG) RES = typeof o.regras.regraPara === 'function' ? o.regras : RG.resolvedor(o.regras.rules ? o.regras : RG.normaliza(o.regras), { board: E });
+  }
+  /* a folga "da placa" (a Clearance de escopo All x All): é a que a tela mostra e a que vale para
+     obstáculo sem descritor */
+  let clearance = isNum(o.clearance) && o.clearance >= 0 ? o.clearance
+                : (isNum(regras.clearance) && regras.clearance > 0 ? regras.clearance : FOLGA_PADRAO);
+  if (RES && !(isNum(o.clearance) && o.clearance >= 0)) {
+    const g = RG.folgaEntre(RES, descMao('track', '\u0001a', 'Top'), descMao('track', '\u0001b', 'Top'));
+    if (g && isNum(g.gap) && g.gap > 0) clearance = g.gap;
+  }
   const bd = (E.board && typeof E.board === 'object') ? E.board : {}, bb0 = bd.bbox;
   const temBB = bb0 && [bb0.x1, bb0.y1, bb0.x2, bb0.y2].every(isNum) && bb0.x2 > bb0.x1 && bb0.y2 > bb0.y1;
   /* a placa: os laços do contorno (sem eles, o bbox como retângulo) e os furos de verdade */
@@ -1591,10 +1799,10 @@ function cena(eb, opts){
   for (const p of E.freepads || []) if (p && ehCobre(p.layer)) cam.add(p.layer);
   const ordem = k => k === 'Top' ? 0 : k === 'Bottom' ? 1000 : /^Mid/.test(k) ? parseInt(k.slice(3), 10) : 100 + parseInt(k.slice(5), 10);
   return { eb: E, clearance, res, bbox, placa, recortes, textoGeo: typeof o.textoGeo === 'function' ? o.textoGeo : null,
-           camadas: [...cam].sort((a, b) => ordem(a) - ordem(b)),
+           regras: RES, RG, camadas: [...cam].sort((a, b) => ordem(a) - ordem(b)),
            _camadas: new Map(), _nets: new Map(), _ctx: null };
 }
 
-return { cena, netEm, folgaTrilha, folgaArco, folgaVia, rota, canto, FOLGA_PADRAO, TOL };
+return { cena, netEm, folgaTrilha, folgaArco, folgaVia, rota, canto, larguraDaRegra, viaDaRegra, limitaLargura, limitaVia, camadaPermitida, FOLGA_PADRAO, TOL };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubRoteador;

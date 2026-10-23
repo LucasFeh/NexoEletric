@@ -174,7 +174,8 @@ function verifica(eb, op, req, res, nome){
   const T = req.w / 2 + clear, alvo = req.alvo || {};
   const N = req.net || (alvo.eletrico && alvo.net ? alvo.net : '');
   const ig = new Set(req.ignora ? [...req.ignora].map(String) : []);
-  const obs = obstaculosV(eb, op, req.layer).filter(o => !ig.has(o.id) && (o.sempre || o.net === '' || o.net !== N));
+  /* sem net contra sem net não é conflito (a regra do DRC); cobre sem net contra mão com net é */
+  const obs = obstaculosV(eb, op, req.layer).filter(o => !ig.has(o.id) && (o.sempre || (o.net === '' ? N !== '' : o.net !== N)));
   for (const o of obs) {
     o.lim = T;
     const d0 = o.sd(req.de[0], req.de[1]);
@@ -302,7 +303,9 @@ function distsDoPonto(c, layer, x, y, net){
   assert.deepStrictEqual(atravessa(8, 8, 12, 8, 'A').conflitos.map(k => [k.id, k.tipo, k.net]), [['tB', 'trilha', 'B']], 'outra net bloqueia');
   assert.ok(atravessa(8, 8, 12, 8, 'B').ok, 'a mesma net não bloqueia');
   assert.ok(!atravessa(8, 8, 12, 8, '').ok, 'sem net na mão: todo cobre bloqueia');
-  assert.ok(!atravessa(5, 17, 5, 19, 'A').ok && !atravessa(5, 17, 5, 19, 'B').ok && !atravessa(5, 17, 5, 19, '').ok, 'cobre sem net bloqueia qualquer net');
+  assert.ok(!atravessa(5, 17, 5, 19, 'A').ok && !atravessa(5, 17, 5, 19, 'B').ok, 'cobre sem net bloqueia qualquer net');
+  /* sem net contra sem net: o DRC não confere folga (hub-pcbdrc.js), e o roteador segue a mesma regra */
+  assert.ok(atravessa(5, 17, 5, 19, '').ok, 'mão sem net passa por cobre sem net, como o DRC aceita');
   const k1 = atravessa(5, 0.6, 5, 2, 'A');
   assert.deepStrictEqual(k1.conflitos.map(k => [k.id, k.tipo]), [['tKO', 'keepout']], 'keepout:true bloqueia até a mesma net');
   const k2 = atravessa(14, 8, 16, 8, 'B');
@@ -494,17 +497,20 @@ function distsDoPonto(c, layer, x, y, net){
     const r = rotaV(eb, op, c, { net: '', de: [5, 5], ate: [5, 8], modo: '90', primeiro: 'v' }, 'partida na trilha sem net');
     assert.ok(r.completa && r.motivo === 'livre');
   }
-  /* 5f. a própria trilha em curso (sem net) não é obstáculo dela: o trecho que termina em `de`
-     já sai pela isenção da partida (ele contém `de`); os anteriores precisam do `ignora` */
+  /* 5f. a própria trilha em curso não é obstáculo dela. Sem net, nenhum trecho dela bloqueia (sem
+     net contra sem net não tem folga, como no DRC); com net, o `ignora` tira os trechos anteriores
+     quando eles ainda não têm a net (a placa os grava depois) */
   {
     const eb2 = placa({ tracks: [{ id: 'novo1', layer: 'Top', x1: 3, y1: 3, x2: 10, y2: 3, w: 0.25, net: '' },
                                  { id: 'novo2', layer: 'Top', x1: 10, y1: 3, x2: 10, y2: 8, w: 0.25, net: '' }] });
     const c2 = R.cena(eb2);
-    const sem = rotaV(eb2, {}, c2, { net: '', de: [10, 8], ate: [5, 3.2], modo: 'livre' }, 'volta por cima de si mesma, sem ignora');
-    assert.ok(!sem.completa, 'sem o ignora, o trecho anterior da própria trilha sem net bloqueia');
-    const so2 = rotaV(eb2, {}, c2, { net: '', de: [10, 8], ate: [10, 4], modo: 'livre' }, 'por cima do trecho que contém de');
+    const sem = rotaV(eb2, {}, c2, { net: '', de: [10, 8], ate: [5, 3.2], modo: 'livre' }, 'volta por cima de si mesma, sem net');
+    assert.ok(sem.completa && sem.motivo === 'livre', 'sem net, o trecho anterior da própria trilha não bloqueia');
+    const comNet = rotaV(eb2, {}, c2, { net: 'A', de: [10, 8], ate: [5, 3.2], modo: 'livre' }, 'com net, sem ignora');
+    assert.ok(!comNet.completa, 'com net, o trecho anterior ainda sem net bloqueia');
+    const so2 = rotaV(eb2, {}, c2, { net: 'A', de: [10, 8], ate: [10, 4], modo: 'livre' }, 'por cima do trecho que contém de');
     assert.ok(so2.completa && so2.motivo === 'livre', 'o trecho que contém `de` não bloqueia');
-    const com = rotaV(eb2, {}, c2, { net: '', de: [10, 8], ate: [5, 3.2], modo: 'livre', ignora: ['novo1', 'novo2'] }, 'com ignora');
+    const com = rotaV(eb2, {}, c2, { net: 'A', de: [10, 8], ate: [5, 3.2], modo: 'livre', ignora: ['novo1', 'novo2'] }, 'com ignora');
     assert.ok(com.completa && com.motivo === 'livre');
   }
 }

@@ -10,7 +10,6 @@
    Faltando o modulo, a ferramenta responde "modulo ausente" sem derrubar nada -- ou usa a reserva
    daqui quando ha uma honesta (ratsnest e comparacao de componentes). */
 'use strict';
-const fs = require('node:fs');
 const { ErroMcp } = require('../lib/contexto.js');
 const ops = require('../lib/pcb-ops.js');
 const geo = require('../lib/geometria.js');
@@ -24,10 +23,8 @@ function aplicaOps(ctx, p, lista, a, ferramenta) {
 /* o conjunto de regras do projeto como a vista o carrega: o rules.js (HubPcbRegras.ler) ou,
    sem ele, o padrao da casa + o board.rules do espelho (doBoard) */
 function regras(ctx, p) {
-  const R = ctx.exige('hub-pcbregras.js', 'HubPcbRegras');
-  const f = p.arq('rules.js');
-  if (fs.existsSync(f)) return { conjunto: R.ler(fs.readFileSync(f, 'utf8')), fonte: 'rules.js' };
-  return { conjunto: R.doBoard(ctx.temBoard(p) ? ctx.board(p) : {}), fonte: 'padrão da casa + board.rules (ainda não há rules.js)' };
+  ctx.exige('hub-pcbregras.js', 'HubPcbRegras');
+  return ops.regrasDoProjeto(ctx, p);
 }
 function textoGeo(ctx) {
   const G = ctx.modulo('hub-gerber.js');

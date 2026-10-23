@@ -38,7 +38,9 @@ fs.writeFileSync(path.join(TMP, 'projects.js'), 'var projects = [\n{"name":"LM55
 
 /* ---------- cliente stdio ---------- */
 function cliente() {
-  const p = spawn(process.execPath, [SCRIPT, '--projetos', PROJETOS], { stdio: ['pipe', 'pipe', 'pipe'] });
+  /* --root = este repositório: sem ele o servidor segue o app instalado (session.json/settings.json)
+     e testaria os módulos de lá */
+  const p = spawn(process.execPath, [SCRIPT, '--root', RAIZ, '--projetos', PROJETOS], { stdio: ['pipe', 'pipe', 'pipe'] });
   let buf = '', erro = '';
   const espera = new Map();
   p.stdout.setEncoding('utf8');
@@ -161,7 +163,11 @@ const texto = r => JSON.parse(r.result.content[0].text);
   assert.deepStrictEqual([op.op, op.orig_x1, op.orig_y1, op.orig_x2, op.orig_y2, op.orig_w, op.orig_layer], ['track_del', t1.x1, t1.y1, t1.x2, t1.y2, t1.w, t1.layer]);
 
   /* via com a net do ponto; validar; mudanças */
+  /* em cima do R1.1, a via de 0,5 mm invade o polígono de GND do Bottom: como na vista (e no DRC),
+     ela não entra; forcar passa por cima e ela herda a net do ponto */
   ({ j } = await chama('pcb_via', { projeto: PROJ, x: 80, y: 35 }));
+  assert.ok(j.ok === false && j.motivo === 'conflito' && j.conflitos.some(c => c.net === 'GND' && c.layer === 'Bottom'), JSON.stringify(j));
+  ({ j } = await chama('pcb_via', { projeto: PROJ, x: 80, y: 35, forcar: true }));
   assert.ok(j.ok && j.linhas[0].linha.includes('"net":"' + r1p1.net + '"'), JSON.stringify(j));
   ({ j } = await chama('pcb_validar', { projeto: PROJ }));
   assert.strictEqual(j.ok, true, JSON.stringify(j));
@@ -264,7 +270,7 @@ const texto = r => JSON.parse(r.result.content[0].text);
 
   /* ---- 3. HTTP + versão antiga ---- */
   const { montaServidor, servidorHttp } = require('../mcp/eletrichub-mcp.js');
-  const srv = montaServidor({ projetos: PROJETOS, log: () => {} });
+  const srv = montaServidor({ root: RAIZ, projetos: PROJETOS, log: () => {} });
   const h = servidorHttp(srv, { http: 0, host: '127.0.0.1' });
   await new Promise(ok => h.once('listening', ok));
   const url = `http://127.0.0.1:${h.address().port}/mcp`;

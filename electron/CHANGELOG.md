@@ -4,6 +4,31 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.23.0 — 2026-10-23
+
+O roteamento e o DRC com as mesmas regras, como no Altium (pedido do dono: "as regras precisam ser a mesma, a lógica
+de roteamento também precisa ser igual"):
+
+- **A Trilha (e o `pcb_rotear` do MCP) obedece as regras do projeto, as mesmas do DRC.** A folga de cada par sai da
+  Clearance vencedora (escopo `InNet(...)`, prioridade e matriz de objetos), e a folga ao contorno sai da Board
+  Outline Clearance. A camada que a Routing Layers da net não permite não recebe rota. Antes, a rota usava uma folga
+  só para a placa inteira, e uma regra como "a net HV pede 1 mm" valia só no DRC.
+- **Largura e via pela regra da net (o "Rule Preferred" do Altium).** A rota começa com a largura preferida da regra
+  Width da net, e a via com a da Routing Via Style. O valor digitado fora da faixa da regra vira o limite dela, com
+  aviso.
+- **Via em cima de outra net é recusada também pelo MCP** (`pcb_via`), como já era na tela.
+- O `pcb_rotear` não liga pad SMD pela camada errada nem grava rota que já sai da partida abaixo da folga (pad de passo
+  fino com a largura da regra): responde o motivo, e a tela avisa.
+- **DRC:** keepout passa a ser conferido contra o cobre, e trilha sem net em cima de furo NPTH é acusada.
+- **A vista reabre a placa que nasceu no hub.** Os componentes trazidos pelo ECO aparecem ao reabrir o projeto. Antes
+  ficavam com "footprint não encontrado" até alguém abrir o ECO de novo.
+- **O MCP posiciona componente que veio do ECO** (`pcb_mover` edita a linha `comp_add`).
+- Testes novos:
+  - roteador × DRC par a par, em placas sintéticas e em placas reais do acervo;
+  - quatro placas feitas do zero pelo MCP: esquema → ECO → posicionar → rotear → DRC → Gerber, com a furação conferida
+    furo a furo;
+  - smoke da vista PCB num Chrome headless (`tests/smoke-vista-pcb.js`).
+
 ## 1.22.0 — 2026-10-23
 
 - **Skill de produção nova no MCP: `pcb-producao-backplane`** (pedido do dono: "seguindo a CBM-DI251877, faça a

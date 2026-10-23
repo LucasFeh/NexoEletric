@@ -244,4 +244,16 @@ function transacao(ctx, p, fn, opts) {
   return estado;
 }
 
-module.exports = { indicePorId, achaObjeto, tipoDoObjeto, origDe, chaveDe, mescla, reserializa, transacao, resumoValidacao, r6 };
+/* o conjunto de regras do projeto como a vista o carrega: o rules.js (HubPcbRegras.ler) ou, sem
+   ele, o padrao da casa + o board.rules do espelho (doBoard). O DRC, o roteador e a largura/via
+   das ferramentas leem daqui: uma fonte so. null sem o hub-pcbregras.js */
+function regrasDoProjeto(ctx, p) {
+  const R = ctx.modulo('hub-pcbregras.js');
+  if (!R) return null;
+  const fs = require('node:fs');
+  const f = p.arq('rules.js');
+  if (fs.existsSync(f)) return { conjunto: R.ler(fs.readFileSync(f, 'utf8')), fonte: 'rules.js' };
+  return { conjunto: R.doBoard(ctx.temBoard(p) ? ctx.board(p) : {}), fonte: 'padrão da casa + board.rules (ainda não há rules.js)' };
+}
+
+module.exports = { indicePorId, achaObjeto, tipoDoObjeto, origDe, chaveDe, mescla, reserializa, transacao, resumoValidacao, regrasDoProjeto, r6 };

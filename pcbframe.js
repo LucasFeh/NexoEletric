@@ -2084,6 +2084,7 @@ function abreRegras(){
   if (!HRUI || !HRG) { HubDialog.alert('O editor de regras (hub-pcbregrasui.js) não carregou nesta página. Atualize o hub (F5).', { title:'Regras de projeto' }); return; }
   HRUI.abrirEditor({ regras:regrasAtuais(), placa:EB, unidade, salvar:async (conj, txt) => {
     REGRAS = conj;
+    CENA = null; ROTA = null;          /* o roteador passa a usar as regras novas na hora */
     if (DRC_RES) drcDepoisDaEdicao();
     if (!HubIO.canPost || !PROJ) { HubDialog.toast('regras valendo nesta sessão (sem gravação neste hub)', 'warn', 3000); return true; }
     const j = await postJson('/api/save', { path:'Projects/' + PROJ + '/rules.js', content:txt });
@@ -2260,7 +2261,11 @@ function cicloConflito(){
 
 /* ---- a cena: a placa efetiva com o contorno, os furos e a geometria de texto da tela ---- */
 function opcoesCena(eb){
-  const o = { clearance:FOLGA, placa:{ lacos:lacosDe(eb), recortes:(eb === EB ? recortesDaTela() : recortesDe(eb)).map(k => k.pts) } };
+  const o = { placa:{ lacos:lacosDe(eb), recortes:(eb === EB ? recortesDaTela() : recortesDe(eb)).map(k => k.pts) } };
+  /* as regras do projeto (as mesmas do DRC): a folga de cada par, a do contorno, e a largura, a via
+     e a camada da rota pela regra da net. Sem o modulo de regras, a folga unica de antes */
+  const S = regrasAtuais();
+  if (S) o.regras = S; else o.clearance = FOLGA;
   /* texto em camada de cobre e cobre: a geometria e a do Gerber (a mesma que a tela desenha);
      oculto nao vai para a fabrica e nao e obstaculo */
   if (typeof HubGerber !== 'undefined' && typeof HubGerber.geometriaTexto === 'function')
@@ -2275,6 +2280,36 @@ function cenaAtual(){
   return CENA;
 }
 const folgaDaCena = () => (CENA && isNum(CENA.clearance) && CENA.clearance > 0) ? CENA.clearance : FOLGA;
+/* Interactive Routing Width / Via Size em "Rule Preferred" (o padrao do Altium e o da vista): a
+   regra Width / Routing Via Style que vence para a net. A largura ou a via que o usuario digitou no
+   painel nesta sessao manda (o Tab do Altium no meio da rota), presa a faixa da regra da net: o
+   Altium nao deixa a rota sair dela, e o valor fora vira o limite, com aviso */
+const EDITADO = { w:false, via:false };
+let ultimoAvisoRegra = '';
+const avisaRegra = t => { if (t === ultimoAvisoRegra) return; ultimoAvisoRegra = t; setTimeout(() => { if (ultimoAvisoRegra === t) ultimoAvisoRegra = ''; }, 2000); HubDialog.toast(t, 'warn', 3500); };
+function larguraDaNet(net, layer){
+  if (!HR || typeof HR.limitaLargura !== 'function') return CFG.wTrilha;
+  try {
+    const c = cenaAtual();
+    if (!c || !c.regras) return CFG.wTrilha;
+    const manual = PREFS.larguraModo !== 'regra' || EDITADO.w;
+    const r = HR.limitaLargura(c, net || '', layer, manual ? CFG.wTrilha : 0);
+    if (r.ajustada && manual) avisaRegra('largura ' + fmtDist(CFG.wTrilha) + ' fora da regra ' + (r.regra || 'Width') + ' da net ' + (net || '(sem net)') + ': ' + fmtDist(r.w));
+    return r.w > 0 ? r6(r.w) : CFG.wTrilha;
+  } catch (e) { return CFG.wTrilha; }
+}
+function viaDaNet(net){
+  const cfg = { size:CFG.viaSize, drill:CFG.viaDrill };
+  if (!HR || typeof HR.limitaVia !== 'function') return cfg;
+  try {
+    const c = cenaAtual();
+    if (!c || !c.regras) return cfg;
+    const manual = PREFS.viaModo !== 'regra' || EDITADO.via;
+    const r = HR.limitaVia(c, net || '', manual ? CFG.viaSize : 0, manual ? CFG.viaDrill : 0);
+    if (r.ajustada && manual) avisaRegra('via ' + fmtDist(CFG.viaSize) + '/' + fmtDist(CFG.viaDrill) + ' fora da regra ' + (r.regra || 'Routing Via Style') + ': ' + fmtDist(r.size) + '/' + fmtDist(r.drill));
+    return r.size > 0 && r.drill > 0 ? { size:r6(r.size), drill:r6(r.drill) } : cfg;
+  } catch (e) { return cfg; }
+}
 /* a net do cobre sob o ponto na camada ('' = nenhum) */
 function netNoPonto(layer, x, y){
   if (!HR || typeof HR.netEm !== 'function') return '';
@@ -2314,7 +2349,9 @@ const folgaDoConflito = c => isNum(c && c.dist) ? c.dist : 0;
 function textoConflito(c){
   const d = descObstaculo(c) + (c && c.layer ? ' na ' + nomeDe(c.layer) : ''), f = folgaDoConflito(c);
   if (f < -1e-6) return 'cruzaria ' + d;
-  return 'encostaria em ' + d + ' (folga ' + fmtDist(Math.max(0, f)) + ' < ' + fmtDist(folgaDaCena()) + ' ' + unidade + ')';
+  /* a folga que a regra pede para ESTE par (Clearance com escopo e matriz), a do roteador */
+  const pede = c && isNum(c.folga) ? c.folga : folgaDaCena();
+  return 'encostaria em ' + d + ' (folga ' + fmtDist(Math.max(0, f)) + ' < ' + fmtDist(pede) + ' ' + unidade + ')';
 }
 /* o porque da recusa fica no rodape ate a proxima rota ou edicao aceita -- e so ele sai: o rodape
    tambem guarda aviso de outra origem (o changes.js que mudou no disco) */
@@ -2413,6 +2450,10 @@ function fixaRota(p, r){
     const t = textoParou(r, bloqueioDaRota(r, p, draft.net));
     avisoRota(t);
     HubDialog.toast(fim ? t : 'a trilha não sai daqui: ' + t, 'warn', 4500);
+  } else if (fim && Array.isArray(r.violacoes) && r.violacoes.length) {
+    /* a partida ja estava perto demais (regra de nao piorar): a trilha sai, mas abaixo da folga da
+       regra -- o DRC vai acusar, e o Walkaround do Altium nao a faria. Diz qual e o caminho */
+    avisaConflito('a trilha sai da partida abaixo da regra (o DRC vai acusar; diminua a largura ou parta de outro ponto)', r.violacoes);
   } else limpaAvisoRota();
   if (!fim) { pintaStatus(); pede(); return; }
   if (r.completa && elet) propagaNet(p.net);
@@ -2561,12 +2602,15 @@ function rotaClique(w, ev){
     draft.passos = [];
     if (tool === 'trilha') {
       draft.net = p.net || '';
-      /* Pickup Track Width From Existing Routes: comecar na ponta de uma trilha pega a largura dela */
-      draft.w = CFG.wTrilha;
-      if (PREFS.larguraDaTrilha && p.tipo === 'ponta' && p.id) { const m = IDX.item.get(String(p.id)); const e = m && m.eff; if (e && e.w > 0 && cobre(e.layer)) draft.w = e.w; }
       /* partida no meio de uma trilha (ou fill, regiao...): a net dela -- o Altium comeca a rota
          de qualquer ponto do cobre, e a trilha sem net seria barrada pela propria origem */
       if (!draft.net && !eletricoP(p) && motorLigado()) draft.net = netNoPonto(draft.layer, p.x, p.y);
+      /* a largura: a da regra Width vencedora para a net (o Rule Preferred do Altium); Pickup Track
+         Width From Existing Routes: comecar na ponta de uma trilha pega a largura dela */
+      draft.w = larguraDaNet(draft.net, draft.layer);
+      if (PREFS.larguraDaTrilha && p.tipo === 'ponta' && p.id) { const m = IDX.item.get(String(p.id)); const e = m && m.eff; if (e && e.w > 0 && cobre(e.layer)) draft.w = e.w; }
+      if (motorLigado() && cenaAtual() && HR.camadaPermitida && !HR.camadaPermitida(cenaAtual(), draft.net, draft.layer))
+        HubDialog.toast('a regra Routing Layers da net ' + (draft.net || '(sem net)') + ' não permite ' + draft.layer + ': troque de camada', 'warn', 4000);
     }
     pintaStatus(); pede(); return;
   }
@@ -2613,14 +2657,15 @@ function rotaVia(trocaCamada){
       const t = 'via não posta: ' + descObstaculo({ tipo:p.tipo === 'ponta' ? 'trilha' : p.tipo, net:p.net }) + ' é outra net — ' + porqueObstaculo({ net:p.net });
       avisoRota(t); HubDialog.toast(t, 'warn'); return true;
     }
-    const cs = conflitosDaViaNova(p, CFG.viaSize, draft.net || (elet ? p.net : '') || '', idsDaTrilha());
+    const cs = conflitosDaViaNova(p, viaDaNet(draft.net || (elet ? p.net : '') || '').size, draft.net || (elet ? p.net : '') || '', idsDaTrilha());
     if (cs && cs.length) { avisaConflito('via não posta', cs); pintaStatus(); return true; }
     if (cs) { depois = estDepois(antes, r.pts.slice(1), [p.x, p.y]); limpaAvisoRota(); }
   }
   if (!depois) depois = HubFio.completa(antes, [p.x, p.y]);
   propagaNet(p.net);
   const ops = segmentosNovos(antes, depois);
-  const via = { op:'via_add', x:r6(p.x), y:r6(p.y), size:r6(CFG.viaSize), drill:r6(CFG.viaDrill) };
+  const vd = viaDaNet(draft.net);
+  const via = { op:'via_add', x:r6(p.x), y:r6(p.y), size:r6(vd.size), drill:r6(vd.drill) };
   if (draft.net) via.net = draft.net;
   via.note = trocaCamada ? 'via da trilha (troca de camada)' : 'via da trilha';
   ops.push(via);
@@ -2701,11 +2746,12 @@ function cliqueFerramenta(w, ev){
   if (tool === 'texto') { const lay = camadaDesenho(); if (lay) abreCaixaTexto(snapPonto(w, ev, { soGrade:true })); return; }
   if (tool === 'via') {
     const p = snapPonto(w, ev);
-    const op = { op:'via_add', x:p.x, y:p.y, size:r6(CFG.viaSize), drill:r6(CFG.viaDrill) };
     const net = motorEdicao() ? netDaViaNova(p) : (p.net || CFG.viaNet);
+    const vd = viaDaNet(net);
+    const op = { op:'via_add', x:p.x, y:p.y, size:r6(vd.size), drill:r6(vd.drill) };
     if (net) op.net = net;
     /* via encostada em cobre de outra net nao entra (o conflito em ignorar e o escape) */
-    if (motorEdicao()) { const cs = conflitosDaViaNova(p, CFG.viaSize, net, []); if (cs && cs.length) { avisaConflito('via não posta', cs); return; } limpaAvisoRota(); }
+    if (motorEdicao()) { const cs = conflitosDaViaNova(p, vd.size, net, []); if (cs && cs.length) { avisaConflito('via não posta', cs); return; } limpaAvisoRota(); }
     op.note = 'via do hub';
     CH.push(op); selDepois = [op]; commit(); return;
   }
@@ -4896,14 +4942,14 @@ function fichaFerramenta(){
     case 'trilha': {
       const regra = isNum(RULES.clearance) && RULES.clearance > 0;
       F.campos.push(camada(l => l.kind === 'signal' || l.kind === 'plane'),
-        { k:'tool.wTrilha', rot:'Largura', tipo:'dist', v:CFG.wTrilha, dica:isNum(RULES.width) ? 'regra Width do espelho: ' + fmtDist(RULES.width) + ' ' + unidade : 'o espelho não trouxe a regra Width: 10 mil' },
+        { k:'tool.wTrilha', rot:'Largura', tipo:'dist', v:CFG.wTrilha, dica:PREFS.larguraModo === 'regra' && !EDITADO.w ? 'cada rota sai com a preferida da regra Width que vence para a net dela (Rule Preferred, como o Altium); o valor digitado aqui passa a valer, preso à faixa da regra' : 'a largura digitada, presa à faixa da regra Width da net' },
         { k:'tool.modo', rot:'Canto', tipo:'enum', v:CFG.modo, opc:[{ v:'45', rot:'45°' }, { v:'90', rot:'90°' }, { v:'livre', rot:'ângulo livre' }] },
         { k:'tool.conflito', rot:'Conflito', tipo:'enum', v:CFG.conflito, opc:CONFLITOS.map(v => ({ v, rot:CONFLITO_ROT[v] })),
-          dica:'Shift+R troca · ' + CONFLITO_FRASE[CFG.conflito] + ' · folga ' + fmtDist(FOLGA) + ' ' + unidade + (regra ? ' (regra Clearance do espelho)' : ' (o espelho não trouxe a regra Clearance: 10 mil)') },
+          dica:'Shift+R troca · ' + CONFLITO_FRASE[CFG.conflito] + ' · folga geral ' + fmtDist(folgaDaCena()) + ' ' + unidade + (regrasAtuais() ? ' — as regras Clearance do projeto valem por par (escopo e matriz), as mesmas do DRC' : (regra ? ' (regra Clearance do espelho)' : ' (o espelho não trouxe a regra Clearance: 10 mil)')) },
         { k:'net', rot:'Net', tipo:'ro', v:(draft && draft.net) || '— (vem do pad, via ou trilha em que começar)' },
         par('Via', { k:'tool.viaSize', rot:'Diâmetro', tipo:'dist', v:CFG.viaSize }, { k:'tool.viaDrill', rot:'Furo', tipo:'dist', v:CFG.viaDrill }),
         { nota:'Clique fixa o canto · Espaço inverte · Shift+Espaço 45°/90°/livre · Shift+R contornar/parar/ignorar · Backspace desfaz o trecho · 2 via · * ou Ctrl+2 via e troca de camada · botão direito termina · Esc larga.' },
-        { nota:'Trilhas de nets diferentes não se encontram (folga ' + fmtDist(FOLGA) + ' ' + unidade + '): contornar dá a volta no obstáculo sem mexer no que já está na placa; parar no obstáculo para antes dele; ignorar não confere nada. A mesma regra recusa arrastar ou editar trilha, arco e via para cima de outra net.' });
+        { nota:'Trilhas de nets diferentes não se encontram (a folga da regra Clearance do par, a mesma do DRC): contornar dá a volta no obstáculo sem mexer no que já está na placa; parar no obstáculo para antes dele; ignorar não confere nada. A mesma regra recusa arrastar ou editar trilha, arco e via para cima de outra net.' });
       if (!HR) F.aviso = 'O roteador (hub-roteador.js) não carregou: a trilha não confere conflito — atualize a página (F5).';
       else if (motorQuebrado) F.aviso = 'O roteador falhou nesta sessão: nada é conferido até recarregar a página (F5).';
       break;
@@ -4911,9 +4957,9 @@ function fichaFerramenta(){
     case 'via':
       F.campos.push(par('Via', { k:'tool.viaSize', rot:'Diâmetro', tipo:'dist', v:CFG.viaSize }, { k:'tool.viaDrill', rot:'Furo', tipo:'dist', v:CFG.viaDrill }),
         { k:'tool.viaNet', rot:'Net', tipo:'net', v:CFG.viaNet, opc:opcNets(CFG.viaNet), dica:'vazio: a via pega a net do pad/trilha em que cair; com uma net aqui, a via é dela — e não entra em cima de cobre de outra net' },
-        { nota:isNum(RULES.viaSize) ? 'Padrão pela regra RoutingVias do espelho.' : 'O espelho não trouxe a regra de via: 0,6/0,3 mm.' },
+        { nota:regrasAtuais() ? 'Padrão: a preferida da regra Routing Via Style que vence para a net; o valor digitado fica preso à faixa dela.' : (isNum(RULES.viaSize) ? 'Padrão pela regra RoutingVias do espelho.' : 'O espelho não trouxe a regra de via: 0,6/0,3 mm.') },
         { nota:CFG.conflito === 'ignorar' ? 'Conflito em ignorar (ficha da Trilha, Shift+R): a via não é conferida.'
-              : 'A via não entra encostada em cobre de outra net (folga ' + fmtDist(FOLGA) + ' ' + unidade + '): o anel vermelho avisa antes do clique.' });
+              : 'A via não entra encostada em cobre de outra net (a folga da regra Clearance do par): o anel vermelho avisa antes do clique.' });
       break;
     case 'linha': case 'arco': F.campos.push(camada(), larg); break;
     case 'circulo': case 'retangulo': case 'triangulo': case 'poligono': F.campos.push(camada(), larg, cheio); break;
@@ -4950,10 +4996,10 @@ function configTool(k, v){
   const pos = x => isNum(x) && x > 0;
   switch (k) {
     case 'camada': setCur(v); if (draft && draft.tipo === 'rota') draft.layer = cur; break;
-    case 'wTrilha': if (pos(v)) { CFG.wTrilha = r6(v); if (draft && draft.tipo === 'rota' && tool === 'trilha') draft.w = CFG.wTrilha; } break;
+    case 'wTrilha': if (pos(v)) { CFG.wTrilha = r6(v); EDITADO.w = true; if (draft && draft.tipo === 'rota' && tool === 'trilha') draft.w = CFG.wTrilha; } break;
     case 'wLinha': if (pos(v)) { CFG.wLinha = r6(v); if (draft && draft.tipo === 'rota' && tool === 'linha') draft.w = CFG.wLinha; } break;
-    case 'viaSize': if (pos(v)) CFG.viaSize = r6(v); if (CFG.viaDrill >= CFG.viaSize) HubDialog.toast('furo >= diâmetro: a via fica sem anel', 'warn'); break;
-    case 'viaDrill': if (pos(v)) CFG.viaDrill = r6(v); if (CFG.viaDrill >= CFG.viaSize) HubDialog.toast('furo >= diâmetro: a via fica sem anel', 'warn'); break;
+    case 'viaSize': if (pos(v)) { CFG.viaSize = r6(v); EDITADO.via = true; } if (CFG.viaDrill >= CFG.viaSize) HubDialog.toast('furo >= diâmetro: a via fica sem anel', 'warn'); break;
+    case 'viaDrill': if (pos(v)) { CFG.viaDrill = r6(v); EDITADO.via = true; } if (CFG.viaDrill >= CFG.viaSize) HubDialog.toast('furo >= diâmetro: a via fica sem anel', 'warn'); break;
     case 'viaNet': CFG.viaNet = String(v || ''); break;
     case 'modo':
       if (HubFio.MODOS.indexOf(v) >= 0) {
@@ -5617,6 +5663,28 @@ function inicia(){
   draw();
   if (MODO === 'gerber' && !LEAN) abreGerber();
   if (!LEAN) { agendaSilhuetas(); agendaPrepara3d(); }
+  carregaLibSePreciso();
+}
+/* PLACA QUE NASCEU NO HUB: o changes.js traz comp_add (o ECO feito antes, nesta tela ou pelo MCP)
+   cujo footprint so existe na biblioteca -- e a pagina nao carrega o Libs/pcblib.js de inicio (3 MB,
+   so o ECO o pedia). Sem ele, ao reabrir o projeto o componente nao aparecia e a validacao acusava
+   "footprint nao encontrado" ate alguem abrir o ECO. Aqui a biblioteca (a do Altium e a do hub, que
+   passa na frente) vem sozinha quando falta, e a placa e refeita. */
+async function carregaLibSePreciso(){
+  const falta = () => model.changeItems.some(i => i.ch && i.ch.op === 'comp_add' && i.status === 'err' && /não encontrado/.test(i.msg || ''));
+  if (!falta()) return;
+  try {
+    await globalDe('pcblib', 'Libs/pcblib.js');
+    if (typeof HubFpLib !== 'undefined' && typeof HubFpLib.carrega === 'function') { try { HUBLIB = await HubFpLib.carrega(); } catch (e) { /* sem a do hub */ } }
+    if (typeof pcblib !== 'undefined' && typeof HC.setPcbLib === 'function') HC.setPcbLib(pcblib);
+    registraLibHub();
+    CENA = null; ROTA = null;
+    reaplica();
+    sujo3d = true;
+    if (painel) painel.atualiza();
+    pede();
+    if (falta()) HubDialog.toast('há componente com footprint que não está na biblioteca (veja Mudanças)', 'warn', 5000);
+  } catch (e) { console.warn('biblioteca de footprints:', e); }
 }
 try { inicia(); }
 catch (e) { fatal('A vista PCB não abriu: ' + (e && e.message || e)); throw e; }

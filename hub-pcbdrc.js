@@ -37,7 +37,12 @@
      Clearance        cobre a cobre na mesma camada, entre nets diferentes (NETSCOPE), com a matriz
                       de objetos (OBJECTCLEARANCES) quando a regra traz. Cobre sem net contra cobre
                       sem net NÃO é conferido (logotipo e QR de trilhas soltas se tocam de propósito).
-                      Furo de pad NPTH (sem anel de cobre) entra como objeto "Hole".
+                      Furo de pad NPTH (sem anel de cobre) entra como objeto "Hole" — e esse vale
+                      também contra cobre sem net (broca atravessando cobre). KEEPOUT (a camada
+                      KeepOut em todo cobre; o objeto keepout:true na camada dele) entra contra o
+                      cobre de qualquer net pela regra do par, menos o do próprio componente. São as
+                      mesmas leituras do hub-roteador.js, que usa as mesmas regras para contornar
+                      (tests/test-roteador-regras.js confere os dois par a par).
      ShortCircuit     cobre de duas nets que se toca ou sobrepõe (as duas com nome).
      UnRoutedNet      a net com pads em mais de um grupo de cobre ligado: uma violação por ligação
                       que falta (a árvore mínima entre os grupos, pelo par de pads mais perto).
@@ -627,6 +632,25 @@ function montaObjetos(eb, opts, avisos){
   for (const g of eb.regions || []) if (g && ehCobre(g.layer) && !g.keepout)
     poeCobre(g, 'region', g.poly ? 'Poly' : 'Region', primsRegiao(g), (g.poly ? 'Polygon Region' : 'Region') + ' (' + ((g.points || []).length) + ' vertices) on ' + nomeCam(g.layer), { poly:!!g.poly });
 
+  /* KEEPOUT: não é cobre (não liga nada nem dá curto), mas barra o cobre de toda net pela regra de
+     Clearance, como no Altium ("... And Track (Keepout) on Keep-Out Layer"). A camada KeepOut barra
+     todas as camadas de cobre; o objeto com keepout:true, só a camada dele — a mesma leitura do
+     hub-roteador.js, que já o trata como obstáculo */
+  const keepouts = [];
+  const poeKo = (o, tipo, mt, prims, cams) => {
+    if (!prims.length) return;
+    const nomeK = o.layer === 'KeepOut' ? 'Keep-Out Layer' : nomeCam(o.layer);
+    keepouts.push(novo({ id:o.id, tipo, mt, net:'', layer:o.layer, camadas:cams, prims, primsBot:prims, bb:caixaDe(prims), dono:o.owner || '', keepout:true,
+                         nome:(tipo === 'arc' ? 'Arc' : tipo === 'fill' ? 'Fill' : tipo === 'region' ? 'Region' : 'Track') + ' (Keepout) on ' + nomeK }));
+  };
+  const camsKo = o => o.layer === 'KeepOut' ? pilha : (ehCobre(o.layer) && o.keepout ? [o.layer] : null);
+  for (const s of (eb.lines || []).concat(eb.tracks || [], eb.arcs || [])) {
+    const cams = s && camsKo(s);
+    if (cams) { const arco = s.kind === 'arc' || (isNum(s.cx) && isNum(s.r) && !isNum(s.x1)); poeKo(s, arco ? 'arc' : 'track', arco ? 'Arc' : 'Track', primsLinha(s), cams); }
+  }
+  for (const f of eb.fills || []) { const cams = f && camsKo(f); if (cams) poeKo(f, 'fill', 'Fill', primsFill(f), cams); }
+  for (const g of eb.regions || []) { const cams = g && camsKo(g); if (cams) poeKo(g, 'region', 'Region', primsRegiao(g), cams); }
+
   /* textos: no cobre e na serigrafia, pela geometria do Gerber */
   const tg = typeof opts.textoGeo === 'function' ? opts.textoGeo : null;
   let semGeo = 0;
@@ -661,7 +685,7 @@ function montaObjetos(eb, opts, avisos){
   for (const f of eb.fills || []) if (f && lado(f.layer)) poeMasc(f, 'fill', primsFill(f), 'Fill on ' + nomeCam(f.layer));
   for (const g of eb.regions || []) if (g && lado(g.layer)) poeMasc(g, 'region', primsRegiao(g), 'Region on ' + nomeCam(g.layer));
 
-  return { cobre, furos, silk, mascara, pads, pilha };
+  return { cobre, furos, silk, mascara, pads, pilha, keepouts };
 }
 function ordemCamada(k){
   if (k === 'Top') return 0;
@@ -794,7 +818,7 @@ function rodar(eb, regras, opts){
   };
 
   const OB = montaObjetos(eb, opts, avisos);
-  const { cobre, furos, silk, mascara, pads, pilha } = OB;
+  const { cobre, furos, silk, mascara, pads, pilha, keepouts } = OB;
   cobre.forEach((o, i) => { o.i = i; });
   const U = uniao(cobre.length);
   const tocou = new Uint8Array(cobre.length);
@@ -825,7 +849,9 @@ function rodar(eb, regras, opts){
     const objs = cobre.filter(o => o.camadas.indexOf(L) >= 0);
     const prims = o => L === 'Bottom' ? o.primsBot : o.prims;
     cadaPar(objs, maxFolga, (a, b) => {
-      const mesma = a.net === b.net;          /* inclui sem-net com sem-net: só conectividade */
+      /* inclui sem-net com sem-net: só conectividade. O furo NPTH não é cobre: não liga nada, e
+         o par com ele vai sempre para a folga */
+      const mesma = a.net === b.net && a.mt !== 'Hole' && b.mt !== 'Hole';
       /* dois objetos passantes se conferem em toda camada (a pilha pode mudar a forma); o poe()
          junta as repetições do mesmo par e fica com a pior folga */
       if (mesma) {
@@ -856,11 +882,38 @@ function rodar(eb, regras, opts){
                                     x:w[0], y:w[1], layer:L, ids:[a.id, b.id], valor:r.d, limite:0, chaveExtra:'' });
         }
       }
-      if (!a.net && !b.net) return;                 /* sem net contra sem net: fora da folga */
+      /* sem net contra sem net: fora da folga — menos o FURO, que não é cobre: trilha solta em
+         cima de furo NPTH é broca atravessando cobre, com net ou sem */
+      if (!a.net && !b.net && a.mt !== 'Hole' && b.mt !== 'Hole') return;
       if (rC && gap > -Infinity && r.d < gap - TOL) {
         const w = onde(r.p, r.q, r.d);
         poe(rC, 'Clearance', { msg:msgPar('Clearance', r.d, gap, a, b), x:w[0], y:w[1], layer:(a.layer === 'Multi' && b.layer === 'Multi') ? 'Multi' : L,
                                ids:[a.id, b.id], valor:Math.max(r.d, 0), limite:gap });
+      }
+    });
+  }
+
+  /* ---- keepout contra cobre: a Clearance do par (keepout sem net, logo "nets diferentes" de todo
+     cobre), com a matriz de objetos. O keepout do próprio componente não briga com o cobre dele
+     (o keepout de antena de um módulo fica em volta dos pads do próprio módulo) ---- */
+  if (ckClear && keepouts.length) for (const L of pilha) {
+    const K = keepouts.filter(k => k.camadas.indexOf(L) >= 0);
+    if (!K.length) continue;
+    const objs = K.concat(cobre.filter(o => o.camadas.indexOf(L) >= 0));
+    const prims = o => L === 'Bottom' ? o.primsBot : o.prims;
+    cadaPar(objs, maxFolga, (a, b) => {
+      if (!!a.keepout === !!b.keepout) return;
+      const ko = a.keepout ? a : b, o = a.keepout ? b : a;
+      if (ko.dono && ko.dono === o.dono) return;
+      if (!envolve(ko, o)) return;
+      const rC = RES.regraPara('Clearance', ko.desc, o.desc);
+      if (!rC || rC.netscope === 'SameNet') return;
+      const gap = gapMatriz(rC, ko.mt, o.mt);
+      if (folgaCaixas(ko.bb, o.bb) > gap + EPS) return;
+      const r = dListas(prims(ko), prims(o), gap + EPS);
+      if (r.d < gap - TOL || r.d <= TOQUE) {
+        const w = onde(r.p, r.q, r.d);
+        poe(rC, 'Clearance', { msg:msgPar('Clearance', r.d, gap, o, ko), x:w[0], y:w[1], layer:L, ids:[o.id, ko.id], valor:Math.max(r.d, 0), limite:gap, chaveExtra:'ko' });
       }
     });
   }
