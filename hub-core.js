@@ -1142,17 +1142,22 @@ function applyPcbChanges(board, changes, opts){
         break;
       }
       case 'region_add': {
-        /* poligono fechado implicito; cutout:true = Board Cutout (a layer e ignorada) */
+        /* poligono fechado implicito; cutout:true = Board Cutout (a layer e ignorada);
+           polycut:true = Polygon Pour Cutout ("sem plano"): o plano nao entra, trilha e via
+           passam -- numa camada de cobre ou na Multi (todas), sem net */
         if (!ptsValid(ch.pts, 3)) return bad('pts deve ser [[x,y],...] com >= 3 vértices');
-        const corte = ch.cutout === true;
-        if (!corte) { const e = layerErr(ch.layer, 'região'); if (e) return bad(e); }
+        const corte = ch.cutout === true, semPlano = !corte && ch.polycut === true;
+        if (semPlano) {
+          if (ch.layer !== 'Multi' && !isCopper(ch.layer))
+            return bad(`recorte de polígono (polycut) só em camada de cobre ou na Multi (todas) — "${ch.layer || ''}" não serve`);
+        } else if (!corte) { const e = layerErr(ch.layer, 'região'); if (e) return bad(e); }
         const ge = regiaoErro(ch.pts); if (ge) return bad(ge);
         const m = { kind:'region', src:null, changed:false, added:true,
-                    eff:{ id:(corte ? 'new-k' : 'new-g')+(++addSeq), ...ch, points:ch.pts.map(p => [p[0], p[1]]) } };
+                    eff:{ id:(corte ? 'new-k' : semPlano ? 'new-q' : 'new-g')+(++addSeq), ...ch, points:ch.pts.map(p => [p[0], p[1]]) } };
         model.added.push(m); item.target = m;
         novoLivre(m.eff);
-        if (corte) {
-          m.eff.layer = 'Multi'; m.eff.cutout = true;
+        if (corte || semPlano) {
+          if (corte) { m.eff.layer = 'Multi'; m.eff.cutout = true; }
           if (typeof ch.net === 'string' && ch.net) warn(`recorte não tem net — "${ch.net}" ignorada`);
           delete m.eff.net;
         } else soCobre(m.eff);
@@ -1820,6 +1825,7 @@ function effectiveBoard(board, model){
   for (const m of M.added) if (m.kind === 'region') {
     const e = m.eff, pts = dcopy(e.points);
     if (e.cutout) cutouts.push({ id:e.id, layer:'Multi', incomp:false, points:pts });
+    else if (e.polycut) cutouts.push({ id:e.id, layer:e.layer, kindn:1, incomp:false, points:pts });
     else {
       const o = { id:e.id, layer:e.layer, net:typeof e.net === 'string' ? e.net : '', points:pts };
       if (!isCopper(o.layer)) delete o.net;
@@ -2542,7 +2548,7 @@ function serializeChanges(changes){
     if (ch.op === 'region_add'){
       if (!ptsValid(ch.pts, 3)) errors.push({ idx:i, msg:'region_add: pts deve ser [[x,y],...] com >= 3 vertices' });
       if (ch.cutout !== true && (typeof ch.layer !== 'string' || !ch.layer))
-        errors.push({ idx:i, msg:'region_add: campo "layer" ausente (ou cutout:true para recorte)' });
+        errors.push({ idx:i, msg:'region_add: campo "layer" ausente (ou cutout:true para recorte)' + (ch.polycut === true ? ' — o polycut vai numa camada de cobre ou na Multi' : '') });
     }
     if (ch.op === 'text_add'){
       if (isNum(ch.h) && ch.h <= 0) errors.push({ idx:i, msg:'text_add: h deve ser > 0' });

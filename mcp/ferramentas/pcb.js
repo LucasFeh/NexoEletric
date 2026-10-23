@@ -77,7 +77,7 @@ function textoGeo(ctx) {
 function recortesDe(eb) {
   const bb = eb.board && eb.board.bbox, out = [];
   for (const k of eb.cutouts || []) {
-    if (!k || !Array.isArray(k.points) || k.points.length < 3 || k.kindn === -1) continue;
+    if (!k || !Array.isArray(k.points) || k.points.length < 3 || k.kindn === -1 || k.kindn === 1) continue;
     const xs = k.points.map(q => q[0]), ys = k.points.map(q => q[1]);
     if (bb && Math.min(...xs) <= bb.x1 + 1e-3 && Math.max(...xs) >= bb.x2 - 1e-3 && Math.min(...ys) <= bb.y1 + 1e-3 && Math.max(...ys) >= bb.y2 - 1e-3) continue;
     out.push({ id: k.id, pts: k.points });

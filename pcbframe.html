@@ -57,6 +57,14 @@
   #pcbtb button:disabled{opacity:.35; cursor:not-allowed;}
   #pcbtb svg{width:18px; height:18px; flex:none;}
   #pcbtb .lb{font-size:11px; letter-spacing:.02em;}
+  /* o grupo com gaveta: o botao da ultima ferramenta + a setinha; a gaveta abre embaixo */
+  #pcbtb .grupo{position:relative; display:inline-flex; align-items:center;}
+  #pcbtb .grupo .gseta{width:14px; padding:0; justify-content:center; margin-left:-2px;}
+  #pcbtb .grupo .gseta svg{width:10px; height:10px;}
+  #pcbtb .grupo .gseta[aria-expanded="true"]{color:var(--fg); background:rgba(var(--tint),0.08); border-color:var(--border);}
+  #pcbtb .gaveta{position:absolute; top:calc(100% + 7px); left:-4px; z-index:13; display:flex; gap:2px; padding:3px 4px;
+    background:var(--panel); border:1px solid var(--border); border-radius:6px; box-shadow:var(--shadow-menu);}
+  #pcbtb .gaveta[hidden]{display:none;}
 
   /* ── as abas de camada, embaixo do canvas: LS + uma aba por camada, com a amostra de cor ── */
   #abas{flex:none; display:flex; align-items:stretch; height:28px; background:var(--panel); border-top:1px solid var(--border); min-width:0;}

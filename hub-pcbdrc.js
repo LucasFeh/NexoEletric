@@ -745,7 +745,7 @@ const dentroDaPlaca = (C, x, y) => { let c = false; for (const A of C.aneis) if 
 function recortes(eb){
   const bb = eb.board && eb.board.bbox, out = [];
   for (const k of eb.cutouts || []) {
-    if (!k || !Array.isArray(k.points) || k.points.length < 3 || k.kindn === -1) continue;
+    if (!k || !Array.isArray(k.points) || k.points.length < 3 || k.kindn === -1 || k.kindn === 1) continue;   /* 1 = recorte de polígono: não é furo */
     const xs = k.points.map(q => q[0]), ys = k.points.map(q => q[1]);
     if (bb && Math.min(...xs) <= bb.x1 + 1e-3 && Math.max(...xs) >= bb.x2 - 1e-3 && Math.min(...ys) <= bb.y1 + 1e-3 && Math.max(...ys) >= bb.y2 - 1e-3) continue;
     const g = primArea([k.points], []);

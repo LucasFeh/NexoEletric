@@ -3342,19 +3342,32 @@ end;
 // Kind - a atribuicao direta, que e a que o AD24 aceita -, relido antes do contorno, depois dele
 // e depois de ir para a placa. Se nao pegar, a FALHA e "recorte nao suportado nesta versao". A
 // camada e a Multi, a dos recortes que a casa desenha (V7_LAYER=MULTILAYER nos PcbDoc).
+//
+// polycut:true e o recorte de POLYGON (Polygon Pour Cutout, o "sem plano" do hub): o plano nao
+// entra nele, trilha e via passam. Mesmo caminho do recorte - o Kind como inteiro, relido -, com
+// KIND_RECORTE_POLIGONO, na camada de cobre pedida ou na Multi (todas as camadas, como no
+// PCBM-DI261904). Sem net.
 procedure DoRegionAdd(Line: String);
 var
   Pts: TStringList;
   Region: TObject;
   Net: IPCB_Net;
-  What, NetStr, Etapa, Origem, Vertices: String;
+  What, NetStr, Etapa, Origem, Vertices, NaoDa: String;
   L: TLayer;
-  N, KindLido, Medidos, BaseX: Integer;
-  Corte, Ok, Conferido, CamadaOk: Boolean;
+  N, KindLido, Medidos, BaseX, KindAlvo: Integer;
+  Corte, PolyCorte, Ok, Conferido, CamadaOk: Boolean;
 begin
   Corte := JBool(Line, 'cutout');
+  PolyCorte := (not Corte) and JBool(Line, 'polycut');
+  KindAlvo := -1;
+  NaoDa := 'recorte nao suportado nesta versao: desenhe o Board Cutout no Altium';
   if Corte then
     What := 'region_add (recorte)'
+  else if PolyCorte then
+  begin
+    What := 'region_add (sem plano ' + JGet(Line, 'layer') + ')';
+    NaoDa := 'recorte de polygon nao suportado nesta versao: desenhe o Polygon Pour Cutout no Altium';
+  end
   else
     What := 'region_add ' + JGet(Line, 'layer');
 
@@ -3391,6 +3404,30 @@ begin
         KindRecorteOrigem + ') - nada foi criado');
       Pts.Free;
       Exit;
+    end;
+    KindAlvo := KindRecorteN;
+  end
+  else if PolyCorte then
+  begin
+    if JGet(Line, 'net') <> '' then
+      LogAviso(What + ': recorte de polygon nao tem net - "' + JGet(Line, 'net') + '" ignorada');
+    KindAlvo := KIND_RECORTE_POLIGONO;
+    if JGet(Line, 'layer') = 'Multi' then
+      L := eMultiLayer
+    else
+    begin
+      L := CamadaDeDestino(JGet(Line, 'layer'), What, 'region');
+      if L = 0 then
+      begin
+        Pts.Free;
+        Exit;
+      end;
+      if not EhCobre(L) then
+      begin
+        LogFail(What + ': recorte de polygon so em camada de cobre (ou na Multi) - nada foi criado');
+        Pts.Free;
+        Exit;
+      end;
     end;
   end
   else
@@ -3442,23 +3479,23 @@ begin
   end;
 
   // 3) recorte: o Kind, escrito e relido; depois a Multi, se ainda nao pegou
-  if Corte then
+  if Corte or PolyCorte then
   begin
     Ok := True;
     try
-      Region.Kind := KindRecorteN;
+      Region.Kind := KindAlvo;
     except
       Ok := False;
     end;
     KindLido := LeKind(Region);
-    if KindLido <> KindRecorteN then
+    if KindLido <> KindAlvo then
     begin
       if Ok then
         Etapa := 'nao pegou'
       else
         Etapa := 'foi recusado na escrita (Region.Kind)';
-      LogFail(What + ': recorte nao suportado nesta versao: desenhe o Board Cutout no Altium (o Kind ' +
-        IntToStr(KindRecorteN) + ' ' + Etapa + ': a region ficou com Kind ' + IntToStr(KindLido) +
+      LogFail(What + ': ' + NaoDa + ' (o Kind ' +
+        IntToStr(KindAlvo) + ' ' + Etapa + ': a region ficou com Kind ' + IntToStr(KindLido) +
         ') - nada foi criado');
       Pts.Free;
       Exit;
@@ -3496,13 +3533,13 @@ begin
 
   // 5) recorte: o Kind de novo (gravar o contorno nao pode te-lo desfeito). Region solida: a net,
   //    so no cobre.
-  if Corte then
+  if Corte or PolyCorte then
   begin
     KindLido := LeKind(Region);
-    if KindLido <> KindRecorteN then
+    if KindLido <> KindAlvo then
     begin
-      LogFail(What + ': recorte nao suportado nesta versao: desenhe o Board Cutout no Altium (o Kind ' +
-        IntToStr(KindRecorteN) + ' se perdeu ao gravar o contorno: a region ficou com Kind ' +
+      LogFail(What + ': ' + NaoDa + ' (o Kind ' +
+        IntToStr(KindAlvo) + ' se perdeu ao gravar o contorno: a region ficou com Kind ' +
         IntToStr(KindLido) + ') - nada foi criado');
       Pts.Free;
       Exit;
@@ -3551,6 +3588,16 @@ begin
   Vertices := Vertices + ' [sonda: X[] base ' + IntToStr(BaseX) + ']';
   if not Ok then
     LogFail(What + ': o Altium recusou Board.AddPCBObject - confira se a region ficou na placa')
+  else if PolyCorte then
+  begin
+    KindLido := LeKind(Region);
+    if KindLido <> KindAlvo then
+      LogFail(What + ': foi para a placa, mas ficou com Kind ' + IntToStr(KindLido) + ' em vez de ' +
+        IntToStr(KindAlvo) + ' - NAO e recorte de polygon: apague essa region no Altium (ou desfaca a ' +
+        'aplicacao inteira com um Ctrl+Z) e desenhe o Polygon Pour Cutout la')
+    else
+      LogOk(What + ': ' + Vertices + ', recorte de polygon (Kind ' + IntToStr(KindAlvo) + ') - repour no Altium');
+  end
   else if Corte then
   begin
     // 7) o recorte ja na placa: o Kind ficou? Se nao ficou, a region ESTA na placa - por isso a

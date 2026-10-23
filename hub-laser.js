@@ -147,6 +147,9 @@ function withMountLayer(layers){
 function boardCutouts(board){
   const B = board || {}, bb = (B.board && B.board.bbox) || null, out = [];
   for (const k of B.cutouts || []){
+    /* kindn 1 = recorte de POLIGONO ("sem plano": so o plano nao entra) e -1 = a regiao da
+       placa: nenhum dos dois e furo */
+    if (k && (k.kindn === 1 || k.kindn === -1)) continue;
     const pts = ((k && k.points) || []).map(q => [q[0], q[1]]);
     if (pts.length < 3) continue;
     const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]);

@@ -319,7 +319,7 @@ function verifica(ctx, a) {
       if (paths.length) silk.push({ tipo: 'silk', id: q.id || '', owner: q.owner || '', lado: s, layer: q.layer, paths, bb: K.caixa(paths) });
     }
     const quadrados = furos.map(f => ({ tipo: 'quadrado do parafuso', id: f.origem, bb: f.quadrado, paths: [K.paraC([[f.quadrado.x1, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y2], [f.quadrado.x1, f.quadrado.y2]])] }));
-    const recortes = (eb.cutouts || []).filter(k => k && Array.isArray(k.points) && k.points.length >= 3 && k.kindn !== -1).map(k => ({ tipo: 'recorte', id: k.id || '', bb: caixaPts(k.points), paths: [K.paraC(k.points)] }));
+    const recortes = (eb.cutouts || []).filter(k => k && Array.isArray(k.points) && k.points.length >= 3 && k.kindn !== -1 && k.kindn !== 1).map(k => ({ tipo: 'recorte', id: k.id || '', bb: caixaPts(k.points), paths: [K.paraC(k.points)] }));
     const nome = s => s.tipo === 'texto' ? `texto "${s.texto}"` : `serigrafia de ${s.owner || s.id}`;
     const bate = (s, ob, folga, contra) => {
       if (!cruza(s.bb, ob.bb, folga + 0.01)) return;

@@ -35,6 +35,7 @@ const ICONES = {
   retangulo:  'r:2.5,3.5,11,9',
   triangulo:  'M8 2.5 L14 13.5 H2 Z',
   poligono:   'M8 2 L14 6.5 L11.7 13.5 L4.3 13.5 L2 6.5 Z',
+  gaveta:     'M4 6 L8 10 L12 6',
   texto:      'M3 3.5 H13 M8 3.5 V13',
   preencher:  'r:2.5,4,11,8|M2.5 9.5 L8 4 M6.5 12 L13.5 5 M11 12 L13.5 9.5',
   /* placa */

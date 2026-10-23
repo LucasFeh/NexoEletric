@@ -296,6 +296,11 @@ const CFG = {
   wLinha: 0.254, hTexto: 1.524, wTexto: 0.254, furo: 3.2,
   padW: 1.524, padFuro: 0.762,            /* o pad padrao do Altium: 60 mil, furo 30 mil */
   modo: '45',
+  /* Polygon Pour: retangulo (2 cliques) ou poligono livre; tipo 'plano:<camada>' ou
+     'sem:<camada>' / 'sem:Multi' (o recorte de poligono); net null = a de terra da placa */
+  pourForma: lePref('pourForma', 'retangulo') === 'livre' ? 'livre' : 'retangulo',
+  pourTipo: lePref('pourTipo', 'plano:Top'),
+  pourNet: null,
   conflito: CONFLITOS.indexOf(lePref('conflito', 'contornar')) >= 0 ? lePref('conflito', 'contornar') : 'contornar',
 };
 if (!(CFG.viaDrill < CFG.viaSize)) CFG.viaDrill = r6(CFG.viaSize / 2);
@@ -421,11 +426,15 @@ function montaIndices(){
   for (const list of [model.tracks, model.arcs, model.vias, model.texts, model.fills, model.regions, model.pads || []])
     for (const m of list) if (m.src && m.src.id != null && !IDX.item.has(String(m.src.id))) IDX.item.set(String(m.src.id), m);
   for (const m of model.added) if (m.eff && m.eff.id != null) IDX.item.set(String(m.eff.id), m);
+  for (const m of model.polygons || []) {
+    const id = m.added ? m.eff.id : (m.src && m.src.id);
+    if (id != null && !IDX.item.has(String(id))) IDX.item.set(String(id), m);
+  }
   model.comps.forEach((m, i) => {
     IDX.compNome.set(String(m.eff.designator || m.src.ref), m);
     IDX.ebComp.set(m, EB.components[i]);
   });
-  for (const k of ['tracks', 'arcs', 'vias', 'texts', 'fills', 'regions', 'silk', 'lines', 'cutouts'])
+  for (const k of ['tracks', 'arcs', 'vias', 'texts', 'fills', 'regions', 'silk', 'lines', 'cutouts', 'polygons'])
     for (const o of (EB[k] || [])) if (o && o.id != null && !IDX.ebPorId.has(String(o.id))) IDX.ebPorId.set(String(o.id), o);
   /* o que cada componente leva junto (pelo nome efetivo: o owner do EB ja sai renomeado) */
   IDX.donos = new Map();
@@ -642,6 +651,7 @@ function chave(a){
     case 'ann': return 'n:' + a.ann.id;
     case 'regiao-ro': return 'g:' + a.eb.id;
     case 'recorte': return a.m ? 'o:' + numDoOp(opDe(a.m)) : 'k:' + a.eb.id;
+    case 'semplano': return a.m ? 'o:' + numDoOp(opDe(a.m)) : 'q:' + a.eb.id;
     default: return a.m.added ? 'o:' + numDoOp(opDe(a.m)) : a.m.kind + ':' + a.m.src.id;
   }
 }
@@ -725,10 +735,38 @@ function montaAlvos(){
     const c = fillCantos(f);
     push(a, f.owner ? 'comp' : tipoFiltro(f, 'fill'), f.layer, bbPts(c), (x, y, tol) => dentroPoli(c, x, y) || pertoPoli(c, x, y, tol), 4, f);
   }
+  /* Polygon Pour: o contorno (a definicao) seleciona o poligono -- a borda ganha de quase tudo,
+     o miolo perde -- e o cobre despejado dele (o do hub pelo `de`; o do Altium pela camada, net e
+     contorno que o contem) tambem */
+  const polyAlvo = new Map(), polys = [];
+  for (const p of EB.polygons || []) {
+    if (!p || !Array.isArray(p.pts) || p.pts.length < 3) continue;
+    const m = IDX.item.get(String(p.id));
+    if (!m || m.kind !== 'poly' || m.deleted) continue;
+    const a = reg({ t:'poly', m }), pts = p.pts, bb = bbPts(pts);
+    polyAlvo.set(String(p.id), a); polys.push({ p, a });
+    push(a, 'poly', p.layer, bb, (x, y, tol) => pertoPoli(pts, x, y, tol), 4, p);
+    push(a, 'poly', p.layer, bb, (x, y) => dentroPoli(pts, x, y), 8, p);
+  }
+  const polyDoCobre = g => {
+    if (g.de != null) return polyAlvo.get(String(g.de)) || null;
+    const q = g.points[0];
+    const x = polys.find(({ p }) => p.layer === g.layer && (p.net || '') === (g.net || '') && dentroPoli(p.pts, q[0], q[1]));
+    return x ? x.a : null;
+  };
+  /* o recorte de poligono ("sem plano"): o do hub edita; o do Altium so se ve */
+  for (const k of EB.cutouts || []) {
+    if (!k || k.kindn !== 1 || !Array.isArray(k.points) || k.points.length < 3) continue;
+    const m = IDX.item.get(String(k.id));
+    const a = reg(m && m.added ? { t:'semplano', eb:k, m } : { t:'semplano', eb:k }), pts = k.points;
+    push(a, 'poly', k.layer || 'Multi', bbPts(pts), (x, y, tol) => pertoPoli(pts, x, y, tol) || dentroPoli(pts, x, y), 6, k);
+  }
   for (const g of EB.regions || []) {
     if (!g || !Array.isArray(g.points) || g.points.length < 3) continue;
     let a = g.owner ? doDono(g) : doItem(g), t;
+    const pg = !g.owner && g.poly ? polyDoCobre(g) : null;
     if (g.owner) t = 'comp';
+    else if (pg) { a = pg; t = 'poly'; }
     else {
       t = g.keepout ? 'keepout' : g.poly ? 'poly' : 'region';
       if (!a) a = reg({ t:'regiao-ro', eb:g, motivo: g.poly ? 'pedaço de polígono despejado: o Altium redespeja — mexa no polígono lá'
@@ -1116,6 +1154,37 @@ function pintaCamada(k){
   }
 }
 
+/* O Polygon Pour como o Altium o mostra: o contorno do poligono tracejado na cor da camada (o
+   cobre despejado ja esta no cache), e o recorte de poligono ("sem plano") hachurado -- na cor da
+   camada, ou cinza quando vale para todas (Multi). O que esta na mao (EXCLUI) sai daqui. */
+function desenhaPlanos(){
+  const pula = o => EXCLUI && EXCLUI.has(o);
+  for (const p of EB.polygons || []) {
+    if (!p || pula(p) || !Array.isArray(p.pts) || p.pts.length < 3 || !camVisivel(p.layer)) continue;
+    const P = new Path2D(); pPoli(P, p.pts);
+    ctx.save(); ctx.strokeStyle = corDe(p.layer); ctx.globalAlpha = 0.95; ctx.setLineDash([px(6), px(3)]); ctx.lineWidth = px(1.3);
+    ctx.stroke(P); ctx.restore();
+  }
+  for (const k of EB.cutouts || []) {
+    if (!k || k.kindn !== 1 || pula(k) || !Array.isArray(k.points) || k.points.length < 3) continue;
+    const multi = !k.layer || k.layer === 'Multi';
+    if (multi ? !camadasCobre().some(l => camVisivel(l.key)) : !camVisivel(k.layer)) continue;
+    hachura(k.points, multi ? COR.contorno : corDe(k.layer));
+  }
+}
+function hachura(pts, cor){
+  const P = new Path2D(); pPoli(P, pts);
+  const bb = bbPts(pts); if (!bb) return;
+  const alt = bb[3] - bb[1];
+  let passo = px(9);
+  if ((bb[2] - bb[0] + alt) / passo > 1500) passo = (bb[2] - bb[0] + alt) / 1500;
+  const H = new Path2D();
+  for (let c = bb[0] - alt; c <= bb[2]; c += passo) { H.moveTo(c, bb[1]); H.lineTo(c + alt, bb[3]); }
+  ctx.save(); ctx.clip(P);
+  ctx.strokeStyle = cor; ctx.globalAlpha = 0.5; ctx.lineWidth = px(1); ctx.setLineDash([]); ctx.stroke(H);
+  ctx.restore();
+  ctx.save(); ctx.strokeStyle = cor; ctx.globalAlpha = 0.95; ctx.setLineDash([px(5), px(3)]); ctx.lineWidth = px(1.3); ctx.stroke(P); ctx.restore();
+}
 function draw(){
   agendado = 0;
   if (!EB || !CW) return;
@@ -1129,6 +1198,7 @@ function draw(){
   if (show.grid) { ctx.save(); ctx.clip(pathPlaca(), 'evenodd'); desenhaGrade(); ctx.restore(); }
   desenhaOrigem();
   for (const k of ORDEM) if (camVisivel(k)) pintaCamada(k);
+  desenhaPlanos();
   ctx.fillStyle = COR.furo; ctx.fill(CACHE.furos);
   ctx.strokeStyle = COR.contorno; ctx.lineWidth = px(1.3); ctx.setLineDash([]); ctx.stroke(pathPlaca());
   desenhaSilhuetas();
@@ -1276,6 +1346,8 @@ function realcaAlvo(a, cor, forte){
     case 'region': { const o = ebDe(a.m); if (o) { const P = new Path2D(); pRegiao(P, o); veu(P); contorno(P); } break; }
     case 'regiao-ro': { const P = new Path2D(); pRegiao(P, a.eb); veu(P); contorno(P); break; }
     case 'recorte': { const k = recortesDaTela().find(x => x.o === a.eb); if (k) poli(k.pts); break; }
+    case 'poly': { const o = ebDe(a.m); if (o && o.pts) poli(o.pts); break; }
+    case 'semplano': poli((a.m && ebDe(a.m)) ? ebDe(a.m).points : a.eb.points); break;
     case 'text': { const o = ebDe(a.m); const g = o && geoTexto(o); if (g) poli(g.caixa); break; }
     case 'ann': { ctx.globalAlpha = 0.9; ctx.lineWidth = px(1.5); ctx.beginPath(); ctx.arc(a.ann.x, a.ann.y, px(9), 0, 2 * Math.PI); ctx.stroke(); break; }
   }
@@ -1284,6 +1356,7 @@ function realcaAlvo(a, cor, forte){
 function desenhaSelecao(){
   if (arrasto && arrasto.moveu) return;           /* o que esta na mao ja aparece no lugar novo */
   for (const a of SEL) realcaAlvo(a, COR.sel, true);
+  desenhaAlcas();
 }
 let HOVER = null;
 function desenhaHover(){ if (HOVER && !selTem(HOVER) && tool === 'select' && !arrasto && !janela) realcaAlvo(HOVER, COR.sel, false); }
@@ -1306,6 +1379,14 @@ function desenhaAnotacoes(){
 /* ============================== mudancas: commit, desfazer, refazer ============================== */
 
 const undoStack = [JSON.stringify(CH)], redoStack = [];
+/* o alvo da tela de um item do modelo (o que uma linha do changes.js fez) */
+function alvoDoModelo(m){
+  if (!m) return null;
+  if (m.kind === 'comp') return ALVO_COMP.get(m) || null;
+  const e = m.eff || {};
+  const t = m.kind === 'region' && e.cutout ? 'recorte' : m.kind === 'region' && e.polycut ? 'semplano' : m.kind;
+  return PORCHAVE.get(chave({ t, m })) || null;
+}
 let selDepois = null;              /* ops cujo objeto vira a selecao depois do proximo recalculo */
 function reaplica(){
   const ks = SEL.map(chave), kh = HOVER && HOVER.t !== 'ann' ? chave(HOVER) : null;
@@ -1316,8 +1397,8 @@ function reaplica(){
     const alvos = [];
     for (const op of selDepois) {
       const it = model.changeItems.find(i => i.ch === op);
-      if (it && it.target) { const k = chave(it.target.kind === 'region' && it.target.eff && it.target.eff.cutout
-        ? { t:'recorte', m:it.target } : { t:it.target.kind, m:it.target }); const a = PORCHAVE.get(k); if (a) alvos.push(a); }
+      const a = it ? alvoDoModelo(it.target) : null;
+      if (a) alvos.push(a);
     }
     selDepois = null;
     if (alvos.length) SEL = alvos;
@@ -1455,6 +1536,27 @@ function editaRegiao(m, g){
   (selDepois || (selDepois = [])).push(add);
   return true;
 }
+/* o Polygon Pour: o do hub reescreve a propria poly_add; o do espelho ganha UMA poly_edit (com os
+   orig_* do board.js), e mexer de novo edita a mesma linha */
+function editaPoly(m, patch){
+  const P = Array.isArray(patch.pts) ? patch.pts.map(p => [r6(p[0]), r6(p[1])]) : null;
+  if (m.added) {
+    const op = opDe(m); if (!op) return false;
+    if (P) op.pts = P;
+    if (patch.layer) op.layer = patch.layer;
+    if ('net' in patch) { if (patch.net) op.net = patch.net; else delete op.net; }
+    return true;
+  }
+  const s = m.src;
+  let c = ultimoOp(x => x.op === 'poly_edit' && x.id === s.id);
+  const novo = !c;
+  if (novo) c = { op:'poly_edit', id:s.id, orig_layer:s.layer, orig_n:s.pts.length, orig_x0:s.pts[0][0], orig_y0:s.pts[0][1] };
+  if (P) c.pts = P;
+  if (patch.layer) c.layer = patch.layer;
+  if ('net' in patch) c.net = patch.net || '';
+  if (novo) { c.note = NOTA; CH.push(c); }
+  return true;
+}
 function apagaItem(m){
   if (m.added) { const op = opDe(m); if (!op) return false; CH.splice(CH.indexOf(op), 1); return true; }
   const s = m.src, kind = m.kind;
@@ -1467,6 +1569,7 @@ function apagaItem(m){
   else if (kind === 'text') Object.assign(del, { orig_x:s.x, orig_y:s.y, orig_text:s.text, orig_layer:s.layer });
   else if (kind === 'region') Object.assign(del, { orig_layer:s.layer, orig_n:s.points.length, orig_x0:s.points[0][0], orig_y0:s.points[0][1] });
   else if (kind === 'pad') Object.assign(del, { orig_x:s.x, orig_y:s.y });
+  else if (kind === 'poly') Object.assign(del, { orig_layer:s.layer, orig_n:s.pts.length, orig_x0:s.pts[0][0], orig_y0:s.pts[0][1] });
   else return false;
   del.note = 'removido no hub';
   CH.push(del);
@@ -1483,6 +1586,7 @@ function apagaSelecao(){
     if (a.t === 'pad' && !a.m) { fica.push('pad ' + (a.comp ? (a.comp.eff.designator || a.comp.src.ref) + '.' : '') + (a.pad.name || '') + ' (é do componente: mude pelo footprint)'); continue; }
     if (a.t === 'regiao-ro') { fica.push('região: ' + a.motivo); continue; }
     if (a.t === 'recorte') { if (a.m && apagaItem(a.m)) n++; else fica.push('recorte do Altium (apague no Altium)'); continue; }
+    if (a.t === 'semplano' && !a.m) { fica.push('recorte de polígono do Altium (apague no Altium)'); continue; }
     if (a.t === 'text' && a.m.src && (a.m.src.designator || a.m.src.comment || a.m.src.owner)) { fica.push('texto do componente ' + (a.m.src.owner || '')); continue; }
     if (a.m && apagaItem(a.m)) n++;
   }
@@ -1504,19 +1608,22 @@ function geoDe(a){
     case 'pad': return a.m ? { x:a.m.eff.x, y:a.m.eff.y } : null;
     case 'fill': { const e = a.m.eff; return { x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2, rot:isNum(e.rot) ? e.rot : 0 }; }
     case 'region': return { points:(a.m.eff.points || []).map(p => [p[0], p[1]]) };
-    case 'recorte': return a.m ? { points:(a.m.eff.points || []).map(p => [p[0], p[1]]) } : null;
+    case 'recorte': case 'semplano': return a.m ? { points:(a.m.eff.points || []).map(p => [p[0], p[1]]) } : null;
+    case 'poly': return { points:(a.m.eff.pts || []).map(p => [p[0], p[1]]) };
     case 'text': { const e = ebDe(a.m) || a.m.eff; return { x:e.x, y:e.y, rot:isNum(e.rot) ? e.rot : 0, mirror:!!e.mirror }; }
     case 'ann': return { x:a.ann.x, y:a.ann.y };
   }
   return null;
 }
+/* os alvos cuja geometria e um contorno de pontos (o geo leva `points`) */
+const ehPts = t => t === 'region' || t === 'recorte' || t === 'poly' || t === 'semplano';
 /* o ponto que a grade prende num arrasto */
 function refDoGeo(t, g){
   if (!g) return null;
   if (t === 'track') return [g.x1, g.y1];
   if (t === 'arc') return [g.cx, g.cy];
   if (t === 'fill') return [Math.min(g.x1, g.x2), Math.min(g.y1, g.y2)];
-  if (t === 'region' || t === 'recorte') return g.points[0] ? [g.points[0][0], g.points[0][1]] : null;
+  if (ehPts(t)) return g.points[0] ? [g.points[0][0], g.points[0][1]] : null;
   return [g.x, g.y];
 }
 function transladaGeo(t, g, dx, dy){
@@ -1524,7 +1631,7 @@ function transladaGeo(t, g, dx, dy){
   if (t === 'track') { n.x1 += dx; n.y1 += dy; n.x2 += dx; n.y2 += dy; }
   else if (t === 'arc') { n.cx += dx; n.cy += dy; }
   else if (t === 'fill') { n.x1 += dx; n.x2 += dx; n.y1 += dy; n.y2 += dy; }
-  else if (t === 'region' || t === 'recorte') n.points = g.points.map(p => [p[0] + dx, p[1] + dy]);
+  else if (ehPts(t)) n.points = g.points.map(p => [p[0] + dx, p[1] + dy]);
   else { n.x += dx; n.y += dy; }
   return n;
 }
@@ -1538,7 +1645,7 @@ function giraGeo(t, g, pv){
     const c = R((g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2), hw = Math.abs(g.x2 - g.x1) / 2, hh = Math.abs(g.y2 - g.y1) / 2;
     n.x1 = c[0] - hw; n.x2 = c[0] + hw; n.y1 = c[1] - hh; n.y2 = c[1] + hh; n.rot = normAng((g.rot || 0) + 90);
   }
-  else if (t === 'region' || t === 'recorte') n.points = g.points.map(p => R(p[0], p[1]));
+  else if (ehPts(t)) n.points = g.points.map(p => R(p[0], p[1]));
   else { const p = R(g.x, g.y); n.x = p[0]; n.y = p[1]; if (t === 'comp' || t === 'text') n.rot = normAng((g.rot || 0) + 90); }
   return n;
 }
@@ -1555,7 +1662,7 @@ function espelhaGeo(t, g, eixo, pv){
     const c = M((g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2), hw = Math.abs(g.x2 - g.x1) / 2, hh = Math.abs(g.y2 - g.y1) / 2;
     n.x1 = c[0] - hw; n.x2 = c[0] + hw; n.y1 = c[1] - hh; n.y2 = c[1] + hh; n.rot = normAng(-(g.rot || 0));
   }
-  else if (t === 'region' || t === 'recorte') n.points = g.points.map(p => M(p[0], p[1]));
+  else if (ehPts(t)) n.points = g.points.map(p => M(p[0], p[1]));
   else if (t === 'text') { const p = M(g.x, g.y); n.x = p[0]; n.y = p[1]; n.mirror = !g.mirror; n.rot = normAng(eixo === 'x' ? -(g.rot || 0) : 180 - (g.rot || 0)); }
   else { const p = M(g.x, g.y); n.x = p[0]; n.y = p[1]; }
   return n;
@@ -1583,11 +1690,12 @@ function escreveGeo(a, g){
     case 'pad': return a.m ? editaItem(a.m, { x:r6(g.x), y:r6(g.y) }) : false;
     case 'fill': return editaItem(a.m, { x1:r6(Math.min(g.x1, g.x2)), y1:r6(Math.min(g.y1, g.y2)), x2:r6(Math.max(g.x1, g.x2)), y2:r6(Math.max(g.y1, g.y2)), rot:normAng(g.rot || 0) });
     case 'region': return editaRegiao(a.m, { points:g.points });
-    case 'recorte': {
+    case 'recorte': case 'semplano': {
       if (!a.m) return false;
       const op = opDe(a.m); if (!op) return false;
       op.pts = g.points.map(p => [r6(p[0]), r6(p[1])]); return true;
     }
+    case 'poly': return editaPoly(a.m, { pts:g.points });
     case 'text': {
       const s = a.m.src;
       if (s && s.designator) { moveDesignator(a.m, { x:g.x, y:g.y, rot:g.rot }); return true; }
@@ -1604,7 +1712,7 @@ function movivel(a){
   if (!a) return null;
   if (a.t === 'pad') return a.comp ? ALVO_COMP.get(a.comp) : (a.m && !a.m.deleted ? a : null);
   if (a.t === 'regiao-ro') return null;
-  if (a.t === 'recorte') return a.m ? a : null;
+  if (a.t === 'recorte' || a.t === 'semplano') return a.m ? a : null;
   if (a.t === 'text') { const s = a.m.src; if (s && s.comment) return null; if (s && s.owner && !s.designator) return null; }
   if (a.m && a.m.deleted) return null;
   return a;
@@ -1942,24 +2050,60 @@ function repour(){
   reaplica();
   HubDialog.toast(n + ' polígono(s) redespejado(s)', 'ok', 1800);
 }
-/* depois de fechar o poligono: a net no menu (o dialogo do Altium pergunta a net na hora) */
-function poePour(pts, sx, sy){
-  const lay = cobre(cur) ? cur : 'Top';
-  const nets = Array.from(new Set((B.nets || []).map(n => typeof n === 'string' ? n : (n && n.name) || '').filter(Boolean)));
-  nets.sort((a, b) => (/^(GND|0V|AGND|DGND)$/i.test(b) ? 1 : 0) - (/^(GND|0V|AGND|DGND)$/i.test(a) ? 1 : 0) || a.localeCompare(b));
-  const cria = net => {
-    if (!garanteEdicao()) return;
-    const op = { op:'poly_add', layer:lay, pts:pts.map(p => [r6(p[0]), r6(p[1])]), pour:'solid', note:'polígono do hub' };
-    if (net) op.net = net;
-    CH.push(op); selDepois = [op]; commit();
-    HubDialog.toast('polígono despejado em ' + nomeDe(lay) + (net ? ' — net ' + net : ' — sem net'), 'ok', 2400);
-  };
-  const itens = [{ titulo:'Net do polígono (' + nomeDe(lay) + ')' }];
-  for (const n of nets.slice(0, 40)) itens.push({ rot:n, f:() => cria(n) });
-  if (nets.length > 40) itens.push({ rot:'… ' + (nets.length - 40) + ' nets a mais: selecione um cobre da net e use o menu', off:true });
-  itens.push('-'); itens.push({ rot:'Sem net', f:() => cria('') });
-  const r = cv.getBoundingClientRect();
-  abreMenu(itens, sx != null ? sx : r.left + r.width / 2, sy != null ? sy : r.top + r.height / 2);
+/* O Polygon Pour do hub (pedido do dono, 2026-10-23: "editar com clique e arraste, regular o tamanho
+   tipo Canva" e "definir se ele e Top, Bottom ou sem plano, uma area que nao deixa plano passar, so
+   trilha"). Forma, tipo e net vem da ficha da ferramenta -- nada de menu a cada poligono -- e o
+   que nasce fica selecionado, com as alcas para esticar:
+     plano:<camada>   poly_add (solido, conexao direta, cobre morto removido) com a net de terra
+     sem:<camada>     region_add polycut:true -- o Polygon Pour Cutout do Altium: o plano nao
+     sem:Multi        entra, trilha e via passam; na Multi vale para todas as camadas */
+function tipoPour(){
+  const [k, lay] = String(CFG.pourTipo || '').split(':');
+  if ((k === 'plano' && LBYK[lay] && cobre(lay)) || (k === 'sem' && (lay === 'Multi' || (LBYK[lay] && cobre(lay))))) return k + ':' + lay;
+  return 'plano:' + (cobre(cur) ? cur : LBYK.Top ? 'Top' : ((camadasCobre()[0] || {}).key || 'Top'));
+}
+const camadaDoTipo = () => tipoPour().split(':')[1];
+function netTerra(){ return NETS.find(n => /^(GND|0V|AGND|DGND|PGND|GNDA|GNDD)$/i.test(n)) || NETS.find(n => /GND/i.test(n)) || ''; }
+const netDoPour = () => CFG.pourNet != null ? CFG.pourNet : netTerra();
+function opcTipoPlano(){
+  const L = camadasCobre(), out = [];
+  for (const l of L) out.push({ v:'plano:' + l.key, rot:'Plano — ' + rotuloAba(l), cor:l.color });
+  for (const l of L) out.push({ v:'sem:' + l.key, rot:'Sem plano — ' + rotuloAba(l), cor:l.color });
+  out.push({ v:'sem:Multi', rot:'Sem plano — todas as camadas' });
+  return out;
+}
+function criaPlano(pts){
+  if (!garanteEdicao()) return;
+  const [k, lay] = tipoPour().split(':');
+  const P = pts.map(p => [r6(p[0]), r6(p[1])]);
+  let op;
+  if (k === 'sem') op = { op:'region_add', polycut:true, layer:lay, pts:P, note:'sem plano do hub' };
+  else { op = { op:'poly_add', layer:lay, pts:P, pour:'solid', note:'plano do hub' }; const n = netDoPour(); if (n) op.net = n; }
+  CH.push(op); selDepois = [op]; commit();
+  setTool('select');
+  HubDialog.toast((k === 'sem' ? 'sem plano em ' + (lay === 'Multi' ? 'todas as camadas' : nomeDe(lay))
+    : 'plano em ' + nomeDe(lay) + (op.net ? ' — net ' + op.net : ' — sem net')) + ' · arraste as bordas para ajustar', 'ok', 2600);
+}
+/* Tipo no painel: trocar a camada edita a mesma linha; trocar plano <-> sem plano apaga um e cria o
+   outro no mesmo contorno */
+function mudaTipoPlano(a, v){
+  const [k, lay] = String(v || '').split(':');
+  if (!a.m || (k !== 'plano' && k !== 'sem') || !lay) return false;
+  if (k === 'plano' ? !(LBYK[lay] && cobre(lay)) : !(lay === 'Multi' || (LBYK[lay] && cobre(lay)))) return false;
+  if (a.t === 'poly' && k === 'plano') return lay !== a.m.eff.layer && editaPoly(a.m, { layer:lay });
+  if (a.t === 'semplano' && k === 'sem') {
+    if (lay === a.m.eff.layer) return false;
+    const op = opDe(a.m); if (!op) return false;
+    op.layer = lay; return true;
+  }
+  const g = geoDe(a); if (!g) return false;
+  const net = a.t === 'poly' ? (a.m.eff.net || '') : netDoPour();
+  if (!apagaItem(a.m)) return false;
+  const P = g.points.map(p => [r6(p[0]), r6(p[1])]);
+  const op = k === 'sem' ? { op:'region_add', polycut:true, layer:lay, pts:P, note:'sem plano do hub' }
+                         : Object.assign({ op:'poly_add', layer:lay, pts:P, pour:'solid', note:'plano do hub' }, net ? { net } : {});
+  CH.push(op); (selDepois || (selDepois = [])).push(op);
+  return true;
 }
 function poePad(w, ev){
   const p = snapPonto(w, ev, { soGrade:true });
@@ -2800,8 +2944,15 @@ function cliqueFerramenta(w, ev){
     }
     poeForma(verticesTriangulo(a, p), true, preencher ? 'triângulo cheio do hub' : 'triângulo do hub'); return;
   }
+  if (tool === 'pour' && CFG.pourForma === 'retangulo') {
+    if (!draft || draft.tipo !== 'pourRet') { draft = { tipo:'pourRet', a:p, layer:camadaDoTipo() }; pede(); return; }
+    const a = draft.a;
+    if (Math.abs(p.x - a.x) < 1e-4 || Math.abs(p.y - a.y) < 1e-4) return;
+    draft = null;
+    criaPlano([[a.x, a.y], [p.x, a.y], [p.x, p.y], [a.x, p.y]]); return;
+  }
   if (tool === 'poligono' || tool === 'contorno' || tool === 'pour') {
-    if (!draft || draft.tipo !== tool) { draft = { tipo:tool, pts:[[p.x, p.y]] }; pede(); return; }
+    if (!draft || draft.tipo !== tool) { draft = { tipo:tool, pts:[[p.x, p.y]], layer:tool === 'pour' ? camadaDoTipo() : undefined }; pede(); return; }
     const pts = draft.pts, p0 = pts[0], ult = pts[pts.length - 1];
     if (pts.length >= 3 && Math.hypot(p.x - p0[0], p.y - p0[1]) <= px(8)) { fechaPoligono(); return; }
     if (Math.hypot(p.x - ult[0], p.y - ult[1]) < 1e-6) return;
@@ -2816,7 +2967,7 @@ async function fechaPoligono(){
   if (pts.length < 3) { HubDialog.toast('o polígono precisa de pelo menos 3 vértices', 'warn'); return true; }
   draft = null; pede();
   if (tipo === 'poligono') { poeForma(pts, true, preencher ? 'polígono cheio do hub' : 'polígono do hub'); return true; }
-  if (tipo === 'pour') { if (seCruza(pts)) { HubDialog.toast('polígono com lados que se cruzam — desenhe de novo', 'warn'); return true; } poePour(pts); return true; }
+  if (tipo === 'pour') { if (seCruza(pts)) { HubDialog.toast('polígono com lados que se cruzam — desenhe de novo', 'warn'); return true; } criaPlano(pts); return true; }
   if (seCruza(pts)) { HubDialog.toast('contorno com lados que se cruzam — desenhe de novo', 'warn'); return true; }
   const ok = await HubDialog.confirm('Trocar o contorno da placa pelo polígono de ' + pts.length + ' vértices?\n\nO outline_set SUBSTITUI o contorno inteiro no Altium (o ApplyChanges ainda pergunta de novo antes de aplicar). Contorno com arco se desenha no Altium.',
     { title:'Contorno da placa', ok:'Trocar o contorno', danger:true });
@@ -2834,7 +2985,7 @@ function desfazPontoPoligono(){
     draft.pts.pop(); if (!draft.pts.length) draft = null; pede(); return true;
   }
   if (draft.tipo === 'arco' && draft.ini) { draft.ini = null; pede(); return true; }
-  if (draft.tipo === 'arco' || draft.tipo === 'circulo' || draft.tipo === 'retangulo' || draft.tipo === 'triangulo') { draft = null; pede(); return true; }
+  if (draft.tipo === 'arco' || draft.tipo === 'circulo' || draft.tipo === 'retangulo' || draft.tipo === 'triangulo' || draft.tipo === 'pourRet') { draft = null; pede(); return true; }
   return false;
 }
 
@@ -2972,6 +3123,10 @@ function desenhaFerramenta(){
     const r = Math.hypot(c.x - draft.c.x, c.y - draft.c.y);
     ctx.beginPath(); ctx.arc(draft.c.x, draft.c.y, r, 0, 2 * Math.PI);
     if (preencher) { ctx.globalAlpha = 0.5; ctx.fill(); } else { ctx.globalAlpha = 0.85; ctx.lineWidth = wl; ctx.stroke(); }
+  } else if (draft && draft.tipo === 'pourRet') {
+    const pts = [[draft.a.x, draft.a.y], [c.x, draft.a.y], [c.x, c.y], [draft.a.x, c.y]];
+    if (tipoPour().indexOf('sem:') === 0) hachura(pts, draft.layer === 'Multi' ? COR.contorno : cor);
+    else { const P = new Path2D(); pPoli(P, pts); ctx.globalAlpha = 0.3; ctx.fill(P); ctx.globalAlpha = 0.95; ctx.setLineDash([px(6), px(3)]); ctx.lineWidth = px(1.3); ctx.stroke(P); }
   } else if (draft && (draft.tipo === 'retangulo' || draft.tipo === 'triangulo')) {
     const pts = draft.tipo === 'retangulo' ? [[draft.a.x, draft.a.y], [c.x, draft.a.y], [c.x, c.y], [draft.a.x, c.y]] : verticesTriangulo(draft.a, c);
     const P = new Path2D(); pPoli(P, pts);
@@ -3020,6 +3175,155 @@ function excluiDoArrasto(alvos){
   }
   return S;
 }
+/* ── AS ALCAS (pedido do dono, 2026-10-23: "editar com clique e arraste, regular o tamanho, tipo
+   Canva, clicando nas bordas e aumentando ou diminuindo") ──
+   A selecao de contornos (plano, sem plano, regiao, recorte do hub), de fill (giro em multiplo de
+   90) ou de varias trilhas ganha a caixa com 8 alcas: canto ou borda (a alca ou a propria linha da
+   caixa) estica a partir do lado oposto, na grade; Shift no canto mantem a proporcao, Ctrl solta a
+   grade. Um contorno so, que nao e retangulo, mostra tambem os vertices: arrastar um muda a forma. */
+const MIN_LADO = 0.01;
+const ALCAS = [['x1', 'y1'], ['x2', 'y1'], ['x2', 'y2'], ['x1', 'y2'], ['x1', null], ['x2', null], [null, 'y1'], [null, 'y2']];
+function ptsDoGeo(t, g){
+  if (t === 'fill') return fillCantos(g);
+  if (t === 'track') return [[g.x1, g.y1], [g.x2, g.y2]];
+  return g.points || [];
+}
+function ehRetangulo(pts){
+  if (!pts || pts.length !== 4) return false;
+  const b = bbPts(pts);
+  return pts.every(p => (near(p[0], b[0]) || near(p[0], b[2])) && (near(p[1], b[1]) || near(p[1], b[3])));
+}
+function alcasDaSel(){
+  if (tool !== 'select' || !editOn || LEAN || !SEL.length) return null;
+  const alvos = [];
+  for (const a of SEL) {
+    if (!a.m || a.m.deleted) return null;
+    const ok = a.t === 'poly' || a.t === 'semplano'
+      || (a.t === 'region' && !(a.m.src && Array.isArray(a.m.src.holes) && a.m.src.holes.length))
+      || (a.t === 'recorte' && !circuloDePts((a.m.eff.points || []).map(p => [p[0], p[1]])))
+      || (a.t === 'fill' && Math.abs(normAng(a.m.eff.rot || 0) % 90) < 1e-6)
+      || (a.t === 'track' && SEL.length > 1);
+    if (!ok) return null;
+    alvos.push(a);
+  }
+  const bases = new Map(alvos.map(a => [a, geoDe(a)]));
+  const pts = [];
+  for (const [a, g] of bases) { if (!g) return null; for (const p of ptsDoGeo(a.t, g)) pts.push(p); }
+  const bb = bbPts(pts);
+  if (!bb || bb[2] - bb[0] < 1e-6 || bb[3] - bb[1] < 1e-6) return null;
+  const um = alvos.length === 1 && ehPts(alvos[0].t) ? bases.get(alvos[0]).points : null;
+  return { alvos, bases, bb, vertices:um && !ehRetangulo(um) ? um : null };
+}
+const pontoAlca = (bb, h) => [h[0] === 'x1' ? bb[0] : h[0] === 'x2' ? bb[2] : (bb[0] + bb[2]) / 2,
+                              h[1] === 'y1' ? bb[1] : h[1] === 'y2' ? bb[3] : (bb[1] + bb[3]) / 2];
+/* a alca debaixo do ponto de TELA s: vertice, alca quadrada ou a linha da borda */
+function alcaEm(s){
+  const A = alcasDaSel();
+  if (!A) return null;
+  if (A.vertices) for (let i = 0; i < A.vertices.length; i++) {
+    const q = mundoParaTela(A.vertices[i][0], A.vertices[i][1]);
+    if (Math.hypot(s.x - q.x, s.y - q.y) <= 6) return { A, vert:i };
+  }
+  for (const h of ALCAS) {
+    const p = pontoAlca(A.bb, h), q = mundoParaTela(p[0], p[1]);
+    if (Math.abs(s.x - q.x) <= 6 && Math.abs(s.y - q.y) <= 6) return { A, h };
+  }
+  const a = mundoParaTela(A.bb[0], A.bb[1]), b = mundoParaTela(A.bb[2], A.bb[3]);
+  const naX = s.x >= Math.min(a.x, b.x) && s.x <= Math.max(a.x, b.x), naY = s.y >= Math.min(a.y, b.y) && s.y <= Math.max(a.y, b.y);
+  if (naY && Math.abs(s.x - a.x) <= 4) return { A, h:['x1', null] };
+  if (naY && Math.abs(s.x - b.x) <= 4) return { A, h:['x2', null] };
+  if (naX && Math.abs(s.y - a.y) <= 4) return { A, h:[null, 'y1'] };
+  if (naX && Math.abs(s.y - b.y) <= 4) return { A, h:[null, 'y2'] };
+  return null;
+}
+function cursorAlca(al){
+  if (al.vert != null) return 'move';
+  const h = al.h;
+  if (!h[0]) return 'ns-resize';
+  if (!h[1]) return 'ew-resize';
+  const p = pontoAlca(al.A.bb, h), q = mundoParaTela(p[0], p[1]);
+  const c = mundoParaTela((al.A.bb[0] + al.A.bb[2]) / 2, (al.A.bb[1] + al.A.bb[3]) / 2);
+  return (q.x - c.x) * (q.y - c.y) > 0 ? 'nwse-resize' : 'nesw-resize';
+}
+/* o geo de um alvo com a caixa bb levada para nb (cada ponto na mesma proporcao) */
+function escalaGeo(t, g, bb, nb){
+  const kx = (nb[2] - nb[0]) / (bb[2] - bb[0]), ky = (nb[3] - nb[1]) / (bb[3] - bb[1]);
+  const S = p => [nb[0] + (p[0] - bb[0]) * kx, nb[1] + (p[1] - bb[1]) * ky];
+  if (t === 'track') { const a = S([g.x1, g.y1]), b = S([g.x2, g.y2]); return Object.assign({}, g, { x1:a[0], y1:a[1], x2:b[0], y2:b[1] }); }
+  if (t === 'fill') {
+    const v = bbPts(fillCantos(g)), a = S([v[0], v[1]]), b = S([v[2], v[3]]);
+    const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2, vw = b[0] - a[0], vh = b[1] - a[1];
+    const deitado = Math.round(normAng(g.rot || 0) / 90) % 2 === 1;
+    const uw = deitado ? vh : vw, uh = deitado ? vw : vh;
+    return Object.assign({}, g, { x1:cx - uw / 2, y1:cy - uh / 2, x2:cx + uw / 2, y2:cy + uh / 2 });
+  }
+  return Object.assign({}, g, { points:g.points.map(S) });
+}
+function iniciaEstica(g){
+  const A = g.al.A;
+  arrasto = { estica:true, alvos:A.alvos, bases:A.bases, bb0:A.bb, h:g.al.h || null, vert:g.al.vert, moveu:true, novas:null, nb:null };
+  EXCLUI = excluiDoArrasto(A.alvos); cacheSujo = true;
+}
+function atualizaEstica(e, w){
+  const a = arrasto;
+  const sx = e.ctrlKey ? w.x : snapV(w.x, grade.mm), sy = e.ctrlKey ? w.y : snapV(w.y, grade.mm);
+  if (a.vert != null) {
+    const al = a.alvos[0], g = a.bases.get(al), pts = g.points.map(p => p.slice());
+    pts[a.vert] = [sx, sy];
+    a.novas = new Map([[al, Object.assign({}, g, { points:pts })]]);
+    avisoRodape('vértice ' + (a.vert + 1) + ' → (' + fmtDist(sx) + '; ' + fmtDist(sy) + ') ' + unidade + ' · Ctrl solta a grade · Esc desiste');
+    pede(); return;
+  }
+  const bb = a.bb0, nb = bb.slice(), h = a.h;
+  if (h[0] === 'x1') nb[0] = Math.min(sx, bb[2] - MIN_LADO); else if (h[0] === 'x2') nb[2] = Math.max(sx, bb[0] + MIN_LADO);
+  if (h[1] === 'y1') nb[1] = Math.min(sy, bb[3] - MIN_LADO); else if (h[1] === 'y2') nb[3] = Math.max(sy, bb[1] + MIN_LADO);
+  if (e.shiftKey && h[0] && h[1]) {
+    const w0 = bb[2] - bb[0], h0 = bb[3] - bb[1], k = Math.max((nb[2] - nb[0]) / w0, (nb[3] - nb[1]) / h0);
+    if (h[0] === 'x1') nb[0] = bb[2] - w0 * k; else nb[2] = bb[0] + w0 * k;
+    if (h[1] === 'y1') nb[1] = bb[3] - h0 * k; else nb[3] = bb[1] + h0 * k;
+  }
+  a.nb = nb;
+  a.novas = new Map(a.alvos.map(al => [al, escalaGeo(al.t, a.bases.get(al), bb, nb)]));
+  avisoRodape('L ' + fmtDist(nb[2] - nb[0]) + ' × A ' + fmtDist(nb[3] - nb[1]) + ' ' + unidade + ' · Shift no canto mantém a proporção · Ctrl solta a grade · Esc desiste');
+  pede();
+}
+function terminaEstica(a){
+  if (!a.novas) { pede(); return; }
+  for (const [al, g] of a.novas) if (g.points && seCruza(g.points)) { HubDialog.toast('o contorno ficaria com lados que se cruzam', 'warn'); pede(); return; }
+  const r = editaConferindo(a.alvos, () => {
+    let mexeu = false;
+    for (const [al, g] of a.novas) if (escreveGeo(al, g)) mexeu = true;
+    return mexeu;
+  }, 'não deixa');
+  if (r) commit(); else pede();
+}
+function desenhaEstica(){
+  const a = arrasto;
+  if (a.novas) for (const [al, g] of a.novas) desenhaGeoPrevia(al, g);
+  if (a.nb) {
+    ctx.save(); ctx.strokeStyle = COR.seta; ctx.setLineDash([px(4), px(3)]); ctx.lineWidth = px(1); ctx.globalAlpha = 0.9;
+    ctx.strokeRect(a.nb[0], a.nb[1], a.nb[2] - a.nb[0], a.nb[3] - a.nb[1]); ctx.restore();
+  }
+}
+function desenhaAlcas(){
+  const A = alcasDaSel();
+  if (!A) return;
+  const bb = A.bb, r = px(4);
+  ctx.save();
+  ctx.strokeStyle = COR.seta; ctx.globalAlpha = 0.9; ctx.lineWidth = px(1); ctx.setLineDash([px(4), px(3)]);
+  ctx.strokeRect(bb[0], bb[1], bb[2] - bb[0], bb[3] - bb[1]);
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+  for (const h of ALCAS) {
+    const p = pontoAlca(bb, h);
+    ctx.fillStyle = COR.sel; ctx.fillRect(p[0] - r, p[1] - r, 2 * r, 2 * r);
+    ctx.strokeStyle = '#1f6feb'; ctx.lineWidth = px(1.2); ctx.strokeRect(p[0] - r, p[1] - r, 2 * r, 2 * r);
+  }
+  if (A.vertices) for (const p of A.vertices) {
+    ctx.beginPath(); ctx.arc(p[0], p[1], px(3.5), 0, 2 * Math.PI);
+    ctx.fillStyle = COR.seta; ctx.fill(); ctx.strokeStyle = '#000000'; ctx.lineWidth = px(1); ctx.stroke();
+  }
+  ctx.restore();
+}
 function geoAtual(a){ const b = arrasto.bases.get(a); return b ? transladaGeo(a.t, b, arrasto.dx || 0, arrasto.dy || 0) : null; }
 function desenhaArrasto(){
   if (!arrasto || (!arrasto.moveu && !arrasto.girou)) return;
@@ -3029,33 +3333,39 @@ function desenhaArrasto(){
     realcaPonta(o, arrasto.ponta.qual);
     return;
   }
+  if (arrasto.estica) { desenhaEstica(); return; }
   for (const a of arrasto.alvos) {
     const g = geoAtual(a);
     if (!g) continue;
     if (a.t === 'comp') { previaComp(a.m, g); continue; }
     if (a.t === 'ann') continue;
-    const e = ebDe(a.m) || (a.m && a.m.eff) || a.eb;
-    if (!e) continue;
-    if (a.t === 'text') {
-      const o = Object.assign({}, e, { x:g.x, y:g.y, rot:g.rot, mirror:g.mirror });
-      if (Array.isArray(e.polys)) {
-        if (nearAng(g.rot, e.rot || 0) && !!g.mirror === !!e.mirror) { const dx = g.x - e.x, dy = g.y - e.y; o.polys = e.polys.map(q => ({ hole:q.hole, pts:q.pts.map(p => [p[0] + dx, p[1] + dy]) })); }
-        else delete o.polys;
-      }
-      desenhaObj('text', o, corDe(e.layer), {});
-      continue;
-    }
-    const kind = a.t === 'recorte' ? 'region' : a.t;
-    const o = Object.assign({}, e, g);
-    const cor = a.t === 'via' ? corDe('Multi') : a.t === 'recorte' ? COR.contorno : corDe(e.layer);
-    desenhaObj(kind, o, cor, a.t === 'recorte' ? { contorno:true } : {});
-    if (a.t === 'via' && e.drill > 0) desenhaObj('via', { x:g.x, y:g.y, size:e.drill }, COR.furo, {});
+    desenhaGeoPrevia(a, g);
   }
   if (arrasto.cena && GUIAS) GUIAS.desenha(ctx, arrasto.cena, { escala:view.scale, fmt:fmtGuia });
   if (arrasto.ima) {
     ctx.save(); ctx.strokeStyle = COR.snap; ctx.lineWidth = px(1.5);
     ctx.beginPath(); ctx.arc(arrasto.ima.x, arrasto.ima.y, px(7), 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
   }
+}
+/* um alvo (que nao e componente) desenhado no geo `g` -- o arrasto e o esticar */
+function desenhaGeoPrevia(a, g){
+  const e = ebDe(a.m) || (a.m && a.m.eff) || a.eb;
+  if (!e) return;
+  if (a.t === 'text') {
+    const o = Object.assign({}, e, { x:g.x, y:g.y, rot:g.rot, mirror:g.mirror });
+    if (Array.isArray(e.polys)) {
+      if (nearAng(g.rot, e.rot || 0) && !!g.mirror === !!e.mirror) { const dx = g.x - e.x, dy = g.y - e.y; o.polys = e.polys.map(q => ({ hole:q.hole, pts:q.pts.map(p => [p[0] + dx, p[1] + dy]) })); }
+      else delete o.polys;
+    }
+    desenhaObj('text', o, corDe(e.layer), {});
+    return;
+  }
+  const contorno = a.t === 'recorte' || a.t === 'poly' || a.t === 'semplano';
+  const kind = contorno ? 'region' : a.t;
+  const o = Object.assign({}, e, g);
+  const cor = a.t === 'via' ? corDe('Multi') : a.t === 'recorte' || (a.t === 'semplano' && (!e.layer || e.layer === 'Multi')) ? COR.contorno : corDe(e.layer);
+  desenhaObj(kind, o, cor, contorno ? { contorno:true, dash:a.t === 'recorte' ? null : [6, 3] } : {});
+  if (a.t === 'via' && e.drill > 0) desenhaObj('via', { x:g.x, y:g.y, size:e.drill }, COR.furo, {});
 }
 function realcaPonta(o, qual){
   const x = qual === 1 ? o.x1 : o.x2, y = qual === 1 ? o.y1 : o.y2;
@@ -3207,6 +3517,8 @@ function rotuloAlvo(a){
     case 'region': return 'região ' + (a.m.added ? 'nova' : a.m.src.id) + ' · ' + nomeDe(a.m.eff.layer);
     case 'regiao-ro': return 'região ' + a.eb.id + ' · ' + nomeDe(a.eb.layer) + (a.eb.poly ? ' · polígono' : '');
     case 'recorte': return 'recorte da placa' + (a.m ? ' (novo)' : ' ' + a.eb.id);
+    case 'poly': { const e = a.m.eff; return 'plano ' + (a.m.added ? 'novo' : a.m.src.id) + ' · ' + nomeDe(e.layer) + ' · ' + (e.net || 'sem net'); }
+    case 'semplano': { const l = a.m ? a.m.eff.layer : a.eb.layer; return 'sem plano · ' + (!l || l === 'Multi' ? 'todas as camadas' : nomeDe(l)) + (a.m ? '' : ' (do Altium)'); }
     case 'text': { const s = a.m.src || {}; const e = ebDe(a.m) || a.m.eff;
       return s.designator ? 'designator ' + s.owner : s.comment ? 'comment ' + s.owner : 'texto "' + String(e.text || '').slice(0, 30) + '" · ' + nomeDe(e.layer); }
     case 'ann': return '⚑ ' + a.ann.id + ': ' + a.ann.msg;
@@ -3222,25 +3534,30 @@ function pintaStatusSel(){
 function avisoRodape(t){ const el = $('smsg'); if (el) el.textContent = t || ''; }
 
 /* ============================== a barra flutuante (Active Bar) ==============================
-   Tudo a vista, nada escondido em gaveta (pedido do dono: o controle escondido "nao chegou");
-   o que ainda nao existe aparece TRAVADO, com o porque no title. */
+   Cada ferramenta a vista, menos as formas de desenho: pedido do dono (2026-10-23), "todo esse
+   conjunto podia estar junto, com uma setinha para abrir uma gaveta, ao inves de deixar a barra
+   grande desse jeito". O grupo mostra a ultima forma usada (o clique nela a escolhe) e a setinha
+   abre a gaveta com as outras, como as listas da Active Bar do Altium. O que ainda nao existe
+   aparece TRAVADO, com o porque no title. */
 const BARRA = [
   { id:'editar', ic:'cadeado', acao:'editar', at:'editar' }, '|',
   { id:'select', ic:'select', tool:'select', titulo:'Selecionar e mover (Esc) — arrastar no vazio: janela (esq→dir dentro, dir→esq toca)' }, '|',
   { id:'trilha', ic:'trilha', tool:'trilha', at:'trilha', titulo:'Trilha — roteamento interativo: clique fixa o canto, Espaço inverte, Shift+Espaço 45°/90°/livre, Shift+R contorna, para no obstáculo ou ignora (trilhas de nets diferentes não se encontram), Backspace desfaz o trecho, 2 via, * ou Ctrl+2 via e troca de camada, Tab largura, botão direito termina' },
   { id:'via', ic:'via', tool:'via', at:'via', titulo:'Via — diâmetro e furo no painel' }, '|',
-  { id:'linha', ic:'linha', tool:'linha', at:'linha', titulo:'Linha na camada atual — cliques encadeados, botão direito termina' },
-  { id:'arco', ic:'arco', tool:'arco', at:'arco', titulo:'Arco — centro, início e fim' },
-  { id:'circulo', ic:'circulo', tool:'circulo', at:'circulo', titulo:'Círculo — centro e raio (com Preencher: região cheia)' },
-  { id:'retangulo', ic:'retangulo', tool:'retangulo', at:'retangulo', titulo:'Retângulo — dois cantos (com Preencher: fill)' },
-  { id:'triangulo', ic:'triangulo', tool:'triangulo', titulo:'Triângulo — dois cantos da caixa (com Preencher: região cheia)' },
-  { id:'poligono', ic:'poligono', tool:'poligono', at:'poligono', titulo:'Polígono — um clique por vértice; duplo clique, Enter ou botão direito fecha (com Preencher: região cheia)' },
+  { id:'formas', titulo:'Formas de desenho', grupo:[
+    { id:'linha', ic:'linha', tool:'linha', at:'linha', titulo:'Linha na camada atual — cliques encadeados, botão direito termina' },
+    { id:'arco', ic:'arco', tool:'arco', at:'arco', titulo:'Arco — centro, início e fim' },
+    { id:'circulo', ic:'circulo', tool:'circulo', at:'circulo', titulo:'Círculo — centro e raio (com Preencher: região cheia)' },
+    { id:'retangulo', ic:'retangulo', tool:'retangulo', at:'retangulo', titulo:'Retângulo — dois cantos (com Preencher: fill)' },
+    { id:'triangulo', ic:'triangulo', tool:'triangulo', titulo:'Triângulo — dois cantos da caixa (com Preencher: região cheia)' },
+    { id:'poligono', ic:'poligono', tool:'poligono', at:'poligono', titulo:'Polígono — um clique por vértice; duplo clique, Enter ou botão direito fecha (com Preencher: região cheia)' },
+  ] },
   { id:'texto', ic:'texto', tool:'texto', at:'texto', titulo:'Texto — clique e digite (Enter grava); na face de baixo nasce espelhado' },
   { id:'preencher', ic:'preencher', acao:'preencher', at:'preencher', titulo:'Preencher — ligado: círculo, triângulo e polígono viram região cheia e o retângulo vira fill; desligado: contorno de trilhas' }, '|',
   { id:'furo', ic:'furo', tool:'furo', titulo:'Furo de fixação — Board Cutout redondo (diâmetro no painel)' },
   { id:'contorno', ic:'contorno', tool:'contorno', titulo:'Contorno da placa — polígono que substitui o contorno (pergunta antes)' },
   { id:'pad', ic:'pad', tool:'pad', at:'pad', titulo:'Pad avulso (Place » Pad) — passante redondo de 60 mil, furo 30 mil' },
-  { id:'pour', ic:'pour', tool:'pour', at:'pour', titulo:'Polygon Pour — um clique por vértice; fechar pergunta a net (sólido, conexão direta, cobre morto removido)' },
+  { id:'pour', ic:'pour', tool:'pour', at:'pour', titulo:'Polygon Pour — plano (Top/Bottom) ou sem plano, em retângulo ou polígono livre (forma, tipo e net no painel); selecionado, as bordas esticam' },
   { id:'teardrops', ic:'teardrop', acao:'teardrops', at:'teardrops', titulo:'Teardrops (Tools » Teardrops) — põe os que faltam nos pads e vias' }, '|',
   { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Medir distância — dois cliques' },
   { id:'sinalizar', ic:'sinalizar', tool:'sinalizar', at:'sinalizar', titulo:'Sinalizar um problema para a IA (annotations.js)' },
@@ -3254,12 +3571,60 @@ const BARRA = [
   /* Gerber e PDF sairam daqui (pedido do dono, 2026-10-14): ficam so no Arquivo, como no Altium
      (File » Fabrication Outputs » Gerber Files e File » Smart PDF) */
 ];
+/* os botoes de verdade da barra: os soltos e os de dentro das gavetas */
+const itensBarra = () => BARRA.reduce((l, b) => l.concat(b && b.grupo ? b.grupo : [b]), []);
+const GRUPO_ATUAL = {};
+function atualDoGrupo(b){
+  const naMao = b.grupo.find(x => x.tool && x.tool === tool);
+  if (naMao) return naMao;
+  const id = GRUPO_ATUAL[b.id] || lePref('grupo.' + b.id, b.grupo[0].id);
+  return b.grupo.find(x => x.id === id) || b.grupo[0];
+}
+function fechaGavetas(exceto){
+  for (const g of document.querySelectorAll('#pcbtb .gaveta')) if (g !== exceto && !g.hidden) {
+    g.hidden = true;
+    const s = g.parentNode && g.parentNode.querySelector('.gseta'); if (s) s.setAttribute('aria-expanded', 'false');
+  }
+}
+function montaGrupo(b){
+  const box = document.createElement('span'); box.className = 'grupo'; box.id = 'tb-' + b.id;
+  const prin = document.createElement('button'); prin.type = 'button'; prin.className = 'gprin'; prin.setAttribute('aria-pressed', 'false');
+  const seta = document.createElement('button'); seta.type = 'button'; seta.className = 'gseta';
+  seta.setAttribute('aria-haspopup', 'true'); seta.setAttribute('aria-expanded', 'false');
+  seta.title = b.titulo + ' — abrir a gaveta'; seta.setAttribute('aria-label', seta.title);
+  seta.append(HubPcbIcones.icone('gaveta'));
+  const gav = document.createElement('div'); gav.className = 'gaveta'; gav.hidden = true; gav.setAttribute('role', 'group'); gav.setAttribute('aria-label', b.titulo);
+  for (const it of b.grupo) {
+    const el = document.createElement('button');
+    el.type = 'button'; el.id = 'tb-' + it.id; el.dataset.id = it.id;
+    el.append(HubPcbIcones.icone(it.ic));
+    if (it.tool) el.setAttribute('aria-pressed', 'false');
+    el.addEventListener('click', () => {
+      GRUPO_ATUAL[b.id] = it.id; gravaPref('grupo.' + b.id, it.id);
+      fechaGavetas();
+      fechaMenu();
+      if (it.tool) { if (tool !== it.tool) setTool(it.tool); else pintaBarra(); } else fazAcao(it.acao);
+    });
+    gav.append(el);
+  }
+  prin.addEventListener('click', () => { fechaGavetas(); acaoDaBarra(atualDoGrupo(b)); });
+  seta.addEventListener('click', () => {
+    const abre = gav.hidden;
+    fechaGavetas(gav);
+    gav.hidden = !abre; seta.setAttribute('aria-expanded', String(abre));
+  });
+  box.append(prin, seta, gav);
+  return box;
+}
+document.addEventListener('pointerdown', e => { if (!(e.target && e.target.closest && e.target.closest('#pcbtb .grupo'))) fechaGavetas(); }, true);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') fechaGavetas(); }, true);
 function montaBarra(){
   const tb = $('pcbtb');
   if (!tb || LEAN) return;
   tb.textContent = '';
   for (const b of BARRA) {
     if (b === '|') { const s = document.createElement('span'); s.className = 'sep'; tb.append(s); continue; }
+    if (b.grupo) { tb.append(montaGrupo(b)); continue; }
     const el = document.createElement('button');
     el.type = 'button'; el.id = 'tb-' + b.id; el.dataset.id = b.id;
     el.append(HubPcbIcones.icone(b.ic));
@@ -3279,6 +3644,16 @@ function acaoDaBarra(b){
 function pintaBarra(){
   if (LEAN) return;
   for (const b of BARRA) {
+    if (!b || !b.grupo) continue;
+    const box = $('tb-' + b.id); if (!box) continue;
+    const at = atualDoGrupo(b), prin = box.querySelector('.gprin');
+    prin.replaceChildren(HubPcbIcones.icone(at.ic));
+    prin.setAttribute('aria-pressed', String(b.grupo.some(x => x.tool && x.tool === tool)));
+    const t = at.at ? teclaDe(at.at) : '';
+    prin.title = (at.titulo || '') + (t ? ' (' + t + ')' : '');
+    prin.setAttribute('aria-label', prin.title);
+  }
+  for (const b of itensBarra()) {
     if (b === '|' || b.trava) continue;
     const el = $('tb-' + b.id); if (!el) continue;
     let tit = b.titulo || '';
@@ -3627,6 +4002,7 @@ cv.addEventListener('mousedown', e => {
   if (tool !== 'select') { gesto = { modo:'ferramenta', s }; return; }
   /* Ctrl+clique: realca a net do cobre (o do Altium) */
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !LEAN) { realcaNetEm(w); return; }
+  if (editOn && !LEAN) { const al = alcaEm(s); if (al) { gesto = { modo:'alca', al, s, inicio:w }; return; } }
   if (editOn && !LEAN) {
     for (const a of SEL) {
       if (a.t !== 'track' || a.m.deleted) continue;
@@ -3652,6 +4028,8 @@ window.addEventListener('mousemove', e => {
   ultimoMouse = { x:e.clientX, y:e.clientY };
   cursorW = w; pintaCursor(w);
   if (tool === 'select') {
+    const al = alcaEm(s);
+    cv.style.cursor = al ? cursorAlca(al) : 'default';
     const h = hitsEm(w.x, w.y)[0] || null;
     if (h !== HOVER) { HOVER = h; $('shover').textContent = h ? rotuloAlvo(h) : ''; pede(); }
   } else {
@@ -3673,6 +4051,7 @@ function moveGesto(e, s, w){
   if (g.modo === 'janela') { if (longe || janela) { janela = { a:g.s, b:s }; pede(); } return; }
   if (g.modo === 'nada') { if (longe && !g.avisou) { g.avisou = true; avisoTrava(); } return; }
   if (g.modo === 'ponta') { if (!arrasto && !longe) return; if (!arrasto) iniciaPonta(g); atualizaPonta(e, w); return; }
+  if (g.modo === 'alca') { if (!arrasto && !longe) return; if (!arrasto) iniciaEstica(g); atualizaEstica(e, w); return; }
   if (g.modo === 'mover') { if (!arrasto && !longe) return; if (!arrasto && !iniciaArrasto(g)) return; atualizaArrasto(e, w); return; }
   if (g.modo === 'ferramenta') { SNAP = snapPonto(w, e, opcoesSnap()); pede(); }
 }
@@ -3819,7 +4198,7 @@ function atualizaArrasto(e, w){
 }
 function giraNoArrasto(como){
   const a = arrasto;
-  if (!a || a.ponta) return;
+  if (!a || a.ponta || a.estica) return;
   if (como === 'vira' && !a.alvos.some(x => x.t === 'comp')) return;
   const pv = pivoDe(a.alvos, a.bases);
   for (const al of a.alvos) {
@@ -3853,6 +4232,7 @@ function terminaArrasto(){
   const a = arrasto;
   arrasto = null; EXCLUI = null; cacheSujo = true;
   avisoRodape('');
+  if (a.estica) { terminaEstica(a); return; }
   if (a.ponta) {
     if (a.pontaGeo) {
       const m = a.ponta.alvo.m, e = m.eff;
@@ -4511,6 +4891,7 @@ function fazAcao(id, arg){
       if (tool === 'trilha' && draft && draft.est) { rotaVia(true); return; }
       setTool(tool === 'via' ? 'select' : 'via'); return;
     case 'linha': case 'arco': case 'circulo': case 'retangulo': case 'poligono': case 'texto':
+      setTool(tool === id ? 'select' : id); return;
     case 'furo': setTool('furo'); return;
     case 'fixacaoMarcacoes': fixacaoNasMarcacoes(); return;
     case 'furoDoCirculo': { const cs = SEL.filter(circuloDoAlvo); if (cs.length) furosDosCirculos(cs); else HubDialog.toast('selecione um círculo (arco de 360°) para virar furo de fixação', 'info'); return; }
@@ -4849,6 +5230,7 @@ function fichaDe(a){
       return { titulo:'Region ' + (m.added ? '(nova)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
         { k:'layer', rot:'Layer', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:m.added ? '' : 'trocar a camada de uma região do espelho é apagar e recriar (region_del + region_add)' },
         cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
+        ...camposCaixa(e.points),
         { k:'n', rot:'Vertices', tipo:'ro', v:String((e.points || []).length) },
         { k:'area', rot:'Area', tipo:'ro', v:fmtNum(ar, 3) + ' mm²' },
       ] };
@@ -4859,6 +5241,28 @@ function fichaDe(a){
         { k:'layer', rot:'Layer', tipo:'ro', v:nomeDe(g.layer) },
         { k:'net', rot:'Net', tipo:'ro', v:g.net || '—' },
         { k:'n', rot:'Vertices', tipo:'ro', v:String((g.points || []).length) + (Array.isArray(g.holes) && g.holes.length ? ' · ' + g.holes.length + ' furo(s)' : '') },
+      ] };
+    }
+    case 'poly': {
+      const m = a.m, e = m.eff;
+      return { titulo:'Plano (Polygon Pour) ' + (m.added ? '(novo)' : m.src.id), sub:[nomeDe(e.layer), e.net || 'sem net', ESTADO(m)].filter(Boolean).join(' · '), campos:[
+        { k:'tipo', rot:'Tipo', tipo:'enum', v:'plano:' + e.layer, opc:opcTipoPlano(), dica:'Sem plano = o plano não entra nesta área; trilha e via passam (o Polygon Pour Cutout do Altium)' },
+        { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) },
+        ...camposCaixa(e.pts),
+        { k:'n', rot:'Vértices', tipo:'ro', v:String((e.pts || []).length) },
+        { nota:'Arraste as bordas ou os cantos para mudar o tamanho (Shift no canto mantém a proporção, Ctrl solta a grade) e um vértice para mudar a forma. Delete apaga.' },
+      ] };
+    }
+    case 'semplano': {
+      const lay = a.m ? a.m.eff.layer : (a.eb.layer || 'Multi'), pts = a.m ? a.m.eff.points : a.eb.points;
+      const onde = !lay || lay === 'Multi' ? 'todas as camadas' : nomeDe(lay);
+      if (!a.m) return { titulo:'Sem plano (recorte de polígono)', sub:onde + ' · do Altium — mude no Altium', campos:[
+        { k:'tam', rot:'Tamanho', tipo:'ro', v:(() => { const b = bbPts(pts); return b ? fmtDist(b[2] - b[0]) + ' × ' + fmtDist(b[3] - b[1]) + ' ' + unidade : '—'; })() },
+      ] };
+      return { titulo:'Sem plano', sub:onde + ' · ' + ESTADO(a.m), campos:[
+        { k:'tipo', rot:'Tipo', tipo:'enum', v:'sem:' + lay, opc:opcTipoPlano() },
+        ...camposCaixa(pts),
+        { nota:'O plano (polygon pour) não entra nesta área; trilha e via passam — o Polygon Pour Cutout do Altium. Arraste as bordas ou os cantos para ajustar.' },
       ] };
     }
     case 'recorte': {
@@ -4906,6 +5310,27 @@ function fichaDe(a){
     }
   }
   return { titulo:'?', campos:[] };
+}
+/* tamanho e canto da caixa de um contorno: editar escala os vertices a partir do canto de baixo */
+function camposCaixa(pts){
+  const b = bbPts(pts || []);
+  if (!b) return [];
+  return [par('Tamanho (L/A)', { k:'bw', rot:'L', tipo:'dist', v:b[2] - b[0] }, { k:'bh', rot:'A', tipo:'dist', v:b[3] - b[1] }),
+          par('Canto (X/Y)', { k:'bx', rot:'X', tipo:'dist', v:b[0] }, { k:'by', rot:'Y', tipo:'dist', v:b[1] })];
+}
+function caixaNoAlvo(a, k, v){
+  if (!isNum(v)) return false;
+  const g = geoDe(a); if (!g || !g.points) return false;
+  const bb = bbPts(g.points);
+  if (!bb || bb[2] - bb[0] < 1e-9 || bb[3] - bb[1] < 1e-9) return false;
+  const nb = bb.slice();
+  if ((k === 'bw' || k === 'bh') && !(v > 0)) { HubDialog.toast('o tamanho tem de ser maior que zero', 'warn'); return false; }
+  if (k === 'bw') nb[2] = bb[0] + v;
+  else if (k === 'bh') nb[3] = bb[1] + v;
+  else if (k === 'bx') { nb[0] = v; nb[2] = v + bb[2] - bb[0]; }
+  else if (k === 'by') { nb[1] = v; nb[3] = v + bb[3] - bb[1]; }
+  else return false;
+  return escreveGeo(a, escalaGeo(a.t, g, bb, nb));
 }
 const CAMADA_LIVRE = a => a.t === 'track' || a.t === 'arc' || a.t === 'fill' || a.t === 'region' ||
   (a.t === 'text' && a.m && (!a.m.src || (!a.m.src.owner && !a.m.src.designator && !a.m.src.comment)));
@@ -4980,6 +5405,16 @@ function fichaFerramenta(){
       break;
     }
     case 'sinalizar': F.campos.push({ nota:'Clique no ponto do problema e escreva o que a IA deve corrigir (annotations.js).' }); break;
+    case 'pour': {
+      const tp = tipoPour();
+      F.campos.push(
+        { k:'tool.pourForma', rot:'Forma', tipo:'enum', v:CFG.pourForma, opc:[{ v:'retangulo', rot:'Retângulo — 2 cliques' }, { v:'livre', rot:'Polígono livre — um clique por vértice' }] },
+        { k:'tool.pourTipo', rot:'Tipo', tipo:'enum', v:tp, opc:opcTipoPlano(), dica:'Sem plano = o plano não entra nesta área; trilha e via passam (o Polygon Pour Cutout do Altium)' });
+      if (tp.indexOf('plano:') === 0) F.campos.push({ k:'tool.pourNet', rot:'Net', tipo:'net', v:netDoPour(), opc:opcNets(netDoPour()) });
+      F.campos.push({ nota:(CFG.pourForma === 'livre' ? 'Um clique por vértice; duplo clique, Enter ou botão direito fecha.' : 'Clique num canto e depois no canto oposto.') +
+        ' O que nasce fica selecionado: arraste as bordas ou os cantos para mudar o tamanho (Shift no canto mantém a proporção), um vértice para mudar a forma, e troque Top/Bottom/Sem plano no painel.' });
+      break;
+    }
   }
   return F;
 }
@@ -5012,6 +5447,9 @@ function configTool(k, v){
     case 'furo': if (pos(v)) CFG.furo = r6(v); break;
     case 'preencher': if (!!v !== preencher) togglePreencher(); break;
     case 'conflito': setConflito(String(v || '')); break;
+    case 'pourForma': if (v === 'retangulo' || v === 'livre') { CFG.pourForma = v; gravaPref('pourForma', v); if (draft && (draft.tipo === 'pour' || draft.tipo === 'pourRet')) draft = null; } break;
+    case 'pourTipo': CFG.pourTipo = String(v || ''); gravaPref('pourTipo', CFG.pourTipo); if (draft && (draft.tipo === 'pour' || draft.tipo === 'pourRet')) draft.layer = camadaDoTipo(); break;
+    case 'pourNet': CFG.pourNet = String(v || ''); break;
   }
   pintaStatus(); if (painel) painel.atualiza(); pede();
 }
@@ -5027,6 +5465,13 @@ function campoNoAlvo(a, k, v){
       if (!op || !c || !isNum(v)) return false;
       if (k === 'diam') { if (!pos(v)) { HubDialog.toast('diâmetro tem de ser maior que zero', 'warn'); return false; } op.pts = circuloPts(c.cx, c.cy, v / 2, 36); op.note = 'furo de fixação ' + fmtNum(v, 2) + ' mm'; return true; }
       if (k === 'cx' || k === 'cy') { op.pts = circuloPts(k === 'cx' ? v : c.cx, k === 'cy' ? v : c.cy, c.r, 36); return true; }
+      return false;
+    }
+    case 'poly': case 'semplano': {
+      if (!a.m) return false;
+      if (k === 'tipo') return mudaTipoPlano(a, v);
+      if (k === 'net' && a.t === 'poly') return editaPoly(a.m, { net:String(v || '') });
+      if (/^b[whxy]$/.test(k)) return caixaNoAlvo(a, k, v);
       return false;
     }
     case 'comp': {
@@ -5062,6 +5507,7 @@ function campoNoAlvo(a, k, v){
       const e = a.m.eff;
       if (k === 'layer') { if (!LBYK[v] || v === 'Multi' || v === e.layer) return false; return editaRegiao(a.m, { layer:v, points:e.points, net:cobre(v) ? e.net : '' }); }
       if (k === 'net') { if (!cobre(e.layer)) return false; return editaRegiao(a.m, { net:String(v || ''), points:e.points, layer:e.layer }); }
+      if (/^b[whxy]$/.test(k)) return caixaNoAlvo(a, k, v);
       return false;
     }
     case 'text': {
@@ -5275,10 +5721,7 @@ const V = {
   irMudanca(i){
     const it = model.changeItems[i]; if (!it || !it.target) return;
     const m = it.target;
-    let a = null;
-    if (m.kind === 'comp') a = ALVO_COMP.get(m);
-    else if (m.kind === 'region' && m.eff && m.eff.cutout) a = PORCHAVE.get(chave({ t:'recorte', m }));
-    else if (m.kind) a = PORCHAVE.get(chave({ t:m.kind, m }));
+    const a = alvoDoModelo(m);
     if (a) irPara(a, true);
   },
   tiraMudanca(i){

@@ -345,7 +345,7 @@ var changes = [
 | `fill_add` | `layer`, `x1`,`y1`,`x2`,`y2` (cantos SEM rotação) | `rot` (em torno do centro), `net`, `note` |
 | `fill_edit` | `id`, `orig_x1`,`orig_y1`,`orig_x2`,`orig_y2`, `orig_layer` | `x1`,`y1`,`x2`,`y2`,`rot`,`layer`,`net`,`note` |
 | `fill_del` | `id`, `orig_x1..orig_y2`, `orig_layer` | `note` |
-| `region_add` | `layer`, `pts` (`[[x,y],...]` ≥3, numa linha só) | `net`, `cutout` (true = Board Cutout; a camada é ignorada), `note` |
+| `region_add` | `layer`, `pts` (`[[x,y],...]` ≥3, numa linha só) | `net`, `cutout` (true = Board Cutout; a camada é ignorada), `polycut` (true = "sem plano", o Polygon Pour Cutout: o plano não entra, trilha e via passam; `layer` de cobre, ou `Multi` = todas; sem net), `note` |
 | `region_del` | `id`, `orig_layer`, `orig_n` (nº de vértices), `orig_x0`, `orig_y0` (1º vértice) | `note` |
 | `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
 | `outline_set` | `pts` (`[[x,y],...]` ≥3, polígono **fechado**, só linhas) | `note` |

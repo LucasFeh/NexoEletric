@@ -126,6 +126,63 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   const d = D.rodar(eb2, S, { ids: eb2.tracks.map(t => t.id), tipos: ['Clearance', 'ShortCircuit', 'Width', 'BoardOutlineClearance'] });
   assert.strictEqual(d.total, 0, 'as trilhas da tela saem limpas no DRC: ' + d.violacoes.map(v => v.msg).join(' | '));
 
+  /* 5. o Polygon Pour: retângulo em 2 cliques, esticar pela borda (as alças), Top -> Sem plano */
+  const bbP = B.board.bbox;
+  const P0 = [bbP.x1 + 3, bbP.y1 + 3], P1 = [bbP.x1 + 13, bbP.y1 + 9];
+  await js('window.__hubPcb.setTool("pour")');
+  await js('window.__hubPcb.editar("tool.pourForma", "retangulo")');
+  await js('window.__hubPcb.editar("tool.pourTipo", "plano:Top")');
+  await js(`window.__hubPcb.setView(${(P0[0] + P1[0]) / 2}, ${(P0[1] + P1[1]) / 2}, 20)`);
+  await espera(300);
+  const tela = async (x, y) => { const s = await js(`window.__hubPcb.telaDe(${x}, ${y})`); return [rect.left + s.x, rect.top + s.y]; };
+  const clicaAqui = async (x, y) => { const [sx, sy] = await tela(x, y); await mouse('mouseMoved', sx, sy); await espera(80); await mouse('mousePressed', sx, sy, 'left'); await mouse('mouseReleased', sx, sy, 'left'); await espera(250); };
+  await clicaAqui(P0[0], P0[1]);
+  await clicaAqui(P1[0], P1[1]);
+  let polys = (await js('window.__hubPcb.changes()')).filter(o => o.op === 'poly_add');
+  assert.strictEqual(polys.length, 1, 'o Polygon Pour em retângulo cria um poly_add');
+  assert.strictEqual(polys[0].layer, 'Top');
+  assert.strictEqual(polys[0].pts.length, 4);
+  /* SMOKE_PRINT=<pasta>: as capturas da tela (o plano com as alças, o sem plano, a gaveta) */
+  const print = async nome => { if (!process.env.SMOKE_PRINT) return; const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SMOKE_PRINT, nome + '.png'), Buffer.from(r.result.data, 'base64')); };
+  await print('1-plano-alcas');
+  const est = await js('window.__hubPcb.estado()');
+  assert.strictEqual(est.tool, 'select', 'depois de criar, volta para a seleção (com o plano selecionado)');
+  assert.strictEqual(est.sel.length, 1, 'o plano novo fica selecionado');
+  /* a borda da direita: arrastar 4 mm para a direita */
+  const xs = polys[0].pts.map(p => p[0]), ys = polys[0].pts.map(p => p[1]);
+  const x2 = Math.max(...xs), ym = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const [ax, ay] = await tela(x2, ym), [bx] = await tela(x2 + 4, ym);
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: ax, y: ay, button: 'none', buttons: 0 });
+  await espera(80);
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: ax, y: ay, button: 'left', buttons: 1, clickCount: 1 });
+  for (let i = 1; i <= 6; i++) { await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: ax + (bx - ax) * i / 6, y: ay, button: 'left', buttons: 1 }); await espera(30); }
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: bx, y: ay, button: 'left', buttons: 0, clickCount: 1 });
+  await espera(300);
+  polys = (await js('window.__hubPcb.changes()')).filter(o => o.op === 'poly_add');
+  const nx = polys[0].pts.map(p => p[0]);
+  assert.ok(Math.abs(Math.max(...nx) - (x2 + 4)) < 0.2, 'a borda esticou ~4 mm: ' + Math.max(...nx) + ' (era ' + x2 + ')');
+  assert.ok(Math.abs(Math.min(...nx) - Math.min(...xs)) < 1e-6, 'o lado oposto ficou no lugar');
+  /* Tipo no painel: vira Sem plano em todas as camadas */
+  await js('window.__hubPcb.editar("tipo", "sem:Multi")');
+  const CHs = await js('window.__hubPcb.changes()');
+  assert.strictEqual(CHs.filter(o => o.op === 'poly_add').length, 0, 'o plano saiu');
+  const sp = CHs.filter(o => o.op === 'region_add' && o.polycut);
+  assert.strictEqual(sp.length, 1, 'virou o sem plano (region_add polycut)');
+  assert.strictEqual(sp[0].layer, 'Multi');
+  await espera(300); await print('2-sem-plano');
+  assert.deepStrictEqual((await js('window.__hubPcb.valida()')).filter(v => v.status === 'err'), [], 'as ops do plano validam');
+  /* a gaveta das formas e o atalho R */
+  const gav = await js(`(() => { document.querySelector('#tb-formas .gseta').click(); return !document.querySelector('#tb-formas .gaveta').hidden; })()`);
+  assert.ok(gav, 'a setinha abre a gaveta das formas');
+  await espera(150); await print('3-gaveta');
+  await js(`document.getElementById('tb-retangulo').click()`);
+  assert.strictEqual((await js('window.__hubPcb.estado()')).tool, 'retangulo', 'a forma da gaveta vira a ferramenta');
+  assert.ok(await js(`document.querySelector('#tb-formas .gaveta').hidden`), 'escolher fecha a gaveta');
+  await js('window.__hubPcb.setTool("select")');
+  await js('window.__hubPcb.fazAcao("circulo")');
+  assert.strictEqual((await js('window.__hubPcb.estado()')).tool, 'circulo', 'o atalho da forma escolhe a forma (e não o Furo)');
+  await js('window.__hubPcb.setTool("select")');
+
   /* 4. sem erro de script */
   assert.deepStrictEqual(erros, [], 'erros na página: ' + erros.join(' || '));
   console.log(`smoke-vista-pcb OK (${CH.filter(o => o.op === 'track_add').length} trilhas feitas na tela, largura e net pela regra, DRC limpo)`);

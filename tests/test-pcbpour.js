@@ -276,6 +276,41 @@ const POL = (o) => Object.assign({ id: 'p1', nome: 'GND_L01_P000', layer: 'Top',
   console.log('  desempenho ok (' + ms + ' ms, ' + r.regioes.length + ' regioes)');
 }
 
+/* ---- 8b. o "sem plano" da vista: region_add polycut (o Polygon Pour Cutout do Altium) ---- */
+{
+  const B = {
+    format: 'pcbmirror-v1', exporter: 'teste', units: 'mm',
+    board: { bbox: { x1: 0, y1: 0, x2: 40, y2: 30 },
+             outline: [{ kind: 'line', x1: 0, y1: 0, x2: 40, y2: 0 }, { kind: 'line', x1: 40, y1: 0, x2: 40, y2: 30 },
+                       { kind: 'line', x1: 40, y1: 30, x2: 0, y2: 30 }, { kind: 'line', x1: 0, y1: 30, x2: 0, y2: 0 }] },
+    nets: ['GND', 'SIG'], layers: [], rules: { clearance: 0.254 },
+    components: [], freepads: [], arcs: [], vias: [], texts: [], silk: [], regions: [], cutouts: [], fills: [], lines: [],
+    tracks: [{ id: 't1', layer: 'Top', x1: 12, y1: 15, x2: 28, y2: 15, w: 0.3, net: 'SIG' }],
+  };
+  const sem = pts => ({ op: 'region_add', polycut: true, layer: 'Top', pts });
+  const plano = { op: 'poly_add', layer: 'Top', net: 'GND', removeDead: false, pts: [[1, 1], [39, 1], [39, 29], [1, 29]] };
+  const ch = [plano, sem([[10, 10], [30, 10], [30, 20], [10, 20]]), Object.assign(sem([[2, 2], [6, 2], [6, 6], [2, 6]]), { layer: 'Multi' })];
+  const M = HubCore.applyPcbChanges(B, ch);
+  assert.deepStrictEqual(M.changeItems.map(i => i.status), ['ok', 'ok', 'ok'], JSON.stringify(M.changeItems.map(i => i.msg)));
+  const eb = HubCore.effectiveBoard(B, M);
+  const k = eb.cutouts.filter(c => c.kindn === 1);
+  assert.deepStrictEqual(k.map(c => c.layer), ['Top', 'Multi'], 'o sem plano vira recorte de poligono (kindn 1) na camada pedida');
+  const r = Pour.despeja(eb, eb.polygons[0]);
+  assert.ok(!cobre(r.regioes, 20, 18), 'o plano nao entra no sem plano');
+  assert.ok(!cobre(r.regioes, 4, 4), 'nem no sem plano da Multi');
+  assert.ok(cobre(r.regioes, 35, 25), 'fora dele o plano continua');
+  /* nao e furo: o laser/PDF e o Gerber nao cortam, e a trilha que passa no meio nao e violacao */
+  const L = require('../hub-laser.js');
+  assert.strictEqual(L.boardCutouts(eb).length, 0, 'recorte de poligono nao e furo da placa');
+  const D = require('../hub-pcbdrc.js');
+  const d = D.rodar(eb, null, { tipos: ['BoardOutlineClearance'] });
+  assert.strictEqual(d.total, 0, 'a trilha no sem plano nao e violacao de contorno: ' + d.violacoes.map(v => v.msg).join(' | '));
+  /* camada que nao e cobre: recusa */
+  const ruim = HubCore.applyPcbChanges(B, [Object.assign(sem([[2, 2], [6, 2], [6, 6]]), { layer: 'TopOverlay' })]);
+  assert.strictEqual(ruim.changeItems[0].status, 'err');
+  console.log('  sem plano (polycut) ok');
+}
+
 /* ---- 9. opcional: uma placa real extraida pelo tools/pour/pour_extrai.py ---- */
 if (process.env.POUR_JSON && fs.existsSync(process.env.POUR_JSON)) {
   const { compara } = require(path.join(__dirname, '..', 'tools', 'pour', 'compara.js'));

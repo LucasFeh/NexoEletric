@@ -6,6 +6,30 @@ app se chamava EletricHUB.
 
 ## 1.23.0 — 2026-10-23
 
+O Polygon Pour editável na vista PCB, como no Canva (pedido do dono: "editar com clique e arraste, regular o tamanho,
+clicando nas bordas" e "definir se o plano é Top, Bottom ou sem plano, uma área que não deixa o plano passar, só
+trilha"):
+
+- **Alças no que está selecionado.** Plano, sem plano, região, recorte, fill e um grupo de trilhas ganham a caixa
+  com 8 alças: arrastar um canto ou uma borda (a alça ou a própria linha da caixa) estica ou encolhe a partir do lado
+  oposto, na grade. Shift no canto mantém a proporção; Ctrl solta a grade; Esc desiste. Um polígono que não é
+  retângulo mostra também os vértices, e arrastar um muda a forma. Tamanho e canto também se digitam no painel.
+- **O plano é selecionável.** Clicar no contorno do Polygon Pour, ou no cobre despejado dele, seleciona o plano:
+  mover, girar, espelhar, apagar, trocar a net, e o **Tipo**: Plano no Top, Plano no Bottom (ou numa interna), ou
+  **Sem plano**. A troca entre plano e sem plano mantém o contorno.
+- **Sem plano** é o Polygon Pour Cutout do Altium (`region_add` com `polycut:true`): o plano não entra na área, e
+  trilha e via passam. Vale numa camada ou em todas (Multi). Na tela aparece hachurado. O despejo, o Gerber, o
+  laser, o PDF e o DRC não o tratam como furo. O ApplyChanges o cria no Altium pelo mesmo caminho do Board Cutout
+  (o Kind 1 escrito e relido).
+- **A ferramenta Polygon Pour ficou direta.** O painel da ferramenta tem a Forma (retângulo em 2 cliques ou polígono
+  livre), o Tipo e a Net (vem a de terra da placa). Não abre mais o menu de net a cada polígono. O que nasce fica
+  selecionado, já com as alças.
+- **As formas de desenho numa gaveta.** Linha, arco, círculo, retângulo, triângulo e polígono viraram um botão só na
+  barra: ele mostra a última forma usada, e a setinha ao lado abre a gaveta com as outras.
+- Correção: as teclas de Linha, Arco, Círculo, Retângulo, Polígono e Texto (L, A, O, R, G, T) escolhiam a ferramenta
+  Furo desde a 1.17.0.
+- Correção: o DRC, o laser e o PDF tratavam um recorte de polígono vindo do Altium como furo da placa.
+
 O roteamento e o DRC com as mesmas regras, como no Altium (pedido do dono: "as regras precisam ser a mesma, a lógica
 de roteamento também precisa ser igual"):
 
