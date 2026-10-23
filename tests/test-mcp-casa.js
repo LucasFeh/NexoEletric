@@ -48,7 +48,7 @@ function cliente() {
     return { j: JSON.parse(r.result.content[0].text), erro: !!r.result.isError };
   };
   const SKILLS = ['pcb-parafusos-isolados', 'pcb-plano-folga-pads', 'pcb-serigrafia-livre',
-    'pcb-cobre-sem-curto', 'pcb-boas-praticas', 'pcb-verificar-antes-de-entregar'];
+    'pcb-cobre-sem-curto', 'pcb-boas-praticas', 'pcb-verificar-antes-de-entregar', 'pcb-producao-backplane'];
 
   /* instruções do servidor: o resumo das regras vai para toda IA que conecta */
   const ini = await c.pede('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'teste', version: '0' } });
@@ -108,6 +108,9 @@ function cliente() {
   assert.ok(/IPC-2221/.test(j.texto) && /acid trap/i.test(j.texto) && /Fontes/.test(j.texto), 'pcb-boas-praticas sem o checklist');
   ({ j } = await chama('skill_ler', { nome: 'pcb-verificar-antes-de-entregar' }));
   assert.ok(/aprovado: true/.test(j.texto) && /despejar:false/.test(j.texto), 'pcb-verificar-antes-de-entregar sem a sequência');
+  ({ j } = await chama('skill_ler', { nome: 'pcb-producao-backplane' }));
+  assert.ok(/CBM-DI251877/.test(j.texto) && /45°/.test(j.texto) && /Sem via/.test(j.texto) && /2,25 mm/.test(j.texto)
+    && /furo\/2 \+ 3,05/.test(j.texto) && /regras_casa_verificar/.test(j.texto), 'pcb-producao-backplane sem a técnica');
 
   /* trilha de OUTRA net passando por cima de um pad passante = CURTO (pad_outra_net), em qualquer camada */
   const comNet = pads.find(q => q.net) || alvo;

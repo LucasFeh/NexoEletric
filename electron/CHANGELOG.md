@@ -4,6 +4,19 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.22.0 — 2026-10-23
+
+- **Skill de produção nova no MCP: `pcb-producao-backplane`** (pedido do dono: "seguindo a CBM-DI251877, faça a
+  mesma lógica de roteamento e plano de terra para a CBM-DI251876 e crie uma skill de produção com ela"). A técnica
+  da CBM-DI251877, com os números: campo sem plano em volta das fileiras (faixa limpa de 2,25 mm), GND no Top fora
+  do campo, +5V no Bottom (e a 2ª fonte no canto dela, com 1,5 mm de vão), retângulo de GND no Bottom entre cada par
+  de conectores, abas de GND/+5V dos pinos aos planos (dando a volta nos rótulos de serigrafia), corrente de +5V no
+  meio das fileiras com entrada a 45°, leque em escada só com 45° (perfil único deslocado: chanfro 0,4, reta 1,0,
+  degraus de 0,6 a cada 1,75), nenhum canto de 90°, sem via, quadrado do parafuso furo/2 + 3,05 em todos os planos,
+  pontes nos cortes dos planos e a conferência antes de entregar.
+- A CBM-DI251876 foi refeita com ela (no `changes.js` do projeto, não neste repositório): DRC 0, nenhuma net
+  pendente, nenhum curto, nenhuma trilha fora de 0/45/90°, nenhuma via.
+
 ## 1.21.1 — 2026-10-22
 
 - O instalador da 1.21.0 saiu sem as dependências do atualizador automático (`electron-updater`: o
