@@ -4,6 +4,19 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.26.0 — 2026-10-23
+
+O Gerber sem a faixa de cima (pedido do dono: "pegue essa área toda bagunçada, cheia de informação, e transforma em um
+menuzinho no canto superior esquerdo, transparente, com as opções em lista, sem muita escrita, e com ícones"):
+
+- As duas barras de cima do visualizador de Gerber viraram **um menu translúcido no canto superior esquerdo**, em lista,
+  cada item com ícone e rótulo curto: Gerar de novo, Baixar .zip, Salvar, Ver salvo, Enviar pra JLC, Abrir, Comparar,
+  Enquadrar, Cima/Baixo, Camadas/Realista e Fechar. A placa ganhou a altura das barras.
+- O que era texto corrido ficou recolhido dentro do menu:
+  - **Opções**: nomes dos arquivos, camadas vazias, legenda .gto/.gbo, atributos X2 e o resumo do pacote;
+  - **N avisos**: os avisos do gerador; o primeiro "ATENÇÃO" aparece passando o mouse.
+- A setinha do cabeçalho recolhe o menu inteiro. O app lembra se ele ficou recolhido.
+
 ## 1.25.0 — 2026-10-23
 
 A placa no carrinho da JLCPCB pelo IntegrateBrowser (pedido do dono: "em Gerber clicar em 'enviar pra JLC', ele já

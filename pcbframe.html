@@ -138,18 +138,24 @@
   #fatal{position:absolute; inset:0; display:none; align-items:center; justify-content:center; color:var(--err); font-size:15px;
     text-align:center; padding:40px; z-index:50; background:var(--bg);}
 
-  /* ── Gerber: o visualizador por cima da vista (hub-gerberview.js), com o que o gerador avisou em cima ── */
+  /* ── Gerber: o visualizador por cima da vista (hub-gerberview.js). A barra dele virou o menu
+     translucido do canto (menu:true); as opcoes do pacote e os avisos do gerador moram nele,
+     recolhidos (pedido do dono, 2026-10-23: "um menuzinho no canto superior esquerdo,
+     transparente, com as opcoes em lista, sem muita escrita, e com icones") ── */
   #gerber{position:absolute; inset:0; z-index:40; display:flex; flex-direction:column; background:var(--bg);}
-  .gb-topo{flex:none; display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:6px 12px; border-bottom:1px solid var(--border);
-    background:var(--panel); font-size:12px; color:var(--fg-dim);}
-  .gb-topo b{color:var(--fg); font-weight:600;}
-  .gb-topo label{display:inline-flex; align-items:center; gap:5px; cursor:pointer;}
-  .gb-topo select{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px; font-size:12px;}
-  .gb-topo input{accent-color:var(--accent);}
-  #gbMeta{color:var(--fg);}
-  #gbAvisos{flex-basis:100%; color:var(--warn); font-size:11.5px;}
-  #gbAvisos summary{cursor:pointer;}
-  #gbAvisos ul{margin:4px 0 2px 18px; color:var(--fg-dim); max-height:22vh; overflow:auto;}
+  #gbOpcoes{display:flex; flex-direction:column; font-size:12px; color:var(--fg-dim);}
+  #gbOpcoes summary{display:flex; align-items:center; gap:5px; height:26px; padding:0 8px; border-radius:5px; cursor:pointer; list-style:none; color:#c8c8ce;}
+  #gbOpcoes summary::-webkit-details-marker{display:none;}
+  #gbOpcoes summary:hover{background:rgba(255,255,255,.08); color:var(--fg);}
+  #gbOpcoes summary svg{width:16px; height:16px; flex:none; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round;}
+  #gbOpcoes details[open] > summary{color:var(--fg);}
+  .gb-gaveta{display:flex; flex-direction:column; gap:6px; padding:4px 8px 8px 29px;}
+  .gb-gaveta label{display:flex; align-items:center; gap:6px; cursor:pointer;}
+  .gb-gaveta select{flex:1; min-width:0; background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px; font-size:12px;}
+  .gb-gaveta input{accent-color:var(--accent);}
+  #gbMeta{color:var(--fg-dim); font-size:11px;}
+  #gbAvisos > summary{color:var(--warn);}
+  #gbAvisos ul{margin:2px 0 4px 0; padding:0 8px 0 29px; color:var(--fg-dim); font-size:11px; max-height:30vh; overflow:auto;}
   #gerberVista{flex:1; min-height:0; position:relative;}
 
   /* com o Gerber aberto, o rodape e o do visualizador (X/Y e zoom dele) */
@@ -195,17 +201,21 @@
   <div id="splitR" class="split" title="arraste para redimensionar · duplo clique fecha/abre"></div>
   <aside id="props"></aside>
   <div id="gerber" hidden>
-    <div class="gb-topo">
-      <b>Gerber</b><span id="gbMeta"></span>
-      <label title="Como os arquivos se chamam no pacote">Nomes
-        <select id="gbNomes">
-          <option value="fabricacao">FABRICAÇÃO (minúsculas, como vai para a JLCPCB)</option>
-          <option value="altium">Altium (Project Outputs)</option>
-        </select></label>
-      <label title="Camada sem objeto sai do pacote (padrão), como no pacote da casa"><input type="checkbox" id="gbVazias"> camadas vazias</label>
-      <label title="Legenda com extensão .gto/.gbo (172 de 282 pacotes da casa renomeiam)"><input type="checkbox" id="gbGto"> legenda .gto/.gbo</label>
-      <label title="Atributos X2 (TF/TA e o MD5), como o Altium 21; desligado, como o CAMtastic reexporta"><input type="checkbox" id="gbX2"> atributos X2</label>
+    <div id="gbOpcoes">
       <details id="gbAvisos" hidden></details>
+      <details id="gbOpc"><summary id="gbOpcSum" title="Nomes dos arquivos, camadas vazias, legenda e atributos X2 do pacote">Opções</summary>
+        <div class="gb-gaveta">
+          <span id="gbMeta"></span>
+          <label title="Como os arquivos se chamam no pacote: em minúsculas, como vai para a JLCPCB, ou como o Project Outputs do Altium">Nomes
+            <select id="gbNomes">
+              <option value="fabricacao">Fabricação</option>
+              <option value="altium">Altium</option>
+            </select></label>
+          <label title="Camada sem objeto sai do pacote (padrão), como no pacote da casa"><input type="checkbox" id="gbVazias"> Camadas vazias</label>
+          <label title="Legenda com extensão .gto/.gbo (172 de 282 pacotes da casa renomeiam)"><input type="checkbox" id="gbGto"> Legenda .gto/.gbo</label>
+          <label title="Atributos X2 (TF/TA e o MD5), como o Altium 21; desligado, como o CAMtastic reexporta"><input type="checkbox" id="gbX2"> Atributos X2</label>
+        </div>
+      </details>
     </div>
     <div id="gerberVista"></div>
   </div>

@@ -186,6 +186,15 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   /* 6. Gerber » Enviar pra JLC: pergunta a quantidade (as da JLC) antes de qualquer coisa; Esc desiste */
   await js('window.__hubPcb.fazAcao("gerber")');
   await espera(1500);
+  /* o Gerber sem a barra de cima: o menu translúcido do canto, com as opções do pacote dentro */
+  const menuGb = await js(`(() => { const m = document.querySelector('#gerber .gv-menu'); return m ? { barra: !!document.querySelector('#gerber .gv-barra'), opcoes: !!m.querySelector('#gbOpcoes #gbNomes'), itens: [...m.querySelectorAll('button')].map(b => b.textContent.trim()).filter(Boolean) } : null; })()`);
+  assert.ok(menuGb && !menuGb.barra && menuGb.opcoes, 'o Gerber abre com o menu do canto (sem a barra) e as opções dentro: ' + JSON.stringify(menuGb));
+  assert.ok(['Gerar de novo', 'Salvar', 'Enviar pra JLC', 'Abrir…', 'Enquadrar', 'Fechar'].every(t => menuGb.itens.includes(t)), 'itens do menu: ' + menuGb.itens.join(', '));
+  await print('5-gerber-menu');
+  await js(`document.getElementById('gbOpc').open = true`);
+  await espera(200);
+  await print('6-gerber-menu-opcoes');
+  await js(`document.getElementById('gbOpc').open = false`);
   const temBotao = await js(`(() => { const b = [...document.querySelectorAll('#gerber button')].find(x => x.textContent.trim() === 'Enviar pra JLC'); if (!b) return false; b.click(); return true; })()`);
   assert.ok(temBotao, 'o visualizador de Gerber tem o botão Enviar pra JLC');
   await espera(400);

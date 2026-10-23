@@ -5794,16 +5794,24 @@ function fechaGerber(){ const o = $('gerber'); if (o) o.hidden = true; document.
 function montaGerberView(){
   GV = HubGerberView.montar($('gerberVista'), {
     conjuntos:[],
+    menu:true,
     aoFechar:() => fechaGerber(),
     barraExtra:[
-      { rotulo:'Gerar de novo', titulo:'Gera de novo a partir da placa com as mudanças de agora (inclusive as ainda não salvas)', primario:true, acao:() => regeraGerber(false) },
-      { rotulo:'Baixar .zip', titulo:'Baixa o pacote num .zip com o nome do .PcbDoc', acao:() => baixaZipGerber() },
-      { rotulo:'Salvar no projeto', titulo:V.podeGravar ? 'Grava em Projects/' + PROJ + '/Gerber/ (o conjunto anterior sai da pasta)' : 'Só com o hubserver e um projeto aberto (?p=)', desabilitado:!V.podeGravar, acao:() => salvaGerber() },
-      { rotulo:'Ver salvo', titulo:V.podeGravar ? 'Abre o último conjunto gravado em Projects/' + PROJ + '/Gerber/ ao lado do gerado, para comparar' : 'Só com o hubserver e um projeto aberto', desabilitado:!V.podeGravar, acao:() => verGerberSalvo() },
-      { rotulo:'Enviar pra JLC', titulo:V.podeGravar ? 'Salva o Gerber no projeto e põe no carrinho da JLCPCB pelo IntegrateBrowser — pergunta a quantidade antes; o pagamento fica com você' : 'Só no app (ou com o hubserver) e um projeto aberto', desabilitado:!V.podeGravar,
+      { rotulo:'Gerar de novo', curto:'Gerar de novo', ic:'gerar', titulo:'Gera de novo a partir da placa com as mudanças de agora (inclusive as ainda não salvas)', primario:true, acao:() => regeraGerber(false) },
+      { rotulo:'Baixar .zip', curto:'Baixar .zip', ic:'baixar', titulo:'Baixa o pacote num .zip com o nome do .PcbDoc', acao:() => baixaZipGerber() },
+      { rotulo:'Salvar no projeto', curto:'Salvar', ic:'salvar', titulo:V.podeGravar ? 'Salvar no projeto: grava em Projects/' + PROJ + '/Gerber/ (o conjunto anterior sai da pasta)' : 'Só com o hubserver e um projeto aberto (?p=)', desabilitado:!V.podeGravar, acao:() => salvaGerber() },
+      { rotulo:'Ver salvo', curto:'Ver salvo', ic:'salvo', titulo:V.podeGravar ? 'Abre o último conjunto gravado em Projects/' + PROJ + '/Gerber/ ao lado do gerado, para comparar' : 'Só com o hubserver e um projeto aberto', desabilitado:!V.podeGravar, acao:() => verGerberSalvo() },
+      { rotulo:'Enviar pra JLC', curto:'Enviar pra JLC', ic:'carrinho', titulo:V.podeGravar ? 'Salva o Gerber no projeto e põe no carrinho da JLCPCB pelo IntegrateBrowser — pergunta a quantidade antes; o pagamento fica com você' : 'Só no app (ou com o hubserver) e um projeto aberto', desabilitado:!V.podeGravar,
         acao:() => enviaJlc().catch(e => HubDialog.toast('Enviar pra JLC: ' + (e && e.message || e), 'err', 0)) },
     ],
   });
+  /* as opcoes do pacote e os avisos do gerador vao para dentro do menu do canto */
+  const opc = $('gbOpcoes');
+  if (opc && GV.menuExtra) {
+    GV.menuExtra.append(opc);
+    const sum = $('gbOpcSum');
+    if (sum && HubGerberView.icone) sum.insertAdjacentHTML('afterbegin', HubGerberView.icone('opcoes'));
+  }
 }
 function geraGerber(){
   if (typeof HubGerber === 'undefined' || typeof HubGerber.gerar !== 'function')
@@ -5817,7 +5825,7 @@ function regeraGerber(primeiro){
   let r;
   try { r = geraGerber(); }
   catch (e) { pintaGerberTopo(String(e && e.message || e)); if (!primeiro) HubDialog.toast('Gerber: ' + (e && e.message || e), 'err', 0); return; }
-  const conj = { titulo:'Gerado agora' + (chDirty ? ' (com mudanças não salvas)' : '') + ' — ' + r.resumo.base, arquivos:r.arquivos.map(a => ({ nome:a.nome, texto:a.texto })) };
+  const conj = { titulo:r.resumo.base + (chDirty ? ' *' : ''), arquivos:r.arquivos.map(a => ({ nome:a.nome, texto:a.texto })) };
   if (gerIdx >= 0 && GV.estado.conjuntos[gerIdx]) GV.substituir(gerIdx, conj);
   else { GV.adicionar(conj, GV.estado.conjuntos.length > 0, r.avisos); gerIdx = GV.estado.conjuntos.length - 1; }
   pintaGerberTopo();
@@ -5831,14 +5839,17 @@ function pintaGerberTopo(erro){
   const r = gerUltimo;
   if (!r) { meta.textContent = ''; av.hidden = true; return; }
   const desc = (r.resumo.descartadas || []).length;
-  meta.textContent = r.resumo.base + ' · ' + r.arquivos.length + ' arquivo(s)' + (desc ? ' · ' + desc + ' camada(s) vazia(s) fora do pacote' : '') +
-    ' · ' + (gerOpc.x2 ? 'Gerber X2' : 'RS-274X sem atributos') + ' mm 4:5' + (B.exporter ? '' : ' · espelho antigo');
+  meta.textContent = r.arquivos.length + ' arquivos · ' + (gerOpc.x2 ? 'X2' : 'RS-274X') + ' mm 4:5' + (desc ? ' · ' + desc + ' vazias fora' : '') + (B.exporter ? '' : ' · espelho antigo');
+  meta.title = r.resumo.base + ' · ' + r.arquivos.length + ' arquivo(s)' + (desc ? ' · ' + desc + ' camada(s) vazia(s) fora do pacote' : '') +
+    ' · ' + (gerOpc.x2 ? 'Gerber X2' : 'RS-274X sem atributos') + ' mm 4:5';
   const lista = r.avisos || [];
   if (!lista.length) { av.hidden = true; return; }
   av.hidden = false;
   const alto = lista.filter(a => /^ATEN/i.test(a));
   const sum = document.createElement('summary');
-  sum.textContent = '⚠ ' + lista.length + ' aviso(s) do gerador' + (alto.length ? ' — ' + alto[0] : '');
+  if (typeof HubGerberView !== 'undefined' && HubGerberView.icone) sum.innerHTML = HubGerberView.icone('aviso');
+  sum.append(lista.length + (lista.length === 1 ? ' aviso' : ' avisos'));
+  sum.title = 'Avisos do gerador' + (alto.length ? ' — ' + alto[0] : '');
   av.append(sum);
   const ul = document.createElement('ul');
   for (const a of lista) { const li = document.createElement('li'); li.textContent = a; ul.append(li); }

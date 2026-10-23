@@ -2294,6 +2294,18 @@ const ICONES = {
   olho: 'M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z|c:8,8,2.2',
   olhoFechado: 'M1.5 8 C3.5 4.6 5.8 3 8 3 C10.2 3 12.5 4.6 14.5 8 C12.5 11.4 10.2 13 8 13 C5.8 13 3.5 11.4 1.5 8 Z|c:8,8,2.2|M2.5 13.5 L13.5 2.5',
   fechar: 'M4 4 L12 12 M12 4 L4 12',
+  gerar: 'M13 8 A5 5 0 1 1 10.5 3.7 M10.5 1.2 V3.7 H13',
+  baixar: 'M8 2 V10.5 M4.5 7 L8 10.5 L11.5 7|M2.5 13.5 H13.5',
+  salvar: 'M2.5 2.5 H11.5 L13.5 4.5 V13.5 H2.5 Z|M5 2.5 V6 H10.5 V2.5|r:5,9,6,4.5',
+  salvo: 'M3 1.5 H10 L13 4.5 V14.5 H3 Z|M5.5 9 L7.3 10.8 L10.5 7.5',
+  carrinho: 'M1.5 2.5 H3.5 L5 10.5 H12.5 L14 5 H4.2|c:6,13,1|c:11.5,13,1',
+  camadas: 'M8 2 L14 5 L8 8 L2 5 Z|M2 8 L8 11 L14 8|M2 11 L8 14 L14 11',
+  virar: 'M2 5 H11 M8.5 2.5 L11 5 L8.5 7.5|M14 11 H5 M7.5 8.5 L5 11 L7.5 13.5',
+  menu: 'M2.5 4 H13.5 M2.5 8 H13.5 M2.5 12 H13.5',
+  opcoes: 'c:8,8,2.3|M8 1.5 V3.5 M8 12.5 V14.5 M1.5 8 H3.5 M12.5 8 H14.5 M3.4 3.4 L4.8 4.8 M11.2 11.2 L12.6 12.6 M3.4 12.6 L4.8 11.2 M11.2 4.8 L12.6 3.4',
+  aviso: 'M8 2 L14.5 13.5 H1.5 Z|M8 6.5 V9.5|M8 11.6 V11.7',
+  recolher: 'M4 10 L8 6 L12 10',
+  expandir: 'M4 6 L8 10 L12 6',
 };
 function icone(nome) {
   const partes = ICONES[nome].split('|').map(p => {
@@ -2303,6 +2315,8 @@ function icone(nome) {
   });
   return '<svg viewBox="0 0 16 16" aria-hidden="true">' + partes.join('') + '</svg>';
 }
+/* o icone para quem monta em volta (a vista PCB pendura as opcoes dela no menu) */
+const iconeDe = nome => (ICONES[nome] ? icone(nome) : '');
 const ACEITA = '.gbr,.gbx,.ger,.pho,.art,.gtl,.gbl,.gto,.gbo,.gts,.gbs,.gtp,.gbp,.gko,.gml,.gpt,.gpb,.gm1,.gm2,.gm3,.gm4,.gm13,.gm15,.gd1,.gg1,.g1,.g2,.gp1,.gp2,' +
   '.drl,.txt,.xln,.exc,.drd,.cmp,.sol,.plc,.pls,.stc,.sts,.crc,.crs,.dim,.zip,.rar';
 
@@ -2342,6 +2356,25 @@ const CSS = `
 .gv-vazio{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center;
   white-space:pre-line; color:var(--text-3,#7a7a80); font-size:13px; pointer-events:none;}
 .gv-raiz.gv-solta .gv-tela{outline:2px dashed var(--hi,#d8d8dd); outline-offset:-6px;}
+.gv-menu{position:absolute; left:10px; top:10px; z-index:4; width:196px; max-height:calc(100% - 20px); overflow:auto; display:flex; flex-direction:column;
+  padding:4px; border-radius:var(--r-md,8px); background:rgba(22,22,25,.72); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+  box-shadow:0 0 0 1px rgba(255,255,255,.08), 0 10px 28px rgba(0,0,0,.45); color:var(--text,#f2f2f3);}
+.gv-menu-cab{display:flex; align-items:center; gap:4px; padding:2px 2px 4px 6px;}
+.gv-menu-cab .gv-tit{flex:1 1 auto; min-width:0; max-width:none; margin:0; font-size:12px;}
+.gv-menu-cab .gv-tit select{max-width:100%;}
+.gv-raiz .gv-menu button{width:100%; justify-content:flex-start; height:26px; padding:0 8px; color:var(--text-2,#c8c8ce);}
+.gv-raiz .gv-menu .gv-menu-cab button{width:26px; padding:0; justify-content:center; flex:none;}
+.gv-raiz .gv-menu button.gv-prim{color:var(--hi,#d8d8dd); border-color:transparent;}
+.gv-menu .gv-extra{display:flex; flex-direction:column; gap:0;}
+.gv-menu .gv-sep{width:auto; height:1px; margin:4px 6px;}
+.gv-menu-linha{display:flex; align-items:center; gap:6px; padding:2px 8px; height:28px; color:var(--text-2,#c8c8ce);}
+.gv-menu-linha .gv-seg{flex:1;}
+.gv-raiz .gv-menu-linha .gv-seg button{flex:1; width:auto; justify-content:center; padding:0 4px; height:22px;}
+.gv-menu-corpo{display:flex; flex-direction:column;}
+.gv-menu.gv-recolhido .gv-menu-corpo{display:none;}
+.gv-menu.gv-recolhido{width:auto; max-width:260px;}
+.gv-menu-extra:empty{display:none;}
+.gv-com-menu .gv-faixa{left:216px;}
 .gv-faixa{position:absolute; left:10px; right:10px; top:10px; z-index:3; display:flex; gap:8px; align-items:flex-start; padding:8px 10px;
   background:var(--surface,#1a1a1d); color:var(--text,#f2f2f3); border-left:3px solid var(--warn,#d6a75a); border-radius:var(--r-sm,5px);
   box-shadow:var(--shadow-menu,0 8px 24px rgba(0,0,0,.5));}
@@ -2430,8 +2463,11 @@ function descreveAbertura(ap) {
      redesenhar(), enquadrar(), avisar(msg, tipo), destruir()
      elemento, botoesExtra, estado (fotografia: conjuntos, camadas, vista, modo, zoom)
    opcoes = { conjuntos:[{titulo, arquivos:[{nome, texto}]}], aoFechar(ctrl),
-              barraExtra:[{rotulo, titulo, acao(ctrl, ev), primario?, desabilitado?}],
-              vista:'cima'|'baixo', modo:'camadas'|'realista' }
+              barraExtra:[{rotulo, titulo, acao(ctrl, ev), primario?, desabilitado?, curto?, ic?}],
+              vista:'cima'|'baixo', modo:'camadas'|'realista', menu?:true }
+   menu:true = no lugar da barra de cima, um menu translucido no canto superior esquerdo da tela, em
+   lista: icone + rotulo curto (o `curto` da barraExtra; `ic` = um dos ICONES), recolhivel pelo
+   cabecalho. ctrl.menuExtra e a gaveta dele para o chamador pendurar o que quiser (opcoes, avisos).
    acao que devolve Promise trava o proprio botao ate terminar. O el precisa ter tamanho (a vista
    ocupa 100% dele); escondido, ela espera aparecer para enquadrar. */
 function montar(el, opcoes) {
@@ -2480,7 +2516,24 @@ function montar(el, opcoes) {
   bFechar.hidden = typeof opcoes.aoFechar !== 'function';
   const inAbrir = mk('input'), inComp = mk('input');
   for (const i of [inAbrir, inComp]) { i.type = 'file'; i.multiple = true; i.hidden = true; i.accept = ACEITA; }
-  barra.append(tit, extra, mk('span', 'gv-sep'), bAbrir, bComparar, mk('span', 'gv-sep'), bEnq, segVista.el, segModo.el, mk('span', 'gv-flex'), bFechar, inAbrir, inComp);
+  const menu = opcoes.menu ? mk('div', 'gv-menu') : null, menuExtra = mk('div', 'gv-menu-extra');
+  if (menu) {
+    /* os mesmos botoes, em lista: icone + rotulo curto */
+    const curto = (b, txt) => { for (const n of Array.from(b.childNodes)) if (n.nodeType === 3) n.remove(); b.appendChild(document.createTextNode(txt)); };
+    curto(bAbrir, 'Abrir…'); curto(bComparar, 'Comparar…'); bEnq.appendChild(document.createTextNode('Enquadrar'));
+    const cab = mk('div', 'gv-menu-cab'), bRec = botao('', 'Recolher o menu');
+    const corpo0 = mk('div', 'gv-menu-corpo');
+    const linha = (ic, el, titulo) => { const l = mk('div', 'gv-menu-linha'); l.innerHTML = icone(ic); if (titulo) l.title = titulo; l.appendChild(el); return l; };
+    cab.append(tit, bRec);
+    corpo0.append(extra, mk('span', 'gv-sep'), bAbrir, bComparar, bEnq, linha('virar', segVista.el, 'Vista (V)'), linha('camadas', segModo.el, 'Cores (R)'),
+      menuExtra, mk('span', 'gv-sep'), bFechar);
+    menu.append(cab, corpo0, inAbrir, inComp);
+    let recolhido = false;
+    try { recolhido = localStorage.getItem('hubgerberview.menu') === 'recolhido'; } catch (_) { /* sem storage */ }
+    const pinta = () => { menu.classList.toggle('gv-recolhido', recolhido); bRec.innerHTML = icone(recolhido ? 'expandir' : 'recolher'); bRec.title = recolhido ? 'Abrir o menu' : 'Recolher o menu'; };
+    bRec.addEventListener('click', () => { recolhido = !recolhido; pinta(); try { localStorage.setItem('hubgerberview.menu', recolhido ? 'recolhido' : 'aberto'); } catch (_) { /* sem storage */ } });
+    pinta();
+  } else barra.append(tit, extra, mk('span', 'gv-sep'), bAbrir, bComparar, mk('span', 'gv-sep'), bEnq, segVista.el, segModo.el, mk('span', 'gv-flex'), bFechar, inAbrir, inComp);
 
   const corpo = mk('div', 'gv-corpo');
   const tela = mk('div', 'gv-tela');
@@ -2494,6 +2547,7 @@ function montar(el, opcoes) {
   const ocupado = mk('div', 'gv-ocupado', 'Lendo arquivos…');
   ocupado.hidden = true;
   tela.append(cv, vazio, faixa, ocupado);
+  if (menu) tela.appendChild(menu);
 
   const painel = mk('aside', 'gv-painel');
   const comp = mk('div', 'gv-comp');
@@ -2518,12 +2572,13 @@ function montar(el, opcoes) {
   const rodapeEl = mk('div', 'gv-rodape');
   const xyEl = mk('span'), zoomEl = mk('span'), objEl = mk('span', 'gv-obj');
   rodapeEl.append(xyEl, zoomEl, objEl);
-  raiz.append(barra, corpo, rodapeEl);
+  if (menu) raiz.classList.add('gv-com-menu');
+  raiz.append(...(menu ? [] : [barra]), corpo, rodapeEl);
   el.appendChild(raiz);
 
   /* ---- barra do chamador ---- */
   const botoesExtra = (opcoes.barraExtra || []).map(def => {
-    const b = botao(def.rotulo || '', def.titulo || '');
+    const b = botao(menu && def.curto ? def.curto : (def.rotulo || ''), def.titulo || def.rotulo || '', menu && def.ic && ICONES[def.ic] ? def.ic : null);
     if (def.primario) b.classList.add('gv-prim');
     if (def.desabilitado) b.disabled = true;
     b.addEventListener('click', ev => {
@@ -3216,7 +3271,7 @@ function montar(el, opcoes) {
     raiz.remove();
   }
   const ctrl = {
-    elemento: raiz, botoesExtra,
+    elemento: raiz, botoesExtra, menuExtra,
     carregar, mostrar, comparar, adicionar, substituir, destruir,
     redesenhar() { mede(); agenda(); return ctrl; },
     enquadrar() { enquadrar(); agenda(); return ctrl; },
@@ -3234,7 +3289,7 @@ function montar(el, opcoes) {
 }
 
 return {
-  parse, parseExcellon, camadaDe, lerZip, contornoDaAbertura, montar,
+  parse, parseExcellon, camadaDe, lerZip, contornoDaAbertura, montar, icone: iconeDe,
   lerConjunto, tipoDeArquivo, contornoDaPlaca, placaDoConjunto, objetoEm, caixaDe, avaliaExpr,
   /* para os testes e para quem desenha */
   formasDe, ehSequencial, pontosArco, areaComSinal, corPadrao, semCamadas,
