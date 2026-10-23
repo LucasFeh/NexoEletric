@@ -47,7 +47,8 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
       switch (nome) {
         case 'janela': return ok({});
         case 'navegar': est.url = params.url; est.guia = 'claude'; return ok({ aba: 'g9', url: params.url });
-        case 'aba_nova': est.url = params.url; est.guia = params.janela + ':' + params.programa; return ok({ aba: 'g9', url: params.url });
+        case 'aba_nova': if (est.trava) return;   /* nunca responde: o motor fica preso aqui */
+          est.url = params.url; est.guia = params.janela + ':' + params.programa; return ok({ aba: 'g9', url: params.url });
         case 'enviar_arquivo': est.subiu = params.arquivos[0]; return ok({ aba: 'g9' });
         case 'digitar': est.digitado.push(params.seletor); if (params.seletor.includes('senha')) est.senhaDigitada = params.texto; return ok({ aba: 'g9' });
         case 'captura': return ok({ __imagem: 'AAAA', mime: 'image/jpeg' });
@@ -137,6 +138,24 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
   const sk = S.ler('pcb-enviar-jlc');
   assert.ok(sk && /PERGUNTE A QUANTIDADE/.test(sk.corpo) && /jlc_login/.test(sk.corpo), 'a skill pcb-enviar-jlc');
   console.log('  relato sem a senha, ferramentas e skill ok');
+
+  /* o hub que rodou o envio morreu (o app fechou): o motor (--cli) sai sozinho, não fica preso no navegador */
+  const { spawnSync } = require('child_process');
+  const motor = path.join(__dirname, '..', 'mcp', 'lib', 'jlc.js');
+  est.trava = true;
+  const entrada = JSON.stringify({ gdir, quantidade: 5 });
+  const pai = spawnSync(process.execPath, ['-e', `const c = require('child_process').spawn(process.execPath, [${JSON.stringify(motor)}, '--cli'], { stdio: ['pipe', 'ignore', 'ignore'], detached: true }); c.stdin.end(${JSON.stringify(entrada)}); c.unref(); console.log(c.pid); setTimeout(() => process.exit(0), 1500);`], { encoding: 'utf8' });
+  const filho = Number(pai.stdout.trim());
+  assert.ok(filho > 0, 'o motor subiu: ' + pai.stdout + pai.stderr);
+  const vivo = pid => { try { process.kill(pid, 0); return true; } catch (_) { return false; } };
+  const preso = vivo(filho);
+  let t1 = Date.now();
+  while (vivo(filho) && Date.now() - t1 < 10000) await new Promise(r => setTimeout(r, 300));
+  if (vivo(filho)) { try { process.kill(filho); } catch (_) {} }
+  assert.ok(preso, 'o motor estava preso esperando o navegador quando o pai morreu');
+  assert.ok(!vivo(filho), 'o motor ficou vivo sem o hub');
+  est.trava = false;
+  console.log('  sem o hub, o motor sai sozinho (' + (Date.now() - t1) + ' ms)');
 
   srv.close();
   fs.rmSync(TMP, { recursive: true, force: true });

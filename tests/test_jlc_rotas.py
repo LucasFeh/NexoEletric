@@ -29,6 +29,7 @@ let e = ''; process.stdin.on('data', d => { e += d; }); process.stdin.on('end', 
   diz({ preparado: { camadas: 2, camadasJlc: 2, arquivos: 9 } });
   diz({ progresso: 'quantidade ' + a.quantidade });
   if (a.quantidade === 8) { diz({ erro: 'a JLC nao vende 8' }); return; }
+  if (a.quantidade === 999) { setInterval(() => {}, 1000); return; }   /* preso: so o cancelar tira */
   diz({ fim: { etapa: 'carrinho', quantidade: a.quantidade, camadas: 2, gdir: a.gdir, mostrar: a.mostrar, esperaLogin: a.esperaLogin } });
 });
 """
@@ -80,6 +81,18 @@ class Rotas(unittest.TestCase):
     def test_erro_do_motor(self):
         e = self.espera(self.c.post('/api/jlc/enviar', json={'proj': 'Placa A', 'quantidade': 8}).get_json()['job'])
         self.assertIn('8', e['erro'])
+
+    def test_cancelar(self):
+        job = self.c.post('/api/jlc/enviar', json={'proj': 'Placa A', 'quantidade': 999}).get_json()['job']
+        time.sleep(0.5)
+        self.assertFalse(self.c.get('/api/jlc/estado?job=' + job).get_json()['fim'])
+        self.assertEqual(self.c.post('/api/jlc/cancelar', data=json.dumps({'job': job}), content_type='text/plain').status_code, 200,
+                         'aceita o sendBeacon (corpo JSON com qualquer content-type)')
+        e = self.espera(job)
+        self.assertEqual(e['erro'], 'envio cancelado')
+        self.assertEqual(self.c.post('/api/jlc/cancelar', json={'job': 'nada'}).status_code, 404)
+        self.local = False
+        self.assertEqual(self.c.post('/api/jlc/cancelar', json={'job': job}).status_code, 403)
 
     def test_recusas(self):
         self.assertEqual(self.c.post('/api/jlc/enviar', json={'proj': 'Sem Gerber', 'quantidade': 5}).status_code, 409)

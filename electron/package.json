@@ -1,7 +1,7 @@
 {
   "name": "altiumhub-desktop",
   "productName": "NexoEletric",
-  "version": "1.27.0",
+  "version": "1.27.1",
   "private": true,
   "description": "NexoEletric: o hub do AltiumPCBMirror como aplicativo desktop",
   "author": "Dieletrons <engenharia@dieletrons.com>",

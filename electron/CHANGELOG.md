@@ -4,6 +4,12 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.27.1 — 2026-10-23
+
+- **Fechar a página cancela o Enviar pra JLC** (pedido do dono). Se a vista PCB ou o app fecham depois do clique, o
+  envio é cancelado (`/api/jlc/cancelar`) e não continua sozinho no navegador. Fechar o app inteiro também para o envio:
+  o processo dele sai junto com o hub. Fechar a guia da JLC já cancelava desde a 1.27.0.
+
 ## 1.27.0 — 2026-10-23
 
 - **Enviar pra JLC sem "Claude".** O botão nunca chamou o Claude, mas o IntegrateBrowser mostrava toda automação na

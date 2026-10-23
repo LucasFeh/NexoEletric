@@ -15,6 +15,8 @@ a senha nunca passa por aqui. So desta maquina: o IntegrateBrowser e o da maquin
 Rotas:
   POST /api/jlc/enviar  {proj, quantidade}   -> {ok, job}
   GET  /api/jlc/estado?job=<id>              -> {ok, fim, passos:[...], preparado?, resultado?, erro?}
+  POST /api/jlc/cancelar {job}               -> {ok}: mata o envio (a vista chama ao ser fechada no meio,
+                                                pelo sendBeacon; o motor tambem sai sozinho se o hub morrer)
 
 No hubserver.py:
 
@@ -73,6 +75,8 @@ def _roda(job, cmd, env, entrada, cwd):
     try:
         p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              env=env, cwd=cwd, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        with _lock:
+            job['proc'] = p
         p.stdin.write(json.dumps(entrada).encode('utf-8'))
         p.stdin.close()
         for linha in p.stdout:
@@ -90,7 +94,9 @@ def _roda(job, cmd, env, entrada, cwd):
                 elif 'erro' in m:
                     job['erro'] = m['erro']
         p.wait()
-        if p.returncode and not job.get('erro') and not job.get('resultado'):
+        if job.get('cancelado'):
+            job['erro'] = 'envio cancelado'
+        elif p.returncode and not job.get('erro') and not job.get('resultado'):
             err = p.stderr.read().decode('utf-8', 'replace')[-600:]
             job['erro'] = 'o envio parou (%s)' % (err.strip() or 'codigo %d' % p.returncode)
         p.stdout.close()
@@ -135,6 +141,26 @@ def registra(app, root, eh_local=None):
                    'mostrar': True, 'esperaLogin': ESPERA_LOGIN}
         threading.Thread(target=_roda, args=(job, node + [motor, '--cli'], env, entrada, root), daemon=True).start()
         return _json({'ok': True, 'job': jid})
+
+    @app.route('/api/jlc/cancelar', methods=['POST'])
+    def jlc_cancelar():
+        if not eh_local(request):
+            return _json({'ok': False, 'error': 'so desta maquina'}, 403)
+        data = request.get_json(silent=True, force=True) or {}
+        with _lock:
+            job = JOBS.get(str(data.get('job', '')))
+            if not job:
+                return _json({'ok': False, 'error': 'envio nao encontrado'}, 404)
+            if job['fim']:
+                return _json({'ok': True, 'fim': True})
+            job['cancelado'] = True
+            p = job.get('proc')
+        if p is not None:
+            try:
+                p.kill()
+            except OSError:
+                pass
+        return _json({'ok': True})
 
     @app.route('/api/jlc/estado')
     def jlc_estado():

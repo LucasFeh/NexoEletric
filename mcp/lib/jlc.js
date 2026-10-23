@@ -327,6 +327,9 @@ if (require.main === module && process.argv.includes('--cli')) {
   let ent = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', d => { ent += d; });
+  /* o hub que rodou este envio morreu (o app fechou): o envio para junto */
+  const pai = process.ppid;
+  setInterval(() => { try { process.kill(pai, 0); } catch (_) { process.exit(3); } }, 2000).unref();
   process.stdin.on('end', async () => {
     const diz = o => process.stdout.write(JSON.stringify(o) + '\n');
     try {

@@ -5898,6 +5898,12 @@ async function salvaGerber(){
    (/api/jlc, tools/rotas/jlc.py) que rode o mcp/lib/jlc.js -- o mesmo motor das ferramentas jlc_* do
    MCP. Sem login na JLC a janela do IntegrateBrowser aparece e espera a pessoa entrar: a senha nunca
    passa pelo hub. O pedido para no carrinho. */
+/* o envio em curso: fechar a vista (ou o app) no meio cancela a ação (POST /api/jlc/cancelar) */
+let jlcJob = null;
+window.addEventListener('pagehide', () => {
+  if (!jlcJob) return;
+  try { navigator.sendBeacon('/api/jlc/cancelar', new Blob([JSON.stringify({ job:jlcJob })], { type:'application/json' })); } catch (e) {}
+});
 const JLC_QTDS = [5, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 750, 800, 900, 1000];
 async function enviaJlc(){
   if (!V.podeGravar) { HubDialog.toast('Enviar pra JLC só funciona no app (ou com o hubserver) e um projeto aberto', 'warn'); return; }
@@ -5919,6 +5925,11 @@ async function enviaJlc(){
   let j = null;
   try { j = await resp.json(); } catch (e) {}
   if (!resp.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + resp.status));
+  jlcJob = j.job;
+  try { await acompanhaJlc(j.job, qtd); } finally { jlcJob = null; }
+}
+async function acompanhaJlc(job, qtd){
+  const j = { job };
   let aviso = HubDialog.toast('JLC: começando…', 'info', 0), ultimo = '';
   const t0 = Date.now();
   for (;;) {
@@ -5930,7 +5941,7 @@ async function enviaJlc(){
     if (passo && passo !== ultimo) { ultimo = passo; aviso.close(); aviso = HubDialog.toast('JLC: ' + passo + '…', 'info', 0); }
     if (e.fim) {
       aviso.close();
-      if (e.erro && /navegador foi fechado/.test(e.erro)) { HubDialog.toast('Enviar pra JLC: o navegador foi fechado — envio cancelado', 'info', 4000); return; }
+      if (e.erro && /navegador foi fechado|envio cancelado/.test(e.erro)) { HubDialog.toast('Enviar pra JLC: ' + (/navegador/.test(e.erro) ? 'o navegador foi fechado — ' : '') + 'envio cancelado', 'info', 4000); return; }
       if (e.erro) throw new Error(e.erro);
       const s = e.resultado || {};
       const av = (s.avisos || []).length ? '\n\nAvisos:\n• ' + s.avisos.join('\n• ') : '';
