@@ -24,6 +24,8 @@ na capacidade do fabricante antes de usar em projeto crítico.
 
 - **Largura pela corrente** (calculadora IPC-2152/2221 com 10 °C de elevação). Sinal: 0,254 mm. Alimentação: largo
   (na casa, regra `Width_Power` até 3 mm) e curto.
+- **Trilha de borne / conector lateral (fio de campo) nunca fina:** ≥ 0,8 mm do pad do borne até onde entra no
+  barramento (pedido do dono). 0,254 só dentro do campo de pinos, onde passa entre pads de passo 2,54.
 - **Trilha mais fina que o pad** em que entra; trilha larga demais puxa a máscara e esfria a solda.
 - **Entrada no pad a 90° ou 45°**, pelo lado ou pela ponta; **nada de ângulo agudo** (< 90°) entre trilhas ou
   trilha-pad: vira "acid trap" (o ácido fica no canto e come o cobre). Cantos a 45°.

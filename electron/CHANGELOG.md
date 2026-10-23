@@ -4,6 +4,19 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.24.0 — 2026-10-23
+
+Duas regras novas do dono nas skills do MCP:
+
+- **O plano de terra pode passar por baixo do overlay** ("plano de terra pode passar por cima de overlay"):
+  `pcb-serigrafia-livre` e `pcb-producao-backplane` agora dizem com todas as letras — texto em cima do plano
+  despejado não é violação, não se recorta o plano por causa de texto; continua proibido em cima de pad, via, furo,
+  trilha e fill (aba de fill não é plano).
+- **Trilha de conector lateral não pode ser fina** ("a trilha desses conectores laterais não pode ser tão fina"):
+  `pcb-boas-praticas` e `pcb-producao-backplane` pedem ≥ 0,8 mm do pad do borne até o pino onde o sinal entra no
+  barramento (0,254 só dentro do campo de pinos). Na CBM-DI251876 as trilhas do CN7/TB2 (PG, RUN, ERR, STERR)
+  foram refeitas em 0,8 mm, raias mais abertas, cantos de 45° (no `changes.js` do projeto).
+
 ## 1.23.0 — 2026-10-23
 
 O Polygon Pour editável na vista PCB, como no Canva (pedido do dono: "editar com clique e arraste, regular o tamanho,

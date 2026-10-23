@@ -181,7 +181,7 @@ Arquivo novo na pasta entra sozinho (lido pelo mtime) e chega ao cliente por qua
 | `pcb-verificar-antes-de-entregar` | a sequência antes de dizer "pronto" e o que fazer com a foto de um problema | — |
 | `pcb-parafusos-isolados` | quadrado sem cobre de furo + 3 mm em volta do parafuso | `parafuso` |
 | `pcb-plano-folga-pads` | plano a 1,0 mm dos pads de outra net, alívio térmico | `plano_pad` |
-| `pcb-serigrafia-livre` | overlay nunca em cima de nada | `serigrafia` |
+| `pcb-serigrafia-livre` | overlay nunca em cima de pad, via, furo, trilha, fill ou outra serigrafia; o plano de terra pode passar por baixo | `serigrafia` |
 | `pcb-producao-backplane` | técnica de produção da CBM-DI251877 para backplane de conectores EDGE: campo sem plano em volta das fileiras, GND no Top fora do campo, +5V no Bottom com retângulos de GND entre os conectores, abas, corrente de +5V, leque em escada só com 45°, sem via | `drc_rodar`, `nets_ratsnest`, `regras_casa_verificar` |
 
 `drc_rodar`, `nets_ratsnest` e `pcb_render` usam a placa como a tela mostra (`ctx.placaDespejada(p)`: os polígonos

@@ -1,7 +1,7 @@
 ---
 nome: pcb-producao-backplane
 titulo: Produção — backplane de conectores EDGE (técnica da CBM-DI251877)
-descricao: Como rotear e fazer os planos de terra de um backplane de 2 camadas com conectores EDGE de 80 pinos em blocos (barramento pino a pino), no padrão da CBM-DI251877 que já foi para produção — campo sem plano em volta das fileiras, GND no Top fora do campo, +5V no Bottom com retângulos de GND entre os conectores, abas, corrente de +5V, leque em escada só com 45°, sem via, parafuso isolado e serigrafia fora do cobre — com os números e a conferência. Use ao fazer ou refazer plano/roteamento de backplane (CBM-DI2518xx e parecidas).
+descricao: Como rotear e fazer os planos de terra de um backplane de 2 camadas com conectores EDGE de 80 pinos em blocos (barramento pino a pino), no padrão da CBM-DI251877 que já foi para produção — campo sem plano em volta das fileiras, GND no Top fora do campo, +5V no Bottom com retângulos de GND entre os conectores, abas, corrente de +5V, leque em escada só com 45°, trilha de borne lateral em 0,8 mm, sem via, parafuso isolado e serigrafia fora do cobre (o plano de terra pode passar por baixo do overlay) — com os números e a conferência. Use ao fazer ou refazer plano/roteamento de backplane (CBM-DI2518xx e parecidas).
 ---
 
 # Produção — backplane de conectores EDGE (técnica da CBM-DI251877)
@@ -89,13 +89,19 @@ barramento, foi no Bottom). Os pinos das pontas já vão ao plano pelas abas.
   entre os pinos). A 1ª reta fica logo acima do pad (fileira + 0,75 + largura + folga); confira que a mais alta
   cabe antes da fileira do latch (pad − 0,76 − 0,381).
 - **Sem via.** Tudo se resolve com as duas camadas e os planos.
+- **Trilha dos conectores laterais (bornes, ex.: CN7/TB2 com PG, RUN, ERR, STERR) em 0,8 mm**, nunca 0,254: do pad
+  do borne até o pino do conector do bloco onde o sinal entra no barramento (dali para dentro o barramento segue em
+  0,254). Raias aninhadas, cada uma com folga de sobra: na 251876 as verticais a 1,8 mm uma da outra (fora do
+  quadrado do furo de fixação do borne) e as horizontais a 1,6 mm, cantos de 45° com 1,0 mm de chanfro.
 
 ## 6. Serigrafia fora do cobre
 
-Texto de overlay não encosta em trilha/fill do mesmo lado (plano pode ficar embaixo). Primeiro ajuste o cobre (abas
-que dão a volta, coluna sem subida); se não der, mova o texto pouco: rótulos 40A/40B com h 1,3 a 2,885 mm do pino 40
-(saem do quadrado do parafuso do borne); designator do Bottom que cai na aba sobe 0,6 mm; designator/números do
-conector do leque vão para o plano ao lado ou abaixo do conector (`designator_move`, texto do changes.js reescrito).
+Texto de overlay não encosta em trilha/fill do mesmo lado. **O plano de terra pode passar por baixo do overlay**
+(liberado pelo dono): não recorte plano por causa de texto e use o plano como lugar para pôr rótulo que não cabe
+em outro canto. Primeiro ajuste o cobre (abas que dão a volta, coluna sem subida); se não der, mova o texto pouco:
+rótulos 40A/40B com h 1,3 a 2,885 mm do pino 40 (saem do quadrado do parafuso do borne); designator do Bottom que
+cai na aba sobe 0,6 mm; designator/números do conector do leque vão para o plano ao lado ou abaixo do conector
+(`designator_move`, texto do changes.js reescrito).
 
 ## 7. Conferência (não entregue sem)
 

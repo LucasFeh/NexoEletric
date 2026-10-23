@@ -1,7 +1,7 @@
 ---
 nome: pcb-serigrafia-livre
 titulo: Serigrafia (overlay) sem passar por cima de nada
-descricao: Regra da casa — texto e desenho de overlay nunca ficam por cima de pad, via, furo, trilha, outra serigrafia ou da borda da placa. Use ao escrever textos/legendas na TopOverlay/BottomOverlay, mover designadores ou revisar uma placa.
+descricao: Regra da casa — texto e desenho de overlay nunca ficam por cima de pad, via, furo, trilha, fill, outra serigrafia ou da borda da placa; o plano de terra PODE passar por baixo do overlay (não recorte o plano por causa de texto). Use ao escrever textos/legendas na TopOverlay/BottomOverlay, mover designadores, criar plano ou revisar uma placa.
 ---
 
 # Serigrafia sem passar por cima de nada (regra da casa)
@@ -20,7 +20,12 @@ Nenhum objeto de overlay (texto, designador, linha, arco, contorno de componente
 4. **Outra serigrafia** (outro texto, contorno de outro componente): folga ≥ 0,254 mm.
 5. **Borda da placa:** ≥ 0,3 mm para dentro.
 
-Só o plano de terra despejado pode ficar embaixo do texto (não há como fugir dele).
+**O plano de terra pode passar por baixo do overlay** (o dono liberou): texto, designador e legenda podem ficar em
+cima do cobre despejado do plano (polígono de GND; o verificador trata igual qualquer plano despejado, como o +5V).
+Não recorte o plano em volta do texto e não tire texto de cima do plano por causa disso. A regra continua valendo
+para pad, via, furo, trilha e fill: aba de fill que liga um pino ao plano é fill, não plano — o texto não fica em
+cima dela (desvie a aba ou mova o texto).
+
 Altura mínima 1,0 mm e traço ≥ 0,15 mm para sair legível.
 
 ## Como fazer no NexoEletric (MCP)

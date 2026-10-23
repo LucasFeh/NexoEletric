@@ -111,6 +111,11 @@ function cliente() {
   ({ j } = await chama('skill_ler', { nome: 'pcb-producao-backplane' }));
   assert.ok(/CBM-DI251877/.test(j.texto) && /45°/.test(j.texto) && /Sem via/.test(j.texto) && /2,25 mm/.test(j.texto)
     && /furo\/2 \+ 3,05/.test(j.texto) && /regras_casa_verificar/.test(j.texto), 'pcb-producao-backplane sem a técnica');
+  assert.ok(/conectores laterais.*0,8 mm/.test(j.texto) && /plano de terra pode passar por baixo do overlay/i.test(j.texto), 'pcb-producao-backplane sem borne em 0,8 / plano sob overlay');
+  ({ j } = await chama('skill_ler', { nome: 'pcb-serigrafia-livre' }));
+  assert.ok(/plano de terra pode passar por baixo do overlay/i.test(j.texto) && /fill/.test(j.texto), 'pcb-serigrafia-livre sem a liberação do plano');
+  ({ j } = await chama('skill_ler', { nome: 'pcb-boas-praticas' }));
+  assert.ok(/borne \/ conector lateral/.test(j.texto) && /0,8 mm/.test(j.texto), 'pcb-boas-praticas sem a trilha de borne');
 
   /* trilha de OUTRA net passando por cima de um pad passante = CURTO (pad_outra_net), em qualquer camada */
   const comNet = pads.find(q => q.net) || alvo;
