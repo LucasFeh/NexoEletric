@@ -183,6 +183,21 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   assert.strictEqual((await js('window.__hubPcb.estado()')).tool, 'circulo', 'o atalho da forma escolhe a forma (e não o Furo)');
   await js('window.__hubPcb.setTool("select")');
 
+  /* 6. Gerber » Enviar pra JLC: pergunta a quantidade (as da JLC) antes de qualquer coisa; Esc desiste */
+  await js('window.__hubPcb.fazAcao("gerber")');
+  await espera(1500);
+  const temBotao = await js(`(() => { const b = [...document.querySelectorAll('#gerber button')].find(x => x.textContent.trim() === 'Enviar pra JLC'); if (!b) return false; b.click(); return true; })()`);
+  assert.ok(temBotao, 'o visualizador de Gerber tem o botão Enviar pra JLC');
+  await espera(400);
+  const modal = await js(`(() => { const s = document.querySelector('.hd-escolha select'); return s ? { n: s.options.length, v: s.value, tem10: [...s.options].some(o => o.value === '10'), texto: document.querySelector('.hd-box p').textContent } : null; })()`);
+  assert.ok(modal && modal.tem10 && modal.n >= 20, 'o modal pergunta a quantidade com as da JLC: ' + JSON.stringify(modal));
+  assert.ok(/camada\(s\) de cobre/.test(modal.texto), 'o modal diz as camadas da placa');
+  await print('4-jlc-quantidade');
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await espera(300);
+  assert.ok(!(await js(`!!document.querySelector('.hd-escolha select')`)), 'Esc desiste sem enviar');
+
   /* 4. sem erro de script */
   assert.deepStrictEqual(erros, [], 'erros na página: ' + erros.join(' || '));
   console.log(`smoke-vista-pcb OK (${CH.filter(o => o.op === 'track_add').length} trilhas feitas na tela, largura e net pela regra, DRC limpo)`);

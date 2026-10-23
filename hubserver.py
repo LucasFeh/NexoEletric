@@ -1593,6 +1593,16 @@ try:
 except Exception as _e:            # noqa: BLE001
     print('AVISO: integracao com o NexoCAD desligada (%s) — falta tools/rotas/nexocad.py.' % _e)
 
+# ─────────────────── JLCPCB: o Gerber no carrinho pelo IntegrateBrowser (tools/rotas/jlc.py) ───────────────────
+# POST /api/jlc/enviar + GET /api/jlc/estado: o botao "Enviar pra JLC" do Gerber roda o mcp/lib/jlc.js (o motor das
+# ferramentas jlc_* do MCP). So desta maquina: o navegador e o do Nexo Hub dela.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import jlc as _jlc             # noqa: E402
+    _jlc.registra(app, ROOT, _is_local)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: envio a JLC desligado (%s) — falta tools/rotas/jlc.py.' % _e)
+
 # ─────────────────── MCP: o canal da IA com a vista aberta (mcp/) ───────────────────
 # /api/mcp/{status,pedido,pedidos,resposta/<id>}: o servidor MCP (mcp/eletrichub-mcp.js) pede
 # screenshot/foco/comando a vista aberta; fila em memoria, nada em disco.

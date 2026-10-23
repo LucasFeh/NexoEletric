@@ -4,6 +4,38 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.25.0 — 2026-10-23
+
+A placa no carrinho da JLCPCB pelo IntegrateBrowser (pedido do dono: "em Gerber clicar em 'enviar pra JLC', ele já
+abre o IntegrateBrowser e já coloca no carrinho da JLC o ZIP; pela quantidade de layers ele já sabe o que configurar;
+só pergunta antes quantas placas", e uma skill no MCP para o mesmo processo):
+
+- **Botão Enviar pra JLC** no visualizador de Gerber da vista PCB:
+  - pergunta antes quantas placas, só entre as quantidades que a JLC vende (5, 10, 15, 20, 25, 30, 50, 75, 100…),
+    e mostra as camadas de cobre e o tamanho da placa;
+  - salva o Gerber no projeto e abre o orçamento da JLCPCB no IntegrateBrowser;
+  - sobe o .zip, confere as camadas que a JLC leu contra as da placa (3 ou 5 camadas viram 4 ou 6, como a JLC
+    fabrica), põe a quantidade e clica SAVE TO CART;
+  - sem a conta aberta, a janela do navegador aparece e espera você entrar (a senha não passa pelo NexoEletric);
+  - no fim, o resumo: o que a JLC detectou, camadas, quantidade e preço.
+
+  O pedido para no carrinho: o pagamento fica com você.
+- **No MCP:**
+  - as ferramentas `jlc_preparar`, `jlc_enviar` e `jlc_login`;
+  - a skill da casa `pcb-enviar-jlc`, com o passo a passo:
+    1. conferir o DRC;
+    2. perguntar a quantidade antes;
+    3. pedir o login e a senha da JLC só quando a conta não está aberta;
+    4. conferir a captura do carrinho antes de dizer "pronto".
+  - A senha só é digitada no campo da JLC: não volta na resposta, não é gravada, e o indicador "IA" do app mostra
+    `senha •••`.
+- O motor é um só (`mcp/lib/jlc.js`): o botão roda o mesmo código pela rota `/api/jlc` do hub.
+- Testes:
+  - o fluxo inteiro contra um IntegrateBrowser de mentira (`tests/test-jlc.js`), com o caminho do login e a senha
+    sem vazar;
+  - as rotas (`tests/test_jlc_rotas.py`);
+  - o botão e o modal da quantidade no smoke da vista.
+
 ## 1.24.0 — 2026-10-23
 
 Duas regras novas do dono nas skills do MCP:

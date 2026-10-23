@@ -7,6 +7,8 @@
 
      await HubDialog.alert('texto', { title })                      -> undefined
      await HubDialog.confirm('texto', { title, ok, cancel, danger }) -> true | false
+     await HubDialog.escolhe('texto', { title, opcoes:[{v, rot}], v, rotulo, ok, cancel })
+                                                                    -> o v escolhido | null
      HubDialog.toast('texto', 'ok'|'warn'|'err'|'info', ms)          -> { close }
        ms omitido: some sozinho (erro fica mais); ms = 0: fica ate clicar.                  */
 "use strict";
@@ -28,6 +30,11 @@ const CSS = `
 .hd-box h3{margin:0 0 8px; font-size:14px; font-weight:600; color:var(--text,#d8d8d8); letter-spacing:-.01em;}
 .hd-box h3.danger{color:var(--err,#ff5252);}
 .hd-box p{margin:0; white-space:pre-wrap; word-break:break-word; color:var(--text,#d8d8d8); max-height:52vh; overflow:auto;}
+.hd-escolha{display:flex; align-items:center; gap:10px; margin-top:12px;}
+.hd-escolha label{color:var(--text-dim,#a8a8a8); font-size:12px;}
+.hd-escolha select{flex:1; background:var(--surface-2,#252525); color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a);
+  border-radius:var(--r-sm,4px); padding:5px 8px; font:inherit;}
+.hd-escolha select:focus-visible{outline:2px solid var(--hi,#4fc3f7); outline-offset:1px;}
 .hd-btns{display:flex; gap:8px; justify-content:flex-end; margin-top:16px;}
 .hd-btns button{background:transparent; color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a);
   border-radius:var(--r-sm,4px); padding:6px 14px; font:inherit; font-size:12px; cursor:pointer; min-width:84px;}
@@ -76,6 +83,16 @@ function abre(msg, o, temCancelar){
     box.setAttribute('role', temCancelar ? 'alertdialog' : 'dialog'); box.setAttribute('aria-modal', 'true');
     if (o.title){ const h = el('h3', o.danger ? 'danger' : null, o.title); box.append(h); }
     box.append(el('p', null, String(msg == null ? '' : msg)));
+    /* escolhe(): um seletor embaixo do texto; o OK devolve o valor escolhido */
+    let sel = null;
+    if (Array.isArray(o.opcoes)){
+      const linha = el('div', 'hd-escolha');
+      sel = el('select');
+      for (const op of o.opcoes){ const x = el('option', null, op.rot != null ? op.rot : String(op.v)); x.value = String(op.v); sel.append(x); }
+      if (o.v != null) sel.value = String(o.v);
+      if (o.rotulo){ const lb = el('label', null, o.rotulo); linha.append(lb); }
+      linha.append(sel); box.append(linha);
+    }
     const btns = el('div', 'hd-btns');
     const ok = el('button', 'ok' + (o.danger ? ' danger' : ''), o.ok || 'OK'); ok.type = 'button';
     let cancel = null;
@@ -87,7 +104,7 @@ function abre(msg, o, temCancelar){
       document.removeEventListener('keydown', tecla, true);
       scrim.onclick = null;
       if (antes && typeof antes.focus === 'function') try { antes.focus(); } catch (e) {}
-      resolve(v);
+      resolve(sel ? (v ? sel.value : null) : v);
     };
     /* na captura do document: os atalhos da vista (window) nao podem disparar com o modal aberto */
     const tecla = e => {
@@ -103,7 +120,7 @@ function abre(msg, o, temCancelar){
     scrim.onclick = e => { if (e.target === scrim) fecha(!temCancelar); };
     document.addEventListener('keydown', tecla, true);
     scrim.hidden = false;
-    ok.focus();
+    (sel || ok).focus();
   });
 }
 function enfileira(fn){ const p = fila.then(fn, fn); fila = p.then(() => {}, () => {}); return p; }
@@ -115,6 +132,7 @@ function enfileira(fn){ const p = fila.then(fn, fn); fila = p.then(() => {}, () 
 function ocioso(){ return fila.then(() => {}, () => {}); }
 function alert(msg, o){ return enfileira(() => abre(msg, o || {}, false)).then(() => undefined); }
 function confirm(msg, o){ return enfileira(() => abre(msg, o || {}, true)); }
+function escolhe(msg, o){ return enfileira(() => abre(msg, Object.assign({ opcoes:[] }, o || {}), true)); }
 
 const DURACAO = { ok: 3000, info: 3200, warn: 4500, err: 6500 };
 function toast(msg, kind, ms){
@@ -138,6 +156,6 @@ function toast(msg, kind, ms){
   return { close };
 }
 
-return { alert, confirm, toast, ocioso };
+return { alert, confirm, escolhe, toast, ocioso };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDialog;

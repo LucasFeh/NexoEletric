@@ -5800,6 +5800,8 @@ function montaGerberView(){
       { rotulo:'Baixar .zip', titulo:'Baixa o pacote num .zip com o nome do .PcbDoc', acao:() => baixaZipGerber() },
       { rotulo:'Salvar no projeto', titulo:V.podeGravar ? 'Grava em Projects/' + PROJ + '/Gerber/ (o conjunto anterior sai da pasta)' : 'Só com o hubserver e um projeto aberto (?p=)', desabilitado:!V.podeGravar, acao:() => salvaGerber() },
       { rotulo:'Ver salvo', titulo:V.podeGravar ? 'Abre o último conjunto gravado em Projects/' + PROJ + '/Gerber/ ao lado do gerado, para comparar' : 'Só com o hubserver e um projeto aberto', desabilitado:!V.podeGravar, acao:() => verGerberSalvo() },
+      { rotulo:'Enviar pra JLC', titulo:V.podeGravar ? 'Salva o Gerber no projeto e põe no carrinho da JLCPCB pelo IntegrateBrowser — pergunta a quantidade antes; o pagamento fica com você' : 'Só no app (ou com o hubserver) e um projeto aberto', desabilitado:!V.podeGravar,
+        acao:() => enviaJlc().catch(e => HubDialog.toast('Enviar pra JLC: ' + (e && e.message || e), 'err', 0)) },
     ],
   });
 }
@@ -5874,6 +5876,58 @@ async function salvaGerber(){
   if (!resp.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + resp.status));
   HubDialog.toast('Gerber salvo em ' + j.pasta + ' — ' + (j.arquivos || []).length + ' arquivo(s)' +
     ((j.removidos || []).length ? '; saíram ' + j.removidos.length + ' de antes' : '') + (chDirty ? '. Atenção: inclui mudanças ainda não salvas no changes.js.' : ''), chDirty ? 'warn' : 'ok', 7000);
+}
+/* ── Enviar pra JLC (pedido do dono, 2026-10-23: "em Gerber clicar em 'enviar pra JLC', ele já abre o
+   IntegrateBrowser e já coloca no carrinho da JLC o ZIP; pela quantidade de layers ele já sabe o que
+   configurar; só pergunta antes quantas placas") ──
+   Pergunta a quantidade (as da lista da JLC), salva o Gerber gerado no projeto e pede ao hub
+   (/api/jlc, tools/rotas/jlc.py) que rode o mcp/lib/jlc.js -- o mesmo motor das ferramentas jlc_* do
+   MCP. Sem login na JLC a janela do IntegrateBrowser aparece e espera a pessoa entrar: a senha nunca
+   passa pelo hub. O pedido para no carrinho. */
+const JLC_QTDS = [5, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 750, 800, 900, 1000];
+async function enviaJlc(){
+  if (!V.podeGravar) { HubDialog.toast('Enviar pra JLC só funciona no app (ou com o hubserver) e um projeto aberto', 'warn'); return; }
+  if (!gerUltimo) regeraGerber(false);
+  const r = gerUltimo;
+  if (!r) return;
+  const cobre = r.arquivos.filter(a => /%TF\.FileFunction,Copper,/i.test(String(a.texto || '').slice(0, 4000))).length;
+  const jlc = cobre <= 2 ? Math.max(1, cobre) : cobre % 2 ? cobre + 1 : cobre;
+  const bb = EB && EB.board && EB.board.bbox;
+  const tam = bb ? fmtNum(bb.x2 - bb.x1, 2) + ' × ' + fmtNum(bb.y2 - bb.y1, 2) + ' mm' : '';
+  const qtd = await HubDialog.escolhe(r.resumo.base + '\n' + cobre + ' camada(s) de cobre' + (jlc !== cobre ? ' — a JLC fabrica ' + jlc : '') + (tam ? ' · ' + tam : '') +
+    '\n\nO Gerber gerado agora é salvo no projeto e sobe para o orçamento da JLCPCB no IntegrateBrowser, com as camadas da placa e a quantidade abaixo. O pedido para no carrinho: o pagamento fica com você. Se a conta não estiver aberta, a janela do navegador aparece para você entrar.' +
+    (chDirty ? '\n\nAtenção: inclui mudanças ainda não salvas no changes.js.' : ''),
+    { title:'Enviar pra JLC', rotulo:'Quantas placas', opcoes:JLC_QTDS.map(v => ({ v, rot:v + ' placas' })), v:lePref('jlc.qtd', '5'), ok:'Enviar' });
+  if (qtd == null) return;
+  gravaPref('jlc.qtd', qtd);
+  await salvaGerber();
+  const resp = await fetch('/api/jlc/enviar', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ proj:PROJ, quantidade:Number(qtd) }) });
+  let j = null;
+  try { j = await resp.json(); } catch (e) {}
+  if (!resp.ok || !j || !j.ok) throw new Error((j && j.error) || ('HTTP ' + resp.status));
+  let aviso = HubDialog.toast('JLC: começando…', 'info', 0), ultimo = '';
+  const t0 = Date.now();
+  for (;;) {
+    await new Promise(res => setTimeout(res, 1500));
+    let e = null;
+    try { e = await (await fetch('/api/jlc/estado?job=' + encodeURIComponent(j.job), { cache:'no-store' })).json(); } catch (x) {}
+    if (!e || !e.ok) { aviso.close(); throw new Error((e && e.error) || 'o hub perdeu o envio'); }
+    const passo = e.passos[e.passos.length - 1] || '';
+    if (passo && passo !== ultimo) { ultimo = passo; aviso.close(); aviso = HubDialog.toast('JLC: ' + passo + '…', 'info', 0); }
+    if (e.fim) {
+      aviso.close();
+      if (e.erro) throw new Error(e.erro);
+      const s = e.resultado || {};
+      const av = (s.avisos || []).length ? '\n\nAvisos:\n• ' + s.avisos.join('\n• ') : '';
+      if (s.etapa === 'login') { HubDialog.toast('JLC: a conta não foi aberta a tempo — entre na conta na janela do IntegrateBrowser e clique em Enviar pra JLC de novo', 'warn', 0); return; }
+      await HubDialog.alert((s.etapa === 'carrinho' ? 'Está no carrinho da JLCPCB.' : 'O SAVE TO CART foi clicado, mas a tela do carrinho não foi reconhecida: confira na janela do IntegrateBrowser.') +
+        '\n\n' + (s.detectado || '') + '\nCamadas: ' + (s.camadas || '?') + ' · Quantidade: ' + (s.quantidade || qtd) + (s.preco ? ' · Preço: ' + s.preco : '') +
+        (s.etapa === 'carrinho' && s.noCarrinho === false ? '\n\nNão achei o nome do arquivo na página do carrinho: confira lá.' : '') + av +
+        '\n\nO pagamento é com você, no carrinho da JLC (aberto no IntegrateBrowser).', { title:'Enviar pra JLC' });
+      return;
+    }
+    if (Date.now() - t0 > 12 * 60000) { aviso.close(); throw new Error('o envio passou de 12 minutos — confira a janela do IntegrateBrowser'); }
+  }
 }
 async function verGerberSalvo(){
   if (!V.podeGravar) { HubDialog.toast('Ver o Gerber salvo só funciona com o hubserver e um projeto aberto', 'warn'); return; }

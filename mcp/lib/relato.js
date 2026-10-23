@@ -74,7 +74,9 @@ function resumo(args) {
   for (const [k, v] of Object.entries(args)) {
     if (k === 'projeto' || v == null || v === '') continue;
     let t;
-    if (Array.isArray(v)) t = v.length + ' ' + (v.length === 1 ? 'item' : 'itens');
+    /* a senha da JLC (jlc_login) e qualquer segredo nunca vão para o app */
+    if (/senha|password|token|segredo/i.test(k)) t = '•••';
+    else if (Array.isArray(v)) t = v.length + ' ' + (v.length === 1 ? 'item' : 'itens');
     else if (typeof v === 'object') t = '{…}';
     else t = String(v);
     partes.push(k + ' ' + (t.length > 40 ? t.slice(0, 39) + '…' : t));
