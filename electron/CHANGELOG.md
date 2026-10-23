@@ -4,6 +4,18 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.28.0 — 2026-10-23
+
+- **O filtro de seleção no canto da PCB** (pedido do dono: "um menuzinho no canto superior esquerdo, em transparência,
+  com esses filtros, em lista; posso marcar todos ou um por um, com checkbox"). É uma lista translúcida no canto
+  superior esquerdo da vista PCB:
+  - **Todos** marca ou desmarca tudo, e fica parcial quando só alguns estão marcados;
+  - uma caixa para cada tipo: Componentes, Trilhas, Arcos, Pads, Vias, Regiões, Polígonos, Fills, Textos, Keepouts e
+    Outros;
+  - o cabeçalho mostra quantos estão ligados (ex.: 10/11) e recolhe a lista; o app lembra como você deixou.
+
+  É o mesmo filtro do Selection Filter do painel: marcar num muda o outro.
+
 ## 1.27.1 — 2026-10-23
 
 - **Fechar a página cancela o Enviar pra JLC** (pedido do dono). Se a vista PCB ou o app fecham depois do clique, o

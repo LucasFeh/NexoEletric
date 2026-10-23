@@ -3618,6 +3618,48 @@ function montaGrupo(b){
 }
 document.addEventListener('pointerdown', e => { if (!(e.target && e.target.closest && e.target.closest('#pcbtb .grupo'))) fechaGavetas(); }, true);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') fechaGavetas(); }, true);
+/* ── O FILTRO DE SELEÇÃO NO CANTO (pedido do dono, 2026-10-23: "na área de PCB um menuzinho de
+   configuração no canto superior esquerdo, em transparência, com esses filtros, em lista; posso
+   marcar todos ou um por um, com checkbox") ──
+   O mesmo estado do Selection Filter do painel (filtro + V.setFiltro): marcar aqui ou lá dá no mesmo.
+   O cabeçalho recolhe a lista (lembrado nas preferências desta máquina). */
+let filtroRecolhido = lePref('filtroMenu', 'aberto') === 'recolhido';
+function montaFiltroMenu(){
+  const box = $('pcbfiltro');
+  if (!box || LEAN) return;
+  box.textContent = '';
+  const cab = document.createElement('div'); cab.className = 'pf-cab'; cab.title = 'Filtro de seleção: o que o clique e a janela pegam';
+  cab.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3 H14 L9.5 8.5 V13 L6.5 14 V8.5 Z"/></svg>';
+  const nome = document.createElement('b'); nome.textContent = 'Filtro';
+  const conta = document.createElement('span'); conta.id = 'pfConta';
+  const seta = document.createElement('i'); seta.id = 'pfSeta'; seta.style.display = 'inline-flex';
+  cab.append(nome, conta, seta);
+  cab.addEventListener('click', () => { filtroRecolhido = !filtroRecolhido; gravaPref('filtroMenu', filtroRecolhido ? 'recolhido' : 'aberto'); pintaFiltroMenu(); });
+  const lista = document.createElement('div'); lista.className = 'pf-lista';
+  const linha = (k, rot, cls) => {
+    const l = document.createElement('label'); if (cls) l.className = cls;
+    const c = document.createElement('input'); c.type = 'checkbox'; c.dataset.k = k;
+    c.addEventListener('change', () => V.setFiltro(k, c.checked));
+    l.append(c, document.createTextNode(rot));
+    return l;
+  };
+  lista.append(linha('*', 'Todos', 'pf-todos'));
+  for (const [k, rot] of FILTROS) lista.append(linha(k, rot));
+  box.append(cab, lista);
+  pintaFiltroMenu();
+}
+function pintaFiltroMenu(){
+  const box = $('pcbfiltro');
+  if (!box || !box.firstChild) return;
+  const n = FILTROS.filter(([k]) => filtro[k]).length;
+  for (const c of box.querySelectorAll('input[data-k]')) {
+    if (c.dataset.k === '*') { c.checked = n === FILTROS.length; c.indeterminate = n > 0 && n < FILTROS.length; }
+    else c.checked = !!filtro[c.dataset.k];
+  }
+  $('pfConta').textContent = n === FILTROS.length ? 'todos' : n + '/' + FILTROS.length;
+  $('pfSeta').innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="' + (filtroRecolhido ? 'M4 6 L8 10 L12 6' : 'M4 10 L8 6 L12 10') + '"/></svg>';
+  box.classList.toggle('pf-recolhido', filtroRecolhido);
+}
 function montaBarra(){
   const tb = $('pcbtb');
   if (!tb || LEAN) return;
@@ -5714,6 +5756,7 @@ const V = {
     if (k === '*') { for (const [f] of FILTROS) filtro[f] = !!v; }
     else if (k in filtro) filtro[k] = !!v;
     gravaPref('filtro', JSON.stringify(filtro));
+    pintaFiltroMenu();
     if (painel) painel.atualiza(); pede();
   },
   info:infoPlaca, ficha, editar:editarCampo, acao:acaoPainel,
@@ -6157,6 +6200,7 @@ function inicia(){
   liga();
   if (!LEAN) {
     montaBarra();
+    montaFiltroMenu();
     pintaAbas();
     montaDivisoria();
     if (typeof HubPcbAltium !== 'undefined') {

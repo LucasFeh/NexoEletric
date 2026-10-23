@@ -161,6 +161,22 @@
   /* com o Gerber aberto, o rodape e o do visualizador (X/Y e zoom dele) */
   body.gerber-on #status{display:none !important;}
   /* lean: embutido na aba Neoden do hub -- so a placa, nunca edita */
+  /* o filtro de seleção no canto do canvas: translúcido, em lista com caixas de marcar (pedido do dono, 2026-10-23) */
+  #pcbfiltro{position:absolute; left:10px; top:10px; z-index:11; width:164px; padding:4px; border-radius:8px; font-size:12px;
+    background:rgba(22,22,25,.72); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); color:#e8e8ec;
+    box-shadow:0 0 0 1px rgba(255,255,255,.08), 0 10px 28px rgba(0,0,0,.45); user-select:none;}
+  #pcbfiltro .pf-cab{display:flex; align-items:center; gap:6px; height:26px; padding:0 4px 0 6px; cursor:pointer; border-radius:5px; color:#c8c8ce;}
+  #pcbfiltro .pf-cab:hover{background:rgba(255,255,255,.08); color:#f2f2f3;}
+  #pcbfiltro .pf-cab b{flex:1; font-weight:600; color:#f2f2f3;}
+  #pcbfiltro .pf-cab span{font-size:11px; color:#a8a8ae; font-variant-numeric:tabular-nums;}
+  #pcbfiltro svg{width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round;}
+  #pcbfiltro .pf-lista{display:flex; flex-direction:column; margin-top:2px;}
+  #pcbfiltro.pf-recolhido .pf-lista{display:none;}
+  #pcbfiltro label{display:flex; align-items:center; gap:8px; height:24px; padding:0 8px; border-radius:5px; cursor:pointer; color:#c8c8ce;}
+  #pcbfiltro label:hover{background:rgba(255,255,255,.08); color:#f2f2f3;}
+  #pcbfiltro label.pf-todos{border-bottom:1px solid rgba(255,255,255,.08); border-radius:5px 5px 0 0; margin-bottom:2px; color:#f2f2f3;}
+  #pcbfiltro input{margin:0; accent-color:var(--accent, #e8a33d); cursor:pointer;}
+  body.lean #pcbfiltro{display:none !important;}
   body.lean #menubar, body.lean #pcbtb, body.lean #abas, body.lean #splitR, body.lean #props, body.lean #status, body.lean #btnPaineis{display:none !important;}
 </style>
 </head>
@@ -176,6 +192,8 @@
       <div id="v3d" hidden></div>
       <!-- a barra de ferramentas (pcbframe.js » montaBarra): tudo a vista, o que falta travado com o porque -->
       <div id="pcbtb" role="toolbar" aria-label="Ferramentas da PCB"></div>
+      <!-- o Selection Filter em lista, no canto (pcbframe.js » montaFiltroMenu) -->
+      <div id="pcbfiltro" role="group" aria-label="Filtro de seleção"></div>
       <!-- o texto se digita no proprio canvas (nada de prompt) -->
       <div id="txtbox" hidden><input id="txtinp" type="text" autocomplete="off" spellcheck="false" placeholder="texto"><div id="txtdica"></div></div>
       <div id="annform" hidden>

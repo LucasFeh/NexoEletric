@@ -73,6 +73,8 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   const cdp = (method, params) => new Promise(ok => { const n = ++id; pend.set(n, ok); ws.send(JSON.stringify({ id: n, method, params: params || {} })); });
   const js = async s => { const r = await cdp('Runtime.evaluate', { expression: s, returnByValue: true, awaitPromise: true }); if (r.result.exceptionDetails) throw new Error(s.slice(0, 60) + ': ' + JSON.stringify(r.result.exceptionDetails).slice(0, 300)); return r.result.result.value; };
   await cdp('Runtime.enable'); await cdp('Page.enable');
+  /* SMOKE_PRINT=<pasta>: as capturas da tela (o plano com as alças, o sem plano, a gaveta) */
+  const print = async nome => { if (!process.env.SMOKE_PRINT) return; const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SMOKE_PRINT, nome + '.png'), Buffer.from(r.result.data, 'base64')); };
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1500, height: 950, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORTA}/pcbframe.html?p=` + encodeURIComponent(PROJ) });
   for (let i = 0; i < 80 && !(await js('!!window.__hubPcb').catch(() => false)); i++) await espera(250);
@@ -81,6 +83,16 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   /* 1. a placa do hub reabre inteira */
   const val = await js('window.__hubPcb.valida().filter(v => v.status === "err")');
   assert.deepStrictEqual(val, [], 'a vista reabre a placa do ECO sem erro de footprint: ' + JSON.stringify(val).slice(0, 600));
+
+  /* 1b. o filtro de seleção no canto: lista com caixas, "Todos" e uma a uma (o mesmo estado do painel) */
+  const caixas = await js(`[...document.querySelectorAll('#pcbfiltro input[data-k]')].map(c => c.dataset.k)`);
+  assert.ok(caixas[0] === '*' && caixas.length === 12 && caixas.includes('track'), 'o menu do filtro com Todos e as 11 caixas: ' + caixas);
+  await js(`document.querySelector('#pcbfiltro input[data-k="track"]').click()`);
+  assert.strictEqual(await js(`window.__hubPcb.filtros().find(f => f.k === 'track').on`), false, 'desmarcar Trilhas tira do filtro');
+  assert.strictEqual(await js(`document.querySelector('#pcbfiltro input[data-k="*"]').indeterminate`), true, 'Todos fica parcial');
+  await print('0-filtro-menu');
+  await js(`document.querySelector('#pcbfiltro input[data-k="*"]').click()`);
+  assert.ok(await js(`window.__hubPcb.filtros().every(f => f.on)`), 'Todos marca tudo de volta');
 
   /* 2. a Trilha de pad a pad */
   const B = lerVar(path.join(HUB, 'Projects', PROJ, 'board.js'), 'pcbmirror');
@@ -144,8 +156,6 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   assert.strictEqual(polys.length, 1, 'o Polygon Pour em retângulo cria um poly_add');
   assert.strictEqual(polys[0].layer, 'Top');
   assert.strictEqual(polys[0].pts.length, 4);
-  /* SMOKE_PRINT=<pasta>: as capturas da tela (o plano com as alças, o sem plano, a gaveta) */
-  const print = async nome => { if (!process.env.SMOKE_PRINT) return; const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SMOKE_PRINT, nome + '.png'), Buffer.from(r.result.data, 'base64')); };
   await print('1-plano-alcas');
   const est = await js('window.__hubPcb.estado()');
   assert.strictEqual(est.tool, 'select', 'depois de criar, volta para a seleção (com o plano selecionado)');
