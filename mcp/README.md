@@ -66,7 +66,7 @@ node mcp/eletrichub-mcp.js --root <pasta> --http 8765
 claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 ```
 
-## Ferramentas (93, por grupo)
+## Ferramentas (96, por grupo)
 
 `list_commands` lista tudo com descrição; cada ferramenta diz na descrição o fluxo de uso.
 
@@ -83,6 +83,7 @@ claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 | nexo | `nexo_estado` (o Nexo Hub e o NexoCAD), `nexo_biblioteca` (lista/busca os itens do Nexo Hub no formato do hub; `id` traz revisões e vínculos), `nexo_sincronizar` (publica a biblioteca 3D e as placas no Nexo Hub: o mesmo `lib/nexohub-sync.js` do app), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou de um item, aberto no NexoCAD sempre por um item do Nexo Hub; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (publica o item placa e pede `pcb_importar {item}`; `so_publicar`, `so_pacote`), `nexo_vincular_footprint` (direto no Nexo Hub: `atributos.footprints` + vínculo; num componente já põe o 3D no footprint), `nexo_componentes` (uma biblioteca só: os componentes do NexoCAD com footprint entram na biblioteca de footprints como o 3D deles; o app faz sozinho a cada minuto). Conexão: `NEXOHUB_URL` > `C:\Users\Public\NexoHub\conexao.json` > `127.0.0.1:47800`. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
 | nexobd | `nexo_projetos` (os projetos guardados no NexoBD, fora do catálogo), `nexo_projeto_historico` (revisões: quando, de qual programa, o que mudou), `nexo_projeto_restaurar` (os arquivos de uma revisão antiga voltam para a pasta; o app sobe como revisão nova) |
 | saidas | `gerber_gerar` (grava `Projects/<p>/Gerber/` + `gerber.json`, como a rota `/api/gerber`; redespeja os polígonos antes), `gerber_salvo` (relê com o `hub-gerberview.js`), `pdf_layout` (`hub-pcbpdf.js` → `PDF/LO - <base>.pdf`), `bom_listar` |
+| jlc | `jlc_preparar` (gera o Gerber se preciso, monta o .zip, conta as camadas de cobre pelo X2 e diz o que a JLC recebe e as quantidades que ela aceita: a IA pergunta a quantidade ANTES), `jlc_enviar` (abre o orçamento da JLCPCB no IntegrateBrowser, sobe o .zip, confere as camadas, põe a quantidade, SAVE TO CART e devolve a captura para conferir; `etapa:"login"` sem conta aberta), `jlc_login` (entra com o usuário e a senha que o usuário der: a senha só é digitada no campo, não volta nem aparece no indicador do app). O motor é o `lib/jlc.js`, o mesmo do botão "Enviar pra JLC" do Gerber (rota `/api/jlc`, `tools/rotas/jlc.py`); para no carrinho |
 | casa | `skills_listar`, `skill_ler` (as skills da casa de `mcp/skills/*.md`), `regras_casa_verificar` (cobre de outra net no pad, trilha por cima de pad, parafuso isolado, plano a 1,0 mm dos pads, serigrafia sem passar por cima de nada) |
 | sinal | `sinal_listar`, `sinal_responder` (só status/reply, AI-GUIDE Parte C), `sinal_criar` |
 | hub | `list_commands`, `hub_status`, `hub_modulos`, `hub_modulo_chamar` (qualquer função de qualquer módulo, com `$placa`, `$esquema`, `$regras`...), `vista_screenshot`, `vista_comando`, `altium_comandos` (`hub-altiumdna.js`), `hub_recarregar_ferramentas` |
@@ -182,6 +183,7 @@ Arquivo novo na pasta entra sozinho (lido pelo mtime) e chega ao cliente por qua
 | `pcb-parafusos-isolados` | quadrado sem cobre de furo + 3 mm em volta do parafuso | `parafuso` |
 | `pcb-plano-folga-pads` | plano a 1,0 mm dos pads de outra net, alívio térmico | `plano_pad` |
 | `pcb-serigrafia-livre` | overlay nunca em cima de pad, via, furo, trilha, fill ou outra serigrafia; o plano de terra pode passar por baixo | `serigrafia` |
+| `pcb-enviar-jlc` | processo de pôr a placa no carrinho da JLCPCB: conferir o DRC, `jlc_preparar`, perguntar a quantidade antes, `jlc_enviar`, `jlc_login` com a conta do usuário (sem guardar nem repetir a senha), conferir a captura; nunca passar do carrinho | `jlc_enviar` (camadas lidas × placa, `noCarrinho`) |
 | `pcb-producao-backplane` | técnica de produção da CBM-DI251877 para backplane de conectores EDGE: campo sem plano em volta das fileiras, GND no Top fora do campo, +5V no Bottom com retângulos de GND entre os conectores, abas, corrente de +5V, leque em escada só com 45°, sem via | `drc_rodar`, `nets_ratsnest`, `regras_casa_verificar` |
 
 `drc_rodar`, `nets_ratsnest` e `pcb_render` usam a placa como a tela mostra (`ctx.placaDespejada(p)`: os polígonos
@@ -193,6 +195,8 @@ do hub redespejados); `despejar:false` volta ao jeito antigo (sem o cobre dos pl
 node tests/test-mcp.js          # stdio com processo filho, HTTP, e as ferramentas numa CÓPIA de "LM555 astável"
 node tests/test-mcp-completo.js # raiz automática, símbolos, 3D do disco, pcb_colocar, lote e o relato ao hub
 python tests/test_mcp_rotas.py  # as rotas da vista ao vivo
+node tests/test-jlc.js          # o envio à JLC (lib/jlc.js) contra um IntegrateBrowser de mentira; a senha não vaza
+python tests/test_jlc_rotas.py  # as rotas /api/jlc do botão "Enviar pra JLC"
 node tests/test-mcp-nexo.js     # o grupo nexo, com um Nexo Hub (tests/nexohub-falso.js) e um NexoCAD de mentira
 node tests/test-nexohub-sync.js # o sincronizador (lib/nexohub-sync.js) contra o Nexo Hub de mentira
 node tests/test-nexohub-real.js # o mesmo contra o servidor de verdade (..
@@ -212,6 +216,7 @@ Os testes nunca gravam nos `Projects/` reais (conferem isso no fim).
 | `lib/contexto.js` | raiz, módulos do hub, bibliotecas, projetos, gravação com desfazer |
 | `lib/arquivo-linhas.js` | edição cirúrgica dos arquivos de uma op por linha |
 | `lib/pcb-ops.js` | orig_* automáticos, uma linha por objeto, transação validada |
+| `lib/jlc.js` | o envio à JLCPCB pelo IntegrateBrowser (o MCP e o botão do Gerber) |
 | `lib/geometria.js` | pad/polígono e a conectividade de reserva |
 | `lib/render.js` | PNG da placa sem dependência |
 | `lib/nexohub.js` | o cliente do Nexo Hub (conexão, API v1) e o item do Nexo Hub no formato do `hub-nexo.js` |
