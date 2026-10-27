@@ -4,6 +4,49 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.29.0 — 2026-10-27
+
+Pedido do dono: "tudo vem do DB … sem ele nada aparece, se ele não tá conectado fica tudo vazio". O caminho agora é
+**Odoo → NexoBD → Nexo Hub → NexoEletric**, e o NexoEletric só fala com o Nexo Hub. A exceção é o envio da lista de
+material e as consultas ao Odoo, que continuam indo direto ao Odoo.
+
+- **Sem o Nexo Hub, o NexoEletric fica vazio.** Com o Hub fora do ar, ou no ar mas sem os dados:
+  - não aparece nenhum projeto, esquema, símbolo nem footprint;
+  - nada é gravado;
+  - um aviso "Sem conexão com o Nexo Hub" aparece no hub e nas vistas Esquema e PCB.
+
+  Quando o Hub volta, as páginas recarregam sozinhas, cheias. A pasta de trabalho virou só a memória de trabalho do app
+  (ela é preenchida pelo Hub e nunca é mostrada sem ele). O MCP segue a mesma regra: sem o Hub, as ferramentas de
+  projeto e de biblioteca respondem "sem conexão" em vez de ler uma cópia velha do disco.
+- **O sincronismo com o Odoo roda no NexoBD.**
+  - O botão Sincronizar e a configuração do Odoo (URL, banco, login, senha) pedem ao NexoBD pelo Hub, e o andamento
+    aparece ao vivo como antes. A revisão nova da biblioteca chega sozinha.
+  - O app não roda mais o gerador nesta máquina. Ele publica o gerador (guardião + almox2lib) no item "Ferramentas do
+    Odoo", que o NexoBD usa.
+  - Precisa do **NexoBD 1.7.0**. A senha do Odoo agora é gravada no NexoBD (painel do NexoBD › Odoo, ou nas
+    configurações do Odoo do hub).
+- **Footprints da PcbLib que vem do Hub.**
+  - O `Libs/pcblib.js`, que o hub, as vistas e o MCP leem, era um arquivo gerado no Altium em 06/08, a partir de uma pasta
+    de rede (Z:), e viajava congelado no instalador.
+  - Agora ele é refeito da `FOOTPRINTS ALMOX.PcbLib` que o Hub traz do NexoBD, toda vez que ela muda. O
+    `tools/pcblib/pcblib2js.py` lê a PcbLib sem o Altium: 609 de 618 footprints idênticos ao export do Altium e o resto só
+    na ordem dos pads. Os nomes saem padronizados pelo rename-map.
+  - O MCP com o app fechado também traz os corpos 3D dessa PcbLib, em vez de "indisponível".
+  - O ApplyChanges do Altium carrega o footprint primeiro dessa PcbLib e só depois das bibliotecas instaladas no Altium.
+- **Conectar IA no desenho do NexoCAD.** Ajuda › Conectar IA (MCP)… e o indicador IA no topo abrem uma tela própria, no
+  lugar da caixa de mensagem do Windows, igual à "Conectar IA" do NexoCAD:
+  - o comando do Claude Code e o JSON dos outros agentes, com Copiar;
+  - a atividade recente da IA;
+  - o botão **Registrar no Claude Code e no Claude Desktop**, que grava a mesma entrada que o Nexo Hub usa;
+  - o estado do **Nexo Hub** ao vivo, numa linha só: conectado (com o endereço, a versão e a última sincronização) ou
+    desconectado;
+  - os botões **Tentar de novo**, **Conexão com o Nexo Hub…** (endereço e token) e **Abrir o Nexo Hub**.
+
+  Quando o Hub cai ou volta, aparece uma notificação. Nas Configurações, no menu e no Sobre, o NexoEletric só fala do
+  Nexo Hub.
+
+Ordem de instalação: NexoBD 1.7.0 → Nexo Hub 2.13.0 → NexoEletric 1.29.0.
+
 ## 1.28.0 — 2026-10-23
 
 - **O filtro de seleção no canto da PCB** (pedido do dono: "um menuzinho no canto superior esquerdo, em transparência,
