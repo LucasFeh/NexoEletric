@@ -15,6 +15,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { execFile } = require('node:child_process');
 
 const ESPERA = 3000;
 const ESPERA_EVENTO = 1500;
@@ -28,6 +29,43 @@ const SCRIPTS = ['AltiumPCBMirror.PrjScr', 'ExportProject.pas', 'ExportBoard.pas
 // Fora da biblioteca: o cache dos STEP extraidos da PcbLib (refeito sob demanda pelo hubserver).
 function aceitaLib(rel) {
   return !/^3d(\/|$)/i.test(rel) && rel !== 'pcblib-3d.js';
+}
+
+// Os footprints (Libs/pcblib.js, o que o hub, as vistas e o MCP leem) saem da PcbLib da casa que veio do NexoBD,
+// e nao mais de um pcblib.js gerado no Altium a partir de uma pasta de rede e congelado no instalador (1.29.0).
+// tools/pcblib/pcblib2js.py le a PcbLib sem o Altium; a saida e deterministica (a data vem do save da PcbLib), entao
+// toda maquina gera o mesmo arquivo e o espelho nao cria revisao a toa. Roda quando a PcbLib, o rename-map.js ou o
+// gerador mudam -- inclusive sem o NexoBD no ar, para a primeira abertura depois da atualizacao.
+const PCBLIB_CASA = ['Libs', 'Almox', 'FOOTPRINTS ALMOX.PcbLib'];
+const GERADOR_PCBLIB = 'pcblib2js/1';
+const ARQ_PCBLIB = (ws) => path.join(ws, '.altiumhub', 'pcblib.json');
+
+function marca(arq) {
+  try { const st = fs.statSync(arq); return `${st.size}:${Math.trunc(st.mtimeMs)}`; } catch { return '-'; }
+}
+
+/** Refaz o Libs/pcblib.js a partir da PcbLib, se ela mudou. → {gerado, footprints?} | null (nada a fazer) */
+function atualizarPcblib({ ws, python, log = () => {}, forcar = false }) {
+  const pcblib = path.join(ws, ...PCBLIB_CASA);
+  const script = path.join(ws, 'tools', 'pcblib', 'pcblib2js.py');
+  const saida = path.join(ws, 'Libs', 'pcblib.js');
+  if (!python || !fs.existsSync(pcblib) || !fs.existsSync(script)) return Promise.resolve(null);
+  const chave = [GERADOR_PCBLIB, marca(pcblib), marca(path.join(ws, 'Libs', 'rename-map.js'))].join('|');
+  if (!forcar && lerJson(ARQ_PCBLIB(ws), {}).chave === chave && fs.existsSync(saida)) return Promise.resolve(null);
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) if (!/^PYTHON/i.test(k) && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
+  env.PYTHONIOENCODING = 'utf-8';
+  const args = [script, pcblib, saida, '--fonte', 'NexoBD: Libs/Almox/FOOTPRINTS ALMOX.PcbLib'];
+  return new Promise((resolve, reject) => {
+    execFile(python, args, { cwd: ws, env, timeout: 180000, windowsHide: true, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(`pcblib.js não foi gerado: ${String(stderr || err.message).trim().split('\n').pop()}`));
+      const m = /^(\d+) footprint/m.exec(stdout);
+      for (const l of String(stdout).split('\n')) if (l.startsWith('aviso: ')) log(`pcblib.js: ${l.slice(7)}`);
+      fs.mkdirSync(path.dirname(ARQ_PCBLIB(ws)), { recursive: true });
+      fs.writeFileSync(ARQ_PCBLIB(ws), JSON.stringify({ chave, footprints: m ? Number(m[1]) : null, em: new Date().toISOString() }));
+      resolve({ gerado: true, footprints: m ? Number(m[1]) : null });
+    });
+  });
 }
 
 const ARQ_ESTADO = (ws) => path.join(ws, '.altiumhub', 'nexobd.json');
@@ -92,9 +130,10 @@ async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = t
 }
 
 class Armazem {
-  constructor({ log, bundle } = {}) {
+  constructor({ log, bundle, python } = {}) {
     this.log = log || console;
     this.bundle = bundle || '';
+    this.python = python || '';
     this.ws = '';
     this.estado = null;
     this.rodando = null;
@@ -190,6 +229,13 @@ class Armazem {
         this.log.warn(`[nexobd] ${motivo}: ${err.message}`);
         return { ok: false, erro: err.message };
       } finally {
+        // com ou sem o NexoBD: a PcbLib desta copia e a que vale para os footprints
+        try {
+          const g = await atualizarPcblib({ ws, python: this.python, log: (l) => this.log.warn(`[nexobd] ${l}`) });
+          if (g) this.log.info(`[nexobd] footprints: Libs/pcblib.js refeito da PcbLib do NexoBD (${g.footprints} footprints)`);
+        } catch (e) {
+          this.log.warn(`[nexobd] ${e.message}`);
+        }
         this.rodando = null;
         if (this.pendente && this.ws) { this.pendente = false; this.agendar(500, 'pendente'); }
       }
@@ -229,4 +275,4 @@ class Armazem {
   }
 }
 
-module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, SCRIPTS, ARQ_APAGAR, ARQ_ESTADO };
+module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_ESTADO, ARQ_PCBLIB };

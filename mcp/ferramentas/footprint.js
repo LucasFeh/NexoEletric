@@ -8,7 +8,8 @@
    a aba Biblioteca » Componentes faz.
 
    Os 3D da PcbLib (Libs/pcblib-3d.js) quase nunca estao no disco: o hubserver os tira da PcbLib sob
-   demanda. Sem o arquivo, o MCP pede ao hub no ar. */
+   demanda. Sem o arquivo, o MCP pede ao hub no ar; com o app fechado, roda o mesmo extrator com o
+   Python do app (lib3dLocal). */
 'use strict';
 const fs = require('node:fs');
 const crypto = require('node:crypto');
@@ -16,6 +17,7 @@ const path = require('node:path');
 const { ErroMcp } = require('../lib/contexto.js');
 const { avaliaVar } = require('../lib/arquivo-linhas.js');
 const { hubNoAr } = require('../lib/util.js');
+const { execFile } = require('node:child_process');
 
 const tem = (o, k) => !!o && Object.prototype.hasOwnProperty.call(o, k);
 const copia = o => JSON.parse(JSON.stringify(o));
@@ -31,14 +33,45 @@ async function lib3d(ctx) {
   if (local) return local;
   if (cache3d && Date.now() - cache3d.quando < 5 * 60 * 1000) return cache3d.v;
   const hub = await hubNoAr(ctx);
-  if (!hub) return null;
-  try {
-    const r = await fetch(hub.url + '/Libs/pcblib-3d.js', { signal: AbortSignal.timeout(60000) });
-    if (!r.ok) return null;
-    const v = avaliaVar(await r.text(), 'pcblib3d');
-    cache3d = { quando: Date.now(), v };
-    return v;
-  } catch (_) { return null; }
+  let v = null;
+  if (hub) {
+    try {
+      const r = await fetch(hub.url + '/Libs/pcblib-3d.js', { signal: AbortSignal.timeout(60000) });
+      if (r.ok) v = avaliaVar(await r.text(), 'pcblib3d');
+    } catch (_) { /* cai no Python daqui */ }
+  }
+  if (!v) v = await lib3dLocal(ctx);
+  if (v) cache3d = { quando: Date.now(), v };
+  return v;
+}
+
+/* Sem o app aberto: o MESMO extrator do hubserver (tools/pcb3d/lib3d_servidor.py), com o Python do
+   NexoEletric, sobre a PcbLib da casa que veio do NexoBD (Libs/Almox). ~10 s na primeira vez; depois
+   le o cache dele (a pasta muda quando a PcbLib muda). */
+function pythonDoApp() {
+  const c = [process.env.ALTIUMHUB_PYTHON,
+    path.join(__dirname, '..', '..', '..', 'python', 'python.exe'),          // instalado: resources/hub/mcp -> resources/python
+    path.join(__dirname, '..', '..', 'electron', 'build', 'python', 'python.exe'),
+    path.join(process.env.ProgramFiles || 'C:\\Program Files', 'NexoEletric', 'resources', 'python', 'python.exe')];
+  return c.find(p => p && fs.existsSync(p)) || '';
+}
+function lib3dLocal(ctx) {
+  const py = pythonDoApp();
+  const extrator = path.join(ctx.root, 'tools', 'pcb3d', 'lib3d_servidor.py');
+  if (!py || !fs.existsSync(extrator)) return Promise.resolve(null);
+  const env = {};
+  for (const [k, x] of Object.entries(process.env)) if (!/^PYTHON/i.test(k) && k !== 'ELECTRON_RUN_AS_NODE') env[k] = x;
+  env.PYTHONIOENCODING = 'utf-8';
+  const codigo = 'import sys; sys.path.insert(0, sys.argv[1]); import lib3d_servidor as S; print(S.prepara(sys.argv[2]) or "")';
+  return new Promise(resolve => {
+    execFile(py, ['-c', codigo, path.dirname(extrator), ctx.root], { cwd: ctx.root, env, timeout: 180000, windowsHide: true },
+      (err, out) => {
+        const pasta = !err && String(out).trim().split(/\r?\n/).pop();
+        const js = pasta && path.join(pasta, 'pcblib-3d.js');
+        if (!js || !fs.existsSync(js)) return resolve(null);
+        try { resolve(avaliaVar(fs.readFileSync(js, 'utf8'), 'pcblib3d')); } catch (_) { resolve(null); }
+      });
+  });
 }
 
 /* o footprint pelo nome: o do hub na frente; o do Altium com os corpos 3D da PcbLib */
@@ -162,7 +195,7 @@ module.exports = {
         for (const f of lib.footprints) poe(f, 'hub');
         for (const f of alt.footprints || []) poe(f, 'altium');
         out.sort((x, y) => x.nome.localeCompare(y.nome));
-        return { total: out.length, footprints: out.slice(0, a.limite || 50), lib3d: L3 ? 'carregada' : 'indisponível (sem o hub no ar não há os 3D da PcbLib)' };
+        return { total: out.length, footprints: out.slice(0, a.limite || 50), lib3d: L3 ? 'carregada' : 'indisponível (a PcbLib da casa não está em Libs/Almox, ou o Python do app não foi achado)' };
       },
     },
     {
@@ -224,7 +257,7 @@ module.exports = {
           out.push({ id, nome: m.name || '', origem, bytes: m.bytes || 0, usadoEm: u.slice(0, 10), usos: u.length });
         }
         out.sort((x, y) => y.usos - x.usos || x.nome.localeCompare(y.nome));
-        return { total: out.length, modelos: out.slice(0, a.limite || 40), lib3d: L3 ? 'carregada' : 'indisponível (sem o hub no ar só os modelos do hub)' };
+        return { total: out.length, modelos: out.slice(0, a.limite || 40), lib3d: L3 ? 'carregada' : 'indisponível (sem a PcbLib da casa em Libs/Almox só os modelos do hub)' };
       },
     },
     {

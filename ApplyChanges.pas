@@ -3775,9 +3775,21 @@ begin
   try
     Etapa := 'IPCB_Component.Pattern';
     Comp.Pattern := Fp;
-    Etapa := 'IPCB_Component.LoadCompFromLibrary';
-    Comp.LoadCompFromLibrary(True);
-    Result := ContaPads(Comp) > 0;
+    // 1o a PcbLib da casa que o Nexo Hub trouxe do NexoBD (<home>\Libs\Almox); so depois as
+    // bibliotecas instaladas no Altium, que podem ser uma copia velha numa pasta de rede
+    Lib := SCRIPT_HOME + '\Libs\Almox\FOOTPRINTS ALMOX.PcbLib';
+    if FileExists(Lib) then
+    begin
+      Etapa := 'IPCB_Component.LoadCompFromLibraryWithFileName(' + Lib + ')';
+      Comp.LoadCompFromLibraryWithFileName(Lib);
+      Result := ContaPads(Comp) > 0;
+    end;
+    if not Result then
+    begin
+      Etapa := 'IPCB_Component.LoadCompFromLibrary';
+      Comp.LoadCompFromLibrary(True);
+      Result := ContaPads(Comp) > 0;
+    end;
     if not Result then
     begin
       Lib := HomeCfgGet('pcblib');
