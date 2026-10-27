@@ -1,0 +1,52 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BOM</title>
+<!-- A pagina da BOM servida pelo NexoBD (1.31.0; NexoBD 1.9.0, contrato §9): o NexoEletric publica este arquivo e os
+     scripts do gerador no item "App web da BOM" do NexoBD, e o NexoBD a serve em /bom/<id> para qualquer navegador da
+     rede local, sem token. O mesmo bootstrap do hubserver.py (BOM_BOOTSTRAP), com o id lido do endereco: os dados
+     (fonte, opcoes, vistos) vem de /api/bom/<id>/..., do NexoBD; os vistos marcados aqui gravam la. -->
+<style>html,body{margin:0;height:100%;background:#14161a;color:#e8e8ea;
+  font:14px system-ui,Segoe UI,sans-serif}
+#av{padding:24px;line-height:1.5}#av b{color:#ff9a9a}</style></head><body>
+<div id="av">montando a BOM…</div>
+<!-- A ORDEM importa: no browser o hub-bom.js le root.HubFont e root.HubLaser. -->
+<script src="/bom/_app/hub-font.js"></script>
+<script src="/bom/_app/hub-laser.js"></script>
+<script src="/bom/_app/hub-bom.js"></script>
+<script>
+(function(){
+  var partes = location.pathname.split('/').filter(Boolean);
+  var ID = decodeURIComponent(partes[1] || '');
+  var API = '/api/bom/' + encodeURIComponent(ID);
+  function falha(m){ var a = document.getElementById('av'); a.textContent = ''; var b = document.createElement('b'); b.textContent = m; a.appendChild(b); }
+  function pega(u){
+    return fetch(u, { cache: 'no-store' })
+      .then(function (r){ return r.json().catch(function (){ return {}; }); })
+      .catch(function (){ return {}; });
+  }
+  if (!ID) return falha('endereço da BOM sem o projeto (/bom/<projeto>)');
+  if (typeof HubFont === 'undefined' || typeof HubLaser === 'undefined')
+    return falha('não consegui carregar hub-font.js / hub-laser.js, de que o gerador depende');
+  if (typeof HubBom === 'undefined') return falha('não consegui carregar hub-bom.js');
+  Promise.all([pega(API + '/source'), pega(API + '/opts'), pega(API + '/vistos')]).then(function (res){
+    var r, proj = (res[0] && res[0].projeto) || ID;
+    document.title = 'BOM — ' + proj;
+    if (!res[0] || !res[0].ok || !res[0].board)
+      return falha((res[0] && (res[0].error || res[0].erro)) || 'não consegui carregar os dados da BOM no NexoBD');
+    try {
+      r = HubBom.gerar(res[0].board, (res[1] && res[1].opts) || null, {
+        proj: proj,
+        generated: res[0].board.generated || '',
+        api: API,
+        vistos: (res[2] && res[2].vistos) || {},
+        rev: (res[2] && res[2].rev) || 0,
+        sourceRev: res[0].sourceRev
+      });
+    } catch (e) { return falha('o gerador falhou: ' + (e && e.message)); }
+    /* Troca o documento inteiro (como no hub): a URL continua a do link, e Ctrl+F, impressão e o zoom do tablet
+       funcionam como em página normal. */
+    document.open(); document.write(r.html); document.close();
+  });
+})();
+</script>
+</body></html>

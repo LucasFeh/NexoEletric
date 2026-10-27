@@ -4,18 +4,15 @@
 // O que o app faz, na ordem:
 //   1. garante a pasta de trabalho (lib/workspace.js): o codigo do hub que veio neste
 //      instalador + o estado da maquina (Projects/, Libs/, credenciais), que nunca e tocado;
-//   2. sobe `python hubserver.py` com o Python embutido (lib/backend.js) -- o MESMO
-//      servidor que roda no 192.168.15.192, so que nesta maquina e escutando em 127.0.0.1;
+//   2. sobe `python hubserver.py` com o Python embutido (lib/backend.js), nesta maquina e
+//      escutando em 127.0.0.1;
 //   3. mostra o hub na janela, com o comportamento de aba do Chrome (lib/web.js);
 //   4. busca atualizacao nos releases do GitHub (lib/updater.js);
-//   5. importa projetos e bibliotecas do hub central quando pedido (lib/import-server.js),
-//      e antes de todo sincronismo do almoxarifado, para a numeracao nao divergir;
-//   6. desde a 1.2.0, a biblioteca e a do SERVIDOR (lib/lib-remota.js): o hub daqui repassa
-//      a ele as gravacoes de biblioteca e mantem Libs/ como espelho. Nesse modo o item 5 fica
-//      so com projetos e Libs/Almox, e o sincronismo roda no servidor, sem guarda aqui.
-//   7. desde a 1.14.0, nada mora aqui: projetos, biblioteca e scripts do Altium ficam no NexoBD
-//      (lib/armazem.js), e a pasta de trabalho e copia. Com ele ligado (o padrao), os itens 5 e 6
-//      ficam de fora e o sincronismo do Odoo roda aqui, sobre a biblioteca trazida do NexoBD.
+//   5. desde a 1.14.0, nada mora aqui: projetos, biblioteca e scripts do Altium ficam no NexoBD
+//      (lib/armazem.js), e a pasta de trabalho e copia; o sincronismo do Odoo roda no NexoBD (1.29.0);
+//   6. desde a 1.31.0, a BOM tambem: a pagina e os dados de cada projeto vao para o NexoBD, que a
+//      serve para a rede local (o link do painel BOM). O servidor central antigo (192.168.15.192:8100:
+//      importar do servidor, biblioteca remota, link do BOM) saiu.
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -52,9 +49,7 @@ const settings = require('./lib/settings');
 const workspace = require('./lib/workspace');
 const { Backend } = require('./lib/backend');
 const updater = require('./lib/updater');
-const importer = require('./lib/import-server');
 const altiumHome = require('./lib/altium-home');
-const libRemota = require('./lib/lib-remota');
 const web = require('./lib/web');
 const buildInfo = require('./lib/build-info');
 const { NexoHubSync } = require('./lib/nexohub-sync');
@@ -76,7 +71,7 @@ const BUNDLE = EMBUTIDO ? path.join(process.resourcesPath, 'hub') : path.join(__
 const LOG_DIR = path.join(app.getPath('userData'), 'logs');
 const SMOKE = process.env.ALTIUMHUB_SMOKE || '';
 // Projetos, biblioteca e scripts do Altium no NexoBD (lib/armazem.js)
-const armazem = new armazemNexoBD.Armazem({ log, bundle: BUNDLE, python: PYTHON });
+const armazem = new armazemNexoBD.Armazem({ log, bundle: BUNDLE, python: PYTHON, versao: app.getVersion() });
 const ESPERA_PRIMEIRA = 45000;   // quanto a abertura espera a primeira rodada (depois segue sem ela)
 
 let janela = null;
@@ -86,17 +81,9 @@ let bootStatus = { fase: 'inicio', msg: 'iniciando…', erro: '', log: [] };
 let saindo = false;
 let backendParado = false;
 let reinicios = 0;
-let importando = null;          // AbortController da importacao em curso
-let importacao = null;          // Promise da importacao em curso (a guarda do sincronismo espera)
 let janelaConfig = null;
-let janelaImport = null;
 let janelaConexao = null;       // Conectar IA: o MCP e a conexao com o Nexo Hub (ui/conexao.html)
 let avisoSync = '';             // o que a sincronizacao da pasta de trabalho precisa dizer
-// A biblioteca do HUB QUE ESTA NO AR e a do servidor? E o que o guarda do sincronismo e a
-// importacao seguem, e nao a configuracao salva: um reinicio recusado (vista com edicao
-// pendente) deixa as duas diferentes, e um hub sem o libremota.py ignora a variavel.
-let libRemotaNoAr = false;
-
 // O app aberto, para o MCP (mcp/lib/contexto.js » sessaoDoApp): a pasta de trabalho e o hub no ar,
 // em ~/.nexoeletric/session.json -- a mesma mecanica do ~/.nexocad/session.json do NexoCAD. Sem
 // isso o MCP precisa de --root e acha o hub so sondando portas.
@@ -155,9 +142,6 @@ function status(fase, msg, extra = {}) {
 function dev(ws) { return workspace.isDevWorkspace(ws || settings.load().workspace); }
 function noNexoBD(ws) { const s = settings.load(); return armazemNexoBD.ligado(s, dev(ws || s.workspace)); }
 
-// Base das tres vias da importacao: o que o app semeou, nesta versao e nas anteriores.
-function seedHashes() { return workspace.seedHashes(settings.load().workspace, BUNDLE); }
-
 // Todo o ciclo de vida do hub (subir, reiniciar, cair e voltar) passa por esta fila. Dois
 // "Tentar de novo" seguidos, ou uma queda no meio de um reinicio, nao podem criar dois
 // hubservers disputando a mesma porta.
@@ -211,16 +195,10 @@ function envDoHub(ws) {
   // de desenvolvedor (git) vale o comportamento de sempre: nada muda.
   if (!dev(ws)) env.ALTIUMHUB_DBLIB_DIR = path.join(ws, 'Libs', 'Almox');
   if (s.masterPassword) env.ALTIUMHUB_MASTER = s.masterPassword;
-  // O BOM de referencia e o do servidor: o "Copiar link" e o "Abrir" do painel BOM apontam
-  // para la (hubserver.py » ALTIUMHUB_BOM_LINK), onde a bancada abre e marca os vistos.
-  // Este app so facilita o acesso ao hub; o link que circula e sempre o do servidor.
-  if (s.serverUrl) env.ALTIUMHUB_BOM_LINK = s.serverUrl;
-  // A biblioteca e a do servidor: ALTIUMHUB_LIB_REMOTA=serverUrl liga o repasse e o espelho
-  // no hubserver (libremota.py). A decisao e uma so, a de lib/lib-remota.js. Com o NexoBD a
-  // biblioteca e a do NexoBD: o hub fica no modo local e o armazem leva o que ele grava; o
-  // ALTIUMHUB_NEXOBD faz o "excluir projeto" anotar o apagar no NexoBD.
+  // Com o NexoBD a biblioteca e os projetos sao os dele: o armazem leva o que o hub grava; o
+  // ALTIUMHUB_NEXOBD liga o "sem o Hub, vazio" (nexohub_gate.py), faz o "excluir projeto" anotar o
+  // apagar no NexoBD e poe o link da BOM no NexoBD (1.31.0). O servidor central antigo saiu.
   if (noNexoBD(ws)) env.ALTIUMHUB_NEXOBD = '1';
-  else Object.assign(env, libRemota.envDoHub(s, dev(ws)));
   // Na rede, o chat passa a pedir a senha mestre (tools/chat/chatserver.py): aberto, ele
   // roda o claude nesta maquina a pedido de qualquer um que alcance a porta.
   if (s.lan) env.ALTIUMHUB_CHAT_SENHA = '1';
@@ -228,20 +206,6 @@ function envDoHub(ws) {
   const chave = settings.getSegredo('anthropicKey');
   if (chave) env.ANTHROPIC_API_KEY = chave;
   return env;
-}
-
-// O que o hub no ar diz da propria biblioteca (libremota.py). O 404 vem de um hub de antes
-// do modo remoto, e em HTML: o json fica null e a decisao e do lib-remota.modoDoHub.
-async function statusDaBiblioteca() {
-  try {
-    const r = await fetch(origem + '/api/lib-remota/status', { signal: AbortSignal.timeout(10000) });
-    let json = null;
-    try { json = await r.json(); } catch { /* corpo que nao e JSON */ }
-    return { status: r.status, json };
-  } catch (e) {
-    log.warn('[lib-remota] o hub nao respondeu o status da biblioteca: ' + e.message);
-    return null;
-  }
 }
 
 // So chamada de dentro da fila (emSerie).
@@ -279,7 +243,6 @@ async function subirHub({ porta } = {}) {
   }
 
   status('python', 'subindo o hub…');
-  libRemotaNoAr = false;
   if (backend) await backend.stop();              // o anterior sai primeiro (saida esperada)
   const envHub = envDoHub(ws);
   const b = new Backend({ python: PYTHON, workspace: ws, logDir: LOG_DIR, env: envHub });
@@ -298,15 +261,6 @@ async function subirHub({ porta } = {}) {
   if (b.port !== s.port) {
     log.warn(`porta ${s.port} ocupada; o hub subiu na ${b.port} (preferencias do navegador ficam por porta)`);
   }
-  const remotaPedida = Boolean(envHub.ALTIUMHUB_LIB_REMOTA);
-  libRemotaNoAr = libRemota.modoDoHub(remotaPedida, remotaPedida ? await statusDaBiblioteca() : null);
-  if (libRemotaNoAr) {
-    log.info('[lib-remota] a biblioteca e a do servidor: ' + envHub.ALTIUMHUB_LIB_REMOTA);
-  } else if (remotaPedida) {
-    log.warn('[lib-remota] pedida, mas o hub respondeu que esta no modo local (hub sem libremota.py, ou endereco recusado)');
-    avisoSync = [avisoSync, 'O hub não ligou a biblioteca do servidor: a biblioteca segue a deste PC ' +
-      '(o motivo está em Ajuda › Abrir pasta de logs).'].filter(Boolean).join(' ');
-  }
   // O hub cai sozinho no modo DEMO (projetos de mentira) se o /api/index.json falhar
   // (hub.html » API.index). Aquecer aqui garante que a primeira pagina ja o encontra.
   status('indice', 'lendo os projetos…');
@@ -317,6 +271,8 @@ async function subirHub({ porta } = {}) {
   }
   // o sincronizador precisa do hub no ar (o 3D da PcbLib sai do hubserver sob demanda)
   nexoSync.iniciar(ws, origem);
+  // a fonte da BOM de cada projeto sai do hubserver (o mesmo gerador do painel): com ele no ar, uma rodada
+  if (noNexoBD(ws)) { armazem.definirHub(origem); armazem.agendar(1500, 'hub no ar'); }
   if (!SMOKE) gravaSessao(ws);
 }
 
@@ -373,7 +329,7 @@ function boot() { return emSerie(bootImpl); }
 function reiniciarHub() {
   return emSerie(async () => {
     const outras = BrowserWindow.getAllWindows().filter((w) => w !== janela && w !== janelaConfig &&
-      w !== janelaImport && !pickers.has(w.webContents.id));
+      !pickers.has(w.webContents.id));
     try {
       await carregarUi('splash.html');
       for (const w of outras) if (!w.isDestroyed()) await w.webContents.loadURL('about:blank');
@@ -420,125 +376,18 @@ function aviso(message, detail) {
   dialog.showMessageBox(janela || undefined, { type: 'info', title: 'NexoEletric', message, detail, buttons: ['OK'], noLink: true });
 }
 
-function abrirImportacao(opts = {}) {
-  const s = settings.load();
-  if (noNexoBD(s.workspace)) {
-    aviso('Os projetos e a biblioteca vêm do Nexo Hub.',
-      'Não há mais o que importar do servidor: o NexoEletric traz tudo do Nexo Hub sozinho (Arquivo › Nexo Hub: sincronizar projetos e biblioteca).');
-    return;
-  }
-  if (!s.setupDone || !s.workspace) {
-    aviso('Escolha a pasta de trabalho primeiro.', 'Conclua a configuração inicial; ela oferece importar do servidor ao final.');
-    return;
-  }
-  if (dev()) {
-    aviso('A pasta de trabalho é um repositório git.',
-      'Importar do servidor sujaria arquivos versionados. Use uma pasta de trabalho comum (Configurações).');
-    return;
-  }
-  if (janelaImport && !janelaImport.isDestroyed()) { janelaImport.focus(); return; }
-  janelaImport = new BrowserWindow({
-    parent: janela || undefined, width: 720, height: 620, minWidth: 560, minHeight: 420,
-    title: 'Importar do servidor — NexoEletric', icon: web.ICONE, backgroundColor: '#14161a', show: false,
-    webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
-  });
-  janelaImport.removeMenu();
-  janelaImport.once('ready-to-show', () => janelaImport.show());
-  janelaImport.on('closed', () => { janelaImport = null; });
-  janelaImport.loadFile(path.join(UI_DIR, 'import.html'), { query: { auto: opts.auto ? '1' : '' } });
-}
-
-async function rodarImportacao(grupos, progresso) {
-  if (importando) throw new Error('já existe uma importação em andamento');
-  const s = settings.load();
-  // Sem pasta de trabalho, os caminhos cairiam na pasta do processo (a de instalacao).
-  if (!s.setupDone || !s.workspace || !path.isAbsolute(s.workspace)) {
-    throw new Error('termine a configuração inicial (pasta de trabalho) antes de importar');
-  }
-  // Com a biblioteca do servidor, 'libs' e 'almox' sao do espelho do hub: a tela ja os
-  // desliga, e aqui e a defesa (uma janela aberta antes de a configuracao mudar ainda os manda).
-  const g = libRemota.gruposDaImportacao(grupos, libRemotaNoAr);
-  if (g.recusados.length) log.warn(`[import] biblioteca do servidor: grupos recusados ${g.recusados.join(', ')}`);
-  if (!g.grupos.length) {
-    throw new Error('a biblioteca já é a do servidor: o hub a mantém sozinho, e só projetos e as bibliotecas do almoxarifado para o Altium são importados');
-  }
-  importando = new AbortController();
-  const p = importer.importar({
-    ws: s.workspace, serverUrl: s.serverUrl, grupos: g.grupos, seedHashes: seedHashes(),
-    progresso, signal: importando.signal,
-  });
-  importacao = p.catch(() => {});
-  try {
-    const res = await p;
-    res.recusados = g.recusados;
-    log.info(`[import] ${res.novos.length} novos, ${res.atualizados.length} atualizados, ` +
-      `${res.conflitos.length} conflitos, ${res.erros.length} erros`);
-    return res;
-  } finally {
-    importando = null;
-    importacao = null;
-  }
-}
-
+// 1.31.0: o "Importar do servidor" saiu com o servidor central (projetos e biblioteca vem do Nexo Hub).
 function toastNoHub(wc, msg, tipo) {
   if (!wc || wc.isDestroyed()) return;
   wc.executeJavaScript(`typeof toast === 'function' && toast(${JSON.stringify(msg)}, ${JSON.stringify(tipo)})`)
     .catch(() => {});
 }
 
-async function esperaImportacao(wc) {
-  if (importando) toastNoHub(wc, 'esperando a importação em andamento terminar antes de sincronizar…', 'warn');
-  while (importando) await importacao;
-}
-
-// Antes de o hub sincronizar o almoxarifado com o Odoo: traz do servidor o estado que o
-// gerador le para numerar (livro-razao de part numbers, ledger dos desenhos, espelhos).
-// Com o mesmo estado e o mesmo Odoo, a numeracao daqui e a do servidor saem iguais; sem
-// isso, cada PC que sincroniza vira uma segunda autoridade dos part numbers. Importacao em
-// andamento: espera ela terminar (sincronizar no meio dela e justamente numerar do estado
-// velho). Nao deu para trazer o estado: pergunta, como quando o servidor nao responde.
-//
-// Com a biblioteca do servidor nada disso vale: o hub daqui repassa o POST e o sincronismo
-// roda NO servidor, com o livro-razao e o Odoo de la. Trazer o estado antes seria um segundo
-// escritor nos arquivos do espelho, e o "Sincronizar assim mesmo" nao teria o que oferecer
-// (servidor fora, o hub recusa com 503 e nada e gravado).
-async function antesDoSincronismo(d) {
-  if (libRemotaNoAr) return true;
-  const s = settings.load();
-  // Pelo Nexo Hub (1.29.0) o sincronismo roda no NexoBD (nexohub_odoo.py repassa o pedido): nao ha
-  // biblioteca local a trazer antes; a revisao nova chega pelo armazem.
-  if (noNexoBD(s.workspace)) return true;
-  if (!s.syncGuard || dev(s.workspace)) return true;
-  const wc = d.webContents;
-  const win = (wc && BrowserWindow.fromWebContents(wc)) || janela;
-  const pergunta = (message, detail) => dialog.showMessageBox(win, {
-    type: 'warning', title: 'NexoEletric', message,
-    detail: `${detail}\n\nSincronizar agora usa só o estado local do almoxarifado. ` +
-      'Componentes novos no Odoo podem receber part numbers diferentes dos que o servidor daria.',
-    buttons: ['Sincronizar assim mesmo', 'Cancelar'], defaultId: 1, cancelId: 1, noLink: true,
-  }).then((r) => r.response === 0);
-
-  await esperaImportacao(wc);
-  const t = await importer.testar(s.serverUrl);
-  if (!t.ok) return pergunta('O servidor central não respondeu.', `${s.serverUrl}: ${t.erro}`);
-  toastNoHub(wc, 'atualizando o almoxarifado a partir do servidor antes de sincronizar…', 'warn');
-  let falha = '';
-  try {
-    await esperaImportacao(wc);                    // uma importacao manual comecou durante o teste
-    const res = await rodarImportacao(['almox'], () => {});
-    const errAlmox = res.erros.filter((e) => importer.ARQ_ALMOX.some((a) => e.startsWith(a + ':')));
-    if (errAlmox.length) {
-      falha = errAlmox.join('; ');
-    } else {
-      const n = res.novos.length + res.atualizados.length;
-      toastNoHub(wc, n ? `estado do almoxarifado atualizado do servidor (${n} arquivo${n > 1 ? 's' : ''})`
-        : 'almoxarifado já estava igual ao do servidor', 'ok');
-    }
-  } catch (e) {
-    log.warn('pre-sincronismo: ' + e.message);
-    falha = e.message;
-  }
-  if (falha) return pergunta('Não consegui trazer do servidor o estado do almoxarifado.', falha);
+// Antes de o hub sincronizar o almoxarifado com o Odoo. Pelo Nexo Hub (1.29.0) o sincronismo roda no
+// NexoBD (nexohub_odoo.py repassa o pedido): nao ha estado local a trazer antes; a revisao nova chega
+// pelo armazem. Numa pasta de desenvolvedor (git) o sincronismo e o local de sempre. O guarda que trazia
+// o livro-razao do servidor central antes (1.2 a 1.30) saiu com ele.
+async function antesDoSincronismo() {
   return true;
 }
 
@@ -598,7 +447,6 @@ function acoesDoMenu() {
   return {
     novaJanela: () => novaJanela(),
     abrirPasta: () => shell.openPath(settings.load().workspace),
-    importar: () => abrirImportacao(),
     configHub: () => abrirConfigDoHub(),
     configApp: () => abrirConfig(),
     sair: () => app.quit(),
@@ -629,7 +477,6 @@ function montarMenu() {
         { type: 'separator' },
         { label: 'Abrir pasta de trabalho', click: () => shell.openPath(settings.load().workspace) },
         { label: 'Nexo Hub: sincronizar projetos e biblioteca', click: () => sincronizarNexoBD() },
-        { label: 'Importar do servidor…', visible: !noNexoBD(), click: () => abrirImportacao() },
         { label: 'Nexo Hub: sincronizar agora', click: () => sincronizarNexoHub() },
         { type: 'separator' },
         { label: 'Configurações do hub…', click: () => abrirConfigDoHub() },
@@ -846,12 +693,10 @@ function sobre() {
       '',
       `pasta de trabalho: ${s.workspace}${dev(s.workspace) ? '  (repositório git: modo desenvolvedor)' : ''}`,
       `hub: ${origem || '—'}${s.lan ? '  (compartilhado na rede)' : ''}`,
-      `servidor central: ${s.serverUrl}`,
-      `biblioteca: ${noNexoBD(s.workspace) ? 'a do Nexo Hub (esta pasta guarda a cópia)' : libRemotaNoAr ? 'a do servidor (esta pasta guarda a cópia para leitura)' : 'a desta pasta de trabalho'}`,
+      `biblioteca: ${noNexoBD(s.workspace) ? 'a do Nexo Hub (esta pasta guarda a cópia)' : 'a desta pasta de trabalho (desenvolvedor)'}`,
       `projetos e biblioteca (pelo Nexo Hub): ${noNexoBD(s.workspace) ? armazem.resumoTexto() : 'desligado'}`,
       `Odoo: ${s.odooUrl} (${s.odooDb})`,
       `Nexo Hub: ${nexoSync.resumoTexto()}`,
-      `última importação: ${importer.ultimaImportacao(s.workspace) || 'nunca'}`,
       '',
       `atualização: ${u.fase}${u.versao ? ' ' + u.versao : ''}${u.erro ? ' — ' + u.erro : ''}`,
     ].join('\n'),
@@ -922,12 +767,9 @@ function registrarIpc() {
       versao: b.version,
       commit: b.commit,
       dev: s.workspace ? dev(s.workspace) : false,
-      // a do hub no ar (a importacao segue esta); a caixa das configuracoes mostra libRemota
-      remota: libRemotaNoAr,
       altium: altiumHome.status(s.workspace),
       nexobd: s.workspace ? noNexoBD(s.workspace) : s.nexobd !== false,
       nexobdEstado: armazem.resumoTexto(),
-      ultimaImportacao: s.workspace ? importer.ultimaImportacao(s.workspace) : '',
       atualizacao: updater.status(),
       tokenEmbutido: Boolean(b.updateToken),
     };
@@ -940,7 +782,6 @@ function registrarIpc() {
     return r.canceled ? '' : r.filePaths[0];
   });
   handle('config:avaliarPasta', (_e, ws) => workspace.avaliar(ws));
-  handle('config:testarServidor', (_e, url) => importer.testar(url));
   handle('config:salvar', async (e, d) => salvarConfig(e, d));
   handle('config:verificarAtualizacoes', async () => updater.verificar(opcoesUpdater, true));
   handle('config:conectarIA', () => { conectarIA(); return true; });
@@ -963,18 +804,6 @@ function registrarIpc() {
   handle('conexao:abrirHub', () => abrirNexoHub());
   handle('conexao:copiar', (_e, texto) => { clipboard.writeText(String(texto || '').slice(0, 20000)); return true; });
   handle('conexao:pastaLogs', () => shell.openPath(LOG_DIR));
-
-  handle('import:iniciar', async (e, grupos) => {
-    const wc = e.sender;
-    const envia = (ev) => { if (!wc.isDestroyed()) wc.send('import:progresso', ev); };
-    return rodarImportacao(grupos, envia);
-  });
-  handle('import:cancelar', () => { if (importando) importando.abort(); return true; });
-  handle('import:abrirPasta', (_e, p) => {
-    const ws = settings.load().workspace;
-    if (p && path.resolve(p).startsWith(path.resolve(ws))) shell.openPath(p);
-    return true;
-  });
 
   handle('picker:fontes', (e) => { const p = pickers.get(e.sender.id); return p ? p.fontes : []; });
   handle('picker:escolher', (e, id) => { const p = pickers.get(e.sender.id); if (p) p.responde(id || null); return true; });
@@ -1002,13 +831,9 @@ async function salvarConfig(e, d) {
     workspace: ws,
     port,
     lan: Boolean(d.lan),
-    serverUrl: validarUrl(d.serverUrl, 'servidor central'),
     odooUrl: validarUrl(d.odooUrl, 'Odoo'),
     odooDb: String(d.odooDb || '').trim() || antes.odooDb,
     autoUpdate: Boolean(d.autoUpdate),
-    libRemota: d.libRemota !== false,
-    // guardado mesmo sem efeito (biblioteca do servidor): volta a valer se ela for desligada
-    syncGuard: d.syncGuard !== false,
     masterPassword: typeof d.masterPassword === 'string' ? d.masterPassword.trim() : antes.masterPassword,
     setupDone: true,
   };
@@ -1020,7 +845,7 @@ async function salvarConfig(e, d) {
   // O ApplyChanges/ExportBoard/... reescrevem sozinhos esse home= para o servidor
   // (RaizAposentada nos .pas): apontar para ca duraria ate a primeira exportacao.
   // Com o NexoBD o home.txt e do Nexo Hub (a pasta do Altium dele): o app nao mexe mais nele.
-  if (armazemNexoBD.ligado({ ...antes, ...novo }, workspace.isDevWorkspace(ws))) { d.apontarAltium = false; d.voltarAltiumServidor = false; d.importar = false; }
+  if (armazemNexoBD.ligado({ ...antes, ...novo }, workspace.isDevWorkspace(ws))) d.apontarAltium = false;
   if (d.apontarAltium && altiumHome.aposentada(ws)) {
     throw new Error(`os scripts do Altium trocam ${ws} pelo servidor sozinhos (caminho aposentado em 2026-09-15); use outra pasta de trabalho`);
   }
@@ -1040,10 +865,8 @@ async function salvarConfig(e, d) {
   if (d.apagarChaveApi) settings.setSegredo('anthropicKey', '');
   settings.save(novo);
 
-  // serverUrl e libRemota entram no env do hub (ALTIUMHUB_BOM_LINK, ALTIUMHUB_LIB_REMOTA): so
-  // valem num hub novo. A pasta tambem conta, porque decide o modo desenvolvedor.
+  // O que entra no env do hub so vale num hub novo. A pasta tambem conta, porque decide o modo desenvolvedor.
   const reinicia = setup || ws !== antes.workspace || port !== antes.port || novo.lan !== antes.lan ||
-    novo.serverUrl !== antes.serverUrl || novo.libRemota !== (antes.libRemota !== false) ||
     novo.masterPassword !== antes.masterPassword || settings.getSegredo('anthropicKey') !== chaveAntes;
 
   // O home.txt so muda DEPOIS de a pasta ter o AI-GUIDE.md (o HomeValida dos .pas).
@@ -1063,12 +886,10 @@ async function salvarConfig(e, d) {
       throw new Error(`não consegui gravar ${altiumHome.ARQ}: ${err.code || err.message}${dica}`);
     }
   };
-  if (d.voltarAltiumServidor) altiumHome.set(altiumHome.SERVIDOR);
 
   if (setup) {
     await apontar();
     await boot();
-    if (d.importar && !dev(ws)) abrirImportacao({ auto: true });
     return { ok: true };
   }
   await apontar();
@@ -1108,8 +929,6 @@ async function smoke() {
       };
     })()`);
     r.hubLog = backend ? backend.tail.slice(-30) : [];
-    // informativo: o build depois do merge do backend deve dizer true (com a configuracao padrao)
-    r.libRemota = libRemotaNoAr;
     r.configPeloMenu = await smokeConfigPeloMenu();
     r.ok = r.page.demo === false && r.page.hubCore === 'object'
       && r.configPeloMenu.principal === true && r.configPeloMenu.semPrincipal === true;

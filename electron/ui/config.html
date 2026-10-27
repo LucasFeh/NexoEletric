@@ -55,30 +55,6 @@
   </div>
 
   <div class="card">
-    <h2>Servidor central</h2>
-    <p>O hub da empresa: a biblioteca é a dele, e é de onde vêm os projetos. O link do BOM que o app copia também é o dele.</p>
-    <div class="campo">
-      <div class="linha">
-        <input type="url" id="serverUrl" class="grow" spellcheck="false">
-        <button class="btn" id="bTestar">Testar</button>
-      </div>
-      <div class="nota" id="nServidor"></div>
-    </div>
-    <label class="check fora-nexobd"><input type="checkbox" id="libRemota">
-      <span><b>Usar a biblioteca do servidor</b>
-      <small>Recomendado. Símbolos, almoxarifado e substituições são lidos e gravados direto no servidor, e esta pasta guarda uma cópia para leitura. Sem o servidor, a biblioteca abre só para leitura. Desligado, este PC tem uma biblioteca própria, que se afasta da do servidor a cada edição.</small></span></label>
-    <div class="nota sob-caixa fora-nexobd" id="nLibRemota"></div>
-    <label class="check so-setup fora-nexobd"><input type="checkbox" id="importar" checked>
-      <span><b>Importar projetos e bibliotecas do servidor ao terminar</b>
-      <small id="importarTxt">Recomendado. Traz os projetos, as bibliotecas publicadas e o almoxarifado (cerca de 80 MB na primeira vez).</small></span></label>
-    <label class="check fora-nexobd"><input type="checkbox" id="syncGuard">
-      <span><b>Antes de sincronizar o almoxarifado com o Odoo, atualizar a partir do servidor</b>
-      <small>O servidor é quem numera os componentes (Libs/almox-parts.json). Com isso ligado, a numeração daqui continua igual à dele.</small></span></label>
-    <div class="nota sob-caixa fora-nexobd" id="nSyncGuard"></div>
-    <p class="nota so-config fora-nexobd" id="nImport"></p>
-  </div>
-
-  <div class="card">
     <h2>Odoo</h2>
     <p>O banco que o almoxarifado consulta. O login e a senha ficam no próprio hub, em <b>Biblioteca › Almoxarifado</b>, e só são pedidos neste PC.</p>
     <div class="linha">
@@ -86,7 +62,6 @@
       <div class="campo" style="width:180px"><span>Base</span><input type="text" id="odooDb" spellcheck="false"></div>
     </div>
     <p class="nota">Vale para uma pasta de trabalho nova. Se a pasta já tem um <code>hub-almox.json</code>, o endereço dele continua valendo.</p>
-    <p class="nota" id="nOdooRemota" style="display:none">Com a biblioteca do servidor, o sincronismo do almoxarifado roda no servidor, com o Odoo e o login de lá: estes campos só valem com ela desligada.</p>
   </div>
 
   <div class="card fora-nexobd">
@@ -95,9 +70,8 @@
     <p class="mono" id="altHome"></p>
     <label class="check"><input type="checkbox" id="apontarAltium">
       <span><b>Apontar o Altium desta máquina para esta pasta de trabalho</b>
-      <small>O que o Altium exportar vai para cá, e não mais para o servidor. Vale para todos os usuários deste PC.</small></span></label>
-    <p class="nota">Depois de apontar, rode os scripts <b>desta</b> pasta, e não do share do servidor: no Altium, <b>DXP › Run Script › Browse</b> e escolha <code id="altPrj"></code>. Os scripts do servidor e os daqui podem ser de versões diferentes.</p>
-    <div class="so-config"><button class="btn" id="bVoltarAltium">Voltar o Altium para o servidor</button></div>
+      <small>O que o Altium exportar vai para cá. Vale para todos os usuários deste PC.</small></span></label>
+    <p class="nota">Depois de apontar, rode os scripts <b>desta</b> pasta: no Altium, <b>DXP › Run Script › Browse</b> e escolha <code id="altPrj"></code>.</p>
   </div>
 
   <div class="card">

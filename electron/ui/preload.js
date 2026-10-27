@@ -42,7 +42,7 @@ if (location.protocol === 'file:') {
 // nomes da lista fechada abaixo e sem argumento -- recarregar, zoom, tela cheia, abrir as
 // configuracoes, sair: nada que leia ou grave arquivo. O main.js confere a origem de novo.
 const MENU = new Set([
-  'novaJanela', 'abrirPasta', 'importar', 'configHub', 'configApp', 'sair',
+  'novaJanela', 'abrirPasta', 'configHub', 'configApp', 'sair',
   'recarregar', 'recarregarSemCache', 'zoomMais', 'zoomMenos', 'zoom0', 'painelProjetos',
   'telaCheia', 'devtools', 'atualizacoes', 'log', 'pastaLogs', 'conectarIA', 'sobre', 'nexoSync', 'nexobd',
 ]);

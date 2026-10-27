@@ -2080,10 +2080,19 @@ const filename = proj => sane(proj || 'placa') + '-BOM.html';
    que quem gerou escolheu. */
 const linkDe = projId => '/bom/' + encodeURIComponent(projId || '');
 
-/* O endereco do BOM de REFERENCIA quando ele mora noutro hub: no app desktop, o do servidor
-   (hubserver.py » ALTIUMHUB_BOM_LINK), que e onde a bancada abre e marca os vistos. null =
+/* O endereco do BOM de REFERENCIA quando ele mora noutro lugar: no app desktop, o do NexoBD
+   (1.31.0, hubserver.py » _bom_base_nexobd), que e onde a bancada abre e marca os vistos. null =
    o BOM e deste hub mesmo (o caso do servidor), e vale o linkDe relativo. Sem conferencia
    no servidor (verificar=0): serve para o rodape e o "abrir", que nao podem esperar a rede. */
+/* O que o hub diz do link (1.31.0: no app desktop, o do NexoBD): {ok, url, externo, nexobd, error}, ou null se o hub
+   nao respondeu. Sem o Nexo Hub conectado vem ok:false com o motivo: o painel avisa em vez de dar um link morto. */
+async function linkInfo(projId){
+  try {
+    const r = await fetch('/api/bom/' + encodeURIComponent(projId || '') + '/link?verificar=0');
+    return await r.json();
+  } catch (e) { return null; }
+}
+
 async function linkRef(projId){
   try {
     const r = await fetch('/api/bom/' + encodeURIComponent(projId || '') + '/link?verificar=0');
@@ -2146,6 +2155,6 @@ function gerar(board, opts, meta){
   return { html: html(m, meta), model: m, warnings: m.warnings };
 }
 
-return { defaults, model, html, filename, gerar, copiarLink, linkDe, linkRef,
+return { defaults, model, html, filename, gerar, copiarLink, linkDe, linkRef, linkInfo,
          textoPolys, padGeom, ladoDe, natural, COR };
 });

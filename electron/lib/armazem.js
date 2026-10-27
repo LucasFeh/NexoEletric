@@ -5,9 +5,18 @@
 //   Projects/<projeto>/  ⇄ um item 'projeto' por pasta (fora do catalogo; so o NexoEletric mostra)
 //   Libs/                ⇄ o item "Biblioteca do NexoEletric" (simbolos, footprints e o almoxarifado do Odoo)
 //   scripts do Altium    → o item "Scripts do Altium" (os do instalador; o Nexo Hub os poe na pasta do Altium dele)
+//   .chat/               ⇄ o item "Chat do NexoEletric" (as conversas do chat do hub; 1.31.0)
 // O trabalho e do electron/lib/espelho-nexobd.mjs (copia do cliente/ do repositorio nexohub, o mesmo que o Hub usa).
 // Pasta apagada nao apaga nada: volta do NexoBD. Projeto apagado no hub (senha mestre) vai para o Trash/ e o hubserver
 // anota em .altiumhub/nexobd-apagar.json; a rodada seguinte o apaga no NexoBD.
+//
+// A BOM (1.31.0; NexoBD 1.9.0, contrato §9): o NexoBD serve a pagina de montagem para a rede local, sem token.
+//   a pagina (bom-pagina.html + hub-bom.js, hub-font.js, hub-laser.js do instalador) → o item "App web da BOM"
+//     (chave nexoeletric-web = bom), a cada versao (uma versao mais velha nao sobrescreve a de uma mais nova);
+//   cada projeto com board.js → o item "BOM: <projeto>" (chave nexoeletric-bom = o slug do link, o _proj_id do
+//     hubserver): fonte.json (a fonte da BOM, gerada pelo hubserver -- o mesmo gerador do painel -- quando o
+//     board.js ou o schematic.js mudam), opts.json (o bom-opts.json do projeto: as opcoes do "Copiar link") e,
+//     so na criacao, os vistos que o projeto ja tinha (bom-vistos.json). Os vistos da bancada gravam no NexoBD.
 //
 // Roda: antes de o hub abrir (a primeira, com espera curta), quando Projects/ ou Libs/ mudam (3 s depois), quando um
 // item nosso muda no NexoBD (o Altium exportou pela pasta do Hub), a cada 2 min, e antes do sincronismo do Odoo.
@@ -16,6 +25,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { execFile } = require('node:child_process');
+const { createHash } = require('node:crypto');
 
 const ESPERA = 3000;
 const ESPERA_EVENTO = 1500;
@@ -25,6 +35,33 @@ const APP = 'nexoeletric';
 // Os scripts do Altium que vao para o NexoBD (do instalador, a pasta resources/hub). AI-GUIDE.md e a marca que o
 // HubHome dos .pas procura para aceitar a pasta.
 const SCRIPTS = ['AltiumPCBMirror.PrjScr', 'ExportProject.pas', 'ExportBoard.pas', 'BuildSchematic.pas', 'ApplyChanges.pas', 'AI-GUIDE.md'];
+
+// A BOM servida pelo NexoBD (1.31.0)
+const SISTEMA_BOM = 'nexoeletric-bom';
+const ARQ_WEB_BOM = ['bom-pagina.html', 'hub-bom.js', 'hub-font.js', 'hub-laser.js'];
+const ALVO_WEB_BOM = {
+  sistema: 'nexoeletric-web', chave: 'bom',
+  criar: { tipo: 'outro', categoria: 'nexoeletric', nome: 'App web da BOM (NexoEletric)', descricao: 'A página de montagem da placa que o NexoBD serve para a rede local (/bom/<projeto>)', atributos: { programa: 'nexoeletric' } },
+};
+// As conversas e o caderno do chat do hub (.chat/ na pasta de trabalho, tools/chat/chatserver.py): no NexoBD tambem
+// (1.31.0), um item so para todas as maquinas (cada conversa e um arquivo com id unico).
+const ALVO_CHAT = {
+  sistema: 'nexoeletric-chat', chave: 'conversas',
+  criar: { tipo: 'outro', categoria: 'nexoeletric', nome: 'Chat do NexoEletric', descricao: 'As conversas e o caderno do chat do hub (a pasta .chat)', atributos: { programa: 'nexoeletric', pasta: '.chat' } },
+};
+/** O slug do projeto no link da BOM: o mesmo _proj_id do hubserver.py. */
+const slugProjeto = (nome) => String(nome || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'proj';
+const cmpVersao = (a, b) => {
+  const x = String(a || '0').split(/[.-]/).map((n) => parseInt(n, 10) || 0), y = String(b || '0').split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (x[i] || 0) - (y[i] || 0); if (d) return d; }
+  return 0;
+};
+const sha256 = (b) => createHash('sha256').update(b).digest('hex');
+const sha256Arq = (arq) => { try { return sha256(fs.readFileSync(arq)); } catch { return null; } };
+const jsonCanonico = (v) => {
+  const ord = (x) => (Array.isArray(x) ? x.map(ord) : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, ord(x[k])])) : x);
+  return JSON.stringify(ord(v));
+};
 
 // O gerador da biblioteca a partir do Odoo (o guardiao + almox2lib) roda no NexoBD (1.29.0: Odoo -> NexoBD -> Nexo Hub
 // -> NexoEletric). O codigo dele continua sendo deste repositorio: sobe do instalador para o item "Ferramentas do Odoo",
@@ -93,9 +130,10 @@ function desligado(env = process.env) {
   return '';
 }
 
-/** O armazem vale para esta pasta? (as configuracoes e a pasta de desenvolvedor decidem; o ambiente tambem) */
+/** O armazem vale para esta pasta? Fora da pasta de desenvolvedor (git), sempre (1.31.0: um "nexobd": false antigo
+ *  nas configuracoes nao desliga mais -- nada do NexoEletric fica so nesta maquina); o ambiente dos testes decide. */
 function ligado(s, ehDev, env = process.env) {
-  return Boolean(s) && s.nexobd !== false && !ehDev && !desligado(env);
+  return Boolean(s) && !ehDev && !desligado(env);
 }
 
 let mods = null;
@@ -114,11 +152,104 @@ function lerJson(arq, padrao) {
 }
 
 /**
+ * O app web da BOM (a pagina e os scripts do instalador) no NexoBD. So sobe se o item nao for de uma versao mais nova
+ * do NexoEletric (duas maquinas com versoes diferentes nao ficam trocando a pagina).
+ */
+async function publicarWebBom({ cliente, bundle, versao, estado, log = () => {} }) {
+  const { espelho } = await modulos();
+  if (!bundle || !ARQ_WEB_BOM.every((f) => fs.existsSync(path.join(bundle, f)))) return null;
+  const it = await cliente.chave(ALVO_WEB_BOM.sistema, ALVO_WEB_BOM.chave);
+  const deLa = it && !it.apagado_em ? (it.atributos || {}).versao : '';
+  if (deLa && versao && cmpVersao(deLa, versao) > 0) return { item: it.id, rev: it.rev, pulado: `versão ${deLa} no NexoBD` };
+  const so = new Set(ARQ_WEB_BOM);
+  const r = await espelho.espelhar({ cliente, pasta: bundle, alvo: ALVO_WEB_BOM, estado, modo: 'subir', aceita: (rel) => so.has(rel), app: APP, log, nota: `página da BOM do NexoEletric ${versao || ''}`.trim() });
+  if (r.item && versao && deLa !== versao) await cliente.alterarItem(r.item, { atributos: { programa: 'nexoeletric', versao } });
+  return r;
+}
+
+/**
+ * A BOM de cada projeto no NexoBD. fonte(nome, slug) → {ok, board} (o /api/bom/<slug>/source do hubserver) ou null
+ * (hub fora: fica para a rodada seguinte). estado = {nome: {item, board, sch, opts}} (mudado aqui).
+ * → {atualizados: [nomes], pendentes: [nomes], erros: [{nome, erro}]}
+ */
+async function espelharBoms({ cliente, ws, nomes, estado, fonte, versao = '', apagados = [], log = () => {} }) {
+  const out = { atualizados: [], pendentes: [], erros: [] };
+  for (const nome of apagados) {
+    try {
+      const it = await cliente.chave(SISTEMA_BOM, slugProjeto(nome));
+      if (it && !it.apagado_em && (it.atributos || {}).projeto === nome) { await cliente.apagarItem(it.id); log(`- BOM ${nome}: apagada no NexoBD`); }
+    } catch (err) { out.erros.push({ nome, erro: err.message }); }
+    delete estado[nome];
+  }
+  for (const nome of nomes) {
+    const pasta = path.join(ws, 'Projects', nome);
+    const shaB = sha256Arq(path.join(pasta, 'board.js'));
+    if (!shaB) continue;                                       // sem board.js nao ha BOM
+    const shaS = sha256Arq(path.join(pasta, 'schematic.js'));
+    let optsTxt = null;
+    try { const o = JSON.parse(fs.readFileSync(path.join(pasta, 'bom-opts.json'), 'utf8')); if (o && typeof o === 'object' && !Array.isArray(o)) optsTxt = jsonCanonico(o); } catch { /* sem opcoes */ }
+    const shaO = optsTxt ? sha256(optsTxt) : null;
+    const e = estado[nome] || (estado[nome] = {});
+    if (e.item && e.board === shaB && e.sch === shaS && e.opts === shaO) continue;
+    const slug = slugProjeto(nome);
+    try {
+      let it = await cliente.chave(SISTEMA_BOM, slug);
+      if (it && it.apagado_em) it = null;
+      if (!it) {
+        it = await cliente.criarItem({ tipo: 'outro', categoria: 'nexoeletric', nome: `BOM: ${nome}`, descricao: 'A BOM do projeto para a bancada: o NexoBD serve em /bom/' + slug,
+          atributos: { programa: 'nexoeletric', projeto: nome, id: slug }, chaves: [{ sistema: SISTEMA_BOM, chave: slug }], app: APP });
+        log(`+ BOM ${nome}: item ${it.id} criado no NexoBD`);
+      }
+      const arqs = it.arquivos || {};
+      const arquivos = {};
+      let fonteAtual = null;
+      if (arqs['fonte.json']) { try { fonteAtual = JSON.parse(Buffer.from(await cliente.blob(arqs['fonte.json'].sha256)).toString('utf8')); } catch { fonteAtual = null; } }
+      const fontes = { board: shaB, schematic: shaS };
+      let pendente = false;
+      if (!fonteAtual || !fonteAtual.fontes || fonteAtual.fontes.board !== shaB || (fonteAtual.fontes.schematic || null) !== shaS) {
+        const f = await fonte(nome, slug);
+        if (f && f.ok && f.board) {
+          const tag = sha256(`${shaB}|${shaS || ''}`).slice(0, 12);
+          arquivos['fonte.json'] = { bytes: Buffer.from(JSON.stringify({ ok: true, projeto: nome, board: f.board, sourceRev: tag, fontes, gerado_em: new Date().toISOString(), gerador: `NexoEletric ${versao}`.trim() })), nome: 'fonte.json' };
+        } else pendente = true;
+      }
+      if (optsTxt && (!arqs['opts.json'] || arqs['opts.json'].sha256 !== shaO)) arquivos['opts.json'] = { bytes: Buffer.from(optsTxt), nome: 'opts.json' };
+      if (!arqs['vistos.json']) {
+        try {
+          const v = JSON.parse(fs.readFileSync(path.join(pasta, 'bom-vistos.json'), 'utf8'));
+          if (v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length) arquivos['vistos.json'] = { bytes: Buffer.from(jsonCanonico(v)), nome: 'vistos.json' };
+        } catch { /* sem vistos antigos */ }
+      }
+      if (Object.keys(arquivos).length) {
+        const rv = await cliente.novaRevisao(it.id, { arquivos, herdar: true, base: it.rev || 0, forcar: true, nota: `BOM de ${nome} (${Object.keys(arquivos).join(', ')})`, app: APP });
+        log(`^ BOM ${nome}: revisão ${rv.numero || rv.rev} (${Object.keys(arquivos).join(', ')})`);
+        out.atualizados.push(nome);
+      }
+      if (pendente) { out.pendentes.push(nome); e.item = it.id; delete e.board; continue; }
+      Object.assign(e, { item: it.id, board: shaB, sch: shaS, opts: shaO });
+    } catch (err) { out.erros.push({ nome, erro: err.message }); }
+  }
+  return out;
+}
+
+/** A fonte da BOM pelo hubserver no ar (o mesmo gerador do painel BOM e da pagina antiga). */
+function fonteDoHub(origem) {
+  return async (_nome, slug) => {
+    if (!origem) return null;
+    try {
+      const r = await fetch(`${origem}/api/bom/${encodeURIComponent(slug)}/source`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+  };
+}
+
+/**
  * Uma rodada (sem agenda; os testes chamam direto).
  * op: {ws, bundle (a pasta com os scripts do instalador, ou ''), cliente, estado, log}
  * → {scripts, biblioteca, projetos}
  */
-async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = true }) {
+async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = true, fonte = null, versao = '' }) {
   const { espelho } = await modulos();
   await espelho.garantirCategoriaInterna(cliente);
   const conflitos = CONFLITOS(ws);
@@ -127,11 +258,17 @@ async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = t
     const so = new Set(SCRIPTS);
     rScripts = await espelho.espelhar({ cliente, pasta: bundle, alvo: espelho.ALVO_SCRIPTS, estado: (estado.scripts ??= {}), modo: 'subir', aceita: (rel) => so.has(rel), app: APP, log, nota: 'scripts do instalador do NexoEletric' });
     await espelho.espelhar({ cliente, pasta: bundle, alvo: ALVO_FERRAMENTAS, estado: (estado.ferramentas ??= {}), modo: 'subir', aceita: aceitaFerramenta, app: APP, log, nota: 'gerador do Odoo do instalador do NexoEletric' });
+    try { await publicarWebBom({ cliente, bundle, versao, estado: (estado.webBom ??= {}), log }); }
+    catch (err) { log(`página da BOM não subiu: ${err.message}`); }
   }
   const biblioteca = await espelho.espelharComRetentativa({
     cliente, pasta: path.join(ws, 'Libs'), alvo: espelho.ALVO_BIBLIOTECA, estado: (estado.biblioteca ??= {}),
     modo: 'ambos', aceita: aceitaLib, conflitos: path.join(conflitos, 'Libs'), app: APP, log, nota: 'NexoEletric',
   });
+  let chat = null;
+  try {
+    chat = await espelho.espelharComRetentativa({ cliente, pasta: path.join(ws, '.chat'), alvo: ALVO_CHAT, estado: (estado.chat ??= {}), modo: 'ambos', conflitos: path.join(conflitos, 'chat'), app: APP, log, nota: 'chat do NexoEletric' });
+  } catch (err) { log(`chat: ${err.message}`); }
   // os projetos que o hub mandou para a lixeira: apagar no NexoBD (a lista so sai do arquivo depois de feito)
   const apagar = lerJson(ARQ_APAGAR(ws), []).filter((n) => typeof n === 'string');
   const projetos = await espelho.espelharProjetos({
@@ -142,14 +279,22 @@ async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = t
     const resto = lerJson(ARQ_APAGAR(ws), []).filter((n) => !apagar.includes(n));
     if (resto.length) fs.writeFileSync(ARQ_APAGAR(ws), JSON.stringify(resto)); else fs.rmSync(ARQ_APAGAR(ws), { force: true });
   }
-  return { scripts: rScripts, biblioteca, projetos };
+  // a BOM de cada projeto (fonte, opcoes) para o NexoBD servir na rede; sem o gerador (hub fora), fica para depois
+  let boms = null;
+  if (fonte) {
+    boms = await espelharBoms({ cliente, ws, nomes: Object.keys(projetos.projetos), estado: (estado.boms ??= {}), fonte, versao, apagados: projetos.apagadosNoNexoBD || [], log });
+    for (const e of boms.erros) log(`BOM ${e.nome}: ${e.erro}`);
+  }
+  return { scripts: rScripts, biblioteca, projetos, boms, chat };
 }
 
 class Armazem {
-  constructor({ log, bundle, python } = {}) {
+  constructor({ log, bundle, python, versao } = {}) {
     this.log = log || console;
     this.bundle = bundle || '';
     this.python = python || '';
+    this.versao = versao || '';
+    this.hub = '';
     this.ws = '';
     this.estado = null;
     this.rodando = null;
@@ -164,6 +309,9 @@ class Armazem {
   }
 
   status() { return { ...this.est }; }
+
+  /** O hubserver no ar (a fonte da BOM sai dele). */
+  definirHub(origem) { this.hub = origem || ''; }
 
   resumoTexto() {
     const e = this.est;
@@ -212,7 +360,7 @@ class Armazem {
         const cliente = c.criarCliente({ app: APP });
         this.est.url = (await cliente.conexao()).url;
         const log = (l) => this.log.info(`[nexobd] ${l}`);
-        const r = await rodada({ ws, bundle: this.bundle, cliente, estado: this.estado, log, scripts: !this.scriptsFeitos });
+        const r = await rodada({ ws, bundle: this.bundle, cliente, estado: this.estado, log, scripts: !this.scriptsFeitos, fonte: fonteDoHub(this.hub), versao: this.versao });
         if (r.scripts) this.scriptsFeitos = true;
         fs.mkdirSync(path.dirname(ARQ_ESTADO(ws)), { recursive: true });
         const tmp = ARQ_ESTADO(ws) + '.tmp';
@@ -293,4 +441,5 @@ class Armazem {
   }
 }
 
-module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, aceitaFerramenta, ALVO_FERRAMENTAS, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_ESTADO, ARQ_PCBLIB };
+module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, aceitaFerramenta, ALVO_FERRAMENTAS, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_ESTADO, ARQ_PCBLIB,
+  espelharBoms, publicarWebBom, fonteDoHub, slugProjeto, SISTEMA_BOM, ALVO_WEB_BOM, ARQ_WEB_BOM, ALVO_CHAT };

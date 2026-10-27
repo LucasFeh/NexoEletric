@@ -4,6 +4,18 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.31.0 — 2026-10-27
+
+- **Nada do NexoEletric fica fora do NexoBD.** O "servidor central" antigo (192.168.15.192:8100) saiu do app: o campo
+  dele nas Configurações, a biblioteca do servidor, o "Importar do servidor" e o link da BOM de lá. Projetos de
+  qualquer máquina sobem para o NexoBD e descem em todas pelo Nexo Hub; as conversas do chat do hub também (item
+  "Chat do NexoEletric"). Um settings.json antigo com o servidor central continua abrindo.
+- **A BOM vem do NexoBD e abre em qualquer PC da rede local**, sem token: `http://<IP do NexoBD>:47810/bom/<projeto>`
+  (ex. `/bom/dmb-di231765-p2`). O NexoEletric publica no NexoBD a página da BOM e a fonte de cada projeto (a cada
+  mudança do esquema/PCB); os vistos da bancada ficam no NexoBD, com histórico. "Copiar link" e "Abrir numa aba" usam
+  esse link; sem o Nexo Hub conectado, o painel avisa. Precisa do **NexoBD 1.9.0** (instale o NexoBD primeiro).
+- Os projetos do servidor central foram migrados para o NexoBD (`tools/nexobd/migrar-central.mjs`, com `--simular`).
+
 ## 1.30.0 — 2026-10-27
 
 - **Ctrl+F no Esquema procura componente.** Pedido do dono: "ctrl+F no esquema te ajuda a procurar um componente, por

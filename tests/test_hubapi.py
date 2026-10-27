@@ -192,11 +192,11 @@ try:
     assert cli.get('/api/bom/%s/opts' % pid).get_json()['opts'] == {'dark': False}
     assert cli.post('/api/bom/%s/opts' % pid, json={'opts': 'nao'}).status_code == 400
 
-    # BOM de REFERENCIA noutro hub (app desktop -> o do servidor .192): o link copiado e o do
-    # outro hub, conferido la, e as opcoes da aba vao junto. Um servidor de mentira faz o .192.
+    # No app desktop (1.31.0) a BOM de REFERENCIA e a do NexoBD: o link copiado e o dele (pelo Nexo Hub),
+    # conferido la; sem o Hub, nao ha link (aviso). Um NexoBD de mentira faz o papel; o Hub, um monkeypatch.
     import http.server
     import threading as _th
-    visto = {'head': [], 'opts': []}
+    visto = {'head': []}
 
     class Ref(http.server.BaseHTTPRequestHandler):
         def do_HEAD(self):
@@ -204,43 +204,83 @@ try:
             self.send_response(200 if self.path == '/bom/' + pid else 404)
             self.end_headers()
 
-        def do_POST(self):
-            corpo = self.rfile.read(int(self.headers.get('Content-Length') or 0))
-            visto['opts'].append((self.path, json.loads(corpo)))
-            self.send_response(200)
-            self.end_headers()
+        def do_GET(self):
+            self.do_HEAD()
 
         def log_message(self, *a):
             pass
 
     ref = http.server.HTTPServer(('127.0.0.1', 0), Ref)
     _th.Thread(target=ref.serve_forever, daemon=True).start()
-    base_antes = H.BOM_LINK_BASE
+    base_nexobd = 'http://127.0.0.1:%d' % ref.server_port
+    antes = (H._bom_no_nexobd, H._bom_base_nexobd, H.BOM_NEXOBD_ESPERA)
     try:
-        H.BOM_LINK_BASE = 'http://127.0.0.1:%d' % ref.server_port
+        H._bom_no_nexobd = lambda: True
+        H._bom_base_nexobd = lambda: (base_nexobd, None)
+        H.BOM_NEXOBD_ESPERA = 1.5
         j = cli.get('/api/bom/%s/link' % pid).get_json()
-        assert j['ok'] and j['externo'] and j['url'] == H.BOM_LINK_BASE + '/bom/' + pid, j
-        assert 'aviso' not in j, 'o projeto existe na referencia: sem aviso'
-        assert visto['opts'] == [('/api/bom/%s/opts' % pid, {'opts': {'dark': False}})], \
-            'as opcoes da aba vao para o hub onde o link abre'
+        assert j['ok'] and j['externo'] and j['nexobd'] and j['url'] == base_nexobd + '/bom/' + pid, j
+        assert 'aviso' not in j, 'a BOM esta no NexoBD: sem aviso'
         n = len(visto['head'])
         j = cli.get('/api/bom/%s/link?verificar=0' % pid).get_json()
-        assert j['url'].startswith(H.BOM_LINK_BASE) and len(visto['head']) == n, \
-            'rodape e "abrir" nao esperam a rede'
-        # a referencia nao tem o projeto (ou nao tem board.js): o link ainda e o dela, com aviso
-        antes_pid = pid
-        visto['head'].clear()
+        assert j['url'].startswith(base_nexobd) and len(visto['head']) == n, 'rodape e "abrir" nao esperam a rede'
+        # a pagina local leva para a do NexoBD; os vistos nao se gravam mais aqui
+        rr = cli.get('/bom/%s' % pid)
+        assert rr.status_code == 302 and rr.headers['Location'] == base_nexobd + '/bom/' + pid, rr.status_code
+        rr = cli.post('/api/bom/%s/vistos' % pid, json={'set': {'R1|10k': True}})
+        assert rr.status_code == 409 and rr.get_json()['nexobd'], rr.status_code
+        # as opcoes do "Copiar link" continuam no projeto (o armazem as leva ao NexoBD)
+        assert cli.post('/api/bom/%s/opts' % pid, json={'opts': {'dark': True}}).status_code == 200
+        # o NexoBD ainda nao tem a BOM: espera um pouco (o armazem esta subindo) e avisa
         Ref.do_HEAD = lambda self: (self.send_response(404), self.end_headers())
-        j = cli.get('/api/bom/%s/link' % antes_pid).get_json()
-        assert j['url'].startswith(H.BOM_LINK_BASE) and 'nao tem este projeto' in j['aviso'], j
-        # referencia fora do ar
-        H.BOM_LINK_BASE = 'http://127.0.0.1:1'
         j = cli.get('/api/bom/%s/link' % pid).get_json()
-        assert j['url'] == 'http://127.0.0.1:1/bom/' + pid and 'nao respondeu' in j['aviso'], j
+        assert j['url'].startswith(base_nexobd) and 'ainda não chegou ao NexoBD' in j['aviso'], j
+        # NexoBD fora da rede
+        H._bom_base_nexobd = lambda: ('http://127.0.0.1:1', None)
+        j = cli.get('/api/bom/%s/link' % pid).get_json()
+        assert 'não respondeu' in j['aviso'], j
+        # sem o Nexo Hub: nada de link (o painel avisa), nem do servidor central
+        H._bom_base_nexobd = lambda: (None, H.nexohub_gate.MSG)
+        rr = cli.get('/api/bom/%s/link' % pid)
+        j = rr.get_json()
+        assert rr.status_code == 503 and not j['ok'] and j['nexobd'] and 'Nexo Hub' in j['error'], j
+        assert '192.168.15.192' not in json.dumps(j)
+        rr = cli.get('/bom/%s' % pid)
+        assert rr.status_code == 503 and 'Nexo Hub' in rr.get_data(as_text=True)
     finally:
-        H.BOM_LINK_BASE = base_antes
+        H._bom_no_nexobd, H._bom_base_nexobd, H.BOM_NEXOBD_ESPERA = antes
         ref.shutdown()
-    assert 'externo' not in cli.get('/api/bom/%s/link' % pid).get_json(), 'sem a variavel, o de sempre'
+    assert 'externo' not in cli.get('/api/bom/%s/link' % pid).get_json(), 'fora do app desktop, o de sempre'
+    assert not hasattr(H, 'BOM_LINK_BASE'), 'o link do servidor central saiu (1.31.0)'
+
+    # _bom_base_nexobd: o que o Hub diz (saude) -> o endereco da rede
+    import nexohub_gate as G
+    import urllib.request as _ur
+
+    class _Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def saude(j):
+        return lambda req, timeout=0: _Resp(json.dumps(j).encode('utf-8'))
+    real_open = _ur.urlopen
+    try:
+        _ur.urlopen = saude({'ok': True, 'bd': {'ok': True, 'url': 'http://127.0.0.1:47810', 'versao': '1.9.0'},
+                             'rede': {'bom': True, 'url': 'http://192.168.15.213:47810'}})
+        assert H._bom_base_nexobd() == ('http://192.168.15.213:47810', None)
+        _ur.urlopen = saude({'ok': True, 'bd': {'ok': True, 'url': 'http://192.168.15.190:47810', 'versao': '1.9.0'},
+                             'rede': {'bom': True, 'url': 'http://172.17.0.2:47810'}})
+        assert H._bom_base_nexobd() == ('http://192.168.15.190:47810', None), 'NexoBD de outra maquina: o endereco do Hub'
+        _ur.urlopen = saude({'ok': True, 'bd': {'ok': True, 'url': 'http://127.0.0.1:47810', 'versao': '1.5.0'}})
+        b, e = H._bom_base_nexobd()
+        assert b is None and '1.9.0' in e, e
+        _ur.urlopen = saude({'ok': False, 'bd': {'ok': False}})
+        assert H._bom_base_nexobd() == (None, G.MSG)
+    finally:
+        _ur.urlopen = real_open
 
     # O estado da bancada NAO pode entrar no watcher: ele muda a cada visto marcado, e o
     # SSE recarregaria todas as paginas abertas - no meio da montagem, que e quando

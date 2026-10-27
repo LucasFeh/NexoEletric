@@ -38,7 +38,6 @@
 <script src="hub-pcbdesfazer.js"></script>
 <!-- os comandos, menus e teclas do Altium (tools/altiumdna): a dica "Altium: Place » Track · P,T" no editor de atalhos -->
 <script src="hub-altiumdna.js"></script>
-<script src="hub-libremota.js"></script>
 <!-- idioma da casca (cabeçalho, abas, fluxo, diálogos) -->
 <script src="hub-i18n.js"></script>
 <script src="hub-altiumabrir.js"></script>
@@ -3993,11 +3992,14 @@ function bomFooter() {
   $('#bomNome').textContent = (bomUrl && bomUrl.id === p.id)
     ? bomUrl.url
     : location.origin + HubBom.linkDe(p.id);
-  /* BOM de referencia noutro hub (app desktop -> o do servidor): o rodape mostra ESSE */
-  if (!(bomUrl && bomUrl.id === p.id) && HubBom.linkRef) {
-    HubBom.linkRef(p.id).then(u => {
+  /* BOM de referencia noutro lugar (app desktop -> a do NexoBD, 1.31.0): o rodape mostra ESSA; sem o Nexo Hub,
+     o motivo de nao haver link, e nao o endereco local */
+  if (!(bomUrl && bomUrl.id === p.id) && (HubBom.linkInfo || HubBom.linkRef)) {
+    (HubBom.linkInfo ? HubBom.linkInfo(p.id) : HubBom.linkRef(p.id).then(u => u && { ok: true, externo: true, url: u })).then(j => {
       const q = proj();
-      if (u && q && q.id === p.id && !(bomUrl && bomUrl.id === p.id)) $('#bomNome').textContent = u;
+      if (!j || !q || q.id !== p.id || (bomUrl && bomUrl.id === p.id)) return;
+      if (j.ok && j.externo && j.url) $('#bomNome').textContent = j.url;
+      else if ((j.nexobd || j.semHub) && !j.ok) $('#bomNome').textContent = j.error || 'BOM sem link: sem conexão com o Nexo Hub';
     });
   }
 }
@@ -4059,8 +4061,8 @@ async function bomCopiarLink() {
   if (!r.ok) return toast(r.error, 'err');
   bomUrl = { id: p.id, url: r.url };
   bomFooter();
-  /* o link e o do servidor, mas o projeto nao esta la (ou o servidor nao respondeu) */
-  if (r.aviso) return toast((r.copiou ? 'link do servidor copiado — ' : 'o link está no rodapé — ') + r.aviso, 'warn');
+  /* o link e o do NexoBD, mas a BOM ainda nao esta la (ou o NexoBD nao respondeu pela rede) */
+  if (r.aviso) return toast((r.copiou ? 'link do NexoBD copiado — ' : 'o link está no rodapé — ') + r.aviso, 'warn');
   if (r.copiou) return toast('link copiado: ' + r.url, 'ok');
   /* área de transferência negada (acontece fora de contexto seguro): o link não pode
      simplesmente sumir — ele está no rodapé, e o aviso diz onde. */
@@ -4074,8 +4076,10 @@ async function bomAbrir() {
   if (!p) return toast('sem projeto selecionado', 'err');
   if (!location.protocol.startsWith('http'))
     return toast('a página do BOM precisa do hub servido por hubserver.py', 'warn');
-  /* no app desktop, o BOM de referencia e o do servidor (HubBom.linkRef); aqui mesmo, o relativo */
-  const ref = HubBom.linkRef ? await HubBom.linkRef(p.id) : null;
+  /* no app desktop, a BOM de referencia e a do NexoBD (1.31.0); sem o Nexo Hub, avisa em vez de abrir */
+  const info = HubBom.linkInfo ? await HubBom.linkInfo(p.id) : null;
+  if (info && (info.nexobd || info.semHub) && !info.ok) return toast(info.error || 'BOM sem link: sem conexão com o Nexo Hub', 'warn');
+  const ref = info ? (info.ok && info.externo ? info.url : null) : (HubBom.linkRef ? await HubBom.linkRef(p.id) : null);
   window.open(ref || HubBom.linkDe(p.id), '_blank');
 }
 

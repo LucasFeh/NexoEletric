@@ -276,7 +276,7 @@ SAVE_BASENAMES = ('changes.js', 'schematic.js', 'annotations.js', 'rules.js')
 # Libs/ e da biblioteca: o symserver (/api/symbols/*) e o guardiao do almoxarifado reescrevem
 # schlib.js, symbols-lib.js e os espelhos inteiros, cada um sob a sua trava. A substituicao de
 # nomes mora num arquivo SEPARADO, o unico de Libs/ que o browser grava direto por aqui. (No
-# app desktop em modo biblioteca remota, este POST vai para o servidor: ver libremota.py.)
+# app desktop, o electron/lib/armazem.js leva a gravacao ao NexoBD, pelo Nexo Hub.)
 # sch-templates-casa.js: os templates de folha criados no hub (hub-schtemplate-ui.js); os do
 # Altium ficam no Libs/sch-templates.js, que e codigo e nao se grava daqui
 # pcblib-hub.js: os footprints criados/alterados no editor de footprint do hub (hub-fplib.js); o
@@ -1410,6 +1410,13 @@ def bom_page(proj_id):
     d = _proj_dir_by_id(proj_id)
     if d is None:
         abort(404)
+    if _bom_no_nexobd():
+        # no app desktop a BOM e a do NexoBD (vistos compartilhados com a bancada): esta pagina leva para la
+        base, erro = _bom_base_nexobd()
+        if base:
+            return Response('', status=302, headers={'Location': base + '/bom/' + proj_id})
+        return Response('<!doctype html><meta charset="utf-8"><p style="font:14px system-ui;padding:24px">'
+                        'BOM sem link: %s</p>' % erro.replace('<', '&lt;'), mimetype='text/html', status=503)
     name = os.path.basename(d)
     if not os.path.isfile(os.path.join(d, 'board.js')):
         return Response(
@@ -1451,6 +1458,10 @@ def api_bom_vistos_set(proj_id):
     d = _proj_dir_by_id(proj_id)
     if d is None:
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
+    if _bom_no_nexobd():
+        # os vistos moram no NexoBD (a bancada marca la): gravar aqui seria um segundo lugar, so desta maquina
+        return {'ok': False, 'error': 'os vistos da BOM ficam no NexoBD: abra o link da BOM (Copiar link / Abrir)',
+                'nexobd': True}, 409
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return {'ok': False, 'error': 'JSON {set:{...}} ou {clear:true} obrigatorio'}, 400
@@ -1506,74 +1517,95 @@ def api_bom_opts_set(proj_id):
     return {'ok': True}
 
 
-# O BOM que vale para a bancada pode morar noutro hub. O app desktop (electron/) roda um hub
-# por PC, mas a referencia -- o projeto que a producao usa e os vistos que os tablets
-# compartilham -- e o hub do servidor: com ALTIUMHUB_BOM_LINK=http://192.168.15.192:8100 o
-# link copiado e o "abrir" apontam para la. Sem a variavel (o proprio servidor), nada muda.
-BOM_LINK_BASE = (os.environ.get('ALTIUMHUB_BOM_LINK') or '').strip().rstrip('/')
+# O BOM que vale para a bancada mora no NexoBD (1.31.0; NexoBD 1.9.0, contrato §9). No app desktop
+# (ALTIUMHUB_NEXOBD=1) o "Copiar link" e o "Abrir" apontam para http://<IP do NexoBD na rede>:47810/bom/<id>:
+# o NexoEletric publica no NexoBD a pagina e os dados da BOM de cada projeto (electron/lib/armazem.js) e o
+# NexoBD serve a pagina para qualquer navegador da rede local, sem token; os vistos da bancada ficam la, com
+# revisao. A maquina que gerou pode estar desligada. O endereco vem do Nexo Hub (a saude dele repassa a do
+# NexoBD: bd.url e rede.bomUrl); sem o Hub conectado nao ha link -- o painel avisa. Ate a 1.30 o link era o do
+# servidor central antigo (ALTIUMHUB_BOM_LINK=http://192.168.15.192:8100), que saiu.
+BOM_NEXOBD_ESPERA = 12.0   # s: o "Copiar link" espera a BOM chegar ao NexoBD (o armazem sobe em segundos)
 
 
-def _bom_na_referencia(proj_id):
-    """O hub de referencia tem o BOM deste projeto? True/False, ou None se nao respondeu.
+def _bom_no_nexobd():
+    return nexohub_gate.ligado()
 
-    HEAD em /bom/<id>: la ele e 404 para projeto desconhecido E para projeto sem board.js,
-    que sao exatamente os dois casos em que o link copiado abriria um erro no tablet.
-    """
+
+def _bom_base_nexobd():
+    """(base, erro): o endereco do NexoBD que a rede local alcanca para o link da BOM, pela saude do Hub."""
+    import urllib.parse
+    import urllib.request
+    url, token = nexohub_gate.conexao()
+    req = urllib.request.Request(url + '/api/v1/saude', headers={'X-App': 'nexoeletric'})
+    if token:
+        req.add_header('Authorization', 'Bearer ' + token)
+    try:
+        with urllib.request.urlopen(req, timeout=4) as r:
+            j = json.loads(r.read().decode('utf-8'))
+    except Exception:                                    # noqa: BLE001 (rede, HTTP 503, JSON)
+        return None, nexohub_gate.MSG
+    bd = j.get('bd') if isinstance(j, dict) else None
+    if not isinstance(j, dict) or not j.get('ok') or not isinstance(bd, dict) or not bd.get('ok'):
+        return None, nexohub_gate.MSG
+    rede = j.get('rede') if isinstance(j.get('rede'), dict) else None
+    if not rede:
+        return None, ('o NexoBD (versão %s) ainda não serve a BOM: atualize o NexoBD para a 1.9.0 ou mais nova '
+                      '(painel do Nexo Hub › Programas da rede)' % (bd.get('versao') or '?'))
+    bd_url = str(bd.get('url') or '').rstrip('/')
+    host = urllib.parse.urlparse(bd_url).hostname or ''
+    if bd_url and host not in LOCAL_ADDRS and not host.startswith('127.'):
+        return bd_url, None                              # o NexoBD de outra maquina: o mesmo endereco que o Hub usa
+    if not rede.get('bom'):
+        return None, ('o NexoBD desta máquina não está aceitando a BOM pela rede ("bomNaRede" desligado no '
+                      'config.json do NexoBD)')
+    base = str(rede.get('url') or '').rstrip('/')
+    if not base:
+        return None, 'o NexoBD não achou o IP desta máquina na rede local (sem placa de rede?)'
+    return base, None
+
+
+def _bom_no_nexobd_existe(base, proj_id):
+    """HEAD <NexoBD>/bom/<id>: True (a BOM esta la), False (ainda nao), None (nao respondeu)."""
     import urllib.error
     import urllib.request
     try:
-        req = urllib.request.Request(BOM_LINK_BASE + '/bom/' + proj_id, method='HEAD')
+        req = urllib.request.Request(base + '/bom/' + proj_id, method='HEAD')
         with urllib.request.urlopen(req, timeout=3) as resp:
             return resp.status == 200
     except urllib.error.HTTPError as e:
-        return False if e.code == 404 else None
+        return False if e.code in (404, 503) else None
     except Exception:                                    # noqa: BLE001 (rede, DNS, timeout)
         return None
-
-
-def _bom_opts_para_referencia(d, proj_id):
-    """Leva as opcoes do BOM gravadas aqui para o hub de referencia. Falhar e silencioso: o
-    link abre do mesmo jeito, so com as opcoes de la."""
-    import urllib.request
-    opts = _bom_json_read(d, BOM_OPTS) if d else {}
-    if not opts:
-        return
-    try:
-        req = urllib.request.Request(BOM_LINK_BASE + '/api/bom/' + proj_id + '/opts',
-                                     data=json.dumps({'opts': opts}).encode('utf-8'),
-                                     headers={'Content-Type': 'application/json'}, method='POST')
-        urllib.request.urlopen(req, timeout=3).close()
-    except Exception:                                    # noqa: BLE001
-        pass
 
 
 @app.route('/api/bom/<proj_id>/link')
 def api_bom_link(proj_id):
     """A URL do BOM deste projeto, no endereco que serve para OUTRA maquina.
 
-    Quem abre o hub em 127.0.0.1 copiaria um link que so funciona no proprio PC -- e o
-    ponto do link e justamente mandar para o tablet. Se o host do request ja e um
-    nome/IP de rede (o caso do dia em que isso virar um servidor de verdade), fica como
-    veio: o proprio Host: do request e a melhor pista de como se chega aqui.
+    No app desktop e a do NexoBD (acima). Fora dele (o repositorio, a web): quem abre o hub em
+    127.0.0.1 copiaria um link que so funciona no proprio PC -- e o ponto do link e justamente
+    mandar para o tablet. Se o host do request ja e um nome/IP de rede, fica como veio.
     """
     if _proj_dir_by_id(proj_id) is None:
         return {'ok': False, 'error': 'projeto nao encontrado'}, 404
-    if BOM_LINK_BASE:
-        # O BOM de referencia e o do OUTRO hub (o do servidor): e la que a bancada inteira
-        # abre e marca os vistos. O slug e o mesmo dos dois lados (_proj_id).
-        r = {'ok': True, 'url': BOM_LINK_BASE + '/bom/' + proj_id, 'lan': True, 'trocado': False,
-             'externo': True}
+    if _bom_no_nexobd():
+        base, erro = _bom_base_nexobd()
+        if not base:
+            return {'ok': False, 'error': 'BOM sem link: ' + erro, 'nexobd': True, 'externo': True}, 503
+        r = {'ok': True, 'url': base + '/bom/' + proj_id, 'lan': True, 'trocado': False,
+             'externo': True, 'nexobd': True}
         if request.args.get('verificar') != '0':
-            tem = _bom_na_referencia(proj_id)
-            if tem:
-                # As opcoes da aba (tema, lados, colunas) acabaram de ser gravadas AQUI pelo
-                # copiarLink; o link abre LA. Repassa, como faria quem copiasse no servidor.
-                _bom_opts_para_referencia(_proj_dir_by_id(proj_id), proj_id)
+            tem = _bom_no_nexobd_existe(base, proj_id)
+            limite = time.time() + BOM_NEXOBD_ESPERA
+            while tem is False and time.time() < limite:
+                time.sleep(1.0)                          # o armazem esta subindo a BOM (o copiar gravou as opcoes)
+                tem = _bom_no_nexobd_existe(base, proj_id)
             if tem is False:
-                r['aviso'] = ('o servidor nao tem este projeto (ou ele esta sem board.js): o link '
-                              'abre um erro la ate o projeto chegar ao servidor')
+                r['aviso'] = ('a BOM deste projeto ainda não chegou ao NexoBD (sem board.js, ou o NexoEletric ainda '
+                              'está enviando): o link abre um aviso até ela chegar')
             elif tem is None:
-                r['aviso'] = 'o servidor nao respondeu agora; o link e o dele, confira quando ele voltar'
+                r['aviso'] = ('o NexoBD não respondeu pela rede em %s agora (firewall?): o link é esse, confira '
+                              'num navegador' % base)
         return r
     host, _, porta = request.host.partition(':')
     trocado = False
@@ -1593,15 +1625,6 @@ def api_bom_link(proj_id):
 sys.path.insert(0, os.path.join(ROOT, 'tools', 'symbols'))
 import symserver                     # noqa: E402
 symserver.registra(app, ROOT)
-
-# ─────────────── biblioteca remota (app desktop) ───────────────
-# Com ALTIUMHUB_LIB_REMOTA=<hub central> a biblioteca e a do SERVIDOR: /api/symbols/*,
-# /api/almox/config e o lib-subs.js vao para la, e Libs/ vira espelho dele para quem le do
-# disco. Sem a variavel (o proprio servidor, a bancada) so existe o status dizendo "local".
-# Fora do try de proposito: sem o modulo, o app subiria local calado -- e a biblioteca
-# voltaria a divergir do servidor, que e o que o modo existe para impedir.
-import libremota                     # noqa: E402
-libremota.registra(app, ROOT, os.environ.get('ALTIUMHUB_LIB_REMOTA'))
 
 # ─────────────────── placa nova (vista PCB » Placa nova) ───────────────────
 # POST /api/board-novo: cria Projects/<nome>/ com o board.js MESTRE do hub-pcbnova.js. Nunca
@@ -1715,7 +1738,6 @@ if __name__ == '__main__':
     configura_escuta(args.host)
     threading.Thread(target=_watcher, daemon=True).start()
     nexohub_gate.inicia(_hub_mudou)
-    libremota.inicia()           # so faz algo com ALTIUMHUB_LIB_REMOTA
     print('NexoEletric:')
     print('  http://127.0.0.1:%d' % args.port)
     ip = _lan_ip() if _ESCUTA_REDE else None

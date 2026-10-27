@@ -29,9 +29,9 @@ test.before(async () => {
 });
 test.after(async () => { await bd?.fechar(); fs.rmSync(tmp, { recursive: true, force: true }); });
 
-test('ligado: padrão sim; não numa pasta de desenvolvedor, nem desligado nas configurações, nem nos testes sem NEXOHUB_URL', () => {
+test('ligado: padrão sim; não numa pasta de desenvolvedor, nem nos testes sem NEXOHUB_URL; "nexobd": false antigo não desliga (1.31.0)', () => {
   assert.equal(armazem.ligado({}, false, {}), true);
-  assert.equal(armazem.ligado({ nexobd: false }, false, {}), false);
+  assert.equal(armazem.ligado({ nexobd: false, serverUrl: 'http://192.168.15.192:8100' }, false, {}), true);
   assert.equal(armazem.ligado({}, true, {}), false);
   assert.equal(armazem.ligado({}, false, { ALTIUMHUB_SMOKE: '1' }), false);
   assert.equal(armazem.ligado({}, false, { ALTIUMHUB_SMOKE: '1', NEXOHUB_URL: 'http://x' }), true);
@@ -89,4 +89,94 @@ test('a pasta de trabalho sobe tudo; outra pasta recebe; nada fica no catálogo'
   // e no outro PC sai também (para a lixeira dele)
   const r4 = await armazem.rodada({ ws: ws2, bundle: '', cliente, estado: est2 });
   assert.deepEqual(r4.projetos.removidosDaqui, ['TCMS_Reader']);
+});
+
+test('duas máquinas: projeto criado/editado em qualquer uma sobe, e projeto novo no NexoBD aparece na outra; o chat também', { skip: pula }, async () => {
+  const A = path.join(tmp, 'maqA'), B = path.join(tmp, 'maqB');
+  const eA = {}, eB = {};
+  escreve(A, 'Projects/Placa A/board.js', 'var pcbmirror={"components":[]}');
+  escreve(B, 'Projects/Placa B/schematic.js', 'var schematic={"items":[]}');
+  escreve(A, '.chat/c1.json', '{"id":"c1"}');
+  await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
+  await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB });
+  await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
+  // os dois projetos nas duas máquinas (todos do NexoBD, não só os "desta máquina")
+  for (const ws of [A, B]) {
+    assert.ok(fs.existsSync(path.join(ws, 'Projects', 'Placa A', 'board.js')), `${ws}: Placa A`);
+    assert.ok(fs.existsSync(path.join(ws, 'Projects', 'Placa B', 'schematic.js')), `${ws}: Placa B`);
+  }
+  assert.equal(le(B, '.chat/c1.json'), '{"id":"c1"}', 'o chat de uma máquina chega na outra');
+  assert.ok(await cliente.chave('nexoeletric-chat', 'conversas'));
+  // B edita o projeto que A criou: sobe; A recebe
+  escreve(B, 'Projects/Placa A/board.js', 'var pcbmirror={"components":[{"ref":"R1"}]}');
+  await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB });
+  await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
+  assert.equal(le(A, 'Projects/Placa A/board.js'), 'var pcbmirror={"components":[{"ref":"R1"}]}');
+  const revs = await cliente.revisoes((await cliente.chave('nexoeletric-projeto', 'Placa A')).id);
+  assert.ok(revs.length >= 2, 'a edição é uma revisão nova (histórico)');
+});
+
+test('BOM: a página e a BOM de cada projeto vão para o NexoBD, que serve /bom/<id> sem token e grava os vistos', { skip: pula }, async () => {
+  const A = path.join(tmp, 'bomA'), B = path.join(tmp, 'bomB'), bundle = path.join(tmp, 'bundle-bom');
+  for (const f of armazem.ARQ_WEB_BOM) escreve(bundle, f, f.endsWith('.html') ? '<!doctype html><title>BOM</title><script src="/bom/_app/hub-bom.js"></script>' : `var x_${f.replace(/\W/g, '_')} = 1;`);
+  for (const f of armazem.SCRIPTS) escreve(bundle, f, `conteúdo de ${f}`);
+  const nome = 'DMB - DI231765_P2', slug = armazem.slugProjeto(nome);
+  assert.equal(slug, 'dmb-di231765-p2');
+  assert.equal(armazem.slugProjeto('MIF - DI261898 - Cartão Allen Bradley 1492 - IFM40D24'), 'mif-di261898-cart-o-allen-bradley-1492-ifm40d24');
+  escreve(A, `Projects/${nome}/board.js`, 'var pcbmirror={"components":[{"ref":"R1"},{"ref":"C1"}]}');
+  escreve(A, `Projects/${nome}/schematic.js`, 'var schematic={"items":[]}');
+  escreve(A, `Projects/${nome}/bom-opts.json`, '{"layout":"f","dark":true}');
+  escreve(A, `Projects/${nome}/bom-vistos.json`, '{"cR1":true}');
+  escreve(A, 'Projects/Sem Placa/schematic.js', 'var schematic={}');
+  let chamadas = 0;
+  const fonte = async (n) => { if (n === nome) chamadas++; return { ok: true, board: { components: [{ ref: 'R1' }, { ref: 'C1' }], generated: 'hoje', projeto: n } }; };
+  const eA = {};
+  const r = await armazem.rodada({ ws: A, bundle, cliente, estado: eA, fonte, versao: '1.31.0' });
+  assert.ok(r.boms.atualizados.includes(nome) && !r.boms.atualizados.includes('Sem Placa'), 'só o projeto com board.js tem BOM');
+  assert.equal(chamadas, 1);
+  const web = await cliente.chave('nexoeletric-web', 'bom');
+  assert.deepEqual(Object.values(web.arquivos).map((a) => a.nome).sort(), [...armazem.ARQ_WEB_BOM].sort());
+  assert.equal(web.atributos.versao, '1.31.0');
+  const it = await cliente.chave('nexoeletric-bom', slug);
+  assert.deepEqual(Object.keys(it.arquivos).sort(), ['fonte.json', 'opts.json', 'vistos.json']);
+  assert.equal(it.atributos.projeto, nome);
+  assert.equal((await cliente.itens()).total, 0, 'nada da BOM no catálogo');
+
+  // rodada de novo sem mudança: nada novo; outra máquina recebe o projeto e não regera a fonte
+  await armazem.rodada({ ws: A, bundle, cliente, estado: eA, fonte, versao: '1.31.0', scripts: false });
+  const eB = {};
+  await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB, fonte, versao: '1.31.0' });
+  assert.equal(chamadas, 1, 'a fonte só é refeita quando o board.js/schematic.js mudam');
+  assert.equal((await cliente.chave('nexoeletric-bom', slug)).rev, it.rev);
+
+  // o NexoBD serve a página e os dados sem token; o visto grava lá
+  const base = bd.url;
+  const pg = await fetch(`${base}/bom/${slug}`);
+  assert.equal(pg.status, 200);
+  assert.match(await pg.text(), /_app\/hub-bom\.js/);
+  const src = await (await fetch(`${base}/api/bom/${slug}/source`)).json();
+  assert.equal(src.board.components.length, 2);
+  assert.deepEqual((await (await fetch(`${base}/api/bom/${slug}/opts`)).json()).opts, { dark: true, layout: 'f' });
+  assert.deepEqual((await (await fetch(`${base}/api/bom/${slug}/vistos`)).json()).vistos, { cR1: true }, 'os vistos antigos do projeto vieram junto');
+  const v = await fetch(`${base}/api/bom/${slug}/vistos`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ set: { cC1: true } }) });
+  assert.deepEqual((await v.json()).vistos, { cC1: true, cR1: true });
+
+  // o esquema mudou na máquina B: a fonte é refeita lá e os vistos da bancada continuam
+  escreve(B, `Projects/${nome}/schematic.js`, 'var schematic={"items":[1]}');
+  await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB, fonte, versao: '1.31.0' });
+  assert.equal(chamadas, 2);
+  const depois = await cliente.chave('nexoeletric-bom', slug);
+  assert.ok(depois.rev > it.rev);
+  assert.deepEqual((await (await fetch(`${base}/api/bom/${slug}/vistos`)).json()).vistos, { cC1: true, cR1: true });
+
+  // uma versão mais velha do NexoEletric não troca a página publicada por uma mais nova
+  const velha = await armazem.publicarWebBom({ cliente, bundle, versao: '1.30.9', estado: {} });
+  assert.match(velha.pulado, /1\.31\.0/);
+
+  // hub fora (sem fonte): fica pendente e tenta de novo na próxima
+  escreve(A, 'Projects/Outra/board.js', 'var pcbmirror={"components":[]}');
+  const r2 = await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA, fonte: async () => null, scripts: false });
+  assert.deepEqual(r2.boms.pendentes, ['Outra']);
+  const r3 = await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA, fonte, scripts: false });
+  assert.deepEqual(r3.boms.atualizados, ['Outra']);
 });
