@@ -125,11 +125,24 @@
     motor.barra(barraEl, topo);
     redesenha();
     /* troca de aba, de projeto, de idioma: a barra acompanha (barato: uma assinatura a cada meio segundo) */
-    setInterval(() => { if (!motor.aberto() && assina() !== assinatura) redesenha(); }, 500);
+    setInterval(() => { ligaVistas(); if (!motor.aberto() && assina() !== assinatura) redesenha(); }, 500);
+  }
+
+  /* clicar dentro da vista (o iframe) e "clicar fora" do menu: o mousedown de la nao chega a
+     este documento e, com o foco ja na vista, a janela daqui nem perde o foco (o blur) */
+  function ligaVista(w) {
+    try {
+      if (!w || !w.document || w.__ehMenubarFecha) return;
+      w.__ehMenubarFecha = true;
+      w.document.addEventListener('mousedown', () => { if (motor && motor.aberto()) motor.fecha(); }, true);
+    } catch (e) { /* outra origem */ }
+  }
+  function ligaVistas() {
+    document.querySelectorAll('iframe').forEach(f => { try { ligaVista(f.contentWindow); } catch (e) { /* outra origem */ } });
   }
 
   window.EletricMenubar = {
-    vistaPronta() { setTimeout(redesenha, 0); },
+    vistaPronta(w) { ligaVista(w); setTimeout(redesenha, 0); },
     /* Alt+letra ou F10 apertado com o foco dentro da vista (o iframe): a barra daqui abre */
     tecla(e) {
       if (!motor || !motor.tecla(e)) return false;

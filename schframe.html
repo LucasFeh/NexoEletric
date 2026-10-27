@@ -68,6 +68,27 @@
     padding:3px 4px; background:var(--panel); border:1px solid var(--border); border-radius:6px;
     box-shadow:var(--shadow-menu);}
   #schtb .sep{width:1px; height:20px; background:var(--border); margin:0 3px;}
+  /* Ctrl+F: a caixa de procurar componente, no alto a direita (a esquerda e da barra de fiacao) */
+  #schBusca{position:absolute; top:8px; right:8px; z-index:13;
+    width:min(460px, calc(100% - 16px)); background:var(--panel); border:1px solid var(--border);
+    border-radius:6px; box-shadow:var(--shadow-menu); font-size:12.5px;}
+  #schBusca[hidden]{display:none;}
+  #schBusca .lin{display:flex; align-items:center; gap:4px; padding:3px 4px 3px 8px;}
+  #schBusca svg{width:16px; height:16px; flex:none; fill:none; stroke:var(--fg-dim); stroke-width:1.8; stroke-linecap:round;}
+  #schBuscaTxt{flex:1; min-width:0; height:26px; border:0; outline:0; background:transparent; color:var(--fg); font:inherit;}
+  #schBusca.nada #schBuscaTxt{color:var(--warn);}
+  #schBuscaN{color:var(--fg-dim); font-size:11px; font-variant-numeric:tabular-nums; white-space:nowrap; padding:0 4px;}
+  #schBusca button{width:24px; height:24px; border:1px solid transparent; border-radius:4px; background:transparent;
+    color:var(--fg-dim); font-size:16px; line-height:1; padding:0;}
+  #schBusca button:hover{color:var(--fg); background:rgba(var(--tint),0.08); border-color:var(--border);}
+  #schBuscaLista{border-top:1px solid var(--border); padding:3px;}
+  #schBuscaLista[hidden]{display:none;}
+  #schBuscaLista .it{display:flex; gap:8px; align-items:baseline; padding:3px 6px; border-radius:4px; cursor:default;}
+  #schBuscaLista .it:hover{background:rgba(var(--tint),0.08);}
+  #schBuscaLista .it.on{background:var(--hi); color:var(--on-hi);}
+  #schBuscaLista .it b{min-width:48px; font-weight:600;}
+  #schBuscaLista .it span{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #schBuscaLista .it i{font-style:normal; font-size:11px; opacity:.7;}
   #schtb button{display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 7px;
     border:1px solid transparent; background:transparent; color:var(--fg-dim); border-radius:4px;}
   #schtb button:hover:not(:disabled){color:var(--fg); background:rgba(var(--tint),0.08); border-color:var(--border);}
@@ -522,6 +543,19 @@
 <body>
 <div id="main">
   <div id="cvwrap"><canvas id="cv"></canvas><div id="fatal"></div>
+    <!-- Ctrl+F: procurar componente por designador, comentario, nome... (schframe.js » abreBusca) -->
+    <div id="schBusca" role="search" hidden>
+      <div class="lin">
+        <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>
+        <input id="schBuscaTxt" type="text" spellcheck="false" autocomplete="off"
+               placeholder="Procurar componente: designador, comentário, nome..." aria-label="Procurar componente">
+        <span id="schBuscaN" aria-live="polite"></span>
+        <button id="schBuscaAnt" title="Anterior (Shift+Enter)">‹</button>
+        <button id="schBuscaProx" title="Próximo (Enter)">›</button>
+        <button id="schBuscaX" title="Fechar (Esc)">×</button>
+      </div>
+      <div id="schBuscaLista" hidden></div>
+    </div>
     <!-- a barra de fiacao: selecionar, fio e os pousos de alimentacao -->
     <div id="schtb" role="toolbar" aria-label="Ferramentas do esquema">
       <button id="tbSel" aria-pressed="true" title="Selecionar e mover (Esc)">

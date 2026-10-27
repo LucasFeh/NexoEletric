@@ -68,6 +68,9 @@ const ATALHOS_SCH = [
      sequência: o D,T fica para a predefinição "Padrão Altium" (PADRAO_ALTIUM_SCH). */
   { id:'template',  tecla:'O,S',    rotulo:'Template da folha (Design » Sheet Templates)', altium:'PLSch:SetTemplateFromLocal' },
   { id:'folha',     tecla:'O,D',    rotulo:'Propriedades da folha (Document Options)',     altium:'PLSch:DocumentPreferencesSchDocumentOptions' },
+  /* 2026-10-27, pedido do dono: o Ctrl+F procura o componente por designador, comentário, nome,
+     footprint ou parâmetro e vai marcando enquanto se digita (schframe.js » abreBusca) */
+  { id:'buscar',    tecla:'Ctrl+F', rotulo:'Procurar componente (designador, comentário, nome...)' },
 ];
 /* A predefinição "Padrão Altium" do Esquema: as teclas do Altium 21 de fábrica (os aceleradores
    de menu, P,W = Place » Wire, e as teclas diretas), tiradas do advsch.rcs pelo hub-altiumdna.js e
@@ -78,7 +81,7 @@ const ATALHOS_SCH = [
 const PADRAO_ALTIUM_SCH = {
   add:'P,P', fio:'P,W', terra:'P,O', rotulo:'P,N', noerc:'P,V,N', girar:'Espaço', espelhoX:'X', espelhoY:'Y',
   rotear:'R', apagar:'Delete', enquadrar:'V,F', grade:'Ctrl+Shift+G', desfazer:'Ctrl+Z', refazer:'Ctrl+Y',
-  tudo:'Ctrl+A', template:'D,T', folha:'O,D',
+  tudo:'Ctrl+A', template:'D,T', folha:'O,D', buscar:'Ctrl+F',
 };
 
 /* Os gestos do mouse e as teclas do fio: fixos (o teclado le a tabela de atalhos; estes o
@@ -208,7 +211,7 @@ const ALTIUM_PCB = { trilha:'PLManRoute:Track', via:'PLPCB:PlaceVia', linha:'PLM
 const ALTIUM_SCH = { add:'PLSch:PlacePart', fio:'PLSch:PlaceWire', terra:'PLSch:PlacePowerPort',
   rotulo:'PLSch:PlaceNetLabel', noerc:'PLSch:PlaceNoERCGeneric', girar:'PLSch:RotateSelectedObjectsCCW',
   enquadrar:'PLSch:ZoomAll', grade:'PLSch:ToggleVisibleGrid', desfazer:'PLSch:Undo', refazer:'PLSch:Redo',
-  tudo:'PLSch:SelectAllObjects' };
+  tudo:'PLSch:SelectAllObjects', buscar:'PLSch:FindText' };
 /* A predefinição "Padrão Altium" da PCB: TODA ação com tecla, as do Altium 21 de fábrica onde há
    (conferidas contra o hub-altiumdna.js no tests/test-altiumdna.js). As que só existem no hub
    (preencher, sinalizar, fantasmas, travar a edição, ajuda) vão para letras que o Altium não usa

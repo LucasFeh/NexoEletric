@@ -118,6 +118,7 @@ const MAPA_SCH = {
   'PLSch:PlacePart': A('add'), 'PLSch:PlacePowerPort': A('terra'), 'PLSch:PlaceWire': A('fio'),
   'PLSch:PlaceNetLabel': A('rotulo'), 'PLSch:PlaceNoERCGeneric': A('noerc'),
   'PLSch:SetTemplateFromLocal': A('template'), 'PLSch:DocumentPreferencesSchDocumentOptions': A('folha'),
+  'PLSch:FindText': A('buscar'),
   /* Tools » Footprint Manager...: o editor de footprint do hub, no componente selecionado */
   'PLWorkspaceManager:PCBLIBImplementationManagement': A('footprints'),
 };

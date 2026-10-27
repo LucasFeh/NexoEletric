@@ -4,6 +4,21 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.30.0 — 2026-10-27
+
+- **Ctrl+F no Esquema procura componente.** Pedido do dono: "ctrl+F no esquema te ajuda a procurar um componente, por
+  qualquer nome, designator, comentário, vai escrevendo e ele vai marcando". Abre uma caixa no alto da folha que procura
+  em todas as folhas, sem diferenciar maiúscula nem acento. Busca no designador, no comentário (ou no Value, quando o
+  comentário é fórmula do Altium), no símbolo, no footprint, nos parâmetros e na descrição.
+  - Enquanto se digita, os achados da folha ficam marcados e a vista vai até eles.
+  - Enter ou ↓ vão para o próximo e Shift+Enter ou ↑ para o anterior, trocando de folha quando precisa.
+  - A lista mostra até 8 achados e aceita clique. Esc fecha e a seleção fica.
+  - O designador exato vem primeiro: "r1" acha o R1 antes do R10. As partes de um componente (A, B...) são um achado só.
+  - Também abre pelo menu do topo, em Editar › Localizar texto... A tecla aparece em Configurações › Atalhos e pode ser trocada.
+- **Corrigido: o menu do topo não fechava ao clicar no esquema ou na PCB.** Depois de abrir um menu (por exemplo, um
+  item com setinha ›), o clique dentro da vista não chegava à barra de menus, que fica fora da vista, e o menu ficava
+  aberto. Agora qualquer clique dentro da vista fecha o menu.
+
 ## 1.29.0 — 2026-10-27
 
 Pedido do dono: "tudo vem do DB … sem ele nada aparece, se ele não tá conectado fica tudo vazio". O caminho agora é

@@ -5787,6 +5787,7 @@ function fazAcao(id){
     case 'template':  if (typeof HubSchTemplateUI !== 'undefined') HubSchTemplateUI.abreEditor(); return;
     case 'folha':     if (typeof HubSchTemplateUI !== 'undefined') HubSchTemplateUI.abreParametros(); return;
     case 'enquadrar': cam.fit(fitBBox()); refazGesto(); return;
+    case 'buscar':    abreBusca(); return;
     case 'grade':     $('btnGrid').click(); return;
     case 'desfazer':  undo(); return;
     case 'refazer':   redo(); return;
@@ -6100,6 +6101,117 @@ function focusComp(c){
   aplicaSel('');
   cam.fit({ x1:c.x-800, y1:c.y-800, x2:c.x+800, y2:c.y+800 });
 }
+/* ------- Ctrl+F: procurar componente -------
+   Pedido do dono (2026-10-27): "ctrl+F no esquema te ajuda a procurar um componente, por
+   qualquer nome, designator, comentario, vai escrevendo e ele vai marcando". Cada palavra
+   digitada tem de aparecer em algum campo do componente (designador, comentario, simbolo,
+   footprint, parametros, descricao), sem caixa e sem acento, em TODAS as folhas. Enquanto se
+   digita, os achados da folha ficam selecionados e a camera vai ao melhor; Enter/Shift+Enter
+   (ou as setas) andam entre eles, trocando de folha quando precisa; Esc fecha e a selecao
+   fica. A lista e refeita a cada passo: undo, troca de folha ou commit trocam os objetos. */
+const semAcento = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const busca = { idx:0, achados:[] };
+function achaComps(q){
+  const palavras = semAcento(q).split(/\s+/).filter(Boolean);
+  if (!palavras.length) return [];
+  const p0 = palavras[0], out = [];
+  model.sheets.forEach((s, si) => {
+    const porRef = new Map();        /* as partes (A, B, ...) de um componente sao um achado so */
+    for (const c of s.comps){
+      const sy = HubCore.symbolOf(SLIB, c.sym);
+      const ref = semAcento(c.ref), com = semAcento(c.comment);
+      const tudo = [ref, com, semAcento(c.sym), semAcento(c.footprint), semAcento(c.params),
+                    semAcento(sy && (sy.description || sy.desc))].join('\n');
+      if (!palavras.every(w => tudo.indexOf(w) >= 0)) continue;
+      const ja = c.ref && porRef.get(c.ref);
+      if (ja){ ja.partes.push(c); continue; }
+      const nota = ref === p0 ? 0 : ref.indexOf(p0) === 0 ? 1 : ref.indexOf(p0) >= 0 ? 2 : com.indexOf(p0) >= 0 ? 3 : 4;
+      const a = { c, si, nota, partes:[c] };
+      if (c.ref) porRef.set(c.ref, a);
+      out.push(a);
+    }
+  });
+  /* a ordem nao depende da folha aberta: o Enter anda numa lista que nao se reembaralha */
+  out.sort((a, b) => a.nota - b.nota || a.si - b.si
+    || String(a.c.ref).localeCompare(String(b.c.ref), undefined, { numeric:true }));
+  return out;
+}
+function buscaVai(passo, enquadra){
+  const q = $('schBuscaTxt').value;
+  const ach = busca.achados = achaComps(q);
+  const n = ach.length;
+  $('schBusca').classList.toggle('nada', !!q.trim() && !n);
+  if (!n){
+    $('schBuscaN').textContent = q.trim() ? 'nada' : '';
+    if (sel.size) limpaSel();
+    pintaListaBusca();
+    return;
+  }
+  busca.idx = ((busca.idx + passo) % n + n) % n;
+  const atual = ach[busca.idx];
+  if (atual.si !== sheetIdx){
+    if (wireDraw) endWire();          /* o fio em curso e da folha que sai (o mesmo do focusComp) */
+    sheetIdx = atual.si; pintaCartaoAtivo();
+  }
+  const daFolha = ach.filter(a => a.si === sheetIdx);
+  selSo([].concat(...daFolha.map(a => a.partes)).map(alvoAll));
+  aplicaSel('');
+  /* enquadra o achado atual (todas as partes dele); digitando, todos os da folha */
+  const caixa = (lista) => {
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    for (const d of lista){ x1 = Math.min(x1, d.x); y1 = Math.min(y1, d.y); x2 = Math.max(x2, d.x); y2 = Math.max(y2, d.y); }
+    cam.fit({ x1:x1 - 800, y1:y1 - 800, x2:x2 + 800, y2:y2 + 800 });
+  };
+  caixa(enquadra || daFolha.length === 1 ? atual.partes : [].concat(...daFolha.map(a => a.partes)));
+  $('schBuscaN').textContent = (busca.idx + 1) + ' de ' + n;
+  pintaListaBusca();
+}
+function pintaListaBusca(){
+  const box = $('schBuscaLista');
+  box.textContent = '';
+  const ach = busca.achados, MAX = 8;
+  const ini = Math.max(0, Math.min(busca.idx - 3, ach.length - MAX));
+  ach.slice(ini, ini + MAX).forEach((a, k) => {
+    const i = ini + k;
+    const li = document.createElement('div');
+    li.className = 'it' + (i === busca.idx ? ' on' : '');
+    const r = document.createElement('b'); r.textContent = a.c.ref || '?';
+    /* comment com formula do Altium por resolver ("=Value + ...") diz nada: vai o Value */
+    const cm = String(a.c.comment || '').trim(), mv = RE_VALUE.exec(String(a.c.params || ''));
+    const d = document.createElement('span');
+    d.textContent = [cm && cm.charAt(0) !== '=' ? cm : (mv ? mv[1].trim() : ''), a.c.sym].filter(Boolean).join(' · ');
+    li.append(r, d);
+    if (model.sheets.length > 1){ const f = document.createElement('i'); f.textContent = model.sheets[a.si].name || ''; li.append(f); }
+    li.addEventListener('mousedown', e => { e.preventDefault(); busca.idx = i; buscaVai(0, true); });
+    box.append(li);
+  });
+  box.hidden = !ach.length;
+}
+function abreBusca(){
+  const b = $('schBusca'), t = $('schBuscaTxt');
+  b.hidden = false;
+  try { window.focus(); } catch (e) {}
+  t.focus(); t.select();
+  if (t.value.trim()) buscaVai(0, false);
+}
+function fechaBusca(){
+  $('schBusca').hidden = true;
+  $('schBuscaLista').hidden = true;
+  $('schBuscaTxt').blur();
+}
+$('schBuscaTxt').addEventListener('input', () => { busca.idx = 0; buscaVai(0, false); });
+$('schBuscaTxt').addEventListener('keydown', e => {
+  if (e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); fechaBusca(); return; }
+  if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault(); e.stopPropagation();
+    buscaVai(e.key === 'ArrowUp' || (e.key === 'Enter' && e.shiftKey) ? -1 : 1, true);
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')){ e.preventDefault(); e.target.select(); }
+});
+$('schBuscaAnt').addEventListener('click', () => buscaVai(-1, true));
+$('schBuscaProx').addEventListener('click', () => buscaVai(1, true));
+$('schBuscaX').addEventListener('click', fechaBusca);
 /* ------- as folhas, em cartoes com miniatura -------
    Era um <select>: dizia o nome da folha e mais nada, e num projeto de duas folhas nao havia
    como saber qual era qual sem trocar e olhar. O cartao mostra a folha COMO ELA ESTA, com o
