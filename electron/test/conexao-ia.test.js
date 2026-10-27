@@ -76,8 +76,8 @@ test('conexao.json: grava o endereço, mantém o token quando o campo vem vazio,
   assert.throws(() => ci.gravarConexao({ url: 'servidor sem http' }, env), /endereço inválido/);
 });
 
-test('saudeHub: Hub no ar com o banco dele fora; Hub fora do ar; Hub que pede token', async () => {
-  let resposta = { ok: true, app: 'nexohub', versao: '2.12.0', revisao: 7, bd: { url: 'http://127.0.0.1:47810', ok: false, erro: 'recusou' } };
+test('saudeHub: conectado só com os dados (bd.ok); respondeu sem os dados = desconectado; fora do ar; token', async () => {
+  let resposta = { ok: true, app: 'nexohub', versao: '2.12.0', revisao: 7, bd: { url: 'http://127.0.0.1:47810', ok: true } };
   let status = 200;
   const srv = http.createServer((req, res) => {
     assert.equal(req.url, '/api/v1/saude');
@@ -90,19 +90,21 @@ test('saudeHub: Hub no ar com o banco dele fora; Hub fora do ar; Hub que pede to
     let h = await ci.saudeHub({ url });
     assert.equal(h.conectado, true);
     assert.equal(h.versao, '2.12.0');
-    assert.deepStrictEqual(h.bd, { ok: false, url: 'http://127.0.0.1:47810', versao: '', erro: 'recusou' });
-    resposta = { ok: true, versao: '1.0.0' };                     // Hub antigo: sem "bd"
+    assert.equal('bd' in h, false);                                // a interface so fala do Hub
+    resposta = { ...resposta, bd: { ok: false, erro: 'recusou' } };
     h = await ci.saudeHub({ url });
-    assert.equal(h.conectado, true);
-    assert.equal(h.bd, null);
+    assert.deepStrictEqual([h.conectado, h.respondeu, h.semDados], [false, true, true]);
+    assert.doesNotMatch(h.erro, /NexoBD|banco|recusou/i);
+    resposta = { ok: true, versao: '1.0.0' };                     // Hub antigo, sem dizer se tem os dados
+    assert.equal((await ci.saudeHub({ url })).conectado, false);
     status = 401;
     h = await ci.saudeHub({ url });
     assert.equal(h.conectado, false);
-    assert.equal(h.erro, 'token inválido');
+    assert.match(h.erro, /token/);
   } finally {
     await new Promise((r) => srv.close(r));
   }
   const fora = await ci.saudeHub({ url: 'http://127.0.0.1:1' });
-  assert.equal(fora.conectado, false);
-  assert.match(fora.erro, /fora do ar|não respondeu/);
+  assert.deepStrictEqual([fora.conectado, fora.respondeu], [false, false]);
+  assert.match(fora.erro, /não respond/);
 });

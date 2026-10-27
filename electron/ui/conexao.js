@@ -1,8 +1,7 @@
 'use strict';
 /* Conectar IA (Ajuda › Conectar IA (MCP)…, o indicador IA no topo do hub e Configurações › Nexo Hub): o MCP do
    NexoEletric e a conexão com o Nexo Hub, no desenho da tela do NexoCAD. Fala com o processo principal só pela ponte
-   do preload (window.altiumhub). O NexoEletric fala com o Nexo Hub; o banco (NexoBD) é do Hub, e aqui só aparece o
-   que o Hub reporta dele (GET /api/v1/saude » bd). Ao vivo: pergunta a cada 3 s enquanto a janela está visível. */
+   do preload (window.altiumhub). Ao vivo: pergunta a cada 3 s enquanto a janela está visível. */
 const api = window.altiumhub;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -38,49 +37,25 @@ function linha(id, classe, titulo, detalhe, dica) {
 let ultimo = null;
 let registro = null;
 
+/* Só o Nexo Hub, como no NexoCAD (pedido do dono: "não precisa, na interface do nexoeletric, mostrar o DB, nem nada
+   além do hub"). Conectado = o Hub respondeu e está com os dados; sem isso o NexoEletric fica vazio (sem projetos e sem
+   biblioteca). A última sincronização entra no detalhe da linha; erro dela, no aviso. */
 function pintaHub(e) {
   const h = e.hub;
+  const a = e.armazem;
+  const s = e.nexoSync;
   if (h.conectado) {
-    linha('eHub', 'on', 'Nexo Hub conectado', [h.url, h.versao && 'versão ' + h.versao, h.revisao != null && 'revisão ' + h.revisao].filter(Boolean).join(' · '),
+    const sinc = !a.ligado ? (a.dev ? 'pasta de desenvolvedor (git)' : '')
+      : a.fase === 'sincronizando' || s.fase === 'sincronizando' ? 'sincronizando…'
+      : a.fase === 'em dia' ? `sincronizado ${quando(a.ultimo)}`
+      : a.fase === 'erro' ? 'a última sincronização falhou' : '';
+    const falhou = (a.ligado && a.fase === 'erro') || s.fase === 'erro';
+    linha('eHub', a.fase === 'sincronizando' ? 'busy' : falhou ? 'warn' : 'on', 'Nexo Hub conectado',
+      [h.url, h.versao && 'versão ' + h.versao, sinc].filter(Boolean).join(' · '),
       `Nexo Hub em ${h.url}${h.maquina ? ' (' + h.maquina + ')' : ''}${h.versao ? '\nVersão ' + h.versao : ''}${h.revisao != null ? '\nRevisão ' + h.revisao : ''}`);
   } else {
-    linha('eHub', 'off', 'Nexo Hub fora do ar', h.erro || h.url);
+    linha('eHub', 'off', 'Nexo Hub desconectado', h.erro || h.url);
   }
-
-  // o banco: so o que o Hub reporta dele
-  if (!h.conectado) linha('eBd', '', 'Banco (NexoBD) do Hub', 'sem informação: o Nexo Hub está fora do ar');
-  else if (!h.bd) linha('eBd', '', 'Banco (NexoBD) do Hub', 'o Nexo Hub não informou (versão antiga do Nexo Hub)');
-  else if (h.bd.ok) linha('eBd', 'on', 'Banco (NexoBD) do Hub', ['no ar', h.bd.versao && 'versão ' + h.bd.versao].filter(Boolean).join(' · '),
-    `O Nexo Hub guarda tudo no NexoBD${h.bd.url ? ' (' + h.bd.url + ')' : ''}`);
-  else linha('eBd', 'off', 'Banco (NexoBD) do Hub', 'fora do ar' + (h.bd.erro ? ': ' + h.bd.erro : ' (o Nexo Hub está no ar, mas o banco dele não responde)'));
-
-  // projetos e biblioteca (lib/armazem.js), pelo Nexo Hub
-  const a = e.armazem;
-  if (!a.ligado) {
-    linha('eProj', '', 'Projetos e biblioteca', a.dev ? 'pasta de desenvolvedor (git): ficam no repositório, fora do Nexo Hub' : 'fora do Nexo Hub nesta pasta de trabalho');
-  } else if (a.fase === 'sincronizando') {
-    linha('eProj', 'busy', 'Projetos e biblioteca', 'sincronizando…');
-  } else if (a.fase === 'em dia') {
-    const r = a.resumo || {};
-    const conf = r.conflitos && r.conflitos.length ? ` · ${plural(r.conflitos.length, 'conflito guardado', 'conflitos guardados')}` : '';
-    linha('eProj', conf ? 'warn' : 'on', 'Projetos e biblioteca',
-      `em dia ${quando(a.ultimo)} · ${plural(r.projetos || 0, 'projeto', 'projetos')}, biblioteca ${r.biblioteca || '?'}${conf}`);
-  } else if (a.fase === 'erro') {
-    linha('eProj', 'off', 'Projetos e biblioteca', `erro: ${a.erro}${a.ultimo ? ` · última sincronização ${quando(a.ultimo)}` : ''}`,
-      `${a.erro}\n\nVocê continua trabalhando na cópia da pasta de trabalho; o que salvar sobe quando o Nexo Hub voltar (a cada 2 min ele tenta de novo, ou clique em Tentar de novo).`);
-  } else {
-    linha('eProj', '', 'Projetos e biblioteca', 'aguardando o hub local subir');
-  }
-
-  // biblioteca 3D e placas (lib/nexohub-sync.js)
-  const s = e.nexoSync;
-  const m = s.resumo && s.resumo.modelos, p = s.resumo && s.resumo.placas;
-  if (s.motivo) linha('eSync', '', 'Biblioteca 3D e placas', 'desligada (' + s.motivo + ')');
-  else if (s.fase === 'sincronizando') linha('eSync', 'busy', 'Biblioteca 3D e placas', 'sincronizando' + (s.progresso ? ` (${s.progresso.fase} ${s.progresso.feitos}/${s.progresso.total})` : '…'));
-  else if (s.fase === 'ok') linha('eSync', 'on', 'Biblioteca 3D e placas', [`em dia ${quando(s.ultimo)}`, m && plural(m.total, 'modelo', 'modelos'), p && plural(p.total, 'placa', 'placas')].filter(Boolean).join(' · '));
-  else if (s.fase === 'offline') linha('eSync', 'off', 'Biblioteca 3D e placas', 'Nexo Hub fora do ar (tenta de novo a cada 2 min)');
-  else if (s.fase === 'erro') linha('eSync', 'off', 'Biblioteca 3D e placas', 'erro: ' + s.erro);
-  else linha('eSync', '', 'Biblioteca 3D e placas', 'aguardando o hub local');
 
   $('hubDir').textContent = `${h.url}  ·  ${h.origem === 'padrão' ? 'endereço padrão (esta máquina)' : h.origem}`;
   $('hubDir').title = 'O mesmo endereço para o NexoCAD e os outros programas da rede\n' + (h.arquivo || '');
@@ -88,18 +63,15 @@ function pintaHub(e) {
   const av = $('hubAviso');
   if (!h.conectado) {
     av.className = 'aviso err';
-    av.innerHTML = 'O NexoEletric guarda os projetos e a biblioteca pelo <b>Nexo Hub</b> desta máquina. Enquanto ele estiver fora do ar, você trabalha na cópia da pasta de trabalho e o que salvar sobe quando ele voltar. Abra o aplicativo <b>Nexo Hub</b> (ícone na bandeja) ou confira a conexão.';
-  } else if (h.bd && !h.bd.ok) {
+    av.innerHTML = '<b>Sem conexão com o Nexo Hub:</b> os projetos e a biblioteca só aparecem com ele conectado. Abra o aplicativo <b>Nexo Hub</b> (ícone na bandeja) ou confira a conexão, e clique em <b>Tentar de novo</b>.';
+  } else if ((a.ligado && a.fase === 'erro') || s.fase === 'erro') {
     av.className = 'aviso warn';
-    av.innerHTML = 'O Nexo Hub está no ar, mas o banco dele (NexoBD) não responde. Os projetos ficam na cópia desta pasta e sobem quando o banco voltar; quem cuida do banco é o Nexo Hub (painel do Nexo Hub).';
-  } else if (e.armazem.ligado && e.armazem.fase === 'erro') {
-    av.className = 'aviso warn';
-    av.innerHTML = 'A última sincronização dos projetos falhou. Clique em <b>Tentar de novo</b>; o detalhe fica no <a id="aLogs">log do app</a>.';
+    av.innerHTML = 'A última sincronização com o Nexo Hub falhou. Clique em <b>Tentar de novo</b>; o detalhe fica no <a id="aLogs">log do app</a>.';
     const l = $('aLogs'); if (l) l.onclick = () => api.chamar('conexao:pastaLogs');
   } else {
     av.className = 'aviso'; av.textContent = '';
   }
-  $('bAbrirHub').hidden = h.conectado;
+  $('bAbrirHub').hidden = h.conectado || h.respondeu;
 }
 
 function pintaLocal(e) {
@@ -184,12 +156,12 @@ $('bTentar').onclick = async () => {
   b.disabled = true;
   const rot = b.lastChild.textContent;
   b.lastChild.textContent = 'Tentando…';
-  linha('eProj', 'busy', 'Projetos e biblioteca', 'sincronizando…');
+  linha('eHub', 'busy', 'Nexo Hub', 'sincronizando…');
   try {
     const r = await api.chamar('conexao:tentar');
     const p = r.projetos;
-    if (p && !p.ok) toast('Projetos e biblioteca: ' + p.erro, 'err', 7000);
-    else if (r.nexoSync && !r.nexoSync.ok) toast('Biblioteca 3D e placas: ' + (r.nexoSync.erro || 'não sincronizou'), 'warn', 7000);
+    if (p && !p.ok) toast('Nexo Hub: ' + p.erro, 'err', 7000);
+    else if (r.nexoSync && !r.nexoSync.ok) toast('Nexo Hub: ' + (r.nexoSync.erro || 'não sincronizou'), 'warn', 7000);
     else if (p) toast(`Em dia: ${plural(p.resumo.projetos, 'projeto', 'projetos')} · ${plural(p.resumo.baixados, 'arquivo baixado', 'arquivos baixados')}, ${plural(p.resumo.subidos, 'subido', 'subidos')}`, 'ok');
     else toast('Sincronizado com o Nexo Hub', 'ok');
   } catch (e) {

@@ -7,8 +7,8 @@
 //                     Se as duas fossem diferentes, o Hub e o app ficariam trocando o registro um do outro.
 //   estadoRegistro -> o MCP "nexoeletric" esta no Claude Code (~/.claude.json) e no Claude Desktop? igual, diferente, ausente
 //   registrar      -> grava nos dois (claude mcp add-json -s user; sem o CLI, no ~/.claude.json; Desktop sem o "type")
-//   saudeHub       -> GET /api/v1/saude do Nexo Hub: o Hub no ar e o banco (NexoBD) que ELE reporta em `bd`.
-//                     O NexoEletric fala so com o Hub; quem fala com o NexoBD e o Hub.
+//   saudeHub       -> GET /api/v1/saude do Nexo Hub. "Conectado" = o Hub respondeu E esta com os dados (bd.ok);
+//                     a interface so fala do Hub (pedido do dono), entao o resto nao sai daqui.
 //   gravarConexao  -> C:\Users\Public\NexoHub\conexao.json (o mesmo arquivo do NexoCAD e dos outros programas)
 const fs = require('node:fs');
 const os = require('node:os');
@@ -54,12 +54,14 @@ function gravarConexao({ url, token } = {}, env = process.env) {
 }
 
 /**
- * Pergunta ao Nexo Hub como ele esta. Nunca lanca: {conectado, url, versao, revisao, maquina, dados,
- * bd: {ok, url, versao} | null, erro, ms}.
+ * Pergunta ao Nexo Hub como ele esta. Nunca lanca: {conectado, respondeu, url, versao, revisao, maquina, erro, ms}.
+ * conectado = respondeu E o /api/v1/saude veio com bd.ok === true (com os dados). Respondeu sem os dados: para a
+ * pessoa e "Nexo Hub desconectado" (semDados: true), sem falar do que ha atras dele.
  */
 async function saudeHub({ url, token, timeout = 2500, fetch: f = globalThis.fetch } = {}) {
   const c = url ? { url: limpaUrl(url), token: token || '' } : lerConexao();
   const t0 = Date.now();
+  const fora = (erro, extra = {}) => ({ conectado: false, respondeu: false, semDados: false, url: c.url, erro, ms: Date.now() - t0, ...extra });
   try {
     const h = {};
     if (c.token) h.Authorization = `Bearer ${c.token}`;
@@ -68,19 +70,15 @@ async function saudeHub({ url, token, timeout = 2500, fetch: f = globalThis.fetc
     let j = null;
     try { j = await r.json(); } catch { /* corpo nao-JSON */ }
     if (!r.ok || !j) {
-      const erro = (j && j.erro) || (r.status === 401 ? 'o Nexo Hub pediu um token (Conexão com o Nexo Hub…)' : `o Nexo Hub respondeu HTTP ${r.status}`);
-      return { conectado: false, url: c.url, erro, ms: Date.now() - t0, bd: null };
+      return fora(r.status === 401 ? 'o Nexo Hub pediu um token (Conexão com o Nexo Hub…)' : (j && j.erro) || `o Nexo Hub respondeu HTTP ${r.status}`,
+        { respondeu: true });
     }
-    const bd = j.bd && typeof j.bd === 'object'
-      ? { ok: j.bd.ok !== false, url: j.bd.url || '', versao: j.bd.versao || '', erro: j.bd.erro || '' }
-      : null;
-    return {
-      conectado: true, url: c.url, versao: j.versao || '', revisao: j.revisao == null ? null : j.revisao,
-      itens: j.itens == null ? null : j.itens, maquina: j.maquina || '', dados: j.dados || '', bd, erro: '', ms: Date.now() - t0,
-    };
+    const info = { url: c.url, versao: j.versao || '', revisao: j.revisao == null ? null : j.revisao, maquina: j.maquina || '', ms: Date.now() - t0 };
+    if (!(j.bd && j.bd.ok === true)) return { ...fora('o Nexo Hub respondeu, mas está sem os dados agora', { respondeu: true, semDados: true }), ...info };
+    return { conectado: true, respondeu: true, semDados: false, erro: '', ...info };
   } catch (err) {
     const tempo = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
-    return { conectado: false, url: c.url, erro: tempo ? `o Nexo Hub não respondeu em ${timeout / 1000} s` : `Nexo Hub fora do ar em ${c.url}`, ms: Date.now() - t0, bd: null };
+    return fora(tempo ? `o Nexo Hub não respondeu em ${timeout / 1000} s` : `o Nexo Hub não responde em ${c.url}`);
   }
 }
 

@@ -264,14 +264,14 @@ async function subirHub({ porta } = {}) {
   avisoSync = avisos.join(' ');
 
   if (noNexoBD(ws)) {
-    status('nexobd', 'trazendo os projetos e a biblioteca do NexoBD…');
+    status('nexobd', 'trazendo os projetos e a biblioteca do Nexo Hub…');
     const r = await Promise.race([
       armazem.iniciar(ws),
       new Promise((res) => setTimeout(() => res({ ok: true, esperando: true }), ESPERA_PRIMEIRA)),
     ]);
     if (r.esperando) log.warn('[nexobd] a primeira rodada passou do tempo: o hub abre e ela segue por trás');
     else if (!r.ok) {
-      avisoSync = [avisoSync, `Sem o NexoBD agora (${r.erro}): o hub abre com a última cópia desta pasta, ` +
+      avisoSync = [avisoSync, `Sem o Nexo Hub agora (${r.erro}): o hub abre com a última cópia desta pasta, ` +
         'e o que você salvar sobe quando ele voltar.'].filter(Boolean).join(' ');
     }
   } else {
@@ -423,8 +423,8 @@ function aviso(message, detail) {
 function abrirImportacao(opts = {}) {
   const s = settings.load();
   if (noNexoBD(s.workspace)) {
-    aviso('Os projetos e a biblioteca vêm do NexoBD.',
-      'Não há mais o que importar do servidor: o NexoEletric traz tudo do NexoBD sozinho (Arquivo › NexoBD: sincronizar agora).');
+    aviso('Os projetos e a biblioteca vêm do Nexo Hub.',
+      'Não há mais o que importar do servidor: o NexoEletric traz tudo do Nexo Hub sozinho (Arquivo › Nexo Hub: sincronizar projetos e biblioteca).');
     return;
   }
   if (!s.setupDone || !s.workspace) {
@@ -509,13 +509,13 @@ async function antesDoSincronismo(d) {
   // ter sincronizado); o que o sincronismo gravar sobe sozinho depois.
   if (noNexoBD(s.workspace)) {
     const wc = d.webContents;
-    toastNoHub(wc, 'trazendo a biblioteca do NexoBD antes de sincronizar com o Odoo…', 'info');
+    toastNoHub(wc, 'trazendo a biblioteca do Nexo Hub antes de sincronizar com o Odoo…', 'info');
     const r = await armazem.agora('antes do sincronismo do Odoo');
     if (r.ok) return true;
     const win = (wc && BrowserWindow.fromWebContents(wc)) || janela;
     return dialog.showMessageBox(win, {
-      type: 'warning', title: 'NexoEletric', message: 'Não consegui falar com o NexoBD.',
-      detail: `${r.erro}\n\nSincronizar agora usa a biblioteca desta cópia; ela sobe para o NexoBD quando ele voltar.`,
+      type: 'warning', title: 'NexoEletric', message: 'Não consegui falar com o Nexo Hub.',
+      detail: `${r.erro}\n\nSincronizar agora usa a biblioteca desta cópia; ela sobe para o Nexo Hub quando ele voltar.`,
       buttons: ['Sincronizar assim mesmo', 'Cancelar'], defaultId: 1, cancelId: 1, noLink: true,
     }).then((x) => x.response === 0);
   }
@@ -639,7 +639,7 @@ function montarMenu() {
         { label: 'Nova janela', accelerator: 'CmdOrCtrl+Shift+N', click: () => novaJanela() },
         { type: 'separator' },
         { label: 'Abrir pasta de trabalho', click: () => shell.openPath(settings.load().workspace) },
-        { label: 'NexoBD: sincronizar agora', click: () => sincronizarNexoBD() },
+        { label: 'Nexo Hub: sincronizar projetos e biblioteca', click: () => sincronizarNexoBD() },
         { label: 'Importar do servidor…', visible: !noNexoBD(), click: () => abrirImportacao() },
         { label: 'Nexo Hub: sincronizar agora', click: () => sincronizarNexoHub() },
         { type: 'separator' },
@@ -739,8 +739,8 @@ async function abrirConfigDoHub() {
 /* O MCP do NexoEletric e a conexao com o Nexo Hub: a tela "Conectar IA" (ui/conexao.html), no desenho da do NexoCAD
    (Avaliar › Conectar IA). O MCP da a IA (Claude Code, Claude Desktop...) as ferramentas para operar projeto, esquema,
    PCB, regras/DRC, pour, ECO, Gerber e PDF; o servidor roda no proprio Electron como Node (ELECTRON_RUN_AS_NODE). A
-   conexao: o NexoEletric fala so com o Nexo Hub (conexao.json); o banco (NexoBD) e do Hub, e a tela so mostra o que
-   o Hub reporta dele. Ate a 1.28 isto era uma caixa de mensagem do Windows. */
+   conexao: o NexoEletric fala so com o Nexo Hub (conexao.json), e a tela so fala dele (pedido do dono: nada alem do
+   Hub na interface). Ate a 1.28 isto era uma caixa de mensagem do Windows. */
 function conectarIA() {
   if (janelaConexao && !janelaConexao.isDestroyed()) { janelaConexao.show(); janelaConexao.focus(); return; }
   janelaConexao = new BrowserWindow({
@@ -818,8 +818,8 @@ function vigiarConexao() {
     const era = antes;
     antes = f;
     const wc = janela && !janela.isDestroyed() ? janela.webContents : null;
-    if (f === 'erro') toastNoHub(wc, `Projetos e biblioteca sem o Nexo Hub (${st.erro}). Você segue na cópia desta pasta e o que salvar sobe quando ele voltar — Ajuda › Conectar IA (MCP) mostra o estado e tenta de novo.`, 'warn');
-    else if (era === 'erro') toastNoHub(wc, 'Nexo Hub de volta: projetos e biblioteca em dia', 'ok');
+    if (f === 'erro') toastNoHub(wc, 'Sem conexão com o Nexo Hub: os projetos e a biblioteca só aparecem com ele conectado. Ajuda › Conectar IA (MCP) mostra o estado e tenta de novo.', 'warn');
+    else if (era === 'erro') toastNoHub(wc, 'Nexo Hub conectado de novo: projetos e biblioteca em dia', 'ok');
   }, 5000);
   if (t.unref) t.unref();
 }
@@ -834,14 +834,14 @@ async function sincronizarNexoHub() {
   else toastNoHub(wc, 'Nexo Hub: ' + (r.erro || 'não sincronizou'), 'warn');
 }
 
-// Arquivo › NexoBD: sincronizar agora (projetos e biblioteca).
+// Arquivo › Nexo Hub: sincronizar projetos e biblioteca.
 async function sincronizarNexoBD() {
   const wc = focada() && focada().webContents;
-  if (!noNexoBD()) { toastNoHub(wc, 'NexoBD desligado nesta pasta de trabalho (pasta de desenvolvedor ou configuração)', 'warn'); return; }
-  toastNoHub(wc, 'NexoBD: sincronizando projetos e biblioteca…', 'info');
+  if (!noNexoBD()) { toastNoHub(wc, 'Projetos e biblioteca fora do Nexo Hub nesta pasta de trabalho (pasta de desenvolvedor ou configuração)', 'warn'); return; }
+  toastNoHub(wc, 'Nexo Hub: sincronizando projetos e biblioteca…', 'info');
   const r = await armazem.agora('pedido');
   const x = r.resumo;
-  if (r.ok) toastNoHub(wc, `NexoBD: ${x.projetos} projeto(s), biblioteca ${x.biblioteca} — ${x.baixados} arquivo(s) baixado(s), ${x.subidos} subido(s)` + (x.conflitos.length ? ` · ${x.conflitos.length} conflito(s) guardado(s)` : ''), x.conflitos.length ? 'warn' : 'ok');
+  if (r.ok) toastNoHub(wc, `Nexo Hub: ${x.projetos} projeto(s), biblioteca ${x.biblioteca} — ${x.baixados} arquivo(s) baixado(s), ${x.subidos} subido(s)` + (x.conflitos.length ? ` · ${x.conflitos.length} conflito(s) guardado(s)` : ''), x.conflitos.length ? 'warn' : 'ok');
   else toastNoHub(wc, 'Projetos e biblioteca (Nexo Hub): ' + r.erro + ' — Ajuda › Conectar IA (MCP) mostra o estado e tenta de novo', 'warn');
 }
 
@@ -858,7 +858,7 @@ function sobre() {
       `pasta de trabalho: ${s.workspace}${dev(s.workspace) ? '  (repositório git: modo desenvolvedor)' : ''}`,
       `hub: ${origem || '—'}${s.lan ? '  (compartilhado na rede)' : ''}`,
       `servidor central: ${s.serverUrl}`,
-      `biblioteca: ${noNexoBD(s.workspace) ? 'a do NexoBD (esta pasta guarda a cópia)' : libRemotaNoAr ? 'a do servidor (esta pasta guarda a cópia para leitura)' : 'a desta pasta de trabalho'}`,
+      `biblioteca: ${noNexoBD(s.workspace) ? 'a do Nexo Hub (esta pasta guarda a cópia)' : libRemotaNoAr ? 'a do servidor (esta pasta guarda a cópia para leitura)' : 'a desta pasta de trabalho'}`,
       `projetos e biblioteca (pelo Nexo Hub): ${noNexoBD(s.workspace) ? armazem.resumoTexto() : 'desligado'}`,
       `Odoo: ${s.odooUrl} (${s.odooDb})`,
       `Nexo Hub: ${nexoSync.resumoTexto()}`,
