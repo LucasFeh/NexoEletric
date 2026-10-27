@@ -44,6 +44,7 @@ test('a pasta de trabalho sobe tudo; outra pasta recebe; nada fica no catálogo'
   const ws = path.join(tmp, 'ws1'), bundle = path.join(tmp, 'bundle');
   for (const f of armazem.SCRIPTS) escreve(bundle, f, `conteúdo de ${f}`);
   escreve(bundle, 'hub.html', '<html>');
+  for (const f of ['tools/almox/almox2lib.py', 'tools/symbols/guardiao.py', 'tools/libpath.py', 'tools/chat/chatserver.py', 'tools/symbols/config.json']) escreve(bundle, f, `# ${f}`);
   escreve(ws, 'Libs/schlib.js', 'var schlib={}');
   escreve(ws, 'Libs/almox-parts.json', '{}');
   escreve(ws, 'Libs/3d/cache.step', 'cache');
@@ -56,6 +57,9 @@ test('a pasta de trabalho sobe tudo; outra pasta recebe; nada fica no catálogo'
   assert.deepEqual(Object.keys(r.projetos.projetos), ['TCMS_Reader']);
   const scripts = await cliente.chave('nexoeletric-scripts', 'altium');
   assert.deepEqual(Object.values(scripts.arquivos).map((a) => a.nome).sort(), [...armazem.SCRIPTS].sort());
+  // o gerador do Odoo sobe para o NexoBD rodar o sincronismo (so o que ele usa; nada de config da maquina nem do chat)
+  const ferr = await cliente.chave('nexoeletric-ferramentas', 'odoo');
+  assert.deepEqual(Object.values(ferr.arquivos).map((a) => a.nome).sort(), ['tools/almox/almox2lib.py', 'tools/libpath.py', 'tools/symbols/guardiao.py']);
   const lib = await cliente.chave('nexoeletric-biblioteca', 'principal');
   assert.deepEqual(Object.values(lib.arquivos).map((a) => a.nome).sort(), ['almox-parts.json', 'schlib.js'], 'o cache do 3D fica fora');
   assert.equal((await cliente.itens()).total, 0, 'projetos, biblioteca e scripts não aparecem no catálogo');

@@ -26,6 +26,21 @@ const APP = 'nexoeletric';
 // HubHome dos .pas procura para aceitar a pasta.
 const SCRIPTS = ['AltiumPCBMirror.PrjScr', 'ExportProject.pas', 'ExportBoard.pas', 'BuildSchematic.pas', 'ApplyChanges.pas', 'AI-GUIDE.md'];
 
+// O gerador da biblioteca a partir do Odoo (o guardiao + almox2lib) roda no NexoBD (1.29.0: Odoo -> NexoBD -> Nexo Hub
+// -> NexoEletric). O codigo dele continua sendo deste repositorio: sobe do instalador para o item "Ferramentas do Odoo",
+// que o NexoBD usa na hora de sincronizar (cada versao do NexoEletric leva a sua).
+const ALVO_FERRAMENTAS = {
+  sistema: 'nexoeletric-ferramentas', chave: 'odoo',
+  criar: { tipo: 'outro', categoria: 'nexoeletric', nome: 'Ferramentas do Odoo (NexoEletric)', descricao: 'O gerador da biblioteca a partir do Odoo (guardião + almox2lib): o NexoBD roda com ele o sincronismo do Odoo', atributos: { programa: 'nexoeletric' } },
+};
+const FERRAMENTAS_DIRS = ['tools/almox', 'tools/symbols', 'tools/pcblib', 'tools/pcbdoc'];
+function aceitaFerramenta(rel) {
+  if (rel.endsWith('/')) return rel === 'tools/' || FERRAMENTAS_DIRS.includes(rel.slice(0, -1));
+  if (rel === 'tools/libpath.py') return true;
+  const d = rel.slice(0, rel.lastIndexOf('/'));
+  return FERRAMENTAS_DIRS.includes(d) && /\.(py|json|csv)$/i.test(rel) && !/(^|\/)(test_|config\.json$)/i.test(rel);
+}
+
 // Fora da biblioteca: o cache dos STEP extraidos da PcbLib (refeito sob demanda pelo hubserver).
 function aceitaLib(rel) {
   return !/^3d(\/|$)/i.test(rel) && rel !== 'pcblib-3d.js';
@@ -111,6 +126,7 @@ async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = t
   if (scripts && bundle && fs.existsSync(path.join(bundle, 'ExportProject.pas'))) {
     const so = new Set(SCRIPTS);
     rScripts = await espelho.espelhar({ cliente, pasta: bundle, alvo: espelho.ALVO_SCRIPTS, estado: (estado.scripts ??= {}), modo: 'subir', aceita: (rel) => so.has(rel), app: APP, log, nota: 'scripts do instalador do NexoEletric' });
+    await espelho.espelhar({ cliente, pasta: bundle, alvo: ALVO_FERRAMENTAS, estado: (estado.ferramentas ??= {}), modo: 'subir', aceita: aceitaFerramenta, app: APP, log, nota: 'gerador do Odoo do instalador do NexoEletric' });
   }
   const biblioteca = await espelho.espelharComRetentativa({
     cliente, pasta: path.join(ws, 'Libs'), alvo: espelho.ALVO_BIBLIOTECA, estado: (estado.biblioteca ??= {}),
@@ -225,9 +241,11 @@ class Armazem {
         this.ouvir(cliente);
         return { ok: true, resumo: this.est.resumo };
       } catch (err) {
-        this.est.fase = 'erro'; this.est.erro = err.message;
+        // para o usuario so existe o Nexo Hub: o "NexoBD fora do ar" que a ponte repassa vira "sem os dados"
+        const txt = /NexoBD|nexobd_fora/i.test(err.message) ? 'o Nexo Hub está sem os dados agora' : err.message;
+        this.est.fase = 'erro'; this.est.erro = txt;
         this.log.warn(`[nexobd] ${motivo}: ${err.message}`);
-        return { ok: false, erro: err.message };
+        return { ok: false, erro: txt };
       } finally {
         // com ou sem o NexoBD: a PcbLib desta copia e a que vale para os footprints
         try {
@@ -275,4 +293,4 @@ class Armazem {
   }
 }
 
-module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_ESTADO, ARQ_PCBLIB };
+module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, aceitaFerramenta, ALVO_FERRAMENTAS, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_ESTADO, ARQ_PCBLIB };

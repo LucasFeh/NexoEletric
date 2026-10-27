@@ -144,6 +144,36 @@ def _watcher():
                 _version += 1
 
 
+# Sem o Nexo Hub, nada de projeto nem de biblioteca (nexohub_gate.py): o app desktop so mostra o que
+# veio dele. Conectou ou caiu: a versao sobe e as paginas abertas recarregam (vazias ou cheias).
+import nexohub_gate                  # noqa: E402
+
+
+def _hub_mudou(_ok):
+    global _version
+    with _version_lock:
+        _version += 1
+
+
+@app.before_request
+def _sem_hub():
+    r = nexohub_gate.bloqueia(request.path, request.method)
+    if r is not None:
+        corpo, status, tipo = r
+        return Response(corpo, status=status, mimetype=tipo.split(';')[0])
+    return None
+
+
+# o sincronismo com o Odoo e a configuracao dele vao ao NexoBD pelo Nexo Hub (nexohub_odoo.py)
+import nexohub_odoo                  # noqa: E402
+nexohub_odoo.registra(app, Response, request)
+
+
+@app.route('/api/nexohub/estado')
+def api_nexohub_estado():
+    return nexohub_gate.estado()
+
+
 @app.after_request
 def _no_store(resp):
     resp.headers['Cache-Control'] = 'no-store'
@@ -1684,6 +1714,7 @@ if __name__ == '__main__':
     args = ap.parse_args()
     configura_escuta(args.host)
     threading.Thread(target=_watcher, daemon=True).start()
+    nexohub_gate.inicia(_hub_mudou)
     libremota.inicia()           # so faz algo com ALTIUMHUB_LIB_REMOTA
     print('NexoEletric:')
     print('  http://127.0.0.1:%d' % args.port)

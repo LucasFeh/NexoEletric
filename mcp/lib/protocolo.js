@@ -12,12 +12,13 @@
 const VERSOES = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const { ErroMcp } = require('./contexto.js');
 const skills = require('./skills.js');
+const gate = require('./gate-hub.js');
 
 const ERR = { PARSE: -32700, REQ: -32600, METODO: -32601, PARAMS: -32602, INTERNO: -32603 };
 
 const INSTRUCOES = [
   'NexoEletric: esquema e PCB no DNA do Altium Designer. Esquema em mil (Y para cima, grade de 100 mil); PCB em mm (Y para cima, rotação anti-horária).',
-  'App: app_status diz se o NexoEletric está aberto. Aberto = ao vivo: tudo o que você grava aparece na tela do usuário na hora, e o indicador "IA" no topo do app mostra cada comando. Fechado: as ferramentas de arquivo funcionam igual (o app sobe tudo para o NexoBD quando abrir); app_abrir abre o app, vista_abrir mostra um projeto ao usuário.',
+  'App: app_status diz se o NexoEletric está aberto. Aberto = ao vivo: tudo o que você grava aparece na tela do usuário na hora, e o indicador "IA" no topo do app mostra cada comando. Fechado: as ferramentas de arquivo funcionam igual; app_abrir abre o app, vista_abrir mostra um projeto ao usuário. Projetos, esquemas, símbolos e footprints vêm do Nexo Hub: sem ele conectado, as ferramentas de projeto/biblioteca recusam (não há cópia local que valha).',
   'Comece por projeto_listar → projeto_resumo {projeto}. Leia os sinalizadores abertos (sinal_listar) antes de mexer: são pendências do usuário. Projeto do Altium: projeto_abrir_altium com o .PrjPcb traz esquema E PCB.',
   'SÍMBOLO: sym_ler mostra o desenho; sym_gerar monta um CI/conector a partir da lista de pinos; sym_salvar grava (destino "projeto" = no esquema do projeto, vale na hora; "biblioteca" = Biblioteca de símbolos do hub; "altium" = redesenha um da SchLib da casa).',
   'FOOTPRINT/3D: fp_pacote (assistente) ou fp_salvar; fp_corpo3d (modelo já na biblioteca), fp_3d_importar (STEP do disco), fp_3d_nexo (modelo da biblioteca da rede Nexo); fp_vincular liga o footprint ao componente.',
@@ -131,6 +132,8 @@ class Servidor {
   /* executa uma ferramenta e embrulha o resultado (o tools/call e o lote usam) */
   async executa(f, args) {
     try {
+      const semHub = await gate.recusa(f.nome, this.ctx);
+      if (semHub) throw new ErroMcp(semHub, { semHub: true });
       const r = await f.executa(args, this.ctx, this);
       return resultado(r, this.versaoProtocolo);
     } catch (e) {

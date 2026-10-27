@@ -271,8 +271,8 @@ async function subirHub({ porta } = {}) {
     ]);
     if (r.esperando) log.warn('[nexobd] a primeira rodada passou do tempo: o hub abre e ela segue por trás');
     else if (!r.ok) {
-      avisoSync = [avisoSync, `Sem o Nexo Hub agora (${r.erro}): o hub abre com a última cópia desta pasta, ` +
-        'e o que você salvar sobe quando ele voltar.'].filter(Boolean).join(' ');
+      avisoSync = [avisoSync, `Sem conexão com o Nexo Hub (${r.erro}): os projetos e a biblioteca só aparecem com ele ` +
+        'conectado; assim que ele voltar, o hub recarrega sozinho.'].filter(Boolean).join(' ');
     }
   } else {
     armazem.parar();
@@ -505,20 +505,9 @@ async function esperaImportacao(wc) {
 async function antesDoSincronismo(d) {
   if (libRemotaNoAr) return true;
   const s = settings.load();
-  // NexoBD: a biblioteca que numera e a do NexoBD. Traz a versao de la antes (outra maquina pode
-  // ter sincronizado); o que o sincronismo gravar sobe sozinho depois.
-  if (noNexoBD(s.workspace)) {
-    const wc = d.webContents;
-    toastNoHub(wc, 'trazendo a biblioteca do Nexo Hub antes de sincronizar com o Odoo…', 'info');
-    const r = await armazem.agora('antes do sincronismo do Odoo');
-    if (r.ok) return true;
-    const win = (wc && BrowserWindow.fromWebContents(wc)) || janela;
-    return dialog.showMessageBox(win, {
-      type: 'warning', title: 'NexoEletric', message: 'Não consegui falar com o Nexo Hub.',
-      detail: `${r.erro}\n\nSincronizar agora usa a biblioteca desta cópia; ela sobe para o Nexo Hub quando ele voltar.`,
-      buttons: ['Sincronizar assim mesmo', 'Cancelar'], defaultId: 1, cancelId: 1, noLink: true,
-    }).then((x) => x.response === 0);
-  }
+  // Pelo Nexo Hub (1.29.0) o sincronismo roda no NexoBD (nexohub_odoo.py repassa o pedido): nao ha
+  // biblioteca local a trazer antes; a revisao nova chega pelo armazem.
+  if (noNexoBD(s.workspace)) return true;
   if (!s.syncGuard || dev(s.workspace)) return true;
   const wc = d.webContents;
   const win = (wc && BrowserWindow.fromWebContents(wc)) || janela;
