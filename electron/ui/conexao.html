@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Conectar IA — NexoEletric</title>
+<link rel="stylesheet" href="ui.css">
+<style>
+  /* O desenho da tela "Conectar IA" do NexoCAD (src/ui/app.js » showAi + styles.css .modal/.ai-status/.code/.ai-log)
+     e do rodape da Biblioteca dele (bolinha "Nexo Hub conectado" e "Conexão com o Nexo Hub…"), nas cores do hub. */
+  body { background: var(--surface); }
+  .modal { display: flex; flex-direction: column; height: 100%; }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; flex: none; }
+  .modal-head b { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .modal-head b svg { width: 18px; height: 18px; }
+  .modal-head .x { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 5px; color: var(--text-2); background: none; border: 0; cursor: pointer; }
+  .modal-head .x:hover { background: rgba(var(--tint), 0.08); color: var(--text); }
+  .modal-head .x svg { width: 16px; height: 16px; }
+  .modal-body { padding: 14px 16px 20px; overflow: auto; line-height: 1.5; flex: 1; }
+  .modal-body > p { color: var(--text); margin: 0 0 10px; }
+  .modal-body h4 { margin: 18px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .5px; }
+  .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  [hidden] { display: none !important; }
+  .modal-body .pm-hint { color: var(--text-3); font-size: 12px; line-height: 1.4; margin: 6px 0 0; }
+  .btn { font-size: 13px; padding: 6px 14px; }
+  .btn svg { width: 15px; height: 15px; }
+  .btn.mini { font-size: 12px; padding: 3px 10px; }
+
+  .ai-status { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; background: var(--surface-2); color: var(--text-2); box-shadow: inset 0 0 0 1px var(--line-soft); }
+  .ai-status svg { width: 16px; height: 16px; flex: none; }
+  .ai-status.on { color: var(--ok); }
+
+  /* as bolinhas de estado (bib-net / bib-hub do NexoCAD) */
+  .estados { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 0; }
+  .net { display: grid; grid-template-columns: 8px minmax(150px, max-content) 1fr; align-items: baseline; gap: 4px 10px; padding: 5px 10px; color: var(--text-2); font-size: 13px; }
+  .net i { width: 8px; height: 8px; border-radius: 50%; background: #6b7280; align-self: center; }
+  .net .t { color: var(--text-2); white-space: nowrap; }
+  .net .d { color: var(--text-3); font-size: 12px; word-break: break-word; }
+  .net.on .t { color: var(--text); }
+  .net.on i { background: #3ccf6e; box-shadow: 0 0 6px #3ccf6e88; }
+  .net.off .t { color: var(--text); }
+  .net.off i { background: #e5484d; }
+  .net.off .d { color: var(--err); }
+  .net.warn i { background: var(--warn); }
+  .net.warn .d { color: var(--warn); }
+  .net.busy i { background: #ff8a1f; animation: pulso 1s ease-out infinite; }
+  @keyframes pulso { 0% { box-shadow: 0 0 0 0 rgba(255,138,31,.55); } 100% { box-shadow: 0 0 0 7px rgba(255,138,31,0); } }
+  .dir { color: var(--text-3); font-size: 11.5px; word-break: break-all; margin-top: 6px; font-family: var(--mono); }
+  .aviso { margin: 10px 0 0; font-size: 12.5px; line-height: 1.45; }
+  .aviso:empty { display: none; }
+  .aviso a { color: inherit; cursor: pointer; text-decoration: underline; }
+
+  .form { margin-top: 10px; padding: 12px; border-radius: 6px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+  .form[hidden] { display: none; }
+  .form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); margin-top: 8px; }
+  .form .modal-actions { justify-content: flex-end; }
+
+  .code-box { position: relative; }
+  .code { margin: 0; padding: 10px 12px; padding-right: 76px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); font: 12px/1.45 var(--mono); color: var(--text); white-space: pre-wrap; word-break: break-all; user-select: text; }
+  .code-box .btn { position: absolute; top: 6px; right: 6px; background: var(--surface); }
+
+  .ai-log { max-height: 240px; overflow: auto; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; }
+  .ai-log > div { display: grid; grid-template-columns: 70px 170px 1fr; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--line-soft); }
+  .ai-log > div:last-child { border-bottom: 0; }
+  .ai-log > div.err { color: #ffb4b4; }
+  .ai-log time { color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .ai-log b { font-weight: 500; font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ai-log span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); }
+  .ai-log .vazio { display: block; color: var(--text-3); padding: 8px 10px; }
+</style>
+</head>
+<body>
+<div class="modal">
+  <div class="modal-head">
+    <b><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6"/></svg>Conectar IA</b>
+    <button class="x" id="bFechar" title="Fechar (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="modal-body">
+    <p>O NexoEletric expõe as ferramentas do esquema, da PCB, das regras/DRC, do Gerber e dos projetos para agentes de IA via <b>MCP</b>. Com o app aberto, a IA trabalha ao vivo nesta janela (o indicador <b>IA</b> no topo mostra cada comando); com ele fechado, as ferramentas de arquivo funcionam igual.</p>
+    <div class="ai-status" id="stLocal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6"/></svg><span>Hub local: …</span></div>
+
+    <h4>Nexo Hub</h4>
+    <div class="estados">
+      <div class="net" id="eHub"><i></i><span class="t">Nexo Hub…</span><span class="d"></span></div>
+      <div class="net" id="eBd"><i></i><span class="t">Banco (NexoBD) do Hub</span><span class="d"></span></div>
+      <div class="net" id="eProj"><i></i><span class="t">Projetos e biblioteca</span><span class="d"></span></div>
+      <div class="net" id="eSync"><i></i><span class="t">Biblioteca 3D e placas</span><span class="d"></span></div>
+    </div>
+    <div class="dir" id="hubDir" title="O mesmo endereço para o NexoCAD e os outros programas da rede"></div>
+    <div class="aviso" id="hubAviso"></div>
+    <div class="modal-actions">
+      <button class="btn" id="bTentar" title="Uma sincronização já dos projetos, da biblioteca, do 3D e das placas, pelo Nexo Hub"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>Tentar de novo</button>
+      <button class="btn" id="bConexao"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v5M12 12l-5.5 5.5M12 12l5.5 5.5"/></svg>Conexão com o Nexo Hub…</button>
+      <button class="btn" id="bAbrirHub" hidden>Abrir o Nexo Hub</button>
+    </div>
+    <form class="form" id="fConexao" hidden autocomplete="off">
+      <p class="pm-hint" style="margin:0">O Nexo Hub é a ponte da rede: o NexoEletric fala só com ele, e ele guarda tudo no banco (NexoBD). Hoje roda nesta máquina; num servidor, troque o endereço (ex.: http://servidor:47800). Vale para todos os programas da rede nesta máquina.</p>
+      <label>Endereço do servidor<input type="url" id="cUrl" spellcheck="false" placeholder="http://127.0.0.1:47800"></label>
+      <label>Token (só se o servidor exigir)<input type="password" id="cToken" spellcheck="false" autocomplete="new-password"></label>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="cCancelar">Cancelar</button>
+        <button type="submit" class="btn primario" id="cConectar">Conectar</button>
+      </div>
+    </form>
+
+    <h4>Clientes de IA</h4>
+    <div class="estados">
+      <div class="net" id="rCode"><i></i><span class="t">Claude Code</span><span class="d">…</span></div>
+      <div class="net" id="rDesk"><i></i><span class="t">Claude Desktop</span><span class="d">…</span></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn primario" id="bRegistrar">Registrar no Claude Code e no Claude Desktop</button>
+    </div>
+    <p class="pm-hint" id="regNota">O Nexo Hub também registra sozinho o MCP de todos os programas da atmosfera (bandeja do Nexo Hub › Conectar a IA). Depois de registrar, reinicie o cliente de IA.</p>
+
+    <h4>Claude Code</h4>
+    <div class="code-box"><pre class="code" id="cCode"></pre><button class="btn mini" data-copiar="cCode">Copiar</button></div>
+    <h4>Outros agentes (Cursor, Codex, Claude Desktop...)</h4>
+    <div class="code-box"><pre class="code" id="cJson"></pre><button class="btn mini" data-copiar="cJson">Copiar</button></div>
+
+    <h4>Atividade recente da IA</h4>
+    <div id="aiLog" class="ai-log"></div>
+  </div>
+</div>
+<div id="toast"></div>
+<script src="conexao.js"></script>
+</body>
+</html>

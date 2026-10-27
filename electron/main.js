@@ -59,6 +59,7 @@ const web = require('./lib/web');
 const buildInfo = require('./lib/build-info');
 const { NexoHubSync } = require('./lib/nexohub-sync');
 const armazemNexoBD = require('./lib/armazem');
+const conexaoIA = require('./lib/conexao-ia');
 
 web.registrarEsquemas();
 
@@ -89,6 +90,7 @@ let importando = null;          // AbortController da importacao em curso
 let importacao = null;          // Promise da importacao em curso (a guarda do sincronismo espera)
 let janelaConfig = null;
 let janelaImport = null;
+let janelaConexao = null;       // Conectar IA: o MCP e a conexao com o Nexo Hub (ui/conexao.html)
 let avisoSync = '';             // o que a sincronizacao da pasta de trabalho precisa dizer
 // A biblioteca do HUB QUE ESTA NO AR e a do servidor? E o que o guarda do sincronismo e a
 // importacao seguem, e nao a configuracao salva: um reinicio recusado (vista com edicao
@@ -734,31 +736,92 @@ async function abrirConfigDoHub() {
   }
 }
 
-/* O MCP do NexoEletric (mcp/ do hub): da a IA (Claude Code, Claude Desktop) as ferramentas para
-   operar projeto, esquema, PCB, regras/DRC, pour, ECO, Gerber e PDF. O servidor roda no proprio
-   Electron como Node (ELECTRON_RUN_AS_NODE), sobre a pasta de trabalho do app. */
+/* O MCP do NexoEletric e a conexao com o Nexo Hub: a tela "Conectar IA" (ui/conexao.html), no desenho da do NexoCAD
+   (Avaliar › Conectar IA). O MCP da a IA (Claude Code, Claude Desktop...) as ferramentas para operar projeto, esquema,
+   PCB, regras/DRC, pour, ECO, Gerber e PDF; o servidor roda no proprio Electron como Node (ELECTRON_RUN_AS_NODE). A
+   conexao: o NexoEletric fala so com o Nexo Hub (conexao.json); o banco (NexoBD) e do Hub, e a tela so mostra o que
+   o Hub reporta dele. Ate a 1.28 isto era uma caixa de mensagem do Windows. */
 function conectarIA() {
-  const ws = settings.load().workspace;
-  let c = null, erro = '';
-  try {
-    const reg = require(path.join(ws, 'mcp', 'registrar.js'));
-    c = reg.configuracoes({ electron: true, node: process.execPath, root: ws, hub: 'http://127.0.0.1:8200' });
-  } catch (e) { erro = String(e && e.message || e); }
-  const w = focada();
-  if (!c) {
-    dialog.showMessageBox(w, { type: 'warning', title: 'Conectar IA (MCP)', message: 'O MCP ainda não está na pasta de trabalho.',
-      detail: 'Falta ' + path.join(ws, 'mcp', 'registrar.js') + ' — atualize o app.\n\n' + erro, buttons: ['Fechar'] });
-    return;
-  }
-  dialog.showMessageBox(w, {
-    type: 'info', title: 'Conectar IA (MCP)', message: 'Registrar o NexoEletric como servidor MCP',
-    detail: 'Claude Code (cole num terminal):\n' + c.claudeCode +
-      '\n\nClaude Desktop: acrescente em ' + c.claudeDesktopArquivo + ':\n' + JSON.stringify(c.claudeDesktop, null, 2),
-    buttons: ['Copiar comando do Claude Code', 'Copiar JSON do Claude Desktop', 'Fechar'], defaultId: 0, cancelId: 2,
-  }).then(r => {
-    if (r.response === 0) clipboard.writeText(c.claudeCode);
-    else if (r.response === 1) clipboard.writeText(JSON.stringify(c.claudeDesktop, null, 2));
+  if (janelaConexao && !janelaConexao.isDestroyed()) { janelaConexao.show(); janelaConexao.focus(); return; }
+  janelaConexao = new BrowserWindow({
+    parent: janela || undefined, modal: false, width: 800, height: 880, minWidth: 600, minHeight: 520,
+    title: 'Conectar IA — NexoEletric', icon: web.ICONE, backgroundColor: '#1a1a1d', show: false,
+    autoHideMenuBar: true,
+    webPreferences: { ...web.webPreferencesHub(), preload: PRELOAD_UI },
   });
+  janelaConexao.removeMenu();
+  janelaConexao.once('ready-to-show', () => janelaConexao.show());
+  janelaConexao.on('closed', () => { janelaConexao = null; });
+  janelaConexao.loadFile(path.join(UI_DIR, 'conexao.html'));
+}
+
+function mcpDestaInstalacao() {
+  return conexaoIA.entradaMcp({ packaged: EMBUTIDO, exe: process.execPath, resourcesPath: process.resourcesPath, repo: path.join(__dirname, '..') });
+}
+
+// O que a tela mostra (ela pergunta a cada 3 s enquanto esta aberta). registro=true tambem le os arquivos dos
+// clientes de IA (o ~/.claude.json pode ter megabytes: so na abertura, depois de registrar e de tempos em tempos).
+async function estadoConexao(registro) {
+  const s = settings.load();
+  const entrada = mcpDestaInstalacao();
+  const con = conexaoIA.lerConexao();
+  const [hub, atividade] = await Promise.all([
+    conexaoIA.saudeHub({ url: con.url, token: con.token }),
+    origem ? fetch(origem + '/api/mcp/atividade?desde=0', { signal: AbortSignal.timeout(2000) }).then((r) => (r.ok ? r.json() : null)).catch(() => null) : null,
+  ]);
+  return {
+    versao: app.getVersion(),
+    hubLocal: origem,
+    hub: { ...hub, origem: con.origem, arquivo: con.arquivo, temToken: Boolean(con.token) },
+    armazem: { ligado: s.workspace ? noNexoBD(s.workspace) : false, dev: s.workspace ? dev(s.workspace) : false, ...armazem.status() },
+    nexoSync: nexoSync.status(),
+    mcp: {
+      entrada, ...conexaoIA.textosMcp(entrada), instalado: EMBUTIDO,
+      registro: registro ? conexaoIA.estadoRegistro(entrada) : null,
+      sessoes: (atividade && atividade.sessoes) || [],
+      atividade: ((atividade && atividade.itens) || []).slice(-60),
+      rotaAtividade: Boolean(atividade),
+    },
+  };
+}
+
+// "Tentar de novo": uma rodada ja dos projetos/biblioteca e da biblioteca 3D/placas, as duas pelo Nexo Hub.
+async function tentarConexao() {
+  const s = settings.load();
+  const [projetos, sync] = await Promise.all([
+    s.workspace && noNexoBD(s.workspace) ? armazem.agora('pedido') : Promise.resolve(null),
+    nexoSync.agora().catch((e) => ({ ok: false, erro: e.message })),
+  ]);
+  return { projetos, nexoSync: sync };
+}
+
+// O app Nexo Hub desta maquina (C:\Program Files\NexoHub, pelo nexo-programa.json dele): abrir sobe a ponte.
+async function abrirNexoHub() {
+  const pf = process.env.ProgramFiles || 'C:\\Program Files';
+  const exe = [path.join(pf, 'NexoHub', 'NexoHub.exe'), path.join(pf, 'Nexo Hub', 'Nexo Hub.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'NexoHub', 'NexoHub.exe')].find((x) => fs.existsSync(x));
+  if (!exe) throw new Error('não achei o Nexo Hub instalado nesta máquina');
+  const erro = await shell.openPath(exe);
+  if (erro) throw new Error('não consegui abrir o Nexo Hub: ' + erro);
+  log.info('[conexao] abrindo o Nexo Hub: ' + exe);
+  return { exe };
+}
+
+// Fora do ar, o armazem so anotava o erro no log a cada 2 min e a pessoa nao ficava sabendo. A MUDANCA (caiu, voltou)
+// vira uma notificacao no hub, uma vez; o estado completo e o "Tentar de novo" ficam na tela Conectar IA.
+function vigiarConexao() {
+  let antes = '';
+  const t = setInterval(() => {
+    const st = armazem.status();
+    const f = st.fase === 'erro' ? 'erro' : st.fase === 'em dia' ? 'ok' : '';
+    if (!f || f === antes) return;
+    const era = antes;
+    antes = f;
+    const wc = janela && !janela.isDestroyed() ? janela.webContents : null;
+    if (f === 'erro') toastNoHub(wc, `Projetos e biblioteca sem o Nexo Hub (${st.erro}). Você segue na cópia desta pasta e o que salvar sobe quando ele voltar — Ajuda › Conectar IA (MCP) mostra o estado e tenta de novo.`, 'warn');
+    else if (era === 'erro') toastNoHub(wc, 'Nexo Hub de volta: projetos e biblioteca em dia', 'ok');
+  }, 5000);
+  if (t.unref) t.unref();
 }
 
 // Arquivo › Nexo Hub: sincronizar agora. O resultado vai na notificacao do hub e no log.
@@ -779,7 +842,7 @@ async function sincronizarNexoBD() {
   const r = await armazem.agora('pedido');
   const x = r.resumo;
   if (r.ok) toastNoHub(wc, `NexoBD: ${x.projetos} projeto(s), biblioteca ${x.biblioteca} — ${x.baixados} arquivo(s) baixado(s), ${x.subidos} subido(s)` + (x.conflitos.length ? ` · ${x.conflitos.length} conflito(s) guardado(s)` : ''), x.conflitos.length ? 'warn' : 'ok');
-  else toastNoHub(wc, 'NexoBD: ' + r.erro, 'warn');
+  else toastNoHub(wc, 'Projetos e biblioteca (Nexo Hub): ' + r.erro + ' — Ajuda › Conectar IA (MCP) mostra o estado e tenta de novo', 'warn');
 }
 
 function sobre() {
@@ -796,7 +859,7 @@ function sobre() {
       `hub: ${origem || '—'}${s.lan ? '  (compartilhado na rede)' : ''}`,
       `servidor central: ${s.serverUrl}`,
       `biblioteca: ${noNexoBD(s.workspace) ? 'a do NexoBD (esta pasta guarda a cópia)' : libRemotaNoAr ? 'a do servidor (esta pasta guarda a cópia para leitura)' : 'a desta pasta de trabalho'}`,
-      `NexoBD: ${noNexoBD(s.workspace) ? armazem.resumoTexto() : 'desligado'}`,
+      `projetos e biblioteca (pelo Nexo Hub): ${noNexoBD(s.workspace) ? armazem.resumoTexto() : 'desligado'}`,
       `Odoo: ${s.odooUrl} (${s.odooDb})`,
       `Nexo Hub: ${nexoSync.resumoTexto()}`,
       `última importação: ${importer.ultimaImportacao(s.workspace) || 'nunca'}`,
@@ -891,6 +954,26 @@ function registrarIpc() {
   handle('config:testarServidor', (_e, url) => importer.testar(url));
   handle('config:salvar', async (e, d) => salvarConfig(e, d));
   handle('config:verificarAtualizacoes', async () => updater.verificar(opcoesUpdater, true));
+  handle('config:conectarIA', () => { conectarIA(); return true; });
+
+  // a tela Conectar IA (ui/conexao.html)
+  handle('conexao:estado', (_e, registro) => estadoConexao(Boolean(registro)));
+  handle('conexao:tentar', () => tentarConexao());
+  handle('conexao:registrar', async () => {
+    const r = await conexaoIA.registrar(mcpDestaInstalacao());
+    log.info(`[conexao] MCP registrado: Claude Code ${r.claudeCode.estado}; Claude Desktop ${r.claudeDesktop.map((d) => d.estado).join(', ') || 'não instalado'}`);
+    return r;
+  });
+  handle('conexao:gravar', async (_e, d) => {
+    const c = conexaoIA.gravarConexao({ url: d && d.url, token: d && d.token });
+    log.info('[conexao] Nexo Hub em ' + c.url + ' (' + c.arquivo + ')');
+    const saude = await conexaoIA.saudeHub({ url: c.url, token: c.token });
+    if (saude.conectado) tentarConexao().catch(() => {});
+    return saude;
+  });
+  handle('conexao:abrirHub', () => abrirNexoHub());
+  handle('conexao:copiar', (_e, texto) => { clipboard.writeText(String(texto || '').slice(0, 20000)); return true; });
+  handle('conexao:pastaLogs', () => shell.openPath(LOG_DIR));
 
   handle('import:iniciar', async (e, grupos) => {
     const wc = e.sender;
@@ -1085,6 +1168,7 @@ app.whenReady().then(async () => {
   app.on('web-contents-created', (_e, wc) => web.endurecer(wc, { origem: () => origem, uiUrl: UI_URL }));
   registrarIpc();
   montarMenu();
+  vigiarConexao();
   criarJanela();
   if (precisaConfigurar()) {
     await carregarUi('config.html', { modo: 'setup' });

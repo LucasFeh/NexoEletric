@@ -14,7 +14,9 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const CHAMADAS = new Set([
   'boot:estado', 'boot:tentar', 'boot:log', 'boot:config',
   'config:ler', 'config:escolherPasta', 'config:avaliarPasta', 'config:testarServidor', 'config:salvar',
-  'config:verificarAtualizacoes',
+  'config:verificarAtualizacoes', 'config:conectarIA',
+  'conexao:estado', 'conexao:tentar', 'conexao:registrar', 'conexao:gravar', 'conexao:abrirHub', 'conexao:copiar',
+  'conexao:pastaLogs',
   'import:iniciar', 'import:cancelar', 'import:abrirPasta',
   'picker:fontes', 'picker:escolher',
 ]);
