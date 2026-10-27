@@ -76,7 +76,7 @@ const BUNDLE = EMBUTIDO ? path.join(process.resourcesPath, 'hub') : path.join(__
 const LOG_DIR = path.join(app.getPath('userData'), 'logs');
 const SMOKE = process.env.ALTIUMHUB_SMOKE || '';
 // Projetos, biblioteca e scripts do Altium no NexoBD (lib/armazem.js)
-const armazem = new armazemNexoBD.Armazem({ log, bundle: BUNDLE });
+const armazem = new armazemNexoBD.Armazem({ log, bundle: BUNDLE, python: PYTHON });
 const ESPERA_PRIMEIRA = 45000;   // quanto a abertura espera a primeira rodada (depois segue sem ela)
 
 let janela = null;
