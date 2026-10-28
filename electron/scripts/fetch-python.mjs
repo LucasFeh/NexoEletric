@@ -15,6 +15,10 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+// os mesmos parametros com que o app sobe o Python (lib/python-flags.js): -E -s -X utf8 -u
+const { PY_FLAGS } = createRequire(import.meta.url)('../lib/python-flags.js');
 
 const PY_VERSION = '3.12.10';
 const PY_TAG = 'python312';
@@ -95,8 +99,8 @@ async function main() {
   // O hub depende dela (hubserver.py importa odoolista_server da raiz; almox2lib.py importa
   // os vizinhos de tools/almox), entao o arquivo sai. Sem ele o python.exe monta o sys.path
   // como uma instalacao normal: python312.zip, Lib\ e Lib\site-packages ao lado do exe.
-  // Quem sobe o processo (lib/backend.js) zera PYTHONHOME/PYTHONPATH e liga
-  // PYTHONNOUSERSITE, para o Python da maquina nao vazar para dentro.
+  // Quem sobe o processo (lib/backend.js) usa -E -s (lib/python-flags.js): nenhuma PYTHON* e nem o
+  // PythonPath do registro (o de um Python 3.12 instalado) entram.
   fs.rmSync(path.join(OUT, `${PY_TAG}._pth`), { force: true });
 
   const site = path.join(OUT, 'Lib', 'site-packages');
@@ -108,17 +112,17 @@ async function main() {
   // Scripts de console (flask.exe...) apontam para o Python do build; ninguem os usa.
   fs.rmSync(path.join(site, 'bin'), { recursive: true, force: true });
 
-  // Prova de vida com o proprio runtime, com o ambiente limpo como o app o sobe.
+  // Prova de vida com o proprio runtime, com os parametros com que o app o sobe.
   const env = { ...process.env, PYTHONNOUSERSITE: '1' };
   delete env.PYTHONHOME; delete env.PYTHONPATH;
-  run(path.join(OUT, 'python.exe'), ['-c',
+  run(path.join(OUT, 'python.exe'), [...PY_FLAGS, '-c',
     'import flask, werkzeug, jinja2, olefile, sqlite3, ssl, xmlrpc.client, sys; ' +
     'assert sys.version_info[:2] == (3, 12), sys.version; print("runtime ok", sys.version.split()[0])'],
   { env });
   // .pyc das dependencias ja no build: a pasta do app pode nao aceitar gravacao depois.
   // olefile2.py e o modulo legado de Python 2 do olefile (sintaxe 0xFFL): ninguem o importa,
   // e sem o -x ele faz o compileall inteiro sair com erro.
-  run(path.join(OUT, 'python.exe'), ['-m', 'compileall', '-q', '-x', 'olefile2\\.py$', site], { env });
+  run(path.join(OUT, 'python.exe'), [...PY_FLAGS, '-m', 'compileall', '-q', '-x', 'olefile2\\.py$', site], { env });
 
   fs.writeFileSync(STAMP, JSON.stringify({ python: PY_VERSION, requirements: reqHash }, null, 2));
   console.log('build/python pronto');

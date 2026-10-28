@@ -26,6 +26,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { execFile } = require('node:child_process');
 const { createHash } = require('node:crypto');
+const { PY_FLAGS } = require('./python-flags');
 
 const ESPERA = 3000;
 const ESPERA_EVENTO = 1500;
@@ -107,7 +108,8 @@ function atualizarPcblib({ ws, python, log = () => {}, forcar = false }) {
   const env = {};
   for (const [k, v] of Object.entries(process.env)) if (!/^PYTHON/i.test(k) && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
   env.PYTHONIOENCODING = 'utf-8';
-  const args = [script, pcblib, saida, '--fonte', 'NexoBD: Libs/Almox/FOOTPRINTS ALMOX.PcbLib'];
+  env.PYTHONHOME = path.dirname(python);
+  const args = [...PY_FLAGS, script, pcblib, saida, '--fonte', 'NexoBD: Libs/Almox/FOOTPRINTS ALMOX.PcbLib'];
   return new Promise((resolve, reject) => {
     execFile(python, args, { cwd: ws, env, timeout: 180000, windowsHide: true, maxBuffer: 4 << 20 }, (err, stdout, stderr) => {
       if (err) return reject(new Error(`pcblib.js não foi gerado: ${String(stderr || err.message).trim().split('\n').pop()}`));

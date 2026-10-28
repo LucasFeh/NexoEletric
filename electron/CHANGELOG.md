@@ -4,6 +4,22 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.32.1 — 2026-10-28
+
+- **O hub sobe com `python.exe -E -s`** (pedido do usuário): `python.exe -E -s -X utf8 -u hubserver.py --port 8200
+  --host 127.0.0.1`, e o `pcblib2js.py` do armazém do mesmo jeito (`lib/python-flags.js`).
+  - `-E` ignora as variáveis `PYTHON*` e, junto, o `PythonPath` do registro. Numa máquina com o Python 3.12 instalado,
+    o Python embutido carregava o `_ctypes.pyd` dele, e o import do Flask derrubava o hub com 0xC0000005 antes de subir
+    (e o `npm run dist` parava na prova de vida do runtime).
+  - `-s` deixa de fora o site-packages do usuário.
+  - `-X utf8` e `-u` fazem o que o `PYTHONUTF8`/`PYTHONIOENCODING` e o `PYTHONUNBUFFERED` faziam (o `-E` os desliga):
+    log em UTF-8 e linha a linha.
+  - Os filhos que o hub sobe com `sys.executable` não herdam parâmetro: o ambiente deles continua limpo e ganha
+    `PYTHONHOME` na pasta do Python embutido, que tira o registro do caminho também para eles.
+- **Hub órfão reconhecido com acento no caminho.** O app pergunta ao PowerShell de quem é a porta e o caminho do
+  `python.exe` voltava na página de código do console: numa pasta com acento ("Área de Trabalho") o hub que ficou de
+  uma sessão anterior passava por "outro programa", seguia vivo e o app mudava de porta. A saída agora é UTF-8.
+
 ## 1.32.0 — 2026-10-28
 
 - **Corrigido: os pads SMD dos componentes não saíam no Gerber.** Abrindo a placa direto na aba Gerber, o pacote era

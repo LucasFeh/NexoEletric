@@ -9,6 +9,7 @@ const http = require('node:http');
 const net = require('node:net');
 const path = require('node:path');
 const porta = require('./porta');
+const { PY_FLAGS } = require('./python-flags');
 
 const LOG_MAX = 4 * 1024 * 1024;       // hub.log gira ao passar disto
 const TAIL_MAX = 400;                  // linhas guardadas para a tela de erro
@@ -101,7 +102,11 @@ class Backend extends EventEmitter {
     for (const [k, v] of Object.entries(process.env)) {
       if (!/^PYTHON/i.test(k) && k !== 'ELECTRON_RUN_AS_NODE') env[k] = v;
     }
+    // O hub ignora estas (sobe com -E, lib/python-flags.js); valem para os filhos que ele sobe com
+    // sys.executable. PYTHONHOME = a pasta do python.exe: sem ela o filho le o registro e carrega os
+    // .pyd de um Python 3.12 instalado na maquina.
     Object.assign(env, {
+      PYTHONHOME: path.dirname(this.python),
       PYTHONNOUSERSITE: '1',
       PYTHONIOENCODING: 'utf-8',
       PYTHONUTF8: '1',
@@ -110,13 +115,13 @@ class Backend extends EventEmitter {
     }, this.extraEnv);
 
     this.parando = false;
-    this._log(`subindo o hub: ${this.python} hubserver.py --port ${this.port} --host ${this.host}  (cwd ${this.workspace})`);
+    this._log(`subindo o hub: ${this.python} ${PY_FLAGS.join(' ')} hubserver.py --port ${this.port} --host ${this.host}  (cwd ${this.workspace})`);
     // windowsHide com nenhum stdio herdado: o libuv sobe o Python com CREATE_NO_WINDOW, um
     // console SEM janela que os filhos dele herdam. Medido (Electron 44, 2026-09-24): os
     // workers do sincronismo e os netos deles saem sem janela nenhuma. NAO force
     // creationflags=CREATE_NO_WINDOW nos filhos: com isso o neto que herda o stdout do pai
     // perde a saida (o stream chega vazio).
-    const proc = spawn(this.python, [hub, '--port', String(this.port), '--host', this.host], {
+    const proc = spawn(this.python, [...PY_FLAGS, hub, '--port', String(this.port), '--host', this.host], {
       cwd: this.workspace,
       env,
       windowsHide: true,

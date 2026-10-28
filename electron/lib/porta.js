@@ -46,8 +46,10 @@ async function quemEscuta(porta) {
 
 async function caminhoDoProcesso(pid) {
   if (process.platform !== 'win32') return '';
+  // saida em UTF-8: na pagina de codigo do console um caminho com acento ("Área de Trabalho")
+  // chegava estragado e o hub orfao do proprio app passava por "outro programa"
   const out = await executa('powershell', ['-NoProfile', '-NonInteractive', '-Command',
-    `(Get-Process -Id ${Number(pid)} -ErrorAction SilentlyContinue).Path`]);
+    `[Console]::OutputEncoding = [Text.Encoding]::UTF8; (Get-Process -Id ${Number(pid)} -ErrorAction SilentlyContinue).Path`]);
   return out.trim();
 }
 

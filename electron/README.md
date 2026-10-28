@@ -74,7 +74,11 @@ contrato é o `..\nexohub\docs\CONTRATO.md` e o `docs/INTEGRACAO-NEXOCAD.md`):
 - **Python embutido, e não PyInstaller.** O hub sobe subprocessos com `sys.executable`
   (`guardiao.py`, `extrair.py`). O `python312._pth` do embeddable sai, porque tiraria a
   pasta do script do `sys.path` e o envio da lista ao Odoo sumiria calado. Em troca, o
-  backend zera todas as variáveis `PYTHON*` e liga `PYTHONNOUSERSITE`.
+  hub sobe com `python.exe -E -s -X utf8 -u hubserver.py --port 8200 --host 127.0.0.1`
+  (`lib/python-flags.js`): o `-E` ignora as variáveis `PYTHON*` e o `PythonPath` do registro (de
+  um Python 3.12 instalado na máquina, cujo `_ctypes.pyd` derrubava o hub), o `-s` deixa de fora o
+  site-packages do usuário. Os filhos que o hub sobe com `sys.executable` recebem o ambiente limpo,
+  com `PYTHONHOME` na pasta do Python embutido.
 - **Porta fixa (8200).** O localStorage do hub é por origem. Se uma porta ocupada por
   outro programa força a seguinte, o hub perde as preferências. O hub órfão de uma
   sessão que caiu é identificado (arquivo de PID + `netstat` + caminho do `python.exe`) e
