@@ -662,7 +662,8 @@ function montaPoly(ch, base, ctx){
      (t/a cobre, s silk, l linhas). Os com owner ficam fora: sao do componente, e a tela os
      desenha direto do board pelo ownerDelta/xfObject;
    - fills livres em model.fills e regions livres (sem owner, sem poly, sem keepout, de espelho
-     NOVO) em model.regions; a region de polygon, a de componente, a keepout e TODA region de
+     NOVO) em model.regions, mais o despejo do Altium sem poligono na placa (marcado `orfa`: so
+     region_del); a region de polygon, a de componente, a keepout e TODA region de
      espelho antigo ficam so para desenho (region_del nelas e erro que diz o porque).
    Ordem (a do ApplyChanges): as mudancas valem na ordem do arquivo, e o orig_* de cada uma e
    conferido com o objeto COMO ELE ESTA depois das anteriores -- objeto que uma op anterior tirou
@@ -733,11 +734,20 @@ function applyPcbChanges(board, changes, opts){
     if (f.owner) { indexa({ kind:'fill', src:f, fora:'owner' }); continue; }
     entra('fill', f, model.fills);
   }
+  /* pedaco despejado cujo `de` nao e poligono da placa (board.js » polygons; o poly_add gera id
+     novo, que nenhum pedaco do board.js cita): cobre que o Altium despejou de um poligono que nao
+     veio no espelho (o ExportBoard nao exporta poligono -- o "altium_sem_poligono" do DRC).
+     Ninguem o redespeja, entao ele entra no modelo marcado `orfa` e o region_del apaga; mexer
+     nele (apagar e recriar) nao: o region_add nao leva os furos do despejo (1.35.0) */
+  const idsPoly = new Set();
+  for (const g of (Array.isArray(B.polygons) ? B.polygons : [])) if (g && g.id != null) idsPoly.add(String(g.id));
   for (const g of (B.regions || [])) {
     if (!g) continue;
-    const fora = g.owner ? 'owner' : g.poly ? 'poly' : g.keepout ? 'keepout' : !novo ? 'antigo' : '';
+    const orfa = !g.owner && !!g.poly && !(g.de != null && idsPoly.has(String(g.de)));
+    const fora = g.owner ? 'owner' : g.poly && !orfa ? 'poly' : g.keepout ? 'keepout' : !novo ? 'antigo' : '';
     if (fora) { indexa({ kind:'region', src:g, fora }); continue; }
     entra('region', g, model.regions);
+    if (orfa) model.regions[model.regions.length - 1].orfa = true;
   }
   for (const p of (B.freepads || [])) if (p) entra('pad', p, model.pads);
   for (const g of (Array.isArray(B.polygons) ? B.polygons : [])) if (g) entra('poly', g, model.polygons);
@@ -1170,7 +1180,7 @@ function applyPcbChanges(board, changes, opts){
         if (m && m.ambiguo) return bad(`região id "${ch.id}" aparece ${m.ambiguo} vezes no board.js e os orig_* não dizem qual — reexporte o espelho`);
         if (!m) return bad(`região id "${ch.id}" não existe no board.js`);
         if (m.fora === 'owner')   return bad(`região id "${ch.id}" pertence ao componente ${m.src.owner} (não é editável sozinha)`);
-        if (m.fora === 'poly')    return bad(`região id "${ch.id}" é pedaço de polígono despejado — o Altium redespeja; mexa no polígono`);
+        if (m.fora === 'poly')    return bad(`região id "${ch.id}" é pedaço do polígono ${m.src.de} despejado — o hub redespeja; mexa no polígono`);
         if (m.fora === 'keepout') return bad(`região id "${ch.id}" é keepout — fica só para desenho (remova no Altium)`);
         if (m.fora === 'antigo')  return bad(`região id "${ch.id}" vem de um espelho antigo (board.js sem "exporter"), que não diz se ela é livre, pedaço de polígono ou do componente — reexporte a placa com o ExportBoard novo`);
         item.target = m;

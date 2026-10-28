@@ -271,7 +271,7 @@ class Contexto {
      (GND "nao roteado", curto com o plano invisivel).
      despejo = {poligonos, regioes, avisos, ms, altium_sem_poligono:[ids]} ou null.
      altium_sem_poligono: regioes de polygon pour do Altium sem poligono no hub -- ficam como
-     vieram (o hub nao as redespeja nem apaga: region_del recusa pedaco de poligono despejado). */
+     vieram (o hub nao as redespeja; region_del as apaga, 1.35.0). */
   placaDespejada(p, changes) {
     const r = this.placa(p, changes);
     const P = this.modulo('hub-pcbpour.js');

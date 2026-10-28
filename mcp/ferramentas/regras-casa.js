@@ -134,7 +134,7 @@ function verifica(ctx, a) {
   const eb = pdp.eb, tg = textoGeo(ctx);
   const velhas = pdp.despejo ? pdp.despejo.altium_sem_poligono : [];
   const despejo = pdp.despejo ? pdp.despejo.poligonos + ' polígono(s) redespejado(s) como na tela' +
-    (velhas.length ? `; ${velhas.length} região(ões) despejada(s) no Altium sem polígono no hub (${velhas.slice(0, 8).join(', ')}) ficam como vieram` : '') : 'sem polígono';
+    (velhas.length ? `; ${velhas.length} região(ões) despejada(s) no Altium sem polígono no hub (${velhas.slice(0, 8).join(', ')}) ficam como vieram (pcb_apagar apaga)` : '') : 'sem polígono';
   const hc = ctx.hc;
   const camadas = [...new Set(['Top', 'Bottom'].concat((eb.tracks || []).map(t => t.layer), (eb.regions || []).map(g => g.layer)))].filter(k => k && hc.isCopper(k));
   /* pad que e so furo (fixacao sem anel, sem net) */
@@ -283,7 +283,7 @@ function verifica(ctx, a) {
             const cob = K.area(K.inter(ob.paths, anel, ob.eo)) - K.area(K.inter(ob.paths, pd.paths, ob.eo));
             if (aAnel > 0 && cob > 0.5 * aAnel) viol.push({ regra: 'trilha_sobre_pad', camada: L, x: r3(pd.cx), y: r3(pd.cy),
               msg: ob.tipo === 'plano'
-                ? `faixa ${ob.id} (${netDe(ob)}) do polygon pour do Altium tapa o ${nomeOb(pd)} e o alívio térmico do plano ${rel.nome || rel.id} — na tela é cobre passando por cima do pad; esse cobre vem de um polígono do Altium (o hub não apaga pedaço de polígono despejado): apague ou recorte o polígono no Altium`
+                ? `faixa ${ob.id} (${netDe(ob)}) do polygon pour do Altium tapa o ${nomeOb(pd)} e o alívio térmico do plano ${rel.nome || rel.id} — na tela é cobre passando por cima do pad; esse cobre veio despejado de um polígono do Altium que não está na placa: apague a região (pcb_apagar) ou recorte o polígono no Altium`
                 : `${ob.tipo} ${ob.id} (${netDe(ob)}) tapa o ${nomeOb(pd)} e o alívio térmico do plano ${rel.nome || rel.id} — o cobre passa por cima do pad; tire a ${ob.tipo} (pcb_apagar) e deixe o plano ligar`,
               objeto: { tipo: 'pad', id: pd.id, ref: pd.ref ? pd.ref + '.' + pd.nome : undefined, net: pd.net }, contra: { tipo: ob.tipo, id: ob.id, net: ob.net } });
           }

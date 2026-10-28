@@ -416,7 +416,10 @@ var changes = [
   serigrafia **sem `owner`**) e `l…` (linha/arco de `lines`, as camadas mecânicas, keep-out,
   máscara, pasta e furação, sem `owner`). Objeto com `owner` é do componente: anda com ele.
   `fill_*`, `text_del` e `region_del` também só valem para objeto livre; `region_del` não vale
-  para pedaço de polígono despejado (`poly:true` — o Altium redespeja) nem em espelho antigo.
+  para pedaço de polígono despejado de um polígono da placa (`poly:true` com `de` — o hub
+  redespeja) nem em espelho antigo. O cobre despejado do Altium cujo polígono não veio no
+  espelho (o `altium_sem_poligono` do DRC) só se apaga, com `region_del` (desde a 1.35.0); no
+  Altium o `ApplyChanges` recusa essa linha (lá o polígono existe: apague-o no Altium).
 - Círculo cheio, triângulo e polígono cheio → `region_add`; retângulo cheio → `fill_add`;
   contorno de qualquer forma → `track_add` em série (círculo: `arc_add` de 0 a 360).
 - `comp_attr` — aplicado **por último** pelo ApplyChanges (renomear cedo quebraria os `ref` das ops seguintes); renomear na PCB dessincroniza do esquema — o ECO vai acusar.

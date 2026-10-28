@@ -1534,6 +1534,8 @@ function attrComp(m, campo, valor){
 function editaRegiao(m, g){
   if (m.added) { const op = opDe(m); if (op) patchAdd(op, 'region', g); return !!op; }
   const s = m.src;
+  /* cobre despejado do Altium sem poligono na placa (hub-core » orfa): so apagar */
+  if (m.orfa) { HubDialog.toast('cobre despejado do Altium sem polígono na placa: dá só para apagar (Delete)', 'warn'); return false; }
   if (Array.isArray(s.holes) && s.holes.length) { HubDialog.toast('região com furo: o region_add não leva furo — mexa nela no Altium', 'warn'); return false; }
   const del = { op:'region_del', id:s.id, orig_layer:s.layer, orig_n:s.points.length, orig_x0:s.points[0][0], orig_y0:s.points[0][1], note:'movida no hub (apaga e recria)' };
   const lay = g.layer || s.layer;
@@ -5302,7 +5304,7 @@ function fichaDe(a){
     case 'region': {
       const m = a.m, e = m.eff, cu = cobre(e.layer);
       const ar = Math.abs(area2(e.points || [])) / 2;
-      return { titulo:'Region ' + (m.added ? '(nova)' : m.src.id), sub:[nomeDe(e.layer), ESTADO(m)].filter(Boolean).join(' · '), campos:[
+      return { titulo:'Region ' + (m.added ? '(nova)' : m.src.id), sub:[nomeDe(e.layer), m.orfa ? 'despejo do Altium sem polígono (só apagar)' : '', ESTADO(m)].filter(Boolean).join(' · '), campos:[
         { k:'layer', rot:'Layer', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:m.added ? '' : 'trocar a camada de uma região do espelho é apagar e recriar (region_del + region_add)' },
         cu ? { k:'net', rot:'Net', tipo:'net', v:e.net || '', opc:opcNets(e.net) } : { k:'net', rot:'Net', tipo:'ro', v:'— (só em cobre)' },
         ...camposCaixa(e.points),

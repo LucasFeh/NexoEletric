@@ -222,7 +222,8 @@ const ap = chs => Core.applyPcbChanges(SB, chs);
   assert.deepStrictEqual(m.tracks.map(x => x.src.id), ['t1', 't2', 's3', 'l1', 'l4'], 'cobre (todo), silk livre, linha livre (keepout inclusa)');
   assert.deepStrictEqual(m.arcs.map(x => x.src.id), ['a1', 's4', 'l3']);
   assert.deepStrictEqual(m.fills.map(x => x.src.id), ['f2'], 'fill de componente fica fora');
-  assert.deepStrictEqual(m.regions.map(x => x.src.id), ['g1', 'g5'], 'region de polygon, de componente e keepout ficam fora');
+  assert.deepStrictEqual(m.regions.map(x => x.src.id), ['g1', 'g2', 'g5'], 'region de componente e keepout ficam fora; o despejo do Altium sem poligono entra');
+  assert.deepStrictEqual(m.regions.map(x => !!x.orfa), [false, true, false], 'g2 (poly:true, sem poligono na placa) entra marcada orfa');
   const s3 = m.tracks[2];
   assert.deepStrictEqual([s3.kind, s3.src.kind, s3.changed, s3.deleted], ['track', 'line', false, false], 'mesmo formato do cobre');
   assert.strictEqual(m.arcs[1].kind, 'arc');
@@ -231,7 +232,7 @@ const ap = chs => Core.applyPcbChanges(SB, chs);
   assert.ok(m.texts.every(t => t.deleted === false), 'texto ganhou deleted (text_del)');
   assert.notStrictEqual(m.regions[0].eff.points, SB.regions[0].points, 'eff da region nao divide os pontos com o board');
   /* achado 9: os furos da region tambem sao copia (antes so os pontos eram) */
-  const g5 = m.regions[1];
+  const g5 = m.regions.find(x => x.src.id === 'g5');
   assert.deepStrictEqual(g5.eff.holes, SB.regions[4].holes);
   assert.ok(g5.eff.holes !== SB.regions[4].holes && g5.eff.holes[0] !== SB.regions[4].holes[0] && g5.eff.holes[0][0] !== SB.regions[4].holes[0][0],
             'eff da region nao divide os furos com o board');
@@ -422,7 +423,20 @@ comErro(ap([trk({ id:'toString', x1:0, y1:0, x2:0, y2:0, w:0, layer:'Top' }, { o
   comAviso(ap([Object.assign({}, go, { op:'region_del', orig_n:5 })]), /não confere/);
   comAviso(ap([Object.assign({}, go, { op:'region_del', orig_x0:41 })]), /não confere/);
   comErro(ap([Object.assign({}, go, { op:'region_del', id:'g99' })]), /região id "g99" não existe/);
-  comErro(ap([Object.assign({}, go, { op:'region_del', id:'g2' })]), /polígono/);
+  /* despejo do Altium sem poligono na placa (o "altium_sem_poligono" do DRC): o region_del apaga (1.35.0) */
+  const d2 = ap([{ op:'region_del', id:'g2', orig_layer:'Bottom', orig_n:3, orig_x0:1, orig_y0:1 }]);
+  semErro(d2);
+  assert.ok(d2.regions[1].deleted && d2.regions[1].orfa);
+  assert.ok(!Core.effectiveBoard(SB, d2).regions.some(g => g.id === 'g2'), 'g2 sai da placa efetiva (tela, DRC, Gerber)');
+  /* pedaco de um poligono que ESTA na placa: o hub redespeja, entao continua so de desenho */
+  {
+    const b = placa();
+    b.polygons = [{ id:'pg1', layer:'Bottom', net:'GND', pts:[[0, 0], [6, 0], [6, 4], [0, 4]] }];
+    b.regions[1].de = 'pg1';
+    const mp = Core.applyPcbChanges(b, []);
+    assert.deepStrictEqual(mp.regions.map(x => x.src.id), ['g1', 'g5'], 'pedaco do pg1 fica fora');
+    comErro(Core.applyPcbChanges(b, [{ op:'region_del', id:'g2', orig_layer:'Bottom', orig_n:3, orig_x0:1, orig_y0:1 }]), /pedaço do polígono pg1/);
+  }
   comErro(ap([Object.assign({}, go, { op:'region_del', id:'g3' })]), /pertence ao componente U1/);
   comErro(ap([Object.assign({}, go, { op:'region_del', id:'g4' })]), /keepout/);
   comErro(ap([{ op:'region_del', id:'g1' }]), /faltam orig_layer/);

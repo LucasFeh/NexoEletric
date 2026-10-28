@@ -4,6 +4,17 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.35.0 — 2026-10-28
+
+- **Apagar o cobre despejado do Altium sem polígono na placa.** O ExportBoard leva os pedaços que o Altium despejou
+  (`poly:true`), mas não o polígono de onde eles saíram. O hub recusava apagar esse cobre ("o Altium redespeja; mexa
+  no polígono"), e quem não volta mais ao Altium ficava com ele na placa: na tela, no DRC, no ratsnest, no Gerber e no
+  PDF (o `altium_sem_poligono` do DRC). Agora esse cobre entra no modelo marcado `orfa` e o `region_del` apaga:
+  selecione na vista PCB e aperte Delete, ou pela IA (`pcb_apagar`). Mover ou editar continua recusado (o
+  `region_add` não leva os furos do despejo), e o pedaço de um polígono que está na placa (`de` = um id de
+  `board.js » polygons`) continua só de desenho, porque o hub o redespeja. No Altium o `ApplyChanges` recusa essa
+  linha: lá o polígono existe, apague-o no Altium.
+
 ## 1.34.0 — 2026-10-28
 
 - **Auto-roteador em várias camadas, com vias** (`hub-autoroteador.js`, ferramenta `pcb_autorotear` do MCP). O
