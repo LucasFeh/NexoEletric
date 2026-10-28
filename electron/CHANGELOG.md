@@ -4,6 +4,27 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.34.0 — 2026-10-28
+
+- **Auto-roteador em várias camadas, com vias** (`hub-autoroteador.js`, ferramenta `pcb_autorotear` do MCP). O
+  `pcb_rotear` liga uma conexão por vez numa camada só; o novo liga o ratsnest aberto da placa (ou só as `nets`
+  pedidas) de uma vez:
+  - A* numa grade única para todas as camadas de sinal (Top, Bottom, Mid…), trocando de camada por via. A via só entra
+    onde fica limpa em todas as camadas de cobre, inclusive furo a furo e ponte de máscara do DRC. Plane não recebe
+    trilha; pad SMD só se liga na camada dele.
+  - As folgas, a largura, a via e as camadas permitidas saem da mesma conta do DRC: Clearance vencedora por par (classes
+    de net e regras com escopo, como fase × baixa tensão 1,5 mm ou COM × VSS 0,2 mm só no IC8), Width, Routing Via
+    Style e Routing Layers.
+  - Ordem (`curta`, `longa`, `classe`, `dada` ou uma lista de nets), arranca-e-refaz só das rotas que ele mesmo pôs
+    (o cobre que já estava na placa nunca sai) e várias passadas, ficando com a de menos conexões abertas.
+  - Padrão `gravar:false`: só simula e mostra as conexões abertas antes/depois, as vias, o tempo e o DRC com as
+    violações NOVAS. `gravar:true` escreve os `track_add`/`via_add` no changes.js; com violação nova nada é gravado.
+  - Medido no acervo, sem violação nova de DRC: placa de potência DI221705 42 → 0 abertas (9 vias, 0,1 s); PRJ-UR 174 →
+    0 (137 vias, ~10 s); MIF 332 → 1 (47 s); PACI (17 × 13 mm, muito densa) 16 → 4.
+  - Limites: cada linha do ratsnest vai de ponta a ponta (não emenda no meio de uma trilha); só via passante; o
+    anti-pad do plano não é modelado (o acervo não tem placa com Plane/Mid para testar mais de 2 camadas). Ainda sem
+    botão na vista PCB: por enquanto pelo MCP.
+
 ## 1.33.0 — 2026-10-28
 
 - **Laser, Neoden e BOM andam junto com a PCB.** Os três liam o `board.js` cru, o espelho do Altium. O que se mexia

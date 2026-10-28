@@ -46,6 +46,9 @@
      limitaLargura(cena, net, layer, w) / limitaVia(cena, net, size, drill)
                                        o valor escolhido preso à faixa da regra ({..., ajustada})
      camadaPermitida(cena, net, layer) a Routing Layers da net deixa?
+     motor                             as peças internas (índice, regra, estado do nó, trecho livre,
+                                       suavização) para o hub-autoroteador.js montar o roteador de
+                                       várias camadas com vias em cima das mesmas contas (2026-10-28)
 
    AS FOLGAS SÃO EXATAS. Cada obstáculo vira primitivas com distância fechada: cápsula (trilha,
    traço de texto, aresta de região/borda com raio 0), arco de verdade, caixa girada de cantos
@@ -605,6 +608,38 @@ function montaCamada(cena, layer){
   }
   return finaliza(M, cena, layer);
 }
+/* A CAMADA EXTRA (2026-10-28, para o hub-autoroteador.js): o cobre que um roteador em lote acabou
+   de pôr, num índice à parte e refeito barato a cada mudança — o índice da placa (montaCamada) é
+   caro de refazer, e o lote acrescenta e arranca rotas centenas de vezes. Pendurada numa regra
+   (R.extra = regraBase(..., montaExtra(...), ...)), ela entra no segLivre e no estadoPonto da regra
+   da placa; sem R.extra (a rota da mão, a Trilha da vista) nada muda.
+   objs = [{id, tipo:'trilha'|'via', net, layer, x1,y1,x2,y2,w | x,y,size}]: as trilhas só da camada
+   pedida, a via (passante) em todas. O índice tem o formato do da placa — regraBase, estadoPonto,
+   segLivre e conflitosSeg servem nele —, e cada obstáculo tem o descritor de query do DRC, para a
+   folga do par sair da mesma Clearance. Os descritores vêm de um cache da cena por tipo|net|camada:
+   o resolvedor de regras guarda a resposta por descritor, e o mesmo par não se resolve de novo a
+   cada refação. */
+function montaExtra(cena, layer, objs){
+  const M = novoMontador(cena);
+  const D = cena._descExtra || (cena._descExtra = new Map());
+  const descDe = (tipo, net, lay) => {
+    const k = tipo + '|' + net + '|' + lay;
+    let d = D.get(k);
+    if (!d) { d = { tipo, net, layer: lay, comp: '', footprint: '', smd: false, poly: false, pad: '', keepout: false, id: '' }; D.set(k, d); }
+    return d;
+  };
+  for (const o of objs || []) {
+    if (!o) continue;
+    const net = typeof o.net === 'string' ? o.net : '', via = o.tipo === 'via';
+    if (via ? !(o.size > 0) || !isNum(o.x) || !isNum(o.y) : o.layer !== layer) continue;
+    M.obst.push({ id: String(o.id), net, netId: idDaNet(cena, net, true), tipo: via ? 'via' : 'trilha', sempre: false, prims: [],
+                  desc: descDe(via ? 'via' : 'track', net, via ? 'Multi' : layer) });
+    const oi = M.obst.length - 1;
+    if (via) addCaixa(M, oi, o.x, o.y, o.size / 2, o.size / 2, o.size / 2, 0);
+    else addSeg(M, oi, o.x1, o.y1, o.x2, o.y2, (o.w || 0) / 2);
+  }
+  return finaliza(M, cena, layer);
+}
 function finaliza(M, cena, layer){
   const n = M.kind.length, nObs = M.obst.length;
   const L = { nome: layer, n, kind: Uint8Array.from(M.kind), dono: Int32Array.from(M.dono), geo: Float64Array.from(M.geo),
@@ -945,7 +980,9 @@ function regraBase(cena, L, N, ig, meia, mao){
     if (bloq[i] && lim[i] > T) T = lim[i];
   }
   const bordaFora = L.oBorda >= 0 && !(ig && ig.has('borda'));
-  return { cena, L, P: bordaFora ? cena.placa : null, bloq, lim, T, m: 0, limBorda: meia + F.borda };
+  /* extra: null = sem a camada extra do lote (motor.montaExtra); o campo nasce aqui para toda regra ter
+     a mesma forma no caminho quente (segLivre/estadoPonto) */
+  return { cena, L, P: bordaFora ? cena.placa : null, bloq, lim, T, m: 0, limBorda: meia + F.borda, extra: null };
 }
 function conjunto(v){
   if (!v) return null;
@@ -1003,6 +1040,9 @@ function segLivre(R, ax, ay, bx, by){
     if (R.limBorda > TOL) { if (!dentroPlaca(R.P, ax, ay)) return false; }
     else if (foraRelaxado(R, ax, ay, bx, by, R.limBorda) < R.limBorda - TOL) return false;
   }
+  /* a camada EXTRA (motor.montaExtra): o cobre que um roteador em lote acabou de pôr, num índice à
+     parte. Só existe na regra que o hub-autoroteador.js monta; a rota da mão nunca tem */
+  if (R.extra && !segLivre(R.extra, ax, ay, bx, by)) return false;
   return true;
 }
 /* os conflitos de um segmento pela regra R: Map obstáculo -> a menor distância com sinal */
@@ -1228,6 +1268,12 @@ function estadoPonto(R, x, y){
     const f = fundoLocal(L, L.oBorda, x, y, TOL - R.limBorda);
     if (f === Infinity) return BLOQ;
     if (-f < R.limBorda + m) banda = true;
+  }
+  /* a camada EXTRA (ver segLivre): o pior dos dois estados */
+  if (R.extra) {
+    const e = estadoPonto(R.extra, x, y);
+    if (e === BLOQ) return BLOQ;
+    if (e === BANDA) banda = true;
   }
   return banda ? BANDA : LIVRE;
 }
@@ -1803,6 +1849,23 @@ function cena(eb, opts){
            _camadas: new Map(), _nets: new Map(), _ctx: null };
 }
 
-return { cena, netEm, folgaTrilha, folgaArco, folgaVia, rota, canto, larguraDaRegra, viaDaRegra, limitaLargura, limitaVia, camadaPermitida, FOLGA_PADRAO, TOL };
+/* O MOTOR POR DENTRO (2026-10-28): as peças com que se monta outro roteador em cima destas mesmas
+   contas exatas e destas mesmas regras — o hub-autoroteador.js (várias camadas, vias, lote com
+   arranca-e-refaz). É acréscimo: nada aqui muda o que a API de cima faz.
+     camada(cena, layer)             o índice da camada (montado na primeira consulta)
+     montaExtra(cena, layer, objs)   o índice do cobre posto pelo lote (ver montaExtra)
+     regraBase(cena, L, N, ig, meia, mao)  a regra de uma consulta: quem bloqueia (bloq) e a que
+                                     distância do eixo (lim); `mao` = descMao(tipo, net, layer)
+     idDaNet(cena, net, cria)        o número da net no índice (monte as camadas antes)
+     estadoPonto(R, x, y)            LIVRE | BANDA | BLOQ, com a margem R.m (0 = o ponto exato)
+     segLivre(R, ax, ay, bx, by)     o segmento é livre pela regra, exato
+     conflitosSeg / conflitosPonto(R, ..., achados)  Map obstáculo -> distância com sinal
+     suaviza / tiraDegraus / limpa   a suavização da rota (as mesmas da rota da mão)
+     caixaDaForma / formaLado / centroCobre / sdPontoCaixa / cosSen  as formas de pad do Gerber */
+const motor = { camada, montaExtra, regraBase, descMao, idDaNet, conjunto, estadoPonto, segLivre, conflitosSeg, conflitosPonto,
+                listaConflitos, suaviza, tiraDegraus, limpa, sdObst, cadaPrim, caixaDaForma, formaLado, centroCobre, sdPontoCaixa,
+                cosSen, ehCobre, LIVRE, BANDA, BLOQ, CURVA, DEGRAU, TOL, SQ2, EPS_PT };
+
+return { cena, netEm, folgaTrilha, folgaArco, folgaVia, rota, canto, larguraDaRegra, viaDaRegra, limitaLargura, limitaVia, camadaPermitida, FOLGA_PADRAO, TOL, motor };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubRoteador;

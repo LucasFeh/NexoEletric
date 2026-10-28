@@ -396,6 +396,11 @@ var changes = [
   com a largura da regra. Diminua `w` dentro da faixa, ou parta de outro ponto.
 - Pad SMD só se liga na camada dele. Rotear em outra camada responde `pad-em-outra-camada`: desça por
   via (trilha até um ponto livre na camada do pad, `pcb_via`, e siga na outra camada).
+- Muitas conexões de uma vez: `pcb_autorotear` (o `hub-autoroteador.js`, com as mesmas regras):
+  - liga o ratsnest aberto (ou só as `nets` dadas) em várias camadas, trocando de camada por via;
+  - roteia na `ordem` pedida, com arranca-e-refaz só das rotas que ele mesmo pôs;
+  - padrão `gravar:false`: só simula e mostra as conexões abertas antes/depois e o DRC com as violações NOVAS;
+  - `gravar:true` escreve os `track_add`/`via_add` no changes.js; com violação nova de DRC nada é gravado.
 
 **Também vem do Altium (só na tela e nas saídas, sem op própria).**
 - Linhas de conexão (ratsnest): o que falta ligar por net.

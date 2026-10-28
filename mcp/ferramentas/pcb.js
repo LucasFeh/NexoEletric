@@ -149,7 +149,7 @@ module.exports = {
   grupo: 'pcb',
   ordem: 30,
   titulo: 'PCB — placa (board.js lido, changes.js escrito)',
-  modulos: ['hub-core.js', 'hub-roteador.js', 'hub-gerber.js'],
+  modulos: ['hub-core.js', 'hub-roteador.js', 'hub-autoroteador.js', 'hub-gerber.js'],
   ferramentas: [
     {
       nome: 'pcb_resumo', titulo: 'Resumo da placa', leitura: true,
@@ -441,6 +441,78 @@ module.exports = {
       },
     },
     {
+      nome: 'pcb_autorotear', titulo: 'Autorotear (várias camadas, vias, lote)',
+      modulo: 'hub-autoroteador.js',
+      descricao: 'Liga SOZINHO as conexões abertas do ratsnest (todas, ou só as `nets` dadas) com o autoroteador do hub (hub-autoroteador.js, em cima do mesmo motor exato do pcb_rotear): várias camadas, trocando de camada por via; uma conexão depois da outra, na `ordem` (curta = a mais curta primeiro, o padrão; longa; classe = a net de regra mais pesada primeiro; dada = a ordem de `nets`; ou uma lista de nets), e arranca-e-refaz nas que falharam (só rotas deste lote saem — o cobre que já está na placa nunca é mexido). Cada rota respeita as regras do projeto como o DRC: a folga de cada par pela Clearance vencedora do rules.js (classes de net, escopo, matriz), a Board Outline Clearance, a Width e a Routing Via Style da net, a Routing Layers; pad SMD só na camada dele; camada Plane não recebe trilha; a via respeita furo a furo e ponte de máscara. Padrão gravar:false = SIMULA: devolve conexões abertas antes/depois, por net, vias, comprimento, falhas com motivo, tempo, e o DRC da placa com as rotas (violações NOVAS — a meta é zero). gravar:true grava os track_add/via_add no changes.js pelo mesmo caminho validado das outras pcb_* (erro de validação ou violação nova de DRC = nada gravado; forcar:true passa por cima do DRC). Para ver: pcb_render {ratsnest:true}, uma camada por vez.',
+      entrada: { type: 'object', properties: {
+        projeto: PROJETO,
+        nets: { type: 'array', items: { type: 'string' }, description: 'só estas nets (padrão: todas as que têm conexão aberta)' },
+        camadas: { type: 'array', items: { type: 'string' }, description: 'camadas de sinal que podem receber trilha (padrão: todas as de cobre da placa, menos Plane)' },
+        ordem: { anyOf: [{ type: 'string', enum: ['curta', 'longa', 'classe', 'dada'] }, { type: 'array', items: { type: 'string' } }], description: 'padrão "curta"; uma lista de nets = esta ordem' },
+        passes: { type: 'integer', minimum: 0, maximum: 20, description: 'passadas de arranca-e-refaz (padrão 4; 0 = passada única)' },
+        custoVia: { type: 'number', minimum: 0, description: 'quanto uma via "custa", em mm de trilha (padrão 3): maior = menos via, rota mais longa' },
+        res: { type: 'number', exclusiveMinimum: 0, description: 'passo da grade em mm (padrão: o da cena, 0,1 mm numa placa normal)' },
+        orcamento: { type: 'object', properties: { tempoMs: { type: 'integer', minimum: 100 }, nosPorBusca: { type: 'integer', minimum: 1000 } }, description: 'padrão {tempoMs: 60000, nosPorBusca: 300000}' },
+        gravar: { type: 'boolean', description: 'padrão false (só simula e mostra)' },
+        forcar: { type: 'boolean', description: 'grava mesmo com violação nova de DRC (evite)' },
+        note: { type: 'string', description: 'o note das linhas (padrão "pcb_autorotear")' },
+      }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const A = ctx.exige('hub-autoroteador.js', 'HubAutoRoteador');
+        ctx.exige('hub-pcbnets.js', 'HubPcbNets');
+        const R = ctx.exige('hub-roteador.js', 'HubRoteador');
+        /* a placa como a tela (e o drc_rodar / nets_ratsnest) a vê: os polígonos do hub despejados */
+        const pl = ctx.placaDespejada(p), eb = pl.eb;
+        const tg = textoGeo(ctx);
+        const S = ops.regrasDoProjeto(ctx, p);
+        const o = { placa: { lacos: lacosDe(ctx, eb), recortes: recortesDe(eb) }, textoGeo: tg };
+        if (S) o.regras = S.conjunto; else o.clearance = (eb.rules && eb.rules.clearance > 0) ? eb.rules.clearance : R.FOLGA_PADRAO;
+        if (isNum(a.res) && a.res > 0) o.res = a.res;
+        const C = R.cena(eb, o);
+        const note = a.note ? String(a.note).replace(/":/g, '" :') : 'pcb_autorotear';
+        const r = A.rotearLote(eb, { cena: C, roteador: R, nets: a.nets, camadas: a.camadas, ordem: a.ordem, passes: a.passes, custoVia: a.custoVia, orcamento: a.orcamento, note });
+        const out = {
+          projeto: p.nome, regras_de: S ? S.fonte : 'folga única do board.rules (sem hub-pcbregras.js)',
+          conexoes_abertas: { antes: r.antes.conexoes, depois: r.depois.conexoes, das_nets_pedidas: { antes: r.alvo.conexoes, depois: r.depois.doAlvo } },
+          roteadas: r.roteadas, primeira_passada: r.primeiraPassada, vias: r.vias, comprimento_mm: r4(r.comprimento),
+          trilhas: r.ops.filter(x => x.op === 'track_add').length, passes: r.passes, arrancadas: r.arrancadas, ms: r.ms,
+          orcamento: r.orcamento, parametros: r.parametros, falhas: r.falhas, por_net: r.porNet,
+          rotas: r.rotas.slice(0, 60), rotas_total: r.rotas.length,
+        };
+        if (!r.ops.length) { out.gravacao = { ok: true, gravado: false, nota: r.alvo.conexoes ? 'nenhuma rota saiu (veja falhas)' : 'nada a ligar: o ratsnest das nets pedidas está fechado' }; return out; }
+        /* o DRC da placa com as rotas (despejada de novo: o plano recua das trilhas novas), contra o de
+           antes: as violações NOVAS (a net não roteada fica de fora — a árvore do ratsnest muda) */
+        const D = ctx.modulo('hub-pcbdrc.js');
+        const itens = ctx.changes(p).concat(r.ops);
+        const depois = ctx.placaDespejada(p, itens);
+        if (D) {
+          const conj = S ? S.conjunto : undefined;
+          const chave = v => v.tipo + '|' + (v.ids || []).map(x => String(x).replace(/^(q:[^:]*):\d+$/, '$1')).sort().join('|');
+          const d0 = D.rodar(eb, conj, { textoGeo: tg }), d1 = D.rodar(depois.eb, conj, { textoGeo: tg });
+          const ja = new Set(d0.violacoes.map(chave));
+          const novas = d1.violacoes.filter(v => v.tipo !== 'UnRoutedNet' && !ja.has(chave(v)));
+          const porTipo = {};
+          for (const v of novas) porTipo[v.tipo] = (porTipo[v.tipo] || 0) + 1;
+          out.drc = { antes: d0.total, depois: d1.total, novas: novas.length, novas_por_tipo: porTipo,
+                      novas_lista: novas.slice(0, 40).map(v => ({ tipo: v.tipo, msg: v.msg, x: r4(v.x), y: r4(v.y), layer: v.layer, ids: v.ids })) };
+        } else out.drc = { nota: 'hub-pcbdrc.js ausente: o DRC não rodou' };
+        /* o ratsnest da placa como ela fica (o mesmo motor do nets_ratsnest) */
+        const N = ctx.modulo('hub-pcbnets.js');
+        if (N) out.conexoes_abertas.na_placa_depois = N.naoRoteadas(depois.eb).conexoes;
+        if (a.gravar && out.drc.novas && !a.forcar) {
+          out.gravacao = { ok: false, gravado: false, motivo: 'drc', erro: `${out.drc.novas} violação(ões) nova(s) de DRC: nada foi gravado (forcar:true grava mesmo assim)` };
+          return out;
+        }
+        const g = ops.transacao(ctx, p, arq => r.ops.map(op => ops.mescla(arq, op).obj), { simular: !a.gravar, forcar: a.forcar, ferramenta: 'pcb_autorotear' });
+        g.linhas_total = (g.linhas || []).length;
+        g.linhas = (g.linhas || []).slice(0, 12);
+        out.gravacao = g;
+        if (!a.gravar) out.nota = 'simulação: nada foi gravado — repita com gravar:true para escrever as ' + r.ops.length + ' linhas no changes.js';
+        return out;
+      },
+    },
+    {
       nome: 'pcb_via', titulo: 'Colocar via',
       descricao: 'Coloca uma via (via_add). size = diâmetro do anel, drill = furo (padrão: a preferida da regra Routing Via Style que vence para a net). A net, se omitida, sai do pad/trilha no ponto. Para trocar de camada: trilha até [x,y] numa camada, via em [x,y], trilha da outra camada saindo de [x,y].',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, x: { type: 'number' }, y: { type: 'number' },
@@ -571,5 +643,5 @@ module.exports = {
       },
     },
   ],
-  _interno: { TIPOS, cena, lacosDe, textoGeo, padDe },
+  _interno: { TIPOS, cena, lacosDe, recortesDe, textoGeo, padDe },
 };

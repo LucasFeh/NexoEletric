@@ -13,7 +13,8 @@ const { PROJETO, sondaHub, hubNoAr, urlsDaVista } = require('../lib/util.js');
 const MODULOS = [
   ['hub-core.js', 'HubCore', 'motor: board+changes → placa efetiva, nets do esquema, validação'],
   ['hub-gerber.js', 'HubGerber', 'Gerber X2'], ['hub-gerberview.js', 'HubGerberView', 'leitor de Gerber/Excellon'],
-  ['hub-roteador.js', 'HubRoteador', 'roteador walkaround'], ['hub-laser.js', 'HubLaser', 'laser / contorno da placa'],
+  ['hub-roteador.js', 'HubRoteador', 'roteador walkaround'], ['hub-autoroteador.js', 'HubAutoRoteador', 'autoroteador: várias camadas, vias, lote com arranca-e-refaz'],
+  ['hub-laser.js', 'HubLaser', 'laser / contorno da placa'],
   ['hub-font.js', 'HubFont', 'fonte stroke'], ['hub-bom.js', 'HubBom', 'BOM de montagem'],
   ['hub-pcbregras.js', 'HubPcbRegras', 'regras de projeto (rules.js)'], ['hub-pcbdrc.js', 'HubPcbDrc', 'DRC'],
   ['hub-pcbnets.js', 'HubPcbNets', 'conectividade / ratsnest'], ['hub-pcbteardrop.js', 'HubPcbTeardrop', 'teardrops'],
