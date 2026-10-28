@@ -13,6 +13,7 @@
 <script src="hub-font.js"></script>
 <script src="hub-laser.js"></script>
 <script src="hub-bom.js"></script>
+<script src="hub-placaviva.js"></script>
 <!-- gravação (POST /api/save, com queda para download em file://) — a aba Biblioteca
      escreve Libs/lib-subs.js por aqui -->
 <script src="hub-io.js"></script>
@@ -1647,7 +1648,7 @@ function ndSelectOnBoard(ref) {
 }
 
 function renderNeoden() {
-  const comps = (S.detail.board && S.detail.board.components) || [];
+  const comps = placaHub().components || [];
   const pane = document.querySelector('.pane[data-pane="neoden"]');
   const grid = pane.querySelector('.nd-grid');
   let empty = pane.querySelector('.empty');
@@ -3383,8 +3384,16 @@ function renderPanes() {
    Toda a geometria vem do hub-laser.js; aqui só há estado de UI, desenho e download.
    A prévia usa HubLaser.place — a MESMA transformação do arquivo — então o que se vê
    é o que sai, inclusive espelho e negativo. */
+/* Laser, Neoden e BOM andam com a PCB (pedido do dono, 2026-10-28): a placa EFETIVA (board.js +
+   changes.js, teardrops, planos), a da vista PCB aberta ao vivo — ver hub-placaviva.js */
+const PV = HubPlacaViva.instala({
+  projeto: () => (S.detail && S.detail.board ? { id: S.projId, name: S.detail.name, board: S.detail.board } : null),
+  aoMudar: () => { bomFeito = null; if (S.tab === 'laser') renderLaser(); else if (S.tab === 'bom') renderBom(); else if (S.tab === 'neoden') renderNeoden(); },
+});
+const placaHub = () => PV.placa() || (S.detail && S.detail.board) || {};
+window.__hubPcbMudou = (nome, eb) => PV.deVista(nome, eb);
 /* mesma armadilha do bomBoard: 'board' vem {} quando nao ha board.js */
-const lzBoard = () => { const b = S.detail && S.detail.board; return temBoard(b) ? b : null; };
+const lzBoard = () => { const b = placaHub(); return temBoard(b) ? b : null; };
 const lzKey = id => 'altiumhub.laser.' + id;
 
 function lzLoad(id) {
@@ -3765,9 +3774,7 @@ function lzRenderSide(po) {
   const W = $('#lzWarn'); W.textContent = '';
   const avisos = HubLaser.checkOpts(S.laser).concat(HubLaser.facesWarnings(lzFaces));
   const p = proj();
-  if (p && p.pending > 0)
-    avisos.unshift(p.pending + ' mudança(s) pendente(s) em changes.js — a arte NÃO as inclui; ' +
-                   'rode ApplyChanges e ExportPcb antes de gravar.');
+  if (!PV.pronta()) avisos.unshift('montando a placa com as mudanças da PCB…');
   for (const a of avisos) W.append(el('div', 'lz-warn', a));
 
   $('#lzName').textContent = p ? HubLaser.filename(p.name, S.laser) : '';
@@ -3915,7 +3922,7 @@ function bomSave() {
    olhar o conteudo, a aba passava direto pelo estado vazio e deixava salvar um BOM de uma
    placa que nao existe */
 const temBoard = b => !!(b && (b.board || (b.components || []).length));
-const bomBoard = () => { const b = S.detail && S.detail.board; return temBoard(b) ? b : null; };
+const bomBoard = () => { const b = placaHub(); return temBoard(b) ? b : null; };
 
 /* a previa do BOM e um iframe, entao nao ha canvas para redesenhar quando a largura muda */
 const bomSplits = mkSplits({
@@ -3943,7 +3950,7 @@ async function bomCompute() {
       if (!resp.ok) throw new Error('HTTP ' + resp.status);
       const dado = await resp.json();
       if (!dado.ok || !dado.board) throw new Error(dado.error || 'resposta vazia');
-      B = dado.board;
+      B = HubPlacaViva.mesclaEsquema(bomBoard(), S.detail && S.detail.board, dado.board);
     } catch (e) {
       if (pedido === bomPedido) $('#bomMeta').textContent = 'falha ao atualizar: ' + e.message;
       return;
@@ -3968,9 +3975,7 @@ async function bomCompute() {
 
   const W = $('#bomWarn'); W.textContent = '';
   const avisos = (r.warnings || []).slice();
-  if (p && p.pending > 0)
-    avisos.unshift(p.pending + ' mudança(s) pendente(s) em changes.js — o BOM sai do board.js cru; '
-                 + 'rode ApplyChanges e ExportPcb antes de usar na bancada.');
+  if (!PV.pronta()) avisos.unshift('montando a placa com as mudanças da PCB…');
   for (const a of avisos) W.append(el('div', 'lz-warn', a));
 
   bomFooter();
@@ -4134,7 +4139,7 @@ function exportBom() {
 }
 
 function neodenDownload(side) {
-  const comps = (S.detail.board && S.detail.board.components) || [];
+  const comps = placaHub().components || [];
   if (!comps.length) return;
   const res = HubCore.neodenTransform(comps, neodenOpts());
   if (res.error) { toast(res.error, 'err'); return; }
@@ -4618,6 +4623,7 @@ window.__hubOnChange = async function () {
      apelido de novo e o editor de símbolos relendo o espelho */
   libInvalida(); libBust = Date.now(); libTabelas = null;
   LIB.cache = {}; LIB.ready = false; LIB.loading = null;
+  PV.recarrega();      /* Laser/Neoden/BOM: a placa do changes.js novo (hub-placaviva.js) */
   /* A UNICA peca destrutiva da receita e o HubSymEd.reload(): ele joga fora o rascunho do
      editor. Com o editor sujo ele fica de fora — o cache ja foi invalidado, o que nao custa
      nada a ninguem, e o desenho que esta na mesa continua sendo do usuario. (No libsync ele
@@ -4774,7 +4780,7 @@ $('#ndInc').onchange = () => {
   if (S.neoden.selDes) ndSetExcluded([S.neoden.selDes], !$('#ndInc').checked);
 };
 $('#ndDropPth').onclick = () => {
-  const comps = (S.detail.board && S.detail.board.components) || [];
+  const comps = placaHub().components || [];
   const pth = comps.filter(c => HubCore.neodenKind(c) === 'pth').map(c => c.ref);
   const n = ndSetExcluded(pth, true);
   toast(n ? n + ' componente(s) PTH fora da lista' : 'nenhum PTH a excluir', n ? 'ok' : 'warn');

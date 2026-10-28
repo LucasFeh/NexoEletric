@@ -380,7 +380,15 @@ function recalcula(){
   pathPlacaCache = null;
   cacheSujo = true;
   if (typeof refaz3d === 'function') refaz3d();
+  avisaHubPlaca();
 }
+/* Laser, Neoden e BOM andam com esta vista (hub-placaviva.js): a cada recalculo o hub recebe a
+   placa daqui, com o que ainda nao foi salvo; ao sair, o hub volta a placa do disco */
+function avisaHubPlaca(fim){
+  if (LEAN || !PROJ) return;
+  try { if (window.parent !== window && typeof window.parent.__hubPcbMudou === 'function') window.parent.__hubPcbMudou(PROJ, fim ? null : EB); } catch (e) {}
+}
+window.addEventListener('pagehide', () => avisaHubPlaca(true));
 /* As abas: a lista do motor (com nome/cor do board.layers quando o espelho novo traz) e a
    Mechanical 1 sempre -- ela existe em toda placa do Altium e e onde a casa desenha cota e
    contorno a mao (86% das placas); sem ela na lista nao haveria onde desenhar. */
@@ -1423,8 +1431,8 @@ function restauraCH(json){
 }
 function desfaz(){ if (undoStack.length < 2) return false; encerraDraft(true); redoStack.push(undoStack.pop()); restauraCH(undoStack[undoStack.length - 1]); return true; }
 function refaz(){ if (!redoStack.length) return false; encerraDraft(true); const s = redoStack.pop(); undoStack.push(s); restauraCH(s); return true; }
-function setChDirty(v){ chDirty = !!v; if (painel) painel.atualizaSalvar(); }
-function setAnnDirty(v){ annDirty = !!v; if (painel) painel.atualizaSalvar(); }
+function setChDirty(v){ chDirty = !!v; if (painel) painel.atualizaSalvar(); if (chDirty) autoSalva(); }
+function setAnnDirty(v){ annDirty = !!v; if (painel) painel.atualizaSalvar(); if (annDirty) autoSalva(); }
 
 /* ============================== escrever as ops ==============================
    Regra de sempre: um objeto PLANO por linha, orig_* copiados do board.js (a trava do
@@ -3931,7 +3939,8 @@ function aplicaPrefs(p){
 }
 function ctxAltium(){
   return { sel:SEL.length, comp:compsDaSel().length > 0, poly:SEL.some(a => a.t === 'regiao-ro' && a.eb && a.eb.poly), net:netDaSel(), lean:LEAN, edit:editOn, grade:grade.id,
-           conexoes:conexoesLigadas(), ghost:show.ghost, flip:view.flip, unica:show.unica, tres:modo3d };
+           conexoes:conexoesLigadas(), ghost:show.ghost, flip:view.flip, unica:show.unica, tres:modo3d,
+           autosave:AUTOSAVE ? AUTOSAVE.ligado() : null };
 }
 
 /* ============================== enquadrar ============================== */
@@ -4988,6 +4997,7 @@ function fazAcao(id, arg){
     case 'tudo': selecionaTudo(); return;
     case 'editar': setEdit(!editOn); HubDialog.toast(editOn ? 'edição destravada' : 'edição travada (só leitura)', 'info', 1600); return;
     case 'salvar': salvar(); return;
+    case 'autosave': alternaAutosave(); return;
     case 'ajuda': toggleAjuda(); return;
     case 'gerber': abreGerber(); return;
     case 'pdf': abrePdf(); return;
@@ -6079,10 +6089,14 @@ function comentariosDoDisco(txt){
   }
   return out;
 }
-async function salvaChanges(){
+async function salvaChanges(quieto){
   if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o changes.js do disco. Continuar?', SOBRESCREVER))) return false;
   const out = HC.serializeChanges(CH);
-  if (!out.text) { await HubDialog.alert(out.errors.map(e => '#' + (e.idx + 1) + ' ' + e.msg).join('\n'), { title:'Mudanças inválidas — nada foi gravado' }); return false; }
+  if (!out.text) {
+    /* no autosave nao abre um alerta a cada edicao: o Salvar fica marcado e o rodape diz por que */
+    if (quieto) { avisoRodape('⚠ autosave parado: há mudança inválida — Salvar (Ctrl+S) mostra qual'); return false; }
+    await HubDialog.alert(out.errors.map(e => '#' + (e.idx + 1) + ' ' + e.msg).join('\n'), { title:'Mudanças inválidas — nada foi gravado' }); return false;
+  }
   let atual = null;
   if (HubIO.canPost) {
     try { atual = await HubIO.fetchText(CH_REL); } catch (e) {}
@@ -6095,17 +6109,17 @@ async function salvaChanges(){
     const r = await HubIO.saveFile(CH_REL, texto);
     chDisco = texto; staleWorkspace = false; setChDirty(false);
     avisoRodape('');
-    HubDialog.toast(r.mode === 'server' ? 'changes.js salvo (' + CH.length + ' mudança' + (CH.length === 1 ? '' : 's') + ')' : 'arquivo baixado — substitua ' + CH_REL, r.mode === 'server' ? 'ok' : 'warn');
+    if (!quieto) HubDialog.toast(r.mode === 'server' ? 'changes.js salvo (' + CH.length + ' mudança' + (CH.length === 1 ? '' : 's') + ')' : 'arquivo baixado — substitua ' + CH_REL, r.mode === 'server' ? 'ok' : 'warn');
     return true;
   } catch (err) { await falhaSalvar(err, 'changes.js', texto); return false; }
 }
-async function salvaAnnotations(){
+async function salvaAnnotations(quieto){
   const out = HC.serializeAnnotations(ANN);
   if (!out.text) { await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Sinalizadores inválidos' }); return false; }
   try {
     const r = await HubIO.saveFile(ANN_REL, out.text);
     annDisco = out.text; setAnnDirty(false);
-    HubDialog.toast(r.mode === 'server' ? 'sinalizadores salvos' : 'arquivo baixado — substitua ' + ANN_REL, r.mode === 'server' ? 'ok' : 'warn');
+    if (!quieto) HubDialog.toast(r.mode === 'server' ? 'sinalizadores salvos' : 'arquivo baixado — substitua ' + ANN_REL, r.mode === 'server' ? 'ok' : 'warn');
     return true;
   } catch (err) { await falhaSalvar(err, 'annotations.js', out.text); return false; }
 }
@@ -6119,6 +6133,30 @@ async function salvar(){
     if (annDirty) await salvaAnnotations();
   } finally { salvando = false; if (painel) painel.atualizaSalvar(); }
 }
+/* Arquivo » Autosave (hub-autosave.js): ligado, cada edicao grava sozinha logo depois da ultima,
+   sem o aviso de "salvo"; com algo na mao (arrasto, trilha sendo desenhada) espera ela acabar */
+var AUTOSAVE = typeof HubAutosave !== 'undefined' ? HubAutosave : null;   /* var: setChDirty pode rodar antes desta linha */
+function autoSalva(){
+  if (!AUTOSAVE || LEAN || !HubIO.canPost || !PROJ) return;
+  AUTOSAVE.agenda(salvarAuto);
+}
+async function salvarAuto(){
+  if (LEAN || (!chDirty && !annDirty)) return;
+  if (salvando || arrasto || draft) { autoSalva(); return; }
+  salvando = true;
+  try {
+    if (chDirty) await salvaChanges(true);
+    if (annDirty) await salvaAnnotations(true);
+  } finally { salvando = false; if (painel) painel.atualizaSalvar(); }
+}
+function alternaAutosave(){
+  if (!AUTOSAVE) return;
+  const v = AUTOSAVE.alterna();
+  HubDialog.toast(v ? 'Autosave ligado: cada mudança já é salva' : 'Autosave desligado: salve com Ctrl+S', 'info', 2200);
+  if (v && (chDirty || annDirty)) autoSalva();
+  if (painel) painel.atualizaSalvar();
+}
+if (AUTOSAVE) AUTOSAVE.aoMudar(v => { if (v && (chDirty || annDirty)) autoSalva(); if (painel) painel.atualizaSalvar(); });
 
 /* ============================== o hub (iframe) ============================== */
 

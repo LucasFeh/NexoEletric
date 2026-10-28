@@ -1393,7 +1393,21 @@ function updateSaveBtn(){
   $('btnSaveLbl').textContent = d ? 'Salvar *' : 'Salvar';
   $('savehint').textContent = d ? 'alterado: esquema' : 'nada pendente';
 }
-function setSchDirty(v){ schDirty = v; updateSaveBtn(); }
+function setSchDirty(v){ schDirty = v; updateSaveBtn(); if (v) autoSalvaSch(); }
+/* Arquivo » Autosave (hub-autosave.js): ligado, cada edicao grava sozinha logo depois da ultima,
+   sem o aviso de "salvo" (as perguntas de sobrescrever continuam). var: roda antes do resto */
+var AUTOSAVE_SCH = typeof HubAutosave !== 'undefined' ? HubAutosave : null;
+function autoSalvaSch(){
+  if (!AUTOSAVE_SCH || !HubIO.canPost) return;
+  AUTOSAVE_SCH.agenda(async () => { if (schDirty) await saveSchematic(); });
+}
+function alternaAutosaveSch(){
+  if (!AUTOSAVE_SCH) return;
+  const v = AUTOSAVE_SCH.alterna();
+  HubDialog.toast(v ? 'Autosave ligado: cada mudança já é salva' : 'Autosave desligado: salve com Ctrl+S', 'info', 2200);
+  if (v && schDirty) autoSalvaSch();
+}
+if (AUTOSAVE_SCH) AUTOSAVE_SCH.aoMudar(v => { if (v && schDirty) autoSalvaSch(); });
 function commit(){
   undoStack.push(JSON.stringify(schematic.items));
   if (undoStack.length > 60) undoStack.shift();
@@ -5794,6 +5808,7 @@ function fazAcao(id){
     case 'tudo':      selectOnly(sheetItems()); return;
     case 'rotear':    return rotearNoArrasto();
     case 'salvar':    saveAll(); return;
+    case 'autosave':  alternaAutosaveSch(); return;
   }
   return false;
 }
@@ -6323,7 +6338,7 @@ window.addEventListener('mousemove', e => { ultimoMouseSch = { x:e.clientX, y:e.
 if (typeof HubPcbAltium !== 'undefined' && typeof HubAltiumDNA !== 'undefined') {
   ALT_SCH = HubPcbAltium.instala({
     vista:'sch', fazAcao:id => fazAcao(id), teclaDe:id => (ATALHOS.porAcao && ATALHOS.porAcao[id]) || '',
-    ctx:() => ({ sel:sel.size, lean:false }), grades:() => [],
+    ctx:() => ({ sel:sel.size, lean:false, autosave:AUTOSAVE_SCH ? AUTOSAVE_SCH.ligado() : null }), grades:() => [],
     toast:(t, tipo, ms) => { if (typeof HubDialog !== 'undefined') HubDialog.toast(t, tipo || 'info', ms); },
   });
   window.__hubMenus = { vista:'sch', itens:() => ALT_SCH.itensBarra(), popup:(l, x, y) => ALT_SCH.popup(l, x, y) };

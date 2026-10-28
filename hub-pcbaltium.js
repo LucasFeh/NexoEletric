@@ -352,6 +352,11 @@ function instala(V) {
       if (!n.plid || OCULTOS.has(n.plid) || INTERNO(n.rotulo)) continue;
       const it = itemDoPlid(n, c, modo);
       if (it) out.push(it);
+      /* Arquivo » Autosave logo abaixo do Salvar (pedido do dono, 2026-10-28): marcado, cada
+         mudanca ja grava sozinha; a escolha fica para as proximas vezes (hub-autosave.js) */
+      if (it && it.acao === 'salvar' && c.autosave != null && !out.some(x => x && x.acao === 'autosave'))
+        out.push({ rot:'Autosave', acao:'autosave', f:() => V.fazAcao('autosave'), check:!!c.autosave,
+                   dica:c.autosave ? 'ligado: cada mudança já é salva no disco — clique para desligar' : 'desligado: clique para salvar sozinho a cada mudança' });
     }
     return limpaSep(out);
   }

@@ -4,6 +4,24 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.33.0 — 2026-10-28
+
+- **Laser, Neoden e BOM andam junto com a PCB.** Os três liam o `board.js` cru, o espelho do Altium. O que se mexia
+  na vista PCB (o `changes.js`) não chegava neles, e os próprios avisos diziam "a arte NÃO inclui as mudanças". Agora
+  usam a mesma placa da vista PCB: mudanças, componentes do ECO com a biblioteca de footprints, teardrops e planos
+  despejados (`hub-placaviva.js`).
+  - Com a vista PCB do projeto aberta, vale a placa dela **ao vivo**, inclusive o que ainda não foi salvo: mexeu um
+    componente, ele já está no lugar novo no Neoden, na arte do Laser e no BOM.
+  - Sem a vista aberta, a placa sai do disco e é refeita quando o projeto muda.
+  - **A BOM publicada no NexoBD para a bancada também.** A fonte dela passa a ter as mudanças da PCB, e mexer só no
+    `changes.js` também a republica. Antes, só o `board.js` e o `schematic.js` disparavam a republicação. O
+    comentário vindo do esquema continua valendo onde a PCB não mexeu.
+- **Arquivo › Autosave**, logo abaixo de Salvar, na PCB e no Esquema. Marcado, cada mudança é salva sozinha logo
+  depois da última edição (arrastando ou desenhando, espera terminar), sem o aviso de "salvo". A escolha é uma só e
+  fica guardada: marcou numa vista, vale na outra e nas próximas vezes. As perguntas de sobrescrever (o arquivo mudou
+  no disco por outro escritor) continuam aparecendo. Mudança inválida para o autosave e avisa no rodapé; Ctrl+S
+  mostra qual é.
+
 ## 1.32.1 — 2026-10-28
 
 - **O hub sobe com `python.exe -E -s`** (pedido do usuário): `python.exe -E -s -X utf8 -u hubserver.py --port 8200

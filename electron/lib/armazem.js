@@ -14,8 +14,8 @@
 //   a pagina (bom-pagina.html + hub-bom.js, hub-font.js, hub-laser.js do instalador) → o item "App web da BOM"
 //     (chave nexoeletric-web = bom), a cada versao (uma versao mais velha nao sobrescreve a de uma mais nova);
 //   cada projeto com board.js → o item "BOM: <projeto>" (chave nexoeletric-bom = o slug do link, o _proj_id do
-//     hubserver): fonte.json (a fonte da BOM, gerada pelo hubserver -- o mesmo gerador do painel -- quando o
-//     board.js ou o schematic.js mudam), opts.json (o bom-opts.json do projeto: as opcoes do "Copiar link") e,
+//     hubserver): fonte.json (a fonte da BOM, gerada pelo hubserver -- o mesmo gerador do painel --, com as mudancas da PCB, quando o
+//     board.js, o schematic.js ou o changes.js mudam), opts.json (o bom-opts.json do projeto: as opcoes do "Copiar link") e,
 //     so na criacao, os vistos que o projeto ja tinha (bom-vistos.json). Os vistos da bancada gravam no NexoBD.
 //
 // Roda: antes de o hub abrir (a primeira, com espera curta), quando Projects/ ou Libs/ mudam (3 s depois), quando um
@@ -188,11 +188,12 @@ async function espelharBoms({ cliente, ws, nomes, estado, fonte, versao = '', ap
     const shaB = sha256Arq(path.join(pasta, 'board.js'));
     if (!shaB) continue;                                       // sem board.js nao ha BOM
     const shaS = sha256Arq(path.join(pasta, 'schematic.js'));
+    const shaC = sha256Arq(path.join(pasta, 'changes.js'));   // a PCB mexida no hub tambem muda a BOM (1.33.0)
     let optsTxt = null;
     try { const o = JSON.parse(fs.readFileSync(path.join(pasta, 'bom-opts.json'), 'utf8')); if (o && typeof o === 'object' && !Array.isArray(o)) optsTxt = jsonCanonico(o); } catch { /* sem opcoes */ }
     const shaO = optsTxt ? sha256(optsTxt) : null;
     const e = estado[nome] || (estado[nome] = {});
-    if (e.item && e.board === shaB && e.sch === shaS && e.opts === shaO) continue;
+    if (e.item && e.board === shaB && e.sch === shaS && (e.changes || null) === shaC && e.opts === shaO) continue;
     const slug = slugProjeto(nome);
     try {
       let it = await cliente.chave(SISTEMA_BOM, slug);
@@ -206,12 +207,13 @@ async function espelharBoms({ cliente, ws, nomes, estado, fonte, versao = '', ap
       const arquivos = {};
       let fonteAtual = null;
       if (arqs['fonte.json']) { try { fonteAtual = JSON.parse(Buffer.from(await cliente.blob(arqs['fonte.json'].sha256)).toString('utf8')); } catch { fonteAtual = null; } }
-      const fontes = { board: shaB, schematic: shaS };
+      const fontes = { board: shaB, schematic: shaS, changes: shaC };
       let pendente = false;
-      if (!fonteAtual || !fonteAtual.fontes || fonteAtual.fontes.board !== shaB || (fonteAtual.fontes.schematic || null) !== shaS) {
+      if (!fonteAtual || !fonteAtual.fontes || fonteAtual.fontes.board !== shaB || (fonteAtual.fontes.schematic || null) !== shaS ||
+          (fonteAtual.fontes.changes || null) !== shaC) {
         const f = await fonte(nome, slug);
         if (f && f.ok && f.board) {
-          const tag = sha256(`${shaB}|${shaS || ''}`).slice(0, 12);
+          const tag = sha256(`${shaB}|${shaS || ''}|${shaC || ''}`).slice(0, 12);
           arquivos['fonte.json'] = { bytes: Buffer.from(JSON.stringify({ ok: true, projeto: nome, board: f.board, sourceRev: tag, fontes, gerado_em: new Date().toISOString(), gerador: `NexoEletric ${versao}`.trim() })), nome: 'fonte.json' };
         } else pendente = true;
       }
@@ -228,7 +230,7 @@ async function espelharBoms({ cliente, ws, nomes, estado, fonte, versao = '', ap
         out.atualizados.push(nome);
       }
       if (pendente) { out.pendentes.push(nome); e.item = it.id; delete e.board; continue; }
-      Object.assign(e, { item: it.id, board: shaB, sch: shaS, opts: shaO });
+      Object.assign(e, { item: it.id, board: shaB, sch: shaS, changes: shaC, opts: shaO });
     } catch (err) { out.erros.push({ nome, erro: err.message }); }
   }
   return out;
@@ -243,6 +245,40 @@ function fonteDoHub(origem) {
       if (!r.ok) return null;
       return await r.json();
     } catch { return null; }
+  };
+}
+
+/**
+ * A fonte da BOM com as mudancas da PCB (1.33.0, pedido do dono: "quando a PCB atualiza, BOM, laser e Neoden andam
+ * junto"). O hubserver devolve o board.js com os dados de compra do esquema; por cima, o changes.js do projeto pela
+ * mesma conta da vista PCB (hub-placaviva.js » efetiva: comp_add com a biblioteca, teardrops, planos despejados).
+ * hubDir = a pasta com os hub-*.js (a do instalador); falhou alguma coisa, fica a fonte do hubserver como veio.
+ */
+function fonteEfetiva(hubDir, ws, fonte) {
+  return async (nome, slug) => {
+    const f = await fonte(nome, slug);
+    if (!f || !f.ok || !f.board || !hubDir) return f;
+    try {
+      const req = (arq) => require(path.join(hubDir, arq));
+      const PV = req('hub-placaviva.js');
+      const chTxt = (() => { try { return fs.readFileSync(path.join(ws, 'Projects', nome, 'changes.js'), 'utf8'); } catch { return ''; } })();
+      const changes = PV.leChanges(chTxt);
+      if (!changes.length) return f;
+      let pcblib = null;
+      if (PV.precisaLib(changes)) {
+        const vm = require('node:vm');
+        const le = (arq, nomeVar) => { try { const c = {}; vm.createContext(c); vm.runInContext(fs.readFileSync(path.join(ws, 'Libs', arq), 'utf8') + `;this.__v=typeof ${nomeVar}!=='undefined'?${nomeVar}:null`, c); return c.__v; } catch { return null; } };
+        const alt = le('pcblib.js', 'pcblib'), hub = le('pcblib-hub.js', 'pcblibHub');
+        let FL = null; try { FL = req('hub-fplib.js'); } catch { FL = null; }
+        const h = FL && hub ? FL.normaliza(hub) : null;
+        pcblib = h && h.footprints && h.footprints.length ? FL.mescla(alt, h) : alt;
+      }
+      let T = null, P = null;
+      try { T = req('hub-pcbteardrop.js'); } catch { T = null; }
+      try { P = req('hub-pcbpour.js'); } catch { P = null; }
+      f.board = PV.efetiva({ board: f.board, changes, HubCore: req('hub-core.js'), pcblib, Teardrop: T, Pour: P });
+    } catch { /* fica a fonte do hubserver */ }
+    return f;
   };
 }
 
@@ -362,7 +398,7 @@ class Armazem {
         const cliente = c.criarCliente({ app: APP });
         this.est.url = (await cliente.conexao()).url;
         const log = (l) => this.log.info(`[nexobd] ${l}`);
-        const r = await rodada({ ws, bundle: this.bundle, cliente, estado: this.estado, log, scripts: !this.scriptsFeitos, fonte: fonteDoHub(this.hub), versao: this.versao });
+        const r = await rodada({ ws, bundle: this.bundle, cliente, estado: this.estado, log, scripts: !this.scriptsFeitos, fonte: fonteEfetiva(this.bundle || ws, ws, fonteDoHub(this.hub)), versao: this.versao });
         if (r.scripts) this.scriptsFeitos = true;
         fs.mkdirSync(path.dirname(ARQ_ESTADO(ws)), { recursive: true });
         const tmp = ARQ_ESTADO(ws) + '.tmp';
@@ -444,4 +480,4 @@ class Armazem {
 }
 
 module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, aceitaFerramenta, ALVO_FERRAMENTAS, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_ESTADO, ARQ_PCBLIB,
-  espelharBoms, publicarWebBom, fonteDoHub, slugProjeto, SISTEMA_BOM, ALVO_WEB_BOM, ARQ_WEB_BOM, ALVO_CHAT };
+  espelharBoms, publicarWebBom, fonteDoHub, fonteEfetiva, slugProjeto, SISTEMA_BOM, ALVO_WEB_BOM, ARQ_WEB_BOM, ALVO_CHAT };
