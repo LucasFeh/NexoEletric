@@ -66,7 +66,7 @@ node mcp/eletrichub-mcp.js --root <pasta> --http 8765
 claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 ```
 
-## Ferramentas (96, por grupo)
+## Ferramentas (97, por grupo)
 
 `list_commands` lista tudo com descrição; cada ferramenta diz na descrição o fluxo de uso.
 
@@ -78,7 +78,7 @@ claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 | simbolo | `sym_ler` (o desenho inteiro, de qualquer acervo), `sym_gerar` (CI/conector a partir da lista de pinos), `sym_salvar` (destino `projeto` = no `symbols` do schematic.js, vale na hora e para as nets; `biblioteca` = Biblioteca de símbolos do hub, `/api/symbols/lib`; `altium` = redesenha um símbolo da SchLib da casa, `/api/symbols/save`), `sym_renomear`, `sym_apagar` |
 | biblioteca | `almox_buscar` (estoque, local, Odoo; devolve o `comp` pronto para `sch_adicionar`) |
 | footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_3d_importar` (STEP do disco → `Libs/3d-hub`), `fp_3d_nexo` (o STEP de um item da biblioteca da rede Nexo), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |
-| pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos), `pcb_colocar` (footprint como componente novo, com as nets dos pads), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
+| pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos), `pcb_colocar` (footprint como componente novo, com as nets dos pads), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_autorotear` (o ratsnest inteiro em várias camadas com vias, ordem e arranca-e-refaz, `hub-autoroteador.js`), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
 | pcbmod | `regras_ler`, `regras_definir` (`hub-pcbregras.js`), `drc_rodar` (`hub-pcbdrc.js`), `nets_ratsnest` (`hub-pcbnets.js`, com reserva própria), `pour_definir`, `pour_despejar` (`hub-pcbpour.js`), `teardrop_aplicar` (`hub-pcbteardrop.js`), `eco_comparar`, `eco_aplicar` (`hub-pcbeco.js`) |
 | nexo | `nexo_estado` (o Nexo Hub e o NexoCAD), `nexo_biblioteca` (lista/busca os itens do Nexo Hub no formato do hub; `id` traz revisões e vínculos), `nexo_sincronizar` (publica a biblioteca 3D e as placas no Nexo Hub: o mesmo `lib/nexohub-sync.js` do app), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou de um item, aberto no NexoCAD sempre por um item do Nexo Hub; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (publica o item placa e pede `pcb_importar {item}`; `so_publicar`, `so_pacote`), `nexo_vincular_footprint` (direto no Nexo Hub: `atributos.footprints` + vínculo; num componente já põe o 3D no footprint), `nexo_componentes` (uma biblioteca só: os componentes do NexoCAD com footprint entram na biblioteca de footprints como o 3D deles; o app faz sozinho a cada minuto). Conexão: `NEXOHUB_URL` > `C:\Users\Public\NexoHub\conexao.json` > `127.0.0.1:47800`. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
 | nexobd | `nexo_projetos` (os projetos guardados no NexoBD, fora do catálogo), `nexo_projeto_historico` (revisões: quando, de qual programa, o que mudou), `nexo_projeto_restaurar` (os arquivos de uma revisão antiga voltam para a pasta; o app sobe como revisão nova) |
@@ -87,6 +87,41 @@ claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 | casa | `skills_listar`, `skill_ler` (as skills da casa de `mcp/skills/*.md`), `regras_casa_verificar` (cobre de outra net no pad, trilha por cima de pad, parafuso isolado, plano a 1,0 mm dos pads, serigrafia sem passar por cima de nada) |
 | sinal | `sinal_listar`, `sinal_responder` (só status/reply, AI-GUIDE Parte C), `sinal_criar` |
 | hub | `list_commands`, `hub_status`, `hub_modulos`, `hub_modulo_chamar` (qualquer função de qualquer módulo, com `$placa`, `$esquema`, `$regras`...), `vista_screenshot`, `vista_comando`, `altium_comandos` (`hub-altiumdna.js`), `hub_recarregar_ferramentas` |
+
+## Autoroteador (`pcb_autorotear`)
+
+O `pcb_rotear` liga UMA conexão numa camada; o `pcb_autorotear` liga o ratsnest inteiro (ou só as `nets`
+dadas) sozinho, com o `hub-autoroteador.js` em cima do mesmo motor exato do roteador (`HubRoteador.motor`):
+
+- **várias camadas com via**: grade única para todas as camadas de cobre de sinal (Plane não recebe trilha); a via
+  só entra onde ela é limpa em toda camada, com o furo a furo e a ponte de máscara do DRC; pad SMD só na camada dele;
+- **as regras do DRC**: folga de cada par pela Clearance vencedora do `rules.js` (classes de net, escopo, matriz de
+  objetos), Board Outline Clearance, Width e Routing Via Style da net (preferida; a mínima só quando a ponta não cabe),
+  Routing Layers;
+- **o lote**: ordem `curta` (padrão), `longa`, `classe` (a net de regra mais pesada primeiro), `dada` (a de `nets`) ou
+  uma lista de nets; cada rota vira obstáculo das seguintes na hora; as que falham passam pelo **arranca-e-refaz**
+  (sai a rota deste lote que fecha o caminho, entra a que faltava, a arrancada é refeita; `passes` passadas, fica o
+  melhor resultado). Cobre que já está na placa nunca é mexido.
+
+| parâmetro | padrão | o quê |
+|---|---|---|
+| `projeto` | — | obrigatório |
+| `nets` | todas com conexão aberta | só estas nets |
+| `camadas` | as de cobre da placa, menos Plane | camadas de sinal que podem receber trilha |
+| `ordem` | `curta` | `curta` / `longa` / `classe` / `dada` / `[nets...]` |
+| `passes` | 4 | passadas de arranca-e-refaz (0 = passada única) |
+| `custoVia` | 3 | quanto uma via "custa" em mm de trilha (maior = menos via) |
+| `res` | o da cena (0,1 mm) | passo da grade |
+| `orcamento` | `{tempoMs: 60000, nosPorBusca: 300000}` | tempo do lote e nós por busca |
+| `gravar` | `false` | `false` simula; `true` grava pelo caminho validado (`ops.transacao`) |
+| `forcar` | `false` | grava mesmo com violação NOVA de DRC |
+
+A resposta traz `conexoes_abertas` (antes/depois, na placa e nas nets pedidas), `roteadas`, `primeira_passada`, `vias`,
+`comprimento_mm`, `passes`, `arrancadas`, `ms`, `por_net`, `falhas` (com `motivo`: `camada-proibida`,
+`partida-bloqueada`/`chegada-bloqueada`, `sem-caminho`, `bloqueada`, `orcamento`, `tempo`), as `rotas` e o `drc` da
+placa com as rotas (com os polígonos redespejados): `antes`, `depois` e as violações **novas** (a meta é zero; com
+alguma, `gravar:true` não grava sem `forcar`). Teste: `node tests/test-autoroteador.js` e
+`node tests/test-mcp-autorotear.js`.
 
 Módulo do hub que faltar não derruba nada: a ferramenta responde "módulo ausente" e volta a
 funcionar sozinha quando o arquivo chega (o carregamento confere o mtime a cada chamada).
@@ -193,6 +228,7 @@ do hub redespejados); `despejar:false` volta ao jeito antigo (sem o cobre dos pl
 
 ```
 node tests/test-mcp.js          # stdio com processo filho, HTTP, e as ferramentas numa CÓPIA de "LM555 astável"
+node tests/test-mcp-autorotear.js # o pcb_autorotear (simular e gravar) numa CÓPIA de uma placa do acervo
 node tests/test-mcp-completo.js # raiz automática, símbolos, 3D do disco, pcb_colocar, lote e o relato ao hub
 python tests/test_mcp_rotas.py  # as rotas da vista ao vivo
 node tests/test-jlc.js          # o envio à JLC (lib/jlc.js) contra um IntegrateBrowser de mentira; a senha não vaza
