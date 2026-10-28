@@ -2,8 +2,8 @@
 
    O "Properties" do Altium 21, no molde do painel da vista Esquema (schframe.html: #props com
    divisoria, paginas .dpane, sub-abas no RODAPE, ficha de campos discretos .pr-inp/.pr-par):
-     Propriedades  sem selecao = a PLACA (Board Information com os numeros reais, filtro de
-                   selecao, grade/snap/unidade, vista, saidas); com selecao = a ficha do objeto,
+     Propriedades  sem selecao = a PLACA (Board Information com os numeros reais,
+                   grade/snap/unidade, vista, saidas); com selecao = a ficha do objeto,
                    editavel NA HORA (Enter ou sair do campo grava, com desfazer), com a CAMADA
                    como primeiro campo; com uma ferramenta na mao = as opcoes dela (o Tab do
                    Altium);
@@ -87,14 +87,6 @@ const CSS = `
 .pp .btn.on{background:var(--hi); color:var(--on-hi); border-color:var(--hi);}
 .pp .wide{width:100%; justify-content:flex-start; margin-top:6px;}
 .pp .pr-sec .wide:first-of-type{margin-top:0;}
-.pp .sf-cab{display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;}
-.pp .sf-cab h3{margin:0;}
-.pp .sf-all{font:11px var(--font); padding:1px 8px; border-radius:3px; border:1px solid var(--border); background:transparent; color:var(--fg-dim); cursor:pointer;}
-.pp .sf-all.on{color:var(--fg); border-color:var(--accent);}
-.pp .sf{display:flex; flex-wrap:wrap; gap:3px;}
-.pp .sf-b{font:11px var(--font); line-height:16px; padding:1px 6px; border-radius:3px; border:1px solid var(--border); background:transparent; color:var(--fg-dim); cursor:pointer;}
-.pp .sf-b:hover{border-color:var(--accent);}
-.pp .sf-b[aria-pressed="true"]{background:rgba(var(--tint),0.14); color:var(--fg); border-color:var(--accent);}
 .pp .chips{display:flex; flex-wrap:wrap; gap:4px;}
 .pp .chip{font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--border); background:transparent; color:var(--fg-dim); cursor:pointer; font-family:inherit;}
 .pp .chip[aria-pressed="true"]{background:rgba(var(--tint),0.12); color:var(--fg); border-color:var(--accent);}
@@ -440,34 +432,8 @@ function instala(aside, V) {
     return wrap;
   }
   function desenhaPlaca(pag) {
-    /* Pedido do dono (2026-10-14): o que ficava acima do filtro (Placa: arquivo, tamanho, contagens)
-       saiu, e o filtro ficou como o Selection Filter do Altium: um "All - On/Off" e um botao pequeno
-       por tipo, na ordem e com os nomes do Altium */
-    const s2 = sec(pag);
-    const cab = el('div', 'sf-cab');
-    cab.append(el('h3', null, 'Selection Filter'));
-    const fs = V.filtros();
-    const todosOn = fs.every(f => f.on);
-    const all = el('button', 'sf-all' + (todosOn ? ' on' : ''), todosOn ? 'All - On' : 'All - Off');
-    all.type = 'button';
-    all.title = todosOn ? 'Tira todos os tipos da seleção' : 'Põe todos os tipos na seleção';
-    all.addEventListener('click', () => V.setFiltro('*', !todosOn));
-    cab.append(all);
-    s2.append(cab);
-    const NOMES = { comp:'Components', keepout:'Keepouts', track:'Tracks', arc:'Arcs', pad:'Pads', via:'Vias',
-                    region:'Regions', poly:'Polygons', fill:'Fills', text:'Texts', outros:'Other' };
-    const ORDEM = ['comp', 'keepout', 'track', 'arc', 'pad', 'via', 'region', 'poly', 'fill', 'text', 'outros'];
-    const grade = el('div', 'sf');
-    for (const k of ORDEM) {
-      const f = fs.find(x => x.k === k); if (!f) continue;
-      const b = el('button', 'sf-b', NOMES[k] || f.rot);
-      b.type = 'button'; b.setAttribute('aria-pressed', String(f.on));
-      b.title = f.rot + (f.on ? ' — selecionável (clique tira)' : ' — fora da seleção (clique põe)');
-      b.addEventListener('click', () => V.setFiltro(f.k, !f.on));
-      grade.append(b);
-    }
-    s2.append(grade);
-
+    /* o Selection Filter saiu daqui (pedido do dono, 2026-10-28: redundante): fica so o do canto do
+       canvas (pcbframe.js » montaFiltroMenu) */
     /* furos de fixacao em cima das marcacoes redondas (pedido do dono, 2026-10-22): o circulo de
        serigrafia/mecanica que marca o parafuso ganha o Board Cutout do diametro dele, e fica */
     const sf = sec(pag, 'Furos de fixação');
@@ -512,7 +478,7 @@ function instala(aside, V) {
     const ibtn = (nome, titulo, on, f) => { const b = el('button', 'ibtn'); b.type = 'button'; b.title = titulo; if (on != null) b.setAttribute('aria-pressed', String(on)); b.append(ic(nome)); b.addEventListener('click', f); ib.append(b); };
     ibtn('fit', 'Enquadrar a placa (' + (V.teclaDe('enquadrar') || 'F') + ')', null, () => V.acao('enquadrar_placa'));
     ibtn('grid', 'Grade (' + (V.teclaDe('grade') || 'B') + ')', sh.grid, () => V.setShow('grid', !sh.grid));
-    ibtn('fantasma', 'Fantasmas das mudanças (' + (V.teclaDe('diff') || 'D') + ')', sh.ghost, () => V.setShow('ghost', !sh.ghost));
+    ibtn(sh.ghost ? 'eye' : 'eyeOff', 'Marcações das mudanças (' + (V.teclaDe('diff') || 'D') + ')', sh.ghost, () => V.setShow('ghost', !sh.ghost));
     ibtn('unica', 'Camada única (' + (V.teclaDe('camadaUnica') || 'S') + ')', sh.unica, () => V.setShow('unica', !sh.unica));
     ibtn('virar', 'Ver por baixo (' + (V.teclaDe('virar') || 'V') + ')', sh.flip, () => V.setShow('flip', !sh.flip));
     /* o Real View do 3D (hub-pcb3d-vista.js): ligar abre o 3D */

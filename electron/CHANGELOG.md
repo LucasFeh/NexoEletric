@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.32.0 — 2026-10-28
+
+- **Corrigido: os pads SMD dos componentes não saíam no Gerber.** Abrindo a placa direto na aba Gerber, o pacote era
+  gerado antes de a vista carregar a biblioteca de footprints. Os componentes postos pelo ECO/`comp_add` cujo footprint
+  vem da biblioteca (capacitores, resistores, CIs SMD, módulos) ficavam de fora, e o plano de cobre passava por cima
+  de onde eles estariam. Na PCB1 a pasta de cima caía de 159 para 14 flashes. Agora o Gerber espera a biblioteca, e o
+  que já estava aberto é gerado de novo quando ela chega. Salvar, Baixar .zip e Enviar pra JLC também esperam. Se
+  ainda faltar footprint, os avisos do Gerber dizem em letra de ATENÇÃO quais componentes ficaram de fora.
+- **Olho das marcações de alteração na barra da PCB.** Fechado, somem os tracejados de onde as coisas estavam, as setas
+  de movimento e os contornos de novo/removido, e fica só a placa como ela está (trilhas, pads, plano). É o mesmo
+  liga/desliga da tecla das marcações e do botão da seção Vista do painel (agora com o mesmo olho), e fica gravado.
+- **O Selection Filter saiu do painel lateral da PCB.** Era repetido: o filtro do canto da área de PCB, com as caixas
+  de marcar, faz o mesmo e continua lá.
+
 ## 1.31.0 — 2026-10-27
 
 - **Nada do NexoEletric fica fora do NexoBD.** O "servidor central" antigo (192.168.15.192:8100) saiu do app: o campo

@@ -134,7 +134,7 @@ const PCB_PADRAO = [
   { id:'outraFace',   tecla:'*',      rotulo:'Top ↔ Bottom (com a trilha na mão: via + troca)' },
   { id:'virar',       tecla:'V',      rotulo:'Ver por baixo' },
   { id:'grade',       tecla:'B',      rotulo:'Mostrar/ocultar a grade' },
-  { id:'diff',        tecla:'D',      rotulo:'Fantasmas das mudanças' },
+  { id:'diff',        tecla:'D',      rotulo:'Marcações das mudanças (olho)' },
   { id:'enquadrar',   tecla:'F',      rotulo:'Enquadrar a placa' },
   { id:'girar',       tecla:'Espaço', rotulo:'Girar 90°' },
   { id:'espelhoX',    tecla:'X',      rotulo:'Espelhar na horizontal' },
@@ -3561,7 +3561,9 @@ const BARRA = [
   { id:'teardrops', ic:'teardrop', acao:'teardrops', at:'teardrops', titulo:'Teardrops (Tools » Teardrops) — põe os que faltam nos pads e vias' }, '|',
   { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Medir distância — dois cliques' },
   { id:'sinalizar', ic:'sinalizar', tool:'sinalizar', at:'sinalizar', titulo:'Sinalizar um problema para a IA (annotations.js)' },
-  { id:'ratsnest', ic:'ratsnest', acao:'ratsnest', at:'ratsnest', titulo:'Linhas de conexão (ratsnest) — Ctrl+clique num cobre realça a net, Esc limpa' }, '|',
+  { id:'ratsnest', ic:'ratsnest', acao:'ratsnest', at:'ratsnest', titulo:'Linhas de conexão (ratsnest) — Ctrl+clique num cobre realça a net, Esc limpa' },
+  /* o olho das marcações das mudanças (pedido do dono, 2026-10-28): fechado, fica só a placa como ela está */
+  { id:'marcas', ic:'eye', acao:'diff', at:'diff', titulo:'Marcações das mudanças' }, '|',
   /* Desfazer/Refazer sairam daqui (pedido do dono, 2026-10-23): moram no fim da fileira "Placa |
      Gerber" do hub (hub-pcbdesfazer.js), e Ctrl+Z/Ctrl+Y e o menu Editar continuam valendo */
   { id:'regras', ic:'regras', acao:'regras', at:'regras', titulo:'Regras de projeto (Design » Rules)' },
@@ -3621,7 +3623,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') fechaGavetas
 /* ── O FILTRO DE SELEÇÃO NO CANTO (pedido do dono, 2026-10-23: "na área de PCB um menuzinho de
    configuração no canto superior esquerdo, em transparência, com esses filtros, em lista; posso
    marcar todos ou um por um, com checkbox") ──
-   O mesmo estado do Selection Filter do painel (filtro + V.setFiltro): marcar aqui ou lá dá no mesmo.
+   O único Selection Filter da vista (o do painel saiu em 2026-10-28, era redundante); estado em filtro + V.setFiltro.
    O cabeçalho recolhe a lista (lembrado nas preferências desta máquina). */
 let filtroRecolhido = lePref('filtroMenu', 'aberto') === 'recolhido';
 function montaFiltroMenu(){
@@ -3659,6 +3661,19 @@ function pintaFiltroMenu(){
   $('pfConta').textContent = n === FILTROS.length ? 'todos' : n + '/' + FILTROS.length;
   $('pfSeta').innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="' + (filtroRecolhido ? 'M4 6 L8 10 L12 6' : 'M4 10 L8 6 L12 10') + '"/></svg>';
   box.classList.toggle('pf-recolhido', filtroRecolhido);
+}
+/* ── O OLHO DAS MARCAÇÕES (pedido do dono, 2026-10-28: "um ícone de olho pra suprimir as marcações de
+   alteração da pcb; desativa o olho, fica só as trilhas e a placa") ──
+   Esconde os fantasmas das mudanças (o original tracejado, o removido em vermelho, o novo com o contorno
+   verde, as setas de onde estava). É o mesmo show.ghost da tecla D e do Preferences, e fica gravado.
+   O botão é o 'marcas' da barra (pintaBarra troca olho aberto/fechado). */
+function setMarcas(v){
+  show.ghost = !!v;
+  PREFS.fantasmas = show.ghost;
+  const guarda = Object.assign({}, PREFS); delete guarda.conflito; delete guarda.conexoes;
+  gravaPref('prefs', JSON.stringify(guarda));
+  pintaBarra();
+  if (painel) painel.atualiza(); pede();
 }
 function montaBarra(){
   const tb = $('pcbtb');
@@ -3705,6 +3720,11 @@ function pintaBarra(){
       el.replaceChildren(HubPcbIcones.icone(editOn ? 'cadeadoAb' : 'cadeado'));
     } else if (b.tool) el.setAttribute('aria-pressed', String(tool === b.tool));
     else if (b.id === 'preencher') el.setAttribute('aria-pressed', String(preencher));
+    else if (b.id === 'marcas') {
+      el.setAttribute('aria-pressed', String(show.ghost));
+      el.replaceChildren(HubPcbIcones.icone(show.ghost ? 'eye' : 'eyeOff'));
+      tit = show.ghost ? 'Marcações das mudanças à vista (tracejados, setas, novo e removido) — clique para esconder e ver só a placa' : 'Marcações das mudanças escondidas — clique para mostrar';
+    }
     const t = b.at ? teclaDe(b.at) : (b.id === 'select' ? '' : '');
     el.title = t && b.id !== 'editar' ? tit + ' (' + t + ')' : tit;
     el.setAttribute('aria-label', el.title);
@@ -3898,7 +3918,7 @@ function aplicaPrefs(p){
   PREFS = normalizaPrefs(p);
   const guarda = Object.assign({}, PREFS); delete guarda.conflito; delete guarda.conexoes;
   gravaPref('prefs', JSON.stringify(guarda));
-  show.grid = !!PREFS.grade; show.ghost = !!PREFS.fantasmas;
+  show.grid = !!PREFS.grade; show.ghost = !!PREFS.fantasmas; pintaBarra();
   if (conexoesLigadas() !== !!PREFS.conexoes) { verConexoes = !!PREFS.conexoes; gravaPref('conexoes', verConexoes ? '1' : '0'); }
   if (PREFS.conflitosCiclo.indexOf(p.conflito) >= 0) setConflito(p.conflito);
   else if (PREFS.conflitosCiclo.indexOf(CFG.conflito) < 0) setConflito(PREFS.conflitosCiclo[0]);
@@ -4957,7 +4977,7 @@ function fazAcao(id, arg){
     }
     case 'virar': setFlip(); HubDialog.toast(view.flip ? 'vista de baixo (como o Flip Board do Altium)' : 'vista de cima', 'info', 1600); return;
     case 'grade': show.grid = !show.grid; if (painel) painel.atualiza(); pede(); return;
-    case 'diff': show.ghost = !show.ghost; if (painel) painel.atualiza(); pede(); HubDialog.toast(show.ghost ? 'fantasmas das mudanças: ligados' : 'fantasmas das mudanças: desligados', 'info', 1600); return;
+    case 'diff': setMarcas(!show.ghost); HubDialog.toast(show.ghost ? 'marcações das mudanças: à vista' : 'marcações das mudanças: escondidas', 'info', 1600); return;
     case 'enquadrar': enquadra(); return;
     case 'girar': if (arrasto) giraNoArrasto('gira'); else transformaSelecao('gira'); return;
     case 'espelhoX': if (arrasto) giraNoArrasto('x'); else transformaSelecao('x'); return;
@@ -5745,7 +5765,7 @@ const V = {
     if (painel) painel.atualiza();
   },
   setShow(k, v){
-    if (k === 'grid') show.grid = !!v; else if (k === 'ghost') show.ghost = !!v;
+    if (k === 'grid') show.grid = !!v; else if (k === 'ghost') { setMarcas(v); return; }
     else if (k === 'unica') { setUnica(!!v); return; } else if (k === 'flip') { setFlip(!!v); return; }
     if (painel) painel.atualiza(); pede();
   },
@@ -5833,7 +5853,7 @@ function abreGerber(){
   /* o visualizador tem o rodape dele (X/Y, zoom): o da vista sai enquanto ele esta aberto */
   document.body.classList.add('gerber-on');
   if (!GV) montaGerberView();
-  if (gerIdx < 0) regeraGerber(true);
+  if (gerIdx < 0) { if (libPronta) libPronta.then(() => { if (gerIdx < 0) regeraGerber(true); }); else regeraGerber(true); }
   else { pintaGerberTopo(); GV.redesenhar(); }
 }
 function fechaGerber(){ const o = $('gerber'); if (o) o.hidden = true; document.body.classList.remove('gerber-on'); try { cv.focus(); } catch (e) {} pede(); }
@@ -5865,6 +5885,11 @@ function geraGerber(){
   /* a placa da TELA: com os teardrops refeitos e os poligonos do hub despejados (recalcula) */
   const eb = EB || HC.effectiveBoard(B, model);
   gerUltimo = HubGerber.gerar(eb, { base:baseDoPcbDoc(), nomes:gerOpc.nomes, vazias:gerOpc.vazias, gtoGbo:gerOpc.gtoGbo, x2:gerOpc.x2, software:'NexoEletric' });
+  /* componente do comp_add sem footprint nao entra na placa: o Gerber sairia sem ele, calado */
+  const sem = compsSemFootprint();
+  if (sem.length && Array.isArray(gerUltimo.avisos))
+    gerUltimo.avisos.unshift('ATENÇÃO: ' + sem.length + (sem.length === 1 ? ' componente ficou' : ' componentes ficaram') + ' FORA do Gerber — footprint não encontrado na biblioteca (' +
+      sem.slice(0, 6).map(i => i.ch.ref).join(', ') + (sem.length > 6 ? '…' : '') + '). Veja a aba Mudanças.');
   return gerUltimo;
 }
 function regeraGerber(primeiro){
@@ -5907,6 +5932,7 @@ function opcaoGerber(k, v){
   if (GV) regeraGerber(false);
 }
 async function baixaZipGerber(){
+  if (libPronta) await libPronta;
   if (!gerUltimo) regeraGerber(false);
   const r = gerUltimo;
   if (!r) return;
@@ -5921,6 +5947,7 @@ async function baixaZipGerber(){
 }
 async function salvaGerber(){
   if (!V.podeGravar) { HubDialog.toast('Salvar no projeto só funciona com o hubserver e um projeto aberto', 'warn'); return; }
+  if (libPronta) await libPronta;
   if (!gerUltimo) regeraGerber(false);
   const r = gerUltimo;
   if (!r) return;
@@ -5950,6 +5977,7 @@ window.addEventListener('pagehide', () => {
 const JLC_QTDS = [5, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 750, 800, 900, 1000];
 async function enviaJlc(){
   if (!V.podeGravar) { HubDialog.toast('Enviar pra JLC só funciona no app (ou com o hubserver) e um projeto aberto', 'warn'); return; }
+  if (libPronta) await libPronta;
   if (!gerUltimo) regeraGerber(false);
   const r = gerUltimo;
   if (!r) return;
@@ -6228,17 +6256,22 @@ function inicia(){
   pintaStatus();
   if (painel) painel.atualiza();
   draw();
-  if (MODO === 'gerber' && !LEAN) abreGerber();
   if (!LEAN) { agendaSilhuetas(); agendaPrepara3d(); }
-  carregaLibSePreciso();
+  /* a aba Gerber so gera depois da biblioteca: antes, o projeto aberto direto no Gerber saia sem os
+     componentes do comp_add (os SMD da biblioteca) e com o plano por cima deles (2026-10-28) */
+  const lib = carregaLibSePreciso();
+  if (MODO === 'gerber' && !LEAN) lib.then(() => abreGerber());
 }
 /* PLACA QUE NASCEU NO HUB: o changes.js traz comp_add (o ECO feito antes, nesta tela ou pelo MCP)
    cujo footprint so existe na biblioteca -- e a pagina nao carrega o Libs/pcblib.js de inicio (3 MB,
    so o ECO o pedia). Sem ele, ao reabrir o projeto o componente nao aparecia e a validacao acusava
    "footprint nao encontrado" ate alguem abrir o ECO. Aqui a biblioteca (a do Altium e a do hub, que
    passa na frente) vem sozinha quando falta, e a placa e refeita. */
-async function carregaLibSePreciso(){
-  const falta = () => model.changeItems.some(i => i.ch && i.ch.op === 'comp_add' && i.status === 'err' && /não encontrado/.test(i.msg || ''));
+const compsSemFootprint = () => model.changeItems.filter(i => i.ch && i.ch.op === 'comp_add' && i.status === 'err' && /não encontrado/.test(i.msg || ''));
+let libPronta = null;
+function carregaLibSePreciso(){ return libPronta || (libPronta = carregaLib()); }
+async function carregaLib(){
+  const falta = () => compsSemFootprint().length > 0;
   if (!falta()) return;
   try {
     await globalDe('pcblib', 'Libs/pcblib.js');
@@ -6250,6 +6283,8 @@ async function carregaLibSePreciso(){
     sujo3d = true;
     if (painel) painel.atualiza();
     pede();
+    /* o Gerber que ja estava aberto foi gerado sem esses componentes: refaz */
+    if (GV && gerIdx >= 0) regeraGerber(true);
     if (falta()) HubDialog.toast('há componente com footprint que não está na biblioteca (veja Mudanças)', 'warn', 5000);
   } catch (e) { console.warn('biblioteca de footprints:', e); }
 }
