@@ -160,6 +160,49 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
     H.build_index(real_root)
 
+# Projeto com mais de uma PCB (1.46.0): o grupo e o grupo.json dentro da pasta de cada PCB; o indice o
+# traz, mover/tirar/renomear/desfazer so mexem nele, e a PCB nova nasce com esquema de uma folha vazia.
+tmp = tempfile.mkdtemp()
+for nome in ('PCB1', 'PCB2', 'Solta'):
+    os.makedirs(os.path.join(tmp, 'Projects', nome))
+real_root, H.ROOT = H.ROOT, tmp
+try:
+    H.build_index(tmp)
+    cli = H.app.test_client()
+    grupos = lambda: {p['name']: p['grupo'] for p in H.build_index(tmp)['projects']}
+    assert grupos() == {'PCB1': '', 'PCB2': '', 'Solta': ''}
+    assert cli.post('/api/project/pcb1/grupo', json={'grupo': 'a/b'}).status_code == 400
+    assert cli.post('/api/project/pcb1/grupo', json={}).status_code == 400
+    assert cli.post('/api/project/nao-existe/grupo', json={'grupo': 'X'}).status_code == 404
+    for pid in ('pcb1', 'pcb2'):
+        r = cli.post('/api/project/%s/grupo' % pid, json={'grupo': ' PAEL Ação '})
+        assert r.status_code == 200 and r.get_json()['grupo'] == 'PAEL Ação', r.get_json()
+    assert grupos() == {'PCB1': 'PAEL Ação', 'PCB2': 'PAEL Ação', 'Solta': ''}
+    with open(os.path.join(tmp, 'Projects', 'PCB1', 'grupo.json'), encoding='utf-8') as f:
+        assert json.load(f) == {'grupo': 'PAEL Ação'}
+    # PCB nova no projeto: esquema de uma folha, changes/annotations vazios, ja no grupo
+    assert cli.post('/api/grupo/nova-pcb', json={'grupo': 'PAEL Ação', 'nome': 'pcb1'}).status_code == 409
+    r = cli.post('/api/grupo/nova-pcb', json={'grupo': 'PAEL Ação', 'nome': 'Fonte'})
+    assert r.get_json() == {'ok': True, 'id': 'fonte', 'name': 'Fonte', 'grupo': 'PAEL Ação'}, r.get_json()
+    sch = H.load_var_file(os.path.join(tmp, 'Projects', 'Fonte', 'schematic.js'))
+    assert sch['project'] == 'Fonte' and [i['t'] for i in sch['items']] == ['sheet']
+    assert H.load_var_file(os.path.join(tmp, 'Projects', 'Fonte', 'changes.js')) == []
+    novo = [p for p in H.build_index(tmp)['projects'] if p['name'] == 'Fonte'][0]
+    assert novo['grupo'] == 'PAEL Ação' and not novo['noSchematic']
+    # renomear o projeto leva as tres PCBs; tirar uma; desfazer solta o resto
+    r = cli.post('/api/grupo/renomear', json={'de': 'PAEL Ação', 'para': 'PAEL'})
+    assert r.get_json()['pcbs'] == ['Fonte', 'PCB1', 'PCB2'], r.get_json()
+    assert cli.post('/api/project/fonte/grupo', json={'grupo': ''}).status_code == 200
+    assert not os.path.exists(os.path.join(tmp, 'Projects', 'Fonte', 'grupo.json'))
+    assert grupos() == {'Fonte': '', 'PCB1': 'PAEL', 'PCB2': 'PAEL', 'Solta': ''}
+    assert cli.post('/api/grupo/renomear', json={'de': 'PAEL', 'para': ''}).status_code == 200
+    assert set(grupos().values()) == {''}
+    assert cli.post('/api/grupo/renomear', json={'de': 'PAEL', 'para': 'X'}).status_code == 404
+finally:
+    H.ROOT = real_root
+    shutil.rmtree(tmp, ignore_errors=True)
+    H.build_index(real_root)
+
 # BOM por link: /bom/<id> monta a pagina na hora, e o estado da bancada e compartilhado.
 # Roda contra o _DemoKit, que esta no repositorio, e limpa os arquivos de estado no fim.
 cli = H.app.test_client()          # test_client chega como 127.0.0.1, entao passa no _is_local

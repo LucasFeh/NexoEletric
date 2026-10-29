@@ -66,6 +66,7 @@
     busca: '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/>',
     fecharTodos: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5.5 8h5"/>',
     lixo: '<path d="M2.5 4.5h11M6 4.5V2.8h4v1.7M4 4.5l.7 9h6.6l.7-9"/><path d="M6.8 7v4.5M9.2 7v4.5"/>',
+    multipcb: '<rect x="1.8" y="5.2" width="8.6" height="8.6" rx="1"/><path d="M5.6 5.2V2.4h8.6V11h-3.8"/><path d="M4 11.4V9h3.4V7.4"/>',
     editar: '<path d="M10.5 2.8l2.7 2.7-7.4 7.4H3.1v-2.7z"/><path d="M9 4.3l2.7 2.7"/>',
     config: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
   };
@@ -205,6 +206,9 @@ body.eh-shell .tab[aria-selected="true"]::after {
 .eh-row.off { color: var(--text-4); }
 .eh-row.off .eh-ico { color: var(--text-4); }
 .eh-row.demo .nm { font-style: italic; }
+.eh-row.multi .eh-ico { color: var(--hi); }
+.eh-row.multi.contem { color: var(--text); }
+.eh-row.alvo { box-shadow: inset 0 0 0 1px var(--hi); background: rgba(var(--tint), 0.10); }
 .eh-row .dot { margin-left: 2px; }
 .eh-row .tag-n { margin-left: auto; font-size: 10px; padding: 0 5px; border-radius: 4px;
   color: var(--text-3); background: rgba(var(--tint), 0.07); font-variant-numeric: tabular-nums; }
@@ -268,6 +272,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
   // Projetos com a gaveta aberta. Clicar no projeto abre; clicar de novo fecha -- vale
   // tambem para o ativo. A gaveta do ativo so abre sozinha quando o ativo MUDA.
   const abertos = new Set();
+  const gruposAbertos = new Set();  // os projetos multi-PCB abertos (pelo nome do grupo)
   let ultimoAtivo = null;
   let bibliotecasAbertas = true;
   let filtro = '';
@@ -318,56 +323,63 @@ body.eh-shell .tab[aria-selected="true"]::after {
     const q = filtro.trim().toLowerCase();
     /* "Só o atual" (pedido do dono, 2026-10-14: "mostrar todos os projetos, ou apenas o projeto
        que deseja ... pra não ficar tão poluído"): a busca continua procurando em todos */
-    const lista = (S.projects || []).filter((p) => q ? p.name.toLowerCase().includes(q) : (!soAtual || (ativo && ativo.id === p.id)));
-    if (soAtual && !q && ativo) abertos.add(ativo.id);
+    /* a busca acha a PCB pelo nome dela ou pelo do projeto multi-PCB em que ela esta */
+    const casa = (p) => p.name.toLowerCase().includes(q) || (p.grupo || '').toLowerCase().includes(q);
+    const lista = (S.projects || []).filter((p) => q ? casa(p) : (!soAtual || (ativo && ativo.id === p.id)));
+    if (soAtual && !q && ativo) { abertos.add(ativo.id); if (ativo.grupo) gruposAbertos.add(ativo.grupo); }
     const frag = document.createDocumentFragment();
 
     const raiz = linha(0, 'grupo', [caret(true), icone('grupo'), el('span', 'nm', 'Projetos'),
       el('span', 'tag-n', String((S.projects || []).length))]);
     raiz.style.cursor = 'default';
+    raiz.title = 'solte aqui uma PCB arrastada para tirá-la do projeto multi-PCB';
+    alvoDeSoltar(raiz, '');
     frag.append(raiz);
 
     if (!lista.length) {
       frag.append(el('div', 'eh-vazio', q ? 'nenhum projeto com esse nome' : 'nenhum projeto nesta pasta de trabalho'));
     }
+    /* PROJETO COM MAIS DE UMA PCB (pedido do dono, 2026-10-29): as PCBs com o mesmo `grupo` (o
+       grupo.json da pasta, hubserver.py) ficam embaixo de uma linha so, e cada uma com os
+       documentos de sempre. Projeto sem grupo continua como era. Grupos e avulsos em ordem de nome. */
+    const grupos = new Map();
+    const entradas = [];
     for (const p of lista) {
-      const eAtivo = ativo && ativo.id === p.id;
-      const aberto = abertos.has(p.id) || Boolean(q);
-      const dot = el('span', 'dot dot-sm ' + (p.pending ? 'warn' : 'ok'));
-      const extras = [];
-      if (p.pending) {
-        const n = el('span', 'tag-n pend', String(p.pending));
-        n.title = p.pending + ' mudança(s) no changes.js ainda não aplicada(s) no Altium';
+      if (!p.grupo) { entradas.push({ nome: p.name, p }); continue; }
+      if (!grupos.has(p.grupo)) { const g = { nome: p.grupo, pcbs: [] }; grupos.set(p.grupo, g); entradas.push(g); }
+      grupos.get(p.grupo).pcbs.push(p);
+    }
+    entradas.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base', numeric: true }));
+    for (const e of entradas) {
+      if (e.p) { linhaDoProjeto(frag, e.p, 1, ativo, aba, q); continue; }
+      const aberto = gruposAbertos.has(e.nome) || Boolean(q);
+      const temAtivo = Boolean(ativo && e.pcbs.some((p) => p.id === ativo.id));
+      const pend = e.pcbs.reduce((s, p) => s + (p.pending || 0), 0);
+      const total = (S.projects || []).filter((p) => p.grupo === e.nome).length;
+      const extras = [el('span', 'tag-n', total + (total === 1 ? ' PCB' : ' PCBs'))];
+      if (pend) {
+        const n = el('span', 'tag-n pend', String(pend));
+        n.title = pend + ' mudança(s) nos changes.js das PCBs ainda não aplicada(s) no Altium';
+        n.style.marginLeft = '4px';
         extras.push(n);
       }
-      const r = linha(1, 'proj' + (eAtivo ? ' ativo' : '') + (p.demo ? ' demo' : ''),
-        [caret(aberto), icone('projeto'), el('span', 'nm', p.name), dot, ...extras]);
-      r.title = p.name;
-      r.querySelector('.car').addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (abertos.has(p.id)) abertos.delete(p.id); else abertos.add(p.id);
-        renderArvore();
-      });
-      // primeiro clique abre a gaveta (e abre o projeto, se for outro); o segundo fecha
+      const r = linha(1, 'proj multi' + (temAtivo ? ' contem' : ''),
+        [caret(aberto), icone('multipcb'), el('span', 'nm', e.nome), ...extras]);
+      r.title = e.nome + ' — projeto com ' + total + ' PCB(s). Arraste uma PCB para cá para incluí-la';
       r.onclick = () => {
-        if (abertos.has(p.id)) { abertos.delete(p.id); renderArvore(); return; }
-        abertos.add(p.id);
-        if (eAtivo) renderArvore(); else selectProject(p.id);
+        if (gruposAbertos.has(e.nome)) gruposAbertos.delete(e.nome); else gruposAbertos.add(e.nome);
+        renderArvore();
       };
-      r.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        menuDoProjeto(p, Boolean(eAtivo), e.clientX, e.clientY);
+      r.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        menuDoGrupo(e.nome, ev.clientX, ev.clientY);
       });
+      alvoDeSoltar(r, e.nome);
       frag.append(r);
       if (!aberto) continue;
-      for (const d of documentosDe(p)) {
-        const doc = linha(2, 'doc' + (d.off ? ' off' : '') + (eAtivo && aba === d.tab ? ' aberto' : ''),
-          [caret(false, true), icone(d.icone), el('span', 'nm', d.nome)],
-          () => abrirDocumento(p, d.tab));
-        if (d.off) doc.title = d.tab === 'esquema' ? 'este projeto ainda não tem schematic.js' : 'este projeto ainda não tem board.js (rode ExportPcb no Altium)';
-        frag.append(doc);
-      }
+      e.pcbs.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base', numeric: true }));
+      for (const p of e.pcbs) linhaDoProjeto(frag, p, 2, ativo, aba, q);
     }
 
     // Bibliotecas: nao dependem do projeto (a aba Biblioteca do hub)
@@ -385,6 +397,72 @@ body.eh-shell .tab[aria-selected="true"]::after {
       }
     }
     tree.replaceChildren(frag);
+  }
+
+  /* uma PCB (um projeto em Projects\) e os documentos dela, no nivel dado: 1 avulsa, 2 dentro de um multi-PCB */
+  function linhaDoProjeto(frag, p, nivel, ativo, aba, q) {
+    const eAtivo = ativo && ativo.id === p.id;
+    const aberto = abertos.has(p.id) || Boolean(q);
+    const dot = el('span', 'dot dot-sm ' + (p.pending ? 'warn' : 'ok'));
+    const extras = [];
+    if (p.pending) {
+      const n = el('span', 'tag-n pend', String(p.pending));
+      n.title = p.pending + ' mudança(s) no changes.js ainda não aplicada(s) no Altium';
+      extras.push(n);
+    }
+    const r = linha(nivel, 'proj' + (eAtivo ? ' ativo' : '') + (p.demo ? ' demo' : ''),
+      [caret(aberto), icone(p.grupo ? 'pcb' : 'projeto'), el('span', 'nm', p.name), dot, ...extras]);
+    arrastavel(r, p);
+    r.title = p.name;
+    r.querySelector('.car').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (abertos.has(p.id)) abertos.delete(p.id); else abertos.add(p.id);
+      renderArvore();
+    });
+    // primeiro clique abre a gaveta (e abre o projeto, se for outro); o segundo fecha
+    r.onclick = () => {
+      if (abertos.has(p.id)) { abertos.delete(p.id); renderArvore(); return; }
+      abertos.add(p.id);
+      if (eAtivo) renderArvore(); else selectProject(p.id);
+    };
+    r.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      menuDoProjeto(p, Boolean(eAtivo), e.clientX, e.clientY);
+    });
+    frag.append(r);
+    if (!aberto) return;
+    for (const d of documentosDe(p)) {
+      const doc = linha(nivel + 1, 'doc' + (d.off ? ' off' : '') + (eAtivo && aba === d.tab ? ' aberto' : ''),
+        [caret(false, true), icone(d.icone), el('span', 'nm', d.nome)],
+        () => abrirDocumento(p, d.tab));
+      if (d.off) doc.title = d.tab === 'esquema' ? 'este projeto ainda não tem schematic.js' : 'este projeto ainda não tem board.js (rode ExportPcb no Altium)';
+      frag.append(doc);
+    }
+  }
+
+  /* ARRASTAR uma PCB para um projeto multi-PCB (inclui) ou para a raiz "Projetos" (tira).
+     O mesmo que o menu do botao direito, so mais curto. */
+  const TIPO_ARRASTO = 'application/x-nexoeletric-projeto';
+  function arrastavel(r, p) {
+    if (typeof S !== 'undefined' && S.demoMode) return;
+    r.draggable = true;
+    r.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData(TIPO_ARRASTO, p.id);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+  }
+  function alvoDeSoltar(r, grupo) {
+    const aceita = (e) => Array.from(e.dataTransfer.types || []).indexOf(TIPO_ARRASTO) >= 0;
+    r.addEventListener('dragover', (e) => { if (!aceita(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; r.classList.add('alvo'); });
+    r.addEventListener('dragleave', () => r.classList.remove('alvo'));
+    r.addEventListener('drop', (e) => {
+      r.classList.remove('alvo');
+      if (!aceita(e)) return;
+      e.preventDefault();
+      const p = (S.projects || []).find((x) => x.id === e.dataTransfer.getData(TIPO_ARRASTO));
+      if (p && (p.grupo || '') !== grupo) poeNoGrupo(p, grupo);
+    });
   }
 
   function renderStatus() {
@@ -440,6 +518,8 @@ body.eh-shell .tab[aria-selected="true"]::after {
     if (hub() && S.projId && S.projId !== ultimoAtivo) {
       ultimoAtivo = S.projId;
       abertos.add(S.projId);         // projeto recem-aberto: a gaveta dele aparece aberta
+      const p = typeof proj === 'function' && proj();
+      if (p && p.grupo) gruposAbertos.add(p.grupo);
     }
     if (pendente && hub()) {
       if (Date.now() > pendente.ate) pendente = null;
@@ -511,6 +591,15 @@ body.eh-shell .tab[aria-selected="true"]::after {
       off: semServidor,
       titulo: semServidor ? 'sem servidor não há o que renomear' : 'troca o nome da pasta do projeto (e no NexoBD)',
     });
+    itemDeMenu(m, p.grupo ? 'Mover para outro projeto…' : 'Mover para um projeto multi-PCB…', icone('multipcb'), () => moverParaGrupo(p), {
+      off: semServidor,
+      titulo: 'junta esta PCB a um projeto com mais de uma PCB (existente ou novo); arrastar a PCB para o projeto faz o mesmo',
+    });
+    if (p.grupo) {
+      itemDeMenu(m, 'Tirar do projeto "' + p.grupo + '"', icone('projeto'), () => poeNoGrupo(p, ''), {
+        off: semServidor, titulo: 'a PCB volta a ser um projeto avulso na árvore',
+      });
+    }
     itemDeMenu(m, 'Excluir projeto…', icone('lixo'), () => openDeleteDialog(p.id), {
       perigo: true,
       off: semServidor || typeof openDeleteDialog !== 'function',
@@ -558,78 +647,203 @@ body.eh-shell .tab[aria-selected="true"]::after {
       if (localStorage.getItem('altiumhub.project') === de) localStorage.setItem('altiumhub.project', para);
     } catch (e) { /* sem storage */ }
   }
-  function renomearProjeto(p) {
-    const eAtivo = typeof proj === 'function' && proj() && proj().id === p.id;
-    if (eAtivo && vistasSujas()) {
-      toast('Salve antes as edições das vistas Esquema/PCB: elas gravam no projeto pelo nome', 'warn');
-      return;
-    }
+  async function postar(url, corpo) {
+    try {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+      let j = {};
+      try { j = await r.json(); } catch (e) { /* sem corpo */ }
+      return j.ok ? j : { ok: false, error: j.error || ('HTTP ' + r.status) };
+    } catch (e) { return { ok: false, error: String(e.message || e) }; }
+  }
+  // o indice mudou no servidor: relê e reabre o projeto que estava aberto (ou o `abre`, se veio)
+  async function releIndice(abre) {
+    const idx = await API.index();
+    S.projects = idx.projects;
+    if (!S.projects.length) return;
+    const alvo = abre || S.projId;
+    await loadProject(S.projects.some((x) => x.id === alvo) ? alvo : S.projects[0].id);
+  }
+
+  /* Um dialogo de um campo de nome, no molde do Excluir do hub. o: {titulo, atual, valor, dica, ok,
+     sugestoes (datalist), confere(n) -> '' | mensagem, envia(n) -> resposta do servidor, feito(j)} */
+  function dialogoNome(o) {
     const bd = el('div', 'backdrop center');
     bd.onclick = (e) => { if (e.target === bd) closeOverlay(); };
     const d = el('div', 'dialog');
     d.style.width = 'min(480px,100%)';
-    d.append(el('h3', null, 'Renomear projeto'));
-    const atual = el('p', 'mono', p.name);
-    atual.style.cssText = 'font-size:12px;color:var(--text-3);margin:0;word-break:break-all';
+    d.append(el('h3', null, o.titulo));
+    if (o.atual) {
+      const atual = el('p', 'mono', o.atual);
+      atual.style.cssText = 'font-size:12px;color:var(--text-3);margin:0;word-break:break-all';
+      d.append(atual);
+    }
     const inp = el('input', 'input');
-    inp.type = 'text'; inp.autocomplete = 'off'; inp.spellcheck = false; inp.value = p.name;
-    const dica = el('p', null, 'A pasta em Projects\\ troca de nome (e o projeto no NexoBD, sem perder o histórico). '
-      + 'O Altium acha o projeto pelo nome: para o BuildSchematic/ApplyChanges, renomeie também o .PrjPcb lá.');
-    dica.style.cssText = 'font-size:12px;color:var(--text-2);margin:2px 0 0';
+    inp.type = 'text'; inp.autocomplete = 'off'; inp.spellcheck = false; inp.value = o.valor || '';
+    d.append(inp);
+    if (o.sugestoes && o.sugestoes.length) {
+      const dl = el('datalist');
+      dl.id = 'ehSugestoes';
+      for (const n of o.sugestoes) { const op = el('option'); op.value = n; dl.append(op); }
+      inp.setAttribute('list', dl.id);
+      d.append(dl);
+    }
+    if (o.dica) {
+      const dica = el('p', null, o.dica);
+      dica.style.cssText = 'font-size:12px;color:var(--text-2);margin:2px 0 0';
+      d.append(dica);
+    }
     const erro = el('p', null, '');
     erro.style.cssText = 'font-size:12px;color:var(--err);margin:0;min-height:1em';
     const act = el('div');
     act.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:6px';
     const cancel = el('button', 'btn btn-ghost', 'Cancelar');
     cancel.type = 'button'; cancel.onclick = closeOverlay;
-    const ok = el('button', 'btn btn-primary', 'Renomear');
+    const ok = el('button', 'btn btn-primary', o.ok);
     ok.type = 'button';
     const confere = () => {
       const n = inp.value.trim();
-      const msg = n === p.name ? '' : nomeRuim(n)
-        || ((S.projects || []).some((x) => x.id !== p.id && x.name.toLowerCase() === n.toLowerCase()) ? 'já existe um projeto com esse nome' : '');
-      erro.textContent = msg;
-      ok.disabled = Boolean(msg) || n === p.name;
+      const msg = o.confere(n);
+      erro.textContent = msg === true ? '' : msg;
+      ok.disabled = Boolean(msg);
       return !ok.disabled;
     };
     const vai = async () => {
       if (!confere()) return;
-      const nome = inp.value.trim();
       ok.disabled = true;
-      let j = {}, st = 0;
-      try {
-        const r = await fetch('/api/project/' + encodeURIComponent(p.id) + '/rename', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nome }),
-        });
-        st = r.status;
-        try { j = await r.json(); } catch (e) { /* sem corpo */ }
-      } catch (e) { j = { error: String(e.message || e) }; }
+      const j = await o.envia(inp.value.trim());
       if (!j.ok) {
-        erro.textContent = 'não deu para renomear: ' + (j.error || ('HTTP ' + st));
+        erro.textContent = 'não deu: ' + j.error;
         ok.disabled = false; inp.focus();
         return;
       }
       closeOverlay();
-      if (j.id !== p.id) {
-        migraPreferencias(p.id, j.id);
-        if (abertos.delete(p.id)) abertos.add(j.id);
-      }
-      toast(p.name + ' agora é ' + j.name, 'ok');
-      const idx = await API.index();
-      S.projects = idx.projects;
-      const ativo = S.projId === p.id ? j.id : S.projId;
-      await loadProject(S.projects.some((x) => x.id === ativo) ? ativo : S.projects[0].id);
+      await o.feito(j);
     };
     inp.oninput = confere;
     inp.onkeydown = (e) => { if (e.key === 'Enter') vai(); else if (e.key === 'Escape') closeOverlay(); };
     ok.onclick = vai;
     act.append(cancel, ok);
-    d.append(atual, inp, dica, erro, act);
+    d.append(erro, act);
     bd.append(d);
     document.getElementById('overlay').append(bd);
     confere();
     inp.focus();
     inp.select();
+  }
+
+  function renomearProjeto(p) {
+    const eAtivo = typeof proj === 'function' && proj() && proj().id === p.id;
+    if (eAtivo && vistasSujas()) {
+      toast('Salve antes as edições das vistas Esquema/PCB: elas gravam no projeto pelo nome', 'warn');
+      return;
+    }
+    dialogoNome({
+      titulo: 'Renomear projeto', atual: p.name, valor: p.name, ok: 'Renomear',
+      dica: 'A pasta em Projects\\ troca de nome (e o projeto no NexoBD, sem perder o histórico). '
+        + 'O Altium acha o projeto pelo nome: para o BuildSchematic/ApplyChanges, renomeie também o .PrjPcb lá.',
+      confere: (n) => n === p.name ? true : nomeRuim(n)
+        || ((S.projects || []).some((x) => x.id !== p.id && x.name.toLowerCase() === n.toLowerCase()) ? 'já existe um projeto com esse nome' : ''),
+      envia: (n) => postar('/api/project/' + encodeURIComponent(p.id) + '/rename', { name: n }),
+      feito: async (j) => {
+        if (j.id !== p.id) {
+          migraPreferencias(p.id, j.id);
+          if (abertos.delete(p.id)) abertos.add(j.id);
+        }
+        toast(p.name + ' agora é ' + j.name, 'ok');
+        await releIndice(S.projId === p.id ? j.id : null);
+      },
+    });
+  }
+
+  /* ── projeto com mais de uma PCB ──────────────────────────────────────────────────
+     O grupo e o grupo.json de cada PCB (hubserver.py: /api/project/<id>/grupo, /api/grupo/*).
+     As PCBs continuam projetos inteiros: mover so muda onde elas aparecem na arvore. */
+  const nomesDeGrupo = () => Array.from(new Set((S.projects || []).map((x) => x.grupo).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base', numeric: true }));
+  async function poeNoGrupo(p, grupo) {
+    const j = await postar('/api/project/' + encodeURIComponent(p.id) + '/grupo', { grupo });
+    if (!j.ok) { toast('não deu para mover ' + p.name + ': ' + j.error, 'err'); return; }
+    if (grupo) gruposAbertos.add(grupo);
+    toast(grupo ? p.name + ' agora está no projeto ' + grupo : p.name + ' saiu do projeto ' + p.grupo, 'ok');
+    await releIndice();
+  }
+  function moverParaGrupo(p) {
+    const outros = nomesDeGrupo().filter((g) => g !== p.grupo);
+    dialogoNome({
+      titulo: 'Mover para um projeto multi-PCB', atual: p.name + (p.grupo ? '   (hoje em ' + p.grupo + ')' : ''),
+      valor: outros[0] || '', ok: 'Mover', sugestoes: outros,
+      dica: outros.length ? 'Escolha um projeto da lista ou digite um nome novo para criar um.'
+        : 'Ainda não há projeto multi-PCB: o nome digitado cria um, com esta PCB dentro.',
+      confere: (n) => n === p.grupo ? 'a PCB já está nesse projeto' : (nomeRuim(n)),
+      envia: (n) => postar('/api/project/' + encodeURIComponent(p.id) + '/grupo', { grupo: n }),
+      feito: async (j) => {
+        gruposAbertos.add(j.grupo);
+        toast(p.name + ' agora está no projeto ' + j.grupo, 'ok');
+        await releIndice();
+      },
+    });
+  }
+  function novaPcbNoGrupo(grupo) {
+    const n = (S.projects || []).filter((x) => x.grupo === grupo).length + 1;
+    dialogoNome({
+      titulo: 'Nova PCB em ' + grupo, valor: grupo + ' - PCB' + n, ok: 'Criar',
+      dica: 'Cria a pasta em Projects\\ com um esquema de uma folha em branco. A placa nasce depois: '
+        + 'vista PCB › Placa nova, ou o ExportBoard do Altium (o .PrjPcb com este mesmo nome).',
+      confere: (v) => nomeRuim(v)
+        || ((S.projects || []).some((x) => x.name.toLowerCase() === v.toLowerCase()) ? 'já existe um projeto com esse nome' : ''),
+      envia: (v) => postar('/api/grupo/nova-pcb', { grupo, nome: v }),
+      feito: async (j) => {
+        gruposAbertos.add(grupo);
+        abertos.add(j.id);
+        toast('PCB ' + j.name + ' criada em ' + grupo, 'ok');
+        await releIndice(j.id);
+      },
+    });
+  }
+  function renomearGrupo(grupo) {
+    dialogoNome({
+      titulo: 'Renomear projeto multi-PCB', atual: grupo, valor: grupo, ok: 'Renomear',
+      dica: 'Só o nome do projeto que agrupa as PCBs muda; cada PCB mantém o nome e a pasta dela.',
+      confere: (n) => n === grupo ? true : nomeRuim(n)
+        || (nomesDeGrupo().some((g) => g !== grupo && g.toLowerCase() === n.toLowerCase()) ? 'já existe um projeto multi-PCB com esse nome' : ''),
+      envia: (n) => postar('/api/grupo/renomear', { de: grupo, para: n }),
+      feito: async (j) => {
+        if (gruposAbertos.delete(grupo)) gruposAbertos.add(j.grupo);
+        toast(grupo + ' agora é ' + j.grupo, 'ok');
+        await releIndice();
+      },
+    });
+  }
+  async function desfazerGrupo(grupo) {
+    const n = (S.projects || []).filter((x) => x.grupo === grupo).length;
+    if (!(await confirmaNoHub('As ' + n + ' PCB(s) de "' + grupo + '" voltam a ser projetos avulsos na árvore. '
+      + 'Nenhum arquivo é apagado.', { title: 'Desfazer o projeto multi-PCB', ok: 'Desfazer' }))) return;
+    const j = await postar('/api/grupo/renomear', { de: grupo, para: '' });
+    if (!j.ok) { toast('não deu: ' + j.error, 'err'); return; }
+    gruposAbertos.delete(grupo);
+    toast(grupo + ' desfeito: ' + j.pcbs.length + ' PCB(s) avulsa(s)', 'ok');
+    await releIndice();
+  }
+  function menuDoGrupo(grupo, x, y) {
+    fecharMenu();
+    const m = el('div', 'eh-menu');
+    m.append(el('div', 'tit', grupo));
+    const semServidor = typeof S !== 'undefined' && S.demoMode;
+    itemDeMenu(m, gruposAbertos.has(grupo) ? 'Fechar a gaveta' : 'Abrir a gaveta', icone('recolher'), () => {
+      if (gruposAbertos.has(grupo)) gruposAbertos.delete(grupo); else gruposAbertos.add(grupo);
+      renderArvore();
+    });
+    m.append(el('div', 'hr'));
+    itemDeMenu(m, 'Nova PCB neste projeto…', icone('mais'), () => novaPcbNoGrupo(grupo), { off: semServidor });
+    itemDeMenu(m, 'Renomear projeto…', icone('editar'), () => renomearGrupo(grupo), { off: semServidor });
+    itemDeMenu(m, 'Desfazer o projeto (PCBs ficam avulsas)…', icone('menos'), () => desfazerGrupo(grupo), {
+      off: semServidor || typeof confirmaNoHub !== 'function',
+    });
+    document.body.append(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.max(6, Math.min(x, window.innerWidth - r.width - 6)) + 'px';
+    m.style.top = Math.max(6, Math.min(y, window.innerHeight - r.height - 6)) + 'px';
+    menuAberto = m;
   }
 
   function montar() {

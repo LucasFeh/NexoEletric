@@ -120,6 +120,11 @@ test('renomear projeto (1.45.0): o mesmo item troca de chave e nome, nada volta 
   await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
   assert.equal(le(A, 'Projects/Fonte 24V/changes.js'), 'var changes=[]');
   assert.equal((await cliente.chave('nexoeletric-projeto', 'Fonte 24V')).id, antes.id);
+  // projeto com mais de uma PCB (1.46.0): o grupo.json mora na pasta da PCB e vai junto para a outra máquina
+  escreve(A, 'Projects/Fonte 24V/grupo.json', '{"grupo":"Painel"}');
+  await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
+  await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB });
+  assert.equal(le(B, 'Projects/Fonte 24V/grupo.json'), '{"grupo":"Painel"}');
 });
 
 test('duas máquinas: projeto criado/editado em qualquer uma sobe, e projeto novo no NexoBD aparece na outra; o chat também', { skip: pula }, async () => {

@@ -4,6 +4,26 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.46.0 — 2026-10-29
+
+Projeto com mais de uma PCB (pedido do dono: "tem projetos que têm mais de uma PCB; na árvore, Projeto → PCB → os
+documentos, e poder mover algumas prontas para esse projeto").
+- **Na árvore**: as PCBs de um mesmo projeto ficam embaixo de uma linha só (com quantas PCBs são e as mudanças
+  pendentes somadas), e cada PCB abre os documentos de sempre (Esquema, PCB, Neoden, Laser, BOM, Histórico).
+  Projeto de uma PCB só continua como era. A busca acha pelo nome da PCB ou do projeto.
+- **Mover uma PCB pronta**: arrastar a PCB para o projeto, ou botão direito › Mover para um projeto multi-PCB…
+  (escolhe um existente ou digita um nome novo, que cria o projeto). Para tirar: botão direito › Tirar do
+  projeto, ou arrastar para a raiz "Projetos".
+- **No projeto (botão direito)**: Nova PCB neste projeto… (pasta nova com um esquema de uma folha em branco; a placa
+  nasce na vista PCB › Placa nova ou pelo Altium), Renomear projeto… e Desfazer o projeto (as PCBs ficam avulsas;
+  nada é apagado).
+- Cada PCB continua sendo um projeto inteiro em `Projects\<nome>`: o Altium, o MCP, as vistas e o NexoBD não mudam.
+  O projeto é o `grupo.json` da pasta de cada PCB (`{"grupo": "<projeto>"}`), que vai para o NexoBD junto com ela,
+  então as outras máquinas montam a mesma árvore. O índice (`/api/index.json`) traz o `grupo` de cada projeto.
+- Rotas novas do `hubserver.py`: `POST /api/project/<id>/grupo`, `/api/grupo/renomear` e `/api/grupo/nova-pcb`.
+- Testes: `tests/test_hubapi.py` (as rotas) e `electron/test/armazem.test.js` (o `grupo.json` chega à outra
+  máquina pelo NexoBD real).
+
 ## 1.45.0 — 2026-10-29
 
 Renomear projeto e folhas (pedido do dono: "não consigo alterar o nome do projeto; se tenho mais de uma folha, apagar

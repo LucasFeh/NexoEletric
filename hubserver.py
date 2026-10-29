@@ -856,6 +856,7 @@ def build_index(root):
             'id': _proj_id(name), 'name': name, 'path': 'Projects\\' + name,
             'demo': name.startswith('_'), 'noSchematic': not has_sch,
             'stages': stages, 'pending': pending, 'stats': stats,
+            'grupo': _grupo_de(d),
         })
     _PROJ_CACHE.clear()
     for p in projects:
@@ -1092,6 +1093,135 @@ def api_project_rename(proj_id):
     _renomeia_no_esquema(os.path.join(dst, 'schematic.js'), novo)
     build_index(ROOT)
     return {'ok': True, 'id': novo_id, 'name': novo}
+
+
+# ─────────────────── projeto com mais de uma PCB (grupo) ───────────────────
+# Pedido do dono (2026-10-29): "tem projetos que tem mais de uma PCB; na arvore, Projeto -> PCB ->
+# Esquema/PCB/... e poder mover PCBs prontas para esse projeto". Cada PCB continua sendo um projeto
+# inteiro em Projects\<nome> (o Altium, o NexoBD, o MCP e as vistas nao mudam); o grupo e so um
+# rotulo: Projects\<pcb>\grupo.json = {"grupo": "<projeto>"}. Por morar dentro da pasta, ele vai
+# para o NexoBD junto com ela e as outras maquinas montam a mesma arvore.
+GRUPO_ARQ = 'grupo.json'
+_GRUPO_RUIM = {'ok': False, 'error': 'nome de projeto inválido: sem \\ / : * ? " < > |, sem ponto no começo ou no fim'}
+
+
+def _grupo_de(pasta):
+    try:
+        with open(os.path.join(pasta, GRUPO_ARQ), encoding='utf-8') as f:
+            g = json.load(f).get('grupo')
+        return g if isinstance(g, str) and g.strip() else ''
+    except (OSError, ValueError, AttributeError):
+        return ''
+
+
+def _grava_grupo(pasta, grupo):
+    arq = os.path.join(pasta, GRUPO_ARQ)
+    if not grupo:
+        if os.path.exists(arq):
+            os.remove(arq)
+        return
+    tmp = arq + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump({'grupo': grupo}, f, ensure_ascii=False)
+    os.replace(tmp, arq)
+
+
+def _grupo_ok(nome):
+    """O grupo nao vira pasta, mas viaja no mesmo JSON de linha: as mesmas regras do nome de projeto."""
+    return nome == '' or _nome_projeto_ok(nome)
+
+
+def _limpa(v):
+    return v.strip() if isinstance(v, str) else None
+
+
+@app.route('/api/project/<proj_id>/grupo', methods=['POST'])
+def api_project_grupo(proj_id):
+    """Poe a PCB num projeto (grupo), troca de projeto, ou tira ("grupo": "")."""
+    grupo = _limpa((request.get_json(silent=True) or {}).get('grupo'))
+    if grupo is None or not _grupo_ok(grupo):
+        return _GRUPO_RUIM, 400
+    if proj_id not in _PROJ_CACHE:
+        build_index(ROOT)
+    name = _PROJ_CACHE.get(proj_id)
+    d = os.path.join(ROOT, 'Projects', name) if name else ''
+    if not d or not os.path.isdir(d):
+        return {'ok': False, 'error': 'projeto desconhecido'}, 404
+    try:
+        _grava_grupo(d, grupo)
+    except OSError as e:
+        return {'ok': False, 'error': 'não deu para gravar o grupo.json: %s' % e}, 500
+    build_index(ROOT)
+    return {'ok': True, 'id': proj_id, 'grupo': grupo}
+
+
+@app.route('/api/grupo/renomear', methods=['POST'])
+def api_grupo_renomear():
+    """Renomeia o projeto multi-PCB (todas as PCBs dele), ou o desfaz ("para": "": as PCBs ficam soltas)."""
+    data = request.get_json(silent=True) or {}
+    de, para = data.get('de'), _limpa(data.get('para'))
+    if not isinstance(de, str) or not de or para is None or not _grupo_ok(para):
+        return _GRUPO_RUIM, 400
+    pdir = os.path.join(ROOT, 'Projects')
+    feitos = []
+    for n in sorted(os.listdir(pdir)) if os.path.isdir(pdir) else []:
+        d = os.path.join(pdir, n)
+        if os.path.isdir(d) and _grupo_de(d) == de:
+            try:
+                _grava_grupo(d, para)
+            except OSError as e:
+                return {'ok': False, 'error': '%s: %s' % (n, e), 'feitos': feitos}, 500
+            feitos.append(n)
+    if not feitos:
+        return {'ok': False, 'error': 'nenhuma PCB no projeto "%s"' % de}, 404
+    build_index(ROOT)
+    return {'ok': True, 'grupo': para, 'pcbs': feitos}
+
+
+def _texto_vazios(nome):
+    quando = time.strftime('%d/%m/%Y %H:%M:%S') + ' (NexoEletric, nova PCB)'
+    return {
+        'schematic.js': 'var schematic = {\n"format":"schmirror-v2",\n"project":%s,\n"generated":%s,\n"units":"mil",\n'
+                        '"items":[\n{"t":"sheet","name":"ESQUEMA_1","size":"A4","w":11693,"h":8268},\n]};\n'
+                        % (json.dumps(nome), json.dumps(quando)),
+        'changes.js': '// AltiumPCBMirror - arquivo de mudancas.\n// Edite ESTE arquivo (nunca o board.js). Um objeto JSON por linha. '
+                      'Consulte AI-GUIDE.md.\nvar changes = [\n];\n',
+        'annotations.js': '// AltiumPCBMirror - sinalizadores do usuario para a IA. Um objeto JSON por linha.\n'
+                          '// A IA le, corrige via changes.js e marca status resolved + reply. Consulte AI-GUIDE.md Parte C.\n'
+                          'var annotations = [\n];\n',
+    }
+
+
+@app.route('/api/grupo/nova-pcb', methods=['POST'])
+def api_grupo_nova_pcb():
+    """Uma PCB nova dentro do projeto: Projects\\<nome> com um esquema de uma folha vazia (o que o
+    projeto_criar do MCP cria), changes.js e annotations.js vazios e o grupo.json. A placa em si
+    nasce depois, na vista PCB (Placa nova) ou no Altium."""
+    data = request.get_json(silent=True) or {}
+    grupo, nome = _limpa(data.get('grupo')), _limpa(data.get('nome'))
+    if not grupo or not _grupo_ok(grupo):
+        return _GRUPO_RUIM, 400
+    if not _nome_projeto_ok(nome):
+        return {'ok': False, 'error': 'nome da PCB inválido: sem \\ / : * ? " < > |, sem ponto no começo ou no fim'}, 400
+    pdir = os.path.join(ROOT, 'Projects')
+    os.makedirs(pdir, exist_ok=True)
+    novo_id = _proj_id(nome)
+    for outro in os.listdir(pdir):
+        if outro.lower() == nome.lower():
+            return {'ok': False, 'error': 'já existe um projeto com esse nome'}, 409
+        if os.path.isdir(os.path.join(pdir, outro)) and _proj_id(outro) == novo_id:
+            return {'ok': False, 'error': 'o nome fica igual ao do projeto "%s" no link (%s)' % (outro, novo_id)}, 409
+    d = os.path.join(pdir, nome)
+    try:
+        os.mkdir(d)
+        for a, txt in _texto_vazios(nome).items():
+            with open(os.path.join(d, a), 'w', encoding='utf-8') as f:
+                f.write(txt)
+        _grava_grupo(d, grupo)
+    except OSError as e:
+        return {'ok': False, 'error': 'não deu para criar a pasta: %s' % e}, 500
+    build_index(ROOT)
+    return {'ok': True, 'id': novo_id, 'name': nome, 'grupo': grupo}
 
 
 def _renomeia_no_esquema(arq, novo):
