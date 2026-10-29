@@ -4,6 +4,27 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.43.0 — 2026-10-29
+
+- **Vista PCB mais leve** (medido num projeto com 25 planos de terra e 3.600 linhas no changes.js):
+  - as marcações das mudanças saem em lote e sem as camadas escondidas: mexer o mouse, dar zoom e arrastar a tela
+    gastam ~10× menos;
+  - o 3D escondido não se refaz mais depois de cada edição (era ~1 s de tela parada): refaz quando você abre;
+  - **Propriedades da placa › Desempenho**: **Componentes 3D** (desligado: sem corpos no 3D nem silhuetas na placa,
+    nada de STEP carregando) e **3D pronto de antemão**;
+  - camada escondida não é desenhada nem processada.
+- **Menu Camadas no canto da placa** (embaixo do Filtro): uma caixa por camada, **Todas**, **só** (passe o mouse) e os
+  atalhos Cobre / Cima / Baixo. O que você deixa à vista fica gravado por projeto.
+- **Pilha de camadas** (painel › aba Camadas): espessura do cobre e do dielétrico em mm, a espessura da placa,
+  **+ Camada de cobre**, tirar camada interna vazia, pilhas prontas de **2, 4, 6 e 8** camadas, camadas mecânicas
+  (+ / tirar) e **Voltar à pilha do Altium**. Vale na tela, no Gerber (uma camada por cobre) e no 3D. Camada que ainda
+  tem objeto (ou via passando) não sai. No Altium, ajuste o Layer Stack Manager à mão (o ApplyChanges avisa).
+- **Vão da via**: **De / Até** na ficha da via e na ferramenta Via (via cega ou enterrada, com aviso).
+- **Camadas do pad pelo footprint**: clique no pad de um componente e escolha **SMD do lado do componente**, **SMD do
+  lado oposto** ou **Passante**; o footprint muda na biblioteca do hub e os componentes da placa com ele se atualizam.
+  **Todos os pads do footprint assim** aplica no footprint inteiro.
+- `tests/test-pcbpilha.js` e `tests/smoke-camadas-pcb.js`; AI-GUIDE: `stack_set` e `from`/`to` no `via_edit`.
+
 ## 1.42.1 — 2026-10-29
 
 - **Régua (Ctrl+M): a retícula não some mais.** Com o cursor Small 90 (a cruz do Windows), longe de qualquer ponto de
