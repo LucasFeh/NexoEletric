@@ -78,7 +78,7 @@ claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 | simbolo | `sym_ler` (o desenho inteiro, de qualquer acervo), `sym_gerar` (CI/conector a partir da lista de pinos), `sym_salvar` (destino `projeto` = no `symbols` do schematic.js, vale na hora e para as nets; `biblioteca` = Biblioteca de símbolos do hub, `/api/symbols/lib`; `altium` = redesenha um símbolo da SchLib da casa, `/api/symbols/save`), `sym_renomear`, `sym_apagar` |
 | biblioteca | `almox_buscar` (estoque, local, Odoo; devolve o `comp` pronto para `sch_adicionar`) |
 | footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_3d_importar` (STEP do disco → `Libs/3d-hub`), `fp_3d_nexo` (o STEP de um item da biblioteca da rede Nexo), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |
-| pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref; `campos` e `arquivo:true` para placa grande), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos; `designator_move` no lugar final, com a posição efetiva na resposta), `pcb_colocar` (footprint como componente novo, com as nets dos pads), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_autorotear` (o ratsnest inteiro em várias camadas com vias, ordem e arranca-e-refaz, `hub-autoroteador.js`), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
+| pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref; `campos` e `arquivo:true` para placa grande), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos; `designator_move` no lugar final, com a posição efetiva na resposta), `pcb_colocar` (footprint como componente novo, com as nets dos pads), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_autorotear` (o ratsnest inteiro em várias camadas com vias, ordem e arranca-e-refaz, `hub-autoroteador.js`), `pcb_fanout` (trilha curta + via ao plano em cada pad SMD da net), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
 | serigrafia | `serigrafia_checar` (um lugar candidato contra as regras da casa, sem DRC), `serigrafia_posicionar` (acha lugar para os designadores; simula por padrão) |
 | pcbmod | `regras_ler`, `regras_definir` (`hub-pcbregras.js`), `drc_rodar` (`hub-pcbdrc.js`), `nets_ratsnest` (`hub-pcbnets.js`, com reserva própria), `pour_definir`, `pour_despejar` (`hub-pcbpour.js`), `teardrop_aplicar` (`hub-pcbteardrop.js`), `eco_comparar`, `eco_aplicar` (`hub-pcbeco.js`) |
 | nexo | `nexo_estado` (o Nexo Hub e o NexoCAD), `nexo_biblioteca` (lista/busca os itens do Nexo Hub no formato do hub; `id` traz revisões e vínculos), `nexo_sincronizar` (publica a biblioteca 3D e as placas no Nexo Hub: o mesmo `lib/nexohub-sync.js` do app), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou de um item, aberto no NexoCAD sempre por um item do Nexo Hub; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (publica o item placa e pede `pcb_importar {item}`; `so_publicar`, `so_pacote`), `nexo_vincular_footprint` (direto no Nexo Hub: `atributos.footprints` + vínculo; num componente já põe o 3D no footprint), `nexo_componentes` (uma biblioteca só: os componentes do NexoCAD com footprint entram na biblioteca de footprints como o 3D deles; o app faz sozinho a cada minuto). Conexão: `NEXOHUB_URL` > `C:\Users\Public\NexoHub\conexao.json` > `127.0.0.1:47800`. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
@@ -116,6 +116,19 @@ dadas) sozinho, com o `hub-autoroteador.js` em cima do mesmo motor exato do rote
 | `orcamento` | `{tempoMs: 60000, nosPorBusca: 300000}` | tempo do lote e nós por busca |
 | `gravar` | `false` | `false` simula; `true` grava pelo caminho validado (`ops.transacao`) |
 | `forcar` | `false` | grava mesmo com violação NOVA de DRC |
+| `cruzarPlanos` | `false` | `true` ou `[polígono/net...]`: a trilha atravessa o plano de OUTRA net (o plano recua em volta dela) |
+| `custoPlano` | 1 | mm a mais por mm de trilha dentro de um plano cruzado |
+| `faixaPlano` | 2 | faixa de plano mais estreita que isto (mm) não leva via nem é cruzada (0 desliga) |
+| `viaEmPad` | `false` | `true` deixa a via cair em pad SMD |
+
+**Os planos (1.40.0).** O cobre que vale é o despejado de verdade, não o contorno do polígono:
+- o pedaço de plano de outra net é obstáculo pela folga do **próprio polígono** (a maior entre ela e a regra), e a rota
+  nunca faz o plano recuar calada;
+- com `cruzarPlanos` a trilha (a de gate pelo plano de fase) atravessa o plano com custo, fora da faixa estreita;
+- depois das passadas o lote **redespeja** e confere o ratsnest: a rota que partiu um plano (um pad numa ilha
+  recortada) sai e é refeita sem cruzá-lo — sem caminho, `motivo: corta-plano`. O relatório traz `planos`
+  (`poligonos`, `cruzaveis`, `voltas`, `desfeitas`, `pioraram`) e `rotas[].cruzaPlanos`;
+- a via nunca cai em pad SMD nem na faixa estreita de um plano.
 
 A resposta traz `conexoes_abertas` (antes/depois, na placa e nas nets pedidas), `roteadas`, `primeira_passada`, `vias`,
 `comprimento_mm`, `passes`, `arrancadas`, `ms`, `por_net`, `falhas` (com `motivo`: `camada-proibida`,
@@ -123,6 +136,34 @@ A resposta traz `conexoes_abertas` (antes/depois, na placa e nas nets pedidas), 
 placa com as rotas (com os polígonos redespejados): `antes`, `depois` e as violações **novas** (a meta é zero; com
 alguma, `gravar:true` não grava sem `forcar`). Teste: `node tests/test-autoroteador.js` e
 `node tests/test-mcp-autorotear.js`.
+
+## Fanout (`pcb_fanout`)
+
+Cada pad SMD da `net` (o GND da placa de potência) que ainda não chega ao plano dela ganha uma trilha reta curta, na
+camada do pad, até uma via que cai **dentro** do cobre despejado do plano (longe da borda o bastante para o térmico
+achar cobre). A via segue as regras do `pcb_autorotear`:
+- folga de cada camada pela Clearance vencedora;
+- furo a furo e ponte de máscara contra tudo, inclusive contra as vias que o próprio fanout acabou de pôr;
+- nunca em pad SMD nem na faixa estreita de plano.
+
+A direção preferida é para fora do componente. Parâmetros:
+
+| parâmetro | padrão | o quê |
+|---|---|---|
+| `projeto`, `net` | — | obrigatórios |
+| `camada` | as camadas com plano da net | a(s) camada(s) do plano |
+| `pads` | `abertos` | `todos` põe via também em quem já chega ao plano |
+| `distMax` | 2,5 | até quantos mm além da borda do pad procurar a via |
+| `cruzarPlanos`, `faixaPlano` | `false`, 2 | como no `pcb_autorotear` |
+| `gravar` / `forcar` | `false` | como no `pcb_autorotear` |
+
+A resposta traz:
+- `pads_smd`, `ja_chegavam_ao_plano`, `feitos`, `vias` e as `falhas`, com o `motivo` (`sem-lugar`, `camada-proibida`,
+  `plano-so-na-camada-do-pad`);
+- `depois`: quantos pads chegam ao plano na placa redespejada;
+- o `drc` com as violações novas.
+
+Teste: `node tests/test-autoroteador-planos.js`.
 
 Módulo do hub que faltar não derruba nada: a ferramenta responde "módulo ausente" e volta a
 funcionar sozinha quando o arquivo chega (o carregamento confere o mtime a cada chamada).
@@ -229,7 +270,7 @@ do hub redespejados); `despejar:false` volta ao jeito antigo (sem o cobre dos pl
 
 ```
 node tests/test-mcp.js          # stdio com processo filho, HTTP, e as ferramentas numa CÓPIA de "LM555 astável"
-node tests/test-mcp-autorotear.js # o pcb_autorotear (simular e gravar) numa CÓPIA de uma placa do acervo
+node tests/test-mcp-autorotear.js # o pcb_autorotear e o pcb_fanout (simular e gravar) numa CÓPIA de uma placa do acervo
 node tests/test-mcp-completo.js # raiz automática, símbolos, 3D do disco, pcb_colocar, lote e o relato ao hub
 python tests/test_mcp_rotas.py  # as rotas da vista ao vivo
 node tests/test-jlc.js          # o envio à JLC (lib/jlc.js) contra um IntegrateBrowser de mentira; a senha não vaza
