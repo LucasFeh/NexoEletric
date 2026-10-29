@@ -333,7 +333,7 @@ var changes = [
 | `track_edit` | `id`, `orig_x1..orig_y2`, `orig_w`, `orig_layer` | `x1`,`y1`,`x2`,`y2`,`w`,`layer` (qualquer, menos `Multi`),`net`,`note` |
 | `track_add` | `layer` (qualquer, menos `Multi`), `x1`,`y1`,`x2`,`y2`,`w` | `net` (só em cobre), `note` |
 | `track_del` | `id`, `orig_x1..orig_y2`, `orig_w`, `orig_layer` | `note` |
-| `via_edit` | `id`, `orig_x`, `orig_y` | `x`,`y`,`size`,`drill`,`note` |
+| `via_edit` | `id`, `orig_x`, `orig_y` | `x`,`y`,`size`,`drill`,`from`,`to` (camadas de cobre do vão: `Top`, `Mid1`..`Mid30`, `Bottom`),`note` |
 | `via_add` | `x`,`y`,`size`,`drill` | `net`, `from`, `to`, `note` |
 | `via_del` | `id`, `orig_x`, `orig_y` | `note` |
 | `arc_edit` | `id`, `orig_cx`,`orig_cy`,`orig_r`,`orig_sa`,`orig_ea`,`orig_layer` | `cx`,`cy`,`r`,`sa`,`ea`,`w`,`layer` (qualquer, menos `Multi`),`note` |
@@ -361,6 +361,16 @@ var changes = [
 | `comment_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
 | `poly_add` | `layer` (cobre), `pts` | `net`, `pour` (solid/hatch/none), `removeDead`, `minArea`, `ordem`, `clearance`, `nome`, `con_tipo`/`con_condutores`/`con_largura`/`con_gap`/`con_angulo`, `pourOver`, `removeNecks`, `neck`, `arco`, `clearanceBorda`, `note` |
 | `poly_edit` / `poly_del` | `id` (`pg…`), `orig_layer`, `orig_n`, `orig_x0`, `orig_y0` | (edit) os do `poly_add` |
+| `stack_set` | `layers` (as de cobre na ordem física: `[{"key":"Top","copper":0.035,"dielectric":0.2},{"key":"Mid1","name":"GND","copper":0.035,"dielectric":1.065},…,{"key":"Bottom","copper":0.035}]`) | `mech` (as mecânicas que a placa tem: `["Mech1","Mech13"]`), `note` |
+
+**Pilha de camadas e vão da via (2026-10-29).**
+- `stack_set` define a pilha do hub: a primeira camada é a `Top`, a última a `Bottom`, no meio `Mid1`..`Mid30`;
+  `copper` = espessura do cobre (mm, padrão 0,035 = 1 oz), `dielectric` = o dielétrico ABAIXO da camada (mm; a
+  `Bottom` não tem). A espessura da placa é a soma. Vale a última `stack_set` do arquivo; uma só linha, editada no
+  lugar. Tirar uma camada que ainda tem objeto (ou via que passa nela) é erro.
+- O Gerber sai com uma camada por cobre da pilha. No Altium, o `ApplyChanges` só avisa: ajuste o Layer Stack
+  Manager à mão antes das trilhas nas camadas novas.
+- `via_add`/`via_edit` com `from`/`to` diferentes de Top–Bottom = via cega/enterrada (o motor avisa).
 
 **Ops da placa nova (2026-10-13).**
 - `comp_add` acha o footprint no `Libs/pcblib.js`, depois na biblioteca embutida da placa

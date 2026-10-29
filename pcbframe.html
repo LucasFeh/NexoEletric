@@ -162,21 +162,38 @@
   body.gerber-on #status{display:none !important;}
   /* lean: embutido na aba Neoden do hub -- so a placa, nunca edita */
   /* o filtro de seleção no canto do canvas: translúcido, em lista com caixas de marcar (pedido do dono, 2026-10-23) */
-  #pcbfiltro{position:absolute; left:10px; top:10px; z-index:11; width:164px; padding:4px; border-radius:8px; font-size:12px;
+  /* o canto de cima a esquerda: o Filtro e, embaixo dele, as Camadas (pedido do dono, 2026-10-29: "ver só
+     o layer que eu marquei"), os dois no mesmo estilo e empilhados */
+  #cantoesq{position:absolute; left:10px; top:10px; z-index:11; display:flex; flex-direction:column; gap:6px; max-height:calc(100% - 20px); pointer-events:none;}
+  #cantoesq > div{pointer-events:auto;}
+  #pcbfiltro, #pcbcamadas{width:164px; padding:4px; border-radius:8px; font-size:12px; flex:none;
     background:rgba(22,22,25,.72); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); color:#e8e8ec;
     box-shadow:0 0 0 1px rgba(255,255,255,.08), 0 10px 28px rgba(0,0,0,.45); user-select:none;}
-  #pcbfiltro .pf-cab{display:flex; align-items:center; gap:6px; height:26px; padding:0 4px 0 6px; cursor:pointer; border-radius:5px; color:#c8c8ce;}
-  #pcbfiltro .pf-cab:hover{background:rgba(255,255,255,.08); color:#f2f2f3;}
-  #pcbfiltro .pf-cab b{flex:1; font-weight:600; color:#f2f2f3;}
-  #pcbfiltro .pf-cab span{font-size:11px; color:#a8a8ae; font-variant-numeric:tabular-nums;}
-  #pcbfiltro svg{width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round;}
-  #pcbfiltro .pf-lista{display:flex; flex-direction:column; margin-top:2px;}
-  #pcbfiltro.pf-recolhido .pf-lista{display:none;}
-  #pcbfiltro label{display:flex; align-items:center; gap:8px; height:24px; padding:0 8px; border-radius:5px; cursor:pointer; color:#c8c8ce;}
-  #pcbfiltro label:hover{background:rgba(255,255,255,.08); color:#f2f2f3;}
-  #pcbfiltro label.pf-todos{border-bottom:1px solid rgba(255,255,255,.08); border-radius:5px 5px 0 0; margin-bottom:2px; color:#f2f2f3;}
-  #pcbfiltro input{margin:0; accent-color:var(--accent, #e8a33d); cursor:pointer;}
-  body.lean #pcbfiltro{display:none !important;}
+  #pcbcamadas{width:188px; flex:0 1 auto; min-height:0; display:flex; flex-direction:column;}
+  #pcbfiltro .pf-cab, #pcbcamadas .pf-cab{display:flex; align-items:center; gap:6px; height:26px; padding:0 4px 0 6px; cursor:pointer; border-radius:5px; color:#c8c8ce; flex:none;}
+  #pcbfiltro .pf-cab:hover, #pcbcamadas .pf-cab:hover{background:rgba(255,255,255,.08); color:#f2f2f3;}
+  #pcbfiltro .pf-cab b, #pcbcamadas .pf-cab b{flex:1; font-weight:600; color:#f2f2f3;}
+  #pcbfiltro .pf-cab span, #pcbcamadas .pf-cab span{font-size:11px; color:#a8a8ae; font-variant-numeric:tabular-nums;}
+  #pcbfiltro svg, #pcbcamadas svg{width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round;}
+  #pcbfiltro .pf-lista, #pcbcamadas .pf-lista{display:flex; flex-direction:column; margin-top:2px;}
+  #pcbcamadas .pf-lista{overflow-y:auto; min-height:0; max-height:min(430px, 46vh);}
+  #pcbfiltro.pf-recolhido .pf-lista, #pcbcamadas.pf-recolhido .pf-lista{display:none;}
+  #pcbfiltro label, #pcbcamadas label{display:flex; align-items:center; gap:8px; height:24px; padding:0 8px; border-radius:5px; cursor:pointer; color:#c8c8ce; flex:none;}
+  #pcbfiltro label:hover, #pcbcamadas label:hover{background:rgba(255,255,255,.08); color:#f2f2f3;}
+  #pcbfiltro label.pf-todos, #pcbcamadas label.pf-todos{border-bottom:1px solid rgba(255,255,255,.08); border-radius:5px 5px 0 0; margin-bottom:2px; color:#f2f2f3;}
+  #pcbfiltro input, #pcbcamadas input{margin:0; accent-color:var(--accent, #e8a33d); cursor:pointer;}
+  #pcbcamadas label{gap:6px; padding:0 4px 0 8px;}
+  #pcbcamadas label .sw{flex:none; width:10px; height:10px; border-radius:2px; box-shadow:0 0 0 1px rgba(255,255,255,.25);}
+  #pcbcamadas label .nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #pcbcamadas label.atual .nm{color:#fff; font-weight:600;}
+  #pcbcamadas label.vazia .nm{opacity:.55;}
+  #pcbcamadas label .so{flex:none; visibility:hidden; font:10px var(--font, sans-serif); color:#c8c8ce; background:rgba(255,255,255,.08); border:0; border-radius:3px; padding:1px 5px; cursor:pointer;}
+  #pcbcamadas label:hover .so{visibility:visible;}
+  #pcbcamadas label .so:hover{background:var(--accent, #e8a33d); color:#111;}
+  #pcbcamadas .pc-rodape{display:flex; gap:4px; padding:4px 4px 2px; flex:none;}
+  #pcbcamadas .pc-rodape button{flex:1; font:11px var(--font, sans-serif); color:#c8c8ce; background:rgba(255,255,255,.06); border:0; border-radius:4px; padding:3px 0; cursor:pointer;}
+  #pcbcamadas .pc-rodape button:hover{background:rgba(255,255,255,.14); color:#fff;}
+  body.lean #cantoesq{display:none !important;}
   body.lean #menubar, body.lean #pcbtb, body.lean #abas, body.lean #splitR, body.lean #props, body.lean #status, body.lean #btnPaineis{display:none !important;}
 </style>
 </head>
@@ -193,7 +210,11 @@
       <!-- a barra de ferramentas (pcbframe.js » montaBarra): tudo a vista, o que falta travado com o porque -->
       <div id="pcbtb" role="toolbar" aria-label="Ferramentas da PCB"></div>
       <!-- o Selection Filter em lista, no canto (pcbframe.js » montaFiltroMenu) -->
-      <div id="pcbfiltro" role="group" aria-label="Filtro de seleção"></div>
+      <div id="cantoesq">
+        <div id="pcbfiltro" role="group" aria-label="Filtro de seleção"></div>
+        <!-- as camadas à vista, em lista com caixas (pcbframe.js » montaCamadasMenu) -->
+        <div id="pcbcamadas" role="group" aria-label="Camadas à vista"></div>
+      </div>
       <!-- o texto se digita no proprio canvas (nada de prompt) -->
       <div id="txtbox" hidden><input id="txtinp" type="text" autocomplete="off" spellcheck="false" placeholder="texto"><div id="txtdica"></div></div>
       <div id="annform" hidden>

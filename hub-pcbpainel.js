@@ -28,6 +28,20 @@ const CSS = `
 .pp{display:flex; flex-direction:column; min-height:0; height:100%; background:var(--panel); color:var(--fg); font:13px/1.45 var(--font);}
 .pp .pr-head{flex:none; display:flex; align-items:center; gap:6px; padding:8px 8px 8px 12px; border-bottom:1px solid var(--border);}
 .pp .pr-head h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); font-weight:400; white-space:nowrap;}
+.pp .pl-cab{display:flex; align-items:baseline; gap:8px;}
+.pp .pl-cab h3{flex:1; margin:0 0 6px;}
+.pp .pl-esp{font-size:11px; color:var(--fg); font-variant-numeric:tabular-nums;}
+.pp .pl-lista{display:flex; flex-direction:column; border-left:2px solid var(--border); margin:2px 0 4px 5px; padding-left:8px;}
+.pp .pl-cu{display:flex; align-items:center; gap:6px; min-height:26px; font-size:12px;}
+.pp .pl-cu .sw{flex:none; width:12px; height:12px; border-radius:2px; box-shadow:0 0 0 1px var(--line);}
+.pp .pl-nm{flex:1; min-width:84px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.pp .pl-die{display:flex; justify-content:flex-end; min-height:24px; padding:1px 0; background:repeating-linear-gradient(135deg, transparent 0 5px, rgba(var(--tint),0.05) 5px 9px); border-radius:3px;}
+.pp .pl-campo{display:inline-flex; align-items:center; gap:4px; font-size:11px; color:var(--fg-dim);}
+.pp .pl-campo .un{font-size:10px;}
+.pp .pl-num{width:50px; text-align:right; font-variant-numeric:tabular-nums;}
+.pp .pl-x{flex:none; width:20px; height:20px; padding:0; border-radius:3px; border:1px solid var(--border); background:transparent; color:var(--fg-dim); cursor:pointer; line-height:1;}
+.pp .pl-x:hover:not(:disabled){color:var(--fg); border-color:var(--err, #ff5252);}
+.pp .pl-x:disabled{opacity:.3; cursor:not-allowed;}
 .pp .pp-cadeado{flex:1; justify-content:flex-start;}
 .pp .pp-cadeado.aberto{color:var(--ok); border-color:var(--ok);}
 .pp .pp-salvar{margin-left:auto; display:inline-flex; align-items:center; gap:6px; padding:4px 10px; font-size:12px; border-radius:4px;
@@ -509,6 +523,25 @@ function instala(aside, V) {
     }
     s4.append(el('div', 'hint', 'Os atalhos desta vista ficam nas Configurações do hub, aba Atalhos.'));
 
+    /* DESEMPENHO (pedido do dono, 2026-10-29: "o software tá muito travado ... quero opção de não ver
+       componente 3D pra ficar mais leve"): o que pesa, para ligar e desligar num lugar so */
+    if (typeof V.opc3d === 'function') {
+      const sd = sec(pag, 'Desempenho');
+      const o3 = V.opc3d();
+      const caixa = (rot, dica, on, f) => {
+        const l = el('label', 'pr-bool'), cb = el('input');
+        cb.type = 'checkbox'; cb.checked = !!on; cb.addEventListener('change', () => f(cb.checked));
+        l.title = dica; l.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer;';
+        l.append(cb, el('span', null, rot)); sd.append(l);
+      };
+      caixa('Componentes 3D', 'Os corpos dos componentes no 3D e as silhuetas azuis deles na placa. Desligado: nada de STEP carregando, o 3D só com a placa.', o3.corpos, v => V.setOpc3d('corpos', v));
+      caixa('3D pronto de antemão', 'Monta o 3D escondido ao abrir a placa (a tecla 3 abre na hora). Desligado: monta na primeira vez que abrir. Depois de editar, o 3D se refaz só quando abre.', o3.antes, v => V.setOpc3d('antes', v));
+      caixa('Marcações das mudanças', 'Os tracejados do que mudou (D). Com muitas linhas no changes.js, escondê-las deixa o desenho mais leve.', sh.ghost, v => V.setShow('ghost', v));
+      const nm = typeof V.nMudancas === 'function' ? V.nMudancas() : 0;
+      sd.append(el('div', 'hint', 'Camadas escondidas (menu Camadas, no canto da placa) não são desenhadas nem processadas — mostre só as que estiver usando.' +
+        (nm > 1500 ? ' Esta placa tem ' + nm + ' linhas no changes.js.' : '')));
+    }
+
     const s5 = sec(pag, 'Saídas');
     const temG = V.temGerber();
     const bG = el('button', 'btn wide'); bG.type = 'button'; bG.append(ic('gerber'), el('span', null, 'Gerar e ver o Gerber'));
@@ -526,8 +559,90 @@ function instala(aside, V) {
   }
 
   /* ============================== Camadas ============================== */
+  /* A PILHA DE CAMADAS (pedido do dono, 2026-10-29: "fácil de adicionar mais layers ou remover,
+     configurar espessura de layer"): as de cobre na ordem fisica com o cobre e o dieletrico entre
+     elas, a espessura total, + camada, as pilhas prontas (2/4/6/8) e as mecanicas. Grava uma linha
+     stack_set no changes.js (V.pilha, pcbframe.js » PILHA). */
+  function desenhaPilha(pag) {
+    if (!V.pilha || typeof V.pilha.ver !== 'function') return;
+    const P = V.pilha.ver();
+    const s = sec(pag);
+    const cab = el('div', 'pl-cab');
+    cab.append(el('h3', null, 'Pilha de camadas'), el('span', 'pl-esp', 'placa ' + V.fmtNum(P.espessura, 3) + ' mm'));
+    s.append(cab);
+    const num = (v, f, dica) => {
+      const i = el('input', 'pr-inp pl-num'); i.type = 'text'; i.inputMode = 'decimal'; i.value = V.fmtNum(v, 3); i.title = dica;
+      i.addEventListener('change', () => f(parseFloat(String(i.value).replace(',', '.'))));
+      i.addEventListener('keydown', e => { if (e.key === 'Enter') i.blur(); e.stopPropagation(); });
+      return i;
+    };
+    const lista = el('div', 'pl-lista');
+    for (const c of P.camadas) {
+      const r = el('div', 'pl-cu');
+      const sw = el('span', 'sw'); sw.style.background = c.cor;
+      const nm = el('span', 'pl-nm', c.rot); nm.title = c.key + (c.count ? ' — ' + c.count + ' objeto(s)' : ' — vazia');
+      const cu = el('label', 'pl-campo'); cu.title = 'espessura do cobre'; cu.append(el('span', null, 'Cu'), num(c.copper, v => V.pilha.edita(c.key, 'copper', v), 'espessura do cobre em mm (0,035 = 1 oz; 0,070 = 2 oz)'), el('span', 'un', 'mm'));
+      r.append(sw, nm, cu);
+      if (/^Mid/.test(c.key)) {
+        const x = el('button', 'pl-x', '×'); x.type = 'button';
+        x.disabled = !c.podeTirar;
+        x.title = c.podeTirar ? 'Tirar ' + c.rot + ' da pilha' : c.rot + ' tem ' + c.count + ' objeto(s): mova ou apague antes de tirar';
+        x.addEventListener('click', () => V.pilha.tiraCobre(c.key));
+        r.append(x);
+      }
+      lista.append(r);
+      if (!c.ultima) {
+        const d = el('div', 'pl-die');
+        const lb = el('label', 'pl-campo'); lb.append(el('span', null, 'dielétrico'), num(c.dielectric, v => V.pilha.edita(c.key, 'dielectric', v), 'o isolante entre esta camada e a de baixo, em mm'), el('span', 'un', 'mm'));
+        d.append(lb); lista.append(d);
+      }
+    }
+    s.append(lista);
+    const l1 = el('div', 'linha');
+    const mais = el('button', 'btn', '+ Camada de cobre'); mais.type = 'button'; mais.title = 'Uma camada interna nova, logo acima da Bottom (divide o dielétrico de lá)';
+    mais.addEventListener('click', () => V.pilha.maisCobre());
+    l1.append(mais); s.append(l1);
+    const l2 = el('div', 'linha'); l2.append(el('label', null, 'Pronta'));
+    const seg = el('div', 'seg');
+    for (const n of [2, 4, 6, 8]) {
+      const b = el('button', null, String(n)); b.type = 'button';
+      b.setAttribute('aria-pressed', String(P.camadas.length === n));
+      b.title = n + ' camadas de cobre, ~1,6 mm (as internas que já existem continuam, na ordem)';
+      b.addEventListener('click', () => V.pilha.pronta(n)); seg.append(b);
+    }
+    l2.append(seg); s.append(l2);
+    /* as mecanicas */
+    const s2 = sec(pag, 'Camadas mecânicas');
+    for (const m of P.mech) {
+      const r = el('div', 'pl-cu');
+      const sw = el('span', 'sw'); sw.style.background = m.cor;
+      const x = el('button', 'pl-x', '×'); x.type = 'button'; x.disabled = !m.podeTirar;
+      x.title = m.podeTirar ? 'Tirar ' + m.rot + ' da placa' : m.rot + ' tem ' + m.count + ' objeto(s): mova ou apague antes';
+      x.addEventListener('click', () => V.pilha.tiraMech(m.key));
+      r.append(sw, el('span', 'pl-nm', m.rot + (m.count ? ' (' + m.count + ')' : '')), x);
+      s2.append(r);
+    }
+    if (P.mechLivres.length) {
+      const l3 = el('div', 'linha');
+      const sel = el('select');
+      const o0 = el('option', null, '+ Camada mecânica…'); o0.value = ''; sel.append(o0);
+      for (const m of P.mechLivres) { const o = el('option', null, m.rot); o.value = m.key; sel.append(o); }
+      sel.addEventListener('change', () => { if (sel.value) V.pilha.maisMech(sel.value); });
+      l3.append(sel); s2.append(l3);
+    }
+    s2.append(el('div', 'hint', P.definida
+      ? 'Pilha definida no hub (uma linha stack_set no changes.js): vale na tela, no Gerber e no 3D. No Altium, ajuste o Layer Stack Manager à mão.'
+      : 'Pilha do Altium (cobre de 1 oz, dielétrico repartido pela espessura da placa). Mexer em qualquer valor passa a pilha para o hub.'));
+    if (P.definida) {
+      const l4 = el('div', 'linha');
+      const volta = el('button', 'btn', 'Voltar à pilha do Altium'); volta.type = 'button';
+      volta.addEventListener('click', () => V.pilha.doAltium());
+      l4.append(volta); s2.append(l4);
+    }
+  }
   function desenhaCamadas(pag) {
     pag.textContent = '';
+    desenhaPilha(pag);
     const s1 = sec(pag, 'Conjuntos (LS)');
     const ch = el('div', 'chips');
     for (const c of V.conjuntos()) { const b = el('button', 'chip', c.rot.replace(/ \(.*\)$/, '')); b.type = 'button'; b.title = c.rot; b.addEventListener('click', () => V.conjunto(c.id)); ch.append(b); }

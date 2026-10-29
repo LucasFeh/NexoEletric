@@ -692,6 +692,73 @@ function montaPoly(ch, base, ctx){
      model.polygons, nets em model.nets (a lista efetiva) com model.netsRenomeadas/Removidas;
    - `opts` (opcional): { pcblib } -- a biblioteca de onde o comp_add tira o footprint (sem ela
      vale a registrada com setPcbLib, a embutida no board e a dos componentes ja colocados). */
+/* ---- a pilha de camadas (stack_set) e o vao da via (from/to) ---- */
+const COBRE_PILHA = /^(Top|Bottom|Mid([1-9]|[12]\d|30))$/;
+function stackDaOp(ch){
+  const L = ch.layers;
+  if (!Array.isArray(L) || L.length < 2) return { erro:'layers deve ser a lista das camadas de cobre na ordem física, de Top a Bottom (>= 2)' };
+  const out = [], vistos = new Set(), avisos = [];
+  for (let i = 0; i < L.length; i++) {
+    const l = (L[i] && typeof L[i] === 'object') ? L[i] : {};
+    const k = typeof l.key === 'string' ? l.key : '';
+    if (i === 0 && k !== 'Top') return { erro:'a primeira camada da pilha é a Top' };
+    if (i === L.length - 1 && k !== 'Bottom') return { erro:'a última camada da pilha é a Bottom' };
+    if (i > 0 && i < L.length - 1 && !/^Mid([1-9]|[12]\d|30)$/.test(k)) return { erro:`camada "${k}" no meio da pilha: use Mid1 a Mid30` };
+    if (vistos.has(k)) return { erro:`camada "${k}" repetida na pilha` };
+    vistos.add(k);
+    const cu = l.copper === undefined ? 0.035 : l.copper;
+    if (!isNum(cu) || cu <= 0 || cu > 0.5) return { erro:`${k}: copper (espessura do cobre, mm) deve ser > 0 e até 0,5` };
+    const e = { key:k, copper:cu };
+    if (i < L.length - 1) {
+      if (!isNum(l.dielectric) || l.dielectric <= 0 || l.dielectric > 10) return { erro:`${k}: dielectric (o dielétrico abaixo dela, mm) deve ser > 0 e até 10` };
+      e.dielectric = l.dielectric;
+    } else if (isNum(l.dielectric) && l.dielectric) avisos.push('a Bottom não tem dielétrico abaixo: o valor foi ignorado');
+    if (typeof l.name === 'string' && l.name.trim()) e.name = l.name.trim().slice(0, 40);
+    out.push(e);
+  }
+  let mech = null;
+  if (ch.mech !== undefined) {
+    if (!Array.isArray(ch.mech) || ch.mech.some(k => typeof k !== 'string' || !/^Mech([1-9]|1[0-6])$/.test(k)))
+      return { erro:'mech deve ser a lista das camadas mecânicas da placa (Mech1 a Mech16)' };
+    mech = [...new Set(ch.mech)];
+  }
+  const thickness = Math.round(out.reduce((s, l) => s + l.copper + (l.dielectric || 0), 0) * 1e6) / 1e6;
+  if (thickness > 12) return { erro:'a placa passaria de 12 mm de espessura: confira os valores (em mm)' };
+  if (out.length > 2 && out.length % 2) avisos.push(out.length + ' camadas de cobre: número ímpar encarece a fabricação');
+  return { stack:{ layers:out, mech, thickness }, avisos };
+}
+/* from/to de via_add e via_edit: camadas de cobre (Top, Mid1..Mid30, Bottom), diferentes entre si */
+function vaoDaVia(ch, atual){
+  if (ch.from === undefined && ch.to === undefined) return {};
+  for (const k of ['from', 'to']) if (ch[k] !== undefined && (typeof ch[k] !== 'string' || !COBRE_PILHA.test(ch[k])))
+    return { erro:`${k}: camada de cobre onde a via ${k === 'from' ? 'começa' : 'acaba'} (Top, Mid1..Mid30 ou Bottom)` };
+  const from = ch.from !== undefined ? ch.from : ((atual && atual.from) || 'Top');
+  const to = ch.to !== undefined ? ch.to : ((atual && atual.to) || 'Bottom');
+  if (from === to) return { erro:'from e to iguais: a via liga duas camadas diferentes' };
+  const cega = !((from === 'Top' && to === 'Bottom') || (from === 'Bottom' && to === 'Top'));
+  return { from, to, aviso:cega ? 'via cega/enterrada (' + from + ' → ' + to + '): confira se o fabricante faz' : '' };
+}
+/* a pilha na placa efetiva: layers[] na ordem da pilha (stack 1..N, copper, dielectric), as que nao
+   sao de cobre como vieram (menos as mecanicas tiradas), e stackup {thickness, layers} */
+function aplicaPilha(out, B, st){
+  const antes = Array.isArray(B.layers) ? B.layers.filter(l => l && typeof l.key === 'string') : [];
+  const porK = new Map(antes.map(l => [l.key, l]));
+  const L = [];
+  st.layers.forEach((s, i) => {
+    const o = Object.assign(dcopy(porK.get(s.key) || {}), { key:s.key, stack:i + 1, copper:s.copper });
+    if (s.name) o.name = s.name; else if (!o.name) o.name = (pcbLayer(s.key) || {}).name || s.key;
+    if (isNum(s.dielectric)) o.dielectric = s.dielectric; else delete o.dielectric;
+    L.push(o);
+  });
+  for (const l of antes) {
+    if (COBRE_PILHA.test(l.key)) continue;
+    if (st.mech && /^Mech\d+$/.test(l.key) && st.mech.indexOf(l.key) < 0) continue;
+    L.push(dcopy(l));
+  }
+  if (st.mech) for (const k of st.mech) if (!L.some(l => l.key === k)) L.push({ key:k, name:(pcbLayer(k) || {}).name || k });
+  out.layers = L;
+  out.stackup = { thickness:st.thickness, layers:st.layers.map(l => Object.assign({}, l)), mech:st.mech ? st.mech.slice() : null };
+}
 function applyPcbChanges(board, changes, opts){
   const B = board || {};
   const CH = Array.isArray(changes) ? changes : [];
@@ -701,7 +768,8 @@ function applyPcbChanges(board, changes, opts){
                   nets:(Array.isArray(B.nets) ? B.nets.filter(n => typeof n === 'string') : []), netsChanged:false,
                   netsRenomeadas:{}, netsRemovidas:[],
                   validation:[], changeItems:[],
-                  outline:((B.board && B.board.outline) || []).slice(), outlineChanged:false };
+                  outline:((B.board && B.board.outline) || []).slice(), outlineChanged:false,
+                  stack:null };
   const oculto = (o, k, v) => Object.defineProperty(o, k, { value:v, writable:true, configurable:true, enumerable:false });
   oculto(model, 'board', board);
   oculto(model, 'pares', pares);
@@ -1011,7 +1079,11 @@ function applyPcbChanges(board, changes, opts){
         if (ch.op==='via_del'){ m.deleted = true; quem.set(m, idx); break; }
         const inv = invalido(ch, ['x','y','size','drill']); if (inv) return bad(`campo "${inv}" inválido`);
         if ((isNum(ch.size) && ch.size <= 0) || (isNum(ch.drill) && ch.drill <= 0)) return bad('size e drill devem ser > 0');
+        /* o vao da via (pedido do dono, 2026-10-29): from/to = as camadas de cobre onde ela comeca e acaba */
+        const vao = vaoDaVia(ch, m.eff); if (vao.erro) return bad(vao.erro);
         for (const k of ['x','y','size','drill']) if (isNum(ch[k])) m.eff[k] = ch[k];
+        if (vao.from) { m.eff.from = vao.from; m.eff.to = vao.to; }
+        if (vao.aviso) warn(vao.aviso);
         if (isNum(m.eff.drill) && isNum(m.eff.size) && m.eff.drill >= m.eff.size) warn('drill >= size (anel nulo)');
         m.changed = true; quem.set(m, idx);
         break;
@@ -1019,6 +1091,8 @@ function applyPcbChanges(board, changes, opts){
       case 'via_add': {
         for (const k of ['x','y','size','drill']) if (!isNum(ch[k])) return bad(`campo "${k}" ausente/inválido`);
         if (ch.size<=0 || ch.drill<=0) return bad('size e drill devem ser > 0');
+        const vao = vaoDaVia(ch, { from:'Top', to:'Bottom' }); if (vao.erro) return bad(vao.erro);
+        if (vao.aviso) warn(vao.aviso);
         const m = { kind:'via', src:null, eff:{ id:'new-v'+(++addSeq), from:'Top', to:'Bottom', ...ch }, changed:false, added:true };
         model.added.push(m); item.target = m;
         if (ch.drill>=ch.size) warn('drill >= size (anel nulo)');
@@ -1403,10 +1477,38 @@ function applyPcbChanges(board, changes, opts){
         m.changed = true; quem.set(m, idx);
         break;
       }
+      case 'stack_set': {
+        /* A PILHA DE CAMADAS DO HUB (pedido do dono, 2026-10-29: "fácil de adicionar ou remover layers e
+           configurar a espessura"): as de cobre na ordem fisica, de Top a Bottom, cada uma com o cobre e o
+           dieletrico abaixo dela; mech = as mecanicas que a placa tem. A ultima stack_set do arquivo vale.
+           Tirar camada que ainda tem objeto e erro (conferido no fim, com a placa inteira) */
+        const r = stackDaOp(ch);
+        if (r.erro) return bad(r.erro);
+        model.stack = r.stack; oculto(model, 'stackItem', item);
+        r.avisos.forEach(warn);
+        break;
+      }
       default:
         bad(`operação desconhecida "${ch.op}"`);
     }
   });
+  /* a pilha nao tira camada com objeto: trilha, arco, fill, regiao, texto, poligono ou via que passe nela */
+  if (model.stack) {
+    const fica = new Set(model.stack.layers.map(l => l.key).concat(model.stack.mech || []));
+    const tirada = k => typeof k === 'string' && ((/^Mid\d+$/.test(k) && !fica.has(k)) || (model.stack.mech && /^Mech\d+$/.test(k) && !fica.has(k)));
+    const conta = new Map(), ve = k => { if (tirada(k)) conta.set(k, (conta.get(k) || 0) + 1); };
+    for (const list of [model.tracks, model.arcs, model.fills, model.regions, model.texts, model.polygons, model.pads])
+      for (const m of list) if (!m.deleted && m.eff) ve(m.eff.layer);
+    for (const m of model.vias) if (!m.deleted && m.eff) { ve(m.eff.from); ve(m.eff.to); }
+    for (const m of model.added) if (m.eff) { ve(m.eff.layer); if (m.kind === 'via') { ve(m.eff.from); ve(m.eff.to); } }
+    for (const c of (B.components || [])) for (const p of ((c && c.pads) || [])) if (p) ve(p.layer);
+    if (conta.size) {
+      const it = model.stackItem, lista = [...conta].map(([k, n]) => k + ' (' + n + ')').join(', ');
+      const msg = 'a pilha tira camada que ainda tem objeto: ' + lista + ' — mova ou apague o que está nela antes';
+      if (it) { it.status = 'err'; it.msg = msg; model.validation.push({ level:'err', msg:`#${it.idx + 1} stack_set: ${msg}`, target:null }); }
+      model.stack = null;
+    }
+  }
   /* Trilha de cobre que foi para outra camada nao leva a net junto: o eff fica com o que a
      placa e. Feito no fim (e nao no edit) para que dois edits encadeados -- Top -> Overlay e
      depois Overlay -> Top -- devolvam a net original em vez de perde-la no meio do caminho. */
@@ -1892,6 +1994,7 @@ function effectiveBoard(board, model){
     for (const k of ['tracks', 'arcs', 'vias', 'fills', 'regions', 'freepads', 'polygons']) for (const o of out[k]) mapa(o);
     for (const c of out.components) for (const p of (c.pads || [])) mapa(p);
   }
+  if (M.stack) aplicaPilha(out, B, M.stack);
   return out;
 }
 
@@ -2531,6 +2634,8 @@ const CH_REQUIRED = {
   poly_add:        { num:[], str:['layer'] },
   poly_edit:       { num:['orig_n','orig_x0','orig_y0'], str:['id','orig_layer'] },
   poly_del:        { num:['orig_n','orig_x0','orig_y0'], str:['id','orig_layer'] },
+  /* a pilha de camadas do hub (2026-10-29): layers conferida a parte */
+  stack_set:       { num:[], str:[] },
 };
 
 function checkFields(objs, reqOf, kindOf, errors){
@@ -2565,6 +2670,7 @@ function serializeChanges(changes){
       errors.push({ idx:i, msg:ch.op + ': type deve ser smd, th ou npth' });
     if (ch.op === 'track_add' && ch.w <= 0) errors.push({ idx:i, msg:'track_add: w deve ser > 0' });
     if (ch.op === 'via_add' && ch.drill >= ch.size) errors.push({ idx:i, msg:'via_add: drill deve ser < size' });
+    if (ch.op === 'stack_set') { const r = stackDaOp(ch); if (r.erro) errors.push({ idx:i, msg:'stack_set: ' + r.erro }); }
     if (ch.op === 'region_add'){
       if (!ptsValid(ch.pts, 3)) errors.push({ idx:i, msg:'region_add: pts deve ser [[x,y],...] com >= 3 vertices' });
       if (ch.cutout !== true && (typeof ch.layer !== 'string' || !ch.layer))

@@ -277,6 +277,13 @@ const show = { grid:true, ghost:true, unica:false, layers:Object.create(null) };
 /* AS COTAS DA RÉGUA (Ctrl+M, hub-pcbcotas.js; pedido do dono, 2026-10-29: "igual ao do NexoCAD ...
    fica lá marcando; esconder ou mostrar com um botão na barra"). Não vão para o changes.js (o Altium
    não as recebe): ficam nas preferências desta máquina, uma lista por projeto. show.cotas é o olho. */
+/* DESEMPENHO DO 3D (pedido do dono, 2026-10-29: "quero opção de não ver componente 3D pra ficar mais
+   leve"). corpos: desligado, nem o 3D nem a vista 2D carregam os corpos dos componentes (STEP,
+   extrudados) -- a 2D fica sem as silhuetas e o 3D so com a placa. antes: o 3D montado escondido ao
+   abrir a pagina (a tecla 3 so mostra); desligado, monta na primeira tecla 3. E, ligado ou nao, o 3D
+   escondido nao se refaz mais depois de cada edicao (custava ~1 s de tela parada num projeto com
+   planos): refaz quando abre, com a cena de antes na tela enquanto isso. */
+const OPC3D = { corpos:lePref('3d.corpos', '1') !== '0', antes:lePref('3d.antes', '1') !== '0' };
 const HCOT = (typeof HubPcbCotas !== 'undefined' && HubPcbCotas && typeof HubPcbCotas.geometria === 'function') ? HubPcbCotas : null;
 const COTAS_PREF = 'cotas.' + (PROJ || '_');
 show.cotas = lePref('cotas.ver', '1') !== '0';
@@ -440,7 +447,8 @@ function montaCamadas(){
   for (const l of L) {
     LBYK[l.key] = l;
     l.num = l.kind === 'signal' ? ++n : 0;              /* o [1] Top Layer, [2] Bottom Layer das abas */
-    if (!(l.key in show.layers)) show.layers[l.key] = true;
+    /* a visibilidade lembrada deste projeto (o menu Camadas do canto grava) */
+    if (!(l.key in show.layers)) show.layers[l.key] = !(VIS_SALVA && VIS_SALVA.ocultas.indexOf(l.key) >= 0);
   }
   if (!LBYK[cur]) cur = LBYK.Top ? 'Top' : (L[0] ? L[0].key : 'Top');
 }
@@ -453,6 +461,9 @@ function montaIndices(){
   IDX.item = new Map(); IDX.compNome = new Map(); IDX.ebComp = new Map(); IDX.ebPorId = new Map(); IDX.opItem = new Map();
   /* a linha do changes.js -> o item do modelo que ela fez (o id do objeto adicionado no EB) */
   for (const it of model.changeItems) if (it && it.ch && !IDX.opItem.has(it.ch)) IDX.opItem.set(it.ch, it);
+  /* o item do modelo -> a PRIMEIRA linha que o tem como alvo (a mesma resposta do find de antes) */
+  IDX.opDoItem = new Map(); IDX.opModel = model;
+  for (const it of model.changeItems) if (it && it.target && !IDX.opDoItem.has(it.target)) IDX.opDoItem.set(it.target, it.ch);
   for (const list of [model.tracks, model.arcs, model.vias, model.texts, model.fills, model.regions, model.pads || []])
     for (const m of list) if (m.src && m.src.id != null && !IDX.item.has(String(m.src.id))) IDX.item.set(String(m.src.id), m);
   for (const m of model.added) if (m.eff && m.eff.id != null) IDX.item.set(String(m.eff.id), m);
@@ -488,6 +499,9 @@ const compDoDono = owner => (owner != null && IDX.compNome.has(String(owner))) ?
 /* a linha do changes.js que criou um objeto adicionado */
 function opDe(m){
   if (!m) return null;
+  /* o indice do montaIndices (antes era uma busca no changes.js inteiro por objeto: com 3.000 linhas,
+     montar os alvos depois de cada edicao fazia ~10 milhoes de comparacoes) */
+  if (IDX.opModel === model && IDX.opDoItem) return IDX.opDoItem.get(m) || null;
   const it = model.changeItems.find(i => i.target === m);
   return it ? it.ch : null;
 }
@@ -965,9 +979,13 @@ let CACHE = null, cacheSujo = true, EXCLUI = null;
 function novaCam(){ return { cheios:new Path2D(), tracos:new Map(), kCheios:new Path2D(), kTracos:new Map(), inv:[], k:false }; }
 function camC(k){ let c = CACHE.cam.get(k); if (!c) { c = novaCam(); CACHE.cam.set(k, c); } return c; }
 function tracoEm(map, w){ const q = Math.max(1, Math.round((w > 0 ? w : 0) * 1e4)); let p = map.get(q); if (!p) { p = new Path2D(); map.set(q, p); } return p; }
-function montaCache(){
-  CACHE = { cam:new Map(), furos:new Path2D() };
-  const pula = o => EXCLUI && EXCLUI.has(o);
+/* todas: o cache completo (o 3D pinta as faces com ele). Sem, a 2D so cacheia as camadas a vista: camada
+   escondida nao custa no refazer depois de cada edicao (o menu Camadas do canto) -- CACHE.vis diz com qual
+   visibilidade ele foi montado, e o draw() refaz quando ela muda */
+function montaCache(todas){
+  CACHE = { cam:new Map(), furos:new Path2D(), vis:todas ? null : chaveVis() };
+  const oculta = o => !todas && typeof o.layer === 'string' && !!LBYK[o.layer] && !camVisivel(o.layer);
+  const pula = o => (EXCLUI && EXCLUI.has(o)) || oculta(o);
   for (const o of EB.tracks || []) if (o && !pula(o)) cacheLinha(o, false);
   for (const o of EB.arcs || []) if (o && !pula(o)) cacheLinha(o, true);
   for (const o of EB.silk || []) if (o && !pula(o)) cacheLinha(o, o.kind === 'arc');
@@ -975,9 +993,11 @@ function montaCache(){
   for (const f of EB.fills || []) if (f && !pula(f)) cacheFill(f);
   for (const g of EB.regions || []) if (g && !pula(g)) cacheRegiao(g);
   for (const t of EB.texts || []) if (t && !pula(t)) cacheTexto(t);
-  for (const c of EB.components || []) for (const p of (c && c.pads) || []) if (p && !pula(p)) cachePad(p);
-  for (const p of EB.freepads || []) if (p && !pula(p)) cachePad(p);
-  for (const v of EB.vias || []) if (v && !pula(v)) cacheVia(v);
+  /* pad e via pintam varias camadas (cobre, mascara, pasta): ficam sempre */
+  const naMao = o => EXCLUI && EXCLUI.has(o);
+  for (const c of EB.components || []) for (const p of (c && c.pads) || []) if (p && !naMao(p)) cachePad(p);
+  for (const p of EB.freepads || []) if (p && !naMao(p)) cachePad(p);
+  for (const v of EB.vias || []) if (v && !naMao(v)) cacheVia(v);
   cacheSujo = false;
 }
 function linhaValida(o, isArc){
@@ -1224,7 +1244,7 @@ function hachura(pts, cor){
 function draw(){
   agendado = 0;
   if (!EB || !CW) return;
-  if (cacheSujo || !CACHE) montaCache();
+  if (cacheSujo || !CACHE || (CACHE.vis !== null && CACHE.vis !== chaveVis())) montaCache();
   calculaOrdem();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = COR.fundo; ctx.fillRect(0, 0, cv.width, cv.height);
@@ -1297,15 +1317,15 @@ function desenhaCursorAltium(){
 /* ============================== desenho avulso (fantasma, arrasto, previa) ============================== */
 
 /* um objeto no formato do board.js, desenhado na hora (sem cache) */
-function pathDoObj(kind, o){
-  const P = new Path2D();
+function pathDoObj(kind, o){ const P = new Path2D(); pathEm(P, kind, o); return P; }
+/* a geometria do objeto num Path2D que ja existe (as marcacoes em lote juntam muitos num so) */
+function pathEm(P, kind, o){
   if (kind === 'track' || kind === 'line') pLinha(P, o);
   else if (kind === 'arc') pArco(P, o);
   else if (kind === 'fill') { const c = fillCentro(o); pForma(P, c[0], c[1], Math.abs(o.x2 - o.x1), Math.abs(o.y2 - o.y1), o.rot || 0, 'rect'); }
   else if (kind === 'region') pRegiao(P, o);
   else if (kind === 'via') pForma(P, o.x, o.y, o.size, o.size, 0, 'circle');
   else if (kind === 'pad') { const f = formaLado(o, ladoDaVista()), c = centroCobre(o); pForma(P, c[0], c[1], f.w, f.h, o.rot, f.shape, f.radius); }
-  return P;
 }
 const ehTraco = kind => kind === 'track' || kind === 'line' || kind === 'arc';
 function desenhaObj(kind, o, cor, opt){
@@ -1341,32 +1361,61 @@ function seta(x1, y1, x2, y2){
 const kindDoItem = m => m.kind === 'track' ? 'track' : m.kind;
 /* Diff: o original tracejado, o removido em vermelho, o adicionado com o contorno verde, e a
    seta do lugar de antes ate o de agora -- so o hub tem, e fica */
-function desenhaFantasmas(){
+/* AS MARCACOES EM LOTE (pedido do dono, 2026-10-29: "o software no geral tá muito travado,
+   principalmente com plano de terra"). Antes cada objeto mudado era desenhado sozinho a cada quadro
+   (save/restore, tracejado, Path2D novo): numa placa com 3.000 linhas no changes.js eram 3.000
+   desenhos por quadro, ate nas camadas escondidas. Agora os caminhos ficam prontos por estilo (cor,
+   alfa, largura) e so se refazem quando a placa ou a visibilidade das camadas muda; camada
+   escondida nao entra. A largura do traco e o tracejado (que dependem do zoom) entram na hora. */
+let FANT = null;
+function chaveVis(){ let s = (show.unica ? 'u:' + cur : '') + '|'; for (const l of LAYERS) if (camVisivel(l.key)) s += l.key + ','; return s; }
+function montaFantasmas(){
+  const grupos = new Map(), vias = [];
+  const P = (chave, base) => { let x = grupos.get(chave); if (!x) { x = Object.assign({ P:new Path2D() }, base); grupos.set(chave, x); } return x.P; };
   for (const list of [model.tracks, model.arcs, model.vias, model.fills, model.regions]) {
     for (const m of list) {
       if (!m.src || (!m.changed && !m.deleted)) continue;
       const k = kindDoItem(m), lay = m.kind === 'via' ? 'Multi' : m.src.layer;
       if (lay && !camVisivel(lay)) continue;
+      const cor = m.deleted ? COR.del : corDe(lay), alpha = m.deleted ? 0.8 : 0.6;
       /* o fantasma de trilha e fino: com a largura cheia ele pintava por cima da trilha nova */
-      const fino = ehTraco(k) ? Math.max((m.src.w || 0) * 0.3, px(1.5)) : undefined;
-      if (m.deleted) desenhaObj(k, m.src, COR.del, { alpha:0.8, dash:[5, 3], contorno:true, larg:fino });
-      else desenhaObj(k, m.src, corDe(lay), { alpha:0.6, dash:[5, 3], contorno:true, larg:fino });
+      if (ehTraco(k)) { const w = r6(m.src.w || 0); pathEm(P('f|' + cor + '|' + alpha + '|' + w, { cor, alpha, dash:[5, 3], w, fator:0.3, min:1.5 }), k, m.src); }
+      else pathEm(P('c|' + cor + '|' + alpha, { cor, alpha, dash:[5, 3], linha:1.2 }), k, m.src);
     }
   }
+  for (const m of model.added) {
+    const e = m.eff;
+    const lay = m.kind === 'via' ? 'Multi' : e.layer;
+    if (lay && LBYK[lay] && !camVisivel(lay)) continue;
+    if (m.kind === 'via') { if (isNum(e.x) && isNum(e.y)) vias.push(e); }
+    else if (m.kind === 'track' || m.kind === 'arc') { const w = r6(e.w || 0); pathEm(P('a|' + w, { cor:COR.add, alpha:1, dash:[4, 3], w, fator:0.3, min:1 }), m.kind, e); }
+    else if (m.kind === 'fill' || m.kind === 'region') pathEm(P('ac', { cor:COR.add, alpha:1, dash:[4, 3], linha:1.2 }), m.kind, e);
+    else if (m.kind === 'text') { const g = geoTexto(e); if (g) pPoli(P('at', { cor:COR.add, alpha:1, dash:[4, 3], linha:1 }), g.caixa); }
+  }
+  return { seq:ebSeq, vis:chaveVis(), layers:LAYERS, grupos:[...grupos.values()], vias };
+}
+function desenhaFantasmas(){
+  if (!FANT || FANT.seq !== ebSeq || FANT.layers !== LAYERS || FANT.vis !== chaveVis()) FANT = montaFantasmas();
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const x of FANT.grupos) {
+    ctx.globalAlpha = x.alpha; ctx.strokeStyle = x.cor;
+    ctx.setLineDash([px(x.dash[0]), px(x.dash[1])]);
+    ctx.lineWidth = x.fator ? Math.max(x.w * x.fator, px(x.min)) : px(x.linha);
+    ctx.stroke(x.P);
+  }
+  if (FANT.vias.length) {
+    /* a via nova: o anel 2,5 px por fora dela (depende do zoom: monta na hora, sao poucas) */
+    const V = new Path2D();
+    for (const e of FANT.vias) { const r = (e.size || 0) / 2 + px(2.5); V.moveTo(e.x + r, e.y); V.arc(e.x, e.y, r, 0, 2 * Math.PI); }
+    ctx.globalAlpha = 1; ctx.strokeStyle = COR.add; ctx.setLineDash([px(4), px(3)]); ctx.lineWidth = px(1.2); ctx.stroke(V);
+  }
+  ctx.restore();
   for (const m of model.texts) {
-    if (!m.src || (!m.changed && !m.deleted)) continue;
+    if (!m.src || (!m.changed && !m.deleted) || !camVisivel(m.src.layer)) continue;
     const e = ebDe(m);
     if (m.deleted) { desenhaObj('text', m.src, COR.del, { alpha:0.6 }); continue; }
     desenhaObj('text', Object.assign({}, m.src, { text: e ? e.text : m.src.text }), corDe(m.src.layer), { alpha:0.3 });
     if (e) seta(m.src.x, m.src.y, e.x, e.y);
-  }
-  for (const m of model.added) {
-    const e = m.eff;
-    if (m.kind === 'via') desenhaObj('via', { x:e.x, y:e.y, size:e.size + px(5) }, COR.add, { dash:[4, 3], contorno:true });
-    else if (m.kind === 'track' || m.kind === 'arc') desenhaObj(m.kind, e, COR.add, { dash:[4, 3], larg:Math.max((e.w || 0) * 0.3, px(1)) });
-    else if (m.kind === 'fill') desenhaObj('fill', e, COR.add, { dash:[4, 3], contorno:true });
-    else if (m.kind === 'region') desenhaObj('region', e, COR.add, { dash:[4, 3], contorno:true });
-    else if (m.kind === 'text') { const g = geoTexto(e); if (g) { const P = new Path2D(); pPoli(P, g.caixa); ctx.save(); ctx.strokeStyle = COR.add; ctx.setLineDash([px(4), px(3)]); ctx.lineWidth = px(1); ctx.stroke(P); ctx.restore(); } }
   }
   for (const m of model.comps) {
     if (!m.changed) continue;
@@ -1536,19 +1585,21 @@ const EDITA = {
   track: { op:'track_edit', orig:['x1', 'y1', 'x2', 'y2', 'w', 'layer'], campos:['x1', 'y1', 'x2', 'y2', 'w', 'layer', 'net'] },
   arc:   { op:'arc_edit',   orig:['cx', 'cy', 'r', 'sa', 'ea', 'layer'], campos:['cx', 'cy', 'r', 'sa', 'ea', 'w', 'layer'] },
   pad:   { op:'pad_edit',   orig:['x', 'y'], campos:['x', 'y', 'w', 'h', 'rot', 'shape', 'radius', 'drill', 'drillshape', 'drillw', 'holerot', 'net', 'name', 'layer'] },
-  via:   { op:'via_edit',   orig:['x', 'y'], campos:['x', 'y', 'size', 'drill'] },
+  via:   { op:'via_edit',   orig:['x', 'y'], campos:['x', 'y', 'size', 'drill', 'from', 'to'] },
   fill:  { op:'fill_edit',  orig:['x1', 'y1', 'x2', 'y2', 'layer'], campos:['x1', 'y1', 'x2', 'y2', 'rot', 'layer', 'net'] },
   text:  { op:'text_edit',  orig:['x', 'y', 'text', 'layer'], campos:['text', 'x', 'y', 'h', 'w', 'rot', 'layer', 'mirror'] },
 };
 const CAMPOS_ADD = {
   track:['x1', 'y1', 'x2', 'y2', 'w', 'layer', 'net'], arc:['cx', 'cy', 'r', 'sa', 'ea', 'w', 'layer', 'net'],
-  via:['x', 'y', 'size', 'drill', 'net'], fill:['x1', 'y1', 'x2', 'y2', 'rot', 'layer', 'net'],
+  via:['x', 'y', 'size', 'drill', 'net', 'from', 'to'], fill:['x1', 'y1', 'x2', 'y2', 'rot', 'layer', 'net'],
   text:['text', 'x', 'y', 'h', 'w', 'rot', 'layer', 'mirror'], region:['layer', 'net'],
   pad:['x', 'y', 'w', 'h', 'rot', 'shape', 'radius', 'drill', 'drillshape', 'drillw', 'holerot', 'net', 'name', 'layer'],
 };
 const ANGULARES = { rot:1, sa:1, ea:1 };
 function mesmoValor(k, a, b){
   if (k === 'net') return (a || '') === (b || '');
+  if (k === 'from') return (a || 'Top') === (b || 'Top');        /* a via sem from/to e passante */
+  if (k === 'to') return (a || 'Bottom') === (b || 'Bottom');
   if (k === 'mirror') return !!a === !!b;
   if (typeof a === 'number' && typeof b === 'number') return ANGULARES[k] ? nearAng(a, b) : near(a, b);
   if (k === 'rot' && (a === undefined || b === undefined)) return normAng(a || 0) === normAng(b || 0);
@@ -1940,7 +1991,7 @@ function opsDaCopia(dx, dy){
   for (const { kind, o } of CLIP.itens) {
     if (kind === 'track') ops.push(comNet({ op:'track_add', layer:o.layer, x1:r6(o.x1 + dx), y1:r6(o.y1 + dy), x2:r6(o.x2 + dx), y2:r6(o.y2 + dy), w:r6(o.w || CFG.wLinha), note:nota }, o));
     else if (kind === 'arc') ops.push(comNet({ op:'arc_add', layer:o.layer, cx:r6(o.cx + dx), cy:r6(o.cy + dy), r:r6(o.r), sa:r6(o.sa), ea:r6(o.ea), w:r6(o.w || CFG.wLinha), note:nota }, o));
-    else if (kind === 'via') { const op = { op:'via_add', x:r6(o.x + dx), y:r6(o.y + dy), size:r6(o.size), drill:r6(o.drill), note:nota }; if (o.net) op.net = o.net; ops.push(op); }
+    else if (kind === 'via') { const op = { op:'via_add', x:r6(o.x + dx), y:r6(o.y + dy), size:r6(o.size), drill:r6(o.drill), note:nota }; if (o.net) op.net = o.net; poeVao(op, o.from, o.to); ops.push(op); }
     else if (kind === 'fill') ops.push(comNet({ op:'fill_add', layer:o.layer, x1:r6(Math.min(o.x1, o.x2) + dx), y1:r6(Math.min(o.y1, o.y2) + dy), x2:r6(Math.max(o.x1, o.x2) + dx), y2:r6(Math.max(o.y1, o.y2) + dy), rot:r6(o.rot || 0), note:nota }, o));
     else if (kind === 'region') ops.push(comNet({ op:'region_add', layer:o.layer, pts:(o.points || []).map(p => [r6(p[0] + dx), r6(p[1] + dy)]), note:nota }, o));
     else if (kind === 'text') {
@@ -3132,6 +3183,135 @@ function medidaAoVivo(){
   return 'medida ' + fmtDist(g.valor) + ' ' + unidade + (g.modo !== 'alinhada' ? ' (' + HCOT.MODOS[g.modo] + ')' : '') +
     ' · distância ' + fmtDist(g.dist) + ' · dX ' + fmtDist(g.dx) + ' · dY ' + fmtDist(g.dy);
 }
+/* ============================== a pilha de camadas (o Layer Stack Manager do hub) ==============================
+   Pedido do dono (2026-10-29): "quero que fique fácil de adicionar mais layers ou remover, configurar
+   espessura de layer". Uma linha stack_set no changes.js, editada no lugar (o motor: hub-core » stackDaOp
+   e aplicaPilha; a pilha muda as abas, o Gerber -- uma camada por cobre -- e a espessura do 3D).
+   Sem stack_set, a pilha mostrada e a do espelho do Altium, com cobre de 1 oz e o dieletrico repartido
+   pela espessura da placa. Tirar camada com objeto o motor recusa, e o aviso diz quantos. */
+const COBRE_PADRAO = 0.035;
+const PILHAS_PRONTAS = {
+  2:[1.53],
+  4:[0.2, 1.065, 0.2],
+  6:[0.2, 0.3, 0.36, 0.3, 0.2],
+  8:[0.15, 0.2, 0.2, 0.25, 0.2, 0.2, 0.15],
+};
+function pilhaAtual(){
+  const st = EB.stackup;
+  if (st && Array.isArray(st.layers)) return { camadas:st.layers.map(l => Object.assign({ name:'' }, l)), mech:LAYERS.filter(l => l.kind === 'mech').map(l => l.key), definida:true };
+  const sinal = LAYERS.filter(l => l.kind === 'signal'), n = sinal.length, esp = espessuraPlaca();
+  const d = n > 1 ? Math.max(0.05, r6((esp - n * COBRE_PADRAO) / (n - 1))) : 0;
+  const doEb = k => (EB.layers || []).find(x => x && x.key === k) || {};
+  const camadas = sinal.map((l, i) => {
+    const b = doEb(l.key), c = { key:l.key, name:'', copper:isNum(b.copper) && b.copper > 0 ? b.copper : COBRE_PADRAO };
+    if (i < n - 1) c.dielectric = isNum(b.dielectric) && b.dielectric > 0 ? b.dielectric : d;
+    return c;
+  });
+  return { camadas, mech:LAYERS.filter(l => l.kind === 'mech').map(l => l.key), definida:false };
+}
+function opDaPilha(p){
+  return { op:'stack_set', layers:p.camadas.map((c, i) => {
+    const o = { key:c.key, copper:r6(c.copper) };
+    if (c.name) o.name = String(c.name);
+    if (i < p.camadas.length - 1) o.dielectric = r6(c.dielectric);
+    return o;
+  }), mech:p.mech.slice(), note:'pilha de camadas definida no hub' };
+}
+/* grava a pilha: confere no motor ANTES (camada com objeto nao sai) e edita a linha que ja existe */
+function gravaPilha(p, msg){
+  if (LEAN || !garanteEdicao()) return false;
+  const op = opDaPilha(p);
+  const i = CH.findIndex(x => x && x.op === 'stack_set');
+  const teste = CH.slice();
+  if (i >= 0) teste[i] = op; else teste.unshift(op);
+  let it = null;
+  try { it = HC.applyPcbChanges(B, teste).changeItems[i >= 0 ? i : 0]; }
+  catch (e) { HubDialog.toast('pilha: ' + (e && e.message || e), 'err'); return false; }
+  if (it && it.status === 'err') { HubDialog.toast(it.msg, 'warn', 7000); if (painel) painel.atualiza(); return false; }
+  if (i >= 0) { CH[i] = op; for (let j = CH.length - 1; j > i; j--) if (CH[j] && CH[j].op === 'stack_set') CH.splice(j, 1); }
+  else CH.unshift(op);          /* no comeco: o que for desenhado nas camadas novas vem depois dela */
+  commit();
+  if (msg) HubDialog.toast(msg, it && it.status === 'warn' ? 'warn' : 'ok', 2600);
+  return true;
+}
+function midLivre(p){ for (let n = 1; n <= 30; n++) if (!p.camadas.some(c => c.key === 'Mid' + n)) return 'Mid' + n; return null; }
+const PILHA = {
+  ver(){
+    const p = pilhaAtual(), cnt = k => (LBYK[k] && LBYK[k].count) || 0;
+    const esp = p.camadas.reduce((s, c) => s + c.copper + (c.dielectric || 0), 0);
+    const temMech = new Set(p.mech);
+    return {
+      definida:p.definida, espessura:r6(esp), unidade:'mm',
+      camadas:p.camadas.map((c, i) => ({ key:c.key, rot:LBYK[c.key] ? rotuloAba(LBYK[c.key]) : c.key, cor:corDe(c.key), name:c.name || '',
+        copper:c.copper, dielectric:c.dielectric, count:cnt(c.key), ultima:i === p.camadas.length - 1,
+        podeTirar:/^Mid/.test(c.key) && !cnt(c.key) })),
+      mech:p.mech.map(k => ({ key:k, rot:nomeDe(k), cor:corDe(k), count:cnt(k), podeTirar:!cnt(k) })),
+      mechLivres:Array.from({ length:16 }, (_, i) => 'Mech' + (i + 1)).filter(k => !temMech.has(k)).map(k => ({ key:k, rot:(HC.pcbLayer(k) || {}).name || k })),
+    };
+  },
+  edita(key, campo, valor){
+    const p = pilhaAtual(), c = p.camadas.find(x => x.key === key); if (!c) return;
+    if (campo === 'name') c.name = String(valor || '').trim().slice(0, 40);
+    else { const v = Number(valor); if (!isNum(v) || v <= 0) { HubDialog.toast('espessura em mm, maior que zero', 'warn'); if (painel) painel.atualiza(); return; } c[campo] = r6(v); }
+    gravaPilha(p);
+  },
+  maisCobre(){
+    const p = pilhaAtual(), k = midLivre(p); if (!k) { HubDialog.toast('a pilha já tem as 30 camadas internas', 'warn'); return; }
+    /* entra logo acima da Bottom, dividindo o dieletrico que havia ali */
+    const n = p.camadas.length, acima = p.camadas[n - 2], d = r6(Math.max(0.05, (acima.dielectric || 0.2) / 2));
+    acima.dielectric = d;
+    p.camadas.splice(n - 1, 0, { key:k, name:'', copper:COBRE_PADRAO, dielectric:d });
+    if (gravaPilha(p, nomeDe(k) + ' entrou na pilha (' + (n + 1) + ' camadas de cobre)')) { setVisivel(k, true); setCur(k); }
+  },
+  tiraCobre(key){
+    const p = pilhaAtual(), i = p.camadas.findIndex(c => c.key === key);
+    if (i <= 0 || i >= p.camadas.length - 1) return;
+    /* o dieletrico dela soma no de cima: a placa so perde o cobre */
+    p.camadas[i - 1].dielectric = r6((p.camadas[i - 1].dielectric || 0) + (p.camadas[i].dielectric || 0) + p.camadas[i].copper);
+    p.camadas.splice(i, 1);
+    if (cur === key) setCur('Top');
+    gravaPilha(p, nomeDe(key) + ' saiu da pilha');
+  },
+  pronta(n){
+    const D = PILHAS_PRONTAS[n]; if (!D) return;
+    const p = pilhaAtual(), mids = p.camadas.filter(c => /^Mid/.test(c.key)).map(c => c.key);
+    const chaves = ['Top'];
+    for (let i = 0; i < n - 2; i++) chaves.push(mids[i] || null);
+    chaves.push('Bottom');
+    const tmp = { camadas:[] };
+    for (const k of chaves) tmp.camadas.push({ key:k || midLivre({ camadas:tmp.camadas.concat(p.camadas) }) });
+    p.camadas = tmp.camadas.map((c, i) => {
+      const velho = pilhaAtual().camadas.find(x => x.key === c.key) || {};
+      const o = { key:c.key, name:velho.name || '', copper:isNum(velho.copper) ? velho.copper : COBRE_PADRAO };
+      if (i < n - 1) o.dielectric = D[i];
+      return o;
+    });
+    gravaPilha(p, 'pilha de ' + n + ' camadas, ' + fmtNum(p.camadas.reduce((s, c) => s + c.copper + (c.dielectric || 0), 0), 3) + ' mm');
+  },
+  maisMech(key){ const p = pilhaAtual(); if (!/^Mech\d+$/.test(key) || p.mech.indexOf(key) >= 0) return; p.mech.push(key); if (gravaPilha(p, nomeDe(key) + ' entrou na placa')) setVisivel(key, true); },
+  tiraMech(key){ const p = pilhaAtual(); p.mech = p.mech.filter(k => k !== key); if (cur === key) setCur('Top'); gravaPilha(p, nomeDe(key) + ' saiu da placa'); },
+  /* volta a pilha do espelho do Altium (tira a linha stack_set) */
+  doAltium(){
+    const i = CH.findIndex(x => x && x.op === 'stack_set'); if (i < 0) return;
+    if (!garanteEdicao()) return;
+    /* seguro: camada com objeto continua nas abas (boardLayers conta o uso) e no Gerber */
+    for (let j = CH.length - 1; j >= 0; j--) if (CH[j] && CH[j].op === 'stack_set') CH.splice(j, 1);
+    commit();
+    HubDialog.toast('pilha de volta à do Altium', 'ok', 2000);
+  },
+};
+/* ---- o vao das vias (pedido do dono, 2026-10-29) ---- */
+/* from/to so quando a via nao e passante (Top-Bottom e o padrao do motor e do Altium) */
+function poeVao(op, de, ate){ if (de && ate && de !== ate && !((de === 'Top' && ate === 'Bottom') || (de === 'Bottom' && ate === 'Top'))) { op.from = de; op.to = ate; } return op; }
+const opcCobreVia = () => LAYERS.filter(l => l.kind === 'signal').map(l => ({ v:l.key, rot:rotuloAba(l), cor:l.color }));
+const viaDe = () => (CFG.viaDe && LBYK[CFG.viaDe] && LBYK[CFG.viaDe].kind === 'signal') ? CFG.viaDe : 'Top';
+const viaAte = () => (CFG.viaAte && LBYK[CFG.viaAte] && LBYK[CFG.viaAte].kind === 'signal') ? CFG.viaAte : 'Bottom';
+function vaoTexto(e){
+  const de = e.from || 'Top', ate = e.to || 'Bottom';
+  if ((de === 'Top' && ate === 'Bottom') || (de === 'Bottom' && ate === 'Top')) return 'Passante: atravessa todas as camadas de cobre.';
+  const cega = de === 'Top' || de === 'Bottom' || ate === 'Top' || ate === 'Bottom';
+  return (cega ? 'Via cega' : 'Via enterrada') + ' (' + nomeDe(de) + ' → ' + nomeDe(ate) + '): só liga essas camadas e as do meio. Confira se o fabricante faz — custa mais.';
+}
 function cliqueFerramenta(w, ev){
   if (tool === 'colar') { colaNoPonto(w, ev); return; }
   if (tool === 'pad') { poePad(w, ev); return; }
@@ -3154,6 +3334,7 @@ function cliqueFerramenta(w, ev){
     const net = motorEdicao() ? netDaViaNova(p) : (p.net || CFG.viaNet);
     const vd = viaDaNet(net);
     const op = { op:'via_add', x:p.x, y:p.y, size:r6(vd.size), drill:r6(vd.drill) };
+    poeVao(op, viaDe(), viaAte());
     if (net) op.net = net;
     /* via encostada em cobre de outra net nao entra (o conflito em ignorar e o escape) */
     if (motorEdicao()) { const cs = conflitosDaViaNova(p, vd.size, net, []); if (cs && cs.length) { avisaConflito('via não posta', cs); return; } limpaAvisoRota(); }
@@ -3958,6 +4139,71 @@ function pintaFiltroMenu(){
   $('pfSeta').innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="' + (filtroRecolhido ? 'M4 6 L8 10 L12 6' : 'M4 10 L8 6 L12 10') + '"/></svg>';
   box.classList.toggle('pf-recolhido', filtroRecolhido);
 }
+/* ── AS CAMADAS NO CANTO (pedido do dono, 2026-10-29: "quero poder ver só o layer que eu marquei, pra não
+   mostrar tudo e não travar tanto") ──
+   Embaixo do Filtro, no mesmo estilo: uma caixa por camada, "Todas" e "só esta" (passe o mouse). A
+   escolha fica gravada por projeto (memVis), e camada escondida nao custa: nao entra no cache de desenho
+   (montaCache), nas marcacoes das mudancas, no clique nem no agarre. Clicar no nome troca a camada atual. */
+let camadasRecolhido = lePref('camadasMenu', 'aberto') === 'recolhido';
+const VIS_PREF = 'vis.' + (PROJ || '_');
+const VIS_SALVA = (() => { try { const v = JSON.parse(lePref(VIS_PREF, 'null')); return v && Array.isArray(v.ocultas) ? v : null; } catch (e) { return null; } })();
+function salvaVis(){
+  if (LEAN) return;
+  const ocultas = LAYERS.filter(l => show.layers[l.key] === false).map(l => l.key);
+  gravaPref(VIS_PREF, JSON.stringify({ ocultas, unica:!!show.unica }));
+}
+function montaCamadasMenu(){
+  const box = $('pcbcamadas');
+  if (!box || LEAN) return;
+  box.textContent = '';
+  const cab = document.createElement('div'); cab.className = 'pf-cab'; cab.title = 'Camadas à vista: desmarque o que não quer ver (a placa fica mais leve)';
+  cab.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2 L14 5 L8 8 L2 5 Z"/><path d="M2 8 L8 11 L14 8"/><path d="M2 11 L8 14 L14 11"/></svg>';
+  const nome = document.createElement('b'); nome.textContent = 'Camadas';
+  const conta = document.createElement('span'); conta.className = 'pc-conta';
+  const seta = document.createElement('i'); seta.className = 'pc-seta'; seta.style.display = 'inline-flex';
+  cab.append(nome, conta, seta);
+  cab.addEventListener('click', () => { camadasRecolhido = !camadasRecolhido; gravaPref('camadasMenu', camadasRecolhido ? 'recolhido' : 'aberto'); pintaCamadasMenu(); });
+  const lista = document.createElement('div'); lista.className = 'pf-lista';
+  const rod = document.createElement('div'); rod.className = 'pc-rodape';
+  const bt = (rot, tit, f) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = rot; b.title = tit; b.addEventListener('click', f); rod.append(b); };
+  bt('Cobre', 'Só as camadas de cobre (e a Multi-Layer)', () => conjunto('sinal'));
+  bt('Cima', 'Só o lado de cima', () => conjunto('cima'));
+  bt('Baixo', 'Só o lado de baixo', () => conjunto('baixo'));
+  box.append(cab, lista, rod);
+  pintaCamadasMenu();
+}
+function pintaCamadasMenu(){
+  const box = $('pcbcamadas');
+  if (!box || !box.firstChild || LEAN) return;
+  const lista = box.querySelector('.pf-lista');
+  lista.textContent = '';
+  const n = LAYERS.filter(l => camVisivel(l.key)).length;
+  const todos = document.createElement('label'); todos.className = 'pf-todos';
+  const ct = document.createElement('input'); ct.type = 'checkbox'; ct.dataset.k = '*';
+  ct.checked = n === LAYERS.length && !show.unica; ct.indeterminate = n > 0 && n < LAYERS.length;
+  ct.addEventListener('change', () => { if (ct.checked) mostraTodas(); else { for (const l of LAYERS) show.layers[l.key] = l.key === cur; show.unica = false; pintaAbas(); pintaStatus(); if (painel) painel.atualiza(); pede(); } });
+  todos.append(ct, document.createTextNode('Todas'));
+  lista.append(todos);
+  for (const l of LAYERS) {
+    const lb = document.createElement('label');
+    if (l.key === cur) lb.classList.add('atual');
+    if (!l.used && !l.inBoard) lb.classList.add('vazia');
+    const c = document.createElement('input'); c.type = 'checkbox'; c.dataset.k = l.key; c.checked = camVisivel(l.key);
+    c.addEventListener('change', () => { if (show.unica) { for (const x of LAYERS) show.layers[x.key] = camVisivel(x.key); show.unica = false; } setVisivel(l.key, c.checked); });
+    const sw = document.createElement('i'); sw.className = 'sw'; sw.style.background = l.color;
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = rotuloAba(l);
+    nm.addEventListener('click', e => { e.preventDefault(); setCur(l.key); });
+    const so = document.createElement('button'); so.type = 'button'; so.className = 'so'; so.textContent = 'só';
+    so.title = 'Mostrar só ' + l.name;
+    so.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); soEsta(l.key); });
+    lb.title = l.name + (l.count ? ' — ' + l.count + ' objeto(s)' : ' — vazia') + '\ncaixa: mostrar/esconder · nome: camada atual · só: só esta';
+    lb.append(c, sw, nm, so);
+    lista.append(lb);
+  }
+  box.querySelector('.pc-conta').textContent = n === LAYERS.length ? 'todas' : n + '/' + LAYERS.length;
+  box.querySelector('.pc-seta').innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="' + (camadasRecolhido ? 'M4 6 L8 10 L12 6' : 'M4 10 L8 6 L12 10') + '"/></svg>';
+  box.classList.toggle('pf-recolhido', camadasRecolhido);
+}
 /* ── O OLHO DAS MARCAÇÕES (pedido do dono, 2026-10-28: "um ícone de olho pra suprimir as marcações de
    alteração da pcb; desativa o olho, fica só as trilhas e a placa") ──
    Esconde os fantasmas das mudanças (o original tracejado, o removido em vermelho, o novo com o contorno
@@ -4071,6 +4317,8 @@ function pintaAbas(){
   const on = box.querySelector('.aba.on');
   if (on && on.scrollIntoView) { try { on.scrollIntoView({ block:'nearest', inline:'nearest' }); } catch (e) {} }
   const ls = $('lsBtn'); if (ls) ls.classList.toggle('unica', show.unica);
+  /* toda troca de visibilidade passa por aqui: grava (por projeto) e repinta o menu do canto */
+  salvaVis(); pintaCamadasMenu();
 }
 function soEsta(k){ for (const l of LAYERS) show.layers[l.key] = l.key === k; setCur(k); pintaAbas(); if (painel) painel.atualiza(); pede(); }
 function mostraTodas(){ for (const l of LAYERS) show.layers[l.key] = true; show.unica = false; pintaAbas(); pintaStatus(); if (painel) painel.atualiza(); pede(); }
@@ -5042,7 +5290,7 @@ function alvoDoRef(ref){
 }
 /* a face da placa para a textura: o cache da vista 2D, com as cores do 3D do Altium */
 function pintaFace3d(c, lado){
-  if (cacheSujo || !CACHE) montaCache();
+  if (cacheSujo || !CACHE || CACHE.vis !== null) montaCache(true);
   const L = lado === 'top' ? 'Top' : 'Bottom';
   const pinta = (k, cor) => {
     const cc = CACHE.cam.get(k); if (!cc) return;
@@ -5063,10 +5311,19 @@ function pintaFace3d(c, lado){
 }
 /* os corpos 3D da placa efetiva, com a biblioteca do NexoCAD por cima (hub-nexo.js): a vista 3D,
    o "Editar 3D no NexoCAD" e o pacote da placa usam a MESMA lista */
-async function corpos3d(vista){
+/* a espessura da placa: a da pilha de camadas do hub (stack_set) manda; senao a do board3d.js do PcbDoc */
+function espessuraPlaca(){
+  const s = EB && EB.stackup;
+  if (s && isNum(s.thickness) && s.thickness > 0) return s.thickness;
+  return (D3 && isNum(D3.thickness) && D3.thickness > 0) ? D3.thickness : 1.6;
+}
+/* tela: a vista 3D (vista) e as silhuetas da 2D -- so elas obedecem ao "Componentes 3D" desligado;
+   o pacote do NexoCAD e o Editar 3D levam os corpos sempre */
+async function corpos3d(vista, tela){
   if (D3 === undefined) D3 = PROJ ? await globalDe('pcbmirror3d', 'Projects/' + encodeURIComponent(PROJ) + '/board3d.js') : null;
   if (LIB3D === undefined) LIB3D = await globalDe('pcblib3d', 'Libs/pcblib-3d.js');
-  const esp = (D3 && isNum(D3.thickness) && D3.thickness > 0) ? D3.thickness : 1.6;
+  const esp = espessuraPlaca();
+  if ((vista || tela) && !OPC3D.corpos) return { corpos:[], esp };
   if (typeof HubNexo !== 'undefined') { try { await HubNexo.carrega(); } catch (e) { /* sem a biblioteca: as fontes de sempre */ } }
   const h = hubLib();
   let corpos = [];
@@ -5131,11 +5388,23 @@ async function cena3d(){
 }
 /* a placa mudou: na tela 3D refaz ja; escondida, fica para quando a tela parar (agendaFundo3d) */
 function refaz3d(){
-  agendaSilhuetas();
+  if (OPC3D.corpos) agendaSilhuetas();
   if (!V3) return;
   sujo3d = true;
-  if (!modo3d) { agendaFundo3d(); return; }
+  if (!modo3d) return;            /* escondido: refaz quando abrir (entra3d), nao a cada edicao */
   if (!v3Agendado) v3Agendado = setTimeout(() => { v3Agendado = 0; cena3d(); }, 120);
+}
+/* as opcoes de desempenho do 3D (painel » Propriedades da placa » Desempenho) */
+function setOpc3d(k, v){
+  if (!(k in OPC3D)) return;
+  OPC3D[k] = !!v; gravaPref('3d.' + k, v ? '1' : '0');
+  if (k === 'corpos') {
+    SILH = new Map();
+    if (v) agendaSilhuetas();
+    if (V3) { sujo3d = true; if (modo3d) cena3d(); }
+  }
+  if (k === 'antes' && v && !V3 && !LEAN) agendaPrepara3d();
+  if (painel) painel.atualiza(); pede();
 }
 function agendaFundo3d(){
   clearTimeout(fundo3d);
@@ -5213,7 +5482,6 @@ function sai3d(){
   if (!modo3d) return;
   modo3d = false;
   v3Esconde($('v3d'));
-  if (sujo3d) agendaFundo3d();
   avisoRodape('');
   try { cv.focus(); } catch (e) { /* ok */ }
   pede();
@@ -5277,7 +5545,7 @@ async function silhuetaDe(b, comp){
 }
 async function atualizaSilhuetas(){
   const seq = ++silhSeq;
-  const { corpos } = await corpos3d();
+  const { corpos } = await corpos3d(false, true);
   if (seq !== silhSeq) return;
   const porRef = new Map();
   for (const c of (EB.components || [])) if (c && c.ref) porRef.set(c.ref, c);
@@ -5317,7 +5585,7 @@ function pintaSilhuetas(polys, lado){
   ctx.restore();
 }
 function desenhaSilhuetas(){
-  if (!SILH.size) return;
+  if (!SILH.size || !OPC3D.corpos) return;
   const naMao = new Set();
   if (arrasto && !arrasto.ponta && (arrasto.moveu || arrasto.girou)) for (const a of arrasto.alvos) if (a.t === 'comp') naMao.add(a.m);
   model.comps.forEach((m, i) => {
@@ -5595,7 +5863,81 @@ function fichaPadDoComp(a){
     { botoes:[{ id:'selComp', rot:'Select Component' }, { id:'girar', rot:'Rotate 90°' }, { id:'virar', rot:'Flip' }] },
     { botoes:[{ id:'editarFp', rot:'Edit Footprint…' }] },
     { sec:'Pad ' + (p.name || '') },
+    /* as camadas do pad pelo footprint (pedido do dono, 2026-10-29: "pad configura camada pelo footprint,
+       só clicar nele e definir quais layers ele pega"): muda o footprint na biblioteca do hub e os
+       componentes da placa com ele se atualizam (padNoFootprint) */
+    { k:'fp.camadas', rot:'Camadas', tipo:'enum', v:camadasDoPad(p, IDX.ebComp.get(m)), opc:CAMADAS_PAD_OPC,
+      dica:'muda no footprint "' + (m.src.footprint || '') + '": vale para todos os componentes com ele' },
+    { botoes:[{ id:'fpPadsTodos', rot:'Todos os pads do footprint assim', dica:'as camadas deste pad em todos os pads do footprint' }] },
   ].concat(camposDoPadRo(p)) };
+}
+const CAMADAS_PAD_OPC = [{ v:'smd:Top', rot:'SMD — lado do componente' }, { v:'smd:Bottom', rot:'SMD — lado oposto' }, { v:'th', rot:'Passante — todas as camadas' }];
+const ROT_CAMADAS_PAD = { 'smd:Top':'SMD do lado do componente', 'smd:Bottom':'SMD do lado oposto', th:'passante' };
+/* o pad visto do footprint: passante, ou SMD do lado do componente / do lado oposto */
+function camadasDoPad(p, ec){
+  if (ehTH(p)) return 'th';
+  const lado = ec && ec.layer === 'Bottom' ? 'Bottom' : 'Top';
+  return p.layer === lado ? 'smd:Top' : 'smd:Bottom';
+}
+/* o pad no referencial do footprint (para achar qual e, entre pads de nome repetido) */
+function localDoPad(p, ec){
+  const dx = p.x - ec.x, dy = p.y - ec.y, a = -(isNum(ec.rot) ? ec.rot : 0) * Math.PI / 180;
+  let x = dx * Math.cos(a) - dy * Math.sin(a); const y = dx * Math.sin(a) + dy * Math.cos(a);
+  if (ec.layer === 'Bottom') x = -x;
+  return { x, y };
+}
+function mudaCamadasPad(q, v){
+  if (v === 'th') {
+    if (q.type === 'th') return false;
+    const menor = Math.min(q.w || 0, q.h || 0);
+    let d = isNum(q.drill) && q.drill > 0 ? q.drill : Math.round(menor * 0.5 * 1e4) / 1e4;
+    if (!(d < menor)) d = Math.round(menor * 0.6 * 1e4) / 1e4;
+    q.type = 'th'; q.layer = 'Multi'; q.drill = d; q.drillshape = q.drillshape || 'circle'; delete q.plated;
+    return true;
+  }
+  const lado = v === 'smd:Bottom' ? 'Bottom' : 'Top';
+  if (q.type === 'smd' && q.layer === lado) return false;
+  q.type = 'smd'; q.layer = lado;
+  for (const k of ['drill', 'drillshape', 'drillw', 'holerot', 'plated']) delete q[k];
+  return true;
+}
+async function padNoFootprint(a, v, todos){
+  if (!a || a.t !== 'pad' || !a.comp || !ROT_CAMADAS_PAD[v]) return;
+  if (typeof HubFpLib === 'undefined' || !HubIO.canPost) { HubDialog.toast('este hub não grava a biblioteca de footprints: use o Edit Footprint no app', 'warn', 4000); return; }
+  const m = a.comp, i = model.comps.indexOf(m), ec = i >= 0 ? EB.components[i] : null;
+  const nome = ec ? (ec.footprint || '') : '';
+  if (!nome) { HubDialog.toast('o componente não tem footprint', 'warn'); return; }
+  HUBLIB = await HubFpLib.carrega();
+  const alt = await globalDe('pcblib', 'Libs/pcblib.js');
+  let fonte = HubFpLib.acha(HUBLIB, nome) || (alt && (alt.footprints || []).find(f => f && f.name === nome)) || null;
+  if (!fonte) { try { const g = HC.footprintGeom(nome, B, {}); if (g && g.fp) fonte = g.fp; } catch (e) { /* sem geometria */ } }
+  if (!fonte) { HubDialog.toast('não achei o footprint "' + nome + '" (nem no hub, nem no Altium, nem na placa)', 'warn', 4000); return; }
+  const fp = HubFpLib.copia(fonte); fp.name = nome;
+  let alvos;
+  if (todos) alvos = (fp.pads || []).filter(Boolean);
+  else {
+    const loc = localDoPad(a.eb, ec), d = q => Math.hypot((q.x || 0) - loc.x, (q.y || 0) - loc.y);
+    const mesmos = (fp.pads || []).filter(q => q && String(q.name) === String(a.eb.name));
+    const q = mesmos.length ? mesmos.reduce((b, x) => d(x) < d(b) ? x : b) : (fp.pads || []).filter(Boolean).reduce((b, x) => !b || d(x) < d(b) ? x : b, null);
+    alvos = q ? [q] : [];
+  }
+  let n = 0; for (const q of alvos) if (mudaCamadasPad(q, v)) n++;
+  if (!n) { HubDialog.toast(todos ? 'todos os pads já são assim' : 'o pad já é assim', 'info', 1800); if (painel) painel.atualiza(); return; }
+  const usam = model.comps.filter((c, j) => EB.components[j] && EB.components[j].footprint === nome);
+  const quem = todos ? n + ' pad(s) do footprint "' + nome + '"' : 'O pad ' + (a.eb.name || '') + ' do footprint "' + nome + '"';
+  const ok = await HubDialog.confirm(quem + ' vira ' + ROT_CAMADAS_PAD[v] + '.\n\nO footprint mudado fica na biblioteca do hub (vale nas outras placas que o usam) e ' +
+    usam.length + ' componente(s) desta placa se atualizam (saem e voltam no mesmo lugar, com as mesmas nets; Ctrl+Z desfaz na placa).', { title:'Camadas do pad', ok:'Mudar' });
+  if (!ok) { if (painel) painel.atualiza(); return; }
+  if (!garanteEdicao()) return;
+  fp.hub = Object.assign({}, fp.hub || {}, { editado:new Date().toISOString(), base:(fonte.hub && fonte.hub.base) || nome });
+  HubFpLib.poe(HUBLIB, fp);
+  try { await HubFpLib.grava(HUBLIB); } catch (e) { HubDialog.toast('não gravei a biblioteca: ' + (e && e.message || e), 'err', 5000); return; }
+  registraLibHub();
+  let ops = []; for (const c of usam) ops = ops.concat(opsTrocaFp(c, nome, 'camadas do pad mudadas no hub (' + ROT_CAMADAS_PAD[v] + ')'));
+  for (const op of ops) CH.push(op);
+  if (ops.length) commit();
+  refaz3d();
+  HubDialog.toast(quem + ': ' + ROT_CAMADAS_PAD[v] + ' · ' + usam.length + ' componente(s) atualizado(s)', 'ok', 3500);
 }
 function fichaPadSolto(a){
   const m = a.m, p = m.eff, t = tipoDoPad(p), furo = t !== 'smd';
@@ -5776,7 +6118,11 @@ function fichaDe(a){
         { k:'size', rot:'Diameter', tipo:'dist', v:e.size },
         { k:'drill', rot:'Hole Size', tipo:'dist', v:e.drill },
         { k:'net', rot:'Net', tipo:'ro', v:e.net || '—', dica:'via_edit ainda não troca a net' },
-        { k:'span', rot:'From - To', tipo:'ro', v:(e.from || 'Top') + ' → ' + (e.to || 'Bottom') },
+        /* o vao da via (pedido do dono, 2026-10-29: "configurar camada da via"): de onde ate onde ela vai */
+        { sec:'Camadas (vão da via)' },
+        { k:'from', rot:'De', tipo:'camada', v:e.from || 'Top', opc:opcCobreVia() },
+        { k:'to', rot:'Até', tipo:'camada', v:e.to || 'Bottom', opc:opcCobreVia() },
+        { nota:vaoTexto(e) },
       ] };
     }
     case 'fill': {
@@ -5965,6 +6311,9 @@ function fichaFerramenta(){
     case 'via':
       F.campos.push(par('Via', { k:'tool.viaSize', rot:'Diâmetro', tipo:'dist', v:CFG.viaSize }, { k:'tool.viaDrill', rot:'Furo', tipo:'dist', v:CFG.viaDrill }),
         { k:'tool.viaNet', rot:'Net', tipo:'net', v:CFG.viaNet, opc:opcNets(CFG.viaNet), dica:'vazio: a via pega a net do pad/trilha em que cair; com uma net aqui, a via é dela — e não entra em cima de cobre de outra net' },
+        { k:'tool.viaDe', rot:'De', tipo:'camada', v:viaDe(), opc:opcCobreVia(), dica:'a camada de cobre onde a via começa' },
+        { k:'tool.viaAte', rot:'Até', tipo:'camada', v:viaAte(), opc:opcCobreVia(), dica:'a camada de cobre onde ela acaba (Top → Bottom = passante)' },
+        { nota:vaoTexto({ from:viaDe(), to:viaAte() }) },
         { nota:regrasAtuais() ? 'Padrão: a preferida da regra Routing Via Style que vence para a net; o valor digitado fica preso à faixa dela.' : (isNum(RULES.viaSize) ? 'Padrão pela regra RoutingVias do espelho.' : 'O espelho não trouxe a regra de via: 0,6/0,3 mm.') },
         { nota:CFG.conflito === 'ignorar' ? 'Conflito em ignorar (ficha da Trilha, Shift+R): a via não é conferida.'
               : 'A via não entra encostada em cobre de outra net (a folga da regra Clearance do par): o anel vermelho avisa antes do clique.' });
@@ -6027,6 +6376,12 @@ function configTool(k, v){
     case 'viaSize': if (pos(v)) { CFG.viaSize = r6(v); EDITADO.via = true; } if (CFG.viaDrill >= CFG.viaSize) HubDialog.toast('furo >= diâmetro: a via fica sem anel', 'warn'); break;
     case 'viaDrill': if (pos(v)) { CFG.viaDrill = r6(v); EDITADO.via = true; } if (CFG.viaDrill >= CFG.viaSize) HubDialog.toast('furo >= diâmetro: a via fica sem anel', 'warn'); break;
     case 'viaNet': CFG.viaNet = String(v || ''); break;
+    case 'viaDe': case 'viaAte': {
+      if (!LBYK[v] || LBYK[v].kind !== 'signal') break;
+      const de = k === 'viaDe' ? v : viaDe(), ate = k === 'viaAte' ? v : viaAte();
+      if (de === ate) { HubDialog.toast('a via liga duas camadas diferentes', 'warn'); break; }
+      CFG.viaDe = de; CFG.viaAte = ate; break;
+    }
     case 'modo':
       if (HubFio.MODOS.indexOf(v) >= 0) {
         CFG.modo = v;
@@ -6048,6 +6403,7 @@ function configTool(k, v){
 function campoNoAlvo(a, k, v){
   const pos = x => isNum(x) && x > 0;
   /* o pad de componente mostra o componente em cima ("comp.x"...): a edicao vai para ele */
+  if (a.t === 'pad' && a.comp && k === 'fp.camadas') { padNoFootprint(a, v, false); return false; }
   if (a.t === 'pad' && a.comp && String(k).indexOf('comp.') === 0) { const c = ALVO_COMP.get(a.comp); return c ? campoNoAlvo(c, String(k).slice(5), v) : false; }
   switch (a.t) {
     case 'pad': return a.m ? campoDoPad(a, k, v) : false;
@@ -6088,6 +6444,12 @@ function campoNoAlvo(a, k, v){
       return editaItem(a.m, { [k]:(k === 'rot' || k === 'sa' || k === 'ea') ? normAng(v) : r6(v) });
     }
     case 'via': {
+      if (k === 'from' || k === 'to') {
+        const e = a.m.eff, de = k === 'from' ? v : (e.from || 'Top'), ate = k === 'to' ? v : (e.to || 'Bottom');
+        if (!LBYK[v] || LBYK[v].kind !== 'signal') return false;
+        if (de === ate) { HubDialog.toast('a via liga duas camadas diferentes', 'warn'); return false; }
+        return editaItem(a.m, { from:de, to:ate });
+      }
       if (!isNum(v)) return false;
       if ((k === 'size' || k === 'drill') && !pos(v)) return false;
       const ok = editaItem(a.m, { [k]:r6(v) });
@@ -6174,6 +6536,7 @@ function acaoPainel(id){
     case 'apagar': if (soNotas(SEL) || garanteEdicao()) apagaSelecao(); return;
     case 'enquadrar': enquadraAlvos(SEL); return;
     case 'enquadrar_placa': enquadra(); return;
+    case 'fpPadsTodos': { const a = SEL[0]; if (a && a.t === 'pad' && a.comp) padNoFootprint(a, camadasDoPad(a.eb, IDX.ebComp.get(a.comp)), true); return; }
     case 'selComp': { const cs = compsDaSel(); if (cs.length) { selSo(cs.map(m => ALVO_COMP.get(m)).filter(Boolean)); aoMudarSel(); pede(); } return; }
   }
   fazAcao(id);
@@ -6249,6 +6612,7 @@ function chLabel(ch){
     case 'net_add': return 'nova net ' + ch.net;
     case 'net_del': return 'remover net ' + ch.net;
     case 'net_rename': return 'renomear net ' + ch.orig_net + ' → ' + ch.net;
+    case 'stack_set': return 'pilha de camadas: ' + ((ch.layers || []).length) + ' de cobre (' + (ch.layers || []).map(l => l && l.key).join(', ') + ')';
     default: return '?? ' + (ch && ch.op);
   }
 }
@@ -6283,6 +6647,10 @@ const V = {
   conjuntos:() => Object.keys(CONJUNTOS).map(k => ({ id:k, rot:CONJUNTOS[k].rot })),
   show:() => ({ grid:show.grid, ghost:show.ghost, unica:show.unica, flip:view.flip, cotas:show.cotas, nCotas:COTAS.length }),
   /* Real View do 3D: o icone do painel Vista liga (abrindo o 3D) e desliga */
+  /* desempenho: as opcoes do 3D e quantas linhas tem o changes.js (as marcacoes pesam com muitas) */
+  opc3d:() => Object.assign({}, OPC3D), setOpc3d, nMudancas:() => CH.length,
+  /* a pilha de camadas (painel » Camadas) */
+  pilha:PILHA,
   realView:() => !!(typeof HubPcb3dVista !== 'undefined' && (V3 ? V3.realView() : HubPcb3dVista.preferido())),
   setRealView(on){
     if (typeof HubPcb3dVista === 'undefined') return;
@@ -6789,11 +7157,13 @@ function liga(){
 function inicia(){
   registraLibHub();
   recalcula();
+  if (VIS_SALVA && VIS_SALVA.unica && !LEAN) show.unica = true;
   mede();
   liga();
   if (!LEAN) {
     montaBarra();
     montaFiltroMenu();
+    montaCamadasMenu();
     pintaAbas();
     montaDivisoria();
     if (typeof HubPcbAltium !== 'undefined') {
@@ -6821,7 +7191,7 @@ function inicia(){
   pintaStatus();
   if (painel) painel.atualiza();
   draw();
-  if (!LEAN) { agendaSilhuetas(); agendaPrepara3d(); }
+  if (!LEAN) { if (OPC3D.corpos) agendaSilhuetas(); if (OPC3D.antes) agendaPrepara3d(); }
   /* a aba Gerber so gera depois da biblioteca: antes, o projeto aberto direto no Gerber saia sem os
      componentes do comp_add (os SMD da biblioteca) e com o plano por cima deles (2026-10-28) */
   const lib = carregaLibSePreciso();

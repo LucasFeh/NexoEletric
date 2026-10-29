@@ -2096,6 +2096,7 @@ procedure DoViaEdit(Line: String);
 var
   Via: IPCB_Via;
   What: String;
+  LFrom, LTo: TLayer;
 begin
   What := 'via_edit ' + JGet(Line, 'id');
   Via := RequireViaOrig(Line, What);
@@ -2111,6 +2112,24 @@ begin
     Via.Size := MMsToCoord(JNum(Line, 'size'));
   if JHas(Line, 'drill') then
     Via.HoleSize := MMsToCoord(JNum(Line, 'drill'));
+  // o vao da via (hub, 2026-10-29): from/to = as camadas de cobre onde ela comeca e acaba,
+  // os mesmos nomes e propriedades do DoViaAdd
+  if JHas(Line, 'from') or JHas(Line, 'to') then
+  begin
+    LFrom := Via.LowLayer;
+    LTo := Via.HighLayer;
+    if JHas(Line, 'from') then
+      LFrom := LayerFromName(JGet(Line, 'from'));
+    if JHas(Line, 'to') then
+      LTo := LayerFromName(JGet(Line, 'to'));
+    if (LFrom = 0) or (LTo = 0) then
+      LogAviso(What + ': camada de from/to desconhecida - o vao da via ficou como estava')
+    else
+    begin
+      Via.LowLayer := LFrom;
+      Via.HighLayer := LTo;
+    end;
+  end;
   PCBServer.SendMessageToRobots(Via.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
   Via.GraphicallyInvalidate;
   LogOk(What);
@@ -4767,6 +4786,11 @@ begin
         DoPolyDel(Line)
       else if Op = 'comp_attr' then
         AttrLines.Add(Line)   // renames por ultimo: FindComponent casa por Name.Text
+      else if Op = 'stack_set' then
+        // a pilha de camadas do hub (2026-10-29): o Layer Stack Manager nao se escreve por script
+        // daqui -- avisa, e o resto do arquivo segue
+        LogAviso('stack_set: a pilha de camadas (camadas de cobre e espessuras) foi definida no hub - ' +
+          'ajuste no Layer Stack Manager do Altium (Design > Layer Stack Manager) antes das trilhas nas camadas novas')
       else
         LogFail('operacao desconhecida: "' + Op + '"');
     except
