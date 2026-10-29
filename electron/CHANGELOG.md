@@ -4,6 +4,19 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.39.0 — 2026-10-29
+
+- **Arrastar a trilha sem quebrar** (o Drag do Altium), na vista PCB:
+  - uma trilha sozinha anda paralela a si mesma e as vizinhas deslizam pela direção delas: os cantos de 45°/90° ficam;
+  - ponta presa em pad ou via que não anda ganha uma trilha nova, na mesma camada, largura e net, do lugar antigo ao
+    novo: a ligação não se perde;
+  - um grupo (o Tab, a janela) anda inteiro e as trilhas de fora que encostavam nele esticam; arrastar a via estica as
+    trilhas das duas camadas; arrastar a ponta leva o vértice inteiro;
+  - a regra de folga continua: cobre de outra net no caminho, tudo volta para o lugar.
+- **Tab do Altium** com a trilha selecionada (ou sob o cursor): **Tab** pega a trilha inteira até a via ou o pad;
+  **Tab de novo** pega tudo o que se liga, atravessando as vias para as outras camadas (para no pad).
+- `hub-pcbtopologia.js` (lógica pura) e `tests/test-pcbtopologia.js`.
+
 ## 1.38.0 — 2026-10-29
 
 - **Auto-rotear na vista PCB** (o Auto Route do Altium, com o auto-roteador da 1.34.0):
