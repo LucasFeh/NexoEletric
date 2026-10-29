@@ -78,7 +78,7 @@ claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 | simbolo | `sym_ler` (o desenho inteiro, de qualquer acervo), `sym_gerar` (CI/conector a partir da lista de pinos), `sym_salvar` (destino `projeto` = no `symbols` do schematic.js, vale na hora e para as nets; `biblioteca` = Biblioteca de símbolos do hub, `/api/symbols/lib`; `altium` = redesenha um símbolo da SchLib da casa, `/api/symbols/save`), `sym_renomear`, `sym_apagar` |
 | biblioteca | `almox_buscar` (estoque, local, Odoo; devolve o `comp` pronto para `sch_adicionar`) |
 | footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_3d_importar` (STEP do disco → `Libs/3d-hub`), `fp_3d_nexo` (o STEP de um item da biblioteca da rede Nexo), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |
-| pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref; `campos` e `arquivo:true` para placa grande), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_aplicar` (qualquer op, orig_* automáticos; `designator_move` no lugar final, com a posição efetiva na resposta), `pcb_colocar` (footprint como componente novo, com as nets dos pads), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_autorotear` (o ratsnest inteiro em várias camadas com vias, ordem e arranca-e-refaz, `hub-autoroteador.js`), `pcb_fanout` (trilha curta + via ao plano em cada pad SMD da net), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
+| pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref; `campos` e `arquivo:true` para placa grande), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_mover_lote` (muitos comp_move numa gravação, com checagem de sobreposição e fora da placa), `pcb_posicao_conferir`, `pcb_aplicar` (qualquer op, orig_* automáticos; `designator_move` no lugar final, com a posição efetiva na resposta), `pcb_colocar` (footprint como componente novo, com as nets dos pads), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_autorotear` (o ratsnest inteiro em várias camadas com vias, ordem e arranca-e-refaz, `hub-autoroteador.js`), `pcb_fanout` (trilha curta + via ao plano em cada pad SMD da net), `pcb_suavizar` (45° sem soltar ramo), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
 | serigrafia | `serigrafia_checar` (um lugar candidato contra as regras da casa, sem DRC), `serigrafia_posicionar` (acha lugar para os designadores; simula por padrão) |
 | pcbmod | `regras_ler`, `regras_definir` (`hub-pcbregras.js`), `drc_rodar` (`hub-pcbdrc.js`), `nets_ratsnest` (`hub-pcbnets.js`, com reserva própria), `pour_definir`, `pour_despejar` (`hub-pcbpour.js`), `teardrop_aplicar` (`hub-pcbteardrop.js`), `eco_comparar`, `eco_aplicar` (`hub-pcbeco.js`) |
 | nexo | `nexo_estado` (o Nexo Hub e o NexoCAD), `nexo_biblioteca` (lista/busca os itens do Nexo Hub no formato do hub; `id` traz revisões e vínculos), `nexo_sincronizar` (publica a biblioteca 3D e as placas no Nexo Hub: o mesmo `lib/nexohub-sync.js` do app), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou de um item, aberto no NexoCAD sempre por um item do Nexo Hub; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (publica o item placa e pede `pcb_importar {item}`; `so_publicar`, `so_pacote`), `nexo_vincular_footprint` (direto no Nexo Hub: `atributos.footprints` + vínculo; num componente já põe o 3D no footprint), `nexo_componentes` (uma biblioteca só: os componentes do NexoCAD com footprint entram na biblioteca de footprints como o 3D deles; o app faz sozinho a cada minuto). Conexão: `NEXOHUB_URL` > `C:\Users\Public\NexoHub\conexao.json` > `127.0.0.1:47800`. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
@@ -164,6 +164,33 @@ A resposta traz:
 - o `drc` com as violações novas.
 
 Teste: `node tests/test-autoroteador-planos.js`.
+
+## Suavizar a 45° (`pcb_suavizar`) e posicionar em lote (`pcb_mover_lote`)
+
+`pcb_suavizar` suaviza a 45° trilhas que já estão na placa (a escada de um roteador de grade, os cantos de 90°)
+sem soltar ramo (`hub-suaviza45.js`):
+- toda ponta de trilha/arco, via, pad ou cruzamento da mesma net que encosta no **meio** de uma trilha vira ponto
+  fixo, e só o trecho entre dois pontos fixos se suaviza, com as pontas paradas;
+- a suavização é a do roteador (`HubRoteador.motor`), com as regras do projeto; a trilha nova não passa por cima de
+  pad da mesma net que não tocava, e trecho que já violava folga fica como está;
+- no fim confere por net o ratsnest e as pontas soltas (NetAntennae): net que piorou volta inteira (`revertidas`);
+- `modo: 'chanfro'` só chanfra os cantos de 90° (pernas de até `chanfro` mm);
+- `gravar:true` troca as trilhas: `track_del` com os orig_*, ou tira a linha `track_add` de quem nasceu no
+  changes.js. Com violação nova de DRC nada é gravado.
+
+`pcb_mover_lote {movimentos:[{ref, x/y ou dx/dy, rot ou drot, layer}]}` move centenas de componentes numa gravação
+só, com a mesma conta do `pcb_mover` (orig_* sozinhos, linha que já existe editada, `comp_add` editado):
+- antes de gravar confere o posicionamento dos que andaram (`hub-posiciona.js`): **colisão** = dois componentes do
+  mesmo lado mais perto que a folga (a ComponentClearance das regras do projeto, ou `folga`), pela caixa do
+  componente; **fora** = saiu do contorno da placa ou caiu sobre um recorte;
+- só conta o que o lote **criou**: com colisão nova ou componente novo fora da placa nada é gravado (`forcar:true`
+  grava);
+- a resposta é curta (totais, as colisões e os "fora" novos, quantas trilhas chegavam nos pads); `detalhes:true`
+  lista por componente.
+
+`pcb_posicao_conferir {refs?, folga?}` faz a mesma conferência na placa como está.
+
+Testes: `node tests/test-suaviza45.js` e `node tests/test-mcp-p3.js`.
 
 Módulo do hub que faltar não derruba nada: a ferramenta responde "módulo ausente" e volta a
 funcionar sozinha quando o arquivo chega (o carregamento confere o mtime a cada chamada).
@@ -271,6 +298,7 @@ do hub redespejados); `despejar:false` volta ao jeito antigo (sem o cobre dos pl
 ```
 node tests/test-mcp.js          # stdio com processo filho, HTTP, e as ferramentas numa CÓPIA de "LM555 astável"
 node tests/test-mcp-autorotear.js # o pcb_autorotear e o pcb_fanout (simular e gravar) numa CÓPIA de uma placa do acervo
+node tests/test-mcp-p3.js       # pcb_mover_lote, pcb_posicao_conferir e pcb_suavizar numa CÓPIA de uma placa do acervo
 node tests/test-mcp-completo.js # raiz automática, símbolos, 3D do disco, pcb_colocar, lote e o relato ao hub
 python tests/test_mcp_rotas.py  # as rotas da vista ao vivo
 node tests/test-jlc.js          # o envio à JLC (lib/jlc.js) contra um IntegrateBrowser de mentira; a senha não vaza
