@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.42.0 — 2026-10-29
+
+- **Régua (Ctrl+M) como a do NexoCAD**, na vista PCB:
+  - marca dois pontos (dois cliques, ou aperta num, arrasta e solta no outro) e agarra em centro de pad, via, furo e
+    círculo, ponta, meio, quadrante (a borda do círculo), vértice, canto, borda do cobre e na **tangente** de círculo ou
+    arco (encosta do lado da outra ponta: perto, longe ou centro, trocável no painel);
+  - depois do 2º ponto, a linha da cota vai com o mouse: acima/abaixo dos pontos dá a **horizontal**, ao lado a
+    **vertical**, no meio a **alinhada** (Espaço troca); o clique deixa a cota na placa; Backspace volta um ponto, Esc
+    larga;
+  - as cotas ficam na placa (nesta máquina, por projeto; não vão para o Altium): clicar seleciona, arrastar muda por
+    onde passa a linha, Delete apaga; o botão da **régua com olho**, na barra (e no painel Vista), esconde e mostra.
+- **Polygon Pour numa gaveta**: retângulo e polígono livre juntos, com a setinha, como as formas de desenho.
+- **O cadeado saiu da barra**: a trava da edição mora nas Propriedades da placa (com nada selecionado); a tecla E e o
+  botão direito continuam.
+- **Sinalizador: pôr e tirar** — a bandeira inteira responde ao clique (antes só a base), Delete apaga sem destravar a
+  edição, e há "Apagar sinalizador" no painel e no botão direito; com a ferramenta Sinalizar, clicar numa bandeira que
+  já existe a seleciona em vez de pôr outra.
+- `hub-pcbcotas.js` (lógica pura), `tests/test-pcbcotas.js` e `tests/smoke-regua-pcb.js`.
+
 ## 1.41.0 — 2026-10-29
 
 Roteamento e posicionamento, o P3 da lista de melhorias (itens 21 e 22).
