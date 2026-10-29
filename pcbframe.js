@@ -1254,8 +1254,31 @@ function draw(){
 }
 /* Preferences » General » Cursor Type: Small 90 e a cruz do sistema; Large 90 cruza a tela
    inteira; Small 45 e Tiny 45 sao o X do Altium */
-function cursorFerramenta(){ return PREFS.cursor === 'small45' || PREFS.cursor === 'tiny45' ? 'none' : 'crosshair'; }
+function cursorFerramenta(){ return tool === 'medir' || PREFS.cursor === 'small45' || PREFS.cursor === 'tiny45' ? 'none' : 'crosshair'; }
+/* A RETICULA DA REGUA (pedido do dono, 2026-10-29: "no Ctrl+M, quando não tem medida, a retícula
+   some"). A cruz do sistema (Small 90) e preta no Windows e some no fundo preto da placa; longe de
+   um agarre a regua nao desenhava nada. Com a regua na mao, a vista desenha a propria cruz no cursor,
+   branca com contorno escuro (visivel na placa e na area cinza), sempre -- o marcador do agarre vem
+   por cima, no ponto agarrado. */
+function desenhaReticulaRegua(){
+  /* na tela, alinhada ao pixel: linha de 1 px branca nitida sobre 3 px escuros */
+  const s = mundoParaTela(cursorW.x, cursorW.y);
+  const x = Math.round(s.x * DPR) + 0.5, y = Math.round(s.y * DPR) + 0.5;
+  const r = Math.round(11 * DPR), g = Math.round(3 * DPR), lw = Math.max(1, Math.round(DPR));
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.setLineDash([]); ctx.lineCap = 'butt'; ctx.globalAlpha = 1;
+  const cruz = () => {
+    ctx.beginPath();
+    ctx.moveTo(x - r, y); ctx.lineTo(x - g, y); ctx.moveTo(x + g, y); ctx.lineTo(x + r, y);
+    ctx.moveTo(x, y - r); ctx.lineTo(x, y - g); ctx.moveTo(x, y + g); ctx.lineTo(x, y + r);
+    ctx.stroke();
+  };
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineWidth = lw * 3; cruz();
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = lw; cruz();
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(x - 0.5, y - 0.5, lw, lw);
+  ctx.restore();
+}
 function desenhaCursorAltium(){
+  if (tool === 'medir' && cursorW && !pan && (PREFS.cursor === 'small90' || !PREFS.cursor)) { desenhaReticulaRegua(); return; }
   if (tool === 'select' || !cursorW || PREFS.cursor === 'small90' || pan) return;
   const c = SNAP || cursorW;
   ctx.save(); ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 0.9; ctx.lineWidth = px(1); ctx.setLineDash([]);
@@ -4407,7 +4430,11 @@ window.addEventListener('mousemove', e => {
     pede();
   }
 });
-cv.addEventListener('mouseleave', () => { if (!gesto && HOVER) { HOVER = null; $('shover').textContent = ''; pede(); } });
+cv.addEventListener('mouseleave', () => {
+  if (!gesto && HOVER) { HOVER = null; $('shover').textContent = ''; pede(); }
+  /* a reticula da regua e desenhada na tela: o mouse fora do canvas a leva junto */
+  if (tool === 'medir' && !gesto) { cursorW = null; SNAP = null; pede(); }
+});
 function pintaMedidaAoVivo(){
   const r = $('srota'); if (!r) return;
   r.textContent = draft && draft.tipo === 'medida' && draft.a ? medidaAoVivo() : 'régua: clique no 1º ponto (centro, ponta, meio, quadrante, vértice, canto, borda, tangente)';

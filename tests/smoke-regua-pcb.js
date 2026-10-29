@@ -138,6 +138,23 @@ const fim = (codigo) => { for (const p of filhos) try { p.kill(); } catch (e) {}
   await espera(200);
   assert.strictEqual((await est()).tool, 'medir', 'Ctrl+M pega a régua');
   assert.strictEqual((await est()).editOn, false, 'a régua não destrava a edição');
+  /* a retícula longe de tudo (pedido do dono: "no Ctrl+M, quando não tem medida, a retícula some"): a
+     cruz do sistema some no preto, então a régua desenha a dela -- o braço da direita é branco */
+  {
+    const longe = await js(`(() => { for (let i = 0; i < 400; i++) { const x = ${cx} + (i % 20 - 10) * 0.9, y = ${cy} + (Math.floor(i / 20) - 10) * 0.9; if (${V}.agarreMedida(x, y).tipo === 'grade') return { x, y }; } return null; })()`);
+    assert.ok(longe, 'um ponto sem agarre perto');
+    const [sx, sy] = await tela(longe.x, longe.y);
+    await mouse('mouseMoved', sx, sy); await espera(150);
+    assert.strictEqual(await js(`document.getElementById('cv').style.cursor`), 'none', 'a régua esconde a cruz do sistema (desenha a dela)');
+    const px = await js(`(() => { const c = document.getElementById('cv'), d = window.devicePixelRatio || 1, r = c.getBoundingClientRect();
+      const p = c.getContext('2d').getImageData(Math.round((${sx} - r.left + 7) * d), Math.round((${sy} - r.top - 2) * d), 1, Math.round(5 * d)).data; let m = [0, 0, 0]; for (let i = 0; i < p.length; i += 4) if (p[i] + p[i + 1] + p[i + 2] > m[0] + m[1] + m[2]) m = [p[i], p[i + 1], p[i + 2]]; return m; })()`);
+    assert.ok(px.every(v => v > 200), 'a retícula da régua aparece longe de qualquer agarre: pixel ' + px);
+    await print('3a-reticula-longe');
+    await mouse('mouseMoved', rect.left - 5, rect.top + 300); await espera(150);
+    const px2 = await js(`(() => { const c = document.getElementById('cv'), d = window.devicePixelRatio || 1, r = c.getBoundingClientRect();
+      const p = c.getContext('2d').getImageData(Math.round((${sx} - r.left + 7) * d), Math.round((${sy} - r.top - 2) * d), 1, Math.round(5 * d)).data; let m = [0, 0, 0]; for (let i = 0; i < p.length; i += 4) if (p[i] + p[i + 1] + p[i + 2] > m[0] + m[1] + m[2]) m = [p[i], p[i + 1], p[i + 2]]; return m; })()`);
+    assert.ok(!px2.every(v => v > 200), 'o mouse fora da placa leva a retícula junto');
+  }
   /* 3a. dois cliques nos centros, a linha um pouco ao lado (no meio = alinhada), clique fixa */
   await clica(p1.x + 0.02, p1.y + 0.02);
   await clica(p2.x - 0.02, p2.y + 0.02);
