@@ -26,11 +26,6 @@
         "remoto": "origin",
         "ref": "main",
         "url": "https://github.com/LucasFeh/NexoEletric"
-      },
-      {
-        "remoto": "altium",
-        "ref": "nexocad-integracao",
-        "url": "https://github.com/LucasFeh/AltiumPCBMirror"
       }
     ],
     "versao": "electron/package.json",
@@ -51,7 +46,8 @@
       "electron/test/",
       "README.md",
       "build.log",
-      "electron/scripts/publicar-nexohub.mjs"
+      "electron/scripts/publicar-nexohub.mjs",
+      "nexo-programa.json"
     ],
     "git": "git -c safe.directory=*; autor Lucas Ferreira <70298160+LucasFeh@users.noreply.github.com> por GIT_AUTHOR_*/GIT_COMMITTER_* (sem mexer no config global). Mudanças só como acréscimo; não mexer no tema. Projetos, Libs/símbolos (Odoo) e scripts do Altium moram no NexoBD (electron/lib/armazem.js)."
   }
