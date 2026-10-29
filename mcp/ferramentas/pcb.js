@@ -85,6 +85,27 @@ function dentroDaPlaca(ctx, eb) {
   };
 }
 
+/* ---------- o DRC antes x depois de um conjunto de ops (pcb_aplicar drc:true) ----------
+   A mesma conta do drc_rodar (planos redespejados, regras do projeto); a violacao e a mesma quando
+   o tipo e os objetos batem (a mensagem muda com a distancia). */
+function drcDiferenca(ctx, p, antes, depois, tipos) {
+  const D = ctx.modulo('hub-pcbdrc.js');
+  if (!D) return { erro: 'hub-pcbdrc.js ausente nesta instalação' };
+  const R = ops.regrasDoProjeto(ctx, p);
+  const G = ctx.modulo('hub-gerber.js');
+  const o = { textoGeo: G && G.geometriaTexto ? (t => { try { return G.geometriaTexto(t); } catch (_) { return null; } }) : undefined };
+  if (tipos) o.tipos = tipos;
+  const t0 = Date.now();
+  const roda = itens => D.rodar(ctx.placaDespejada(p, itens).eb, R ? R.conjunto : undefined, o).violacoes || [];
+  const va = roda(antes), vd = roda(depois);
+  const chave = v => v.tipo + '|' + (v.ids || []).map(String).sort().join('|');
+  const ka = new Set(va.map(chave)), kd = new Set(vd.map(chave));
+  const curta = v => ({ tipo: v.tipo, msg: v.msg, x: v.x, y: v.y, layer: v.layer, ids: v.ids });
+  const novas = vd.filter(v => !ka.has(chave(v))), sairam = va.filter(v => !kd.has(chave(v)));
+  return { antes: va.length, depois: vd.length, novas: novas.length, sairam: sairam.length, ms: Date.now() - t0,
+           lista_novas: novas.slice(0, 50).map(curta), lista_sairam: sairam.slice(0, 20).map(curta) };
+}
+
 /* ---------- a placa: pontos do contorno para o roteador ---------- */
 function lacosDe(ctx, eb) {
   const L = ctx.modulo('hub-laser.js');
@@ -338,22 +359,29 @@ module.exports = {
         projeto: PROJETO,
         ops: { type: 'array', minItems: 1, items: { type: 'object', properties: { op: { type: 'string' } }, required: ['op'], additionalProperties: true },
                description: 'ex.: [{"op":"track_add","layer":"Top","x1":10,"y1":5,"x2":20,"y2":5,"w":0.3,"net":"GND"}, {"op":"track_del","id":"t7"}]' },
+        drc: { description: 'true (ou a lista de tipos do DRC) = roda o DRC antes e depois destas ops e devolve as violações NOVAS e as que SAÍRAM (vale com simular:true)' },
       }, COMUNS), required: ['projeto', 'ops'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const hc = ctx.pcbPronto();
         const ehTexto = o => o && (o.op === 'designator_move' || o.op === 'comment_move');
         const pedidos = a.ops.filter(ehTexto).map(o => ({ ref: o.ref, op: o.op, x: o.x, y: o.y }));
+        const querDrc = a.drc === true || Array.isArray(a.drc);
         const est = ops.transacao(ctx, p, (arq, board) => a.ops.map(o0 => {
           const o = Object.assign({}, o0);
           if (a.note && !o.note) comNote(o, a);
           if (ehTexto(o)) return ops.aplicaTexto(arq, board, hc, o);
           return ops.mescla(arq, ops.origDe(o, board)).obj;
         }), { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_aplicar',
-              relata: pedidos.length ? (model, board) => {
-                const textos = ops.posicoesEfetivas(hc, board, model, pedidos, dentroDaPlaca(ctx, hc.effectiveBoard(board, model)));
-                const fora = textos.filter(t => t.fora_da_placa).map(t => t.ref);
-                return { textos, avisos_textos: fora.length ? `${fora.length} texto(s) FORA do contorno da placa: ${fora.slice(0, 20).join(', ')}${fora.length > 20 ? '…' : ''}` : undefined };
+              relata: pedidos.length || querDrc ? (model, board, _hc, itens) => {
+                const out = {};
+                if (pedidos.length) {
+                  const textos = ops.posicoesEfetivas(hc, board, model, pedidos, dentroDaPlaca(ctx, hc.effectiveBoard(board, model)));
+                  const fora = textos.filter(t => t.fora_da_placa).map(t => t.ref);
+                  Object.assign(out, { textos, avisos_textos: fora.length ? `${fora.length} texto(s) FORA do contorno da placa: ${fora.slice(0, 20).join(', ')}${fora.length > 20 ? '…' : ''}` : undefined });
+                }
+                if (querDrc) out.drc = drcDiferenca(ctx, p, itens.antes, itens.depois, Array.isArray(a.drc) ? a.drc : null);
+                return out;
               } : null });
         return est;
       },

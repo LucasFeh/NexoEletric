@@ -4,6 +4,31 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.37.0 — 2026-10-29
+
+Serigrafia pela IA, segunda parte: posicionar, conferir rápido e regras da casa por projeto.
+
+- **`serigrafia_posicionar`** (MCP): acha lugar para os designadores que violam as regras da casa (ou os `refs`
+  dados, ou `todos:true`) e grava como `designator_move` no lugar final. Procura em volta da caixa do componente, do
+  mais perto ao mais longe, da maior altura à menor (`altura_min`/`altura_max`), paralelo ao lado comprido. Recusa
+  lugar em cima de pad, via, furo, trilha (`ignorar_trilha` libera), outra serigrafia, borda e corpo de componente
+  (`sobre_corpo` libera), e lugar ambíguo (o rótulo mais perto de outro componente que do dono). `modo:"fileira"`
+  alinha o rótulo ao próprio componente numa fileira de iguais. Simula por padrão; `gravar:true` grava. Os que não
+  acham lugar voltam em `falhas`, com o que bloqueou.
+- **`serigrafia_checar`**: diz em milissegundos se um lugar candidato (do designator de um ref, de um texto pelo id
+  ou de um texto novo) viola alguma regra da casa, sem gravar e sem rodar o DRC — a mesma conta do
+  `regras_casa_verificar`.
+- **`pcb_aplicar` com `drc:true`**: roda o DRC antes e depois das ops (também com `simular:true`) e devolve as
+  violações novas e as que saíram.
+- **Regras da casa por projeto e por área** (`Projects/<p>/regras-casa.json`, ferramentas `regras_casa_ler` e
+  `regras_casa_definir`): os números (folgas, `texto_h_min`, `texto_w_min`...), regras desligadas inteiras ou só uma
+  parte da serigrafia (`serigrafia_trilha`, `serigrafia_pad`, `texto_tamanho`...) e áreas da placa com regras
+  próprias. O verificador, o `serigrafia_checar` e o `serigrafia_posicionar` seguem o arquivo.
+- **Altura e traço mínimos do texto** (1,0 e 0,15 mm, a skill `pcb-serigrafia-livre`) agora são conferidos pelo
+  `regras_casa_verificar` (`texto_tamanho`), e o projeto pode mudar.
+- **Correção da 1.36.0:** a checagem de borda do `regras_casa_verificar` somava os traços sobrepostos da fonte e
+  acusava quase todo texto como "a menos de 0,3 mm da borda". Agora mede a área da união.
+
 ## 1.36.0 — 2026-10-29
 
 Serigrafia e despejo pela IA. Nasceu de uma rodada em que 80 designadores foram parar fora da placa com `status: ok`,

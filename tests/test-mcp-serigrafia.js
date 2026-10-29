@@ -157,6 +157,66 @@ function testaPourRegras() {
   assert.strictEqual(JSON.parse(fs.readFileSync(j.arquivo, 'utf8')).itens.length, j.total);
   fs.rmSync(j.arquivo, { force: true });
 
+  /* ===== etapa 2 (1.37.0) ===== */
+  /* 7. regras da casa do projeto: sem arquivo vale o padrão; definir grava e o verificador segue */
+  ({ j } = await chama('regras_casa_ler', { projeto: PROJ }));
+  assert.ok(j.existe === false && j.valendo.texto_h_min === 1 && j.subregras.includes('serigrafia_trilha'), 'regras_casa_ler sem arquivo: ' + JSON.stringify(j).slice(0, 300));
+  ({ j, erro } = await chama('regras_casa_definir', { projeto: PROJ, parametros: { banana: 1 } }));
+  assert.ok(erro && /banana/.test(JSON.stringify(j)), 'parâmetro desconhecido é recusado');
+  /* o R4 de 0,7 mm (item 1) viola a altura mínima da casa... */
+  ({ j } = await chama('regras_casa_verificar', { projeto: PROJ, regras: ['serigrafia'] }));
+  assert.ok(j.violacoes.some(v => v.sub === 'texto_tamanho' && /"R4"/.test(v.msg)), 'altura mínima acusada: ' + JSON.stringify(j.violacoes.map(v => v.msg)).slice(0, 500));
+  /* ...até o projeto liberar */
+  ({ j, erro } = await chama('regras_casa_definir', { projeto: PROJ, parametros: { texto_h_min: 0.6, texto_w_min: 0.1 }, note: 'teste' }));
+  assert.ok(!erro && j.gravado && fs.existsSync(path.join(PROJETOS, PROJ, 'regras-casa.json')), 'regras_casa_definir grava');
+  ({ j } = await chama('regras_casa_verificar', { projeto: PROJ, regras: ['serigrafia'] }));
+  assert.ok(!j.violacoes.some(v => v.sub === 'texto_tamanho' && /"R4"/.test(v.msg)) && j.regras_do_projeto, 'liberado no projeto');
+  /* a borda só acusa o que está perto da borda (1.36.0 somava os traços sobrepostos da fonte e
+     acusava quase todo texto): o designator do CI1, no meio da placa, não */
+  assert.ok(!j.violacoes.some(v => v.sub === 'serigrafia_borda' && /"CI1"/.test(v.msg)), 'borda falsa: ' + JSON.stringify(j.violacoes.filter(v => v.sub === 'serigrafia_borda').map(v => v.msg)));
+
+  /* 6. serigrafia_checar: um lugar em cima de um pad do CI1 viola; a área que desliga libera */
+  const CI1 = (await chama('pcb_componente', { projeto: PROJ, ref: 'CI1' })).j;
+  const pad = CI1.pads[0];
+  ({ j } = await chama('serigrafia_checar', { projeto: PROJ, textos: [{ ref: 'T1', x: pad.x, y: pad.y }] }));
+  assert.ok(!j.ok && j.textos[0].violacoes.some(v => v.regra === 'serigrafia_pad'), 'em cima do pad: ' + JSON.stringify(j).slice(0, 400));
+  assert.ok(j.ms < 5000, 'checagem rápida: ' + j.ms + ' ms');
+  ({ j, erro } = await chama('regras_casa_definir', { projeto: PROJ, areas: [{ nome: 'teste', caixa: { x1: pad.x - 3, y1: pad.y - 3, x2: pad.x + 3, y2: pad.y + 3 }, desligar: ['serigrafia_pad', 'serigrafia_silk', 'serigrafia_trilha'] }] }));
+  assert.ok(!erro, 'área: ' + JSON.stringify(j).slice(0, 300));
+  ({ j } = await chama('serigrafia_checar', { projeto: PROJ, textos: [{ ref: 'T1', x: pad.x, y: pad.y }] }));
+  assert.ok(!j.textos[0].violacoes.some(v => v.regra === 'serigrafia_pad'), 'a área libera pad: ' + JSON.stringify(j.textos[0]));
+  ({ j } = await chama('regras_casa_definir', { projeto: PROJ, areas: [] }));
+
+  /* 5. serigrafia_posicionar: o R3 (fora da placa, item 3) ganha um lugar livre; simula por padrão */
+  const antesCh = fs.readFileSync(path.join(PROJETOS, PROJ, 'changes.js'), 'utf8');
+  ({ j, erro } = await chama('serigrafia_posicionar', { projeto: PROJ, refs: ['R3'], todos: true, altura_min: 0.8, altura_max: 1 }));
+  assert.ok(!erro && j.movidos === 1 && j.gravado === false, 'posicionar simula: ' + JSON.stringify(j).slice(0, 700));
+  assert.strictEqual(fs.readFileSync(path.join(PROJETOS, PROJ, 'changes.js'), 'utf8'), antesCh, 'simular não grava');
+  const novo = j.posicoes[0].para;
+  assert.ok(novo.h >= 0.8 - 1e-9 && novo.h <= 1 + 1e-9, 'altura dentro da faixa');
+  /* o lugar escolhido passa no serigrafia_checar (mesma conta), com corpo e ambiguidade */
+  ({ j } = await chama('serigrafia_checar', { projeto: PROJ, textos: [{ ref: 'R3', x: novo.x, y: novo.y, h: novo.h, w: novo.w, rot: novo.rot }], corpo: 'todos', ambiguidade: true }));
+  assert.ok(j.ok, 'o lugar do posicionador é limpo: ' + JSON.stringify(j.textos[0]));
+  ({ j, erro } = await chama('serigrafia_posicionar', { projeto: PROJ, refs: ['R3'], todos: true, altura_min: 0.8, altura_max: 1, gravar: true }));
+  assert.ok(!erro && j.gravado, 'posicionar grava: ' + JSON.stringify(j).slice(0, 500));
+  ({ j } = await chama('regras_casa_verificar', { projeto: PROJ, regras: ['serigrafia'] }));
+  assert.ok(!j.violacoes.some(v => v.objeto && v.objeto.owner === 'R3' && v.objeto.tipo === 'texto'), 'R3 limpo no verificador: ' + JSON.stringify(j.violacoes.filter(v => v.objeto && v.objeto.owner === 'R3')));
+  ({ j } = await chama('pcb_componente', { projeto: PROJ, ref: 'R3' }));
+  const desR3 = j.textos.find(t => t.designator);
+  assert.ok(perto(desR3.x, novo.x) && perto(desR3.y, novo.y), 'R3 no lugar escolhido: ' + JSON.stringify(desR3));
+  /* modo fileira roda (R1/R2 são do mesmo footprint) */
+  ({ j, erro } = await chama('serigrafia_posicionar', { projeto: PROJ, refs: ['R1', 'R2'], todos: true, modo: 'fileira' }));
+  assert.ok(!erro && j.modo === 'fileira' && j.analisados === 2, 'fileira: ' + JSON.stringify(j).slice(0, 400));
+  /* refs que não existem voltam em nao_achados */
+  ({ j } = await chama('serigrafia_posicionar', { projeto: PROJ, refs: ['ZZ9'] }));
+  assert.deepStrictEqual(j.nao_achados, ['ZZ9']);
+
+  /* 6b. pcb_aplicar drc:true: a trilha nova por cima de um pad de outra net aparece em "novas" */
+  const outro = CI1.pads.find(q => q.net && q.net !== pad.net) || CI1.pads[1];
+  ({ j, erro } = await chama('pcb_aplicar', { projeto: PROJ, simular: true, drc: true,
+    ops: [{ op: 'track_add', layer: 'Top', x1: outro.x - 2, y1: outro.y, x2: outro.x + 2, y2: outro.y, w: 0.3, net: 'NETX_TESTE' }] }));
+  assert.ok(!erro && j.drc && j.drc.novas >= 1 && j.drc.depois > j.drc.antes - j.drc.sairam - 1, 'drc antes/depois: ' + JSON.stringify(j.drc || j).slice(0, 500));
+
   c.fim();
   assert.strictEqual(fs.readFileSync(path.join(RAIZ, 'Projects', PROJ, 'board.js'), 'utf8'), realAntes, 'o Projects real foi tocado');
   fs.rmSync(TMP, { recursive: true, force: true });

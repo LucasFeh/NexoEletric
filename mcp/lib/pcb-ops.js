@@ -282,7 +282,8 @@ function transacao(ctx, p, fn, opts) {
   const hc = ctx.pcbPronto();
   const board = ctx.board(p);
   const arq = ArquivoLinhas.abrir('changes', p.arq('changes.js'));
-  const antes = hc.applyPcbChanges(board, arq.itens.slice());
+  const itensAntes = arq.itens.slice();
+  const antes = hc.applyPcbChanges(board, itensAntes);
   const statusAntes = new Map(antes.changeItems.map(it => [it.ch, it.status]));
   const tocados = fn(arq, board) || [];
   const model = hc.applyPcbChanges(board, arq.itens);
@@ -312,7 +313,7 @@ function transacao(ctx, p, fn, opts) {
     validacao: resumoValidacao(model),
   };
   if (typeof o.relata === 'function') {
-    try { Object.assign(estado, o.relata(model, board, hc) || {}); }
+    try { Object.assign(estado, o.relata(model, board, hc, { antes: itensAntes, depois: arq.itens.slice() }) || {}); }
     catch (e) { estado.relato_erro = String(e && e.message || e); }
   }
   if (o.simular) { estado.simulado = true; return estado; }

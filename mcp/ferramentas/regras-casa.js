@@ -11,7 +11,19 @@
        plano_pad   cobre de plano despejado a menos de `folga_plano_pad` de pad de outra net
        serigrafia  overlay encostando em pad/via (+ mascara), furo/recorte, quadrado de parafuso,
                    cobre do mesmo lado, outra serigrafia ou saindo da placa
-   A geometria e a do Clipper do hub (hub-clipper.js), em 0,1 um, a mesma do pour e do Gerber. */
+       texto_tamanho  texto de serigrafia abaixo da altura/traco minimos (1,0 / 0,15 mm)
+   A geometria e a do Clipper do hub (hub-clipper.js), em 0,1 um, a mesma do pour e do Gerber.
+
+   REGRAS POR PROJETO (1.37.0): Projects/<p>/regras-casa.json muda os numeros, desliga regras e
+   vale por area da placa (o backplane que libera serigrafia sobre trilha, o conector com texto de
+   0,6 mm). Precedencia: padrao da casa < arquivo do projeto < area < o que a chamada passa.
+     { "format":"regras-casa-v1",
+       "parametros":{"silk_cobre":0.1,"texto_h_min":0.8,...},
+       "desligar":["serigrafia_trilha", ...],      regra inteira ou sub-regra (SUBREGRAS)
+       "areas":[{"nome":"...","caixa":{"x1","y1","x2","y2"},"camada"?:"TopOverlay",
+                 "parametros":{...},"desligar":[...]}] }
+   A cena da serigrafia (cenaSerigrafia + checaSerigrafia) e a MESMA para o verificador, o
+   serigrafia_checar e o serigrafia_posicionar (mcp/ferramentas/serigrafia.js). */
 'use strict';
 const fs = require('node:fs');
 const { ErroMcp } = require('../lib/contexto.js');
@@ -22,7 +34,65 @@ const { PROJETO } = require('../lib/util.js');
 const E = 1e4;                                  // unidades do Clipper por mm
 const isNum = v => typeof v === 'number' && isFinite(v);
 const r3 = v => Math.round(v * 1000) / 1000;
-const PAD = { parafuso: 3.0, plano_pad: 1.0, silk: 0.254, silk_cobre: 0.1, silk_borda: 0.3, furo_min: 2.5 };
+const PAD = { parafuso: 3.0, plano_pad: 1.0, silk: 0.254, silk_cobre: 0.1, silk_borda: 0.3, furo_min: 2.5, texto_h_min: 1.0, texto_w_min: 0.15 };
+const PARAMS = Object.keys(PAD);
+const REGRAS = ['pad_outra_net', 'trilha_sobre_pad', 'parafuso', 'plano_pad', 'serigrafia'];
+/* as partes da regra "serigrafia", para desligar uma so (por projeto ou por area) */
+const SUBREGRAS = ['serigrafia_pad', 'serigrafia_trilha', 'serigrafia_furo', 'serigrafia_parafuso', 'serigrafia_borda', 'serigrafia_silk', 'texto_tamanho'];
+const ARQ_CFG = 'regras-casa.json';
+
+/* ---------- as regras da casa do projeto (regras-casa.json) ---------- */
+function lerConfig(p) {
+  const f = p.arq(ARQ_CFG);
+  if (!fs.existsSync(f)) return { format: 'regras-casa-v1', parametros: {}, desligar: [], areas: [], existe: false };
+  let c;
+  try { c = JSON.parse(fs.readFileSync(f, 'utf8')); }
+  catch (e) { throw new ErroMcp(`${ARQ_CFG} do projeto "${p.nome}" não é JSON válido: ${e.message}`); }
+  return normalizaConfig(c, true);
+}
+/* confere e limpa: parametro desconhecido ou regra que nao existe e erro (nao some calado) */
+function normalizaConfig(c, existe) {
+  c = c || {};
+  const erro = m => { throw new ErroMcp(`regras da casa: ${m}`); };
+  const prm = o => {
+    const out = {};
+    for (const [k, v] of Object.entries(o || {})) {
+      if (!PARAMS.includes(k)) erro(`parâmetro "${k}" não existe (${PARAMS.join(', ')})`);
+      if (!isNum(v) || v < 0) erro(`parâmetro "${k}" deve ser número >= 0 (mm)`);
+      out[k] = v;
+    }
+    return out;
+  };
+  const des = L => {
+    if (L == null) return [];
+    if (!Array.isArray(L)) erro('"desligar" deve ser uma lista');
+    for (const r of L) if (!REGRAS.includes(r) && !SUBREGRAS.includes(r)) erro(`"${r}" não é regra (${REGRAS.concat(SUBREGRAS).join(', ')})`);
+    return [...new Set(L)];
+  };
+  const areas = (c.areas || []).map((ar, i) => {
+    const q = ar && ar.caixa;
+    if (!q || ![q.x1, q.y1, q.x2, q.y2].every(isNum)) erro(`área ${i + 1}: "caixa" {x1,y1,x2,y2} em mm`);
+    if (ar.camada != null && typeof ar.camada !== 'string') erro(`área ${i + 1}: "camada" deve ser texto`);
+    return { nome: String(ar.nome || 'área ' + (i + 1)),
+             caixa: { x1: Math.min(q.x1, q.x2), y1: Math.min(q.y1, q.y2), x2: Math.max(q.x1, q.x2), y2: Math.max(q.y1, q.y2) },
+             camada: ar.camada || undefined, parametros: prm(ar.parametros), desligar: des(ar.desligar) };
+  });
+  return { format: 'regras-casa-v1', parametros: prm(c.parametros), desligar: des(c.desligar), areas, existe: !!existe };
+}
+/* o que vale num ponto: os parametros (padrao < projeto < area < chamada) e o que esta desligado */
+function regrasEm(cfg, base, chamada, x, y, layer) {
+  const o = Object.assign({}, base, cfg.parametros);
+  const desl = new Set(cfg.desligar);
+  for (const ar of cfg.areas) {
+    const q = ar.caixa;
+    if (!(isNum(x) && isNum(y) && x >= q.x1 && x <= q.x2 && y >= q.y1 && y <= q.y2)) continue;
+    if (ar.camada && layer && ar.camada !== layer) continue;
+    Object.assign(o, ar.parametros);
+    for (const r of ar.desligar) desl.add(r);
+  }
+  Object.assign(o, chamada || {});
+  return { o, desl };
+}
 
 function textoGeo(ctx) {
   const G = ctx.modulo('hub-gerber.js');
@@ -123,26 +193,19 @@ function cobreDa(K, eb, L, hc, buracoPad) {
   return out;
 }
 
-function verifica(ctx, a) {
-  const p = ctx.projeto(a.projeto);
-  const C = ctx.exige('hub-clipper.js', 'ClipperLib');
-  const K = kit(C);
-  const o = Object.assign({}, PAD, a.parametros || {});
-  ['parafuso', 'plano_pad', 'silk', 'silk_cobre', 'silk_borda', 'furo_min'].forEach(k => { if (isNum(a[k])) o[k] = a[k]; });
-  /* a placa como a tela mostra (planos do hub redespejados; cobre despejado do Altium sem poligono fica) */
-  const pdp = ctx.placaDespejada(p);
-  const eb = pdp.eb, tg = textoGeo(ctx);
-  const velhas = pdp.despejo ? pdp.despejo.altium_sem_poligono : [];
-  const despejo = pdp.despejo ? pdp.despejo.poligonos + ' polígono(s) redespejado(s) como na tela' +
-    (velhas.length ? `; ${velhas.length} região(ões) despejada(s) no Altium sem polígono no hub (${velhas.slice(0, 8).join(', ')}) ficam como vieram (pcb_apagar apaga)` : '') : 'sem polígono';
+/* os parametros que a chamada passou (os de nome proprio e o objeto parametros) */
+function paramsDaChamada(a) {
+  const o = Object.assign({}, (a && a.parametros) || {});
+  for (const k of PARAMS) if (a && isNum(a[k])) o[k] = a[k];
+  return o;
+}
+
+/* a placa conferida: camadas de cobre, os furos de parafuso e o cobre de cada camada */
+function preparaPlaca(ctx, eb, K, o, a, camadasSo) {
   const hc = ctx.hc;
-  const camadas = [...new Set(['Top', 'Bottom'].concat((eb.tracks || []).map(t => t.layer), (eb.regions || []).map(g => g.layer)))].filter(k => k && hc.isCopper(k));
+  const camadas = camadasSo || [...new Set(['Top', 'Bottom'].concat((eb.tracks || []).map(t => t.layer), (eb.regions || []).map(g => g.layer)))].filter(k => k && hc.isCopper(k));
   /* pad que e so furo (fixacao sem anel, sem net) */
   const buracoPad = q => !q.net && q.drill >= o.furo_min - 1e-6 && Math.max(q.w || 0, q.h || 0) <= q.drill + 0.05;
-  const viol = [];
-  const quer = r => !a.regras || !a.regras.length || a.regras.includes(r);
-
-  /* ---------- furos de parafuso ---------- */
   const furos = [];
   const bbPlaca = eb.board && eb.board.bbox;
   for (const k of eb.cutouts || []) {
@@ -153,11 +216,157 @@ function verifica(ctx, a) {
   }
   for (const c of eb.components || []) for (const q of (c && c.pads) || []) if (q && buracoPad(q)) furos.push({ x: q.x, y: q.y, d: q.drill, origem: c.ref + ' (furo de fixação)' });
   for (const q of eb.freepads || []) if (q && buracoPad(q)) furos.push({ x: q.x, y: q.y, d: q.drill, origem: 'furo livre' });
-  for (const f of a.furos || []) if (Array.isArray(f) && f.length >= 3) furos.push({ x: f[0], y: f[1], d: f[2], origem: 'informado' });
+  for (const f of (a && a.furos) || []) if (Array.isArray(f) && f.length >= 3) furos.push({ x: f[0], y: f[1], d: f[2], origem: 'informado' });
   for (const f of furos) { const m = f.d / 2 + o.parafuso; f.quadrado = { x1: r3(f.x - m), y1: r3(f.y - m), x2: r3(f.x + m), y2: r3(f.y + m) }; }
-
   const cobre = {};
   for (const L of camadas) cobre[L] = cobreDa(K, eb, L, hc, buracoPad);
+  return { camadas, buracoPad, furos, cobre, bbPlaca };
+}
+
+/* ---------- a cena da serigrafia (o verificador, o serigrafia_checar e o posicionador) ---------- */
+const ladoSilk = l => l === 'TopOverlay' ? 'Top' : l === 'BottomOverlay' ? 'Bottom' : null;
+/* a forma de um texto em paths do Clipper: a do HubGerber (a da tela e do Gerber), senao a caixa
+   aproximada pelo tamanho da fonte */
+function formaTexto(K, tg, t) {
+  let paths = [];
+  const g = tg ? tg(t) : null;
+  if (g && Array.isArray(g.regioes)) paths = g.regioes.filter(r => !r.hole && r.pts && r.pts.length >= 3).map(r => K.paraC(r.pts));
+  else if (g && Array.isArray(g.tracos)) {           // fonte stroke do hub: polilinhas com a espessura do traço
+    const w = Math.max(g.w || t.w || 0.15, 0.01);
+    for (const tr of g.tracos) if (Array.isArray(tr) && tr.length >= 2) paths.push(...K.offset([K.paraC(tr)], w / 2, true));
+  }
+  if (!paths.length && isNum(t.x)) { const hw = String(t.text || '').length * (t.h || 1) * 0.45, hh = (t.h || 1) / 2; paths = [K.paraC([[t.x - hw, t.y - hh], [t.x + hw, t.y - hh], [t.x + hw, t.y + hh], [t.x - hw, t.y + hh]])]; }
+  return paths;
+}
+function silkDeTexto(K, tg, t) {
+  const s = ladoSilk(t && t.layer); if (!s || t.hidden) return null;
+  const paths = formaTexto(K, tg, t);
+  return paths.length ? { tipo: 'texto', id: t.id || '', texto: t.text, owner: t.owner || '', designator: !!t.designator, lado: s, layer: t.layer,
+                          paths, bb: K.caixa(paths), h: t.h, w: t.w, kind: t.kind || '' } : null;
+}
+function chavesGrade(g, bb) {
+  const out = [];
+  for (let gx = Math.floor(bb.x1 / g.C); gx <= Math.floor(bb.x2 / g.C); gx++) for (let gy = Math.floor(bb.y1 / g.C); gy <= Math.floor(bb.y2 / g.C); gy++) out.push(gx + ',' + gy);
+  return out;
+}
+function cenaSerigrafia(ctx, eb, K, furos, cobre, tg) {
+  const sm = (eb.rules && isNum(eb.rules.sm)) ? eb.rules.sm : 0.1016;
+  const silk = [];
+  for (const t of eb.texts || []) { const s = silkDeTexto(K, tg, t); if (s) silk.push(s); }
+  for (const q of eb.silk || []) {
+    const s = ladoSilk(q && q.layer); if (!s) continue;
+    let pts = null;
+    if ([q.x1, q.y1, q.x2, q.y2].every(isNum)) pts = [[q.x1, q.y1], [q.x2, q.y2]];
+    else if (isNum(q.r) && isNum(q.cx)) pts = geo.pontosArco(q, 5);
+    if (!pts) continue;
+    const paths = K.offset([K.paraC(pts)], Math.max(q.w || 0.15, 0.01) / 2, true);
+    if (paths.length) silk.push({ tipo: 'silk', id: q.id || '', owner: q.owner || '', lado: s, layer: q.layer, paths, bb: K.caixa(paths) });
+  }
+  const quadrados = furos.map(f => ({ tipo: 'quadrado do parafuso', id: f.origem, bb: f.quadrado, paths: [K.paraC([[f.quadrado.x1, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y2], [f.quadrado.x1, f.quadrado.y2]])] }));
+  const recortes = (eb.cutouts || []).filter(k => k && Array.isArray(k.points) && k.points.length >= 3 && k.kindn !== -1 && k.kindn !== 1).map(k => ({ tipo: 'recorte', id: k.id || '', bb: caixaPts(k.points), paths: [K.paraC(k.points)] }));
+  /* a placa encolhida da folga da borda, pelo CONTORNO (placa recortada ou com arco nao cabe no
+     retangulo da bbox); sem contorno, a bbox */
+  const PP = ctx.modulo('hub-pcbpour.js');
+  const ptsPlaca = PP && PP._int && PP._int.contornoPlaca ? PP._int.contornoPlaca(eb.board, 0.05) : null;
+  const placas = new Map();
+  const placaEm = f => { if (!ptsPlaca) return null; let v = placas.get(f); if (!v) placas.set(f, v = K.offset([K.paraC(ptsPlaca)], -f, false)); return v; };
+  /* o cobre do lado de cada overlay (plano despejado pode ficar embaixo do texto: fora) */
+  const obs = {}, gCobre = {};
+  for (const L of ['Top', 'Bottom']) { obs[L] = (cobre[L] || []).filter(x => x.tipo !== 'plano'); gCobre[L] = grade(obs[L], 2); }
+  const cena = { K, tg, sm, silk, quadrados, recortes, ptsPlaca, bbPlaca: eb.board && eb.board.bbox, placaEm, obs, gCobre, gSilk: {}, cache: new WeakMap() };
+  for (const L of ['TopOverlay', 'BottomOverlay']) cena.gSilk[L] = grade(silk.filter(x => x.layer === L), 2);
+  /* objeto novo na cena (o texto que o posicionador acabou de pôr) */
+  cena.poe = x => {
+    cena.silk.push(x);
+    const g = cena.gSilk[x.layer];
+    if (g) for (const k of chavesGrade(g, x.bb)) { let l = g.G.get(k); if (!l) g.G.set(k, l = []); l.push(x); }
+  };
+  return cena;
+}
+/* o obstaculo crescido da folga, guardado (o posicionador testa centenas de lugares contra ele) */
+function expande(cena, ob, folga) {
+  if (!(folga > 0)) return ob.paths;
+  let m = cena.cache.get(ob);
+  if (!m) cena.cache.set(ob, m = new Map());
+  const k = Math.round(folga * 1e4);
+  let v = m.get(k);
+  if (!v) m.set(k, v = cena.K.offset(ob.paths, folga, false));
+  return v;
+}
+const nomeSilk = s => s.tipo === 'texto' ? `texto "${s.texto}"` : `serigrafia de ${s.owner || s.id}`;
+const SEM_GRADE = { G: new Map(), C: 2 };
+/* As violacoes de UM objeto de serigrafia `s` (texto ou desenho), com os parametros `o` e as regras
+   desligadas `desl` do lugar dele. opc: {semSilk (o verificador faz silk x silk em pares),
+   ignora:Set de ids de serigrafia que nao contam (o texto que vai sair dali), corpos:[{ref, lado,
+   bb, paths}] (corpo de componente proibido), parar (para na primeira)}. Cada violacao leva `sub`
+   (SUBREGRAS) para o projeto poder desligar. */
+function checaSerigrafia(cena, s, o, desl, opc) {
+  opc = opc || {};
+  const K = cena.K, out = [], txt = s.tipo === 'texto';
+  const poe = v => { out.push(Object.assign({ regra: 'serigrafia', camada: s.layer, objeto: { tipo: s.tipo, id: s.id, texto: s.texto, owner: s.owner } }, v)); return !!opc.parar; };
+  const bate = (ob, folga, contra, sub) => {
+    if (desl.has(sub) || !cruza(s.bb, ob.bb, folga + 0.01)) return false;
+    const it = K.inter(s.paths, expande(cena, ob, folga), false);
+    if (K.area(it) < 1e-4) return false;
+    const bb = K.caixa(it);
+    return poe({ sub, x: r3((bb.x1 + bb.x2) / 2), y: r3((bb.y1 + bb.y2) / 2), msg: `${nomeSilk(s)} encosta em ${contra}`,
+      contra: { tipo: ob.tipo, id: ob.id, net: ob.net || undefined, ref: ob.ref ? ob.ref + (ob.nome != null ? '.' + ob.nome : '') : undefined } });
+  };
+  const cx = r3((s.bb.x1 + s.bb.x2) / 2), cy = r3((s.bb.y1 + s.bb.y2) / 2);
+  if (txt && !desl.has('texto_tamanho')) {
+    const baixo = isNum(s.h) && s.h < o.texto_h_min - 1e-6, fino = s.kind !== 'truetype' && isNum(s.w) && s.w < o.texto_w_min - 1e-6;
+    if ((baixo || fino) && poe({ sub: 'texto_tamanho', x: cx, y: cy,
+      msg: `${nomeSilk(s)} ${baixo ? `com altura ${r3(s.h)} mm (mínimo ${o.texto_h_min})` : ''}${baixo && fino ? ' e ' : ''}${fino ? `com traço ${r3(s.w)} mm (mínimo ${o.texto_w_min})` : ''}` })) return out;
+  }
+  /* texto (inclusive designador): todas as regras. Desenho de footprint (contorno, marca do pino 1): so
+     cobre exposto (pad/via com a mascara) e furo -- a trilha tem de cruzar o contorno para chegar aos pads */
+  const m = Math.max(cena.sm + o.silk, o.silk_cobre) + 0.02;
+  for (const ob of vizinhos(cena.gCobre[s.lado] || SEM_GRADE, s.bb, m)) {
+    if (ob.tipo === 'pad' || ob.tipo === 'via') { if (bate(ob, txt ? cena.sm + o.silk : cena.sm, ob.tipo === 'pad' ? `pad ${ob.ref ? ob.ref + '.' + ob.nome : ob.id}` : `via ${ob.id}`, 'serigrafia_pad')) return out; }
+    else if (txt && bate(ob, o.silk_cobre, `${ob.tipo} ${ob.id}${ob.net ? ' (' + ob.net + ')' : ''}`, 'serigrafia_trilha')) return out;
+  }
+  for (const k of cena.recortes) if (bate(k, o.silk, `recorte/furo ${k.id}`, 'serigrafia_furo')) return out;
+  if (txt) for (const q of cena.quadrados) if (bate(q, 0, `quadrado isolado do parafuso (${q.id})`, 'serigrafia_parafuso')) return out;
+  if (txt && !desl.has('serigrafia_borda')) {
+    const pc = cena.placaEm(o.silk_borda), bp = cena.bbPlaca;
+    /* a area da UNIAO: os tracos da fonte stroke se sobrepoem, e a soma deles passava a parte
+       dentro da placa -- todo texto parecia encostar na borda (1.36.0) */
+    if (pc && !isNum(s.areaU)) s.areaU = K.area(K.uniaoC(s.paths));
+    const fora = pc ? s.areaU - K.area(K.inter(s.paths, pc, false)) > 1e-4
+      : !!bp && !(s.bb.x1 >= bp.x1 + o.silk_borda && s.bb.x2 <= bp.x2 - o.silk_borda && s.bb.y1 >= bp.y1 + o.silk_borda && s.bb.y2 <= bp.y2 - o.silk_borda);
+    if (fora && poe({ sub: 'serigrafia_borda', x: cx, y: cy, msg: `${nomeSilk(s)} a menos de ${o.silk_borda} mm da borda da placa` })) return out;
+  }
+  if (!opc.semSilk && !desl.has('serigrafia_silk')) {
+    for (const t2 of vizinhos(cena.gSilk[s.layer] || SEM_GRADE, s.bb, o.silk + 0.02)) {
+      if (t2 === s || (t2.id && t2.id === s.id) || (opc.ignora && opc.ignora.has(t2.id))) continue;
+      if (!txt && t2.tipo === 'silk' && s.owner && s.owner === t2.owner) continue;
+      if (bate(t2, o.silk, nomeSilk(t2), 'serigrafia_silk')) return out;
+    }
+  }
+  if (txt && opc.corpos) for (const c of opc.corpos) {
+    if (c.lado !== s.lado || !cruza(s.bb, c.bb, 0)) continue;
+    if (K.area(K.inter(s.paths, c.paths, false)) < 1e-4) continue;
+    if (poe({ sub: 'serigrafia_corpo', x: cx, y: cy, msg: `${nomeSilk(s)} em cima do corpo de ${c.ref}`, contra: { tipo: 'corpo', ref: c.ref } })) return out;
+  }
+  return out;
+}
+
+function verifica(ctx, a) {
+  const p = ctx.projeto(a.projeto);
+  const C = ctx.exige('hub-clipper.js', 'ClipperLib');
+  const K = kit(C);
+  const cfg = lerConfig(p);
+  const chamada = paramsDaChamada(a);
+  const o = Object.assign({}, PAD, cfg.parametros, chamada);      // o geral; a area muda por objeto
+  /* a placa como a tela mostra (planos do hub redespejados; cobre despejado do Altium sem poligono fica) */
+  const pdp = ctx.placaDespejada(p);
+  const eb = pdp.eb, tg = textoGeo(ctx);
+  const velhas = pdp.despejo ? pdp.despejo.altium_sem_poligono : [];
+  const despejo = pdp.despejo ? pdp.despejo.poligonos + ' polígono(s) redespejado(s) como na tela' +
+    (velhas.length ? `; ${velhas.length} região(ões) despejada(s) no Altium sem polígono no hub (${velhas.slice(0, 8).join(', ')}) ficam como vieram (pcb_apagar apaga)` : '') : 'sem polígono';
+  const { camadas, furos, cobre } = preparaPlaca(ctx, eb, K, o, a);
+  const viol = [];
+  const quer = r => (!a.regras || !a.regras.length || a.regras.includes(r)) && !cfg.desligar.includes(r);
 
   if (quer('parafuso')) for (const f of furos) {
     const q = f.quadrado, sq = [K.paraC([[q.x1, q.y1], [q.x2, q.y1], [q.x2, q.y2], [q.x1, q.y2]])];
@@ -294,82 +503,37 @@ function verifica(ctx, a) {
 
   /* ---------- serigrafia ---------- */
   if (quer('serigrafia')) {
-    const sm = (eb.rules && isNum(eb.rules.sm)) ? eb.rules.sm : 0.1016;
-    const silk = [];
-    const lado = l => l === 'TopOverlay' ? 'Top' : l === 'BottomOverlay' ? 'Bottom' : null;
-    for (const t of eb.texts || []) {
-      const s = lado(t && t.layer); if (!s || t.hidden) continue;
-      let paths = [];
-      const g = tg ? tg(t) : null;
-      if (g && Array.isArray(g.regioes)) paths = g.regioes.filter(r => !r.hole && r.pts && r.pts.length >= 3).map(r => K.paraC(r.pts));
-      else if (g && Array.isArray(g.tracos)) {           // fonte stroke do hub: polilinhas com a espessura do traço
-        const w = Math.max(g.w || t.w || 0.15, 0.01);
-        for (const tr of g.tracos) if (Array.isArray(tr) && tr.length >= 2) paths.push(...K.offset([K.paraC(tr)], w / 2, true));
-      }
-      if (!paths.length && isNum(t.x)) { const hw = String(t.text || '').length * (t.h || 1) * 0.45, hh = (t.h || 1) / 2; paths = [K.paraC([[t.x - hw, t.y - hh], [t.x + hw, t.y - hh], [t.x + hw, t.y + hh], [t.x - hw, t.y + hh]])]; }
-      if (paths.length) silk.push({ tipo: 'texto', id: t.id || '', texto: t.text, owner: t.owner || '', lado: s, layer: t.layer, paths, bb: K.caixa(paths) });
-    }
-    for (const q of eb.silk || []) {
-      const s = lado(q && q.layer); if (!s) continue;
-      let pts = null;
-      if ([q.x1, q.y1, q.x2, q.y2].every(isNum)) pts = [[q.x1, q.y1], [q.x2, q.y2]];
-      else if (isNum(q.r) && isNum(q.cx)) pts = geo.pontosArco(q, 5);
-      if (!pts) continue;
-      const paths = K.offset([K.paraC(pts)], Math.max(q.w || 0.15, 0.01) / 2, true);
-      if (paths.length) silk.push({ tipo: 'silk', id: q.id || '', owner: q.owner || '', lado: s, layer: q.layer, paths, bb: K.caixa(paths) });
-    }
-    const quadrados = furos.map(f => ({ tipo: 'quadrado do parafuso', id: f.origem, bb: f.quadrado, paths: [K.paraC([[f.quadrado.x1, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y2], [f.quadrado.x1, f.quadrado.y2]])] }));
-    const recortes = (eb.cutouts || []).filter(k => k && Array.isArray(k.points) && k.points.length >= 3 && k.kindn !== -1 && k.kindn !== 1).map(k => ({ tipo: 'recorte', id: k.id || '', bb: caixaPts(k.points), paths: [K.paraC(k.points)] }));
-    const nome = s => s.tipo === 'texto' ? `texto "${s.texto}"` : `serigrafia de ${s.owner || s.id}`;
-    /* a placa encolhida da folga da borda, pelo CONTORNO (placa recortada ou com arco nao cabe no
-       retangulo da bbox); sem contorno, a bbox como antes */
-    const PP = ctx.modulo('hub-pcbpour.js');
-    const ptsPlaca = PP && PP._int && PP._int.contornoPlaca ? PP._int.contornoPlaca(eb.board, 0.05) : null;
-    const placaC = ptsPlaca ? K.offset([K.paraC(ptsPlaca)], -o.silk_borda, false) : null;
-    const foraDaPlaca = s => placaC
-      ? K.area(s.paths) - K.area(K.inter(s.paths, placaC, false)) > 1e-4
-      : !!bbPlaca && !(s.bb.x1 >= bbPlaca.x1 + o.silk_borda && s.bb.x2 <= bbPlaca.x2 - o.silk_borda && s.bb.y1 >= bbPlaca.y1 + o.silk_borda && s.bb.y2 <= bbPlaca.y2 - o.silk_borda);
-    const bate = (s, ob, folga, contra) => {
-      if (!cruza(s.bb, ob.bb, folga + 0.01)) return;
-      const ex = folga > 0 ? K.offset(ob.paths, folga, false) : ob.paths;
-      const it = K.inter(s.paths, ex, false);
-      if (K.area(it) < 1e-4) return;
-      const bb = K.caixa(it);
-      viol.push({ regra: 'serigrafia', camada: s.layer, x: r3((bb.x1 + bb.x2) / 2), y: r3((bb.y1 + bb.y2) / 2), msg: `${nome(s)} encosta em ${contra}`,
-        objeto: { tipo: s.tipo, id: s.id, texto: s.texto, owner: s.owner }, contra: { tipo: ob.tipo, id: ob.id, net: ob.net || undefined, ref: ob.ref ? ob.ref + '.' + ob.nome : undefined } });
-    };
-    /* texto (inclusive designador): todas as regras. Desenho de footprint (contorno, marca do pino 1): só
-       cobre exposto (pad/via com a máscara) e furo -- a trilha tem de cruzar o contorno para chegar aos pads */
-    for (const s of silk) {
-      const L = s.lado, txt = s.tipo === 'texto';
-      for (const ob of (cobre[L] || [])) {
-        if (ob.tipo === 'plano') continue;                       // plano despejado pode ficar embaixo
-        if (ob.tipo === 'pad' || ob.tipo === 'via') bate(s, ob, txt ? sm + o.silk : sm, ob.tipo === 'pad' ? `pad ${ob.ref ? ob.ref + '.' + ob.nome : ob.id}` : `via ${ob.id}`);
-        else if (txt) bate(s, ob, o.silk_cobre, `${ob.tipo} ${ob.id}${ob.net ? ' (' + ob.net + ')' : ''}`);
-      }
-      for (const k of recortes) bate(s, k, o.silk, `recorte/furo ${k.id}`);
-      if (txt) for (const q of quadrados) bate(s, q, 0, `quadrado isolado do parafuso (${q.id})`);
-      if (txt && foraDaPlaca(s))
-        viol.push({ regra: 'serigrafia', camada: s.layer, x: r3((s.bb.x1 + s.bb.x2) / 2), y: r3((s.bb.y1 + s.bb.y2) / 2), msg: `${nome(s)} a menos de ${o.silk_borda} mm da borda da placa`, objeto: { tipo: s.tipo, id: s.id, texto: s.texto } });
-    }
+    const cena = cenaSerigrafia(ctx, eb, K, furos, cobre, tg);
+    const rDe = s => regrasEm(cfg, PAD, chamada, (s.bb.x1 + s.bb.x2) / 2, (s.bb.y1 + s.bb.y2) / 2, s.layer);
+    for (const s of cena.silk) { const r = rDe(s); viol.push(...checaSerigrafia(cena, s, r.o, r.desl, { semSilk: true })); }
     /* serigrafia x serigrafia (mesmo lado; o desenho de um mesmo componente pode se tocar) */
+    const silk = cena.silk;
     for (let i = 0; i < silk.length; i++) for (let j = i + 1; j < silk.length; j++) {
       const s1 = silk[i], s2 = silk[j];
       if (s1.layer !== s2.layer || !cruza(s1.bb, s2.bb, o.silk + 0.01)) continue;
       if (s1.tipo === 'silk' && s2.tipo === 'silk' && s1.owner && s1.owner === s2.owner) continue;
       const [t1, t2] = s1.tipo === 'texto' ? [s1, s2] : [s2, s1];
-      bate(t1, Object.assign({}, t2, { tipo: t2.tipo }), o.silk, nome(t2));
+      const r = rDe(t1);
+      if (r.desl.has('serigrafia_silk') || !cruza(t1.bb, t2.bb, r.o.silk + 0.01)) continue;
+      const it = K.inter(t1.paths, expande(cena, t2, r.o.silk), false);
+      if (K.area(it) < 1e-4) continue;
+      const bb = K.caixa(it);
+      viol.push({ regra: 'serigrafia', sub: 'serigrafia_silk', camada: t1.layer, x: r3((bb.x1 + bb.x2) / 2), y: r3((bb.y1 + bb.y2) / 2), msg: `${nomeSilk(t1)} encosta em ${nomeSilk(t2)}`,
+        objeto: { tipo: t1.tipo, id: t1.id, texto: t1.texto, owner: t1.owner }, contra: { tipo: t2.tipo, id: t2.id } });
     }
   }
 
+  /* o que o projeto desligou numa area vale para a violacao que cai nela */
+  const valendo = cfg.areas.length ? viol.filter(v => { const r = regrasEm(cfg, PAD, chamada, v.x, v.y, v.camada); return !r.desl.has(v.regra) && !(v.sub && r.desl.has(v.sub)); }) : viol;
   const por = {};
-  for (const v of viol) por[v.regra] = (por[v.regra] || 0) + 1;
+  for (const v of valendo) por[v.regra] = (por[v.regra] || 0) + 1;
   const lim = a.limite || 200;
-  return { projeto: p.nome, ok: viol.length === 0, total: viol.length, por_regra: por, despejo,
+  return { projeto: p.nome, ok: valendo.length === 0, total: valendo.length, por_regra: por, despejo,
     parametros: Object.assign({ folga_cobre: folga }, o), camadas, furos_parafuso: furos,
-    violacoes: viol.slice(0, lim), cortadas: Math.max(0, viol.length - lim),
+    regras_do_projeto: cfg.existe ? { arquivo: ctx.rel(p.arq(ARQ_CFG)), parametros: cfg.parametros, desligar: cfg.desligar, areas: cfg.areas.length } : null,
+    violacoes: valendo.slice(0, lim), cortadas: Math.max(0, valendo.length - lim),
     skills: skills.listar().map(s => s.nome),
-    nota: viol.length ? 'Corrija e rode de novo até zerar (skill_ler {nome} explica cada regra).' : 'Placa dentro das regras da casa.' };
+    nota: valendo.length ? 'Corrija e rode de novo até zerar (skill_ler {nome} explica cada regra; regras_casa_definir muda as do projeto).' : 'Placa dentro das regras da casa.' };
 }
 
 module.exports = {
@@ -404,11 +568,48 @@ module.exports = {
         plano_pad: { type: 'number', description: 'folga mínima plano × pad de outra net, mm (padrão 1,0)' },
         silk: { type: 'number', description: 'folga da serigrafia para pad/via/furo/outra serigrafia, mm (padrão 0,254; pad e via somam a expansão da máscara)' },
         silk_cobre: { type: 'number', description: 'folga da serigrafia para trilha/fill/região do mesmo lado, mm (padrão 0,1)' },
+        silk_borda: { type: 'number', description: 'folga do texto para a borda da placa, mm (padrão 0,3)' },
+        texto_h_min: { type: 'number', description: 'altura mínima do texto de serigrafia, mm (padrão 1,0)' },
+        texto_w_min: { type: 'number', description: 'traço mínimo do texto de serigrafia, mm (padrão 0,15)' },
         furo_min: { type: 'number', description: 'furo sem anel a partir do qual um pad sem net é furo de parafuso, mm (padrão 2,5)' },
         furos: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'furos de parafuso a mais: [[x, y, diâmetro], ...] em mm' },
         limite: { type: 'integer', minimum: 1, maximum: 5000 } }, required: ['projeto'] },
       executa: async (a, ctx) => verifica(ctx, a),
     },
+    {
+      nome: 'regras_casa_ler', titulo: 'Regras da casa do projeto', leitura: true,
+      descricao: `As regras da casa que valem NESTE projeto (Projects/<p>/${ARQ_CFG}): os números que mudam (parametros), as regras desligadas e as áreas da placa com números ou regras próprias, mais o padrão da casa. Sem o arquivo, vale o padrão.`,
+      entrada: { type: 'object', properties: { projeto: PROJETO }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const c = lerConfig(p);
+        return { projeto: p.nome, arquivo: ctx.rel(p.arq(ARQ_CFG)), existe: c.existe, padrao: PAD, valendo: Object.assign({}, PAD, c.parametros),
+                 parametros: c.parametros, desligar: c.desligar, areas: c.areas, regras: REGRAS, subregras: SUBREGRAS };
+      },
+    },
+    {
+      nome: 'regras_casa_definir', titulo: 'Mudar as regras da casa do projeto',
+      descricao: `Grava as regras da casa deste projeto (Projects/<p>/${ARQ_CFG}), que o regras_casa_verificar, o serigrafia_checar e o serigrafia_posicionar seguem. parametros: ${PARAMS.join(', ')} (mm). desligar: regra inteira (${REGRAS.join(', ')}) ou parte da serigrafia (${SUBREGRAS.join(', ')}). areas: [{nome, caixa:{x1,y1,x2,y2}, camada?, parametros, desligar}] — valem só dentro da caixa (ex.: liberar serigrafia sobre trilha no backplane, texto de 0,6 mm na fileira de conectores). Mescla com o que já está no arquivo (parametro null tira; substituir:true troca tudo). Libere uma regra só quando o dono pedir, e diga qual.`,
+      entrada: { type: 'object', properties: { projeto: PROJETO,
+        parametros: { type: 'object', additionalProperties: true, description: 'ex.: {"texto_h_min":0.6,"texto_w_min":0.1}; null num parâmetro volta ao padrão' },
+        desligar: { type: 'array', items: { type: 'string' } },
+        ligar: { type: 'array', items: { type: 'string' }, description: 'tira estas da lista de desligadas' },
+        areas: { type: 'array', items: { type: 'object', additionalProperties: true }, description: 'substitui a lista de áreas' },
+        substituir: { type: 'boolean' }, note: { type: 'string' } }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const atual = a.substituir ? normalizaConfig({}) : lerConfig(p);
+        const prm = Object.assign({}, atual.parametros);
+        for (const [k, v] of Object.entries(a.parametros || {})) { if (v === null) delete prm[k]; else prm[k] = v; }
+        let desl = atual.desligar.concat(a.desligar || []);
+        if (a.ligar) desl = desl.filter(r => !a.ligar.includes(r));
+        const c = normalizaConfig({ parametros: prm, desligar: desl, areas: a.areas !== undefined ? a.areas : atual.areas }, true);
+        const obj = { format: c.format, parametros: c.parametros, desligar: c.desligar, areas: c.areas };
+        if (a.note) obj.note = String(a.note);
+        const gravado = ctx.grava(p.arq(ARQ_CFG), JSON.stringify(obj, null, 1) + '\n', 'regras_casa_definir');
+        return { projeto: p.nome, arquivo: ctx.rel(p.arq(ARQ_CFG)), gravado, valendo: Object.assign({}, PAD, c.parametros), desligar: c.desligar, areas: c.areas };
+      },
+    },
   ],
-  _interno: { verifica, kit },
+  _interno: { verifica, kit, PAD, PARAMS, SUBREGRAS, lerConfig, regrasEm, paramsDaChamada, preparaPlaca, cenaSerigrafia, checaSerigrafia, silkDeTexto, formaTexto, textoGeo, expande },
 };
