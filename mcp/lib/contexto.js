@@ -281,8 +281,10 @@ class Contexto {
     const ids = new Set(pols.map(q => String(q.id)));
     let novas = [];
     const avisos = [];
-    for (const pol of pols.slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0))) {
-      const d = P.despeja(r.eb, pol);
+    const ebR = this.comRegras(p, r.eb);
+    const polR = new Map((ebR.polygons || []).map(q => [q && q.id, q]));
+    for (const pol of pols.map(q => polR.get(q.id) || q).sort((a, b) => (a.ordem || 0) - (b.ordem || 0))) {
+      const d = P.despeja(ebR, pol);
       const reg = (d && (d.regioes || d)) || [];
       if (Array.isArray(reg)) novas = novas.concat(reg);
       for (const a of (d && d.avisos) || []) avisos.push(a);
@@ -297,6 +299,16 @@ class Contexto {
       }));
     return Object.assign(r, { eb, ebSemDespejo: r.eb, despejo: { poligonos: pols.length, regioes: novas.length, avisos, ms: Date.now() - t0,
       altium_sem_poligono: velhas.map(g => g.id || '?') } });
+  }
+  /* a placa com a folga das regras (classes de net) posta nos poligonos, so para despejar
+     (hub-pcbpour.js » comRegras, 1.36.0): o despejo do hub respeita "Fase x baixa tensao" etc. */
+  comRegras(p, eb) {
+    const P = this.modulo('hub-pcbpour.js');
+    if (!P || typeof P.comRegras !== 'function' || !(eb.polygons || []).length) return eb;
+    try {
+      const R = require('./pcb-ops.js').regrasDoProjeto(this, p);   // aqui (e nao no topo): o pcb-ops requer este arquivo
+      return R && R.conjunto ? P.comRegras(eb, R.conjunto) : eb;
+    } catch (e) { this.log('regras do despejo: ' + (e && e.message || e)); return eb; }
   }
   schematic(p) {
     const s = this.lerVarCache(p.arq('schematic.js'), 'schematic');

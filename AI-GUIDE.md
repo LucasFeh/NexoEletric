@@ -347,10 +347,10 @@ var changes = [
 | `fill_del` | `id`, `orig_x1..orig_y2`, `orig_layer` | `note` |
 | `region_add` | `layer`, `pts` (`[[x,y],...]` ≥3, numa linha só) | `net`, `cutout` (true = Board Cutout; a camada é ignorada), `polycut` (true = "sem plano", o Polygon Pour Cutout: o plano não entra, trilha e via passam; `layer` de cobre, ou `Multi` = todas; sem net), `note` |
 | `region_del` | `id`, `orig_layer`, `orig_n` (nº de vértices), `orig_x0`, `orig_y0` (1º vértice) | `note` |
-| `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
+| `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `w`, `rot`, `note` |
 | `outline_set` | `pts` (`[[x,y],...]` ≥3, polígono **fechado**, só linhas) | `note` |
 | `comp_attr` | `ref`, `orig_designator`, `orig_comment` | `designator` (novo texto), `comment` (novo texto), `note` |
-| `comp_add` | `ref`, `footprint`, `x`, `y` | `rot`, `layer` (Top/Bottom), `comment`, `nets` (texto plano `"1=GND;2=VCC"`), `note` |
+| `comp_add` | `ref`, `footprint`, `x`, `y` | `rot`, `layer` (Top/Bottom), `comment`, `nets` (texto plano `"1=GND;2=VCC"`), `des_x`/`des_y` (centro do designator na placa), `des_h`, `des_w`, `des_rot`, `note` |
 | `comp_del` | `ref`, `orig_x`, `orig_y`, `orig_rot`, `orig_layer` | `orig_footprint`, `note` |
 | `pad_net` | `ref`, `pad` (nome do pad), `net` (`""` = sem net), `orig_net` | `note` |
 | `net_add` / `net_del` | `net` | `note` |
@@ -434,7 +434,12 @@ var changes = [
 - `designator_move` reposiciona o **designator de um componente** (item `designator:true`
   em `board.js » texts`; ache-o pelo `owner` = ref). Mesma convenção de centro do
   `text_edit`; os `orig_x`/`orig_y` vêm desse item. O script põe o autoposition do nome em
-  Manual antes de mover (senão o Altium re-ancora sozinho).
+  Manual antes de mover (senão o Altium re-ancora sozinho). `h` = altura, `w` = espessura do
+  traço (1.36.0): reduzir a altura sem reduzir o traço deixa o texto ilegível.
+- O designator de um componente **criado por `comp_add`** não está no `board.js`: o lugar, a
+  altura, o traço e o giro dele vão na **própria linha do `comp_add`** (`des_x`/`des_y` = centro,
+  `des_h`, `des_w`, `des_rot`; 1.36.0). O `designator_move` não serve para ele (o Altium põe o
+  nome onde o footprint manda, e o `orig_*` não casaria).
 - `net`: use um nome existente em `board.js » nets` (net inexistente gera aviso e objeto sem net).
 - `outline_set` **substitui inteiro** o `Board.BoardOutline` pelo polígono de `pts`; só
   aceita segmentos de linha (contorno com arcos: desenhe no Altium). O `ApplyChanges`

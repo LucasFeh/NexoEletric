@@ -52,6 +52,9 @@
      assinatura(eb, poligono) -> hash (string) de tudo que muda o despejo
      desatualizado(eb, poligono) -> true se poligono.hash nao bate com a placa de agora
      placaSemDespejoVelho(eb, regioes) -> eb com as regions poly:true trocadas pelas novas (para o Gerber)
+     comRegras(eb, conjunto) -> eb com a folga das regras de Clearance (classes de net, pares,
+                           matriz de objetos) posta em cada poligono (clearanceNet), so onde ela e
+                           MAIOR que a do poligono. Quem despeja chama antes (1.36.0).
 */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
@@ -324,6 +327,59 @@ function conexaoDe(pol, obj, ehVia, ehSmd) {
     gap: isNum(o.gap) && o.gap >= 0 ? o.gap : CON_PADRAO.gap,
     angulo: o.angulo === 45 ? 45 : 90,
   };
+}
+
+/* ============================== a folga das regras ============================== */
+/* O poligono do hub (poly_add) trazia so a clearance unica (0,254 ou a do poly_add): a regra por
+   classe ("Fase x baixa tensao 1,5 mm", "+74 x baixa 1,0", "COM x GND 0,5") nao chegava no despejo e
+   o DRC acusava centenas de Clearance logo depois. comRegras poe em cada poligono de cobre, por net
+   vizinha e por tipo de objeto, a folga que a Clearance vencedora pede (HubPcbRegras.folgaEntre, a
+   MESMA conta do DRC e do roteador) -- so onde ela passa a do proprio poligono: o despejo nunca
+   encolhe, e fica igual ao do Altium quando as regras batem com ele. O escopo por componente
+   (InComponent...) nao entra: o par e avaliado por net, camada e tipo de objeto. */
+function regrasMod() {
+  if (root && root.HubPcbRegras) return root.HubPcbRegras;
+  if (typeof module === 'object' && module.exports) { try { return require('./hub-pcbregras.js'); } catch (e) { return null; } }
+  return null;
+}
+const TIPOS_REGRA = [['track', { tipo: 'track' }], ['arc', { tipo: 'arc' }], ['via', { tipo: 'via', layer: 'Multi' }],
+  ['smd', { tipo: 'pad', smd: true }], ['th', { tipo: 'pad', smd: false, layer: 'Multi' }], ['fill', { tipo: 'fill' }], ['region', { tipo: 'region' }]];
+function comRegras(eb, conjunto) {
+  const RG = regrasMod();
+  if (!RG || !conjunto || !eb || !Array.isArray(eb.polygons) || !eb.polygons.length) return eb;
+  let RES;
+  try { RES = typeof conjunto.regraPara === 'function' ? conjunto : RG.resolvedor(conjunto.rules ? conjunto : RG.normaliza(conjunto), { board: eb }); }
+  catch (e) { return eb; }
+  /* as nets de cada camada ('*' = passante: via e pad TH valem em toda camada de cobre) */
+  const nets = new Map();
+  const poe = (L, n) => { if (!n || !L) return; let s = nets.get(L); if (!s) nets.set(L, s = new Set()); s.add(n); };
+  for (const k of ['tracks', 'arcs', 'fills', 'regions']) for (const o of eb[k] || []) if (o && !o.poly) poe(o.layer, o.net);
+  for (const v of eb.vias || []) if (v) poe('*', v.net);
+  const pad = p => { if (p) poe(ehTH(p) ? '*' : p.layer, p.net); };
+  for (const c of eb.components || []) for (const p of (c && c.pads) || []) pad(p);
+  for (const p of eb.freepads || []) pad(p);
+  let mudou = false;
+  const pols = eb.polygons.map(P => {
+    if (!P || !RE_COBRE.test(P.layer || '') || P.pour === 'none') return P;
+    const net = typeof P.net === 'string' ? P.net : '';
+    const mao = { tipo: 'region', poly: true, net, layer: P.layer, id: P.id };
+    const vizinhas = new Set([...(nets.get(P.layer) || []), ...(nets.get('*') || [])]);
+    vizinhas.delete(net);
+    let cn = null;
+    for (const n of vizinhas) for (const [k, d0] of TIPOS_REGRA) {
+      let f = null;
+      try { f = RG.folgaEntre(RES, mao, Object.assign({ net: n, layer: P.layer }, d0)); } catch (e) { f = null; }
+      if (!f || !isNum(f.gap) || !(f.gap > folgaDe(P, k, n) + 1e-9)) continue;
+      cn = cn || {};
+      (cn[n] = cn[n] || {})[k] = f.gap;
+    }
+    if (!cn) return P;
+    mudou = true;
+    const cnet = Object.assign({}, P.clearanceNet || {});
+    for (const n of Object.keys(cn)) cnet[n] = Object.assign({}, cnet[n] || {}, cn[n]);
+    return Object.assign({}, P, { clearanceNet: cnet });
+  });
+  return mudou ? Object.assign({}, eb, { polygons: pols }) : eb;
 }
 
 /* ============================== assinatura ============================== */
@@ -659,6 +715,6 @@ function placaSemDespejoVelho(eb, regioes) {
   return out;
 }
 
-return { despeja, despejaTodos, assinatura, desatualizado, placaSemDespejoVelho,
+return { despeja, despejaTodos, assinatura, desatualizado, placaSemDespejoVelho, comRegras,
          _int: { contornoPlaca, formaPad, arcoGrosso, capsula, circulo, ESC } };
 });

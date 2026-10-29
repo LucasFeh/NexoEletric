@@ -321,6 +321,14 @@ function verifica(ctx, a) {
     const quadrados = furos.map(f => ({ tipo: 'quadrado do parafuso', id: f.origem, bb: f.quadrado, paths: [K.paraC([[f.quadrado.x1, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y2], [f.quadrado.x1, f.quadrado.y2]])] }));
     const recortes = (eb.cutouts || []).filter(k => k && Array.isArray(k.points) && k.points.length >= 3 && k.kindn !== -1 && k.kindn !== 1).map(k => ({ tipo: 'recorte', id: k.id || '', bb: caixaPts(k.points), paths: [K.paraC(k.points)] }));
     const nome = s => s.tipo === 'texto' ? `texto "${s.texto}"` : `serigrafia de ${s.owner || s.id}`;
+    /* a placa encolhida da folga da borda, pelo CONTORNO (placa recortada ou com arco nao cabe no
+       retangulo da bbox); sem contorno, a bbox como antes */
+    const PP = ctx.modulo('hub-pcbpour.js');
+    const ptsPlaca = PP && PP._int && PP._int.contornoPlaca ? PP._int.contornoPlaca(eb.board, 0.05) : null;
+    const placaC = ptsPlaca ? K.offset([K.paraC(ptsPlaca)], -o.silk_borda, false) : null;
+    const foraDaPlaca = s => placaC
+      ? K.area(s.paths) - K.area(K.inter(s.paths, placaC, false)) > 1e-4
+      : !!bbPlaca && !(s.bb.x1 >= bbPlaca.x1 + o.silk_borda && s.bb.x2 <= bbPlaca.x2 - o.silk_borda && s.bb.y1 >= bbPlaca.y1 + o.silk_borda && s.bb.y2 <= bbPlaca.y2 - o.silk_borda);
     const bate = (s, ob, folga, contra) => {
       if (!cruza(s.bb, ob.bb, folga + 0.01)) return;
       const ex = folga > 0 ? K.offset(ob.paths, folga, false) : ob.paths;
@@ -341,7 +349,7 @@ function verifica(ctx, a) {
       }
       for (const k of recortes) bate(s, k, o.silk, `recorte/furo ${k.id}`);
       if (txt) for (const q of quadrados) bate(s, q, 0, `quadrado isolado do parafuso (${q.id})`);
-      if (txt && bbPlaca && !(s.bb.x1 >= bbPlaca.x1 + o.silk_borda && s.bb.x2 <= bbPlaca.x2 - o.silk_borda && s.bb.y1 >= bbPlaca.y1 + o.silk_borda && s.bb.y2 <= bbPlaca.y2 - o.silk_borda))
+      if (txt && foraDaPlaca(s))
         viol.push({ regra: 'serigrafia', camada: s.layer, x: r3((s.bb.x1 + s.bb.x2) / 2), y: r3((s.bb.y1 + s.bb.y2) / 2), msg: `${nome(s)} a menos de ${o.silk_borda} mm da borda da placa`, objeto: { tipo: s.tipo, id: s.id, texto: s.texto } });
     }
     /* serigrafia x serigrafia (mesmo lado; o desenho de um mesmo componente pode se tocar) */

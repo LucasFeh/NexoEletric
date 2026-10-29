@@ -9,7 +9,8 @@
      poligonos do hub despejados.
 
    Duas metades:
-   - PURA (navegador e Node): efetiva({board, changes, HubCore, pcblib, Teardrop, Pour}) -> eb.
+   - PURA (navegador e Node): efetiva({board, changes, HubCore, pcblib, Teardrop, Pour, regras}) -> eb.
+     regras = o conjunto do projeto (rules.js): o despejo respeita a folga por classe (Pour.comRegras).
      O app desktop a usa para a BOM publicada no NexoBD (electron/lib/armazem.js).
    - NO HUB (so navegador): instala({...}) guarda a placa do projeto aberto. Com a vista PCB do
      MESMO projeto aberta, vale a placa DELA, ao vivo, inclusive o que ainda nao foi salvo
@@ -48,8 +49,10 @@ function efetiva(o) {
     try {
       const ids = new Set(pols.map(q => String(q.id)));
       let novas = [];
-      for (const pol of pols.slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0))) {
-        const d = P.despeja(eb, pol);
+      const ebR = o.regras && typeof P.comRegras === 'function' ? P.comRegras(eb, o.regras) : eb;
+      const polsR = (ebR.polygons || []).filter(q => q && ids.has(String(q.id)) && q.pour !== 'none' && Array.isArray(q.pts) && q.pts.length >= 3);
+      for (const pol of polsR.slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0))) {
+        const d = P.despeja(ebR, pol);
         const reg = (d && (d.regioes || d)) || [];
         if (Array.isArray(reg)) novas = novas.concat(reg);
       }
@@ -112,6 +115,7 @@ function garanteModulos() {
   if (!g.HubPcbTeardrop) fila.push('hub-pcbteardrop.js');
   if (!g.ClipperLib) fila.push('hub-clipper.js');
   if (!g.HubGerber) fila.push('hub-gerber.js');
+  if (!g.HubPcbRegras) fila.push('hub-pcbregras.js');
   if (!g.HubPcbPour) fila.push('hub-pcbpour.js');
   modulos = fila.reduce((p, f) => p.then(() => carregaScript(f).catch(() => null)), Promise.resolve());
   return modulos;
@@ -146,8 +150,17 @@ function instala(op) {
       const ch = leChanges(txt);
       await garanteModulos();
       const lib = precisaLib(ch) ? await garanteLibs() : null;
+      /* as regras do projeto (as da vista PCB): o rules.js, senao o padrao da casa + board.rules */
+      let regras = null;
+      const RG = g.HubPcbRegras;
+      if (RG && ((p.board.polygons || []).length || ch.some(c => c && c.op === 'poly_add'))) {
+        try {
+          const r = await fetch('Projects/' + encodeURIComponent(p.name) + '/rules.js?t=' + Date.now(), { cache: 'no-store' });
+          regras = r.ok ? RG.ler(await r.text()) : RG.doBoard(p.board);
+        } catch (e) { try { regras = RG.doBoard(p.board); } catch (x) { regras = null; } }
+      }
       if (chave !== k) return;                       /* trocou de projeto no meio */
-      eb = efetiva({ board: p.board, changes: ch, HubCore: g.HubCore, pcblib: lib, Teardrop: g.HubPcbTeardrop, Pour: g.HubPcbPour });
+      eb = efetiva({ board: p.board, changes: ch, HubCore: g.HubCore, pcblib: lib, Teardrop: g.HubPcbTeardrop, Pour: g.HubPcbPour, regras });
     } catch (e) { console.warn('placa viva:', e); eb = p.board; }
     finally { if (chave === k) { montando = null; avisa(); } }
   }

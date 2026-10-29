@@ -1503,7 +1503,16 @@ function moveComp(m, g){
    antes do componente andar (xfPointInv) -- e o que o motor exige (hubcore-api). */
 function moveDesignator(m, g){
   const ref = m.src.owner, comp = ref != null ? model.compByRef[ref] : null;
+  /* componente criado por comp_add: o designator dele vai na propria linha do comp_add (des_*),
+     o Altium nao o tem no lugar que o hub sintetizou (1.36.0) */
   const d = comp && comp.changed ? HC.compDelta(comp) : null;
+  const add = comp && comp.added ? ultimoOp(x => x.op === 'comp_add' && x.ref === ref) : null;
+  if (add) {
+    if (isNum(g.x) && isNum(g.y)) { const p = d ? HC.xfPointInv(d, g.x, g.y) : { x:g.x, y:g.y }; add.des_x = r6(p.x); add.des_y = r6(p.y); }
+    if (isNum(g.rot)) add.des_rot = normAng(d ? (d.flip ? d.phi + 180 - g.rot : g.rot - d.dr) : g.rot);
+    if (isNum(g.h) && g.h > 0) add.des_h = r6(g.h);
+    return;
+  }
   let c = ultimoOp(x => x.op === 'designator_move' && x.ref === ref);
   const novo = !c;
   if (novo) c = { op:'designator_move', ref, orig_x:m.src.x, orig_y:m.src.y };
@@ -2031,12 +2040,16 @@ function comDespejo(eb){
   const ids = new Set(pols.map(p => String(p.id)));
   let novas = [];
   try {
-    const ord = pols.slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+    /* a folga por classe das regras do projeto entra no poligono so para despejar (1.36.0); a placa
+       da tela fica com o poligono como esta no arquivo */
+    const ebR = typeof HPP.comRegras === 'function' && regrasAtuais() ? HPP.comRegras(eb, regrasAtuais()) : eb;
+    const polR = new Map((ebR.polygons || []).map(p => [p && p.id, p]));
+    const ord = pols.map(p => polR.get(p.id) || p).sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
     for (const pol of ord) {
-      const h = HPP.assinatura(eb, pol);
+      const h = HPP.assinatura(ebR, pol);
       let c = despejoCache.get(pol.id);
       if (!c || c.hash !== h) {
-        const r = HPP.despeja(eb, pol);
+        const r = HPP.despeja(ebR, pol);
         c = { hash:h, regioes:(r && (r.regioes || r)) || [] };
         if (!Array.isArray(c.regioes)) c.regioes = [];
         despejoCache.set(pol.id, c);

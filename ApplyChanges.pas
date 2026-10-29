@@ -2683,11 +2683,13 @@ begin
   PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
 
   // Estilo num ciclo proprio (bounding box so recalcula no EndModify - ver DoTextEdit).
-  if JHas(Line, 'h') or JHas(Line, 'rot') then
+  if JHas(Line, 'h') or JHas(Line, 'w') or JHas(Line, 'rot') then
   begin
     PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
     if JHas(Line, 'h') then
       Nm.Size := MMsToCoord(JNum(Line, 'h'));
+    if JHas(Line, 'w') then
+      Nm.Width := MMsToCoord(JNum(Line, 'w'));
     if JHas(Line, 'rot') then
       Nm.Rotation := JNum(Line, 'rot');
     PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
@@ -3854,7 +3856,9 @@ end;
 procedure DoCompAdd(Line: String);
 var
   Comp: TObject;
+  Nm: IPCB_Text;
   Ref, Fp, What, Etapa, Prob: String;
+  cx, cy: Double;
 begin
   Ref := JGet(Line, 'ref');
   Fp := JGet(Line, 'footprint');
@@ -3895,6 +3899,35 @@ begin
     Prob := AplicaNetsDoCampo(Comp, JGet(Line, 'nets'));
   if Prob <> '' then
     LogAviso(What + ': colocado, mas ' + Prob);
+  // Designator onde o hub pos (des_x/des_y = centro do bounding box; des_h/des_w/des_rot), com
+  // a mesma sequencia do DoDesignatorMove: autoposition Manual, estilo, depois MoveByXY.
+  if JHas(Line, 'des_x') or JHas(Line, 'des_h') or JHas(Line, 'des_w') or JHas(Line, 'des_rot') then
+  begin
+    Nm := Comp.Name;
+    PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+    Comp.ChangeNameAutoposition(eAutoPos_Manual);
+    PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+    if JHas(Line, 'des_h') or JHas(Line, 'des_w') or JHas(Line, 'des_rot') then
+    begin
+      PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+      if JHas(Line, 'des_h') then
+        Nm.Size := MMsToCoord(JNum(Line, 'des_h'));
+      if JHas(Line, 'des_w') then
+        Nm.Width := MMsToCoord(JNum(Line, 'des_w'));
+      if JHas(Line, 'des_rot') then
+        Nm.Rotation := JNum(Line, 'des_rot');
+      PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+    end;
+    if JHas(Line, 'des_x') and JHas(Line, 'des_y') then
+    begin
+      cx := (XMM(Nm.BoundingRectangleForSelection.Left) + XMM(Nm.BoundingRectangleForSelection.Right)) / 2;
+      cy := (YMM(Nm.BoundingRectangleForSelection.Bottom) + YMM(Nm.BoundingRectangleForSelection.Top)) / 2;
+      PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
+      Nm.MoveByXY(MMsToCoord(JNum(Line, 'des_x') - cx), MMsToCoord(JNum(Line, 'des_y') - cy));
+      PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
+    end;
+    Nm.GraphicallyInvalidate;
+  end;
   LogOk(What + ' -> x=' + JGet(Line, 'x') + ' y=' + JGet(Line, 'y') + ' rot=' + JGet(Line, 'rot') +
     ' (' + IntToStr(ContaPads(Comp)) + ' pads)');
 end;

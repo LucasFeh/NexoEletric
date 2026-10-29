@@ -90,7 +90,7 @@ module.exports = {
         const P = ctx.modulo('hub-pcbpour.js'), G2 = ctx.modulo('hub-gerber.js');
         if (P && (eb.polygons || []).length && a.despejar !== false) {
           try {
-            const d = P.despejaTodos(eb, { texto: G2 && G2.geometriaTexto ? (t => { try { return G2.geometriaTexto(t); } catch (_) { return null; } }) : undefined });
+            const d = P.despejaTodos(ctx.comRegras(p, eb), { texto: G2 && G2.geometriaTexto ? (t => { try { return G2.geometriaTexto(t); } catch (_) { return null; } }) : undefined });
             ebG = P.placaSemDespejoVelho(eb, d.regioes); pour = { poligonos: eb.polygons.length, regioes: (d.regioes || []).length, avisos: d.avisos };
           } catch (e) { pour = { erro: e.message }; }
         }

@@ -55,6 +55,36 @@ function caixaDe(o) {
 }
 const sobrepoe = (a, b) => a && b && a.x1 <= b.x2 && a.x2 >= b.x1 && a.y1 <= b.y2 && a.y2 >= b.y1;
 
+/* ---------- texto dentro do contorno? (o designator que vai parar fora da placa) ----------
+   t => true | false | undefined (sem contorno). A forma do texto vem do HubGerber (a mesma da tela e
+   do Gerber); sem ele, a caixa aproximada pelo tamanho da fonte. */
+function dentroDaPlaca(ctx, eb) {
+  const P = ctx.modulo('hub-pcbpour.js'), G = ctx.modulo('hub-gerber.js');
+  const anel = P && P._int && P._int.contornoPlaca ? P._int.contornoPlaca(eb.board, 0.05) : null;
+  if (!anel) return () => undefined;
+  const dentro = (x, y) => {
+    let c = false;
+    for (let i = 0, j = anel.length - 1; i < anel.length; j = i++) {
+      const [xi, yi] = anel[i], [xj, yj] = anel[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  return t => {
+    let pts = [];
+    try {
+      const g = G && G.geometriaTexto ? G.geometriaTexto(t) : null;
+      if (g && Array.isArray(g.regioes)) for (const r of g.regioes) if (r && !r.hole && r.pts) pts.push(...r.pts);
+      if (g && Array.isArray(g.tracos)) for (const tr of g.tracos) if (Array.isArray(tr)) pts.push(...tr);
+    } catch (_) { pts = []; }
+    if (!pts.length && isNum(t.x) && isNum(t.y)) {
+      const hw = String(t.text || '').length * (t.h || 1) * 0.45, hh = (t.h || 1) / 2;
+      pts = [[t.x - hw, t.y - hh], [t.x + hw, t.y - hh], [t.x + hw, t.y + hh], [t.x - hw, t.y + hh]];
+    }
+    return pts.length ? pts.every(q => dentro(q[0], q[1])) : undefined;
+  };
+}
+
 /* ---------- a placa: pontos do contorno para o roteador ---------- */
 function lacosDe(ctx, eb) {
   const L = ctx.modulo('hub-laser.js');
@@ -170,7 +200,7 @@ module.exports = {
     },
     {
       nome: 'pcb_consultar', titulo: 'Consultar objetos da placa', leitura: true,
-      descricao: 'Lista objetos da placa EFETIVA (board.js + changes.js) com ids e coordenadas, filtrando por caixa (região em mm), camada, net, componente (ref = dono) ou id. Tipos: componentes, pads, trilhas, arcos, vias, textos, fills, regioes, silk, linhas, recortes. Os ids servem para pcb_apagar/pcb_editar.',
+      descricao: 'Lista objetos da placa EFETIVA (board.js + changes.js) com ids e coordenadas, filtrando por caixa (região em mm), camada, net, componente (ref = dono) ou id. Tipos: componentes, pads, trilhas, arcos, vias, textos, fills, regioes, silk, linhas, recortes. Os ids servem para pcb_apagar/pcb_editar. Placa grande: filtre por caixa, peça só os campos que precisa (campos) e/ou grave a lista inteira em arquivo (arquivo:true devolve o caminho e só a contagem) — despejar pads/vias/trilhas da placa toda na conversa esgota o contexto.',
       entrada: { type: 'object', properties: {
         projeto: PROJETO,
         tipo: { type: 'string', enum: Object.keys(TIPOS) },
@@ -178,6 +208,8 @@ module.exports = {
         camada: { type: 'string', description: 'Top, Bottom, TopOverlay, Mech1...' },
         net: { type: 'string' }, ref: { type: 'string', description: 'componente (para pads/textos/silk: o dono)' }, id: { type: 'string' },
         limite: { type: 'integer', minimum: 1, maximum: 2000, description: 'padrão 200' }, pular: { type: 'integer', minimum: 0 },
+        campos: { type: 'array', items: { type: 'string' }, description: 'só estes campos de cada item (ex.: ["id","x","y","net"])' },
+        arquivo: { type: 'boolean', description: 'true = grava TODOS os itens filtrados num .json (pasta temporária) e devolve o caminho, sem a lista na resposta' },
       }, required: ['projeto', 'tipo'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
@@ -191,7 +223,16 @@ module.exports = {
           && (!a.ref || o.ref === a.ref || o.owner === a.ref)
           && (!a.id || String(o.id) === a.id)
           && (!cx || sobrepoe(caixaDe(o), cx)));
+        if (Array.isArray(a.campos) && a.campos.length) L = L.map(o => { const r = {}; for (const k of a.campos) if (o[k] !== undefined) r[k] = o[k]; return r; });
         const total = L.length, ini = a.pular || 0, lim = a.limite || 200;
+        if (a.arquivo) {
+          const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+          const dir = path.join(os.tmpdir(), 'nexoeletric-consultas');
+          fs.mkdirSync(dir, { recursive: true });
+          const f = path.join(dir, `${String(p.nome).replace(/[^\w.-]+/g, '_')}-${a.tipo}-${Date.now()}.json`);
+          fs.writeFileSync(f, JSON.stringify({ projeto: p.nome, tipo: a.tipo, filtros: { caixa: a.caixa, camada: a.camada, net: a.net, ref: a.ref, id: a.id }, total, itens: L }, null, 1));
+          return { tipo: a.tipo, total, arquivo: f, amostra: L.slice(0, 3) };
+        }
         return { tipo: a.tipo, total, mostrando: [ini, Math.min(total, ini + lim)], itens: L.slice(ini, ini + lim) };
       },
     },
@@ -265,7 +306,17 @@ module.exports = {
           if (!(board.components || []).some(k => k.ref === a.ref)) {
             const i = arq.itens.findIndex(x => x && x.op === 'comp_add' && x.ref === a.ref);
             if (i < 0) throw new ErroMcp(`componente "${a.ref}" não está no board.js nem num comp_add do changes.js`);
-            const novo = Object.assign({}, arq.itens[i], { x: op.x, y: op.y, rot: op.rot, layer: op.layer }, op.note ? { note: op.note } : {});
+            const velho = arq.itens[i];
+            const novo = Object.assign({}, velho, { x: op.x, y: op.y, rot: op.rot, layer: op.layer }, op.note ? { note: op.note } : {});
+            /* o designator posto na linha (des_x/des_y) anda junto com o componente */
+            if (isNum(velho.des_x) && isNum(velho.des_y)) {
+              const lado = q => q === 'Bottom' ? 'Bottom' : 'Top';
+              const d = ctx.hc.compDelta({ src: { x: velho.x, y: velho.y, rot: velho.rot || 0, layer: lado(velho.layer) },
+                                           eff: { x: novo.x, y: novo.y, rot: novo.rot || 0, layer: lado(novo.layer) } });
+              const q = ctx.hc.xfPoint(d, velho.des_x, velho.des_y);
+              novo.des_x = ops.r6(q.x); novo.des_y = ops.r6(q.y);
+              if (isNum(velho.des_rot)) novo.des_rot = ((velho.des_rot + d.dr) % 360 + 360) % 360;
+            }
             arq.substitui(i, novo);
             return [novo];
           }
@@ -282,7 +333,7 @@ module.exports = {
     },
     {
       nome: 'pcb_aplicar', titulo: 'Aplicar ops no changes.js',
-      descricao: 'Escreve QUALQUER op do changes.js (AI-GUIDE Parte B): track_add/edit/del, via_*, arc_*, text_add/edit/del, fill_*, region_add/del, designator_move, comp_move, comp_attr, outline_set — e as ops novas dos módulos (comp_add, pad_add, poly_add… do hub-pcbeco). Os orig_* das edições/remoções são preenchidos SOZINHOS a partir do board.js (pode omiti-los). Op de um objeto que já tem linha edita aquela linha. Tudo validado antes de gravar; com erro nada é gravado.',
+      descricao: 'Escreve QUALQUER op do changes.js (AI-GUIDE Parte B): track_add/edit/del, via_*, arc_*, text_add/edit/del, fill_*, region_add/del, designator_move, comp_move, comp_attr, outline_set — e as ops novas dos módulos (comp_add, pad_add, poly_add… do hub-pcbeco). Os orig_* das edições/remoções são preenchidos SOZINHOS a partir do board.js (pode omiti-los). Op de um objeto que já tem linha edita aquela linha. Tudo validado antes de gravar; com erro nada é gravado. designator_move/comment_move: x/y/rot = onde o texto deve FICAR na placa (a conta inversa do comp_move é feita aqui; "referencial":"original" grava como veio), h = altura e w = traço em mm; funciona também para componente criado por comp_add. A resposta traz em "textos" a posição efetiva de cada um e "fora_da_placa" quando ele sai do contorno.',
       entrada: { type: 'object', properties: Object.assign({
         projeto: PROJETO,
         ops: { type: 'array', minItems: 1, items: { type: 'object', properties: { op: { type: 'string' } }, required: ['op'], additionalProperties: true },
@@ -290,11 +341,21 @@ module.exports = {
       }, COMUNS), required: ['projeto', 'ops'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        return ops.transacao(ctx, p, (arq, board) => a.ops.map(o0 => {
+        const hc = ctx.pcbPronto();
+        const ehTexto = o => o && (o.op === 'designator_move' || o.op === 'comment_move');
+        const pedidos = a.ops.filter(ehTexto).map(o => ({ ref: o.ref, op: o.op, x: o.x, y: o.y }));
+        const est = ops.transacao(ctx, p, (arq, board) => a.ops.map(o0 => {
           const o = Object.assign({}, o0);
           if (a.note && !o.note) comNote(o, a);
+          if (ehTexto(o)) return ops.aplicaTexto(arq, board, hc, o);
           return ops.mescla(arq, ops.origDe(o, board)).obj;
-        }), { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_aplicar' });
+        }), { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_aplicar',
+              relata: pedidos.length ? (model, board) => {
+                const textos = ops.posicoesEfetivas(hc, board, model, pedidos, dentroDaPlaca(ctx, hc.effectiveBoard(board, model)));
+                const fora = textos.filter(t => t.fora_da_placa).map(t => t.ref);
+                return { textos, avisos_textos: fora.length ? `${fora.length} texto(s) FORA do contorno da placa: ${fora.slice(0, 20).join(', ')}${fora.length > 20 ? '…' : ''}` : undefined };
+              } : null });
+        return est;
       },
     },
     {

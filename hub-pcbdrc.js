@@ -62,6 +62,9 @@
                       componentes diferentes (o contorno do próprio footprint não briga com ele mesmo).
      BoardOutlineClearance  cobre fora da placa, cruzando o contorno ou dentro de recorte, ou mais
                       perto da borda que a folga.
+     SilkOutsideBoard  (da casa, 1.36.0; não existe no Altium) texto de serigrafia fora da placa ou
+                      cruzando o contorno — o designator que foi parar fora passava calado. Roda junto
+                      com qualquer checagem de silk ou com a BoardOutlineClearance, e em opts.tipos.
      NetAntennae      ponta de trilha/arco com net que não encosta em nada da mesma net.
      ComponentClearance  caixas dos componentes do mesmo lado (sem corpo 3D no espelho: a caixa é a
                       do Altium sem nome/comment — pads, silk e desenho —, mais larga que o corpo).
@@ -764,7 +767,9 @@ function uniao(n){
 
 /* ============================== o DRC ============================== */
 
-const TITULO = k => (RG.TIPOS[k] && RG.TIPOS[k].titulo) || k;
+const TITULO = k => k === 'SilkOutsideBoard' ? 'Serigrafia fora da placa' : (RG.TIPOS[k] && RG.TIPOS[k].titulo) || k;
+/* a checagem da casa que nao tem regra no Altium: vale sem regra no conjunto */
+const REGRA_CASA = { name:'SilkOutsideBoard (casa)' };
 
 function rodar(eb, regras, opts){
   const t0 = agora();
@@ -1154,6 +1159,21 @@ function rodar(eb, regras, opts){
         }
       }
     } else avisos.push('placa sem contorno: a folga ao contorno não foi conferida');
+  }
+
+  /* ---- texto de serigrafia fora da placa (da casa: o Altium nao confere) ---- */
+  const querSilkFora = opts.tipos ? opts.tipos.indexOf('SilkOutsideBoard') >= 0
+    : (quer('BoardOutlineClearance') || querSilkMasc || quer('SilkToSilkClearance'));
+  if (querSilkFora && silk.length) {
+    const C = contornoDaPlaca(eb);
+    if (C.aneis.length) for (const o of silk) {
+      if (!o.texto || !envolve(o)) continue;
+      const P = o.prims, fora = !dentroDaPlaca(C, P[0].fx, P[0].fy);
+      const d = fora ? null : dListas(P, C.arestas, EPS);
+      if (!fora && !(d.d <= 0)) continue;
+      poe(REGRA_CASA, 'SilkOutsideBoard', { msg:'Serigrafia fora da placa: (' + (fora ? 'fora do contorno' : 'cruza o contorno') + ') ' + o.nome,
+        x:(o.bb[0] + o.bb[2]) / 2, y:(o.bb[1] + o.bb[3]) / 2, layer:o.layer, ids:[o.id], valor:fora ? -1 : 0, limite:0 });
+    }
   }
 
   /* ---- componente a componente (caixas do mesmo lado) ---- */

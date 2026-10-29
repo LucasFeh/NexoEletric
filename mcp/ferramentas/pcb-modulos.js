@@ -147,7 +147,7 @@ module.exports = {
         const P = ctx.exige('hub-pcbpour.js', 'HubPcbPour');
         const { eb } = ctx.placa(p);
         if (!(eb.polygons || []).length) return { poligonos: 0, nota: 'a placa não tem polígono (pour_definir cria)' };
-        const r = P.despejaTodos(eb, { texto: textoGeo(ctx) });
+        const r = P.despejaTodos(ctx.comRegras(p, eb), { texto: textoGeo(ctx) });
         return { poligonos: eb.polygons.length, ms: r.ms, avisos: r.avisos, regioes: (r.regioes || []).length,
                  por_poligono: Object.entries(r.porPoligono || {}).map(([id, x]) => ({ id, area_mm2: x.area, regioes: (x.regioes || []).length, avisos: x.avisos,
                    desatualizado_no_espelho: (() => { try { const pol = eb.polygons.find(q => q.id === id); return pol ? P.desatualizado(eb, pol) : undefined; } catch (_) { return undefined; } })() })) };

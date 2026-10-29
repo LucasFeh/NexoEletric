@@ -489,9 +489,14 @@ function sintetizaComp(fp, a, cid){
     silk.push(obj);
   });
   const bx = bbox || { x1:a.x, y1:a.y, x2:a.x, y2:a.y };
+  /* o designator: acima do corpo, ou onde o comp_add pede (des_x/des_y = centro do texto, na placa;
+     des_h/des_w/des_rot = altura, traço e giro -- o DoCompAdd do ApplyChanges poe la tambem) */
+  const des = a.des || {};
+  const h = isNum(des.h) ? des.h : DESIG_H;
   const texts = [{ id:cid + 'x', layer:a.layer === 'Bottom' ? 'BottomOverlay' : 'TopOverlay',
-                   x:r6((bx.x1 + bx.x2) / 2), y:r6(bx.y2 + DESIG_FOLGA + DESIG_H / 2), text:a.ref, h:DESIG_H, rot:0,
-                   mirror:a.layer === 'Bottom', designator:true, comment:false, owner:a.ref, w:DESIG_W, kind:'stroke' }];
+                   x:r6(isNum(des.x) ? des.x : (bx.x1 + bx.x2) / 2), y:r6(isNum(des.y) ? des.y : bx.y2 + DESIG_FOLGA + h / 2),
+                   text:a.ref, h, rot:isNum(des.rot) ? normAng(des.rot) : 0,
+                   mirror:a.layer === 'Bottom', designator:true, comment:false, owner:a.ref, w:isNum(des.w) ? des.w : DESIG_W, kind:'stroke' }];
   return { comp, silk, texts };
 }
 
@@ -1213,9 +1218,11 @@ function applyPcbChanges(board, changes, opts){
             return bad(`o designator de ${ch.ref} já terá andado com o comp_move #${at.mexeu+1} — o ApplyChanges aplica em ordem e vai recusar este designator_move; ponha-o antes do comp_move`);
           if (!conferir(false, at.mexeu, 'orig_* não confere com o board.js — espelho pode estar desatualizado')) return;
         }
-        const inv = invalido(ch, ['x','y','h','rot']); if (inv) return bad(`campo "${inv}" inválido`);
+        const inv = invalido(ch, ['x','y','h','w','rot']); if (inv) return bad(`campo "${inv}" inválido`);
         if (isNum(ch.h) && ch.h <= 0) return bad('altura h deve ser > 0');
+        if (isNum(ch.w) && ch.w <= 0) return bad('espessura w deve ser > 0');
         if (isNum(ch.h)) m.eff.h = ch.h;
+        if (isNum(ch.w)) m.eff.w = ch.w;
         escreveTexto(m, { x:ch.x, y:ch.y, rot:ch.rot }, at);
         m.changed = true; quem.set(m, idx);
         break;
@@ -1234,7 +1241,9 @@ function applyPcbChanges(board, changes, opts){
         if (typeof ch.ref !== 'string' || !ch.ref) return bad('campo "ref" ausente');
         if (typeof ch.footprint !== 'string' || !ch.footprint) return bad('campo "footprint" ausente');
         for (const k of ['x','y']) if (!isNum(ch[k])) return bad(`campo "${k}" ausente/inválido`);
-        const inv = invalido(ch, ['rot']); if (inv) return bad(`campo "${inv}" inválido`);
+        const inv = invalido(ch, ['rot','des_x','des_y','des_h','des_w','des_rot']); if (inv) return bad(`campo "${inv}" inválido`);
+        if ((isNum(ch.des_h) && ch.des_h <= 0) || (isNum(ch.des_w) && ch.des_w <= 0)) return bad('des_h e des_w (altura e traço do designator) devem ser > 0');
+        if (isNum(ch.des_x) !== isNum(ch.des_y)) return bad('des_x e des_y vão juntos (o centro do designator na placa)');
         if (ch.layer != null && ch.layer !== '' && ch.layer !== 'Top' && ch.layer !== 'Bottom')
           return bad(`layer "${ch.layer}" inválida para componente — use Top ou Bottom`);
         const ja = compDe(ch.ref);
@@ -1247,7 +1256,8 @@ function applyPcbChanges(board, changes, opts){
         const lado = ch.layer === 'Bottom' ? 'Bottom' : 'Top', rot = isNum(ch.rot) ? normAng(ch.rot) : 0;
         const cid = 'new-c' + (++addSeq);
         const sc = sintetizaComp(g.fp, { ref:ch.ref, footprint:ch.footprint, comment:typeof ch.comment === 'string' ? ch.comment : '',
-                                         x:ch.x, y:ch.y, rot, layer:lado, nets }, cid);
+                                         x:ch.x, y:ch.y, rot, layer:lado, nets,
+                                         des:{ x:ch.des_x, y:ch.des_y, h:ch.des_h, w:ch.des_w, rot:ch.des_rot } }, cid);
         const m = { kind:'comp', src:sc.comp, eff:{ x:ch.x, y:ch.y, rot, layer:lado }, changed:false, attrChanged:false, added:true };
         oculto(m, 'pares', pares);
         oculto(m, 'fonte', g.fonte);

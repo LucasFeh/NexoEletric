@@ -4,6 +4,33 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.36.0 — 2026-10-29
+
+Serigrafia e despejo pela IA. Nasceu de uma rodada em que 80 designadores foram parar fora da placa com `status: ok`,
+e de 220 violações de Clearance de dois polígonos novos.
+
+- **`designator_move` no lugar final (MCP).** Antes, o x/y valia no lugar de antes do `comp_move` do componente: o
+  `pcb_aplicar` punha a linha antes do `comp_move` e respondia ok, mas o texto andava junto com o componente e ia
+  parar em outro lugar. Agora o x/y/rot é onde o texto deve **ficar** na placa, e a conta inversa é feita por dentro
+  (a mesma da vista PCB, `xfPointInv`). `"referencial":"original"` mantém o comportamento antigo. A resposta traz em
+  `textos` a posição efetiva de cada texto, a diferença para o pedido e `fora_da_placa` quando ele sai do contorno.
+- **`w` (traço) no `designator_move`**, no hub e no `ApplyChanges`: altura de 0,6–0,8 mm com o traço de 0,254 mm
+  deixava o texto grosso e ilegível.
+- **Designator de componente criado por `comp_add`.** Ele não está no `board.js` ("o designator de J5 não está em
+  board.js » texts"). O lugar, a altura, o traço e o giro agora vão na própria linha do `comp_add` (`des_x`,
+  `des_y`, `des_h`, `des_w`, `des_rot`), no `pcb_aplicar` e arrastando na vista PCB; o `ApplyChanges` põe o nome
+  lá. Mover o componente (`pcb_mover`) leva o designator junto.
+- **Serigrafia fora da placa.** O DRC ganhou a checagem `SilkOutsideBoard` (da casa; o Altium não tem): texto de
+  serigrafia fora do contorno ou cruzando a borda. Roda junto com as checagens de silk e de contorno. O
+  `regras_casa_verificar` passou a medir a borda pelo contorno de verdade, não pelo retângulo da placa.
+- **O despejo respeita as regras por classe.** O polígono do hub (`poly_add`) despejava com a folga única dele
+  (0,2 mm), ignorando "fase × baixa tensão 1,5 mm", "+74 × baixa 1,0 mm" e afins. Agora a folga de cada net vizinha
+  sai da Clearance vencedora (`HubPcbPour.comRegras`, a mesma conta do DRC e do roteador) — só onde ela é maior que
+  a do polígono, então o despejo de quem já seguia as regras não muda. Vale na tela, no DRC, no Gerber, no
+  `pour_despejar` e na placa viva (laser).
+- **`pcb_consultar` com `campos` e `arquivo`.** Pads, vias e trilhas da placa inteira esgotavam o contexto da IA:
+  `campos` devolve só o que pedir e `arquivo:true` grava tudo num `.json` e devolve o caminho.
+
 ## 1.35.0 — 2026-10-28
 
 - **Apagar o cobre despejado do Altium sem polígono na placa.** O ExportBoard leva os pedaços que o Altium despejou

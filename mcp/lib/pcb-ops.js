@@ -13,6 +13,8 @@ const { ArquivoLinhas, jline } = require('./arquivo-linhas.js');
 const { ErroMcp } = require('./contexto.js');
 
 const r6 = v => Math.round(v * 1e6) / 1e6;
+const isNum = v => typeof v === 'number' && isFinite(v);
+const normAng = a => { const v = r6(((a % 360) + 360) % 360); return v >= 360 ? 0 : v; };
 
 /* indice id -> {obj, lista} de tudo que tem id no board.js */
 function indicePorId(board) {
@@ -164,6 +166,82 @@ function mescla(arq, op) {
   return { obj: op, indice: pos, acao: 'nova' };
 }
 
+/* designator_move / comment_move como a IA pensa (1.36.0): x/y/rot = onde o texto deve FICAR na
+   placa ("referencial":"efetivo", o padrao). O motor e o ApplyChanges querem o lugar de antes do
+   comp_move do dono (a linha entra antes dele): a conta inversa e a mesma da vista (pcbframe.js »
+   moveDesignator, HubCore.xfPointInv). "referencial":"original" grava como veio (o de antes).
+   Componente criado por comp_add nao tem designator no board.js (o Altium o poe onde o footprint
+   manda): o lugar vai na propria linha do comp_add (des_x/des_y/des_h/des_w/des_rot).
+   Devolve o objeto que ficou no arquivo. */
+function aplicaTexto(arq, board, hc, op0) {
+  const op = Object.assign({}, op0);
+  const ref = op.ref, refl = op.referencial;
+  delete op.referencial;
+  if (refl != null && refl !== 'efetivo' && refl !== 'original')
+    throw new ErroMcp('referencial deve ser "efetivo" (padrão: x/y/rot = onde o texto fica na placa) ou "original" (o referencial de antes do comp_move)');
+  if (!(board.components || []).some(c => c.ref === ref)) {
+    const i = arq.itens.findIndex(x => x && x.op === 'comp_add' && x.ref === ref);
+    if (i < 0) throw new ErroMcp(`componente "${ref}" não está no board.js nem num comp_add do changes.js`);
+    if (op.op === 'comment_move') throw new ErroMcp(`${ref} foi criado por comp_add: o comment dele ainda não se move pelo hub (o designator sim)`);
+    const novo = Object.assign({}, arq.itens[i]);
+    const model = hc.applyPcbChanges(board, arq.itens);
+    if (isNum(op.x) !== isNum(op.y)) {
+      const t = (hc.effectiveBoard(board, model).texts || []).find(x => x && x.designator && x.owner === ref);
+      if (t) { if (!isNum(op.x)) op.x = t.x; if (!isNum(op.y)) op.y = t.y; }
+    }
+    /* comp_add seguido de comp_move: o des_* vale no lugar do comp_add (antes de andar) */
+    const m = model.compByRef[ref];
+    if (refl !== 'original' && m && m.changed) {
+      const d = hc.compDelta(m);
+      if (isNum(op.x) && isNum(op.y)) { const q = hc.xfPointInv(d, op.x, op.y); op.x = r6(q.x); op.y = r6(q.y); }
+      if (isNum(op.rot)) op.rot = normAng(d.flip ? d.phi + 180 - op.rot : op.rot - d.dr);
+    }
+    for (const [de, para] of [['x', 'des_x'], ['y', 'des_y'], ['h', 'des_h'], ['w', 'des_w'], ['rot', 'des_rot']])
+      if (op[de] !== undefined) novo[para] = op[de];
+    arq.substitui(i, novo);
+    return novo;
+  }
+  if (refl !== 'original' && (isNum(op.x) || isNum(op.y) || isNum(op.rot))) {
+    const model = hc.applyPcbChanges(board, arq.itens);
+    const m = model.compByRef[ref];
+    if (m && m.changed && !m.deleted) {
+      const d = hc.compDelta(m);
+      if (isNum(op.x) || isNum(op.y)) {
+        let x = op.x, y = op.y;
+        if (!isNum(x) || !isNum(y)) {
+          const qual = op.op === 'designator_move' ? 'designator' : 'comment';
+          const t = (hc.effectiveBoard(board, model).texts || []).find(k => k && k[qual] && k.owner === ref);
+          if (t) { if (!isNum(x)) x = t.x; if (!isNum(y)) y = t.y; }
+        }
+        if (isNum(x) && isNum(y)) { const q = hc.xfPointInv(d, x, y); op.x = r6(q.x); op.y = r6(q.y); }
+      }
+      if (isNum(op.rot)) op.rot = normAng(d.flip ? d.phi + 180 - op.rot : op.rot - d.dr);
+    }
+  }
+  return mescla(arq, origDe(op, board)).obj;
+}
+
+/* onde cada designator/comment pedido ficou DE FATO na placa efetiva (para a IA comparar com o que
+   pediu) e se ficou fora do contorno. `pedidos` = [{ref, op, x, y}] */
+function posicoesEfetivas(hc, board, model, pedidos, dentro) {
+  const eb = hc.effectiveBoard(board, model);
+  const out = [];
+  for (const q of pedidos) {
+    const qual = q.op === 'comment_move' ? 'comment' : 'designator';
+    const t = (eb.texts || []).find(k => k && k[qual] && k.owner === q.ref);
+    if (!t) { out.push({ ref: q.ref, texto: qual, erro: 'não achei o texto na placa efetiva' }); continue; }
+    const o = { ref: q.ref, texto: qual, efetivo: { x: r6(t.x), y: r6(t.y), h: t.h, w: t.w, rot: t.rot, layer: t.layer } };
+    if (isNum(q.x) && isNum(q.y)) {
+      o.pedido = { x: q.x, y: q.y };
+      const dist = Math.hypot(t.x - q.x, t.y - q.y);
+      if (dist > 0.005) o.diferenca_mm = r6(dist);
+    }
+    if (dentro) { const f = dentro(t); if (f === false) o.fora_da_placa = true; }
+    out.push(o);
+  }
+  return out;
+}
+
 /* reserializa pelo hub-core; op que ele nao conhece (comp_add, pad_add... do hub-pcbeco) vai
    como linha crua, no mesmo formato */
 function reserializa(hc, itens) {
@@ -233,6 +311,10 @@ function transacao(ctx, p, fn, opts) {
     erros: novosErros,
     validacao: resumoValidacao(model),
   };
+  if (typeof o.relata === 'function') {
+    try { Object.assign(estado, o.relata(model, board, hc) || {}); }
+    catch (e) { estado.relato_erro = String(e && e.message || e); }
+  }
   if (o.simular) { estado.simulado = true; return estado; }
   if (novosErros.length && !o.forcar) {
     estado.dica = 'Nada foi gravado. Corrija os erros (ou passe forcar:true para gravar mesmo assim; o hub e o ApplyChanges vão acusar a linha).';
@@ -256,4 +338,4 @@ function regrasDoProjeto(ctx, p) {
   return { conjunto: R.doBoard(ctx.temBoard(p) ? ctx.board(p) : {}), fonte: 'padrão da casa + board.rules (ainda não há rules.js)' };
 }
 
-module.exports = { indicePorId, achaObjeto, tipoDoObjeto, origDe, chaveDe, mescla, reserializa, transacao, resumoValidacao, regrasDoProjeto, r6 };
+module.exports = { indicePorId, achaObjeto, tipoDoObjeto, origDe, chaveDe, mescla, aplicaTexto, posicoesEfetivas, reserializa, transacao, resumoValidacao, regrasDoProjeto, r6 };
