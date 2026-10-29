@@ -155,17 +155,62 @@ module.exports = {
     },
     {
       nome: 'teardrop_aplicar', titulo: 'Teardrops', modulo: 'hub-pcbteardrop.js',
-      descricao: 'Põe os teardrops que faltam (pad/via com trilha mais fina e sem gota) como o Tools » Teardrops da vista: region_add no changes.js, que o Gerber e o Altium recebem como região de cobre. Os órfãos (trilha/via que andou) a placa já refaz sozinha. opcoes: {estilo:"linha"|"curva", vias, pads, smd, th, ids:[pads/vias]}.',
+      descricao: 'Põe os teardrops que faltam (pad/via com trilha mais fina e sem gota, e a junção em T: trilha que termina no meio de outra da mesma net) como o Tools » Teardrops da vista: region_add no changes.js, que o Gerber e o Altium recebem como região de cobre. Os órfãos (trilha/via que andou) a placa já refaz sozinha. opcoes: {estilo:"linha"|"curva", vias, pads, smd, th, tjuncao (padrão true), ids:[pads/vias] (só esses; sem T)}. Tirar: teardrop_remover.',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, opcoes: { type: 'object', additionalProperties: true } }, SIM), required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const T = ctx.exige('hub-pcbteardrop.js', 'HubPcbTeardrop');
         const { eb } = ctx.placa(p);
-        const pula = new Set((T.reconhece(eb) || []).map(t => (t.de && t.de.id) + '|' + t.trilha + '|' + t.layer));
-        const novos = T.gera(eb, Object.assign({ pula }, a.opcoes || {})) || [];
-        if (!novos.length) return { ok: true, postos: 0, nota: 'nenhum teardrop por pôr: todo pad e via com trilha mais fina já tem o seu' };
+        let novos;
+        if (typeof T.faltam === 'function') novos = T.faltam(eb, a.opcoes || {}) || [];
+        else { const pula = new Set((T.reconhece(eb) || []).map(t => (t.de && t.de.id) + '|' + t.trilha + '|' + t.layer)); novos = T.gera(eb, Object.assign({ pula }, a.opcoes || {})) || []; }
+        if (!novos.length) return { ok: true, postos: 0, nota: 'nenhum teardrop por pôr: todo pad e via com trilha mais fina e toda junção em T já tem o seu' };
         const L = novos.map(g => { const o = { op: 'region_add', layer: g.layer, pts: g.points.map(q => [r6(q[0]), r6(q[1])]), note: 'teardrop do hub' }; if (g.net) o.net = g.net; return o; });
-        return Object.assign({ postos: L.length }, aplicaOps(ctx, p, L, a, 'teardrop_aplicar'));
+        return Object.assign({ postos: L.length, em_t: novos.filter(g => g.tipo === 'trilha').length }, aplicaOps(ctx, p, L, a, 'teardrop_aplicar'));
+      },
+    },
+    {
+      nome: 'teardrop_remover', titulo: 'Tirar teardrops', modulo: 'hub-pcbteardrop.js',
+      descricao: 'Tira os teardrops da placa, como o "Tirar teardrops" da vista: o posto pelo hub sai tirando a linha region_add do changes.js; o do espelho (board.js) ganha um region_del com os orig_*. O do espelho antigo (board.js sem "exporter") não se apaga daqui e volta em "ficaram". nets/camadas limitam a esses. simular:true só mostra.',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO,
+        nets: { type: 'array', items: { type: 'string' }, description: 'só os teardrops destas nets' },
+        camadas: { type: 'array', items: { type: 'string' }, description: 'só nestas camadas (Top, Bottom...)' } }, SIM), required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const T = ctx.exige('hub-pcbteardrop.js', 'HubPcbTeardrop');
+        if (typeof T.todos !== 'function') throw new ErroMcp('o hub-pcbteardrop.js desta instalação não sabe tirar teardrops (precisa da 1.42.0)');
+        const { board, model, eb } = ctx.placa(p);
+        const nets = Array.isArray(a.nets) && a.nets.length ? new Set(a.nets) : null;
+        const camadas = Array.isArray(a.camadas) && a.camadas.length ? new Set(a.camadas) : null;
+        const vale = r => (!nets || nets.has(r.net)) && (!camadas || camadas.has(r.layer));
+        const lista = (T.todos(eb, board) || []).filter(vale);
+        const livres = new Set((model.regions || []).filter(m => !m.deleted).map(m => String(m.src.id)));
+        const doEspelho = [], doHub = [], ficaram = [];
+        const ebPorId = new Map((eb.regions || []).map(g => [String(g.id), g]));
+        for (const r of lista) {
+          const id = String(r.id);
+          if (r.espelho) { if (livres.has(id)) doEspelho.push(id); else if (!(model.regions || []).some(m => String(m.src.id) === id && m.deleted)) ficaram.push(id); continue; }
+          if (/^new-g/.test(id) && ebPorId.has(id)) doHub.push(ebPorId.get(id));
+        }
+        const mesmo = (x, g) => x && x.op === 'region_add' && x.layer === g.layer && Array.isArray(x.pts) && x.pts.length === g.points.length &&
+          x.pts.every((q, i) => Math.abs(q[0] - g.points[i][0]) < 1e-6 && Math.abs(q[1] - g.points[i][1]) < 1e-6);
+        let nHub = 0;
+        const monta = (arq, brd) => {
+          const tocados = [];
+          nHub = 0;
+          for (const g of doHub) { const i = arq.itens.findIndex(x => mesmo(x, g)); if (i >= 0) { arq.remove(i); nHub++; } }
+          /* o do hub que ficou orfao (a trilha andou) nao e mais reconhecido: a nota da linha diz */
+          for (let i = arq.itens.length - 1; i >= 0; i--) {
+            const x = arq.itens[i];
+            if (x && x.op === 'region_add' && x.note === 'teardrop do hub' && (!nets || nets.has(x.net)) && (!camadas || camadas.has(x.layer))) { arq.remove(i); nHub++; }
+          }
+          for (const id of doEspelho) tocados.push(ops.mescla(arq, ops.origDe({ op: 'region_del', id, note: 'teardrop tirado' }, brd)).obj);
+          return tocados;
+        };
+        const antes = ctx.changes(p).filter(x => x && x.op === 'region_add' && x.note === 'teardrop do hub').length;
+        if (!doEspelho.length && !doHub.length && !antes) return { ok: true, tirados: 0, ficaram: ficaram.length, nota: ficaram.length ? 'só há teardrops do espelho antigo: reexporte a placa com o ExportBoard novo' : 'nenhum teardrop na placa' };
+        const r = ops.transacao(ctx, p, monta, { simular: a.simular, forcar: a.forcar, ferramenta: 'teardrop_remover' });
+        return Object.assign({ tirados: doEspelho.length + nHub, do_espelho: doEspelho.length, do_hub: nHub, ficaram: ficaram.length }, r);
       },
     },
     {

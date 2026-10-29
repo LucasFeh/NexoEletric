@@ -108,6 +108,71 @@ t('opcoes: so vias, so ids, estilo curva', () => {
   assert.ok(Math.abs(area(c.points)) < Math.abs(area(l.points)));   /* a curva e concava: menos cobre */
 });
 
+/* ============================== parte 1b: junção em T (1.42.0) ============================== */
+
+const soT = g => g.filter(r => r.tipo === 'trilha');
+t('T do LM555: principal em dois pedacos emendados, trilha de 0,381 chegando de baixo', () => {
+  /* Altium (LM555 astavel, g da t27): [[0,0.1905],[-0.5715,-0.1905],[-0.1905,-0.5715],[0.1905,-0.5715],[0.5715,-0.1905]] */
+  const B = placa({ tracks: [trk('t49', -1, 0, 0, 0, 0.381), trk('t46', 0, 0, 1, 0, 0.381), trk('t27', 0, -4, 0, 0, 0.381)] });
+  const g = soT(T.gera(B));
+  assert.strictEqual(g.length, 1, JSON.stringify(g));
+  assert.strictEqual(g[0].trilha, 't27'); assert.strictEqual(g[0].teardrop, true); assert.strictEqual(g[0].net, 'A');
+  const alt = [[0, 0.1905], [-0.5715, -0.1905], [-0.1905, -0.5715], [0.1905, -0.5715], [0.5715, -0.1905]];
+  g[0].points.forEach((p, i) => assert.ok(near(p[0], alt[i][0], 2e-4) && near(p[1], alt[i][1], 2e-4), JSON.stringify(g[0].points)));
+});
+
+t('T do DMB: principal de 1 numa trilha so, trilha de 0,5: a base anda a largura da PRINCIPAL', () => {
+  /* Altium (DMB, t159): base em +-1,25 na borda (y 0,5), ponta 0,5 alem, apice em y -0,5 */
+  const B = placa({ tracks: [trk('m', -5, 0, 5, 0, 1), trk('b', 0, 0, 0, 6, 0.5)] });
+  const [r] = soT(T.gera(B));
+  const P = r.points;
+  assert.ok(near(P[0][0], 0) && near(P[0][1], -0.5), JSON.stringify(P));
+  assert.ok(near(Math.abs(P[1][0]), 1.25) && near(P[1][1], 0.5) && near(Math.abs(P[4][0]), 1.25));
+  assert.ok(near(Math.abs(P[2][0]), 0.25) && near(P[2][1], 1.0) && near(P[3][1], 1.0));
+});
+
+t('T a 45 graus (PAEL): ponta na borda da trilha, base pela borda da principal', () => {
+  /* Altium: [[148.971,64.85527],[148.12602,64.15526],[149.321,63.66029],[150.31095,63.66029],[150.51598,64.15526]] */
+  const x0 = 148.971, y0 = 64.50527;
+  const B = placa({ tracks: [trk('t15', x0, y0, 154.67527, y0, 0.7), trk('t41', 143.272, y0, x0, y0, 0.7), trk('t16', x0, y0, 150.368, 63.10827, 0.7)] });
+  const [r] = soT(T.gera(B));
+  const alt = [[148.971, 64.85527], [148.12602, 64.15526], [149.321, 63.66029], [150.31095, 63.66029], [150.51598, 64.15526]];
+  const pega = q => r.points.some(p => near(p[0], q[0], 2e-4) && near(p[1], q[1], 2e-4));
+  assert.ok(alt.every(pega), JSON.stringify(r.points));
+});
+
+t('sem T: canto (L), emenda reta, ponta dentro de via, outra net, tjuncao:false e ids', () => {
+  assert.strictEqual(soT(T.gera(placa({ tracks: [trk('a', 0, 0, 5, 0, 0.3), trk('b', 0, 0, 0, 5, 0.3)] }))).length, 0, 'L');
+  assert.strictEqual(soT(T.gera(placa({ tracks: [trk('a', 0, 0, 5, 0, 0.3), trk('b', 5, 0, 9, 0.5, 0.3)] }))).length, 0, 'emenda');
+  assert.strictEqual(soT(T.gera(placa({ tracks: [trk('a', -5, 0, 5, 0, 0.3), trk('b', 0, 0, 0, 5, 0.3, { net: 'B' })] }))).length, 0, 'outra net');
+  const comVia = placa({ vias: [via('v1', 0, 0, 0.7)], tracks: [trk('a', -5, 0, 5, 0, 0.3), trk('b', 0, 0, 0, 5, 0.3)] });
+  assert.strictEqual(soT(T.gera(comVia)).length, 0, 'na via');
+  const B = placa({ tracks: [trk('a', -5, 0, 5, 0, 0.3), trk('b', 0, 0, 0, 5, 0.3)] });
+  assert.strictEqual(soT(T.gera(B)).length, 1);
+  assert.strictEqual(soT(T.gera(B, { tjuncao: false })).length, 0);
+  assert.strictEqual(soT(T.gera(B, { ids: ['x'] })).length, 0);
+  /* perto da ponta da principal a base nao cabe na borda reta: sem T */
+  assert.strictEqual(soT(T.gera(placa({ tracks: [trk('a', -0.2, 0, 5, 0, 0.3), trk('b', 0, 0, 0, 5, 0.3)] }))).length, 0, 'na ponta');
+});
+
+t('faltam(): o T posto e reconhecido (trilha com trilha) e nao pede de novo; todos() acha os dois lados', () => {
+  const B = placa({ vias: [via('v1', 10, 0, 0.7)], tracks: [trk('a', -5, 0, 10, 0, 0.3), trk('b', 0, 0, 0, 5, 0.25)] });
+  const f0 = T.faltam(B);
+  assert.deepStrictEqual(f0.map(g => g.tipo || 'pad').sort(), ['pad', 'trilha']);
+  const ch = f0.map(g => ({ op: 'region_add', layer: g.layer, net: g.net, pts: g.points, note: 'teardrop do hub' }));
+  const m = C.applyPcbChanges(B, ch);
+  assert.ok(!m.changeItems.some(it => it.status === 'err'), JSON.stringify(m.changeItems.map(it => it.msg)));
+  const eb = C.effectiveBoard(B, m);
+  const rec = T.reconhece(eb);
+  assert.ok(rec.some(r => r.tipo === 'trilha') && rec.some(r => r.tipo === 'pad'), JSON.stringify(rec));
+  assert.deepStrictEqual(T.faltam(eb), []);
+  /* o do espelho (no board.js cru) e o do hub (na placa efetiva) */
+  const B2 = Object.assign({}, B, { regions: [{ id: 'g1', layer: 'Top', net: 'A', points: f0.find(g => g.tipo === 'trilha').points }] });
+  const eb2 = C.effectiveBoard(B2, C.applyPcbChanges(B2, ch.filter(c => !/^td:T/.test(c.id || '')).slice(0, 1)));
+  const tod = T.todos(eb2, B2);
+  assert.ok(tod.some(r => r.id === 'g1' && r.espelho) && tod.some(r => !r.espelho), JSON.stringify(tod));
+});
+
 /* ============================== parte 2: orfaos ============================== */
 
 t('trilha movida: o teardrop do espelho fica orfao e refaz() poe o novo no mesmo par', () => {

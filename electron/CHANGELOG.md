@@ -4,6 +4,26 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.42.0 — 2026-10-29
+
+Teardrops (pedido do dono: "o teardrop não pega as conexões em T; coloque uma opção de tirar os teardrops").
+- **Junção em T**: o Teardrops da vista e o `teardrop_aplicar` do MCP põem a gota também onde uma trilha termina no
+  meio de outra da mesma net (uma trilha só ou duas emendadas no ponto).
+  - A forma é a do Altium, medida nos 82 de trilha com trilha do acervo: ponta a 100% da largura da trilha que
+    chega, base andando 100% da largura da principal pela borda dela, e o vértice na borda do outro lado. 77 dos 82
+    caem na mesma junção.
+  - Canto (L), emenda quase reta e ponta dentro de pad/via ficam sem. Junção que já tem gota (do Altium ou do hub)
+    não ganha outra.
+  - `opcoes.tjuncao:false` desliga.
+- **Tirar teardrops**: item novo na gaveta Teardrops da barra da PCB, e ferramenta `teardrop_remover` do MCP
+  (`nets`/`camadas` limitam).
+  - O teardrop posto pelo hub sai tirando a linha `region_add`; o do espelho ganha `region_del`.
+  - O do espelho antigo (board.js sem `exporter`) não se apaga daqui, e a mensagem diz quantos ficaram.
+  - Ctrl+Z volta. O botão da frente da gaveta é sempre o Pôr, para o Tirar não ficar a um clique por engano.
+- `hub-pcbteardrop.js`: `faltam()` (o que o botão põe) e `todos()` (o que o Tirar tira).
+- Testes: `tests/test-pcbteardrop.js` (o T do LM555, do DMB e a 45° do PAEL, e os casos sem gota),
+  `tests/test-mcp-teardrop.js` e o `tests/smoke-teardrops.js` na vista.
+
 ## 1.41.0 — 2026-10-29
 
 Roteamento e posicionamento, o P3 da lista de melhorias (itens 21 e 22).

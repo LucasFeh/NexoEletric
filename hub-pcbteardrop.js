@@ -60,7 +60,11 @@ const PADRAO = Object.freeze({
   estilo: 'linha',
   via: Object.freeze({ comprimento: 30, largura: 70 }),    /* % do diametro (via e pad redondo) */
   pad: Object.freeze({ comprimento: 100, largura: 200 }),  /* % da largura da trilha (os outros) */
+  /* trilha com trilha (T-junction), medido nos 13 do acervo: a ponta vai 100% da largura da trilha
+     que CHEGA alem da borda da principal; a base anda 100% da largura da PRINCIPAL pela borda dela */
+  t: Object.freeze({ comprimento: 100, largura: 100 }),
 });
+const COS_T = 0.94;        /* trilha quase na mesma direcao da outra (~20 graus) nao e T: e emenda */
 const EPS_LADO = 0.003;    /* mm: a base fica 3 micros para dentro do lado do pad (medido) */
 const TOL_RECONHECE = 0.006;
 const PASSOS_CURVA = 8;
@@ -215,6 +219,7 @@ function opcoesDe(o){
     vias: o.vias !== false, pads: o.pads !== false, smd: o.smd !== false, th: o.th !== false,
     ids: Array.isArray(o.ids) ? new Set(o.ids) : null, trilhas: Array.isArray(o.trilhas) ? new Set(o.trilhas) : null,
     pula: o.pula instanceof Set ? o.pula : null, forcar: !!o.forcar,
+    t: Object.assign({}, PADRAO.t, o.t || {}), tjuncao: o.tjuncao !== false,
   };
 }
 /* para cada pad/via e cada trilha da mesma net que TERMINA dentro dele na mesma camada */
@@ -254,8 +259,121 @@ function pares(eb, op){
   return out;
 }
 
+/* ============================== trilha com trilha (T-junction) ==============================
+   Pedido do dono (2026-10-29): "o teardrop nao pega as conexoes em T". Medido nos teardrops de 5/6
+   vertices do acervo (DMB, LM555, MIF, PACI, PAEL): a trilha que CHEGA termina no meio da principal
+   (uma trilha so, ou duas emendadas no ponto) e o Altium poe [apice, base-, ponta-, ponta+, base+]:
+     apice  = o pe da ponta na linha de centro da principal, na borda do OUTRO lado dela;
+     base   = onde a borda da trilha que chega sai da principal, andando mais 100% da largura da
+              principal pela borda dela (LM555: 0,381; DMB, principal de 1 com trilha de 0,5: 1,0);
+     ponta  = na borda da trilha que chega, 100% da largura dela alem da saida (como no pad).
+   Canto (L), emenda reta (quase a mesma direcao) e ponta dentro de pad/via ficam sem: as duas bases
+   tem de cair na borda reta de uma principal. */
+function paresT(eb, op){
+  const A = N.analisa(eb), grupos = new Map(), alvos = new Map(), out = [];
+  for (const o of A.objs) {
+    if (!o.net) continue;
+    if (o.tipo === 'track') {
+      const k = o.formas[0].layer + '|' + o.net;
+      if (!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k).push(o);
+    } else if (o.tipo === 'pad' || o.tipo === 'via') {
+      for (const fl of o.formas) { const k = fl.layer + '|' + o.net; if (!alvos.has(k)) alvos.set(k, []); alvos.get(k).push(fl.f); }
+    }
+  }
+  for (const [k, L] of grupos) {
+    if (L.length < 2) continue;
+    const layer = L[0].formas[0].layer;
+    for (const br of L) {
+      const t = br.src;
+      if (!(t.w > 0)) continue;
+      if (op.trilhas && !op.trilhas.has(t.id)) continue;
+      for (const [ex, ey, ox, oy] of [[t.x1, t.y1, t.x2, t.y2], [t.x2, t.y2, t.x1, t.y1]]) {
+        const L0 = Math.hypot(ox - ex, oy - ey);
+        if (!(L0 > 1e-6)) continue;
+        if ((alvos.get(k) || []).some(f => dentro(f, ex, ey))) continue;   /* e do teardrop do pad */
+        const e = [(ox - ex) / L0, (oy - ey) / L0];
+        const mains = L.filter(m => {
+          if (m === br) return false;
+          const f = m.formas[0].f, b = f.bb, s = m.src;
+          if (ex < b[0] || ex > b[2] || ey < b[1] || ey > b[3]) return false;
+          if (!dentro(f, ex, ey) || dentro(f, ox, oy)) return false;
+          const ml = Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
+          return ml > 1e-6 && Math.abs((s.x2 - s.x1) / ml * e[0] + (s.y2 - s.y1) / ml * e[1]) < COS_T;
+        });
+        if (mains.length) out.push({ t, layer, net: br.net, ex, ey, ox, oy, mains });
+      }
+    }
+  }
+  return out;
+}
+/* P em cima da borda RETA da trilha s (nao no arredondado da ponta) */
+function naBordaReta(s, P){
+  const dx = s.x2 - s.x1, dy = s.y2 - s.y1, l2 = dx * dx + dy * dy;
+  if (!l2) return false;
+  const u = ((P[0] - s.x1) * dx + (P[1] - s.y1) * dy) / l2;
+  if (u < -1e-6 || u > 1 + 1e-6) return false;
+  return G.dPS(P[0], P[1], s.x1, s.y1, s.x2, s.y2) <= (s.w || 0) / 2 + 1e-3;
+}
+function umT(q, op){
+  const t = q.t, tw = t.w, hw = tw / 2, E = [q.ex, q.ey];
+  const L0 = Math.hypot(q.ox - q.ex, q.oy - q.ey);
+  const e = [(q.ox - q.ex) / L0, (q.oy - q.ey) / L0], nrm = [-e[1], e[0]];
+  const comp = tw * op.t.comprimento / 100;
+  const lado_ = {};
+  for (const s of [-1, 1]) {
+    let best = null;
+    for (const m of q.mains) {
+      const ms = m.src, f = m.formas[0].f;
+      const u = saida(f, E, e, nrm, s * hw);
+      if (u === null) continue;
+      const X = [E[0] + u * e[0] + s * hw * nrm[0], E[1] + u * e[1] + s * hw * nrm[1]];
+      const ml = Math.hypot(ms.x2 - ms.x1, ms.y2 - ms.y1);
+      let mx = (ms.x2 - ms.x1) / ml, my = (ms.y2 - ms.y1) / ml;
+      if ((mx * nrm[0] + my * nrm[1]) * s < 0) { mx = -mx; my = -my; }
+      const ext = (ms.w || 0) * op.t.largura / 100;
+      const B = [X[0] + mx * ext, X[1] + my * ext];
+      if (!q.mains.some(k => naBordaReta(k.src, B))) continue;
+      if (!best || u > best.u) best = { u, B, m: ms };
+    }
+    if (!best) return null;
+    lado_[s] = best;
+  }
+  const ponta = s => {
+    let uT = lado_[s].u + comp;
+    if (uT > L0) uT = L0;
+    if (uT <= lado_[s].u + 1e-4) return null;
+    return [E[0] + uT * e[0] + s * hw * nrm[0], E[1] + uT * e[1] + s * hw * nrm[1]];
+  };
+  const tm = ponta(-1), tp = ponta(1);
+  if (!tm || !tp) return null;
+  /* o apice: o pe de E na linha de centro da principal, meia largura para o lado de la */
+  const ms = lado_[-1].m, ml = Math.hypot(ms.x2 - ms.x1, ms.y2 - ms.y1);
+  const mx = (ms.x2 - ms.x1) / ml, my = (ms.y2 - ms.y1) / ml;
+  const k = (E[0] - ms.x1) * mx + (E[1] - ms.y1) * my;
+  let nm = [-my, mx];
+  if (nm[0] * e[0] + nm[1] * e[1] > 0) nm = [my, -mx];
+  const ap = [ms.x1 + k * mx + nm[0] * (ms.w || 0) / 2, ms.y1 + k * my + nm[1] * (ms.w || 0) / 2];
+  const bm = lado_[-1].B, bp = lado_[1].B;
+  const R = q => [r5(q[0]), r5(q[1])];
+  if (op.estilo === 'curva') return { pts: [R(ap), ...lado(tm, bm, tm, e, -1).reverse(), ...lado(tp, bp, tp, e, 1)], principal: ms.id };
+  return { pts: [ap, bm, tm, tp, bp].map(R), principal: ms.id };
+}
+
 function gera(eb, opcoes){
   const op = opcoesDe(opcoes), out = [], visto = new Set();
+  if (op.tjuncao && !op.ids) {
+    for (const q of paresT(eb, op)) {
+      if (op.pula && op.pula.has('T|' + q.t.id + '|' + q.layer)) continue;
+      let id = 'td:T:' + q.t.id + ':' + q.layer;
+      if (visto.has(id)) id += ':' + (q.ex === q.t.x1 && q.ey === q.t.y1 ? 1 : 2);
+      if (visto.has(id)) continue;
+      const r = umT(q, op);
+      if (!r) continue;
+      visto.add(id);
+      out.push({ id, layer: q.layer, net: q.net, points: r.pts, teardrop: true, tipo: 'trilha', de: r.principal, trilha: q.t.id, junta: [q.ex, q.ey] });
+    }
+  }
   for (const q of pares(eb, op)) {
     const chave = q.o.id + '|' + q.t.id + '|' + q.layer;
     if (op.pula && op.pula.has(chave)) continue;
@@ -344,6 +462,7 @@ function reconhece(eb){
   const A = N.analisa(eb), out = [];
   for (const g of eb.regions || []) {
     const P = candidata(g); if (!P) continue;
+    if (g.teardrop === true && g.tipo === 'trilha') { out.push({ id: g.id, de: null, trilha: g.trilha, layer: g.layer, net: g.net, tipo: 'trilha', usadas: [g.trilha, g.de], gerado: true }); continue; }
     if (g.teardrop === true && g.de) { out.push({ id: g.id, de: { tipo: /^v/.test(g.de) ? 'via' : 'pad', id: g.de }, trilha: g.trilha, layer: g.layer, net: g.net, tipo: 'pad', gerado: true }); continue; }
     const m = encaixa(A, g, P);
     if (m) out.push({ id: g.id, de: m.de, trilha: m.trilha, layer: g.layer, net: g.net, tipo: m.tipo, usadas: m.usadas });
@@ -382,5 +501,33 @@ function refaz(eb, base, opcoes){
   return { eb: Object.assign({}, eb, { regions: resto.concat(gerados) }), removidos: [...orf], gerados };
 }
 
-return { gera, reconhece, orfaos, refaz, PADRAO, _int: { umTeardrop, saida, pares, encaixa, candidata } };
+/* os que FALTAM (o botao Teardrops da vista e o teardrop_aplicar do MCP): gera() sem os pares que
+   ja tem teardrop -- o do pad pela chave pad|trilha|camada; o de T pela junta (a ponta da trilha
+   que chega) dentro de um teardrop de trilha que ja esta na placa, na mesma camada e net */
+function faltam(eb, opcoes){
+  const rec = reconhece(eb);
+  const pula = new Set(opcoes && opcoes.pula instanceof Set ? opcoes.pula : []);
+  for (const r of rec) if (r.de) pula.add(r.de.id + '|' + r.trilha + '|' + r.layer);
+  const porId = new Map((eb.regions || []).map(g => [g.id, g]));
+  const ts = [];
+  for (const r of rec) if (r.tipo === 'trilha') { const g = porId.get(r.id); if (g) ts.push({ layer: g.layer, net: g.net, P: anel(g.points) }); }
+  const perto = (P, x, y) => {
+    if (G.dentroAnel(P, x, y)) return true;
+    for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; if (G.dPS(x, y, a[0], a[1], b[0], b[1]) <= 1e-3) return true; }
+    return false;
+  };
+  return gera(eb, Object.assign({}, opcoes || {}, { pula }))
+    .filter(g => g.tipo !== 'trilha' || !ts.some(x => x.layer === g.layer && x.net === g.net && perto(x.P, g.junta[0], g.junta[1])));
+}
+/* todos os teardrops da placa (para TIRAR): os do espelho, reconhecidos no board.js cru `base`
+   (inclusive o orfao, que a placa efetiva ja trocou pelo refeito), e os da placa efetiva (os
+   region_add do hub). -> [{id, layer, net, tipo, espelho:bool}] */
+function todos(eb, base){
+  const out = new Map();
+  if (base && base !== eb) for (const r of reconhece(base)) out.set(String(r.id), Object.assign({}, r, { espelho: true }));
+  for (const r of reconhece(eb)) if (!out.has(String(r.id))) out.set(String(r.id), Object.assign({}, r, { espelho: false }));
+  return [...out.values()];
+}
+
+return { gera, faltam, todos, reconhece, orfaos, refaz, PADRAO, _int: { umTeardrop, umT, paresT, saida, pares, encaixa, candidata } };
 });

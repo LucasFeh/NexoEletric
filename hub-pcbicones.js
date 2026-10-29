@@ -74,6 +74,7 @@ const ICONES = {
   drc:        'M8 1.8 L13.5 4 V8 C13.5 11 11 13.3 8 14.3 C5 13.3 2.5 11 2.5 8 V4 Z|M5.5 8 L7.3 9.8 L10.7 6.2',
   ratsnest:   'c:3,12,1.3|c:13,4,1.3|c:12,12.5,1.3|M4 11.2 L12 4.8 M4.3 12.1 H10.7',
   teardrop:   'M2 8 H6.5|M6.5 6.5 L10 4.4 M6.5 9.5 L10 11.6|c:11.5,8,3.5',
+  teardropTirar: 'M2 8 H6.5|M6.5 6.5 L10 4.4 M6.5 9.5 L10 11.6|c:11.5,8,3.5|M2.5 13.5 L13.5 2.5',
   /* o auto-roteador (Route » Auto Route » All): dois pads, a trilha que troca de camada na via, e a
      faísca do "sozinho" */
   autorotear: 'c:2.5,13.5,1.3|c:13.5,2.5,1.3|M3.8 13.5 H6.4 L7.4 12.5|c:8.4,11.5,1.4|M9.4 10.5 L13.5 6.4 V3.8|M4 2 V6 M2 4 H6',
