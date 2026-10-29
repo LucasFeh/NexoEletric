@@ -4,6 +4,12 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.42.1 — 2026-10-29
+
+- **Régua (Ctrl+M): a retícula não some mais.** Com o cursor Small 90 (a cruz do Windows), longe de qualquer ponto de
+  agarre não aparecia nada no cursor: a cruz do sistema é preta e some no fundo preto da placa. Agora, com a régua na
+  mão, a vista desenha a própria cruz, branca com contorno escuro, sempre; o marcador do agarre vem por cima.
+
 ## 1.42.0 — 2026-10-29
 
 - **Régua (Ctrl+M) como a do NexoCAD**, na vista PCB:
