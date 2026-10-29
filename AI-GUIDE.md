@@ -428,7 +428,9 @@ var changes = [
 
 **Também vem do Altium (só na tela e nas saídas, sem op própria).**
 - Linhas de conexão (ratsnest): o que falta ligar por net.
-- Teardrop refeito quando a trilha ou a via anda; teardrop novo é `region_add` (botão Teardrops).
+- Teardrop refeito quando a trilha ou a via anda; teardrop novo é `region_add` (botão Teardrops, `teardrop_aplicar`),
+  também na junção em T (trilha que termina no meio de outra da mesma net). Tirar: `teardrop_remover` (ou Teardrops ›
+  Tirar teardrops na vista).
 - O PDF de layout (`LO -`) com o carimbo DIEletrons, gravado em `Projects/<nome>/PDF/`.
 
 - **Ordem.** O ApplyChanges aplica o arquivo na ordem e confere cada `orig_*` com o objeto

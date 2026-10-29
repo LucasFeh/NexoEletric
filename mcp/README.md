@@ -80,7 +80,7 @@ claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 | footprint | `fp_buscar`, `fp_ler` (pads, serigrafia, corpos 3D), `fp_salvar` (validado como no editor), `fp_pacote` (o assistente: chip, SOIC, QFP, DIP, SOT-23, barra de pinos; `hub-fppacote.js`), `fp_modelos3d` (os STEP da PcbLib da casa e do hub), `fp_corpo3d` (prende o STEP com a rotação de quem já o usa), `fp_3d_importar` (STEP do disco → `Libs/3d-hub`), `fp_3d_nexo` (o STEP de um item da biblioteca da rede Nexo), `fp_apagar`, `fp_vincular` (footprint → componente do almoxarifado ou símbolo) |
 | pcb | `pcb_resumo`, `pcb_consultar` (por tipo/caixa/camada/net/ref; `campos` e `arquivo:true` para placa grande), `pcb_componente`, `pcb_net`, `pcb_mudancas`, `pcb_mover`, `pcb_mover_lote` (muitos comp_move numa gravação, com checagem de sobreposição e fora da placa), `pcb_posicao_conferir`, `pcb_aplicar` (qualquer op, orig_* automáticos; `designator_move` no lugar final, com a posição efetiva na resposta), `pcb_colocar` (footprint como componente novo, com as nets dos pads), `pcb_editar`, `pcb_apagar`, `pcb_trilha`, `pcb_rotear` (walkaround, `hub-roteador.js`), `pcb_autorotear` (o ratsnest inteiro em várias camadas com vias, ordem e arranca-e-refaz, `hub-autoroteador.js`), `pcb_fanout` (trilha curta + via ao plano em cada pad SMD da net), `pcb_suavizar` (45° sem soltar ramo), `pcb_via`, `pcb_contorno`, `pcb_mudanca_remover`, `pcb_mudanca_editar`, `pcb_validar`, `pcb_render` (PNG da placa, com ratsnest) |
 | serigrafia | `serigrafia_checar` (um lugar candidato contra as regras da casa, sem DRC), `serigrafia_posicionar` (acha lugar para os designadores; simula por padrão) |
-| pcbmod | `regras_ler`, `regras_definir` (`hub-pcbregras.js`), `drc_rodar` (`hub-pcbdrc.js`), `nets_ratsnest` (`hub-pcbnets.js`, com reserva própria), `pour_definir`, `pour_despejar` (`hub-pcbpour.js`), `teardrop_aplicar` (`hub-pcbteardrop.js`), `eco_comparar`, `eco_aplicar` (`hub-pcbeco.js`) |
+| pcbmod | `regras_ler`, `regras_definir` (`hub-pcbregras.js`), `drc_rodar` (`hub-pcbdrc.js`), `nets_ratsnest` (`hub-pcbnets.js`, com reserva própria), `pour_definir`, `pour_despejar` (`hub-pcbpour.js`), `teardrop_aplicar`, `teardrop_remover` (`hub-pcbteardrop.js`), `eco_comparar`, `eco_aplicar` (`hub-pcbeco.js`) |
 | nexo | `nexo_estado` (o Nexo Hub e o NexoCAD), `nexo_biblioteca` (lista/busca os itens do Nexo Hub no formato do hub; `id` traz revisões e vínculos), `nexo_sincronizar` (publica a biblioteca 3D e as placas no Nexo Hub: o mesmo `lib/nexohub-sync.js` do app), `nexo_editar_modelo` (o corpo 3D de `{projeto, ref}`, de um footprint, de uma chave de modelo ou de um item, aberto no NexoCAD sempre por um item do Nexo Hub; `novo:true` cria um item vazio vinculado ao footprint), `nexo_enviar_placa` (publica o item placa e pede `pcb_importar {item}`; `so_publicar`, `so_pacote`), `nexo_vincular_footprint` (direto no Nexo Hub: `atributos.footprints` + vínculo; num componente já põe o 3D no footprint), `nexo_componentes` (uma biblioteca só: os componentes do NexoCAD com footprint entram na biblioteca de footprints como o 3D deles; o app faz sozinho a cada minuto). Conexão: `NEXOHUB_URL` > `C:\Users\Public\NexoHub\conexao.json` > `127.0.0.1:47800`. Contrato: `docs/INTEGRACAO-NEXOCAD.md` |
 | nexobd | `nexo_projetos` (os projetos guardados no NexoBD, fora do catálogo), `nexo_projeto_historico` (revisões: quando, de qual programa, o que mudou), `nexo_projeto_restaurar` (os arquivos de uma revisão antiga voltam para a pasta; o app sobe como revisão nova) |
 | saidas | `gerber_gerar` (grava `Projects/<p>/Gerber/` + `gerber.json`, como a rota `/api/gerber`; redespeja os polígonos antes), `gerber_salvo` (relê com o `hub-gerberview.js`), `pdf_layout` (`hub-pcbpdf.js` → `PDF/LO - <base>.pdf`), `bom_listar` |
@@ -191,6 +191,24 @@ só, com a mesma conta do `pcb_mover` (orig_* sozinhos, linha que já existe edi
 `pcb_posicao_conferir {refs?, folga?}` faz a mesma conferência na placa como está.
 
 Testes: `node tests/test-suaviza45.js` e `node tests/test-mcp-p3.js`.
+
+## Teardrops (`teardrop_aplicar`, `teardrop_remover`)
+
+`teardrop_aplicar` põe os teardrops que faltam como `region_add` (nota `teardrop do hub`), como o botão Teardrops da
+vista:
+- pad e via com trilha mais fina (os números do Altium 21, medidos no acervo);
+- **junção em T** (1.42.0): trilha que termina no meio de outra da mesma net, uma trilha só ou duas emendadas no
+  ponto. A forma é a do Altium (medida em 82 do acervo): ponta a 100% da largura da trilha que chega, base andando
+  100% da largura da principal pela borda dela. Canto (L), emenda quase reta e ponta dentro de pad/via ficam sem;
+  `opcoes.tjuncao:false` desliga;
+- par que já tem teardrop (do Altium ou do hub) não ganha outro.
+
+`teardrop_remover {nets?, camadas?}` tira os teardrops: o posto pelo hub sai tirando a linha `region_add`; o do
+espelho ganha um `region_del` com os orig_*. O do espelho antigo (board.js sem `exporter`) não se apaga daqui e
+volta em `ficaram`. Na vista: a gaveta Teardrops da barra, item **Tirar teardrops** (Ctrl+Z volta).
+
+Testes: `node tests/test-pcbteardrop.js` e `node tests/test-mcp-teardrop.js` (Node 24); na vista,
+`node tests/smoke-teardrops.js`.
 
 Módulo do hub que faltar não derruba nada: a ferramenta responde "módulo ausente" e volta a
 funcionar sozinha quando o arquivo chega (o carregamento confere o mtime a cada chamada).

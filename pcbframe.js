@@ -2144,14 +2144,38 @@ function poeTeardrops(){
   if (!garanteEdicao()) return;
   let novos = [];
   try {
-    const pula = new Set((HTD.reconhece(EB) || []).map(t => (t.de && t.de.id) + '|' + t.trilha + '|' + t.layer));
-    novos = HTD.gera(EB, { pula }) || [];
+    /* faltam(): o par que ja tem teardrop fica, e a junta em T tambem (1.42.0) */
+    if (typeof HTD.faltam === 'function') novos = HTD.faltam(EB) || [];
+    else { const pula = new Set((HTD.reconhece(EB) || []).map(t => (t.de && t.de.id) + '|' + t.trilha + '|' + t.layer)); novos = HTD.gera(EB, { pula }) || []; }
   } catch (e) { console.warn('teardrops:', e); HubDialog.toast('teardrops: ' + (e && e.message || e), 'err'); return; }
   if (!novos.length) { HubDialog.toast('nenhum teardrop por pôr: todo pad e via com trilha mais fina já tem o seu', 'info', 2600); return; }
   const ops = novos.map(g => ({ op:'region_add', layer:g.layer, net:g.net || '', pts:g.points.map(q => [r6(q[0]), r6(q[1])]), note:'teardrop do hub' }));
   for (const op of ops) { if (!op.net) delete op.net; CH.push(op); }
   commit();
   HubDialog.toast(ops.length + ' teardrop(s) postos', 'ok', 2400);
+}
+/* Tirar os teardrops (pedido do dono, 2026-10-29): os postos pelo hub saem tirando a linha region_add
+   do changes.js; os do espelho, por region_del. O do espelho antigo (board.js sem "exporter") nao tem
+   como apagar daqui -- a notificacao diz quantos ficaram. Ctrl+Z volta tudo. */
+function tiraTeardrops(){
+  if (!HTD || typeof HTD.todos !== 'function') { HubDialog.toast('teardrops: o hub-pcbteardrop.js não carregou nesta página', 'warn'); return; }
+  if (!garanteEdicao()) return;
+  let lista = [];
+  try { lista = HTD.todos(EB, B) || []; }
+  catch (e) { console.warn('teardrops:', e); HubDialog.toast('teardrops: ' + (e && e.message || e), 'err'); return; }
+  let n = 0, fica = 0;
+  for (const r of lista) {
+    const m = IDX.item.get(String(r.id));
+    if (!m || m.kind !== 'region') { if (r.espelho) fica++; continue; }
+    if (m.deleted) continue;
+    if (apagaItem(m)) n++; else fica++;
+  }
+  /* o do hub que ficou orfao (a trilha andou) nao e mais reconhecido: a nota da linha diz */
+  for (let i = CH.length - 1; i >= 0; i--) { const c = CH[i]; if (c && c.op === 'region_add' && c.note === 'teardrop do hub') { CH.splice(i, 1); n++; } }
+  if (!n) { HubDialog.toast(fica ? fica + ' teardrop(s) do espelho antigo: reexporte a placa com o ExportBoard novo para tirar daqui' : 'nenhum teardrop na placa', 'info', 3200); return; }
+  SEL = [];
+  commit();
+  HubDialog.toast(n + ' teardrop(s) tirados' + (fica ? ' — ' + fica + ' do espelho antigo ficaram' : ''), 'ok', 2600);
 }
 
 /* ============================== Auto-rotear (Route » Auto Route » All, U,A,A) ==============================
@@ -4021,7 +4045,11 @@ const BARRA = [
     { id:'pourRet', ic:'pour', tool:'pour', forma:'retangulo', at:'pour', titulo:'Polygon Pour em retângulo — dois cantos; plano (Top/Bottom) ou sem plano, tipo e net no painel; selecionado, as bordas esticam' },
     { id:'pourLivre', ic:'pourLivre', tool:'pour', forma:'livre', at:'pour', titulo:'Polygon Pour em polígono livre — um clique por vértice; duplo clique, Enter ou botão direito fecha; tipo e net no painel' },
   ] },
-  { id:'teardrops', ic:'teardrop', acao:'teardrops', at:'teardrops', titulo:'Teardrops (Tools » Teardrops) — põe os que faltam nos pads e vias' }, '|',
+  /* 2026-10-29: Pôr e Tirar na mesma gaveta (pedido do dono: "uma opção de tirar os teardrops") */
+  { id:'teardropsGrupo', titulo:'Teardrops', fixo:true, grupo:[
+    { id:'teardrops', ic:'teardrop', acao:'teardrops', at:'teardrops', titulo:'Teardrops (Tools » Teardrops) — põe os que faltam nos pads, nas vias e nas junções em T' },
+    { id:'tirarTeardrops', ic:'teardropTirar', acao:'tirarTeardrops', titulo:'Tirar teardrops — apaga todos os teardrops da placa (Ctrl+Z volta)' },
+  ] }, '|',
   { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Régua — marque dois pontos (centro, ponta, meio, quadrante, vértice, canto, borda, tangente), arraste a linha e clique: a cota fica na placa' },
   /* o olho das cotas da regua (pedido do dono, 2026-10-29) */
   { id:'cotas', ic:'cotas', acao:'cotas', titulo:'Cotas da régua' },
@@ -4055,6 +4083,8 @@ function atualDoGrupo(b){
   if (naMao) return naMao;
   const porForma = b.grupo.find(x => x.forma && x.forma === CFG.pourForma);
   if (porForma) return porForma;
+  /* grupo fixo: o botao e sempre o primeiro (o Tirar teardrops nao fica a um clique por engano) */
+  if (b.fixo) return b.grupo[0];
   const id = GRUPO_ATUAL[b.id] || lePref('grupo.' + b.id, b.grupo[0].id);
   return b.grupo.find(x => x.id === id) || b.grupo[0];
 }
@@ -5767,6 +5797,7 @@ function fazAcao(id, arg){
     case 'ratsnest': toggleConexoes(); return;
     case 'realcarNet': if (!limpaRealce() && SEL.length === 1 && SEL[0].m && SEL[0].m.eff && SEL[0].m.eff.net) realcaNet(SEL[0].m.eff.net); return;
     case 'teardrops': poeTeardrops(); return;
+    case 'tirarTeardrops': tiraTeardrops(); return;
     case 'autorotear': abreAutorotear('todas'); return;
     case 'autorotearNets': abreAutorotear(netsDaSel().length ? 'sel' : 'todas'); return;
     case 'copiar': copiaSelecao(false); return;
