@@ -1043,6 +1043,98 @@ def api_project_delete(proj_id):
     return {'ok': True, 'trash': os.path.relpath(dst, ROOT)}
 
 
+# ─────────────────────────── renomear projeto ───────────────────────────
+# Pedido do dono (2026-10-29): "no NexoEletric nao consigo alterar o nome do projeto". O nome do
+# projeto E a pasta em Projects\ (e o id e o slug dela), entao renomear e renomear a pasta. Sem
+# senha: nada se perde, e desfazer e renomear de volta. O "project" do schematic.js acompanha,
+# para o esquema nao continuar se chamando pelo nome antigo; o board.js e espelho do Altium e nao
+# e tocado. O vinculo com o Altium e pelo nome: o .PrjPcb homonimo e o que o BuildSchematic procura.
+@app.route('/api/project/<proj_id>/rename', methods=['POST'])
+def api_project_rename(proj_id):
+    data = request.get_json(silent=True) or {}
+    novo = data.get('name')
+    if isinstance(novo, str):
+        novo = novo.strip()
+    if not _nome_projeto_ok(novo) or novo.endswith(' '):
+        return {'ok': False, 'error': 'nome inválido: sem \\ / : * ? " < > |, sem ponto no começo ou no fim'}, 400
+    if proj_id not in _PROJ_CACHE:
+        build_index(ROOT)
+    name = _PROJ_CACHE.get(proj_id)
+    if not name:
+        return {'ok': False, 'error': 'projeto desconhecido'}, 404
+    if novo == name:
+        return {'ok': True, 'id': proj_id, 'name': name}
+    pdir = os.path.join(ROOT, 'Projects')
+    src = os.path.join(pdir, name)
+    if not os.path.isdir(src):
+        return {'ok': False, 'error': 'a pasta do projeto ja nao existe'}, 404
+    so_caixa = novo.lower() == name.lower()     # "pcb1" -> "PCB1": a mesma pasta no Windows
+    novo_id = _proj_id(novo)
+    for outro in os.listdir(pdir):
+        if outro == name or not os.path.isdir(os.path.join(pdir, outro)):
+            continue
+        if outro.lower() == novo.lower():
+            return {'ok': False, 'error': 'já existe um projeto com esse nome'}, 409
+        if _proj_id(outro) == novo_id:
+            return {'ok': False, 'error': 'o nome fica igual ao do projeto "%s" no link (%s)' % (outro, novo_id)}, 409
+    dst = os.path.join(pdir, novo)
+    _anota_renomear_nexobd(name, novo)          # ANTES de mexer: a rodada do NexoBD nao pode ver a pasta nova sem a nota
+    try:
+        if so_caixa:                            # o rename direto muda so a caixa, que o Windows ignora em alguns discos
+            meio = os.path.join(pdir, '.renomeando-%s' % time.strftime('%Y%m%d%H%M%S'))
+            os.rename(src, meio)
+            os.rename(meio, dst)
+        else:
+            os.rename(src, dst)
+    except OSError as e:
+        _anota_renomear_nexobd(name, novo, desfaz=True)
+        return {'ok': False, 'error': 'não deu para renomear a pasta (algum arquivo aberto?): %s' % e}, 500
+    _renomeia_no_esquema(os.path.join(dst, 'schematic.js'), novo)
+    build_index(ROOT)
+    return {'ok': True, 'id': novo_id, 'name': novo}
+
+
+def _renomeia_no_esquema(arq, novo):
+    """Troca a linha "project" do schematic.js (um campo por linha, como o ExportProject escreve)."""
+    try:
+        with open(arq, encoding='utf-8') as f:
+            txt = f.read()
+    except OSError:
+        return
+    lin = '"project":' + json.dumps(novo) + ','
+    txt2, n = re.subn(r'^"project"\s*:\s*"(?:[^"\\]|\\.)*"\s*,', lambda m: lin, txt, count=1, flags=re.M)
+    if n and txt2 != txt:
+        tmp = arq + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(txt2)
+        os.replace(tmp, arq)
+
+
+def _anota_renomear_nexobd(de, para, desfaz=False):
+    """No app desktop o projeto mora no NexoBD (ver _anota_apagar_nexobd): sem esta nota, a proxima
+    rodada do electron/lib/armazem.js veria uma pasta nova (subiria um projeto novo) e um projeto
+    sem pasta (baixaria o antigo de volta). Com ela, o armazem troca o nome do MESMO item no NexoBD
+    e o historico de revisoes fica."""
+    if os.environ.get('ALTIUMHUB_NEXOBD') != '1':
+        return
+    arq = os.path.join(ROOT, '.altiumhub', 'nexobd-renomear.json')
+    try:
+        with open(arq, encoding='utf-8') as f:
+            lista = json.load(f)
+        if not isinstance(lista, list):
+            lista = []
+    except (OSError, ValueError):
+        lista = []
+    lista = [r for r in lista if not (isinstance(r, dict) and r.get('de') == de and r.get('para') == para)]
+    if not desfaz:
+        lista.append({'de': de, 'para': para})
+    os.makedirs(os.path.dirname(arq), exist_ok=True)
+    tmp = arq + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(lista, f, ensure_ascii=False)
+    os.replace(tmp, arq)
+
+
 def _anota_apagar_nexobd(name):
     """No app desktop (ALTIUMHUB_NEXOBD=1) o projeto mora no NexoBD e Projects\\ e so a copia:
     sem esta nota, a proxima rodada do electron/lib/armazem.js o baixaria de volta. Ela le a

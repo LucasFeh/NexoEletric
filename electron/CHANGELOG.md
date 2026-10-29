@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.45.0 — 2026-10-29
+
+Renomear projeto e folhas (pedido do dono: "não consigo alterar o nome do projeto; se tenho mais de uma folha, apagar
+alguma em branco, além de poder renomear a folha").
+- **Renomear projeto**: botão direito no projeto, no painel Projetos › Renomear projeto….
+  - Rota `POST /api/project/<id>/rename` do `hubserver.py`: renomeia a pasta em `Projects\`, troca o `"project"` do
+    `schematic.js` (o `board.js` não é tocado) e recusa nome inválido, nome repetido e nome que dá o mesmo id/link
+    de outro projeto. Só a caixa ("pcb1" → "PCB1") também vale.
+  - No NexoBD é o MESMO item que troca de chave e nome, com o histórico de revisões; a BOM (`/bom/<id>`) acompanha.
+    O hubserver anota em `.altiumhub/nexobd-renomear.json` antes de renomear, e o `armazem.js` aplica na rodada.
+  - Nas outras máquinas a pasta é renomeada também, sem baixar de novo e sem perder o que estava por subir.
+  - As escolhas do projeto no navegador (Neoden, Laser, BOM) vão para o id novo.
+  - O Altium acha o projeto pelo nome: para o BuildSchematic/ApplyChanges, renomeie também o `.PrjPcb`.
+- **Folhas do esquema** (vista Esquema › Configurações › Folha): **Nova folha**, **Renomear…** (ou duplo clique no
+  cartão) e **Apagar**, que só vale para folha em branco e nunca para a última. Renomear leva junto o `sheet` de
+  todos os itens. Ctrl+Z volta.
+- `HubDialog.texto` (`hub-dialog.js`): a caixa de digitar no tema, com validação embaixo do campo.
+- Testes: `tests/test_hubapi.py` (a rota) e `electron/test/armazem.test.js` (duas máquinas contra o NexoBD real).
+
 ## 1.44.0 — 2026-10-29
 
 Junta as duas linhas do dia: os teardrops feitos em paralelo no `main` (lá saíram como 1.42.0) chegam à vista da

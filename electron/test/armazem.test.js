@@ -91,6 +91,37 @@ test('a pasta de trabalho sobe tudo; outra pasta recebe; nada fica no catálogo'
   assert.deepEqual(r4.projetos.removidosDaqui, ['TCMS_Reader']);
 });
 
+test('renomear projeto (1.45.0): o mesmo item troca de chave e nome, nada volta com o nome velho, a outra máquina acompanha', { skip: pula }, async () => {
+  const A = path.join(tmp, 'renA'), B = path.join(tmp, 'renB');
+  const eA = {}, eB = {};
+  escreve(A, 'Projects/PCB1/schematic.js', 'var schematic={"items":[]}');
+  await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
+  await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB });
+  const antes = await cliente.chave('nexoeletric-projeto', 'PCB1');
+  assert.ok(antes && fs.existsSync(path.join(B, 'Projects', 'PCB1', 'schematic.js')));
+  // o hubserver anota e depois renomeia a pasta (e B edita a dele enquanto isso: não pode perder)
+  fs.mkdirSync(path.join(A, '.altiumhub'), { recursive: true });
+  fs.writeFileSync(armazem.ARQ_RENOMEAR(A), JSON.stringify([{ de: 'PCB1', para: 'Fonte 24V' }]));
+  fs.renameSync(path.join(A, 'Projects', 'PCB1'), path.join(A, 'Projects', 'Fonte 24V'));
+  escreve(B, 'Projects/PCB1/changes.js', 'var changes=[]');
+  const r = await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
+  assert.deepEqual(Object.keys(r.projetos.projetos).filter((n) => /PCB1|Fonte/.test(n)), ['Fonte 24V']);
+  assert.equal(fs.existsSync(armazem.ARQ_RENOMEAR(A)), false);
+  assert.equal(fs.existsSync(path.join(A, 'Projects', 'PCB1')), false, 'o nome velho não volta do NexoBD');
+  assert.equal(await cliente.chave('nexoeletric-projeto', 'PCB1'), null);
+  const depois = await cliente.chave('nexoeletric-projeto', 'Fonte 24V');
+  assert.equal(depois.id, antes.id, 'o mesmo item: o histórico fica');
+  assert.equal(depois.nome, 'Fonte 24V');
+  // B: a pasta é renomeada (sem lixeira) e a edição dela sobe com o nome novo
+  const rB = await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB });
+  assert.deepEqual(rB.projetos.removidosDaqui, []);
+  assert.equal(fs.existsSync(path.join(B, 'Projects', 'PCB1')), false);
+  assert.equal(le(B, 'Projects/Fonte 24V/changes.js'), 'var changes=[]');
+  await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
+  assert.equal(le(A, 'Projects/Fonte 24V/changes.js'), 'var changes=[]');
+  assert.equal((await cliente.chave('nexoeletric-projeto', 'Fonte 24V')).id, antes.id);
+});
+
 test('duas máquinas: projeto criado/editado em qualquer uma sobe, e projeto novo no NexoBD aparece na outra; o chat também', { skip: pula }, async () => {
   const A = path.join(tmp, 'maqA'), B = path.join(tmp, 'maqB');
   const eA = {}, eB = {};

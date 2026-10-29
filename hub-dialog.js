@@ -9,6 +9,9 @@
      await HubDialog.confirm('texto', { title, ok, cancel, danger }) -> true | false
      await HubDialog.escolhe('texto', { title, opcoes:[{v, rot}], v, rotulo, ok, cancel })
                                                                     -> o v escolhido | null
+     await HubDialog.texto('texto', { title, v, rotulo, ok, cancel, valida })
+                                                                    -> o texto digitado | null
+       valida(texto) -> '' (aceita) | a mensagem que aparece embaixo do campo (e o OK espera)
      HubDialog.toast('texto', 'ok'|'warn'|'err'|'info', ms)          -> { close }
        ms omitido: some sozinho (erro fica mais); ms = 0: fica ate clicar.                  */
 "use strict";
@@ -35,6 +38,10 @@ const CSS = `
 .hd-escolha select{flex:1; background:var(--surface-2,#252525); color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a);
   border-radius:var(--r-sm,4px); padding:5px 8px; font:inherit;}
 .hd-escolha select:focus-visible{outline:2px solid var(--hi,#4fc3f7); outline-offset:1px;}
+.hd-escolha input{flex:1; min-width:0; background:var(--surface-2,#252525); color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a);
+  border-radius:var(--r-sm,4px); padding:5px 8px; font:inherit;}
+.hd-escolha input:focus-visible{outline:2px solid var(--hi,#4fc3f7); outline-offset:1px;}
+.hd-erro{margin:6px 0 0 !important; min-height:1.2em; font-size:12px; color:var(--err,#ff5252) !important;}
 .hd-btns{display:flex; gap:8px; justify-content:flex-end; margin-top:16px;}
 .hd-btns button{background:transparent; color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a);
   border-radius:var(--r-sm,4px); padding:6px 14px; font:inherit; font-size:12px; cursor:pointer; min-width:84px;}
@@ -93,6 +100,16 @@ function abre(msg, o, temCancelar){
       if (o.rotulo){ const lb = el('label', null, o.rotulo); linha.append(lb); }
       linha.append(sel); box.append(linha);
     }
+    /* texto(): um campo de digitar; o OK devolve o texto (sem espaco nas pontas) */
+    let inp = null, erro = null;
+    if (o.texto){
+      const linha = el('div', 'hd-escolha');
+      inp = el('input'); inp.type = 'text'; inp.autocomplete = 'off'; inp.spellcheck = false;
+      inp.value = o.v != null ? String(o.v) : '';
+      if (o.rotulo){ const lb = el('label', null, o.rotulo); linha.append(lb); }
+      linha.append(inp); box.append(linha);
+      erro = el('p', 'hd-erro', ''); box.append(erro);
+    }
     const btns = el('div', 'hd-btns');
     const ok = el('button', 'ok' + (o.danger ? ' danger' : ''), o.ok || 'OK'); ok.type = 'button';
     let cancel = null;
@@ -100,11 +117,15 @@ function abre(msg, o, temCancelar){
     btns.append(ok); box.append(btns); scrim.append(box);
 
     const fecha = v => {
+      if (v && inp && typeof o.valida === 'function'){
+        const msg = o.valida(inp.value.trim());
+        if (msg){ erro.textContent = msg; inp.focus(); return; }
+      }
       scrim.hidden = true; scrim.textContent = '';
       document.removeEventListener('keydown', tecla, true);
       scrim.onclick = null;
       if (antes && typeof antes.focus === 'function') try { antes.focus(); } catch (e) {}
-      resolve(sel ? (v ? sel.value : null) : v);
+      resolve(inp ? (v ? inp.value.trim() : null) : sel ? (v ? sel.value : null) : v);
     };
     /* na captura do document: os atalhos da vista (window) nao podem disparar com o modal aberto */
     const tecla = e => {
@@ -112,7 +133,9 @@ function abre(msg, o, temCancelar){
       if (e.key === 'Escape'){ e.preventDefault(); fecha(!temCancelar); }
       else if (e.key === 'Enter' && e.target !== cancel){ e.preventDefault(); fecha(true); }
       else if (e.key === 'Tab' && temCancelar){
-        e.preventDefault(); (document.activeElement === ok ? cancel : ok).focus();
+        e.preventDefault();
+        const roda = [inp || sel, cancel, ok].filter(Boolean);
+        roda[(roda.indexOf(document.activeElement) + 1) % roda.length].focus();
       }
     };
     ok.addEventListener('click', () => fecha(true));
@@ -120,7 +143,8 @@ function abre(msg, o, temCancelar){
     scrim.onclick = e => { if (e.target === scrim) fecha(!temCancelar); };
     document.addEventListener('keydown', tecla, true);
     scrim.hidden = false;
-    (sel || ok).focus();
+    if (inp){ inp.addEventListener('input', () => { erro.textContent = ''; }); inp.focus(); inp.select(); }
+    else (sel || ok).focus();
   });
 }
 function enfileira(fn){ const p = fila.then(fn, fn); fila = p.then(() => {}, () => {}); return p; }
@@ -133,6 +157,7 @@ function ocioso(){ return fila.then(() => {}, () => {}); }
 function alert(msg, o){ return enfileira(() => abre(msg, o || {}, false)).then(() => undefined); }
 function confirm(msg, o){ return enfileira(() => abre(msg, o || {}, true)); }
 function escolhe(msg, o){ return enfileira(() => abre(msg, Object.assign({ opcoes:[] }, o || {}), true)); }
+function texto(msg, o){ return enfileira(() => abre(msg, Object.assign({}, o || {}, { texto:true }), true)); }
 
 const DURACAO = { ok: 3000, info: 3200, warn: 4500, err: 6500 };
 function toast(msg, kind, ms){
@@ -156,6 +181,6 @@ function toast(msg, kind, ms){
   return { close };
 }
 
-return { alert, confirm, escolhe, toast, ocioso };
+return { alert, confirm, escolhe, texto, toast, ocioso };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDialog;

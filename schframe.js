@@ -6260,12 +6260,110 @@ function renderSheetCards(){
     b.append(document.createElement('canvas'), txt);
     box.append(b);
   });
+  const acts = el('div', 'sheetacts');
+  acts.style.cssText = 'display:flex; gap:4px; margin-top:2px;';
+  box.append(acts);
+  pintaAcoesFolha();
   pintaMiniaturas();
+}
+/* as acoes valem para a folha ATIVA (o cartao aceso), entao trocar de folha as repinta; duplo
+   clique no cartao tambem renomeia */
+function pintaAcoesFolha(){
+  const acts = document.querySelector('#sheetcards .sheetacts');
+  if (!acts) return;
+  acts.textContent = '';
+  const sh = model.sheets[sheetIdx];
+  const vazia = sh && folhaVazia(sheetIdx);
+  const bt = (rot, titulo, fn, off) => {
+    const x = el('button', 'wide sutil', rot); x.type = 'button'; x.title = titulo;
+    x.style.cssText = 'flex:1; justify-content:center; margin-top:0;';
+    x.disabled = Boolean(off); x.onclick = fn; acts.append(x);
+  };
+  bt('Nova folha', 'acrescenta uma folha em branco, no formato e no template da folha ativa', novaFolha);
+  bt('Renomear…', 'troca o nome da folha ativa (duplo clique no cartão também)', () => renomeiaFolha(sheetIdx), !sh);
+  bt('Apagar', !sh ? '' : model.sheets.length < 2 ? 'é a única folha do esquema'
+     : vazia ? 'apaga a folha ativa (ela está em branco)'
+     : 'só folha em branco se apaga: esta tem ' + sheetItems(sheetIdx).length + ' item(ns)',
+     () => apagaFolha(sheetIdx), !sh || model.sheets.length < 2 || !vazia);
 }
 $('sheetcards').addEventListener('click', e => {
   const b = e.target.closest('.sheetcard');
   if (b) setSheet(+b.dataset.i);
 });
+$('sheetcards').addEventListener('dblclick', e => {
+  const b = e.target.closest('.sheetcard');
+  if (b) renomeiaFolha(+b.dataset.i);
+});
+
+/* ------- nova / renomear / apagar folha (pedido do dono, 2026-10-29) -------
+   A folha e o item {"t":"sheet"} e o campo `sheet` de cada item que mora nela. Renomear troca
+   os dois; apagar so vale para folha EM BRANCO (sem item nenhum), e nunca a ultima. Para o
+   Altium o nome e rotulo: o BuildSchematic pergunta em qual .SchDoc despejar cada folha. */
+function folhaVazia(si){ return sheetItems(si).length === 0; }
+function nomeFolhaRuim(n, atual){
+  if (!n) return 'digite um nome';
+  /* aspas e barra invertida quebrariam a linha que o parser do BuildSchematic le */
+  if (/["\\]/.test(n)) return 'o nome não pode ter aspas nem \\';
+  if (n.length > 60) return 'nome comprido demais (máx. 60)';
+  if (n !== atual && model.sheets.some(s => s.name.toLowerCase() === n.toLowerCase())) return 'já existe uma folha com esse nome';
+  return '';
+}
+async function renomeiaFolha(si){
+  const sh = model.sheets[si];
+  if (!sh) return;
+  const antigo = sh.name;
+  const nome = await HubDialog.texto('Nome novo da folha "' + antigo + '":',
+    { title:'Renomear folha', v:antigo, ok:'Renomear', valida: n => nomeFolhaRuim(n, antigo) });
+  if (nome == null || nome === antigo) return;
+  if (wireDraw) endWire();
+  itemFolha(antigo);                     /* folha implicita: declara antes, senao o nome novo nao tem onde morar */
+  const daFolha = it => it.sheet === antigo || (!it.sheet && antigo === 'main');
+  for (const it of schematic.items){
+    if (!it) continue;
+    if (it.t === 'sheet'){ if (it.name === antigo) it.name = nome; }
+    else if (daFolha(it)) it.sheet = nome;
+  }
+  commit();
+  HubDialog.toast('folha "' + antigo + '" agora é "' + nome + '"', 'ok');
+}
+async function apagaFolha(si){
+  const sh = model.sheets[si];
+  if (!sh) return;
+  if (model.sheets.length < 2){ HubDialog.toast('é a única folha do esquema: não dá para apagar', 'warn'); return; }
+  const n = sheetItems(si).length;
+  if (n){ HubDialog.toast('a folha "' + sh.name + '" tem ' + n + ' item(ns): só folha em branco se apaga', 'warn', 5000); return; }
+  if (!(await HubDialog.confirm('Apagar a folha "' + sh.name + '"? Ela está em branco.',
+                                { title:'Apagar folha', ok:'Apagar', danger:true }))) return;
+  if (wireDraw) endWire();
+  for (let i = schematic.items.length - 1; i >= 0; i--){
+    const it = schematic.items[i];
+    if (it && it.t === 'sheet' && it.name === sh.name) schematic.items.splice(i, 1);
+  }
+  /* a folha ativa e um INDICE: apagar uma antes dela a desloca uma casa para tras */
+  if (sheetIdx > si || sheetIdx >= model.sheets.length - 1) sheetIdx = Math.max(0, sheetIdx - 1);
+  limpaSel();
+  commit();
+  cam.fit(fitBBox());
+  HubDialog.toast('folha "' + sh.name + '" apagada', 'ok');
+}
+async function novaFolha(){
+  let k = model.sheets.length + 1, sugestao;
+  do sugestao = 'Folha ' + k++; while (model.sheets.some(s => s.name.toLowerCase() === sugestao.toLowerCase()));
+  const nome = await HubDialog.texto('Nome da folha nova:',
+    { title:'Nova folha', v:sugestao, ok:'Criar', valida: n => nomeFolhaRuim(n, '') });
+  if (nome == null) return;
+  if (wireDraw) endWire();
+  /* o formato, a medida e o template (com os parametros do carimbo) vem da folha ativa */
+  const base = model.sheets[sheetIdx] ? itemFolha(model.sheets[sheetIdx].name) : { size:'A4' };
+  const nova = Object.assign({}, base, { t:'sheet', name:nome });
+  let fim = -1;
+  schematic.items.forEach((it, i) => { if (it && it.t === 'sheet') fim = i; });
+  schematic.items.splice(fim + 1, 0, nova);
+  commit();
+  const i = model.sheets.findIndex(s => s.name === nome);
+  if (i >= 0) setSheet(i);
+  HubDialog.toast('folha "' + nome + '" criada', 'ok');
+}
 /* O canvas de um cartao mede 0 enquanto a sub-aba Configuracoes esta fechada, e enquadrar
    numa largura 0 sai EM BRANCO sem erro nenhum (a escala vira Infinity). Um observador no
    CONTAINER resolve os dois casos de uma vez — a aba abrindo e a divisoria mudando a largura
@@ -6274,6 +6372,7 @@ new ResizeObserver(pintaMiniaturas).observe($('sheetcards'));
 function pintaCartaoAtivo(){
   for (const b of document.querySelectorAll('#sheetcards .sheetcard'))
     b.classList.toggle('on', +b.dataset.i === sheetIdx);
+  pintaAcoesFolha();
 }
 /* a folha ativa muda: larga a selecao (a net acesa era da folha antiga — levar o laranja
    junto pintaria fios de outra folha) e reenquadra */

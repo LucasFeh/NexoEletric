@@ -122,6 +122,44 @@ finally:
     shutil.rmtree(tmp, ignore_errors=True)
     H.build_index(real_root)
 
+# Renomear projeto (1.45.0): a pasta muda de nome, o "project" do schematic.js acompanha, e no app
+# a nota para o NexoBD fica escrita. Nome ruim, nome repetido e id repetido sao recusados.
+tmp = tempfile.mkdtemp()
+for nome in ('PCB1', 'PCB2'):
+    os.makedirs(os.path.join(tmp, 'Projects', nome))
+with open(os.path.join(tmp, 'Projects', 'PCB1', 'schematic.js'), 'w', encoding='utf-8') as f:
+    f.write('var schematic = {\n"format":"schmirror-v2",\n"project":"PCB1",\n"items":[\n{"t":"sheet","name":"main","size":"A4"},\n]};\n')
+real_root, H.ROOT = H.ROOT, tmp
+try:
+    H.build_index(tmp)
+    cli = H.app.test_client()
+    for ruim in ('', '  ', 'a/b', 'x:y', '.oculto', 'fim.', 'CON'):
+        assert cli.post('/api/project/pcb1/rename', json={'name': ruim}).status_code == 400, ruim
+    assert cli.post('/api/project/pcb1/rename', json={'name': 'pcb2'}).status_code == 409, 'nome de outro projeto'
+    assert cli.post('/api/project/pcb1/rename', json={'name': 'PCB2!'}).status_code == 409, 'mesmo id (pcb2) de outro'
+    assert cli.post('/api/project/nao-existe/rename', json={'name': 'X'}).status_code == 404
+    os.environ['ALTIUMHUB_NEXOBD'] = '1'
+    try:
+        r = cli.post('/api/project/pcb1/rename', json={'name': ' Fonte 24V Ação '})
+    finally:
+        del os.environ['ALTIUMHUB_NEXOBD']
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json() == {'ok': True, 'id': 'fonte-24v-a-o', 'name': 'Fonte 24V Ação'}, r.get_json()
+    assert not os.path.exists(os.path.join(tmp, 'Projects', 'PCB1'))
+    sch = H.load_var_file(os.path.join(tmp, 'Projects', 'Fonte 24V Ação', 'schematic.js'))
+    assert sch['project'] == 'Fonte 24V Ação' and sch['items'][0]['name'] == 'main'
+    with open(os.path.join(tmp, '.altiumhub', 'nexobd-renomear.json'), encoding='utf-8') as f:
+        assert json.load(f) == [{'de': 'PCB1', 'para': 'Fonte 24V Ação'}]
+    ids = [p['id'] for p in H.build_index(tmp)['projects']]
+    assert 'fonte-24v-a-o' in ids and 'pcb1' not in ids
+    # so a caixa: a mesma pasta, nome novo
+    r = cli.post('/api/project/pcb2/rename', json={'name': 'Pcb2'})
+    assert r.status_code == 200 and os.listdir(os.path.join(tmp, 'Projects')).count('Pcb2') == 1, r.get_json()
+finally:
+    H.ROOT = real_root
+    shutil.rmtree(tmp, ignore_errors=True)
+    H.build_index(real_root)
+
 # BOM por link: /bom/<id> monta a pagina na hora, e o estado da bancada e compartilhado.
 # Roda contra o _DemoKit, que esta no repositorio, e limpa os arquivos de estado no fim.
 cli = H.app.test_client()          # test_client chega como 127.0.0.1, entao passa no _is_local

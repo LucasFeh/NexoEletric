@@ -124,6 +124,7 @@ function atualizarPcblib({ ws, python, log = () => {}, forcar = false }) {
 
 const ARQ_ESTADO = (ws) => path.join(ws, '.altiumhub', 'nexobd.json');
 const ARQ_APAGAR = (ws) => path.join(ws, '.altiumhub', 'nexobd-apagar.json');
+const ARQ_RENOMEAR = (ws) => path.join(ws, '.altiumhub', 'nexobd-renomear.json');
 const CONFLITOS = (ws) => path.join(ws, '.altiumhub', 'conflitos-nexobd');
 
 function desligado(env = process.env) {
@@ -283,6 +284,77 @@ function fonteEfetiva(hubDir, ws, fonte) {
 }
 
 /**
+ * Projeto renomeado (1.45.0). O nome do projeto e a chave dele no NexoBD (nexoeletric-projeto = nome da pasta), entao
+ * renomear a pasta, sem mais nada, seria para o espelho um projeto novo (sobe) e um projeto sem pasta (baixa de volta).
+ *  - aqui: o hubserver anota {de, para} em .altiumhub/nexobd-renomear.json ANTES de renomear a pasta; a chave e o nome
+ *    do MESMO item trocam (o historico de revisoes fica) e a BOM o acompanha;
+ *  - nas outras maquinas: o item que esta pasta conhecia agora tem outra chave; a pasta e renomeada aqui tambem, com a
+ *    memoria do espelho junto (nada e baixado de novo, e o que estava por subir sobe).
+ * estado = o de espelharProjetos ({bd, projetos: {nome: ...}}); boms = o de espelharBoms. → nomes da nota que foram feitos
+ */
+async function renomearProjetos({ cliente, raiz, renomear = [], estado, boms = {}, lixeira, log = () => {} }) {
+  const { espelho } = await modulos();
+  const S = espelho.SISTEMA_PROJETO;
+  // outro NexoBD (ou a primeira rodada): a memoria nao vale la (espelharProjetos a zera), so a chave do item troca
+  const mesmoBD = estado.bd === await espelho.identidadeBD(cliente);
+  estado.projetos ??= {};
+  const vivos = await espelho.listarProjetos(cliente);
+  const existe = (nome) => fs.existsSync(path.join(raiz, nome));
+  const moveEstado = (de, para) => {
+    if (estado.projetos[de]) { estado.projetos[para] = estado.projetos[de]; delete estado.projetos[de]; }
+    if (boms[de]) { boms[para] = boms[de]; delete boms[de]; }
+  };
+  const tirar = async (fn) => { try { await fn(); } catch { /* chave que ja nao existe */ } };
+  const feitos = [], locais = [];
+  for (const r of renomear) {
+    const { de, para } = r;
+    if (!espelho.nomeDePastaOk(de) || !espelho.nomeDePastaOk(para) || de === para) { feitos.push(r); continue; }
+    const it = vivos.get(de), outro = vivos.get(para);
+    if (it) {
+      if (outro && outro.id !== it.id) {
+        // uma rodada correu entre o rename e esta nota e subiu a pasta nova como projeto novo: fica o antigo (o historico)
+        await cliente.apagarItem(outro.id);
+        log(`− ${para}: cópia subida no meio do renomear, apagada (fica o item ${it.id})`);
+      }
+      await cliente.definirChave(S, para, it.id);
+      await tirar(() => cliente.apagarChave(S, de));
+      await cliente.alterarItem(it.id, { nome: para, atributos: { pasta: para } });
+      vivos.delete(de); vivos.set(para, it);
+      log(`↔ ${de} → ${para}: renomeado no NexoBD (item ${it.id})`);
+      try {
+        const b = await cliente.chave(SISTEMA_BOM, slugProjeto(de));
+        if (b && !b.apagado_em && (b.atributos || {}).projeto === de) {
+          const slug = slugProjeto(para);
+          if (slug !== slugProjeto(de)) { await cliente.definirChave(SISTEMA_BOM, slug, b.id); await tirar(() => cliente.apagarChave(SISTEMA_BOM, slugProjeto(de))); }
+          await cliente.alterarItem(b.id, { nome: `BOM: ${para}`, descricao: 'A BOM do projeto para a bancada: o NexoBD serve em /bom/' + slug, atributos: { projeto: para, id: slug } });
+        }
+      } catch (err) { log(`BOM ${de} → ${para}: ${err.message}`); }
+    }
+    moveEstado(de, para);
+    // a rodada que correu no meio pode ter baixado a pasta antiga de volta: ela e a mesma coisa que a nova
+    if (existe(de) && existe(para) && de.toLowerCase() !== para.toLowerCase()) {
+      fs.mkdirSync(lixeira, { recursive: true });
+      fs.renameSync(path.join(raiz, de), path.join(lixeira, `${de}-renomeado-${Date.now()}`));
+    } else if (existe(de) && !existe(para)) fs.renameSync(path.join(raiz, de), path.join(raiz, para));
+    feitos.push(r);
+  }
+  // o que outra maquina renomeou: a pasta daqui ainda tem o nome velho e a memoria aponta para o item que mudou de chave
+  const porId = new Map([...vivos].map(([nome, it]) => [it.id, nome]));
+  for (const [de, est] of mesmoBD ? Object.entries(estado.projetos) : []) {
+    if (!est || !est.item || vivos.has(de)) continue;
+    const para = porId.get(est.item);
+    if (!para || para === de || estado.projetos[para] || !existe(de) || existe(para) || !espelho.nomeDePastaOk(para)) continue;
+    try {
+      fs.renameSync(path.join(raiz, de), path.join(raiz, para));
+      moveEstado(de, para);
+      locais.push({ de, para });
+      log(`↔ ${de} → ${para}: renomeado em outra máquina, a pasta daqui acompanhou`);
+    } catch (err) { log(`${de} → ${para}: a pasta não deu para renomear (${err.message}); vai pela lixeira`); }
+  }
+  return { feitos, locais };
+}
+
+/**
  * Uma rodada (sem agenda; os testes chamam direto).
  * op: {ws, bundle (a pasta com os scripts do instalador, ou ''), cliente, estado, log}
  * → {scripts, biblioteca, projetos}
@@ -307,6 +379,14 @@ async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = t
   try {
     chat = await espelho.espelharComRetentativa({ cliente, pasta: path.join(ws, '.chat'), alvo: ALVO_CHAT, estado: (estado.chat ??= {}), modo: 'ambos', conflitos: path.join(conflitos, 'chat'), app: APP, log, nota: 'chat do NexoEletric' });
   } catch (err) { log(`chat: ${err.message}`); }
+  // os projetos renomeados (aqui pelo hub, ou em outra maquina): antes do espelho, senao ele os toma por novo + sumido
+  const renomear = lerJson(ARQ_RENOMEAR(ws), []).filter((r) => r && typeof r.de === 'string' && typeof r.para === 'string');
+  const ren = await renomearProjetos({ cliente, raiz: path.join(ws, 'Projects'), renomear, estado: (estado.projetos ??= {}),
+    boms: (estado.boms ??= {}), lixeira: path.join(ws, 'Trash'), log });
+  if (renomear.length) {
+    const resto = lerJson(ARQ_RENOMEAR(ws), []).filter((r) => !ren.feitos.some((f) => f.de === r.de && f.para === r.para));
+    if (resto.length) fs.writeFileSync(ARQ_RENOMEAR(ws), JSON.stringify(resto)); else fs.rmSync(ARQ_RENOMEAR(ws), { force: true });
+  }
   // os projetos que o hub mandou para a lixeira: apagar no NexoBD (a lista so sai do arquivo depois de feito)
   const apagar = lerJson(ARQ_APAGAR(ws), []).filter((n) => typeof n === 'string');
   const projetos = await espelho.espelharProjetos({
@@ -479,5 +559,5 @@ class Armazem {
   }
 }
 
-module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, aceitaFerramenta, ALVO_FERRAMENTAS, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_ESTADO, ARQ_PCBLIB,
+module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, aceitaFerramenta, ALVO_FERRAMENTAS, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_RENOMEAR, ARQ_ESTADO, ARQ_PCBLIB, renomearProjetos,
   espelharBoms, publicarWebBom, fonteDoHub, fonteEfetiva, slugProjeto, SISTEMA_BOM, ALVO_WEB_BOM, ARQ_WEB_BOM, ALVO_CHAT };

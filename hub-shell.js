@@ -66,6 +66,7 @@
     busca: '<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/>',
     fecharTodos: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5.5 8h5"/>',
     lixo: '<path d="M2.5 4.5h11M6 4.5V2.8h4v1.7M4 4.5l.7 9h6.6l.7-9"/><path d="M6.8 7v4.5M9.2 7v4.5"/>',
+    editar: '<path d="M10.5 2.8l2.7 2.7-7.4 7.4H3.1v-2.7z"/><path d="M9 4.3l2.7 2.7"/>',
     config: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
   };
   const ICONE_DA_ABA = { esquema: 'esquema', pcb: 'pcb', comp: 'comp', nets: 'nets', lib: 'lib',
@@ -506,6 +507,10 @@ body.eh-shell .tab[aria-selected="true"]::after {
     });
     m.append(el('div', 'hr'));
     const semServidor = typeof S !== 'undefined' && S.demoMode;
+    itemDeMenu(m, 'Renomear projeto…', icone('editar'), () => renomearProjeto(p), {
+      off: semServidor,
+      titulo: semServidor ? 'sem servidor não há o que renomear' : 'troca o nome da pasta do projeto (e no NexoBD)',
+    });
     itemDeMenu(m, 'Excluir projeto…', icone('lixo'), () => openDeleteDialog(p.id), {
       perigo: true,
       off: semServidor || typeof openDeleteDialog !== 'function',
@@ -519,6 +524,114 @@ body.eh-shell .tab[aria-selected="true"]::after {
     m.style.top = Math.max(6, Math.min(y, window.innerHeight - r.height - 6)) + 'px';
     menuAberto = m;
   }
+  /* Renomear projeto (pedido do dono, 2026-10-29). O nome E a pasta em Projects\ e o id e o slug
+     dela: o servidor renomeia a pasta (/api/project/<id>/rename) e, no app, anota para o NexoBD
+     trocar o nome do mesmo item. Aqui so o dialogo, no mesmo molde do Excluir do hub. */
+  const NOME_RUIM = /[\\/:*?"<>|\x00-\x1f]/;
+  function nomeRuim(n) {
+    if (!n) return 'digite um nome';
+    if (NOME_RUIM.test(n)) return 'o nome não pode ter \\ / : * ? " < > |';
+    if (/^\./.test(n) || /\.$/.test(n)) return 'o nome não pode começar nem terminar com ponto';
+    if (n.length > 120) return 'nome comprido demais (máx. 120)';
+    if (/^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(n)) return 'esse nome o Windows reserva';
+    return '';
+  }
+  function vistasSujas() {
+    let sujo = false;
+    document.querySelectorAll('iframe').forEach((f) => {
+      try { if (f.contentWindow && f.contentWindow.__hubDirty && f.contentWindow.__hubDirty()) sujo = true; } catch (e) { /* cross-frame */ }
+    });
+    return sujo;
+  }
+  // as escolhas de cada projeto no navegador (Neoden, Laser, BOM...) sao guardadas pelo id: o id muda junto com o nome
+  function migraPreferencias(de, para) {
+    try {
+      const fim = '.' + de;
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('altiumhub.') && k.endsWith(fim)) {
+          const nova = k.slice(0, -fim.length) + '.' + para;
+          if (localStorage.getItem(nova) == null) localStorage.setItem(nova, localStorage.getItem(k));
+          localStorage.removeItem(k);
+        }
+      }
+      if (localStorage.getItem('altiumhub.project') === de) localStorage.setItem('altiumhub.project', para);
+    } catch (e) { /* sem storage */ }
+  }
+  function renomearProjeto(p) {
+    const eAtivo = typeof proj === 'function' && proj() && proj().id === p.id;
+    if (eAtivo && vistasSujas()) {
+      toast('Salve antes as edições das vistas Esquema/PCB: elas gravam no projeto pelo nome', 'warn');
+      return;
+    }
+    const bd = el('div', 'backdrop center');
+    bd.onclick = (e) => { if (e.target === bd) closeOverlay(); };
+    const d = el('div', 'dialog');
+    d.style.width = 'min(480px,100%)';
+    d.append(el('h3', null, 'Renomear projeto'));
+    const atual = el('p', 'mono', p.name);
+    atual.style.cssText = 'font-size:12px;color:var(--text-3);margin:0;word-break:break-all';
+    const inp = el('input', 'input');
+    inp.type = 'text'; inp.autocomplete = 'off'; inp.spellcheck = false; inp.value = p.name;
+    const dica = el('p', null, 'A pasta em Projects\\ troca de nome (e o projeto no NexoBD, sem perder o histórico). '
+      + 'O Altium acha o projeto pelo nome: para o BuildSchematic/ApplyChanges, renomeie também o .PrjPcb lá.');
+    dica.style.cssText = 'font-size:12px;color:var(--text-2);margin:2px 0 0';
+    const erro = el('p', null, '');
+    erro.style.cssText = 'font-size:12px;color:var(--err);margin:0;min-height:1em';
+    const act = el('div');
+    act.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:6px';
+    const cancel = el('button', 'btn btn-ghost', 'Cancelar');
+    cancel.type = 'button'; cancel.onclick = closeOverlay;
+    const ok = el('button', 'btn btn-primary', 'Renomear');
+    ok.type = 'button';
+    const confere = () => {
+      const n = inp.value.trim();
+      const msg = n === p.name ? '' : nomeRuim(n)
+        || ((S.projects || []).some((x) => x.id !== p.id && x.name.toLowerCase() === n.toLowerCase()) ? 'já existe um projeto com esse nome' : '');
+      erro.textContent = msg;
+      ok.disabled = Boolean(msg) || n === p.name;
+      return !ok.disabled;
+    };
+    const vai = async () => {
+      if (!confere()) return;
+      const nome = inp.value.trim();
+      ok.disabled = true;
+      let j = {}, st = 0;
+      try {
+        const r = await fetch('/api/project/' + encodeURIComponent(p.id) + '/rename', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nome }),
+        });
+        st = r.status;
+        try { j = await r.json(); } catch (e) { /* sem corpo */ }
+      } catch (e) { j = { error: String(e.message || e) }; }
+      if (!j.ok) {
+        erro.textContent = 'não deu para renomear: ' + (j.error || ('HTTP ' + st));
+        ok.disabled = false; inp.focus();
+        return;
+      }
+      closeOverlay();
+      if (j.id !== p.id) {
+        migraPreferencias(p.id, j.id);
+        if (abertos.delete(p.id)) abertos.add(j.id);
+      }
+      toast(p.name + ' agora é ' + j.name, 'ok');
+      const idx = await API.index();
+      S.projects = idx.projects;
+      const ativo = S.projId === p.id ? j.id : S.projId;
+      await loadProject(S.projects.some((x) => x.id === ativo) ? ativo : S.projects[0].id);
+    };
+    inp.oninput = confere;
+    inp.onkeydown = (e) => { if (e.key === 'Enter') vai(); else if (e.key === 'Escape') closeOverlay(); };
+    ok.onclick = vai;
+    act.append(cancel, ok);
+    d.append(atual, inp, dica, erro, act);
+    bd.append(d);
+    document.getElementById('overlay').append(bd);
+    confere();
+    inp.focus();
+    inp.select();
+  }
+
   function montar() {
     if (document.body.classList.contains('eh-shell')) return;
     const app = document.getElementById('app');
