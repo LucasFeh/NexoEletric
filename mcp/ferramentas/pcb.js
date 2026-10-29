@@ -196,11 +196,44 @@ function trilhasNosPads(comp, eb) {
   return out;
 }
 
+/* ---------- um comp_move (pcb_mover e pcb_mover_lote) ----------
+   O op do movimento a partir do pedido (x/y absolutos ou dx/dy, rot ou drot, layer) e do componente
+   como ele está na placa efetiva. */
+function opDoMovimento(c, a) {
+  return { op: 'comp_move', ref: a.ref,
+    x: isNum(a.x) ? a.x : r4(c.x + (a.dx || 0)), y: isNum(a.y) ? a.y : r4(c.y + (a.dy || 0)),
+    rot: isNum(a.rot) ? ((a.rot % 360) + 360) % 360 : (((c.rot + (a.drot || 0)) % 360) + 360) % 360,
+    layer: a.layer || c.layer };
+}
+/* grava o movimento no changes.js (dentro de uma ops.transacao) e devolve a linha que ficou */
+function gravaMovimento(ctx, arq, board, op) {
+  /* componente que chegou pelo ECO (ou pelo pcb_componente) ainda é um comp_add no
+     changes.js: mover é editar a linha dele (uma linha por objeto, como a vista faz) */
+  if (!(board.components || []).some(k => k.ref === op.ref)) {
+    const i = arq.itens.findIndex(x => x && x.op === 'comp_add' && x.ref === op.ref);
+    if (i < 0) throw new ErroMcp(`componente "${op.ref}" não está no board.js nem num comp_add do changes.js`);
+    const velho = arq.itens[i];
+    const novo = Object.assign({}, velho, { x: op.x, y: op.y, rot: op.rot, layer: op.layer }, op.note ? { note: op.note } : {});
+    /* o designator posto na linha (des_x/des_y) anda junto com o componente */
+    if (isNum(velho.des_x) && isNum(velho.des_y)) {
+      const lado = q => q === 'Bottom' ? 'Bottom' : 'Top';
+      const d = ctx.hc.compDelta({ src: { x: velho.x, y: velho.y, rot: velho.rot || 0, layer: lado(velho.layer) },
+                                   eff: { x: novo.x, y: novo.y, rot: novo.rot || 0, layer: lado(novo.layer) } });
+      const q = ctx.hc.xfPoint(d, velho.des_x, velho.des_y);
+      novo.des_x = ops.r6(q.x); novo.des_y = ops.r6(q.y);
+      if (isNum(velho.des_rot)) novo.des_rot = ((velho.des_rot + d.dr) % 360 + 360) % 360;
+    }
+    arq.substitui(i, novo);
+    return novo;
+  }
+  return ops.mescla(arq, ops.origDe(op, board)).obj;
+}
+
 module.exports = {
   grupo: 'pcb',
   ordem: 30,
   titulo: 'PCB — placa (board.js lido, changes.js escrito)',
-  modulos: ['hub-core.js', 'hub-roteador.js', 'hub-autoroteador.js', 'hub-gerber.js'],
+  modulos: ['hub-core.js', 'hub-roteador.js', 'hub-autoroteador.js', 'hub-gerber.js', 'hub-suaviza45.js', 'hub-posiciona.js'],
   ferramentas: [
     {
       nome: 'pcb_resumo', titulo: 'Resumo da placa', leitura: true,
@@ -316,33 +349,9 @@ module.exports = {
         const c = (antes.eb.components || []).find(x => x.ref === a.ref);
         if (!c) throw new ErroMcp(`componente "${a.ref}" não existe na placa`);
         const tocavam = trilhasNosPads(c, antes.eb);
-        const op = { op: 'comp_move', ref: a.ref,
-          x: isNum(a.x) ? a.x : r4(c.x + (a.dx || 0)), y: isNum(a.y) ? a.y : r4(c.y + (a.dy || 0)),
-          rot: isNum(a.rot) ? ((a.rot % 360) + 360) % 360 : (((c.rot + (a.drot || 0)) % 360) + 360) % 360,
-          layer: a.layer || c.layer };
+        const op = opDoMovimento(c, a);
         comNote(op, a);
-        const est = ops.transacao(ctx, p, (arq, board) => {
-          /* componente que chegou pelo ECO (ou pelo pcb_componente) ainda é um comp_add no
-             changes.js: mover é editar a linha dele (uma linha por objeto, como a vista faz) */
-          if (!(board.components || []).some(k => k.ref === a.ref)) {
-            const i = arq.itens.findIndex(x => x && x.op === 'comp_add' && x.ref === a.ref);
-            if (i < 0) throw new ErroMcp(`componente "${a.ref}" não está no board.js nem num comp_add do changes.js`);
-            const velho = arq.itens[i];
-            const novo = Object.assign({}, velho, { x: op.x, y: op.y, rot: op.rot, layer: op.layer }, op.note ? { note: op.note } : {});
-            /* o designator posto na linha (des_x/des_y) anda junto com o componente */
-            if (isNum(velho.des_x) && isNum(velho.des_y)) {
-              const lado = q => q === 'Bottom' ? 'Bottom' : 'Top';
-              const d = ctx.hc.compDelta({ src: { x: velho.x, y: velho.y, rot: velho.rot || 0, layer: lado(velho.layer) },
-                                           eff: { x: novo.x, y: novo.y, rot: novo.rot || 0, layer: lado(novo.layer) } });
-              const q = ctx.hc.xfPoint(d, velho.des_x, velho.des_y);
-              novo.des_x = ops.r6(q.x); novo.des_y = ops.r6(q.y);
-              if (isNum(velho.des_rot)) novo.des_rot = ((velho.des_rot + d.dr) % 360 + 360) % 360;
-            }
-            arq.substitui(i, novo);
-            return [novo];
-          }
-          return [ops.mescla(arq, ops.origDe(op, board)).obj];
-        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_mover' });
+        const est = ops.transacao(ctx, p, (arq, board) => [gravaMovimento(ctx, arq, board, op)], { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_mover' });
         const depois = ctx.placa(p);
         const c2 = (depois.eb.components || []).find(x => x.ref === a.ref);
         if (est.gravado && c2) {
@@ -350,6 +359,166 @@ module.exports = {
           if (tocavam.length) est.trilhas_que_chegavam = { nota: 'estas trilhas tocavam os pads antes do movimento — ajuste (pcb_editar) ou apague (pcb_apagar)', lista: tocavam };
         }
         return est;
+      },
+    },
+    {
+      nome: 'pcb_mover_lote', titulo: 'Mover muitos componentes de uma vez (com checagem de posicionamento)',
+      descricao: 'Move/gira/vira VÁRIOS componentes numa gravação só (comp_move com os orig_* preenchidos sozinhos; a linha que já existe é editada; componente de comp_add tem a linha dele editada) — o lote rápido para centenas de movimentos, em vez de um pcb_mover por componente. Cada movimento: {ref, x/y absolutos ou dx/dy, rot ou drot, layer Top/Bottom}. Antes de gravar, confere o POSICIONAMENTO dos que andaram (hub-posiciona.js): colisão = dois componentes do mesmo lado mais perto que a folga (a ComponentClearance das regras do projeto, ou `folga`), pela caixa do componente; fora = saiu do contorno da placa ou caiu sobre um recorte. Só o que o lote CRIOU conta: com colisão nova ou componente novo fora da placa nada é gravado (forcar:true grava). A resposta é curta: totais, as colisões/fora novos e quantas trilhas chegavam nos pads dos que andaram (detalhes:true lista por componente).',
+      entrada: { type: 'object', properties: Object.assign({
+        projeto: PROJETO,
+        movimentos: { type: 'array', minItems: 1, items: { type: 'object', properties: {
+          ref: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, dx: { type: 'number' }, dy: { type: 'number' },
+          rot: { type: 'number' }, drot: { type: 'number' }, layer: { type: 'string', enum: ['Top', 'Bottom'] } }, required: ['ref'] } },
+        folga: { type: 'number', minimum: 0, description: 'folga de posicionamento em mm (padrão: a ComponentClearance das regras do projeto)' },
+        checar: { type: 'boolean', description: 'padrão true: confere colisão e fora da placa antes de gravar' },
+        detalhes: { type: 'boolean', description: 'lista cada componente (posição nova e trilhas que chegavam nos pads)' },
+      }, COMUNS), required: ['projeto', 'movimentos'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const antes = ctx.placa(p);
+        const porRef = new Map((antes.eb.components || []).map(c => [String(c.ref), c]));
+        const vistos = new Set(), faltam = [], repetidos = [];
+        const lista = [];
+        for (const m of a.movimentos) {
+          const ref = String(m.ref || '');
+          const c = porRef.get(ref);
+          if (!c) { faltam.push(ref); continue; }
+          if (vistos.has(ref)) repetidos.push(ref);
+          vistos.add(ref);
+          lista.push(comNote(opDoMovimento(c, Object.assign({}, m, { ref })), a));
+        }
+        if (faltam.length) throw new ErroMcp(`componente(s) que não existem na placa: ${faltam.slice(0, 20).join(', ')} — nada foi gravado`);
+        const refs = [...vistos];
+        const PS = ctx.modulo('hub-posiciona.js');
+        const S = ops.regrasDoProjeto(ctx, p);
+        const confere = eb => PS.confere(eb, { refs, folga: a.folga, regras: S ? S.conjunto : undefined });
+        const t0 = Date.now();
+        const faz = simular => ops.transacao(ctx, p, (arq, board) => lista.map(op => gravaMovimento(ctx, arq, board, op)),
+          { simular, forcar: a.forcar, ferramenta: 'pcb_mover_lote',
+            relata: (model, board, hc) => {
+              if (a.checar === false || !PS) return {};
+              const c0 = confere(antes.eb), c1 = confere(hc.effectiveBoard(board, model)), nv = PS.novas(c0, c1);
+              return { posicionamento: { componentes: refs.length, colisoes_antes: c0.colisoes.length, colisoes_depois: c1.colisoes.length,
+                       novas_colisoes: nv.colisoes.slice(0, 50), n_novas_colisoes: nv.colisoes.length,
+                       novos_fora: nv.fora.slice(0, 50), n_novos_fora: nv.fora.length,
+                       folga: isNum(a.folga) ? a.folga : (S ? 'ComponentClearance das regras' : PS.FOLGA_PADRAO) } };
+            } });
+        /* primeiro simula (valida e confere); grava só se o lote não criou colisão nem tirou componente da placa */
+        let est = faz(true);
+        const pos = est.posicionamento;
+        const ruim = !!(pos && (pos.n_novas_colisoes || pos.n_novos_fora));
+        if (!a.simular && (est.ok || a.forcar) && (!ruim || a.forcar)) est = faz(false);
+        else if (!a.simular && ruim) est.dica = `${pos.n_novas_colisoes} colisão(ões) nova(s) e ${pos.n_novos_fora} componente(s) fora da placa: nada foi gravado (forcar:true grava mesmo assim)`;
+        else if (!a.simular && !est.ok) est.dica = 'Nada foi gravado: há erro de validação nas linhas (veja "erros"); forcar:true grava mesmo assim.';
+        est.movimentos = lista.length;
+        if (repetidos.length) est.repetidos = { nota: 'o mesmo componente mais de uma vez: vale o último', refs: [...new Set(repetidos)] };
+        const linhas = est.linhas || [];
+        est.linhas_total = linhas.length;
+        est.linhas = linhas.filter(l => l.status !== 'ok').slice(0, 20);
+        let nTrilhas = 0;
+        const det = [];
+        const depois = est.gravado ? ctx.placa(p) : null;
+        for (const ref of refs) {
+          const tocavam = trilhasNosPads(porRef.get(ref), antes.eb);
+          nTrilhas += tocavam.length;
+          if (a.detalhes) {
+            const c2 = depois && (depois.eb.components || []).find(x => String(x.ref) === ref);
+            det.push(Object.assign({ ref, trilhas_que_chegavam: tocavam.map(t => t.id) }, c2 ? { x: c2.x, y: c2.y, rot: c2.rot, layer: c2.layer } : {}));
+          }
+        }
+        est.trilhas_que_chegavam = nTrilhas ? { total: nTrilhas, nota: 'trilhas que tocavam os pads dos componentes que andaram: ajuste (pcb_editar) ou apague (pcb_apagar); detalhes:true lista' } : { total: 0 };
+        if (a.detalhes) est.componentes = det;
+        est.ms = Date.now() - t0;
+        return est;
+      },
+    },
+    {
+      nome: 'pcb_posicao_conferir', titulo: 'Conferir posicionamento (sobreposição, folga, fora da placa)', leitura: true,
+      descricao: 'Confere o posicionamento da placa efetiva (hub-posiciona.js): os pares de componentes do MESMO lado mais perto que a folga de posicionamento (a ComponentClearance das regras do projeto, ou `folga`), pela caixa do componente — sobrepostos com a distância negativa —, e os componentes fora do contorno ou sobre um recorte. refs = só os pares que envolvem estes.',
+      entrada: { type: 'object', properties: { projeto: PROJETO, refs: { type: 'array', items: { type: 'string' } },
+        folga: { type: 'number', minimum: 0, description: 'mm (padrão: a ComponentClearance das regras)' } }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const PS = ctx.exige('hub-posiciona.js', 'HubPosiciona');
+        const { eb } = ctx.placa(p);
+        const S = ops.regrasDoProjeto(ctx, p);
+        const r = PS.confere(eb, { refs: a.refs, folga: a.folga, regras: S ? S.conjunto : undefined });
+        return { projeto: p.nome, componentes: r.componentes, n_colisoes: r.colisoes.length, colisoes: r.colisoes.slice(0, 100),
+                 n_fora: r.fora.length, fora: r.fora.slice(0, 100), folga: isNum(a.folga) ? a.folga : (S ? 'ComponentClearance das regras (' + S.fonte + ')' : PS.FOLGA_PADRAO), ms: r.ms };
+      },
+    },
+    {
+      nome: 'pcb_suavizar', titulo: 'Suavizar trilhas a 45° (sem soltar ramo)',
+      modulo: 'hub-suaviza45.js',
+      descricao: 'Suaviza a 45° trilhas já na placa (a escada de um roteador de grade, os cantos de 90°) SEM soltar ramo (hub-suaviza45.js): toda ponta de trilha/arco, via, pad ou cruzamento da mesma net que encosta no MEIO de uma trilha vira ponto fixo, e só o trecho entre dois pontos fixos se suaviza, com as pontas paradas. A suavização é a do roteador (o vértice mais distante que se alcança com reta ou diagonal+reta, sem degraus), com as regras do projeto como o DRC; trilha não passa por cima de pad da mesma net que ela não tocava; trecho que já violava folga fica como está. modo chanfro: só chanfra os cantos de 90° (pernas de até `chanfro` mm). No fim confere por net o ratsnest e as pontas soltas (NetAntennae): net que piorou volta inteira (revertidas). Padrão gravar:false = SIMULA; gravar:true troca as trilhas (track_del com orig_*, ou tira a linha track_add de quem nasceu no changes.js; track_add dos trechos novos) — com violação nova de DRC nada é gravado (forcar:true passa).',
+      entrada: { type: 'object', properties: {
+        projeto: PROJETO,
+        nets: { type: 'array', items: { type: 'string' }, description: 'só estas nets (padrão: todas)' },
+        ids: { type: 'array', items: { type: 'string' }, description: 'só estas trilhas' },
+        camadas: { type: 'array', items: { type: 'string' } },
+        modo: { type: 'string', enum: ['puxar', 'chanfro'], description: 'puxar (padrão): estica o fio a 45°; chanfro: só chanfra os cantos de 90°' },
+        chanfro: { type: 'number', exclusiveMinimum: 0, description: 'perna máxima do chanfro em mm (padrão 1)' },
+        gravar: { type: 'boolean', description: 'padrão false (só simula e mostra)' },
+        forcar: { type: 'boolean', description: 'grava mesmo com violação nova de DRC (evite)' },
+        note: { type: 'string', description: 'o note das linhas (padrão "suavizar 45")' },
+      }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const SV = ctx.exige('hub-suaviza45.js', 'HubSuaviza45');
+        ctx.exige('hub-pcbnets.js', 'HubPcbNets');
+        const R = ctx.exige('hub-roteador.js', 'HubRoteador');
+        const pl = ctx.placaDespejada(p), eb = pl.eb;
+        const tg = textoGeo(ctx);
+        const S = ops.regrasDoProjeto(ctx, p);
+        const o = { placa: { lacos: lacosDe(ctx, eb), recortes: recortesDe(eb) }, textoGeo: tg };
+        if (S) o.regras = S.conjunto; else o.clearance = (eb.rules && eb.rules.clearance > 0) ? eb.rules.clearance : R.FOLGA_PADRAO;
+        const C = R.cena(eb, o);
+        const r = SV.suaviza(eb, { cena: C, roteador: R, regras: S ? S.conjunto : undefined, nets: a.nets, ids: a.ids, camadas: a.camadas,
+                                   modo: a.modo, chanfro: a.chanfro, note: a.note ? String(a.note).replace(/":/g, '" :') : undefined });
+        const out = { projeto: p.nome, cadeias: r.cadeias, suavizadas: r.suavizadas, mantidas: r.mantidas, vertices: r.vertices,
+                      comprimento_mm: r.comprimento, revertidas: r.revertidas, puladas: r.puladas, por_net: r.porNet.slice(0, 60), ms: r.ms,
+                      trilhas: { saem: r.ops.filter(x => x.op === 'track_del').length, entram: r.ops.filter(x => x.op === 'track_add').length } };
+        if (!r.ops.length) { out.gravacao = { ok: true, gravado: false, nota: 'nada a suavizar' }; return out; }
+        /* as ops do changes.js: a trilha do board.js sai por track_del (orig_*); a que nasceu de um
+           track_add (id new-t…) sai tirando a linha dela */
+        const porId = new Map((eb.tracks || []).map(t => [String(t.id), t]));
+        const monta = (arq, board) => {
+          const tocados = [];
+          for (const op of r.ops) {
+            if (op.op !== 'track_del') continue;
+            if ((board.tracks || []).some(t => String(t.id) === String(op.id))) { tocados.push(ops.mescla(arq, ops.origDe(Object.assign({}, op), board)).obj); continue; }
+            const t = porId.get(String(op.id));
+            const i = t ? arq.itens.findIndex(x => x && x.op === 'track_add' && x.layer === t.layer && x.w === t.w &&
+              Math.abs(x.x1 - t.x1) < 1e-6 && Math.abs(x.y1 - t.y1) < 1e-6 && Math.abs(x.x2 - t.x2) < 1e-6 && Math.abs(x.y2 - t.y2) < 1e-6) : -1;
+            if (i < 0) throw new ErroMcp(`a trilha ${op.id} não está no board.js nem numa linha track_add do changes.js`);
+            arq.remove(i);
+          }
+          for (const op of r.ops) if (op.op === 'track_add') tocados.push(ops.mescla(arq, Object.assign({}, op)).obj);
+          return tocados;
+        };
+        /* o DRC (com os planos redespejados) antes e depois: as violações NOVAS */
+        const D = ctx.modulo('hub-pcbdrc.js'), A = ctx.modulo('hub-autoroteador.js');
+        const sim = ops.transacao(ctx, p, monta, { simular: true, ferramenta: 'pcb_suavizar',
+          relata: (model, board, hc, l) => {
+            if (!D) return {};
+            const conj = S ? S.conjunto : undefined;
+            const d0 = D.rodar(eb, conj, { textoGeo: tg }), d1 = D.rodar(ctx.placaDespejada(p, l.depois).eb, conj, { textoGeo: tg });
+            const nv = A && A.novasViolacoes ? A.novasViolacoes(d0, d1) : [];
+            return { drc: { antes: d0.total, depois: d1.total, novas: nv.length, novas_lista: nv.slice(0, 30).map(v => ({ tipo: v.tipo, msg: v.msg, x: r4(v.x), y: r4(v.y), layer: v.layer })) } };
+          } });
+        out.drc = sim.drc || { nota: 'hub-pcbdrc.js ausente: o DRC não rodou' };
+        if (!sim.ok && !a.forcar) { delete sim.drc; out.gravacao = sim; return out; }
+        if (a.gravar && out.drc.novas && !a.forcar) {
+          out.gravacao = { ok: false, gravado: false, motivo: 'drc', erro: `${out.drc.novas} violação(ões) nova(s) de DRC: nada foi gravado (forcar:true grava mesmo assim)` };
+          return out;
+        }
+        const g = a.gravar ? ops.transacao(ctx, p, monta, { forcar: a.forcar, ferramenta: 'pcb_suavizar' }) : sim;
+        delete g.drc;
+        g.linhas_total = (g.linhas || []).length;
+        g.linhas = (g.linhas || []).slice(0, 12);
+        out.gravacao = g;
+        if (!a.gravar) out.nota = 'simulação: nada foi gravado — repita com gravar:true para trocar as trilhas';
+        return out;
       },
     },
     {

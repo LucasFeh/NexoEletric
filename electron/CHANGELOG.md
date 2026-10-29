@@ -4,6 +4,28 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.41.0 — 2026-10-29
+
+Roteamento e posicionamento, o P3 da lista de melhorias (itens 21 e 22).
+- **Suavizar a 45° sem soltar ramo (21)**: módulo novo `hub-suaviza45.js` e ferramenta `pcb_suavizar` do MCP.
+  - Toda ponta de trilha ou arco, via, pad ou cruzamento da mesma net que encosta no meio de uma trilha vira ponto
+    fixo, e só o trecho entre dois pontos fixos se suaviza, com as pontas paradas. A versão ingênua (a rota inteira
+    puxada de ponta a ponta) soltava o ramo e a via; o teste mostra isso antes.
+  - A suavização é a do roteador, com as regras do projeto. A trilha nova não passa por cima de pad da mesma net que
+    não tocava, e trecho que já violava folga fica como está. `modo:'chanfro'` só chanfra os cantos de 90°.
+  - No fim confere por net o ratsnest e as pontas soltas: net que piorou volta inteira.
+  - Grava trocando as trilhas: `track_del` com os orig_*, ou tirando a linha `track_add` de quem nasceu no
+    changes.js. Com violação nova de DRC nada é gravado.
+- **Mover componentes em lote (22)**: ferramentas `pcb_mover_lote` e `pcb_posicao_conferir` do MCP, módulo novo
+  `hub-posiciona.js`.
+  - Centenas de `comp_move` numa gravação só, com a mesma conta do `pcb_mover`. Medido: 18 componentes em 0,3 s
+    numa chamada.
+  - Antes de gravar, confere colisão entre componentes do mesmo lado (a ComponentClearance das regras, ou `folga`)
+    e componente fora da placa ou sobre recorte. Só o que o lote criou conta: com colisão nova nada é gravado, e
+    `forcar:true` grava.
+  - O `pcb_mover` passou a usar a mesma função do lote, sem mudar o que faz.
+- Testes: `tests/test-suaviza45.js` e `tests/test-mcp-p3.js`.
+
 ## 1.40.0 — 2026-10-29
 
 Auto-roteador e planos, o P2 da lista de melhorias de roteamento (itens 17 a 20).

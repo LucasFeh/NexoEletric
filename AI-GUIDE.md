@@ -409,6 +409,12 @@ var changes = [
 - Fanout de uma net (GND): `pcb_fanout {net}` põe, em cada pad SMD que ainda não chega ao plano, uma trilha curta e
   uma via dentro do cobre do plano. A via respeita furo a furo e máscara, também contra as outras vias do fanout.
   Simula por padrão; com `gravar:true` grava, desde que não haja violação nova de DRC.
+- Suavizar trilhas que já estão na placa a 45° (a escada de um roteador de grade): `pcb_suavizar`. Ponto em que
+  outro cobre da mesma net encosta no meio da trilha (ramo, via, pad) fica parado, então nenhum ramo se solta; net
+  que piorar no ratsnest ou nas pontas soltas volta inteira. Simula por padrão.
+- Posicionar muitos componentes: `pcb_mover_lote {movimentos:[...]}` numa gravação só, em vez de um `pcb_mover` por
+  componente. Ele recusa o lote que põe componente em cima de outro (ComponentClearance) ou fora da placa;
+  `pcb_posicao_conferir` mostra as colisões a qualquer hora.
 
 **Também vem do Altium (só na tela e nas saídas, sem op própria).**
 - Linhas de conexão (ratsnest): o que falta ligar por net.
