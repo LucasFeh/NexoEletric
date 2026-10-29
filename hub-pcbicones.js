@@ -43,9 +43,14 @@ const ICONES = {
   contorno:   'r:2,3,12,10|c:2,3,1|c:14,3,1|c:14,13,1|c:2,13,1',
   pad:        'c:8,8,5|c:8,8,1.8',
   pour:       'M2.5 2.5 H13.5 V13.5 H2.5 Z|M2.5 6.5 L6.5 2.5 M2.5 10.5 L10.5 2.5 M5.5 13.5 L13.5 5.5 M9.5 13.5 L13.5 9.5',
+  /* o Polygon Pour em polígono livre: o pentágono do Polígono, hachurado como o pour */
+  pourLivre:  'M8 2 L14 6.5 L11.7 13.5 L4.3 13.5 L2 6.5 Z|M2.3 7.5 L7.3 2.5 M3.3 10.5 L10.2 3.6 M7 13.5 L13.9 6.6',
   /* medir e sinalizar */
   medir:      'M2 11.5 L11.5 2 L14 4.5 L4.5 14 Z|M5 9 L6.5 10.5 M7.2 6.8 L8.7 8.3 M9.4 4.6 L10.9 6.1',
   sinalizar:  'M4 14.5 V2|M4 2.5 H12.5 L10.5 5.5 L12.5 8.5 H4',
+  /* as cotas da régua: a cota (linhas de chamada, linha com setas) à vista ou riscada */
+  cotas:      'M2 4 V12 M14 4 V12|M2 8 H14|M4.5 6 L2 8 L4.5 10 M11.5 6 L14 8 L11.5 10',
+  cotasOff:   'M2 4 V12 M14 4 V12|M2 8 H14|M4.5 6 L2 8 L4.5 10 M11.5 6 L14 8 L11.5 10|M2.5 14 L13.5 2',
   /* historico */
   desfazer:   'M3 7 H10 A3.5 3.5 0 0 1 10 14 H7 M6 4 L3 7 L6 10',
   refazer:    'M13 7 H6 A3.5 3.5 0 0 0 6 14 H9 M10 4 L13 7 L10 10',

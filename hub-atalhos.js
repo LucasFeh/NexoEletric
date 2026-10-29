@@ -135,7 +135,7 @@ const ATALHOS_PCB = [
   { id:'texto',       tecla:'T',      rotulo:'Texto' },
   { id:'preencher',   tecla:'P',      rotulo:'Preencher formas (cheio/contorno)' },
   { id:'sinalizar',   tecla:'N',      rotulo:'Sinalizar para a IA' },
-  { id:'medir',       tecla:'Ctrl+M', rotulo:'Medir distância' },
+  { id:'medir',       tecla:'Ctrl+M', rotulo:'Régua (medir e cotar)' },
   { id:'unidade',     tecla:'Q',      rotulo:'Trocar a unidade mm/mil' },
   { id:'camadaUnica', tecla:'S',      rotulo:'Camada única' },
   { id:'proxCamada',  tecla:'+',      rotulo:'Próxima camada' },
@@ -243,7 +243,7 @@ const PADRAO_ALTIUM_PCB = {
    conflito do roteamento interativo do Altium: contornar, parar no obstaculo ou ignorar): o
    normalizaTecla nao grava Shift em tecla de um caractere, entao no mapa ele chegaria como R, o
    Retangulo -- o canvas o trata antes do mapa, e so com a ferramenta Trilha. */
-const TRILHA = 'trilha na mão (W)', TRILHA_SEL = 'trilha selecionada';
+const TRILHA = 'trilha na mão (W)', TRILHA_SEL = 'trilha selecionada', MEDIR = 'régua na mão (Ctrl+M)';
 const GESTOS_PCB = [
   { rotulo:'Selecionar',                                teclas:['Clique'] },
   { rotulo:'Pegar o objeto de baixo, no mesmo ponto',   teclas:['Segundo clique'] },
@@ -279,6 +279,15 @@ const GESTOS_PCB = [
   { rotulo:'Largura da trilha no painel',               teclas:['Tab'],             quando:TRILHA },
   { rotulo:'Terminar a trilha',                         teclas:['Botão direito'],   quando:TRILHA },
   { rotulo:'Largar a trilha',                           teclas:['Escape'],          quando:TRILHA },
+  /* 2026-10-29, pedido do dono: a régua do NexoCAD (hub-pcbcotas.js) — dois pontos, a linha no arrasto,
+     a cota fica na placa; o olho da barra esconde e mostra */
+  { rotulo:'Marcar o ponto (centro, ponta, meio, quadrante, vértice, borda, tangente)', teclas:['Clique'], quando:MEDIR },
+  { rotulo:'Medir de um ponto ao outro, num arrasto só',  teclas:['Arrastar'],        quando:MEDIR },
+  { rotulo:'Cota automática, alinhada, horizontal, vertical', teclas:['Espaço'],     quando:MEDIR },
+  { rotulo:'Voltar um ponto',                           teclas:['Backspace'],       quando:MEDIR },
+  { rotulo:'Soltar o agarre (ponto livre)',             teclas:['Ctrl'],            quando:MEDIR },
+  { rotulo:'Largar a cota na mão (de novo, a régua)',   teclas:['Escape'],          quando:MEDIR },
+  { rotulo:'Mudar por onde passa a cota',               teclas:['Arrastar'],         quando:'cota sob o cursor' },
   { rotulo:'Girar 90°',                                 teclas:['Espaço'],          quando:ARRASTO, acoes:['girar'] },
   { rotulo:'Trocar de face (componente)',               teclas:['L'],               quando:ARRASTO },
   { rotulo:'Espelhar',                                  teclas:['X'],               quando:ARRASTO, acoes:['espelhoX', 'espelhoY'] },

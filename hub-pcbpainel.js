@@ -28,8 +28,8 @@ const CSS = `
 .pp{display:flex; flex-direction:column; min-height:0; height:100%; background:var(--panel); color:var(--fg); font:13px/1.45 var(--font);}
 .pp .pr-head{flex:none; display:flex; align-items:center; gap:6px; padding:8px 8px 8px 12px; border-bottom:1px solid var(--border);}
 .pp .pr-head h2{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--fg-dim); font-weight:400; white-space:nowrap;}
-.pp .pp-trava{font-size:10px; letter-spacing:.04em; color:var(--fg-dim); border:1px solid var(--border); border-radius:3px; padding:1px 5px; cursor:pointer; white-space:nowrap; background:transparent;}
-.pp .pp-trava.on{color:var(--ok); border-color:var(--ok);}
+.pp .pp-cadeado{flex:1; justify-content:flex-start;}
+.pp .pp-cadeado.aberto{color:var(--ok); border-color:var(--ok);}
 .pp .pp-salvar{margin-left:auto; display:inline-flex; align-items:center; gap:6px; padding:4px 10px; font-size:12px; border-radius:4px;
   background:transparent; color:var(--fg); border:1px solid var(--border); cursor:pointer; white-space:nowrap;}
 .pp .pp-salvar svg{width:15px; height:15px;}
@@ -182,17 +182,15 @@ function instala(aside, V) {
   try { const v = localStorage.getItem(ABA_KEY); if (ABAS.some(a => a[0] === v)) aba = v; } catch (e) {}
   const est = { compQ:'', compK:'ref', compAsc:true };
 
-  /* ---- cabecalho: titulo, a trava e o Salvar ---- */
+  /* ---- cabecalho: titulo e o Salvar (a trava da edicao mora nas Propriedades da placa, com nada
+     selecionado: pedido do dono, 2026-10-29) ---- */
   const head = el('div', 'pr-head');
   const tit = el('h2', null, 'Propriedades');
-  const trava = el('button', 'pp-trava');
-  trava.type = 'button';
-  trava.addEventListener('click', () => V.setEdit(!V.editOn()));
   const salvar = el('button', 'pp-salvar');
   salvar.type = 'button';
   salvar.append(ic('salvar'), el('span', 'lb', 'Salvar'));
   salvar.addEventListener('click', () => V.salvar());
-  head.append(tit, trava, salvar);
+  head.append(tit, salvar);
   const pags = {};
   aside.append(head);
   for (const [id] of ABAS) { pags[id] = el('div', 'pp-pag'); pags[id].dataset.aba = id; aside.append(pags[id]); }
@@ -222,11 +220,6 @@ function instala(aside, V) {
     salvar.title = (sujo ? 'Gravar ' + [s.ch ? 'o changes.js' : '', s.ann ? 'os sinalizadores (annotations.js)' : ''].filter(Boolean).join(' e ')
                          : 'Nada pendente — o changes.js do disco é o que está na tela') + (t ? ' (' + t + ')' : '');
     salvar.disabled = V.LEAN;
-    const on = V.editOn();
-    trava.classList.toggle('on', on);
-    trava.textContent = on ? 'editando' : 'só leitura';
-    trava.title = on ? 'Edição destravada — clique (ou ' + (V.teclaDe('editar') || 'E') + ') para travar'
-                     : 'Só leitura: o arrasto não mexe na placa. Clique (ou ' + (V.teclaDe('editar') || 'E') + ') para destravar — escolher uma ferramenta ou mudar um campo também destrava';
   }
 
   /* ---- o render, com o foco preservado: a ficha e refeita a cada commit, e o campo que tinha
@@ -273,7 +266,7 @@ function instala(aside, V) {
     cab.append(el('div', 'pr-title', f.titulo || ''));
     if (f.sub) cab.append(el('div', 'pr-sub', f.sub));
     if (f.aviso) cab.append(el('div', 'pr-aviso', f.aviso));
-    if (!V.editOn() && f.tipo !== 'ferramenta' && (f.campos || []).some(c => c.k && c.tipo !== 'ro'))
+    if (!V.editOn() && f.tipo !== 'ferramenta' && !f.semTrava && (f.campos || []).some(c => c.k && c.tipo !== 'ro'))
       cab.append(el('div', 'pr-nota', 'Só leitura: mudar um campo destrava a edição (' + (V.teclaDe('editar') || 'E') + ' trava de novo).'));
     let box = sec(pag);
     for (const c of f.campos || []) {
@@ -432,6 +425,24 @@ function instala(aside, V) {
     return wrap;
   }
   function desenhaPlaca(pag) {
+    /* O CADEADO DA EDICAO (pedido do dono, 2026-10-29: "ao inves de tirar o cadeado 100%, coloca ele no
+       menu lateral direito, dentro do Propriedades quando nao tem nada selecionado"). Saiu da barra e
+       do cabecalho do painel; a tecla (E) e o botao direito continuam. */
+    const se = sec(pag, 'Edição');
+    const on = V.editOn(), tqE = V.teclaDe('editar');
+    const le = el('div', 'linha');
+    const bt = el('button', 'btn pp-cadeado' + (on ? ' aberto' : ''));
+    bt.type = 'button'; bt.disabled = !!V.LEAN;
+    bt.setAttribute('aria-pressed', String(on));
+    bt.append(ic(on ? 'cadeadoAb' : 'cadeado'), el('span', null, on ? 'Editando — clique para travar' : 'Só leitura — clique para destravar'));
+    bt.title = (on ? 'Edição destravada: o arrasto e o painel mexem na placa' : 'Só leitura: o arrasto não mexe na placa') + (tqE ? ' (' + tqE + ' alterna)' : '');
+    bt.addEventListener('click', () => V.setEdit(!V.editOn()));
+    le.append(bt);
+    if (tqE) { const k = el('kbd', null, tqE); k.title = 'trava e destrava a edição'; le.append(k); }
+    se.append(le);
+    se.append(el('div', 'hint', on ? 'Travada, a placa só se vê: o arrasto acidental não muda nada.'
+                                   : 'Escolher uma ferramenta ou mudar um campo também destrava.'));
+
     /* o Selection Filter saiu daqui (pedido do dono, 2026-10-28: redundante): fica so o do canto do
        canvas (pcbframe.js » montaFiltroMenu) */
     /* furos de fixacao em cima das marcacoes redondas (pedido do dono, 2026-10-22): o circulo de
@@ -479,6 +490,7 @@ function instala(aside, V) {
     ibtn('fit', 'Enquadrar a placa (' + (V.teclaDe('enquadrar') || 'F') + ')', null, () => V.acao('enquadrar_placa'));
     ibtn('grid', 'Grade (' + (V.teclaDe('grade') || 'B') + ')', sh.grid, () => V.setShow('grid', !sh.grid));
     ibtn(sh.ghost ? 'eye' : 'eyeOff', 'Marcações das mudanças (' + (V.teclaDe('diff') || 'D') + ')', sh.ghost, () => V.setShow('ghost', !sh.ghost));
+    if (sh.cotas !== undefined) ibtn(sh.cotas ? 'cotas' : 'cotasOff', 'Cotas da régua (' + (sh.nCotas || 0) + ') — ' + (sh.cotas ? 'esconder' : 'mostrar'), sh.cotas, () => V.setShow('cotas', !sh.cotas));
     ibtn('unica', 'Camada única (' + (V.teclaDe('camadaUnica') || 'S') + ')', sh.unica, () => V.setShow('unica', !sh.unica));
     ibtn('virar', 'Ver por baixo (' + (V.teclaDe('virar') || 'V') + ')', sh.flip, () => V.setShow('flip', !sh.flip));
     /* o Real View do 3D (hub-pcb3d-vista.js): ligar abre o 3D */

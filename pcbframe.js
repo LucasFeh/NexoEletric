@@ -128,7 +128,7 @@ const PCB_PADRAO = [
   { id:'texto',       tecla:'T',      rotulo:'Texto' },
   { id:'preencher',   tecla:'P',      rotulo:'Preencher formas (cheio/contorno)' },
   { id:'sinalizar',   tecla:'N',      rotulo:'Sinalizar para a IA' },
-  { id:'medir',       tecla:'Ctrl+M', rotulo:'Medir distância' },
+  { id:'medir',       tecla:'Ctrl+M', rotulo:'Régua (medir e cotar)' },
   { id:'unidade',     tecla:'Q',      rotulo:'Trocar a unidade mm/mil' },
   { id:'camadaUnica', tecla:'S',      rotulo:'Camada única' },
   { id:'proxCamada',  tecla:'+',      rotulo:'Próxima camada' },
@@ -156,7 +156,7 @@ const PCB_PADRAO = [
   { id:'vista3d',     tecla:'3',      rotulo:'3D Layout Mode' },
 ];
 /* os gestos fixos (nao gravaveis): o canvas os trata antes do mapa */
-const TRILHA = 'trilha na mão (W)', ARRASTO = 'arrastando', TRILHA_SEL = 'trilha selecionada';
+const TRILHA = 'trilha na mão (W)', ARRASTO = 'arrastando', TRILHA_SEL = 'trilha selecionada', MEDIR = 'régua na mão (Ctrl+M)';
 const GESTOS_PCB = [
   { rotulo:'Selecionar (2º clique no mesmo ponto pega o objeto de baixo)', teclas:['Clique'] },
   { rotulo:'Somar/tirar da seleção',                     teclas:['Shift', 'Clique'] },
@@ -183,6 +183,13 @@ const GESTOS_PCB = [
   { rotulo:'Via e troca de camada',                      teclas:['Ctrl', '2'],        quando:TRILHA },
   { rotulo:'Largura no painel',                          teclas:['Tab'],              quando:TRILHA },
   { rotulo:'Terminar a trilha (de novo, larga a ferramenta)', teclas:['Botão direito'], quando:TRILHA },
+  { rotulo:'Marcar o ponto (centro, ponta, meio, quadrante, vértice, borda, tangente)', teclas:['Clique'], quando:MEDIR },
+  { rotulo:'Medir de um ponto ao outro, num arrasto só',  teclas:['Arrastar'],         quando:MEDIR },
+  { rotulo:'Cota automática, alinhada, horizontal, vertical', teclas:['Espaço'],      quando:MEDIR },
+  { rotulo:'Voltar um ponto',                            teclas:['Backspace'],        quando:MEDIR },
+  { rotulo:'Soltar o agarre (ponto livre)',              teclas:['Ctrl'],             quando:MEDIR },
+  { rotulo:'Largar a cota na mão (de novo, a régua)',    teclas:['Escape'],           quando:MEDIR },
+  { rotulo:'Mudar por onde passa a cota',                teclas:['Arrastar'],         quando:'cota sob o cursor' },
   { rotulo:'Girar',                                      teclas:['Espaço'],           quando:ARRASTO },
   { rotulo:'Trocar de face (componente)',                teclas:['L'],                quando:ARRASTO },
   { rotulo:'Espelhar (texto e forma)',                   teclas:['X / Y'],            quando:ARRASTO },
@@ -267,6 +274,16 @@ let model = null, EB = null;
 let LAYERS = [], LBYK = Object.create(null);
 const view = { scale:10, cx:0, cy:0, flip:false };
 const show = { grid:true, ghost:true, unica:false, layers:Object.create(null) };
+/* AS COTAS DA RÉGUA (Ctrl+M, hub-pcbcotas.js; pedido do dono, 2026-10-29: "igual ao do NexoCAD ...
+   fica lá marcando; esconder ou mostrar com um botão na barra"). Não vão para o changes.js (o Altium
+   não as recebe): ficam nas preferências desta máquina, uma lista por projeto. show.cotas é o olho. */
+const HCOT = (typeof HubPcbCotas !== 'undefined' && HubPcbCotas && typeof HubPcbCotas.geometria === 'function') ? HubPcbCotas : null;
+const COTAS_PREF = 'cotas.' + (PROJ || '_');
+show.cotas = lePref('cotas.ver', '1') !== '0';
+const COTAS = (() => {
+  try { const l = JSON.parse(lePref(COTAS_PREF, '[]')); return Array.isArray(l) ? l.filter(c => c && c.a && c.b && c.id) : []; }
+  catch (e) { return []; }
+})();
 let cur = 'Top';                              /* a camada atual (aba ativa embaixo) */
 let unidade = lePref('unidade', 'mm') === 'mil' ? 'mil' : 'mm';
 let grade = gradePorId(lePref('grade', '5mil'));
@@ -662,6 +679,7 @@ function chave(a){
     case 'comp': return 'c:' + a.m.src.ref;
     case 'pad': return (!a.comp && a.m && a.m.added) ? 'o:' + numDoOp(opDe(a.m)) : 'p:' + (a.comp ? a.comp.src.ref : '~') + ':' + (a.pad.id || a.pad.name);
     case 'ann': return 'n:' + a.ann.id;
+    case 'cota': return 'm:' + a.cota.id;
     case 'regiao-ro': return 'g:' + a.eb.id;
     case 'recorte': return a.m ? 'o:' + numDoOp(opDe(a.m)) : 'k:' + a.eb.id;
     case 'semplano': return a.m ? 'o:' + numDoOp(opDe(a.m)) : 'q:' + a.eb.id;
@@ -671,6 +689,10 @@ function chave(a){
 let HITS = [], PORCHAVE = new Map(), ALVO_COMP = new Map();
 const alvoAnn = new Map();
 function annAlvo(a){ let x = alvoAnn.get(a); if (!x) { x = { t:'ann', ann:a }; alvoAnn.set(a, x); } return x; }
+const alvoCota = new Map();
+function cotaAlvo(c){ let x = alvoCota.get(c); if (!x) { x = { t:'cota', cota:c }; alvoCota.set(c, x); } return x; }
+/* o que nao vai para o changes.js (sinalizador e cota): apagar e mexer nao pedem a edicao destravada */
+const soNotas = lista => lista.length > 0 && lista.every(a => a.t === 'ann' || a.t === 'cota');
 /* o tipo do Selection Filter de cada objeto */
 function tipoFiltro(o, base){
   if (o && (o.keepout || o.layer === 'KeepOut')) return 'keepout';
@@ -849,6 +871,7 @@ function selLimpa(){ if (SEL.length) { SEL = []; aoMudarSel(); } }
 /* resolve a selecao pelas chaves depois de um recalculo */
 function reSeleciona(chaves){
   SEL = chaves.map(k => k.indexOf('n:') === 0 ? (ANN.find(a => 'n:' + a.id === k) ? annAlvo(ANN.find(a => 'n:' + a.id === k)) : null)
+                      : k.indexOf('m:') === 0 ? (COTAS.find(c => 'm:' + c.id === k) ? cotaAlvo(COTAS.find(c => 'm:' + c.id === k)) : null)
                                               : PORCHAVE.get(k)).filter(Boolean);
 }
 let selChaveAntes = '';
@@ -1224,6 +1247,7 @@ function draw(){
   desenhaSelecao();
   desenhaHover();
   desenhaAnotacoes();
+  desenhaCotas();
   desenhaFerramenta();
   desenhaCursorAltium();
   desenhaJanela();
@@ -1363,9 +1387,47 @@ function realcaAlvo(a, cor, forte){
     case 'poly': { const o = ebDe(a.m); if (o && o.pts) poli(o.pts); break; }
     case 'semplano': poli((a.m && ebDe(a.m)) ? ebDe(a.m).points : a.eb.points); break;
     case 'text': { const o = ebDe(a.m); const g = o && geoTexto(o); if (g) poli(g.caixa); break; }
-    case 'ann': { ctx.globalAlpha = 0.9; ctx.lineWidth = px(1.5); ctx.beginPath(); ctx.arc(a.ann.x, a.ann.y, px(9), 0, 2 * Math.PI); ctx.stroke(); break; }
+    case 'ann': { const b = caixaBandeira(a.ann); const P = new Path2D(); P.rect(b[0], b[1], b[2] - b[0], b[3] - b[1]); veu(P); contorno(P); break; }
+    case 'cota': break;              /* a cota se realca sozinha (desenhaCotas, com a cor da selecao) */
   }
   ctx.restore();
+}
+/* a bandeira inteira do sinalizador (o mastro sobe 1,6 x 14 px a partir do ponto): o clique nela
+   pega o sinalizador -- antes so a base pegava, e o desenho em cima nao respondia (pedido do dono,
+   2026-10-29: "o sinalizador eu consigo pôr mas não consigo tirar") */
+function caixaBandeira(n){ const s = px(14); return [n.x - px(5), n.y - px(6), n.x + s * 1.1 + px(4), n.y + s * 1.6 + px(4)]; }
+
+/* ---- as cotas da regua (hub-pcbcotas.js): o valor na unidade da vista ---- */
+let FONTE_VISTA = null;
+const fonteVista = () => FONTE_VISTA || (FONTE_VISTA = (getComputedStyle(document.body).fontFamily || 'sans-serif'));
+function geoCota(c){ try { return HCOT ? HCOT.geometria(c) : null; } catch (e) { return null; } }
+function textoCota(g){
+  const v = fmtDist(g.valor) + ' ' + unidade;
+  return g.modo === 'h' ? '↔ ' + v : g.modo === 'v' ? '↕ ' + v : v;
+}
+const opCota = (forte, cor) => ({ px, aTela:mundoParaTela, DPR, voltaMundo:transformaMundo, texto:textoCota, cor:cor || COR.medida, forte, fonte:fonteVista() });
+function desenhaCotas(){
+  if (!HCOT || !show.cotas || !COTAS.length) return;
+  for (const c of COTAS) {
+    const al = alvoCota.get(c), sel = !!al && selTem(al), hov = !!HOVER && HOVER.t === 'cota' && HOVER.cota === c;
+    try { HCOT.desenha(ctx, geoCota(c), opCota(sel || hov, sel ? COR.sel : null)); } catch (e) { transformaMundo(); }
+  }
+}
+function gravaCotas(){ gravaPref(COTAS_PREF, JSON.stringify(COTAS)); }
+function setCotasVer(v){
+  show.cotas = !!v;
+  gravaPref('cotas.ver', show.cotas ? '1' : '0');
+  if (!show.cotas && SEL.some(a => a.t === 'cota')) { SEL = SEL.filter(a => a.t !== 'cota'); aoMudarSel(); }
+  if (HOVER && HOVER.t === 'cota') HOVER = null;
+  pintaBarra(); if (painel) painel.atualiza(); pede();
+}
+function apagaCotas(){
+  if (!COTAS.length) { HubDialog.toast('nenhuma cota na placa', 'info', 1600); return; }
+  const n = COTAS.length;
+  COTAS.splice(0, COTAS.length);
+  if (SEL.some(a => a.t === 'cota')) { SEL = SEL.filter(a => a.t !== 'cota'); aoMudarSel(); }
+  gravaCotas(); pintaBarra(); if (painel) painel.atualiza(); pede();
+  HubDialog.toast(n + (n === 1 ? ' cota apagada' : ' cotas apagadas'), 'ok', 1800);
 }
 function desenhaSelecao(){
   if (arrasto && arrasto.moveu) return;           /* o que esta na mao ja aparece no lugar novo */
@@ -1603,10 +1665,11 @@ function apagaItem(m){
 /* Delete: o que tem op de apagar sai; o resto diz por que fica */
 function apagaSelecao(){
   if (!SEL.length) return;
-  let n = 0, annMexeu = false;
+  let n = 0, annMexeu = false, cotaMexeu = false;
   const fica = [];
   for (const a of SEL) {
     if (a.t === 'ann') { const i = ANN.indexOf(a.ann); if (i >= 0) { ANN.splice(i, 1); annMexeu = true; n++; } continue; }
+    if (a.t === 'cota') { const i = COTAS.indexOf(a.cota); if (i >= 0) { COTAS.splice(i, 1); cotaMexeu = true; } continue; }
     if (a.t === 'comp') { fica.push(a.m.src.ref + ' (componente sai pelo esquema e o ECO)'); continue; }
     if (a.t === 'pad' && !a.m) { fica.push('pad ' + (a.comp ? (a.comp.eff.designator || a.comp.src.ref) + '.' : '') + (a.pad.name || '') + ' (é do componente: mude pelo footprint)'); continue; }
     if (a.t === 'regiao-ro') { fica.push('região: ' + a.motivo); continue; }
@@ -1616,8 +1679,10 @@ function apagaSelecao(){
     if (a.m && apagaItem(a.m)) n++;
   }
   SEL = [];
+  HOVER = null;
+  if (cotaMexeu) { gravaCotas(); pintaBarra(); }
   if (annMexeu) annChanged();
-  if (n) commit(); else aoMudarSel();
+  if (n) commit(); else { aoMudarSel(); pede(); }
   if (fica.length) HubDialog.toast('Não apagado: ' + fica.slice(0, 4).join('; ') + (fica.length > 4 ? ' …' : ''), 'warn', 5000);
 }
 
@@ -2985,17 +3050,81 @@ function poeForma(pts, fechada, nota){
   commit();
   return true;
 }
+/* ============================== a regua (Ctrl+M) ==============================
+   Como a Cota inteligente do NexoCAD (pedido do dono, 2026-10-29): o 1o clique marca um ponto, o
+   2o marca o outro (ou: aperta num, arrasta e solta no outro), e a cota fica na mao -- mexer o mouse
+   escolhe por onde passa a linha (acima/abaixo = horizontal, ao lado = vertical, no meio =
+   alinhada; Espaco troca) e o clique a deixa na placa. Os pontos agarram em centro, ponta, meio,
+   quadrante, vertice, canto, borda do cobre e tangente de circulo (hub-pcbcotas.js); fora deles, a
+   grade; Ctrl solta. draft = { tipo:'medida', a, b, modo:'auto'|..., q } */
+function snapMedida(w, ev){
+  if (ev && ev.ctrlKey) return { x:r6(w.x), y:r6(w.y), tipo:'livre' };
+  if (HCOT && snapObj !== 'off') {
+    let idx = null;
+    try { idx = HCOT.indice(EB, { centroCobre, ehTH, recortes:recortesDaTela() }); } catch (e) { console.warn('régua:', e); }
+    const vis = l => camVisivel(l) && (snapObj !== 'atual' || l === cur || l === '_placa' || (l === 'Multi' && cobre(cur)));
+    const s = idx ? HCOT.agarra(idx, w, px(10), { visivel:vis }) : null;
+    if (s) return s;
+  }
+  const g = snapPonto(w, ev, { soGrade:true });
+  return { x:g.x, y:g.y, tipo:'grade' };
+}
+const MODOS_CICLO = ['auto', 'alinhada', 'h', 'v'];
+function cotaDoDraft(q){
+  if (!draft || draft.tipo !== 'medida' || !draft.a) return null;
+  const b = draft.b || SNAP || (cursorW ? { x:cursorW.x, y:cursorW.y, tipo:'livre' } : null);
+  if (!b) return null;
+  return { id:'_', a:draft.a, b, modo:draft.b ? (draft.modo || 'auto') : 'alinhada', q:draft.b ? (q || draft.q || null) : null };
+}
+function ponto2(b){
+  if (Math.hypot(b.x - draft.a.x, b.y - draft.a.y) < 1e-6 && !(b.circ && draft.a.circ)) { HubDialog.toast('o segundo ponto é o mesmo do primeiro', 'info', 1400); return false; }
+  draft.b = b; draft.q = cursorW ? { x:cursorW.x, y:cursorW.y } : { x:b.x, y:b.y }; SNAP = null;
+  avisoRodape('mexa o mouse para levar a linha da cota (acima/abaixo: horizontal · ao lado: vertical · no meio: alinhada · Espaço troca) e clique para deixá-la na placa');
+  return true;
+}
+function cliqueMedida(w, ev){
+  if (!draft || draft.tipo !== 'medida') { draft = { tipo:'medida', a:snapMedida(w, ev), b:null, modo:'auto' }; SNAP = snapMedida(w, ev); pintaStatus(); pede(); return; }
+  if (!draft.b) { ponto2(snapMedida(w, ev)); pintaStatus(); if (painel) painel.atualiza(); pede(); return; }
+  fixaCota({ x:w.x, y:w.y });
+}
+function fixaCota(q){
+  const c = cotaDoDraft(q);
+  if (!c || !HCOT) { draft = null; return; }
+  const g = HCOT.geometria(c);
+  let n = 0; for (const x of COTAS) { const k = parseInt(String(x.id).replace(/^m/, ''), 10); if (isFinite(k) && k > n) n = k; }
+  const limpa = p => { const o = { x:r6(p.x), y:r6(p.y), tipo:p.tipo || 'grade' }; if (p.circ) { o.circ = { cx:r6(p.circ.cx), cy:r6(p.circ.cy), r:r6(p.circ.r) }; if (p.cond) o.cond = p.cond; } return o; };
+  const nova = { id:'m' + (n + 1), a:limpa(c.a), b:limpa(c.b), modo:g ? g.modo : 'alinhada', q:{ x:r6(q.x), y:r6(q.y) } };
+  COTAS.push(nova);
+  gravaCotas();
+  draft = null; SNAP = null;
+  if (!show.cotas) setCotasVer(true); else pintaBarra();
+  avisoRodape('cota ' + (g ? textoCota(g) : '') + ' na placa · o botão da régua com olho, na barra, esconde e mostra as cotas · Esc larga a régua');
+  pintaStatus(); if (painel) painel.atualiza(); pede();
+}
+/* a medida da hora, no rodape e na ficha */
+function medidaAoVivo(){
+  const c = cotaDoDraft();
+  const g = c && HCOT ? HCOT.geometria(c) : null;
+  if (!g) return '';
+  return 'medida ' + fmtDist(g.valor) + ' ' + unidade + (g.modo !== 'alinhada' ? ' (' + HCOT.MODOS[g.modo] + ')' : '') +
+    ' · distância ' + fmtDist(g.dist) + ' · dX ' + fmtDist(g.dx) + ' · dY ' + fmtDist(g.dy);
+}
 function cliqueFerramenta(w, ev){
   if (tool === 'colar') { colaNoPonto(w, ev); return; }
   if (tool === 'pad') { poePad(w, ev); return; }
   if (tool === 'trilha' || tool === 'linha') { rotaClique(w, ev); return; }
-  if (tool === 'medir') {
-    const p = snapPonto(w, ev);
-    if (!draft || draft.tipo !== 'medida' || draft.b) draft = { tipo:'medida', a:p, b:null };
-    else draft.b = p;
-    pintaStatus(); pede(); return;
+  if (tool === 'medir') { cliqueMedida(w, ev); return; }
+  if (tool === 'sinalizar') {
+    /* clicar numa bandeira que ja existe a pega (para ver, mudar ou apagar), em vez de pôr outra em cima */
+    const ex = hitsEm(w.x, w.y).find(a => a.t === 'ann');
+    if (ex) {
+      setTool('select'); selSo([ex]);
+      if (painel) painel.mostra('props');
+      avisoRodape('sinalizador ' + ex.ann.id + ' selecionado — ' + (teclaDe('apagar') || 'Delete') + ' apaga (ou o botão Apagar no painel)');
+      return;
+    }
+    abreAnnForm(snapPonto(w, ev, { soGrade:true })); return;
   }
-  if (tool === 'sinalizar') { abreAnnForm(snapPonto(w, ev, { soGrade:true })); return; }
   if (tool === 'texto') { const lay = camadaDesenho(); if (lay) abreCaixaTexto(snapPonto(w, ev, { soGrade:true })); return; }
   if (tool === 'via') {
     const p = snapPonto(w, ev);
@@ -3184,6 +3313,22 @@ function desenhaRota(r, c, cor){
   ctx.restore();
 }
 function desenhaFerramenta(){
+  /* a regua: a cota na mao (do 1o ponto ao cursor, depois com a linha no arrasto) e o agarre */
+  if (tool === 'medir') {
+    const op = { px, aTela:mundoParaTela, DPR, voltaMundo:transformaMundo, fonte:fonteVista(), cor:COR.snap };
+    const c = cotaDoDraft();
+    if (c && HCOT) { try { HCOT.desenha(ctx, HCOT.geometria(c), opCota(true)); } catch (e) { transformaMundo(); } }
+    if (draft && draft.a && HCOT) {
+      /* o 1o ponto fica marcado (com o circulo, se for tangente) */
+      const a = draft.a;
+      ctx.save(); ctx.strokeStyle = COR.medida; ctx.lineWidth = px(1.4); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(a.x, a.y, px(4), 0, 2 * Math.PI); ctx.stroke();
+      if (a.circ) { ctx.globalAlpha = 0.5; ctx.setLineDash([px(4), px(3)]); ctx.beginPath(); ctx.arc(a.circ.cx, a.circ.cy, a.circ.r, 0, 2 * Math.PI); ctx.stroke(); }
+      ctx.restore();
+    }
+    if (SNAP && HCOT && !(draft && draft.b)) { try { HCOT.desenhaAgarre(ctx, SNAP, op); } catch (e) { transformaMundo(); } }
+    return;
+  }
   /* o ponto de snap num objeto: o anel ciano */
   if (SNAP && tool !== 'select' && (SNAP.tipo === 'pad' || SNAP.tipo === 'via' || SNAP.tipo === 'ponta')) {
     ctx.save(); ctx.strokeStyle = COR.snap; ctx.lineWidth = px(1.5); ctx.setLineDash([]);
@@ -3248,19 +3393,6 @@ function desenhaFerramenta(){
     ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) ctx.lineTo(q[0], q[1]); ctx.stroke();
     if (pts.length >= 3) { ctx.setLineDash([px(4), px(3)]); ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(pts[0][0], pts[0][1]); ctx.stroke(); }
     ctx.setLineDash([]); ctx.fillStyle = COR.seta; for (const q of draft.pts) { ctx.beginPath(); ctx.arc(q[0], q[1], px(2.5), 0, 2 * Math.PI); ctx.fill(); }
-  } else if (draft && draft.tipo === 'medida') {
-    const a = draft.a, b = draft.b || c;
-    ctx.strokeStyle = COR.medida; ctx.fillStyle = COR.medida; ctx.lineWidth = px(1.4); ctx.globalAlpha = 1;
-    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    for (const q of [a, b]) { ctx.beginPath(); ctx.arc(q.x, q.y, px(3), 0, 2 * Math.PI); ctx.fill(); }
-    const d = Math.hypot(b.x - a.x, b.y - a.y), s = mundoParaTela((a.x + b.x) / 2, (a.y + b.y) / 2);
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.font = '600 12px ' + (getComputedStyle(document.body).fontFamily || 'sans-serif');
-    const txt = fmtDist(d) + ' ' + unidade + '  (dX ' + fmtDist(Math.abs(b.x - a.x)) + ', dY ' + fmtDist(Math.abs(b.y - a.y)) + ')';
-    const tw = ctx.measureText(txt).width;
-    ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(s.x + 8, s.y - 22, tw + 10, 18);
-    ctx.fillStyle = COR.medida; ctx.fillText(txt, s.x + 13, s.y - 9);
-    transformaMundo();
   }
   ctx.restore();
 }
@@ -3616,9 +3748,8 @@ function pintaStatus(){
       s = (tool === 'trilha' ? 'trilha ' : 'linha ') + modo + ' · W ' + fmtDist(tool === 'trilha' ? CFG.wTrilha : CFG.wLinha);
       if (tool === 'trilha' && draft && draft.net) s += ' · ' + draft.net;
       if (tool === 'trilha') s += ' · via ' + fmtDist(CFG.viaSize) + '/' + fmtDist(CFG.viaDrill) + ' · ' + statusConflito();
-    } else if (tool === 'medir' && draft && draft.tipo === 'medida' && draft.b) {
-      const a = draft.a, b = draft.b;
-      s = 'medida ' + fmtDist(Math.hypot(b.x - a.x, b.y - a.y)) + ' ' + unidade + ' · dX ' + fmtDist(Math.abs(b.x - a.x)) + ' · dY ' + fmtDist(Math.abs(b.y - a.y));
+    } else if (tool === 'medir') {
+      s = draft && draft.tipo === 'medida' && draft.a ? medidaAoVivo() : 'régua · clique no 1º ponto · ' + COTAS.length + (COTAS.length === 1 ? ' cota' : ' cotas') + (show.cotas ? '' : ' (escondidas)');
     } else if (tool !== 'select') s = FERRAMENTA_ROT[tool] + (preencher && /circulo|retangulo|triangulo|poligono/.test(tool) ? ' · cheio' : '');
     r.textContent = s;
   }
@@ -3641,6 +3772,7 @@ function rotuloAlvo(a){
     case 'text': { const s = a.m.src || {}; const e = ebDe(a.m) || a.m.eff;
       return s.designator ? 'designator ' + s.owner : s.comment ? 'comment ' + s.owner : 'texto "' + String(e.text || '').slice(0, 30) + '" · ' + nomeDe(e.layer); }
     case 'ann': return '⚑ ' + a.ann.id + ': ' + a.ann.msg;
+    case 'cota': { const g = geoCota(a.cota); return 'cota ' + (g ? textoCota(g) + ' · ' + (HCOT.MODOS[g.modo] || g.modo) : ''); }
   }
   return '';
 }
@@ -3658,8 +3790,9 @@ function avisoRodape(t){ const el = $('smsg'); if (el) el.textContent = t || '';
    grande desse jeito". O grupo mostra a ultima forma usada (o clique nela a escolhe) e a setinha
    abre a gaveta com as outras, como as listas da Active Bar do Altium. O que ainda nao existe
    aparece TRAVADO, com o porque no title. */
+/* O cadeado da edicao saiu daqui (pedido do dono, 2026-10-29): mora nas Propriedades da placa, com
+   nada selecionado (hub-pcbpainel.js » desenhaPlaca); a tecla E e o botao direito continuam. */
 const BARRA = [
-  { id:'editar', ic:'cadeado', acao:'editar', at:'editar' }, '|',
   { id:'select', ic:'select', tool:'select', titulo:'Selecionar e mover (Esc) — arrastar no vazio: janela (esq→dir dentro, dir→esq toca)' }, '|',
   { id:'trilha', ic:'trilha', tool:'trilha', at:'trilha', titulo:'Trilha — roteamento interativo: clique fixa o canto, Espaço inverte, Shift+Espaço 45°/90°/livre, Shift+R contorna, para no obstáculo ou ignora (trilhas de nets diferentes não se encontram), Backspace desfaz o trecho, 2 via, * ou Ctrl+2 via e troca de camada, Tab largura, botão direito termina' },
   { id:'via', ic:'via', tool:'via', at:'via', titulo:'Via — diâmetro e furo no painel' },
@@ -3678,9 +3811,16 @@ const BARRA = [
   { id:'furo', ic:'furo', tool:'furo', titulo:'Furo de fixação — Board Cutout redondo (diâmetro no painel)' },
   { id:'contorno', ic:'contorno', tool:'contorno', titulo:'Contorno da placa — polígono que substitui o contorno (pergunta antes)' },
   { id:'pad', ic:'pad', tool:'pad', at:'pad', titulo:'Pad avulso (Place » Pad) — passante redondo de 60 mil, furo 30 mil' },
-  { id:'pour', ic:'pour', tool:'pour', at:'pour', titulo:'Polygon Pour — plano (Top/Bottom) ou sem plano, em retângulo ou polígono livre (forma, tipo e net no painel); selecionado, as bordas esticam' },
+  /* o plano de terra em retangulo e em poligono livre e a mesma ferramenta: uma gaveta so, como a das
+     formas (pedido do dono, 2026-10-29). O item leva a forma (CFG.pourForma) junto com a ferramenta */
+  { id:'planos', titulo:'Polygon Pour (plano de terra)', grupo:[
+    { id:'pourRet', ic:'pour', tool:'pour', forma:'retangulo', at:'pour', titulo:'Polygon Pour em retângulo — dois cantos; plano (Top/Bottom) ou sem plano, tipo e net no painel; selecionado, as bordas esticam' },
+    { id:'pourLivre', ic:'pourLivre', tool:'pour', forma:'livre', at:'pour', titulo:'Polygon Pour em polígono livre — um clique por vértice; duplo clique, Enter ou botão direito fecha; tipo e net no painel' },
+  ] },
   { id:'teardrops', ic:'teardrop', acao:'teardrops', at:'teardrops', titulo:'Teardrops (Tools » Teardrops) — põe os que faltam nos pads e vias' }, '|',
-  { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Medir distância — dois cliques' },
+  { id:'medir', ic:'medir', tool:'medir', at:'medir', titulo:'Régua — marque dois pontos (centro, ponta, meio, quadrante, vértice, canto, borda, tangente), arraste a linha e clique: a cota fica na placa' },
+  /* o olho das cotas da regua (pedido do dono, 2026-10-29) */
+  { id:'cotas', ic:'cotas', acao:'cotas', titulo:'Cotas da régua' },
   { id:'sinalizar', ic:'sinalizar', tool:'sinalizar', at:'sinalizar', titulo:'Sinalizar um problema para a IA (annotations.js)' },
   { id:'ratsnest', ic:'ratsnest', acao:'ratsnest', at:'ratsnest', titulo:'Linhas de conexão (ratsnest) — Ctrl+clique num cobre realça a net, Esc limpa' },
   /* o olho das marcações das mudanças (pedido do dono, 2026-10-28): fechado, fica só a placa como ela está */
@@ -3697,9 +3837,20 @@ const BARRA = [
 /* os botoes de verdade da barra: os soltos e os de dentro das gavetas */
 const itensBarra = () => BARRA.reduce((l, b) => l.concat(b && b.grupo ? b.grupo : [b]), []);
 const GRUPO_ATUAL = {};
+/* o botao esta na mao? o da gaveta do Polygon Pour so com a forma dele (a mesma ferramenta, duas formas) */
+const ativoNaBarra = it => !!it.tool && it.tool === tool && (!it.forma || CFG.pourForma === it.forma);
+/* escolher um item com forma: troca a forma e pega a ferramenta; o mesmo de novo larga (alterna) */
+function escolheForma(it, alterna){
+  const muda = CFG.pourForma !== it.forma;
+  if (muda) configTool('pourForma', it.forma);
+  if (tool === it.tool) { if (!muda && alterna) setTool('select'); else pintaBarra(); return; }
+  setTool(it.tool);
+}
 function atualDoGrupo(b){
-  const naMao = b.grupo.find(x => x.tool && x.tool === tool);
+  const naMao = b.grupo.find(ativoNaBarra);
   if (naMao) return naMao;
+  const porForma = b.grupo.find(x => x.forma && x.forma === CFG.pourForma);
+  if (porForma) return porForma;
   const id = GRUPO_ATUAL[b.id] || lePref('grupo.' + b.id, b.grupo[0].id);
   return b.grupo.find(x => x.id === id) || b.grupo[0];
 }
@@ -3726,7 +3877,8 @@ function montaGrupo(b){
       GRUPO_ATUAL[b.id] = it.id; gravaPref('grupo.' + b.id, it.id);
       fechaGavetas();
       fechaMenu();
-      if (it.tool) { if (tool !== it.tool) setTool(it.tool); else pintaBarra(); } else fazAcao(it.acao);
+      if (it.forma) escolheForma(it, false);
+      else if (it.tool) { if (tool !== it.tool) setTool(it.tool); else pintaBarra(); } else fazAcao(it.acao);
     });
     gav.append(el);
   }
@@ -3809,13 +3961,14 @@ function montaBarra(){
     if (b.rotulo) { const l = document.createElement('span'); l.className = 'lb'; l.textContent = b.rotulo; el.append(l); }
     if (b.trava) { el.disabled = true; el.title = b.trava; el.setAttribute('aria-label', b.trava); }
     else el.addEventListener('click', () => acaoDaBarra(b));
-    if (b.tool || b.id === 'preencher' || b.id === 'editar') el.setAttribute('aria-pressed', 'false');
+    if (b.tool || b.id === 'preencher' || b.id === 'cotas') el.setAttribute('aria-pressed', 'false');
     tb.append(el);
   }
   pintaBarra();
 }
 function acaoDaBarra(b){
   fechaMenu();
+  if (b.forma) { escolheForma(b, true); return; }
   if (b.tool) { setTool(tool === b.tool && b.tool !== 'select' ? 'select' : b.tool); return; }
   fazAcao(b.acao);
 }
@@ -3835,19 +3988,21 @@ function pintaBarra(){
     if (b === '|' || b.trava) continue;
     const el = $('tb-' + b.id); if (!el) continue;
     let tit = b.titulo || '';
-    if (b.id === 'editar') {
-      tit = editOn ? 'Edição destravada — clique (ou ' + (teclaDe('editar') || 'E') + ') para travar' : 'Só leitura — clique (ou ' + (teclaDe('editar') || 'E') + ') para destravar; escolher uma ferramenta também destrava';
-      el.setAttribute('aria-pressed', String(editOn));
-      el.replaceChildren(HubPcbIcones.icone(editOn ? 'cadeadoAb' : 'cadeado'));
-    } else if (b.tool) el.setAttribute('aria-pressed', String(tool === b.tool));
+    if (b.tool) el.setAttribute('aria-pressed', String(ativoNaBarra(b)));
     else if (b.id === 'preencher') el.setAttribute('aria-pressed', String(preencher));
+    else if (b.id === 'cotas') {
+      el.setAttribute('aria-pressed', String(show.cotas));
+      el.replaceChildren(HubPcbIcones.icone(show.cotas ? 'cotas' : 'cotasOff'));
+      const n = COTAS.length + (COTAS.length === 1 ? ' cota' : ' cotas');
+      tit = show.cotas ? 'Cotas da régua à vista (' + n + ') — clique para esconder' : 'Cotas da régua escondidas (' + n + ') — clique para mostrar';
+    }
     else if (b.id === 'marcas') {
       el.setAttribute('aria-pressed', String(show.ghost));
       el.replaceChildren(HubPcbIcones.icone(show.ghost ? 'eye' : 'eyeOff'));
       tit = show.ghost ? 'Marcações das mudanças à vista (tracejados, setas, novo e removido) — clique para esconder e ver só a placa' : 'Marcações das mudanças escondidas — clique para mostrar';
     }
     const t = b.at ? teclaDe(b.at) : (b.id === 'select' ? '' : '');
-    el.title = t && b.id !== 'editar' ? tit + ' (' + t + ')' : tit;
+    el.title = t ? tit + ' (' + t + ')' : tit;
     el.setAttribute('aria-label', el.title);
   }
   avisaHistorico();
@@ -3979,7 +4134,7 @@ function menuContexto(sx, sy, w){
     if (SEL.some(a => a.t === 'comp')) { itens.push('-'); itens.push({ rot:'Virar de face', tecla:'L', f:() => transformaSelecao('vira') }); }
     itens.push('-');
     itens.push({ rot:'Girar 90°', tecla:teclaDe('girar'), f:() => transformaSelecao('gira') });
-    itens.push({ rot:'Apagar', tecla:teclaDe('apagar'), f:() => { if (garanteEdicao()) apagaSelecao(); } });
+    itens.push({ rot:soNotas(SEL) ? (SEL.every(a => a.t === 'ann') ? 'Apagar sinalizador' : 'Apagar') : 'Apagar', tecla:teclaDe('apagar'), f:() => { if (soNotas(SEL) || garanteEdicao()) apagaSelecao(); } });
     itens.push({ rot:'Enquadrar a seleção', f:() => enquadraAlvos(SEL) });
   }
   itens.push('-');
@@ -4008,7 +4163,11 @@ function extrasDoHub(w){
   it.push(modo3d ? { rot:'Voltar ao 2D', tecla:teclaDe('vista2d') || '2', f:() => fazAcao('vista2d') }
                  : { rot:'Ver em 3D', tecla:teclaDe('vista3d') || '3', f:() => fazAcao('vista3d') });
   if (SEL.length) it.push({ rot:'Girar 90°', tecla:teclaDe('girar'), f:() => transformaSelecao('gira') });
-  /* o Sinalizar aqui saiu: o Comment... do Altium, logo acima, e ele (a nota para a IA) */
+  /* o Sinalizar aqui saiu: o Comment... do Altium, logo acima, e ele (a nota para a IA). Apagar o
+     sinalizador e a cota mora aqui tambem (pedido do dono, 2026-10-29: "consigo pôr mas não consigo tirar") */
+  if (SEL.some(a => a.t === 'ann')) it.push({ rot:'Apagar sinalizador', tecla:teclaDe('apagar'), f:() => fazAcao('apagar') });
+  if (SEL.some(a => a.t === 'cota')) it.push({ rot:'Apagar cota', tecla:teclaDe('apagar'), f:() => fazAcao('apagar') });
+  if (COTAS.length) it.push({ rot:show.cotas ? 'Esconder as cotas' : 'Mostrar as cotas', f:() => fazAcao('cotas') });
   it.push({ rot:editOn ? 'Travar a edição' : 'Destravar a edição', tecla:teclaDe('editar'), f:() => fazAcao('editar') });
   return it;
 }
@@ -4073,6 +4232,7 @@ function enquadra(){
 function caixaDoAlvo(a){
   const h = HITS.filter(x => x.a === a);
   if (a.t === 'ann') return [a.ann.x - 4, a.ann.y - 4, a.ann.x + 4, a.ann.y + 4];
+  if (a.t === 'cota') { const g = geoCota(a.cota); return g ? bbPts([g.A, g.B, g.D1, g.D2].map(p => [p.x, p.y])) : null; }
   if (!h.length) return null;
   let bb = null;
   for (const x of h) if (a.t !== 'comp' || x.prio === 9) bb = bb ? [Math.min(bb[0], x.bb[0]), Math.min(bb[1], x.bb[1]), Math.max(bb[2], x.bb[2]), Math.max(bb[3], x.bb[3])] : x.bb.slice();
@@ -4100,8 +4260,17 @@ const noLadoAtual = k => k === cur || (k === 'Multi' && cobre(cur));
    por ultimo). O 2o clique no mesmo ponto anda nesta lista. */
 function hitsEm(x, y){
   const tol = px(4), out = [], vistos = new Set();
-  if (filtro.outros) for (const a of ANN) if (a.view === 'pcb' && isNum(a.x) && Math.hypot(x - a.x, y - a.y) <= px(12)) {
-    const al = annAlvo(a); if (!vistos.has(al)) { vistos.add(al); out.push({ a:al, k:-1e9 }); } }
+  if (filtro.outros) for (const a of ANN) {
+    if (a.view !== 'pcb' || !isNum(a.x) || !isNum(a.y)) continue;
+    const b = caixaBandeira(a);
+    if (!(Math.hypot(x - a.x, y - a.y) <= px(12) || (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]))) continue;
+    const al = annAlvo(a); if (!vistos.has(al)) { vistos.add(al); out.push({ a:al, k:-1e9 }); }
+  }
+  if (show.cotas && HCOT) for (const c of COTAS) {
+    const g = geoCota(c);
+    if (!g || !HCOT.toca(g, { x, y }, px(5), px(16))) continue;
+    const al = cotaAlvo(c); if (!vistos.has(al)) { vistos.add(al); out.push({ a:al, k:-1e9 }); }
+  }
   const cand = [];
   for (const h of HITS) {
     if (!filtro[h.t] || !visivelHit(h)) continue;
@@ -4186,9 +4355,16 @@ cv.addEventListener('mousedown', e => {
   engoleClique = false;
   if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur &&
       !(document.activeElement.closest && document.activeElement.closest('#txtbox, #annform'))) document.activeElement.blur();
-  if (tool !== 'select') { gesto = { modo:'ferramenta', s }; return; }
+  if (tool !== 'select') {
+    gesto = { modo:'ferramenta', s };
+    /* a regua: apertar num ponto, arrastar e soltar no outro tambem mede (o mouseup decide) */
+    if (tool === 'medir' && !(draft && draft.tipo === 'medida')) gesto.medirA = snapMedida(w, e);
+    return;
+  }
   /* Ctrl+clique: realca a net do cobre (o do Altium) */
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !LEAN) { realcaNetEm(w); return; }
+  /* a cota da regua anda pela linha de cota: arrastar muda por onde ela passa (nao pede edicao) */
+  if (!LEAN) { const c = cotaEm(w); if (c) { gesto = { modo:'cota', cota:c, s, inicio:w, moveu:false }; return; } }
   if (editOn && !LEAN) { const al = alcaEm(s); if (al) { gesto = { modo:'alca', al, s, inicio:w }; return; } }
   /* a ponta so com UMA trilha selecionada: a selecao do Tab (varias) anda inteira */
   if (editOn && !LEAN && SEL.length === 1) {
@@ -4220,18 +4396,21 @@ window.addEventListener('mousemove', e => {
     cv.style.cursor = al ? cursorAlca(al) : 'default';
     const h = hitsEm(w.x, w.y)[0] || null;
     if (h !== HOVER) { HOVER = h; $('shover').textContent = h ? rotuloAlvo(h) : ''; pede(); }
+  } else if (tool === 'medir') {
+    if (draft && draft.tipo === 'medida' && draft.b) { SNAP = null; draft.q = { x:w.x, y:w.y }; $('shover').textContent = ''; }
+    else { SNAP = snapMedida(w, e); $('shover').textContent = SNAP && HCOT && HCOT.ROTULO[SNAP.tipo] && SNAP.tipo !== 'grade' ? '⊙ ' + HCOT.ROTULO[SNAP.tipo] : ''; }
+    pintaMedidaAoVivo();
+    pede();
   } else {
     SNAP = snapPonto(w, e, opcoesSnap());
     $('shover').textContent = SNAP && (SNAP.tipo === 'pad' || SNAP.tipo === 'via' || SNAP.tipo === 'ponta') ? '⊙ ' + SNAP.tipo + (SNAP.net ? ' · ' + SNAP.net : '') : '';
-    if (tool === 'medir' && draft && draft.tipo === 'medida' && !draft.b) pintaMedidaAoVivo();
     pede();
   }
 });
 cv.addEventListener('mouseleave', () => { if (!gesto && HOVER) { HOVER = null; $('shover').textContent = ''; pede(); } });
 function pintaMedidaAoVivo(){
-  const r = $('srota'); if (!r || !draft || !draft.a) return;
-  const b = SNAP || cursorW, a = draft.a;
-  r.textContent = 'medida ' + fmtDist(Math.hypot(b.x - a.x, b.y - a.y)) + ' ' + unidade + ' · dX ' + fmtDist(Math.abs(b.x - a.x)) + ' · dY ' + fmtDist(Math.abs(b.y - a.y));
+  const r = $('srota'); if (!r) return;
+  r.textContent = draft && draft.tipo === 'medida' && draft.a ? medidaAoVivo() : 'régua: clique no 1º ponto (centro, ponta, meio, quadrante, vértice, canto, borda, tangente)';
 }
 function moveGesto(e, s, w){
   const g = gesto, longe = Math.hypot(s.x - g.s.x, s.y - g.s.y) > 3;
@@ -4241,7 +4420,23 @@ function moveGesto(e, s, w){
   if (g.modo === 'ponta') { if (!arrasto && !longe) return; if (!arrasto) iniciaPonta(g); atualizaPonta(e, w); return; }
   if (g.modo === 'alca') { if (!arrasto && !longe) return; if (!arrasto) iniciaEstica(g); atualizaEstica(e, w); return; }
   if (g.modo === 'mover') { if (!arrasto && !longe) return; if (!arrasto && !iniciaArrasto(g)) return; atualizaArrasto(e, w); return; }
+  if (g.modo === 'cota') {
+    if (!g.moveu && !longe) return;
+    g.moveu = true; g.cota.q = { x:r6(w.x), y:r6(w.y) };
+    const gg = geoCota(g.cota); avisoRodape(gg ? 'cota ' + textoCota(gg) : '');
+    pede(); return;
+  }
+  if (g.modo === 'ferramenta' && tool === 'medir') {
+    if (draft && draft.tipo === 'medida' && draft.b) { SNAP = null; draft.q = { x:w.x, y:w.y }; }
+    else SNAP = snapMedida(w, e);
+    pintaMedidaAoVivo(); pede(); return;
+  }
   if (g.modo === 'ferramenta') { SNAP = snapPonto(w, e, opcoesSnap()); pede(); }
+}
+function cotaEm(w){
+  if (!show.cotas || !HCOT || !COTAS.length) return null;
+  for (let i = COTAS.length - 1; i >= 0; i--) { const g = geoCota(COTAS[i]); if (g && HCOT.toca(g, w, px(5), px(16))) return COTAS[i]; }
+  return null;
 }
 function iniciaArrasto(g){
   let alvos;
@@ -4544,6 +4739,18 @@ window.addEventListener('mouseup', e => {
   if (e.button !== 0) { if (e.button === 1) { pan = null; cv.style.cursor = tool === 'select' ? 'default' : cursorFerramenta(); } return; }
   const g = gesto; gesto = null;
   if (!g) return;
+  if (g.modo === 'cota') { if (g.moveu) { engoleClique = true; gravaCotas(); selSo([cotaAlvo(g.cota)]); avisoRodape(''); pede(); } return; }
+  /* a regua por arrasto: apertou no 1o ponto, soltou no 2o -- a cota fica na mao para o arrasto da linha */
+  if (g.modo === 'ferramenta' && g.medirA && tool === 'medir') {
+    const r = cv.getBoundingClientRect(), s = { x:e.clientX - r.left, y:e.clientY - r.top };
+    if (Math.hypot(s.x - g.s.x, s.y - g.s.y) > 6) {
+      const w = telaParaMundo(s.x, s.y);
+      draft = { tipo:'medida', a:g.medirA, b:null, modo:'auto' };
+      if (!ponto2(snapMedida(w, e))) draft = null;
+      engoleClique = true; pintaStatus(); if (painel) painel.atualiza(); pede();
+      return;
+    }
+  }
   if (arrasto) { engoleClique = true; terminaArrasto(); return; }
   if (g.modo === 'janela' && janela) { const j = janela; janela = null; engoleClique = true; selecionaJanela(j, g.shift); pede(); return; }
   if (g.modo === 'nada' && g.avisou) engoleClique = true;
@@ -4592,7 +4799,7 @@ window.addEventListener('contextmenu', e => {
     else if (draft) { draft = null; pede(); } else setTool('select');
     return;
   }
-  if (tool !== 'select') { if (draft && draft.tipo !== 'medida') { draft = null; pede(); } else setTool('select'); return; }
+  if (tool !== 'select') { if (draft) { draft = null; SNAP = null; pintaStatus(); pede(); } else setTool('select'); return; }
   menuContexto(e.clientX, e.clientY, w);
 });
 /* Preferences » Mouse Wheel Configuration: a combinacao exata escolhe a acao; a que nao esta na
@@ -4673,6 +4880,8 @@ function escape(){
   if (annPendente) { fechaAnnForm(); return; }
   if (arrasto) { cancelaArrasto(); return; }
   if (janela || gesto) { janela = null; gesto = null; pede(); return; }
+  /* a regua: o 1o Esc larga a cota na mao; o 2o, a regua */
+  if (tool === 'medir' && draft && draft.tipo === 'medida') { draft = null; SNAP = null; avisoRodape(''); pintaStatus(); if (painel) painel.atualiza(); pede(); return; }
   if (tool !== 'select') { setTool('select'); return; }
   if (limpaRealce()) return;
   if (SEL.length) { selLimpa(); return; }
@@ -4729,6 +4938,16 @@ window.addEventListener('keydown', e => {
     e.preventDefault();
     if (painel) { painel.mostra('props'); painel.foca(tool === 'trilha' ? 'tool.wTrilha' : null); }
     return;
+  }
+  if (tool === 'medir' && draft && draft.tipo === 'medida') {
+    if ((e.key === ' ' || e.code === 'Space') && draft.b) {
+      e.preventDefault();
+      const i = MODOS_CICLO.indexOf(draft.modo || 'auto');
+      draft.modo = MODOS_CICLO[(i + 1) % MODOS_CICLO.length];
+      avisoRodape('cota ' + HCOT.MODOS[draft.modo] + ' (Espaço troca)'); pintaStatus(); pede(); return;
+    }
+    if (e.key === 'Backspace') { e.preventDefault(); if (draft.b) { draft.b = null; draft.modo = 'auto'; } else draft = null; pintaStatus(); pede(); return; }
+    if (e.key === 'Enter' && draft.b) { e.preventDefault(); fixaCota(draft.q || draft.b); return; }
   }
   if ((tool === 'poligono' || tool === 'contorno' || tool === 'pour') && e.key === 'Enter') { e.preventDefault(); fechaPoligono(); return; }
   if (tool !== 'select' && tool !== 'trilha' && tool !== 'linha' && e.key === 'Backspace' && desfazPontoPoligono()) { e.preventDefault(); return; }
@@ -5212,6 +5431,8 @@ function fazAcao(id, arg){
     case 'triangulo': case 'contorno':
       setTool(tool === id ? 'select' : id); return;
     case 'medir': setTool(tool === 'medir' ? 'select' : 'medir'); return;
+    case 'cotas': setCotasVer(!show.cotas); HubDialog.toast(show.cotas ? 'cotas à vista (' + COTAS.length + ')' : 'cotas escondidas', 'info', 1400); return;
+    case 'apagarCotas': apagaCotas(); return;
     case 'sinalizar': setTool(tool === 'sinalizar' ? 'select' : 'sinalizar'); return;
     case 'preencher': togglePreencher(); return;
     case 'unidade': setUnidade(unidade === 'mm' ? 'mil' : 'mm'); return;
@@ -5231,7 +5452,7 @@ function fazAcao(id, arg){
     case 'girar': if (arrasto) giraNoArrasto('gira'); else transformaSelecao('gira'); return;
     case 'espelhoX': if (arrasto) giraNoArrasto('x'); else transformaSelecao('x'); return;
     case 'espelhoY': if (arrasto) giraNoArrasto('y'); else transformaSelecao('y'); return;
-    case 'apagar': if (!SEL.length) return; if (!editOn) { avisoTrava(); return; } apagaSelecao(); return;
+    case 'apagar': if (!SEL.length) return; if (!editOn && !soNotas(SEL)) { avisoTrava(); return; } apagaSelecao(); return;
     case 'desfazer': if (!desfaz()) HubDialog.toast('nada para desfazer', 'info', 1400); return;
     case 'refazer': if (!refaz()) HubDialog.toast('nada para refazer', 'info', 1400); return;
     case 'tudo': selecionaTudo(); return;
@@ -5618,12 +5839,30 @@ function fichaDe(a){
     }
     case 'ann': {
       const n = a.ann;
-      return { titulo:'Sinalizador ' + n.id, sub:(n.created || '') + (n.status === 'resolved' ? ' · resolvido' : ''), campos:[
+      return { titulo:'Sinalizador ' + n.id, sub:(n.created || '') + (n.status === 'resolved' ? ' · resolvido' : ''), semTrava:true, campos:[
         { k:'msg', rot:'Mensagem', tipo:'texto', v:n.msg || '' },
         { k:'severity', rot:'Cor', tipo:'enum', v:n.severity, opc:[{ v:'err', rot:'vermelho (erro)', cor:ANN_COLORS.err }, { v:'warn', rot:'amarelo (atenção)', cor:ANN_COLORS.warn }, { v:'info', rot:'azul (nota)', cor:ANN_COLORS.info }] },
         { k:'status', rot:'Situação', tipo:'enum', v:n.status || 'open', opc:[{ v:'open', rot:'aberto' }, { v:'resolved', rot:'resolvido' }] },
         { k:'reply', rot:'Resposta', tipo:'ro', v:n.reply || '—' },
+        { botoes:[{ id:'apagar', rot:'Apagar sinalizador', dica:'tira a bandeira da placa (Delete também); grave com Salvar' }, { id:'enquadrar', rot:'Enquadrar' }] },
       ] };
+    }
+    case 'cota': {
+      const c = a.cota, g = geoCota(c);
+      if (!g) return { titulo:'Cota', campos:[{ nota:'Cota sem geometria (os dois pontos coincidem).' }, { botoes:[{ id:'apagar', rot:'Apagar cota' }] }] };
+      const cond = (p, k, rot) => p.circ ? { k, rot, tipo:'enum', v:p.cond || 'perto', opc:[
+        { v:'perto', rot:'tangente de perto' }, { v:'longe', rot:'tangente de longe' }, { v:'centro', rot:'centro do círculo' }] } : null;
+      const nome = p => p.circ ? 'círculo Ø' + fmtDist(2 * p.circ.r) : (HCOT.ROTULO[p.tipo] || p.tipo || 'ponto');
+      return { titulo:'Cota ' + textoCota(g), semTrava:true, sub:(HCOT.MODOS[g.modo] || g.modo) + ' · ' + nome(c.a) + ' → ' + nome(c.b), campos:[
+        { k:'v', rot:'Valor', tipo:'ro', v:fmtDist(g.valor) + ' ' + unidade },
+        { k:'d', rot:'Distância', tipo:'ro', v:fmtDist(g.dist) + ' ' + unidade },
+        par('Δ', { k:'dx', rot:'dX', tipo:'ro', v:fmtDist(g.dx) }, { k:'dy', rot:'dY', tipo:'ro', v:fmtDist(g.dy) }),
+        { k:'modo', rot:'Tipo', tipo:'enum', v:c.modo || 'auto', opc:Object.keys(HCOT.MODOS).map(v => ({ v, rot:HCOT.MODOS[v] })),
+          dica:'automática: acima ou abaixo dos pontos dá a horizontal, ao lado dá a vertical, no meio dá a alinhada' },
+        cond(c.a, 'condA', 'Ponta 1'), cond(c.b, 'condB', 'Ponta 2'),
+        { nota:'Arraste a cota para mudar onde passa a linha. Ela não vai para o Altium: fica nesta máquina, com o projeto. O botão da régua com olho, na barra, esconde e mostra todas.' },
+        { botoes:[{ id:'apagar', rot:'Apagar cota' }, { id:'apagarCotas', rot:'Apagar todas (' + COTAS.length + ')' }, { id:'enquadrar', rot:'Enquadrar' }] },
+      ].filter(Boolean) };
     }
   }
   return { titulo:'?', campos:[] };
@@ -5654,7 +5893,7 @@ const CAMADA_LIVRE = a => a.t === 'track' || a.t === 'arc' || a.t === 'fill' || 
 function fichaMulti(lista){
   const n = {};
   for (const a of lista) n[a.t] = (n[a.t] || 0) + 1;
-  const nomes = { comp:'componente', track:'trilha/linha', arc:'arco', via:'via', fill:'fill', region:'região', text:'texto', pad:'pad', 'regiao-ro':'região (só desenho)', recorte:'recorte', ann:'sinalizador' };
+  const nomes = { comp:'componente', track:'trilha/linha', arc:'arco', via:'via', fill:'fill', region:'região', text:'texto', pad:'pad', 'regiao-ro':'região (só desenho)', recorte:'recorte', ann:'sinalizador', cota:'cota' };
   const campos = [];
   const comCamada = lista.filter(a => a.t === 'comp' || CAMADA_LIVRE(a));
   if (comCamada.length === lista.length) {
@@ -5716,12 +5955,20 @@ function fichaFerramenta(){
       F.campos.push({ nota:'Um clique por vértice; duplo clique, Enter ou botão direito fecha. Substitui o contorno inteiro (outline_set), só com retas — pergunta antes.' });
       break;
     case 'medir': {
-      const m = draft && draft.tipo === 'medida' && draft.b ? draft : null;
-      F.campos.push({ k:'d', rot:'Distância', tipo:'ro', v:m ? fmtDist(Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y)) + ' ' + unidade : '— (dois cliques)' });
-      if (m) F.campos.push(par('Δ', { k:'dx', rot:'dX', tipo:'ro', v:fmtDist(Math.abs(m.b.x - m.a.x)) }, { k:'dy', rot:'dY', tipo:'ro', v:fmtDist(Math.abs(m.b.y - m.a.y)) }));
+      F.titulo = 'Régua (cotas)';
+      const c = draft && draft.tipo === 'medida' && draft.b ? cotaDoDraft() : null, g = c && HCOT ? HCOT.geometria(c) : null;
+      F.campos.push({ k:'d', rot:'Medida', tipo:'ro', v:g ? fmtDist(g.valor) + ' ' + unidade + ' · ' + HCOT.MODOS[g.modo] : '— (marque os dois pontos)' });
+      if (g) F.campos.push(par('Δ', { k:'dx', rot:'dX', tipo:'ro', v:fmtDist(g.dx) }, { k:'dy', rot:'dY', tipo:'ro', v:fmtDist(g.dy) }));
+      F.campos.push({ k:'tool.cotasVer', rot:'Mostrar as cotas', tipo:'bool', v:show.cotas, dica:'o mesmo botão da régua com olho, na barra' });
+      F.campos.push(
+        { nota:'1º clique: um ponto. 2º clique: o outro (ou aperte num, arraste e solte no outro). Depois mexa o mouse para levar a linha da cota e clique para deixá-la na placa.' },
+        { nota:'Agarra em centro (pad, via, furo, círculo), ponta, meio, quadrante (borda do círculo), vértice, canto, borda do cobre e na tangente de um círculo ou arco — a tangente encosta do lado da outra ponta. Fora deles, a grade; Ctrl solta tudo.' },
+        { nota:'A linha acima ou abaixo dos pontos dá a cota horizontal, ao lado dá a vertical, no meio dá a alinhada; Espaço troca. Esc larga a cota na mão (de novo, a régua). Clique numa cota (com a Seleção) para ver, arrastar ou apagar.' },
+        { botoes:[{ id:'cotas', rot:show.cotas ? 'Esconder as cotas' : 'Mostrar as cotas' }, { id:'apagarCotas', rot:'Apagar todas (' + COTAS.length + ')', off:!COTAS.length }] });
       break;
     }
-    case 'sinalizar': F.campos.push({ nota:'Clique no ponto do problema e escreva o que a IA deve corrigir (annotations.js).' }); break;
+    case 'sinalizar': F.campos.push({ nota:'Clique no ponto do problema e escreva o que a IA deve corrigir (annotations.js).' },
+      { nota:'Para tirar um sinalizador: clique na bandeira (com esta ferramenta ou com a Seleção) e aperte ' + (teclaDe('apagar') || 'Delete') + ', ou use Apagar no painel ou no botão direito. A aba Mudanças lista todos, com o × de apagar. Depois, Salvar.' }); break;
     case 'pour': {
       const tp = tipoPour();
       F.campos.push(
@@ -5764,9 +6011,10 @@ function configTool(k, v){
     case 'furo': if (pos(v)) CFG.furo = r6(v); break;
     case 'preencher': if (!!v !== preencher) togglePreencher(); break;
     case 'conflito': setConflito(String(v || '')); break;
-    case 'pourForma': if (v === 'retangulo' || v === 'livre') { CFG.pourForma = v; gravaPref('pourForma', v); if (draft && (draft.tipo === 'pour' || draft.tipo === 'pourRet')) draft = null; } break;
+    case 'pourForma': if (v === 'retangulo' || v === 'livre') { CFG.pourForma = v; gravaPref('pourForma', v); if (draft && (draft.tipo === 'pour' || draft.tipo === 'pourRet')) draft = null; pintaBarra(); } break;
     case 'pourTipo': CFG.pourTipo = String(v || ''); gravaPref('pourTipo', CFG.pourTipo); if (draft && (draft.tipo === 'pour' || draft.tipo === 'pourRet')) draft.layer = camadaDoTipo(); break;
     case 'pourNet': CFG.pourNet = String(v || ''); break;
+    case 'cotasVer': setCotasVer(!!v); break;
   }
   pintaStatus(); if (painel) painel.atualiza(); pede();
 }
@@ -5860,14 +6108,22 @@ function campoNoAlvo(a, k, v){
       else return false;
       return 'ann';
     }
+    case 'cota': {
+      const c = a.cota;
+      if (k === 'modo' && HCOT && HCOT.MODOS[v]) { c.modo = v; return 'cota'; }
+      if ((k === 'condA' || k === 'condB') && (v === 'perto' || v === 'longe' || v === 'centro')) {
+        const p = k === 'condA' ? c.a : c.b; if (!p.circ) return false; p.cond = v; return 'cota';
+      }
+      return false;
+    }
   }
   return false;
 }
 function editarCampo(k, v){
   if (String(k).indexOf('tool.') === 0) { configTool(String(k).slice(5), v); return; }
   if (!SEL.length || LEAN) return;
-  if (!garanteEdicao()) return;
-  let ann = false;
+  if (!soNotas(SEL) && !garanteEdicao()) return;
+  let ann = false, cota = false;
   const alvos = SEL.slice();
   /* camada, largura, pontas, centro, raio, angulos ou net de trilha/arco, e posicao ou diametro de
      via: a mudanca que faria cobre de nets diferentes se encontrarem nao entra (editaConferindo) */
@@ -5876,10 +6132,11 @@ function editarCampo(k, v){
     let mexeu = false;
     for (const a of alvos) {
       const x = campoNoAlvo(a, k, v);
-      if (x === 'ann') ann = true; else if (x) mexeu = true;
+      if (x === 'ann') ann = true; else if (x === 'cota') cota = true; else if (x) mexeu = true;
     }
     return mexeu;
   }, 'não deixa');
+  if (cota) { gravaCotas(); pede(); if (painel) painel.atualiza(); }
   if (ann) annChanged();
   if (r) commit(); else if (painel) painel.atualiza();
 }
@@ -5887,7 +6144,7 @@ function acaoPainel(id){
   switch (id) {
     case 'girar': transformaSelecao('gira'); return;
     case 'virar': transformaSelecao('vira'); return;
-    case 'apagar': if (garanteEdicao()) apagaSelecao(); return;
+    case 'apagar': if (soNotas(SEL) || garanteEdicao()) apagaSelecao(); return;
     case 'enquadrar': enquadraAlvos(SEL); return;
     case 'enquadrar_placa': enquadra(); return;
     case 'selComp': { const cs = compsDaSel(); if (cs.length) { selSo(cs.map(m => ALVO_COMP.get(m)).filter(Boolean)); aoMudarSel(); pede(); } return; }
@@ -5997,7 +6254,7 @@ const V = {
                                    vis:show.layers[l.key] !== false, atual:l.key === cur, kind:l.kind })),
   cur:() => cur, setCur, setVisivel, soEsta, mostraTodas, conjunto,
   conjuntos:() => Object.keys(CONJUNTOS).map(k => ({ id:k, rot:CONJUNTOS[k].rot })),
-  show:() => ({ grid:show.grid, ghost:show.ghost, unica:show.unica, flip:view.flip }),
+  show:() => ({ grid:show.grid, ghost:show.ghost, unica:show.unica, flip:view.flip, cotas:show.cotas, nCotas:COTAS.length }),
   /* Real View do 3D: o icone do painel Vista liga (abrindo o 3D) e desliga */
   realView:() => !!(typeof HubPcb3dVista !== 'undefined' && (V3 ? V3.realView() : HubPcb3dVista.preferido())),
   setRealView(on){
@@ -6019,6 +6276,7 @@ const V = {
   setShow(k, v){
     if (k === 'grid') show.grid = !!v; else if (k === 'ghost') { setMarcas(v); return; }
     else if (k === 'unica') { setUnica(!!v); return; } else if (k === 'flip') { setFlip(!!v); return; }
+    else if (k === 'cotas') { setCotasVer(!!v); return; }
     if (painel) painel.atualiza(); pede();
   },
   unidade:() => unidade, setUnidade, grades:() => GRADES, grade:() => grade.id, setGrade,
@@ -6052,8 +6310,8 @@ const V = {
   validacao:() => model.validation.map(v => ({ level:v.level, msg:v.msg })),
   sinalizadores:() => ANN.filter(a => a.view === 'pcb'),
   irAnn(a){ irPara(annAlvo(a), true); },
-  annDel(a){ if (!garanteEdicao()) return; const i = ANN.indexOf(a); if (i >= 0) { ANN.splice(i, 1); SEL = SEL.filter(x => x.ann !== a); annChanged(); } },
-  annReabre(a){ if (!garanteEdicao()) return; a.status = 'open'; a.reply = ''; annChanged(); },
+  annDel(a){ if (LEAN) return; const i = ANN.indexOf(a); if (i >= 0) { ANN.splice(i, 1); SEL = SEL.filter(x => x.ann !== a); if (HOVER && HOVER.ann === a) HOVER = null; annChanged(); aoMudarSel(); } },
+  annReabre(a){ if (LEAN) return; a.status = 'open'; a.reply = ''; annChanged(); },
   editOn:() => editOn, setEdit(v){ setEdit(v); },
   sujo:() => ({ ch:chDirty, ann:annDirty }), salvar:() => salvar(), csv:exportCsv,
   gerber:() => abreGerber(), verGerberSalvo:() => verGerberSalvo(), temGerber:() => typeof HubGerber !== 'undefined' && typeof HubGerberView !== 'undefined',
@@ -6593,6 +6851,13 @@ window.__hubPcb = Object.assign(Object.create(V), {
   autorotear(o){ const x = o || {}; return !!abreAutorotear(x.escopo || 'todas', 'worker' in x ? { worker:x.worker } : null); },
   autoRota:() => { const c = typeof HubPcbAutoRota !== 'undefined' ? HubPcbAutoRota.atual() : null; return c ? c.resumo() : null; },
   previaAuto:() => PREVIA_AUTO ? { tracks:PREVIA_AUTO.tracks.length, vias:PREVIA_AUTO.vias.length } : null,
+  /* a regua: as cotas na placa (com o valor resolvido), o agarre num ponto e a medida na mao */
+  cotas:() => COTAS.map(c => { const g = geoCota(c); return { id:c.id, modo:g ? g.modo : c.modo, valor:g ? g.valor : null, a:c.a, b:c.b }; }),
+  cotasVer:() => show.cotas,
+  agarreMedida:(x, y) => snapMedida({ x, y }, null),
+  medida:() => medidaAoVivo(),
+  sinalizadores:() => ANN.filter(a => a.view === 'pcb').map(a => Object.assign({}, a)),
+  poeSinalizador(x, y, msg){ const a = { id:'n' + (ANN.length + 90), view:'pcb', x, y, severity:'info', status:'open', msg:msg || 'teste', created:'' }; ANN.push(a); annChanged(); return a.id; },
 });
 
 })();
