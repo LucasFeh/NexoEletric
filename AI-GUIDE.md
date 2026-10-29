@@ -400,7 +400,15 @@ var changes = [
   - liga o ratsnest aberto (ou só as `nets` dadas) em várias camadas, trocando de camada por via;
   - roteia na `ordem` pedida, com arranca-e-refaz só das rotas que ele mesmo pôs;
   - padrão `gravar:false`: só simula e mostra as conexões abertas antes/depois e o DRC com as violações NOVAS;
-  - `gravar:true` escreve os `track_add`/`via_add` no changes.js; com violação nova de DRC nada é gravado.
+  - `gravar:true` escreve os `track_add`/`via_add` no changes.js; com violação nova de DRC nada é gravado;
+  - planos do hub (1.40.0): o cobre despejado é obstáculo pela folga do próprio polígono, e o lote redespeja e
+    desfaz a rota que partiria um plano (`motivo: corta-plano`);
+  - `cruzarPlanos` deixa a trilha atravessar o plano de OUTRA net (o gate pelo plano de fase), com custo; o plano
+    recua em volta dela, nunca na faixa estreita (`faixaPlano`, padrão 2 mm);
+  - a via nunca cai em pad SMD (`viaEmPad:true` libera) nem na faixa estreita de um plano.
+- Fanout de uma net (GND): `pcb_fanout {net}` põe, em cada pad SMD que ainda não chega ao plano, uma trilha curta e
+  uma via dentro do cobre do plano. A via respeita furo a furo e máscara, também contra as outras vias do fanout.
+  Simula por padrão; com `gravar:true` grava, desde que não haja violação nova de DRC.
 
 **Também vem do Altium (só na tela e nas saídas, sem op própria).**
 - Linhas de conexão (ratsnest): o que falta ligar por net.

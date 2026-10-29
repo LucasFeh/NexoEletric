@@ -166,6 +166,12 @@ var HubPcbAutoRota = (function () {
     const A = (typeof HubAutoRoteador !== 'undefined') ? HubAutoRoteador : null;
     const iVia = numero('Custo da via (mm de trilha: maior = menos via)', 'ar-via', A ? A.CUSTO_VIA : 3, 0, null, 0.5);
     const iPas = numero('Passadas de arranca-e-refaz', 'ar-passes', A ? A.PASSES : 4, 0, 10, 1);
+    /* P2 (19): a trilha pode atravessar o plano de OUTRA net, com custo; o plano é redespejado em volta
+       dela, nunca na faixa estreita, e a rota que partiria o plano é desfeita */
+    const lCruza = el('label', 'ar-forcar'), iCruza = el('input');
+    iCruza.type = 'checkbox'; iCruza.id = 'ar-cruza';
+    lCruza.append(iCruza, ' Cruzar planos de outra net (o plano recua em volta da trilha; nunca na faixa estreita)');
+    box.append(lCruza);
     const bCancel = botao('Cancelar', null, () => C.fecha());
     const bRota = botao('Rotear', 'ok', () => comeca());
     const btns = el('div', 'ar-btns'); btns.append(bCancel, bRota); box.append(btns);
@@ -185,6 +191,7 @@ var HubPcbAutoRota = (function () {
     C.pedido = () => ({
       escopo: rSel.checked ? 'sel' : 'todas', ordem: sOrd.value, camadas: chks.filter(c => c.checked).map(c => c.value),
       custoVia: Math.max(0, parseFloat(String(iVia.value).replace(',', '.')) || 0), passes: Math.max(0, Math.min(10, parseInt(iPas.value, 10) || 0)),
+      cruzarPlanos: iCruza.checked,
     });
     /* o smoke e quem mais quiser: preenche o pedido sem clicar */
     C.preenche = p => {
@@ -194,6 +201,7 @@ var HubPcbAutoRota = (function () {
       if (Array.isArray(p.camadas)) for (const c of chks) c.checked = p.camadas.includes(c.value);
       if (p.custoVia != null) iVia.value = String(p.custoVia);
       if (p.passes != null) iPas.value = String(p.passes);
+      if (p.cruzarPlanos != null) iCruza.checked = !!p.cruzarPlanos;
     };
 
     /* ---------- 2. o progresso ---------- */
@@ -212,6 +220,7 @@ var HubPcbAutoRota = (function () {
       const seg = ' · ' + nf((p.ms || 0) / 1000, 1) + ' s';
       if (p.fase === 'rota') { f = p.total ? 0.85 * p.feitas / p.total : 0; t = 'conexão ' + nf(p.feitas, 0) + ' de ' + nf(p.total, 0) + ' · ' + nf(p.roteadas, 0) + ' roteadas, ' + nf(p.falhas, 0) + ' abertas' + seg; }
       else if (p.fase === 'conserto') { f = 0.85 + 0.1 * (p.total ? p.feitas / p.total : 0); t = 'arranca-e-refaz, passada ' + p.passe + ': ' + nf(p.feitas, 0) + ' de ' + nf(p.total, 0) + ' · ' + nf(p.falhas, 0) + ' abertas' + seg; }
+      else if (p.fase === 'planos') { f = 0.95; t = 'redespejando os planos: alguma rota partiu um plano?' + seg; }
       else if (p.fase === 'drc') { f = 0.97; t = 'conferindo o DRC (as violações novas)…'; }
       pBar.style.width = Math.round(100 * Math.min(1, f)) + '%';
       pTxt.textContent = t;
@@ -231,7 +240,7 @@ var HubPcbAutoRota = (function () {
       c.append(barra, pTxt, pModo, bc);
       const cn = V.cena() || {};
       const msg = { tipo: 'roda', id: Date.now(), eb: V.eb(), regras: V.regras() || null, clearance: cn.clearance, placa: cn.placa || null, textos: V.textos() || {},
-                    opcoes: { nets, camadas: p.camadas, ordem: p.ordem, passes: p.passes, custoVia: p.custoVia, note: 'auto-rotear da vista' } };
+                    opcoes: { nets, camadas: p.camadas, ordem: p.ordem, passes: p.passes, custoVia: p.custoVia, cruzarPlanos: !!p.cruzarPlanos, note: 'auto-rotear da vista' } };
       C.pedidoFeito = p;
       if (V.worker && typeof Worker !== 'undefined') emWorker(msg);
       else emFatias(msg, 'em fatias na própria página (sem worker)');
@@ -313,6 +322,10 @@ var HubPcbAutoRota = (function () {
       item('Trilhas / vias', nf(nTr, 0) + ' trechos · ' + nf(r.vias, 0) + ' vias');
       item('Comprimento', nf(r.comprimento, 1) + ' mm');
       item('Tempo', nf(r.ms / 1000, 1) + ' s · ' + r.passes + ' passada(s) · ' + r.arrancadas + ' arrancada(s)' + (C.modo === 'fatias' ? ' · em fatias' : ''));
+      const pl = r.planos || {};
+      if (pl.poligonos) item('Planos', nf(pl.poligonos, 0) + ' polígono(s) redespejado(s)' +
+        (pl.cruzaveis && pl.cruzaveis.length ? ' · ' + nf(r.rotas.filter(x => x.cruzaPlanos).length, 0) + ' rota(s) cruzam plano' : '') +
+        (pl.desfeitas ? ' · ' + nf(pl.desfeitas, 0) + ' desfeita(s) por partir o plano de ' + pl.pioraram.join(', ') : ''));
       c.append(dl);
       /* o DRC: as violações novas */
       const bloqueia = !!(drc && drc.nNovas);

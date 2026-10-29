@@ -55,6 +55,8 @@
      comRegras(eb, conjunto) -> eb com a folga das regras de Clearance (classes de net, pares,
                            matriz de objetos) posta em cada poligono (clearanceNet), so onde ela e
                            MAIOR que a do poligono. Quem despeja chama antes (1.36.0).
+     estreitas(regioes, largura, margem) -> [{pts, holes}] as faixas do cobre mais estreitas que
+                           `largura`, crescidas de `margem` (o auto-roteador nao corta o plano nelas)
 */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
@@ -715,6 +717,34 @@ function placaSemDespejoVelho(eb, regioes) {
   return out;
 }
 
-return { despeja, despejaTodos, assinatura, desatualizado, placaSemDespejoVelho, comRegras,
+/* AS FAIXAS ESTREITAS de um plano (2026-10-29, para o auto-roteador: "via proibida em faixa estreita
+   de plano, ex.: o +74 que vai ao PS1 -- para nao cortar o plano"). O que sobra do cobre depois da
+   ABERTURA por largura/2 (encolhe e cresce de volta: o que nao cabe num disco de diametro `largura`
+   some) e a faixa estreita; crescida de `margem` e presa ao cobre, e a zona onde trilha e via de
+   outra net nao entram. Na abertura a quina vai em esquadro (jtMiter): o canto vivo do plano volta
+   inteiro e nao vira "faixa". Pedacinho com menos de (largura/4)^2 de area e resto de canto: sai.
+   regioes = [{pts|points, holes}] -> [{pts, holes}] */
+function estreitas(regioes, largura, margem, tol) {
+  if (!(largura > 0)) return [];
+  const t = isNum(tol) && tol > 0 ? tol : ARCO_PADRAO;
+  const cu = [];
+  for (const g of regioes || []) {
+    const pts = g && (g.pts || g.points);
+    if (!Array.isArray(pts) || pts.length < 3) continue;
+    cu.push(positivo(paraC(pts)));
+    for (const h of Array.isArray(g.holes) ? g.holes : []) if (Array.isArray(h) && h.length >= 3) cu.push(negativo(paraC(h)));
+  }
+  if (!cu.length) return [];
+  const base = opera(C.ClipType.ctUnion, cu, null);
+  const aberta = offset(offset(base, -largura / 2, t, true), largura / 2, t, true);
+  let faixa = opera(C.ClipType.ctDifference, base, aberta);
+  const minA = (largura / 4) * (largura / 4) * ESC * ESC;
+  faixa = faixa.filter(q => Math.abs(C.Clipper.Area(q)) >= minA || C.Clipper.Area(q) < 0);
+  if (!faixa.length) return [];
+  if (isNum(margem) && margem > 0) faixa = opera(C.ClipType.ctIntersection, offset(faixa, margem, t), base);
+  return arvore(faixa).map(ex => ({ pts: deC(ex.outer), holes: ex.holes.map(deC) }));
+}
+
+return { despeja, despejaTodos, assinatura, desatualizado, placaSemDespejoVelho, comRegras, estreitas,
          _int: { contornoPlaca, formaPad, arcoGrosso, capsula, circulo, ESC } };
 });

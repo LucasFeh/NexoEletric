@@ -9,7 +9,10 @@
       DRC com as violações NOVAS = 0) e NADA gravado;
    3. pcb_autorotear {gravar:true}: os track_add/via_add vão para o changes.js pelo caminho validado, o
       pcb_validar passa, o nets_ratsnest fecha as nets e o drc_rodar não piora;
-   4. as nets pedidas já fechadas: nada a fazer, nada gravado. */
+   4. as nets pedidas já fechadas: nada a fazer, nada gravado;
+   5. pcb_fanout (P2, item 18): um plano de GND no Bottom (pour_definir), as trilhas de GND fora, e o
+      fanout liga os pads SMD de GND do Top ao plano por trilha curta + via — simulado, DRC sem violação
+      nova, os pads chegam ao plano na placa redespejada; gravar:true escreve as linhas com o note. */
 'use strict';
 const assert = require('assert');
 const fs = require('fs'), os = require('os'), path = require('path');
@@ -96,6 +99,27 @@ async function chama(name, args) {
   ({ j } = await chama('pcb_autorotear', { projeto: PROJ, nets, gravar: true }));
   ok(j.gravacao && j.gravacao.gravado === false && (restam > 0 || /nada a ligar/.test(j.gravacao.nota || '')), 'as nets fechadas: nada gravado');
   ok(fs.readFileSync(path.join(D, 'changes.js'), 'utf8') === ch, 'o changes.js ficou como estava');
+
+  /* 5. o fanout de GND */
+  const tf = lista.find(x => x.name === 'pcb_fanout');
+  ok(tf && tf.inputSchema.properties.net && tf.inputSchema.required.includes('net'), 'pcb_fanout no tools/list, com net obrigatória');
+  const bb = board.board.bbox;
+  ({ j } = await chama('pour_definir', { projeto: PROJ, layer: 'Bottom', net: 'GND', nome: 'GND_teste',
+    pts: [[bb.x1, bb.y1], [bb.x2, bb.y1], [bb.x2, bb.y2], [bb.x1, bb.y2]], opcoes: { removeDead: true } }));
+  ok(j.ok !== false && !(j.erros && j.erros.length), 'pour_definir: plano de GND no Bottom' + (j.erros && j.erros.length ? ': ' + JSON.stringify(j.erros).slice(0, 300) : ''));
+  const gndTr = (board.tracks || []).filter(tr => tr.net === 'GND' && !tr.owner).map(tr => tr.id);
+  if (gndTr.length) ({ j } = await chama('pcb_apagar', { projeto: PROJ, ids: gndTr, note: 'teste: GND sem trilha para o fanout' }));
+  const fs1 = await chama('pcb_fanout', { projeto: PROJ, net: 'GND' });
+  j = fs1.j;
+  ok(!fs1.erro && j.feitos > 0 && j.vias === j.feitos, `pcb_fanout simulado: ${j.pads_smd} pads SMD, ${j.ja_chegavam_ao_plano} já no plano, ${j.feitos} com via, falhas ${JSON.stringify(j.falhas)}` + (fs1.erro ? ': ' + JSON.stringify(j).slice(0, 400) : ''));
+  ok(j.depois && j.depois.ligados === j.pads_smd - j.falhas.length, `depois, na placa redespejada: ${j.depois && j.depois.ligados} de ${j.pads_smd} pads chegam ao plano`);
+  ok(j.drc && j.drc.novas === 0, 'fanout sem violação nova de DRC ' + JSON.stringify(j.drc && j.drc.novas_lista && j.drc.novas_lista.slice(0, 3)));
+  ok(j.gravacao && j.gravacao.simulado === true && j.gravacao.gravado === false, 'fanout simulado não grava');
+  const fg = await chama('pcb_fanout', { projeto: PROJ, net: 'GND', gravar: true });
+  const chF = fs.readFileSync(path.join(D, 'changes.js'), 'utf8').split('\n').filter(l => /"note":"fanout GND"/.test(l));
+  ok(fg.j.gravacao && fg.j.gravacao.gravado && chF.length === 2 * fg.j.feitos, `fanout gravado: ${chF.length} linhas com o note "fanout GND"`);
+  ({ j } = await chama('pcb_fanout', { projeto: PROJ, net: 'GND' }));
+  ok(j.feitos === 0 && j.ja_chegavam_ao_plano === j.pads_smd - j.falhas.length, 'de novo: todos os pads já chegam ao plano, nada a fazer');
 
   ok(fs.readFileSync(path.join(ORIGEM, 'board.js'), 'utf8') === realAntes && (realCh === null || fs.readFileSync(path.join(ORIGEM, 'changes.js'), 'utf8') === realCh),
      'o projeto real não mudou');

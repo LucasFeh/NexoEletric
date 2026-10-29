@@ -26,11 +26,18 @@
                        {tipo:'fim', id, r, drc}   r = o relatório do rotearLote (com as ops);
                                                   drc = {antes, depois, nNovas, novas:[...]} | null
                        {tipo:'erro', id, msg}
-   Cancelar é o worker.terminate() da página: o lote é síncrono aqui dentro, e não há o que esperar. */
+   Cancelar é o worker.terminate() da página: o lote é síncrono aqui dentro, e não há o que esperar.
+
+   2026-10-29 (P2, item 17): o worker carrega também o despejo (hub-clipper.js + hub-pcbpour.js). O lote
+   redespeja os planos para conferir que nenhuma rota partiu um plano, e o DRC de "depois" sai da placa
+   REDESPEJADA (HubAutoRoteador.redespeja): o plano recua das trilhas novas como na tela depois de
+   Aplicar — sem isso a trilha que cruza um plano (cruzarPlanos) sairia acusada de curto com o cobre velho. */
 (function (raiz) {
   'use strict';
   const EM_WORKER = typeof importScripts === 'function' && typeof document === 'undefined' && typeof module === 'undefined';
   if (EM_WORKER) importScripts('hub-pcbregras.js', 'hub-pcbnets.js', 'hub-roteador.js', 'hub-autoroteador.js', 'hub-pcbdrc.js');
+  /* o despejo, à parte: sem ele o auto-roteador roda igual, só sem redespejar os planos */
+  if (EM_WORKER) { try { importScripts('hub-clipper.js', 'hub-pcbpour.js'); } catch (e) { /* sem o despejo */ } }
 
   const PASSO_MS = 120;
   const agora = () => Date.now();
@@ -57,7 +64,9 @@
     if (!D || !A) return null;
     const o = textoGeo ? { textoGeo } : {};
     const d0 = D.rodar(eb, regras || undefined, o);
-    const d1 = ops && ops.length ? D.rodar(A.comPrevia(eb, ops), regras || undefined, o) : d0;
+    const depois = !(ops && ops.length) ? eb
+      : (typeof A.redespeja === 'function' ? A.redespeja(eb, ops, { regras: regras || undefined, textoGeo }) : A.comPrevia(eb, ops));
+    const d1 = depois === eb ? d0 : D.rodar(depois, regras || undefined, o);
     const novas = A.novasViolacoes(d0, d1);
     const porTipo = {};
     for (const v of novas) porTipo[v.tipo] = (porTipo[v.tipo] || 0) + 1;

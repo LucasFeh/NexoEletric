@@ -77,10 +77,26 @@
      previa(ops) -> {tracks, vias}      as ops como objetos da placa (ids auto-t1.., auto-v1..)
      comPrevia(eb, ops)                a placa com as rotas, para o ratsnest e o DRC de "depois"
      novasViolacoes(drcAntes, drcDepois) as violações que as rotas criaram (a conta do MCP)
+   O P2 (2026-10-29, o mesmo relato, itens 17 a 20):
+     17  a árvore da net é o COBRE DESPEJADO DE VERDADE, não o contorno do polígono: o pedaço de plano
+         (region poly:true com `de`) é obstáculo pela folga do PRÓPRIO polígono (a maior entre ela e a
+         regra) — assim a rota nunca faz o plano recuar calado —, e o "depois" (ratsnest e DRC) sai da
+         placa redespejada (redespeja: a mesma conta da placaDespejada do MCP e do comDespejo da vista).
+         Depois das passadas o lote redespeja e confere: a net cujo plano partiu (o pad que ficou numa
+         ilha recortada) acusa, e a rota que cortou o plano sai e é refeita sem cruzá-lo;
+     18  FANOUT (fanout): cada pad SMD da net que ainda não chega ao plano ganha uma trilha curta e uma
+         via que cai DENTRO do cobre do plano (com folga para o térmico), respeitando furo a furo,
+         máscara e as vias que o próprio fanout acabou de pôr — 77 pads de GND sem via em cima de via;
+     19  CRUZAR PLANO (cruzarPlanos): a trilha pode atravessar o polígono de OUTRA net (a de gate pelo
+         plano de fase) com custo por mm dentro dele (custoPlano); o plano é redespejado em volta dela;
+     20  VIA PROIBIDA em pad SMD (de qualquer net: nada de via no pad; viaEmPad:true libera) e na FAIXA
+         ESTREITA de plano (largura < faixaPlano, padrão 2 mm, crescida de metade dela: o +74 que vai ao
+         PS1) — a via e o térmico dela cortariam o plano. A trilha que cruza plano também não passa ali.
    Motivo de falha: 'camada-proibida' (a Routing Layers não deixa a camada da ponta), 'partida-bloqueada' /
    'chegada-bloqueada' (a ponta não cabe nem com a largura mínima da regra), 'sem-caminho' (nem contra a
    placa sozinha há caminho), 'bloqueada' (só o cobre deste lote fecha o caminho e o arranca-e-refaz não
-   resolveu), 'orcamento' (estourou os nós da busca), 'tempo' (estourou o tempo do lote). */
+   resolveu), 'orcamento' (estourou os nós da busca), 'tempo' (estourou o tempo do lote), 'corta-plano' (a rota cortava um
+   plano de outra net e, sem cruzá-lo, não houve caminho). */
 "use strict";
 const HubAutoRoteador = (function(){
 
@@ -100,6 +116,10 @@ const CUSTO_BANDA = 0.2;      /* passo que encosta na banda: um pouco mais caro,
 const ENCOSTA = 1e-3;         /* mm: pad da mesma net que não é ponta — a trilha não passa por cima */
 const MAX_ESTADOS = 1.2e7;    /* teto de estados da grade de uma busca (camadas x nós) */
 const SEM_DIR = 8;
+const CUSTO_PLANO = 1.0;      /* mm a mais por mm de trilha dentro de um plano de outra net (cruzarPlanos) */
+const FAIXA_PLANO = 2.0;      /* mm: faixa de plano mais estreita que isto não leva via nem é cruzada */
+const FANOUT_DIST = 2.5;      /* mm: o fanout procura a via até esta distância da borda do pad */
+const VOLTAS_PLANO = 3;       /* vezes que o lote redespeja e desfaz as rotas que cortaram plano */
 const DI = [1, 1, 0, -1, -1, -1, 0, 1], DJ = [0, 1, 1, 1, 0, -1, -1, -1];
 const SQ2 = Math.SQRT2;
 const isNum = v => typeof v === 'number' && isFinite(v);
@@ -113,6 +133,7 @@ function mod(global, arquivo){
   if (global === 'HubRoteador' && typeof HubRoteador !== 'undefined' && HubRoteador) return HubRoteador;
   if (global === 'HubPcbNets' && typeof HubPcbNets !== 'undefined' && HubPcbNets) return HubPcbNets;
   if (global === 'HubPcbRegras' && typeof HubPcbRegras !== 'undefined' && HubPcbRegras) return HubPcbRegras;
+  if (global === 'HubPcbPour' && typeof HubPcbPour !== 'undefined' && HubPcbPour) return HubPcbPour;
   try { if (typeof require === 'function') return require(arquivo); } catch (e) { /* sem o módulo */ }
   return null;
 }
@@ -399,6 +420,13 @@ function regraGuardada(J, layer, net, meia, tipo){
   const M = J.M, L = M.camada(J.cena, layer), N = M.idDaNet(J.cena, net, false);
   R = M.regraBase(J.cena, L, N, null, meia, M.descMao(tipo, net, tipo === 'via' ? undefined : layer));
   R.N = N;
+  /* o pedaço de plano de OUTRA net, pela folga do polígono quando ela passa a da regra: o redespejo
+     recua dela, e a rota encostada só na da regra faria o plano recuar (e às vezes partir) calado */
+  for (const [oi, pl] of obstPlano(J, layer, L)) {
+    if (pl.net === net || !R.bloq[oi]) continue;
+    const l = meia + folgaPol(pl.pol, tipo === 'via' ? 'via' : 'track', net);
+    if (l > R.lim[oi]) { R.lim[oi] = l; if (l > R.T) R.T = l; }
+  }
   if (tipo === 'track') {
     /* pad da MESMA net que não é ponta: obstáculo encostado (a trilha nunca passa por cima) */
     const pads = padsDaNet(J, layer, L, N);
@@ -445,7 +473,7 @@ function pool(n, nn){
   if (!POOL || POOL.cap < n || POOL.capN < nn) {
     const cap = Math.max(n, POOL ? POOL.cap : 0), capN = Math.max(nn, POOL ? POOL.capN : 0);
     POOL = { cap, capN, estado: new Uint8Array(cap), arSab: new Uint8Array(cap), arOk: new Uint8Array(cap), g: new Float32Array(cap),
-             marca: new Uint32Array(cap), pai: new Int32Array(cap), dirIn: new Uint8Array(cap), viaSab: new Uint8Array(capN),
+             marca: new Uint32Array(cap), pai: new Int32Array(cap), dirIn: new Uint8Array(cap), viaSab: new Uint8Array(capN), plSab: new Uint8Array(cap),
              hn: new Int32Array(1 << 16), hk: new Float64Array(1 << 16), hlen: 0, gen: 0 };
   }
   POOL.estado.fill(0, 0, n); POOL.arSab.fill(0, 0, n); POOL.viaSab.fill(0, 0, nn);
@@ -513,7 +541,7 @@ function busca(J, S){
     let v = viaSab[n];
     if (v) return v === 1;
     const i = n % NI, j = (n - i) / NI, x = x0 + i * res, y = y0 + j * res;
-    let ok = viaFuroOk(J, S, x, y, null, false);
+    let ok = !viaProibida(J, S, x, y) && viaFuroOk(J, S, x, y, null, false);
     if (ok) for (const Rv of S.RV) if (!pontoOk(M, Rv, x, y)) { ok = false; break; }
     viaSab[n] = ok ? 1 : 2;
     return ok;
@@ -521,6 +549,18 @@ function busca(J, S){
   const h = (i, j, li) => {
     const a = i > ti ? i - ti : ti - i, b = j > tj ? j - tj : tj - j;
     return ((a + b + K2 * (a < b ? a : b)) + (S.fimCam[li] ? 0 : viaP)) * peso;
+  };
+  /* o plano de outra net que esta conexão pode cruzar (19): 1 fora, 2 dentro (custa), 3 faixa estreita */
+  const plS = S.cruza ? B.plSab : null;
+  if (plS) plS.fill(0, 0, nl * NN);
+  const plano = (li, n) => {
+    const s = li * NN + n;
+    let v = plS[s];
+    if (v) return v;
+    const i = n % NI, j = (n - i) / NI;
+    v = estadoPlano(J, S, li, x0 + i * res, y0 + j * res);
+    plS[s] = v;
+    return v;
   };
   B.hlen = 0;
   const n0 = S.s0;
@@ -560,7 +600,13 @@ function busca(J, S){
       const em = est(li, m);
       if (em === BLOQ) continue;
       if ((sn !== LIVRE || em !== LIVRE) && !aresta(li, n, d, m)) continue;
-      const ng = gn + ((d & 1) ? SQ2 : 1) + curva + (em === BANDA ? CUSTO_BANDA : 0);
+      let dentro = 0;
+      if (plS && S.cruza[li]) {
+        const pv = plano(li, m);
+        if (pv === 3) continue;
+        if (pv === 2) dentro = ((d & 1) ? SQ2 : 1) * S.custoPlano;
+      }
+      const ng = gn + ((d & 1) ? SQ2 : 1) + curva + (em === BANDA ? CUSTO_BANDA : 0) + dentro;
       if (marca[sm2] !== ABERTO || ng < g[sm2]) {
         g[sm2] = ng; dirIn[sm2] = d; pai[sm2] = s; marca[sm2] = ABERTO;
         heapPush(B, sm2, ng + h(ii, jj, li));
@@ -637,6 +683,26 @@ function preparaBusca(J, con, larg, jan, semExtra){
     R.m = 0;
     return comExtra(J, R, l, net, S.vd.size / 2, 'via', semExtra);
   }) : [];
+  /* 19: os planos de outra net que esta conexão pode atravessar saem do caminho (o redespejo recua) —
+     na trilha, com custo por mm dentro (busca), e na via; nunca na faixa estreita (20) */
+  S.cruza = null;
+  S.custoPlano = J.custoPlano;
+  if (J.planos.cruzaveis) {
+    const pode = pl => pl.cruzavel && pl.net !== net && !(con.semCruzar && con.semCruzar.has(pl.id));
+    const solta = (R, layer) => {
+      const L = R.L, out = [];
+      for (const [oi, pl] of obstPlano(J, layer, L)) {
+        if (!pode(pl) || !R.bloq[oi]) continue;
+        S.soltos.push([R, oi, R.bloq[oi]]);
+        R.bloq[oi] = 0;
+        out.push([oi, pl]);
+      }
+      return out;
+    };
+    const porCam = S.RL.map((R, li) => solta(R, Lr[li]));
+    S.RV.forEach((R, k) => solta(R, J.camadasVia[k]));
+    if (porCam.some(x => x.length)) S.cruza = porCam;
+  }
   /* a grade: ancorada na partida */
   S.dx = con.a.x; S.dy = con.a.y;
   S.iMin = Math.min(0, Math.floor((jan.x1 - S.dx) / res)); S.jMin = Math.min(0, Math.floor((jan.y1 - S.dy) / res));
@@ -678,15 +744,24 @@ function montaRota(J, S, sFim){
   cur.pts.push([S.b.x, S.b.y]);
   trechos.push(cur);
   /* suaviza cada trecho na regra da camada dele (pontas fixas: a partida, as vias, a chegada) */
-  const trilhas = [], vias = [];
+  const trilhas = [], vias = [], cruza = new Set();
   let comp = 0, ok = true;
   trechos.forEach((T, k) => {
     const R = S.RL[T.li], layer = S.camadas[T.li], w = S.w[T.li];
-    let pts = M.limpa(T.pts);
+    const cru = M.limpa(T.pts);
+    let pts = cru;
     if (pts.length > 1) {
       const sv = M.suaviza(R, pts, true, J.modo, J.modo === '45' ? 'diag' : 'v');
       if (sv.chegou) pts = sv.pts;
       pts = M.limpa(M.tiraDegraus(R, M.limpa(pts), J.modo, M.DEGRAU * res));
+    }
+    /* a suavização não sabe da faixa estreita do plano que a conexão cruza: se o atalho dela entra na
+       faixa, fica o caminho da grade (que a busca já desviou dela) */
+    if (S.cruza && S.cruza[T.li] && S.cruza[T.li].length) {
+      const confere = P => { const c = new Set(); for (let q = 1; q < P.length; q++) if (!segPlano(J, S, T.li, P[q - 1], P[q], c)) return null; return c; };
+      let c = confere(pts);
+      if (!c) { pts = cru; c = confere(pts); }
+      if (!c) ok = false; else for (const id of c) cruza.add(id);
     }
     for (let q = 1; q < pts.length; q++) {
       const A = pts[q - 1], C = pts[q];
@@ -701,10 +776,13 @@ function montaRota(J, S, sFim){
   });
   /* a conferência final da via: furo, máscara e cobre em toda camada, exata */
   for (const v of vias) {
+    if (viaProibida(J, S, v.x, v.y)) ok = false;
     if (!viaFuroOk(J, S, v.x, v.y, null, false)) ok = false;
     for (const Rv of S.RV) if (!pontoOk(M, Rv, v.x, v.y)) ok = false;
+    /* a via dentro de plano de outra net também o recorta */
+    if (S.cruza) for (const pl of J.planos.lista) if (pl.cruzavel && pl.net !== S.net && dentroPlano(J, pl, v.x, v.y)) cruza.add(pl.id);
   }
-  return { ok, trilhas, vias, comprimento: comp, camadas: [...new Set(trechos.map(t => S.camadas[t.li]))] };
+  return { ok, trilhas, vias, comprimento: comp, camadas: [...new Set(trechos.map(t => S.camadas[t.li]))], cruza };
 }
 /* uma tentativa: largura e janela dadas */
 function tenta(J, con, larg, jan, semExtra){
@@ -746,6 +824,372 @@ function roteia(J, con, semExtra){
   }
   ult.nos = nos;
   return ult;
+}
+
+/* ============================== os planos (P2: itens 17 a 20) ============================== */
+
+/* OS PLANOS DO HUB: cada polígono de cobre (eb.polygons) com os pedaços que o despejo deixou na placa
+   (regions poly:true com `de` = o id dele). É o cobre de verdade — a ilha recortada não entra no
+   contorno —, e é ele que o lote redespeja. `pol` leva a folga das regras (HubPcbPour.comRegras, a
+   mesma que a vista e o MCP põem antes de despejar). cruzar = true | [id, nome ou net de polígono]. */
+function planosDe(J, cruzar){
+  const eb = J.eb, out = { lista: [], porId: new Map(), porRegiao: new Map(), cruzaveis: false };
+  const pols = (eb.polygons || []).filter(q => q && q.id != null && q.pour !== 'none' && Array.isArray(q.pts) && q.pts.length >= 3 && J.M.ehCobre(q.layer));
+  if (!pols.length) return out;
+  let comR = null;
+  if (J.PO && typeof J.PO.comRegras === 'function' && J.RES) { try { comR = J.PO.comRegras(eb, J.RES); } catch (e) { comR = null; } }
+  const polR = new Map(((comR && comR.polygons) || []).filter(Boolean).map(q => [String(q.id), q]));
+  const lista = Array.isArray(cruzar) ? new Set(cruzar.map(String)) : null;
+  for (const q of pols) {
+    const id = String(q.id), net = typeof q.net === 'string' ? q.net : '';
+    const cruzavel = cruzar === true || (!!lista && (lista.has(id) || (net !== '' && lista.has(net)) || (q.nome != null && lista.has(String(q.nome)))));
+    const pl = { id, net, layer: q.layer, nome: q.nome || '', pol: polR.get(id) || q, regioes: [], cruzavel, aneis: null, zonas: null, bb: null };
+    out.lista.push(pl);
+    out.porId.set(id, pl);
+  }
+  for (const g of eb.regions || []) {
+    if (!g || !g.poly || g.de == null || !Array.isArray(g.points) || g.points.length < 3) continue;
+    const pl = out.porId.get(String(g.de));
+    if (!pl) continue;
+    pl.regioes.push(g);
+    if (g.id != null) out.porRegiao.set(String(g.id), pl);
+  }
+  for (const pl of out.lista) {
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    for (const g of pl.regioes) for (const q of g.points) { if (q[0] < x1) x1 = q[0]; if (q[0] > x2) x2 = q[0]; if (q[1] < y1) y1 = q[1]; if (q[1] > y2) y2 = q[1]; }
+    pl.bb = x1 <= x2 ? [x1, y1, x2, y2] : null;
+  }
+  out.cruzaveis = out.lista.some(p => p.cruzavel);
+  return out;
+}
+/* a folga do polígono para um objeto de outra net (a do hub-pcbpour.js » folgaDe) */
+function folgaPol(pol, tipo, net){
+  const cn = pol && pol.clearanceNet && net ? pol.clearanceNet[net] : null;
+  if (cn) { if (isNum(cn[tipo])) return cn[tipo]; if (isNum(cn['*'])) return cn['*']; }
+  if (pol && pol.clearanceTipo && isNum(pol.clearanceTipo[tipo])) return pol.clearanceTipo[tipo];
+  if (pol && isNum(pol.clearance)) return pol.clearance;
+  return 0.254;
+}
+/* os obstáculos da camada que são pedaço de plano do hub: [[oi, plano]] (guardado pelo índice) */
+function obstPlano(J, layer, L){
+  if (!J.planos || !J.planos.lista.length) return [];
+  let c = J._obstPlano.get(layer);
+  if (c && c.L === L) return c.v;
+  const v = [];
+  L.obst.forEach((ob, oi) => {
+    if (ob.tipo !== 'regiao') return;
+    const pl = J.planos.porRegiao.get(String(ob.id));
+    if (pl) v.push([oi, pl]);
+  });
+  J._obstPlano.set(layer, { L, v });
+  return v;
+}
+/* ponto em anel (par/ímpar) e o anel com a caixa, para as contas fora do índice do motor */
+function anelDe(pts){
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const q of pts) { if (q[0] < x1) x1 = q[0]; if (q[0] > x2) x2 = q[0]; if (q[1] < y1) y1 = q[1]; if (q[1] > y2) y2 = q[1]; }
+  return { pts, bb: [x1, y1, x2, y2] };
+}
+function noAnel(A, x, y){
+  const b = A.bb;
+  if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) return false;
+  const P = A.pts;
+  let c = false;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+    const xi = P[i][0], yi = P[i][1], xj = P[j][0], yj = P[j][1];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+function distAnelPt(A, x, y){
+  const P = A.pts;
+  let d = Infinity;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+    const ax = P[j][0], ay = P[j][1], dx = P[i][0] - ax, dy = P[i][1] - ay, L2 = dx * dx + dy * dy;
+    let t = L2 > 0 ? ((x - ax) * dx + (y - ay) * dy) / L2 : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const qx = ax + t * dx - x, qy = ay + t * dy - y, e = qx * qx + qy * qy;
+    if (e < d) d = e;
+  }
+  return Math.sqrt(d);
+}
+/* uma "área" (contorno + furos) a partir de {points|pts, holes} */
+function areaDe(g){
+  return { fora: anelDe(g.points || g.pts), furos: (Array.isArray(g.holes) ? g.holes : []).filter(h => Array.isArray(h) && h.length >= 3).map(anelDe) };
+}
+function naArea(A, x, y){
+  if (!noAnel(A.fora, x, y)) return false;
+  for (const h of A.furos) if (noAnel(h, x, y)) return false;
+  return true;
+}
+/* o ponto está no cobre do plano? */
+function dentroPlano(J, pl, x, y){
+  const b = pl.bb;
+  if (!b || x < b[0] || x > b[2] || y < b[1] || y > b[3]) return false;
+  if (!pl.aneis) pl.aneis = pl.regioes.map(areaDe);
+  for (const A of pl.aneis) if (naArea(A, x, y)) return true;
+  return false;
+}
+/* 20: o ponto está na FAIXA ESTREITA do plano (HubPcbPour.estreitas: o cobre que não cabe num disco de
+   faixaPlano mm, crescido de metade dela)? Montada só quando alguém pergunta perto do plano */
+function emFaixa(J, pl, x, y){
+  const b = pl.bb;
+  if (!b || !(J.faixaPlano > 0) || x < b[0] || x > b[2] || y < b[1] || y > b[3]) return false;
+  if (!pl.zonas) {
+    let z = [];
+    if (J.PO && typeof J.PO.estreitas === 'function') {
+      try { z = J.PO.estreitas(pl.regioes, J.faixaPlano, J.faixaPlano / 2); } catch (e) { z = []; }
+    }
+    pl.zonas = z.map(areaDe);
+  }
+  for (const A of pl.zonas) if (naArea(A, x, y)) return true;
+  return false;
+}
+/* o estado do nó (li, x, y) quanto aos planos que a conexão cruza: 1 fora, 2 dentro, 3 faixa estreita */
+function estadoPlano(J, S, li, x, y){
+  const L = S.RL[li].L;
+  for (const [oi, pl] of S.cruza[li]) {
+    if (!J.M.dentroObst(L, oi, x, y)) continue;
+    return emFaixa(J, pl, x, y) ? 3 : 2;
+  }
+  return 1;
+}
+/* a perna A-C na camada li: false se entra em faixa estreita; `cruza` recebe os planos atravessados */
+function segPlano(J, S, li, A, C, cruza){
+  const lista = S.cruza[li], L = S.RL[li].L;
+  const len = Math.hypot(C[0] - A[0], C[1] - A[1]), n = Math.max(1, Math.ceil(len / Math.min(0.05, J.res / 2)));
+  for (let k = 0; k <= n; k++) {
+    const x = A[0] + (C[0] - A[0]) * k / n, y = A[1] + (C[1] - A[1]) * k / n;
+    for (const [oi, pl] of lista) {
+      if (!J.M.dentroObst(L, oi, x, y)) continue;
+      if (emFaixa(J, pl, x, y)) return false;
+      cruza.add(pl.id);
+    }
+  }
+  return true;
+}
+/* 20: a via em (x,y) cairia num pad SMD (de qualquer net) ou na faixa estreita de um plano? */
+function viaProibida(J, S, x, y){
+  const r = S.vd.size / 2;
+  if (J.smd) {
+    let em = false;
+    cadaFuro(J.smd, x, y, r + 0.05, it => { if (!em && J.M.sdPontoCaixa(it.g, 0, x, y) < r - 1e-9) em = true; });
+    if (em) return true;
+  }
+  for (const pl of J.planos.lista) if (emFaixa(J, pl, x, y)) return true;
+  return false;
+}
+/* os pads SMD (o cobre deles, pela forma do Gerber) num índice de grade */
+function indiceSmd(J){
+  const M = J.M, itens = [];
+  const pad = p => {
+    if (!p || ehTH(p) || !isNum(p.x) || !isNum(p.y)) return;
+    const f = M.caixaDaForma(M.formaLado(p, p.layer === 'Bottom'));
+    if (!f) return;
+    const c0 = M.centroCobre(p), cx = caixaG(c0[0], c0[1], f.hx, f.hy, f.rr, p.rot || 0, M);
+    if (cx) itens.push({ g: cx.g, bb: cx.bb, id: p.id });
+  };
+  for (const c of J.eb.components || []) for (const p of (c && c.pads) || []) pad(p);
+  for (const p of J.eb.freepads || []) pad(p);
+  return gradeFuros(itens);
+}
+/* as rotas do lote como ops (sem arredondar: para o redespejo e o ratsnest de conferência) */
+function opsDasRotas(J){
+  const ops = [];
+  for (const r of J.rotas.values()) {
+    for (const t of r.trilhas) ops.push({ op: 'track_add', layer: t.layer, x1: t.x1, y1: t.y1, x2: t.x2, y2: t.y2, w: t.w, net: t.net });
+    for (const v of r.vias) ops.push({ op: 'via_add', x: v.x, y: v.y, size: v.size, drill: v.drill, net: v.net });
+  }
+  return ops;
+}
+
+/* 17: A PLACA COM AS OPS E OS PLANOS REDESPEJADOS — a mesma conta da placaDespejada do MCP e do
+   comDespejo da vista: a folga das regras nos polígonos (comRegras), cada um despejado na ordem, e
+   os pedaços dele (regions poly:true com `de`) trocados pelos novos (ids q:<polígono>:<n>). O cobre
+   do Altium sem polígono no espelho fica como veio. Sem hub-pcbpour ou sem polígono: o comPrevia.
+   opts {pour (o HubPcbPour), regras (conjunto ou resolvedor), textoGeo} */
+function redespeja(eb, ops, opts){
+  const o = opts || {}, PO = o.pour || mod('HubPcbPour', './hub-pcbpour.js');
+  const base = ops && ops.length ? comPrevia(eb, ops) : eb;
+  const pols = (base.polygons || []).filter(q => q && q.id != null && q.pour !== 'none' && Array.isArray(q.pts) && q.pts.length >= 3);
+  if (!PO || typeof PO.despeja !== 'function' || !pols.length) return base;
+  const ids = new Set(pols.map(q => String(q.id)));
+  let ebR = base;
+  if (o.regras && typeof PO.comRegras === 'function') { try { ebR = PO.comRegras(base, o.regras); } catch (e) { ebR = base; } }
+  const polR = new Map((ebR.polygons || []).filter(Boolean).map(q => [q.id, q]));
+  const opD = typeof o.textoGeo === 'function' ? { texto: o.textoGeo } : undefined;
+  let novas = [];
+  for (const pol of pols.map(q => polR.get(q.id) || q).sort((a, b) => (a.ordem || 0) - (b.ordem || 0))) {
+    const d = PO.despeja(ebR, pol, opD);
+    const reg = (d && (d.regioes || d)) || [];
+    if (Array.isArray(reg)) novas = novas.concat(reg);
+  }
+  return Object.assign({}, base, {
+    regions: (base.regions || []).filter(g => !(g && g.poly && g.de != null && ids.has(String(g.de))))
+      .concat(novas.map((g, i) => {
+        const r = { id: 'q:' + g.de + ':' + i, layer: g.layer, net: g.net, points: g.pts || g.points, poly: true, de: g.de };
+        if (g.holes && g.holes.length) r.holes = g.holes;
+        return r;
+      })),
+  });
+}
+/* 17: as nets cujo ratsnest PIOROU só porque os planos foram redespejados em volta das rotas do lote (o
+   plano partiu: um pad ficou numa ilha recortada), e as rotas que cruzaram um plano delas.
+   -> null (nada piorou) | {nets, rotas:[[conId, [plano...]]]} */
+function cortaramPlano(J, eb){
+  if (!J.planos.lista.length || !J.PO) return null;
+  const NETS = exige('HubPcbNets', './hub-pcbnets.js');
+  const ops = opsDasRotas(J);
+  if (!ops.length) return null;
+  const sem = NETS.naoRoteadas(comPrevia(eb, ops));
+  const com = NETS.naoRoteadas(redespeja(eb, ops, { pour: J.PO, regras: J.RES, textoGeo: J.textoGeo }));
+  const f0 = new Map(sem.nets.map(n => [n.net, n.faltam]));
+  const nets = com.nets.filter(n => n.faltam > (f0.get(n.net) || 0)).map(n => n.net);
+  if (!nets.length) return null;
+  const ns = new Set(nets), rotas = [];
+  for (const [id, r] of J.rotas) {
+    if (!r.cruza || !r.cruza.size) continue;
+    const pls = [...r.cruza].filter(pid => { const pl = J.planos.porId.get(pid); return pl && ns.has(pl.net); });
+    if (pls.length) rotas.push([id, pls]);
+  }
+  return { nets, rotas };
+}
+
+/* ============================== 18: o fanout ============================== */
+
+/* O FANOUT DE UMA NET (o GND de 77 pads da placa de potência): cada pad SMD da net que ainda não chega
+   ao plano dela ganha uma trilha reta curta, na camada do pad, até uma via que cai DENTRO do cobre do
+   plano (a pelo menos o raio da via + o térmico do polígono da borda dele: o raio do térmico precisa
+   achar cobre). A via respeita o mesmo que a do lote — folga de cada camada pela regra, furo a furo,
+   ponte de máscara, nada em pad SMD nem em faixa estreita de plano — e as vias que o fanout acabou de
+   pôr (são cobre do lote: a seguinte não cai em cima). A direção preferida é a de FORA do componente.
+   opts (além das do rotearLote: regras, cena, roteador, textoGeo, cruzarPlanos, faixaPlano...):
+     net (obrigatória), camada | [camadas] (as do plano; padrão: todas em que a net tem cobre de plano),
+     pads 'abertos' (padrão: só os que não chegam ao plano) | 'todos', distMax (mm além da borda do pad,
+     padrão 2,5), note
+   -> {ops, net, camadas, pads, jaLigados, feitos, falhas:[{pad, motivo}], vias, comprimento, ms,
+       depois:{ligados, semPlano:[pad...]}}   motivo: 'sem-lugar' | 'camada-proibida' |
+       'plano-so-na-camada-do-pad' */
+function fanout(eb, opts){
+  const t0 = agora(), o = opts || {};
+  const NETS = exige('HubPcbNets', './hub-pcbnets.js');
+  const net = typeof o.net === 'string' ? o.net.trim() : '';
+  if (!net) throw new Error('HubAutoRoteador.fanout: falta a net (ex.: GND)');
+  const J = montaJob(eb, o), M = J.M, RT = J.RT, C = J.cena;
+  const note = typeof o.note === 'string' && o.note ? String(o.note).replace(/":/g, '" :') : 'fanout ' + net;
+  const distMax = isNum(o.distMax) && o.distMax > 0 ? o.distMax : FANOUT_DIST;
+  const pedidas = o.camada ? new Set([].concat(o.camada).map(String)) : null;
+  const ehPlanoDaNet = g => g && !g.keepout && g.net === net && M.ehCobre(g.layer) && Array.isArray(g.points) && g.points.length >= 3 && (!pedidas || pedidas.has(g.layer));
+  const rel = { ops: [], net, camadas: [], pads: 0, jaLigados: 0, feitos: 0, falhas: [], vias: 0, comprimento: 0, ms: 0 };
+  /* o plano: os pedaços de cobre da net (o despejo do hub e o que veio do Altium) */
+  const planoDe = e => (e.regions || []).filter(ehPlanoDaNet);
+  const regs = planoDe(eb).map(g => Object.assign(areaDe(g), { g, layer: g.layer, pl: g.de != null ? J.planos.porId.get(String(g.de)) : null }));
+  rel.camadas = [...new Set(regs.map(r => r.layer))];
+  if (!regs.length) { rel.motivo = 'sem-plano'; rel.ms = Math.round(agora() - t0); return rel; }
+  /* os pads SMD da net */
+  const pads = [];
+  for (const c of eb.components || []) for (const p of (c && c.pads) || []) if (p && p.net === net && !ehTH(p) && isNum(p.x) && isNum(p.y)) pads.push({ p, comp: c });
+  for (const p of eb.freepads || []) if (p && p.net === net && !ehTH(p) && isNum(p.x) && isNum(p.y)) pads.push({ p, comp: null });
+  const nomeDe = x => (x.comp && x.comp.ref ? x.comp.ref + '.' : 'pad ') + (x.p.name != null ? x.p.name : x.p.id);
+  pads.sort((a, b) => nomeDe(a) < nomeDe(b) ? -1 : nomeDe(a) > nomeDe(b) ? 1 : 0);
+  /* o pad já chega ao plano? (a ilha dele no ratsnest tem um pedaço do plano — o pad SMD na própria camada
+     do plano já está nele pelo despejo) */
+  const ligadosEm = e => {
+    const cam = new Map((e.regions || []).filter(ehPlanoDaNet).map(g => [String(g.id), g.layer]));
+    const I = ((NETS.conexoes(e).nets || {})[net] || {}).ilhas || [];
+    const m = new Map();
+    for (const ilha of I) {
+      const cams = new Set(ilha.filter(r => r.tipo === 'region' && cam.has(String(r.id))).map(r => cam.get(String(r.id))));
+      for (const r of ilha) if (r.tipo === 'pad') m.set(String(r.id), cams);
+    }
+    return x => { const cams = m.get(String(x.p.id)); return !!cams && cams.size > 0; };
+  };
+  const ligado = ligadosEm(eb);
+  /* a via da regra da net e o S que o viaFuroOk / viaProibida pedem */
+  const vd = RT.viaDaRegra(C, net);
+  const S = { vd, net, descVia: descDRC('via', net, 'Multi'), descFuro: descDRC('hole', net, 'Multi'), semExtra: false };
+  S.mask = { Top: mascaraDe(J, {}, S.descVia, 'via', 'Top'), Bottom: mascaraDe(J, {}, S.descVia, 'via', 'Bottom') };
+  S.maskMax = { e: Math.max(S.mask.Top.e, S.mask.Bottom.e, 0) };
+  const rv = vd.size / 2;
+  /* a via cai no plano, longe da borda: raio + o térmico do polígono (o raio precisa achar cobre) */
+  const noPlano = (x, y, alvo) => regs.some(A => {
+    if (!alvo.includes(A.layer) || !naArea(A, x, y)) return false;
+    const P = A.pl && A.pl.pol, con = P && (P.conexaoVia || P.conexao);
+    const prof = rv + (A.pl ? (con && isNum(con.gap) ? con.gap : 0.254) + (con && isNum(con.largura) ? con.largura : 0.254) : 0.1);
+    if (distAnelPt(A.fora, x, y) < prof) return false;
+    for (const h of A.furos) if (distAnelPt(h, x, y) < prof) return false;
+    return true;
+  });
+  let k = 0;
+  for (const x of pads) {
+    rel.pads++;
+    const p = x.p, nome = nomeDe(x);
+    if (o.pads !== 'todos' && ligado(x)) { rel.jaLigados++; continue; }
+    const alvo = rel.camadas.filter(l => l !== p.layer);
+    if (!alvo.length) { rel.falhas.push({ pad: nome, motivo: 'plano-so-na-camada-do-pad' }); continue; }
+    if (!RT.camadaPermitida(C, net, p.layer)) { rel.falhas.push({ pad: nome, motivo: 'camada-proibida' }); continue; }
+    const c0 = M.centroCobre(p), f = M.caixaDaForma(M.formaLado(p, p.layer === 'Bottom'));
+    const hx = f ? f.hx : (p.w || 0) / 2, hy = f ? f.hy : (p.h || 0) / 2;
+    const cs = M.cosSen(p.rot || 0);
+    /* para fora do componente */
+    let ox = 0, oy = 0;
+    if (x.comp && isNum(x.comp.x) && isNum(x.comp.y)) { ox = c0[0] - x.comp.x; oy = c0[1] - x.comp.y; const n = Math.hypot(ox, oy); if (n > 1e-9) { ox /= n; oy /= n; } else ox = oy = 0; }
+    const larg = RT.larguraDaRegra(C, net, p.layer);
+    const larguras = [larg.pref];
+    if (isNum(larg.min) && larg.min > 0 && larg.min < larg.pref - 1e-9) larguras.push(larg.min);
+    let achou = null;
+    for (const w of larguras) {
+      const R = regraGuardada(J, p.layer, net, w / 2, 'track');
+      R.m = 0;
+      comExtra(J, R, p.layer, net, w / 2, 'track', false);
+      const soltos = [];
+      for (const oi of R._padsNet || []) if (R.bloq[oi] && (String(R.L.obst[oi].id) === String(p.id) || M.sdObst(R.L, null, oi, c0[0], c0[1]) <= M.TOL)) { soltos.push(oi); R.bloq[oi] = 0; }
+      const RV = J.camadasVia.map(l => { const Rv = regraGuardada(J, l, net, rv, 'via'); Rv.m = 0; return comExtra(J, Rv, l, net, rv, 'via', false); });
+      /* cruzarPlanos vale para a via do fanout também (fora da faixa estreita) */
+      const soltosV = [];
+      if (J.planos.cruzaveis) RV.forEach((Rv, i) => { for (const [oi, pl] of obstPlano(J, J.camadasVia[i], Rv.L)) if (pl.cruzavel && pl.net !== net && Rv.bloq[oi]) { soltosV.push([Rv, oi]); Rv.bloq[oi] = 0; } });
+      const cand = [];
+      for (let d = 0; d < 8; d++) {
+        const a = ((p.rot || 0) + d * 45) * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a);
+        const lx = ux * cs[0] + uy * cs[1], ly = -ux * cs[1] + uy * cs[0];
+        const ext = Math.abs(lx) * hx + Math.abs(ly) * hy;
+        const pena = (1 - (ux * ox + uy * oy)) * 0.75;
+        for (let t = ext + rv + 0.1; t <= ext + distMax + 1e-9; t += J.res) cand.push({ x: c0[0] + ux * t, y: c0[1] + uy * t, t, custo: t + pena });
+      }
+      cand.sort((a, b) => a.custo - b.custo);
+      for (const c of cand) {
+        if (viaProibida(J, S, c.x, c.y)) continue;
+        if (!viaFuroOk(J, S, c.x, c.y, null, false)) continue;
+        let ok = true;
+        for (const Rv of RV) if (!pontoOk(M, Rv, c.x, c.y)) { ok = false; break; }
+        if (!ok || !M.segLivre(R, c0[0], c0[1], c.x, c.y)) continue;
+        if (!noPlano(c.x, c.y, alvo)) continue;
+        achou = { x: c.x, y: c.y, t: c.t, w };
+        break;
+      }
+      for (const oi of soltos) R.bloq[oi] = 1;
+      for (const [Rv, oi] of soltosV) Rv.bloq[oi] = 1;
+      if (achou) break;
+    }
+    if (!achou) { rel.falhas.push({ pad: nome, motivo: 'sem-lugar' }); continue; }
+    const rota = { trilhas: [{ layer: p.layer, x1: c0[0], y1: c0[1], x2: achou.x, y2: achou.y, w: achou.w, net }],
+                   vias: [{ x: achou.x, y: achou.y, size: vd.size, drill: vd.drill, net }], comprimento: achou.t, camadas: [p.layer], cruza: new Set() };
+    poe(J, { id: 'F' + (++k), net }, rota);
+    rel.feitos++; rel.vias++; rel.comprimento += achou.t;
+  }
+  for (const r of J.rotas.values()) {
+    for (const t of r.trilhas) rel.ops.push({ op: 'track_add', layer: t.layer, x1: r6(t.x1), y1: r6(t.y1), x2: r6(t.x2), y2: r6(t.y2), w: t.w, net, note });
+    for (const v of r.vias) rel.ops.push({ op: 'via_add', x: r6(v.x), y: r6(v.y), size: v.size, drill: v.drill, net, note });
+  }
+  rel.comprimento = r6(rel.comprimento);
+  /* 17: quem chega ao plano DEPOIS, na placa redespejada (a via ganha o térmico dela) */
+  if (rel.ops.length) {
+    const ebD = J.planos.lista.length ? redespeja(eb, rel.ops, { pour: J.PO, regras: J.RES, textoGeo: J.textoGeo }) : comPrevia(eb, rel.ops);
+    const lig = ligadosEm(ebD), sem = pads.filter(x => !lig(x)).map(nomeDe);
+    rel.depois = { ligados: pads.length - sem.length, semPlano: sem.slice(0, 80) };
+  } else rel.depois = { ligados: rel.jaLigados, semPlano: [] };
+  rel.ms = Math.round(agora() - t0);
+  return rel;
 }
 
 /* ============================== o lote ============================== */
@@ -830,6 +1274,15 @@ function montaJob(eb, opts){
     maxSliver: S0 ? maior('MinimumSolderMaskSliver', 'min') : 0.254, maxFuroFuro: S0 ? maior('HoleToHoleClearance', 'gap') : 0.254,
   };
   J.furos = novoIndiceFuros(J);
+  /* P2 (17-20): os planos do hub, o pad SMD (via proibida), o redespejo */
+  J.PO = mod('HubPcbPour', './hub-pcbpour.js');
+  J.textoGeo = typeof o.textoGeo === 'function' ? o.textoGeo : cena.textoGeo;
+  J.custoPlano = isNum(o.custoPlano) && o.custoPlano >= 0 ? o.custoPlano : CUSTO_PLANO;
+  J.faixaPlano = isNum(o.faixaPlano) && o.faixaPlano >= 0 ? o.faixaPlano : FAIXA_PLANO;
+  J.viaEmPad = o.viaEmPad === true;
+  J.planos = planosDe(J, o.cruzarPlanos);
+  J._obstPlano = new Map();
+  J.smd = J.viaEmPad ? null : indiceSmd(J);
   return J;
 }
 
@@ -928,7 +1381,30 @@ function* lote(eb, opts){
   for (const k of [...falhas.keys()]) falhas.delete(k);
   for (const [k, v] of melhor.falhas) falhas.set(k, v);
 
-  return relatorio(J, eb, cons, falhas, { t0, nrAntes, passes, totalArranca, esgotouTempo, nosTotal, primeira, o });
+  /* 17: redespeja e confere — a rota que cortou um plano de outra net (o pad que ficou numa ilha
+     recortada) sai e é refeita sem cruzá-lo */
+  const planos = { cruzaveis: J.planos.lista.filter(p => p.cruzavel).map(p => p.id), voltas: 0, desfeitas: 0, pioraram: [] };
+  for (let v = 0; v < VOLTAS_PLANO && !esgotouTempo; v++) {
+    const ruins = cortaramPlano(J, eb);
+    if (!ruins) break;
+    planos.voltas++;
+    planos.pioraram = ruins.nets;
+    if (!ruins.rotas.length) break;
+    yield progresso('planos', v, VOLTAS_PLANO);
+    for (const [conId, plIds] of ruins.rotas) {
+      const con = porId.get(conId);
+      tira(J, conId);
+      planos.desfeitas++;
+      con.semCruzar = con.semCruzar || new Set();
+      for (const id of plIds) con.semCruzar.add(id);
+      const r = roteia(J, con, false);
+      nosTotal += r.nos || 0;
+      if (r.ok) { poe(J, con, r.rota); falhas.delete(conId); } else falhas.set(conId, 'corta-plano');
+    }
+    if (tempoAcabou()) esgotouTempo = true;
+  }
+
+  return relatorio(J, eb, cons, falhas, { t0, nrAntes, passes, totalArranca, esgotouTempo, nosTotal, primeira, o, planos });
 }
 function rotearLote(eb, opts){
   const g = lote(eb, opts);
@@ -964,10 +1440,14 @@ function relatorio(J, eb, cons, falhas, X){
       op.note = note;
       ops.push(op);
     }
-    rotas.push({ net: con.net, de: con.a.nome || [r6(con.a.x), r6(con.a.y)], para: con.b.nome || [r6(con.b.x), r6(con.b.y)],
-                 camadas: r.camadas, vias: r.vias.length, comprimento: r6(r.comprimento), largura: [...new Set(r.trilhas.map(t => t.w))] });
+    const rr = { net: con.net, de: con.a.nome || [r6(con.a.x), r6(con.a.y)], para: con.b.nome || [r6(con.b.x), r6(con.b.y)],
+                 camadas: r.camadas, vias: r.vias.length, comprimento: r6(r.comprimento), largura: [...new Set(r.trilhas.map(t => t.w))] };
+    if (r.cruza && r.cruza.size) rr.cruzaPlanos = [...r.cruza];
+    rotas.push(rr);
   }
-  const nrDepois = NETS.naoRoteadas(comPrevia(eb, ops)), netsAlvo = new Set(cons.map(c => c.net));
+  /* 17: o "depois" sai da placa REDESPEJADA (o plano recua das rotas novas, como na tela e no Gerber) */
+  const nrDepois = NETS.naoRoteadas(J.planos.lista.length ? redespeja(eb, ops, { pour: J.PO, regras: J.RES, textoGeo: J.textoGeo }) : comPrevia(eb, ops));
+  const netsAlvo = new Set(cons.map(c => c.net));
   const lista = [];
   for (const con of cons) if (falhas.has(con.id)) lista.push({ net: con.net, de: con.a.nome || [r6(con.a.x), r6(con.a.y)], para: con.b.nome || [r6(con.b.x), r6(con.b.y)], motivo: falhas.get(con.id) });
   return {
@@ -982,7 +1462,10 @@ function relatorio(J, eb, cons, falhas, X){
     porNet: [...porNet.values()].map(x => Object.assign(x, { comprimento: r6(x.comprimento) })),
     orcamento: { tempoMs: J.tempoMs, nosPorBusca: J.nosPorBusca, esgotouTempo: X.esgotouTempo },
     parametros: { ordem: Array.isArray(X.o.ordem) ? X.o.ordem : (X.o.ordem || 'curta'), passes: isNum(X.o.passes) ? X.o.passes : PASSES,
-                  custoVia: J.custoVia, res: J.res, camadas: J.camadasRota, peso: J.peso },
+                  custoVia: J.custoVia, res: J.res, camadas: J.camadasRota, peso: J.peso,
+                  cruzarPlanos: J.planos.lista.filter(p => p.cruzavel).map(p => p.id), custoPlano: J.custoPlano,
+                  faixaPlano: J.faixaPlano, viaEmPad: J.viaEmPad },
+    planos: Object.assign({ poligonos: J.planos.lista.length, redespejado: J.planos.lista.length > 0 && !!J.PO }, X.planos || {}),
     rotas,
   };
 }
@@ -1046,6 +1529,7 @@ function rodaEmFatias(gen, opts){
 }
 
 return { rotearLote, lote, rotearConexao, conexoesAbertas, previa, comPrevia, novasViolacoes, rodaEmFatias,
-         CUSTO_VIA, PASSES, TEMPO_MS, NOS_BUSCA };
+         redespeja, fanout,
+         CUSTO_VIA, PASSES, TEMPO_MS, NOS_BUSCA, CUSTO_PLANO, FAIXA_PLANO, FANOUT_DIST };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubAutoRoteador;

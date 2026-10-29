@@ -1861,9 +1861,18 @@ function cena(eb, opts){
      segLivre(R, ax, ay, bx, by)     o segmento é livre pela regra, exato
      conflitosSeg / conflitosPonto(R, ..., achados)  Map obstáculo -> distância com sinal
      suaviza / tiraDegraus / limpa   a suavização da rota (as mesmas da rota da mão)
-     caixaDaForma / formaLado / centroCobre / sdPontoCaixa / cosSen  as formas de pad do Gerber */
+     caixaDaForma / formaLado / centroCobre / sdPontoCaixa / cosSen  as formas de pad do Gerber
+     dentroObst(L, oi, x, y)         o ponto está DENTRO da área (região, polígono despejado) do
+                                     obstáculo? (2026-10-29: o custo de atravessar um plano) */
+function dentroObst(L, oi, x, y){
+  for (let p = L.oIni[oi], pf = L.oIni[oi + 1]; p < pf; p++) {
+    const k = L.oPrim[p];
+    if (L.kind[k] === K_AREA && dentroArea(L.areas[L.geo[k * G]], x, y)) return true;
+  }
+  return false;
+}
 const motor = { camada, montaExtra, regraBase, descMao, idDaNet, conjunto, estadoPonto, segLivre, conflitosSeg, conflitosPonto,
-                listaConflitos, suaviza, tiraDegraus, limpa, sdObst, cadaPrim, caixaDaForma, formaLado, centroCobre, sdPontoCaixa,
+                listaConflitos, suaviza, tiraDegraus, limpa, sdObst, cadaPrim, caixaDaForma, formaLado, centroCobre, sdPontoCaixa, dentroObst,
                 cosSen, ehCobre, LIVRE, BANDA, BLOQ, CURVA, DEGRAU, TOL, SQ2, EPS_PT };
 
 return { cena, netEm, folgaTrilha, folgaArco, folgaVia, rota, canto, larguraDaRegra, viaDaRegra, limitaLargura, limitaVia, camadaPermitida, FOLGA_PADRAO, TOL, motor };

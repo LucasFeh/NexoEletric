@@ -532,7 +532,7 @@ module.exports = {
     {
       nome: 'pcb_autorotear', titulo: 'Autorotear (várias camadas, vias, lote)',
       modulo: 'hub-autoroteador.js',
-      descricao: 'Liga SOZINHO as conexões abertas do ratsnest (todas, ou só as `nets` dadas) com o autoroteador do hub (hub-autoroteador.js, em cima do mesmo motor exato do pcb_rotear): várias camadas, trocando de camada por via; uma conexão depois da outra, na `ordem` (curta = a mais curta primeiro, o padrão; longa; classe = a net de regra mais pesada primeiro; dada = a ordem de `nets`; ou uma lista de nets), e arranca-e-refaz nas que falharam (só rotas deste lote saem — o cobre que já está na placa nunca é mexido). Cada rota respeita as regras do projeto como o DRC: a folga de cada par pela Clearance vencedora do rules.js (classes de net, escopo, matriz), a Board Outline Clearance, a Width e a Routing Via Style da net, a Routing Layers; pad SMD só na camada dele; camada Plane não recebe trilha; a via respeita furo a furo e ponte de máscara. Padrão gravar:false = SIMULA: devolve conexões abertas antes/depois, por net, vias, comprimento, falhas com motivo, tempo, e o DRC da placa com as rotas (violações NOVAS — a meta é zero). gravar:true grava os track_add/via_add no changes.js pelo mesmo caminho validado das outras pcb_* (erro de validação ou violação nova de DRC = nada gravado; forcar:true passa por cima do DRC). Para ver: pcb_render {ratsnest:true}, uma camada por vez.',
+      descricao: 'Liga SOZINHO as conexões abertas do ratsnest (todas, ou só as `nets` dadas) com o autoroteador do hub (hub-autoroteador.js, em cima do mesmo motor exato do pcb_rotear): várias camadas, trocando de camada por via; uma conexão depois da outra, na `ordem` (curta = a mais curta primeiro, o padrão; longa; classe = a net de regra mais pesada primeiro; dada = a ordem de `nets`; ou uma lista de nets), e arranca-e-refaz nas que falharam (só rotas deste lote saem — o cobre que já está na placa nunca é mexido). Cada rota respeita as regras do projeto como o DRC: a folga de cada par pela Clearance vencedora do rules.js (classes de net, escopo, matriz), a Board Outline Clearance, a Width e a Routing Via Style da net, a Routing Layers; pad SMD só na camada dele; camada Plane não recebe trilha; a via respeita furo a furo e ponte de máscara, nunca cai em pad SMD (viaEmPad:true libera) nem na faixa estreita de um plano (faixaPlano). Planos do hub: o pedaço despejado é obstáculo pela folga do próprio polígono, e o lote REDESPEJA e confere — a rota que partisse um plano (pad numa ilha recortada) é desfeita; cruzarPlanos deixa a trilha atravessar o plano de OUTRA net com custo (custoPlano), o plano recua em volta dela. Padrão gravar:false = SIMULA: devolve conexões abertas antes/depois, por net, vias, comprimento, falhas com motivo, tempo, e o DRC da placa com as rotas (violações NOVAS — a meta é zero). gravar:true grava os track_add/via_add no changes.js pelo mesmo caminho validado das outras pcb_* (erro de validação ou violação nova de DRC = nada gravado; forcar:true passa por cima do DRC). Para ver: pcb_render {ratsnest:true}, uma camada por vez.',
       entrada: { type: 'object', properties: {
         projeto: PROJETO,
         nets: { type: 'array', items: { type: 'string' }, description: 'só estas nets (padrão: todas as que têm conexão aberta)' },
@@ -545,6 +545,10 @@ module.exports = {
         gravar: { type: 'boolean', description: 'padrão false (só simula e mostra)' },
         forcar: { type: 'boolean', description: 'grava mesmo com violação nova de DRC (evite)' },
         note: { type: 'string', description: 'o note das linhas (padrão "pcb_autorotear")' },
+        cruzarPlanos: { anyOf: [{ type: 'boolean' }, { type: 'array', items: { type: 'string' } }], description: 'a trilha pode atravessar o polígono de OUTRA net (true = todos; ou ids/nomes/nets de polígono, ex. ["FASE"]): o plano é redespejado em volta dela; nunca na faixa estreita; a rota que partiria o plano é desfeita (motivo corta-plano). Padrão false' },
+        custoPlano: { type: 'number', minimum: 0, description: 'mm a mais por mm de trilha dentro de um plano cruzado (padrão 1)' },
+        faixaPlano: { type: 'number', minimum: 0, description: 'faixa de plano mais estreita que isto (mm) não leva via nem é cruzada (padrão 2; 0 desliga)' },
+        viaEmPad: { type: 'boolean', description: 'deixa a via cair em pad SMD (padrão false: proibido)' },
       }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
@@ -560,13 +564,14 @@ module.exports = {
         if (isNum(a.res) && a.res > 0) o.res = a.res;
         const C = R.cena(eb, o);
         const note = a.note ? String(a.note).replace(/":/g, '" :') : 'pcb_autorotear';
-        const r = A.rotearLote(eb, { cena: C, roteador: R, nets: a.nets, camadas: a.camadas, ordem: a.ordem, passes: a.passes, custoVia: a.custoVia, orcamento: a.orcamento, note });
+        const r = A.rotearLote(eb, { cena: C, roteador: R, nets: a.nets, camadas: a.camadas, ordem: a.ordem, passes: a.passes, custoVia: a.custoVia, orcamento: a.orcamento, note,
+                                     cruzarPlanos: a.cruzarPlanos, custoPlano: a.custoPlano, faixaPlano: a.faixaPlano, viaEmPad: a.viaEmPad });
         const out = {
           projeto: p.nome, regras_de: S ? S.fonte : 'folga única do board.rules (sem hub-pcbregras.js)',
           conexoes_abertas: { antes: r.antes.conexoes, depois: r.depois.conexoes, das_nets_pedidas: { antes: r.alvo.conexoes, depois: r.depois.doAlvo } },
           roteadas: r.roteadas, primeira_passada: r.primeiraPassada, vias: r.vias, comprimento_mm: r4(r.comprimento),
           trilhas: r.ops.filter(x => x.op === 'track_add').length, passes: r.passes, arrancadas: r.arrancadas, ms: r.ms,
-          orcamento: r.orcamento, parametros: r.parametros, falhas: r.falhas, por_net: r.porNet,
+          orcamento: r.orcamento, parametros: r.parametros, planos: r.planos, falhas: r.falhas, por_net: r.porNet,
           rotas: r.rotas.slice(0, 60), rotas_total: r.rotas.length,
         };
         if (!r.ops.length) { out.gravacao = { ok: true, gravado: false, nota: r.alvo.conexoes ? 'nenhuma rota saiu (veja falhas)' : 'nada a ligar: o ratsnest das nets pedidas está fechado' }; return out; }
@@ -594,6 +599,67 @@ module.exports = {
           return out;
         }
         const g = ops.transacao(ctx, p, arq => r.ops.map(op => ops.mescla(arq, op).obj), { simular: !a.gravar, forcar: a.forcar, ferramenta: 'pcb_autorotear' });
+        g.linhas_total = (g.linhas || []).length;
+        g.linhas = (g.linhas || []).slice(0, 12);
+        out.gravacao = g;
+        if (!a.gravar) out.nota = 'simulação: nada foi gravado — repita com gravar:true para escrever as ' + r.ops.length + ' linhas no changes.js';
+        return out;
+      },
+    },
+    {
+      nome: 'pcb_fanout', titulo: 'Fanout de uma net (trilha curta + via ao plano)',
+      modulo: 'hub-autoroteador.js',
+      descricao: 'FANOUT de uma net (o GND da placa de potência): cada pad SMD da net que ainda não chega ao plano dela ganha uma trilha reta curta, na camada do pad, até uma via que cai DENTRO do cobre despejado do plano (longe da borda o bastante para o térmico achar cobre). A via segue as mesmas regras do pcb_autorotear: folga de cada camada pela Clearance vencedora, furo a furo (HoleToHoleClearance) e ponte de máscara contra tudo — inclusive contra as vias que o próprio fanout acabou de pôr (nada de via sobre via) —, nunca em pad SMD nem na faixa estreita de plano (faixaPlano). A direção preferida é para FORA do componente. Padrão gravar:false = SIMULA: devolve os pads feitos, os que já chegavam ao plano, as falhas com motivo, e quantos pads chegam ao plano DEPOIS na placa redespejada, mais o DRC (violações NOVAS). gravar:true grava os track_add/via_add no changes.js (violação nova de DRC = nada gravado; forcar:true passa).',
+      entrada: { type: 'object', properties: {
+        projeto: PROJETO,
+        net: { type: 'string', description: 'a net (ex.: GND)' },
+        camada: { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }], description: 'a(s) camada(s) do plano (padrão: todas em que a net tem cobre de plano)' },
+        pads: { type: 'string', enum: ['abertos', 'todos'], description: 'abertos (padrão) = só os pads que ainda não chegam ao plano' },
+        distMax: { type: 'number', exclusiveMinimum: 0, description: 'até quantos mm além da borda do pad procurar a via (padrão 2,5)' },
+        cruzarPlanos: { anyOf: [{ type: 'boolean' }, { type: 'array', items: { type: 'string' } }], description: 'a via pode furar o plano de OUTRA net no caminho (fora da faixa estreita); padrão false' },
+        faixaPlano: { type: 'number', minimum: 0, description: 'faixa de plano mais estreita que isto (mm) não leva via (padrão 2)' },
+        gravar: { type: 'boolean', description: 'padrão false (só simula e mostra)' },
+        forcar: { type: 'boolean', description: 'grava mesmo com violação nova de DRC (evite)' },
+        note: { type: 'string', description: 'o note das linhas (padrão "fanout <net>")' },
+      }, required: ['projeto', 'net'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const A = ctx.exige('hub-autoroteador.js', 'HubAutoRoteador');
+        if (typeof A.fanout !== 'function') throw new ErroMcp('hub-autoroteador.js sem fanout (versão antiga carregada: hub_recarregar_ferramentas)');
+        ctx.exige('hub-pcbnets.js', 'HubPcbNets');
+        const R = ctx.exige('hub-roteador.js', 'HubRoteador');
+        const pl = ctx.placaDespejada(p), eb = pl.eb;
+        const tg = textoGeo(ctx);
+        const S = ops.regrasDoProjeto(ctx, p);
+        const o = { placa: { lacos: lacosDe(ctx, eb), recortes: recortesDe(eb) }, textoGeo: tg };
+        if (S) o.regras = S.conjunto; else o.clearance = (eb.rules && eb.rules.clearance > 0) ? eb.rules.clearance : R.FOLGA_PADRAO;
+        const C = R.cena(eb, o);
+        const note = a.note ? String(a.note).replace(/":/g, '" :') : undefined;
+        const r = A.fanout(eb, { cena: C, roteador: R, net: a.net, camada: a.camada, pads: a.pads, distMax: a.distMax,
+                                 cruzarPlanos: a.cruzarPlanos, faixaPlano: a.faixaPlano, note });
+        const out = {
+          projeto: p.nome, regras_de: S ? S.fonte : 'folga única do board.rules (sem hub-pcbregras.js)',
+          net: r.net, camadas_do_plano: r.camadas, pads_smd: r.pads, ja_chegavam_ao_plano: r.jaLigados, feitos: r.feitos,
+          vias: r.vias, comprimento_mm: r4(r.comprimento || 0), falhas: r.falhas, depois: r.depois, ms: r.ms,
+        };
+        if (r.motivo) out.motivo = r.motivo === 'sem-plano' ? 'a net não tem cobre de plano (polígono despejado) — crie o plano (poly_add) antes do fanout' : r.motivo;
+        if (!r.ops.length) { out.gravacao = { ok: true, gravado: false, nota: 'nenhuma via a pôr' }; return out; }
+        const D = ctx.modulo('hub-pcbdrc.js');
+        const depois = ctx.placaDespejada(p, ctx.changes(p).concat(r.ops));
+        if (D) {
+          const conj = S ? S.conjunto : undefined;
+          const d0 = D.rodar(eb, conj, { textoGeo: tg }), d1 = D.rodar(depois.eb, conj, { textoGeo: tg });
+          const novas = A.novasViolacoes(d0, d1);
+          const porTipo = {};
+          for (const v of novas) porTipo[v.tipo] = (porTipo[v.tipo] || 0) + 1;
+          out.drc = { antes: d0.total, depois: d1.total, novas: novas.length, novas_por_tipo: porTipo,
+                      novas_lista: novas.slice(0, 40).map(v => ({ tipo: v.tipo, msg: v.msg, x: r4(v.x), y: r4(v.y), layer: v.layer, ids: v.ids })) };
+        } else out.drc = { nota: 'hub-pcbdrc.js ausente: o DRC não rodou' };
+        if (a.gravar && out.drc.novas && !a.forcar) {
+          out.gravacao = { ok: false, gravado: false, motivo: 'drc', erro: `${out.drc.novas} violação(ões) nova(s) de DRC: nada foi gravado (forcar:true grava mesmo assim)` };
+          return out;
+        }
+        const g = ops.transacao(ctx, p, arq => r.ops.map(op => ops.mescla(arq, op).obj), { simular: !a.gravar, forcar: a.forcar, ferramenta: 'pcb_fanout' });
         g.linhas_total = (g.linhas || []).length;
         g.linhas = (g.linhas || []).slice(0, 12);
         out.gravacao = g;

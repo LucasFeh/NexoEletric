@@ -4,6 +4,35 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.40.0 — 2026-10-29
+
+Auto-roteador e planos, o P2 da lista de melhorias de roteamento (itens 17 a 20).
+- **A árvore da net é o cobre despejado de verdade (17)**:
+  - o pedaço de plano de outra net é obstáculo pela folga do **próprio polígono**, quando ela passa a da regra. Antes,
+    a rota encostava só na folga da regra e o plano recuava calado no redespejo (medido: 5,7 mm² a menos num teste);
+  - depois das passadas o lote **redespeja** os planos e confere o ratsnest. A rota que partiu um plano (o pad que
+    ficou numa ilha recortada) sai e é refeita sem cruzá-lo; sem caminho, a falha é `corta-plano`;
+  - o "depois" do relatório e o DRC da prévia na vista saem da placa redespejada (`HubAutoRoteador.redespeja`, a
+    mesma conta da vista e do MCP). O worker da vista carrega o despejo (`hub-clipper.js`, `hub-pcbpour.js`).
+- **Fanout (18)**, ferramenta `pcb_fanout {net}` do MCP:
+  - cada pad SMD da net que ainda não chega ao plano ganha uma trilha reta curta e uma via dentro do cobre do plano,
+    longe da borda o bastante para o térmico achar cobre;
+  - a via respeita folga, furo a furo e ponte de máscara, também contra as outras vias do fanout (nada de via sobre
+    via), e a direção preferida é para fora do componente;
+  - simula por padrão e grava com `gravar:true`, desde que não haja violação nova de DRC.
+- **Cruzar plano de outra net (19)**, `cruzarPlanos`:
+  - no MCP e na caixa "Cruzar planos de outra net" do Auto-rotear da vista;
+  - a trilha (a de gate pelo plano de fase) atravessa o polígono com custo por mm dentro dele (`custoPlano`), e o plano
+    é redespejado em volta dela.
+- **Via proibida (20)**:
+  - em pad SMD de qualquer net (`viaEmPad:true` libera);
+  - na faixa estreita de plano (`faixaPlano`, padrão 2 mm, crescida de metade dela), onde a via e o térmico cortariam
+    o plano. A trilha que cruza plano também não passa ali;
+  - novo `HubPcbPour.estreitas` acha essas faixas.
+- Testes:
+  - novo `tests/test-autoroteador-planos.js`, com placas sintéticas para cada item;
+  - `pcb_fanout` no `tests/test-mcp-autorotear.js`.
+
 ## 1.39.0 — 2026-10-29
 
 - **Arrastar a trilha sem quebrar** (o Drag do Altium), na vista PCB:

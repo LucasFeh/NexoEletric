@@ -87,7 +87,7 @@ const texto = r => JSON.parse(r.result.content[0].text);
 
   const lista = (await c.pede('tools/list', {})).result.tools;
   const nomes = lista.map(t => t.name);
-  for (const n of ['projeto_listar', 'projeto_criar', 'sch_adicionar', 'sch_ligar', 'pcb_mover', 'pcb_aplicar', 'pcb_trilha', 'pcb_rotear', 'pcb_autorotear',
+  for (const n of ['projeto_listar', 'projeto_criar', 'sch_adicionar', 'sch_ligar', 'pcb_mover', 'pcb_aplicar', 'pcb_trilha', 'pcb_rotear', 'pcb_autorotear', 'pcb_fanout',
                    'pcb_apagar', 'pcb_validar', 'pcb_render', 'gerber_gerar', 'drc_rodar', 'nets_ratsnest', 'pour_despejar', 'teardrop_aplicar',
                    'eco_comparar', 'pdf_layout', 'sinal_listar', 'sinal_responder', 'hub_status', 'list_commands', 'vista_screenshot'])
     assert.ok(nomes.includes(n), 'falta a ferramenta ' + n);
