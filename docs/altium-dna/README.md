@@ -215,7 +215,8 @@ editor deve aparecer (o `hub.html`); sem ele a dica mostra o plid cru.
 | Design » Import Changes (ECO) | D,I | ◐ | `atualizarPcb` |
 | Design » Update Schematic | D,U | ✗ | — |
 | Design » Layer Stack Manager | D,K | ✗ | — |
-| Route » Auto Route / Fanout | U,A · U,F | ✗ | — |
+| Route » Auto Route » All / Net / Setup | U,A,A · U,A,N · U,A,S | ◐ | `autorotear` U,A,A (barra), `autorotearNets` — o lote do `hub-autoroteador.js` com prévia, num worker |
+| Route » Fanout | U,F | ✗ | — |
 | interactive routing: conflito (Walkaround/Stop/Ignore) | Shift+R | ✓ | gesto da trilha |
 | File » Fabrication Outputs » Gerber | — (lista dinâmica) | ✓ | `gerber` (barra) |
 | File » Smart PDF | F,M | ◐ | `pdf` — travado na barra |
