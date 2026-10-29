@@ -82,6 +82,9 @@ const PCB = {
   atualizarPcb:'', pdf:'', novaPlaca:'',
   /* 2026-10-14: a vista 3D, com as teclas do Altium (2 e 3 estavam livres) */
   vista2d:'2', vista3d:'3',
+  /* 2026-10-28: o auto-roteador em lote, com o U,A,A do Altium (Route » Auto Route » All): o U
+     estava livre na casa, então a sequência vale também aqui */
+  autorotear:'U,A,A',
 };
 assert.deepStrictEqual(P.ATALHOS_PADRAO.map(a => a.id), Object.keys(PCB), 'os ids da PCB, na ordem');
 for (const a of P.ATALHOS_PADRAO){
@@ -107,6 +110,21 @@ for (const v of [S, P]){
   for (const a of v.ATALHOS_PADRAO) assert.strictEqual(m.porAcao[a.id], a.tecla);
   /* nenhuma tecla do padrão é começo de outra (P e P,T): a tecla seria ação e sequência ao mesmo tempo */
   for (const x of teclas) for (const y of teclas) if (x !== y) assert.ok(!A.colide(x, y), v.QUANDO + ': ' + x + ' × ' + y);
+}
+/* o Auto-rotear: U,A,A na casa e no Padrão Altium, a sequência do menu Route » Auto Route » All; o U
+   sozinho não é ação (ele continua abrindo o menu Route no cursor), e nenhuma tecla da casa começa
+   por U nem colide com a sequência */
+{
+  const au = P.ATALHOS_PADRAO.find(a => a.id === 'autorotear');
+  assert.ok(au && au.altium === 'PLPCB:AutorouteAll' && /Auto-rotear/.test(au.rotulo), 'autorotear espelha o Auto Route » All');
+  assert.strictEqual(P.mapaAtalhos({}).porTecla['U,A,A'], 'autorotear', 'U,A,A = autorotear na casa');
+  assert.strictEqual(P.mapaAtalhos(P.predefinicao('altium')).porTecla['U,A,A'], 'autorotear', 'U,A,A = autorotear no Padrão Altium');
+  assert.ok(!P.mapaAtalhos({}).porTecla.U, 'o U sozinho não é ação');
+  for (const a of P.ATALHOS_PADRAO) if (a.id !== 'autorotear' && a.tecla) assert.ok(!A.colide(a.tecla, 'U,A,A'), a.id + ' (' + a.tecla + ') não colide com U,A,A');
+  /* trocável como as outras: gravar outra tecla tira o U,A,A do mapa */
+  const m = P.mapaAtalhos({ autorotear:'Ctrl+Shift+A' });
+  assert.strictEqual(m.porTecla['Ctrl+Shift+A'], 'autorotear');
+  assert.ok(!m.porTecla['U,A,A'], 'a sequência antiga fica livre');
 }
 /* o Esquema inteiro tem tecla (o tests/test-fio-topologia.js conta uma por ação) */
 assert.ok(S.ATALHOS_PADRAO.every(a => a.tecla), 'Esquema: toda ação com tecla');

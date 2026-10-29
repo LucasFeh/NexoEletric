@@ -1212,6 +1212,7 @@ function draw(){
   desenhaSilhuetas();
   desenhaRealce();
   desenhaConexoes();
+  desenhaPreviaAuto();
   desenhaDrc();
   if (show.ghost) desenhaFantasmas();
   desenhaArrasto();
@@ -2007,6 +2008,86 @@ function poeTeardrops(){
   for (const op of ops) { if (!op.net) delete op.net; CH.push(op); }
   commit();
   HubDialog.toast(ops.length + ' teardrop(s) postos', 'ok', 2400);
+}
+
+/* ============================== Auto-rotear (Route » Auto Route » All, U,A,A) ==============================
+   Pedido do dono (2026-10-28): o auto-roteador em lote na vista, como o Auto Route » All do Altium. A
+   conta é a do hub-autoroteador.js (várias camadas, vias, ordem e arranca-e-refaz), com as regras do
+   projeto — as mesmas do DRC e da Trilha —, num worker (hub-autoroteador-worker.js) para a vista não
+   travar; a conversa (o pedido, o progresso com Cancelar, a prévia com Aplicar/Descartar) é do
+   hub-pcbautorota.js. Aqui só se liga: a placa da tela, a prévia desenhada por cima do cobre e o
+   Aplicar como uma edição da vista (CH + commit: o Ctrl+Z desfaz, o Salvar e o autosave gravam o
+   changes.js como qualquer outra edição). */
+const HAR = (typeof HubAutoRoteador !== 'undefined' && HubAutoRoteador && typeof HubAutoRoteador.lote === 'function') ? HubAutoRoteador : null;
+let PREVIA_AUTO = null;
+/* a geometria dos textos de cobre (a do Gerber): o worker não recebe função, recebe a forma pronta */
+function textosDeCobre(){
+  const out = {};
+  if (typeof HubGerber === 'undefined' || typeof HubGerber.geometriaTexto !== 'function') return out;
+  for (const t of EB.texts || []) {
+    if (!t || t.hidden || t.id == null || !cobre(t.layer)) continue;
+    try { const g = HubGerber.geometriaTexto(t); if (g) out[t.id] = g; } catch (e) { /* sem forma: fica de fora, como na cena da vista */ }
+  }
+  return out;
+}
+/* as nets do que está selecionado: pad, cobre com net e os pads dos componentes */
+function netsDaSel(){
+  const S = new Set();
+  for (const a of SEL) {
+    if (a.t === 'pad') { if (a.eb && a.eb.net) S.add(a.eb.net); }
+    else if (a.t === 'comp') {
+      const c = a.m ? IDX.ebComp.get(a.m) : null;
+      for (const p of (c && c.pads) || []) if (p.net) S.add(p.net);
+    } else if (a.m && a.m.eff && a.m.eff.net) S.add(a.m.eff.net);
+  }
+  return [...S].sort();
+}
+function abreAutorotear(escopo, extra){
+  if (!HAR || !HR || !HN || typeof HubPcbAutoRota === 'undefined') {
+    HubDialog.toast('auto-rotear: o hub-autoroteador.js (ou o hub-pcbautorota.js) não carregou nesta página — atualize com F5', 'warn');
+    return null;
+  }
+  if (!garanteEdicao()) return null;
+  encerraDraft(true);
+  const x = extra || {};
+  return HubPcbAutoRota.abre({
+    eb:() => EB, regras:() => regrasAtuais() || null,
+    cena:() => { const o = opcoesCena(EB); return { placa:o.placa, clearance:o.clearance }; },
+    textos:textosDeCobre,
+    camadas:() => LAYERS.filter(l => l.kind === 'signal').map(l => ({ key:l.key, rot:rotuloAba(l), cor:l.color })),
+    selNets:netsDaSel,
+    abertas:() => { try { const n = HN.naoRoteadas(EB); return { conexoes:n.conexoes, nets:n.total }; } catch (e) { return null; } },
+    previa:ops => { PREVIA_AUTO = ops && ops.length ? HAR.previa(ops) : null; pede(); },
+    foto:() => JSON.stringify(CH),
+    aplica:ops => {
+      if (!garanteEdicao()) return false;
+      for (const op of ops) CH.push(Object.assign({}, op));
+      commit();
+      return true;
+    },
+    toast:(t, tipo, ms) => HubDialog.toast(t, tipo || 'info', ms),
+    worker:'worker' in x ? x.worker : 'hub-autoroteador-worker.js',
+    escopo:escopo || 'todas',
+  });
+}
+/* a prévia: as trilhas e vias que o Aplicar escreveria, na cor da camada com o contorno verde das
+   adições (o das marcações das mudanças), por cima do cobre */
+function desenhaPreviaAuto(){
+  if (!PREVIA_AUTO) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([]);
+  for (const t of PREVIA_AUTO.tracks) {
+    if (!camVisivel(t.layer)) continue;
+    ctx.beginPath(); ctx.moveTo(t.x1, t.y1); ctx.lineTo(t.x2, t.y2);
+    ctx.globalAlpha = 0.55; ctx.strokeStyle = COR.add; ctx.lineWidth = t.w + px(3); ctx.stroke();
+    ctx.globalAlpha = 0.95; ctx.strokeStyle = corDe(t.layer); ctx.lineWidth = Math.max(t.w, px(1)); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  for (const v of PREVIA_AUTO.vias) {
+    ctx.beginPath(); ctx.arc(v.x, v.y, v.size / 2 + px(1.5), 0, 2 * Math.PI); ctx.fillStyle = COR.add; ctx.fill();
+    ctx.beginPath(); ctx.arc(v.x, v.y, v.size / 2, 0, 2 * Math.PI); ctx.fillStyle = '#c9c9c9'; ctx.fill();
+    ctx.beginPath(); ctx.arc(v.x, v.y, v.drill / 2, 0, 2 * Math.PI); ctx.fillStyle = COR.furo; ctx.fill();
+  }
+  ctx.restore();
 }
 
 /* ============================== PDF de layout ==============================
@@ -3566,7 +3647,9 @@ const BARRA = [
   { id:'editar', ic:'cadeado', acao:'editar', at:'editar' }, '|',
   { id:'select', ic:'select', tool:'select', titulo:'Selecionar e mover (Esc) — arrastar no vazio: janela (esq→dir dentro, dir→esq toca)' }, '|',
   { id:'trilha', ic:'trilha', tool:'trilha', at:'trilha', titulo:'Trilha — roteamento interativo: clique fixa o canto, Espaço inverte, Shift+Espaço 45°/90°/livre, Shift+R contorna, para no obstáculo ou ignora (trilhas de nets diferentes não se encontram), Backspace desfaz o trecho, 2 via, * ou Ctrl+2 via e troca de camada, Tab largura, botão direito termina' },
-  { id:'via', ic:'via', tool:'via', at:'via', titulo:'Via — diâmetro e furo no painel' }, '|',
+  { id:'via', ic:'via', tool:'via', at:'via', titulo:'Via — diâmetro e furo no painel' },
+  /* 2026-10-28: o auto-roteador em lote (hub-autoroteador.js), o Route » Auto Route » All do Altium */
+  { id:'autorotear', ic:'autorotear', acao:'autorotear', at:'autorotear', titulo:'Auto-rotear (Route » Auto Route » All) — liga as conexões abertas em várias camadas, com vias, pelas regras do projeto; mostra a prévia antes de aplicar' }, '|',
   { id:'formas', titulo:'Formas de desenho', grupo:[
     { id:'linha', ic:'linha', tool:'linha', at:'linha', titulo:'Linha na camada atual — cliques encadeados, botão direito termina' },
     { id:'arco', ic:'arco', tool:'arco', at:'arco', titulo:'Arco — centro, início e fim' },
@@ -4540,7 +4623,7 @@ const v3Mostra = h => { h.hidden = false; h.style.visibility = ''; h.style.point
 const SO_2D = new Set(['trilha', 'via', 'linha', 'arco', 'circulo', 'retangulo', 'poligono', 'texto', 'triangulo', 'furo',
   'contorno', 'medir', 'sinalizar', 'pad', 'pour', 'fill', 'solidRegion', 'retanguloContorno', 'colar', 'duplicar',
   'espelhoX', 'espelhoY', 'camadaUnica', 'proxCamada', 'antCamada', 'outraFace', 'grade', 'diff', 'gradeId', 'zoomIn', 'zoomOut',
-  'enquadrarSel', 'painelGrade']);
+  'enquadrarSel', 'painelGrade', 'autorotear', 'autorotearNets']);
 function hubLib(){
   if (HUBLIB) return HUBLIB;
   if (typeof HubFpLib === 'undefined') return null;
@@ -5026,6 +5109,8 @@ function fazAcao(id, arg){
     case 'ratsnest': toggleConexoes(); return;
     case 'realcarNet': if (!limpaRealce() && SEL.length === 1 && SEL[0].m && SEL[0].m.eff && SEL[0].m.eff.net) realcaNet(SEL[0].m.eff.net); return;
     case 'teardrops': poeTeardrops(); return;
+    case 'autorotear': abreAutorotear('todas'); return;
+    case 'autorotearNets': abreAutorotear(netsDaSel().length ? 'sel' : 'todas'); return;
     case 'copiar': copiaSelecao(false); return;
     case 'recortar': if (!SEL.length) return; copiaSelecao(true); return;
     case 'colar': comecaColar(false); return;
@@ -6362,6 +6447,10 @@ window.__hubPcb = Object.assign(Object.create(V), {
   changes:() => CH, fazAcao, destravar(){ editOn = true; pintaBarra(); },
   historico:() => ({ desfazer:undoStack.length > 1, refazer:redoStack.length > 0 }),
   valida:() => HC.applyPcbChanges(B, CH).changeItems.map(i => ({ op:i.ch.op, status:i.status, msg:i.msg || '' })),
+  /* o Auto-rotear: abrir (com o worker ou, worker:null, em fatias), o controle aberto e a prévia na placa */
+  autorotear(o){ const x = o || {}; return !!abreAutorotear(x.escopo || 'todas', 'worker' in x ? { worker:x.worker } : null); },
+  autoRota:() => { const c = typeof HubPcbAutoRota !== 'undefined' ? HubPcbAutoRota.atual() : null; return c ? c.resumo() : null; },
+  previaAuto:() => PREVIA_AUTO ? { tracks:PREVIA_AUTO.tracks.length, vias:PREVIA_AUTO.vias.length } : null,
 });
 
 })();

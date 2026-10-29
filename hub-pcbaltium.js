@@ -101,6 +101,10 @@ const MAPA = {
   'PLPCB:RepourAllPolygonsNoContext': A('repour', 'edit'), 'PLPCB:RepourPolygonsNoContext': A('repour', 'edit'),
   'PLPCB:RepourModified': A('repour', 'edit'),
   'PLPCB:TearDrops': A('teardrops', 'edit'),
+  /* Route » Auto Route (2026-10-28): o auto-roteador em lote do hub (hub-autoroteador.js). All e Setup
+     abrem o pedido com todas as conexões abertas; Net, com as nets da seleção */
+  'PLPCB:AutorouteAll': A('autorotear', 'edit'), 'PLPCB:AutorouteSetup': A('autorotear', 'edit'),
+  'PLPCB:AutorouteNet': A('autorotearNets', 'edit'),
   'PLPCB:SetupPreferences': A('preferencias'), 'PLPCB:PopupOptionsPreferences': A('preferencias'),
   'PLPCB:MeasureDistance': A('medir'), 'PLPCB:ReportBoardSpecs': A('boardInfo'),
   'PLPCB:PopupRightMouseProperties': A('propriedades'),

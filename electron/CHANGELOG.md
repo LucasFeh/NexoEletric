@@ -4,6 +4,21 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.38.0 — 2026-10-29
+
+- **Auto-rotear na vista PCB** (o Auto Route do Altium, com o auto-roteador da 1.34.0):
+  - botão **Auto-rotear** na barra, logo depois da Via; teclas **U, A, A** nos dois conjuntos de atalhos (NexoEletric e
+    Padrão Altium); menu **Rotear › Roteamento automático › Tudo… / Net / Configurar…** (Net = as nets da seleção);
+  - janela com as conexões abertas agora, o escopo (todas ou só as nets selecionadas), a ordem (curtas primeiro, longas
+    primeiro, por classe de regra), as camadas de sinal, o custo da via e as passadas de arranca-e-refaz;
+  - roda num Web Worker, sem travar a vista (sem worker, em fatias de ~40 ms na própria página), com o progresso no
+    canto (conexão x de y, passada, roteadas/abertas, tempo) e **Cancelar**;
+  - **prévia** na placa (trilhas e vias novas com contorno verde) e o resumo: abertas antes → depois, trechos e vias,
+    comprimento, tempo, falhas com o motivo e as violações NOVAS de DRC (a mesma conta do `pcb_autorotear`);
+  - **Aplicar** entra como uma edição da vista (um Ctrl+Z desfaz o lote inteiro; Salvar/autosave grava o changes.js);
+    **Descartar** não deixa nada. Com violação nova, o Aplicar só libera marcando "Aplicar mesmo com as violações
+    novas"; se a placa mudou depois da prévia, o Aplicar recusa e pede para rodar de novo.
+
 ## 1.37.0 — 2026-10-29
 
 Serigrafia pela IA, segunda parte: posicionar, conferir rápido e regras da casa por projeto.

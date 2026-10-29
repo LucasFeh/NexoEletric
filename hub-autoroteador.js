@@ -70,6 +70,13 @@
               peso (da heurística, padrão 1,2), modo '45' | '90', note, roteador (o HubRoteador da cena)}
      conexoesAbertas(eb, cena, opts)   as conexões do lote, com as pontas e as camadas de cada uma
      rotearConexao(cena, eb, con, opts) uma só conexão, em várias camadas (o mesmo motor do lote)
+     lote(eb, opts)                    o mesmo lote como GERADOR: para depois de cada conexão com o
+                                       progresso {fase, feitas, total, passe, roteadas, falhas} e
+                                       devolve o relatório (a vista o roda num worker ou em fatias)
+     rodaEmFatias(gen, {fatiaMs, aoProgresso, cancelado, agenda}) -> Promise {ok, valor|cancelado|erro}
+     previa(ops) -> {tracks, vias}      as ops como objetos da placa (ids auto-t1.., auto-v1..)
+     comPrevia(eb, ops)                a placa com as rotas, para o ratsnest e o DRC de "depois"
+     novasViolacoes(drcAntes, drcDepois) as violações que as rotas criaram (a conta do MCP)
    Motivo de falha: 'camada-proibida' (a Routing Layers não deixa a camada da ponta), 'partida-bloqueada' /
    'chegada-bloqueada' (a ponta não cabe nem com a largura mínima da regra), 'sem-caminho' (nem contra a
    placa sozinha há caminho), 'bloqueada' (só o cobre deste lote fecha o caminho e o arranca-e-refaz não
@@ -833,7 +840,12 @@ function rotearConexao(cena, eb, con, opts){
   return { ok: r.ok, rota: r.ok ? r.rota : null, motivo: r.ok ? null : r.motivo, nos: r.nos };
 }
 
-function rotearLote(eb, opts){
+/* O LOTE COMO GERADOR (2026-10-28, para a vista PCB): o mesmo lote do rotearLote, que para depois de
+   cada conexão com o progresso — {fase:'rota'|'conserto', feitas, total, passe, roteadas, falhas} — e
+   devolve (done) o relatório. Quem o roda decide o ritmo: o rotearLote vai direto ao fim; o worker da
+   vista (hub-autoroteador-worker.js) manda o progresso à tela; sem worker, o rodaEmFatias o roda em
+   fatias de tempo, sem travar a página, e para quando pedem para cancelar. */
+function* lote(eb, opts){
   const t0 = agora(), o = opts || {};
   const NETS = exige('HubPcbNets', './hub-pcbnets.js');
   const J = montaJob(eb, o);
@@ -843,13 +855,17 @@ function rotearLote(eb, opts){
   const porId = new Map(cons.map(c => [c.id, c]));
   const falhas = new Map(), permanentes = new Map(), arrancadas = new Map();
   let esgotouTempo = false, totalArranca = 0, passes = 0, nosTotal = 0;
+  const progresso = (fase, feitas, total) => ({ fase, feitas, total, passe: passes, roteadas: J.rotas.size, falhas: falhas.size, conexoes: cons.length, ms: Math.round(agora() - t0) });
+  yield progresso('rota', 0, cons.length);
 
   /* 1a passada: na ordem */
+  let feitas = 0;
   for (const con of cons) {
     if (tempoAcabou()) { esgotouTempo = true; falhas.set(con.id, 'tempo'); continue; }
     const r = roteia(J, con, false);
     nosTotal += r.nos || 0;
     if (r.ok) poe(J, con, r.rota); else falhas.set(con.id, r.motivo);
+    yield progresso('rota', ++feitas, cons.length);
   }
   let melhor = fotografia(J, falhas), placarMelhor = placar(J, melhor);
   const primeira = { falhas: falhas.size };
@@ -859,7 +875,9 @@ function rotearLote(eb, opts){
   for (let ps = 0; ps < npasses && falhas.size && !esgotouTempo; ps++) {
     passes++;
     const pend = cons.filter(c => falhas.has(c.id));
+    let vistas = 0;
     for (const con of pend) {
+      if (vistas++) yield progresso('conserto', vistas - 1, pend.length);
       if (!falhas.has(con.id)) continue;
       if (tempoAcabou()) { esgotouTempo = true; break; }
       const motivo = falhas.get(con.id);
@@ -912,13 +930,17 @@ function rotearLote(eb, opts){
 
   return relatorio(J, eb, cons, falhas, { t0, nrAntes, passes, totalArranca, esgotouTempo, nosTotal, primeira, o });
 }
+function rotearLote(eb, opts){
+  const g = lote(eb, opts);
+  for (;;) { const p = g.next(); if (p.done) return p.value; }
+}
 
 /* as ops do changes.js e o relatório */
 function relatorio(J, eb, cons, falhas, X){
   const NETS = exige('HubPcbNets', './hub-pcbnets.js');
   const note = typeof X.o.note === 'string' && X.o.note ? String(X.o.note).replace(/":/g, '" :') : 'autorotear';
-  const ops = [], novosT = [], novosV = [], porNet = new Map(), rotas = [];
-  let vias = 0, comp = 0, nT = 0, nV = 0;
+  const ops = [], porNet = new Map(), rotas = [];
+  let vias = 0, comp = 0;
   const net0 = net => { let x = porNet.get(net); if (!x) porNet.set(net, x = { net, conexoes: 0, roteadas: 0, falhas: 0, vias: 0, comprimento: 0 }); return x; };
   for (const con of cons) {
     const pn = net0(con.net);
@@ -935,20 +957,17 @@ function relatorio(J, eb, cons, falhas, X){
       if (con.net) op.net = con.net;
       op.note = note;
       ops.push(op);
-      novosT.push({ id: 'auto-t' + (++nT), layer: t.layer, x1: op.x1, y1: op.y1, x2: op.x2, y2: op.y2, w: t.w, net: con.net });
     }
     for (const v of r.vias) {
       const op = { op: 'via_add', x: r6(v.x), y: r6(v.y), size: v.size, drill: v.drill };
       if (con.net) op.net = con.net;
       op.note = note;
       ops.push(op);
-      novosV.push({ id: 'auto-v' + (++nV), x: op.x, y: op.y, size: v.size, drill: v.drill, net: con.net, from: 'Top', to: 'Bottom' });
     }
     rotas.push({ net: con.net, de: con.a.nome || [r6(con.a.x), r6(con.a.y)], para: con.b.nome || [r6(con.b.x), r6(con.b.y)],
                  camadas: r.camadas, vias: r.vias.length, comprimento: r6(r.comprimento), largura: [...new Set(r.trilhas.map(t => t.w))] });
   }
-  const eb2 = Object.assign({}, eb, { tracks: (eb.tracks || []).concat(novosT), vias: (eb.vias || []).concat(novosV) });
-  const nrDepois = NETS.naoRoteadas(eb2), netsAlvo = new Set(cons.map(c => c.net));
+  const nrDepois = NETS.naoRoteadas(comPrevia(eb, ops)), netsAlvo = new Set(cons.map(c => c.net));
   const lista = [];
   for (const con of cons) if (falhas.has(con.id)) lista.push({ net: con.net, de: con.a.nome || [r6(con.a.x), r6(con.a.y)], para: con.b.nome || [r6(con.b.x), r6(con.b.y)], motivo: falhas.get(con.id) });
   return {
@@ -968,6 +987,65 @@ function relatorio(J, eb, cons, falhas, X){
   };
 }
 
-return { rotearLote, rotearConexao, conexoesAbertas, CUSTO_VIA, PASSES, TEMPO_MS, NOS_BUSCA };
+/* ============================== para a vista (2026-10-28) ============================== */
+
+/* AS OPS COMO OBJETOS DA PLACA: os track_add e via_add do lote no formato do board.js (o que o
+   effectiveBoard faria com elas), com ids auto-t1.. e auto-v1.. — a prévia que a vista desenha antes
+   de aplicar, e a placa "depois" que o ratsnest e o DRC conferem */
+function previa(ops){
+  const tracks = [], vias = [];
+  for (const o of ops || []) {
+    if (!o) continue;
+    if (o.op === 'track_add') tracks.push({ id: 'auto-t' + (tracks.length + 1), layer: o.layer, x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2, w: o.w, net: o.net || '' });
+    else if (o.op === 'via_add') vias.push({ id: 'auto-v' + (vias.length + 1), x: o.x, y: o.y, size: o.size, drill: o.drill, net: o.net || '', from: 'Top', to: 'Bottom' });
+  }
+  return { tracks, vias };
+}
+function comPrevia(eb, ops){
+  const p = previa(ops), E = eb || {};
+  return Object.assign({}, E, { tracks: (E.tracks || []).concat(p.tracks), vias: (E.vias || []).concat(p.vias) });
+}
+/* AS VIOLAÇÕES NOVAS de DRC: as da placa com as rotas que a de antes não tinha — a mesma conta do
+   pcb_autorotear do MCP. A net não roteada fica de fora (a árvore do ratsnest muda quando as ilhas se
+   juntam), e o pedaço de plano redespejado (q:<polígono>:<n>) vale pelo polígono, não pelo número */
+const chaveViolacao = v => v.tipo + '|' + (v.ids || []).map(x => String(x).replace(/^(q:[^:]*):\d+$/, '$1')).sort().join('|');
+function novasViolacoes(antes, depois){
+  const ja = new Set(((antes && antes.violacoes) || []).map(chaveViolacao));
+  return ((depois && depois.violacoes) || []).filter(v => v.tipo !== 'UnRoutedNet' && !ja.has(chaveViolacao(v)));
+}
+/* O LOTE EM FATIAS, sem worker: roda o gerador (lote) em fatias de `fatiaMs` e devolve a página ao
+   navegador entre elas (setTimeout 0, ou o `agenda` dado), com o último progresso em `aoProgresso`.
+   `cancelado()` verdadeiro para no próximo intervalo. Uma conexão não se corta ao meio: a fatia é
+   o tempo até a primeira parada depois dele.
+   -> Promise {ok:true, valor} | {ok:false, cancelado:true} | {ok:false, erro} */
+function rodaEmFatias(gen, opts){
+  const o = opts || {}, fatia = isNum(o.fatiaMs) && o.fatiaMs > 0 ? o.fatiaMs : 30;
+  const agenda = typeof o.agenda === 'function' ? o.agenda : (f => setTimeout(f, 0));
+  return new Promise(resolve => {
+    const passo = () => {
+      if (typeof o.cancelado === 'function' && o.cancelado()) {
+        try { gen.return(); } catch (e) { /* o gerador ja acabou */ }
+        resolve({ ok: false, cancelado: true });
+        return;
+      }
+      const t0 = agora();
+      let ult = null;
+      try {
+        for (;;) {
+          const p = gen.next();
+          if (p.done) { if (ult && o.aoProgresso) o.aoProgresso(ult); resolve({ ok: true, valor: p.value }); return; }
+          ult = p.value;
+          if (agora() - t0 >= fatia) break;
+        }
+      } catch (e) { resolve({ ok: false, erro: String(e && e.message || e) }); return; }
+      if (ult && o.aoProgresso) o.aoProgresso(ult);
+      agenda(passo);
+    };
+    agenda(passo);
+  });
+}
+
+return { rotearLote, lote, rotearConexao, conexoesAbertas, previa, comPrevia, novasViolacoes, rodaEmFatias,
+         CUSTO_VIA, PASSES, TEMPO_MS, NOS_BUSCA };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubAutoRoteador;
