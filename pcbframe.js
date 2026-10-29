@@ -51,6 +51,8 @@ const HC = HubCore;
    hub-pcbteardrop.js: o teardrop orfao do espelho sai e o do mesmo par pad/trilha e refeito. */
 const HN = (typeof HubPcbNets !== 'undefined' && HubPcbNets && typeof HubPcbNets.conexoes === 'function') ? HubPcbNets : null;
 const HTD = (typeof HubPcbTeardrop !== 'undefined' && HubPcbTeardrop && typeof HubPcbTeardrop.refaz === 'function') ? HubPcbTeardrop : null;
+/* hub-pcbtopologia.js: o Drag (a trilha arrastada leva as vizinhas, nao quebra) e o Tab do Altium */
+const TOPO = (typeof HubPcbTopologia !== 'undefined' && HubPcbTopologia && typeof HubPcbTopologia.planoArrasto === 'function') ? HubPcbTopologia : null;
 const isNum = HC.isNum, distSeg = HC.distSeg, near = HC.near, nearAng = HC.nearAng;
 
 /* ============================== cores e constantes ============================== */
@@ -154,7 +156,7 @@ const PCB_PADRAO = [
   { id:'vista3d',     tecla:'3',      rotulo:'3D Layout Mode' },
 ];
 /* os gestos fixos (nao gravaveis): o canvas os trata antes do mapa */
-const TRILHA = 'trilha na mão (W)', ARRASTO = 'arrastando';
+const TRILHA = 'trilha na mão (W)', ARRASTO = 'arrastando', TRILHA_SEL = 'trilha selecionada';
 const GESTOS_PCB = [
   { rotulo:'Selecionar (2º clique no mesmo ponto pega o objeto de baixo)', teclas:['Clique'] },
   { rotulo:'Somar/tirar da seleção',                     teclas:['Shift', 'Clique'] },
@@ -163,6 +165,9 @@ const GESTOS_PCB = [
   { rotulo:'Mover',                                      teclas:['Arrastar'] },
   { rotulo:'Trilha (Interactive Routing do Altium, no app desktop)', teclas:['Ctrl', 'W'] },
   { rotulo:'Mover só a ponta de uma trilha selecionada', teclas:['Arrastar a ponta'] },
+  { rotulo:'Arrastar a trilha sem soltar das vizinhas',  teclas:['Arrastar'],         quando:TRILHA_SEL },
+  { rotulo:'Selecionar a trilha inteira até a via',      teclas:['Tab'],              quando:TRILHA_SEL },
+  { rotulo:'De novo: tudo o que liga, além da via',      teclas:['Tab', 'Tab'],       quando:TRILHA_SEL },
   { rotulo:'Arrastar a tela',                            teclas:['Botão direito', 'Arrastar'] },
   { rotulo:'Menu',                                       teclas:['Botão direito'] },
   { rotulo:'Aproximar e afastar (no cursor)',            teclas:['Roda do mouse'] },
@@ -3434,16 +3439,26 @@ function desenhaArrasto(){
   if (arrasto.ponta) {
     const a = arrasto.ponta.alvo, o = Object.assign({}, ebDe(a.m) || a.m.eff, arrasto.pontaGeo || {});
     desenhaObj('track', o, corDe(o.layer), {});
+    for (const v of (arrasto.pontaP && arrasto.pontaViz) || []) {
+      const e = ebDe(v.al.m) || v.al.m.eff;
+      desenhaObj('track', Object.assign({}, e, comPonta(e, v.qual, arrasto.pontaP)), corDe(e.layer), {});
+    }
     realcaPonta(o, arrasto.ponta.qual);
     return;
   }
   if (arrasto.estica) { desenhaEstica(); return; }
+  const P = arrasto.topo && arrasto.topo.plano;
   for (const a of arrasto.alvos) {
-    const g = geoAtual(a);
+    const g = geoDoPlano(arrasto, a) || geoAtual(a);
     if (!g) continue;
     if (a.t === 'comp') { previaComp(a.m, g); continue; }
     if (a.t === 'ann') continue;
     desenhaGeoPrevia(a, g);
+  }
+  if (arrasto.topo) {
+    const porId = new Map(P ? P.viz.map(v => [String(v.id), v.geo]) : []);
+    for (const v of arrasto.topo.viz) desenhaGeoPrevia({ t:'track', m:v.m }, porId.get(v.id) || geoDe({ t:'track', m:v.m }));
+    for (const l of (P && P.links) || []) desenhaObj('track', l, corDe(l.layer), {});
   }
   if (arrasto.cena && GUIAS) GUIAS.desenha(ctx, arrasto.cena, { escala:view.scale, fmt:fmtGuia });
   if (arrasto.ima) {
@@ -4175,7 +4190,8 @@ cv.addEventListener('mousedown', e => {
   /* Ctrl+clique: realca a net do cobre (o do Altium) */
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !LEAN) { realcaNetEm(w); return; }
   if (editOn && !LEAN) { const al = alcaEm(s); if (al) { gesto = { modo:'alca', al, s, inicio:w }; return; } }
-  if (editOn && !LEAN) {
+  /* a ponta so com UMA trilha selecionada: a selecao do Tab (varias) anda inteira */
+  if (editOn && !LEAN && SEL.length === 1) {
     for (const a of SEL) {
       if (a.t !== 'track' || a.m.deleted) continue;
       const o = ebDe(a.m) || a.m.eff, tolP = Math.max((o.w || 0) / 2, px(6));
@@ -4246,8 +4262,56 @@ function iniciaArrasto(g){
   arrasto = { alvos:movs, bases, inicio:g.inicio, dx:0, dy:0, moveu:false, girou:false, principal,
               ref:refDoGeo(principal.t, bases.get(principal)), annBase:new Map() };
   for (const a of movs) if (a.t === 'ann') arrasto.annBase.set(a, { x:a.ann.x, y:a.ann.y });
-  EXCLUI = excluiDoArrasto(movs); cacheSujo = true;
+  arrasto.topo = topoDoArrasto(movs);
+  EXCLUI = excluiDoArrasto(movs);
+  if (arrasto.topo) for (const v of arrasto.topo.viz) { const o = ebDe(v.m); if (o) EXCLUI.add(o); }
+  cacheSujo = true;
   return true;
+}
+/* ── O DRAG DO ALTIUM (pedido do dono, 2026-10-29: "quando eu arrastar a trilha, eu consiga mover
+   ela sem quebrar a trilha, igual o Altium, move nao quebra, mantem a trilha conectada") ──
+   A trilha, o arco e a via que andam levam as pontas das vizinhas que encostavam neles: uma trilha
+   sozinha anda paralela e as vizinhas deslizam (o canto de 45/90 fica), um grupo anda inteiro e as
+   vizinhas esticam, e o que estava preso em pad ou via que fica ganha uma trilha nova do lugar
+   antigo ao novo. A conta e o hub-pcbtopologia.js (planoArrasto); aqui so o alvo de cada id e o
+   que se desenha e escreve. Girar ou espelhar no arrasto volta ao mover de sempre. */
+function alvoDoEb(id){
+  const m = IDX.item.get(String(id));
+  if (!m || m.deleted) return null;
+  return PORCHAVE.get(chave({ t:m.kind, m })) || { t:m.kind, m };
+}
+function topoDoArrasto(movs){
+  if (!TOPO) return null;
+  const movem = { tracks:[], arcs:[], vias:[] }, porId = new Map();
+  for (const a of movs) {
+    if (a.t !== 'track' && a.t !== 'arc' && a.t !== 'via') continue;
+    const o = ebDe(a.m);
+    if (!o || o.id == null) continue;
+    (a.t === 'track' ? movem.tracks : a.t === 'arc' ? movem.arcs : movem.vias).push(o.id);
+    porId.set(a.t + ':' + o.id, a);
+  }
+  if (!movem.tracks.length && !movem.arcs.length && !movem.vias.length) return null;
+  let p0, p1;
+  try { p0 = TOPO.planoArrasto(EB, movem, 0, 0); p1 = TOPO.planoArrasto(EB, movem, 1, 1); }
+  catch (e) { console.warn('topologia:', e); return null; }
+  if (!p0.viz.length && !p1.links.length) return null;      /* nada ligado: o mover de sempre (com o ima) */
+  const viz = [];
+  for (const v of p0.viz) { const al = alvoDoEb(v.id); if (al && al.m) viz.push({ id:String(v.id), m:al.m, al }); }
+  return { movem, porId, viz, plano:null };
+}
+function planoDoArrasto(a){
+  const T = a.topo;
+  if (!T) return;
+  try { T.plano = TOPO.planoArrasto(EB, T.movem, a.dx || 0, a.dy || 0); }
+  catch (e) { console.warn('topologia:', e); T.plano = null; }
+}
+/* o geo de um alvo que anda pelo plano (null: anda pela translacao de sempre) */
+function geoDoPlano(a, al){
+  const P = a.topo && a.topo.plano;
+  if (!P || !al.m) return null;
+  const o = ebDe(al.m);
+  const g = o && P.mov[al.t] ? P.mov[al.t][String(o.id)] : null;
+  return g ? Object.assign({}, a.bases.get(al), g) : null;
 }
 /* ── AS GUIAS DO ARRASTO (hub-guias.js, as mesmas do Esquema) ──
    Pedido do dono (2026-10-16): "tenha auxilio tipo que tem no esquema, pra ajudar a alinhar os
@@ -4353,7 +4417,8 @@ function atualizaArrasto(e, w){
     const alvo = { x:a.ref[0] + dx, y:a.ref[1] + dy };
     /* trilha, arco e via grudam em pad/via/ponta (a ligacao); o resto, na grade */
     const eletrico = a.alvos.length === 1 && (a.principal.t === 'via' || a.principal.t === 'track' || a.principal.t === 'arc');
-    const p = snapPonto(alvo, e, eletrico ? {} : { soGrade:true });
+    /* no Drag a ligacao ja vai junto: o ima puxaria a ponta de volta para a via ou o pad onde ela estava */
+    const p = snapPonto(alvo, e, eletrico && !a.topo ? {} : { soGrade:true });
     if (p.tipo === 'pad' || p.tipo === 'via' || p.tipo === 'ponta') a.ima = p;
     dx = p.x - a.ref[0]; dy = p.y - a.ref[1];
   }
@@ -4364,14 +4429,16 @@ function atualizaArrasto(e, w){
     a.cena = g.cena; guia = g.rotulo || '';
   }
   a.dx = dx; a.dy = dy; a.moveu = true;
+  planoDoArrasto(a);
   for (const [al, b] of a.annBase) { al.ann.x = b.x + dx; al.ann.y = b.y + dy; }
-  avisoRodape('dX ' + fmtDist(dx) + '  dY ' + fmtDist(dy) + ' ' + unidade + (guia ? ' · ' + guia : '') + ' · Espaço gira · L vira · X/Y espelha · Ctrl solta o snap e as guias · Esc desiste');
+  avisoRodape('dX ' + fmtDist(dx) + '  dY ' + fmtDist(dy) + ' ' + unidade + (guia ? ' · ' + guia : '') + (a.topo ? ' · a trilha leva as vizinhas' : '') + ' · Espaço gira · L vira · X/Y espelha · Ctrl solta o snap e as guias · Esc desiste');
   pede();
 }
 function giraNoArrasto(como){
   const a = arrasto;
   if (!a || a.ponta || a.estica) return;
   if (como === 'vira' && !a.alvos.some(x => x.t === 'comp')) return;
+  if (a.topo) { a.topo = null; EXCLUI = excluiDoArrasto(a.alvos); cacheSujo = true; }   /* girou: o mover de sempre */
   const pv = pivoDe(a.alvos, a.bases);
   for (const al of a.alvos) {
     let g = a.bases.get(al);
@@ -4386,15 +4453,31 @@ function giraNoArrasto(como){
   pede();
 }
 function iniciaPonta(g){
-  arrasto = { ponta:{ alvo:g.alvo, qual:g.qual }, pontaGeo:null, moveu:true, alvos:[], bases:new Map() };
+  arrasto = { ponta:{ alvo:g.alvo, qual:g.qual }, pontaGeo:null, moveu:true, alvos:[], bases:new Map(), pontaViz:[] };
   const o = ebDe(g.alvo.m);
   EXCLUI = new Set(o ? [o] : []); cacheSujo = true;
+  /* o vertice inteiro anda: as trilhas com a ponta no mesmo lugar (mesma camada) vao junto, como no Altium */
+  if (TOPO && o) {
+    try {
+      const P = g.qual === 1 ? [o.x1, o.y1] : [o.x2, o.y2];
+      for (const e of TOPO.grafo(EB).pontasEm(P[0], P[1], TOPO.TOL, o.layer)) {
+        if (e.seg.tipo !== 'track' || String(e.seg.id) === String(o.id)) continue;
+        const al = alvoDoEb(e.seg.id);
+        if (!al || al.t !== 'track') continue;
+        arrasto.pontaViz.push({ al, qual:e.qual + 1 });
+        EXCLUI.add(e.seg.o);
+      }
+    } catch (err) { console.warn('topologia:', err); arrasto.pontaViz = []; }
+  }
 }
+/* o geo de uma trilha com a ponta `qual` (1|2) em p */
+const comPonta = (e, qual, p) => qual === 1 ? { x1:p.x, y1:p.y, x2:e.x2, y2:e.y2 } : { x1:e.x1, y1:e.y1, x2:p.x, y2:p.y };
 function atualizaPonta(e, w){
   const a = arrasto, m = a.ponta.alvo.m;
   const p = snapPonto(w, e, { camada:m.eff.layer });
   a.ima = (p.tipo === 'pad' || p.tipo === 'via' || p.tipo === 'ponta') ? p : null;
   a.pontaGeo = a.ponta.qual === 1 ? { x1:p.x, y1:p.y } : { x2:p.x, y2:p.y };
+  a.pontaP = { x:p.x, y:p.y };
   pede();
 }
 /* Soltar: a edicao que faria cobre de nets diferentes se encontrarem volta tudo para o lugar
@@ -4410,15 +4493,31 @@ function terminaArrasto(){
       const m = a.ponta.alvo.m, e = m.eff;
       const g = Object.assign({ x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2 }, a.pontaGeo);
       if (Math.hypot(g.x2 - g.x1, g.y2 - g.y1) < 1e-6) { HubDialog.toast('a trilha ficaria com comprimento zero', 'warn'); pede(); return; }
-      const r = editaConferindo([a.ponta.alvo], () => editaItem(m, { x1:r6(g.x1), y1:r6(g.y1), x2:r6(g.x2), y2:r6(g.y2) }), 'não deixa');
+      const viz = (a.pontaViz || []).filter(v => { const ev = v.al.m.eff, q = comPonta(ev, v.qual, a.pontaP);
+        return Math.hypot(q.x2 - q.x1, q.y2 - q.y1) >= 1e-6; });
+      const r = editaConferindo([a.ponta.alvo].concat(viz.map(v => v.al)), () => {
+        let mexeu = editaItem(m, { x1:r6(g.x1), y1:r6(g.y1), x2:r6(g.x2), y2:r6(g.y2) });
+        for (const v of viz) { const q = comPonta(v.al.m.eff, v.qual, a.pontaP);
+          if (editaItem(v.al.m, { x1:r6(q.x1), y1:r6(q.y1), x2:r6(q.x2), y2:r6(q.y2) })) mexeu = true; }
+        return mexeu;
+      }, 'não deixa');
       if (r) commit(); else pede();
     } else pede();
     return;
   }
   if (!a.moveu && !a.girou) { pede(); return; }
-  const r = editaConferindo(a.alvos, () => {
+  const P = a.topo && a.topo.plano;
+  const vizP = P ? a.topo.viz.map(v => ({ v, g:(P.viz.find(x => String(x.id) === v.id) || {}).geo })).filter(x => x.g) : [];
+  const r = editaConferindo(a.alvos.concat(vizP.map(x => x.v.al)), () => {
     let mexeu = false;
-    for (const al of a.alvos) if (al.t !== 'ann' && escreveGeo(al, transladaGeo(al.t, a.bases.get(al), a.dx, a.dy))) mexeu = true;
+    for (const al of a.alvos) if (al.t !== 'ann' && escreveGeo(al, geoDoPlano(a, al) || transladaGeo(al.t, a.bases.get(al), a.dx, a.dy))) mexeu = true;
+    /* as vizinhas esticadas e as trilhas novas que seguram a ligacao (o Drag do Altium) */
+    for (const { v, g } of vizP) if (editaItem(v.m, { x1:r6(g.x1), y1:r6(g.y1), x2:r6(g.x2), y2:r6(g.y2) })) mexeu = true;
+    for (const l of (P && P.links) || []) {
+      const op = { op:'track_add', layer:l.layer, x1:r6(l.x1), y1:r6(l.y1), x2:r6(l.x2), y2:r6(l.y2), w:r6(l.w || CFG.wLinha), note:'arrastado no hub: liga a trilha' };
+      if (l.net && cobre(l.layer)) op.net = l.net;
+      CH.push(op); mexeu = true;
+    }
     return mexeu;
   }, 'não deixa');
   /* recusado: o sinalizador que andava junto volta tambem (o arrasto inteiro nao aconteceu) */
@@ -4526,6 +4625,46 @@ window.addEventListener('blur', () => { if (arrasto) cancelaArrasto(); gesto = n
 
 /* ============================== teclado ============================== */
 
+/* ── O TAB DO ALTIUM (pedido do dono, 2026-10-29: "o tab 1x seleciona toda a trilha ate a via, e tab
+   2x seleciona tudo conectado, as outras trilhas alem da via") ──
+   Com trilha, arco ou via selecionado (ou sob o cursor), o 1o Tab pega a trilha inteira, ponta com
+   ponta na mesma camada, ate a via ou o pad; o 2o pega tudo o que se liga, atravessando as vias
+   (para no pad, que e do componente). A conta e o hub-pcbtopologia.js. O Tab seguinte, sem mexer na
+   selecao, fica no 2o nivel. Arrastar a selecao do Tab leva tudo junto, e as vizinhas de fora
+   esticam (o Drag). */
+let ultimoTab = null;        /* { sel, nivel, sementes } */
+function tabTopologia(){
+  if (!TOPO) return;
+  const chaveSel = SEL.map(chave).join('|');
+  let nivel = 1, sementes;
+  if (ultimoTab && ultimoTab.sel === chaveSel && SEL.length) { nivel = 2; sementes = ultimoTab.sementes; }
+  else {
+    let base = SEL.filter(a => a && a.m && !a.m.deleted && (a.t === 'track' || a.t === 'arc' || a.t === 'via'));
+    if (!base.length && HOVER && HOVER.m && !HOVER.m.deleted && (HOVER.t === 'track' || HOVER.t === 'arc' || HOVER.t === 'via')) base = [HOVER];
+    if (!base.length) { avisoRodape('Tab: selecione uma trilha (ou passe o mouse em cima dela)'); return; }
+    sementes = { tracks:[], arcs:[], vias:[] };
+    for (const a of base) {
+      const o = ebDe(a.m);
+      if (o && o.id != null) (a.t === 'track' ? sementes.tracks : a.t === 'arc' ? sementes.arcs : sementes.vias).push(o.id);
+    }
+    /* so via: o 1o Tab ja e o de atravessar */
+    if (!sementes.tracks.length && !sementes.arcs.length) nivel = 2;
+  }
+  let r;
+  try { r = nivel === 1 ? TOPO.trilhaAteVia(EB, sementes) : TOPO.tudoLigado(EB, sementes); }
+  catch (e) { console.warn('topologia:', e); return; }
+  const lista = [];
+  for (const id of [].concat(r.tracks || [], r.arcs || [], r.vias || [])) { const al = alvoDoEb(id); if (al && lista.indexOf(al) < 0) lista.push(al); }
+  for (const id of sementes.vias) { const al = alvoDoEb(id); if (al && lista.indexOf(al) < 0) lista.push(al); }
+  if (!lista.length) return;
+  selSo(lista);
+  ultimoTab = { sel:SEL.map(chave).join('|'), nivel, sementes };
+  const nT = (r.tracks || []).length + (r.arcs || []).length, nV = (r.vias || []).length;
+  avisoRodape(nivel === 1
+    ? 'Tab: ' + nT + ' trilha(s) até a via ou o pad · Tab de novo: tudo o que liga, além da via · arrastar leva tudo junto'
+    : 'Tab Tab: ' + nT + ' trilha(s) e ' + nV + ' via(s) ligadas · arrastar leva tudo junto');
+}
+
 function ehCampo(t){ return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); }
 function escape(){
   const m = $('menu');
@@ -4582,6 +4721,9 @@ window.addEventListener('keydown', e => {
       if (e.key === '2' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); rotaVia(false); return; }
       if (e.key === '*' || k === 'Ctrl+2' || k === teclaDe('via') || k === teclaDe('outraFace')) { e.preventDefault(); rotaVia(true); return; }
     }
+  }
+  if (tool === 'select' && e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey && !arrasto && !LEITOR.pendente()) {
+    e.preventDefault(); tabTopologia(); return;
   }
   if (tool !== 'select' && e.key === 'Tab') {
     e.preventDefault();

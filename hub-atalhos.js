@@ -243,7 +243,7 @@ const PADRAO_ALTIUM_PCB = {
    conflito do roteamento interativo do Altium: contornar, parar no obstaculo ou ignorar): o
    normalizaTecla nao grava Shift em tecla de um caractere, entao no mapa ele chegaria como R, o
    Retangulo -- o canvas o trata antes do mapa, e so com a ferramenta Trilha. */
-const TRILHA = 'trilha na mão (W)';
+const TRILHA = 'trilha na mão (W)', TRILHA_SEL = 'trilha selecionada';
 const GESTOS_PCB = [
   { rotulo:'Selecionar',                                teclas:['Clique'] },
   { rotulo:'Pegar o objeto de baixo, no mesmo ponto',   teclas:['Segundo clique'] },
@@ -255,6 +255,11 @@ const GESTOS_PCB = [
   { rotulo:'Selecionar o que a janela toca',            teclas:['Arrastar no vazio ←'] },
   { rotulo:'Mover o objeto (ou a seleção)',             teclas:['Arrastar'] },
   { rotulo:'Mover só a ponta da trilha selecionada',    teclas:['Arrastar a ponta'] },
+  /* 2026-10-29, pedido do dono: o Drag e o Tab do Altium (hub-pcbtopologia.js). A trilha arrastada
+     leva as vizinhas junto (nao quebra); o Tab pega a trilha ate a via, e o 2o Tab, alem dela */
+  { rotulo:'Arrastar a trilha sem soltar das vizinhas (o Drag do Altium)', teclas:['Arrastar'], quando:TRILHA_SEL },
+  { rotulo:'Selecionar a trilha inteira até a via',     teclas:['Tab'],             quando:TRILHA_SEL },
+  { rotulo:'De novo: tudo o que liga, além da via',     teclas:['Tab', 'Tab'],      quando:TRILHA_SEL },
   { rotulo:'Arrastar a tela',                           teclas:['Botão direito', 'Arrastar'] },
   { rotulo:'Abrir o menu (sem arrastar)',               teclas:['Botão direito'] },
   { rotulo:'Aproximar e afastar, no cursor',            teclas:['Roda do mouse'] },
