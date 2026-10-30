@@ -932,6 +932,11 @@ function applyPcbChanges(board, changes, opts){
     ordem: model.polygons.reduce((mx, p) => Math.max(mx, isNum(p.eff.ordem) ? p.eff.ordem + 1 : 0), 0) });
 
   let addSeq = 0;
+  /* O ID DO OBJETO ACRESCENTADO: "new-" + tipo + o uid da linha quando ela tem um ("u" + letras e
+     numeros; o MCP grava um em cada *_add), senao o contador de sempre. Com o uid o id nao muda
+     quando outra linha entra ou sai (new-t96 virava new-t73 a cada edicao e a IA perdia o objeto).
+     O contador anda nos dois casos: os ids das linhas sem uid ficam os mesmos de antes. */
+  const nid = (tipo, ch) => { const n = ++addSeq; return 'new-' + tipo + (typeof ch.uid === 'string' && /^u[a-z0-9]{1,15}$/i.test(ch.uid) ? ch.uid : n); };
   CH.forEach((chIn, idx) => {
     const ch = (chIn && typeof chIn === 'object') ? chIn : {};
     const item = { ch:chIn, idx, status:'ok', msg:'', target:null };
@@ -1062,7 +1067,7 @@ function applyPcbChanges(board, changes, opts){
         for (const k of ['x1','y1','x2','y2','w']) if (!isNum(ch[k])) return bad(`campo "${k}" ausente/inválido`);
         const e = layerErr(ch.layer, 'trilha'); if (e) return bad(e);
         if (ch.w<=0) return bad('largura w deve ser > 0');
-        const m = { kind:'track', src:null, eff:{ id:'new-t'+(++addSeq), ...ch }, changed:false, added:true };
+        const m = { kind:'track', src:null, eff:{ id:nid('t', ch), ...ch }, changed:false, added:true };
         model.added.push(m); item.target = m;
         novoLivre(m.eff); soCobre(m.eff);
         break;
@@ -1093,7 +1098,7 @@ function applyPcbChanges(board, changes, opts){
         if (ch.size<=0 || ch.drill<=0) return bad('size e drill devem ser > 0');
         const vao = vaoDaVia(ch, { from:'Top', to:'Bottom' }); if (vao.erro) return bad(vao.erro);
         if (vao.aviso) warn(vao.aviso);
-        const m = { kind:'via', src:null, eff:{ id:'new-v'+(++addSeq), from:'Top', to:'Bottom', ...ch }, changed:false, added:true };
+        const m = { kind:'via', src:null, eff:{ id:nid('v', ch), from:'Top', to:'Bottom', ...ch }, changed:false, added:true };
         model.added.push(m); item.target = m;
         if (ch.drill>=ch.size) warn('drill >= size (anel nulo)');
         novoLivre(m.eff);
@@ -1128,7 +1133,7 @@ function applyPcbChanges(board, changes, opts){
         const e = layerErr(ch.layer, 'arco'); if (e) return bad(e);
         if (ch.r<=0) return bad('raio r deve ser > 0');
         if (ch.w<=0) return bad('largura w deve ser > 0');
-        const m = { kind:'arc', src:null, eff:{ id:'new-a'+(++addSeq), ...ch }, changed:false, added:true };
+        const m = { kind:'arc', src:null, eff:{ id:nid('a', ch), ...ch }, changed:false, added:true };
         model.added.push(m); item.target = m;
         novoLivre(m.eff); soCobre(m.eff);
         break;
@@ -1168,7 +1173,7 @@ function applyPcbChanges(board, changes, opts){
         if (ch.w!==undefined && !(isNum(ch.w) && ch.w>0)) return bad('espessura w deve ser > 0');
         if (ch.rot!==undefined && !isNum(ch.rot)) return bad('campo "rot" inválido');
         const m = { kind:'text', src:null, changed:false, added:true,
-                    eff:{ id:'new-x'+(++addSeq), ...ch, w: isNum(ch.w) ? ch.w : ch.h/10, rot: isNum(ch.rot) ? ch.rot : 0,
+                    eff:{ id:nid('x', ch), ...ch, w: isNum(ch.w) ? ch.w : ch.h/10, rot: isNum(ch.rot) ? ch.rot : 0,
                           mirror: ch.mirror === true, designator:false, comment:false, kind:'stroke' } };
         delete m.eff.font; delete m.eff.polys; delete m.eff.ax; delete m.eff.ay;
         model.added.push(m); item.target = m;
@@ -1225,7 +1230,7 @@ function applyPcbChanges(board, changes, opts){
         const e = layerErr(ch.layer, 'fill'); if (e) return bad(e);
         if (near(ch.x1, ch.x2) || near(ch.y1, ch.y2)) return bad('fill sem área (x1 = x2 ou y1 = y2)');
         if (ch.rot!==undefined && !isNum(ch.rot)) return bad('campo "rot" inválido');
-        const m = { kind:'fill', src:null, eff:{ id:'new-f'+(++addSeq), ...ch, rot: isNum(ch.rot) ? ch.rot : 0 }, changed:false, added:true };
+        const m = { kind:'fill', src:null, eff:{ id:nid('f', ch), ...ch, rot: isNum(ch.rot) ? ch.rot : 0 }, changed:false, added:true };
         model.added.push(m); item.target = m;
         novoLivre(m.eff); soCobre(m.eff);
         break;
@@ -1242,7 +1247,7 @@ function applyPcbChanges(board, changes, opts){
         } else if (!corte) { const e = layerErr(ch.layer, 'região'); if (e) return bad(e); }
         const ge = regiaoErro(ch.pts); if (ge) return bad(ge);
         const m = { kind:'region', src:null, changed:false, added:true,
-                    eff:{ id:(corte ? 'new-k' : semPlano ? 'new-q' : 'new-g')+(++addSeq), ...ch, points:ch.pts.map(p => [p[0], p[1]]) } };
+                    eff:{ id:nid(corte ? 'k' : semPlano ? 'q' : 'g', ch), ...ch, points:ch.pts.map(p => [p[0], p[1]]) } };
         model.added.push(m); item.target = m;
         novoLivre(m.eff);
         if (corte || semPlano) {
@@ -1328,7 +1333,7 @@ function applyPcbChanges(board, changes, opts){
         const g = footprintGeom(ch.footprint, B, opts);
         if (!g) return bad(`footprint "${ch.footprint}" não encontrado — nem na pcblib (${((opts && opts.pcblib) || PCBLIB) ? 'carregada' : 'não carregada: HubCore.setPcbLib'}), nem embutido no board.js (footprints), nem em componente da placa`);
         const lado = ch.layer === 'Bottom' ? 'Bottom' : 'Top', rot = isNum(ch.rot) ? normAng(ch.rot) : 0;
-        const cid = 'new-c' + (++addSeq);
+        const cid = nid('c', ch);
         const sc = sintetizaComp(g.fp, { ref:ch.ref, footprint:ch.footprint, comment:typeof ch.comment === 'string' ? ch.comment : '',
                                          x:ch.x, y:ch.y, rot, layer:lado, nets,
                                          des:{ x:ch.des_x, y:ch.des_y, h:ch.des_h, w:ch.des_w, rot:ch.des_rot } }, cid);
@@ -1417,7 +1422,7 @@ function applyPcbChanges(board, changes, opts){
       case 'pad_add': {
         const r = padDaOp(ch, null);
         if (r.erro) return bad(r.erro);
-        const m = { kind:'pad', src:null, eff:{ id:'new-p'+(++addSeq), ...r.pad }, changed:false, added:true };
+        const m = { kind:'pad', src:null, eff:{ id:nid('p', ch), ...r.pad }, changed:false, added:true };
         model.added.push(m); item.target = m;
         r.avisos.forEach(warn);
         if (temNets && m.eff.net && !netSet.has(m.eff.net)) warn(`net "${m.eff.net}" não existe na placa — crie com net_add antes`);
@@ -1450,7 +1455,7 @@ function applyPcbChanges(board, changes, opts){
       case 'poly_add': {
         const r = polyDaOp(ch, null);
         if (r.erro) return bad(r.erro);
-        const m = { kind:'poly', src:null, eff:{ id:'new-pg'+(++addSeq), ...r.poly }, changed:false, deleted:false, added:true };
+        const m = { kind:'poly', src:null, eff:{ id:nid('pg', ch), ...r.poly }, changed:false, deleted:false, added:true };
         if (!m.eff.nome) m.eff.nome = ((pcbLayer(m.eff.layer) || {}).name || m.eff.layer) + '-' + (m.eff.net || 'No Net');
         model.polygons.push(m); item.target = m;
         r.avisos.forEach(warn);

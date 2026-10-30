@@ -42,7 +42,17 @@ function gravaAtomico(arquivo, texto) {
   fs.writeFileSync(tmp, texto, { encoding: 'utf8' });
   let alvo = arquivo;
   try { if (fs.lstatSync(arquivo).isSymbolicLink()) alvo = fs.realpathSync(arquivo); } catch (_) { /* ainda nao existe */ }
-  fs.renameSync(tmp, alvo);
+  /* No Windows o rename falha com EPERM/EBUSY/EACCES quando o app, o hub, o OneDrive ou o antivirus
+     estao com o arquivo aberto naquele instante ("EPERM rename changes.js.tmp" no meio de um
+     pcb_trilha; repetido, passou). Tenta de novo por ~2 s antes de desistir. */
+  const espera = new Int32Array(new SharedArrayBuffer(4));
+  for (let n = 0; ; n++) {
+    try { fs.renameSync(tmp, alvo); return; }
+    catch (e) {
+      if (n >= 8 || !/^(EPERM|EBUSY|EACCES)$/.test(e && e.code)) { try { fs.unlinkSync(tmp); } catch (_) { /* fica o .tmp */ } throw e; }
+      Atomics.wait(espera, 0, 0, 40 * (n + 1));
+    }
+  }
 }
 
 /* Formas conhecidas: a abertura e o fecho do array de cada arquivo. */

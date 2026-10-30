@@ -17,7 +17,10 @@ const { PROJETO } = require('../lib/util.js');
 
 const r6 = v => Math.round(v * 1e6) / 1e6;
 function aplicaOps(ctx, p, lista, a, ferramenta) {
-  return ops.transacao(ctx, p, (arq, board) => lista.map(o => ops.mescla(arq, ops.origDe(Object.assign({}, o), board)).obj),
+  /* ops.aplica: o componente que ainda é uma linha comp_add (o ECO trocando o footprint de quem ele
+     mesmo trouxe) e o objeto "new-..." mexem na linha deles, sem orig_* do board.js */
+  const hc = ctx.pcbPronto();
+  return ops.transacao(ctx, p, (arq, board) => lista.map(o => ops.aplica(arq, board, hc, Object.assign({}, o))),
     { simular: a.simular, forcar: a.forcar, ferramenta });
 }
 /* o conjunto de regras do projeto como a vista o carrega: o rules.js (HubPcbRegras.ler) ou,
@@ -70,15 +73,26 @@ module.exports = {
           let L = (c[campo] || []).slice();
           const nomeDe = r => r.name || r.nome;
           if (a.remover) L = L.filter(r => !a.remover.includes(nomeDe(r)));
-          for (const n of a.regras || []) { const i = L.findIndex(r => nomeDe(r) === nomeDe(n) && (r.kind || r.tipo) === (n.kind || n.tipo || r.kind)); if (i >= 0) L[i] = Object.assign({}, L[i], n); else L.push(n); }
+          /* A PRIORIDADE PEDIDA VENCE O EMPATE. O normaliza renumera 1..n por tipo e, no empate,
+             fica a ordem do arquivo: a HoleSize nova com priority 1 entrava DEPOIS da geral que já
+             era 1 e virava 2 em silêncio (PCB1: a regra geral de 2,54 mm seguia vencendo nos furos
+             M3). Meio ponto a menos poe a pedida na frente; o normaliza devolve os inteiros. */
+          for (const n0 of a.regras || []) {
+            const n = Object.assign({}, n0);
+            if (typeof n.priority === 'number') n.priority -= 0.5;
+            const i = L.findIndex(r => nomeDe(r) === nomeDe(n) && (r.kind || r.tipo) === (n.kind || n.tipo || r.kind));
+            if (i >= 0) L[i] = Object.assign({}, L[i], n); else L.push(n);
+          }
           c = Object.assign({}, c, { [campo]: L });
         }
         if (typeof R.normaliza === 'function') c = R.normaliza(c) || c;
+        const tipos = new Set((a.regras || []).map(n => n.kind || n.tipo).filter(Boolean));
+        const prioridades = tipos.size ? (c.rules || c.regras || []).filter(r => tipos.has(r.kind || r.tipo)).map(r => ({ kind: r.kind || r.tipo, name: r.name || r.nome, priority: r.priority })) : undefined;
         const t = R.serializa(c);
         const texto = typeof t === 'string' ? t : t && t.text;
         if (!texto) throw new ErroMcp('regras inválidas: ' + JSON.stringify((t && t.errors) || t).slice(0, 800));
         try { R.ler(texto); } catch (e) { throw new ErroMcp('o rules.js gerado não relê: ' + e.message); }
-        return { ok: true, gravado: ctx.grava(p.arq('rules.js'), texto, 'regras_definir'), arquivo: ctx.rel(p.arq('rules.js')) };
+        return { ok: true, gravado: ctx.grava(p.arq('rules.js'), texto, 'regras_definir'), arquivo: ctx.rel(p.arq('rules.js')), prioridades };
       },
     },
     {

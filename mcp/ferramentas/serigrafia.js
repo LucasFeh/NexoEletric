@@ -33,7 +33,7 @@ function monta(ctx, a) {
   const o = Object.assign({}, RC.PAD, cfg.parametros, chamada);
   const { eb } = ctx.placa(p);
   const tg = RC.textoGeo(ctx);
-  const { furos, cobre } = RC.preparaPlaca(ctx, eb, K, o, a, ['Top', 'Bottom']);
+  const { furos, cobre } = RC.preparaPlaca(ctx, eb, K, o, a, ['Top', 'Bottom'], (x, y) => RC.regrasEm(cfg, RC.PAD, chamada, x, y).o);
   const cena = RC.cenaSerigrafia(ctx, eb, K, furos, cobre, tg);
   const regras = (x, y, layer) => {
     const r = RC.regrasEm(cfg, RC.PAD, chamada, x, y, layer);

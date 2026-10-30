@@ -200,8 +200,11 @@ function paramsDaChamada(a) {
   return o;
 }
 
-/* a placa conferida: camadas de cobre, os furos de parafuso e o cobre de cada camada */
-function preparaPlaca(ctx, eb, K, o, a, camadasSo) {
+/* a placa conferida: camadas de cobre, os furos de parafuso e o cobre de cada camada. paramsEm(x, y)
+   = os parametros que valem naquele ponto (as areas do regras-casa.json): o quadrado de cada furo usa
+   o `parafuso` da area onde o FURO esta -- antes usava o geral, e a area com parafuso:1 em volta do
+   H3 da PCB1 continuava conferindo 3 mm (13 violacoes) */
+function preparaPlaca(ctx, eb, K, o, a, camadasSo, paramsEm) {
   const hc = ctx.hc;
   const camadas = camadasSo || [...new Set(['Top', 'Bottom'].concat((eb.tracks || []).map(t => t.layer), (eb.regions || []).map(g => g.layer)))].filter(k => k && hc.isCopper(k));
   /* pad que e so furo (fixacao sem anel, sem net) */
@@ -217,7 +220,11 @@ function preparaPlaca(ctx, eb, K, o, a, camadasSo) {
   for (const c of eb.components || []) for (const q of (c && c.pads) || []) if (q && buracoPad(q)) furos.push({ x: q.x, y: q.y, d: q.drill, origem: c.ref + ' (furo de fixação)' });
   for (const q of eb.freepads || []) if (q && buracoPad(q)) furos.push({ x: q.x, y: q.y, d: q.drill, origem: 'furo livre' });
   for (const f of (a && a.furos) || []) if (Array.isArray(f) && f.length >= 3) furos.push({ x: f[0], y: f[1], d: f[2], origem: 'informado' });
-  for (const f of furos) { const m = f.d / 2 + o.parafuso; f.quadrado = { x1: r3(f.x - m), y1: r3(f.y - m), x2: r3(f.x + m), y2: r3(f.y + m) }; }
+  for (const f of furos) {
+    const par = paramsEm ? paramsEm(f.x, f.y).parafuso : o.parafuso;
+    if (par !== o.parafuso) f.parafuso = par;
+    const m = f.d / 2 + par; f.quadrado = { x1: r3(f.x - m), y1: r3(f.y - m), x2: r3(f.x + m), y2: r3(f.y + m) };
+  }
   const cobre = {};
   for (const L of camadas) cobre[L] = cobreDa(K, eb, L, hc, buracoPad);
   return { camadas, buracoPad, furos, cobre, bbPlaca };
@@ -364,7 +371,7 @@ function verifica(ctx, a) {
   const velhas = pdp.despejo ? pdp.despejo.altium_sem_poligono : [];
   const despejo = pdp.despejo ? pdp.despejo.poligonos + ' polígono(s) redespejado(s) como na tela' +
     (velhas.length ? `; ${velhas.length} região(ões) despejada(s) no Altium sem polígono no hub (${velhas.slice(0, 8).join(', ')}) ficam como vieram (pcb_apagar apaga)` : '') : 'sem polígono';
-  const { camadas, furos, cobre } = preparaPlaca(ctx, eb, K, o, a);
+  const { camadas, furos, cobre } = preparaPlaca(ctx, eb, K, o, a, null, (x, y) => regrasEm(cfg, PAD, chamada, x, y).o);
   const viol = [];
   const quer = r => (!a.regras || !a.regras.length || a.regras.includes(r)) && !cfg.desligar.includes(r);
 

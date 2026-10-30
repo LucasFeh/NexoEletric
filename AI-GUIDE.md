@@ -363,6 +363,15 @@ var changes = [
 | `poly_edit` / `poly_del` | `id` (`pg…`), `orig_layer`, `orig_n`, `orig_x0`, `orig_y0` | (edit) os do `poly_add` |
 | `stack_set` | `layers` (as de cobre na ordem física: `[{"key":"Top","copper":0.035,"dielectric":0.2},{"key":"Mid1","name":"GND","copper":0.035,"dielectric":1.065},…,{"key":"Bottom","copper":0.035}]`) | `mech` (as mecânicas que a placa tem: `["Mech1","Mech13"]`), `note` |
 
+**Objeto e componente criados pelo changes.js (1.49.0).**
+- Toda linha `*_add` (track, via, arc, text, fill, region, pad, poly) pode levar `uid` (`"u"` + letras e números; o MCP grava
+  sozinho). O objeto aparece na placa com o id `new-<tipo><uid>` (`new-tu1a`), que não muda quando outra linha entra ou
+  sai. Linha sem `uid` continua com o contador de antes (`new-t12`), que muda.
+- Para mexer num objeto `new-…`, edite ou tire a linha `*_add` dele. Os `orig_*` não valem para ele (não está no
+  `board.js`).
+- O componente de uma linha `comp_add` (também o que saiu do `board.js` por `comp_del` e voltou por `comp_add` com o
+  mesmo nome) se move, renomeia e apaga pela própria linha `comp_add`. O designator dele vai nos `des_*` dessa linha.
+
 **Pilha de camadas e vão da via (2026-10-29).**
 - `stack_set` define a pilha do hub: a primeira camada é a `Top`, a última a `Bottom`, no meio `Mid1`..`Mid30`;
   `copper` = espessura do cobre (mm, padrão 0,035 = 1 oz), `dielectric` = o dielétrico ABAIXO da camada (mm; a

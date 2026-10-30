@@ -4,6 +4,38 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.49.0 — 2026-10-30
+
+PCB pelo MCP: o que a sessão de IA da PCB1 não conseguia apagar, editar nem mover (itens 15 a 34 do relato, etapa A).
+- **Objetos criados pelo changes.js** (trilha, via, texto, região… com id `new-…`): o `pcb_apagar` e o `pcb_editar`
+  aceitam o id que o `pcb_consultar` mostra e mexem na linha que criou o objeto. Antes respondiam "não existe objeto com
+  id new-t245 no board.js", e o caminho era baixar o `pcb_mudancas` inteiro (270 mil caracteres) e achar a linha pela
+  coordenada.
+- **Id que não muda**: toda linha `*_add` gravada pelo MCP ganha um `uid`, e o objeto aparece como `new-<tipo><uid>`.
+  Antes o id era um contador e mudava a cada gravação (new-t96 virava new-t73). Linhas antigas e as da vista seguem com
+  o contador.
+- **Componente de `comp_add`** (ECO, `pcb_colocar`, a vista): mover, apagar, renomear (`comp_attr`) e o designator mexem
+  na própria linha `comp_add`. Vale para o `pcb_mover`, o `pcb_mover_lote`, o `pcb_apagar`, o `pcb_aplicar`, o
+  `eco_aplicar` (trocar o footprint de quem o ECO trouxe dava "componente X não existe no board.js") e o
+  `serigrafia_posicionar`. Vale também para o componente que saiu do `board.js` por `comp_del` e voltou por `comp_add` com
+  o mesmo nome: antes as ferramentas usavam os `orig_*` do componente antigo (o `pcb_mover_lote` editava a linha
+  errada e o `designator_move` ficava com `orig_*` que não conferia). As linhas `comp_move`/`designator_move` antigas
+  desse componente são juntadas na `comp_add` na primeira mexida.
+- **`pcb_mudancas`** com filtros: `id` (também `new-…`), `ref`, `op` (ou o começo dela), `caixa`, `curto` e
+  `limite`/`pular`; cada linha `*_add` traz o id do objeto na placa.
+- **Resposta resumida**: lote com mais de 40 linhas (`teardrop_aplicar`, `eco_aplicar`, `serigrafia_posicionar`…)
+  devolve as 10 primeiras e as com aviso ou erro, com o total e a contagem por op.
+- **`regras_definir`**: a prioridade pedida vence o empate (a `HoleSize` nova com prioridade 1 entrava como 2, e a regra
+  geral de 2,54 mm seguia vencendo nos furos M3). A resposta mostra a prioridade final das regras daquele tipo.
+- **Regras da casa por área**: o quadrado de cada furo de parafuso usa o `parafuso` da área onde o furo está (o
+  `regras_casa_verificar` e o `serigrafia_posicionar`). Antes usava o valor geral (3 mm) mesmo com `parafuso: 1` na área
+  do H3 da PCB1. A falha era da 1.37.0.
+- **`pcb_colocar`** aceita de novo um designador que saiu por `comp_del`.
+- **Gravação**: o rename do arquivo temporário tenta de novo por até ~2 s quando o Windows responde EPERM/EBUSY/EACCES
+  (o app, o hub, o OneDrive ou o antivírus com o `changes.js` aberto naquele instante).
+- Contrato (AI-GUIDE): campo opcional `uid` nas linhas `*_add`.
+- Teste: `tests/test-mcp-novos.js`.
+
 ## 1.48.0 — 2026-10-29
 
 **`sch_copiar`** (MCP): copia um circuito de um projeto para outro, pedido pela mesma sessão de IA que, para levar a fonte

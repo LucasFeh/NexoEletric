@@ -207,26 +207,18 @@ function opDoMovimento(c, a) {
 }
 /* grava o movimento no changes.js (dentro de uma ops.transacao) e devolve a linha que ficou */
 function gravaMovimento(ctx, arq, board, op) {
-  /* componente que chegou pelo ECO (ou pelo pcb_componente) ainda é um comp_add no
-     changes.js: mover é editar a linha dele (uma linha por objeto, como a vista faz) */
-  if (!(board.components || []).some(k => k.ref === op.ref)) {
-    const i = arq.itens.findIndex(x => x && x.op === 'comp_add' && x.ref === op.ref);
-    if (i < 0) throw new ErroMcp(`componente "${op.ref}" não está no board.js nem num comp_add do changes.js`);
-    const velho = arq.itens[i];
-    const novo = Object.assign({}, velho, { x: op.x, y: op.y, rot: op.rot, layer: op.layer }, op.note ? { note: op.note } : {});
-    /* o designator posto na linha (des_x/des_y) anda junto com o componente */
-    if (isNum(velho.des_x) && isNum(velho.des_y)) {
-      const lado = q => q === 'Bottom' ? 'Bottom' : 'Top';
-      const d = ctx.hc.compDelta({ src: { x: velho.x, y: velho.y, rot: velho.rot || 0, layer: lado(velho.layer) },
-                                   eff: { x: novo.x, y: novo.y, rot: novo.rot || 0, layer: lado(novo.layer) } });
-      const q = ctx.hc.xfPoint(d, velho.des_x, velho.des_y);
-      novo.des_x = ops.r6(q.x); novo.des_y = ops.r6(q.y);
-      if (isNum(velho.des_rot)) novo.des_rot = ((velho.des_rot + d.dr) % 360 + 360) % 360;
-    }
-    arq.substitui(i, novo);
-    return novo;
-  }
-  return ops.mescla(arq, ops.origDe(op, board)).obj;
+  /* componente que chegou pelo ECO (ou pelo pcb_colocar) ainda é um comp_add no changes.js: mover é
+     editar a linha dele, com o designator (des_*) junto -- pcb-ops » opNoAdicionado */
+  return ops.aplica(arq, board, ctx.hc, op);
+}
+
+/* o tipo (track, via, text...) de um id: o do board.js, ou o da linha *_add que criou o "new-..." */
+const TIPO_DO_ADD = { track_add: 'track', arc_add: 'arc', via_add: 'via', text_add: 'text', fill_add: 'fill', region_add: 'region', pad_add: 'pad', poly_add: 'poly' };
+function tipoDoId(arq, board, hc, id, novos) {
+  if (ops.indicePorId(board).has(String(id))) return ops.tipoDoObjeto(ops.achaObjeto(board, id));
+  const linha = novos.get(String(id));
+  if (!linha) throw new ErroMcp(`não existe objeto com id "${id}" (nem no board.js nem nas linhas do changes.js; pcb_consultar mostra os ids de agora)`);
+  return TIPO_DO_ADD[linha.op] || linha.op;
 }
 
 module.exports = {
@@ -325,14 +317,36 @@ module.exports = {
     },
     {
       nome: 'pcb_mudancas', titulo: 'Mudanças do changes.js', leitura: true,
-      descricao: 'Lista as ops do changes.js com índice (0 = primeira), status da validação (ok/warn/err) e a mensagem. Use os índices em pcb_mudanca_remover/pcb_mudanca_editar.',
-      entrada: { type: 'object', properties: { projeto: PROJETO, so_problemas: { type: 'boolean' } }, required: ['projeto'] },
+      descricao: 'Lista as ops do changes.js com índice (0 = primeira), status da validação (ok/warn/err), a mensagem e, nas linhas *_add, o id do objeto na placa ("new-…", o mesmo do pcb_consultar). Filtros: id (do board.js ou "new-…"), ref, op (ex.: "track_add" ou "comp_"), caixa em mm (alguma coordenada da linha dentro), so_problemas; limite/pular (padrão 200). curto:true = só índice, op, status e id, sem a linha. Use os índices em pcb_mudanca_remover/pcb_mudanca_editar — ou, mais simples, pcb_apagar/pcb_editar com o id.',
+      entrada: { type: 'object', properties: { projeto: PROJETO, so_problemas: { type: 'boolean' },
+        id: { type: 'string' }, ref: { type: 'string' }, op: { type: 'string', description: 'a op inteira ou o começo dela ("comp_")' },
+        caixa: { type: 'object', properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' } } },
+        curto: { type: 'boolean' }, limite: { type: 'integer', minimum: 1, maximum: 5000 }, pular: { type: 'integer', minimum: 0 } }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const { model } = ctx.placa(p);
-        const L = model.changeItems.map(it => ({ indice: it.idx, status: it.status, msg: it.msg || undefined, op: it.ch }))
-          .filter(x => !a.so_problemas || x.status !== 'ok');
-        return { total: model.changeItems.length, validacao: ops.resumoValidacao(model, 0), mudancas: L };
+        const cx = a.caixa && { x1: Math.min(a.caixa.x1, a.caixa.x2), y1: Math.min(a.caixa.y1, a.caixa.y2), x2: Math.max(a.caixa.x1, a.caixa.x2), y2: Math.max(a.caixa.y1, a.caixa.y2) };
+        /* os pontos de uma linha: x/y, x1..y2, cx/cy, pts e des_x/des_y */
+        const pontos = ch => {
+          const P = [];
+          for (const [kx, ky] of [['x', 'y'], ['x1', 'y1'], ['x2', 'y2'], ['cx', 'cy'], ['des_x', 'des_y'], ['orig_x', 'orig_y'], ['orig_x1', 'orig_y1'], ['orig_x2', 'orig_y2']])
+            if (isNum(ch[kx]) && isNum(ch[ky])) P.push([ch[kx], ch[ky]]);
+          for (const q of (Array.isArray(ch.pts) ? ch.pts : [])) if (Array.isArray(q) && isNum(q[0]) && isNum(q[1])) P.push(q);
+          return P;
+        };
+        const idDe = it => it.target && it.target.added && it.target.eff && it.target.eff.id != null ? String(it.target.eff.id) : undefined;
+        let L = model.changeItems.filter(it => {
+          const ch = it.ch || {};
+          if (a.so_problemas && it.status === 'ok') return false;
+          if (a.ref && ch.ref !== a.ref) return false;
+          if (a.op && !String(ch.op || '').startsWith(a.op)) return false;
+          if (a.id && String(ch.id) !== a.id && idDe(it) !== a.id) return false;
+          if (cx && !pontos(ch).some(([x, y]) => x >= cx.x1 && x <= cx.x2 && y >= cx.y1 && y <= cx.y2)) return false;
+          return true;
+        }).map(it => a.curto ? { indice: it.idx, op: it.ch && it.ch.op, status: it.status, id: idDe(it) || (it.ch && it.ch.id) || undefined, ref: (it.ch && it.ch.ref) || undefined }
+                             : { indice: it.idx, status: it.status, msg: it.msg || undefined, id_na_placa: idDe(it), op: it.ch });
+        const total = L.length, ini = a.pular || 0, lim = a.limite || 200;
+        return { total_no_arquivo: model.changeItems.length, total, mostrando: [ini, Math.min(total, ini + lim)], validacao: ops.resumoValidacao(model, 0), mudancas: L.slice(ini, ini + lim) };
       },
     },
     {
@@ -413,7 +427,7 @@ module.exports = {
         est.movimentos = lista.length;
         if (repetidos.length) est.repetidos = { nota: 'o mesmo componente mais de uma vez: vale o último', refs: [...new Set(repetidos)] };
         const linhas = est.linhas || [];
-        est.linhas_total = linhas.length;
+        est.linhas_total = est.linhas_total || linhas.length;
         est.linhas = linhas.filter(l => l.status !== 'ok').slice(0, 20);
         let nTrilhas = 0;
         const det = [];
@@ -514,7 +528,7 @@ module.exports = {
         }
         const g = a.gravar ? ops.transacao(ctx, p, monta, { forcar: a.forcar, ferramenta: 'pcb_suavizar' }) : sim;
         delete g.drc;
-        g.linhas_total = (g.linhas || []).length;
+        g.linhas_total = g.linhas_total || (g.linhas || []).length;
         g.linhas = (g.linhas || []).slice(0, 12);
         out.gravacao = g;
         if (!a.gravar) out.nota = 'simulação: nada foi gravado — repita com gravar:true para trocar as trilhas';
@@ -540,7 +554,7 @@ module.exports = {
           const o = Object.assign({}, o0);
           if (a.note && !o.note) comNote(o, a);
           if (ehTexto(o)) return ops.aplicaTexto(arq, board, hc, o);
-          return ops.mescla(arq, ops.origDe(o, board)).obj;
+          return ops.aplica(arq, board, hc, o);
         }), { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_aplicar',
               relata: pedidos.length || querDrc ? (model, board, _hc, itens) => {
                 const out = {};
@@ -566,8 +580,8 @@ module.exports = {
       }, COMUNS), required: ['projeto', 'ref', 'footprint', 'x', 'y'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        const board = ctx.board(p);
-        if ((board.components || []).some(c => c.ref === a.ref)) throw new ErroMcp(`a placa já tem um ${a.ref}: escolha outro designador (ou pcb_mover para mexer no que existe)`);
+        /* a placa de AGORA: o designador que saiu por comp_del pode voltar */
+        if ((ctx.placa(p).eb.components || []).some(c => c.ref === a.ref)) throw new ErroMcp(`a placa já tem um ${a.ref}: escolha outro designador (ou pcb_mover para mexer no que existe)`);
         let nets = a.nets;
         if (nets && typeof nets === 'object') nets = Object.entries(nets).map(([pad, n]) => `${pad}=${n}`).join(';');
         const op = { op: 'comp_add', ref: a.ref, footprint: a.footprint, x: a.x, y: a.y, rot: isNum(a.rot) ? a.rot : 0, layer: a.layer || 'Top' };
@@ -586,34 +600,48 @@ module.exports = {
     },
     {
       nome: 'pcb_editar', titulo: 'Editar objeto por id',
-      descricao: 'Edita um objeto da placa pelo id (trilha t…/s…/l…, arco a…, via v…, texto x…, fill f…, pad livre, polígono): passe só os campos novos (ex.: {"w":0.5} ou {"x1":10,"y1":5}). A op certa (track_edit, arc_edit, via_edit, text_edit, fill_edit) e os orig_* saem do board.js.',
+      descricao: 'Edita um objeto da placa pelo id (trilha t…/s…/l…, arco a…, via v…, texto x…, fill f…, pad livre, polígono): passe só os campos novos (ex.: {"w":0.5} ou {"x1":10,"y1":5}). A op certa (track_edit, arc_edit, via_edit, text_edit, fill_edit) e os orig_* saem do board.js. Objeto criado pelo changes.js (id "new-…", o que o pcb_consultar mostra) tem a linha que o criou editada.',
       entrada: { type: 'object', properties: Object.assign({
         projeto: PROJETO, id: { type: 'string' },
         campos: { type: 'object', additionalProperties: true, description: 'trilha: x1,y1,x2,y2,w,layer,net · arco: cx,cy,r,sa,ea,w,layer · via: x,y,size,drill · texto: text,x,y,h,w,rot,layer,mirror · fill: x1,y1,x2,y2,rot,layer,net' },
       }, COMUNS), required: ['projeto', 'id', 'campos'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        const board = ctx.board(p);
-        const r = ops.achaObjeto(board, a.id), k = ops.tipoDoObjeto(r);
-        const opn = { track: 'track_edit', arc: 'arc_edit', via: 'via_edit', text: 'text_edit', fill: 'fill_edit', pad: 'pad_edit', poly: 'poly_edit' }[k];
-        if (!opn) throw new ErroMcp(`"${a.id}" é ${k}: não há op de edição para ele (região: apague e crie outra)`);
-        const op = comNote(Object.assign({ op: opn, id: a.id }, a.campos), a);
-        return ops.transacao(ctx, p, (arq, b) => [ops.mescla(arq, ops.origDe(op, b)).obj], { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_editar' });
+        const hc = ctx.pcbPronto();
+        let idNovo;
+        const est = ops.transacao(ctx, p, (arq, b) => {
+          const novos = ops.mapaNovos(arq, b, hc);
+          const k = tipoDoId(arq, b, hc, a.id, novos);
+          const opn = { track: 'track_edit', arc: 'arc_edit', via: 'via_edit', text: 'text_edit', fill: 'fill_edit', pad: 'pad_edit', poly: 'poly_edit' }[k];
+          if (!opn) throw new ErroMcp(`"${a.id}" é ${k}: não há op de edição para ele (região: apague e crie outra)`);
+          const o = ops.aplica(arq, b, hc, comNote(Object.assign({ op: opn, id: a.id }, a.campos), a), novos);
+          if (/_add$/.test(o.op)) idNovo = o;
+          return [o];
+        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_editar' });
+        /* a linha *_add editada pode ter ganhado um uid agora: o id dela na placa e o de agora */
+        if (idNovo) { try { const m = ops.mapaNovos({ itens: ctx.changes(p) }, ctx.board(p), hc); m.forEach((l, id) => { if (l && idNovo.uid && l.uid === idNovo.uid) est.id = id; }); } catch (_) { /* so informativo */ } }
+        return est;
       },
     },
     {
       nome: 'pcb_apagar', titulo: 'Apagar objetos por id', destrutiva: true,
-      descricao: 'Apaga objetos da placa pelos ids (trilha/linha → track_del, arco → arc_del, via → via_del, texto → text_del, fill → fill_del, região → region_del, pad livre → pad_del, polígono → poly_del) e componentes por refs (comp_del), com os orig_* do board.js. Objeto ACRESCENTADO pelo changes.js (sem id no board.js) se apaga removendo a linha: pcb_mudanca_remover.',
+      descricao: 'Apaga objetos da placa pelos ids (trilha/linha → track_del, arco → arc_del, via → via_del, texto → text_del, fill → fill_del, região → region_del, pad livre → pad_del, polígono → poly_del) e componentes por refs (comp_del), com os orig_* do board.js. Objeto criado pelo changes.js (id "new-…", o que o pcb_consultar mostra) e componente criado por comp_add (ECO, pcb_colocar) saem tirando a linha que os criou (e as linhas dele que vêm depois).',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, ids: { type: 'array', items: { type: 'string' } }, refs: { type: 'array', items: { type: 'string' }, description: 'componentes a tirar da placa (comp_del)' } }, COMUNS), required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         if (!(a.ids || []).length && !(a.refs || []).length) throw new ErroMcp('dê ids e/ou refs');
-        return ops.transacao(ctx, p, (arq, board) => (a.refs || []).map(ref => ops.mescla(arq, ops.origDe(comNote({ op: 'comp_del', ref }, a), board)).obj).concat((a.ids || []).map(id => {
-          const r = ops.achaObjeto(board, id), k = ops.tipoDoObjeto(r);
-          const opn = { track: 'track_del', arc: 'arc_del', via: 'via_del', text: 'text_del', fill: 'fill_del', region: 'region_del', pad: 'pad_del', poly: 'poly_del' }[k];
-          if (!opn) throw new ErroMcp(`"${id}" (${k}) não se apaga pelo changes.js`);
-          return ops.mescla(arq, ops.origDe(comNote({ op: opn, id }, a), board)).obj;
-        })), { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_apagar' });
+        const hc = ctx.pcbPronto();
+        return ops.transacao(ctx, p, (arq, board) => {
+          const novos = ops.mapaNovos(arq, board, hc);
+          const tipos = (a.ids || []).map(id => tipoDoId(arq, board, hc, id, novos));
+          const out = (a.refs || []).map(ref => ops.aplica(arq, board, hc, comNote({ op: 'comp_del', ref }, a), novos));
+          return out.concat((a.ids || []).map((id, i) => {
+            const k = tipos[i];
+            const opn = { track: 'track_del', arc: 'arc_del', via: 'via_del', text: 'text_del', fill: 'fill_del', region: 'region_del', pad: 'pad_del', poly: 'poly_del' }[k];
+            if (!opn) throw new ErroMcp(`"${id}" (${k}) não se apaga pelo changes.js`);
+            return ops.aplica(arq, board, hc, comNote({ op: opn, id }, a), novos);
+          }));
+        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_apagar' });
       },
     },
     {
@@ -768,7 +796,7 @@ module.exports = {
           return out;
         }
         const g = ops.transacao(ctx, p, arq => r.ops.map(op => ops.mescla(arq, op).obj), { simular: !a.gravar, forcar: a.forcar, ferramenta: 'pcb_autorotear' });
-        g.linhas_total = (g.linhas || []).length;
+        g.linhas_total = g.linhas_total || (g.linhas || []).length;
         g.linhas = (g.linhas || []).slice(0, 12);
         out.gravacao = g;
         if (!a.gravar) out.nota = 'simulação: nada foi gravado — repita com gravar:true para escrever as ' + r.ops.length + ' linhas no changes.js';
@@ -829,7 +857,7 @@ module.exports = {
           return out;
         }
         const g = ops.transacao(ctx, p, arq => r.ops.map(op => ops.mescla(arq, op).obj), { simular: !a.gravar, forcar: a.forcar, ferramenta: 'pcb_fanout' });
-        g.linhas_total = (g.linhas || []).length;
+        g.linhas_total = g.linhas_total || (g.linhas || []).length;
         g.linhas = (g.linhas || []).slice(0, 12);
         out.gravacao = g;
         if (!a.gravar) out.nota = 'simulação: nada foi gravado — repita com gravar:true para escrever as ' + r.ops.length + ' linhas no changes.js';
