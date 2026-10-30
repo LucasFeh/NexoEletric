@@ -4581,6 +4581,15 @@ async function loadProject(id) {
   S.bom = bomLoad(id); bomFeito = null;               /* idem o BOM */
   libUse = null; libUseFor = null;        /* o cruzamento com a lib e por projeto */
   if (trocouProjeto) { S.lib.sel = null; S.lib.fpShown = null; }
+  /* as vistas das abas que nao estao na frente (Esquema, PCB, Gerber, a placa do Neoden)
+     ficavam vivas e escondidas com o projeto ANTERIOR, cada uma relendo o disco a cada aviso.
+     Trocou de projeto, saem; a da frente o renderPanes remonta, as outras quando a aba abrir. */
+  if (trocouProjeto) {
+    document.querySelectorAll('.pane[data-pane="esquema"], .pane[data-pane="pcb"], .pane[data-pane="gerber"]')
+      .forEach(p => { p.textContent = ''; delete p.dataset.proj; });
+    const nd = $('#ndViewport');
+    if (nd) { nd.textContent = ''; delete nd.dataset.proj; }
+  }
   $('#ndSearch').value = ''; $('#ndKind').value = '';
   syncURL();
   renderAll();
@@ -4607,7 +4616,7 @@ async function selectProject(id) {
    - o PROJETO (loadProject): esse troca o que está aberto e descartaria trabalho. Com
      qualquer coisa suja ele fica suprimido, como antes — quem avisa e quem salva é o
      usuário. */
-window.__hubOnChange = async function () {
+window.__hubOnChange = async function (info) {
   /* HUB QUE ABRIU SEM PROJETO NENHUM (pasta nova: antes do primeiro export do Altium, ou de
      uma importacao do servidor no app desktop). Nao ha o que recarregar no lugar — o
      renderTabs abaixo le proj().stats e quebrava aqui com "reading 'stats'", antes de
@@ -4616,6 +4625,14 @@ window.__hubOnChange = async function () {
   if (!proj()) {
     const idx = await API.index();
     if (idx.projects && idx.projects.length) location.reload();
+    return;
+  }
+  /* SO OUTRO PROJETO MUDOU (o aviso diz quais; hubserver.py » _escopos): a sincronia do NexoBD
+     baixa arquivos dos 17 projetos e o MCP grava num so. Reler e redesenhar o projeto aberto a
+     cada um desses travava a janela inteira; basta a lista de projetos em dia. */
+  if (window.__hubAvisoToca && !window.__hubAvisoToca(info, proj().name)) {
+    const idx = await API.index();
+    if (idx.projects && idx.projects.some(p => p.id === S.projId)) { S.projects = idx.projects; renderHeader(); }
     return;
   }
   /* a receita de invalidação é a mesma do onApplied do libsync (a sincronização com o

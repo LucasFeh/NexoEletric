@@ -63,12 +63,20 @@ PDF_DIR = 'PDF'
 app = Flask(__name__)
 _version = 0           # incrementa a cada mudanca detectada
 _version_lock = threading.Lock()
+# O QUE mudou em cada versao: {versao: set de escopos ('Libs', 'projects.js', 'Projects/<nome>')}
+# ou None (tudo: o Nexo Hub conectou ou caiu). O aviso do SSE leva os escopos, e a pagina de um
+# projeto que nao mudou nao rele nada -- a sincronia do NexoBD baixa arquivos dos 17 projetos e
+# cada gravacao do MCP fazia o hub reler e redesenhar o projeto aberto, travando a janela.
+_escopos = {}
+MAX_ESCOPOS = 200
 
 LIVE_JS = b"""/* hubserver: auto-reload via SSE (injetado; nao existe como arquivo) */
 (function(){
-  /* paginas de edicao definem __hubOnChange p/ nao perder trabalho nao salvo */
-  function avisa(w){
-    if (w.__hubOnChange) { w.__hubOnChange(); return; }
+  /* paginas de edicao definem __hubOnChange p/ nao perder trabalho nao salvo. `info` e o
+     {v, o} do aviso: `o` = escopos que mudaram ('Libs', 'projects.js', 'Projects/<nome>'),
+     ausente = tudo. Quem nao olha o `info` continua como antes. */
+  function avisa(w, info){
+    if (w.__hubOnChange) { w.__hubOnChange(info); return; }
     w.location.reload();
   }
   /* UMA conexao por janela, e nao uma por documento. Este script entra em todo .html servido,
@@ -77,20 +85,37 @@ LIVE_JS = b"""/* hubserver: auto-reload via SSE (injetado; nao existe como arqui
      sincronismo + o do chat ja sao 6, e o fetch seguinte fica na fila para sempre -- o hub
      parece travado. Agora o iframe se registra e quem escuta e a janela de cima, que repassa
      o aviso a cada iframe registrado, na mesma ordem de antes (cada um decide o seu). */
-  function repassa(w){
+  function repassa(w, info){
     for (var i = 0; i < w.frames.length; i++) {
       try {
         var f = w.frames[i];
-        if (f.__hubLiveFilho) { repassa(f); avisa(f); }
+        if (f.__hubLiveFilho) { repassa(f, info); avisa(f, info); }
       } catch (e) {}
     }
   }
+  /* O aviso `info` toca o projeto `proj` (o nome da pasta em Projects/)? Sem lista = tudo mudou;
+     a biblioteca e o projects.js tocam todos. Para a pagina de um projeto ignorar o aviso de
+     outro (a sincronia do NexoBD baixa os 17; o MCP grava num so). */
+  window.__hubAvisoToca = function(info, proj){
+    if (!info || !info.o || !info.o.length) return true;
+    var alvo = proj ? ('projects/' + proj).toLowerCase() : null;
+    for (var i = 0; i < info.o.length; i++) {
+      var o = String(info.o[i]).toLowerCase();
+      if (o === 'libs' || o === 'projects.js' || o === alvo) return true;
+    }
+    return false;
+  };
   var topo = null;
   try { if (window.top !== window && window.top.__hubLive) topo = window.top; } catch (e) {}
   if (topo) { window.__hubLiveFilho = true; return; }
   window.__hubLive = true;
   var es = new EventSource('/__events');
-  es.addEventListener('change', function(){ repassa(window); avisa(window); });
+  es.addEventListener('change', function(ev){
+    var info = null;
+    try { info = JSON.parse(ev.data); } catch (e) {}
+    if (!info || typeof info !== 'object') info = null;
+    repassa(window, info); avisa(window, info);
+  });
   /* EventSource reconecta sozinho se o servidor cair/voltar */
 })();
 """
@@ -129,8 +154,36 @@ def _snapshot():
     return snap
 
 
-def _watcher():
+def _escopo(path):
+    """'Libs', 'projects.js' ou 'Projects/<nome>' do arquivo visto pelo _snapshot()"""
+    rel = os.path.relpath(path, ROOT).replace('\\', '/')
+    partes = rel.split('/')
+    if partes[0] == 'Projects' and len(partes) > 2:
+        return 'Projects/' + partes[1]
+    return partes[0]
+
+
+def _sobe_versao(escopos):
+    """escopos = set ou None (tudo). So chamada com o _version_lock na mao."""
     global _version
+    _version += 1
+    _escopos[_version] = escopos
+    for v in [v for v in _escopos if v <= _version - MAX_ESCOPOS]:
+        del _escopos[v]
+
+
+def _escopos_desde(visto, atual):
+    """os escopos das versoes (visto, atual]; None = tudo (alguma foi None ou ja saiu da janela)"""
+    junta = set()
+    for v in range(visto + 1, atual + 1):
+        e = _escopos.get(v)
+        if e is None:
+            return None
+        junta |= e
+    return junta
+
+
+def _watcher():
     prev = _snapshot()
     while True:
         time.sleep(WATCH_INTERVAL)
@@ -139,9 +192,10 @@ def _watcher():
         except Exception:
             continue
         if cur != prev:
+            mudou = {k for k in set(cur) | set(prev) if cur.get(k) != prev.get(k)}
             prev = cur
             with _version_lock:
-                _version += 1
+                _sobe_versao({_escopo(p) for p in mudou})
 
 
 # Sem o Nexo Hub, nada de projeto nem de biblioteca (nexohub_gate.py): o app desktop so mostra o que
@@ -150,9 +204,8 @@ import nexohub_gate                  # noqa: E402
 
 
 def _hub_mudou(_ok):
-    global _version
     with _version_lock:
-        _version += 1
+        _sobe_versao(None)
 
 
 @app.before_request
@@ -195,9 +248,13 @@ def events():
             time.sleep(0.5)
             with _version_lock:
                 cur = _version
+                escopos = _escopos_desde(seen, cur) if cur != seen else None
             if cur != seen:
                 seen = cur
-                yield 'event: change\ndata: %d\n\n' % cur
+                info = {'v': cur}
+                if escopos is not None:
+                    info['o'] = sorted(escopos)
+                yield 'event: change\ndata: %s\n\n' % json.dumps(info)
                 last_beat = time.time()
             elif time.time() - last_beat >= HEARTBEAT:
                 yield ': keep-alive\n\n'

@@ -76,6 +76,7 @@ def _gate(url):
     os.environ['NEXOHUB_URL'] = url
     import nexohub_gate as G
     G._estado['conectado'] = None
+    G._estado['falhas'] = 0
     return G
 
 
@@ -89,6 +90,9 @@ def test_conectado_nao_bloqueia_e_desconectado_esvazia():
         assert G.bloqueia('/Libs/pcblib.js') is None
         ESTADO['saude'] = {'ok': True, 'bd': {'ok': False}}
         mudou = []
+        for _ in range(G.FALHAS_PARA_CAIR - 1):
+            G.atualiza(mudou.append)
+        assert mudou == [] and G.conectado(), 'uma falha passageira nao pode esvaziar o hub'
         G.atualiza(mudou.append)
         assert mudou == [False]
         corpo, st, _ = G.bloqueia('/api/index.json')
@@ -106,6 +110,38 @@ def test_conectado_nao_bloqueia_e_desconectado_esvazia():
     G.atualiza()                                   # Hub fora do ar
     assert not G.conectado() and 'fora do ar' in G.estado()['erro']
     assert json.loads(G.bloqueia('/api/index.json')[0])['projects'] == []
+
+
+def test_falha_passageira_nao_derruba():
+    """O Hub ocupado (envio de revisao a cada gravacao do MCP) demora na saude de vez em quando.
+    Antes, UMA sonda perdida virava 'sem Hub': todas as paginas recarregavam vazias (tela preta)
+    e de novo na volta. Agora cai so com FALHAS_PARA_CAIR seguidas e volta na primeira boa."""
+    srv, url = _sobe()
+    try:
+        G = _gate(url)
+        ESTADO['saude'] = {'ok': True, 'bd': {'ok': True}}
+        mudou = []
+        assert G.atualiza(mudou.append)
+        ESTADO['saude'] = {'ok': False, 'erro': 'NexoBD fora do ar: sem resposta'}
+        for _ in range(G.FALHAS_PARA_CAIR - 1):
+            assert G.atualiza(mudou.append)
+            assert G.bloqueia('/api/index.json') is None and G.estado()['erro'] == ''
+        assert G._espera() == G.CICLO_CONFIRMA, 'com falha por confirmar a proxima sonda vem logo'
+        ESTADO['saude'] = {'ok': True, 'bd': {'ok': True}}
+        assert G.atualiza(mudou.append) and G.estado()['falhas'] == 0 and G._espera() == G.CICLO
+        assert mudou == [], 'falhas nao seguidas nao derrubam'
+        ESTADO['saude'] = {'ok': False}
+        for _ in range(G.FALHAS_PARA_CAIR):
+            G.atualiza(mudou.append)
+        assert mudou == [False] and not G.conectado()
+        G.atualiza(mudou.append)
+        assert mudou == [False], 'ja fora: nao avisa de novo'
+        ESTADO['saude'] = {'ok': True, 'bd': {'ok': True}}
+        G.atualiza(mudou.append)
+        assert mudou == [False, True], 'volta na primeira sonda boa'
+    finally:
+        srv.shutdown()
+        ESTADO['saude'] = {'ok': True, 'bd': {'ok': True}}
 
 
 def test_fora_do_app_desktop_nada_muda():
@@ -144,6 +180,7 @@ def test_hubserver_sincroniza_pelo_hub():
 
 if __name__ == '__main__':
     test_conectado_nao_bloqueia_e_desconectado_esvazia()
+    test_falha_passageira_nao_derruba()
     test_fora_do_app_desktop_nada_muda()
     test_hubserver_sincroniza_pelo_hub()
     print('ok')

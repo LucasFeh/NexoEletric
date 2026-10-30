@@ -7097,7 +7097,9 @@ async function discoMudou(){
   if (s !== null) { if (boardSig === null) boardSig = s; else if (s !== boardSig) m.push('board.js'); }
   return m;
 }
-window.__hubOnChange = function(){
+window.__hubOnChange = function(info){
+  /* aviso de OUTRO projeto (hubserver » __hubAvisoToca): nem baixa o changes.js para comparar */
+  if (PROJ && window.__hubAvisoToca && !window.__hubAvisoToca(info, PROJ)) return;
   discoMudou().then(lista => {
     if (!lista.length) return;
     if (!chDirty && !annDirty) { HubDialog.ocioso().then(() => location.reload()); return; }

@@ -21,7 +21,15 @@ import time
 import urllib.request
 
 CICLO = 5.0
-TIMEOUT = 3.0
+# Acima dos 4 s que o Nexo Hub espera o NexoBD na saude dele (ponte/ponte.mjs): com 3 s aqui, um
+# NexoBD lento fazia a gente desistir antes de o Hub responder.
+TIMEOUT = 6.0
+# Uma sonda que falha nao derruba: com o Hub e o NexoBD ocupados (o envio de revisao a cada
+# gravacao do MCP), a saude passava do tempo, o hub virava "sem Hub" e TODAS as paginas
+# recarregavam vazias (a tela preta), e de novo na sonda seguinte. Cai so com FALHAS_PARA_CAIR
+# seguidas, conferidas a cada CICLO_CONFIRMA; volta na primeira que responde.
+FALHAS_PARA_CAIR = 3
+CICLO_CONFIRMA = 2.0
 URL_PADRAO = 'http://127.0.0.1:47800'
 MSG = 'sem conexão com o Nexo Hub: os projetos e a biblioteca só aparecem com ele conectado'
 
@@ -29,7 +37,7 @@ MSG = 'sem conexão com o Nexo Hub: os projetos e a biblioteca só aparecem com 
 # que vai direto ao Odoo
 LIVRES_API = ('/api/lista/', '/api/mcp/', '/api/config', '/api/nexohub/')
 
-_estado = {'conectado': None, 'erro': '', 'quando': 0.0}
+_estado = {'conectado': None, 'erro': '', 'quando': 0.0, 'falhas': 0}
 _trava = threading.Lock()
 
 
@@ -77,17 +85,28 @@ def conectado():
 
 def estado():
     return {'conectado': bool(_estado['conectado']), 'erro': _estado['erro'],
-            'quando': _estado['quando'], 'ligado': ligado()}
+            'quando': _estado['quando'], 'ligado': ligado(), 'falhas': _estado['falhas']}
 
 
 def atualiza(aviso=None):
     ok, erro = sonda()
     with _trava:
-        mudou = _estado['conectado'] is not None and _estado['conectado'] != ok
-        _estado.update(conectado=ok, erro=erro, quando=time.time())
+        antes = _estado['conectado']
+        falhas = 0 if ok else _estado['falhas'] + 1
+        if not ok and antes and falhas < FALHAS_PARA_CAIR:
+            agora, erro = True, ''      # falha ainda nao confirmada: segue conectado
+        else:
+            agora = ok                  # respondeu, ou ja estava fora, ou e a 1a medida, ou confirmou
+        mudou = antes is not None and antes != agora
+        _estado.update(conectado=agora, erro=erro, quando=time.time(), falhas=falhas)
     if mudou and aviso:
-        aviso(ok)
-    return ok
+        aviso(agora)
+    return agora
+
+
+def _espera():
+    """conectado com uma falha por confirmar: confere logo; senao, o ciclo normal"""
+    return CICLO_CONFIRMA if _estado['conectado'] and _estado['falhas'] else CICLO
 
 
 def inicia(aviso):
@@ -100,7 +119,7 @@ def inicia(aviso):
                 atualiza(aviso)
             except Exception:                                # noqa: BLE001
                 pass
-            time.sleep(CICLO)
+            time.sleep(_espera())
     threading.Thread(target=laco, daemon=True).start()
 
 

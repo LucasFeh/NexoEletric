@@ -4,6 +4,27 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.51.1 — 2026-10-30
+
+A tela preta que aparecia de vez em quando com o MCP em uso.
+- **O "sem Nexo Hub" não dispara mais por uma demora**: o hub perguntava ao Nexo Hub a cada 5 s, esperava 3 s, e
+  bastava **uma** resposta lenta para virar "sem Hub". Com isso, todas as páginas recarregavam vazias (a tela preta)
+  e recarregavam de novo na volta, 15 s ou mais cada vez. A demora vinha do Hub e do NexoBD ocupados com o envio de
+  revisão que cada gravação do MCP faz. Agora:
+  - a espera é de 6 s, acima dos 4 s que o próprio Nexo Hub espera o NexoBD;
+  - só vira "sem Hub" com 3 falhas seguidas (conferidas a cada 2 s);
+  - volta na primeira resposta boa.
+- **O aviso de "disco mudou" diz qual projeto mudou**: antes ele mandava só um número, e cada arquivo que a sincronia
+  do NexoBD baixava de qualquer um dos projetos (ou cada gravação do MCP) fazia o hub reler e redesenhar o projeto
+  aberto, e as vistas Esquema e PCB reconferirem os arquivos e a biblioteca. Agora:
+  - o hub e as vistas ignoram o aviso de outro projeto;
+  - a biblioteca (`Libs`) e o `projects.js` continuam valendo para todos;
+  - aviso sem lista (o Nexo Hub conectou ou caiu) continua recarregando tudo.
+- **Trocar de projeto fecha as vistas escondidas do anterior**: Esquema, PCB, Gerber e a placa do Neoden ficavam
+  vivas, escondidas, com o projeto antigo e relendo o disco a cada aviso. Agora saem na troca e voltam quando a aba
+  abrir.
+- Testes: `tests/test_nexohub_gate.py` (falha passageira não derruba) e `tests/test_hubapi.py` (escopos do aviso).
+
 ## 1.51.0 — 2026-10-30
 
 Mover levando as trilhas, teardrops que acompanham e a colisão medida pelo cobre (etapa C do relato da PCB1).

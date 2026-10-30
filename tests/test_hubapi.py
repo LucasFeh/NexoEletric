@@ -39,6 +39,25 @@ assert live.index('__hubLiveFilho = true; return;') < live.index('new EventSourc
     'o iframe registrado nao pode abrir a propria conexao'
 assert '__hubOnChange' in live, 'quem tem trabalho nao salvo continua decidindo o proprio reload'
 
+# O aviso diz QUAIS projetos mudaram ({v, o} no data do SSE): a pagina de um projeto ignora o de
+# outro. Antes era so o numero, e cada arquivo que a sincronia do NexoBD baixava de QUALQUER
+# projeto (ou cada gravacao do MCP) fazia o hub reler e redesenhar o projeto aberto.
+assert '__hubAvisoToca' in live and '__hubOnChange(info)' in live
+assert H._escopo(os.path.join(H.ROOT, 'Projects', 'P1', 'changes.js')) == 'Projects/P1'
+assert H._escopo(os.path.join(H.ROOT, 'Projects', 'P1', '3d', 'x.step')) == 'Projects/P1'
+assert H._escopo(os.path.join(H.ROOT, 'Libs', 'schlib.js')) == 'Libs'
+assert H._escopo(os.path.join(H.ROOT, 'projects.js')) == 'projects.js'
+with H._version_lock:
+    v0 = H._version
+    H._sobe_versao({'Projects/P1'})
+    H._sobe_versao({'Libs'})
+    assert H._escopos_desde(v0, H._version) == {'Projects/P1', 'Libs'}, 'versoes juntas somam'
+    assert H._escopos_desde(v0 - H.MAX_ESCOPOS, v0 + 2) is None, 'fora da janela = tudo'
+    H._sobe_versao(None)                       # o Nexo Hub conectou/caiu: tudo
+    assert H._escopos_desde(v0, H._version) is None
+    H._sobe_versao({'Projects/P2'})
+    assert H._escopos_desde(H._version - 1, H._version) == {'Projects/P2'}
+
 # --host 127.0.0.1 (app desktop): so o Host: de loopback passa. Um dominio que resolve para
 # 127.0.0.1 (DNS rebinding) nao pode ler o hub-almox.json nem falar com o chat.
 try:

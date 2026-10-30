@@ -5817,8 +5817,8 @@ function fazAcao(id){
 /* O schematic.js do disco ainda e o que esta aba tem?
 
    `schDiskSnapshot` guarda os bytes EXATOS da ultima leitura ou da ultima gravacao, entao a
-   comparacao responde isso sem margem. Ela existe porque o aviso do hubserver e um contador
-   de versao e nao diz QUAL arquivo mudou (hubserver.py » /__events manda so o numero).
+   comparacao responde isso sem margem. Ela existe porque o aviso do hubserver diz o PROJETO
+   que mudou, mas nao QUAL arquivo dele (hubserver.py » /__events manda os escopos).
 
    Falha de leitura responde NAO: um erro de rede nao e motivo para recarregar a pagina por
    cima do que a pessoa esta fazendo. Sem servidor (file://) nao ha disco que mude por baixo. */
@@ -5830,7 +5830,9 @@ async function schemaDoDiscoMudou(){
   if (schDiskSnapshot === null){ schDiskSnapshot = atual; return false; }   /* sem base: adota e segue */
   return atual !== schDiskSnapshot;
 }
-window.__hubOnChange = function(){
+window.__hubOnChange = function(info){
+  /* aviso de OUTRO projeto (hubserver » __hubAvisoToca; a biblioteca toca todos): nada a fazer */
+  if (window.__hubAvisoToca && !window.__hubAvisoToca(info, SCH_P)) return;
   /* COM O MODAL ABERTO a página não pode recarregar. O "Editar símbolo ↗" abriu o editor numa
      aba própria justamente para esta ficar de pé; recarregar aqui fecharia o modal e o usuário
      salvaria lá para perder a tela de cá. Recarrega a BIBLIOTECA e redesenha o modal. */
