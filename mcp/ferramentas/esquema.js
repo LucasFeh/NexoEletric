@@ -42,16 +42,19 @@ function transacao(ctx, p, fn, opts) {
   const L = ctx.libsDe(arq.valor);
   if (arq.valor === undefined) throw new ErroMcp(`o projeto "${p.nome}" não tem schematic.js (projeto_criar faz um)`);
   const cab = Object.assign({}, arq.valor); delete cab.items;
-  const antes = hc.validateSchematic(Object.assign({}, cab, { items: arq.itens.slice() }), L.schlib, L.pcblib);
+  const sch0 = Object.assign({}, cab, { items: arq.itens.slice() });
+  const antes = hc.validateSchematic(sch0, L.schlib, L.pcblib, netsOuNada(hc, sch0, L));
   const tocados = fn(arq, L) || [];
   const sch = Object.assign({}, cab, { items: arq.itens });
-  const v = hc.validateSchematic(sch, L.schlib, L.pcblib);
+  const nx = netsOuNada(hc, sch, L);
+  const v = hc.validateSchematic(sch, L.schlib, L.pcblib, nx);
   const ja = new Set(antes.errors), jaAv = new Set(antes.warnings);
   const novos = v.errors.filter(e => !ja.has(e));
   const ser = hc.serializeSchematic(sch);
   for (const e of ser.errors || []) novos.push((e.idx >= 0 ? `item #${e.idx}: ` : '') + e.msg);
   let nets = null;
-  try { const n = hc.extractNets(sch, L.schlib); nets = { total: n.nets.length, avisos: n.warnings.slice(0, 15) }; } catch (e) { nets = { erro: e.message }; }
+  if (nx) nets = { total: nx.nets.length, avisos: nx.warnings.slice(0, 15) };
+  else { try { hc.extractNets(sch, L.schlib); } catch (e) { nets = { erro: e.message }; } }
   const estado = {
     ok: !novos.length, gravado: false, arquivo: ctx.rel(p.arq('schematic.js')), itens_no_arquivo: arq.itens.length,
     tocados: tocados.map(t => ({ indice: arq.itens.indexOf(t), item: t })),
@@ -65,6 +68,59 @@ function transacao(ctx, p, fn, opts) {
   estado.gravado = ctx.grava(p.arq('schematic.js'), texto, o.ferramenta);
   return estado;
 }
+
+/* o extractNets para a validacao (pinos sem ligacao, pontas soltas); esquema quebrado = null */
+function netsOuNada(hc, sch, L) { try { return hc.extractNets(sch, L.schlib); } catch (_) { return null; } }
+
+/* o prefixo do designador: "R12" -> "R", "CI4" -> "CI", "RV1" -> "RV" */
+const prefixoDe = ref => String(ref || '').replace(/[0-9].*$/, '').toUpperCase();
+/* filtro de componente: ref exato, lista de refs, ou prefixo do designador ("R" = todos os
+   resistores, sem pegar RV1 nem o "C" de CI1) */
+function casaRef(a) {
+  const refs = Array.isArray(a.refs) && a.refs.length ? new Set(a.refs.map(String)) : null;
+  const pref = a.prefixo ? String(a.prefixo).toUpperCase() : '';
+  return ref => (!a.ref || ref === a.ref) && (!refs || refs.has(ref)) && (!pref || prefixoDe(ref) === pref);
+}
+const FILTRO_REF = {
+  ref: { type: 'string', description: 'designador exato (R5)' },
+  refs: { type: 'array', items: { type: 'string' }, description: 'lista de designadores' },
+  prefixo: { type: 'string', description: 'prefixo do designador: "R" = R1, R2... (não pega RV1 nem CI1 no "C")' },
+};
+/* o item tem um ponto em (x,y)? ancora (rotulo, power, port, juncao, No ERC, texto, comp) ou,
+   no fio, um vertice ou um ponto de um segmento */
+function itemEm(it, x, y) {
+  const T = 0.5;
+  if (!it) return false;
+  if (it.t === 'wire') {
+    const p = it.pts || [];
+    for (let i = 0; i < p.length; i++) {
+      if (Math.abs(p[i][0] - x) <= T && Math.abs(p[i][1] - y) <= T) return true;
+      if (i && distSeg(x, y, p[i - 1], p[i]) <= T) return true;
+    }
+    return false;
+  }
+  return isNum(it.x) && isNum(it.y) && Math.abs(it.x - x) <= T && Math.abs(it.y - y) <= T;
+}
+function distSeg(x, y, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+  const t = L2 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / L2)) : 0;
+  return Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy));
+}
+/* os indices que um alvo {t?, x, y, folha?, net?} acha (sch_apagar/sch_editar sem depender de indice) */
+function achaEm(itens, alvo) {
+  if (!alvo || !isNum(alvo.x) || !isNum(alvo.y)) throw new ErroMcp('cada alvo de "em" precisa de x e y (mil)');
+  const r = [];
+  itens.forEach((it, i) => {
+    if (!it || it.t === 'sheet') return;
+    if (alvo.t && it.t !== alvo.t) return;
+    if (alvo.folha && it.sheet !== alvo.folha) return;
+    if (alvo.net && it.net !== alvo.net) return;
+    if (itemEm(it, alvo.x, alvo.y)) r.push(i);
+  });
+  return r;
+}
+const ALVO_EM = { type: 'array', items: { type: 'object', properties: { t: { type: 'string', enum: TIPOS_ITEM }, x: { type: 'number' }, y: { type: 'number' }, folha: { type: 'string' }, net: { type: 'string' } }, required: ['x', 'y'] },
+  description: 'achar pelo lugar em vez do índice (que muda depois de cada sch_apagar): [{t:"wire", x, y}] pega o fio que passa ou tem vértice em (x,y); rótulo/power/port/junção/No ERC/texto pela âncora. t, folha e net estreitam.' };
 
 /* o proximo designador livre para o prefixo ("R" -> R7) */
 function proximoRef(itens, prefixo) {
@@ -120,10 +176,13 @@ module.exports = {
   ferramentas: [
     {
       nome: 'sch_ler', titulo: 'Ler itens do esquema', leitura: true,
-      descricao: 'Lista os itens do schematic.js com o índice de cada um (para sch_editar/sch_apagar). Filtros: folha, tipo (comp, wire, netlabel, power, port, junction, noerc, text, sheet), ref, caixa em mil.',
-      entrada: { type: 'object', properties: { projeto: PROJETO, folha: { type: 'string' }, tipo: { type: 'string', enum: TIPOS_ITEM }, ref: { type: 'string' },
+      descricao: 'Lista os itens do schematic.js com o índice de cada um (para sch_editar/sch_apagar). Filtros: folha, tipo (comp, wire, netlabel, power, port, junction, noerc, text, sheet), ref/refs/prefixo (componentes), net (rótulo/power/port), caixa em mil. cabecalho: "resumo" (padrão: os campos do arquivo e os NOMES dos símbolos guardados), "completo" (com o desenho de cada símbolo — grande; sym_ler mostra um só) ou "nenhum". campos limita os campos de cada item.',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, folha: { type: 'string' }, tipo: { type: 'string', enum: TIPOS_ITEM } }, FILTRO_REF, {
+        net: { type: 'string' },
         caixa: { type: 'object', properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' } } },
-        limite: { type: 'integer', minimum: 1, maximum: 3000 }, pular: { type: 'integer', minimum: 0 } }, required: ['projeto'] },
+        cabecalho: { type: 'string', enum: ['resumo', 'completo', 'nenhum'] },
+        campos: { type: 'array', items: { type: 'string' }, description: 'só estes campos de cada item (t e sheet vêm sempre), ex.: ["ref","sym","x","y"]' },
+        limite: { type: 'integer', minimum: 1, maximum: 3000 }, pular: { type: 'integer', minimum: 0 } }), required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const s = ctx.schematic(p);
@@ -133,29 +192,66 @@ module.exports = {
           const pts = it.pts || (isNum(it.x) ? [[it.x, it.y]] : []);
           return pts.some(q => q[0] >= Math.min(cx.x1, cx.x2) && q[0] <= Math.max(cx.x1, cx.x2) && q[1] >= Math.min(cx.y1, cx.y2) && q[1] <= Math.max(cx.y1, cx.y2));
         };
+        const porRef = a.ref || a.refs || a.prefixo ? casaRef(a) : null;
         const L = (s.items || []).map((it, indice) => ({ indice, item: it }))
-          .filter(x => (!a.folha || x.item.sheet === a.folha || x.item.name === a.folha) && (!a.tipo || x.item.t === a.tipo) && (!a.ref || x.item.ref === a.ref) && dentro(x.item));
+          .filter(x => (!a.folha || x.item.sheet === a.folha || x.item.name === a.folha) && (!a.tipo || x.item.t === a.tipo)
+            && (!porRef || (x.item.t === 'comp' && porRef(x.item.ref))) && (!a.net || x.item.net === a.net) && dentro(x.item));
         const ini = a.pular || 0, lim = a.limite || 300;
-        const cab = Object.assign({}, s); delete cab.items;
-        return { cabecalho: cab, total: L.length, mostrando: [ini, Math.min(L.length, ini + lim)], itens: L.slice(ini, ini + lim) };
+        const corta = it => {
+          if (!Array.isArray(a.campos) || !a.campos.length) return it;
+          const o = { t: it.t, sheet: it.sheet };
+          for (const k of a.campos) if (k in it) o[k] = it[k];
+          return o;
+        };
+        const r = { total: L.length, mostrando: [ini, Math.min(L.length, ini + lim)], itens: L.slice(ini, ini + lim).map(x => ({ indice: x.indice, item: corta(x.item) })) };
+        const modo = a.cabecalho || 'resumo';
+        if (modo !== 'nenhum') {
+          const cab = Object.assign({}, s); delete cab.items;
+          if (modo === 'resumo' && Array.isArray(cab.symbols)) { cab.simbolos_guardados = cab.symbols.map(x => x && x.name); delete cab.symbols; }
+          r.cabecalho = cab;
+        }
+        return r;
       },
     },
     {
       nome: 'sch_componentes', titulo: 'Componentes e pinos', leitura: true,
-      descricao: 'Os componentes do esquema com a PONTA QUENTE de cada pino em coordenada da folha (onde o fio tem de encostar) e a net em que cada pino está. Use antes de desenhar fios.',
-      entrada: { type: 'object', properties: { projeto: PROJETO, ref: { type: 'string' } }, required: ['projeto'] },
+      descricao: 'Os componentes do esquema com a PONTA QUENTE de cada pino em coordenada da folha (onde o fio tem de encostar) e a net em que cada pino está (solto: true = pino sem ligação: nenhum fio, rótulo ou outro pino; No ERC na ponta não conta). Use antes de desenhar fios. Filtros: ref, refs, prefixo ("R" = todos os resistores), folha. pinos: "todos" (padrão), "soltos" (só os sem ligação; some o componente que não tem nenhum) ou "nenhum". campos limita os campos de cada componente.',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO }, FILTRO_REF, { folha: { type: 'string' },
+        pinos: { type: 'string', enum: ['todos', 'soltos', 'nenhum'] },
+        campos: { type: 'array', items: { type: 'string' }, description: 'ex.: ["ref","sym","comment","footprint"] (ref vem sempre)' } }), required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const s = ctx.schematic(p), L = ctx.libsDe(s), hc = ctx.hc;
         let pinNet = {};
-        try { pinNet = hc.extractNets(s, L.schlib).pinNet || {}; } catch (_) { /* esquema quebrado: segue sem nets */ }
-        const comps = (s.items || []).map((it, indice) => ({ it, indice })).filter(x => x.it.t === 'comp' && (!a.ref || x.it.ref === a.ref));
-        if (a.ref && !comps.length) throw new ErroMcp(`componente "${a.ref}" não está no esquema`);
-        return { componentes: comps.map(({ it, indice }) => {
+        const soltos = new Set();
+        try {
+          const n = hc.extractNets(s, L.schlib);
+          pinNet = n.pinNet || {};
+          for (const q of n.pinosSoltos || []) soltos.add(q.ref + '-' + q.num);
+        } catch (_) { /* esquema quebrado: segue sem nets */ }
+        const porRef = casaRef(a), modo = a.pinos || 'todos';
+        const comps = (s.items || []).map((it, indice) => ({ it, indice })).filter(x => x.it.t === 'comp' && porRef(x.it.ref) && (!a.folha || x.it.sheet === a.folha));
+        if ((a.ref || a.refs || a.prefixo) && !comps.length) throw new ErroMcp(`nenhum componente com ${a.ref ? '"' + a.ref + '"' : a.prefixo ? 'o prefixo "' + a.prefixo + '"' : 'esses refs'} no esquema`);
+        const out = [];
+        for (const { it, indice } of comps) {
           const P = hc.compPinsWorld(it, L.schlib);
-          return { indice, ref: it.ref, sym: it.sym, part: it.part || 1, sheet: it.sheet, x: it.x, y: it.y, rot: it.rot, mirror: !!it.mirror, footprint: it.footprint, comment: it.comment,
-                   simbolo_encontrado: !!P, pinos: (P || []).map(q => ({ num: q.num, name: q.name, x: q.x, y: q.y, net: pinNet[it.ref + '-' + q.num] || '' })) };
-        }) };
+          let pinos = (P || []).map(q => {
+            const k = it.ref + '-' + q.num, o = { num: q.num, name: q.name, x: q.x, y: q.y, net: pinNet[k] || '' };
+            if (soltos.has(k)) o.solto = true;
+            return o;
+          });
+          if (modo === 'soltos') { pinos = pinos.filter(q => q.solto); if (!pinos.length && P) continue; }
+          let c = { indice, ref: it.ref, sym: it.sym, part: it.part || 1, sheet: it.sheet, x: it.x, y: it.y, rot: it.rot, mirror: !!it.mirror, footprint: it.footprint, comment: it.comment,
+                    simbolo_encontrado: !!P };
+          if (modo !== 'nenhum') c.pinos = pinos;
+          if (Array.isArray(a.campos) && a.campos.length) {
+            const o = { ref: c.ref };
+            for (const k of a.campos) if (k in c) o[k] = c[k];
+            c = o;
+          }
+          out.push(c);
+        }
+        return { total: out.length, componentes: out };
       },
     },
     {
@@ -184,14 +280,20 @@ module.exports = {
     },
     {
       nome: 'sch_editar', titulo: 'Editar item do esquema',
-      descricao: 'Muda campos de um item do schematic.js, achado por índice (sch_ler) ou por ref (componente). Ex.: mover {x, y}, girar {rot}, trocar {footprint}, {comment}, {sym}. remover_campos tira campos opcionais.',
+      descricao: 'Muda campos de um item do schematic.js, achado por índice (sch_ler), por ref (componente) ou pelo lugar (em: {t, x, y} — tem de achar um item só). Ex.: mover {x, y}, girar {rot}, trocar {footprint}, {comment}, {sym}. remover_campos tira campos opcionais.',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, indice: { type: 'integer', minimum: 0 }, ref: { type: 'string' }, part: { type: 'integer' },
+        em: Object.assign({}, ALVO_EM.items, { description: 'achar pelo lugar: {t:"netlabel", x, y}' }),
         campos: { type: 'object', additionalProperties: true }, remover_campos: { type: 'array', items: { type: 'string' } } }, COMUNS), required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         return transacao(ctx, p, arq => {
-          let i = isNum(a.indice) ? a.indice : arq.itens.findIndex(x => x && x.t === 'comp' && x.ref === a.ref && (!a.part || (x.part || 1) === a.part));
-          if (!(i >= 0 && i < arq.itens.length)) throw new ErroMcp('item não achado (dê indice ou ref)');
+          let i = isNum(a.indice) ? a.indice : -1;
+          if (!isNum(a.indice) && a.em) {
+            const l = achaEm(arq.itens, a.em);
+            if (l.length > 1) throw new ErroMcp(`"em" achou ${l.length} itens (índices ${l.join(', ')}): dê t, folha ou net para escolher um`);
+            i = l.length ? l[0] : -1;
+          } else if (!isNum(a.indice)) i = arq.itens.findIndex(x => x && x.t === 'comp' && x.ref === a.ref && (!a.part || (x.part || 1) === a.part));
+          if (!(i >= 0 && i < arq.itens.length)) throw new ErroMcp('item não achado (dê indice, ref ou em)');
           const n = Object.assign({}, arq.itens[i], a.campos || {});
           for (const k of a.remover_campos || []) delete n[k];
           arq.substitui(i, n);
@@ -201,15 +303,21 @@ module.exports = {
     },
     {
       nome: 'sch_apagar', titulo: 'Apagar itens do esquema', destrutiva: true,
-      descricao: 'Remove itens do schematic.js por índice e/ou por ref (todas as partes do componente). Lembre (AI-GUIDE): componente apagado do schematic.js continua na folha do Altium até alguém removê-lo lá.',
-      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, indices: { type: 'array', items: { type: 'integer', minimum: 0 } }, refs: { type: 'array', items: { type: 'string' } } }, COMUNS), required: ['projeto'] },
+      descricao: 'Remove itens do schematic.js por índice, por ref (todas as partes do componente) e/ou pelo lugar (em: [{t, x, y}] — não depende dos índices, que mudam depois de cada apagar). Lembre (AI-GUIDE): componente apagado do schematic.js continua na folha do Altium até alguém removê-lo lá.',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, indices: { type: 'array', items: { type: 'integer', minimum: 0 } }, refs: { type: 'array', items: { type: 'string' } },
+        em: ALVO_EM }, COMUNS), required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const removidos = [];
         const est = transacao(ctx, p, arq => {
           const alvo = new Set(a.indices || []);
           arq.itens.forEach((x, i) => { if (x && x.t === 'comp' && (a.refs || []).includes(x.ref)) alvo.add(i); });
-          if (!alvo.size) throw new ErroMcp('nada a apagar (dê indices ou refs)');
+          for (const e of a.em || []) {
+            const l = achaEm(arq.itens, e);
+            if (!l.length) throw new ErroMcp(`nada em (${e.x},${e.y})${e.t ? ' do tipo ' + e.t : ''}`);
+            for (const i of l) alvo.add(i);
+          }
+          if (!alvo.size) throw new ErroMcp('nada a apagar (dê indices, refs ou em)');
           for (const i of [...alvo].sort((x, y) => y - x)) { if (i >= arq.itens.length) throw new ErroMcp('índice fora: ' + i); removidos.push(arq.itens[i]); arq.remove(i); }
           return [];
         }, { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_apagar' });
@@ -243,14 +351,17 @@ module.exports = {
     },
     {
       nome: 'sch_validar', titulo: 'Validar esquema', leitura: true,
-      descricao: 'Valida o schematic.js contra as bibliotecas como a vista Esquema (símbolos, partes, footprints, pinos x pads, grade, refs duplicados) e o formato que o BuildSchematic lê.',
+      descricao: 'Valida o schematic.js contra as bibliotecas como a vista Esquema (símbolos, partes, footprints, pinos x pads e pads x pinos, grade, refs duplicados) e o formato que o BuildSchematic lê. Também acusa pino sem ligação (sem fio, rótulo nem outro pino; No ERC na ponta = de propósito), ponta de fio solta, símbolo que só casou trocando maiúsculas/acentos e a cópia de símbolo guardada no esquema que difere da biblioteca (vale a do esquema).',
       entrada: { type: 'object', properties: { projeto: PROJETO }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const s = ctx.schematic(p), L = ctx.libsDe(s);
-        const v = ctx.hc.validateSchematic(s, L.schlib, L.pcblib);
+        const n = netsOuNada(ctx.hc, s, L);
+        const v = ctx.hc.validateSchematic(s, L.schlib, L.pcblib, n);
         const ser = ctx.hc.serializeSchematic(s);
-        return { ok: !v.errors.length && !ser.errors.length, erros: v.errors, avisos: v.warnings, formato: ser.errors.map(e => e.msg), descartados: (ser.descartados || []).length };
+        return { ok: !v.errors.length && !ser.errors.length, erros: v.errors, avisos: v.warnings, formato: ser.errors.map(e => e.msg), descartados: (ser.descartados || []).length,
+                 pinos_sem_ligacao: n ? n.pinosSoltos.length : null, pontas_soltas: n ? n.pontasSoltas.length : null,
+                 simbolos_do_esquema_diferentes: L.divergentes && L.divergentes.length ? L.divergentes : undefined };
       },
     },
     {
@@ -280,12 +391,21 @@ module.exports = {
       entrada: { type: 'object', properties: { nome: { type: 'string' }, part: { type: 'integer', minimum: 1 }, projeto: Object.assign({}, PROJETO, { description: 'opcional: vale também símbolo guardado no esquema do projeto' }) }, required: ['nome'] },
       executa: async (a, ctx) => {
         const L = a.projeto ? ctx.libsDe(ctx.schematic(ctx.projeto(a.projeto))) : ctx.libs(), hc = ctx.hc;
-        const s = hc.symbolOf(L.schlib, a.nome);
+        const rs = hc.resolveSym(L.schlib, a.nome), s = rs && rs.item;
         if (!s) throw new ErroMcp(`símbolo "${a.nome}" não existe (sch_buscar_simbolo)`);
         const fp = footprintAtual(s), F = fp ? hc.footprintOf(L.pcblib, fp) : null;
-        return { sym: s.name, descricao: s.description || '', acervo: s.doDocumento ? 'projeto' : L.acervoDe.get(s.name), designador: s.designator,
+        const pinos = pinosDe(hc, s, a.part || 1);
+        const fora = pinos.filter(q => q.ponta_quente[0] % 100 || q.ponta_quente[1] % 100).map(q => q.num + ' ' + JSON.stringify(q.ponta_quente));
+        const avisos = [];
+        if (rs.how === 'chave') avisos.push(`não existe "${a.nome}" com esse nome; casou com "${s.name}" (maiúsculas, acentos ou espaços diferentes) — pode ser outro desenho${a.projeto ? '' : '; com o parâmetro projeto entram os símbolos guardados no esquema'}`);
+        const dv = L.schlib.divergentes && L.schlib.divergentes.get(a.nome);
+        if (dv) avisos.push(`o esquema do projeto guarda uma cópia de "${a.nome}" com pinos diferentes destes (sym_ler {projeto} mostra a cópia); vale este, o da biblioteca — sch_validar conta qual dos dois os fios seguem`);
+        if (fora.length) avisos.push(`pontas de pino fora da grade de 100 mil (${fora.slice(0, 6).join(', ')}): com o componente na grade, esses pinos ficam fora dela`);
+        if (fp && !F) avisos.push(`o footprint padrão "${fp}" não existe na PcbLib`);
+        return { sym: s.name, pedido: a.nome !== s.name ? a.nome : undefined, casou_por: rs.how, avisos: avisos.length ? avisos : undefined,
+                 descricao: s.description || '', acervo: s.doDocumento ? 'projeto' : L.acervoDe.get(s.name), designador: s.designator,
                  partes: (s.parts || []).map(pt => ({ part: pt.part, pinos: pinosDe(hc, s, pt.part).length })),
-                 pinos: pinosDe(hc, s, a.part || 1),
+                 pinos,
                  footprints: (s.footprints || []).map(f => ({ name: f.name, padrao: !!f.current, na_pcblib: !!hc.footprintOf(L.pcblib, f.name) })),
                  footprint_padrao: F ? { name: F.name, pads: (F.pads || []).map(q => q.name) } : null,
                  nota: 'transform: mirror espelha X antes; rot anti-horário; soma (x,y) do comp. O fio encosta na ponta quente.' };

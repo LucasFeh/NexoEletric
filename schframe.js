@@ -1218,12 +1218,14 @@ function aplicaAcervos(){
      -- o .SchDoc carrega uma copia do simbolo em cada componente. Entram SO onde nenhum acervo
      resolve o nome: a biblioteca da casa continua mandando, e o que ela nao tem deixa de ser
      quadrado vermelho. Nao e palpite como o resgate de baixo: e o simbolo daquele componente,
-     entao vale tambem para as nets. Array NOVO, como acima. */
+     entao vale tambem para as nets. A copia com outras pontas de pino que a biblioteca tem fica
+     em SLIB.divergentes, para a validacao (HubCore.simbolosDoDocumento). Array NOVO, como acima. */
+  delete SLIB.divergentes;
   const doDoc = (typeof schematic !== 'undefined' && schematic && Array.isArray(schematic.symbols)) ? schematic.symbols : [];
   if (doDoc.length) {
-    const extras = doDoc.filter(s => s && s.name && Array.isArray(s.parts) && !HubCore.symbolOf(SLIB, s.name))
-                        .map(s => Object.assign({}, s, { doDocumento:true }));
-    if (extras.length) SLIB.symbols = SLIB.symbols.concat(extras);
+    const d = HubCore.simbolosDoDocumento(SLIB, doDoc);
+    if (d.extras.length) SLIB.symbols = d.schlib.symbols;
+    if (d.schlib.divergentes) SLIB.divergentes = d.schlib.divergentes;
   }
   montaEmergencia();
   return r;
@@ -1244,7 +1246,7 @@ function avisaRenomeados(lista){
 
 let model = HubCore.buildSchModel(schematic);
 let nets  = HubCore.extractNets(model, SLIB);
-let val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
+let val   = HubCore.validateSchematic(schematic, SLIB, PLIB, nets);
 let sheetIdx = 0, selNet = '';
 /* O comentario do componente nasce SUPRIMIDO. Numa folha real ele e a maior fonte de
    poluicao visual: no DMB sao 44 componentes e "CONECTOR HEADER / 6 VIAS / Macho"
@@ -1361,7 +1363,7 @@ function updateMeta(){
 function reapply(){
   model = HubCore.buildSchModel(schematic);
   nets  = HubCore.extractNets(model, SLIB);
-  val   = HubCore.validateSchematic(schematic, SLIB, PLIB);
+  val   = HubCore.validateSchematic(schematic, SLIB, PLIB, nets);
   if (sheetIdx >= model.sheets.length) sheetIdx = 0;
   /* poda da selecao: o item pode ter sumido (Delete, undo, troca de simbolo) e o INDICE do
      alvo pode ter ficado fora de faixa — um fio que perdeu vertices por outro caminho deixa

@@ -183,17 +183,16 @@ class Contexto {
   symbolsLib() { return this.lib('symbols-lib.js', 'symbolsLib') || { symbols: [] }; }
   /* As bibliotecas para UM esquema: as de sempre + os simbolos guardados no proprio schematic.js
      (`symbols`: os da folha do Altium, ou os que a IA criou com sym_salvar destino "projeto"). Como na
-     vista (schframe.js » aplicaAcervos), so entram os nomes que nenhum acervo resolve, e valem
-     tambem para as nets. */
+     vista (schframe.js » aplicaAcervos), HubCore.simbolosDoDocumento: so entram os nomes que nenhum
+     acervo resolve, e valem tambem para as nets. A copia com OUTRAS pontas de pino que a biblioteca
+     tem vai para `divergentes` (a validacao conta qual desenho os fios seguem). */
   libsDe(sch) {
     const v = this.libs();
     const doc = sch && Array.isArray(sch.symbols) ? sch.symbols : null;
     if (!doc || !doc.length) return v;
     if (this._libsDoc && this._libsDoc.base === v && this._libsDoc.doc === doc) return this._libsDoc.v;
-    const hc = this.hc;
-    const extras = doc.filter(s => s && s.name && Array.isArray(s.parts) && !hc.symbolOf(v.schlib, s.name))
-      .map(s => Object.assign({ partcount: s.parts.length }, s, { doDocumento: true }));
-    const out = extras.length ? Object.assign({}, v, { schlib: Object.assign({}, v.schlib, { symbols: v.schlib.symbols.concat(extras) }) }) : v;
+    const r = this.hc.simbolosDoDocumento(v.schlib, doc);
+    const out = r.schlib !== v.schlib ? Object.assign({}, v, { schlib: r.schlib, divergentes: r.divergentes }) : v;
     this._libsDoc = { base: v, doc, v: out };
     return out;
   }

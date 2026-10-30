@@ -4,6 +4,34 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.47.0 — 2026-10-29
+
+Esquema: validação e ferramentas da IA (relato de uma sessão de IA que montou a PCB1 a partir do PRJ-UR-DI261924).
+- **Pino sem ligação e ponta de fio solta.** A validação (`HubCore.validateSchematic`, que o `sch_validar` e as gravações de esquema do MCP usam) acusa o pino que não liga a
+  nada (nenhum fio, rótulo ou outro pino) e a ponta de fio onde nada encosta, uma linha por componente e uma por folha.
+  No ERC na ponta do pino ou do fio quer dizer "solto de propósito" e não é acusado (o pino 3 do CI4 do PRJ-UR-DI261924
+  tem No ERC). O `HubCore.extractNets` devolve `pinosSoltos` e `pontasSoltas`.
+- **Pad sem pino**: pad de cobre do footprint que nenhum pino do símbolo leva fica sem net na placa, e agora é aviso (a
+  aba térmica do TO-263-5/DDPAK-5 nos reguladores, a do SOT223, os capacitores cujo símbolo numera diferente do
+  footprint).
+- **Símbolo que só casa trocando maiúsculas, acentos ou espaços** ("Varistor" → "VARISTOR", outro desenho) é aviso na
+  validação, e o `sch_simbolo` diz `casou_por` e avisa.
+- **A cópia do símbolo guardada no esquema** (`schematic.symbols`) com pontas de pino diferentes da biblioteca: continua
+  valendo a da biblioteca, e a validação conta quantos pinos encostam em fio com cada desenho (no PRJ-UR-DI261924, o
+  "Res SMD 1206": 22 de 26 com a biblioteca, 7 com a cópia). Se os fios seguem a cópia, o aviso diz. O relato pedia o
+  contrário (usar sempre a do esquema), mas a medição mostrou que a cópia é a que desligaria os resistores.
+- **MCP**:
+  - `sch_componentes`: filtros `prefixo` ("R" = os resistores, sem pegar RV1 nem o "C" de CI1), `refs` e `folha`;
+    `pinos: "soltos" | "nenhum"`; `campos`; cada pino solto vem com `solto: true`.
+  - `sch_ler`: o cabeçalho sai em `resumo` por padrão (os nomes dos símbolos guardados, sem o desenho de cada um, que
+    passava de 15 mil caracteres); `cabecalho: "completo" | "nenhum"`; filtros `refs`, `prefixo` e `net`; `campos`.
+  - `sch_apagar` e `sch_editar` acham o item pelo lugar (`em: {t, x, y}`), sem depender dos índices, que mudam depois
+    de cada apagar. Lugar com mais de um item não edita (diz quais índices achou).
+  - `sch_simbolo`: avisa pontas de pino fora da grade de 100 mil, o footprint padrão que não existe na PcbLib e a cópia
+    diferente guardada no esquema do projeto.
+  - `sch_validar`: `pinos_sem_ligacao`, `pontas_soltas` e `simbolos_do_esquema_diferentes`.
+- Teste: `tests/test-sch-validacao.js`.
+
 ## 1.46.0 — 2026-10-29
 
 Projeto com mais de uma PCB (pedido do dono: "tem projetos que têm mais de uma PCB; na árvore, Projeto → PCB → os

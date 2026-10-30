@@ -2286,6 +2286,63 @@ function resolveLib(list, name, kind, tables){
 
 const resolveSym = (schlib, name, tables) =>
   resolveLib((schlib && schlib.symbols) || [], name, 'sym', tables);
+/* As pontas quentes por parte ("1@-200,0 2@200,0|..."): o que liga o fio ao pino. Dois
+   simbolos com a mesma assinatura ligam igual na folha, mesmo com desenho diferente. */
+function assinaturaPinos(sym){
+  return ((sym && sym.parts) || []).slice().sort((a, b) => (a.part || 1) - (b.part || 1))
+    .map(pt => (pt.pins || []).map(p => { const h = pinHot(p); return p.num + '@' + h.x + ',' + h.y; }).sort().join(' '))
+    .join('|');
+}
+/* OS SIMBOLOS GUARDADOS NO ESQUEMA (`schematic.symbols`: a copia que o .SchDoc traz em cada
+   componente, ou o que a IA gravou com sym_salvar destino "projeto"). Entram SO os nomes que
+   nenhum acervo resolve (deixam de ser quadrado vermelho): a biblioteca da casa continua
+   mandando. Quem a biblioteca resolve com OUTRAS pontas de pino vai para `divergentes` (e para
+   o Map `schlib.divergentes`, que a validacao le), sem trocar nada: a copia nao e prova de qual
+   desenho a folha usa. Medido no PRJ-UR-DI261924: com o "RES [SMD]" da biblioteca 22 dos 26
+   pinos dos "Res SMD 1206" encostam em fio; com a copia (pontas em +-200), so 7 -- e o BC337
+   da copia numera B/C/E onde o footprint tem 1/2/3. A validacao conta os dois lados e diz qual
+   os fios seguem. Devolve uma schlib NOVA (array novo) quando ha o que acrescentar. */
+function simbolosDoDocumento(schlib, doc){
+  const base = schlib || { symbols: [] };
+  const lista = Array.isArray(doc) ? doc.filter(s => s && s.name && Array.isArray(s.parts)) : [];
+  if (!lista.length) return { schlib: base, extras: [], divergentes: [] };
+  const extras = [], divergentes = [], dv = new Map();
+  for (const s of lista) {
+    const r = resolveSym(base, s.name);
+    if (!r || !r.item) { extras.push(Object.assign({ partcount: s.parts.length }, s, { doDocumento: true })); continue; }
+    if (r.item.doDocumento || assinaturaPinos(s) === assinaturaPinos(r.item)) continue;
+    divergentes.push({ nome: s.name, biblioteca: r.name });
+    dv.set(s.name, { biblioteca: r.name, copia: s });
+  }
+  if (!extras.length && !dv.size) return { schlib: base, extras, divergentes };
+  const out = Object.assign({}, base, { symbols: extras.length ? (base.symbols || []).concat(extras) : base.symbols });
+  if (dv.size) out.divergentes = dv;
+  return { schlib: out, extras, divergentes };
+}
+/* Quantos pinos dos componentes `comps` (de um simbolo) encostam em fio, rotulo, power, port
+   ou juncao da folha, desenhados com `sym`. Para dizer qual de dois desenhos a folha segue. */
+function pinosQueEncostam(sheet, comps, sym){
+  const T = STOL;
+  const pts = [];
+  for (const w of sheet.wires) for (const p of (w.pts || [])) pts.push(p);
+  for (const l of [].concat(sheet.netlabels, sheet.powers, sheet.ports, sheet.junctions)) pts.push([l.x, l.y]);
+  const lib = { symbols: [sym] };
+  let tot = 0, ok = 0;
+  for (const c of comps) {
+    const P = compPinsWorld(Object.assign({}, c, { sym: sym.name }), lib) || [];
+    for (const q of P) {
+      tot++;
+      let toca = pts.some(p => near(p[0], q.x, T) && near(p[1], q.y, T));
+      if (!toca) for (const w of sheet.wires) {
+        const v = w.pts || [];
+        for (let i = 1; i < v.length && !toca; i++) toca = distSeg(q.x, q.y, v[i-1][0], v[i-1][1], v[i][0], v[i][1]) <= T;
+        if (toca) break;
+      }
+      if (toca) ok++;
+    }
+  }
+  return { tot, ok };
+}
 const resolveFp = (pcblib, name, tables) =>
   resolveLib((pcblib && pcblib.footprints) || [], name, 'fp', tables);
 
@@ -2396,6 +2453,8 @@ function extractNets(schematicOrModel, schlib){
 
   const segs = [], attach = [], pinRecs = [], labelRecs = [], powerRecs = [], portRecs = [];
   const wireNet = model.sheets.map(s => s.wires.map(() => ''));
+  const noercEm = new Set();
+  model.sheets.forEach((s, si) => s.noercs.forEach(n => noercEm.add(key(si, n.x, n.y))));
 
   model.sheets.forEach((s, si) => {
     s.wires.forEach((w, wi) => {
@@ -2405,7 +2464,8 @@ function extractNets(schematicOrModel, schlib){
         uni(nA, nB);
         segs.push({ si, wi, x1:pts[i][0], y1:pts[i][1], x2:pts[i+1][0], y2:pts[i+1][1], node:nA });
       }
-      pts.forEach(p => attach.push({ si, x:p[0], y:p[1], node:nodeAt(si, p[0], p[1]), kind:'wend' }));
+      pts.forEach((p, i) => attach.push({ si, x:p[0], y:p[1], node:nodeAt(si, p[0], p[1]), kind:'wend',
+        ponta: pts.length >= 2 && (i === 0 || i === pts.length - 1) }));
     });
     s.comps.forEach(c => {
       const pins = compPinsWorld(c, schlib);
@@ -2418,7 +2478,7 @@ function extractNets(schematicOrModel, schlib){
       }
       pins.forEach(p => {
         const n = nodeAt(si, p.x, p.y);
-        pinRecs.push({ ref:c.ref, num:p.num, node:n });
+        pinRecs.push({ ref:c.ref, num:p.num, name:p.name, node:n, si, x:p.x, y:p.y });
         attach.push({ si, x:p.x, y:p.y, node:n, kind:'pin' });
       });
     });
@@ -2439,6 +2499,7 @@ function extractNets(schematicOrModel, schlib){
       if ((near(a.x,g.x1,STOL) && near(a.y,g.y1,STOL)) || (near(a.x,g.x2,STOL) && near(a.y,g.y2,STOL))) continue;
       if (distSeg(a.x, a.y, g.x1, g.y1, g.x2, g.y2) <= STOL) {
         uni(a.node, g.node);
+        a.emT = true;
         if (a.kind === 'pin' || a.kind === 'wend' || a.kind === 'junction')
           autoJunctions.push({ sheet:a.si, x:a.x, y:a.y });
       }
@@ -2507,13 +2568,34 @@ function extractNets(schematicOrModel, schlib){
   for (const rec of pinRecs) { const nm = netByRoot[find(rec.node)]; if (nm) pinNet[rec.ref + '-' + rec.num] = nm; }
   for (const g of segs) { const nm = netByRoot[find(g.node)]; if (nm) wireNet[g.si][g.wi] = nm; }
 
-  return { nets, pinNet, wireNet, autoJunctions, warnings };
+  /* PINO SEM LIGACAO: o grupo dele nao tem outro pino nem nome (rotulo, power, port) -- o
+     pino nao liga a nada, com ou sem um fio pendurado. No ERC na ponta quente = solto de
+     proposito. PONTA DE FIO SOLTA: a primeira ou a ultima ponta de um fio onde nada mais
+     encosta (nem outra ponta, nem pino, nem nomeador, nem juncao, nem o meio de outro fio). */
+  const naChave = {};
+  for (const a of attach) { const k = key(a.si, a.x, a.y); naChave[k] = (naChave[k] || 0) + 1; }
+  const pinosSoltos = [];
+  for (const rec of pinRecs) {
+    const g = groups[find(rec.node)];
+    if (g.names.size || g.pins.length > 1 || noercEm.has(key(rec.si, rec.x, rec.y))) continue;
+    pinosSoltos.push({ ref:rec.ref, num:rec.num, name:rec.name, sheet:model.sheets[rec.si].name, x:rec.x, y:rec.y,
+                       fio: segRoots.has(find(rec.node)) });
+  }
+  const pontasSoltas = [];
+  for (const a of attach)
+    if (a.ponta && !a.emT && naChave[key(a.si, a.x, a.y)] === 1 && !noercEm.has(key(a.si, a.x, a.y)))
+      pontasSoltas.push({ sheet:model.sheets[a.si].name, x:a.x, y:a.y });
+
+  return { nets, pinNet, wireNet, autoJunctions, warnings, pinosSoltos, pontasSoltas };
 }
 
 /* ============ validacao do schematic.js contra as libs espelhadas ============ */
 
-function validateSchematic(schematic, schlib, pcblib){
+/* `nets` (opcional) = o extractNets do mesmo esquema e da mesma schlib: com ele saem tambem
+   os pinos sem ligacao e as pontas de fio soltas (quem ja extraiu as nets nao paga duas vezes). */
+function validateSchematic(schematic, schlib, pcblib, nets){
   const errors = [], warnings = [];
+  const avisadoSym = new Set(), avisadoFp = new Set();
   if (!schematic || schematic.format !== 'schmirror-v2') warnings.push('format esperado "schmirror-v2"');
   if (!schematic || !schematic.project) errors.push('header: falta "project"');
   const model = buildSchModel(schematic || {});
@@ -2529,8 +2611,16 @@ function validateSchematic(schematic, schlib, pcblib){
       if (!isNum(c.x) || !isNum(c.y)) { errors.push(`${where}: faltam x/y`); continue; }
       const rot = (((c.rot || 0) % 360) + 360) % 360;
       if (![0, 90, 180, 270].includes(rot)) errors.push(`${where}: rot deve ser 0/90/180/270`);
-      const sym = symbolOf(schlib, c.sym);
+      const rs = resolveSym(schlib, c.sym);
+      const sym = (rs && rs.item) || null;
       if (!sym) { errors.push(`${where}: símbolo "${c.sym}" não existe na schlib`); continue; }
+      /* uma vez por simbolo: o nome que so casou trocando maiusculas/acentos/espacos
+         ("Varistor" -> "VARISTOR" e outro desenho) */
+      if (!avisadoSym.has(c.sym)) {
+        avisadoSym.add(c.sym);
+        if (rs.how === 'chave')
+          warnings.push(`símbolo "${c.sym}" não existe com esse nome; casou com "${rs.name}" (maiúsculas, acentos ou espaços diferentes): confira se é o mesmo desenho`);
+      }
       const part = partOf(sym, c.part);
       if (!part) errors.push(`${where}: parte ${c.part || 1} não existe em "${c.sym}"`);
       /* sem a chave e erro; VAZIO e aviso — vai sem vinculo e se resolve no Altium, como o
@@ -2545,6 +2635,18 @@ function validateSchematic(schematic, schlib, pcblib){
           for (const p of (part.pins || []))
             if (!padNames.has(String(p.num)))
               warnings.push(`${where}: pino "${p.num}" sem pad correspondente no footprint ${c.footprint}`);
+          /* o contrario: pad de cobre que nenhum pino de NENHUMA parte do simbolo leva (a aba
+             termica do DDPAK-5 no LM2575: pad 6, 5 pinos) fica sem net na placa. Uma vez por
+             componente; pad sem nome e furo sem cobre (npth) nao contam. */
+          if (!avisadoFp.has(c.ref)) {
+            avisadoFp.add(c.ref);
+            const pinos = new Set();
+            for (const pt of (sym.parts || [])) for (const p of (pt.pins || [])) pinos.add(String(p.num));
+            const sobra = [...new Set((fp.pads || []).filter(q => q && q.name !== '' && q.name != null && q.type !== 'npth' && q.plated !== false)
+              .map(q => String(q.name)))].filter(n => !pinos.has(n));
+            if (sobra.length)
+              warnings.push(`${where}: pad${sobra.length > 1 ? 's' : ''} ${sobra.map(n => '"' + n + '"').join(', ')} do footprint ${c.footprint} sem pino no símbolo — fica${sobra.length > 1 ? 'm' : ''} sem net na placa`);
+          }
         }
         /* compara o footprint RESOLVIDO, e nao a string: o modelo do simbolo no espelho
            carrega o nome novo e o projeto carrega o antigo, e comparar cru dispararia o
@@ -2584,6 +2686,41 @@ function validateSchematic(schematic, schlib, pcblib){
         if (!quentes.has(n.x + ',' + n.y))
           warnings.push(`No ERC em (${n.x},${n.y}) não está na ponta de nenhum pino`);
     }
+  }
+  /* A COPIA DO ESQUEMA QUE DIFERE DA BIBLIOTECA (simbolosDoDocumento): vale a da biblioteca, e
+     o aviso conta, nos componentes da folha, quantos pinos encostam em fio com cada desenho --
+     e isso que diz se os fios foram desenhados na copia (aí os pinos aparecem soltos). */
+  const dv = schlib && schlib.divergentes;
+  if (dv && dv.size) dv.forEach((d, nome) => {
+    let lib = { tot: 0, ok: 0 }, cop = { tot: 0, ok: 0 }, n = 0;
+    const symLib = symbolOf(schlib, nome), copia = Object.assign({}, d.copia, { name: nome });
+    for (const s of model.sheets) {
+      const cs = s.comps.filter(c => c.sym === nome);
+      if (!cs.length || !symLib) continue;
+      n += cs.length;
+      const a = pinosQueEncostam(s, cs, symLib), b = pinosQueEncostam(s, cs, copia);
+      lib.tot += a.tot; lib.ok += a.ok; cop.tot += b.tot; cop.ok += b.ok;
+    }
+    if (!n || cop.ok === lib.ok) return;
+    warnings.push(`símbolo "${nome}": a cópia guardada no esquema tem pinos diferentes da biblioteca ("${d.biblioteca}"), e vale a da biblioteca — `
+      + `${lib.ok} de ${lib.tot} pinos encostam em fio com ela; com a cópia, ${cop.ok}`
+      + (cop.ok > lib.ok ? '. Os fios parecem desenhados na cópia: troque o símbolo dos componentes ou corrija a biblioteca' : ''));
+  });
+  /* um aviso por componente (os pinos juntos); as pontas de fio soltas, uma linha por folha */
+  if (nets && Array.isArray(nets.pinosSoltos)) {
+    const porComp = new Map();
+    for (const p of nets.pinosSoltos) {
+      const k = p.ref;
+      if (!porComp.has(k)) porComp.set(k, []);
+      porComp.get(k).push(p.name && p.name !== p.num ? `${p.num} (${p.name})` : String(p.num));
+    }
+    porComp.forEach((l, ref) => warnings.push(`comp ${ref}: pino${l.length > 1 ? 's' : ''} ${l.join(', ')} sem ligação (nenhum fio, rótulo ou outro pino; solto de propósito = No ERC na ponta)`));
+  }
+  if (nets && Array.isArray(nets.pontasSoltas) && nets.pontasSoltas.length) {
+    const porFolha = new Map();
+    for (const p of nets.pontasSoltas) { if (!porFolha.has(p.sheet)) porFolha.set(p.sheet, []); porFolha.get(p.sheet).push(p); }
+    porFolha.forEach((l, sh) => warnings.push(`folha ${sh}: ${l.length} ponta${l.length > 1 ? 's' : ''} de fio solta${l.length > 1 ? 's' : ''} (nada encosta): `
+      + l.slice(0, 8).map(p => `(${p.x},${p.y})`).join(' ') + (l.length > 8 ? ` e mais ${l.length - 8}` : '')));
   }
   return { errors, warnings };
 }
@@ -2958,7 +3095,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          SHEET_SIZES, SHEET_ISO, SHEET_PRESETS, SHEET_TOL,
          sheetSize, sheetPreset, sheetMatch, sheetLabel,
          symbolOf, partOf, footprintOf, pinHot, rotEfetiva, compTransform, compPinsWorld,
-         normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp,
+         normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp, assinaturaPinos, simbolosDoDocumento,
          suggestSym,
          buildSchModel, extractNets, validateSchematic,
          applyPcbChanges, effectiveBoard, deriveStatus,
