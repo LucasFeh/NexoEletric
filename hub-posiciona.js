@@ -9,7 +9,10 @@
      colisao  dois componentes do MESMO lado mais perto que a folga de posicionamento — a
               ComponentClearance das regras (HubPcbRegras: a vencedora do par, como o DRC), ou
               `folga` dada; sobrepostos = distância negativa (a sobreposição, em mm). A forma é a
-              caixa do componente (c.bbox: pads, serigrafia e desenho, a mesma do DRC);
+              caixa do COBRE E DA SERIGRAFIA do componente (os pads e o desenho dele no overlay): a
+              c.bbox inteira tem tambem o desenho mecanico/courtyard, maior que a peca -- o IND
+              IFDC2525 tem bbox de +-6,15 mm com cobre e serigrafia em +-4, e o conferidor acusava
+              colisao com o D3 que nao existia (PCB1). caixa:"componente" volta a c.bbox;
      fora     o componente sai do contorno da placa (algum canto da caixa fora dele, ou dentro de um
               recorte) — pela caixa: do lado seguro.
    comparaLotes(antes, depois) -> o que o lote CRIOU (as colisões e os "fora" que não existiam antes).
@@ -19,7 +22,7 @@
    API
      confere(eb, opts) -> {colisoes:[{a, b, lado, dist, folga}], fora:[{ref, lado, cantos}], componentes, ms}
         opts {refs (só os pares que tocam estes), folga (mm), regras (o conjunto ou o resolvedor do
-              hub-pcbregras; sem ele e sem folga, 0,254)}
+              hub-pcbregras; sem ele e sem folga, 0,254), caixa ('cobre' padrão | 'componente')}
      novas(antes, depois) -> {colisoes, fora}   (os resultados do confere de antes e de depois) */
 (function (raiz, fabrica) {
   const m = fabrica();
@@ -89,10 +92,35 @@ function distCaixas(a, b){
 }
 const ladoDe = c => c && c.layer === 'Bottom' ? 'Bottom' : 'Top';
 
+/* a caixa do cobre e da serigrafia do componente: os cantos de cada pad (girado) e o desenho dele
+   no overlay (eb.silk com owner); sem pad, a c.bbox */
+function caixasCobre(eb){
+  const silkDe = new Map();
+  for (const s of eb.silk || []) if (s && s.owner != null) { const k = String(s.owner); if (!silkDe.has(k)) silkDe.set(k, []); silkDe.get(k).push(s); }
+  return c => {
+    let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+    const poe = (x, y) => { if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y; };
+    for (const p of c.pads || []) {
+      if (!p || !isNum(p.x) || !isNum(p.y)) continue;
+      const w = (isNum(p.w) ? p.w : 0) / 2, h = (isNum(p.h) ? p.h : 0) / 2, a = (p.rot || 0) * Math.PI / 180, co = Math.cos(a), si = Math.sin(a);
+      for (const [u, v] of [[-w, -h], [w, -h], [w, h], [-w, h]]) poe(p.x + u * co - v * si, p.y + u * si + v * co);
+    }
+    if (x1 === Infinity) return c.bbox;
+    for (const s of silkDe.get(String(c.ref)) || []) {
+      const m = (isNum(s.w) ? s.w : 0) / 2;
+      if ([s.x1, s.y1, s.x2, s.y2].every(isNum)) { poe(s.x1 - m, s.y1 - m); poe(s.x2 + m, s.y2 + m); poe(s.x1 + m, s.y1 + m); poe(s.x2 - m, s.y2 - m); }
+      else if ([s.cx, s.cy, s.r].every(isNum)) { poe(s.cx - s.r - m, s.cy - s.r - m); poe(s.cx + s.r + m, s.cy + s.r + m); }
+    }
+    return { x1, y1, x2, y2 };
+  };
+}
+
 function confere(eb, opts){
   const t0 = agora(), o = opts || {};
   const so = Array.isArray(o.refs) && o.refs.length ? new Set(o.refs.map(String)) : null;
-  const cs = (eb.components || []).filter(c => c && c.ref != null && c.bbox && [c.bbox.x1, c.bbox.y1, c.bbox.x2, c.bbox.y2].every(isNum));
+  const caixaDe = o.caixa === 'componente' ? (c => c.bbox) : caixasCobre(eb);
+  const cs = (eb.components || []).filter(c => c && c.ref != null && c.bbox && [c.bbox.x1, c.bbox.y1, c.bbox.x2, c.bbox.y2].every(isNum))
+    .map(c => { const b = caixaDe(c); return b === c.bbox ? c : Object.assign({}, c, { bbox: b }); });
   /* a folga do par: a dada, ou a ComponentClearance vencedora (a conta do DRC), ou 10 mil */
   let RES = null;
   if (!isNum(o.folga) && o.regras) {

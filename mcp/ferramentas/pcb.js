@@ -212,6 +212,75 @@ function gravaMovimento(ctx, arq, board, op) {
   return ops.aplica(arq, board, ctx.hc, op);
 }
 
+/* AS TRILHAS PRESAS NOS PADS DE QUEM ANDOU (pcb_mover e pcb_mover_lote, trilhas:"arrastar"|"apagar").
+   Arrastar = a ponta que estava num pad vai junto com o pad (a mesma conta do componente, compDelta +
+   xfPoint): a trilha estica, como o "drag" do Altium -- descer o ESP32 2 mm na PCB1 soltou 30 trilhas.
+   Apagar = tira a trilha inteira (o toco). Trilha de pad SMD num componente que virou de lado nao se
+   arrasta (a camada muda): vai em puladas. `antes` = a placa efetiva e as linhas de ANTES dos movimentos
+   (os ids "new-..." sao os daquele momento). A regiao de cobre da mesma net que estava em cima de uma
+   trilha que andou e nao e teardrop reconhecido (esses a placa refaz) fica onde estava: vai em
+   regioes_que_ficaram (no LM555, a g36 do Altium em cima da t33). Devolve {tocados, arrastadas,
+   apagadas, puladas, regioes_que_ficaram}. */
+function trilhasDosMovidos(ctx, arq, board, antes, refs, modo, note) {
+  const out = { tocados: [], arrastadas: 0, apagadas: 0, puladas: [], regioes_que_ficaram: [] };
+  if (!modo || modo === 'deixar') return out;
+  const hc = ctx.hc;
+  const eb1 = hc.effectiveBoard(board, hc.applyPcbChanges(board, arq.itens));
+  const depois = new Map((eb1.components || []).map(c => [String(c.ref), c]));
+  const lado = q => q === 'Bottom' ? 'Bottom' : 'Top';
+  const mexe = new Map();
+  for (const ref of refs) {
+    const c0 = (antes.eb.components || []).find(c => String(c.ref) === String(ref)), c1 = depois.get(String(ref));
+    if (!c0 || !c1) continue;
+    const virou = lado(c0.layer) !== lado(c1.layer);
+    const d = hc.compDelta({ src: { x: c0.x, y: c0.y, rot: c0.rot || 0, layer: lado(c0.layer) }, eff: { x: c1.x, y: c1.y, rot: c1.rot || 0, layer: lado(c1.layer) } });
+    for (const t of antes.eb.tracks || []) {
+      if (!t || t.id == null || !hc.isCopper(t.layer)) continue;
+      for (const k of [1, 2]) {
+        const x = t['x' + k], y = t['y' + k];
+        const pd = (c0.pads || []).find(q => (q.type === 'th' || q.layer === t.layer) && geo.noPad(q, x, y, 0.01));
+        if (!pd) continue;
+        const e = mexe.get(String(t.id)) || { campos: {} };
+        if (modo === 'apagar') e.del = true;
+        else if (virou && pd.type !== 'th') { out.puladas.push(String(t.id)); continue; }
+        else { const q = hc.xfPoint(d, x, y); e.campos['x' + k] = r4(q.x); e.campos['y' + k] = r4(q.y); }
+        mexe.set(String(t.id), e);
+      }
+    }
+  }
+  if (!mexe.size) return out;
+  /* as regioes (nao poligono, nao teardrop reconhecido) da mesma net em cima das trilhas que andam */
+  const TD = ctx.modulo('hub-pcbteardrop.js');
+  let gotas = new Set();
+  try { if (TD) gotas = new Set((TD.reconhece(antes.eb) || []).map(r => String(r.id))); } catch (_) { /* sem teardrop */ }
+  const porId = new Map((antes.eb.tracks || []).map(t => [String(t.id), t]));
+  for (const g of antes.eb.regions || []) {
+    if (!g || g.poly || g.keepout || !g.net || gotas.has(String(g.id)) || !Array.isArray(g.points)) continue;
+    for (const id of mexe.keys()) {
+      const t = porId.get(id);
+      if (!t || t.net !== g.net || t.layer !== g.layer) continue;
+      const m = (t.w || 0) / 2 + 0.05;
+      const P = g.points, dentro = (x, y) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) if ((P[i][1] > y) !== (P[j][1] > y) && x < (P[j][0] - P[i][0]) * (y - P[i][1]) / (P[j][1] - P[i][1]) + P[i][0]) c = !c; return c; };
+      const naTrilha = P.some(q => geo.distSeg(q[0], q[1], t.x1, t.y1, t.x2, t.y2) <= m) ||
+        [0, 0.25, 0.5, 0.75, 1].some(f => dentro(t.x1 + (t.x2 - t.x1) * f, t.y1 + (t.y2 - t.y1) * f));
+      if (naTrilha) { out.regioes_que_ficaram.push(String(g.id)); break; }
+    }
+  }
+  const novos = ops.mapaNovos({ itens: antes.itens }, board, hc);
+  for (const [id, e] of mexe) {
+    const op = e.del ? { op: 'track_del', id } : Object.assign({ op: 'track_edit', id }, e.campos);
+    if (note) op.note = note;
+    out.tocados.push(ops.aplica(arq, board, hc, op, novos));
+    if (e.del) out.apagadas++; else out.arrastadas++;
+  }
+  return out;
+}
+const resumoTrilhas = tr => ({ arrastadas: tr.arrastadas, apagadas: tr.apagadas, puladas: tr.puladas.length ? tr.puladas : undefined,
+  regioes_que_ficaram: tr.regioes_que_ficaram.length ? tr.regioes_que_ficaram : undefined,
+  nota: tr.regioes_que_ficaram.length ? 'regiões de cobre que estavam em cima das trilhas que andaram e ficaram no lugar (não são teardrop reconhecido): apague (pcb_apagar) ou refaça' : undefined });
+const TRILHAS_MODO = { type: 'string', enum: ['deixar', 'arrastar', 'apagar'],
+  description: 'as trilhas presas nos pads de quem anda: "deixar" (padrão: ficam onde estão, soltas), "arrastar" (a ponta vai junto com o pad e a trilha estica) ou "apagar" (saem as trilhas)' };
+
 /* o tipo (track, via, text...) de um id: o do board.js, ou o da linha *_add que criou o "new-..." */
 const TIPO_DO_ADD = { track_add: 'track', arc_add: 'arc', via_add: 'via', text_add: 'text', fill_add: 'fill', region_add: 'region', pad_add: 'pad', poly_add: 'poly' };
 function tipoDoId(arq, board, hc, id, novos) {
@@ -356,6 +425,7 @@ module.exports = {
         projeto: PROJETO, ref: { type: 'string' },
         x: { type: 'number' }, y: { type: 'number' }, dx: { type: 'number' }, dy: { type: 'number' },
         rot: { type: 'number' }, drot: { type: 'number', description: 'gira relativo (graus)' }, layer: { type: 'string', enum: ['Top', 'Bottom'] },
+        trilhas: TRILHAS_MODO,
       }, COMUNS), required: ['projeto', 'ref'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
@@ -365,12 +435,19 @@ module.exports = {
         const tocavam = trilhasNosPads(c, antes.eb);
         const op = opDoMovimento(c, a);
         comNote(op, a);
-        const est = ops.transacao(ctx, p, (arq, board) => [gravaMovimento(ctx, arq, board, op)], { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_mover' });
+        let tr = null;
+        const est = ops.transacao(ctx, p, (arq, board) => {
+          const ant = { eb: antes.eb, itens: arq.itens.slice() };
+          const t = [gravaMovimento(ctx, arq, board, op)];
+          tr = trilhasDosMovidos(ctx, arq, board, ant, [a.ref], a.trilhas, op.note);
+          return t.concat(tr.tocados);
+        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_mover' });
         const depois = ctx.placa(p);
         const c2 = (depois.eb.components || []).find(x => x.ref === a.ref);
+        if (tr && (tr.arrastadas || tr.apagadas || tr.puladas.length)) est.trilhas = resumoTrilhas(tr);
         if (est.gravado && c2) {
           est.componente = { ref: c2.ref, x: c2.x, y: c2.y, rot: c2.rot, layer: c2.layer, bbox: c2.bbox, pads: (c2.pads || []).map(q => ({ name: q.name, x: r4(q.x), y: r4(q.y), net: q.net || '' })) };
-          if (tocavam.length) est.trilhas_que_chegavam = { nota: 'estas trilhas tocavam os pads antes do movimento — ajuste (pcb_editar) ou apague (pcb_apagar)', lista: tocavam };
+          if (tocavam.length && (!a.trilhas || a.trilhas === 'deixar')) est.trilhas_que_chegavam = { nota: 'estas trilhas tocavam os pads antes do movimento e ficaram onde estavam — de novo com trilhas:"arrastar" (esticam junto) ou "apagar", ou ajuste com pcb_editar', lista: tocavam };
         }
         return est;
       },
@@ -385,6 +462,8 @@ module.exports = {
           rot: { type: 'number' }, drot: { type: 'number' }, layer: { type: 'string', enum: ['Top', 'Bottom'] } }, required: ['ref'] } },
         folga: { type: 'number', minimum: 0, description: 'folga de posicionamento em mm (padrão: a ComponentClearance das regras do projeto)' },
         checar: { type: 'boolean', description: 'padrão true: confere colisão e fora da placa antes de gravar' },
+        caixa: { type: 'string', enum: ['cobre', 'componente'], description: 'a forma da checagem: "cobre" (padrão: pads e serigrafia do componente) ou "componente" (a caixa inteira do footprint, com o desenho mecânico)' },
+        trilhas: TRILHAS_MODO,
         detalhes: { type: 'boolean', description: 'lista cada componente (posição nova e trilhas que chegavam nos pads)' },
       }, COMUNS), required: ['projeto', 'movimentos'] },
       executa: async (a, ctx) => {
@@ -405,9 +484,15 @@ module.exports = {
         const refs = [...vistos];
         const PS = ctx.modulo('hub-posiciona.js');
         const S = ops.regrasDoProjeto(ctx, p);
-        const confere = eb => PS.confere(eb, { refs, folga: a.folga, regras: S ? S.conjunto : undefined });
+        const confere = eb => PS.confere(eb, { refs, folga: a.folga, regras: S ? S.conjunto : undefined, caixa: a.caixa });
         const t0 = Date.now();
-        const faz = simular => ops.transacao(ctx, p, (arq, board) => lista.map(op => gravaMovimento(ctx, arq, board, op)),
+        let tr = null;
+        const faz = simular => ops.transacao(ctx, p, (arq, board) => {
+          const ant = { eb: antes.eb, itens: arq.itens.slice() };
+          const t = lista.map(op => gravaMovimento(ctx, arq, board, op));
+          tr = trilhasDosMovidos(ctx, arq, board, ant, refs, a.trilhas, a.note ? String(a.note).replace(/":/g, '" :') : undefined);
+          return t.concat(tr.tocados);
+        },
           { simular, forcar: a.forcar, ferramenta: 'pcb_mover_lote',
             relata: (model, board, hc) => {
               if (a.checar === false || !PS) return {};
@@ -440,7 +525,8 @@ module.exports = {
             det.push(Object.assign({ ref, trilhas_que_chegavam: tocavam.map(t => t.id) }, c2 ? { x: c2.x, y: c2.y, rot: c2.rot, layer: c2.layer } : {}));
           }
         }
-        est.trilhas_que_chegavam = nTrilhas ? { total: nTrilhas, nota: 'trilhas que tocavam os pads dos componentes que andaram: ajuste (pcb_editar) ou apague (pcb_apagar); detalhes:true lista' } : { total: 0 };
+        est.trilhas_que_chegavam = nTrilhas ? { total: nTrilhas, nota: !a.trilhas || a.trilhas === 'deixar' ? 'trilhas que tocavam os pads dos componentes que andaram e ficaram onde estavam: de novo com trilhas:"arrastar" (esticam junto) ou "apagar"; detalhes:true lista' : undefined } : { total: 0 };
+        if (tr && (tr.arrastadas || tr.apagadas || tr.puladas.length)) est.trilhas = resumoTrilhas(tr);
         if (a.detalhes) est.componentes = det;
         est.ms = Date.now() - t0;
         return est;
@@ -450,13 +536,14 @@ module.exports = {
       nome: 'pcb_posicao_conferir', titulo: 'Conferir posicionamento (sobreposição, folga, fora da placa)', leitura: true,
       descricao: 'Confere o posicionamento da placa efetiva (hub-posiciona.js): os pares de componentes do MESMO lado mais perto que a folga de posicionamento (a ComponentClearance das regras do projeto, ou `folga`), pela caixa do componente — sobrepostos com a distância negativa —, e os componentes fora do contorno ou sobre um recorte. refs = só os pares que envolvem estes.',
       entrada: { type: 'object', properties: { projeto: PROJETO, refs: { type: 'array', items: { type: 'string' } },
-        folga: { type: 'number', minimum: 0, description: 'mm (padrão: a ComponentClearance das regras)' } }, required: ['projeto'] },
+        folga: { type: 'number', minimum: 0, description: 'mm (padrão: a ComponentClearance das regras)' },
+        caixa: { type: 'string', enum: ['cobre', 'componente'], description: '"cobre" (padrão: pads e serigrafia do componente) ou "componente" (a caixa inteira do footprint)' } }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const PS = ctx.exige('hub-posiciona.js', 'HubPosiciona');
         const { eb } = ctx.placa(p);
         const S = ops.regrasDoProjeto(ctx, p);
-        const r = PS.confere(eb, { refs: a.refs, folga: a.folga, regras: S ? S.conjunto : undefined });
+        const r = PS.confere(eb, { refs: a.refs, folga: a.folga, regras: S ? S.conjunto : undefined, caixa: a.caixa });
         return { projeto: p.nome, componentes: r.componentes, n_colisoes: r.colisoes.length, colisoes: r.colisoes.slice(0, 100),
                  n_fora: r.fora.length, fora: r.fora.slice(0, 100), folga: isNum(a.folga) ? a.folga : (S ? 'ComponentClearance das regras (' + S.fonte + ')' : PS.FOLGA_PADRAO), ms: r.ms };
       },

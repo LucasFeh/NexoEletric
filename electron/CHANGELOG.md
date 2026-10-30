@@ -4,6 +4,28 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.51.0 — 2026-10-30
+
+Mover levando as trilhas, teardrops que acompanham e a colisão medida pelo cobre (etapa C do relato da PCB1).
+- **`pcb_mover` e `pcb_mover_lote` com `trilhas`**:
+  - `"arrastar"`: a ponta da trilha que estava no pad vai junto com ele e a trilha estica, como o drag do Altium.
+    Descer o ESP32 2 mm na PCB1 tinha soltado 30 trilhas.
+  - `"apagar"`: tira as trilhas presas nos pads.
+  - `"deixar"` (o padrão): a resposta diz como arrastar.
+  - Mexer de novo na mesma peça edita as linhas `track_edit`, sem empilhar.
+  - Trilha de pad SMD num componente que virou de lado não se arrasta e vai em `puladas`.
+  - A região de cobre que estava em cima de uma trilha arrastada e não é teardrop reconhecido fica no lugar e vem em
+    `regioes_que_ficaram`.
+- **Teardrops do hub acompanham**: depois de qualquer gravação do MCP que mexe em trilha, via, arco, pad ou
+  componente, o teardrop posto pelo hub (`teardrop do hub`) que perdeu a trilha ou a via sai sozinho, e volta onde o
+  par pad/trilha ainda existe (`teardrops: {tirados, refeitos}` na resposta). Antes ficava na placa, barrava via nova e
+  era preciso tirar e repor todos (`teardrop_remover` + `teardrop_aplicar`). O teardrop do `board.js` a placa já
+  refazia.
+- **Colisão pelo cobre**: o `pcb_posicao_conferir` e o `pcb_mover_lote` medem cada componente pela caixa dos pads e da
+  serigrafia dele, não pela caixa inteira do footprint (com o desenho mecânico). Antes o IND IFDC2525 da PCB1, de
+  ±6,15 mm de caixa e ±4 mm de cobre e serigrafia, "colidia" com o D3. `caixa:"componente"` volta à conta antiga.
+- Teste: `tests/test-mcp-arrasta.js`.
+
 ## 1.50.0 — 2026-10-30
 
 Furos, recortes, faixa proibida e o autoroteador (etapa B do relato da PCB1: trilho de 2 mm + furos M3).

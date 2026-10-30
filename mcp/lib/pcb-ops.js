@@ -294,6 +294,51 @@ function aplica(arq, board, hc, op, novos) {
   return opNoAdicionado(arq, board, hc, op) || opNoNovo(arq, board, hc, op, novos) || mescla(arq, origDe(op, board)).obj;
 }
 
+/* OS TEARDROPS DO HUB ACOMPANHAM (1.51.0). O teardrop que o hub pos (region_add "teardrop do hub")
+   ficava na placa quando a trilha ou a via dele saia ou andava: a placa so refazia os do board.js
+   (HubPcbTeardrop.refaz com a base do espelho), e o orfao barrava via nova e fazia curto no Gerber
+   (PCB1: as regioes +VIN/+5V/0VCC da fonte antiga). Depois de uma gravacao que mexe em trilha, via,
+   arco, pad ou componente: o teardrop do hub que era reconhecido ANTES e nao e mais DEPOIS sai (a
+   linha dele), e os que faltam naquele lugar (o mesmo par pad/trilha, se ainda existe) entram de
+   novo. So o que o hub pos; o do board.js a placa ja refaz sozinha. Devolve null ou {tirados, refeitos}. */
+const EH_TD = x => x && x.op === 'region_add' && /^teardrop/.test(String(x.note || ''));
+function acompanhaTeardrops(ctx, hc, board, arq, itensAntes) {
+  if (!arq.itens.some(EH_TD)) return null;
+  const antes = new Set(itensAntes), agora = new Set(arq.itens);
+  const estrut = x => x && /^(track|via|arc|pad|comp)_/.test(x.op);
+  if (!itensAntes.some(x => !agora.has(x) && estrut(x)) && !arq.itens.some(x => !antes.has(x) && estrut(x))) return null;
+  const T = ctx.modulo('hub-pcbteardrop.js');
+  if (!T || typeof T.reconhece !== 'function') return null;
+  /* as linhas teardrop do hub e o id de cada uma na placa, antes e depois */
+  const ids = itens => {
+    const model = hc.applyPcbChanges(board, itens), m = new Map();
+    for (const it of model.changeItems) if (EH_TD(it.ch) && it.target && it.target.eff) m.set(it.ch, String(it.target.eff.id));
+    return { eb: hc.effectiveBoard(board, model), m };
+  };
+  const A = ids(itensAntes), D = ids(arq.itens);
+  const vivosA = new Set((T.reconhece(A.eb) || []).map(r => String(r.id)));
+  const vivosD = new Set((T.reconhece(D.eb) || []).map(r => String(r.id)));
+  const orfas = [];
+  for (const [ch, id] of D.m) if (vivosA.has(A.m.get(ch)) && !vivosD.has(id)) orfas.push(ch);
+  if (!orfas.length) return null;
+  const caixa = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+  for (const ch of orfas) for (const q of ch.pts || []) { caixa.x1 = Math.min(caixa.x1, q[0] - 0.5); caixa.y1 = Math.min(caixa.y1, q[1] - 0.5); caixa.x2 = Math.max(caixa.x2, q[0] + 0.5); caixa.y2 = Math.max(caixa.y2, q[1] + 0.5); }
+  for (const ch of orfas) { const i = arq.itens.indexOf(ch); if (i >= 0) arq.remove(i); }
+  /* os que faltam onde os orfaos estavam (o par que ainda existe ganha a gota de novo) */
+  let novos = [];
+  try {
+    const eb2 = hc.effectiveBoard(board, hc.applyPcbChanges(board, arq.itens));
+    const L = typeof T.faltam === 'function' ? T.faltam(eb2, {}) : [];
+    novos = (L || []).filter(g => (g.points || []).some(q => q[0] >= caixa.x1 && q[0] <= caixa.x2 && q[1] >= caixa.y1 && q[1] <= caixa.y2));
+  } catch (_) { novos = []; }
+  for (const g of novos) {
+    const o = { op: 'region_add', layer: g.layer, pts: g.points.map(q => [r6(q[0]), r6(q[1])]), note: 'teardrop do hub' };
+    if (g.net) o.net = g.net;
+    arq.insere(null, o);
+  }
+  return { tirados: orfas.length, refeitos: novos.length };
+}
+
 /* designator_move / comment_move como a IA pensa (1.36.0): x/y/rot = onde o texto deve FICAR na
    placa ("referencial":"efetivo", o padrao). O motor e o ApplyChanges querem o lugar de antes do
    comp_move do dono (a linha entra antes dele): a conta inversa e a mesma da vista (pcbframe.js »
@@ -416,6 +461,8 @@ function transacao(ctx, p, fn, opts) {
   const antes = hc.applyPcbChanges(board, itensAntes);
   const statusAntes = new Map(antes.changeItems.map(it => [it.ch, it.status]));
   const tocados = fn(arq, board) || [];
+  let teardrops = null;
+  if (o.teardrops !== false) { try { teardrops = acompanhaTeardrops(ctx, hc, board, arq, itensAntes); } catch (_) { teardrops = null; } }
   /* toda linha *_add nova ganha um uid (no proprio objeto: os tocados continuam os mesmos) */
   const jaTinha = new Set(itensAntes);
   for (const x of arq.itens) if (x && !jaTinha.has(x) && COM_UID.test(x.op) && x.uid == null) x.uid = uidLivre(arq);
@@ -455,6 +502,7 @@ function transacao(ctx, p, fn, opts) {
     mudancas_no_arquivo: arq.itens.length,
     linhas: linhasResp,
     ...extraLinhas,
+    teardrops: teardrops ? Object.assign({ nota: 'teardrops do hub que perderam a trilha/via foram tirados e refeitos onde o par ainda existe' }, teardrops) : undefined,
     erros: novosErros,
     validacao: resumoValidacao(model),
   };
