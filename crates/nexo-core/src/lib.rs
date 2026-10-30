@@ -7,7 +7,8 @@
 //! - `geom`: geometria plana;
 //! - `scene`: a placa em malhas para a GPU;
 //! - `pick`: selecao (indice espacial) e propriedades;
-//! - `solido`: a placa como solido 3D (tampas com os furos e paredes).
+//! - `solido`: a placa como solido 3D (tampas com os furos e paredes);
+//! - `step3d`: a malha de um modelo STEP pronta para a vista 3D (normais e grupos por cor).
 
 pub mod changes;
 pub mod font;
@@ -19,5 +20,6 @@ pub mod pick;
 pub mod project;
 pub mod scene;
 pub mod solido;
+pub mod step3d;
 
 pub use model::Board;

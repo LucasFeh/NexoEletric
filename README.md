@@ -13,6 +13,9 @@ O NexoEletric com a interface web de sempre, trocando por Rust **só o que media
 | vista PCB monta o 3D escondido ao abrir (three.js: ~2 s de CPU + centenas de MB de GPU) | a preferência que já existia ("3D pronto de antemão") passa a vir desligada; o 3D monta quando for aberto |
 | 3D: a placa (contorno com ~2.400 furos) passava pelo earcut do three.js **três vezes** (ExtrudeGeometry + duas ShapeGeometry): ~750 ms | `nexo_core::solido` (WASM): uma triangulação (lyon) para as tampas, as faces pintadas e as paredes com normais — ~6 ms. Imagem 99,9% idêntica |
 | 3D: o primeiro `render()` travava ~0,9 s compilando os shaders do three.js | `compileAsync` (KHR_parallel_shader_compile): compila em paralelo, fora da thread da página, antes do primeiro quadro |
+| 3D com os componentes: cada face do STEP virava um grupo → **8.610 chamadas de desenho por quadro** (PRJ-UR, 130 corpos), 687 geometrias, normais suavizadas em JS | `nexo_core::step3d` (WASM): normais + triângulos reordenados por cor (um grupo por cor), esfera envolvente pronta e geometria compartilhada entre componentes iguais → **807 chamadas**, 262 geometrias; imagem 100% igual |
+| 3D remontado INTEIRO a cada revisão da biblioteca da rede Nexo (3 vezes num minuto, parado) | só se a lista de corpos desta placa mudou, e então só os corpos |
+| Real View: mapas das faces pixel a pixel em JS (~1 s) e leitura do canvas na GPU (0,2–4,7 s) | laço no WASM (mesmos bytes, 1,8× mais rápido) e o canvas da face na memória quando o Real View está ligado |
 | 2D: na abertura, a malha da placa (e o cache de caminhos do Canvas 2D) eram montados na thread da página | a malha sai do WASM num **Web Worker** que nasce com a página; o cache do Canvas 2D só é montado se o desenho original for usado |
 
 O que **não** era gargalo ficou como está: toda a interface (hub.html, esquema, PCB, BOM, Gerber, laser,

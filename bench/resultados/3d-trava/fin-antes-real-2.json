@@ -1,0 +1,343 @@
+{
+ "longas_total_ms": 618,
+ "longas_n": 1,
+ "maior_ms": 618,
+ "longas": [
+  [
+   892,
+   618
+  ]
+ ],
+ "linha": [
+  {
+   "t": 268,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2379,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2587,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2803,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3004,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3206,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3422,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3624,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3826,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 4028,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 5051,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 6077,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 7088,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 8099,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 9111,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 10134,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 11185,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 12221,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 13230,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 14255,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 15278,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 16285,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 17323,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 18333,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 19357,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 20381,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 21391,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 22400,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 23470,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 24496,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 25504,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 26530,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 27539,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 28549,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 29560,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 30570,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 31595,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 32632,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  }
+ ],
+ "cpu_top": [
+  [
+   "mapasDaFace  hub-pcb3d-real.js:194",
+   791
+  ],
+  [
+   "getProgramInfoLog  getProgramInfoLog:0",
+   650
+  ],
+  [
+   "getImageData  getImageData:0",
+   161
+  ],
+  [
+   "rnd  hub-pcb3d-real.js:207",
+   155
+  ],
+  [
+   "suaviza  hub-pcb3d-vista.js:437",
+   137
+  ],
+  [
+   "(program)  (program):0",
+   88
+  ],
+  [
+   "bufferData  bufferData:0",
+   64
+  ],
+  [
+   "putImageData  putImageData:0",
+   59
+  ],
+  [
+   "(garbage collector)  (garbage collector):0",
+   44
+  ],
+  [
+   "needsUpdate  three.module.js:1759",
+   30
+  ],
+  [
+   "computeBoundingSphere  three.core.js:19079",
+   27
+  ],
+  [
+   "setFromBufferAttribute  three.core.js:15989",
+   24
+  ],
+  [
+   "leRgbe  hub-pcb3d-real.js:137",
+   21
+  ],
+  [
+   "chave  hub-pcb3d-vista.js:450",
+   20
+  ],
+  [
+   "min  three.core.js:5370",
+   19
+  ],
+  [
+   "getContext  getContext:0",
+   16
+  ],
+  [
+   "cloneUniforms  three.core.js:37958",
+   14
+  ],
+  [
+   "malhaDoStep  hub-pcb3d-vista.js:479",
+   11
+  ],
+  [
+   "getParameters  three.module.js:7357",
+   11
+  ],
+  [
+   "WebGLRenderer.renderBufferDirect  three.module.js:17233",
+   10
+  ],
+  [
+   "shaderSource  shaderSource:0",
+   8
+  ],
+  [
+   "(anon)  :1",
+   7
+  ],
+  [
+   "getProgram  three.module.js:18224",
+   6
+  ],
+  [
+   "setProgram  three.module.js:18407",
+   6
+  ],
+  [
+   "setup  three.module.js:1623",
+   6
+  ]
+ ]
+}

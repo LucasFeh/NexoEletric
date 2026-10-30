@@ -20,4 +20,4 @@ opt-level = 2
 
 # o WASM vai pela rede para a pagina: otimizado para tamanho
 [profile.release.package.nexo-wasm]
-opt-level = "s"
+opt-level = 3

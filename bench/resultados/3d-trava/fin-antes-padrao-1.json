@@ -1,0 +1,355 @@
+{
+ "longas_total_ms": 1244,
+ "longas_n": 4,
+ "maior_ms": 571,
+ "longas": [
+  [
+   32,
+   243
+  ],
+  [
+   541,
+   358
+  ],
+  [
+   7809,
+   72
+  ],
+  [
+   7888,
+   571
+  ]
+ ],
+ "linha": [
+  {
+   "t": 215,
+   "steps": null,
+   "corpos": null,
+   "falhas": null
+  },
+  {
+   "t": 612,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1234,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1441,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1643,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1845,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2046,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2262,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2465,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2667,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3679,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 4690,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 5702,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 6729,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 7784,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 9229,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 10265,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 11276,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 12285,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 13310,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 14335,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 15346,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 16356,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 17367,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 18391,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 19403,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 20413,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 21425,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 22436,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 23447,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 24457,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 25470,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 26482,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 27490,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 28500,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 29527,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 30538,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 31562,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  }
+ ],
+ "cpu_top": [
+  [
+   "getProgramInfoLog  getProgramInfoLog:0",
+   573
+  ],
+  [
+   "(program)  (program):0",
+   331
+  ],
+  [
+   "bufferData  bufferData:0",
+   211
+  ],
+  [
+   "suaviza  hub-pcb3d-vista.js:437",
+   140
+  ],
+  [
+   "computeBoundingSphere  three.core.js:19079",
+   124
+  ],
+  [
+   "(garbage collector)  (garbage collector):0",
+   78
+  ],
+  [
+   "needsUpdate  three.module.js:1759",
+   29
+  ],
+  [
+   "min  three.core.js:5370",
+   25
+  ],
+  [
+   "malhaDoStep  hub-pcb3d-vista.js:479",
+   24
+  ],
+  [
+   "getParameters  three.module.js:7357",
+   22
+  ],
+  [
+   "cloneUniforms  three.core.js:37958",
+   16
+  ],
+  [
+   "chave  hub-pcb3d-vista.js:450",
+   12
+  ],
+  [
+   "setFromBufferAttribute  three.core.js:15989",
+   10
+  ],
+  [
+   "fromBufferAttribute  three.core.js:5997",
+   10
+  ],
+  [
+   "getContext  getContext:0",
+   9
+  ],
+  [
+   "getX  three.core.js:17333",
+   9
+  ],
+  [
+   "WebGLRenderer.renderBufferDirect  three.module.js:17233",
+   7
+  ],
+  [
+   "isThreeObject  three.core.js:38045",
+   7
+  ],
+  [
+   "getProgram  three.module.js:18224",
+   6
+  ],
+  [
+   "max  three.core.js:5387",
+   6
+  ],
+  [
+   "Object3D  three.core.js:11960",
+   6
+  ],
+  [
+   "updateMatrixWorld  three.core.js:13067",
+   6
+  ],
+  [
+   "setProgram  three.module.js:18407",
+   6
+  ],
+  [
+   "nexoPlaca3d  hub-pcb3d-vista.js:346",
+   5
+  ],
+  [
+   "shaderSource  shaderSource:0",
+   5
+  ]
+ ]
+}

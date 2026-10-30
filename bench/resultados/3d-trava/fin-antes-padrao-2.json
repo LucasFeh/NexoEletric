@@ -1,0 +1,359 @@
+{
+ "longas_total_ms": 1903,
+ "longas_n": 5,
+ "maior_ms": 630,
+ "longas": [
+  [
+   73,
+   606
+  ],
+  [
+   6075,
+   62
+  ],
+  [
+   6138,
+   539
+  ],
+  [
+   7640,
+   66
+  ],
+  [
+   7709,
+   630
+  ]
+ ],
+ "linha": [
+  {
+   "t": 269,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 876,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1080,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1282,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1486,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1702,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1905,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2107,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2311,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2513,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3528,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 4556,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 5568,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 7076,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 8536,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 9561,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 10574,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 11585,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 12601,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 13613,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 14625,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 15634,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 16672,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 17685,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 18711,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 19723,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 20733,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 21744,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 22768,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 23780,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 24793,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 25821,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 26845,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 27854,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 28866,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 29890,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 30900,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 31926,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  }
+ ],
+ "cpu_top": [
+  [
+   "getProgramInfoLog  getProgramInfoLog:0",
+   799
+  ],
+  [
+   "bufferData  bufferData:0",
+   749
+  ],
+  [
+   "suaviza  hub-pcb3d-vista.js:437",
+   135
+  ],
+  [
+   "computeBoundingSphere  three.core.js:19079",
+   87
+  ],
+  [
+   "(garbage collector)  (garbage collector):0",
+   81
+  ],
+  [
+   "(program)  (program):0",
+   79
+  ],
+  [
+   "needsUpdate  three.module.js:1759",
+   43
+  ],
+  [
+   "min  three.core.js:5370",
+   35
+  ],
+  [
+   "malhaDoStep  hub-pcb3d-vista.js:479",
+   28
+  ],
+  [
+   "getParameters  three.module.js:7357",
+   28
+  ],
+  [
+   "cloneUniforms  three.core.js:37958",
+   21
+  ],
+  [
+   "setFromBufferAttribute  three.core.js:15989",
+   15
+  ],
+  [
+   "applyMatrix4  three.core.js:5244",
+   13
+  ],
+  [
+   "multiplyMatrices  three.core.js:10570",
+   12
+  ],
+  [
+   "max  three.core.js:5387",
+   11
+  ],
+  [
+   "fromBufferAttribute  three.core.js:5997",
+   11
+  ],
+  [
+   "getX  three.core.js:17333",
+   11
+  ],
+  [
+   "getContext  getContext:0",
+   10
+  ],
+  [
+   "chave  hub-pcb3d-vista.js:450",
+   10
+  ],
+  [
+   "updateMatrixWorld  three.core.js:13067",
+   9
+  ],
+  [
+   "compose  three.core.js:11030",
+   9
+  ],
+  [
+   "Object3D  three.core.js:11960",
+   8
+  ],
+  [
+   "retanguloGirado  pcbframe.js:5604",
+   8
+  ],
+  [
+   "replaceLightNums  three.module.js:6373",
+   7
+  ],
+  [
+   "getY  three.core.js:17366",
+   7
+  ]
+ ]
+}

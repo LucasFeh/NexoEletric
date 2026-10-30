@@ -5,7 +5,7 @@
 //! - a vista PCB desenhada no WebGL com a malha do nucleo Rust (WASM).
 //!
 //! Uso: NexoEletric [--workspace PASTA] [--projeto NOME] [--aba pcb|esquema] [--porta N]
-//!                  [--so-servidor] [--sem-remendos] [--sem-sessao] [--nexobd] [--cdp PORTA] [--livre]
+//!                  [--so-servidor] [--sem-remendos] [--sem-sessao] [--nexobd] [--cdp PORTA] [--livre] [--dados PASTA]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::{Path, PathBuf};
@@ -33,6 +33,7 @@ struct Args {
     nexobd: bool,
     cdp: Option<u16>,
     livre: bool,
+    dados: Option<PathBuf>,
 }
 
 fn exe_dir() -> PathBuf {
@@ -67,6 +68,7 @@ fn args() -> Args {
         nexobd: std::env::var("ALTIUMHUB_NEXOBD").map(|v| v == "1").unwrap_or(false),
         cdp: None,
         livre: false,
+        dados: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(x) = it.next() {
@@ -83,6 +85,7 @@ fn args() -> Args {
             "--nexobd" => a.nexobd = true,
             "--cdp" => a.cdp = it.next().and_then(|s| s.parse().ok()),
             "--livre" => a.livre = true,
+            "--dados" => a.dados = it.next().map(PathBuf::from),
             _ => {}
         }
     }
@@ -226,7 +229,8 @@ fn main() {
     let proxy = ev_loop.create_proxy();
     let janela = WindowBuilder::new().with_title("NexoEletric").with_maximized(true).build(&ev_loop).expect("janela");
     janela.set_maximized(true);
-    let dados = std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("NexoEletric-rust").join("WebView2"));
+    // a pasta do WebView2 (cache, IndexedDB dos modelos 3D); --dados da outra (teste ao lado do app aberto)
+    let dados = a.dados.clone().or_else(|| std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("NexoEletric-rust").join("WebView2")));
     let mut ctx = WebContext::new(dados);
     let mut extra = String::from("--lang=pt-BR");
     if let Some(p) = a.cdp {

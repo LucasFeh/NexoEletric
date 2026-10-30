@@ -1,0 +1,343 @@
+{
+ "longas_total_ms": 543,
+ "longas_n": 1,
+ "maior_ms": 543,
+ "longas": [
+  [
+   13,
+   543
+  ]
+ ],
+ "linha": [
+  {
+   "t": 713,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 922,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1124,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1327,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1529,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1730,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1931,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2133,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2337,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2540,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3551,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 4590,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 5614,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 6637,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 7648,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 8660,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 9668,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 10692,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 11731,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 12740,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 13750,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 14773,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 15811,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 16825,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 17850,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 18874,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 19898,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 20922,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 21944,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 22955,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 23974,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 24986,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 26010,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 27035,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 28045,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 29056,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 30079,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 31106,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  }
+ ],
+ "cpu_top": [
+  [
+   "getProgramInfoLog  getProgramInfoLog:0",
+   498
+  ],
+  [
+   "computeBoundingSphere  three.core.js:19079",
+   104
+  ],
+  [
+   "setFromBufferAttribute  three.core.js:15989",
+   60
+  ],
+  [
+   "(program)  (program):0",
+   50
+  ],
+  [
+   "(garbage collector)  (garbage collector):0",
+   25
+  ],
+  [
+   "_RNvNtCslazegQw18c4_9nexo_core6step3d7prepara  nexo_wasm.wasm:1",
+   12
+  ],
+  [
+   "getContext  getContext:0",
+   9
+  ],
+  [
+   "malhaStep  nexo-gl.js:262",
+   9
+  ],
+  [
+   "min  three.core.js:5370",
+   7
+  ],
+  [
+   "updateMatrixWorld  three.core.js:13067",
+   6
+  ],
+  [
+   "applyMatrix4  three.core.js:5244",
+   6
+  ],
+  [
+   "closePath  closePath:0",
+   5
+  ],
+  [
+   "getExtension  getExtension:0",
+   4
+  ],
+  [
+   "_RNvXs3_NtNtCs4NIexwV1FGX_4core4hash3sipINtB5_6HasherNtB5_11Sip13RoundsENtB7_6Hasher5writeCslazegQw18c4_9nexo_core  nexo_wasm.wasm:1",
+   4
+  ],
+  [
+   "Object3D  three.core.js:11960",
+   4
+  ],
+  [
+   "update  three.module.js:4612",
+   4
+  ],
+  [
+   "bufferData  bufferData:0",
+   4
+  ],
+  [
+   "cloneUniforms  three.core.js:37958",
+   3
+  ],
+  [
+   "nexoPlaca3d  hub-pcb3d-vista.js:346",
+   3
+  ],
+  [
+   "cacheLinha  pcbframe.js:1007",
+   3
+  ],
+  [
+   "replaceClippingPlaneNums  three.module.js:6394",
+   3
+  ],
+  [
+   "malhaDoStep  hub-pcb3d-vista.js:499",
+   3
+  ],
+  [
+   "intersectsObject  three.core.js:25925",
+   3
+  ],
+  [
+   "projectObject  three.module.js:17897",
+   3
+  ],
+  [
+   "getUniforms  three.module.js:7909",
+   3
+  ]
+ ]
+}

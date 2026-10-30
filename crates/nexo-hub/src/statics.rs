@@ -66,10 +66,22 @@ async fn arquivo(est: &Est, full: &Path, headers: &HeaderMap) -> Response {
     }
     let nome = full.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
     let remenda = est.cfg.remendos && patches::alvo(&nome);
-    let tag = format!("{}{}", etag(&meta), if remenda { "-nx" } else { "" });
     let mut h = HeaderMap::new();
     h.insert(header::CONTENT_TYPE, mime(full));
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    // remendado: a etiqueta leva a impressao digital do RESULTADO (remendo novo = arquivo novo para o
+    // navegador, mesmo com o original igual no disco)
+    if remenda {
+        let Ok(bytes) = tokio::fs::read(full).await else { return StatusCode::NOT_FOUND.into_response() };
+        let (s, digital) = est.patches.remendado(&nome, &etag(&meta), &bytes);
+        let tag = format!("{}-nx{:016x}", etag(&meta).trim_end_matches('"'), digital) + "\"";
+        h.insert(header::ETAG, HeaderValue::from_str(&tag).unwrap());
+        if nao_mudou(headers, &tag) {
+            return (StatusCode::NOT_MODIFIED, h).into_response();
+        }
+        return (h, s).into_response();
+    }
+    let tag = etag(&meta);
     h.insert(header::ETAG, HeaderValue::from_str(&tag).unwrap());
     let html = nome.ends_with(".html") || nome.ends_with(".htm");
     if !html && nao_mudou(headers, &tag) {
@@ -90,10 +102,6 @@ async fn arquivo(est: &Est, full: &Path, headers: &HeaderMap) -> Response {
         }
         h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
         h.remove(header::ETAG);
-        return (h, s).into_response();
-    }
-    if remenda {
-        let s = est.patches.remendado(&nome, &tag, &bytes);
         return (h, s).into_response();
     }
     (h, bytes).into_response()

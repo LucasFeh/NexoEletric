@@ -13,11 +13,26 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 pub struct Cache {
-    m: Mutex<HashMap<String, (String, Arc<Vec<u8>>)>>,
+    m: Mutex<HashMap<String, (String, Arc<Vec<u8>>, u64)>>,
+}
+
+/// NEXO_SEM_REMENDOS=a,b: desliga remendos pelo nome (comparar antes e depois no mesmo executavel)
+fn quer(nome: &str) -> bool {
+    !std::env::var("NEXO_SEM_REMENDOS").map(|v| v.split(',').any(|x| x.trim() == nome)).unwrap_or(false)
+}
+
+/// impressao digital (FNV-1a 64) do arquivo remendado: entra no ETag
+fn digital(b: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &x in b {
+        h ^= x as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
 }
 
 pub fn alvo(nome: &str) -> bool {
-    nome == "pcbframe.js" || nome == "hub-pcb3d-vista.js"
+    nome == "pcbframe.js" || nome == "hub-pcb3d-vista.js" || nome == "hub-pcb3d-real.js"
 }
 
 /* o cache de caminhos do Canvas 2D so e montado quando o desenho original vai ser usado (com o
@@ -106,6 +121,35 @@ function nexoGlDesenha(){
 }
 "#;
 
+/* a biblioteca da rede Nexo muda de revisao com frequencia (o sincronismo do NexoBD): a vista refazia o
+   3D INTEIRO a cada revisao (placa, todos os corpos e, no Real View, os mapas das faces) -- 3 vezes num
+   minuto parado. Agora: so se a lista de corpos DESTA placa mudou, e entao so os corpos */
+const BIB_ORIG: &str = "nexoDesliga = HubNexo.aoMudar(() => refaz3d());";
+const BIB_NOVO: &str = "nexoDesliga = HubNexo.aoMudar(() => nexoBibliotecaMudou());";
+const CENA3D_ORIG: &str = "async function cena3d(){\n  if (!V3) return;\n  const seq = ++cena3dSeq;\n  sujo3d = false;\n  const { corpos, esp } = await corpos3d(true);\n  if (seq !== cena3dSeq || !V3) return;";
+const CENA3D_NOVO: &str = "/* ---- NexoEletric (Rust): a revisao da biblioteca so troca os corpos que mudaram ---- */
+let NX_CORPOS = null;
+const nexoChaveCorpos = l => JSON.stringify((l || []).map(b => b ? [b.owner || '', b.kind || '', b.chave || b.model || b.modelUrl || '', b.matrix || null, b.color || '', b.opacity] : null));
+async function nexoBibliotecaMudou(){
+  if (!V3) { refaz3d(); return; }
+  try {
+    const { corpos } = await corpos3d(true);
+    const k = nexoChaveCorpos(corpos);
+    if (k === NX_CORPOS) return;                 /* nada desta placa mudou na biblioteca */
+    NX_CORPOS = k;
+    if (OPC3D.corpos) agendaSilhuetas();
+    if (!modo3d) { sujo3d = true; return; }      /* escondido: refaz quando abrir */
+    V3.corpos(corpos);                           /* so os corpos: a placa e os mapas ficam */
+  } catch (e) { refaz3d(); }
+}
+async function cena3d(){
+  if (!V3) return;
+  const seq = ++cena3dSeq;
+  sujo3d = false;
+  const { corpos, esp } = await corpos3d(true);
+  if (seq !== cena3dSeq || !V3) return;
+  NX_CORPOS = nexoChaveCorpos(corpos);";
+
 const PREF_3D_ORIG: &str = "antes:lePref('3d.antes', '1') !== '0' }";
 const PREF_3D_NOVO: &str = "antes:lePref('3d.antes', '0') !== '0' }";
 
@@ -114,19 +158,25 @@ pub fn remenda(nome: &str, src: &str) -> (String, Vec<&'static str>) {
     let s = src.replace("\r\n", "\n");
     match nome {
         "hub-pcb3d-vista.js" => remenda_3d(s),
+        "hub-pcb3d-real.js" => remenda_real(s),
         _ => remenda_pcb(s),
     }
 }
 
 fn remenda_pcb(mut s: String) -> (String, Vec<&'static str>) {
     let mut feitos = Vec::new();
-    if s.contains(DESENHO_ORIG) && s.contains(ANTES_DRAW) && s.contains(CACHE_ORIG) {
+    if quer("webgl") && s.contains(DESENHO_ORIG) && s.contains(ANTES_DRAW) && s.contains(CACHE_ORIG) {
         s = s.replacen(DESENHO_ORIG, DESENHO_NOVO, 1);
         s = s.replacen(ANTES_DRAW, &format!("{ELO}{ANTES_DRAW}"), 1);
         s = s.replacen(CACHE_ORIG, CACHE_NOVO, 1);
         feitos.push("webgl");
     }
-    if s.contains(PREF_3D_ORIG) {
+    if quer("biblioteca-so-corpos") && s.contains(BIB_ORIG) && s.contains(CENA3D_ORIG) {
+        s = s.replacen(BIB_ORIG, BIB_NOVO, 1);
+        s = s.replacen(CENA3D_ORIG, CENA3D_NOVO, 1);
+        feitos.push("biblioteca-so-corpos");
+    }
+    if quer("3d-sob-demanda") && s.contains(PREF_3D_ORIG) {
         s = s.replacen(PREF_3D_ORIG, PREF_3D_NOVO, 1);
         feitos.push("3d-sob-demanda");
     }
@@ -134,17 +184,19 @@ fn remenda_pcb(mut s: String) -> (String, Vec<&'static str>) {
 }
 
 impl Cache {
-    pub fn remendado(&self, nome: &str, tag: &str, bytes: &[u8]) -> Vec<u8> {
-        if let Some((t, v)) = self.m.lock().unwrap().get(nome) {
+    /// o arquivo remendado e a impressao digital dele (refeito so quando o original muda)
+    pub fn remendado(&self, nome: &str, tag: &str, bytes: &[u8]) -> (Vec<u8>, u64) {
+        if let Some((t, v, d)) = self.m.lock().unwrap().get(nome) {
             if t == tag {
-                return (**v).clone();
+                return ((**v).clone(), *d);
             }
         }
         let (s, feitos) = remenda(nome, &String::from_utf8_lossy(bytes));
         eprintln!("[nexo-hub] {nome}: remendos {feitos:?}");
         let v = Arc::new(s.into_bytes());
-        self.m.lock().unwrap().insert(nome.to_string(), (tag.to_string(), v.clone()));
-        (*v).clone()
+        let d = digital(&v);
+        self.m.lock().unwrap().insert(nome.to_string(), (tag.to_string(), v.clone(), d));
+        ((*v).clone(), d)
     }
 }
 
@@ -206,16 +258,106 @@ const DESENHA_NOVO: &str = "  let nxCompila = null;\n  function desenha(){\n    
 const CENA_ORIG: &str = "      poeCorpos(c.corpos || []);\n";
 const CENA_NOVO: &str = "      poeCorpos(c.corpos || []);\n      if (ren.compileAsync && !nxCompila) { posiciona(); const pr = ren.compileAsync(cena, cam).catch(() => {}); nxCompila = pr; pr.then(() => { if (nxCompila === pr) nxCompila = null; pede(); }); }\n";
 
+/* os modelos STEP: a malha sai do nucleo Rust (normais + um grupo por cor, no lugar de um grupo por
+   face: ~17 mil chamadas de desenho por quadro na PRJ-UR), a geometria e compartilhada entre os
+   componentes que usam o mesmo modelo, e os materiais entre as malhas do mesmo corpo */
+const STEP_HELPER: &str = r#"  /* ---- NexoEletric (Rust): a malha do STEP vem do nucleo Rust (nexo_core::step3d) ---- */
+  const NXSTEP = new WeakMap();
+  function nexoStep(mm){
+    try {
+      const NG = (typeof window !== 'undefined') ? window.NexoGL : null;
+      if (!NG || typeof NG.malhaStep !== 'function') return null;
+      let r = NXSTEP.get(mm);
+      if (r) return r;
+      const s = NG.malhaStep(mm);
+      if (!s) return null;
+      const geo = new T.BufferGeometry();
+      geo.setAttribute('position', new T.BufferAttribute(s.pos, 3));
+      geo.setAttribute('normal', new T.BufferAttribute(s.nor, 3));
+      geo.setAttribute('uv', new T.BufferAttribute(s.uv, 2));
+      for (const q of s.grupos) geo.addGroup(q[0], q[1], q[2]);
+      /* a esfera envolvente ja vem do Rust (o three.js percorria todos os vertices no 1o quadro) */
+      if (s.esfera) geo.boundingSphere = new T.Sphere(new T.Vector3(s.esfera[0], s.esfera[1], s.esfera[2]), s.esfera[3]);
+      r = { geo, cores: s.cores };
+      NXSTEP.set(mm, r);
+      return r;
+    } catch (e) { console.warn('3D: a malha do STEP no nucleo Rust falhou, vai a do three.js', e); return null; }
+  }
+"#;
+const STEP_FN_ORIG: &str = "  function malhaDoStep(malhas, b){\n";
+const STEP_LACO_ORIG: &str = "    for (const mm of malhas) {\n      const geo = new T.BufferGeometry();\n      const sv = suaviza(mm);\n";
+const STEP_LACO_NOVO: &str = "    const nxMats = new Map();
+    const nxMat = (hex, temCor) => { const k = hex + (temCor ? '+' : '-'); let m = nxMats.get(k); if (!m) { m = material(hex, b.opacity, temCor); nxMats.set(k, m); } return m; };
+    for (const mm of malhas) {
+      const nx = nexoStep(mm);
+      if (nx) {
+        const base = mm.cor ? new T.Color(mm.cor[0], mm.cor[1], mm.cor[2]) : new T.Color(b.color || '#9a9a9a');
+        const m0 = nxMat('#' + base.getHexString(), !!mm.cor);
+        g.add(new T.Mesh(nx.geo, nx.cores.length ? [m0].concat(nx.cores.map(c => nxMat('#' + new T.Color(c[0], c[1], c[2]).getHexString(), true))) : m0));
+        continue;
+      }
+      const geo = new T.BufferGeometry();
+      const sv = suaviza(mm);
+";
+
+/* Real View ligado: os shaders fisicos tambem compilam em paralelo antes do primeiro quadro */
+const REAL_ORIG: &str = "    /* a mudanca de tom/sombra exige recompilar os materiais que ja existem */
+    cena.traverse(x => { const ms = x.material ? (Array.isArray(x.material) ? x.material : [x.material]) : []; for (const m of ms) m.needsUpdate = true; });
+    materiaisDoModo(gPlaca); materiaisDoModo(gCorpos);
+    aplicaRealce();
+    pede();
+";
+const REAL_NOVO: &str = "    /* a mudanca de tom/sombra exige recompilar os materiais que ja existem */
+    cena.traverse(x => { const ms = x.material ? (Array.isArray(x.material) ? x.material : [x.material]) : []; for (const m of ms) m.needsUpdate = true; });
+    materiaisDoModo(gPlaca); materiaisDoModo(gCorpos);
+    aplicaRealce();
+    if (ren.compileAsync) { posiciona(); const pr = ren.compileAsync(cena, cam).catch(() => {}); nxCompila = pr; pr.then(() => { if (nxCompila === pr) nxCompila = null; pede(); }); }
+    pede();
+";
+
+// ---------------- hub-pcb3d-real.js (modulo ES do Real View) ----------------
+/* o laco por pixel dos mapas da face vai ao WASM (NexoGL.mapasFace; mesmos bytes) */
+const MAPAS_ORIG: &str = "  for (let p = 0; p < w * h; p++) {\n    const j = p * 4, a = src[j + 3];\n";
+const MAPAS_NOVO: &str = "  if (!(typeof window !== 'undefined' && window.NexoGL && typeof window.NexoGL.mapasFace === 'function' && window.NexoGL.mapasFace(src, w * h, metal, C, O, K, B)))\n  for (let p = 0; p < w * h; p++) {\n    const j = p * 4, a = src[j + 3];\n";
+
+fn remenda_real(mut s: String) -> (String, Vec<&'static str>) {
+    let mut feitos = Vec::new();
+    if quer("mapas-rust") && s.contains(MAPAS_ORIG) {
+        s = s.replacen(MAPAS_ORIG, MAPAS_NOVO, 1);
+        feitos.push("mapas-rust");
+    }
+    (s, feitos)
+}
+
+/* Real View: o canvas da face e lido de volta pixel a pixel (os mapas); na GPU essa leitura espera a
+   placa de video (0,2 a 4,7 s medidos). Com o Real View ligado ele nasce na memoria (willReadFrequently) */
+const FACE_CV_ORIG: &str = "    const x = tc.getContext('2d');\n    x.setTransform(s, 0, 0, -s, -bb.x1 * s, bb.y2 * s);\n";
+const FACE_CV_NOVO: &str = "    const x = tc.getContext('2d', modo === 'real' ? { willReadFrequently:true } : undefined);\n    x.setTransform(s, 0, 0, -s, -bb.x1 * s, bb.y2 * s);\n";
+
 fn remenda_3d(mut s: String) -> (String, Vec<&'static str>) {
     let mut feitos = Vec::new();
-    if [MONTA_ORIG, BB_ORIG, EXTRUDE_ORIG, FACE_ORIG].iter().all(|a| s.contains(a)) {
+    if quer("face-na-memoria") && s.contains(FACE_CV_ORIG) {
+        s = s.replacen(FACE_CV_ORIG, FACE_CV_NOVO, 1);
+        feitos.push("face-na-memoria");
+    }
+    // usa o nxCompila do remendo dos shaders: so entra junto com ele
+    if quer("real-em-paralelo") && s.contains(REAL_ORIG) && s.contains(DESENHA_ORIG) && s.contains(CENA_ORIG) {
+        s = s.replacen(REAL_ORIG, REAL_NOVO, 1);
+        feitos.push("real-em-paralelo");
+    }
+    if quer("step-rust") && s.contains(STEP_FN_ORIG) && s.contains(STEP_LACO_ORIG) {
+        s = s.replacen(STEP_FN_ORIG, &format!("{STEP_HELPER}{STEP_FN_ORIG}"), 1);
+        s = s.replacen(STEP_LACO_ORIG, STEP_LACO_NOVO, 1);
+        feitos.push("step-rust");
+    }
+    if quer("placa-rust") && [MONTA_ORIG, BB_ORIG, EXTRUDE_ORIG, FACE_ORIG].iter().all(|a| s.contains(a)) {
         s = s.replacen(MONTA_ORIG, &format!("{PLACA3D_HELPER}{MONTA_ORIG}"), 1);
         s = s.replacen(BB_ORIG, BB_NOVO, 1);
         s = s.replacen(EXTRUDE_ORIG, EXTRUDE_NOVO, 1);
         s = s.replacen(FACE_ORIG, FACE_NOVO, 1);
         feitos.push("placa-rust");
     }
-    if s.contains(DESENHA_ORIG) && s.contains(CENA_ORIG) {
+    if quer("shaders-em-paralelo") && s.contains(DESENHA_ORIG) && s.contains(CENA_ORIG) {
         s = s.replacen(DESENHA_ORIG, DESENHA_NOVO, 1);
         s = s.replacen(CENA_ORIG, CENA_NOVO, 1);
         feitos.push("shaders-em-paralelo");
@@ -241,10 +383,14 @@ mod tests {
         let p = std::path::Path::new(r"C:\Program Files\NexoEletric\resources\hub\pcbframe.js");
         let Ok(src) = std::fs::read_to_string(p) else { return };
         let (_, feitos) = super::remenda("pcbframe.js", &src);
-        assert_eq!(feitos, vec!["webgl", "3d-sob-demanda"]);
+        assert_eq!(feitos, vec!["webgl", "biblioteca-so-corpos", "3d-sob-demanda"]);
         let p3 = std::path::Path::new(r"C:\Program Files\NexoEletric\resources\hub\hub-pcb3d-vista.js");
         let src3 = std::fs::read_to_string(p3).unwrap();
         let (_, feitos) = super::remenda("hub-pcb3d-vista.js", &src3);
-        assert_eq!(feitos, vec!["placa-rust", "shaders-em-paralelo"]);
+        assert_eq!(feitos, vec!["face-na-memoria", "real-em-paralelo", "step-rust", "placa-rust", "shaders-em-paralelo"]);
+        let pr = std::path::Path::new(r"C:\Program Files\NexoEletric\resources\hub\hub-pcb3d-real.js");
+        let srcr = std::fs::read_to_string(pr).unwrap();
+        let (_, feitos) = super::remenda("hub-pcb3d-real.js", &srcr);
+        assert_eq!(feitos, vec!["mapas-rust"]);
     }
 }

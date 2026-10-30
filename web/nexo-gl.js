@@ -256,5 +256,57 @@ function placa3d(entrada) {
   };
 }
 
-window.NexoGL = { cria, carrega, placa3d };
+/* a malha de um modelo STEP (nexo_core::step3d): normais com vinco de 35 graus, UV na caixa e os
+   triangulos reordenados por cor -- um grupo por cor em vez de um por face. Os arrays vao direto para
+   a memoria do WASM (sem JSON). null = sem WASM (quem chama faz do jeito antigo) */
+function malhaStep(mm) {
+  if (!wasm || !mm || !mm.pos || !mm.idx) return null;
+  const faces = mm.faces || [];
+  const nPal = 3 + mm.pos.length + mm.idx.length + faces.length * 6;
+  const p = wasm.nx_alloc(nPal * 4);
+  const u32 = new Uint32Array(wasm.memory.buffer, p, nPal), f32 = new Float32Array(wasm.memory.buffer, p, nPal);
+  u32[0] = mm.pos.length; u32[1] = mm.idx.length; u32[2] = faces.length;
+  f32.set(mm.pos, 3); u32.set(mm.idx, 3 + mm.pos.length);
+  let o = 3 + mm.pos.length + mm.idx.length;
+  for (const f of faces) {
+    u32[o] = f.ini; u32[o + 1] = f.fim;
+    if (f.cor) { f32[o + 2] = f.cor[0]; f32[o + 3] = f.cor[1]; f32[o + 4] = f.cor[2]; u32[o + 5] = 1; } else u32[o + 5] = 0;
+    o += 6;
+  }
+  const pc = wasm.nx_step(p, nPal * 4);
+  wasm.nx_free(p, nPal * 4);
+  const mem = wasm.memory.buffer;           // lido DEPOIS da chamada (a memoria pode ter crescido)
+  const c = new Uint32Array(mem, pc, 10).slice();
+  if (!c[0]) return null;
+  const nv = c[2], g = new Uint32Array(mem, c[5], c[6] * 3), k = new Float32Array(mem, c[7], c[8] * 3);
+  const esfera = Array.from(new Float32Array(mem, c[9], 4));
+  const grupos = [], cores = [];
+  for (let i = 0; i < c[6]; i++) grupos.push([g[3 * i], g[3 * i + 1], g[3 * i + 2]]);
+  for (let i = 0; i < c[8]; i++) cores.push([k[3 * i], k[3 * i + 1], k[3 * i + 2]]);
+  return { pos: new Float32Array(mem, c[1], nv * 3).slice(), nor: new Float32Array(mem, c[3], nv * 3).slice(),
+           uv: new Float32Array(mem, c[4], nv * 2).slice(), grupos, cores, esfera };
+}
+
+/* os mapas do Real View (o laco por pixel do mapasDaFace) no WASM, em faixas de 1 milhao de pixels:
+   preenche C/O/K/B (os ImageData de cor, rugosidade-metal, verniz e altura). false = sem WASM */
+function mapasFace(src, n, metal, C, O, K, B) {
+  if (!wasm || !wasm.nx_mapas_faixa) return false;
+  const FAIXA = 1 << 20;
+  wasm.nx_mapas_ini(metal[0], metal[1], metal[2]);
+  const p = wasm.nx_alloc(FAIXA * 4);
+  try {
+    for (let ini = 0; ini < n; ini += FAIXA) {
+      const q = Math.min(FAIXA, n - ini);
+      new Uint8Array(wasm.memory.buffer, p, q * 4).set(src.subarray(ini * 4, (ini + q) * 4));
+      const pc = wasm.nx_mapas_faixa(p, q);
+      const mem = wasm.memory.buffer;         // lido DEPOIS da chamada (a memoria pode ter crescido)
+      const c = new Uint32Array(mem, pc, 4);
+      C.set(new Uint8Array(mem, c[0], q * 4), ini * 4); O.set(new Uint8Array(mem, c[1], q * 4), ini * 4);
+      K.set(new Uint8Array(mem, c[2], q * 4), ini * 4); B.set(new Uint8Array(mem, c[3], q * 4), ini * 4);
+    }
+  } finally { wasm.nx_free(p, FAIXA * 4); }
+  return true;
+}
+
+window.NexoGL = { cria, carrega, placa3d, malhaStep, mapasFace };
 })();
