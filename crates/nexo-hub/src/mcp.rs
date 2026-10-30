@@ -23,7 +23,10 @@ const VISTA_VIVA: f64 = 10.0;
 const ESPERA_MAX: f64 = 20.0;
 const SESSAO_VIVA: f64 = 60.0;
 const MAX_ATIVIDADE: usize = 300;
-const ACOES: [&str; 6] = ["screenshot", "recarregar", "focar", "selecionar", "comando", "abrir"];
+/// pedido que a vista JA pegou e ainda esta fazendo (as fotos 3D do render3d esperam os STEP e o Real
+/// View): fica guardado ate isto -- o mesmo PEGO_MAX do mcp/rotas_hub.py (NexoEletric 1.52.0)
+const PEGO_MAX: f64 = 240.0;
+const ACOES: [&str; 7] = ["screenshot", "recarregar", "focar", "selecionar", "comando", "abrir", "render3d"];
 const ALVOS: [&str; 3] = ["pcb", "sch", "hub"];
 
 struct Pedido {
@@ -66,7 +69,10 @@ fn erro(st: StatusCode, m: &str) -> Response {
 
 impl Dados {
     fn limpa(&mut self) {
-        self.pedidos.retain(|_, p| p.criado.elapsed().as_secs_f64() <= VALIDADE + ESPERA_MAX);
+        self.pedidos.retain(|_, p| {
+            let teto = if p.pego && p.resposta.is_none() { PEGO_MAX } else { ESPERA_MAX };
+            p.criado.elapsed().as_secs_f64() <= VALIDADE + teto
+        });
         self.vistas.retain(|_, t| t.elapsed().as_secs_f64() <= 300.0);
     }
 }

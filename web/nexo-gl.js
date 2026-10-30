@@ -185,8 +185,10 @@ function cria(cv, aoPronto) {
     if (monta(fazEntrada())) atual = chave;
   }
 
+  let ultimoV = null;
   function desenha(v) {
     if (!meta || perdido) return false;
+    ultimoV = v;
     // o canvas do WebGL embaixo do 2D, do mesmo tamanho
     const r = cv.getBoundingClientRect(), pr = cv.parentNode.getBoundingClientRect();
     const st = gc.style, l = (r.left - pr.left) + 'px', t = (r.top - pr.top) + 'px';
@@ -225,15 +227,27 @@ function cria(cv, aoPronto) {
     return true;
   }
 
-  return {
+  const inst = {
     pronto: () => !!wasm && !perdido && !quebrado,
     usavel: () => !perdido && !quebrado,
     temMalha: () => !!meta && !perdido && !quebrado,
     monta, pedeMalha, desenha,
     esconde() { if (gc.style.display !== 'none') gc.style.display = 'none'; },
     info: () => meta && { triangulos: meta.triangulos, capsulas: meta.capsulas, montar_ms: meta.ms },
+    /* o screenshot do MCP (mcp/hub-mcpvista.js): o WebGL nao guarda o quadro (preserveDrawingBuffer
+       false), entao redesenha AGORA e devolve o canvas para quem o copia na mesma tarefa; null =
+       nada desenhado ou escondido */
+    fotografa() {
+      if (!ultimoV || gc.style.display === 'none' || !document.contains(gc)) return null;
+      return desenha(ultimoV) ? gc : null;
+    },
   };
+  INSTANCIAS.push(inst);
+  return inst;
 }
+const INSTANCIAS = [];
+/* as camadas WebGL desta pagina, para quem fotografa a vista */
+function camadas() { return INSTANCIAS.slice(); }
 
 /* a placa solida do 3D (nexo_core::solido): uma triangulacao das tampas com todos os furos e as
    paredes, em arrays prontos para BufferGeometry. null = sem WASM (quem chama faz do jeito antigo) */
@@ -308,5 +322,5 @@ function mapasFace(src, n, metal, C, O, K, B) {
   return true;
 }
 
-window.NexoGL = { cria, carrega, placa3d, malhaStep, mapasFace };
+window.NexoGL = { cria, carrega, placa3d, malhaStep, mapasFace, camadas };
 })();

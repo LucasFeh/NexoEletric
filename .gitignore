@@ -2,3 +2,4 @@
 *.log
 /bench/out
 /target-teste
+/target-casca

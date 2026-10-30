@@ -38,9 +38,21 @@ Sem `--workspace`, usa a pasta de trabalho configurada no NexoEletric (Electron)
 estiver ocupada: nunca toma a de outro programa). Grava o `~/.nexoeletric/session.json` do MCP só se
 nenhum outro NexoEletric estiver aberto (`--sem-sessao` desliga).
 
-## Ainda não portado da casca Electron
-Sincronismo com o NexoBD/Nexo Hub (`armazem.js`, `nexohub-sync.js`), atualização automática, telas de
-configuração/conexão/importar, e os itens de menu correspondentes (avisam "ainda não portado").
+## No instalador do NexoEletric (1.54.0+)
+Esta casca é a janela do NexoEletric instalado. O `npm run dist` do repositório NexoEletric a compila aqui
+(`target-casca`, para não brigar com um `target\release\NexoEletric.exe` aberto) e a põe em
+`resources\rust`. O atalho continua abrindo o `NexoEletric.exe` Electron, que vira o **motor de fundo**, sem
+janela: pasta de trabalho, sincronismo com o NexoBD/Nexo Hub (`armazem.js`, `nexohub-sync.js`), configurações,
+Conectar IA, Sobre e o runtime do MCP. Ele abre esta casca com `NEXOELETRIC_MOTOR=1`:
+- menu que a casca não tem sai na saída padrão (`menu:<id>`) e o motor abre a tela dele;
+- pela entrada padrão chegam `focar` (o atalho clicado de novo) e `toast {texto, tipo}`;
+- `NEXOELETRIC_VERSAO` vai para o `session.json` do MCP; o AppUserModelID é o do NexoEletric
+  (`com.dieletrons.altiumhub`), então a janela agrupa com o atalho fixado; o ícone vem de `recursos/`.
+
+Se a casca não abrir (sem WebView2), o motor volta para a janela Electron naquela sessão. `"casca": "electron"`
+no `settings.json` do app (ou `NEXOELETRIC_CASCA=electron`) também volta. Rodar a casca sozinha
+(`target\release\NexoEletric.exe`, sem o motor) continua valendo para desenvolver e medir, mas aí não há
+sincronismo com o NexoBD.
 
 ## Outros
 - `crates/nexoeletric` (`NexoEletric-nativo.exe`): a primeira tentativa, vista PCB 100% nativa (egui + wgpu).

@@ -1,0 +1,29 @@
+// O icone do NexoEletric (o mesmo do instalador Electron: electron/assets/icon.ico do repositorio
+// NexoEletric) e o nome que o Gerenciador de Tarefas mostra. Ordinal 1: a janela o usa
+// (Icon::from_resource) e o Explorer tambem, como icone do .exe.
+1 ICON "nexoeletric.ico"
+
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041604b0"
+    BEGIN
+      VALUE "CompanyName", "Dieletrons\0"
+      VALUE "FileDescription", "NexoEletric\0"
+      VALUE "FileVersion", "1.0.0.0\0"
+      VALUE "InternalName", "NexoEletric\0"
+      VALUE "ProductName", "NexoEletric\0"
+      VALUE "ProductVersion", "1.0.0.0\0"
+      VALUE "OriginalFilename", "NexoEletric.exe\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0416, 1200
+  END
+END

@@ -58,12 +58,17 @@ pub fn router(est: Est) -> Router {
         .route("/__events", get(live::events))
         .route("/api/index.json", get(index::api_index))
         .route("/api/project/{arquivo}", get(index::api_project))
-        .route("/api/save", post(statics::api_save))
+        // o schematic.js/changes.js inteiro vai no corpo: o maior da casa ja passa de 1 MB, e o limite
+        // padrao do axum (2 MB) recusaria o Salvar de um projeto grande
+        .route("/api/save", post(statics::api_save).layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)))
         .route("/api/nexohub/estado", get(gate::api_estado))
         .route("/api/mcp/status", get(mcp::status))
         .route("/api/mcp/pedido", post(mcp::pedido))
         .route("/api/mcp/pedidos", get(mcp::pedidos))
-        .route("/api/mcp/resposta/{pid}", get(mcp::resposta_espera).post(mcp::resposta_grava))
+        // a resposta da vista traz PNG em base64 (o screenshot e as duas fotos 3D do render3d): o
+        // limite padrao do axum (2 MB) recusava; 30 MB e o MAX_RESPOSTA do mcp/rotas_hub.py
+        .route("/api/mcp/resposta/{pid}", get(mcp::resposta_espera).post(mcp::resposta_grava)
+            .layer(axum::extract::DefaultBodyLimit::max(30 * 1024 * 1024)))
         .route("/api/mcp/ola", post(mcp::ola))
         .route("/api/mcp/atividade", get(mcp::atividade_le).post(mcp::atividade_grava))
         .route("/nexo/{*arquivo}", get(statics::overlay))

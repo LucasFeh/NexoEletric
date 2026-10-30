@@ -378,19 +378,30 @@ pub fn html_pcb(s: &str, tag: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// todos os remendos casam com os arquivos do hub nesta pasta (pula se ela nao existe)
+    fn casam_em(pasta: &std::path::Path) {
+        let Ok(src) = std::fs::read_to_string(pasta.join("pcbframe.js")) else { return };
+        let (_, feitos) = super::remenda("pcbframe.js", &src);
+        assert_eq!(feitos, vec!["webgl", "biblioteca-so-corpos", "3d-sob-demanda"], "pcbframe.js de {}", pasta.display());
+        let src3 = std::fs::read_to_string(pasta.join("hub-pcb3d-vista.js")).unwrap();
+        let (_, feitos) = super::remenda("hub-pcb3d-vista.js", &src3);
+        assert_eq!(feitos, vec!["face-na-memoria", "real-em-paralelo", "step-rust", "placa-rust", "shaders-em-paralelo"],
+                   "hub-pcb3d-vista.js de {}", pasta.display());
+        let srcr = std::fs::read_to_string(pasta.join("hub-pcb3d-real.js")).unwrap();
+        let (_, feitos) = super::remenda("hub-pcb3d-real.js", &srcr);
+        assert_eq!(feitos, vec!["mapas-rust"], "hub-pcb3d-real.js de {}", pasta.display());
+    }
     #[test]
     fn remendos_casam_com_o_pcbframe_instalado() {
-        let p = std::path::Path::new(r"C:\Program Files\NexoEletric\resources\hub\pcbframe.js");
-        let Ok(src) = std::fs::read_to_string(p) else { return };
-        let (_, feitos) = super::remenda("pcbframe.js", &src);
-        assert_eq!(feitos, vec!["webgl", "biblioteca-so-corpos", "3d-sob-demanda"]);
-        let p3 = std::path::Path::new(r"C:\Program Files\NexoEletric\resources\hub\hub-pcb3d-vista.js");
-        let src3 = std::fs::read_to_string(p3).unwrap();
-        let (_, feitos) = super::remenda("hub-pcb3d-vista.js", &src3);
-        assert_eq!(feitos, vec!["face-na-memoria", "real-em-paralelo", "step-rust", "placa-rust", "shaders-em-paralelo"]);
-        let pr = std::path::Path::new(r"C:\Program Files\NexoEletric\resources\hub\hub-pcb3d-real.js");
-        let srcr = std::fs::read_to_string(pr).unwrap();
-        let (_, feitos) = super::remenda("hub-pcb3d-real.js", &srcr);
-        assert_eq!(feitos, vec!["mapas-rust"]);
+        casam_em(std::path::Path::new(r"C:\Program Files\NexoEletric\resources\hub"));
+    }
+    /// o hub que vai no PROXIMO instalador (o repositorio do NexoEletric): a casca Rust e o hub
+    /// saem no mesmo instalador desde o NexoEletric 1.54.0, e um remendo que deixou de casar so
+    /// apareceria la, na maquina de quem abriu. NEXOELETRIC_REPO troca a pasta.
+    #[test]
+    fn remendos_casam_com_o_hub_do_repositorio() {
+        let repo = std::env::var_os("NEXOELETRIC_REPO").map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"D:\Pessoal\NexoEletric"));
+        casam_em(&repo);
     }
 }

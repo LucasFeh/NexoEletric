@@ -6,6 +6,14 @@
 //!
 //! Uso: NexoEletric [--workspace PASTA] [--projeto NOME] [--aba pcb|esquema] [--porta N]
 //!                  [--so-servidor] [--sem-remendos] [--sem-sessao] [--nexobd] [--cdp PORTA] [--livre] [--dados PASTA]
+//!
+//! NO INSTALADOR DO NEXOELETRIC (1.54.0+): o atalho abre o NexoEletric.exe de sempre (Electron), que
+//! vira o MOTOR DE FUNDO, sem janela -- pasta de trabalho, sincronia com o NexoBD, configuracoes, o
+//! runtime do MCP -- e abre esta janela (resources\rust\NexoEletric.exe) com NEXOELETRIC_MOTOR=1:
+//!   - o menu que esta casca ainda nao tem (configuracoes, Conectar IA, Nexo Hub, Sobre...) sai pela
+//!     saida padrao como "menu:<id>", e o motor abre a tela dele;
+//!   - pela entrada padrao o motor manda "focar" (o atalho clicado de novo) e "toast <json>";
+//!   - NEXOELETRIC_VERSAO = a versao do app, que vai para o session.json do MCP.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::{Path, PathBuf};
@@ -18,6 +26,29 @@ enum Ev {
     Menu(String),
     Titulo(String),
     Arrastou(Vec<PathBuf>),
+    Focar,
+    Toast(String),
+}
+
+/// o mesmo AppUserModelID do Electron (app.setAppUserModelId e o appId do instalador): a janela
+/// agrupa na barra de tarefas com o atalho do NexoEletric (e com ele fixado), com o icone dele
+#[cfg(windows)]
+fn app_id_do_nexoeletric() {
+    #[link(name = "shell32")]
+    extern "system" {
+        fn SetCurrentProcessExplicitAppUserModelID(id: *const u16) -> i32;
+    }
+    let id: Vec<u16> = "com.dieletrons.altiumhub".encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        SetCurrentProcessExplicitAppUserModelID(id.as_ptr());
+    }
+}
+#[cfg(not(windows))]
+fn app_id_do_nexoeletric() {}
+
+/// aberto pelo motor de fundo (o NexoEletric.exe Electron do instalador)?
+fn com_motor() -> bool {
+    std::env::var("NEXOELETRIC_MOTOR").map(|v| v == "1").unwrap_or(false)
 }
 
 struct Args {
@@ -159,7 +190,9 @@ fn grava_sessao(ws: &Path, porta: u16) -> bool {
         }
     }
     let j = serde_json::json!({
-        "app": "nexoeletric", "versao": env!("CARGO_PKG_VERSION"), "hub": format!("http://127.0.0.1:{porta}"),
+        "app": "nexoeletric",
+        "versao": std::env::var("NEXOELETRIC_VERSAO").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
+        "hub": format!("http://127.0.0.1:{porta}"),
         "root": ws, "pid": std::process::id(), "mcp": ws.join("mcp").join("eletrichub-mcp.js"),
         "exe": std::env::current_exe().unwrap_or_default(), "iniciado": "",
     });
@@ -195,6 +228,7 @@ const PONTE: &str = r#"(function(){
 })();"#;
 
 fn main() {
+    app_id_do_nexoeletric();
     let a = args();
     let cfg = nexo_hub::Config {
         root: a.workspace.clone(),
@@ -227,8 +261,43 @@ fn main() {
 
     let ev_loop = EventLoopBuilder::<Ev>::with_user_event().build();
     let proxy = ev_loop.create_proxy();
-    let janela = WindowBuilder::new().with_title("NexoEletric").with_maximized(true).build(&ev_loop).expect("janela");
+    let mut wb = WindowBuilder::new().with_title("NexoEletric").with_maximized(true);
+    #[cfg(windows)]
+    {
+        use tao::platform::windows::{IconExtWindows, WindowBuilderExtWindows};
+        use tao::window::Icon;
+        // o icone do NexoEletric embutido no .exe (recursos/nexoeletric.rc, ordinal 1)
+        if let Ok(i) = Icon::from_resource(1, None) {
+            wb = wb.with_window_icon(Some(i));
+        }
+        if let Ok(i) = Icon::from_resource(1, None) {
+            wb = wb.with_taskbar_icon(Some(i));
+        }
+    }
+    let janela = wb.build(&ev_loop).expect("janela");
     janela.set_maximized(true);
+    let motor = com_motor();
+    if motor {
+        // o motor de fundo fala pela entrada padrao: "focar" e "toast {texto, tipo}"
+        let px = proxy.clone();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for linha in std::io::stdin().lock().lines() {
+                let Ok(l) = linha else { break };
+                let l = l.trim();
+                let ev = if l == "focar" {
+                    Ev::Focar
+                } else if let Some(j) = l.strip_prefix("toast ") {
+                    Ev::Toast(j.to_string())
+                } else {
+                    continue;
+                };
+                if px.send_event(ev).is_err() {
+                    break;
+                }
+            }
+        });
+    }
     // a pasta do WebView2 (cache, IndexedDB dos modelos 3D); --dados da outra (teste ao lado do app aberto)
     let dados = a.dados.clone().or_else(|| std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("NexoEletric-rust").join("WebView2")));
     let mut ctx = WebContext::new(dados);
@@ -276,6 +345,20 @@ fn main() {
                 *flow = ControlFlow::Exit;
             }
             Event::UserEvent(Ev::Titulo(t)) => janela.set_title(if t.is_empty() { "NexoEletric" } else { &t }),
+            Event::UserEvent(Ev::Focar) => {
+                if janela.is_minimized() {
+                    janela.set_minimized(false);
+                }
+                janela.set_visible(true);
+                janela.set_focus();
+            }
+            Event::UserEvent(Ev::Toast(j)) => {
+                // j = {"texto": ..., "tipo": "ok"|"warn"|"err"|"info"} (JSON do motor)
+                let _ = webview.evaluate_script(&format!(
+                    "(function(t){{ if (window.HubDialog && HubDialog.toast) HubDialog.toast(t.texto, t.tipo || 'info', t.ms || 8000); \
+                     else if (window.toast) toast(t.texto); else console.warn(t.texto); }})({j});"
+                ));
+            }
             Event::UserEvent(Ev::Arrastou(p)) => {
                 let lista: Vec<String> = p.iter().map(|x| x.to_string_lossy().into_owned()).collect();
                 let _ = webview.evaluate_script(&format!("window.__nexoArrastados = {};", serde_json::to_string(&lista).unwrap()));
@@ -292,6 +375,9 @@ fn main() {
                     };
                     let _ = webview.zoom(zoom);
                 }
+                "painelProjetos" => {
+                    let _ = webview.evaluate_script("window.EletricShell && EletricShell.alternarProjetos()");
+                }
                 "telaCheia" => janela.set_fullscreen(if janela.fullscreen().is_some() { None } else { Some(Fullscreen::Borderless(None)) }),
                 "devtools" => webview.open_devtools(),
                 "abrirPasta" => {
@@ -302,6 +388,13 @@ fn main() {
                         apaga_sessao();
                     }
                     *flow = ControlFlow::Exit;
+                }
+                outro if motor => {
+                    // o motor de fundo (Electron) tem a tela: configuracoes, Conectar IA, Nexo Hub, Sobre...
+                    use std::io::Write;
+                    let mut o = std::io::stdout().lock();
+                    let _ = writeln!(o, "menu:{outro}");
+                    let _ = o.flush();
                 }
                 outro => {
                     let msg = format!("“{outro}” ainda não foi portado para a versão Rust do NexoEletric");
