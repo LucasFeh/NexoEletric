@@ -1,0 +1,613 @@
+{
+ "hub": "http://127.0.0.1:8371",
+ "d2": {
+  "placa_pronta_ms": 2256,
+  "tempos": {
+   "iframe_inicio_desde_hub": 3365,
+   "html_resposta": 20,
+   "dom_interativo": 0,
+   "dcl": 0,
+   "load": 0,
+   "pronto": 340,
+   "scripts": 55,
+   "scripts_ultimo_fim": 199,
+   "scripts_kb": 3778,
+   "scripts_cache": 0,
+   "projeto": [
+    [
+     "board.js",
+     46,
+     162,
+     968834
+    ],
+    [
+     "changes.js",
+     46,
+     155,
+     451
+    ],
+    [
+     "annotations.js",
+     46,
+     156,
+     504
+    ],
+    [
+     "rules.js",
+     47,
+     157,
+     160818
+    ],
+    [
+     "changes.js",
+     195,
+     199,
+     451
+    ]
+   ]
+  },
+  "primeiro_quadro_ms": 2359,
+  "cpu": {
+   "cpu_ms": 668,
+   "por_arquivo": [
+    [
+     "(program)",
+     185.9
+    ],
+    [
+     "pcbframe.js",
+     65.1
+    ],
+    [
+     "hub-core.js",
+     60.7
+    ],
+    [
+     "hub-schtemplate.js",
+     52.5
+    ],
+    [
+     "schframe.js",
+     44.8
+    ],
+    [
+     "hub-draw.js",
+     41
+    ],
+    [
+     "hub-pcbnets.js",
+     39.4
+    ],
+    [
+     "(garbage collector)",
+     38.8
+    ],
+    [
+     "hub-pcbteardrop.js",
+     17
+    ],
+    [
+     "hub-shell.js",
+     12
+    ],
+    [
+     "hub-pcbpainel.js",
+     10.9
+    ],
+    [
+     "?",
+     8.7
+    ],
+    [
+     "querySelectorAll",
+     8.2
+    ],
+    [
+     "",
+     7.1
+    ],
+    [
+     "hub-gerber.js",
+     6
+    ],
+    [
+     "scrollIntoView",
+     6
+    ],
+    [
+     "hub-pcb3d-modelo.js",
+     6
+    ],
+    [
+     "hub-pcb3d-step.js",
+     6
+    ],
+    [
+     "pcblib.js",
+     5.5
+    ],
+    [
+     "append",
+     4.9
+    ],
+    [
+     "hub-pcbaltium.js",
+     4.4
+    ],
+    [
+     "hub-altiumdna.js",
+     3.3
+    ],
+    [
+     "schlib.js",
+     2.7
+    ],
+    [
+     "symbols-lib.js",
+     2.2
+    ],
+    [
+     "hub-menubar.js",
+     2.2
+    ]
+   ],
+   "por_funcao": [
+    [
+     "(program)  (program):0",
+     185.9
+    ],
+    [
+     "desenha  hub-schtemplate.js:408",
+     46.5
+    ],
+    [
+     "(garbage collector)  (garbage collector):0",
+     38.8
+    ],
+    [
+     "worldText  hub-draw.js:27",
+     23
+    ],
+    [
+     "extractNets  hub-core.js:2447",
+     13.1
+    ],
+    [
+     "atualiza  hub-pcbpainel.js:241",
+     9.3
+    ],
+    [
+     "(anon)  schframe.js:12",
+     8.7
+    ],
+    [
+     "analisa  hub-pcbnets.js:348",
+     8.7
+    ],
+    [
+     "(anon)  ?:1",
+     8.2
+    ],
+    [
+     "querySelectorAll  querySelectorAll:0",
+     8.2
+    ],
+    [
+     "desenhaMiniatura  schframe.js:6400",
+     8.2
+    ],
+    [
+     "(anon)  hub-shell.js:352",
+     6.6
+    ],
+    [
+     "drawSymbolPart  hub-draw.js:97",
+     6.6
+    ],
+    [
+     "distSeg  hub-core.js:17",
+     6
+    ],
+    [
+     "scrollIntoView  scrollIntoView:0",
+     6
+    ],
+    [
+     "(anon)  pcblib.js:1",
+     5.5
+    ],
+    [
+     "natural  hub-core.js:2531",
+     5.5
+    ],
+    [
+     "resize  hub-draw.js:366",
+     5.5
+    ],
+    [
+     "assinatura  hub-pcbnets.js:248",
+     5.5
+    ],
+    [
+     "montaAlvos  pcbframe.js:715",
+     5.5
+    ],
+    [
+     "append  append:0",
+     4.9
+    ],
+    [
+     "dcopy  hub-core.js:1636",
+     4.9
+    ],
+    [
+     "encaixa  hub-pcbteardrop.js:411",
+     4.9
+    ],
+    [
+     "topologiaFolha  schframe.js:414",
+     4.4
+    ],
+    [
+     "draw  pcbframe.js:1244",
+     4.4
+    ]
+   ]
+  }
+ },
+ "d3": {
+  "cria_pronta_ms": 60,
+  "cena_chamada_ms": 62,
+  "cena_retornou_ms": 334,
+  "cena_resolvida_ms": 336,
+  "erros": [],
+  "assentou_ms": 1287,
+  "tarefas_longas_ms": 1120,
+  "estado": {
+   "steps": 0,
+   "falhas": [
+    "VDR7: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4054007979.step não está no hub (HTTP 404).",
+    "VDR1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4054007979.step não está no hub (HTTP 404).",
+    "PTC2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4048098512.step não está no hub (HTTP 404).",
+    "L1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/991023710.step não está no hub (HTTP 404).",
+    "D20: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D18: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D15: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D14: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D13: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D12: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D11: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D10: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D9: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D5: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3021931127.step não está no hub (HTTP 404).",
+    "D19: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/406929290.step não está no hub (HTTP 404).",
+    "D2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/406929290.step não está no hub (HTTP 404).",
+    "CI9: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2835630474.step não está no hub (HTTP 404).",
+    "C32: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C10: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C13: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C5: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C22: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C16: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C21: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C15: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C27: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C28: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C24: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C26: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C25: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C17: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C23: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C18: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C11: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3102036649.step não está no hub (HTTP 404).",
+    "C31: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2677807077.step não está no hub (HTTP 404).",
+    "C30: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2677807077.step não está no hub (HTTP 404).",
+    "C29: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4030588170.step não está no hub (HTTP 404).",
+    "R28: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R12: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R16: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R18: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R20: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R17: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R14: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R19: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R13: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R23: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R22: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R21: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R33: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R34: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R35: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R26: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R31: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R27: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R29: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R32: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R30: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R25: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R24: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R15: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R11: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R10: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R9: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R8: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R7: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R6: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R5: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R4: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "R2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4241671424.step não está no hub (HTTP 404).",
+    "CN5: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3041931766.step não está no hub (HTTP 404).",
+    "R1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4191160244.step não está no hub (HTTP 404).",
+    "R36: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4191160244.step não está no hub (HTTP 404).",
+    "R3: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4191160244.step não está no hub (HTTP 404).",
+    "R37: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/4191160244.step não está no hub (HTTP 404).",
+    "MD1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2475317612.step não está no hub (HTTP 404).",
+    "D7: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/523556646.step não está no hub (HTTP 404).",
+    "D8: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/523556646.step não está no hub (HTTP 404).",
+    "D17: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/523556646.step não está no hub (HTTP 404).",
+    "D6: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2413095815.step não está no hub (HTTP 404).",
+    "D16: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2413095815.step não está no hub (HTTP 404).",
+    "LD2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1206938685.step não está no hub (HTTP 404).",
+    "LD1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1206938685.step não está no hub (HTTP 404).",
+    "LD3: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1206938685.step não está no hub (HTTP 404).",
+    "LD6: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1206938685.step não está no hub (HTTP 404).",
+    "LD4: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1206938685.step não está no hub (HTTP 404).",
+    "LD5: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1206938685.step não está no hub (HTTP 404).",
+    "CI6: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2378325727.step não está no hub (HTTP 404).",
+    "CI8: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2378325727.step não está no hub (HTTP 404).",
+    "FB1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3643664567.step não está no hub (HTTP 404).",
+    "FB2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3643664567.step não está no hub (HTTP 404).",
+    "RL5: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2743768365.step não está no hub (HTTP 404).",
+    "RL4: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2743768365.step não está no hub (HTTP 404).",
+    "RL3: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2743768365.step não está no hub (HTTP 404).",
+    "RL2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2743768365.step não está no hub (HTTP 404).",
+    "IC1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1872781080.step não está no hub (HTTP 404).",
+    "C20: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2883654568.step não está no hub (HTTP 404).",
+    "C19: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2883654568.step não está no hub (HTTP 404).",
+    "C14: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2883654568.step não está no hub (HTTP 404).",
+    "C12: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2883654568.step não está no hub (HTTP 404).",
+    "PTC1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/657967028.step não está no hub (HTTP 404).",
+    "J10: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J10: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J10: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J9: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J9: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J9: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J8: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J8: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J8: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "J2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1588404751.step não está no hub (HTTP 404).",
+    "CI7: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3815770284.step não está no hub (HTTP 404).",
+    "VDR6: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/948937307.step não está no hub (HTTP 404).",
+    "VDR5: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/948937307.step não está no hub (HTTP 404).",
+    "VDR4: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/948937307.step não está no hub (HTTP 404).",
+    "VDR3: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/948937307.step não está no hub (HTTP 404).",
+    "T4: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1792417310.step não está no hub (HTTP 404).",
+    "T3: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1792417310.step não está no hub (HTTP 404).",
+    "T2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1792417310.step não está no hub (HTTP 404).",
+    "T1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1792417310.step não está no hub (HTTP 404).",
+    "CI4: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2829007374.step não está no hub (HTTP 404).",
+    "CI2: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/2326042673.step não está no hub (HTTP 404).",
+    "CI1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1747220508.step não está no hub (HTTP 404).",
+    "C4: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/1037151560.step não está no hub (HTTP 404).",
+    "C3: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/3450821352.step não está no hub (HTTP 404).",
+    "C1: o modelo http://127.0.0.1:8371/Projects/PRJ-UR-DI261924/3d/771105612.step não está no hub (HTTP 404)."
+   ],
+   "corpos": 130,
+   "az": 0,
+   "el": 90,
+   "dist": 285.34548828276615,
+   "realView": false
+  },
+  "cpu": {
+   "cpu_ms": 1213,
+   "por_arquivo": [
+    [
+     "three.module.js",
+     826.6
+    ],
+    [
+     "three.core.js",
+     284.2
+    ],
+    [
+     "(program)",
+     45.5
+    ],
+    [
+     "getContext",
+     10.8
+    ],
+    [
+     "?",
+     8.1
+    ],
+    [
+     "pcbframe.js",
+     7.6
+    ],
+    [
+     "hub-pcb3d-vista.js",
+     4.3
+    ],
+    [
+     "querySelectorAll",
+     4.3
+    ],
+    [
+     "(garbage collector)",
+     3.8
+    ],
+    [
+     "closePath",
+     3.8
+    ],
+    [
+     "hub-pcb3d-step.js",
+     2.7
+    ],
+    [
+     "URLSearchParams",
+     1.6
+    ],
+    [
+     "hub-pcb3d-modelo.js",
+     1.1
+    ],
+    [
+     "moveTo",
+     1.1
+    ],
+    [
+     "hub-gerber.js",
+     1.1
+    ],
+    [
+     "createElement",
+     0.5
+    ],
+    [
+     "H.cria",
+     0.5
+    ],
+    [
+     "hub-laser.js",
+     0.5
+    ],
+    [
+     "lineTo",
+     0.5
+    ],
+    [
+     "arc",
+     0.5
+    ],
+    [
+     "transaction",
+     0.5
+    ],
+    [
+     "focus",
+     0.5
+    ],
+    [
+     "]+)>",
+     0.5
+    ],
+    [
+     "hub-semhub.js",
+     0.5
+    ],
+    [
+     "hub-menubar.js",
+     0.5
+    ]
+   ],
+   "por_funcao": [
+    [
+     "onFirstUse  three.module.js:7022",
+     795.8
+    ],
+    [
+     "isEarHashed  three.core.js:34451",
+     155.9
+    ],
+    [
+     "(program)  (program):0",
+     45.5
+    ],
+    [
+     "findHoleBridge  three.core.js:34602",
+     16.8
+    ],
+    [
+     "getContext  getContext:0",
+     10.8
+    ],
+    [
+     "equals  three.core.js:34790",
+     9.7
+    ],
+    [
+     "(anon)  ?:1",
+     8.1
+    ],
+    [
+     "earcutLinked  three.core.js:34375",
+     7
+    ],
+    [
+     "addShape  three.core.js:36678",
+     7
+    ],
+    [
+     "area  three.core.js:34785",
+     5.4
+    ],
+    [
+     "pointInTriangle  three.core.js:34765",
+     4.9
+    ],
+    [
+     "addShape  three.core.js:35132",
+     4.3
+    ],
+    [
+     "indexCurve  three.core.js:34664",
+     4.3
+    ],
+    [
+     "f3  three.core.js:35745",
+     4.3
+    ],
+    [
+     "querySelectorAll  querySelectorAll:0",
+     4.3
+    ],
+    [
+     "getExtension  three.module.js:4077",
+     3.8
+    ],
+    [
+     "(garbage collector)  (garbage collector):0",
+     3.8
+    ],
+    [
+     "sortLinked  three.core.js:34681",
+     3.8
+    ],
+    [
+     "closePath  closePath:0",
+     3.8
+    ],
+    [
+     "WebGLRenderer.setSize  three.module.js:16708",
+     2.7
+    ],
+    [
+     "Float32BufferAttribute  three.core.js:17950",
+     2.7
+    ],
+    [
+     "fromBufferAttribute  three.core.js:5997",
+     2.7
+    ],
+    [
+     "setFromBufferAttribute  three.core.js:15989",
+     2.7
+    ],
+    [
+     "createBuffer  three.module.js:66",
+     2.7
+    ],
+    [
+     "WebGLShader  three.module.js:6158",
+     2.7
+    ]
+   ]
+  }
+ }
+}

@@ -111,3 +111,54 @@ pub unsafe extern "C" fn nx_cena(p: *const u8, n: usize) -> *const u32 {
         u.as_ref().unwrap().cab.as_ptr()
     })
 }
+
+// ---------------- a placa solida do 3D ----------------
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Entrada3d {
+    lacos: Vec<Vec<[f64; 2]>>,
+    recortes: Vec<Vec<[f64; 2]>>,
+    furos: Vec<[f64; 3]>,
+    esp: f64,
+    seg: usize,
+}
+
+struct Saida3d {
+    p: nexo_core::solido::Placa3d,
+    cab: [u32; 10],
+}
+
+thread_local! {
+    static ULTIMA3D: RefCell<Option<Saida3d>> = const { RefCell::new(None) };
+}
+
+/// # Safety
+/// `p`/`n` apontam para o JSON {lacos, recortes, furos:[[x,y,r]], esp, seg} escrito pelo JS.
+/// Cabecalho: ok, tampa_xy, n_vert_tampa, tampa_idx, n_idx_tampa, lado_pos, n_vert_lado, lado_nor, lado_idx, n_idx_lado.
+#[no_mangle]
+pub unsafe extern "C" fn nx_placa3d(p: *const u8, n: usize) -> *const u32 {
+    let bytes = std::slice::from_raw_parts(p, n);
+    let placa = serde_json::from_slice::<Entrada3d>(bytes)
+        .ok()
+        .and_then(|e| nexo_core::solido::placa(&e.lacos, &e.recortes, &e.furos, if e.esp > 0.0 { e.esp } else { 1.6 }, if e.seg > 0 { e.seg } else { 18 }));
+    ULTIMA3D.with(|u| {
+        let mut u = u.borrow_mut();
+        let ok = placa.is_some() as u32;
+        let mut s = Saida3d { p: placa.unwrap_or_default(), cab: [0; 10] };
+        s.cab = [
+            ok,
+            s.p.tampa_xy.as_ptr() as u32,
+            s.p.tampa_xy.len() as u32,
+            s.p.tampa_idx.as_ptr() as u32,
+            s.p.tampa_idx.len() as u32,
+            s.p.lado_pos.as_ptr() as u32,
+            s.p.lado_pos.len() as u32,
+            s.p.lado_nor.as_ptr() as u32,
+            s.p.lado_idx.as_ptr() as u32,
+            s.p.lado_idx.len() as u32,
+        ];
+        *u = Some(s);
+        u.as_ref().unwrap().cab.as_ptr()
+    })
+}

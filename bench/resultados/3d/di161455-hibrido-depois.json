@@ -1,0 +1,482 @@
+{
+ "hub": "http://127.0.0.1:8250",
+ "d2": {
+  "placa_pronta_ms": 1227,
+  "tempos": {
+   "iframe_inicio_desde_hub": 2411,
+   "html_resposta": 7,
+   "dom_interativo": 0,
+   "dcl": 0,
+   "load": 0,
+   "pronto": 412,
+   "scripts": 56,
+   "scripts_ultimo_fim": 183,
+   "scripts_kb": 2915,
+   "scripts_cache": 0,
+   "projeto": [
+    [
+     "board.js",
+     25,
+     149,
+     1192815
+    ],
+    [
+     "annotations.js",
+     26,
+     115,
+     504
+    ],
+    [
+     "changes.js",
+     26,
+     115,
+     37416
+    ],
+    [
+     "rules.js",
+     26,
+     121,
+     35883
+    ],
+    [
+     "changes.js",
+     181,
+     183,
+     37416
+    ]
+   ]
+  },
+  "primeiro_quadro_ms": 1262,
+  "cpu": {
+   "cpu_ms": 401,
+   "por_arquivo": [
+    [
+     "(program)",
+     76.2
+    ],
+    [
+     "hub-pcbnets.js",
+     61.4
+    ],
+    [
+     "pcbframe.js",
+     56.3
+    ],
+    [
+     "nexo-gl.js",
+     42.1
+    ],
+    [
+     "nexo_wasm.wasm",
+     42.1
+    ],
+    [
+     "hub-core.js",
+     21
+    ],
+    [
+     "(garbage collector)",
+     19.9
+    ],
+    [
+     "hub-pcb3d-modelo.js",
+     15.4
+    ],
+    [
+     "hub-pcbpainel.js",
+     13.7
+    ],
+    [
+     "hub-gerber.js",
+     5.7
+    ],
+    [
+     "scrollIntoView",
+     5.1
+    ],
+    [
+     "getContext",
+     4
+    ],
+    [
+     "?",
+     3.4
+    ],
+    [
+     "append",
+     3.4
+    ],
+    [
+     "hub-pcbteardrop.js",
+     2.8
+    ],
+    [
+     "querySelectorAll",
+     2.3
+    ],
+    [
+     "hub-altiumdna.js",
+     2.3
+    ],
+    [
+     "hub-menubar.js",
+     1.7
+    ],
+    [
+     "",
+     1.7
+    ],
+    [
+     "hub-pcbdesfazer.js",
+     1.7
+    ],
+    [
+     "setAttribute",
+     1.7
+    ],
+    [
+     "hub-shell.js",
+     1.7
+    ],
+    [
+     "board.js",
+     1.7
+    ],
+    [
+     "hub-atalhos.js",
+     1.7
+    ],
+    [
+     "fetch",
+     1.1
+    ]
+   ],
+   "por_funcao": [
+    [
+     "(program)  (program):0",
+     76.2
+    ],
+    [
+     "(garbage collector)  (garbage collector):0",
+     19.9
+    ],
+    [
+     "compila  nexo-gl.js:85",
+     17.6
+    ],
+    [
+     "analisa  hub-pcbnets.js:348",
+     14.8
+    ],
+    [
+     "montaJa  nexo-gl.js:135",
+     14.2
+    ],
+    [
+     "atualiza  hub-pcbpainel.js:241",
+     10.8
+    ],
+    [
+     "assinatura  hub-pcbnets.js:248",
+     8
+    ],
+    [
+     "cadaSeg  hub-pcbnets.js:211",
+     8
+    ],
+    [
+     "grade  hub-pcbnets.js:324",
+     6.8
+    ],
+    [
+     "reg  pcbframe.js:717",
+     6.8
+    ],
+    [
+     "_RNvMs0_NtCsbw64Iw7W9Hn_8dlmalloc8dlmallocINtB5_8DlmallocNtNtB7_3sys6SystemE6mallocCsiuSwmoQr08c_3std.llvm.17318140613379366676  nexo_wasm.wasm:1",
+     6.8
+    ],
+    [
+     "(anon)  hub-pcb3d-modelo.js:218",
+     6.8
+    ],
+    [
+     "doItem  pcbframe.js:743",
+     6.3
+    ],
+    [
+     "desenha  nexo-gl.js:155",
+     6.3
+    ],
+    [
+     "scrollIntoView  scrollIntoView:0",
+     5.1
+    ],
+    [
+     "placeholder  hub-pcb3d-modelo.js:209",
+     5.1
+    ],
+    [
+     "memo  hub-pcbnets.js:255",
+     4.6
+    ],
+    [
+     "linha  pcbframe.js:744",
+     4.6
+    ],
+    [
+     "recalcula  pcbframe.js:388",
+     4
+    ],
+    [
+     "getContext  getContext:0",
+     4
+    ],
+    [
+     "_RNvCs3r0HIiC14DM_9nexo_wasm5monta  nexo_wasm.wasm:1",
+     4
+    ],
+    [
+     "(anon)  ?:1",
+     3.4
+    ],
+    [
+     "append  append:0",
+     3.4
+    ],
+    [
+     "dcopy  hub-core.js:1636",
+     3.4
+    ],
+    [
+     "tocam  hub-pcbnets.js:227",
+     3.4
+    ]
+   ]
+  }
+ },
+ "d3": {
+  "cria_pronta_ms": 478,
+  "cena_chamada_ms": 479,
+  "cena_retornou_ms": 544,
+  "cena_resolvida_ms": 544,
+  "assentou_ms": 544,
+  "tarefas_longas_ms": 263,
+  "estado": {
+   "steps": 0,
+   "falhas": [],
+   "corpos": 0,
+   "az": 0,
+   "el": 90,
+   "dist": 456.61163445879765,
+   "realView": false
+  },
+  "cpu": {
+   "cpu_ms": 711,
+   "por_arquivo": [
+    [
+     "(program)",
+     416.1
+    ],
+    [
+     "getProgramInfoLog",
+     172.4
+    ],
+    [
+     "pcbframe.js",
+     17.5
+    ],
+    [
+     "three.module.js",
+     17.5
+    ],
+    [
+     "three.core.js",
+     15.8
+    ],
+    [
+     "closePath",
+     13.6
+    ],
+    [
+     "getContext",
+     9
+    ],
+    [
+     "nexo_wasm.wasm",
+     9
+    ],
+    [
+     "hub-pcb3d-vista.js",
+     8.5
+    ],
+    [
+     "(garbage collector)",
+     6.8
+    ],
+    [
+     "?",
+     4.5
+    ],
+    [
+     "getExtension",
+     4
+    ],
+    [
+     "hub-gerber.js",
+     2.3
+    ],
+    [
+     "querySelectorAll",
+     1.7
+    ],
+    [
+     "shaderSource",
+     1.7
+    ],
+    [
+     "bufferData",
+     1.7
+    ],
+    [
+     "RegExp: #pragma unroll_loop_start\\s+for\\s*\\(\\s*int\\s+i\\s*=\\s*(\\d+)\\s*;\\s*i\\s*<\\s*(\\d+)\\s*;\\s*i\\s*\\+\\+\\s*\\)\\s*{([\\s\\S]+?)}\\s+#pragma unroll_loop_end",
+     1.1
+    ],
+    [
+     "H.cria",
+     0.6
+    ],
+    [
+     "get",
+     0.6
+    ],
+    [
+     "getParameter",
+     0.6
+    ],
+    [
+     "nexo-gl.js",
+     0.6
+    ],
+    [
+     "setTransform",
+     0.6
+    ],
+    [
+     "hub-core.js",
+     0.6
+    ],
+    [
+     "lineTo",
+     0.6
+    ],
+    [
+     "stroke",
+     0.6
+    ]
+   ],
+   "por_funcao": [
+    [
+     "(program)  (program):0",
+     416.1
+    ],
+    [
+     "getProgramInfoLog  getProgramInfoLog:0",
+     172.4
+    ],
+    [
+     "closePath  closePath:0",
+     13.6
+    ],
+    [
+     "getContext  getContext:0",
+     9
+    ],
+    [
+     "(garbage collector)  (garbage collector):0",
+     6.8
+    ],
+    [
+     "(anon)  ?:1",
+     4.5
+    ],
+    [
+     "getExtension  getExtension:0",
+     4
+    ],
+    [
+     "nexoPlaca3d  hub-pcb3d-vista.js:346",
+     3.4
+    ],
+    [
+     "WebGLRenderer.setSize  three.module.js:16708",
+     2.8
+    ],
+    [
+     "_RNvMs6_NtCseWu7sr1ntn8_17lyon_tessellation4fillNtB5_15FillTessellator14process_events  nexo_wasm.wasm:1",
+     2.3
+    ],
+    [
+     "geoTexto  pcbframe.js:595",
+     2.3
+    ],
+    [
+     "computeBoundingSphere  three.core.js:19079",
+     2.3
+    ],
+    [
+     "querySelectorAll  querySelectorAll:0",
+     1.7
+    ],
+    [
+     "montaPlaca  hub-pcb3d-vista.js:384",
+     1.7
+    ],
+    [
+     "cacheLinha  pcbframe.js:1007",
+     1.7
+    ],
+    [
+     "camC  pcbframe.js:980",
+     1.7
+    ],
+    [
+     "shaderSource  shaderSource:0",
+     1.7
+    ],
+    [
+     "bufferData  bufferData:0",
+     1.7
+    ],
+    [
+     "alvos  pcbframe.js:7315",
+     1.1
+    ],
+    [
+     "(anon)  three.core.js:1",
+     1.1
+    ],
+    [
+     "WebGLRenderer  three.module.js:16107",
+     1.1
+    ],
+    [
+     "initGLContext  three.module.js:16479",
+     1.1
+    ],
+    [
+     "_RNvNtCslazegQw18c4_9nexo_core6solido5placa  nexo_wasm.wasm:1",
+     1.1
+    ],
+    [
+     "_RINvNtNtNtNtCs4NIexwV1FGX_4core5slice4sort8unstable9quicksort9quicksortoNvYoNtNtBa_3cmp10PartialOrd2ltECseWu7sr1ntn8_17lyon_tessellation  nexo_wasm.wasm:1",
+     1.1
+    ],
+    [
+     "pintaFace3d  pcbframe.js:5363",
+     1.1
+    ]
+   ]
+  }
+ }
+}

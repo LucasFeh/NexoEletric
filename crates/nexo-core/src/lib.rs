@@ -6,7 +6,8 @@
 //! - `font`: a fonte vetorial da serigrafia;
 //! - `geom`: geometria plana;
 //! - `scene`: a placa em malhas para a GPU;
-//! - `pick`: selecao (indice espacial) e propriedades.
+//! - `pick`: selecao (indice espacial) e propriedades;
+//! - `solido`: a placa como solido 3D (tampas com os furos e paredes).
 
 pub mod changes;
 pub mod font;
@@ -17,5 +18,6 @@ pub mod model;
 pub mod pick;
 pub mod project;
 pub mod scene;
+pub mod solido;
 
 pub use model::Board;

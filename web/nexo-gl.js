@@ -22,6 +22,10 @@ function carrega() {
   return carregando;
 }
 carrega();
+/* o worker da malha nasce JA (o nexo-gl.js entra no <head> da vista): o WASM compila enquanto os
+   outros scripts da vista baixam, e o primeiro pedido de malha nao espera por ele */
+let WORKER = null;
+try { WORKER = new Worker('/nexo/nexo-gl-worker.js'); } catch (e) { WORKER = null; }
 
 const VS_TRI = `#version 300 es
 layout(location=0) in vec2 pos;
@@ -152,6 +156,35 @@ function cria(cv, aoPronto) {
     return true;
   }
 
+  /* A malha montada FORA da thread da pagina (nexo-gl-worker.js): a vista pede e segue abrindo;
+     quando a malha chega, sobe para a GPU e a vista redesenha (aoPronto). Enquanto uma malha nova
+     esta a caminho, a anterior continua na tela. Sem Worker: a montagem direta de sempre. */
+  let worker = null, seq = 0, pedida = '', atual = '';
+  worker = WORKER; WORKER = null;            /* uma vista por pagina: o worker e dela */
+  if (!worker) { try { worker = new Worker('/nexo/nexo-gl-worker.js'); } catch (e) { worker = null; } }
+  if (worker) {
+    worker.onmessage = (e) => {
+      const r = e.data;
+      if (r.id !== seq) return;               /* chegou uma mais velha que a ultima pedida */
+      if (!r.ok) { quebrado = true; console.warn('nexo-gl: a malha falhou, a vista segue no Canvas 2D', r.erro); if (aoPronto) aoPronto(); return; }
+      if (perdido) return;
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbuf); gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(r.verts), gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(r.idx), gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, cbuf); gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(r.caps), gl.STATIC_DRAW);
+      meta = r.meta; atual = pedida;
+      if (aoPronto) aoPronto();
+    };
+    worker.onerror = (e) => { worker = null; console.warn('nexo-gl: worker', e.message); if (aoPronto) aoPronto(); };
+  }
+  function pedeMalha(fazEntrada, chave) {
+    if (quebrado || perdido) return;
+    if (chave === atual && meta) return;
+    if (chave === pedida && worker) return;
+    pedida = chave;
+    if (worker) { seq++; worker.postMessage({ id:seq, entrada:fazEntrada() }); return; }
+    if (monta(fazEntrada())) atual = chave;
+  }
+
   function desenha(v) {
     if (!meta || perdido) return false;
     // o canvas do WebGL embaixo do 2D, do mesmo tamanho
@@ -194,11 +227,34 @@ function cria(cv, aoPronto) {
 
   return {
     pronto: () => !!wasm && !perdido && !quebrado,
-    monta, desenha,
+    usavel: () => !perdido && !quebrado,
+    temMalha: () => !!meta && !perdido && !quebrado,
+    monta, pedeMalha, desenha,
     esconde() { if (gc.style.display !== 'none') gc.style.display = 'none'; },
     info: () => meta && { triangulos: meta.triangulos, capsulas: meta.capsulas, montar_ms: meta.ms },
   };
 }
 
-window.NexoGL = { cria, carrega };
+/* a placa solida do 3D (nexo_core::solido): uma triangulacao das tampas com todos os furos e as
+   paredes, em arrays prontos para BufferGeometry. null = sem WASM (quem chama faz do jeito antigo) */
+function placa3d(entrada) {
+  if (!wasm) return null;
+  const bytes = new TextEncoder().encode(JSON.stringify(entrada));
+  const p = wasm.nx_alloc(bytes.length);
+  new Uint8Array(wasm.memory.buffer, p, bytes.length).set(bytes);
+  const pc = wasm.nx_placa3d(p, bytes.length);
+  wasm.nx_free(p, bytes.length);
+  const mem = wasm.memory.buffer;           // lido DEPOIS da chamada (a memoria pode ter crescido)
+  const c = new Uint32Array(mem, pc, 10).slice();
+  if (!c[0]) return null;
+  return {
+    tampaXY: new Float32Array(mem, c[1], c[2] * 2).slice(),
+    tampaIdx: new Uint32Array(mem, c[3], c[4]).slice(),
+    ladoPos: new Float32Array(mem, c[5], c[6] * 3).slice(),
+    ladoNor: new Float32Array(mem, c[7], c[6] * 3).slice(),
+    ladoIdx: new Uint32Array(mem, c[8], c[9]).slice(),
+  };
+}
+
+window.NexoGL = { cria, carrega, placa3d };
 })();

@@ -11,6 +11,9 @@ O NexoEletric com a interface web de sempre, trocando por Rust **só o que media
 | vigia do ao vivo varrendo `Projects/` e `Libs/` a cada segundo (`os.walk`) | notificação do sistema (`ReadDirectoryChangesW`): custo zero parado |
 | vista PCB: o Canvas 2D rasteriza milhares de caminhos a cada quadro | WebGL2 (`web/nexo-gl.js`) com a malha do **núcleo Rust em WASM** (`crates/nexo-wasm`), montada uma vez por mudança da placa; o 2D fica por cima com o que é interativo |
 | vista PCB monta o 3D escondido ao abrir (three.js: ~2 s de CPU + centenas de MB de GPU) | a preferência que já existia ("3D pronto de antemão") passa a vir desligada; o 3D monta quando for aberto |
+| 3D: a placa (contorno com ~2.400 furos) passava pelo earcut do three.js **três vezes** (ExtrudeGeometry + duas ShapeGeometry): ~750 ms | `nexo_core::solido` (WASM): uma triangulação (lyon) para as tampas, as faces pintadas e as paredes com normais — ~6 ms. Imagem 99,9% idêntica |
+| 3D: o primeiro `render()` travava ~0,9 s compilando os shaders do three.js | `compileAsync` (KHR_parallel_shader_compile): compila em paralelo, fora da thread da página, antes do primeiro quadro |
+| 2D: na abertura, a malha da placa (e o cache de caminhos do Canvas 2D) eram montados na thread da página | a malha sai do WASM num **Web Worker** que nasce com a página; o cache do Canvas 2D só é montado se o desenho original for usado |
 
 O que **não** era gargalo ficou como está: toda a interface (hub.html, esquema, PCB, BOM, Gerber, laser,
 editores, roteadores, DRC...) e as rotas do `hubserver.py` que não estão no caminho de abrir/usar a placa
