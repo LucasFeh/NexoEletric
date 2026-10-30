@@ -44,26 +44,43 @@ function transacao(ctx, p, fn, opts) {
   const cab = Object.assign({}, arq.valor); delete cab.items;
   const sch0 = Object.assign({}, cab, { items: arq.itens.slice() });
   const antes = hc.validateSchematic(sch0, L.schlib, L.pcblib, netsOuNada(hc, sch0, L));
-  const tocados = fn(arq, L) || [];
+  /* fn pode mexer no cabecalho (o sch_copiar acrescenta `symbols`): as bibliotecas da validacao
+     de depois sao as do esquema novo */
+  const symAntes = cab.symbols;
+  const tocados = fn(arq, L, cab) || [];
   const sch = Object.assign({}, cab, { items: arq.itens });
-  const nx = netsOuNada(hc, sch, L);
-  const v = hc.validateSchematic(sch, L.schlib, L.pcblib, nx);
+  const L2 = cab.symbols !== symAntes ? ctx.libsDe(sch) : L;
+  const nx = netsOuNada(hc, sch, L2);
+  const v = hc.validateSchematic(sch, L2.schlib, L2.pcblib, nx);
   const ja = new Set(antes.errors), jaAv = new Set(antes.warnings);
-  const novos = v.errors.filter(e => !ja.has(e));
+  let novos = v.errors.filter(e => !ja.has(e));
+  /* o.herdado(msg): erro que o item ja tinha de onde veio (sch_copiar) nao trava a gravacao */
+  const herdados = o.herdado ? novos.filter(e => o.herdado(e)) : [];
+  if (herdados.length) novos = novos.filter(e => !herdados.includes(e));
   const ser = hc.serializeSchematic(sch);
   for (const e of ser.errors || []) novos.push((e.idx >= 0 ? `item #${e.idx}: ` : '') + e.msg);
   let nets = null;
   if (nx) nets = { total: nx.nets.length, avisos: nx.warnings.slice(0, 15) };
-  else { try { hc.extractNets(sch, L.schlib); } catch (e) { nets = { erro: e.message }; } }
+  else { try { hc.extractNets(sch, L2.schlib); } catch (e) { nets = { erro: e.message }; } }
+  let avNovos = v.warnings.filter(w => !jaAv.has(w)), foraDaGrade;
+  /* o.resumeGrade (sch_copiar): a folha importada do Altium raramente esta inteira na grade, e os
+     avisos de grade dos itens copiados viram uma contagem para os outros aparecerem */
+  if (o.resumeGrade) {
+    const g = avNovos.filter(w => /fora da grade de 100 mil/.test(w));
+    if (g.length) { foraDaGrade = g.length; avNovos = avNovos.filter(w => !/fora da grade de 100 mil/.test(w)); }
+  }
   const estado = {
     ok: !novos.length, gravado: false, arquivo: ctx.rel(p.arq('schematic.js')), itens_no_arquivo: arq.itens.length,
-    tocados: tocados.map(t => ({ indice: arq.itens.indexOf(t), item: t })),
-    erros: novos, avisos_novos: v.warnings.filter(w => !jaAv.has(w)).slice(0, 40),
+    tocados: o.semTocados ? undefined : tocados.map(t => ({ indice: arq.itens.indexOf(t), item: t })),
+    erros: novos, erros_herdados: herdados.length ? herdados : undefined, avisos_novos: avNovos.slice(0, 40), fora_da_grade: foraDaGrade,
     validacao: { erros: v.errors.length, avisos: v.warnings.length }, nets,
   };
   if (o.simular) { estado.simulado = true; return estado; }
   if (novos.length && !o.forcar) { estado.dica = 'Nada foi gravado. Corrija os erros (sch_simbolo mostra pinos e footprint).'; return estado; }
   if (!ser.text) { estado.dica = 'o formato não fecha; nada gravado'; return estado; }
+  /* o modo cirurgico so troca as linhas dos itens e guarda o cabecalho do arquivo: cabecalho
+     mexido (symbols) pede o arquivo reserializado inteiro, como o sym_salvar faz */
+  if (cab.symbols !== symAntes) arq.cirurgico = false;
   const texto = arq.texto(itens => hc.serializeSchematic(Object.assign({}, cab, { items: itens })).text);
   estado.gravado = ctx.grava(p.arq('schematic.js'), texto, o.ferramenta);
   return estado;
@@ -121,6 +138,204 @@ function achaEm(itens, alvo) {
 }
 const ALVO_EM = { type: 'array', items: { type: 'object', properties: { t: { type: 'string', enum: TIPOS_ITEM }, x: { type: 'number' }, y: { type: 'number' }, folha: { type: 'string' }, net: { type: 'string' } }, required: ['x', 'y'] },
   description: 'achar pelo lugar em vez do índice (que muda depois de cada sch_apagar): [{t:"wire", x, y}] pega o fio que passa ou tem vértice em (x,y); rótulo/power/port/junção/No ERC/texto pela âncora. t, folha e net estreitam.' };
+
+/* ---------- sch_copiar: um circuito de um projeto para outro ---------- */
+const r100 = v => Math.round(v / 100) * 100;
+const naCaixa = (c, x, y) => x >= c.x1 && x <= c.x2 && y >= c.y1 && y <= c.y2;
+/* o segmento a-b passa pela caixa? (Liang-Barsky) */
+function segNaCaixa(a, b, c) {
+  let t0 = 0, t1 = 1;
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  for (const [p, q] of [[-dx, a[0] - c.x1], [dx, c.x2 - a[0]], [-dy, a[1] - c.y1], [dy, c.y2 - a[1]]]) {
+    if (p === 0) { if (q < 0) return false; continue; }
+    const r = q / p;
+    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; }
+  }
+  return true;
+}
+/* A SELECAO na origem. Por refs: os componentes, e o que pertence as nets dos pinos deles e passa
+   pela caixa em volta deles (pinos + margem): o fio que passa pela caixa vem INTEIRO (o barramento
+   de 0V que comeca 120 mil fora dela levava o terra de metade da fonte -- PRJ-UR-DI261924), e
+   conta em fios_estendidos; rotulo, power e port dentro da caixa ou pousados num fio copiado; a
+   juncao num fio copiado; o No ERC num pino copiado. Por caixa: tudo o que esta dentro (componente
+   pela ancora, fio com todos os vertices dentro); fio que sai dela nao vai (fios_cortados). */
+function selecaoDe(ctx, a, so, Lo) {
+  const hc = ctx.hc, itens = so.items || [];
+  let comps, folha, caixa;
+  if (a.caixa) {
+    const c = a.caixa;
+    caixa = { x1: Math.min(c.x1, c.x2), y1: Math.min(c.y1, c.y2), x2: Math.max(c.x1, c.x2), y2: Math.max(c.y1, c.y2) };
+    folha = a.folha || (itens.find(i => i && i.t === 'sheet') || {}).name;
+    comps = itens.filter(i => i && i.t === 'comp' && i.sheet === folha && naCaixa(caixa, i.x, i.y));
+  } else {
+    if (!Array.isArray(a.refs) || !a.refs.length) throw new ErroMcp('dê refs (lista de designadores) ou caixa (em mil, na folha de origem)');
+    comps = itens.filter(i => i && i.t === 'comp' && a.refs.includes(i.ref) && (!a.folha || i.sheet === a.folha));
+    const faltam = a.refs.filter(r => !comps.some(c => c.ref === r));
+    if (faltam.length) throw new ErroMcp(`não estão no esquema de "${a.de}"${a.folha ? ' (folha ' + a.folha + ')' : ''}: ${faltam.join(', ')}`);
+    const folhas = [...new Set(comps.map(c => c.sheet))];
+    if (folhas.length > 1) throw new ErroMcp(`os componentes estão em ${folhas.length} folhas (${folhas.join(', ')}): copie uma folha por vez (dê folha)`);
+    folha = folhas[0];
+  }
+  if (!comps.length) throw new ErroMcp('nenhum componente na seleção');
+  const pinos = [];
+  const bx = { x1: Infinity, y1: Infinity, x2: -Infinity, y2: -Infinity };
+  const amplia = (x, y) => { bx.x1 = Math.min(bx.x1, x); bx.y1 = Math.min(bx.y1, y); bx.x2 = Math.max(bx.x2, x); bx.y2 = Math.max(bx.y2, y); };
+  for (const c of comps) {
+    amplia(c.x, c.y);
+    for (const q of hc.compPinsWorld(c, Lo.schlib) || []) { pinos.push(Object.assign({ ref: c.ref }, q)); amplia(q.x, q.y); }
+  }
+  if (!caixa) {
+    const m = isNum(a.margem) ? a.margem : 400;
+    caixa = { x1: bx.x1 - m, y1: bx.y1 - m, x2: bx.x2 + m, y2: bx.y2 + m };
+  }
+  /* as nets dos pinos escolhidos e a net de cada fio, pela extracao do hub */
+  let netDoFio = new Map(), netsSel = null;
+  if (!a.caixa) {
+    let n = null;
+    try { n = hc.extractNets(so, Lo.schlib); } catch (_) { /* sem nets: so a caixa vale */ }
+    if (n) {
+      const model = hc.buildSchModel(so);
+      model.sheets.forEach((s, si) => s.wires.forEach((w, wi) => netDoFio.set(w, n.wireNet[si][wi] || '')));
+      netsSel = new Set(pinos.map(q => n.pinNet[q.ref + '-' + q.num]).filter(Boolean));
+    }
+  }
+  const daNet = net => !netsSel || netsSel.has(net);
+  const fios = [], outros = [];
+  let cortados = 0, estendidos = 0;
+  for (const it of itens) {
+    if (!it || it.sheet !== folha || it.t !== 'wire') continue;
+    const pts = it.pts || [];
+    const dentro = pts.filter(p => naCaixa(caixa, p[0], p[1])).length;
+    if (netsSel) {
+      if (!daNet(netDoFio.get(it))) continue;
+      const passa = dentro || pts.some((p, i) => i && segNaCaixa(pts[i - 1], p, caixa));
+      if (!passa) continue;
+      fios.push(it);
+      if (dentro < pts.length) estendidos++;
+    } else if (dentro === pts.length) fios.push(it);
+    else if (dentro) cortados++;
+  }
+  const noFio = (x, y) => fios.some(w => { const p = w.pts; for (let i = 0; i < p.length; i++) { if (Math.abs(p[i][0] - x) <= 0.5 && Math.abs(p[i][1] - y) <= 0.5) return true; if (i && distSeg(x, y, p[i - 1], p[i]) <= 0.5) return true; } return false; });
+  for (const it of itens) {
+    if (!it || it.sheet !== folha || !isNum(it.x) || !isNum(it.y)) continue;
+    const nomeador = it.t === 'netlabel' || it.t === 'power' || it.t === 'port';
+    if (!naCaixa(caixa, it.x, it.y) && !(netsSel && nomeador && daNet(it.net) && noFio(it.x, it.y))) continue;
+    if (nomeador) { if (daNet(it.net)) outros.push(it); }
+    else if (it.t === 'junction') { if (!netsSel || noFio(it.x, it.y)) outros.push(it); }
+    else if (it.t === 'noerc') { if (!netsSel || pinos.some(q => Math.abs(q.x - it.x) <= 0.5 && Math.abs(q.y - it.y) <= 0.5)) outros.push(it); }
+    else if (it.t === 'text' && a.caixa) outros.push(it);
+  }
+  return { comps, fios, outros, folha, caixa, bx, cortados, estendidos, pinos };
+}
+function copiaCircuito(ctx, a, arq, Ld, cab, info) {
+  const hc = ctx.hc;
+  const po = ctx.projeto(a.de);
+  const so = ctx.schematic(po);
+  if (!so || !Array.isArray(so.items)) throw new ErroMcp(`o projeto "${po.nome}" não tem esquema`);
+  const Lo = ctx.libsDe(so);
+  const sel = selecaoDe(ctx, a, so, Lo);
+  /* a folha de destino (criada com o tamanho da de origem, se ainda nao existe) */
+  const folhaD = a.folha_destino || (arq.itens.find(i => i && i.t === 'sheet') || {}).name || sel.folha;
+  if (!arq.itens.some(i => i && i.t === 'sheet' && i.name === folhaD)) {
+    const fo = so.items.find(i => i && i.t === 'sheet' && i.name === sel.folha) || { size: 'A4' };
+    const nova = { t: 'sheet', name: folhaD, size: fo.size || 'A4' };
+    if (isNum(fo.w) && isNum(fo.h)) { nova.w = fo.w; nova.h = fo.h; }
+    arq.insere(null, nova);
+    info.folha_criada = folhaD;
+  }
+  /* o deslocamento: dado, ou o canto inferior-esquerdo dos componentes em `posicao`, acertado para
+     a grade de 100 pela sobra (x mod 100) que mais pinos tem -- a folha importada do Altium nem
+     sempre esta inteira na grade, e assim o maior numero de pinos cai nela */
+  let dx = 0, dy = 0;
+  if (Array.isArray(a.deslocamento)) { dx = +a.deslocamento[0] || 0; dy = +a.deslocamento[1] || 0; }
+  else if (Array.isArray(a.posicao)) {
+    dx = a.posicao[0] - sel.bx.x1; dy = a.posicao[1] - sel.bx.y1;
+    const moda = vs => { const c = new Map(); let m = 0, best = 0; for (const v of vs) { const k = Math.round((((v % 100) + 100) % 100) * 1000) / 1000; const n = (c.get(k) || 0) + 1; c.set(k, n); if (n > best) { best = n; m = k; } } return m; };
+    const fx = moda(sel.pinos.map(q => q.x)), fy = moda(sel.pinos.map(q => q.y));
+    dx += r100(fx + dx) - (fx + dx); dy += r100(fy + dy) - (fy + dy);
+  }
+  dx = +dx.toFixed(3); dy = +dy.toFixed(3);
+  const mv = v => +(v).toFixed(3);
+  /* os designadores: o que ja existe no destino ganha o proximo livre do mesmo prefixo */
+  const usados = new Set(arq.itens.filter(i => i && i.t === 'comp').map(i => i.ref));
+  const maxDe = pre => { let n = 0; const re = new RegExp('^' + pre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\d+)$'); for (const r of usados) { const m = re.exec(r); if (m) n = Math.max(n, +m[1]); } return n; };
+  const refs = new Map(), pedidos = a.refs_novos || {};
+  for (const c of sel.comps) {
+    if (refs.has(c.ref)) continue;
+    let novo = c.ref;
+    if (pedidos[c.ref]) {
+      novo = String(pedidos[c.ref]);
+      if (usados.has(novo)) throw new ErroMcp(`refs_novos: "${novo}" já existe em "${a.para}"`);
+    } else if (usados.has(c.ref) || a.renumerar) {
+      const pre = c.ref.replace(/\d+$/, '') || 'U';
+      novo = pre + (maxDe(pre) + 1);
+    }
+    refs.set(c.ref, novo); usados.add(novo);
+  }
+  const nets = a.nets || {};
+  const troca = n => (Object.prototype.hasOwnProperty.call(nets, n) ? String(nets[n]) : n);
+  const novos = [];
+  const poe = it => { arq.insere(null, it); novos.push(it); };
+  for (const c of sel.comps) poe(Object.assign({}, c, { sheet: folhaD, ref: refs.get(c.ref), x: mv(c.x + dx), y: mv(c.y + dy) }));
+  for (const w of sel.fios) poe(Object.assign({}, w, { sheet: folhaD, pts: w.pts.map(p => [mv(p[0] + dx), mv(p[1] + dy)]) }));
+  for (const o of sel.outros) {
+    const n = Object.assign({}, o, { sheet: folhaD, x: mv(o.x + dx), y: mv(o.y + dy) });
+    if ('net' in n) n.net = troca(n.net);
+    poe(n);
+  }
+  /* os simbolos: o que a origem tirou do proprio esquema (ou que o destino nao resolve) vai para o
+     `symbols` do destino; o que o destino resolve com outras pontas de pino vira aviso */
+  const avisos = [], copiados = [];
+  const doc = Array.isArray(cab.symbols) ? cab.symbols : [];
+  const ja = new Set(doc.map(s => s && s.name));
+  const acrescenta = [];
+  for (const sym of [...new Set(sel.comps.map(c => c.sym))]) {
+    const ro = hc.resolveSym(Lo.schlib, sym), so2 = ro && ro.item;
+    if (!so2) { avisos.push(`símbolo "${sym}" não existe nem na origem: os componentes vão sem desenho`); continue; }
+    const rd = hc.resolveSym(Ld.schlib, sym), sd = rd && rd.item;
+    if (so2.doDocumento || !sd) {
+      if (ja.has(sym)) continue;
+      const orig = (so.symbols || []).find(s => s && s.name === ro.name) || so2;
+      const c = Object.assign({}, orig, { name: sym });
+      delete c.doDocumento;
+      acrescenta.push(c); ja.add(sym); copiados.push(sym);
+      if (sd && hc.assinaturaPinos(sd) !== hc.assinaturaPinos(c))
+        avisos.push(`símbolo "${sym}": no destino vale o da biblioteca ("${rd.name}"), com pontas de pino diferentes do que a origem usa — confira os fios`);
+    } else if (hc.assinaturaPinos(sd) !== hc.assinaturaPinos(so2)) {
+      avisos.push(`símbolo "${sym}": o destino resolve como "${rd.name}" e a origem como "${ro.name}", com pontas de pino diferentes — confira os fios`);
+    }
+  }
+  if (acrescenta.length) {
+    cab.symbols = doc.concat(acrescenta);
+    avisos.push(`símbolos copiados para o esquema de "${a.para}" (${copiados.join(', ')}): a vista e as nets os usam, mas o BuildSchematic do Altium só põe componente cujo símbolo existe na biblioteca dele (sym_salvar destino "altium" ou "biblioteca")`);
+  }
+  /* componentes do destino que ja ocupam a area */
+  const area = { x1: sel.bx.x1 + dx - 100, y1: sel.bx.y1 + dy - 100, x2: sel.bx.x2 + dx + 100, y2: sel.bx.y2 + dy + 100 };
+  const ocupam = arq.itens.filter(i => i && i.t === 'comp' && i.sheet === folhaD && !novos.includes(i) && naCaixa(area, i.x, i.y)).map(i => i.ref);
+  if (ocupam.length) avisos.push(`a área de destino já tem componentes (${ocupam.slice(0, 12).join(', ')}${ocupam.length > 12 ? '…' : ''}): use posicao ou deslocamento`);
+  const nomeadas = new Set(sel.outros.filter(o => 'net' in o).map(o => o.net));
+  const semUso = Object.keys(nets).filter(n => !nomeadas.has(n));
+  if (semUso.length) avisos.push(`nets sem rótulo/power/port na seleção (não trocadas): ${semUso.join(', ')}`);
+  Object.assign(info, {
+    origem: { projeto: po.nome, folha: sel.folha, caixa: sel.caixa },
+    folha_destino: folhaD, deslocamento: [dx, dy],
+    copiados: { componentes: sel.comps.length, fios: sel.fios.length, outros: sel.outros.length },
+    fios_cortados: sel.cortados || undefined, fios_estendidos: sel.estendidos || undefined,
+    refs: [...refs].filter(([x, y]) => x !== y).reduce((o, [x, y]) => (o[x] = y, o), {}),
+    simbolos_copiados: copiados.length ? copiados : undefined,
+    avisos: avisos.length ? avisos : undefined,
+  });
+  /* o erro que o componente ja tinha na origem (footprint fora da PcbLib...) nao trava a copia */
+  const errosO = new Set(hc.validateSchematic(so, Lo.schlib, Lo.pcblib).errors);
+  info._herdado = msg => {
+    for (const [velho, novo] of refs) {
+      const pre = `comp ${novo}:`;
+      if (msg.startsWith(pre) && errosO.has(`comp ${velho}:` + msg.slice(pre.length))) return true;
+    }
+    return false;
+  };
+  return novos;
+}
 
 /* o proximo designador livre para o prefixo ("R" -> R7) */
 function proximoRef(itens, prefixo) {
@@ -323,6 +538,33 @@ module.exports = {
         }, { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_apagar' });
         est.removidos = removidos;
         return est;
+      },
+    },
+    {
+      nome: 'sch_copiar', titulo: 'Copiar um circuito de outro projeto',
+      descricao: 'Copia um pedaço do esquema de um projeto (de) para outro (para): os componentes (refs, ou todos dentro de uma caixa em mil), os fios, rótulos, power ports, ports, junções e No ERC deles, e os símbolos que o destino não tem (vão para o esquema do destino). Por refs, vai só o que pertence às nets dos pinos escolhidos, dentro da caixa em volta deles (margem, padrão 400 mil); fio que sai dessa caixa não vai (fios_cortados). Designador que já existe no destino ganha o próximo livre do prefixo (refs mostra a troca; refs_novos escolhe; renumerar:true renumera todos). nets troca nomes de net ({"0V":"0VCC"}). Lugar: deslocamento [dx,dy] em mil ou posicao [x,y] (canto inferior-esquerdo dos componentes, com o primeiro na grade de 100); sem os dois, as mesmas coordenadas. Erro que o componente já tinha na origem (footprint fora da PcbLib) não trava (erros_herdados). Simule antes (simular:true).',
+      entrada: { type: 'object', properties: Object.assign({
+        de: Object.assign({}, PROJETO, { description: 'projeto de origem' }),
+        para: Object.assign({}, PROJETO, { description: 'projeto de destino (é o que é gravado)' }),
+        refs: { type: 'array', items: { type: 'string' }, description: 'os componentes a copiar' },
+        caixa: { type: 'object', properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' } }, description: 'ou: tudo o que está dentro, em mil, na folha de origem' },
+        folha: { type: 'string', description: 'folha de origem (padrão: a dos refs, ou a primeira)' },
+        margem: { type: 'number', description: 'mil em volta dos componentes (refs); padrão 400' },
+        folha_destino: { type: 'string', description: 'padrão: a primeira folha do destino; nome novo cria a folha' },
+        deslocamento: { type: 'array', items: { type: 'number' }, description: '[dx, dy] em mil' },
+        posicao: { type: 'array', items: { type: 'number' }, description: '[x, y] em mil: onde fica o canto inferior-esquerdo dos componentes' },
+        nets: { type: 'object', additionalProperties: { type: 'string' }, description: 'troca de nomes de net: {"0V":"0VCC"}' },
+        refs_novos: { type: 'object', additionalProperties: { type: 'string' }, description: '{"R2":"R102"}' },
+        renumerar: { type: 'boolean', description: 'true = todos ganham o próximo livre do prefixo' },
+      }, COMUNS), required: ['de', 'para'] },
+      executa: async (a, ctx) => {
+        const pd = ctx.projeto(a.para);
+        if (ctx.projeto(a.de).nome === pd.nome) throw new ErroMcp('de e para são o mesmo projeto (para duplicar dentro do projeto use sch_adicionar)');
+        const info = {};
+        const est = transacao(ctx, pd, (arq, L, cab) => copiaCircuito(ctx, a, arq, L, cab, info),
+          { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_copiar', semTocados: true, resumeGrade: true, herdado: m => !!(info._herdado && info._herdado(m)) });
+        delete info._herdado;
+        return Object.assign(est, info);
       },
     },
     {

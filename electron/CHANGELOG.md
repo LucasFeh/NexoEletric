@@ -4,6 +4,30 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.48.0 — 2026-10-29
+
+**`sch_copiar`** (MCP): copia um circuito de um projeto para outro, pedido pela mesma sessão de IA que, para levar a fonte
+do PRJ-UR-DI261924 para a PCB1, teve de ler e regravar cada símbolo, recriar cada componente e redesenhar cada fio.
+- Escolha por `refs` ou por `caixa` (em mil, na folha de origem).
+  - Por refs vem o que é das nets dos pinos escolhidos e passa pela caixa em volta deles (`margem`, padrão 400 mil). O
+    fio que passa pela caixa vem inteiro, com o rótulo e o power pousados nele (`fios_estendidos`). O circuito vizinho
+    que cai na caixa não vem.
+  - Por caixa vem tudo o que está dentro. O fio que sai dela fica de fora (`fios_cortados`).
+- Designador que já existe no destino ganha o próximo livre do prefixo (`refs` mostra a troca). `refs_novos` escolhe e
+  `renumerar` renumera todos.
+- `nets` troca nomes de net (`{"0V":"0VCC"}`).
+- `posicao` (o canto dos componentes, na grade de 100 pela sobra que mais pinos têm) ou `deslocamento`. `folha_destino`
+  com nome novo cria a folha.
+- O símbolo que só existe no esquema de origem vai para o `symbols` do destino (`simbolos_copiados`), com o aviso de
+  que o BuildSchematic do Altium só põe componente cujo símbolo está na biblioteca dele.
+- Erro que o componente já tinha na origem (footprint fora da PcbLib) não trava a cópia (`erros_herdados`). Os avisos
+  de grade viram a contagem `fora_da_grade`.
+- Medido no PRJ-UR-DI261924: a fonte (11 componentes) copiada por refs mantém as 300 combinações de pinos com a mesma
+  ligação da origem, com o 0V virando 0VCC.
+- Correção: gravação do MCP que mudava o cabeçalho do `schematic.js` (os `symbols`) no modo que só troca as linhas dos
+  itens perdia o cabeçalho; agora o arquivo é reserializado inteiro, como no `sym_salvar`.
+- Teste: `tests/test-sch-copiar.js`.
+
 ## 1.47.0 — 2026-10-29
 
 Esquema: validação e ferramentas da IA (relato de uma sessão de IA que montou a PCB1 a partir do PRJ-UR-DI261924).
