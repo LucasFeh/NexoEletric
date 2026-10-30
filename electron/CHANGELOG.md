@@ -4,6 +4,27 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.52.0 — 2026-10-30
+
+Fotos 3D da placa para o cadastro no Odoo: a placa montada e a placa virgem.
+- **MCP `pcb_render_3d`**: a IA tira duas fotos da placa:
+  - **placa montada**: isométrica, com os componentes 3D;
+  - **placa virgem**: de frente, só a placa (a fibra).
+  Elas saem da vista PCB do app, em Real View e fundo branco, recortadas na placa. A vista 3D é própria e fica fora da
+  tela: a câmera, a seleção e o Real View de quem está trabalhando não mudam, e a janela escondida também fotografa.
+  Sem vista aberta, o MCP pede ao hub para abrir a aba PCB do projeto. As fotos ficam em
+  `Projects/<p>/Renders/placa-montada.png` e `placa-virgem.png` (+ `renders.json`). Essa pasta fica fora do vigia,
+  como o Gerber, e vai ao NexoBD com o projeto.
+- **As fotos vão com a lista do Odoo**: o envio (`di_recebe_lista`) leva `imagem_montada` e `pcb_virgem`
+  (`{quantidade: 1, imagem}`): a placa virgem vai declarada como item da montada. Só no envio: o ensaio não leva foto.
+  Ficam fora da assinatura, então refazer a foto não invalida o ensaio. O modal "Enviar para o Odoo" mostra as
+  miniaturas, ou "sem foto". O `di_lista_altium` 19.0.8 da produção ainda ignora as duas chaves; o que ele precisa
+  fazer com elas está em `docs/prompt-altium-envio-de-lista.md`, seção 10.
+- Canal MCP ↔ vista: a ação `render3d` responde com Promise, e o pedido que a vista já pegou espera até 240 s.
+  A resposta do MCP aceita mais de uma imagem (`_imagens`).
+- Testes: `tests/test_odoolista.py` (fotos e placa virgem só no envio, fora da assinatura) e
+  `tests/test_mcp_rotas.py` (pedido pego espera mais).
+
 ## 1.51.1 — 2026-10-30
 
 A tela preta que aparecia de vez em quando com o MCP em uso.

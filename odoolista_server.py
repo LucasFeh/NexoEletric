@@ -277,8 +277,10 @@ def previa():
     payload, erro, status = _prepara(dict(data, revisao=rev), vazia_ok=True)
     if erro:
         return {'ok': False, 'error': erro}, status
+    # as fotos 3D que vao no envio (MCP pcb_render_3d): a tela diz quais existem
     return {'ok': True, 'payload': payload, 'uid_externo': payload['uid_externo'],
-            'revisaoSugerida': sugerida, 'revisaoUsada': rev}
+            'revisaoSugerida': sugerida, 'revisaoUsada': rev,
+            'imagens': OL.imagens_do_projeto(nome, ROOT), 'placa': OL.tem_placa(nome, ROOT)}
 
 
 @bp.route('/ensaio', methods=['POST'])
@@ -323,7 +325,8 @@ def envio():
     try:
         limpo = OL.payload_limpo(payload)
         try:
-            recibo_odoo = cliente.envia(limpo)
+            # as fotos 3D e a placa virgem so no envio, fora da assinatura (odoolista.anexa_imagens)
+            recibo_odoo = cliente.envia(OL.anexa_imagens(limpo, payload['projeto'], ROOT))
         except OL.ErroOdoo as e:
             return {'ok': False, 'error': str(e)}, 502
         gravado = ''

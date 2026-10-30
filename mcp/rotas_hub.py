@@ -45,7 +45,10 @@ VERSAO = '1.0.0'
 VALIDADE = 30.0          # segundos que um pedido espera uma vista pegar
 VISTA_VIVA = 10.0        # vista que nao pergunta ha mais que isso e dada como fechada
 ESPERA_MAX = 20.0
-ACOES = ('screenshot', 'recarregar', 'focar', 'selecionar', 'comando', 'abrir')
+# pedido que a vista JA pegou e ainda esta fazendo (as fotos 3D do render3d esperam os STEP e o
+# Real View): fica guardado ate isto, e o MCP pergunta pela resposta em varias esperas de ESPERA_MAX
+PEGO_MAX = 240.0
+ACOES = ('screenshot', 'recarregar', 'focar', 'selecionar', 'comando', 'abrir', 'render3d')
 ALVOS = ('pcb', 'sch', 'hub')
 SESSAO_VIVA = 60.0       # IA que nao da sinal ha mais que isso e dada como desconectada
 MAX_ATIVIDADE = 300
@@ -74,7 +77,8 @@ def _local(req):
 
 
 def _limpa(agora):
-    for k in [k for k, p in _pedidos.items() if agora - p['criado'] > VALIDADE + ESPERA_MAX]:
+    for k in [k for k, p in _pedidos.items()
+              if agora - p['criado'] > VALIDADE + (PEGO_MAX if p['pego'] and p['resposta'] is None else ESPERA_MAX)]:
         del _pedidos[k]
     for k in [k for k, t in _vistas.items() if agora - t > 300]:
         del _vistas[k]

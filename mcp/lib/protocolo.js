@@ -156,9 +156,11 @@ function falha(codigo, msg, dados) { const e = new Error(msg); e.codigo = codigo
 function resultado(r, versao) {
   const content = [];
   let obj = r;
-  if (r && typeof r === 'object' && r._imagem) {
-    obj = Object.assign({}, r); delete obj._imagem;
-    content.push({ type: 'image', data: r._imagem.base64, mimeType: r._imagem.mime || 'image/png' });
+  if (r && typeof r === 'object' && (r._imagem || Array.isArray(r._imagens))) {
+    obj = Object.assign({}, r); delete obj._imagem; delete obj._imagens;
+    /* _imagens: mais de uma imagem (as fotos 3D da placa montada e da virgem) */
+    for (const im of [].concat(r._imagem || [], r._imagens || []))
+      if (im && im.base64) content.push({ type: 'image', data: im.base64, mimeType: im.mime || 'image/png' });
   }
   const texto = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 1);
   content.unshift({ type: 'text', text: texto });

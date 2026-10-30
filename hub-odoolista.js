@@ -42,6 +42,11 @@ const CSS = `
    (que descem para baixo do cabecalho, ver .hd-toasts), coberto justamente logo depois de cada
    mudanca — o momento em que ele muda */
 #odoomodal .od-tot{font-size:11px; color:var(--fg-dim,#9a9a9a); white-space:nowrap;}
+#odoomodal .od-fotos{display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:11px;
+  color:var(--fg-dim,#9a9a9a); padding:0 0 8px;}
+#odoomodal .od-fotos .ft{display:flex; align-items:center; gap:6px;}
+#odoomodal .od-fotos img{width:48px; height:36px; object-fit:contain; background:#fff; border-radius:3px;}
+#odoomodal .od-fotos .falta{color:var(--warn,#ffb74d);}
 #odoomodal .od-aviso{font-size:11px; padding:7px 9px; border-radius:4px; margin-bottom:8px;
   border:1px solid var(--border,#3a3a3a); border-left:3px solid var(--warn,#ffd54f);
   background:var(--panel2,#2d2d2d); white-space:pre-wrap;}
@@ -711,6 +716,7 @@ async function previa(){
     ST.conferido = null;
     $('odooEnviar').disabled = true;
     pintaLista(null, null);
+    pintaFotos(null);
     estadoTxt('a lista não se montou — veja o aviso acima');
     $('odooLista').prepend(el('div', 'od-aviso err', j.error || 'não deu para montar a lista'));
     return false;
@@ -725,9 +731,36 @@ async function previa(){
      Enviar sobre um esquema que nao estava no disco. */
   $('odooEnviar').disabled = true;
   pintaLista(j.payload, null);
+  pintaFotos(j);
   if (ST.aplicados.length) pintaPendentes();
   estadoTxt('lista montada do esquema salvo');
   return true;
+}
+
+/* As fotos 3D que vao com o envio (Projects/<p>/Renders/, tiradas pela IA com o pcb_render_3d):
+   a "placa montada" vira a foto da PCB montada no Odoo, a "placa virgem" a da fibra, que vai como
+   item da montada (odoolista.anexa_imagens). So informa: sem foto, a lista vai assim mesmo. */
+function pintaFotos(j){
+  const box = $('odooFotos');
+  if (!box) return;
+  box.textContent = '';
+  const im = (j && j.imagens) || {};
+  if (!j || (!j.placa && !im.montada && !im.virgem)) return;
+  box.append(el('span', null, 'Fotos 3D que vão junto:'));
+  for (const [t, rot] of [['montada', 'placa montada'], ['virgem', 'placa virgem']]) {
+    const f = im[t], s = el('span', 'ft');
+    if (f) {
+      const img = el('img');
+      img.src = '/' + f.arquivo.split('/').map(encodeURIComponent).join('/') + '?t=' + encodeURIComponent(f.gerado || '');
+      img.alt = rot;
+      s.title = rot + ' — ' + f.arquivo + ' (' + f.gerado + ')';
+      s.append(img, el('span', null, rot));
+    } else {
+      s.append(el('span', 'falta', rot + ': sem foto'));
+      s.title = 'peça à IA: pcb_render_3d (MCP do NexoEletric) tira a foto 3D da ' + rot;
+    }
+    box.append(s);
+  }
 }
 
 /* Resolver uma linha e escolher o componente do almoxarifado para os designadores dela. O
@@ -1443,6 +1476,7 @@ function montaDom(){
     +       '<input type="text" class="od-obs" id="odooObs" maxlength="500" '
     +         'placeholder="observação para quem confere (opcional)">'
     +     '</div>'
+    +     '<div class="od-fotos" id="odooFotos"></div>'
     +     '<div class="od-novo" id="odooNovo" hidden></div>'
     +     '<div id="odooLista"></div>'
     +   '</div>'

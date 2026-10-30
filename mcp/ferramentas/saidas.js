@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { ErroMcp } = require('../lib/contexto.js');
-const { PROJETO } = require('../lib/util.js');
+const { PROJETO, hubNoAr } = require('../lib/util.js');
 
 const GERBER_DIR = 'Gerber', MANIFESTO = 'gerber.json', PDF_DIR = 'PDF';
 const EXTS = ['.gbr', '.gtl', '.gbl', '.gto', '.gbo', '.gts', '.gbs', '.gtp', '.gbp', '.gko', '.gm1', '.drl', '.txt'];
@@ -65,10 +65,52 @@ function baseDoPcbDoc(board, nome) {
   return n || nome || 'placa';
 }
 
+/* As fotos 3D da placa que vao com a lista do Odoo (pedido do dono, 2026-10-30): a "placa montada"
+   (isometrica, com os componentes) e a "placa virgem" (de frente, so a placa). Quem fotografa e a
+   vista PCB aberta no app (WebGL: o Node do MCP nao desenha 3D), numa vista 3D propria e fora da tela
+   (pcbframe.js » render3d); sem vista aberta, o MCP pede ao hub para abrir a aba PCB do projeto e o
+   pedido espera ela pegar. As fotos ficam em Projects/<p>/Renders/ (fora do vigia do hubserver, como o
+   Gerber) e o envio da lista ao Odoo as leva (odoolista.py » imagens_do_projeto). */
+const RENDER_DIR = 'Renders', RENDER_MANIFESTO = 'renders.json';
+const RENDER_ARQ = { montada: 'placa-montada.png', virgem: 'placa-virgem.png' };
+const RENDER_TAG = { montada: 'placa montada', virgem: 'placa virgem' };
+const POSES_3D = ['iso', 'isoVirada', 'topo', 'base', 'frente', 'tras', 'esq', 'dir'];
+async function pedeRender3d(ctx, proj, args, segundos) {
+  const hub = await hubNoAr(ctx);
+  if (!hub) throw new ErroMcp('o NexoEletric não está aberto: as fotos 3D saem da vista PCB do app (app_abrir {projeto, aba:"pcb"})');
+  if (!hub.mcp) throw new ErroMcp('o hub no ar não tem as rotas /api/mcp/* (atualize o NexoEletric)');
+  const post = (corpo) => fetch(hub.url + '/api/mcp/pedido', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(corpo), signal: AbortSignal.timeout(3000) }).then(r => r.json());
+  const j = await post({ alvo: 'pcb', proj, acao: 'render3d', args });
+  if (!j.ok) throw new ErroMcp(j.error || 'o hub recusou o pedido (versão sem a ação render3d?)');
+  let abriu = false;
+  if (!j.vista_aberta) {
+    /* a casca do hub (hub-mcp.js) abre a aba PCB do projeto; a vista nova pega o pedido da fila */
+    const a = await post({ alvo: 'hub', proj: '*', acao: 'abrir', args: { projeto: proj, aba: 'pcb' } }).catch(() => null);
+    abriu = !!(a && a.ok);
+  }
+  const inicio = Date.now(), fim = inicio + (segundos || 200) * 1000;
+  for (;;) {
+    const q = await fetch(`${hub.url}/api/mcp/resposta/${encodeURIComponent(j.id)}?espera=20`, { signal: AbortSignal.timeout(25000) });
+    const r = await q.json();
+    if (!r.pendente) return Object.assign(r, { abriu });
+    if (Date.now() > fim) throw new ErroMcp('a vista PCB não terminou as fotos a tempo: ' + (r.erro || 'sem resposta'));
+    if (!r.pego && Date.now() - inicio > 35000)
+      throw new ErroMcp('nenhuma vista PCB de ' + proj + ' pegou o pedido' + (abriu ? ' (pedi ao hub para abrir a aba PCB, mas ela não respondeu)' : '') + ': abra o projeto na aba PCB (vista_abrir {projeto, aba:"pcb"}) e tente de novo');
+  }
+}
+function gravaPng(f, base64) {
+  const b = Buffer.from(String(base64).replace(/^data:image\/png;base64,/, ''), 'base64');
+  if (b.length < 8 || b.readUInt32BE(0) !== 0x89504e47) throw new ErroMcp('a vista não devolveu um PNG');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f + '.tmp', b); fs.renameSync(f + '.tmp', f);
+  return b;
+}
+
 module.exports = {
   grupo: 'saidas',
   ordem: 50,
-  titulo: 'Saídas — Gerber, PDF de layout, BOM',
+  titulo: 'Saídas — Gerber, PDF de layout, fotos 3D para o Odoo, BOM',
   modulos: ['hub-gerber.js', 'hub-pcbpdf.js'],
   ferramentas: [
     {
@@ -168,6 +210,56 @@ module.exports = {
         fs.mkdirSync(path.dirname(f), { recursive: true });
         fs.writeFileSync(f + '.tmp', bytes); fs.renameSync(f + '.tmp', f);
         return { ok: true, arquivo: ctx.rel(f), bytes: bytes.length, via: 'HubPcbPdf.' + r.funcao, avisos };
+      },
+    },
+    {
+      nome: 'pcb_render_3d', titulo: 'Fotos 3D da placa (montada e virgem) para o Odoo',
+      descricao: 'Tira as fotos 3D da placa que vão com a lista do Odoo: "placa montada" (isométrica, com os componentes 3D — a foto da PCB montada) e "placa virgem" (de frente, só a placa, sem componente — a foto da fibra, que entra na lista da montada). Sai da vista PCB do app NexoEletric (WebGL, Real View, fundo branco, numa vista 3D própria: a tela do usuário não muda); sem vista aberta, pede ao hub para abrir a aba PCB do projeto. Grava em Projects/<p>/Renders/placa-montada.png e placa-virgem.png (+ renders.json); o envio da lista ao Odoo (painel "Enviar para o Odoo") leva as duas. Devolve as imagens para conferir. salvar:false só mostra.',
+      entrada: { type: 'object', properties: {
+        projeto: PROJETO,
+        tipo: { type: 'string', enum: ['ambas', 'montada', 'virgem'], description: 'padrão ambas' },
+        largura: { type: 'integer', minimum: 320, maximum: 3000, description: 'pixels (padrão 1600)' },
+        altura: { type: 'integer', minimum: 240, maximum: 3000, description: 'pixels (padrão 3/4 da largura)' },
+        fundo: { type: 'string', description: 'cor CSS (#ffffff, o padrão) ou "transparente"' },
+        real: { type: 'boolean', description: 'padrão true: Real View (materiais físicos, reflexo e sombra no piso)' },
+        pose_montada: { type: 'string', enum: POSES_3D, description: 'padrão iso' },
+        pose_virgem: { type: 'string', enum: POSES_3D, description: 'padrão topo (de frente para a face de cima)' },
+        salvar: { type: 'boolean', description: 'padrão true' },
+      }, required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        if (!ctx.temBoard(p)) throw new ErroMcp(p.nome + ' não tem placa (board.js): sem PCB não há foto 3D');
+        const tipo = a.tipo === 'montada' || a.tipo === 'virgem' ? a.tipo : 'ambas';
+        const r = await pedeRender3d(ctx, p.nome, { tipo, largura: a.largura, altura: a.altura, fundo: a.fundo, real: a.real,
+          poseMontada: a.pose_montada, poseVirgem: a.pose_virgem });
+        if (!r.ok) throw new ErroMcp('a vista PCB não fotografou: ' + (r.erro || 'erro sem mensagem'));
+        const d = r.dados || {};
+        const tipos = tipo === 'ambas' ? ['montada', 'virgem'] : [tipo];
+        const rdir = path.join(p.dir, RENDER_DIR), mf = path.join(rdir, RENDER_MANIFESTO);
+        let man = {};
+        try { man = JSON.parse(fs.readFileSync(mf, 'utf8')) || {}; } catch (_) { man = {}; }
+        const z = n => String(n).padStart(2, '0'), dt = new Date();
+        const quando = `${dt.getFullYear()}-${z(dt.getMonth() + 1)}-${z(dt.getDate())} ${z(dt.getHours())}:${z(dt.getMinutes())}:${z(dt.getSeconds())}`;
+        const out = { ok: true, projeto: p.nome, abriu_vista: r.abriu || undefined, fotos: {} }, imagens = [];
+        for (const t of tipos) {
+          const f = d[t];
+          if (!f || !f.png) throw new ErroMcp(`a vista não devolveu a foto "${RENDER_TAG[t]}"`);
+          const info = { tag: RENDER_TAG[t], pose: f.pose, largura: f.largura, altura: f.altura, realView: f.realView,
+            corpos: t === 'montada' ? f.corpos : undefined, steps: t === 'montada' ? f.steps : undefined,
+            falhas: f.falhas && f.falhas.length ? f.falhas : undefined, incompleto: f.incompleto };
+          if (a.salvar !== false) {
+            const b = gravaPng(path.join(rdir, RENDER_ARQ[t]), f.png);
+            Object.assign(info, { arquivo: ctx.rel(path.join(rdir, RENDER_ARQ[t])), bytes: b.length, gerado: quando });
+            man[t] = Object.assign({}, info, { arquivo: RENDER_ARQ[t], sha1: crypto.createHash('sha1').update(b).digest('hex') });
+          }
+          out.fotos[t] = info;
+          imagens.push({ base64: String(f.png).replace(/^data:image\/png;base64,/, ''), mime: 'image/png' });
+        }
+        if (a.salvar !== false) { fs.writeFileSync(mf + '.tmp', jsonOrdenado(man), 'utf8'); fs.renameSync(mf + '.tmp', mf); out.pasta = ctx.rel(rdir); }
+        else out.nota = 'salvar:false — nada gravado; o envio ao Odoo usa as fotos salvas em Renders/';
+        if (out.fotos.montada && out.fotos.montada.falhas) out.aviso = 'componentes sem modelo 3D carregado aparecem só pelo footprint: confira as falhas';
+        out._imagens = imagens;
+        return out;
       },
     },
     {

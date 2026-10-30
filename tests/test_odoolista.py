@@ -342,6 +342,52 @@ def test_fluxo_completo_com_odoo_de_mentira():
         shutil.rmtree(d, ignore_errors=True)
 
 
+# ─────────── as fotos 3D da placa (pcb_render_3d) e a placa virgem ───────────
+
+PNG_MINIMO = (b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00'
+              b'\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\xa7\x35\x81\x84'
+              b'\x00\x00\x00\x00IEND\xaeB`\x82')
+
+
+def test_fotos_e_placa_virgem_vao_so_no_envio():
+    """As fotos vão no di_recebe_lista e ficam fora da assinatura: refazer a foto entre o ensaio
+    e o envio não muda linha nenhuma, e o /envio não pode recusar com "a lista mudou"."""
+    import base64
+    d = tempfile.mkdtemp()
+    try:
+        pasta = os.path.join(d, 'Projects', 'P')
+        os.makedirs(os.path.join(pasta, OL.RENDER_DIR))
+        limpo = OL.payload_limpo(OL.monta_payload('P', 'B', esquema(comp('R1', 'SMD 0805 10K 1/8W')), ACERVO))
+        antes = OL.assinatura(limpo)
+
+        # sem placa e sem foto: nada a anexar (projeto só de esquema)
+        sem = OL.anexa_imagens(limpo, 'P', d)
+        assert 'imagem_montada' not in sem and 'pcb_virgem' not in sem, sem
+        assert OL.imagens_do_projeto('P', d) == {'montada': None, 'virgem': None}
+
+        # com placa e sem foto: a virgem vai declarada como item, sem imagem
+        io.open(os.path.join(pasta, 'board.js'), 'w').write('var board = {};\n')
+        so = OL.anexa_imagens(limpo, 'P', d)
+        assert so['pcb_virgem'] == {'quantidade': 1}, so.get('pcb_virgem')
+
+        # as duas fotos (e um arquivo que não é PNG, que fica de fora)
+        for arq in OL.RENDERS.values():
+            io.open(os.path.join(pasta, OL.RENDER_DIR, arq), 'wb').write(PNG_MINIMO)
+        com = OL.anexa_imagens(limpo, 'P', d)
+        assert base64.b64decode(com['imagem_montada']) == PNG_MINIMO
+        assert base64.b64decode(com['pcb_virgem']['imagem']) == PNG_MINIMO
+        assert com['pcb_virgem']['quantidade'] == 1
+        assert 'imagem_montada' not in limpo, 'o anexa_imagens mexeu no payload assinado'
+        assert OL.assinatura(limpo) == antes
+        info = OL.imagens_do_projeto('P', d)
+        assert info['montada']['arquivo'] == 'Projects/P/Renders/placa-montada.png', info
+        io.open(os.path.join(pasta, OL.RENDER_DIR, OL.RENDERS['montada']), 'wb').write(b'nao e png')
+        assert 'imagem_montada' not in OL.anexa_imagens(limpo, 'P', d)
+        assert OL.imagens_do_projeto('P', d)['montada'] is None
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 # ─────────── o que a revisão adversarial encontrou, medido contra o Odoo real ───────────
 
 def test_encapsulamento_nunca_vem_do_footprint_do_altium():

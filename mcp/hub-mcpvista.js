@@ -5,10 +5,11 @@
 
    Pergunta ao hub (rotas de mcp/rotas_hub.py) se ha pedido do MCP para ESTA vista (alvo pela
    pagina, projeto pelo ?p=) e responde: screenshot (o canvas da vista, em PNG), recarregar,
-   focar, selecionar, comando. Sem as rotas no hub (404), para de perguntar e fica quieto. A vista
+   focar, selecionar, comando, render3d. Sem as rotas no hub (404), para de perguntar e fica quieto. A vista
    pode oferecer ganchos melhores definindo, antes ou depois deste script:
 
-     window.HubMcpVista = { focar(x, y, zoom), selecionar({ids, refs}), comando(nome, args), captura() }
+     window.HubMcpVista = { focar(x, y, zoom), selecionar({ids, refs}), comando(nome, args), captura(),
+                            render3d(args) -> Promise<{montada?, virgem?: {png, largura, altura, ...}}> }
 
    (captura() devolve um <canvas> ou dataURL; sem ela, junta os canvas visiveis da pagina). */
 (function () {
@@ -64,6 +65,10 @@
       case 'selecionar':
         if (typeof g.selecionar !== 'function') throw new Error('esta vista ainda não oferece selecionar (window.HubMcpVista.selecionar)');
         return { feito: g.selecionar(a) !== false };
+      case 'render3d':
+        /* as fotos 3D da placa (pcb_render_3d): uma Promise, respondida quando as imagens ficam prontas */
+        if (typeof g.render3d !== 'function') throw new Error('esta vista não fotografa em 3D (falta HubMcpVista.render3d: atualize o NexoEletric)');
+        return g.render3d(a);
       case 'comando': {
         var dna = (window.HubAltiumDNA || window.HubAltiumDna);
         if (typeof g.comando === 'function') return { resultado: g.comando(a.comando, a) };
@@ -81,11 +86,12 @@
     fetch('/api/mcp/pedidos?alvo=' + alvo + '&proj=' + encodeURIComponent(proj), { cache: 'no-store' })
       .then(function (r) { if (r.status === 404) { parado = true; return null; } return r.ok ? r.json() : null; })
       .then(function (j) {
-        (j && j.pedidos || []).forEach(function (p) {
-          var corpo;
-          try { corpo = { ok: true, dados: executa(p) }; } catch (e) { corpo = { ok: false, erro: String(e && e.message || e) }; }
-          responde(p.id, corpo);
-        });
+        /* um pedido depois do outro; a acao pode devolver uma Promise (render3d) */
+        return (j && j.pedidos || []).reduce(function (fila, p) {
+          return fila.then(function () { return executa(p); })
+            .then(function (d) { return { ok: true, dados: d }; }, function (e) { return { ok: false, erro: String(e && e.message || e) }; })
+            .then(function (corpo) { return responde(p.id, corpo); });
+        }, Promise.resolve());
       })
       .catch(function () {})
       .then(function () { if (!parado) setTimeout(pergunta, document.visibilityState === 'hidden' ? 4000 : 1200); });

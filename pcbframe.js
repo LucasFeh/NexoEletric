@@ -5349,11 +5349,12 @@ function espessuraPlaca(){
 }
 /* tela: a vista 3D (vista) e as silhuetas da 2D -- so elas obedecem ao "Componentes 3D" desligado;
    o pacote do NexoCAD e o Editar 3D levam os corpos sempre */
-async function corpos3d(vista, tela){
+async function corpos3d(vista, tela, todos){
   if (D3 === undefined) D3 = PROJ ? await globalDe('pcbmirror3d', 'Projects/' + encodeURIComponent(PROJ) + '/board3d.js') : null;
   if (LIB3D === undefined) LIB3D = await globalDe('pcblib3d', 'Libs/pcblib-3d.js');
   const esp = espessuraPlaca();
-  if ((vista || tela) && !OPC3D.corpos) return { corpos:[], esp };
+  /* todos: a foto da placa montada (render3d) leva os corpos mesmo com o "Componentes 3D" desligado */
+  if ((vista || tela) && !OPC3D.corpos && !todos) return { corpos:[], esp };
   if (typeof HubNexo !== 'undefined') { try { await HubNexo.carrega(); } catch (e) { /* sem a biblioteca: as fontes de sempre */ } }
   const h = hubLib();
   let corpos = [];
@@ -5408,13 +5409,82 @@ async function cena3d(){
   sujo3d = false;
   const { corpos, esp } = await corpos3d(true);
   if (seq !== cena3dSeq || !V3) return;   /* outra mudanca chegou durante a espera: vale a dela */
+  V3.cena(dadosCena3d(corpos, esp, refsDaSel()));
+}
+/* a placa efetiva no formato do vista.cena: contorno, recortes, furos vazados, faces pintadas */
+function dadosCena3d(corpos, esp, realce){
   const furos = [];
   const furo = p => { if (p && p.drill > 0 && isNum(p.x) && isNum(p.y)) furos.push({ x:p.x, y:p.y, r:p.drill / 2 }); };
   for (const c of (EB.components || [])) for (const p of ((c && c.pads) || [])) furo(p);
   for (const p of (EB.freepads || [])) furo(p);
   for (const v of (EB.vias || [])) furo(v);
-  V3.cena({ lacos:lacosDe(EB), recortes:recortesDaTela().map(k => k.pts), furos, esp,
-            bbox:EB.board && EB.board.bbox, pintaFace:pintaFace3d, corpos, realce:refsDaSel() });
+  return { lacos:lacosDe(EB), recortes:recortesDaTela().map(k => k.pts), furos, esp,
+           bbox:EB.board && EB.board.bbox, pintaFace:pintaFace3d, corpos, realce:realce || [] };
+}
+/* ============================== fotos 3D da placa para o Odoo (MCP pcb_render_3d) ==============================
+   Pedido do dono (2026-10-30): a IA tira as fotos que vao com a lista do Odoo -- a "placa montada"
+   (isometrica, com os componentes: a foto da PCB montada) e a "placa virgem" (de frente, so a placa: a
+   foto da fibra, que entra na lista da montada). Numa vista 3D PROPRIA, fora da tela e do tamanho pedido:
+   a camera, a selecao e o Real View de quem esta trabalhando nao mudam, e a janela escondida tambem
+   fotografa (vista.captura desenha na hora, sem requestAnimationFrame). */
+const POSES_FOTO = ['iso', 'isoVirada', 'topo', 'base', 'frente', 'tras', 'esq', 'dir'];
+const comPrazo = (p, ms) => Promise.race([p, new Promise(r => setTimeout(() => r(null), ms))]);
+/* a foto no tamanho pedido, recortada no que foi desenhado (placa, corpos e a sombra no piso) com
+   uma margem: o enquadramento da camera e pela esfera que envolve tudo, e na isometrica a placa
+   ficava com metade da foto em branco. src: o canvas transparente da vista (em 2x) */
+function recortaFoto(src, L, A, fundo){
+  const w = src.width, h = src.height, px = src.getContext('2d', { willReadFrequently:true }).getImageData(0, 0, w, h).data;
+  let x1 = w, y1 = h, x2 = -1, y2 = -1;
+  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
+    if (px[(y * w + x) * 4 + 3] > 24) { if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y; }
+  }
+  const out = document.createElement('canvas');
+  out.width = L; out.height = A;
+  const c = out.getContext('2d');
+  if (fundo) { c.fillStyle = fundo; c.fillRect(0, 0, L, A); }
+  if (x2 < 0) { c.drawImage(src, 0, 0, L, A); return out; }
+  /* a caixa do conteudo + 6% de margem, na proporcao da foto, centrada no conteudo */
+  let cw = (x2 - x1 + 2) * 1.12, ch = (y2 - y1 + 2) * 1.12;
+  if (cw / ch > L / A) ch = cw * A / L; else cw = ch * L / A;
+  const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+  c.imageSmoothingQuality = 'high';
+  c.drawImage(src, cx - cw / 2, cy - ch / 2, cw, ch, 0, 0, L, A);
+  return out;
+}
+async function render3d(a){
+  a = a || {};
+  if (typeof HubPcb3dVista === 'undefined' || !HubPcb3dVista.disponivel()) throw new Error('esta máquina não tem WebGL: a vista 3D não abre');
+  if (libPronta) await libPronta;
+  const L = Math.max(320, Math.min(3000, Math.round(+a.largura || 1600)));
+  const A = Math.max(240, Math.min(3000, Math.round(+a.altura || L * 0.75)));
+  const tipos = a.tipo === 'montada' || a.tipo === 'virgem' ? [a.tipo] : ['montada', 'virgem'];
+  const pose = { montada:POSES_FOTO.includes(a.poseMontada) ? a.poseMontada : 'iso',
+                 virgem:POSES_FOTO.includes(a.poseVirgem) ? a.poseVirgem : 'topo' };
+  const fundo = a.fundo === 'transparente' ? '' : (typeof a.fundo === 'string' && /^#[0-9a-f]{3,8}$|^[a-z]+$/i.test(a.fundo) ? a.fundo : '#ffffff');
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:' + -(L + 200) + 'px;top:0;width:' + L + 'px;height:' + A + 'px;overflow:hidden;pointer-events:none;';
+  document.body.append(host);
+  let v = null;
+  try {
+    /* em 2x: o recorte (recortaFoto) amplia o conteudo sem perder nitidez */
+    v = await HubPcb3dVista.cria(host, { modo:a.real === false ? 'padrao' : 'real', razao:Math.min(2, 4096 / Math.max(L, A)) });
+    const { corpos, esp } = await corpos3d(true, false, true);
+    const out = {};
+    for (const t of tipos) {
+      v.cena(dadosCena3d(t === 'montada' ? corpos : [], esp, []));
+      v.redimensiona();
+      v.pose(pose[t]);
+      const est = (await comPrazo(v.pronto(), 90000)) || Object.assign(v.estado(), { incompleto:'os modelos 3D não terminaram de carregar em 90 s' });
+      v.pose(pose[t]);          /* enquadra de novo com todos os STEP que chegaram */
+      const c = recortaFoto(v.captura(''), L, A, fundo);
+      out[t] = { png:c.toDataURL('image/png'), largura:c.width, altura:c.height, pose:pose[t], realView:!!est.realView,
+                 corpos:est.corpos, steps:est.steps, falhas:(est.falhas || []).slice(0, 20), incompleto:est.incompleto };
+    }
+    return out;
+  } finally {
+    if (v) v.destroi();
+    host.remove();
+  }
 }
 /* a placa mudou: na tela 3D refaz ja; escondida, fica para quando a tela parar (agendaFundo3d) */
 function refaz3d(){
@@ -6759,6 +6829,7 @@ window.HubMcpVista = {
   },
   comando(nome){ if (typeof nome !== 'string' || !nome) return false; fazAcao(nome); return true; },
   captura(){ return cv; },
+  render3d,
 };
 
 /* ============================== Gerber ==============================

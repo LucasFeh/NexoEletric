@@ -105,6 +105,31 @@ class TestRotasMcp(unittest.TestCase):
         rotas_hub._pedidos[pid]['criado'] -= rotas_hub.VALIDADE + 1
         self.assertEqual(c.get('/api/mcp/pedidos?alvo=pcb&proj=Z').get_json()['pedidos'], [])
 
+    def test_render3d_pego_espera_mais(self):
+        """as fotos 3D (pcb_render_3d) levam mais que VALIDADE+ESPERA_MAX: o pedido que a vista ja
+        pegou fica guardado ate PEGO_MAX; o que ninguem pegou vence como antes"""
+        c = novo_app()
+        pid = c.post('/api/mcp/pedido', json={'alvo': 'pcb', 'proj': 'R', 'acao': 'render3d',
+                                              'args': {'tipo': 'ambas'}}).get_json()['id']
+        p = c.get('/api/mcp/pedidos?alvo=pcb&proj=R').get_json()['pedidos']
+        self.assertEqual([(x['acao'], x['args']) for x in p], [('render3d', {'tipo': 'ambas'})])
+        # nao pego: vence no prazo de sempre
+        pid2 = c.post('/api/mcp/pedido', json={'alvo': 'pcb', 'proj': 'S', 'acao': 'render3d'}).get_json()['id']
+        for k in (pid, pid2):
+            rotas_hub._pedidos[k]['criado'] -= rotas_hub.VALIDADE + rotas_hub.ESPERA_MAX + 5
+        c.get('/api/mcp/pedidos?alvo=pcb&proj=outro')          # roda a limpeza
+        self.assertEqual(c.get('/api/mcp/resposta/%s' % pid2).status_code, 404)
+        j = c.get('/api/mcp/resposta/%s?espera=0' % pid).get_json()
+        self.assertTrue(j.get('pendente') and j.get('pego'), j)
+        c.post('/api/mcp/resposta/%s' % pid, json={'ok': True, 'dados': {'montada': {'png': 'x'}}})
+        self.assertEqual(c.get('/api/mcp/resposta/%s' % pid).get_json()['dados'], {'montada': {'png': 'x'}})
+        # pego e ainda sem resposta depois de PEGO_MAX: ai vence
+        pid3 = c.post('/api/mcp/pedido', json={'alvo': 'pcb', 'proj': 'R', 'acao': 'render3d'}).get_json()['id']
+        c.get('/api/mcp/pedidos?alvo=pcb&proj=R')
+        rotas_hub._pedidos[pid3]['criado'] -= rotas_hub.VALIDADE + rotas_hub.PEGO_MAX + 5
+        c.get('/api/mcp/pedidos?alvo=pcb&proj=outro')
+        self.assertEqual(c.get('/api/mcp/resposta/%s' % pid3).status_code, 404)
+
     def test_presenca_e_atividade(self):
         """o que o indicador "IA" no topo do hub mostra (hub-mcp.js): quem esta conectado e o que fez"""
         c = novo_app()

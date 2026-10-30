@@ -53,6 +53,11 @@ EXTRAS_FORMATO = 'lista-extras-v1'
 # proposito: o hub de antes le o v1 e ignoraria o campo, mandando ao Odoo as linhas que o
 # projetista tirou; o v2 ele RECUSA, com a frase do arquivo. Sem nada tirado, continua v1.
 EXTRAS_FORMATO_FORA = 'lista-extras-v2'
+# As fotos 3D da placa (MCP pcb_render_3d, gravadas pela vista PCB): a "placa montada" vira a foto
+# da PCB montada no Odoo, a "placa virgem" a da fibra. Ver imagens_do_projeto e anexa_imagens.
+RENDER_DIR = 'Renders'
+RENDERS = {'montada': 'placa-montada.png', 'virgem': 'placa-virgem.png'}
+RENDER_MAX = 15 * 1024 * 1024    # um PNG maior que isto nao e foto de cadastro: fica fora do envio
 
 MODELO = 'di.lista.altium'
 TIMEOUT = 30.0                   # por conexao; nunca socket.setdefaulttimeout (global)
@@ -845,6 +850,81 @@ def grava_recibo(nome, dados, raiz=RAIZ):
     return full
 
 
+# ───────────────────────────── as fotos 3D da placa ─────────────────────────────
+#
+# Pedido do dono (2026-10-30): o cadastro da placa no Odoo nasce com foto. A IA tira duas pelo MCP
+# (pcb_render_3d) e elas ficam em Projects/<p>/Renders/: "placa montada" (isometrica, com os
+# componentes) e "placa virgem" (de frente, so a placa). No envio elas vao assim:
+#
+#   'imagem_montada': '<PNG em base64>'                  -> a foto da PCB montada (image_1920)
+#   'pcb_virgem': {'quantidade': 1, 'imagem': '<PNG>'}   -> a placa virgem (a fibra) como ITEM da
+#                                                          montada, com a foto dela
+#
+# So no ENVIO (di_recebe_lista): o ensaio nao grava nada, e mandar megabytes para o Odoo jogar fora
+# so atrasaria o Conferir. Tambem ficam FORA da assinatura -- a foto refeita entre o ensaio e o envio
+# nao muda nenhuma linha da lista. O di_lista_altium 19.0.8 ignora as duas chaves (le so as que
+# conhece); ver docs/prompt-altium-envio-de-lista.md, secao 10, para o que o Odoo precisa fazer com elas.
+
+def _png_ok(caminho):
+    try:
+        if not os.path.isfile(caminho) or os.path.getsize(caminho) > RENDER_MAX:
+            return False
+        with io.open(caminho, 'rb') as f:
+            return f.read(8) == b'\x89PNG\r\n\x1a\n'
+    except OSError:
+        return False
+
+
+def imagens_do_projeto(nome, raiz=RAIZ):
+    """{'montada': {...}|None, 'virgem': {...}|None}: as fotos que existem, para a tela e o envio."""
+    import time
+    pasta = os.path.join(raiz, 'Projects', nome, RENDER_DIR)
+    out = {}
+    for tipo, arq in RENDERS.items():
+        caminho = os.path.join(pasta, arq)
+        if not _png_ok(caminho):
+            out[tipo] = None
+            continue
+        st = os.stat(caminho)
+        out[tipo] = {'arquivo': 'Projects/%s/%s/%s' % (nome, RENDER_DIR, arq), 'bytes': st.st_size,
+                     'gerado': time.strftime('%Y-%m-%d %H:%M', time.localtime(st.st_mtime))}
+    return out
+
+
+def tem_placa(nome, raiz=RAIZ):
+    return os.path.isfile(os.path.join(raiz, 'Projects', nome, 'board.js'))
+
+
+def anexa_imagens(limpo, nome, raiz=RAIZ):
+    """O payload limpo + as fotos e a placa virgem. Copia: o limpo (o assinado) nao muda.
+
+    A placa virgem vai declarada sempre que o projeto tem placa (board.js) ou foto dela: e o item
+    que a casa poe na lista de toda placa montada (medido no Odoo em 2026-10-30: 177 linhas de BoM
+    com a "(Virgem)" do mesmo codigo). Quem acha ou cria o produto da virgem, e com que nome, e o
+    Odoo -- o codigo da placa so fecha la (a ficha da lista deixa a pessoa corrigir)."""
+    import base64
+    out = dict(limpo)
+    caminho = lambda t: os.path.join(raiz, 'Projects', nome, RENDER_DIR, RENDERS[t])  # noqa: E731
+
+    def b64(t):
+        # foto que some ou trava entre a conferencia e a leitura: o envio segue sem ela
+        if not _png_ok(caminho(t)):
+            return None
+        try:
+            with io.open(caminho(t), 'rb') as f:
+                return base64.b64encode(f.read()).decode('ascii')
+        except OSError:
+            return None
+    montada, virgem = b64('montada'), b64('virgem')
+    if montada:
+        out['imagem_montada'] = montada
+    if virgem or tem_placa(nome, raiz):
+        out['pcb_virgem'] = {'quantidade': 1}
+        if virgem:
+            out['pcb_virgem']['imagem'] = virgem
+    return out
+
+
 # ───────────────────────────── componentes fora do esquema ─────────────────────────────
 #
 # Projects/<p>/lista-extras.json: pecas que vao na lista do Odoo sem estar no desenho (a
@@ -1261,7 +1341,11 @@ def main(argv=None):
 
         cliente = ClienteLista()
         limpo = payload_limpo(payload)
-        recibo = cliente.envia(limpo) if args.aplicar else cliente.confere(limpo)
+        if args.aplicar:
+            fotos = imagens_do_projeto(args.projeto)
+            print('  fotos 3D: placa montada %s, placa virgem %s'
+                  % tuple('sim' if fotos[t] else 'nao (pcb_render_3d)' for t in ('montada', 'virgem')))
+        recibo = cliente.envia(anexa_imagens(limpo, args.projeto)) if args.aplicar else cliente.confere(limpo)
         print('%s  %s  %d linha(s), %d pendente(s)'
               % (recibo.get('referencia') or '(ensaio)', recibo.get('estado', '?'),
                  recibo.get('total_linhas', 0), recibo.get('linhas_pendentes', 0)))

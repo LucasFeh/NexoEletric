@@ -238,3 +238,50 @@ Estado do módulo em 2026-09-11: **15 testes passam** (`--test-tags /di_lista_al
 falhas. Os testes cobrem exatamente as regras desta spec — resolução por id/hub_uid/MPN,
 reenvio que não duplica, aprovação que cria placa + BoM, aprovação barrada com linha pendente,
 recusa sem motivo barrada, e lista aprovada que ignora reenvio.
+
+---
+
+## 10. As fotos 3D e a placa virgem (o hub manda desde o NexoEletric 1.52.0; o Odoo ainda NÃO usa)
+
+Pedido do dono (2026-10-30): a placa nasce no Odoo **com foto**, e a **placa virgem** (a fibra)
+entra como item da placa montada. A IA tira as duas fotos pelo MCP do NexoEletric
+(`pcb_render_3d`) e o hub as guarda em `Projects/<p>/Renders/`. O `di_recebe_lista` (só ele; o
+ensaio não leva foto) recebe duas chaves novas no cabeçalho:
+
+```python
+payload = {
+    ...                                    # tudo da seção 2, igual
+    'imagem_montada': '<PNG em base64>',   # foto isométrica da placa com os componentes (1600x1200)
+    'pcb_virgem': {                        # a placa virgem como ITEM da montada
+        'quantidade': 1,
+        'imagem': '<PNG em base64>',       # foto de frente, só a placa (pode faltar)
+    },
+}
+```
+
+Regras do lado do hub: `imagem_montada` só vai quando a foto existe; `pcb_virgem` vai sempre que o
+projeto tem placa (`board.js`) ou foto da virgem, com `imagem` só quando a foto existe. As duas
+ficam **fora da assinatura** do ensaio (a foto refeita não muda nenhuma linha). Medido em
+2026-10-30 contra a produção: o `di_confere_lista` aceita o payload com as fotos (3,4 MB) e
+ignora as duas chaves.
+
+**O que falta no `di_lista_altium` (19.0.8.0.0 na produção) para usar isso:**
+
+1. **Guardar** as duas chaves no `_di_le_payload` (hoje ele lê só as conhecidas e descarta o
+   resto): `imagem_montada` e `imagem_virgem` (Image), `tem_virgem` e `qtd_virgem` na solicitação,
+   e mostrar as fotos na ficha da lista, para quem confere ver a placa.
+2. **Na aprovação, a foto da montada** vai no `image_1920` do `product.template` da placa (na que
+   é criada e na reaproveitada que ainda não tem foto).
+3. **Na aprovação, a placa virgem:** achar pelo par (código, revisão), como o `_di_placas_do_codigo`
+   faz com a montada, mas com `(Virgem)` no lugar de `(Montada)`: o acervo já tem
+   `Placa Circuito Impresso (Virgem) - PURI-DI261924 REV. B [UR]` e as grafias antigas
+   (`Placa de Circuito Impresso (Virgem) ...`). Se não existir, criar
+   `Placa Circuito Impresso (Virgem) - <codigo> REV. <revisao>`, estocável, na categoria
+   **Fibras** (id 40, onde estão as virgens hoje), com a foto da virgem. E pôr a virgem como
+   **linha da BoM** da montada (`product_qty` = `qtd_virgem`), que é o que a casa faz à mão hoje
+   (177 linhas de BoM com a "(Virgem)" do mesmo código).
+4. Revisão nova da virgem segue a mesma regra da montada (`_di_substitui_revisoes`): a virgem da
+   revisão antiga sai do cadastro, apagada ou arquivada.
+5. O **código** da placa (`codigo`) hoje cai no nome do projeto (`PRJ-UR-DI261924`), e a placa da
+   casa se chama `PURI-DI261924`. Quem confere corrige na ficha antes de aprovar; a virgem tem
+   que usar o código **corrigido**, por isso ela é achada/criada na aprovação e não no recebimento.

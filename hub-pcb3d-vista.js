@@ -28,6 +28,9 @@
        vista.pose('topo'|'base'|'frente'|'tras'|'esq'|'dir'|'iso'|'isoVirada')
        vista.gira(graus) vista.inclina(graus) vista.vira() vista.enquadra()
        vista.redimensiona() vista.destroi() vista.estado() -> {steps, falhas, corpos}
+       vista.pronto() -> Promise<estado>  o Real View e os STEP da cena carregados
+       vista.captura(fundo?) -> <canvas>  desenha na hora (mesmo com a janela escondida)
+     opcoes.modo 'real'|'padrao': fixa o modo sem ler nem gravar a preferencia (vista de captura)
      HubPcb3dVista.disponivel() -> bool (WebGL)
 
    REAL VIEW (o RealView do SolidWorks): materiais fisicos (PBR) calibrados nos .p2m do SolidWorks,
@@ -119,7 +122,7 @@ async function cria(host, opcoes){
   const o = opcoes || {};
   await tres();
   const ren = new T.WebGLRenderer({ antialias:true, alpha:true, preserveDrawingBuffer:true });
-  ren.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  ren.setPixelRatio(o.razao > 0 ? o.razao : Math.min(2, window.devicePixelRatio || 1));   /* a foto (razao 1) sai do tamanho pedido */
   ren.setClearColor(0x000000, 0);
   const cv = ren.domElement;
   cv.className = 'v3d-cv';
@@ -139,7 +142,10 @@ async function cria(host, opcoes){
   const piso = new T.Mesh(new T.PlaneGeometry(1, 1), new T.ShadowMaterial({ opacity:0.32 }));
   piso.receiveShadow = true; piso.visible = false; cena.add(piso);
   const fundoPadrao = o.fundo || 'linear-gradient(180deg,#4a5262 0%,#262a33 55%,#15171c 100%)';
-  let modo = preferido() ? 'real' : 'padrao';
+  /* opcoes.modo ('real'|'padrao') fixa o modo SEM ler nem gravar a preferencia da maquina: e a vista
+     de captura (pcbframe » render3d), que nao pode trocar o Real View de quem esta na tela */
+  const fixo = o.modo === 'real' || o.modo === 'padrao';
+  let modo = fixo ? o.modo : (preferido() ? 'real' : 'padrao');
   const ambNome = 'studio', acab = 'hasl';
   const gPlaca = new T.Group(), gCorpos = new T.Group();
   cena.add(gPlaca); cena.add(gCorpos);
@@ -520,11 +526,12 @@ async function cria(host, opcoes){
     }
     return g.children.length ? g : null;
   }
-  let geracao = 0;
+  let geracao = 0, carregando = [], modoP = Promise.resolve();
   function poeCorpos(lista){
     const minha = ++geracao;
     limpa(gCorpos);
     est.corpos = 0; est.steps = 0; est.falhas = [];
+    carregando = [];
     for (const b of (lista || [])) {
       if (!b) continue;
       let m = null;
@@ -544,7 +551,7 @@ async function cria(host, opcoes){
         est.corpos++;
         if (!b.modelUrl) { est.falhas.push((b.owner || '?') + ': modelo sem arquivo'); continue; }
         if (typeof HubPcb3dStep === 'undefined') { est.falhas.push('leitor de STEP não carregado'); continue; }
-        HubPcb3dStep.carrega(b.modelUrl, { chave:b.chave || b.model || b.modelUrl }).then(r => {
+        carregando.push(HubPcb3dStep.carrega(b.modelUrl, { chave:b.chave || b.model || b.modelUrl }).then(r => {
           if (minha !== geracao || !vivo) return;
           const mg = malhaDoStep(r.malhas, b);
           g.add(mg); est.steps++;
@@ -553,7 +560,7 @@ async function cria(host, opcoes){
           if (!mexeu) enquadra();   /* o modelo chegou e ninguem mexeu na camera: enquadra com ele */
           if (g.userData.ref && g.userData.ref === selRef) poeGizmo();
           pede();
-        }).catch(e => { est.falhas.push((b.owner || '?') + ': ' + (e && e.message || e)); });
+        }).catch(e => { est.falhas.push((b.owner || '?') + ': ' + (e && e.message || e)); }));
         continue;
       }
       if (!m) continue;
@@ -898,7 +905,7 @@ async function cria(host, opcoes){
   }
   async function trocaModo(novo){
     if (novo !== 'padrao' && novo !== 'real') return;
-    modo = novo; prefere(modo === 'real');
+    modo = novo; if (!fixo) prefere(modo === 'real');
     if (modo === 'padrao') {
       ren.toneMapping = T.NoToneMapping; ren.shadowMap.enabled = false; cena.environment = null;
       hemi.intensity = 1.6; sol.intensity = 1.5; contra.intensity = 0.7; sol.castShadow = false;
@@ -950,7 +957,31 @@ async function cria(host, opcoes){
     seleciona,
     selecionado:() => selRef,
     sincroniza,
-    realView(on){ if (on != null) trocaModo(on ? 'real' : 'padrao'); return modo === 'real'; },
+    realView(on){ if (on != null) modoP = trocaModo(on ? 'real' : 'padrao'); return modo === 'real'; },
+    /* o Real View montado (HDRI) e os STEP da cena carregados (ou falhos). Um STEP que chega pode
+       pedir outro (cena trocada no meio): repete ate a lista parar de mudar */
+    async pronto(){
+      await modoP.catch(() => {});
+      for (let i = 0; i < 20; i++) {
+        const l = carregando;
+        await Promise.allSettled(l);
+        if (l === carregando) break;
+      }
+      return vista.estado();
+    },
+    /* desenha AGORA (sem esperar o requestAnimationFrame, que para com a janela escondida) e devolve
+       um <canvas> com a imagem; fundo = cor CSS por baixo (sem ela, o PNG sai transparente) */
+    captura(fundo){
+      posiciona();
+      if (gGiz.visible) gGiz.scale.setScalar(orb.dist * 0.11);
+      ren.render(cena, cam);
+      const out = document.createElement('canvas');
+      out.width = cv.width; out.height = cv.height;
+      const c = out.getContext('2d');
+      if (fundo) { c.fillStyle = fundo; c.fillRect(0, 0, out.width, out.height); }
+      c.drawImage(cv, 0, 0);
+      return out;
+    },
     estado(){ return { steps:est.steps, falhas:est.falhas.slice(), corpos:est.corpos, az:orb.az / RAD, el:orb.el / RAD, dist:orb.dist, realView:modo === 'real' }; },
     destroi(){
       vivo = false;
@@ -961,7 +992,7 @@ async function cria(host, opcoes){
     },
   };
   redimensiona();
-  if (modo !== 'padrao') trocaModo(modo);
+  if (modo !== 'padrao') modoP = trocaModo(modo);
   root.HubPcb3dVista._ultima = vista;   /* gancho de teste (CDP), nao e contrato */
   return vista;
 }
