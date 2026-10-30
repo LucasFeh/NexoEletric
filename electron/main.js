@@ -55,6 +55,7 @@ const buildInfo = require('./lib/build-info');
 const { NexoHubSync } = require('./lib/nexohub-sync');
 const armazemNexoBD = require('./lib/armazem');
 const conexaoIA = require('./lib/conexao-ia');
+const cascaRust = require('./lib/casca-rust');
 
 web.registrarEsquemas();
 
@@ -73,6 +74,18 @@ const SMOKE = process.env.ALTIUMHUB_SMOKE || '';
 // Projetos, biblioteca e scripts do Altium no NexoBD (lib/armazem.js)
 const armazem = new armazemNexoBD.Armazem({ log, bundle: BUNDLE, python: PYTHON, versao: app.getVersion() });
 const ESPERA_PRIMEIRA = 45000;   // quanto a abertura espera a primeira rodada (depois segue sem ela)
+// A janela do NexoEletric em Rust (lib/casca-rust.js, 1.54.0): com ela, este processo e o motor de fundo
+const CASCA_EXE = cascaRust.caminhoDaCasca({ empacotado: EMBUTIDO, resourcesPath: process.resourcesPath });
+let casca = null;               // a janela Rust aberta (CascaRust)
+let cascaFalhou = false;        // nao abriu nesta maquina: esta sessao segue na janela Electron
+function usaCasca() { return !SMOKE && !cascaFalhou && !!CASCA_EXE && cascaRust.querCasca(settings.load()); }
+/* Com a janela Rust este processo nao desenha nada (so as telas de configuracao, quando pedidas): sem a GPU
+   do Chromium e sem o renderizador reserva, o motor de fundo deixa de pagar ~100 MB por janelas que nao abre.
+   Tem de vir antes do app ficar pronto. */
+if (usaCasca()) {
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('disable-features', 'SpareRendererForSitePerProcess');
+}
 
 let janela = null;
 let backend = null;
@@ -122,6 +135,8 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    // o atalho clicado de novo com a janela Rust aberta: ela vem para a frente
+    if (casca && casca.viva) { casca.focar(); return; }
     const w = (janela && !janela.isDestroyed()) ? janela
       : BrowserWindow.getAllWindows().find((x) => !x.isDestroyed());
     if (!w) return;
@@ -208,9 +223,8 @@ function envDoHub(ws) {
   return env;
 }
 
-// So chamada de dentro da fila (emSerie).
-async function subirHub({ porta } = {}) {
-  const s = settings.load();
+/* a pasta de trabalho com o codigo do hub deste instalador (as duas janelas, a Electron e a Rust) */
+function preparaPasta(s) {
   const ws = s.workspace;
   status('workspace', 'preparando a pasta de trabalho…');
   const r = workspace.sync(ws, BUNDLE, logWs);
@@ -226,6 +240,13 @@ async function subirHub({ porta } = {}) {
       `(${app.getVersion()}): atualize o NexoEletric nesta conta do Windows.`);
   }
   avisoSync = avisos.join(' ');
+  return ws;
+}
+
+// So chamada de dentro da fila (emSerie).
+async function subirHub({ porta } = {}) {
+  const s = settings.load();
+  const ws = preparaPasta(s);
 
   if (noNexoBD(ws)) {
     status('nexobd', 'trazendo os projetos e a biblioteca do Nexo Hub…');
@@ -305,7 +326,70 @@ async function aoCairOHub({ code }) {
   status('erro', 'o hub parou de responder', { erro: `o processo Python terminou (codigo ${code}). Veja o log abaixo.` });
 }
 
+/* ── A JANELA RUST (lib/casca-rust.js) ──
+   A pasta de trabalho e a sincronia com o NexoBD continuam aqui, como sempre; o hub e a janela sao os da
+   casca Rust, que abre na hora (o servidor dela sobe em ~0,1 s e o Python dela so quando uma rota pede).
+   A primeira rodada do NexoBD segue em paralelo: o vigia da casca recarrega a pagina quando os arquivos
+   chegam. Nao abriu (WebView2 ausente, executavel faltando): esta sessao volta para a janela Electron. */
+async function bootCascaImpl() {
+  const s = settings.load();
+  const ws = preparaPasta(s);
+  if (noNexoBD(ws)) {
+    armazem.iniciar(ws).then((r) => {
+      if (r && !r.ok && casca) casca.toast(`Sem conexão com o Nexo Hub (${r.erro}): os projetos e a biblioteca só aparecem com ` +
+        'ele conectado; assim que ele voltar, o hub recarrega sozinho.', 'warn', 12000);
+    }).catch((e) => log.warn('[nexobd] primeira rodada: ' + e.message));
+  } else {
+    armazem.parar();
+  }
+  status('rust', 'abrindo a janela…');
+  const c = new cascaRust.CascaRust({ log, logDir: LOG_DIR });
+  c.on('menu', (id) => {
+    const f = acoesDoMenu()[id];
+    if (f) Promise.resolve().then(f).catch((e) => log.warn(`[rust] menu ${id}: ${e.message}`));
+    else log.warn('[rust] menu desconhecido: ' + id);
+  });
+  c.on('exit', ({ code, cedo, subiu }) => {
+    if (casca !== c) return;
+    casca = null;
+    if (saindo) return;
+    if (code !== 0 && (cedo || !subiu)) {
+      // nao abriu nesta maquina: a janela Electron de sempre
+      log.error(`[rust] a janela Rust saiu com ${code} logo ao abrir: sigo na janela Electron (veja logs/rust.log)`);
+      cascaFalhou = true;
+      boot();
+      return;
+    }
+    log.info(`[rust] janela fechada (${code}): o NexoEletric sai`);
+    // o que foi salvo nos ultimos segundos ainda sobe ao NexoBD (a janela ja sumiu; o motor termina por tras)
+    const ultima = noNexoBD(ws) ? Promise.race([armazem.agora('fechando').catch(() => null),
+      new Promise((r) => setTimeout(r, 20000))]) : Promise.resolve();
+    ultima.finally(() => app.quit());
+  });
+  casca = c;
+  try {
+    origem = await c.iniciar({ exe: CASCA_EXE, ws, porta: s.port, python: PYTHON, env: envDoHub(ws), versao: app.getVersion() });
+  } catch (e) {
+    if (casca === c) {
+      casca = null;
+      log.error('[rust] ' + e.message + ': sigo na janela Electron');
+      cascaFalhou = true;
+      await c.parar();
+      return bootImpl();
+    }
+    return undefined;   // o exit ja tratou
+  }
+  log.info(`[rust] janela aberta, hub em ${origem}`);
+  // a tela de configuracao da primeira execucao (ou o splash) sai: a janela agora e a Rust
+  if (janela && !janela.isDestroyed()) { const j = janela; janela = null; j.destroy(); }
+  nexoSync.iniciar(ws, origem);
+  if (noNexoBD(ws)) { armazem.definirHub(origem); armazem.agendar(1500, 'hub no ar'); }
+  if (avisoSync) setTimeout(() => { if (casca) casca.toast(avisoSync, 'warn', 15000); }, 3000);
+  return undefined;
+}
+
 async function bootImpl() {
+  if (usaCasca()) return bootCascaImpl();
   reinicios = 0;
   try {
     await carregarUi('splash.html');
@@ -327,6 +411,12 @@ function boot() { return emSerie(bootImpl); }
 // salvar" -- e ai o hub tem de continuar no ar para ela salvar); so depois o servidor para.
 // Navegar uma janela cuja pagina recusou o beforeunload rejeita com ERR_ABORTED.
 function reiniciarHub() {
+  /* Com a janela Rust, fechar a janela por baixo da pessoa perderia a edicao que ainda nao foi salva (a
+     casca nao tem o "Voltar e salvar" do Electron). A configuracao nova vale na proxima abertura. */
+  if (casca && casca.viva) {
+    aviso('Configurações salvas.', 'Feche e abra o NexoEletric para aplicar (salve antes o que estiver aberto).');
+    return Promise.resolve(true);
+  }
   return emSerie(async () => {
     const outras = BrowserWindow.getAllWindows().filter((w) => w !== janela && w !== janelaConfig &&
       !pickers.has(w.webContents.id));
@@ -378,6 +468,8 @@ function aviso(message, detail) {
 
 // 1.31.0: o "Importar do servidor" saiu com o servidor central (projetos e biblioteca vem do Nexo Hub).
 function toastNoHub(wc, msg, tipo) {
+  // com a janela Rust, o aviso vai para ela (o motor nao tem pagina)
+  if (casca && casca.viva) { casca.toast(msg, tipo); return; }
   if (!wc || wc.isDestroyed()) return;
   wc.executeJavaScript(`typeof toast === 'function' && toast(${JSON.stringify(msg)}, ${JSON.stringify(tipo)})`)
     .catch(() => {});
@@ -977,16 +1069,19 @@ app.whenReady().then(async () => {
   registrarIpc();
   montarMenu();
   vigiarConexao();
-  criarJanela();
   if (precisaConfigurar()) {
+    criarJanela();
     await carregarUi('config.html', { modo: 'setup' });
   } else {
+    // com a janela Rust nao ha janela Electron nenhuma: este processo fica de motor, por tras
+    if (!usaCasca()) criarJanela();
     await boot();
   }
   updater.iniciar(opcoesUpdater);
 });
 
-app.on('window-all-closed', () => app.quit());
+// a tela de configuracoes (ou o Sobre, o Conectar IA) fechando com a janela Rust aberta nao fecha o app
+app.on('window-all-closed', () => { if (!(casca && casca.viva)) app.quit(); });
 
 // will-quit, e nao before-quit: o before-quit vem ANTES de as janelas fecharem, e uma vista
 // com edicao pendente ainda pode recusar ("Voltar e salvar") -- com o hub ja derrubado ela
@@ -994,6 +1089,7 @@ app.on('window-all-closed', () => app.quit());
 // para e, se "Reiniciar agora" foi pedido, o instalador da atualizacao roda.
 app.on('will-quit', (e) => {
   apagaSessao();
+  if (casca && casca.viva) { saindo = true; casca.parar(); }
   nexoSync.parar();
   armazem.parar();
   if (backendParado || !backend) {

@@ -4,6 +4,31 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.54.0 — 2026-10-30
+
+A janela do NexoEletric agora é a da versão em Rust.
+- **O mesmo atalho, o mesmo ícone, a janela nova.** Ao abrir o NexoEletric, a janela que aparece é a do
+  NexoEletric em Rust: WebView2 do Windows, o servidor do hub em Rust e a vista PCB no WebGL com o núcleo Rust.
+  Abre em ~0,1 s depois de preparar a pasta. O instalador, o `NexoEletric.exe`, o atalho, o registro no Windows e a
+  publicação no NexoBD são os de sempre, então o Nexo Hub atualiza como antes. A janela agrupa na barra de tarefas
+  com o atalho fixado.
+- **O Electron vira o motor de fundo, sem janela**: pasta de trabalho, sincronia com o NexoBD (a primeira rodada
+  corre enquanto a janela já está aberta; o vigia recarrega quando os arquivos chegam), biblioteca da rede,
+  configurações, Conectar IA, Sobre e o runtime do MCP. Os itens de menu que a janela Rust ainda não tem abrem a
+  tela do motor. Ao fechar a janela, o que foi salvo nos últimos segundos ainda sobe ao NexoBD antes de o app sair.
+- **Se a janela Rust não abrir** nesta máquina (sem WebView2), a sessão segue na janela Electron de antes.
+  `"casca": "electron"` no `settings.json` (ou `NEXOELETRIC_CASCA=electron`) volta a ela de propósito.
+- **MCP com a janela Rust**:
+  - `pcb_render_3d` funciona: o canal da vista ganhou a ação `render3d` e aceita respostas grandes;
+  - `vista_screenshot` traz a placa desenhada no WebGL (antes só os contornos por cima);
+  - o `session.json` diz a versão do app.
+- **Configurações que exigem reiniciar** (porta, pasta) valem na próxima abertura: fechar a janela por baixo
+  perderia uma edição não salva.
+- Medido no teste com a janela Rust: a janela usa ~30 MB e o motor Electron ~240 MB. O Python só sobe quando
+  uma rota que ficou nele é pedida.
+- Testes: `electron/test/casca-rust.test.js` (o canal inteiro contra uma casca falsa: origem do hub, menu,
+  focar, aviso, saída e a volta para a janela Electron).
+
 ## 1.53.0 — 2026-10-30
 
 O símbolo da folha na troca de componente.

@@ -49,6 +49,10 @@ const PADRAO = {
   anthropicKey: '',         // cifrado; liga o motor "api" do chat (tools/chat/claude_api.py)
   window: null,             // {x,y,width,height,maximized}
   setupDone: false,
+  // A janela (1.54.0, lib/casca-rust.js): 'rust' = a do NexoEletric em Rust (WebView2, hub em Rust), com
+  // este app de motor por tras; 'electron' = a janela de antes. Sem o executavel Rust no instalador, ou se
+  // ele nao abrir nesta maquina, vale a Electron.
+  casca: 'rust',
 };
 
 const SEGREDOS = ['updateToken', 'anthropicKey'];

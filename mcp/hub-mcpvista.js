@@ -24,12 +24,35 @@
   var ganchos = function () { return window.HubMcpVista || {}; };
   var parado = false;
 
+  /* A JANELA RUST (NexoEletric 1.54.0): a placa sai numa camada WebGL POR BAIXO do canvas 2D da vista
+     (nexo-gl.js, o canvas .nexo-gl), e o WebGL nao guarda o quadro -- copiar so o 2D dava os contornos
+     dos componentes sobre o vazio. Cada camada se redesenha (NexoGL.camadas()[i].fotografa()) e entra
+     embaixo, na mesma tarefa. Sem camada WebGL: null, e vale o canvas da vista sozinho. */
+  function comCamadasGl(c) {
+    var NG = window.NexoGL;
+    if (!NG || typeof NG.camadas !== 'function') return null;
+    var R = c.getBoundingClientRect(), k = c.width / (R.width || 1), out = null, ctx = null;
+    NG.camadas().forEach(function (inst) {
+      var gc = inst && typeof inst.fotografa === 'function' ? inst.fotografa() : null;
+      if (!gc) return;
+      if (!out) { out = document.createElement('canvas'); out.width = c.width; out.height = c.height; ctx = out.getContext('2d'); }
+      var r = gc.getBoundingClientRect();
+      try { ctx.drawImage(gc, (r.left - R.left) * k, (r.top - R.top) * k, r.width * k, r.height * k); } catch (e) { /* camada suja */ }
+    });
+    if (!out) return null;
+    ctx.drawImage(c, 0, 0);
+    return { png: out.toDataURL('image/png'), largura: out.width, altura: out.height };
+  }
+
   function captura() {
     var g = ganchos();
     if (typeof g.captura === 'function') {
       var c = g.captura();
       if (typeof c === 'string') return { png: c };
-      if (c && c.toDataURL) return { png: c.toDataURL('image/png'), largura: c.width, altura: c.height };
+      if (c && c.toDataURL) {
+        var gls = comCamadasGl(c);
+        return gls || { png: c.toDataURL('image/png'), largura: c.width, altura: c.height };
+      }
     }
     /* os canvas visiveis, empilhados na ordem do DOM sobre o maior */
     var cs = Array.prototype.slice.call(document.querySelectorAll('canvas')).filter(function (c) {

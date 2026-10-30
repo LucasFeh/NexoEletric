@@ -1,6 +1,7 @@
 // Tudo o que o instalador precisa antes do electron-builder:
 //   build/python   o CPython embutido + dependencias   (fetch-python.mjs)
 //   build/hub      o hub do commit HEAD, com manifesto  (stage-hub.mjs)
+//   build/rust     a janela do NexoEletric em Rust      (casca-rust.mjs)
 //   gen/build-info.json   versao, commit, data e, se houver, o token de atualizacao
 //
 // O token vem de ALTIUMHUB_UPDATE_TOKEN (ou do arquivo electron/.update-token, fora do
@@ -23,6 +24,7 @@ function node(script, args = []) {
 
 node('fetch-python.mjs');
 node('stage-hub.mjs');
+node('casca-rust.mjs');     // a janela Rust (build/rust -> resources\rust)
 
 const pkg = JSON.parse(fs.readFileSync(path.join(APP, 'package.json'), 'utf8'));
 const commit = execFileSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();

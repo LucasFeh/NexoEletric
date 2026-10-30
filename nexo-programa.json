@@ -1,7 +1,7 @@
 {
   "id": "nexoeletric",
   "nome": "NexoEletric",
-  "descricao": "Esquema e PCB estilo Altium (antigo EletricHUB); guarda projetos, biblioteca e scripts do Altium no NexoBD e publica a biblioteca 3D e as placas.",
+  "descricao": "Esquema e PCB estilo Altium (antigo EletricHUB): janela em Rust (WebView2, hub e vista PCB em Rust) com o motor Electron por trás; guarda projetos, biblioteca e scripts do Altium no NexoBD e publica a biblioteca 3D e as placas.",
   "windows": [
     "NexoEletric",
     "EletricHUB"
@@ -49,6 +49,6 @@
       "electron/scripts/publicar-nexohub.mjs",
       "nexo-programa.json"
     ],
-    "git": "git -c safe.directory=*; autor Lucas Ferreira <70298160+LucasFeh@users.noreply.github.com> por GIT_AUTHOR_*/GIT_COMMITTER_* (sem mexer no config global). Mudanças só como acréscimo; não mexer no tema. Projetos, Libs/símbolos (Odoo) e scripts do Altium moram no NexoBD (electron/lib/armazem.js)."
+    "git": "git -c safe.directory=*; autor Lucas Ferreira <70298160+LucasFeh@users.noreply.github.com> por GIT_AUTHOR_*/GIT_COMMITTER_* (sem mexer no config global). Mudanças só como acréscimo; não mexer no tema. Projetos, Libs/símbolos (Odoo) e scripts do Altium moram no NexoBD (electron/lib/armazem.js). A janela (1.54.0+) vem do repositório D:\\NexoEletric-rust (crates/nexoeletric-web, sem remoto): o npm run dist a compila em target-casca (electron/scripts/casca-rust.mjs; NEXOELETRIC_RUST_REPO troca a pasta) e ela vai em resources\\rust; commite lá também (git -c safe.directory=*, branch main)."
   }
 }
