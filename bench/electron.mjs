@@ -9,7 +9,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const CDP = +arg('cdp', 9333), HUB = +arg('hub', 8371), PROJ = arg('projeto'), IDLE = +arg('idle', 20), SECS = +arg('secs', 30);
-const BOARD = arg('board');
+const BOARD = arg('board'), APP = arg('app', 'NexoEletric-electron');
 const FASE = arg('fase'), OUT = arg('out'), T0 = +arg('t0', Date.now());
 const marca = f => FASE && writeFileSync(FASE, f);
 const dorme = ms => new Promise(r => setTimeout(r, ms));
@@ -82,7 +82,7 @@ for (const s of ((board.board && board.board.outline) || [])) {
 if (!(x1 <= x2)) { const bb = board.board.bbox; x1 = bb.x1; y1 = bb.y1; x2 = bb.x2; y2 = bb.y2; }
 
 // o contexto do iframe da vista PCB: o gancho de teste window.__hubPcb com a placa indexada
-const PRONTA = `location.pathname.endsWith('pcbframe.html') && !/lean=1/.test(location.search) && !!window.__hubPcb && __hubPcb.alvos().length > 0 && document.getElementById('cv').clientWidth > 0 ? 1 : 0`;
+const PRONTA = `location.pathname.endsWith('pcbframe.html') && !/lean=1/.test(location.search) && new URLSearchParams(location.search).get('p') === ${JSON.stringify(PROJ)} && !!window.__hubPcb && __hubPcb.alvos().length > 0 && document.getElementById('cv').clientWidth > 0 ? 1 : 0`;
 let ctx = null;
 for (let i = 0; i < 1200 && !ctx; i++) {
   for (const k of c.ctxs.filter(k => k.auxData?.isDefault)) {
@@ -136,7 +136,7 @@ const est = v => {
 };
 const q = est(res.fr);
 const out = {
-  app: 'NexoEletric-electron',
+  app: APP,
   projeto: PROJ,
   abrir_ms: pronto - T0,
   hub_ms: pronto_hub - T0,
@@ -149,3 +149,5 @@ const out = {
 writeFileSync(OUT, JSON.stringify(out, null, 2));
 console.log(JSON.stringify(out));
 c.ws.close();
+// as conexoes do DevTools podem segurar o processo: sai explicitamente
+process.exit(0);

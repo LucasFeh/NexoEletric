@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/nexo-core", "crates/nexoeletric"]
+members = ["crates/nexo-core", "crates/nexoeletric", "crates/nexo-wasm", "crates/nexo-hub", "crates/nexoeletric-web"]
 
 [workspace.package]
 version = "0.1.0"

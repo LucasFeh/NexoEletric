@@ -1,0 +1,442 @@
+{
+ "tabela": {
+  "electron/livre": {
+   "execucoes": 2,
+   "abrir_s": 4.357,
+   "fps": 58.05820236980916,
+   "quadro_p95_ms": 37.69999999999709,
+   "parado.cpu_pct": 3.9237087912087913,
+   "parado.ws_mb": 1214.6442307692307,
+   "parado.ws_mb_max": 1291.1999999999998,
+   "parado.priv_mb": 1579.5090659340658,
+   "parado.gpu3d_pct": 0.24071428571428571,
+   "parado.gpu_ded_mb": 744.6500000000001,
+   "parado.processos": 6,
+   "animando.cpu_pct": 217.33237154150197,
+   "animando.ws_mb": 1116.1453557312252,
+   "animando.ws_mb_max": 1186.5500000000002,
+   "animando.priv_mb": 1325.0002964426876,
+   "animando.gpu3d_pct": 28.712875494071145,
+   "animando.gpu_ded_mb": 597.6727272727273,
+   "animando.processos": 6
+  },
+  "electron/vsync": {
+   "execucoes": 2,
+   "abrir_s": 3.5785,
+   "fps": 47.94317195105619,
+   "quadro_p95_ms": 33.400000000001455,
+   "parado.cpu_pct": 4.021153846153846,
+   "parado.ws_mb": 1217.2884615384614,
+   "parado.ws_mb_max": 1292.55,
+   "parado.priv_mb": 1622.1653846153845,
+   "parado.gpu3d_pct": 0.1819230769230769,
+   "parado.gpu_ded_mb": 752.176923076923,
+   "parado.processos": 6,
+   "animando.cpu_pct": 102.1201902173913,
+   "animando.ws_mb": 1094.016304347826,
+   "animando.ws_mb_max": 1158.75,
+   "animando.priv_mb": 1309.4066123188404,
+   "animando.gpu3d_pct": 31.391277173913046,
+   "animando.gpu_ded_mb": 592.8662137681159,
+   "animando.processos": 6
+  },
+  "hibrido/livre": {
+   "execucoes": 2,
+   "abrir_s": 1.5665,
+   "fps": 2860.707027020133,
+   "quadro_p95_ms": 0.8499999999967258,
+   "parado.cpu_pct": 1.0480769230769231,
+   "parado.ws_mb": 598.0230769230769,
+   "parado.ws_mb_max": 603.8499999999999,
+   "parado.priv_mb": 543.7346153846154,
+   "parado.gpu3d_pct": 0.21076923076923076,
+   "parado.gpu_ded_mb": 198.15,
+   "parado.processos": 9,
+   "animando.cpu_pct": 290.7630434782609,
+   "animando.ws_mb": 930.9152173913044,
+   "animando.ws_mb_max": 1014.05,
+   "animando.priv_mb": 1097.782608695652,
+   "animando.gpu3d_pct": 94.75086956521739,
+   "animando.gpu_ded_mb": 293.11739130434785,
+   "animando.processos": 9
+  },
+  "hibrido/vsync": {
+   "execucoes": 2,
+   "abrir_s": 2.274,
+   "fps": 59.99637514997336,
+   "quadro_p95_ms": 16.850000000002183,
+   "parado.cpu_pct": 1.4196474358974358,
+   "parado.ws_mb": 622.0535256410255,
+   "parado.ws_mb_max": 628.45,
+   "parado.priv_mb": 564.4932692307693,
+   "parado.gpu3d_pct": 0.18929487179487178,
+   "parado.gpu_ded_mb": 194.88557692307694,
+   "parado.processos": 9,
+   "animando.cpu_pct": 19.59838768115942,
+   "animando.ws_mb": 618.7286231884059,
+   "animando.ws_mb_max": 645.25,
+   "animando.priv_mb": 575.2813405797101,
+   "animando.gpu3d_pct": 14.789039855072463,
+   "animando.gpu_ded_mb": 213.92952898550726,
+   "animando.processos": 9
+  }
+ },
+ "execucoes": {
+  "electron/livre": [
+   {
+    "tag": "1",
+    "abrir_ms": 4665,
+    "fps": 60.10034793155201,
+    "quadro_p95": 36.099999999998545,
+    "area": [
+     1270,
+     772
+    ],
+    "fases": {
+     "abrir": {
+      "amostras": 2,
+      "processos": 7,
+      "cpu_pct": -5.235,
+      "cpu_pct_max": 0.0,
+      "ws_mb": 664.25,
+      "ws_mb_max": 714.8,
+      "priv_mb": 313.15,
+      "gpu3d_pct": 28.810000000000002,
+      "gpu_ded_mb": 60.95,
+      "gpu_shr_mb": 18.4
+     },
+     "parado": {
+      "amostras": 14,
+      "processos": 6,
+      "cpu_pct": 4.093571428571429,
+      "cpu_pct_max": 11.58,
+      "ws_mb": 1206.75,
+      "ws_mb_max": 1285.3,
+      "priv_mb": 1579.7642857142857,
+      "gpu3d_pct": 0.20142857142857143,
+      "gpu_ded_mb": 760.2,
+      "gpu_shr_mb": 151.5285714285714
+     },
+     "animando": {
+      "amostras": 23,
+      "processos": 6,
+      "cpu_pct": 219.15565217391304,
+      "cpu_pct_max": 236.06,
+      "ws_mb": 1112.504347826087,
+      "ws_mb_max": 1171.2,
+      "priv_mb": 1321.086956521739,
+      "gpu3d_pct": 32.673478260869565,
+      "gpu_ded_mb": 600.5,
+      "gpu_shr_mb": 127.79565217391304
+     }
+    }
+   },
+   {
+    "tag": "2",
+    "abrir_ms": 4049,
+    "fps": 56.01605680806631,
+    "quadro_p95": 39.299999999995634,
+    "area": [
+     1270,
+     772
+    ],
+    "fases": {
+     "abrir": {
+      "amostras": 2,
+      "processos": 6,
+      "cpu_pct": 99.04,
+      "cpu_pct_max": 198.08,
+      "ws_mb": 624.75,
+      "ws_mb_max": 738.6,
+      "priv_mb": 317.35,
+      "gpu3d_pct": 26.005,
+      "gpu_ded_mb": 58.5,
+      "gpu_shr_mb": 18.4
+     },
+     "parado": {
+      "amostras": 13,
+      "processos": 6,
+      "cpu_pct": 3.753846153846154,
+      "cpu_pct_max": 10.45,
+      "ws_mb": 1222.5384615384614,
+      "ws_mb_max": 1297.1,
+      "priv_mb": 1579.253846153846,
+      "gpu3d_pct": 0.27999999999999997,
+      "gpu_ded_mb": 729.1,
+      "gpu_shr_mb": 145.91538461538462
+     },
+     "animando": {
+      "amostras": 22,
+      "processos": 6,
+      "cpu_pct": 215.5090909090909,
+      "cpu_pct_max": 253.82,
+      "ws_mb": 1119.7863636363636,
+      "ws_mb_max": 1201.9,
+      "priv_mb": 1328.9136363636364,
+      "gpu3d_pct": 24.752272727272725,
+      "gpu_ded_mb": 594.8454545454546,
+      "gpu_shr_mb": 128.39090909090908
+     }
+    }
+   }
+  ],
+  "electron/vsync": [
+   {
+    "tag": "1",
+    "abrir_ms": 3668,
+    "fps": 48.03799676810656,
+    "quadro_p95": 33.400000000001455,
+    "area": [
+     1270,
+     772
+    ],
+    "fases": {
+     "abrir": {
+      "amostras": 1,
+      "processos": 6,
+      "cpu_pct": 0.0,
+      "cpu_pct_max": 0.0,
+      "ws_mb": 518.4,
+      "ws_mb_max": 518.4,
+      "priv_mb": 250.5,
+      "gpu3d_pct": 1.25,
+      "gpu_ded_mb": 59.6,
+      "gpu_shr_mb": 18.1
+     },
+     "parado": {
+      "amostras": 13,
+      "processos": 6,
+      "cpu_pct": 3.6569230769230767,
+      "cpu_pct_max": 11.6,
+      "ws_mb": 1219.323076923077,
+      "ws_mb_max": 1295.1,
+      "priv_mb": 1631.2,
+      "gpu3d_pct": 0.18384615384615385,
+      "gpu_ded_mb": 756.1,
+      "gpu_shr_mb": 149.15384615384616
+     },
+     "animando": {
+      "amostras": 23,
+      "processos": 6,
+      "cpu_pct": 100.84913043478261,
+      "cpu_pct_max": 127.11,
+      "ws_mb": 1092.8826086956522,
+      "ws_mb_max": 1155.1,
+      "priv_mb": 1305.5173913043477,
+      "gpu3d_pct": 31.331304347826087,
+      "gpu_ded_mb": 591.5782608695652,
+      "gpu_shr_mb": 128.46521739130435
+     }
+    }
+   },
+   {
+    "tag": "2",
+    "abrir_ms": 3489,
+    "fps": 47.84834713400583,
+    "quadro_p95": 33.400000000001455,
+    "area": [
+     1270,
+     772
+    ],
+    "fases": {
+     "abrir": {
+      "amostras": 1,
+      "processos": 6,
+      "cpu_pct": 0.0,
+      "cpu_pct_max": 0.0,
+      "ws_mb": 528.7,
+      "ws_mb_max": 528.7,
+      "priv_mb": 260.1,
+      "gpu3d_pct": 1.06,
+      "gpu_ded_mb": 59.4,
+      "gpu_shr_mb": 18.0
+     },
+     "parado": {
+      "amostras": 13,
+      "processos": 6,
+      "cpu_pct": 4.385384615384615,
+      "cpu_pct_max": 13.05,
+      "ws_mb": 1215.253846153846,
+      "ws_mb_max": 1290.0,
+      "priv_mb": 1613.1307692307691,
+      "gpu3d_pct": 0.18,
+      "gpu_ded_mb": 748.2538461538461,
+      "gpu_shr_mb": 145.91538461538462
+     },
+     "animando": {
+      "amostras": 24,
+      "processos": 6,
+      "cpu_pct": 103.39125,
+      "cpu_pct_max": 136.15,
+      "ws_mb": 1095.15,
+      "ws_mb_max": 1162.4,
+      "priv_mb": 1313.2958333333333,
+      "gpu3d_pct": 31.45125,
+      "gpu_ded_mb": 594.1541666666667,
+      "gpu_shr_mb": 127.96666666666667
+     }
+    }
+   }
+  ],
+  "hibrido/livre": [
+   {
+    "tag": "1",
+    "abrir_ms": 1791,
+    "fps": 2867.35593220339,
+    "quadro_p95": 0.7999999999992724,
+    "area": [
+     1270,
+     772
+    ],
+    "fases": {
+     "parado": {
+      "amostras": 13,
+      "processos": 9,
+      "cpu_pct": 1.106923076923077,
+      "cpu_pct_max": 8.11,
+      "ws_mb": 599.5615384615385,
+      "ws_mb_max": 604.4,
+      "priv_mb": 548.123076923077,
+      "gpu3d_pct": 0.2153846153846154,
+      "gpu_ded_mb": 201.9923076923077,
+      "gpu_shr_mb": 19.9
+     },
+     "animando": {
+      "amostras": 23,
+      "processos": 9,
+      "cpu_pct": 290.7691304347826,
+      "cpu_pct_max": 362.01,
+      "ws_mb": 923.1782608695652,
+      "ws_mb_max": 1005.0,
+      "priv_mb": 1095.182608695652,
+      "gpu3d_pct": 95.00478260869565,
+      "gpu_ded_mb": 291.95652173913044,
+      "gpu_shr_mb": 108.4304347826087
+     }
+    }
+   },
+   {
+    "tag": "2",
+    "abrir_ms": 1342,
+    "fps": 2854.0581218368757,
+    "quadro_p95": 0.8999999999941792,
+    "area": [
+     1270,
+     772
+    ],
+    "fases": {
+     "parado": {
+      "amostras": 13,
+      "processos": 9,
+      "cpu_pct": 0.9892307692307692,
+      "cpu_pct_max": 3.88,
+      "ws_mb": 596.4846153846154,
+      "ws_mb_max": 603.3,
+      "priv_mb": 539.3461538461538,
+      "gpu3d_pct": 0.20615384615384616,
+      "gpu_ded_mb": 194.30769230769232,
+      "gpu_shr_mb": 19.8
+     },
+     "animando": {
+      "amostras": 23,
+      "processos": 9,
+      "cpu_pct": 290.75695652173914,
+      "cpu_pct_max": 344.92,
+      "ws_mb": 938.6521739130435,
+      "ws_mb_max": 1023.1,
+      "priv_mb": 1100.3826086956522,
+      "gpu3d_pct": 94.49695652173914,
+      "gpu_ded_mb": 294.2782608695652,
+      "gpu_shr_mb": 112.85217391304347
+     }
+    }
+   }
+  ],
+  "hibrido/vsync": [
+   {
+    "tag": "1",
+    "abrir_ms": 2796,
+    "fps": 59.9960702743355,
+    "quadro_p95": 16.900000000001455,
+    "area": [
+     1270,
+     772
+    ],
+    "fases": {
+     "abrir": {
+      "amostras": 1,
+      "processos": 3,
+      "cpu_pct": 0.0,
+      "cpu_pct_max": 0.0,
+      "ws_mb": 139.5,
+      "ws_mb_max": 139.5,
+      "priv_mb": 44.9,
+      "gpu3d_pct": 0.0,
+      "gpu_ded_mb": 0.0,
+      "gpu_shr_mb": 0.0
+     },
+     "parado": {
+      "amostras": 12,
+      "processos": 9,
+      "cpu_pct": 1.5208333333333333,
+      "cpu_pct_max": 6.32,
+      "ws_mb": 644.6916666666666,
+      "ws_mb_max": 650.5,
+      "priv_mb": 586.825,
+      "gpu3d_pct": 0.16166666666666665,
+      "gpu_ded_mb": 195.025,
+      "gpu_shr_mb": 19.45
+     },
+     "animando": {
+      "amostras": 24,
+      "processos": 9,
+      "cpu_pct": 21.314166666666665,
+      "cpu_pct_max": 43.47,
+      "ws_mb": 608.0833333333334,
+      "ws_mb_max": 637.4,
+      "priv_mb": 571.6583333333333,
+      "gpu3d_pct": 14.634166666666667,
+      "gpu_ded_mb": 222.34166666666667,
+      "gpu_shr_mb": 20.2
+     }
+    }
+   },
+   {
+    "tag": "2",
+    "abrir_ms": 1752,
+    "fps": 59.99668002561123,
+    "quadro_p95": 16.80000000000291,
+    "area": [
+     1270,
+     772
+    ],
+    "fases": {
+     "parado": {
+      "amostras": 13,
+      "processos": 9,
+      "cpu_pct": 1.3184615384615386,
+      "cpu_pct_max": 5.04,
+      "ws_mb": 599.4153846153846,
+      "ws_mb_max": 606.4,
+      "priv_mb": 542.1615384615385,
+      "gpu3d_pct": 0.2169230769230769,
+      "gpu_ded_mb": 194.74615384615385,
+      "gpu_shr_mb": 19.7
+     },
+     "animando": {
+      "amostras": 23,
+      "processos": 9,
+      "cpu_pct": 17.882608695652173,
+      "cpu_pct_max": 24.35,
+      "ws_mb": 629.3739130434783,
+      "ws_mb_max": 653.1,
+      "priv_mb": 578.9043478260869,
+      "gpu3d_pct": 14.943913043478261,
+      "gpu_ded_mb": 205.51739130434783,
+      "gpu_shr_mb": 19.7
+     }
+    }
+   }
+  ]
+ }
+}

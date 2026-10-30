@@ -1,0 +1,25 @@
+[package]
+name = "nexo-hub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "O servidor do hub do NexoEletric em Rust: arquivos, projetos, gravar, ao vivo, MCP; o resto vai ao hubserver.py sob demanda"
+
+[dependencies]
+nexo-core = { path = "../nexo-core" }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "fs", "process"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures-util = "0.3"
+reqwest = { version = "0.13", default-features = false, features = ["stream", "json"] }
+notify = "8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mime_guess = "2"
+percent-encoding = "2"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rayon = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_JobObjects", "Win32_Foundation", "Win32_System_Threading", "Win32_Security"] }

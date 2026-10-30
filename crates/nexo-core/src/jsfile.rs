@@ -128,6 +128,17 @@ pub fn parse_js<T: DeserializeOwned>(src: &str) -> Result<T, String> {
     serde_json::from_value(v).map_err(|e| format!("formato inesperado: {e}"))
 }
 
+/// O valor da declaracao como TEXTO JSON puro (limpo de comentarios e virgulas): para devolver a
+/// placa inteira numa resposta sem interpretar e reescrever 1 MB de JSON.
+pub fn js_body(src: &str) -> String {
+    let body = rhs(src);
+    if serde_json::from_str::<serde::de::IgnoredAny>(body).is_ok() {
+        return body.to_string();
+    }
+    let clean = clean_js(src);
+    rhs(&clean).to_string()
+}
+
 pub fn parse_js_value(src: &str) -> Result<Value, String> {
     let clean = clean_js(src);
     let body = rhs(&clean);

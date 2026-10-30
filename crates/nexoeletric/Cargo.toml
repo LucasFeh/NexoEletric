@@ -6,7 +6,7 @@ license.workspace = true
 description = "NexoEletric nativo: esquema e PCB no DNA do Altium, desenhado na GPU (wgpu)"
 
 [[bin]]
-name = "NexoEletric"
+name = "NexoEletric-nativo"
 path = "src/main.rs"
 
 [dependencies]

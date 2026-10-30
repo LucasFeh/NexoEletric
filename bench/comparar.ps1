@@ -1,4 +1,4 @@
-# Comparativo NexoEletric Rust x Electron na MESMA placa (mesmos arquivos do projeto).
+﻿# Comparativo NexoEletric Rust x Electron na MESMA placa (mesmos arquivos do projeto).
 # Para cada app: abre a placa, fica parado -Idle s, anima a camera -Secs s (mesma formula nos dois),
 # enquanto o medir.ps1 le CPU/memoria/GPU da arvore inteira de processos.
 #
@@ -16,10 +16,11 @@ param(
     [string]$Modo = 'vsync',
     [int]$Idle = 20,
     [int]$Secs = 30,
-    [string]$Apps = 'rust,electron',
+    [string]$Apps = 'hibrido,electron',
     [string]$Tag = '1',
-    [string]$RustExe = "$PSScriptRoot\..\target\release\NexoEletric.exe",
-    [string]$ElectronExe = 'C:\Program Files\NexoEletric\NexoEletric.exe'
+    [string]$RustExe = "$PSScriptRoot\..\target\release\NexoEletric-nativo.exe",
+    [string]$ElectronExe = 'C:\Program Files\NexoEletric\NexoEletric.exe',
+    [string]$HibridoExe = "$PSScriptRoot\..\target\release\NexoEletric.exe"
 )
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force $OutDir | Out-Null
@@ -48,7 +49,26 @@ foreach ($app in $Apps.Split(',')) {
         $m = Medidor $p.Id $csv $fase
         $p.WaitForExit(($Idle + $Secs + 120) * 1000) | Out-Null
         'fim' | Set-Content $fase -NoNewline
+    } elseif ($app -eq 'hibrido') {
+        # a casca Rust (WebView2) + servidor Rust + vista PCB no WebGL, na MESMA pasta de teste
+        $t0 = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $a = @('--workspace', "`"$Workspace`"", '--porta', '8260', '--sem-sessao', '--cdp', '9334')
+        if ($Modo -eq 'livre') { $a += '--livre' }
+        $p = Start-Process $HibridoExe -ArgumentList $a -PassThru
+        $m = Medidor $p.Id $csv $fase
+        try {
+            $ErrorActionPreference = 'Continue'
+            node (Join-Path $PSScriptRoot 'electron.mjs') --app NexoEletric-hibrido --cdp 9334 --hub 8260 --projeto $projeto --board (Join-Path $ProjDir 'board.js') --idle $Idle --secs $Secs --fase $fase --out $json --t0 $t0 2>&1 | ForEach-Object { "$_" }
+            $ErrorActionPreference = 'Stop'
+        } finally {
+            'fim' | Set-Content $fase -NoNewline
+            Start-Sleep 2
+            taskkill /PID $p.Id /T /F | Out-Null
+        }
     } else {
+        # trava 0: o NexoEletric da pessoa tem de estar FECHADO (so os servidores MCP podem rodar)
+        $janelas = Get-CimInstance Win32_Process -Filter "Name='NexoEletric.exe'" | Where-Object { $_.CommandLine -notlike '*eletrichub-mcp.js*' }
+        if ($janelas) { throw "o NexoEletric esta aberto (pid $($janelas.ProcessId -join ', ')): feche-o antes do teste" }
         # trava 1: a instancia de teste tem de subir o hub na 8371 (settings.json legivel, sem BOM)
         $porta = node -e "const t=require('fs').readFileSync(process.argv[1],'utf8');try{console.log(JSON.parse(t).port)}catch(e){console.log('ilegivel')}" (Join-Path $UserData 'settings.json')
         if ("$porta".Trim() -ne '8371') { throw "settings.json da instancia de teste com porta '$porta' (precisa 8371): abortado para nao tocar no hub da pessoa" }
@@ -87,9 +107,13 @@ foreach ($app in $Apps.Split(',')) {
             Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and ($_.CommandLine -like "*$UserData*" -or $_.CommandLine -like "*$Workspace*") } |
                 ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            # o session.json do MCP que a instancia de teste gravou sai junto
+            $sess = Join-Path $homeAntes '.nexoeletric\session.json'
+            if ((Test-Path $sess) -and ((Get-Content $sess -Raw) -like '*ws-electron*')) { Remove-Item $sess -Force }
         }
     }
     $m.WaitForExit(30000) | Out-Null
     "$app/$Modo/$Tag -> $csv"
     Start-Sleep 5
 }
+

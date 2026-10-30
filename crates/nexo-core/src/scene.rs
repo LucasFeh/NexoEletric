@@ -64,6 +64,15 @@ pub struct SceneStats {
     pub build_ms: f64,
 }
 
+/// o relogio (no WASM do navegador nao ha: std::time::Instant entra em panico la)
+fn relogio() -> Option<std::time::Instant> {
+    if cfg!(target_arch = "wasm32") {
+        None
+    } else {
+        Some(std::time::Instant::now())
+    }
+}
+
 pub fn rgba(c: [u8; 3], a: f32) -> u32 {
     u32::from_le_bytes([c[0], c[1], c[2], (a.clamp(0.0, 1.0) * 255.0).round() as u8])
 }
@@ -145,23 +154,48 @@ impl Bucket {
     }
 }
 
+#[derive(Default)]
 pub struct BuildOpts {
     /// vista de baixo (View > Flip Board): o pad passante mostra a face de baixo
     pub flipped: bool,
     pub ghosts: Option<crate::changes::Ghosts>,
+    /// a cor de cada camada (a tela web manda as dela); sem, a tabela + board.layers
+    pub colors: Option<HashMap<String, [u8; 3]>>,
+    /// a geometria dos textos ja pronta (a da tela web, igual a do Gerber); sem, a HubFont daqui
+    pub texts: Option<Vec<TextIn>>,
+    /// expansao da mascara e da pasta (rules.js); sem, as do board.js
+    pub sm: Option<f64>,
+    pub pm: Option<f64>,
+    /// o contorno dos poligonos (a tela web desenha os dela tracejados por cima)
+    pub sem_poligonos: bool,
+}
+
+/// Um texto ja resolvido: contorno exato (aneis par-impar) ou tracos com largura.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct TextIn {
+    pub layer: String,
+    pub polys: Vec<Vec<[f64; 2]>>,
+    pub linhas: Vec<Vec<[f64; 2]>>,
+    pub w: f64,
+    pub inv: bool,
+    pub caixa: Vec<[f64; 2]>,
 }
 
 pub fn build(eb: &Board, opts: &BuildOpts) -> Scene {
-    let t0 = std::time::Instant::now();
+    let t0 = relogio();
     let mut buckets: HashMap<String, Bucket> = HashMap::new();
-    let colors: HashMap<String, [u8; 3]> =
+    let mut colors: HashMap<String, [u8; 3]> =
         layers::table().iter().map(|l| (l.key.clone(), layers::color_of(&l.key, &eb.layers))).collect();
+    if let Some(c) = &opts.colors {
+        colors.extend(c.iter().map(|(k, v)| (k.clone(), *v)));
+    }
     let col = |k: &str| rgba(colors.get(k).copied().unwrap_or([0x88, 0x88, 0x88]), 1.0);
     let ko = |k: &str| rgba(colors.get(k).copied().unwrap_or([0x88, 0x88, 0x88]), 0.45);
     let mut drills = Bucket::default();
     let black = rgba([0, 0, 0], 1.0);
-    let sm_rule = eb.rules.as_ref().and_then(|r| r.sm).unwrap_or(MASCARA_PADRAO);
-    let pm_rule = eb.rules.as_ref().and_then(|r| r.pm).unwrap_or(0.0);
+    let sm_rule = opts.sm.or(eb.rules.as_ref().and_then(|r| r.sm)).unwrap_or(MASCARA_PADRAO);
+    let pm_rule = opts.pm.or(eb.rules.as_ref().and_then(|r| r.pm)).unwrap_or(0.0);
 
     macro_rules! b {
         ($k:expr) => {
@@ -202,7 +236,24 @@ pub fn build(eb: &Board, opts: &BuildOpts) -> Scene {
         }
         b!(g.layer).fill_evenodd(&rings, c);
     }
-    for t in &eb.texts {
+    for t in opts.texts.iter().flatten() {
+        let c = col(&t.layer);
+        let bk = b!(t.layer);
+        if !t.polys.is_empty() {
+            let rings: Vec<&[[f64; 2]]> = t.polys.iter().map(|q| q.as_slice()).collect();
+            bk.fill_evenodd(&rings, c);
+        } else if t.inv && t.caixa.len() >= 3 {
+            bk.convex(&t.caixa, c);
+            for l in &t.linhas {
+                bk.polyline(l, t.w, black);
+            }
+        } else {
+            for l in &t.linhas {
+                bk.polyline(l, t.w, c);
+            }
+        }
+    }
+    for t in eb.texts.iter().filter(|_| opts.texts.is_none()) {
         if t.layer.is_empty() || t.hidden {
             continue;
         }
@@ -337,7 +388,7 @@ pub fn build(eb: &Board, opts: &BuildOpts) -> Scene {
         outline_b.polyline(&c, -1.3, contorno);
     }
     // poligonos: o contorno na cor da camada (o despejo ja esta nas regioes)
-    for p in &eb.polygons {
+    for p in eb.polygons.iter().filter(|_| !opts.sem_poligonos) {
         if p.pts.len() >= 3 {
             let mut c = p.pts.clone();
             c.push(p.pts[0]);
@@ -397,7 +448,7 @@ pub fn build(eb: &Board, opts: &BuildOpts) -> Scene {
     sc.stats = SceneStats {
         triangles: sc.indices.len() / 3,
         capsules: sc.caps.len(),
-        build_ms: t0.elapsed().as_secs_f64() * 1000.0,
+        build_ms: t0.map(|t| t.elapsed().as_secs_f64() * 1000.0).unwrap_or(0.0),
     };
     sc
 }
