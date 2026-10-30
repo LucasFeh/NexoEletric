@@ -14,7 +14,7 @@ fn todas_as_placas_carregam() {
     for e in lista {
         let p = project::load(&e.dir).unwrap_or_else(|err| panic!("{}: {err}", e.name));
         let (ok, w, er) = p.applied.counts();
-        let sc = scene::build(&p.applied.board, &scene::BuildOpts { flipped: false, ghosts: Some(p.applied.ghosts.clone()) });
+        let sc = scene::build(&p.applied.board, &scene::BuildOpts { flipped: false, ghosts: Some(p.applied.ghosts.clone()), ..Default::default() });
         let idx = nexo_core::pick::PickIndex::build(&p.applied.board);
         let _ = idx;
         eprintln!(
@@ -37,7 +37,7 @@ fn placa_tem_fundo() {
         return;
     }
     let p = project::load(&dir).unwrap();
-    let sc = scene::build(&p.applied.board, &scene::BuildOpts { flipped: false, ghosts: None });
+    let sc = scene::build(&p.applied.board, &scene::BuildOpts { flipped: false, ghosts: None, ..Default::default() });
     let b = sc.board.as_ref().unwrap();
     let mut area = 0.0f64;
     for t in sc.indices[b.tris.start as usize..b.tris.end as usize].chunks(3) {

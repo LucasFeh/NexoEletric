@@ -192,7 +192,7 @@ impl NexoApp {
 
     fn install(&mut self, p: Project, nova: bool) {
         let ghosts = Some(p.applied.ghosts.clone());
-        let sc = scene::build(&p.applied.board, &scene::BuildOpts { flipped: self.view.flip, ghosts });
+        let sc = scene::build(&p.applied.board, &scene::BuildOpts { flipped: self.view.flip, ghosts, ..Default::default() });
         let pick = PickIndex::build(&p.applied.board);
         let present: Vec<String> = sc.layers.iter().map(|l| l.key.clone()).collect();
         self.gen += 1;
@@ -225,7 +225,7 @@ impl NexoApp {
 
     fn rebuild_scene(&mut self) {
         if let Some(l) = &mut self.loaded {
-            let sc = scene::build(&l.proj.applied.board, &scene::BuildOpts { flipped: self.view.flip, ghosts: Some(l.proj.applied.ghosts.clone()) });
+            let sc = scene::build(&l.proj.applied.board, &scene::BuildOpts { flipped: self.view.flip, ghosts: Some(l.proj.applied.ghosts.clone()), ..Default::default() });
             self.gen += 1;
             l.scene = Arc::new(sc);
             l.scene_gen = self.gen;
