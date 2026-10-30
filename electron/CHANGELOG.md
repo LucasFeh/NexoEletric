@@ -4,6 +4,34 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.50.0 — 2026-10-30
+
+Furos, recortes, faixa proibida e o autoroteador (etapa B do relato da PCB1: trilho de 2 mm + furos M3).
+- **Furo sem cobre (NPTH) no footprint**: o `fp_salvar` aceita `type:"npth"` (grava `th` com `plated:false`, o pad do
+  tamanho do furo) e `plated:false` num pad passante. Antes recusava o furo de 3,4 num pad de 3,4 dizendo "o furo é
+  maior que o pad"; para o pad metalizado a mensagem agora diz "do tamanho do pad" e mostra o caminho do NPTH. O editor de
+  footprint ganhou **Plated: Metalizado (PTH) / Sem cobre (NPTH)** em Hole Information. O Gerber já mandava esse furo
+  para o arquivo de NPTH.
+- **Furo de fixação pronto**: `fp_pacote` (e o assistente do editor) com o tipo `furo` — furo 3,2 sem cobre por padrão
+  (`FURO_3.2_NPTH`), `padX` = anel de cobre (furo metalizado), `cx` = círculo da cabeça do parafuso na serigrafia.
+- **`pcb_furo`**: furo avulso na placa (`pad_add`), sem cobre por padrão; `metalizado` com `anel` e `net`.
+- **`pcb_recorte`**: recorte da placa (Board Cutout, `region_add` com `cutout:true`) em círculo, retângulo ou polígono.
+  A op já existia, mas sem ferramenta, e a IA não a achou.
+- **`pcb_faixa_borda`**: a faixa proibida ao longo de bordas escolhidas (ex.: 2 mm em cima e embaixo para o trilho), uma
+  região na camada KeepOut por lado, recortada no contorno. A resposta lista o que já está dentro dela.
+  - O polígono (pour) passou a respeitar tudo o que está na KeepOut, como o roteador e o DRC já faziam (antes só
+    o que tinha a marca `keepout:true`).
+  - A regra da casa acusa texto de serigrafia na KeepOut (`serigrafia_keepout`), e o `serigrafia_posicionar` não
+    põe designador lá (o do VDR1 tinha caído dentro da faixa do trilho).
+- **Autoroteador**:
+  - Sem `camadas`, usa só Top, Bottom e as camadas internas que já têm cobre. A PCB1 tinha Mid2/Mid4 vazias na pilha
+    e saiu roteada por elas. A resposta diz quais ficaram de fora.
+  - Avisa a rota que só passou com a largura MÍNIMA da regra (`abaixo_da_preferida`). Antes o +3V3 saiu com 0,19 mm
+    em vez dos 0,8 da Width_Power sem aviso.
+  - Sugere `cruzarPlanos:true` quando falta caminho e há plano de cobre na placa.
+- `pcb_consultar` e `pcb_componente` mostram `plated` nos pads com furo.
+- Teste: `tests/test-mcp-furos.js`.
+
 ## 1.49.0 — 2026-10-30
 
 PCB pelo MCP: o que a sessão de IA da PCB1 não conseguia apagar, editar nem mover (itens 15 a 34 do relato, etapa A).

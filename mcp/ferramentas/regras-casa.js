@@ -38,7 +38,7 @@ const PAD = { parafuso: 3.0, plano_pad: 1.0, silk: 0.254, silk_cobre: 0.1, silk_
 const PARAMS = Object.keys(PAD);
 const REGRAS = ['pad_outra_net', 'trilha_sobre_pad', 'parafuso', 'plano_pad', 'serigrafia'];
 /* as partes da regra "serigrafia", para desligar uma so (por projeto ou por area) */
-const SUBREGRAS = ['serigrafia_pad', 'serigrafia_trilha', 'serigrafia_furo', 'serigrafia_parafuso', 'serigrafia_borda', 'serigrafia_silk', 'texto_tamanho'];
+const SUBREGRAS = ['serigrafia_pad', 'serigrafia_trilha', 'serigrafia_furo', 'serigrafia_parafuso', 'serigrafia_borda', 'serigrafia_silk', 'serigrafia_keepout', 'texto_tamanho'];
 const ARQ_CFG = 'regras-casa.json';
 
 /* ---------- as regras da casa do projeto (regras-casa.json) ---------- */
@@ -163,7 +163,8 @@ function kit(C) {
   const uniaoC = paths => { const c = new C.Clipper(); c.AddPaths(paths, C.PolyType.ptSubject, true); const out = new C.Paths(); c.Execute(C.ClipType.ctUnion, out, C.PolyFillType.pftNonZero, C.PolyFillType.pftNonZero); return out; };
   const area = paths => Math.abs(paths.reduce((s, p) => s + C.Clipper.Area(p), 0)) / (E * E);
   const caixa = paths => caixaPts([].concat(...paths.map(p => p.map(q => [q.X / E, q.Y / E]))));
-  return { paraC, offset, inter, uniaoC, area, caixa };
+  const deC = path => path.map(q => [q.X / E, q.Y / E]);
+  return { paraC, deC, offset, inter, uniaoC, area, caixa };
 }
 
 /* o cobre de uma camada como formas {tipo, id, net, paths, bb} (paths em unidades do Clipper) */
@@ -271,6 +272,12 @@ function cenaSerigrafia(ctx, eb, K, furos, cobre, tg) {
   }
   const quadrados = furos.map(f => ({ tipo: 'quadrado do parafuso', id: f.origem, bb: f.quadrado, paths: [K.paraC([[f.quadrado.x1, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y1], [f.quadrado.x2, f.quadrado.y2], [f.quadrado.x1, f.quadrado.y2]])] }));
   const recortes = (eb.cutouts || []).filter(k => k && Array.isArray(k.points) && k.points.length >= 3 && k.kindn !== -1 && k.kindn !== 1).map(k => ({ tipo: 'recorte', id: k.id || '', bb: caixaPts(k.points), paths: [K.paraC(k.points)] }));
+  /* A FAIXA PROIBIDA / KEEPOUT (camada KeepOut: pcb_faixa_borda, o trilho da PCB1): o texto nao
+     entra nela (o serigrafia_posicionar pos o designador do VDR1 dentro da faixa do trilho) */
+  const keepouts = [];
+  for (const g of eb.regions || []) if (g && g.layer === 'KeepOut' && Array.isArray(g.points) && g.points.length >= 3) keepouts.push({ tipo: 'keepout', id: g.id || '', bb: caixaPts(g.points), paths: [K.paraC(g.points)] });
+  for (const f of eb.fills || []) if (f && f.layer === 'KeepOut' && [f.x1, f.y1, f.x2, f.y2].every(isNum)) { const pts = [[f.x1, f.y1], [f.x2, f.y1], [f.x2, f.y2], [f.x1, f.y2]]; keepouts.push({ tipo: 'keepout', id: f.id || '', bb: caixaPts(pts), paths: [K.paraC(pts)] }); }
+  for (const t of eb.tracks || []) if (t && t.layer === 'KeepOut' && [t.x1, t.y1, t.x2, t.y2].every(isNum)) { const paths = K.offset([K.paraC([[t.x1, t.y1], [t.x2, t.y2]])], Math.max(t.w || 0.1, 0.01) / 2, true); if (paths.length) keepouts.push({ tipo: 'keepout', id: t.id || '', bb: K.caixa(paths), paths }); }
   /* a placa encolhida da folga da borda, pelo CONTORNO (placa recortada ou com arco nao cabe no
      retangulo da bbox); sem contorno, a bbox */
   const PP = ctx.modulo('hub-pcbpour.js');
@@ -280,7 +287,7 @@ function cenaSerigrafia(ctx, eb, K, furos, cobre, tg) {
   /* o cobre do lado de cada overlay (plano despejado pode ficar embaixo do texto: fora) */
   const obs = {}, gCobre = {};
   for (const L of ['Top', 'Bottom']) { obs[L] = (cobre[L] || []).filter(x => x.tipo !== 'plano'); gCobre[L] = grade(obs[L], 2); }
-  const cena = { K, tg, sm, silk, quadrados, recortes, ptsPlaca, bbPlaca: eb.board && eb.board.bbox, placaEm, obs, gCobre, gSilk: {}, cache: new WeakMap() };
+  const cena = { K, tg, sm, silk, quadrados, recortes, keepouts, ptsPlaca, bbPlaca: eb.board && eb.board.bbox, placaEm, obs, gCobre, gSilk: {}, cache: new WeakMap() };
   for (const L of ['TopOverlay', 'BottomOverlay']) cena.gSilk[L] = grade(silk.filter(x => x.layer === L), 2);
   /* objeto novo na cena (o texto que o posicionador acabou de pôr) */
   cena.poe = x => {
@@ -334,6 +341,7 @@ function checaSerigrafia(cena, s, o, desl, opc) {
   }
   for (const k of cena.recortes) if (bate(k, o.silk, `recorte/furo ${k.id}`, 'serigrafia_furo')) return out;
   if (txt) for (const q of cena.quadrados) if (bate(q, 0, `quadrado isolado do parafuso (${q.id})`, 'serigrafia_parafuso')) return out;
+  if (txt) for (const k of cena.keepouts || []) if (bate(k, 0, `faixa proibida / keepout ${k.id}`, 'serigrafia_keepout')) return out;
   if (txt && !desl.has('serigrafia_borda')) {
     const pc = cena.placaEm(o.silk_borda), bp = cena.bbPlaca;
     /* a area da UNIAO: os tracos da fonte stroke se sobrepoem, e a soma deles passava a parte
@@ -567,7 +575,7 @@ module.exports = {
     },
     {
       nome: 'regras_casa_verificar', titulo: 'Verificar as regras da casa', leitura: true, modulo: 'hub-clipper.js',
-      descricao: 'Confere a placa (com as mudanças e os planos redespejados) contra as skills da casa e lista cada violação com posição e objeto: "pad_outra_net" = cobre de OUTRA net (trilha, arco, via, pad, fill, região, plano) passando por cima de um pad/via (CURTO) ou a menos da Clearance do projeto — pad passante vale em todas as camadas; "trilha_sobre_pad" = trilha da mesma net cruzando o pad sem terminar nele, ou região/faixa tapando o pad e o alívio térmico do plano; "parafuso" = cobre dentro do quadrado isolado de um furo de parafuso (furo + 3 mm, todas as camadas); "plano_pad" = plano despejado a menos de 1,0 mm de pad de outra net; "serigrafia" = overlay encostando em pad/via, furo, quadrado de parafuso, trilha do mesmo lado, outra serigrafia ou borda. A placa conferida é a da tela (planos do hub redespejados). Devolve também os furos de parafuso achados com o quadrado de cada um. Rode antes de entregar a placa e zere.',
+      descricao: 'Confere a placa (com as mudanças e os planos redespejados) contra as skills da casa e lista cada violação com posição e objeto: "pad_outra_net" = cobre de OUTRA net (trilha, arco, via, pad, fill, região, plano) passando por cima de um pad/via (CURTO) ou a menos da Clearance do projeto — pad passante vale em todas as camadas; "trilha_sobre_pad" = trilha da mesma net cruzando o pad sem terminar nele, ou região/faixa tapando o pad e o alívio térmico do plano; "parafuso" = cobre dentro do quadrado isolado de um furo de parafuso (furo + 3 mm, todas as camadas); "plano_pad" = plano despejado a menos de 1,0 mm de pad de outra net; "serigrafia" = overlay encostando em pad/via, furo, quadrado de parafuso, trilha do mesmo lado, outra serigrafia ou borda, ou texto dentro de faixa proibida (camada KeepOut, pcb_faixa_borda). A placa conferida é a da tela (planos do hub redespejados). Devolve também os furos de parafuso achados com o quadrado de cada um. Rode antes de entregar a placa e zere.',
       entrada: { type: 'object', properties: { projeto: PROJETO,
         regras: { type: 'array', items: { type: 'string', enum: ['pad_outra_net', 'trilha_sobre_pad', 'parafuso', 'plano_pad', 'serigrafia'] }, description: 'só estas (padrão: todas)' },
         folga_cobre: { type: 'number', description: 'folga mínima cobre × pad/via de outra net, mm (padrão: a Clearance All×All do rules.js, senão 0,254)' },

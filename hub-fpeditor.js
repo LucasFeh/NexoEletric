@@ -1468,6 +1468,9 @@ async function inicia(o, resolve){
     if (p.type === 'th') {
       const h = sec('Hole Information');
       campo(h, 'Hole Size', mostra(p.drill), ap('drill', x => Math.max(0.05, x)));
+      /* furo sem cobre (NPTH, furo de fixação): plated:false, como o board.js e o Gerber leem */
+      campo(h, 'Plated', p.plated === false ? 'nao' : 'sim', muda(v => { if (v === 'nao') p.plated = false; else delete p.plated; }),
+        { opcoes:[['sim', 'Metalizado (PTH)'], ['nao', 'Sem cobre (NPTH)']] });
       campo(h, 'Shape', p.drillw > p.drill ? 'slot' : 'round', muda(v => { if (v === 'slot') { p.drillw = r4(p.drill * 2); p.drillshape = 'slot'; } else { delete p.drillw; p.drillshape = 'circle'; } }),
         { opcoes:[['round', 'Round'], ['slot', 'Slot']] });
       if (p.drillw > p.drill) campo(h, 'Slot Length', mostra(p.drillw), ap('drillw'));
@@ -2161,16 +2164,16 @@ async function inicia(o, resolve){
     const campos = [
       { k:'tipo', rot:'Pacote', v:'soic', opcoes:Object.keys(PK.TIPOS).map(t => [t, PK.TIPOS[t].rot]) },
       { k:'nome', rot:'Nome do footprint', v:PK.nome('soic', {}) },
-      { k:'n', rot:'Pinos', v:'8' },
+      { k:'n', rot:'Pinos', v:'8', oculto:o => o.tipo === 'furo' },
       { k:'fil', rot:'Fileiras (1 ou 2)', v:'1', oculto:o => o.tipo !== 'header' },
-      { k:'passo', rot:'Passo entre pinos (' + E.unid + ')', v:'', dica:'chip: de centro a centro dos 2 pads' },
-      { k:'span', rot:'Entre fileiras, centro a centro (' + E.unid + ')', v:'', oculto:o => o.tipo === 'chip' || o.tipo === 'header' },
-      { k:'padX', rot:'Pad: comprimento (' + E.unid + ')', v:'', dica:'no sentido que sai do corpo' },
-      { k:'padY', rot:'Pad: largura (' + E.unid + ')', v:'', dica:'no sentido da fileira' },
-      { k:'furo', rot:'Furo (' + E.unid + ')', v:'', oculto:o => o.tipo !== 'dip' && o.tipo !== 'header' },
-      { k:'cx', rot:'Corpo: comprimento (' + E.unid + ')', v:'', oculto:o => o.tipo === 'header' },
-      { k:'cy', rot:'Corpo: largura (' + E.unid + ')', v:'', oculto:o => o.tipo === 'header' },
-      { k:'alt', rot:'Corpo: altura do 3D (' + E.unid + ')', v:'' },
+      { k:'passo', rot:'Passo entre pinos (' + E.unid + ')', v:'', dica:'chip: de centro a centro dos 2 pads', oculto:o => o.tipo === 'furo' },
+      { k:'span', rot:'Entre fileiras, centro a centro (' + E.unid + ')', v:'', oculto:o => o.tipo === 'chip' || o.tipo === 'header' || o.tipo === 'furo' },
+      { k:'padX', rot:'Pad: comprimento (' + E.unid + ')', v:'', dica:'no sentido que sai do corpo; furo de fixação: o diâmetro do anel de cobre (0 = sem cobre, NPTH)' },
+      { k:'padY', rot:'Pad: largura (' + E.unid + ')', v:'', dica:'no sentido da fileira', oculto:o => o.tipo === 'furo' },
+      { k:'furo', rot:'Furo (' + E.unid + ')', v:'', oculto:o => o.tipo !== 'dip' && o.tipo !== 'header' && o.tipo !== 'furo' },
+      { k:'cx', rot:'Corpo: comprimento (' + E.unid + ')', v:'', dica:'furo de fixação: o círculo da cabeça do parafuso na serigrafia (0 = sem)', oculto:o => o.tipo === 'header' },
+      { k:'cy', rot:'Corpo: largura (' + E.unid + ')', v:'', oculto:o => o.tipo === 'header' || o.tipo === 'furo' },
+      { k:'alt', rot:'Corpo: altura do 3D (' + E.unid + ')', v:'', oculto:o => o.tipo === 'furo' },
     ];
     const enche = t => { const d = D(t); for (const c of campos) if (c.k !== 'tipo' && c.k !== 'nome') c.v = (c.k === 'n' || c.k === 'fil') ? String(d[c.k]) : mm(d[c.k]); };
     const lidos = o => { const P = {}; for (const k of ['passo', 'span', 'padX', 'padY', 'furo', 'cx', 'cy', 'alt']) P[k] = le(o[k]); P.n = parseInt(o.n, 10); P.fil = parseInt(o.fil, 10); return P; };

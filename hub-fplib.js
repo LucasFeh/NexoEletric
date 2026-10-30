@@ -45,6 +45,18 @@ function normaliza(lib){
   o.format = FORMATO; o.units = 'mm';
   return o;
 }
+/* type "npth" -> o que o board.js usa: type "th" com plated:false, na Multi; sem w/h, o pad e o
+   proprio furo. Devolve o footprint (o mesmo objeto). */
+function normalizaPads(fp){
+  for (const p of ((fp && fp.pads) || [])) {
+    if (!p || p.type !== 'npth') continue;
+    p.type = 'th'; p.plated = false; p.layer = 'Multi';
+    if (!isNum(p.w)) p.w = p.drill;
+    if (!isNum(p.h)) p.h = p.drill;
+    if (!p.shape) p.shape = 'circle';
+  }
+  return fp;
+}
 function acha(lib, nome){ return ((lib && lib.footprints) || []).find(f => f && f.name === nome) || null; }
 function poe(lib, fp){
   normaliza(lib);
@@ -119,8 +131,14 @@ function valida(fp){
     if (!p) { e.push(q + ': vazio'); return; }
     for (const k of ['x', 'y', 'w', 'h']) if (!isNum(p[k])) e.push(q + ': ' + k + ' inválido');
     if (isNum(p.w) && p.w <= 0 || isNum(p.h) && p.h <= 0) e.push(q + ': tamanho tem que ser maior que zero');
-    if (p.type === 'th' && !(p.drill > 0)) e.push(q + ': pad passante sem furo');
-    if (p.type === 'th' && p.drill > 0 && p.drill >= Math.min(p.w, p.h)) e.push(q + ': o furo é maior que o pad');
+    /* FURO SEM COBRE (NPTH): type "th" com plated:false (o que o board.js e o Gerber usam) ou o
+       atalho type "npth" (normalizaPads converte). Ele pode ter o pad do tamanho do furo, ou menor:
+       nao ha anel. O metalizado precisa de anel -- furo IGUAL ao pad tambem e erro (a mensagem
+       dizia "maior" para um furo de 3,4 num pad de 3,4). */
+    const semCobre = p.type === 'npth' || (p.type === 'th' && p.plated === false);
+    if ((p.type === 'th' || p.type === 'npth') && !(p.drill > 0)) e.push(q + (semCobre ? ': furo sem cobre sem "drill"' : ': pad passante sem furo'));
+    if (p.type === 'th' && !semCobre && p.drill > 0 && p.drill >= Math.min(p.w, p.h))
+      e.push(q + (p.drill > Math.min(p.w, p.h) ? ': o furo é maior que o pad' : ': o furo é do tamanho do pad (pad metalizado precisa de anel)') + ' — furo sem cobre: type "npth" (ou plated:false)');
     if (FORMAS.indexOf(p.shape) < 0) e.push(q + ': forma "' + p.shape + '" desconhecida');
     const n = String(p.name || '');
     if (n) vistos.set(n, (vistos.get(n) || 0) + 1);
@@ -186,5 +204,5 @@ async function sobeStep(arq, nome){
 }
 
 return { FORMATO, ARQUIVO, FORMAS, vazia, normaliza, acha, poe, tira, mescla, lib3d, bbox, cantosPad, copia, novo,
-         valida, repetidos, serializa, carrega, grava, sobeStep };
+         valida, normalizaPads, repetidos, serializa, carrega, grava, sobeStep };
 });

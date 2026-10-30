@@ -32,6 +32,9 @@ const TIPOS = {
   dip:    { rot:'DIP (2 fileiras, PTH)', n:8, passo:2.54, span:7.62, padX:1.6, padY:1.6, furo:0.8, cx:9.8, cy:6.35, alt:3.3, fil:2 },
   sot23:  { rot:'SOT-23 (3, 5 ou 6 pinos)', n:3, passo:0.95, span:2.2, padX:0.6, padY:1.1, furo:0, cx:2.9, cy:1.3, alt:1.1, fil:2 },
   header: { rot:'Barra de pinos (PTH)', n:4, passo:2.54, span:2.54, padX:1.7, padY:1.7, furo:1.0, cx:0, cy:0, alt:2.5, fil:1 },
+  /* furo de fixacao: furo = o furo; padX = diametro do anel de cobre (0 = sem cobre, NPTH);
+     cx = o circulo da cabeca do parafuso na serigrafia (0 = sem). Os outros nao se usam. */
+  furo:   { rot:'Furo de fixação (M3: furo 3,2 sem cobre)', n:1, passo:1, span:0, padX:0, padY:0, furo:3.2, cx:6, cy:0, alt:0, fil:1 },
 };
 const STANDOFF = { chip:0, soic:0.1, qfp:0.1, dip:0.5, sot23:0.05, header:0 };
 const SILK = 0.15;
@@ -65,11 +68,26 @@ function nome(tipo, P){
   if (tipo === 'qfp') return 'QFP-' + p.n + '_P' + fmt(p.passo);
   if (tipo === 'dip') return 'DIP-' + p.n;
   if (tipo === 'sot23') return 'SOT-23-' + p.n;
+  if (tipo === 'furo') return 'FURO_' + fmt(p.furo) + (p.padX > 0 ? '_PTH_' + fmt(p.padX) : '_NPTH');
   return 'HDR_' + p.fil + 'x' + Math.ceil(p.n / Math.max(1, p.fil)) + '_P' + fmt(p.passo);
+}
+
+/* o furo de fixacao (sem anel: pad do tamanho do furo, plated:false, vai para o Gerber de NPTH) */
+function geraFuro(p, nomeFp){
+  if (!(p.furo > 0)) throw new Error('"furo" precisa ser maior que zero');
+  if (p.padX < 0) throw new Error('"padX" (o anel) não pode ser negativo');
+  if (p.padX > 0 && !(p.padX > p.furo)) throw new Error('o anel (padX ' + fmt(p.padX) + ') precisa ser maior que o furo (' + fmt(p.furo) + '); padX 0 = sem cobre');
+  const d = p.padX > 0 ? p.padX : p.furo;
+  const pad = { name:'1', type:'th', shape:'circle', x:0, y:0, w:r4(d), h:r4(d), rot:0, layer:'Multi', drill:r4(p.furo), drillshape:'circle', holerot:0 };
+  if (!(p.padX > 0)) pad.plated = false;
+  const silk = p.cx > d ? [{ kind:'arc', cx:0, cy:0, r:r4(p.cx / 2), sa:0, ea:360, w:SILK }] : [];
+  return { name:nomeFp || nome('furo', p), description:TIPOS.furo.rot.replace(/\s*\(.*$/, '') + ' Ø' + fmt(p.furo) + (p.padX > 0 ? ' com anel Ø' + fmt(p.padX) : ' sem cobre (NPTH)') + ' · gerado pelo assistente do hub',
+           pads:[pad], silk, bodies:[] };
 }
 
 function gera(tipo, P, nomeFp){
   const p = params(tipo, P);
+  if (tipo === 'furo') return geraFuro(p, nomeFp);
   for (const k of ['passo', 'padX', 'padY', 'alt']) if (!(p[k] > 0)) throw new Error('"' + k + '" precisa ser maior que zero');
   if (p.furo < 0) throw new Error('"furo" não pode ser negativo');
   const th = p.furo > 0;

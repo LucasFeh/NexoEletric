@@ -363,6 +363,14 @@ var changes = [
 | `poly_edit` / `poly_del` | `id` (`pg…`), `orig_layer`, `orig_n`, `orig_x0`, `orig_y0` | (edit) os do `poly_add` |
 | `stack_set` | `layers` (as de cobre na ordem física: `[{"key":"Top","copper":0.035,"dielectric":0.2},{"key":"Mid1","name":"GND","copper":0.035,"dielectric":1.065},…,{"key":"Bottom","copper":0.035}]`) | `mech` (as mecânicas que a placa tem: `["Mech1","Mech13"]`), `note` |
 
+**Furos, recortes e keepout (1.50.0).**
+- Furo de fixação sem cobre: `pad_add` com `type:"npth"` (no `board.js` e no footprint é `type:"th"` com `plated:false`).
+  Sai no Gerber de furação NPTH. O footprint pronto sai do assistente (`fp_pacote` tipo `furo`).
+- Recorte da placa: `region_add` com `cutout:true` (layer ignorada).
+- Tudo na camada `KeepOut` barra o cobre de todas as camadas: o roteador, o polígono (pour) e o DRC. A regra da casa
+  também não deixa texto de serigrafia lá (`serigrafia_keepout`). A faixa proibida da borda (`pcb_faixa_borda`) é uma
+  `region_add` na `KeepOut` com `keepout:true` e `note` "faixa da borda (lado, largura)".
+
 **Objeto e componente criados pelo changes.js (1.49.0).**
 - Toda linha `*_add` (track, via, arc, text, fill, region, pad, poly) pode levar `uid` (`"u"` + letras e números; o MCP grava
   sozinho). O objeto aparece na placa com o id `new-<tipo><uid>` (`new-tu1a`), que não muda quando outra linha entra ou

@@ -26,8 +26,8 @@ const comNote = (op, a) => { if (a.note) op.note = String(a.note).replace(/":/g,
 const TIPOS = {
   componentes: eb => (eb.components || []).map(c => ({ ref: c.ref, footprint: c.footprint, comment: c.comment, layer: c.layer, x: c.x, y: c.y, rot: c.rot, bbox: c.bbox,
     pads: (c.pads || []).length, nets: [...new Set((c.pads || []).map(p => p.net).filter(Boolean))] })),
-  pads: eb => [].concat(...(eb.components || []).map(c => (c.pads || []).map(p => ({ ref: c.ref, name: p.name, id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, rot: p.rot, shape: p.shape, layer: p.layer, type: p.type, drill: p.drill, net: p.net || '' }))),
-    (eb.freepads || []).map(p => ({ ref: '', name: p.name, id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, rot: p.rot, shape: p.shape, layer: p.layer, type: p.type, drill: p.drill, net: p.net || '' }))),
+  pads: eb => [].concat(...(eb.components || []).map(c => (c.pads || []).map(p => ({ ref: c.ref, name: p.name, id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, rot: p.rot, shape: p.shape, layer: p.layer, type: p.type, drill: p.drill, plated: p.drill > 0 ? p.plated !== false : undefined, net: p.net || '' }))),
+    (eb.freepads || []).map(p => ({ ref: '', name: p.name, id: p.id, x: p.x, y: p.y, w: p.w, h: p.h, rot: p.rot, shape: p.shape, layer: p.layer, type: p.type, drill: p.drill, plated: p.drill > 0 ? p.plated !== false : undefined, net: p.net || '' }))),
   trilhas: eb => eb.tracks || [],
   arcos: eb => eb.arcs || [],
   vias: eb => eb.vias || [],
@@ -294,7 +294,7 @@ module.exports = {
         const m = model.compByRef[a.ref];
         return { ref: c.ref, footprint: c.footprint, comment: c.comment, layer: c.layer, x: c.x, y: c.y, rot: c.rot, bbox: c.bbox, movido: !!(m && m.changed),
                  original: m ? { x: m.src.x, y: m.src.y, rot: m.src.rot, layer: m.src.layer } : null,
-                 pads: (c.pads || []).map(q => ({ name: q.name, x: q.x, y: q.y, w: q.w, h: q.h, rot: q.rot, shape: q.shape, layer: q.layer, type: q.type, drill: q.drill, net: q.net || '' })),
+                 pads: (c.pads || []).map(q => ({ name: q.name, x: q.x, y: q.y, w: q.w, h: q.h, rot: q.rot, shape: q.shape, layer: q.layer, type: q.type, drill: q.drill, plated: q.drill > 0 ? q.plated !== false : undefined, net: q.net || '' })),
                  textos: (eb.texts || []).filter(t => t.owner === a.ref).map(t => ({ id: t.id, text: t.text, x: t.x, y: t.y, layer: t.layer, designator: !!t.designator, comment: !!t.comment })),
                  trilhas_nos_pads: trilhasNosPads(c, eb) };
       },
@@ -599,6 +599,111 @@ module.exports = {
       },
     },
     {
+      nome: 'pcb_furo', titulo: 'Furo de fixação avulso (NPTH)',
+      descricao: 'Põe um furo avulso na placa (op pad_add): sem cobre (NPTH) por padrão — vai para o Gerber de furação NPTH e para o Altium como pad não metalizado. metalizado:true com anel (diâmetro do cobre) faz um furo metalizado (net opcional, ex.: GND do chassi). Para um furo que é RECORTE da placa (forma qualquer, sai no contorno), use pcb_recorte; para um furo que entra na lista de componentes, um footprint (fp_pacote tipo "furo") + pcb_colocar.',
+      entrada: { type: 'object', properties: Object.assign({
+        projeto: PROJETO, x: { type: 'number' }, y: { type: 'number' },
+        diametro: { type: 'number', exclusiveMinimum: 0, description: 'o furo, mm (M3: 3,2)' },
+        metalizado: { type: 'boolean', description: 'padrão false (NPTH)' },
+        anel: { type: 'number', description: 'metalizado: diâmetro do cobre, mm (maior que o furo)' },
+        net: { type: 'string', description: 'só metalizado' }, nome: { type: 'string', description: 'designador do pad (ex.: "H3")' },
+      }, COMUNS), required: ['projeto', 'x', 'y', 'diametro'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const d = a.diametro;
+        let op;
+        if (a.metalizado) {
+          if (!(isNum(a.anel) && a.anel > d)) throw new ErroMcp('furo metalizado precisa de "anel" maior que o diâmetro do furo');
+          op = { op: 'pad_add', type: 'th', x: a.x, y: a.y, w: a.anel, h: a.anel, shape: 'circle', drill: d };
+          if (a.net) op.net = a.net;
+        } else op = { op: 'pad_add', type: 'npth', x: a.x, y: a.y, w: d, h: d, shape: 'circle', drill: d };
+        if (a.nome) op.name = String(a.nome);
+        comNote(op, a);
+        return ops.transacao(ctx, p, arq => [ops.mescla(arq, op).obj], { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_furo' });
+      },
+    },
+    {
+      nome: 'pcb_recorte', titulo: 'Recorte da placa (Board Cutout)',
+      descricao: 'Recorta a placa (op region_add com cutout:true, o Board Cutout do Altium): círculo {x, y, diametro}, retângulo {x1, y1, x2, y2} ou polígono pts [[x,y],...]. O recorte sai no contorno do Gerber (Profile), tira o cobre e conta no DRC e nas regras da casa (recorte redondo de até 12 mm é furo de parafuso). O círculo vira um polígono de `lados` lados (padrão 48). Para um furo simples de fixação prefira pcb_furo (NPTH na furação).',
+      entrada: { type: 'object', properties: Object.assign({
+        projeto: PROJETO, x: { type: 'number' }, y: { type: 'number' }, diametro: { type: 'number', exclusiveMinimum: 0 },
+        x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' },
+        pts: { type: 'array', items: PT, description: 'polígono, ≥ 3 pontos (mm)' },
+        lados: { type: 'integer', minimum: 8, maximum: 360 },
+      }, COMUNS), required: ['projeto'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        let pts;
+        if (Array.isArray(a.pts)) pts = a.pts;
+        else if ([a.x, a.y, a.diametro].every(isNum)) {
+          const n = a.lados || 48, r = a.diametro / 2;
+          pts = []; for (let i = 0; i < n; i++) { const t = i * 2 * Math.PI / n; pts.push([r4(a.x + r * Math.cos(t)), r4(a.y + r * Math.sin(t))]); }
+        } else if ([a.x1, a.y1, a.x2, a.y2].every(isNum)) {
+          const X1 = Math.min(a.x1, a.x2), X2 = Math.max(a.x1, a.x2), Y1 = Math.min(a.y1, a.y2), Y2 = Math.max(a.y1, a.y2);
+          if (!(X2 > X1 && Y2 > Y1)) throw new ErroMcp('retângulo vazio');
+          pts = [[X1, Y1], [X2, Y1], [X2, Y2], [X1, Y2]];
+        } else throw new ErroMcp('dê o círculo (x, y, diametro), o retângulo (x1, y1, x2, y2) ou pts');
+        if (pts.length < 3) throw new ErroMcp('o polígono precisa de 3 pontos ou mais');
+        const op = comNote({ op: 'region_add', layer: 'Multi', cutout: true, pts }, a);
+        return ops.transacao(ctx, p, arq => [ops.mescla(arq, op).obj], { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_recorte' });
+      },
+    },
+    {
+      nome: 'pcb_faixa_borda', titulo: 'Faixa proibida nas bordas (keepout)',
+      descricao: 'Desenha uma faixa proibida ao longo de bordas da placa (trilho, guia, encaixe da caixa): uma região na camada KeepOut por lado, recortada no contorno. O roteador (pcb_rotear, pcb_autorotear), o polígono (pour) e o DRC tiram o cobre dela — como o keepout do Altium —, e a serigrafia (regras_casa_verificar, serigrafia_posicionar) não põe texto nela. lados: cima, baixo, esquerda, direita (pela caixa do contorno); largura em mm (padrão 2). substituir:true tira antes as faixas que esta ferramenta pôs nesses lados. A resposta lista o que JÁ está dentro das faixas (trilhas, vias, pads, textos) para tirar.',
+      entrada: { type: 'object', properties: Object.assign({
+        projeto: PROJETO,
+        lados: { type: 'array', minItems: 1, items: { type: 'string', enum: ['cima', 'baixo', 'esquerda', 'direita'] } },
+        largura: { type: 'number', exclusiveMinimum: 0, description: 'mm (padrão 2)' },
+        substituir: { type: 'boolean' },
+      }, COMUNS), required: ['projeto', 'lados'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const { eb } = ctx.placa(p);
+        const PP = ctx.exige('hub-pcbpour.js', 'HubPcbPour');
+        const K = require('./regras-casa.js')._interno.kit(ctx.exige('hub-clipper.js', 'ClipperLib'));
+        const anel = PP._int && PP._int.contornoPlaca ? PP._int.contornoPlaca(eb.board, 0.05) : null;
+        if (!anel || anel.length < 3) throw new ErroMcp('a placa não tem contorno fechado (pcb_contorno)');
+        const bb = { x1: Math.min(...anel.map(q => q[0])), y1: Math.min(...anel.map(q => q[1])), x2: Math.max(...anel.map(q => q[0])), y2: Math.max(...anel.map(q => q[1])) };
+        const w = isNum(a.largura) ? a.largura : 2, m = 1;
+        const faixa = { cima: [bb.x1 - m, bb.y2 - w, bb.x2 + m, bb.y2 + m], baixo: [bb.x1 - m, bb.y1 - m, bb.x2 + m, bb.y1 + w],
+                        esquerda: [bb.x1 - m, bb.y1 - m, bb.x1 + w, bb.y2 + m], direita: [bb.x2 - w, bb.y1 - m, bb.x2 + m, bb.y2 + m] };
+        const lados = [...new Set(a.lados)];
+        const ops2 = [], polis = [];
+        for (const lado of lados) {
+          const [x1, y1, x2, y2] = faixa[lado];
+          const it = K.inter([K.paraC(anel)], [K.paraC([[x1, y1], [x2, y1], [x2, y2], [x1, y2]])], false);
+          for (const path of it) {
+            const pts = K.deC(path).map(q => [r4(q[0]), r4(q[1])]);
+            if (pts.length < 3) continue;
+            polis.push({ lado, pts });
+            ops2.push({ op: 'region_add', layer: 'KeepOut', keepout: true, pts, note: `faixa da borda (${lado}, ${w} mm)` });
+          }
+        }
+        if (!ops2.length) throw new ErroMcp('as faixas não cruzam a placa (largura grande demais ou contorno estranho)');
+        /* o que ja esta dentro das faixas */
+        const dentro = (x, y) => polis.some(({ pts }) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; });
+        const ja = {
+          trilhas: (eb.tracks || []).filter(t => t && ctx.hc.isCopper(t.layer) && !t.keepout && (dentro(t.x1, t.y1) || dentro(t.x2, t.y2) || dentro((t.x1 + t.x2) / 2, (t.y1 + t.y2) / 2))).map(t => t.id),
+          vias: (eb.vias || []).filter(v => v && dentro(v.x, v.y)).map(v => v.id),
+          pads: [].concat(...(eb.components || []).map(c => (c.pads || []).filter(q => q && dentro(q.x, q.y)).map(q => c.ref + '.' + q.name))),
+          textos: (eb.texts || []).filter(t => t && !t.hidden && /Overlay$/.test(t.layer || '') && dentro(t.x, t.y)).map(t => t.owner ? t.owner + (t.designator ? ' (designator)' : ' (comment)') : t.id),
+        };
+        const est = ops.transacao(ctx, p, arq => {
+          if (a.substituir) {
+            const fora = [];
+            arq.itens.forEach((x, i) => { if (x && x.op === 'region_add' && x.layer === 'KeepOut' && lados.some(l => String(x.note || '').startsWith(`faixa da borda (${l},`))) fora.push(i); });
+            for (const i of fora.sort((u, v) => v - u)) arq.remove(i);
+          }
+          return ops2.map(o => ops.mescla(arq, comNote(o, a)).obj);
+        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'pcb_faixa_borda' });
+        est.faixas = polis.map(f => ({ lado: f.lado, largura: w, caixa: { x1: r4(Math.min(...f.pts.map(q => q[0]))), y1: r4(Math.min(...f.pts.map(q => q[1]))), x2: r4(Math.max(...f.pts.map(q => q[0]))), y2: r4(Math.max(...f.pts.map(q => q[1]))) } }));
+        const n = ja.trilhas.length + ja.vias.length + ja.pads.length + ja.textos.length;
+        est.ja_dentro = n ? Object.assign({ nota: 'isto já está dentro das faixas: tire ou mova (pcb_apagar, pcb_mover, serigrafia_posicionar); o DRC acusa o cobre' }, ja) : { total: 0 };
+        return est;
+      },
+    },
+    {
       nome: 'pcb_editar', titulo: 'Editar objeto por id',
       descricao: 'Edita um objeto da placa pelo id (trilha t…/s…/l…, arco a…, via v…, texto x…, fill f…, pad livre, polígono): passe só os campos novos (ex.: {"w":0.5} ou {"x1":10,"y1":5}). A op certa (track_edit, arc_edit, via_edit, text_edit, fill_edit) e os orig_* saem do board.js. Objeto criado pelo changes.js (id "new-…", o que o pcb_consultar mostra) tem a linha que o criou editada.',
       entrada: { type: 'object', properties: Object.assign({
@@ -771,6 +876,22 @@ module.exports = {
           orcamento: r.orcamento, parametros: r.parametros, planos: r.planos, falhas: r.falhas, por_net: r.porNet,
           rotas: r.rotas.slice(0, 60), rotas_total: r.rotas.length,
         };
+        /* O QUE A IA PRECISA SABER SEM PROCURAR: a camada vazia que ficou de fora, a rota que saiu na
+           largura mínima e a saída quando falta caminho com plano de outra net na placa */
+        const dicas = [];
+        const ign = r.parametros && r.parametros.camadas_ignoradas;
+        if (ign && ign.length) dicas.push(`camadas internas vazias ficaram de fora (${ign.join(', ')}): só Top, Bottom e as que já têm cobre. Para rotear nelas, passe camadas:[...]`);
+        const finas = r.rotas.filter(x => x.abaixoDaPreferida);
+        if (finas.length) {
+          const porNet = {};
+          for (const x of finas) porNet[x.net] = { largura: Math.min(...x.largura), preferida: x.abaixoDaPreferida };
+          out.abaixo_da_preferida = porNet;
+          dicas.push(`${finas.length} rota(s) só passaram com a largura MÍNIMA da regra (a preferida não cabia): ${Object.entries(porNet).slice(0, 8).map(([n, v]) => `${n} ${v.largura} mm em vez de ${v.preferida}`).join('; ')}. Abra espaço, mude a ordem (ordem:"classe" roteia antes as nets de trilha larga) ou aceite a mínima`);
+        }
+        const semCaminho = (r.falhas || []).filter(f => f.motivo === 'sem-caminho').length;
+        const temPlano = (eb.polygons || []).some(q => q && q.pour !== 'none') || (eb.regions || []).some(g => g && g.poly);
+        if (semCaminho && temPlano && !a.cruzarPlanos) dicas.push(`${semCaminho} conexão(ões) sem caminho com plano de cobre na placa: tente cruzarPlanos:true (a trilha atravessa o plano de OUTRA net e o plano recua em volta dela, fora da faixa estreita)`);
+        if (dicas.length) out.dicas = dicas;
         if (!r.ops.length) { out.gravacao = { ok: true, gravado: false, nota: r.alvo.conexoes ? 'nenhuma rota saiu (veja falhas)' : 'nada a ligar: o ratsnest das nets pedidas está fechado' }; return out; }
         /* o DRC da placa com as rotas (despejada de novo: o plano recua das trilhas novas), contra o de
            antes: as violações NOVAS (a net não roteada fica de fora — a árvore do ratsnest muda) */

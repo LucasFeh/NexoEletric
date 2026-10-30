@@ -498,8 +498,10 @@ function despeja(eb, pol, opcoes) {
     if (bbp && b.x1 <= bbp.x1 + 1e-3 && b.x2 >= bbp.x2 - 1e-3 && b.y1 <= bbp.y1 + 1e-3 && b.y2 >= bbp.y2 - 1e-3) continue;
     for (const q of offsetObst([positivo(paraC(pts))], folgaBorda, tol)) duros.push(q);
   }
-  /* keepout: objeto com keepout:true na camada do poligono ou na KeepOut */
-  const keep = o => o && o.keepout === true && (o.layer === L || o.layer === 'KeepOut');
+  /* keepout: tudo na camada KeepOut (como o roteador e o DRC leem, e como o Altium faz) e o objeto
+     com keepout:true na camada do poligono. Antes a KeepOut so valia com a marca keepout:true, e a
+     faixa proibida da borda (pcb_faixa_borda) nao tirava o plano de la. */
+  const keep = o => o && (o.layer === 'KeepOut' || (o.keepout === true && o.layer === L));
   const daNet = o => cobre && net !== '' && typeof o.net === 'string' && o.net === net;
   const poe = (lista, pts) => { if (ok(pts)) lista.push(positivo(emC(pts))); };
   const poeConj = (lista, conj) => { for (const c of conj) { if (!c.length || !ok(c[0])) continue; lista.push(positivo(emC(c[0]))); for (let i = 1; i < c.length; i++) lista.push(negativo(emC(c[i]))); } };

@@ -1254,7 +1254,19 @@ function montaJob(eb, opts){
   /* as camadas montadas antes de qualquer pergunta pela net (o número da net nasce no índice) */
   for (const l of cena.camadas) M.camada(cena, l);
   const pedidas = Array.isArray(o.camadas) && o.camadas.length ? new Set(o.camadas.map(String)) : null;
-  const camadasRota = cena.camadas.filter(l => !ehPlano(l) && (!pedidas || pedidas.has(l)));
+  /* SEM `camadas` NO PEDIDO, SO AS QUE TEM COBRE: Top, Bottom e a interna que ja tem trilha, arco,
+     fill, regiao, poligono ou pad. A camada interna vazia que veio na pilha do Altium nao entra --
+     a PCB1 (2 camadas na pratica, Mid2/Mid4 vazias na pilha) saiu roteada pela Mid2 e pela Mid4, e
+     viraria placa de 4 camadas sem ninguem ver. Quem quer a interna pede: camadas:[...]. */
+  let camadasIgnoradas = [];
+  const comCobre = new Set(['Top', 'Bottom']);
+  if (!pedidas) {
+    for (const k of ['tracks', 'arcs', 'fills', 'regions', 'polygons']) for (const x of eb[k] || []) if (x && x.layer && !x.keepout) comCobre.add(x.layer);
+    for (const c of eb.components || []) for (const q of (c && c.pads) || []) if (q && q.layer) comCobre.add(q.layer);
+    for (const q of eb.freepads || []) if (q && q.layer) comCobre.add(q.layer);
+    camadasIgnoradas = cena.camadas.filter(l => !ehPlano(l) && !comCobre.has(l));
+  }
+  const camadasRota = cena.camadas.filter(l => !ehPlano(l) && (pedidas ? pedidas.has(l) : comCobre.has(l)));
   /* o resolvedor que o DRC usaria (o da cena, ou o padrão da casa + board.rules quando a cena não tem
      regras): é dele que saem o furo a furo, a ponte de máscara e a expansão de máscara da via */
   let RES = cena.regras;
@@ -1263,7 +1275,7 @@ function montaJob(eb, opts){
   const maior = (kind, campo) => { let m = 0; for (const r of S0 ? S0.regras(kind) : []) if (r && isNum(r[campo])) m = Math.max(m, r[campo]); return m; };
   const orc = o.orcamento || {};
   const J = {
-    eb, cena, RT, RG, M, RES, camadasRota, camadasVia: cena.camadas.slice(), res: cena.res,
+    eb, cena, RT, RG, M, RES, camadasRota, camadasIgnoradas, camadasVia: cena.camadas.slice(), res: cena.res,
     custoVia: isNum(o.custoVia) && o.custoVia >= 0 ? o.custoVia : CUSTO_VIA,
     peso: isNum(o.peso) && o.peso >= 1 ? o.peso : PESO, curva: M.CURVA,
     modo: o.modo === '90' ? '90' : '45',
@@ -1443,6 +1455,11 @@ function relatorio(J, eb, cons, falhas, X){
     const rr = { net: con.net, de: con.a.nome || [r6(con.a.x), r6(con.a.y)], para: con.b.nome || [r6(con.b.x), r6(con.b.y)],
                  camadas: r.camadas, vias: r.vias.length, comprimento: r6(r.comprimento), largura: [...new Set(r.trilhas.map(t => t.w))] };
     if (r.cruza && r.cruza.size) rr.cruzaPlanos = [...r.cruza];
+    /* a rota que so passou com a largura MINIMA da regra (a preferida nao cabia): avisa, com a
+       preferida -- o +3V3 da PCB1 saiu com 0,19 mm em vez dos 0,8 da Width_Power, em silencio */
+    let pref = 0;
+    for (const l of r.camadas || []) { try { const q = J.RT.larguraDaRegra(J.cena, con.net, l).pref; if (isNum(q)) pref = Math.max(pref, q); } catch (e) { /* sem regra */ } }
+    if (pref > 0 && r.trilhas.some(t => t.w < pref - 1e-9)) rr.abaixoDaPreferida = r6(pref);
     rotas.push(rr);
   }
   /* 17: o "depois" sai da placa REDESPEJADA (o plano recua das rotas novas, como na tela e no Gerber) */
@@ -1463,6 +1480,7 @@ function relatorio(J, eb, cons, falhas, X){
     orcamento: { tempoMs: J.tempoMs, nosPorBusca: J.nosPorBusca, esgotouTempo: X.esgotouTempo },
     parametros: { ordem: Array.isArray(X.o.ordem) ? X.o.ordem : (X.o.ordem || 'curta'), passes: isNum(X.o.passes) ? X.o.passes : PASSES,
                   custoVia: J.custoVia, res: J.res, camadas: J.camadasRota, peso: J.peso,
+                  camadas_ignoradas: J.camadasIgnoradas && J.camadasIgnoradas.length ? J.camadasIgnoradas : undefined,
                   cruzarPlanos: J.planos.lista.filter(p => p.cruzavel).map(p => p.id), custoPlano: J.custoPlano,
                   faixaPlano: J.faixaPlano, viaEmPad: J.viaEmPad },
     planos: Object.assign({ poligonos: J.planos.lista.length, redespejado: J.planos.lista.length > 0 && !!J.PO }, X.planos || {}),

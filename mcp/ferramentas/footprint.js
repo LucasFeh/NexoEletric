@@ -97,6 +97,7 @@ async function salva(ctx, fp, opcoes, ferramenta) {
   fp = copia(fp);
   for (const k of ['pads', 'silk', 'bodies']) if (!Array.isArray(fp[k])) fp[k] = [];
   if (typeof fp.description !== 'string') fp.description = '';
+  if (hf.normalizaPads) hf.normalizaPads(fp);         // type "npth" -> th + plated:false
   const erros = hf.valida(fp);
   if (erros.length) throw new ErroMcp('o footprint não pode ser salvo: ' + erros.join('; '), { erros });
   const lib = libHub(ctx);
@@ -164,7 +165,7 @@ const ROT3D = {
 
 const FP_SCHEMA = {
   type: 'object',
-  description: 'mm, origem do footprint, Top. pads:[{name, type:"smd"|"th", shape:"rect"|"roundrect"|"circle"|"oval"|"octagon", x, y, w, h, rot, layer:"Top"|"Bottom"|"Multi", drill (th), radius (roundrect)}]; silk (Top Overlay):[{kind:"line", x1,y1,x2,y2,w} | {kind:"arc", cx,cy,r,sa,ea,w}] (ângulos em graus, anti-horário; círculo = sa 0, ea 360); bodies:[{kind:"step", model:<id>, raw:{x2d,y2d,rotx,roty,rotz,dz}} | {kind:"extruded", pts:[[x,y]...], standoff, height} | {kind:"cylinder", radius, height, raw} | {kind:"sphere", radius, raw}] (color "#rrggbb", opacity 0..1)',
+  description: 'mm, origem do footprint, Top. pads:[{name, type:"smd"|"th"|"npth", shape:"rect"|"roundrect"|"circle"|"oval"|"octagon", x, y, w, h, rot, layer:"Top"|"Bottom"|"Multi", drill (th/npth), plated (th: false = sem cobre), radius (roundrect)}] — "npth" = furo sem cobre (furo de fixação): grava como th com plated:false, w/h padrão = o furo, e sai no Gerber de furação NPTH; silk (Top Overlay):[{kind:"line", x1,y1,x2,y2,w} | {kind:"arc", cx,cy,r,sa,ea,w}] (ângulos em graus, anti-horário; círculo = sa 0, ea 360); bodies:[{kind:"step", model:<id>, raw:{x2d,y2d,rotx,roty,rotz,dz}} | {kind:"extruded", pts:[[x,y]...], standoff, height} | {kind:"cylinder", radius, height, raw} | {kind:"sphere", radius, raw}] (color "#rrggbb", opacity 0..1)',
   properties: { name: { type: 'string' }, description: { type: 'string' }, pads: { type: 'array' }, silk: { type: 'array' }, bodies: { type: 'array' } },
   required: ['name', 'pads'],
 };
@@ -220,10 +221,10 @@ module.exports = {
     },
     {
       nome: 'fp_pacote', titulo: 'Assistente de footprint', modulo: 'hub-fppacote.js',
-      descricao: 'Gera o footprint de um pacote padrão (o assistente do editor): chip (2 terminais), soic, qfp, dip, sot23, header. Pads numerados como o Altium (pino 1 no alto à esquerda, anti-horário), serigrafia com a marca do pino 1 e um corpo 3D extrudado. Parâmetros em mm (sem eles, os de fábrica do tipo). Por padrão já salva na biblioteca do hub; salvar:false só devolve.',
+      descricao: 'Gera o footprint de um pacote padrão (o assistente do editor): chip (2 terminais), soic, qfp, dip, sot23, header, furo (furo de fixação: furo 3,2 sem cobre por padrão; padX = anel de cobre, 0 = NPTH; cx = círculo da cabeça na serigrafia). Pads numerados como o Altium (pino 1 no alto à esquerda, anti-horário), serigrafia com a marca do pino 1 e um corpo 3D extrudado. Parâmetros em mm (sem eles, os de fábrica do tipo). Por padrão já salva na biblioteca do hub; salvar:false só devolve.',
       entrada: { type: 'object', properties: {
-        tipo: { type: 'string', enum: ['chip', 'soic', 'qfp', 'dip', 'sot23', 'header'] },
-        nome: { type: 'string', description: 'sem ele: SOIC-8_P1.27, QFP-32_P0.8, DIP-8, SOT-23-3, HDR_1x4_P2.54, CHIP_2x1.25' },
+        tipo: { type: 'string', enum: ['chip', 'soic', 'qfp', 'dip', 'sot23', 'header', 'furo'] },
+        nome: { type: 'string', description: 'sem ele: SOIC-8_P1.27, QFP-32_P0.8, DIP-8, SOT-23-3, HDR_1x4_P2.54, CHIP_2x1.25, FURO_3.2_NPTH' },
         parametros: { type: 'object', description: 'n (pinos), passo, span (entre fileiras, centro a centro), padX (sai do corpo), padY (na fileira), furo (PTH), cx/cy (corpo: comprimento/largura), alt (altura 3D), fil (fileiras da barra: 1|2)' },
         salvar: { type: 'boolean' }, substituir: { type: 'boolean' },
       }, required: ['tipo'] },
