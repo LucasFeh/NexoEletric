@@ -4,6 +4,29 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.53.0 — 2026-10-30
+
+O símbolo da folha na troca de componente.
+- **A troca pergunta quando o símbolo da folha é diferente do componente novo.** Vale para o "Converter para o
+  almoxarifado" e para o "Trocar componente…" da ficha. Uma tela lista todos os componentes trocados assim, com o
+  antes e o depois de cada um, e três escolhas:
+  - **substituir o símbolo do componente**: o componente do almoxarifado passa a ter o símbolo da folha. Vale para
+    todos os projetos que o usam;
+  - **criar uma parte com o símbolo da folha**: o componente ganha uma parte nova com esse símbolo, e os
+    designadores trocados usam essa parte. Os outros projetos continuam na parte 1;
+  - **usar o símbolo do almoxarifado**: como a troca sempre fez.
+  Há atalho "para todos", e o Trocar só libera com todas as linhas escolhidas.
+- **Símbolo igual não pergunta**: a troca mantém o desenho. Se o componente já tem uma parte com o desenho da folha
+  (a que um "criar parte" de antes fez), a troca usa essa parte direto.
+- **Onde grava**: a biblioteca, pela rota do editor de símbolos (`/api/symbols/save-almox`: espelho, `.SchLib` da
+  família e a proteção no ledger, que faz o desenho sobreviver ao sincronismo). Cada componente é gravado uma vez, com
+  todas as decisões dele; a biblioteca se recarrega e só então a folha troca. Cancelar não muda nada. Multi-parte e
+  componente fora do almoxarifado continuam como antes.
+- **Gravação da biblioteca no Windows**: a troca do arquivo (espelho, ledger, resumo) tenta de novo quando o Windows
+  responde "acesso negado". Isso acontecia quando a vista relia o `almox-basicos.js` no instante da gravação
+  seguinte.
+- Testes: `tests/test-simbolo-na-troca.js` (o que é o mesmo desenho, quando não pergunta, e as partes de cada escolha).
+
 ## 1.52.0 — 2026-10-30
 
 Fotos 3D da placa para o cadastro no Odoo: a placa montada e a placa virgem.

@@ -1484,11 +1484,23 @@ async function aplica(){
 
   ST.rodando = true;
   atualizaRodape();
-  const vinculos = marc.map(l => ({ componente: l.escolha.alvo.nome, refs: l.refs }));
+  let vinculos = marc.map(l => ({ componente: l.escolha.alvo.nome, refs: l.refs }));
+  /* O SÍMBOLO DA FOLHA (pedido do dono, 2026-10-30): quando o desenho que está na folha não é o
+     do componente novo, o schframe pergunta (hub-trocasimbolo.js) se ele substitui o símbolo do
+     componente, vira uma parte nova dele ou dá lugar ao do almoxarifado — e grava na biblioteca
+     antes da troca. Cancelou: nada muda. */
+  let prep = null;
+  if (typeof window.__hubPreparaTroca === 'function'){
+    try { prep = await window.__hubPreparaTroca(vinculos); }
+    catch (e){ prep = null; HubDialog.toast('a conferência do símbolo falhou: ' + ((e && e.message) || e), 'err', 8000); }
+    if (!prep){ ST.rodando = false; atualizaRodape(); return; }
+    vinculos = prep.vinculos;
+  }
   let r;
   try { r = window.__hubAplicaVinculos(vinculos); }
   catch (e){ r = { ok: false, erro: String((e && e.message) || e) }; }
   ST.rodando = false;
+  if (r && prep) r.simbolos = prep.feitos;
 
   if (!r || !r.ok){
     await HubDialog.alert('Não troquei nada: ' + ((r && r.erro) || 'a ponte do esquema não respondeu')
@@ -1520,6 +1532,12 @@ function relatorio(r, conta){
     linhas.push(r.encaixes.length + ' componente(s) deslocado(s) para os pinos caírem onde estavam.');
   if (r.recusados && r.recusados.length)
     linhas.push('recusados: ' + r.recusados.map(x => x.componente + ' (' + x.porque + ')').join('; '));
+  for (const f of r.simbolos || [])
+    linhas.push(f.refs.join(', ') + ': ' + (f.decisao === 'substituir'
+      ? '"' + f.componente + '" recebeu o símbolo da folha (biblioteca)'
+      : 'parte ' + f.parte + ' de "' + f.componente + '" com o símbolo da folha'
+        + (f.virouParte ? ' (outra linha já tinha substituído o símbolo dele)' : ''))
+      + (f.soEspelho ? ' — só no espelho: a SchLib do Altium fica para o próximo sincronismo' : ''));
   av.append(el('div', null, linhas.join('\n')));
   const b = el('button', 'pri', 'Salvar o esquema');
   b.type = 'button';

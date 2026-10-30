@@ -448,8 +448,27 @@ def grava_ledger(raiz, ledger):
     # quebrou. Foi assim que o ledger do servidor ficou parado em 08/09 enquanto o
     # trabalho continuava numa copia dentro da release — e cada push "voltava tudo".
     # realpath resolve o link quando ha um e nao faz nada quando nao ha (a bancada).
-    os.replace(tmp, os.path.realpath(p))
+    troca_arquivo(tmp, os.path.realpath(p))
 
+
+# ─── troca atômica que aguenta o Windows ──────────────────────────────────────
+def troca_arquivo(tmp, destino, tentativas=12, espera=0.15):
+    """os.replace com nova tentativa no PermissionError (WinError 5/32).
+
+    No Windows, trocar um arquivo que outro processo tem aberto sem FILE_SHARE_DELETE falha
+    na hora. E o hub MESMO o abre: a gravacao de um espelho dispara o vigia, a vista Esquema
+    rele a biblioteca e o Flask fica entregando os 3 MB do almox-basicos.js justamente quando
+    a gravacao seguinte quer troca-lo. Medido (2026-10-30): a troca de componente que grava
+    dois componentes seguidos (schframe » __hubPreparaTroca) caia em "Acesso negado" no
+    segundo. A janela e de dezenas de ms; ~2 s de tentativas cobrem com folga."""
+    for i in range(tentativas):
+        try:
+            os.replace(tmp, destino)
+            return
+        except PermissionError:
+            if i == tentativas - 1:
+                raise
+            time.sleep(espera)
 
 # ─── arquivos: mtime/size ─────────────────────────────────────────────────────
 def chave_arquivo(raiz, caminho):
@@ -611,7 +630,7 @@ def grava_espelho_almox(caminho, varname, esp):
     tmp = os.path.join(d, os.path.basename(caminho))
     A.escreve_espelho(tmp, varname, esp.get('title', ''), esp.get('symbols') or [], esp.get('generated', ''))
     # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
-    os.replace(tmp, os.path.realpath(caminho))
+    troca_arquivo(tmp, os.path.realpath(caminho))
     try:
         os.rmdir(d)
     except OSError:
@@ -1136,7 +1155,7 @@ def escreve_resumo(raiz, resumo):
     with io.open(tmp, 'w', encoding='utf-8', newline='\n') as f:
         f.write('var almoxGuardiao = %s;\n' % json.dumps(resumo, ensure_ascii=False, indent=1))
     # segue o symlink antes de trocar (ver tools/symbols/guardiao.py >> grava_ledger)
-    os.replace(tmp, os.path.realpath(cam))
+    troca_arquivo(tmp, os.path.realpath(cam))
 
 
 def le_resumo(raiz):

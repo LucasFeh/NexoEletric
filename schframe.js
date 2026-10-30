@@ -873,6 +873,71 @@ function desenhoCabe(itensDoRef, nNovo, trocas){
   return maior <= (nNovo || 1);
 }
 
+/* ── O SÍMBOLO NA TROCA DE COMPONENTE ──
+   Pedido do dono (2026-10-30): no "Converter para o almoxarifado" o símbolo da folha às vezes
+   já está certo e o componente é que está errado. Trocar o componente trocava o desenho pelo do
+   almoxarifado, e o desenho certo se perdia. Agora, quando os dois desenhos NÃO são o mesmo, a
+   troca pergunta (hub-trocasimbolo.js) o que fazer com o símbolo da folha:
+     substituir  o componente do almoxarifado passa a ter o símbolo da folha (vale para todos os
+                 projetos que o usam: é a biblioteca);
+     parte       o componente ganha uma PARTE NOVA com o símbolo da folha, e os designadores
+                 trocados usam essa parte (os outros projetos continuam na parte 1);
+     manter      o desenho do almoxarifado entra na folha, como sempre foi.
+   Desenho igual não pergunta nada: é o mesmo símbolo. E igual a uma parte que o componente já
+   tem (a que um "parte" de antes criou) também não: a troca usa essa parte.
+
+   "O mesmo desenho" é o que a folha DESENHA e LIGA: pino (número, ponta, comprimento, direção) e
+   gráfico (tipo, coordenadas, preenchimento, texto). Ficam de fora a espessura, a cor e o nome
+   do pino — o mesmo símbolo vindo do Altium e do espelho do almoxarifado difere nisso sem ser
+   outro desenho. */
+const r2d = n => Math.round((Number(n) || 0) * 100) / 100;
+const GRAF_FORA = new Set(['w', 'color', 'cor', 'stroke', 'fill']);
+function assinaturaDesenho(part){
+  if (!part) return '';
+  const pinos = (part.pins || []).map(p => [String(p.num == null ? '' : p.num).trim(), r2d(p.x), r2d(p.y), r2d(p.len),
+    ((Math.round(Number(p.orient) || 0) % 360) + 360) % 360].join(',')).sort();
+  const val = v => typeof v === 'number' ? r2d(v) : Array.isArray(v) ? v.map(val) : v;
+  const grafs = (part.graphics || []).filter(Boolean).map(g => JSON.stringify(Object.keys(g).sort()
+    .filter(k => !GRAF_FORA.has(k) && g[k] != null && g[k] !== false).map(k => [k, val(g[k])]))).sort();
+  return pinos.join(';') + '|' + grafs.join(';');
+}
+function desenhoIgual(a, b){ return !!(a && b) && assinaturaDesenho(a) === assinaturaDesenho(b); }
+/* so o que o espelho guarda de uma parte: o /save-almox recusa chave que nao conhece */
+function parteLimpa(part, n){
+  return { part:n, pins:JSON.parse(JSON.stringify((part && part.pins) || [])),
+           graphics:JSON.parse(JSON.stringify((part && part.graphics) || [])) };
+}
+/* o que a folha desenha hoje x as partes do componente novo:
+   { caso:'sem-desenho' } nao ha o que comparar (quadrado vermelho: o resgate de sempre cuida);
+   { caso:'igual', parte } o componente ja tem este desenho, nesta parte;
+   { caso:'diferente' } pergunta */
+function casoDoSimbolo(atual, partesAlvo){
+  if (!atual || !((atual.pins || []).length || (atual.graphics || []).length)) return { caso:'sem-desenho' };
+  const lista = partesAlvo || [];
+  for (let i = 0; i < lista.length; i++)
+    if (desenhoIgual(lista[i], atual)) return { caso:'igual', parte:(lista[i] && lista[i].part) || i + 1 };
+  return { caso:'diferente' };
+}
+/* as partes do componente depois da decisao. `partesAlvo` sao as de HOJE (as do valor, ou as da
+   familia que ele herda: partesDe) — o valor passa a ter as dele.
+     substituir: a parte 1 vira o desenho da folha, as outras ficam;
+     parte:      o desenho da folha entra como a parte seguinte (ou reusa uma igual que ja exista).
+   Devolve { parts, parte } — `parte` e a que os designadores trocados vao usar. */
+function partesDaDecisao(partesAlvo, atual, decisao){
+  const base = (partesAlvo || []).map((p, i) => parteLimpa(p, (p && p.part) || i + 1));
+  if (decisao === 'substituir'){
+    const parts = base.length ? base.map(p => (p.part === 1 ? parteLimpa(atual, 1) : p)) : [parteLimpa(atual, 1)];
+    return { parts, parte:1 };
+  }
+  if (decisao === 'parte'){
+    const ja = base.find(p => desenhoIgual(p, atual));
+    if (ja) return { parts:base, parte:ja.part };
+    const n = base.reduce((m, p) => Math.max(m, p.part), 0) + 1;
+    return { parts:base.concat([parteLimpa(atual, n)]), parte:n };
+  }
+  return { parts:null, parte:null };
+}
+
 /* ── O QUE UM COMPONENTE DO ALMOXARIFADO GRAVA ──
    `sym`, `comment`, `params` e `footprint` de um valor escolhido. Moram aqui, na parte pura,
    porque tres caminhos gravam isso e os tres tem de gravar IGUAL: o "Adicionar componentes"
@@ -1090,6 +1155,7 @@ function reachaValor(grupos, nome, valorAntes, symAntes){
 }
 
 const PURE = { LIBS, ACERVO_DEFS, montaAcervos, partesDe, nPartes, refDaParte, trocaDeParte, desenhoCabe,
+               assinaturaDesenho, desenhoIgual, casoDoSimbolo, partesDaDecisao,
                carimbo, decideTroca, montaPartsTrocando,
                valorDoComp, tipoDoComp,
                paramsDoValor, modelosDeFootprint, footprintPadrao, identidadeDoValor,
@@ -5546,10 +5612,20 @@ async function usarSimboloEscolhido(){
     : refsDoAlcance(symAlvo, symEscopo);
   /* o VALOR clicado vai junto (identidadeDoVinculo): pelo nome, o xara clicado gravava o
      OdooId do outro, e o BC807 da lib da casa era recusado como familia */
-  const res = window.__hubAplicaVinculos([{ refs: refs, componente: para,
-                                            valor: symEscolhido.valor || null,
-                                            familia: symEscolhido.familia || null,
-                                            parte: parteNova ? { item: symAlvo, para: parteNova } : null }]);
+  let vincs = [{ refs: refs, componente: para,
+                 valor: symEscolhido.valor || null,
+                 familia: symEscolhido.familia || null,
+                 parte: parteNova ? { item: symAlvo, para: parteNova } : null }];
+  /* O SÍMBOLO DA FOLHA (pedido do dono, 2026-10-30): desenho da folha diferente do componente
+     novo pergunta antes (__hubPreparaTroca). A parte escolhida a mão no modal ja e uma decisao
+     sobre o desenho: com ela, a troca segue como sempre. */
+  let prep = null;
+  if (!parteNova && !emg){
+    prep = await window.__hubPreparaTroca(vincs);
+    if (!prep) return;
+    vincs = prep.vinculos;
+  }
+  const res = window.__hubAplicaVinculos(vincs);
   if (!res || !res.ok){
     await HubDialog.alert((res && res.erro) || 'não deu para aplicar a troca.',
                           { title: 'não troquei' });
@@ -5573,6 +5649,10 @@ async function usarSimboloEscolhido(){
   for (const rc of (res.recusados || [])) HubDialog.toast('recusado: ' + rc.porque, 'warn', 9000);
   for (const pt of (res.partes || []))
     HubDialog.toast(pt.ref + ': parte ' + pt.de + ' → ' + pt.para, 'info', 6000);
+  for (const f of (prep && prep.feitos) || [])
+    HubDialog.toast(f.refs.join(', ') + ': ' + (f.decisao === 'substituir'
+      ? '"' + f.componente + '" recebeu o símbolo da folha na biblioteca'
+      : 'parte ' + f.parte + ' de "' + f.componente + '" criada com o símbolo da folha'), 'ok', 8000);
   /* a parte pedida so vale com o desenho novo na folha: com a identidade apenas (o componente
      novo nao tem todas as partes que o designador usa), o numero seria de outro desenho */
   if (res.parteIgnorada)
@@ -6003,6 +6083,9 @@ window.__hubAplicaVinculos = function(vinculos){
       multiParte: multiParte,
       parte: soParams ? null : pedido,
       parteIgnorada: !!(soParams && pedido),
+      /* `v.parteTodos` = N: os designadores (de UM item) passam a usar a parte N do componente
+         novo — a parte com o simbolo da folha (__hubPreparaTroca, decisao "parte") */
+      parteTodos: (!soParams && v.parteTodos > 1) ? Math.trunc(v.parteTodos) : null,
       /* resolveu, mas nao pelo nome exato: o lib-subs.js guarda escolhas GLOBAIS por nome e
          elas vencem o nome exato. Gravar "X" e a folha desenhar "Y" nao e erro de gravacao,
          e surpresa — e surpresa tem de sair na tela. */
@@ -6034,6 +6117,10 @@ window.__hubAplicaVinculos = function(vinculos){
            com os da parte antiga moveria o componente para um lugar que nao encaixa nada. */
         const antes = antesDe.get(c);
         if (p.sym) c.sym = p.sym;
+        if (p.parteTodos && its.length === 1 && (c.part || 1) !== p.parteTodos){
+          partes.push({ ref, de: c.part || 1, para: p.parteTodos });
+          c.part = p.parteTodos;
+        }
         if (p.comment) c.comment = p.comment; else delete c.comment;
         if (p.params) c.params = p.params; else delete c.params;
         if (antes && antes.length && !outraParte.has(c)){
@@ -6056,6 +6143,124 @@ window.__hubAplicaVinculos = function(vinculos){
            soIdentidade: planos.filter(p => p.multiParte && p.soParams).map(p => p.refs.join(', ')),
            desvios: planos.filter(p => p.desvio).map(p => ({ refs:p.refs, sym:p.sym,
                                                              como:p.desvio.como, vira:p.desvio.vira })) };
+};
+/* ── ANTES DA TROCA: o símbolo da folha x o do componente novo ──
+   Pedido do dono (2026-10-30). Quem troca componente (o "Converter para o almoxarifado" e o
+   "Trocar componente…") passa os vinculos por aqui ANTES do __hubAplicaVinculos. Para cada
+   designador de um item so, compara o desenho que a folha usa hoje com as partes do componente
+   do almoxarifado que vai entrar (casoDoSimbolo):
+     igual a parte 1      a troca segue como sempre;
+     igual a outra parte  a troca usa essa parte (parteTodos), sem perguntar;
+     diferente            entra na lista que o HubTrocaSimbolo mostra, com o antes e o depois, e a
+                          pessoa escolhe: substituir o simbolo do componente, criar uma parte com o
+                          simbolo da folha, ou usar o do almoxarifado.
+   As decisoes vao para a biblioteca pela rota do editor (/api/symbols/save-almox: espelho,
+   .SchLib da familia e a protecao no ledger, que faz o desenho sobreviver ao sincronismo), uma
+   gravacao por componente com todas as decisoes dele; a biblioteca se recarrega aqui e so
+   entao a folha troca. Multi-parte (designador com mais de um item, ou numa parte acima da 1)
+   e componente que nao e do almoxarifado passam direto, como antes.
+   Devolve { vinculos, feitos } para o __hubAplicaVinculos, ou null (a pessoa cancelou ou a
+   biblioteca nao gravou: nada muda na folha). */
+window.__hubPreparaTroca = async function(vinculos){
+  const lista = Array.isArray(vinculos) ? vinculos : [];
+  const porRef = new Map();
+  for (const s of model.sheets) for (const c of s.comps){
+    if (!porRef.has(c.ref)) porRef.set(c.ref, []);
+    porRef.get(c.ref).push(c);
+  }
+  const resolve = n => HubCore.resolveSym(SLIB, n);
+  const grupos = [], conflitos = [];
+  for (const v of lista){
+    const ident = identidadeDoVinculo(v, resolve);
+    const res = ident.ok ? resolve(ident.sym) : null;
+    const vd = res && VALOR_DE.get(res.name);
+    const sy = (v && v.valor && v.familia && v.familia.name) ? v.familia : (vd && vd.sym);
+    const valor = (v && v.valor) || (vd && vd.valor);
+    if (!ident.ok || !sy || !valor || !valor.altium){ grupos.push({ v, refs:(v && v.refs) || [] }); continue; }
+    const partesAlvo = partesDe(sy, valor);
+    const porChave = new Map();
+    for (const ref of (v.refs || [])){
+      const its = porRef.get(ref);
+      let chave = 'passa', caso = null, atual = null, c = null;
+      if (its && its.length === 1 && (its[0].part || 1) === 1){
+        c = its[0];
+        const s0 = HubCore.symbolOf(SLIB, c.sym);
+        atual = s0 ? HubCore.partOf(s0, c.part || 1) : null;
+        caso = casoDoSimbolo(atual, partesAlvo);
+        if (caso.caso === 'igual' && caso.parte > 1) chave = 'parte:' + caso.parte;
+        else if (caso.caso === 'diferente') chave = 'dif:' + assinaturaDesenho(atual);
+      }
+      if (!porChave.has(chave)) porChave.set(chave, { v, refs:[], caso, atual, sym:c && c.sym });
+      porChave.get(chave).refs.push(ref);
+    }
+    for (const [chave, g] of porChave){
+      if (chave.startsWith('parte:')) g.parteTodos = g.caso.parte;
+      if (chave.startsWith('dif:')){
+        g.conflito = { refs:g.refs, de:{ sym:g.sym, desenho:g.atual },
+                       para:{ componente:valor.altium, familia:sy.name, rotulo:String(valor.label || ''),
+                              desenho:partesAlvo[0] || null, partes:partesAlvo,
+                              parteNova:partesDaDecisao(partesAlvo, g.atual, 'parte').parte },
+                       alvo:{ sy, valor } };
+        conflitos.push(g.conflito);
+      }
+      grupos.push(g);
+    }
+  }
+  const feitos = [];
+  if (conflitos.length){
+    if (!HubIO.canPost || typeof HubTrocaSimbolo === 'undefined'){
+      HubDialog.toast('o símbolo da folha é diferente do componente novo em ' + conflitos.length
+        + ' troca(s), mas sem servidor não dá para gravar na biblioteca: entra o desenho do almoxarifado', 'warn', 9000);
+    } else {
+      const dec = await HubTrocaSimbolo.pergunta(conflitos, { desenha:D });
+      if (!dec) return null;
+      /* as decisoes de cada componente juntas, na ordem: duas linhas podem mexer no mesmo
+         componente (dois desenhos diferentes que viram duas partes) */
+      const porAlvo = new Map();
+      conflitos.forEach((cf, i) => {
+        cf.decisao = dec[i] || 'manter';
+        if (cf.decisao === 'manter') return;
+        const k = cf.para.familia + '\u0001' + cf.para.componente;
+        if (!porAlvo.has(k)) porAlvo.set(k, { cf, parts:cf.para.partes, linhas:[], subst:null });
+        const a = porAlvo.get(k);
+        /* duas linhas mandando SUBSTITUIR o mesmo componente por desenhos diferentes: so cabe um
+           na parte 1; a segunda vira parte, e o relatorio diz */
+        let d = cf.decisao;
+        if (d === 'substituir' && a.subst && !desenhoIgual(a.subst, cf.de.desenho)){ d = 'parte'; cf.virouParte = true; }
+        if (d === 'substituir') a.subst = cf.de.desenho;
+        const r = partesDaDecisao(a.parts, cf.de.desenho, d);
+        a.parts = r.parts; cf.parteFinal = r.parte; cf.decisaoFinal = d;
+        a.linhas.push(cf);
+      });
+      for (const a of porAlvo.values()){
+        const { status, j } = await postSymbols('save-almox', { familia:a.cf.para.familia, componente:a.cf.para.componente,
+                                                                 parts:a.parts, altium:true });
+        if (!(j && (j.ok || j.espelho))){
+          await HubDialog.alert('Não gravei o símbolo de "' + a.cf.para.componente + '" na biblioteca: '
+            + ((j && j.error) || ('HTTP ' + status)) + '\n\nNada foi trocado na folha.'
+            + (feitos.length ? '\n\nJá gravados antes deste: ' + feitos.map(f => f.componente).join(', ') + '.' : ''),
+            { title:'a troca não seguiu' });
+          return null;
+        }
+        for (const cf of a.linhas)
+          feitos.push({ refs:cf.refs, componente:cf.para.componente, decisao:cf.decisaoFinal, parte:cf.parteFinal,
+                        virouParte:!!cf.virouParte, soEspelho:!j.altium });
+      }
+      if (porAlvo.size){
+        try { await window.__hubRecarregaLibs(); }
+        catch (e){ await HubDialog.alert('A biblioteca gravou, mas não recarregou aqui: ' + (e && e.message || e)
+                     + '\n\nRecarregue a página (F5) e troque de novo.', { title:'a troca não seguiu' }); return null; }
+      }
+    }
+  }
+  const fora = [];
+  for (const g of grupos){
+    if (!g.refs.length) continue;
+    const cf = g.conflito;
+    const parteTodos = cf ? (cf.decisaoFinal === 'parte' ? cf.parteFinal : null) : (g.parteTodos || null);
+    fora.push(Object.assign({}, g.v, { refs:g.refs.slice(), parteTodos:parteTodos || undefined }));
+  }
+  return { vinculos:fora, feitos, conflitos:conflitos.length };
 };
 /* Os componentes da folha, para quem precisa LISTAR o projeto (hub-converte.js). Copia rasa
    de propriedade, e nao o objeto do modelo: painel que recebe o comp de verdade pode escrever
