@@ -194,7 +194,9 @@ const hexRgb = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), p
 export function mapasDaFace(T, canvas, acab){
   const w = canvas.width, h = canvas.height;
   const src = canvas.getContext('2d').getImageData(0, 0, w, h).data;
-  const mk = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+  /* na memoria (willReadFrequently): o canvas acelerado sobe como textura sRGB com os mipmaps pretos em
+     varios tamanhos (Chromium/ANGLE, 2026-10-30) -- a placa saia preta; tests/test-pcb3d-face-cpu.mjs */
+  const mk = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d', { willReadFrequently:true }); return c; };
   const cC = mk(), cO = mk(), cK = mk(), cB = mk();
   const iC = cC.getContext('2d').createImageData(w, h), iO = cO.getContext('2d').createImageData(w, h);
   const iK = cK.getContext('2d').createImageData(w, h), iB = cB.getContext('2d').createImageData(w, h);

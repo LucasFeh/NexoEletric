@@ -337,6 +337,10 @@ async function cria(host, opcoes){
     const s = Math.max(4, Math.min(48, max / Math.max(W, H)));
     const tc = document.createElement('canvas');
     tc.width = Math.max(2, Math.ceil(W * s)); tc.height = Math.max(2, Math.ceil(H * s));
+    /* a face nasce na memoria: o canvas acelerado (na GPU) sobe como textura sRGB com os mipmaps pretos em
+       varios tamanhos no Chromium/ANGLE (PBIDP-DI261944: 3725x3463), e a placa saia preta conforme o zoom.
+       O primeiro getContext fixa os atributos; a linha seguinte e a ancora do remendo da janela Rust */
+    tc.getContext('2d', { willReadFrequently:true });
     const x = tc.getContext('2d');
     x.setTransform(s, 0, 0, -s, -bb.x1 * s, bb.y2 * s);
     try { c.pintaFace(x, lado, s); } catch (e) { console.warn('3D: face ' + lado, e); }

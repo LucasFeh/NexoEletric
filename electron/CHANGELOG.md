@@ -4,6 +4,27 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.54.1 — 2026-10-30
+
+Duas correções na vista 3D da placa.
+- **O 3D da biblioteca encaixa nos pads do componente.** Um footprint pode ter o mesmo nome na biblioteca do hub
+  e na placa, mas com outra origem ou outro giro. O corpo 3D da biblioteca era posto na origem da biblioteca e saía
+  deslocado dos pads. Exemplo: o ESP32-WROOM-32D do MIRBC_DI251885 e da PLACAB_DI251885B ficava 2,4 mm fora. Agora
+  o corpo vai pelo encaixe dos pads da biblioteca nos pads do componente, casados pelo nome.
+  - Se o desenho dos pads for diferente, ou houver pads de menos para casar, o corpo fica como antes.
+  - O corpo ajustado sai com `ajuste: {pads, dx, dy, giro}`.
+  - Também acerta, no PRJ-DI161455, resistores e diodos girados 90°/180°/270° e o IDC20RM 1,27 mm fora.
+- **A placa não sai mais preta no 3D.** Na PBIDP-DI261944, a face da placa (máscara, cobre, serigrafia) ficava
+  preta conforme o zoom, o tamanho da janela e a escala do Windows (a 125% aparecia). Também no Real View.
+  - A causa: a textura sRGB enviada de um `<canvas>` acelerado (na GPU) gera as versões de longe (os mipmaps)
+    pretas em vários tamanhos no Chromium/ANGLE. Medido no Edge 156 em WebGL2 puro: 3725×3463, 3433×3384,
+    3000×3000 e 4000×3000 saem pretos; 4096×3000 e 2500×1500 saem certos.
+  - A correção: os canvases da face e os mapas do Real View nascem na memória (`willReadFrequently`), que sobe certo
+    em todos os tamanhos medidos.
+  - As linhas que a janela Rust troca (remendo `face-na-memoria`) continuam iguais.
+- Testes: `tests/test-pcb3d-origem.js` (o encaixe no Top e no Bottom, giro, forma diferente) e
+  `tests/test-pcb3d-face-cpu.mjs` (os canvases da face na memória e a âncora do remendo Rust intacta).
+
 ## 1.54.0 — 2026-10-30
 
 A janela do NexoEletric agora é a da versão em Rust.

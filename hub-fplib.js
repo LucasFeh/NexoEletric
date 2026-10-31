@@ -22,7 +22,8 @@
    API (global HubFpLib)
      vazia() normaliza(lib) acha(lib, nome) poe(lib, fp) tira(lib, nome)
      mescla(pcblibAltium, hub) -> pcblib     (o do hub na frente, mesmo nome)
-     lib3d(hub) -> {footprints:{nome:{bodies}}, models}   para HubPcb3dModelo.corpos(.., {pcblib3dHub})
+     lib3d(hub) -> {footprints:{nome:{bodies, pads}}, models}   para HubPcb3dModelo.corpos(.., {pcblib3dHub});
+                   pads = [{name, x, y}]: o corpo se encaixa nos pads do componente da placa
      bbox(fp) copia(fp) novo(nome) valida(fp) -> [erros] serializa(lib) -> texto
      carrega() grava(lib) sobeStep(arquivo|ArrayBuffer, nome)            (navegador) */
 (function (root, factory) {
@@ -93,7 +94,12 @@ function lib3d(hub){
     const temCorpo = Array.isArray(f.bodies) && f.bodies.length;
     /* solda:true -- o pino so do lado do componente, o ponto de solda na outra face (HubPcb3dModelo).
        Vale tambem sem corpo proprio: o corpo continua vindo do PcbDoc ou da biblioteca */
-    if (temCorpo || f.solda) fps[f.name] = Object.assign({ bodies:temCorpo ? f.bodies : [] }, f.solda ? { solda:true } : {});
+    if (!temCorpo && !f.solda) continue;
+    fps[f.name] = Object.assign({ bodies:temCorpo ? f.bodies : [] }, f.solda ? { solda:true } : {});
+    /* os pads (so nome e lugar): o mesmo footprint na placa pode ter outra origem, e o corpo se encaixa
+       nos pads do componente (HubPcb3dModelo.ajusteFootprint) */
+    const pads = (f.pads || []).filter(p => p && p.name != null && isNum(p.x) && isNum(p.y)).map(p => ({ name:String(p.name), x:p.x, y:p.y }));
+    if (temCorpo && pads.length) fps[f.name].pads = pads;
   }
   return { format:'pcblib3d-v1', footprints:fps, models:(hub && hub.models) || {} };
 }

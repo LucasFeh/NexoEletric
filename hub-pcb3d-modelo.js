@@ -63,6 +63,10 @@
                    esp, furos:[{x, y, r, rf}]}; e os corpos desse componente saem com corte:'abaixo'
                    (componente em cima: o pino some abaixo da face de baixo) ou 'acima'
        origem: 'hub' | 'board3d' | 'biblioteca' | 'placeholder' | 'nexo'
+       Corpo da biblioteca ('hub', 'biblioteca') com `pads` no footprint dela: encaixado nos pads do
+       componente (o footprint da placa pode ter outra origem/giro com o mesmo nome) e sai com
+       ajuste:{pads, dx, dy, giro} (o que foi corrigido, no referencial do footprint)
+     HubPcb3dModelo.ajusteFootprint(padsLib, comp, esp) -> {M, pads, dx, dy, giro} ou null
      HubPcb3dModelo.matrizCorpo(raw, comp) -> [16] coluna-maior
        raw  {x2d, y2d, rot2d, rotx, roty, rotz, dz}
        comp {side|layer, thickness, orig?:{x,y,rot,layer}, eff?:{x,y,rot,layer}}: com orig e eff,
@@ -163,6 +167,54 @@ function matrizCorpo(raw, comp){
 function matrizLocal(matriz, comp, esp){
   const e = isNum(esp) ? esp : espDe(comp);
   return colMaior(mul4(inversa(matPose(comp, e)), deColMaior(matriz)));
+}
+
+/* ---- o footprint da biblioteca encaixado no da placa ----
+   O MESMO nome de footprint pode ter a origem (ou o giro) diferente na biblioteca e na placa: o
+   ESP32-WROOM-32D da biblioteca do hub tem a origem 2,4 mm longe da do footprint que o PcbDoc do MIRBC
+   trouxe (2026-10-30), e o corpo da biblioteca, na origem dela, saia deslocado dos pads. Aqui: o giro +
+   deslocamento (no plano, referencial local) que leva os pads da biblioteca nos do componente, casados
+   pelo nome (nome repetido -- o pad termico 39 do ESP32 -- vale pelo centro do grupo). Encaixe ruim
+   (forma diferente) ou pads de menos: nenhum ajuste. Devolve {M (linha-maior), pads, dx, dy, giro} ou null. */
+const TOL_ENCAIXE = 0.05;
+function centrosPorNome(pts){
+  const g = new Map();
+  for (const [nome, x, y] of pts) { const s = g.get(nome) || [0, 0, 0]; s[0] += x; s[1] += y; s[2]++; g.set(nome, s); }
+  const out = new Map();
+  for (const [k, s] of g) out.set(k, [s[0] / s[2], s[1] / s[2]]);
+  return out;
+}
+function ajusteFootprint(padsLib, comp, esp){
+  if (!Array.isArray(padsLib) || !padsLib.length || !comp || !Array.isArray(comp.pads)) return null;
+  const Pinv = inversa(matPose(comp, esp)), z = ladoDe(comp) === 'bottom' ? -esp : 0;
+  const lib = centrosPorNome(padsLib.filter(p => p && p.name != null && isNum(p.x) && isNum(p.y)).map(p => [String(p.name), p.x, p.y]));
+  const loc = centrosPorNome(comp.pads.filter(p => p && p.name != null && isNum(p.x) && isNum(p.y))
+    .map(p => { const q = aplica(Pinv, [p.x, p.y, z]); return [String(p.name), q[0], q[1]]; }));
+  const nomes = [...lib.keys()].filter(k => loc.has(k));
+  if (nomes.length < 2 || nomes.length < 0.8 * Math.min(lib.size, loc.size)) return null;
+  /* Kabsch no plano: o giro pelos pontos centrados, o deslocamento pelos centros */
+  let ax = 0, ay = 0, bx = 0, by = 0;
+  for (const k of nomes) { const a = lib.get(k), b = loc.get(k); ax += a[0]; ay += a[1]; bx += b[0]; by += b[1]; }
+  ax /= nomes.length; ay /= nomes.length; bx /= nomes.length; by /= nomes.length;
+  let sc = 0, ss = 0;
+  for (const k of nomes) {
+    const a = lib.get(k), b = loc.get(k), u = a[0] - ax, v = a[1] - ay, p = b[0] - bx, q = b[1] - by;
+    sc += u * p + v * q; ss += u * q - v * p;
+  }
+  if (Math.abs(sc) + Math.abs(ss) < 1e-9) return null;
+  /* o arredondamento dos pads (3 casas no PcbDoc) da milesimos de grau: perto de 90 em 90, vale o exato */
+  let g = Math.atan2(ss, sc) * 180 / Math.PI;
+  const g90 = Math.round(g / 90) * 90;
+  if (Math.abs(g - g90) < 0.01) g = g90;
+  const [c, s] = cs(g);
+  const dx = bx - (c * ax - s * ay), dy = by - (s * ax + c * ay);
+  for (const k of nomes) {
+    const a = lib.get(k), b = loc.get(k);
+    if (Math.hypot(c * a[0] - s * a[1] + dx - b[0], s * a[0] + c * a[1] + dy - b[1]) > TOL_ENCAIXE) return null;
+  }
+  const giro = r6(((g % 360) + 360) % 360);
+  if (Math.hypot(dx, dy) < 1e-3 && Math.min(giro, 360 - giro) < 1e-4) return null;
+  return { M:mul4(tr(dx, dy, 0), rz(g)), pads:nomes.length, dx:r6(dx), dy:r6(dy), giro };
 }
 
 /* ---- extrudado ---- */
@@ -372,14 +424,7 @@ function corpos(eb, d3, opcoes){
     /* o corpo que o editor de footprint do hub pos (Libs/pcblib-hub.js) vale mais que o do PcbDoc:
        foi escolhido DEPOIS, de proposito */
     const fh = hub && hub.footprints && tem(hub.footprints, c.footprint) ? hub.footprints[c.footprint] : null;
-    if (fh && Array.isArray(fh.bodies) && fh.bodies.length) {
-      const P = matPose(c, esp), lado = ladoDe(c);
-      for (const b of fh.bodies) {
-        const ladoB = ladoDe(b) === 'bottom' ? (lado === 'top' ? 'bottom' : 'top') : lado;
-        out.push(leva(b, P, ladoB, esp, hub.models, baseLib, 'hub', c.ref));
-      }
-      return;
-    }
+    if (fh && Array.isArray(fh.bodies) && fh.bodies.length) { daBiblioteca(fh, hub.models, 'hub'); return; }
     const refO = tem(ren, c.ref) ? ren[c.ref] : c.ref;
     const o = tem(origem, refO) ? origem[refO] : null;
     const doD3 = o && porDono[refO] && (!o.footprint || !c.footprint || o.footprint === c.footprint);
@@ -394,15 +439,19 @@ function corpos(eb, d3, opcoes){
       return;
     }
     const fp = lib && lib.footprints && tem(lib.footprints, c.footprint) ? lib.footprints[c.footprint] : null;
-    if (fp && Array.isArray(fp.bodies) && fp.bodies.length) {
-      const P = matPose(c, esp), lado = ladoDe(c);
-      for (const b of fp.bodies) {
-        const ladoB = ladoDe(b) === 'bottom' ? (lado === 'top' ? 'bottom' : 'top') : lado;
-        out.push(leva(b, P, ladoB, esp, lib.models, baseLib, 'biblioteca', c.ref));
-      }
-      return;
-    }
+    if (fp && Array.isArray(fp.bodies) && fp.bodies.length) { daBiblioteca(fp, lib.models, 'biblioteca'); return; }
     if (opcoes.placeholder !== false) out.push(placeholder(c, eb, { thickness: esp, alturas: opcoes.alturas }));
+    /* os corpos LOCAIS de um footprint da biblioteca, na pose do componente e encaixados nos pads dele */
+    function daBiblioteca(f, models, fonte){
+      const aj = ajusteFootprint(f.pads, c, esp);
+      const P = aj ? mul4(matPose(c, esp), aj.M) : matPose(c, esp), lado = ladoDe(c);
+      for (const b of f.bodies) {
+        const ladoB = ladoDe(b) === 'bottom' ? (lado === 'top' ? 'bottom' : 'top') : lado;
+        const o = leva(b, P, ladoB, esp, models, baseLib, fonte, c.ref);
+        if (aj) o.ajuste = { pads:aj.pads, dx:aj.dx, dy:aj.dy, giro:aj.giro };
+        out.push(o);
+      }
+    }
   }
   for (const b of livres) {
     const o = leva(b, I4(), ladoDe(b), esp, d3.models, base, 'board3d', '', prefD3);
@@ -413,6 +462,6 @@ function corpos(eb, d3, opcoes){
   return out;
 }
 
-return { corpos, soldaDoComp, matrizCorpo, matrizLocal, placeholder, deltaComp, matPose, mul4, aplica, colMaior, deColMaior,
+return { corpos, soldaDoComp, matrizCorpo, matrizLocal, placeholder, ajusteFootprint, deltaComp, matPose, mul4, aplica, colMaior, deColMaior,
          ALTURAS, ESPESSURA_PADRAO, VERSAO };
 });
