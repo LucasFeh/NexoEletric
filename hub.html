@@ -35,6 +35,7 @@
 <script src="hub-guias.js"></script><script src="hub-fplib.js"></script><script src="hub-nexo.js"></script><script src="hub-pcb3d-modelo.js"></script><script src="hub-pcb3d-step.js"></script><script src="hub-pcb3d-vista.js"></script><script src="hub-fppacote.js"></script><script src="hub-fpeditor.js"></script>
 <!-- destino do envio da lista ao Odoo: bloco da aba Projeto da configuração -->
 <script src="hub-odoocfg.js"></script>
+<script src="hub-jlccfg.js"></script>
 <script src="hub-atalhos.js"></script>
 <script src="hub-pcbdesfazer.js"></script>
 <!-- os comandos, menus e teclas do Altium (tools/altiumdna): a dica "Altium: Place » Track · P,T" no editor de atalhos -->
@@ -4460,6 +4461,8 @@ function cfgPaneProjeto(pane) {
      procura depois que o "Enviar para o Odoo" da vista Esquema disse que falta senha. O
      painel é dono dos próprios rótulos e do próprio CSS (hub-odoocfg.js). */
   if (window.HubOdooCfg) HubOdooCfg.pane(pane);
+  /* a conta da JLCPCB do "Enviar pra JLC" (hub-jlccfg.js), logo abaixo da credencial do Odoo */
+  if (window.HubJlcCfg) HubJlcCfg.pane(pane);
 
   pane.append(el('div', 'kicker', t('cfg.proj.risk')));
   const del = el('button', 'btn btn-danger', t('cfg.delete'));

@@ -9,10 +9,21 @@ como `node mcp/lib/jlc.js --cli`, um processo por envio, e a vista acompanha pel
 O node: NEXOELETRIC_NODE > o exe do app aberto (~/.nexoeletric/session.json, com
 ELECTRON_RUN_AS_NODE=1 -- o NexoEletric.exe e um Node) > o `node` do PATH.
 
-Sem login na JLC o motor mostra a janela do navegador e espera a pessoa entrar (ate ESPERA_LOGIN);
-a senha nunca passa por aqui. So desta maquina: o IntegrateBrowser e o da maquina que roda o hub.
+A CONTA DA JLC (pedido do dono, 2026-11-03: "na configuracao do hub, junto com a credencial do odoo,
+tambem tenha a credencial da jlc ... pra serem usados no login, quando clicar em enviar pra jlc"):
+e-mail e senha ficam em .hub-jlc.json, na raiz do workspace -- o ponto no nome tira o arquivo do HTTP
+(hubserver.py » _serve e o statics.rs da janela Rust). A senha vai CIFRADA com a DPAPI do Windows
+(CryptProtectData, escopo do usuario): so o mesmo usuario do Windows, nesta maquina, a abre; copiar o
+arquivo para outro PC nao leva a senha. Sem DPAPI (fora do Windows) ela fica em texto, como a do Odoo
+no .hub-odoo.json, e a configuracao diz isso. A senha nunca volta pela rota de configuracao
+(so `temSenha`) e vai para o motor pela entrada padrao (nunca argumento nem variavel de ambiente).
+Com ela, quando a JLC pede o login no meio do envio, o motor preenche e entra sozinho; captcha ou
+senha recusada: mostra a janela do navegador e espera a pessoa entrar (ate ESPERA_LOGIN), como antes.
+So desta maquina: o IntegrateBrowser e o da maquina que roda o hub.
 
 Rotas:
+  GET  /api/jlc/config                        -> {ok, local, config:{email, temSenha, protegida}}
+  POST /api/jlc/config {email, senha?, apagarSenha?} (so do PC do hub) -> o mesmo; senha vazia = nao mexe
   POST /api/jlc/enviar  {proj, quantidade}   -> {ok, job}
   GET  /api/jlc/estado?job=<id>              -> {ok, fim, passos:[...], preparado?, resultado?, erro?}
   POST /api/jlc/cancelar {job}               -> {ok}: mata o envio (a vista chama ao ser fechada no meio,
@@ -41,6 +52,82 @@ _lock = threading.Lock()
 
 def _json(obj, status=200):
     return obj, status
+
+
+# ============================== a conta da JLC (.hub-jlc.json) ==============================
+
+CFG_FILE = '.hub-jlc.json'
+
+
+def _dpapi(dados, cifrar):
+    """CryptProtectData / CryptUnprotectData (escopo do usuario do Windows). None fora do Windows ou se falhar."""
+    if os.name != 'nt':
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class BLOB(ctypes.Structure):
+        _fields_ = [('cbData', wintypes.DWORD), ('pbData', ctypes.POINTER(ctypes.c_char))]
+
+    crypt32, kernel32 = ctypes.windll.crypt32, ctypes.windll.kernel32
+    buf = ctypes.create_string_buffer(dados, len(dados))
+    ent, sai = BLOB(len(dados), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), BLOB()
+    CRYPTPROTECT_UI_FORBIDDEN = 0x01
+    fn = crypt32.CryptProtectData if cifrar else crypt32.CryptUnprotectData
+    ok = fn(ctypes.byref(ent), None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, ctypes.byref(sai))
+    if not ok:
+        return None
+    try:
+        return ctypes.string_at(sai.pbData, sai.cbData)
+    finally:
+        kernel32.LocalFree(sai.pbData)
+
+
+def _cfg_path(root):
+    return os.path.join(root, CFG_FILE)
+
+
+def le_cfg(root):
+    """O .hub-jlc.json cru ({} se nao existe; {'ilegivel': True} se nao e JSON)."""
+    try:
+        with open(_cfg_path(root), encoding='utf-8') as f:
+            c = json.load(f)
+        return c if isinstance(c, dict) else {'ilegivel': True}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        return {'ilegivel': True}
+
+
+def credencial(root):
+    """(email, senha) para o login, ou (email, None) sem senha (ou se a DPAPI nao abre: outro usuario/PC)."""
+    import base64
+    c = le_cfg(root)
+    email = str(c.get('email') or '').strip()
+    if c.get('senhaDpapi'):
+        try:
+            claro = _dpapi(base64.b64decode(c['senhaDpapi']), False)
+        except (ValueError, TypeError):
+            claro = None
+        return email, (claro.decode('utf-8') if claro else None)
+    s = c.get('senha')
+    return email, (str(s) if s else None)
+
+
+def _grava_cfg(root, cfg):
+    alvo = os.path.realpath(_cfg_path(root))
+    tmp = alvo + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, alvo)
+
+
+def _resumo(root):
+    c = le_cfg(root)
+    email, senha = credencial(root)
+    tem = bool(c.get('senhaDpapi') or c.get('senha'))
+    return {'email': email, 'temSenha': tem, 'protegida': bool(c.get('senhaDpapi')),
+            'senhaAbre': bool(senha), 'arquivoIlegivel': bool(c.get('ilegivel')), 'arquivo': CFG_FILE}
 
 
 def eh_electron(exe):
@@ -166,8 +253,48 @@ def registra(app, root, eh_local=None):
             JOBS[jid] = job
         entrada = {'gdir': os.path.join(d, 'Gerber'), 'quantidade': qtd, 'nome': data.get('proj'),
                    'mostrar': True, 'esperaLogin': ESPERA_LOGIN}
+        # a conta gravada na configuracao do hub: vai so pela entrada padrao do motor, nunca no job
+        email, senha = credencial(root)
+        if email and senha:
+            entrada['usuario'], entrada['senha'] = email, senha
         threading.Thread(target=_roda, args=(job, node + [motor, '--cli'], env, entrada, root), daemon=True).start()
         return _json({'ok': True, 'job': jid})
+
+    @app.route('/api/jlc/config', methods=['GET'])
+    def jlc_config_ler():
+        return _json({'ok': True, 'local': bool(eh_local(request)), 'config': _resumo(root)})
+
+    @app.route('/api/jlc/config', methods=['POST'])
+    def jlc_config_gravar():
+        if not eh_local(request):
+            return _json({'ok': False, 'error': 'a conta da JLC so muda no PC do hub'}, 403)
+        data = request.get_json(silent=True) or {}
+        atual = le_cfg(root)
+        if atual.get('ilegivel'):
+            return _json({'ok': False, 'error': CFG_FILE + ' nao e um JSON valido: arrume ou apague o arquivo antes'}, 409)
+        cfg = {k: v for k, v in atual.items() if k in ('email', 'senha', 'senhaDpapi')}
+        if 'email' in data:
+            email = str(data.get('email') or '').strip()
+            if len(email) > 200 or any(c in email for c in '\r\n\t'):
+                return _json({'ok': False, 'error': 'e-mail invalido'}, 400)
+            cfg['email'] = email
+        if data.get('apagarSenha'):
+            cfg.pop('senha', None)
+            cfg.pop('senhaDpapi', None)
+        elif data.get('senha'):
+            import base64
+            s = str(data['senha'])
+            if len(s) > 500:
+                return _json({'ok': False, 'error': 'senha comprida demais'}, 400)
+            cif = _dpapi(s.encode('utf-8'), True)
+            cfg.pop('senha', None)
+            cfg.pop('senhaDpapi', None)
+            if cif:
+                cfg['senhaDpapi'] = base64.b64encode(cif).decode('ascii')
+            else:
+                cfg['senha'] = s          # sem DPAPI (fora do Windows): como a do Odoo, no arquivo com ponto
+        _grava_cfg(root, cfg)
+        return _json({'ok': True, 'local': True, 'config': _resumo(root)})
 
     @app.route('/api/jlc/cancelar', methods=['POST'])
     def jlc_cancelar():

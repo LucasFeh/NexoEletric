@@ -30,7 +30,8 @@ let e = ''; process.stdin.on('data', d => { e += d; }); process.stdin.on('end', 
   diz({ progresso: 'quantidade ' + a.quantidade });
   if (a.quantidade === 8) { diz({ erro: 'a JLC nao vende 8' }); return; }
   if (a.quantidade === 999) { setInterval(() => {}, 1000); return; }   /* preso: so o cancelar tira */
-  diz({ fim: { etapa: 'carrinho', quantidade: a.quantidade, camadas: 2, gdir: a.gdir, mostrar: a.mostrar, esperaLogin: a.esperaLogin } });
+  diz({ fim: { etapa: 'carrinho', quantidade: a.quantidade, camadas: 2, gdir: a.gdir, mostrar: a.mostrar, esperaLogin: a.esperaLogin,
+               usuario: a.usuario || '', senhaOk: a.senha === 'segredo-123', temSenha: !!a.senha } });
 });
 """
 
@@ -93,6 +94,45 @@ class Rotas(unittest.TestCase):
         self.assertEqual(self.c.post('/api/jlc/cancelar', json={'job': 'nada'}).status_code, 404)
         self.local = False
         self.assertEqual(self.c.post('/api/jlc/cancelar', json={'job': job}).status_code, 403)
+
+    def test_conta_da_jlc(self):
+        """1.57.2: a conta da configuracao do hub chega ao motor pela entrada padrao; a senha nunca volta."""
+        cfg = self.c.get('/api/jlc/config').get_json()
+        self.assertEqual(cfg['config']['email'], '')
+        self.assertFalse(cfg['config']['temSenha'])
+        e = self.espera(self.c.post('/api/jlc/enviar', json={'proj': 'Placa A', 'quantidade': 5}).get_json()['job'])
+        self.assertFalse(e['resultado']['temSenha'], 'sem conta gravada, o motor nao recebe senha')
+        r = self.c.post('/api/jlc/config', json={'email': ' compras@dieletrons.com ', 'senha': 'segredo-123'})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        j = r.get_json()
+        self.assertEqual(j['config']['email'], 'compras@dieletrons.com')
+        self.assertTrue(j['config']['temSenha'] and j['config']['senhaAbre'])
+        self.assertNotIn('segredo-123', json.dumps(j))
+        self.assertNotIn('segredo-123', json.dumps(self.c.get('/api/jlc/config').get_json()))
+        bruto = open(os.path.join(self.tmp, jlc.CFG_FILE), encoding='utf-8').read()
+        if os.name == 'nt':
+            self.assertTrue(j['config']['protegida'])
+            self.assertNotIn('segredo-123', bruto, 'no Windows a senha vai cifrada pela DPAPI')
+        e = self.espera(self.c.post('/api/jlc/enviar', json={'proj': 'Placa A', 'quantidade': 5}).get_json()['job'])
+        self.assertEqual(e['resultado']['usuario'], 'compras@dieletrons.com')
+        self.assertTrue(e['resultado']['senhaOk'], 'a senha chega ao motor')
+        self.assertNotIn('segredo-123', json.dumps(e), 'e nao fica no estado do envio')
+        # senha vazia nao mexe; troca o e-mail
+        self.c.post('/api/jlc/config', json={'email': 'outro@dieletrons.com', 'senha': ''})
+        self.assertEqual(jlc.credencial(self.tmp), ('outro@dieletrons.com', 'segredo-123'))
+        # de outra maquina: le (sem senha), nao grava
+        self.local = False
+        self.assertEqual(self.c.post('/api/jlc/config', json={'email': 'x@y.z'}).status_code, 403)
+        self.assertFalse(self.c.get('/api/jlc/config').get_json()['local'])
+        self.local = True
+        self.assertEqual(self.c.post('/api/jlc/config', json={'email': 'a' + chr(10) + 'b'}).status_code, 400)
+        # apagar a senha
+        self.assertFalse(self.c.post('/api/jlc/config', json={'apagarSenha': True}).get_json()['config']['temSenha'])
+        self.assertEqual(jlc.credencial(self.tmp), ('outro@dieletrons.com', None))
+        # arquivo torto: nao grava por cima
+        open(os.path.join(self.tmp, jlc.CFG_FILE), 'w').write('{nao e json')
+        self.assertTrue(self.c.get('/api/jlc/config').get_json()['config']['arquivoIlegivel'])
+        self.assertEqual(self.c.post('/api/jlc/config', json={'email': 'z@z.z'}).status_code, 409)
 
     def test_recusas(self):
         self.assertEqual(self.c.post('/api/jlc/enviar', json={'proj': 'Sem Gerber', 'quantidade': 5}).status_code, 409)

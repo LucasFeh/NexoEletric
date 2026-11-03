@@ -56,6 +56,10 @@ odoo-lista.json
 # untracked COM a senha dentro, a um "git add ." de ir para o servidor.
 .hub-odoo.json*
 
+# a conta da JLCPCB do "Enviar pra JLC" (tools/rotas/jlc.py): e-mail e a senha cifrada pela DPAPI, com
+# o mesmo ponto no nome e o mesmo * pelo temporario da gravacao.
+.hub-jlc.json*
+
 # conversas do chat e os anexos. Elas carregam PRINT DE TELA em base64 -- do Altium, do ERP,
 # do que o usuario recortou -- e ficariam a um "git add ." de ir para o repositorio. O ponto
 # no nome tambem e o que faz o hubserver recusar servi-las por HTTP (_serve, hubserver.py:120),

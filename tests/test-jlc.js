@@ -105,6 +105,22 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
   assert.ok(r2.imagem && r2.imagem.base64, 'a captura volta para conferir');
   console.log('  envio: quantidade da lista, 4 camadas, login, carrinho e a captura ok');
 
+  /* 1.57.2: a conta da configuração do hub -- a JLC pede o login no meio do envio e o motor entra sozinho */
+  est.logado = false; est.subiu = null; est.digitado = [];
+  const ra = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, usuario: 'eu@dieletrons.com', senha: SENHA });
+  assert.strictEqual(ra.etapa, 'carrinho', 'entrou e foi até o carrinho');
+  assert.ok(est.digitado.some(s => s.includes('senha')) && est.logado);
+  assert.ok(ra.avisos.some(a => /entrou na conta eu@dieletrons\.com/.test(a)), ra.avisos.join(' | '));
+  assert.ok(!JSON.stringify(ra).includes(SENHA), 'a senha não volta');
+  /* senha errada e ninguém para esperar: para no login, com o aviso, sem a senha */
+  est.logado = false;
+  const rb = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, usuario: 'eu@dieletrons.com', senha: 'errada-' + SENHA });
+  assert.strictEqual(rb.etapa, 'login');
+  assert.ok(rb.avisos.some(a => /não aceitou o login/.test(a)), rb.avisos.join(' | '));
+  assert.ok(!JSON.stringify(rb).includes(SENHA), 'nem a errada volta');
+  est.logado = true;
+  console.log('  envio com a conta do hub: entra sozinho no login do meio; senha errada para no login');
+
   /* o botão do NexoEletric (programa): a guia abre na janela da pessoa, não na do Claude */
   est.subiu = null;
   const rp = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 5, programa: 'NexoEletric' });

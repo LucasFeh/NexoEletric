@@ -27,8 +27,10 @@
    O que não deu para medir ainda (a volta do login e a tela do carrinho) é conferido pelo texto e
    pela captura que voltam: quem chama (a IA ou a pessoa, na janela) olha antes de dizer "pronto".
 
-   A SENHA: só passa por login(); vai digitada no campo e não volta em resultado, aviso nem erro.
-   Nada é gravado. O relato do MCP (relato.js) esconde os argumentos senha/token.
+   A SENHA: só passa por entrarNaGuia() (login() do MCP, ou o envio quando a JLC pede o login no meio); vai
+   digitada no campo e não volta em resultado, aviso nem erro. Aqui nada é gravado: a conta do botão vem da
+   configuração do hub (.hub-jlc.json, a senha cifrada pela DPAPI; tools/rotas/jlc.py), pela entrada padrão do
+   --cli. O relato do MCP (relato.js) esconde os argumentos senha/token.
 
    Nunca passa do carrinho: pagar, endereço e frete ficam com a pessoa. */
 'use strict';
@@ -268,6 +270,16 @@ async function enviar(o) {
       if (/shopcart|\\/cart(?!\\.)/i.test(location.pathname + location.hash) || /Shopping Cart|Proceed to Checkout|Secure Checkout/i.test(document.body.innerText)) return 'carrinho';
       return ''; })()`, 25000, 1000);
     if (destino === 'login') {
+      /* a conta gravada na configuração do hub (tools/rotas/jlc.py » .hub-jlc.json): entra sozinho */
+      if (o.usuario && o.senha && volta === 0) {
+        prog('entrando na conta da JLC');
+        const r = await entrarNaGuia(g, String(o.usuario).trim(), String(o.senha));
+        if (r.etapa === 'logado') {
+          avisos.push('entrou na conta ' + String(o.usuario).trim() + ' (a da configuração do hub): o Gerber foi enviado de novo (o orçamento recomeça depois do login)');
+          continue;
+        }
+        avisos.push(r.aviso || 'o login automático não entrou');
+      }
       if (o.esperaLogin && volta === 0) {
         prog('entre na sua conta da JLC na janela do IntegrateBrowser');
         await g.mostra();
@@ -291,19 +303,16 @@ async function enviar(o) {
   throw new Error('o envio não terminou depois do login');
 }
 
-/* Entra na conta da JLC com o que a pessoa disse. A senha só vai digitada no campo. Captcha ou
-   verificação: a janela aparece e a resposta pede à pessoa terminar lá. */
-async function login(o) {
-  const usuario = String(o && o.usuario || '').trim(), senha = String(o && o.senha || '');
-  if (!usuario || !senha) throw new Error('faltam o usuário (ou e-mail) e a senha da JLC');
-  const g = await abreGuia(LOGIN, o.mostrar, o.programa);
+/* Preenche e-mail e senha na tela de login da JLC aberta na guia g e entra. A senha só vai digitada no campo.
+   -> {etapa:'logado'|'captcha'|'erro', url, mensagem?, aviso?} (sem a senha em lugar nenhum) */
+async function entrarNaGuia(g, usuario, senha) {
   const campo = await g.ate(`(() => { const p = document.querySelector('input[type=password]'); const u = [...document.querySelectorAll('input')].find(i => i.type !== 'password' && i.type !== 'checkbox' && i.type !== 'hidden' && i.offsetParent);
     if (!p || !u) return ''; u.setAttribute('data-nexo-jlc', 'usuario'); p.setAttribute('data-nexo-jlc', 'senha');
     const b = [...document.querySelectorAll('button')].find(x => /^\\s*Sign In\\s*$/i.test(x.textContent)); if (b) b.setAttribute('data-nexo-jlc', 'entrar'); return 'ok'; })()`, 30000);
   if (!campo) {
     const u = await g.url();
     if (!/passport\.jlcpcb\.com/.test(u)) return { etapa: 'logado', url: u };
-    throw new Error('a tela de login da JLC não mostrou os campos (mudou?)');
+    return { etapa: 'erro', url: u, aviso: 'a tela de login da JLC não mostrou os campos (mudou?)' };
   }
   await g.chama('digitar', { seletor: '[data-nexo-jlc=usuario]', texto: usuario, limpar: true });
   await g.chama('digitar', { seletor: '[data-nexo-jlc=senha]', texto: senha, limpar: true });
@@ -312,15 +321,26 @@ async function login(o) {
   if (saiu) return { etapa: 'logado', url: await g.url() };
   const msg = String(await g.js(`(() => { const e = [...document.querySelectorAll('.el-form-item__error,.el-message,[class*=error],[class*=tip]')].find(x => x.offsetParent && x.textContent.trim().length > 3); return e ? e.textContent.trim().slice(0, 200) : ''; })()`) || '');
   const captcha = await g.js(`[...document.querySelectorAll('iframe')].some(f => /recaptcha|captcha|geetest/i.test(f.src) && f.offsetParent && f.getBoundingClientRect().height > 100)`);
-  await g.mostra();
-  return { etapa: captcha ? 'captcha' : 'erro', mensagem: msg.replace(senha, '•••'), url: await g.url(), imagem: await g.captura(),
-           aviso: captcha ? 'a JLC pediu a verificação (captcha): resolva na janela do IntegrateBrowser' : 'a JLC não aceitou o login' + (msg ? ': ' + msg.replace(senha, '•••') : '') };
+  const limpa = msg.split(senha).join('•••');
+  return { etapa: captcha ? 'captcha' : 'erro', mensagem: limpa, url: await g.url(),
+           aviso: captcha ? 'a JLC pediu a verificação (captcha): resolva na janela do IntegrateBrowser' : 'a JLC não aceitou o login' + (limpa ? ': ' + limpa : '') };
+}
+
+/* Entra na conta da JLC com o que a pessoa disse (a ferramenta jlc_login do MCP). Captcha ou verificação: a
+   janela aparece e a resposta pede à pessoa terminar lá. */
+async function login(o) {
+  const usuario = String(o && o.usuario || '').trim(), senha = String(o && o.senha || '');
+  if (!usuario || !senha) throw new Error('faltam o usuário (ou e-mail) e a senha da JLC');
+  const g = await abreGuia(LOGIN, o.mostrar, o.programa);
+  const r = await entrarNaGuia(g, usuario, senha);
+  if (r.etapa !== 'logado') { await g.mostra(); r.imagem = await g.captura(); }
+  return r;
 }
 
 module.exports = { QTDS, QUOTE, LOGIN, camadasCobre, camadasJlc, lerGerber, preparar, enviar, login, qtdPerto, arqConexao };
 
 /* ============================== a linha de comando (a rota /api/jlc do hub) ==============================
-   node mcp/lib/jlc.js --cli  < {gdir, quantidade, nome?, mostrar?, esperaLogin?}
+   node mcp/lib/jlc.js --cli  < {gdir, quantidade, nome?, mostrar?, esperaLogin?, usuario?, senha?}
    escreve uma linha JSON por passo: {"progresso":"..."} e, no fim, {"fim":{...}} ou {"erro":"..."}.
    A captura não vai na linha (é grande): o hub mostra a janela do navegador. */
 if (require.main === module && process.argv.includes('--cli')) {
@@ -338,7 +358,8 @@ if (require.main === module && process.argv.includes('--cli')) {
       const p = await preparar(a.gdir, { nome: a.nome });
       diz({ preparado: { camadas: p.camadas, camadasJlc: p.camadasJlc, arquivos: p.arquivos, zip: p.zip } });
       const r = await enviar({ zip: p.zip, camadas: p.camadas, quantidade: a.quantidade, mostrar: a.mostrar !== false,
-                               esperaLogin: a.esperaLogin || 0, programa: a.programa || 'NexoEletric', progresso: t => diz({ progresso: t }) });
+                               esperaLogin: a.esperaLogin || 0, programa: a.programa || 'NexoEletric', progresso: t => diz({ progresso: t }),
+                               usuario: a.usuario || '', senha: a.senha || '' });
       delete r.imagem;
       diz({ fim: Object.assign(r, { zip: p.zip }) });
     } catch (e) { diz({ erro: String(e && e.message || e) }); }

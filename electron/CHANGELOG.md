@@ -4,6 +4,22 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.57.2 — 2026-11-03
+
+- **A conta da JLCPCB na configuração do hub.**
+  - **Onde:** Configurações › Projeto, logo abaixo da credencial do Odoo, um bloco "Conta da JLCPCB (Enviar pra
+    JLC)" com e-mail e senha (Gravar e Apagar senha).
+  - **No envio:** quando a JLC pede o login no meio do "Enviar pra JLC", o motor preenche e entra sozinho, sobe o
+    Gerber de novo e vai até o carrinho. Captcha ou senha recusada: mostra a janela do navegador e espera você
+    entrar, como antes.
+  - **Onde fica:** em `.hub-jlc.json`, na raiz do workspace. O ponto no nome tira o arquivo do HTTP, no hub Python
+    e no Rust, e ele está no `.gitignore`.
+  - **Cifra:** a senha vai cifrada pela DPAPI do Windows, e só o mesmo usuário, nesta máquina, a abre.
+  - **Segurança:** a senha nunca volta pela tela nem pela rota (só "tem senha"). Vai para o motor pela entrada
+    padrão e não fica no estado do envio. De outra máquina, a gravação é recusada.
+- Testes: `tests/test_jlc_rotas.py` (a conta, a cifra, a senha que não volta) e `tests/test-jlc.js` (o login
+  automático no meio do envio e a senha errada).
+
 ## 1.57.1 — 2026-11-03
 
 - **Corrigido: o zoom numa trilha travava a vista PCB.**
