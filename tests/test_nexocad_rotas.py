@@ -347,6 +347,26 @@ try:
     pac3['espessura'] = 1.0
     st, j3 = post('/api/nexo/placa', {'pacote': pac3})
     confere(j3['ok'] and j3['rev'] == 2 and j3['mudou'] is True, 'placa mudou: revisao 2')
+    # o render (Projects/<p>/Renders/) vai junto: a montada e a miniatura (thumb), a virgem vai como virgem
+    pf = json.loads(json.dumps(pac))
+    pf['projeto'] = 'PlacaFoto'
+    rd = os.path.join(tmp, 'Projects', 'PlacaFoto', 'Renders')
+    os.makedirs(rd, exist_ok=True)
+    png = lambda s: b'\x89PNG\r\n\x1a\n' + s  # noqa: E731
+    for arq, dados in (('placa-montada.png', png(b'montada')), ('placa-virgem.png', png(b'virgem'))):
+        with open(os.path.join(rd, arq), 'wb') as f:
+            f.write(dados)
+    st, jf = post('/api/nexo/placa', {'pacote': pf})
+    itf = nh('GET', '/api/v1/itens/%s' % jf['item'])
+    confere(jf['ok'] and set(itf['arquivos']) == {'placa', 'thumb', 'virgem'}, 'placa com render: placa + thumb + virgem (%r)' % itf.get('arquivos'))
+    with urllib.request.urlopen(NH_URL + '/api/v1/itens/%s/arquivo/thumb' % jf['item']) as r:
+        confere(r.read() == png(b'montada'), 'placa com render: a miniatura e a placa montada')
+    st, jf2 = post('/api/nexo/placa', {'pacote': pf})
+    confere(jf2['ok'] and jf2['mudou'] is False, 'placa com a mesma foto: sem revisao nova')
+    with open(os.path.join(rd, 'placa-montada.png'), 'wb') as f:
+        f.write(png(b'montada 2'))
+    st, jf3 = post('/api/nexo/placa', {'pacote': pf})
+    confere(jf3['ok'] and jf3['mudou'] is True and jf3['rev'] == jf['rev'] + 1, 'render refeito: revisao nova da placa')
     st, j = post('/api/nexo/placa', {'pacote': {'format': 'outro'}})
     confere(st == 400, 'placa: formato errado = 400')
 

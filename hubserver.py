@@ -774,6 +774,11 @@ def api_pdf():
     if not isinstance(data, dict) or not isinstance(data.get('base64'), str):
         return {'ok': False, 'error': 'JSON {proj, nome, base64} obrigatorio'}, 400
     d, motivo = _gerber_projeto(data.get('proj'))
+    if d is None and motivo != 'projeto nao encontrado':
+        # o PDF do esquema (vista Esquema, Arquivo » Exportar PDF): projeto so de esquema tambem grava
+        cand = os.path.join(ROOT, 'Projects', data.get('proj'))
+        if os.path.isfile(os.path.join(cand, 'schematic.js')):
+            d, motivo = cand, ''
     if d is None:
         return {'ok': False, 'error': motivo}, 404
     nome = data.get('nome')
@@ -805,6 +810,86 @@ def api_pdf():
         return {'ok': False, 'error': 'falha ao gravar o PDF: %s' % e}, 500
     return {'ok': True, 'arquivo': 'Projects/%s/%s/%s.pdf' % (os.path.basename(d), PDF_DIR, nome),
             'bytes': len(corpo)}
+
+
+# As fotos 3D da placa (o "Gerar render" da vista PCB e do envio ao Odoo; o MCP pcb_render_3d grava
+# as mesmas, do mesmo jeito): Projects/<p>/Renders/placa-montada.png e placa-virgem.png + renders.json.
+# Quem fotografa e a vista (pcbframe.js » render3d, WebGL); aqui so se grava. Quem as le: o envio da
+# lista ao Odoo (odoolista.imagens_do_projeto) e a publicacao da placa no NexoBD (a miniatura do item).
+RENDER_ARQ = {'montada': 'placa-montada.png', 'virgem': 'placa-virgem.png'}
+RENDER_TAG = {'montada': 'placa montada', 'virgem': 'placa virgem'}
+RENDER_MANIFESTO = 'renders.json'
+RENDER_MAX_BYTES = 15 * 1024 * 1024     # o mesmo teto do envio (odoolista.RENDER_MAX)
+
+
+@app.route('/api/render', methods=['POST'])
+def api_render():
+    """Grava as fotos 3D da placa. Corpo: {proj, fotos: {montada|virgem: {png (data URL ou base64),
+    pose, largura, altura, realView, corpos, steps, falhas, incompleto}}}. So o tipo que veio e
+    trocado; o renders.json guarda o que foi tirado de cada um (mesmo formato do pcb_render_3d)."""
+    request.max_content_length = RENDER_MAX_BYTES * 3 + 1024 * 1024
+    try:
+        data = request.get_json(silent=True)
+    except RequestEntityTooLarge:
+        return {'ok': False, 'error': 'foto grande demais'}, 413
+    if not isinstance(data, dict) or not isinstance(data.get('fotos'), dict) or not data['fotos']:
+        return {'ok': False, 'error': 'JSON {proj, fotos: {montada, virgem}} obrigatorio'}, 400
+    d, motivo = _gerber_projeto(data.get('proj'))
+    if d is None:
+        return {'ok': False, 'error': motivo}, 404
+    pngs = {}
+    for t, f in data['fotos'].items():
+        if t not in RENDER_ARQ or not isinstance(f, dict) or not isinstance(f.get('png'), str):
+            return {'ok': False, 'error': 'foto "%s" invalida' % t}, 400
+        try:
+            corpo = base64.b64decode(re.sub(r'^data:image/png;base64,', '', f['png']), validate=True)
+        except ValueError:
+            return {'ok': False, 'error': 'base64 invalido na foto "%s"' % t}, 400
+        if not corpo.startswith(b'\x89PNG\r\n\x1a\n'):
+            return {'ok': False, 'error': 'a foto "%s" nao e um PNG' % t}, 400
+        if len(corpo) > RENDER_MAX_BYTES:
+            return {'ok': False, 'error': 'a foto "%s" passa de 15 MB' % t}, 413
+        pngs[t] = corpo
+    rdir = os.path.join(d, RENDER_DIR)
+    mf = os.path.join(rdir, RENDER_MANIFESTO)
+    try:
+        with open(mf, encoding='utf-8') as fh:
+            man = json.load(fh)
+        if not isinstance(man, dict):
+            man = {}
+    except (OSError, ValueError):
+        man = {}
+    quando = time.strftime('%Y-%m-%d %H:%M:%S')
+    nome = os.path.basename(d)
+    out = {}
+    try:
+        os.makedirs(rdir, exist_ok=True)
+        for t, corpo in pngs.items():
+            full = os.path.join(rdir, RENDER_ARQ[t])
+            with open(full + '.tmp', 'wb') as fh:
+                fh.write(corpo)
+            os.replace(full + '.tmp', os.path.realpath(full))
+            f = data['fotos'][t]
+            info = {'tag': RENDER_TAG[t], 'arquivo': RENDER_ARQ[t], 'bytes': len(corpo), 'gerado': quando,
+                    'sha1': hashlib.sha1(corpo).hexdigest()}
+            for k in ('pose', 'largura', 'altura', 'realView', 'incompleto'):
+                if f.get(k) not in (None, ''):
+                    info[k] = f[k]
+            if t == 'montada':
+                for k in ('corpos', 'steps'):
+                    if isinstance(f.get(k), (int, float)):
+                        info[k] = f[k]
+            if isinstance(f.get('falhas'), list) and f['falhas']:
+                info['falhas'] = [str(x)[:300] for x in f['falhas'][:20]]
+            man[t] = info
+            out[t] = {'arquivo': 'Projects/%s/%s/%s' % (nome, RENDER_DIR, RENDER_ARQ[t]), 'bytes': len(corpo),
+                      'gerado': quando}
+        with open(mf + '.tmp', 'w', encoding='utf-8', newline='\n') as fh:
+            fh.write(json.dumps(man, ensure_ascii=False, indent=1, sort_keys=True))
+        os.replace(mf + '.tmp', os.path.realpath(mf))
+    except OSError as e:
+        return {'ok': False, 'error': 'falha ao gravar o render: %s' % e}, 500
+    return {'ok': True, 'fotos': out, 'pasta': 'Projects/%s/%s' % (nome, RENDER_DIR)}
 
 
 # ─────────────────────────── configuracao do hub ───────────────────────────

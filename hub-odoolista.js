@@ -42,11 +42,18 @@ const CSS = `
    (que descem para baixo do cabecalho, ver .hd-toasts), coberto justamente logo depois de cada
    mudanca — o momento em que ele muda */
 #odoomodal .od-tot{font-size:11px; color:var(--fg-dim,#9a9a9a); white-space:nowrap;}
-#odoomodal .od-fotos{display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:11px;
-  color:var(--fg-dim,#9a9a9a); padding:0 0 8px;}
-#odoomodal .od-fotos .ft{display:flex; align-items:center; gap:6px;}
-#odoomodal .od-fotos img{width:48px; height:36px; object-fit:contain; background:#fff; border-radius:3px;}
-#odoomodal .od-fotos .falta{color:var(--warn,#ffb74d);}
+#odoomodal .od-fotos{display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; font-size:11px;
+  color:var(--fg-dim,#9a9a9a); padding:0 0 10px;}
+#odoomodal .od-fotos .ft{display:flex; flex-direction:column; align-items:center; gap:4px;}
+#odoomodal .od-fotos .ft img{width:176px; height:132px; object-fit:contain; background:#fff; border-radius:4px;
+  cursor:zoom-in; box-shadow:0 0 0 1px var(--border,#3a3a3a);}
+#odoomodal .od-fotos .ft img:hover{box-shadow:0 0 0 1px var(--accent,#4fc3f7);}
+#odoomodal .od-fotos .ft .vazia{width:176px; height:132px; display:grid; place-items:center; text-align:center;
+  border-radius:4px; border:1px dashed var(--border,#3a3a3a); color:var(--warn,#ffb74d); padding:0 10px;}
+#odoomodal .od-fotos .od-add{align-self:center;}
+#odoomodal .od-zoom{position:absolute; inset:0; z-index:5; display:grid; place-items:center; cursor:zoom-out;
+  background:var(--scrim,rgba(11,11,13,.75));}
+#odoomodal .od-zoom img{max-width:92%; max-height:88%; object-fit:contain; background:#fff; border-radius:6px;}
 #odoomodal .od-aviso{font-size:11px; padding:7px 9px; border-radius:4px; margin-bottom:8px;
   border:1px solid var(--border,#3a3a3a); border-left:3px solid var(--warn,#ffd54f);
   background:var(--panel2,#2d2d2d); white-space:pre-wrap;}
@@ -737,10 +744,13 @@ async function previa(){
   return true;
 }
 
-/* As fotos 3D que vao com o envio (Projects/<p>/Renders/, tiradas pela IA com o pcb_render_3d):
-   a "placa montada" vira a foto da PCB montada no Odoo, a "placa virgem" a da fibra, que vai como
-   item da montada (odoolista.anexa_imagens). So informa: sem foto, a lista vai assim mesmo. */
+/* As fotos 3D que vao com o envio (Projects/<p>/Renders/): a "placa montada" vira a foto da PCB
+   montada no Odoo, a "placa virgem" a da fibra, que vai como item da montada (odoolista.anexa_imagens).
+   Sem foto a lista vai assim mesmo; o "Gerar render" tira as duas aqui (pedido do dono, 2026-11-03),
+   as mesmas do Arquivo » Gerar render da vista PCB e do pcb_render_3d do MCP. Clicar na foto amplia. */
+let fotosJ = null, fotosVer = '';
 function pintaFotos(j){
+  fotosJ = j;
   const box = $('odooFotos');
   if (!box) return;
   box.textContent = '';
@@ -751,15 +761,81 @@ function pintaFotos(j){
     const f = im[t], s = el('span', 'ft');
     if (f) {
       const img = el('img');
-      img.src = '/' + f.arquivo.split('/').map(encodeURIComponent).join('/') + '?t=' + encodeURIComponent(f.gerado || '');
+      img.src = '/' + f.arquivo.split('/').map(encodeURIComponent).join('/') + '?t=' + encodeURIComponent((f.gerado || '') + fotosVer);
       img.alt = rot;
+      img.onclick = () => ampliaFoto(img.src, rot);
       s.title = rot + ' — ' + f.arquivo + ' (' + f.gerado + ')';
-      s.append(img, el('span', null, rot));
+      s.append(img, el('span', null, rot + (f.gerado ? ' · ' + f.gerado : '')));
     } else {
-      s.append(el('span', 'falta', rot + ': sem foto'));
-      s.title = 'peça à IA: pcb_render_3d (MCP do NexoEletric) tira a foto 3D da ' + rot;
+      s.append(el('span', 'vazia', 'sem foto da ' + rot), el('span', null, rot));
+      s.title = 'o "Gerar render" ao lado tira a foto 3D da ' + rot;
     }
     box.append(s);
+  }
+  if (j.placa) {
+    const b = el('button', 'od-add', ST.renderando ? 'gerando o render…' : (im.montada && im.virgem ? 'Refazer render' : 'Gerar render'));
+    b.type = 'button';
+    b.disabled = !!ST.renderando;
+    b.title = 'tira as duas fotos 3D da placa (virgem e montada) e grava em Renders/ — leva alguns segundos';
+    b.onclick = () => geraRender();
+    box.append(b);
+  }
+}
+function ampliaFoto(src, rot){
+  const box = document.querySelector('#odoomodal .od-box') || $('odoomodal');
+  if (!box) return;
+  const z = el('div', 'od-zoom'), img = el('img');
+  img.src = src; img.alt = rot; z.title = rot + ' (clique para fechar)';
+  z.append(img);
+  z.onclick = () => z.remove();
+  box.append(z);
+}
+/* A foto sai da vista PCB (WebGL, pcbframe.js » render3d), aberta escondida num iframe da mesma origem: o
+   modal fica na tela e vale tambem no hub web, onde a fila do MCP (/api/mcp/*) nao atende de fora. */
+function vistaPcbEscondida(p){
+  return new Promise((ok, falha) => {
+    const f = document.createElement('iframe');
+    f.setAttribute('aria-hidden', 'true');
+    f.tabIndex = -1;
+    f.style.cssText = 'position:fixed;left:-20000px;top:0;width:1600px;height:1200px;border:0;visibility:hidden;pointer-events:none;';
+    f.src = 'pcbframe.html?p=' + encodeURIComponent(p) + '&lean=1';
+    const fim = Date.now() + 90000;
+    const olha = () => {
+      let g = null;
+      try { g = f.contentWindow && f.contentWindow.HubMcpVista; } catch (e) { g = null; }
+      if (g && typeof g.render3d === 'function') return ok(f);
+      if (Date.now() > fim) { f.remove(); return falha(new Error('a vista PCB não abriu em 90 s')); }
+      setTimeout(olha, 300);
+    };
+    document.body.append(f);
+    olha();
+  });
+}
+async function geraRender(){
+  const p = proj();
+  if (!p || ST.renderando) return;
+  ST.renderando = true;
+  pintaFotos(fotosJ);
+  let f = null;
+  try {
+    f = await vistaPcbEscondida(p);
+    const fotos = await f.contentWindow.HubMcpVista.render3d({});
+    const r = await fetch('/api/render', { method:'POST', cache:'no-store', headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ proj:p, fotos }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || 'o hub respondeu ' + r.status);
+    fotosVer = '&' + Date.now();
+    const im = Object.assign({}, (fotosJ && fotosJ.imagens) || {}, j.fotos || {});
+    if (fotosJ) fotosJ = Object.assign({}, fotosJ, { imagens:im });
+    const m = fotos.montada || {};
+    const falta = m.incompleto || ((m.falhas || []).length ? m.falhas.length + ' componente(s) sem modelo 3D carregado' : '');
+    HubDialog.toast('render salvo: placa montada e placa virgem' + (falta ? ' — ' + falta : ''), falta ? 'warn' : 'ok', falta ? 9000 : 3500);
+  } catch (e) {
+    HubDialog.toast('o render não saiu: ' + (e && e.message || e), 'err', 9000);
+  } finally {
+    if (f) f.remove();
+    ST.renderando = false;
+    if (ST.aberto) pintaFotos(fotosJ);
   }
 }
 

@@ -359,14 +359,26 @@ async function publicaPacote(o) {
       tags: ['pcb'], atributos: { projeto }, chaves: [{ sistema: NH.SIS_PLACA, chave: projeto }] });
   } else it = await cliente.item(r.id);
   const revAtual = Number(it.rev != null ? it.rev : it.rev_atual) || 0;
-  if (revAtual >= 1 && (it.atributos || {}).pacote_sha === sha) return { item: it.id, rev: revAtual, mudou: false, avisos, pacote, sha };
+  /* as fotos 3D (Renders/): a "montada" e a miniatura do item (papel thumb, a que o catalogo do NexoBD
+     mostra) e a "virgem" vai junto (papel virgem). Mudaram quando o PNG daqui nao e o da revisao atual:
+     a comparacao e pelo proprio arquivo, sem atributo, e vale igual para o publicador em Python */
+  const fotos = o.fotos || {};
+  const naRev = (it.arquivos && typeof it.arquivos === 'object') ? it.arquivos : {};
+  const fotoMudou = ['thumb', 'virgem'].some(pp => fotos[pp] && (!naRev[pp] || naRev[pp].sha256 !== sha256(fotos[pp])));
+  if (revAtual >= 1 && (it.atributos || {}).pacote_sha === sha && !fotoMudou) return { item: it.id, rev: revAtual, mudou: false, avisos, pacote, sha };
   const b = await cliente.sobeBlob(Buffer.from(JSON.stringify(pacote, null, 1), 'utf8'), 'placa.json');
+  const arquivos = { placa: { sha256: b.sha256, nome: 'placa.json' } };
+  for (const [pp, nome] of [['thumb', 'placa-montada.png'], ['virgem', 'placa-virgem.png']]) {
+    if (!fotos[pp]) continue;
+    try { arquivos[pp] = { sha256: (await cliente.sobeBlob(fotos[pp], nome)).sha256, nome }; }
+    catch (e) { if (e && e.codigo === 'fora_do_ar') throw e; avisos.push('foto ' + nome + ': ' + (e && e.message || e)); }
+  }
   let numero;
-  try { numero = (await cliente.novaRevisao(it.id, { arquivos: { placa: { sha256: b.sha256, nome: 'placa.json' } }, base: revAtual, nota: o.nota || 'placa do NexoEletric' })).numero; }
+  try { numero = (await cliente.novaRevisao(it.id, { arquivos, base: revAtual, nota: o.nota || 'placa do NexoEletric' })).numero; }
   catch (e) {
     if (e.status !== 409) throw e;
     const x = await cliente.item(it.id);
-    numero = (await cliente.novaRevisao(it.id, { arquivos: { placa: { sha256: b.sha256, nome: 'placa.json' } }, base: Number(x.rev != null ? x.rev : x.rev_atual) || 0, nota: o.nota || 'placa do NexoEletric' })).numero;
+    numero = (await cliente.novaRevisao(it.id, { arquivos, base: Number(x.rev != null ? x.rev : x.rev_atual) || 0, nota: o.nota || 'placa do NexoEletric' })).numero;
   }
   await cliente.alteraItem(it.id, { atributos: { projeto, pacote_sha: sha, componentes: (pacote.componentes || []).length, modelos: Object.keys(saida).length } });
   const usados = [...new Set(Object.values(saida).map(m => m.item))];
@@ -391,8 +403,22 @@ async function publicaPlaca(o) {
     const g = await garanteModelo(cliente, { file: k, nome: m.nome, origem, footprints: fps }, ler, `importado do NexoEletric (${origem}, placa ${p.nome})`);
     return { id: g.id, rev: g.rev };
   };
-  const r = await publicaPacote({ cliente, pacote, avisos, garante, nota: o.nota });
+  const r = await publicaPacote({ cliente, pacote, avisos, garante, nota: o.nota, fotos: fotosDaPlaca(p.dir) });
   return Object.assign({ projeto: p.nome }, r);
+}
+
+/* as fotos 3D da placa (Projects/<p>/Renders/, o "Gerar render" da vista PCB ou o pcb_render_3d):
+   {thumb: Buffer (placa montada), virgem: Buffer} -- so PNG de verdade e ate 15 MB, como no envio ao Odoo */
+const RENDERS = { thumb: 'placa-montada.png', virgem: 'placa-virgem.png' };
+function fotosDaPlaca(dir) {
+  const out = {};
+  for (const [pp, arq] of Object.entries(RENDERS)) {
+    try {
+      const b = fs.readFileSync(path.join(dir, 'Renders', arq));
+      if (b.length > 8 && b.length <= 15 * 1024 * 1024 && b.readUInt32BE(0) === 0x89504e47) out[pp] = b;
+    } catch (_) { /* sem a foto */ }
+  }
+  return out;
 }
 
 function projetosComPlaca(ctx) {
@@ -450,7 +476,7 @@ async function sincroniza(o) {
   return resumo;
 }
 
-module.exports = { sincroniza, trazComponentes, poeComponentes, tiraComponente, sincronizaModelos, sincronizaPlacas, publicaPlaca, publicaPacote, garanteModelo, coletaModelos,
+module.exports = { fotosDaPlaca, sincroniza, trazComponentes, poeComponentes, tiraComponente, sincronizaModelos, sincronizaPlacas, publicaPlaca, publicaPacote, garanteModelo, coletaModelos,
                    lerModelo, lib3dDe, libHubDe, corposDaPlaca, indiceDoNexoHub, projetosComPlaca, canonico, shaPacote, idDaChave, emLotes };
 
 /* ---------- CLI (o app desktop) ---------- */

@@ -98,6 +98,8 @@ class NexoHubSync {
     vigia(path.join(this.ws, 'Projects'), { recursive: true }, (n) => {
       const partes = n.split(/[\\/]/);
       if (partes.length === 2 && /^(board|changes|board3d)\.js$/i.test(partes[1])) this.agendar({ placa: partes[0] });
+      /* o render novo (Gerar render / pcb_render_3d) vira a miniatura da placa no NexoBD */
+      else if (partes.length === 3 && /^renders$/i.test(partes[1]) && /^placa-(montada|virgem)\.png$/i.test(partes[2])) this.agendar({ placa: partes[0] });
     });
   }
 

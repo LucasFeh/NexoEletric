@@ -110,6 +110,31 @@ const hub = http.createServer((q, r) => {
   r = await roda();
   assert.strictEqual(placa.rev_atual, 2, 'sem mudanca, sem revisao');
 
+  /* ---------- o render (Renders/): a montada vira a miniatura (thumb), a virgem vai junto ---------- */
+  const PNG = s => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(s)]);
+  const rdir = path.join(ROOT, 'Projects', 'LM555 astável', 'Renders');
+  fs.mkdirSync(rdir, { recursive: true });
+  fs.writeFileSync(path.join(rdir, 'placa-montada.png'), PNG('montada'));
+  fs.writeFileSync(path.join(rdir, 'placa-virgem.png'), PNG('virgem'));
+  fs.writeFileSync(path.join(rdir, 'lixo.png'), 'nao e png');
+  r = await roda({ modelos: false });
+  assert.strictEqual(r.placas.publicadas, 1, 'a foto nova e revisao nova da placa');
+  assert.strictEqual(placa.rev_atual, 3);
+  const a3 = placa.revisoes[2].arquivos;
+  assert.deepStrictEqual(Object.keys(a3).sort(), ['placa', 'thumb', 'virgem']);
+  assert.strictEqual(E.blobs.get(a3.thumb.sha).dados.toString('latin1'), PNG('montada').toString('latin1'));
+  assert.strictEqual(E.blobs.get(a3.virgem.sha).dados.toString('latin1'), PNG('virgem').toString('latin1'));
+  assert.strictEqual(a3.thumb.nome, 'placa-montada.png');
+  r = await roda({ modelos: false });
+  assert.strictEqual(placa.rev_atual, 3, 'a mesma foto nao gera revisao');
+  fs.writeFileSync(path.join(rdir, 'placa-montada.png'), PNG('montada de novo'));
+  r = await roda({ modelos: false });
+  assert.strictEqual(placa.rev_atual, 4, 'refazer o render publica de novo');
+  assert.strictEqual(placa.revisoes[3].arquivos.virgem.sha, a3.virgem.sha, 'a virgem que nao mudou e o mesmo blob');
+  fs.writeFileSync(path.join(rdir, 'placa-virgem.png'), 'quebrado');
+  assert.deepStrictEqual(Object.keys(S.fotosDaPlaca(path.join(ROOT, 'Projects', 'LM555 astável'))), ['thumb'], 'so PNG de verdade');
+  fs.writeFileSync(path.join(rdir, 'placa-virgem.png'), PNG('virgem'));
+
   /* ---------- retoma + footprint novo ---------- */
   fs.writeFileSync(path.join(ROOT, 'Libs', '3d-hub', 'ccc.step'), STEP('novo'));
   libHub.models.m3 = { file: '3d-hub/ccc.step', name: 'SOT23.step' };

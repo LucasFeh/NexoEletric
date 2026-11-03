@@ -43,7 +43,8 @@ pub const LIVE_JS: &str = r#"/* hubserver: auto-reload via SSE (injetado; nao ex
 const ESTADO_LOCAL: [&str; 4] = ["bom-vistos.json", "bom-opts.json", "odoo-lista.json", "lista-extras.json"];
 const FP_HUB: &str = "pcblib-hub.js";
 const FP3D_PASTA: &str = "3d-hub";
-const SAIDAS: [&str; 2] = ["gerber", "pdf"];
+// renders: as fotos 3D da placa (Renders/, a vista PCB grava): recarregar mataria a vista que fotografou
+const SAIDAS: [&str; 3] = ["gerber", "pdf", "renders"];
 
 pub struct Live {
     pub tx: watch::Sender<u64>,
@@ -128,4 +129,23 @@ pub async fn events(State(est): State<Est>) -> Sse<impl Stream<Item = Result<Eve
         .filter(move |v| *v != inicio)
         .map(|v| Ok(Event::default().event("change").data(v.to_string())));
     Sse::new(s).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("keep-alive"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::conta;
+    use std::path::Path;
+
+    #[test]
+    fn saidas_do_projeto_nao_recarregam() {
+        let root = Path::new("C:/hub");
+        assert!(conta(root, &root.join("Projects/P1/board.js")));
+        assert!(conta(root, &root.join("Projects/P1/changes.js")));
+        // Gerber, PDF e as fotos 3D (Renders/): quem grava e a propria vista, e recarregar a mataria
+        for p in ["Projects/P1/Gerber/x.gtl", "Projects/P1/PDF/LO.pdf", "Projects/P1/Renders/placa-montada.png",
+                  "Projects/P1/Renders/renders.json", "Projects/P1/Renders/placa-virgem.png.tmp"] {
+            assert!(!conta(root, &root.join(p)), "{p} nao recarrega");
+        }
+        assert!(!conta(root, &root.join("Projects/P1/odoo-lista.json")));
+    }
 }

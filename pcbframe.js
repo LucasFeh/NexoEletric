@@ -4461,6 +4461,7 @@ function extrasDoHub(w){
   if (compsDaSel().length === 1 && typeof HubNexo !== 'undefined') it.push({ rot:'Editar 3D no NexoCAD', f:() => fazAcao('nexoEditar3d') });
   /* a placa inteira para o NexoCAD (a caixa em volta): no 2D e no 3D */
   if (typeof HubNexoPacote !== 'undefined') it.push({ rot:'Enviar placa ao NexoCAD', f:() => fazAcao('nexoPlaca') });
+  if (typeof HubPcb3dVista !== 'undefined' && HubPcb3dVista.disponivel()) it.push({ rot:'Gerar render (placa virgem e montada)', f:() => fazAcao('gerarRender') });
   it.push(modo3d ? { rot:'Voltar ao 2D', tecla:teclaDe('vista2d') || '2', f:() => fazAcao('vista2d') }
                  : { rot:'Ver em 3D', tecla:teclaDe('vista3d') || '3', f:() => fazAcao('vista3d') });
   if (SEL.length) it.push({ rot:'Girar 90°', tecla:teclaDe('girar'), f:() => transformaSelecao('gira') });
@@ -5486,6 +5487,36 @@ async function render3d(a){
     host.remove();
   }
 }
+/* Arquivo » Gerar render (pedido do dono, 2026-11-03): as mesmas duas fotos do pcb_render_3d -- a placa
+   "montada" (isometrica, com os componentes) e a "virgem" (de frente, so a placa) --, tiradas sozinhas
+   e gravadas em Projects/<p>/Renders/ (POST /api/render). Dali elas vao com a lista do Odoo e viram a
+   miniatura da placa na biblioteca do NexoBD (a sincronia publica a placa de novo quando a foto muda). */
+let renderando = null;
+function gerarRender(){
+  if (renderando) { HubDialog.toast('o render da placa já está sendo gerado…', 'info', 2500); return renderando; }
+  if (!PROJ) { HubDialog.toast('abra um projeto com placa para gerar o render', 'warn'); return Promise.resolve(null); }
+  const aviso = HubDialog.toast('gerando o render da placa — virgem e montada…', 'info', 0);
+  renderando = (async () => {
+    try {
+      const fotos = await render3d({});
+      const r = await fetch('/api/render', { method:'POST', headers:{ 'Content-Type':'application/json' },
+        body:JSON.stringify({ proj:PROJ, fotos }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || 'o hub respondeu ' + r.status);
+      const m = fotos.montada || {};
+      const falta = m.incompleto || ((m.falhas || []).length ? (m.falhas.length + ' componente(s) sem modelo 3D carregado') : '');
+      HubDialog.toast('render salvo: placa montada e placa virgem (' + j.pasta + ')' + (falta ? ' — ' + falta : ''), falta ? 'warn' : 'ok', falta ? 9000 : 4000);
+      return j;
+    } catch (e) {
+      HubDialog.toast('o render não saiu: ' + (e && e.message || e), 'err', 9000);
+      return null;
+    } finally {
+      aviso.close();
+      renderando = null;
+    }
+  })();
+  return renderando;
+}
 /* a placa mudou: na tela 3D refaz ja; escondida, fica para quando a tela parar (agendaFundo3d) */
 function refaz3d(){
   if (OPC3D.corpos) agendaSilhuetas();
@@ -5776,6 +5807,7 @@ function fazAcao(id, arg){
     case 'editarFp': { const L = compsDaSel(); editaFootprint(L.length === 1 ? L[0] : null); return; }
     case 'nexoEditar3d': { const L = compsDaSel(); const c = CORPO_MENU; editar3dNexo(L.length === 1 ? L[0] : null).finally(() => { if (CORPO_MENU === c) CORPO_MENU = null; }); return; }
     case 'nexoPlaca': enviaPlacaNexo(); return;
+    case 'gerarRender': gerarRender(); return;
     case 'gradeId': setGrade(arg); HubDialog.toast('grade ' + grade.rot, 'info', 1400); return;
     case 'desselecionar': selLimpa(); return;
     case 'selNet': { const n = netDaSel(); if (n) selecionaNets(new Set([n])); return; }

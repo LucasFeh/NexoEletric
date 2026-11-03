@@ -787,9 +787,32 @@ def _id_da_chave(k, m):
     return urllib.parse.unquote(b.group(1)) if b else None
 
 
-def publica_pacote(pacote, porta):
+# as fotos 3D da placa (Projects/<p>/Renders/; o "Gerar render" da vista PCB ou o pcb_render_3d): a "montada"
+# e a miniatura do item placa (papel thumb) e a "virgem" vai junto (papel virgem). O mesmo do
+# mcp/lib/nexohub-sync.js » fotosDaPlaca: mudou quando o PNG daqui nao e o da revisao atual.
+RENDERS_PLACA = (('thumb', 'placa-montada.png'), ('virgem', 'placa-virgem.png'))
+RENDER_MAX = 15 * 1024 * 1024
+
+
+def fotos_da_placa(root, projeto):
+    """{papel: bytes} das fotos que existem (so PNG de verdade, ate 15 MB)."""
+    out = {}
+    if not root or not projeto or '/' in projeto or '\\' in projeto or projeto.startswith('.'):
+        return out
+    for papel, arq in RENDERS_PLACA:
+        try:
+            with open(os.path.join(root, 'Projects', projeto, 'Renders', arq), 'rb') as f:
+                b = f.read(RENDER_MAX + 1)
+        except OSError:
+            continue
+        if 8 < len(b) <= RENDER_MAX and b.startswith(b'\x89PNG\r\n\x1a\n'):
+            out[papel] = b
+    return out
+
+
+def publica_pacote(pacote, porta, root=None):
     """O pacote (com `url` em cada modelo) -> modelos {item, rev, nome} -> o item placa no Nexo Hub.
-    Devolve {item, rev, mudou, avisos}."""
+    Com `root`, as fotos de Renders/ vao junto (thumb e virgem). Devolve {item, rev, mudou, avisos}."""
     if not isinstance(pacote, dict) or pacote.get('format') != 'eletrichub-placa-v1':
         raise ErroNexo('pacote invalido: falta format "eletrichub-placa-v1"', 400)
     projeto = str(pacote.get('projeto') or '').strip()
@@ -845,15 +868,28 @@ def publica_pacote(pacote, porta):
     else:
         it = nh_item(r['id'])
     rev_atual = _rev(it)
-    if rev_atual >= 1 and (it.get('atributos') or {}).get('pacote_sha') == sha:
+    fotos = fotos_da_placa(root, projeto)
+    na_rev = it.get('arquivos') if isinstance(it.get('arquivos'), dict) else {}
+    foto_mudou = any(not isinstance(na_rev.get(pp), dict) or na_rev[pp].get('sha256') != hashlib.sha256(b).hexdigest()
+                     for pp, b in fotos.items())
+    if rev_atual >= 1 and (it.get('atributos') or {}).get('pacote_sha') == sha and not foto_mudou:
         return {'item': it['id'], 'rev': rev_atual, 'mudou': False, 'avisos': avisos}
     b = nh_sobe_blob(json.dumps(pac, ensure_ascii=False, indent=1).encode('utf-8'), 'placa.json')
+    arquivos = {'placa': {'sha256': b['sha256'], 'nome': 'placa.json'}}
+    for papel, arq in RENDERS_PLACA:
+        if papel in fotos:
+            try:
+                arquivos[papel] = {'sha256': nh_sobe_blob(fotos[papel], arq)['sha256'], 'nome': arq}
+            except ErroNexo as e:
+                if e.status == 503:
+                    raise
+                avisos.append('foto %s: %s' % (arq, e))
     try:
-        j = nh_revisao(it['id'], {'arquivos': {'placa': {'sha256': b['sha256'], 'nome': 'placa.json'}}, 'base': rev_atual, 'nota': 'placa do NexoEletric'})
+        j = nh_revisao(it['id'], {'arquivos': arquivos, 'base': rev_atual, 'nota': 'placa do NexoEletric'})
     except ErroNexo as e:
         if getattr(e, 'http', 0) != 409:
             raise
-        j = nh_revisao(it['id'], {'arquivos': {'placa': {'sha256': b['sha256'], 'nome': 'placa.json'}}, 'base': _rev(nh_item(it['id'])), 'nota': 'placa do NexoEletric'})
+        j = nh_revisao(it['id'], {'arquivos': arquivos, 'base': _rev(nh_item(it['id'])), 'nota': 'placa do NexoEletric'})
     nh('PATCH', '/api/v1/itens/%s' % _q(it['id']), {'atributos': {'projeto': projeto, 'pacote_sha': sha,
                                                                  'componentes': len(pac.get('componentes') or []),
                                                                  'modelos': len(saida)}})
@@ -994,7 +1030,7 @@ def registra(app, root, eh_local=None):
         a = request.get_json(silent=True) or {}
         pacote = a.get('pacote') if isinstance(a.get('pacote'), dict) else (a if a.get('format') else None)
         try:
-            pub = publica_pacote(pacote, porta_atual())
+            pub = publica_pacote(pacote, porta_atual(), root)
             r = rpc('pcb_importar', {'item': pub['item']})
             return _json({'ok': True, 'result': r, 'item': pub['item'], 'rev': pub['rev'], 'mudou': pub['mudou'],
                           'avisos': pub['avisos']})

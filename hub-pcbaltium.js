@@ -146,8 +146,9 @@ const OCULTOS = new Set(['PLPCB:TASKINGPinSwap', 'PLPCB:ConvertToGeneric']);
    aqui entram as saidas que o hub gera */
 const DINAMICOS = {
   'Fabrication Outputs': [{ rotulo:'Gerber Files', acao:'gerber' }, { rotulo:'NC Drill Files', acao:'gerber' }],
-  'Assembly Outputs': [{ rotulo:'Assembly Drawings', acao:'pdf' }],
-  'Export': [{ rotulo:'Gerber (.zip)', acao:'gerber' }, { rotulo:'PDF (layout)', acao:'pdf' }, { rotulo:'Placa para o NexoCAD…', acao:'nexoPlaca' }],
+  'Assembly Outputs': [{ rotulo:'Assembly Drawings', acao:'pdf' }, { rotulo:'Render 3D (placa virgem e montada)', acao:'gerarRender' }],
+  'Export': [{ rotulo:'Gerber (.zip)', acao:'gerber' }, { rotulo:'PDF (layout)', acao:'pdf' }, { rotulo:'Placa para o NexoCAD…', acao:'nexoPlaca' },
+             { rotulo:'Render 3D (placa virgem e montada)', acao:'gerarRender' }],
 };
 
 /* ============================== CSS (no tema do hub) ============================== */
@@ -599,13 +600,21 @@ function instala(V) {
       .filter(x => x.filhos.length || x.ing === 'File' || x.ing === 'View' || x.ing === 'Help');
   }
   /* Pedido do dono (2026-10-15): o envio da placa ao NexoCAD a vista no Arquivo, logo abaixo do Exportar
-     (que tambem o tem), e nao so dentro do submenu */
+     (que tambem o tem), e nao so dentro do submenu. E o "Gerar render" (2026-11-03) logo abaixo dele: as
+     fotos da placa virgem e montada que vao para o Odoo e para a biblioteca do NexoBD */
   function comNexo(filhos) {
-    if (VISTA !== 'pcb') return filhos;
+    /* o PDF a vista no Arquivo das duas vistas (2026-11-03): "Exportar PDF do esquema/do layout", alem do Smart PDF */
+    const pdf = { rot:TR(VISTA === 'pcb' ? 'Exportar PDF do layout…' : 'Exportar PDF do esquema…'), f:() => V.fazAcao('pdf'), tecla:V.teclaDe('pdf') || '', acao:'pdf' };
+    if (VISTA !== 'pcb') {
+      if (VISTA !== 'sch') return filhos;
+      const k = filhos.findIndex(x => x && x.acao === 'pdf');
+      return k < 0 ? [pdf].concat(filhos.length && filhos[0] !== '-' ? ['-'] : [], filhos) : filhos;
+    }
     const i = filhos.findIndex(x => x && x.filhos && x.filhos.some(f => f && f.acao === 'nexoPlaca'));
     if (i < 0) return filhos;
     const item = { rot:TR('Enviar placa ao NexoCAD…'), f:() => V.fazAcao('nexoPlaca'), tecla:V.teclaDe('nexoPlaca') || '', acao:'nexoPlaca' };
-    return filhos.slice(0, i + 1).concat([item], filhos.slice(i + 1));
+    const render = { rot:TR('Gerar render (placa virgem e montada)'), f:() => V.fazAcao('gerarRender'), tecla:V.teclaDe('gerarRender') || '', acao:'gerarRender' };
+    return filhos.slice(0, i + 1).concat([item, render, pdf], filhos.slice(i + 1));
   }
   /* fonte: funcao que devolve a lista de cima (o topo do hub passa a sua); sem ela, a da vista */
   function barra(box, fonte) {
