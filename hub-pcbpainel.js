@@ -130,6 +130,12 @@ const CSS = `
 .pp .pp-campo{display:flex; flex-direction:column; gap:3px; min-width:0;}
 .pp .pp-campo > small{font-size:10px; color:var(--fg-dim);}
 .pp .pp-campo select{width:100%; min-width:0; height:26px; background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px; font-family:inherit; font-size:12px;}
+.pp .pp-passo{display:flex; gap:6px; min-width:0;}
+.pp .pp-passo select{flex:1;}
+.pp .pp-unidade{flex:none; min-height:26px; height:26px; padding:0 8px; gap:5px; font-variant-numeric:tabular-nums;}
+.pp .pp-unidade > span{flex:none; min-width:24px; text-align:center;}
+.pp .pp-unidade svg{color:var(--fg-dim);}
+.pp .pp-unidade:hover svg{color:var(--accent);}
 .pp .pp-campo .seg{display:flex; height:26px; box-sizing:border-box;}
 .pp .pp-campo .seg button{flex:1;}
 .pp .pp-larga{grid-column:1 / -1;}
@@ -498,11 +504,15 @@ function instala(aside, V) {
     for (const g of V.grades()) { const o = el('option', null, g.rot); o.value = g.id; if (g.id === V.grade()) o.selected = true; (/mil$/.test(g.id) ? gm : gmm).append(o); }
     gs.append(gm, gmm); gs.title = 'Passo da grade';
     gs.addEventListener('change', () => V.setGrade(gs.value));
-    campo(g2, 'Passo', gs);
-    const seg = el('div', 'seg'), tq = V.teclaDe('unidade');
-    seg.title = 'Unidade' + (tq ? ' (' + tq + ' troca)' : '');
-    for (const u of ['mm', 'mil']) { const b = el('button', null, u); b.type = 'button'; b.setAttribute('aria-pressed', String(V.unidade() === u)); b.addEventListener('click', () => V.setUnidade(u)); seg.append(b); }
-    campo(g2, 'Unidade', seg);
+    /* o passo e, do lado, a unidade num botao so com o icone de troca (pedido do dono, 2026-11-03: "do lado
+       'mm' com um simbolo icone de troca, quando clica nele, troca pra mil") */
+    const un = V.unidade(), outra = un === 'mm' ? 'mil' : 'mm', tq = V.teclaDe('unidade');
+    const bu = el('button', 'pp-tile pp-unidade'); bu.type = 'button';
+    bu.title = 'Unidade: ' + un + ' — clique para trocar para ' + outra + (tq ? ' (' + tq + ')' : '');
+    bu.append(el('span', null, un), ic('trocaUn'));
+    bu.addEventListener('click', () => V.setUnidade(outra));
+    const lp = el('div', 'pp-passo'); lp.append(gs, bu);
+    campo(g2, 'Passo', lp, true);
     const so = el('select');
     so.title = 'Snap a objetos: centro de pad, centro de via e ponta de trilha ganham da grade (alcance de 9 px). Ctrl solta o snap.';
     for (const [v, rot] of [['todas', 'Todas as camadas'], ['atual', 'Só a camada atual'], ['off', 'Desligado (só a grade)']]) { const o = el('option', null, rot); o.value = v; if (V.snapObj() === v) o.selected = true; so.append(o); }

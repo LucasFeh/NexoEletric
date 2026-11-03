@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.56.1 — 2026-11-03
+
+- Propriedades da placa › Grade: o passo é uma lista, e do lado dela fica um botão só com a unidade e o ícone de
+  troca (⇅). Clicar troca de mm para mil e de volta. Antes eram dois botões, "mm" e "mil".
+
 ## 1.56.0 — 2026-11-03
 
 As Propriedades da placa (vista PCB, nada selecionado) enxutas e em grade.
