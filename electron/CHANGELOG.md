@@ -4,6 +4,36 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.55.0 — 2026-11-03
+
+O render da placa, o valor no esquema e o PDF do esquema.
+- **Gerar render** (vista PCB › Arquivo, também em Exportar e no menu do botão direito): tira sozinho as duas fotos
+  3D da placa, a **montada** (isométrica, com os componentes) e a **virgem** (de frente, só a placa). Grava em
+  `Projects/<p>/Renders/` (rota nova `POST /api/render`), igual ao `pcb_render_3d` do MCP.
+- **Enviar para o Odoo mostra as fotos**: as duas aparecem grandes no modal, e o clique amplia. Há um botão "Gerar
+  render" (ou "Refazer render") que tira as fotos ali mesmo, numa vista PCB escondida, sem sair do modal.
+- **A placa no NexoBD tem a foto**: a placa montada vira a miniatura da placa na biblioteca (papel `thumb`) e a placa
+  virgem vai junto (papel `virgem`). Foto nova publica a placa de novo: a sincronia vigia `Renders/`, e o "Enviar
+  placa ao NexoCAD" também leva as fotos. No catálogo do NexoBD 1.11.0 a placa abre em 3D e exporta STEP, STL e
+  Parasolid.
+- **O valor dos componentes aparece no esquema** (olho novo "Ω" na seção Vista, ligado por padrão), no lugar do
+  comment, onde o Altium o põe. O valor vem nesta ordem:
+  - o `Value` do componente (o do almoxarifado: 10K, 1uF);
+  - senão o comment, quando é curto (100uF 16V, 1N4007, BC337, LM2575-5);
+  - a fórmula do Altium é resolvida: `=Value + ' - ' + Potência + ' - ' + Tolerancia` vira "1K - 1/4W - 1%".
+
+  Conector, jumper e ponto de teste não mostram valor: o comment deles é descrição. A ficha do componente mostra o
+  campo Valor. O olho do comment continua mostrando o comment inteiro, agora com a fórmula resolvida.
+- **Exportar PDF do esquema** (vista Esquema › Arquivo, ou Smart PDF): uma página por folha, no tamanho da folha,
+  **vetorial** e com o texto selecionável. É o mesmo desenho da tela (`hub-schpdf.js`: um contexto 2D que grava no
+  `hub-pdfwriter.js`), em papel branco. Baixa o arquivo e grava em `Projects/<p>/PDF/SCH - <p>.pdf`. A rota `/api/pdf`
+  passa a aceitar projeto só de esquema.
+- **Exportar PDF do layout** fica à vista no Arquivo da vista PCB (o "LO -" de sempre, que antes só estava em
+  Exportar › PDF).
+- Janela Rust: gravar em `Renders/` não recarrega mais a vista que acabou de fotografar.
+- Testes: `tests/test_render_api.py`, `tests/test-schpdf.js`, e as fotos em `tests/test-nexohub-sync.js` e
+  `tests/test_nexocad_rotas.py`.
+
 ## 1.54.1 — 2026-10-30
 
 Duas correções na vista 3D da placa.

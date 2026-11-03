@@ -64,10 +64,15 @@ try:
     assert r.status_code == 400
     r = cli.post('/api/pdf', json={'proj': PROJ, 'nome': 'x', 'base64': '***'})
     assert r.status_code == 400
-    for proj in ('..', 'NAOEXISTE', 'SEMPLACA', None):
+    os.makedirs(os.path.join(tmp, 'Projects', 'VAZIO'), exist_ok=True)
+    for proj in ('..', 'NAOEXISTE', 'VAZIO', None):
         r = cli.post('/api/pdf', json={'proj': proj, 'nome': 'x', 'base64': b64(PDF)})
         assert r.status_code == 404, (proj, r.status_code)
-    print('  ok  recusa nome com pasta/oculto/vazio, conteudo que nao e PDF e projeto sem board.js')
+    print('  ok  recusa nome com pasta/oculto/vazio, conteudo que nao e PDF e projeto sem placa nem esquema')
+    # o PDF do esquema (vista Esquema): projeto so de esquema tambem grava
+    r = cli.post('/api/pdf', json={'proj': 'SEMPLACA', 'nome': 'SCH - SEMPLACA', 'base64': b64(PDF)})
+    assert r.status_code == 200 and r.get_json()['arquivo'] == 'Projects/SEMPLACA/PDF/SCH - SEMPLACA.pdf', r.get_json()
+    print('  ok  projeto so de esquema grava o PDF do esquema')
 
     # o vigia nao desce na PDF/ (gravar o PDF nao recarrega a vista)
     assert not any(os.sep + H.PDF_DIR + os.sep in p for p in H._snapshot()), 'o vigia viu a pasta PDF/'

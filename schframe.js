@@ -1341,7 +1341,14 @@ try { prAba = localStorage.getItem(PR_ABA_KEY) === 'pinos' ? 'pinos' : 'geral'; 
    (pedido de 2026-09-24). Desligadas, o arrasto volta a ser o de antes: o cursor, a grade ao
    soltar e o ima do pino — que nao e guia, e continua. Preferencia de vista, desta maquina. */
 const VER_GUIAS_KEY = 'altiumhub.sch.guias';
-const showState = { grid:true, comment:false, pinos:true, ref:true, guias:true };
+/* O VALOR NASCE A VISTA (pedido do dono, 2026-11-03: "no esquema apareça o valor dos componentes"). Ele
+   ocupa o lugar do comment (comdx/comdy, embaixo do corpo), que e onde o Altium o mostra: no Altium o
+   comment da casa e a formula "=Value", que a folha resolve para o parametro. O valor e o `Value` do params
+   (o do almoxarifado), a formula do comment resolvida, ou o comment de resistor/capacitor/indutor (que e o
+   proprio valor: "10K"). Com o olho do comment aceso, o lugar mostra o comment inteiro (resolvido). */
+const VER_VALOR_KEY = 'altiumhub.sch.valor';
+const showState = { grid:true, comment:false, pinos:true, ref:true, guias:true, valor:true };
+try { showState.valor = localStorage.getItem(VER_VALOR_KEY) !== '0'; } catch (e) {}
 try { showState.guias = localStorage.getItem(VER_GUIAS_KEY) !== '0'; } catch (e) {}
 try { showState.ref = localStorage.getItem(VER_REF_KEY) !== '0'; } catch (e) {}
 try { showState.comment = localStorage.getItem(VER_COMMENT_KEY) === '1'; } catch (e) {}
@@ -1544,10 +1551,67 @@ function compBBox(c){
    que a mao escolhe aqui chegaria ao Altium deslocada da mesma meia palavra, para o outro
    lado — um ciclo que nunca fecha. Um ponto so, e o dele. */
 const FOLGA_TXT = 70;
+/* o parametro `nome` do params plano (Chave=Valor;Chave=Valor), sem diferenciar maiusculas */
+function paramDe(c, nome){
+  const alvo = String(nome || '').trim().toLowerCase();
+  if (!alvo) return '';
+  for (const par of String((c && c.params) || '').split(';')){
+    const i = par.indexOf('=');
+    if (i > 0 && par.slice(0, i).trim().toLowerCase() === alvo) return par.slice(i + 1).trim();
+  }
+  return '';
+}
+/* a formula do comment, como o Altium a resolve: termos ligados por "+", cada um um parametro (Value,
+   Potência...) ou um texto entre aspas simples ("=Value + ' - ' + Potência + ' - ' + Tolerancia" -> "1K - 1/4W -
+   1%"). Parametro que falta sai vazio */
+function avaliaFormula(c, expr){
+  let out = '', i = 0;
+  const s = String(expr || '');
+  while (i < s.length){
+    const ch = s.charAt(i);
+    if (ch === "'" || ch === '"'){
+      const f = s.indexOf(ch, i + 1);
+      out += s.slice(i + 1, f < 0 ? s.length : f);
+      i = f < 0 ? s.length : f + 1;
+    } else if (ch === '+' || /\s/.test(ch)) i++;
+    else {
+      let j = i;
+      while (j < s.length && s.charAt(j) !== '+' && s.charAt(j) !== "'" && s.charAt(j) !== '"') j++;
+      out += paramDe(c, s.slice(i, j).trim());
+      i = j;
+    }
+  }
+  return out.trim();
+}
+/* o comment como a folha do Altium o mostra: a formula resolvida */
+function commentExibido(c){
+  const cm = String((c && c.comment) || '').trim();
+  return cm.charAt(0) === '=' ? avaliaFormula(c, cm.slice(1)) : cm;
+}
+/* quem nao tem valor: conector, jumper, ponto de teste, furo, fiducial — o comment deles e descricao
+   ("Conector Header 6 vias passo 1.27mm 180º PTH"), e e essa poluicao que mantem o comment escondido */
+const RE_REF_SEM_VALOR = /^(CN|CON|J|JP|P|X|PT|TP|MH|H|FID|M)\d/i;
+const VALOR_MAX = 24;
+/* o valor: o parametro Value (o do almoxarifado: "10K", "1uF"); senao o comment — resolvido, se for formula —
+   quando ele e curto (o valor ou a peca: "100uF 16V", "1N4007", "BC337", "LM2575-5") e o componente nao e dos
+   que so tem descricao */
+function valorExibido(c){
+  if (!c) return '';
+  const v = paramDe(c, 'Value');
+  if (v) return v;
+  if (RE_REF_SEM_VALOR.test(String(c.ref || ''))) return '';
+  const cm = commentExibido(c);
+  return cm.length <= VALOR_MAX ? cm : '';
+}
+/* o texto do lugar do comment, como esta a vista agora ('' = nada a desenhar nem a clicar) */
+function textoDoCom(c){
+  if (showState.comment) return commentExibido(c);
+  return showState.valor ? valorExibido(c) : '';
+}
 function textoComp(c, qual){
   const bb = compBBox(c);
   const h = qual === 'com' ? 55 : 60;
-  const s = qual === 'com' ? (c.comment || '') : c.ref;
+  const s = qual === 'com' ? textoDoCom(c) : c.ref;
   /* o lugar derivado centraliza a PALAVRA sobre o corpo, e para isso a ancora recua meia
      largura: centralizar e coisa do desenho, a ancora continua sendo o canto */
   const cx = (bb.x1 + bb.x2) / 2 - larguraTexto(s, h) / 2;
@@ -2152,7 +2216,7 @@ function guiasDoGesto(base){
     const movendo = new Set(textos.map(chaveAlvo)), tipos = new Set(textos.map(a => a.k));
     for (const c of s.comps) for (const k of tipos){
       if (movendo.has(chaveAlvo({ it:c, k }))) continue;
-      if (k === 'ref' ? !(showState.ref && designadorVisivel(c)) : !(showState.comment && c.comment)) continue;
+      if (k === 'ref' ? !(showState.ref && designadorVisivel(c)) : !textoDoCom(c)) continue;
       fixos.caixas.push(Object.assign(textoBBox(c, k), { nome:c.ref, tipo:'texto' }));
     }
   } else {
@@ -4098,6 +4162,7 @@ function renderProps(){
     prKv(g, '', 'o símbolo resolvido tem só ' + nparts + ' parte(s) — as outras não desenham', 'dim');
 
   prKv(g, 'Comment', it.comment, it.comment ? null : 'dim');
+  { const v = valorExibido(it); prKv(g, 'Valor', v || 'sem valor', v ? null : 'dim'); }
   prKv(g, 'Descrição', sym && sym.description, sym && sym.description ? null : 'dim');
 
   /* ACERVO. "Biblioteca do Altium" sai em VERMELHO com o triângulo: o componente ainda não
@@ -4346,7 +4411,7 @@ function desenhaFolha(ctx, si, o){
   const s = model.sheets[si];
   const foco = o.foco, esc = o.esc;
   const bb = sheetBBox(si);
-  ctx.fillStyle = D.SCH.sheet;
+  ctx.fillStyle = o.papel || D.SCH.sheet;     /* o PDF sai em papel branco (exportaPdfEsquema) */
   ctx.fillRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
   /* A GRADE SEGUE O PASSO ESCOLHIDO, e some por DENSIDADE e nao por um corte fixo de escala:
      com passo de 10 mil, o corte antigo (esc > 0.045) mandaria desenhar 1100 linhas em cada
@@ -4453,7 +4518,7 @@ function desenhaFolha(ctx, si, o){
     const tr = textoComp(c, 'ref');
     const refVisivel = showState.ref && designadorVisivel(c);
     if (refVisivel) D.worldText(ctx, tr.s, tr.x, tr.y + tr.h * 0.33, tr.h, 0, '#000000', 'left');
-    if (c.comment && showState.comment){
+    if (textoDoCom(c)){
       const tc = textoComp(c, 'com');
       D.worldText(ctx, tc.s, tc.x, tc.y + tc.h * 0.33, tc.h, 0, '#333366', 'left');
     }
@@ -4463,7 +4528,7 @@ function desenhaFolha(ctx, si, o){
        enchia de linhas tracejadas. */
     for (const qual of ['ref', 'com']){
       if (qual === 'ref' && !refVisivel) continue;
-      if (qual === 'com' && !(c.comment && showState.comment)) continue;
+      if (qual === 'com' && !textoDoCom(c)) continue;
       if (!(o.textosNaMao && o.textosNaMao.has(chaveAlvo({ it:c, k:qual })))) continue;
       const t = textoComp(c, qual);
       if (Math.abs(t.x - t.bx) < 1 && Math.abs(t.y - t.by) < 1) continue;
@@ -4790,8 +4855,8 @@ function hitTest(x, y){
     const b = textoBBox(c, 'ref');
     if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return { kind:'ref', ref:c.ref, item:c };
   }
-  if (showState.comment) for (const c of s.comps){
-    if (!c.comment) continue;
+  if (showState.comment || showState.valor) for (const c of s.comps){
+    if (!textoDoCom(c)) continue;
     const b = textoBBox(c, 'com');
     if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return { kind:'com', ref:c.ref, item:c };
   }
@@ -5891,8 +5956,55 @@ function fazAcao(id){
     case 'rotear':    return rotearNoArrasto();
     case 'salvar':    saveAll(); return;
     case 'autosave':  alternaAutosaveSch(); return;
+    case 'pdf':       exportaPdfEsquema(); return;
   }
   return false;
+}
+/* ------- Arquivo » Exportar PDF do esquema (pedido do dono, 2026-11-03) -------
+   Uma pagina por folha, no tamanho da folha, VETORIAL: a mesma desenhaFolha da tela desenha num contexto que
+   grava em PDF (hub-schpdf.js), em papel branco e sem a net em foco. Baixa o arquivo e, com o hubserver, grava
+   tambem em Projects/<p>/PDF/SCH - <p>.pdf (o lugar do "LO -" da vista PCB). O PDF sai do que esta NA TELA: a
+   edicao ainda nao salva vai junto. */
+let gerandoPdf = false;
+function nomeDoPdf(p){ return ('SCH - ' + String(p || 'esquema')).replace(/[^A-Za-z0-9 _.()+,-]+/g, '_').replace(/[ .]+$/, '').slice(0, 140); }
+async function exportaPdfEsquema(){
+  if (gerandoPdf) return;
+  if (typeof HubSchPdf === 'undefined' || typeof HubPdfWriter === 'undefined') { HubDialog.toast('o gerador de PDF não carregou (hub-schpdf.js)', 'err'); return; }
+  gerandoPdf = true;
+  const aviso = HubDialog.toast('gerando o PDF do esquema (' + model.sheets.length + ' folha' + (model.sheets.length === 1 ? '' : 's') + ')…', 'info', 0);
+  try {
+    const folhas = model.sheets.map((s, si) => {
+      const bb = sheetBBox(si);
+      return { largura:bb.x2, altura:bb.y2, desenha:ctx => {
+        /* a matriz Y-para-cima da tela (mkCamera), com 1 unidade do aparelho = 1 mil */
+        ctx.setTransform(1, 0, 0, -1, 0, bb.y2);
+        desenhaFolha(ctx, si, { grid:false, foco:'', esc:0.3, papel:'#ffffff' });
+      } };
+    });
+    const bytes = await HubSchPdf.gera({ folhas, unidade:0.0254, titulo:'Esquema ' + SCH_P, assunto:'Esquema elétrico — ' + SCH_P });
+    const nome = nomeDoPdf(SCH_P);
+    const url = URL.createObjectURL(new Blob([bytes], { type:'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = nome + '.pdf';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    let onde = '';
+    if (HubIO.canPost) {
+      let b64 = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) b64 += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      try {
+        const r = await fetch('/api/pdf', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ proj:SCH_P, nome, base64:btoa(b64) }) });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.ok) onde = ' e salvo em ' + j.arquivo;
+      } catch (e) { /* baixado ja esta */ }
+    }
+    HubDialog.toast('PDF do esquema pronto: ' + nome + '.pdf (' + Math.round(bytes.length / 1024) + ' KB)' + (onde || ' — baixado'), 'ok', 6000);
+  } catch (e) {
+    HubDialog.toast('o PDF do esquema não saiu: ' + (e && e.message || e), 'err', 9000);
+  } finally {
+    aviso.close();
+    gerandoPdf = false;
+  }
 }
 /* O schematic.js do disco ainda e o que esta aba tem?
 
@@ -6732,6 +6844,24 @@ function pintaOlhoComment(){
   b.innerHTML = '<svg viewBox="0 0 16 16"><path d="' + OLHO + '"/><circle cx="8" cy="8" r="2.2"/>'
               + (on ? '' : '<path d="' + OLHO_X + '"/>') + '</svg>';
 }
+/* o olho do valor: um "Ω" (o valor), riscado quando suprimido */
+function pintaOlhoValor(){
+  const b = $('btnValor');
+  if (!b) return;
+  const on = showState.valor;
+  b.classList.toggle('active', on);
+  b.setAttribute('aria-pressed', String(on));
+  b.title = on ? 'Valor dos componentes visível (10K, 100nF…) — clique para suprimir'
+               : 'Valor dos componentes suprimido — clique para mostrar';
+  b.innerHTML = '<svg viewBox="0 0 16 16"><path d="M3 13.5h3v-1.6C4.3 10.9 3.2 9.2 3.2 7.2 3.2 4.3 5.3 2.3 8 2.3s4.8 2 4.8 4.9c0 2-1.1 3.7-2.8 4.7v1.6h3"/>'
+              + (on ? '' : '<path d="' + OLHO_X + '"/>') + '</svg>';
+}
+if ($('btnValor')) $('btnValor').addEventListener('click', () => {
+  showState.valor = !showState.valor;
+  try { localStorage.setItem(VER_VALOR_KEY, showState.valor ? '1' : '0'); } catch (e) {}
+  pintaOlhoValor(); cam.draw(); pintaMiniaturas();
+});
+pintaOlhoValor();
 $('btnComment').addEventListener('click', () => {
   showState.comment = !showState.comment;
   try { localStorage.setItem(VER_COMMENT_KEY, showState.comment ? '1' : '0'); } catch (e) {}
