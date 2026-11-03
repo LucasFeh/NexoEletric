@@ -4,6 +4,18 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.59.1 — 2026-11-03
+
+- **Corrigido: o "Odoo ↗" dos componentes não abria a ficha no Odoo** (nem outros links que abrem numa janela
+  nova).
+  - **Causa:** desde a janela Rust (1.54.0), todo link com `target=_blank` ou `window.open` era recusado em
+    silêncio. Sem tratador, o WebView2 do `wry` nega a janela nova.
+  - **Agora vale a regra que o Electron tinha:**
+    - página do próprio hub abre numa janela do app;
+    - link de fora (http, https, mailto), como a ficha do produto no Odoo, abre no navegador padrão do Windows;
+    - o resto (`file:`, `javascript:`, endereço com espaço ou aspas) não abre.
+  - Teste novo em `rust/crates/nexoeletric-web` (`links_novos_como_o_electron`).
+
 ## 1.59.0 — 2026-11-03
 
 Três itens do relato da serigrafia (MIRBC).

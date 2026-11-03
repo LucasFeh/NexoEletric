@@ -20,7 +20,50 @@ use std::path::{Path, PathBuf};
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::{Fullscreen, WindowBuilder};
-use wry::{DragDropEvent, WebContext, WebViewBuilder, WebViewBuilderExtWindows};
+use wry::{DragDropEvent, NewWindowResponse, WebContext, WebViewBuilder, WebViewBuilderExtWindows};
+
+/// Para onde vai um pedido de janela nova (link com target=_blank, window.open). Sem o tratador o wry
+/// recusa todos em silencio, e o "Odoo ↗" dos componentes (hub-odoolink.js), o "Abrir em nova aba" e
+/// qualquer link de fora pararam de abrir com a janela Rust (1.54.0). A regra e a do Electron
+/// (electron/lib/web.js » endurecer): pagina do proprio hub abre numa janela do app; http, https e
+/// mailto de fora vao para o navegador padrao do Windows; o resto nao abre.
+#[derive(Debug, PartialEq)]
+enum DestinoLink {
+    Hub,
+    Fora,
+    Nada,
+}
+
+fn destino_link(url: &str, porta: u16) -> DestinoLink {
+    let u = url.trim();
+    if u.is_empty() || u.chars().any(|c| c.is_control() || c.is_whitespace() || c == '"') {
+        return DestinoLink::Nada;
+    }
+    let l = u.to_ascii_lowercase();
+    for h in [format!("http://127.0.0.1:{porta}"), format!("http://localhost:{porta}")] {
+        if l == h || l.starts_with(&format!("{h}/")) || l.starts_with(&format!("{h}?")) || l.starts_with(&format!("{h}#")) {
+            return DestinoLink::Hub;
+        }
+    }
+    if l.starts_with("https://") || l.starts_with("http://") || l.starts_with("mailto:") {
+        return DestinoLink::Fora;
+    }
+    DestinoLink::Nada
+}
+
+/// Abre no navegador padrao do Windows (o shell.openExternal do Electron). O rundll32 recebe a url
+/// como um argumento so, sem passar pelo cmd (nada de & ou ^ virar comando); destino_link ja recusou
+/// espaco, aspas e caractere de controle.
+fn abre_fora(url: &str) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
 
 enum Ev {
     Menu(String),
@@ -321,6 +364,14 @@ fn main() {
                 }
             }
         })
+        .with_new_window_req_handler(move |u, _| match destino_link(&u, porta) {
+            DestinoLink::Hub => NewWindowResponse::Allow,
+            DestinoLink::Fora => {
+                abre_fora(&u);
+                NewWindowResponse::Deny
+            }
+            DestinoLink::Nada => NewWindowResponse::Deny,
+        })
         .with_document_title_changed_handler(move |t| {
             let _ = p2.send_event(Ev::Titulo(t));
         })
@@ -407,4 +458,30 @@ fn main() {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod testes {
+    use super::{destino_link, DestinoLink};
+
+    #[test]
+    fn links_novos_como_o_electron() {
+        // o "Odoo ↗" de um componente (hub-odoolink.js) vai para o navegador do Windows
+        assert_eq!(destino_link("http://192.168.15.192:8070/odoo/action-282/2116", 8200), DestinoLink::Fora);
+        assert_eq!(destino_link("https://cart.jlcpcb.com/quote", 8200), DestinoLink::Fora);
+        assert_eq!(destino_link("mailto:compras@dieletrons.com", 8200), DestinoLink::Fora);
+        // o proprio hub: numa janela do app
+        assert_eq!(destino_link("http://127.0.0.1:8200/pcbframe.html?p=DMB", 8200), DestinoLink::Hub);
+        assert_eq!(destino_link("http://localhost:8200/", 8200), DestinoLink::Hub);
+        assert_eq!(destino_link("http://127.0.0.1:8200", 8200), DestinoLink::Hub);
+        // outra porta da maquina nao e o hub (e um servico qualquer): vai para fora
+        assert_eq!(destino_link("http://127.0.0.1:82001/x", 8200), DestinoLink::Fora);
+        // o resto nao abre: esquema estranho, espaco, aspas, quebra de linha
+        assert_eq!(destino_link("file:///C:/Windows/system32/calc.exe", 8200), DestinoLink::Nada);
+        assert_eq!(destino_link("javascript:alert(1)", 8200), DestinoLink::Nada);
+        assert_eq!(destino_link("http://x.com/a b", 8200), DestinoLink::Nada);
+        assert_eq!(destino_link("http://x.com/\"&calc", 8200), DestinoLink::Nada);
+        assert_eq!(destino_link("http://x.com/\ncalc", 8200), DestinoLink::Nada);
+        assert_eq!(destino_link("", 8200), DestinoLink::Nada);
+    }
 }
