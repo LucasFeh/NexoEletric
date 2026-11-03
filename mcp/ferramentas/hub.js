@@ -21,6 +21,7 @@ const MODULOS = [
   ['hub-pcbpour.js', 'HubPcbPour', 'polygon pour'], ['hub-pcbpdf.js', 'HubPcbPdf', 'PDF de layout'],
   ['hub-pcbeco.js', 'HubPcbEco', 'ECO esquema → placa'], ['hub-pcbnova.js', 'HubPcbNova', 'placa nova'],
   ['hub-schtemplate.js', 'HubSchTemplate', 'templates de folha'], ['hub-altiumdna.js', 'HubAltiumDNA', 'comandos/atalhos do Altium'],
+  ['hub-silkgen.js', 'HubSilkGen', 'imagem/texto → serigrafia (region_add com furos)'],
 ];
 
 /* "$placa", "$board", "$model", "$esquema", "$regras", "$schlib", "$pcblib" nos args do

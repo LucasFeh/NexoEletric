@@ -478,6 +478,16 @@ var changes = [
   Sai na tela, no Gerber (a região escura e cada furo claro), no DRC e no PDF. No Altium, o `ApplyChanges`
   grava os furos pelo bloco APOSTAS (`GravaFuros`); se ele recusar, a linha sai como FALHA e nada é criado
   (confira o `apply-report.txt` na primeira rodada).
+- **Imagem ou texto na serigrafia** (1.60.0): logo, selo ou texto numa fonte TrueType vira `region_add` com
+  `holes` na `TopOverlay`/`BottomOverlay`, nunca pedaços. Pelo MCP:
+  - `serigrafia_imagem` — PNG sem entrelaçamento; o escuro é tinta (`inverter:true` troca) e o transparente nunca
+    é; `largura` ou `altura` em mm da caixa da tinta, centro em `x`,`y`;
+  - `serigrafia_texto` — `h` = altura da MAIÚSCULA em mm, Arial por padrão (`fonte`: nome de uma fonte do Windows
+    ou caminho de um `.ttf`/`.otf`).
+  As duas simulam por padrão, mostram a imagem e as regras da casa no lugar e avisam traço ou vão abaixo de 0,15 mm
+  (em Arial, `h` < ~1,2 mm já fica fino); `gravar:true` grava e `substituir:true` refaz no lugar sem duplicar. Na
+  `BottomOverlay` sai espelhado. Na vista PCB é o botão ao lado do Texto (ou Place » Imagem ou texto →
+  serigrafia…), com o mesmo motor (`hub-silkgen.js`: `HubSilkGen.daImagem`/`daTexto` → `opsDe(...).ops`).
 - `comp_attr` — aplicado **por último** pelo ApplyChanges (renomear cedo quebraria os `ref` das ops seguintes); renomear na PCB dessincroniza do esquema — o ECO vai acusar.
 - `size` = diâmetro do anel da via; `drill` = diâmetro do furo (`drill < size`).
 - `sa`/`ea` = ângulos inicial/final do arco em graus, anti-horário a partir de +X.

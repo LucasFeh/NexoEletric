@@ -2401,6 +2401,44 @@ function abreAutorotear(escopo, extra){
     escopo:escopo || 'todas',
   });
 }
+/* IMAGEM OU TEXTO -> SERIGRAFIA (pedido do dono, 2026-11-03: "falta uma ferramenta que converta imagem ou texto em
+   serigrafia"). O dialogo mora no hub-pcbsilkgen.js e a conta no motor hub-silkgen.js (o mesmo do MCP); aqui so o elo:
+   onde a arte nasce, a face da camada atual, a cor da camada e a escrita das region_add (com holes) como uma edicao
+   da vista -- selecionadas para arrastar e girar, o Ctrl+Z desfaz */
+function abreSerigrafia(){
+  if (typeof HubPcbSilkGen === 'undefined') {
+    HubDialog.toast('serigrafia: o hub-pcbsilkgen.js não carregou nesta página — atualize com F5', 'warn');
+    return null;
+  }
+  if (!garanteEdicao()) return null;
+  encerraDraft(true);
+  if (tool !== 'select') setTool('select');
+  return HubPcbSilkGen.abre({
+    centro:centroSerigrafia,
+    face:() => (/^Bottom/.test(cur) ? 'Bottom' : 'Top'),
+    corCamada:k => (LBYK[k] && LBYK[k].color) || (k === 'BottomOverlay' ? '#808000' : '#ffff00'),
+    aplica:ops => {
+      if (!ops || !ops.length || !garanteEdicao()) return 0;
+      const novos = ops.map(op => Object.assign({}, op));
+      for (const op of novos) CH.push(op);
+      selDepois = novos.slice();
+      /* a camada da arte a vista: nascer numa camada escondida pareceria que nada aconteceu */
+      const k = novos[0].layer;
+      if (k && show.layers[k] === false) show.layers[k] = true;
+      commit();
+      return novos.length;
+    },
+    toast:(t, tipo, ms) => HubDialog.toast(t, tipo || 'info', ms),
+  });
+}
+/* onde a arte nasce: o centro da vista; com a vista fora da placa, o centro da placa */
+function centroSerigrafia(){
+  const c = { x:view.cx, y:view.cy };
+  const bb = EB && EB.board && EB.board.bbox;
+  if (bb && [bb.x1, bb.y1, bb.x2, bb.y2].every(isNum) && (c.x < bb.x1 || c.x > bb.x2 || c.y < bb.y1 || c.y > bb.y2))
+    return { x:(bb.x1 + bb.x2) / 2, y:(bb.y1 + bb.y2) / 2 };
+  return c;
+}
 /* a prévia: as trilhas e vias que o Aplicar escreveria, na cor da camada com o contorno verde das
    adições (o das marcações das mudanças), por cima do cobre */
 function desenhaPreviaAuto(){
@@ -4213,6 +4251,9 @@ const BARRA = [
     { id:'poligono', ic:'poligono', tool:'poligono', at:'poligono', titulo:'Polígono — um clique por vértice; duplo clique, Enter ou botão direito fecha (com Preencher: região cheia)' },
   ] },
   { id:'texto', ic:'texto', tool:'texto', at:'texto', titulo:'Texto — clique e digite (Enter grava); na face de baixo nasce espelhado' },
+  /* 2026-11-03: imagem ou texto -> serigrafia (hub-pcbsilkgen.js; pedido do dono: "falta uma ferramenta que converta
+     imagem ou texto em serigrafia") */
+  { id:'serigrafia', ic:'serigrafia', acao:'serigrafia', titulo:'Imagem ou texto → serigrafia — um logo (PNG, JPG, SVG) ou um texto em qualquer fonte do Windows vira regiões de serigrafia, com os miolos vazados' },
   { id:'preencher', ic:'preencher', acao:'preencher', at:'preencher', titulo:'Preencher — ligado: círculo, triângulo e polígono viram região cheia e o retângulo vira fill; desligado: contorno de trilhas' }, '|',
   { id:'furo', ic:'furo', tool:'furo', titulo:'Furo de fixação — Board Cutout redondo (diâmetro no painel)' },
   { id:'contorno', ic:'contorno', tool:'contorno', titulo:'Contorno da placa — polígono que substitui o contorno (pergunta antes)' },
@@ -5468,7 +5509,7 @@ const v3Mostra = h => { h.hidden = false; h.style.visibility = ''; h.style.point
 const SO_2D = new Set(['trilha', 'via', 'linha', 'arco', 'circulo', 'retangulo', 'poligono', 'texto', 'triangulo', 'furo',
   'contorno', 'medir', 'sinalizar', 'pad', 'pour', 'fill', 'solidRegion', 'retanguloContorno', 'colar', 'duplicar',
   'espelhoX', 'espelhoY', 'camadaUnica', 'proxCamada', 'antCamada', 'outraFace', 'grade', 'diff', 'gradeId', 'zoomIn', 'zoomOut',
-  'enquadrarSel', 'painelGrade', 'autorotear', 'autorotearNets']);
+  'enquadrarSel', 'painelGrade', 'autorotear', 'autorotearNets', 'serigrafia']);
 function hubLib(){
   if (HUBLIB) return HUBLIB;
   if (typeof HubFpLib === 'undefined') return null;
@@ -6080,6 +6121,7 @@ function fazAcao(id, arg){
     case 'tirarTeardrops': tiraTeardrops(); return;
     case 'autorotear': abreAutorotear('todas'); return;
     case 'autorotearNets': abreAutorotear(netsDaSel().length ? 'sel' : 'todas'); return;
+    case 'serigrafia': abreSerigrafia(); return;
     case 'copiar': copiaSelecao(false); return;
     case 'recortar': if (!SEL.length) return; copiaSelecao(true); return;
     case 'colar': comecaColar(false); return;

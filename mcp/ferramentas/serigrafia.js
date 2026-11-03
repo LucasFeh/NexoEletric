@@ -7,7 +7,15 @@
      serigrafia_posicionar  acha lugar para os designadores: altura entre min e max, folgas, longe
                             do corpo dos componentes, fora de ambiguidade (o rótulo não fica mais
                             perto de outro componente que do dono), "fileira" (o rótulo alinhado
-                            ao próprio componente numa fileira) e simulação antes de gravar.
+                            ao próprio componente numa fileira) e simulação antes de gravar;
+     serigrafia_imagem      (1.60.0) um PNG do disco vira serigrafia: region_add com furos (holes), pelo
+                            hub-silkgen.js (limiar -> marching squares -> mm -> simplificação), lido
+                            aqui pelo mcp/lib/png.js (sem dependência);
+     serigrafia_texto       (1.60.0) texto numa fonte TrueType/OpenType (Arial do Windows por padrão,
+                            pelo vendor/opentype.min.js) vira serigrafia do mesmo jeito: a letra "o"
+                            é uma region com furo.
+   Os dois simulam por padrão (gravar:true grava), conferem a largura mínima da serigrafia e as
+   regras da casa no lugar (pad, via, trilha, furo, borda, keepout) e devolvem a imagem do lugar.
    A placa é a efetiva SEM redespejar os polígonos: plano pode ficar embaixo do texto (a regra da
    casa), então o despejo não muda nada aqui e a conta fica rápida.
    A forma de cada texto candidato é a do HubGerber (a da tela e do Gerber), feita uma vez por
@@ -17,6 +25,10 @@ const { ErroMcp } = require('../lib/contexto.js');
 const ops = require('../lib/pcb-ops.js');
 const { PROJETO, isNum } = require('../lib/util.js');
 const RC = require('./regras-casa.js')._interno;
+const fs = require('node:fs');
+const path = require('node:path');
+const PNG = require('../lib/png.js');
+const render = require('../lib/render.js');
 
 const E = 1e4;
 const r3 = v => Math.round(v * 1000) / 1000;
@@ -280,6 +292,211 @@ function posicionar(ctx, a) {
   return out;
 }
 
+/* ---------------- serigrafia_imagem / serigrafia_texto (1.60.0) ---------------- */
+const LAYERS_SILK = ['TopOverlay', 'BottomOverlay'];
+function layerSilk(a) {
+  const L = a.layer == null ? 'TopOverlay' : String(a.layer);
+  if (!LAYERS_SILK.includes(L)) throw new ErroMcp(`layer deve ser TopOverlay ou BottomOverlay (veio "${L}")`);
+  return L;
+}
+const limpaNote = s => String(s).replace(/[\r\n]+/g, ' ').replace(/":/g, '" :').slice(0, 200);
+
+/* as fontes do Windows pelo nome da familia (o arquivo precisa existir nesta maquina) */
+const FONTES = {
+  'arial': 'arial.ttf', 'arial bold': 'arialbd.ttf', 'arial negrito': 'arialbd.ttf', 'arial italic': 'ariali.ttf', 'arial bold italic': 'arialbi.ttf',
+  'calibri': 'calibri.ttf', 'calibri bold': 'calibrib.ttf', 'calibri negrito': 'calibrib.ttf',
+  'segoe ui': 'segoeui.ttf', 'segoe ui bold': 'segoeuib.ttf', 'segoe ui negrito': 'segoeuib.ttf',
+  'times new roman': 'times.ttf', 'times new roman bold': 'timesbd.ttf', 'times new roman negrito': 'timesbd.ttf', 'times': 'times.ttf',
+  'consolas': 'consola.ttf', 'consolas bold': 'consolab.ttf', 'consolas negrito': 'consolab.ttf',
+  'verdana': 'verdana.ttf', 'tahoma': 'tahoma.ttf', 'courier new': 'cour.ttf',
+};
+const pastaFontes = () => path.join(process.env.WINDIR || process.env.windir || 'C:\\Windows', 'Fonts');
+function arquivoDaFonte(fonte) {
+  const f = fonte == null || fonte === '' ? 'Arial' : String(fonte);
+  if (/[\\/]/.test(f) || /\.(ttf|otf|woff|ttc)$/i.test(f)) {
+    const abs = path.isAbsolute(f) ? f : path.join(pastaFontes(), f);
+    if (!fs.existsSync(abs)) throw new ErroMcp(`fonte não encontrada: ${abs}`);
+    if (/\.ttc$/i.test(abs)) throw new ErroMcp('coleção de fontes (.ttc) não é lida: escolha um .ttf ou .otf');
+    return abs;
+  }
+  const k = f.trim().toLowerCase().replace(/\s+/g, ' ');
+  const nome = FONTES[k];
+  if (nome) {
+    const abs = path.join(pastaFontes(), nome);
+    if (fs.existsSync(abs)) return abs;
+    throw new ErroMcp(`a fonte "${f}" (${nome}) não está instalada em ${pastaFontes()}: passe o caminho de um .ttf/.otf`);
+  }
+  for (const ext of ['.ttf', '.otf']) { const abs = path.join(pastaFontes(), k.replace(/ /g, '') + ext); if (fs.existsSync(abs)) return abs; }
+  throw new ErroMcp(`fonte "${f}" desconhecida: use um nome (${Object.keys(FONTES).filter(n => !/negrito/.test(n)).join(', ')}) ou o caminho de um .ttf/.otf`);
+}
+const cacheFontes = new Map();
+function carregaFonte(ctx, arq) {
+  const ot = ctx.exige('vendor/opentype.min.js', 'opentype');
+  const st = fs.statSync(arq);
+  const c = cacheFontes.get(arq);
+  if (c && c.mtime === st.mtimeMs) return c.font;
+  const b = fs.readFileSync(arq);
+  let font;
+  try { font = ot.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); }
+  catch (e) { throw new ErroMcp(`não consegui ler a fonte ${arq}: ${e && e.message || e}`); }
+  if (!font || typeof font.getPath !== 'function' || (font.supported === false)) throw new ErroMcp(`a fonte ${arq} não é suportada pelo opentype.js`);
+  cacheFontes.set(arq, { mtime: st.mtimeMs, font });
+  return font;
+}
+
+/* as regras da casa no lugar: a serigrafia nova como um "texto" (todas as regras: pad, via, trilha,
+   furo, borda, keepout, outra serigrafia), em unidades do Clipper do regras-casa */
+function regrasNoLugar(ctx, a, lista, layer) {
+  const M = monta(ctx, { projeto: a.projeto });
+  const C = ctx.exige('hub-clipper.js', 'ClipperLib');
+  const paths = [];
+  for (const op of lista) {
+    const P = M.K.paraC(op.pts); if (C.Clipper.Area(P) < 0) P.reverse(); paths.push(P);
+    for (const h of op.holes || []) { const H = M.K.paraC(h); if (C.Clipper.Area(H) > 0) H.reverse(); paths.push(H); }
+  }
+  const bb = M.K.caixa(paths);
+  const s = { tipo: 'texto', id: '', texto: a.texto != null ? String(a.texto) : path.basename(String(a.arquivo || 'imagem')), owner: '', designator: false,
+              lado: layer === 'BottomOverlay' ? 'Bottom' : 'Top', layer, paths, bb, kind: 'truetype' };
+  const r = M.regras((bb.x1 + bb.x2) / 2, (bb.y1 + bb.y2) / 2, layer);
+  const v = RC.checaSerigrafia(M.cena, s, r.o, r.desl, {});
+  return { ok: !v.length, violacoes: v.slice(0, 20).map(curta), total: v.length };
+}
+
+/* o caminho comum dos dois: confere, simula/grava e desenha */
+function gravaSilk(ctx, a, p, res, layer, nota, ferramenta) {
+  const out = {
+    projeto: p.nome, layer, regioes: res.ops.length, furos: res.furos, vertices: res.vertices, area_mm2: res.area_mm2, caixa: res.caixa,
+    avisos: res.avisos.length ? res.avisos : undefined, descartadas: res.descartadas.length ? res.descartadas.slice(0, 20) : undefined,
+    tracos_finos: res.finos && res.finos.length ? res.finos.slice(0, 10) : undefined, vaos_finos: res.vaos && res.vaos.length ? res.vaos.slice(0, 10) : undefined,
+  };
+  if (!res.ops.length) {
+    out.ok = false; out.gravado = false;
+    out.erro = res.recusado ? 'saída grande demais: nada gerado (veja avisos)' : 'nada para gravar (nenhum polígono sobrou)';
+    return out;
+  }
+  const bp = ctx.placa(p).eb.board;
+  const bbp = bp && bp.bbox;
+  if (bbp && (res.caixa.x1 < bbp.x1 || res.caixa.y1 < bbp.y1 || res.caixa.x2 > bbp.x2 || res.caixa.y2 > bbp.y2))
+    (out.avisos = out.avisos || []).push(`a serigrafia sai da caixa da placa (${bbp.x1}..${bbp.x2} x ${bbp.y1}..${bbp.y2} mm)`);
+  if (a.conferir !== false) {
+    try { out.regras_casa = regrasNoLugar(ctx, a, res.ops, layer); }
+    catch (e) { out.regras_casa = { erro: String(e && e.message || e) }; }
+  }
+  const note = limpaNote(nota);
+  const lista = res.ops.map(o => Object.assign({}, o, { note }));
+  const iguais = ctx.changes(p).filter(x => x && x.op === 'region_add' && x.note === note).length;
+  const substituir = a.substituir === true;
+  if (iguais && !substituir) (out.avisos = out.avisos || []).push(`já há ${iguais} região(ões) com a note "${note}" no changes.js: esta chamada SOMA mais uma cópia (substituir:true troca)`);
+  const hc = ctx.pcbPronto();
+  const g = ops.transacao(ctx, p, arq => {
+    if (substituir) for (let i = arq.itens.length - 1; i >= 0; i--) { const x = arq.itens[i]; if (x && x.op === 'region_add' && x.note === note) arq.remove(i); }
+    return lista.map(o => ops.mescla(arq, o).obj);
+  }, { simular: a.gravar !== true, forcar: a.forcar === true, ferramenta, teardrops: false });
+  /* a linha inteira de cada region (milhares de numeros) nao volta: so o status */
+  if (Array.isArray(g.linhas)) {
+    const L = g.linhas, porStatus = {};
+    for (const l of L) porStatus[l.status] = (porStatus[l.status] || 0) + 1;
+    g.linhas_resumo = { total: g.linhas_total || L.length, indices: L.length ? [L[0].indice, L[L.length - 1].indice] : [], por_status: porStatus };
+    g.linhas = L.filter(l => l.status !== 'ok').slice(0, 20).map(l => ({ indice: l.indice, op: l.op, status: l.status, msg: l.msg }));
+    if (!g.linhas.length) delete g.linhas;
+    delete g.linhas_total; delete g.linhas_por_op; delete g.nota_linhas;
+  }
+  out.gravacao = g;
+  out.substituidas = substituir ? iguais : undefined;
+  out.note = note;
+  out.gravado = !!g.gravado;
+  out.ok = g.ok !== false;
+  if (a.gravar !== true) out.nota = 'Simulação: nada gravado. Confira a imagem e chame de novo com gravar:true.';
+  if (a.imagem !== false) {
+    try {
+      const base = ctx.changes(p).filter(x => !(substituir && x && x.op === 'region_add' && x.note === note));
+      const { eb } = a.gravar === true ? ctx.placa(p) : ctx.placa(p, base.concat(lista));
+      const m = Math.max(1, 0.25 * Math.max(res.caixa.x2 - res.caixa.x1, res.caixa.y2 - res.caixa.y1));
+      const G = ctx.modulo('hub-gerber.js');
+      const tg = G && G.geometriaTexto ? (t => { if (!t || t.hidden) return null; try { return G.geometriaTexto(t); } catch (_) { return null; } }) : null;
+      const r = render.desenha(hc, eb, { largura: 700, lado: layer === 'BottomOverlay' ? 'bottom' : 'top', textoGeo: tg,
+        caixa: { x1: res.caixa.x1 - m, y1: res.caixa.y1 - m, x2: res.caixa.x2 + m, y2: res.caixa.y2 + m } });
+      out.imagem = { largura: r.largura, altura: r.altura, mm_por_px: r.mm_por_px, lado: r.lado };
+      out._imagem = { base64: r.png.toString('base64'), mime: 'image/png' };
+    } catch (e) { out.imagem = { erro: String(e && e.message || e) }; }
+  }
+  return out;
+}
+const OPC_SILKGEN = a => {
+  const o = {};
+  if (isNum(a.largura_min)) o.larguraMin = a.largura_min;
+  if (isNum(a.max_vertices)) o.maxVertices = a.max_vertices;
+  return o;
+};
+
+function silkImagem(ctx, a) {
+  const t0 = Date.now();
+  const p = ctx.projeto(a.projeto);
+  const S = ctx.exige('hub-silkgen.js', 'HubSilkGen');
+  const layer = layerSilk(a);
+  if (!isNum(a.x) || !isNum(a.y)) throw new ErroMcp('dê x e y (mm): o centro da imagem na placa');
+  const arq = path.isAbsolute(String(a.arquivo || '')) ? String(a.arquivo) : path.join(p.dir, String(a.arquivo || ''));
+  if (!a.arquivo || !fs.existsSync(arq) || !fs.statSync(arq).isFile()) throw new ErroMcp(`arquivo não encontrado: ${arq}`);
+  let img;
+  try { img = PNG.decodifica(fs.readFileSync(arq)); }
+  catch (e) { if (e instanceof PNG.ErroPng) throw new ErroMcp(e.message); throw e; }
+  const tam = {};
+  if (isNum(a.largura) && a.largura > 0) tam.largura = a.largura;
+  else if (isNum(a.altura) && a.altura > 0) tam.altura = a.altura;
+  else if (isNum(a.escala) && a.escala > 0) tam.escala = a.escala;
+  else if (img.mm_por_px) tam.escala = img.mm_por_px;
+  else throw new ErroMcp('dê largura ou altura (mm) da imagem na placa (ou escala em mm por pixel); o PNG não traz o tamanho físico (pHYs)');
+  const espelhar = typeof a.espelhar === 'boolean' ? a.espelhar : layer === 'BottomOverlay';
+  const opts = Object.assign({ x: a.x, y: a.y, espelhar, rot: isNum(a.rot) ? a.rot : 0, layer,
+    limiar: isNum(a.limiar) ? a.limiar : 128, inverter: a.inverter === true, alfa: a.alfa !== false,
+    simplificar: isNum(a.simplificar) ? a.simplificar : 0.02, areaMin: isNum(a.area_min) ? a.area_min : 1,
+    diagonal: a.diagonal === 'liga' ? 'liga' : 'separa', caixaPx: a.caixa === 'imagem' ? { x1: 0, y1: 0, x2: img.w, y2: img.h } : undefined,
+    HubCore: ctx.hc, ClipperLib: ctx.modulo('hub-clipper.js') || undefined }, tam, OPC_SILKGEN(a));
+  const res = S.daImagem(img.rgba, img.w, img.h, opts);
+  const nota = a.note ? String(a.note) : 'serigrafia imagem ' + path.basename(arq);
+  const out = gravaSilk(ctx, a, p, res, layer, nota, 'serigrafia_imagem');
+  return Object.assign({ arquivo: arq, pixels: res.pixels, png: { tipo_cor: img.tipo, bits: img.bits, mm_por_px_do_arquivo: img.mm_por_px || undefined },
+    tinta_px: res.tinta_px, reduzida: res.reduzida > 1 ? res.reduzida : undefined, mm_por_px: res.escala ? Math.round(res.escala * 1e6) / 1e6 : null, espelhada: espelhar }, out, { ms: Date.now() - t0 });
+}
+
+function silkTexto(ctx, a) {
+  const t0 = Date.now();
+  const p = ctx.projeto(a.projeto);
+  const S = ctx.exige('hub-silkgen.js', 'HubSilkGen');
+  const layer = layerSilk(a);
+  if (typeof a.texto !== 'string' || !a.texto.trim()) throw new ErroMcp('texto vazio');
+  if (!isNum(a.x) || !isNum(a.y)) throw new ErroMcp('dê x e y (mm)');
+  if (!(isNum(a.h) && a.h > 0)) throw new ErroMcp('dê h (mm): a altura da letra maiúscula');
+  const arqF = arquivoDaFonte(a.fonte);
+  const font = carregaFonte(ctx, arqF);
+  const espelhar = typeof a.espelhar === 'boolean' ? a.espelhar : layer === 'BottomOverlay';
+  const alinha = ['esquerda', 'centro', 'direita'].includes(a.alinha) ? a.alinha : 'centro';
+  const opts = Object.assign({ x: a.x, y: a.y, h: a.h, alinha, espelhar, rot: isNum(a.rot) ? a.rot : 0, layer,
+    hRef: a.altura_de === 'em' ? 'em' : 'maiuscula', ancora: a.ancora === 'base' ? 'base' : 'centro',
+    tolerancia: isNum(a.tolerancia) ? a.tolerancia : undefined, entrelinha: isNum(a.entrelinha) ? a.entrelinha : undefined,
+    HubCore: ctx.hc, ClipperLib: ctx.modulo('hub-clipper.js') || undefined }, OPC_SILKGEN(a));
+  const res = S.daTexto(font, a.texto, opts);
+  const nota = a.note ? String(a.note) : 'serigrafia texto ' + a.texto.replace(/[\r\n]+/g, ' ').slice(0, 60);
+  const out = gravaSilk(ctx, a, p, res, layer, nota, 'serigrafia_texto');
+  const nomeF = (font.names && font.names.fullName && (font.names.fullName.en || Object.values(font.names.fullName)[0])) || path.basename(arqF);
+  return Object.assign({ texto: a.texto, fonte: { nome: nomeF, arquivo: arqF }, h_maiuscula_mm: opts.hRef === 'em' ? undefined : a.h,
+    corpo_mm: Math.round(res.corpo_mm * 1e4) / 1e4, alinha, espelhado: espelhar, sem_glifo: res.faltam.length ? res.faltam : undefined }, out, { ms: Date.now() - t0 });
+}
+
+const OPC_SILK = {
+  layer: { type: 'string', enum: LAYERS_SILK, description: 'padrão TopOverlay; na BottomOverlay sai espelhado (lido por baixo)' },
+  espelhar: { type: 'boolean', description: 'padrão: true na BottomOverlay, false na TopOverlay' },
+  rot: { type: 'number', description: 'graus, anti-horário, em volta do centro' },
+  largura_min: { type: 'number', description: 'mm (padrão 0,15, o traço mínimo da serigrafia da casa): avisa traço e vão mais finos' },
+  max_vertices: { type: 'integer', description: 'guarda (padrão 20000): acima disso nada sai' },
+  conferir: { type: 'boolean', description: 'padrão true: confere as regras da casa no lugar (pad, via, trilha, furo, borda, keepout, outra serigrafia)' },
+  imagem: { type: 'boolean', description: 'padrão true: devolve a imagem do lugar com a serigrafia' },
+  substituir: { type: 'boolean', description: 'true = tira antes as region_add com a mesma note (refazer no lugar sem duplicar)' },
+  note: { type: 'string', description: 'a note das linhas (padrão "serigrafia imagem <arquivo>" / "serigrafia texto <texto>"); é a chave do substituir' },
+  gravar: { type: 'boolean', description: 'padrão false: só simula' },
+  forcar: { type: 'boolean', description: 'grava mesmo com erro de validação (evite)' },
+};
+
 const OPC_COMUNS = {
   folga_pad: { type: 'number', description: 'folga do texto para pad, via, furo e outra serigrafia, mm (padrão: o "silk" das regras da casa, 0,254)' },
   folga_trilha: { type: 'number', description: 'folga do texto para trilha/fill/região do mesmo lado, mm (padrão 0,1)' },
@@ -289,8 +506,8 @@ const OPC_COMUNS = {
 module.exports = {
   grupo: 'serigrafia',
   ordem: 46,
-  titulo: 'Serigrafia — conferir um lugar candidato e posicionar designadores pelas regras da casa, sem rodar o DRC inteiro',
-  modulos: ['hub-clipper.js', 'hub-gerber.js'],
+  titulo: 'Serigrafia — conferir um lugar candidato, posicionar designadores pelas regras da casa e converter imagem (PNG) ou texto (fonte TrueType) em serigrafia',
+  modulos: ['hub-clipper.js', 'hub-gerber.js', 'hub-silkgen.js', 'vendor/opentype.min.js'],
   ferramentas: [
     {
       nome: 'serigrafia_checar', titulo: 'Conferir lugar de texto', leitura: true, modulo: 'hub-clipper.js',
@@ -314,6 +531,39 @@ module.exports = {
         gravar: { type: 'boolean' }, note: { type: 'string' } }, OPC_COMUNS), required: ['projeto'] },
       executa: async (a, ctx) => posicionar(ctx, a),
     },
+    {
+      nome: 'serigrafia_imagem', titulo: 'Imagem (PNG) em serigrafia', modulo: 'hub-silkgen.js',
+      descricao: 'Converte um PNG do disco (logo, símbolo, selo) em serigrafia: limiar na luminância (o escuro é tinta; inverter:true troca; o transparente nunca é tinta), contorno pelo marching squares, escala para largura OU altura em mm (o outro lado segue a proporção; ou escala em mm/pixel, ou o tamanho físico do PNG) com o CENTRO da tinta em x, y, simplificação (simplificar, mm, padrão 0,02) e region_add com holes (o miolo de cada letra/furo do logo) na TopOverlay/BottomOverlay — cada região conferida pelo motor. Avisa traço/vão abaixo de largura_min e as regras da casa no lugar, e devolve a imagem. Só PNG (sem entrelaçamento): JPEG e outros voltam com erro pedindo PNG. Padrão SIMULA; gravar:true grava; substituir:true refaz no lugar sem duplicar.',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO,
+        arquivo: { type: 'string', description: 'caminho do PNG (absoluto, ou relativo à pasta do projeto)' },
+        x: { type: 'number', description: 'mm: centro da tinta na placa' }, y: { type: 'number', description: 'mm' },
+        largura: { type: 'number', exclusiveMinimum: 0, description: 'mm, da caixa da tinta' }, altura: { type: 'number', exclusiveMinimum: 0, description: 'mm, da caixa da tinta' },
+        escala: { type: 'number', exclusiveMinimum: 0, description: 'mm por pixel (no lugar de largura/altura)' },
+        caixa: { type: 'string', enum: ['tinta', 'imagem'], description: 'a referência do centro e da largura/altura: a caixa da tinta (padrão) ou a imagem inteira' },
+        limiar: { type: 'number', minimum: 0, maximum: 255, description: 'luminância abaixo dele é tinta (padrão 128)' },
+        inverter: { type: 'boolean', description: 'true = o claro é tinta (logo branco em fundo escuro)' },
+        alfa: { type: 'boolean', description: 'padrão true: pixel transparente nunca é tinta' },
+        simplificar: { type: 'number', minimum: 0, description: 'tolerância da simplificação em mm (padrão 0,02; 0 = sem)' },
+        area_min: { type: 'number', minimum: 0, description: 'px²: mancha/furo menor que isso some (padrão 1)' },
+        diagonal: { type: 'string', enum: ['separa', 'liga'], description: 'dois pixels de tinta só pela quina: separados (padrão) ou ligados' },
+      }, OPC_SILK), required: ['projeto', 'arquivo', 'x', 'y'] },
+      executa: async (a, ctx) => silkImagem(ctx, a),
+    },
+    {
+      nome: 'serigrafia_texto', titulo: 'Texto em fonte TrueType na serigrafia', modulo: 'hub-silkgen.js',
+      descricao: 'Escreve um texto na serigrafia numa fonte TrueType/OpenType (padrão Arial do Windows; fonte = nome — Arial, Arial Bold, Calibri, Segoe UI, Times New Roman, Consolas, Verdana… — ou o caminho de um .ttf/.otf), como region_add com holes (o "o", o "e", o "D" com o miolo vazado), sem a fonte stroke do text_add. h = altura da MAIÚSCULA em mm (altura_de:"em" = o corpo da fonte); x, y = a caixa da tinta: alinha esquerda (x = borda esquerda) | centro (padrão) | direita, y = meio (ancora:"base" = linha de base da 1ª linha). "\\n" quebra linha. Avisa traço abaixo de largura_min (0,15 mm: em Arial, h abaixo de ~1,2 mm já fica fino), caractere sem glifo e as regras da casa no lugar; devolve a imagem. Padrão SIMULA; gravar:true grava; substituir:true refaz no lugar sem duplicar.',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO,
+        texto: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' },
+        h: { type: 'number', exclusiveMinimum: 0, description: 'mm: altura da letra maiúscula' },
+        fonte: { type: 'string', description: 'nome da família (Arial, Arial Bold, Calibri, Segoe UI, Times New Roman, Consolas…) ou caminho de .ttf/.otf' },
+        alinha: { type: 'string', enum: ['esquerda', 'centro', 'direita'] },
+        ancora: { type: 'string', enum: ['centro', 'base'] },
+        altura_de: { type: 'string', enum: ['maiuscula', 'em'] },
+        tolerancia: { type: 'number', exclusiveMinimum: 0, description: 'mm, ao achatar as curvas (padrão h/200)' },
+        entrelinha: { type: 'number', exclusiveMinimum: 0, description: 'múltiplo de h entre linhas (padrão: a da fonte)' },
+      }, OPC_SILK), required: ['projeto', 'texto', 'x', 'y', 'h'] },
+      executa: async (a, ctx) => silkTexto(ctx, a),
+    },
   ],
-  _interno: { checar, posicionar },
+  _interno: { checar, posicionar, silkImagem, silkTexto, arquivoDaFonte },
 };

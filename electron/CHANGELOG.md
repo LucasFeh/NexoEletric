@@ -4,6 +4,33 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.60.0 — 2026-11-03
+
+**Imagem e texto viram serigrafia.** Um logo ou um texto em qualquer fonte TrueType/OpenType vai direto para a
+serigrafia de cima ou de baixo. Cada letra ou mancha vira uma região sólida (`region_add`) com o miolo vazado em
+`holes` (1.59.0): o "o", o "e" e o furo do logo saem certos na tela, na janela Rust, no Gerber, no DRC e no PDF.
+
+- **Na vista PCB:** um botão novo na barra (logo depois do Texto) e o item Place » "Imagem ou texto → serigrafia…".
+  Os dois abrem um diálogo com duas abas.
+  - **Imagem:** PNG, JPG, SVG ou qualquer imagem que o navegador abra, escolhida, arrastada ou colada com Ctrl+V.
+    Controles: limiar, inverter, transparente como fundo e a largura ou a altura em mm.
+  - **Texto:** qualquer texto, com quebra de linha, numa fonte do Windows (Arial, Calibri, Segoe UI, Times New
+    Roman, Consolas, Verdana, Tahoma ou outra instalada). Controles: negrito, itálico e a altura da maiúscula em mm.
+  - **Nas duas abas:** face (Bottom Overlay sai espelhado), giro e simplificação.
+  - **Prévia:** mostra as regiões com os miolos, o tamanho, os vértices e os avisos.
+  - **Colocar:** as regiões entram no centro da vista já selecionadas, para arrastar e girar; o Ctrl+Z desfaz.
+    Acima de 2000 vértices, o hub pergunta antes.
+- **Pela IA (MCP):** `serigrafia_imagem` (PNG) e `serigrafia_texto` (`h` = altura da maiúscula, Arial por padrão ou
+  outra fonte do Windows / um `.ttf`). Elas simulam por padrão, mostram a imagem do lugar e conferem as regras da
+  casa (pad, via, trilha, furo, borda) antes de gravar. `substituir:true` refaz no lugar sem duplicar.
+- **O motor** (`hub-silkgen.js`, o mesmo na vista e no MCP):
+  - contorna a imagem pelo limiar de claro e escuro (o fundo transparente não imprime) e escala para a medida pedida;
+  - simplifica o contorno sem deixar lado cruzado;
+  - avisa onde o traço ou o vão fica abaixo de 0,15 mm, que a serigrafia não imprime;
+  - lê as fontes pelo opentype.js 1.3.4 (MIT, em `vendor/`); o PNG é lido sem dependência nova (`mcp/lib/png.js`).
+- Testes: `tests/test-silkgen.js`, `tests/test-mcp-silkgen.js`, `tests/test-pcbsilkgen.js` e
+  `tests/smoke-serigrafia.js` (navegador headless).
+
 ## 1.59.1 — 2026-11-03
 
 - **Corrigido: o "Odoo ↗" dos componentes não abria a ficha no Odoo** (nem outros links que abrem numa janela

@@ -357,6 +357,13 @@ function instala(V) {
       if (!n.plid || OCULTOS.has(n.plid) || INTERNO(n.rotulo)) continue;
       const it = itemDoPlid(n, c, modo);
       if (it) out.push(it);
+      /* Place » String e, logo abaixo, a Imagem ou texto -> serigrafia do hub (hub-pcbsilkgen.js, 2026-11-03): o
+         Altium nao tem o comando (la e o script PCB Logo Creator), entao nao ha plid -- entra como o Autosave */
+      if (it && it.acao === 'texto' && VISTA === 'pcb' && !out.some(x => x && x.acao === 'serigrafia')) {
+        const sg = { rot:TR('Imagem ou texto → serigrafia…'), acao:'serigrafia', tecla:V.teclaDe('serigrafia') || '', dica:'' };
+        if (condicaoOk('edit', c)) sg.f = () => V.fazAcao('serigrafia'); else { sg.off = true; sg.dica = 'só no editor'; }
+        out.push(sg);
+      }
       /* Arquivo » Autosave logo abaixo do Salvar (pedido do dono, 2026-10-28): marcado, cada
          mudanca ja grava sozinha; a escolha fica para as proximas vezes (hub-autosave.js) */
       if (it && it.acao === 'salvar' && c.autosave != null && !out.some(x => x && x.acao === 'autosave'))
