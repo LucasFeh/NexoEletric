@@ -1,0 +1,343 @@
+{
+ "longas_total_ms": 283,
+ "longas_n": 1,
+ "maior_ms": 283,
+ "longas": [
+  [
+   174,
+   283
+  ]
+ ],
+ "linha": [
+  {
+   "t": 635,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 837,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1039,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1241,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1445,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1648,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1851,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2052,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2255,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2457,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3467,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 4478,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 5500,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 6524,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 7536,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 8550,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 9564,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 10588,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 11602,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 12614,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 13625,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 14650,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 15662,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 16687,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 17696,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 18707,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 19720,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 20729,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 21741,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 22780,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 23791,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 24815,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 25826,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 26841,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 27855,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 28864,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 29875,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 30886,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  }
+ ],
+ "cpu_top": [
+  [
+   "(program)  (program):0",
+   250
+  ],
+  [
+   "getProgramInfoLog  getProgramInfoLog:0",
+   238
+  ],
+  [
+   "computeBoundingSphere  three.core.js:19079",
+   209
+  ],
+  [
+   "setFromBufferAttribute  three.core.js:15989",
+   47
+  ],
+  [
+   "(garbage collector)  (garbage collector):0",
+   21
+  ],
+  [
+   "_RNvNtCslazegQw18c4_9nexo_core6step3d7prepara  nexo_wasm.wasm:1",
+   20
+  ],
+  [
+   "bufferData  bufferData:0",
+   9
+  ],
+  [
+   "getContext  getContext:0",
+   8
+  ],
+  [
+   "cloneUniforms  three.core.js:37958",
+   5
+  ],
+  [
+   "closePath  closePath:0",
+   5
+  ],
+  [
+   "malhaStep  nexo-gl.js:262",
+   5
+  ],
+  [
+   "multiplyMatrices  three.core.js:10570",
+   5
+  ],
+  [
+   "(anon)  :1",
+   5
+  ],
+  [
+   "min  three.core.js:5370",
+   4
+  ],
+  [
+   "projectObject  three.module.js:17897",
+   4
+  ],
+  [
+   "WebGLRenderer.renderBufferDirect  three.module.js:17233",
+   4
+  ],
+  [
+   "Object3D  three.core.js:11960",
+   3
+  ],
+  [
+   "malhaDoStep  hub-pcb3d-vista.js:499",
+   3
+  ],
+  [
+   "compose  three.core.js:11030",
+   3
+  ],
+  [
+   "updateMatrixWorld  three.core.js:13067",
+   3
+  ],
+  [
+   "fromBufferAttribute  three.core.js:5997",
+   3
+  ],
+  [
+   "pinta  hub-mcp.js:84",
+   3
+  ],
+  [
+   "querySelectorAll  querySelectorAll:0",
+   2
+  ],
+  [
+   "cria  hub-pcb3d-vista.js:118",
+   2
+  ],
+  [
+   "(anon)  three.core.js:1",
+   2
+  ]
+ ]
+}

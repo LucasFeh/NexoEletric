@@ -1,0 +1,14 @@
+[package]
+name = "nexo-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "O nucleo do NexoEletric em WebAssembly: a placa efetiva (EB) da vista web vira malha para o WebGL"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nexo-core = { path = "../nexo-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

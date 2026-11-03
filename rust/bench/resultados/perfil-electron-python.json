@@ -1,0 +1,455 @@
+{
+  "abrir": {
+    "ate_pedido_aceito_ms": 838,
+    "ate_placa_pronta_ms": 1616,
+    "cpu": {
+      "total_ms": 4221.416000000095,
+      "top": [
+        {
+          "fn": "(idle)  :0",
+          "ms": 1494.3,
+          "pct": 35.4
+        },
+        {
+          "fn": "onFirstUse  three.module.js:7022",
+          "ms": 886.2,
+          "pct": 21
+        },
+        {
+          "fn": "(program)  :0",
+          "ms": 497,
+          "pct": 11.8
+        },
+        {
+          "fn": "isEarHashed  three.core.js:34451",
+          "ms": 440.4,
+          "pct": 10.4
+        },
+        {
+          "fn": "findHoleBridge  three.core.js:34602",
+          "ms": 187.6,
+          "pct": 4.4
+        },
+        {
+          "fn": "equals  three.core.js:34790",
+          "ms": 131.5,
+          "pct": 3.1
+        },
+        {
+          "fn": "(garbage collector)  :0",
+          "ms": 44.2,
+          "pct": 1
+        },
+        {
+          "fn": "sortLinked  three.core.js:34681",
+          "ms": 25.9,
+          "pct": 0.6
+        },
+        {
+          "fn": "disponivel  hub-pcb3d-vista.js:91",
+          "ms": 19.9,
+          "pct": 0.5
+        },
+        {
+          "fn": "addShape  three.core.js:35132",
+          "ms": 18.9,
+          "pct": 0.4
+        },
+        {
+          "fn": "pForma  pcbframe.js:930",
+          "ms": 17.3,
+          "pct": 0.4
+        },
+        {
+          "fn": "analisa  hub-pcbnets.js:348",
+          "ms": 15.1,
+          "pct": 0.4
+        },
+        {
+          "fn": "pointInTriangle  three.core.js:34765",
+          "ms": 15.1,
+          "pct": 0.4
+        },
+        {
+          "fn": "addShape  three.core.js:36678",
+          "ms": 15.1,
+          "pct": 0.4
+        },
+        {
+          "fn": "area  three.core.js:34785",
+          "ms": 12.4,
+          "pct": 0.3
+        },
+        {
+          "fn": "earcutLinked  three.core.js:34375",
+          "ms": 11.3,
+          "pct": 0.3
+        },
+        {
+          "fn": "mede  hub-shell.js:977",
+          "ms": 10.8,
+          "pct": 0.3
+        },
+        {
+          "fn": "atualiza  hub-pcbpainel.js:241",
+          "ms": 10.8,
+          "pct": 0.3
+        },
+        {
+          "fn": "memo  hub-pcbnets.js:255",
+          "ms": 8.1,
+          "pct": 0.2
+        },
+        {
+          "fn": "getPoint  three.core.js:32016",
+          "ms": 7.5,
+          "pct": 0.2
+        },
+        {
+          "fn": "addVertex  three.core.js:35784",
+          "ms": 7,
+          "pct": 0.2
+        },
+        {
+          "fn": "createBuffer  three.module.js:66",
+          "ms": 7,
+          "pct": 0.2
+        },
+        {
+          "fn": "reg  pcbframe.js:717",
+          "ms": 5.9,
+          "pct": 0.1
+        },
+        {
+          "fn": "zOrder  three.core.js:34734",
+          "ms": 5.9,
+          "pct": 0.1
+        },
+        {
+          "fn": "placeholder  hub-pcb3d-modelo.js:209",
+          "ms": 5.4,
+          "pct": 0.1
+        },
+        {
+          "fn": "fetch  :0",
+          "ms": 4.9,
+          "pct": 0.1
+        },
+        {
+          "fn": "grade  hub-pcbnets.js:324",
+          "ms": 4.9,
+          "pct": 0.1
+        },
+        {
+          "fn": "pintaAbas  pcbframe.js:4330",
+          "ms": 4.9,
+          "pct": 0.1
+        },
+        {
+          "fn": "draw  pcbframe.js:1244",
+          "ms": 4.9,
+          "pct": 0.1
+        },
+        {
+          "fn": "fromBufferAttribute  three.core.js:5997",
+          "ms": 4.9,
+          "pct": 0.1
+        }
+      ]
+    }
+  },
+  "rede_mais_lentas": [
+    {
+      "url": "/",
+      "ms": 385,
+      "kb": 264
+    },
+    {
+      "url": "/api/project/prj-di161455.json",
+      "ms": 323,
+      "kb": 1335
+    },
+    {
+      "url": "/hub-semhub.js",
+      "ms": 272,
+      "kb": 2
+    },
+    {
+      "url": "/mcp/hub-mcpvista.js",
+      "ms": 259,
+      "kb": 5
+    },
+    {
+      "url": "/api/nexo/biblioteca?categoria=*",
+      "ms": 259,
+      "kb": 310
+    },
+    {
+      "url": "/pcbframe.js",
+      "ms": 256,
+      "kb": 434
+    },
+    {
+      "url": "/__live.js",
+      "ms": 252,
+      "kb": 2
+    },
+    {
+      "url": "/hub-fpeditor.js",
+      "ms": 249,
+      "kb": 139
+    },
+    {
+      "url": "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
+      "ms": 236,
+      "kb": 1
+    },
+    {
+      "url": "/hub-fppacote.js",
+      "ms": 209,
+      "kb": 10
+    },
+    {
+      "url": "/hub-nexopacote.js",
+      "ms": 206,
+      "kb": 12
+    },
+    {
+      "url": "/hub-nexo.js",
+      "ms": 205,
+      "kb": 13
+    },
+    {
+      "url": "/hub-fplib.js",
+      "ms": 204,
+      "kb": 12
+    },
+    {
+      "url": "/hub-pcb3d-vista.js",
+      "ms": 201,
+      "kb": 50
+    },
+    {
+      "url": "/hub-pcb3d-modelo.js",
+      "ms": 198,
+      "kb": 24
+    },
+    {
+      "url": "/Projects/PRJ-DI161455/rules.js",
+      "ms": 197,
+      "kb": 35
+    },
+    {
+      "url": "/Projects/PRJ-DI161455/annotations.js",
+      "ms": 196,
+      "kb": 1
+    },
+    {
+      "url": "/Projects/PRJ-DI161455/board.js",
+      "ms": 195,
+      "kb": 1165
+    },
+    {
+      "url": "/hub-pcb3d-step.js",
+      "ms": 195,
+      "kb": 12
+    },
+    {
+      "url": "/Projects/PRJ-DI161455/changes.js",
+      "ms": 194,
+      "kb": 37
+    },
+    {
+      "url": "/hub-pcbpainel.js",
+      "ms": 183,
+      "kb": 50
+    },
+    {
+      "url": "/hub-pcbaltium.js",
+      "ms": 180,
+      "kb": 56
+    },
+    {
+      "url": "/api/project/prj-di161455.json",
+      "ms": 176,
+      "kb": 1335
+    },
+    {
+      "url": "/hub-menutrad.js",
+      "ms": 175,
+      "kb": 34
+    },
+    {
+      "url": "/hub-altiumdna.js",
+      "ms": 175,
+      "kb": 322
+    }
+  ],
+  "rede_total": {
+    "pedidos": 121,
+    "kb": 11176
+  },
+  "animar": {
+    "quadros": 400,
+    "medio": 25.043000000000003,
+    "cpu": {
+      "total_ms": 10093.296000002612,
+      "top": [
+        {
+          "fn": "(idle)  :0",
+          "ms": 9713.3,
+          "pct": 96.2
+        },
+        {
+          "fn": "(program)  :0",
+          "ms": 220.9,
+          "pct": 2.2
+        },
+        {
+          "fn": "draw  pcbframe.js:1244",
+          "ms": 19.3,
+          "pct": 0.2
+        },
+        {
+          "fn": "(garbage collector)  :0",
+          "ms": 11.6,
+          "pct": 0.1
+        },
+        {
+          "fn": "desenhaFantasmas  pcbframe.js:1397",
+          "ms": 11,
+          "pct": 0.1
+        },
+        {
+          "fn": "desenhaGrade  pcbframe.js:1162",
+          "ms": 11,
+          "pct": 0.1
+        },
+        {
+          "fn": "stroke  :0",
+          "ms": 8.3,
+          "pct": 0.1
+        },
+        {
+          "fn": "pintaCamada  pcbframe.js:1184",
+          "ms": 7.2,
+          "pct": 0.1
+        },
+        {
+          "fn": "geoTexto  pcbframe.js:595",
+          "ms": 6.6,
+          "pct": 0.1
+        },
+        {
+          "fn": "geometriaTexto  hub-gerber.js:689",
+          "ms": 6.6,
+          "pct": 0.1
+        },
+        {
+          "fn": "passo  :5",
+          "ms": 6.1,
+          "pct": 0.1
+        },
+        {
+          "fn": "fill  :0",
+          "ms": 5.5,
+          "pct": 0.1
+        },
+        {
+          "fn": "lineTo  :0",
+          "ms": 5,
+          "pct": 0
+        },
+        {
+          "fn": "linhaDeTexto  hub-gerber.js:636",
+          "ms": 5,
+          "pct": 0
+        },
+        {
+          "fn": "setTransform  :0",
+          "ms": 4.4,
+          "pct": 0
+        },
+        {
+          "fn": "moveTo  :0",
+          "ms": 3.9,
+          "pct": 0
+        },
+        {
+          "fn": "requestAnimationFrame  :0",
+          "ms": 2.8,
+          "pct": 0
+        },
+        {
+          "fn": "clip  :0",
+          "ms": 2.8,
+          "pct": 0
+        },
+        {
+          "fn": "desenhaOrigem  pcbframe.js:1177",
+          "ms": 2.8,
+          "pct": 0
+        },
+        {
+          "fn": "fillRect  :0",
+          "ms": 2.8,
+          "pct": 0
+        },
+        {
+          "fn": "ebDe  pcbframe.js:509",
+          "ms": 2.2,
+          "pct": 0
+        },
+        {
+          "fn": "save  :0",
+          "ms": 2.2,
+          "pct": 0
+        },
+        {
+          "fn": "desenhaObj  pcbframe.js:1331",
+          "ms": 2.2,
+          "pct": 0
+        },
+        {
+          "fn": "calculaOrdem  pcbframe.js:1084",
+          "ms": 2.2,
+          "pct": 0
+        },
+        {
+          "fn": "chaveVis  pcbframe.js:1371",
+          "ms": 2.2,
+          "pct": 0
+        },
+        {
+          "fn": "pPolilinha  pcbframe.js:971",
+          "ms": 1.7,
+          "pct": 0
+        },
+        {
+          "fn": "add  pcbframe.js:1087",
+          "ms": 1.7,
+          "pct": 0
+        },
+        {
+          "fn": "restore  :0",
+          "ms": 1.7,
+          "pct": 0
+        },
+        {
+          "fn": "arc  :0",
+          "ms": 1.7,
+          "pct": 0
+        },
+        {
+          "fn": "(anonima)  pcbframe.js:1102",
+          "ms": 1.7,
+          "pct": 0
+        }
+      ]
+    }
+  },
+  "memoria": {
+    "heap_hub_mb": 53.19288444519043,
+    "iframes": 2
+  }
+}

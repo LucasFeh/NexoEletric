@@ -1,0 +1,12 @@
+[package]
+name = "nexo-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "NexoEletric: modelo da placa (pcbmirror-v1), motor de mudancas e geometria"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lyon_tessellation = "1"
+bytemuck = { version = "1", features = ["derive"] }

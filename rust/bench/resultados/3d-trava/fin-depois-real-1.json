@@ -1,0 +1,347 @@
+{
+ "longas_total_ms": 1072,
+ "longas_n": 2,
+ "maior_ms": 694,
+ "longas": [
+  [
+   113,
+   694
+  ],
+  [
+   1109,
+   378
+  ]
+ ],
+ "linha": [
+  {
+   "t": 261,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 968,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1174,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1645,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1856,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2057,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2259,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2462,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2663,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2867,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3889,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 4901,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 5913,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 6923,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 7934,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 8946,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 9957,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 10969,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 11982,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 12993,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 14003,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 15015,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 16040,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 17050,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 18061,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 19071,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 20085,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 21128,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 22172,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 23182,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 24205,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 25242,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 26290,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 27301,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 28320,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 29389,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 30437,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 31477,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  }
+ ],
+ "cpu_top": [
+  [
+   "needsUpdate  three.module.js:1759",
+   859
+  ],
+  [
+   "nx_mapas_faixa  nexo_wasm.wasm:1",
+   393
+  ],
+  [
+   "(program)  (program):0",
+   343
+  ],
+  [
+   "getProgramInfoLog  getProgramInfoLog:0",
+   307
+  ],
+  [
+   "setProgram  three.module.js:18407",
+   282
+  ],
+  [
+   "refreshUniformsCommon  three.module.js:15139",
+   213
+  ],
+  [
+   "WebGLRenderer.renderBufferDirect  three.module.js:17233",
+   158
+  ],
+  [
+   "setup  three.module.js:1623",
+   147
+  ],
+  [
+   "upload  three.module.js:6123",
+   115
+  ],
+  [
+   "markUniformsLightsNeedsUpdate  three.module.js:18874",
+   109
+  ],
+  [
+   "computeBoundingSphere  three.core.js:19079",
+   101
+  ],
+  [
+   "putImageData  putImageData:0",
+   98
+  ],
+  [
+   "renderObject  three.module.js:9569",
+   97
+  ],
+  [
+   "refreshUniformsPhysical  three.module.js:15414",
+   91
+  ],
+  [
+   "(garbage collector)  (garbage collector):0",
+   69
+  ],
+  [
+   "projectObject  three.module.js:17897",
+   66
+  ],
+  [
+   "refreshMaterialUniforms  three.module.js:15043",
+   58
+  ],
+  [
+   "bindVertexArray  bindVertexArray:0",
+   58
+  ],
+  [
+   "multiplyMatrices  three.core.js:10570",
+   56
+  ],
+  [
+   "setMaterial  three.module.js:10409",
+   54
+  ],
+  [
+   "makeRotationFromEuler  three.core.js:10346",
+   51
+  ],
+  [
+   "getBindingState  three.module.js:1680",
+   50
+  ],
+  [
+   "flatten  three.module.js:5029",
+   48
+  ],
+  [
+   "getDepthMaterial  three.module.js:9480",
+   47
+  ],
+  [
+   "uniformMatrix4fv  uniformMatrix4fv:0",
+   40
+  ]
+ ]
+}

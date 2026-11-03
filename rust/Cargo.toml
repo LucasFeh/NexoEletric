@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/nexo-core", "crates/nexoeletric", "crates/nexo-wasm", "crates/nexo-hub", "crates/nexoeletric-web"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Dieletrons <engenharia@dieletrons.com>"]
+license = "UNLICENSED"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+debug = false
+panic = "abort"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+# o WASM vai pela rede para a pagina: otimizado para tamanho
+[profile.release.package.nexo-wasm]
+opt-level = 3

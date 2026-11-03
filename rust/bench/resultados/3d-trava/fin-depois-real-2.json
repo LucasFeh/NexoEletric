@@ -1,0 +1,355 @@
+{
+ "longas_total_ms": 1562,
+ "longas_n": 4,
+ "maior_ms": 829,
+ "longas": [
+  [
+   6,
+   88
+  ],
+  [
+   95,
+   234
+  ],
+  [
+   362,
+   829
+  ],
+  [
+   1404,
+   411
+  ]
+ ],
+ "linha": [
+  {
+   "t": 272,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 509,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1370,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 1993,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2210,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2413,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2614,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 2817,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3018,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 3221,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 4247,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 5258,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 6285,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 7301,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 8314,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 9340,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 10351,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 11363,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 12379,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 13451,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 14477,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 15492,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 16507,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 17521,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 18539,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 19551,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 20569,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 21582,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 22607,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 23622,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 24635,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 25648,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 26662,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 27688,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 28705,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 29717,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 30742,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  },
+  {
+   "t": 31756,
+   "steps": 129,
+   "corpos": 130,
+   "falhas": 0
+  }
+ ],
+ "cpu_top": [
+  [
+   "nx_mapas_faixa  nexo_wasm.wasm:1",
+   393
+  ],
+  [
+   "getProgramInfoLog  getProgramInfoLog:0",
+   357
+  ],
+  [
+   "computeBoundingSphere  three.core.js:19079",
+   242
+  ],
+  [
+   "texSubImage2D  texSubImage2D:0",
+   156
+  ],
+  [
+   "mapasDaFace  hub-pcb3d-real.js:194",
+   145
+  ],
+  [
+   "(program)  (program):0",
+   93
+  ],
+  [
+   "putImageData  putImageData:0",
+   60
+  ],
+  [
+   "(garbage collector)  (garbage collector):0",
+   56
+  ],
+  [
+   "mapasFace  nexo-gl.js:291",
+   45
+  ],
+  [
+   "setFromBufferAttribute  three.core.js:15989",
+   29
+  ],
+  [
+   "getParameters  three.module.js:7357",
+   26
+  ],
+  [
+   "leRgbe  hub-pcb3d-real.js:137",
+   25
+  ],
+  [
+   "getImageData  getImageData:0",
+   22
+  ],
+  [
+   "cloneUniforms  three.core.js:37958",
+   19
+  ],
+  [
+   "_RNvNtCslazegQw18c4_9nexo_core6step3d7prepara  nexo_wasm.wasm:1",
+   19
+  ],
+  [
+   "getProgram  three.module.js:18224",
+   16
+  ],
+  [
+   "setTransform  setTransform:0",
+   11
+  ],
+  [
+   "WebGLRenderer.renderBufferDirect  three.module.js:17233",
+   11
+  ],
+  [
+   "ruido  hub-pcb3d-real.js:80",
+   11
+  ],
+  [
+   "shaderSource  shaderSource:0",
+   9
+  ],
+  [
+   "(anon)  :1",
+   9
+  ],
+  [
+   "toHalfFloat  three.core.js:16859",
+   9
+  ],
+  [
+   "getContext  getContext:0",
+   8
+  ],
+  [
+   "replaceLightNums  three.module.js:6373",
+   7
+  ],
+  [
+   "bufferData  bufferData:0",
+   7
+  ]
+ ]
+}
