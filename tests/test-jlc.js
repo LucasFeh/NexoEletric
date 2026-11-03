@@ -52,6 +52,7 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
         case 'enviar_arquivo': est.subiu = params.arquivos[0]; return ok({ aba: 'g9' });
         case 'digitar': est.digitado.push(params.seletor); if (params.seletor.includes('senha')) est.senhaDigitada = params.texto; return ok({ aba: 'g9' });
         case 'captura': return ok({ __imagem: 'AAAA', mime: 'image/jpeg' });
+        case 'aba_fechar': est.abaFechada = params.aba; return ok({ fechada: params.aba });
         case 'clicar':
           est.cliques.push(params.seletor);
           if (params.seletor === 'button.saveCart') est.url = est.logado ? 'https://cart.jlcpcb.com/shopcart' : 'https://passport.jlcpcb.com/#/login';
@@ -112,6 +113,11 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
   assert.ok(est.digitado.some(s => s.includes('senha')) && est.logado);
   assert.ok(ra.avisos.some(a => /entrou na conta eu@dieletrons\.com/.test(a)), ra.avisos.join(' | '));
   assert.ok(!JSON.stringify(ra).includes(SENHA), 'a senha não volta');
+  assert.ok(!ra.fechou && !est.abaFechada, 'sem fecharNoFim (o MCP), a guia fica aberta');
+  /* o botão (fecharNoFim): no carrinho, a guia do envio fecha sozinha */
+  const rf = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, fecharNoFim: true });
+  assert.strictEqual(rf.etapa, 'carrinho'); assert.strictEqual(rf.fechou, true); assert.strictEqual(est.abaFechada, 'g9');
+  est.abaFechada = null;
   /* senha errada e ninguém para esperar: para no login, com o aviso, sem a senha */
   est.logado = false;
   const rb = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, usuario: 'eu@dieletrons.com', senha: 'errada-' + SENHA });

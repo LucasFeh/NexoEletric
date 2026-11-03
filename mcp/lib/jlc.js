@@ -231,8 +231,9 @@ function qtdPerto(n) {
 /* Sobe o .zip, confere as camadas, põe a quantidade e salva no carrinho.
    o = {zip, camadas (as de cobre do Gerber), quantidade, mostrar, esperaLogin (ms: com a janela
         aberta, espera a pessoa entrar e refaz), programa (quem automatiza, quando não é a IA: a
-        guia vai para a janela da pessoa), progresso(fn)}. Fechou a guia ou o navegador: erro na hora.
-   -> {etapa:'carrinho'|'login'|'conferir', detectado, camadas, quantidade, preco, url, avisos, imagem} */
+        guia vai para a janela da pessoa), usuario/senha (a conta do hub: o login do meio entra sozinho),
+        fecharNoFim (no carrinho, fecha a guia do envio), progresso(fn)}. Fechou a guia ou o navegador: erro na hora.
+   -> {etapa:'carrinho'|'login'|'conferir', detectado, camadas, quantidade, preco, url, avisos, imagem, fechou?} */
 async function enviar(o) {
   const avisos = [], prog = o.progresso || (() => {});
   const qtd = Number(o.quantidade);
@@ -298,6 +299,13 @@ async function enviar(o) {
     res.imagem = await g.captura();
     res.etapa = destino === 'carrinho' ? 'carrinho' : 'conferir';
     if (res.etapa === 'conferir') avisos.push('não reconheci a tela do carrinho depois do SAVE TO CART — confira a captura');
+    /* no carrinho, com o arquivo lá: a guia do envio fecha sozinha (pedido do dono, 2026-11-03: "dps de
+       entrar com a credencial salva, por no carrinho o integrated pode fechar sozinho"). Era a única guia da
+       janela: o IntegrateBrowser fecha junto; a pessoa tinha outras: só esta sai. Carrinho não reconhecido
+       ou sem o arquivo: fica aberta, para conferir */
+    if (o.fecharNoFim && res.etapa === 'carrinho' && res.noCarrinho && g.aba) {
+      try { await g.chama('aba_fechar', { aba: g.aba }); res.fechou = true; } catch (_) { /* fechada por fora: tanto faz */ }
+    }
     return res;
   }
   throw new Error('o envio não terminou depois do login');
@@ -340,7 +348,7 @@ async function login(o) {
 module.exports = { QTDS, QUOTE, LOGIN, camadasCobre, camadasJlc, lerGerber, preparar, enviar, login, qtdPerto, arqConexao };
 
 /* ============================== a linha de comando (a rota /api/jlc do hub) ==============================
-   node mcp/lib/jlc.js --cli  < {gdir, quantidade, nome?, mostrar?, esperaLogin?, usuario?, senha?}
+   node mcp/lib/jlc.js --cli  < {gdir, quantidade, nome?, mostrar?, esperaLogin?, usuario?, senha?, fecharNoFim?}
    escreve uma linha JSON por passo: {"progresso":"..."} e, no fim, {"fim":{...}} ou {"erro":"..."}.
    A captura não vai na linha (é grande): o hub mostra a janela do navegador. */
 if (require.main === module && process.argv.includes('--cli')) {
@@ -359,7 +367,7 @@ if (require.main === module && process.argv.includes('--cli')) {
       diz({ preparado: { camadas: p.camadas, camadasJlc: p.camadasJlc, arquivos: p.arquivos, zip: p.zip } });
       const r = await enviar({ zip: p.zip, camadas: p.camadas, quantidade: a.quantidade, mostrar: a.mostrar !== false,
                                esperaLogin: a.esperaLogin || 0, programa: a.programa || 'NexoEletric', progresso: t => diz({ progresso: t }),
-                               usuario: a.usuario || '', senha: a.senha || '' });
+                               usuario: a.usuario || '', senha: a.senha || '', fecharNoFim: !!a.fecharNoFim });
       delete r.imagem;
       diz({ fim: Object.assign(r, { zip: p.zip }) });
     } catch (e) { diz({ erro: String(e && e.message || e) }); }

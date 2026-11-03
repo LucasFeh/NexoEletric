@@ -252,7 +252,9 @@ def registra(app, root, eh_local=None):
                 del JOBS[k]
             JOBS[jid] = job
         entrada = {'gdir': os.path.join(d, 'Gerber'), 'quantidade': qtd, 'nome': data.get('proj'),
-                   'mostrar': True, 'esperaLogin': ESPERA_LOGIN}
+                   'mostrar': True, 'esperaLogin': ESPERA_LOGIN,
+                   # no carrinho, a guia do envio fecha sozinha (e o IntegrateBrowser, se era a unica guia)
+                   'fecharNoFim': True}
         # a conta gravada na configuracao do hub: vai so pela entrada padrao do motor, nunca no job
         email, senha = credencial(root)
         if email and senha:

@@ -4,6 +4,15 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.58.1 — 2026-11-03
+
+- "Enviar pra JLC": **com o Gerber no carrinho, o IntegrateBrowser fecha sozinho.**
+  - **Quando fecha:** o envio fecha a guia dele quando o carrinho é reconhecido e o arquivo está lá. Se era a única
+    guia da janela, o IntegrateBrowser fecha junto; se você tinha outras guias abertas, só a do envio sai.
+  - **Quando fica aberta:** carrinho não reconhecido ou sem o arquivo, para você conferir.
+  - **No aviso final:** diz que o navegador fechou e que o pagamento é no carrinho da JLC (cart.jlcpcb.com).
+  - **Pelo MCP:** as ferramentas `jlc_*` (a IA) não fecham nada.
+
 ## 1.58.0 — 2026-11-03
 
 **Não montar (DNP)**, no esquema e na PCB. Até aqui ele não existia em lugar nenhum: o MIRBC tinha `DNP=1` e

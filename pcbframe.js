@@ -7218,7 +7218,8 @@ async function acompanhaJlc(job, qtd){
       await HubDialog.alert((s.etapa === 'carrinho' ? 'Está no carrinho da JLCPCB.' : 'O SAVE TO CART foi clicado, mas a tela do carrinho não foi reconhecida: confira na janela do IntegrateBrowser.') +
         '\n\n' + (s.detectado || '') + '\nCamadas: ' + (s.camadas || '?') + ' · Quantidade: ' + (s.quantidade || qtd) + (s.preco ? ' · Preço: ' + s.preco : '') +
         (s.etapa === 'carrinho' && s.noCarrinho === false ? '\n\nNão achei o nome do arquivo na página do carrinho: confira lá.' : '') + av +
-        '\n\nO pagamento é com você, no carrinho da JLC (aberto no IntegrateBrowser).', { title:'Enviar pra JLC' });
+        (s.fechou ? '\n\nO navegador fechou sozinho. O pagamento é com você: abra o carrinho da JLC (cart.jlcpcb.com) quando for pagar.'
+                  : '\n\nO pagamento é com você, no carrinho da JLC (aberto no IntegrateBrowser).'), { title:'Enviar pra JLC' });
       return;
     }
     if (Date.now() - t0 > 12 * 60000) { aviso.close(); throw new Error('o envio passou de 12 minutos — confira a janela do IntegrateBrowser'); }

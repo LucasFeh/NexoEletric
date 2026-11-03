@@ -31,7 +31,7 @@ let e = ''; process.stdin.on('data', d => { e += d; }); process.stdin.on('end', 
   if (a.quantidade === 8) { diz({ erro: 'a JLC nao vende 8' }); return; }
   if (a.quantidade === 999) { setInterval(() => {}, 1000); return; }   /* preso: so o cancelar tira */
   diz({ fim: { etapa: 'carrinho', quantidade: a.quantidade, camadas: 2, gdir: a.gdir, mostrar: a.mostrar, esperaLogin: a.esperaLogin,
-               usuario: a.usuario || '', senhaOk: a.senha === 'segredo-123', temSenha: !!a.senha } });
+               usuario: a.usuario || '', senhaOk: a.senha === 'segredo-123', temSenha: !!a.senha, fecharNoFim: a.fecharNoFim } });
 });
 """
 
@@ -75,6 +75,7 @@ class Rotas(unittest.TestCase):
         self.assertEqual(e['resultado']['quantidade'], 10)
         self.assertTrue(e['resultado']['mostrar'])
         self.assertGreater(e['resultado']['esperaLogin'], 60000, 'o botao espera a pessoa entrar na conta')
+        self.assertTrue(e['resultado']['fecharNoFim'], 'no carrinho, o navegador do botao fecha sozinho')
         self.assertEqual(os.path.normcase(e['resultado']['gdir']), os.path.normcase(os.path.join(self.tmp, 'Projects', 'Placa A', 'Gerber')))
         self.assertEqual(e['preparado']['camadas'], 2)
         self.assertIn('quantidade 10', e['passos'])
