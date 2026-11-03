@@ -43,18 +43,45 @@ def _json(obj, status=200):
     return obj, status
 
 
+def eh_electron(exe):
+    """O exe e um Electron (roda como Node com ELECTRON_RUN_AS_NODE)? O Electron tem o icudtl.dat do lado; a janela
+    Rust (resources\\rust\\NexoEletric.exe, 1.54.0+) nao tem, nao e um Node e ignora os argumentos: chamada para
+    rodar o jlc.js, ela nao rodava nada e o "Enviar pra JLC" parava sem abrir o site (1.56.2)."""
+    d = os.path.dirname(exe)
+    return os.path.isfile(exe) and (os.path.isfile(os.path.join(d, 'icudtl.dat')) or os.path.isfile(os.path.join(d, 'v8_context_snapshot.bin')))
+
+
+def _electrons_do_app(exe):
+    """Os Electron candidatos a partir de um exe do app: ele mesmo, e o da instalacao quando ele e a janela Rust
+    (<instalacao>\\resources\\rust\\NexoEletric.exe -> <instalacao>\\NexoEletric.exe)."""
+    if not exe:
+        return []
+    d = os.path.dirname(os.path.abspath(exe))
+    return [exe, os.path.join(os.path.dirname(os.path.dirname(d)), 'NexoEletric.exe')]
+
+
 def acha_node():
-    """[comando, env extra] do Node que roda o motor, ou (None, motivo)."""
+    """[comando, env extra] do Node que roda o motor, ou (None, motivo). Ordem: NEXOELETRIC_NODE > o Electron do app
+    aberto (~/.nexoeletric/session.json; se ele for a janela Rust, o Electron da mesma instalacao) > o Electron
+    instalado > o `node` do PATH."""
+    cands = []
     exe = os.environ.get('NEXOELETRIC_NODE')
-    if exe and os.path.isfile(exe):
-        return [exe], {'ELECTRON_RUN_AS_NODE': '1'}
+    if exe and os.path.basename(exe).lower() in ('node', 'node.exe') and os.path.isfile(exe):
+        return [exe], {}
+    if exe:
+        cands += _electrons_do_app(exe)
     try:
         with open(os.path.join(os.path.expanduser('~'), '.nexoeletric', 'session.json'), encoding='utf-8') as f:
             s = json.load(f)
-        if s.get('exe') and os.path.isfile(s['exe']):
-            return [s['exe']], {'ELECTRON_RUN_AS_NODE': '1'}
-    except (OSError, ValueError):
+        cands += _electrons_do_app(s.get('exe'))
+    except (OSError, ValueError, AttributeError):
         pass
+    cands.append(r'C:\Program Files\NexoEletric\NexoEletric.exe')
+    if os.environ.get('LOCALAPPDATA'):
+        cands.append(os.path.join(os.environ['LOCALAPPDATA'], 'Programs', 'NexoEletric', 'NexoEletric.exe'))
+    for c in cands:
+        if c and eh_electron(c):
+            return [c], {'ELECTRON_RUN_AS_NODE': '1'}
     n = shutil.which('node')
     if n:
         return [n], {}

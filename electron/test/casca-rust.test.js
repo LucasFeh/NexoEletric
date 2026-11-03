@@ -34,6 +34,8 @@ test('os argumentos e o ambiente da casca', () => {
   assert.strictEqual(env.ALTIUMHUB_NEXOBD, '1');
   assert.strictEqual(env.PATH, 'x');
   assert.ok(!('ELECTRON_RUN_AS_NODE' in env));
+  assert.strictEqual(env.NEXOELETRIC_NODE, process.execPath, 'o Node do Enviar pra JLC (jlc.py) e este Electron, nao a janela Rust');
+  assert.strictEqual(C.comando({ ws: 'W', base: { NEXOELETRIC_NODE: 'N:\node.exe' } }).env.NEXOELETRIC_NODE, 'N:\node.exe', 'o de fora ganha');
   const p = C.comando({ ws: 'W', projeto: 'PRJ-UR', base: {} }).args;
   assert.deepStrictEqual(p.slice(-4), ['--projeto', 'PRJ-UR', '--aba', 'pcb']);
 });

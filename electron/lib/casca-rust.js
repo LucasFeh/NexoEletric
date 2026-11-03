@@ -36,7 +36,7 @@ function querCasca(s, env = process.env) {
 }
 
 /** Os argumentos e o ambiente da casca. */
-function comando({ ws, porta, python, projeto, aba, env = {}, versao, base = process.env }) {
+function comando({ ws, porta, python, projeto, aba, env = {}, versao, base = process.env, node = process.execPath }) {
   const args = ['--workspace', ws];
   if (porta) args.push('--porta', String(porta));
   if (python) args.push('--python', python);
@@ -46,6 +46,9 @@ function comando({ ws, porta, python, projeto, aba, env = {}, versao, base = pro
   // o Electron roda o MCP com ELECTRON_RUN_AS_NODE: herdado, o Python de reserva da casca nao liga, mas
   // nada dela precisa disto -- e um processo filho dela (o Python) nao deve ver
   delete e.ELECTRON_RUN_AS_NODE;
+  // o Node dos motores que o Python de reserva roda (o "Enviar pra JLC": tools/rotas/jlc.py): este Electron, com
+  // ELECTRON_RUN_AS_NODE. O exe do session.json e o da janela Rust, que nao e um Node (1.56.2)
+  if (!e.NEXOELETRIC_NODE && node) e.NEXOELETRIC_NODE = node;
   return { args, env: e };
 }
 

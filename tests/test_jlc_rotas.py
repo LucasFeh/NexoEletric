@@ -103,5 +103,50 @@ class Rotas(unittest.TestCase):
         self.assertEqual(self.c.post('/api/jlc/enviar', json={'proj': 'Placa A', 'quantidade': 5}).status_code, 403)
 
 
+class AchaNode(unittest.TestCase):
+    """1.56.2: o session.json da 1.54.0+ aponta para a janela Rust (resources\\rust\\NexoEletric.exe), que nao e um
+    Node: o envio tem de usar o Electron da mesma instalacao."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix='jlc-node-')
+        self.env = {k: os.environ.get(k) for k in ('NEXOELETRIC_NODE', 'HOME', 'USERPROFILE', 'LOCALAPPDATA')}
+        inst = os.path.join(self.tmp, 'NexoEletric')
+        self.electron = os.path.join(inst, 'NexoEletric.exe')
+        self.rust = os.path.join(inst, 'resources', 'rust', 'NexoEletric.exe')
+        os.makedirs(os.path.dirname(self.rust))
+        for f in (self.electron, os.path.join(inst, 'icudtl.dat'), self.rust):
+            open(f, 'wb').close()
+        os.makedirs(os.path.join(self.tmp, '.nexoeletric'))
+        with open(os.path.join(self.tmp, '.nexoeletric', 'session.json'), 'w', encoding='utf-8') as f:
+            json.dump({'app': 'nexoeletric', 'exe': self.rust}, f)
+        os.environ['HOME'] = os.environ['USERPROFILE'] = self.tmp
+        os.environ['NEXOELETRIC_NODE'] = ''
+        os.environ['LOCALAPPDATA'] = self.tmp
+
+    def tearDown(self):
+        for k, v in self.env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_janela_rust_no_session_usa_o_electron_da_instalacao(self):
+        self.assertFalse(jlc.eh_electron(self.rust))
+        cmd, extra = jlc.acha_node()
+        if cmd[0] == r'C:\Program Files\NexoEletric\NexoEletric.exe':
+            self.skipTest('o Electron instalado nesta maquina vem antes (so depois do session.json)')
+        self.assertEqual(cmd, [self.electron])
+        self.assertEqual(extra, {'ELECTRON_RUN_AS_NODE': '1'})
+
+    def test_nexoeletric_node_ganha_e_aceita_o_node_puro(self):
+        os.environ['NEXOELETRIC_NODE'] = self.rust          # a janela Rust passada a mao: vira o Electron dela
+        self.assertEqual(jlc.acha_node()[0], [self.electron])
+        node = os.path.join(self.tmp, 'node.exe')
+        open(node, 'wb').close()
+        os.environ['NEXOELETRIC_NODE'] = node
+        self.assertEqual(jlc.acha_node(), ([node], {}))
+
+
 if __name__ == '__main__':
     unittest.main()

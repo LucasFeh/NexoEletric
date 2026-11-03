@@ -4,6 +4,17 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.56.2 — 2026-11-03
+
+- **Corrigido: o "Enviar pra JLC" do Gerber não abria mais o site.**
+  - **Causa:** o envio roda o motor (`mcp/lib/jlc.js`) com o exe do app como Node. Desde a 1.54.0, o exe anotado no
+    `~/.nexoeletric/session.json` é o da janela Rust (`resources\rust\NexoEletric.exe`), que não é Node e ignora os
+    argumentos. O motor nunca rodava.
+  - **Agora:** o `tools/rotas/jlc.py` só usa um exe que seja Electron. A partir da janela Rust, chega no
+    `NexoEletric.exe` da mesma instalação; depois tenta o instalado e o `node` do PATH.
+  - Além disso, o app passa `NEXOELETRIC_NODE` (o próprio Electron) para a janela Rust, e o Python dela já recebe o
+    Node certo.
+
 ## 1.56.1 — 2026-11-03
 
 - Propriedades da placa › Grade: o passo é uma lista, e do lado dela fica um botão só com a unidade e o ícone de
