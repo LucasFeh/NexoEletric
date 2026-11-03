@@ -4,6 +4,19 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.57.1 — 2026-11-03
+
+- **Corrigido: o zoom numa trilha travava a vista PCB.**
+  - **Causa:** o tracejado é medido em pixels de tela. Com zoom alto, uma trilha de 40 mm vira 120.000 px, e o
+    Chrome gerava ~15.000 traços só para ela, inclusive para o que estava fora da tela.
+  - **Medido na CBM-DI251876 (3.595 linhas no `changes.js`):** com zoom alto, cada quadro levava até 2 s. As
+    marcações das mudanças custavam ~1,9 s, e os contornos dos planos e o keepout, o resto.
+  - **Agora:** com zoom, o tracejado é montado só com a parte da geometria que aparece na tela, e o arco vira
+    polilinha só nessa parte. Vale para as marcações das mudanças, o contorno dos planos, a hachura do "sem plano",
+    o keepout e o realce da seleção.
+  - **Resultado:** 27–45 ms por quadro em qualquer zoom. Com a placa inteira à vista, nada muda.
+- Teste novo: `tests/test-pcb-recorte.js`.
+
 ## 1.57.0 — 2026-11-03
 
 Correções de um relato de uma sessão de IA que montou a serigrafia de uma placa (MIRBC).

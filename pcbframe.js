@@ -969,6 +969,104 @@ function pRegiao(P, g){
   for (const h of (Array.isArray(g.holes) ? g.holes : [])) if (Array.isArray(h) && h.length >= 3) pPoli(P, h, true);
 }
 function pTextoPolys(P, polys){ for (const q of polys) pPoli(P, q.pts, !!q.hole); }
+
+/* O TRACEJADO SO NA TELA (pedido do dono, 2026-11-03: "quando dou zoom na trilha da pcb, começa a travar
+   tudo"). O tracejado e medido em pixels de tela (px(6), px(3)): com zoom alto uma trilha de 40 mm vira
+   120.000 px e o Chrome gera ~15.000 tracos so para ela -- inclusive para o que esta fora da tela. Na CBM
+   (3.595 linhas no changes.js) as marcacoes das mudancas custavam 2 s por quadro no zoom 3000 (e os
+   contornos dos planos, 110 ms). Aqui a geometria passa por um "recortador" com a cara de um Path2D
+   (moveTo/lineTo/arc/closePath, o que pathEm e pPoli usam): cada segmento e cortado no retangulo da tela
+   (com folga) e o arco vira polilinha so na parte que aparece. Com a placa inteira a vista, o Path2D de
+   sempre (o recorte nao muda nada e o cache vale). */
+/* folga: 24 px de tela + meia largura do traco (mm), senao a ponta redonda de uma trilha larga cortada fora da tela
+   apareceria dentro dela */
+function retanguloDaTela(folgaPx, largura){
+  const a = telaParaMundo(0, 0), b = telaParaMundo(CW, CHH), f = px(folgaPx == null ? 24 : folgaPx) + (largura > 0 ? largura / 2 : 0);
+  return { x1:Math.min(a.x, b.x) - f, y1:Math.min(a.y, b.y) - f, x2:Math.max(a.x, b.x) + f, y2:Math.max(a.y, b.y) + f };
+}
+/* a tela e bem menor que a placa? entao vale recortar (com a placa toda a vista, o cache sem recorte) */
+function zoomRecorta(){
+  const bb = EB && EB.board && EB.board.bbox;
+  if (!bb || ![bb.x1, bb.y1, bb.x2, bb.y2].every(isNum)) return true;
+  const R = retanguloDaTela(0);
+  return (R.x2 - R.x1) * 1.5 < (bb.x2 - bb.x1) || (R.y2 - R.y1) * 1.5 < (bb.y2 - bb.y1);
+}
+/* Liang-Barsky: o pedaco do segmento dentro de R, [t0, t1] em 0..1, ou null */
+function recorteSeg(x1, y1, x2, y2, R){
+  let t0 = 0, t1 = 1;
+  const dx = x2 - x1, dy = y2 - y1;
+  for (const [p, q] of [[-dx, x1 - R.x1], [dx, R.x2 - x1], [-dy, y1 - R.y1], [dy, R.y2 - y1]]) {
+    if (p === 0) { if (q < 0) return null; continue; }
+    const t = q / p;
+    if (p < 0) { if (t > t1) return null; if (t > t0) t0 = t; }
+    else { if (t < t0) return null; if (t < t1) t1 = t; }
+  }
+  return [t0, t1];
+}
+function recortador(R, P){
+  P = P || new Path2D();
+  let cx = 0, cy = 0, sx = 0, sy = 0, tem = false, caneta = false;
+  const dentro = (x, y) => x >= R.x1 && x <= R.x2 && y >= R.y1 && y <= R.y2;
+  const linha = (x, y) => {
+    if (!tem) { cx = sx = x; cy = sy = y; tem = true; caneta = false; return; }
+    const t = recorteSeg(cx, cy, x, y, R);
+    if (t) {
+      const ax = cx + (x - cx) * t[0], ay = cy + (y - cy) * t[0], bx = cx + (x - cx) * t[1], by = cy + (y - cy) * t[1];
+      if (!(caneta && t[0] === 0)) P.moveTo(ax, ay);
+      P.lineTo(bx, by);
+      caneta = t[1] === 1;
+    } else caneta = false;
+    cx = x; cy = y;
+  };
+  return {
+    P,
+    moveTo(x, y){ cx = sx = x; cy = sy = y; tem = true; caneta = false; },
+    lineTo: linha,
+    closePath(){ if (tem) linha(sx, sy); },
+    arc(ox, oy, r, a0, a1, anti){
+      let sw = a1 - a0;
+      if (anti) { if (sw > 0) sw -= 2 * Math.PI * Math.ceil(sw / (2 * Math.PI)); if (sw < -2 * Math.PI) sw = -2 * Math.PI; }
+      else { if (sw < 0) sw += 2 * Math.PI * Math.ceil(-sw / (2 * Math.PI)); if (sw > 2 * Math.PI) sw = 2 * Math.PI; }
+      const ix = ox + r * Math.cos(a0), iy = oy + r * Math.sin(a0);
+      linha(ix, iy);
+      const fx = ox + r * Math.cos(a0 + sw), fy = oy + r * Math.sin(a0 + sw);
+      /* a caixa do circulo: toda fora = so anda; toda dentro = o arco de verdade */
+      if (ox + r < R.x1 || ox - r > R.x2 || oy + r < R.y1 || oy - r > R.y2) { cx = fx; cy = fy; caneta = false; return; }
+      if (dentro(ox - r, oy - r) && dentro(ox + r, oy + r)) {
+        if (!caneta) P.moveTo(ix, iy);
+        P.arc(ox, oy, r, a0, a1, !!anti); cx = fx; cy = fy; caneta = true; return;
+      }
+      /* em parte: polilinha com erro de corda de ~0,25 px */
+      const e = Math.min(px(0.25), r * 0.5), passo = Math.max(2 * Math.acos(1 - e / r), 1e-4);
+      const n = Math.min(8192, Math.max(2, Math.ceil(Math.abs(sw) / passo)));
+      for (let i = 1; i <= n; i++) { const a = a0 + sw * i / n; linha(ox + r * Math.cos(a), oy + r * Math.sin(a)); }
+    },
+  };
+}
+/* grava as chamadas feitas num Path2D (e as faz nele): refazCaminho(ops, Q) as repete noutro alvo -- o recortador */
+function gravador(P, ops){
+  return {
+    moveTo(x, y){ P.moveTo(x, y); ops.push(0, x, y); },
+    lineTo(x, y){ P.lineTo(x, y); ops.push(1, x, y); },
+    closePath(){ P.closePath(); ops.push(2); },
+    arc(x, y, r, a0, a1, anti){ P.arc(x, y, r, a0, a1, !!anti); ops.push(3, x, y, r, a0, a1, anti ? 1 : 0); },
+  };
+}
+function refazCaminho(ops, Q){
+  for (let i = 0; i < ops.length;) {
+    const op = ops[i++];
+    if (op === 0) { Q.moveTo(ops[i], ops[i + 1]); i += 2; }
+    else if (op === 1) { Q.lineTo(ops[i], ops[i + 1]); i += 2; }
+    else if (op === 2) Q.closePath();
+    else { Q.arc(ops[i], ops[i + 1], ops[i + 2], ops[i + 3], ops[i + 4], ops[i + 5] === 1); i += 6; }
+  }
+  return Q;
+}
+/* um Path2D para tracejar: monta(Q) desenha nele (Q tem moveTo/lineTo/arc/closePath); com zoom, recortado na tela */
+function caminhoTracejado(monta, R){
+  if (!R && !zoomRecorta()) { const P = new Path2D(); monta(P); return P; }
+  const Q = recortador(R || retanguloDaTela()); monta(Q); return Q.P;
+}
 function pPolilinha(P, pts){ if (!pts.length) return; P.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) P.lineTo(pts[i][0], pts[i][1]); }
 
 /* ============================== cache por camada ==============================
@@ -977,7 +1075,12 @@ function pPolilinha(P, pts){ if (!pts.length) return; P.moveTo(pts[0][0], pts[0]
    engasgava. O cache refaz so quando o modelo muda (commit) ou a vista vira; durante um
    arrasto, o que esta na mao sai do cache (EXCLUI) e e desenhado por cima a cada quadro. */
 let CACHE = null, cacheSujo = true, EXCLUI = null;
-function novaCam(){ return { cheios:new Path2D(), tracos:new Map(), kCheios:new Path2D(), kTracos:new Map(), inv:[], k:false }; }
+/* o keepout e tracejado: os caminhos dele guardam tambem as chamadas (gravador), refeitas recortadas na tela com zoom */
+function novaCam(){
+  const kCheios = new Path2D(), kOps = [];
+  return { cheios:new Path2D(), tracos:new Map(), kCheios, kOps, kG:gravador(kCheios, kOps), kTracos:new Map(), inv:[], k:false };
+}
+function tracoK(c, w){ const q = Math.max(1, Math.round((w > 0 ? w : 0) * 1e4)); let x = c.kTracos.get(q); if (!x) { x = { P:new Path2D(), ops:[] }; x.g = gravador(x.P, x.ops); c.kTracos.set(q, x); } return x.g; }
 function camC(k){ let c = CACHE.cam.get(k); if (!c) { c = novaCam(); CACHE.cam.set(k, c); } return c; }
 function tracoEm(map, w){ const q = Math.max(1, Math.round((w > 0 ? w : 0) * 1e4)); let p = map.get(q); if (!p) { p = new Path2D(); map.set(q, p); } return p; }
 /* todas: o cache completo (o 3D pinta as faces com ele). Sem, a 2D so cacheia as camadas a vista: camada
@@ -1009,20 +1112,20 @@ function cacheLinha(o, isArc){
   if (typeof o.layer !== 'string' || !linhaValida(o, isArc)) return;
   const c = camC(o.layer);
   if (o.keepout) c.k = true;
-  const P = tracoEm(o.keepout ? c.kTracos : c.tracos, o.w);
+  const P = o.keepout ? tracoK(c, o.w) : tracoEm(c.tracos, o.w);
   if (isArc) pArco(P, o); else pLinha(P, o);
 }
 function cacheFill(f){
   if (typeof f.layer !== 'string' || ![f.x1, f.y1, f.x2, f.y2].every(isNum)) return;
   const c = camC(f.layer), cc = fillCentro(f);
   if (f.keepout) c.k = true;
-  pForma(f.keepout ? c.kCheios : c.cheios, cc[0], cc[1], Math.abs(f.x2 - f.x1), Math.abs(f.y2 - f.y1), f.rot || 0, 'rect');
+  pForma(f.keepout ? c.kG : c.cheios, cc[0], cc[1], Math.abs(f.x2 - f.x1), Math.abs(f.y2 - f.y1), f.rot || 0, 'rect');
 }
 function cacheRegiao(g){
   if (typeof g.layer !== 'string') return;
   const c = camC(g.layer);
   if (g.keepout) c.k = true;
-  pRegiao(g.keepout ? c.kCheios : c.cheios, g);
+  pRegiao(g.keepout ? c.kG : c.cheios, g);
 }
 function cacheTexto(t){
   if (typeof t.layer !== 'string') return;
@@ -1194,8 +1297,9 @@ function pintaCamada(k){
     /* keepout: translucido e tracejado -- e regra, nao cobre */
     ctx.save();
     ctx.globalAlpha = 0.35; ctx.fill(c.kCheios);
-    ctx.globalAlpha = 0.9; ctx.setLineDash([px(6), px(4)]); ctx.lineWidth = px(1.2); ctx.stroke(c.kCheios);
-    for (const [q, P] of c.kTracos) { ctx.lineWidth = Math.max(q / 1e4, min); ctx.stroke(P); }
+    const zoom = zoomRecorta();
+    ctx.globalAlpha = 0.9; ctx.setLineDash([px(6), px(4)]); ctx.lineWidth = px(1.2); ctx.stroke(zoom ? refazCaminho(c.kOps, recortador(retanguloDaTela())).P : c.kCheios);
+    for (const [q, x] of c.kTracos) { ctx.lineWidth = Math.max(q / 1e4, min); ctx.stroke(zoom ? refazCaminho(x.ops, recortador(retanguloDaTela(24, ctx.lineWidth))).P : x.P); }
     ctx.restore();
   }
   for (const g of c.inv) {
@@ -1218,7 +1322,7 @@ function desenhaPlanos(){
   const pula = o => EXCLUI && EXCLUI.has(o);
   for (const p of EB.polygons || []) {
     if (!p || pula(p) || !Array.isArray(p.pts) || p.pts.length < 3 || !camVisivel(p.layer)) continue;
-    const P = new Path2D(); pPoli(P, p.pts);
+    const P = caminhoTracejado(Q => pPoli(Q, p.pts));
     ctx.save(); ctx.strokeStyle = corDe(p.layer); ctx.globalAlpha = 0.95; ctx.setLineDash([px(6), px(3)]); ctx.lineWidth = px(1.3);
     ctx.stroke(P); ctx.restore();
   }
@@ -1240,7 +1344,7 @@ function hachura(pts, cor){
   ctx.save(); ctx.clip(P);
   ctx.strokeStyle = cor; ctx.globalAlpha = 0.5; ctx.lineWidth = px(1); ctx.setLineDash([]); ctx.stroke(H);
   ctx.restore();
-  ctx.save(); ctx.strokeStyle = cor; ctx.globalAlpha = 0.95; ctx.setLineDash([px(5), px(3)]); ctx.lineWidth = px(1.3); ctx.stroke(P); ctx.restore();
+  ctx.save(); ctx.strokeStyle = cor; ctx.globalAlpha = 0.95; ctx.setLineDash([px(5), px(3)]); ctx.lineWidth = px(1.3); ctx.stroke(caminhoTracejado(Q => pPoli(Q, pts))); ctx.restore();
 }
 function draw(){
   agendado = 0;
@@ -1342,7 +1446,7 @@ function desenhaObj(kind, o, cor, opt){
       else { const P = new Path2D(); for (const l of g.linhas) pPolilinha(P, l); ctx.lineWidth = Math.max(g.w, px(1)); ctx.stroke(P); }
     }
   } else {
-    const P = pathDoObj(kind, o);
+    const P = opt.dash && (ehTraco(kind) || opt.contorno) ? caminhoTracejado(Q => pathEm(Q, kind, o), zoomRecorta() ? retanguloDaTela(24, Math.max(opt.larg != null ? opt.larg : (o.w || 0), 0)) : null) : pathDoObj(kind, o);
     if (ehTraco(kind)) { ctx.lineWidth = Math.max(opt.larg != null ? opt.larg : (o.w || 0), px(1)); ctx.stroke(P); }
     else if (opt.contorno) { ctx.lineWidth = px(opt.linha || 1.2); ctx.stroke(P); }
     else ctx.fill(P);
@@ -1372,7 +1476,8 @@ let FANT = null;
 function chaveVis(){ let s = (show.unica ? 'u:' + cur : '') + '|'; for (const l of LAYERS) if (camVisivel(l.key)) s += l.key + ','; return s; }
 function montaFantasmas(){
   const grupos = new Map(), vias = [];
-  const P = (chave, base) => { let x = grupos.get(chave); if (!x) { x = Object.assign({ P:new Path2D() }, base); grupos.set(chave, x); } return x.P; };
+  /* cada grupo guarda o Path2D (placa inteira a vista) e as chamadas que o montaram (refeitas no recortador com zoom) */
+  const P = (chave, base) => { let x = grupos.get(chave); if (!x) { x = Object.assign({ P:new Path2D(), ops:[] }, base); x.g = gravador(x.P, x.ops); grupos.set(chave, x); } return x.g; };
   for (const list of [model.tracks, model.arcs, model.vias, model.fills, model.regions]) {
     for (const m of list) {
       if (!m.src || (!m.changed && !m.deleted)) continue;
@@ -1398,11 +1503,12 @@ function montaFantasmas(){
 function desenhaFantasmas(){
   if (!FANT || FANT.seq !== ebSeq || FANT.layers !== LAYERS || FANT.vis !== chaveVis()) FANT = montaFantasmas();
   ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const zoom = zoomRecorta();
   for (const x of FANT.grupos) {
     ctx.globalAlpha = x.alpha; ctx.strokeStyle = x.cor;
     ctx.setLineDash([px(x.dash[0]), px(x.dash[1])]);
     ctx.lineWidth = x.fator ? Math.max(x.w * x.fator, px(x.min)) : px(x.linha);
-    ctx.stroke(x.P);
+    ctx.stroke(zoom ? refazCaminho(x.ops, recortador(retanguloDaTela(24, ctx.lineWidth))).P : x.P);
   }
   if (FANT.vias.length) {
     /* a via nova: o anel 2,5 px por fora dela (depende do zoom: monta na hora, sao poucas) */
@@ -3919,7 +4025,7 @@ function previaComp(m, g){
     const c = [[ca.x1, ca.y1], [ca.x2, ca.y1], [ca.x2, ca.y2], [ca.x1, ca.y2]].map(p => {
       const q0 = m.changed ? HC.xfPoint(HC.compDelta(m), p[0], p[1]) : { x:p[0], y:p[1] };
       const q = HC.xfPoint(d, q0.x, q0.y); return [q.x, q.y]; });
-    const P = new Path2D(); pPoli(P, c);
+    const P = caminhoTracejado(Q => pPoli(Q, c));
     ctx.save(); ctx.strokeStyle = COR.sel; ctx.setLineDash([px(5), px(3)]); ctx.lineWidth = px(1.2); ctx.stroke(P); ctx.restore();
   }
 }
