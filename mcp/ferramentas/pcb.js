@@ -624,7 +624,7 @@ module.exports = {
     },
     {
       nome: 'pcb_aplicar', titulo: 'Aplicar ops no changes.js',
-      descricao: 'Escreve QUALQUER op do changes.js (AI-GUIDE Parte B): track_add/edit/del, via_*, arc_*, text_add/edit/del, fill_*, region_add/del, designator_move, comp_move, comp_attr, outline_set — e as ops novas dos módulos (comp_add, pad_add, poly_add… do hub-pcbeco). Os orig_* das edições/remoções são preenchidos SOZINHOS a partir do board.js (pode omiti-los). Op de um objeto que já tem linha edita aquela linha. Tudo validado antes de gravar; com erro nada é gravado. designator_move/comment_move: x/y/rot = onde o texto deve FICAR na placa (a conta inversa do comp_move é feita aqui; "referencial":"original" grava como veio), h = altura e w = traço em mm; funciona também para componente criado por comp_add. A resposta traz em "textos" a posição efetiva de cada um e "fora_da_placa" quando ele sai do contorno.',
+      descricao: 'Escreve QUALQUER op do changes.js (AI-GUIDE Parte B): track_add/edit/del, via_*, arc_*, text_add/edit/del, fill_*, region_add/del, designator_move, comp_move, comp_attr, outline_set — e as ops novas dos módulos (comp_add, pad_add, poly_add… do hub-pcbeco). Os orig_* das edições/remoções são preenchidos SOZINHOS a partir do board.js (pode omiti-los). Op de um objeto que já tem linha edita aquela linha. Tudo validado antes de gravar; com erro nada é gravado. designator_move/comment_move: x/y/rot = onde o texto deve FICAR na placa (a conta inversa do comp_move é feita aqui; "referencial":"original" grava como veio), h = altura e w = traço em mm, hidden:true oculta o texto (o Show Designator/Show Comment do Altium; false mostra de novo); funciona também para componente criado por comp_add (vira des_* e des_hidden). Campo que a op não tem volta em "campos_ignorados". A resposta traz em "textos" a posição efetiva de cada um e "fora_da_placa" quando ele sai do contorno.',
       entrada: { type: 'object', properties: Object.assign({
         projeto: PROJETO,
         ops: { type: 'array', minItems: 1, items: { type: 'object', properties: { op: { type: 'string' } }, required: ['op'], additionalProperties: true },
@@ -792,10 +792,10 @@ module.exports = {
     },
     {
       nome: 'pcb_editar', titulo: 'Editar objeto por id',
-      descricao: 'Edita um objeto da placa pelo id (trilha t…/s…/l…, arco a…, via v…, texto x…, fill f…, pad livre, polígono): passe só os campos novos (ex.: {"w":0.5} ou {"x1":10,"y1":5}). A op certa (track_edit, arc_edit, via_edit, text_edit, fill_edit) e os orig_* saem do board.js. Objeto criado pelo changes.js (id "new-…", o que o pcb_consultar mostra) tem a linha que o criou editada.',
+      descricao: 'Edita um objeto da placa pelo id (trilha t…/s…/l…, arco a…, via v…, texto x…, fill f…, pad livre, polígono): passe só os campos novos (ex.: {"w":0.5} ou {"x1":10,"y1":5}). A op certa (track_edit, arc_edit, via_edit, text_edit, fill_edit; designator e comment de componente: designator_move/comment_move e comp_attr) e os orig_* saem do board.js. Objeto criado pelo changes.js (id "new-…", o que o pcb_consultar mostra) tem a linha que o criou editada.',
       entrada: { type: 'object', properties: Object.assign({
         projeto: PROJETO, id: { type: 'string' },
-        campos: { type: 'object', additionalProperties: true, description: 'trilha: x1,y1,x2,y2,w,layer,net · arco: cx,cy,r,sa,ea,w,layer · via: x,y,size,drill · texto: text,x,y,h,w,rot,layer,mirror · fill: x1,y1,x2,y2,rot,layer,net' },
+        campos: { type: 'object', additionalProperties: true, description: 'trilha: x1,y1,x2,y2,w,layer,net · arco: cx,cy,r,sa,ea,w,layer · via: x,y,size,drill · texto: text,x,y,h,w,rot,layer,mirror · designator/comment de componente: x,y,h,w,rot,hidden (true oculta, false mostra) e text (renomeia o componente / troca o comment) · fill: x1,y1,x2,y2,rot,layer,net' },
       }, COMUNS), required: ['projeto', 'id', 'campos'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
@@ -804,6 +804,20 @@ module.exports = {
         const est = ops.transacao(ctx, p, (arq, b) => {
           const novos = ops.mapaNovos(arq, b, hc);
           const k = tipoDoId(arq, b, hc, a.id, novos);
+          /* designator/comment (1.57.0): o text_edit so vale para texto livre -- o do componente vai
+             por designator_move/comment_move (x, y, h, w, rot, hidden) e o texto por comp_attr */
+          const tc = k === 'text' ? (b.texts || []).find(x => x && String(x.id) === String(a.id) && (x.designator || x.comment)) : null;
+          if (tc) {
+            const qual = tc.designator ? 'designator' : 'comment', c = Object.assign({}, a.campos), out = [];
+            for (const f of ['layer', 'mirror']) if (c[f] !== undefined) throw new ErroMcp(`o ${qual} de ${tc.owner} segue a face do componente: "${f}" não se muda nele (pcb_mover com layer vira o componente)`);
+            if (c.text !== undefined) {
+              out.push(ops.aplica(arq, b, hc, comNote({ op: 'comp_attr', ref: tc.owner, [qual]: String(c.text) }, a), novos));
+              delete c.text;
+            }
+            if (Object.keys(c).length) out.push(ops.aplicaTexto(arq, b, hc, comNote(Object.assign({ op: qual + '_move', ref: tc.owner }, c), a)));
+            if (!out.length) throw new ErroMcp('campos vazio: diga o que muda (x, y, h, w, rot, hidden ou text)');
+            return out;
+          }
           const opn = { track: 'track_edit', arc: 'arc_edit', via: 'via_edit', text: 'text_edit', fill: 'fill_edit', pad: 'pad_edit', poly: 'poly_edit' }[k];
           if (!opn) throw new ErroMcp(`"${a.id}" é ${k}: não há op de edição para ele (região: apague e crie outra)`);
           const o = ops.aplica(arq, b, hc, comNote(Object.assign({ op: opn, id: a.id }, a.campos), a), novos);
@@ -817,7 +831,7 @@ module.exports = {
     },
     {
       nome: 'pcb_apagar', titulo: 'Apagar objetos por id', destrutiva: true,
-      descricao: 'Apaga objetos da placa pelos ids (trilha/linha → track_del, arco → arc_del, via → via_del, texto → text_del, fill → fill_del, região → region_del, pad livre → pad_del, polígono → poly_del) e componentes por refs (comp_del), com os orig_* do board.js. Objeto criado pelo changes.js (id "new-…", o que o pcb_consultar mostra) e componente criado por comp_add (ECO, pcb_colocar) saem tirando a linha que os criou (e as linhas dele que vêm depois).',
+      descricao: 'Apaga objetos da placa pelos ids (trilha/linha → track_del, arco → arc_del, via → via_del, texto → text_del, fill → fill_del, região ou recorte (cutouts: Board Cutout, Polygon Pour Cutout) → region_del, pad livre → pad_del, polígono → poly_del) e componentes por refs (comp_del), com os orig_* do board.js. Objeto criado pelo changes.js (id "new-…", o que o pcb_consultar mostra) e componente criado por comp_add (ECO, pcb_colocar) saem tirando a linha que os criou (e as linhas dele que vêm depois).',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, ids: { type: 'array', items: { type: 'string' } }, refs: { type: 'array', items: { type: 'string' }, description: 'componentes a tirar da placa (comp_del)' } }, COMUNS), required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
@@ -829,7 +843,7 @@ module.exports = {
           const out = (a.refs || []).map(ref => ops.aplica(arq, board, hc, comNote({ op: 'comp_del', ref }, a), novos));
           return out.concat((a.ids || []).map((id, i) => {
             const k = tipos[i];
-            const opn = { track: 'track_del', arc: 'arc_del', via: 'via_del', text: 'text_del', fill: 'fill_del', region: 'region_del', pad: 'pad_del', poly: 'poly_del' }[k];
+            const opn = { track: 'track_del', arc: 'arc_del', via: 'via_del', text: 'text_del', fill: 'fill_del', region: 'region_del', cutouts: 'region_del', pad: 'pad_del', poly: 'poly_del' }[k];
             if (!opn) throw new ErroMcp(`"${id}" (${k}) não se apaga pelo changes.js`);
             return ops.aplica(arq, board, hc, comNote({ op: opn, id }, a), novos);
           }));

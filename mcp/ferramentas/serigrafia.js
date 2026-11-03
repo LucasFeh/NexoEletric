@@ -198,8 +198,9 @@ function posicionar(ctx, a) {
   /* os textos velhos dos que vao andar nao contam (vao sair dali) */
   const ignora = new Set(refs.map(r => String((T.find(x => x && x.designator && x.owner === r) || {}).id)));
 
-  const movidos = [], falhas = [];
-  for (const ref of refs) {
+  const movidos = [], falhas = [], silkDe = new Map();
+  /* um componente: o lugar mais barato que nao viola nada da cena de agora */
+  const colocaUm = ref => {
     const base = T.find(x => x && x.designator && x.owner === ref);
     const dono = M.corpos.find(c => c.ref === ref);
     const r0 = M.regras(dono.cx, dono.cy, base.layer);
@@ -238,14 +239,33 @@ function posicionar(ctx, a) {
     if (!achou) {
       falhas.push({ ref, motivo: 'nenhum lugar livre até ' + dmax + ' mm com altura ' + hMin + '–' + hMax + ' mm', bloqueios: motivos, tentativas: tent - 1,
                     dica: 'aumente distancia_max, baixe altura_min (se o projeto permitir), use ignorar_trilha:true ou libere uma área com regras_casa_definir' });
-      ignora.delete(String(base.id));          // o texto velho fica onde esta: volta a contar para os proximos
-      continue;
+      ignora.delete(String(base.id));          // o texto velho fica onde esta: volta a contar
+      return;
     }
     achou.s.id = 'novo:' + ref;
     M.cena.poe(achou.s);
+    silkDe.set(ref, achou.s);
     movidos.push({ ref, de: { x: base.x, y: base.y, h: base.h, w: base.w, rot: base.rot }, para: { x: achou.s.gravar.x, y: achou.s.gravar.y, h: achou.c.h, w: achou.c.w, rot: achou.c.rot },
                    lado: achou.c.lado, distancia_mm: r3(achou.c.d), fileira: fileira || undefined, violava: violando.has(ref) ? curta(violando.get(ref)) : undefined, tentativas: tent });
+  };
+  /* O texto velho de quem nao achou lugar FICA na placa, mas os que foram postos antes dele o
+     ignoraram (contavam que ele ia sair) e podiam cair em cima dele (1.57.0). Depois de cada volta,
+     o posto que encosta no texto velho de uma falha sai da cena e procura outro lugar; se nao achar,
+     vira falha tambem, e o texto velho dele passa a contar. Para quando nada mais muda. */
+  let fila = refs.slice(), refeitos = 0;
+  for (let volta = 0; fila.length && volta < 8; volta++) {
+    for (const ref of fila) colocaUm(ref);
+    fila = [];
+    if (!falhas.length) break;
+    for (let i = movidos.length - 1; i >= 0; i--) {
+      const mv = movidos[i], s = silkDe.get(mv.ref);
+      const r = M.regras(mv.para.x, mv.para.y, s.layer);
+      const ig = new Set(ignora); ig.add(s.id);
+      if (!RC.checaSerigrafia(M.cena, s, r.o, r.desl, { parar: true, ignora: ig, corpos: proibeCorpo ? M.corpos : null }).length) continue;
+      M.cena.tira(s); silkDe.delete(mv.ref); movidos.splice(i, 1); fila.push(mv.ref); refeitos++;
+    }
   }
+  if (refeitos) avisos.push(`${refeitos} rótulo(s) procuraram outro lugar: tinham caído em cima do designator antigo de quem não achou lugar (${falhas.map(f => f.ref).join(', ')})`);
 
   const out = { projeto: M.p.nome, modo, ms: Date.now() - t0, analisados: refs.length, movidos: movidos.length, sem_lugar: falhas.length,
                 ja_ok: a.todos === true ? undefined : 'só os designadores que violam hoje (todos:true reposiciona todos)', posicoes: movidos, falhas,

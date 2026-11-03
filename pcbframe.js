@@ -1641,36 +1641,55 @@ function moveComp(m, g){
   if (origDoSrc && volta) { if (!novo) CH.splice(CH.indexOf(c), 1); return; }
   if (novo) { c.note = NOTA; CH.push(c); }
 }
-/* O designator anda com o componente, e o ApplyChanges aplica as mudancas EM ORDEM: o
-   designator_move vai ANTES do comp_move do mesmo componente, com x/y/rot no referencial de
-   antes do componente andar (xfPointInv) -- e o que o motor exige (hubcore-api). */
-function moveDesignator(m, g){
+/* O designator (e o comment) anda com o componente, e o ApplyChanges aplica as mudancas EM ORDEM:
+   o designator_move/comment_move vai ANTES do comp_move do mesmo componente, com x/y/rot no
+   referencial de antes do componente andar (xfPointInv) -- e o que o motor exige (hubcore-api).
+   g: {x, y, rot, h, w, hidden} -- hidden e o Show Designator/Show Comment desligado (1.57.0). */
+function moveTextoComp(m, g){
   const ref = m.src.owner, comp = ref != null ? model.compByRef[ref] : null;
+  const opn = m.src.comment ? 'comment_move' : 'designator_move';
   /* componente criado por comp_add: o designator dele vai na propria linha do comp_add (des_*),
      o Altium nao o tem no lugar que o hub sintetizou (1.36.0) */
   const d = comp && comp.changed ? HC.compDelta(comp) : null;
   const add = comp && comp.added ? ultimoOp(x => x.op === 'comp_add' && x.ref === ref) : null;
   if (add) {
+    if (opn !== 'designator_move') return;
     if (isNum(g.x) && isNum(g.y)) { const p = d ? HC.xfPointInv(d, g.x, g.y) : { x:g.x, y:g.y }; add.des_x = r6(p.x); add.des_y = r6(p.y); }
     if (isNum(g.rot)) add.des_rot = normAng(d ? (d.flip ? d.phi + 180 - g.rot : g.rot - d.dr) : g.rot);
     if (isNum(g.h) && g.h > 0) add.des_h = r6(g.h);
+    if (isNum(g.w) && g.w > 0) add.des_w = r6(g.w);
+    if (g.hidden === true) add.des_hidden = true; else if (g.hidden === false) delete add.des_hidden;
     return;
   }
-  let c = ultimoOp(x => x.op === 'designator_move' && x.ref === ref);
+  let c = ultimoOp(x => x.op === opn && x.ref === ref);
   const novo = !c;
-  if (novo) c = { op:'designator_move', ref, orig_x:m.src.x, orig_y:m.src.y };
+  if (novo) c = { op:opn, ref, orig_x:m.src.x, orig_y:m.src.y };
   c.orig_x = m.src.x; c.orig_y = m.src.y;
   if (isNum(g.x) && isNum(g.y)) { const p = d ? HC.xfPointInv(d, g.x, g.y) : { x:g.x, y:g.y }; c.x = r6(p.x); c.y = r6(p.y); }
   else if (!isNum(c.x) || !isNum(c.y)) { c.x = r6(m.eff.x); c.y = r6(m.eff.y); }
   if (isNum(g.rot)) c.rot = normAng(d ? (d.flip ? d.phi + 180 - g.rot : g.rot - d.dr) : g.rot);
   if (isNum(g.h) && g.h > 0) c.h = r6(g.h);
+  if (isNum(g.w) && g.w > 0) c.w = r6(g.w);
+  if (g.hidden === true) c.hidden = true; else if (g.hidden === false) delete c.hidden;
   if (!novo) CH.splice(CH.indexOf(c), 1);
   const volta = near(c.x, m.src.x) && near(c.y, m.src.y) && (c.rot === undefined || nearAng(c.rot, m.src.rot || 0)) &&
-                (c.h === undefined || near(c.h, m.src.h));
+                (c.h === undefined || near(c.h, m.src.h)) && (c.w === undefined || near(c.w, m.src.w)) && !c.hidden;
   if (volta) return;
-  if (novo) c.note = 'designator no hub';
+  if (novo) c.note = opn === 'comment_move' ? 'comment no hub' : 'designator no hub';
   const iMove = CH.findIndex(x => x && x.op === 'comp_move' && x.ref === ref);
   if (iMove >= 0) CH.splice(iMove, 0, c); else CH.push(c);
+}
+/* o designator/comment (texto do modelo) de um componente vivo, e as caixas Show da ficha */
+function textoDoComp(c, qual){
+  const ref = c.src.ref;
+  return model.texts.find(t => t.src && t.src[qual] && t.src.owner === ref && !t.deleted) || null;
+}
+function camposMostra(c){
+  const L = [];
+  const td = textoDoComp(c, 'designator'), tc = textoDoComp(c, 'comment');
+  if (td) L.push({ k:'mostraDes', rot:'Show Designator', tipo:'bool', v:!td.eff.hidden });
+  if (tc) L.push({ k:'mostraCom', rot:'Show Comment', tipo:'bool', v:!tc.eff.hidden });
+  return L;
 }
 function attrComp(m, campo, valor){
   let c = ultimoOp(x => x.op === 'comp_attr' && x.ref === m.src.ref);
@@ -1737,10 +1756,18 @@ function apagaItem(m){
   CH.push(del);
   return true;
 }
+/* o recorte do board.js (Board Cutout ou Polygon Pour Cutout do Altium) sai por region_del (1.57.0);
+   o de componente anda com ele */
+function apagaRecorte(k){
+  if (!k || k.owner || !Array.isArray(k.points) || !k.points.length) return false;
+  if (ultimoOp(x => x.op === 'region_del' && x.id === k.id)) return true;
+  CH.push({ op:'region_del', id:k.id, orig_layer:k.layer, orig_n:k.points.length, orig_x0:k.points[0][0], orig_y0:k.points[0][1], note:'recorte removido no hub' });
+  return true;
+}
 /* Delete: o que tem op de apagar sai; o resto diz por que fica */
 function apagaSelecao(){
   if (!SEL.length) return;
-  let n = 0, annMexeu = false, cotaMexeu = false;
+  let n = 0, annMexeu = false, cotaMexeu = false, ocultos = 0;
   const fica = [];
   for (const a of SEL) {
     if (a.t === 'ann') { const i = ANN.indexOf(a.ann); if (i >= 0) { ANN.splice(i, 1); annMexeu = true; n++; } continue; }
@@ -1748,9 +1775,15 @@ function apagaSelecao(){
     if (a.t === 'comp') { fica.push(a.m.src.ref + ' (componente sai pelo esquema e o ECO)'); continue; }
     if (a.t === 'pad' && !a.m) { fica.push('pad ' + (a.comp ? (a.comp.eff.designator || a.comp.src.ref) + '.' : '') + (a.pad.name || '') + ' (é do componente: mude pelo footprint)'); continue; }
     if (a.t === 'regiao-ro') { fica.push('região: ' + a.motivo); continue; }
-    if (a.t === 'recorte') { if (a.m && apagaItem(a.m)) n++; else fica.push('recorte do Altium (apague no Altium)'); continue; }
-    if (a.t === 'semplano' && !a.m) { fica.push('recorte de polígono do Altium (apague no Altium)'); continue; }
-    if (a.t === 'text' && a.m.src && (a.m.src.designator || a.m.src.comment || a.m.src.owner)) { fica.push('texto do componente ' + (a.m.src.owner || '')); continue; }
+    if ((a.t === 'recorte' || a.t === 'semplano') && !a.m) {
+      if (apagaRecorte(a.eb)) n++; else fica.push((a.t === 'recorte' ? 'recorte' : 'recorte de polígono') + ' do componente ' + (a.eb.owner || ''));
+      continue;
+    }
+    if (a.t === 'recorte') { if (apagaItem(a.m)) n++; continue; }
+    /* designator e comment nao saem do componente: Delete os oculta (o Show Designator/Show Comment
+       do Altium); voltam pela ficha do componente */
+    if (a.t === 'text' && a.m.src && (a.m.src.designator || a.m.src.comment)) { moveTextoComp(a.m, { hidden:true }); n++; ocultos++; continue; }
+    if (a.t === 'text' && a.m.src && a.m.src.owner) { fica.push('texto do footprint de ' + a.m.src.owner); continue; }
     if (a.m && apagaItem(a.m)) n++;
   }
   SEL = [];
@@ -1758,6 +1791,8 @@ function apagaSelecao(){
   if (cotaMexeu) { gravaCotas(); pintaBarra(); }
   if (annMexeu) annChanged();
   if (n) commit(); else { aoMudarSel(); pede(); }
+  if (ocultos) HubDialog.toast(ocultos === 1 ? 'texto do componente oculto — volta pelo Show Designator/Show Comment na ficha do componente'
+    : ocultos + ' textos de componente ocultos — voltam pela ficha do componente', 'info', 5000);
   if (fica.length) HubDialog.toast('Não apagado: ' + fica.slice(0, 4).join('; ') + (fica.length > 4 ? ' …' : ''), 'warn', 5000);
 }
 
@@ -1863,8 +1898,8 @@ function escreveGeo(a, g){
     case 'poly': return editaPoly(a.m, { pts:g.points });
     case 'text': {
       const s = a.m.src;
-      if (s && s.designator) { moveDesignator(a.m, { x:g.x, y:g.y, rot:g.rot }); return true; }
-      if (s && (s.comment || s.owner)) return false;
+      if (s && (s.designator || s.comment)) { moveTextoComp(a.m, { x:g.x, y:g.y, rot:g.rot }); return true; }
+      if (s && s.owner) return false;
       return editaItem(a.m, { x:r6(g.x), y:r6(g.y), rot:normAng(g.rot), mirror:!!g.mirror });
     }
     case 'ann': a.ann.x = r6(g.x); a.ann.y = r6(g.y); annChanged(); return false;
@@ -1878,7 +1913,7 @@ function movivel(a){
   if (a.t === 'pad') return a.comp ? ALVO_COMP.get(a.comp) : (a.m && !a.m.deleted ? a : null);
   if (a.t === 'regiao-ro') return null;
   if (a.t === 'recorte' || a.t === 'semplano') return a.m ? a : null;
-  if (a.t === 'text') { const s = a.m.src; if (s && s.comment) return null; if (s && s.owner && !s.designator) return null; }
+  if (a.t === 'text') { const s = a.m.src; if (s && s.owner && !s.designator && !s.comment) return null; }
   if (a.m && a.m.deleted) return null;
   return a;
 }
@@ -4768,7 +4803,7 @@ function iniciaArrasto(g){
     g.modo = 'nada';
     const t = g.topo;
     HubDialog.toast(t && t.t === 'regiao-ro' ? 'Esta região não anda daqui: ' + t.motivo
-      : t && t.t === 'text' ? 'O comment não tem op de posição (comment_move ainda não existe) — mova pelo Altium'
+      : t && t.t === 'text' ? 'Texto do footprint: anda com o componente (mude pelo footprint)'
       : 'Isto não se move daqui', 'info', 4000);
     return false;
   }
@@ -6207,6 +6242,7 @@ function fichaDe(a){
         { k:'layer', rot:'Layer', tipo:'enum', v:e.layer, opc:opcFaces(), dica:'trocar de face espelha o componente como olhar a placa por baixo (a rotação vira 180 − r), igual ao L no arrasto' },
         { k:'designator', rot:'Designator', tipo:'texto', v:e.designator || s.ref, dica:'renomear na PCB dessincroniza do esquema — o ECO vai acusar' },
         { k:'comment', rot:'Comment', tipo:'texto', v:e.comment !== undefined ? e.comment : (s.comment || '') },
+        ...camposMostra(m),
         { k:'tipo', rot:'Type', tipo:'ro', v:'Standard' },
         { sec:'Footprint' },
         { k:'footprint', rot:'Footprint Name', tipo:'ro', v:s.footprint || '—' },
@@ -6330,24 +6366,23 @@ function fichaDe(a){
         { k:'diam', rot:'Diameter', tipo:'dist', v:2 * circ.r, dica:'o furo da fábrica (Gerber, laser, 3D)' },
         par('Center (X/Y)', { k:'cx', rot:'X', tipo:'dist', v:circ.cx }, { k:'cy', rot:'Y', tipo:'dist', v:circ.cy }),
       ] };
-      return { titulo:'Board Cutout', sub:a.m ? 'recorte do hub (region_add cutout) — Delete tira' : 'Board Cutout do Altium (mude no Altium)', campos:[
+      return { titulo:'Board Cutout', sub:a.m ? 'recorte do hub (region_add cutout) — Delete tira' : 'Board Cutout do Altium — Delete tira', campos:[
         { k:'tam', rot:'Size', tipo:'ro', v:bb ? fmtDist(bb[2] - bb[0]) + ' × ' + fmtDist(bb[3] - bb[1]) + ' ' + unidade : '—' },
         { k:'c', rot:'Center', tipo:'ro', v:bb ? fmtDist((bb[0] + bb[2]) / 2) + ' ; ' + fmtDist((bb[1] + bb[3]) / 2) : '—' },
       ] };
     }
     case 'text': {
       const m = a.m, s = m.src || {}, e = ebDe(m) || m.eff;
-      if (s.designator) return { titulo:'Designator — ' + s.owner, sub:ESTADO(m), campos:[
-        par('Location (X/Y)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
-        { k:'h', rot:'Text Height', tipo:'dist', v:e.h },
-        { k:'rot', rot:'Rotation', tipo:'ang', v:e.rot || 0 },
-        { nota:'O designator_move vai antes do comp_move do componente no changes.js (o ApplyChanges aplica em ordem).' },
-      ] };
-      if (s.comment) return { titulo:'Comment — ' + s.owner, sub:'', campos:[
-        { k:'comment', rot:'Comment', tipo:'texto', v:e.text || '' },
-        par('Location (X/Y)', { k:'x', rot:'X', tipo:'ro', v:fmtDist(e.x) }, { k:'y', rot:'Y', tipo:'ro', v:fmtDist(e.y) }),
-        { nota:'A posição do comment ainda não tem op (comment_move): mova pelo Altium.' },
-      ] };
+      if (s.designator || s.comment) {
+        const qual = s.designator ? 'Designator' : 'Comment';
+        return { titulo:qual + ' — ' + s.owner, sub:ESTADO(m), campos:[
+          s.comment ? { k:'comment', rot:'Comment', tipo:'texto', v:e.text || '' } : null,
+          par('Location (X/Y)', { k:'x', rot:'X', tipo:'dist', v:e.x }, { k:'y', rot:'Y', tipo:'dist', v:e.y }),
+          par('Size', { k:'h', rot:'Height', tipo:'dist', v:e.h }, { k:'w', rot:'Stroke', tipo:'dist', v:e.w > 0 ? e.w : (e.h || 0) * TRACO_TEXTO }),
+          { k:'rot', rot:'Rotation', tipo:'ang', v:e.rot || 0 },
+          { nota:'O ' + qual.toLowerCase() + '_move vai antes do comp_move do componente no changes.js (o ApplyChanges aplica em ordem). Delete oculta o texto; ele volta pelo Show ' + qual + ' na ficha do componente.' },
+        ].filter(Boolean) };
+      }
       return { titulo:'Text ' + (m.added ? '(novo)' : s.id), sub:[nomeDe(e.layer), ESTADO(m), e.kind === 'truetype' ? 'TrueType' : ''].filter(Boolean).join(' · '), campos:[
         { k:'layer', rot:'Layer', tipo:'camada', v:e.layer, opc:opcCamadas(), dica:'na face de baixo o texto fica espelhado, como no Altium' },
         { k:'text', rot:'Text', tipo:'texto', v:e.text || '' },
@@ -6574,6 +6609,10 @@ function campoNoAlvo(a, k, v){
       if (k === 'layer') { if ((v !== 'Top' && v !== 'Bottom') || v === g.layer) return false; moveComp(a.m, viraGeo(g, [g.x, g.y])); return true; }
       if (k === 'x' || k === 'y' || k === 'rot') { if (!isNum(v)) return false; g[k] = k === 'rot' ? normAng(v) : v; moveComp(a.m, g); return true; }
       if (k === 'designator' || k === 'comment') { attrComp(a.m, k, v); return true; }
+      if (k === 'mostraDes' || k === 'mostraCom') {
+        const t = textoDoComp(a.m, k === 'mostraDes' ? 'designator' : 'comment'); if (!t) return false;
+        moveTextoComp(t, { hidden:!v }); return true;
+      }
       return false;
     }
     case 'track': case 'arc': case 'fill': {
@@ -6613,14 +6652,11 @@ function campoNoAlvo(a, k, v){
     }
     case 'text': {
       const s = a.m.src || {}, e = ebDe(a.m) || a.m.eff;
-      if (s.designator) {
-        if (k === 'h') { if (!pos(v)) return false; moveDesignator(a.m, { h:v }); return true; }
-        if (k === 'rot') { if (!isNum(v)) return false; moveDesignator(a.m, { rot:v }); return true; }
-        if (k === 'x' || k === 'y') { if (!isNum(v)) return false; moveDesignator(a.m, { x:k === 'x' ? v : e.x, y:k === 'y' ? v : e.y }); return true; }
-        return false;
-      }
-      if (s.comment) {
-        if (k === 'comment') { const c = model.compByRef[s.owner]; if (!c) return false; attrComp(c, 'comment', v); return true; }
+      if (s.designator || s.comment) {
+        if (k === 'comment' && s.comment) { const c = model.compByRef[s.owner]; if (!c) return false; attrComp(c, 'comment', v); return true; }
+        if (k === 'h' || k === 'w') { if (!pos(v)) return false; moveTextoComp(a.m, { [k]:v }); return true; }
+        if (k === 'rot') { if (!isNum(v)) return false; moveTextoComp(a.m, { rot:v }); return true; }
+        if (k === 'x' || k === 'y') { if (!isNum(v)) return false; moveTextoComp(a.m, { x:k === 'x' ? v : e.x, y:k === 'y' ? v : e.y }); return true; }
         return false;
       }
       if (s.owner && !a.m.added) return false;
@@ -6739,7 +6775,7 @@ function chLabel(ch){
     case 'text_edit': return 'editar texto ' + ch.id + (typeof ch.text === 'string' ? ' → "' + ch.text + '"' : '');
     case 'text_add': return 'novo texto "' + ch.text + '" ' + ch.layer;
     case 'text_del': return 'remover texto ' + ch.id;
-    case 'designator_move': return 'designator ' + ch.ref + ' → (' + f(ch.x) + ', ' + f(ch.y) + ')';
+    case 'designator_move': return 'designator ' + ch.ref + (ch.hidden ? ' oculto' : '') + (isNum(ch.x) || isNum(ch.y) || !ch.hidden ? ' → (' + f(ch.x) + ', ' + f(ch.y) + ')' : '');
     case 'fill_add': return 'novo fill ' + ch.layer;
     case 'fill_edit': return 'editar fill ' + ch.id + (ch.layer ? ' → ' + ch.layer : '');
     case 'fill_del': return 'remover fill ' + ch.id;
@@ -6752,7 +6788,7 @@ function chLabel(ch){
     case 'pad_net': return 'net do pad ' + ch.ref + '.' + ch.pad + ' → ' + (ch.net || '(sem net)');
     case 'comp_add': return 'novo componente ' + ch.ref + ' (' + ch.footprint + ')';
     case 'comp_del': return 'remover componente ' + ch.ref;
-    case 'comment_move': return 'comment ' + ch.ref + ' → (' + f(ch.x) + ', ' + f(ch.y) + ')';
+    case 'comment_move': return 'comment ' + ch.ref + (ch.hidden ? ' oculto' : '') + (isNum(ch.x) || isNum(ch.y) || !ch.hidden ? ' → (' + f(ch.x) + ', ' + f(ch.y) + ')' : '');
     case 'poly_add': return 'novo polígono ' + ch.layer + (ch.net ? ' ' + ch.net : '');
     case 'poly_edit': return 'editar polígono ' + ch.id;
     case 'poly_del': return 'remover polígono ' + ch.id;

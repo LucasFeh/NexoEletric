@@ -53,6 +53,9 @@
 {     HoleRotation/Name (ESCRITA; a leitura roda no ExportBoard) ... GravaPad (pad_add/edit)  }
 {   Pad.Plated (escrita) .............................. GravaMetalizado (pad_add npth)        }
 {   ChangeCommentAutoposition ......................... CommentManual (comment_move)          }
+{   NameOn, CommentOn (escrita) ....................... MostraTexto (hidden do designator_move }
+{                                                       e do comment_move, des_hidden do      }
+{                                                       comp_add; 1.57.0)                     }
 {   ArcTan, Sqrt (as primeiras contas de trigonometria dos .pas) ... AnguloDe e ArcoDoBulge    }
 {                                                       (outline_set e poly_* com arco)       }
 {   Seg.cx/cy/Radius/Angle1/Angle2 (ESCRITA; a leitura roda no ExportBoard) ... GravaSegmentos}
@@ -2663,6 +2666,44 @@ begin
     LogFail(What + ': o Altium recusou a remocao do texto');
 end;
 
+// APOSTA (ver APOSTAS): o Show Designator / Show Comment do componente. Comp em TObject de
+// proposito: so o nome do membro precisa existir. False = o Altium recusou (o texto fica como esta).
+function MostraTexto(Comp: TObject; Designator: Boolean; Mostra: Boolean): Boolean;
+begin
+  Result := False;
+  try
+    if Designator then
+      Comp.NameOn := Mostra
+    else
+      Comp.CommentOn := Mostra;
+    Result := True;
+  except
+    Result := False;
+  end;
+end;
+
+// Campo booleano da linha (hidden, des_hidden): true oculta, false mostra, ausente nao mexe.
+procedure AplicaHidden(Comp: TObject; Line, Campo, What: String; Designator: Boolean);
+var
+  Qual: String;
+begin
+  if not JHas(Line, Campo) then
+    Exit;
+  if Designator then
+    Qual := 'Show Designator'
+  else
+    Qual := 'Show Comment';
+  if MostraTexto(Comp, Designator, not JBool(Line, Campo)) then
+  begin
+    if JBool(Line, Campo) then
+      LogOk(What + ': ' + Qual + ' desligado')
+    else
+      LogOk(What + ': ' + Qual + ' ligado');
+  end
+  else
+    LogAviso(What + ': o Altium recusou o ' + Qual + ' - mude no Properties do componente');
+end;
+
 // designator_move: reposiciona o texto do designator de um componente (ref). x/y do
 // contrato = CENTRO do bounding box (igual ao item designator:true de board.js >> texts).
 // Poe o autoposition do nome em Manual e desloca a ancora pela medida real do bounding
@@ -2714,6 +2755,7 @@ begin
     PCBServer.SendMessageToRobots(Nm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
     Nm.GraphicallyInvalidate;
   end;
+  AplicaHidden(Comp, Line, 'hidden', What, True);
 
   // Move com MoveByXY (escrever XLocation em texto e ignorado neste engine).
   if JHas(Line, 'x') or JHas(Line, 'y') then
@@ -3947,6 +3989,7 @@ begin
     end;
     Nm.GraphicallyInvalidate;
   end;
+  AplicaHidden(Comp, Line, 'des_hidden', What, True);
   LogOk(What + ' -> x=' + JGet(Line, 'x') + ' y=' + JGet(Line, 'y') + ' rot=' + JGet(Line, 'rot') +
     ' (' + IntToStr(ContaPads(Comp)) + ' pads)');
 end;
@@ -4379,11 +4422,13 @@ begin
   if not CommentManual(Comp) then
     LogAviso(What + ': o Altium recusou o autoposition Manual do comment - ele pode voltar para o lugar automatico');
   PCBServer.SendMessageToRobots(Comp.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
-  if JHas(Line, 'h') or JHas(Line, 'rot') then
+  if JHas(Line, 'h') or JHas(Line, 'w') or JHas(Line, 'rot') then
   begin
     PCBServer.SendMessageToRobots(Cm.I_ObjectAddress, c_Broadcast, PCBM_BeginModify, c_NoEventData);
     if JHas(Line, 'h') then
       Cm.Size := MMsToCoord(JNum(Line, 'h'));
+    if JHas(Line, 'w') then
+      Cm.Width := MMsToCoord(JNum(Line, 'w'));
     if JHas(Line, 'rot') then
       Cm.Rotation := JNum(Line, 'rot');
     PCBServer.SendMessageToRobots(Cm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
@@ -4402,6 +4447,7 @@ begin
     Cm.MoveByXY(MMsToCoord(dx), MMsToCoord(dy));
     PCBServer.SendMessageToRobots(Cm.I_ObjectAddress, c_Broadcast, PCBM_EndModify, c_NoEventData);
   end;
+  AplicaHidden(Comp, Line, 'hidden', What, False);
   Comp.GraphicallyInvalidate;
   cx := (XMM(Cm.BoundingRectangleForSelection.Left) + XMM(Cm.BoundingRectangleForSelection.Right)) / 2;
   cy := (YMM(Cm.BoundingRectangleForSelection.Bottom) + YMM(Cm.BoundingRectangleForSelection.Top)) / 2;

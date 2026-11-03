@@ -346,11 +346,11 @@ var changes = [
 | `fill_edit` | `id`, `orig_x1`,`orig_y1`,`orig_x2`,`orig_y2`, `orig_layer` | `x1`,`y1`,`x2`,`y2`,`rot`,`layer`,`net`,`note` |
 | `fill_del` | `id`, `orig_x1..orig_y2`, `orig_layer` | `note` |
 | `region_add` | `layer`, `pts` (`[[x,y],...]` ≥3, numa linha só) | `net`, `cutout` (true = Board Cutout; a camada é ignorada), `polycut` (true = "sem plano", o Polygon Pour Cutout: o plano não entra, trilha e via passam; `layer` de cobre, ou `Multi` = todas; sem net), `note` |
-| `region_del` | `id`, `orig_layer`, `orig_n` (nº de vértices), `orig_x0`, `orig_y0` (1º vértice) | `note` |
-| `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `w`, `rot`, `note` |
+| `region_del` | `id`, `orig_layer`, `orig_n` (nº de vértices), `orig_x0`, `orig_y0` (1º vértice) | `note` — também apaga um recorte do `board.js » cutouts` (`k…`: Board Cutout e Polygon Pour Cutout; 1.57.0) |
+| `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `w`, `rot`, `hidden` (true = oculto, o Show Designator do Altium desligado; false = mostra; 1.57.0), `note` |
 | `outline_set` | `pts` (`[[x,y],...]` ≥3, polígono **fechado**, só linhas) | `note` |
 | `comp_attr` | `ref`, `orig_designator`, `orig_comment` | `designator` (novo texto), `comment` (novo texto), `note` |
-| `comp_add` | `ref`, `footprint`, `x`, `y` | `rot`, `layer` (Top/Bottom), `comment`, `nets` (texto plano `"1=GND;2=VCC"`), `des_x`/`des_y` (centro do designator na placa), `des_h`, `des_w`, `des_rot`, `note` |
+| `comp_add` | `ref`, `footprint`, `x`, `y` | `rot`, `layer` (Top/Bottom), `comment`, `nets` (texto plano `"1=GND;2=VCC"`), `des_x`/`des_y` (centro do designator na placa), `des_h`, `des_w`, `des_rot`, `des_hidden` (designator oculto), `note` |
 | `comp_del` | `ref`, `orig_x`, `orig_y`, `orig_rot`, `orig_layer` | `orig_footprint`, `note` |
 | `pad_net` | `ref`, `pad` (nome do pad), `net` (`""` = sem net), `orig_net` | `note` |
 | `net_add` / `net_del` | `net` | `note` |
@@ -358,7 +358,7 @@ var changes = [
 | `pad_add` | `type` (smd/th/npth), `x`, `y`, `w`, `h`; furo: `drill` | `shape` (circle/rect/oval/roundrect/octagon), `rot`, `layer` (SMD: Top/Bottom), `name`, `net`, `radius`, `drillshape` (circle/rect/oblong), `drillw`, `holerot`, `note` |
 | `pad_edit` | `id` (pad solto `p…`), `orig_x`, `orig_y` | os campos do `pad_add`, menos `type` |
 | `pad_del` | `id`, `orig_x`, `orig_y` | `note` |
-| `comment_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `rot`, `note` |
+| `comment_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `w`, `rot`, `hidden` (true = Show Comment desligado), `note` |
 | `poly_add` | `layer` (cobre), `pts` | `net`, `pour` (solid/hatch/none), `removeDead`, `minArea`, `ordem`, `clearance`, `nome`, `con_tipo`/`con_condutores`/`con_largura`/`con_gap`/`con_angulo`, `pourOver`, `removeNecks`, `neck`, `arco`, `clearanceBorda`, `note` |
 | `poly_edit` / `poly_del` | `id` (`pg…`), `orig_layer`, `orig_n`, `orig_x0`, `orig_y0` | (edit) os do `poly_add` |
 | `stack_set` | `layers` (as de cobre na ordem física: `[{"key":"Top","copper":0.035,"dielectric":0.2},{"key":"Mid1","name":"GND","copper":0.035,"dielectric":1.065},…,{"key":"Bottom","copper":0.035}]`) | `mech` (as mecânicas que a placa tem: `["Mech1","Mech13"]`), `note` |
@@ -469,7 +469,8 @@ var changes = [
 - `size` = diâmetro do anel da via; `drill` = diâmetro do furo (`drill < size`).
 - `sa`/`ea` = ângulos inicial/final do arco em graus, anti-horário a partir de +X.
 - `text_edit` vale só para **textos livres** (`designator:false` e `comment:false` no
-  `board.js`); designator/comment pertencem ao componente. `x`/`y` são o **centro do
+  `board.js`); designator/comment pertencem ao componente (o `pcb_editar` do MCP manda o
+  designator/comment para `designator_move`/`comment_move` e o texto dele para `comp_attr`). `x`/`y` são o **centro do
   bounding box** (mesma convenção do `board.js » texts`): o ApplyChanges aplica
   `text`/`h`/`w`/`rot` primeiro, mede o bounding box novo no Altium e desloca a âncora para o
   centro cair exatamente em `x`/`y` — o texto fica centralizado independente da largura.
@@ -479,6 +480,16 @@ var changes = [
   `text_edit`; os `orig_x`/`orig_y` vêm desse item. O script põe o autoposition do nome em
   Manual antes de mover (senão o Altium re-ancora sozinho). `h` = altura, `w` = espessura do
   traço (1.36.0): reduzir a altura sem reduzir o traço deixa o texto ilegível.
+- **Ocultar o designator ou o comment** (1.57.0): `designator_move`/`comment_move` com
+  `"hidden":true` (só ele basta, sem `x`/`y`). O texto continua no componente, mas some da tela, do
+  Gerber, do PDF e do DRC; `"hidden":false` (ou tirar o campo da linha) mostra de novo. No Altium o
+  `ApplyChanges` desliga o `NameOn`/`CommentOn` (bloco APOSTAS). Na vista PCB, Delete num
+  designator/comment o oculta, e a ficha do componente tem Show Designator/Show Comment. O texto já
+  oculto no Altium não vem no `board.js` (o ExportBoard pula texto oculto): ligue-o lá para editar.
+- **Recortes do Altium** (1.57.0): o `region_del` apaga um item de `board.js » cutouts` (o Board
+  Cutout e o Polygon Pour Cutout, `kindn` 1), com os `orig_*` dele — o recorte que ficou fora da
+  placa depois de um `outline_set`, por exemplo. O de componente (`owner`) anda com ele. No Altium o
+  `ApplyChanges` recusa (lá é region que não é sólida): apague-o no Altium também.
 - O designator de um componente **criado por `comp_add`** não está no `board.js`: o lugar, a
   altura, o traço e o giro dele vão na **própria linha do `comp_add`** (`des_x`/`des_y` = centro,
   `des_h`, `des_w`, `des_rot`; 1.36.0). O `designator_move` não serve para ele (o Altium põe o

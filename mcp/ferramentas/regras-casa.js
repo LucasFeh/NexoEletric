@@ -295,6 +295,12 @@ function cenaSerigrafia(ctx, eb, K, furos, cobre, tg) {
     const g = cena.gSilk[x.layer];
     if (g) for (const k of chavesGrade(g, x.bb)) { let l = g.G.get(k); if (!l) g.G.set(k, l = []); l.push(x); }
   };
+  /* e o caminho de volta: o texto posto que precisa de outro lugar (1.57.0) */
+  cena.tira = x => {
+    const i = cena.silk.indexOf(x); if (i >= 0) cena.silk.splice(i, 1);
+    const g = cena.gSilk[x.layer];
+    if (g) for (const k of chavesGrade(g, x.bb)) { const l = g.G.get(k); const j = l ? l.indexOf(x) : -1; if (j >= 0) l.splice(j, 1); }
+  };
   return cena;
 }
 /* o obstaculo crescido da folga, guardado (o posicionador testa centenas de lugares contra ele) */
@@ -364,6 +370,26 @@ function checaSerigrafia(cena, s, o, desl, opc) {
     if (poe({ sub: 'serigrafia_corpo', x: cx, y: cy, msg: `${nomeSilk(s)} em cima do corpo de ${c.ref}`, contra: { tipo: 'corpo', ref: c.ref } })) return out;
   }
   return out;
+}
+
+/* O filtro da chamada (1.57.0): area {x1,y1,x2,y2} (mm) e/ou refs. A violacao fica quando o ponto
+   dela cai na area e quando um dos componentes envolvidos (o pad "R1.3", o dono do texto, o do outro
+   lado) esta em refs. A placa inteira e conferida do mesmo jeito -- o filtro so escolhe o que volta. */
+function filtroDaChamada(a) {
+  const A = a.area && [a.area.x1, a.area.y1, a.area.x2, a.area.y2].every(isNum)
+    ? { x1: Math.min(a.area.x1, a.area.x2), y1: Math.min(a.area.y1, a.area.y2), x2: Math.max(a.area.x1, a.area.x2), y2: Math.max(a.area.y1, a.area.y2) } : null;
+  if (a.area && !A) throw new ErroMcp('area: {x1, y1, x2, y2} em mm (os quatro números)');
+  const R = Array.isArray(a.refs) && a.refs.length ? new Set(a.refs.map(String)) : null;
+  if (!A && !R) return null;
+  const refsDa = v => {
+    const L = [];
+    for (const ob of [v.objeto, v.contra]) if (ob) for (const k of ['ref', 'owner']) if (typeof ob[k] === 'string' && ob[k]) L.push(ob[k].split('.')[0]);
+    return L;
+  };
+  return {
+    eco: { area: A || undefined, refs: R ? [...R] : undefined, nota: 'só as violações dentro da área e/ou dos componentes pedidos (a placa inteira foi conferida)' },
+    passa: v => (!A || (isNum(v.x) && isNum(v.y) && v.x >= A.x1 && v.x <= A.x2 && v.y >= A.y1 && v.y <= A.y2)) && (!R || refsDa(v).some(r => R.has(r))),
+  };
 }
 
 function verifica(ctx, a) {
@@ -534,16 +560,19 @@ function verifica(ctx, a) {
       if (K.area(it) < 1e-4) continue;
       const bb = K.caixa(it);
       viol.push({ regra: 'serigrafia', sub: 'serigrafia_silk', camada: t1.layer, x: r3((bb.x1 + bb.x2) / 2), y: r3((bb.y1 + bb.y2) / 2), msg: `${nomeSilk(t1)} encosta em ${nomeSilk(t2)}`,
-        objeto: { tipo: t1.tipo, id: t1.id, texto: t1.texto, owner: t1.owner }, contra: { tipo: t2.tipo, id: t2.id } });
+        objeto: { tipo: t1.tipo, id: t1.id, texto: t1.texto, owner: t1.owner }, contra: { tipo: t2.tipo, id: t2.id, owner: t2.owner } });
     }
   }
 
   /* o que o projeto desligou numa area vale para a violacao que cai nela */
-  const valendo = cfg.areas.length ? viol.filter(v => { const r = regrasEm(cfg, PAD, chamada, v.x, v.y, v.camada); return !r.desl.has(v.regra) && !(v.sub && r.desl.has(v.sub)); }) : viol;
+  let valendo = cfg.areas.length ? viol.filter(v => { const r = regrasEm(cfg, PAD, chamada, v.x, v.y, v.camada); return !r.desl.has(v.regra) && !(v.sub && r.desl.has(v.sub)); }) : viol;
+  const filtro = filtroDaChamada(a);
+  if (filtro) valendo = valendo.filter(filtro.passa);
   const por = {};
   for (const v of valendo) por[v.regra] = (por[v.regra] || 0) + 1;
   const lim = a.limite || 200;
   return { projeto: p.nome, ok: valendo.length === 0, total: valendo.length, por_regra: por, despejo,
+    filtro: filtro ? filtro.eco : undefined,
     parametros: Object.assign({ folga_cobre: folga }, o), camadas, furos_parafuso: furos,
     regras_do_projeto: cfg.existe ? { arquivo: ctx.rel(p.arq(ARQ_CFG)), parametros: cfg.parametros, desligar: cfg.desligar, areas: cfg.areas.length } : null,
     violacoes: valendo.slice(0, lim), cortadas: Math.max(0, valendo.length - lim),
@@ -588,6 +617,8 @@ module.exports = {
         texto_w_min: { type: 'number', description: 'traço mínimo do texto de serigrafia, mm (padrão 0,15)' },
         furo_min: { type: 'number', description: 'furo sem anel a partir do qual um pad sem net é furo de parafuso, mm (padrão 2,5)' },
         furos: { type: 'array', items: { type: 'array', items: { type: 'number' } }, description: 'furos de parafuso a mais: [[x, y, diâmetro], ...] em mm' },
+        area: { type: 'object', properties: { x1: { type: 'number' }, y1: { type: 'number' }, x2: { type: 'number' }, y2: { type: 'number' } }, description: 'só as violações cujo ponto cai neste retângulo (mm); a placa inteira é conferida' },
+        refs: { type: 'array', items: { type: 'string' }, description: 'só as violações que envolvem estes componentes (pad, designator ou desenho deles, dos dois lados da violação)' },
         limite: { type: 'integer', minimum: 1, maximum: 5000 } }, required: ['projeto'] },
       executa: async (a, ctx) => verifica(ctx, a),
     },

@@ -4,6 +4,48 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.57.0 — 2026-11-03
+
+Correções de um relato de uma sessão de IA que montou a serigrafia de uma placa (MIRBC).
+
+- **Os recortes que vieram do Altium agora saem.**
+  - **O que acontecia:** no MIRBC, 12 recortes de polígono (Polygon Pour Cutout) das Mid1/Mid2 ficaram fora da placa,
+    na posição antiga do contorno. A vista PCB os mostrava, mas o Delete respondia "apague no Altium".
+  - **Agora:** Delete no recorte (Board Cutout ou recorte de polígono do `board.js`) grava um `region_del` com os
+    `orig_*` dele. O `pcb_apagar` do MCP aceita o id `k…`. Vale no motor do hub e no da janela Rust. O recorte de
+    componente continua andando com ele. No Altium, o `ApplyChanges` recusa a linha, porque lá a region não é sólida:
+    apague o recorte lá também.
+- **Designator e comment ocultos (o Show Designator / Show Comment do Altium).**
+  - **A op:** `designator_move` e `comment_move` aceitam `"hidden":true` para ocultar e `false` para mostrar de novo;
+    o `comp_add` aceita `des_hidden`. O texto continua no componente, mas some da tela, do Gerber, do PDF e do DRC.
+  - **No Altium:** o `ApplyChanges` liga ou desliga o `NameOn`/`CommentOn` (novo no bloco APOSTAS: se o Altium
+    recusar o nome, apague o `MostraTexto`).
+  - **Na vista PCB:**
+    - Delete num designator ou comment o oculta, em vez de dizer "texto do componente";
+    - a ficha do componente ganhou as caixas Show Designator e Show Comment;
+    - o texto do footprint continua preso ao componente.
+- **Tamanho do designator pela edição de texto.**
+  - **No MCP:** o `pcb_editar` num designator ou comment (id `x…`) manda `x`, `y`, `h`, `w`, `rot` e `hidden` para
+    `designator_move`/`comment_move`, e `text` para `comp_attr` (renomeia o componente ou troca o comment). Antes ia
+    como `text_edit`, que o motor recusa para texto de componente.
+  - **Na vista PCB:** a ficha do designator ganhou o traço (Stroke) ao lado da altura. O comment agora se arrasta e se
+    redimensiona como o designator (o `comment_move` já existia e a vista não o usava).
+  - **No Altium:** o `comment_move` passa a gravar o traço também.
+- **Campo que ninguém lê não some mais calado.** As ops do MCP com campo que a op não tem (o `oculto` que a IA mandou
+  no `designator_move`) respondem em `campos_ignorados`, com a linha e o campo. A conferência cobre as ops de campos
+  fechados no AI-GUIDE.
+- **O posicionador de designadores não empilha rótulos.**
+  - **O que acontecia:** o `serigrafia_posicionar` ignorava, desde o começo, o designator velho de todo componente que
+    ia andar. Quando um deles não achava lugar, o texto velho dele ficava na placa, e os rótulos já postos podiam estar
+    em cima dele.
+  - **Agora:** depois de cada volta, o rótulo posto que encosta no texto velho de uma falha procura outro lugar (e,
+    sem lugar, vira falha também). A resposta avisa quantos foram refeitos. No MIRBC, 1 dos 25 rótulos postos caía
+    em cima de um dos 9 que ficaram.
+- **`regras_casa_verificar` com filtro:** `area {x1, y1, x2, y2}` e `refs` devolvem só as violações daquela área ou
+  daqueles componentes (o pad, o designator ou o desenho deles, dos dois lados da violação). A placa inteira continua
+  sendo conferida, e a resposta repete o filtro.
+- Testes: `tests/test-recorte-apagar.js`, `tests/test-designator-oculto.js` e `tests/test-mcp-designator.js`.
+
 ## 1.56.3 — 2026-11-03
 
 - Vista PCB › Grade: **o passo anda junto com a unidade.**

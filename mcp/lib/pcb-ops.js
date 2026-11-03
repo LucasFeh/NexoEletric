@@ -103,7 +103,7 @@ function origDe(op, board) {
     }
     case 'region_del': {
       const r = achaObjeto(board, op.id), g = r.obj;
-      if (r.lista !== 'regions') throw new ErroMcp(`"${op.id}" não é região`);
+      if (r.lista !== 'regions' && r.lista !== 'cutouts') throw new ErroMcp(`"${op.id}" não é região`);
       const p = g.points || [];
       Object.assign(o, { orig_layer: g.layer, orig_n: p.length, orig_x0: (p[0] || [])[0], orig_y0: (p[0] || [])[1] });
       break;
@@ -371,8 +371,9 @@ function aplicaTexto(arq, board, hc, op0) {
       if (isNum(op.x) && isNum(op.y)) { const q = hc.xfPointInv(d, op.x, op.y); op.x = r6(q.x); op.y = r6(q.y); }
       if (isNum(op.rot)) op.rot = normAng(d.flip ? d.phi + 180 - op.rot : op.rot - d.dr);
     }
-    for (const [de, para] of [['x', 'des_x'], ['y', 'des_y'], ['h', 'des_h'], ['w', 'des_w'], ['rot', 'des_rot']])
+    for (const [de, para] of [['x', 'des_x'], ['y', 'des_y'], ['h', 'des_h'], ['w', 'des_w'], ['rot', 'des_rot'], ['hidden', 'des_hidden']])
       if (op[de] !== undefined) novo[para] = op[de];
+    if (novo.des_hidden === false) delete novo.des_hidden;
     arq.substitui(i, novo);
     return novo;
   }
@@ -394,6 +395,33 @@ function aplicaTexto(arq, board, hc, op0) {
     }
   }
   return mescla(arq, origDe(op, board)).obj;
+}
+
+/* CAMPO QUE NINGUEM LE (1.57.0). O motor e o ApplyChanges leem so os campos de cada op; o resto ia
+   para o changes.js e ficava la calado (o "hidden" no designator_move, antes de existir, foi aceito e
+   ignorado). Aqui so as ops cujos campos estao fechados no AI-GUIDE; op fora da tabela nao e
+   conferida. orig_*, note e uid valem em todas. Devolve os campos que sobram. */
+const CAMPOS_OP = {
+  comp_move: 'ref x y rot layer',
+  designator_move: 'ref x y h w rot hidden',
+  comment_move: 'ref x y h w rot hidden',
+  comp_attr: 'ref designator comment',
+  comp_del: 'ref',
+  comp_add: 'ref footprint x y rot layer comment nets des_x des_y des_h des_w des_rot des_hidden',
+  track_add: 'layer x1 y1 x2 y2 w net keepout', track_edit: 'id layer x1 y1 x2 y2 w net', track_del: 'id',
+  arc_add: 'layer cx cy r sa ea w net keepout', arc_edit: 'id layer cx cy r sa ea w net', arc_del: 'id',
+  via_add: 'x y size drill net from to', via_edit: 'id x y size drill net from to', via_del: 'id',
+  text_add: 'layer text x y h w rot mirror', text_edit: 'id layer text x y h w rot mirror', text_del: 'id',
+  fill_add: 'layer x1 y1 x2 y2 rot net keepout', fill_edit: 'id layer x1 y1 x2 y2 rot net', fill_del: 'id',
+  region_add: 'layer pts net cutout polycut keepout', region_del: 'id',
+  pad_net: 'ref pad net', net_add: 'net', net_del: 'net', net_rename: 'net',
+  outline_set: 'pts',
+};
+const CAMPOS_SET = Object.fromEntries(Object.entries(CAMPOS_OP).map(([k, v]) => [k, new Set(v.split(' '))]));
+function camposSobrando(op) {
+  const S = op && CAMPOS_SET[op.op];
+  if (!S) return [];
+  return Object.keys(op).filter(k => k !== 'op' && k !== 'note' && k !== 'uid' && !k.startsWith('orig_') && !S.has(k));
 }
 
 /* onde cada designator/comment pedido ficou DE FATO na placa efetiva (para a IA comparar com o que
@@ -468,7 +496,8 @@ function transacao(ctx, p, fn, opts) {
   for (const x of arq.itens) if (x && !jaTinha.has(x) && COM_UID.test(x.op) && x.uid == null) x.uid = uidLivre(arq);
   const model = hc.applyPcbChanges(board, arq.itens);
   const tset = new Set(tocados);
-  const novosErros = [], linhas = [];
+  const novosErros = [], linhas = [], ignorados = [];
+  for (const x of arq.itens) if (tset.has(x)) { const L = camposSobrando(x); if (L.length) ignorados.push(`${x.op}${x.ref ? ' ' + x.ref : x.id ? ' ' + x.id : ''}: ${L.join(', ')}`); }
   for (const it of model.changeItems) {
     const toc = tset.has(it.ch);
     if (toc) linhas.push({ indice: it.idx, op: it.ch && it.ch.op, status: it.status, msg: it.msg || undefined, linha: jline(it.ch) });
@@ -504,6 +533,7 @@ function transacao(ctx, p, fn, opts) {
     ...extraLinhas,
     teardrops: teardrops ? Object.assign({ nota: 'teardrops do hub que perderam a trilha/via foram tirados e refeitos onde o par ainda existe' }, teardrops) : undefined,
     erros: novosErros,
+    campos_ignorados: ignorados.length ? { linhas: ignorados, nota: 'estes campos não existem na op: foram gravados, mas nem o hub nem o ApplyChanges os leem (confira o nome no AI-GUIDE, Parte B)' } : undefined,
     validacao: resumoValidacao(model),
   };
   if (typeof o.relata === 'function') {
@@ -533,4 +563,4 @@ function regrasDoProjeto(ctx, p) {
   return { conjunto: R.doBoard(ctx.temBoard(p) ? ctx.board(p) : {}), fonte: 'padrão da casa + board.rules (ainda não há rules.js)' };
 }
 
-module.exports = { indicePorId, achaObjeto, tipoDoObjeto, origDe, chaveDe, mescla, aplica, mapaNovos, linhaCompAdd, dobraCompAdd, opNoAdicionado, opNoNovo, aplicaTexto, posicoesEfetivas, reserializa, transacao, resumoValidacao, regrasDoProjeto, r6 };
+module.exports = { camposSobrando, indicePorId, achaObjeto, tipoDoObjeto, origDe, chaveDe, mescla, aplica, mapaNovos, linhaCompAdd, dobraCompAdd, opNoAdicionado, opNoNovo, aplicaTexto, posicoesEfetivas, reserializa, transacao, resumoValidacao, regrasDoProjeto, r6 };

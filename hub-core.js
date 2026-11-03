@@ -497,6 +497,7 @@ function sintetizaComp(fp, a, cid){
                    x:r6(isNum(des.x) ? des.x : (bx.x1 + bx.x2) / 2), y:r6(isNum(des.y) ? des.y : bx.y2 + DESIG_FOLGA + h / 2),
                    text:a.ref, h, rot:isNum(des.rot) ? normAng(des.rot) : 0,
                    mirror:a.layer === 'Bottom', designator:true, comment:false, owner:a.ref, w:isNum(des.w) ? des.w : DESIG_W, kind:'stroke' }];
+  if (des.hidden === true) texts[0].hidden = true;
   return { comp, silk, texts };
 }
 
@@ -763,7 +764,7 @@ function applyPcbChanges(board, changes, opts){
   const B = board || {};
   const CH = Array.isArray(changes) ? changes : [];
   const novo = espelhoNovo(B), pares = mechPairs(B);
-  const model = { comps:[], compByRef:{}, tracks:[], arcs:[], vias:[], texts:[], fills:[], regions:[], added:[],
+  const model = { comps:[], compByRef:{}, tracks:[], arcs:[], vias:[], texts:[], fills:[], regions:[], cutouts:[], added:[],
                   pads:[], polygons:[], compsRemovidos:[],
                   nets:(Array.isArray(B.nets) ? B.nets.filter(n => typeof n === 'string') : []), netsChanged:false,
                   netsRenomeadas:{}, netsRemovidas:[],
@@ -821,6 +822,14 @@ function applyPcbChanges(board, changes, opts){
     if (fora) { indexa({ kind:'region', src:g, fora }); continue; }
     entra('region', g, model.regions);
     if (orfa) model.regions[model.regions.length - 1].orfa = true;
+  }
+  /* recortes do board.js (Board Cutout e Polygon Pour Cutout, kindn 1): o region_del os apaga
+     (1.57.0) -- o que veio do Altium na posicao antiga da placa nao tinha como sair. O de
+     componente anda com ele; a regiao da placa (kindn -1) nao e recorte (o Gerber a ignora) */
+  for (const k of (Array.isArray(B.cutouts) ? B.cutouts : [])) {
+    if (!k) continue;
+    if (k.owner) { indexa({ kind:'region', src:k, fora:'owner' }); continue; }
+    entra('region', k, model.cutouts);
   }
   for (const p of (B.freepads || [])) if (p) entra('pad', p, model.pads);
   for (const g of (Array.isArray(B.polygons) ? B.polygons : [])) if (g) entra('poly', g, model.polygons);
@@ -1300,8 +1309,12 @@ function applyPcbChanges(board, changes, opts){
         const inv = invalido(ch, ['x','y','h','w','rot']); if (inv) return bad(`campo "${inv}" inválido`);
         if (isNum(ch.h) && ch.h <= 0) return bad('altura h deve ser > 0');
         if (isNum(ch.w) && ch.w <= 0) return bad('espessura w deve ser > 0');
+        /* hidden (1.57.0): o "Show Designator"/"Show Comment" do Altium desligado -- o texto fica no
+           componente e some da tela, do Gerber e do DRC; false volta a mostrar */
+        if (ch.hidden !== undefined && typeof ch.hidden !== 'boolean') return bad('hidden deve ser true (ocultar) ou false (mostrar)');
         if (isNum(ch.h)) m.eff.h = ch.h;
         if (isNum(ch.w)) m.eff.w = ch.w;
+        if (ch.hidden === true) m.eff.hidden = true; else if (ch.hidden === false) delete m.eff.hidden;
         escreveTexto(m, { x:ch.x, y:ch.y, rot:ch.rot }, at);
         m.changed = true; quem.set(m, idx);
         break;
@@ -1323,6 +1336,7 @@ function applyPcbChanges(board, changes, opts){
         const inv = invalido(ch, ['rot','des_x','des_y','des_h','des_w','des_rot']); if (inv) return bad(`campo "${inv}" inválido`);
         if ((isNum(ch.des_h) && ch.des_h <= 0) || (isNum(ch.des_w) && ch.des_w <= 0)) return bad('des_h e des_w (altura e traço do designator) devem ser > 0');
         if (isNum(ch.des_x) !== isNum(ch.des_y)) return bad('des_x e des_y vão juntos (o centro do designator na placa)');
+        if (ch.des_hidden !== undefined && typeof ch.des_hidden !== 'boolean') return bad('des_hidden deve ser true (designator oculto) ou false');
         if (ch.layer != null && ch.layer !== '' && ch.layer !== 'Top' && ch.layer !== 'Bottom')
           return bad(`layer "${ch.layer}" inválida para componente — use Top ou Bottom`);
         const ja = compDe(ch.ref);
@@ -1336,7 +1350,7 @@ function applyPcbChanges(board, changes, opts){
         const cid = nid('c', ch);
         const sc = sintetizaComp(g.fp, { ref:ch.ref, footprint:ch.footprint, comment:typeof ch.comment === 'string' ? ch.comment : '',
                                          x:ch.x, y:ch.y, rot, layer:lado, nets,
-                                         des:{ x:ch.des_x, y:ch.des_y, h:ch.des_h, w:ch.des_w, rot:ch.des_rot } }, cid);
+                                         des:{ x:ch.des_x, y:ch.des_y, h:ch.des_h, w:ch.des_w, rot:ch.des_rot, hidden:ch.des_hidden } }, cid);
         const m = { kind:'comp', src:sc.comp, eff:{ x:ch.x, y:ch.y, rot, layer:lado }, changed:false, attrChanged:false, added:true };
         oculto(m, 'pares', pares);
         oculto(m, 'fonte', g.fonte);
@@ -1782,7 +1796,7 @@ function effectiveBoard(board, model){
   const compOfRef = ref => compOf(M, ref);
   const deltaOf = ref => compOfRef(ref) ? ownerDelta(M, ref) : null;
   const mOf = new Map();
-  for (const list of [M.tracks, M.arcs, M.vias, M.texts, M.fills || [], M.regions || []])
+  for (const list of [M.tracks, M.arcs, M.vias, M.texts, M.fills || [], M.regions || [], M.cutouts || []])
     for (const m of list) if (m.src) mOf.set(m.src, m);
 
   /* comp_attr que trocou o designator: o owner dos objetos do componente acompanha */
@@ -1944,6 +1958,8 @@ function effectiveBoard(board, model){
   const cutouts = [];
   for (const k of (Array.isArray(B.cutouts) ? B.cutouts : [])) {
     if (morto(k)) continue;
+    const mk = mOf.get(k);
+    if (mk && mk.deleted) continue;
     const o = dcopy(k);
     const d = (k && k.owner) ? deltaOf(k.owner) : null;
     if (d) xfRegionObj(d, o);

@@ -123,6 +123,7 @@ enum Arr {
     Line,
     Fill,
     Region,
+    Cutout,
     FreePad,
     Polygon,
 }
@@ -223,6 +224,9 @@ pub fn apply(board: &Board, changes: &[Value]) -> Applied {
         }
         for (i, o) in board.regions.iter().enumerate() {
             idx(&o.id, Arr::Region, i);
+        }
+        for (i, o) in board.cutouts.iter().enumerate() {
+            idx(&o.id, Arr::Cutout, i);
         }
         for (i, o) in board.freepads.iter().enumerate() {
             idx(&o.id, Arr::FreePad, i);
@@ -646,6 +650,12 @@ pub fn apply(board: &Board, changes: &[Value]) -> Applied {
                     }
                     if let Some(v) = num(ch, "h") { m.h = v; }
                     if let Some(v) = num(ch, "w") { m.w = Some(v); }
+                    // hidden (1.57.0): o Show Designator / Show Comment desligado
+                    if op == "designator_move" || op == "comment_move" {
+                        if let Some(h) = ch.get("hidden").and_then(|v| v.as_bool()) {
+                            m.hidden = h;
+                        }
+                    }
                     let (nx, ny) = (num(ch, "x").unwrap_or(ax), num(ch, "y").unwrap_or(ay));
                     let (dx, dy) = (nx - ax, ny - ay);
                     let (px, py) = d.map(|d| d.pt_inv(nx, ny)).unwrap_or((nx, ny));
@@ -818,7 +828,8 @@ pub fn apply(board: &Board, changes: &[Value]) -> Applied {
             }
             "region_del" => {
                 let id = s(ch, "id");
-                let cands = find(id, &[Arr::Region]);
+                // o recorte do board.js (Board Cutout, Polygon Pour Cutout) tambem sai (1.57.0)
+                let cands = find(id, &[Arr::Region, Arr::Cutout]);
                 if cands.is_empty() {
                     bad!("região id \"{}\" não existe no board.js", id.unwrap_or(""));
                 }
@@ -829,8 +840,9 @@ pub fn apply(board: &Board, changes: &[Value]) -> Applied {
                     let p0 = g.points.first().copied().unwrap_or([f64::NAN, f64::NAN]);
                     olay == g.layer && on as usize == g.points.len() && near(ox, p0[0]) && near(oy, p0[1])
                 };
-                let Some(key) = pick(&cands, |_, i| casa(&eb.regions[i])) else { bad!("região id ambígua") };
-                let g = &eb.regions[key.1];
+                let de = |k: (Arr, usize)| if k.0 == Arr::Cutout { &eb.cutouts[k.1] } else { &eb.regions[k.1] };
+                let Some(key) = pick(&cands, |a, i| casa(de((a, i)))) else { bad!("região id ambígua") };
+                let g = de(key);
                 if !g.owner.is_empty() {
                     bad!("região id \"{}\" pertence ao componente {} (não é editável sozinha)", g.id, g.owner);
                 }
@@ -1079,6 +1091,7 @@ pub fn apply(board: &Board, changes: &[Value]) -> Applied {
                     o.owner = r.to_string();
                     o.text = r.to_string();
                     o.polys = None;
+                    o.hidden = bool_(ch, "des_hidden");
                     eb.texts.push(o);
                 }
                 ghosts.added_ids.insert(cid);
@@ -1143,6 +1156,7 @@ pub fn apply(board: &Board, changes: &[Value]) -> Applied {
             Arr::Line => drop(eb.lines.remove(i)),
             Arr::Fill => drop(eb.fills.remove(i)),
             Arr::Region => drop(eb.regions.remove(i)),
+            Arr::Cutout => drop(eb.cutouts.remove(i)),
             Arr::FreePad => drop(eb.freepads.remove(i)),
             Arr::Polygon => drop(eb.polygons.remove(i)),
         }
