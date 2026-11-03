@@ -499,10 +499,14 @@ function instala(aside, V) {
 
     /* ---- Grade: passo, unidade e snap ---- */
     const g2 = grade(sec(pag, 'Grade'));
-    const gs = el('select');
-    const gm = el('optgroup'); gm.label = 'mil'; const gmm = el('optgroup'); gmm.label = 'mm';
-    for (const g of V.grades()) { const o = el('option', null, g.rot); o.value = g.id; if (g.id === V.grade()) o.selected = true; (/mil$/.test(g.id) ? gm : gmm).append(o); }
-    gs.append(gm, gmm); gs.title = 'Passo da grade';
+    /* so os passos da unidade em uso (a troca de unidade leva o passo junto: pcbframe.js » setUnidade); o atual
+       entra mesmo se for da outra (escolhido no menu do botao direito) */
+    const gs = el('select'), unAt = V.unidade();
+    for (const g of V.grades()) {
+      if ((/mil$/.test(g.id) ? 'mil' : 'mm') !== unAt && g.id !== V.grade()) continue;
+      const o = el('option', null, g.rot); o.value = g.id; if (g.id === V.grade()) o.selected = true; gs.append(o);
+    }
+    gs.title = 'Passo da grade';
     gs.addEventListener('change', () => V.setGrade(gs.value));
     /* o passo e, do lado, a unidade num botao so com o icone de troca (pedido do dono, 2026-11-03: "do lado
        'mm' com um simbolo icone de troca, quando clica nele, troca pra mil") */

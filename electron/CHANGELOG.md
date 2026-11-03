@@ -4,6 +4,14 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.56.3 — 2026-11-03
+
+- Vista PCB › Grade: **o passo anda junto com a unidade.**
+  - **Na troca:** trocar a unidade (o botão ⇅, ou a tecla) leva o passo para o equivalente mais perto na outra:
+    5 mil ↔ 0,1 mm, 10 mil ↔ 0,25 mm, 20 mil ↔ 0,5 mm, 50 mil ↔ 1 mm e 100 mil ↔ 2,5 mm.
+  - **Na lista:** só aparecem os passos da unidade em uso.
+  - **Ao abrir:** um par misturado gravado antes (mm com 5 mil) abre já alinhado.
+
 ## 1.56.2 — 2026-11-03
 
 - **Corrigido: o "Enviar pra JLC" do Gerber não abria mais o site.**

@@ -293,7 +293,8 @@ const COTAS = (() => {
 })();
 let cur = 'Top';                              /* a camada atual (aba ativa embaixo) */
 let unidade = lePref('unidade', 'mm') === 'mil' ? 'mil' : 'mm';
-let grade = gradePorId(lePref('grade', '5mil'));
+/* o passo anda com a unidade (2026-11-03): um par misturado gravado antes (mm com 5 mil) abre ja no passo equivalente */
+let grade = gradeNaUnidade(gradePorId(lePref('grade', '5mil')), unidade);
 /* snap a objetos: 'todas' as camadas visiveis, so a 'atual', ou 'off' */
 let snapObj = ['todas', 'atual', 'off'].indexOf(lePref('snapobj', 'todas')) >= 0 ? lePref('snapobj', 'todas') : 'todas';
 /* o Selection Filter do Altium; Corpos 3D e Rooms nao vem no espelho e ficam travados no painel */
@@ -3927,11 +3928,24 @@ function parseNum(s){
   const v = parseFloat(t);
   return isFinite(v) ? v : null;
 }
+/* a unidade de um passo (os ids terminam em mil ou mm) e o passo equivalente na outra: o mais perto em escala
+   (log), entao 5 mil <-> 0,1 mm, 10 mil <-> 0,25 mm, 50 mil <-> 1 mm, 100 mil <-> 2,5 mm */
+function unidadeDaGrade(g){ return /mil$/.test(g.id) ? 'mil' : 'mm'; }
+function gradeNaUnidade(g, u){
+  if (unidadeDaGrade(g) === u) return g;
+  let melhor = null, d = Infinity;
+  for (const x of GRADES) if (unidadeDaGrade(x) === u) { const e = Math.abs(Math.log(x.mm / g.mm)); if (e < d - 1e-9) { d = e; melhor = x; } }
+  return melhor || g;
+}
 function setUnidade(u){
   unidade = u === 'mil' ? 'mil' : 'mm';
   gravaPref('unidade', unidade);
+  /* o passo vai junto com a unidade (pedido do dono, 2026-11-03: "o passo no dropbox precisa alterar junto com a
+     troca de unidade") */
+  const g = gradeNaUnidade(grade, unidade);
+  if (g !== grade) { grade = g; gravaPref('grade', grade.id); }
   pintaStatus(); if (painel) painel.atualiza(); pede();
-  HubDialog.toast('unidade: ' + unidade, 'info', 1600);
+  HubDialog.toast('unidade: ' + unidade + ' · passo ' + grade.rot, 'info', 1600);
 }
 function setGrade(id){
   grade = gradePorId(id);
