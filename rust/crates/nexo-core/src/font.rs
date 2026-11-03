@@ -1,5 +1,10 @@
 //! Fonte vetorial (stroke) da serigrafia, como geometria pura -- a HubFont do hub-font.js
-//! (dados do InteractiveHtmlBom, MIT). Saida em coordenadas locais centradas em x, Y para cima.
+//! (a newstroke do KiCad, CC0, no formato do InteractiveHtmlBom, com as minusculas e o complemento
+//! na grade do Altium: '+', X, Z, simbolos). Saida em coordenadas locais centradas em x, Y para cima.
+//! O font.json e o `HubFont.GLIFOS` do hub-font.js (o tests/test-font.js confere glifo a glifo);
+//! mudou la, regrave com
+//! `node -e "require('fs').writeFileSync('rust/crates/nexo-core/src/font.json', JSON.stringify(require('./hub-font.js').GLIFOS))"`
+//! (na raiz do repo).
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -42,6 +47,7 @@ fn font() -> &'static HashMap<char, Glyph> {
     })
 }
 
+/// Glifo do caractere; a minuscula so cai na maiuscula se nao tiver glifo proprio (como a HubFont).
 fn glyph(c: char) -> Option<&'static Glyph> {
     let f = font();
     f.get(&c).or_else(|| c.to_uppercase().next().and_then(|u| f.get(&u)))
@@ -181,4 +187,40 @@ pub fn text_geom(t: &crate::model::Text) -> Option<TextGeom> {
         [ox + gx, oy + gy]
     });
     Some(TextGeom { lines: out, w, frame })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// "dieletrons.com" saia "DIELETROnS.COM": so o n/u/x tinham minuscula, o resto caia na maiuscula
+    #[test]
+    fn minusculas_proprias() {
+        for c in 'a'..='z' {
+            let g = font().get(&c).unwrap_or_else(|| panic!("falta o glifo '{c}'"));
+            let u = font().get(&c.to_ascii_uppercase()).unwrap_or_else(|| panic!("falta o glifo '{}'", c.to_ascii_uppercase()));
+            assert!(g.strokes != u.strokes, "'{c}' igual a maiuscula");
+        }
+        assert_ne!(text_polylines("dieletrons.com", 1.0), text_polylines("DIELETRONS.COM", 1.0));
+        /* o 'x' de "nF"/"uF" continua o de antes: altura de x = 2/3 h */
+        let ys: Vec<f64> = text_polylines("x", 1.0).concat().iter().map(|p| p[1]).collect();
+        let alt = ys.iter().cloned().fold(f64::MIN, f64::max) - ys.iter().cloned().fold(f64::MAX, f64::min);
+        assert!((alt - (0.714286 - 0.047619)).abs() < 1e-6, "altura do 'x' {alt}");
+    }
+
+    /// o complemento na grade do Altium (o '+' de polaridade, X, Z, simbolos) tambem esta aqui
+    #[test]
+    fn complemento_sem_caixa() {
+        for c in "+XZ*=<>?%():".chars() {
+            assert!(glyph(c).is_some(), "falta o glifo '{c}'");
+        }
+        /* '+': dois tracos, nao a caixa de quatro lados */
+        assert_eq!(text_polylines("+", 1.0).len(), 2);
+        /* o que a fonte nao tem continua a caixa fechada */
+        let caixa = text_polylines("\u{20ac}", 1.0);
+        assert_eq!(caixa.len(), 1);
+        assert_eq!(caixa[0].len(), 5);
+        /* acentuada cai na maiuscula so se a maiuscula existir; se nao, caixa */
+        assert_eq!(text_width("\u{e7}", 1.0), MISS_W);
+    }
 }

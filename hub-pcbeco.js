@@ -29,6 +29,10 @@
      aplica(eco, opts?) -> { linhas:[op...], puladas:[{acao, motivo}] }
        opts: { margem (mm, 5), folga (mm, 1.27), x0, y0 } -- onde estacionar os novos
      relatorio(eco) -> texto (o "Report Changes...")
+     trocasFp(eco) -> [{id, ref, de, para, ativo, status, msg, pads_mudam, pads_ficam_da_placa, pads_saem}]
+   Troca de footprint (comp_del + comp_add no mesmo lugar, com o designator de antes): os pads
+   levam a net que tem HOJE na placa; cada diferenca do esquema e uma acao de pino propria
+   (dados.troca = id da troca), marcada, que se desmarca para ficar com a net da placa.
    Acao: { id, grupo, tipo, objeto, para, ativo, status:'ok'|'warn'|'err', msg, dados } */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory(require('./hub-core.js'));
@@ -168,6 +172,50 @@ function compara(schematic, board, opts){
   }
   const netFinal = n => (n && n in mapaPcb) ? mapaPcb[n] : n;
 
+  /* ---- troca de footprint ----
+     O componente sai e volta (comp_del + comp_add) com as nets que os pads tem HOJE na placa,
+     pelo nome do pad -- como o "Update PCB With" da vista (opsTrocaFp do pcbframe). Trocar o
+     footprint nao religa nada calado: onde o esquema discorda (outra net, ou pad que so o
+     footprint novo tem), a diferenca vira acao de pino PROPRIA, marcada (aceitar tudo deixa a
+     placa como o esquema), que se desmarca para ficar com a net da placa. Pad do footprint velho
+     que o novo nao tem sai com a net dele: vai no aviso da troca. Pinagem desconhecida (cego):
+     so as nets da placa, sem acao de pino. */
+  const trocaFp = (a, s, c) => {
+    const ref = a.dados.ref;
+    const velhos = new Map();                     /* nome do pad -> net crua da placa */
+    for (const p of (c.pads || [])) if (p && p.name != null && p.name !== '' && !velhos.has(String(p.name))) velhos.set(String(p.name), p.net || '');
+    const g = HC.footprintGeom(s.footprint, eb, { pcblib:o.pcblib });
+    /* sem a geometria (o valida acusa) os pads sao os de hoje: as acoes de pino ainda valem nele */
+    const novosPads = g ? [...new Set((g.fp.pads || []).filter(p => p && p.name != null && p.name !== '').map(p => String(p.name)))]
+                        : [...velhos.keys()];
+    const temPad = new Set(novosPads);
+    const nets = {};
+    for (const pad of novosPads) if (velhos.get(pad)) nets[pad] = velhos.get(pad);
+    a.dados.nets = nets;
+    a.dados.somem = [...velhos].filter(([pad]) => !temPad.has(pad)).map(([pad, net]) => ({ pad, net }));
+    if (cegos.has(ref)) return;
+    for (const pad of novosPads) {
+      const k = ref + '-' + pad, cru = velhos.get(pad) || '';
+      const quer = pinSch[k] || '', tem = netFinal(cru);
+      if (quer === tem) continue;
+      const base = { ref, pad, orig_net:cru, troca:a.id, padNovo:!velhos.has(pad) };
+      if (quer) acao('pinAdd', { tipo:'pad_net', objeto:k, para:quer,
+                                 msg:'troca de footprint: ' + (tem ? `na placa está em ${tem}` : velhos.has(pad) ? 'sem net na placa' : `pad novo do ${s.footprint}`),
+                                 dados:Object.assign({ net:quer }, base) });
+      else if ([...(netPcbPins.get(cru) || [])].some(q => cegos.has(q.slice(0, q.lastIndexOf('-'))))) continue;
+      else acao('pinDel', { tipo:'pad_net', objeto:k, para:cru, msg:`troca de footprint: o esquema não liga o pino ${pad}`,
+                            dados:Object.assign({ net:'' }, base) });
+    }
+    for (const k of Object.keys(pinSch)) {
+      if (k.slice(0, ref.length + 1) !== ref + '-') continue;
+      const pino = k.slice(ref.length + 1);
+      if (!temPad.has(pino))
+        acao('pinAdd', { tipo:'pad_net', objeto:k, para:pinSch[k], status:'err', ativo:false,
+                         msg:`pino ${pino} não tem pad no footprint ${s.footprint} (Unknown Pin)`,
+                         dados:{ ref, pad:pino, net:pinSch[k], orig_net:'' }, semPad:true });
+    }
+  };
+
   /* ---- componentes ---- */
   const novos = [];
   for (const ref of [...sch.keys()].sort(natural)) {
@@ -180,12 +228,13 @@ function compara(schematic, board, opts){
     }
     if (s.footprint && !mesmoFootprint(s.footprint, c.footprint || '', o.pcblib)) {
       const a = acao('compFp', { tipo:'comp_fp', objeto:ref, para:s.footprint,
-                                 msg:`${c.footprint || '(sem footprint)'} -> ${s.footprint}`,
+                                 msg:`${c.footprint || '(sem footprint)'} → ${s.footprint}`,
                                  dados:{ ref, footprint:s.footprint, sheet:s.sheet,
                                          comment:(!ehFormula(s.comment) && s.comment) ? s.comment : (c.comment || ''),
-                                         x:c.x, y:c.y, rot:c.rot, layer:c.layer, orig_footprint:c.footprint || '' } });
-      novos.push(a);
-      continue;                                    /* os pinos vem no comp_add da troca */
+                                         x:c.x, y:c.y, rot:c.rot, layer:c.layer, orig_footprint:c.footprint || '',
+                                         des:designatorDe(eb, ref) } });
+      trocaFp(a, s, c);
+      continue;                                    /* os pinos da troca sao do trocaFp */
     }
     if (!ehFormula(s.comment) && s.comment && s.comment !== (c.comment || ''))
       acao('compComent', { tipo:'comp_attr', objeto:ref, para:s.comment, msg:`"${c.comment || ''}" -> "${s.comment}"`,
@@ -223,16 +272,10 @@ function compara(schematic, board, opts){
     acao('compDel', { tipo:'comp_del', objeto:ref, para:'PCB', msg:c.footprint || '',
                       dados:{ ref, orig_x:c.x, orig_y:c.y, orig_rot:c.rot, orig_layer:c.layer, orig_footprint:c.footprint || '' } });
   }
-  /* nets dos componentes novos: pino do esquema -> pad do footprint */
+  /* nets dos componentes novos: pino do esquema -> pad do footprint (a troca de footprint leva
+     as da placa: trocaFp) */
   for (const a of novos) {
     const nets = {};
-    /* troca de footprint de componente de pinagem desconhecida: as nets que o pad tinha ficam
-       (pelo nome do pad) -- a previa nao sabe as do esquema, e o Altium sabe */
-    if (a.tipo === 'comp_fp' && cegos.has(a.dados.ref)) {
-      for (const p of (pcb.get(a.dados.ref).pads || [])) if (p && p.net && !(String(p.name) in nets)) nets[String(p.name)] = netFinal(p.net);
-      a.dados.nets = nets;
-      continue;
-    }
     for (const k of Object.keys(pinSch)) if (k.slice(0, a.dados.ref.length + 1) === a.dados.ref + '-') nets[k.slice(a.dados.ref.length + 1)] = pinSch[k];
     a.dados.nets = nets;
   }
@@ -253,6 +296,54 @@ function contaUsos(eb, net){
   let n = 0;
   for (const k of ['tracks', 'arcs', 'vias', 'fills', 'regions', 'freepads', 'polygons']) for (const o of (eb[k] || [])) if (o && o.net === net) n++;
   return n;
+}
+
+/* o designator do componente na placa efetiva, para o comp_add da troca de footprint nao o
+   devolver ao lugar padrao: x/y = centro do texto (a convencao do board.js » texts e dos des_*) */
+function designatorDe(eb, ref){
+  const t = (eb.texts || []).find(x => x && x.designator && x.owner === ref);
+  if (!t || !isNum(t.x) || !isNum(t.y)) return null;
+  const d = { x:t.x, y:t.y };
+  if (isNum(t.h) && t.h > 0) d.h = t.h;
+  if (isNum(t.w) && t.w > 0) d.w = t.w;
+  if (isNum(t.rot)) d.rot = t.rot;
+  if (t.hidden === true) d.hidden = true;
+  return d;
+}
+
+/* net da placa depois do ECO: a renomeada (net_rename marcada) leva o nome novo */
+function netRenomeada(eco, n, vale){
+  const r = n ? eco.acoes.find(x => x.tipo === 'net_rename' && x.dados.orig_net === n && vale(x)) : null;
+  return r ? r.dados.net : n;
+}
+
+/* o que a troca de footprint faz com as nets, com as marcacoes de agora:
+   muda = pads cuja net o ECO troca (acoes de pino marcadas e sem erro), fica = diferencas do
+   esquema desmarcadas (o pad fica com a net da placa), somem = pads que o footprint novo nao tem */
+function resumoTroca(eco, a){
+  const d = a.dados || {};
+  const pinos = eco.acoes.filter(x => x.tipo === 'pad_net' && x.dados && x.dados.troca === a.id);
+  const vai = x => x.ativo && x.status !== 'err';
+  const muda = pinos.filter(vai).map(x => ({ pad:x.dados.pad, de:x.dados.orig_net || '', para:x.dados.net || '' }));
+  const fica = pinos.filter(x => !vai(x)).map(x => ({ pad:x.dados.pad, net:x.dados.orig_net || '', esquema:x.dados.net || '' }));
+  const somem = (d.somem || []).slice();
+  const nome = n => n || 'sem net';
+  const lista = (L, f) => L.slice(0, 4).map(f).join(', ') + (L.length > 4 ? ', …' : '');
+  let t = `${d.orig_footprint || '(sem footprint)'} → ${d.footprint}`;
+  if (muda.length) t += ` · ${muda.length} ${muda.length === 1 ? 'pad muda' : 'pads mudam'} de net: ` + lista(muda, m => `${m.pad} ${nome(m.de)}→${nome(m.para)}`);
+  if (fica.length) t += ` · ${fica.length} ${fica.length === 1 ? 'fica' : 'ficam'} com a net da placa: ` + lista(fica, m => `${m.pad} ${nome(m.net)}`);
+  if (somem.length) t += ` · ${somem.length} ${somem.length === 1 ? 'pad sai' : 'pads saem'} (não existe${somem.length === 1 ? '' : 'm'} no ${d.footprint}): ` + lista(somem, m => m.pad + (m.net ? ` (${m.net})` : ''));
+  if (!muda.length && !fica.length && !somem.length) t += ' · nets da placa mantidas';
+  return { muda, fica, somem, texto:t, aviso:!!(muda.length || somem.length) };
+}
+
+/* as trocas de footprint do ECO, para quem mostra (o MCP) */
+function trocasFp(eco){
+  return eco.acoes.filter(a => a.tipo === 'comp_fp').map(a => {
+    const r = resumoTroca(eco, a);
+    return { id:a.id, ref:a.dados.ref, de:a.dados.orig_footprint || '', para:a.dados.footprint, ativo:a.ativo, status:a.status,
+             msg:[a.msg, a.msgValida].filter(Boolean).join(' — '), pads_mudam:r.muda, pads_ficam_da_placa:r.fica, pads_saem:r.somem };
+  });
 }
 
 /* Validate Changes: refaz o status de cada acao (o Check do Altium), com as desmarcadas em conta */
@@ -288,12 +379,29 @@ function valida(eco, opts){
       const pads = new Set((g.fp.pads || []).map(p => String(p.name)));
       const falta = Object.keys(a.dados.nets || {}).filter(k => !pads.has(k));
       if (falta.length) ruim('warn', `pino(s) ${falta.join(', ')} sem pad no footprint — ficam fora da net`);
-      const dep = [...new Set(Object.values(a.dados.nets || {}))].map(netOk).filter(Boolean);
+      /* na troca as nets sao as da placa: a renomeada marcada ja tem o nome novo */
+      const nn = a.tipo === 'comp_fp' ? (n => netRenomeada(eco, n, x => ativa.has(x.id))) : (n => n);
+      const dep = [...new Set(Object.values(a.dados.nets || {}).map(nn))].map(netOk).filter(Boolean);
       if (dep.length) ruim('warn', dep[0] + ' — o pad entra sem net');
     } else if (a.tipo === 'pad_net' && a.dados.net) {
       const m = netOk(a.dados.net);
       if (m) ruim('err', m);
     }
+  }
+  /* troca de footprint: o pad que so o footprint novo tem depende da troca; e a mensagem da
+     troca diz, com as marcacoes de agora, quantos pads mudam de net e quais saem */
+  const troca = Object.create(null);
+  for (const a of eco.acoes) if (a.tipo === 'comp_fp') troca[a.id] = a;
+  for (const a of eco.acoes) {
+    if (a.tipo !== 'pad_net' || !a.dados || !a.dados.troca || !a.dados.padNovo || a.status === 'err') continue;
+    const t = troca[a.dados.troca];
+    if (!t || !ativa.has(t.id)) { a.status = 'err'; a.msgValida = `o pad ${a.dados.pad} só existe no ${t ? t.dados.footprint : 'footprint novo'} — depende de "Trocar footprint ${a.dados.ref}", desmarcada`; }
+    else if (t.status === 'err') { a.status = 'err'; a.msgValida = `o pad ${a.dados.pad} só existe no ${t.dados.footprint} — a troca de footprint tem erro`; }
+  }
+  for (const a of Object.values(troca)) {
+    const r = resumoTroca(eco, a);
+    a.msg = r.texto;
+    if (r.aviso && a.status === 'ok') a.status = 'warn';
   }
   const conta = s => eco.acoes.filter(a => a.ativo && a.status === s).length;
   eco.resumo = { total:eco.acoes.length, ativas:ativa.size, ok:conta('ok'), avisos:conta('warn'), erros:conta('err') };
@@ -303,7 +411,8 @@ function valida(eco, opts){
 /* Execute Changes: as acoes marcadas e sem erro -> linhas do changes.js, na ordem dos grupos.
    Componente novo estaciona a DIREITA da placa, em colunas (uma por folha, como a Room do
    Altium), de cima para baixo, e sem cair em cima de quem ja estacionou num ECO anterior. A troca
-   de footprint fica no mesmo lugar (comp_del + comp_add com x/y/rot/layer de antes). */
+   de footprint fica no mesmo lugar (comp_del + comp_add com x/y/rot/layer e o designator de antes),
+   com as nets da placa e as acoes de pino dela que vao dobradas nas nets do comp_add. */
 function aplica(eco, opts){
   const o = Object.assign({ margem:5, folga:1.27 }, opts || {});
   valida(eco, o);
@@ -349,6 +458,17 @@ function aplica(eco, opts){
     }
     return HC.netsCampo(m);
   };
+  /* troca de footprint: as nets da placa (com o nome novo da renomeada que vai), e por cima as
+     acoes de pino da troca que vao -- dobradas no comp_add, em vez de pad_net depois dele */
+  const vaiId = new Set(vai.map(x => x.id));
+  const netsTroca = a => {
+    const m = {};
+    for (const k of Object.keys(a.dados.nets || {})) m[k] = netRenomeada(eco, a.dados.nets[k], x => vaiId.has(x.id));
+    for (const x of vai) if (x.tipo === 'pad_net' && x.dados.troca === a.id) {
+      if (x.dados.net) m[x.dados.pad] = x.dados.net; else delete m[x.dados.pad];
+    }
+    return HC.netsCampo(m);
+  };
   for (const a of ord) {
     const d = a.dados;
     switch (a.tipo) {
@@ -364,7 +484,16 @@ function aplica(eco, opts){
                       orig_footprint:d.orig_footprint, note:nota(a) });
         const l = { op:'comp_add', ref:d.ref, footprint:d.footprint, x:d.x, y:d.y, rot:d.rot, layer:d.layer };
         if (d.comment) l.comment = d.comment;
-        const n = netsDe(a); if (n) l.nets = n;
+        const n = netsTroca(a); if (n) l.nets = n;
+        /* o designator fica onde estava, do tamanho e no giro que tinha (e oculto, se era) */
+        const t = d.des;
+        if (t) {
+          l.des_x = t.x; l.des_y = t.y;
+          if (isNum(t.h)) l.des_h = t.h;
+          if (isNum(t.w)) l.des_w = t.w;
+          if (isNum(t.rot)) l.des_rot = t.rot;
+          if (t.hidden === true) l.des_hidden = true;
+        }
         l.note = nota(a);
         linhas.push(l);
         break;
@@ -380,6 +509,9 @@ function aplica(eco, opts){
         break;
       }
       case 'pad_net':
+        /* pino da troca de footprint que vai: ja esta nas nets do comp_add; sem a troca, o
+           pad_net vale no componente de hoje (o pad que so o novo tem nao chega aqui: erro) */
+        if (d.troca && vaiId.has(d.troca)) break;
         linhas.push({ op:'pad_net', ref:d.ref, pad:d.pad, net:d.net, orig_net:d.orig_net, note:nota(a) });
         break;
       case 'comp_attr':
@@ -412,5 +544,5 @@ function relatorio(eco){
   return L.join('\n') + '\n';
 }
 
-return { GRUPOS, compara, valida, aplica, relatorio, mesmoFootprint, compsDoEsquema };
+return { GRUPOS, compara, valida, aplica, relatorio, mesmoFootprint, compsDoEsquema, resumoTroca, trocasFp };
 });

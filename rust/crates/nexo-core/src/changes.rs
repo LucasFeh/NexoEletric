@@ -161,6 +161,116 @@ fn pts(ch: &Value, k: &str) -> Option<Vec<[f64; 2]>> {
     Some(out)
 }
 
+/// o poligono que a region aceita (o regiaoErro do hub-core.js): sem vertice repetido em seguida, >= 3
+/// vertices, area e nenhum lado cortando outro que nao seja vizinho. "" = aceito
+fn regiao_erro(pts: &[[f64; 2]]) -> String {
+    let mesmo = |a: &[f64; 2], b: &[f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
+    let mut q: Vec<[f64; 2]> = Vec::with_capacity(pts.len());
+    for p in pts {
+        if q.last().map_or(true, |l| !mesmo(l, p)) {
+            q.push(*p);
+        }
+    }
+    while q.len() > 1 && mesmo(&q[0], q.last().unwrap()) {
+        q.pop();
+    }
+    let sem_area = "região sem área (vértices alinhados ou repetidos)".to_string();
+    if q.len() < 3 {
+        return sem_area;
+    }
+    let n = q.len();
+    for i in 0..n {
+        for j in i + 2..n {
+            if i == 0 && j == n - 1 {
+                continue; // o ultimo lado e vizinho do primeiro
+            }
+            if seg_corta(q[i], q[(i + 1) % n], q[j], q[(j + 1) % n]) {
+                return "região com lados que se cruzam (o Altium e o Gerber não aceitam)".into();
+            }
+        }
+    }
+    let s: f64 = (0..n).map(|i| { let (a, b) = (q[i], q[(i + 1) % n]); a[0] * b[1] - b[0] * a[1] }).sum();
+    if s.abs() < 1e-9 { sem_area } else { String::new() }
+}
+
+/// os lados p1-p2 e p3-p4 se cruzam ou se encostam (ponta em cima do outro, colinear sobreposto)
+fn seg_corta(p1: [f64; 2], p2: [f64; 2], p3: [f64; 2], p4: [f64; 2]) -> bool {
+    let lado = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+        let v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+        if v.abs() < 1e-12 { 0 } else if v > 0.0 { 1 } else { -1 }
+    };
+    let sobre = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+        a[0].min(b[0]) - 1e-9 <= c[0] && c[0] <= a[0].max(b[0]) + 1e-9 && a[1].min(b[1]) - 1e-9 <= c[1] && c[1] <= a[1].max(b[1]) + 1e-9
+    };
+    let (o1, o2, o3, o4) = (lado(p1, p2, p3), lado(p1, p2, p4), lado(p3, p4, p1), lado(p3, p4, p2));
+    if o1 != o2 && o3 != o4 {
+        return true;
+    }
+    (o1 == 0 && sobre(p1, p2, p3)) || (o2 == 0 && sobre(p1, p2, p4)) || (o3 == 0 && sobre(p3, p4, p1)) || (o4 == 0 && sobre(p3, p4, p2))
+}
+
+/// os furos (holes) de uma region_add, com as mensagens do furosErro do hub-core.js: cada um um anel
+/// que o regiao_erro aceita, inteiro dentro do contorno (sem encostar nele) e sem encostar noutro furo
+/// nem morar dentro dele. Ok = os aneis; Err = o texto do erro
+fn furos(ch: &Value, contorno: &[[f64; 2]]) -> Result<Vec<Vec<[f64; 2]>>, String> {
+    let Some(v) = ch.get("holes") else { return Ok(Vec::new()) };
+    let Some(lista) = v.as_array() else {
+        return Err("holes deve ser [[[x,y],...], ...] (uma lista de furos, cada um com >= 3 vértices)".into());
+    };
+    type Caixa = [f64; 4];
+    let caixa = |p: &[[f64; 2]]| -> Caixa {
+        p.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
+    };
+    let longe = |a: &Caixa, b: &Caixa| a[2] < b[0] - 1e-9 || b[2] < a[0] - 1e-9 || a[3] < b[1] - 1e-9 || b[3] < a[1] - 1e-9;
+    let encostam = |a: &[[f64; 2]], b: &[[f64; 2]], bba: &Caixa, bbb: &Caixa| {
+        for i in 0..a.len() {
+            let (a1, a2) = (a[i], a[(i + 1) % a.len()]);
+            if longe(&caixa(&[a1, a2]), bbb) {
+                continue;
+            }
+            for j in 0..b.len() {
+                let (b1, b2) = (b[j], b[(j + 1) % b.len()]);
+                if !longe(&caixa(&[b1, b2]), bba) && seg_corta(a1, a2, b1, b2) {
+                    return true;
+                }
+            }
+        }
+        false
+    };
+    let bbp = caixa(contorno);
+    let mut aneis: Vec<Vec<[f64; 2]>> = Vec::with_capacity(lista.len());
+    let mut bbs: Vec<Caixa> = Vec::with_capacity(lista.len());
+    for (i, h) in lista.iter().enumerate() {
+        let k = format!("furo {}", i + 1);
+        let anel = h.as_array().and_then(|a| {
+            a.iter().map(|p| { let p = p.as_array()?; Some([p.first()?.as_f64()?, p.get(1)?.as_f64()?]) }).collect::<Option<Vec<_>>>()
+        });
+        let Some(anel) = anel.filter(|a| a.len() >= 3) else { return Err(format!("{k}: holes[{i}] deve ser [[x,y],...] com >= 3 vértices")) };
+        let ge = regiao_erro(&anel);
+        if !ge.is_empty() {
+            return Err(format!("{k}: {}", ge.replacen("região", "furo", 1)));
+        }
+        let bb = caixa(&anel);
+        if !anel.iter().all(|p| geom::point_in_poly(p[0], p[1], contorno)) || encostam(&anel, contorno, &bb, &bbp) {
+            return Err(format!("{k} fora da região (o furo precisa ficar inteiro dentro do pts, sem encostar no contorno)"));
+        }
+        aneis.push(anel);
+        bbs.push(bb);
+    }
+    for i in 0..aneis.len() {
+        for j in i + 1..aneis.len() {
+            if longe(&bbs[i], &bbs[j]) {
+                continue;
+            }
+            let (a, b) = (&aneis[i], &aneis[j]);
+            if encostam(a, b, &bbs[i], &bbs[j]) || geom::point_in_poly(b[0][0], b[0][1], a) || geom::point_in_poly(a[0][0], a[0][1], b) {
+                return Err(format!("furos {} e {} se sobrepõem ou se encostam (junte-os num furo só)", i + 1, j + 1));
+            }
+        }
+    }
+    Ok(aneis)
+}
+
 fn layer_err(key: Option<&str>, what: &str) -> Option<String> {
     let Some(key) = key.filter(|k| !k.is_empty()) else { return Some("falta layer".into()) };
     match layers::by_key(key) {
@@ -808,9 +918,17 @@ pub fn apply(board: &Board, changes: &[Value]) -> Applied {
                         bad!("{e}");
                     }
                 }
+                // holes: os furos da region solida (a letra "o" na serigrafia); recorte nao leva furo
+                if (corte || sem_plano) && ch.get("holes").and_then(|v| v.as_array()).map_or(false, |a| !a.is_empty()) {
+                    bad!("{} não leva furo (holes) — faça um recorte por pedaço", if corte { "recorte (cutout)" } else { "recorte de polígono (polycut)" });
+                }
+                let holes = match furos(ch, &p) {
+                    Ok(h) => h,
+                    Err(e) => bad!("{e}"),
+                };
                 let id = nid(if corte { "k" } else if sem_plano { "q" } else { "g" }, ch);
                 ghosts.added_ids.insert(id.clone());
-                let mut r = Region { id, layer: lay.unwrap_or("Multi").to_string(), points: p, cutout: corte, polycut: sem_plano, ..Default::default() };
+                let mut r = Region { id, layer: lay.unwrap_or("Multi").to_string(), points: p, holes, cutout: corte, polycut: sem_plano, ..Default::default() };
                 if corte {
                     r.layer = "Multi".into();
                     eb.cutouts.push(r);
@@ -1478,5 +1596,63 @@ fn reclassify(eb: &mut Board) {
         } else {
             eb.tracks.push(o);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn quad(x: f64, y: f64, s: f64) -> Value {
+        json!([[x, y], [x + s, y], [x + s, y + s], [x, y + s]])
+    }
+    /* um "o" quadrado na serigrafia: 10 x 10 com um furo 4 x 4 no meio */
+    fn letra_o(holes: Value) -> Value {
+        json!({"op": "region_add", "layer": "TopOverlay", "pts": quad(10.0, 10.0, 10.0), "holes": holes})
+    }
+    fn aplica(ch: Value) -> Applied {
+        apply(&Board::default(), &[ch])
+    }
+    fn erro(a: &Applied) -> String {
+        a.status.iter().filter(|s| s.level == Level::Err).map(|s| s.msg.clone()).collect::<Vec<_>>().join("; ")
+    }
+
+    #[test]
+    fn region_add_leva_os_furos() {
+        let a = aplica(letra_o(json!([quad(13.0, 13.0, 4.0)])));
+        assert_eq!(erro(&a), "");
+        let g = a.board.regions.last().unwrap();
+        assert_eq!(g.holes, vec![vec![[13.0, 13.0], [17.0, 13.0], [17.0, 17.0], [13.0, 17.0]]]);
+        let b = aplica(json!({"op": "region_add", "layer": "Top", "pts": quad(0.0, 0.0, 20.0), "holes": [quad(2.0, 2.0, 5.0), quad(10.0, 10.0, 5.0)]}));
+        assert_eq!(erro(&b), "");
+        assert_eq!(b.board.regions.last().unwrap().holes.len(), 2);
+        assert!(aplica(letra_o(json!([]))).board.regions.last().unwrap().holes.is_empty());
+    }
+
+    #[test]
+    fn region_add_recusa_furo_invalido() {
+        let casos = [
+            (letra_o(json!([quad(30.0, 30.0, 2.0)])), "furo 1 fora da região"),
+            (letra_o(json!([quad(18.0, 12.0, 4.0)])), "furo 1 fora da região"),
+            (letra_o(json!([[[10, 12], [14, 12], [14, 16], [10, 16]]])), "furo 1 fora da região"),
+            (letra_o(json!([quad(12.0, 12.0, 4.0), quad(14.0, 14.0, 4.0)])), "furos 1 e 2 se sobrepõem"),
+            (letra_o(json!([quad(11.0, 11.0, 8.0), quad(13.0, 13.0, 2.0)])), "furos 1 e 2 se sobrepõem"),
+            (letra_o(json!([[[13, 13], [15, 15]]])), "furo 1: holes[0] deve ser"),
+            (letra_o(json!([[[12, 12], [16, 16], [16, 12], [12, 16]]])), "furo 1: furo com lados que se cruzam"),
+            (letra_o(json!("x")), "holes deve ser"),
+        ];
+        for (ch, msg) in casos {
+            let a = aplica(ch.clone());
+            assert!(erro(&a).contains(msg), "{ch} -> {:?}", erro(&a));
+            assert!(a.board.regions.is_empty());
+        }
+        let mut c = letra_o(json!([quad(13.0, 13.0, 4.0)]));
+        c["cutout"] = json!(true);
+        assert!(erro(&aplica(c)).contains("recorte (cutout) não leva furo"));
+        let mut q = letra_o(json!([quad(13.0, 13.0, 4.0)]));
+        q["layer"] = json!("Top");
+        q["polycut"] = json!(true);
+        assert!(erro(&aplica(q)).contains("polycut) não leva furo"));
     }
 }

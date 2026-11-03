@@ -288,7 +288,7 @@ de um projeto que já tinha PCB). Único ajuste: os arquivos vivem em
 1. **NUNCA edite `board.js`** — ele é o espelho exportado (verdade da placa). Só leitura.
 2. **Edite somente `changes.js`** (e nada mais na pasta do projeto).
 3. Em `changes.js`, escreva **um objeto JSON por linha**, dentro do array `var changes = [...]`.
-   Objetos **planos** (sem aninhamento), terminados com `,` — o parser do Altium lê linha a linha.
+   Objetos **planos** (sem aninhamento — `pts` e `holes` são as únicas exceções, sempre numa linha só), terminados com `,` — o parser do Altium lê linha a linha.
 4. Toda edição/remoção **deve carregar os campos `orig_*` copiados EXATAMENTE do `board.js`**
    (mesmos números, sem arredondar). É a trava de segurança: se a placa real não casar com o
    `orig_*` (tolerância 0,001 mm), a mudança é rejeitada.
@@ -352,7 +352,7 @@ var changes = [
 | `fill_add` | `layer`, `x1`,`y1`,`x2`,`y2` (cantos SEM rotação) | `rot` (em torno do centro), `net`, `note` |
 | `fill_edit` | `id`, `orig_x1`,`orig_y1`,`orig_x2`,`orig_y2`, `orig_layer` | `x1`,`y1`,`x2`,`y2`,`rot`,`layer`,`net`,`note` |
 | `fill_del` | `id`, `orig_x1..orig_y2`, `orig_layer` | `note` |
-| `region_add` | `layer`, `pts` (`[[x,y],...]` ≥3, numa linha só) | `net`, `cutout` (true = Board Cutout; a camada é ignorada), `polycut` (true = "sem plano", o Polygon Pour Cutout: o plano não entra, trilha e via passam; `layer` de cobre, ou `Multi` = todas; sem net), `note` |
+| `region_add` | `layer`, `pts` (`[[x,y],...]` ≥3, numa linha só) | `holes` (furos: `[[[x,y],...],...]`, cada um ≥3 vértices, na MESMA linha; cada furo inteiro dentro do `pts`, sem encostar no contorno nem em outro furo, e sem furo dentro de furo — não vale com `cutout`/`polycut`; 1.59.0), `net`, `cutout` (true = Board Cutout; a camada é ignorada), `polycut` (true = "sem plano", o Polygon Pour Cutout: o plano não entra, trilha e via passam; `layer` de cobre, ou `Multi` = todas; sem net), `note` |
 | `region_del` | `id`, `orig_layer`, `orig_n` (nº de vértices), `orig_x0`, `orig_y0` (1º vértice) | `note` — também apaga um recorte do `board.js » cutouts` (`k…`: Board Cutout e Polygon Pour Cutout; 1.57.0) |
 | `designator_move` | `ref`, `orig_x`, `orig_y` | `x`, `y`, `h`, `w`, `rot`, `hidden` (true = oculto, o Show Designator do Altium desligado; false = mostra; 1.57.0), `note` |
 | `outline_set` | `pts` (`[[x,y],...]` ≥3, polígono **fechado**, só linhas) | `note` |
@@ -472,6 +472,12 @@ var changes = [
   Altium o `ApplyChanges` recusa essa linha (lá o polígono existe: apague-o no Altium).
 - Círculo cheio, triângulo e polígono cheio → `region_add`; retângulo cheio → `fill_add`;
   contorno de qualquer forma → `track_add` em série (círculo: `arc_add` de 0 a 360).
+- Forma com miolo vazado (as letras "o", "e", "D", "A" na serigrafia, um logo, um anel de cobre) é **uma**
+  `region_add` com `holes`, não pedaços (1.59.0):
+  `{"op":"region_add","layer":"TopOverlay","pts":[[10,10],[20,10],[20,20],[10,20]],"holes":[[[13,13],[17,13],[17,17],[13,17]]]}`.
+  Sai na tela, no Gerber (a região escura e cada furo claro), no DRC e no PDF. No Altium, o `ApplyChanges`
+  grava os furos pelo bloco APOSTAS (`GravaFuros`); se ele recusar, a linha sai como FALHA e nada é criado
+  (confira o `apply-report.txt` na primeira rodada).
 - `comp_attr` — aplicado **por último** pelo ApplyChanges (renomear cedo quebraria os `ref` das ops seguintes); renomear na PCB dessincroniza do esquema — o ECO vai acusar.
 - `size` = diâmetro do anel da via; `drill` = diâmetro do furo (`drill < size`).
 - `sa`/`ea` = ângulos inicial/final do arco em graus, anti-horário a partir de +X.

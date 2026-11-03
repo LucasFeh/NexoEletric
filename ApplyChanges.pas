@@ -61,6 +61,10 @@
 {   Seg.cx/cy/Radius/Angle1/Angle2 (ESCRITA; a leitura roda no ExportBoard) ... GravaSegmentos}
 {   PolyHatchStyle, Grid, TrackSize, RemoveDead, PourIndex, Name do polygon ... PropsDoPoligono}
 {   Rebuild de polygon (o do BoardOutline ja roda) .... DoPolyAdd, DoPolyEdit                 }
+{   --- region com furo (holes) ---                                                           }
+{   GeometricPolygon (leitura e escrita na region), AddContourIsHole ... GravaFuros           }
+{                                                       (region_add com holes; HoleCount, a   }
+{                                                       releitura, ja roda no ExportBoard)    }
 { Os numeros novos (sem constante, ver acima): SEG_ARCO (TPolySegmentType, conferido contra o  }
 { ePolySegmentLine = 0 no comeco da rodada) e HATCH_* (TPolyHatchStyle, NAO conferido - a      }
 { ordem e a da documentacao). Pad.Net := nil (tirar o pad da net) e comportamento, nao nome:   }
@@ -982,6 +986,80 @@ begin
     else if c <> ' ' then
       Cur := Cur + c;
   end;
+end;
+
+// Extrai "holes":[[[x,y],...],[[x,y],...]] da linha -> TStringList, um item por furo, com os
+// vertices 'x|y' separados por espaco (AnelDoFuro os separa de novo). A mesma leitura do ParsePts,
+// uma profundidade a mais: '[' de profundidade 2 abre um furo, de 3 um vertice. O ParsePts procura
+// '"pts":[' e este '"holes":[' - um nao acha o outro, em qualquer ordem dos campos na linha.
+// Linha sem "holes" da a lista vazia.
+function ParseFuros(Line: String): TStringList;
+var
+  p, i, Depth: Integer;
+  Cur, Anel, c: String;
+begin
+  Result := TStringList.Create;
+  p := Pos('"holes":[', Line);
+  if p = 0 then
+    Exit;
+  i := p + 9;
+  Depth := 1;
+  Cur := '';
+  Anel := '';
+  while (i <= Length(Line)) and (Depth > 0) do
+  begin
+    c := Line[i];
+    if c = '[' then
+    begin
+      Depth := Depth + 1;
+      if Depth = 2 then
+        Anel := ''
+      else
+        Cur := '';
+    end
+    else if c = ']' then
+    begin
+      if Depth = 3 then
+      begin
+        p := Pos(',', Cur);
+        if p > 0 then
+        begin
+          if Anel <> '' then
+            Anel := Anel + ' ';
+          Anel := Anel + Copy(Cur, 1, p - 1) + '|' + Copy(Cur, p + 1, 255);
+        end;
+      end
+      else if Depth = 2 then
+        Result.Add(Anel);
+      Depth := Depth - 1;
+    end
+    else if c <> ' ' then
+      Cur := Cur + c;
+    i := i + 1;
+  end;
+end;
+
+// Os vertices 'x|y' de um furo do ParseFuros (o fechamento escrito a mao sai no GravaFuros).
+function AnelDoFuro(S: String): TStringList;
+var
+  i: Integer;
+  Cur: String;
+begin
+  Result := TStringList.Create;
+  Cur := '';
+  for i := 1 to Length(S) do
+  begin
+    if S[i] = ' ' then
+    begin
+      if Cur <> '' then
+        Result.Add(Cur);
+      Cur := '';
+    end
+    else
+      Cur := Cur + S[i];
+  end;
+  if Cur <> '' then
+    Result.Add(Cur);
 end;
 
 // x e y de um vertice 'x|y' do ParsePts
@@ -3392,6 +3470,68 @@ begin
   end;
 end;
 
+// APOSTA (ver APOSTAS): os furos da region (region_add com holes: a letra "o" na serigrafia, o
+// miolo de um logo). A leitura que roda e a do ExportBoard (Region.HoleCount, Region.Holes[i]); a
+// escrita vai pelo IPCB_GeometricPolygon da region: cada furo e um contorno novo - o principal
+// REPLICADO, com Count e X[i]/Y[i] na base que a sonda do MontaContorno achou (Base) -, posto como
+// furo por AddContourIsHole(contorno, True), e o poligono volta para a region pelo GeometricPolygon.
+// Releitura: HoleCount tem de dar o numero de furos pedido. Chamar so DEPOIS do MontaContorno (o
+// contorno principal ja gravado e o modelo dos furos). False = recusado; Etapa diz qual chamada.
+// Variaveis TObject de proposito (ver APOSTAS).
+function GravaFuros(Region: TObject; Furos: TStringList; Base: Integer; var Etapa: String): Boolean;
+var
+  GP, C: TObject;
+  Anel: TStringList;
+  h, k, M, Lidos: Integer;
+begin
+  Result := False;
+  Anel := nil;
+  Etapa := 'GravaFuros sem o bloco try (ver APOSTAS)';
+  try
+    Etapa := 'IPCB_Region.GeometricPolygon (leitura)';
+    GP := Region.GeometricPolygon;
+    for h := 0 to Furos.Count - 1 do
+    begin
+      Anel := AnelDoFuro(Furos[h]);
+      M := Anel.Count;
+      if M > 1 then
+        if NearMM(PtX(Anel[M - 1]), PtX(Anel[0])) and NearMM(PtY(Anel[M - 1]), PtY(Anel[0])) then
+          M := M - 1;
+      if M < 3 then
+      begin
+        Etapa := 'o furo ' + IntToStr(h + 1) + ' tem menos de 3 vertices';
+        Anel.Free;
+        Exit;
+      end;
+      Etapa := 'IPCB_Contour.Replicate/Count/X[i]/Y[i] (furo ' + IntToStr(h + 1) + ', base ' + IntToStr(Base) + ')';
+      C := Region.GetMainContour();
+      C := C.Replicate;
+      C.Count := M;
+      for k := 0 to M - 1 do
+      begin
+        C.X[k + Base] := MMX(PtX(Anel[k]));
+        C.Y[k + Base] := MMY(PtY(Anel[k]));
+      end;
+      Anel.Free;
+      Anel := nil;
+      Etapa := 'IPCB_GeometricPolygon.AddContourIsHole (furo ' + IntToStr(h + 1) + ')';
+      GP.AddContourIsHole(C, True);
+    end;
+    Etapa := 'IPCB_Region.GeometricPolygon (escrita)';
+    Region.GeometricPolygon := GP;
+    Etapa := 'IPCB_Region.HoleCount (releitura)';
+    Lidos := Region.HoleCount;
+    if Lidos = Furos.Count then
+      Result := True
+    else
+      Etapa := 'a region guardou ' + IntToStr(Lidos) + ' furo(s) dos ' + IntToStr(Furos.Count) + ' pedidos';
+  except
+    Result := False;
+    if Anel <> nil then
+      Anel.Free;
+  end;
+end;
+
 // region_add: region solida (cheia) na camada pedida ou - com cutout:true - um recorte da placa
 // (Board Cutout: e assim que a casa faz furo de fixacao). Poligono fechado implicito: o ultimo
 // vertice liga no primeiro, e um ultimo vertice repetindo o primeiro e ignorado.
@@ -3410,14 +3550,18 @@ end;
 // entra nele, trilha e via passam. Mesmo caminho do recorte - o Kind como inteiro, relido -, com
 // KIND_RECORTE_POLIGONO, na camada de cobre pedida ou na Multi (todas as camadas, como no
 // PCBM-DI261904). Sem net.
+//
+// holes (so na region solida): os furos, gravados depois do contorno (GravaFuros) e relidos. Se o
+// Altium recusar, e FALHA e nada vai para a placa - a region cheia no lugar da letra com furo seria
+// desenho errado, e no cobre um curto.
 procedure DoRegionAdd(Line: String);
 var
-  Pts: TStringList;
+  Pts, Furos: TStringList;
   Region: TObject;
   Net: IPCB_Net;
   What, NetStr, Etapa, Origem, Vertices, NaoDa: String;
   L: TLayer;
-  N, KindLido, Medidos, BaseX, KindAlvo: Integer;
+  N, KindLido, Medidos, BaseX, KindAlvo, NFuros: Integer;
   Corte, PolyCorte, Ok, Conferido, CamadaOk: Boolean;
 begin
   Corte := JBool(Line, 'cutout');
@@ -3433,6 +3577,12 @@ begin
   end
   else
     What := 'region_add ' + JGet(Line, 'layer');
+  // o hub recusa recorte com furo (holes): recorte com ilha sao dois recortes
+  if (Corte or PolyCorte) and (Pos('"holes":[[', Line) > 0) then
+  begin
+    LogFail(What + ': recorte nao leva furo (holes) - faca um recorte por pedaco; nada foi criado');
+    Exit;
+  end;
 
   // N = quantos vertices de Pts valem: um ultimo igual ao primeiro e o fechamento escrito a mao
   Pts := ParsePts(Line);
@@ -3594,6 +3744,30 @@ begin
     Exit;
   end;
 
+  // 4b) os furos (holes), gravados e relidos; o contorno conferido de novo depois deles
+  Furos := ParseFuros(Line);
+  NFuros := Furos.Count;
+  if NFuros > 0 then
+  begin
+    if not GravaFuros(Region, Furos, BaseX, Etapa) then
+    begin
+      LogFail(What + ': os furos (holes) nao foram para o Altium (' + Etapa + ') - nada foi criado: ' +
+        'desenhe a region com furo no Altium, ou divida-a em pedacos sem furo');
+      Furos.Free;
+      Pts.Free;
+      Exit;
+    end;
+    if not ContornoConfere(Region, Pts, N, Medidos) then
+    begin
+      LogFail(What + ': o contorno nao e mais o pedido depois de gravar os furos (' + IntToStr(Medidos) +
+        ' vertice(s)) - nada foi criado');
+      Furos.Free;
+      Pts.Free;
+      Exit;
+    end;
+  end;
+  Furos.Free;
+
   // 5) recorte: o Kind de novo (gravar o contorno nao pode te-lo desfeito). Region solida: a net,
   //    so no cobre.
   if Corte or PolyCorte then
@@ -3648,6 +3822,8 @@ begin
   Vertices := IntToStr(Medidos) + ' vertices';
   if Medidos <> N then
     Vertices := Vertices + ' (pedidos ' + IntToStr(N) + ')';
+  if NFuros > 0 then
+    Vertices := Vertices + ', ' + IntToStr(NFuros) + ' furo(s)';
   Vertices := Vertices + ' [sonda: X[] base ' + IntToStr(BaseX) + ']';
   if not Ok then
     LogFail(What + ': o Altium recusou Board.AddPCBObject - confira se a region ficou na placa')

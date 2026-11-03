@@ -276,23 +276,72 @@ function regiaoErro(pts){
   while (q.length > 1 && mesmo(q[0], q[q.length - 1])) q.pop();
   if (q.length < 3) return 'região sem área (vértices alinhados ou repetidos)';
   const n = q.length;
-  const lado = (a, b, c) => { const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); return Math.abs(v) < 1e-12 ? 0 : (v > 0 ? 1 : -1); };
-  const sobre = (a, b, c) => Math.min(a[0], b[0]) - 1e-9 <= c[0] && c[0] <= Math.max(a[0], b[0]) + 1e-9 &&
-                             Math.min(a[1], b[1]) - 1e-9 <= c[1] && c[1] <= Math.max(a[1], b[1]) + 1e-9;
-  const corta = (p1, p2, p3, p4) => {
-    const o1 = lado(p1, p2, p3), o2 = lado(p1, p2, p4), o3 = lado(p3, p4, p1), o4 = lado(p3, p4, p2);
-    if (o1 !== o2 && o3 !== o4) return true;
-    return (o1 === 0 && sobre(p1, p2, p3)) || (o2 === 0 && sobre(p1, p2, p4)) ||
-           (o3 === 0 && sobre(p3, p4, p1)) || (o4 === 0 && sobre(p3, p4, p2));
-  };
   for (let i = 0; i < n; i++)
     for (let j = i + 2; j < n; j++) {
       if (i === 0 && j === n - 1) continue;                 /* o ultimo lado e vizinho do primeiro */
-      if (corta(q[i], q[(i + 1) % n], q[j], q[(j + 1) % n])) return 'região com lados que se cruzam (o Altium e o Gerber não aceitam)';
+      if (segCorta(q[i], q[(i + 1) % n], q[j], q[(j + 1) % n])) return 'região com lados que se cruzam (o Altium e o Gerber não aceitam)';
     }
   let s = 0;
   for (let i = 0; i < n; i++) { const a = q[i], b = q[(i + 1) % n]; s += a[0] * b[1] - b[0] * a[1]; }
   return Math.abs(s) < 1e-9 ? 'região sem área (vértices alinhados ou repetidos)' : '';
+}
+/* os lados p1-p2 e p3-p4 se cruzam ou se encostam (ponta em cima do outro, colinear sobreposto) */
+const segLado = (a, b, c) => { const v = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); return Math.abs(v) < 1e-12 ? 0 : (v > 0 ? 1 : -1); };
+const segSobre = (a, b, c) => Math.min(a[0], b[0]) - 1e-9 <= c[0] && c[0] <= Math.max(a[0], b[0]) + 1e-9 &&
+                              Math.min(a[1], b[1]) - 1e-9 <= c[1] && c[1] <= Math.max(a[1], b[1]) + 1e-9;
+function segCorta(p1, p2, p3, p4){
+  const lado = segLado, sobre = segSobre;
+  const o1 = lado(p1, p2, p3), o2 = lado(p1, p2, p4), o3 = lado(p3, p4, p1), o4 = lado(p3, p4, p2);
+  if (o1 !== o2 && o3 !== o4) return true;
+  return (o1 === 0 && sobre(p1, p2, p3)) || (o2 === 0 && sobre(p1, p2, p4)) ||
+         (o3 === 0 && sobre(p3, p4, p1)) || (o4 === 0 && sobre(p3, p4, p2));
+}
+/* ponto dentro do poligono (par-impar; ponto em cima do lado e do segCorta, nao daqui) */
+function dentroPts(pts, x, y){
+  let d = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], b = pts[j];
+    if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) d = !d;
+  }
+  return d;
+}
+/* os furos (holes) de uma region_add: cada um um anel [[x,y],...] que o regiaoErro aceita, INTEIRO
+   dentro do pts (lado nenhum encostando no contorno) e sem encostar em outro furo nem morar dentro
+   dele -- furo dentro de furo e ilha, e o Gerber (a region escura, depois cada furo claro) e o
+   Altium nao a desenham. Devolve o texto do erro ou ''. */
+function furosErro(pts, holes){
+  if (!Array.isArray(holes)) return 'holes deve ser [[[x,y],...], ...] (uma lista de furos, cada um com >= 3 vértices)';
+  const caixa = p => p.reduce((b, q) => [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[0]), Math.max(b[3], q[1])], [Infinity, Infinity, -Infinity, -Infinity]);
+  const longe = (a, b) => a[2] < b[0] - 1e-9 || b[2] < a[0] - 1e-9 || a[3] < b[1] - 1e-9 || b[3] < a[1] - 1e-9;
+  /* algum lado de A encosta num lado de B? (so os lados cuja caixa alcanca a do outro anel) */
+  const encostam = (A, B, bbA, bbB) => {
+    for (let i = 0; i < A.length; i++) {
+      const a1 = A[i], a2 = A[(i + 1) % A.length];
+      if (longe(caixa([a1, a2]), bbB)) continue;
+      for (let j = 0; j < B.length; j++) {
+        const b1 = B[j], b2 = B[(j + 1) % B.length];
+        if (!longe(caixa([b1, b2]), bbA) && segCorta(a1, a2, b1, b2)) return true;
+      }
+    }
+    return false;
+  };
+  const bbP = caixa(pts), bbs = [];
+  for (let i = 0; i < holes.length; i++) {
+    const h = holes[i], k = 'furo ' + (i + 1);
+    if (!ptsValid(h, 3)) return `${k}: holes[${i}] deve ser [[x,y],...] com >= 3 vértices`;
+    const ge = regiaoErro(h); if (ge) return k + ': ' + ge.replace('região', 'furo');
+    const bb = caixa(h);
+    bbs.push(bb);
+    if (!h.every(p => dentroPts(pts, p[0], p[1])) || encostam(h, pts, bb, bbP))
+      return `${k} fora da região (o furo precisa ficar inteiro dentro do pts, sem encostar no contorno)`;
+  }
+  for (let i = 0; i < holes.length; i++)
+    for (let j = i + 1; j < holes.length; j++) {
+      if (longe(bbs[i], bbs[j])) continue;
+      if (encostam(holes[i], holes[j], bbs[i], bbs[j]) || dentroPts(holes[i], holes[j][0][0], holes[j][0][1]) || dentroPts(holes[j], holes[i][0][0], holes[i][0][1]))
+        return `furos ${i + 1} e ${j + 1} se sobrepõem ou se encostam (junte-os num furo só)`;
+    }
+  return '';
 }
 /* espelho NOVO: o ExportBoard de 2026-10 (ou o leitor de .PcbDoc) carimba `exporter`, e so ele
    marca poly/owner/keepout nas regions. No espelho antigo uma region pode ser cobre livre,
@@ -812,7 +861,8 @@ function applyPcbChanges(board, changes, opts){
      novo, que nenhum pedaco do board.js cita): cobre que o Altium despejou de um poligono que nao
      veio no espelho (o ExportBoard nao exporta poligono -- o "altium_sem_poligono" do DRC).
      Ninguem o redespeja, entao ele entra no modelo marcado `orfa` e o region_del apaga; mexer
-     nele (apagar e recriar) nao: o region_add nao leva os furos do despejo (1.35.0) */
+     nele (apagar e recriar) a vista nao deixa: no Altium o poligono existe, o ApplyChanges recusa
+     o region_del e o region_add sairia em dobro (1.35.0) */
   const idsPoly = new Set();
   for (const g of (Array.isArray(B.polygons) ? B.polygons : [])) if (g && g.id != null) idsPoly.add(String(g.id));
   for (const g of (B.regions || [])) {
@@ -1255,8 +1305,16 @@ function applyPcbChanges(board, changes, opts){
             return bad(`recorte de polígono (polycut) só em camada de cobre ou na Multi (todas) — "${ch.layer || ''}" não serve`);
         } else if (!corte) { const e = layerErr(ch.layer, 'região'); if (e) return bad(e); }
         const ge = regiaoErro(ch.pts); if (ge) return bad(ge);
+        /* holes: os furos da region solida (a letra "o" na serigrafia, o miolo de um logo). Recorte
+           nao leva furo: o Board Cutout e o Polygon Pour Cutout vao para o cutouts, que o contorno do
+           Gerber, o laser e o pour leem sem furo -- recorte com ilha sao dois recortes */
+        const furos = ch.holes !== undefined ? ch.holes : [];
+        if (Array.isArray(furos) && furos.length && (corte || semPlano))
+          return bad(`${corte ? 'recorte (cutout)' : 'recorte de polígono (polycut)'} não leva furo (holes) — faça um recorte por pedaço`);
+        const fe = furosErro(ch.pts, furos); if (fe) return bad(fe);
         const m = { kind:'region', src:null, changed:false, added:true,
                     eff:{ id:nid(corte ? 'k' : semPlano ? 'q' : 'g', ch), ...ch, points:ch.pts.map(p => [p[0], p[1]]) } };
+        if (furos.length) m.eff.holes = furos.map(h => h.map(p => [p[0], p[1]])); else delete m.eff.holes;
         model.added.push(m); item.target = m;
         novoLivre(m.eff);
         if (corte || semPlano) {
@@ -1971,6 +2029,7 @@ function effectiveBoard(board, model){
     else if (e.polycut) cutouts.push({ id:e.id, layer:e.layer, kindn:1, incomp:false, points:pts });
     else {
       const o = { id:e.id, layer:e.layer, net:typeof e.net === 'string' ? e.net : '', points:pts };
+      if (Array.isArray(e.holes) && e.holes.length) o.holes = dcopy(e.holes);
       if (!isCopper(o.layer)) delete o.net;
       regions.push(o);
     }
@@ -2833,6 +2892,14 @@ function serializeChanges(changes){
       if (!ptsValid(ch.pts, 3)) errors.push({ idx:i, msg:'region_add: pts deve ser [[x,y],...] com >= 3 vertices' });
       if (ch.cutout !== true && (typeof ch.layer !== 'string' || !ch.layer))
         errors.push({ idx:i, msg:'region_add: campo "layer" ausente (ou cutout:true para recorte)' + (ch.polycut === true ? ' — o polycut vai numa camada de cobre ou na Multi' : '') });
+      /* holes: aninhado como o pts, e o jline o poe na mesma linha (o ParsePts do ApplyChanges
+         procura '"pts":[' e o ParseFuros '"holes":[', um nao acha o outro) */
+      if (ch.holes !== undefined && ptsValid(ch.pts, 3)) {
+        const fe = furosErro(ch.pts, ch.holes);
+        if (fe) errors.push({ idx:i, msg:'region_add: ' + fe });
+        else if (ch.holes.length && (ch.cutout === true || ch.polycut === true))
+          errors.push({ idx:i, msg:'region_add: recorte (cutout/polycut) não leva furo (holes)' });
+      }
     }
     if (ch.op === 'text_add'){
       if (isNum(ch.h) && ch.h <= 0) errors.push({ idx:i, msg:'text_add: h deve ser > 0' });
@@ -3162,5 +3229,5 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          compDelta, xfPoint, xfPointInv, xfAngle, xfArc, xfObject, ownerDelta, effLayerForOwner,
          neodenTransform, neodenCsv, neodenKind,
          setPcbLib, pcbLibAtual, footprintGeom, parseNetsCampo, netsCampo, ptsToOutline, outlineToPts, bulgeArco,
-         outlineBBox, normAng, PAD_FORMAS, FURO_FORMAS, POUR };
+         outlineBBox, normAng, PAD_FORMAS, FURO_FORMAS, POUR, regiaoErro, furosErro };
 });

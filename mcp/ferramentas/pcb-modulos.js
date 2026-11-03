@@ -241,6 +241,8 @@ module.exports = {
           const acoes = eco.acoes || eco.actions || [];
           const out = { motor: 'HubPcbEco', total: acoes.length, por_status: acoes.reduce((s, x) => (s[x.status] = (s[x.status] || 0) + 1, s), {}),
                         acoes: acoes.map(x => ({ id: x.id, grupo: x.grupo, tipo: x.tipo, objeto: x.objeto, para: x.para, status: x.status, msg: x.msg })) };
+          const trocas = E.trocasFp ? E.trocasFp(eco) : [];
+          if (trocas.length) out.trocas_footprint = trocas;
           if (a.relatorio && E.relatorio) out.relatorio = E.relatorio(eco);
           return out;
         }
@@ -261,7 +263,7 @@ module.exports = {
     },
     {
       nome: 'eco_aplicar', titulo: 'ECO: levar o esquema para a placa', modulo: 'hub-pcbeco.js',
-      descricao: 'Executa o ECO (hub-pcbeco.js): transforma as ações marcadas em linhas do changes.js (comp_add com o footprint da PcbLib estacionado ao lado da placa, net_add, pad_net, comp_attr...) e grava validado. ids = só essas ações (eco_comparar mostra os ids); refs = só esses componentes. simular:true mostra as linhas sem gravar. Depois: pcb_mover para posicionar e nets_ratsnest/pcb_rotear para ligar.',
+      descricao: 'Executa o ECO (hub-pcbeco.js): transforma as ações marcadas em linhas do changes.js (comp_add com o footprint da PcbLib estacionado ao lado da placa, net_add, pad_net, comp_attr...) e grava validado. Troca de footprint: o componente volta no mesmo lugar, com o designator de antes e as nets que os pads têm na placa; cada pad em que o esquema discorda é uma ação de pino própria (deixe o id fora de ids para manter a net da placa) — trocas_footprint na resposta lista os pads que mudam de net e os que saem. ids = só essas ações (eco_comparar mostra os ids); refs = só esses componentes. simular:true mostra as linhas sem gravar. Depois: pcb_mover para posicionar e nets_ratsnest/pcb_rotear para ligar.',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, ids: { type: 'array', items: { type: 'string' } }, refs: { type: 'array', items: { type: 'string' } },
         opcoes: { type: 'object', additionalProperties: true, description: '{margem, folga, x0, y0} onde estacionar os novos' } }, SIM), required: ['projeto'] },
       executa: async (a, ctx) => {
@@ -281,8 +283,12 @@ module.exports = {
         }
         const r = E.aplica(eco, a.opcoes || {});
         const linhas = r.linhas || [];
-        if (!linhas.length) return { ok: true, linhas: 0, puladas: r.puladas, nota: 'nada a aplicar: esquema e placa já concordam (ou as ações foram puladas)' };
-        return Object.assign({ via: 'HubPcbEco.aplica', puladas: r.puladas }, aplicaOps(ctx, p, linhas, a, 'eco_aplicar'));
+        /* troca de footprint: os pads ficam com a net da placa; o que o esquema muda (cada pino uma
+           acao, que ids/refs deixam de fora) e os pads que saem vao na resposta, nao so o nome */
+        const trocas = (E.trocasFp ? E.trocasFp(eco) : []).filter(t => t.ativo && t.status !== 'err');
+        const extra = trocas.length ? { trocas_footprint: trocas } : {};
+        if (!linhas.length) return Object.assign({ ok: true, linhas: 0, puladas: r.puladas, nota: 'nada a aplicar: esquema e placa já concordam (ou as ações foram puladas)' }, extra);
+        return Object.assign({ via: 'HubPcbEco.aplica', puladas: r.puladas }, extra, aplicaOps(ctx, p, linhas, a, 'eco_aplicar'));
       },
     },
   ],

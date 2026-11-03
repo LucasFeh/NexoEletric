@@ -413,7 +413,7 @@ const CAMPOS_OP = {
   via_add: 'x y size drill net from to', via_edit: 'id x y size drill net from to', via_del: 'id',
   text_add: 'layer text x y h w rot mirror', text_edit: 'id layer text x y h w rot mirror', text_del: 'id',
   fill_add: 'layer x1 y1 x2 y2 rot net keepout', fill_edit: 'id layer x1 y1 x2 y2 rot net', fill_del: 'id',
-  region_add: 'layer pts net cutout polycut keepout', region_del: 'id',
+  region_add: 'layer pts holes net cutout polycut keepout', region_del: 'id',
   pad_net: 'ref pad net', net_add: 'net', net_del: 'net', net_rename: 'net',
   outline_set: 'pts',
 };

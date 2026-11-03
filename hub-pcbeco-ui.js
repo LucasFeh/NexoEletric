@@ -120,10 +120,14 @@ function eco(par){
         for (const a of as) {
           const r = el('tr', a.ativo ? '' : 'off');
           const trava = a.semPad || a.info || feitos.has(a.id);
+          /* troca de footprint: a mensagem diz quantos pads mudam de net (o hub-pcbeco a refaz a
+             cada marcacao); o pino da troca diz de qual troca e -- desmarcar = fica a net da placa */
+          const msg = [a.msg, a.msgValida].filter(Boolean).join(' — ');
+          const dica = a.dados && a.dados.troca ? msg + ' — desmarque para o pad ficar com a net da placa' : msg;
           r.innerHTML = `<td><input type="checkbox" ${a.ativo ? 'checked' : ''} ${trava ? 'disabled' : ''}></td><td>${esc(g.acao || g.altium)}</td>
             <td>${esc(a.objeto)}</td><td>${a.para ? '→' : ''}</td><td>${esc(a.para || '')}</td>
             <td class="st">${icone(a)}</td><td class="st">${feitos.has(a.id) ? '<span class="eco-ok">✔</span>' : ''}</td>
-            <td class="msg">${esc([a.msg, a.msgValida].filter(Boolean).join(' — '))}</td>`;
+            <td class="msg" title="${esc(dica)}">${esc(msg)}</td>`;
           r.querySelector('input').onchange = ev => { a.ativo = ev.target.checked; E.valida(ec); desenha(); };
           tbody.appendChild(r);
         }
@@ -156,7 +160,11 @@ function eco(par){
         if (ok === true) {
           for (const a of pend) if (a.status !== 'err') feitos.add(a.id);
           executou = true; linhasFeitas = linhasFeitas.concat(r.linhas);
-          avisa(`${r.linhas.length} mudança(s) no changes.js` + (r.puladas.length ? ` — ${r.puladas.length} com erro ficaram de fora` : ''), r.puladas.length ? 'warn' : 'ok');
+          /* a troca de footprint que mexeu em net aparece tambem no aviso */
+          const trocas = (E.trocasFp ? E.trocasFp(ec) : []).filter(t => pend.some(a => a.id === t.id) && t.status !== 'err');
+          const nPads = trocas.reduce((s, t) => s + t.pads_mudam.length, 0), nSaem = trocas.reduce((s, t) => s + t.pads_saem.length, 0);
+          const tr = trocas.length ? ` · ${trocas.length} troca(s) de footprint: ${nPads} pad(s) mudam de net` + (nSaem ? `, ${nSaem} saem` : '') : '';
+          avisa(`${r.linhas.length} mudança(s) no changes.js` + tr + (r.puladas.length ? ` — ${r.puladas.length} com erro ficaram de fora` : ''), r.puladas.length || nPads || nSaem ? 'warn' : 'ok');
         } else if (typeof ok === 'string') avisa('Não gravou: ' + ok, 'err');
         desenha();
       }

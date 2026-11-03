@@ -4,6 +4,45 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.59.0 — 2026-11-03
+
+Três itens do relato da serigrafia (MIRBC).
+
+- **ECO: trocar o footprint pelo esquema não religa mais a placa calado.**
+  - **Nets e designator:** em "Design » Atualizar PCB", o componente com footprint novo volta no mesmo lugar, com as
+    nets que os pads têm hoje na placa (pelo nome do pad). O designator fica onde estava, com a altura, o traço, o
+    giro e o "oculto" de antes.
+  - **Onde o esquema discorda:** pad numa net diferente, pad que o esquema deixa sem ligação ou pad que só o
+    footprint novo tem. A diferença aparece como uma ação própria em "Adicionar/Remover pinos", marcada. Aceitar
+    tudo deixa a placa como o esquema; desmarcar mantém a net da placa.
+  - **A linha da troca:** diz quantos pads mudam de net (ex.: "RES 1206 → RES 0805 · 1 pad muda de net: 2 GND→VCC")
+    e avisa quando um pad do footprint antigo some, com a net que ele leva.
+  - **No MCP:** o `eco_aplicar` e o `eco_comparar` trazem o mesmo resumo em `trocas_footprint`.
+  - **Corrigido junto:** a troca de um componente de símbolo desconhecido gravava o nome de prévia da net do esquema
+    (`NetR1_1`) no lugar da net da placa.
+- **Fonte da serigrafia com minúsculas de verdade.**
+  - **O que acontecia:** só o n, o u e o x tinham glifo próprio (para "nF"/"uF"), e o resto caía na maiúscula:
+    "dieletrons.com" saía "DIELETROnS.COM".
+  - **Agora:** as 26 minúsculas vêm da newstroke do KiCad (CC0, a mesma família dos glifos que já existiam). Os
+    antigos ficaram idênticos.
+  - **O complemento na grade do Altium:** o "+" de polaridade, X, Z, * = < > ? % ( ) : passou do gerador de Gerber
+    para a própria fonte.
+  - **Onde vale:** tela, Gerber, gravação a laser, BOM, PDF e a janela Rust desenham os mesmos glifos. O laser e o
+    BOM não põem mais uma caixa no lugar do "+".
+- **Região com furo.**
+  - **A op:** a `region_add` aceita `holes`, os furos, na mesma linha do `pts`. Letras como "o", "e" e "D" na
+    serigrafia, um logo vazado ou um anel de cobre viram uma região só, sem dividir em pedaços.
+  - **Onde aparece:** na tela, na janela Rust, no Gerber (o furo sai claro), no DRC e no PDF.
+  - **Na vista PCB:** a região com furo, inclusive a que veio do Altium, agora se move, gira, espelha, estica, copia e
+    cola com os furos junto. Antes aparecia o aviso "o region_add não leva furo".
+  - **O motor recusa:** furo fora da região, encostado no contorno, sobreposto a outro furo, dentro de outro furo ou
+    num recorte.
+  - **No Altium:** o `ApplyChanges` grava os furos (novo no bloco APOSTAS: `GravaFuros`, com `GeometricPolygon` e
+    `AddContourIsHole`, ainda não medidos) e confere na releitura. Se o Altium recusar, a linha sai como FALHA e
+    nada é criado.
+- Testes: `tests/test-eco-troca-fp.js`, `tests/test-regiao-furo.js` e `tests/test-font.js` (minúsculas e a tabela
+  do Rust igual à do hub).
+
 ## 1.58.1 — 2026-11-03
 
 - "Enviar pra JLC": **com o Gerber no carrinho, o IntegrateBrowser fecha sozinho.**

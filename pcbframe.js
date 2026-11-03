@@ -1717,6 +1717,7 @@ function mesmoValor(k, a, b){
 function patchAdd(op, kind, patch){
   for (const k of (CAMPOS_ADD[kind] || [])) if (k in patch) op[k] = patch[k];
   if (kind === 'region' && Array.isArray(patch.points)) op.pts = patch.points.map(p => [r6(p[0]), r6(p[1])]);
+  if (kind === 'region' && Array.isArray(patch.holes)) { if (patch.holes.length) op.holes = furosR6(patch.holes); else delete op.holes; }
   if (kind !== 'pad' && op.layer && !cobre(op.layer)) delete op.net;
   if (op.net === '') delete op.net;
 }
@@ -1808,16 +1809,25 @@ function attrComp(m, campo, valor){
   if (novo) { c.note = 'atributos no hub'; CH.push(c); }
 }
 /* region nao tem region_edit: mover ou trocar de camada e apagar e recriar (a do hub so
-   reescreve a propria linha). Region com furo nao viaja assim -- o region_add nao leva furo. */
+   reescreve a propria linha). Os furos vao junto no holes do region_add: os do geo (que andou
+   com o contorno) ou, quando o geo nao os traz (a ficha so troca camada/net), os da region. */
+const furosR6 = H => H.map(h => h.map(p => [r6(p[0]), r6(p[1])]));
 function editaRegiao(m, g){
-  if (m.added) { const op = opDe(m); if (op) patchAdd(op, 'region', g); return !!op; }
+  /* o vertice arrastado pode engolir um furo ou cruzar com ele: o motor recusaria o region_add
+     (e a region do board.js sumiria pelo region_del), entao a vista nem escreve */
+  const op0 = m.added ? opDe(m) : null, s0 = op0 ? { points:op0.pts, holes:op0.holes } : m.src;
+  const H0 = Array.isArray(g.holes) ? g.holes : s0.holes, P0 = g.points || s0.points;
+  const fe = Array.isArray(H0) && H0.length && Array.isArray(P0) ? HC.furosErro(P0, H0) : '';
+  if (fe) { HubDialog.toast('região com furo: ' + fe, 'warn', 4000); return false; }
+  if (m.added) { if (op0) patchAdd(op0, 'region', g); return !!op0; }
   const s = m.src;
   /* cobre despejado do Altium sem poligono na placa (hub-core » orfa): so apagar */
   if (m.orfa) { HubDialog.toast('cobre despejado do Altium sem polígono na placa: dá só para apagar (Delete)', 'warn'); return false; }
-  if (Array.isArray(s.holes) && s.holes.length) { HubDialog.toast('região com furo: o region_add não leva furo — mexa nela no Altium', 'warn'); return false; }
   const del = { op:'region_del', id:s.id, orig_layer:s.layer, orig_n:s.points.length, orig_x0:s.points[0][0], orig_y0:s.points[0][1], note:'movida no hub (apaga e recria)' };
   const lay = g.layer || s.layer;
   const add = { op:'region_add', layer:lay, pts:(g.points || s.points).map(p => [r6(p[0]), r6(p[1])]), note:'movida no hub' };
+  const H = Array.isArray(g.holes) ? g.holes : s.holes;
+  if (Array.isArray(H) && H.length) add.holes = furosR6(H);
   const net = g.net !== undefined ? g.net : s.net;
   if (cobre(lay) && net) add.net = net;
   CH.push(del, add);
@@ -1914,7 +1924,11 @@ function geoDe(a){
     case 'via': return { x:a.m.eff.x, y:a.m.eff.y };
     case 'pad': return a.m ? { x:a.m.eff.x, y:a.m.eff.y } : null;
     case 'fill': { const e = a.m.eff; return { x1:e.x1, y1:e.y1, x2:e.x2, y2:e.y2, rot:isNum(e.rot) ? e.rot : 0 }; }
-    case 'region': return { points:(a.m.eff.points || []).map(p => [p[0], p[1]]) };
+    case 'region': {
+      const e = a.m.eff, g = { points:(e.points || []).map(p => [p[0], p[1]]) };
+      if (Array.isArray(e.holes) && e.holes.length) g.holes = e.holes.map(h => h.map(p => [p[0], p[1]]));
+      return g;
+    }
     case 'recorte': case 'semplano': return a.m ? { points:(a.m.eff.points || []).map(p => [p[0], p[1]]) } : null;
     case 'poly': return { points:(a.m.eff.pts || []).map(p => [p[0], p[1]]) };
     case 'text': { const e = ebDe(a.m) || a.m.eff; return { x:e.x, y:e.y, rot:isNum(e.rot) ? e.rot : 0, mirror:!!e.mirror }; }
@@ -1933,12 +1947,14 @@ function refDoGeo(t, g){
   if (ehPts(t)) return g.points[0] ? [g.points[0][0], g.points[0][1]] : null;
   return [g.x, g.y];
 }
+/* os furos (holes) da region andam pela mesma conta do contorno */
+function furosDoGeo(n, g, f){ if (Array.isArray(g.holes)) n.holes = g.holes.map(h => h.map(f)); }
 function transladaGeo(t, g, dx, dy){
   const n = Object.assign({}, g);
   if (t === 'track') { n.x1 += dx; n.y1 += dy; n.x2 += dx; n.y2 += dy; }
   else if (t === 'arc') { n.cx += dx; n.cy += dy; }
   else if (t === 'fill') { n.x1 += dx; n.x2 += dx; n.y1 += dy; n.y2 += dy; }
-  else if (ehPts(t)) n.points = g.points.map(p => [p[0] + dx, p[1] + dy]);
+  else if (ehPts(t)) { n.points = g.points.map(p => [p[0] + dx, p[1] + dy]); furosDoGeo(n, g, p => [p[0] + dx, p[1] + dy]); }
   else { n.x += dx; n.y += dy; }
   return n;
 }
@@ -1952,7 +1968,7 @@ function giraGeo(t, g, pv){
     const c = R((g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2), hw = Math.abs(g.x2 - g.x1) / 2, hh = Math.abs(g.y2 - g.y1) / 2;
     n.x1 = c[0] - hw; n.x2 = c[0] + hw; n.y1 = c[1] - hh; n.y2 = c[1] + hh; n.rot = normAng((g.rot || 0) + 90);
   }
-  else if (ehPts(t)) n.points = g.points.map(p => R(p[0], p[1]));
+  else if (ehPts(t)) { n.points = g.points.map(p => R(p[0], p[1])); furosDoGeo(n, g, p => R(p[0], p[1])); }
   else { const p = R(g.x, g.y); n.x = p[0]; n.y = p[1]; if (t === 'comp' || t === 'text') n.rot = normAng((g.rot || 0) + 90); }
   return n;
 }
@@ -1969,7 +1985,7 @@ function espelhaGeo(t, g, eixo, pv){
     const c = M((g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2), hw = Math.abs(g.x2 - g.x1) / 2, hh = Math.abs(g.y2 - g.y1) / 2;
     n.x1 = c[0] - hw; n.x2 = c[0] + hw; n.y1 = c[1] - hh; n.y2 = c[1] + hh; n.rot = normAng(-(g.rot || 0));
   }
-  else if (ehPts(t)) n.points = g.points.map(p => M(p[0], p[1]));
+  else if (ehPts(t)) { n.points = g.points.map(p => M(p[0], p[1])); furosDoGeo(n, g, p => M(p[0], p[1])); }
   else if (t === 'text') { const p = M(g.x, g.y); n.x = p[0]; n.y = p[1]; n.mirror = !g.mirror; n.rot = normAng(eixo === 'x' ? -(g.rot || 0) : 180 - (g.rot || 0)); }
   else { const p = M(g.x, g.y); n.x = p[0]; n.y = p[1]; }
   return n;
@@ -1996,7 +2012,7 @@ function escreveGeo(a, g){
     case 'via': return editaItem(a.m, { x:r6(g.x), y:r6(g.y) });
     case 'pad': return a.m ? editaItem(a.m, { x:r6(g.x), y:r6(g.y) }) : false;
     case 'fill': return editaItem(a.m, { x1:r6(Math.min(g.x1, g.x2)), y1:r6(Math.min(g.y1, g.y2)), x2:r6(Math.max(g.x1, g.x2)), y2:r6(Math.max(g.y1, g.y2)), rot:normAng(g.rot || 0) });
-    case 'region': return editaRegiao(a.m, { points:g.points });
+    case 'region': return editaRegiao(a.m, { points:g.points, holes:g.holes });
     case 'recorte': case 'semplano': {
       if (!a.m) return false;
       const op = opDe(a.m); if (!op) return false;
@@ -2136,7 +2152,11 @@ function opsDaCopia(dx, dy){
     else if (kind === 'arc') ops.push(comNet({ op:'arc_add', layer:o.layer, cx:r6(o.cx + dx), cy:r6(o.cy + dy), r:r6(o.r), sa:r6(o.sa), ea:r6(o.ea), w:r6(o.w || CFG.wLinha), note:nota }, o));
     else if (kind === 'via') { const op = { op:'via_add', x:r6(o.x + dx), y:r6(o.y + dy), size:r6(o.size), drill:r6(o.drill), note:nota }; if (o.net) op.net = o.net; poeVao(op, o.from, o.to); ops.push(op); }
     else if (kind === 'fill') ops.push(comNet({ op:'fill_add', layer:o.layer, x1:r6(Math.min(o.x1, o.x2) + dx), y1:r6(Math.min(o.y1, o.y2) + dy), x2:r6(Math.max(o.x1, o.x2) + dx), y2:r6(Math.max(o.y1, o.y2) + dy), rot:r6(o.rot || 0), note:nota }, o));
-    else if (kind === 'region') ops.push(comNet({ op:'region_add', layer:o.layer, pts:(o.points || []).map(p => [r6(p[0] + dx), r6(p[1] + dy)]), note:nota }, o));
+    else if (kind === 'region') {
+      const op = { op:'region_add', layer:o.layer, pts:(o.points || []).map(p => [r6(p[0] + dx), r6(p[1] + dy)]), note:nota };
+      if (Array.isArray(o.holes) && o.holes.length) op.holes = o.holes.map(h => h.map(p => [r6(p[0] + dx), r6(p[1] + dy)]));
+      ops.push(comNet(op, o));
+    }
     else if (kind === 'text') {
       const op = { op:'text_add', layer:o.layer, text:String(o.text || ''), x:r6(o.x + dx), y:r6(o.y + dy), h:r6(o.h || CFG.hTexto), rot:r6(o.rot || 0), note:nota };
       if (o.w > 0) op.w = r6(o.w);
@@ -2174,7 +2194,7 @@ function desenhaColagem(c){
     if (kind === 'track') { n.x1 += dx; n.x2 += dx; n.y1 += dy; n.y2 += dy; }
     else if (kind === 'arc') { n.cx += dx; n.cy += dy; }
     else if (kind === 'fill') { n.x1 += dx; n.x2 += dx; n.y1 += dy; n.y2 += dy; }
-    else if (kind === 'region') n.points = (o.points || []).map(q => [q[0] + dx, q[1] + dy]);
+    else if (kind === 'region') { n.points = (o.points || []).map(q => [q[0] + dx, q[1] + dy]); if (Array.isArray(o.holes)) n.holes = o.holes.map(h => h.map(q => [q[0] + dx, q[1] + dy])); }
     else { n.x += dx; n.y += dy; }
     desenhaObj(kind, n, kind === 'via' ? corDe('Multi') : corDe(o.layer), { alpha:0.55 });
   }
@@ -3811,7 +3831,7 @@ function alcasDaSel(){
   for (const a of SEL) {
     if (!a.m || a.m.deleted) return null;
     const ok = a.t === 'poly' || a.t === 'semplano'
-      || (a.t === 'region' && !(a.m.src && Array.isArray(a.m.src.holes) && a.m.src.holes.length))
+      || a.t === 'region'
       || (a.t === 'recorte' && !circuloDePts((a.m.eff.points || []).map(p => [p[0], p[1]])))
       || (a.t === 'fill' && Math.abs(normAng(a.m.eff.rot || 0) % 90) < 1e-6)
       || (a.t === 'track' && SEL.length > 1);
@@ -3869,7 +3889,9 @@ function escalaGeo(t, g, bb, nb){
     const uw = deitado ? vh : vw, uh = deitado ? vw : vh;
     return Object.assign({}, g, { x1:cx - uw / 2, y1:cy - uh / 2, x2:cx + uw / 2, y2:cy + uh / 2 });
   }
-  return Object.assign({}, g, { points:g.points.map(S) });
+  const n = Object.assign({}, g, { points:g.points.map(S) });
+  furosDoGeo(n, g, S);
+  return n;
 }
 function iniciaEstica(g){
   const A = g.al.A;

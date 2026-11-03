@@ -38,7 +38,8 @@
 
    O que nao foi medido no acervo (octogono, furo deslocado, fill girado fora de 90 graus, texto
    em cobre, furo NPTH de pad, via cega) sai pela convencao mais provavel e com aviso; os glifos
-   que a HubFont nao tem (GLIFOS_EXTRA: so o '+' medido) vem desenhados na grade do Altium. */
+   que a newstroke da HubFont nao tem (HubFont.GLIFOS_EXTRA: so o '+' medido) vem desenhados na
+   grade do Altium. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports)
     module.exports = factory(root, require('./hub-font.js'), require('./hub-laser.js'));
@@ -590,45 +591,11 @@ function polysDoTexto(t, av) {
 }
 /* ---- texto sem contorno: a fonte do hub ---- */
 
-/* Glifos que faltam na HubFont (hub-font.js) e aparecem no acervo - em 40 board.js, '+' em 91
-   textos (polaridade, "+5V"), 'X' em 23, 'Z' em 9, '(' ')' ':' '%' '>' '*' '?' em ate 5. Sem eles a
-   HubFont poe uma caixa no lugar, e o '+' de polaridade do C3/C5 do DMB saia um retangulo de
-   0,9 x 1,5 mm. Desenhados na grade da fonte stroke do Altium (u = h/6, maiuscula de 6u, glifo de
-   4u de largura): o '+' e o medido no X2 do DMB (cruz de 4u x 4u com o centro a 3u da linha de
-   base); os outros seguem a mesma grade, sem medida. A HubFont manda quando tiver o glifo, e
-   HubGerber.GLIFOS_EXTRA ja sai no formato do FONTDATA dela (escala = altura, Y negativo para
-   cima, linha de base em -1/21, maiuscula em -22/21): copiados para la, a tela e o laser passam a
-   desenhar igual ao Gerber. */
+/* Os glifos: todos da HubFont (hub-font.js) - a newstroke com as minusculas e o complemento na
+   grade do Altium (o '+' medido no X2 do DMB, X, Z, simbolos), que morou aqui ate 2026-11 e hoje
+   vale tambem para o laser, o BOM e a janela Rust. A minuscula so cai na maiuscula se nao tiver
+   glifo proprio (HubFont.glyphFor); null = sem glifo. */
 const LINHA_BASE = 1 / 21;          /* a linha de base da HubFont fica 1/21 h acima do pe da caixa dela */
-const U_ALTIUM = 1 / 6;
-const pontoGrade = (x, y) => [[x, y + 0.5], [x + 0.25, y + 0.25], [x, y], [x - 0.25, y + 0.25], [x, y + 0.5], [x, y]];
-/* [tracos em u (x desde o comeco da tinta, y desde a linha de base), largura da tinta em u, margem
-   de cada lado em h: a do 'A'/'V'/'Y' da HubFont (2/21) e, nos estreitos, a do '.' e da ',' (4/21)] */
-const GRADE_EXTRA = {
-  '+': [[[[0, 3], [4, 3]], [[2, 1], [2, 5]]], 4],
-  'X': [[[[0, 6], [4, 0]], [[0, 0], [4, 6]]], 4],
-  'Z': [[[[0, 6], [4, 6], [0, 0], [4, 0]]], 4],
-  '*': [[[[2, 1], [2, 5]], [[0.27, 2], [3.73, 4]], [[0.27, 4], [3.73, 2]]], 4],
-  '=': [[[[0, 2], [4, 2]], [[0, 4], [4, 4]]], 4],
-  '<': [[[[4, 5], [0, 3], [4, 1]]], 4],
-  '>': [[[[0, 5], [4, 3], [0, 1]]], 4],
-  '?': [[[[0, 5], [1, 6], [3, 6], [4, 5], [4, 4], [2, 3], [2, 1.5]], pontoGrade(2, 0)], 4],
-  '%': [[[[0, 0], [4, 6]], [[0, 5], [0.75, 5.75], [1.5, 5], [0.75, 4.25], [0, 5]], [[2.5, 1], [3.25, 1.75], [4, 1], [3.25, 0.25], [2.5, 1]]], 4],
-  '(': [[[[1.6, 6.5], [0.6, 5.5], [0, 4], [0, 2], [0.6, 0.5], [1.6, -0.5]]], 1.6, 4 / 21],
-  ')': [[[[0, 6.5], [1, 5.5], [1.6, 4], [1.6, 2], [1, 0.5], [0, -0.5]]], 1.6, 4 / 21],
-  ':': [[pontoGrade(0.25, 0), pontoGrade(0.25, 3.5)], 0.5, 4 / 21],
-};
-const GLIFOS_EXTRA = {};
-for (const c of Object.keys(GRADE_EXTRA)) {
-  const g = GRADE_EXTRA[c], m = g[2] || 2 / 21, r6 = v => Math.round(v * 1e6) / 1e6;
-  GLIFOS_EXTRA[c] = { l: g[0].map(s => s.map(p => [r6(m + p[0] * U_ALTIUM), r6(-(LINHA_BASE + p[1] * U_ALTIUM))])),
-                      w: r6(2 * m + g[1] * U_ALTIUM) };
-}
-/* glifo do caractere: o da HubFont (a minuscula que falta cai na maiuscula, como nela), senao o do
-   complemento; null = falta nos dois */
-function glifo(F, c) {
-  return F.glyphFor(c) || GLIFOS_EXTRA[c] || GLIFOS_EXTRA[c.toUpperCase()] || null;
-}
 /* uma linha de texto em coordenadas locais - caneta comecando em x = 0, linha de base em y = 0, Y
    para cima -> {polys, tinta: caixa [x1, y1, x2, y2] das linhas de centro (null sem traco),
    faltam: os caracteres sem glifo}. Espaco e caractere sem glifo levam o avanco da HubFont; no
@@ -638,7 +605,7 @@ function linhaDeTexto(F, txt, h) {
   let cx = 0;
   for (const c of String(txt)) {
     if (!c.trim()) { cx += F.textWidth(' ', h); continue; }
-    const g = glifo(F, c);
+    const g = F.glyphFor(c);
     if (g) {
       for (const s of g.l) polys.push(s.map(p => [cx + p[0] * h, -(p[1] + LINHA_BASE) * h]));
       cx += g.w * h;
@@ -1336,8 +1303,9 @@ async function zip(arquivos, opts) {
 
 return {
   gerar, zip, md5, crc32, VERSAO,
-  /* os glifos que a HubFont nao tem, no formato do FONTDATA dela (para o dono do hub-font.js) */
-  GLIFOS_EXTRA,
+  /* o complemento da newstroke na grade do Altium - mora no hub-font.js desde 2026-11 (o laser, o
+     BOM e a janela Rust tambem o desenham); fica aqui para quem o lia por este nome */
+  get GLIFOS_EXTRA() { return fonte().GLIFOS_EXTRA; },
   /* a geometria do texto que o Gerber escreve: a vista PCB desenha com ela */
   geometriaTexto,
   /* para os testes e para quem quiser a mesma conta */

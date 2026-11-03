@@ -36,8 +36,42 @@ const a2 = Font.textPolylines('A', 2);
 assert.ok(a2.flat().every((p, i) => Math.abs(p[0] - a.flat()[i][0] * 2) < 1e-9 &&
                                     Math.abs(p[1] - a.flat()[i][1] * 2) < 1e-9));
 
-/* ── minuscula sem glifo proprio cai na maiuscula (como glyphFor sempre fez) ── */
-assert.deepStrictEqual(Font.textPolylines('a', 1), Font.textPolylines('A', 1));
+/* ── minusculas de verdade (newstroke do KiCad): "dieletrons.com" saia "DIELETROnS.COM", porque so
+   o n/u/x tinham glifo e o resto caia na maiuscula ── */
+for (let k = 97; k <= 122; k++) {
+  const c = String.fromCharCode(k);
+  assert.ok(Font.FONTDATA[c], "falta o glifo '" + c + "'");
+  assert.notDeepStrictEqual(Font.textPolylines(c, 1), Font.textPolylines(c.toUpperCase(), 1), c + ' igual a maiuscula');
+}
+assert.notDeepStrictEqual(Font.textPolylines('dieletrons.com', 1), Font.textPolylines('DIELETRONS.COM', 1));
+for (const c of 'dieletrons.com') assert.strictEqual(Font.glyphFor(c), Font.FONTDATA[c], c + ': o glifo dele, nao o da maiuscula');
+/* o n/u/x de "nF"/"uF" ficam como eram (o 'x' tem 2/3 h de altura: e o que o teste do Gerber mede) */
+assert.deepStrictEqual(Font.FONTDATA.n, {"l":[[[0.238095,-0.714286],[0.238095,-0.047619]],[[0.238095,-0.619048],[0.285714,-0.666667],[0.380952,-0.714286],[0.52381,-0.714286],[0.619048,-0.666667],[0.666667,-0.571429],[0.666667,-0.047619]]],"w":0.904762});
+assert.deepStrictEqual(Font.FONTDATA.x, {"l":[[[0.142857,-0.047619],[0.666667,-0.714286]],[[0.142857,-0.714286],[0.666667,-0.047619]]],"w":0.809524});
+assert.deepStrictEqual(Font.FONTDATA.u, {"l":[[[0.666667,-0.714286],[0.666667,-0.047619]],[[0.238095,-0.714286],[0.238095,-0.190476],[0.285714,-0.095238],[0.380952,-0.047619],[0.52381,-0.047619],[0.619048,-0.095238],[0.666667,-0.142857]]],"w":0.904762});
+/* a minuscula cai na maiuscula so se nao tiver glifo proprio: o 'ç' nao tem nem ele nem o 'Ç' (caixa) */
+assert.strictEqual(Font.glyphFor('ç'), null);
+
+/* ── o complemento na grade do Altium ('+' de polaridade, X, Z, simbolos), que morava so no
+   hub-gerber.js: agora a HubFont o desenha, e o laser e o BOM param de por caixa no lugar ── */
+for (const c of '+XZ*=<>?%():') {
+  assert.ok(Font.GLIFOS_EXTRA[c], c);
+  assert.strictEqual(Font.glyphFor(c), Font.GLIFOS_EXTRA[c], c + ': o do complemento');
+}
+assert.strictEqual(Font.textPolylines('+', 1).length, 2, "'+': dois tracos, nao a caixa");
+/* o 'z' minusculo e o da newstroke, nao o 'Z' do complemento */
+assert.strictEqual(Font.glyphFor('z'), Font.FONTDATA.z);
+
+/* ── a janela Rust desenha com a mesma tabela (rust/crates/nexo-core/src/font.json) ── */
+{
+  const path = require('path'), fs = require('fs');
+  const arq = path.join(__dirname, '..', 'rust', 'crates', 'nexo-core', 'src', 'font.json');
+  if (fs.existsSync(arq)) {
+    const rs = JSON.parse(fs.readFileSync(arq, 'utf8'));
+    assert.deepStrictEqual(Object.keys(rs).sort(), Object.keys(Font.GLIFOS).sort(), 'font.json: as mesmas chaves da HubFont.GLIFOS');
+    for (const c of Object.keys(rs)) assert.deepStrictEqual(rs[c], Font.GLIFOS[c], 'font.json: o glifo ' + c + ' da HubFont');
+  }
+}
 
 /* ── glifo ausente vira caixa fechada, e nao some ── */
 const box = Font.textPolylines('€', 1);                   /* euro: nao existe no FONTDATA */
