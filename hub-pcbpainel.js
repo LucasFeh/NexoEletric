@@ -117,6 +117,24 @@ const CSS = `
 .pp .ibtn:hover{color:var(--fg); border-color:var(--accent);}
 .pp .ibtn[aria-pressed="true"]{background:var(--hi); color:var(--on-hi); border-color:var(--hi);}
 .pp .ibtn svg{width:16px; height:16px;}
+.pp .pp-grade{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px;}
+.pp .pp-icones + .pp-grade{margin-top:6px;}
+.pp .pp-tile{display:flex; align-items:center; gap:6px; min-width:0; min-height:30px; box-sizing:border-box; padding:4px 8px; margin:0; border:1px solid var(--border); border-radius:4px;
+  background:transparent; color:var(--fg); font:12px var(--font); text-align:left; cursor:pointer;}
+.pp .pp-tile > span{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.pp .pp-tile svg{width:15px; height:15px; flex:none;}
+.pp .pp-tile kbd{flex:none;}
+.pp .pp-tile:hover:not(:disabled){border-color:var(--accent);}
+.pp .pp-tile:disabled{opacity:.4; cursor:not-allowed;}
+.pp label.pp-tile:has(input:checked){border-color:var(--accent); background:rgba(var(--tint),0.08);}
+.pp .pp-campo{display:flex; flex-direction:column; gap:3px; min-width:0;}
+.pp .pp-campo > small{font-size:10px; color:var(--fg-dim);}
+.pp .pp-campo select{width:100%; min-width:0; height:26px; background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:2px; font-family:inherit; font-size:12px;}
+.pp .pp-campo .seg{display:flex; height:26px; box-sizing:border-box;}
+.pp .pp-campo .seg button{flex:1;}
+.pp .pp-larga{grid-column:1 / -1;}
+.pp .pp-icones{display:grid; grid-template-columns:repeat(auto-fill,minmax(32px,1fr)); gap:6px;}
+.pp .pp-icones .ibtn{width:auto;}
 .pp .hint{font-size:11px; color:var(--fg-dim); margin-top:6px; line-height:1.4;}
 .pp kbd{font:11px var(--mono); background:var(--panel2); border:1px solid var(--border); border-radius:3px; padding:0 4px; color:var(--fg);}
 .pp table{border-collapse:collapse; width:100%; font-size:11px;}
@@ -439,123 +457,90 @@ function instala(aside, V) {
     return wrap;
   }
   function desenhaPlaca(pag) {
-    /* O CADEADO DA EDICAO (pedido do dono, 2026-10-29: "ao inves de tirar o cadeado 100%, coloca ele no
-       menu lateral direito, dentro do Propriedades quando nao tem nada selecionado"). Saiu da barra e
-       do cabecalho do painel; a tecla (E) e o botao direito continuam. */
-    const se = sec(pag, 'Edição');
+    /* A PLACA SEM NADA SELECIONADO, EM GRADE (pedido do dono, 2026-11-03: "reduzir completamente os textos
+       informativos, deixar o menu bem mais enxuto ... sair do modo lista pra ficar em formato grid"): nada de
+       nota embaixo de cada grupo (a explicacao fica na dica do mouse), quatro grupos em vez de seis, tudo em
+       ladrilhos de duas colunas. O cadeado (pedido de 2026-10-29) continua aqui; a tecla (E) e o botao
+       direito tambem. O Selection Filter fica so no canto do canvas (pcbframe.js » montaFiltroMenu). */
+    const grade = box => { const g = el('div', 'pp-grade'); box.append(g); return g; };
+    const ladrilho = (g, nome, rot, titulo, f, cls) => {
+      const b = el('button', 'pp-tile' + (cls ? ' ' + cls : '')); b.type = 'button'; b.title = titulo;
+      if (nome) b.append(ic(nome));
+      b.append(el('span', null, rot)); b.addEventListener('click', f); g.append(b); return b;
+    };
+    /* caixa de ligar/desligar em ladrilho (label.pr-bool com o checkbox: o smoke-camadas-pcb clica nela pelo texto) */
+    const caixa = (g, rot, titulo, on, f) => {
+      const l = el('label', 'pr-bool pp-tile'), cb = el('input');
+      cb.type = 'checkbox'; cb.checked = !!on; cb.addEventListener('change', () => f(cb.checked));
+      l.title = titulo; l.append(cb, el('span', null, rot)); g.append(l); return l;
+    };
+    const campo = (g, rot, ctl, larga) => { const c = el('div', 'pp-campo' + (larga ? ' pp-larga' : '')); c.append(el('small', null, rot), ctl); g.append(c); return c; };
+
+    /* ---- Edição: o cadeado e os furos de fixação nas marcações ---- */
+    const g1 = grade(sec(pag, 'Edição'));
     const on = V.editOn(), tqE = V.teclaDe('editar');
-    const le = el('div', 'linha');
-    const bt = el('button', 'btn pp-cadeado' + (on ? ' aberto' : ''));
-    bt.type = 'button'; bt.disabled = !!V.LEAN;
-    bt.setAttribute('aria-pressed', String(on));
-    bt.append(ic(on ? 'cadeadoAb' : 'cadeado'), el('span', null, on ? 'Editando — clique para travar' : 'Só leitura — clique para destravar'));
-    bt.title = (on ? 'Edição destravada: o arrasto e o painel mexem na placa' : 'Só leitura: o arrasto não mexe na placa') + (tqE ? ' (' + tqE + ' alterna)' : '');
-    bt.addEventListener('click', () => V.setEdit(!V.editOn()));
-    le.append(bt);
-    if (tqE) { const k = el('kbd', null, tqE); k.title = 'trava e destrava a edição'; le.append(k); }
-    se.append(le);
-    se.append(el('div', 'hint', on ? 'Travada, a placa só se vê: o arrasto acidental não muda nada.'
-                                   : 'Escolher uma ferramenta ou mudar um campo também destrava.'));
-
-    /* o Selection Filter saiu daqui (pedido do dono, 2026-10-28: redundante): fica so o do canto do
-       canvas (pcbframe.js » montaFiltroMenu) */
-    /* furos de fixacao em cima das marcacoes redondas (pedido do dono, 2026-10-22): o circulo de
-       serigrafia/mecanica que marca o parafuso ganha o Board Cutout do diametro dele, e fica */
-    const sf = sec(pag, 'Furos de fixação');
+    const bt = ladrilho(g1, on ? 'cadeadoAb' : 'cadeado', on ? 'Editando' : 'Só leitura',
+      (on ? 'Edição destravada: o arrasto e o painel mexem na placa. Clique para travar' : 'Só leitura: o arrasto não mexe na placa. Clique para destravar (escolher uma ferramenta ou mudar um campo também destrava)') + (tqE ? ' (' + tqE + ')' : ''),
+      () => V.setEdit(!V.editOn()), 'pp-cadeado' + (on ? ' aberto' : ''));
+    bt.disabled = !!V.LEAN; bt.setAttribute('aria-pressed', String(on));
+    if (tqE) bt.append(el('kbd', null, tqE));
     const nm = typeof V.marcacoes === 'function' ? V.marcacoes() : 0;
-    const lf = el('div', 'linha');
-    const bf = el('button', 'btn', nm ? 'Gerar fixação nas marcações (' + nm + ')' : 'Gerar fixação nas marcações');
-    bf.type = 'button'; bf.disabled = !nm;
-    bf.title = nm ? 'Põe um furo de fixação (Board Cutout) em cima de cada marcação redonda sem furo, com o diâmetro dela; a marcação fica'
-                  : 'Nenhuma marcação redonda sem furo: desenhe um círculo (O) na serigrafia ou numa mecânica onde vai o parafuso';
-    bf.addEventListener('click', () => V.acao('fixacaoMarcacoes'));
-    lf.append(bf); sf.append(lf);
-    sf.append(el('div', 'hint', nm ? nm + (nm === 1 ? ' marcação redonda sem furo.' : ' marcações redondas sem furo.') + ' Com círculos selecionados, só neles.'
-                                  : 'Marcação = círculo desenhado solto (serigrafia, mecânica…). Com a ferramenta Furo, clicar numa marcação também gera.'));
+    const bf = ladrilho(g1, 'furo', nm ? 'Fixação (' + nm + ')' : 'Fixação',
+      nm ? 'Gerar fixação nas marcações: um furo de fixação (Board Cutout) em cima de cada marcação redonda sem furo, com o diâmetro dela; a marcação fica. Com círculos selecionados, só neles.'
+         : 'Gerar fixação nas marcações: nenhuma marcação redonda sem furo. Desenhe um círculo (O) na serigrafia ou numa mecânica onde vai o parafuso; com a ferramenta Furo, clicar numa marcação também gera.',
+      () => V.acao('fixacaoMarcacoes'));
+    bf.disabled = !nm;
 
-    const s3 = sec(pag, 'Grade e snap');
-    const l1 = el('div', 'linha');
-    l1.append(el('label', null, 'Passo'));
+    /* ---- Grade: passo, unidade e snap ---- */
+    const g2 = grade(sec(pag, 'Grade'));
     const gs = el('select');
     const gm = el('optgroup'); gm.label = 'mil'; const gmm = el('optgroup'); gmm.label = 'mm';
     for (const g of V.grades()) { const o = el('option', null, g.rot); o.value = g.id; if (g.id === V.grade()) o.selected = true; (/mil$/.test(g.id) ? gm : gmm).append(o); }
-    gs.append(gm, gmm);
+    gs.append(gm, gmm); gs.title = 'Passo da grade';
     gs.addEventListener('change', () => V.setGrade(gs.value));
-    l1.append(gs); s3.append(l1);
-    const l2 = el('div', 'linha');
-    l2.append(el('label', null, 'Unidade'));
-    const seg = el('div', 'seg');
+    campo(g2, 'Passo', gs);
+    const seg = el('div', 'seg'), tq = V.teclaDe('unidade');
+    seg.title = 'Unidade' + (tq ? ' (' + tq + ' troca)' : '');
     for (const u of ['mm', 'mil']) { const b = el('button', null, u); b.type = 'button'; b.setAttribute('aria-pressed', String(V.unidade() === u)); b.addEventListener('click', () => V.setUnidade(u)); seg.append(b); }
-    l2.append(seg);
-    const tq = V.teclaDe('unidade'); if (tq) { const k = el('kbd', null, tq); k.title = 'troca a unidade'; l2.append(k); }
-    s3.append(l2);
-    const l3 = el('div', 'linha');
-    l3.append(el('label', null, 'Snap a objetos'));
+    campo(g2, 'Unidade', seg);
     const so = el('select');
+    so.title = 'Snap a objetos: centro de pad, centro de via e ponta de trilha ganham da grade (alcance de 9 px). Ctrl solta o snap.';
     for (const [v, rot] of [['todas', 'Todas as camadas'], ['atual', 'Só a camada atual'], ['off', 'Desligado (só a grade)']]) { const o = el('option', null, rot); o.value = v; if (V.snapObj() === v) o.selected = true; so.append(o); }
     so.addEventListener('change', () => V.setSnapObj(so.value));
-    l3.append(so); s3.append(l3);
-    s3.append(el('div', 'hint', 'Centro de pad, centro de via e ponta de trilha ganham da grade (alcance de 9 px). Ctrl solta o snap.'));
+    campo(g2, 'Snap', so, true);
 
+    /* ---- Vista: os botões de ícone e as opções do 3D (o que pesa) ---- */
     const s4 = sec(pag, 'Vista');
     const sh = V.show();
-    const ib = el('div', 'ibtns');
+    const ib = el('div', 'pp-icones');
     const ibtn = (nome, titulo, on, f) => { const b = el('button', 'ibtn'); b.type = 'button'; b.title = titulo; if (on != null) b.setAttribute('aria-pressed', String(on)); b.append(ic(nome)); b.addEventListener('click', f); ib.append(b); };
     ibtn('fit', 'Enquadrar a placa (' + (V.teclaDe('enquadrar') || 'F') + ')', null, () => V.acao('enquadrar_placa'));
     ibtn('grid', 'Grade (' + (V.teclaDe('grade') || 'B') + ')', sh.grid, () => V.setShow('grid', !sh.grid));
-    ibtn(sh.ghost ? 'eye' : 'eyeOff', 'Marcações das mudanças (' + (V.teclaDe('diff') || 'D') + ')', sh.ghost, () => V.setShow('ghost', !sh.ghost));
+    ibtn(sh.ghost ? 'eye' : 'eyeOff', 'Marcações das mudanças (' + (V.teclaDe('diff') || 'D') + '). Com muitas linhas no changes.js, escondê-las deixa o desenho mais leve', sh.ghost, () => V.setShow('ghost', !sh.ghost));
     if (sh.cotas !== undefined) ibtn(sh.cotas ? 'cotas' : 'cotasOff', 'Cotas da régua (' + (sh.nCotas || 0) + ') — ' + (sh.cotas ? 'esconder' : 'mostrar'), sh.cotas, () => V.setShow('cotas', !sh.cotas));
     ibtn('unica', 'Camada única (' + (V.teclaDe('camadaUnica') || 'S') + ')', sh.unica, () => V.setShow('unica', !sh.unica));
     ibtn('virar', 'Ver por baixo (' + (V.teclaDe('virar') || 'V') + ')', sh.flip, () => V.setShow('flip', !sh.flip));
     /* o Real View do 3D (hub-pcb3d-vista.js): ligar abre o 3D */
     if (typeof V.realView === 'function') { const rv = V.realView(); ibtn('realview', 'Real View: o 3D com materiais, reflexo e sombra realistas (liga o 3D)', rv, () => V.setRealView(!rv)); }
-    ibtn('ajuda', 'Ajuda: teclas e gestos (' + (V.teclaDe('ajuda') || 'H') + ')', null, () => V.ajuda());
+    ibtn('ajuda', 'Ajuda: teclas e gestos (' + (V.teclaDe('ajuda') || 'H') + '). Os atalhos ficam nas Configurações do hub, aba Atalhos', null, () => V.ajuda());
     s4.append(ib);
-    /* Solda embaixo: so visualizacao do 3D, para a placa inteira (o pino nao passa; o ponto de solda) */
-    if (typeof V.solda === 'function') {
-      const l = el('label', 'pr-bool'), cb = el('input');
-      cb.type = 'checkbox'; cb.checked = !!V.solda();
-      cb.addEventListener('change', () => V.setSolda(cb.checked));
-      l.title = 'Só visualização do 3D, em todos os componentes: o pino não passa da placa, e embaixo de cada pad passante aparece o ponto de solda. Não altera footprint nem placa.';
-      l.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;';
-      l.append(cb, el('span', null, 'Solda embaixo no 3D (o pino não passa da placa)'));
-      s4.append(l);
-    }
-    s4.append(el('div', 'hint', 'Os atalhos desta vista ficam nas Configurações do hub, aba Atalhos.'));
-
-    /* DESEMPENHO (pedido do dono, 2026-10-29: "o software tá muito travado ... quero opção de não ver
-       componente 3D pra ficar mais leve"): o que pesa, para ligar e desligar num lugar so */
+    /* DESEMPENHO (pedido do dono, 2026-10-29: "quero opção de não ver componente 3D pra ficar mais leve") e a
+       Solda embaixo (só visualização do 3D). As Marcações das mudanças ficam só no olho, logo acima. */
+    const g4 = grade(s4);
     if (typeof V.opc3d === 'function') {
-      const sd = sec(pag, 'Desempenho');
       const o3 = V.opc3d();
-      const caixa = (rot, dica, on, f) => {
-        const l = el('label', 'pr-bool'), cb = el('input');
-        cb.type = 'checkbox'; cb.checked = !!on; cb.addEventListener('change', () => f(cb.checked));
-        l.title = dica; l.style.cssText = 'display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer;';
-        l.append(cb, el('span', null, rot)); sd.append(l);
-      };
-      caixa('Componentes 3D', 'Os corpos dos componentes no 3D e as silhuetas azuis deles na placa. Desligado: nada de STEP carregando, o 3D só com a placa.', o3.corpos, v => V.setOpc3d('corpos', v));
-      caixa('3D pronto de antemão', 'Monta o 3D escondido ao abrir a placa (a tecla 3 abre na hora). Desligado: monta na primeira vez que abrir. Depois de editar, o 3D se refaz só quando abre.', o3.antes, v => V.setOpc3d('antes', v));
-      caixa('Marcações das mudanças', 'Os tracejados do que mudou (D). Com muitas linhas no changes.js, escondê-las deixa o desenho mais leve.', sh.ghost, v => V.setShow('ghost', v));
-      const nm = typeof V.nMudancas === 'function' ? V.nMudancas() : 0;
-      sd.append(el('div', 'hint', 'Camadas escondidas (menu Camadas, no canto da placa) não são desenhadas nem processadas — mostre só as que estiver usando.' +
-        (nm > 1500 ? ' Esta placa tem ' + nm + ' linhas no changes.js.' : '')));
+      caixa(g4, 'Componentes 3D', 'Os corpos dos componentes no 3D e as silhuetas azuis deles na placa. Desligado: nada de STEP carregando, o 3D só com a placa. Camadas escondidas (menu Camadas) também não pesam.', o3.corpos, v => V.setOpc3d('corpos', v));
+      caixa(g4, '3D de antemão', 'Monta o 3D escondido ao abrir a placa (a tecla 3 abre na hora). Desligado: monta na primeira vez que abrir. Depois de editar, o 3D se refaz só quando abre.', o3.antes, v => V.setOpc3d('antes', v));
     }
+    if (typeof V.solda === 'function')
+      caixa(g4, 'Solda embaixo', 'Só visualização do 3D, em todos os componentes: o pino não passa da placa, e embaixo de cada pad passante aparece o ponto de solda. Não altera footprint nem placa.', V.solda(), v => V.setSolda(v));
+    if (!g4.childElementCount) g4.remove();
 
-    const s5 = sec(pag, 'Saídas');
-    const temG = V.temGerber();
-    const bG = el('button', 'btn wide'); bG.type = 'button'; bG.append(ic('gerber'), el('span', null, 'Gerar e ver o Gerber'));
-    bG.title = temG ? 'O pacote X2 que vai para a JLCPCB, da placa com as mudanças de agora' : 'O gerador/visualizador de Gerber não carregou nesta página';
-    bG.addEventListener('click', () => V.gerber());
-    const bS = el('button', 'btn wide'); bS.type = 'button'; bS.append(ic('eye'), el('span', null, 'Ver o Gerber salvo'));
-    bS.disabled = !V.podeGravar; bS.title = V.podeGravar ? 'Abre o último conjunto gravado em Projects/' + V.PROJ + '/Gerber/' : 'Só com o hubserver e um projeto aberto';
-    bS.addEventListener('click', () => V.verGerberSalvo());
-    const bC = el('button', 'btn wide'); bC.type = 'button'; bC.append(ic('csv'), el('span', null, 'CSV da PCB List'));
-    bC.title = 'Baixa a lista de componentes com as mudanças (TSV)';
-    bC.addEventListener('click', () => V.csv());
-    const bP = el('button', 'btn wide'); bP.type = 'button'; bP.append(ic('pdf'), el('span', null, 'PDF de layout'));
-    bP.disabled = true; bP.title = 'PDF de layout (A4 com carimbo) — travado: próxima etapa';
-    s5.append(bS, bC);     /* Gerar o Gerber e o PDF ficam so no Arquivo (pedido do dono, 2026-10-14) */
+    /* ---- Saídas (gerar o Gerber e o PDF ficam no Arquivo, pedido do dono de 2026-10-14) ---- */
+    const g5 = grade(sec(pag, 'Saídas'));
+    const bS = ladrilho(g5, 'eye', 'Gerber salvo', V.podeGravar ? 'Ver o Gerber salvo: o último conjunto gravado em Projects/' + V.PROJ + '/Gerber/' : 'Ver o Gerber salvo: só com o hubserver e um projeto aberto', () => V.verGerberSalvo());
+    bS.disabled = !V.podeGravar;
+    ladrilho(g5, 'csv', 'PCB List', 'CSV da PCB List: a lista de componentes com as mudanças (TSV)', () => V.csv());
   }
 
   /* ============================== Camadas ============================== */

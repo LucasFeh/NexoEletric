@@ -4,6 +4,19 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.56.0 — 2026-11-03
+
+As Propriedades da placa (vista PCB, nada selecionado) enxutas e em grade.
+- **Sem as notas:** as notas embaixo de cada grupo saíram. A explicação de cada controle aparece ao passar o mouse.
+- **Quatro grupos em vez de seis:**
+  - **Edição:** o cadeado (Só leitura / Editando, com a tecla) e a Fixação nas marcações, lado a lado.
+  - **Grade:** Passo e Unidade lado a lado, e o Snap embaixo.
+  - **Vista:** os botões de ícone, e embaixo Componentes 3D, 3D de antemão e Solda embaixo. Esse grupo juntou o
+    antigo Desempenho.
+  - **Saídas:** Gerber salvo e PCB List.
+- **Ladrilhos de duas colunas:** tudo em ladrilhos, no lugar da lista de linhas.
+- **Sem repetição:** a caixa "Marcações das mudanças" saiu, porque o botão do olho em Vista faz o mesmo.
+
 ## 1.55.0 — 2026-11-03
 
 O render da placa, o valor no esquema e o PDF do esquema.
