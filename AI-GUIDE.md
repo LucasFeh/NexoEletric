@@ -99,7 +99,7 @@ Um item JSON **plano** por linha (o parser DelphiScript lê linha a linha, como 
 | `t` | obrigatórios | opcionais |
 |---|---|---|
 | `sheet` | `name`, `size` (A4/A3/A2/A1/A0/A/B/C/D/E, ou `Custom`) | `w`,`h` — **medida real da folha, em mil**, como o Altium a reporta. Sem elas vale a tabela por nome, que traz o tamanho *legado* do Altium e **não** o ISO real: a “A4” do template da casa mede 11693×8268, não 11500×7600, e a diferença joga carimbo e fios de borda para fora da página desenhada |
-| `comp` | `sheet`,`ref`,`sym`,`x`,`y`,`rot`,`footprint` | `part` (default 1), `mirror`, `comment`, `params`, `refdx`/`refdy` e `comdx`/`comdy` — deslocamento do texto do designador e do comment em relação à âncora do componente, em mil, na coordenada da folha, medido até o **canto inferior-esquerdo** do texto; par ausente = o hub decide onde pousar o texto — mas o export os emite para todo componente |
+| `comp` | `sheet`,`ref`,`sym`,`x`,`y`,`rot`,`footprint` | `part` (default 1), `mirror`, `comment`, `dnp` (true = **não montar**; ver abaixo), `params`, `refdx`/`refdy` e `comdx`/`comdy` — deslocamento do texto do designador e do comment em relação à âncora do componente, em mil, na coordenada da folha, medido até o **canto inferior-esquerdo** do texto; par ausente = o hub decide onde pousar o texto — mas o export os emite para todo componente |
 | `wire` | `sheet`,`pts` (`[[x,y],...]` ≥2, numa linha só) | — |
 | `netlabel` | `sheet`,`net`,`x`,`y` | `rot` |
 | `power` | `sheet`,`net`,`style`,`x`,`y` | `rot` (`Bar`/`Circle`/`Arrow`/`Wave`/`GndPower`/`GndSignal`/`GndEarth`) |
@@ -163,6 +163,13 @@ projetos medidos, 156 de 159 se reposicionam sozinhos hoje).
 A posição é somada à âncora **atual** do componente, já depois de ele ter sido posicionado —
 igual à fórmula acima quando o posicionamento deu certo, e diferente dela exatamente quando não
 deu (aí o texto acompanha o símbolo onde ele ficou, em vez de ficar sozinho no lugar certo).
+
+`"dnp":true` é o **não montar** (DNP, o Not Fitted do Altium; 1.58.0). O componente continua na folha, na
+placa e no ECO (footprint e nets ficam), mas sai da lista do Odoo, do BOM da bancada, do CSV da Neoden e do
+`bom_listar`; a folha e a vista PCB o desenham com um X vermelho. Vale para o componente inteiro: marque todas as
+partes (a ficha do esquema e da PCB e o `sch_nao_montar` do MCP fazem isso). Esquema escrito antes do campo pode
+trazer a marca nos `params` (`DNP=1` ou `Montagem=NAO MONTAR`): vale igual, e desmarcar a tira de lá. O
+`BuildSchematic` ignora o campo (no Altium a variante Not Fitted continua à mão). Omitido quando falso.
 
 `params` é a **identidade da peça no cadastro**, num campo plano `Chave=Valor;Chave=Valor`
 (o parser DelphiScript lê linha a linha e não aguenta objeto aninhado). Ele carrega

@@ -1363,6 +1363,7 @@ function draw(){
   ctx.fillStyle = COR.furo; ctx.fill(CACHE.furos);
   ctx.strokeStyle = COR.contorno; ctx.lineWidth = px(1.3); ctx.setLineDash([]); ctx.stroke(pathPlaca());
   desenhaSilhuetas();
+  desenhaNaoMontar();
   desenhaRealce();
   desenhaConexoes();
   desenhaPreviaAuto();
@@ -6349,6 +6350,7 @@ function fichaDe(a){
         { k:'designator', rot:'Designator', tipo:'texto', v:e.designator || s.ref, dica:'renomear na PCB dessincroniza do esquema — o ECO vai acusar' },
         { k:'comment', rot:'Comment', tipo:'texto', v:e.comment !== undefined ? e.comment : (s.comment || '') },
         ...camposMostra(m),
+        ...camposNaoMontar(m),
         { k:'tipo', rot:'Type', tipo:'ro', v:'Standard' },
         { sec:'Footprint' },
         { k:'footprint', rot:'Footprint Name', tipo:'ro', v:s.footprint || '—' },
@@ -6715,6 +6717,7 @@ function campoNoAlvo(a, k, v){
       if (k === 'layer') { if ((v !== 'Top' && v !== 'Bottom') || v === g.layer) return false; moveComp(a.m, viraGeo(g, [g.x, g.y])); return true; }
       if (k === 'x' || k === 'y' || k === 'rot') { if (!isNum(v)) return false; g[k] = k === 'rot' ? normAng(v) : v; moveComp(a.m, g); return true; }
       if (k === 'designator' || k === 'comment') { attrComp(a.m, k, v); return true; }
+      if (k === 'naoMontar') { marcaNaoMontar(refDnp(a.m), !!v); return false; }
       if (k === 'mostraDes' || k === 'mostraCom') {
         const t = textoDoComp(a.m, k === 'mostraDes' ? 'designator' : 'comment'); if (!t) return false;
         moveTextoComp(t, { hidden:!v }); return true;
@@ -7241,6 +7244,60 @@ async function verGerberSalvo(){
   HubDialog.toast('conjunto salvo aberto' + (GV.estado.conjuntos.length > 1 ? ' para comparar com o gerado (C alterna)' : ''), 'info');
 }
 
+/* ============================== nao montar (DNP) ==============================
+   A marca mora no esquema (schematic.js, "dnp":true; HubCore.ehDnp, 1.58.0): a placa mostra e muda
+   a MESMA marca -- uma fonte so, que o BOM, a Neoden e a lista do Odoo leem. O componente continua
+   na placa com footprint e nets; o X vermelho diz que ele nao vai ser montado. */
+const SCH_SRC = PROJ ? 'Projects/' + encodeURIComponent(PROJ) + '/schematic.js' : null;
+const SCH_REL = PROJ ? 'Projects/' + PROJ + '/schematic.js' : null;
+let DNP = new Set(), dnpSemEsquema = true;
+const refDnp = c => (c && c.eff && c.eff.designator) || (c && c.src && c.src.ref) || '';
+async function leNaoMontar(){
+  if (!SCH_SRC) return;
+  const sch = await globalDe('schematic', SCH_SRC, true);
+  dnpSemEsquema = !sch;
+  const novo = HC.dnpRefs(sch);
+  const mudou = novo.size !== DNP.size || [...novo].some(r => !DNP.has(r));
+  DNP = novo;
+  if (mudou) { pede(); if (SEL.length) aoMudarSel(); }
+}
+async function marcaNaoMontar(ref, on){
+  if (LEAN || !HubIO.canPost || !SCH_SRC) { HubDialog.toast('abra a vista pelo hub para mudar a marca de não montar', 'warn'); return; }
+  const sch = await globalDe('schematic', SCH_SRC, true);
+  if (!sch) { HubDialog.toast('este projeto não tem schematic.js — a marca de não montar mora no esquema', 'warn'); return; }
+  if (!(sch.items || []).some(it => it && it.t === 'comp' && String(it.ref) === String(ref))) {
+    HubDialog.toast(ref + ' não está no esquema: a marca de não montar mora lá (rode o ECO ou acerte o designador)', 'warn'); return;
+  }
+  if (!HC.marcaDnp(sch, [ref], on).length) { await leNaoMontar(); return; }
+  const out = HC.serializeSchematic(sch);
+  if (!out.text) { await HubDialog.alert(out.errors.map(e => (e.idx >= 0 ? '#' + (e.idx + 1) + ' ' : '') + e.msg).join('\n'), { title:'schematic.js inválido — nada foi gravado' }); return; }
+  try { await HubIO.saveFile(SCH_REL, out.text); }
+  catch (e) { HubDialog.toast('não gravou o schematic.js: ' + e.message, 'err'); return; }
+  DNP = HC.dnpRefs(sch); dnpSemEsquema = false;
+  pede(); aoMudarSel();
+  HubDialog.toast(ref + (on ? ': não montar — marcado no esquema (sai do BOM, da Neoden e da lista do Odoo)' : ': volta a ser montado'), 'ok');
+}
+function camposNaoMontar(c){
+  if (!SCH_SRC) return [];
+  if (dnpSemEsquema) return [{ k:'naoMontarRo', rot:'Não montar', tipo:'ro', v:'sem schematic.js (a marca mora no esquema)' }];
+  return [{ k:'naoMontar', rot:'Não montar', tipo:'bool', v:DNP.has(String(refDnp(c))),
+            dica:'DNP: o componente fica na placa (footprint e nets), mas sai do BOM, da Neoden e da lista do Odoo — grava no esquema' }];
+}
+function desenhaNaoMontar(){
+  if (!DNP.size) return;
+  ctx.save();
+  ctx.strokeStyle = '#ff5252'; ctx.globalAlpha = 0.9; ctx.lineWidth = px(1.6); ctx.setLineDash([]); ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (const c of EB.components || []) {
+    if (!c || !c.bbox || !(DNP.has(String(c.ref)) || (c.designator && DNP.has(String(c.designator))))) continue;
+    const b = c.bbox;
+    if (![b.x1, b.y1, b.x2, b.y2].every(isNum)) continue;
+    ctx.moveTo(b.x1, b.y1); ctx.lineTo(b.x2, b.y2); ctx.moveTo(b.x1, b.y2); ctx.lineTo(b.x2, b.y1);
+  }
+  ctx.stroke(); ctx.restore();
+}
+leNaoMontar();
+
 /* ============================== salvar ==============================
    Dois escritores (a IA e esta tela): guarda o que veio do disco e pergunta antes de passar por
    cima de uma gravacao de fora; os comentarios // do changes.js em disco sao preservados. */
@@ -7359,6 +7416,7 @@ async function discoMudou(){
 window.__hubOnChange = function(info){
   /* aviso de OUTRO projeto (hubserver » __hubAvisoToca): nem baixa o changes.js para comparar */
   if (PROJ && window.__hubAvisoToca && !window.__hubAvisoToca(info, PROJ)) return;
+  leNaoMontar();
   discoMudou().then(lista => {
     if (!lista.length) return;
     if (!chDirty && !annDirty) { HubDialog.ocioso().then(() => location.reload()); return; }

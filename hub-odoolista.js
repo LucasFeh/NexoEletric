@@ -342,6 +342,13 @@ function pintaLista(payload, recibo){
       + 'diferentes. Rode o ExportProject de novo (ele agora traz os parâmetros) ou confira '
       + 'essas linhas peça a peça antes de aprovar.']);
   }
+  /* nao montar (1.58.0): marcado no esquema, nao vai -- e e dito, para ninguem estranhar o que falta */
+  const naoMontar = (payload && payload._nao_montar) || [];
+  if (naoMontar.length){
+    avisos.push(['', naoMontar.length + (naoMontar.length === 1 ? ' componente marcado' : ' componentes marcados')
+      + ' como não montar no esquema ' + (naoMontar.length === 1 ? 'fica' : 'ficam') + ' fora da lista ('
+      + naoMontar.join(', ') + '). Para pedir, desmarque o "Não montar" na ficha do componente.']);
+  }
   /* o que foi tirado da lista e dito no TOPO tambem: a lista pode ser longa, e quem confere
      antes de enviar tem de saber que ha linha do esquema que nao vai, sem rolar ate o fim */
   const tirados = (payload && payload._tirados) || [];

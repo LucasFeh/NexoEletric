@@ -4164,6 +4164,20 @@ function renderProps(){
   prKv(g, 'Comment', it.comment, it.comment ? null : 'dim');
   { const v = valorExibido(it); prKv(g, 'Valor', v || 'sem valor', v ? null : 'dim'); }
   prKv(g, 'Descrição', sym && sym.description, sym && sym.description ? null : 'dim');
+  /* NAO MONTAR (1.58.0): o componente fica na folha e na placa, e sai da lista do Odoo, do BOM e
+     da Neoden. Vale para todas as partes do designador; a vista PCB mostra e muda a mesma marca */
+  {
+    const ck = el('input', 'pr-chk');
+    ck.type = 'checkbox';
+    ck.checked = HubCore.dnpRefs(schematic).has(String(it.ref));
+    ck.title = 'não montar (DNP): o componente continua no esquema e na placa, mas sai da lista do Odoo, do BOM e da Neoden';
+    ck.addEventListener('change', () => {
+      HubCore.marcaDnp(schematic, [it.ref], ck.checked);      // todas as partes, de todas as folhas
+      commit();
+      HubDialog.toast(it.ref + (ck.checked ? ': não montar — sai da lista do Odoo, do BOM e da Neoden' : ': volta a ser montado'), 'ok');
+    });
+    prKvEl(g, 'Não montar', ck);
+  }
 
   /* ACERVO. "Biblioteca do Altium" sai em VERMELHO com o triângulo: o componente ainda não
      tem par no almoxarifado, e é isso que impede a lista do Odoo de casar a linha por id em
@@ -4407,6 +4421,18 @@ function desenhaTemplate(ctx, si, esc){
   d.ctxo.faltante = '';
   T.desenha(ctx, d.tpl, HubCore.sheetSize(s), d.ctxo, { esc, aoChegarImagem: () => { cam.draw(); pintaMiniaturas(); } });
 }
+/* NAO MONTAR (1.58.0): o X vermelho por cima do corpo, como o Not Fitted do Altium. Sai na tela,
+   nas miniaturas e no PDF (todos passam pela desenhaFolha). */
+function desenhaNaoMontar(ctx, c){
+  const b = compBBox(c), m = 20;
+  ctx.save();
+  ctx.strokeStyle = '#e53935'; ctx.globalAlpha = 0.85; ctx.lineWidth = 10; ctx.setLineDash([]); ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(b.x1 - m, b.y1 - m); ctx.lineTo(b.x2 + m, b.y2 + m);
+  ctx.moveTo(b.x1 - m, b.y2 + m); ctx.lineTo(b.x2 + m, b.y1 - m);
+  ctx.stroke();
+  ctx.restore();
+}
 function desenhaFolha(ctx, si, o){
   const s = model.sheets[si];
   const foco = o.foco, esc = o.esc;
@@ -4494,6 +4520,7 @@ function desenhaFolha(ctx, si, o){
   /* o simbolo tambem nao muda de cor por estar selecionado: o azul entrava por cima dos
      PINOS junto com o corpo (o stroke do hub-draw vale para os dois), e pinos de outras nets
      ficavam azuis sem motivo. Quem marca o componente e o contorno tracejado. */
+  const naoMonta = HubCore.dnpRefs(schematic);
   for (const c of s.comps) {
     const sym = HubCore.symbolOf(SLIB, c.sym);
     const part = HubCore.partOf(sym, c.part);
@@ -4509,6 +4536,7 @@ function desenhaFolha(ctx, si, o){
     else if (emg) D.drawSymbolPart(ctx, emg.part, { mirror: !!c.mirror, honraOlho: !showState.pinos, stroke: EMERG_COR, rot: HubCore.rotEfetiva(c) });
     else { ctx.strokeStyle = '#ff5252'; ctx.strokeRect(-100, -100, 200, 200); }
     ctx.restore();
+    if (naoMonta.has(String(c.ref))) desenhaNaoMontar(ctx, c);
     /* designador e comment: ancora medida pelo textoComp (caixa NA FOLHA + o deslocamento que
        a mao deu). Continuam desenhados fora do ctx.rotate e sempre na horizontal — girar o
        componente nao pode deitar o nome dele, que e o que o Altium tambem faz. */

@@ -265,6 +265,28 @@ def _parece_mpn(texto):
                 and len(re.findall(r'\d', t)) >= 2 and re.search(r'[A-Za-z]', t))
 
 
+# NAO MONTAR (1.58.0): a regra do HubCore.ehDnp (hub-core.js), do lado do Python. O componente com
+# "dnp":true no item comp -- ou, de esquema escrito antes do campo existir, DNP=1 / Montagem=NAO
+# MONTAR nos params -- fica na folha e na placa, mas nao vai para o Odoo nem para o BOM da bancada.
+# Componente de varias partes: uma parte marcada basta.
+_DNP_PARAM = re.compile(r'^\s*(DNP\s*=\s*(1|true|sim)|Montagem\s*=\s*N[AÃ]O\s+MONTAR)\s*$', re.I)
+
+
+def eh_dnp(it):
+    if not isinstance(it, dict):
+        return False
+    if it.get('dnp') is True:
+        return True
+    p = it.get('params')
+    return isinstance(p, str) and any(_DNP_PARAM.match(par) for par in p.split(';'))
+
+
+def dnp_refs(schematic):
+    """Os designadores marcados como nao montar (set de str)."""
+    return {str(it.get('ref')).strip() for it in ((schematic or {}).get('items') or [])
+            if isinstance(it, dict) and it.get('t') == 'comp' and it.get('ref') is not None and eh_dnp(it)}
+
+
 def agrupa(schematic):
     """Os itens comp do schematic.js viram linhas de BoM.
 
@@ -470,6 +492,11 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
     outras linhas, so para a tela mostrar e devolver: o payload_limpo os deixa deste lado, e a
     assinatura nem os ve.
     """
+    # nao montar: sai antes de tudo (nem linha, nem "tirado" -- o esquema diz que nao vai)
+    nao_montar = dnp_refs(schematic)
+    if nao_montar:
+        schematic = dict(schematic, items=[it for it in (schematic.get('items') or [])
+                                           if not (it.get('t') == 'comp' and str(it.get('ref') or '').strip() in nao_montar)])
     guardados = {f['ref']: f['sym'] for f in (fora or [])}
     saem = set()
     if guardados:
@@ -498,6 +525,7 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
         '_sem_valor': sum(1 for l in linhas if l.get('_semValor')),
         '_extras': len(de_fora),
         '_tirados': tirados,
+        '_nao_montar': sorted(nao_montar, key=_natural),
     }
 
 

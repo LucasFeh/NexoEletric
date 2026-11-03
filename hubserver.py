@@ -1700,6 +1700,13 @@ def _bom_source(d):
                     if campo == 'footprint' and not origem[campo]:
                         continue
                     comp[campo] = origem[campo]
+    # nao montar (1.58.0): a marca e do esquema e vale sempre, mais novo que a placa ou nao
+    if os.path.isfile(sch_path):
+        from odoolista import dnp_refs
+        dnp = dnp_refs(load_var_file(sch_path))
+        for comp in board.get('components', []):
+            if str(comp.get('ref')) in dnp:
+                comp['dnp'] = True
     return board
 
 

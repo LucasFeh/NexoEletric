@@ -2913,6 +2913,43 @@ const SCH_ITEM_REQUIRED = {
   text:     { num:['x','y'], str:['sheet','s'] },
 };
 
+/* ---- NAO MONTAR (DNP), 1.58.0 ----
+   O componente do esquema com "dnp":true continua na folha, na placa e no ECO (o footprint e as nets
+   ficam), e sai do que e para comprar e montar: a lista do Odoo, o BOM da bancada, o CSV da Neoden e
+   o bom_listar do MCP. Esquema escrito antes do campo existir pode trazer a marca nos params (DNP=1,
+   ou Montagem=NAO MONTAR, como uma sessao de IA gravou no MIRBC): vale igual. Componente de varias
+   partes: uma parte marcada basta, e o marcaDnp marca (ou desmarca) todas. */
+const DNP_PARAM = /^\s*(DNP\s*=\s*(1|true|sim)|Montagem\s*=\s*N[AÃ]O\s+MONTAR)\s*$/i;
+function ehDnp(it){
+  if (!it || typeof it !== 'object') return false;
+  if (it.dnp === true) return true;
+  return typeof it.params === 'string' && it.params.split(';').some(par => DNP_PARAM.test(par));
+}
+/* os designadores marcados como nao montar no esquema (Set de strings; esquema ausente = vazio) */
+function dnpRefs(sch){
+  const S = new Set();
+  for (const it of ((sch && Array.isArray(sch.items)) ? sch.items : [])) if (it && it.t === 'comp' && it.ref != null && ehDnp(it)) S.add(String(it.ref));
+  return S;
+}
+/* marca (on) ou desmarca todas as partes dos `refs` no esquema, no lugar. Desmarcar tira tambem a
+   marca dos params. Devolve os refs que mudaram de estado. */
+function marcaDnp(sch, refs, on){
+  const R = new Set((refs || []).map(String)), mudou = new Set();
+  const antes = dnpRefs(sch);
+  for (const it of ((sch && Array.isArray(sch.items)) ? sch.items : [])) {
+    if (!it || it.t !== 'comp' || !R.has(String(it.ref))) continue;
+    if (on) { it.dnp = true; continue; }
+    delete it.dnp;
+    if (typeof it.params === 'string') {
+      const p = it.params.split(';').filter(par => !DNP_PARAM.test(par)).join(';');
+      if (p) it.params = p; else delete it.params;
+    }
+  }
+  const depois = dnpRefs(sch);
+  for (const r of R) if (antes.has(r) !== depois.has(r)) mudou.add(r);
+  return [...mudou];
+}
+
 function serializeSchematic(sch){
   if (!sch || typeof sch !== 'object') return { text:null, errors:[{ idx:-1, msg:'schematic ausente' }] };
   const errors = [];
@@ -3118,7 +3155,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          symbolOf, partOf, footprintOf, pinHot, rotEfetiva, compTransform, compPinsWorld,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp, assinaturaPinos, simbolosDoDocumento,
          suggestSym,
-         buildSchModel, extractNets, validateSchematic,
+         buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp,
          applyPcbChanges, effectiveBoard, deriveStatus,
          PCB_LAYERS, pcbLayer, isCopper, flipLayer, boardLayers,
          serializeChanges, serializeSchematic, serializeAnnotations, serializeLibSubs,

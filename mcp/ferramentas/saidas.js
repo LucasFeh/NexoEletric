@@ -264,32 +264,39 @@ module.exports = {
     },
     {
       nome: 'bom_listar', titulo: 'Lista de materiais (simples)', leitura: true,
-      descricao: 'Lista de materiais simples do projeto, agrupada por valor (comment) + footprint: da placa efetiva (lado de cada um) ou, sem placa, do esquema (com a identidade do Odoo em params, quando houver). Para a BOM de montagem/Odoo use o painel BOM do hub.',
+      descricao: 'Lista de materiais simples do projeto, agrupada por valor (comment) + footprint: da placa efetiva (lado de cada um) ou, sem placa, do esquema (com a identidade do Odoo em params, quando houver). Os marcados como não montar no esquema (sch_nao_montar) ficam fora e voltam em nao_montar. Para a BOM de montagem/Odoo use o painel BOM do hub.',
       entrada: { type: 'object', properties: { projeto: PROJETO, fonte: { type: 'string', enum: ['placa', 'esquema'] } }, required: ['projeto'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
         const usarPlaca = a.fonte !== 'esquema' && ctx.temBoard(p);
         const linhas = new Map();
+        /* nao montar (1.58.0): a marca e do esquema e vale para as duas fontes */
+        let sch = null;
+        try { sch = ctx.schematic(p); } catch (_) { sch = null; }
+        const dnp = ctx.hc.dnpRefs(sch), fora = new Set();
         const soma = (chave, ref, extra) => { if (!linhas.has(chave)) linhas.set(chave, Object.assign({ qtd: 0, refs: [] }, extra)); const l = linhas.get(chave); l.qtd++; l.refs.push(ref); };
         if (usarPlaca) {
           const { eb } = ctx.placa(p);
           for (const c of eb.components || []) {
+            if (dnp.has(String(c.ref))) { fora.add(String(c.ref)); continue; }
             const k = (c.comment || '') + '|' + (c.footprint || '');
             soma(k, c.ref, { valor: c.comment || '', footprint: c.footprint || '', lados: {} });
             linhas.get(k).lados[c.layer] = 1;
           }
         } else {
-          const s = ctx.schematic(p);
+          const s = sch || ctx.schematic(p);
           const vistos = new Set();
           for (const it of s.items || []) {
             if (it.t !== 'comp' || vistos.has(it.ref)) continue;
             vistos.add(it.ref);
+            if (dnp.has(String(it.ref))) { fora.add(String(it.ref)); continue; }
             soma((it.comment || it.sym) + '|' + (it.footprint || ''), it.ref, { valor: it.comment || '', simbolo: it.sym, footprint: it.footprint || '', params: it.params || undefined });
           }
         }
         const nat = (x, y) => String(x).localeCompare(String(y), undefined, { numeric: true });
         const L = [...linhas.values()].map(l => Object.assign(l, { refs: l.refs.sort(nat), lados: l.lados ? Object.keys(l.lados) : undefined })).sort((x, y) => nat(x.refs[0], y.refs[0]));
-        return { fonte: usarPlaca ? 'placa (board.js + changes.js)' : 'esquema', itens: L.length, componentes: L.reduce((s, l) => s + l.qtd, 0), linhas: L };
+        return { fonte: usarPlaca ? 'placa (board.js + changes.js)' : 'esquema', itens: L.length, componentes: L.reduce((s, l) => s + l.qtd, 0), linhas: L,
+                 nao_montar: fora.size ? [...fora].sort(nat) : undefined };
       },
     },
   ],

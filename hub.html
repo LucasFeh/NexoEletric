@@ -1617,7 +1617,7 @@ function neodenOpts() {
   return {
     refDes: S.neoden.refDes,
     group: !!S.neoden.group,
-    exclude: [...(S.neoden.excluded || [])],
+    exclude: [...new Set([...(S.neoden.excluded || []), ...dnpDoProjeto()])],
     off: { x: S.neoden.off.x, y: S.neoden.off.y },
     rot: (+$('#ndRotAng').value ? { ox: +$('#ndRotOx').value || 0, oy: +$('#ndRotOy').value || 0, angle: +$('#ndRotAng').value } : null),
     move: ((+$('#ndMvDx').value || +$('#ndMvDy').value) ? { dx: +$('#ndMvDx').value || 0, dy: +$('#ndMvDy').value || 0, n: +$('#ndMvN').value || 0 } : null),
@@ -1686,6 +1686,7 @@ function renderNeoden() {
     (!q || (r.des + ' ' + r.footprint + ' ' + r.comment + ' ' + r.layer).toLowerCase().includes(q)) &&
     (!kf || (kf === 'off' ? r.excluded : r.kind === kf)));
   const shownDes = shown.map(r => r.des);
+  const dnp = dnpDoProjeto();
 
   shown.forEach(r => {
     const tr = el('tr');
@@ -1696,8 +1697,9 @@ function renderNeoden() {
     const box = el('input', 'nd-inc');
     box.type = 'checkbox';
     box.checked = !r.excluded;
-    box.disabled = r.des === S.neoden.refDes;
-    box.title = box.disabled ? 'a referência sempre vai no CSV' : 'shift+clique seleciona o intervalo';
+    box.disabled = r.des === S.neoden.refDes || dnp.has(r.des);
+    box.title = r.des === S.neoden.refDes ? 'a referência sempre vai no CSV'
+      : dnp.has(r.des) ? 'não montar (marcado no esquema): fica fora do CSV' : 'shift+clique seleciona o intervalo';
     box.onclick = e => { e.stopPropagation(); ndToggle(r.des, shownDes, e.shiftKey); };
     cell.onclick = e => e.stopPropagation();
     cell.append(box); tr.append(cell);
@@ -1706,6 +1708,7 @@ function renderNeoden() {
     idx.style.color = 'var(--text-4)'; tr.append(idx);
     const des = el('td', 'mono', r.des);
     if (r.des === S.neoden.refDes) des.textContent = r.des + ' ★';
+    else if (dnp.has(r.des)) des.textContent = r.des + ' · não montar';
     tr.append(des);
     const fp = el('td', null, r.footprint); fp.style.color = 'var(--text-2)'; tr.append(fp);
     const kd = el('td');
@@ -3933,10 +3936,14 @@ const bomSplits = mkSplits({
 
 let bomTimer = null, bomFeito = null, bomPedido = 0; /* evita resposta antiga apos trocar projeto */
 
+/* nao montar (1.58.0): a marca mora no esquema (HubCore.ehDnp); o BOM e a Neoden a recebem aqui */
+const dnpDoProjeto = () => HubCore.dnpRefs(S.detail && S.detail.schematic);
 function bomGerar(B) {
   B = B || bomBoard();
   if (!B) return null;
   const p = proj();
+  const dnp = dnpDoProjeto();
+  if (dnp.size) B = Object.assign({}, B, { components: (B.components || []).map(c => dnp.has(String(c.ref)) ? Object.assign({}, c, { dnp: true }) : c) });
   return HubBom.gerar(B, S.bom, { proj: (p && p.name) || 'placa', generated: B.generated || '' });
 }
 

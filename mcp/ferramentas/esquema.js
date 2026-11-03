@@ -430,7 +430,7 @@ module.exports = {
     },
     {
       nome: 'sch_componentes', titulo: 'Componentes e pinos', leitura: true,
-      descricao: 'Os componentes do esquema com a PONTA QUENTE de cada pino em coordenada da folha (onde o fio tem de encostar) e a net em que cada pino está (solto: true = pino sem ligação: nenhum fio, rótulo ou outro pino; No ERC na ponta não conta). Use antes de desenhar fios. Filtros: ref, refs, prefixo ("R" = todos os resistores), folha. pinos: "todos" (padrão), "soltos" (só os sem ligação; some o componente que não tem nenhum) ou "nenhum". campos limita os campos de cada componente.',
+      descricao: 'Os componentes do esquema (dnp: true = marcado como não montar) com a PONTA QUENTE de cada pino em coordenada da folha (onde o fio tem de encostar) e a net em que cada pino está (solto: true = pino sem ligação: nenhum fio, rótulo ou outro pino; No ERC na ponta não conta). Use antes de desenhar fios. Filtros: ref, refs, prefixo ("R" = todos os resistores), folha. pinos: "todos" (padrão), "soltos" (só os sem ligação; some o componente que não tem nenhum) ou "nenhum". campos limita os campos de cada componente.',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO }, FILTRO_REF, { folha: { type: 'string' },
         pinos: { type: 'string', enum: ['todos', 'soltos', 'nenhum'] },
         campos: { type: 'array', items: { type: 'string' }, description: 'ex.: ["ref","sym","comment","footprint"] (ref vem sempre)' } }), required: ['projeto'] },
@@ -445,6 +445,7 @@ module.exports = {
           for (const q of n.pinosSoltos || []) soltos.add(q.ref + '-' + q.num);
         } catch (_) { /* esquema quebrado: segue sem nets */ }
         const porRef = casaRef(a), modo = a.pinos || 'todos';
+        const naoMonta = hc.dnpRefs(s);
         const comps = (s.items || []).map((it, indice) => ({ it, indice })).filter(x => x.it.t === 'comp' && porRef(x.it.ref) && (!a.folha || x.it.sheet === a.folha));
         if ((a.ref || a.refs || a.prefixo) && !comps.length) throw new ErroMcp(`nenhum componente com ${a.ref ? '"' + a.ref + '"' : a.prefixo ? 'o prefixo "' + a.prefixo + '"' : 'esses refs'} no esquema`);
         const out = [];
@@ -458,6 +459,7 @@ module.exports = {
           if (modo === 'soltos') { pinos = pinos.filter(q => q.solto); if (!pinos.length && P) continue; }
           let c = { indice, ref: it.ref, sym: it.sym, part: it.part || 1, sheet: it.sheet, x: it.x, y: it.y, rot: it.rot, mirror: !!it.mirror, footprint: it.footprint, comment: it.comment,
                     simbolo_encontrado: !!P };
+          if (naoMonta.has(String(it.ref))) c.dnp = true;
           if (modo !== 'nenhum') c.pinos = pinos;
           if (Array.isArray(a.campos) && a.campos.length) {
             const o = { ref: c.ref };
@@ -511,9 +513,35 @@ module.exports = {
           if (!(i >= 0 && i < arq.itens.length)) throw new ErroMcp('item não achado (dê indice, ref ou em)');
           const n = Object.assign({}, arq.itens[i], a.campos || {});
           for (const k of a.remover_campos || []) delete n[k];
+          if (n.dnp !== undefined && typeof n.dnp !== 'boolean') throw new ErroMcp('dnp deve ser true (não montar) ou false; para todas as partes de um componente use sch_nao_montar');
+          if (n.dnp === false) delete n.dnp;
           arq.substitui(i, n);
           return [n];
         }, { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_editar' });
+      },
+    },
+    {
+      nome: 'sch_nao_montar', titulo: 'Marcar componentes como não montar (DNP)',
+      descricao: 'Marca (dnp:true, o padrão) ou desmarca (dnp:false) componentes como NÃO MONTAR, em todas as partes de cada ref. O componente continua no esquema e na placa (footprint e nets ficam, o ECO não o tira), mas sai da lista do Odoo, do BOM da bancada, do CSV da Neoden e do bom_listar; a folha e a vista PCB o mostram com um X vermelho. Desmarcar também tira a marca antiga dos params (DNP=1, Montagem=NAO MONTAR).',
+      entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO, refs: { type: 'array', minItems: 1, items: { type: 'string' } },
+        dnp: { type: 'boolean', description: 'true = não montar (padrão); false = volta a ser montado' } }, COMUNS), required: ['projeto', 'refs'] },
+      executa: async (a, ctx) => {
+        const p = ctx.projeto(a.projeto);
+        const on = a.dnp !== false;
+        let mudou = [];
+        const est = transacao(ctx, p, arq => {
+          const faltam = a.refs.filter(r => !arq.itens.some(x => x && x.t === 'comp' && String(x.ref) === String(r)));
+          if (faltam.length) throw new ErroMcp(`não estão no esquema: ${faltam.join(', ')}`);
+          const novos = arq.itens.map(x => (x && x.t === 'comp' && a.refs.map(String).includes(String(x.ref))) ? Object.assign({}, x) : x);
+          mudou = ctx.hc.marcaDnp({ items: novos }, a.refs, on);
+          const tocados = [];
+          novos.forEach((x, i) => { if (x !== arq.itens[i]) { arq.substitui(i, x); tocados.push(x); } });
+          return tocados;
+        }, { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_nao_montar' });
+        est.nao_montar = on;
+        est.mudaram = mudou;
+        if (!mudou.length) est.nota = on ? 'já estavam marcados como não montar' : 'já eram montados';
+        return est;
       },
     },
     {

@@ -149,9 +149,13 @@ function model(board, opts){
   (B.components || []).forEach(c => {
     const s = ladoDe(c.layer);
     if (s === null){ avisos.push('componente ' + (c.ref || '?') + ' em camada inesperada: ' + c.layer); return; }
-    comps.push({ ref: c.ref || '?', val: c.comment || '', fp: c.footprint || '',
-                 s, x: r3(c.x || 0), y: r3(c.y || 0),
-                 bb: c.bbox ? [r3(c.bbox.x1), r3(c.bbox.y1), r3(c.bbox.x2), r3(c.bbox.y2)] : null });
+    const o = { ref: c.ref || '?', val: c.comment || '', fp: c.footprint || '',
+                s, x: r3(c.x || 0), y: r3(c.y || 0),
+                bb: c.bbox ? [r3(c.bbox.x1), r3(c.bbox.y1), r3(c.bbox.x2), r3(c.bbox.y2)] : null };
+    /* nao montar (1.58.0): a marca vem do esquema (quem chama poe c.dnp: hub.html » bomGerar e
+       hubserver » _bom_source). Ele fica na lista e na placa, para a bancada saber que deixa vazio */
+    if (c.dnp === true) o.d = 1;
+    comps.push(o);
   });
   comps.sort((a, b) => natural(a.ref, b.ref));
   const idxPorRef = {};
@@ -162,8 +166,8 @@ function model(board, opts){
      sao a mesma compra. */
   const porChave = new Map();
   comps.forEach((c, i) => {
-    const k = c.val + '\u0000' + c.fp;
-    if (!porChave.has(k)) porChave.set(k, { val:c.val, fp:c.fp, refs:[] });
+    const k = c.val + '\u0000' + c.fp + (c.d ? '\u0000dnp' : '');
+    if (!porChave.has(k)) porChave.set(k, Object.assign({ val:c.val, fp:c.fp, refs:[] }, c.d ? { d:1 } : {}));
     porChave.get(k).refs.push(i);
   });
   const groups = [...porChave.values()];
@@ -171,9 +175,10 @@ function model(board, opts){
      indice seria mais curto e estaria errado: regerar o BOM depois de acrescentar um
      componente reordena a lista, e os vistos passariam a apontar para outra peça - sem nada
      na tela dizendo que trocaram de dono. */
-  groups.forEach(g => { g.qty = g.refs.length; g.k = g.val + '\u001f' + g.fp; });
-  /* ordena pelo primeiro designador do grupo: a lista sai na ordem em que a bancada procura */
-  groups.sort((a, b) => natural(comps[a.refs[0]].ref, comps[b.refs[0]].ref));
+  groups.forEach(g => { g.qty = g.refs.length; g.k = g.val + '\u001f' + g.fp + (g.d ? '\u001fdnp' : ''); });
+  /* ordena pelo primeiro designador do grupo: a lista sai na ordem em que a bancada procura; os de
+     nao montar vao para o fim */
+  groups.sort((a, b) => ((a.d || 0) - (b.d || 0)) || natural(comps[a.refs[0]].ref, comps[b.refs[0]].ref));
   groups.forEach((g, gi) => g.refs.forEach(i => { comps[i].g = gi; }));
 
   /* ── geometria ── */
@@ -263,6 +268,7 @@ function model(board, opts){
     frente: comps.filter(c => c.s === 0).length,
     verso: comps.filter(c => c.s === 1).length,
     grupos: groups.length,
+    dnp: comps.filter(c => c.d).length,
     pads: pads.length, silk: silk.length, tracks: tracks.length,
   };
   return { bbox: bb ? { x1:r3(bb.x1), y1:r3(bb.y1), x2:r3(bb.x2), y2:r3(bb.y2) } : null,
@@ -417,6 +423,8 @@ tbody tr{cursor:pointer}
 tbody tr:hover{background:color-mix(in srgb,var(--hi) 10%,transparent)}
 tbody tr[aria-selected="true"]{background:color-mix(in srgb,var(--hi) 20%,transparent)}
 tbody tr.feito td:not(.cx){opacity:.45;text-decoration:line-through}
+tbody tr.dnp td{opacity:.6} tbody tr.dnp td.q{color:#ff6b6b;font-weight:600}
+.dnp-tag{display:inline-block;margin-left:6px;padding:0 5px;border-radius:3px;background:#5a1f22;color:#ffb3b3;font-size:10px;font-weight:600;letter-spacing:.02em}
 td.q,td.n{text-align:right;font-variant-numeric:tabular-nums;color:var(--fg2)}
 td.n{width:30px;padding-right:4px;opacity:.65}
 td.refs{font-family:ui-monospace,Consolas,monospace;font-size:calc(var(--fte) - 1px);
@@ -1366,13 +1374,13 @@ function linhas(){
   var out = [];
   if (modo === 'grupo'){
     D.groups.forEach(function (g, gi){
-      out.push({ k:'g' + g.k, qtd:g.qty, val:g.val, fp:g.fp, realce:g.refs,
+      out.push({ k:'g' + g.k, qtd:g.qty, val:g.val, fp:g.fp, realce:g.refs, dnp:!!g.d,
                  refs:g.refs.map(function (i){ return D.comps[i].ref; }),
                  lados:g.refs.map(function (i){ return D.comps[i].s; }) });
     });
   } else {
     D.comps.forEach(function (c, i){
-      out.push({ k:'c' + c.ref, qtd:1, val:c.val, fp:c.fp, realce:[i], refs:[c.ref], lados:[c.s] });
+      out.push({ k:'c' + c.ref, qtd:1, val:c.val, fp:c.fp, realce:[i], refs:[c.ref], lados:[c.s], dnp:!!c.d });
     });
   }
   if (!q) return out;
@@ -1389,12 +1397,14 @@ function montaBom(){
     tr.dataset.k = r.k;
     tr.setAttribute('aria-selected', String(r.k === selKey));
     if (feitos[r.k]) tr.className = 'feito';
+    if (r.dnp) tr.className = 'dnp';
     var td = function (cls, txt){ var e = document.createElement('td'); if (cls) e.className = cls;
                                   e.textContent = txt; tr.appendChild(e); return e; };
     td('n', String(++n));
     var cx = td('cx', '');
     var box = document.createElement('input');
     box.type = 'checkbox'; box.checked = !!feitos[r.k];
+    if (r.dnp){ box.disabled = true; box.title = 'não montar: deixe o lugar vazio'; }
     box.onclick = function (ev){
       ev.stopPropagation();
       if (box.checked) feitos[r.k] = 1; else delete feitos[r.k];
@@ -1402,10 +1412,11 @@ function montaBom(){
       pinta();          /* o verde e o tique na placa sao este visto, do outro lado da tela */
     };
     cx.appendChild(box);
-    td('q', String(r.qtd));
+    td('q', r.dnp ? '0' : String(r.qtd));
     var refs = td('refs', r.refs.join(', '));
     td('f', r.fp || '—');
-    td('v', r.val || '—');
+    var tv = td('v', r.val || '—');
+    if (r.dnp){ var tg = document.createElement('span'); tg.className = 'dnp-tag'; tg.textContent = 'NÃO MONTAR'; tv.appendChild(tg); }
     var lados = {};
     r.lados.forEach(function (s){ lados[s] = 1; });
     Object.keys(lados).sort().forEach(function (s){
@@ -1618,10 +1629,11 @@ function contas(){
   /* conta o que esta marcado NA VISTA ABERTA: as duas granularidades convivem no mesmo
      mapa, e somar as duas contaria a mesma peça duas vezes */
   var f = 0;
-  if (modo === 'grupo') D.groups.forEach(function (g){ if (feitos['g' + g.k]) f += g.qty; });
+  if (modo === 'grupo') D.groups.forEach(function (g){ if (feitos['g' + g.k] && !g.d) f += g.qty; });
   else D.comps.forEach(function (c){ if (feitos['c' + c.ref]) f++; });
   document.getElementById('contas').textContent =
     D.stats.comps + ' comps · ' + D.stats.grupos + ' grupos · ' +
+    (D.stats.dnp ? D.stats.dnp + ' não montar · ' : '') +
     D.stats.frente + ' frente / ' + D.stats.verso + ' verso · ' + f + ' montados'
     + (netSel ? ' · net ' + netSel : '');
 }

@@ -1135,6 +1135,21 @@ def test_cli_sem_revisao_nao_inventa_a_do_nome_da_pasta():
     finally:
         OL.ClienteLista, OL.le_schematic, OL.carrega_acervo, OL.le_extras = velho
 
+def test_nao_montar_fica_fora_da_lista():
+    """1.58.0: "dnp":true (ou DNP=1 / Montagem=NAO MONTAR nos params, o esquema antigo) não vai
+    para o Odoo e volta em _nao_montar; o multi-parte com UMA parte marcada sai inteiro."""
+    e = esquema(comp('J5', 'CONE [02V]', dnp=True),
+                comp('J7', 'CONE [04V]', params='Comment=x;Montagem=NAO MONTAR;DNP=1;BOM=NAO'),
+                comp('U1', 'CI', part=1), comp('U1', 'CI', part=2, dnp=True),
+                comp('R1', 'SMD 0805 10K 1/8W'), comp('R2', 'SMD 0805 10K 1/8W', params='DNP=0'))
+    assert OL.dnp_refs(e) == {'J5', 'J7', 'U1'}, OL.dnp_refs(e)
+    p = OL.monta_payload('X', 'A', e, ACERVO)
+    vao = sorted(r for l in p['linhas'] for r in l['designadores'].split(', '))
+    assert vao == ['R1', 'R2'], vao
+    assert p['_nao_montar'] == ['J5', 'J7', 'U1'], p['_nao_montar']
+    assert '_nao_montar' not in OL.payload_limpo(p), 'diagnóstico não vai ao Odoo'
+
+
 def main():
     n = 0
     for nome, fn in sorted(globals().items()):

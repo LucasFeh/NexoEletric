@@ -4,6 +4,33 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.58.0 — 2026-11-03
+
+**Não montar (DNP)**, no esquema e na PCB. Até aqui ele não existia em lugar nenhum: o MIRBC tinha `DNP=1` e
+`Montagem=NAO MONTAR` nos `params` de J5, J6 e J7 (uma sessão de IA gravou assim), e nada lia isso.
+
+- **A marca mora no esquema** (`schematic.js`, `"dnp":true` no item `comp`), e vale para o componente inteiro:
+  todas as partes. A marca antiga nos `params` (`DNP=1`, `Montagem=NAO MONTAR`) vale igual, e desmarcar a tira.
+  O componente continua na folha, na placa e no ECO (footprint e nets ficam).
+- **Vista Esquema:** a ficha do componente tem a caixa "Não montar", e a folha desenha um X vermelho por cima do
+  corpo, como o Not Fitted do Altium. O X sai também nas miniaturas e no PDF do esquema.
+- **Vista PCB:** o mesmo X por cima do componente. A ficha do componente tem a caixa "Não montar", que grava no
+  `schematic.js` (a mesma marca, uma fonte só). A vista relê a marca quando o esquema muda no disco, sem recarregar.
+  O X é desenhado por cima da placa também na janela Rust.
+- **Fica fora de:**
+  - **lista do Odoo:** o componente não vai, e o aviso no topo diz quais ficaram de fora e como pedir de novo;
+  - **BOM da bancada** (o do hub e o do link): o componente vai para um grupo próprio no fim da lista, com
+    "NÃO MONTAR", quantidade 0 e sem o visto, e a conta de cima diz quantos são;
+  - **CSV da Neoden:** sai do CSV e a linha mostra "não montar", sem deixar incluir.
+- **MCP:**
+  - `sch_nao_montar {refs, dnp}` marca ou desmarca todas as partes;
+  - `sch_componentes` diz `dnp: true`;
+  - `sch_editar` recusa `dnp` que não é booleano;
+  - `bom_listar` deixa os marcados de fora e os devolve em `nao_montar`.
+- **No Altium:** o `BuildSchematic` ignora o campo; a variante Not Fitted continua sendo feita à mão lá.
+- Testes: `tests/test-dnp.js`, `tests/test-mcp-dnp.js` e `test_nao_montar_fica_fora_da_lista` em
+  `tests/test_odoolista.py`.
+
 ## 1.57.2 — 2026-11-03
 
 - **A conta da JLCPCB na configuração do hub.**
