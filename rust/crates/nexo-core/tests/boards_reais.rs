@@ -3,9 +3,14 @@
 use nexo_core::{project, scene};
 use std::path::PathBuf;
 
+/// os Projects/ do repositorio do NexoEletric, onde esta pasta rust/ mora
+fn projetos_do_repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../Projects")
+}
+
 #[test]
 fn todas_as_placas_carregam() {
-    let root = PathBuf::from(std::env::var("NEXO_PROJECTS").unwrap_or_else(|_| r"D:\Pessoal\NexoEletric\Projects".into()));
+    let root = std::env::var_os("NEXO_PROJECTS").map(PathBuf::from).unwrap_or_else(projetos_do_repo);
     let lista = project::scan(&[root]);
     if lista.is_empty() {
         eprintln!("sem projetos nesta maquina; pulando");
@@ -32,7 +37,7 @@ fn todas_as_placas_carregam() {
 #[test]
 fn placa_tem_fundo() {
     // o recorte que repete o contorno (k4 do PRJ-UR) nao pode vazar a placa inteira
-    let dir = PathBuf::from(r"D:\Pessoal\NexoEletric\Projects\PRJ-UR-DI261924");
+    let dir = projetos_do_repo().join("PRJ-UR-DI261924");
     if !dir.exists() {
         return;
     }

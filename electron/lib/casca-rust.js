@@ -1,6 +1,6 @@
 'use strict';
 // A JANELA DO NEXOELETRIC EM RUST (1.54.0). Pedido do dono (2026-10-30): o NexoEletric em Rust
-// (repositorio NexoEletric-rust: janela WebView2 do Windows, o servidor do hub em Rust, a vista PCB no
+// (pasta rust/ deste repositorio, antes o repositorio separado NexoEletric-rust: janela WebView2 do Windows, o servidor do hub em Rust, a vista PCB no
 // WebGL com o nucleo Rust em WASM) entra NO LUGAR da janela Electron, com o mesmo atalho e o mesmo icone.
 //
 // O instalador continua este (o mesmo NexoEletric.exe, appId, atalho, registro no Windows e publicacao no
@@ -10,7 +10,7 @@
 // mora em resources\rust\NexoEletric.exe. Ela traz o proprio servidor do hub (com o Python embutido de
 // reserva, so para as rotas que ficaram nele) e grava o session.json do MCP.
 //
-// O canal (main.rs do NexoEletric-rust, NEXOELETRIC_MOTOR=1):
+// O canal (rust/crates/nexoeletric-web/src/main.rs, NEXOELETRIC_MOTOR=1):
 //   saida de erro   "[NexoEletric] hub em http://127.0.0.1:PORTA/ ..."  -> a origem do hub
 //   saida padrao    "menu:<id>"   o menu que a casca Rust ainda nao tem: o motor abre a tela dele
 //   entrada padrao  "focar"       o atalho clicado de novo (segunda instancia)

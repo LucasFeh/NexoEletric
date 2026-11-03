@@ -1,9 +1,11 @@
-// A janela do NexoEletric em Rust para o instalador (lib/casca-rust.js): compila o NexoEletric-rust e poe
-// em build/rust o que vai para resources\rust:
+// A janela do NexoEletric em Rust para o instalador (lib/casca-rust.js): compila a pasta rust/ deste
+// repositorio e poe em build/rust o que vai para resources\rust:
 //   NexoEletric.exe   a casca (crates/nexoeletric-web): janela WebView2 + o servidor do hub em Rust
 //   web/              nexo-gl.js, nexo-gl-worker.js e o nexo_wasm.wasm (o nucleo Rust da vista PCB)
 //
-// O repositorio: NEXOELETRIC_RUST_REPO, senao D:\NexoEletric-rust. Compila em target-casca, e nao no target
+// O codigo: a pasta rust/ do proprio repositorio (desde 2026-11-03; antes era o repositorio separado
+// D:\NexoEletric-rust, sem remoto, que so existia num PC). NEXOELETRIC_RUST_REPO troca a pasta.
+// Compila em rust/target-casca (gitignored), e nao no target
 // de quem esta desenvolvendo nele: o NexoEletric.exe de la pode estar aberto (o Windows nao deixa trocar).
 // Sem o repositorio ou sem o cargo o build PARA: um instalador sem a janela Rust abriria a janela Electron
 // calado, e a versao publicada nao seria a que foi pedida. NEXOELETRIC_SEM_RUST=1 gera sem ela, de proposito.
@@ -25,10 +27,10 @@ if (process.env.NEXOELETRIC_SEM_RUST === '1') {
   process.exit(0);
 }
 
-const REPO = process.env.NEXOELETRIC_RUST_REPO || 'D:\\NexoEletric-rust';
+const REPO = process.env.NEXOELETRIC_RUST_REPO || path.resolve(APP, '..', 'rust');
 const ALVO = path.join(REPO, 'target-casca');
 if (!fs.existsSync(path.join(REPO, 'Cargo.toml'))) {
-  console.error(`casca-rust: não achei o NexoEletric-rust em ${REPO} (NEXOELETRIC_RUST_REPO)`);
+  console.error(`casca-rust: não achei o Cargo.toml da janela Rust em ${REPO} (NEXOELETRIC_RUST_REPO)`);
   process.exit(1);
 }
 const r = spawnSync('cargo', ['build', '--release', '-p', 'nexoeletric-web'], {

@@ -16,8 +16,13 @@
 *.png binary
 *.jpg binary
 *.pdf binary
+*.wasm binary
+*.ico binary
 
 # O app desktop (EletricHUB) mora no mesmo repo, mas nao vai para o servidor: o
 # deploy.sh extrai a release com `git archive`, que respeita o export-ignore. O
 # build do app nao passa por aqui (o stage-hub.mjs le o `git ls-files`).
 electron/ export-ignore
+
+# A janela Rust (rust/) tambem nao vai para o servidor: vai compilada no instalador do app.
+rust/ export-ignore

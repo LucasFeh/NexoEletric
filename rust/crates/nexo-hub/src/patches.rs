@@ -395,13 +395,13 @@ mod tests {
     fn remendos_casam_com_o_pcbframe_instalado() {
         casam_em(std::path::Path::new(r"C:\Program Files\NexoEletric\resources\hub"));
     }
-    /// o hub que vai no PROXIMO instalador (o repositorio do NexoEletric): a casca Rust e o hub
-    /// saem no mesmo instalador desde o NexoEletric 1.54.0, e um remendo que deixou de casar so
-    /// apareceria la, na maquina de quem abriu. NEXOELETRIC_REPO troca a pasta.
+    /// o hub que vai no PROXIMO instalador (o repositorio do NexoEletric, onde esta pasta rust/
+    /// mora): a casca Rust e o hub saem no mesmo instalador desde o NexoEletric 1.54.0, e um remendo
+    /// que deixou de casar so apareceria la, na maquina de quem abriu. NEXOELETRIC_REPO troca a pasta.
     #[test]
     fn remendos_casam_com_o_hub_do_repositorio() {
         let repo = std::env::var_os("NEXOELETRIC_REPO").map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from(r"D:\Pessoal\NexoEletric"));
+            .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.."));
         casam_em(&repo);
     }
 }

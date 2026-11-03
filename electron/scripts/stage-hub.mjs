@@ -29,6 +29,7 @@ const PKG = JSON.parse(fs.readFileSync(path.join(APP, 'package.json'), 'utf8'));
 // Fora do pacote. Nada disto roda no desktop.
 const EXCLUIR = [
   /^electron\//,             // o proprio app
+  /^rust\//,                 // o codigo da janela Rust: vai compilado em resources\rust (casca-rust.mjs)
   /^tests\//,                // suite de testes
   /^docs\//,                 // specs e planos de desenvolvimento
   /^example\//,              // o exemplo do v1, que o hub nao carrega

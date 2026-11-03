@@ -94,6 +94,14 @@ encosta nele. Vale a regra que nasceu para os agentes não fazerem fila e que ta
   dele. No DMB (v94) deu XOR zero em 10 de 13 camadas; as outras três são a fusão de regiões do
   Altium (0,01 mm² no cobre de cima) e a fonte dos textos stroke nas duas legendas.
 
+## A janela Rust (`rust/`)
+
+A janela do app instalado (1.54.0+) é a pasta `rust/`: um workspace Cargo (casca WebView2, servidor do hub
+em Rust, núcleo WASM da vista PCB; ver `rust/README.md`). Até 2026-11-03 era o repositório separado
+`D:\NexoEletric-rust`; entrou aqui por `git subtree`, com o histórico, e o build não depende mais dele. O
+`npm run dist` compila em `rust/target-casca` (`electron/scripts/casca-rust.mjs`); `rust/` fica fora do hub
+empacotado (`stage-hub.mjs`) e do deploy (`export-ignore`). Os `target*/` são gitignored.
+
 ## Nunca `alert()`, `confirm()` ou `prompt()`
 
 O diálogo do navegador chega em inglês, com a cara do sistema, e trava a aba. Toda

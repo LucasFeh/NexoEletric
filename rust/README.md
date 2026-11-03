@@ -28,6 +28,12 @@ Os remendos da vista PCB são aplicados **ao servir** (`crates/nexo-hub/src/patc
 trabalho não muda, e se um trecho não casar com a versão do hub, aquele remendo não entra e a vista
 segue a original. O teste `remendos_casam_com_o_pcbframe_instalado` confere contra o NexoEletric instalado.
 
+## Onde mora
+Desde 2026-11-03 esta é a pasta `rust/` do repositório NexoEletric (entrou por `git subtree`, com o histórico
+do antigo `D:\NexoEletric-rust`, que não tinha remoto). Os comandos abaixo rodam de dentro de `rust/`. Os
+testes que olham o hub e os `Projects/` acham o repositório sozinhos (`../`); `NEXOELETRIC_REPO` e
+`NEXO_PROJECTS` trocam a pasta.
+
 ## Rodar
 
     cargo build --release -p nexoeletric-web
@@ -39,8 +45,8 @@ estiver ocupada: nunca toma a de outro programa). Grava o `~/.nexoeletric/sessio
 nenhum outro NexoEletric estiver aberto (`--sem-sessao` desliga).
 
 ## No instalador do NexoEletric (1.54.0+)
-Esta casca é a janela do NexoEletric instalado. O `npm run dist` do repositório NexoEletric a compila aqui
-(`target-casca`, para não brigar com um `target\release\NexoEletric.exe` aberto) e a põe em
+Esta casca é a janela do NexoEletric instalado. O `npm run dist` (em `electron/`) a compila aqui
+(`rust/target-casca`, para não brigar com um `target\release\NexoEletric.exe` aberto) e a põe em
 `resources\rust`. O atalho continua abrindo o `NexoEletric.exe` Electron, que vira o **motor de fundo**, sem
 janela: pasta de trabalho, sincronismo com o NexoBD/Nexo Hub (`armazem.js`, `nexohub-sync.js`), configurações,
 Conectar IA, Sobre e o runtime do MCP. Ele abre esta casca com `NEXOELETRIC_MOTOR=1`:

@@ -49,6 +49,6 @@
       "electron/scripts/publicar-nexohub.mjs",
       "nexo-programa.json"
     ],
-    "git": "git -c safe.directory=*; autor Lucas Ferreira <70298160+LucasFeh@users.noreply.github.com> por GIT_AUTHOR_*/GIT_COMMITTER_* (sem mexer no config global). Mudanças só como acréscimo; não mexer no tema. Projetos, Libs/símbolos (Odoo) e scripts do Altium moram no NexoBD (electron/lib/armazem.js). A janela (1.54.0+) vem do repositório D:\\NexoEletric-rust (crates/nexoeletric-web, sem remoto): o npm run dist a compila em target-casca (electron/scripts/casca-rust.mjs; NEXOELETRIC_RUST_REPO troca a pasta) e ela vai em resources\\rust; commite lá também (git -c safe.directory=*, branch main)."
+    "git": "git -c safe.directory=*; autor Lucas Ferreira <70298160+LucasFeh@users.noreply.github.com> por GIT_AUTHOR_*/GIT_COMMITTER_* (sem mexer no config global). Mudanças só como acréscimo; não mexer no tema. Projetos, Libs/símbolos (Odoo) e scripts do Altium moram no NexoBD (electron/lib/armazem.js). A janela (1.54.0+) é a pasta rust/ deste repositório (rust/crates/nexoeletric-web; até 2026-11-03 era o repositório separado D:\\NexoEletric-rust): o npm run dist a compila em rust/target-casca (electron/scripts/casca-rust.mjs; NEXOELETRIC_RUST_REPO troca a pasta) e ela vai em resources\\rust."
   }
 }
