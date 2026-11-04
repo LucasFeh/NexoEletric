@@ -4011,6 +4011,7 @@ function desenhaArrasto(){
   }
   if (arrasto.estica) { desenhaEstica(); return; }
   const P = arrasto.topo && arrasto.topo.plano;
+  realcaDonosDoArrasto();
   for (const a of arrasto.alvos) {
     const g = geoDoPlano(arrasto, a) || geoAtual(a);
     if (!g) continue;
@@ -4028,6 +4029,24 @@ function desenhaArrasto(){
     ctx.save(); ctx.strokeStyle = COR.snap; ctx.lineWidth = px(1.5);
     ctx.beginPath(); ctx.arc(arrasto.ima.x, arrasto.ima.y, px(7), 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
   }
+}
+/* O DONO DO TEXTO NA MAO (pedido do dono, 2026-11-03: "sempre que eu vou mover o designator de um
+   componente na pcb clicando e arrastando, o componente associado a aquele designator dê um
+   highlight"). Designator ou comment arrastado realca o componente dele (a caixa, como na selecao),
+   por baixo da previa do texto; o componente que anda junto no mesmo arrasto ja aparece na mao. */
+function donosDoArrasto(alvos){
+  const out = [];
+  for (const a of alvos || []) {
+    const s = a && a.t === 'text' && a.m && a.m.src;
+    if (!s || (!s.designator && !s.comment) || s.owner == null) continue;
+    const mc = model.compByRef[s.owner] || compDoDono(s.owner);
+    const ac = mc && ALVO_COMP.get(mc);
+    if (ac && out.indexOf(ac) < 0 && alvos.indexOf(ac) < 0) out.push(ac);
+  }
+  return out;
+}
+function realcaDonosDoArrasto(){
+  for (const ac of donosDoArrasto(arrasto.alvos)) realcaAlvo(ac, COR.sel, true);
 }
 /* um alvo (que nao e componente) desenhado no geo `g` -- o arrasto e o esticar */
 function desenhaGeoPrevia(a, g){

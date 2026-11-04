@@ -4,6 +4,17 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.61.0 — 2026-11-03
+
+**O componente do designator acende no arraste.** Clicar e arrastar o designator (ou o comment) de um componente na
+vista PCB realça o componente dono dele — a caixa com o véu e o contorno tracejado da seleção —, por baixo da prévia
+do texto, até soltar. Assim fica claro de quem é o nome que está andando, mesmo com a placa cheia.
+
+- Vale para o designator e o comment, em qualquer face, também para o componente criado por `comp_add`.
+- Texto livre e texto do footprint não acendem nada; o componente que anda no mesmo arraste (selecionado junto) já
+  aparece na mão e não ganha um segundo realce.
+- Teste: `tests/test-pcb-dono-designator.js`.
+
 ## 1.60.0 — 2026-11-03
 
 **Imagem e texto viram serigrafia.** Um logo ou um texto em qualquer fonte TrueType/OpenType vai direto para a
