@@ -6791,11 +6791,12 @@ function pintaCabMenuFolha(){
   /* o duplo clique no cabeçalho também recolhe; a roda do mouse sobre o menu rola o menu, não dá zoom na folha */
   m.querySelector('.sf-cab').addEventListener('dblclick', e => { if (e.target.closest('button')) return; b.click(); });
   m.addEventListener('wheel', e => e.stopPropagation(), { passive:true });
-  /* AO LADO da barra de ferramentas (pedido do dono, 2026-11-04): a barra muda de largura (a gaveta dos pousos troca
-     o rótulo, o "libs" entra depois), então o menu acompanha a borda direita dela */
+  /* NO CANTO ESQUERDO, e a barra de ferramentas logo depois dele, na mesma altura (pedido do dono, 2026-11-04: "do
+     outro lado, do lado esquerdo"). O menu muda de largura (aberto ou recolhido no nome da folha), então a barra
+     acompanha a borda direita dele */
   const tb = $('schtb');
-  const encosta = () => { if (tb && tb.offsetWidth) m.style.left = (tb.offsetLeft + tb.offsetWidth + 6) + 'px'; };
-  if (tb && typeof ResizeObserver !== 'undefined') new ResizeObserver(encosta).observe(tb);
+  const encosta = () => { if (tb && m.offsetWidth) tb.style.left = (m.offsetLeft + m.offsetWidth + 6) + 'px'; };
+  if (tb && typeof ResizeObserver !== 'undefined') new ResizeObserver(encosta).observe(m);
   encosta();
   for (const ev of ['mousedown', 'pointerdown', 'contextmenu']) m.addEventListener(ev, e => e.stopPropagation());
   pinta();
