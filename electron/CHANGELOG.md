@@ -4,6 +4,11 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.69.1 — 2026-11-04
+
+- O menu da folha do Esquema fica **ao lado** da barra de ferramentas, na mesma altura, e não mais embaixo dela.
+  Ele acompanha a largura da barra quando ela muda; recolhido, sobra só o cabeçalho com o nome da folha.
+
 ## 1.69.0 — 2026-11-04
 
 **Novo projeto com o código da casa, o menu da folha e o painel enxuto do Esquema.**

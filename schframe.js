@@ -6791,6 +6791,12 @@ function pintaCabMenuFolha(){
   /* o duplo clique no cabeçalho também recolhe; a roda do mouse sobre o menu rola o menu, não dá zoom na folha */
   m.querySelector('.sf-cab').addEventListener('dblclick', e => { if (e.target.closest('button')) return; b.click(); });
   m.addEventListener('wheel', e => e.stopPropagation(), { passive:true });
+  /* AO LADO da barra de ferramentas (pedido do dono, 2026-11-04): a barra muda de largura (a gaveta dos pousos troca
+     o rótulo, o "libs" entra depois), então o menu acompanha a borda direita dela */
+  const tb = $('schtb');
+  const encosta = () => { if (tb && tb.offsetWidth) m.style.left = (tb.offsetLeft + tb.offsetWidth + 6) + 'px'; };
+  if (tb && typeof ResizeObserver !== 'undefined') new ResizeObserver(encosta).observe(tb);
+  encosta();
   for (const ev of ['mousedown', 'pointerdown', 'contextmenu']) m.addEventListener(ev, e => e.stopPropagation());
   pinta();
 })();
