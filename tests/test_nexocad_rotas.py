@@ -373,6 +373,21 @@ try:
     # o NexoCAD nao cria rev nova de modelo pelo hub: o modelo abc continua na rev 2
     confere(nh('GET', '/api/v1/itens/%s' % mod['id'])['rev'] == 2, 'o modelo editado no NexoCAD nao foi tocado')
 
+    # o mesmo STEP nao vira dois itens (1.63.0): a chave de projeto reaproveita o item com o mesmo arquivo
+    antes = len(nh('GET', '/api/v1/itens?tipo=modelo3d&limite=500')['itens'])
+    lidos = []
+    iid, rev, criado = N.garante_modelo('projeto:MIRBC_X/3d/abc.step', 'abc.step', ['SOT23-B'], lambda: (lidos.append(1), STEP)[1])
+    confere(iid == mod['id'] and not criado, 'mesmo STEP com chave de projeto: reaproveita o item (%s)' % iid)
+    confere(rev == nh('GET', '/api/v1/itens/%s' % mod['id'])['rev'], 'reaproveitar nao cria revisao')
+    confere(len(nh('GET', '/api/v1/itens?tipo=modelo3d&limite=500')['itens']) == antes, 'nenhum modelo3d novo')
+    res = nh('POST', '/api/v1/chaves/resolver', {'sistema': 'nexoeletric-modelo', 'chaves': ['projeto:MIRBC_X/3d/abc.step']})
+    res = res.get('resultado', res)
+    confere((res.get('projeto:MIRBC_X/3d/abc.step') or {}).get('id') == mod['id'], 'a chave de projeto passa a resolver para o item')
+    fps = nh('GET', '/api/v1/itens/%s' % mod['id'])['atributos']['footprints']
+    confere('SOT23-B' in fps and 'SOT23' in fps, 'os footprints se juntam (%r)' % fps)
+    iid2, rev2, criado2 = N.garante_modelo('projeto:Y/3d/zz.step', 'zz.step', ['ZZ'], lambda: STEP + b'\n/* outro */')
+    confere(criado2 and iid2 != mod['id'], 'STEP diferente: item proprio')
+
     # so desta maquina
     app2 = Flask('x')
     N.registra(app2, tmp, lambda req: False)

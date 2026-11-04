@@ -122,23 +122,84 @@ async function emLotes(lista, n, f, sinal) {
 const nomeItem = m => String(m.nome || m.file).replace(/\.(step|stp)$/i, '') || m.file;
 const iguais = (a, b) => JSON.stringify([...(a || [])].map(String).sort()) === JSON.stringify([...(b || [])].map(String).sort());
 
-/* cria o item (se faltar) e a revisao 1 (se faltar). Devolve {id, rev, criado, enviado} */
+/* ── O MESMO STEP NAO VIRA DOIS ITENS (1.63.0) ──
+   O corpo 3D de uma placa tem a chave "projeto:<p>/3d/<n>.step", diferente em cada projeto (ate MIRBC_DI251885b e
+   MIRBC_DI251885B eram duas), e o garanteModelo so procurava pela chave: cada placa enviada criava um item novo com o
+   MESMO arquivo. Medido em 2026-11-04: 144 itens a mais em 67 grupos na categoria Modelos 3D da PcbLib (o "step_temp"
+   do CAP EL SMD 12.7mm D10 cinco vezes; pedido do dono: "tem como evitar"). Agora, sem item na chave, o STEP de mesmo
+   sha256 que ja esta no Nexo Hub (o `origem` ou o `step` de um modelo3d) e reaproveitado: a chave nova passa a
+   apontar para ele (PUT /chaves) e os footprints se juntam. O indice sha -> item e lido uma vez por cliente (2 min),
+   e o que esta sendo criado agora entra nele na hora: dois lotes paralelos com o mesmo arquivo criam UM item. */
+const INDICE_SHA = new WeakMap();
+const revDe = it => Number(it && (it.rev != null ? it.rev : it.rev_atual)) || 0;
+function indiceSha(cliente) {
+  let x = INDICE_SHA.get(cliente);
+  if (x && Date.now() - x.quando < 120000) return x;
+  x = { quando: Date.now(), criando: new Map(), mapa: (async () => {
+    const m = new Map();
+    const L = ((await cliente.todos({ tipo: 'modelo3d' })).itens || []).slice()
+      .sort((a, b) => String(a.criado_em || '').localeCompare(String(b.criado_em || '')));   /* o mais antigo fica */
+    for (const it of L) for (const papel of ['origem', 'step']) {
+      const s = it.arquivos && it.arquivos[papel] && it.arquivos[papel].sha256;
+      if (s && !m.has(s) && revDe(it) >= 1) m.set(s, it);
+    }
+    return m;
+  })() };
+  x.mapa.catch(() => INDICE_SHA.delete(cliente));
+  INDICE_SHA.set(cliente, x);
+  return x;
+}
+async function reaproveita(cliente, it, m) {
+  await cliente.poeChave(NH.SIS_MODELO, m.file, it.id);
+  const antes = new Set((((it.atributos || {}).footprints) || []).map(String));
+  const novos = (m.footprints || []).map(String).filter(f => !antes.has(f));
+  if (novos.length) {
+    const fps = [...antes, ...novos].sort();
+    await cliente.alteraItem(it.id, { atributos: { footprints: fps } });
+    it.atributos = Object.assign({}, it.atributos, { footprints: fps });
+    for (const f of novos) { try { await cliente.vincula({ de_item: it.id, relacao: 'footprint', para_ref: f }); } catch (_) { /* vinculo e so para a busca */ } }
+  }
+  return { id: it.id, rev: revDe(it), criado: false, enviado: false, reaproveitado: true };
+}
+
+/* cria o item (se faltar) e a revisao 1 (se faltar). Devolve {id, rev, criado, enviado, reaproveitado?} */
 async function garanteModelo(cliente, m, ler, nota) {
   let r = (await cliente.resolver(NH.SIS_MODELO, [m.file]))[m.file] || null;
-  let criado = false;
+  let criado = false, dados = null, sha = null, fimCriacao = null;
   if (!r) {
+    /* o mesmo arquivo ja tem item? (ou esta nascendo agora, noutro lote) */
+    dados = await ler(m);
+    sha = crypto.createHash('sha256').update(dados).digest('hex');
+    const ix = indiceSha(cliente);
+    const ja = (await ix.mapa).get(sha);
+    if (ja) return reaproveita(cliente, ja, m);
+    if (ix.criando.has(sha)) {
+      const it = await ix.criando.get(sha).catch(() => null);
+      if (it) return reaproveita(cliente, it, m);
+    }
+    let pronto; ix.criando.set(sha, new Promise((ok, falha) => { pronto = { ok, falha }; }));
+    ix.criando.get(sha).catch(() => {});
+    fimCriacao = (it) => { if (it) { (ix.mapa.then(mm => mm.set(sha, it)).catch(() => {})); pronto.ok(it); } else { ix.criando.delete(sha); pronto.falha(new Error('não criado')); } };
     const fps = m.footprints || [];
-    const it = await cliente.criaItem({
-      tipo: 'modelo3d', categoria: NH.CAT_MODELOS, nome: nomeItem(m), descricao: fps.length ? 'Corpo 3D de ' + fps.join(', ') : '',
-      tags: ['step', m.origem || 'nexoeletric'], atributos: { footprints: fps, origem: m.origem || '', arquivo: m.nome || '' },
-      chaves: [{ sistema: NH.SIS_MODELO, chave: m.file }],
-      vinculos: fps.map(f => ({ relacao: 'footprint', para_ref: f })),
-    });
-    r = { id: it.id, rev: Number(it.rev != null ? it.rev : it.rev_atual) || 0 };
-    criado = !it.existente;
+    try {
+      const it = await cliente.criaItem({
+        tipo: 'modelo3d', categoria: NH.CAT_MODELOS, nome: nomeItem(m), descricao: fps.length ? 'Corpo 3D de ' + fps.join(', ') : '',
+        tags: ['step', m.origem || 'nexoeletric'], atributos: { footprints: fps, origem: m.origem || '', arquivo: m.nome || '' },
+        chaves: [{ sistema: NH.SIS_MODELO, chave: m.file }],
+        vinculos: fps.map(f => ({ relacao: 'footprint', para_ref: f })),
+      });
+      r = { id: it.id, rev: revDe(it) };
+      criado = !it.existente;
+    } catch (e) { fimCriacao(null); throw e; }
   }
-  if (r.rev >= 1) return { id: r.id, rev: r.rev, criado, enviado: false };
-  const dados = await ler(m);
+  if (r.rev >= 1) { if (fimCriacao) fimCriacao({ id: r.id, rev: r.rev, atributos: { footprints: m.footprints || [] } }); return { id: r.id, rev: r.rev, criado, enviado: false }; }
+  try {
+    const g = await sobeRevisao1(cliente, r, m, dados || await ler(m), nota, criado);
+    if (fimCriacao) fimCriacao({ id: g.id, rev: g.rev, atributos: { footprints: m.footprints || [] } });
+    return g;
+  } catch (e) { if (fimCriacao) fimCriacao(null); throw e; }
+}
+async function sobeRevisao1(cliente, r, m, dados, nota, criado) {
   const b = await cliente.sobeBlob(dados, m.nome || m.file.split('/').pop());
   try {
     const j = await cliente.novaRevisao(r.id, { arquivos: { step: { sha256: b.sha256, nome: m.nome || '' }, origem: { sha256: b.sha256, nome: m.nome || '' } }, base: 0, nota: nota || 'importado do NexoEletric' });

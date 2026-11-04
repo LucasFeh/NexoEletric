@@ -4,6 +4,21 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.63.0 — 2026-11-04
+
+**O mesmo STEP não vira dois itens na biblioteca.** O corpo 3D de uma placa enviada ao Nexo Hub tem a chave
+`projeto:<projeto>/3d/<n>.step`, diferente em cada projeto (até `MIRBC_DI251885b` e `MIRBC_DI251885B` contavam como
+dois), e quem publica os modelos (`garanteModelo` do `mcp/lib/nexohub-sync.js` e `garante_modelo` do
+`tools/rotas/nexocad.py`) só procurava pela chave: cada placa criava um item novo com o MESMO arquivo. Medido em
+2026-11-04: 144 itens a mais em 67 grupos em Eletrônicos › Modelos 3D da PcbLib (o "step_temp" do CAP EL SMD 12.7mm
+D10 cinco vezes).
+
+- Sem item na chave, o STEP de mesmo sha256 que já está no Nexo Hub é reaproveitado: a chave nova passa a apontar
+  para o item que existe e os footprints se juntam nele. Só cria item quando o arquivo é outro.
+- Vale também com dois envios ao mesmo tempo (os lotes paralelos do sincronizador criam um item só).
+- Os repetidos que já existem continuam lá (as placas publicadas apontam para eles).
+- Testes: `tests/test-modelo-mesmo-step.js` e o caso novo do `tests/test_nexocad_rotas.py`.
+
 ## 1.62.0 — 2026-11-03
 
 **Power port do tamanho do desenho, e troca de símbolo sem pino solto.**

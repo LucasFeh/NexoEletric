@@ -705,11 +705,58 @@ def _origem_da_chave(k):
     return 'nexoeletric'
 
 
+# O MESMO STEP NAO VIRA DOIS ITENS (1.63.0; o mesmo do garanteModelo do mcp/lib/nexohub-sync.js). A chave de um
+# corpo de placa ("projeto:<p>/3d/<n>.step") muda de projeto para projeto e o garante_modelo so procurava por ela:
+# cada placa enviada criava um item com o MESMO arquivo (144 a mais em 67 grupos, medido em 2026-11-04). Sem item na
+# chave, o STEP de mesmo sha256 que ja esta no Nexo Hub (origem ou step de um modelo3d) e reaproveitado: a chave nova
+# passa a apontar para ele e os footprints se juntam. O indice sha -> item vale 2 min e recebe o que se cria aqui.
+_indice_sha = {'quando': 0.0, 'mapa': None}
+
+
+def _mapa_sha():
+    agora = time.time()
+    if _indice_sha['mapa'] is None or agora - _indice_sha['quando'] > 120:
+        L, _r = nh_todos({'tipo': 'modelo3d'})
+        m = {}
+        for it in sorted(L, key=lambda i: str(i.get('criado_em') or '')):     # o mais antigo fica
+            if _rev(it) < 1:
+                continue
+            for papel in ('origem', 'step'):
+                s = ((it.get('arquivos') or {}).get(papel) or {}).get('sha256')
+                if s and s not in m:
+                    m[s] = it
+        _indice_sha.update({'quando': agora, 'mapa': m})
+    return _indice_sha['mapa']
+
+
+def _reaproveita(it, chave, footprints):
+    nh('PUT', '/api/v1/chaves', {'sistema': SIS_MODELO, 'chave': chave, 'item_id': it['id']})
+    antes = [str(f) for f in ((it.get('atributos') or {}).get('footprints') or [])]
+    novos = sorted(set(str(f) for f in footprints or [] if f) - set(antes))
+    if novos:
+        fps = sorted(set(antes) | set(novos))
+        nh('PATCH', '/api/v1/itens/%s' % _q(it['id']), {'atributos': {'footprints': fps}})
+        it['atributos'] = dict(it.get('atributos') or {}, footprints=fps)
+        for f in novos:
+            try:
+                nh_vincula({'de_item': it['id'], 'relacao': 'footprint', 'para_ref': f})
+            except ErroNexo:
+                pass                                   # o vinculo e so para a busca
+    return it['id'], _rev(it), False
+
+
 def garante_modelo(chave, nome, footprints, ler, nota=None):
-    """O item modelo3d da chave (cria e sobe a revisao 1 se faltar). (id, rev, criado). Nunca cria rev 2+."""
+    """O item modelo3d da chave (cria e sobe a revisao 1 se faltar). (id, rev, criado). Nunca cria rev 2+.
+    Sem item na chave, reaproveita o modelo3d que ja tem o mesmo STEP (sha256)."""
     r = nh_resolver(SIS_MODELO, [chave]).get(chave)
     criado = False
+    dados = None
     if not r:
+        dados = ler()
+        sha = hashlib.sha256(dados).hexdigest()
+        ja = _mapa_sha().get(sha)
+        if ja:
+            return _reaproveita(ja, chave, footprints)
         fps = sorted(set(str(f) for f in footprints or [] if f))
         it = nh_cria({'tipo': 'modelo3d', 'categoria': CAT_MODELOS,
                       'nome': re.sub(r'\.(step|stp)$', '', nome or chave.split('/')[-1], flags=re.I) or chave,
@@ -722,11 +769,15 @@ def garante_modelo(chave, nome, footprints, ler, nota=None):
         criado = not it.get('existente')
     if int(r.get('rev') or 0) >= 1:
         return r['id'], int(r['rev']), criado
-    dados = ler()
+    if dados is None:
+        dados = ler()
     b = nh_sobe_blob(dados, nome or chave.split('/')[-1])
     try:
         j = nh_revisao(r['id'], {'arquivos': {'step': {'sha256': b['sha256'], 'nome': nome or ''}, 'origem': {'sha256': b['sha256'], 'nome': nome or ''}}, 'base': 0,
                                  'nota': nota or 'importado do NexoEletric'})
+        if _indice_sha['mapa'] is not None:
+            _indice_sha['mapa'].setdefault(b['sha256'], {'id': r['id'], 'rev': int(j.get('numero') or 1),
+                                                         'atributos': {'footprints': sorted(set(str(f) for f in footprints or [] if f))}})
         return r['id'], int(j.get('numero') or 1), criado
     except ErroNexo as e:
         if getattr(e, 'http', 0) == 409:
