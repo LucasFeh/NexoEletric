@@ -28,8 +28,13 @@ conta pela janela do navegador.
    A JLC só aceita as quantidades da lista: 5, 10, 15, 20, 25, 30, 50, 75, 100, 125, 150, 200…
    Se o usuário pedir outra (ex.: 8), ofereça a mais perto. **Não envie nada sem a quantidade dita pelo
    usuário nesta conversa.**
-4. **`jlc_enviar {projeto, quantidade}`**: a janela do IntegrateBrowser aparece. A ferramenta sobe o .zip,
-   confere as camadas que a JLC leu contra as da placa, marca as camadas, põe a quantidade e clica SAVE TO CART.
+4. **`jlc_enviar {projeto, quantidade}`**: a janela do IntegrateBrowser aparece. A ferramenta faz, nesta ordem:
+   - confere a conta da JLC. Sem ela, para **antes** de subir o Gerber, com `etapa: "login"` (passo 5);
+   - sobe o .zip e confere as camadas que a JLC leu contra as da placa;
+   - marca as camadas e a quantidade;
+   - abre o **visualizador de camadas da JLC** (Gerber Viewer, na aba Layers) numa janela nova, que fica aberta
+     para o usuário conferir as camadas (`visualizador` = o endereço);
+   - só então clica SAVE TO CART.
    - Os outros campos ficam no padrão da JLC: FR-4, 1,6 mm, verde, HASL, 1 oz. Se o usuário pediu outra
      espessura, cor ou acabamento, diga que o padrão foi mantido e que ele muda no carrinho. Ou ajuste na
      página antes do SAVE TO CART, com as ferramentas do IntegrateBrowser, e confira na captura.
@@ -42,7 +47,7 @@ conta pela janela do navegador.
    - **`etapa: "captcha"`:** a JLC pediu verificação. A janela já está aberta; peça ao usuário para resolver
      lá e avisar.
    - **`etapa: "erro"`:** a JLC não aceitou o login. Diga a mensagem, sem a senha, e peça de novo.
-   - Depois de entrar, chame **`jlc_enviar` de novo**: o orçamento recomeça depois do login.
+   - Depois de entrar, chame **`jlc_enviar` de novo**: agora ele segue para o Gerber.
 6. **Confira antes de dizer "pronto".** A resposta de `jlc_enviar` traz a captura. Olhe nela e no retorno:
    - o arquivo (`noCarrinho`);
    - as camadas e o tamanho que a JLC detectou (`detectado`, `dimensoes`), contra os do `jlc_preparar`;
@@ -54,6 +59,7 @@ conta pela janela do navegador.
 7. **Diga ao usuário:**
    - o que foi para o carrinho: placa, camadas, tamanho, quantidade e preço;
    - os avisos;
+   - que o visualizador de camadas da JLC ficou aberto noutra janela, para ele conferir as camadas;
    - que **o pagamento é com ele**, no carrinho da JLC (o IntegrateBrowser fica aberto nessa página).
 
 ## Não faça

@@ -7247,8 +7247,10 @@ async function salvaGerber(){
    configurar; só pergunta antes quantas placas") ──
    Pergunta a quantidade (as da lista da JLC), salva o Gerber gerado no projeto e pede ao hub
    (/api/jlc, tools/rotas/jlc.py) que rode o mcp/lib/jlc.js -- o mesmo motor das ferramentas jlc_* do
-   MCP. Sem login na JLC a janela do IntegrateBrowser aparece e espera a pessoa entrar: a senha nunca
-   passa pelo hub. O pedido para no carrinho. */
+   MCP. A ordem (pedido do dono, 2026-11-04): entra na conta da JLC (a da configuração do hub; sem ela, a
+   janela do IntegrateBrowser aparece e espera a pessoa entrar), sobe o Gerber, confere as camadas, põe a
+   quantidade, abre o visualizador de camadas da JLC noutra janela (que fica aberta) e só então salva no
+   carrinho. O pedido para no carrinho. */
 /* o envio em curso: fechar a vista (ou o app) no meio cancela a ação (POST /api/jlc/cancelar) */
 let jlcJob = null;
 window.addEventListener('pagehide', () => {
@@ -7267,7 +7269,7 @@ async function enviaJlc(){
   const bb = EB && EB.board && EB.board.bbox;
   const tam = bb ? fmtNum(bb.x2 - bb.x1, 2) + ' × ' + fmtNum(bb.y2 - bb.y1, 2) + ' mm' : '';
   const qtd = await HubDialog.escolhe(r.resumo.base + '\n' + cobre + ' camada(s) de cobre' + (jlc !== cobre ? ' — a JLC fabrica ' + jlc : '') + (tam ? ' · ' + tam : '') +
-    '\n\nO Gerber gerado agora é salvo no projeto e sobe para o orçamento da JLCPCB no IntegrateBrowser, com as camadas da placa e a quantidade abaixo. O pedido para no carrinho: o pagamento fica com você. Se a conta não estiver aberta, a janela do navegador aparece para você entrar.' +
+    '\n\nO Gerber gerado agora é salvo no projeto e sobe para o orçamento da JLCPCB no IntegrateBrowser, com as camadas da placa e a quantidade abaixo. Primeiro entra na sua conta da JLC (a da configuração do hub; sem ela, a janela do navegador aparece para você entrar). Antes do carrinho, o visualizador de camadas da JLC abre noutra janela e fica aberto para você conferir. O pedido para no carrinho: o pagamento fica com você.' +
     (chDirty ? '\n\nAtenção: inclui mudanças ainda não salvas no changes.js.' : ''),
     { title:'Enviar pra JLC', rotulo:'Quantas placas', opcoes:JLC_QTDS.map(v => ({ v, rot:v + ' placas' })), v:lePref('jlc.qtd', '5'), ok:'Enviar' });
   if (qtd == null) return;
@@ -7300,8 +7302,9 @@ async function acompanhaJlc(job, qtd){
       if (s.etapa === 'login') { HubDialog.toast('JLC: a conta não foi aberta a tempo — entre na conta na janela do IntegrateBrowser e clique em Enviar pra JLC de novo', 'warn', 0); return; }
       await HubDialog.alert((s.etapa === 'carrinho' ? 'Está no carrinho da JLCPCB.' : 'O SAVE TO CART foi clicado, mas a tela do carrinho não foi reconhecida: confira na janela do IntegrateBrowser.') +
         '\n\n' + (s.detectado || '') + '\nCamadas: ' + (s.camadas || '?') + ' · Quantidade: ' + (s.quantidade || qtd) + (s.preco ? ' · Preço: ' + s.preco : '') +
-        (s.etapa === 'carrinho' && s.noCarrinho === false ? '\n\nNão achei o nome do arquivo na página do carrinho: confira lá.' : '') + av +
-        (s.fechou ? '\n\nO navegador fechou sozinho. O pagamento é com você: abra o carrinho da JLC (cart.jlcpcb.com) quando for pagar.'
+        (s.etapa === 'carrinho' && s.noCarrinho === false ? '\n\nNão achei o nome do arquivo na página do carrinho: confira lá.' : '') +
+        (s.visualizador ? '\n\nO visualizador de camadas da JLC ficou aberto noutra janela do IntegrateBrowser.' : '') + av +
+        (s.fechou ? '\n\nA guia do envio fechou sozinha. O pagamento é com você: abra o carrinho da JLC (cart.jlcpcb.com) quando for pagar.'
                   : '\n\nO pagamento é com você, no carrinho da JLC (aberto no IntegrateBrowser).'), { title:'Enviar pra JLC' });
       return;
     }

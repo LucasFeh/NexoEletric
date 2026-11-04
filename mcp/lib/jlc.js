@@ -5,6 +5,10 @@
    o login e a senha, entra e faz todo o processo de adicionar ao carrinho, visualiza pra ver se está
    tudo certo; pela quantidade de layers da PCB ele já sabe o que configurar; só pergunta antes de
    iniciar quantas placas vai querer".
+   A ORDEM (pedido do dono, 2026-11-04: "primeiro fazer o login, dps identificar a quantidade de layer que a placa
+   tem, adicionar os layers, quantidade de placa, abrir em outra aba pra pessoa poder vê os layers e camada da pcb e
+   ai sim adicionar no carrinho; a aba pra visualizar camada fica aberta em outra janela"): conta → Gerber (a JLC diz
+   quantas camadas leu) → camadas e quantidade → visualizador de camadas numa janela nova → SAVE TO CART.
 
    UM motor para os dois caminhos:
      - o MCP (mcp/ferramentas/jlc.js: jlc_preparar, jlc_enviar, jlc_login) chama as funções daqui;
@@ -221,6 +225,51 @@ const JS_PRECO = `(() => {
   const m = i >= 0 ? /\\$\\s?[0-9][0-9,]*\\.[0-9]{2}/.exec(t.slice(i, i + 400)) : null; return m ? m[0] : '';
 })()`;
 
+/* A SESSÃO E O VISUALIZADOR (medidos em cart.jlcpcb.com, 2026-11-04):
+     - sem conta, o cabeçalho do orçamento tem o span .sign-in-btn com "Sign In"; o popover dele tem o botão
+       "Sign In" (.el-popover .el-button--primary), que leva ao passport com a volta certa (o OAuth da JLC);
+     - o "Gerber Viewer" do orçamento (span.jumpText) chama checkLogin(<SHOP_CART_BASE_URL>/quote/gerberviewThree/
+       ?qs=<form.pcbMsg.technologyDiscernRecordNum>_1_0_<colorJson[cor]>_0_0.html): logado, window.open desse
+       endereço; sem conta, vai para o login. O visualizador tem as abas 2D, 3D e Layers (.center-modes .mode-item):
+       a Layers lista as camadas (máscara, cobre, contorno) e mostra cada uma.
+   'fora' = sem conta; 'dentro' = o cabeçalho mostra outra coisa (a conta); '' = o cabeçalho ainda não apareceu */
+const JS_SESSAO = `(() => { const b = document.querySelector('.sign-in-btn');
+  if (b && /^\\s*Sign In\\s*$/i.test(b.textContent)) return 'fora';
+  return b || document.querySelector('.el-popover__reference') ? 'dentro' : ''; })()`;
+const JS_ABRE_LOGIN = `(async () => {
+  const b = document.querySelector('.sign-in-btn'); if (!b) return '';
+  b.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true })); b.click();
+  await new Promise(r => setTimeout(r, 800));
+  const pop = [...document.querySelectorAll('.el-popover')].find(p => /Start Here|Order History/i.test(p.textContent));
+  const s = pop && [...pop.querySelectorAll('button')].find(x => /^\\s*Sign In\\s*$/i.test(x.textContent));
+  if (!s) return '';
+  s.click(); return 'ok';
+})()`;
+const JS_VISUALIZADOR = `(() => {
+  const s = [...document.querySelectorAll('span.jumpText')].find(x => /Gerber Viewer/i.test(x.textContent));
+  if (!s) return { erro: 'o orçamento não mostrou o Gerber Viewer' };
+  let v = null, e = s; while (e && !v) { v = e.__vue__; e = e.parentElement; }
+  const f = v && v.form, rec = f && f.pcbMsg && f.pcbMsg.technologyDiscernRecordNum;
+  if (rec) {
+    const base = String((v.envConfig && v.envConfig.SHOP_CART_BASE_URL) || 'https://cart.jlcpcb.com').replace(/\\/+$/, '');
+    const cor = (v.colorJson && v.colorJson[f.preAdornColor || 'Green']) || 1;
+    return { url: base + '/quote/gerberviewThree/?qs=' + rec + '_1_0_' + cor + '_0_0.html' };
+  }
+  /* sem o Vue: o próprio botão, que logado só chama window.open (sem conta ele iria para o login: não clica) */
+  const b = document.querySelector('.sign-in-btn');
+  if (b && /^\\s*Sign In\\s*$/i.test(b.textContent)) return { erro: 'o visualizador da JLC pede a conta' };
+  const o = window.open; let u = '';
+  window.open = x => { u = String(x || ''); return null; };
+  try { s.click(); } finally { window.open = o; }
+  return /^https:\\/\\/[^/]*jlcpcb\\.com\\//.test(u) ? { url: u } : { erro: 'não achei o endereço do Gerber Viewer' };
+})()`;
+const JS_ABA_LAYERS = `(() => {
+  if (!document.querySelector('canvas')) return '';
+  const b = [...document.querySelectorAll('.center-modes .mode-item')].find(x => /^\\s*Layers\\s*$/i.test(x.textContent));
+  if (!b) return '';
+  b.click(); return 'ok';
+})()`;
+
 /* a quantidade da JLC mais perto (para a resposta sugerir quando a pedida não existe) */
 function qtdPerto(n) {
   let m = QTDS[0];
@@ -228,22 +277,107 @@ function qtdPerto(n) {
   return m;
 }
 
-/* Sobe o .zip, confere as camadas, põe a quantidade e salva no carrinho.
-   o = {zip, camadas (as de cobre do Gerber), quantidade, mostrar, esperaLogin (ms: com a janela
-        aberta, espera a pessoa entrar e refaz), programa (quem automatiza, quando não é a IA: a
-        guia vai para a janela da pessoa), usuario/senha (a conta do hub: o login do meio entra sozinho),
-        fecharNoFim (no carrinho, fecha a guia do envio), progresso(fn)}. Fechou a guia ou o navegador: erro na hora.
-   -> {etapa:'carrinho'|'login'|'conferir', detectado, camadas, quantidade, preco, url, avisos, imagem, fechou?} */
+/* a página do orçamento pronta para o upload (o campo #uploadFile apareceu) */
+async function esperaOrcamento(g) {
+  if (!await g.ate(`!!document.querySelector('#uploadFile')`, 40000)) throw new Error('a página de orçamento da JLC não abriu o campo de upload (mudou? confira em ' + QUOTE + ')');
+}
+async function vaiProOrcamento(g) {
+  await g.chama('navegar', { url: QUOTE });
+  await esperaOrcamento(g);
+}
+
+/* a conta está aberta neste orçamento? O cabeçalho confere a sessão (passport checkLogins) depois de carregar:
+   espera até ms pelo 'dentro'; 'fora' até o fim = sem conta. Cabeçalho que não aparece = não sabe (segue: se a
+   JLC pedir a conta no SAVE TO CART, o envio entra lá) */
+async function sessao(g, ms) {
+  const t0 = Date.now();
+  let v = '';
+  for (;;) {
+    try { v = await g.js(JS_SESSAO); } catch (e) { if (e.fechou) throw e; v = ''; }
+    if (v === 'dentro' || Date.now() - t0 > ms) return v || '';
+    await espera(600);
+  }
+}
+
+/* a guia g está na tela de login da JLC: entra com a conta do hub (usuario/senha) ou espera a pessoa entrar
+   (esperaLogin). -> null quando entrou; senão o resultado da etapa 'login' (sem a senha) */
+async function entrarNaConta(g, o, avisos, prog) {
+  const usuario = String(o.usuario || '').trim(), senha = String(o.senha || '');
+  if (usuario && senha) {
+    prog('entrando na conta da JLC');
+    const r = await entrarNaGuia(g, usuario, senha);
+    if (r.etapa === 'logado') { avisos.push('entrou na conta ' + usuario + ' (a da configuração do hub)'); return null; }
+    avisos.push(r.aviso || 'o login automático não entrou');
+  }
+  if (!o.esperaLogin) return { etapa: 'login', url: await g.url(), imagem: await g.captura() };
+  prog('entre na sua conta da JLC na janela do IntegrateBrowser');
+  await g.mostra();
+  const ok = await g.ate(`!/passport\\.jlcpcb\\.com/.test(location.href) && /jlcpcb\\.com/.test(location.href)`, o.esperaLogin, 2000);
+  if (!ok) return { etapa: 'login', url: await g.url(), aviso: 'o login não terminou a tempo' };
+  avisos.push('entrou na conta');
+  return null;
+}
+
+/* 1º passo do envio (pedido do dono, 2026-11-04: "primeiro fazer o login"): no orçamento aberto, sem conta, o
+   botão Sign In do cabeçalho leva ao login da JLC (o mesmo caminho da página, com a volta certa); depois de
+   entrar, o orçamento abre de novo, já com a sessão. -> null = com a conta; senão o resultado da etapa 'login' */
+async function garanteConta(g, o, avisos, prog) {
+  prog('conferindo a conta da JLC');
+  if (await sessao(g, o.esperaSessao == null ? 5000 : o.esperaSessao) !== 'fora') return null;
+  if (!String(o.usuario || '').trim() && !o.esperaLogin) return { etapa: 'login', url: await g.url(), imagem: await g.captura() };
+  if (await g.js(JS_ABRE_LOGIN) !== 'ok') await g.chama('navegar', { url: LOGIN });
+  await g.ate(`/passport\\.jlcpcb\\.com/.test(location.href)`, 20000, 700);
+  const falta = await entrarNaConta(g, o, avisos, prog);
+  if (falta) return falta;
+  prog('abrindo o orçamento de novo, já na conta');
+  await vaiProOrcamento(g);
+  return null;
+}
+
+/* O visualizador de camadas da JLC (o Gerber Viewer do orçamento) numa janela só dele, na aba Layers, para a
+   pessoa ver as camadas da placa como a JLC leu. Ele fica aberto depois que a guia do envio fecha (aba_nova
+   {janela:"nova"}, Nexo Hub 2.24.0; um Hub mais velho abre numa guia da janela da pessoa). Falhar aqui não para o
+   envio: vira aviso. anterior = o de uma volta anterior (o Gerber subiu de novo): fecha, abre o novo. */
+async function abreVisualizador(g, anterior, avisos, prog) {
+  prog('abrindo o visualizador de camadas da JLC noutra janela');
+  try {
+    const r = await g.js(JS_VISUALIZADOR);
+    if (!r || !r.url) { avisos.push('não abri o visualizador de camadas da JLC: ' + ((r && r.erro) || 'sem endereço') + ' (o botão Gerber Viewer do orçamento abre ele)'); return anterior; }
+    if (anterior && anterior.aba) { try { await anterior.chama('aba_fechar', { aba: anterior.aba }); } catch (_) { /* a pessoa já fechou */ } }
+    const v = new Guia(g.c, g.programa);
+    await v.chama('aba_nova', Object.assign({ url: r.url, janela: 'nova' }, g.programa ? { programa: g.programa } : {}));
+    v.endereco = r.url;
+    if (!await v.ate(JS_ABA_LAYERS, 30000, 1000)) avisos.push('o visualizador da JLC abriu, mas não achei a aba Layers dele: clique em Layers lá');
+    return v;
+  } catch (e) {
+    avisos.push('não abri o visualizador de camadas da JLC: ' + (e.fechou ? 'a janela dele foi fechada' : e.message));
+    return anterior;
+  }
+}
+
+/* O envio, na ordem pedida pelo dono (2026-11-04): entra na conta, sobe o .zip, confere quantas camadas a placa
+   tem, marca as camadas e a quantidade, abre o visualizador de camadas noutra janela e só então salva no carrinho.
+   o = {zip, camadas (as de cobre do Gerber), quantidade, mostrar, esperaLogin (ms: com a janela aberta, espera a
+        pessoa entrar), programa (quem automatiza, quando não é a IA: a guia vai para a janela da pessoa),
+        usuario/senha (a conta do hub: o login entra sozinho), fecharNoFim (no carrinho, fecha a guia do envio; a
+        do visualizador fica), esperaSessao (ms, padrão 5000), progresso(fn)}. Fechou a guia ou o navegador: erro na hora.
+   -> {etapa:'carrinho'|'login'|'conferir', detectado, camadas, quantidade, preco, visualizador, url, avisos, imagem, fechou?} */
 async function enviar(o) {
   const avisos = [], prog = o.progresso || (() => {});
   const qtd = Number(o.quantidade);
   if (!QTDS.includes(qtd)) throw new Error('a JLC não vende ' + o.quantidade + ' placas: escolha uma de ' + QTDS.slice(0, 12).join(', ') + '… (a mais perto é ' + qtdPerto(qtd) + ')');
   if (!o.zip || !fs.existsSync(o.zip)) throw new Error('o .zip do Gerber não existe: ' + o.zip);
   const alvo = camadasJlc(Number(o.camadas) || 0);
+  prog('abrindo o orçamento da JLC');
+  const g = await abreGuia(QUOTE, o.mostrar, o.programa);
+  await esperaOrcamento(g);
+  /* 1. a conta */
+  const semConta = await garanteConta(g, o, avisos, prog);
+  if (semConta) return Object.assign({ quantidade: qtd, avisos }, semConta);
+  let viz = null;
   for (let volta = 0; volta < 2; volta++) {
-    prog('abrindo o orçamento da JLC');
-    const g = await abreGuia(QUOTE, o.mostrar, o.programa);
-    if (!await g.ate(`!!document.querySelector('#uploadFile')`, 40000)) throw new Error('a página de orçamento da JLC não abriu o campo de upload (mudou? confira em ' + QUOTE + ')');
+    if (volta) await vaiProOrcamento(g);
+    /* 2. o Gerber, e quantas camadas a JLC leu nele */
     prog('subindo o Gerber');
     await g.chama('enviar_arquivo', { seletor: '#uploadFile', arquivos: [path.resolve(o.zip)] });
     const det = await g.ate(JS_DETECTOU, 120000, 1200);
@@ -252,11 +386,12 @@ async function enviar(o) {
     const md = /Detected (\d+) layer board of ([\d.]+)\s*x\s*([\d.]+)\s*mm/i.exec(det.texto) || [];
     const lidas = Number(md[1]) || 0;
     if (alvo && lidas && lidas !== alvo) avisos.push('a JLC leu ' + lidas + ' camada(s) no Gerber e a placa tem ' + alvo + ': ficou ' + alvo + ' (confira o conjunto)');
+    /* 3. as camadas e a quantidade */
+    prog('camadas ' + (alvo || lidas) + ' e quantidade ' + qtd);
     if (alvo) {
       const c = await g.js(JS_CAMADA(alvo));
       if (c && c.erro) throw new Error(c.erro);
     }
-    prog('quantidade ' + qtd);
     const q = await g.js(JS_QTD(qtd));
     if (!q || q.erro || !q.ok) throw new Error((q && q.erro) || 'a quantidade não pegou na página (ficou ' + (q && q.agora) + ')');
     await espera(1500);
@@ -264,32 +399,21 @@ async function enviar(o) {
     const preco = await g.js(JS_PRECO);
     const res = { detectado: det.texto, dimensoes: md[2] ? md[2] + ' x ' + md[3] + ' mm' : '', camadas: Number(camadaFinal) || alvo, quantidade: qtd, preco, avisos };
     if (alvo && Number(camadaFinal) !== alvo) throw new Error('a camada não ficou em ' + alvo + ' (a página mostra ' + camadaFinal + ')');
+    /* 4. o visualizador de camadas, noutra janela */
+    viz = await abreVisualizador(g, viz, avisos, prog);
+    if (viz && viz.endereco) res.visualizador = viz.endereco;
+    /* 5. o carrinho */
     prog('salvando no carrinho');
     await g.chama('clicar', { seletor: 'button.saveCart' });
-    /* sai do orçamento: login (passport) ou o carrinho */
+    /* sai do orçamento: o carrinho (ou o login, se a sessão caiu no meio) */
     const destino = await g.ate(`(() => { const u = location.href; if (/passport\\.jlcpcb\\.com/.test(u)) return 'login';
       if (/shopcart|\\/cart(?!\\.)/i.test(location.pathname + location.hash) || /Shopping Cart|Proceed to Checkout|Secure Checkout/i.test(document.body.innerText)) return 'carrinho';
       return ''; })()`, 25000, 1000);
     if (destino === 'login') {
-      /* a conta gravada na configuração do hub (tools/rotas/jlc.py » .hub-jlc.json): entra sozinho */
-      if (o.usuario && o.senha && volta === 0) {
-        prog('entrando na conta da JLC');
-        const r = await entrarNaGuia(g, String(o.usuario).trim(), String(o.senha));
-        if (r.etapa === 'logado') {
-          avisos.push('entrou na conta ' + String(o.usuario).trim() + ' (a da configuração do hub): o Gerber foi enviado de novo (o orçamento recomeça depois do login)');
-          continue;
-        }
-        avisos.push(r.aviso || 'o login automático não entrou');
-      }
-      if (o.esperaLogin && volta === 0) {
-        prog('entre na sua conta da JLC na janela do IntegrateBrowser');
-        await g.mostra();
-        const ok = await g.ate(`!/passport\\.jlcpcb\\.com/.test(location.href) && /jlcpcb\\.com/.test(location.href)`, o.esperaLogin, 2000);
-        if (!ok) return Object.assign(res, { etapa: 'login', url: await g.url(), aviso: 'o login não terminou a tempo' });
-        avisos.push('entrou na conta: o Gerber foi enviado de novo (o orçamento recomeça depois do login)');
-        continue;
-      }
-      return Object.assign(res, { etapa: 'login', url: await g.url(), imagem: await g.captura() });
+      const falta = volta === 0 ? await entrarNaConta(g, o, avisos, prog) : { etapa: 'login', url: await g.url(), imagem: await g.captura() };
+      if (falta) return Object.assign(res, falta);
+      avisos.push('a JLC pediu a conta de novo no SAVE TO CART: o Gerber foi enviado de novo (o orçamento recomeça depois do login)');
+      continue;
     }
     await espera(2000);
     const base = path.basename(o.zip);
@@ -300,9 +424,9 @@ async function enviar(o) {
     res.etapa = destino === 'carrinho' ? 'carrinho' : 'conferir';
     if (res.etapa === 'conferir') avisos.push('não reconheci a tela do carrinho depois do SAVE TO CART — confira a captura');
     /* no carrinho, com o arquivo lá: a guia do envio fecha sozinha (pedido do dono, 2026-11-03: "dps de
-       entrar com a credencial salva, por no carrinho o integrated pode fechar sozinho"). Era a única guia da
-       janela: o IntegrateBrowser fecha junto; a pessoa tinha outras: só esta sai. Carrinho não reconhecido
-       ou sem o arquivo: fica aberta, para conferir */
+       entrar com a credencial salva, por no carrinho o integrated pode fechar sozinho"). A do visualizador fica
+       (pedido de 2026-11-04: "a aba pra visualizar camada fica aberta em outra janela"). Carrinho não
+       reconhecido ou sem o arquivo: fica aberta, para conferir */
     if (o.fecharNoFim && res.etapa === 'carrinho' && res.noCarrinho && g.aba) {
       try { await g.chama('aba_fechar', { aba: g.aba }); res.fechou = true; } catch (_) { /* fechada por fora: tanto faz */ }
     }
@@ -339,13 +463,20 @@ async function entrarNaGuia(g, usuario, senha) {
 async function login(o) {
   const usuario = String(o && o.usuario || '').trim(), senha = String(o && o.senha || '');
   if (!usuario || !senha) throw new Error('faltam o usuário (ou e-mail) e a senha da JLC');
-  const g = await abreGuia(LOGIN, o.mostrar, o.programa);
+  /* pelo Sign In do orçamento (a volta do OAuth da JLC certa); já com a conta: nada a fazer */
+  const g = await abreGuia(QUOTE, o.mostrar, o.programa);
+  await esperaOrcamento(g);
+  if (await sessao(g, o.esperaSessao == null ? 5000 : o.esperaSessao) === 'dentro') return { etapa: 'logado', url: await g.url() };
+  if (await g.js(JS_ABRE_LOGIN) !== 'ok') await g.chama('navegar', { url: LOGIN });
+  await g.ate(`/passport\\.jlcpcb\\.com/.test(location.href)`, 20000, 700);
   const r = await entrarNaGuia(g, usuario, senha);
   if (r.etapa !== 'logado') { await g.mostra(); r.imagem = await g.captura(); }
   return r;
 }
 
-module.exports = { QTDS, QUOTE, LOGIN, camadasCobre, camadasJlc, lerGerber, preparar, enviar, login, qtdPerto, arqConexao };
+module.exports = { QTDS, QUOTE, LOGIN, camadasCobre, camadasJlc, lerGerber, preparar, enviar, login, qtdPerto, arqConexao,
+  /* os trechos que rodam na página da JLC (para conferir contra a página de verdade) */
+  _pagina: { JS_SESSAO, JS_ABRE_LOGIN, JS_VISUALIZADOR, JS_ABA_LAYERS, JS_DETECTOU } };
 
 /* ============================== a linha de comando (a rota /api/jlc do hub) ==============================
    node mcp/lib/jlc.js --cli  < {gdir, quantidade, nome?, mostrar?, esperaLogin?, usuario?, senha?, fecharNoFim?}

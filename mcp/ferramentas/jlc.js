@@ -46,7 +46,7 @@ module.exports = {
     },
     {
       nome: 'jlc_enviar', titulo: 'JLC: pôr no carrinho',
-      descricao: 'Abre o orçamento da JLCPCB no IntegrateBrowser, sobe o .zip do Gerber do projeto, confere as camadas que a JLC leu contra as da placa, põe a quantidade e clica SAVE TO CART. Só chame DEPOIS de o usuário dizer a quantidade (jlc_preparar). etapa:"login" = a conta não está aberta: peça o login e a senha ao usuário, chame jlc_login e depois jlc_enviar de novo. etapa:"carrinho" = salvo; a captura vem junto: CONFIRA na imagem (arquivo, camadas, quantidade, preço) antes de dizer ao usuário que está pronto. Nunca vai além do carrinho (pagamento é com o usuário).',
+      descricao: 'Abre o orçamento da JLCPCB no IntegrateBrowser e, nesta ordem: confere a conta (sem ela para ANTES de subir nada, com etapa:"login"), sobe o .zip do Gerber do projeto, confere as camadas que a JLC leu contra as da placa, marca as camadas e a quantidade, abre o visualizador de camadas da JLC (Gerber Viewer, aba Layers) numa janela nova que fica aberta para o usuário conferir (visualizador = o endereço) e só então clica SAVE TO CART. Só chame DEPOIS de o usuário dizer a quantidade (jlc_preparar). etapa:"login" = a conta não está aberta: peça o login e a senha ao usuário, chame jlc_login e depois jlc_enviar de novo. etapa:"carrinho" = salvo; a captura vem junto: CONFIRA na imagem (arquivo, camadas, quantidade, preço) antes de dizer ao usuário que está pronto. Nunca vai além do carrinho (pagamento é com o usuário).',
       entrada: { type: 'object', properties: {
         projeto: PROJETO,
         quantidade: { type: 'integer', description: 'quantas placas (uma das quantidades da JLC: 5, 10, 15, 20, 25, 30, 50, 75, 100...)' },

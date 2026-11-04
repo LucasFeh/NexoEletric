@@ -33,7 +33,7 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
 
   /* ---- 2. o IntegrateBrowser falso ---- */
   const SENHA = 'S3nh@-Secreta-Teste';
-  const est = { url: '', logado: false, qtd: '5', camada: '2', subiu: null, cliques: [], digitado: [], chamadas: [] };
+  const est = { url: '', logado: false, qtd: '5', camada: '2', subiu: null, cliques: [], digitado: [], chamadas: [], ordem: [] };
   const srv = http.createServer((req, res) => {
     let b = '';
     req.on('data', d => { b += d; });
@@ -46,22 +46,29 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
       const c = params.codigo || '';
       switch (nome) {
         case 'janela': return ok({});
-        case 'navegar': est.url = params.url; est.guia = 'claude'; return ok({ aba: 'g9', url: params.url });
-        case 'aba_nova': if (est.trava) return;   /* nunca responde: o motor fica preso aqui */
+        case 'navegar': est.url = params.url; if (params.nova) est.guia = 'claude'; return ok({ aba: 'g9', url: params.url });
+        case 'aba_nova': if (params.janela === 'nova') { est.viz = params; est.ordem.push('viz'); return ok({ aba: 'v1', url: params.url }); }
+          if (est.trava) return;   /* nunca responde: o motor fica preso aqui */
           est.url = params.url; est.guia = params.janela + ':' + params.programa; return ok({ aba: 'g9', url: params.url });
-        case 'enviar_arquivo': est.subiu = params.arquivos[0]; return ok({ aba: 'g9' });
+        case 'enviar_arquivo': est.subiu = params.arquivos[0]; est.ordem.push('upload'); return ok({ aba: 'g9' });
         case 'digitar': est.digitado.push(params.seletor); if (params.seletor.includes('senha')) est.senhaDigitada = params.texto; return ok({ aba: 'g9' });
         case 'captura': return ok({ __imagem: 'AAAA', mime: 'image/jpeg' });
-        case 'aba_fechar': est.abaFechada = params.aba; return ok({ fechada: params.aba });
+        case 'aba_fechar': if (params.aba === 'v1') est.vizFechada = true; else est.abaFechada = params.aba; return ok({ fechada: params.aba });
         case 'clicar':
           est.cliques.push(params.seletor);
+          if (params.seletor === 'button.saveCart') est.ordem.push('carrinho');
           if (params.seletor === 'button.saveCart') est.url = est.logado ? 'https://cart.jlcpcb.com/shopcart' : 'https://passport.jlcpcb.com/#/login';
-          if (params.seletor === '[data-nexo-jlc=entrar]') { est.logado = est.senhaDigitada === SENHA; if (est.logado) est.url = 'https://jlcpcb.com/'; }
+          if (params.seletor === '[data-nexo-jlc=entrar]') { est.logado = est.senhaDigitada === SENHA; if (est.logado) { est.url = 'https://jlcpcb.com/'; est.ordem.push('login'); } }
           return ok({ aba: 'g9' });
         case 'js': {
           if (est.fechada) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ ok: false, erro: 'A guia g9 não existe mais (veja abas)' })); }
           let r = null;
-          if (c === 'location.href') r = est.url;
+          if (params.aba === 'v1') r = c.includes('center-modes') ? (est.layers = (est.layers || 0) + 1, 'ok') : null;
+          else if (c === 'location.href') r = est.url;
+          else if (c.includes('gerberviewThree')) r = { url: 'https://cart.jlcpcb.com/quote/gerberviewThree/?qs=abc123_1_0_1_0_0.html' };
+          else if (c.includes('mouseenter') && c.includes('sign-in-btn')) { est.url = 'https://passport.jlcpcb.com/#/login?response_type=code'; r = 'ok'; }
+          else if (c.includes('sign-in-btn')) r = est.logado || est.sessaoMente ? 'dentro' : 'fora';
+          else if (c.startsWith('/passport')) r = /passport/.test(est.url);
           else if (c.includes("querySelector('#uploadFile')")) r = /quote/.test(est.url);
           else if (c.includes('Detected')) r = est.subiu ? { texto: 'Detected 4 layer board of 45x60mm(1.772x2.362 inches).' } : null;
           else if (c.includes("textContent.trim() === '") && c.includes('pcb-layers-label')) { const n = /=== '(\d+)'/.exec(c)[1]; const antes = est.camada; est.camada = n; r = { antes }; }
@@ -87,51 +94,73 @@ fs.writeFileSync(path.join(gdir, 'gerber.json'), JSON.stringify({ base: 'Placa X
   await assert.rejects(JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 8 }), /a mais perto é 10/);
   assert.strictEqual(est.chamadas.length, 0);
 
-  /* sem login: sobe, marca 4 camadas e a quantidade, e para no login */
-  const r1 = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10 });
+  /* 2026-11-04: a conta vem PRIMEIRO. Sem conta e sem ninguém para entrar: para no login antes de subir nada */
+  const r1 = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, esperaSessao: 200 });
   assert.strictEqual(r1.etapa, 'login');
-  assert.strictEqual(est.subiu, path.resolve(pr.zip));
-  assert.strictEqual(est.camada, '4'); assert.strictEqual(est.qtd, '10');
-  assert.strictEqual(r1.camadas, 4); assert.strictEqual(r1.preco, '$18.40'); assert.strictEqual(r1.dimensoes, '45 x 60 mm');
+  assert.strictEqual(est.subiu, null, 'sem a conta, o Gerber não sobe');
+  assert.ok(!est.chamadas.includes('enviar_arquivo') && !est.viz);
 
   /* login errado: não entra, e a senha não volta */
-  const rErr = await JLC.login({ usuario: 'eu@dieletrons.com', senha: 'errada' });
+  const rErr = await JLC.login({ usuario: 'eu@dieletrons.com', senha: 'errada', esperaSessao: 200 });
   assert.strictEqual(rErr.etapa, 'erro');
-  /* login certo, e o envio vai até o carrinho */
-  const rl = await JLC.login({ usuario: 'eu@dieletrons.com', senha: SENHA });
+  /* login certo (pelo Sign In do orçamento), e o envio vai até o carrinho */
+  const rl = await JLC.login({ usuario: 'eu@dieletrons.com', senha: SENHA, esperaSessao: 200 });
   assert.strictEqual(rl.etapa, 'logado');
   assert.ok(!JSON.stringify(rl).includes(SENHA) && !JSON.stringify(rErr).includes(SENHA), 'a senha não volta na resposta');
+  assert.strictEqual((await JLC.login({ usuario: 'eu@dieletrons.com', senha: SENHA })).etapa, 'logado', 'já na conta: nada a fazer');
+  est.ordem = [];
   const r2 = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10 });
   assert.strictEqual(r2.etapa, 'carrinho'); assert.strictEqual(r2.noCarrinho, true);
+  assert.strictEqual(est.subiu, path.resolve(pr.zip));
+  assert.strictEqual(est.camada, '4'); assert.strictEqual(est.qtd, '10');
+  assert.strictEqual(r2.camadas, 4); assert.strictEqual(r2.preco, '$18.40'); assert.strictEqual(r2.dimensoes, '45 x 60 mm');
   assert.ok(r2.imagem && r2.imagem.base64, 'a captura volta para conferir');
-  console.log('  envio: quantidade da lista, 4 camadas, login, carrinho e a captura ok');
+  /* o visualizador de camadas da JLC: numa janela nova, na aba Layers, ANTES do SAVE TO CART */
+  assert.deepStrictEqual(est.ordem, ['upload', 'viz', 'carrinho']);
+  assert.strictEqual(est.viz.janela, 'nova');
+  assert.match(est.viz.url, /^https:\/\/cart\.jlcpcb\.com\/quote\/gerberviewThree\/\?qs=abc123_1_0_1_0_0\.html$/);
+  assert.strictEqual(r2.visualizador, est.viz.url);
+  assert.ok(est.layers > 0, 'clicou na aba Layers do visualizador');
+  console.log('  envio: na conta, 4 camadas, quantidade, visualizador noutra janela, carrinho e a captura ok');
 
-  /* 1.57.2: a conta da configuração do hub -- a JLC pede o login no meio do envio e o motor entra sozinho */
-  est.logado = false; est.subiu = null; est.digitado = [];
-  const ra = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, usuario: 'eu@dieletrons.com', senha: SENHA });
+  /* a conta da configuração do hub: entra sozinho, ANTES de subir o Gerber */
+  est.logado = false; est.subiu = null; est.digitado = []; est.ordem = []; est.viz = null;
+  const ra = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, usuario: 'eu@dieletrons.com', senha: SENHA, esperaSessao: 200 });
   assert.strictEqual(ra.etapa, 'carrinho', 'entrou e foi até o carrinho');
+  assert.deepStrictEqual(est.ordem, ['login', 'upload', 'viz', 'carrinho'], 'login, Gerber, visualizador, carrinho');
   assert.ok(est.digitado.some(s => s.includes('senha')) && est.logado);
   assert.ok(ra.avisos.some(a => /entrou na conta eu@dieletrons\.com/.test(a)), ra.avisos.join(' | '));
   assert.ok(!JSON.stringify(ra).includes(SENHA), 'a senha não volta');
   assert.ok(!ra.fechou && !est.abaFechada, 'sem fecharNoFim (o MCP), a guia fica aberta');
-  /* o botão (fecharNoFim): no carrinho, a guia do envio fecha sozinha */
+  /* o botão (fecharNoFim): no carrinho, a guia do envio fecha sozinha; a do visualizador fica */
+  est.vizFechada = false;
   const rf = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, fecharNoFim: true });
   assert.strictEqual(rf.etapa, 'carrinho'); assert.strictEqual(rf.fechou, true); assert.strictEqual(est.abaFechada, 'g9');
+  assert.ok(!est.vizFechada, 'o visualizador fica aberto');
   est.abaFechada = null;
-  /* senha errada e ninguém para esperar: para no login, com o aviso, sem a senha */
-  est.logado = false;
-  const rb = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, usuario: 'eu@dieletrons.com', senha: 'errada-' + SENHA });
+  /* senha errada e ninguém para esperar: para no login, com o aviso, sem a senha e sem subir nada */
+  est.logado = false; est.subiu = null;
+  const rb = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, usuario: 'eu@dieletrons.com', senha: 'errada-' + SENHA, esperaSessao: 200 });
   assert.strictEqual(rb.etapa, 'login');
   assert.ok(rb.avisos.some(a => /não aceitou o login/.test(a)), rb.avisos.join(' | '));
   assert.ok(!JSON.stringify(rb).includes(SENHA), 'nem a errada volta');
-  est.logado = true;
-  console.log('  envio com a conta do hub: entra sozinho no login do meio; senha errada para no login');
+  assert.strictEqual(est.subiu, null);
+  /* a sessão parecia aberta mas caiu: a JLC pede a conta no SAVE TO CART, o motor entra e sobe de novo */
+  est.sessaoMente = true; est.ordem = []; est.vizFechada = false;
+  const rm = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 10, usuario: 'eu@dieletrons.com', senha: SENHA });
+  assert.strictEqual(rm.etapa, 'carrinho');
+  assert.deepStrictEqual(est.ordem, ['upload', 'viz', 'carrinho', 'login', 'upload', 'viz', 'carrinho']);
+  assert.ok(est.vizFechada, 'o visualizador da primeira volta fecha; fica o do Gerber novo');
+  assert.ok(rm.avisos.some(a => /pediu a conta de novo/.test(a)), rm.avisos.join(' | '));
+  est.sessaoMente = false; est.logado = true;
+  console.log('  envio com a conta do hub: entra antes do Gerber; senha errada para no login; sessão caída entra no meio');
 
   /* o botão do NexoEletric (programa): a guia abre na janela da pessoa, não na do Claude */
   est.subiu = null;
   const rp = await JLC.enviar({ zip: pr.zip, camadas: 4, quantidade: 5, programa: 'NexoEletric' });
   assert.strictEqual(rp.etapa, 'carrinho');
   assert.strictEqual(est.guia, 'pessoa:NexoEletric', 'o botão não usa a janela do Claude');
+  assert.strictEqual(est.viz.programa, 'NexoEletric', 'o visualizador também é do programa');
   assert.ok(!est.chamadas.slice(-12).includes('janela'), 'nem mostra a janela do Claude');
   /* fechou o navegador no meio: o envio para na hora (o botão não fica desabilitado esperando) */
   est.logado = false; est.subiu = null;

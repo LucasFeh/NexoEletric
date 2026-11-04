@@ -4,6 +4,23 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.68.0 — 2026-11-04
+
+**O "Enviar pra JLC" entra na conta primeiro e mostra as camadas antes do carrinho.** A ordem agora é:
+1. **A conta.** O envio confere a conta da JLC antes de subir o Gerber. Sem ela, entra pelo "Sign In" do orçamento,
+   com a conta da configuração do hub. Sem conta na configuração, ou com captcha, a janela do IntegrateBrowser
+   aparece e espera você entrar. Pelo MCP, o `jlc_enviar` para com `etapa: "login"` antes de subir nada.
+2. **O Gerber.** O .zip sobe e a JLC diz quantas camadas leu, que o envio confere contra as da placa.
+3. **Camadas e quantidade** marcadas no orçamento.
+4. **O visualizador de camadas da JLC** (o Gerber Viewer, na aba Layers) abre numa janela nova do IntegrateBrowser.
+   Ela fica aberta para você conferir cada camada, mesmo depois que a guia do envio fecha. Precisa do Nexo Hub
+   2.24.0; num Hub mais velho ele abre numa guia da sua janela.
+5. **Só então o SAVE TO CART.** Se a sessão cair no meio e a JLC pedir a conta ali, o envio entra e sobe o Gerber de
+   novo, como antes.
+
+Medido na página da JLC em 2026-11-04: o Gerber Viewer só abre com a conta. O `jlc_login` do MCP também entra pelo
+"Sign In" do orçamento.
+
 ## 1.67.0 — 2026-11-04
 
 **O componente local se apaga pela lista, e o modal ganha a cara do "Trocar componente".**
