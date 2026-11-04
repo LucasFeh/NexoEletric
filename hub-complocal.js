@@ -27,16 +27,18 @@
 var HubCompLocal = (function () {
 
 const CSS = `
-.cl-fundo{position:fixed; inset:0; z-index:9000; display:flex; align-items:center; justify-content:center; padding:24px;
-  background:rgba(0,0,0,.55); animation:cl-fade .18s ease-out;}
+/* A CARA DO "TROCAR COMPONENTE" (pedido do dono, 2026-11-04: "tudo preto, maior"): a caixa no fundo da página (--bg), a
+   14 px das bordas da janela, a sombra dos menus e o cabeçalho com o traço embaixo. Fecha só pelo × (ou Esc). */
+.cl-fundo{position:fixed; inset:0; z-index:9000; display:flex; align-items:center; justify-content:center; padding:14px;
+  background:var(--scrim,rgba(11,11,13,.6)); animation:cl-fade .18s ease-out;}
 .cl-fundo.fecha{animation:cl-fade .16s ease-in reverse forwards;}
 @keyframes cl-fade{from{opacity:0} to{opacity:1}}
-.cl-modal{position:relative; width:min(640px,100%); max-height:min(760px,100%); display:flex; flex-direction:column;
-  background:var(--bg-2,#232323); color:var(--text,#d8d8d8); border:1px solid var(--line,#3a3a3a); border-radius:10px;
-  box-shadow:0 24px 70px rgba(0,0,0,.55); overflow:hidden; animation:cl-sobe .22s cubic-bezier(.2,.8,.2,1);
-  font:12px var(--font,'Segoe UI',sans-serif);}
+.cl-modal{position:relative; width:100%; height:100%; display:flex; flex-direction:column;
+  background:var(--bg,#0f0f11); color:var(--text,#d8d8d8); border-radius:var(--r-lg,14px);
+  box-shadow:var(--shadow-menu,0 0 0 1px rgba(255,255,255,.16),0 16px 40px rgba(0,0,0,.65)); overflow:hidden;
+  animation:cl-sobe .22s cubic-bezier(.2,.8,.2,1); font:13px/1.5 var(--font,'Segoe UI',sans-serif);}
 @keyframes cl-sobe{from{opacity:0; transform:translateY(14px) scale(.98)} to{opacity:1; transform:none}}
-.cl-cab{display:flex; align-items:center; gap:10px; padding:14px 18px 10px;}
+.cl-cab{display:flex; align-items:center; gap:12px; padding:12px 18px; box-shadow:inset 0 -1px 0 var(--line,#3a3a3a);}
 .cl-cab h2{flex:1; margin:0; font:500 15px var(--font,'Segoe UI',sans-serif);}
 .cl-tag{font-size:10px; line-height:1.4; padding:1px 7px; border-radius:999px; white-space:nowrap;
   border:1px solid var(--hi,#4fc3f7); color:var(--hi,#4fc3f7);}
@@ -44,18 +46,18 @@ const CSS = `
   padding:4px 6px; border-radius:4px;}
 .cl-x:hover{background:rgba(255,255,255,.06); color:var(--text,#d8d8d8);}
 /* as etapas: pontos ligados por um traço, a da vez acesa */
-.cl-passos{display:flex; align-items:center; gap:0; padding:0 18px 12px; border-bottom:1px solid var(--line,#3a3a3a);}
+.cl-passos{display:flex; align-items:center; gap:0; padding:14px max(18px, calc(50% - 470px)); box-shadow:inset 0 -1px 0 var(--line,#3a3a3a);}
 .cl-passo{display:flex; align-items:center; gap:6px; border:0; background:transparent; color:var(--text-4,#7a7a7a);
-  font:11px var(--font,'Segoe UI',sans-serif); padding:2px 0; cursor:pointer; white-space:nowrap;}
+  font:12px var(--font,'Segoe UI',sans-serif); padding:2px 0; cursor:pointer; white-space:nowrap;}
 .cl-passo:disabled{cursor:default;}
-.cl-passo .bola{width:18px; height:18px; border-radius:50%; display:grid; place-items:center; font-size:10px;
+.cl-passo .bola{width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font-size:11px;
   box-shadow:inset 0 0 0 1px var(--line,#3a3a3a); transition:background .25s, box-shadow .25s, color .25s;}
 .cl-passo.feito{color:var(--text-3,#9a9a9a);} .cl-passo.feito .bola{box-shadow:inset 0 0 0 1px var(--ok,#00e676); color:var(--ok,#00e676);}
 .cl-passo.atual{color:var(--text,#d8d8d8);} .cl-passo.atual .bola{background:var(--hi,#4fc3f7); color:#000; box-shadow:none;}
 .cl-traco{flex:1; height:1px; min-width:12px; margin:0 8px; background:var(--line,#3a3a3a);}
 /* o palco: o conteúdo da etapa troca por baixo de uma vinheta (as bordas escurecem e o meio se abre de novo) */
 .cl-palco{position:relative; flex:1; min-height:0; overflow:hidden;}
-.cl-corpo{height:100%; overflow:auto; padding:16px 18px 18px; box-sizing:border-box;}
+.cl-corpo{height:100%; overflow:auto; padding:28px max(18px, calc(50% - 470px)) 28px; box-sizing:border-box;}
 .cl-corpo.sai-f{animation:cl-sai-f .2s ease-in forwards;}  .cl-corpo.entra-f{animation:cl-entra-f .28s cubic-bezier(.2,.8,.2,1);}
 .cl-corpo.sai-t{animation:cl-sai-t .2s ease-in forwards;}  .cl-corpo.entra-t{animation:cl-entra-t .28s cubic-bezier(.2,.8,.2,1);}
 @keyframes cl-sai-f{to{opacity:0; transform:translateX(-28px) scale(.985); filter:blur(2px)}}
@@ -69,13 +71,13 @@ const CSS = `
 @media (prefers-reduced-motion: reduce){
   .cl-corpo.sai-f,.cl-corpo.sai-t,.cl-corpo.entra-f,.cl-corpo.entra-t,.cl-vinheta.on,.cl-modal,.cl-fundo{animation-duration:1ms !important;}
 }
-.cl-etapa-t{font:500 13px var(--font,'Segoe UI',sans-serif); margin:0 0 2px;}
-.cl-etapa-s{font-size:11px; color:var(--text-4,#7a7a7a); margin:0 0 14px; line-height:1.5;}
-.cl-grade{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 14px;}
+.cl-etapa-t{font:500 16px var(--font,'Segoe UI',sans-serif); margin:0 0 4px;}
+.cl-etapa-s{font-size:12px; color:var(--text-4,#7a7a7a); margin:0 0 20px; line-height:1.5;}
+.cl-grade{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px 18px;}
 .cl-campo{display:flex; flex-direction:column; gap:4px; min-width:0;}
-.cl-campo > label{font-size:11px; color:var(--text-3,#9a9a9a);}
+.cl-campo > label{font-size:12px; color:var(--text-3,#9a9a9a);}
 .cl-campo > label b{color:var(--warn,#ffb74d); font-weight:500;}
-.cl-campo .input, .cl-campo select{width:100%; box-sizing:border-box; min-height:30px;}
+.cl-campo .input, .cl-campo select{width:100%; box-sizing:border-box; min-height:34px;}
 .cl-campo.erro .input{box-shadow:inset 0 0 0 1px var(--err,#ff6b6b);}
 .cl-campo .dica{font-size:10px; color:var(--text-4,#7a7a7a); line-height:1.4;}
 .cl-larga{grid-column:1 / -1;}
@@ -87,10 +89,10 @@ const CSS = `
 .cl-sug:hover{border-color:var(--hi,#4fc3f7); color:var(--text,#d8d8d8);}
 .cl-sug[aria-pressed="true"]{border-color:var(--hi,#4fc3f7); color:var(--hi,#4fc3f7);}
 /* a etapa do desenho: duas colunas, o quadro com o desenho e o seletor embaixo */
-.cl-des{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px;}
+.cl-des{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px;}
 .cl-des-col{display:flex; flex-direction:column; gap:6px; min-width:0;}
 .cl-des-rot{font-size:11px; color:var(--text-3,#9a9a9a);}
-.cl-quadro{aspect-ratio:1; width:100%; max-height:240px; border-radius:8px; background:#121212; display:grid; place-items:center;
+.cl-quadro{width:100%; height:clamp(220px, 42vh, 460px); border-radius:8px; background:#060607; display:grid; place-items:center;
   box-shadow:inset 0 0 0 1px var(--line,#3a3a3a); overflow:hidden;}
 .cl-quadro .cl-svg{width:88%; height:88%;}
 .cl-quadro-vazio{font-size:11px; color:var(--text-4,#7a7a7a);}
@@ -103,12 +105,12 @@ const CSS = `
 .cl-sel-painel{margin-top:4px; border:1px solid var(--line,#3a3a3a); border-radius:6px; background:var(--bg-3,#1c1c1c); padding:6px;
   animation:cl-fade .14s ease-out;}
 .cl-sel-painel .input{width:100%; box-sizing:border-box; min-height:28px; margin-bottom:6px;}
-.cl-sel-lista{max-height:260px; overflow:auto;}
+.cl-sel-lista{max-height:min(340px, 40vh); overflow:auto;}
 .cl-sel-it{display:flex; align-items:center; gap:8px; width:100%; border:0; background:transparent; color:var(--text,#d8d8d8);
   padding:4px 6px; border-radius:5px; cursor:pointer; font:inherit; text-align:left;}
 .cl-sel-it:hover, .cl-sel-it.foco{background:rgba(255,255,255,.06);}
 .cl-sel-it[aria-selected="true"]{box-shadow:inset 2px 0 0 var(--hi,#4fc3f7);}
-.cl-sel-it .th{flex:none; width:42px; height:42px; border-radius:5px; background:#121212; display:grid; place-items:center; overflow:hidden;}
+.cl-sel-it .th{flex:none; width:52px; height:52px; border-radius:5px; background:#060607; display:grid; place-items:center; overflow:hidden;}
 .cl-sel-it .th .cl-svg{width:86%; height:86%;}
 .cl-sel-it .th-vazio{font-size:12px; color:var(--text-4,#7a7a7a);}
 .cl-sel-it .tx{display:flex; flex-direction:column; min-width:0;}
@@ -123,7 +125,25 @@ const CSS = `
 .cl-conf.ok{border-color:var(--ok,#00e676);} .cl-conf.err{border-color:var(--warn,#ffb74d);}
 .cl-conf ul{margin:4px 0 0 16px; padding:0;} .cl-conf li{margin:2px 0;}
 .cl-conf .np{font:12px var(--mono,Consolas,monospace);}
-.cl-pe{display:flex; align-items:center; gap:8px; padding:12px 18px; border-top:1px solid var(--line,#3a3a3a);}
+.cl-pe{display:flex; align-items:center; gap:8px; padding:12px max(18px, calc(50% - 470px)); box-shadow:inset 0 1px 0 var(--line,#3a3a3a);}
+.cl-pe .cl-apagar{color:var(--err,#ff6b6b);}
+.cl-pe .cl-apagar.confirma{background:var(--err,#ff6b6b); color:#000; border-color:var(--err,#ff6b6b);}
+/* a caixa de confirmar o apagar (o menu da lista chama sem abrir o modal inteiro) */
+.cl-conf-apagar{width:min(440px,100%); height:auto; padding:18px 20px 14px;}
+.cl-conf-apagar h3{margin:0 0 8px; font:600 14px var(--font,'Segoe UI',sans-serif); color:var(--err,#ff6b6b);}
+.cl-conf-apagar p{margin:0 0 4px; font-size:12px; color:var(--text-2,#b8b8b8); word-break:break-word;}
+.cl-conf-apagar .cl-pe{padding:14px 0 0; box-shadow:none;}
+/* o combo (família, encapsulamento): o campo de texto com a lista do que já existe embaixo */
+.cl-combo{position:relative;}
+.cl-combo-lista{position:absolute; left:0; right:0; top:calc(100% + 3px); z-index:5; max-height:240px; overflow:auto;
+  background:var(--surface,#1a1a1d); border-radius:6px; box-shadow:var(--shadow-menu,0 0 0 1px rgba(255,255,255,.16),0 16px 40px rgba(0,0,0,.65));
+  padding:4px;}
+.cl-combo-it{display:flex; align-items:baseline; gap:8px; width:100%; border:0; background:transparent; color:var(--text,#d8d8d8);
+  padding:5px 8px; border-radius:4px; cursor:pointer; font:inherit; font-size:12px; text-align:left;}
+.cl-combo-it:hover, .cl-combo-it.foco{background:rgba(255,255,255,.07);}
+.cl-combo-it .nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.cl-combo-it .mt{font-size:10px; color:var(--text-4,#7a7a7a); white-space:nowrap;}
+.cl-combo-sec{font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-4,#7a7a7a); padding:6px 8px 2px;}
 .cl-pe .sep{flex:1;}
 .cl-apagar.confirma{color:var(--err,#ff6b6b);}
 `;
@@ -202,12 +222,16 @@ async function abre(o){
   const modal = nel('div', 'cl-modal');
   modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
   fundo.append(modal);
-  fundo.addEventListener('mousedown', e => { if (e.target === fundo) fecha(); });
+  /* clicar fora NÃO fecha (pedido do dono, 2026-11-04): só o × ou o Esc */
   M = { fundo, modal, passo: 0, F, c, aoSalvar: o.aoSalvar, ocupado: false, erros: {}, apagando: false };
   M.tecla = e => {
     /* o Esc dentro da lista aberta fecha só a lista (quem trata é o seletor) */
-    if (e.key === 'Escape'){ if (e.target && e.target.closest && e.target.closest('.cl-sel.aberto')) return; e.preventDefault(); e.stopPropagation(); fecha(); }
-    else if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && !e.isComposing && !e.target.closest('.cl-sel')){ e.preventDefault(); avanca(); }
+    const dentro = sel => !!(e.target && e.target.closest && e.target.closest(sel));
+    if (e.key === 'Escape'){ if (dentro('.cl-sel.aberto, .cl-combo.aberto')) return; e.preventDefault(); e.stopPropagation(); fecha(); }
+    else if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && !e.isComposing
+             && !dentro('.cl-sel') && !(dentro('.cl-combo.aberto') && e.target.closest('.cl-combo').querySelector('.cl-combo-it.foco'))){
+      e.preventDefault(); avanca();
+    }
   };
   document.addEventListener('keydown', M.tecla, true);
   document.body.append(fundo);
@@ -291,9 +315,16 @@ function focaPrimeiro(){
 function pintaEtapa(){
   if (!M) return;
   pintaPassos();
+  /* redesenhar (as regras do Odoo chegaram, a família mudou) não tira o cursor de quem está digitando */
+  const ativo = document.activeElement, kAtivo = ativo && M.corpo.contains(ativo) && ativo.dataset ? ativo.dataset.k : null;
+  const pos = kAtivo && typeof ativo.selectionStart === 'number' ? [ativo.selectionStart, ativo.selectionEnd] : null;
   const corpo = M.corpo; corpo.textContent = '';
   [etapaEssencial, etapaOdoo, etapaDesenho, etapaRevisar][M.passo](corpo);
   pintaPe();
+  if (kAtivo){
+    const i = corpo.querySelector('[data-k="' + kAtivo + '"]');
+    if (i){ i.focus(); if (pos) try { i.setSelectionRange(pos[0], pos[1]); } catch (e) {} }
+  }
 }
 
 function pintaPe(){
@@ -326,7 +357,7 @@ function etapaEssencial(corpo){
   g.append(campoLivre('nome', 'Nome', { obrig: true, larga: true, ph: 'Regulador LDO 3.3V, Sensor de temperatura…',
     dica: M.c ? 'é o nome gravado nos esquemas: trocar não muda os já colocados' : 'como ele aparece na biblioteca' }));
   g.append(campo('x_mpn', { obrig: true, ph: 'AMS1117-3.3' }));
-  g.append(campo('x_encapsulamento', { obrig: true, ph: 'SOT-223', sugestoes: encTodos() }));
+  g.append(campo('x_encapsulamento', { obrig: true, ph: 'SOT-223', combo: gruposEnc }));
   g.append(campo('x_pinos', { obrig: true, tipo: 'number', ph: '3', dica: 'sem símbolo escolhido, ele ganha um com esses pinos' }));
   g.append(campoLivre('link', 'Link', { obrig: true, ph: 'https://… (datasheet ou página do produto)', tipo: 'url' }));
   corpo.append(g);
@@ -351,7 +382,7 @@ function etapaOdoo(corpo){
     });
   }
   const g = nel('div', 'cl-grade');
-  g.append(campo('x_familia', { lista: listaDe('x_familia'), muda: () => pintaEtapa() }));
+  g.append(campo('x_familia', { combo: gruposFam, ph: 'CAPACITOR, RESISTOR, CI…', muda: () => pintaEtapa() }));
   g.append(campo('x_montagem', { lista: listaDe('x_montagem') || [['smd', 'SMD'], ['pth', 'PTH']] }));
   g.append(campo('x_fabricante'));
   g.append(campo('x_designator', { ph: 'U, Q, D…' }));
@@ -694,14 +725,18 @@ function campoGenerico(k, rot, o){
     if (o.tipo === 'number'){ i.min = '1'; i.step = '1'; }
     i.value = valorDe(k) == null ? '' : valorDe(k);
     if (o.ph) i.placeholder = o.ph;
-    i.oninput = () => { poeValor(k, i.value); d.classList.remove('erro'); if (M.passo === 0) pintaPassos(); };
-    if (o.sugestoes && o.sugestoes.length){
+    i.dataset.k = k;
+    i.oninput = e => { poeValor(k, e.target.value); d.classList.remove('erro'); if (M.passo === 0) pintaPassos(); };
+    if (o.combo){
+      d.append(combo(i, k, o.combo, o.muda));     /* o combo embrulha o campo */
+      i = null;
+    } else if (o.sugestoes && o.sugestoes.length){
       const dl = nel('datalist'); dl.id = 'cl-dl-' + (++nDl);
       for (const s of o.sugestoes.slice(0, 5000)){ const op = nel('option'); op.value = s; dl.append(op); }
       i.setAttribute('list', dl.id); d.append(dl);
     }
   }
-  d.append(i);
+  if (i) d.append(i);
   if (M.erros[k]) d.append(nel('div', 'dica', M.erros[k]));
   else if (o.dica) d.append(nel('div', 'dica', o.dica));
   if (o.chips && o.chips.length){
@@ -715,6 +750,75 @@ function campoGenerico(k, rot, o){
     d.append(sg);
   }
   return d;
+}
+
+/* O COMBO (família e encapsulamento): o campo continua livre, e embaixo dele abre a lista do que JÁ EXISTE — na
+   biblioteca (com quantos componentes usam) e no cadastro do Odoo —, filtrada pelo que se digita. Setas e Enter
+   escolhem; Esc fecha só a lista. `grupos` = [{titulo, itens:[{v, rot?, meta?}]}] (uma função, para ler na hora). */
+function combo(i, k, grupos, muda){
+  const w = nel('div', 'cl-combo');
+  const lista = nel('div', 'cl-combo-lista'); lista.hidden = true;
+  w.append(i, lista);
+  let vis = [], foco = -1;
+  const escolhe = it => {
+    i.value = it.v; poeValor(k, it.v); fecha();
+    if (muda) i.blur();        /* o redesenho do muda não reabre a lista */
+    w.closest('.cl-campo') && w.closest('.cl-campo').classList.remove('erro');
+    if (M.passo === 0) pintaPassos();
+    if (muda) muda();
+  };
+  const pinta = () => {
+    const q = chave(i.value);
+    lista.textContent = ''; vis = [];
+    const vistos = new Set();
+    for (const g of (typeof grupos === 'function' ? grupos() : grupos)){
+      const its = g.itens.filter(it => {
+        const c = chave(it.v);
+        if (vistos.has(c)) return false;
+        return !q || c.includes(q) || chave(it.rot).includes(q);
+      }).slice(0, 80);
+      if (!its.length) continue;
+      lista.append(nel('div', 'cl-combo-sec', g.titulo));
+      for (const it of its){
+        vistos.add(chave(it.v));
+        const b = nel('button', 'cl-combo-it'); b.type = 'button'; b.tabIndex = -1;
+        b.append(nel('span', 'nm', it.rot || it.v));
+        if (it.meta) b.append(nel('span', 'mt', it.meta));
+        b.onmousedown = e => { e.preventDefault(); escolhe(it); };
+        vis.push({ it, b });
+        lista.append(b);
+      }
+    }
+    foco = -1;
+    lista.hidden = !vis.length;
+    w.classList.toggle('aberto', !lista.hidden);
+  };
+  const fecha = () => { lista.hidden = true; w.classList.remove('aberto'); };
+  const marca = () => vis.forEach((x, n) => { x.b.classList.toggle('foco', n === foco); if (n === foco) x.b.scrollIntoView({ block: 'nearest' }); });
+  i.addEventListener('focus', pinta);
+  i.addEventListener('mousedown', () => { if (lista.hidden) setTimeout(pinta, 0); });
+  i.addEventListener('input', pinta);
+  i.addEventListener('blur', () => setTimeout(fecha, 120));
+  if (muda) i.addEventListener('change', muda);
+  i.addEventListener('keydown', e => {
+    if (lista.hidden) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault();
+      foco = Math.max(0, Math.min(vis.length - 1, foco + (e.key === 'ArrowDown' ? 1 : -1))); marca();
+    } else if (e.key === 'Enter' && foco >= 0){ e.preventDefault(); escolhe(vis[foco].it); }
+    else if (e.key === 'Escape'){ e.preventDefault(); fecha(); }
+  });
+  return w;
+}
+const usos = n => n + (n === 1 ? ' componente' : ' componentes');
+function gruposEnc(){
+  const bib = ((ST.opcoes && ST.opcoes.encapsulamentos) || []).map(e => ({ v: e.nome, meta: usos(e.usos) }));
+  return [{ titulo: 'na biblioteca', itens: bib }, { titulo: 'no cadastro do Odoo', itens: encTodos().map(v => ({ v })) }];
+}
+function gruposFam(){
+  const bib = ((ST.opcoes && ST.opcoes.familias) || []).map(f => ({ v: f.nome, meta: usos(f.usos) }));
+  const odoo = (listaDe('x_familia') || []).map(p => ({ v: String(p[0]), rot: String(p[1] != null ? p[1] : p[0]) }));
+  return [{ titulo: 'na biblioteca', itens: bib }, { titulo: 'no cadastro do Odoo', itens: odoo }];
 }
 
 /* o essencial: os cinco obrigatórios */
@@ -805,6 +909,39 @@ async function apagar(){
   if (fn) fn(null);
 }
 
-return { abre, fecha, estado: ST, _errosEssencial: () => M ? errosEssencial() : null };
+/* APAGAR SEM ABRIR O MODAL (o menu do clique direito na lista): a caixa de confirmar, na cara do modal. Só usa o
+   POST de apagar, então funciona mesmo quando a ficha não abre. `aoSalvar(null)` recarrega a lista. */
+function confirmaApagar(o){
+  poeCss();
+  if (M) fecha(true);
+  const fundo = nel('div', 'cl-fundo');
+  const caixa = nel('div', 'cl-modal cl-conf-apagar');
+  caixa.setAttribute('role', 'alertdialog'); caixa.setAttribute('aria-modal', 'true');
+  caixa.append(nel('h3', null, 'Apagar componente local'));
+  caixa.append(nel('p', null, '"' + (o.nome || o.id) + '" sai da biblioteca.'));
+  caixa.append(nel('p', null, 'Os esquemas que já usam este componente ficam com o quadrado vermelho no lugar dele.'));
+  const pe = nel('div', 'cl-pe');
+  const nao = nel('button', 'btn btn-ghost btn-sm', 'Cancelar'); nao.type = 'button';
+  const sim = nel('button', 'btn btn-sm cl-apagar confirma', 'Apagar'); sim.type = 'button';
+  pe.append(nel('span', 'sep'), nao, sim);
+  caixa.append(pe);
+  fundo.append(caixa);
+  const sai = () => { document.removeEventListener('keydown', tecla, true); fundo.remove(); };
+  const tecla = e => { if (e.key === 'Escape'){ e.preventDefault(); e.stopPropagation(); sai(); } };
+  document.addEventListener('keydown', tecla, true);
+  nao.onclick = sai;
+  sim.onclick = async () => {
+    sim.disabled = nao.disabled = true; sim.textContent = 'Apagando…';
+    const r = await api('/api/locais/' + encodeURIComponent(o.id) + '/apagar', {});
+    if (!r.ok){ sim.disabled = nao.disabled = false; sim.textContent = 'Apagar'; return toast('não apagou: ' + r.error, 'err'); }
+    sai();
+    toast('componente local apagado', 'ok');
+    if (o.aoSalvar) o.aoSalvar(null);
+  };
+  document.body.append(fundo);
+  nao.focus();
+}
+
+return { abre, fecha, confirmaApagar, estado: ST, _errosEssencial: () => M ? errosEssencial() : null };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubCompLocal;

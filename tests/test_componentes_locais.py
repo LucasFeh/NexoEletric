@@ -126,6 +126,21 @@ class Locais(unittest.TestCase):
         self.assertEqual(CL.resumo(s3)['simboloDe'], 'biblioteca')
         self.assertEqual([p['name'] for p in s3['parts'][0]['pins']], ['B', 'E', 'C'])
 
+    def test_opcoes_trazem_familias_e_encapsulamentos_existentes(self):
+        """O combo do modal oferece o que já existe: as famílias e os pacotes dos acervos e dos locais."""
+        basicos = {'symbols': [dict(FAMILIA_R, valores=[{'id': 1, 'pkgs': ['0603']}, {'id': 2, 'pkgs': ['0603', '0805']}]),
+                               FAMILIA_Q]}
+        escreve(self.raiz, 'almox-basicos.js', 'almoxBasicos', basicos)
+        CL._cache.clear()
+        self.cria()
+        o = CL.opcoes(self.raiz)
+        fams = {f['nome']: f['usos'] for f in o['familias']}
+        encs = {e['nome']: e['usos'] for e in o['encapsulamentos']}
+        self.assertEqual(fams['RESISTOR'], 2)
+        self.assertIn('TRANSISTOR', fams)
+        self.assertEqual(encs, {'0603': 2, '0805': 1, 'SOT-23': 1})
+        self.assertEqual(o['encapsulamentos'][0]['nome'], '0603')     # o mais usado primeiro
+
     def test_recusas(self):
         with self.assertRaises(CL.ErroLocal):
             self.cria(simbolo='NAO EXISTE')

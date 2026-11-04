@@ -269,7 +269,28 @@ def opcoes(root):
             if n and n not in vf:
                 vf.add(n)
                 fps.append(n)
-    return {'simbolos': sims, 'footprints': sorted(fps, key=lambda x: x.lower())}
+    # as familias e os encapsulamentos que JA EXISTEM na biblioteca (pedido do dono, 2026-11-04: "se ja tem um
+    # componente dip8, ele precisa aparecer como opcao no encap; mesma coisa pra familia"), com quantos usam cada um
+    fams, encs = {}, {}
+    acervos = [(libs.get(c) or {}).get('symbols') or [] for c in ('basicos', 'especiais')]
+    try:
+        acervos.append(le(root).get('symbols') or [])
+    except ErroLocal:
+        pass
+    for simbolos in acervos:
+        for s in simbolos:
+            f = _limpa_txt(s.get('familia')).upper()
+            vals = s.get('valores') or []
+            if f:
+                fams[f] = fams.get(f, 0) + max(1, len(vals))
+            for v in vals:
+                for p in v.get('pkgs') or []:
+                    p = _limpa_txt(p)
+                    if p:
+                        encs[p] = encs.get(p, 0) + 1
+    ordena = lambda d: [{'nome': k, 'usos': n} for k, n in sorted(d.items(), key=lambda kv: (-kv[1], kv[0].lower()))]
+    return {'simbolos': sims, 'footprints': sorted(fps, key=lambda x: x.lower()),
+            'familias': ordena(fams), 'encapsulamentos': ordena(encs)}
 
 
 def _footprint_existe(root, nome):

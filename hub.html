@@ -2152,18 +2152,32 @@ function alxFormCred(box, cfg, aoGravar) {
    componente local para editar (a tag da linha chama assim). */
 function libNovoComp(id) {
   if (typeof HubCompLocal === 'undefined') return toast('o hub-complocal.js não carregou', 'err');
-  HubCompLocal.abre({ id, aoSalvar: async c => {
-    LIB.cache = {}; LIB.ready = false; LIB.loading = null; libBust = Date.now();
-    await loadLibs();
-    if (c && c.nome && LIB.symBy.has(c.nome)) {
-      const s = LIB.symBy.get(c.nome);
-      S.lib.sel = { k: 'sym', name: c.nome };
-      S.lib.valor = (alxValores(s)[0] || {}).id || 0;
-      S.lib.valQ = ''; S.lib.fpShown = null;
-      S.lib.q = ''; const busca = $('#libSearch'); if (busca) busca.value = '';
-    }
-    if (S.tab === 'lib' || S.tab === 'libfp') renderLib();
-  } });
+  HubCompLocal.abre({ id, aoSalvar: libLocalSalvo });
+}
+/* o clique direito num componente criado localmente: editar ou apagar (o apagar não depende da ficha abrir) */
+function menuLocal(x, y, s) {
+  const id = s.criadoLocal && s.criadoLocal.id;
+  if (!id || typeof HubCompLocal === 'undefined') return;
+  menuNoPonto(x, y, [
+    { l: 'Editar componente…', c: 'abre a ficha em etapas', on: () => libNovoComp(id) },
+    { l: 'Apagar componente local…', c: 'tira "' + s.name + '" da biblioteca', on: () =>
+        HubCompLocal.confirmaApagar({ id, nome: s.name, aoSalvar: libLocalSalvo }) },
+  ]);
+}
+/* depois de salvar (c) ou apagar (null): a lista recarrega, com o salvo selecionado */
+async function libLocalSalvo(c) {
+  LIB.cache = {}; LIB.ready = false; LIB.loading = null; libBust = Date.now();
+  await loadLibs();
+  if (c && c.nome && LIB.symBy.has(c.nome)) {
+    const s = LIB.symBy.get(c.nome);
+    S.lib.sel = { k: 'sym', name: c.nome };
+    S.lib.valor = (alxValores(s)[0] || {}).id || 0;
+    S.lib.valQ = ''; S.lib.fpShown = null;
+    S.lib.q = ''; const busca = $('#libSearch'); if (busca) busca.value = '';
+  } else if (!c && S.lib.sel && !LIB.symBy.has(S.lib.sel.name)) {
+    S.lib.sel = null; S.lib.fpShown = null;
+  }
+  if (S.tab === 'lib' || S.tab === 'libfp') renderLib();
 }
 
 /* Recarrega tudo que veio de Libs\ depois da sincronização: índice, diff e o acervo
@@ -2833,6 +2847,8 @@ function renderLibAlmox() {
         + 'tiver a peça. Clique para editar.';
       p.onclick = e => { e.stopPropagation(); libNovoComp(s.criadoLocal.id); };
       b.append(p);
+      b.title = s.name + '\nclique direito: editar ou apagar';
+      b.oncontextmenu = e => { e.preventDefault(); menuLocal(e.clientX, e.clientY, s); };
     } else {
       const q2 = el('span', 'mt', alxQtd(est));
       q2.style.color = est > 0 ? 'var(--ok)' : 'var(--text-4)';

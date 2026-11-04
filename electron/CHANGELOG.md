@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.67.0 — 2026-11-04
+
+**O componente local se apaga pela lista, e o modal ganha a cara do "Trocar componente".**
+- **Apagar:** o clique direito num componente criado localmente abre "Editar componente…" e "Apagar componente
+  local…". O apagar confirma numa caixa no tema, sem abrir a ficha. Antes, o único caminho era abrir a ficha pela
+  tag, e a ficha não abre sem o Nexo Hub conectado.
+- **Família e encapsulamento** abrem a lista do que já existe enquanto se digita: o que está na biblioteca, com
+  quantos componentes usam, e o que está no cadastro do Odoo. O "DIP8" de um componente que já existe aparece como
+  opção. Setas e Enter escolhem, e o campo continua aceitando um valor novo. O `/api/locais/opcoes` traz
+  `familias` e `encapsulamentos`.
+- **O modal:** fundo preto (o da página), a 14 px das bordas da janela e com o cabeçalho do "Trocar componente". Os
+  quadros do símbolo e do footprint e as miniaturas da lista ficaram maiores.
+- **Fechar:** clicar fora não fecha mais o modal; só o × (ou o Esc).
+
 ## 1.66.0 — 2026-11-04
 
 **O componente novo nasce num modal, e a lista da Biblioteca fica limpa.**
