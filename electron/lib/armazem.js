@@ -295,9 +295,9 @@ function fonteEfetiva(hubDir, ws, fonte) {
 async function renomearProjetos({ cliente, raiz, renomear = [], estado, boms = {}, lixeira, log = () => {} }) {
   const { espelho } = await modulos();
   const S = espelho.SISTEMA_PROJETO;
-  // outro NexoBD (ou a primeira rodada): a memoria nao vale la (espelharProjetos a zera), so a chave do item troca
-  const mesmoBD = estado.bd === await espelho.identidadeBD(cliente);
-  estado.projetos ??= {};
+  // outro NexoBD (ou o mesmo com outra identidade): so vale a memoria dos itens que ele conhece (1.70.1). Antes ela era
+  // zerada aqui, e a pasta com o nome velho de um projeto renomeado em outra maquina subia como projeto novo.
+  await espelho.memoriaDoBD(cliente, estado);
   const vivos = await espelho.listarProjetos(cliente);
   const existe = (nome) => fs.existsSync(path.join(raiz, nome));
   const moveEstado = (de, para) => {
@@ -340,7 +340,7 @@ async function renomearProjetos({ cliente, raiz, renomear = [], estado, boms = {
   }
   // o que outra maquina renomeou: a pasta daqui ainda tem o nome velho e a memoria aponta para o item que mudou de chave
   const porId = new Map([...vivos].map(([nome, it]) => [it.id, nome]));
-  for (const [de, est] of mesmoBD ? Object.entries(estado.projetos) : []) {
+  for (const [de, est] of Object.entries(estado.projetos)) {
     if (!est || !est.item || vivos.has(de)) continue;
     const para = porId.get(est.item);
     if (!para || para === de || estado.projetos[para] || !existe(de) || existe(para) || !espelho.nomeDePastaOk(para)) continue;

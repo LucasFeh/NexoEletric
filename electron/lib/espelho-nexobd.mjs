@@ -267,6 +267,47 @@ export async function identidadeBD(cliente) {
   return `${s.bd?.maquina ?? s.maquina ?? "?"}|${s.bd?.dados ?? s.dados ?? "?"}`;
 }
 
+/** Os ids de todos os projetos que o NexoBD conhece, vivos e apagados. */
+async function idsDeProjetos(cliente) {
+  const ids = new Set();
+  for (let pagina = 1; ; pagina++) {
+    const r = await cliente.itens({ tipo: "projeto", apagados: 1, limite: 500, pagina });
+    for (const it of r.itens) ids.add(it.id);
+    if (pagina * 500 >= r.total || !r.itens.length) break;
+  }
+  return ids;
+}
+
+const MAX_OUTROS_BD = 4;
+
+/**
+ * A memória do espelho de projetos (estado = {bd, projetos, outrosBD}) para o NexoBD em que o cliente está agora (1.70.1).
+ * A identidade (máquina|pasta) muda quando o banco vai para outra máquina, ou quando o Hub troca de NexoBD e volta. Zerar
+ * a memória nessa hora fazia de toda pasta com nome velho (renomeada ou apagada em outra máquina) um projeto novo, e o
+ * antigo voltava para todo mundo. Agora:
+ *  - a memória deste banco, se já esteve aqui, volta (a do banco de antes fica guardada em outrosBD);
+ *  - senão, fica a memória dos itens que este banco também tem (os ids viajam com o banco); o resto é de outro banco.
+ */
+export async function memoriaDoBD(cliente, estado) {
+  const bd = await identidadeBD(cliente);
+  estado.projetos ??= {};
+  if (estado.bd === bd) return false;
+  const memoria = estado.projetos;
+  estado.outrosBD ??= {};
+  const guardada = estado.outrosBD[bd];
+  delete estado.outrosBD[bd];
+  if (estado.bd) estado.outrosBD[estado.bd] = memoria;
+  const nomes = Object.keys(estado.outrosBD);
+  for (const n of nomes.slice(0, Math.max(0, nomes.length - MAX_OUTROS_BD))) delete estado.outrosBD[n];
+  if (guardada) estado.projetos = guardada;
+  else {
+    const ids = Object.keys(memoria).length ? await idsDeProjetos(cliente) : new Set();
+    estado.projetos = Object.fromEntries(Object.entries(memoria).filter(([, est]) => est?.item && ids.has(est.item)));
+  }
+  estado.bd = bd;
+  return true;
+}
+
 /** Os projetos do NexoEletric no NexoBD: {nome → item resumido} (vivos) e os nomes dos apagados. */
 export async function listarProjetos(cliente) {
   const vivos = new Map();
@@ -291,11 +332,9 @@ export async function listarProjetos(cliente) {
  */
 export async function espelharProjetos({ cliente, raiz, estado, modo = "ambos", apagar = [], lixeira, conflitos, app, log = () => {}, nota }) {
   const out = { projetos: {}, erros: [], apagadosNoNexoBD: [], removidosDaqui: [] };
-  // outro NexoBD (o Hub foi religado em outro banco): a memória da última rodada não vale lá. Sem ela, nada daqui é
-  // tomado por "apagado no NexoBD"; as pastas que o banco novo não tem sobem para ele.
-  const bd = await identidadeBD(cliente);
-  if (estado.bd !== bd) { estado.projetos = {}; estado.bd = bd; }
-  estado.projetos ??= {};
+  // outro NexoBD (ou o mesmo com outra identidade): vale só a memória dos itens que ele conhece (memoriaDoBD). Sem
+  // memória, nada daqui é tomado por "apagado no NexoBD"; as pastas que o banco não tem sobem para ele.
+  await memoriaDoBD(cliente, estado);
   const vivos = await listarProjetos(cliente);
 
   const tirarDaqui = (nome) => {

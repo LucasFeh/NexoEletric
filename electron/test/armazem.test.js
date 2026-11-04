@@ -127,6 +127,42 @@ test('renomear projeto (1.45.0): o mesmo item troca de chave e nome, nada volta 
   assert.equal(le(B, 'Projects/Fonte 24V/grupo.json'), '{"grupo":"Painel"}');
 });
 
+test('NexoBD com outra identidade (mudou de máquina, ou o Hub voltou para ele): a memória dos itens que ele tem vale — o renomeado e o apagado em outra máquina não voltam com o nome velho (1.70.1)', { skip: pula }, async () => {
+  const A = path.join(tmp, 'idA'), B = path.join(tmp, 'idB');
+  const eA = {}, eB = {};
+  escreve(A, 'Projects/MIRBC_X/schematic.js', 'var schematic={"v":1}');
+  escreve(A, 'Projects/PLACAB_X/schematic.js', 'var schematic={"v":1}');
+  await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
+  await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB });
+  const item = (await cliente.chave('nexoeletric-projeto', 'MIRBC_X')).id;
+  // A renomeia um, edita, e apaga o outro, enquanto B está fora
+  fs.mkdirSync(path.join(A, '.altiumhub'), { recursive: true });
+  fs.writeFileSync(armazem.ARQ_RENOMEAR(A), JSON.stringify([{ de: 'MIRBC_X', para: 'MIRBC-XDRV' }]));
+  fs.renameSync(path.join(A, 'Projects', 'MIRBC_X'), path.join(A, 'Projects', 'MIRBC-XDRV'));
+  escreve(A, 'Projects/MIRBC-XDRV/schematic.js', 'var schematic={"v":2}');
+  fs.renameSync(path.join(A, 'Projects', 'PLACAB_X'), path.join(tmp, 'lixo-PLACAB_X'));
+  fs.writeFileSync(armazem.ARQ_APAGAR(A), JSON.stringify(['PLACAB_X']));
+  await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA });
+  // B volta, e o NexoBD agora se identifica de outro jeito (o banco foi para outra máquina / outra pasta)
+  eB.projetos.bd = 'ServAntigo|D:\\NexoBD';
+  const rB = await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB });
+  assert.equal(await cliente.chave('nexoeletric-projeto', 'MIRBC_X'), null, 'o nome velho não vira projeto novo');
+  assert.equal(await cliente.chave('nexoeletric-projeto', 'PLACAB_X'), null, 'o apagado não volta');
+  assert.equal((await cliente.chave('nexoeletric-projeto', 'MIRBC-XDRV')).id, item);
+  assert.equal(fs.existsSync(path.join(B, 'Projects', 'MIRBC_X')), false);
+  assert.equal(fs.existsSync(path.join(B, 'Projects', 'PLACAB_X')), false);
+  assert.deepEqual(rB.projetos.removidosDaqui, ['PLACAB_X']);
+  assert.equal(le(B, 'Projects/MIRBC-XDRV/schematic.js'), 'var schematic={"v":2}', 'a edição de A chega, sem conflito');
+  // e se B voltar para o banco de antes, a memória dele está guardada
+  assert.ok(eB.projetos.outrosBD?.['ServAntigo|D:\\NexoBD']);
+  // banco de verdade diferente (os itens da memória não existem nele): a pasta sobe como antes
+  escreve(B, 'Projects/SO_AQUI/schematic.js', 'var schematic={}');
+  eB.projetos.projetos.SO_AQUI = { item: 'pj-que-nao-existe', rev: 3, base: {}, local: {}, cache: {} };
+  eB.projetos.bd = 'OutroBanco|E:\\x';
+  await armazem.rodada({ ws: B, bundle: '', cliente, estado: eB });
+  assert.ok(await cliente.chave('nexoeletric-projeto', 'SO_AQUI'), 'pasta que o banco não conhece sobe');
+});
+
 test('duas máquinas: projeto criado/editado em qualquer uma sobe, e projeto novo no NexoBD aparece na outra; o chat também', { skip: pula }, async () => {
   const A = path.join(tmp, 'maqA'), B = path.join(tmp, 'maqB');
   const eA = {}, eB = {};

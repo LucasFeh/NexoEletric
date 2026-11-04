@@ -4,6 +4,17 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.70.1 — 2026-11-04
+
+**Projeto renomeado ou apagado em outra máquina não volta com o nome velho quando o NexoBD muda de identidade.**
+- A memória do espelho de projetos era zerada sempre que o NexoBD se identificava de outro jeito (máquina|pasta: o banco
+  que foi para outra máquina, ou o Hub que trocou de NexoBD e voltou). Sem ela, a pasta com o nome antigo (o
+  `MIRBC_DI251885`, renomeado para `MIRBC-DI251885DRV` em outra máquina) subia como projeto novo, com o conteúdo velho,
+  e aparecia para todo mundo ao lado do novo; o projeto apagado em outra máquina também voltava.
+- Agora a memória do banco de antes fica guardada (volta se o Hub voltar para ele) e, num banco sem memória, vale a dos
+  itens que ele também tem (os ids viajam com o banco). Assim a pasta renomeada acompanha o nome novo, a apagada vai
+  para a lixeira, e só a pasta que o banco não conhece sobe como projeto novo.
+
 ## 1.70.0 — 2026-11-04
 
 **Novo projeto pelo clique direito, o contorno da placa editável e o menu da folha que abre com um clique.**
