@@ -4,6 +4,16 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.71.0 — 2026-11-04
+
+**O Tab da vista PCB vai até a net inteira, e o terceiro Tab realça a net com os componentes.**
+- **Tab Tab** (com uma trilha, arco ou via selecionado) não para mais no pad: atravessa as vias **e os pads** e
+  seleciona a net inteira, juntando todo cobre livre (trilha, arco, via) com o mesmo nome de net — inclusive o pedaço
+  que só se liga pelo plano ou por outro pad do componente. Sem nome de net, segue a ligação, atravessando o pad.
+- **Tab Tab Tab** (sem mexer na seleção) escurece o resto da placa e realça a net, e acende os **componentes que
+  encostam nela**: a caixa do componente e os outros pads dele aparecem. Esc limpa.
+- O realce do Ctrl+clique numa net também acende os componentes dela.
+
 ## 1.70.1 — 2026-11-04
 
 **Projeto renomeado ou apagado em outra máquina não volta com o nome velho quando o NexoBD muda de identidade.**

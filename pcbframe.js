@@ -2290,14 +2290,15 @@ function desenhaConexoes(){
   const r = conexoes(); if (!r || !r.linhas || !r.linhas.length) return;
   ctx.save(); ctx.strokeStyle = COR.conexao; ctx.lineWidth = px(1); ctx.setLineDash([]); ctx.globalAlpha = 0.9;
   ctx.beginPath();
-  for (const l of r.linhas) { if (REALCE && l.net !== REALCE.net) continue; ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); }
+  for (const l of r.linhas) { if (REALCE && !(REALCE.nets ? REALCE.nets.has(l.net) : l.net === REALCE.net)) continue; ctx.moveTo(l.x1, l.y1); ctx.lineTo(l.x2, l.y2); }
   ctx.stroke(); ctx.restore();
 }
 function realcaNet(net){
   if (!HN || !net) { limpaRealce(); return; }
   let o = null; try { o = HN.objetosDaNet(EB, net); } catch (e) { console.warn('realce:', e); }
-  REALCE = { net, ids:new Set(((o && o.ids) || []).map(String)) };
-  avisoRodape('net ' + net + ': ' + REALCE.ids.size + ' objeto(s) — Esc limpa');
+  const ids = new Set(((o && o.ids) || []).map(String));
+  REALCE = { net, nets:new Set([net]), ids, comps:compsDaNet(ids, [net]) };
+  avisoRodape('net ' + net + ': ' + REALCE.ids.size + ' objeto(s), ' + REALCE.comps.size + ' componente(s) — Esc limpa');
   pede();
 }
 function limpaRealce(){ if (!REALCE) return false; REALCE = null; avisoRodape(''); pede(); return true; }
@@ -2324,6 +2325,21 @@ function desenhaRealce(){
   for (const o of EB.vias || []) if (tem(o)) pinta('via', o);
   for (const c of EB.components || []) for (const o of (c && c.pads) || []) if (tem(o)) pinta('pad', o);
   for (const o of EB.freepads || []) if (tem(o)) pinta('pad', o);
+  /* os componentes que encostam na net (1.71.0): os outros pads deles aparecem, e a caixa acende */
+  for (const i of REALCE.comps || []) {
+    const c = EB.components[i], m = model.comps[i];
+    if (!c || !m || m.deleted) continue;
+    for (const o of c.pads || []) {
+      if (tem(o)) continue;
+      const lay = ehTH(o) ? 'Multi' : o.layer;
+      if (camVisivel(lay)) desenhaObj('pad', o, corDe(lay), { alpha:0.6 });
+    }
+    const cx = caixaComp(m);
+    if (!cx) continue;
+    const P = new Path2D(); pPoli(P, cx);
+    ctx.save(); ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.1; ctx.fill(P);
+    ctx.globalAlpha = 0.95; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = px(1.6); ctx.setLineDash([]); ctx.stroke(P); ctx.restore();
+  }
 }
 /* Tools » Teardrops: os que faltam (onde a trilha e mais fina que o pad/via e ainda nao ha
    teardrop) entram como region_add -- o Gerber e o Altium os recebem como regiao de cobre */
@@ -5465,15 +5481,21 @@ window.addEventListener('blur', () => { if (arrasto) cancelaArrasto(); gesto = n
    2x seleciona tudo conectado, as outras trilhas alem da via") ──
    Com trilha, arco ou via selecionado (ou sob o cursor), o 1o Tab pega a trilha inteira, ponta com
    ponta na mesma camada, ate a via ou o pad; o 2o pega tudo o que se liga, atravessando as vias
-   (para no pad, que e do componente). A conta e o hub-pcbtopologia.js. O Tab seguinte, sem mexer na
-   selecao, fica no 2o nivel. Arrastar a selecao do Tab leva tudo junto, e as vizinhas de fora
-   esticam (o Drag). */
-let ultimoTab = null;        /* { sel, nivel, sementes } */
+   (para no pad, que e do componente). A conta e o hub-pcbtopologia.js. Arrastar a selecao do Tab leva
+   tudo junto, e as vizinhas de fora esticam (o Drag).
+   1.71.0 (pedido do dono: "deve ir para alem dos componentes tambem, selecionar toda net; com um
+   terceiro tab o restante dos itens fiquem opacos e highlightado tambem todos componentes que tocam
+   essa net"): o 2o Tab atravessa o pad tambem e pega a net inteira (netInteira); o 3o, sem mexer na
+   selecao, escurece o resto e realca a net com os componentes que encostam nela (Esc limpa). */
+let ultimoTab = null;        /* { sel, nivel, sementes, r } */
 function tabTopologia(){
   if (!TOPO) return;
   const chaveSel = SEL.map(chave).join('|');
   let nivel = 1, sementes;
-  if (ultimoTab && ultimoTab.sel === chaveSel && SEL.length) { nivel = 2; sementes = ultimoTab.sementes; }
+  if (ultimoTab && ultimoTab.sel === chaveSel && SEL.length) {
+    if (ultimoTab.nivel >= 2) { realcaNetDoTab(ultimoTab.r); return; }
+    nivel = 2; sementes = ultimoTab.sementes;
+  }
   else {
     let base = SEL.filter(a => a && a.m && !a.m.deleted && (a.t === 'track' || a.t === 'arc' || a.t === 'via'));
     if (!base.length && HOVER && HOVER.m && !HOVER.m.deleted && (HOVER.t === 'track' || HOVER.t === 'arc' || HOVER.t === 'via')) base = [HOVER];
@@ -5487,18 +5509,38 @@ function tabTopologia(){
     if (!sementes.tracks.length && !sementes.arcs.length) nivel = 2;
   }
   let r;
-  try { r = nivel === 1 ? TOPO.trilhaAteVia(EB, sementes) : TOPO.tudoLigado(EB, sementes); }
+  try { r = nivel === 1 ? TOPO.trilhaAteVia(EB, sementes) : (TOPO.netInteira || TOPO.tudoLigado)(EB, sementes); }
   catch (e) { console.warn('topologia:', e); return; }
   const lista = [];
   for (const id of [].concat(r.tracks || [], r.arcs || [], r.vias || [])) { const al = alvoDoEb(id); if (al && lista.indexOf(al) < 0) lista.push(al); }
   for (const id of sementes.vias) { const al = alvoDoEb(id); if (al && lista.indexOf(al) < 0) lista.push(al); }
   if (!lista.length) return;
   selSo(lista);
-  ultimoTab = { sel:SEL.map(chave).join('|'), nivel, sementes };
+  ultimoTab = { sel:SEL.map(chave).join('|'), nivel, sementes, r };
   const nT = (r.tracks || []).length + (r.arcs || []).length, nV = (r.vias || []).length;
+  const nome = r.nets && r.nets.length ? ' da net ' + r.nets.join(', ') : '';
   avisoRodape(nivel === 1
-    ? 'Tab: ' + nT + ' trilha(s) até a via ou o pad · Tab de novo: tudo o que liga, além da via · arrastar leva tudo junto'
-    : 'Tab Tab: ' + nT + ' trilha(s) e ' + nV + ' via(s) ligadas · arrastar leva tudo junto');
+    ? 'Tab: ' + nT + ' trilha(s) até a via ou o pad · Tab de novo: a net inteira · arrastar leva tudo junto'
+    : 'Tab Tab: ' + nT + ' trilha(s) e ' + nV + ' via(s)' + nome + ' · Tab de novo: realça a net e os componentes (Esc limpa)');
+}
+/* o 3o Tab: o realce da net (o mesmo do Ctrl+clique), com o que o 2o Tab achou -- a net pelo nome, ou, sem
+   nome, o cobre que a ligacao alcancou -- e os componentes que encostam nela */
+function realcaNetDoTab(r){
+  if (!r) return;
+  const nets = r.nets || [];
+  const ids = new Set([].concat(r.tracks || [], r.arcs || [], r.vias || [], r.pads || []).map(String));
+  if (HN) for (const net of nets) { try { for (const id of (HN.objetosDaNet(EB, net).ids || [])) ids.add(String(id)); } catch (e) { console.warn('realce:', e); } }
+  REALCE = { net:nets[0] || '', nets:new Set(nets), ids, comps:compsDaNet(ids, nets) };
+  avisoRodape('Tab Tab Tab: net ' + (nets.length ? nets.join(', ') : '(sem nome)') + ' — ' + ids.size + ' objeto(s), ' + REALCE.comps.size + ' componente(s) — Esc limpa');
+  pede();
+}
+/* os componentes (indice em EB.components) com algum pad na net */
+function compsDaNet(ids, nets){
+  const out = new Set(), ns = new Set(nets || []);
+  (EB.components || []).forEach((c, i) => {
+    if ((c && c.pads || []).some(p => p && (p.id != null && ids.has(String(p.id)) || p.net && ns.has(p.net)))) out.add(i);
+  });
+  return out;
 }
 
 function ehCampo(t){ return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable); }

@@ -43,6 +43,34 @@ t('Tab 2x: atravessa a via, para no pad', () => {
   assert.ok(T.tudoLigado(B, { tracks:['t2'] }).tracks.indexOf('t9') < 0, 'alem do pad e outra ligacao');
 });
 
+t('Tab 2x da net inteira (1.71.0): atravessa via E pad, e junta todo cobre livre com o mesmo nome de net', () => {
+  const B = rota();
+  B.tracks.push(trk('t9', 20, 5, 25, 5));                                   /* alem do pad passante p2 */
+  B.tracks.push(trk('t20', 50, 50, 55, 50));                                /* pedaco solto da mesma net */
+  B.tracks.push(trk('t30', 30, 30, 35, 30, { net:'B' }));                   /* outra net */
+  B.tracks.push(trk('t31', 1, 0.2, 1, 3, { net:'B', layer:'Bottom' }));      /* outra camada, passa debaixo do pad SMD */
+  B.vias.push({ id:'v9', x:55, y:50, size:0.6, drill:0.3, net:'A' });
+  const r = T.netInteira(B, { tracks:['t2'] });
+  assert.deepStrictEqual(ord(r.tracks), ['t1', 't2', 't20', 't3', 't4', 't9']);
+  assert.deepStrictEqual(ord(r.vias), ['v1', 'v9']);
+  assert.deepStrictEqual(ord(r.pads), ['p1', 'p2']);
+  assert.deepStrictEqual(r.nets, ['A']);
+  /* so a via na selecao: a mesma net */
+  assert.deepStrictEqual(ord(T.netInteira(B, { vias:['v9'] }).tracks), ['t1', 't2', 't20', 't3', 't4', 't9']);
+});
+
+t('Tab 2x sem nome de net: segue a ligacao atravessando o pad, e nada solto entra', () => {
+  const sem = { net:'' };
+  const B = placa({
+    freepads:[pad('q1', 5, 10, sem)],
+    tracks:[trk('a1', 0, 10, 5, 10, sem), trk('a2', 5, 10, 10, 10, sem), trk('a3', 40, 10, 45, 10, sem)],
+  });
+  const r = T.netInteira(B, { tracks:['a1'] });
+  assert.deepStrictEqual(ord(r.tracks), ['a1', 'a2']);
+  assert.deepStrictEqual(r.nets, []);
+  assert.deepStrictEqual(ord(r.pads), ['q1']);
+});
+
 t('arrastar UMA trilha: anda paralela, as vizinhas deslizam e o canto de 45° fica', () => {
   const p = T.planoArrasto(rota(), { tracks:['t2'] }, 0, 1);
   geoIgual(p.mov.track.t2, 4, 0, 9, 5, 't2 paralela, uma unidade acima');
@@ -125,6 +153,12 @@ for (const nome of fs.existsSync(PROJ) ? fs.readdirSync(PROJ) : []) {
     const a = T.trilhaAteVia(B, { tracks:[o.id] }), b = T.tudoLigado(B, { tracks:[o.id] });
     assert.ok(a.tracks.map(String).includes(String(o.id)), nome + ': o Tab leva a propria trilha');
     for (const id of a.tracks) assert.ok(b.tracks.includes(id), nome + ': Tab 2x contem o Tab 1x (' + id + ')');
+    const n = T.netInteira(B, { tracks:[o.id] });
+    for (const id of b.tracks) assert.ok(n.tracks.includes(id), nome + ': a net inteira contem a ligacao (' + id + ')');
+    for (const id of n.tracks) {
+      const tr = B.tracks.find(x => x && String(x.id) === String(id));
+      if (tr && tr.net && n.nets.length) assert.ok(n.nets.includes(tr.net), nome + ': so cobre das nets achadas (' + id + ' ' + tr.net + ')');
+    }
     const p = T.planoArrasto(B, { tracks:a.tracks, arcs:a.arcs }, 0.1, 0.1);
     assert.strictEqual(Object.keys(p.mov.track).length, a.tracks.length, nome + ': o grupo anda inteiro');
   }

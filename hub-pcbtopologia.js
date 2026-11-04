@@ -21,7 +21,8 @@
    API
      HubPcbTopologia.grafo(eb)                    -> o indice (cacheado por eb)
      HubPcbTopologia.trilhaAteVia(eb, sementes)   -> { tracks:[id], arcs:[id] }   o Tab 1x
-     HubPcbTopologia.tudoLigado(eb, sementes)     -> { tracks:[id], arcs:[id], vias:[id] }   o Tab 2x
+     HubPcbTopologia.tudoLigado(eb, sementes)     -> { tracks:[id], arcs:[id], vias:[id] }   so a ligacao, ate o pad
+     HubPcbTopologia.netInteira(eb, sementes)     -> { tracks, arcs, vias, pads, nets }   o Tab 2x (1.71.0)
      HubPcbTopologia.planoArrasto(eb, movem, dx, dy)
          -> { mov:{ track:{id:geo}, arc:{id:geo}, via:{id:geo} },   onde cada um que anda fica
               viz:[{ tipo:'track', id, geo }],                      as vizinhas esticadas
@@ -213,6 +214,56 @@ function tudoLigado(eb, sementes){
   return resposta(out, vs);
 }
 
+/* Tab 2x da net inteira (1.71.0, pedido do dono: "deve ir para alem dos componentes tambem, selecionar
+   toda net"): a ligacao ponta com ponta atravessando as vias E os pads (a trilha que sai do outro lado
+   do pad), e depois todo cobre livre (trilha, arco, via) com o mesmo nome de net -- o pedaco que so se
+   liga pelo plano ou por outro pad do componente tambem e da net. Sem nome de net, so a ligacao.
+   -> { tracks, arcs, vias, pads:[id do pad alcancado ou da net], nets:[nome] } */
+function netInteira(eb, sementes){
+  const g = grafo(eb), vistos = new Set(), viasV = new Set(), padsV = new Set();
+  const fila = sementesDe(g, sementes), out = [], vs = [], ps = [];
+  const poe = s => { if (!vistos.has(s)) { vistos.add(s); fila.push(s); } };
+  const daVia = v => { for (const e of g.pontasEm(v.o.x, v.o.y, v.r + TOL, null)) poe(e.seg); };
+  const poeVia = v => { if (!viasV.has(v)) { viasV.add(v); vs.push(v); daVia(v); } };
+  const poePad = p => {
+    if (padsV.has(p)) return;
+    padsV.add(p); ps.push(p);
+    const w = isNum(p.w) ? p.w : 0, h = isNum(p.h) ? p.h : w;
+    const cx = p.x + (isNum(p.hox) ? p.hox : 0), cy = p.y + (isNum(p.hoy) ? p.hoy : 0);
+    for (const e of g.pontasEm(cx, cy, Math.hypot(w, h) / 2 + TOL, null)) {
+      const q = e.seg.p[e.qual];
+      if (padNaCamada(p, e.seg.layer) && noPad(p, q[0], q[1], TOL)) poe(e.seg);
+    }
+  };
+  for (const s of fila) vistos.add(s);
+  for (const id of (sementes && sementes.vias) || []) { const v = g.viaPorId.get(sid(id)); if (v) poeVia(v); }
+  while (fila.length) {
+    const s = fila.shift();
+    out.push(s);
+    for (const p of s.p) {
+      for (const v of g.viasEm(p[0], p[1])) poeVia(v);
+      for (const pd of g.padsEm(p[0], p[1], s.layer)) poePad(pd);
+      for (const e of g.pontasEm(p[0], p[1], TOL, s.layer)) poe(e.seg);
+      for (const m of g.meiosEm(p[0], p[1], s.layer)) poe(m);
+    }
+    for (const e of g.pontasNoCorpo(s)) poe(e.seg);
+  }
+  const nets = new Set();
+  const temNet = o => o && typeof o.net === 'string' && o.net !== '';
+  for (const s of out) if (temNet(s.o)) nets.add(s.o.net);
+  for (const v of vs) if (temNet(v.o)) nets.add(v.o.net);
+  for (const p of ps) if (temNet(p)) nets.add(p.net);
+  if (nets.size) {
+    for (const s of g.segs) if (!vistos.has(s) && temNet(s.o) && nets.has(s.o.net)) { vistos.add(s); out.push(s); }
+    for (const v of g.vias) if (!viasV.has(v) && temNet(v.o) && nets.has(v.o.net)) { viasV.add(v); vs.push(v); }
+    for (const p of g.pads) if (!padsV.has(p) && temNet(p) && nets.has(p.net)) { padsV.add(p); ps.push(p); }
+  }
+  const r = resposta(out, vs);
+  r.pads = ps.filter(p => p.id != null).map(p => p.id);
+  r.nets = [...nets].sort();
+  return r;
+}
+
 /* ============================== o arrasto ============================== */
 
 /* a interseccao da reta (P + t*u) com a reta (A + s*v): t, ou null se paralelas */
@@ -320,5 +371,5 @@ function planoArrasto(eb, movem, dx, dy){
   return out;
 }
 
-return { TOL, grafo, trilhaAteVia, tudoLigado, planoArrasto };
+return { TOL, grafo, trilhaAteVia, tudoLigado, netInteira, planoArrasto };
 });
