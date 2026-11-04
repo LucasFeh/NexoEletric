@@ -73,7 +73,7 @@ claude mcp add --transport http nexoeletric http://127.0.0.1:8765/mcp
 | grupo | ferramentas |
 |---|---|
 | app | `app_status` (o app está aberto? qual pasta, qual hub, quais vistas), `app_abrir` (abre o NexoEletric e espera o hub, como o `gui_open` do NexoCAD; com `projeto` já o mostra), `vista_abrir` (mostra um projeto ao usuário na aba pedida), `lote` (vários passos numa chamada, `$id.campo` usa o resultado de um passo anterior, como o `batch` do NexoCAD) |
-| projeto | `projeto_listar`, `projeto_resumo`, `projeto_ler_arquivo`, `projeto_abrir_altium` (o .PrjPcb do Altium vira o projeto inteiro, sem o Altium: esquema, `board.js` da .PcbDoc, regras, 3D), `projeto_criar` (pasta + schematic.js; com `placa` cria o board.js mestre pelo `hub-pcbnova.js` e o rules.js da casa), `projeto_desfazer` |
+| projeto | `projeto_listar`, `projeto_resumo`, `projeto_ler_arquivo`, `projeto_abrir_altium` (o .PrjPcb do Altium vira o projeto inteiro, sem o Altium: esquema, `board.js` da .PcbDoc, regras, 3D), `projeto_criar` (pasta + schematic.js; com `produto` registra a placa no catálogo da casa e usa o código como nome, com o carimbo preenchido; com `placa` cria o board.js mestre pelo `hub-pcbnova.js` e o rules.js da casa), `catalogo_previa` (o código que a placa nova vai ganhar, ou o produto de um código), `projeto_desfazer` |
 | esquema | `sch_ler` (cabeçalho em resumo, `campos`, filtros por `prefixo`/`refs`/`net`), `sch_componentes` (ponta quente dos pinos + net + `solto`; `prefixo` "R", `pinos:"soltos"`), `sch_nets`, `sch_adicionar` (ref "R?" = próximo livre, footprint do símbolo), `sch_editar` e `sch_apagar` (por índice, ref ou lugar `em:{t,x,y}`), `sch_ligar` ("R1.2" → "C1.1"), `sch_copiar` (circuito de outro projeto: refs ou caixa, troca de net e de designador, símbolos junto), `sch_validar` (também pino sem ligação, ponta de fio solta, pad sem pino), `sch_buscar_simbolo`, `sch_simbolo`, `sch_buscar_footprint`, `sch_template` (`hub-schtemplate.js`) |
 | simbolo | `sym_ler` (o desenho inteiro, de qualquer acervo), `sym_gerar` (CI/conector a partir da lista de pinos), `sym_salvar` (destino `projeto` = no `symbols` do schematic.js, vale na hora e para as nets; `biblioteca` = Biblioteca de símbolos do hub, `/api/symbols/lib`; `altium` = redesenha um símbolo da SchLib da casa, `/api/symbols/save`), `sym_renomear`, `sym_apagar` |
 | biblioteca | `almox_buscar` (estoque, local, Odoo; devolve o `comp` pronto para `sch_adicionar`) |
@@ -306,6 +306,7 @@ Arquivo novo na pasta entra sozinho (lido pelo mtime) e chega ao cliente por qua
 | `pcb-plano-folga-pads` | plano a 1,0 mm dos pads de outra net, alívio térmico | `plano_pad` |
 | `pcb-serigrafia-livre` | overlay nunca em cima de pad, via, furo, trilha, fill ou outra serigrafia; o plano de terra pode passar por baixo | `serigrafia` |
 | `pcb-enviar-jlc` | processo de pôr a placa no carrinho da JLCPCB: conferir o DRC, `jlc_preparar`, perguntar a quantidade antes, `jlc_enviar`, `jlc_login` com a conta do usuário (sem guardar nem repetir a senha), conferir a captura; nunca passar do carrinho | `jlc_enviar` (camadas lidas × placa, `noCarrinho`) |
+| `projeto-novo` | placa nova da casa: perguntar o nome da placa e quem iniciou o projeto, `catalogo_previa` (o código P…-DI<ano><item> do catálogo CATALOGAÇÃO TODOS OS PRODUTOS), confirmar e `projeto_criar {produto}` (registra no catálogo e cria a folha A4 no template da casa com o carimbo preenchido) | `projeto_criar` (`catalogo`) |
 | `pcb-producao-backplane` | técnica de produção da CBM-DI251877 para backplane de conectores EDGE: campo sem plano em volta das fileiras, GND no Top fora do campo, +5V no Bottom com retângulos de GND entre os conectores, abas, corrente de +5V, leque em escada só com 45°, sem via | `drc_rodar`, `nets_ratsnest`, `regras_casa_verificar` |
 
 `drc_rodar`, `nets_ratsnest` e `pcb_render` usam a placa como a tela mostra (`ctx.placaDespejada(p)`: os polígonos
@@ -321,6 +322,8 @@ node tests/test-mcp-completo.js # raiz automática, símbolos, 3D do disco, pcb_
 python tests/test_mcp_rotas.py  # as rotas da vista ao vivo
 node tests/test-jlc.js          # o envio à JLC (lib/jlc.js) contra um IntegrateBrowser de mentira; a senha não vaza
 python tests/test_jlc_rotas.py  # as rotas /api/jlc do botão "Enviar pra JLC"
+node tests/test-catalogo.js     # o código da placa nova (lib/catalogo.js) num catálogo .xlsx falso, e projeto_criar {produto}
+python tests/test_projeto_novo.py  # as rotas /api/projeto/novo do botão "Novo projeto"
 node tests/test-mcp-nexo.js     # o grupo nexo, com um Nexo Hub (tests/nexohub-falso.js) e um NexoCAD de mentira
 node tests/test-nexohub-sync.js # o sincronizador (lib/nexohub-sync.js) contra o Nexo Hub de mentira
 node tests/test-nexohub-real.js # o mesmo contra o servidor de verdade (..
