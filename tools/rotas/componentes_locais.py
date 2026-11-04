@@ -42,6 +42,7 @@ Rotas (registradas pelo hubserver.py, como as da JLC):
   POST /api/locais/integrar           -> {ok, integrados:[...]} (o integra() a mao)
   GET  /api/locais/regras?familia=X   -> {ok, perfil?, listas, encapsulamentos, subtipos, footprints}
   GET  /api/locais/opcoes             -> {ok, simbolos:[{nome, de, pinos}], footprints:[nome]}
+  POST /api/locais/desenhos           {simbolos:[nome], footprints:[nome]} -> a geometria das miniaturas do modal
 """
 import base64
 import datetime
@@ -218,6 +219,33 @@ def desenho(root, nome):
         if s.get('name') == nome and s.get('parts'):
             return s['parts'], 'local'
     return None, None
+
+
+DESENHOS_MAX = 80
+
+
+def desenhos(root, simbolos=(), footprints=()):
+    """A geometria para as miniaturas do modal: {simbolos: {nome: parts}, footprints: {nome: {bbox, pads, silk}}}.
+    "genérico de N pinos" devolve o retangulo que o componente ganharia. Nome que nao existe fica de fora."""
+    out_s, out_f = {}, {}
+    for n in list(simbolos or [])[:DESENHOS_MAX]:
+        n = _limpa_txt(n)
+        m = re.match(r'^genérico de (\d+) pinos$', n)
+        if m:
+            out_s[n] = simbolo_generico(int(m.group(1)))
+            continue
+        partes, _ = desenho(root, n)
+        if partes:
+            out_s[n] = partes[:1]
+    pedidos = set(_limpa_txt(n) for n in list(footprints or [])[:DESENHOS_MAX])
+    if pedidos:
+        libs = _libs(root)
+        for chave in ('pcblibHub', 'pcblib'):
+            for f in ((libs.get(chave) or {}).get('footprints') or []):
+                n = f.get('name')
+                if n in pedidos and n not in out_f:
+                    out_f[n] = {'bbox': f.get('bbox'), 'pads': f.get('pads') or [], 'silk': f.get('silk') or []}
+    return {'simbolos': out_s, 'footprints': out_f}
 
 
 def opcoes(root):
@@ -439,6 +467,30 @@ def monta_simbolo(root, meta, nome, partes, footprint):
     }
 
 
+GENERICO = 'generico'
+PINOS_MAX = 400
+
+
+def simbolo_generico(n):
+    """Um retangulo com n pinos (metade de cada lado, como um DIP: 1 no alto a esquerda, descendo, e voltando
+    pela direita de baixo para cima), em mil e na grade de 100. A ponta quente fica a 200 mil do corpo."""
+    n = max(1, min(PINOS_MAX, int(n)))
+    esq = (n + 1) // 2
+    linhas = max(esq, n - esq, 1)
+    larg = 600
+    pins = []
+    for i in range(n):
+        if i < esq:
+            pins.append({'num': str(i + 1), 'name': str(i + 1), 'x': 0, 'y': -100 * (i + 1), 'len': 200,
+                         'orient': 180, 'type': 'Passive'})
+        else:
+            k = i - esq
+            pins.append({'num': str(i + 1), 'name': str(i + 1), 'x': larg, 'y': -100 * (linhas - k), 'len': 200,
+                         'orient': 0, 'type': 'Passive'})
+    return [{'part': 1, 'pins': pins,
+             'graphics': [{'g': 'rect', 'x1': 0, 'y1': -100 * (linhas + 1), 'x2': larg, 'y2': 0, 'w': 10}]}]
+
+
 def salva(root, dados, por=''):
     """Cria (sem id) ou edita (com id) um componente local. -> (registro, avisos)."""
     if not isinstance(dados, dict):
@@ -459,7 +511,17 @@ def salva(root, dados, por=''):
         # o desenho: o pedido, senao o que ja estava
         nome_sim = _limpa_txt(dados.get('simbolo')) if 'simbolo' in dados else (meta.get('simbolo') or {}).get('nome', '')
         partes, de = (None, None)
-        if nome_sim:
+        generico = False
+        eh_generico = (not nome_sim or nome_sim.startswith('genérico de ')
+                       or ((meta.get('simbolo') or {}).get('de') == GENERICO and 'simbolo' not in dados))
+        if eh_generico and int(b_novo.get('x_pinos') or 0) > 0:
+            # sem simbolo escolhido: o retangulo com os N pinos (refeito quando os pinos mudam), para o componente
+            # ja poder ir para o esquema; trocar por um desenho de verdade e so escolher o simbolo depois
+            partes, de, generico = simbolo_generico(b_novo['x_pinos']), GENERICO, True
+            nome_sim = 'genérico de %d pinos' % int(b_novo['x_pinos'])
+        elif nome_sim.startswith('genérico de '):
+            nome_sim = ''
+        elif nome_sim:
             partes, de = desenho(root, nome_sim)
             if partes is None:
                 raise ErroLocal('o simbolo "%s" nao existe na biblioteca de simbolos, na SchLib nem no almoxarifado '
@@ -472,7 +534,7 @@ def salva(root, dados, por=''):
                             'crie com fp_pacote/fp_salvar)' % footprint)
         if footprint:
             b_novo['footprint'] = footprint
-        if partes and not b_novo.get('x_pinagem'):
+        if partes and not generico and not b_novo.get('x_pinagem'):
             pin = pinagem_do_desenho(partes)
             if pin:
                 b_novo['x_pinagem'] = pin
@@ -574,7 +636,7 @@ def resumo(s):
         'id': meta.get('id'), 'nome': s.get('name'), 'tag': None if meta.get('integrado') else TAG,
         'familia': b.get('x_familia') or '', 'mpn': b.get('x_mpn') or '', 'encapsulamento': b.get('x_encapsulamento') or '',
         'montagem': b.get('x_montagem') or '', 'valor': v.get('value') or '', 'simbolo': sim.get('nome') or '',
-        'simboloDe': sim.get('de') or '', 'footprint': fp, 'designator': s.get('designator'),
+        'simboloDe': sim.get('de') or '', 'pinos': b.get('x_pinos') or '', 'footprint': fp, 'designator': s.get('designator'),
         'datasheet': meta.get('datasheet') or '', 'criado': meta.get('criado'), 'atualizado': meta.get('atualizado'),
         'por': meta.get('por') or '', 'conferencia': conf, 'integrado': meta.get('integrado') or None,
         'situacao': ('integrado' if meta.get('integrado') else 'incompleto' if falta_local
@@ -797,3 +859,9 @@ def registra(app, root):
     @com_erros
     def locais_opcoes():
         return dict({'ok': True}, **opcoes(root))
+
+    @app.route('/api/locais/desenhos', methods=['POST'])
+    @com_erros
+    def locais_desenhos():
+        data = request.get_json(silent=True) or {}
+        return dict({'ok': True}, **desenhos(root, data.get('simbolos') or [], data.get('footprints') or []))

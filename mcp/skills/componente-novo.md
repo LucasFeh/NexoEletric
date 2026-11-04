@@ -6,8 +6,8 @@ descricao: Processo da casa para a peça que o almoxarifado do Odoo ainda não t
 
 # Componente novo (criado localmente)
 
-**O que é:** a peça que o almoxarifado do Odoo ainda não tem vira um componente **criado localmente** (Biblioteca »
-Componentes novos, arquivo `Libs/almox-locais.js`). Ele aparece no "Adicionar componentes" com a tag
+**O que é:** a peça que o almoxarifado do Odoo ainda não tem vira um componente **criado localmente** (o ícone "Novo
+componente" ao lado da busca da Biblioteca; arquivo `Libs/almox-locais.js`). Ele aparece no "Adicionar componentes" com a tag
 **criado localmente**, vai para o esquema como qualquer peça e, no **Enviar para o Odoo**, vai com a **ficha
 completa** (o bloco `componente`). O almoxarifado confere e cria a peça com um clique. No sincronismo seguinte ela
 volta como peça do almoxarifado e **perde a tag** (`local_integrar`, que roda sozinho).

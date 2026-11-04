@@ -186,8 +186,8 @@ Ele é **opcional e é omitido quando vazio** — `schematic.js` de projeto anti
 componente da biblioteca da casa nunca vai ter. Sem ele a lista de materiais ainda sai,
 mas a linha só pode casar por MPN ou voltar para conferência humana.
 
-**Componente criado localmente** (a peça que o almoxarifado do Odoo ainda não tem; Biblioteca »
-Componentes novos, ou as ferramentas `local_*` do MCP e a skill `componente-novo`):
+**Componente criado localmente** (a peça que o almoxarifado do Odoo ainda não tem; o ícone "Novo componente" ao lado da
+busca da Biblioteca, ou as ferramentas `local_*` do MCP e a skill `componente-novo`):
 - **Onde mora:** em `Libs/almox-locais.js`, no formato dos acervos do almoxarifado.
 - **O params:** ele leva `LocalId=Ln` no lugar do `OdooId`; o `sym` é o nome do componente local.
 - **No "Enviar para o Odoo":** a linha dele vai com a ficha completa, no bloco `componente` (os campos `x_*` do

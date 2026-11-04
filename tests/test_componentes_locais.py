@@ -99,6 +99,33 @@ class Locais(unittest.TestCase):
         self.assertIn('LocalId=L1', r['comp']['params'])
         self.assertEqual(r['comp']['ref'], 'Q?')
 
+    def test_modal_sem_simbolo_ganha_o_generico(self):
+        """O modal manda só o essencial (nome, MPN, encapsulamento, pinos, link): sem símbolo, o retângulo com N pinos."""
+        comp = {'x_mpn': 'AMS1117-3.3', 'x_encapsulamento': 'SOT-223', 'x_pinos': 3,
+                'links': [{'name': 'Lcsc', 'url': 'https://lcsc.com/x'}]}
+        s, _ = CL.salva(self.raiz, {'nome': 'Regulador LDO 3.3V', 'simbolo': '', 'footprint': '',
+                                    'componente': comp, 'datasheet': 'https://lcsc.com/x'})
+        self.assertEqual(s['name'], 'Regulador LDO 3.3V')
+        pinos = s['parts'][0]['pins']
+        self.assertEqual([p['num'] for p in pinos], ['1', '2', '3'])
+        # ponta quente na grade de 100 mil
+        for p in pinos:
+            ponta = p['x'] + (p['len'] if p['orient'] == 0 else -p['len'])
+            self.assertEqual(ponta % 100, 0)
+            self.assertEqual(p['y'] % 100, 0)
+        r = CL.resumo(s)
+        self.assertEqual(r['simboloDe'], 'generico')
+        self.assertNotIn('sem simbolo', r['faltaLocal'])
+        self.assertNotIn('x_pinagem', s['criadoLocal']['componente'])   # pinagem de mentira não vai ao Odoo
+        # mudar os pinos refaz o genérico; escolher um símbolo de verdade troca por ele
+        id_ = s['criadoLocal']['id']
+        s2, _ = CL.salva(self.raiz, {'id': id_, 'componente': dict(comp, x_pinos=8), 'simbolo': 'genérico de 3 pinos'})
+        self.assertEqual(len(s2['parts'][0]['pins']), 8)
+        self.assertEqual(s2['name'], 'Regulador LDO 3.3V')
+        s3, _ = CL.salva(self.raiz, {'id': id_, 'componente': dict(comp, x_pinos=3), 'simbolo': 'TRANSISTOR NPN'})
+        self.assertEqual(CL.resumo(s3)['simboloDe'], 'biblioteca')
+        self.assertEqual([p['name'] for p in s3['parts'][0]['pins']], ['B', 'E', 'C'])
+
     def test_recusas(self):
         with self.assertRaises(CL.ErroLocal):
             self.cria(simbolo='NAO EXISTE')

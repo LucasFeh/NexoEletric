@@ -381,6 +381,9 @@ aside { overflow-y: auto; padding: 12px 18px 18px; background: var(--surface-2);
 .lib-left { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; }
 .lib-bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px 7px 18px; }
 .lib-bar .input { min-width: 0; }
+.lib-bar .lib-novo { flex: none; width: 30px; height: 30px; color: var(--text-3); }
+.lib-bar .lib-novo:hover { color: var(--hi); }
+.lib-row .pill.local { color: var(--hi); background: transparent; box-shadow: inset 0 0 0 1px var(--hi); cursor: pointer; }
 .lib-sum { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 0 18px 9px; font-size: 11px; color: var(--text-4); }
 .lib-sum b { font-weight: 400; color: var(--text-2); }
 .lib-list { padding: 0 6px 18px 12px; }
@@ -840,7 +843,8 @@ select.input { min-height: 28px; padding: 2px 6px; font-size: 12px; width: auto;
       <div class="lib-grid">
         <div class="lib-left">
           <div class="lib-bar">
-            <input class="input" id="libSearch" type="text" placeholder="Buscar na biblioteca…">
+            <input class="input" id="libSearch" type="text" placeholder="Buscar na biblioteca…" title="também filtra: &quot;sem footprint&quot;, &quot;com saldo&quot;, &quot;zerados&quot;, &quot;criado local&quot;">
+            <button class="btn btn-ghost btn-icon lib-novo" id="libNovoComp" type="button" title="Novo componente (a peça que o almoxarifado do Odoo ainda não tem)" aria-label="Novo componente"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="5" y="7" width="11" height="12" rx="1.5"/><path d="M8 7V4.5M10.5 7V4.5M13 7V4.5M8 19v2.5M10.5 19v2.5M13 19v2.5M5 10H2.5M5 13H2.5M5 16H2.5M16 13h2.5M16 16h2.5"/><path d="M19.5 1.5v6M16.5 4.5h6" stroke-width="1.8"/></svg></button>
             <div class="seg" id="libKind"></div>
           </div>
           <div class="lib-sum" id="libSum"></div>
@@ -1912,7 +1916,17 @@ function loadLibs() {
             title: s.title,
           }))
       : loadVarScript(libUrl(s.sch), s.schVar);
-    return Promise.all([carregaSch,
+    /* OS CRIADOS LOCALMENTE entram na mesma lista (Libs/almox-locais.js, no formato dos acervos; o modal "Novo
+       componente" é quem grava). O integrado ao almoxarifado não entra: a peça dele já está na lista, com o nome do
+       Odoo, e mostrar as duas seria o mesmo produto duas vezes. */
+    const comLocais = !s.almox ? carregaSch : Promise.all([carregaSch,
+      loadVarScript(libUrl('Libs/almox-locais.js'), 'almoxLocais')]).then(([a, loc]) => {
+        const meus = ((loc && loc.symbols) || []).filter(x => x && x.criadoLocal && !x.criadoLocal.integrado);
+        if (!meus.length || !a) return a;
+        const nomes = new Set((a.symbols || []).map(x => x.name));
+        return Object.assign({}, a, { symbols: (a.symbols || []).concat(meus.filter(x => !nomes.has(x.name))) });
+      });
+    return Promise.all([comLocais,
                         s.pcb ? loadVarScript(libUrl(s.pcb), s.pcbVar) : Promise.resolve(null)])
       .then(([a, p]) => (LIB.cache[s.id] = {
         src: s,
@@ -2131,6 +2145,25 @@ function alxFormCred(box, cfg, aoGravar) {
   };
   det.append(nota, gravar);
   box.append(det);
+}
+
+/* O "Novo componente" (o ícone do CI com + ao lado da busca; hub-complocal.js): o modal em etapas grava em
+   Libs/almox-locais.js, e a lista recarrega com ele selecionado, na tag "criado local". Com `id`, abre o
+   componente local para editar (a tag da linha chama assim). */
+function libNovoComp(id) {
+  if (typeof HubCompLocal === 'undefined') return toast('o hub-complocal.js não carregou', 'err');
+  HubCompLocal.abre({ id, aoSalvar: async c => {
+    LIB.cache = {}; LIB.ready = false; LIB.loading = null; libBust = Date.now();
+    await loadLibs();
+    if (c && c.nome && LIB.symBy.has(c.nome)) {
+      const s = LIB.symBy.get(c.nome);
+      S.lib.sel = { k: 'sym', name: c.nome };
+      S.lib.valor = (alxValores(s)[0] || {}).id || 0;
+      S.lib.valQ = ''; S.lib.fpShown = null;
+      S.lib.q = ''; const busca = $('#libSearch'); if (busca) busca.value = '';
+    }
+    if (S.tab === 'lib' || S.tab === 'libfp') renderLib();
+  } });
 }
 
 /* Recarrega tudo que veio de Libs\ depois da sincronização: índice, diff e o acervo
@@ -2670,7 +2703,20 @@ function alxNovidades() {
 function renderLibAlmox() {
   const meta = LIB.almox;
 
-  const q = S.lib.q.trim().toLowerCase();
+  /* A LISTA É SÓ A BUSCA (pedido do dono, 2026-11-04: "o mais limpo possível"). Os recortes que eram botões
+     embaixo dela (Tudo, Com saldo, Zerados, Sem footprint) e os números do resumo saíram; o recorte agora se
+     digita na própria busca — "sem footprint", "com saldo", "zerados", "criado local" —, junto com o resto do
+     texto ("sem footprint capacitor"). A data da sincronização foi para o fim da faixa das sub-abas. */
+  const RECORTES = [
+    ['nofp', /\bsem\s+(footprint|fp|encap(sulamento)?)\b/],
+    ['stock', /\bcom\s+(saldo|estoque)\b/],
+    ['nostock', /\b(zerados?|sem\s+(saldo|estoque))\b/],
+    ['local', /\b(criados?\s+local(mente)?|locais|local)\b/],
+  ];
+  let q = S.lib.q.trim().toLowerCase();
+  const recortes = [];
+  for (const [k, re] of RECORTES) if (re.test(q)) { recortes.push(k); q = q.replace(re, ' '); }
+  q = q.replace(/\s+/g, ' ').trim();
   /* O ENCAP E O FOOTPRINT SAO CRITERIO DE BUSCA, em toda barra do sistema que procura
      componente (pedido do dono, 2026-09-17). Sao dois nomes para o mesmo tamanho — "1206"
      vem do Odoo, "CAP 1206" e como a casa chama —, e quem digita um dos dois esta
@@ -2679,34 +2725,20 @@ function renderLibAlmox() {
     alxValores(s).slice(0, 400).map(p => p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '')
       + ' ' + (p.pkgs || []).join(' ') + ' ' + (p.footprint || '')).join(' ')
   ).toLowerCase().includes(q);
-
-  const comEstoque = LIB.syms.filter(s => alxEstoque(s) > 0);
-  const semEstoque = LIB.syms.filter(s => alxEstoque(s) <= 0);
   /* O FILTRO OLHA OS COMPONENTES, pelo mesmo motivo que a tag: quem tem footprint é a
-     peça, não a categoria. Antes ele contava categorias sem `footprints` — a lista da
-     família —, então vincular um footprint a um componente não mudava o número. */
-  const semFp = LIB.syms.filter(s => {
+     peça, não a categoria. "Zerado" é não ter saldo, inclusive o saldo NEGATIVO que o Odoo às vezes carrega. */
+  const semFpDe = s => {
     const vals = alxValores(s);
     return vals.length ? vals.some(v => !v.footprint) : !(s.footprints || []).length;
-  });
-  let kind = S.lib.kind;
-  if (['all', 'stock', 'nostock', 'nofp'].indexOf(kind) < 0) kind = 'all';
-  S.lib.kind = kind;      /* recorte de outro acervo nao existe aqui: fixa o que sobrou */
-
-  const seg = $('#libKind'); seg.textContent = '';
-  [['all', 'Tudo', LIB.syms.length], ['stock', 'Com saldo', comEstoque.length],
-   ['nostock', 'Zerados', semEstoque.length], ['nofp', 'Sem footprint', semFp.length]]
-    .forEach(([k, label, n]) => {
-      const b = el('button', null, label);
-      b.setAttribute('aria-pressed', String(kind === k));
-      b.append(el('span', 'n', String(n)));
-      b.onclick = () => { S.lib.kind = k; renderLib(); };
-      seg.append(b);
-    });
-
-  const base = kind === 'stock' ? comEstoque : kind === 'nostock' ? semEstoque
-             : kind === 'nofp' ? semFp : LIB.syms;
-  const lista = base.filter(hit);
+  };
+  const passa = s => recortes.every(k =>
+    k === 'nofp' ? semFpDe(s) : k === 'stock' ? alxEstoque(s) > 0 : k === 'nostock' ? alxEstoque(s) <= 0
+    : k === 'local' ? !!s.criadoLocal : true);
+  S.lib.kind = 'all';
+  const seg = $('#libKind'); seg.textContent = ''; seg.hidden = true;
+  /* os criados localmente vêm primeiro, num grupo só deles */
+  const lista = LIB.syms.filter(s => passa(s) && hit(s))
+    .sort((x, y) => (y.criadoLocal ? 1 : 0) - (x.criadoLocal ? 1 : 0));
 
   /* A busca serve para CHEGAR num componente. Se o selecionado nao esta entre os
      resultados, o preview seguia mostrando ele — a tela dizia "DIODO RETIFICADOR [SMD]" na
@@ -2720,53 +2752,8 @@ function renderLibAlmox() {
     S.lib.fpShown = null;
   }
 
-  /* resumo */
+  /* o resumo saiu (ver acima); fica só o que é aviso de verdade: o que a última sincronização trouxe de novo */
   const sum = $('#libSum'); sum.textContent = '';
-  const stat = (n, label, tone) => {
-    const s = el('span'); const b = el('b', null, String(n));
-    if (tone) b.style.color = 'var(--' + tone + ')';
-    s.append(b, document.createTextNode(' ' + label)); sum.append(s);
-  };
-  /* Os números do cabeçalho são a SOMA, componente por componente, do que está listado —
-     e não os totais prontos do índice. Vindo do índice, filtrar a lista em "Zerados" deixava
-     o cabeçalho dizendo 109.644 peças em cima de uma lista sem nenhuma: dois números
-     discordando na mesma tela. Somando aqui, o total é sempre o total do que se vê, e no
-     recorte "Tudo" ele bate com o índice.
-     "Zerado" aqui é não ter saldo — inclusive o saldo NEGATIVO que o Odoo às vezes carrega
-     (consumo lançado antes da entrada). É o mesmo critério do seg acima; o índice contava só
-     o zero exato, e por isso dava 4 a menos. */
-  const soma = lista.reduce((a, sy) => {
-    const vs = alxValores(sy);
-    a.vals += vs.length;
-    a.itens += (sy.itens || 0);
-    a.pecas += alxEstoque(sy);
-    a.zerados += vs.filter(v => !((v.estoque || 0) > 0)).length;
-    return a;
-  }, { vals: 0, itens: 0, pecas: 0, zerados: 0 });
-
-  stat(lista.length, 'símbolos');
-  stat(soma.vals, 'valores');
-  stat(soma.itens, 'itens do Odoo');
-  /* verde só quando há o que pegar: no recorte dos zerados a soma pode sair NEGATIVA, e é
-     um saldo negativo do Odoo aparecendo — não uma boa notícia */
-  stat(alxQtd(soma.pecas), 'peças em estoque', soma.pecas > 0 ? 'ok' : 'warn');
-  stat(soma.zerados, 'valores zerados', soma.zerados ? 'warn' : null);
-  /* quando há recorte, dizer de quantos componentes veio a soma evita a leitura errada */
-  if (lista.length !== LIB.syms.length) {
-    const s0 = el('span', null, 'de ' + LIB.syms.length + ' no acervo');
-    s0.title = 'o resumo acompanha o recorte: soma só os componentes listados';
-    sum.append(s0);
-  }
-  /* a última sincronização fica no resumo: é o que responde "isto está velho?" */
-  const us = LIB.index && LIB.index.ultimaSync;
-  if (us) {
-    const s2 = el('span');
-    s2.append(document.createTextNode('sincronizado ' + (us.generated || '—')));
-    s2.title = 'fonte: ' + (us.fonte || '—');
-    sum.append(s2);
-  }
-  /* o contador de novidades é acumulado e só zera quando alguém diz que viu — não na
-     próxima geração */
   const nv = alxNovidades();
   if (nv.total) {
     const s3 = el('span');
@@ -2780,17 +2767,18 @@ function renderLibAlmox() {
     s3.append(btn);
     sum.append(s3);
   }
-  sum.title = meta.hint + '\ngerado em ' + (LIB.gen.sym || '—') + '\n' + (LIB.src.sym || '');
+  sum.hidden = !sum.childNodes.length;
 
   /* lista, agrupada por família — é assim que se procura um componente */
   const list = $('#libList'); list.textContent = '';
   const frag = document.createDocumentFragment();
   let fam = null;
   lista.forEach(s => {
-    if (s.familia !== fam) {
-      fam = s.familia;
-      const n = lista.filter(x => x.familia === fam).length;
-      frag.append(el('div', 'lib-head', fam + (n > 1 ? ' (' + n + ')' : '')));
+    const grupo = s.criadoLocal ? '~local' : s.familia;
+    if (grupo !== fam) {
+      fam = grupo;
+      const n = lista.filter(x => (x.criadoLocal ? '~local' : x.familia) === fam).length;
+      frag.append(el('div', 'lib-head', (s.criadoLocal ? 'criados localmente' : fam) + (n > 1 ? ' (' + n + ')' : '')));
     }
     const est = alxEstoque(s);
     const b = el('button', 'lib-row');
@@ -2838,9 +2826,18 @@ function renderLibAlmox() {
         + 'símbolo padrão da categoria, e o registro devolve este depois';
       b.append(p);
     }
-    const q2 = el('span', 'mt', alxQtd(est));
-    q2.style.color = est > 0 ? 'var(--ok)' : 'var(--text-4)';
-    b.append(q2);
+    /* o criado localmente: a tag no lugar do saldo (ele não tem), e ela abre o modal para completar ou editar */
+    if (s.criadoLocal) {
+      const p = el('span', 'pill local', 'criado local');
+      p.title = 'criado no NexoEletric: vai com a ficha no "Enviar para o Odoo" e perde a tag quando o almoxarifado '
+        + 'tiver a peça. Clique para editar.';
+      p.onclick = e => { e.stopPropagation(); libNovoComp(s.criadoLocal.id); };
+      b.append(p);
+    } else {
+      const q2 = el('span', 'mt', alxQtd(est));
+      q2.style.color = est > 0 ? 'var(--ok)' : 'var(--text-4)';
+      b.append(q2);
+    }
     /* valQ é o filtro DA lista de valores do símbolo anterior: mantê-lo esconderia
        a lista inteira do símbolo novo, que é o oposto do que o clique pediu */
     b.onclick = () => {
@@ -2851,7 +2848,7 @@ function renderLibAlmox() {
     frag.append(b);
   });
   if (!frag.childNodes.length)
-    frag.append(el('div', 'lib-head', q ? 'nada com "' + S.lib.q + '"' : 'nada aqui'));
+    frag.append(el('div', 'lib-head', S.lib.q.trim() ? 'nada com "' + S.lib.q + '"' : 'nada aqui'));
   list.append(frag);
 
   renderLibAlmoxPreview();
@@ -4725,6 +4722,7 @@ $('#pickerSearch').addEventListener('keydown', e => {
 });
 $('#compSearch').oninput = e => { S.compQ = e.target.value; renderComponents(); };
 $('#libSearch').oninput = e => { S.lib.q = e.target.value; renderLib(); };
+$('#libNovoComp').onclick = () => libNovoComp();
 $('#libPart').onchange = e => { S.lib.part = +e.target.value || 1; S.lib.fpShown = null; renderLib(); };
 $('#btnBrand').onclick = openBrandMenu;
 $('#btnBom').onclick = exportBom;
@@ -4879,6 +4877,8 @@ document.addEventListener('keydown', e => {
         LIB.fpBy = new Map(LIB.fps.map(x => [x.name, x]));
       },
       redesenha: () => { try { renderLib(); } catch (e) {} },
+      /* a última sincronização do almoxarifado: a faixa das sub-abas mostra no fim (saiu do resumo da lista) */
+      sincronizado: () => (LIB.index && LIB.index.ultimaSync) || null,
       /* As vistas Componentes e Símbolos são o MESMO editor de sempre, em dois modos dele
          (HubSymEd.modo, trocado pelo hub-libview.js) — o `#symed`, que vivia num pane próprio
          e agora é MOVIDO para dentro do centro da Biblioteca. Mover, e não clonar: o

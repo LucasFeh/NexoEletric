@@ -4,6 +4,31 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.66.0 — 2026-11-04
+
+**O componente novo nasce num modal, e a lista da Biblioteca fica limpa.**
+- **A lista:** saíram os botões Tudo, Com saldo, Zerados e Sem footprint, e os números do resumo (símbolos, valores,
+  itens do Odoo, peças). O recorte agora se digita na busca, junto com o texto: "sem footprint", "com saldo",
+  "zerados" e "criado local" ("sem footprint capacitor"). A data da sincronização foi para o fim da faixa das
+  sub-abas. Fica só o aviso de novidades da última sincronização, quando há.
+- **O botão:** um ícone de CI com um + ao lado da busca abre o modal "Novo componente". A sub-aba "Componentes
+  novos" (1.65.0) saiu.
+- **O modal, em etapas,** com a troca de tela em vinheta: as bordas escurecem e o conteúdo desliza para o lado.
+  1. **Essencial (obrigatório):** nome, MPN, encapsulamento, pinos e o link (datasheet ou página do produto).
+  2. **Ficha do Odoo:** família, montagem, fabricante, designator, valor, subtipo, polaridade e os atributos que a
+     família pede, pelas regras do Odoo.
+  3. **Símbolo e footprint:** dois quadros com o desenho de cada um e, embaixo, a lista com busca por nome e a
+     miniatura de cada opção. Os símbolos com o número de pinos certo e os footprints parecidos com o
+     encapsulamento vêm primeiro.
+  4. **Revisar:** salvar, ou salvar e conferir no Odoo.
+  As etapas 2 a 4 são opcionais ("Salvar agora").
+- **Na biblioteca:** salvo, o componente entra na lista da esquerda, num grupo "criados localmente" no topo, com a
+  tag "criado local", e fica selecionado. Clicar na tag reabre o modal para completar ou apagar. Ele perde a tag
+  quando o almoxarifado do Odoo tiver a peça.
+- **Sem símbolo escolhido,** o componente ganha um retângulo com os N pinos, para já ir para o esquema. Mudar os
+  pinos refaz o retângulo; a pinagem desse genérico não vai para o Odoo.
+- **Servidor:** a rota `POST /api/locais/desenhos` dá a geometria das miniaturas.
+
 ## 1.65.0 — 2026-11-04
 
 **Componentes novos:** a peça que o almoxarifado do Odoo ainda não tem, criada no NexoEletric com a tag

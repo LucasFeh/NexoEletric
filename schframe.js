@@ -21,7 +21,7 @@ const LIBS = [
   { src:'Libs/pcblib.js',          nome:'pcblib' },
   { src:'Libs/almox-basicos.js',   nome:'almoxBasicos' },
   { src:'Libs/almox-especiais.js', nome:'almoxEspeciais' },
-  /* os componentes criados localmente (Biblioteca » Componentes novos): o formato dos acervos; pode nao existir */
+  /* os componentes criados localmente (Biblioteca, botão Novo componente ao lado da busca): o formato dos acervos; pode nao existir */
   { src:'Libs/almox-locais.js',    nome:'almoxLocais', opcional:true },
   { src:'Libs/almox-index.js',     nome:'almoxIndex' },
   { src:'Libs/rename-map.js',      nome:'renameMap' },
@@ -3232,7 +3232,7 @@ function buildAddList(){
         const nv = valoresDe(s).length;
         if (nv > 1) b.append(el('span', 'pill', nv + ' val'));
         if (!(s.footprints || []).length) b.append(el('span', 'pill warn', 'sem encap'));
-        /* CRIADO LOCALMENTE (Biblioteca » Componentes novos): a tag no lugar do estoque, que ele nao tem */
+        /* CRIADO LOCALMENTE (Biblioteca, botão Novo componente ao lado da busca): a tag no lugar do estoque, que ele nao tem */
         if (s.criadoLocal && !s.criadoLocal.integrado){
           const t = el('span', 'pill', 'criado localmente');
           t.style.cssText = 'border:1px solid var(--hi,#4fc3f7);color:var(--hi,#4fc3f7);background:transparent;';
@@ -4302,7 +4302,7 @@ function renderProps(){
      continua lá e diz POR QUÊ — sumir com ela faria parecer que a ficha nem tem esse campo. */
   const od = odooDoComp(it);
   const lkOdoo = od && od.alvo ? HubOdooLink.link(od.alvo, { nome: od.nome, texto: 'Abrir no Odoo ↗' }) : null;
-  /* CRIADO LOCALMENTE (Biblioteca » Componentes novos): a peca que o Odoo ainda nao tem vai com a ficha no
+  /* CRIADO LOCALMENTE (Biblioteca, botão Novo componente ao lado da busca): a peca que o Odoo ainda nao tem vai com a ficha no
      "Enviar para o Odoo"; integrada (o almoxarifado a criou e o sincronismo a trouxe), a tag sai */
   const loc = localDoComp(it);
   if (loc && !loc.integrado){

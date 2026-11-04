@@ -293,7 +293,7 @@ const FRASE_SEM_EXTRAS = 'este servidor ainda não tem os componentes fora do es
    achando que esta resolvido: palpite local (o que o espelho do almoxarifado sabe) e
    veredito do Odoo (o que di_confere_lista respondeu). */
 function resolucaoDe(linha, pendencia){
-  /* CRIADO LOCALMENTE (Biblioteca » Componentes novos): a linha vai com a ficha no bloco `componente`, e o recibo diz se
+  /* CRIADO LOCALMENTE (Biblioteca, botão Novo componente ao lado da busca): a linha vai com a ficha no bloco `componente`, e o recibo diz se
      ela passa nas regras do cadastro novo (pronto) ou o que falta. Pronta, o almoxarifado cria com um clique. */
   if (linha.componente){
     const c = pendencia && pendencia.componente;

@@ -585,7 +585,7 @@ function renderValores(box, g, opts){
     else b.append(el('span', 'k', it.tipo || it.pkg || ''));
     if (it.local){
       const t = el('span', 'ap-tag', 'criado localmente');
-      t.title = 'Criado no NexoEletric (Biblioteca » Componentes novos): ainda não está no almoxarifado do Odoo. Vai com a ficha no "Enviar para o Odoo".';
+      t.title = 'Criado no NexoEletric (Biblioteca, botão Novo componente ao lado da busca): ainda não está no almoxarifado do Odoo. Vai com a ficha no "Enviar para o Odoo".';
       b.append(t);
     } else {
       const q2 = el('span', 'q' + (it.saldo > 0 ? '' : ' zero'), String(it.saldo));

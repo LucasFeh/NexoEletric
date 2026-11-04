@@ -61,7 +61,7 @@ const COMPONENTE = {
 };
 const CAMPOS = {
   nome: { type: 'string', description: 'o nome no NexoEletric (é o sym gravado nos esquemas). Vazio = automático; o nome_previsto do Odoo vem no local_conferir' },
-  simbolo: { type: 'string', description: 'o nome de um símbolo existente (local_opcoes tipo "simbolos"): da Biblioteca de símbolos do hub, da SchLib ou de uma família do almoxarifado. Não tem? sym_gerar + sym_salvar destino "biblioteca" e use o nome' },
+  simbolo: { type: 'string', description: 'o nome de um símbolo existente (local_opcoes tipo "simbolos"): da Biblioteca de símbolos do hub, da SchLib ou de uma família do almoxarifado. Não tem? sym_gerar + sym_salvar destino "biblioteca" e use o nome. Vazio (com x_pinos na ficha) = o retângulo genérico com os N pinos, o que o modal da tela faz quando ninguém escolhe' },
   footprint: { type: 'string', description: 'o nome exato de um footprint (local_opcoes tipo "footprints"). Não tem? fp_pacote/fp_salvar e use o nome' },
   datasheet: { type: 'string', description: 'o link do datasheet (vai como link "Datasheet" da peça no Odoo)' },
   componente: COMPONENTE,
@@ -161,7 +161,7 @@ module.exports = {
     },
     {
       nome: 'local_integrar', titulo: 'Integrar os locais que o Odoo já criou',
-      descricao: 'Procura no almoxarifado (o espelho do Odoo, depois do sincronismo) os componentes locais que o almoxarifado já criou — o mesmo MPN e encapsulamento — e os integra: perdem a tag "criado localmente" e passam a apontar para o produto (o envio da lista manda o product_id dele, mesmo nos esquemas antigos). Roda sozinho no local_listar e na aba Componentes novos.',
+      descricao: 'Procura no almoxarifado (o espelho do Odoo, depois do sincronismo) os componentes locais que o almoxarifado já criou — o mesmo MPN e encapsulamento — e os integra: perdem a tag "criado localmente" e passam a apontar para o produto (o envio da lista manda o product_id dele, mesmo nos esquemas antigos). Roda sozinho no local_listar e quando a Biblioteca carrega.',
       entrada: { type: 'object', properties: {} },
       executa: async (a, ctx) => { const j = await chama(ctx, '/api/locais/integrar', {}); return { integrados: j.integrados }; },
     },
