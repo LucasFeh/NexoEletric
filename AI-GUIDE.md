@@ -186,6 +186,17 @@ Ele é **opcional e é omitido quando vazio** — `schematic.js` de projeto anti
 componente da biblioteca da casa nunca vai ter. Sem ele a lista de materiais ainda sai,
 mas a linha só pode casar por MPN ou voltar para conferência humana.
 
+**Componente criado localmente** (a peça que o almoxarifado do Odoo ainda não tem; Biblioteca »
+Componentes novos, ou as ferramentas `local_*` do MCP e a skill `componente-novo`):
+- **Onde mora:** em `Libs/almox-locais.js`, no formato dos acervos do almoxarifado.
+- **O params:** ele leva `LocalId=Ln` no lugar do `OdooId`; o `sym` é o nome do componente local.
+- **No "Enviar para o Odoo":** a linha dele vai com a ficha completa, no bloco `componente` (os campos `x_*` do
+  produto; o contrato é o `prompt-nexoeletric-componente-novo.md`), e sem `product_id`.
+- **Depois que o almoxarifado cria a peça:** no sincronismo seguinte ela chega nos acervos com o mesmo MPN e
+  encapsulamento, e o componente local é **integrado**. Perde a tag "criado localmente", sai do "Adicionar
+  componentes", e a linha passa a ir com o `product_id` dela, mesmo nos esquemas que só têm o `LocalId`.
+- **Não reescreva** um `LocalId` à mão nem crie produto no Odoo: o caminho é a ficha.
+
 ### Template de folha (`sheet`, opcional)
 
 Cada item `sheet` pode levar dois campos. Folha sem `template` desenha como sempre desenhou.

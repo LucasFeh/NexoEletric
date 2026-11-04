@@ -62,6 +62,9 @@ const CSS = `
   box-shadow:inset 2px 0 0 var(--hi,#4fc3f7);}
 .ap-val .v{font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .ap-val .k{font:10px var(--mono,Consolas,ui-monospace,monospace); color:var(--text-4,#7a7a7a); white-space:nowrap;}
+/* o componente CRIADO LOCALMENTE (Libs/almox-locais.js): a tag no lugar do saldo, que ele nao tem */
+.ap-val .ap-tag{font-size:10px; line-height:1.4; padding:1px 7px; border-radius:999px; white-space:nowrap;
+  border:1px solid var(--hi,#4fc3f7); color:var(--hi,#4fc3f7); letter-spacing:.02em;}
 .ap-val .q{font-size:11px; font-variant-numeric:tabular-nums; color:var(--ok,#00e676); min-width:3ch; text-align:right;}
 .ap-val .q.zero{color:var(--text-4,#7a7a7a);}
 /* a recomendacao: o componente de mesmo nome que o Altium mandou. Ela se anuncia, senao
@@ -97,10 +100,15 @@ const RESERVA = [
   { id: 'almox-basicos',   title: 'Almoxarifado — Básicos',   file: 'Libs/almox-basicos.js',   var: 'almoxBasicos' },
   { id: 'almox-especiais', title: 'Almoxarifado — Especiais', file: 'Libs/almox-especiais.js', var: 'almoxEspeciais' },
 ];
+/* os componentes CRIADOS LOCALMENTE (tools/rotas/componentes_locais.py): o arquivo tem o formato dos acervos, mas
+   nao esta no indice (quem escreve o indice e o sincronismo do Odoo, e a peca local e justamente a que o Odoo nao tem) */
+const LOCAIS = { id: 'almox-locais', title: 'Componentes criados localmente', file: 'Libs/almox-locais.js', var: 'almoxLocais', locais: true };
 function acervos(){
   const ix = window.almoxIndex;
   const libs = (ix && ix.libs && ix.libs.length) ? ix.libs : RESERVA;
-  return libs.filter(l => l && l.var && window[l.var]);
+  const out = libs.filter(l => l && l.var && window[l.var]);
+  if (window[LOCAIS.var] && !out.some(l => l.var === LOCAIS.var)) out.push(LOCAIS);
+  return out;
 }
 
 const saldoDe = v => (v.itens || []).reduce((a, i) => a + (Number(i.estoque) || 0), 0);
@@ -172,6 +180,9 @@ function grupos(){
        familia aparece em ST.sel e o desenho vem vazio */
     const acervo = { id: a.id, title: a.title, file: a.file, varName: a.var };
     for (const sy of ((lib && lib.symbols) || [])){
+      /* o local ja INTEGRADO (o almoxarifado criou a peca e o sincronismo a trouxe) sai daqui: a peca e a do almoxarifado.
+         O registro so fica no arquivo para os esquemas que o usam continuarem desenhando. */
+      if (a.locais && sy.criadoLocal && sy.criadoLocal.integrado) continue;
       const vals = (sy.valores || []).filter(v => v && v.altium).map(v => ({
         v, sym: sy, lib: acervo, nome: v.altium, rotulo: v.label || v.altium,
         saldo: Number(v.estoque) || saldoDe(v),
@@ -189,9 +200,14 @@ function grupos(){
         /* o codigo do fabricante (MC 1,5/4-G-3,81, 2510, BBPTC-4). E ele que separa duas
            linhas identicas em vias/passo/angulo, e e o que se tem na mao olhando a peca. */
         tipo: String(((v.conn || {}).tipo) || '').trim(),
+        /* criado localmente: a tag na linha (e nada de "Apagar da biblioteca", que e do almoxarifado) */
+        local: !!(a.locais && v.criadoLocal),
       }));
       if (!vals.length) continue;
-      const chave = chaveDoGrupo(sy);
+      /* o local entra na familia dele: "RESISTOR [SMD]" quando os basicos a partem por montagem, senao a familia */
+      const chave = a.locais && sy.montagem && porChave.has(String(sy.familia || '') + ' [' + sy.montagem + ']')
+        ? String(sy.familia || '') + ' [' + sy.montagem + ']'
+        : (a.locais ? String(sy.familia || sy.name || '') : chaveDoGrupo(sy));
       let g = porChave.get(chave);
       if (!g){
         g = { familia: chave, sym: sy, acervo: titulo, lib: acervo, valores: [], acervos: new Set() };
@@ -567,13 +583,19 @@ function renderValores(box, g, opts){
        (não existe "encapsulamento 0805" de bloco terminal). Sem ele cai para o encap, como
        em todas as outras famílias. */
     else b.append(el('span', 'k', it.tipo || it.pkg || ''));
-    const q2 = el('span', 'q' + (it.saldo > 0 ? '' : ' zero'), String(it.saldo));
-    q2.title = it.saldo > 0 ? it.saldo + ' em estoque' : 'sem saldo no almoxarifado';
-    b.append(q2);
+    if (it.local){
+      const t = el('span', 'ap-tag', 'criado localmente');
+      t.title = 'Criado no NexoEletric (Biblioteca » Componentes novos): ainda não está no almoxarifado do Odoo. Vai com a ficha no "Enviar para o Odoo".';
+      b.append(t);
+    } else {
+      const q2 = el('span', 'q' + (it.saldo > 0 ? '' : ' zero'), String(it.saldo));
+      q2.title = it.saldo > 0 ? it.saldo + ' em estoque' : 'sem saldo no almoxarifado';
+      b.append(q2);
+    }
     b.onclick = () => { if (o.onPick) o.onPick(it, g); };
     /* o botao direito NAO seleciona: quem abre o menu esta mirando aquela linha, e trocar a
        selecao por baixo faria o "Usar este componente" apontar para outra coisa */
-    if (o.onExcluir) b.oncontextmenu = ev => {
+    if (o.onExcluir && !it.local) b.oncontextmenu = ev => {
       ev.preventDefault(); ev.stopPropagation();
       menu(ev.clientX, ev.clientY, it.rotulo, [
         { rotulo: 'Apagar da biblioteca…', perigo: true, onEscolher: () => o.onExcluir(it, g) },

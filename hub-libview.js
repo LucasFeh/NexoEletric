@@ -83,8 +83,10 @@ const CSS = `
    cada um deles reexibia a caixa de valores por cima da vista Componentes. Com a regra na
    CLASSE que este módulo controla, todos os caminhos fecham de uma vez — inclusive os que
    alguém escrever amanhã. O laço de aplicaVisibilidade fica como cinto e suspensório. */
-.lib-view.lv-outra > :not(.lv-tabs):not(#symed):not(#lvFootprints){display:none !important;}
+.lib-view.lv-outra > :not(.lv-tabs):not(#symed):not(#lvFootprints):not(#lvNovos){display:none !important;}
 .lib-view.lv-outra > #lvFootprints{height:100%; min-height:0;}
+/* Componentes novos (hub-complocal.js): a área de criação dos componentes criados localmente */
+.lib-view.lv-outra > #lvNovos{height:100%; min-height:0;}
 /* AS MESMAS COLUNAS EM TODAS AS VISTAS: a lista da esquerda e o painel da direita com a largura
    dos da vista Símbolos (o --aside-w do hub), o meio com o resto. Depois das regras de ficha e
    de lista de propósito: com a mesma força, ganha a última. */
@@ -215,8 +217,10 @@ function el(tag, cls, txt){
 /* "simbolos" mudou de dono em 2026-10-09: era o id da vista que hoje é Componentes. Quem
    chamava ir('simbolos') para chegar no componente (o #/libsym do hub.html) passou a pedir
    'componentes'; 'simbolos' agora é a vista nova, a do editor de símbolos. */
+/* Componentes novos (pedido do dono, 2026-11-03): criar a peça que o almoxarifado do Odoo ainda não tem, com a tag
+   "criado localmente" (hub-complocal.js; servidor em tools/rotas/componentes_locais.py) */
 const ABAS = [['geral', 'Geral'], ['componentes', 'Componentes'], ['footprints', 'Footprints'],
-              ['simbolos', 'Símbolos']];
+              ['simbolos', 'Símbolos'], ['novos', 'Componentes novos']];
 /* as duas vistas que mostram o editor (#symed), cada uma num modo dele */
 const DO_EDITOR = { componentes: true, simbolos: true };
 
@@ -253,6 +257,11 @@ function trocaCentro(){
     meu = montaFootprints();
     centro.append(meu);
   }
+  let novos = centro.querySelector('#lvNovos');
+  if (ST.aba === 'novos' && typeof HubCompLocal !== 'undefined'){
+    if (!novos){ novos = el('div', 'lv-novos'); novos.id = 'lvNovos'; centro.append(novos); }
+    HubCompLocal.monta(novos);
+  }
   aplicaVisibilidade();
   if (ST.aba === 'footprints' && !ST.ed) abreEditorFp(null);
   /* só a vista Componentes abre no editor o que está selecionado na lista da casca: na
@@ -285,6 +294,8 @@ function aplicaVisibilidade(){
      ficava só com as duas barras de título — "eu clico e não aparece nada". */
   const meu = centro.querySelector('#lvFootprints');
   if (meu) meu.hidden = (ST.aba !== 'footprints');
+  const novos = centro.querySelector('#lvNovos');
+  if (novos) novos.hidden = (ST.aba !== 'novos');
   const ed = document.getElementById('symed');
   if (ed && ed.closest('.lib-view')) ed.hidden = !DO_EDITOR[ST.aba];
   /* a grade de 4 painéis só faz sentido na vista Geral (ver .lv-outra no CSS) */
@@ -296,7 +307,7 @@ function aplicaVisibilidade(){
   if (grade && grade.classList){
     grade.classList.toggle('lv-sem-ficha', !soGeral);
     /* na vista Símbolos a lista da casca sai também: ela é de componentes (ver o CSS) */
-    grade.classList.toggle('lv-sem-lista', ST.aba === 'simbolos' || ST.aba === 'footprints');
+    grade.classList.toggle('lv-sem-lista', ST.aba === 'simbolos' || ST.aba === 'footprints' || ST.aba === 'novos');
   }
 }
 

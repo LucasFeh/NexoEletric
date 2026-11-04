@@ -293,6 +293,19 @@ const FRASE_SEM_EXTRAS = 'este servidor ainda não tem os componentes fora do es
    achando que esta resolvido: palpite local (o que o espelho do almoxarifado sabe) e
    veredito do Odoo (o que di_confere_lista respondeu). */
 function resolucaoDe(linha, pendencia){
+  /* CRIADO LOCALMENTE (Biblioteca » Componentes novos): a linha vai com a ficha no bloco `componente`, e o recibo diz se
+     ela passa nas regras do cadastro novo (pronto) ou o que falta. Pronta, o almoxarifado cria com um clique. */
+  if (linha.componente){
+    const c = pendencia && pendencia.componente;
+    if (c && c.pronto) return { txt: 'criado localmente · ficha pronta: o almoxarifado cria com um clique', pend: false };
+    if (c){
+      const falta = [].concat(c.faltas || [], c.erros || []);
+      return { txt: 'criado localmente · ficha incompleta: ' + (falta.join(' · ') || 'veja no Odoo'), pend: true };
+    }
+    if (pendencia) return { txt: 'criado localmente · ' + (pendencia.motivo || 'pendente'), pend: true };
+    return { txt: 'criado localmente · vai com a ficha' + (linha._localPronto === true ? ' (conferida: pronta)'
+                : linha._localPronto === false ? ' (a última conferência apontou faltas)' : ''), pend: false };
+  }
   if (pendencia) return { txt: pendencia.motivo || 'pendente', pend: true };
   if (linha.product_id) return { txt: 'produto ' + linha.product_id + ' · ' + (linha._como || ''), pend: false };
   if (linha.mpn) return { txt: 'MPN ' + linha.mpn + (linha.encapsulamento ? ' · ' + linha.encapsulamento : ''), pend: false };

@@ -21,6 +21,8 @@ const LIBS = [
   { src:'Libs/pcblib.js',          nome:'pcblib' },
   { src:'Libs/almox-basicos.js',   nome:'almoxBasicos' },
   { src:'Libs/almox-especiais.js', nome:'almoxEspeciais' },
+  /* os componentes criados localmente (Biblioteca » Componentes novos): o formato dos acervos; pode nao existir */
+  { src:'Libs/almox-locais.js',    nome:'almoxLocais', opcional:true },
   { src:'Libs/almox-index.js',     nome:'almoxIndex' },
   { src:'Libs/rename-map.js',      nome:'renameMap' },
   { src:'Libs/lib-subs.js',        nome:'libSubs' },
@@ -44,6 +46,7 @@ const ACERVO_DEFS = [
   { id:'altium',          nome:'schlib',         titulo:'Biblioteca do Altium' },
   { id:'almox-basicos',   nome:'almoxBasicos',   titulo:'Almoxarifado — Básicos' },
   { id:'almox-especiais', nome:'almoxEspeciais', titulo:'Almoxarifado — Especiais' },
+  { id:'almox-locais',    nome:'almoxLocais',    titulo:'Componentes criados localmente' },
 ];
 const _acervo = (g, id, titulo) => (g && g.symbols && g.symbols.length)
   ? { id, titulo: g.title || titulo, syms: g.symbols, almox: id !== 'altium',
@@ -3159,8 +3162,11 @@ function buildAddSrc(){
    ou um codigo Mouser sem saber em que familia ele mora */
 function addFiltered(){
   const q = $('addSearch').value.trim().toLowerCase(), ac = acervoAtual();
-  if (!q) return ac.syms.slice();           /* ac.syms = familias, sem os alias por valor */
-  return ac.syms.filter(s => (s.name + ' ' + (s.description || '') + ' '
+  /* o criado localmente ja INTEGRADO nao se oferece mais: a peca e a do almoxarifado (o registro so fica para
+     os esquemas que o usam continuarem desenhando) */
+  const syms = ac.syms.filter(s => !(s.criadoLocal && s.criadoLocal.integrado));
+  if (!q) return syms;                      /* ac.syms = familias, sem os alias por valor */
+  return syms.filter(s => (s.name + ' ' + (s.description || '') + ' '
     + (ac.almox ? valoresDe(s).slice(0, 400).map(p => p.label + ' ' + (p.mpn || '') + ' ' + (p.mouser || '')).join(' ') : '')
   ).toLowerCase().includes(q));
 }
@@ -3226,6 +3232,14 @@ function buildAddList(){
         const nv = valoresDe(s).length;
         if (nv > 1) b.append(el('span', 'pill', nv + ' val'));
         if (!(s.footprints || []).length) b.append(el('span', 'pill warn', 'sem encap'));
+        /* CRIADO LOCALMENTE (Biblioteca » Componentes novos): a tag no lugar do estoque, que ele nao tem */
+        if (s.criadoLocal && !s.criadoLocal.integrado){
+          const t = el('span', 'pill', 'criado localmente');
+          t.style.cssText = 'border:1px solid var(--hi,#4fc3f7);color:var(--hi,#4fc3f7);background:transparent;';
+          t.title = 'Criado no NexoEletric: ainda não está no almoxarifado do Odoo. Vai com a ficha completa no "Enviar para o Odoo".';
+          b.append(t);
+          return;
+        }
         const est = estoqueDe(s), q2 = el('span', 'mt', qtdFmt(est));
         q2.style.color = est > 0 ? 'var(--ok)' : 'var(--text-4)';
         b.append(q2);
@@ -3567,6 +3581,14 @@ $('btnPaineis').addEventListener('click', () => { if (painelProps) painelProps.a
    hub-odoolink » fichaDoComp, onde é provada em Node. NÃO passa pelo resolveSym: ele segue as
    escolhas de DESENHO do lib-subs.js, e uma delas fazia todo resistor "RES [ SMD ]" abrir a
    ficha do 10R. Devolve { alvo, nome }, { motivo } ou null. */
+/* o componente local (LocalId do params) e o registro dele em Libs/almox-locais.js: {id, s, integrado} ou null */
+function localDoComp(comp){
+  const m = /(?:^|;)\s*LocalId\s*=\s*([^;]*)/i.exec(String((comp && comp.params) || ''));
+  if (!m) return null;
+  const id = m[1].trim(), L = window.almoxLocais;
+  const s = L && (L.symbols || []).find(x => x && x.criadoLocal && x.criadoLocal.id === id) || null;
+  return { id, s, integrado: !!(s && s.criadoLocal.integrado) };
+}
 function odooDoComp(comp){
   return (comp && typeof HubOdooLink !== 'undefined') ? HubOdooLink.fichaDoComp(comp) : null;
 }
@@ -4280,7 +4302,18 @@ function renderProps(){
      continua lá e diz POR QUÊ — sumir com ela faria parecer que a ficha nem tem esse campo. */
   const od = odooDoComp(it);
   const lkOdoo = od && od.alvo ? HubOdooLink.link(od.alvo, { nome: od.nome, texto: 'Abrir no Odoo ↗' }) : null;
+  /* CRIADO LOCALMENTE (Biblioteca » Componentes novos): a peca que o Odoo ainda nao tem vai com a ficha no
+     "Enviar para o Odoo"; integrada (o almoxarifado a criou e o sincronismo a trouxe), a tag sai */
+  const loc = localDoComp(it);
+  if (loc && !loc.integrado){
+    const t = el('span', null, 'criado localmente');
+    t.style.cssText = 'font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid var(--hi,#4fc3f7);color:var(--hi,#4fc3f7);white-space:nowrap;';
+    t.title = 'Componente ' + loc.id + ', criado no NexoEletric: ainda não está no almoxarifado do Odoo. '
+            + 'Vai com a ficha completa no "Enviar para o Odoo"; quando o almoxarifado o criar, ele perde a tag.';
+    prKvEl(g, 'Origem', t);
+  }
   if (lkOdoo) prKvEl(g, 'Odoo', lkOdoo);
+  else if (loc && !loc.integrado) prKv(g, 'Odoo', 'ainda não está no Odoo: vai com a ficha no "Enviar para o Odoo"', 'dim');
   else prKv(g, 'Odoo', od && od.motivo ? od.motivo
                      : od ? 'o espelho não diz qual é o Odoo — rode a sincronização do almoxarifado'
                      : 'sem ficha: vincule ao almoxarifado pelo "Trocar componente…"', 'dim');

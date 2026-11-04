@@ -28,13 +28,17 @@ module.exports = {
       executa: async (a, ctx) => {
         const termos = norm(a.busca).split(/\s+/).filter(Boolean);
         const out = [];
-        for (const [arq, nome, acervo] of [['almox-basicos.js', 'almoxBasicos', 'básicos'], ['almox-especiais.js', 'almoxEspeciais', 'especiais']]) {
+        /* + os criados localmente (componentes-locais.js): a peça que o Odoo ainda não tem, com a tag; o já integrado
+           sai (a peça é a do almoxarifado) */
+        for (const [arq, nome, acervo] of [['almox-basicos.js', 'almoxBasicos', 'básicos'], ['almox-especiais.js', 'almoxEspeciais', 'especiais'], ['almox-locais.js', 'almoxLocais', 'criados localmente']]) {
           const g = ctx.lib(arq, nome);
           for (const s of (g && g.symbols) || []) for (const v of s.valores || []) {
+            if (s.criadoLocal && s.criadoLocal.integrado) continue;
             const txt = norm([s.name, s.familia, s.description, v.label, v.value, v.mpn, v.footprint, v.local, (v.itens || []).map(i => i.nome).join(' ')].join(' '));
             if (!termos.every(t => txt.includes(t))) continue;
             if (a.so_com_estoque && !(v.estoque > 0)) continue;
             out.push({ acervo, familia: s.name, valor: v.label, estoque: v.estoque, local: v.local, mpn: v.mpn || undefined, odoo: (v.itens || []).map(i => i.odoo),
+              tag: v.criadoLocal ? 'criado localmente (' + s.criadoLocal.id + ': ainda não está no Odoo; vai com a ficha no Enviar para o Odoo)' : undefined,
               comp: { t: 'comp', sym: v.altium, comment: v.label, footprint: v.footprint || '', params: paramsDoValor(v), ref: (s.designator || 'U') .replace(/\?+$/, '') + '?' } });
           }
         }

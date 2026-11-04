@@ -4,6 +4,43 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.65.0 — 2026-11-04
+
+**Componentes novos:** a peça que o almoxarifado do Odoo ainda não tem, criada no NexoEletric com a tag
+**"criado localmente"**. O contrato é o `docs/prompt-nexoeletric-componente-novo.md` (módulo `di_lista_altium`
+19.0.9.0.0).
+- **A área (Biblioteca › Componentes novos):**
+  - lista dos componentes criados localmente, com a situação de cada um: incompleto, não conferido, com faltas ou
+    pronto para o Odoo;
+  - a ficha completa do contrato: família, montagem, encapsulamento, MPN, fabricante, subtipo, valor, vias,
+    polaridade, os atributos que a família pede, pinos, pinagem e designator;
+  - o símbolo (da Biblioteca de símbolos, da SchLib ou de uma família do almoxarifado), o footprint, o datasheet e os
+    links.
+- **O formulário se monta pelo Odoo:** as listas fechadas, os encapsulamentos, os subtipos e o perfil da família vêm
+  do próprio Odoo, sem nada cravado aqui. Sem o Odoo, os campos ficam livres.
+- **Conferir no Odoo:** o botão "Salvar e conferir no Odoo" é o `di_confere_lista` (ensaio, não grava nada lá). Ele
+  mostra pronto, faltas, erros e o nome que a peça vai ter. A pinagem sai sozinha dos pinos do símbolo.
+- **No esquema:** o componente local aparece no "Adicionar componentes", com a tag, num acervo próprio e na família
+  dele. Coloca-se como qualquer peça; o params leva `LocalId=Ln`. A ficha da vista Esquema também mostra a tag.
+- **No "Enviar para o Odoo":** a linha do componente local vai com a ficha completa, no bloco `componente`, sem
+  `product_id`. O modal diz se a ficha está pronta (o almoxarifado cria com um clique) ou o que falta.
+- **A integração:** depois que o almoxarifado cria a peça, o sincronismo seguinte a traz com o mesmo MPN e
+  encapsulamento.
+  - O componente local é integrado: perde a tag, sai do "Adicionar componentes" e a linha passa a ir com o
+    `product_id`, também nos esquemas que já o usavam.
+  - O "Odoo ↗" dele passa a abrir a ficha.
+- **Onde mora:** `Libs/almox-locais.js`, no formato dos acervos do almoxarifado. Ele vai e volta com o NexoBD, como a
+  biblioteca, e está no `.gitignore`. O servidor é o `tools/rotas/componentes_locais.py` (rotas `/api/locais/*`).
+- **MCP:**
+  - ferramentas `local_regras`, `local_opcoes`, `local_listar`, `local_ler`, `local_criar`, `local_editar`,
+    `local_conferir`, `local_apagar` e `local_integrar`;
+  - a skill `componente-novo`: ler o link ou o datasheet, perguntar as regras ao Odoo, atribuir o símbolo e o
+    footprint (criando com `sym_gerar`/`fp_pacote` se faltar), conferir e colocar no esquema;
+  - o `almox_buscar` também acha os criados localmente, com a tag.
+- **Para o Odoo:** `docs/prompt-odoo-verificar-recebimento-nexoeletric.md`, a instrução para a IA do Odoo conferir o
+  recebimento da lista com as fotos da placa e das peças novas.
+- Testes: `tests/test_componentes_locais.py`.
+
 ## 1.64.2 — 2026-11-04
 
 **Arrastar o projeto do Altium para a janela abre de verdade.** A 1.64.1 consertou o Arquivo › Abrir, mas o arrastar

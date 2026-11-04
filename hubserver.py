@@ -2031,6 +2031,16 @@ try:
 except Exception as _e:            # noqa: BLE001
     print('AVISO: envio a JLC desligado (%s) — falta tools/rotas/jlc.py.' % _e)
 
+# ─────────────────── componentes criados localmente (tools/rotas/componentes_locais.py) ───────────────────
+# /api/locais/*: a peca que o almoxarifado do Odoo ainda nao tem, em Libs/almox-locais.js (mesmo formato
+# dos acervos), com a ficha x_* que o "Enviar para o Odoo" manda no bloco `componente` da linha.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import componentes_locais as _locais   # noqa: E402
+    _locais.registra(app, ROOT)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: componentes locais desligados (%s) — falta tools/rotas/componentes_locais.py.' % _e)
+
 # ─────────────────── MCP: o canal da IA com a vista aberta (mcp/) ───────────────────
 # /api/mcp/{status,pedido,pedidos,resposta/<id>}: o servidor MCP (mcp/eletrichub-mcp.js) pede
 # screenshot/foco/comando a vista aberta; fila em memoria, nada em disco.

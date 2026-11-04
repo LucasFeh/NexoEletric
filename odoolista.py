@@ -71,7 +71,12 @@ PADRAO = {'url': 'http://192.168.15.192:8070', 'db': 'odoo_db',
 # vindo". Linha sem acervo nenhum aqui e a que a tela pinta de vermelho -- nao esta em
 # nenhum dos dois almoxarifados, e por isso nao tem como resolver sozinha.
 ACERVOS = (('Libs/almox-basicos.js', 'almoxBasicos', 'almoxarifado - básicos'),
-           ('Libs/almox-especiais.js', 'almoxEspeciais', 'almoxarifado - especiais'))
+           ('Libs/almox-especiais.js', 'almoxEspeciais', 'almoxarifado - especiais'),
+           # os componentes criados localmente (tools/rotas/componentes_locais.py): mesmo formato
+           ('Libs/almox-locais.js', 'almoxLocais', 'criados localmente'))
+# os registros dos componentes locais por LocalId, guardados no indice do acervo sob esta chave (que
+# nenhum nome de simbolo do Altium tem): o resolve() os acha sem mudar de assinatura
+LOCAIS = '\x00locais'
 
 
 class ErroOdoo(RuntimeError):
@@ -147,7 +152,27 @@ def carrega_acervo(raiz=RAIZ):
                     idx[nome].setdefault('homonimos', [idx[nome]]).append(ficha)
                     continue
                 idx[nome] = ficha
+    try:
+        # o local que o almoxarifado ja criou (chegou pelo sincronismo) e integrado ANTES de montar a lista: a linha vai
+        # com o product_id dele, e nao com a ficha de novo
+        _locais().integra(raiz)
+    except Exception:                # noqa: BLE001
+        pass
+    try:
+        locais = _locais().por_id(raiz)
+    except Exception:                # noqa: BLE001  -- sem o modulo ou o arquivo, so nao ha locais
+        locais = {}
+    if locais:
+        idx[LOCAIS] = locais
     return idx
+
+
+def _locais():
+    pasta = os.path.join(RAIZ, 'tools', 'rotas')
+    if pasta not in sys.path:
+        sys.path.insert(0, pasta)
+    import componentes_locais
+    return componentes_locais
 
 
 def _ficha_do_params(ficha, product_id, par):
@@ -369,6 +394,27 @@ def resolve(grupo, acervo):
         linha['product_id'] = odoo_ids[0]
         como = 'OdooId do componente'
 
+    # COMPONENTE CRIADO LOCALMENTE (o LocalId do params): a peca que o Odoo nao tem vai com a ficha
+    # inteira no bloco `componente`, sem product_id (prompt-nexoeletric-componente-novo.md, secao 2);
+    # depois que o almoxarifado a criou e o sincronismo a trouxe (componentes_locais.integra), vai o
+    # product_id do produto, mesmo nos esquemas que ainda tem o LocalId
+    lid = (par.get('LocalId') or '').strip()
+    loc = (acervo.get(LOCAIS) or {}).get(lid) if lid else None
+    if lid and 'product_id' not in linha:
+        meta = (loc or {}).get('criadoLocal') or {}
+        integ = meta.get('integrado') or {}
+        if str(integ.get('odoo') or '').isdigit():
+            linha['product_id'] = int(integ['odoo'])
+            como = 'criado localmente, ja integrado ao almoxarifado'
+        elif loc:
+            linha['componente'] = _locais().bloco_do_envio(loc)
+            como = 'criado localmente: vai com a ficha do componente'
+            conf = meta.get('conferencia')
+            linha['_local'] = lid
+            linha['_localPronto'] = (conf or {}).get('pronto') if conf else None
+        else:
+            como = 'criado localmente (%s), mas o componente nao esta mais em Libs/almox-locais.js' % lid
+
     ficha = _ficha_do_params(acervo.get(grupo['sym']) or {}, linha.get('product_id'), par)
     itens = ficha.get('itens') or []
     if 'product_id' not in linha and itens:
@@ -384,7 +430,7 @@ def resolve(grupo, acervo):
         else:
             como = 'ambiguo: %d produtos com este rotulo' % len(itens)
 
-    if 'product_id' not in linha:
+    if 'product_id' not in linha and 'componente' not in linha:
         mpn, palpite = par.get('MPN') or ficha.get('mpn') or '', False
         if not mpn and _parece_mpn(grupo['sym']):
             # Boa parte da biblioteca antiga da casa tem o proprio part number como nome do
@@ -417,6 +463,8 @@ def resolve(grupo, acervo):
     item = next((x for x in itens if str(x.get('odoo')) == str(linha.get('product_id'))),
                 itens[0] if itens else {})
     nome = item.get('nome') or ficha.get('label') or ''
+    if 'componente' in linha and loc:
+        nome = loc.get('name') or nome
     if not nome:
         nome = grupo['sym']
         if grupo['comment'] and grupo['comment'] != grupo['sym']:
@@ -443,7 +491,7 @@ def resolve(grupo, acervo):
     if ficha.get('acervo'):
         linha['_acervo'] = ficha['acervo']
     linha['_como'] = como or 'sem vinculo com o cadastro'
-    linha['_resolvida'] = 'product_id' in linha or 'mpn' in linha
+    linha['_resolvida'] = 'product_id' in linha or 'mpn' in linha or 'componente' in linha
     if grupo.get('semValor'):
         linha['_semValor'] = True
         linha['_como'] = 'valor nao esta no espelho - pode juntar pecas diferentes'
@@ -537,8 +585,15 @@ _FORA_DO_XML = re.compile(u'[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff
 
 
 def _xml_seguro(v):
-    """O texto sem o que o XML 1.0 recusa (vira espaco); o resto passa intacto."""
-    return _FORA_DO_XML.sub(' ', v) if isinstance(v, str) else v
+    """O texto sem o que o XML 1.0 recusa (vira espaco); o resto passa intacto. Desce em dicionario e
+    lista: o bloco `componente` de um criado localmente leva textos dentro."""
+    if isinstance(v, str):
+        return _FORA_DO_XML.sub(' ', v)
+    if isinstance(v, dict):
+        return {k: _xml_seguro(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_xml_seguro(x) for x in v]
+    return v
 
 
 def payload_limpo(payload):

@@ -91,7 +91,9 @@ const RESERVA = ['almoxBasicos', 'almoxEspeciais'];
 let mapa = null, mapaDe = [];
 function acervos(){
   const ix = G.almoxIndex;
-  const vars = (ix && ix.libs && ix.libs.length) ? ix.libs.map(l => l && l.var) : RESERVA;
+  const vars = (ix && ix.libs && ix.libs.length) ? ix.libs.map(l => l && l.var) : RESERVA.slice();
+  /* os criados localmente: o INTEGRADO (o almoxarifado criou a peca) traz o item do Odoo, e o link passa a abrir */
+  if (vars.indexOf('almoxLocais') < 0) vars.push('almoxLocais');
   return vars.filter(Boolean).map(v => G[v]).filter(l => l && l.symbols);
 }
 /* dois mapas numa passada: produto → {tmpl, nome} e nome do valor (`v.altium`, o que o `sym`

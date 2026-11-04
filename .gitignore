@@ -14,6 +14,8 @@ Libs/Almox/
 Libs/almox-basicos.js
 Libs/almox-especiais.js
 Libs/almox-index.js
+# os componentes criados localmente (tools/rotas/componentes_locais.py): dado da biblioteca, viaja pelo NexoBD
+Libs/almox-locais.js*
 Libs/almox-sync.js
 # resumo do guardiao (tools/symbols/guardiao.py o reescreve a cada sincronismo)
 Libs/almox-guardiao.js
