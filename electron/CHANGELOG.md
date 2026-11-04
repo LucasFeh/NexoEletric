@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.64.0 — 2026-11-04
+
+**O componente posto depois do Altium pega o 3D do irmão de mesmo footprint.** No PLACAB_DI251885B o IC16
+(TMCS1123A1AQDVGR, criado por `comp_add`) aparecia como caixa genérica no 3D, ao lado do IC1 e do IC12–IC14 (o mesmo
+footprint, vindos do Altium) com o corpo certo. O `board3d.js` só tem corpo para quem veio do Altium, o footprint
+no editor do hub não tinha corpo e a PcbLib 3D da casa não tinha o footprint.
+
+- Agora, sem corpo próprio, o componente usa o corpo de um irmão da mesma placa com o mesmo footprint
+  (`HubPcb3dModelo.corpos`), levado da pose do irmão para a dele: giro e troca de face juntos.
+- A ordem fica: corpo do editor do hub › corpo próprio do `board3d.js` › irmão de mesmo footprint › PcbLib 3D da
+  casa › caixa genérica.
+- Vale na vista 3D, nas fotos da placa e no pacote que vai para o NexoCAD.
+- Teste: `tests/test-pcb3d-irmao.js`.
+
 ## 1.63.0 — 2026-11-04
 
 **O mesmo STEP não vira dois itens na biblioteca.** O corpo 3D de uma placa enviada ao Nexo Hub tem a chave

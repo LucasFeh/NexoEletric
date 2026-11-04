@@ -438,6 +438,23 @@ function corpos(eb, d3, opcoes){
       }
       return;
     }
+    /* O IRMAO NA MESMA PLACA (1.64.0): o componente posto depois do Altium (comp_add) nao tem corpo no
+       board3d.js, e o footprint dele nem sempre tem corpo na biblioteca -- o IC16 do PLACAB_DI251885B saia
+       como caixa generica ao lado do IC1 de mesmo footprint, com o corpo certo (pedido do dono, 2026-11-04).
+       Sem corpo proprio, vale o de um irmao com o MESMO footprint nesta placa, levado da pose do irmao para
+       a dele (deltaComp: giro e troca de face juntos). O primeiro irmao por ordem de nome, para nao variar. */
+    const irmao = c.footprint ? Object.keys(origem).filter(r => r !== refO && porDono[r] && origem[r]
+      && origem[r].footprint === c.footprint).sort()[0] : null;
+    if (irmao) {
+      const oi = origem[irmao], D = deltaComp(oi, c, esp), lado = ladoDe(c);
+      for (const b of porDono[irmao]) {
+        const ladoB = ladoDe(oi) === ladoDe(c) ? ladoDe(b) : (ladoDe(b) === 'top' ? 'bottom' : 'top');
+        const o = leva(b, D, ladoB || lado, esp, d3.models, base, 'board3d', c.ref, prefD3);
+        o.irmao = irmao;
+        out.push(o);
+      }
+      return;
+    }
     const fp = lib && lib.footprints && tem(lib.footprints, c.footprint) ? lib.footprints[c.footprint] : null;
     if (fp && Array.isArray(fp.bodies) && fp.bodies.length) { daBiblioteca(fp, lib.models, 'biblioteca'); return; }
     if (opcoes.placeholder !== false) out.push(placeholder(c, eb, { thickness: esp, alturas: opcoes.alturas }));
