@@ -69,6 +69,8 @@ enum Ev {
     Menu(String),
     Titulo(String),
     Arrastou(Vec<PathBuf>),
+    /// a janela de arquivos do Windows respondeu (id do pedido, caminhos; vazio = cancelou)
+    Escolheu(u64, Vec<String>),
     Focar,
     Toast(String),
 }
@@ -257,18 +259,51 @@ fn apaga_sessao() {
     }
 }
 
-/// a ponte que a pagina do hub espera (o preload.js do Electron): menu(id) e caminho(arquivo)
+/// a ponte que a pagina do hub espera (o preload.js do Electron): menu(id) e caminho(arquivo), mais (1.64.1):
+///   escolheArquivos() -> Promise<[caminho]>  a janela de arquivos do Windows (o <input type=file> nunca da o caminho,
+///                                            e o "abrir projeto do Altium" so com o .PrjPcb precisa dele);
+///   esperaCaminhos(nomes, ms) -> Promise<[caminho]|null>  o caminho dos arquivos ARRASTADOS chega aqui um instante
+///                                            depois do soltar da pagina (o Rust repassa pelo evaluate_script): espera.
 const PONTE: &str = r#"(function(){
   if (!(location.protocol === 'http:' && (location.hostname === '127.0.0.1' || location.hostname === 'localhost'))) return;
+  var T = function () { return window.top || window; };
+  var achaUltimo = function (n) {
+    var a = T().__nexoArrastados || [];
+    for (var i = a.length - 1; i >= 0; i--) if (a[i].split(/[\\/]/).pop() === n) return a[i];
+    return '';
+  };
+  if (window.top === window) window.__nexoEscolheu = function (id, lista) {
+    var f = window.__nexoEscolhas && window.__nexoEscolhas[id];
+    if (f) { delete window.__nexoEscolhas[id]; f(lista || []); }
+  };
   window.eletricApp = {
-    menu: function (id) { window.ipc.postMessage(JSON.stringify({ menu: String(id) })); return Promise.resolve(true); },
-    caminho: function (f) {
-      var a = (window.top && window.top.__nexoArrastados) || [], n = f && f.name;
-      for (var i = a.length - 1; i >= 0; i--) if (a[i].split(/[\\/]/).pop() === n) return a[i];
-      return '';
+    menu: function (id) { T().ipc.postMessage(JSON.stringify({ menu: String(id) })); return Promise.resolve(true); },
+    caminho: function (f) { return achaUltimo(f && f.name); },
+    escolheArquivos: function () {
+      var t = T();
+      t.__nexoEscolhas = t.__nexoEscolhas || {};
+      var id = (t.__nexoEscSeq = (t.__nexoEscSeq || 0) + 1);
+      return new Promise(function (ok) { t.__nexoEscolhas[id] = ok; t.ipc.postMessage(JSON.stringify({ escolher: id })); });
+    },
+    esperaCaminhos: function (nomes, ms) {
+      var t0 = Date.now(), fim = t0 + (ms || 1500);
+      return new Promise(function (ok) {
+        (function olha() {
+          var t = T(), fresco = (t.__nexoArrastadosEm || 0) >= t0 - 3000;
+          var l = fresco ? (nomes || []).map(achaUltimo) : [];
+          if (fresco && l.length && l.every(Boolean)) return ok(l);
+          if (Date.now() >= fim) return ok(null);
+          setTimeout(olha, 40);
+        })();
+      });
     },
   };
 })();"#;
+
+/// o script que entrega a escolha da janela de arquivos a pagina (eletricApp.escolheArquivos)
+fn script_escolheu(id: u64, caminhos: &[String]) -> String {
+    format!("window.__nexoEscolheu && window.__nexoEscolheu({id}, {});", serde_json::to_string(caminhos).unwrap())
+}
 
 fn main() {
     app_id_do_nexoeletric();
@@ -362,6 +397,21 @@ fn main() {
                 if let Some(m) = j.get("menu").and_then(|m| m.as_str()) {
                     let _ = p1.send_event(Ev::Menu(m.to_string()));
                 }
+                // eletricApp.escolheArquivos(): a janela de arquivos do Windows, numa thread (ela e modal e
+                // seguraria o laco de eventos); a resposta volta pelo Ev::Escolheu
+                if let Some(id) = j.get("escolher").and_then(|m| m.as_u64()) {
+                    let px = p1.clone();
+                    std::thread::spawn(move || {
+                        let l = rfd::FileDialog::new()
+                            .set_title("Abrir projeto do Altium")
+                            .add_filter("Projeto do Altium (.PrjPcb, .SchDoc, .PcbDoc)", &["PrjPcb", "SchDoc", "PcbDoc"])
+                            .add_filter("Todos os arquivos", &["*"])
+                            .pick_files()
+                            .unwrap_or_default();
+                        let l: Vec<String> = l.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                        let _ = px.send_event(Ev::Escolheu(id, l));
+                    });
+                }
             }
         })
         .with_new_window_req_handler(move |u, _| match destino_link(&u, porta) {
@@ -411,8 +461,15 @@ fn main() {
                 ));
             }
             Event::UserEvent(Ev::Arrastou(p)) => {
+                // __nexoArrastadosEm: a pagina so aceita o caminho de um arraste recente (eletricApp.esperaCaminhos)
                 let lista: Vec<String> = p.iter().map(|x| x.to_string_lossy().into_owned()).collect();
-                let _ = webview.evaluate_script(&format!("window.__nexoArrastados = {};", serde_json::to_string(&lista).unwrap()));
+                let _ = webview.evaluate_script(&format!(
+                    "window.__nexoArrastados = {}; window.__nexoArrastadosEm = Date.now();",
+                    serde_json::to_string(&lista).unwrap()
+                ));
+            }
+            Event::UserEvent(Ev::Escolheu(id, l)) => {
+                let _ = webview.evaluate_script(&script_escolheu(id, &l));
             }
             Event::UserEvent(Ev::Menu(m)) => match m.as_str() {
                 "recarregar" | "recarregarSemCache" => {
@@ -462,7 +519,19 @@ fn main() {
 
 #[cfg(test)]
 mod testes {
-    use super::{destino_link, DestinoLink};
+    use super::{destino_link, script_escolheu, DestinoLink, PONTE};
+
+    #[test]
+    fn escolha_de_arquivos_volta_para_a_pagina() {
+        // a barra invertida do Windows e as aspas viajam como JSON: a pagina recebe o caminho exato
+        let s = script_escolheu(3, &["C:\\Projetos\\MIRBC\\x \"y\".PrjPcb".to_string()]);
+        assert_eq!(s, r#"window.__nexoEscolheu && window.__nexoEscolheu(3, ["C:\\Projetos\\MIRBC\\x \"y\".PrjPcb"]);"#);
+        assert_eq!(script_escolheu(4, &[]), "window.__nexoEscolheu && window.__nexoEscolheu(4, []);");
+        // a ponte oferece o que o hub-altiumabrir.js usa
+        for f in ["caminho:", "escolheArquivos:", "esperaCaminhos:", "__nexoEscolheu", "__nexoArrastadosEm"] {
+            assert!(PONTE.contains(f), "a PONTE nao tem {f}");
+        }
+    }
 
     #[test]
     fn links_novos_como_o_electron() {

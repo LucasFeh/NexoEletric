@@ -4,6 +4,21 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.64.1 — 2026-11-04
+
+**Abrir projeto do Altium volta a funcionar na janela Rust.** Pelo Arquivo › Abrir e arrastando o `.PrjPcb`, nada
+abria. Para abrir só pelo `.PrjPcb`, a página precisa do caminho do arquivo no disco: com ele, o servidor acha as
+folhas e a placa. Na janela Electron o preload dava esse caminho; na janela Rust (1.54.0+) ele não chegava.
+
+- **Arquivo › Abrir:** era a janela de arquivos do navegador (`<input type=file>`), que nunca entrega o caminho.
+  Agora é a janela de arquivos do Windows (`eletricApp.escolheArquivos`, pelo `rfd` na casca Rust), com o caminho
+  completo: basta o `.PrjPcb`, como no Electron.
+- **Arrastar:** a casca Rust recebe o caminho do arquivo solto e o repassa à página um instante depois do soltar. A
+  página perguntava na hora e não achava. Agora ela espera até 1,5 s pelo caminho (`eletricApp.esperaCaminhos`) e
+  só aceita o de um arraste recente.
+- No navegador (sem o app) continua igual: escolha o `.PrjPcb` junto com as folhas e a placa.
+- Testes: `tests/test-altium-abrir.js` (a página e a ponte de verdade) e o teste novo do `nexoeletric-web`.
+
 ## 1.64.0 — 2026-11-04
 
 **O componente posto depois do Altium pega o 3D do irmão de mesmo footprint.** No PLACAB_DI251885B o IC16

@@ -73,19 +73,38 @@ async function envia(corpo){
   return j;
 }
 
-/* os caminhos no disco (so no app desktop, e so se TODOS vierem) */
-function caminhos(arqs){
+/* os caminhos no disco (so no app desktop, e so se TODOS vierem). A janela Rust (1.64.1) entrega o caminho do arquivo
+   arrastado um instante DEPOIS do soltar: esperaCaminhos espera ate 1,5 s por ele (antes a pagina perguntava na hora,
+   achava nada e caia no "escolha o .PrjPcb JUNTO com as folhas"). A janela Electron responde na hora (caminho). */
+async function caminhos(arqs){
   const a = app();
   if (!a) return null;
+  if (typeof a.esperaCaminhos === 'function') {
+    try {
+      const l = await a.esperaCaminhos(arqs.map(f => f.name), 1500);
+      if (Array.isArray(l) && l.length === arqs.length && l.every(Boolean)) return l;
+    } catch (e) { /* cai no de sempre */ }
+  }
   const l = arqs.map(f => a.caminho(f));
   return l.every(Boolean) ? l : null;
 }
+const nomeDe = p => String(p).split(/[\\/]/).pop();
 
 async function abre(opcoes){
   const o = opcoes || {};
   const d = dlg();
   if (!/^https?:/.test(location.protocol)) { toast('abrir documento do Altium pede o hub pelo servidor (hubserver.py), não o arquivo aberto do disco', 'warn', 5000); return null; }
-  const arqs = [...(o.arquivos || await escolhe())].filter(f => EXT.test(f.name));
+  /* Arquivo › Abrir na janela Rust (1.64.1): a janela de arquivos do Windows (eletricApp.escolheArquivos), que devolve
+     o caminho completo -- o <input type=file> do navegador nunca entrega o caminho, e so o .PrjPcb nao abria */
+  const a = app();
+  let arqs, disco = null;
+  if (o.arquivos) arqs = [...o.arquivos].filter(f => EXT.test(f.name));
+  else if (a && typeof a.escolheArquivos === 'function') {
+    const ps = ((await a.escolheArquivos()) || []).filter(p => EXT.test(String(p)));
+    if (!ps.length) return null;
+    disco = ps;
+    arqs = ps.map(p => ({ name: nomeDe(p), size: 0 }));
+  } else arqs = [...(await escolhe())].filter(f => EXT.test(f.name));
   if (!arqs.length) {
     if (o.arquivos && d) await d.alert('Solte um projeto do Altium: o .PrjPcb (ou as folhas .SchDoc e a placa .PcbDoc).', { title:'Abrir projeto do Altium' });
     return null;
@@ -93,7 +112,7 @@ async function abre(opcoes){
   const prj = arqs.find(f => /\.prjpcb$/i.test(f.name));
   const folhas = arqs.filter(f => /\.schdoc$/i.test(f.name));
   const placas = arqs.filter(f => /\.pcbdoc$/i.test(f.name));
-  const disco = caminhos(arqs);
+  if (!disco) disco = await caminhos(arqs);
   if (!disco && !folhas.length && !placas.length) {
     if (d) await d.alert('Escolha o .PrjPcb JUNTO com as folhas de esquema (.SchDoc) e a placa (.PcbDoc) do projeto: o navegador só entrega os arquivos escolhidos, nunca a pasta.\n\nNa janela de arquivos, segure Ctrl e clique em cada um. No app NexoEletric basta o .PrjPcb.', { title:'Abrir projeto do Altium' });
     return null;
