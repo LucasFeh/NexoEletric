@@ -16,7 +16,7 @@ const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
 const perto = (a, b, m) => ok(Math.abs(a - b) < 0.01, (m || '') + ' — ' + a + ' ≠ ' + b);
 
 /* ── 1. o acervo extraído ── */
-const lib = loadVar('Libs/sch-templates.js', 'schtemplates');
+const lib = loadVar('tools/schtemplate/sch-templates-altium.js', 'schtemplates');
 eq(lib.format, 'schtemplate-v1', 'formato do Libs');
 const A = T.acervo([lib]);
 for (const id of ['altium:Standard', 'altium:ANSI', 'altium:ISO A3 Landscape', 'altium:ISO A2 Landscape',

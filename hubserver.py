@@ -2031,6 +2031,17 @@ try:
 except Exception as _e:            # noqa: BLE001
     print('AVISO: envio a JLC desligado (%s) — falta tools/rotas/jlc.py.' % _e)
 
+# ─────────────────── projeto novo com o codigo do catalogo (tools/rotas/projeto_novo.py) ───────────────────
+# /api/projeto/novo{,/previa}: registra a placa no CATALOGACAO TODOS OS PRODUTOS (mcp/lib/catalogo.js) e cria o
+# projeto com o template da casa preenchido (codigo, quem iniciou, data).
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import projeto_novo as _projnovo   # noqa: E402
+    _projnovo.registra(app, ROOT, {'nome_ok': _nome_projeto_ok, 'proj_id': _proj_id,
+                                   'build_index': lambda: build_index(ROOT), 'vazios': _texto_vazios})
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: projeto novo desligado (%s) — falta tools/rotas/projeto_novo.py.' % _e)
+
 # ─────────────────── componentes criados localmente (tools/rotas/componentes_locais.py) ───────────────────
 # /api/locais/*: a peca que o almoxarifado do Odoo ainda nao tem, em Libs/almox-locais.js (mesmo formato
 # dos acervos), com a ficha x_* que o "Enviar para o Odoo" manda no bloco `componente` da linha.

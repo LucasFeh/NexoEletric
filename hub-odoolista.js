@@ -1529,9 +1529,11 @@ function atualizaBotao(){
   const b = $('btnOdooLista'), h = $('odooHint');
   if (!b) return;
   b.disabled = !temServidor();
-  if (!temServidor()){ h.textContent = 'sem servidor — abra o hub por hubserver.py'; return; }
+  if (!temServidor()){ h.textContent = 'sem servidor — abra o hub por hubserver.py'; if (h.hidden) b.title = h.textContent; return; }
   h.textContent = ST.reciboLocal ? 'último envio: ' + descRecibo(ST.reciboLocal)
                                  : 'monta a lista de componentes e manda para a fila do estoque';
+  /* compacto: o texto não aparece no painel, vai no título do botão */
+  if (h.hidden) b.title = 'Enviar para o Odoo — ' + h.textContent;
 }
 
 function montaDom(){
@@ -1545,11 +1547,14 @@ function montaDom(){
     sec = el('div', 'sec'); sec.id = 'odoolista';
     pane.appendChild(sec);
   }
-  sec.append(el('h2', null, 'Odoo'));
+  /* data-compacto (o painel enxuto da vista Esquema, 2026-11-04): só o botão, "Enviar lista", sem título nem texto */
+  const compacto = sec.hasAttribute('data-compacto');
+  if (!compacto) sec.append(el('h2', null, 'Odoo'));
   const b = el('button', 'wide'); b.id = 'btnOdooLista';
   b.title = 'Monta a lista de componentes do esquema e manda para a fila de aprovação do Odoo';
-  b.append(el('span', null, '↗ Enviar para o Odoo'));
+  b.append(el('span', null, compacto ? 'Enviar lista' : '↗ Enviar para o Odoo'));
   const h = el('div', 'hint'); h.id = 'odooHint';
+  if (compacto) h.hidden = true;
   sec.append(b, h);
   b.addEventListener('click', () => { if (!ST.rodando) abre(); });
 

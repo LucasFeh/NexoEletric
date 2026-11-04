@@ -1636,13 +1636,18 @@ function montaDom(){
     sec.id = 'converte';
     pane.appendChild(sec);
   }
-  sec.append(el('h2', null, 'Almoxarifado'));
+  /* data-compacto (o painel enxuto da vista Esquema, 2026-11-04): só o botão, "Trocar acervo", ao lado do
+     "Enviar lista" */
+  const compacto = sec.hasAttribute('data-compacto');
+  if (!compacto) sec.append(el('h2', null, 'Almoxarifado'));
   const b = el('button', 'wide');
   b.id = 'btnConverte';
   b.type = 'button';
-  b.title = 'Lista os componentes que não são do almoxarifado e recomenda substitutos';
-  b.append(el('span', null, '⇄ Converter para o almoxarifado'));
-  sec.append(b, el('div', 'hint', 'compara comment, parâmetros, valor e footprint de cada '
+  b.title = 'Lista os componentes que não são do almoxarifado e recomenda substitutos (compara comment, parâmetros, '
+    + 'valor e footprint de cada componente com as peças do almoxarifado)';
+  b.append(el('span', null, compacto ? 'Trocar acervo' : '⇄ Converter para o almoxarifado'));
+  sec.append(b);
+  if (!compacto) sec.append(el('div', 'hint', 'compara comment, parâmetros, valor e footprint de cada '
     + 'componente com as peças do almoxarifado'));
   b.addEventListener('click', () => { if (!ST.rodando) abre(); });
 

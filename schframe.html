@@ -260,6 +260,60 @@
   .gridrow{display:flex; align-items:center; gap:6px; margin-top:6px;}
   .gridrow label{font-size:11px; color:var(--fg-dim);}
   .gridrow select{flex:1; min-width:0;}
+
+  /* ── o menu da folha (#sfMenu), no canto de cima à esquerda, abaixo da barra de ferramentas ──
+     A mesma cara do menu do Gerber (hub-gerberview.js » .gv-menu): vidro escuro, cabeçalho com o nome e a seta de
+     recolher, linhas de ícone + rótulo. Recolhido, sobra o cabeçalho (fica guardado no localStorage). */
+  .sf-menu{position:absolute; left:8px; top:52px; z-index:11; width:236px; max-height:calc(100% - 64px); overflow:auto;
+    display:flex; flex-direction:column; padding:4px; border-radius:8px; background:rgba(22,22,25,.78);
+    -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+    box-shadow:0 0 0 1px rgba(255,255,255,.08), 0 10px 28px rgba(0,0,0,.45); color:var(--fg); font-size:12px;}
+  .sf-menu svg{width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.5;
+    stroke-linecap:round; stroke-linejoin:round;}
+  .sf-cab{display:flex; align-items:center; gap:6px; padding:2px 2px 4px 6px; color:var(--fg-dim);}
+  .sf-tit{flex:1; min-width:0; font-weight:600; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .sf-cab button{width:24px; height:24px; padding:0; display:inline-flex; align-items:center; justify-content:center;
+    background:transparent; border-color:transparent;}
+  .sf-cab button:hover{background:rgba(var(--tint),.08);}
+  .sf-corpo{display:flex; flex-direction:column; gap:6px; padding:0 2px 2px;}
+  .sf-menu.sf-recolhido{width:auto; max-width:260px;}
+  .sf-menu.sf-recolhido .sf-corpo{display:none;}
+  .sf-menu #sheetcards .sheetcard{background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.07);}
+  .sf-menu #sheetcards .sheetcard.on{background:rgba(var(--tint),0.14);}
+  .sf-menu select{width:100%; min-width:0;}
+  .sf-sep{height:1px; background:rgba(255,255,255,.08); margin:2px 4px;}
+  /* as ações em lista, como o menu do Gerber: ícone + rótulo, alinhadas à esquerda */
+  .sf-acao{display:flex; align-items:center; gap:8px; width:100%; height:26px; padding:0 8px; justify-content:flex-start;
+    background:transparent; border-color:transparent; color:var(--fg2, var(--fg)); font-size:12px;}
+  .sf-acao:hover:not(:disabled){background:rgba(var(--tint),.08); color:var(--fg);}
+  .sf-acao:disabled{opacity:.4;}
+  .sf-acao.perigo:hover:not(:disabled){color:var(--err, #f87171);}
+  .sf-acoes{display:grid; grid-template-columns:repeat(3, 1fr); gap:2px;}
+  .sf-acoes .sf-acao{justify-content:center; padding:0 4px; gap:4px; font-size:11px;}
+  .sf-seg{display:flex; gap:2px; padding:2px; border-radius:6px; background:rgba(255,255,255,.05);}
+  .sf-seg button{flex:1; height:24px; padding:0 4px; font-size:11px; background:transparent; border-color:transparent;
+    display:inline-flex; align-items:center; justify-content:center; gap:5px;}
+  .sf-seg button[aria-pressed="true"]{background:var(--hi); color:var(--on-hi);}
+  .sf-seg button:disabled{opacity:.4;}
+  .sf-med{font-size:10.5px; color:var(--fg-dim); padding:0 4px; font-variant-numeric:tabular-nums;}
+  .sf-med.warn{color:var(--warn, #fbbf24);}
+  .sf-lin{display:flex; align-items:center; gap:6px;}
+  .sf-lin > svg{color:var(--fg-dim);}
+
+  /* ── Configurações enxutas: grade de ícones, sem textos de ajuda ── */
+  #pane-cfg.on{display:flex; flex-direction:column;}
+  .cfg-vista{border-bottom:1px solid var(--border);}
+  .cfg-grade{display:grid !important; grid-template-columns:repeat(auto-fill, minmax(32px, 1fr)); gap:4px !important;}
+  .cfg-grade .ibtn{width:100%;}
+  .cfg-acoes{display:grid; grid-template-columns:1fr 1fr; gap:6px;}
+  .cfg-acoes > div{min-width:0;}
+  .cfg-acoes > div:empty{display:none;}
+  .cfg-acoes button{width:100%; margin:0; justify-content:center; text-align:center; padding:6px 6px; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis;}
+  .cfg-acoes .hint, .cfg-acoes h2{display:none;}
+  .cfg-pe{margin-top:auto; display:flex; align-items:center; padding:8px 10px; border-top:1px solid var(--border);}
+  .cfg-pe #btnSave{display:inline-flex; align-items:center; gap:6px; padding:5px 12px;}
+  .cfg-pe #btnSave svg{width:15px; height:15px; fill:none; stroke:currentColor; stroke-width:1.5; stroke-linejoin:round;}
   /* A FICHA EDITA: a caixa fica lisa, cinza, como se estivesse desligada, e só se revela no
      hover ou no foco. Foi o pedido — "uma caixa mais discreta, que fique em cinza claro como
      se tivesse desativada, só ativa quando clica em cima" — e serve ao painel: com borda em
@@ -612,6 +666,23 @@
            Configuracoes › Folha, no painel da direita. O montaBotaoLibs poe o separador
            antes do "libs". -->
     </div>
+    <!-- O MENU DA FOLHA (pedido do dono, 2026-11-04: "formato, orientação, toda a configuração de template e criação
+         de novos templates, em um menu superior esquerdo, igual ao menu do Gerber; tudo que diz respeito a
+         configuração de folha fica lá"). As folhas (cartões), o formato, a orientação e o template; recolhe pela
+         seta do cabeçalho (schframe.js » montaMenuFolha). -->
+    <div id="sfMenu" class="sf-menu" role="region" aria-label="Folha">
+      <div class="sf-cab">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 1.5h6l3 3v10h-9z M9.5 1.5v3h3"/></svg>
+        <span class="sf-tit" id="sfTit">Folha</span>
+        <button type="button" id="sfRec" title="Recolher o menu da folha"></button>
+      </div>
+      <div class="sf-corpo">
+        <!-- um cartao por folha, com a miniatura dela; o clique troca a folha ativa -->
+        <div id="sheetcards"></div>
+        <!-- formato, orientacao e template da folha ativa (schframe.js » secFolha) -->
+        <div id="folhaFmt"></div>
+      </div>
+    </div>
     <!-- a palavra do rotulo: o navegador nao pode abrir prompt() (CLAUDE.md), entao a
          pergunta e este campo no tema da pagina -->
     <div id="netform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
@@ -647,17 +718,12 @@
     </div>
 
     <div class="dpane cfg" id="pane-cfg">
-      <div class="sec">
-        <h2>Folha</h2>
-        <!-- um cartao por folha, com a miniatura dela; o clique troca a folha ativa -->
-        <div id="sheetcards"></div>
-        <!-- o formato da folha ativa (schframe.js » secFolha) -->
-        <div id="folhaFmt"></div>
-        <div class="meta" id="meta" style="margin-top:6px;"></div>
-      </div>
-      <div class="sec">
-        <h2>Vista</h2>
-        <div class="row">
+      <!-- a folha (cartões, formato, orientação, template) mora no menu da folha, no canto de cima à esquerda (#sfMenu).
+           O painel ficou enxuto (pedido do dono, 2026-11-04): ícones em grade, sem textos de ajuda; "Enviar lista" e
+           "Trocar acervo" lado a lado; o Salvar no canto de baixo à esquerda -->
+      <div class="meta" id="meta" hidden></div>
+      <div class="sec cfg-vista">
+        <div class="row cfg-grade">
           <button class="ibtn" id="btnFit" title="Centralizar a folha na tela">
             <svg viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/><circle cx="12" cy="12" r="3"/></svg></button>
           <button class="ibtn active" id="btnGrid" title="Mostrar/ocultar a grade">
@@ -676,22 +742,23 @@
              mil — por isso a lista tem os dois mundos, e nao so os multiplos de 10. -->
         <div class="gridrow">
           <label for="gridsel">Passo</label>
-          <select id="gridsel" title="o passo do encaixe e da malha desenhada; o ímã acompanha"></select>
+          <select id="gridsel" title="o passo do encaixe e da malha desenhada; o ímã acompanha (os atalhos desta vista ficam nas Configurações do hub, aba Atalhos)"></select>
         </div>
-        <div class="hint">Os atalhos de teclado desta vista ficam nas Configurações do hub, aba Atalhos.</div>
       </div>
-      <div class="sec">
-        <h2>Arquivo</h2>
-        <button class="wide" id="btnSave" title="Grava o schematic.js">
+      <!-- os ancoras do "Enviar para o Odoo" (hub-odoolista.js) e do almoxarifado (hub-converte.js), lado a lado e
+           só com o botão (data-compacto). A lista de validacao que vinha depois deles saiu a pedido do usuario
+           (2026-09-24): a validacao continua valendo (trava o Salvar e alimenta a ficha), so nao e mais listada aqui. -->
+      <div class="sec cfg-acoes">
+        <div id="odoolista" data-compacto></div>
+        <div id="converte" data-compacto></div>
+      </div>
+      <!-- o Salvar, no canto de baixo à esquerda do painel; o que falta salvar vai no título dele -->
+      <div class="cfg-pe">
+        <button id="btnSave" title="Grava o schematic.js">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h9l2 2v9h-11z M5 2.5v3.5h5v-3.5 M5 13.5v-4h6v4"/></svg>
           <span id="btnSaveLbl">Salvar</span></button>
-        <div class="hint" id="savehint"></div>
+        <span class="hint" id="savehint" hidden></span>
       </div>
-      <!-- os ancoras do "Enviar para o Odoo" (hub-odoolista.js) e do almoxarifado
-           (hub-converte.js). A lista de validacao que vinha depois deles saiu a pedido do
-           usuario (2026-09-24): a validacao continua valendo (trava o Salvar e alimenta a
-           ficha), so nao e mais listada aqui. -->
-      <div class="sec" id="odoolista"></div>
-      <div class="sec" id="converte"></div>
     </div>
 
     <div class="dpane" id="pane-props">

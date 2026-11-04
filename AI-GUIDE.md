@@ -37,7 +37,12 @@ sendo o contrato dos arquivos, que é o que as ferramentas escrevem.
   `Libs\pcblib.js` (footprints: pads, silk, bbox) são o espelho das bibliotecas reais do
   usuário, gerado pelo `ExportLibs`. **Leia os dois antes de escolher qualquer
   componente.** São só leitura — nunca edite `Libs\*.js`.
-- Projeto novo: crie `Projects\<nome>\schematic.js` (a pasta/arquivo ainda não existem —
+- **Placa nova da casa: siga a skill `projeto-novo`** (MCP: `catalogo_previa` → `projeto_criar {produto}`). Toda
+  placa nova é registrada no catálogo `CATALOGAÇÃO TODOS OS PRODUTOS` (no NAS, `\\192.168.15.31\Controle de
+  Projetos`). O código dela é P + iniciais do nome + `-DI` + ano + item, ex.: `PAEL-DI261940`. Pergunte ao usuário
+  o nome da placa e **quem iniciou o projeto**, que vai no carimbo. No hub é o botão **Novo projeto** do painel
+  Projetos.
+- Projeto novo à mão (sem registro no catálogo): crie `Projects\<nome>\schematic.js` (a pasta/arquivo ainda não existem —
   você os cria) e adicione uma entrada em `projects.js`, no formato exato já usado pelo
   índice (mesmo shape da fixture `_DemoKit`):
 
@@ -200,13 +205,26 @@ busca da Biblioteca, ou as ferramentas `local_*` do MCP e a skill `componente-no
 ### Template de folha (`sheet`, opcional)
 
 Cada item `sheet` pode levar dois campos. Folha sem `template` desenha como sempre desenhou.
-- `"template":"<id>"`: o id do template, de `Libs/sch-templates.js` (os do Altium: `altium:Standard`, `ISO A3 Landscape`…) ou de `Libs/sch-templates-casa.js` (o da casa: `casa:A4_DiEletrons`).
+- `"template":"<id>"`: o id do template, de `Libs/sch-templates-casa.js`. Hoje só existe o da casa,
+  `casa:A4_DiEletrons`: os do Altium saíram do hub em 2026-11-04 e ficaram só como fixture dos testes
+  (`tools/schtemplate/sch-templates-altium.js`).
 - `"params":"Chave=Valor;…"`: os parâmetros do carimbo da folha. O cabeçalho do arquivo pode levar o mesmo `params` para os parâmetros do projeto.
+
+Na vista Esquema, tudo da folha fica no **menu da folha** (canto de cima à esquerda):
+- as folhas;
+- formato e orientação;
+- o template;
+- o **Carimbo…** (os campos do projeto e da folha);
+- editar, criar e **remover** template.
 
 Texto do carimbo `=Nome` (sem diferenciar maiúsculas) se resolve nesta ordem:
 1. a folha;
 2. o projeto;
-3. o sistema: `SheetNumber`, `SheetTotal`, `CurrentDate`, `DocumentName`, `ProjectName`.
+3. o sistema: `SheetNumber`, `SheetTotal`, `CurrentDate`, `DocumentName`, `ProjectName`. O sistema também preenche
+   sozinho:
+   - `Formato`, pelo formato da folha;
+   - o código do produto, quando o nome do projeto o traz (`PDCD-DI261939 (PTYPE)`): `Desenho_linha_unica` e
+     `Equipamento_linha_dois` = `PDCD-DI261939`, e `Arquivo` = `SCH-DI261939`.
 
 Os nomes da casa valem como apelidos dos do Altium: `Desenhista_DiEletrons`=`DrawnBy`,
 `Verificador_DiEletrons`=`CheckedBy`, `Aprovador_DiEletrons`=`ApprovedBy`,

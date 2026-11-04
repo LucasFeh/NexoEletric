@@ -68,6 +68,7 @@
     lixo: '<path d="M2.5 4.5h11M6 4.5V2.8h4v1.7M4 4.5l.7 9h6.6l.7-9"/><path d="M6.8 7v4.5M9.2 7v4.5"/>',
     multipcb: '<rect x="1.8" y="5.2" width="8.6" height="8.6" rx="1"/><path d="M5.6 5.2V2.4h8.6V11h-3.8"/><path d="M4 11.4V9h3.4V7.4"/>',
     editar: '<path d="M10.5 2.8l2.7 2.7-7.4 7.4H3.1v-2.7z"/><path d="M9 4.3l2.7 2.7"/>',
+    novoProj: '<path d="M3.5 1.5h5.5l3 3v4.5"/><path d="M9 1.5v3h3"/><path d="M3.5 1.5v13h5"/><path d="M12 10.5v4M10 12.5h4"/>',
     config: '<circle cx="8" cy="8" r="2.2"/><path d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2"/>',
   };
   const ICONE_DA_ABA = { esquema: 'esquema', pcb: 'pcb', comp: 'comp', nets: 'nets', lib: 'lib',
@@ -126,7 +127,7 @@ body.eh-shell #app > .eh-topo {
   grid-column: 2; grid-row: 2; justify-self: end; align-self: stretch; z-index: 3;
   display: flex; align-items: center; gap: 4px; padding: 0 10px 0 6px;
 }
-.eh-topo #chatLanc, .eh-topo #mcpLanc { display: inline-flex; align-items: center; }
+.eh-topo #chatLanc, .eh-topo #mcpLanc, .eh-topo #skillsLanc { display: inline-flex; align-items: center; }
 .eh-topo .eh-bt { width: 28px; height: 28px; }
 .eh-topo .eh-bt .eh-ico { width: 16px; height: 16px; }
 
@@ -783,6 +784,19 @@ body.eh-shell .tab[aria-selected="true"]::after {
       },
     });
   }
+  /* o Novo projeto (hub-projnovo.js): registra a placa no catálogo da casa e cria o projeto; o menu Arquivo
+     (hub-menubar.js) chama pelo mesmo window.__hubNovoProjeto */
+  window.__hubNovoProjeto = () => {
+    if (!window.HubProjNovo) { toast('Novo projeto: falta o hub-projnovo.js', 'err'); return; }
+    window.HubProjNovo.abre({
+      existe: (n) => (S.projects || []).some((x) => x.name.toLowerCase() === n.toLowerCase()),
+      aoCriar: async (j) => {
+        abertos.add(j.id);
+        toast('Projeto ' + j.name + ' criado · ' + j.codigo + ' registrado no catálogo (item ' + j.item + ')', 'ok');
+        await releIndice(j.id);
+      },
+    });
+  };
   function novaPcbNoGrupo(grupo) {
     const n = (S.projects || []).filter((x) => x.grupo === grupo).length + 1;
     dialogoNome({
@@ -873,6 +887,8 @@ body.eh-shell .tab[aria-selected="true"]::after {
       b.onclick = acao;
       tools.append(b);
     };
+    ferramenta('novoProj', 'Novo projeto — gera o código da placa no catálogo da casa e cria o projeto com o carimbo preenchido',
+      () => window.__hubNovoProjeto && window.__hubNovoProjeto());
     ferramenta('recarregar', 'Reindexar os projetos da pasta de trabalho', () => {
       if (typeof runAction === 'function') runAction('Rescan');
     });
@@ -956,7 +972,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
     // so no navegador, as configuracoes do hub -- no app elas ficam no menu Arquivo (NO_APP)
     const topo = el('div', 'eh-topo');
     // a IA (MCP, hub-mcp.js) mora no mesmo canto, antes do chat: e o "em cima" que nao some
-    for (const id of ['mcpLanc', 'chatLanc']) { const n = document.getElementById(id); if (n) topo.append(n); }
+    for (const id of ['skillsLanc', 'mcpLanc', 'chatLanc']) { const n = document.getElementById(id); if (n) topo.append(n); }
     if (!NO_APP) {
       const cfg = el('button', 'eh-bt');
       cfg.type = 'button';

@@ -1552,6 +1552,8 @@ function updateSaveBtn(){
   $('btnSave').classList.toggle('active', d);
   $('btnSaveLbl').textContent = d ? 'Salvar *' : 'Salvar';
   $('savehint').textContent = d ? 'alterado: esquema' : 'nada pendente';
+  /* o painel não mostra mais o texto (pedido do dono, 2026-11-04): ele vai no título do botão */
+  $('btnSave').title = 'Grava o schematic.js — ' + (d ? 'alterado: esquema' : 'nada pendente');
 }
 function setSchDirty(v){ schDirty = v; updateSaveBtn(); if (v) autoSalvaSch(); }
 /* Arquivo » Autosave (hub-autosave.js): ligado, cada edicao grava sozinha logo depois da ultima,
@@ -3937,13 +3939,31 @@ function secFolha(){
   };
   selFmt.addEventListener('change', aplica);
   selOri.addEventListener('change', aplica);
-  prPar(s, ['formato', selFmt], ['orientação', selOri]);
-  prKv(s, 'medida', milTxt(med[0]) + ' × ' + milTxt(med[1]) + ' mil');
-  prKv(s, 'em mm', mmTxt(med[0]) + ' × ' + mmTxt(med[1]) + ' mm', 'dim');
-  /* o `size` do arquivo fica à vista justamente porque ele pode estar mentindo: é assim que o
-     usuário descobre que o export chamou de "A4" a folha A3 dele */
-  prKv(s, 'size no arquivo', (sh.size || '—') + (casa && casa.name !== sh.size ? '  (mede ' + casa.name + ')' : ''),
-       casa && casa.name !== sh.size ? 'warn' : 'mono');
+  /* NO MENU DA FOLHA (2026-11-04): o formato numa linha com o ícone, a orientação em dois botões (o select continua
+     sendo o estado que o `aplica` lê), e a medida numa linha só. Sem os rótulos "formato/orientação/medida". */
+  s.className = 'sf-folha';
+  s.style.cssText = 'display:flex; flex-direction:column; gap:5px;';
+  const lin = (svg, node, titulo) => { const l = el('div', 'sf-lin'); l.innerHTML = svg; if (titulo) l.title = titulo; l.append(node); return l; };
+  const icPag = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="9" rx="1"/><path d="M2.5 6h11"/></svg>';
+  s.append(lin(icPag, selFmt, 'formato da folha'));
+  const seg = el('div', 'sf-seg');
+  seg.title = selOri.title;
+  for (const [v, t, svg] of [['0', 'Deitado', '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8.5" rx="1"/></svg>'],
+                             ['1', 'Em pé', '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.75" y="1.5" width="8.5" height="13" rx="1"/></svg>']]){
+    const b = el('button'); b.type = 'button'; b.innerHTML = svg; b.append(document.createTextNode(t));
+    b.setAttribute('aria-pressed', String(selOri.value === v)); b.disabled = selOri.disabled;
+    b.addEventListener('click', () => { if (selOri.value === v) return; selOri.value = v; aplica(); });
+    seg.append(b);
+  }
+  s.append(seg);
+  /* o `size` do arquivo só aparece quando ele mente (o export chamou de "A4" a folha A3): é assim que o usuário
+     descobre */
+  const mente = casa && casa.name !== sh.size;
+  const md = el('div', 'sf-med' + (mente ? ' warn' : ''),
+    milTxt(med[0]) + '×' + milTxt(med[1]) + ' mil · ' + mmTxt(med[0]) + '×' + mmTxt(med[1]) + ' mm'
+    + (mente ? ' · no arquivo: ' + (sh.size || '—') : ''));
+  md.title = 'size no arquivo: ' + (sh.size || '—');
+  s.append(md);
   /* TEMPLATE e PARÂMETROS da folha (o Document Options do Altium): a seção inteira, o editor
      de template e a gravação moram no hub-schtemplate-ui.js; daqui ele só recebe as alças */
   if (typeof HubSchTemplateUI !== 'undefined') s.append(HubSchTemplateUI.secao({
@@ -6741,12 +6761,39 @@ function renderSheetCards(){
     b.append(document.createElement('canvas'), txt);
     box.append(b);
   });
-  const acts = el('div', 'sheetacts');
-  acts.style.cssText = 'display:flex; gap:4px; margin-top:2px;';
+  const acts = el('div', 'sheetacts sf-acoes');
   box.append(acts);
   pintaAcoesFolha();
   pintaMiniaturas();
+  pintaCabMenuFolha();
 }
+/* o cabeçalho do menu da folha: o nome da folha ativa, e a seta que recolhe (guardada no localStorage, como a do
+   menu do Gerber) */
+function pintaCabMenuFolha(){
+  const t = $('sfTit'), sh = model.sheets[sheetIdx];
+  if (t) { t.textContent = sh ? sh.name : 'Folha'; t.title = sh ? 'folha ' + sh.name + ' — ' + HubCore.sheetLabel(sh) : ''; }
+}
+(function montaMenuFolha(){
+  const m = $('sfMenu'), b = $('sfRec');
+  if (!m || !b) return;
+  let recolhido = false;
+  try { recolhido = localStorage.getItem('schframe.menuFolha') === 'recolhido'; } catch (_) { /* sem storage */ }
+  const pinta = () => {
+    m.classList.toggle('sf-recolhido', recolhido);
+    b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="' + (recolhido ? 'M4 6 L8 10 L12 6' : 'M4 10 L8 6 L12 10') + '"/></svg>';
+    b.title = recolhido ? 'Abrir o menu da folha' : 'Recolher o menu da folha';
+  };
+  b.addEventListener('click', () => {
+    recolhido = !recolhido; pinta();
+    try { localStorage.setItem('schframe.menuFolha', recolhido ? 'recolhido' : 'aberto'); } catch (_) { /* sem storage */ }
+    if (!recolhido) requestAnimationFrame(pintaMiniaturas);
+  });
+  /* o duplo clique no cabeçalho também recolhe; a roda do mouse sobre o menu rola o menu, não dá zoom na folha */
+  m.querySelector('.sf-cab').addEventListener('dblclick', e => { if (e.target.closest('button')) return; b.click(); });
+  m.addEventListener('wheel', e => e.stopPropagation(), { passive:true });
+  for (const ev of ['mousedown', 'pointerdown', 'contextmenu']) m.addEventListener(ev, e => e.stopPropagation());
+  pinta();
+})();
 /* as acoes valem para a folha ATIVA (o cartao aceso), entao trocar de folha as repinta; duplo
    clique no cartao tambem renomeia */
 function pintaAcoesFolha(){
@@ -6755,17 +6802,20 @@ function pintaAcoesFolha(){
   acts.textContent = '';
   const sh = model.sheets[sheetIdx];
   const vazia = sh && folhaVazia(sheetIdx);
-  const bt = (rot, titulo, fn, off) => {
-    const x = el('button', 'wide sutil', rot); x.type = 'button'; x.title = titulo;
-    x.style.cssText = 'flex:1; justify-content:center; margin-top:0;';
+  const IC = { nova:'M8 3v10M3 8h10', ren:'M3 13l1-3.5 6.5-6.5 2.5 2.5-6.5 6.5z M9.5 4.5l2 2', apa:'M3 4.5h10 M6 4.5V3h4v1.5 M4.5 4.5l.7 8.5h5.6l.7-8.5' };
+  const bt = (rot, ic, titulo, fn, off, perigo) => {
+    const x = el('button', 'sf-acao' + (perigo ? ' perigo' : '')); x.type = 'button'; x.title = titulo;
+    x.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="' + IC[ic] + '"/></svg>';
+    x.append(document.createTextNode(rot));
     x.disabled = Boolean(off); x.onclick = fn; acts.append(x);
   };
-  bt('Nova folha', 'acrescenta uma folha em branco, no formato e no template da folha ativa', novaFolha);
-  bt('Renomear…', 'troca o nome da folha ativa (duplo clique no cartão também)', () => renomeiaFolha(sheetIdx), !sh);
-  bt('Apagar', !sh ? '' : model.sheets.length < 2 ? 'é a única folha do esquema'
+  bt('Nova', 'nova', 'acrescenta uma folha em branco, no formato e no template da folha ativa', novaFolha);
+  bt('Renomear', 'ren', 'troca o nome da folha ativa (duplo clique no cartão também)', () => renomeiaFolha(sheetIdx), !sh);
+  bt('Apagar', 'apa', !sh ? '' : model.sheets.length < 2 ? 'é a única folha do esquema'
      : vazia ? 'apaga a folha ativa (ela está em branco)'
      : 'só folha em branco se apaga: esta tem ' + sheetItems(sheetIdx).length + ' item(ns)',
-     () => apagaFolha(sheetIdx), !sh || model.sheets.length < 2 || !vazia);
+     () => apagaFolha(sheetIdx), !sh || model.sheets.length < 2 || !vazia, true);
+  pintaCabMenuFolha();
 }
 $('sheetcards').addEventListener('click', e => {
   const b = e.target.closest('.sheetcard');

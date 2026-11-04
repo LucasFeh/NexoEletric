@@ -4,6 +4,41 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.69.0 — 2026-11-04
+
+**Novo projeto com o código da casa, o menu da folha e o painel enxuto do Esquema.**
+
+**Novo projeto.** O botão novo no painel Projetos (e Arquivo › Novo projeto…) pergunta o nome da placa, o cliente,
+a descrição e **quem iniciou o projeto**. Enquanto você digita, ele mostra o código que a placa vai ganhar no catálogo
+`CATALOGAÇÃO TODOS OS PRODUTOS` (no NAS, Controle de Projetos): P + as iniciais do nome + `-DI` + ano + o número do
+produto, ex.: `PAEL-DI261940`. A sigla pode ser trocada.
+- **Criar e registrar** acrescenta a linha no catálogo (ITEM, TIPO PLACA, NOME, CLIENTE, MODELO, VÍNCULO) e cria o
+  projeto com o nome do código.
+- O projeto nasce com uma folha A4 no template da DIEletrons, com o carimbo preenchido: código, `SCH-DI…`, nome,
+  quem iniciou e a data.
+- O catálogo aberto no Excel não é gravado (o aviso pede para fechar). Antes de cada gravação fica uma cópia em
+  `%TEMP%\NexoEletric-catalogo`. Só a linha nova muda no .xlsx.
+- Pela IA: a skill nova `projeto-novo` manda perguntar quem iniciou e confirmar antes de registrar. A ferramenta
+  `catalogo_previa` mostra o código e `projeto_criar {produto}` registra e cria.
+
+**O menu da folha** (canto de cima à esquerda do Esquema, com a cara do menu do Gerber): as folhas
+(nova/renomear/apagar), o formato, a orientação (Deitado/Em pé) e o template. Recolhe pela seta.
+- **Carimbo…** abre todos os campos do template numa tabela, com o valor do projeto e o desta folha; o vazio mostra o
+  que vai sair.
+- **Remover template…** lista os templates da casa, cada um com o seu Remover.
+- Só sobrou o template da DIEletrons: os do Altium saíram da lista.
+- **O carimbo se completa sozinho:**
+  - o formato vem da folha;
+  - no projeto com código no nome (`PDCD-DI261939 (PTYPE)`), o código e o `SCH-DI…` saem do nome;
+  - escolher o template busca o nome da placa e o cliente no catálogo.
+
+**O painel Configurações ficou enxuto:** os ícones da vista em grade, sem os textos de ajuda. **Enviar lista** (o
+Enviar para o Odoo) e **Trocar acervo** (o Converter para o almoxarifado) ficam lado a lado, e o **Salvar** no canto
+de baixo à esquerda (o que falta salvar vai no título do botão).
+
+**MCP no canto de cima à direita:** o botão novo ao lado do "IA" lista todas as skills da casa (os processos que a IA
+segue) e abre o texto de cada uma.
+
 ## 1.68.0 — 2026-11-04
 
 **O "Enviar pra JLC" entra na conta primeiro e mostra as camadas antes do carrinho.** A ordem agora é:

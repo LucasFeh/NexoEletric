@@ -61,6 +61,15 @@ const CSS = `
 .st-kvl input{background:var(--panel2); color:var(--fg); border:1px solid var(--border); border-radius:3px; padding:3px 5px;
   font:12px var(--font); min-width:0;}
 .st-foot{display:flex; justify-content:flex-end; gap:6px; padding:8px 10px; border-top:1px solid var(--border);}
+.st-sec.st-menu{margin:0; padding:6px 0 0; border-top:1px solid rgba(255,255,255,.08); display:flex; flex-direction:column; gap:1px;}
+.st-sec.st-menu .sf-lin{margin-bottom:3px;}
+.st-car{grid-template-columns:minmax(110px, .9fr) 1fr 1fr; font-size:12px;}
+.st-car > span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.st-carimbo{width:min(720px, 94vw);}
+.st-rem{display:flex; flex-direction:column; gap:6px;}
+.st-remlin{display:flex; align-items:center; gap:10px; padding:6px 8px; border:1px solid var(--border); border-radius:6px;}
+.st-remtxt{flex:1; min-width:0;}
+.st-perigo:hover{color:var(--err, #f87171); border-color:var(--err, #f87171);}
 `;
 function css(){
   if (typeof document === 'undefined' || document.getElementById('st-css')) return;
@@ -124,40 +133,58 @@ function secao(a){
   }
   sel.value = atual;
   sel.addEventListener('change', () => escolhe(sel.value));
-  linha(box, 'template', sel);
-
-  if (tpl){
-    const doc = T.parseParams(it.params);
-    const ctx = T.contexto({ tpl, doc:{}, proj:a.schematic.params, folhaN:a.indice + 1, folhaTotal:a.total,
-                             documento:a.nome + '.SchDoc', projeto:a.schematic.project });
-    let nomes = T.campos(tpl);
-    if (!nomes.length) nomes = T.CAMPOS_PADRAO.slice();
-    for (const n of nomes){
-      const inp = el('input', 'st-inp');
-      inp.value = doc[n] != null ? doc[n] : '';
-      const herdado = T.valor(n, ctx);
-      inp.placeholder = herdado != null && herdado !== '' ? herdado : '—';
-      inp.title = '=' + n + ' — vazio usa o do projeto/template (' + (herdado || 'nada') + ')';
-      inp.addEventListener('change', () => mudaParam(n, inp.value));
-      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
-      linha(box, n.replace(/_DiEletrons$/, ''), inp);
-    }
-  }
-  const bts = el('div', 'st-bts');
-  bts.append(botao('Projeto…', 'parâmetros do PROJETO (valem para todas as folhas)', () => abreParametros()));
-  bts.append(botao(tpl && tpl.origem === 'casa' ? 'Editar template…' : 'Editar cópia…',
-                   'abrir o editor de template' + (tpl ? '' : ' (um novo, em branco)'), () => abreEditor()));
-  bts.append(botao('Novo…', 'criar um template da casa em branco', () => abreEditor({ novo:true })));
-  box.append(bts);
+  /* NO MENU DA FOLHA (2026-11-04): o seletor numa linha com o ícone, e as ações em lista (ícone + rótulo), como o
+     menu do Gerber. Os campos do carimbo saíram do painel: o "Carimbo…" abre todos, do projeto e da folha */
+  box.className = 'st-sec st-menu';
+  const lin = el('div', 'sf-lin');
+  lin.title = 'template da folha';
+  lin.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1"/><path d="M8.5 10.5h5.5 M8.5 10.5v3"/></svg>';
+  lin.append(sel);
+  box.replaceChildren(lin);
+  const acao = (rot, d, titulo, fn, off, perigo) => {
+    const b = el('button', 'sf-acao' + (perigo ? ' perigo' : '')); b.type = 'button'; b.title = titulo;
+    b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="' + d + '"/></svg>';
+    b.append(document.createTextNode(rot)); b.disabled = Boolean(off);
+    b.addEventListener('click', fn); box.append(b); return b;
+  };
+  acao('Carimbo…', 'M2.5 9.5h11v4h-11z M4.5 9.5v-2h7v2 M8 7.5v-5 M6 2.5h4', 'os campos do carimbo: os do projeto (valem para todas as folhas) e os desta folha',
+       () => abreCarimbo(), !tpl);
+  acao(tpl && tpl.origem === 'casa' ? 'Editar template…' : 'Editar cópia…', 'M3 13l1-3.5 6.5-6.5 2.5 2.5-6.5 6.5z M9.5 4.5l2 2',
+       'abrir o editor de template' + (tpl ? '' : ' (um novo, em branco)'), () => abreEditor());
+  acao('Novo template…', 'M8 3v10M3 8h10', 'criar um template da casa em branco', () => abreEditor({ novo:true }));
+  acao('Remover template…', 'M3 4.5h10 M6 4.5V3h4v1.5 M4.5 4.5l.7 8.5h5.6l.7-8.5', 'tirar um template da casa da lista (o arquivo Libs/sch-templates-casa.js)',
+       () => abreRemover(), !Object.keys(casa().templates).length, true);
   return box;
 }
 function itemDaFolha(){ return api.item(); }
+/* O carimbo se completa sozinho (2026-11-04): o projeto com código de produto no nome ("PDCD-DI261939 (PTYPE)") tem o
+   nome e o cliente no catálogo da casa (/api/projeto/novo/catalogo, o mcp/lib/catalogo.js). Só preenche o que o
+   projeto ainda não tem; sem o catálogo (NAS fora, hub sem servidor) fica como está, em silêncio. */
+async function completaDoCatalogo(tpl){
+  const sch = api && api.schematic;
+  const cod = sch && T.codigoDoProjeto(sch.project);
+  if (!cod || !T.campos(tpl).some(n => /^Equipamento_linha_um$/i.test(n))) return;
+  const p = T.parseParams(sch.params);
+  if (p.Equipamento_linha_um) return;
+  let j = null;
+  try { j = await (await fetch('/api/projeto/novo/catalogo?codigo=' + encodeURIComponent(cod.codigo), { cache:'no-store' })).json(); } catch (_) { return; }
+  const a = j && j.ok && j.achou;
+  if (!a || !a.nome) return;
+  const q = T.parseParams(sch.params);
+  if (q.Equipamento_linha_um) return;
+  q.Equipamento_linha_um = a.nome;
+  if (a.cliente && !q.Cliente) q.Cliente = a.cliente;
+  sch.params = T.serializaParams(q);
+  api.sujo(); api.redesenha();
+  DLG().toast('carimbo: ' + a.nome + ' (item ' + a.item + ' do catálogo)', 'ok', 4000);
+}
 function escolhe(id){
   const it = itemDaFolha();
   const tpl = id ? T.acha(id) : null;
   if (id && !tpl) return;
   const nova = T.aplica(it, tpl, root.HubCore && root.HubCore.sheetMatch);
   api.commit();
+  if (tpl) completaDoCatalogo(tpl);
   if (nova){
     api.enquadra();
     const fora = api.contaFora ? api.contaFora(nova) : 0;
@@ -220,6 +247,115 @@ function abreParametros(){
   bx.append(hd, lista, ft); ov.append(bx); document.body.append(ov);
   document.addEventListener('keydown', esc, true);
   ov.addEventListener('mousedown', e => { if (e.target === ov) fecha(); });
+}
+
+/* ─── o carimbo: os campos do template, do projeto e da folha, numa tabela só (2026-11-04) ───
+   Coluna "projeto" = o cabeçalho do schematic.js (vale para todas as folhas); "esta folha" = o item sheet (ganha do
+   projeto). Vazio herda: o placeholder mostra o que vai sair no carimbo (o que o sistema preenche sozinho, como o
+   código da placa tirado do nome do projeto e o formato da folha, ou o padrão do template). */
+function abreCarimbo(){
+  if (!api) return;
+  css();
+  const sch = api.schematic, it = itemDaFolha();
+  const tpl = it && it.template ? T.acha(it.template) : null;
+  const proj = T.parseParams(sch.params), doc = T.parseParams(it && it.params);
+  const ctxBase = o => T.contexto(Object.assign({ tpl, folhaN:api.indice + 1, folhaTotal:api.total, documento:api.nome + '.SchDoc',
+                                                  projeto:sch.project, formato:it && it.size }, o));
+  let nomes = tpl ? T.campos(tpl) : T.CAMPOS_PADRAO.slice();
+  nomes = nomes.filter(n => !/^Sheet(Number|Total)$/i.test(n));
+  for (const k of Object.keys(proj).concat(Object.keys(doc))) if (!nomes.some(n => n.toLowerCase() === k.toLowerCase())) nomes.push(k);
+
+  const ov = el('div', 'st-ov');
+  const bx = el('div', 'st-box st-pp st-carimbo');
+  const hd = el('div', 'st-head');
+  hd.append(el('h2', null, 'Carimbo'), el('span', 'st-dim', (tpl ? tpl.nome : 'sem template') + ' · folha ' + api.nome));
+  const lista = el('div', 'st-list');
+  const grade = el('div', 'st-kvl st-car');
+  grade.append(el('span', 'st-dim', 'campo'), el('span', 'st-dim', 'projeto'), el('span', 'st-dim', 'esta folha'));
+  const campos = [];
+  for (const n of nomes){
+    const rot = el('span', null, n.replace(/_DiEletrons$/, '').replace(/_/g, ' ')); rot.title = '=' + n;
+    const ip = el('input'); ip.value = proj[n] != null ? proj[n] : '';
+    const id = el('input'); id.value = doc[n] != null ? doc[n] : '';
+    const pinta = () => {
+      const semProj = T.valor(n, ctxBase({ doc:{}, proj:{} }));
+      ip.placeholder = semProj != null && semProj !== '' ? semProj : '—';
+      const p2 = Object.assign({}, proj); if (ip.value !== '') p2[n] = ip.value; else delete p2[n];
+      const doProj = T.valor(n, ctxBase({ doc:{}, proj:T.serializaParams(p2) }));
+      id.placeholder = doProj != null && doProj !== '' ? doProj : '—';
+    };
+    ip.addEventListener('input', pinta);
+    pinta();
+    campos.push([n, ip, id]);
+    grade.append(rot, ip, id);
+  }
+  lista.append(grade);
+  const ft = el('div', 'st-foot');
+  const fecha = () => { ov.remove(); document.removeEventListener('keydown', esc, true); };
+  const esc = e => { if (e.key === 'Escape'){ e.stopPropagation(); fecha(); } };
+  const sp = el('span'); sp.style.flex = '1';
+  ft.append(sp, botao('Cancelar', null, fecha), botao('Aplicar', 'grava no schematic.js (Salvar para ir ao disco)', () => {
+    const p = {}, d = {};
+    for (const [n, ip, id] of campos){ if (ip.value.trim() !== '') p[n] = ip.value.trim(); if (id.value.trim() !== '') d[n] = id.value.trim(); }
+    const sp2 = T.serializaParams(p), sd = T.serializaParams(d);
+    if (sp2) sch.params = sp2; else delete sch.params;
+    if (it){ if (sd) it.params = sd; else delete it.params; }
+    api.sujo();
+    api.commit();
+    fecha();
+    DLG().toast('carimbo aplicado', 'ok');
+  }));
+  bx.append(hd, lista, ft); ov.append(bx); document.body.append(ov);
+  document.addEventListener('keydown', esc, true);
+  const pri = grade.querySelector('input'); if (pri) pri.focus();
+}
+
+/* ─── remover template da casa (2026-11-04: "quero que tenha uma área pra remover esse template") ───
+   A lista dos templates da casa (Libs/sch-templates-casa.js), cada um com o seu Remover (confirma no tema). A folha
+   ativa que usava o removido fica sem template; as outras folhas guardam o id e aparecem "(não encontrado)" até
+   alguém escolher outro. */
+function abreRemover(){
+  css();
+  const ov = el('div', 'st-ov');
+  const bx = el('div', 'st-box st-pp');
+  const hd = el('div', 'st-head'); hd.append(el('h2', null, 'Remover template'), el('span', 'st-dim', T.ARQ_CASA));
+  const lista = el('div', 'st-list st-rem');
+  const fecha = () => { ov.remove(); document.removeEventListener('keydown', esc, true); };
+  const esc = e => { if (e.key === 'Escape'){ e.stopPropagation(); fecha(); } };
+  const pinta = () => {
+    lista.textContent = '';
+    const ids = Object.keys(casa().templates);
+    if (!ids.length){ lista.append(el('div', 'st-dim', 'nenhum template da casa')); return; }
+    const it = api ? itemDaFolha() : null;
+    for (const id of ids){
+      const t = casa().templates[id];
+      const l = el('div', 'st-remlin');
+      const f = t.folha || {};
+      const txt = el('div', 'st-remtxt');
+      txt.append(el('div', null, t.nome || id), el('div', 'st-dim', (f.estilo || '') + (f.w ? ' · ' + Math.round(f.w) + '×' + Math.round(f.h) + ' mil' : '')
+        + (it && it.template === id ? ' · nesta folha' : '')));
+      const b = botao('Remover', 'tira este template da lista da casa', async () => {
+        if (!await DLG().confirm('Remover o template "' + (t.nome || id) + '"?\nEle sai de ' + T.ARQ_CASA
+            + '. A folha ativa que o usa fica sem template; as outras guardam o nome até você escolher outro.',
+            { title:'Remover template', ok:'Remover', danger:true })) return;
+        delete casa().templates[id];
+        const ok = await gravaCasa();
+        if (ok && api){
+          const fol = itemDaFolha();
+          if (fol && fol.template === id){ T.aplica(fol, null); api.commit(); }
+          else api.redesenha();
+        }
+        pinta();
+      });
+      b.classList.add('st-perigo');
+      l.append(txt, b);
+      lista.append(l);
+    }
+  };
+  pinta();
+  const ft = el('div', 'st-foot'); ft.append(botao('Fechar', null, fecha));
+  bx.append(hd, lista, ft); ov.append(bx); document.body.append(ov);
+  document.addEventListener('keydown', esc, true);
 }
 
 /* ─── o editor de template ─── */
@@ -489,5 +625,5 @@ function abreEditor(o){
   requestAnimationFrame(() => { cam.resize(); cam.fit({ x1:0, y1:0, x2:tpl.folha.w, y2:tpl.folha.h }, 1.05); });
 }
 
-root.HubSchTemplateUI = { secao, abreEditor: o => abreEditor(o), abreParametros, escolhe: id => api && escolhe(id) };
+root.HubSchTemplateUI = { secao, abreEditor: o => abreEditor(o), abreParametros, abreCarimbo, abreRemover, escolhe: id => api && escolhe(id) };
 })(typeof self !== 'undefined' ? self : this);

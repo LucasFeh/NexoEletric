@@ -147,6 +147,12 @@ function pega(o, nome){
      proj    parâmetros do projeto (cabeçalho `params`)
      auto    o que o sistema sabe: folha n de N, data, nomes
      tpl     os valores padrão gravados no próprio template   — só se nada acima respondeu */
+/* o código de produto que o nome do projeto traz (o costume da casa: "PDCD-DI261939 (PTYPE)", "PAEL - DI261940"):
+   {codigo:'PDCD-DI261939', numero:'DI261939'} ou null */
+function codigoDoProjeto(nome){
+  const m = /([A-Za-z][A-Za-z0-9]*)\s*-\s*(DI\d{5,})/.exec(String(nome || ''));
+  return m ? { codigo: m[1].toUpperCase() + '-' + m[2].toUpperCase(), numero: m[2].toUpperCase() } : null;
+}
 function contexto(o){
   o = o || {};
   const d = o.agora instanceof Date ? o.agora : new Date();
@@ -157,6 +163,11 @@ function contexto(o){
     DocumentName: o.documento || '', DocumentFullPathAndName: o.caminho || o.documento || '',
     ProjectName: o.projeto || '', ModifiedDate: hoje(d),
   };
+  /* o carimbo da casa se preenche sozinho (pedido do dono, 2026-11-04): o formato da folha e o código do produto
+     que o nome do projeto traz. O que a folha ou o projeto gravarem ganha deste (as camadas doc e proj vêm antes) */
+  if (o.formato) auto.Formato = String(o.formato);
+  const cod = codigoDoProjeto(o.projeto);
+  if (cod){ auto.Desenho_linha_unica = cod.codigo; auto.Arquivo = 'SCH-' + cod.numero; auto.Equipamento_linha_dois = cod.codigo; }
   return { doc: parseParams(o.doc), proj: parseParams(o.proj), auto, tpl: (o.tpl && o.tpl.params) || {},
            estilo: o.estilo || '', faltante: o.faltante,
            /* cru: o editor de template mostra "=Title" como está, para se ver o que é campo */
@@ -474,7 +485,7 @@ function daFolha(schematic, nome, fontes){
   const n = folhas.indexOf(it);
   return { item:it, tpl:acha(it.template, fontes), ctxo:{
     doc:it.params, proj:schematic.params, folhaN:n + 1, folhaTotal:folhas.length,
-    documento:nome + '.SchDoc', projeto:schematic.project || '' } };
+    documento:nome + '.SchDoc', projeto:schematic.project || '', formato:it.size || '' } };
 }
 
 /* Escolher um template para a folha, no item `sheet`, como o Altium faz: o template traz a
@@ -536,7 +547,7 @@ function copia(tpl, nome, existentes){
 }
 
 const API = { ESTILOS, CARIMBOS, APELIDOS, CAMPOS_PADRAO, ARQ_CASA,
-              parseParams, serializaParams, acervo, lista, acha, contexto, valor, resolve, campos,
+              parseParams, serializaParams, acervo, lista, acha, contexto, valor, resolve, campos, codigoDoProjeto,
               folhaDe, estiloPorMedida, primitivas, desenha, itemFolha, daFolha,
               caixaItem, moveItem, fonteId, aplica,
               idCasa, serializaCasa, copia };

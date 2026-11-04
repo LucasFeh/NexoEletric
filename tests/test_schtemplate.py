@@ -88,7 +88,7 @@ def offline():
        'ESTILOS do Python e do JS iguais')
 
     # o Libs versionado: JSON válido entre o "var x =" e o ";"
-    txt = open(os.path.join(RAIZ, 'Libs', 'sch-templates.js'), encoding='utf-8').read()
+    txt = open(os.path.join(RAIZ, 'tools', 'schtemplate', 'sch-templates-altium.js'), encoding='utf-8').read()
     lib = json.loads(txt[txt.index('{'):txt.rindex(';')])
     ok(lib['format'] == ST.FORMATO, 'formato do Libs')
     ids = set(lib['templates'])

@@ -121,16 +121,44 @@ module.exports = {
     },
     {
       nome: 'projeto_criar', titulo: 'Criar projeto',
-      descricao: 'Cria um projeto novo: Projects/<nome>/ com schematic.js (uma folha vazia no formato schmirror-v2), annotations.js e changes.js vazios, e a entrada no projects.js (como o AI-GUIDE pede). Com "placa" e o módulo hub-pcbnova.js presente, cria também a placa nova (board.js). Depois: sch_adicionar.',
+      descricao: 'Cria um projeto novo: Projects/<nome>/ com schematic.js (uma folha vazia no formato schmirror-v2), annotations.js e changes.js vazios, e a entrada no projects.js (como o AI-GUIDE pede). PLACA NOVA DA CASA (skill projeto-novo): passe "produto" {nome da placa, iniciador = quem iniciou o projeto (PERGUNTE ao usuário), cliente?, descricao?, sigla?}: ele REGISTRA a placa no catálogo CATALOGAÇÃO TODOS OS PRODUTOS (uma linha nova, o código P<sigla>-DI<ano><item>), usa o código como nome do projeto (se "nome" não vier) e cria a folha A4 no template da casa com o carimbo preenchido. Veja o código antes com catalogo_previa. Com "placa" e o módulo hub-pcbnova.js presente, cria também a placa nova (board.js). Depois: sch_adicionar.',
       entrada: { type: 'object', properties: {
-        nome: { type: 'string', description: 'nome da pasta do projeto (sem \\ / : * ? " < > |)' },
+        nome: { type: 'string', description: 'nome da pasta do projeto (sem \\ / : * ? " < > |); com "produto", o padrão é o código da placa' },
+        produto: { type: 'object', additionalProperties: false, description: 'a placa nova no catálogo da casa: registra e preenche o carimbo', properties: {
+          nome: { type: 'string', description: 'nome da placa (vai em NOME no catálogo e no carimbo), ex.: "Placa adaptadora encoder linear"' },
+          iniciador: { type: 'string', description: 'quem iniciou o projeto (vai em DESEN. no carimbo) — pergunte ao usuário' },
+          cliente: { type: 'string', description: 'o cliente (CLIENTE no catálogo)' },
+          descricao: { type: 'string', description: 'para que serve (VÍNCULO no catálogo)' },
+          sigla: { type: 'string', description: 'a sigla do código; padrão P + as iniciais do nome (catalogo_previa mostra)' },
+        }, required: ['nome', 'iniciador'] },
         folha: { type: 'string', description: 'formato da folha: A4 (padrão), A3, A2, A1, A0 (ISO, como os templates da casa)' },
         retrato: { type: 'boolean', description: 'folha em pé' },
         nome_folha: { type: 'string', description: 'nome da folha (padrão ESQUEMA_1)' },
         placa: { type: 'object', additionalProperties: true, description: 'opcional (hub-pcbnova.js): {largura, altura} em mm, forma retangulo|arredondado (raio), camadas 2|4, origem canto|centro, furos {d, margem} (furos de fixação), codigo "texto" ou null' },
-      }, required: ['nome'] },
+      } },
       executa: async (a, ctx) => {
         const hc = ctx.hc;
+        a = Object.assign({}, a);
+        if (!a.nome && !a.produto) throw new ErroMcp('informe "nome" (a pasta) ou "produto" (a placa nova da casa, que dá o código)');
+        if (a.produto && (!String(a.produto.nome || '').trim() || !String(a.produto.iniciador || '').trim()))
+          throw new ErroMcp('produto precisa de nome (da placa) e iniciador (quem iniciou o projeto — pergunte ao usuário)');
+        if (a.nome) {
+          const m0 = nomeDePastaOk(a.nome);
+          if (m0) throw new ErroMcp(`nome inválido: ${m0}`);
+          if (ctx.listaProjetos().some(n => n.toLowerCase() === a.nome.toLowerCase())) throw new ErroMcp(`já existe um projeto "${a.nome}"`);
+        }
+        /* a placa nova da casa: registra no catálogo ANTES de criar a pasta (o código vira o nome) */
+        let reg = null;
+        if (a.produto) {
+          const CAT = require('../lib/catalogo.js');
+          try { reg = CAT.registra({ nome: a.produto.nome, tipo: 'PLACA', cliente: a.produto.cliente, vinculo: a.produto.descricao, sigla: a.produto.sigla }); }
+          catch (e) { throw new ErroMcp('catálogo de produtos: ' + e.message); }
+          if (!a.nome) {
+            a.nome = reg.codigo;
+            for (let n = 2; ctx.listaProjetos().some(x => x.toLowerCase() === a.nome.toLowerCase()); n++) a.nome = reg.codigo + ' (' + n + ')';
+          }
+          a.nome_folha = a.nome_folha || 'SCH-' + reg.codigo.replace(/^.*?-(DI\d+)$/, '$1');
+        }
         const motivo = nomeDePastaOk(a.nome);
         if (motivo) throw new ErroMcp(`nome inválido: ${motivo}`);
         if (ctx.listaProjetos().some(n => n.toLowerCase() === a.nome.toLowerCase())) throw new ErroMcp(`já existe um projeto "${a.nome}"`);
@@ -141,6 +169,14 @@ module.exports = {
         const quando = agora.toLocaleDateString('pt-BR') + ' ' + agora.toLocaleTimeString('pt-BR');
         const sch = { format: 'schmirror-v2', project: a.nome, generated: quando + ' (NexoEletric MCP)', units: 'mil',
                       items: [{ t: 'sheet', name: a.nome_folha || 'ESQUEMA_1', size: (a.folha || 'A4').toUpperCase(), w: tam[0], h: tam[1] }] };
+        if (reg) {
+          /* o template da casa (A4) e o carimbo preenchido, nos parâmetros do projeto (o mesmo do "Novo projeto" do hub) */
+          const CAT = require('../lib/catalogo.js');
+          const T = ctx.modulo('hub-schtemplate.js');
+          const pt = CAT.paramsTemplate({ codigo: reg.codigo, nome: a.produto.nome, iniciador: a.produto.iniciador, cliente: a.produto.cliente });
+          sch.params = T ? T.serializaParams(pt) : Object.keys(pt).map(k => k + '=' + String(pt[k]).replace(/[;|]/g, ',')).join(';');
+          if ((a.folha || 'A4').toUpperCase() === 'A4' && !a.retrato) Object.assign(sch.items[0], { template: 'casa:A4_DiEletrons', w: 11692.913, h: 8267.717 });
+        }
         const s = hc.serializeSchematic(sch);
         if (!s.text) throw new ErroMcp('schematic inválido: ' + s.errors.map(e => e.msg).join('; '));
         fs.mkdirSync(dir, { recursive: false });
@@ -149,6 +185,7 @@ module.exports = {
         ctx.grava(p.arq('annotations.js'), hc.serializeAnnotations([]).text, 'projeto_criar');
         ctx.grava(p.arq('changes.js'), hc.serializeChanges([]).text, 'projeto_criar');
         const out = { ok: true, projeto: a.nome, pasta: ctx.rel(dir), arquivos: ['schematic.js', 'annotations.js', 'changes.js'] };
+        if (reg) out.catalogo = { codigo: reg.codigo, item: reg.item, linha: reg.linha, arquivo: reg.arquivo, template: 'casa:A4_DiEletrons' };
         /* projects.js: o indice que os scripts do Altium regeneram; o AI-GUIDE manda acrescentar */
         const pj = path.join(path.dirname(ctx.dirProjetos()), 'projects.js');   /* o indice ao lado de Projects/ */
         if (fs.existsSync(pj)) {
@@ -175,6 +212,22 @@ module.exports = {
           } catch (e) { out.placa = { ok: false, erro: e.message }; }
         }
         return out;
+      },
+    },
+    {
+      nome: 'catalogo_previa', titulo: 'Catálogo: o código da placa nova', leitura: true,
+      descricao: 'Lê o catálogo de produtos da casa (CATALOGAÇÃO TODOS OS PRODUTOS, no NAS) e diz o código que a placa nova vai ganhar: o próximo item, o ano e a sigla (P + as iniciais do nome). Não grava nada. Com "codigo" (ex.: PDCD-DI261939), devolve o produto já registrado. Use antes de projeto_criar {produto} (skill projeto-novo) para mostrar o código ao usuário.',
+      entrada: { type: 'object', properties: {
+        nome: { type: 'string', description: 'nome da placa nova (dá a sigla)' },
+        sigla: { type: 'string', description: 'outra sigla, se o usuário quiser' },
+        codigo: { type: 'string', description: 'buscar um produto já registrado pelo código' },
+      } },
+      executa: async (a) => {
+        const CAT = require('../lib/catalogo.js');
+        try {
+          if (a.codigo) return CAT.busca({ codigo: a.codigo });
+          return Object.assign(CAT.previa({ nome: a.nome || '', sigla: a.sigla }), { proximo_passo: 'mostre o código ao usuário, pergunte quem iniciou o projeto e chame projeto_criar {produto:{nome, iniciador, cliente, descricao, sigla}}' });
+        } catch (e) { throw new ErroMcp('catálogo de produtos: ' + e.message); }
       },
     },
     {

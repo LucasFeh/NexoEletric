@@ -34,6 +34,7 @@ Ligar no hubserver.py (o integrador), no mesmo molde dos outros registraveis, so
     except Exception as _e:                  # noqa: BLE001
         print('AVISO: rotas do MCP desligadas (%s) — falta mcp/rotas_hub.py.' % _e)
 """
+import os
 import socket
 import threading
 import time
@@ -84,7 +85,49 @@ def _limpa(agora):
         del _vistas[k]
 
 
+def _skills(root):
+    """as skills da casa (mcp/skills/*.md, cabecalho --- com nome, titulo e descricao): o mesmo que o mcp/lib/skills.js
+    le para a IA. [{nome, titulo, descricao, arquivo, corpo}] em ordem de nome"""
+    import re
+    pasta = os.path.join(root, 'mcp', 'skills')
+    out = []
+    try:
+        arqs = sorted(f for f in os.listdir(pasta) if f.lower().endswith('.md'))
+    except OSError:
+        return out
+    for f in arqs:
+        try:
+            with open(os.path.join(pasta, f), encoding='utf-8-sig') as h:
+                texto = h.read()
+        except OSError:
+            continue
+        meta, corpo = {}, texto
+        m = re.match(r'---\r?\n([\s\S]*?)\r?\n---\r?\n?', texto)
+        if m:
+            for l in m.group(1).splitlines():
+                if ':' in l:
+                    k, v = l.split(':', 1)
+                    meta[k.strip()] = v.strip()
+            corpo = texto[m.end():]
+        nome = meta.get('nome') or f[:-3]
+        out.append({'nome': nome, 'titulo': meta.get('titulo') or nome, 'descricao': meta.get('descricao', ''),
+                    'arquivo': f, 'corpo': corpo})
+    return out
+
+
 def registra(app, root):
+    # as skills da casa para o menu "MCP" do hub (hub-mcpskills.js): a lista e o texto de cada uma, so leitura
+    @app.route('/api/mcp/skills')
+    def mcp_skills():
+        return {'ok': True, 'skills': [{k: s[k] for k in ('nome', 'titulo', 'descricao', 'arquivo')} for s in _skills(root)]}
+
+    @app.route('/api/mcp/skills/<nome>')
+    def mcp_skill(nome):
+        for s in _skills(root):
+            if s['nome'] == nome:
+                return {'ok': True, 'skill': s}
+        return {'ok': False, 'error': 'skill nao encontrada'}, 404
+
     @app.route('/api/mcp/status')
     def mcp_status():
         agora = time.time()

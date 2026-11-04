@@ -37,6 +37,8 @@
   function menusDoApp() {
     const P = temPonte();
     const file = [it('novaJanela', 'Ctrl+Shift+N')];
+    /* o projeto novo com o código da placa no catálogo da casa (hub-projnovo.js, pelo hub-shell.js) */
+    if (typeof window.__hubNovoProjeto === 'function') file.unshift({ rot:'Novo projeto…', tecla:'', f:() => window.__hubNovoProjeto() });
     /* o projeto do Altium (esquema e PCB) aberto direto no hub (hub-altiumabrir.js); arrastar o .PrjPcb tambem abre */
     if (typeof window.__hubAbrirAltium === 'function') file.push({ rot:T('mb.abrirAltium'), tecla:'', f:() => window.__hubAbrirAltium() });
     if (P) file.push('-', it('abrirPasta'), it('nexobd'), it('nexoSync'));
