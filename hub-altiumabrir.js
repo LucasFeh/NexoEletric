@@ -98,7 +98,13 @@ async function abre(opcoes){
      o caminho completo -- o <input type=file> do navegador nunca entrega o caminho, e so o .PrjPcb nao abria */
   const a = app();
   let arqs, disco = null;
-  if (o.arquivos) arqs = [...o.arquivos].filter(f => EXT.test(f.name));
+  const soTexto = l => l.length > 0 && l.every(x => typeof x === 'string');
+  if (o.arquivos && soTexto([...o.arquivos])) {
+    /* caminhos no disco (o arquivo solto na janela Rust, 1.64.2: __nexoSoltou) */
+    const ps = [...o.arquivos].filter(p => EXT.test(p));
+    disco = ps.length ? ps : null;
+    arqs = ps.map(p => ({ name: nomeDe(p), size: 0 }));
+  } else if (o.arquivos) arqs = [...o.arquivos].filter(f => EXT.test(f.name));
   else if (a && typeof a.escolheArquivos === 'function') {
     const ps = ((await a.escolheArquivos()) || []).filter(p => EXT.test(String(p)));
     if (!ps.length) return null;
@@ -155,6 +161,13 @@ async function abre(opcoes){
 function soltar(aoSoltar){
   const doc = document;
   let aviso = null, saida = null;
+  /* NA JANELA RUST (1.64.2) a pagina nao ve o arraste: o wry desliga o soltar de arquivos dentro da pagina quando a
+     casca trata o arraste (SetAllowExternalDrop(false)), e so o Rust recebe os caminhos. Ele chama estas duas: a
+     faixa "Solte..." com o arquivo sobre a janela, e o soltar com os caminhos no disco (abre direto, basta o .PrjPcb). */
+  if (window.top === window) {
+    window.__nexoArrasto = sobre => { if (sobre) mostra(); else esconde(150); };
+    window.__nexoSoltou = caminhos => { esconde(); const l = (Array.isArray(caminhos) ? caminhos : []).map(String); return aoSoltar(l); };
+  }
   const temArquivo = e => !!(e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files'));
   const mostra = () => {
     clearTimeout(saida);

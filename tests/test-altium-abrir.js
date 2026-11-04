@@ -27,7 +27,7 @@ function carrega(eletricApp) {
     fetch: async (url, o) => { enviados.push({ url, corpo: JSON.parse(o.body) }); return { status: 200, json: async () => ({ ok: true, projeto: 'P', resumo: { folhas: 1, comp: 1, wire: 1 } }) }; },
     FileReader: function () {} });
   vm.runInContext(SRC, ctx);
-  return { H: window.HubAltiumAbrir, enviados, alertas };
+  return { H: window.HubAltiumAbrir, enviados, alertas, window, body };
 }
 const PRJ = 'C:\\Projetos\\MIRBC\\MIRBC-DI251885.PrjPcb';
 /* o abre que fica esperando para sempre (a janela de arquivos do navegador, que aqui nunca responde) nao pode passar
@@ -80,12 +80,34 @@ process.on('exit', c => { if (!terminou && c === 0) { console.error('test-altium
     assert.deepStrictEqual(t.enviados[0].corpo.caminhos, ['D:\\p\\X.PrjPcb']);
     ok++;
   }
+  /* 5b. ARRASTAR NA JANELA RUST (1.64.2): o wry desliga o soltar de arquivos DENTRO da pagina quando a casca trata o
+     arraste (SetAllowExternalDrop(false)), entao a pagina nunca via o "drop". Quem chama e o Rust:
+     window.__nexoSoltou(caminhos) abre direto pelos caminhos, e __nexoArrasto(true/false) mostra a faixa */
+  {
+    const t = carrega({ caminho: () => '' });
+    assert.strictEqual(typeof t.window.__nexoSoltou, 'function', 'a pagina oferece __nexoSoltou ao Rust');
+    assert.strictEqual(typeof t.window.__nexoArrasto, 'function', 'e __nexoArrasto (a faixa "Solte...")');
+    t.window.__nexoArrasto(true);
+    assert.ok(t.body.filhos.some(x => /Solte o projeto/.test(x.textContent || '')), 'a faixa aparece com o arquivo sobre a janela');
+    const r = await t.window.__nexoSoltou([PRJ]);
+    assert.ok(r && r.ok, 'abriu pelo caminho solto');
+    assert.deepStrictEqual(t.enviados[0].corpo.caminhos, [PRJ], 'so o .PrjPcb, pelo caminho');
+    const t2 = carrega({ caminho: () => '' });
+    assert.strictEqual(await t2.window.__nexoSoltou(['C:\\x\\foto.png']), null, 'arquivo que nao e do Altium nao abre');
+    assert.strictEqual(t2.enviados.length, 0);
+    /* o hub.html chama abre({arquivos}) com o que recebeu: caminhos (texto) tambem valem */
+    const t3 = carrega({ caminho: () => '' });
+    await t3.H.abre({ arquivos: [PRJ] });
+    assert.deepStrictEqual(t3.enviados[0].corpo.caminhos, [PRJ]);
+    ok++;
+  }
   /* 6. a ponte da janela Rust tem as duas funcoes e o Rust as atende */
   {
     const rs = fs.readFileSync(path.join(__dirname, '..', 'rust', 'crates', 'nexoeletric-web', 'src', 'main.rs'), 'utf8');
     assert.ok(/escolheArquivos\s*:/.test(rs) && /esperaCaminhos\s*:/.test(rs), 'a PONTE oferece escolheArquivos e esperaCaminhos');
     assert.ok(/"escolher"/.test(rs) && /rfd::FileDialog/.test(rs), 'o Rust abre a janela de arquivos do Windows');
     assert.ok(/__nexoArrastadosEm/.test(rs), 'o Rust marca quando o arrastado chegou');
+    assert.ok(/__nexoSoltou/.test(rs) && /__nexoArrasto\b/.test(rs), 'o Rust chama a pagina no soltar e no entrar/sair');
     ok++;
     /* 7. a PONTE de verdade (o JS dentro do main.rs) roda: espera o caminho que chega depois, e responde a escolha */
     const ponte = rs.slice(rs.indexOf('const PONTE: &str = r#"') + 'const PONTE: &str = r#"'.length, rs.indexOf('"#;', rs.indexOf('const PONTE')));

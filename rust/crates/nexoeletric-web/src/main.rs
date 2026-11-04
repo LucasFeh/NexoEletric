@@ -69,6 +69,8 @@ enum Ev {
     Menu(String),
     Titulo(String),
     Arrastou(Vec<PathBuf>),
+    /// um arquivo entrou (true) ou saiu (false) de cima da janela: a faixa "Solte..." da pagina
+    Arrasto(bool),
     /// a janela de arquivos do Windows respondeu (id do pedido, caminhos; vazio = cancelou)
     Escolheu(u64, Vec<String>),
     Focar,
@@ -300,6 +302,13 @@ const PONTE: &str = r#"(function(){
   };
 })();"#;
 
+/// o script do arquivo solto na janela (1.64.2): guarda os caminhos (eletricApp.caminho/esperaCaminhos) e chama o
+/// soltar da pagina (__nexoSoltou, do hub-altiumabrir.js) -- a pagina nao recebe o "drop" com o tratador do Rust ligado
+fn script_soltou(caminhos: &[String]) -> String {
+    let l = serde_json::to_string(caminhos).unwrap();
+    format!("window.__nexoArrastados = {l}; window.__nexoArrastadosEm = Date.now(); window.__nexoSoltou && window.__nexoSoltou({l});")
+}
+
 /// o script que entrega a escolha da janela de arquivos a pagina (eletricApp.escolheArquivos)
 fn script_escolheu(id: u64, caminhos: &[String]) -> String {
     format!("window.__nexoEscolheu && window.__nexoEscolheu({id}, {});", serde_json::to_string(caminhos).unwrap())
@@ -425,9 +434,21 @@ fn main() {
         .with_document_title_changed_handler(move |t| {
             let _ = p2.send_event(Ev::Titulo(t));
         })
+        // Com este tratador ligado o wry DESLIGA o soltar de arquivos dentro da pagina (SetAllowExternalDrop(false)),
+        // e o retorno e ignorado no Windows: a pagina nunca ve o arraste. Por isso o Rust chama a pagina (1.64.2):
+        // __nexoArrasto(true/false) para a faixa "Solte...", e __nexoSoltou(caminhos) para abrir (Ev::Arrastou).
         .with_drag_drop_handler(move |e| {
-            if let DragDropEvent::Drop { paths, .. } = e {
-                let _ = p3.send_event(Ev::Arrastou(paths));
+            match e {
+                DragDropEvent::Enter { .. } => {
+                    let _ = p3.send_event(Ev::Arrasto(true));
+                }
+                DragDropEvent::Leave => {
+                    let _ = p3.send_event(Ev::Arrasto(false));
+                }
+                DragDropEvent::Drop { paths, .. } => {
+                    let _ = p3.send_event(Ev::Arrastou(paths));
+                }
+                _ => {}
             }
             false
         })
@@ -461,12 +482,11 @@ fn main() {
                 ));
             }
             Event::UserEvent(Ev::Arrastou(p)) => {
-                // __nexoArrastadosEm: a pagina so aceita o caminho de um arraste recente (eletricApp.esperaCaminhos)
                 let lista: Vec<String> = p.iter().map(|x| x.to_string_lossy().into_owned()).collect();
-                let _ = webview.evaluate_script(&format!(
-                    "window.__nexoArrastados = {}; window.__nexoArrastadosEm = Date.now();",
-                    serde_json::to_string(&lista).unwrap()
-                ));
+                let _ = webview.evaluate_script(&script_soltou(&lista));
+            }
+            Event::UserEvent(Ev::Arrasto(sobre)) => {
+                let _ = webview.evaluate_script(&format!("window.__nexoArrasto && window.__nexoArrasto({sobre});"));
             }
             Event::UserEvent(Ev::Escolheu(id, l)) => {
                 let _ = webview.evaluate_script(&script_escolheu(id, &l));
@@ -519,7 +539,16 @@ fn main() {
 
 #[cfg(test)]
 mod testes {
-    use super::{destino_link, script_escolheu, DestinoLink, PONTE};
+    use super::{destino_link, script_escolheu, script_soltou, DestinoLink, PONTE};
+
+    #[test]
+    fn arquivo_solto_vai_para_a_pagina() {
+        let s = script_soltou(&["C:\\Projetos\\MIRBC\\MIRBC.PrjPcb".to_string()]);
+        assert_eq!(
+            s,
+            r#"window.__nexoArrastados = ["C:\\Projetos\\MIRBC\\MIRBC.PrjPcb"]; window.__nexoArrastadosEm = Date.now(); window.__nexoSoltou && window.__nexoSoltou(["C:\\Projetos\\MIRBC\\MIRBC.PrjPcb"]);"#
+        );
+    }
 
     #[test]
     fn escolha_de_arquivos_volta_para_a_pagina() {

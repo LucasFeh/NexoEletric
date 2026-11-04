@@ -4,6 +4,18 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.64.2 — 2026-11-04
+
+**Arrastar o projeto do Altium para a janela abre de verdade.** A 1.64.1 consertou o Arquivo › Abrir, mas o arrastar
+continuou sem abrir. Com o tratador de arraste da casca Rust ligado, o wry desliga o soltar de arquivos dentro da
+página (`SetAllowExternalDrop(false)`; o retorno do tratador é ignorado no Windows). A página nunca recebia o "soltar":
+só o Rust recebia os caminhos, e apenas os guardava. A espera da 1.64.1 supunha que a página recebia o soltar.
+
+- Agora o Rust chama a página: `__nexoSoltou(caminhos)` abre direto pelos caminhos (basta o `.PrjPcb`), e
+  `__nexoArrasto(true/false)` mostra e esconde a faixa "Solte o projeto do Altium…" com o arquivo sobre a janela.
+- `HubAltiumAbrir.abre({arquivos})` aceita caminhos (texto) além de arquivos.
+- Testes: `tests/test-altium-abrir.js` (8 casos) e o teste novo do `nexoeletric-web`.
+
 ## 1.64.1 — 2026-11-04
 
 **Abrir projeto do Altium volta a funcionar na janela Rust.** Pelo Arquivo › Abrir e arrastando o `.PrjPcb`, nada
