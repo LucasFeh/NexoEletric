@@ -53,6 +53,8 @@ class Rotas(unittest.TestCase):
         os.environ['NEXOELETRIC_NODE'] = shutil.which('node')
         # o motor de verdade, na pasta de trabalho temporaria (a rota roda <root>/mcp/lib/catalogo.js)
         os.makedirs(os.path.join(self.tmp, 'mcp', 'lib'))
+        os.makedirs(os.path.join(self.tmp, 'Libs'))
+        shutil.copy(os.path.join(RAIZ, 'Libs', 'sch-templates-casa.js'), os.path.join(self.tmp, 'Libs', 'sch-templates-casa.js'))
         shutil.copy(os.path.join(RAIZ, 'mcp', 'lib', 'catalogo.js'), os.path.join(self.tmp, 'mcp', 'lib', 'catalogo.js'))
         self.indexado = []
         app = Flask(__name__)
@@ -97,6 +99,20 @@ class Rotas(unittest.TestCase):
         # a busca acha o produto novo
         a = self.c.get('/api/projeto/novo/catalogo?codigo=' + cod).get_json()
         self.assertEqual(a['achou']['cliente'], 'ALUMAR')
+
+    def test_template_do_esquema(self):
+        t = self.c.get('/api/projeto/novo/templates').get_json()
+        self.assertEqual(t['padrao'], 'casa:A4_DiEletrons')
+        self.assertEqual([x['id'] for x in t['templates']], ['casa:A4_DiEletrons'])
+        # template que nao existe: recusa antes de registrar
+        r = self.c.post('/api/projeto/novo', json={'nome': 'Placa Y', 'iniciador': 'Ana', 'template': 'casa:nao-existe'})
+        self.assertEqual(r.status_code, 400)
+        # sem template: a folha A4 sem o campo template
+        j = self.c.post('/api/projeto/novo', json={'nome': 'Placa Y', 'iniciador': 'Ana', 'template': ''}).get_json()
+        self.assertTrue(j['ok'], j)
+        sch = open(os.path.join(self.tmp, 'Projects', j['name'], 'schematic.js'), encoding='utf-8').read()
+        self.assertNotIn('"template"', sch)
+        self.assertIn('"size": "A4"', sch)
 
     def test_nome_do_projeto_que_ja_existe_nao_registra(self):
         r = self.c.post('/api/projeto/novo', json={'nome': 'Placa X', 'iniciador': 'Ana', 'projeto': 'antigo'})

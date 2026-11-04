@@ -14,7 +14,8 @@ schematic.js): codigo da placa, arquivo SCH-DI.., nome, quem iniciou e a data.
 Rotas:
   GET  /api/projeto/novo/previa?nome=&sigla=   -> {ok, proximo, ano, sigla, codigo, ultimo, arquivo}
   GET  /api/projeto/novo/catalogo?codigo=      -> {ok, achou:{item, nome, cliente, modelo, ...}|null}
-  POST /api/projeto/novo {nome, cliente?, vinculo?, sigla?, iniciador, projeto?}
+  GET  /api/projeto/novo/templates             -> {ok, padrao, templates:[{id, nome, w, h, estilo}]} (os da casa)
+  POST /api/projeto/novo {nome, cliente?, vinculo?, sigla?, iniciador, projeto?, template? ('' = sem template)}
        -> {ok, id, name, codigo, item, linha}: registra no catalogo e cria Projects/<projeto ou codigo>/
 """
 import json
@@ -65,10 +66,31 @@ def params_template(codigo, nome, iniciador, cliente='', data=None):
     return p
 
 
-def texto_esquema(projeto, codigo, params):
+def templates_casa(root):
+    """{id: {nome, w, h, estilo}} dos templates da casa (Libs/sch-templates-casa.js, o que o menu da folha edita)"""
+    try:
+        with open(os.path.join(root, 'Libs', 'sch-templates-casa.js'), encoding='utf-8') as f:
+            txt = f.read()
+        d = json.loads(txt[txt.index('{'):txt.rindex(';')])
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for tid, t in (d.get('templates') or {}).items():
+        f = t.get('folha') or {}
+        out[tid] = {'nome': t.get('nome') or tid, 'w': f.get('w'), 'h': f.get('h'), 'estilo': f.get('estilo') or ''}
+    return out
+
+
+def texto_esquema(projeto, codigo, params, template=TEMPLATE, tpl=None):
+    """a folha do projeto novo: no template escolhido (com a medida dele) ou uma A4 sem template (template '')"""
     quando = time.strftime('%d/%m/%Y %H:%M:%S') + ' (NexoEletric, projeto novo)'
-    folha = {'t': 'sheet', 'name': params.get('Arquivo') or 'ESQUEMA_1', 'size': 'A4', 'w': A4[0], 'h': A4[1],
-             'template': TEMPLATE}
+    folha = {'t': 'sheet', 'name': params.get('Arquivo') or 'ESQUEMA_1', 'size': 'A4', 'w': A4[0], 'h': A4[1]}
+    if template:
+        folha['template'] = template
+        if tpl and tpl.get('w') and tpl.get('h'):
+            folha['w'], folha['h'] = tpl['w'], tpl['h']
+            if tpl.get('estilo') and tpl['estilo'] != 'Custom':
+                folha['size'] = tpl['estilo']
     cab = ';'.join('%s=%s' % (k, _limpa_param(v)) for k, v in params.items() if str(v).strip())
     return ('var schematic = {\n"format":"schmirror-v2",\n"project":%s,\n"generated":%s,\n"units":"mil",\n"params":%s,\n'
             '"items":[\n%s,\n]};\n' % (json.dumps(projeto), json.dumps(quando), json.dumps(cab, ensure_ascii=False),
@@ -103,6 +125,13 @@ def registra(app, root, h):
         r.pop('ok', None)
         return dict(ok=True, **r)
 
+    @app.route('/api/projeto/novo/templates')
+    def projeto_novo_templates():
+        """os templates de esquema que o projeto novo pode usar (os da casa)"""
+        t = templates_casa(root)
+        return {'ok': True, 'padrao': TEMPLATE if TEMPLATE in t else '',
+                'templates': [dict(id=k, **v) for k, v in sorted(t.items(), key=lambda kv: kv[1]['nome'].lower())]}
+
     @app.route('/api/projeto/novo/catalogo')
     def projeto_novo_catalogo():
         """o produto de um codigo (o carimbo da casa se completa com o nome e o cliente do catalogo)"""
@@ -122,6 +151,14 @@ def registra(app, root, h):
         if not iniciador:
             return {'ok': False, 'error': 'falta quem iniciou o projeto'}, 400
         projeto = ' '.join(str(data.get('projeto') or '').split())
+        # o template do esquema: o da casa por padrao; '' = folha A4 sem template
+        tpls = templates_casa(root)
+        if data.get('template') is None:
+            template = TEMPLATE if TEMPLATE in tpls else ''      # o da casa, se ainda existir
+        else:
+            template = str(data.get('template') or '')
+        if template and template not in tpls:
+            return {'ok': False, 'error': 'o template "%s" nao existe nos templates da casa' % template}, 400
         if projeto:
             ruim = livre(projeto)
             if ruim:
@@ -144,7 +181,7 @@ def registra(app, root, h):
             os.makedirs(os.path.join(root, 'Projects'), exist_ok=True)
             os.mkdir(d)
             arqs = h['vazios'](projeto)
-            arqs['schematic.js'] = texto_esquema(projeto, codigo, params)
+            arqs['schematic.js'] = texto_esquema(projeto, codigo, params, template, tpls.get(template))
             for a, txt in arqs.items():
                 with open(os.path.join(d, a), 'w', encoding='utf-8') as f:
                     f.write(txt)

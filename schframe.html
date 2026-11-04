@@ -270,7 +270,9 @@
     box-shadow:0 0 0 1px rgba(255,255,255,.08), 0 10px 28px rgba(0,0,0,.45); color:var(--fg); font-size:12px;}
   .sf-menu svg{width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.5;
     stroke-linecap:round; stroke-linejoin:round;}
-  .sf-cab{display:flex; align-items:center; gap:6px; padding:2px 2px 4px 6px; color:var(--fg-dim);}
+  .sf-cab{display:flex; align-items:center; gap:6px; padding:2px 2px 4px 6px; color:var(--fg-dim); cursor:pointer; user-select:none; border-radius:6px;}
+  .sf-cab:hover{background:rgba(var(--tint),.06);}
+  .sf-menu.sf-recolhido .sf-cab{padding-bottom:2px;}
   .sf-tit{flex:1; min-width:0; font-weight:600; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .sf-cab button{width:24px; height:24px; padding:0; display:inline-flex; align-items:center; justify-content:center;
     background:transparent; border-color:transparent;}

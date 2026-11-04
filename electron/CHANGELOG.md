@@ -4,6 +4,23 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.70.0 — 2026-11-04
+
+**Novo projeto pelo clique direito, o contorno da placa editável e o menu da folha que abre com um clique.**
+- **Clique direito em "Projetos"** (a raiz da árvore ou o cabeçalho do painel) abre o menu com **Novo projeto…**,
+  Reindexar, Abrir todos e Fechar todos.
+- O Novo projeto ganhou o **Template do esquema**: o da casa por padrão, outro template da casa, ou "sem template" (A4
+  em branco). O aviso de campo faltando só aparece depois de começar a preencher. O MCP também aceita
+  `projeto_criar {produto, template}`; o template que não existe é recusado antes de registrar no catálogo.
+- **O contorno da placa (PCB) se clica.**
+  - Retângulo: a ficha "Board Outline" dá **Largura**, **Altura** e a origem; o canto de baixo à esquerda fica
+    parado.
+  - Contorno de várias retas: cada reta se clica e se edita como uma reta comum (início, fim e comprimento). A reta
+    vizinha acompanha, porque o vértice é o mesmo. O arco só se lê.
+  - Cada edição grava um `outline_set` (trocando o anterior), com o Ctrl+Z. O contorno de antes aparece tracejado.
+    No Altium o ApplyChanges pergunta antes de trocar o contorno.
+- **O menu da folha do Esquema** abre e recolhe com um clique em qualquer lugar do cabeçalho, não só na seta.
+
 ## 1.69.2 — 2026-11-04
 
 - O menu da folha do Esquema passa para o canto esquerdo, e a barra de ferramentas vem logo depois dele, na mesma

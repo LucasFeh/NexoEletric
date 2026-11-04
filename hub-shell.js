@@ -333,8 +333,9 @@ body.eh-shell .tab[aria-selected="true"]::after {
     const raiz = linha(0, 'grupo', [caret(true), icone('grupo'), el('span', 'nm', 'Projetos'),
       el('span', 'tag-n', String((S.projects || []).length))]);
     raiz.style.cursor = 'default';
-    raiz.title = 'solte aqui uma PCB arrastada para tirá-la do projeto multi-PCB';
+    raiz.title = 'solte aqui uma PCB arrastada para tirá-la do projeto multi-PCB · clique direito: novo projeto';
     alvoDeSoltar(raiz, '');
+    raiz.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); menuDaRaiz(ev.clientX, ev.clientY); });
     frag.append(raiz);
 
     if (!lista.length) {
@@ -838,6 +839,24 @@ body.eh-shell .tab[aria-selected="true"]::after {
     toast(grupo + ' desfeito: ' + j.pcbs.length + ' PCB(s) avulsa(s)', 'ok');
     await releIndice();
   }
+  /* clique direito em "Projetos" (a raiz da árvore ou o cabeçalho do painel; pedido do dono, 2026-11-04): o projeto
+     novo (nome e template do esquema, hub-projnovo.js) e as ações da lista */
+  function menuDaRaiz(x, y) {
+    fecharMenu();
+    const m = el('div', 'eh-menu');
+    m.append(el('div', 'tit', 'Projetos'));
+    const semServidor = typeof S !== 'undefined' && S.demoMode;
+    itemDeMenu(m, 'Novo projeto…', icone('novoProj'), () => window.__hubNovoProjeto && window.__hubNovoProjeto(), { off: semServidor });
+    m.append(el('div', 'hr'));
+    itemDeMenu(m, 'Reindexar', icone('recarregar'), () => { if (typeof runAction === 'function') runAction('Rescan'); });
+    itemDeMenu(m, 'Abrir todos', icone('mais'), () => { (S.projects || []).forEach((p) => abertos.add(p.id)); renderArvore(); });
+    itemDeMenu(m, 'Fechar todos', icone('fecharTodos'), () => { abertos.clear(); renderArvore(); });
+    document.body.append(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.max(6, Math.min(x, window.innerWidth - r.width - 6)) + 'px';
+    m.style.top = Math.max(6, Math.min(y, window.innerHeight - r.height - 6)) + 'px';
+    menuAberto = m;
+  }
   function menuDoGrupo(grupo, x, y) {
     fecharMenu();
     const m = el('div', 'eh-menu');
@@ -877,6 +896,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
     hd.type = 'button';
     hd.append(el('span', 'ttl', 'Projetos'), icone('recolherEsq', 'chev'));
     hd.onclick = () => mostrarDock(!dockAberto());
+    hd.addEventListener('contextmenu', (ev) => { ev.preventDefault(); menuDaRaiz(ev.clientX, ev.clientY); });
     cabecalho = hd;
 
     const tools = el('div', 'eh-tools');

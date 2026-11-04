@@ -118,6 +118,13 @@ const outros = C.lerZip(fs.readFileSync(ARQ)).filter(e => e.nome !== 'xl/workshe
   assert.ok(!x.erro, JSON.stringify(x.j));
   x = await chama('catalogo_previa', { codigo: 'PTM-DI' + d.ano + '1944' });
   assert.strictEqual(x.j.achou.cliente, 'USIMINAS');
+  /* o template do esquema: o que não existe é recusado ANTES de registrar; "" cria a folha sem template */
+  x = await chama('projeto_criar', { produto: { nome: 'Outra placa', iniciador: 'Ana' }, template: 'casa:nao-existe' });
+  assert.ok(x.erro && /não existe/.test(JSON.stringify(x.j)), JSON.stringify(x.j));
+  assert.strictEqual(C.abre().ultimo, 1944, 'template errado: nada registrado');
+  x = await chama('projeto_criar', { produto: { nome: 'Outra placa', iniciador: 'Ana' }, template: '' });
+  assert.ok(!x.erro && x.j.ok, JSON.stringify(x.j));
+  assert.ok(!/"template"/.test(fs.readFileSync(path.join(PROJETOS, x.j.projeto, 'schematic.js'), 'utf8')), 'sem template');
   h.close();
   console.log('  MCP: catalogo_previa, projeto_criar {produto} (registra, nome = código, carimbo) ok');
 

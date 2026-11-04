@@ -37,8 +37,9 @@ No hub é o botão **Novo projeto** do painel Projetos (ou Arquivo › Novo proj
 3. **Confirme com o usuário antes de registrar.** Criar acrescenta uma linha no catálogo da empresa e não se desfaz
    sozinho. Só siga com o "sim".
 4. **`projeto_criar {produto: {nome, iniciador, cliente, descricao, sigla}}`**: registra no catálogo e cria
-   `Projects/<código>/`. Para outro nome de pasta, passe `nome`. Para outra folha, passe `folha`/`retrato`: o
-   template da casa só entra em A4 deitada.
+   `Projects/<código>/`. Para outro nome de pasta, passe `nome`. O template do esquema é o da casa por padrão;
+   pergunte se o usuário quer outro (`template`, um id de `sch_template`) ou nenhum (`template: ""`). Para outra
+   folha, passe `folha`/`retrato`: o template da casa só entra sozinho em A4 deitada.
 5. **Diga ao usuário:** o código, o item e a linha do catálogo (`catalogo`), e o nome do projeto. Depois siga com o
    esquema: `sch_buscar_simbolo` → `sch_adicionar`.
 

@@ -698,6 +698,7 @@ function chave(a){
     case 'regiao-ro': return 'g:' + a.eb.id;
     case 'recorte': return a.m ? 'o:' + numDoOp(opDe(a.m)) : 'k:' + a.eb.id;
     case 'semplano': return a.m ? 'o:' + numDoOp(opDe(a.m)) : 'q:' + a.eb.id;
+    case 'contorno': return 'b:' + a.i;
     default: return a.m.added ? 'o:' + numDoOp(opDe(a.m)) : a.m.kind + ':' + a.m.src.id;
   }
 }
@@ -837,6 +838,19 @@ function montaAlvos(){
     const a = reg(m && m.added ? { t:'recorte', eb:k.o, m } : { t:'recorte', eb:k.o });
     push(a, 'outros', '_placa', bbPts(pts), (x, y, tol) => dentroPoli(pts, x, y) || pertoPoli(pts, x, y, tol), 6, k.o);
   }
+  /* o contorno da placa: cada reta ou arco, clicando na borda (editaContorno) */
+  segsContorno().forEach((s, i) => {
+    const a = reg({ t:'contorno', i });
+    if (s.kind === 'arc') {
+      push(a, 'outros', '_placa', [s.cx - s.r, s.cy - s.r, s.cx + s.r, s.cy + s.r], (x, y, tol) => {
+        if (Math.abs(Math.hypot(x - s.cx, y - s.cy) - s.r) > tol) return false;
+        return arcoCheio(s) || noArco(s.sa, s.ea, Math.atan2(y - s.cy, x - s.cx) / RAD);
+      }, 7, s);
+    } else {
+      push(a, 'outros', '_placa', [Math.min(s.x1, s.x2), Math.min(s.y1, s.y2), Math.max(s.x1, s.x2), Math.max(s.y1, s.y2)],
+        (x, y, tol) => distSeg(x, y, s.x1, s.y1, s.x2, s.y2) <= tol, 7, s);
+    }
+  });
 }
 function entradaPad(ap, p, push){
   const f = formaLado(p, ladoDaVista()), c = centroCobre(p);
@@ -1569,6 +1583,17 @@ function realcaAlvo(a, cor, forte){
     case 'text': { const o = ebDe(a.m); const g = o && geoTexto(o); if (g) poli(g.caixa); break; }
     case 'ann': { const b = caixaBandeira(a.ann); const P = new Path2D(); P.rect(b[0], b[1], b[2] - b[0], b[3] - b[1]); veu(P); contorno(P); break; }
     case 'cota': break;              /* a cota se realca sozinha (desenhaCotas, com a cor da selecao) */
+    case 'contorno': {
+      /* o retângulo se realça inteiro (a ficha é da placa toda); senão, a reta ou o arco clicado */
+      const segs = segsContorno(), so = retanguloDe(segs) ? segs : [segs[a.i]].filter(Boolean);
+      for (const s of so) {
+        const P = new Path2D();
+        if (s.kind === 'arc') P.arc(s.cx, s.cy, s.r, s.sa * RAD, s.ea * RAD, false);
+        else { P.moveTo(s.x1, s.y1); P.lineTo(s.x2, s.y2); }
+        ctx.globalAlpha = forte ? 0.6 : 0.35; ctx.lineWidth = px(5); ctx.stroke(P);
+      }
+      break;
+    }
   }
   ctx.restore();
 }
@@ -3646,6 +3671,63 @@ async function fechaPoligono(){
   HubDialog.toast('contorno trocado (' + pts.length + ' vértices) — salve para gravar o changes.js', 'ok');
   return true;
 }
+/* ── O CONTORNO DA PLACA, SELECIONÁVEL (pedido do dono, 2026-11-04: "o molde da pcb mais fácil de manejar: se for
+   retângulo você clica e consegue mudar no menu a altura e a largura, e se for várias retas, você consegue editar a
+   reta normal"). Cada segmento do EB.board.outline é um alvo {t:'contorno', i} (filtro "outros"). A ficha do
+   retângulo (4 retas em esquadro) dá Largura, Altura e a Origem (o canto de baixo à esquerda, que fica parado); a de
+   outro contorno dá a reta clicada (início, fim e comprimento), e mexer num vértice leva as duas retas que se encontram
+   nele. Arco só se lê. Toda edição grava UM outline_set (o mesmo da ferramenta Contorno: substitui o contorno inteiro;
+   no Altium o ApplyChanges pergunta antes), trocando o anterior. ── */
+function segsContorno(){ return ((EB && EB.board && EB.board.outline) || []).filter(s => s && (s.kind === 'line' || s.kind === 'arc')); }
+/* o contorno é um retângulo em esquadro? {x1, y1, w, h} ou null */
+function retanguloDe(segs){
+  if (!segs || segs.length !== 4 || segs.some(s => s.kind !== 'line')) return null;
+  const T = 1e-3, xs = [], ys = [];
+  for (const s of segs) {
+    if (Math.abs(s.x1 - s.x2) > T && Math.abs(s.y1 - s.y2) > T) return null;    /* reta inclinada */
+    xs.push(s.x1, s.x2); ys.push(s.y1, s.y2);
+  }
+  const x1 = Math.min(...xs), x2 = Math.max(...xs), y1 = Math.min(...ys), y2 = Math.max(...ys);
+  if (!(x2 - x1 > T && y2 - y1 > T)) return null;
+  /* toda ponta num canto da caixa */
+  const canto = (x, y) => (Math.abs(x - x1) <= T || Math.abs(x - x2) <= T) && (Math.abs(y - y1) <= T || Math.abs(y - y2) <= T);
+  if (!segs.every(s => canto(s.x1, s.y1) && canto(s.x2, s.y2))) return null;
+  return { x1, y1, w:x2 - x1, h:y2 - y1 };
+}
+/* grava o contorno novo (pts com bulge, como o outline_set) no lugar do outline_set anterior */
+function gravaContorno(pts, note){
+  if (!HC.ptsToOutline(pts)) { HubDialog.toast('contorno inválido', 'warn'); return false; }
+  if (seCruza(pts.map(p => [p[0], p[1]]))) { HubDialog.toast('o contorno ficaria com lados que se cruzam — não mudei', 'warn'); return false; }
+  const ant = ultimoOp(x => x.op === 'outline_set');
+  const op = { op:'outline_set', pts:pts.map(p => (isNum(p[2]) && p[2] ? [r6(p[0]), r6(p[1]), p[2]] : [r6(p[0]), r6(p[1])])), note };
+  if (ant) CH.splice(CH.indexOf(ant), 1, op); else CH.push(op);
+  return true;
+}
+function editaContorno(a, k, v){
+  if (!isNum(v)) return false;
+  const segs = segsContorno(), ret = retanguloDe(segs);
+  if (ret && /^b[whxy]$/.test(k)) {
+    let { x1, y1, w, h } = ret;
+    if ((k === 'bw' || k === 'bh') && !(v > 0)) { HubDialog.toast('a medida tem de ser maior que zero', 'warn'); return false; }
+    if (k === 'bw') w = v; else if (k === 'bh') h = v; else if (k === 'bx') x1 = v; else y1 = v;
+    return gravaContorno([[x1, y1], [x1 + w, y1], [x1 + w, y1 + h], [x1, y1 + h]],
+      'placa ' + fmtNum(w, 3) + ' x ' + fmtNum(h, 3) + ' mm');
+  }
+  const pts = HC.outlineToPts(segs);
+  const s = segs[a.i];
+  if (!pts || !s || s.kind !== 'line') { HubDialog.toast('este pedaço do contorno não se edita aqui (arco, ou contorno que não fecha)', 'warn'); return false; }
+  const n = pts.length, i0 = a.i, i1 = (a.i + 1) % n;
+  const p0 = pts[i0].slice(), p1 = pts[i1].slice();
+  if (k === 'x1') p0[0] = v; else if (k === 'y1') p0[1] = v; else if (k === 'x2') p1[0] = v; else if (k === 'y2') p1[1] = v;
+  else if (k === 'len') {
+    if (!(v > 0)) { HubDialog.toast('o comprimento tem de ser maior que zero', 'warn'); return false; }
+    const L = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]);
+    if (!(L > 1e-9)) return false;
+    p1[0] = p0[0] + (p1[0] - p0[0]) * v / L; p1[1] = p0[1] + (p1[1] - p0[1]) * v / L;
+  } else return false;
+  pts[i0] = p0; pts[i1] = p1;
+  return gravaContorno(pts, 'contorno editado no hub (reta ' + (a.i + 1) + ')');
+}
 function desfazPontoPoligono(){
   if (!draft) return false;
   if ((draft.tipo === 'poligono' || draft.tipo === 'contorno' || draft.tipo === 'pour') && draft.pts.length) {
@@ -4230,6 +4312,9 @@ function rotuloAlvo(a){
     case 'region': return 'região ' + (a.m.added ? 'nova' : a.m.src.id) + ' · ' + nomeDe(a.m.eff.layer);
     case 'regiao-ro': return 'região ' + a.eb.id + ' · ' + nomeDe(a.eb.layer) + (a.eb.poly ? ' · polígono' : '');
     case 'recorte': return 'recorte da placa' + (a.m ? ' (novo)' : ' ' + a.eb.id);
+    case 'contorno': { const segs = segsContorno(), r = retanguloDe(segs);
+      return r ? 'contorno da placa · ' + fmtDist(r.w) + ' × ' + fmtDist(r.h) + ' ' + unidade
+               : 'contorno da placa · ' + ((segs[a.i] || {}).kind === 'arc' ? 'arco ' : 'reta ') + (a.i + 1) + ' de ' + segs.length; }
     case 'poly': { const e = a.m.eff; return 'plano ' + (a.m.added ? 'novo' : a.m.src.id) + ' · ' + nomeDe(e.layer) + ' · ' + (e.net || 'sem net'); }
     case 'semplano': { const l = a.m ? a.m.eff.layer : a.eb.layer; return 'sem plano · ' + (!l || l === 'Multi' ? 'todas as camadas' : nomeDe(l)) + (a.m ? '' : ' (do Altium)'); }
     case 'text': { const s = a.m.src || {}; const e = ebDe(a.m) || a.m.eff;
@@ -6550,6 +6635,28 @@ function fichaDe(a){
         { nota:'O plano (polygon pour) não entra nesta área; trilha e via passam — o Polygon Pour Cutout do Altium. Arraste as bordas ou os cantos para ajustar.' },
       ] };
     }
+    case 'contorno': {
+      const segs = segsContorno(), ret = retanguloDe(segs), s = segs[a.i];
+      const est = model.outlineChanged ? 'mudado no hub (outline_set)' : 'do Altium';
+      if (ret) return { titulo:'Board Outline', sub:'retângulo · ' + est, campos:[
+        par('Size', { k:'bw', rot:'Width', tipo:'dist', v:ret.w, dica:'a largura da placa (o canto de baixo à esquerda fica parado)' },
+                    { k:'bh', rot:'Height', tipo:'dist', v:ret.h, dica:'a altura da placa (o canto de baixo à esquerda fica parado)' }),
+        par('Origin (X/Y)', { k:'bx', rot:'X', tipo:'dist', v:ret.x1 }, { k:'by', rot:'Y', tipo:'dist', v:ret.y1 }),
+        { nota:'Grava um outline_set: o contorno inteiro é trocado (no Altium o ApplyChanges pergunta antes de aplicar).' },
+      ] };
+      if (!s) return { titulo:'Board Outline', sub:est, campos:[] };
+      if (s.kind === 'arc') return { titulo:'Board Outline — arco', sub:'arco ' + (a.i + 1) + ' de ' + segs.length + ' · ' + est, campos:[
+        par('Center (X/Y)', { k:'cx', rot:'X', tipo:'ro', v:fmtDist(s.cx) }, { k:'cy', rot:'Y', tipo:'ro', v:fmtDist(s.cy) }),
+        { k:'r', rot:'Radius', tipo:'ro', v:fmtDist(s.r) + ' ' + unidade },
+        { nota:'O arco acompanha as retas vizinhas: edite-as clicando nelas.' },
+      ] };
+      return { titulo:'Board Outline — reta', sub:'reta ' + (a.i + 1) + ' de ' + segs.length + ' · ' + est, campos:[
+        par('Start (X/Y)', { k:'x1', rot:'X', tipo:'dist', v:s.x1 }, { k:'y1', rot:'Y', tipo:'dist', v:s.y1 }),
+        par('End (X/Y)', { k:'x2', rot:'X', tipo:'dist', v:s.x2 }, { k:'y2', rot:'Y', tipo:'dist', v:s.y2 }),
+        { k:'len', rot:'Length', tipo:'dist', v:Math.hypot(s.x2 - s.x1, s.y2 - s.y1), dica:'o início fica parado; o fim anda na mesma direção' },
+        { nota:'Mexer numa ponta leva junto a reta vizinha (o vértice é o mesmo). Grava um outline_set, que troca o contorno inteiro.' },
+      ] };
+    }
     case 'recorte': {
       const k = recortesDaTela().find(x => x.o === a.eb), bb = k ? bbPts(k.pts) : null;
       const circ = a.m ? circuloDePts((a.m.eff.points || []).map(p => [p[0], p[1]])) : null;
@@ -6780,6 +6887,7 @@ function campoNoAlvo(a, k, v){
   if (a.t === 'pad' && a.comp && String(k).indexOf('comp.') === 0) { const c = ALVO_COMP.get(a.comp); return c ? campoNoAlvo(c, String(k).slice(5), v) : false; }
   switch (a.t) {
     case 'pad': return a.m ? campoDoPad(a, k, v) : false;
+    case 'contorno': return editaContorno(a, k, v);
     case 'recorte': {
       if (!a.m) return false;
       const op = opDe(a.m), c = circuloDePts((a.m.eff.points || []).map(p => [p[0], p[1]]));

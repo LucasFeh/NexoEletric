@@ -132,6 +132,7 @@ module.exports = {
           sigla: { type: 'string', description: 'a sigla do código; padrão P + as iniciais do nome (catalogo_previa mostra)' },
         }, required: ['nome', 'iniciador'] },
         folha: { type: 'string', description: 'formato da folha: A4 (padrão), A3, A2, A1, A0 (ISO, como os templates da casa)' },
+        template: { type: 'string', description: 'com "produto": o template do esquema (id de sch_template); padrão casa:A4_DiEletrons em A4 deitada; "" = sem template' },
         retrato: { type: 'boolean', description: 'folha em pé' },
         nome_folha: { type: 'string', description: 'nome da folha (padrão ESQUEMA_1)' },
         placa: { type: 'object', additionalProperties: true, description: 'opcional (hub-pcbnova.js): {largura, altura} em mm, forma retangulo|arredondado (raio), camadas 2|4, origem canto|centro, furos {d, margem} (furos de fixação), codigo "texto" ou null' },
@@ -148,8 +149,17 @@ module.exports = {
           if (ctx.listaProjetos().some(n => n.toLowerCase() === a.nome.toLowerCase())) throw new ErroMcp(`já existe um projeto "${a.nome}"`);
         }
         /* a placa nova da casa: registra no catálogo ANTES de criar a pasta (o código vira o nome) */
-        let reg = null;
+        let reg = null, tplEsc = null;
         if (a.produto) {
+          /* o template do esquema: o da casa por padrão (só em A4 deitada), outro da casa pelo id, '' = sem template;
+             conferido ANTES de registrar (registro no catálogo não se desfaz) */
+          const tid = a.template === undefined ? ((a.folha || 'A4').toUpperCase() === 'A4' && !a.retrato ? 'casa:A4_DiEletrons' : '') : String(a.template || '');
+          if (tid) {
+            const T0 = ctx.modulo('hub-schtemplate.js');
+            const fontes = [ctx.lib('sch-templates.js', 'schtemplates'), ctx.lib('sch-templates-casa.js', 'schtemplatesCasa')].filter(Boolean);
+            tplEsc = T0 && T0.acha(tid, fontes);
+            if (!tplEsc && a.template !== undefined) throw new ErroMcp('template "' + tid + '" não existe (sch_template lista os da casa; "" = sem template)');
+          }
           const CAT = require('../lib/catalogo.js');
           try { reg = CAT.registra({ nome: a.produto.nome, tipo: 'PLACA', cliente: a.produto.cliente, vinculo: a.produto.descricao, sigla: a.produto.sigla }); }
           catch (e) { throw new ErroMcp('catálogo de produtos: ' + e.message); }
@@ -175,7 +185,10 @@ module.exports = {
           const T = ctx.modulo('hub-schtemplate.js');
           const pt = CAT.paramsTemplate({ codigo: reg.codigo, nome: a.produto.nome, iniciador: a.produto.iniciador, cliente: a.produto.cliente });
           sch.params = T ? T.serializaParams(pt) : Object.keys(pt).map(k => k + '=' + String(pt[k]).replace(/[;|]/g, ',')).join(';');
-          if ((a.folha || 'A4').toUpperCase() === 'A4' && !a.retrato) Object.assign(sch.items[0], { template: 'casa:A4_DiEletrons', w: 11692.913, h: 8267.717 });
+          if (tplEsc) {
+            const f = tplEsc.folha || {};
+            Object.assign(sch.items[0], { template: tplEsc.id }, f.w > 0 && f.h > 0 ? { w: f.w, h: f.h } : {});
+          }
         }
         const s = hc.serializeSchematic(sch);
         if (!s.text) throw new ErroMcp('schematic inválido: ' + s.errors.map(e => e.msg).join('; '));

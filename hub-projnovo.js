@@ -4,7 +4,8 @@
    pergunta o nome de quem iniciou o projeto pra por no template". O código segue o catálogo CATALOGAÇÃO TODOS OS
    PRODUTOS (\\192.168.15.31\Controle de Projetos): P + as iniciais do nome da placa + -DI + ano + o número do
    produto (PDIDP-DI261945). Criar REGISTRA a placa no catálogo (uma linha nova) e cria Projects/<código>/ com uma
-   folha A4 no template da casa, o carimbo já preenchido.
+   folha no template do esquema escolhido (o da casa por padrão), o carimbo já preenchido. Abre também pelo clique
+   direito em "Projetos" no painel (hub-shell.js » menuDaRaiz).
 
    O servidor faz o trabalho (tools/rotas/projeto_novo.py, que roda o mcp/lib/catalogo.js):
      GET  /api/projeto/novo/previa?nome=&sigla=  o próximo número e o código que vai sair (nada é gravado)
@@ -57,6 +58,18 @@ function abre(o) {
   const iSig = inp('sigla'); const cod = el('span', 'pn-cod', '—');
   sig.append(iSig, cod);
   const lSig = el('label', null, 'Código'); g.append(lSig, sig);
+  /* o template do esquema (os da casa, /api/projeto/novo/templates); "sem template" = folha A4 em branco */
+  const iTpl = campo('Template do esquema', false, el('select', 'input'));
+  const semTpl = el('option', null, '— sem template (A4 em branco) —'); semTpl.value = '';
+  iTpl.append(semTpl);
+  fetch('/api/projeto/novo/templates', { cache: 'no-store' }).then(r => r.json()).then(j => {
+    if (!j || !j.ok) return;
+    for (const t of j.templates || []) {
+      const op = el('option', null, t.nome + (t.w ? ' · ' + Math.round(t.w) + '×' + Math.round(t.h) + ' mil' : ''));
+      op.value = t.id; iTpl.insertBefore(op, semTpl);
+    }
+    iTpl.value = j.padrao || '';
+  }).catch(() => { /* sem servidor: fica a folha em branco */ });
   const iCli = campo('Cliente', false, inp('ex.: USIMINAS'));
   const iVin = campo('Descrição', false, inp('para que serve (vai na coluna VÍNCULO do catálogo)'));
   const iQuem = campo('Quem iniciou', true, inp('o seu nome, vai no carimbo (DESEN.)'));
@@ -71,7 +84,7 @@ function abre(o) {
   acts.append(bCancel, bOk); d.append(acts);
   bd.append(d); ov.append(bd);
 
-  let siglaMexida = false, prev = null, seq = 0, timer = null, enviando = false;
+  let siglaMexida = false, mexeu = false, prev = null, seq = 0, timer = null, enviando = false;
   const fecha = () => { bd.remove(); document.removeEventListener('keydown', tecla, true); };
   const tecla = e => {
     if (e.key === 'Escape' && !enviando) { e.preventDefault(); e.stopPropagation(); fecha(); }
@@ -113,20 +126,20 @@ function abre(o) {
     prev = j;
     if (!siglaMexida) iSig.value = j.sigla;
     info.textContent = 'vai ser o item ' + j.proximo + ' do catálogo' + (j.ultimo ? ' · o último é ' + j.ultimo.modelo : '');
-    erro.textContent = confere();
+    const m2 = confere(); if (mexeu) erro.textContent = m2;
     pintaCod();
   };
   const agenda = () => { clearTimeout(timer); timer = setTimeout(previa, 350); };
-  iNome.addEventListener('input', () => { agenda(); erro.textContent = confere(); });
+  iNome.addEventListener('input', () => { mexeu = true; agenda(); erro.textContent = confere(); });
   iSig.addEventListener('input', () => { siglaMexida = iSig.value.trim() !== ''; pintaCod(); erro.textContent = confere(); });
-  for (const i of [iQuem, iProj, iCli, iVin]) i.addEventListener('input', () => { erro.textContent = confere(); });
+  for (const i of [iQuem, iProj, iCli, iVin]) i.addEventListener('input', () => { mexeu = true; erro.textContent = confere(); });
 
   async function cria() {
     const m = confere();
     if (m || !prev) { erro.textContent = m || 'esperando o catálogo'; return; }
     enviando = true; bOk.disabled = true; bCancel.disabled = true; bOk.textContent = 'Registrando…';
     const corpo = { nome: iNome.value.trim(), sigla: (iSig.value.trim() || prev.sigla).toUpperCase(), cliente: iCli.value.trim(),
-                    vinculo: iVin.value.trim(), iniciador: iQuem.value.trim(), projeto: iProj.value.trim() };
+                    vinculo: iVin.value.trim(), iniciador: iQuem.value.trim(), projeto: iProj.value.trim(), template: iTpl.value };
     let j = null;
     try {
       const r = await fetch('/api/projeto/novo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });

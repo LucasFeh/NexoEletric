@@ -6788,8 +6788,9 @@ function pintaCabMenuFolha(){
     try { localStorage.setItem('schframe.menuFolha', recolhido ? 'recolhido' : 'aberto'); } catch (_) { /* sem storage */ }
     if (!recolhido) requestAnimationFrame(pintaMiniaturas);
   });
-  /* o duplo clique no cabeçalho também recolhe; a roda do mouse sobre o menu rola o menu, não dá zoom na folha */
-  m.querySelector('.sf-cab').addEventListener('dblclick', e => { if (e.target.closest('button')) return; b.click(); });
+  /* o cabeçalho INTEIRO abre e recolhe, com um clique em qualquer lugar dele (pedido do dono, 2026-11-04: "quero
+     poder clicar em qualquer lugar e abrir o menu"); a roda do mouse sobre o menu rola o menu, não dá zoom na folha */
+  m.querySelector('.sf-cab').addEventListener('click', e => { if (e.target.closest('button')) return; b.click(); });
   m.addEventListener('wheel', e => e.stopPropagation(), { passive:true });
   /* NO CANTO ESQUERDO, e a barra de ferramentas logo depois dele, na mesma altura (pedido do dono, 2026-11-04: "do
      outro lado, do lado esquerdo"). O menu muda de largura (aberto ou recolhido no nome da folha), então a barra
