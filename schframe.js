@@ -751,6 +751,87 @@ function encaixeDaTroca(antes, depois){
               : { dx:0, dy:0, encaixa:0, comuns:0 };
 }
 
+/* ── O QUE O ENCAIXE NAO DEVOLVE, ESTICA (1.62.0) ──
+   Simbolo novo com OUTRA distancia entre os pinos (o "CAP [PTH] 1-2" a +-100 mil, o capacitor do
+   almoxarifado a +-150) nao tem deslocamento que devolva todos os pinos ao lugar: o encaixe religava um
+   e o outro ficava solto, sem aviso que dissesse qual (C15, C1 e C8 do PBIDP-DI261944, 2026-10-30;
+   pedido do dono em 2026-11-03: "esticar os fios"). Agora, como o arrasto do Altium, o que estava
+   ligado no ponto antigo de cada pino vai ate o ponto novo:
+     - ponta de fio no pino: estica (no mesmo eixo so anda; fora dele ganha um trecho, em L se preciso);
+     - fio que passava PELO pino (T, ou vertice do meio) ou pino de outro componente encostado: um fio
+       novo do ponto antigo ate o pino;
+     - power, rotulo, porta ou No ERC no pino: anda junto, a nao ser que o ponto antigo continue sendo
+       fio depois de esticar (ai ele fica ligado ali mesmo).
+   O plano e feito na folha de ANTES, e so depois aplicado: dois pinos que trocam de lugar nao levam a
+   mesma coisa duas vezes. Pino que nao tinha nada ligado continua sem nada. */
+function movimentosDosPinos(antes, depois){
+  const de = new Map();
+  for (const p of (antes || [])) de.set(String(p.num), p);
+  const out = [];
+  for (const p of (depois || [])){
+    const a = de.get(String(p.num));
+    if (a && !pertoDe(a.x, a.y, p.x, p.y)) out.push({ num:String(p.num), de:{ x:a.x, y:a.y }, para:{ x:p.x, y:p.y } });
+  }
+  return out;
+}
+/* o caminho ortogonal de `a` ate `b` (sem o `a`): reto, ou em L */
+const caminhoAte = (a, b) => (pertoDe(a[0], 0, b[0], 0) || pertoDe(0, a[1], 0, b[1])) ? [[b[0], b[1]]] : [[b[0], a[1]], [b[0], b[1]]];
+function esticaPonta(pts, i, para){
+  const out = pts.map(p => [p[0], p[1]]), n = out.length;
+  const p = out[i], q = out[i === 0 ? 1 : n - 2];
+  const alvo = [para.x, para.y];
+  const mesmoEixo = (pertoDe(p[0], 0, q[0], 0) && pertoDe(alvo[0], 0, p[0], 0))
+                 || (pertoDe(0, p[1], 0, q[1]) && pertoDe(0, alvo[1], 0, p[1]));
+  if (mesmoEixo){
+    if (pertoDe(alvo[0], alvo[1], q[0], q[1]) && n > 2) out.splice(i, 1);   /* encolheu ate o vertice: some */
+    else out[i] = alvo;
+    return out;
+  }
+  const trecho = caminhoAte(p, alvo);
+  if (i === 0) return trecho.reverse().concat(out);
+  return out.concat(trecho);
+}
+function esticaLigacoes(folha, movs, outrosPinos){
+  const F = folha || {}, W = F.wires || [];
+  const ancoras = [].concat(F.powers || [], F.netlabels || [], F.ports || [], F.noercs || []);
+  const noPonto = (o, x, y) => pertoDe(o.x, o.y, x, y);
+  const passaPor = (x, y) => W.some(w => {
+    const v = w.pts || [];
+    for (let k = 0; k < v.length - 1; k++) if (distPS(x, y, v[k][0], v[k][1], v[k+1][0], v[k+1][1]) <= STOL_SCH) return true;
+    return false;
+  });
+  /* 1. o plano, na folha de antes */
+  const planos = [];
+  for (const m of (movs || [])){
+    if (!m || pertoDe(m.de.x, m.de.y, m.para.x, m.para.y)) continue;
+    const pontas = [], meio = [];
+    for (const w of W){
+      const v = w.pts || [], n = v.length;
+      if (n < 2) continue;
+      if (pertoDe(v[0][0], v[0][1], m.de.x, m.de.y)) pontas.push({ w, i:0 });
+      else if (pertoDe(v[n-1][0], v[n-1][1], m.de.x, m.de.y)) pontas.push({ w, i:n - 1 });
+      else for (let k = 0; k < n - 1; k++)
+        if (distPS(m.de.x, m.de.y, v[k][0], v[k][1], v[k+1][0], v[k+1][1]) <= STOL_SCH){ meio.push(w); break; }
+    }
+    const pino = (outrosPinos || []).some(p => noPonto(p, m.de.x, m.de.y));
+    const ancs = ancoras.filter(a => noPonto(a, m.de.x, m.de.y));
+    if (pontas.length || meio.length || pino || ancs.length) planos.push({ m, pontas, fioNovo:!!(meio.length || pino), ancs });
+  }
+  /* 2. aplica: fio primeiro, ancora depois (ela fica se o ponto antigo continuar sendo fio) */
+  const novos = [];
+  for (const p of planos){
+    for (const { w, i } of p.pontas){
+      const n = (w.pts || []).length;
+      w.pts = esticaPonta(w.pts, i === 0 ? 0 : n - 1, p.m.para);
+    }
+    if (p.fioNovo) novos.push({ pts:[[p.m.de.x, p.m.de.y]].concat(caminhoAte([p.m.de.x, p.m.de.y], [p.m.para.x, p.m.para.y])) });
+  }
+  for (const p of planos)
+    for (const a of p.ancs)
+      if (!((p.pontas.length || p.fioNovo) && passaPor(p.m.de.x, p.m.de.y))){ a.x = p.m.para.x; a.y = p.m.para.y; }
+  return { ligacoes:planos.length, novos };
+}
+
 /* ── A GRADE ──
    Os 100 mil do AI-GUIDE nao descrevem esta casa: as folhas reais snapam em 1 mm (39,37 mil)
    ou 0,3 mm, e 3980 dos 4188 vertices de fio dos projetos deste workspace estao fora da grade
@@ -1162,6 +1243,7 @@ const PURE = { LIBS, ACERVO_DEFS, montaAcervos, partesDe, nPartes, refDaParte, t
                identidadeDoComponente, identidadeDoEscolhido, identidadeDoVinculo,
                idsDoParams, pecaDeHoje, reachaValor, recomendacaoDe, mesmaPecaDaFolha, seguePeloOdoo,
                topologiaFolha, moveSegmento, eixosDoTrecho, apagaSegmento, apagaVertice, espelha, encaixeDaTroca,
+               movimentosDosPinos, esticaLigacoes,
                fioNoPonto, pontasSoltas, paresDeRota, ligaPonta,
                GRADES, gradePorId, snapPasso, MM_MIL, caixaTexto, larguraTexto, designadorAparece,
                ATALHOS_PADRAO, TECLAS_PROIBIDAS, normalizaTecla, mapaAtalhos, defineAtalho };
@@ -1661,7 +1743,9 @@ function itemBBox(it){
       return x1 > x2 ? { x1:0, y1:0, x2:0, y2:0 } : { x1, y1, x2, y2 };
     }
     case 'netlabel': return { x1:it.x - 20, y1:it.y - 20, x2:it.x + Math.max((it.net || '').length * 40, 120), y2:it.y + 80 };
-    case 'power':    return { x1:it.x - 150, y1:it.y - 150, x2:it.x + 150, y2:it.y + 150 };
+    /* do desenho (D.powerBBox), como a port: so para o lado da rotacao. Centrada na ancora, a caixa
+       cobria o componente onde o power encosta e roubava o clique dele */
+    case 'power':    return D.powerBBox(it);
     /* A caixa da port vem do PROPRIO desenho (D.portBBox), nao de uma copia da geometria
        aqui: a barra nasce na ancora e cresce numa direcao so, entao cobrir os dois lados
        dobrava a area de clique — e no dia em que a direcao passar a sair do `style` a caixa
@@ -4865,8 +4949,10 @@ function hitTest(x, y){
   for (const l of s.netlabels)
     if (x >= l.x - 20 && x <= l.x + Math.max((l.net || '').length * 40, 120) && y >= l.y - 20 && y <= l.y + 80)
       return { kind:'netlabel', item:l };
-  for (const p of s.powers)
-    if (Math.hypot(x - p.x, y - p.y) <= Math.max(tol, 140)) return { kind:'power', item:p };
+  for (const p of s.powers){
+    const b = itemBBox(p);
+    if (x >= b.x1 - tol && x <= b.x2 + tol && y >= b.y1 - tol && y <= b.y2 + tol) return { kind:'power', item:p };
+  }
   for (const p of s.ports){
     const b = itemBBox(p);
     if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return { kind:'port', item:p };
@@ -5739,6 +5825,9 @@ async function usarSimboloEscolhido(){
     HubDialog.toast(en.ref + ': encaixei no lugar do antigo — ' + en.encaixa + ' de ' + en.comuns
       + ' pinos voltaram ao mesmo ponto (andou ' + Math.round(en.dx) + ' , ' + Math.round(en.dy) + ' mil)',
       'info', 9000);
+  for (const es of (res.esticados || []))
+    HubDialog.toast(es.ref + ': o símbolo novo tem outra distância entre os pinos — levei ' + es.ligacoes
+      + (es.ligacoes === 1 ? ' ligação' : ' ligações') + ' até o pino novo, nenhum pino ficou solto', 'info', 9000);
   for (const rc of (res.recusados || [])) HubDialog.toast('recusado: ' + rc.porque, 'warn', 9000);
   for (const pt of (res.partes || []))
     HubDialog.toast(pt.ref + ': parte ' + pt.de + ' → ' + pt.para, 'info', 6000);
@@ -6235,7 +6324,7 @@ window.__hubAplicaVinculos = function(vinculos){
   if (!planos.length) return { ok:false, erro:'nenhum vinculo passou na conferencia', recusados };
 
   let itens = 0;
-  const refsTocados = [], encaixes = [], partes = [];
+  const refsTocados = [], encaixes = [], esticados = [], partes = [];
   for (const p of planos)
     for (const ref of p.refs){
       const its = porRef.get(ref);
@@ -6271,6 +6360,16 @@ window.__hubAplicaVinculos = function(vinculos){
             c.y = Math.round((c.y + enc.dy) * 1e4) / 1e4;
             encaixes.push({ ref, dx:enc.dx, dy:enc.dy, encaixa:enc.encaixa, comuns:enc.comuns });
           }
+          /* o pino que o encaixe nao devolveu ao lugar leva o que estava ligado nele (esticaLigacoes) */
+          const movs = movimentosDosPinos(antes, HubCore.compPinsWorld(c, SLIB) || []);
+          const folha = movs.length ? model.sheets.find(s => s.comps.indexOf(c) >= 0) : null;
+          if (folha){
+            const outros = [];
+            for (const o of folha.comps) if (o !== c) for (const q of (HubCore.compPinsWorld(o, SLIB) || [])) outros.push(q);
+            const est = esticaLigacoes(folha, movs, outros);
+            for (const w of est.novos) schematic.items.push({ t:'wire', sheet:c.sheet, pts:w.pts });
+            if (est.ligacoes) esticados.push({ ref, ligacoes:est.ligacoes });
+          }
         }
         itens++;
       }
@@ -6278,7 +6377,7 @@ window.__hubAplicaVinculos = function(vinculos){
     }
   commit();
   limpaSel();
-  return { ok:true, vinculos:planos.length, refs:refsTocados, itens, recusados, encaixes, partes,
+  return { ok:true, vinculos:planos.length, refs:refsTocados, itens, recusados, encaixes, esticados, partes,
            parteIgnorada: planos.some(p => p.parteIgnorada),
            soIdentidade: planos.filter(p => p.multiParte && p.soParams).map(p => p.refs.join(', ')),
            desvios: planos.filter(p => p.desvio).map(p => ({ refs:p.refs, sym:p.sym,

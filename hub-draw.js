@@ -203,6 +203,11 @@ function drawFootprint(ctx, fp, opts){
 
 /* ---------- power port / netlabel / junction (coords da folha, mil) ---------- */
 function seg(ctx, x1, y1, x2, y2){ ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); }
+/* As medidas do power port, num lugar so: o desenho e a caixa de clique leem daqui. */
+const POWER_HASTE = 100, POWER_MEIA = 50, POWER_TXT = 55;
+const powerFim  = st => st === 'GndSignal' ? 160 : (st === 'Circle' || st === 'Wave') ? 150
+                      : (st === 'GndPower' || st === 'GndEarth') ? 140 : POWER_HASTE;
+const powerNome = st => (st || '').indexOf('Gnd') === 0 ? 230 : 190;
 function drawPowerPort(ctx, p, color){
   const c = color || SCH.power;
   ctx.save();
@@ -218,8 +223,28 @@ function drawPowerPort(ctx, p, color){
   ctx.restore();
   const rot = ((p.rot||0)%360+360)%360;
   const d = OD[rot] || [1,0];
-  const isGnd = st.indexOf('Gnd') === 0;
-  worldText(ctx, p.net || '', p.x + d[0]*(isGnd?230:190), p.y + d[1]*(isGnd?230:190), 55, 0, c, 'center');
+  const dn = powerNome(st);
+  worldText(ctx, p.net || '', p.x + d[0]*dn, p.y + d[1]*dn, POWER_TXT, 0, c, 'center');
+}
+/* Caixa do power port em mil: o que drawPowerPort desenha — a haste nasce na ancora e cresce SO para
+   o lado da rotacao, o simbolo no fim dela e o nome (sempre deitado) adiante — e nada atras da ancora.
+   Era 300x300 centrada na ancora (e o clique, um raio de 140): no power em cima de um componente,
+   metade da caixa cobria o corpo dele, a selecao virava um quadrado gigante e o clique no componente
+   pegava o power (pedido do dono, 2026-11-03). Mesma regra da portBBox: desenho e caixa leem a mesma
+   geometria. */
+function powerBBox(p){
+  const st = p.style || 'Bar';
+  const a = ((((p.rot || 0) % 360) + 360) % 360) * Math.PI / 180, cs = Math.cos(a), sn = Math.sin(a);
+  const fim = powerFim(st), xs = [], ys = [];
+  for (const [lx, ly] of [[0, -POWER_MEIA], [fim, -POWER_MEIA], [fim, POWER_MEIA], [0, POWER_MEIA]]) {
+    xs.push(p.x + lx * cs - ly * sn); ys.push(p.y + lx * sn + ly * cs);
+  }
+  const d = OD[(((p.rot || 0) % 360) + 360) % 360] || [1, 0], dn = powerNome(st);
+  const cx = p.x + d[0] * dn, cy = p.y + d[1] * dn;
+  const meiaL = Math.max(POWER_TXT, String(p.net || '').length * POWER_TXT * 0.62) / 2, meiaA = POWER_TXT * 0.6;
+  xs.push(cx - meiaL, cx + meiaL); ys.push(cy - meiaA, cy + meiaA);
+  const r = v => Math.round(v * 1e3) / 1e3;
+  return { x1: r(Math.min(...xs)), y1: r(Math.min(...ys)), x2: r(Math.max(...xs)), y2: r(Math.max(...ys)) };
 }
 /* A Port do Altium: uma barra deitada com o nome dentro. O ponto ELETRICO e a ancora
    (x,y) — e onde o fio encosta e onde a extracao de nets liga. `w` e o comprimento em
@@ -427,6 +452,6 @@ function mkCamera(canvas, drawWorld, opts){
 }
 
 return { SCH, PCB, OD, worldText, roundRect, dePe, drawSymbolPart, mirrorPart, symBBox, drawFootprint,
-         drawPowerPort, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, drawNoERC, mkCamera };
+         drawPowerPort, powerBBox, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, drawNoERC, mkCamera };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDraw;

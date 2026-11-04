@@ -4,6 +4,26 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.62.0 — 2026-11-03
+
+**Power port do tamanho do desenho, e troca de símbolo sem pino solto.**
+
+- **Power port (vista Esquema):** a caixa de clique e de seleção era um quadrado de 300×300 mil centrado na âncora
+  (e o clique, um raio de 140 mil). Num power encostado num componente (o 0VCC em cima do C25), metade da caixa
+  cobria o corpo dele: a seleção virava um quadrado gigante e o clique no componente pegava o power. Agora a
+  caixa é o desenho: a haste, o símbolo e o nome, só para o lado da rotação (`HubDraw.powerBBox`, a mesma
+  geometria do `drawPowerPort`), nada atrás da âncora.
+- **Troca de símbolo que muda a distância entre os pinos** (Trocar componente, Converter para o almoxarifado,
+  lista do Odoo): o "CAP [PTH] 1-2" tem os pinos a ±100 mil e o capacitor do almoxarifado a ±150. Nenhum
+  deslocamento devolve os dois pinos ao lugar; o encaixe religava um e o outro ficava solto sem aviso (C15, C1
+  e C8 do PBIDP-DI261944). Agora, como o arrasto do Altium, o que estava ligado no pino antigo vai até o pino
+  novo:
+  - a ponta do fio estica (no mesmo eixo só anda; fora dele ganha um trecho, em L se preciso);
+  - o fio que passava pelo pino (T) ou o pino de outro componente encostado ganham um fio novo;
+  - o power, o rótulo, a porta ou o No ERC no pino andam junto.
+  Um aviso diz quantas ligações foram levadas em cada componente.
+- Testes: `tests/test-power-bbox.js` e `tests/test-estica-troca.js`.
+
 ## 1.61.0 — 2026-11-03
 
 **O componente do designator acende no arraste.** Clicar e arrastar o designator (ou o comment) de um componente na

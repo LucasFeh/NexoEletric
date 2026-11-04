@@ -1530,6 +1530,9 @@ function relatorio(r, conta){
     linhas.push('resolveu por outro nome: ' + r.desvios.map(d => d.refs.join(',') + ' → ' + d.vira).join('; '));
   if (r.encaixes && r.encaixes.length)
     linhas.push(r.encaixes.length + ' componente(s) deslocado(s) para os pinos caírem onde estavam.');
+  if (r.esticados && r.esticados.length)
+    linhas.push(r.esticados.length + ' componente(s) com outra distância entre os pinos: as ligações foram esticadas até os pinos novos ('
+      + r.esticados.map(e => e.ref).join(', ') + ').');
   if (r.recusados && r.recusados.length)
     linhas.push('recusados: ' + r.recusados.map(x => x.componente + ' (' + x.porque + ')').join('; '));
   for (const f of r.simbolos || [])
