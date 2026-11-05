@@ -4589,7 +4589,7 @@ if (window.HubCatalogo && HubIO.canPost) HubCatalogo.monta(document.querySelecto
 if (window.HubCarimbos && HubIO.canPost) HubCarimbos.montaAprovar({
   projeto: SCH_P, ancora: $('btnSave'), sujo: () => schDirty, marcaSujo: () => setSchDirty(true), schematic: () => schematic,
   salva: async () => { const r = await saveSchematic(); if (r) HubDialog.toast(r.m, r.k); return Boolean(r); },
-  gerenciador: { campos: () => HubSchTemplateUI.abreCarimbo() },
+  gerenciador: {},
   adota: (texto, params) => {
     if (params) schematic.params = params; else delete schematic.params;
     schDiskSnapshot = texto;

@@ -149,18 +149,16 @@ function secao(a){
   };
   /* OS CARIMBOS DA CASA (2026-11-05, hub-carimbos.js): o "Carimbo…" abre os carimbos salvos no NexoBD (usar com a
      senha, tag aprovador, apagar com a senha mestre); o nome do que está em uso vai no rótulo. Os campos do template
-     continuam no "Campos do carimbo…" (aqui e no rodapé dos carimbos). */
+     saíram em 2026-11-05: o carimbo da casa se preenche sozinho (folha, Definir projeto, carimbos e Aprovar). */
   const CB = root.HubCarimbos;
   const rotCarimbo = () => { const a = CB && CB.estado().ativo; return a ? 'Carimbo · ' + a.nome : 'Carimbo…'; };
   const bCar = acao(rotCarimbo(), 'M2.5 9.5h11v4h-11z M4.5 9.5v-2h7v2 M8 7.5v-5 M6 2.5h4',
        'os carimbos da casa: quem desenha e quem aprova (trocar de carimbo pede a senha dele)',
-       () => CB ? CB.abreGerenciador({ campos: abreCarimbo, semTemplate: !tpl }) : abreCarimbo(), !CB && !tpl);
+       () => CB && CB.abreGerenciador({}), !CB);
   if (CB){
     const pintaCar = () => { if (!bCar.isConnected) return desliga(); bCar.lastChild.textContent = rotCarimbo(); };
     const desliga = CB.ouve(pintaCar);
   }
-  acao('Campos do carimbo…', 'M3 4h10 M3 8h10 M3 12h6', 'os campos do carimbo: os do projeto (valem para todas as folhas) e os desta folha',
-       () => abreCarimbo(), !tpl);
   acao(tpl && tpl.origem === 'casa' ? 'Editar template…' : 'Editar cópia…', 'M3 13l1-3.5 6.5-6.5 2.5 2.5-6.5 6.5z M9.5 4.5l2 2',
        'abrir o editor de template' + (tpl ? '' : ' (um novo, em branco)'), () => abreEditor());
   acao('Novo template…', 'M8 3v10M3 8h10', 'criar um template da casa em branco', () => abreEditor({ novo:true }));
@@ -237,63 +235,6 @@ function abreParametros(){
   bx.append(hd, lista, ft); ov.append(bx); document.body.append(ov);
   document.addEventListener('keydown', esc, true);
   ov.addEventListener('mousedown', e => { if (e.target === ov) fecha(); });
-}
-
-/* ─── os campos do carimbo: UMA coluna, só o que não se preenche sozinho (2026-11-05) ───
-   "Formato e escala vêm da folha, arquivo é o nome da folha, código da placa e código/nome do equipamento vêm do Definir
-   projeto, as datas são automáticas, desenhista e aprovador são os carimbos; a área do carimbo não precisa da coluna
-   projeto e esta folha, é só uma coluna" (o dono). O que sobra é o campo que o template tem e o sistema não sabe
-   preencher; vale para o projeto inteiro (o cabeçalho do schematic.js). O resto dos parâmetros passa intacto. */
-function abreCarimbo(){
-  if (!api) return;
-  css();
-  const sch = api.schematic, it = itemDaFolha();
-  const tpl = it && it.template ? T.acha(it.template) : null;
-  const proj = T.parseParams(sch.params);
-  const nomes = (tpl ? T.campos(tpl) : T.CAMPOS_PADRAO.slice()).filter(n => !T.automatico(n));
-
-  const ov = el('div', 'st-ov');
-  const bx = el('div', 'st-box st-pp');
-  const hd = el('div', 'st-head');
-  hd.append(el('h2', null, 'Campos do carimbo'), el('span', 'st-dim', tpl ? tpl.nome : 'sem template'));
-  const lista = el('div', 'st-list');
-  const campos = [];
-  if (!nomes.length){
-    lista.append(el('div', 'st-dim', 'Todos os campos deste template se preenchem sozinhos.'));
-  } else {
-    const grade = el('div', 'st-kvl');
-    grade.style.gridTemplateColumns = 'minmax(110px, .8fr) 1.4fr';
-    for (const n of nomes){
-      const rot = el('span', null, n.replace(/_DiEletrons$/, '').replace(/_/g, ' ')); rot.title = '=' + n;
-      const ip = el('input'); ip.value = proj[n] != null ? proj[n] : '';
-      const pad = tpl && tpl.params ? tpl.params[n] : '';
-      ip.placeholder = pad && pad !== '*' ? String(pad) : '—';
-      campos.push([n, ip]);
-      grade.append(rot, ip);
-    }
-    lista.append(grade);
-  }
-  const ft = el('div', 'st-foot');
-  const fecha = () => { ov.remove(); document.removeEventListener('keydown', esc, true); };
-  const esc = e => { if (e.key === 'Escape'){ e.stopPropagation(); fecha(); } };
-  const sp = el('span'); sp.style.flex = '1';
-  if (root.HubCatalogo && root.HubCatalogo.abreDaFolha)
-    ft.append(botao('Definir projeto…', 'código da placa e código e nome do equipamento, do catálogo de todos os produtos',
-                    () => { fecha(); root.HubCatalogo.abreDaFolha(); }));
-  ft.append(sp, botao(campos.length ? 'Cancelar' : 'Fechar', null, fecha));
-  if (campos.length) ft.append(botao('Aplicar', 'grava no schematic.js (Salvar para ir ao disco)', () => {
-    const p = Object.assign({}, proj);
-    for (const [n, ip] of campos){ if (ip.value.trim() !== '') p[n] = ip.value.trim(); else delete p[n]; }
-    const s2 = T.serializaParams(p);
-    if (s2) sch.params = s2; else delete sch.params;
-    api.sujo();
-    api.commit();
-    fecha();
-    DLG().toast('carimbo aplicado', 'ok');
-  }));
-  bx.append(hd, lista, ft); ov.append(bx); document.body.append(ov);
-  document.addEventListener('keydown', esc, true);
-  const pri = lista.querySelector('input'); if (pri) pri.focus();
 }
 
 /* ─── remover template da casa (2026-11-04: "quero que tenha uma área pra remover esse template") ───
@@ -611,5 +552,5 @@ function abreEditor(o){
   requestAnimationFrame(() => { cam.resize(); cam.fit({ x1:0, y1:0, x2:tpl.folha.w, y2:tpl.folha.h }, 1.05); });
 }
 
-root.HubSchTemplateUI = { secao, abreEditor: o => abreEditor(o), abreParametros, abreCarimbo, abreRemover, escolhe: id => api && escolhe(id) };
+root.HubSchTemplateUI = { secao, abreEditor: o => abreEditor(o), abreParametros, abreRemover, escolhe: id => api && escolhe(id) };
 })(typeof self !== 'undefined' ? self : this);

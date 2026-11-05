@@ -17,7 +17,7 @@
 
    HubCatalogo.monta(caixa, ganchos)   o botão "Definir projeto" nas Configurações da vista Esquema
    HubCatalogo.abre(ganchos)           o modal;  ganchos = {schematic(), mudou()}
-   HubCatalogo.abreDaFolha()           o mesmo, com os ganchos do monta (o "Campos do carimbo" chama) */
+   HubCatalogo.abreDaFolha()           o mesmo, com os ganchos do monta */
 (function (root) {
 'use strict';
 const T = () => root.HubSchTemplate;

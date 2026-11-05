@@ -189,7 +189,7 @@ function abreGerenciador(o){
         if (s == null) return;
         await carrega(); pinta(); toast('carimbo em uso: ' + c.nome, 'ok');
       }));
-      l.append(botao('Tags…', 'trocar as tags (pede a senha mestre)', () => editaTags(c).then(ok => { if (ok) pinta(); })));
+      l.append(botao('Aprovador…', 'pode aprovar projetos ou não (pede a senha mestre)', () => editaTags(c).then(ok => { if (ok) pinta(); })));
       l.append(botao('Apagar', 'apagar o carimbo (pede a senha mestre)', async () => {
         const s = await pedeSenha('Apagar o carimbo ' + c.nome, 'Some para todos. Os projetos já aprovados por ele continuam com o nome no carimbo.', {
           ok:'Apagar', rotulo:'senha mestre', sub:'senha mestre do sistema',
@@ -207,14 +207,14 @@ function abreGerenciador(o){
   const iNome = el('input'); iNome.type = 'text'; iNome.placeholder = 'o nome que vai no carimbo (ex.: Lucas)';
   const iSenha = el('input'); iSenha.type = 'password'; iSenha.autocomplete = 'new-password';
   const iConf = el('input'); iConf.type = 'password'; iConf.autocomplete = 'new-password';
-  const iTags = el('input'); iTags.type = 'text'; iTags.placeholder = 'outras tags, separadas por vírgula (opcional)';
   const cAprov = el('input'); cAprov.type = 'checkbox';
   const lAprov = el('label'); lAprov.style.cssText = 'display:flex; align-items:center; gap:6px';
   lAprov.append(cAprov, document.createTextNode('aprovador (pode aprovar projetos; pede a senha mestre)'));
   const iMestre = el('input'); iMestre.type = 'password'; iMestre.autocomplete = 'new-password'; iMestre.placeholder = 'senha mestre do sistema';
   const rMestre = el('span', null, 'senha mestre');
+  /* 2026-11-05: "só vai criar o carimbo, perguntar o nome e se é aprovador" (a senha fica: é ela que o Usar pede) */
   f.append(el('span', null, 'nome'), iNome, el('span', null, 'senha'), iSenha, el('span', null, 'confirmar senha'), iConf,
-           el('span', null, 'tags'), lAprov, el('span'), iTags, rMestre, iMestre);
+           el('span'), lAprov, rMestre, iMestre);
   const mostraMestre = () => { rMestre.style.display = iMestre.style.display = cAprov.checked ? '' : 'none'; };
   cAprov.addEventListener('change', mostraMestre); mostraMestre();
   const erro = el('div', 'cb-erro');
@@ -224,13 +224,12 @@ function abreGerenciador(o){
     if (!nome){ erro.textContent = 'dê um nome ao carimbo'; iNome.focus(); return; }
     if (!iSenha.value){ erro.textContent = 'dê uma senha ao carimbo'; iSenha.focus(); return; }
     if (iSenha.value !== iConf.value){ erro.textContent = 'a confirmação não bate com a senha'; iConf.focus(); return; }
-    const tags = iTags.value.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
-    if (cAprov.checked && tags.indexOf(est.tagAprovador) < 0) tags.unshift(est.tagAprovador);
+    const tags = cAprov.checked ? [est.tagAprovador] : [];
     criar.disabled = true;
     const j = await api('/api/carimbos', { nome, senha:iSenha.value, tags, mestre:iMestre.value });
     criar.disabled = false;
     if (!j.ok){ erro.textContent = j.error || 'não gravou'; return; }
-    for (const i of [iNome, iSenha, iConf, iTags, iMestre]) i.value = '';
+    for (const i of [iNome, iSenha, iConf, iMestre]) i.value = '';
     cAprov.checked = false; mostraMestre();
     await carrega(); pinta();
     toast('carimbo ' + j.carimbo.nome + ' salvo — clique em Usar para entrar com ele', 'ok', 5000);
@@ -239,13 +238,7 @@ function abreGerenciador(o){
   lc.append(erro, criar); erro.style.flex = '1';
   m.corpo.append(f, lc);
 
-  const sp = el('span', 'cb-sp');
-  if (o.campos){
-    const bc = botao('Campos do carimbo…', 'os campos do template desta folha (projeto e folha)', () => { m.fecha(); o.campos(); });
-    if (o.semTemplate){ bc.disabled = true; bc.title = 'a folha não tem template'; }
-    m.pe.append(bc);
-  }
-  m.pe.append(sp, botao('Fechar', null, () => m.fecha()));
+  m.pe.append(el('span', 'cb-sp'), botao('Fechar', null, () => m.fecha()));
   const off = ouve(pinta);
   m.aoFechar(() => off());
   pinta();
@@ -253,22 +246,20 @@ function abreGerenciador(o){
 }
 function editaTags(c){
   return new Promise(res => {
-    const m = modal('Tags do carimbo ' + c.nome, 'pede a senha mestre', true);
+    const m = modal('Carimbo ' + c.nome, 'pede a senha mestre', true);
     let feito = false;
     m.aoFechar(() => { if (!feito) res(false); });
     const cAprov = el('input'); cAprov.type = 'checkbox'; cAprov.checked = (c.tags || []).indexOf(est.tagAprovador) >= 0;
-    const lA = el('label'); lA.style.cssText = 'display:flex; align-items:center; gap:6px'; lA.append(cAprov, document.createTextNode('aprovador'));
-    const iT = el('input'); iT.type = 'text'; iT.placeholder = 'outras tags, separadas por vírgula';
-    iT.value = (c.tags || []).filter(t => t !== est.tagAprovador).join(', ');
+    const lA = el('label'); lA.style.cssText = 'display:flex; align-items:center; gap:6px'; lA.append(cAprov, document.createTextNode('aprovador (pode aprovar projetos)'));
+    const outras = (c.tags || []).filter(t => t !== est.tagAprovador);
     const iM = el('input'); iM.type = 'password'; iM.placeholder = 'senha mestre do sistema'; iM.autocomplete = 'new-password';
     const erro = el('div', 'cb-erro');
-    m.corpo.append(lA, iT, iM, erro);
+    m.corpo.append(lA, iM, erro);
     const ok = botao('Salvar', null, async () => {
-      const tags = iT.value.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
-      if (cAprov.checked) tags.unshift(est.tagAprovador);
+      const tags = (cAprov.checked ? [est.tagAprovador] : []).concat(outras);
       const j = await api('/api/carimbos/tags', { id:c.id, tags, mestre:iM.value });
       if (!j.ok){ erro.textContent = j.error || 'não gravou'; iM.focus(); return; }
-      feito = true; m.fecha(); await carrega(); toast('tags de ' + c.nome + ' salvas', 'ok'); res(true);
+      feito = true; m.fecha(); await carrega(); toast(c.nome + (cAprov.checked ? ' é aprovador' : ' não é mais aprovador'), 'ok'); res(true);
     });
     iM.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); ok.click(); } });
     m.pe.append(el('span', 'cb-sp'), botao('Cancelar', null, () => m.fecha()), ok);

@@ -214,7 +214,7 @@ Na vista Esquema, tudo da folha fica no **menu da folha** (canto de cima à esqu
 - as folhas;
 - formato e orientação;
 - o template;
-- o **Carimbo…** (os carimbos das pessoas) e os **Campos do carimbo…** (só o que o sistema não preenche);
+- o **Carimbo…** (os carimbos das pessoas: nome, senha e se é aprovador);
 - editar, criar e **remover** template.
 
 No template da casa (`casa:A4_DiEletrons`) o carimbo se preenche sozinho (desde a 1.75.0):

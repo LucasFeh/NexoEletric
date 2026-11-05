@@ -4,6 +4,14 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.76.0 — 2026-11-05
+
+**Sem "Campos do carimbo": o carimbo é só a pessoa.**
+- O item **Campos do carimbo…** saiu do menu da folha e do rodapé dos carimbos: o carimbo da casa se preenche todo
+  sozinho (folha, Definir projeto, carimbos e Aprovar).
+- **Carimbo novo** pede só o **nome**, a **senha** (a que o "Usar" pede) e se é **aprovador**. O campo de outras tags
+  saiu, e o "Tags…" de cada carimbo virou **Aprovador…**, que liga ou desliga a aprovação com a senha mestre.
+
 ## 1.75.0 — 2026-11-05
 
 **O carimbo se preenche sozinho, e o projeto é definido pelo catálogo de todos os produtos.**
