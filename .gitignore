@@ -86,3 +86,7 @@ Trash/
 # estado da biblioteca de cada servidor/maquina, gravado pelo hub -- nao viaja no push
 Libs/pcblib-hub.js
 Libs/3d-hub/
+
+# os carimbos da casa (tools/rotas/carimbos.py): dado da rede, viaja pelo NexoBD (Libs/), com as senhas em hash
+Libs/carimbos.json
+Libs/carimbos.json.tmp

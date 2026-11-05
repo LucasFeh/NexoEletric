@@ -147,7 +147,19 @@ function secao(a){
     b.append(document.createTextNode(rot)); b.disabled = Boolean(off);
     b.addEventListener('click', fn); box.append(b); return b;
   };
-  acao('Carimbo…', 'M2.5 9.5h11v4h-11z M4.5 9.5v-2h7v2 M8 7.5v-5 M6 2.5h4', 'os campos do carimbo: os do projeto (valem para todas as folhas) e os desta folha',
+  /* OS CARIMBOS DA CASA (2026-11-05, hub-carimbos.js): o "Carimbo…" abre os carimbos salvos no NexoBD (usar com a
+     senha, tag aprovador, apagar com a senha mestre); o nome do que está em uso vai no rótulo. Os campos do template
+     continuam no "Campos do carimbo…" (aqui e no rodapé dos carimbos). */
+  const CB = root.HubCarimbos;
+  const rotCarimbo = () => { const a = CB && CB.estado().ativo; return a ? 'Carimbo · ' + a.nome : 'Carimbo…'; };
+  const bCar = acao(rotCarimbo(), 'M2.5 9.5h11v4h-11z M4.5 9.5v-2h7v2 M8 7.5v-5 M6 2.5h4',
+       'os carimbos da casa: quem desenha e quem aprova (trocar de carimbo pede a senha dele)',
+       () => CB ? CB.abreGerenciador({ campos: abreCarimbo, semTemplate: !tpl }) : abreCarimbo(), !CB && !tpl);
+  if (CB){
+    const pintaCar = () => { if (!bCar.isConnected) return desliga(); bCar.lastChild.textContent = rotCarimbo(); };
+    const desliga = CB.ouve(pintaCar);
+  }
+  acao('Campos do carimbo…', 'M3 4h10 M3 8h10 M3 12h6', 'os campos do carimbo: os do projeto (valem para todas as folhas) e os desta folha',
        () => abreCarimbo(), !tpl);
   acao(tpl && tpl.origem === 'casa' ? 'Editar template…' : 'Editar cópia…', 'M3 13l1-3.5 6.5-6.5 2.5 2.5-6.5 6.5z M9.5 4.5l2 2',
        'abrir o editor de template' + (tpl ? '' : ' (um novo, em branco)'), () => abreEditor());
@@ -264,6 +276,9 @@ function abreCarimbo(){
   let nomes = tpl ? T.campos(tpl) : T.CAMPOS_PADRAO.slice();
   nomes = nomes.filter(n => !/^Sheet(Number|Total)$/i.test(n));
   for (const k of Object.keys(proj).concat(Object.keys(doc))) if (!nomes.some(n => n.toLowerCase() === k.toLowerCase())) nomes.push(k);
+  /* a assinatura da aprovação (hub-carimbos.js) não é campo de carimbo: fica fora da tabela e passa intacta pelo Aplicar */
+  const oculto = n => /^Aprovacao_/.test(n);
+  nomes = nomes.filter(n => !oculto(n));
 
   const ov = el('div', 'st-ov');
   const bx = el('div', 'st-box st-pp st-carimbo');
@@ -296,6 +311,7 @@ function abreCarimbo(){
   const sp = el('span'); sp.style.flex = '1';
   ft.append(sp, botao('Cancelar', null, fecha), botao('Aplicar', 'grava no schematic.js (Salvar para ir ao disco)', () => {
     const p = {}, d = {};
+    for (const k of Object.keys(proj)) if (oculto(k)) p[k] = proj[k];
     for (const [n, ip, id] of campos){ if (ip.value.trim() !== '') p[n] = ip.value.trim(); if (id.value.trim() !== '') d[n] = id.value.trim(); }
     const sp2 = T.serializaParams(p), sd = T.serializaParams(d);
     if (sp2) sch.params = sp2; else delete sch.params;

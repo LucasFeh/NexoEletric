@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.72.0 — 2026-11-05
+
+**Carimbos da casa e aprovação do projeto.**
+- **Carimbo…** no menu da folha do Esquema abre os carimbos salvos (Libs/carimbos.json, que vai para o NexoBD, ou
+  seja, todo mundo vê os mesmos). Cada carimbo tem o nome e a senha que a pessoa deu na criação. **Usar** um carimbo
+  pede a senha dele e vale só neste computador; o nome do carimbo em uso aparece no menu ("Carimbo · Lucas").
+  **Apagar** e **Tags…** pedem a senha mestre do sistema. Criar carimbo com a tag **aprovador** também pede a senha
+  mestre. A tabela de campos do template continua em **Campos do carimbo…**.
+- **Aprovar**, ao lado do Salvar: aparece quando o carimbo em uso tem a tag aprovador. Ele preenche no template o
+  **verificador e o aprovador** com o nome do carimbo e a data de hoje (quem verifica também aprova). Sem carimbo
+  aprovador, o lugar mostra **Sem aprovação** em vermelho piscando; depois de aprovado, **Aprovado** em verde.
+- No painel Projetos, cada projeto leva **[Aprovado]** (verde) ou **[Sem aprovação]** (vermelho, piscando).
+- **Qualquer modificação tira a aprovação.** A aprovação guarda a assinatura do schematic.js, do changes.js e do
+  board.js. Se algum deles muda (esquema salvo, PCB editada, Altium reexportado ou a IA mexendo), a tag volta para
+  [Sem aprovação] na hora, os nomes de verificador e aprovador saem do carimbo e a **data do desenho** vira a de hoje.
+  Editar e salvar no Esquema faz isso na mesma gravação; mudança que chega de fora é limpa depois de 2 minutos, que é
+  o tempo para o NexoBD terminar de trazer os arquivos de outra máquina.
+- O grupo **Bibliotecas** saiu do painel Projetos (a aba Biblioteca continua no topo).
+
 ## 1.71.0 — 2026-11-04
 
 **O Tab da vista PCB vai até a net inteira, e o terceiro Tab realça a net com os componentes.**

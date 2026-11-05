@@ -275,7 +275,6 @@ body.eh-shell .tab[aria-selected="true"]::after {
   const abertos = new Set();
   const gruposAbertos = new Set();  // os projetos multi-PCB abertos (pelo nome do grupo)
   let ultimoAtivo = null;
-  let bibliotecasAbertas = true;
   let filtro = '';
   let pendente = null;              // {id, tab, ate}: documento de OUTRO projeto clicado
   let dock, tree, status, busca, stInfo, stSrv;
@@ -384,20 +383,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
       for (const p of e.pcbs) linhaDoProjeto(frag, p, 2, ativo, aba, q);
     }
 
-    // Bibliotecas: nao dependem do projeto (a aba Biblioteca do hub)
-    const libTab = TABS.find((tb) => tb.id === 'lib');
-    if (libTab) {
-      const rl = linha(0, 'grupo', [caret(bibliotecasAbertas), icone('pasta'), el('span', 'nm', 'Bibliotecas')],
-        () => { bibliotecasAbertas = !bibliotecasAbertas; renderArvore(); });
-      frag.append(rl);
-      if (bibliotecasAbertas) {
-        const cont = typeof libTab.count === 'function' ? libTab.count(S.detail) : '';
-        frag.append(linha(1, 'doc' + (aba === 'lib' ? ' aberto' : ''),
-          [caret(false, true), icone('lib'), el('span', 'nm', tr(libTab.key, 'Biblioteca')),
-            cont !== '' && cont != null ? el('span', 'tag-n', String(cont)) : null],
-          () => goTab('lib')));
-      }
-    }
+    // o grupo "Bibliotecas" saiu do painel (pedido do dono, 2026-11-05: "nao precisa existir, pode remover")
     tree.replaceChildren(frag);
   }
 
@@ -412,8 +398,10 @@ body.eh-shell .tab[aria-selected="true"]::after {
       n.title = p.pending + ' mudança(s) no changes.js ainda não aplicada(s) no Altium';
       extras.push(n);
     }
+    // [Aprovado] / [Sem aprovação] (hub-carimbos.js): a aprovação do projeto, que cai a cada modificação
+    const aprov = window.HubCarimbos && !p.demo ? window.HubCarimbos.tagProjeto(p.name) : null;
     const r = linha(nivel, 'proj' + (eAtivo ? ' ativo' : '') + (p.demo ? ' demo' : ''),
-      [caret(aberto), icone(p.grupo ? 'pcb' : 'projeto'), el('span', 'nm', p.name), dot, ...extras]);
+      [caret(aberto), icone(p.grupo ? 'pcb' : 'projeto'), el('span', 'nm', p.name), aprov, dot, ...extras]);
     arrastavel(r, p);
     r.title = p.name;
     r.querySelector('.car').addEventListener('click', (e) => {

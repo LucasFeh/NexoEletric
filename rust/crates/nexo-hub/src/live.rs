@@ -40,7 +40,8 @@ pub const LIVE_JS: &str = r#"/* hubserver: auto-reload via SSE (injetado; nao ex
 "#;
 
 // estado do BOM/Odoo ao lado do projeto e a biblioteca do editor de footprint: nao recarregam
-const ESTADO_LOCAL: [&str; 4] = ["bom-vistos.json", "bom-opts.json", "odoo-lista.json", "lista-extras.json"];
+// + os carimbos (Libs/carimbos.json, tools/rotas/carimbos.py): criar um carimbo nao muda biblioteca nenhuma
+const ESTADO_LOCAL: [&str; 5] = ["bom-vistos.json", "bom-opts.json", "odoo-lista.json", "lista-extras.json", "carimbos.json"];
 const FP_HUB: &str = "pcblib-hub.js";
 const FP3D_PASTA: &str = "3d-hub";
 // renders: as fotos 3D da placa (Renders/, a vista PCB grava): recarregar mataria a vista que fotografou

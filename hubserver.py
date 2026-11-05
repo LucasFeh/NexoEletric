@@ -45,7 +45,8 @@ ODOO_LISTA = 'odoo-lista.json'  # recibo do envio ao Odoo; muda sem o projeto mu
 # componentes fora do esquema da lista do Odoo (odoolista.EXTRAS): o modal grava a cada
 # quantidade mudada, e nenhuma aba precisa recarregar por isso -- a folha nao muda
 ODOO_EXTRAS = 'lista-extras.json'
-ESTADO_LOCAL = BOM_STATE_FILES + (ODOO_LISTA, ODOO_EXTRAS)
+# + os carimbos (Libs/carimbos.json, tools/rotas/carimbos.py): criar um carimbo nao muda biblioteca nenhuma
+ESTADO_LOCAL = BOM_STATE_FILES + (ODOO_LISTA, ODOO_EXTRAS, 'carimbos.json')
 # a biblioteca de footprints do hub (Libs/pcblib-hub.js) e os STEP dela (Libs/3d-hub/): o editor de
 # footprint grava de dentro do Esquema e da PCB, e quem usa relê na hora de abrir (hub-fplib.js »
 # carrega). Vistos pelo vigia, gravar um footprint recarregaria a pagina onde o editor esta aberto.
@@ -2051,6 +2052,16 @@ try:
     _locais.registra(app, ROOT)
 except Exception as _e:            # noqa: BLE001
     print('AVISO: componentes locais desligados (%s) — falta tools/rotas/componentes_locais.py.' % _e)
+
+# ─────────────────── carimbos e aprovacao do projeto (tools/rotas/carimbos.py) ───────────────────
+# /api/carimbos*: quem desenha e quem aprova (Libs/carimbos.json, no NexoBD); /api/aprovacao*: a aprovacao no
+# cabecalho do schematic.js, que cai sozinha quando o projeto muda. Apagar carimbo pede a senha mestre do hub.
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import carimbos as _carimbos   # noqa: E402
+    _carimbos.registra(app, ROOT, MASTER_PASSWORD)
+except Exception as _e:            # noqa: BLE001
+    print('AVISO: carimbos desligados (%s) — falta tools/rotas/carimbos.py.' % _e)
 
 # ─────────────────── MCP: o canal da IA com a vista aberta (mcp/) ───────────────────
 # /api/mcp/{status,pedido,pedidos,resposta/<id>}: o servidor MCP (mcp/eletrichub-mcp.js) pede
