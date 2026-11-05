@@ -4604,6 +4604,8 @@ async function loadProject(id) {
      painel de "substituto em uso"/desfazer um segundo depois de aparecer */
   const trocouProjeto = S.projId !== id;
   S.projId = id; S.detail = det;
+  /* as strings especiais da placa (a logo da casa) com os parametros do projeto aberto (HubCore.resolveEspeciais) */
+  if (HubCore.setParamsProjeto) HubCore.setParamsProjeto(det && det.schematic ? det.schematic.params : '', (det && det.schematic && det.schematic.project) || (det && det.name) || '');
   S.selDes = S.detail.components[0] ? S.detail.components[0].des : null;
   S.neoden = { refDes: null, selDes: null, q: '', kind: '', off: { x: 0, y: 0 }, excluded: ndLoadExcl(id), group: ndLoadGroup(id) };
   ndAnchor = null;

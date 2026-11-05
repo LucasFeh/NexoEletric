@@ -71,10 +71,21 @@ const outros = C.lerZip(fs.readFileSync(ARQ)).filter(e => e.nome !== 'xl/workshe
   /* a mesma placa outra vez é recusada (2026-11-05: "não pode deixar repetir"), dizendo o código que já existe; outro
      nome ganha o número seguinte */
   assert.throws(() => C.registra({ nome: 'Placa medidora de nível' }), /já está no catálogo com o código PMN-DI\d+1942/);
-  assert.strictEqual(C.registra({ nome: 'Placa medidora de temperatura' }).item, 1943);
+  const r43 = C.registra({ nome: 'Placa medidora de temperatura' });
+  assert.strictEqual(r43.item, 1943);
+  const L0codigo = () => r43.codigo;
   /* os grupos do Definir projeto e a lista inteira */
   assert.deepStrictEqual(['PLACA', 'Placa', 'PCB', 'Equipamento', 'EQUIAPAMENTO', 'Equipmaento', 'Sistema', 'Nacionalização', 'Acessórios', 'CABO', 'Software'].map(C.grupo),
     ['placa', 'placa', 'placa', 'equipamento', 'equipamento', 'equipamento', 'equipamento', 'equipamento', 'produto', 'produto', 'produto']);
+  /* mudar o nome e o código de um item (o botão direito do Definir projeto): na mesma linha, sem repetir código */
+  const e1 = C.edita({ item: 1943, codigo: L0codigo(), novoNome: 'Placa medidora de temperatura v2' });
+  assert.strictEqual(e1.nome, 'Placa medidora de temperatura v2');
+  assert.throws(() => C.edita({ item: 1943, codigo: e1.codigo, novoCodigo: C.abre().itens.find(i => i.item === 1942).modelo }), /já é do item 1942/);
+  assert.throws(() => C.edita({ item: 1943, codigo: 'OUTRO-DI000000', novoNome: 'x' }), /não está mais no catálogo/);
+  const e2 = C.edita({ item: 1943, codigo: e1.codigo, novoCodigo: 'pmtv-di261943' });
+  assert.strictEqual(e2.codigo, 'PMTV-DI261943');
+  const depois = C.abre().itens.find(i => i.item === 1943);
+  assert.deepStrictEqual([depois.nome, depois.modelo], ['Placa medidora de temperatura v2', 'PMTV-DI261943'], 'gravado na planilha');
   const L = C.lista();
   assert.deepStrictEqual(L.itens.map(i => [i.item, i.grupo]).slice(-2), [[1942, 'placa'], [1943, 'placa']]);
   console.log('  registrar: linha nova, estilos, o resto do .xlsx intacto ok');

@@ -275,7 +275,9 @@
   (function () {
     var p = new URLSearchParams(location.search).get('p');
     var base = p ? 'Projects/' + encodeURIComponent(p) + '/' : '';
-    ['board.js', 'changes.js', 'annotations.js', 'rules.js'].forEach(function (f) {
+    /* + o schematic.js: os parametros do projeto resolvem as strings especiais da placa (".Revisao", ".CodigoDaPlaca" da
+       logo da casa, HubCore.resolveEspeciais) antes do primeiro desenho */
+    ['board.js', 'changes.js', 'annotations.js', 'rules.js', 'schematic.js'].forEach(function (f) {
       document.write('<script src="' + base + f + '"><\/script>');
     });
   })();

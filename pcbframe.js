@@ -34,6 +34,11 @@ const $ = id => document.getElementById(id);
 const fatal = (m) => { const f = $('fatal'); if (f){ f.style.display = 'flex'; f.textContent = m; } };
 const QS = new URLSearchParams(location.search);
 const PROJ = QS.get('p');
+/* as strings especiais da placa (a logo da casa: ".CodigoDaPlaca", ".Revisao") com os parametros do projeto; o
+   leNaoMontar relê o esquema a cada mudança do disco e recarrega a vista se eles mudarem (a aprovação troca a revisão) */
+const chaveParams = s => (s && typeof s.params === 'string' ? s.params : '') + '|' + ((s && s.project) || PROJ || '');
+let PARAMS_CHAVE = chaveParams(window.schematic);
+HubCore.setParamsProjeto(window.schematic ? window.schematic.params : '', (window.schematic && window.schematic.project) || PROJ);
 const LEAN = QS.has('lean');
 const MODO = QS.get('modo') || '';
 if (LEAN) document.body.classList.add('lean');
@@ -7493,6 +7498,13 @@ async function leNaoMontar(){
   if (!SCH_SRC) return;
   const sch = await globalDe('schematic', SCH_SRC, true);
   dnpSemEsquema = !sch;
+  const ch = chaveParams(sch);
+  if (sch && ch !== PARAMS_CHAVE) {
+    PARAMS_CHAVE = ch;
+    HC.setParamsProjeto(sch.params, sch.project || PROJ);
+    /* a revisão ou o código mudaram: os textos da placa são refeitos por inteiro recarregando a vista */
+    if (!chDirty && !annDirty) HubDialog.ocioso().then(() => location.reload());
+  }
   const novo = HC.dnpRefs(sch);
   const mudou = novo.size !== DNP.size || [...novo].some(r => !DNP.has(r));
   DNP = novo;

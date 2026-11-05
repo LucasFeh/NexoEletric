@@ -17,7 +17,12 @@
 
    HubCatalogo.monta(caixa, ganchos)   o botão "Definir projeto" nas Configurações da vista Esquema
    HubCatalogo.abre(ganchos)           o modal;  ganchos = {schematic(), mudou()}
-   HubCatalogo.abreDaFolha()           o mesmo, com os ganchos do monta */
+   HubCatalogo.abreDaFolha()           o mesmo, com os ganchos do monta
+   HubCatalogo.poeLogo(projeto)        a logo DiEletrons na PCB (comp_add do LOGO_DIELETRONS no changes.js, hub-core.js)
+
+   E MAIS (2026-11-05): o botão "Logo DiEletrons" põe na PCB a logo da casa com o código da placa e a revisão, que se
+   preenchem sozinhos (as strings especiais .CodigoDaPlaca e .Revisao, HubCore.resolveEspeciais); e o botão direito numa
+   linha do catálogo muda o código ou o nome do item (POST /api/catalogo/editar, sem repetir código). */
 (function (root) {
 'use strict';
 const T = () => root.HubSchTemplate;
@@ -76,6 +81,11 @@ const CSS = `
 .ct-pe{display:flex; gap:8px; align-items:center; padding:10px 14px; border-top:1px solid var(--border, var(--line, #444)); margin-top:8px;}
 .ct-pe .sp{flex:1;}
 .ct-sec{display:flex; flex-direction:column; gap:4px;}
+.ct-menu{position:fixed; z-index:80; min-width:190px; padding:4px; border-radius:6px; background:var(--panel, var(--surface, #222));
+  border:1px solid var(--border, var(--line, #444)); box-shadow:var(--shadow-menu, 0 8px 30px rgba(0,0,0,.5));}
+.ct-menu .tit{font-size:11px; color:var(--fg-dim, var(--text-3, #999)); padding:4px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:320px;}
+.ct-menu button{display:block; width:100%; text-align:left; border:0 !important; background:transparent !important; padding:6px 8px;}
+.ct-menu button:hover{background:rgba(127,127,127,.16) !important;}
 .ct-sec .ct-resumo{font-size:11px; color:var(--fg-dim, var(--text-3, #999)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 `;
 function css(){
@@ -120,6 +130,47 @@ function monta(caixa, ganchos){
   pinta();
 }
 function abreDaFolha(){ if (ganchosDaFolha) abre(ganchosDaFolha); }
+
+/* A LOGO DA CASA NA PCB: um comp_add do footprint embutido LOGO_DIELETRONS (hub-core.js) no changes.js, no canto de baixo à
+   esquerda da placa, para arrastar na vista PCB. O código e a revisão são as strings especiais do footprint: a placa os
+   mostra com os parâmetros do projeto. A linha entra no fim do arquivo, sem regravar as outras. Placa que já tem a logo
+   não ganha outra. */
+async function poeLogo(projeto){
+  const IO = root.HubIO, HC = root.HubCore;
+  if (!IO || !HC || !HC.LOGO_FP){ toast('a logo precisa do hub (HubIO e HubCore)', 'err'); return false; }
+  const base = 'Projects/' + projeto + '/';
+  let bTxt = null;
+  try { bTxt = await IO.fetchText(base + 'board.js'); } catch (_) { bTxt = null; }
+  if (!bTxt || bTxt.indexOf('{') < 0){ toast('o projeto ainda não tem PCB (board.js): crie a placa antes de pôr a logo', 'warn', 7000); return false; }
+  let board;
+  try { board = JSON.parse(bTxt.slice(bTxt.indexOf('{'), bTxt.lastIndexOf('}') + 1)); }
+  catch (e) { toast('não consegui ler o board.js: ' + e.message, 'err'); return false; }
+  let cTxt = '';
+  try { cTxt = await IO.fetchText(base + 'changes.js'); } catch (_) { cTxt = ''; }
+  if (!cTxt.trim()) cTxt = '// AltiumPCBMirror - arquivo de mudancas.\nvar changes = [\n];\n';
+  const ops = [];
+  for (const l of cTxt.split('\n')){ const t = l.trim().replace(/,\s*$/, ''); if (t.charAt(0) === '{') try { ops.push(JSON.parse(t)); } catch (_) { /* linha que nao e op */ } }
+  const tem = (board.components || []).find(c => c && c.footprint === HC.LOGO_FP)
+    || ops.find(o => o && o.op === 'comp_add' && o.footprint === HC.LOGO_FP && !ops.some(d => d && d.op === 'comp_del' && d.ref === o.ref));
+  if (tem){ toast('a placa já tem a logo DiEletrons (' + tem.ref + '): o código e a revisão dela acompanham o projeto', 'info', 6000); return false; }
+  const usados = new Set((board.components || []).map(c => c && c.ref).concat(ops.filter(o => o && o.op === 'comp_add').map(o => o.ref)));
+  let n = 1; while (usados.has('LOGO' + n)) n++;
+  const bb = HC.outlineBBox ? HC.outlineBBox(board.board && board.board.outline) : null;
+  const ok = bb && [bb.x1, bb.y1].every(isFinite);
+  const r3 = v => Math.round(v * 1000) / 1000;
+  const op = { op:'comp_add', ref:'LOGO' + n, footprint:HC.LOGO_FP, x:r3(ok ? bb.x1 + 3 : 0), y:r3(ok ? bb.y1 + 3 + 3.7 : 0), rot:0,
+               layer:'Top', des_hidden:true, note:'logo DiEletrons (Definir projeto): o código da placa e a revisão vêm do projeto' };
+  const model = HC.applyPcbChanges(board, ops.concat([op]));
+  const erroOp = (model.validation || []).find(v => v.level === 'err' && v.msg.indexOf('#' + (ops.length + 1) + ' ') === 0);
+  if (erroOp){ toast('a logo não entrou: ' + erroOp.msg, 'err', 8000); return false; }
+  const fim = cTxt.lastIndexOf('];');
+  if (fim < 0){ toast('o changes.js não está no formato do hub (sem o "];" do fim): nada gravado', 'err', 8000); return false; }
+  const novo = cTxt.slice(0, fim) + JSON.stringify(op) + ',\n' + cTxt.slice(fim);
+  try { await IO.saveFile(base + 'changes.js', novo); }
+  catch (e) { toast('não gravou o changes.js: ' + e.message, 'err', 8000); return false; }
+  toast('logo DiEletrons na PCB (' + op.ref + '), no canto de baixo à esquerda da placa: arraste para o lugar na vista PCB', 'ok', 8000);
+  return true;
+}
 
 function abre(g){
   css();
@@ -178,7 +229,15 @@ function abre(g){
   const fecha = () => { ov.remove(); document.removeEventListener('keydown', tecla, true); };
   const tecla = e => { if (e.key === 'Escape'){ e.stopPropagation(); e.preventDefault(); fecha(); } };
   const bDef = bt('Definir', 'grava no carimbo do projeto (Salvar para ir ao disco)', () => define(), 'prim');
-  pe.append(el('span', 'ct-dim', 'os códigos vão para o carimbo; o projeto aprovado perde a aprovação (é uma modificação)'), el('span', 'sp'),
+  const bLogo = bt('Logo DiEletrons', 'define o projeto e põe na PCB a logo DiEletrons com o código da placa e a revisão (os dois automáticos: mudam com o projeto)',
+                   async () => {
+                     define();
+                     /* a PCB lê o código e a revisão do schematic.js do disco: a definição vai antes */
+                     if (g.salva && !(await g.salva())) return;
+                     if (g.projeto) await poeLogo(g.projeto);
+                   });
+  if (!g.projeto) bLogo.disabled = true;
+  pe.append(bLogo, el('span', 'ct-dim', 'os códigos vão para o carimbo; o projeto aprovado perde a aprovação (é uma modificação)'), el('span', 'sp'),
             bt('Cancelar', null, fecha), bDef);
   bx.append(hd, escolha, barra, novo, erro, lista, pe);
   ov.append(bx); document.body.append(ov);
@@ -226,6 +285,7 @@ function abre(g){
                  bt('Equip.', 'usar como equipamento (código e nome)', ev => { ev.stopPropagation(); usa(i, 'equip'); }));
       tr.append(el('td', null, String(i.item)), tdG, el('td', 'cod', i.modelo), el('td', null, i.nome), el('td', null, i.cliente), el('td', 'vin', i.vinculo), tdA);
       tr.addEventListener('click', () => usa(i, i.grupo === 'placa' ? 'placa' : 'equip'));
+      tr.addEventListener('contextmenu', ev => { ev.preventDefault(); menuDoItem(i, ev.clientX, ev.clientY); });
       tb.append(tr);
     }
     const tab = el('table');
@@ -235,6 +295,43 @@ function abre(g){
     lista.replaceChildren(tab);
     if (achou.length > MAX) lista.append(el('div', 'ct-dim', 'mostrando ' + MAX + ' de ' + achou.length + ': refine a pesquisa'));
     if (!achou.length) lista.append(el('div', 'ct-dim', 'nada com essa pesquisa' + (grupo !== 'todos' ? ' neste filtro' : '') + ' — "+ Adicionar ao catálogo" registra um novo'));
+  }
+  /* o botão direito: mudar o código ou o nome do item no catálogo */
+  let menu = null;
+  const fechaMenu = () => { if (menu){ menu.remove(); menu = null; } };
+  ov.addEventListener('mousedown', e => { if (menu && !menu.contains(e.target)) fechaMenu(); }, true);
+  function menuDoItem(i, x, y){
+    fechaMenu();
+    menu = el('div', 'ct-menu');
+    menu.append(el('div', 'tit', i.modelo + ' · ' + i.nome),
+      bt('Mudar código…', 'o código (MODELO) deste item no catálogo', () => { fechaMenu(); muda(i, 'codigo'); }),
+      bt('Mudar nome…', 'o nome deste item no catálogo', () => { fechaMenu(); muda(i, 'nome'); }));
+    ov.append(menu);
+    const r = menu.getBoundingClientRect();
+    menu.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
+    menu.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
+  }
+  async function muda(i, campo){
+    const D = DLG();
+    const atual = campo === 'codigo' ? i.modelo : i.nome;
+    const v = D && D.texto ? await D.texto((campo === 'codigo' ? 'Código novo' : 'Nome novo') + ' do item ' + i.item + ' (' + i.tipo + '):',
+      { title: campo === 'codigo' ? 'Mudar código' : 'Mudar nome', v: atual, ok: 'Mudar',
+        valida: s => !String(s || '').trim() ? 'não pode ficar vazio'
+          : campo === 'codigo' && itens.some(o => o !== i && norm(o.modelo) === norm(s)) ? 'esse código já é de outro item' : '' }) : null;
+    if (v == null || v.trim() === String(atual).trim()) return;
+    const corpo = { item: i.item, codigo: i.modelo };
+    corpo[campo === 'codigo' ? 'novoCodigo' : 'novoNome'] = v.trim();
+    let j = null;
+    try {
+      j = await (await fetch('/api/catalogo/editar', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(corpo) })).json();
+    } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
+    if (!j || !j.ok){ erro.textContent = 'não mudou: ' + ((j && j.error) || 'sem resposta'); return; }
+    const velho = norm(i.modelo);
+    i.modelo = j.codigo; i.nome = j.nome;
+    for (const k of ['placa', 'equip']) if (esc[k] && (esc[k] === i || norm(esc[k].modelo) === velho)) esc[k] = i;
+    erro.textContent = '';
+    pintaSlots(); pintaLista();
+    toast('item ' + i.item + ': ' + (campo === 'codigo' ? 'código ' + j.codigo : 'nome ' + j.nome) + ' (gravado no catálogo)', 'ok', 5000);
   }
   function usa(i, papel){
     esc[papel] = i;
@@ -316,5 +413,5 @@ function abre(g){
   });
 }
 
-root.HubCatalogo = { monta, abre, abreDaFolha, codigosNoTexto };
+root.HubCatalogo = { monta, abre, abreDaFolha, poeLogo, codigosNoTexto };
 })(typeof window !== 'undefined' ? window : globalThis);

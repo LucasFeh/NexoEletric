@@ -254,6 +254,12 @@ class Contexto {
   /* a placa com as mudancas: {board, changes, model, eb} -- o mesmo motor da tela */
   placa(p, changes) {
     const hc = this.pcbPronto();
+    /* as strings especiais da placa (a logo da casa: ".CodigoDaPlaca", ".Revisao") com os parametros do projeto */
+    if (typeof hc.setParamsProjeto === 'function') {
+      let sp = '';
+      try { if (fs.existsSync(p.arq('schematic.js'))) { const s = this.schematic(p); sp = s && s.params; } } catch (_) { /* sem esquema: o nome do projeto */ }
+      hc.setParamsProjeto(sp || '', p.nome);
+    }
     const board = this.board(p);
     const ch = changes || this.changes(p);
     const model = hc.applyPcbChanges(board, ch);

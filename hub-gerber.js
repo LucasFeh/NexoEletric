@@ -656,6 +656,10 @@ const SEM_AVISO = { add() {} };
 function geometriaTexto(t, av) {
   av = av || SEM_AVISO;
   if (!t) return null;
+  /* as strings especiais (".Revisao", ".CodigoDaPlaca") com os parametros do projeto (HubCore.resolveEspeciais): a
+     logo da casa leva o codigo e a revisao do projeto, e a tela e o Gerber mostram o mesmo */
+  const RES = typeof globalThis !== 'undefined' && globalThis.__nexoResolveEspeciais;
+  if (RES && typeof t.text === 'string') { const r = RES(t.text); if (r !== t.text) t = Object.assign({}, t, { text: r }); }
   const txt = t.text == null ? '' : String(t.text);
   const crus = especiaisCrus(txt);
   if (crus.length) av.add('texto-especial', t, crus);

@@ -4581,7 +4581,8 @@ $('btnSave').addEventListener('click', saveAll);
 /* O DEFINIR PROJETO nas Configuracoes (hub-catalogo.js, 2026-11-05): o catalogo de todos os produtos, e de la o codigo da
    placa e o codigo e o nome do equipamento no cabecalho (o carimbo os mostra) */
 if (window.HubCatalogo && HubIO.canPost) HubCatalogo.monta(document.querySelector('.cfg-acoes'), {
-  schematic: () => schematic,
+  projeto: SCH_P, schematic: () => schematic,
+  salva: async () => { const r = await saveSchematic(); if (r) HubDialog.toast(r.m, r.k); return Boolean(r); },
   mudou: () => { setSchDirty(true); cam.draw(); pintaMiniaturas(); renderProps(); } });
 /* O APROVAR ao lado do Salvar (hub-carimbos.js, 2026-11-05): com um carimbo aprovador em uso neste computador, aprova o
    projeto (verificador e aprovador no carimbo). O servidor grava o cabecalho do schematic.js e devolve o texto: a aba

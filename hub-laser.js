@@ -356,6 +356,8 @@ function collect(board, opts){
       if (t.layer !== ov) continue;
       const own = t.owner ? byRef[t.owner] : null;
       let txt = t.text || '';
+      /* as strings especiais (".Revisao" da logo da casa) com os parametros do projeto, como na tela e no Gerber */
+      if (typeof globalThis !== 'undefined' && globalThis.__nexoResolveEspeciais) txt = globalThis.__nexoResolveEspeciais(txt);
       if (t.designator && own) txt = own.ref;
       if (t.comment && own) txt = own.comment || txt;
       if (!txt) continue;

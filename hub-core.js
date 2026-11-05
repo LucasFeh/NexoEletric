@@ -389,6 +389,43 @@ function fpDoComponente(c, board){
   return { name:c.footprint || '', description:'', bbox, pads, silk };
 }
 /* a geometria do footprint `nome` para esta placa: {fp, fonte} ou null (ver o cabecalho acima) */
+/* ── A LOGO DA CASA NA PLACA (pedido do dono, 2026-11-05: "um botão Logo DiEletrons que põe essa logo que fica na pcb,
+   com DiEletrons, a revisão e o código; a revisão e o código automáticos: a revisão do projeto e o código da placa
+   definido") ──
+   O desenho é o do LOGOTIPO_P_SILK das placas da casa (a PBIDP-DI261944, medido: 47 traços de serigrafia, 20,8 x 4,2 mm,
+   origem no canto de baixo à esquerda), e embaixo dele dois textos com as strings especiais do Altium: `.CodigoDaPlaca` e
+   `.Revisao`, que a placa resolve com os parâmetros do projeto (setParamsProjeto / resolveEspeciais) na tela, no Gerber
+   e no PDF -- a aprovação troca a revisão sem mexer na placa. Embutido aqui: nem a PcbLib da casa nem a do hub o têm. */
+const LOGO_FP = 'LOGO_DIELETRONS';
+const FOOTPRINTS_DA_CASA = {
+  [LOGO_FP]: { name: LOGO_FP, description: 'Logo DiEletrons com o código da placa e a revisão (automáticos)', pads: [],
+    silk: [[12.0904,3.7084,12.5984,4.1148,0.254],[0.508,0.508,3.4544,0.508,1.016],[3.6322,2.0574,3.7084,2.0574,1.016],[0.7874,2.0574,2.3876,2.0574,1.016],[1.0414,3.7084,3.9878,3.7084,1.016],[4.8006,0.2032,20.066,0.2032,0.4064],[20.574,2.9972,20.6248,3.2766,0.4064],[19.685,3.2766,20.6248,3.2766,0.4064],[19.4818,2.159,19.685,3.2766,0.4064],[19.4818,2.159,20.4216,2.159,0.4064],[20.2184,1.016,20.4216,2.159,0.4064],[19.2786,1.016,20.2184,1.016,0.4064],[19.2786,1.016,19.3294,1.2954,0.4064],[17.6022,1.016,17.9832,3.2766,0.4064],[18.542,1.016,18.923,3.2766,0.4064],[17.9832,3.2766,18.923,3.2766,0.4064],[16.3068,3.2766,17.2466,3.2766,0.4064],[16.8656,1.016,17.2466,3.2766,0.4064],[15.9258,1.016,16.8656,1.016,0.4064],[15.9258,1.016,16.3068,3.2766,0.4064],[15.5448,2.9972,15.5956,3.2766,0.4064],[14.6558,3.2766,15.5956,3.2766,0.4064],[14.2748,1.016,14.6558,3.2766,0.4064],[13.1064,3.2512,14.0462,3.2512,0.4064],[13.1826,1.016,13.6906,4.0132,0.4064],[10.3886,1.016,10.8966,4.0132,0.4064],[11.2268,1.016,11.6078,3.2766,0.4064],[11.2268,1.016,12.1666,1.016,0.4064],[12.1666,1.016,12.2174,1.2954,0.4064],[11.6078,3.2766,12.5476,3.2766,0.4064],[12.3444,2.0574,12.5476,3.2766,0.4064],[11.4554,2.0574,12.3444,2.0574,0.4064],[8.9154,2.0574,9.8044,2.0574,0.4064],[9.8044,2.0574,10.0076,3.2766,0.4064],[9.0678,3.2766,10.0076,3.2766,0.4064],[9.6266,1.016,9.6774,1.2954,0.4064],[8.6868,1.016,9.6266,1.016,0.4064],[8.6868,1.016,9.0678,3.2766,0.4064],[7.7978,2.0574,8.255,2.0574,0.4064],[7.0358,1.016,7.4168,3.2766,0.4064],[7.5184,3.8608,7.5438,4.0132,0.4064],[4.9276,1.016,5.4356,4.0132,0.4064],[4.9276,1.016,5.8674,1.016,0.4064],[5.8674,1.016,6.2484,1.3208,0.4064],[6.2484,1.3208,6.6294,3.5814,0.4064],[6.3754,4.0132,6.6294,3.5814,0.4064],[5.4356,4.0132,6.3754,4.0132,0.4064]].map(l => ({ kind:'line', x1:l[0], y1:l[1], x2:l[2], y2:l[3], w:l[4], layer:'TopOverlay' })),
+    texts: [{ x:10.414, y:-1.2, text:'.CodigoDaPlaca', h:1.2, w:0.18 }, { x:10.414, y:-2.9, text:'.Revisao', h:1.2, w:0.18 }],
+    bbox: { x1:0, y1:-3.7, x2:20.83, y2:4.25 } },
+};
+/* As STRINGS ESPECIAIS da placa (".Revisao", ".CodigoDaPlaca": o "." + o nome do parâmetro do projeto, como no Altium).
+   Os parâmetros são os do cabeçalho do schematic.js, que a vista dá ao abrir o projeto. O código da placa, sem o
+   Definir projeto, sai do nome do projeto ("PDCD-DI261939 (PTYPE)"). O que não resolve fica como está (o Gerber avisa). */
+const _G = typeof globalThis !== 'undefined' ? globalThis : (typeof self !== 'undefined' ? self : {});
+function setParamsProjeto(params, projeto){
+  const o = {};
+  if (typeof params === 'string') for (const par of params.split(';')){ const i = par.indexOf('='); if (i > 0) o[par.slice(0, i).trim().toLowerCase()] = par.slice(i + 1); }
+  else if (params && typeof params === 'object') for (const k of Object.keys(params)) o[k.toLowerCase()] = String(params[k]);
+  const m = /([A-Za-z][A-Za-z0-9]*)\s*-\s*(DI\d{4,8})/.exec(String(projeto || ''));
+  if (!o.codigodaplaca && m) o.codigodaplaca = (m[1] + '-' + m[2]).toUpperCase();
+  if (!o.codigodaplaca && o.desenho_linha_unica) o.codigodaplaca = o.desenho_linha_unica;
+  _G.__nexoParamsProjeto = o;
+  return o;
+}
+function resolveEspeciais(txt){
+  const P = _G.__nexoParamsProjeto;
+  if (!P || typeof txt !== 'string' || txt.indexOf('.') < 0) return txt;
+  return txt.replace(/(^|[^A-Za-z0-9_.\u00C0-\u024F])\.([A-Za-z_][A-Za-z0-9_]*)/g, (s, a, n) => {
+    const v = P[n.toLowerCase()];
+    return v != null && v !== '' ? a + v : s;
+  });
+}
+_G.__nexoResolveEspeciais = resolveEspeciais;
 function footprintGeom(nome, board, opts){
   const nm = typeof nome === 'string' ? nome : '';
   if (!nm) return null;
@@ -401,6 +438,7 @@ function footprintGeom(nome, board, opts){
       const fp = fpDoComponente(c, board);
       if (fp) return { fp, fonte:'placa (' + c.ref + ')' };
     }
+  if (FOOTPRINTS_DA_CASA[nm]) return { fp:FOOTPRINTS_DA_CASA[nm], fonte:'embutido (hub-core)' };
   return null;
 }
 /* "1=GND;2=VCC;3=" -> {"1":"GND","2":"VCC","3":""}; null = mal formado. Campo PLANO de
@@ -547,6 +585,14 @@ function sintetizaComp(fp, a, cid){
                    text:a.ref, h, rot:isNum(des.rot) ? normAng(des.rot) : 0,
                    mirror:a.layer === 'Bottom', designator:true, comment:false, owner:a.ref, w:isNum(des.w) ? des.w : DESIG_W, kind:'stroke' }];
   if (des.hidden === true) texts[0].hidden = true;
+  /* os textos do proprio footprint (a logo da casa: o codigo e a revisao), com o componente */
+  (fp.texts || []).forEach((t, i) => {
+    if (!t || typeof t.text !== 'string' || !isNum(t.x) || !isNum(t.y) || !(t.h > 0)) return;
+    const o = { id:cid + 't' + (i + 1), layer:'TopOverlay', x:t.x, y:t.y, text:t.text, h:t.h, rot:isNum(t.rot) ? t.rot : 0,
+                mirror:false, designator:false, comment:false, owner:a.ref, w:isNum(t.w) ? t.w : t.h / 10, kind:'stroke' };
+    xfTextObj(d, o);
+    texts.push(o);
+  });
   return { comp, silk, texts };
 }
 
@@ -3312,6 +3358,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          sheetSize, sheetPreset, sheetMatch, sheetLabel,
          symbolOf, partOf, footprintOf, pinHot, rotEfetiva, compTransform, compPinsWorld,
          CONECTOR_VIA, moldeConectorVia, ehConector, partesPorVia, simboloPorVia, migraConectoresPorVia,
+         LOGO_FP, FOOTPRINTS_DA_CASA, setParamsProjeto, resolveEspeciais,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp, assinaturaPinos, simbolosDoDocumento,
          suggestSym,
          buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp,

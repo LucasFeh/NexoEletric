@@ -4,6 +4,20 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.77.0 — 2026-11-05
+
+**Logo DiEletrons na PCB e o catálogo editável no Definir projeto.**
+- **Logo DiEletrons**, no rodapé do Definir projeto: grava a definição, salva o esquema e põe na PCB a logo da casa (o
+  desenho do LOGOTIPO_P_SILK das placas, "Di-elétrons" sublinhado), com o **código da placa** e a **revisão** embaixo,
+  no canto de baixo à esquerda da placa, para arrastar na vista PCB. A placa que já tem a logo não ganha outra.
+- O código e a revisão da logo são **automáticos**: os textos guardam as strings especiais `.CodigoDaPlaca` e
+  `.Revisao`, e a placa as resolve com os parâmetros do projeto na tela, no Gerber, no laser e no que a IA gera. Uma
+  aprovação nova (REV.C) muda a logo sozinha, sem mexer na PCB, e a vista PCB aberta se atualiza. Sem o Definir
+  projeto, o código sai do nome do projeto.
+- Footprint agora pode ter texto próprio, que anda e gira com o componente.
+- **Botão direito numa linha do Definir projeto:** "Mudar código…" e "Mudar nome…", gravados no catálogo de todos os
+  produtos. Código repetido é recusado e a mensagem diz de qual item ele já é.
+
 ## 1.76.0 — 2026-11-05
 
 **Sem "Campos do carimbo": o carimbo é só a pessoa.**
