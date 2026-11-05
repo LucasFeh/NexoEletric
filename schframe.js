@@ -84,6 +84,10 @@ function montaAcervos(globais, velhos){
     else if (velho) acervos.push(Object.assign({}, velho, { caiu:true }));
   }
   const symbols = [], acervoDe = new Map(), valorDe = new Map();
+  /* O CONECTOR UMA PARTE POR VIA (2026-11-05, HubCore.simboloPorVia): o valor com `conn` ganha uma parte por pino,
+     no desenho do "Conector 1 via" da Biblioteca de simbolos */
+  const HC = typeof HubCore !== 'undefined' ? HubCore : null;
+  const molde = HC ? HC.moldeConectorVia(g.symbolsLib) : null;
   for (const a of acervos) for (const sy of a.syms){
     if (acervoDe.has(sy.name)) continue;      /* o do Altium ganha em caso de xara */
     acervoDe.set(sy.name, a);
@@ -111,9 +115,10 @@ function montaAcervos(globais, velhos){
                                 : (sy.footprints || []),
         valores: [v], deValor: true,
       };
+      const final = HC ? HC.simboloPorVia(alias, v, molde) : alias;
       acervoDe.set(alias.name, a);
       valorDe.set(alias.name, { sym: sy, valor: v });
-      symbols.push(alias);
+      symbols.push(final);
     }
   }
   return { acervos, symbols, acervoDe, valorDe };
@@ -1386,6 +1391,10 @@ aplicaAcervos();
    folha só fica marcada como alterada — o schematic.js é de dois escritores e nada vai ao
    disco sem o Salvar —, e o aviso sai no fim da montagem, quando a tela já existe. */
 const RENOMEADOS_ODOO = seguePeloOdoo(schematic.items, VALOR_DE, n => HubCore.resolveSym(SLIB, n));
+/* os conectores colocados com o desenho de antes (um simbolo com todos os pinos) viram uma parte por via, com a
+   ponta de cada pino onde ela estava (HubCore.migraConectoresPorVia). Como o RENOMEADOS_ODOO: a folha so fica
+   marcada como alterada, e o aviso sai no fim da montagem */
+const CONECTORES_POR_VIA = HubCore.migraConectoresPorVia(schematic, SLIB);
 function avisaRenomeados(lista){
   if (!lista || !lista.length || typeof HubDialog === 'undefined') return;
   const ex = lista.slice(0, 4).map(x => x.ref + ': ' + x.de + ' → ' + x.para).join('\n');
@@ -1692,6 +1701,9 @@ function valorExibido(c){
 }
 /* o texto do lugar do comment, como esta a vista agora ('' = nada a desenhar nem a clicar) */
 function textoDoCom(c){
+  /* o conector uma parte por via: o valor sai so na parte 1, como o designador -- trinta "2x15 30 vias..." empilhados
+     diziam a mesma coisa trinta vezes */
+  if (c && c.porVia && (c.part || 1) > 1) return '';
   if (showState.comment) return commentExibido(c);
   return showState.valor ? valorExibido(c) : '';
 }
@@ -1902,7 +1914,47 @@ function describe(a){
        : it.t === 'power' ? 'power ' + (it.net || '') : it.t === 'junction' ? 'junção'
        : it.t === 'noerc' ? 'No ERC' : 'texto';
 }
+/* ── O COMPONENTE INTEIRO (2026-11-05: "quando clicar em 1 e apertar tab 1x, marca todos e aparece o designator no
+   topo do esquema indicando qual conector e aquele") ──
+   Tab com partes de UM componente marcadas (o conector uma parte por via, ou qualquer multiparte): marca todas as
+   partes dele nesta folha. Com a selecao sendo o componente inteiro, o designador vai num selo no topo da folha. */
+function partesDaSelecao(){
+  const comps = selAlvos().map(a => a.it).filter(it => it && it.t === 'comp');
+  if (!comps.length || comps.length !== sel.size) return null;
+  const ref = comps[0].ref;
+  if (!ref || comps.some(c => c.ref !== ref)) return null;
+  const todas = sheetItems().filter(it => it.t === 'comp' && it.ref === ref);
+  return { ref, marcadas: comps, todas };
+}
+function selecionaComponenteInteiro(){
+  const p = partesDaSelecao();
+  if (!p || p.todas.length < 2 || p.marcadas.length === p.todas.length) return false;
+  selectOnly(p.todas);
+  return true;
+}
+function pintaRefTopo(){
+  let box = document.getElementById('refTopo');
+  const p = partesDaSelecao();
+  if (!p || p.todas.length < 2 || p.marcadas.length !== p.todas.length){ if (box) box.hidden = true; return; }
+  if (!box){
+    box = document.createElement('div'); box.id = 'refTopo';
+    $('cvwrap').append(box);
+  }
+  const c = p.todas[0];
+  const sym = HubCore.symbolOf(SLIB, c.sym);
+  let total = 0;
+  for (const s of model.sheets) for (const x of s.comps) if (x.ref === p.ref) total++;
+  const desc = String(valorExibido(c) || commentExibido(c) || c.sym || '');
+  box.replaceChildren();
+  const b = document.createElement('b'); b.textContent = p.ref;
+  box.append(b, document.createTextNode((desc ? '  ' + desc : '') + '  ·  '
+    + (sym && sym.porVia ? total + (total === 1 ? ' via' : ' vias') : total + ' partes')
+    + (total !== p.todas.length ? ' (' + p.todas.length + ' nesta folha)' : '')));
+  box.title = (c.sym || '') + (c.footprint ? ' · ' + c.footprint : '');
+  box.hidden = false;
+}
 function updateSelStatus(){
+  pintaRefTopo();
   const n = sel.size;
   const s = !n ? '' : n === 1 ? describe(sel.values().next().value) + ' selecionado' : n + ' selecionados';
   /* o laranja precisa de dono escrito: sem isso a net acesa nao tem nome nem jeito obvio de
@@ -3306,18 +3358,20 @@ function renderAddPreview(){
      mais volta para a 1. */
   const partes = { parts: partesDe(s, v) }, nparts = nPartes(s, v);
   if (!(pick.part >= 1 && pick.part <= nparts)) pick.part = 1;
-  /* o partOf da FOLHA, e nao uma busca daqui: o que o modal mostra e o que ela vai desenhar */
-  const part = HubCore.partOf(partes, pick.part);
+  /* o partOf da FOLHA, e nao uma busca daqui: o que o modal mostra e o que ela vai desenhar.
+     O CONECTOR POR VIA (2026-11-05) mostra a coluna que o Finalizar vai pôr: as vias empilhadas, de 100 em 100 mil */
+  const alVia = v ? SLIB.symbols.find(x => x.name === v.altium && x.porVia) : null;
+  const part = alVia ? colunaDeVias(alVia) : HubCore.partOf(partes, pick.part);
   addDrawSym = part || null;
   fitPreview(camSym, part ? D.symBBox(part) : null);
   $('addSymHint').textContent = part && (part.graphics || []).length ? '' : 'sem desenho na biblioteca';
-  $('addSymMeta').textContent = s.name + ' · ' + ((part && part.pins) || []).length + ' pinos'
+  $('addSymMeta').textContent = s.name + ' · ' + ((part && part.pins) || []).length + (alVia ? ' vias (um símbolo por via)' : ' pinos')
     + (v ? ' · valor ' + (vals.indexOf(v) + 1) + '/' + vals.length : '')
     + (nparts > 1 ? ' · parte ' + pick.part + '/' + nparts : '');
 
   /* a parte: aparece sempre que o componente tem mais de uma, com os pinos de cada uma — e o
      que separa a bobina (2 pinos) dos contatos (3) de um rele sem abrir o desenho */
-  const pl = $('addPartLab'); pl.hidden = nparts <= 1;
+  const pl = $('addPartLab'); pl.hidden = nparts <= 1 || Boolean(alVia);
   if (!pl.hidden){
     const ps = $('addPart'); ps.textContent = '';
     for (let i = 1; i <= nparts; i++){
@@ -3422,6 +3476,22 @@ function openAdd(){
 function closeAdd(){ $('addmodal').classList.remove('on'); }
 const addOpen = () => $('addmodal').classList.contains('on');
 
+/* a previa do conector por via: as N partes numa parte so, empilhadas como o Finalizar as coloca */
+function colunaDeVias(sym){
+  const pins = [], graphics = [];
+  (sym.parts || []).forEach((pt, i) => {
+    const dy = -100 * i;
+    for (const p of pt.pins || []) pins.push(Object.assign({}, p, { y: p.y + dy }));
+    for (const g of pt.graphics || []) graphics.push(desloca(g, dy));
+  });
+  return { part: 1, pins, graphics };
+}
+function desloca(g, dy){
+  const o = Object.assign({}, g);
+  for (const k of ['y', 'cy', 'y1', 'y2']) if (typeof o[k] === 'number') o[k] += dy;
+  if (Array.isArray(o.pts)) o.pts = o.pts.map(q => [q[0], q[1] + dy]);
+  return o;
+}
 /* ------- a lista (o que vai para o esquema) ------- */
 const cartCount = () => cart.reduce((a, c) => a + c.qtd, 0);
 function cartAdd(){
@@ -3431,6 +3501,8 @@ function cartAdd(){
   /* a parte vale nos dois acervos: a do simbolo do Altium ou a do desenho do valor */
   const partes = nPartes(s, v);
   const part = Math.min(Math.max(1, pick.part || 1), partes);
+  /* o conector (uma parte por via): entra INTEIRO, as N partes com o mesmo designador */
+  const porVia = ((v && SLIB.symbols.find(x => x.name === v.altium)) || {}).porVia || 0;
   const item = {
     /* o nome do componente no Altium: cada valor e um componente proprio na lib da
        familia ("SMD 0805 10K 1/8W"). O espelho do hub continua por familia. */
@@ -3444,6 +3516,7 @@ function cartAdd(){
     estoque: v && typeof v.estoque === 'number' ? v.estoque : null,
     qtd,
   };
+  if (porVia){ item.porVia = porVia; item.part = 1; item.partes = 1; item.rotulo = item.nome + ' · ' + porVia + ' vias'; }
   const igual = cart.find(c => c.sym === item.sym && c.part === item.part && c.footprint === item.footprint && c.comment === item.comment);
   if (igual) igual.qtd += qtd; else cart.push(item);
   cartRender();
@@ -3468,6 +3541,7 @@ function cartRender(){
     /* a parte vem NA FRENTE do nome: a linha corta no fim, e com "parte 2 de 3" no fim as
        duas partes do mesmo rele viravam duas linhas iguais */
     if (c.partes > 1) t.append(el('b', null, 'parte ' + c.part + '/' + c.partes + ' · '));
+    if (c.porVia) t.append(el('b', null, c.porVia + ' vias · '));
     t.append(document.createTextNode(c.nome || c.rotulo));
     row.append(t,
       mk('−', 'uma a menos', () => { if (--cart[i].qtd <= 0) cart.splice(i, 1); cartRender(); }),
@@ -3495,6 +3569,22 @@ function finalizar(){
   let i = 0; const novos = [], juntas = [];
   for (const item of cart){
     for (let k = 0; k < item.qtd; k++){
+      /* O CONECTOR: uma coluna com as N vias (partes 1..N, de cima para baixo, de 100 em 100 mil), todas com o mesmo
+         designador novo -- o designador aparece so na parte 1 (designadorAparece) */
+      if (item.porVia){
+        const ref = nextRef(item.sym);
+        const x = snapG(x0 + (i % LARGURA) * PASSO_X), yTopo = snapG(y0 - Math.floor(i / LARGURA) * PASSO_Y);
+        for (let p = 1; p <= item.porVia; p++){
+          const c = { t: 'comp', sheet: folha.name, ref, sym: item.sym, part: p, porVia: true,
+                      x, y: yTopo - (p - 1) * 100, rot: 0, footprint: item.footprint };
+          if (item.comment) c.comment = item.comment;
+          if (item.params) c.params = item.params;
+          schematic.items.push(c); novos.push(c);
+        }
+        model = HubCore.buildSchModel(schematic);
+        i++;
+        continue;
+      }
       /* a parte de um componente de varias vai para o designador que ainda nao a tem
          (refDaParte); a de uma parte so ganha designador novo, como sempre */
       const d = refDaParte(allComps(), item, () => nextRef(item.sym));
@@ -6076,6 +6166,7 @@ window.addEventListener('keydown', e => {
   if (addOpen() || symModalAberto()) return;   /* os atalhos da folha nao valem dentro do modal */
   /* O FIO NA MAO tem teclas proprias, como no Altium, e elas vem antes dos atalhos: aqui o
      Espaco inverte o canto (nao gira a selecao), Shift+Espaco troca o modo, Backspace desfaz */
+  if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey && !wireDraw && selecionaComponenteInteiro()){ e.preventDefault(); return; }
   if (tool === 'wire' && (e.key === ' ' || e.code === 'Space')){ e.preventDefault(); espacoDoFio(e.shiftKey); return; }
   if (tool === 'wire' && wireDraw && e.key === 'Backspace'){ e.preventDefault(); backspaceDoFio(); return; }
   /* as sequencias do Altium (O,D; O,S e as da predefinicao "Padrao Altium"): o leitor do
@@ -7148,6 +7239,12 @@ $('btnGrid').addEventListener('click', () => {
 montaGrade();
 renderSheetCards();
 if (RENOMEADOS_ODOO.length){ schDirty = true; avisaRenomeados(RENOMEADOS_ODOO); }
+if (CONECTORES_POR_VIA.length){
+  schDirty = true;
+  HubDialog.toast(CONECTORES_POR_VIA.length + (CONECTORES_POR_VIA.length === 1 ? ' conector passou' : ' conectores passaram')
+    + ' para um símbolo por via (' + CONECTORES_POR_VIA.map(x => x.ref + ': ' + x.vias).join(', ')
+    + ') — os fios continuam nos mesmos pinos. Salve para gravar.', 'warn', 12000);
+}
 updateMeta(); updateSaveBtn(); updateSelStatus(); cartRender(); renderProps();
 cam.resize(); cam.fit(fitBBox());
 

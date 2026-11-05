@@ -98,6 +98,9 @@ const GESTOS_SCH = [
   { rotulo:'Pegar só o trecho do fio (ou o vértice)',      teclas:['Segundo clique'] },
   { rotulo:'Acender a net',                                teclas:['Alt', 'Clique'] },
   { rotulo:'Somar à seleção',                              teclas:['Shift', 'Clique'] },
+  /* 2026-11-05, pedido do dono: o conector uma parte por via -- clicar numa parte e dar Tab marca o conector inteiro,
+     e o designador aparece no topo da folha (schframe.js » selecionaComponenteInteiro) */
+  { rotulo:'Marcar o componente inteiro (todas as partes, como as vias do conector)', teclas:['Tab'], quando:'parte de um componente selecionada' },
   { rotulo:'Mover a seleção',                              teclas:['Arrastar'] },
   { rotulo:'Andar reto no trilho da guia',                 teclas:['Shift'],            quando:ARRASTO },
   { rotulo:'Soltar as guias',                              teclas:['Ctrl'],             quando:ARRASTO },

@@ -157,15 +157,19 @@ class Contexto {
       if (!s || acervoDe.has(s.name)) continue;
       acervoDe.set(s.name, a.id); symbols.push(s);
     }
+    /* o conector uma parte por via (2026-11-05): o mesmo da vista (schframe.js » montaAcervos, HubCore.simboloPorVia) */
+    const hc = this.hc;
+    const molde = typeof hc.moldeConectorVia === 'function' ? hc.moldeConectorVia(this.symbolsLib()) : null;
     for (const a of acervos) {
       if (!a.almox) continue;
       for (const s of a.g.symbols) for (const v of (s.valores || [])) {
         if (!v || !v.altium || acervoDe.has(v.altium)) continue;
         const partes = (v.parts || s.parts) || [];
-        symbols.push({ name: v.altium, description: (v.itens && v.itens[0] && v.itens[0].nome) || v.label,
+        const alias = { name: v.altium, description: (v.itens && v.itens[0] && v.itens[0].nome) || v.label,
           designator: s.designator, familia: s.familia, partcount: partes.length || 1, parts: partes,
           footprints: v.footprint ? [{ name: v.footprint, current: true, incurrentlib: true }] : (s.footprints || []),
-          almoxValor: true, familiaNome: s.name });
+          almoxValor: true, familiaNome: s.name };
+        symbols.push(molde ? hc.simboloPorVia(alias, v, molde) : alias);
         acervoDe.set(v.altium, a.id);
       }
     }
@@ -312,6 +316,10 @@ class Contexto {
   schematic(p) {
     const s = this.lerVarCache(p.arq('schematic.js'), 'schematic');
     if (s === undefined) throw new ErroMcp(`o projeto "${p.nome}" não tem schematic.js`);
+    /* o conector colocado com o desenho de antes, lido como a vista o mostra: uma parte por via (so na memoria;
+       o arquivo muda quando a vista salvar). Idempotente: a parte convertida leva porVia */
+    try { if (typeof this.hc.migraConectoresPorVia === 'function') this.hc.migraConectoresPorVia(s, this.libsDe(s).schlib); }
+    catch (e) { this.log('conectores por via: ' + (e && e.message || e)); }
     return s;
   }
 

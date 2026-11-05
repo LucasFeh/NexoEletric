@@ -3207,6 +3207,97 @@ function neodenCsv(rows, side){
 
 /* ============ status do projeto na esteira ============ */
 
+/* ── O CONECTOR DESENHADO UMA PARTE POR VIA (pedido do dono, 2026-11-05) ──
+   "o simbolo Conector 1 via: quero que todos os componentes do tipo conector tenham ele como simbolo,
+   e quando forem colocados no esquema vai a quantidade de pinos que o conector tem, numerados de 1 a N,
+   com o mesmo designator". E o CONECTOR PADRAO da biblioteca do Altium da casa (80 partes de um pino),
+   agora para todo conector do almoxarifado: o valor com `conn` (tools/almox/almox2lib.py » conn_do_valor)
+   ganha uma parte por pino, cada uma com o desenho do "Conector 1 via" da Biblioteca de simbolos
+   (Libs/symbols-lib.js) e o numero do pino do desenho antigo -- o footprint continua casando pad a pad.
+   CONECTOR_VIA e a copia do "Conector 1 via" para quem nao tem a Biblioteca de simbolos carregada. */
+const CONECTOR_VIA = {
+  name: 'Conector 1 via',
+  pins: [{ num:'1', name:'1', x:-100, y:0, len:100, orient:0, type:'Passive', hideName:true }],
+  graphics: [{ g:'arc', cx:-195, cy:0, r:31, sa:0, ea:360, w:10 },
+             { g:'polyline', pts:[[-130, -25], [-160, 0], [-130, 25]], w:10 },
+             { g:'polyline', pts:[[-215, -20], [-175, 20]], w:10 },
+             { g:'polyline', pts:[[-95, -25], [-125, 0], [-95, 25]], w:10 }],
+};
+/* o molde: o "Conector 1 via" de uma Biblioteca de simbolos (symlib-v1: pins/graphics no proprio simbolo),
+   se ela tiver um com UM pino; senao a copia acima */
+function moldeConectorVia(symbolsLib){
+  const s = ((symbolsLib && symbolsLib.symbols) || []).find(x => x && x.name === CONECTOR_VIA.name);
+  const pins = s && (s.pins || (s.parts && s.parts[0] && s.parts[0].pins));
+  const gr = s && (s.graphics || (s.parts && s.parts[0] && s.parts[0].graphics));
+  return pins && pins.length === 1 && Array.isArray(gr) ? { name: s.name, pins, graphics: gr } : CONECTOR_VIA;
+}
+/* o valor do almoxarifado e um conector? (so o conector tem `conn`, o gerador o poe) */
+function ehConector(valor){ return Boolean(valor && valor.conn && typeof valor.conn === 'object'); }
+const numPino = n => { const v = parseFloat(n); return isFinite(v) ? v : Infinity; };
+/* As partes por via de um conector: uma por pino do desenho de antes, na ordem do numero ("1", "2"... "10"), cada
+   uma com o pino do molde renumerado, completadas ate os `vias` do conector (sem desenho: de 1 a N). */
+function partesPorVia(partesAntigas, vias, molde){
+  const m = molde || CONECTOR_VIA;
+  let nums = [];
+  for (const pt of partesAntigas || []) for (const p of (pt.pins || [])) if (p && p.num != null && nums.indexOf(String(p.num)) < 0) nums.push(String(p.num));
+  /* o desenho com MENOS pinos que as vias do conector (medido: o "1x40 40 vias" do almoxarifado desenhado com 6)
+     ganha os numeros que faltam, ate as vias: "se o conector tem 40 pinos, 40 simbolos" */
+  for (let k = 1; nums.length < (+vias || 0) && k <= 9999; k++) if (nums.indexOf(String(k)) < 0) nums.push(String(k));
+  nums = nums.slice().sort((a, b) => numPino(a) - numPino(b) || (a < b ? -1 : a > b ? 1 : 0));
+  return nums.map((n, i) => ({ part: i + 1,
+    pins: [Object.assign({}, m.pins[0], { num: n, name: n })], graphics: m.graphics }));
+}
+/* O simbolo de um valor de conector, uma parte por via. `alias` e o simbolo do valor como a casa sempre montou
+   (nome = valores[].altium, parts = o desenho de um pino por via); volta um NOVO com `porVia` (quantas) e
+   `partesAntigas` (o desenho de antes: o que converte os conectores ja colocados, ver migraConectoresPorVia). */
+function simboloPorVia(alias, valor, molde){
+  if (!ehConector(valor)) return alias;
+  const antes = alias.parts || [];
+  const partes = partesPorVia(antes, valor.conn.vias, molde);
+  if (!partes.length) return alias;
+  return Object.assign({}, alias, { parts: partes, partcount: partes.length, porVia: partes.length, partesAntigas: antes });
+}
+/* OS CONECTORES JA COLOCADOS COM O DESENHO DE ANTES (um simbolo com todos os pinos) viram uma parte por pino, cada
+   uma com a ponta do pino EXATAMENTE onde a do pino antigo estava e virada para o mesmo lado -- os fios continuam
+   ligados. Marca as partes novas com `porVia:true` (e a marca que diz "ja convertido": sem ela, um conector que
+   perdeu as partes 2..N seria convertido de novo). Mexe no `schematic` e devolve [{ref, sym, vias}]. */
+function migraConectoresPorVia(schematic, schlib){
+  const items = (schematic && schematic.items) || [];
+  const feitos = [];
+  for (let i = 0; i < items.length; i++){
+    const c = items[i];
+    if (!c || c.t !== 'comp' || c.porVia || !c.sym) continue;
+    const sym = symbolOf(schlib, c.sym);
+    if (!sym || !sym.porVia || !(sym.partesAntigas || []).length) continue;
+    const antiga = partOf({ parts: sym.partesAntigas }, c.part);
+    if (!antiga || !(antiga.pins || []).length) continue;
+    const tf = compTransform(c);
+    const molde = sym.parts[0].pins[0];
+    const hl = pinHot(molde);
+    const novos = [];
+    for (const p of antiga.pins){
+      const parte = sym.parts.find(pt => pt.pins[0].num === String(p.num));
+      if (!parte) continue;
+      const h = pinHot(p), w = tf.map(h.x, h.y);
+      /* o pino antigo aponta (do corpo para a ponta) em tf.ang(orient); o do molde em molde.orient: gira a diferenca */
+      const rot = ((tf.ang(p.orient || 0) - (molde.orient || 0)) % 360 + 360) % 360;
+      const ct = compTransform({ x:0, y:0, rot, mirror:false });
+      const o = ct.map(hl.x, hl.y);
+      const n = Object.assign({}, c, { part: parte.part, x: w.x - o.x, y: w.y - o.y, rot, mirror: false, porVia: true });
+      delete n.refdx; delete n.refdy; delete n.comdx; delete n.comdy;
+      novos.push(n);
+    }
+    if (!novos.length) continue;
+    /* a parte 1 leva os deslocamentos de texto que a peca tinha (o designador so aparece nela) */
+    const um = novos.find(n => n.part === 1);
+    if (um && typeof c.refdx === 'number' && typeof c.refdy === 'number'){ um.refdx = c.refdx + c.x - um.x; um.refdy = c.refdy + c.y - um.y; }
+    items.splice(i, 1, ...novos);
+    i += novos.length - 1;
+    feitos.push({ ref: c.ref, sym: c.sym, vias: novos.length });
+  }
+  return feitos;
+}
+
 function deriveStatus(entry, loaded){
   const f = (entry && entry.files) || {};
   if (f.applyreport) return 'aplicada';
@@ -3220,6 +3311,7 @@ return { near, nearAng, isNum, distSeg, TOL, STOL, ORIENT_DIR,
          SHEET_SIZES, SHEET_ISO, SHEET_PRESETS, SHEET_TOL,
          sheetSize, sheetPreset, sheetMatch, sheetLabel,
          symbolOf, partOf, footprintOf, pinHot, rotEfetiva, compTransform, compPinsWorld,
+         CONECTOR_VIA, moldeConectorVia, ehConector, partesPorVia, simboloPorVia, migraConectoresPorVia,
          normKey, libIndex, setLibTables, libTables, resolveLib, resolveSym, resolveFp, assinaturaPinos, simbolosDoDocumento,
          suggestSym,
          buildSchModel, extractNets, validateSchematic, ehDnp, dnpRefs, marcaDnp,

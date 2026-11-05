@@ -49,6 +49,11 @@
 
   #main{flex:1; display:flex; min-height:0; position:relative;}   /* ancora da ficha, que flutua por cima */
   #cvwrap{flex:1; position:relative; min-width:0;}
+  /* o designador do componente inteiro (o conector por via): o Tab marca todas as partes e o selo diz qual e */
+  #refTopo{position:absolute; top:58px; left:50%; transform:translateX(-50%); z-index:4; pointer-events:none; max-width:70%;
+    padding:5px 14px; border-radius:6px; background:var(--panel); border:1px solid var(--accent); color:var(--fg);
+    font:13px var(--font); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; box-shadow:var(--shadow-menu);}
+  #refTopo b{color:var(--accent); font-size:15px;}
   /* divisoria arrastavel entre a folha e o painel: a mesma peca das abas Laser e BOM do hub
      (6 px de alvo com um traco fino no meio, que acende ao pegar; duplo clique fecha/abre) */
   .split{flex:0 0 6px; cursor:col-resize; position:relative; touch-action:none; background:var(--panel);}

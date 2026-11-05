@@ -4,6 +4,25 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.73.0 — 2026-11-05
+
+**Todo conector com o símbolo "Conector 1 via", uma parte por pino.**
+- Todo conector do almoxarifado (os valores com `conn`, mais de 260) passa a ser desenhado como o CONECTOR PADRÃO da
+  biblioteca da casa: **um símbolo "Conector 1 via" por pino**, numerados de 1 a N, todos com o **mesmo designator**.
+  O desenho vem da Biblioteca de símbolos (Libs/symbols-lib.js, o "Conector 1 via"). O número de cada via é o do pino
+  do desenho antigo, então o footprint continua casando pad a pad. Se o desenho tiver menos pinos que as vias do
+  conector, os que faltam são completados (o "1x40 40 vias" tinha 6 pinos desenhados e agora tem 40).
+- **Adicionar componentes:** o conector entra **inteiro**, uma coluna com as N vias (de 100 em 100 mil) e o designator
+  novo. A prévia mostra as vias empilhadas.
+- **Tab:** com uma via selecionada, o Tab marca o conector inteiro. O **designator aparece num selo no topo da folha**
+  (ex.: "CN2 2x15 30 vias… · 30 vias"). Vale para qualquer componente de várias partes.
+- Designator e valor saem só na parte 1. As outras mostram só o número da via.
+- **Os conectores já colocados** com o desenho antigo (um símbolo com todos os pinos) viram uma parte por via quando o
+  esquema abre, com a ponta de cada pino exatamente onde estava. Os fios e as nets não mudam. A folha fica marcada
+  como alterada e um aviso diz quais conectores mudaram; ao salvar, a mudança fica gravada.
+- MCP: a IA vê os conectores do mesmo jeito (o esquema antigo é lido já convertido), e o `sch_adicionar` de um
+  conector sem `part` coloca as N vias com o mesmo ref.
+
 ## 1.72.0 — 2026-11-05
 
 **Carimbos da casa e aprovação do projeto.**

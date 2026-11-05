@@ -485,14 +485,26 @@ module.exports = {
     },
     {
       nome: 'sch_adicionar', titulo: 'Adicionar itens ao esquema',
-      descricao: 'Acrescenta itens ao schematic.js (um por linha, formato schmirror-v2): comp {sym, x, y, rot?, mirror?, ref? (sem ref ou "R?" = próximo livre), footprint? (padrão: o do símbolo), comment?, part?}, wire {pts:[[x,y],...]}, netlabel {net,x,y}, power {net, style?, x, y, rot?}, port {net,x,y,io?,style?,w?}, junction {x,y}, noerc {x,y}, text {s,x,y}, sheet {name,size}. sheet padrão = a primeira folha. Coordenadas em mil, grade de 100. Valida (símbolo, footprint, pinos x pads, grade) antes de gravar.',
+      descricao: 'Acrescenta itens ao schematic.js (um por linha, formato schmirror-v2): comp {sym, x, y, rot?, mirror?, ref? (sem ref ou "R?" = próximo livre), footprint? (padrão: o do símbolo), comment?, part?} — conector do almoxarifado (uma parte por via) sem part entra inteiro: as N vias numa coluna com o mesmo ref, wire {pts:[[x,y],...]}, netlabel {net,x,y}, power {net, style?, x, y, rot?}, port {net,x,y,io?,style?,w?}, junction {x,y}, noerc {x,y}, text {s,x,y}, sheet {name,size}. sheet padrão = a primeira folha. Coordenadas em mil, grade de 100. Valida (símbolo, footprint, pinos x pads, grade) antes de gravar.',
       entrada: { type: 'object', properties: Object.assign({ projeto: PROJETO,
         itens: { type: 'array', minItems: 1, items: { type: 'object', properties: { t: { type: 'string', enum: TIPOS_ITEM } }, required: ['t'], additionalProperties: true } } }, COMUNS),
         required: ['projeto', 'itens'] },
       executa: async (a, ctx) => {
         const p = ctx.projeto(a.projeto);
-        return transacao(ctx, p, (arq, L) => a.itens.map(it => { const o = completa(it, arq, L, ctx.hc); arq.insere(null, o); return o; }),
-          { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_adicionar' });
+        /* o CONECTOR (uma parte por via, HubCore.simboloPorVia): sem `part`, entra inteiro -- as N vias numa coluna,
+           de 100 em 100 mil para baixo, todas com o mesmo designador */
+        return transacao(ctx, p, (arq, L) => [].concat(...a.itens.map(it => {
+          const sym = it && it.t === 'comp' && it.part == null ? ctx.hc.symbolOf(L.schlib, it.sym) : null;
+          const o = completa(sym && sym.porVia ? Object.assign({}, it, { part: 1, porVia: true }) : it, arq, L, ctx.hc);
+          arq.insere(null, o);
+          if (!(sym && sym.porVia)) return [o];
+          const todas = [o];
+          for (let k = 2; k <= sym.porVia; k++) {
+            const q = Object.assign({}, o, { part: k, y: o.y - (k - 1) * 100 });
+            arq.insere(null, q); todas.push(q);
+          }
+          return todas;
+        })), { simular: a.simular, forcar: a.forcar, ferramenta: 'sch_adicionar' });
       },
     },
     {
