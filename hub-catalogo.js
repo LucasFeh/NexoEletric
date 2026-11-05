@@ -29,6 +29,10 @@
 const T = () => root.HubSchTemplate;
 const DLG = () => root.HubDialog;
 const ANTIGOS = ['Desenho_linha_unica', 'Desenho_linha_um', 'Desenho_linha_dois', 'Equipamento_linha_um', 'Equipamento_linha_dois', 'Equipamento_linha_unica'];
+/* o nome do catálogo tem no máximo 27 caracteres (como "CARTAO MELPLAC 550 - P9CF01"; mcp/lib/catalogo.js NOME_MAX): o que
+   passar vai na descrição. Os antigos que passam ficam com o ⚠ na lista, e o filtro "⚠ nome longo" junta todos. */
+const NOME_MAX = 27;
+const tamNome = s => String(s || '').replace(/\s+/g, ' ').trim().length;
 const GRUPOS = [['todos', 'Todos'], ['placa', 'Placas'], ['equipamento', 'Equipamentos'], ['produto', 'Produtos']];
 const TIPOS_NOVOS = [['PLACA', 'Placa', 'placa'], ['EQUIPAMENTO', 'Equipamento', 'equipamento'], ['SISTEMA', 'Sistema', 'equipamento'],
                      ['ACESSÓRIOS', 'Acessório', 'produto'], ['CABO', 'Cabo', 'produto'], ['SOFTWARE', 'Software', 'produto']];
@@ -72,6 +76,8 @@ const CSS = `
 .ct-lista td.acoes{white-space:nowrap; width:1%;}
 .ct-lista td.acoes button{padding:2px 8px; font-size:11px;}
 .ct-g{font-size:10px; padding:0 6px; border-radius:8px; border:1px solid currentColor; white-space:nowrap;}
+.ct-alerta{color:#f59e0b; font-weight:700; margin-left:5px; cursor:help;}
+tr.longo td.nmc{color:#f59e0b;}
 .ct-g.placa{color:#22c55e;} .ct-g.equipamento{color:#60a5fa;} .ct-g.produto{color:#f59e0b;}
 .ct-novo{margin:8px 14px 0; padding:10px; border:1px solid var(--border, var(--line, #444)); border-radius:6px; display:grid;
   grid-template-columns:repeat(4, minmax(0, 1fr)) auto; gap:8px; align-items:end;}
@@ -206,6 +212,10 @@ function abre(g){
   const filtros = el('div'); filtros.style.cssText = 'display:flex; gap:4px';
   const bFiltro = {};
   for (const [id, rot] of GRUPOS){ const b = bt(rot, null, () => { grupo = id; pintaFiltros(); pintaLista(); }); bFiltro[id] = b; filtros.append(b); }
+  let soLongos = false;
+  const bLongo = bt('⚠ nome longo', 'só os itens com o nome acima de ' + NOME_MAX + ' caracteres (botão direito › Mudar nome para encurtar; o resto vai na descrição)',
+                    () => { soLongos = !soLongos; bLongo.classList.toggle('on', soLongos); pintaLista(); });
+  filtros.append(bLongo);
   const conta = el('span', 'ct-dim');
   const bNovo = bt('+ Adicionar ao catálogo', 'quando o produto ainda não está no catálogo', () => { novo.hidden = !novo.hidden; if (!novo.hidden) iNome.focus(); });
   barra.append(busca, filtros, conta, bNovo);
@@ -214,7 +224,8 @@ function abre(g){
   const lab = (rot, input) => { const l = el('label'); l.append(document.createTextNode(rot), input); return l; };
   const sTipo = el('select');
   for (const [v, r] of TIPOS_NOVOS){ const o = el('option', null, r); o.value = v; sTipo.append(o); }
-  const iNome = el('input'); iNome.placeholder = 'nome do produto';
+  const iNome = el('input'); iNome.placeholder = 'nome do produto (até ' + NOME_MAX + ' caracteres)'; iNome.maxLength = NOME_MAX;
+  iNome.title = 'até ' + NOME_MAX + ' caracteres, como "CARTAO MELPLAC 550 - P9CF01"; o que passar vai na descrição';
   const iCli = el('input'); iCli.placeholder = 'cliente';
   const iVin = el('input'); iVin.placeholder = 'para que serve / de qual equipamento';
   const iSig = el('input'); iSig.placeholder = 'sigla'; iSig.style.textTransform = 'uppercase';
@@ -262,6 +273,11 @@ function abre(g){
       if (!v){ s.val.append(el('div', 'nm', '— nenhum —')); continue; }
       const i = v.item ? v : (achaPorCodigo(v.modelo) || v);
       s.val.append(el('div', 'cod', i.modelo || '—'), el('div', 'nm', (i.nome || v.nome || '') + (i.cliente ? ' · ' + i.cliente : '')));
+      if (tamNome(i.nome || v.nome) > NOME_MAX){
+        const a = el('span', 'ct-alerta', '⚠ nome com ' + tamNome(i.nome || v.nome) + ' caracteres (limite ' + NOME_MAX + ')');
+        a.title = 'o nome passa do limite: encurte pelo botão direito › Mudar nome e ponha o resto na descrição';
+        s.val.append(a);
+      }
     }
   }
   function pintaFiltros(){ for (const [id] of GRUPOS) bFiltro[id].classList.toggle('on', grupo === id); }
@@ -269,7 +285,7 @@ function abre(g){
     if (!cat){ return; }
     const q = semAcento(busca.value.trim());
     const qc = norm(busca.value);
-    const achou = itens.filter(i => (grupo === 'todos' || i.grupo === grupo)
+    const achou = itens.filter(i => (grupo === 'todos' || i.grupo === grupo) && (!soLongos || tamNome(i.nome) > NOME_MAX)
       && (!q || semAcento(i.modelo + ' ' + i.nome + ' ' + i.cliente + ' ' + i.vinculo + ' ' + i.tipo).includes(q) || (qc && norm(i.modelo).includes(qc))));
     conta.textContent = achou.length + ' de ' + itens.length;
     const tb = el('tbody');
@@ -284,7 +300,15 @@ function abre(g){
       tdA.append(bt('Placa', 'usar como código da placa', ev => { ev.stopPropagation(); usa(i, 'placa'); }),
                  document.createTextNode(' '),
                  bt('Equip.', 'usar como equipamento (código e nome)', ev => { ev.stopPropagation(); usa(i, 'equip'); }));
-      tr.append(el('td', null, String(i.item)), tdG, el('td', 'cod', i.modelo), el('td', null, i.nome), el('td', null, i.cliente), el('td', 'vin', i.vinculo), tdA);
+      const tdN = el('td', 'nmc', i.nome);
+      const n = tamNome(i.nome);
+      if (n > NOME_MAX){
+        tr.classList.add('longo');
+        const a = el('span', 'ct-alerta', '⚠');
+        a.title = 'nome com ' + n + ' caracteres: o limite é ' + NOME_MAX + ' (como "CARTAO MELPLAC 550 - P9CF01"). Encurte pelo botão direito › Mudar nome; o resto vai na descrição';
+        tdN.append(a);
+      }
+      tr.append(el('td', null, String(i.item)), tdG, el('td', 'cod', i.modelo), tdN, el('td', null, i.cliente), el('td', 'vin', i.vinculo), tdA);
       tr.addEventListener('click', () => usa(i, i.grupo === 'placa' ? 'placa' : 'equip'));
       tr.addEventListener('contextmenu', ev => { ev.preventDefault(); menuDoItem(i, ev.clientX, ev.clientY); });
       tb.append(tr);
@@ -326,6 +350,7 @@ function abre(g){
     const v = D && D.texto ? await D.texto((campo === 'codigo' ? 'Código novo' : 'Nome novo') + ' do item ' + i.item + ' (' + i.tipo + '):',
       { title: campo === 'codigo' ? 'Mudar código' : 'Mudar nome', v: atual, ok: 'Mudar',
         valida: s => !String(s || '').trim() ? 'não pode ficar vazio'
+          : campo === 'nome' && tamNome(s) > NOME_MAX ? 'tem ' + tamNome(s) + ' caracteres: o limite é ' + NOME_MAX + ' (o resto vai na descrição)'
           : campo === 'codigo' && itens.some(o => o !== i && norm(o.modelo) === norm(s)) ? 'esse código já é de outro item' : '' }) : null;
     if (v == null || v.trim() === String(atual).trim()) return;
     const corpo = { item: i.item, codigo: i.modelo };
@@ -385,6 +410,7 @@ function abre(g){
   async function registra(){
     const nome = iNome.value.trim();
     if (!nome){ erro.textContent = 'dê o nome do produto'; iNome.focus(); return; }
+    if (tamNome(nome) > NOME_MAX){ erro.textContent = 'o nome tem ' + tamNome(nome) + ' caracteres e o limite é ' + NOME_MAX + ': o que passar vai na descrição'; iNome.focus(); return; }
     const gr = (TIPOS_NOVOS.find(t => t[0] === sTipo.value) || [])[2];
     const igual = itens.find(i => i.grupo === gr && semAcento(i.nome).trim() === semAcento(nome));
     if (igual){ erro.textContent = '"' + nome + '" já está no catálogo com o código ' + igual.modelo + ' (item ' + igual.item + '): use esse'; return; }

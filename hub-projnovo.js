@@ -53,7 +53,10 @@ function abre(o) {
     g.append(l, input); return input;
   };
   const inp = (ph) => { const i = el('input', 'input'); i.type = 'text'; i.autocomplete = 'off'; i.spellcheck = false; if (ph) i.placeholder = ph; return i; };
-  const iNome = campo('Nome da placa', true, inp('ex.: Placa adaptadora encoder linear'));
+  const iNome = campo('Nome da placa', true, inp('ex.: CARTAO MELPLAC 550 - P9CF01'));
+  /* o nome do catálogo tem no máximo 27 caracteres (mcp/lib/catalogo.js NOME_MAX); o que passar vai na descrição */
+  iNome.maxLength = 27;
+  iNome.title = 'até 27 caracteres, como "CARTAO MELPLAC 550 - P9CF01"; o que passar vai na descrição (vínculo)';
   const sig = el('div', 'pn-sig');
   const iSig = inp('sigla'); const cod = el('span', 'pn-cod', '—');
   sig.append(iSig, cod);
@@ -116,6 +119,7 @@ function abre(o) {
     const n = iNome.value.trim(), q = iQuem.value.trim(), p = iProj.value.trim(), s = iSig.value.trim().toUpperCase();
     let m = '';
     if (!n) m = 'falta o nome da placa';
+    else if (n.replace(/\s+/g, ' ').length > 27) m = 'o nome tem ' + n.replace(/\s+/g, ' ').length + ' caracteres e o limite é 27: o que passar vai na descrição';
     else if (!q) m = 'escolha o seu carimbo: ele entra como desenhista';
     else if (s && !/^[A-Z][A-Z0-9]{0,11}$/.test(s)) m = 'a sigla tem só letras e números, começando por letra';
     else if (p && nomeRuim(p)) m = 'nome do projeto: ' + nomeRuim(p);

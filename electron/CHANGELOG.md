@@ -4,6 +4,15 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.79.0 — 2026-11-05
+
+**O nome do catálogo tem no máximo 27 caracteres** (como "CARTAO MELPLAC 550 - P9CF01"); o que passar vai na descrição.
+- Item novo (Definir projeto › Adicionar ao catálogo e Novo projeto), "Mudar nome…" e o MCP (`projeto_criar {produto}`)
+  recusam nome acima de 27 caracteres, dizendo quantos tem (rotas: 409). Os campos de nome param em 27.
+- Os antigos que passam do limite ficam com ⚠ na lista do Definir projeto (e no item escolhido), e o filtro
+  **⚠ nome longo** junta todos para encurtar. Mudar outra coisa de um item antigo continua valendo.
+- `lista` do catálogo traz `nomeMax` e `nomeLongo` em cada item.
+
 ## 1.78.0 — 2026-11-05
 
 **Mudar a categoria de um item no Definir projeto.**

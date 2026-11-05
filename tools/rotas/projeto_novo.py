@@ -151,7 +151,7 @@ def registra(app, root, h):
                               'vinculo': data.get('vinculo') or '', 'sigla': data.get('sigla') or ''})
         except Exception as e:             # noqa: BLE001
             msg = str(e)
-            return {'ok': False, 'error': msg}, 409 if 'já está no catálogo' in msg else 503
+            return {'ok': False, 'error': msg}, 409 if ('já está no catálogo' in msg or 'caracteres' in msg) else 503
         r.pop('ok', None)
         return dict(ok=True, **r)
 
@@ -171,7 +171,7 @@ def registra(app, root, h):
         except Exception as e:             # noqa: BLE001
             msg = str(e)
             return {'ok': False, 'error': msg}, 409 if ('já é do item' in msg or 'inválido' in msg or 'vazio' in msg
-                                                      or 'categoria' in msg) else 503
+                                                      or 'categoria' in msg or 'caracteres' in msg) else 503
         r.pop('ok', None)
         return dict(ok=True, **r)
 
@@ -234,7 +234,8 @@ def registra(app, root, h):
             r = _motor(root, {'acao': 'registra', 'nome': nome, 'tipo': 'PLACA', 'cliente': data.get('cliente') or '',
                               'vinculo': data.get('vinculo') or '', 'sigla': data.get('sigla') or ''})
         except Exception as e:             # noqa: BLE001
-            return {'ok': False, 'error': str(e)}, 503
+            msg = str(e)                   # o nome passa de 27 caracteres ou já está no catálogo: é do pedido
+            return {'ok': False, 'error': msg}, 409 if ('caracteres' in msg or 'já está no catálogo' in msg) else 503
         codigo = r['codigo']
         if not projeto:
             projeto = codigo

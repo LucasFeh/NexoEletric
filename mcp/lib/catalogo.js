@@ -186,6 +186,17 @@ function grupo(tipo) {
 }
 const normCod = s => String(s || '').replace(/\s+/g, '').toUpperCase();
 
+/* NOME CURTO (2026-11-05: "CARTAO MELPLAC 550 - P9CF01 o nome precisa ser limitado a esse número de caracteres, se
+   precisar acrescentar algo é na descrição, e isso vale pros novos e antigos"): no máximo 27 caracteres. O produto novo e
+   o nome mudado não passam disso; os antigos que passam ficam com o alerta na lista (nomeLongo) até alguém encurtar. */
+const NOME_MAX = 27;
+const nomeLongo = n => limpa(n).length > NOME_MAX;
+function checaNome(n) {
+  const t = limpa(n);
+  if (t.length > NOME_MAX) throw new Error('o nome tem ' + t.length + ' caracteres e o limite é ' + NOME_MAX
+    + ' (como "CARTAO MELPLAC 550 - P9CF01"): o que passar vai na descrição');
+}
+
 /* MUDAR A CATEGORIA (2026-11-05: "tem coisa que é produto e tá categorizado como placa, quero poder mudar a
    categoria"): a categoria é a coluna TIPO. Se o TIPO de agora já cai na categoria pedida, fica; senão vira a palavra
    da categoria. O código não muda. (O mesmo do Gerência Dieletrons, app/produtos.mjs.) */
@@ -198,9 +209,9 @@ function tipoDoGrupo(g, atual) {
 /* o catálogo inteiro, para a tela: {itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo}], ultimo, proximo, ano} */
 function lista(o) {
   const c = abre(o && o.arquivo);
-  return { arquivo: c.arquivo, ultimo: c.ultimo, proximo: c.proximo, ano: c.ano,
+  return { arquivo: c.arquivo, ultimo: c.ultimo, proximo: c.proximo, ano: c.ano, nomeMax: NOME_MAX,
            itens: c.itens.map(i => ({ item: i.item, tipo: i.tipo, grupo: grupo(i.tipo), nome: i.nome, cliente: i.cliente,
-                                      modelo: i.modelo, vinculo: i.vinculo })) };
+                                      modelo: i.modelo, vinculo: i.vinculo, nomeLongo: nomeLongo(i.nome) })) };
 }
 
 /* o produto de um código ("PDCD-DI261939", espaços em volta do hífen não contam): {item, nome, cliente, modelo, ...} ou null */
@@ -228,6 +239,7 @@ function registra(o) {
   o = o || {};
   const nome = limpa(o.nome).toUpperCase();
   if (!nome) throw new Error('falta o nome do produto');
+  checaNome(nome);
   const tipo = limpa(o.tipo || 'PLACA').toUpperCase();
   const c = abre(o.arquivo);
   const sg = o.sigla ? String(o.sigla).toUpperCase().trim() : sigla(nome, tipo);
@@ -309,6 +321,7 @@ function edita(o) {
     if (outro) throw new Error('o código ' + novoCod + ' já é do item ' + outro.item + ' (' + outro.nome + ')');
   }
   if (novoNome !== null && !novoNome) throw new Error('o nome não pode ficar vazio');
+  if (novoNome !== null && novoNome !== limpa(it.nome)) checaNome(novoNome);
   const uso = emUso(c.arquivo);
   if (uso) throw new Error(uso);
   const linha = c.linhas.find(l => l.r === it.linha);
@@ -348,7 +361,7 @@ function paramsTemplate(o) {
   return p;
 }
 
-module.exports = { PADRAO, abre, previa, registra, edita, busca, lista, grupo, tipoDoGrupo, sigla, codigo, paramsTemplate, lerZip, escreverZip };
+module.exports = { PADRAO, abre, previa, registra, edita, busca, lista, grupo, tipoDoGrupo, NOME_MAX, nomeLongo, sigla, codigo, paramsTemplate, lerZip, escreverZip };
 
 /* ============================== a linha de comando ==============================
    node mcp/lib/catalogo.js --cli  < {acao:'previa'|'registra'|'busca'|'lista', nome, tipo?, cliente?, vinculo?, sigla?, codigo?, arquivo?}
