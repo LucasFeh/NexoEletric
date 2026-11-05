@@ -214,22 +214,24 @@ Na vista Esquema, tudo da folha fica no **menu da folha** (canto de cima à esqu
 - as folhas;
 - formato e orientação;
 - o template;
-- o **Carimbo…** (os campos do projeto e da folha);
+- o **Carimbo…** (os carimbos das pessoas) e os **Campos do carimbo…** (só o que o sistema não preenche);
 - editar, criar e **remover** template.
 
-Texto do carimbo `=Nome` (sem diferenciar maiúsculas) se resolve nesta ordem:
-1. a folha;
-2. o projeto;
-3. o sistema: `SheetNumber`, `SheetTotal`, `CurrentDate`, `DocumentName`, `ProjectName`. O sistema também preenche
-   sozinho:
-   - `Formato`, pelo formato da folha;
-   - o código do produto, quando o nome do projeto o traz (`PDCD-DI261939 (PTYPE)`): `Desenho_linha_unica` e
-     `Equipamento_linha_dois` = `PDCD-DI261939`, e `Arquivo` = `SCH-DI261939`.
+No template da casa (`casa:A4_DiEletrons`) o carimbo se preenche sozinho (desde a 1.75.0):
+- `Formato` e `Escala`: da folha (`size`; a escala é `1:1` se a folha não disser). O que a folha ou o projeto gravarem
+  com esses nomes não conta.
+- `Arquivo`: o nome da folha. `SheetNumber`/`SheetTotal`: a posição da folha.
+- `CodigoDaPlaca`, `CodigoDoEquipamento`, `NomeDoEquipamento`: do **Definir projeto** (Configurações do Esquema), que
+  lê o catálogo de todos os produtos; gravados no cabeçalho `params`. Sem eles, o código da placa sai do nome do projeto
+  (`PDCD-DI261939 (PTYPE)` → `PDCD-DI261939`). Os nomes antigos (`Desenho_linha_unica`, `Equipamento_linha_um`/`_dois`)
+  ainda são lidos como os novos.
+- `Desenhista_DiEletrons` + `Data_desenho`: quem criou ou assumiu o projeto (carimbo em uso; Arquivo › Assumir projeto).
+- `Verificador_DiEletrons`, `Aprovador_DiEletrons`, `Data_verificacao`, `Data_aprovacao`, `Revisao`: o **Aprovar**.
+Esses campos das pessoas, datas, revisão e códigos vêm SÓ do cabeçalho do projeto, pelo nome exato: a folha não os
+sobrescreve, e o `DrawnBy`/`CheckedBy`/`Revision` do Altium não os preenchem. Não os edite à mão no schematic.js.
 
-Os nomes da casa valem como apelidos dos do Altium: `Desenhista_DiEletrons`=`DrawnBy`,
-`Verificador_DiEletrons`=`CheckedBy`, `Aprovador_DiEletrons`=`ApprovedBy`,
-`Revisao`=`Revision`, `Arquivo`=`DocumentNumber`, `Equipamento_linha_um`=`Title`. O
-`BuildSchematic.pas` ignora esses campos.
+Os outros campos `=Nome` (sem diferenciar maiúsculas) se resolvem nesta ordem: a folha; o projeto; o sistema
+(`CurrentDate`, `DocumentName`, `ProjectName`...); o padrão do template.
 
 ### Regras de conectividade (como o Altium)
 

@@ -12,7 +12,9 @@ A4 no template da casa (casa:A4_DiEletrons) e o carimbo preenchido nos parametro
 schematic.js): codigo da placa, arquivo SCH-DI.., nome, quem iniciou e a data.
 
 Rotas:
-  GET  /api/projeto/novo/previa?nome=&sigla=   -> {ok, proximo, ano, sigla, codigo, ultimo, arquivo}
+  GET  /api/projeto/novo/previa?nome=&sigla=&tipo=  -> {ok, proximo, ano, sigla, codigo, ultimo, arquivo}
+  GET  /api/catalogo                           -> {ok, itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo}], proximo, ano}
+  POST /api/catalogo/registrar {tipo, nome, cliente?, vinculo?, sigla?} -> {ok, item, codigo, ...} (409: codigo ou nome repetido)
   GET  /api/projeto/novo/catalogo?codigo=      -> {ok, achou:{item, nome, cliente, modelo, ...}|null}
   GET  /api/projeto/novo/templates             -> {ok, padrao, templates:[{id, nome, w, h, estilo}]} (os da casa)
   POST /api/projeto/novo {nome, cliente?, vinculo?, sigla?, iniciador?, projeto?, template? ('' = sem template)}
@@ -55,12 +57,16 @@ def _limpa_param(v):
     return str(v).replace(';', ',').replace('|', '/').replace('":', '" :').strip()
 
 
+def nome_da_folha(codigo):
+    """a folha do projeto novo: SCH-DI261944 (o Arquivo do carimbo e o nome da folha)"""
+    return 'SCH-' + (codigo.split('-', 1)[1].replace(' ', '') if '-' in codigo else codigo)
+
+
 def params_template(codigo, nome, iniciador, cliente='', data=None):
-    """os campos do carimbo A4_DiEletrons para o projeto novo (o mesmo do catalogo.js » paramsTemplate)"""
+    """os campos do carimbo A4_DiEletrons para o projeto novo (o mesmo do catalogo.js » paramsTemplate): o codigo da
+    placa, o desenhista e a data; o equipamento vem do Definir projeto (2026-11-05)"""
     t = data or time.localtime()
-    num = codigo.split('-', 1)[1].replace(' ', '') if '-' in codigo else codigo
-    p = {'Desenho_linha_unica': codigo, 'Arquivo': 'SCH-' + num,
-         'Equipamento_linha_um': ' '.join(str(nome).split()).upper(), 'Equipamento_linha_dois': codigo,
+    p = {'CodigoDaPlaca': codigo,
          'Desenhista_DiEletrons': ' '.join(str(iniciador).split()),
          'Data_desenho': time.strftime('%d/%m/%y', t), 'Revisao': 'REV.A'}
     if cliente:
@@ -86,7 +92,7 @@ def templates_casa(root):
 def texto_esquema(projeto, codigo, params, template=TEMPLATE, tpl=None):
     """a folha do projeto novo: no template escolhido (com a medida dele) ou uma A4 sem template (template '')"""
     quando = time.strftime('%d/%m/%Y %H:%M:%S') + ' (NexoEletric, projeto novo)'
-    folha = {'t': 'sheet', 'name': params.get('Arquivo') or 'ESQUEMA_1', 'size': 'A4', 'w': A4[0], 'h': A4[1]}
+    folha = {'t': 'sheet', 'name': nome_da_folha(codigo) if codigo else 'ESQUEMA_1', 'size': 'A4', 'w': A4[0], 'h': A4[1]}
     if template:
         folha['template'] = template
         if tpl and tpl.get('w') and tpl.get('h'):
@@ -118,10 +124,40 @@ def registra(app, root, h):
                 return 'o nome fica igual ao do projeto "%s" no link (%s)' % (o, novo_id)
         return None
 
+    @app.route('/api/catalogo')
+    def catalogo_lista():
+        """o catalogo inteiro para o Definir projeto (hub-catalogo.js)"""
+        try:
+            r = _motor(root, {'acao': 'lista'})
+        except Exception as e:             # noqa: BLE001
+            return {'ok': False, 'error': str(e)}, 503
+        r.pop('ok', None)
+        return dict(ok=True, **r)
+
+    @app.route('/api/catalogo/registrar', methods=['POST'])
+    def catalogo_registrar():
+        """um item novo no catalogo (placa, equipamento ou produto), com o codigo no padrao da casa"""
+        data = request.get_json(silent=True) or {}
+        nome = ' '.join(str(data.get('nome') or '').split())
+        tipo = ' '.join(str(data.get('tipo') or '').split()).upper()
+        if not nome:
+            return {'ok': False, 'error': 'falta o nome'}, 400
+        if not tipo:
+            return {'ok': False, 'error': 'falta o tipo (placa, equipamento...)'}, 400
+        try:
+            r = _motor(root, {'acao': 'registra', 'nome': nome, 'tipo': tipo, 'cliente': data.get('cliente') or '',
+                              'vinculo': data.get('vinculo') or '', 'sigla': data.get('sigla') or ''})
+        except Exception as e:             # noqa: BLE001
+            msg = str(e)
+            return {'ok': False, 'error': msg}, 409 if 'já está no catálogo' in msg else 503
+        r.pop('ok', None)
+        return dict(ok=True, **r)
+
     @app.route('/api/projeto/novo/previa')
     def projeto_novo_previa():
         try:
-            r = _motor(root, {'acao': 'previa', 'nome': request.args.get('nome', ''), 'sigla': request.args.get('sigla', '')})
+            r = _motor(root, {'acao': 'previa', 'nome': request.args.get('nome', ''), 'sigla': request.args.get('sigla', ''),
+                              'tipo': request.args.get('tipo', '')})
         except Exception as e:             # noqa: BLE001
             return {'ok': False, 'error': str(e)}, 503
         r.pop('ok', None)

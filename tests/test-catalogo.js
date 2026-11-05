@@ -68,22 +68,30 @@ const outros = C.lerZip(fs.readFileSync(ARQ)).filter(e => e.nome !== 'xl/workshe
     'sharedStrings, workbook e o resto do .xlsx não mudam');
   assert.ok(fs.existsSync(r.copia), 'a cópia de antes ficou guardada');
   assert.throws(() => C.registra({ nome: 'X', sigla: '1ab' }), /sigla inválida/);
-  /* a mesma placa outra vez ganha o número seguinte (o código é outro); o código repetido é recusado */
-  assert.strictEqual(C.registra({ nome: 'Placa medidora de nível' }).item, 1943);
+  /* a mesma placa outra vez é recusada (2026-11-05: "não pode deixar repetir"), dizendo o código que já existe; outro
+     nome ganha o número seguinte */
+  assert.throws(() => C.registra({ nome: 'Placa medidora de nível' }), /já está no catálogo com o código PMN-DI\d+1942/);
+  assert.strictEqual(C.registra({ nome: 'Placa medidora de temperatura' }).item, 1943);
+  /* os grupos do Definir projeto e a lista inteira */
+  assert.deepStrictEqual(['PLACA', 'Placa', 'PCB', 'Equipamento', 'EQUIAPAMENTO', 'Equipmaento', 'Sistema', 'Nacionalização', 'Acessórios', 'CABO', 'Software'].map(C.grupo),
+    ['placa', 'placa', 'placa', 'equipamento', 'equipamento', 'equipamento', 'equipamento', 'equipamento', 'produto', 'produto', 'produto']);
+  const L = C.lista();
+  assert.deepStrictEqual(L.itens.map(i => [i.item, i.grupo]).slice(-2), [[1942, 'placa'], [1943, 'placa']]);
   console.log('  registrar: linha nova, estilos, o resto do .xlsx intacto ok');
 
   /* ---- 4. o template preenchido ---- */
   const pt = C.paramsTemplate({ codigo: 'PAEL-DI261940', nome: 'placa adaptadora', iniciador: 'Ana', data: new Date(2026, 10, 4) });
-  assert.deepStrictEqual([pt.Desenho_linha_unica, pt.Arquivo, pt.Equipamento_linha_um, pt.Desenhista_DiEletrons, pt.Data_desenho],
-    ['PAEL-DI261940', 'SCH-DI261940', 'PLACA ADAPTADORA', 'Ana', '04/11/26']);
+  assert.deepStrictEqual([pt.CodigoDaPlaca, pt.Arquivo, pt.Equipamento_linha_um, pt.Desenhista_DiEletrons, pt.Data_desenho],
+    ['PAEL-DI261940', undefined, undefined, 'Ana', '04/11/26'], 'o código da placa; o Arquivo é o nome da folha');
   const T = require('../hub-schtemplate.js');
   assert.deepStrictEqual(T.codigoDoProjeto('PDCD-DI261939 (PTYPE)'), { codigo: 'PDCD-DI261939', numero: 'DI261939' });
   assert.deepStrictEqual(T.codigoDoProjeto('PAEAT - DI261941'), { codigo: 'PAEAT-DI261941', numero: 'DI261941' });
   assert.strictEqual(T.codigoDoProjeto('LM555 astável'), null);
   const ctx = T.contexto({ projeto: 'PDCD-DI261939 (PTYPE)', formato: 'A3' });
-  assert.deepStrictEqual([T.valor('Arquivo', ctx), T.valor('Desenho_linha_unica', ctx), T.valor('Formato', ctx)], ['SCH-DI261939', 'PDCD-DI261939', 'A3'],
+  assert.deepStrictEqual([T.valor('Arquivo', ctx), T.valor('CodigoDaPlaca', ctx), T.valor('Formato', ctx)], ['SCH-DI261939', 'PDCD-DI261939', 'A3'],
     'o carimbo se completa pelo nome do projeto e pela folha');
-  assert.strictEqual(T.valor('Arquivo', T.contexto({ projeto: 'PDCD-DI261939', proj: 'Arquivo=OUTRO' })), 'OUTRO', 'o que o projeto grava ganha');
+  assert.strictEqual(T.valor('Arquivo', T.contexto({ projeto: 'PDCD-DI261939', proj: 'Arquivo=OUTRO', folhaNome: 'SCH-X' })), 'SCH-X',
+    'o Arquivo é o nome da folha, o que o projeto grava não conta');
   console.log('  carimbo: params do projeto novo e o preenchimento sozinho ok');
 
   /* ---- 5. pelo MCP: catalogo_previa e projeto_criar {produto} ---- */
@@ -112,7 +120,7 @@ const outros = C.lerZip(fs.readFileSync(ARQ)).filter(e => e.nome !== 'xl/workshe
   assert.strictEqual(x.j.catalogo.item, 1944);
   const sch = fs.readFileSync(path.join(PROJETOS, x.j.projeto, 'schematic.js'), 'utf8');
   assert.ok(/"template":"casa:A4_DiEletrons"/.test(sch.replace(/\s/g, '')), 'a folha no template da casa');
-  assert.ok(/Desenhista_DiEletrons=Ana Teste/.test(sch) && /Cliente=USIMINAS/.test(sch) && /Arquivo=SCH-DI\d+1944/.test(sch), sch);
+  assert.ok(/Desenhista_DiEletrons=Ana Teste/.test(sch) && /Cliente=USIMINAS/.test(sch) && /CodigoDaPlaca=PTM-DI\d+1944/.test(sch), sch);
   assert.ok(/"name":"SCH-DI\d+1944"/.test(sch.replace(/\s/g, '')), 'a folha com o nome do arquivo do carimbo');
   x = await chama('sch_validar', { projeto: 'PTM-DI' + d.ano + '1944' });
   assert.ok(!x.erro, JSON.stringify(x.j));

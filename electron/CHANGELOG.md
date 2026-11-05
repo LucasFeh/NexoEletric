@@ -4,6 +4,32 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.75.0 — 2026-11-05
+
+**O carimbo se preenche sozinho, e o projeto é definido pelo catálogo de todos os produtos.**
+- **Definir projeto** (Configurações do Esquema, e também no rodapé dos Campos do carimbo) abre o catálogo de todos os
+  produtos numa tela. Ele tem:
+  - pesquisa por código, nome, cliente ou descrição;
+  - filtros **Placas / Equipamentos / Produtos** (a coluna TIPO da planilha, com as grafias soltas agrupadas);
+  - escolha do **código da placa** e do **equipamento** (código e nome). Escolher uma placa traz junto o equipamento
+    que a descrição dela cita;
+  - **Adicionar ao catálogo**, quando o produto ainda não está lá: tipo, nome, cliente e descrição, com o código no
+    padrão da casa (sigla + DI + ano + item). Código ou nome repetido no mesmo grupo é recusado, e a mensagem diz o
+    código que já existe.
+  Os códigos e o nome do equipamento vão para o carimbo.
+- **Template da casa:**
+  - "Equipamento linha um/dois" passa a ser **Nome do equipamento** e **Código do equipamento**, e a "linha única" sai;
+  - o quadro "DESENHO:" passa a ser **PLACA:**, com o código da placa;
+  - os nomes são os do template do Altium (NomeDoEquipamento, CodigoDoEquipamento, CodigoDaPlaca), então os projetos
+    que vieram do Altium já aparecem preenchidos. Os nomes antigos continuam sendo lidos.
+- **Campos automáticos:** Formato e Escala vêm da folha, Arquivo é o nome da folha, e o número da folha também é
+  automático. Desenhista, verificador, aprovador, datas e revisão só vêm do projeto (carimbos e Aprovar): o que a folha
+  ou o Altium tenham gravado com esses nomes não conta mais, e projeto sem aprovação não mostra "NOME_APROVADOR".
+- **Campos do carimbo:** uma coluna só, sem os textos de cima, só com o que o sistema não preenche (no template da
+  casa, nada).
+- Novo projeto: a folha nasce com o nome do arquivo (SCH-DI…) e o carimbo com o código da placa. O equipamento vem do
+  Definir projeto.
+
 ## 1.74.0 — 2026-11-05
 
 **O carimbo do projeto: desenhista, assumir projeto e as revisões a cada aprovação.**

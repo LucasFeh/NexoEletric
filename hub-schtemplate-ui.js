@@ -169,34 +169,12 @@ function secao(a){
   return box;
 }
 function itemDaFolha(){ return api.item(); }
-/* O carimbo se completa sozinho (2026-11-04): o projeto com código de produto no nome ("PDCD-DI261939 (PTYPE)") tem o
-   nome e o cliente no catálogo da casa (/api/projeto/novo/catalogo, o mcp/lib/catalogo.js). Só preenche o que o
-   projeto ainda não tem; sem o catálogo (NAS fora, hub sem servidor) fica como está, em silêncio. */
-async function completaDoCatalogo(tpl){
-  const sch = api && api.schematic;
-  const cod = sch && T.codigoDoProjeto(sch.project);
-  if (!cod || !T.campos(tpl).some(n => /^Equipamento_linha_um$/i.test(n))) return;
-  const p = T.parseParams(sch.params);
-  if (p.Equipamento_linha_um) return;
-  let j = null;
-  try { j = await (await fetch('/api/projeto/novo/catalogo?codigo=' + encodeURIComponent(cod.codigo), { cache:'no-store' })).json(); } catch (_) { return; }
-  const a = j && j.ok && j.achou;
-  if (!a || !a.nome) return;
-  const q = T.parseParams(sch.params);
-  if (q.Equipamento_linha_um) return;
-  q.Equipamento_linha_um = a.nome;
-  if (a.cliente && !q.Cliente) q.Cliente = a.cliente;
-  sch.params = T.serializaParams(q);
-  api.sujo(); api.redesenha();
-  DLG().toast('carimbo: ' + a.nome + ' (item ' + a.item + ' do catálogo)', 'ok', 4000);
-}
 function escolhe(id){
   const it = itemDaFolha();
   const tpl = id ? T.acha(id) : null;
   if (id && !tpl) return;
   const nova = T.aplica(it, tpl, root.HubCore && root.HubCore.sheetMatch);
   api.commit();
-  if (tpl) completaDoCatalogo(tpl);
   if (nova){
     api.enquadra();
     const fora = api.contaFora ? api.contaFora(nova) : 0;
@@ -261,74 +239,53 @@ function abreParametros(){
   ov.addEventListener('mousedown', e => { if (e.target === ov) fecha(); });
 }
 
-/* ─── o carimbo: os campos do template, do projeto e da folha, numa tabela só (2026-11-04) ───
-   Coluna "projeto" = o cabeçalho do schematic.js (vale para todas as folhas); "esta folha" = o item sheet (ganha do
-   projeto). Vazio herda: o placeholder mostra o que vai sair no carimbo (o que o sistema preenche sozinho, como o
-   código da placa tirado do nome do projeto e o formato da folha, ou o padrão do template). */
+/* ─── os campos do carimbo: UMA coluna, só o que não se preenche sozinho (2026-11-05) ───
+   "Formato e escala vêm da folha, arquivo é o nome da folha, código da placa e código/nome do equipamento vêm do Definir
+   projeto, as datas são automáticas, desenhista e aprovador são os carimbos; a área do carimbo não precisa da coluna
+   projeto e esta folha, é só uma coluna" (o dono). O que sobra é o campo que o template tem e o sistema não sabe
+   preencher; vale para o projeto inteiro (o cabeçalho do schematic.js). O resto dos parâmetros passa intacto. */
 function abreCarimbo(){
   if (!api) return;
   css();
   const sch = api.schematic, it = itemDaFolha();
   const tpl = it && it.template ? T.acha(it.template) : null;
-  const proj = T.parseParams(sch.params), doc = T.parseParams(it && it.params);
-  const ctxBase = o => T.contexto(Object.assign({ tpl, folhaN:api.indice + 1, folhaTotal:api.total, documento:api.nome + '.SchDoc',
-                                                  projeto:sch.project, formato:it && it.size }, o));
-  let nomes = tpl ? T.campos(tpl) : T.CAMPOS_PADRAO.slice();
-  nomes = nomes.filter(n => !/^Sheet(Number|Total)$/i.test(n));
-  for (const k of Object.keys(proj).concat(Object.keys(doc))) if (!nomes.some(n => n.toLowerCase() === k.toLowerCase())) nomes.push(k);
-  /* AS PESSOAS E AS DATAS NÃO SÃO CAMPO (2026-11-05: "o carimbo carrega o nome de quem desenhou e quem aprova, não
-     precisa de um campo pra desenhista nem pra verificador"): o desenhista vem de quem criou ou assumiu o projeto
-     (Arquivo › Assumir projeto…), o verificador e o aprovador do Aprovar, e as datas junto. Ficam fora da tabela, ditos
-     no topo dela, e passam intactos pelo Aplicar (como a assinatura da aprovação, hub-carimbos.js). */
-  const oculto = n => /^Aprovacao_|^Desenhista_|^Verificador_|^Aprovador_|^Data_(desenho|verificacao|aprovacao)$|^Revisao$|^Revision$/i.test(n);
-  nomes = nomes.filter(n => !oculto(n));
+  const proj = T.parseParams(sch.params);
+  const nomes = (tpl ? T.campos(tpl) : T.CAMPOS_PADRAO.slice()).filter(n => !T.automatico(n));
 
   const ov = el('div', 'st-ov');
-  const bx = el('div', 'st-box st-pp st-carimbo');
+  const bx = el('div', 'st-box st-pp');
   const hd = el('div', 'st-head');
-  hd.append(el('h2', null, 'Carimbo'), el('span', 'st-dim', (tpl ? tpl.nome : 'sem template') + ' · folha ' + api.nome));
+  hd.append(el('h2', null, 'Campos do carimbo'), el('span', 'st-dim', tpl ? tpl.nome : 'sem template'));
   const lista = el('div', 'st-list');
-  const quem = el('div', 'st-dim');
-  quem.style.cssText = 'margin-bottom:8px; line-height:1.6';
-  const pessoa = (rot, nome, data) => rot + ': ' + (nome ? nome + (data ? ' (' + data + ')' : '') : '—');
-  quem.append(el('div', null, pessoa('Desenhista', proj.Desenhista_DiEletrons, proj.Data_desenho)
-                 + '  ·  trocar: Arquivo › Assumir projeto… (senha mestre)'),
-              el('div', null, proj.Aprovador_DiEletrons ? pessoa('Verificado e aprovado por', proj.Aprovador_DiEletrons, proj.Data_aprovacao)
-                                                        : 'Sem aprovação: o Aprovar, ao lado do Salvar, preenche verificador e aprovador'),
-              el('div', null, 'Revisão: ' + (proj.Revisao || '—') + '  ·  cada aprovação grava a revisão seguinte (Histórico › Revisões)'));
-  lista.append(quem);
-  const grade = el('div', 'st-kvl st-car');
-  grade.append(el('span', 'st-dim', 'campo'), el('span', 'st-dim', 'projeto'), el('span', 'st-dim', 'esta folha'));
   const campos = [];
-  for (const n of nomes){
-    const rot = el('span', null, n.replace(/_DiEletrons$/, '').replace(/_/g, ' ')); rot.title = '=' + n;
-    const ip = el('input'); ip.value = proj[n] != null ? proj[n] : '';
-    const id = el('input'); id.value = doc[n] != null ? doc[n] : '';
-    const pinta = () => {
-      const semProj = T.valor(n, ctxBase({ doc:{}, proj:{} }));
-      ip.placeholder = semProj != null && semProj !== '' ? semProj : '—';
-      const p2 = Object.assign({}, proj); if (ip.value !== '') p2[n] = ip.value; else delete p2[n];
-      const doProj = T.valor(n, ctxBase({ doc:{}, proj:T.serializaParams(p2) }));
-      id.placeholder = doProj != null && doProj !== '' ? doProj : '—';
-    };
-    ip.addEventListener('input', pinta);
-    pinta();
-    campos.push([n, ip, id]);
-    grade.append(rot, ip, id);
+  if (!nomes.length){
+    lista.append(el('div', 'st-dim', 'Todos os campos deste template se preenchem sozinhos.'));
+  } else {
+    const grade = el('div', 'st-kvl');
+    grade.style.gridTemplateColumns = 'minmax(110px, .8fr) 1.4fr';
+    for (const n of nomes){
+      const rot = el('span', null, n.replace(/_DiEletrons$/, '').replace(/_/g, ' ')); rot.title = '=' + n;
+      const ip = el('input'); ip.value = proj[n] != null ? proj[n] : '';
+      const pad = tpl && tpl.params ? tpl.params[n] : '';
+      ip.placeholder = pad && pad !== '*' ? String(pad) : '—';
+      campos.push([n, ip]);
+      grade.append(rot, ip);
+    }
+    lista.append(grade);
   }
-  lista.append(grade);
   const ft = el('div', 'st-foot');
   const fecha = () => { ov.remove(); document.removeEventListener('keydown', esc, true); };
   const esc = e => { if (e.key === 'Escape'){ e.stopPropagation(); fecha(); } };
   const sp = el('span'); sp.style.flex = '1';
-  ft.append(sp, botao('Cancelar', null, fecha), botao('Aplicar', 'grava no schematic.js (Salvar para ir ao disco)', () => {
-    const p = {}, d = {};
-    for (const k of Object.keys(proj)) if (oculto(k)) p[k] = proj[k];
-    for (const k of Object.keys(doc)) if (oculto(k)) d[k] = doc[k];
-    for (const [n, ip, id] of campos){ if (ip.value.trim() !== '') p[n] = ip.value.trim(); if (id.value.trim() !== '') d[n] = id.value.trim(); }
-    const sp2 = T.serializaParams(p), sd = T.serializaParams(d);
-    if (sp2) sch.params = sp2; else delete sch.params;
-    if (it){ if (sd) it.params = sd; else delete it.params; }
+  if (root.HubCatalogo && root.HubCatalogo.abreDaFolha)
+    ft.append(botao('Definir projeto…', 'código da placa e código e nome do equipamento, do catálogo de todos os produtos',
+                    () => { fecha(); root.HubCatalogo.abreDaFolha(); }));
+  ft.append(sp, botao(campos.length ? 'Cancelar' : 'Fechar', null, fecha));
+  if (campos.length) ft.append(botao('Aplicar', 'grava no schematic.js (Salvar para ir ao disco)', () => {
+    const p = Object.assign({}, proj);
+    for (const [n, ip] of campos){ if (ip.value.trim() !== '') p[n] = ip.value.trim(); else delete p[n]; }
+    const s2 = T.serializaParams(p);
+    if (s2) sch.params = s2; else delete sch.params;
     api.sujo();
     api.commit();
     fecha();
@@ -336,7 +293,7 @@ function abreCarimbo(){
   }));
   bx.append(hd, lista, ft); ov.append(bx); document.body.append(ov);
   document.addEventListener('keydown', esc, true);
-  const pri = grade.querySelector('input'); if (pri) pri.focus();
+  const pri = lista.querySelector('input'); if (pri) pri.focus();
 }
 
 /* ─── remover template da casa (2026-11-04: "quero que tenha uma área pra remover esse template") ───
@@ -608,7 +565,7 @@ function abreEditor(o){
       const campo = String(x.s).charAt(0) === '=';
       if (campo){
         const nomes = Array.from(new Set(T.CAMPOS_PADRAO.concat(T.campos(tpl), ['Desenhista_DiEletrons', 'Verificador_DiEletrons',
-          'Aprovador_DiEletrons', 'Equipamento_linha_um', 'Equipamento_linha_dois', 'Revisao', 'Escala', 'Arquivo',
+          'Aprovador_DiEletrons', 'NomeDoEquipamento', 'CodigoDoEquipamento', 'CodigoDaPlaca', 'Revisao', 'Escala', 'Arquivo',
           'Data_desenho', 'Data_verificacao', 'Data_aprovacao', 'CurrentDate', 'DocumentName', 'ProjectName'])));
         const lista = 'st-campos-' + Math.random().toString(36).slice(2, 7);
         const dl = el('datalist'); dl.id = lista; for (const n of nomes){ const o = el('option'); o.value = n; dl.append(o); }

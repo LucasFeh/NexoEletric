@@ -76,6 +76,32 @@ const APELIDOS = [
 const APELIDO = {};
 for (const g of APELIDOS) for (const n of g) APELIDO[n.toLowerCase()] = g;
 
+/* O CARIMBO QUE SE PREENCHE SOZINHO (pedido do dono, 2026-11-05: "o formato é automático, baseado no formato da folha,
+   escala também; arquivo é o nome da folha; código da placa, código e nome do equipamento vêm do Definir projeto; as
+   datas são automáticas; o carimbo é a assinatura de cada pessoa").
+   AUTOMATICOS  o sistema responde, e o que a folha ou o projeto tenham gravado não conta (Formato, Escala, Arquivo e
+                o número da folha: a folha é quem sabe).
+   DO_PROJETO   só o cabeçalho do schematic.js responde, pelo nome exato, sem o padrão do template: as pessoas e as
+                datas (dos carimbos: quem criou/assumiu e quem aprovou), a revisão (do Aprovar) e os códigos (do Definir
+                projeto). A folha não sobrescreve, e "NOME_APROVADOR" do template não aparece num projeto sem aprovação.
+   ANTIGOS      os nomes de antes (o template da casa até a 1.74.0), lidos como os novos nos projetos que os têm. */
+const AUTOMATICOS = ['Formato', 'Escala', 'Arquivo', 'SheetNumber', 'SheetTotal'];
+const DO_PROJETO = ['Desenhista_DiEletrons', 'Verificador_DiEletrons', 'Aprovador_DiEletrons', 'Data_desenho', 'Data_verificacao',
+                    'Data_aprovacao', 'Revisao', 'CodigoDaPlaca', 'CodigoDoEquipamento', 'NomeDoEquipamento'];
+const ANTIGOS = { codigodaplaca: ['Desenho_linha_unica'], codigodoequipamento: ['Equipamento_linha_dois'],
+                  nomedoequipamento: ['Equipamento_linha_um'] };
+const NOMES_ANTIGOS = ['Desenho_linha_unica', 'Desenho_linha_um', 'Desenho_linha_dois', 'Equipamento_linha_um',
+                       'Equipamento_linha_dois', 'Equipamento_linha_unica'];
+const _auto = new Set(AUTOMATICOS.map(n => n.toLowerCase()));
+const _proj = new Set(DO_PROJETO.map(n => n.toLowerCase()));
+/* o campo se preenche sozinho (não vai na tabela de campos do carimbo)? */
+function automatico(nome){
+  const n = String(nome || '').toLowerCase();
+  return _auto.has(n) || _proj.has(n) || NOMES_ANTIGOS.some(x => x.toLowerCase() === n)
+    || /^(revision|date|drawnby|checkedby|approvedby|title|documentnumber)$/i.test(n)
+    || /^Aprovacao_|^Desenhista_|^Verificador_|^Aprovador_/i.test(nome);
+}
+
 /* os campos que o painel oferece para preencher, nesta ordem (os do Altium e os da casa) */
 const CAMPOS_PADRAO = ['Title', 'DocumentNumber', 'Revision', 'DrawnBy', 'CheckedBy', 'ApprovedBy',
                        'Date', 'CompanyName', 'SheetNumber', 'SheetTotal'];
@@ -163,11 +189,13 @@ function contexto(o){
     DocumentName: o.documento || '', DocumentFullPathAndName: o.caminho || o.documento || '',
     ProjectName: o.projeto || '', ModifiedDate: hoje(d),
   };
-  /* o carimbo da casa se preenche sozinho (pedido do dono, 2026-11-04): o formato da folha e o código do produto
-     que o nome do projeto traz. O que a folha ou o projeto gravarem ganha deste (as camadas doc e proj vêm antes) */
+  /* o carimbo da casa se preenche sozinho (2026-11-04/05): o formato e a escala da folha, o nome da folha no Arquivo e,
+     enquanto o Definir projeto não disser, o código da placa que o nome do projeto traz */
   if (o.formato) auto.Formato = String(o.formato);
+  auto.Escala = o.escala ? String(o.escala) : '1:1';
+  if (o.folhaNome) auto.Arquivo = String(o.folhaNome);
   const cod = codigoDoProjeto(o.projeto);
-  if (cod){ auto.Desenho_linha_unica = cod.codigo; auto.Arquivo = 'SCH-' + cod.numero; auto.Equipamento_linha_dois = cod.codigo; }
+  if (cod){ auto.CodigoDaPlaca = cod.codigo; if (!o.folhaNome) auto.Arquivo = 'SCH-' + cod.numero; }
   return { doc: parseParams(o.doc), proj: parseParams(o.proj), auto, tpl: (o.tpl && o.tpl.params) || {},
            estilo: o.estilo || '', faltante: o.faltante,
            /* cru: o editor de template mostra "=Title" como está, para se ver o que é campo */
@@ -176,6 +204,19 @@ function contexto(o){
 /* valor de um parâmetro pelo nome, ou undefined: cada camada é consultada pelo nome e pelos
    apelidos dele antes de cair para a camada seguinte */
 function valor(nome, c){
+  const k = nome.toLowerCase();
+  if (_auto.has(k) && !c.cru){
+    const v = pega(c.auto, nome);
+    if (v !== undefined) return String(v);
+  }
+  if (_proj.has(k) && !c.cru){
+    for (const n of [nome].concat(ANTIGOS[k] || [])){
+      const v = pega(c.proj, n);
+      if (v !== undefined && v !== '' && v !== '*') return String(v);
+    }
+    const v = pega(c.auto, nome);
+    return v !== undefined ? String(v) : undefined;
+  }
   const nomes = APELIDO[nome.toLowerCase()] ? [nome].concat(APELIDO[nome.toLowerCase()]) : [nome];
   for (const camada of [c.doc, c.proj, c.auto, c.tpl])
     /* o que o SISTEMA sabe responde só pelo nome exato: "Data_desenho" é apelido de "Date"
@@ -485,7 +526,8 @@ function daFolha(schematic, nome, fontes){
   const n = folhas.indexOf(it);
   return { item:it, tpl:acha(it.template, fontes), ctxo:{
     doc:it.params, proj:schematic.params, folhaN:n + 1, folhaTotal:folhas.length,
-    documento:nome + '.SchDoc', projeto:schematic.project || '', formato:it.size || '' } };
+    documento:nome + '.SchDoc', projeto:schematic.project || '', formato:it.size || '', folhaNome:nome,
+    escala:it.escala || '' } };
 }
 
 /* Escolher um template para a folha, no item `sheet`, como o Altium faz: o template traz a
@@ -546,7 +588,7 @@ function copia(tpl, nome, existentes){
   return t;
 }
 
-const API = { ESTILOS, CARIMBOS, APELIDOS, CAMPOS_PADRAO, ARQ_CASA,
+const API = { ESTILOS, CARIMBOS, APELIDOS, CAMPOS_PADRAO, ARQ_CASA, AUTOMATICOS, DO_PROJETO, NOMES_ANTIGOS, automatico,
               parseParams, serializaParams, acervo, lista, acha, contexto, valor, resolve, campos, codigoDoProjeto,
               folhaDe, estiloPorMedida, primitivas, desenha, itemFolha, daFolha,
               caixaItem, moveItem, fonteId, aplica,

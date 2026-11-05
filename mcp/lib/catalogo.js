@@ -174,6 +174,26 @@ function previa(o) {
            ultimo: u && { item: u.item, nome: u.nome, modelo: u.modelo } };
 }
 
+/* OS GRUPOS DO "DEFINIR PROJETO" (2026-11-05: "separar em filtro Placas, Produtos, Equipamentos"): a coluna TIPO do
+   catálogo é escrita à mão (Placa, PLACA, PCB; Equipamento, EQUIAPAMENTO, Equipmaento, Sistema, Nacionalização...),
+   então o grupo sai de uma regra, e não de uma lista fechada. O que não é placa nem equipamento é produto (acessório,
+   cabo, software). */
+function grupo(tipo) {
+  const t = semAcento(String(tipo || '')).toUpperCase();
+  if (/PLACA|PCB/.test(t)) return 'placa';
+  if (/EQU?I?A?P|EQUIPM|SISTEMA|NACIONALIZ|REVENDA/.test(t)) return 'equipamento';
+  return 'produto';
+}
+const normCod = s => String(s || '').replace(/\s+/g, '').toUpperCase();
+
+/* o catálogo inteiro, para a tela: {itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo}], ultimo, proximo, ano} */
+function lista(o) {
+  const c = abre(o && o.arquivo);
+  return { arquivo: c.arquivo, ultimo: c.ultimo, proximo: c.proximo, ano: c.ano,
+           itens: c.itens.map(i => ({ item: i.item, tipo: i.tipo, grupo: grupo(i.tipo), nome: i.nome, cliente: i.cliente,
+                                      modelo: i.modelo, vinculo: i.vinculo })) };
+}
+
 /* o produto de um código ("PDCD-DI261939", espaços em volta do hífen não contam): {item, nome, cliente, modelo, ...} ou null */
 function busca(o) {
   const cod = String((o && o.codigo) || '').replace(/\s+/g, '').toUpperCase();
@@ -204,7 +224,10 @@ function registra(o) {
   const sg = o.sigla ? String(o.sigla).toUpperCase().trim() : sigla(nome, tipo);
   if (!siglaOk(sg)) throw new Error('sigla inválida: ' + sg + ' (letras e números, começando por letra)');
   const numero = c.proximo, cod = codigo(sg, c.ano, numero);
-  if (c.itens.some(i => i.modelo.replace(/\s+/g, '').toUpperCase() === cod)) throw new Error('o código ' + cod + ' já está no catálogo');
+  if (c.itens.some(i => normCod(i.modelo) === cod)) throw new Error('o código ' + cod + ' já está no catálogo');
+  /* o mesmo produto duas vezes também não (2026-11-05: "não pode deixar repetir"): mesmo nome no mesmo grupo */
+  const igual = !o.permitirMesmoNome && c.itens.find(i => limpa(i.nome).toUpperCase() === nome && grupo(i.tipo) === grupo(tipo));
+  if (igual) throw new Error('"' + nome + '" já está no catálogo com o código ' + igual.modelo + ' (item ' + igual.item + '): use esse');
   const uso = emUso(c.arquivo);
   if (uso) throw new Error(uso);
   /* a linha: a primeira sem MODELO depois do último produto (as de sobra só têm o ITEM repetido) */
@@ -255,11 +278,10 @@ function registra(o) {
 function paramsTemplate(o) {
   const d = o.data instanceof Date ? o.data : new Date();
   const dd = n => String(n).padStart(2, '0');
+  /* 2026-11-05: o template da casa tem o código da placa (CodigoDaPlaca); o equipamento (nome e código) vem do
+     Definir projeto, e o Arquivo é o nome da folha */
   const p = {
-    Desenho_linha_unica: o.codigo,
-    Arquivo: 'SCH-' + String(o.codigo).replace(/^.*?-(DI\d+)$/, '$1'),
-    Equipamento_linha_um: limpa(o.nome).toUpperCase(),
-    Equipamento_linha_dois: o.codigo,
+    CodigoDaPlaca: o.codigo,
     Desenhista_DiEletrons: limpa(o.iniciador),
     Data_desenho: dd(d.getDate()) + '/' + dd(d.getMonth() + 1) + '/' + String(d.getFullYear()).slice(-2),
     Revisao: 'REV.A',
@@ -268,10 +290,10 @@ function paramsTemplate(o) {
   return p;
 }
 
-module.exports = { PADRAO, abre, previa, registra, busca, sigla, codigo, paramsTemplate, lerZip, escreverZip };
+module.exports = { PADRAO, abre, previa, registra, busca, lista, grupo, sigla, codigo, paramsTemplate, lerZip, escreverZip };
 
 /* ============================== a linha de comando ==============================
-   node mcp/lib/catalogo.js --cli  < {acao:'previa'|'registra'|'busca', nome, tipo?, cliente?, vinculo?, sigla?, codigo?, arquivo?}
+   node mcp/lib/catalogo.js --cli  < {acao:'previa'|'registra'|'busca'|'lista', nome, tipo?, cliente?, vinculo?, sigla?, codigo?, arquivo?}
    -> uma linha JSON: {ok:true, ...} ou {ok:false, erro} */
 if (require.main === module && process.argv.includes('--cli')) {
   let ent = '';
@@ -281,7 +303,8 @@ if (require.main === module && process.argv.includes('--cli')) {
     let r;
     try {
       const a = JSON.parse(ent || '{}');
-      r = Object.assign({ ok: true }, a.acao === 'registra' ? registra(a) : a.acao === 'busca' ? busca(a) : previa(a));
+      r = Object.assign({ ok: true }, a.acao === 'registra' ? registra(a) : a.acao === 'busca' ? busca(a)
+        : a.acao === 'lista' ? lista(a) : previa(a));
     } catch (e) { r = { ok: false, erro: String(e && e.message || e) }; }
     process.stdout.write(JSON.stringify(r) + '\n');
   });

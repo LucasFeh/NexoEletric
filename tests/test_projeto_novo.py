@@ -103,7 +103,8 @@ class Rotas(unittest.TestCase):
         self.assertIn('"template": "casa:A4_DiEletrons"', sch)
         self.assertIn('Desenhista_DiEletrons=Ana', sch)
         self.assertIn('Cliente=ALUMAR', sch)
-        self.assertIn('Arquivo=SCH-' + cod.split('-', 1)[1], sch)
+        self.assertIn('"name": "SCH-' + cod.split('-', 1)[1] + '"', sch)       # o Arquivo do carimbo e o nome da folha
+        self.assertIn('CodigoDaPlaca=' + cod, sch)
         self.assertTrue(os.path.isfile(os.path.join(self.tmp, 'Projects', cod, 'changes.js')))
         self.assertEqual(self.indexado, [1])
         # o catalogo ganhou a linha

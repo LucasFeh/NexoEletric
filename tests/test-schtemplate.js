@@ -18,7 +18,8 @@ const perto = (a, b, m) => ok(Math.abs(a - b) < 0.01, (m || '') + ' — ' + a + 
 /* ── 1. o acervo extraído ── */
 const lib = loadVar('tools/schtemplate/sch-templates-altium.js', 'schtemplates');
 eq(lib.format, 'schtemplate-v1', 'formato do Libs');
-const A = T.acervo([lib]);
+/* + o da casa como o app carrega (Libs/sch-templates-casa.js): ele ganha o da extração, como no hub (globais) */
+const A = T.acervo([lib, loadVar('Libs/sch-templates-casa.js', 'schtemplatesCasa')]);
 for (const id of ['altium:Standard', 'altium:ANSI', 'altium:ISO A3 Landscape', 'altium:ISO A2 Landscape',
                   'altium:ANSI B Landscape', 'altium:ANSI C Landscape', 'altium:ANSI D Landscape',
                   'altium-legado:A4', 'casa:A4_DiEletrons'])
@@ -48,21 +49,38 @@ const c = T.contexto({ tpl:casa, doc:'Title=Folha da fonte;drawnby=ANA', proj:'T
 eq(T.resolve('=Title', c), 'Folha da fonte', 'documento ganha do projeto');
 eq(T.resolve('=title', c), 'Folha da fonte', 'sem caixa, como o Altium (=sheetnumber nos .SchDot antigos)');
 eq(T.resolve('=Revision', c), 'C', 'projeto ganha do padrão do template (Revisao=REV.A)');
-eq(T.resolve('=Revisao', c), 'C', 'o nome da casa acha o do Altium (apelido)');
-eq(T.resolve('=Desenhista_DiEletrons', c), 'ANA', 'DrawnBy preenche o DESEN. da casa');
-eq(T.resolve('=Verificador_DiEletrons', c), 'BETO', 'CheckedBy preenche o VERIF.');
-eq(T.resolve('=Aprovador_DiEletrons', c), 'NOME_APROVADOR', 'sem ninguém, vale o padrão do template');
+/* as pessoas, as datas e a revisão da casa vêm SÓ do cabeçalho, pelo nome exato (2026-11-05: dos carimbos e do
+   Aprovar): o DrawnBy/CheckedBy/Revision do Altium não preenchem, e sem ninguém o "NOME_APROVADOR" do template não sai */
+eq(T.resolve('=Revisao', c), '=Revisao', 'a Revisao da casa é a do Aprovar, não o Revision do Altium');
+eq(T.resolve('=Desenhista_DiEletrons', c), '=Desenhista_DiEletrons', 'o DrawnBy da folha não é o desenhista');
+eq(T.resolve('=Verificador_DiEletrons', c), '=Verificador_DiEletrons', 'o CheckedBy não é o verificador');
+eq(T.resolve('=Aprovador_DiEletrons', c), '=Aprovador_DiEletrons', 'sem aprovação, nada (nem o padrão do template)');
+{
+  const c2 = T.contexto({ tpl:casa, doc:'Desenhista_DiEletrons=FOLHA;Formato=A0;Escala=1:5;Arquivo=X', folhaNome:'SCH-DI261944',
+                          proj:'Desenhista_DiEletrons=Lucas;Data_desenho=05/11/26;CodigoDaPlaca=PBIDP-DI261944;Equipamento_linha_um=Velho',
+                          formato:'A4', projeto:'PBIDP-DI261944' });
+  eq(T.resolve('=Desenhista_DiEletrons', c2), 'Lucas', 'o desenhista é o do projeto, a folha não sobrescreve');
+  eq(T.resolve('=Data_desenho', c2), '05/11/26', 'a data do desenho do projeto');
+  eq([T.resolve('=Formato', c2), T.resolve('=Escala', c2), T.resolve('=Arquivo', c2)], ['A4', '1:1', 'SCH-DI261944'],
+     'formato e escala da folha, arquivo = nome da folha (o que a folha gravou não conta)');
+  eq(T.resolve('=CodigoDaPlaca', c2), 'PBIDP-DI261944', 'o código da placa do Definir projeto');
+  eq(T.resolve('=NomeDoEquipamento', c2), 'Velho', 'o nome antigo (Equipamento_linha_um) vale como o novo');
+  eq(T.resolve('=CodigoDaPlaca', T.contexto({ projeto:'PDCD-DI261939 (PTYPE)' })), 'PDCD-DI261939', 'sem definição: o código do nome do projeto');
+  ok(T.automatico('Formato') && T.automatico('Data_aprovacao') && T.automatico('CodigoDaPlaca') && T.automatico('Equipamento_linha_um')
+     && !T.automatico('Cliente'), 'o que se preenche sozinho');
+}
 eq(T.resolve('=SheetNumber', c) + '/' + T.resolve('=SheetTotal', c), '2/5', 'folha n de N');
 eq(T.resolve('=CurrentDate', c), '13/10/2026', 'data');
 eq(T.resolve('=CurrentTime', c), '08:05:09', 'hora');
-eq(T.resolve('=Data_desenho', c), '00/00/00', 'o apelido não puxa a data do sistema');
+eq(T.resolve('=Data_desenho', c), '=Data_desenho', 'o apelido não puxa a data do sistema');
 eq(T.resolve('=DocumentName', c) + ' ' + T.resolve('=ProjectName', c), 'main.SchDoc Demo', 'nomes');
 eq(T.resolve('=NaoExiste', c), '=NaoExiste', 'o que não resolve aparece como o Altium mostra');
 eq(T.resolve('=NaoExiste', T.contexto({ faltante:'' })), '', 'a vista pede vazio');
 eq(T.resolve('Rev =Revision', c), 'Rev =Revision', 'só o texto INTEIRO é special string');
 eq(T.resolve('=Title', T.contexto({ doc:'Title=X', cru:true })), '=Title', 'cru: o editor vê o campo');
 eq(T.resolve('=Address1', T.contexto({ tpl:{ params:{ Address1:'*' } } })), '=Address1', 'o * da semente não é valor');
-ok(T.campos(casa).includes('Equipamento_linha_um') && !T.campos(casa).includes('CurrentDate'), 'campos editáveis da casa');
+ok(T.campos(casa).includes('NomeDoEquipamento') && T.campos(casa).includes('CodigoDaPlaca') && !T.campos(casa).includes('CurrentDate')
+   && !T.campos(casa).some(n => /linha/.test(n)), 'campos da casa (nome e código do equipamento, código da placa)');
 
 /* ── 4. primitivas: moldura e zonas ── */
 const std = A['altium:Standard'];
@@ -93,8 +111,9 @@ ok(A3.some(p => p.g === 'text' && p.s === 'A3'), 'Standard numa folha A3 diz A3'
 eq(A3.filter(p => p.g === 'text' && /^[1-8]$/.test(p.s)).length, 16, 'A3 do Altium tem 8 zonas X (ArkGlobalSettings)');
 
 /* ── 5. primitivas do template da casa ── */
-const PC = T.primitivas(casa, null, { doc:'Equipamento_linha_um=Oscilador', faltante:'' });
-ok(PC.some(p => p.g === 'text' && p.s === 'Oscilador' && p.origem === '=Equipamento_linha_um'), 'campo resolvido, com a origem');
+const PC = T.primitivas(casa, null, { proj:'NomeDoEquipamento=Oscilador', faltante:'' });
+ok(PC.some(p => p.g === 'text' && p.s === 'Oscilador' && p.origem === '=NomeDoEquipamento'), 'campo resolvido, com a origem');
+ok(PC.some(p => p.s === 'PLACA:') && !PC.some(p => p.s === 'DESENHO:'), 'o quadro do desenho virou o da placa');
 const desen = PC.find(p => p.s === 'DESEN.');
 eq([desen.h, desen.v, desen.fonte, desen.tam], ['left', 'top', 'Times New Roman', 100], 'Justification=6 = em cima-esq; 10 pt = 100 mil');
 const iso = T.primitivas(A['altium:ISO A3 Landscape'], null, {});
