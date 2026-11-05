@@ -15,7 +15,8 @@ Rotas:
   GET  /api/projeto/novo/previa?nome=&sigla=&tipo=  -> {ok, proximo, ano, sigla, codigo, ultimo, arquivo}
   GET  /api/catalogo                           -> {ok, itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo}], proximo, ano}
   POST /api/catalogo/registrar {tipo, nome, cliente?, vinculo?, sigla?} -> {ok, item, codigo, ...} (409: codigo ou nome repetido)
-  POST /api/catalogo/editar {item, codigo, novoCodigo?, novoNome?}      -> {ok, item, codigo, nome} (409: codigo repetido)
+  POST /api/catalogo/editar {item, codigo, novoCodigo?, novoNome?, novoGrupo?}  -> {ok, item, codigo, nome, tipo, grupo}
+       (409: codigo repetido; novoGrupo = placa|equipamento|produto, grava na coluna TIPO)
   GET  /api/projeto/novo/catalogo?codigo=      -> {ok, achou:{item, nome, cliente, modelo, ...}|null}
   GET  /api/projeto/novo/templates             -> {ok, padrao, templates:[{id, nome, w, h, estilo}]} (os da casa)
   POST /api/projeto/novo {nome, cliente?, vinculo?, sigla?, iniciador?, projeto?, template? ('' = sem template)}
@@ -163,11 +164,14 @@ def registra(app, root, h):
             ent['novoCodigo'] = data.get('novoCodigo')
         if data.get('novoNome') is not None:
             ent['novoNome'] = data.get('novoNome')
+        if data.get('novoGrupo') is not None:
+            ent['novoGrupo'] = data.get('novoGrupo')
         try:
             r = _motor(root, ent)
         except Exception as e:             # noqa: BLE001
             msg = str(e)
-            return {'ok': False, 'error': msg}, 409 if ('já é do item' in msg or 'inválido' in msg or 'vazio' in msg) else 503
+            return {'ok': False, 'error': msg}, 409 if ('já é do item' in msg or 'inválido' in msg or 'vazio' in msg
+                                                      or 'categoria' in msg) else 503
         r.pop('ok', None)
         return dict(ok=True, **r)
 

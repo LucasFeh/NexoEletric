@@ -22,7 +22,8 @@
 
    E MAIS (2026-11-05): o botão "Logo DiEletrons" põe na PCB a logo da casa com o código da placa e a revisão, que se
    preenchem sozinhos (as strings especiais .CodigoDaPlaca e .Revisao, HubCore.resolveEspeciais); e o botão direito numa
-   linha do catálogo muda o código ou o nome do item (POST /api/catalogo/editar, sem repetir código). */
+   linha do catálogo muda o código ou o nome do item (POST /api/catalogo/editar, sem repetir código) e a categoria
+   (Placa / Equipamento / Produto: a coluna TIPO, novoGrupo). */
 (function (root) {
 'use strict';
 const T = () => root.HubSchTemplate;
@@ -305,7 +306,15 @@ function abre(g){
     menu = el('div', 'ct-menu');
     menu.append(el('div', 'tit', i.modelo + ' · ' + i.nome),
       bt('Mudar código…', 'o código (MODELO) deste item no catálogo', () => { fechaMenu(); muda(i, 'codigo'); }),
-      bt('Mudar nome…', 'o nome deste item no catálogo', () => { fechaMenu(); muda(i, 'nome'); }));
+      bt('Mudar nome…', 'o nome deste item no catálogo', () => { fechaMenu(); muda(i, 'nome'); }),
+      el('div', 'tit', 'Categoria'));
+    /* a categoria (2026-11-05): grava na coluna TIPO do catálogo */
+    for (const [g, rot] of [['placa', 'Placa'], ['equipamento', 'Equipamento'], ['produto', 'Produto']]){
+      const b = bt('', i.grupo === g ? 'a categoria de agora' : 'passar este item para ' + rot, () => { fechaMenu(); mudaCategoria(i, g); });
+      b.append(el('span', 'ct-g ' + g, rot), document.createTextNode(i.grupo === g ? '  ✓' : ''));
+      if (i.grupo === g) b.style.fontWeight = '600';
+      menu.append(b);
+    }
     ov.append(menu);
     const r = menu.getBoundingClientRect();
     menu.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
@@ -332,6 +341,19 @@ function abre(g){
     erro.textContent = '';
     pintaSlots(); pintaLista();
     toast('item ' + i.item + ': ' + (campo === 'codigo' ? 'código ' + j.codigo : 'nome ' + j.nome) + ' (gravado no catálogo)', 'ok', 5000);
+  }
+  async function mudaCategoria(i, g){
+    if (i.grupo === g) return;
+    let j = null;
+    try {
+      j = await (await fetch('/api/catalogo/editar', { method:'POST', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ item: i.item, codigo: i.modelo, novoGrupo: g }) })).json();
+    } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
+    if (!j || !j.ok){ erro.textContent = 'não mudou: ' + ((j && j.error) || 'sem resposta'); return; }
+    i.tipo = j.tipo; i.grupo = j.grupo;
+    erro.textContent = '';
+    pintaSlots(); pintaLista();
+    toast('item ' + i.item + ' (' + i.modelo + '): categoria ' + j.tipo + ' (gravado no catálogo)', 'ok', 5000);
   }
   function usa(i, papel){
     esc[papel] = i;

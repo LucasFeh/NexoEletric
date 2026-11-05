@@ -4,6 +4,14 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.78.0 — 2026-11-05
+
+**Mudar a categoria de um item no Definir projeto.**
+- O botão direito numa linha do catálogo ganhou **Categoria: Placa / Equipamento / Produto** (a de agora com ✓). Grava
+  na coluna TIPO da planilha (se o TIPO de agora já é daquela categoria, fica; senão vira "Placa", "Equipamento" ou
+  "Produto"); o código não muda. Para o que é produto e estava como placa.
+- `POST /api/catalogo/editar` aceita `novoGrupo` (placa, equipamento ou produto) e devolve `tipo` e `grupo`.
+
 ## 1.77.0 — 2026-11-05
 
 **Logo DiEletrons na PCB e o catálogo editável no Definir projeto.**

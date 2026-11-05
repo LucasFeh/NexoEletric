@@ -186,6 +186,15 @@ function grupo(tipo) {
 }
 const normCod = s => String(s || '').replace(/\s+/g, '').toUpperCase();
 
+/* MUDAR A CATEGORIA (2026-11-05: "tem coisa que é produto e tá categorizado como placa, quero poder mudar a
+   categoria"): a categoria é a coluna TIPO. Se o TIPO de agora já cai na categoria pedida, fica; senão vira a palavra
+   da categoria. O código não muda. (O mesmo do Gerência Dieletrons, app/produtos.mjs.) */
+const TIPO_DO_GRUPO = { placa: 'Placa', equipamento: 'Equipamento', produto: 'Produto' };
+function tipoDoGrupo(g, atual) {
+  if (!TIPO_DO_GRUPO[g]) throw new Error('categoria desconhecida: ' + g + ' (placa, equipamento ou produto)');
+  return atual && grupo(atual) === g ? atual : TIPO_DO_GRUPO[g];
+}
+
 /* o catálogo inteiro, para a tela: {itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo}], ultimo, proximo, ano} */
 function lista(o) {
   const c = abre(o && o.arquivo);
@@ -291,7 +300,9 @@ function edita(o) {
   if (!it) throw new Error('o item ' + o.item + ' (' + (o.codigo || '?') + ') não está mais no catálogo assim: abra de novo o Definir projeto');
   const novoCod = o.novoCodigo != null ? limpa(o.novoCodigo).toUpperCase() : null;
   const novoNome = o.novoNome != null ? limpa(o.novoNome) : null;
-  if (novoCod === null && novoNome === null) throw new Error('nada para mudar');
+  let novoTipo = o.novoGrupo != null ? tipoDoGrupo(String(o.novoGrupo), it.tipo) : null;
+  if (novoTipo === it.tipo) novoTipo = null;          /* já está nessa categoria */
+  if (novoCod === null && novoNome === null && novoTipo === null) throw new Error(o.novoGrupo != null ? 'o item já é dessa categoria' : 'nada para mudar');
   if (novoCod !== null) {
     if (!/^[A-Z0-9][A-Z0-9 ._\/-]*$/.test(novoCod)) throw new Error('código inválido: ' + novoCod);
     const outro = c.itens.find(i => i !== it && normCod(i.modelo) === normCod(novoCod));
@@ -313,9 +324,12 @@ function edita(o) {
   };
   if (novoNome !== null) troca('C', novoNome);
   if (novoCod !== null) troca('E', novoCod);
+  if (novoTipo !== null) troca('B', novoTipo);
   const xml = c.xml.replace(linha.xml, row);
-  const copia = gravaPlanilha(c, xml, novoCod !== null ? novoCod : novoNome);
-  return { item: it.item, codigo: novoCod !== null ? novoCod : it.modelo, nome: novoNome !== null ? novoNome : it.nome, linha: it.linha, copia };
+  const copia = gravaPlanilha(c, xml, novoCod !== null ? novoCod : novoNome !== null ? novoNome : novoTipo);
+  const tipo = novoTipo !== null ? novoTipo : it.tipo;
+  return { item: it.item, codigo: novoCod !== null ? novoCod : it.modelo, nome: novoNome !== null ? novoNome : it.nome,
+           tipo, grupo: grupo(tipo), linha: it.linha, copia };
 }
 
 /* o template DIEletrons preenchido para o projeto novo (os parâmetros do projeto, no cabeçalho do schematic.js) */
@@ -334,7 +348,7 @@ function paramsTemplate(o) {
   return p;
 }
 
-module.exports = { PADRAO, abre, previa, registra, edita, busca, lista, grupo, sigla, codigo, paramsTemplate, lerZip, escreverZip };
+module.exports = { PADRAO, abre, previa, registra, edita, busca, lista, grupo, tipoDoGrupo, sigla, codigo, paramsTemplate, lerZip, escreverZip };
 
 /* ============================== a linha de comando ==============================
    node mcp/lib/catalogo.js --cli  < {acao:'previa'|'registra'|'busca'|'lista', nome, tipo?, cliente?, vinculo?, sigla?, codigo?, arquivo?}

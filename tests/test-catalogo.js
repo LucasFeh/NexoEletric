@@ -86,6 +86,15 @@ const outros = C.lerZip(fs.readFileSync(ARQ)).filter(e => e.nome !== 'xl/workshe
   assert.strictEqual(e2.codigo, 'PMTV-DI261943');
   const depois = C.abre().itens.find(i => i.item === 1943);
   assert.deepStrictEqual([depois.nome, depois.modelo], ['Placa medidora de temperatura v2', 'PMTV-DI261943'], 'gravado na planilha');
+  /* mudar a categoria (a coluna TIPO), sem mexer no código */
+  const e3 = C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'produto' });
+  assert.deepStrictEqual([e3.tipo, e3.grupo, e3.codigo], ['Produto', 'produto', 'PMTV-DI261943']);
+  assert.throws(() => C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'produto' }), /já é dessa categoria/);
+  assert.throws(() => C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'outra' }), /categoria desconhecida/);
+  assert.deepStrictEqual([C.tipoDoGrupo('equipamento', 'EQUIAPAMENTO'), C.tipoDoGrupo('produto', 'CABO'), C.tipoDoGrupo('placa', 'CABO')],
+    ['EQUIAPAMENTO', 'CABO', 'Placa']);
+  const e4 = C.edita({ item: 1943, codigo: 'PMTV-DI261943', novoGrupo: 'placa' });
+  assert.deepStrictEqual([e4.tipo, e4.grupo], ['Placa', 'placa']);
   const L = C.lista();
   assert.deepStrictEqual(L.itens.map(i => [i.item, i.grupo]).slice(-2), [[1942, 'placa'], [1943, 'placa']]);
   console.log('  registrar: linha nova, estilos, o resto do .xlsx intacto ok');
