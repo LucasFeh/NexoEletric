@@ -303,23 +303,14 @@ function paramsDoTexto(txt){
   if (!m || !T) return {};
   try { return T.parseParams(JSON.parse(m[2])); } catch (_) { return {}; }
 }
+/* 2026-11-05 (1.80.0): o Salvar NÃO tira mais a aprovação sozinho ("se eu movimento algo, mudo o layout, ele já gera uma
+   revisão nova, eu não quero isso"). Quem decide é a assinatura do servidor (tools/rotas/carimbos.py » assinatura): do
+   esquema, só a impressão elétrica (componentes e ligações, mcp/lib/impressao-eletrica.js); da PCB, tudo. Mudou o que
+   conta, o projeto aparece sem aprovação na hora e os campos saem do carimbo depois da carência. A função fica (quem
+   chama continua igual) e não mexe em nada. */
 function antesDeSalvar(sch, disco){
-  const T = root.HubSchTemplate;
-  if (!T || !sch) return false;
-  const usa = Boolean(sch.params && String(sch.params).trim()) || (sch.items || []).some(it => it && it.t === 'sheet' && it.template);
-  if (!usa) return false;
-  const p = T.parseParams(sch.params), d = paramsDoTexto(disco);
-  let mudou = false;
-  for (const k of CAMPOS_APROVACAO) if (k in p){ delete p[k]; mudou = true; }
-  for (const it of sch.items || []){
-    if (!it || it.t !== 'sheet' || !it.params) continue;
-    const q = T.parseParams(it.params); let m = false;
-    for (const k of CAMPOS_APROVACAO) if (k in q){ delete q[k]; m = true; }
-    if (m){ const s = T.serializaParams(q); if (s) it.params = s; else delete it.params; mudou = true; }
-  }
-  void d;
-  if (mudou){ const s = T.serializaParams(p); if (s) sch.params = s; else delete sch.params; }
-  return mudou;
+  void sch; void disco;
+  return false;
 }
 
 /* ─── o botão Aprovar ao lado do Salvar (schframe.js) ───

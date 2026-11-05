@@ -25,17 +25,15 @@ function esquema(params, folha){
 const APROVADO = 'Desenhista_DiEletrons=Lucas;Data_desenho=01/11/26;Verificador_DiEletrons=Lucas;Aprovador_DiEletrons=Lucas;'
                + 'Data_verificacao=02/11/26;Data_aprovacao=02/11/26;Aprovacao_carimbo=lucas;Aprovacao_assinatura=abc';
 
-/* 1. a edição de um projeto aprovado: os campos da aprovação saem; o desenhista e a data do desenho ficam */
+/* 1. a edição de um projeto aprovado (1.80.0): o Salvar não tira mais nada; quem decide é a assinatura elétrica do
+   servidor (mover e mexer no layout não derruba a aprovação) */
 {
   const sch = esquema(APROVADO, { params:'Aprovador_DiEletrons=Outro;Escala=1:2' });
   const disco = HubCore.serializeSchematic(sch).text;
   eq(CB._paramsDoTexto(disco).Aprovador_DiEletrons, 'Lucas', 'lê o cabeçalho do texto gravado');
-  ok(CB.antesDeSalvar(sch, disco), 'mudou');
-  const p = T.parseParams(sch.params);
-  for (const k of CB.CAMPOS_APROVACAO) ok(!(k in p), 'saiu ' + k);
-  eq(p.Data_desenho, '01/11/26', 'a data do desenho não muda na edição');
-  eq(p.Desenhista_DiEletrons, 'Lucas', 'o resto fica');
-  eq(sch.items[0].params, 'Escala=1:2', 'a folha perde só o que é da aprovação');
+  eq(CB.antesDeSalvar(sch, disco), false, 'o Salvar não mexe na aprovação');
+  eq(sch.params, APROVADO, 'os campos da aprovação ficam');
+  eq(sch.items[0].params, 'Aprovador_DiEletrons=Outro;Escala=1:2', 'a folha fica');
 }
 
 /* 2. projeto sem aprovação: a edição não mexe em nada */

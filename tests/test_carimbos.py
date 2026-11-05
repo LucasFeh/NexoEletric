@@ -169,6 +169,78 @@ class Rotas(unittest.TestCase):
         self.escreve('schematic.js', txt.replace('Desenho_linha_unica=CBM-DI251876', 'Desenho_linha_unica=CBM-DI999999'))
         self.assertFalse(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
 
+    # ── 1.80.0: a assinatura eletrica (mover no esquema nao derruba; trocar componente ou ligacao derruba) ──
+    def esquema_eletrico(self, dx=0, footprint='R0805', sem_fio=False, extra=''):
+        it = [{'t': 'sheet', 'name': 'SCH-DI251876', 'size': 'A4', 'template': 'casa:A4_DiEletrons'}]
+        for ref, x, y in (('R1', 1000, 1000), ('R2', 1800, 1000), ('R3', 1000, 2000)):
+            it.append({'t': 'comp', 'sheet': 'SCH-DI251876', 'ref': ref, 'sym': 'RES [SMD]', 'part': 1, 'x': x + dx, 'y': y,
+                       'rot': 0, 'mirror': False, 'footprint': footprint if ref == 'R1' else 'R0805', 'comment': '1k'})
+        if not sem_fio:
+            it.append({'t': 'wire', 'sheet': 'SCH-DI251876', 'pts': [[1150 + dx, 1000], [1550 + dx, 1000]]})
+        it.append({'t': 'wire', 'sheet': 'SCH-DI251876', 'pts': [[1950 + dx, 1000], [1950 + dx, 2000], [1150 + dx, 2000]]})
+        it.append({'t': 'netlabel', 'sheet': 'SCH-DI251876', 'net': 'SINAL', 'x': 1350 + dx, 'y': 1000, 'rot': 0})
+        it.append({'t': 'text', 'sheet': 'SCH-DI251876', 'x': 100 + dx, 'y': 100, 's': 'nota'})
+        cab = ESQUEMA.split('"items":')[0]
+        if extra:
+            cab = cab.replace('Revisao=REV.A', 'Revisao=REV.A;' + extra)
+        return cab + '"items":[\n' + ''.join(json.dumps(x, ensure_ascii=False) + ',\n' for x in it) + ']};\n'
+
+    def test_mover_no_esquema_nao_derruba_trocar_componente_derruba(self):
+        self.escreve('schematic.js', self.esquema_eletrico())
+        self.entra_aprovador()
+        self.assertTrue(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()['ok'])
+        aprov = carimbos.params_do_texto(self.le())
+        self.assertTrue(aprov['Aprovacao_assinatura'].startswith(carimbos.PREFIXO))
+        extra = ';'.join('%s=%s' % (k, aprov[k]) for k in carimbos.CAMPOS_APROVACAO)
+        # tudo andou 700 mil (componentes, fios, rotulo, texto): continua aprovado
+        self.escreve('schematic.js', self.esquema_eletrico(dx=700, extra=extra))
+        self.assertTrue(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
+        # o footprint do R1 trocou: sem aprovacao
+        self.escreve('schematic.js', self.esquema_eletrico(dx=700, footprint='R1206', extra=extra))
+        self.assertFalse(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
+        # um fio saiu (a ligacao mudou): sem aprovacao
+        self.escreve('schematic.js', self.esquema_eletrico(dx=700, sem_fio=True, extra=extra))
+        self.assertFalse(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
+        # de volta ao eletrico aprovado, em outro lugar da folha: aprovado de novo; e a PCB que mexe derruba
+        self.escreve('schematic.js', self.esquema_eletrico(dx=300, extra=extra))
+        self.assertTrue(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
+        self.escreve('board.js', 'var board = {"comps":[{"ref":"R1","x":1}]};\n')
+        self.assertFalse(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
+
+    def test_aprovacao_antiga_vale_pela_pasta_da_revisao(self):
+        """aprovada antes da 1.80.0 (assinatura do texto inteiro): mover depois nao derruba, pela copia em Revisoes/REV.A"""
+        self.escreve('schematic.js', self.esquema_eletrico())
+        velha = carimbos.assinatura_legada(self.pdir)
+        extra = ('Verificador_DiEletrons=Lucas;Aprovador_DiEletrons=Lucas;Data_verificacao=01/11/26;Data_aprovacao=01/11/26;'
+                 'Aprovacao_carimbo=lucas;Aprovacao_assinatura=' + velha)
+        self.escreve('schematic.js', self.esquema_eletrico(extra=extra))
+        self.assertTrue(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
+        rd = os.path.join(self.pdir, 'Revisoes', 'REV.A')
+        os.makedirs(rd)
+        for n in ('schematic.js', 'changes.js'):
+            shutil.copy2(os.path.join(self.pdir, n), os.path.join(rd, n))
+        self.escreve('schematic.js', self.esquema_eletrico(dx=500, extra=extra))
+        self.assertTrue(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'], 'so mudou o layout')
+        self.escreve('schematic.js', self.esquema_eletrico(dx=500, sem_fio=True, extra=extra))
+        self.assertFalse(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'], 'a ligacao mudou')
+
+    def test_sem_node_nao_limpa_a_aprovacao(self):
+        self.escreve('schematic.js', self.esquema_eletrico())
+        self.entra_aprovador()
+        self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'})
+        antes = self.le()
+        velho = carimbos.impressoes_eletricas
+        carimbos.impressoes_eletricas = lambda arqs: {a: None for a in arqs}
+        try:
+            carimbos._cache_hash.clear()
+            self.escreve('changes.js', 'var changes = [\n{"op":"move"},\n];\n')
+            e = carimbos.confere(self.pdir, agora=1.0)
+            e = carimbos.confere(self.pdir, agora=1.0 + carimbos.CARENCIA + 10)
+            self.assertFalse(e['conferida'])
+            self.assertEqual(self.le(), antes, 'sem conferir, nada sai do carimbo')
+        finally:
+            carimbos.impressoes_eletricas = velho
+
     def test_assumir_pede_carimbo_e_senha_mestre(self):
         self.assertEqual(self.c.post('/api/carimbos/assumir', json={'projeto': 'CBM-DI251876', 'mestre': MESTRE}).status_code, 403)
         cid = self.cria('Luciano', 'x').get_json()['carimbo']['id']

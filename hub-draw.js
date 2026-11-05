@@ -388,17 +388,28 @@ function mkCamera(canvas, drawWorld, opts){
       DPR*(W/2 - cam.cx*cam.scale), DPR*(H/2 + cam.cy*cam.scale));
     drawWorld(ctx, cam);
   }
+  /* ENQUADRAR COM A TELA ESCONDIDA (2026-11-05: "quando troco a revisão, o esquema tá bugando, fica nessa tela e não
+     sai mais", com X: NaN Y: NaN): o esquema se recarrega quando o disco muda, e o Voltar da revisão é feito com a aba
+     Histórico na frente — o quadro do esquema fica escondido, com 0×0. O fit dava escala min(0/w, 0/h) = 0, e daí em
+     diante todo toWorld dividia por zero (NaN) e a roda multiplicava o zero. Agora, sem tamanho, o enquadramento
+     fica guardado e acontece no primeiro resize com a tela de verdade (o ResizeObserver abaixo avisa quando a aba
+     volta). E uma escala que não presta (0, NaN, infinito) nunca fica: volta para a de antes. */
+  let fitPendente = null;
   function resize(){
     DPR = window.devicePixelRatio || 1;
     W = canvas.clientWidth; H = canvas.clientHeight;
     canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+    if (fitPendente && W > 0 && H > 0){ const [bb, m] = fitPendente; fitPendente = null; fit(bb, m); return; }
     draw();
   }
   function fit(bb, margin){
+    if (!(W > 0 && H > 0)){ fitPendente = [bb, margin]; return; }
+    fitPendente = null;
     const m = margin || 1.15;
     const w = Math.max(bb.x2-bb.x1, 1), h = Math.max(bb.y2-bb.y1, 1);
     cam.cx = (bb.x1+bb.x2)/2; cam.cy = (bb.y1+bb.y2)/2;
-    cam.scale = Math.min(W/(w*m), H/(h*m));
+    const s = Math.min(W/(w*m), H/(h*m));
+    if (s > 0 && isFinite(s)) cam.scale = s;
     draw();
   }
   function toWorld(sx, sy){ return { x:(sx-W/2)/cam.scale + cam.cx, y:(H/2-sy)/cam.scale + cam.cy }; }
@@ -429,6 +440,7 @@ function mkCamera(canvas, drawWorld, opts){
       draw();
       return;
     }
+    if (!(cam.scale > 0 && isFinite(cam.scale))) cam.scale = 0.1;
     const w = toWorld(e.offsetX, e.offsetY);
     cam.scale *= (e.deltaY < 0 ? 1.18 : 1/1.18);
     cam.cx = w.x - (e.offsetX-W/2)/cam.scale;

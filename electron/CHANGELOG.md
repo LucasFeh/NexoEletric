@@ -4,6 +4,23 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.80.0 — 2026-11-05
+
+**Revisão nova só quando o esquema muda de verdade; e o esquema não trava mais depois de voltar uma revisão.**
+- **A aprovação do esquema olha só o elétrico.** Mover componente, arrastar fio sem mudar a ligação, mexer em texto,
+  rótulo, folha ou template não tira mais a aprovação (e não pede revisão nova). Tira: trocar componente (símbolo,
+  footprint, valor, MPN e os parâmetros da peça), mudar a ligação (os pinos de cada net) ou o nome de uma net com
+  rótulo, e os dados do projeto (código da placa, equipamento). Na **PCB** continua valendo qualquer mudança (mover,
+  trocar nome...). A impressão elétrica é o `mcp/lib/impressao-eletrica.js` (o mesmo `extractNets` da tela); a
+  assinatura nova começa com `e1-`. Estoque, custo e local do almoxarifado não contam.
+- O Salvar do Esquema não apaga mais os campos da aprovação sozinho: quem decide é a assinatura do servidor.
+- Projetos aprovados antes desta versão continuam aprovados, e mover coisas neles também não derruba mais: a
+  conferência compara com a cópia da revisão aprovada (Projects/<p>/Revisoes/REV.x/).
+- Se o Node não responder, a aprovação fica como está (nada é apagado do carimbo) e o Aprovar pede para tentar de novo.
+- **Esquema travado em "X: NaN Y: NaN" depois de Voltar para uma revisão:** a página do esquema se recarrega quando o
+  disco muda, e com a aba Histórico na frente ela estava escondida (0×0); o enquadramento dava zoom zero. Agora o
+  enquadramento espera a tela ter tamanho (hub-draw.js » mkCamera), e um zoom inválido nunca fica.
+
 ## 1.79.0 — 2026-11-05
 
 **O nome do catálogo tem no máximo 27 caracteres** (como "CARTAO MELPLAC 550 - P9CF01"); o que passar vai na descrição.

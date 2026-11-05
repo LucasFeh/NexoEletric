@@ -248,7 +248,103 @@ def _marca(pdir):
     return tuple(m)
 
 
+# A ASSINATURA ELETRICA (2026-11-05: "so muda revisao no esquema se troca realmente componente ou altera algo relevante
+# na ligacao; ja na PCB gera revisao de qualquer forma"). Do schematic.js entra a impressao eletrica (componentes e
+# netlist, mcp/lib/impressao-eletrica.js, no Node: o mesmo extractNets da tela) e os parametros do projeto no
+# cabecalho; o changes.js e o board.js (a PCB) entram inteiros. Mover, arrastar, texto, folha: nao mudam a assinatura.
+# Prefixo 'e1-'. A assinatura velha (sem prefixo, o texto inteiro do esquema) continua valendo: confere com a pasta da
+# revisao (estado_aprovacao).
+PREFIXO = 'e1-'
+RAIZ = [os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]   # registra() troca pela do hub
+_cache_eletrica = {}      # caminho do schematic.js -> ((mtime, tamanho), hash)
+
+
+def impressoes_eletricas(arquivos):
+    """{caminho do schematic.js: hash 24 hex | None} pelo Node; None em tudo se o Node nao respondeu"""
+    falta = []
+    out = {}
+    for a in arquivos:
+        try:
+            st = os.stat(a)
+            m = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            out[a] = None
+            continue
+        achou = _cache_eletrica.get(a)
+        if achou and achou[0] == m:
+            out[a] = achou[1]
+        else:
+            falta.append((a, m))
+    if not falta:
+        return out
+    import subprocess
+    try:
+        import jlc
+        node, extra = jlc.acha_node()
+        if node is None:
+            raise RuntimeError(extra)
+        env = dict(os.environ)
+        env.update(extra)
+        root = RAIZ[0]
+        p = subprocess.run(node + [os.path.join(root, 'mcp', 'lib', 'impressao-eletrica.js'), '--cli'],
+                           input=json.dumps({'root': root, 'arquivos': [a for a, _ in falta]}).encode('utf-8'),
+                           capture_output=True, env=env, cwd=root, timeout=120,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        linhas = [l for l in p.stdout.decode('utf-8', 'replace').splitlines() if l.strip()]
+        r = json.loads(linhas[-1]) if linhas else {}
+        if not r.get('ok'):
+            raise RuntimeError(r.get('erro') or p.stderr.decode('utf-8', 'replace')[-300:])
+        hs = r.get('hashes') or {}
+    except Exception as e:                 # noqa: BLE001
+        print('[carimbos] impressao eletrica: %s' % e, flush=True)
+        for a, _ in falta:
+            out[a] = None
+        return out
+    for a, m in falta:
+        out[a] = hs.get(a)
+        if out[a]:
+            _cache_eletrica[a] = (m, out[a])
+    return out
+
+
 def assinatura(pdir):
+    """'e1-' + 24 hex: a impressao eletrica do esquema + os parametros do projeto + a PCB inteira; None se o Node
+    nao respondeu (ninguem tira aprovacao por isso)"""
+    marca = _marca(pdir)
+    achou = _cache_hash.get(('e1', pdir))
+    if achou and achou[0] == marca:
+        return achou[1]
+    sch = os.path.join(pdir, 'schematic.js')
+    if os.path.isfile(sch):
+        el = impressoes_eletricas([sch]).get(sch)
+        if not el:
+            return None
+    else:
+        el = '(ausente)'
+    h = hashlib.sha256()
+    h.update(('\0eletrica\0' + el).encode('utf-8'))
+    try:
+        with open(sch, encoding='utf-8') as f:
+            p = params_do_texto(f.read())
+    except OSError:
+        p = {}
+    h.update(('\0params\0' + ';'.join('%s=%s' % (k, p[k]) for k in sorted(p) if k not in FORA_DA_ASSINATURA)).encode('utf-8'))
+    for a in ARQS_ASSINADOS:
+        if a == 'schematic.js':
+            continue
+        h.update(('\0' + a + '\0').encode('utf-8'))
+        try:
+            with open(os.path.join(pdir, a), 'rb') as f:
+                h.update(f.read().decode('utf-8', 'replace').replace('\r\n', '\n').encode('utf-8'))
+        except OSError:
+            h.update(b'(ausente)')
+    r = PREFIXO + h.hexdigest()[:24]
+    _cache_hash[('e1', pdir)] = (marca, r)
+    return r
+
+
+def assinatura_legada(pdir):
+    """a assinatura de antes da 1.80.0: o texto inteiro do esquema (menos os campos da aprovacao), changes.js e board.js"""
     marca = _marca(pdir)
     achou = _cache_hash.get(pdir)
     if achou and achou[0] == marca:
@@ -299,8 +395,27 @@ def estado_aprovacao(pdir):
     except OSError:
         return {'aprovado': False, 'temEsquema': False, 'assinada': False}
     ass = p.get('Aprovacao_assinatura') or ''
-    ok = bool(ass and (p.get('Aprovador_DiEletrons') or '').strip() and ass == assinatura(pdir))
-    return {'aprovado': ok, 'por': p.get('Aprovador_DiEletrons') or '', 'data': p.get('Data_aprovacao') or '',
+    conferida = True
+    ok = False
+    if ass and (p.get('Aprovador_DiEletrons') or '').strip():
+        atual = assinatura(pdir)
+        if atual is None:                  # sem o Node nao da para conferir: fica como esta, e nada e limpo
+            ok, conferida = True, False
+        elif ass.startswith(PREFIXO):
+            ok = ass == atual
+        else:
+            # aprovada pela assinatura velha: vale se nada mudou, ou se so mudou o que nao e eletrico desde a revisao
+            # aprovada (a copia em Revisoes/REV.<x>/ e o estado da aprovacao)
+            ok = ass == assinatura_legada(pdir)
+            if not ok:
+                rd = os.path.join(pdir, PASTA_REV, 'REV.' + letra_da_revisao(p.get('Revisao')))
+                if os.path.isfile(os.path.join(rd, 'schematic.js')) and assinatura_legada(rd) == ass:
+                    ar = assinatura(rd)
+                    if ar is None:
+                        ok, conferida = True, False
+                    else:
+                        ok = ar == atual
+    return {'aprovado': ok, 'conferida': conferida, 'por': p.get('Aprovador_DiEletrons') or '', 'data': p.get('Data_aprovacao') or '',
             'rev': p.get('Revisao') or '',
             'carimbo': p.get('Aprovacao_carimbo') or '', 'assinada': bool(ass), 'temEsquema': True}
 
@@ -323,7 +438,7 @@ def params_desenhista(carimbo, data=None):
 def confere(pdir, agora=None):
     """o estado do projeto; assinatura velha ha mais que a CARENCIA: tira os campos da aprovacao do schematic.js"""
     e = estado_aprovacao(pdir)
-    if e['aprovado'] or not e.get('assinada'):
+    if e['aprovado'] or not e.get('assinada') or e.get('conferida') is False:
         _desde.pop(pdir, None)
         return e
     agora = agora if agora is not None else time.time()
@@ -550,6 +665,8 @@ def volta_revisao(pdir, rev):
 
 # ─────────────────────────── rotas ───────────────────────────
 def registra(app, root, senha_mestre):
+    if os.path.isfile(os.path.join(root, 'mcp', 'lib', 'impressao-eletrica.js')):
+        RAIZ[0] = root
     pdir_raiz = os.path.join(root, 'Projects')
 
     def pasta(nome):
@@ -711,6 +828,8 @@ def registra(app, root, senha_mestre):
                                               % (params_do_texto(txt).get('Revisao') or '')}, 409
             hoje = _hoje()
             ass = assinatura(d)
+            if ass is None:
+                return {'ok': False, 'error': 'não consegui conferir o esquema (o Node do NexoEletric não respondeu): tente de novo'}, 503
             rev = proxima_revisao(d, params_do_texto(txt))
 
             def fn(p):
