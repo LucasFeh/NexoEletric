@@ -129,7 +129,7 @@ class Rotas(unittest.TestCase):
         # o resto do arquivo nao mudou
         self.assertEqual(self.le().split('"items":')[1], ESQUEMA.split('"items":')[1])
         lista = self.c.get('/api/aprovacoes').get_json()['projetos']
-        self.assertEqual(lista['CBM-DI251876'], {'aprovado': True, 'por': 'Lucas', 'data': hoje})
+        self.assertEqual(lista['CBM-DI251876'], {'aprovado': True, 'por': 'Lucas', 'data': hoje, 'rev': 'REV.A'})
         self.assertFalse(lista['Sem esquema']['aprovado'])
 
     def test_modificacao_derruba_a_aprovacao(self):
@@ -145,7 +145,7 @@ class Rotas(unittest.TestCase):
         p = carimbos.params_do_texto(self.le())
         for k in carimbos.CAMPOS_APROVACAO:
             self.assertNotIn(k, p)
-        self.assertEqual(p['Data_desenho'], time.strftime('%d/%m/%y'))
+        self.assertEqual(p['Data_desenho'], '01/11/26')          # a data do desenho so muda ao criar ou assumir
         self.assertEqual(p['Desenhista_DiEletrons'], 'Lucas')
 
     def test_arquivo_que_volta_igual_reaprova(self):
@@ -165,9 +165,73 @@ class Rotas(unittest.TestCase):
         txt = self.le().replace('Data_desenho=01/11/26', 'Data_desenho=05/11/26').replace('\n', '\r\n')
         self.escreve('schematic.js', txt)
         self.assertTrue(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
-        # mas o resto do cabecalho conta (a revisao e parte do desenho)
-        self.escreve('schematic.js', txt.replace('REV.A', 'REV.B'))
+        # mas o resto do cabecalho conta (o codigo da placa e parte do desenho; a revisao, nao: ela e do Aprovar)
+        self.escreve('schematic.js', txt.replace('Desenho_linha_unica=CBM-DI251876', 'Desenho_linha_unica=CBM-DI999999'))
         self.assertFalse(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
+
+    def test_assumir_pede_carimbo_e_senha_mestre(self):
+        self.assertEqual(self.c.post('/api/carimbos/assumir', json={'projeto': 'CBM-DI251876', 'mestre': MESTRE}).status_code, 403)
+        cid = self.cria('Luciano', 'x').get_json()['carimbo']['id']
+        self.c.post('/api/carimbos/entrar', json={'id': cid, 'senha': 'x'})
+        self.assertEqual(self.c.post('/api/carimbos/assumir', json={'projeto': 'CBM-DI251876', 'mestre': 'x'}).status_code, 403)
+        self.assertEqual(carimbos.params_do_texto(self.le())['Desenhista_DiEletrons'], 'Lucas')
+        j = self.c.post('/api/carimbos/assumir', json={'projeto': 'CBM-DI251876', 'mestre': MESTRE}).get_json()
+        self.assertTrue(j['ok'], j)
+        p = carimbos.params_do_texto(self.le())
+        self.assertEqual(p['Desenhista_DiEletrons'], 'Luciano')
+        self.assertEqual(p['Desenhista_carimbo'], cid)
+        self.assertEqual(p['Data_desenho'], time.strftime('%d/%m/%y'))
+        self.assertEqual(p['Revisao'], 'REV.A')
+        self.assertEqual(j['texto'], self.le())
+
+    def test_assumir_nao_derruba_a_aprovacao(self):
+        self.entra_aprovador()
+        self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'})
+        j = self.c.post('/api/carimbos/assumir', json={'projeto': 'CBM-DI251876', 'mestre': MESTRE}).get_json()
+        self.assertTrue(j['ok'] and j['aprovado'], j)
+        self.assertTrue(self.c.get('/api/aprovacao?projeto=CBM-DI251876').get_json()['aprovado'])
+
+    def test_revisoes_a_cada_aprovacao(self):
+        self.entra_aprovador()
+        j = self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()
+        self.assertEqual((j['rev'], j['resumo']), ('REV.A', ['primeira revisão']))
+        self.assertEqual(carimbos.params_do_texto(self.le())['Revisao'], 'REV.A')
+        rev_a = os.path.join(self.pdir, 'Revisoes', 'REV.A')
+        self.assertTrue(os.path.isfile(os.path.join(rev_a, 'schematic.js')))
+        self.assertTrue(os.path.isfile(os.path.join(rev_a, 'changes.js')))
+        # aprovado nao aprova de novo
+        self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).status_code, 409)
+        # modifica: um componente novo e a PCB mexida
+        a_sch = self.le()
+        self.escreve('schematic.js', a_sch.replace('\n]};', '\n{"t":"comp","sheet":"SCH-DI251876","ref":"R9","sym":"RES","x":1,"y":2,"footprint":"0805"},\n]};'))
+        self.escreve('changes.js', 'var changes = [\n{"op":"move"},\n];\n')
+        r = self.c.get('/api/revisoes?projeto=CBM-DI251876').get_json()
+        self.assertFalse(r['atual']['aprovado'])
+        self.assertEqual(r['atual']['desde'], 'REV.A')
+        self.assertIn('componentes novos: R9', r['atual']['mudancas'])
+        self.assertIn('PCB: 0 → 1 mudanças no changes.js', r['atual']['mudancas'])
+        j = self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()
+        self.assertEqual(j['rev'], 'REV.B')
+        self.assertIn('componentes novos: R9', j['resumo'])
+        r = self.c.get('/api/revisoes?projeto=CBM-DI251876').get_json()
+        self.assertEqual([x['rev'] for x in r['revisoes']], ['REV.B', 'REV.A'])
+        self.assertTrue(r['atual']['aprovado'])
+        self.assertNotIn('assinatura', r['revisoes'][0])
+        # volta para a REV.A: os arquivos dela, e aprovado de novo (identico ao aprovado)
+        j = self.c.post('/api/revisoes/voltar', json={'projeto': 'CBM-DI251876', 'rev': 'REV.A'}).get_json()
+        self.assertTrue(j['ok'] and j['aprovado'], j)
+        self.assertEqual(self.le(), a_sch)
+        with open(os.path.join(self.pdir, 'changes.js'), encoding='utf-8') as f:
+            self.assertEqual(f.read(), 'var changes = [\n];\n')
+        self.assertEqual(self.c.post('/api/revisoes/voltar', json={'projeto': 'CBM-DI251876', 'rev': 'REV.Z'}).status_code, 404)
+
+    def test_primeira_revisao_segue_o_carimbo(self):
+        """projeto que ja chegou numa revisao (REV.C do Altium): a primeira aprovacao e a REV.C, a seguinte a REV.D"""
+        self.escreve('schematic.js', ESQUEMA.replace('REV.A', 'REV.C'))
+        self.entra_aprovador()
+        self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()['rev'], 'REV.C')
+        self.escreve('changes.js', 'var changes = [\n{"op":"x"},\n];\n')
+        self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()['rev'], 'REV.D')
 
     def test_esquema_sem_params(self):
         self.escreve('schematic.js', ESQUEMA.replace(ESQUEMA.split('\n')[5] + '\n', ''))

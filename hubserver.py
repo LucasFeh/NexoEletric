@@ -63,6 +63,8 @@ PDF_DIR = 'PDF'
 # as fotos 3D da placa para o Odoo (MCP pcb_render_3d; odoolista.RENDER_DIR): fora do vigia tambem --
 # quem as tira e a propria vista PCB, e gravar recarregaria a pagina que acabou de fotografar
 RENDER_DIR = 'Renders'
+# as copias do projeto a cada aprovacao (tools/rotas/carimbos.py » grava_revisao): fora do vigia, como as saidas
+REV_DIR = 'Revisoes'
 
 app = Flask(__name__)
 _version = 0           # incrementa a cada mudanca detectada
@@ -147,7 +149,8 @@ def _snapshot():
                 dirnames[:] = [d for d in dirnames
                                if os.path.normcase(d) not in (os.path.normcase(GERBER_DIR),
                                                               os.path.normcase(PDF_DIR),
-                                                              os.path.normcase(RENDER_DIR))]
+                                                              os.path.normcase(RENDER_DIR),
+                                                              os.path.normcase(REV_DIR))]
             for f in filenames:
                 # o .tmp da gravacao atomica junto: uma varredura que o pegasse no meio da
                 # escrita via um arquivo nascer e sumir, e isso tambem e "mudou"

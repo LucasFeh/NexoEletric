@@ -46,6 +46,7 @@
 <script src="hub-altiumabrir.js"></script>
 <script src="hub-mcp.js"></script>
 <script src="hub-carimbos.js" defer></script>
+<script src="hub-revisoes.js" defer></script>
 <script src="hub-shell.js" defer></script>
 <script src="hub-projnovo.js" defer></script>
 <script src="hub-mcpskills.js" defer></script>
@@ -3399,6 +3400,7 @@ function renderPanes() {
       r.append(el('div', 'when num', x.when), el('span', 'dot ' + kind), txt);
       h.append(r);
     });
+    if (window.HubRevisoes) HubRevisoes.pinta(document.querySelector('.pane[data-pane="hist"]'), (proj() || {}).name || '');
   }
 }
 

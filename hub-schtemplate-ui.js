@@ -276,8 +276,11 @@ function abreCarimbo(){
   let nomes = tpl ? T.campos(tpl) : T.CAMPOS_PADRAO.slice();
   nomes = nomes.filter(n => !/^Sheet(Number|Total)$/i.test(n));
   for (const k of Object.keys(proj).concat(Object.keys(doc))) if (!nomes.some(n => n.toLowerCase() === k.toLowerCase())) nomes.push(k);
-  /* a assinatura da aprovação (hub-carimbos.js) não é campo de carimbo: fica fora da tabela e passa intacta pelo Aplicar */
-  const oculto = n => /^Aprovacao_/.test(n);
+  /* AS PESSOAS E AS DATAS NÃO SÃO CAMPO (2026-11-05: "o carimbo carrega o nome de quem desenhou e quem aprova, não
+     precisa de um campo pra desenhista nem pra verificador"): o desenhista vem de quem criou ou assumiu o projeto
+     (Arquivo › Assumir projeto…), o verificador e o aprovador do Aprovar, e as datas junto. Ficam fora da tabela, ditos
+     no topo dela, e passam intactos pelo Aplicar (como a assinatura da aprovação, hub-carimbos.js). */
+  const oculto = n => /^Aprovacao_|^Desenhista_|^Verificador_|^Aprovador_|^Data_(desenho|verificacao|aprovacao)$|^Revisao$|^Revision$/i.test(n);
   nomes = nomes.filter(n => !oculto(n));
 
   const ov = el('div', 'st-ov');
@@ -285,6 +288,15 @@ function abreCarimbo(){
   const hd = el('div', 'st-head');
   hd.append(el('h2', null, 'Carimbo'), el('span', 'st-dim', (tpl ? tpl.nome : 'sem template') + ' · folha ' + api.nome));
   const lista = el('div', 'st-list');
+  const quem = el('div', 'st-dim');
+  quem.style.cssText = 'margin-bottom:8px; line-height:1.6';
+  const pessoa = (rot, nome, data) => rot + ': ' + (nome ? nome + (data ? ' (' + data + ')' : '') : '—');
+  quem.append(el('div', null, pessoa('Desenhista', proj.Desenhista_DiEletrons, proj.Data_desenho)
+                 + '  ·  trocar: Arquivo › Assumir projeto… (senha mestre)'),
+              el('div', null, proj.Aprovador_DiEletrons ? pessoa('Verificado e aprovado por', proj.Aprovador_DiEletrons, proj.Data_aprovacao)
+                                                        : 'Sem aprovação: o Aprovar, ao lado do Salvar, preenche verificador e aprovador'),
+              el('div', null, 'Revisão: ' + (proj.Revisao || '—') + '  ·  cada aprovação grava a revisão seguinte (Histórico › Revisões)'));
+  lista.append(quem);
   const grade = el('div', 'st-kvl st-car');
   grade.append(el('span', 'st-dim', 'campo'), el('span', 'st-dim', 'projeto'), el('span', 'st-dim', 'esta folha'));
   const campos = [];
@@ -312,6 +324,7 @@ function abreCarimbo(){
   ft.append(sp, botao('Cancelar', null, fecha), botao('Aplicar', 'grava no schematic.js (Salvar para ir ao disco)', () => {
     const p = {}, d = {};
     for (const k of Object.keys(proj)) if (oculto(k)) p[k] = proj[k];
+    for (const k of Object.keys(doc)) if (oculto(k)) d[k] = doc[k];
     for (const [n, ip, id] of campos){ if (ip.value.trim() !== '') p[n] = ip.value.trim(); if (id.value.trim() !== '') d[n] = id.value.trim(); }
     const sp2 = T.serializaParams(p), sd = T.serializaParams(d);
     if (sp2) sch.params = sp2; else delete sch.params;

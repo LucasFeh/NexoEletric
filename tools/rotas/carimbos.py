@@ -6,8 +6,11 @@ um carimbo, ele fica com o nome que voce der, pra todo mundo, fica salvo no DB; 
 estiver com tag de aprovador ela pode aprovar o projeto [...] no menu de projeto fica uma TAG na frente do nome
 'CBM-DI251876 [Aprovado]' e no template vai o nome de quem aprovou; pra trocar de carimbo precisa a senha daquele carimbo;
 pra apagar o carimbo, a senha mestre do sistema". E logo depois: "enquanto nao tiver aprovado fica 'Sem aprovacao'; toda
-vez que tiver uma modificacao no projeto a tag de aprovado some, a data do desenho atualiza [...] quem verifica tambem
-aprova, entao ja completa os dois campos no template ao mesmo tempo".
+vez que tiver uma modificacao no projeto a tag de aprovado some [...] quem verifica tambem aprova, entao ja completa
+os dois campos no template ao mesmo tempo". E depois (o mesmo dia): "o carimbo carrega o nome de quem desenhou e quem
+aprova; se voce iniciar um projeto, seu nome fica como desenhista; o carimbo do projeto so pode ser trocado com a senha
+mestre: 'assumir projeto' troca o desenhista atual pelo seu, e a data do desenho e definida quando o projeto e criado
+ou assumido".
 
 ONDE MORA
   Libs/carimbos.json            os carimbos (nome, tags, senha com sal em PBKDF2). Libs/ e o item "Biblioteca do
@@ -17,12 +20,25 @@ ONDE MORA
                                 Data_verificacao, Data_aprovacao) e a ASSINATURA do que foi aprovado
                                 (Aprovacao_assinatura, Aprovacao_carimbo). Viaja junto com o esquema, num arquivo so.
 
+O DESENHISTA e quem criou o projeto (tools/rotas/projeto_novo.py usa o carimbo em uso) ou quem o ASSUMIU (POST
+/api/carimbos/assumir, com a senha mestre): Desenhista_DiEletrons, Desenhista_carimbo e o Data_desenho, que so muda
+nessas duas horas.
+
+AS REVISOES (2026-11-05: "a revisao e definida no momento em que aprova: o projeto esta na REV.A, o aprovador aprova
+1x, o projeto salva como REV.A no historico; vai ter uma aba Revisoes onde voce ve o que foi alterado e pode selecionar
+aquela revisao, que volta todo o projeto para o estado dela; algo foi modificado, tem que aprovar a 2x, salva REV.B").
+Cada aprovacao grava o campo Revisao do carimbo e uma COPIA do projeto em Projects/<p>/Revisoes/REV.<x>/ (os arquivos
+da pasta do projeto, sem as subpastas e sem o estado local da bancada), com a linha dela em Revisoes/revisoes.json:
+quem aprovou, quando, a assinatura e o resumo do que mudou desde a revisao anterior. A pasta Revisoes/ viaja com o
+projeto para o NexoBD e fica fora do vigia do hub (como Gerber/ e PDF/). Voltar para uma revisao copia os arquivos
+dela de volta: o projeto fica identico ao aprovado, e com isso aprovado de novo.
+
 A ASSINATURA e o sha256 do projeto como ele estava na aprovacao: schematic.js (sem a linha "generated" e sem os campos
-da aprovacao e o Data_desenho no cabecalho), changes.js e board.js. Projeto aprovado = assinatura igual a de agora.
-Mudou qualquer um deles (o esquema salvo, a PCB editada, o Altium reexportou, a IA mexeu): a tag volta a "Sem aprovacao"
-na hora, e passada a CARENCIA (o NexoBD pode estar trazendo os arquivos de outra maquina um de cada vez) os campos da
-aprovacao saem do cabecalho e o Data_desenho vira a data de hoje. A vista Esquema faz o mesmo ao salvar uma edicao
-(hub-carimbos.js » antesDeSalvar), sem esperar.
+das pessoas e das datas no cabecalho), changes.js e board.js. Projeto aprovado = assinatura igual a de agora.
+Mudou qualquer um deles (o esquema salvo, a PCB editada, a IA mexeu): a tag volta a "Sem aprovacao" na hora, e passada
+a CARENCIA (o NexoBD pode estar trazendo os arquivos de outra maquina um de cada vez) os campos da aprovacao saem do
+cabecalho. A vista Esquema faz o mesmo ao salvar uma edicao (hub-carimbos.js » antesDeSalvar), sem esperar. Assumir o
+projeto nao mexe na aprovacao (nao muda o desenho).
 
 Rotas:
   GET  /api/carimbos                       -> {ok, carimbos:[{id, nome, tags}], ativo:{id, nome, tags}|null}
@@ -31,9 +47,12 @@ Rotas:
   POST /api/carimbos/sair                                   nenhum carimbo nesta maquina
   POST /api/carimbos/tags {id, tags, mestre}                troca as tags (senha mestre)
   POST /api/carimbos/apagar {id, mestre}                    apaga (senha mestre)
+  POST /api/carimbos/assumir {projeto, mestre}              o carimbo em uso vira o desenhista do projeto (senha mestre)
   GET  /api/aprovacao?projeto=             -> {ok, aprovado, por, data, carimbo, temEsquema}
   GET  /api/aprovacoes                     -> {ok, projetos:{<nome>: {aprovado, por, data}}}
-  POST /api/aprovacao {projeto}            -> aprova com o carimbo ativo (tag aprovador): {ok, texto, params, ...}
+  POST /api/aprovacao {projeto}            -> aprova com o carimbo ativo (tag aprovador) e grava a revisao: {ok, texto, params, rev, ...}
+  GET  /api/revisoes?projeto=              -> {ok, revisoes:[{rev, data, quando, aprovador, resumo}], atual:{rev, aprovado, mudancas}}
+  POST /api/revisoes/voltar {projeto, rev} -> o projeto volta a ser o da revisao
 """
 import hashlib
 import hmac
@@ -55,7 +74,13 @@ CARENCIA = 120.0          # s: assinatura diferente por mais que isto = modifica
 # os campos que a aprovacao escreve no cabecalho (e que a assinatura nao cobre)
 CAMPOS_APROVACAO = ('Verificador_DiEletrons', 'Aprovador_DiEletrons', 'Data_verificacao', 'Data_aprovacao',
                     'Aprovacao_assinatura', 'Aprovacao_carimbo')
-FORA_DA_ASSINATURA = set(CAMPOS_APROVACAO) | {'Data_desenho'}
+CAMPOS_DESENHISTA = ('Desenhista_DiEletrons', 'Desenhista_carimbo', 'Data_desenho')
+# a Revisao e do Aprovar (a letra da revisao que esta aprovacao grava): nao e desenho
+FORA_DA_ASSINATURA = set(CAMPOS_APROVACAO) | set(CAMPOS_DESENHISTA) | {'Revisao'}
+PASTA_REV = 'Revisoes'
+ARQ_REV = 'revisoes.json'
+# o estado local da bancada e o que nao e projeto (hubserver.py » ESTADO_LOCAL): nao entra na copia da revisao
+FORA_DA_REVISAO = {'bom-vistos.json', 'bom-opts.json', 'odoo-lista.json', 'lista-extras.json'}
 ARQS_ASSINADOS = ('schematic.js', 'changes.js', 'board.js')
 
 _trava = threading.Lock()
@@ -276,17 +301,23 @@ def estado_aprovacao(pdir):
     ass = p.get('Aprovacao_assinatura') or ''
     ok = bool(ass and (p.get('Aprovador_DiEletrons') or '').strip() and ass == assinatura(pdir))
     return {'aprovado': ok, 'por': p.get('Aprovador_DiEletrons') or '', 'data': p.get('Data_aprovacao') or '',
+            'rev': p.get('Revisao') or '',
             'carimbo': p.get('Aprovacao_carimbo') or '', 'assinada': bool(ass), 'temEsquema': True}
 
 
 def limpa_aprovacao(texto):
-    """o schematic.js sem os campos da aprovacao e com o Data_desenho de hoje (a modificacao que derrubou a aprovacao)"""
+    """o schematic.js sem os campos da aprovacao (a modificacao que derrubou a aprovacao)"""
     def fn(p):
         for k in CAMPOS_APROVACAO:
             p.pop(k, None)
-        p['Data_desenho'] = _hoje()
         return p
     return troca_params(texto, fn)
+
+
+def params_desenhista(carimbo, data=None):
+    """os campos do desenhista no carimbo da folha: o nome do carimbo, o id dele e a data (hoje)"""
+    return {'Desenhista_DiEletrons': carimbo['nome'], 'Desenhista_carimbo': carimbo['id'],
+            'Data_desenho': data or _hoje()}
 
 
 def confere(pdir, agora=None):
@@ -311,6 +342,210 @@ def confere(pdir, agora=None):
         return e
     _desde.pop(pdir, None)
     return estado_aprovacao(pdir)
+
+
+# ─────────────────────────── as revisoes ───────────────────────────
+def revisoes(pdir):
+    try:
+        with open(os.path.join(pdir, PASTA_REV, ARQ_REV), encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d.get('revisoes'), list):
+            return d['revisoes']
+    except (OSError, ValueError, AttributeError):
+        pass
+    return []
+
+
+def _grava_revisoes(pdir, lista):
+    arq = os.path.join(pdir, PASTA_REV, ARQ_REV)
+    os.makedirs(os.path.dirname(arq), exist_ok=True)
+    tmp = arq + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump({'format': 'nexoeletric-revisoes-1', 'revisoes': lista}, f, ensure_ascii=False, indent=1)
+        f.write('\n')
+    os.replace(tmp, arq)
+
+
+def _letra_seguinte(s):
+    """A -> B ... Z -> AA (como coluna de planilha)"""
+    s = (s or '').upper()
+    if not s or not s.isalpha():
+        return 'A'
+    n = 0
+    for ch in s:
+        n = n * 26 + (ord(ch) - 64)
+    n += 1
+    out = ''
+    while n:
+        n, r = divmod(n - 1, 26)
+        out = chr(65 + r) + out
+    return out
+
+
+def letra_da_revisao(texto):
+    """'REV.A' / 'REV. B' / 'Rev C' -> 'A' / 'B' / 'C'; '' se nao tem"""
+    m = re.search(r'([A-Za-z]{1,3})\s*$', str(texto or '').replace('REV', ' ').replace('Rev', ' ').replace('rev', ' ').strip())
+    return m.group(1).upper() if m else ''
+
+
+def proxima_revisao(pdir, params):
+    """a letra que a aprovacao vai gravar: a seguinte da ultima revisao; sem revisao ainda, a do carimbo (REV.A)"""
+    lst = revisoes(pdir)
+    if lst:
+        return _letra_seguinte(lst[-1].get('rev'))
+    return letra_da_revisao(params.get('Revisao')) or 'A'
+
+
+def _arquivos_do_projeto(pdir):
+    out = []
+    try:
+        nomes = sorted(os.listdir(pdir))
+    except OSError:
+        return out
+    for n in nomes:
+        if n in FORA_DA_REVISAO or n.endswith('.tmp') or not os.path.isfile(os.path.join(pdir, n)):
+            continue
+        out.append(n)
+    return out
+
+
+def _le_arquivos(pasta_, nomes=('schematic.js', 'changes.js', 'board.js')):
+    out = {}
+    for n in nomes:
+        try:
+            with open(os.path.join(pasta_, n), encoding='utf-8') as f:
+                out[n] = f.read().replace('\r\n', '\n')
+        except OSError:
+            out[n] = None
+    return out
+
+
+def _linhas_json(txt, depois_de=None):
+    """os objetos de um arquivo do hub, um por linha (schematic.js depois de "items", changes.js)"""
+    out, dentro = [], depois_de is None
+    for l in (txt or '').split('\n'):
+        if not dentro:
+            dentro = l.startswith(depois_de)
+            continue
+        l = l.strip().rstrip(',')
+        if l.startswith('{'):
+            try:
+                out.append(json.loads(l))
+            except ValueError:
+                pass
+    return out
+
+
+def _comps(itens):
+    por = {}
+    for it in itens:
+        if it.get('t') != 'comp' or not it.get('ref'):
+            continue
+        c = por.setdefault(it['ref'], {'sym': it.get('sym'), 'footprint': it.get('footprint'),
+                                       'comment': it.get('comment'), 'pos': set()})
+        c['pos'].add((it.get('sheet'), it.get('part') or 1, round(it.get('x') or 0), round(it.get('y') or 0),
+                      it.get('rot') or 0, bool(it.get('mirror'))))
+    return por
+
+
+def resumo(antes, depois):
+    """o que mudou de `antes` para `depois` ({arquivo: texto|None}), em frases curtas"""
+    if antes is None:
+        return ['primeira revisão']
+    out = []
+    sa, sd = antes.get('schematic.js') or '', depois.get('schematic.js') or ''
+    if sa != sd:
+        ia, idd = _linhas_json(sa, '"items":'), _linhas_json(sd, '"items":')
+        ca, cd = _comps(ia), _comps(idd)
+        novos = sorted(set(cd) - set(ca), key=_nat)
+        foram = sorted(set(ca) - set(cd), key=_nat)
+        if novos:
+            out.append('componentes novos: ' + _lista(novos))
+        if foram:
+            out.append('componentes removidos: ' + _lista(foram))
+        movidos = []
+        for r in sorted(set(ca) & set(cd), key=_nat):
+            a, b = ca[r], cd[r]
+            for k, rot in (('sym', 'símbolo'), ('footprint', 'footprint'), ('comment', 'valor')):
+                if (a[k] or '') != (b[k] or ''):
+                    out.append('%s: %s %s → %s' % (r, rot, a[k] or '—', b[k] or '—'))
+            if a['pos'] != b['pos']:
+                movidos.append(r)
+        if movidos:
+            out.append('componentes movidos: ' + _lista(movidos))
+        for t, rot in (('wire', 'fios'), ('netlabel', 'rótulos de net'), ('power', 'símbolos de alimentação'),
+                       ('port', 'portas'), ('junction', 'junções'), ('text', 'textos')):
+            na = sum(1 for x in ia if x.get('t') == t)
+            nd = sum(1 for x in idd if x.get('t') == t)
+            la = sorted(json.dumps(x, sort_keys=True) for x in ia if x.get('t') == t)
+            ld = sorted(json.dumps(x, sort_keys=True) for x in idd if x.get('t') == t)
+            if la != ld:
+                out.append('%s: %d → %d' % (rot, na, nd) if na != nd else '%s alterados' % rot)
+        fa = [x.get('name') for x in ia if x.get('t') == 'sheet']
+        fd = [x.get('name') for x in idd if x.get('t') == 'sheet']
+        if fa != fd:
+            out.append('folhas: ' + ', '.join(fd or ['—']))
+        pa, pd = params_do_texto(sa), params_do_texto(sd)
+        for k in sorted(set(pa) | set(pd)):
+            if k in FORA_DA_ASSINATURA or pa.get(k) == pd.get(k):
+                continue
+            out.append('carimbo, %s: %s → %s' % (k.replace('_DiEletrons', '').replace('_', ' '), pa.get(k) or '—', pd.get(k) or '—'))
+    ga, gd = antes.get('changes.js'), depois.get('changes.js')
+    if (ga or '') != (gd or ''):
+        oa, od = _linhas_json(ga or ''), _linhas_json(gd or '')
+        out.append('PCB: %d → %d mudanças no changes.js' % (len(oa), len(od)) if len(oa) != len(od)
+                   else 'PCB: mudanças do changes.js alteradas')
+    if (antes.get('board.js') or '') != (depois.get('board.js') or ''):
+        out.append('placa (board.js) diferente')
+    return out or ['nada no esquema nem na PCB (só arquivos de apoio)']
+
+
+def _nat(s):
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', str(s))]
+
+
+def _lista(xs, n=25):
+    return ', '.join(xs[:n]) + (' e mais %d' % (len(xs) - n) if len(xs) > n else '')
+
+
+def grava_revisao(pdir, rev, carimbo, ass):
+    """copia o projeto para Revisoes/REV.<rev>/ e acrescenta a linha no revisoes.json"""
+    import shutil
+    lst = revisoes(pdir)
+    destino = os.path.join(pdir, PASTA_REV, 'REV.' + rev)
+    if os.path.isdir(destino):
+        shutil.rmtree(destino, ignore_errors=True)
+    os.makedirs(destino, exist_ok=True)
+    arqs = _arquivos_do_projeto(pdir)
+    for n in arqs:
+        shutil.copy2(os.path.join(pdir, n), os.path.join(destino, n))
+    anterior = lst[-1] if lst else None
+    antes = _le_arquivos(os.path.join(pdir, PASTA_REV, 'REV.' + anterior['rev'])) if anterior else None
+    linha = {'rev': rev, 'quando': time.strftime('%Y-%m-%dT%H:%M:%S'), 'data': _hoje(), 'aprovador': carimbo['nome'],
+             'carimbo': carimbo['id'], 'assinatura': ass, 'arquivos': arqs,
+             'resumo': resumo(antes, _le_arquivos(destino))}
+    lst = [x for x in lst if x.get('rev') != rev] + [linha]
+    _grava_revisoes(pdir, lst)
+    return linha
+
+
+def volta_revisao(pdir, rev):
+    """o projeto volta a ser o da revisao: os arquivos dela por cima dos de agora"""
+    import shutil
+    linha = next((x for x in revisoes(pdir) if x.get('rev') == rev), None)
+    origem = os.path.join(pdir, PASTA_REV, 'REV.' + str(rev))
+    if not linha or not os.path.isdir(origem):
+        return None
+    feitos = []
+    for n in linha.get('arquivos') or os.listdir(origem):
+        src = os.path.join(origem, n)
+        if os.path.basename(n) != n or not os.path.isfile(src):
+            continue
+        tmp = os.path.join(pdir, n + '.tmp')
+        shutil.copy2(src, tmp)
+        os.replace(tmp, os.path.join(pdir, n))
+        feitos.append(n)
+    return feitos
 
 
 # ─────────────────────────── rotas ───────────────────────────
@@ -406,6 +641,32 @@ def registra(app, root, senha_mestre):
             _grava_ativo(root, None)
         return {'ok': True}
 
+    @app.route('/api/carimbos/assumir', methods=['POST'])
+    def carimbos_assumir():
+        b = corpo()
+        d = pasta(b.get('projeto'))
+        if not d:
+            return {'ok': False, 'error': 'projeto desconhecido'}, 404
+        c = ativo(root)
+        if not c:
+            return {'ok': False, 'error': 'nenhum carimbo em uso neste computador'}, 403
+        if not _mestre_ok(b.get('mestre'), senha_mestre):
+            return {'ok': False, 'error': 'senha mestre incorreta'}, 403
+        sch = os.path.join(d, 'schematic.js')
+        with _trava:
+            try:
+                with open(sch, encoding='utf-8', newline='') as f:
+                    txt = f.read()
+            except OSError:
+                return {'ok': False, 'error': 'o projeto não tem schematic.js'}, 404
+            novo = troca_params(txt, lambda p: dict(p, **params_desenhista(c)))
+            if novo is None:
+                return {'ok': False, 'error': 'o schematic.js não está no formato que o hub grava'}, 409
+            with open(sch, 'w', encoding='utf-8', newline='') as f:
+                f.write(novo)
+        return dict(ok=True, texto=novo, params=serializa_params(params_do_texto(novo)), desenhista=c['nome'],
+                    dataDesenho=_hoje(), **estado_aprovacao(d))
+
     @app.route('/api/aprovacao')
     def aprovacao_estado():
         d = pasta(request.args.get('projeto'))
@@ -424,7 +685,7 @@ def registra(app, root, senha_mestre):
             d = os.path.join(pdir_raiz, n)
             if os.path.isdir(d):
                 e = confere(d)
-                out[n] = {'aprovado': e['aprovado'], 'por': e.get('por', ''), 'data': e.get('data', '')}
+                out[n] = {'aprovado': e['aprovado'], 'por': e.get('por', ''), 'data': e.get('data', ''), 'rev': e.get('rev', '')}
         return {'ok': True, 'projetos': out}
 
     @app.route('/api/aprovacao', methods=['POST'])
@@ -444,10 +705,16 @@ def registra(app, root, senha_mestre):
                     txt = f.read()
             except OSError:
                 return {'ok': False, 'error': 'o projeto não tem schematic.js'}, 404
+            e0 = estado_aprovacao(d)
+            if e0.get('aprovado'):
+                return {'ok': False, 'error': 'o projeto já está aprovado (%s): modifique e aprove de novo para uma revisão nova'
+                                              % (params_do_texto(txt).get('Revisao') or '')}, 409
             hoje = _hoje()
             ass = assinatura(d)
+            rev = proxima_revisao(d, params_do_texto(txt))
 
             def fn(p):
+                p['Revisao'] = 'REV.' + rev
                 p['Verificador_DiEletrons'] = c['nome']
                 p['Aprovador_DiEletrons'] = c['nome']
                 p['Data_verificacao'] = hoje
@@ -460,8 +727,44 @@ def registra(app, root, senha_mestre):
                 return {'ok': False, 'error': 'o schematic.js não está no formato que o hub grava'}, 409
             with open(sch, 'w', encoding='utf-8', newline='') as f:
                 f.write(novo)
+            e = estado_aprovacao(d)
+            if not e['aprovado']:            # a assinatura nao pode depender do proprio cabecalho
+                with open(sch, 'w', encoding='utf-8', newline='') as f:
+                    f.write(txt)
+                return {'ok': False, 'error': 'a aprovação não conferiu depois de gravada'}, 500
+            linha = grava_revisao(d, rev, c, ass)
         _desde.pop(d, None)
-        e = estado_aprovacao(d)
-        if not e['aprovado']:            # a assinatura nao pode depender do proprio cabecalho
-            return {'ok': False, 'error': 'a aprovação não conferiu depois de gravada'}, 500
-        return dict(ok=True, texto=novo, params=serializa_params(params_do_texto(novo)), **e)
+        return dict(e, ok=True, texto=novo, params=serializa_params(params_do_texto(novo)), rev='REV.' + rev,
+                    resumo=linha['resumo'])
+
+    @app.route('/api/revisoes')
+    def revisoes_lista():
+        d = pasta(request.args.get('projeto'))
+        if not d:
+            return {'ok': False, 'error': 'projeto desconhecido'}, 404
+        lst = revisoes(d)
+        e = confere(d)
+        atual = {'rev': params_do_texto(_le_arquivos(d, ('schematic.js',))['schematic.js'] or '').get('Revisao') or '',
+                 'aprovado': e['aprovado']}
+        if lst and not e['aprovado']:
+            ult = os.path.join(d, PASTA_REV, 'REV.' + lst[-1]['rev'])
+            atual['desde'] = 'REV.' + lst[-1]['rev']
+            atual['mudancas'] = resumo(_le_arquivos(ult), _le_arquivos(d))
+        out = [dict((k, v) for k, v in x.items() if k != 'assinatura') for x in reversed(lst)]
+        for x in out:
+            x['rev'] = 'REV.' + x['rev']
+        return {'ok': True, 'revisoes': out, 'atual': atual}
+
+    @app.route('/api/revisoes/voltar', methods=['POST'])
+    def revisoes_voltar():
+        b = corpo()
+        d = pasta(b.get('projeto'))
+        if not d:
+            return {'ok': False, 'error': 'projeto desconhecido'}, 404
+        rev = letra_da_revisao(b.get('rev'))
+        with _trava:
+            feitos = volta_revisao(d, rev)
+        if feitos is None:
+            return {'ok': False, 'error': 'a revisão %s não existe neste projeto' % b.get('rev')}, 404
+        _desde.pop(d, None)
+        return dict(estado_aprovacao(d), ok=True, rev='REV.' + rev, arquivos=feitos)

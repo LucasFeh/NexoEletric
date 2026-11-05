@@ -5,13 +5,16 @@
    Trocar de carimbo pede a senha daquele carimbo; apagar pede a senha mestre do hub. Com um carimbo aprovador em uso,
    o "Aprovar" aparece ao lado do Salvar: preenche no template o verificador E o aprovador (quem verifica também
    aprova) com a data de hoje. Na lista de projetos, cada um leva a tag [Aprovado] ou [Sem aprovação] (vermelha,
-   piscando). Qualquer modificação no projeto tira a aprovação e atualiza a data do desenho.
+   piscando). Qualquer modificação no projeto tira a aprovação.
+   O DESENHISTA (2026-11-05, o mesmo dia): quem cria o projeto (o carimbo em uso entra no carimbo da folha) ou quem o
+   ASSUME (Arquivo › Assumir projeto…, com a senha mestre). A data do desenho é a da criação ou a de assumir.
 
    O servidor é o tools/rotas/carimbos.py (a regra da assinatura está lá). Aqui:
      HubCarimbos.abreGerenciador({campos})    o diálogo dos carimbos (campos = abre a tabela de campos do carimbo)
      HubCarimbos.tagProjeto(nome)             a tag do projeto no painel Projetos (hub-shell.js); liga a consulta
      HubCarimbos.montaAprovar(ganchos)        o botão Aprovar ao lado do Salvar (schframe.js)
-     HubCarimbos.antesDeSalvar(sch, disco)    a edição salva derruba a aprovação e põe a data de hoje no desenho
+     HubCarimbos.antesDeSalvar(sch, disco)    a edição salva derruba a aprovação
+     HubCarimbos.assumir(projeto, ganchos?)   o carimbo em uso vira o desenhista (senha mestre)
      HubCarimbos.estado() / carrega() / ouve(fn)
    Nada de alert/confirm/prompt: modal no tema e toast (HubDialog quando a página tem; senão o toast do hub). */
 (function (root) {
@@ -48,7 +51,10 @@ const CSS = `
 .cb-form > span{color:var(--text-3, #999);}
 .cb-sec{font-size:10px; text-transform:uppercase; letter-spacing:.09em; color:var(--text-3, #999); margin-top:4px;}
 .cb-erro{font-size:12px; color:var(--err, #f87171); min-height:1em;}
-.cb-box button{cursor:pointer;}
+.cb-box button{cursor:pointer; padding:4px 11px; border-radius:var(--r-sm, 6px); border:1px solid var(--line, #444);
+  background:var(--surface-2, #2a2a2a); color:var(--text, #ddd); font:12px var(--font, sans-serif);}
+.cb-box button:hover:not(:disabled){border-color:var(--hi, #3b82f6);}
+.cb-box button:disabled{opacity:.45; cursor:default;}
 .cb-perigo:hover{color:var(--err, #f87171); border-color:var(--err, #f87171);}
 .eh-aprov{font-size:10px; font-weight:600; margin-left:6px; white-space:nowrap; flex:none;}
 .eh-aprov.ok{color:var(--ok, #4ade80);}
@@ -136,6 +142,19 @@ function pedeSenha(titulo, texto, o){
     const sp = el('span', 'cb-sp');
     m.pe.append(sp, botao('Cancelar', null, () => m.fecha()), ok);
     inp.focus();
+  });
+}
+
+/* uma pergunta sim/não no tema: resolve true (ok) ou false */
+function confirma(titulo, texto, ok){
+  return new Promise(res => {
+    const m = modal(titulo, null, true);
+    let feito = false;
+    m.aoFechar(() => { if (!feito) res(false); });
+    m.corpo.append(el('div', null, texto));
+    const b = botao(ok || 'OK', null, () => { feito = true; m.fecha(); res(true); });
+    m.pe.append(el('span', 'cb-sp'), botao('Cancelar', null, () => m.fecha()), b);
+    b.focus();
   });
 }
 
@@ -279,14 +298,14 @@ function tagProjeto(nome){
   const a = aprovs && aprovs[nome];
   if (!a) return null;
   const t = el('span', 'eh-aprov ' + (a.aprovado ? 'ok' : 'nao'), a.aprovado ? '[Aprovado]' : '[Sem aprovação]');
-  t.title = a.aprovado ? 'aprovado por ' + a.por + (a.data ? ' em ' + a.data : '') + ' — qualquer modificação tira a aprovação'
+  t.title = a.aprovado ? (a.rev ? a.rev + ' · ' : '') + 'aprovado por ' + a.por + (a.data ? ' em ' + a.data : '') + ' — qualquer modificação tira a aprovação'
                        : 'ainda sem aprovação (ou modificado depois de aprovado): um carimbo aprovador aprova pelo Esquema, ao lado do Salvar';
   return t;
 }
 
-/* ─── a edição salva no Esquema: derruba a aprovação e põe a data de hoje no desenho ───
-   `disco` = o texto do schematic.js da última leitura/gravação: se o Data_desenho de agora é diferente do de lá, quem
-   mudou foi a pessoa (na tabela de campos), e o dela vale. Projeto sem carimbo (sem params e sem template) fica como está. */
+/* ─── a edição salva no Esquema: derruba a aprovação ───
+   A data do desenho NÃO muda aqui (2026-11-05: "a data de desenho é definida assim que é criado, ou quando o projeto é
+   assumido"). `disco` fica na assinatura para quem chama, mas não é mais usado. */
 function paramsDoTexto(txt){
   const T = root.HubSchTemplate;
   const m = /(^|\n)"params":("(?:[^"\\]|\\.)*"),?\s*(\n|$)/.exec(String(txt || '').split('\n"items":')[0]);
@@ -307,8 +326,7 @@ function antesDeSalvar(sch, disco){
     for (const k of CAMPOS_APROVACAO) if (k in q){ delete q[k]; m = true; }
     if (m){ const s = T.serializaParams(q); if (s) it.params = s; else delete it.params; mudou = true; }
   }
-  const h = hoje();
-  if ((p.Data_desenho || '') === (d.Data_desenho || '') && p.Data_desenho !== h){ p.Data_desenho = h; mudou = true; }
+  void d;
   if (mudou){ const s = T.serializaParams(p); if (s) sch.params = s; else delete sch.params; }
   return mudou;
 }
@@ -328,7 +346,7 @@ function montaAprovar(g){
     b.classList.remove('ok', 'nao', 'pode');
     if (!ap) return;
     if (ap.aprovado){
-      b.classList.add('ok'); lbl.textContent = 'Aprovado';
+      b.classList.add('ok'); lbl.textContent = 'Aprovado' + (ap.rev ? ' · ' + ap.rev : '');
       b.title = 'aprovado por ' + ap.por + (ap.data ? ' em ' + ap.data : '') + ' — qualquer modificação no projeto tira a aprovação';
     } else if (pode){
       b.classList.add('pode'); lbl.textContent = 'Aprovar';
@@ -350,7 +368,8 @@ function montaAprovar(g){
     if (!ehAprovador(est.ativo)){ abreGerenciador(g.gerenciador || {}); return; }
     const D = root.HubDialog;
     if (D && !(await D.confirm('Aprovar o projeto ' + g.projeto + ' como ' + est.ativo.nome + '?\nO carimbo recebe '
-        + est.ativo.nome + ' como verificador e aprovador, com a data de hoje. Qualquer modificação depois tira a aprovação.',
+        + est.ativo.nome + ' como verificador e aprovador, com a data de hoje, e o projeto é guardado como uma revisão nova '
+        + '(Histórico › Revisões). Qualquer modificação depois tira a aprovação.',
         { title:'Aprovar projeto', ok:'Aprovar' }))) return;
     /* o aprovado é o que está no disco: a edição pendente vai antes (e a folha que sobrescreve os campos do projeto
        perde os dela, senão o carimbo mostraria o nome da folha e não o de quem aprovou) */
@@ -367,13 +386,50 @@ function montaAprovar(g){
     if (!j.ok){ toast('não aprovou: ' + (j.error || 'falhou'), 'err', 7000); await confere(); return; }
     g.adota(j.texto, j.params);
     ap = j; pinta();
-    toast(g.projeto + ' aprovado por ' + j.por, 'ok', 5000);
+    toast(g.projeto + ' aprovado por ' + j.por + ' — ' + j.rev + ' guardada', 'ok', 5000);
   });
   carrega().then(confere);
   setInterval(() => { if (!document.hidden) confere(); }, PERIODO);
+  /* o "Assumir projeto" do menu do hub chega aqui quando esta vista está aberta: a edição pendente vai antes, e o texto
+     que o servidor gravou vira o do disco (sem recarregar a folha) */
+  if (typeof window !== 'undefined') window.__schCarimbo = { projeto: g.projeto, assumir: () => assumir(g.projeto, g) };
   return { confere };
 }
 
-root.HubCarimbos = { abreGerenciador, tagProjeto, montaAprovar, antesDeSalvar, carrega, ouve, estado: () => est, ehAprovador,
+/* ─── assumir o projeto: o carimbo em uso vira o desenhista, com a data de hoje (senha mestre) ─── */
+async function assumir(projeto, g){
+  if (!projeto){ toast('abra um projeto para assumir', 'warn'); return false; }
+  await carrega();
+  if (!est.ativo){
+    toast('escolha o seu carimbo primeiro: ele é quem assume o projeto', 'warn', 6000);
+    abreGerenciador((g && g.gerenciador) || {});
+    return false;
+  }
+  if (g && g.sujo() && !(await g.salva())) return false;
+  let resp = null;
+  const s = await pedeSenha('Assumir o projeto ' + projeto,
+    'O carimbo ' + est.ativo.nome + ' passa a ser o desenhista do projeto, com a data de hoje. Trocar o carimbo do projeto pede a senha mestre do sistema.',
+    { ok:'Assumir', rotulo:'senha mestre', sub:'senha mestre do sistema',
+      confere: async mestre => { const j = await api('/api/carimbos/assumir', { projeto, mestre }); if (j.ok) resp = j; return j.ok ? '' : (j.error || 'falhou'); } });
+  if (s == null || !resp) return false;
+  if (g) g.adota(resp.texto, resp.params);
+  toast(projeto + ': desenhista agora é ' + resp.desenhista + ' (' + resp.dataDesenho + ')', 'ok', 5000);
+  return true;
+}
+/* o "Assumir projeto…" do menu Arquivo do hub (hub-menubar.js): o projeto aberto; se a vista Esquema dele está aberta,
+   é ela que assume (salva o que estiver pendente e adota o texto novo) */
+function assumirNoHub(){
+  let nome = '';
+  try { const p = typeof proj === 'function' ? proj() : null; nome = p ? p.name : ''; } catch (_) { nome = ''; }
+  for (const f of document.querySelectorAll('iframe')){
+    let w = null;
+    try { w = f.contentWindow; } catch (_) { w = null; }
+    if (w && w.__schCarimbo && w.__schCarimbo.projeto === nome) return w.__schCarimbo.assumir();
+  }
+  return assumir(nome, null);
+}
+if (typeof window !== 'undefined' && typeof document !== 'undefined') window.__hubAssumirProjeto = assumirNoHub;
+
+root.HubCarimbos = { abreGerenciador, tagProjeto, montaAprovar, antesDeSalvar, assumir, confirma, carrega, ouve, estado: () => est, ehAprovador,
                      CAMPOS_APROVACAO, _paramsDoTexto: paramsDoTexto };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -4,6 +4,28 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.74.0 — 2026-11-05
+
+**O carimbo do projeto: desenhista, assumir projeto e as revisões a cada aprovação.**
+- **Desenhista = quem criou o projeto.** O Novo projeto não pergunta mais o nome: o desenhista é o **carimbo em uso**
+  neste computador (o "Trocar…"/"Escolher…" do diálogo abre os carimbos), com a data de criação como data do desenho.
+- **Arquivo › Assumir projeto…** troca o desenhista do projeto aberto pelo carimbo em uso, com a data de hoje. Pede a
+  **senha mestre**: o carimbo do projeto só muda por aqui. Não mexe na aprovação.
+- **A data do desenho só muda na criação e no assumir.** Ela não é mais atualizada a cada modificação (a modificação
+  continua tirando a aprovação).
+- **Campos do carimbo** não tem mais desenhista, verificador, aprovador, datas nem revisão: eles vêm do carimbo de
+  quem criou ou assumiu e do Aprovar, e aparecem resumidos no topo da tabela.
+- **Revisões.** Cada **Aprovar** define a revisão: a primeira aprovação grava a **REV.A** (ou a revisão que o carimbo
+  já tinha, se o projeto veio do Altium numa REV.C); depois de uma modificação, a próxima aprovação grava a **REV.B**,
+  e assim por diante. A revisão vai para o campo Revisão do template, e o projeto inteiro é guardado em
+  `Projects/<projeto>/Revisoes/REV.<x>/`, que viaja com o projeto para o NexoBD.
+- **Histórico › Revisões** (nova sub-aba, ao lado da Linha do tempo): o estado de agora (o que mudou desde a última
+  revisão), cada revisão com quem aprovou, quando e **o que mudou** desde a anterior (componentes novos, removidos,
+  movidos, valor/footprint trocado, fios, rótulos, carimbo, mudanças da PCB) e **Voltar para esta revisão**: o
+  projeto inteiro volta a ser o daquela revisão, e fica aprovado de novo.
+- O botão do Esquema mostra a revisão ("Aprovado · REV.B"). Um projeto já aprovado não é aprovado de novo sem
+  modificação.
+
 ## 1.73.0 — 2026-11-05
 
 **Todo conector com o símbolo "Conector 1 via", uma parte por pino.**

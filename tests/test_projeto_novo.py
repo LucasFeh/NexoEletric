@@ -12,6 +12,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 import zipfile
 
@@ -72,6 +73,18 @@ class Rotas(unittest.TestCase):
             os.environ['NEXO_CATALOGO'] = self.env
         os.environ.pop('NEXOELETRIC_NODE', None)
         shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_desenhista_e_o_carimbo_em_uso(self):
+        """o carimbo em uso nesta maquina (tools/rotas/carimbos.py) entra como desenhista, por cima do `iniciador`"""
+        import carimbos
+        carimbos._grava(self.tmp, {'format': 'nexoeletric-carimbos-1', 'carimbos': {
+            'luciano': {'id': 'luciano', 'nome': 'Luciano', 'tags': [], 'sal': '00', 'senha': 'x'}}})
+        carimbos._grava_ativo(self.tmp, 'luciano')
+        j = self.c.post('/api/projeto/novo', json={'nome': 'Placa Z', 'iniciador': 'Outro', 'template': ''}).get_json()
+        self.assertTrue(j['ok'], j)
+        self.assertEqual(j['params']['Desenhista_DiEletrons'], 'Luciano')
+        self.assertEqual(j['params']['Desenhista_carimbo'], 'luciano')
+        self.assertEqual(j['params']['Data_desenho'], time.strftime('%d/%m/%y'))
 
     def test_previa_e_criar(self):
         j = self.c.get('/api/projeto/novo/previa?nome=Placa%20medidora%20de%20nivel').get_json()

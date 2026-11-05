@@ -72,8 +72,27 @@ function abre(o) {
   }).catch(() => { /* sem servidor: fica a folha em branco */ });
   const iCli = campo('Cliente', false, inp('ex.: USIMINAS'));
   const iVin = campo('Descrição', false, inp('para que serve (vai na coluna VÍNCULO do catálogo)'));
-  const iQuem = campo('Quem iniciou', true, inp('o seu nome, vai no carimbo (DESEN.)'));
-  iQuem.value = lePref();
+  /* O DESENHISTA É O SEU CARIMBO (2026-11-05: "se você iniciar um projeto, seu nome fica como desenhista"): o carimbo
+     em uso neste computador (hub-carimbos.js), e não um nome digitado. Sem carimbo em uso, o Escolher abre os carimbos. */
+  const CB = root.HubCarimbos;
+  const quem = el('div', 'pn-sig');
+  const quemNome = el('span', 'pn-cod', '…');
+  const quemTroca = el('button', 'btn btn-ghost', 'Escolher…'); quemTroca.type = 'button';
+  quem.append(quemNome, quemTroca);
+  const lQuem = el('label'); lQuem.textContent = 'Desenhista'; lQuem.append(' ', el('b', null, '*'));
+  g.append(lQuem, quem);
+  const iQuem = { value: '' };
+  const pintaQuem = () => {
+    const a = CB ? CB.estado().ativo : null;
+    iQuem.value = a ? a.nome : (CB ? '' : lePref());
+    quemNome.textContent = a ? a.nome : (CB ? 'nenhum carimbo em uso' : (iQuem.value || '—'));
+    quemNome.style.color = a ? '' : 'var(--err)';
+    quemTroca.textContent = a ? 'Trocar…' : 'Escolher…';
+    if (typeof confere === 'function') erro.textContent = mexeu ? confere() : (confere(), '');
+  };
+  quemTroca.onclick = () => { if (CB) CB.abreGerenciador({}); };
+  const desliga = CB ? CB.ouve(pintaQuem) : null;
+  if (CB) CB.carrega();
   const iProj = campo('Nome do projeto', false, inp('o código'));
   d.append(g);
   const info = el('div', 'pn-info'), erro = el('div', 'pn-erro');
@@ -85,7 +104,7 @@ function abre(o) {
   bd.append(d); ov.append(bd);
 
   let siglaMexida = false, mexeu = false, prev = null, seq = 0, timer = null, enviando = false;
-  const fecha = () => { bd.remove(); document.removeEventListener('keydown', tecla, true); };
+  const fecha = () => { bd.remove(); document.removeEventListener('keydown', tecla, true); if (desliga) desliga(); };
   const tecla = e => {
     if (e.key === 'Escape' && !enviando) { e.preventDefault(); e.stopPropagation(); fecha(); }
     else if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && !enviando) { e.preventDefault(); cria(); }
@@ -97,7 +116,7 @@ function abre(o) {
     const n = iNome.value.trim(), q = iQuem.value.trim(), p = iProj.value.trim(), s = iSig.value.trim().toUpperCase();
     let m = '';
     if (!n) m = 'falta o nome da placa';
-    else if (!q) m = 'falta quem iniciou o projeto (vai no carimbo)';
+    else if (!q) m = 'escolha o seu carimbo: ele entra como desenhista';
     else if (s && !/^[A-Z][A-Z0-9]{0,11}$/.test(s)) m = 'a sigla tem só letras e números, começando por letra';
     else if (p && nomeRuim(p)) m = 'nome do projeto: ' + nomeRuim(p);
     else if (p && o.existe && o.existe(p)) m = 'já existe um projeto com esse nome';
@@ -132,7 +151,7 @@ function abre(o) {
   const agenda = () => { clearTimeout(timer); timer = setTimeout(previa, 350); };
   iNome.addEventListener('input', () => { mexeu = true; agenda(); erro.textContent = confere(); });
   iSig.addEventListener('input', () => { siglaMexida = iSig.value.trim() !== ''; pintaCod(); erro.textContent = confere(); });
-  for (const i of [iQuem, iProj, iCli, iVin]) i.addEventListener('input', () => { mexeu = true; erro.textContent = confere(); });
+  for (const i of [iProj, iCli, iVin]) i.addEventListener('input', () => { mexeu = true; erro.textContent = confere(); });
 
   async function cria() {
     const m = confere();
@@ -152,6 +171,7 @@ function abre(o) {
     if (o.aoCriar) await o.aoCriar(j);
   }
   bOk.onclick = cria;
+  pintaQuem();
   confere();
   previa();
   iNome.focus();

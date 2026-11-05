@@ -1,4 +1,5 @@
-/* Carimbos e aprovação (hub-carimbos.js): a edição salva no Esquema derruba a aprovação e põe a data de hoje no desenho.
+/* Carimbos e aprovação (hub-carimbos.js): a edição salva no Esquema derruba a aprovação (a data do desenho fica: ela só
+   muda quando o projeto é criado ou assumido).
 
    node tests/test-carimbos.js
 
@@ -24,7 +25,7 @@ function esquema(params, folha){
 const APROVADO = 'Desenhista_DiEletrons=Lucas;Data_desenho=01/11/26;Verificador_DiEletrons=Lucas;Aprovador_DiEletrons=Lucas;'
                + 'Data_verificacao=02/11/26;Data_aprovacao=02/11/26;Aprovacao_carimbo=lucas;Aprovacao_assinatura=abc';
 
-/* 1. a edição de um projeto aprovado: os campos da aprovação saem, o desenho fica com a data de hoje */
+/* 1. a edição de um projeto aprovado: os campos da aprovação saem; o desenhista e a data do desenho ficam */
 {
   const sch = esquema(APROVADO, { params:'Aprovador_DiEletrons=Outro;Escala=1:2' });
   const disco = HubCore.serializeSchematic(sch).text;
@@ -32,17 +33,17 @@ const APROVADO = 'Desenhista_DiEletrons=Lucas;Data_desenho=01/11/26;Verificador_
   ok(CB.antesDeSalvar(sch, disco), 'mudou');
   const p = T.parseParams(sch.params);
   for (const k of CB.CAMPOS_APROVACAO) ok(!(k in p), 'saiu ' + k);
-  eq(p.Data_desenho, HOJE, 'data do desenho = hoje');
+  eq(p.Data_desenho, '01/11/26', 'a data do desenho não muda na edição');
   eq(p.Desenhista_DiEletrons, 'Lucas', 'o resto fica');
   eq(sch.items[0].params, 'Escala=1:2', 'a folha perde só o que é da aprovação');
 }
 
-/* 2. a pessoa mudou a data do desenho na tabela de campos: vale a dela */
+/* 2. projeto sem aprovação: a edição não mexe em nada */
 {
   const disco = HubCore.serializeSchematic(esquema('Data_desenho=01/11/26')).text;
-  const sch = esquema('Data_desenho=15/10/26');
+  const sch = esquema('Data_desenho=01/11/26;Desenhista_DiEletrons=Lucas');
   eq(CB.antesDeSalvar(sch, disco), false, 'nada a fazer');
-  eq(T.parseParams(sch.params).Data_desenho, '15/10/26', 'a data digitada fica');
+  eq(sch.params, 'Data_desenho=01/11/26;Desenhista_DiEletrons=Lucas', 'fica como estava');
 }
 
 /* 3. projeto sem carimbo (sem params e sem template) não ganha campo nenhum */
@@ -52,12 +53,13 @@ const APROVADO = 'Desenhista_DiEletrons=Lucas;Data_desenho=01/11/26;Verificador_
   ok(!('params' in sch), 'sem params');
 }
 
-/* 4. projeto com template e sem params: ganha só a data do desenho */
+/* 4. projeto com template e sem params: não ganha campo nenhum */
 {
   const sch = esquema(undefined);
   delete sch.params;
-  ok(CB.antesDeSalvar(sch, HubCore.serializeSchematic(sch).text), 'mudou');
-  eq(sch.params, 'Data_desenho=' + HOJE, 'só a data');
+  eq(CB.antesDeSalvar(sch, HubCore.serializeSchematic(sch).text), false, 'nada a fazer');
+  ok(!('params' in sch), 'sem params');
 }
+void HOJE;
 
 console.log('test-carimbos: ' + n + ' verificações ok');

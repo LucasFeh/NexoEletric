@@ -15,7 +15,9 @@ Rotas:
   GET  /api/projeto/novo/previa?nome=&sigla=   -> {ok, proximo, ano, sigla, codigo, ultimo, arquivo}
   GET  /api/projeto/novo/catalogo?codigo=      -> {ok, achou:{item, nome, cliente, modelo, ...}|null}
   GET  /api/projeto/novo/templates             -> {ok, padrao, templates:[{id, nome, w, h, estilo}]} (os da casa)
-  POST /api/projeto/novo {nome, cliente?, vinculo?, sigla?, iniciador, projeto?, template? ('' = sem template)}
+  POST /api/projeto/novo {nome, cliente?, vinculo?, sigla?, iniciador?, projeto?, template? ('' = sem template)}
+       O desenhista e o CARIMBO EM USO nesta maquina (tools/rotas/carimbos.py, 2026-11-05: "se voce iniciar um projeto,
+       seu nome fica como desenhista"); sem carimbo em uso vale o `iniciador` (a IA, os testes).
        -> {ok, id, name, codigo, item, linha}: registra no catalogo e cria Projects/<projeto ou codigo>/
 """
 import json
@@ -146,10 +148,17 @@ def registra(app, root, h):
         data = request.get_json(silent=True) or {}
         nome = ' '.join(str(data.get('nome') or '').split())
         iniciador = ' '.join(str(data.get('iniciador') or '').split())
+        try:
+            import carimbos
+            carimbo = carimbos.ativo(root)
+        except Exception:                  # noqa: BLE001
+            carimbo = None
+        if carimbo:
+            iniciador = carimbo['nome']
         if not nome:
             return {'ok': False, 'error': 'falta o nome da placa'}, 400
         if not iniciador:
-            return {'ok': False, 'error': 'falta quem iniciou o projeto'}, 400
+            return {'ok': False, 'error': 'escolha o seu carimbo (menu da folha › Carimbo…): ele entra como desenhista'}, 400
         projeto = ' '.join(str(data.get('projeto') or '').split())
         # o template do esquema: o da casa por padrao; '' = folha A4 sem template
         tpls = templates_casa(root)
@@ -176,6 +185,8 @@ def registra(app, root, h):
                 projeto = '%s (%d)' % (codigo, n)
                 n += 1
         params = params_template(codigo, nome, iniciador, data.get('cliente') or '')
+        if carimbo:
+            params['Desenhista_carimbo'] = carimbo['id']
         d = os.path.join(root, 'Projects', projeto)
         try:
             os.makedirs(os.path.join(root, 'Projects'), exist_ok=True)

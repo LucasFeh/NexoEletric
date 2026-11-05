@@ -45,7 +45,8 @@ const ESTADO_LOCAL: [&str; 5] = ["bom-vistos.json", "bom-opts.json", "odoo-lista
 const FP_HUB: &str = "pcblib-hub.js";
 const FP3D_PASTA: &str = "3d-hub";
 // renders: as fotos 3D da placa (Renders/, a vista PCB grava): recarregar mataria a vista que fotografou
-const SAIDAS: [&str; 3] = ["gerber", "pdf", "renders"];
+// + as revisoes (Projects/<p>/Revisoes/, a copia do projeto a cada aprovacao: tools/rotas/carimbos.py)
+const SAIDAS: [&str; 4] = ["gerber", "pdf", "renders", "revisoes"];
 
 pub struct Live {
     pub tx: watch::Sender<u64>,
