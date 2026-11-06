@@ -69,7 +69,7 @@
      esquema (texto, trocar valor, footprint) e da IA, pelo schematic.js. */
   /* flutua sobre a mesa como os menus do hub: a sombra e a --shadow-menu do tema (no claro
      ela e tinta, nao o preto que pesava sobre a mesa clara) */
-  #schtb{position:absolute; top:8px; left:8px; z-index:12; display:flex; align-items:center; gap:2px;
+  #schtb{position:absolute; top:8px; left:8px; z-index:12; display:flex; flex-wrap:wrap; align-items:center; gap:2px;
     padding:3px 4px; background:var(--panel); border:1px solid var(--border); border-radius:6px;
     box-shadow:var(--shadow-menu);}
   #schtb .sep{width:1px; height:20px; background:var(--border); margin:0 3px;}
@@ -660,6 +660,35 @@
         </div>
       </span>
       <span class="sep"></span>
+      <!-- O DESENHO (1.82.0, pedido do dono em 2026-11-06: "símbolos geométricos (retângulo, reta, círculo, texto,
+           estrela) e outras coisas"): texto, linha, retângulo, círculo e estrela à vista; seta, retângulo
+           arredondado, triângulo e losango na gaveta "Mais formas". Cada um com data-forma (schframe.js » formas). -->
+      <button id="tbTexto" aria-pressed="false" title="Texto — clique na folha e escreva">
+        <svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></button>
+      <button data-forma="linha" aria-pressed="false" title="Linha — arraste (Shift: 0°/45°/90°)">
+        <svg viewBox="0 0 24 24"><path d="M4 20L20 4"/></svg></button>
+      <button data-forma="ret" aria-pressed="false" title="Retângulo — arraste de canto a canto (Shift: quadrado)">
+        <svg viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="12" rx="0.5"/></svg></button>
+      <button data-forma="elipse" aria-pressed="false" title="Círculo — arraste (Shift: elipse)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg></button>
+      <button data-forma="estrela" aria-pressed="false" title="Estrela — arraste (Shift: proporção livre)">
+        <svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6-4.5-4.2 6.1-.7z"/></svg></button>
+      <span class="gaveta" id="gavFormas">
+        <button id="tbMaisFormas" aria-pressed="false" aria-expanded="false" aria-controls="gavFormasLista"
+                title="Mais formas: seta, retângulo arredondado, triângulo e losango">
+          <svg viewBox="0 0 24 24"><path d="M4 11l4-7 4 7z"/><rect x="13" y="4" width="7" height="7" rx="2"/><path d="M4 17h8M9 14l3 3-3 3"/><path d="M16.5 13l3.5 3.5-3.5 3.5-3.5-3.5z"/></svg></button>
+        <div class="gav-lista" id="gavFormasLista" role="group" aria-label="Mais formas" hidden>
+          <button data-forma="seta" aria-pressed="false" title="Seta — arraste da cauda até a ponta (Shift: 0°/45°/90°)">
+            <svg viewBox="0 0 24 24"><path d="M4 12h15M14 7l5 5-5 5"/></svg><span class="lb">seta</span></button>
+          <button data-forma="arred" aria-pressed="false" title="Retângulo arredondado — arraste (Shift: quadrado)">
+            <svg viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="12" rx="4"/></svg><span class="lb">arredondado</span></button>
+          <button data-forma="triangulo" aria-pressed="false" title="Triângulo — arraste (Shift: proporção igual)">
+            <svg viewBox="0 0 24 24"><path d="M12 4l8.5 15h-17z"/></svg><span class="lb">triângulo</span></button>
+          <button data-forma="losango" aria-pressed="false" title="Losango — arraste (Shift: quadrado)">
+            <svg viewBox="0 0 24 24"><path d="M12 3l8 9-8 9-8-9z"/></svg><span class="lb">losango</span></button>
+        </div>
+      </span>
+      <span class="sep"></span>
       <!-- AÇÃO, não ferramenta: abre o modal e não entra na máquina do setTool. Sem
            aria-pressed de propósito — o CSS de ativo da barra é por atributo e ninguém
            repintaria este, que nunca fica "ligado" — e sem class="pw", que o setTool varre
@@ -703,6 +732,19 @@
         <span style="flex:1"></span>
         <button id="netok">OK</button>
         <button id="netcancel">Cancelar</button>
+      </div>
+    </div>
+    <!-- o texto da ferramenta "T" (1.82.0): o mesmo campo no tema do rotulo de net -->
+    <div id="txtform" style="display:none; position:absolute; top:10px; right:10px; z-index:15;
+         background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:8px; width:260px;">
+      <div style="font:11px var(--font); color:var(--fg2); margin-bottom:5px;">texto da folha — Enter coloca</div>
+      <input id="txttext" type="text" placeholder="ex: FONTE 24 V" autocomplete="off" spellcheck="false"
+        style="width:100%; background:var(--panel); color:var(--fg); border:1px solid var(--border);
+               border-radius:3px; font:12px var(--font); padding:4px;">
+      <div style="display:flex; gap:6px; margin-top:6px; align-items:center;">
+        <span style="flex:1"></span>
+        <button id="txtok">OK</button>
+        <button id="txtcancel">Cancelar</button>
       </div>
     </div>
     <button id="btnPaineis" hidden title="Abrir a ficha de propriedades e deixá-la fixa — o tamanho da folha fica em Configurações › Folha">

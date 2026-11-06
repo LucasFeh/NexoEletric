@@ -463,7 +463,126 @@ function mkCamera(canvas, drawWorld, opts){
   return { cam, ctx, draw, fit, toWorld, resize };
 }
 
+/* ---------- AS FORMAS DE DESENHO DO ESQUEMA (1.82.0, 2026-11-06) ----------
+   Pedido do dono: "na barra de ferramenta, quero que tenha símbolos geométricos (retângulo, reta, círculo, texto,
+   estrela) e outras coisas". Item {"t":"forma", "forma":<FORMAS>, "pts":[[x1,y1],[x2,y2]], cor?, larg?, fundo?,
+   traco?, rot?} em mil. Os dois pontos sao as pontas (linha, seta) ou dois cantos opostos da caixa (o resto). O `rot`
+   (0/90/180/270) so muda o desenho do que nao e simetrico (triangulo, estrela): girar as outras e trocar os cantos.
+   Nao e eletrico: fica fora das nets e da assinatura da aprovacao. */
+const FORMAS = ['linha', 'seta', 'ret', 'arred', 'elipse', 'triangulo', 'losango', 'estrela'];
+const FORMA_NOME = { linha:'linha', seta:'seta', ret:'retângulo', arred:'retângulo arredondado', elipse:'círculo / elipse',
+                     triangulo:'triângulo', losango:'losango', estrela:'estrela' };
+const FORMA_COR = '#00008b', FORMA_LARG = 10;
+const formaLarg = it => (typeof it.larg === 'number' && it.larg > 0) ? it.larg : FORMA_LARG;
+function formaCaixa(it){
+  const p = it.pts || [], a = p[0] || [0, 0], b = p[1] || a;
+  return { x1:Math.min(a[0], b[0]), y1:Math.min(a[1], b[1]), x2:Math.max(a[0], b[0]), y2:Math.max(a[1], b[1]) };
+}
+/* a ponta da seta: o triangulo cheio na ponta `b` */
+function pontaDaSeta(a, b, larg){
+  const vx = b[0] - a[0], vy = b[1] - a[1], L = Math.hypot(vx, vy) || 1, ux = vx / L, uy = vy / L;
+  const c = Math.min(L * 0.5, Math.max(60, larg * 5)), m = c * 0.45;
+  const bx = b[0] - ux * c, by = b[1] - uy * c;
+  return [[bx - uy * m, by + ux * m], [b[0], b[1]], [bx + uy * m, by - ux * m]];
+}
+/* o contorno como poligono (o mundo e Y para cima): {fechada, pts, ponta?}. A elipse e o arredondado saem em
+   pontos tambem: o clique e o PDF usam o mesmo contorno que a tela */
+function formaContorno(it){
+  const f = it.forma, p = it.pts || [], a = p[0] || [0, 0], b = p[1] || a;
+  if (f === 'linha') return { fechada:false, pts:[a, b] };
+  if (f === 'seta') return { fechada:false, pts:[a, b], ponta:pontaDaSeta(a, b, formaLarg(it)) };
+  const c = formaCaixa(it), cx = (c.x1 + c.x2) / 2, cy = (c.y1 + c.y2) / 2;
+  const rx = (c.x2 - c.x1) / 2, ry = (c.y2 - c.y1) / 2;
+  if (f === 'elipse'){
+    const out = [];
+    for (let i = 0; i < 64; i++){ const t = i / 64 * 2 * Math.PI; out.push([cx + rx * Math.cos(t), cy + ry * Math.sin(t)]); }
+    return { fechada:true, pts:out };
+  }
+  if (f === 'arred'){
+    const r = Math.min(rx, ry) * 0.3, out = [];
+    const cantos = [[c.x2 - r, c.y2 - r, 0], [c.x1 + r, c.y2 - r, 90], [c.x1 + r, c.y1 + r, 180], [c.x2 - r, c.y1 + r, 270]];
+    for (const [qx, qy, a0] of cantos)
+      for (let i = 0; i <= 8; i++){ const t = (a0 + i * 90 / 8) * Math.PI / 180; out.push([qx + r * Math.cos(t), qy + r * Math.sin(t)]); }
+    return { fechada:true, pts:out };
+  }
+  if (f === 'losango') return { fechada:true, pts:[[cx, c.y2], [c.x2, cy], [cx, c.y1], [c.x1, cy]] };
+  if (f === 'triangulo' || f === 'estrela'){
+    /* desenhado "em pe" na caixa sem giro e girado pelo `rot`: a caixa girada de 90/270 tem os lados trocados */
+    const rot = ((((it.rot || 0) % 360) + 360) % 360);
+    const deitado = rot === 90 || rot === 270;
+    const hx = deitado ? ry : rx, hy = deitado ? rx : ry;
+    let loc;
+    if (f === 'triangulo') loc = [[0, hy], [hx, -hy], [-hx, -hy]];
+    else {
+      loc = [];
+      for (let i = 0; i < 10; i++){
+        const t = Math.PI / 2 + i * Math.PI / 5, k = i % 2 ? 0.4 : 1;
+        loc.push([hx * k * Math.cos(t), hy * k * Math.sin(t)]);
+      }
+      /* a estrela de 5 pontas nao enche a caixa embaixo: desce o centro para ela ficar no meio */
+      const ymin = Math.min.apply(null, loc.map(q => q[1]));
+      const d = (-hy - ymin) / 2;
+      loc = loc.map(q => [q[0], q[1] + d]);
+    }
+    const ang = rot * Math.PI / 180, co = Math.cos(ang), si = Math.sin(ang);
+    return { fechada:true, pts:loc.map(([x, y]) => [cx + x * co - y * si, cy + x * si + y * co]) };
+  }
+  /* 'ret' e o que nao for conhecido */
+  return { fechada:true, pts:[[c.x1, c.y1], [c.x2, c.y1], [c.x2, c.y2], [c.x1, c.y2]] };
+}
+function drawForma(ctx, it, opts){
+  const o = opts || {};
+  const g = formaContorno(it), larg = formaLarg(it), cor = o.cor || it.cor || FORMA_COR;
+  if (!g.pts.length) return;
+  ctx.save();
+  if (o.alfa != null) ctx.globalAlpha = o.alfa;
+  ctx.lineWidth = larg; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.setLineDash(it.traco === 'tracejado' ? [larg * 4, larg * 3] : it.traco === 'pontilhado' ? [larg * 0.01, larg * 2.5] : []);
+  ctx.beginPath();
+  g.pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]));
+  if (g.fechada) ctx.closePath();
+  if (g.fechada && it.fundo){ ctx.fillStyle = it.fundo; ctx.fill(); }
+  ctx.strokeStyle = cor; ctx.stroke();
+  if (g.ponta){
+    ctx.setLineDash([]);
+    ctx.beginPath(); g.ponta.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath();
+    ctx.fillStyle = cor; ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
+}
+function distSegF(x, y, a, b){
+  const vx = b[0] - a[0], vy = b[1] - a[1], L2 = vx * vx + vy * vy;
+  const t = L2 ? Math.max(0, Math.min(1, ((x - a[0]) * vx + (y - a[1]) * vy) / L2)) : 0;
+  return Math.hypot(x - (a[0] + t * vx), y - (a[1] + t * vy));
+}
+function dentroPoli(x, y, pts){
+  let d = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++){
+    const a = pts[i], b = pts[j];
+    if ((a[1] > y) !== (b[1] > y) && x < (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]) + a[0]) d = !d;
+  }
+  return d;
+}
+/* o clique pega a forma no TRAÇO (com folga), ou dentro dela quando ela tem preenchimento: o retangulo vazio em
+   volta de um bloco do circuito nao rouba o clique de quem esta dentro */
+function formaPerto(it, x, y, tol){
+  const g = formaContorno(it), lim = tol + formaLarg(it) / 2;
+  const n = g.pts.length;
+  for (let i = 0; i < n - 1 + (g.fechada ? 1 : 0); i++) if (distSegF(x, y, g.pts[i], g.pts[(i + 1) % n]) <= lim) return true;
+  if (g.ponta && dentroPoli(x, y, g.ponta)) return true;
+  return !!(g.fechada && it.fundo && dentroPoli(x, y, g.pts));
+}
+/* a caixa do que se ve (o traco inteiro e a ponta da seta dentro) */
+function formaBBox(it){
+  const g = formaContorno(it), m = formaLarg(it) / 2;
+  const pts = g.ponta ? g.pts.concat(g.ponta) : g.pts;
+  let x1 = 1e12, y1 = 1e12, x2 = -1e12, y2 = -1e12;
+  for (const q of pts){ if (q[0] < x1) x1 = q[0]; if (q[0] > x2) x2 = q[0]; if (q[1] < y1) y1 = q[1]; if (q[1] > y2) y2 = q[1]; }
+  return x1 > x2 ? { x1:0, y1:0, x2:0, y2:0 } : { x1:x1 - m, y1:y1 - m, x2:x2 + m, y2:y2 + m };
+}
+
 return { SCH, PCB, OD, worldText, roundRect, dePe, drawSymbolPart, mirrorPart, symBBox, drawFootprint,
-         drawPowerPort, powerBBox, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, drawNoERC, mkCamera };
+         drawPowerPort, powerBBox, drawNetLabel, drawPort, portGeom, portBBox, drawJunction, drawNoERC, mkCamera,
+         FORMAS, FORMA_NOME, FORMA_COR, FORMA_LARG, formaLarg, formaCaixa, formaContorno, drawForma, formaPerto, formaBBox };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubDraw;

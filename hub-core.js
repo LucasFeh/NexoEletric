@@ -2534,7 +2534,7 @@ function buildSchModel(schematic){
       /* w/h = medida REAL da folha no Altium, quando o export a trouxe; 0 = "nao sei", e ai
          sheetSize() cai na tabela por nome. Nao inventar medida a partir do size aqui. */
       const s = { name: it.name, size: it.size || 'A4', w: isNum(it.w) ? it.w : 0, h: isNum(it.h) ? it.h : 0,
-                  comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], noercs:[], texts:[] };
+                  comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], noercs:[], texts:[], formas:[] };
       model.sheets.push(s); byName[it.name] = s;
       continue;
     }
@@ -2542,7 +2542,7 @@ function buildSchModel(schematic){
     if (!s) {
       /* folha IMPLICITA (ninguem declarou): mesma forma da declarada, sem medida de onde sair */
       s = { name: it.sheet || 'main', size:'A4', w:0, h:0,
-            comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], noercs:[], texts:[] };
+            comps:[], wires:[], netlabels:[], powers:[], ports:[], junctions:[], noercs:[], texts:[], formas:[] };
       model.sheets.push(s); byName[s.name] = s;
     }
     if      (it.t === 'comp')     s.comps.push(it);
@@ -2556,6 +2556,8 @@ function buildSchModel(schematic){
        ligacao que a folha real nao tem */
     else if (it.t === 'noerc')    s.noercs.push(it);
     else if (it.t === 'text')     s.texts.push(it);
+    /* as formas de desenho (1.82.0): so desenho, fora da extracao de nets */
+    else if (it.t === 'forma')    s.formas.push(it);
   }
   return model;
 }
@@ -3024,6 +3026,8 @@ const SCH_ITEM_REQUIRED = {
      espelho como veio, e .SchDoc antigo pode nao trazer nenhum dos dois */
   noerc:    { num:['x','y'], str:['sheet'] },
   text:     { num:['x','y'], str:['sheet','s'] },
+  /* a forma de desenho da barra do Esquema (1.82.0): pts (2 pontos) conferido no serializeSchematic */
+  forma:    { num:[], str:['sheet','forma'] },
 };
 
 /* ---- NAO MONTAR (DNP), 1.58.0 ----
@@ -3088,6 +3092,8 @@ function serializeSchematic(sch){
   items.forEach((it, i) => {
     if (it.t === 'wire' && (!Array.isArray(it.pts) || it.pts.length < 2))
       errors.push({ idx:i, msg:'wire: pts precisa de >= 2 pontos' });
+    if (it.t === 'forma' && (!Array.isArray(it.pts) || it.pts.length < 2 || it.pts.some(p => !Array.isArray(p) || !isNum(p[0]) || !isNum(p[1]))))
+      errors.push({ idx:i, msg:'forma: pts precisa de 2 pontos [x,y]' });
     if (it.t === 'comp' && it.rot != null && ![0, 90, 180, 270].includes((((it.rot % 360) + 360) % 360)))
       errors.push({ idx:i, msg:'comp: rot deve ser 0/90/180/270' });
     if (it.t === 'comp' && typeof it.footprint !== 'string')

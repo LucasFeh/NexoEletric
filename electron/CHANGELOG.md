@@ -4,6 +4,21 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.82.0 — 2026-11-06
+
+**Formas e texto na barra do Esquema.**
+- A barra ganhou **Texto**, **Linha**, **Retângulo**, **Círculo** e **Estrela**, e a gaveta **Mais formas** (seta,
+  retângulo arredondado, triângulo, losango). Arrastar desenha de canto a canto, na grade; clicar sem arrastar põe uma
+  do tamanho padrão. Shift: quadrado / linha a 0°-45°-90°; no Círculo, o Shift solta para elipse. Esc ou o botão
+  direito largam a ferramenta.
+- A forma marcada tem alças verdes (puxar muda o tamanho ou a ponta), anda com o arrasto, gira no Espaço, espelha no
+  X/Y e sai no Del. Na ficha: forma, cor, espessura, traço (sólido, tracejado, pontilhado) e preenchimento. O texto:
+  a palavra (duplo clique edita), o tamanho e a cor.
+- Item novo no `schematic.js`: `{"t":"forma","forma":"ret|linha|seta|arred|elipse|triangulo|losango|estrela",
+  "pts":[[x1,y1],[x2,y2]], cor?, larg?, fundo?, traco?, rot?}`; o texto ganhou `cor`. Saem no PDF. Não são
+  elétricos: ficam fora das nets e não tiram a aprovação.
+- A barra quebra em duas linhas quando a vista fica estreita.
+
 ## 1.81.0 — 2026-11-06
 
 **Carimbos mais simples e apagar revisão no histórico.**

@@ -1600,7 +1600,7 @@ function redo(){ if (!redoStack.length) return; const s = redoStack.pop(); undoS
 /* ------- geometria da selecao ------- */
 function sheetItems(si){
   const s = model.sheets[si === undefined ? sheetIdx : si];
-  return [].concat(s.comps, s.wires, s.netlabels, s.powers, s.ports, s.junctions, s.noercs, s.texts);
+  return [].concat(s.comps, s.wires, s.netlabels, s.powers, s.ports, s.junctions, s.noercs, s.texts, s.formas || []);
 }
 const onSheet = it => it.sheet === model.sheets[sheetIdx].name;
 function compBBox(c){
@@ -1772,12 +1772,20 @@ function itemBBox(it){
     /* do tamanho do X desenhado, e nao maior: o No ERC mora EM CIMA da ponta do pino,
        e uma caixa generosa roubaria o clique do pino que ele marca */
     case 'noerc':    return { x1:it.x - 30, y1:it.y - 30, x2:it.x + 30, y2:it.y + 30 };
-    case 'text': {
-      const h = (it.h || 10) * 4;
-      return { x1:it.x - 20, y1:it.y - h, x2:it.x + Math.max((it.s || '').length * (it.h || 10) * 4, 120), y2:it.y + h };
-    }
+    case 'text': return textoLivreBBox(it);
+    case 'forma': return D.formaBBox(it);
   }
   return { x1:it.x || 0, y1:it.y || 0, x2:it.x || 0, y2:it.y || 0 };
+}
+/* o texto livre (o "T" da barra, 1.82.0): a caixa segue o giro. Desenhado com altura h*6 mil, ancora na esquerda */
+function textoLivreBBox(it){
+  const hh = (it.h || 10) * 6, L = Math.max(larguraTexto(it.s || '', hh), 60);
+  const r = ((((it.rot || 0) % 360) + 360) % 360);
+  const m = hh * 0.6;
+  if (r === 90)  return { x1:it.x - m, y1:it.y, x2:it.x + m, y2:it.y + L };
+  if (r === 180) return { x1:it.x - L, y1:it.y - m, x2:it.x, y2:it.y + m };
+  if (r === 270) return { x1:it.x - m, y1:it.y - L, x2:it.x + m, y2:it.y };
+  return { x1:it.x, y1:it.y - m, x2:it.x + L, y2:it.y + m };
 }
 const bbInside = (a, r) => a.x1 >= r.x1 && a.x2 <= r.x2 && a.y1 >= r.y1 && a.y2 <= r.y2;
 const bbTouch  = (a, r) => a.x1 <= r.x2 && a.x2 >= r.x1 && a.y1 <= r.y2 && a.y2 >= r.y1;
@@ -1822,7 +1830,7 @@ function baseOf(alvos){
     }
     else if (a.k === 'vert' || a.k === 'seg')
       m.set(chaveAlvo(a), { a, pts:(it.pts || []).map(p => [p[0], p[1]]) });
-    else if (it.t === 'wire')
+    else if (it.t === 'wire' || it.t === 'forma')
       m.set(chaveAlvo(a), { a, pts:(it.pts || []).map(p => [p[0], p[1]]) });
     else
       m.set(chaveAlvo(a), { a, x:it.x, y:it.y });
@@ -1861,7 +1869,7 @@ function applyMove(base, dx, dy){
       }
       it.pts = pts; trab.set(it, pts);
     }
-    else if (it.t === 'wire') it.pts = b.pts.map(p => [p[0] + dx, p[1] + dy]);
+    else if (it.t === 'wire' || it.t === 'forma') it.pts = b.pts.map(p => [p[0] + dx, p[1] + dy]);
     else { it.x = b.x + dx; it.y = b.y + dy; }
   }
   /* O FIO SELECIONADO FICA PRESO AO PINO. Com o trecho (ou o vertice) de um fio selecionado
@@ -1909,7 +1917,10 @@ function describe(a){
   if (a && a.k === 'ref') return 'designador ' + it.ref;
   if (a && a.k === 'com') return 'comment de ' + it.ref;
   if (a && a.k === 'seg') return 'trecho ' + (a.i + 1) + ' de ' + Math.max((it.pts || []).length - 1, 1) + ' do fio';
+  if (a && a.k === 'vert' && it.t === 'forma') return 'ponta ' + (a.i + 1) + ' de ' + (D.FORMA_NOME[it.forma] || 'forma');
   if (a && a.k === 'vert') return 'vértice ' + (a.i + 1) + ' do fio';
+  if (it.t === 'forma') return D.FORMA_NOME[it.forma] || 'forma';
+  if (it.t === 'text') return 'texto "' + String(it.s || '').slice(0, 24) + '"';
   return it.t === 'comp' ? it.ref : it.t === 'wire' ? 'fio' : it.t === 'netlabel' ? 'label ' + (it.net || '')
        : it.t === 'power' ? 'power ' + (it.net || '') : it.t === 'junction' ? 'junção'
        : it.t === 'noerc' ? 'No ERC' : 'texto';
@@ -1999,9 +2010,28 @@ function netEm(x, y){
   return '';
 }
 function selectOnly(items){ selSo(items.map(alvoAll)); aplicaSel(''); }
+/* a forma gira 90° em volta do proprio centro (os dois pontos giram; o triangulo e a estrela levam o `rot`) e o
+   texto livre ganha +90° — os dois fora do arrasto (o giro no meio do arrasto e coisa do componente) */
+function giraFormaETexto(itens){
+  let mexeu = false;
+  for (const it of itens){
+    if (it.t === 'text'){ it.rot = (((it.rot || 0) + 90) % 360); mexeu = true; }
+    else if (it.t === 'forma'){
+      const c = D.formaCaixa(it), cx = snapG((c.x1 + c.x2) / 2), cy = snapG((c.y1 + c.y2) / 2);
+      it.pts = (it.pts || []).map(([x, y]) => [cx - (y - cy), cy + (x - cx)]);
+      if (it.forma === 'triangulo' || it.forma === 'estrela') it.rot = (((it.rot || 0) + 90) % 360);
+      mexeu = true;
+    }
+  }
+  return mexeu;
+}
 function rotateSel(){
   const comps = selItens().filter(it => it.t === 'comp');
-  if (!comps.length) return;
+  if (!comps.length){
+    if (!(mouse && mouse.mode === 'move') && giraFormaETexto(selItens())) commit();
+    return;
+  }
+  if (!(mouse && mouse.mode === 'move')) giraFormaETexto(selItens());
   retratoDoGiro(comps);
   for (const c of comps) c.rot = (((c.rot || 0) + 90) % 360);
   if (mouse && mouse.mode === 'move') giroNoArrasto(); else commit();
@@ -2040,7 +2070,18 @@ function giroNoArrasto(){
    rotacao. A conta esta no bloco puro (espelha) e vale para os dois eixos. */
 function mirrorSel(eixo){
   const comps = selItens().filter(it => it.t === 'comp');
-  if (!comps.length) return;
+  /* a forma espelha em volta do proprio centro (a seta troca de lado; o triangulo de cabeca para baixo) */
+  const formas = mouse && mouse.mode === 'move' ? [] : selItens().filter(it => it.t === 'forma');
+  for (const it of formas){
+    const c = D.formaCaixa(it), cx = (c.x1 + c.x2) / 2, cy = (c.y1 + c.y2) / 2;
+    it.pts = (it.pts || []).map(([x, y]) => eixo === 'y' ? [x, 2 * cy - y] : [2 * cx - x, y]);
+    if (it.forma === 'triangulo' || it.forma === 'estrela'){
+      const r = ((((it.rot || 0) % 360) + 360) % 360);
+      const vira = eixo === 'y' ? (r === 0 || r === 180) : (r === 90 || r === 270);
+      if (vira) it.rot = (r + 180) % 360;
+    }
+  }
+  if (!comps.length){ if (formas.length) commit(); return; }
   retratoDoGiro(comps);
   for (const c of comps){
     const r = espelha(c.rot, !!c.mirror, eixo === 'y' ? 'y' : 'x');
@@ -2065,6 +2106,8 @@ function deleteSel(){
   const porFio = new Map();
   let mexeu = false;
   for (const a of sel.values()){
+    /* a ponta de uma forma marcada: o Delete leva a forma inteira (forma de uma ponta so nao existe) */
+    if (a.it.t === 'forma'){ fora.add(a.it); mexeu = true; continue; }
     if (a.k === 'seg' || a.k === 'vert'){
       let l = porFio.get(a.it); if (!l){ l = []; porFio.set(a.it, l); }
       l.push(a);
@@ -2105,7 +2148,12 @@ function deleteSel(){
    So o que a MAO faz nesta vista: escolher/mover, puxar fio e, pela gaveta dos pousos, pousar
    um terra, um trilho de alimentacao, um rotulo de net ou um No ERC. Texto, junção e troca de
    valor/footprint sao da IA, no schematic.js — por isso nao existem botoes para eles. */
-let tool = 'select';        /* 'select' | 'wire' | 'power' | 'label' | 'noerc' */
+let tool = 'select';        /* 'select' | 'wire' | 'power' | 'label' | 'noerc' | 'forma' | 'texto' */
+/* A FORMA NA MAO (1.82.0): qual das D.FORMAS o 'forma' desenha. Arrastar desenha do canto ao canto (Shift: quadrado,
+   círculo, linha a 45°); clicar sem arrastar poe uma do tamanho padrao centrada no clique. */
+let toolForma = 'ret';
+/* o 'texto' guarda o ponto do clique enquanto o campo da palavra esta aberto */
+let textoEm = null;
 /* "So fios" nao e um valor de `tool`: e um filtro DENTRO da seleção, e os muitos testes de
    tool === 'select' (o clique, o arrasto, o duplo clique, o ima, o Esc) valem nele sem mudar.
    So vale com tool === 'select'; o setTool o desliga e a vista sempre abre sem ele. */
@@ -2771,6 +2819,8 @@ function setTool(t, pw){
   tool = t; toolPower = pw || null; wireDraw = null; snapHit = null; fioCursor = null;
   soFio = false;        /* toda troca de ferramenta larga o "so fios" — quem o quer liga depois (setSoFio) */
   if (t !== 'label') toolNet = '';
+  if (t !== 'texto') hideTxtForm();
+  pintaFormas();
   pintaSelecao();
   $('tbWire').setAttribute('aria-pressed', String(t === 'wire'));
   $('tbNet').setAttribute('aria-pressed', String(t === 'label'));
@@ -2796,6 +2846,96 @@ function setSoFio(on){
   $('shover').textContent = soFio ? 'só fios: clique num fio' : '';
   cam.draw();
 }
+/* ------- as formas e o texto da barra (1.82.0, 2026-11-06) -------
+   "na barra de ferramenta, quero que tenha símbolos geométricos (retângulo, reta, círculo, texto, estrela) e outras
+   coisas". Linha, retângulo, círculo e estrela ficam a vista; seta, retângulo arredondado, triângulo e losango moram
+   na gaveta "Mais formas". O texto e o {"t":"text"} de sempre do schematic.js, agora com botao. Nada disso e
+   eletrico: fica fora das nets e da aprovacao. Cor, espessura, traço e preenchimento: na ficha (Propriedades). */
+const FORMA_PADRAO = { linha:[400, 0], seta:[400, 0], ret:[400, 300], arred:[400, 300], elipse:[300, 300],
+                       triangulo:[300, 300], losango:[300, 300], estrela:[300, 300] };
+/* o outro canto (ou a outra ponta) da forma em desenho: na grade, e com o Shift preso
+   - linha e seta: so 0°, 45° e 90°;
+   - circulo: e circulo sem Shift (a caixa quadrada) e elipse com ele; as outras, o contrario */
+function fimDaForma(a, w, shift){
+  const x = snapG(w.x), y = snapG(w.y), dx = x - a.x, dy = y - a.y;
+  if (toolForma === 'linha' || toolForma === 'seta'){
+    if (!shift) return { x, y };
+    if (Math.abs(dx) > 2 * Math.abs(dy)) return { x, y:a.y };
+    if (Math.abs(dy) > 2 * Math.abs(dx)) return { x:a.x, y };
+    const m = Math.max(Math.abs(dx), Math.abs(dy));
+    return { x:a.x + Math.sign(dx || 1) * m, y:a.y + Math.sign(dy || 1) * m };
+  }
+  const quadrado = (toolForma === 'elipse') !== !!shift;
+  if (!quadrado) return { x, y };
+  const m = Math.max(Math.abs(dx), Math.abs(dy));
+  return { x:a.x + Math.sign(dx || 1) * m, y:a.y + Math.sign(dy || 1) * m };
+}
+/* grava a forma, marca ela (a ficha mostra a cor e a espessura) e a ferramenta continua na mao */
+function poeForma(pts){
+  const it = { t:'forma', sheet:model.sheets[sheetIdx].name, forma:toolForma, pts };
+  schematic.items.push(it);
+  commit();
+  selSo([alvoAll(it)]); aplicaSel('');
+}
+function formaPadrao(w){
+  const [lx, ly] = FORMA_PADRAO[toolForma] || [400, 300];
+  const cx = snapG(w.x), cy = snapG(w.y);
+  poeForma([[cx - lx / 2, cy - ly / 2], [cx + lx / 2, cy + ly / 2]]);
+}
+const formaBotoes = () => [...document.querySelectorAll('#schtb button[data-forma]')];
+const gavFormasAberta = () => !$('gavFormasLista').hidden;
+function gavFormasAbre(sim){
+  $('gavFormasLista').hidden = !sim;
+  $('tbMaisFormas').setAttribute('aria-expanded', String(sim));
+}
+function pintaFormas(){
+  for (const b of formaBotoes()) b.setAttribute('aria-pressed', String(tool === 'forma' && toolForma === b.dataset.forma));
+  $('tbTexto').setAttribute('aria-pressed', String(tool === 'texto'));
+  const naGaveta = tool === 'forma' && !!$('gavFormasLista').querySelector('[data-forma="' + toolForma + '"]');
+  $('tbMaisFormas').setAttribute('aria-pressed', String(naGaveta));
+}
+for (const b of formaBotoes())
+  b.addEventListener('click', () => {
+    const igual = tool === 'forma' && toolForma === b.dataset.forma;
+    gavFormasAbre(false);
+    if (igual){ setTool('select'); return; }
+    toolForma = b.dataset.forma;
+    setTool('forma');
+  });
+$('tbMaisFormas').addEventListener('click', () => gavFormasAbre(!gavFormasAberta()));
+window.addEventListener('mousedown', e => {
+  if (!gavFormasAberta() || $('gavFormas').contains(e.target)) return;
+  gavFormasAbre(false);
+  if (e.target === cv && e.button === 0){ e.stopImmediatePropagation(); swallowClick = true; }
+}, true);
+window.addEventListener('blur', () => gavFormasAbre(false));
+$('tbTexto').addEventListener('click', () => setTool(tool === 'texto' ? 'select' : 'texto'));
+/* a palavra do texto: o campo no tema (nada de prompt), no alto a direita como o do rotulo de net */
+function hideTxtForm(){ const f = $('txtform'); if (f) f.style.display = 'none'; textoEm = null; }
+function openTxtForm(p){
+  textoEm = p;
+  $('txttext').value = '';
+  $('txtform').style.display = 'block';
+  $('txttext').focus();
+}
+function confirmaTxtForm(){
+  /* aspas viram apostrofo: a sequencia aspas-dois-pontos e proibida no schematic.js */
+  const s = $('txttext').value.trim().replace(/"/g, "'");
+  if (!s){ HubDialog.toast('escreva o texto', 'warn'); $('txttext').focus(); return; }
+  const p = textoEm;
+  hideTxtForm();
+  if (!p) return;
+  const it = { t:'text', sheet:model.sheets[sheetIdx].name, x:p.x, y:p.y, s, h:10, rot:0 };
+  schematic.items.push(it);
+  commit();
+  selSo([alvoAll(it)]); aplicaSel('');
+}
+$('txtok').addEventListener('click', confirmaTxtForm);
+$('txtcancel').addEventListener('click', hideTxtForm);
+$('txttext').addEventListener('keydown', e => {
+  if (e.key === 'Enter'){ e.preventDefault(); confirmaTxtForm(); }
+  else if (e.key === 'Escape'){ e.stopPropagation(); hideTxtForm(); }
+});
 $('tbSel').addEventListener('click', () => setTool('select'));
 $('tbSoFio').addEventListener('click', () => setSoFio(!soFio));
 $('tbWire').addEventListener('click', () => setTool(tool === 'wire' ? 'select' : 'wire'));
@@ -2941,7 +3081,7 @@ window.addEventListener('contextmenu', e => {
   const arrastou = panMoved;
   panning = false; panMoved = false;
   if (!arrastou && wireDraw) endWire();
-  else if (!arrastou && tool === 'wire') setTool('select');
+  else if (!arrastou && (tool === 'wire' || tool === 'forma' || tool === 'texto')) setTool('select');
 });
 window.addEventListener('mousemove', e => {
   if (mouse){ leftMove(e); return; }
@@ -2976,6 +3116,8 @@ function leftDown(e){
   const w = worldOf(e);
   swallowClick = false;
   lastDown = null;        /* o click deste gesto so pode ver o que ESTE mousedown acertou */
+  /* a forma: o aperto marca o primeiro canto (na grade); o arrasto desenha; o soltar grava (leftUp) */
+  if (tool === 'forma'){ mouse = { mode:'forma', start:{ x:snapG(w.x), y:snapG(w.y) }, moved:false, fim:null }; return; }
   /* com uma ferramenta na mao o esquerdo nao seleciona nem arrasta: ele coloca */
   if (tool !== 'select'){ mouse = { mode:'none', start:w, moved:false }; return; }
   const h = hitTest(w.x, w.y);
@@ -3021,6 +3163,7 @@ function leftDown(e){
    no nivel do pedaco e pega o trecho ou o vertice em que caiu) */
 function alvoDoHit(h){
   if (h.kind === 'ref' || h.kind === 'com') return { it:h.item, k:h.kind };
+  if (h.kind === 'forma' && h.vert != null) return { it:h.item, k:'vert', i:h.vert };
   if (h.kind === 'wire'){
     const pedaco = selAlvos().some(a => a.it === h.item && (a.k === 'seg' || a.k === 'vert'));
     if (!pedaco) return alvoAll(h.item);
@@ -3066,6 +3209,13 @@ function leftMove(e){
     desenhaNoQuadro();
   }
   else if (d.mode === 'box'){ boxRect = { x1:d.start.x, y1:d.start.y, x2:w.x, y2:w.y }; desenhaNoQuadro(); }
+  else if (d.mode === 'forma'){
+    d.fim = fimDaForma(d.start, w, e.shiftKey);
+    const c = { x1:Math.min(d.start.x, d.fim.x), x2:Math.max(d.start.x, d.fim.x), y1:Math.min(d.start.y, d.fim.y), y2:Math.max(d.start.y, d.fim.y) };
+    $('shover').textContent = (D.FORMA_NOME[toolForma] || 'forma') + ' · ' + Math.round(c.x2 - c.x1) + ' × ' + Math.round(c.y2 - c.y1) + ' mil'
+      + (toolForma === 'linha' || toolForma === 'seta' ? ' · Shift: 0°/45°/90°' : ' · Shift: ' + (toolForma === 'elipse' ? 'elipse livre' : 'proporção livre'));
+    desenhaNoQuadro();
+  }
   /* O terceiro modo, 'none', e o arrasto com uma FERRAMENTA na mao: nao move nada, e e
      assim que tem de ser. Havia aqui um toast "Só leitura" pendurado nesse mesmo ramo — ele
      ja disparava indevidamente com a ferramenta na mao, e com o lapis fora nao teria mais o
@@ -3075,6 +3225,16 @@ function leftUp(e){
   const d = mouse; if (!d) return;
   mouse = null;
   swallowClick = d.moved;
+  if (d.mode === 'forma'){
+    if (d.moved && tool === 'forma'){
+      const fim = fimDaForma(d.start, worldOf(e), e.shiftKey);
+      $('shover').textContent = '';
+      /* forma sem tamanho (apertou e voltou ao mesmo ponto da grade) nao vira item */
+      if (fim.x !== d.start.x || fim.y !== d.start.y) poeForma([[d.start.x, d.start.y], [fim.x, fim.y]]);
+      else cam.draw();
+    } else cam.draw();
+    return;
+  }
   if (d.mode === 'move' && d.moved){
     /* ao soltar: ima > guia > grade (ou o trilho do Shift) — a conta e o pousoDoArrasto */
     const p = pousoDoArrasto(d, e);
@@ -3120,6 +3280,8 @@ function leftClick(e){
   if (tool === 'power'){ placePower(w); return; }
   if (tool === 'label'){ placeLabel(w); return; }
   if (tool === 'noerc'){ placeNoERC(w); return; }
+  if (tool === 'forma'){ formaPadrao(w); return; }
+  if (tool === 'texto'){ openTxtForm({ x:snapG(w.x), y:snapG(w.y) }); return; }
   /* O alvo foi resolvido no mousedown (lastDown) e NAO se refaz o hitTest aqui: entre o
      mousedown e o click a ficha abriu e o canvas mudou de largura, entao o mesmo ponto de
      tela cai em outro ponto do mundo, "erra" o componente que acabou de ser marcado e
@@ -3147,6 +3309,14 @@ cv.addEventListener('dblclick', e => {
   const w = worldOf(e);
   const h = hitTest(w.x, w.y);
   if (!h) return;
+  /* o texto livre: o duplo clique leva ao campo da palavra na ficha */
+  if (h.kind === 'text'){
+    selSo([alvoAll(h.item)]); aplicaSel('');
+    mostraDir('props');
+    const campo = $('prBody') && $('prBody').querySelector('input[data-campo="texto"]');
+    if (campo){ campo.focus(); campo.select(); }
+    return;
+  }
   /* o FIO nao tem mais duplo clique: o primeiro clique ja pega o fio inteiro, e o segundo pega o
      trecho (leftClick). Promover aqui desfaria o que o segundo clique acabou de escolher. */
   if (h.kind === 'ref' || h.kind === 'com'){
@@ -4063,6 +4233,69 @@ function secFolha(){
     enquadra: () => cam.fit(fitBBox()), contaFora: med => contaFora(sheetIdx, med) }));
   return s;
 }
+/* ── A FICHA DA FORMA E DO TEXTO LIVRE (1.82.0) ──
+   Diferente do resto da ficha, aqui tudo e editavel: e desenho, nao eletrica. Cada troca e um commit (Ctrl+Z desfaz). */
+function prEscolha(box, rotulo, opcoes, atual, aplica){
+  const s = el('select', 'pr-inp');
+  for (const [v, txt] of opcoes){ const o = el('option', null, txt); o.value = v; if (v === atual) o.selected = true; s.append(o); }
+  s.addEventListener('change', () => aplica(s.value));
+  prKvEl(box, rotulo, s);
+  return s;
+}
+function secForma(s, it){
+  s.append(el('div', 'pr-title', D.FORMA_NOME[it.forma] || 'forma'));
+  prEscolha(s, 'Forma', D.FORMAS.map(f => [f, D.FORMA_NOME[f]]), it.forma, v => {
+    it.forma = v;
+    if (v !== 'triangulo' && v !== 'estrela') delete it.rot;
+    commit();
+  });
+  prCor(s, 'Cor', it, 'cor', D.FORMA_COR);
+  const larg = D.formaLarg(it);
+  const LARGS = [[4, 'fina (4 mil)'], [10, 'média (10 mil)'], [20, 'grossa (20 mil)'], [40, 'muito grossa (40 mil)']];
+  if (!LARGS.some(([v]) => v === larg)) LARGS.push([larg, larg + ' mil']);
+  prEscolha(s, 'Espessura', LARGS.map(([v, t]) => [String(v), t]), String(larg), v => {
+    if (+v === D.FORMA_LARG) delete it.larg; else it.larg = +v;
+    commit();
+  });
+  prEscolha(s, 'Traço', [['', 'sólido'], ['tracejado', 'tracejado'], ['pontilhado', 'pontilhado']], it.traco || '', v => {
+    if (v) it.traco = v; else delete it.traco;
+    commit();
+  });
+  if (it.forma !== 'linha' && it.forma !== 'seta'){
+    prCor(s, 'Preenchimento', it, 'fundo', '#ffffff');
+    if (!corValida(it.fundo)) prKv(s, '', 'sem preenchimento: a cor acima preenche', 'dim');
+  }
+  const c = D.formaCaixa(it);
+  if (it.forma === 'linha' || it.forma === 'seta'){
+    const p = it.pts || [];
+    if (p[0]) prKv(s, 'De', p[0][0] + ' , ' + p[0][1] + ' mil', 'mono');
+    if (p[1]) prKv(s, 'Até', p[1][0] + ' , ' + p[1][1] + ' mil', 'mono');
+  } else {
+    prKv(s, 'Tamanho', Math.round(c.x2 - c.x1) + ' × ' + Math.round(c.y2 - c.y1) + ' mil', 'mono');
+    prKv(s, 'Canto', c.x1 + ' , ' + c.y1 + ' mil', 'mono');
+  }
+  prKv(s, '', 'arraste para mover · puxe as alças verdes para mudar o tamanho · Espaço gira · X/Y espelham · Del apaga', 'dim');
+}
+function secTextoLivre(s, it){
+  s.append(el('div', 'pr-title', it.s || 'texto'));
+  const t = prCampo(it.s || '', 'o texto (Enter grava)', i => {
+    const v = i.value.trim().replace(/"/g, "'");
+    if (!v){ i.value = it.s || ''; HubDialog.toast('texto vazio não fica na folha: Del apaga o texto', 'warn'); return; }
+    if (v !== it.s){ it.s = v; commit(); }
+  });
+  t.dataset.campo = 'texto';
+  prKvEl(s, 'Texto', t);
+  const h = it.h || 10;
+  const ALTS = [[6, 'pequena'], [10, 'média'], [16, 'grande'], [24, 'muito grande']];
+  if (!ALTS.some(([v]) => v === h)) ALTS.push([h, String(h)]);
+  prEscolha(s, 'Tamanho', ALTS.map(([v, txt]) => [String(v), txt + ' (' + v * 6 + ' mil)']), String(h), v => {
+    it.h = +v; commit();
+  });
+  prCor(s, 'Cor', it, 'cor', D.SCH.text);
+  prKv(s, 'Posição', it.x + ' , ' + it.y + ' mil', 'mono');
+  prKv(s, 'Rotação', ((((it.rot || 0) % 360) + 360) % 360) + '°');
+  prKv(s, '', 'duplo clique no texto edita · Espaço gira · Del apaga', 'dim');
+}
 function renderProps(){
   const body = $('prBody');
   body.textContent = '';
@@ -4094,7 +4327,7 @@ function renderProps(){
     const cont = {};
     for (const it of itens) cont[it.t] = (cont[it.t] || 0) + 1;
     const NOME = { comp:'componente', wire:'fio', netlabel:'net label', power:'power port',
-                   port:'port', junction:'junção', noerc:'No ERC', text:'texto' };
+                   port:'port', junction:'junção', noerc:'No ERC', text:'texto', forma:'forma' };
     for (const [k, n] of Object.entries(cont)) prKv(s, (NOME[k] || k) + (n > 1 ? 's' : ''), n);
     body.append(s);
 
@@ -4138,9 +4371,11 @@ function renderProps(){
   const it = itens[0], alvo = alvos[0];
   if (it.t !== 'comp'){
     const NOME = { wire:'fio', netlabel:'net label', power:'power port', port:'port',
-                   junction:'junção', noerc:'No ERC', text:'texto' };
+                   junction:'junção', noerc:'No ERC', text:'texto', forma:'forma' };
     const s = prSec(NOME[it.t] || it.t);
-    if (it.t === 'wire'){
+    if (it.t === 'forma') secForma(s, it);
+    else if (it.t === 'text') secTextoLivre(s, it);
+    else if (it.t === 'wire'){
       const wi = model.sheets[sheetIdx].wires.indexOf(it);
       const pts = it.pts || [];
       s.append(el('div', 'pr-title', (wi >= 0 && nets.wireNet[sheetIdx][wi]) || 'sem net'));
@@ -4705,6 +4940,8 @@ function desenhaFolha(ctx, si, o){
   ctx.strokeStyle = D.SCH.border; ctx.lineWidth = 8;
   ctx.strokeRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
   desenhaTemplate(ctx, si, esc);
+  /* as formas da barra (1.82.0), por baixo do circuito: um retangulo preenchido em volta de um bloco nao cobre nada */
+  for (const f of (s.formas || [])) D.drawForma(ctx, f);
   /* o que tem de ficar POR BAIXO dos fios e dos simbolos (a cruz do cursor do fio) */
   if (o.antesDosFios) o.antesDosFios(ctx);
 
@@ -4829,7 +5066,7 @@ function desenhaFolha(ctx, si, o){
   for (const l of s.netlabels) D.drawNetLabel(ctx, l, foco && foco === l.net ? D.SCH.hl : undefined);
   for (const p of s.powers)    D.drawPowerPort(ctx, p, foco && foco === p.net ? D.SCH.hl : undefined);
   for (const p of s.ports)     D.drawPort(ctx, p, foco && foco === p.net ? D.SCH.hl : undefined);
-  for (const t of s.texts)     D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, D.SCH.text, 'left');
+  for (const t of s.texts)     D.worldText(ctx, t.s || '', t.x, t.y, (t.h || 10) * 6, t.rot || 0, corValida(t.cor) ? t.cor : D.SCH.text, 'left');
   /* o X por ULTIMO: ele marca um pino, e marca escondida atras do corpo nao marca nada */
   for (const n of s.noercs)    D.drawNoERC(ctx, n.x, n.y, n.color);
 
@@ -4854,6 +5091,16 @@ function drawWorld(ctx, cam){
 function drawFerramenta(ctx, cam){
   const px = 1 / cam.scale;
   if (tool === 'wire') desenhaFioEmCurso(ctx, px);
+  /* a forma em desenho, como vai ficar */
+  if (tool === 'forma' && mouse && mouse.mode === 'forma' && mouse.fim)
+    D.drawForma(ctx, { forma:toolForma, pts:[[mouse.start.x, mouse.start.y], [mouse.fim.x, mouse.fim.y]] }, { alfa:0.65 });
+  /* o ponto da grade em que a forma (ou o texto) vai comecar */
+  if ((tool === 'forma' || tool === 'texto') && hoverW && !(mouse && mouse.mode === 'forma' && mouse.moved)){
+    const x = snapG(hoverW.x), y = snapG(hoverW.y), c = 6 * px;
+    ctx.save(); ctx.strokeStyle = D.SCH.hl; ctx.lineWidth = 1.5 * px;
+    ctx.beginPath(); ctx.moveTo(x - c, y); ctx.lineTo(x + c, y); ctx.moveTo(x, y - c); ctx.lineTo(x, y + c); ctx.stroke();
+    ctx.restore();
+  }
   if (tool === 'power' && toolPower && hoverW){
     const x = snapHit ? snapHit.x : snapG(hoverW.x), y = snapHit ? snapHit.y : snapG(hoverW.y);
     ctx.save(); ctx.globalAlpha = 0.6;
@@ -5014,9 +5261,20 @@ function drawSelection(ctx, cam){
     pts.forEach((q, i) => { if (escolhidos.indexOf(i) < 0) alca(q, ALCA_VERDE); });
     for (const i of escolhidos) if (pts[i]) alca(pts[i], ALCA_VERMELHA);
   }
+  /* A FORMA MARCADA: o contorno tracejado em volta e uma alca em cada ponto que se puxa (verde; a puxada, vermelha) */
   for (const a of sel.values()){
     const it = a.it;
-    if (!onSheet(it) || it.t === 'wire') continue;
+    if (!onSheet(it) || it.t !== 'forma') continue;
+    const bb = D.formaBBox(it), mm = 8 * px;
+    ctx.strokeStyle = SEL; ctx.lineWidth = px; ctx.setLineDash([5 * px, 4 * px]);
+    if (it.forma === 'linha' || it.forma === 'seta'){ const p = it.pts || []; if (p[0] && p[1]) linhaSel(p[0], p[1]); }
+    else ctx.strokeRect(bb.x1 - mm, bb.y1 - mm, bb.x2 - bb.x1 + 2 * mm, bb.y2 - bb.y1 + 2 * mm);
+    ctx.setLineDash([]);
+    (it.pts || []).forEach((q, i) => alca(q, a.k === 'vert' && a.i === i ? ALCA_VERMELHA : ALCA_VERDE));
+  }
+  for (const a of sel.values()){
+    const it = a.it;
+    if (!onSheet(it) || it.t === 'wire' || it.t === 'forma') continue;
     const bb = alvoBBox(a);
     const mm = (a.k === 'ref' || a.k === 'com') ? 10 : m;    /* o texto quer moldura justa */
     const x = bb.x1 - mm, y = bb.y1 - mm, w = (bb.x2 - bb.x1) + 2*mm, h = (bb.y2 - bb.y1) + 2*mm;
@@ -5048,6 +5306,14 @@ const cam = D.mkCamera(cv, drawWorld, {
       snapHit = null;
       statusDoFio();
       cam.draw();
+      return;
+    }
+    /* a forma e o texto nao grudam em ponto eletrico: so a grade */
+    if (tool === 'forma' || tool === 'texto'){
+      snapHit = null;
+      if (!mouse) $('shover').textContent = tool === 'texto' ? 'clique onde vai o texto · Esc larga'
+        : 'arraste para desenhar ' + (D.FORMA_NOME[toolForma] || 'a forma') + ' · clique: tamanho padrão · Esc larga';
+      if (!mouse) desenhaNoQuadro();
       return;
     }
     if (tool !== 'select'){
@@ -5096,6 +5362,13 @@ function hitTest(x, y){
      pega o fio que passa por ela. O resto do gesto (inteiro, trecho, vertice, arrasto) e o
      mesmo, porque o que sai daqui tem a forma de sempre. */
   if (soFio) return hitDoFio(s, x, y, tol);
+  /* as alcas da forma MARCADA vem antes de tudo: puxar a alca muda o tamanho (ou a ponta da linha) */
+  for (const a of sel.values()){
+    if (a.it.t !== 'forma' || !onSheet(a.it)) continue;
+    const pts = a.it.pts || [];
+    for (let i = 0; i < pts.length; i++)
+      if (Math.hypot(x - pts[i][0], y - pts[i][1]) <= Math.max(tol * 1.5, 12)) return { kind:'forma', item:a.it, vert:i };
+  }
   /* o No ERC vem ANTES do pino, e so: ele fica EM CIMA da ponta quente, entao com o
      pino primeiro o X nunca poderia ser selecionado — nem apagado. O raio e curto (30
      mil, o tamanho do desenho), entao clicar um fio de distancia ao lado ainda pega o
@@ -5120,10 +5393,10 @@ function hitTest(x, y){
     const b = itemBBox(p);
     if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) return { kind:'port', item:p };
   }
-  for (const t of s.texts)
-    if (x >= t.x - 20 && x <= t.x + Math.max((t.s || '').length * (t.h || 10) * 4, 120) &&
-        y >= t.y - (t.h || 10) * 4 && y <= t.y + (t.h || 10) * 4)
-      return { kind:'text', item:t };
+  for (const t of s.texts){
+    const b = textoLivreBBox(t);
+    if (x >= b.x1 - tol && x <= b.x2 + tol && y >= b.y1 - tol && y <= b.y2 + tol) return { kind:'text', item:t };
+  }
   /* O TEXTO DO COMPONENTE (designador e comment) vem antes do fio e do corpo: ele mora em
      area vazia, e quem clica em cima de uma palavra esta mirando a palavra. Entre os dois, o
      designador ganha — ele esta sempre a vista, o comment so com o olho ligado. */
@@ -5149,6 +5422,9 @@ function hitTest(x, y){
     const bb = compBBox(c), f = Math.max(tol, 20);
     if (x >= bb.x1 - f && x <= bb.x2 + f && y >= bb.y1 - f && y <= bb.y2 + f) return { kind:'comp', ref:c.ref, item:c };
   }
+  /* as formas por ULTIMO (e a de cima primeiro): o retangulo em volta de um bloco nao rouba o clique do circuito */
+  const fs = s.formas || [];
+  for (let i = fs.length - 1; i >= 0; i--) if (D.formaPerto(fs[i], x, y, tol)) return { kind:'forma', item:fs[i] };
   return null;
 }
 
@@ -6147,6 +6423,7 @@ window.addEventListener('keydown', e => {
       if (dentro) $('tbPousoSeta').focus();
       return;
     }
+    if (gavFormasAberta()){ gavFormasAbre(false); return; }
     if (wireDraw){ endWire(); return; }
     if (tool !== 'select'){ setTool('select'); return; }
     if (mouse){
@@ -6907,7 +7184,13 @@ function pintaCabMenuFolha(){
      outro lado, do lado esquerdo"). O menu muda de largura (aberto ou recolhido no nome da folha), então a barra
      acompanha a borda direita dele */
   const tb = $('schtb');
-  const encosta = () => { if (tb && m.offsetWidth) tb.style.left = (m.offsetLeft + m.offsetWidth + 6) + 'px'; };
+  /* a barra cresceu com as formas (1.82.0): ela nao passa da borda da vista — quebra em duas linhas quando falta lugar */
+  const encosta = () => {
+    if (!tb || !m.offsetWidth) return;
+    const esq = m.offsetLeft + m.offsetWidth + 6;
+    tb.style.left = esq + 'px';
+    tb.style.maxWidth = 'calc(100% - ' + (esq + 8) + 'px)';
+  };
   if (tb && typeof ResizeObserver !== 'undefined') new ResizeObserver(encosta).observe(m);
   encosta();
   for (const ev of ['mousedown', 'pointerdown', 'contextmenu']) m.addEventListener(ev, e => e.stopPropagation());

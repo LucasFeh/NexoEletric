@@ -10,7 +10,7 @@ const COMUNS = {
   simular: { type: 'boolean', description: 'true = só valida, não grava' },
   forcar: { type: 'boolean', description: 'grava mesmo com erro novo de validação (evite)' },
 };
-const TIPOS_ITEM = ['sheet', 'comp', 'wire', 'netlabel', 'power', 'port', 'junction', 'noerc', 'text'];
+const TIPOS_ITEM = ['sheet', 'comp', 'wire', 'netlabel', 'power', 'port', 'junction', 'noerc', 'text', 'forma'];
 
 /* ---------- busca na biblioteca ---------- */
 const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
