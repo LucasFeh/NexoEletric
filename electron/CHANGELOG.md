@@ -4,6 +4,19 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.81.0 — 2026-11-06
+
+**Carimbos mais simples e apagar revisão no histórico.**
+- **A janela Carimbos** mostra em cima o carimbo em uso neste computador, com **Editar** e **Sair**; embaixo os
+  outros (Usar, Apagar). O "Novo carimbo" virou só o botão **Adicionar carimbo** (nome, senha, confirmar; sem
+  carimbo em uso, o novo já entra em uso).
+- **Aprovador é um switch** em cada carimbo (liga/desliga; pede a senha mestre). O "Aprovador…" saiu.
+- **Editar** troca o nome e/ou a senha do carimbo (pede a senha atual) e tem o Apagar carimbo. Os projetos que já
+  levam o nome antigo na folha ficam como estão. Rota nova: `POST /api/carimbos/editar`.
+- **Histórico › Revisões:** cada revisão tem **Apagar** (senha mestre): sai do histórico e a cópia em
+  `Revisoes/REV.<x>/` some. Apagar a revisão em que o projeto está aprovado tira a aprovação junto. Rota nova:
+  `POST /api/revisoes/apagar`.
+
 ## 1.80.0 — 2026-11-05
 
 **Revisão nova só quando o esquema muda de verdade; e o esquema não trava mais depois de voltar uma revisão.**
