@@ -32,6 +32,7 @@ const CSS = `
 .rv-card button{padding:4px 10px; border-radius:var(--r-sm, 6px); border:1px solid var(--line, #444); background:transparent;
   color:var(--text, #ddd); cursor:pointer; font:12px var(--font, sans-serif);}
 .rv-card button:hover{border-color:var(--hi, #3b82f6);}
+.rv-card button.rv-apagar:hover{color:var(--err, #f87171); border-color:var(--err, #f87171);}
 .rv-atual{font-size:11px; color:var(--ok, #4ade80); border:1px solid var(--ok, #4ade80); border-radius:9px; padding:0 7px;}
 `;
 function css(){
@@ -102,6 +103,10 @@ async function carrega(corpo, projeto, pane){
     b.title = 'o projeto inteiro volta a ser o desta revisão (esquema, PCB e o resto da pasta)';
     b.addEventListener('click', () => volta(projeto, r.rev, () => pinta(pane, projeto)));
     h.append(b);
+    const ap = el('button', 'rv-apagar', 'Apagar'); ap.type = 'button';
+    ap.title = 'tirar esta revisão do histórico (pede a senha mestre)';
+    ap.addEventListener('click', () => apaga(projeto, r.rev, at.aprovado && at.rev === r.rev, () => pinta(pane, projeto)));
+    h.append(ap);
     c.append(h, el('div', 'rv-vazio', r.rev === (j.revisoes[j.revisoes.length - 1] || {}).rev ? 'o que tinha nela:' : 'o que mudou desde a anterior:'));
     const ul = el('ul'); for (const m of r.resumo || []) ul.append(el('li', null, m)); c.append(ul);
     out.push(c);
@@ -124,6 +129,28 @@ async function volta(projeto, rev, depois){
   } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
   if (!j || !j.ok){ toast('não voltou: ' + ((j && j.error) || 'sem resposta'), 'err', 7000); return; }
   toast(projeto + ' voltou para a ' + j.rev, 'ok', 5000);
+  if (depois) depois();
+}
+
+/* 2026-11-06: "no histórico de revisões também, quero poder apagar uma revisão" — pede a senha mestre; a revisão em
+   que o projeto está aprovado, ao sair, leva a aprovação junto (o servidor limpa os campos do carimbo da folha) */
+async function apaga(projeto, rev, ehAtual, depois){
+  const CB = root.HubCarimbos;
+  if (!CB || !CB.pedeSenha){ toast('os carimbos não carregaram nesta página', 'err'); return; }
+  let j = null;
+  const s = await CB.pedeSenha('Apagar a ' + rev, 'A ' + rev + ' sai do histórico do projeto ' + projeto + ' (a cópia dela também). '
+      + (ehAtual ? 'O projeto está aprovado nela: ele fica SEM aprovação e precisa ser aprovado de novo. ' : '')
+      + 'Os arquivos do projeto de agora não mudam.', {
+    ok:'Apagar', rotulo:'senha mestre', sub:'senha mestre do sistema',
+    confere: async mestre => {
+      try {
+        j = await (await fetch('/api/revisoes/apagar', { method:'POST', headers:{ 'Content-Type':'application/json' },
+          body:JSON.stringify({ projeto, rev, mestre }) })).json();
+      } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
+      return j && j.ok ? '' : ((j && j.error) || 'sem resposta');
+    } });
+  if (s == null || !j || !j.ok) return;
+  toast(j.rev + ' apagada' + (j.aprovacaoTirada ? ' — o projeto ficou sem aprovação' : ''), 'ok', 5000);
   if (depois) depois();
 }
 

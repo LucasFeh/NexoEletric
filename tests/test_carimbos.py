@@ -297,6 +297,48 @@ class Rotas(unittest.TestCase):
             self.assertEqual(f.read(), 'var changes = [\n];\n')
         self.assertEqual(self.c.post('/api/revisoes/voltar', json={'projeto': 'CBM-DI251876', 'rev': 'REV.Z'}).status_code, 404)
 
+    def test_apagar_revisao(self):
+        """2026-11-06: apagar uma revisao do historico (senha mestre); a revisao em que o projeto esta aprovado leva a
+        aprovacao junto"""
+        self.entra_aprovador()
+        self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'})
+        self.escreve('schematic.js', self.le().replace('\n]};', '\n{"t":"comp","sheet":"SCH-DI251876","ref":"R9","sym":"RES","x":1,"y":2,"footprint":"0805"},\n]};'))
+        self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()['rev'], 'REV.B')
+        url = '/api/revisoes/apagar'
+        self.assertEqual(self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.A', 'mestre': 'x'}).status_code, 403)
+        # uma revisao antiga: sai do historico e a pasta some; o projeto continua aprovado na REV.B
+        j = self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.A', 'mestre': MESTRE}).get_json()
+        self.assertTrue(j['ok'] and j['aprovado'] and not j['aprovacaoTirada'], j)
+        self.assertFalse(os.path.isdir(os.path.join(self.pdir, 'Revisoes', 'REV.A')))
+        r = self.c.get('/api/revisoes?projeto=CBM-DI251876').get_json()
+        self.assertEqual([x['rev'] for x in r['revisoes']], ['REV.B'])
+        # a revisao de agora: a aprovacao sai do carimbo da folha
+        j = self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.B', 'mestre': MESTRE}).get_json()
+        self.assertTrue(j['ok'] and j['aprovacaoTirada'] and not j['aprovado'], j)
+        self.assertNotIn('Aprovador_DiEletrons', carimbos.params_do_texto(self.le()))
+        self.assertEqual(self.c.get('/api/revisoes?projeto=CBM-DI251876').get_json()['revisoes'], [])
+        self.assertEqual(self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.Z', 'mestre': MESTRE}).status_code, 404)
+        # aprovar de novo grava a letra do carimbo da folha
+        self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()['rev'], 'REV.B')
+
+    def test_editar_nome_e_senha_do_carimbo(self):
+        """2026-11-06: o Editar do carimbo troca o nome e a senha (pede a senha atual, ou a mestre)"""
+        cid = self.cria('Luciano', 'velha').get_json()['carimbo']['id']
+        self.c.post('/api/carimbos/entrar', json={'id': cid, 'senha': 'velha'})
+        url = '/api/carimbos/editar'
+        self.assertEqual(self.c.post(url, json={'id': cid, 'senha': 'errada', 'nome': 'X'}).status_code, 403)
+        self.assertEqual(self.c.post(url, json={'id': cid, 'senha': 'velha', 'nome': '  '}).status_code, 400)
+        j = self.c.post(url, json={'id': cid, 'senha': 'velha', 'nome': 'Luciano Silva', 'novaSenha': 'nova'}).get_json()
+        self.assertEqual(j['carimbo']['nome'], 'Luciano Silva')
+        lst = self.c.get('/api/carimbos').get_json()
+        self.assertEqual(lst['ativo']['nome'], 'Luciano Silva')       # o id nao muda: continua em uso
+        self.assertEqual(self.c.post('/api/carimbos/entrar', json={'id': cid, 'senha': 'velha'}).status_code, 403)
+        self.assertTrue(self.c.post('/api/carimbos/entrar', json={'id': cid, 'senha': 'nova'}).get_json()['ok'])
+        # nome de outro carimbo recusa; a senha mestre tambem edita
+        oid = self.cria('Outro', 'o').get_json()['carimbo']['id']
+        self.assertEqual(self.c.post(url, json={'id': oid, 'senha': 'o', 'nome': 'luciano silva'}).status_code, 409)
+        self.assertEqual(self.c.post(url, json={'id': oid, 'mestre': MESTRE, 'nome': 'Outra'}).get_json()['carimbo']['nome'], 'Outra')
+
     def test_primeira_revisao_segue_o_carimbo(self):
         """projeto que ja chegou numa revisao (REV.C do Altium): a primeira aprovacao e a REV.C, a seguinte a REV.D"""
         self.escreve('schematic.js', ESQUEMA.replace('REV.A', 'REV.C'))

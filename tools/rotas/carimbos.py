@@ -46,6 +46,7 @@ Rotas:
   POST /api/carimbos/entrar {id, senha}                     passa a usar o carimbo nesta maquina
   POST /api/carimbos/sair                                   nenhum carimbo nesta maquina
   POST /api/carimbos/tags {id, tags, mestre}                troca as tags (senha mestre)
+  POST /api/carimbos/editar {id, senha|mestre, nome?, novaSenha?}  troca o nome e/ou a senha (senha atual ou mestre)
   POST /api/carimbos/apagar {id, mestre}                    apaga (senha mestre)
   POST /api/carimbos/assumir {projeto, mestre}              o carimbo em uso vira o desenhista do projeto (senha mestre)
   GET  /api/aprovacao?projeto=             -> {ok, aprovado, por, data, carimbo, temEsquema}
@@ -53,6 +54,7 @@ Rotas:
   POST /api/aprovacao {projeto}            -> aprova com o carimbo ativo (tag aprovador) e grava a revisao: {ok, texto, params, rev, ...}
   GET  /api/revisoes?projeto=              -> {ok, revisoes:[{rev, data, quando, aprovador, resumo}], atual:{rev, aprovado, mudancas}}
   POST /api/revisoes/voltar {projeto, rev} -> o projeto volta a ser o da revisao
+  POST /api/revisoes/apagar {projeto, rev, mestre} -> tira a revisao do historico (a de agora tira tambem a aprovacao)
 """
 import hashlib
 import hmac
@@ -663,6 +665,19 @@ def volta_revisao(pdir, rev):
     return feitos
 
 
+def apaga_revisao(pdir, rev):
+    """tira a revisao do historico (a linha do revisoes.json e a pasta Revisoes/REV.<rev>/); None se nao existe"""
+    import shutil
+    lst = revisoes(pdir)
+    if not rev or not any(x.get('rev') == rev for x in lst):
+        return None
+    _grava_revisoes(pdir, [x for x in lst if x.get('rev') != rev])
+    pasta_rev = os.path.join(pdir, PASTA_REV, 'REV.' + rev)
+    if os.path.isdir(pasta_rev):
+        shutil.rmtree(pasta_rev, ignore_errors=True)
+    return True
+
+
 # ─────────────────────────── rotas ───────────────────────────
 def registra(app, root, senha_mestre):
     if os.path.isfile(os.path.join(root, 'mcp', 'lib', 'impressao-eletrica.js')):
@@ -740,6 +755,38 @@ def registra(app, root, senha_mestre):
             if not c:
                 return {'ok': False, 'error': 'carimbo não encontrado'}, 404
             c['tags'] = _tags(b.get('tags'))
+            _grava(root, d)
+        return {'ok': True, 'carimbo': _publico(c)}
+
+    @app.route('/api/carimbos/editar', methods=['POST'])
+    def carimbos_editar():
+        """2026-11-06: o Editar do carimbo troca o nome e/ou a senha; pede a senha atual do carimbo (ou a mestre).
+        Os projetos que ja levam o nome antigo no carimbo da folha continuam como estao."""
+        b = corpo()
+        nome = _nome(b.get('nome')) if b.get('nome') is not None else None
+        nova = b.get('novaSenha')
+        if nome is not None and not nome:
+            return {'ok': False, 'error': 'dê um nome ao carimbo'}, 400
+        if nova is not None and (not isinstance(nova, str) or not nova):
+            return {'ok': False, 'error': 'a senha nova não pode ficar vazia'}, 400
+        with _trava:
+            d = _le(root)
+            c = d['carimbos'].get(b.get('id'))
+            if not c:
+                return {'ok': False, 'error': 'carimbo não encontrado'}, 404
+            senha = b.get('senha')
+            pela_senha = isinstance(senha, str) and senha and hmac.compare_digest(_hash_senha(senha, c['sal']), c['senha'])
+            if not pela_senha and not _mestre_ok(b.get('mestre'), senha_mestre):
+                return {'ok': False, 'error': 'senha atual do carimbo incorreta'}, 403
+            if nome and nome.lower() != c['nome'].lower() and any(
+                    o['nome'].lower() == nome.lower() for o in d['carimbos'].values() if o['id'] != c['id']):
+                return {'ok': False, 'error': 'já existe um carimbo com esse nome'}, 409
+            if nome:
+                c['nome'] = nome
+            if nova:
+                c['sal'] = secrets.token_hex(16)
+                c['senha'] = _hash_senha(nova, c['sal'])
+            c['editado'] = time.strftime('%Y-%m-%dT%H:%M:%S')
             _grava(root, d)
         return {'ok': True, 'carimbo': _publico(c)}
 
@@ -873,6 +920,38 @@ def registra(app, root, senha_mestre):
         for x in out:
             x['rev'] = 'REV.' + x['rev']
         return {'ok': True, 'revisoes': out, 'atual': atual}
+
+    @app.route('/api/revisoes/apagar', methods=['POST'])
+    def revisoes_apagar():
+        """2026-11-06: "no historico de revisoes, quero poder apagar uma revisao" (senha mestre). Apagar a revisao em
+        que o projeto esta aprovado tira a aprovacao (o carimbo da folha nao pode apontar para uma revisao que sumiu)."""
+        b = corpo()
+        d = pasta(b.get('projeto'))
+        if not d:
+            return {'ok': False, 'error': 'projeto desconhecido'}, 404
+        if not _mestre_ok(b.get('mestre'), senha_mestre):
+            return {'ok': False, 'error': 'senha mestre incorreta'}, 403
+        rev = letra_da_revisao(b.get('rev'))
+        tirou = False
+        with _trava:
+            e = estado_aprovacao(d)
+            atual = e.get('assinada') and letra_da_revisao(e.get('rev')) == rev
+            if apaga_revisao(d, rev) is None:
+                return {'ok': False, 'error': 'a revisão %s não existe neste projeto' % b.get('rev')}, 404
+            if atual:
+                sch = os.path.join(d, 'schematic.js')
+                try:
+                    with open(sch, encoding='utf-8', newline='') as f:
+                        txt = f.read()
+                    novo = limpa_aprovacao(txt)
+                    if novo is not None and novo != txt.replace('\r\n', '\n'):
+                        with open(sch, 'w', encoding='utf-8', newline='') as f:
+                            f.write(novo)
+                        tirou = True
+                except OSError:
+                    pass
+        _desde.pop(d, None)
+        return dict(estado_aprovacao(d), ok=True, rev='REV.' + rev, aprovacaoTirada=tirou)
 
     @app.route('/api/revisoes/voltar', methods=['POST'])
     def revisoes_voltar():

@@ -56,6 +56,16 @@ const CSS = `
 .cb-box button:hover:not(:disabled){border-color:var(--hi, #3b82f6);}
 .cb-box button:disabled{opacity:.45; cursor:default;}
 .cb-perigo:hover{color:var(--err, #f87171); border-color:var(--err, #f87171);}
+.cb-sw{display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--text-2, #bbb); cursor:pointer; user-select:none;}
+.cb-sw input{appearance:none; -webkit-appearance:none; margin:0; width:30px; height:16px; border-radius:8px; position:relative;
+  background:var(--sunken, #1e1e1e); border:1px solid var(--line, #555); cursor:pointer; transition:background .15s, border-color .15s;}
+.cb-sw input::after{content:''; position:absolute; top:2px; left:2px; width:10px; height:10px; border-radius:50%;
+  background:var(--text-3, #999); transition:left .15s, background .15s;}
+.cb-sw input:checked{background:var(--ok, #4ade80); border-color:var(--ok, #4ade80);}
+.cb-sw input:checked::after{left:16px; background:var(--on-hi, #fff);}
+.cb-sw input:checked + span{color:var(--ok, #4ade80);}
+.cb-sw input:focus-visible{outline:2px solid var(--hi, #3b82f6); outline-offset:1px;}
+@media (prefers-reduced-motion: reduce){ .cb-sw input, .cb-sw input::after{transition:none;} }
 .eh-aprov{font-size:10px; font-weight:600; margin-left:6px; white-space:nowrap; flex:none;}
 .eh-aprov.ok{color:var(--ok, #4ade80);}
 .eh-aprov.nao{color:var(--err, #f87171); animation:cb-pisca 1.1s ease-in-out infinite;}
@@ -158,113 +168,153 @@ function confirma(titulo, texto, ok){
   });
 }
 
-/* ─── o gerenciador: a lista, usar (senha do carimbo), tags e apagar (senha mestre), novo ─── */
+/* ─── o gerenciador (2026-11-06, pedido do dono): em cima o carimbo em uso (Editar, Sair e o switch de aprovador);
+   embaixo os outros (Usar, Apagar, o switch); no rodapé só o "Adicionar carimbo". O switch de aprovador pede a
+   senha mestre; o Editar troca o nome e a senha (pede a senha atual do carimbo). ─── */
+function switchAprovador(c, depois){
+  const lb = el('label', 'cb-sw'); lb.title = 'aprovador: pode aprovar projetos (ligar ou desligar pede a senha mestre)';
+  const ck = el('input'); ck.type = 'checkbox'; ck.checked = ehAprovador(c);
+  ck.setAttribute('role', 'switch'); ck.setAttribute('aria-label', 'aprovador ' + c.nome);
+  lb.append(ck, el('span', null, 'aprovador'));
+  ck.addEventListener('change', async () => {
+    const liga = ck.checked;
+    const outras = (c.tags || []).filter(t => t !== est.tagAprovador);
+    const tags = (liga ? [est.tagAprovador] : []).concat(outras);
+    const s = await pedeSenha((liga ? 'Tornar ' : 'Tirar ') + c.nome + (liga ? ' aprovador' : ' de aprovador'),
+      liga ? 'Com a tag aprovador, ' + c.nome + ' pode aprovar projetos.' : c.nome + ' deixa de poder aprovar projetos.', {
+        ok: liga ? 'Ligar' : 'Desligar', rotulo:'senha mestre', sub:'senha mestre do sistema',
+        confere: async mestre => { const j = await api('/api/carimbos/tags', { id:c.id, tags, mestre }); return j.ok ? '' : (j.error || 'falhou'); } });
+    if (s == null){ ck.checked = !liga; return; }
+    await carrega(); if (depois) depois();
+    toast(c.nome + (liga ? ' agora é aprovador' : ' não é mais aprovador'), 'ok');
+  });
+  return lb;
+}
+function apagaCarimbo(c){
+  return pedeSenha('Apagar o carimbo ' + c.nome, 'Some para todos. Os projetos já aprovados por ele continuam com o nome no carimbo.', {
+    ok:'Apagar', rotulo:'senha mestre', sub:'senha mestre do sistema',
+    confere: async mestre => { const j = await api('/api/carimbos/apagar', { id:c.id, mestre }); return j.ok ? '' : (j.error || 'falhou'); } })
+    .then(async s => { if (s == null) return false; await carrega(); toast('carimbo ' + c.nome + ' apagado', 'ok'); return true; });
+}
 function abreGerenciador(o){
   o = o || {};
   const m = modal('Carimbos', 'salvos no NexoBD para todos; o que está em uso vale só neste computador');
+  const topo = el('div', null); topo.style.cssText = 'display:flex; flex-direction:column; gap:6px';
   const lista = el('div', null); lista.style.cssText = 'display:flex; flex-direction:column; gap:6px';
-  const uso = el('div', 'cb-dim');
-  m.corpo.append(uso, lista);
+  const secOutros = el('div', 'cb-sec', 'Outros carimbos');
+  m.corpo.append(el('div', 'cb-sec', 'Em uso neste computador'), topo, secOutros, lista);
 
   const pinta = () => {
-    uso.textContent = est.ativo ? 'Em uso neste computador: ' + est.ativo.nome + (ehAprovador(est.ativo) ? ' (aprovador)' : '')
-                                : 'Nenhum carimbo em uso neste computador.';
-    lista.textContent = '';
-    if (!est.carimbos.length) lista.append(el('div', 'cb-dim', est.carregado ? 'Nenhum carimbo ainda: crie o primeiro abaixo.' : 'carregando…'));
-    for (const c of est.carimbos){
-      const emUso = Boolean(est.ativo && est.ativo.id === c.id);
-      const l = el('div', 'cb-lin' + (emUso ? ' cb-uso' : ''));
+    topo.textContent = ''; lista.textContent = '';
+    const a = est.ativo && est.carimbos.find(c => c.id === est.ativo.id) || est.ativo;
+    if (a){
+      const l = el('div', 'cb-lin cb-uso');
+      const nm = el('div', 'cb-nome'); nm.append(el('b', null, a.nome));
+      l.append(nm, switchAprovador(a, pinta),
+        botao('Editar', 'mudar o nome ou a senha deste carimbo', () => editaCarimbo(a).then(ok => { if (ok) pinta(); })),
+        botao('Sair', 'deixar de usar este carimbo neste computador', async () => {
+          const j = await api('/api/carimbos/sair', {});
+          if (!j.ok){ toast('não saiu do carimbo: ' + j.error, 'err'); return; }
+          await carrega(); pinta(); toast('nenhum carimbo em uso', 'ok');
+        }));
+      topo.append(l);
+    } else {
+      topo.append(el('div', 'cb-dim', !est.carregado ? 'carregando…'
+        : est.carimbos.length ? 'Nenhum carimbo em uso: clique em Usar num dos carimbos abaixo.'
+        : 'Nenhum carimbo ainda: clique em Adicionar carimbo.'));
+    }
+    const outros = est.carimbos.filter(c => !(est.ativo && est.ativo.id === c.id));
+    secOutros.hidden = !outros.length;
+    for (const c of outros){
+      const l = el('div', 'cb-lin');
       const nm = el('div', 'cb-nome'); nm.append(el('b', null, c.nome));
-      if (emUso) nm.append(el('span', 'cb-chip cb-uso', 'em uso'));
-      for (const t of c.tags || []) nm.append(el('span', 'cb-chip' + (t === est.tagAprovador ? ' cb-apr' : ''), t));
-      l.append(nm);
-      if (emUso) l.append(botao('Sair', 'deixar de usar este carimbo neste computador', async () => {
-        const j = await api('/api/carimbos/sair', {});
-        if (!j.ok){ toast('não saiu do carimbo: ' + j.error, 'err'); return; }
-        await carrega(); pinta(); toast('nenhum carimbo em uso', 'ok');
-      }));
-      else l.append(botao('Usar', 'passar a usar este carimbo neste computador (pede a senha dele)', async () => {
-        const s = await pedeSenha('Usar o carimbo ' + c.nome, 'A senha que foi dada a este carimbo na criação.', {
-          ok:'Usar', confere: async senha => { const j = await api('/api/carimbos/entrar', { id:c.id, senha }); return j.ok ? '' : (j.error || 'falhou'); } });
-        if (s == null) return;
-        await carrega(); pinta(); toast('carimbo em uso: ' + c.nome, 'ok');
-      }));
-      l.append(botao('Aprovador…', 'pode aprovar projetos ou não (pede a senha mestre)', () => editaTags(c).then(ok => { if (ok) pinta(); })));
-      l.append(botao('Apagar', 'apagar o carimbo (pede a senha mestre)', async () => {
-        const s = await pedeSenha('Apagar o carimbo ' + c.nome, 'Some para todos. Os projetos já aprovados por ele continuam com o nome no carimbo.', {
-          ok:'Apagar', rotulo:'senha mestre', sub:'senha mestre do sistema',
-          confere: async mestre => { const j = await api('/api/carimbos/apagar', { id:c.id, mestre }); return j.ok ? '' : (j.error || 'falhou'); } });
-        if (s == null) return;
-        await carrega(); pinta(); toast('carimbo ' + c.nome + ' apagado', 'ok');
-      }, 'cb-perigo'));
+      l.append(nm, switchAprovador(c, pinta),
+        botao('Usar', 'passar a usar este carimbo neste computador (pede a senha dele)', async () => {
+          const s = await pedeSenha('Usar o carimbo ' + c.nome, 'A senha que foi dada a este carimbo.', {
+            ok:'Usar', confere: async senha => { const j = await api('/api/carimbos/entrar', { id:c.id, senha }); return j.ok ? '' : (j.error || 'falhou'); } });
+          if (s == null) return;
+          await carrega(); pinta(); toast('carimbo em uso: ' + c.nome, 'ok');
+        }),
+        botao('Apagar', 'apagar o carimbo (pede a senha mestre)', () => apagaCarimbo(c).then(ok => { if (ok) pinta(); }), 'cb-perigo'));
       lista.append(l);
     }
   };
 
-  /* novo carimbo */
-  m.corpo.append(el('div', 'cb-sec', 'Novo carimbo'));
-  const f = el('div', 'cb-form');
-  const iNome = el('input'); iNome.type = 'text'; iNome.placeholder = 'o nome que vai no carimbo (ex.: Lucas)';
-  const iSenha = el('input'); iSenha.type = 'password'; iSenha.autocomplete = 'new-password';
-  const iConf = el('input'); iConf.type = 'password'; iConf.autocomplete = 'new-password';
-  const cAprov = el('input'); cAprov.type = 'checkbox';
-  const lAprov = el('label'); lAprov.style.cssText = 'display:flex; align-items:center; gap:6px';
-  lAprov.append(cAprov, document.createTextNode('aprovador (pode aprovar projetos; pede a senha mestre)'));
-  const iMestre = el('input'); iMestre.type = 'password'; iMestre.autocomplete = 'new-password'; iMestre.placeholder = 'senha mestre do sistema';
-  const rMestre = el('span', null, 'senha mestre');
-  /* 2026-11-05: "só vai criar o carimbo, perguntar o nome e se é aprovador" (a senha fica: é ela que o Usar pede) */
-  f.append(el('span', null, 'nome'), iNome, el('span', null, 'senha'), iSenha, el('span', null, 'confirmar senha'), iConf,
-           el('span'), lAprov, rMestre, iMestre);
-  const mostraMestre = () => { rMestre.style.display = iMestre.style.display = cAprov.checked ? '' : 'none'; };
-  cAprov.addEventListener('change', mostraMestre); mostraMestre();
-  const erro = el('div', 'cb-erro');
-  const criar = botao('Salvar carimbo', 'grava o carimbo no NexoBD (todas as máquinas veem)', async () => {
-    erro.textContent = '';
-    const nome = iNome.value.trim();
-    if (!nome){ erro.textContent = 'dê um nome ao carimbo'; iNome.focus(); return; }
-    if (!iSenha.value){ erro.textContent = 'dê uma senha ao carimbo'; iSenha.focus(); return; }
-    if (iSenha.value !== iConf.value){ erro.textContent = 'a confirmação não bate com a senha'; iConf.focus(); return; }
-    const tags = cAprov.checked ? [est.tagAprovador] : [];
-    criar.disabled = true;
-    const j = await api('/api/carimbos', { nome, senha:iSenha.value, tags, mestre:iMestre.value });
-    criar.disabled = false;
-    if (!j.ok){ erro.textContent = j.error || 'não gravou'; return; }
-    for (const i of [iNome, iSenha, iConf, iMestre]) i.value = '';
-    cAprov.checked = false; mostraMestre();
-    await carrega(); pinta();
-    toast('carimbo ' + j.carimbo.nome + ' salvo — clique em Usar para entrar com ele', 'ok', 5000);
-  });
-  const lc = el('div'); lc.style.cssText = 'display:flex; justify-content:flex-end; gap:8px; align-items:center';
-  lc.append(erro, criar); erro.style.flex = '1';
-  m.corpo.append(f, lc);
-
-  m.pe.append(el('span', 'cb-sp'), botao('Fechar', null, () => m.fecha()));
+  m.pe.append(botao('Adicionar carimbo', 'criar um carimbo novo (nome e senha)', () => novoCarimbo().then(ok => { if (ok) pinta(); })),
+              el('span', 'cb-sp'), botao('Fechar', null, () => m.fecha()));
   const off = ouve(pinta);
   m.aoFechar(() => off());
   pinta();
   carrega();
 }
-function editaTags(c){
+/* um formulário pequeno (rótulo + campo) num modal: resolve true quando `salva()` devolve '' */
+function formulario(titulo, sub, linhas, okTxt, salva, extra){
   return new Promise(res => {
-    const m = modal('Carimbo ' + c.nome, 'pede a senha mestre', true);
+    const m = modal(titulo, sub, true);
     let feito = false;
     m.aoFechar(() => { if (!feito) res(false); });
-    const cAprov = el('input'); cAprov.type = 'checkbox'; cAprov.checked = (c.tags || []).indexOf(est.tagAprovador) >= 0;
-    const lA = el('label'); lA.style.cssText = 'display:flex; align-items:center; gap:6px'; lA.append(cAprov, document.createTextNode('aprovador (pode aprovar projetos)'));
-    const outras = (c.tags || []).filter(t => t !== est.tagAprovador);
-    const iM = el('input'); iM.type = 'password'; iM.placeholder = 'senha mestre do sistema'; iM.autocomplete = 'new-password';
+    const f = el('div', 'cb-form');
+    for (const [rot, inp] of linhas) f.append(el('span', null, rot), inp);
     const erro = el('div', 'cb-erro');
-    m.corpo.append(lA, iM, erro);
-    const ok = botao('Salvar', null, async () => {
-      const tags = (cAprov.checked ? [est.tagAprovador] : []).concat(outras);
-      const j = await api('/api/carimbos/tags', { id:c.id, tags, mestre:iM.value });
-      if (!j.ok){ erro.textContent = j.error || 'não gravou'; iM.focus(); return; }
-      feito = true; m.fecha(); await carrega(); toast(c.nome + (cAprov.checked ? ' é aprovador' : ' não é mais aprovador'), 'ok'); res(true);
-    });
-    iM.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); ok.click(); } });
+    m.corpo.append(f, erro);
+    const vai = async () => {
+      erro.textContent = '';
+      ok.disabled = true;
+      const msg = await salva(erro);
+      ok.disabled = false;
+      if (msg){ erro.textContent = msg; return; }
+      feito = true; m.fecha(); res(true);
+    };
+    const ok = botao(okTxt, null, vai);
+    for (const [, inp] of linhas) inp.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); vai(); } });
+    if (extra) m.pe.append(extra(() => { feito = true; m.fecha(); res(true); }));
     m.pe.append(el('span', 'cb-sp'), botao('Cancelar', null, () => m.fecha()), ok);
-    iM.focus();
+    if (linhas[0]) linhas[0][1].focus();
   });
+}
+function campo(tipo, valor, ph){
+  const i = el('input'); i.type = tipo; if (tipo === 'password') i.autocomplete = 'new-password';
+  if (valor) i.value = valor; if (ph) i.placeholder = ph;
+  return i;
+}
+function novoCarimbo(){
+  const iNome = campo('text', '', 'o nome que vai no carimbo (ex.: Lucas)'), iSenha = campo('password'), iConf = campo('password');
+  return formulario('Adicionar carimbo', 'fica salvo no NexoBD para todos',
+    [['nome', iNome], ['senha', iSenha], ['confirmar senha', iConf]], 'Adicionar', async () => {
+      const nome = iNome.value.trim();
+      if (!nome){ iNome.focus(); return 'dê um nome ao carimbo'; }
+      if (!iSenha.value){ iSenha.focus(); return 'dê uma senha ao carimbo'; }
+      if (iSenha.value !== iConf.value){ iConf.focus(); return 'a confirmação não bate com a senha'; }
+      const j = await api('/api/carimbos', { nome, senha:iSenha.value, tags:[] });
+      if (!j.ok) return j.error || 'não gravou';
+      /* sem carimbo em uso neste computador, o novo já entra em uso (a senha acabou de ser digitada) */
+      if (!est.ativo) await api('/api/carimbos/entrar', { id:j.carimbo.id, senha:iSenha.value });
+      await carrega();
+      toast('carimbo ' + j.carimbo.nome + ' adicionado' + (est.ativo && est.ativo.id === j.carimbo.id ? ' e em uso' : ''), 'ok', 4000);
+      return '';
+    });
+}
+function editaCarimbo(c){
+  const iNome = campo('text', c.nome), iNova = campo('password', '', 'em branco: continua a mesma'),
+        iConf = campo('password'), iAtual = campo('password', '', 'a senha de hoje deste carimbo');
+  return formulario('Editar o carimbo ' + c.nome, 'o nome vai no carimbo da folha dos projetos novos',
+    [['nome', iNome], ['senha nova', iNova], ['confirmar senha', iConf], ['senha atual', iAtual]], 'Salvar', async () => {
+      const nome = iNome.value.trim();
+      if (!nome){ iNome.focus(); return 'dê um nome ao carimbo'; }
+      if (iNova.value !== iConf.value){ iConf.focus(); return 'a confirmação não bate com a senha nova'; }
+      if (nome === c.nome && !iNova.value) return 'nada mudou';
+      if (!iAtual.value){ iAtual.focus(); return 'digite a senha atual do carimbo'; }
+      const corpo = { id:c.id, senha:iAtual.value };
+      if (nome !== c.nome) corpo.nome = nome;
+      if (iNova.value) corpo.novaSenha = iNova.value;
+      const j = await api('/api/carimbos/editar', corpo);
+      if (!j.ok) return j.error || 'não gravou';
+      await carrega();
+      toast('carimbo ' + j.carimbo.nome + ' salvo', 'ok');
+      return '';
+    }, fecha => botao('Apagar carimbo', 'apagar este carimbo (pede a senha mestre)', async () => {
+      if (await apagaCarimbo(c)) fecha();
+    }, 'cb-perigo'));
 }
 
 /* ─── a tag na lista de projetos (hub-shell.js » linhaDoProjeto) ─── */
@@ -412,6 +462,6 @@ function assumirNoHub(){
 }
 if (typeof window !== 'undefined' && typeof document !== 'undefined') window.__hubAssumirProjeto = assumirNoHub;
 
-root.HubCarimbos = { abreGerenciador, tagProjeto, montaAprovar, antesDeSalvar, assumir, confirma, carrega, ouve, estado: () => est, ehAprovador,
+root.HubCarimbos = { abreGerenciador, tagProjeto, montaAprovar, antesDeSalvar, assumir, confirma, pedeSenha, carrega, ouve, estado: () => est, ehAprovador,
                      CAMPOS_APROVACAO, _paramsDoTexto: paramsDoTexto };
 })(typeof window !== 'undefined' ? window : globalThis);
