@@ -111,7 +111,10 @@ const ehNaoDefinido = v => String(v == null ? '' : v).trim().toUpperCase() === N
 /* 1.88.0 (pedido do dono, 2026-11-09: "onde antes ia 'equipamento' no template agora só vai o código do equipamento"): o
    NomeDoEquipamento sai do quadro (continua no cabeçalho, só não aparece). A linha que ele ocupava mostra a VARIANTE de
    projeto ativa ("VARIANTE <nome> · <código>", hub-variantes.js), que é onde ela cabe no quadro da casa; sem variante, vazia.
-   setVariante(v) vale para os contextos seguintes (a vista e o PDF do esquema); contexto({variante}) troca. */
+   setVariante(v) vale para os contextos seguintes (a vista e o PDF do esquema); contexto({variante}) troca.
+   1.89.0 (a variante é um equipamento, hub-variantes.js): com a variante ativa, o campo do EQUIPAMENTO (CodigoDoEquipamento)
+   mostra o código do equipamento DA VARIANTE no lugar do do projeto; a linha "VARIANTE …" saiu (ficava redundante: a
+   barra da vista diz o nome da variante) e o NomeDoEquipamento volta a sair vazio. A PLACA continua o código da PCB. */
 const CAMPO_DA_VARIANTE = 'nomedoequipamento';
 let VARIANTE = null;
 function setVariante(v){ VARIANTE = v && (v.nome || v.codigo) ? { nome: String(v.nome || ''), codigo: String(v.codigo || '') } : null; }
@@ -228,7 +231,8 @@ function contexto(o){
    apelidos dele antes de cair para a camada seguinte */
 function valor(nome, c){
   const k = nome.toLowerCase();
-  if (k === CAMPO_DA_VARIANTE && !c.cru) return textoVariante(c.variante);
+  if (k === CAMPO_DA_VARIANTE && !c.cru) return '';
+  if (k === 'codigodoequipamento' && !c.cru && c.variante && c.variante.codigo) return c.variante.codigo;
   if (_auto.has(k) && !c.cru){
     const v = pega(c.auto, nome);
     if (v !== undefined) return String(v);

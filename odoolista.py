@@ -584,14 +584,16 @@ def monta_payload(projeto, revisao, schematic, acervo, enviado_por='', observaca
         '_tirados': tirados,
         '_nao_montar': sorted(nao_montar, key=_natural),
     }
-    # 1.88.0: os codigos da placa montada e da virgem (o Odoo que nao os conhece ignora as chaves; ver a secao 10 do
-    # docs/prompt-altium-envio-de-lista.md)
+    # 1.88.0: os codigos da placa montada e da virgem (o Odoo que nao os conhece ignora as chaves; ver a secao 11 do
+    # docs/prompt-altium-envio-de-lista.md). 1.89.0: com a variante, a montada e "<codigo da placa> <NOME DA VARIANTE>"
+    # (variantes.montada_da_variante, que ja vem em codigos['montada']) e a virgem NAO vai (anexa_imagens, _sem_virgem)
     if cods.get('placa') or cods.get('montada'):
         out['codigo_placa'] = cods.get('virgem') or cods.get('placa') or ''
         out['pcb_montada'] = {'codigo': cods.get('montada') or cods.get('placa') or ''}
     if var:
         out['variante'] = {'nome': var.get('nome', ''), 'codigo': var.get('codigo', '')}
         out['_suprimidos'] = suprimidos
+        out['_sem_virgem'] = True
     return out
 
 
@@ -1016,10 +1018,13 @@ def anexa_imagens(limpo, nome, raiz=RAIZ):
                 return base64.b64encode(f.read()).decode('ascii')
         except OSError:
             return None
-    montada, virgem = b64('montada'), b64('virgem')
+    # 1.89.0 (pedido do dono: "toda vez que enviar pro odoo, a lista, precisa enviar sem criar a PCB virgem, quando for
+    # uma variante"): com a variante, nem a placa virgem nem a foto dela vao (a virgem e a do projeto padrao)
+    variante = bool(limpo.get('variante'))
+    montada, virgem = b64('montada'), (None if variante else b64('virgem'))
     if montada:
         out['imagem_montada'] = montada
-    if virgem or tem_placa(nome, raiz):
+    if not variante and (virgem or tem_placa(nome, raiz)):
         out['pcb_virgem'] = {'quantidade': 1}
         # 1.88.0: a virgem e a da PCB (o mesmo codigo em todas as variantes)
         if limpo.get('codigo_placa'):

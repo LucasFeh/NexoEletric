@@ -145,6 +145,17 @@ function sessao(forcar) {
 /* 1.87.0: apenas visualizador (o Nexo Hub 2.27.0 diz; Hub antigo, sem o campo, é usuário comum) */
 const MSG_VIS = 'Seu usuário é apenas visualizador — peça ao administrador do Nexo Hub';
 function visualizador() { return Boolean(ses.modo === 'login' && ses.usuario && ses.usuario.visualizador); }
+/* 1.89.0 (pedido do dono: "sim só pro admin"): apagar da biblioteca (componente local, valor do almoxarifado) é só do
+   administrador do Nexo Hub. '' = pode; senão o motivo (a tela desliga o botão com ele; o servidor confere de novo:
+   tools/rotas/equipe.py » recusa_so_admin) */
+const MSG_SO_ADMIN = 'Só o administrador do Nexo Hub apaga componentes da biblioteca';
+function motivoSoAdmin() {
+  const t = topo();
+  if (t && t.HubEquipe && t.HubEquipe.motivoSoAdmin && t.HubEquipe !== root.HubEquipe) return t.HubEquipe.motivoSoAdmin();
+  if (!ses.carregado) { sessao(); return MSG_SO_ADMIN; }
+  const u = ses.modo === 'login' ? ses.usuario : null;
+  return u && (u.admin || u.funcao === 'admin') ? '' : MSG_SO_ADMIN;
+}
 function barraVisualizador(acao) {
   if (!visualizador()) return false;
   toast((acao ? 'Não dá para ' + acao + ': ' : '') + MSG_VIS, 'warn', 7000);
@@ -589,7 +600,7 @@ function pintaSelo() {
 }
 ouve(pintaSelo);
 
-root.HubEquipe = { abre, assumir: assumirProjeto, podeAssumir, podeExcluir, tagArvore, pintaModificacoes, cracha, avatar, sessao, ouve, somenteLeitura, bloqueia, recusado, confirma,
+root.HubEquipe = { abre, assumir: assumirProjeto, podeAssumir, podeExcluir, motivoSoAdmin, MSG_SO_ADMIN, tagArvore, pintaModificacoes, cracha, avatar, sessao, ouve, somenteLeitura, bloqueia, recusado, confirma,
                    visualizador, barraVisualizador, MSG_VISUALIZADOR: MSG_VIS,
                    haQuanto, _vista: () => vista.projeto, _confere: confereVista };
 if (window.top === window) {

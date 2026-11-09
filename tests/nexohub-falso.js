@@ -83,6 +83,14 @@ function inicia(opcoes) {
         const [, , r1, r2, r3, r4, r5, r6] = partes;
         const m = req.method;
         if (r1 === 'saude') return json(200, { ok: true, app: 'nexohub', versao: 'falso', schema: 1, dados: '(memória)', revisao: E.seq });
+        if (r1 === 'categorias' && m === 'POST') {
+          /* a categoria nova (a interna do NexoEletric, oculta): 409 se já existe, como o de verdade */
+          if (!a.id || !a.nome) return erro(400, 'faltam id ou nome');
+          if (E.categorias.some(c => c.id === a.id)) return erro(409, 'categoria já existe');
+          const c = { id: a.id, nome: a.nome, pai_id: a.pai_id || null, ordem: a.ordem || 0, oculta: !!a.oculta };
+          E.categorias.push(c);
+          return json(201, c);
+        }
         if (r1 === 'categorias') return json(200, { ok: true, categorias: E.categorias.map(c => Object.assign({}, c, { itens: [...E.itens.values()].filter(i => !i.apagado_em && i.categoria === c.id).length })) });
         if (r1 === 'blobs' && !r2 && m === 'POST') {
           const sha = crypto.createHash('sha256').update(buf).digest('hex');

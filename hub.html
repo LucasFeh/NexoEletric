@@ -2170,8 +2170,10 @@ function menuLocal(x, y, s) {
   if (!id || typeof HubCompLocal === 'undefined') return;
   menuNoPonto(x, y, [
     { l: 'Editar componente…', c: 'abre a ficha em etapas', on: () => libNovoComp(id) },
-    { l: 'Apagar componente local…', c: 'tira "' + s.name + '" da biblioteca', on: () =>
-        HubCompLocal.confirmaApagar({ id, nome: s.name, aoSalvar: libLocalSalvo }) },
+    /* 1.89.0: só o administrador do Nexo Hub apaga (desligado, com o motivo, para os outros) */
+    (() => { const nao = window.HubEquipe && HubEquipe.motivoSoAdmin ? HubEquipe.motivoSoAdmin() : '';
+      return { l: 'Apagar componente local…', c: nao || 'tira "' + s.name + '" da biblioteca', off: Boolean(nao), on: () =>
+        HubCompLocal.confirmaApagar({ id, nome: s.name, aoSalvar: libLocalSalvo }) }; })(),
   ]);
 }
 /* depois de salvar (c) ou apagar (null): a lista recarrega, com o salvo selecionado */

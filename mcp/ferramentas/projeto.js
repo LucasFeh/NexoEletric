@@ -163,8 +163,9 @@ module.exports = {
             tplEsc = T0 && T0.acha(tid, fontes);
             if (!tplEsc && a.template !== undefined) throw new ErroMcp('template "' + tid + '" não existe (sch_template lista os da casa; "" = sem template)');
           }
-          const CAT = require('../lib/catalogo.js');
-          try { reg = CAT.registra({ nome: a.produto.nome, tipo: 'PLACA', cliente: a.produto.cliente, vinculo: a.produto.descricao, sigla: a.produto.sigla }); }
+          /* 1.89.0: pela fila do catálogo no NexoBD (catalogo-fila.js): a planilha aberta no Excel não impede */
+          const FILA = require('../lib/catalogo-fila.js');
+          try { reg = await FILA.registra({ nome: a.produto.nome, tipo: 'PLACA', cliente: a.produto.cliente, vinculo: a.produto.descricao, sigla: a.produto.sigla, por: { nome: a.produto.iniciador || '' } }); }
           catch (e) { throw new ErroMcp('catálogo de produtos: ' + e.message); }
           if (!a.nome) {
             a.nome = reg.codigo;
@@ -203,7 +204,8 @@ module.exports = {
         ctx.grava(p.arq('annotations.js'), hc.serializeAnnotations([]).text, 'projeto_criar');
         ctx.grava(p.arq('changes.js'), hc.serializeChanges([]).text, 'projeto_criar');
         const out = { ok: true, projeto: a.nome, pasta: ctx.rel(dir), arquivos: ['schematic.js', 'annotations.js', 'changes.js'] };
-        if (reg) out.catalogo = { codigo: reg.codigo, item: reg.item, linha: reg.linha, arquivo: reg.arquivo, template: 'casa:A4_DiEletrons' };
+        if (reg) out.catalogo = { codigo: reg.codigo, item: reg.item, linha: reg.linha, arquivo: reg.arquivo, template: 'casa:A4_DiEletrons',
+          aguardandoGravar: reg.pendente ? 'a planilha estava aberta: o código está reservado na fila do catálogo (NexoBD) e grava sozinho quando ela fechar' : undefined };
         /* projects.js: o indice que os scripts do Altium regeneram; o AI-GUIDE manda acrescentar */
         const pj = path.join(path.dirname(ctx.dirProjetos()), 'projects.js');   /* o indice ao lado de Projects/ */
         if (fs.existsSync(pj)) {
@@ -241,10 +243,10 @@ module.exports = {
         codigo: { type: 'string', description: 'buscar um produto já registrado pelo código' },
       } },
       executa: async (a) => {
-        const CAT = require('../lib/catalogo.js');
+        const CAT = require('../lib/catalogo-fila.js');      /* 1.89.0: a planilha + a fila do catálogo */
         try {
-          if (a.codigo) return CAT.busca({ codigo: a.codigo });
-          return Object.assign(CAT.previa({ nome: a.nome || '', sigla: a.sigla }), { proximo_passo: 'mostre o código ao usuário, pergunte quem iniciou o projeto e chame projeto_criar {produto:{nome, iniciador, cliente, descricao, sigla}}' });
+          if (a.codigo) return await CAT.busca({ codigo: a.codigo });
+          return Object.assign(await CAT.previa({ nome: a.nome || '', sigla: a.sigla }), { proximo_passo: 'mostre o código ao usuário, pergunte quem iniciou o projeto e chame projeto_criar {produto:{nome, iniciador, cliente, descricao, sigla}}' });
         } catch (e) { throw new ErroMcp('catálogo de produtos: ' + e.message); }
       },
     },

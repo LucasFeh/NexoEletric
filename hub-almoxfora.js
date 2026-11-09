@@ -166,6 +166,8 @@ function aviso(txt, tom){
 async function apaga(corpo, onde, repinta){
   const io = ioDaCasca();
   if (!io){ aviso('esta tela não tem como falar com o servidor', 'err'); return false; }
+  /* 1.89.0: só o administrador do Nexo Hub apaga da biblioteca (o servidor confere de novo) */
+  { const E = typeof window !== 'undefined' && window.HubEquipe; const nao = E && E.motivoSoAdmin ? E.motivoSoAdmin() : ''; if (nao){ io.toast(nao, 'warn'); return false; } }
   let p;
   try { p = await io.post('/api/symbols/almox-fora', corpo); }
   catch (e){ io.toast('não consegui perguntar ao servidor: ' + (e && e.message || e), 'err'); return false; }

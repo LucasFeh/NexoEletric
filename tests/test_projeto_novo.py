@@ -27,9 +27,12 @@ NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 
 
 def catalogo_falso(arq):
-    ss = ['ITEM ', 'TIPO', 'NOME', 'CLIENTE ', 'MODELO', 'VINCULO', 'PLACA', 'PLACA ADAPTADORA ENCODER LINEAR', 'PAEL-DI261940']
+    ss = ['ITEM ', 'TIPO', 'NOME', 'CLIENTE ', 'MODELO', 'VINCULO', 'PLACA', 'PLACA ADAPTADORA ENCODER LINEAR', 'PAEL-DI261940',
+          'CABO', 'CABO SERIAL', 'CS-DI261939']
     s = lambda r, k, i: '<c r="%s%d" s="44" t="s"><v>%d</v></c>' % (k, r, i)
     sheet = ('<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="%s"><dimension ref="A1:F4"/><sheetData>' % NS
+             # 1.89.0: um cabo (o Definir projeto nao o mostra)
+             + '<row r="1"><c r="A1" s="44"><v>1939</v></c>' + s(1, 'B', 9) + s(1, 'C', 10) + s(1, 'E', 11) + '</row>'
              + '<row r="2">' + ''.join(s(2, k, i) for i, k in enumerate('ABCDEF')) + '</row>'
              + '<row r="3"><c r="A3" s="44"><v>1940</v></c>' + s(3, 'B', 6) + s(3, 'C', 7) + s(3, 'E', 8) + '</row>'
              + '<row r="4"><c r="A4" s="44"><v>1940</v></c></row></sheetData></worksheet>')
@@ -57,7 +60,8 @@ class Rotas(unittest.TestCase):
         os.makedirs(os.path.join(self.tmp, 'mcp', 'lib'))
         os.makedirs(os.path.join(self.tmp, 'Libs'))
         shutil.copy(os.path.join(RAIZ, 'Libs', 'sch-templates-casa.js'), os.path.join(self.tmp, 'Libs', 'sch-templates-casa.js'))
-        shutil.copy(os.path.join(RAIZ, 'mcp', 'lib', 'catalogo.js'), os.path.join(self.tmp, 'mcp', 'lib', 'catalogo.js'))
+        for m in ('catalogo.js', 'catalogo-fila.js', 'nexohub.js'):
+            shutil.copy(os.path.join(RAIZ, 'mcp', 'lib', m), os.path.join(self.tmp, 'mcp', 'lib', m))
         self.indexado = []
         # o Nexo Hub desta maquina fica de fora: sem nada, o Hub "antigo" (sem login, 404); self.logado = alguem logado
         self.logado = None
@@ -117,6 +121,26 @@ class Rotas(unittest.TestCase):
         # a busca acha o produto novo
         a = self.c.get('/api/projeto/novo/catalogo?codigo=' + cod).get_json()
         self.assertEqual(a['achou']['cliente'], 'ALUMAR')
+
+    def test_definir_so_placas_e_equipamentos(self):
+        """1.89.0 (pedido do dono: "sistemas, cabos, acessorios, softwares podem sair, deixa so placa, codigo de placa
+        errado e equipamento no definir"): a lista, o cadastro e a categoria so de placa e equipamento; o cabo continua na
+        planilha"""
+        j = self.c.get('/api/catalogo').get_json()
+        self.assertTrue(j['ok'], j)
+        self.assertEqual(sorted({i['grupo'] for i in j['itens']}), ['placa'])
+        self.assertEqual([c['id'] for c in j['categorias']], ['placa', 'equipamento'])
+        self.assertEqual(j['ultimo'], 1940)
+        self.assertIn('fila', j)
+        r = self.c.post('/api/catalogo/registrar', json={'nome': 'Cabo novo', 'tipo': 'CABO'})
+        self.assertEqual(r.status_code, 400)
+        r = self.c.post('/api/catalogo/editar', json={'item': 1940, 'codigo': 'PAEL-DI261940', 'novoGrupo': 'cabo'})
+        self.assertEqual(r.status_code, 400)
+        j = self.c.post('/api/catalogo/registrar', json={'nome': 'Equipamento novo', 'tipo': 'EQUIPAMENTO'}).get_json()
+        self.assertTrue(j['ok'], j)
+        self.assertEqual((j['item'], j['pendente']), (1941, False))
+        with zipfile.ZipFile(self.cat) as z:
+            self.assertIn('>CS-DI261939<', z.read('xl/sharedStrings.xml').decode('utf-8'), 'o cabo continua na planilha')
 
     def test_template_do_esquema(self):
         t = self.c.get('/api/projeto/novo/templates').get_json()

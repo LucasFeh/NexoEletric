@@ -31,7 +31,23 @@
      HubVariantes.ouve(fn)                   fn(projeto, estado, antes) quando o estado muda (esta janela, outra janela
                                              do mesmo app pelo BroadcastChannel, ou a releitura a cada 8 s)
      HubVariantes.instalaTecla(projeto, selecionados)  Shift+S = Suprimir / Montar a seleção (só com variante ativa)
-     HubVariantes.selo(projeto)              o selo "VARIANTE <nome> · <código>" no canto da vista (body.variante-on) */
+     HubVariantes.selo(projeto)              o selo "VARIANTE <nome> · <código>" no canto da vista (body.variante-on)
+
+   1.89.0 (pedido do dono, 2026-11-09: "o dropbox pra criar variante, precisa ser só o dropbox, você clica, se não tiver
+   você clicar em 'adicionar variante' dentro do dropbox mesmo, e isso abre a tela pra selecionar o equipamento daquela
+   variante, seleciona só o equipamento pq a PCB é a mesma"):
+   - a área "Variante de projeto" é SÓ um dropdown: "Padrão (todos montados)", as variantes (nome · código) e, no fim,
+     "+ Adicionar variante"; com uma variante escolhida, também "Renomear esta variante…", "Trocar equipamento desta
+     variante…" e "Apagar esta variante…" (separados por um divisor). Sem botões soltos e sem perguntar nome antes;
+   - "+ Adicionar variante" abre o catálogo do Definir projeto SÓ com equipamentos (HubCatalogo.escolhe({soEquipamento}));
+     o equipamento escolhido (ou cadastrado ali mesmo, pela fila do catálogo) dá o CÓDIGO da variante e, em seguida, a
+     pessoa dá o NOME (obrigatório, sugestão = o nome do equipamento; "Renomear esta variante…" muda depois). Cancelou,
+     nada é criado. O equipamento do projeto padrão e o de outra variante são recusados (proibidos);
+   - o quadro da folha, com a variante ativa, mostra no EQUIPAMENTO o código do equipamento DA VARIANTE (a linha
+     "VARIANTE …" saiu: a barra da vista diz o nome); PLACA continua o código da PCB;
+   - o envio da lista ao Odoo com a variante ativa (odoolista.monta_payload): a PCB MONTADA é "<código da placa> <NOME DA
+     VARIANTE>" e a PCB VIRGEM não vai (a virgem é a do projeto padrão); o equipamento da variante só vai ao quadro.
+   As variantes da 1.88.0 (nome livre, código de qualquer grupo) continuam abrindo como estão. */
 (function (root, fabrica) {
   const api = fabrica(root);
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -67,18 +83,30 @@ function params(sch){
 }
 /* A REGRA DOS CÓDIGOS (decisão de 2026-11-09; o mesmo do variantes.py » codigos): a virgem é a fibra, igual em todas as
    variantes; a montada é um produto por variante. Mude aqui e lá juntos. */
+/* 1.89.0: a PCB montada de uma variante no Odoo = "<código da placa><SEPARADOR><NOME DA VARIANTE>" (o variantes.py »
+   montada_da_variante; mude os dois juntos) e a virgem não vai (virgemVai) */
+const SEPARADOR_MONTADA = ' ';
+function montadaDaVariante(placa, nome){
+  const n = String(nome || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  return placa ? (placa + SEPARADOR_MONTADA + n).trim() : n;
+}
 function codigos(sch, v){
   const p = params(sch);
   let placa = p.CodigoDaPlaca || '';
   if (placa.toUpperCase() === 'PROJETO NÃO DEFINIDO') placa = '';
-  return { placa, nomePlaca: p.NomeDaPlaca || '', virgem: placa, montada: (v && v.codigo) || placa,
-           equipamento: p.CodigoDoEquipamento || '', variante: v ? { id: v.id, nome: v.nome || '', codigo: v.codigo || '' } : null };
+  /* 1.89.0: a variante é um equipamento: com ela ativa, o equipamento (o do quadro da folha) é o código dela */
+  return { placa, nomePlaca: p.NomeDaPlaca || '', virgem: placa, virgemVai: !v, montada: v ? montadaDaVariante(placa, v.nome || v.codigo) : placa,
+           equipamento: (v && v.codigo) || p.CodigoDoEquipamento || '', equipamentoProjeto: p.CodigoDoEquipamento || '',
+           variante: v ? { id: v.id, nome: v.nome || '', codigo: v.codigo || '' } : null };
 }
 function proibidos(est, menosId){
   const out = {};
   const pl = est && est.placa && est.placa.codigo;
   if (pl) out[normCod(pl)] = 'é o código da PCB (a placa virgem, igual em todas as variantes): a variante precisa de um código próprio';
-  for (const v of (est && est.variantes) || []) if (v.id !== menosId) out[normCod(v.codigo)] = 'já é o código da variante "' + v.nome + '"';
+  /* 1.89.0: o equipamento do projeto padrão também não (a variante é OUTRO equipamento com a mesma PCB) */
+  const eq = est && est.codigos && est.codigos.equipamentoProjeto;
+  if (eq) out[normCod(eq)] = 'é o equipamento do projeto padrão: a variante é outro equipamento (com a mesma PCB)';
+  for (const v of (est && est.variantes) || []) if (v.id !== menosId) out[normCod(v.codigo)] = 'já é o equipamento da variante "' + v.nome + '"';
   return out;
 }
 const sufixo = v => v ? ' - variante ' + String(v.codigo || v.nome || v.id).replace(/[\\/:*?"<>|]+/g, '_') : '';
@@ -88,7 +116,7 @@ function filtraPlaca(B, fora){
 }
 const textoVariante = v => v ? 'VARIANTE ' + (v.nome || '') + (v.codigo ? ' · ' + v.codigo : '') : '';
 
-const PURO = { FORMATO, PADRAO, TECLA, refs, aplica, codigos, proibidos, sufixo, filtraPlaca, params, textoVariante, normCod };
+const PURO = { FORMATO, PADRAO, TECLA, SEPARADOR_MONTADA, montadaDaVariante, refs, aplica, codigos, proibidos, sufixo, filtraPlaca, params, textoVariante, normCod };
 if (typeof document === 'undefined') return PURO;
 
 /* ============================== tela ============================== */
@@ -100,6 +128,27 @@ function bt(txt, titulo, fn, cls){ const b = el('button', cls || null, txt); b.t
 const CSS = `
 .vr-sec{display:flex; flex-direction:column; gap:6px; margin-top:6px; padding-top:8px; border-top:1px solid var(--border, var(--line, #444));}
 .vr-sec h3{margin:0; font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--fg2, var(--text-3, #999));}
+.vr-dd{position:relative;}
+.vr-dd-bt{width:100%; display:flex; align-items:center; gap:6px; text-align:left; cursor:pointer; padding:5px 8px; border-radius:4px;
+  background:var(--panel, var(--surface, #1e1e1e)); color:var(--fg, var(--text, #ddd)); border:1px solid var(--border, var(--line, #444));
+  font:12px var(--font, "Segoe UI", sans-serif);}
+.vr-dd-bt:hover, .vr-dd.aberto .vr-dd-bt{border-color:var(--accent, var(--hi, #3b82f6));}
+.vr-dd-bt .vr-dd-txt{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.vr-dd-bt .vr-dd-cod{font:11px var(--mono, ui-monospace, monospace); color:var(--fg2, var(--text-3, #999));}
+.vr-dd-lista{position:fixed; z-index:90; min-width:220px; max-height:60vh; overflow:auto; padding:4px; border-radius:6px;
+  background:var(--panel, var(--surface, #222)); border:1px solid var(--border, var(--line, #444)); box-shadow:var(--shadow-menu, 0 8px 30px rgba(0,0,0,.5));
+  font:12px var(--font, "Segoe UI", sans-serif); color:var(--fg, var(--text, #ddd));}
+.vr-dd-lista[hidden]{display:none;}
+.vr-op{display:flex; align-items:baseline; gap:8px; padding:6px 8px; border-radius:4px; cursor:pointer; white-space:nowrap;}
+.vr-op:hover, .vr-op.foco{background:rgba(127,127,127,.16);}
+.vr-op.on{font-weight:600;}
+.vr-op.on::before{content:'✓'; width:12px; color:var(--accent, var(--hi, #3b82f6));}
+.vr-op:not(.on)::before{content:''; width:12px;}
+.vr-op .cod{font:11px var(--mono, ui-monospace, monospace); color:var(--fg2, var(--text-3, #999)); margin-left:auto;}
+.vr-op.acao{color:var(--accent, var(--hi, #60a5fa));}
+.vr-op.perigo{color:var(--err, #f87171);}
+.vr-op.off{opacity:.45; cursor:default;}
+.vr-div{height:1px; margin:4px 2px; background:var(--border, var(--line, #444));}
 .vr-sec select{width:100%; background:var(--panel, var(--surface, #1e1e1e)); color:var(--fg, var(--text, #ddd)); border:1px solid var(--border, var(--line, #444));
   border-radius:4px; padding:4px 6px; font:12px var(--font, "Segoe UI", sans-serif);}
 .vr-lin{display:flex; gap:4px; flex-wrap:wrap;}
@@ -173,43 +222,55 @@ async function troca(projeto, id){
   if (!j.ok) { toast('não trocou de variante: ' + j.error, 'err', 7000); return null; }
   return poe(projeto, j);
 }
+/* "+ Adicionar variante" (1.89.0): o catálogo só com equipamentos; o equipamento dá o nome e o código da variante */
 async function cria(projeto){
   if (!podeEditar(projeto)) { toast(motivo(projeto), 'warn', 6000); return null; }
-  const D = DLG(), C = root.HubCatalogo;
-  if (!D || !D.texto || !C || !C.escolhe) { toast('a variante precisa do catálogo (hub-catalogo.js) e do hub-dialog.js', 'err'); return null; }
+  const C = root.HubCatalogo;
+  if (!C || !C.escolhe) { toast('a variante precisa do catálogo (hub-catalogo.js)', 'err'); return null; }
   const est = estadoDe(projeto) || await carrega(projeto, true);
-  const nome = await D.texto('Nome da variante (ex.: "Sem display", "Versão 12 V"). A PCB é a mesma; a variante só suprime componentes.',
-    { title:'Nova variante de projeto', ok:'Escolher o código…',
-      valida: s => !String(s || '').trim() ? 'dê um nome' : (est.variantes || []).some(v => v.nome.toLowerCase() === String(s).trim().toLowerCase()) ? 'já existe uma variante com esse nome' : '' });
-  if (nome == null || !String(nome).trim()) return null;
-  /* NA HORA, o código da variante no catálogo do Definir projeto (sem código não há variante) */
-  const item = await C.escolhe({ titulo:'Código da variante "' + String(nome).trim() + '"', rotulo:'Código da variante',
-    sub:'escolha no catálogo (ou cadastre) o produto montado desta variante — o código não pode ser o da PCB nem o de outra variante',
-    proibidos: proibidos(est) });
-  if (!item) { toast('variante não criada: sem código não há variante', 'warn', 5000); return null; }
-  const j = await pede('/api/variantes/criar', { projeto, nome: String(nome).trim(), codigo: item.modelo, nomeCatalogo: item.nome || '' });
+  const item = await C.escolhe({ soEquipamento: true, titulo: 'Equipamento da nova variante', rotulo: 'Equipamento da variante',
+    sub: 'a PCB é a mesma: escolha (ou cadastre) só o equipamento — a variante nasce com o nome e o código dele',
+    pe: 'o equipamento do projeto padrão e o de outra variante não podem', proibidos: proibidos(est) });
+  if (!item) return null;                                   /* cancelou: nada é criado */
+  /* 1.89.0 ("precisa por nome da variante"): o nome é obrigatório — a sugestão é o nome do equipamento */
+  const nome = await pedeNome(est, item.nome || item.modelo, null, 'Nome da variante (equipamento ' + item.modelo + '). A PCB montada desta variante vai ao Odoo como "<código da placa> <NOME DA VARIANTE>".');
+  if (nome == null) return null;
+  const j = await pede('/api/variantes/criar', { projeto, nome, codigo: item.modelo, nomeCatalogo: item.nome || '' });
   if (!j.ok) { toast('não criou a variante: ' + j.error, 'err', 8000); return null; }
   poe(projeto, j);
-  toast('variante "' + j.variante.nome + '" (' + j.variante.codigo + ') criada — ative-a para suprimir componentes', 'ok', 6000);
+  toast('variante "' + j.variante.nome + '" (' + j.variante.codigo + ') criada — suprima nela o que esse equipamento não monta', 'ok', 6000);
   return j.variante;
 }
-async function renomeia(projeto, v){
+/* o nome da variante (obrigatório, sem repetir entre as variantes do projeto) -> string | null (cancelou) */
+async function pedeNome(est, sugestao, menosId, texto){
   const D = DLG();
-  const n = D && D.texto ? await D.texto('Nome novo da variante:', { title:'Renomear variante', v: v.nome, ok:'Renomear' }) : null;
-  if (n == null || !String(n).trim() || String(n).trim() === v.nome) return;
-  const j = await pede('/api/variantes/editar', { projeto, id: v.id, nome: String(n).trim() });
+  if (!D || !D.texto) return String(sugestao || '').trim() || null;
+  const n = await D.texto(texto, { title: menosId ? 'Renomear variante' : 'Nome da variante', v: String(sugestao || ''), ok: menosId ? 'Renomear' : 'Criar variante',
+    valida: s => !String(s || '').trim() ? 'dê um nome à variante'
+      : ((est && est.variantes) || []).some(v => v.id !== menosId && String(v.nome || '').toLowerCase() === String(s).trim().toLowerCase()) ? 'já existe uma variante com esse nome' : '' });
+  return n == null || !String(n).trim() ? null : String(n).trim().replace(/\s+/g, ' ');
+}
+async function renomeia(projeto, v){
+  if (!podeEditar(projeto)) { toast(motivo(projeto), 'warn', 6000); return; }
+  const n = await pedeNome(estadoDe(projeto), v.nome, v.id, 'Nome novo da variante (equipamento ' + v.codigo + '):');
+  if (n == null || n === v.nome) return;
+  const j = await pede('/api/variantes/editar', { projeto, id: v.id, nome: n });
   if (!j.ok) { toast('não renomeou: ' + j.error, 'err', 7000); return; }
   poe(projeto, j);
+  toast('variante renomeada: "' + n + '"', 'ok');
 }
-async function trocaCodigo(projeto, v){
+/* "Trocar equipamento desta variante…": o mesmo catálogo; a variante fica com o nome e o código do equipamento novo */
+async function trocaEquipamento(projeto, v){
+  if (!podeEditar(projeto)) { toast(motivo(projeto), 'warn', 6000); return; }
   const C = root.HubCatalogo;
-  const item = C && C.escolhe ? await C.escolhe({ titulo:'Código da variante "' + v.nome + '"', rotulo:'Código da variante (hoje ' + v.codigo + ')',
+  const item = C && C.escolhe ? await C.escolhe({ soEquipamento: true, titulo: 'Equipamento da variante "' + v.nome + '"',
+    rotulo: 'Equipamento (hoje ' + v.codigo + ')', sub: 'a PCB é a mesma: só o equipamento muda (os suprimidos ficam)',
     proibidos: proibidos(estadoDe(projeto), v.id) }) : null;
   if (!item || normCod(item.modelo) === v.codigo) return;
   const j = await pede('/api/variantes/editar', { projeto, id: v.id, codigo: item.modelo, nomeCatalogo: item.nome || '' });
-  if (!j.ok) { toast('não trocou o código: ' + j.error, 'err', 7000); return; }
+  if (!j.ok) { toast('não trocou o equipamento: ' + j.error, 'err', 7000); return; }
   poe(projeto, j);
-  toast('variante "' + v.nome + '": código ' + j.variante.codigo, 'ok');
+  toast('variante "' + j.variante.nome + '": equipamento ' + j.variante.codigo, 'ok');
 }
 async function apaga(projeto, v){
   const D = DLG();
@@ -243,47 +304,77 @@ function monta(caixa, o){
   const sec = el('div', 'sec vr-sec');
   sec.dataset.variantes = '1';
   const h = el('h3', null, 'Variante de projeto');
-  const sel = el('select'); sel.title = 'a variante que a vista mostra e que as saídas (BOM, Neoden, lista do Odoo, PDF) usam — nesta máquina';
+  /* 1.89.0: SÓ um dropdown (o nativo não deixa pôr ações nem divisor; este é desenhado aqui) */
+  const dd = el('div', 'vr-dd');
+  const bt0 = el('button', 'vr-dd-bt'); bt0.type = 'button';
+  bt0.title = 'a variante que a vista mostra e que as saídas (BOM, Neoden, lista do Odoo, PDF) usam — nesta máquina';
+  const txt = el('span', 'vr-dd-txt'), cod = el('span', 'vr-dd-cod');
+  bt0.append(txt, cod, el('span', null, '▾'));
+  const lista = el('div', 'vr-dd-lista'); lista.hidden = true; lista.setAttribute('role', 'listbox');
+  dd.append(bt0);
   const info = el('div', 'vr-info');
   const chips = el('div', 'vr-chips');
-  const l1 = el('div', 'vr-lin'), l2 = el('div', 'vr-lin');
-  const bNova = bt('+ Nova', 'cria uma variante: o nome e, na hora, o código dela no catálogo do Definir projeto', () => cria(P).then(v => { if (v && o.ativarNova !== false) troca(P, v.id); }));
-  const bRen = bt('Renomear', 'muda o nome da variante escolhida', () => { const v = ativa(P); if (v) renomeia(P, v); });
-  const bCod = bt('Código…', 'troca o código da variante pelo catálogo do Definir projeto', () => { const v = ativa(P); if (v) trocaCodigo(P, v); });
-  const bApa = bt('Apagar', 'apaga a variante escolhida (a PCB não muda)', () => { const v = ativa(P); if (v) apaga(P, v); });
-  const bSup = bt('Suprimir / Montar', 'tira (ou devolve) os componentes selecionados desta variante: some da PCB montada, do BOM, da Neoden e da lista do Odoo (' + TECLA + ')',
-    () => alterna(P, o.selecionados ? o.selecionados() : []), 'prim');
-  l1.append(bNova, bRen, bCod, bApa);
-  l2.append(bSup);
-  sec.append(h, sel, info, l2, chips, l1);
+  sec.append(h, dd, info, chips);
   if (o.antes && o.antes.parentNode) o.antes.parentNode.insertBefore(sec, o.antes);
   else caixa.append(sec);
-  sel.addEventListener('change', async () => {
-    sel.disabled = true;
-    const e = await troca(P, sel.value || null);
-    sel.disabled = false;
-    if (!e) pinta();
-  });
+  document.body.append(lista);
+  let ocupado = false;
+  const fechaLista = () => { lista.hidden = true; dd.classList.remove('aberto'); };
+  const abreLista = () => {
+    pintaLista();
+    lista.hidden = false; dd.classList.add('aberto');
+    const r = bt0.getBoundingClientRect();
+    lista.style.minWidth = Math.max(220, r.width) + 'px';
+    const lr = lista.getBoundingClientRect();
+    lista.style.left = Math.max(4, Math.min(r.left, innerWidth - lr.width - 6)) + 'px';
+    lista.style.top = (r.bottom + 2 + lr.height > innerHeight - 6 ? Math.max(4, r.top - 2 - lr.height) : r.bottom + 2) + 'px';
+  };
+  bt0.addEventListener('click', () => { if (ocupado) return; if (lista.hidden) abreLista(); else fechaLista(); });
+  document.addEventListener('mousedown', e => { if (!lista.hidden && !lista.contains(e.target) && !dd.contains(e.target)) fechaLista(); }, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !lista.hidden) { e.stopPropagation(); fechaLista(); } }, true);
+  window.addEventListener('resize', fechaLista);
+  const vai = async (fn) => { fechaLista(); ocupado = true; bt0.disabled = true; try { await fn(); } finally { ocupado = false; bt0.disabled = false; pinta(); } };
+  function opcao(rot, codTxt, cls, titulo, fn){
+    const d = el('div', 'vr-op' + (cls ? ' ' + cls : ''));
+    d.setAttribute('role', 'option');
+    d.append(el('span', null, rot));
+    if (codTxt) d.append(el('span', 'cod', codTxt));
+    if (titulo) d.title = titulo;
+    if (fn && !/\boff\b/.test(cls || '')) d.addEventListener('click', () => vai(fn));
+    lista.append(d);
+    return d;
+  }
+  function pintaLista(){
+    const e = estadoDe(P), v = ativa(P), pode = podeEditar(P);
+    const semPerm = pode ? '' : ' — ' + motivo(P);
+    lista.replaceChildren();
+    opcao(PADRAO, (e && e.codigos && e.codigos.placa) || '', !v ? 'on' : '', 'todos os componentes montados (a PCB do projeto)', () => troca(P, null));
+    for (const x of (e && e.variantes) || [])
+      opcao(x.nome || x.codigo, x.codigo, v && v.id === x.id ? 'on' : '', 'a variante "' + (x.nome || x.codigo) + '" (equipamento ' + x.codigo + '): ' + (x.suprimidos || []).length + ' suprimido(s)', () => troca(P, x.id));
+    lista.append(el('div', 'vr-div'));
+    opcao('+ Adicionar variante', '', 'acao' + (pode ? '' : ' off'), pode ? 'escolha o equipamento da variante no catálogo (a PCB é a mesma)' : 'criar variante é edição' + semPerm,
+      () => cria(P).then(nv => { if (nv && o.ativarNova !== false) return troca(P, nv.id); return null; }));
+    if (v) {
+      lista.append(el('div', 'vr-div'));
+      opcao('Renomear esta variante…', '', pode ? '' : 'off', pode ? 'o nome da variante (vai na PCB montada do Odoo: <código da placa> <NOME>)' : 'é edição' + semPerm, () => renomeia(P, v));
+      opcao('Trocar equipamento desta variante…', '', pode ? '' : 'off', pode ? 'escolhe outro equipamento no catálogo para "' + v.nome + '"' : 'é edição' + semPerm, () => trocaEquipamento(P, v));
+      opcao('Apagar esta variante…', '', 'perigo' + (pode ? '' : ' off'), pode ? 'apaga "' + v.nome + '" (a PCB não muda)' : 'é edição' + semPerm, () => apaga(P, v));
+    }
+  }
   function pinta(){
     const e = estadoDe(P);
     const v = ativa(P);
-    sel.replaceChildren();
-    const o0 = el('option', null, PADRAO); o0.value = ''; sel.append(o0);
-    for (const x of (e && e.variantes) || []) { const op = el('option', null, x.nome + ' · ' + x.codigo); op.value = x.id; sel.append(op); }
-    sel.value = v ? v.id : '';
-    const pode = podeEditar(P);
-    const t = pode ? '' : ' — ' + motivo(P);
-    bNova.disabled = !pode; bNova.title = pode ? bNova.title.replace(/ — .*$/, '') : 'criar variante é edição' + t;
-    for (const b of [bRen, bCod, bApa]) b.disabled = !pode || !v;
-    bSup.disabled = !v || !pode;
-    bSup.title = !v ? 'escolha uma variante: na padrão todos são montados' : !pode ? 'suprimir é edição' + t : 'tira (ou devolve) os componentes selecionados desta variante (' + TECLA + ')';
-    l2.hidden = !v;
+    txt.textContent = v ? (v.nome || v.codigo) : PADRAO;
+    cod.textContent = v ? v.codigo : '';
+    bt0.title = (v ? 'variante "' + v.nome + '" (' + v.codigo + ')' : PADRAO) + ' — clique para trocar, adicionar' + (v ? ', renomear, trocar o equipamento ou apagar' : '') + ' (nesta máquina)';
+    if (!lista.hidden) pintaLista();
     const c = (e && e.codigos) || {};
     info.replaceChildren();
     const linha = (rot, val) => { const d = el('div'); d.append(rot + ' ', el('b', null, val || '—')); info.append(d); };
     linha('PCB montada:', c.montada);
-    linha('PCB virgem:', c.virgem || c.placa);
-    if (v) info.append(el('div', null, (v.suprimidos || []).length + ' suprimido(s) nesta variante — a PCB, o cobre e o Gerber são os da padrão'));
+    if (v) { const d = el('div'); d.append('PCB virgem: ', el('b', null, 'não enviada'), ' (variante — a placa virgem é a do projeto padrão)'); info.append(d); }
+    else linha('PCB virgem:', c.virgem || c.placa);
+    if (v) info.append(el('div', null, (v.suprimidos || []).length + ' suprimido(s) nesta variante — a PCB, o cobre e o Gerber são os da padrão (Suprimir / Montar: a barra da vista, ' + TECLA + ')'));
     else info.append(el('div', null, (e && e.variantes && e.variantes.length ? e.variantes.length + ' variante(s) — ' : '') + 'na padrão todos os componentes são montados'));
     chips.replaceChildren();
     if (v) for (const s of v.suprimidos || []) {
@@ -297,7 +388,7 @@ function monta(caixa, o){
   ouve(p => { if (p === P) pinta(); });
   pinta();
   carrega(P, true);
-  return { pinta };
+  return { pinta, abre: abreLista, fecha: fechaLista };
 }
 
 function instalaTecla(projeto, selecionados){
@@ -332,5 +423,5 @@ function barra(container, projeto, selecionados){
   return { pinta };
 }
 
-return Object.assign({}, PURO, { carrega, estadoDe, ativa, refsDoProjeto, ouve, monta, alterna, troca, cria, instalaTecla, barra, podeEditar });
+return Object.assign({}, PURO, { carrega, estadoDe, ativa, refsDoProjeto, ouve, monta, alterna, troca, cria, renomeia, trocaEquipamento, apaga, instalaTecla, barra, podeEditar });
 });

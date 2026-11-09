@@ -30,16 +30,20 @@ t('refs: só o que está no esquema; aplica marca todas as partes sem mexer no o
   assert.deepStrictEqual([...HC.dnpRefs(a)], ['U3'], 'a regra de não montar de todo lugar vê o suprimido');
   assert.strictEqual(V.aplica(SCH, null), SCH);
 });
-t('códigos: virgem = PCB; montada = PCB na padrão, a variante quando ativa; o equipamento não entra', () => {
-  assert.deepStrictEqual(V.codigos(SCH, null), { placa: 'PAEL-DI261940', nomePlaca: 'PLACA ADAPTADORA', virgem: 'PAEL-DI261940', montada: 'PAEL-DI261940', equipamento: 'EQ-DI1', variante: null });
+t('códigos: virgem = PCB; montada = PCB na padrão; na variante (1.89.0) montada = código da placa + nome da variante, sem virgem; o equipamento é o da variante', () => {
+  assert.deepStrictEqual(V.codigos(SCH, null), { placa: 'PAEL-DI261940', nomePlaca: 'PLACA ADAPTADORA', virgem: 'PAEL-DI261940', virgemVai: true, montada: 'PAEL-DI261940',
+    equipamento: 'EQ-DI1', equipamentoProjeto: 'EQ-DI1', variante: null });
   const c = V.codigos(SCH, VAR);
-  assert.deepStrictEqual([c.virgem, c.montada, c.variante.codigo], ['PAEL-DI261940', 'PAELST-DI261951', 'PAELST-DI261951']);
+  assert.deepStrictEqual([c.virgem, c.virgemVai, c.montada, c.variante.codigo, c.equipamento, c.equipamentoProjeto],
+    ['PAEL-DI261940', false, 'PAEL-DI261940 SEM TIMER', 'PAELST-DI261951', 'PAELST-DI261951', 'EQ-DI1']);
+  assert.strictEqual(V.montadaDaVariante('', 'sem  timer'), 'SEM TIMER', 'sem placa definida: só o nome');
   assert.strictEqual(V.codigos({ params: 'CodigoDaPlaca=PROJETO NÃO DEFINIDO' }, null).placa, '');
 });
-t('proibidos: o código da PCB e o das outras variantes', () => {
-  const est = { placa: { codigo: 'PAEL-DI261940' }, variantes: [VAR, { id: 'v1', nome: 'B', codigo: 'PB-DI2' }] };
+t('proibidos: o código da PCB, o equipamento do projeto (1.89.0) e o das outras variantes', () => {
+  const est = { placa: { codigo: 'PAEL-DI261940' }, codigos: { equipamentoProjeto: 'EQ-DI1' }, variantes: [VAR, { id: 'v1', nome: 'B', codigo: 'PB-DI2' }] };
   const p = V.proibidos(est, 'v1');
   assert.ok(/código da PCB/.test(p['PAEL-DI261940']) && /Sem timer/.test(p['PAELST-DI261951']) && !p['PB-DI2']);
+  assert.ok(/equipamento do projeto padrão/.test(p['EQ-DI1']));
   assert.strictEqual(V.sufixo(VAR), ' - variante PAELST-DI261951');
   assert.strictEqual(V.sufixo(null), '');
 });
@@ -74,14 +78,16 @@ t('árvore: o nome da PCB, o código ao lado, a pasta sem placa', () => {
   assert.ok(r.semNome && r.nome === 'PX-DI1', 'código sem nome: o código até o catálogo responder');
   assert.ok(C.placaSemP({ grupo: 'placa', modelo: 'ISO-DI181526' }) && !C.placaSemP({ grupo: 'placa', modelo: 'PISO-DI1' }) && !C.placaSemP({ grupo: 'cabo', modelo: 'X' }));
 });
-t('quadro da folha: o nome do equipamento sai; a variante entra no lugar; código do equipamento fica', () => {
+t('quadro da folha: o nome do equipamento sai; com a variante (1.89.0) o EQUIPAMENTO é o código da variante e a linha VARIANTE sai', () => {
   const c = T.contexto({ proj: SCH.params });
   assert.strictEqual(T.valor('NomeDoEquipamento', c), '', 'só o código do equipamento vai ao quadro');
   assert.strictEqual(T.valor('CodigoDoEquipamento', c), 'EQ-DI1');
   assert.strictEqual(T.valor('CodigoDaPlaca', c), 'PAEL-DI261940');
   T.setVariante(VAR);
   try {
-    assert.strictEqual(T.valor('NomeDoEquipamento', T.contexto({ proj: SCH.params })), 'VARIANTE Sem timer · PAELST-DI261951');
+    assert.strictEqual(T.valor('NomeDoEquipamento', T.contexto({ proj: SCH.params })), '', 'a linha "VARIANTE …" saiu (a barra da vista diz o nome)');
+    assert.strictEqual(T.valor('CodigoDoEquipamento', T.contexto({ proj: SCH.params })), 'PAELST-DI261951', 'o equipamento da variante');
+    assert.strictEqual(T.valor('CodigoDoEquipamento', T.contexto({ proj: SCH.params, variante: null })), 'EQ-DI1', 'na padrão, o do projeto');
     assert.strictEqual(T.valor('CodigoDaPlaca', T.contexto({ proj: SCH.params })), 'PAEL-DI261940', 'a placa é a mesma');
   } finally { T.setVariante(null); }
   assert.strictEqual(T.valor('CodigoDoEquipamento', T.contexto({})), T.NAO_DEFINIDO, 'sem código: PROJETO NÃO DEFINIDO');
@@ -143,7 +149,7 @@ function cliente() {
   r = await chama('variante_suprimir', { projeto: PROJ, refs: [ALVO] });
   assert.ok(r.erro && /nenhuma variante ativa/.test(r.texto), 'na padrão não se suprime');
   r = await chama('variante_ativar', { projeto: PROJ, id: 'v0a1b2c3' });
-  assert.ok(!r.erro && r.j.ativa.codigo === 'PLMST-DI269999' && r.j.codigos.montada === 'PLMST-DI269999', r.texto);
+  assert.ok(!r.erro && r.j.ativa.codigo === 'PLMST-DI269999' && r.j.codigos.montada === V.montadaDaVariante(r.j.codigos.placa, 'Sem ' + ALVO) && r.j.codigos.virgemVai === false, r.texto);
   r = await chama('variante_suprimir', { projeto: PROJ, refs: [ALVO, 'ZZ999'] });
   assert.ok(r.erro && /não estão no esquema: ZZ999/.test(r.texto), r.texto);
   const schAntes = fs.readFileSync(path.join(PD, 'schematic.js'), 'utf8');

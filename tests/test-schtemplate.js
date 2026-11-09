@@ -116,8 +116,10 @@ const PC = T.primitivas(casa, null, { proj:'CodigoDoEquipamento=OSC-DI1;NomeDoEq
 ok(PC.some(p => p.g === 'text' && p.s === 'OSC-DI1' && p.origem === '=CodigoDoEquipamento'), 'campo resolvido, com a origem');
 ok(!PC.some(p => p.s === 'Oscilador'), '1.88.0: o nome do equipamento sai do quadro');
 T.setVariante({ nome:'Sem display', codigo:'POSC-DI2' });
-ok(T.primitivas(casa, null, { proj:'NomeDoEquipamento=Oscilador', faltante:'' }).some(p => p.s === 'VARIANTE Sem display · POSC-DI2' && p.origem === '=NomeDoEquipamento'),
-   '1.88.0: a variante ativa no lugar do nome do equipamento');
+{ const PV = T.primitivas(casa, null, { proj:'CodigoDoEquipamento=OSC-DI1;NomeDoEquipamento=Oscilador', faltante:'' });
+  ok(PV.some(p => p.s === 'POSC-DI2' && p.origem === '=CodigoDoEquipamento') && !PV.some(p => p.s === 'OSC-DI1'),
+     '1.89.0: com a variante ativa, o EQUIPAMENTO do quadro é o código do equipamento da variante');
+  ok(!PV.some(p => /^VARIANTE /.test(p.s)) && !PV.some(p => p.s === 'Oscilador'), '1.89.0: a linha VARIANTE saiu do quadro'); }
 T.setVariante(null);
 ok(PC.some(p => p.s === 'PLACA:') && !PC.some(p => p.s === 'DESENHO:'), 'o quadro do desenho virou o da placa');
 const desen = PC.find(p => p.s === 'DESEN.');

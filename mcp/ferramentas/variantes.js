@@ -22,7 +22,7 @@ function estado(ctx, p) {
            codigos: VR.codigos(s || {}, v),
            variantes: d.variantes.map(x => ({ id: x.id, nome: x.nome, codigo: x.codigo, nomeCatalogo: x.nomeCatalogo || '',
              suprimidos: x.suprimidos.map(r => r.ref), ativa: Boolean(v && v.id === x.id) })),
-           regra: 'PCB virgem = código da PCB (a mesma em todas as variantes); PCB montada = código da PCB na padrão, o da variante quando há uma ativa' };
+           regra: 'a variante é um equipamento (código = o do equipamento, no quadro da folha). Na padrão: PCB montada e PCB virgem = código da PCB. Com uma variante ativa (1.89.0): PCB montada = <código da placa> <NOME DA VARIANTE> e a PCB virgem NÃO vai ao Odoo (é a do projeto padrão)' };
 }
 function historico(p, mud) {
   try {

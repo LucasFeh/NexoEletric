@@ -9,6 +9,7 @@ PCB montada e a virgem pelos codigos certos; o historico diz quem suprimiu o que
 
     python tests/test_variantes.py
 """
+import base64
 import json
 import os
 import shutil
@@ -34,6 +35,8 @@ FORA = {'id': 'u-fora', 'login': 'fora', 'nome': 'Fabio Fora', 'admin': False}
 VISU = {'id': 'u-dono', 'login': 'dono', 'nome': 'Davi Dono', 'admin': False, 'visualizador': True, 'funcao': 'visualizador'}
 
 PLACA = 'PAEL-DI261940'
+# um PNG de 1x1 (as fotos 3D do envio)
+PNG = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4//8/AAX+Av6nNYGEAAAAAElFTkSuQmCC")
 CAB = ('var schematic = {\n"format":"schmirror-v2",\n"project":"P1",\n"units":"mil",\n'
        '"params":"CodigoDaPlaca=%s;NomeDaPlaca=PLACA ADAPTADORA ENCODER LINEAR;CodigoDoEquipamento=EQ-DI261000;'
        'NomeDoEquipamento=ENCODER;Revisao=REV.A",\n"items":[\n' % PLACA)
@@ -101,6 +104,12 @@ class Variantes(unittest.TestCase):
         self.assertIn('já é da variante "Sem timer"', r.get_json()['error'])
         r = self.post('/api/variantes/criar', nome='sem TIMER', codigo='PX-DI1')
         self.assertEqual(r.status_code, 409, 'nome repetido')
+        r = self.post('/api/variantes/criar', nome='', codigo='PX-DI1')
+        self.assertEqual(r.status_code, 400, '1.89.0: o nome da variante e obrigatorio')
+        # 1.89.0: o equipamento do projeto padrao nao pode ser o da variante
+        r = self.post('/api/variantes/criar', nome='Mesmo equipamento', codigo='eq-di261000')
+        self.assertEqual(r.status_code, 409)
+        self.assertIn('equipamento do projeto padrão', r.get_json()['error'])
         # o arquivo: o formato e a variante
         with open(os.path.join(self.pdir, 'variantes.json'), encoding='utf-8') as f:
             d = json.load(f)
@@ -143,15 +152,33 @@ class Variantes(unittest.TestCase):
         self.assertNotIn('U3', json.dumps(payload['linhas']))
         self.assertIn('R5', json.dumps(payload['linhas']))
         self.assertEqual(payload['codigo_placa'], PLACA)
-        self.assertEqual(payload['pcb_montada'], {'codigo': 'PAELST-DI261951'})
+        # 1.89.0: a montada da variante = o codigo da placa + o nome da variante; a virgem nao vai
+        self.assertEqual(payload['pcb_montada'], {'codigo': PLACA + ' SEM TIMER'})
+        self.assertEqual(VR.montada_da_variante(PLACA, ' sem  timer '), PLACA + VR.SEPARADOR_MONTADA + 'SEM TIMER')
         self.assertEqual(payload['variante'], {'nome': 'Sem timer', 'codigo': 'PAELST-DI261951'})
         self.assertEqual(payload['_suprimidos'], ['U3'])
         self.assertTrue(payload['uid_externo'].startswith('altium:P1-PAELST-DI261951:'), payload['uid_externo'])
         limpo = OL.payload_limpo(payload)
         self.assertNotIn('_suprimidos', limpo)
         os.makedirs(os.path.join(self.tmp, 'Projects', 'P1', 'Renders'), exist_ok=True)
+        with open(os.path.join(self.tmp, 'Projects', 'P1', 'Renders', OL.RENDERS['virgem']), 'wb') as f:
+            f.write(base64.b64decode(PNG))
+        with open(os.path.join(self.tmp, 'Projects', 'P1', 'Renders', OL.RENDERS['montada']), 'wb') as f:
+            f.write(base64.b64decode(PNG))
         com = OL.anexa_imagens(limpo, 'P1', self.tmp)
-        self.assertEqual(com['pcb_virgem'], {'quantidade': 1, 'codigo': PLACA})
+        self.assertNotIn('pcb_virgem', com, 'variante: a lista vai sem a PCB virgem (nem a foto dela)')
+        self.assertIn('imagem_montada', com, 'a foto da montada vai')
+        # na padrao: a virgem vai, com o codigo da PCB e a foto
+        self.assertEqual(self.post('/api/variantes/ativar', id=None).status_code, 200)
+        root_os, OS.ROOT = OS.ROOT, self.tmp
+        try:
+            p0, erro, st = OS._prepara({'projeto': 'P1', 'revisao': 'A'})
+        finally:
+            OS.ROOT = root_os
+        self.assertEqual(p0['pcb_montada'], {'codigo': PLACA})
+        c0 = OL.anexa_imagens(OL.payload_limpo(p0), 'P1', self.tmp)
+        self.assertEqual((c0['pcb_virgem']['codigo'], c0['pcb_virgem']['quantidade'], bool(c0['pcb_virgem'].get('imagem'))), (PLACA, 1, True))
+        self.assertEqual(self.post('/api/variantes/ativar', id=v['id']).status_code, 200)
         # Neoden/BOM da tela: a mesma marca (o HubCore.dnpRefs le o dnp do esquema aplicado)
         apl = VR.aplica(H.load_var_file(os.path.join(d, 'schematic.js')), VR.ativa(d))
         self.assertEqual(OL.dnp_refs(apl), {'U3'})
@@ -241,7 +268,8 @@ class Variantes(unittest.TestCase):
         self.assertEqual(e['codigos']['montada'], PLACA, 'a padrao ativa: a montada e a PCB')
         self.post('/api/variantes/ativar', id=v['id'])
         e = self.c.get('/api/variantes?projeto=P1').get_json()
-        self.assertEqual((e['ativa'], e['codigos']['montada'], e['codigos']['virgem']), (v['id'], 'PAELST-DI261951', PLACA))
+        self.assertEqual((e['ativa'], e['codigos']['montada'], e['codigos']['virgem'], e['codigos']['virgemVai'], e['codigos']['equipamento']),
+                         (v['id'], PLACA + ' SEM TIMER', PLACA, False, 'PAELST-DI261951'))
         # a ativa e desta maquina: o arquivo comeca com ponto (fora do NexoBD e do HTTP); o variantes.json viaja
         self.assertTrue(os.path.exists(os.path.join(self.pdir, '.variante-ativa.json')))
         idx = H.build_index(self.tmp)['projects'][0]

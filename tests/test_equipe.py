@@ -377,8 +377,40 @@ class Visualizador(Base):
     def barrado(self, r, rota):
         self.assertEqual(r.status_code, 403, (rota, r.status_code, r.get_data(as_text=True)[:200]))
         j = r.get_json()
-        self.assertEqual((j['codigo'], j['error']), ('sem_permissao', MSG_VIS), rota)
+        msg = equipe.MSG_SO_ADMIN if equipe.so_admin('POST', rota, {}) else MSG_VIS     # 1.89.0: apagar da biblioteca
+        self.assertEqual((j['codigo'], j['error']), ('sem_permissao', msg), rota)
         return j
+
+    def test_apagar_da_biblioteca_so_o_admin(self):
+        """1.89.0 (pedido do dono: 'sim so pro admin'): apagar componente local e excluir valor do almox (com confirmar, e o
+        desfazer; tambem o apagar dos duplicados e dos fora) so o administrador; comum, visualizador e sem login: 403; a
+        previa (sem confirmar, nao grava) continua livre. Rotas de mentira atras do mesmo before_request: nada encosta na
+        Libs/ de verdade."""
+        app = Flask(__name__)
+        equipe.registra_rotas(app, self.tmp)
+        rotas = ['/api/locais/x1/apagar', '/api/symbols/almox-excluir', '/api/symbols/almox-excluir/desfazer',
+                 '/api/symbols/almox-duplicados', '/api/symbols/almox-fora']
+        for i, rr in enumerate(rotas):
+            app.add_url_rule(rr, 'falsa%d' % i, lambda: {'ok': True, 'passou': True}, methods=['POST'])
+        c = app.test_client()
+        apagar = [(r, {'confirmar': True}) for r in rotas]
+        for u in (DONO, VISUAL, None):
+            self.como(u)
+            equipe.esquece_sessao()
+            for rota, corpo in apagar:
+                r = c.post(rota, json=corpo)
+                self.assertEqual(r.status_code, 403, (u and u['login'], rota))
+                self.assertEqual((r.get_json()['codigo'], r.get_json()['error']), ('sem_permissao', equipe.MSG_SO_ADMIN))
+        # a previa: o usuario comum pergunta (sem confirmar); o visualizador continua barrado como na 1.87.0
+        self.como(DONO)
+        equipe.esquece_sessao()
+        for rota in rotas[1:2] + rotas[3:]:
+            self.assertEqual(c.post(rota, json={'familia': 'X', 'componente': 'Y'}).status_code, 200, rota)
+        self.como(ADMIN)
+        equipe.esquece_sessao()
+        for rota, corpo in apagar:
+            r = c.post(rota, json=corpo)
+            self.assertEqual((r.status_code, r.get_json().get('passou')), (200, True), rota)
 
     def test_funcao_do_hub(self):
         u = equipe.publico(VISUAL)

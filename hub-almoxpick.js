@@ -484,8 +484,12 @@ if (typeof document !== 'undefined') document.addEventListener('keydown', e => {
 
    O `io` e o adaptador da tela que chamou: a vista Esquema tem HubDialog e HubIO, a aba
    Biblioteca do hub tem os proprios. Assim o fluxo (e o texto da pergunta) existe UMA vez. */
+/* 1.89.0: só o administrador do Nexo Hub apaga da biblioteca ('' = pode; hub-equipe.js » motivoSoAdmin) */
+const motivoSoAdmin = () => { try { const E = (typeof window !== 'undefined' && window.HubEquipe) || null; return E && E.motivoSoAdmin ? E.motivoSoAdmin() : ''; } catch (_) { return ''; } };
 async function excluirValor(alvo, io){
   const corpo = { familia: alvo.familia, componente: alvo.componente };
+  const naoAdmin = motivoSoAdmin();
+  if (naoAdmin){ io.toast(naoAdmin, 'warn', 7000); return false; }
   let previa;
   try {
     previa = await io.post('/api/symbols/almox-excluir', corpo);
@@ -598,7 +602,7 @@ function renderValores(box, g, opts){
     if (o.onExcluir && !it.local) b.oncontextmenu = ev => {
       ev.preventDefault(); ev.stopPropagation();
       menu(ev.clientX, ev.clientY, it.rotulo, [
-        { rotulo: 'Apagar da biblioteca…', perigo: true, onEscolher: () => o.onExcluir(it, g) },
+        { rotulo: 'Apagar da biblioteca…', perigo: true, off: motivoSoAdmin() || undefined, onEscolher: () => o.onExcluir(it, g) },
       ]);
     };
     /* o "Odoo ↗" ao lado da linha, nunca dentro: a linha é um <button> (hub-odoolink » faixa).

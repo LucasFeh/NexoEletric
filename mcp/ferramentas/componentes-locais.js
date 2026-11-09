@@ -155,9 +155,13 @@ module.exports = {
     },
     {
       nome: 'local_apagar', titulo: 'Apagar um componente local',
-      descricao: 'Apaga um componente local. Os esquemas que já o usam ficam com o símbolo em quadrado vermelho: só apague o que ninguém colocou (ou troque antes pelo do almoxarifado).',
+      descricao: 'Apaga um componente local — SÓ o administrador do Nexo Hub (1.89.0; usuário comum, visualizador e sem login são recusados). Os esquemas que já o usam ficam com o símbolo em quadrado vermelho: só apague o que ninguém colocou (ou troque antes pelo do almoxarifado).',
       entrada: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
-      executa: async (a, ctx) => { await chama(ctx, '/api/locais/' + encodeURIComponent(a.id) + '/apagar', {}); return { apagado: a.id }; },
+      executa: async (a, ctx) => {
+        /* 1.89.0 (pedido do dono: "sim só pro admin"): o hub barra também (tools/rotas/equipe.py » recusa_so_admin) */
+        const s = await require('../lib/equipe.js').sessao(true);
+        if (!(s && s.usuario && s.usuario.admin)) throw new ErroMcp('Só o administrador do Nexo Hub apaga componentes da biblioteca', { codigo: 'sem_permissao' });
+        await chama(ctx, '/api/locais/' + encodeURIComponent(a.id) + '/apagar', {}); return { apagado: a.id }; },
     },
     {
       nome: 'local_integrar', titulo: 'Integrar os locais que o Odoo já criou',

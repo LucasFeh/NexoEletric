@@ -357,10 +357,12 @@ function pintaLista(payload, recibo){
   }
   /* 1.88.0: a PCB MONTADA e a PCB VIRGEM pelo código da PCB (o equipamento só dá o nome no quadro da folha); com uma
      variante de projeto ativa, a montada é a da variante e os suprimidos dela não vão (odoolista.monta_payload) */
+  /* 1.89.0: com a variante, a montada é "<código da placa> <NOME DA VARIANTE>" e a virgem não vai (variantes.py » codigos) */
   if (payload && payload.pcb_montada){
     const v = payload.variante;
-    avisos.push(['ok', 'PCB montada: ' + (payload.pcb_montada.codigo || '—') + ' · PCB virgem: ' + (payload.codigo_placa || '—')
-      + (v ? ' — variante "' + v.nome + '" (' + v.codigo + ')' : ' — variante padrão (todos montados)')
+    avisos.push(['ok', 'PCB montada: ' + (payload.pcb_montada.codigo || '—') + ' · PCB virgem: '
+      + (v ? 'não enviada (variante — a placa virgem é a do projeto padrão)' : (payload.codigo_placa || '—'))
+      + (v ? ' — variante "' + v.nome + '" (equipamento ' + v.codigo + ', só no quadro da folha)' : ' — variante padrão (todos montados)')
       + ((payload._suprimidos || []).length ? '; suprimidos na variante: ' + payload._suprimidos.join(', ') : '') + '.']);
   } else if (payload){
     avisos.push(['', 'Projeto sem código de placa: a PCB montada e a virgem vão sem código (o Odoo usa o nome do projeto). '
@@ -789,9 +791,14 @@ function pintaFotos(j){
   const im = (j && j.imagens) || {};
   if (!j || (!j.placa && !im.montada && !im.virgem)) return;
   box.append(el('span', null, 'Fotos 3D que vão junto:'));
+  /* 1.89.0: com a variante, a foto da placa virgem não vai (a virgem não é enviada) */
+  const naVariante = Boolean((ST.conferido && ST.conferido.variante) || (ST.previa && ST.previa.variante));
   for (const [t, rot] of [['montada', 'placa montada'], ['virgem', 'placa virgem']]) {
     const f = im[t], s = el('span', 'ft');
-    if (f) {
+    if (t === 'virgem' && naVariante) {
+      s.append(el('span', 'vazia', 'não vai'), el('span', null, 'placa virgem: não enviada (variante)'));
+      s.title = 'variante de projeto: a lista vai sem a PCB virgem (a virgem é a do projeto padrão)';
+    } else if (f) {
       const img = el('img');
       img.src = '/' + f.arquivo.split('/').map(encodeURIComponent).join('/') + '?t=' + encodeURIComponent((f.gerado || '') + fotosVer);
       img.alt = rot;

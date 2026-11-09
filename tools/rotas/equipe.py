@@ -351,8 +351,48 @@ def recusa_visualizador(s=None):
     return None
 
 
-def recusa_rota(metodo, caminho, s=None):
-    """o before_request: None = segue; senao o corpo 403 (so POST de ROTAS_EDICAO, so para o visualizador)"""
+# 1.89.0 (pergunta ao dono: "componente local e valor do Almox ainda podem ser apagados por qualquer usuario logado;
+# deixo so para o admin?" -- "sim so pro admin"): APAGAR da biblioteca e so do administrador do Nexo Hub. O componente
+# local (/api/locais/<id>/apagar) e o valor do almoxarifado: o /almox-excluir (e o "apagar os duplicados" e o "apagar os
+# fora", que tambem tiram valores) COM `confirmar` -- a previa, sem `confirmar`, nao grava e continua livre -- e o
+# /almox-excluir/desfazer. Usuario comum, visualizador e sem login: 403 sem_permissao.
+MSG_SO_ADMIN = 'Só o administrador do Nexo Hub apaga componentes da biblioteca'
+ROTAS_SO_ADMIN = re.compile(r'^/api/(?:locais/[^/]+/apagar|symbols/almox-excluir/desfazer)/?$')
+ROTAS_SO_ADMIN_CONFIRMAR = re.compile(r'^/api/symbols/(?:almox-excluir|almox-duplicados|almox-fora)/?$')
+
+
+def eh_admin(u):
+    return bool(u) and (bool(u.get('admin')) or funcao_de(u) == 'admin')
+
+
+def recusa_so_admin(s=None):
+    """None = quem esta logado e o administrador do Nexo Hub; senao o corpo 403 (1.89.0: apagar da biblioteca)"""
+    s = s or sessao(forcar=True)
+    u = s.get('usuario') if s.get('modo') == 'login' else None
+    if eh_admin(u):
+        return None
+    return {'ok': False, 'codigo': 'sem_permissao', 'error': MSG_SO_ADMIN, 'soAdmin': True,
+            'visualizador': bool(u and eh_visualizador(u))}
+
+
+def so_admin(metodo, caminho, corpo=None):
+    """a rota (com o corpo) e um APAGAR da biblioteca? corpo = dict ou fn() -> dict"""
+    if metodo != 'POST':
+        return False
+    caminho = caminho or ''
+    if ROTAS_SO_ADMIN.match(caminho):
+        return True
+    if ROTAS_SO_ADMIN_CONFIRMAR.match(caminho):
+        c = corpo() if callable(corpo) else corpo
+        return bool((c or {}).get('confirmar'))
+    return False
+
+
+def recusa_rota(metodo, caminho, s=None, corpo=None):
+    """o before_request: None = segue; senao o corpo 403 (so POST de ROTAS_EDICAO, so para o visualizador; 1.89.0: e o
+    apagar da biblioteca, so para o admin)"""
+    if so_admin(metodo, caminho, corpo):
+        return recusa_so_admin(s)
     if metodo != 'POST' or not ROTAS_EDICAO.match(caminho or ''):
         return None
     return recusa_visualizador(s)
@@ -853,7 +893,7 @@ def registra_rotas(app, root, h=None):
     # o que nao e dele) ou de quem for
     @app.before_request
     def _barra_visualizador():
-        nao = recusa_rota(request.method, request.path)
+        nao = recusa_rota(request.method, request.path, corpo=lambda: request.get_json(silent=True) or {})
         if nao:
             return nao, 403
 

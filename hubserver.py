@@ -2302,6 +2302,11 @@ if __name__ == '__main__':
     configura_escuta(args.host)
     threading.Thread(target=_watcher, daemon=True).start()
     nexohub_gate.inicia(_hub_mudou)
+    # 1.89.0: o gravador da fila do catalogo (so com o hub no ar de verdade; importado por teste, nao)
+    try:
+        _projnovo.inicia_gravador(ROOT)
+    except Exception as _e:        # noqa: BLE001
+        print('AVISO: gravador da fila do catalogo desligado (%s)' % _e)
     print('NexoEletric:')
     print('  http://127.0.0.1:%d' % args.port)
     ip = _lan_ip() if _ESCUTA_REDE else None

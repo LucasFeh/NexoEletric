@@ -442,6 +442,8 @@ async function abreDups(){
 }
 async function apagaAntigos(){
   const io = ioDaCasca();
+  /* 1.89.0: só o administrador do Nexo Hub apaga da biblioteca (o servidor confere de novo) */
+  { const E = typeof window !== 'undefined' && window.HubEquipe; const nao = E && E.motivoSoAdmin ? E.motivoSoAdmin() : ''; if (nao){ aviso(nao, 'warn'); return; } }
   const post = io ? io.post : async (url, body) => (await fetch(url, { method: 'POST',
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
   let p;

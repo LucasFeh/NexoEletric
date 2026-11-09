@@ -333,6 +333,9 @@ function pintaPe(){
   if (M.c){
     const a = btn(M.apagando ? 'Confirmar: apagar' : 'Apagar', 'btn-ghost cl-apagar' + (M.apagando ? ' confirma' : ''), apagar,
       'Apaga este componente local. Os esquemas que o usam ficam com o quadrado vermelho.');
+    /* 1.89.0: só o administrador do Nexo Hub apaga */
+    const naoAdmin = motivoSoAdmin();
+    if (naoAdmin){ a.disabled = true; a.title = naoAdmin; }
     pe.append(a);
   }
   if (M.passo > 0) pe.append(btn('Voltar', 'btn-ghost', () => vai(M.passo - 1)));
@@ -895,8 +898,11 @@ async function salvar(conferir){
   if (fn) fn(res);
 }
 
+/* 1.89.0: só o administrador do Nexo Hub apaga da biblioteca ('' = pode; hub-equipe.js » motivoSoAdmin) */
+const motivoSoAdmin = () => { try { const E = (typeof window !== 'undefined' && window.HubEquipe) || null; return E && E.motivoSoAdmin ? E.motivoSoAdmin() : ''; } catch (_) { return ''; } };
 async function apagar(){
   if (!M || !M.c || M.ocupado) return;
+  if (motivoSoAdmin()) return toast(motivoSoAdmin(), 'warn');
   if (!M.apagando){ M.apagando = true; pintaPe(); setTimeout(() => { if (M && M.apagando){ M.apagando = false; pintaPe(); } }, 4000); return; }
   M.ocupado = true; pintaPe();
   const r = await api('/api/locais/' + encodeURIComponent(M.c.id) + '/apagar', {});
@@ -912,6 +918,7 @@ async function apagar(){
 /* APAGAR SEM ABRIR O MODAL (o menu do clique direito na lista): a caixa de confirmar, na cara do modal. Só usa o
    POST de apagar, então funciona mesmo quando a ficha não abre. `aoSalvar(null)` recarrega a lista. */
 function confirmaApagar(o){
+  if (motivoSoAdmin()) return toast(motivoSoAdmin(), 'warn');
   poeCss();
   if (M) fecha(true);
   const fundo = nel('div', 'cl-fundo');

@@ -193,6 +193,10 @@ with io.open(os.path.join(tmp, 'Projects', 'PRJ - TESTE', 'schematic.js'), 'w',
 real_root = H.ROOT
 H.ROOT = S.ROOT = tmp
 cli = H.app.test_client()
+# 1.89.0: apagar da biblioteca e so do administrador do Nexo Hub (tools/rotas/equipe.py >> recusa_so_admin): o teste
+# e o admin, e nao o login de quem roda (o Nexo Hub desta maquina fica de fora)
+import equipe as _eq  # noqa: E402
+_eq._provedor[0] = lambda: {'ok': True, 'logado': True, 'usuario': {'id': 'u-adm', 'login': 'admin', 'nome': 'Ana Admin', 'admin': True, 'funcao': 'admin'}}
 try:
     # ── 1. a previa nao muda arquivo nenhum ──────────────────────────────────
     antes = foto(tmp)

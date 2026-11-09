@@ -54,6 +54,8 @@ const web = require('./lib/web');
 const buildInfo = require('./lib/build-info');
 const { NexoHubSync } = require('./lib/nexohub-sync');
 const armazemNexoBD = require('./lib/armazem');
+// 1.89.0: o gravador da fila do catálogo de produtos (a planilha aberta no Excel não impede cadastrar/editar)
+const { GravadorCatalogo } = require('./lib/gravador-catalogo');
 const conexaoIA = require('./lib/conexao-ia');
 const cascaRust = require('./lib/casca-rust');
 
@@ -73,6 +75,7 @@ const LOG_DIR = path.join(app.getPath('userData'), 'logs');
 const SMOKE = process.env.ALTIUMHUB_SMOKE || '';
 // Projetos, biblioteca e scripts do Altium no NexoBD (lib/armazem.js)
 const armazem = new armazemNexoBD.Armazem({ log, bundle: BUNDLE, python: PYTHON, versao: app.getVersion() });
+const gravadorCatalogo = new GravadorCatalogo({ log: (m) => log.info(m) });
 const ESPERA_PRIMEIRA = 45000;   // quanto a abertura espera a primeira rodada (depois segue sem ela)
 // A janela do NexoEletric em Rust (lib/casca-rust.js, 1.54.0): com ela, este processo e o motor de fundo
 const CASCA_EXE = cascaRust.caminhoDaCasca({ empacotado: EMBUTIDO, resourcesPath: process.resourcesPath });
@@ -269,6 +272,7 @@ function preparaPasta(s) {
 async function subirHub({ porta } = {}) {
   const s = settings.load();
   const ws = preparaPasta(s);
+  gravadorCatalogo.iniciar(ws);
 
   if (noNexoBD(ws)) {
     status('nexobd', 'trazendo os projetos e a biblioteca do Nexo Hub…');
@@ -356,6 +360,7 @@ async function aoCairOHub({ code }) {
 async function bootCascaImpl() {
   const s = settings.load();
   const ws = preparaPasta(s);
+  gravadorCatalogo.iniciar(ws);
   if (noNexoBD(ws)) {
     armazem.iniciar(ws).then((r) => {
       if (r && !r.ok && casca) casca.toast(`Sem conexão com o Nexo Hub (${r.erro}): os projetos e a biblioteca só aparecem com ` +

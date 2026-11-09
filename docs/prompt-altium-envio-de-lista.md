@@ -306,3 +306,35 @@ outro produto montado (o código dela vem do catálogo da casa) sobre a MESMA vi
 variante (`altium:<PROJETO>-<CODIGO DA VARIANTE>:<REV>`). Sem variante, a chave é a de sempre. O código do equipamento
 não vai ao Odoo. O Odoo deve usar `pcb_montada.codigo` para achar/criar a montada e `codigo_placa` para a virgem, no
 lugar do código tirado do nome do projeto (item 5 da seção 10).
+
+### 11.1 A variante de projeto no envio (o hub manda desde o NexoEletric 1.89.0)
+
+Pedido do dono (2026-11-09): "sempre que for subir lista de variante, precisa gerar uma PCB (montada) gera com o codigo
+da placa + nome da variante (precisa por nome da variante) e toda vez que enviar pro odoo, a lista, precisa enviar sem
+criar a PCB virgem, quando for uma variante".
+
+A variante agora é um EQUIPAMENTO do catálogo (o código dela é o do equipamento, que vai só ao quadro da folha) com um
+NOME obrigatório dado pela pessoa. Com uma variante ativa, o payload muda assim:
+
+```python
+payload = {
+    ...
+    'codigo_placa': 'PAEL-DI261940',                      # o código da PCB (continua indo; é a virgem do projeto padrão)
+    'pcb_montada': {'codigo': 'PAEL-DI261940 SEM R1'},    # <código da placa> + ' ' + <NOME DA VARIANTE em maiúsculas>
+    'variante': {'nome': 'Sem R1', 'codigo': 'EQSR-DI261960'},   # o código é o do equipamento: NÃO crie produto com ele
+    # 'pcb_virgem' NÃO vem (nem a foto da placa virgem): a virgem é a do projeto padrão
+}
+```
+
+O Odoo (addon `di_lista_altium`) deve, quando vier `variante`:
+
+1. achar ou criar a **PCB montada** pelo `pcb_montada.codigo` (o código da placa + o nome da variante, como veio: é um
+   produto montado diferente para cada variante);
+2. **não** achar nem criar a PCB virgem (o payload vem sem `pcb_virgem`): a montada da variante usa a mesma virgem da
+   padrão, que já existe no estoque — se o addon quiser pôr a virgem na lista da montada da variante, ele a acha pelo
+   `codigo_placa`, nunca cria;
+3. não usar `variante.codigo` (o equipamento) para produto nenhum.
+
+Sem variante (a padrão) nada muda: `pcb_montada.codigo` = `codigo_placa` e `pcb_virgem` vem como na seção 10. O
+separador entre o código da placa e o nome mora num lugar só no NexoEletric (`tools/rotas/variantes.py` »
+`SEPARADOR_MONTADA`, o mesmo em `hub-variantes.js`).

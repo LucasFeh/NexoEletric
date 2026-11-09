@@ -4,6 +4,86 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.89.0 — 2026-11-09
+
+**O Definir projeto fica só com Placas, ⚠ Código de placa errado e Equipamentos; cadastrar e editar o catálogo não dependem
+mais da planilha estar fechada (fila no NexoBD, várias pessoas ao mesmo tempo); a variante de projeto vira um equipamento
+escolhido num dropdown só, com nome, e vai ao Odoo como "<código da placa> <NOME DA VARIANTE>" sem a PCB virgem.**
+
+- **Definir projeto só com três filtros** (pedido do dono: "sistemas, cabos, acessorios, softwares podem sair, deixa só
+  placa, codigo de placa errado e equipamento no definir"): **Todos** (placas + equipamentos), **Placas**,
+  **Equipamentos** e **⚠ Código de placa errado**. Sistemas, cabos, acessórios, software e nacionalização não aparecem na
+  lista, nos filtros, no cadastro novo nem no "mudar categoria" do botão direito (que fica só Placa ↔ Equipamento). A
+  planilha não é reescrita: esses itens continuam nela, e o código repetido continua recusado contra todos. O servidor
+  (`/api/catalogo`) só manda placas e equipamentos; `/api/catalogo/registrar` só aceita PLACA ou EQUIPAMENTO e o
+  `novoGrupo` do editar só placa ou equipamento (400 no resto).
+- **Catálogo com a planilha aberta no Excel** (pedido do dono: "hoje não tá deixando editar se o excel tiver sendo usado,
+  isso n pode acontecer, tem que ser assincrono, mais de uma pessoa pode editar ao mesmo tempo"). Até a 1.88.0 o cadastro e
+  a edição gravavam direto no .xlsx: com o Excel aberto a tela dizia "não registrou: o catálogo está aberto em outro
+  programa (Excel?): feche e tente de novo" (HTTP 503), e com o arquivo em uso exclusivo nem o Definir abria ("EBUSY:
+  resource busy or locked"). Agora (`mcp/lib/catalogo-fila.js`):
+  - **a fila mora no NexoBD**: um item oculto do NexoEletric (categoria interna `nexoeletric`, chave
+    `nexoeletric-catalogo` = `fila-<sha1 do caminho da planilha>`, arquivo `fila.json`). Cadastrar e mudar
+    código/nome/categoria entram nela e **respondem na hora**; cada mudança na fila é uma revisão com `base` (duas
+    máquinas juntas: a segunda leva conflito, relê e refaz a conta);
+  - **código único com gente cadastrando ao mesmo tempo**: o próximo item é o maior entre a planilha e a fila (pendentes,
+    em conflito e os gravados dos últimos 7 dias) + 1, calculado dentro da revisão — duas pessoas nunca ganham o mesmo
+    código nem o mesmo item; nome e código repetidos são recusados contra a planilha + a fila;
+  - **a leitura** é a planilha (ou, se ela estiver travada até para ler, a cópia da última leitura boa em
+    `%TEMP%\NexoEletric-catalogo\ultima-lida-*.xlsx`) com a fila por cima: o item novo aparece já com o código e a marca
+    discreta **"aguardando gravar na planilha"** (o título diz quem pediu, de qual máquina e quando); a edição aparece com
+    o valor novo. Um aviso no Definir diz que a planilha está aberta e que as mudanças gravam sozinhas;
+  - **o gravador**: em toda máquina com o NexoEletric aberto, o app (`electron/lib/gravador-catalogo.js`) tenta a cada
+    45 s (`NEXO_GRAVADOR_S`) e o motor tenta logo depois de cada mudança; só com a planilha livre; **um por vez** (a trava fica na própria fila, com validade de 2 min — máquina
+    que cai não prende ninguém). Relê a planilha, aplica na ordem, grava uma vez, relê para conferir e só então marca como
+    gravado. **Nunca duplica**: o código que já está na planilha conta como gravado; **nunca atropela**: a edição só grava
+    se o valor de agora ainda é o de quando foi pedida — senão vira **conflito** (marcado em vermelho na lista; botão
+    direito: Gravar por cima / Tentar de novo / Descartar). Quem via o valor antigo e tenta editar o mesmo item é avisado
+    na hora ("outra pessoa mudou o nome … agora há pouco"). Falha que não é trava fica na fila com o erro visível;
+  - a tela relê a lista a cada 10 s enquanto houver mudança pendente e avisa quando gravou;
+  - o Novo projeto e o `projeto_criar`/`catalogo_previa` do MCP usam a mesma fila; sem o NexoBD no ar vale o caminho de
+    antes (direto, com a planilha livre);
+  - rotas novas: `GET /api/catalogo/fila`, `POST /api/catalogo/fila/resolver {id, como}`, `POST /api/catalogo/fila/gravar`.
+- **Variante de projeto = um dropdown só** (pedido do dono: "o dropbox pra criar variante, precisa ser só o dropbox …
+  clicar em 'adicionar variante' dentro do dropbox mesmo, e isso abre a tela pra selecionar o equipamento daquela
+  variante, seleciona só o equipamento pq a PCB é a mesma"). A área "Variante de projeto" (esquema e PCB) é só o
+  dropdown: **Padrão (todos montados)**, as variantes e **+ Adicionar variante**; com uma variante escolhida, também
+  **Renomear esta variante…**, **Trocar equipamento desta variante…** e **Apagar esta variante…** (com divisor). Os botões
+  soltos saíram (o Suprimir / Montar fica na barra da vista e no Shift+S). Permissões como antes: a equipe edita; o
+  visualizador e o não convidado só trocam de variante (as ações aparecem apagadas, com o motivo).
+  - **+ Adicionar variante** abre o catálogo do Definir **só com equipamentos** (a PCB é a mesma); o equipamento dá o
+    **código** da variante e em seguida a pessoa dá o **nome** (obrigatório — "precisa por nome da variante"; a sugestão é
+    o nome do equipamento; nome repetido é recusado). Cancelou, nada é criado. O equipamento do projeto padrão e o de
+    outra variante são recusados. Equipamento que não existe: cadastra ali mesmo (só Equipamento), pela fila.
+  - Com a variante ativa, o campo **EQUIPAMENTO** do quadro da folha mostra o código do equipamento **da variante**; a
+    linha "VARIANTE …" saiu do quadro (a barra da vista diz o nome); **PLACA** continua o código da PCB.
+  - Variantes da 1.88.0 (nome livre, código de qualquer grupo) continuam abrindo como estão.
+- **Lista do Odoo com variante** (pedido do dono: "sempre que for subir lista de variante, precisa gerar uma PCB
+  (montada) gera com o codigo da placa + nome da variante … e toda vez que enviar pro odoo, a lista, precisa enviar sem
+  criar a PCB virgem, quando for uma variante"): com a variante ativa, `pcb_montada.codigo` = **"<código da placa>
+  <NOME DA VARIANTE>"** (ex. "PAEL-DI261940 SEM R1"; o separador mora num lugar só: `tools/rotas/variantes.py` »
+  `SEPARADOR_MONTADA`, o mesmo em `hub-variantes.js`) e o payload vai **sem `pcb_virgem`** e sem a foto da placa virgem
+  (a tela do envio diz "PCB virgem: não enviada (variante — a placa virgem é a do projeto padrão)"). Na padrão, como
+  antes: montada e virgem com o código da placa (virgem = código da PCB). O equipamento da variante só vai ao quadro,
+  nunca ao Odoo. Isso substitui a regra da 1.88.0 (montada = código da variante). `docs/prompt-altium-envio-de-lista.md`
+  §11.1 conta ao addon `di_lista_altium`.
+- **Apagar da biblioteca só pelo administrador** (pergunta ao dono: "componente local e valor do Almox ainda podem ser
+  apagados por qualquer usuário logado; deixo só para o admin?" — "sim só pro admin"): apagar componente local
+  (`POST /api/locais/<id>/apagar`, o `local_apagar` do MCP) e excluir valor do almoxarifado (`/api/symbols/almox-excluir`
+  com `confirmar`, o `/almox-excluir/desfazer` e também o apagar dos duplicados e dos "fora" com `confirmar`) são só do
+  **administrador do Nexo Hub**: usuário comum, visualizador e sem login levam 403 `sem_permissao` "Só o administrador do
+  Nexo Hub apaga componentes da biblioteca" (o before_request de `tools/rotas/equipe.py` » `recusa_so_admin`, que vale
+  também para o que o Rust repassa). A prévia (sem `confirmar`, não grava) continua livre. Na tela, "Apagar" da ficha do
+  componente local, "Apagar componente local…" do botão direito, "Apagar da biblioteca…" do almoxarifado e os "apagar
+  os antigos/os fora" ficam desligados com o motivo para quem não é admin (`HubEquipe.motivoSoAdmin`).
+- Testes: `tests/test-catalogo-fila.js` (novo: Excel aberto, duas "máquinas" em processos ao mesmo tempo sem código
+  repetido, gravador único com trava e trava vencida, edição concorrente com conflito, arquivo exclusivo lendo a cópia,
+  erro que não é trava, descartar, sem NexoBD), `electron/test/gravador-catalogo.test.js` (novo), `tests/nexohub-falso.js` (criar categoria), `test_projeto_novo.py`
+  (Definir só com placas e equipamentos), `test_variantes.py` e `test-variantes.js` (equipamento do projeto recusado, nome
+  obrigatório, quadro com o equipamento da variante, montada = código + nome e sem virgem; na padrão, os dois),
+  `test-schtemplate.js` (o quadro com a variante), `test_equipe.py` e `test_componentes_locais.py` (apagar só o admin;
+  comum, visualizador e sem login 403; a prévia livre) e os `test_almox_*` rodando como admin.
+
 ## 1.88.0 — 2026-11-09
 
 **A árvore da esquerda vira o controle de PCB, o catálogo fica com Placas e Equipamentos (mais as categorias próprias) e

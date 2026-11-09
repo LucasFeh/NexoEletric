@@ -13,11 +13,24 @@ schematic.js): codigo da placa, arquivo SCH-DI.., nome, quem iniciou e a data.
 
 Rotas:
   GET  /api/projeto/novo/previa?nome=&sigla=&tipo=  -> {ok, proximo, ano, sigla, codigo, ultimo, arquivo}
-  GET  /api/catalogo                           -> {ok, itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo}], proximo, ano}
-  POST /api/catalogo/registrar {tipo, nome, cliente?, vinculo?, sigla?} -> {ok, item, codigo, ...} (409: codigo ou nome repetido)
-  POST /api/catalogo/editar {item, codigo, novoCodigo?, novoNome?, novoGrupo?}  -> {ok, item, codigo, nome, tipo, grupo}
-       (409: codigo repetido ou placa sem o P; novoGrupo = placa|equipamento|sistema|cabo|software|acessorio|
-       nacionalizacao -- 1.88.0: "produto" virou equipamento --, grava na coluna TIPO)
+  GET  /api/catalogo                           -> {ok, itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo, fila?}],
+       categorias, proximo, ano, fila:{ligada, pendentes, conflitos, travada, copia, gravando}}
+       1.89.0 (pedido do dono, 2026-11-09: "sistemas, cabos, acessorios, softwares podem sair, deixa so placa, codigo de
+       placa errado e equipamento no definir"): so PLACAS e EQUIPAMENTOS (os outros continuam na planilha, so nao vem).
+  POST /api/catalogo/registrar {tipo: PLACA|EQUIPAMENTO, nome, cliente?, vinculo?, sigla?}
+       -> {ok, item, codigo, ..., pendente, fila:{id, estado, erro}} (409: codigo ou nome repetido)
+  POST /api/catalogo/editar {item, codigo, nome?, tipo?, novoCodigo?, novoNome?, novoGrupo?}
+       -> {ok, item, codigo, nome, tipo, grupo, pendente, fila} (409: codigo repetido, placa sem o P, ou outra pessoa
+       mudou antes -- conflito; novoGrupo = placa|equipamento, grava na coluna TIPO)
+  1.89.0 (pedido do dono: "hoje nao ta deixando editar se o excel tiver sendo usado, isso n pode acontecer, tem que ser
+  assincrono, mais de uma pessoa pode editar ao mesmo tempo"): cadastrar e editar passam pela FILA DO CATALOGO no NexoBD
+  (mcp/lib/catalogo-fila.js): respondem na hora, a lista ja mostra o valor novo ("aguardando gravar na planilha") e o
+  GRAVADOR grava quando a planilha estiver livre -- uma maquina por vez (a trava fica na propria fila): no app, o
+  electron/lib/gravador-catalogo.js (a cada 45 s; NEXO_GRAVADOR=0 desliga, NEXO_GRAVADOR_S troca o intervalo); o
+  hubserver rodado direto (o servidor da rede) liga o inicia_gravador daqui no __main__.
+  GET  /api/catalogo/fila                      -> {ok, ligada, pendentes, conflitos, trava, ops:[...]}
+  POST /api/catalogo/fila/resolver {id, como: descartar|tentar|por-cima}  -> {ok, ...}
+  POST /api/catalogo/fila/gravar               -> {ok, gravados|travada|nada|ocupado}
   GET  /api/projeto/novo/catalogo?codigo=      -> {ok, achou:{item, nome, cliente, modelo, ...}|null}
   GET  /api/projeto/novo/templates             -> {ok, padrao, templates:[{id, nome, w, h, estilo}]} (os da casa)
   POST /api/projeto/novo {nome, cliente?, vinculo?, sigla?, iniciador?, projeto?, template? ('' = sem template)}
@@ -52,8 +65,81 @@ def _motor(root, entrada):
         raise RuntimeError('o motor do catalogo nao respondeu (%s)' % p.stderr.decode('utf-8', 'replace')[-400:].strip())
     r = json.loads(linhas[-1])
     if not r.get('ok'):
-        raise RuntimeError(r.get('erro') or 'o catalogo recusou')
+        e = RuntimeError(r.get('erro') or 'o catalogo recusou')
+        e.conflito = bool(r.get('conflito'))
+        raise e
     return r
+
+
+# 1.89.0: o Definir projeto so mostra e so cadastra placas e equipamentos
+GRUPOS_DEFINIR = ('placa', 'equipamento')
+TIPOS_DEFINIR = ('PLACA', 'EQUIPAMENTO')
+
+
+def _por():
+    """quem esta logado no Nexo Hub (vai na fila do catalogo: a tela mostra quem cadastrou)"""
+    try:
+        import equipe as _eq
+        u = _eq.sessao()['usuario']
+        return {'nome': u.get('nome', ''), 'login': u.get('login', '')} if u else {}
+    except Exception:                      # noqa: BLE001
+        return {}
+
+
+def so_definir(r):
+    """a lista do motor so com placas e equipamentos (o Definir projeto e as variantes)"""
+    r['itens'] = [i for i in r.get('itens') or [] if i.get('grupo') in GRUPOS_DEFINIR]
+    r['categorias'] = [c for c in r.get('categorias') or [] if c.get('id') in GRUPOS_DEFINIR]
+    return r
+
+
+_gravador = {'thread': None}
+
+
+def gravador_ligado():
+    if os.environ.get('NEXO_GRAVADOR') == '0' or os.environ.get('NEXO_FILA') == '0':
+        return False
+    # catalogo de teste sem NexoBD de teste: a fila fica desligada (catalogo-fila.js >> desligada)
+    return not (os.environ.get('NEXO_CATALOGO') and not os.environ.get('NEXOHUB_URL'))
+
+
+def inicia_gravador(root):
+    """o gravador da fila do catalogo: a cada NEXO_GRAVADOR_S (45) s grava o que esta na fila (de qualquer maquina), se a
+    planilha estiver livre. Uma linha de execucao por processo; quem grava de fato decide o motor (a trava na fila)."""
+    import threading
+    if _gravador['thread'] is not None or not gravador_ligado():
+        return
+    try:
+        periodo = max(3.0, float(os.environ.get('NEXO_GRAVADOR_S') or 45))
+    except ValueError:
+        periodo = 45.0
+
+    def roda():
+        time.sleep(min(periodo, 15.0))
+        while True:
+            try:
+                r = _motor(root, {'acao': 'fila-gravar'})
+                if r.get('gravados') or r.get('conflitos'):
+                    print('[catalogo] fila gravada na planilha: %s gravado(s), %s conflito(s)'
+                          % (r.get('gravados') or 0, r.get('conflitos') or 0), flush=True)
+            except Exception as e:         # noqa: BLE001 -- tenta de novo na proxima
+                print('[catalogo] gravador: %s' % e, flush=True)
+            time.sleep(periodo)
+
+    t = threading.Thread(target=roda, name='catalogo-gravador', daemon=True)
+    _gravador['thread'] = t
+    t.start()
+
+
+def _status_erro(msg, conflito=False):
+    """409 = e do pedido (repetido, placa sem P, outra pessoa mudou antes); 503 = o catalogo/o motor"""
+    if conflito:
+        return 409
+    for t in ('já está no catálogo', 'começar com "P"', 'sigla', 'já é do item', 'inválido', 'vazio', 'categoria',
+              'nada para mudar', 'já é dessa'):
+        if t in msg:
+            return 409
+    return 503
 
 
 def _limpa_param(v):
@@ -112,7 +198,8 @@ def texto_esquema(projeto, codigo, params, template=TEMPLATE, tpl=None):
 
 
 def registra(app, root, h):
-    """h = {'nome_ok': fn(nome), 'proj_id': fn(nome), 'build_index': fn(), 'vazios': fn(nome) -> {arquivo: texto}}"""
+    """h = {'nome_ok': fn(nome), 'proj_id': fn(nome), 'build_index': fn(), 'vazios': fn(nome) -> {arquivo: texto}}
+    (o gravador da fila, inicia_gravador, o hubserver liga no __main__: importado por teste ele nao roda)"""
 
     def livre(nome):
         pdir = os.path.join(root, 'Projects')
@@ -138,33 +225,72 @@ def registra(app, root, h):
         except Exception as e:             # noqa: BLE001
             return {'ok': False, 'error': str(e)}, 503
         r.pop('ok', None)
+        return dict(ok=True, **so_definir(r))
+
+    @app.route('/api/catalogo/fila')
+    def catalogo_fila():
+        """a fila do catalogo (o que ainda vai para a planilha, de todas as maquinas)"""
+        try:
+            r = _motor(root, {'acao': 'fila'})
+        except Exception as e:             # noqa: BLE001
+            return {'ok': False, 'error': str(e)}, 503
+        r.pop('ok', None)
+        return dict(ok=True, **r)
+
+    @app.route('/api/catalogo/fila/resolver', methods=['POST'])
+    def catalogo_fila_resolver():
+        """o que fazer com uma mudanca em conflito: descartar, tentar de novo ou gravar por cima (edicao)"""
+        data = request.get_json(silent=True) or {}
+        try:
+            r = _motor(root, {'acao': 'fila-resolver', 'id': data.get('id') or '', 'como': data.get('como') or '',
+                              'por': _por()})
+        except Exception as e:             # noqa: BLE001
+            return {'ok': False, 'error': str(e)}, 409
+        r.pop('ok', None)
+        return dict(ok=True, **r)
+
+    @app.route('/api/catalogo/fila/gravar', methods=['POST'])
+    def catalogo_fila_gravar():
+        """grava agora o que esta na fila (o gravador faz sozinho a cada 45 s)"""
+        try:
+            r = _motor(root, {'acao': 'fila-gravar'})
+        except Exception as e:             # noqa: BLE001
+            return {'ok': False, 'error': str(e)}, 503
+        r.pop('ok', None)
         return dict(ok=True, **r)
 
     @app.route('/api/catalogo/registrar', methods=['POST'])
     def catalogo_registrar():
-        """um item novo no catalogo (placa, equipamento ou produto), com o codigo no padrao da casa"""
+        """um item novo no catalogo (placa ou equipamento), com o codigo no padrao da casa -- pela fila (1.89.0)"""
         data = request.get_json(silent=True) or {}
         nome = ' '.join(str(data.get('nome') or '').split())
         tipo = ' '.join(str(data.get('tipo') or '').split()).upper()
         if not nome:
             return {'ok': False, 'error': 'falta o nome'}, 400
         if not tipo:
-            return {'ok': False, 'error': 'falta o tipo (placa, equipamento...)'}, 400
+            return {'ok': False, 'error': 'falta o tipo (placa ou equipamento)'}, 400
+        if tipo not in TIPOS_DEFINIR:
+            return {'ok': False, 'error': 'o Definir projeto cadastra só placa ou equipamento (não %s)' % tipo}, 400
         try:
             r = _motor(root, {'acao': 'registra', 'nome': nome, 'tipo': tipo, 'cliente': data.get('cliente') or '',
-                              'vinculo': data.get('vinculo') or '', 'sigla': data.get('sigla') or ''})
+                              'vinculo': data.get('vinculo') or '', 'sigla': data.get('sigla') or '', 'por': _por()})
         except Exception as e:             # noqa: BLE001
             msg = str(e)
-            return {'ok': False, 'error': msg}, 409 if ('já está no catálogo' in msg or 'começar com "P"' in msg
-                                                      or 'sigla' in msg) else 503
+            return {'ok': False, 'error': msg}, _status_erro(msg, getattr(e, 'conflito', False))
         r.pop('ok', None)
         return dict(ok=True, **r)
 
     @app.route('/api/catalogo/editar', methods=['POST'])
     def catalogo_editar():
-        """muda o codigo ou o nome de um item do catalogo (o botao direito do Definir projeto)"""
+        """muda o codigo, o nome ou a categoria de um item do catalogo (o botao direito do Definir projeto) -- pela fila"""
         data = request.get_json(silent=True) or {}
-        ent = {'acao': 'edita', 'item': data.get('item'), 'codigo': data.get('codigo') or ''}
+        ent = {'acao': 'edita', 'item': data.get('item'), 'codigo': data.get('codigo') or '', 'por': _por()}
+        # o que a pessoa viu: se outra pessoa mudou antes, recusa na hora (conflito)
+        for k in ('nome', 'tipo'):
+            if data.get(k) is not None:
+                ent[k] = data.get(k)
+        if data.get('novoGrupo') is not None and str(data.get('novoGrupo')) not in GRUPOS_DEFINIR:
+            return {'ok': False, 'error': 'no Definir projeto a categoria é Placa ou Equipamento'}, 400
         if data.get('novoCodigo') is not None:
             ent['novoCodigo'] = data.get('novoCodigo')
         if data.get('novoNome') is not None:
@@ -175,8 +301,7 @@ def registra(app, root, h):
             r = _motor(root, ent)
         except Exception as e:             # noqa: BLE001
             msg = str(e)
-            return {'ok': False, 'error': msg}, 409 if ('já é do item' in msg or 'inválido' in msg or 'vazio' in msg
-                                                      or 'categoria' in msg or 'começar com "P"' in msg) else 503
+            return {'ok': False, 'error': msg}, _status_erro(msg, getattr(e, 'conflito', False))
         r.pop('ok', None)
         return dict(ok=True, **r)
 
@@ -238,11 +363,11 @@ def registra(app, root, h):
                 return {'ok': False, 'error': ruim}, 409
         try:
             r = _motor(root, {'acao': 'registra', 'nome': nome, 'tipo': 'PLACA', 'cliente': data.get('cliente') or '',
-                              'vinculo': data.get('vinculo') or '', 'sigla': data.get('sigla') or ''})
+                              'vinculo': data.get('vinculo') or '', 'sigla': data.get('sigla') or '',
+                              'por': {'nome': iniciador, 'login': (usuario or {}).get('login', '')}})
         except Exception as e:             # noqa: BLE001
             msg = str(e)                   # ja esta no catalogo, ou placa sem o P: e do pedido
-            return {'ok': False, 'error': msg}, 409 if ('começar com "P"' in msg or 'já está no catálogo' in msg
-                                                      or 'sigla' in msg) else 503
+            return {'ok': False, 'error': msg}, _status_erro(msg, getattr(e, 'conflito', False))
         codigo = r['codigo']
         if not projeto:
             projeto = codigo
@@ -271,4 +396,4 @@ def registra(app, root, h):
         if usuario and _eq is not None:
             _eq.evento(d, 'equipe', ['%s criou o projeto (%s) e é o responsável' % (usuario['nome'], codigo)], usuario)
         return {'ok': True, 'id': h['proj_id'](projeto), 'name': projeto, 'codigo': codigo, 'item': r['item'],
-                'linha': r['linha'], 'params': params}
+                'linha': r.get('linha'), 'params': params, 'pendente': bool(r.get('pendente'))}

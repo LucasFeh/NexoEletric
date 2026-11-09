@@ -122,27 +122,59 @@ function linhas(sheetXml, ss) {
 const limpa = s => String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
 
 /* o catálogo lido: {arquivo, itens:[{linha, item, tipo, nome, cliente, modelo, vinculo}], ultimo, proximo, ano} */
-function abre(arq) {
-  arq = arquivo(arq);
-  let buf;
-  try { buf = fs.readFileSync(arq); } catch (e) {
+/* A PLANILHA TRAVADA (1.89.0): o Excel aberto deixa os outros lerem (só não gravarem); um programa com o arquivo em uso
+   exclusivo não deixa nem ler. Toda leitura boa guarda uma cópia em %TEMP%\NexoEletric-catalogo\ultima-lida-*.xlsx, e a
+   leitura que dá EBUSY/EPERM usa essa cópia (c.copia = {arquivo, de}); quem grava (o gravador da fila) pede semCopia. */
+const DIR_COPIA = () => path.join(os.tmpdir(), 'NexoEletric-catalogo');
+const travado = e => /EBUSY|EPERM|EACCES/.test((e && e.code) || '');
+const arqLida = arq => path.join(DIR_COPIA(), 'ultima-lida-' + require('node:crypto').createHash('sha1').update(String(arq).toLowerCase()).digest('hex').slice(0, 12) + '.xlsx');
+function leArquivo(arq, o) {
+  try {
+    const buf = fs.readFileSync(arq);
+    try {
+      const cp = arqLida(arq);
+      let igual = false;
+      try { igual = fs.statSync(cp).size === buf.length && fs.readFileSync(cp).equals(buf); } catch (_) { igual = false; }
+      if (!igual) { fs.mkdirSync(DIR_COPIA(), { recursive: true }); fs.writeFileSync(cp + '.' + process.pid, buf); fs.renameSync(cp + '.' + process.pid, cp); }
+    } catch (_) { /* a cópia é só para quando travar */ }
+    return { buf, copia: null };
+  } catch (e) {
+    if (travado(e) && !(o && o.semCopia)) {
+      const cp = arqLida(arq);
+      try { return { buf: fs.readFileSync(cp), copia: { arquivo: cp, de: fs.statSync(cp).mtime.toISOString() } }; } catch (_) { /* sem cópia */ }
+      throw new Error('o catálogo de produtos (' + arq + ') está aberto em outro programa que não deixa nem ler, e esta máquina ainda não tem uma cópia dele: feche o programa (Excel?) e abra de novo');
+    }
+    if (travado(e)) throw Object.assign(new Error(MSG_EM_USO), { travado: true });
     throw new Error('não consegui abrir o catálogo de produtos (' + arq + '): ' + (e.code === 'ENOENT' ? 'o arquivo ou a pasta da rede não existe (o NAS 192.168.15.31 está ligado e esta máquina entra em "Controle de Projetos"?)' : e.message));
   }
-  const ents = lerZip(buf);
-  const aba = caminhoAba(ents);
-  const ent = ents.find(e => e.nome === aba);
-  if (!ent) throw new Error('o catálogo não tem a planilha ' + aba);
-  const ss = textos((ents.find(e => e.nome === 'xl/sharedStrings.xml') || { dados: Buffer.alloc(0) }).dados.toString('utf8'));
-  const xml = ent.dados.toString('utf8');
-  const L = linhas(xml, ss);
+}
+const MSG_EM_USO = 'o catálogo está aberto em outro programa (Excel?): feche e tente de novo';
+function itensDe(L) {
   const itens = [];
   for (const l of L) {
     const v = k => limpa(l.cel[k] && l.cel[k].v);
     if (!v('E') || !/^\d+$/.test(v('A'))) continue;
     itens.push({ linha: l.r, item: Number(v('A')), tipo: v('B'), nome: v('C'), cliente: v('D'), modelo: v('E'), vinculo: v('F') });
   }
+  return itens;
+}
+/* o = {semCopia}: sem a cópia da última leitura quando o arquivo está travado (o erro leva .travado) */
+function abre(arq, o) {
+  arq = arquivo(arq);
+  const { buf, copia } = leArquivo(arq, o);
+  const ents = lerZip(buf);
+  const aba = caminhoAba(ents);
+  const ent = ents.find(e => e.nome === aba);
+  if (!ent) throw new Error('o catálogo não tem a planilha ' + aba);
+  const ss = textos((ents.find(e => e.nome === 'xl/sharedStrings.xml') || { dados: Buffer.alloc(0) }).dados.toString('utf8'));
+  return refaz({ arquivo: arq, ents, aba, ss, copia, ano: anoDe(new Date()) }, ent.dados.toString('utf8'));
+}
+/* o mesmo catálogo com outro xml da aba (o gravador da fila aplica as mudanças uma a uma, antes de gravar) */
+function refaz(c, xml) {
+  const L = linhas(xml, c.ss);
+  const itens = itensDe(L);
   const ultimo = itens.reduce((m, i) => Math.max(m, i.item), 0);
-  return { arquivo: arq, ents, aba, xml, linhas: L, itens, ultimo, proximo: ultimo + 1, ano: anoDe(new Date()) };
+  return Object.assign({}, c, { xml, linhas: L, itens, ultimo, proximo: ultimo + 1 });
 }
 const anoDe = d => String(d.getFullYear()).slice(-2);
 
@@ -168,9 +200,12 @@ const codigo = (sg, ano, numero) => sg + '-DI' + ano + String(numero).padStart(4
 function previa(o) {
   o = o || {};
   const c = abre(o.arquivo);
+  return previaDe(c, c.itens, c.ultimo, o);
+}
+function previaDe(c, itens, ultimo, o) {
   const sg = o.sigla ? String(o.sigla).toUpperCase().trim() : sigla(o.nome || '', o.tipo);
-  const u = c.itens.find(i => i.item === c.ultimo) || null;
-  return { arquivo: c.arquivo, proximo: c.proximo, ano: c.ano, sigla: sg, codigo: codigo(sg, c.ano, c.proximo),
+  const u = itens.find(i => i.item === ultimo) || null;
+  return { arquivo: c.arquivo, proximo: ultimo + 1, ano: c.ano, sigla: sg, codigo: codigo(sg, c.ano, ultimo + 1),
            ultimo: u && { item: u.item, nome: u.nome, modelo: u.modelo } };
 }
 
@@ -229,15 +264,21 @@ function tipoDoGrupo(g, atual) {
 
 /* o catálogo inteiro, para a tela: {itens:[{item, tipo, grupo, nome, cliente, modelo, vinculo, codigoErrado?}], categorias:[{id,
    rotulo, tipo, n}], ultimo, proximo, ano} */
+function itemDaLista(i) {
+  const g = grupo(i.tipo);
+  const o = { item: i.item, tipo: i.tipo, grupo: g, nome: i.nome, cliente: i.cliente, modelo: i.modelo, vinculo: i.vinculo };
+  if (g === 'placa' && !codigoDePlacaOk(i.modelo)) o.codigoErrado = true;
+  return o;
+}
+/* a lista de um catálogo já lido (crus = os itens da planilha, ou com a fila por cima: catalogo-fila.js) */
+function listaDe(c, crus, ultimo) {
+  const itens = crus.map(i => Object.assign(itemDaLista(i), i.fila ? { fila: i.fila } : {}));
+  const u = ultimo != null ? ultimo : c.ultimo;
+  return { arquivo: c.arquivo, ultimo: u, proximo: u + 1, ano: c.ano, categorias: categoriasDe(itens), itens, copia: c.copia || null };
+}
 function lista(o) {
   const c = abre(o && o.arquivo);
-  const itens = c.itens.map(i => {
-    const g = grupo(i.tipo);
-    const o = { item: i.item, tipo: i.tipo, grupo: g, nome: i.nome, cliente: i.cliente, modelo: i.modelo, vinculo: i.vinculo };
-    if (g === 'placa' && !codigoDePlacaOk(i.modelo)) o.codigoErrado = true;
-    return o;
-  });
-  return { arquivo: c.arquivo, ultimo: c.ultimo, proximo: c.proximo, ano: c.ano, categorias: categoriasDe(itens), itens };
+  return listaDe(c, c.itens);
 }
 
 /* o produto de um código ("PDCD-DI261939", espaços em volta do hífen não contam): {item, nome, cliente, modelo, ...} ou null */
@@ -255,29 +296,31 @@ function busca(o) {
 function emUso(arq) {
   let fd = null;
   try { fd = fs.openSync(arq, 'r+'); return null; } catch (e) {
-    return /EBUSY|EPERM|EACCES/.test(e.code || '') ? 'o catálogo está aberto em outro programa (Excel?): feche e tente de novo' : null;
+    return travado(e) ? MSG_EM_USO : null;
   } finally { if (fd != null) try { fs.closeSync(fd); } catch (_) { /* foi */ } }
 }
 
-/* Registra o produto novo: {nome, tipo ('PLACA'), cliente, vinculo, sigla?, arquivo?}
-   -> {item, codigo, sigla, ano, linha, arquivo, copia} */
-function registra(o) {
+/* O CADASTRO NOVO, em pedaços (1.89.0: a fila do catálogo, mcp/lib/catalogo-fila.js, usa os mesmos):
+   novoRegistro(itens, o, ano, numero) confere e monta o item -- itens = a planilha e, com a fila, o que ainda vai ser
+   gravado de todas as máquinas; acrescenta(c, d) põe a linha no xml da aba (sem gravar). */
+function novoRegistro(itens, o, ano, numero) {
   o = o || {};
   const nome = limpa(o.nome).toUpperCase();
   if (!nome) throw new Error('falta o nome do produto');
   const tipo = limpa(o.tipo || 'PLACA').toUpperCase();
-  const c = abre(o.arquivo);
   const sg = o.sigla ? String(o.sigla).toUpperCase().trim() : sigla(nome, tipo);
   if (!siglaOk(sg)) throw new Error('sigla inválida: ' + sg + ' (letras e números, começando por letra)');
-  const numero = c.proximo, cod = codigo(sg, c.ano, numero);
+  const cod = codigo(sg, ano, numero);
   if (grupo(tipo) === 'placa' && !codigoDePlacaOk(cod)) throw new Error(MSG_PLACA_SEM_P(cod));
-  if (c.itens.some(i => normCod(i.modelo) === cod)) throw new Error('o código ' + cod + ' já está no catálogo');
+  if (itens.some(i => normCod(i.modelo) === cod)) throw new Error('o código ' + cod + ' já está no catálogo');
   /* o mesmo produto duas vezes também não (2026-11-05: "não pode deixar repetir"): mesmo nome no mesmo grupo */
-  const igual = !o.permitirMesmoNome && c.itens.find(i => limpa(i.nome).toUpperCase() === nome && grupo(i.tipo) === grupo(tipo));
+  const igual = !o.permitirMesmoNome && itens.find(i => limpa(i.nome).toUpperCase() === nome && grupo(i.tipo) === grupo(tipo));
   if (igual) throw new Error('"' + nome + '" já está no catálogo com o código ' + igual.modelo + ' (item ' + igual.item + '): use esse');
-  const uso = emUso(c.arquivo);
-  if (uso) throw new Error(uso);
-  /* a linha: a primeira sem MODELO depois do último produto (as de sobra só têm o ITEM repetido) */
+  return { item: numero, codigo: cod, sigla: sg, ano, nome, tipo, cliente: limpa(o.cliente).toUpperCase(), vinculo: limpa(o.vinculo) };
+}
+/* a linha nova no xml (d = o de novoRegistro): a primeira sem MODELO depois do último produto (as de sobra só têm o ITEM
+   repetido), com os estilos e a altura da linha do produto anterior -> {xml, linha} */
+function acrescenta(c, d) {
   const ultimaLinha = c.itens.reduce((m, i) => Math.max(m, i.linha), 2);
   const ref = c.linhas.find(l => l.r === ultimaLinha);
   const r = ultimaLinha + 1;
@@ -290,52 +333,65 @@ function registra(o) {
   };
   const ht = ref && /\bht="([^"]+)"/.exec(ref.xml);
   const linhaXml = '<row r="' + r + '" spans="1:6"' + (ht ? ' ht="' + ht[1] + '" customHeight="1"' : '') + '>'
-    + cel('A', numero, true) + cel('B', tipo) + cel('C', nome) + cel('D', limpa(o.cliente).toUpperCase()) + cel('E', cod) + cel('F', limpa(o.vinculo)) + '</row>';
+    + cel('A', d.item, true) + cel('B', d.tipo) + cel('C', d.nome) + cel('D', d.cliente) + cel('E', d.codigo) + cel('F', d.vinculo) + '</row>';
   let xml = c.xml;
   const existente = c.linhas.find(l => l.r === r);
   if (existente) {
     const outros = Object.keys(existente.cel).filter(k => k !== 'A' && existente.cel[k].v !== '');
     if (outros.length) throw new Error('a linha ' + r + ' do catálogo não está livre (tem ' + outros.join(', ') + '): confira a planilha');
-    xml = xml.replace(existente.xml, linhaXml);
+    xml = xml.replace(existente.xml, () => linhaXml);
   } else {
     const prox = c.linhas.find(l => l.r > r);
-    xml = prox ? xml.replace(prox.xml, linhaXml + prox.xml) : xml.replace('</sheetData>', linhaXml + '</sheetData>');
+    xml = prox ? xml.replace(prox.xml, () => linhaXml + prox.xml) : xml.replace('</sheetData>', () => linhaXml + '</sheetData>');
   }
   /* a dimensão cobre a linha nova */
-  xml = xml.replace(/<dimension ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/, (m, a, b, cc, d) => Number(d) >= r ? m : '<dimension ref="' + a + b + ':' + cc + r + '"/>');
-  const copia = gravaPlanilha(c, xml, cod);
-  return { item: numero, codigo: cod, sigla: sg, ano: c.ano, linha: r, arquivo: c.arquivo, copia, nome, tipo };
+  xml = xml.replace(/<dimension ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/, (m, a, b, cc, dd) => Number(dd) >= r ? m : '<dimension ref="' + a + b + ':' + cc + r + '"/>');
+  return { xml, linha: r };
 }
 
-/* grava a planilha com o xml novo da aba (o resto do .xlsx igual), conferindo que o texto `deveTer` está nela; guarda
-   antes uma cópia em %TEMP%\NexoEletric-catalogo -> o caminho da cópia */
+/* Registra o produto novo DIRETO na planilha: {nome, tipo ('PLACA'), cliente, vinculo, sigla?, arquivo?}
+   -> {item, codigo, sigla, ano, linha, arquivo, copia}. Com a planilha aberta no Excel, recusa (MSG_EM_USO); a fila do
+   catálogo (catalogo-fila.js » registra) é quem não recusa. */
+function registra(o) {
+  o = o || {};
+  const c = abre(o.arquivo);
+  const d = novoRegistro(c.itens, o, c.ano, c.proximo);
+  const uso = emUso(c.arquivo);
+  if (uso) throw Object.assign(new Error(uso), { travado: true });
+  const { xml, linha } = acrescenta(c, d);
+  const copia = gravaPlanilha(c, xml, [d.codigo]);
+  return { item: d.item, codigo: d.codigo, sigla: d.sigla, ano: c.ano, linha, arquivo: c.arquivo, copia, nome: d.nome, tipo: d.tipo };
+}
+
+/* grava a planilha com o xml novo da aba (o resto do .xlsx igual), conferindo que os textos `deveTer` estão nela;
+   guarda antes uma cópia em %TEMP%\NexoEletric-catalogo -> o caminho da cópia. Arquivo em uso: o erro leva .travado */
 function gravaPlanilha(c, xml, deveTer) {
   const ents = c.ents.map(e => e.nome === c.aba ? Object.assign({}, e, { dados: Buffer.from(xml, 'utf8') }) : e);
   const novo = escreverZip(ents);
   /* confere antes de gravar: o .zip novo se lê e tem o produto */
   const conf = lerZip(novo).find(e => e.nome === c.aba);
-  if (!conf || !conf.dados.toString('utf8').includes('>' + escapa(deveTer) + '<')) throw new Error('não consegui montar o catálogo com a mudança');
-  const dirCopia = path.join(os.tmpdir(), 'NexoEletric-catalogo');
+  const txt = conf ? conf.dados.toString('utf8') : '';
+  if (!conf || [].concat(deveTer).some(t => !txt.includes('>' + escapa(t) + '<'))) throw new Error('não consegui montar o catálogo com a mudança');
+  const dirCopia = DIR_COPIA();
   fs.mkdirSync(dirCopia, { recursive: true });
   const copia = path.join(dirCopia, 'catalogo-' + new Date().toISOString().replace(/[:.]/g, '-') + '.xlsx');
-  fs.copyFileSync(c.arquivo, copia);
+  try { fs.copyFileSync(c.arquivo, copia); } catch (e) {
+    if (travado(e)) throw Object.assign(new Error(MSG_EM_USO), { travado: true });
+    throw e;
+  }
   const tmp = path.join(path.dirname(c.arquivo), '~nexo-' + process.pid + '-' + path.basename(c.arquivo));
   fs.writeFileSync(tmp, novo);
   try { fs.renameSync(tmp, c.arquivo); } catch (e) {
     try { fs.unlinkSync(tmp); } catch (_) { /* foi */ }
-    throw new Error(/EBUSY|EPERM|EACCES/.test(e.code || '') ? 'o catálogo está aberto em outro programa (Excel?): feche e tente de novo' : 'não consegui gravar o catálogo: ' + e.message);
+    if (travado(e)) throw Object.assign(new Error(MSG_EM_USO), { travado: true });
+    throw new Error('não consegui gravar o catálogo: ' + e.message);
   }
   return copia;
 }
 
-/* Muda o código (MODELO) ou o nome de um item que já está no catálogo (2026-11-05: "clicar com o lado direito na lista
-   e mudar o código ou o nome do equipamento"): {item, codigo (o de agora, confere que é a mesma linha), novoCodigo?,
-   novoNome?}. Código repetido é recusado, como no registrar. -> {item, codigo, nome, linha, copia} */
-function edita(o) {
-  o = o || {};
-  const c = abre(o.arquivo);
-  const it = c.itens.find(i => i.item === Number(o.item) && normCod(i.modelo) === normCod(o.codigo));
-  if (!it) throw new Error('o item ' + o.item + ' (' + (o.codigo || '?') + ') não está mais no catálogo assim: abra de novo o Definir projeto');
+/* A EDIÇÃO, em pedaços (a fila usa os mesmos): validaEdicao(itens, it, o) confere contra a lista (a planilha e, com a fila,
+   o que está para gravar) -> {codigo?, nome?, tipo?} (só o que muda); mudaLinha(c, it, m) troca as células no xml. */
+function validaEdicao(itens, it, o) {
   const novoCod = o.novoCodigo != null ? limpa(o.novoCodigo).toUpperCase() : null;
   const novoNome = o.novoNome != null ? limpa(o.novoNome) : null;
   let novoTipo = o.novoGrupo != null ? tipoDoGrupo(String(o.novoGrupo), it.tipo) : null;
@@ -343,33 +399,54 @@ function edita(o) {
   if (novoCod === null && novoNome === null && novoTipo === null) throw new Error(o.novoGrupo != null ? 'o item já é dessa categoria' : 'nada para mudar');
   if (novoCod !== null) {
     if (!/^[A-Z0-9][A-Z0-9 ._\/-]*$/.test(novoCod)) throw new Error('código inválido: ' + novoCod);
-    const outro = c.itens.find(i => i !== it && normCod(i.modelo) === normCod(novoCod));
+    const outro = itens.find(i => i !== it && !(i.item === it.item && normCod(i.modelo) === normCod(it.modelo)) && normCod(i.modelo) === normCod(novoCod));
     if (outro) throw new Error('o código ' + novoCod + ' já é do item ' + outro.item + ' (' + outro.nome + ')');
   }
   if (novoNome !== null && !novoNome) throw new Error('o nome não pode ficar vazio');
   /* placa com código sem o P: recusada quando a edição mexe no código ou faz do item uma placa (só o nome, não) */
   if ((novoCod !== null || novoTipo !== null) && grupo(novoTipo !== null ? novoTipo : it.tipo) === 'placa'
       && !codigoDePlacaOk(novoCod !== null ? novoCod : it.modelo)) throw new Error(MSG_PLACA_SEM_P(novoCod !== null ? novoCod : it.modelo));
-  const uso = emUso(c.arquivo);
-  if (uso) throw new Error(uso);
+  const m = {};
+  if (novoCod !== null && novoCod !== it.modelo) m.codigo = novoCod;
+  if (novoNome !== null && novoNome !== it.nome) m.nome = novoNome;
+  if (novoTipo !== null) m.tipo = novoTipo;
+  if (!Object.keys(m).length) throw new Error('nada para mudar');
+  return m;
+}
+function mudaLinha(c, it, m) {
   const linha = c.linhas.find(l => l.r === it.linha);
+  if (!linha) throw new Error('a linha ' + it.linha + ' do item ' + it.item + ' sumiu da planilha');
   let row = linha.xml;
   const troca = (col, v) => {
     const s = linha.cel[col] && linha.cel[col].s;
     const nova = '<c r="' + col + it.linha + '"' + (s ? ' s="' + s + '"' : '') + ' t="inlineStr"><is><t xml:space="preserve">' + escapa(v) + '</t></is></c>';
     const re = new RegExp('<c r="' + col + it.linha + '"(?=[\\s/>])(?:[^>]*?/>|[^>]*?>[\\s\\S]*?</c>)');
-    if (re.test(row)) { row = row.replace(re, nova); return; }
+    if (re.test(row)) { row = row.replace(re, () => nova); return; }
     /* a célula não existia: entra na ordem das colunas */
-    const depois = [...row.matchAll(/<c r="([A-Z]+)\d+"/g)].find(m => m[1] > col);
-    row = depois ? row.replace(depois[0], nova + depois[0]) : row.replace('</row>', nova + '</row>');
+    const depois = [...row.matchAll(/<c r="([A-Z]+)\d+"/g)].find(x => x[1] > col);
+    row = depois ? row.replace(depois[0], () => nova + depois[0]) : row.replace('</row>', () => nova + '</row>');
   };
-  if (novoNome !== null) troca('C', novoNome);
-  if (novoCod !== null) troca('E', novoCod);
-  if (novoTipo !== null) troca('B', novoTipo);
-  const xml = c.xml.replace(linha.xml, row);
-  const copia = gravaPlanilha(c, xml, novoCod !== null ? novoCod : novoNome !== null ? novoNome : novoTipo);
-  const tipo = novoTipo !== null ? novoTipo : it.tipo;
-  return { item: it.item, codigo: novoCod !== null ? novoCod : it.modelo, nome: novoNome !== null ? novoNome : it.nome,
+  if (m.nome != null) troca('C', m.nome);
+  if (m.codigo != null) troca('E', m.codigo);
+  if (m.tipo != null) troca('B', m.tipo);
+  return c.xml.replace(linha.xml, () => row);
+}
+
+/* Muda o código (MODELO), o nome ou a categoria de um item DIRETO na planilha (2026-11-05: "clicar com o lado direito na
+   lista e mudar o código ou o nome do equipamento"): {item, codigo (o de agora, confere que é a mesma linha), novoCodigo?,
+   novoNome?, novoGrupo?}. Código repetido é recusado, como no registrar. -> {item, codigo, nome, tipo, grupo, linha, copia} */
+function edita(o) {
+  o = o || {};
+  const c = abre(o.arquivo);
+  const it = c.itens.find(i => i.item === Number(o.item) && normCod(i.modelo) === normCod(o.codigo));
+  if (!it) throw new Error('o item ' + o.item + ' (' + (o.codigo || '?') + ') não está mais no catálogo assim: abra de novo o Definir projeto');
+  const m = validaEdicao(c.itens, it, o);
+  const uso = emUso(c.arquivo);
+  if (uso) throw Object.assign(new Error(uso), { travado: true });
+  const xml = mudaLinha(c, it, m);
+  const copia = gravaPlanilha(c, xml, [m.codigo != null ? m.codigo : m.nome != null ? m.nome : m.tipo]);
+  const tipo = m.tipo != null ? m.tipo : it.tipo;
+  return { item: it.item, codigo: m.codigo != null ? m.codigo : it.modelo, nome: m.nome != null ? m.nome : it.nome,
            tipo, grupo: grupo(tipo), linha: it.linha, copia };
 }
 
@@ -392,22 +469,27 @@ function paramsTemplate(o) {
   return p;
 }
 
-module.exports = { PADRAO, abre, previa, registra, edita, busca, lista, grupo, tipoDoGrupo, CATEGORIAS, categoriasDe, codigoDePlacaOk, sigla, codigo, paramsTemplate, lerZip, escreverZip };
+module.exports = { PADRAO, MSG_EM_USO, abre, refaz, previa, previaDe, registra, edita, busca, lista, listaDe, novoRegistro, acrescenta, validaEdicao, mudaLinha, gravaPlanilha, emUso, normCod, grupo, tipoDoGrupo, CATEGORIAS, categoriasDe, codigoDePlacaOk, sigla, codigo, paramsTemplate, lerZip, escreverZip };
 
 /* ============================== a linha de comando ==============================
-   node mcp/lib/catalogo.js --cli  < {acao:'previa'|'registra'|'busca'|'lista', nome, tipo?, cliente?, vinculo?, sigla?, codigo?, arquivo?}
-   -> uma linha JSON: {ok:true, ...} ou {ok:false, erro} */
+   node mcp/lib/catalogo.js --cli  < {acao, ...} -> uma linha JSON: {ok:true, ...} ou {ok:false, erro, conflito?}
+   acao: 'previa' | 'registra' | 'edita' | 'busca' | 'lista' (1.89.0: pela fila do catálogo no NexoBD, catalogo-fila.js:
+   a planilha aberta no Excel não impede) | 'fila' (o estado da fila) | 'fila-gravar' (o gravador: o hubserver roda a cada
+   45 s) | 'fila-resolver' {id, como: descartar|tentar|por-cima} */
 if (require.main === module && process.argv.includes('--cli')) {
   let ent = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', d => { ent += d; });
-  process.stdin.on('end', () => {
+  process.stdin.on('end', async () => {
     let r;
     try {
       const a = JSON.parse(ent || '{}');
-      r = Object.assign({ ok: true }, a.acao === 'registra' ? registra(a) : a.acao === 'edita' ? edita(a) : a.acao === 'busca' ? busca(a)
-        : a.acao === 'lista' ? lista(a) : previa(a));
-    } catch (e) { r = { ok: false, erro: String(e && e.message || e) }; }
-    process.stdout.write(JSON.stringify(r) + '\n');
+      const F = require('./catalogo-fila.js');
+      const fn = { registra: F.registra, edita: F.edita, busca: F.busca, lista: F.lista, previa: F.previa, fila: F.estado,
+                   'fila-gravar': F.grava, 'fila-resolver': F.resolve }[a.acao || 'previa'];
+      if (!fn) throw new Error('ação desconhecida: ' + a.acao);
+      r = Object.assign({ ok: true }, await fn(a));
+    } catch (e) { r = { ok: false, erro: String(e && e.message || e) }; if (e && e.conflito) r.conflito = true; }
+    process.stdout.write(JSON.stringify(r) + '\n', () => process.exit(0));
   });
 }

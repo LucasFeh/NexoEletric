@@ -261,6 +261,38 @@ class Locais(unittest.TestCase):
         self.assertEqual(c.post('/api/locais/L1/apagar').status_code, 200)
         self.assertEqual(c.get('/api/locais').get_json()['componentes'], [])
 
+    def test_apagar_so_o_admin(self):
+        """1.89.0 (pedido do dono: 'sim so pro admin'): apagar componente local e so do administrador do Nexo Hub; usuario
+        comum, visualizador e sem login levam 403 sem_permissao (o before_request do tools/rotas/equipe.py)"""
+        import equipe
+        app = Flask(__name__)
+        logado = [None]
+        equipe._provedor[0] = lambda: {'ok': True, 'logado': bool(logado[0]), 'usuario': logado[0]}
+        try:
+            equipe.registra_rotas(app, self.raiz)
+            CL.registra(app, self.raiz)
+            c = app.test_client()
+            admin = {'id': 'u-a', 'login': 'ana', 'nome': 'Ana Admin', 'admin': True, 'funcao': 'admin'}
+            comum = {'id': 'u-c', 'login': 'caio', 'nome': 'Caio', 'admin': False, 'funcao': 'usuario'}
+            visual = {'id': 'u-v', 'login': 'vera', 'nome': 'Vera', 'admin': False, 'visualizador': True, 'funcao': 'visualizador'}
+            logado[0] = comum
+            r = c.post('/api/locais', json={'simbolo': 'TRANSISTOR NPN', 'footprint': 'SOT-23', 'componente': FICHA})
+            self.assertEqual(r.status_code, 200, r.get_json())
+            for u in (comum, visual, None):
+                logado[0] = u
+                equipe.esquece_sessao()
+                r = c.post('/api/locais/L1/apagar')
+                self.assertEqual(r.status_code, 403, u)
+                self.assertEqual((r.get_json()['codigo'], r.get_json()['error']), ('sem_permissao', equipe.MSG_SO_ADMIN))
+                self.assertEqual(len(c.get('/api/locais').get_json()['componentes']), 1, 'nao apagou')
+            logado[0] = admin
+            equipe.esquece_sessao()
+            self.assertEqual(c.post('/api/locais/L1/apagar').status_code, 200)
+            self.assertEqual(c.get('/api/locais').get_json()['componentes'], [])
+        finally:
+            equipe._provedor[0] = None
+            equipe.esquece_sessao()
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -26,8 +26,14 @@ do HTTP): trocar de variante aqui nao troca a vista de quem abre o mesmo projeto
 
 OS CODIGOS (a regra mora em codigos(): mude aqui se a casa decidir outra coisa):
   PCB virgem  = o codigo da PCB (CodigoDaPlaca): a fibra e a mesma em todas as variantes;
-  PCB montada = o codigo da PCB na variante padrao; com uma variante ativa, o codigo da variante (cada variante e um
-                produto montado diferente). O equipamento (CodigoDoEquipamento) so vai para o quadro da folha.
+  PCB montada = o codigo da PCB na variante padrao; com uma variante ativa (1.89.0, pedido do dono: "sempre que for subir
+                lista de variante, precisa gerar uma PCB (montada) gera com o codigo da placa + nome da variante"),
+                "<codigo da placa> <NOME DA VARIANTE>" (montada_da_variante; SEPARADOR_MONTADA troca o separador). E,
+                na variante, a lista vai ao Odoo SEM a PCB virgem ("precisa enviar sem criar a PCB virgem, quando for uma
+                variante"): virgemVai = False (odoolista.anexa_imagens nao a poe; a virgem e a do projeto padrao).
+  1.89.0: a variante E um equipamento (escolhido no catalogo, so equipamentos): o codigo dela e o do equipamento, que vai
+  ao quadro da folha (EQUIPAMENTO) com ela ativa; o equipamento nao vai ao Odoo. O nome e obrigatorio (a pessoa da;
+  a sugestao e o nome do equipamento) e nao repete entre as variantes do projeto.
 
 Rotas:
   GET  /api/variantes?projeto=           -> {ok, formato, variantes, ativa: id|null, placa:{codigo, nome}, codigos, permissao}
@@ -52,7 +58,10 @@ FORMATO = 'nexoeletric-variantes-1'
 ATIVA = '.variante-ativa.json'
 # o que a variante nao deixa mudar (o /api/save do Python e do Rust, e o MCP)
 TRAVADOS = ('schematic.js', 'changes.js', 'annotations.js', 'rules.js')
-NOME_MAX = 80                  # so para nao virar um paragrafo na tela; o codigo e o do catalogo
+NOME_MAX = 120                 # so para nao virar um paragrafo na tela (vai no codigo da montada no Odoo)
+# 1.89.0: a PCB montada de uma variante, no Odoo: "<codigo da placa><SEPARADOR><NOME DA VARIANTE>" (o mesmo do
+# hub-variantes.js >> codigos: mude os dois juntos)
+SEPARADOR_MONTADA = ' '
 _ID = re.compile(r'^v[0-9a-f]{6,16}$')
 
 
@@ -172,14 +181,22 @@ def params_de(schematic):
     return out
 
 
+def montada_da_variante(placa, nome):
+    """o codigo da PCB montada de uma variante no Odoo: o codigo da placa + o nome da variante (em maiusculas)"""
+    nome = ' '.join(str(nome or '').split()).upper()
+    return (str(placa or '') + SEPARADOR_MONTADA + nome).strip() if placa else nome
+
+
 def codigos(schematic, v):
-    """{placa, virgem, montada, equipamento, variante} -- a regra do cabecalho deste arquivo"""
+    """{placa, virgem, virgemVai, montada, equipamento, equipamentoProjeto, variante} -- a regra do cabecalho"""
     p = params_de(schematic)
     placa = p.get('CodigoDaPlaca', '')
     if placa.upper() == 'PROJETO NÃO DEFINIDO':
         placa = ''
-    return {'placa': placa, 'nomePlaca': p.get('NomeDaPlaca', ''), 'virgem': placa,
-            'montada': (v or {}).get('codigo') or placa, 'equipamento': p.get('CodigoDoEquipamento', ''),
+    eq = p.get('CodigoDoEquipamento', '')
+    return {'placa': placa, 'nomePlaca': p.get('NomeDaPlaca', ''), 'virgem': placa, 'virgemVai': not v,
+            'montada': montada_da_variante(placa, v.get('nome') or v.get('codigo')) if v else placa,
+            'equipamento': (v or {}).get('codigo') or eq, 'equipamentoProjeto': eq,
             'variante': {'id': v['id'], 'nome': v.get('nome', ''), 'codigo': v.get('codigo', '')} if v else None}
 
 
@@ -291,9 +308,12 @@ def registra(app, root, equipe=None, ler_esquema=None):
         if cod['placa'] and norm_cod(cod['placa']) == c:
             return None, ('%s é o código da PCB (a placa virgem, igual em todas as variantes): a variante precisa de um '
                           'código próprio' % c)
+        # 1.89.0: a variante e outro equipamento com a mesma PCB: o do projeto padrao nao
+        if cod['equipamentoProjeto'] and norm_cod(cod['equipamentoProjeto']) == c:
+            return None, ('%s é o equipamento do projeto padrão: a variante é outro equipamento (com a mesma PCB)' % c)
         outra = next((x for x in dv['variantes'] if x['codigo'] == c and x['id'] != menos), None)
         if outra:
-            return None, 'o código %s já é da variante "%s"' % (c, outra['nome'])
+            return None, 'o equipamento %s já é da variante "%s"' % (c, outra['nome'])
         return c, None
 
     @app.route('/api/variantes')
