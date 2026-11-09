@@ -183,7 +183,7 @@ const DICT = {
   'cfg.proj.browseNone': 'nenhuma pasta escolhida',
   'cfg.proj.risk':   'excluir',
   'cfg.delete':      'Excluir projeto…',
-  'cfg.deleteHint':  'a pasta sai de Projects\\ e vai inteira para Trash\\, no mesmo workspace. Pede a senha mestre.',
+  'cfg.deleteHint':  'a pasta sai de Projects\\ e vai inteira para Trash\\, no mesmo workspace. Só o administrador do Nexo Hub ou o responsável pelo projeto exclui (pelo login).',
   'cfg.deleteNoSrv': 'sem servidor: a exclusão precisa do hubserver.py rodando.',
 
   /* layout */
@@ -214,11 +214,14 @@ const DICT = {
   /* excluir projeto */
   'del.title':       'Excluir projeto',
   'del.what':        'A pasta sai de Projects\\ e vai para Trash\\<nome>-<data>, no mesmo workspace. O projeto some do hub na hora; para desfazer, mova a pasta de volta à mão.',
-  'del.pwd':         'senha mestre',
   'del.cancel':      'Cancelar',
   'del.ok':          'Excluir',
-  'del.needPwd':     'informe a senha mestre',
-  'del.wrong':       'senha mestre incorreta',
+  'del.byOwner':     'Você é o responsável por este projeto no Nexo Hub: pode excluir.',
+  'del.byAdmin':     'Você é administrador no Nexo Hub: pode excluir.',
+  'del.noLogin':     'Entre no Nexo Hub: só o administrador ou o responsável pelo projeto exclui.',
+  'del.denied':      'não excluiu: só o administrador ou o responsável pelo projeto exclui',
+  'del.assume':      'Assumir projeto…',
+  'del.close':       'Fechar',
   'del.done':        '{name} foi para {path}',
   'del.fail':        'não deu para excluir: {e}',
 
@@ -384,7 +387,7 @@ const DICT = {
   'cfg.proj.browseNone': 'no folder chosen',
   'cfg.proj.risk':   'delete',
   'cfg.delete':      'Delete project…',
-  'cfg.deleteHint':  'the folder leaves Projects\\ and goes whole to Trash\\, in the same workspace. Asks for the master password.',
+  'cfg.deleteHint':  'the folder leaves Projects\\ and goes whole to Trash\\, in the same workspace. Only the Nexo Hub administrator or the project owner deletes (by login).',
   'cfg.deleteNoSrv': 'no server: deleting needs hubserver.py running.',
 
   'cfg.lay.color':   'Colour',
@@ -412,11 +415,14 @@ const DICT = {
 
   'del.title':       'Delete project',
   'del.what':        'The folder leaves Projects\\ and goes to Trash\\<name>-<date>, in the same workspace. The project disappears from the hub right away; to undo it, move the folder back by hand.',
-  'del.pwd':         'master password',
   'del.cancel':      'Cancel',
   'del.ok':          'Delete',
-  'del.needPwd':     'enter the master password',
-  'del.wrong':       'wrong master password',
+  'del.byOwner':     'You own this project in Nexo Hub: you can delete it.',
+  'del.byAdmin':     'You are a Nexo Hub administrator: you can delete it.',
+  'del.noLogin':     'Sign in to Nexo Hub: only the administrator or the project owner deletes.',
+  'del.denied':      'not deleted: only the administrator or the project owner deletes',
+  'del.assume':      'Take over project…',
+  'del.close':       'Close',
   'del.done':        '{name} moved to {path}',
   'del.fail':        'could not delete: {e}',
 

@@ -23,7 +23,6 @@ sys.path.insert(0, os.path.join(RAIZ, 'tools', 'rotas'))
 import aprovacao as carimbos  # noqa: E402
 import equipe  # noqa: E402
 
-MESTRE = 'LucasGatao'
 ESQUEMA = ('var schematic = {\n"format":"schmirror-v2",\n"project":"CBM-DI251876",\n"generated":"05/11/2026 10:00:00",\n'
            '"units":"mil",\n"params":"Desenho_linha_unica=CBM-DI251876;Desenhista_DiEletrons=Lucas;Data_desenho=01/11/26;Revisao=REV.A",\n'
            '"items":[\n{"t":"sheet","name":"SCH-DI251876","size":"A4","template":"casa:A4_DiEletrons"},\n'
@@ -45,7 +44,7 @@ class Rotas(unittest.TestCase):
         self.logado = None
         equipe._provedor[0] = lambda: ({'ok': True, 'logado': True, 'usuario': self.logado} if self.logado else ('http', 404))
         app = Flask(__name__)
-        carimbos.registra(app, self.tmp, MESTRE)
+        carimbos.registra(app, self.tmp)
         equipe.registra_rotas(app, self.tmp, {'desenhista': carimbos.assume_desenhista})
         self.c = app.test_client()
 
@@ -228,8 +227,8 @@ class Rotas(unittest.TestCase):
             carimbos.impressoes_eletricas = velho
 
     def test_assumir_pelo_login(self):
-        """1.84.0: quem esta logado assume o projeto sem responsavel (vira o responsavel e o desenhista), sem senha
-        mestre; o admin assume sempre"""
+        """1.84.0: quem esta logado assume o projeto sem responsavel (vira o responsavel e o desenhista), sem senha;
+        o admin assume sempre"""
         self.entra('Luciano')
         j = self.c.post('/api/equipe/assumir', json={'projeto': 'CBM-DI251876'}).get_json()
         self.assertTrue(j['ok'], j)
@@ -284,15 +283,20 @@ class Rotas(unittest.TestCase):
         self.assertEqual(self.c.post('/api/revisoes/voltar', json={'projeto': 'CBM-DI251876', 'rev': 'REV.Z'}).status_code, 404)
 
     def test_apagar_revisao(self):
-        """2026-11-06: apagar uma revisao do historico (senha mestre); a revisao em que o projeto esta aprovado leva a
-        aprovacao junto"""
+        """2026-11-06: apagar uma revisao do historico; a revisao em que o projeto esta aprovado leva a aprovacao junto.
+        1.86.0: sem senha mestre -- o administrador do Nexo Hub ou o responsavel pelo projeto, pelo login"""
         self.entra_aprovador()
         self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'})
         self.escreve('schematic.js', self.le().replace('\n]};', '\n{"t":"comp","sheet":"SCH-DI251876","ref":"R9","sym":"RES","x":1,"y":2,"footprint":"0805"},\n]};'))
         self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()['rev'], 'REV.B')
         url = '/api/revisoes/apagar'
-        # 1.84.0: o aprovador que nao e admin nao apaga (nem com a senha mestre); o admin apaga pelo login
-        self.assertEqual(self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.A', 'mestre': MESTRE}).status_code, 403)
+        # o aprovador que nao e admin nem responsavel nao apaga (a senha mestre de antes nao vale nada); projeto sem
+        # responsavel: so o admin, e o motivo manda assumir
+        r = self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.A', 'mestre': 'LucasGatao', 'password': 'LucasGatao'})
+        self.assertEqual((r.status_code, r.get_json()['codigo']), (403, 'sem_permissao'))
+        self.assertIn('Assuma o projeto', r.get_json()['error'])
+        self.assertIn('apagar revisões', r.get_json()['error'])
+        self.assertTrue(os.path.isdir(os.path.join(self.pdir, 'Revisoes', 'REV.A')))
         self.entra_aprovador('Lucas', admin=True)
         # uma revisao antiga: sai do historico e a pasta some; o projeto continua aprovado na REV.B
         j = self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.A'}).get_json()
@@ -300,16 +304,27 @@ class Rotas(unittest.TestCase):
         self.assertFalse(os.path.isdir(os.path.join(self.pdir, 'Revisoes', 'REV.A')))
         r = self.c.get('/api/revisoes?projeto=CBM-DI251876').get_json()
         self.assertEqual([x['rev'] for x in r['revisoes']], ['REV.B'])
-        # a revisao de agora (Hub antigo, sem login: a senha mestre): a aprovacao sai do carimbo da folha
-        self.logado = None
-        self.assertEqual(self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.B', 'mestre': 'x'}).status_code, 403)
-        j = self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.B', 'mestre': MESTRE}).get_json()
+        # o responsavel apaga; quem nao e da equipe (nem com a senha mestre) e o Hub sem login, nao
+        self.entra('Dono')
+        self.assertTrue(self.c.post('/api/equipe/assumir', json={'projeto': 'CBM-DI251876'}).get_json()['ok'])
+        self.entra('Outro')
+        r = self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.B', 'mestre': 'LucasGatao'})
+        self.assertEqual(r.status_code, 403)
+        self.assertIn('Só o administrador ou o responsável (Dono) apaga revisões deste projeto', r.get_json()['error'])
+        self.logado = None                                      # Hub antigo, sem login: ninguem apaga
+        r = self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.B', 'mestre': 'LucasGatao'})
+        self.assertEqual((r.status_code, r.get_json()['codigo']), (403, 'sem_permissao'))
+        self.assertIn('Atualize o Nexo Hub', r.get_json()['error'])
+        self.assertTrue(os.path.isdir(os.path.join(self.pdir, 'Revisoes', 'REV.B')))
+        # a revisao de agora, pelo responsavel: a aprovacao sai do carimbo da folha
+        self.entra('Dono')
+        j = self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.B'}).get_json()
         self.assertTrue(j['ok'] and j['aprovacaoTirada'] and not j['aprovado'], j)
         self.assertNotIn('Aprovador_DiEletrons', carimbos.params_do_texto(self.le()))
         self.assertEqual(self.c.get('/api/revisoes?projeto=CBM-DI251876').get_json()['revisoes'], [])
-        self.assertEqual(self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.Z', 'mestre': MESTRE}).status_code, 404)
-        # aprovar de novo grava a letra do carimbo da folha
-        self.entra_aprovador()
+        self.assertEqual(self.c.post(url, json={'projeto': 'CBM-DI251876', 'rev': 'REV.Z'}).status_code, 404)
+        # aprovar de novo (o responsavel, aprovador) grava a letra do carimbo da folha
+        self.entra_aprovador('Dono')
         self.assertEqual(self.c.post('/api/aprovacao', json={'projeto': 'CBM-DI251876'}).get_json()['rev'], 'REV.B')
 
     def test_primeira_revisao_segue_o_carimbo(self):

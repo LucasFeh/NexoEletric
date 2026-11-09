@@ -99,13 +99,12 @@ O que fazer depende da decisão 0.1 do [INSTALL.md](INSTALL.md): se o Windows
 continua dono, gatear `/api/save` por `_is_local`; se o servidor é o dono, a rota
 precisa da mesma autenticação do item 1.5.
 
-### 1.7 `MASTER_PASSWORD` com default público
-`hubserver.py:470`
-
-`os.environ.get('ALTIUMHUB_MASTER') or 'LucasGatao'`, em arquivo versionado no
-GitHub. Vira `os.environ.get('ALTIUMHUB_MASTER')`, e `api_project_delete` responde
-503 quando for `None` e o request não for local. O drop-in do systemd já está no
-[INSTALL.md](INSTALL.md) item 4.
+### 1.7 ~~`MASTER_PASSWORD` com default público~~ FEITO
+**Resolvido na 1.86.0** (pedido do dono, 2026-11-09: "tira a senha mestre de vez, só admin ou
+responsável exclui"): a senha mestre saiu inteira — `MASTER_PASSWORD`, `ALTIUMHUB_MASTER` e o
+campo do app. `api_project_delete` e `/api/revisoes/apagar` respondem 403 `sem_permissao` para
+quem não é o administrador do Nexo Hub nem o responsável pelo projeto (`tools/rotas/equipe.py` »
+`recusa_apagar`), e sem login ninguém exclui.
 
 ### 1.8 ~~Sem `hub-almox.json`, o sincronismo puxa do ERP de teste em silêncio~~ FEITO
 **Resolvido em 2026-09-15**, a pedido do usuário, no branch do integrador — e não pelos

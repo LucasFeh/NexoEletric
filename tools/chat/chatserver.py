@@ -34,16 +34,14 @@ desenha é o `hub-chat.js`.
 
 Seis decisões que este arquivo carrega:
 
-  a senha        O chat edita projeto — e, com o motor CLI, RODA O `claude` DA MÁQUINA que
-                 serve o hub, com as ferramentas do terminal. Isso vale mais que o clique
-                 errado que a senha mestre já protegia no "Excluir projeto"
-                 (hubserver.py:489), então TODA rota daqui pede a mesma senha, no
-                 cabeçalho X-Hub-Senha, comparada com `hmac.compare_digest` (comparação de
-                 `==` vaza o tamanho do prefixo certo pelo tempo que leva). Ela também é
-                 aceita no corpo JSON dos POST, porque é assim que o /api/project/<id>/delete
-                 já a recebe e o cliente do hub tem esse hábito — mas NUNCA na query string,
-                 que é a única das três que o log de acesso do servidor grava.
-                 Registrado sem senha, o chat recusa tudo: nunca abre.
+  a tranca       O chat edita projeto — e, com o motor CLI, RODA O `claude` DA MÁQUINA que
+                 serve o hub, com as ferramentas do terminal. Desde 2026-09-16 a porta fica
+                 ABERTA por decisão do dono (ver "A PORTA ESTA ABERTA", logo abaixo); a
+                 tranca é uma variável (ALTIUMHUB_CHAT_TRANCA), que o app liga quando o hub
+                 vai para a rede. Trancado, o chat abre só com alguém LOGADO NO NEXO HUB desta
+                 máquina (tools/rotas/equipe.py » sessao): até a 1.85.0 era a senha mestre do
+                 hub, no cabeçalho X-Hub-Senha; ela saiu de vez na 1.86.0 ("tira a senha mestre
+                 de vez") e nenhuma rota daqui lê senha nenhuma.
 
   o SSE não morre  Quando o primeiro evento sai, os cabeçalhos já foram mandados e uma exceção
                  subindo pelo Flask não vira página de erro nenhuma — vira conexão cortada,
@@ -90,7 +88,6 @@ Seis decisões que este arquivo carrega:
 """
 import base64
 import hashlib
-import hmac
 import io
 import json
 import os
@@ -120,11 +117,8 @@ import operador as OP                                   # noqa: E402
 bp = Blueprint('chat', __name__, url_prefix='/api/chat')
 
 ROOT = RAIZ          # o workspace servido; registra() troca
-SENHA = ''           # a senha mestre do hub; registra() traz a do hubserver
 TRANSPORTE = None    # injeção de teste: o `transporte` do claude_api (None = urllib de verdade)
 ABRIR = None         # injeção de teste: o `abrir` do claude_cli (None = Popen de verdade)
-
-CAB_SENHA = 'X-Hub-Senha'
 
 # ── A PORTA ESTA ABERTA, e foi decisao do dono da maquina ────────────────────────────
 # Em 2026-09-16 o usuario pediu: "tira essa senha, deixa aberto pra qlqr um usar". Antes de
@@ -134,15 +128,37 @@ CAB_SENHA = 'X-Hub-Senha'
 # comando ali. Ele confirmou escolhendo "Tudo aberto, sem senha nenhuma".
 #
 # Fica como VARIAVEL e nao como codigo apagado porque o caminho de volta tem que ser curto:
-#     ALTIUMHUB_CHAT_SENHA=1   -> volta a pedir a senha mestre do hub
-# Qualquer valor diferente de "" liga a tranca de novo, sem editar arquivo nenhum.
-ENV_TRANCA = 'ALTIUMHUB_CHAT_SENHA'
+#     ALTIUMHUB_CHAT_TRANCA=1  -> o chat so abre com alguem logado no Nexo Hub desta maquina
+# Qualquer valor diferente de "" liga a tranca de novo, sem editar arquivo nenhum. 1.86.0: a tranca
+# era a senha mestre do hub (ALTIUMHUB_CHAT_SENHA); a senha saiu de vez e a tranca virou o login. O
+# nome antigo ainda liga a tranca (um servidor com o env de antes nao fica aberto por engano), mas
+# nao pede senha nenhuma.
+ENV_TRANCA = 'ALTIUMHUB_CHAT_TRANCA'
+ENV_TRANCA_ANTIGA = 'ALTIUMHUB_CHAT_SENHA'
+MSG_TRANCA = ('o chat está trancado neste hub (%s): ele só abre com alguém logado no Nexo Hub desta máquina. '
+              'Entre no Nexo Hub e tente de novo.' % ENV_TRANCA)
+_sessao = [None]     # injeção de teste: () -> {modo, usuario}; None = tools/rotas/equipe.py » sessao
 
 
-def exige_senha():
+def exige_login():
     """True quando a tranca esta ligada. Lido a cada pedido de proposito: ligar a tranca
        num servidor que ja esta no ar nao deveria precisar de reinicio."""
-    return bool((os.environ.get(ENV_TRANCA) or '').strip())
+    return any((os.environ.get(n) or '').strip() for n in (ENV_TRANCA, ENV_TRANCA_ANTIGA))
+
+
+def _quem_esta_logado():
+    """o usuario logado no Nexo Hub desta maquina (o servidor pergunta, nunca a pagina), ou None"""
+    try:
+        if _sessao[0] is not None:
+            s = _sessao[0]()
+        else:
+            sys.path.insert(0, os.path.join(RAIZ, 'tools', 'rotas'))
+            import equipe as _eq                         # noqa: E402
+            s = _eq.sessao()
+    except Exception:                                    # noqa: BLE001
+        return None
+    return (s or {}).get('usuario') if (s or {}).get('modo') == 'login' else None
+
 
 # O PONTO NA FRENTE NÃO É ENFEITE, E NÃO SE "ARRUMA" ESTE NOME.
 # O hubserver serve a árvore inteira do workspace sem senha nenhuma (hubserver.py:143 ->
@@ -339,11 +355,11 @@ Libs/Almox/*.SchLib
 lista, BOM, Odoo → hub-bom.js, tools/almox/, Projects/<aberto>/pcb-list.csv"""
 
 
-def registra(app, root, senha):
-    """o hubserver chama uma vez: guarda o workspace, a senha mestre e pendura as rotas"""
-    global ROOT, SENHA
+def registra(app, root, *_antigo):
+    """o hubserver chama uma vez: guarda o workspace e pendura as rotas. (*_antigo: ate a 1.85.0 vinha a senha mestre
+       do hub; ela saiu e o que vier e ignorado.)"""
+    global ROOT
     ROOT = root
-    SENHA = senha or ''
     _cache_motor.clear()
     app.register_blueprint(bp)
 
@@ -486,24 +502,14 @@ def _corpo():
 def _autoriza(dados=None):
     """`None` quando passou; senão a resposta 403 pronta para dar `return`.
 
-    A senha NUNCA é escrita em log, nem devolvida, nem ecoada na mensagem de recusa — a
-    recusa diz onde pôr a senha, não o que veio.
+    Porta aberta (o padrão, ver "A PORTA ESTA ABERTA"): passa. Trancada: passa quem estiver logado
+    no Nexo Hub desta máquina. Senha nenhuma (1.86.0): a mestre saiu de vez.
     """
-    if not exige_senha():
+    if not exige_login():
         return None          # porta aberta: ver o bloco "A PORTA ESTA ABERTA" no topo
-    if not SENHA:
-        return _erro('a tranca do chat está ligada (%s), mas o hub subiu sem senha mestre. '
-                     'Defina ALTIUMHUB_MASTER, ou apague %s para deixar o chat aberto.'
-                     % (ENV_TRANCA, ENV_TRANCA), 403)
-    veio = request.headers.get(CAB_SENHA) or ''
-    if not veio and isinstance(dados, dict):
-        veio = dados.get('senha') or dados.get('password') or ''
-    if not isinstance(veio, str) or not hmac.compare_digest(
-            veio.encode('utf-8'), SENHA.encode('utf-8')):
-        return _erro('senha mestre do hub ausente ou incorreta. O chat gasta dinheiro e edita '
-                     'projeto, então toda rota dele pede a senha no cabeçalho %s.' % CAB_SENHA,
-                     403)
-    return None
+    if _quem_esta_logado():
+        return None
+    return _erro(MSG_TRANCA, 403, codigo='sem_login')
 
 
 def _grande_demais():
@@ -906,8 +912,8 @@ def _grava_conversa(conv):
 def _msg_guardada(papel, texto, anexos):
     """a mensagem como ela vai para o arquivo: os anexos viram FICHA, não bytes.
 
-    Montada campo a campo, e não copiada do pedido, para que nada mais do corpo (a senha,
-    por exemplo) possa vazar para dentro do arquivo da conversa por descuido.
+    Montada campo a campo, e não copiada do pedido, para que nada mais do corpo (a senha que um
+    painel antigo ainda mande, por exemplo) possa vazar para dentro do arquivo da conversa por descuido.
     """
     fichas = []
     for an in (anexos or [])[:TETO_ANEXOS_MSG]:
@@ -1372,8 +1378,9 @@ def _turno_cli(ident, projeto, tela, modelo, modo, historico, conv):
 
 @bp.route('/estado', methods=['GET', 'POST'])
 def api_estado():
-    # `exige_senha` vai na resposta para o painel saber se desenha a tela de entrada ou se
-    # abre direto na conversa. Sem isso ele pediria uma senha que ninguem confere.
+    # `exige_login` vai na resposta para o painel saber que a tranca esta ligada (e que ele so
+    # abriu porque alguem esta logado no Nexo Hub). `exige_senha` fica sempre False: o painel de
+    # antes da 1.86.0 desenhava a tela da senha mestre com ele, e senha nenhuma e conferida aqui.
     """Que motor? Que modos? Que tetos? NADA DE SEGREDO SAI DAQUI.
 
     Nem a chave, nem um pedaço dela, nem o tamanho dela (qualquer um dos três estreita o campo
@@ -1399,7 +1406,7 @@ def api_estado():
         # `api_chave` — e ela é um booleano, nunca o valor.
         ('chave', ligado), ('api_chave', bool(A.chave())),
         # a porta: o painel le isto para saber se desenha a tela de entrada
-        ('exige_senha', exige_senha()),
+        ('exige_login', exige_login()), ('exige_senha', False),
         ('projeto', (dados.get('projeto') or '')),
     ))
 

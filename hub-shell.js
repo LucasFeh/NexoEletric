@@ -565,8 +565,8 @@ body.eh-shell .tab[aria-selected="true"]::after {
     return b;
   }
   // Botao direito num projeto da arvore. Excluir usa o mesmo dialogo das Configuracoes do hub
-  // (senha mestre conferida no servidor; a pasta vai para Trash\, nao some), agora com o id do
-  // projeto clicado -- que pode nao ser o aberto.
+  // (1.86.0: so o administrador do Nexo Hub ou o responsavel pelo projeto, conferido no servidor; a pasta
+  // vai para Trash\, nao some), agora com o id do projeto clicado -- que pode nao ser o aberto.
   function menuDoProjeto(p, eAtivo, x, y) {
     fecharMenu();
     const m = el('div', 'eh-menu');
@@ -600,12 +600,20 @@ body.eh-shell .tab[aria-selected="true"]::after {
         off: semServidor, titulo: 'quem mexe neste projeto: o responsável e os colaboradores convidados (pelo login do Nexo Hub)',
       });
     }
+    const exc = window.HubEquipe && window.HubEquipe.podeExcluir ? window.HubEquipe.podeExcluir(p.name) : { pode: true, dica: '' };
     itemDeMenu(m, 'Excluir projeto…', icone('lixo'), () => openDeleteDialog(p.id), {
       perigo: true,
-      off: semServidor || typeof openDeleteDialog !== 'function',
+      off: semServidor || typeof openDeleteDialog !== 'function' || !exc.pode,
       titulo: semServidor ? 'sem servidor não há o que excluir'
-        : 'o responsável ou o administrador exclui pelo login; os outros, com a senha mestre. A pasta vai para Trash\\, na pasta de trabalho',
+        : !exc.pode ? exc.dica
+        : 'o administrador do Nexo Hub ou o responsável pelo projeto exclui, pelo login. A pasta vai para Trash\\, na pasta de trabalho',
     });
+    // 1.86.0: quem nao exclui ve o porque logo abaixo do item desligado (o title de botao desligado nem sempre aparece)
+    if (!semServidor && !exc.pode && exc.dica) {
+      const nota = el('div', 'eh-menu-nota', exc.dica);
+      nota.style.cssText = 'font-size:11px;line-height:1.35;color:var(--text-3);padding:0 10px 6px 30px;max-width:260px;white-space:normal';
+      m.append(nota);
+    }
     document.body.append(m);
     // so da para medir no DOM; encosta nas bordas em vez de vazar
     const r = m.getBoundingClientRect();

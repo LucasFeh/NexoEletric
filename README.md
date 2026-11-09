@@ -275,12 +275,14 @@ Casca única com:
   soltos no antigo cabeçalho, entraram para ele.
   - **Projeto** (a primeira) — o projeto aberto e a exclusão. (A **pasta padrão do BOM**
     morava aqui; saiu quando o BOM virou link e deixou de existir arquivo para pôr em
-    pasta alguma — veja *BOM* mais abaixo.) **Excluir projeto** fica atrás da **senha
-    mestre** (conferida no servidor; o browser só a transporta — veja `MASTER_PASSWORD`
-    em `hubserver.py`, ou a variável de ambiente `ALTIUMHUB_MASTER`). A pasta não é
-    apagada: vai inteira para `Trash\<nome>-<data>` no mesmo workspace, some do hub na
-    hora e volta arrastando de volta para `Projects\`. Senha errada não fecha o
-    diálogo; sem servidor o botão fica desligado.
+    pasta alguma — veja *BOM* mais abaixo.) **Excluir projeto** é do **administrador do
+    Nexo Hub** ou do **responsável pelo projeto**, pelo login (conferido no servidor:
+    `hubserver.py` » `api_project_delete`, `tools/rotas/equipe.py` » `recusa_apagar`; os
+    outros recebem 403 `sem_permissao` e veem o motivo; projeto sem responsável, só o
+    administrador — os outros podem **Assumir projeto** antes). A senha mestre saiu de vez
+    na 1.86.0. A pasta não é apagada: vai inteira para `Trash\<nome>-<data>` no mesmo
+    workspace, some do hub na hora e volta arrastando de volta para `Projects\`. Sem
+    servidor o botão fica desligado.
   - **Layout** — quatro comboboxes. **Cor**: Escuro · Claro · Automático (automático
     segue o sistema e muda junto se o Windows mudar com o hub aberto). **Tema**:
     Grafite (o de sempre) · Papel · Altium · Placa. **Linguagem**: Português ou English.
@@ -323,8 +325,9 @@ Casca única com:
   BOM, Histórico) e as Bibliotecas embaixo, com busca (`Ctrl+K`). Clicar no projeto abre a
   gaveta dele (e abre o projeto, se for outro); clicar de novo fecha. **Fechar todos os
   projetos** recolhe todas as gavetas. O **botão direito** num projeto abre um menu com
-  **Excluir projeto…** — o mesmo diálogo da aba Projeto das configurações (senha mestre,
-  pasta para `Trash\`), só que para o projeto clicado, que não precisa ser o aberto.
+  **Excluir projeto…** — o mesmo diálogo da aba Projeto das configurações (o administrador
+  ou o responsável, pelo login; pasta para `Trash\`), só que para o projeto clicado, que não
+  precisa ser o aberto. Para os outros o item fica desligado, com o motivo.
   Clicar no cabeçalho **Projetos** recolhe o painel numa faixa fina, com o título em pé, e
   clicar na faixa o traz de volta (no app, também **Exibir › Painel Projetos**, `Ctrl+Alt+P`).
   A largura se ajusta arrastando a borda; duplo clique nela volta ao padrão.

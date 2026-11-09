@@ -14,8 +14,9 @@ ao Hub desta maquina quem esta logado (tools/rotas/equipe.py » sessao):
   - O desenhista e quem criou o projeto (tools/rotas/projeto_novo.py) ou quem o assumiu (POST /api/equipe/assumir, em
     tools/rotas/equipe.py, que chama assume_desenhista daqui): Desenhista_DiEletrons, Desenhista_carimbo e o
     Data_desenho, que so muda nessas duas horas.
-  - Apagar revisao e do administrador do Hub. So o Hub antigo (sem login) ainda aceita a senha mestre para isso;
-    aprovar, nele, fica recusado ("Atualize o Nexo Hub").
+  - Apagar revisao e do administrador do Hub ou do responsavel pelo projeto (1.86.0: a mesma regra do Excluir projeto,
+    tools/rotas/equipe.py » recusa_apagar). A senha mestre saiu de vez: sem login (Hub antigo, Hub fora) ninguem apaga,
+    e aprovar, nele, fica recusado ("Atualize o Nexo Hub").
   - Os campos *_carimbo do cabecalho (Desenhista_carimbo, Aprovacao_carimbo) guardam o LOGIN; o nome dos campos fica por
     causa do template da folha, dos PDFs e das aprovacoes antigas. O sistema de carimbos de antes (nome + senha em
     Libs/carimbos.json, o carimbo em uso em .altiumhub/carimbo-ativo.json, as rotas /api/carimbos*) SAIU: o arquivo
@@ -46,10 +47,9 @@ Rotas:
   POST /api/aprovacao {projeto}            -> aprova como quem esta logado (aprovador) e grava a revisao: {ok, texto, params, rev, ...}
   GET  /api/revisoes?projeto=              -> {ok, revisoes:[{rev, data, quando, aprovador, usuario, resumo}], atual:{rev, aprovado, mudancas}}
   POST /api/revisoes/voltar {projeto, rev} -> o projeto volta a ser o da revisao
-  POST /api/revisoes/apagar {projeto, rev, mestre?} -> tira a revisao do historico (a de agora tira tambem a aprovacao)
+  POST /api/revisoes/apagar {projeto, rev}  -> tira a revisao do historico (a de agora tira tambem a aprovacao)
 """
 import hashlib
-import hmac
 import json
 import os
 import re
@@ -84,15 +84,10 @@ _cache_hash = {}          # pasta -> (marca dos arquivos, assinatura)
 _desde = {}               # pasta -> quando a assinatura passou a nao bater
 
 
-# ─────────────────────────── o nome e a senha mestre ───────────────────────────
+# ─────────────────────────── o nome ───────────────────────────
 def _nome(v):
     """o nome vai para o cabecalho da folha (campo K=V;K=V): sem ; nem | nem aspas-dois-pontos"""
     return ' '.join(str(v or '').replace(';', ',').replace('|', '/').replace('":', '" :').split())
-
-
-def _mestre_ok(mestre, senha_mestre):
-    """so o Hub antigo (sem login) ainda pede a senha mestre, para apagar revisao"""
-    return isinstance(mestre, str) and hmac.compare_digest(mestre.encode('utf-8'), senha_mestre.encode('utf-8'))
 
 
 # ─────────────────────────── o cabecalho do schematic.js ───────────────────────────
@@ -646,7 +641,8 @@ def apaga_revisao(pdir, rev):
 
 
 # ─────────────────────────── rotas ───────────────────────────
-def registra(app, root, senha_mestre):
+def registra(app, root, *_antigo):
+    # *_antigo: ate a 1.85.0 o hubserver passava a senha mestre aqui; ela saiu (1.86.0) e o que vier e ignorado
     if os.path.isfile(os.path.join(root, 'mcp', 'lib', 'impressao-eletrica.js')):
         RAIZ[0] = root
     pdir_raiz = os.path.join(root, 'Projects')
@@ -765,20 +761,21 @@ def registra(app, root, senha_mestre):
 
     @app.route('/api/revisoes/apagar', methods=['POST'])
     def revisoes_apagar():
-        """2026-11-06: "no historico de revisoes, quero poder apagar uma revisao" (senha mestre). Apagar a revisao em
-        que o projeto esta aprovado tira a aprovacao (o carimbo da folha nao pode apontar para uma revisao que sumiu)."""
+        """2026-11-06: "no historico de revisoes, quero poder apagar uma revisao". Apagar a revisao em que o projeto esta
+        aprovado tira a aprovacao (o carimbo da folha nao pode apontar para uma revisao que sumiu). 1.86.0: quem apaga e
+        o administrador do Nexo Hub ou o responsavel pelo projeto, pelo login; sem senha mestre."""
         b = corpo()
         d = pasta(b.get('projeto'))
         if not d:
             return {'ok': False, 'error': 'projeto desconhecido'}, 404
-        # 1.84.0: o administrador do Nexo Hub apaga pelo login; a senha mestre so vale com o Hub sem login (antigo/fora)
-        s = _eq.sessao(forcar=True) if _eq is not None else {'modo': 'legado', 'usuario': None}
+        # 1.86.0: o administrador do Nexo Hub ou o responsavel pelo projeto, pelo login (a regra do Excluir projeto)
+        if _eq is None:
+            return {'ok': False, 'codigo': 'sem_permissao', 'error': 'apagar revisão pede o login do Nexo Hub'}, 403
+        s = _eq.sessao(forcar=True)
         u = s['usuario']
-        if u and not u.get('admin'):
-            return {'ok': False, 'codigo': 'sem_permissao', 'error': 'Só o administrador do Nexo Hub apaga revisões'}, 403
-        if not u and (s['modo'] not in ('legado', 'fora') or not _mestre_ok(b.get('mestre'), senha_mestre)):
-            return {'ok': False, 'error': 'senha mestre incorreta' if s['modo'] in ('legado', 'fora') else _eq.MSG_DESLOGADO,
-                    'mestre': s['modo'] in ('legado', 'fora')}, 403
+        recusa = _eq.recusa_apagar(d, s, revisao=True)
+        if recusa:
+            return recusa, 403
         rev = letra_da_revisao(b.get('rev'))
         tirou = False
         with _trava:

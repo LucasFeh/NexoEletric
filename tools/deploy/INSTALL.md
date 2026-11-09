@@ -93,14 +93,17 @@ O UID 1500 não é decorativo: é o mesmo do `Dockerfile` e o do `force user` do
 share. Os três precisam bater, senão o Altium grava `board.js` pelo SMB e o hub
 não consegue reescrever.
 
-A senha mestre, fora do git:
+O arquivo dos segredos do host, fora do git (a chave da Anthropic e o
+`CLAUDE_CODE_OAUTH_TOKEN` do chat moram nele; pode nascer vazio):
 
 ```bash
 sudo install -d -m 755 /etc/altiumhub
-printf 'ALTIUMHUB_MASTER=%s\n' "$(openssl rand -base64 24)" | sudo tee /etc/altiumhub/senha.env >/dev/null
-sudo chown root:altiumhub /etc/altiumhub/senha.env
-sudo chmod 640 /etc/altiumhub/senha.env
+sudo install -m 640 -o root -g altiumhub /dev/null /etc/altiumhub/senha.env
 ```
+
+Desde a 1.86.0 o hub não tem senha mestre (`ALTIUMHUB_MASTER` saiu): excluir projeto e
+apagar revisão são do administrador do Nexo Hub ou do responsável pelo projeto, pelo
+login. Uma linha `ALTIUMHUB_MASTER=` que ainda esteja no arquivo pode ser apagada.
 
 O modo é 640 com grupo `altiumhub`, e não 600 do root. Quem lê o `env_file` é o
 **cliente** do compose, que roda como `altiumhub`; o container nem chega a ver o

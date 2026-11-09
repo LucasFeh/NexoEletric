@@ -130,7 +130,9 @@ function monta(caixa, ganchos){
     const p = T() ? T().parseParams(ganchos.schematic().params) : {};
     const placa = p.CodigoDaPlaca || p.Desenho_linha_unica || '';
     const eq = p.CodigoDoEquipamento || p.Equipamento_linha_dois || '';
-    resumo.textContent = placa || eq ? 'placa ' + (placa || '—') + ' · equipamento ' + (eq || '—') : 'projeto ainda não definido no catálogo';
+    /* 1.86.0: o que falta é o mesmo "PROJETO NÃO DEFINIDO" do quadro da folha */
+    const ND = (T() && T().NAO_DEFINIDO) || 'PROJETO NÃO DEFINIDO';
+    resumo.textContent = placa || eq ? 'placa ' + (placa || ND) + ' · equipamento ' + (eq || ND) : ND + ' — escolha a placa e o equipamento no catálogo';
     resumo.title = (p.NomeDoEquipamento || p.Equipamento_linha_um || '');
   };
   ganchos._pinta = pinta;

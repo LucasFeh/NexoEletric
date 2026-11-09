@@ -11,7 +11,8 @@
    (a lista de sempre, #histRows).
    1.84.0: a primeira sub-aba é "Modificações" (hub-equipe.js » pintaModificacoes): cada gravação com a foto e o nome de
    quem fez, quando e o que mudou (o histórico com autor do tools/rotas/equipe.py). As revisões mostram a foto e o nome de
-   quem aprovou; apagar uma revisão é do administrador do Nexo Hub (sem senha; só o Hub antigo, sem login, pede a mestre). */
+   quem aprovou. 1.86.0: apagar uma revisão é do administrador do Nexo Hub ou do responsável pelo projeto, pelo login
+   (sem senha mestre: ela saiu de vez); para os outros o Apagar fica desligado, com o motivo. */
 (function (root) {
 'use strict';
 const LS_ABA = 'nexoeletric.hist.aba2';   /* 1.84.0: chave nova, para todo mundo cair em Modificações */
@@ -96,9 +97,13 @@ async function carrega(corpo, projeto, pane){
   const out = [];
   const at = j.atual || {};
   const HE = root.HubEquipe;
-  const ses = HE ? await HE.sessao() : { modo:'legado', usuario:null };
+  /* quem apaga revisão: o administrador ou o responsável (o servidor diz, pela equipe do projeto) */
+  let perm = null;
+  try { const e = await (await fetch('/api/equipe?projeto=' + encodeURIComponent(projeto), { cache:'no-store' })).json(); perm = e && e.ok ? e.permissao : null; }
+  catch (e) { perm = null; }
   if (n !== seq) return;
-  const admin = Boolean(ses.usuario && ses.usuario.admin), semLogin = ses.modo === 'legado' || ses.modo === 'fora';
+  const podeApagar = Boolean(perm && perm.apagar);
+  const motivo = (perm && (perm.motivoApagarRevisao || perm.motivoApagar)) || 'só o administrador do Nexo Hub ou o responsável pelo projeto apaga revisões';
   const agora = el('div', 'rv-card agora ' + (at.aprovado ? 'ok' : 'nao'));
   const cab = el('div', 'rv-cab');
   cab.append(el('span', 'rv-rev', 'Agora'), el('span', 'rv-quem', at.aprovado
@@ -125,11 +130,10 @@ async function carrega(corpo, projeto, pane){
     b.addEventListener('click', () => volta(projeto, r.rev, () => pinta(pane, projeto)));
     h.append(b);
     const ap = el('button', 'rv-apagar', 'Apagar'); ap.type = 'button';
-    ap.title = admin ? 'tirar esta revisão do histórico (você é administrador no Nexo Hub)'
-      : semLogin ? 'tirar esta revisão do histórico (pede a senha mestre: o Nexo Hub desta máquina não tem login)'
-      : 'só o administrador do Nexo Hub apaga revisões';
-    ap.disabled = !admin && !semLogin;
-    ap.addEventListener('click', () => apaga(projeto, r.rev, at.aprovado && at.rev === r.rev, () => pinta(pane, projeto), admin));
+    ap.title = podeApagar ? 'tirar esta revisão do histórico (' + (perm.papel === 'responsavel' ? 'você é o responsável pelo projeto' : 'você é administrador no Nexo Hub') + ')'
+      : motivo;
+    ap.disabled = !podeApagar;
+    ap.addEventListener('click', () => apaga(projeto, r.rev, at.aprovado && at.rev === r.rev, () => pinta(pane, projeto)));
     h.append(ap);
     c.append(h, el('div', 'rv-vazio', r.rev === (j.revisoes[j.revisoes.length - 1] || {}).rev ? 'o que tinha nela:' : 'o que mudou desde a anterior:'));
     const ul = el('ul'); for (const m of r.resumo || []) ul.append(el('li', null, m)); c.append(ul);
@@ -156,41 +160,23 @@ async function volta(projeto, rev, depois){
   if (depois) depois();
 }
 
-/* 2026-11-06: "no histórico de revisões também, quero poder apagar uma revisão" — pede a senha mestre; a revisão em
-   que o projeto está aprovado, ao sair, leva a aprovação junto (o servidor limpa os campos do carimbo da folha) */
-async function apaga(projeto, rev, ehAtual, depois, admin){
+/* 2026-11-06: "no histórico de revisões também, quero poder apagar uma revisão"; a revisão em que o projeto está aprovado,
+   ao sair, leva a aprovação junto (o servidor limpa os campos do carimbo da folha). 1.86.0: sem senha mestre — quem
+   apaga é o administrador do Nexo Hub ou o responsável pelo projeto, pelo login (a regra do Excluir projeto); o servidor
+   confere de novo (tools/rotas/aprovacao.py, 403 sem_permissao). */
+async function apaga(projeto, rev, ehAtual, depois){
   const CB = root.HubAprovacao;
   const texto = 'A ' + rev + ' sai do histórico do projeto ' + projeto + ' (a cópia dela também). '
     + (ehAtual ? 'O projeto está aprovado nela: ele fica SEM aprovação e precisa ser aprovado de novo. ' : '')
     + 'Os arquivos do projeto de agora não mudam.';
-  /* 1.84.0: o administrador apaga pelo login, sem senha */
-  if (admin){
-    const ok = CB && CB.confirma ? await CB.confirma('Apagar a ' + rev, texto, 'Apagar') : true;
-    if (!ok) return;
-    let j = null;
-    try {
-      j = await (await fetch('/api/revisoes/apagar', { method:'POST', headers:{ 'Content-Type':'application/json' },
-        body:JSON.stringify({ projeto, rev }) })).json();
-    } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
-    if (!j || !j.ok){ toast('não apagou: ' + ((j && j.error) || 'sem resposta'), 'err', 7000); return; }
-    toast(j.rev + ' apagada' + (j.aprovacaoTirada ? ' — o projeto ficou sem aprovação' : ''), 'ok', 5000);
-    if (depois) depois();
-    return;
-  }
-  if (!CB || !CB.pedeSenha){ toast('a aprovação não carregou nesta página', 'err'); return; }
+  const ok = CB && CB.confirma ? await CB.confirma('Apagar a ' + rev, texto, 'Apagar') : true;
+  if (!ok) return;
   let j = null;
-  const s = await CB.pedeSenha('Apagar a ' + rev, 'A ' + rev + ' sai do histórico do projeto ' + projeto + ' (a cópia dela também). '
-      + (ehAtual ? 'O projeto está aprovado nela: ele fica SEM aprovação e precisa ser aprovado de novo. ' : '')
-      + 'Os arquivos do projeto de agora não mudam.', {
-    ok:'Apagar', rotulo:'senha mestre', sub:'senha mestre do sistema',
-    confere: async mestre => {
-      try {
-        j = await (await fetch('/api/revisoes/apagar', { method:'POST', headers:{ 'Content-Type':'application/json' },
-          body:JSON.stringify({ projeto, rev, mestre }) })).json();
-      } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
-      return j && j.ok ? '' : ((j && j.error) || 'sem resposta');
-    } });
-  if (s == null || !j || !j.ok) return;
+  try {
+    j = await (await fetch('/api/revisoes/apagar', { method:'POST', headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ projeto, rev }) })).json();
+  } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
+  if (!j || !j.ok){ toast('não apagou: ' + ((j && j.error) || 'sem resposta'), 'err', 7000); if (depois) depois(); return; }
   toast(j.rev + ' apagada' + (j.aprovacaoTirada ? ' — o projeto ficou sem aprovação' : ''), 'ok', 5000);
   if (depois) depois();
 }

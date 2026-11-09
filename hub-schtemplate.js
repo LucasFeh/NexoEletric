@@ -94,6 +94,20 @@ const NOMES_ANTIGOS = ['Desenho_linha_unica', 'Desenho_linha_um', 'Desenho_linha
                        'Equipamento_linha_dois', 'Equipamento_linha_unica'];
 const _auto = new Set(AUTOMATICOS.map(n => n.toLowerCase()));
 const _proj = new Set(DO_PROJETO.map(n => n.toLowerCase()));
+/* "PROJETO NÃO DEFINIDO" (1.86.0, pedido do dono, 2026-11-09: "se o projeto não tiver definido, deixa 'projeto não
+   definido' nos campos de código de equipamento e código de placa, clica em 'definir projeto' pra definir um").
+   O código da placa e o do equipamento que ninguém deu (nem o Definir projeto, nem o Altium com os nomes de antes, nem
+   — para a placa — o código que o nome do projeto traz) aparecem com este texto no lugar do vazio, na caixa do template.
+   Ele NUNCA é gravado: sai só do desenho (resolve), e um cabeçalho que o traga como valor conta como vazio. Na tela a
+   vista Esquema o destaca (vermelho, tracejado em volta) e o clique nele abre o Definir projeto (schframe.js »
+   campoNaoDefinido); no PDF do esquema ele sai como o resto do quadro, na cor do template: o projeto está indefinido, e
+   a folha impressa tem de dizer isso em vez de fingir um campo em branco. O Gerber/PDF da PCB não passam por aqui (a
+   logo da placa usa .CodigoDaPlaca, hub-core.js » resolveEspeciais, que fica como sempre). `naoDefinido:false` no
+   contexto desliga (o campo volta a sair vazio/"=Nome"). */
+const NAO_DEFINIDO = 'PROJETO NÃO DEFINIDO';
+const CAMPOS_DEFINIR = ['CodigoDaPlaca', 'CodigoDoEquipamento'];
+const _definir = new Set(CAMPOS_DEFINIR.map(n => n.toLowerCase()));
+const ehNaoDefinido = v => String(v == null ? '' : v).trim().toUpperCase() === NAO_DEFINIDO;
 /* o campo se preenche sozinho (não vai na tabela de campos do carimbo)? */
 function automatico(nome){
   const n = String(nome || '').toLowerCase();
@@ -197,7 +211,7 @@ function contexto(o){
   const cod = codigoDoProjeto(o.projeto);
   if (cod){ auto.CodigoDaPlaca = cod.codigo; if (!o.folhaNome) auto.Arquivo = 'SCH-' + cod.numero; }
   return { doc: parseParams(o.doc), proj: parseParams(o.proj), auto, tpl: (o.tpl && o.tpl.params) || {},
-           estilo: o.estilo || '', faltante: o.faltante,
+           estilo: o.estilo || '', faltante: o.faltante, naoDefinido: o.naoDefinido !== false,
            /* cru: o editor de template mostra "=Title" como está, para se ver o que é campo */
            cru: !!o.cru };
 }
@@ -212,10 +226,13 @@ function valor(nome, c){
   if (_proj.has(k) && !c.cru){
     for (const n of [nome].concat(ANTIGOS[k] || [])){
       const v = pega(c.proj, n);
-      if (v !== undefined && v !== '' && v !== '*') return String(v);
+      if (v !== undefined && v !== '' && v !== '*' && !ehNaoDefinido(v)) return String(v);
     }
     const v = pega(c.auto, nome);
-    return v !== undefined ? String(v) : undefined;
+    if (v !== undefined) return String(v);
+    /* o código que ninguém deu: "PROJETO NÃO DEFINIDO" (ver NAO_DEFINIDO) */
+    if (_definir.has(k) && c.naoDefinido) return NAO_DEFINIDO;
+    return undefined;
   }
   const nomes = APELIDO[nome.toLowerCase()] ? [nome].concat(APELIDO[nome.toLowerCase()]) : [nome];
   for (const camada of [c.doc, c.proj, c.auto, c.tpl])
@@ -337,13 +354,22 @@ function carimboInterno(f, tpl, c, out){
     out.push(Object.assign({ g:'text', x:x - dx, y:y + dy, s:resolve(s, c), origem:s, h:'left', v:'top', rot:0,
                              color:'#000000' }, ft));
 }
+/* o campo (=CodigoDaPlaca, =CodigoDoEquipamento) que o desenho deixou em "PROJETO NÃO DEFINIDO", ou '' */
+function campoNaoDefinido(origem, s){
+  if (typeof origem !== 'string' || origem.charAt(0) !== '=' || s !== NAO_DEFINIDO) return '';
+  const n = origem.slice(1).trim();
+  return _definir.has(n.toLowerCase()) ? n : '';
+}
 function texto(it, tpl, c){
   const j = it.just | 0;
   let hz = j % 3;
   if (it.espelho) hz = 2 - hz;
-  return Object.assign({ g:'text', x:it.x, y:it.y, s:resolve(it.s, c), origem:it.s,
-                         h:JUST_H[hz], v:JUST_V[Math.floor(j / 3) % 3], rot:it.rot || 0,
-                         color:it.color || '#000000' }, fonteDe(tpl, it.fonte));
+  const p = Object.assign({ g:'text', x:it.x, y:it.y, s:resolve(it.s, c), origem:it.s,
+                            h:JUST_H[hz], v:JUST_V[Math.floor(j / 3) % 3], rot:it.rot || 0,
+                            color:it.color || '#000000' }, fonteDe(tpl, it.fonte));
+  const nd = campoNaoDefinido(it.s, p.s);
+  if (nd) p.naoDefinido = nd;
+  return p;
 }
 function quadro(it, tpl, c, out){
   const x1 = Math.min(it.x1, it.x2), x2 = Math.max(it.x1, it.x2);
@@ -356,6 +382,7 @@ function quadro(it, tpl, c, out){
   /* quebra por largura APROXIMADA (meio em por letra): o motor não mede fonte; o Altium mede */
   const larg = Math.max(1, x2 - x1 - 2 * mg), porLinha = Math.max(1, Math.floor(larg / (ft.tam * 0.5)));
   const fim = [];
+  const nd = campoNaoDefinido(it.s, linhas.join('\n'));
   for (const l of linhas){
     if (!it.quebra || l.length <= porLinha){ fim.push(l); continue; }
     let atual = '';
@@ -368,7 +395,7 @@ function quadro(it, tpl, c, out){
   const hz = it.alinha || 'center';
   const x = hz === 'left' ? x1 + mg : hz === 'right' ? x2 - mg : (x1 + x2) / 2;
   fim.forEach((l, i) => out.push(Object.assign({ g:'text', x, y:y2 - mg - i * ft.tam * 1.15, s:l, h:hz, v:'top', rot:0,
-                                                  color:it.textColor || '#000000' }, ft)));
+                                                  color:it.textColor || '#000000' }, ft, nd ? { naoDefinido:nd } : null)));
 }
 /* As primitivas do template numa folha.
    `tpl`    o template (de `acha`) — null = nada
@@ -416,6 +443,36 @@ function caixaItem(it, tpl){
   else if (it.cx != null){ const rx = it.rx != null ? it.rx : it.r, ry = it.ry != null ? it.ry : it.r; pt(it.cx - rx, it.cy - ry); pt(it.cx + rx, it.cy + ry); }
   else { pt(it.x1, it.y1); pt(it.x2, it.y2); }
   return { x1:Math.min(...xs), y1:Math.min(...ys), x2:Math.max(...xs), y2:Math.max(...ys) };
+}
+/* a caixa de uma primitiva de texto, em mil (a mesma conta aproximada do caixaItem) */
+function caixaTexto(p){
+  const w = Math.max(1, String(p.s).length) * p.tam * 0.55, h = p.tam;
+  const x0 = p.h === 'center' ? -w / 2 : p.h === 'right' ? -w : 0;
+  const y0 = p.v === 'middle' ? -h / 2 : p.v === 'top' ? -h : 0;
+  const a = (p.rot || 0) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  const xs = [], ys = [];
+  for (const [u, v] of [[x0, y0], [x0 + w, y0], [x0, y0 + h], [x0 + w, y0 + h]]){ xs.push(p.x + u * c - v * s); ys.push(p.y + u * s + v * c); }
+  return { x1:Math.min(...xs), y1:Math.min(...ys), x2:Math.max(...xs), y2:Math.max(...ys) };
+}
+/* os campos "PROJETO NÃO DEFINIDO" que o template desenha nesta folha: [{campo, caixa:{x1,y1,x2,y2}}] (em mil, com
+   folga) — o que a vista Esquema destaca e onde o clique abre o Definir projeto */
+function naoDefinidos(tpl, medida, ctxo){
+  const out = [];
+  if (!tpl) return out;
+  for (const p of primitivas(tpl, medida, ctxo)){
+    if (p.g !== 'text' || !p.naoDefinido) continue;
+    const b = caixaTexto(p), f = p.tam * 0.35;
+    out.push({ campo:p.naoDefinido, caixa:{ x1:b.x1 - f, y1:b.y1 - f, x2:b.x2 + f, y2:b.y2 + f } });
+  }
+  return out;
+}
+/* o projeto (o cabeçalho `params` do schematic.js e o nome) ainda não tem o código da placa / do equipamento?
+   {CodigoDaPlaca:bool, CodigoDoEquipamento:bool} — true = não definido (o mesmo que o carimbo mostra) */
+function camposNaoDefinidos(params, projeto){
+  const c = contexto({ proj:params, projeto });
+  const out = {};
+  for (const n of CAMPOS_DEFINIR) out[n] = valor(n, c) === NAO_DEFINIDO;
+  return out;
 }
 /* move um item por (dx, dy) — no lugar */
 function moveItem(it, dx, dy){
@@ -486,12 +543,22 @@ function desenha(ctx, tpl, medida, ctxo, opts){
       ctx.stroke();
     } else if (p.g === 'text'){
       if (!p.s || p.tam * esc < 2) continue;
+      if (p.naoDefinido && opts.destacaNaoDefinido && !opts.cor){
+        /* "PROJETO NÃO DEFINIDO" na tela: vermelho, com o tracejado em volta (é clicável: abre o Definir projeto) */
+        const b = caixaTexto(p), f = p.tam * 0.35;
+        ctx.save();
+        ctx.setLineDash([p.tam * 0.25, p.tam * 0.18]);
+        ctx.lineWidth = Math.max(p.tam * 0.05, 1 / esc);
+        ctx.strokeStyle = '#d32f2f';
+        ctx.strokeRect(b.x1 - f, b.y1 - f, b.x2 - b.x1 + 2 * f, b.y2 - b.y1 + 2 * f);
+        ctx.restore();
+      }
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.rotate((p.rot || 0) * Math.PI / 180);
       ctx.scale(1, -1);
       ctx.font = fonteCss(p);
-      ctx.fillStyle = cor;
+      ctx.fillStyle = p.naoDefinido && opts.destacaNaoDefinido && !opts.cor ? '#d32f2f' : cor;
       ctx.textAlign = p.h || 'left';
       ctx.textBaseline = p.v === 'top' ? 'top' : p.v === 'middle' ? 'middle' : 'bottom';
       ctx.fillText(p.s, 0, 0);
@@ -592,6 +659,7 @@ const API = { ESTILOS, CARIMBOS, APELIDOS, CAMPOS_PADRAO, ARQ_CASA, AUTOMATICOS,
               parseParams, serializaParams, acervo, lista, acha, contexto, valor, resolve, campos, codigoDoProjeto,
               folhaDe, estiloPorMedida, primitivas, desenha, itemFolha, daFolha,
               caixaItem, moveItem, fonteId, aplica,
+              NAO_DEFINIDO, CAMPOS_DEFINIR, ehNaoDefinido, naoDefinidos, camposNaoDefinidos, caixaTexto,
               idCasa, serializaCasa, copia };
 root.HubSchTemplate = API;
 if (typeof module === 'object' && module.exports) module.exports = API;

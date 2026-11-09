@@ -7,7 +7,6 @@ Aditivo: nao altera nenhum arquivo do hub; abrir hub.html por duplo clique segue
 import argparse
 import base64
 import hashlib
-import hmac
 import json
 import mimetypes
 import os
@@ -1182,11 +1181,18 @@ def api_project(proj_id):
 
 
 # ─────────────────────────── exclusao de projeto ───────────────────────────
-# Senha mestre do hub, em texto aqui de proposito: o que ela protege e o clique errado
-# no menu, nao um invasor - quem le este arquivo tambem apaga a pasta a mao. Trocar sem
-# mexer no codigo: variavel de ambiente ALTIUMHUB_MASTER antes de subir o servidor.
-MASTER_PASSWORD = os.environ.get('ALTIUMHUB_MASTER') or 'LucasGatao'
+# 1.86.0 (pedido do dono, 2026-11-09: "tira a senha mestre de vez, so admin ou responsavel exclui"): quem exclui e o
+# administrador do Nexo Hub ou o responsavel pelo projeto, pelo login (tools/rotas/equipe.py » recusa_apagar). Nao ha
+# mais senha mestre nenhuma (nem a ALTIUMHUB_MASTER): sem login, ninguem exclui.
 TRASH_DIR = 'Trash'
+
+
+def _recusa_apagar(pdir):
+    """None = quem esta logado no Nexo Hub exclui este projeto; senao o corpo da resposta 403"""
+    if _equipe is None:
+        return {'ok': False, 'codigo': 'sem_permissao',
+                'error': 'excluir projeto pede o login do Nexo Hub, e a equipe do projeto (tools/rotas/equipe.py) nao carregou'}
+    return _equipe.recusa_apagar(pdir, _equipe.sessao(forcar=True))
 
 
 @app.route('/api/project/<proj_id>/delete', methods=['POST'])
@@ -1194,29 +1200,24 @@ def api_project_delete(proj_id):
     """Tira o projeto de Projects\\ e move a pasta inteira para Trash\\<nome>-<data>.
 
     Nao apaga nada. Para o hub da no mesmo - o indice so enxerga Projects\\ -, mas
-    mover e reversivel e apagar nao: um clique com a senha certa nao pode custar o
-    historico de uma placa. Quem quiser sumir de vez esvazia o Trash\\ a mao.
+    mover e reversivel e apagar nao: um clique errado nao pode custar o historico de
+    uma placa. Quem quiser sumir de vez esvazia o Trash\\ a mao.
 
-    Diferente do laser-open, este endpoint NAO e so-localhost: o hub e
-    usado do tablet da bancada, e quem manda aqui e a senha mestre.
+    Diferente do laser-open, este endpoint NAO e so-localhost: o hub e usado do tablet
+    da bancada. Quem decide e o login do Nexo Hub desta maquina: o administrador ou o
+    responsavel pelo projeto (403 sem_permissao para os outros).
     """
-    data = request.get_json(silent=True) or {}
-    senha = data.get('password')
     if proj_id not in _PROJ_CACHE:
         build_index(ROOT)
     name = _PROJ_CACHE.get(proj_id)
-    # 1.84.0: o administrador ou o responsavel pelo projeto apaga pelo login (tools/rotas/equipe.py); quem nao e, e o
-    # Hub antigo sem login, continuam com a senha mestre
-    pelo_login = bool(name and _equipe is not None and os.path.isdir(os.path.join(ROOT, 'Projects', name))
-                      and _equipe.permissao(os.path.join(ROOT, 'Projects', name))['apagar'])
-    if not pelo_login and (not isinstance(senha, str) or not hmac.compare_digest(
-            senha.encode('utf-8'), MASTER_PASSWORD.encode('utf-8'))):
-        return {'ok': False, 'error': 'senha mestre incorreta', 'mestre': True}, 403
     if not name:
         return {'ok': False, 'error': 'projeto desconhecido'}, 404
-    src = os.path.join(ROOT, 'Projects', name)
-    if not os.path.isdir(src):
+    if not os.path.isdir(os.path.join(ROOT, 'Projects', name)):
         return {'ok': False, 'error': 'a pasta do projeto ja nao existe'}, 404
+    recusa = _recusa_apagar(os.path.join(ROOT, 'Projects', name))
+    if recusa:
+        return recusa, 403
+    src = os.path.join(ROOT, 'Projects', name)
     stamp = time.strftime('%Y%m%d-%H%M%S')
     dst = os.path.join(ROOT, TRASH_DIR, '%s-%s' % (name, stamp))
     n = 1
@@ -2102,7 +2103,7 @@ except Exception as _e:            # noqa: BLE001
 try:
     sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
     import aprovacao as _aprovacao   # noqa: E402
-    _aprovacao.registra(app, ROOT, MASTER_PASSWORD)
+    _aprovacao.registra(app, ROOT)
 except Exception as _e:            # noqa: BLE001
     print('AVISO: aprovacao desligada (%s) — falta tools/rotas/aprovacao.py.' % _e)
 
@@ -2147,21 +2148,15 @@ except Exception as _e:            # noqa: BLE001
           'ou odoolista.py na raiz do workspace.' % _e)
 
 # ─────────────────── chat do Claude dentro do hub (tools/chat) ──────────────────
-# A senha mestre e a MESMA do "Excluir projeto" — e a unica que este hub tem, e o chat
-# precisa de uma porque gasta dinheiro da conta do usuario a cada mensagem. No servidor ela
-# vem do /etc/altiumhub/senha.env (o compose ja monta o arquivo); aqui na bancada cai no
-# padrao que esta neste arquivo, e por isso o aviso abaixo existe: senha que esta no git nao
-# tranca nada contra quem alcanca a maquina pela rede.
+# Sem senha mestre (1.86.0): com a tranca do chat ligada (ALTIUMHUB_CHAT_TRANCA, que o app liga quando o hub vai para a
+# rede), o chat abre so com alguem logado no Nexo Hub desta maquina (tools/chat/chatserver.py » _autoriza).
 #
 # Sob try pela mesma razao dos dois de cima: o hub inteiro nao pode deixar de subir porque um
 # arquivo novo nao viajou num merge. Botao mudo e pior que erro — o aviso e alto de proposito.
 try:
     sys.path.insert(0, os.path.join(ROOT, 'tools', 'chat'))
     import chatserver                # noqa: E402
-    chatserver.registra(app, ROOT, MASTER_PASSWORD)
-    if not os.environ.get('ALTIUMHUB_MASTER'):
-        print('AVISO: o chat esta usando a senha mestre PADRAO (a que esta no git). Numa '
-              'maquina que outras pessoas alcancam, defina ALTIUMHUB_MASTER antes de subir.')
+    chatserver.registra(app, ROOT)
 except Exception as _e:            # noqa: BLE001
     print('AVISO: chat do Claude desligado (%s) — falta tools/chat/chatserver.py.' % _e)
 

@@ -504,48 +504,30 @@ async function pintaModificacoes(corpo, projeto) {
   corpo.replaceChildren(...out);
 }
 
-/* ─── no hub: excluir projeto pelo login (o responsável ou o administrador, sem a senha mestre) ─── */
-function ligaExcluir() {
-  if (window.top !== window || typeof root.openDeleteDialog !== 'function' || root.openDeleteDialog.__eq) return;
-  const orig = root.openDeleteDialog;
-  const novo = async function (id) {
-    let p = null;
-    try { p = id ? (S.projects || []).find(x => x.id === id) : proj(); } catch (_) { p = null; }   // eslint-disable-line no-undef
-    if (!p) return orig.apply(this, arguments);
-    const j = await api('/api/equipe?projeto=' + enc(p.name));
-    if (!j.ok || !j.permissao || !j.permissao.apagar || j.permissao.papel === 'legado') return orig.apply(this, arguments);
-    const quem = j.permissao.papel === 'responsavel' ? 'Você é o responsável' : 'Você é administrador';
-    if (!(await confirma('Excluir projeto', 'O projeto ' + p.name + ' sai da lista e a pasta vai inteira para Trash\\ (não é apagada). '
-      + quem + ' no Nexo Hub: não precisa da senha mestre.', 'Excluir', true))) return;
-    const r = await api('/api/project/' + enc(p.id) + '/delete', {});
-    if (!r.ok) {
-      if (r.mestre) return orig.apply(this, arguments);
-      toast('não excluiu: ' + (r.error || 'falhou'), 'err'); return;
-    }
-    toast(p.name + ' excluído (a pasta foi para ' + r.trash + ')', 'ok');
-    try {
-      /* o mesmo depois do diálogo do hub (hub.html » openDeleteDialog) */
-      const idx = await API.index(); S.projects = idx.projects;           // eslint-disable-line no-undef
-      if (!S.projects.length) { location.reload(); return; }              // eslint-disable-line no-undef
-      await loadProject(S.projects.some(x => x.id === S.projId) ? S.projId : S.projects[0].id);   // eslint-disable-line no-undef
-    } catch (_) { location.reload(); }
-  };
-  novo.__eq = true;
-  root.openDeleteDialog = novo;
+/* ─── excluir projeto (1.86.0: sem senha mestre; o diálogo é o do hub.html » openDeleteDialog) ───
+   O "Excluir projeto…" do botão direito na árvore (hub-shell.js) pergunta aqui, pelo que já se sabe (/api/equipes), se
+   quem está logado exclui: o administrador do Nexo Hub ou o responsável pelo projeto. {pode, dica}; o servidor confere
+   de novo (403 sem_permissao). */
+function podeExcluir(projeto) {
+  const u = ses.usuario;
+  if (!projeto) return { pode: false, dica: 'abra um projeto' };
+  const e = equipes && equipes[projeto];
+  if (e && typeof e.apagar === 'boolean') return { pode: e.apagar, dica: e.apagar ? '' : (e.motivoApagar || 'só o administrador ou o responsável pelo projeto exclui') };
+  if (!ses.carregado || !equipes) return { pode: true, dica: '' };          /* ainda não sabe: o diálogo explica */
+  if (!u) return { pode: false, dica: ses.modo === 'legado' ? 'atualize o Nexo Hub para 2.26.0+' : 'entre no Nexo Hub: só o administrador ou o responsável pelo projeto exclui' };
+  return { pode: Boolean(u.admin), dica: u.admin ? '' : 'só o administrador ou o responsável pelo projeto exclui' };
 }
 
 /* o "Equipe do projeto…" do menu Arquivo do hub (hub-menubar.js) e do clique direito na árvore (hub-shell.js) */
 function projetoAberto() { try { const p = typeof proj === 'function' ? proj() : null; return p ? p.name : ''; } catch (_) { return ''; } }   // eslint-disable-line no-undef
 
-root.HubEquipe = { abre, assumir: assumirProjeto, podeAssumir, tagArvore, pintaModificacoes, cracha, avatar, sessao, ouve, somenteLeitura, bloqueia, recusado, confirma,
+root.HubEquipe = { abre, assumir: assumirProjeto, podeAssumir, podeExcluir, tagArvore, pintaModificacoes, cracha, avatar, sessao, ouve, somenteLeitura, bloqueia, recusado, confirma,
                    haQuanto, _vista: () => vista.projeto, _confere: confereVista };
 if (window.top === window) {
   root.__hubEquipeProjeto = nome => abre(nome || projetoAberto());
   root.__hubEquipeAssumir = nome => assumirProjeto(nome || projetoAberto());
   root.__hubEquipePodeAssumir = nome => podeAssumir(nome || projetoAberto());
   setTimeout(leEquipes, 800);
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', ligaExcluir, { once: true }); else ligaExcluir();
-  setTimeout(ligaExcluir, 1500);
 }
 iniciaVista();
 sessao();

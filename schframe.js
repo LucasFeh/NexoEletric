@@ -3061,6 +3061,7 @@ let swallowClick = false;   /* o click que fecha um arrasto nao e um clique */
 let panning = false, panFrom = null, panMoved = false;
 
 function worldOf(e){ const r = cv.getBoundingClientRect(); return cam.toWorld(e.clientX - r.left, e.clientY - r.top); }
+let naoDefDown = null;      /* o "PROJETO NÃO DEFINIDO" debaixo do ultimo mousedown em area vazia (1.86.0) */
 
 window.addEventListener('mousedown', () => { panning = false; }, true);
 cv.addEventListener('mousedown', e => {
@@ -3116,6 +3117,7 @@ function leftDown(e){
   const w = worldOf(e);
   swallowClick = false;
   lastDown = null;        /* o click deste gesto so pode ver o que ESTE mousedown acertou */
+  naoDefDown = null;
   /* a forma: o aperto marca o primeiro canto (na grade); o arrasto desenha; o soltar grava (leftUp) */
   if (tool === 'forma'){ mouse = { mode:'forma', start:{ x:snapG(w.x), y:snapG(w.y) }, moved:false, fim:null }; return; }
   /* com uma ferramenta na mao o esquerdo nao seleciona nem arrasta: ele coloca */
@@ -3124,6 +3126,7 @@ function leftDown(e){
   if (!h){
     mouse = { mode:'box', start:w, moved:false, shift:e.shiftKey };
     lastDown = null;
+    naoDefDown = campoNaoDefinido(w);     /* o "PROJETO NÃO DEFINIDO" do quadro: o click abre o Definir projeto */
     return;
   }
   /* O FIO COMO NO ALTIUM (pedido de 2026-09-24, com fotos do Altium): o PRIMEIRO clique pega o
@@ -3286,6 +3289,9 @@ function leftClick(e){
      mousedown e o click a ficha abriu e o canvas mudou de largura, entao o mesmo ponto de
      tela cai em outro ponto do mundo, "erra" o componente que acabou de ser marcado e
      limpava a selecao — era isso que fazia a ficha abrir e fechar no mesmo clique. */
+  /* 1.86.0: o clique no "PROJETO NÃO DEFINIDO" do quadro da folha (resolvido no mousedown, pelo mesmo motivo) abre o
+     Definir projeto */
+  if (!lastDown && naoDefDown && !e.shiftKey){ naoDefDown = null; limpaSel(); abreDefinirProjeto(); return; }
   if (!lastDown){ if (!e.shiftKey) limpaSel(); return; }
   /* o segundo clique num fio ja inteiro na selecao: fica SO o trecho clicado */
   if (lastDown.promover && !e.shiftKey){
@@ -4895,15 +4901,39 @@ function topologiaDe(si){
 /* O TEMPLATE DE FOLHA (moldura, zonas, carimbo — o .SchDot do Altium): só quando o item `sheet`
    traz `template`. Folha sem o campo desenha exatamente como antes; o motor inteiro mora no
    hub-schtemplate.js, e sem ele carregado isto não faz nada. Campo sem valor sai em branco
-   (o Altium mostraria o "*" da semente; na tela, vazio lê melhor). */
-function desenhaTemplate(ctx, si, esc){
+   (o Altium mostraria o "*" da semente; na tela, vazio lê melhor).
+   1.86.0: o código da placa e o do equipamento que o projeto ainda não tem saem "PROJETO NÃO DEFINIDO"
+   (hub-schtemplate.js » NAO_DEFINIDO). Na tela (`destaca`), em vermelho com o tracejado em volta, e o clique
+   nele abre o Definir projeto (campoNaoDefinido / leftClick); no PDF (`o.papel`), na cor do template. */
+function desenhaTemplate(ctx, si, esc, destaca){
   const T = typeof HubSchTemplate !== 'undefined' ? HubSchTemplate : null;
   const s = model.sheets[si];
   if (!T || !s) return;
   const d = T.daFolha(schematic, s.name);
   if (!d.tpl) return;
   d.ctxo.faltante = '';
-  T.desenha(ctx, d.tpl, HubCore.sheetSize(s), d.ctxo, { esc, aoChegarImagem: () => { cam.draw(); pintaMiniaturas(); } });
+  T.desenha(ctx, d.tpl, HubCore.sheetSize(s), d.ctxo, { esc, destacaNaoDefinido: Boolean(destaca),
+    aoChegarImagem: () => { cam.draw(); pintaMiniaturas(); } });
+}
+/* o campo "PROJETO NÃO DEFINIDO" da folha ativa debaixo do ponto (mundo, mil), ou null: {campo, caixa} */
+function campoNaoDefinido(w){
+  const T = typeof HubSchTemplate !== 'undefined' ? HubSchTemplate : null;
+  const s = model.sheets[sheetIdx];
+  if (!T || !T.naoDefinidos || !s || !w) return null;
+  const d = T.daFolha(schematic, s.name);
+  if (!d.tpl) return null;
+  d.ctxo.faltante = '';
+  for (const n of T.naoDefinidos(d.tpl, HubCore.sheetSize(s), d.ctxo)){
+    const b = n.caixa;
+    if (w.x >= b.x1 && w.x <= b.x2 && w.y >= b.y1 && w.y <= b.y2) return n;
+  }
+  return null;
+}
+/* o clique no "PROJETO NÃO DEFINIDO": o Definir projeto (hub-catalogo.js), o mesmo das Configurações */
+function abreDefinirProjeto(){
+  if (window.HubCatalogo && typeof HubCatalogo.abreDaFolha === 'function' && HubIO.canPost){ HubCatalogo.abreDaFolha(); return true; }
+  HubDialog.toast('o Definir projeto precisa do servidor do hub (Configurações › Definir projeto)', 'warn', 5000);
+  return false;
 }
 /* NAO MONTAR (1.58.0): o X vermelho por cima do corpo, como o Not Fitted do Altium. Sai na tela,
    nas miniaturas e no PDF (todos passam pela desenhaFolha). */
@@ -4941,7 +4971,7 @@ function desenhaFolha(ctx, si, o){
   }
   ctx.strokeStyle = D.SCH.border; ctx.lineWidth = 8;
   ctx.strokeRect(bb.x1, bb.y1, bb.x2-bb.x1, bb.y2-bb.y1);
-  desenhaTemplate(ctx, si, esc);
+  desenhaTemplate(ctx, si, esc, !o.papel);
   /* as formas da barra (1.82.0), por baixo do circuito: um retangulo preenchido em volta de um bloco nao cobre nada */
   for (const f of (s.formas || [])) D.drawForma(ctx, f);
   /* o que tem de ficar POR BAIXO dos fios e dos simbolos (a cruz do cursor do fio) */
@@ -5341,6 +5371,11 @@ const cam = D.mkCamera(cv, drawWorld, {
          : h.kind === 'wire' ? (describe(alvoDoHit(h)) + ' · ' + (nets.wireNet[sheetIdx][h.wi] || 'sem net'))
                              : describe(alvoDoHit(h))) : soFio ? 'só fios: clique num fio' : '';
     cv.style.cursor = 'default';   /* seta normal; so o pan (agarrando) muda */
+    /* 1.86.0: em cima do "PROJETO NÃO DEFINIDO" do quadro, a mão e a dica: o clique abre o Definir projeto */
+    if (!h && tool === 'select' && campoNaoDefinido(w)){
+      $('shover').textContent = 'PROJETO NÃO DEFINIDO — clique para definir o projeto (código da placa e do equipamento)';
+      cv.style.cursor = 'pointer';
+    }
   }
 });
 /* O GESTO E REFEITO A CADA MUDANCA DE CAMERA no meio do arrasto. A roda amplia (e com o Shift

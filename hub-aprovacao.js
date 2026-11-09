@@ -112,31 +112,6 @@ function modal(titulo, sub, peq){
   ov.addEventListener('mousedown', e => { if (e.target === ov) fecha(); });
   return { ov, bx, hd, corpo, pe, fecha, aoFechar: fn => { aoFechar = fn; } };
 }
-/* uma senha (só o Hub antigo, sem login, ainda pede a senha mestre): resolve com o texto, ou null */
-function pedeSenha(titulo, texto, o){
-  o = o || {};
-  return new Promise(res => {
-    const m = modal(titulo, o.sub, true);
-    let feito = false;
-    m.aoFechar(() => { if (!feito) res(null); });
-    if (texto) m.corpo.append(el('div', null, texto));
-    const inp = el('input'); inp.type = 'password'; inp.autocomplete = 'new-password'; inp.placeholder = o.rotulo || 'senha';
-    const erro = el('div', 'cb-erro');
-    m.corpo.append(inp, erro);
-    const vai = async () => {
-      if (!inp.value){ erro.textContent = 'digite a senha'; inp.focus(); return; }
-      ok.disabled = true;
-      const msg = o.confere ? await o.confere(inp.value) : '';
-      ok.disabled = false;
-      if (msg){ erro.textContent = msg; inp.select(); inp.focus(); return; }
-      feito = true; m.fecha(); res(inp.value);
-    };
-    const ok = botao(o.ok || 'OK', null, vai);
-    inp.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); vai(); } });
-    m.pe.append(el('span', 'cb-sp'), botao('Cancelar', null, () => m.fecha()), ok);
-    inp.focus();
-  });
-}
 /* uma pergunta sim/não no tema: resolve true (ok) ou false */
 function confirma(titulo, texto, ok){
   return new Promise(res => {
@@ -290,6 +265,6 @@ function assumirNoHub(nome){
 }
 if (typeof window !== 'undefined' && typeof document !== 'undefined') window.__hubAssumirProjeto = assumirNoHub;
 
-root.HubAprovacao = { tagProjeto, montaAprovar, antesDeSalvar, assumir, confirma, pedeSenha, carrega, ouve, estado: () => est, ehAprovador,
+root.HubAprovacao = { tagProjeto, montaAprovar, antesDeSalvar, assumir, confirma, carrega, ouve, estado: () => est, ehAprovador,
                      CAMPOS_APROVACAO, MSG_APROVADOR, _paramsDoTexto: paramsDoTexto };
 })(typeof window !== 'undefined' ? window : globalThis);

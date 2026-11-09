@@ -24,8 +24,8 @@ const PADRAO = {
   // 8200 nao colide com as do repositorio (8000 principal, 8001 homologacao, 8100 servidor).
   port: 8200,
   // Escutar na rede local. Desligado por padrao: o hub tem rotas que gravam sem senha
-  // (tools/deploy/PENDENCIAS.md, grupo 1), e exige senha mestre propria (main.js »
-  // salvarConfig). O BOM nao precisa disto: o link copiado e o do NexoBD (1.31.0).
+  // (tools/deploy/PENDENCIAS.md, grupo 1). Ligado, o chat so abre com alguem logado no Nexo Hub
+  // (main.js » envDoHub, ALTIUMHUB_CHAT_TRANCA). O BOM nao precisa disto: o link copiado e o do NexoBD (1.31.0).
   lan: false,
   // 1.31.0: o servidor central antigo (serverUrl, http://192.168.15.192:8100) saiu: a biblioteca remota
   // (libRemota), o "Importar do servidor", o guarda do sincronismo (syncGuard) e o link do BOM dele. Um
@@ -43,8 +43,6 @@ const PADRAO = {
   odooUrl: 'http://192.168.15.192:8070',
   odooDb: 'odoo_db',
   autoUpdate: true,
-  // Senha mestre do hub (excluir projeto, chat). Vazia = a padrao do hubserver.py.
-  masterPassword: '',
   updateToken: '',          // cifrado (safeStorage), em base64
   anthropicKey: '',         // cifrado; liga o motor "api" do chat (tools/chat/claude_api.py)
   window: null,             // {x,y,width,height,maximized}
@@ -56,6 +54,10 @@ const PADRAO = {
 };
 
 const SEGREDOS = ['updateToken', 'anthropicKey'];
+// O que saiu e um settings.json antigo ainda traz: some na leitura (e do arquivo, na proxima gravacao).
+// 1.86.0: a senha mestre do hub (masterPassword) saiu de vez; excluir projeto e apagar revisao sao do
+// administrador do Nexo Hub ou do responsavel pelo projeto, e o chat trancado pede o login do Nexo Hub.
+const QUE_SAIRAM = ['masterPassword'];
 
 let cache = null;
 
@@ -76,6 +78,7 @@ function load() {
     lido = {};
   }
   cache = { ...PADRAO, ...(lido && typeof lido === 'object' ? lido : {}) };
+  for (const k of QUE_SAIRAM) delete cache[k];
   return cache;
 }
 
@@ -124,5 +127,5 @@ function publicView() {
 }
 
 module.exports = {
-  load, save, getSegredo, setSegredo, getUpdateToken, setUpdateToken, publicView, workspacePadrao, PADRAO,
+  load, save, getSegredo, setSegredo, getUpdateToken, setUpdateToken, publicView, workspacePadrao, PADRAO, QUE_SAIRAM,
 };

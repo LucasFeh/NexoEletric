@@ -7,7 +7,7 @@
 //   scripts do Altium    → o item "Scripts do Altium" (os do instalador; o Nexo Hub os poe na pasta do Altium dele)
 //   .chat/               ⇄ o item "Chat do NexoEletric" (as conversas do chat do hub; 1.31.0)
 // O trabalho e do electron/lib/espelho-nexobd.mjs (copia do cliente/ do repositorio nexohub, o mesmo que o Hub usa).
-// Pasta apagada nao apaga nada: volta do NexoBD. Projeto apagado no hub (senha mestre) vai para o Trash/ e o hubserver
+// Pasta apagada nao apaga nada: volta do NexoBD. Projeto apagado no hub (pelo administrador ou pelo responsavel) vai para o Trash/ e o hubserver
 // anota em .altiumhub/nexobd-apagar.json; a rodada seguinte o apaga no NexoBD.
 //
 // A BOM (1.31.0; NexoBD 1.9.0, contrato §9): o NexoBD serve a pagina de montagem para a rede local, sem token.

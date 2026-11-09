@@ -231,14 +231,14 @@ function envDoHub(ws) {
   // O DbLib gerado AQUI tem de apontar o SQLite daqui (tools/almox/dblib.py). Numa pasta
   // de desenvolvedor (git) vale o comportamento de sempre: nada muda.
   if (!dev(ws)) env.ALTIUMHUB_DBLIB_DIR = path.join(ws, 'Libs', 'Almox');
-  if (s.masterPassword) env.ALTIUMHUB_MASTER = s.masterPassword;
   // Com o NexoBD a biblioteca e os projetos sao os dele: o armazem leva o que o hub grava; o
   // ALTIUMHUB_NEXOBD liga o "sem o Hub, vazio" (nexohub_gate.py), faz o "excluir projeto" anotar o
   // apagar no NexoBD e poe o link da BOM no NexoBD (1.31.0). O servidor central antigo saiu.
   if (noNexoBD(ws)) env.ALTIUMHUB_NEXOBD = '1';
-  // Na rede, o chat passa a pedir a senha mestre (tools/chat/chatserver.py): aberto, ele
-  // roda o claude nesta maquina a pedido de qualquer um que alcance a porta.
-  if (s.lan) env.ALTIUMHUB_CHAT_SENHA = '1';
+  // Na rede, o chat so abre com alguem logado no Nexo Hub desta maquina (tools/chat/chatserver.py):
+  // aberto, ele roda o claude nesta maquina a pedido de qualquer um que alcance a porta. 1.86.0: era a
+  // senha mestre (ALTIUMHUB_CHAT_SENHA + ALTIUMHUB_MASTER); ela saiu de vez.
+  if (s.lan) env.ALTIUMHUB_CHAT_TRANCA = '1';
   // Motor "api" do chat, para quem nao tem o claude instalado (tools/chat/claude_api.py).
   const chave = settings.getSegredo('anthropicKey');
   if (chave) env.ANTHROPIC_API_KEY = chave;
@@ -956,14 +956,10 @@ async function salvarConfig(e, d) {
     odooUrl: validarUrl(d.odooUrl, 'Odoo'),
     odooDb: String(d.odooDb || '').trim() || antes.odooDb,
     autoUpdate: Boolean(d.autoUpdate),
-    masterPassword: typeof d.masterPassword === 'string' ? d.masterPassword.trim() : antes.masterPassword,
     setupDone: true,
   };
-  // Na rede, a senha padrao do hub (a que esta no git) trancaria o "Excluir projeto" e o
-  // chat contra ninguem.
-  if (novo.lan && !novo.masterPassword) {
-    throw new Error('para compartilhar na rede, defina uma senha mestre própria (Rede e segurança)');
-  }
+  // 1.86.0: sem senha mestre. Excluir projeto e apagar revisao sao do administrador do Nexo Hub ou do
+  // responsavel pelo projeto (pelo login), e na rede o chat pede o login do Nexo Hub (envDoHub).
   // O ApplyChanges/ExportBoard/... reescrevem sozinhos esse home= para o servidor
   // (RaizAposentada nos .pas): apontar para ca duraria ate a primeira exportacao.
   // Com o NexoBD o home.txt e do Nexo Hub (a pasta do Altium dele): o app nao mexe mais nele.
@@ -989,7 +985,7 @@ async function salvarConfig(e, d) {
 
   // O que entra no env do hub so vale num hub novo. A pasta tambem conta, porque decide o modo desenvolvedor.
   const reinicia = setup || ws !== antes.workspace || port !== antes.port || novo.lan !== antes.lan ||
-    novo.masterPassword !== antes.masterPassword || settings.getSegredo('anthropicKey') !== chaveAntes;
+    settings.getSegredo('anthropicKey') !== chaveAntes;
 
   // O home.txt so muda DEPOIS de a pasta ter o AI-GUIDE.md (o HomeValida dos .pas).
   const apontar = async () => {

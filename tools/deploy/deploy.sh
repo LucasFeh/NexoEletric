@@ -132,7 +132,7 @@ docker info >/dev/null 2>&1 || erro "$(whoami) nao fala com o daemon do docker. 
 # e dono root, ele da 'permission denied' la na frente, no meio de um comando que
 # fala de outra coisa.
 ENVFILE=${ALTIUMHUB_ENVFILE:-/etc/altiumhub/senha.env}
-[ -e "$ENVFILE" ] || erro "$ENVFILE nao existe. E o env_file do compose, com ALTIUMHUB_MASTER."
+[ -e "$ENVFILE" ] || erro "$ENVFILE nao existe. E o env_file do compose, com os segredos do host (pode estar vazio)."
 [ -r "$ENVFILE" ] || erro "$(whoami) nao consegue ler $ENVFILE.
    Conserto:  sudo chown root:altiumhub $ENVFILE && sudo chmod 640 $ENVFILE"
 

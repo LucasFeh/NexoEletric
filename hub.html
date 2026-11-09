@@ -1203,9 +1203,8 @@ const API = {
       es.addEventListener('error', e => { es.close(); rej(new Error(e.data || 'erro')); });
     });
   },
-  /* Exclusao: quem confere a senha mestre e o SERVIDOR - aqui ela so trafega, e o hub
-     nunca fica sabendo qual e. Devolve o erro em vez de estourar, porque o dialogo
-     continua aberto para a segunda tentativa. */
+  /* Exclusao (1.86.0, sem senha mestre): quem decide e o SERVIDOR, pelo login do Nexo Hub (o administrador ou o
+     responsavel pelo projeto). Devolve o erro em vez de estourar, porque o dialogo continua aberto. */
   /* Almoxarifado. As credenciais do Odoo ficam no servidor e nunca voltam por aqui —
      o GET só diz se existe senha gravada. A sincronização segue o mesmo par do run:
      POST reserva a corrida, o log chega por SSE. */
@@ -1263,11 +1262,11 @@ const API = {
       });
     });
   },
-  async remove(id, password) {
+  async remove(id) {
     try {
       const r = await fetch('/api/project/' + encodeURIComponent(id) + '/delete', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({}),
       });
       let j = {}; try { j = await r.json(); } catch (e) {}
       if (!r.ok) return { ok: false, status: r.status, error: j.error || ('HTTP ' + r.status) };
@@ -4500,7 +4499,17 @@ function cfgPaneProjeto(pane) {
   del.style.marginTop = '7px';
   del.disabled = !p || S.demoMode;
   del.onclick = () => { closeOverlay(); openDeleteDialog(); };
-  pane.append(del, cfgHint(S.demoMode ? 'cfg.deleteNoSrv' : 'cfg.deleteHint'));
+  const dica = cfgHint(S.demoMode ? 'cfg.deleteNoSrv' : 'cfg.deleteHint');
+  pane.append(del, dica);
+  /* 1.86.0: só o administrador do Nexo Hub ou o responsável exclui; para os outros o botão fica desligado, com o motivo */
+  if (p && !S.demoMode) permissaoDeExcluir(p.name).then(perm => {
+    if (perm.apagar) return;
+    del.disabled = true;
+    del.title = perm.motivoApagar || t('del.noLogin');
+    const m = el('p', 'cfgm-hint', perm.motivoApagar || t('del.noLogin'));
+    m.style.color = 'var(--warn)';
+    dica.after(m);
+  });
 }
 
 function cfgPaneLayout(pane) {
@@ -4543,12 +4552,24 @@ function cfgPaneAcoes(pane) {
   });
 }
 
-/* Excluir projeto. A senha mestre é conferida no SERVIDOR — o hub nunca fica sabendo
-   qual é. E a pasta não é apagada: vai inteira para Trash\, no mesmo workspace.
-   Sem `id` é o projeto aberto (Configurações › Projeto); com `id`, o que foi clicado com o
-   botão direito no painel Projetos (hub-shell.js), que pode não ser o aberto. */
-function openDeleteDialog(id) {
+/* Excluir projeto. 1.86.0 ("tira a senha mestre de vez, só admin ou responsável exclui"): quem exclui é o
+   administrador do Nexo Hub ou o responsável pelo projeto, pelo login. Quem decide é o SERVIDOR (hubserver.py »
+   api_project_delete: 403 sem_permissao para os outros); aqui o diálogo pergunta antes ao /api/equipe, e quem não pode
+   vê o motivo no lugar do botão — e, num projeto sem responsável, o "Assumir projeto…" (depois de assumir, o diálogo
+   volta e a pessoa, agora responsável, exclui). A pasta não é apagada: vai inteira para Trash\, no mesmo workspace.
+   Sem `id` é o projeto aberto (Configurações › Projeto); com `id`, o que foi clicado com o botão direito no painel
+   Projetos (hub-shell.js), que pode não ser o aberto. */
+async function permissaoDeExcluir(nome) {
+  try {
+    const r = await fetch('/api/equipe?projeto=' + encodeURIComponent(nome), { cache: 'no-store' });
+    const j = await r.json();
+    if (j && j.ok && j.permissao) return j.permissao;
+    return { apagar: false, motivoApagar: (j && j.error) || t('del.noLogin') };
+  } catch (e) { return { apagar: false, motivoApagar: t('del.noLogin') }; }
+}
+async function openDeleteDialog(id) {
   const p = id ? (S.projects || []).find(x => x.id === id) : proj(); if (!p) return;
+  const perm = await permissaoDeExcluir(p.name);
   const bd = el('div', 'backdrop center'); bd.onclick = e => { if (e.target === bd) closeOverlay(); };
   const d = el('div', 'dialog'); d.style.width = 'min(480px,100%)';
   d.append(el('h3', null, t('del.title')));
@@ -4560,35 +4581,45 @@ function openDeleteDialog(id) {
   what.style.cssText = 'font-size:12px;color:var(--text-2);margin:2px 0 0';
   d.append(nome, cam, what);
 
-  const pwd = el('input', 'input');
-  pwd.type = 'password'; pwd.autocomplete = 'off'; pwd.placeholder = t('del.pwd');
-  d.append(pwd);
+  const quem = el('p', null, perm.apagar ? t(perm.papel === 'responsavel' ? 'del.byOwner' : 'del.byAdmin')
+                                         : (perm.motivoApagar || t('del.noLogin')));
+  quem.dataset.del = perm.apagar ? 'pode' : 'motivo';
+  quem.style.cssText = 'font-size:12px;margin:4px 0 0;' + (perm.apagar ? 'color:var(--text-2)' : 'color:var(--warn)');
+  d.append(quem);
 
   const act = el('div'); act.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:6px';
-  const cancel = el('button', 'btn btn-ghost', t('del.cancel')); cancel.onclick = closeOverlay;
-  const ok = el('button', 'btn btn-danger', t('del.ok'));
-  const go = async () => {
-    if (!pwd.value) { toast(t('del.needPwd'), 'warn'); pwd.focus(); return; }
-    ok.disabled = true;
-    const r = await API.remove(p.id, pwd.value);
-    ok.disabled = false;
-    /* senha errada não fecha o diálogo: limpa o campo e devolve o foco */
-    if (!r.ok) {
-      toast(r.status === 403 ? t('del.wrong') : t('del.fail', { e: r.error }), 'err');
-      pwd.value = ''; pwd.focus(); return;
-    }
-    closeOverlay();
-    toast(t('del.done', { name: p.name, path: r.trash }), 'ok');
-    const idx = await API.index(); S.projects = idx.projects;
-    /* sem nenhum projeto a casca não tem o que desenhar (renderPipeline lê proj()
-       direto): recarregar cai no estado vazio do boot, que já existe */
-    if (!S.projects.length) { location.reload(); return; }
-    await loadProject(S.projects.some(x => x.id === S.projId) ? S.projId : S.projects[0].id);
-  };
-  ok.onclick = go;
-  pwd.onkeydown = e => { if (e.key === 'Enter') go(); };
-  act.append(cancel, ok); d.append(act); bd.append(d); $('#overlay').append(bd);
-  pwd.focus();
+  const cancel = el('button', 'btn btn-ghost', t(perm.apagar ? 'del.cancel' : 'del.close')); cancel.onclick = closeOverlay;
+  act.append(cancel);
+  if (perm.apagar) {
+    const ok = el('button', 'btn btn-danger', t('del.ok'));
+    ok.onclick = async () => {
+      ok.disabled = true;
+      const r = await API.remove(p.id);
+      ok.disabled = false;
+      if (!r.ok) {
+        toast(r.status === 403 ? (r.error || t('del.denied')) : t('del.fail', { e: r.error }), 'err');
+        return;
+      }
+      closeOverlay();
+      toast(t('del.done', { name: p.name, path: r.trash }), 'ok');
+      const idx = await API.index(); S.projects = idx.projects;
+      /* sem nenhum projeto a casca não tem o que desenhar (renderPipeline lê proj()
+         direto): recarregar cai no estado vazio do boot, que já existe */
+      if (!S.projects.length) { location.reload(); return; }
+      await loadProject(S.projects.some(x => x.id === S.projId) ? S.projId : S.projects[0].id);
+    };
+    act.append(ok);
+    setTimeout(() => ok.focus(), 0);
+  } else if (perm.assumir && window.HubEquipe && typeof HubEquipe.assumir === 'function') {
+    /* projeto sem responsável: assumir primeiro (hub-equipe.js); assumido, o diálogo volta com o Excluir */
+    const assume = el('button', 'btn', t('del.assume'));
+    assume.onclick = async () => {
+      closeOverlay();
+      if (await HubEquipe.assumir(p.name)) openDeleteDialog(p.id);
+    };
+    act.append(assume);
+  }
+  d.append(act); bd.append(d); $('#overlay').append(bd);
 }
 /* ═══ NAVEGAÇÃO / PERSISTÊNCIA ════════════════════════════════ */
 function syncURL() { location.hash = S.projId + '/' + S.tab; localStorage.setItem('altiumhub.project', S.projId); }

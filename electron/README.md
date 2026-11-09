@@ -84,7 +84,8 @@ contrato é o `..\nexohub\docs\CONTRATO.md` e o `docs/INTEGRACAO-NEXOCAD.md`):
   sessão que caiu é identificado (arquivo de PID + `netstat` + caminho do `python.exe`) e
   encerrado.
 - **Só loopback por padrão.** O hub tem rotas que gravam sem senha. O compartilhamento na
-  rede (para o link do BOM no tablet) é opcional, exige senha mestre e tranca o chat.
+  rede (para o link do BOM no tablet) é opcional e tranca o chat (só abre com alguém logado
+  no Nexo Hub desta máquina; sem senha mestre desde a 1.86.0).
   Com `--host 127.0.0.1` o hub só aceita `Host:` de loopback, o que protege contra DNS
   rebinding.
 - **Biblioteca da casa só leitura.** O `tools/symbols/config.json` do desktop sai sem

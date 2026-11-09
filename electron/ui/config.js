@@ -65,7 +65,6 @@ async function carrega() {
   $('odooDb').value = cfg.odooDb;
   $('port').value = cfg.port;
   $('lan').checked = cfg.lan;
-  $('masterPassword').value = cfg.masterPassword || '';
   pastaDev = Boolean(cfg.dev);
   $('autoUpdate').checked = cfg.autoUpdate;
   $('avisoLan').style.display = cfg.lan ? 'block' : 'none';
@@ -110,7 +109,6 @@ $('bSalvar').onclick = async () => {
       odooDb: $('odooDb').value.trim(),
       port: Number($('port').value),
       lan: $('lan').checked,
-      masterPassword: $('masterPassword').value,
       autoUpdate: $('autoUpdate').checked,
       updateToken: $('updateToken').value,
       apagarToken,

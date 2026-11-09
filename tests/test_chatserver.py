@@ -12,9 +12,10 @@ tentar sair para a internet, o teste acusa em vez de travar.
 
 O que este teste prende, nesta ordem:
 
-  1. SEM SENHA ninguém entra. O chat edita projeto e, no motor CLI, RODA O `claude` DA
-     MÁQUINA que serve o hub — isso vale mais que o clique errado que a senha mestre já
-     protegia no "Excluir projeto". Todas as seis rotas respondem 403, e senha errada também;
+  1. A PORTA: aberta por padrão (decisão do dono, 2026-09-16) e, com a tranca ligada
+     (ALTIUMHUB_CHAT_TRANCA), SEM LOGIN NO NEXO HUB ninguém entra. O chat edita projeto e, no
+     motor CLI, RODA O `claude` DA MÁQUINA que serve o hub. Todas as rotas respondem 403 sem
+     ninguém logado — e a senha mestre de antes (1.85.0) não abre mais nada (1.86.0);
   2. SEM MOTOR NENHUM o estado diz `ligado:false` com os DOIS motivos (o da bancada, que é
      instalar o Claude Code, e o do servidor, que é pôr a chave) — e a resposta não contém a
      chave, nem um pedaço dela, nem o tamanho dela, nem o caminho do executável (qualquer um
@@ -108,7 +109,7 @@ import chatserver as CS                                          # noqa: E402
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-SENHA = 'LucasGatao'
+SENHA = 'LucasGatao'     # a senha mestre de ANTES (até a 1.85.0): não abre mais nada, e não pode cair em arquivo
 CHAVE = 'sk-ant-de-mentira-0123456789'
 ABERTO = 'PRJ - ABERTO'
 OUTRO = 'PRJ - FECHADO'
@@ -349,9 +350,9 @@ try:
             ESQUEMA.replace(ABERTO, OUTRO))
 
     app = Flask(__name__)
-    CS.registra(app, tmp, SENHA)
+    CS.registra(app, tmp)
     cli = app.test_client()
-    CAB = {CS.CAB_SENHA: SENHA}
+    CAB = {}     # 1.86.0: nenhuma rota pede cabeçalho de senha (a tranca é o login do Nexo Hub)
     assert 'chat' in app.blueprints, 'registra() tem que pendurar o blueprint'
 
     # QUAL MOTOR ESTÁ ATRÁS é a primeira decisão de toda rota daqui, e ela depende da máquina:
@@ -371,9 +372,10 @@ try:
     # escuta em 0.0.0.0, a bancada dele está numa rede de empresa, e o painel tem um modo que
     # roda comando na máquina. Ele confirmou.
     #
-    # Então o que este teste prende NÃO é "a senha protege" — é que os dois estados existem e
-    # que cada um faz o que promete. A tranca volta com ALTIUMHUB_CHAT_SENHA, sem editar
-    # arquivo nenhum, e uma regressão que a deixasse presa (aberta ou fechada) some daqui.
+    # Então o que este teste prende NÃO é "a tranca protege" — é que os dois estados existem e
+    # que cada um faz o que promete. A tranca volta com ALTIUMHUB_CHAT_TRANCA (ou o nome antigo,
+    # ALTIUMHUB_CHAT_SENHA), sem editar arquivo nenhum; desde a 1.86.0 ela pede alguém logado no
+    # Nexo Hub desta máquina, e não mais a senha mestre (que saiu de vez).
     print('\n── 1. a porta ──')
     os.environ['ANTHROPIC_API_KEY'] = CHAVE
     portas = [('GET', '/api/chat/estado'), ('POST', '/api/chat/enviar'),
@@ -381,38 +383,51 @@ try:
               ('POST', '/api/chat/aplicar'), ('GET', '/api/chat/conversas'),
               ('GET', '/api/chat/conversa/c1'), ('DELETE', '/api/chat/conversa/c1')]
 
-    os.environ.pop(CS.ENV_TRANCA, None)
-    assert CS.exige_senha() is False
+    assert not hasattr(CS, 'CAB_SENHA') and not hasattr(CS, 'SENHA'), 'a senha mestre saiu do chat (1.86.0)'
+    for n in (CS.ENV_TRANCA, CS.ENV_TRANCA_ANTIGA):
+        os.environ.pop(n, None)
+    assert CS.exige_login() is False
     for metodo, rota in portas:
         r = cli.open(rota, method=metodo, json={'texto': 'oi'})
-        assert r.status_code != 403, '%s %s pediu senha com a porta aberta' % (metodo, rota)
+        assert r.status_code != 403, '%s %s recusou com a porta aberta' % (metodo, rota)
     r = cli.get('/api/chat/estado')
-    assert r.status_code == 200 and r.get_json()['exige_senha'] is False, r.get_json()
-    print('  ok  porta aberta: as %d rotas respondem sem senha, e o /estado avisa' % len(portas))
+    j = r.get_json()
+    assert r.status_code == 200 and j['exige_login'] is False and j['exige_senha'] is False, j
+    print('  ok  porta aberta: as %d rotas respondem sem login, e o /estado avisa' % len(portas))
 
-    # e a tranca, que é o caminho de volta em uma variável
-    os.environ[CS.ENV_TRANCA] = '1'
-    try:
-        assert CS.exige_senha() is True
-        for metodo, rota in portas:
-            r = cli.open(rota, method=metodo, json={'texto': 'oi'})
-            assert r.status_code == 403, \
-                '%s %s passou sem senha com a tranca ligada (%d)' % (metodo, rota, r.status_code)
-            assert CS.CAB_SENHA in (r.get_json() or {}).get('erro', ''), \
-                'a recusa tem que dizer ONDE pôr a senha: %s' % r.get_json()
-        r = cli.post('/api/chat/enviar', headers={CS.CAB_SENHA: 'LucasGatai'},
-                     json={'texto': 'oi'})
-        assert r.status_code == 403, 'senha errada tem que ser 403'
-        assert 'LucasGatai' not in r.get_data(as_text=True), \
-            'a recusa não pode ecoar o que veio — log e tela não são lugar de senha'
-        # a senha vale também no corpo: é assim que o /api/project/<id>/delete já a recebe
-        r = cli.get('/api/chat/conversas', json={'senha': SENHA})
-        assert r.status_code == 200, 'senha no corpo tem que valer também: %s' % r.get_json()
-        r = cli.get('/api/chat/estado', headers=CAB)
-        assert r.get_json()['exige_senha'] is True, r.get_json()
-        print('  ok  tranca ligada: 403 sem senha, senha errada não volta ecoada, corpo vale')
-    finally:
-        os.environ.pop(CS.ENV_TRANCA, None)
+    # e a tranca, que é o caminho de volta em uma variável: o login do Nexo Hub
+    QUEM = {'v': {'modo': 'deslogado', 'usuario': None}}
+    CS._sessao[0] = lambda: QUEM['v']
+    for nome_env in (CS.ENV_TRANCA, CS.ENV_TRANCA_ANTIGA):
+        os.environ[nome_env] = '1'
+        try:
+            assert CS.exige_login() is True
+            QUEM['v'] = {'modo': 'deslogado', 'usuario': None}
+            for metodo, rota in portas:
+                r = cli.open(rota, method=metodo, json={'texto': 'oi'})
+                assert r.status_code == 403, \
+                    '%s %s passou sem login com a tranca ligada (%d)' % (metodo, rota, r.status_code)
+                jj = r.get_json() or {}
+                assert jj.get('codigo') == 'sem_login' and 'Nexo Hub' in jj.get('erro', ''), \
+                    'a recusa tem que dizer que é o login do Nexo Hub: %s' % jj
+            # a senha mestre de antes, no cabeçalho ou no corpo, não abre nada
+            r = cli.post('/api/chat/enviar', headers={'X-Hub-Senha': SENHA}, json={'texto': 'oi', 'senha': SENHA})
+            assert r.status_code == 403, 'a senha mestre de antes não pode abrir o chat'
+            assert SENHA not in r.get_data(as_text=True), 'a recusa não pode ecoar o que veio'
+            # Hub antigo / Hub fora: sem login, fechado
+            for modo in ('legado', 'fora'):
+                QUEM['v'] = {'modo': modo, 'usuario': None}
+                assert cli.get('/api/chat/conversas').status_code == 403, modo
+            # alguém logado no Nexo Hub: abre
+            QUEM['v'] = {'modo': 'login', 'usuario': {'id': 'u1', 'nome': 'Ana', 'admin': False}}
+            r = cli.get('/api/chat/conversas')
+            assert r.status_code == 200, 'logado no Nexo Hub tem que abrir: %s' % r.get_json()
+            r = cli.get('/api/chat/estado')
+            assert r.get_json()['exige_login'] is True and r.get_json()['exige_senha'] is False, r.get_json()
+        finally:
+            os.environ.pop(nome_env, None)
+    CS._sessao[0] = None
+    print('  ok  tranca ligada: 403 sem login no Nexo Hub (e a senha mestre de antes não abre), logado abre')
 
     # ═══ 2. estado sem motor nenhum, e estado no motor da chave ═══
     print('\n── 2. o estado ──')
@@ -1320,6 +1335,7 @@ try:
 finally:
     CS.TRANSPORTE = None
     CS.ABRIR = None
+    CS._sessao[0] = None
     CS.motor = motor_real
     CS._cache_motor.clear()
     CS.TETO_FERRAMENTAS = teto_real

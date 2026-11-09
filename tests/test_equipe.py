@@ -147,17 +147,68 @@ class Permissao(Base):
         self.modo_hub = 'legado'
         self.assertEqual(self.salva('schematic.js', esquema([FOLHA])).status_code, 200)
 
-    def test_apagar_projeto_pelo_login(self):
-        self.com_dono()
+    def apaga(self):
         H.build_index(self.tmp)
+        return self.h.post('/api/project/p1/delete', json={'password': 'LucasGatao'})   # a senha mestre de antes nao vale
+
+    def recusa(self, trecho):
+        r = self.apaga()
+        self.assertEqual(r.status_code, 403, r.get_json())
+        j = r.get_json()
+        self.assertEqual(j['codigo'], 'sem_permissao')
+        self.assertNotIn('mestre', j)
+        self.assertIn(trecho, j['error'])
+        self.assertTrue(os.path.isdir(self.pdir), 'recusado nao move nada')
+        return j
+
+    def test_apagar_projeto_pelo_login(self):
+        """1.86.0: "tira a senha mestre de vez, so admin ou responsavel exclui" """
+        self.com_dono([COLAB])
+        # colaborador e quem nao e da equipe: 403 sem_permissao, com o motivo (e a senha mestre nao abre nada)
+        self.como(COLAB)
+        self.recusa('Só o administrador ou o responsável (Davi Dono) exclui este projeto')
         self.como(ESTRANHO)
-        r = self.h.post('/api/project/p1/delete', json={})
-        self.assertEqual((r.status_code, r.get_json().get('mestre')), (403, True))
-        self.como(DONO)                                   # o responsavel apaga sem a senha mestre
-        r = self.h.post('/api/project/p1/delete', json={})
+        self.recusa('Só o administrador ou o responsável (Davi Dono) exclui este projeto')
+        # sem login, Hub antigo e Hub fora: ninguem exclui
+        self.como(None)
+        self.recusa('Entre no Nexo Hub')
+        self.como(ADMIN)
+        self.modo_hub = 'legado'
+        self.recusa('Atualize o Nexo Hub')
+        self.modo_hub = 'fora'
+        self.recusa('O Nexo Hub não respondeu')
+        self.modo_hub = 'login'
+        # o que a interface le: a permissao (e a lista da arvore) diz quem exclui e por que nao
+        self.como(COLAB)
+        p = self.c.get('/api/equipe?projeto=P1').get_json()['permissao']
+        self.assertEqual((p['apagar'], p['motivoApagar']), (False, 'Só o administrador ou o responsável (Davi Dono) exclui este projeto'))
+        e = self.c.get('/api/equipes').get_json()['projetos']['P1']
+        self.assertEqual((e['apagar'], e['motivoApagar']), (False, p['motivoApagar']))
+        self.como(DONO)
+        self.assertTrue(self.c.get('/api/equipes').get_json()['projetos']['P1']['apagar'])
+        # o responsavel exclui, pelo login
+        r = self.apaga()
         self.assertEqual(r.status_code, 200, r.get_json())
         self.assertFalse(os.path.isdir(self.pdir))
 
+    def test_apagar_projeto_pelo_admin(self):
+        self.com_dono()
+        self.como(ADMIN)
+        r = self.apaga()
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertFalse(os.path.isdir(self.pdir))
+        self.assertTrue(any(n.startswith('P1-') for n in os.listdir(os.path.join(self.tmp, 'Trash'))))
+
+    def test_apagar_projeto_sem_responsavel(self):
+        """projeto sem responsavel: so o admin; os outros veem o motivo e podem Assumir projeto antes"""
+        self.como(ESTRANHO)
+        j = self.recusa('Este projeto não tem responsável: só o administrador exclui')
+        self.assertTrue(j['assumir'])
+        self.assertIn('Assuma o projeto', j['error'])
+        self.assertTrue(self.c.post('/api/equipe/assumir', json={'projeto': 'P1'}).get_json()['ok'])
+        r = self.apaga()
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertFalse(os.path.isdir(self.pdir))
 
 class Equipe(Base):
     def test_convidar_remover_trocar(self):

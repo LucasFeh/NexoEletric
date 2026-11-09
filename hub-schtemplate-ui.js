@@ -197,9 +197,14 @@ function abreParametros(){
   const lista = el('div', 'st-list');
   const grade = el('div', 'st-kvl');
   const campos = [];
+  /* 1.86.0: o código da placa / do equipamento que o projeto não tem mostra "PROJETO NÃO DEFINIDO" (só de dica: não
+     é gravado), e o "Definir projeto…" do rodapé abre o catálogo */
+  const nd = T.camposNaoDefinidos ? T.camposNaoDefinidos(sch.params, api.schematic.project || '') : {};
   const add = (k, v) => {
     const ik = el('input'); ik.value = k; ik.placeholder = 'Nome';
-    const iv = el('input'); iv.value = v; iv.placeholder = 'valor';
+    const iv = el('input'); iv.value = T.ehNaoDefinido && T.ehNaoDefinido(v) ? '' : v;
+    iv.placeholder = nd[k] ? T.NAO_DEFINIDO : 'valor';
+    if (nd[k]) iv.title = 'o projeto ainda não tem este código: use o Definir projeto (o catálogo de todos os produtos)';
     const x = botao('✕', 'remover', () => { ik.remove(); iv.remove(); x.remove(); campos.splice(campos.indexOf(par), 1); });
     const par = [ik, iv];
     campos.push(par); grade.append(ik, iv, x);
@@ -209,11 +214,16 @@ function abreParametros(){
   const ft = el('div', 'st-foot');
   const fecha = () => { ov.remove(); document.removeEventListener('keydown', esc, true); };
   const esc = e => { if (e.key === 'Escape'){ e.stopPropagation(); fecha(); } };
-  ft.append(botao('+ parâmetro', null, () => add('', '')), el('span', 'sp'),
+  ft.append(botao('+ parâmetro', null, () => add('', '')));
+  if (root.HubCatalogo && typeof root.HubCatalogo.abreDaFolha === 'function')
+    ft.append(botao('Definir projeto…', 'o código da placa e o código e o nome do equipamento, do catálogo de todos os produtos',
+      () => { fecha(); root.HubCatalogo.abreDaFolha(); }));
+  ft.append(el('span', 'sp'),
     botao('Cancelar', null, fecha),
     botao('Aplicar', 'grava no cabeçalho do schematic.js (Salvar para ir ao disco)', () => {
       const o = {};
-      for (const [ik, iv] of campos) if (ik.value.trim() && iv.value !== '') o[ik.value.trim()] = iv.value;
+      /* "PROJETO NÃO DEFINIDO" nunca vira valor gravado */
+      for (const [ik, iv] of campos) if (ik.value.trim() && iv.value !== '' && !(T.ehNaoDefinido && T.ehNaoDefinido(iv.value))) o[ik.value.trim()] = iv.value;
       const s = T.serializaParams(o);
       if (s) sch.params = s; else delete sch.params;
       /* o cabeçalho não entra no desfazer (ele guarda só os itens): marca sujo e redesenha */

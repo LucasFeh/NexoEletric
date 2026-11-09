@@ -4,6 +4,42 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.86.0 — 2026-11-09
+
+**A senha mestre saiu de vez: só o administrador ou o responsável exclui. E o projeto sem código mostra "PROJETO NÃO
+DEFINIDO" no quadro da folha, com um clique para defini-lo.**
+- **Excluir projeto** (botão direito na árvore, ou Configurações do hub › Projeto): só o **administrador do Nexo Hub**
+  ou o **responsável pelo projeto**, pelo login. Não existe mais senha nenhuma no diálogo: ele diz "Você é o
+  responsável…"/"Você é administrador…" e exclui (a pasta continua indo inteira para `Trash\`).
+  - Para os outros o "Excluir projeto…" fica **desligado**, com o motivo logo abaixo ("Só o administrador ou o
+    responsável (Paula Prado) exclui este projeto"), e o botão das Configurações também.
+  - **Projeto sem responsável:** só o administrador. Os outros veem "Este projeto não tem responsável… Assuma o
+    projeto" e um botão **Assumir projeto…**; assumido, o diálogo volta com o Excluir.
+  - Sem login (Nexo Hub antigo, Nexo Hub fora do ar, ninguém logado): ninguém exclui. O servidor confere de novo e
+    responde 403 `sem_permissao` (a janela Rust repassa a mesma rota).
+- **Apagar revisão** (Histórico › Revisões): a mesma regra — o administrador ou o responsável pelo projeto (antes era
+  só o administrador, e o Nexo Hub antigo pedia a senha mestre). Para os outros o Apagar fica desligado, com o motivo.
+- **Chat do Claude na rede:** com o "Compartilhar na rede local" ligado, o chat abre só com alguém logado no Nexo Hub
+  desta máquina (era a senha mestre). O campo "Senha mestre" saiu das Configurações do aplicativo; a que estiver
+  gravada no `settings.json` é ignorada e some na próxima gravação, e a que o chat guardava no navegador é apagada.
+- **"PROJETO NÃO DEFINIDO":** no quadro de título da folha (template da casa), o **código da placa** e o **código do
+  equipamento** que o projeto ainda não tem aparecem como **PROJETO NÃO DEFINIDO** (antes, em branco). Na tela sai em
+  vermelho, com um tracejado em volta e a mão do mouse; **clicar abre o Definir projeto** (o catálogo de todos os
+  produtos). Escolhida a placa e o equipamento, o texto some e entram os códigos.
+  - O texto nunca é gravado no projeto: é só o desenho. O código da placa que o nome do projeto traz
+    ("PDCD-DI261939 (PTYPE)") e os códigos dos projetos vindos do Altium (os nomes antigos) continuam valendo.
+  - **No PDF do esquema** ele sai como o resto do quadro (na cor do template, sem o destaque): o projeto está
+    indefinido, e a folha impressa diz isso em vez de um campo em branco que parece esquecido. Gerber e PDF da PCB
+    não mudam (a logo da placa continua com `.CodigoDaPlaca`).
+  - Também em Parâmetros do projeto (o campo vazio mostra PROJETO NÃO DEFINIDO e há um "Definir projeto…") e no
+    resumo do Definir projeto nas Configurações.
+- Por dentro: `hubserver.py` (sem `MASTER_PASSWORD`/`ALTIUMHUB_MASTER`; `api_project_delete` pelo
+  `tools/rotas/equipe.py » recusa_apagar`), `tools/rotas/aprovacao.py` (apagar revisão pelo login), `/api/equipe` e
+  `/api/equipes` com `apagar`/`motivoApagar`, `tools/chat/chatserver.py` (a tranca `ALTIUMHUB_CHAT_TRANCA` pede o
+  login; o `ALTIUMHUB_CHAT_SENHA` antigo ainda liga a tranca, sem senha), `hub-schtemplate.js` (`NAO_DEFINIDO`,
+  `naoDefinidos`), `schframe.js` (o destaque e o clique), `electron/lib/settings.js` (`masterPassword` some na leitura)
+  e `tools/deploy/*` sem a senha.
+
 ## 1.85.0 — 2026-11-09
 
 **Projeto desatualizado: quem está com o projeto aberto fica sabendo na hora que outra pessoa mudou, e escolhe quando

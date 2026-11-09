@@ -38,10 +38,9 @@ Environment=PYTHONIOENCODING=utf-8
 # carimbo do ledger, nome das pastas do Trash) sai 3 h adiantada.
 Environment=TZ=America/Sao_Paulo
 
-# A senha mestre NAO entra em arquivo versionado. Vai num drop-in chmod 600:
-#   /etc/systemd/system/altiumhub.service.d/senha.conf
-#   [Service]
-#   Environment=ALTIUMHUB_MASTER=<senha gerada>
+# 1.86.0: o hub nao tem mais senha mestre (ALTIUMHUB_MASTER saiu): excluir projeto e apagar revisao
+# sao do administrador do Nexo Hub ou do responsavel pelo projeto, pelo login. Um drop-in antigo com
+# Environment=ALTIUMHUB_MASTER pode ser apagado; ninguem le.
 
 Restart=always
 RestartSec=2

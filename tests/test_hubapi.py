@@ -104,11 +104,14 @@ finally:
     H.ROOT = real_root
     shutil.rmtree(tmp, ignore_errors=True)
 
-# Exclusao de projeto: senha errada nao pode encostar na pasta, e senha certa MOVE
-# (nao apaga). Roda num workspace de mentira - ROOT e lido em tempo de chamada.
-# 1.84.0: o responsavel e o admin do Nexo Hub excluem pelo login (tests/test_equipe.py); aqui o Hub e o "antigo", sem
-# login (404), e vale a senha mestre de sempre -- o Hub desta maquina fica de fora
-H._equipe._provedor[0] = lambda: ('http', 404)
+# Exclusao de projeto: quem nao pode nao encosta na pasta, e quem pode MOVE (nao apaga). Roda num workspace de
+# mentira - ROOT e lido em tempo de chamada. 1.86.0: a senha mestre saiu de vez; exclui o administrador do Nexo Hub ou o
+# responsavel pelo projeto, pelo login (a matriz inteira em tests/test_equipe.py). Aqui o Hub e de mentira: o "antigo"
+# (sem login, 404), ninguem logado, e o administrador.
+assert not hasattr(H, 'MASTER_PASSWORD'), 'a senha mestre saiu do hubserver (1.86.0)'
+SES = {'v': ('http', 404)}
+H._equipe._provedor[0] = lambda: SES['v']
+ADM = {'id': 'u-adm', 'login': 'adm', 'nome': 'Ana Admin', 'admin': True, 'aprovador': False}
 tmp = tempfile.mkdtemp()
 alvo = os.path.join(tmp, 'Projects', 'ZZ_Teste')
 os.makedirs(alvo)
@@ -118,28 +121,35 @@ real_root, H.ROOT = H.ROOT, tmp
 try:
     H.build_index(tmp)
     cli = H.app.test_client()
-    r = cli.post('/api/project/zz-teste/delete', json={'password': 'nao e essa'})
-    assert r.status_code == 403, 'senha errada barra'
-    assert os.path.isdir(alvo), 'senha errada nao move nada'
+    # Hub antigo (sem login): a senha mestre de antes nao abre mais nada
+    for corpo in ({'password': 'LucasGatao'}, {}):
+        r = cli.post('/api/project/zz-teste/delete', json=corpo)
+        assert r.status_code == 403 and r.get_json()['codigo'] == 'sem_permissao', (corpo, r.get_json())
+        assert 'Atualize o Nexo Hub' in r.get_json()['error'], r.get_json()
+        assert os.path.isdir(alvo), 'recusado nao move nada'
+    # ninguem logado no Nexo Hub: tambem nao
+    SES['v'] = {'ok': True, 'logado': False, 'usuario': None}
     r = cli.post('/api/project/zz-teste/delete', json={})
-    assert r.status_code == 403, 'sem senha barra'
-    assert os.path.isdir(alvo), 'sem senha nao move nada'
+    assert r.status_code == 403 and 'Entre no Nexo Hub' in r.get_json()['error'], r.get_json()
+    assert os.path.isdir(alvo), 'sem login nao move nada'
+    # o administrador do Nexo Hub exclui pelo login
+    SES['v'] = {'ok': True, 'logado': True, 'usuario': ADM}
     nota = os.path.join(tmp, '.altiumhub', 'nexobd-apagar.json')
     os.environ['ALTIUMHUB_NEXOBD'] = '1'    # app desktop com o NexoBD: anota para o armazem apagar la
     try:
-        r = cli.post('/api/project/zz-teste/delete', json={'password': H.MASTER_PASSWORD})
+        r = cli.post('/api/project/zz-teste/delete', json={})
     finally:
         del os.environ['ALTIUMHUB_NEXOBD']
-    assert r.status_code == 200, 'senha certa passa'
+    assert r.status_code == 200, ('o administrador exclui', r.get_json())
     assert not os.path.exists(alvo), 'saiu de Projects'
     with open(nota, encoding='utf-8') as f:
         assert json.load(f) == ['ZZ_Teste'], 'o nome da pasta fica anotado para apagar no NexoBD'
     lixo = os.path.join(tmp, r.get_json()['trash'])
     assert os.path.isfile(os.path.join(lixo, 'board.js')), 'a pasta inteira foi para o Trash'
     assert not any(p['id'] == 'zz-teste' for p in H.build_index(tmp)['projects']), 'sumiu do indice'
-    assert cli.post('/api/project/zz-teste/delete',
-                    json={'password': H.MASTER_PASSWORD}).status_code == 404
+    assert cli.post('/api/project/zz-teste/delete', json={}).status_code == 404
 finally:
+    SES['v'] = ('http', 404)                # o resto do arquivo: o Hub "antigo", como antes
     H.ROOT = real_root
     shutil.rmtree(tmp, ignore_errors=True)
     H.build_index(real_root)

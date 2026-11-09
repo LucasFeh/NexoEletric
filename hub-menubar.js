@@ -40,7 +40,7 @@
     /* o projeto novo com o código da placa no catálogo da casa (hub-projnovo.js, pelo hub-shell.js) */
     if (typeof window.__hubNovoProjeto === 'function') file.unshift({ rot:'Novo projeto…', tecla:'', f:() => window.__hubNovoProjeto() });
     /* a equipe do projeto aberto (hub-equipe.js, 1.84.0): responsável, colaboradores e o convite; e o "Assumir projeto"
-       pelo login (o administrador sempre; os outros, num projeto sem responsável; sem senha mestre) */
+       pelo login (o administrador sempre; os outros, num projeto sem responsável) */
     if (typeof window.__hubEquipeProjeto === 'function') {
       const ap = typeof window.__hubEquipePodeAssumir === 'function' ? window.__hubEquipePodeAssumir() : { pode:true };
       const assumir = { rot:'Assumir projeto…', tecla:'', f:() => window.__hubEquipeAssumir() };

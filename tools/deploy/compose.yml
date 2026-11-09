@@ -90,10 +90,11 @@ services:
       # arquivo nao vai para o senha.env, que e para o que nao pode ser lido.
       HOME: /srv/altiumhub/shared/claude-home
       ALTIUMHUB_CLAUDE: /srv/altiumhub/shared/claude-home/.local/bin/claude
-    # A senha mestre nunca entra em arquivo versionado. Crie no host:
-    #   printf 'ALTIUMHUB_MASTER=%s\n' "$(openssl rand -base64 24)" \
-    #     | sudo tee /etc/altiumhub/senha.env
-    #   sudo chmod 600 /etc/altiumhub/senha.env
+    # Os segredos do host (a chave da Anthropic, o CLAUDE_CODE_OAUTH_TOKEN) nunca entram em
+    # arquivo versionado. Crie no host (pode nascer vazio):
+    #   sudo install -m 640 -g altiumhub /dev/null /etc/altiumhub/senha.env
+    # 1.86.0: a senha mestre do hub (ALTIUMHUB_MASTER) saiu; uma linha antiga dela no arquivo
+    # pode ser apagada, ninguem le.
     env_file:
       - /etc/altiumhub/senha.env
 

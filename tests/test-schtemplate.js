@@ -174,4 +174,50 @@ const tf = { fontes:{ '1':{ nome:'Times New Roman', tam:10 } } };
 eq(T.fonteId(tf, 10), 1, 'fonte existente');
 eq(T.fonteId(tf, 14, 'Arial'), 2, 'fonte nova');
 
+/* ── 9. "PROJETO NÃO DEFINIDO" (1.86.0): o código da placa e o do equipamento que ninguém deu ── */
+{
+  eq(T.NAO_DEFINIDO, 'PROJETO NÃO DEFINIDO', 'o texto, na caixa do template (maiúsculas)');
+  const c0 = T.contexto({ tpl:casa, proj:'Revisao=REV.A', projeto:'Projeto qualquer', faltante:'' });
+  eq([T.resolve('=CodigoDaPlaca', c0), T.resolve('=CodigoDoEquipamento', c0)], [T.NAO_DEFINIDO, T.NAO_DEFINIDO],
+     'sem Definir projeto: os dois códigos dizem PROJETO NÃO DEFINIDO');
+  eq(T.resolve('=NomeDoEquipamento', c0), '', 'o nome do equipamento continua vazio (só os códigos)');
+  eq(T.resolve('=Title', c0), '', 'os outros campos não mudam');
+  /* o Definir projeto (e o Altium com os nomes de antes) tiram o texto; o código do nome do projeto vale para a placa */
+  const cd = T.contexto({ proj:'CodigoDaPlaca=PBIDP-DI261944;CodigoDoEquipamento=EQP-DI261945', projeto:'x' });
+  eq([T.resolve('=CodigoDaPlaca', cd), T.resolve('=CodigoDoEquipamento', cd)], ['PBIDP-DI261944', 'EQP-DI261945'], 'definido: os códigos');
+  const ca = T.contexto({ proj:'Desenho_linha_unica=CBM-DI251876;Equipamento_linha_dois=EQ-DI1', projeto:'x' });
+  eq([T.resolve('=CodigoDaPlaca', ca), T.resolve('=CodigoDoEquipamento', ca)], ['CBM-DI251876', 'EQ-DI1'], 'projeto do Altium (nomes antigos) não quebra');
+  const cn = T.contexto({ projeto:'PDCD-DI261939 (PTYPE)' });
+  eq([T.resolve('=CodigoDaPlaca', cn), T.resolve('=CodigoDoEquipamento', cn)], ['PDCD-DI261939', T.NAO_DEFINIDO],
+     'o código da placa que o nome traz continua; o equipamento, não definido');
+  /* nunca vira valor: o cabeçalho que traga o texto conta como vazio; desligável; o editor (cru) vê o campo */
+  const cm = T.contexto({ proj:'CodigoDaPlaca=projeto não definido', projeto:'x' });
+  eq(T.resolve('=CodigoDaPlaca', cm), T.NAO_DEFINIDO, 'o texto gravado por engano não é código');
+  ok(T.ehNaoDefinido(' Projeto Não Definido ') && !T.ehNaoDefinido('PDCD-DI1'), 'ehNaoDefinido');
+  eq(T.resolve('=CodigoDaPlaca', T.contexto({ projeto:'x', naoDefinido:false, faltante:'' })), '', 'naoDefinido:false desliga');
+  eq(T.resolve('=CodigoDaPlaca', T.contexto({ projeto:'x', cru:true })), '=CodigoDaPlaca', 'cru: o editor vê o campo');
+  eq(T.camposNaoDefinidos('', 'x'), { CodigoDaPlaca:true, CodigoDoEquipamento:true }, 'camposNaoDefinidos: nada definido');
+  eq(T.camposNaoDefinidos('CodigoDoEquipamento=EQ-DI1', 'PDCD-DI261939'), { CodigoDaPlaca:false, CodigoDoEquipamento:false }, 'definidos');
+  /* as primitivas marcam o campo (a tela destaca e o clique acha); a caixa cobre o texto */
+  const P0 = T.primitivas(casa, null, { proj:'', projeto:'x', faltante:'' });
+  const nd = P0.filter(p => p.naoDefinido);
+  eq(nd.map(p => [p.naoDefinido, p.s]).sort(), [['CodigoDaPlaca', T.NAO_DEFINIDO], ['CodigoDoEquipamento', T.NAO_DEFINIDO]], 'as duas primitivas marcadas');
+  const caixas = T.naoDefinidos(casa, null, { proj:'', projeto:'x', faltante:'' });
+  eq(caixas.map(x => x.campo).sort(), ['CodigoDaPlaca', 'CodigoDoEquipamento'], 'naoDefinidos: um por campo');
+  const placa = caixas.find(x => x.campo === 'CodigoDaPlaca').caixa;
+  ok(placa.x1 < 7753.317 && placa.x2 > 7753.317 && placa.y1 < 354.331 && placa.y2 > 354.331, 'a caixa da placa envolve a âncora do campo');
+  ok(placa.x1 > 6732 && placa.x2 < 8819, 'e cabe na célula do código da placa no quadro da casa');
+  eq(T.naoDefinidos(casa, null, { proj:'CodigoDaPlaca=P-DI1;CodigoDoEquipamento=E-DI2', projeto:'x' }), [], 'definido: nada para clicar');
+  /* o desenho: na tela (destacaNaoDefinido) em vermelho com o tracejado; no PDF (sem destaque), na cor do template */
+  const traco = [], cores = [];
+  const ctx = { save(){}, restore(){}, translate(){}, rotate(){}, scale(){}, beginPath(){}, moveTo(){}, lineTo(){}, stroke(){},
+                fillRect(){}, arc(){}, ellipse(){}, closePath(){}, fill(){}, drawImage(){}, setLineDash(){},
+                strokeRect(){ traco.push(this.strokeStyle); }, fillText(s){ if (s === T.NAO_DEFINIDO) cores.push(this.fillStyle); } };
+  T.desenha(ctx, casa, null, { proj:'', projeto:'x', faltante:'' }, { esc:1, destacaNaoDefinido:true });
+  eq([cores, traco.filter(c => c === '#d32f2f').length], [['#d32f2f', '#d32f2f'], 2], 'na tela: vermelho e tracejado em volta');
+  cores.length = 0; traco.length = 0;
+  T.desenha(ctx, casa, null, { proj:'', projeto:'x', faltante:'' }, { esc:1 });
+  eq([cores, traco.filter(c => c === '#d32f2f').length], [['#110f0a', '#110f0a'], 0], 'no PDF: a cor do template, sem destaque');
+}
+
 console.log('test-schtemplate: ' + n + ' verificações ok');

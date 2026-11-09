@@ -11,7 +11,7 @@ no terminal, com o login que já está na máquina — não há chave de API em 
 arquivo, de propósito.
 
 O preço dessa escolha está dito por inteiro em MODOS, logo abaixo: isto é um acesso de
-terminal. Quem abre o painel e sabe a senha mestre manda no `claude` da máquina que roda o
+terminal. Quem abre o painel (com a tranca ligada, quem está logado no Nexo Hub) manda no `claude` da máquina que roda o
 hubserver, com as ferramentas dele (Read, Edit, Bash…). Não é a mesma coisa que o motor da
 API, onde as ferramentas eram as do `operador.py` e a cerca era código meu.
 
@@ -90,12 +90,12 @@ MODOS = {
 #
 # O que 'bypassPermissions' quer dizer NESTA instalacao, medido: o hubserver escuta em
 # 0.0.0.0, a bancada fica numa rede de empresa, e neste modo a cerca do PreToolUse nem e
-# pendurada. Somado a ALTIUMHUB_CHAT_SENHA vazia (a porta aberta, ver chatserver.py), quem
+# pendurada. Somado a ALTIUMHUB_CHAT_TRANCA vazia (a porta aberta, ver chatserver.py), quem
 # alcanca a porta do hub roda comando na maquina.
 #
 # Sao DUAS trancas independentes, de proposito:
 #     MODO_PADRAO                 -> o quanto o chat pode fazer sem que ninguem escolha
-#     ALTIUMHUB_CHAT_SENHA=1      -> o chat volta a pedir a senha mestre
+#     ALTIUMHUB_CHAT_TRANCA=1     -> o chat so abre com alguem logado no Nexo Hub (1.86.0: sem senha mestre)
 MODO_PADRAO = 'plan'
 
 # aliases que o CLI aceita em --model. Nome cheio também passa; modelo desconhecido é

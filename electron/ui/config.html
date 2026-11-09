@@ -78,12 +78,12 @@
     <h2>Rede e segurança</h2>
     <div class="linha">
       <div class="campo" style="width:140px"><span>Porta</span><input type="number" id="port" min="1024" max="65535"></div>
-      <div class="campo grow"><span>Senha mestre (excluir projeto, chat)</span><input type="password" id="masterPassword" placeholder="vazia = a senha padrão do hub" autocomplete="new-password"></div>
+      <p class="nota grow">Excluir projeto e apagar revisão são do administrador do Nexo Hub ou do responsável pelo projeto, pelo login (sem senha mestre).</p>
     </div>
     <label class="check"><input type="checkbox" id="lan">
       <span><b>Compartilhar na rede local</b>
       <small>Deixa outras máquinas abrirem o hub DESTE computador. Não é preciso para o BOM: o link copiado já é o do servidor central.</small></span></label>
-    <div class="aviso warn" id="avisoLan" style="display:none">Com isto ligado, qualquer máquina da rede alcança esta pasta de trabalho pelo hub, inclusive o <code>hub-almox.json</code> com a senha do Odoo, e pode gravar nos projetos. Defina uma senha mestre própria.</div>
+    <div class="aviso warn" id="avisoLan" style="display:none">Com isto ligado, qualquer máquina da rede alcança esta pasta de trabalho pelo hub, inclusive o <code>hub-almox.json</code> com a senha do Odoo, e pode gravar nos projetos. O chat do Claude passa a abrir só com alguém logado no Nexo Hub desta máquina.</div>
   </div>
 
   <div class="card">

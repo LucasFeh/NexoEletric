@@ -19,6 +19,8 @@ A EQUIPE: Projects/<p>/equipe.json (viaja para o NexoBD com o projeto)
    colaboradores:[{id, login, nome, convidado_por:{id, nome}, em}]}
   Pode editar = admin || responsavel || colaborador || projeto sem responsavel. Projeto novo: responsavel = quem criou.
   Projeto antigo sem responsavel: qualquer logado edita e pode "Assumir o projeto"; o admin troca o responsavel.
+  Excluir o projeto (e apagar uma revisao dele) = admin || responsavel (1.86.0: a senha mestre saiu de vez). Projeto sem
+  responsavel: so o admin (os outros assumem antes). Sem login (Hub antigo, Hub fora, ninguem logado): ninguem.
 
 O HISTORICO: Projects/<p>/Historico/<id do usuario>.jsonl, uma linha por modificacao:
   {id, quando, ate, usuario:{id, login, nome}|null, origem:"app"|"ia", arquivo, tipo, mudancas:[texto], gravacoes, ...}
@@ -34,7 +36,7 @@ Rotas:
   GET  /api/sessao/usuarios              -> {ok, usuarios:[...]} (a equipe ativa do Hub, para convidar)
   GET  /api/sessao/foto?id=&v=           -> a foto (pelo Hub; 404 sem foto)
   GET  /api/equipe?projeto=              -> {ok, equipe, permissao, usuario, modo}
-  GET  /api/equipes                      -> {ok, usuario, modo, projetos:{<nome>: {papel, pode, responsavel}}}
+  GET  /api/equipes                      -> {ok, usuario, modo, projetos:{<nome>: {papel, pode, responsavel, apagar, motivoApagar}}}
   POST /api/equipe/convidar {projeto, id}       o responsavel ou o admin convida (o nome vem do Hub, nao da pagina)
   POST /api/equipe/remover {projeto, id}        o responsavel ou o admin tira (ou a propria pessoa sai)
   POST /api/equipe/responsavel {projeto, id}    so o admin troca o responsavel
@@ -237,11 +239,44 @@ def permissao(pdir, s=None, eq=None):
            'sair': papel == 'colaborador'}
     if papel == 'leitura':
         out['motivo'] = mensagem(resp)
+    if not out['apagar']:
+        out['motivoApagar'] = mensagem_apagar(modo, u, resp)
+        out['motivoApagarRevisao'] = mensagem_apagar(modo, u, resp, revisao=True)
     return out
+
+
+def mensagem_apagar(modo, u, resp, revisao=False):
+    """por que quem esta logado nao exclui o projeto (ou, revisao=True, nao apaga revisoes dele). 1.86.0: a senha mestre
+    saiu; so o administrador do Nexo Hub ou o responsavel pelo projeto"""
+    faz, fazer = ('apaga revisões', 'apagar revisões') if revisao else ('exclui', 'excluir')
+    if modo == 'legado':
+        return ('Atualize o Nexo Hub para 2.26.0+: %s vem do login dele (só o administrador ou o responsável)'
+                % ('apagar revisão' if revisao else 'excluir projeto'))
+    if modo == 'fora':
+        return MSG_FORA + ': só o administrador ou o responsável pelo projeto ' + faz
+    if not u:
+        return 'Entre no Nexo Hub: só o administrador ou o responsável pelo projeto ' + faz
+    if not resp:
+        return ('Este projeto não tem responsável: só o administrador %s. '
+                'Assuma o projeto (Arquivo › Assumir projeto…) para poder %s' % (faz, fazer))
+    return 'Só o administrador ou o responsável (%s) %s' % (resp.get('nome') or '—',
+                                                          'apaga revisões deste projeto' if revisao else 'exclui este projeto')
 
 
 def mensagem(resp):
     return 'Só o responsável (%s) e os colaboradores convidados mexem neste projeto' % ((resp or {}).get('nome') or '—')
+
+
+def recusa_apagar(pdir, s=None, revisao=False):
+    """None = pode excluir o projeto (revisao=True: apagar uma revisao dele); senao o corpo da resposta 403. 1.86.0: so o
+    administrador do Nexo Hub ou o responsavel pelo projeto -- sem a senha mestre, e sem login nao ha excecao (Hub antigo,
+    Hub fora, ninguem logado)"""
+    s = s or sessao()
+    p = permissao(pdir, s)
+    if p['apagar']:
+        return None
+    return {'ok': False, 'codigo': 'sem_permissao', 'error': mensagem_apagar(s['modo'], s.get('usuario'), p['responsavel'], revisao),
+            'responsavel': p['responsavel'], 'modo': p['modo'], 'assumir': p['assumir']}
 
 
 def recusa_gravar(pdir):
@@ -811,7 +846,8 @@ def registra_rotas(app, root, h=None):
             d = os.path.join(pdir_raiz, n)
             if os.path.isdir(d) and not n.startswith('.'):
                 p = permissao(d, s)
-                out[n] = {'papel': p['papel'], 'pode': p['pode'], 'responsavel': p['responsavel']}
+                out[n] = {'papel': p['papel'], 'pode': p['pode'], 'responsavel': p['responsavel'],
+                          'apagar': p['apagar'], 'motivoApagar': p.get('motivoApagar', '')}
         return {'ok': True, 'usuario': s['usuario'], 'modo': s['modo'], 'projetos': out}
 
     @app.route('/api/equipe/convidar', methods=['POST'])

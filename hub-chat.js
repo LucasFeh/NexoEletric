@@ -6,8 +6,8 @@
    escreve em disco: quem fala é o `tools/chat/chatserver.py`, quem decide é o motor que
    estiver atrás dele. O navegador nunca vê CHAVE nenhuma — é a mesma regra que o
    /hub-almox.json já quebrou uma vez, vazando a senha do Odoo em texto claro para a LAN
-   inteira, e que não se quebra de novo. (A senha mestre do hub, essa sim, o navegador
-   guarda: veja "entrar", logo abaixo.)
+   inteira, e que não se quebra de novo. (Nem senha: desde a 1.86.0 o chat trancado abre pelo
+   login do Nexo Hub desta máquina, que o SERVIDOR confere — veja "entrar", logo abaixo.)
 
    ── DOIS MOTORES, e a tela diz qual ──
    O servidor responde no /estado qual está atrás, e a tela muda de acordo:
@@ -47,12 +47,14 @@
    — sem cópia dentro dos frames para manter em dia.
 
    ── entrar ──
-   O painel abre pedindo a SENHA MESTRE DO HUB (a mesma do "Excluir projeto"), porque é ela
-   que TODA rota do chat exige (chatserver.py » _autoriza). Aceita, ela fica no localStorage
-   deste navegador e vai no cabeçalho X-Hub-Senha de cada pedido; "Sair" apaga. É por isso
-   que o painel fala com /api/chat/* por conta própria, e não pelo io.post/io.stream do hub:
-   quem tem a credencial é ele. O `io` continua servindo para o resto — projeto, tela, canvas,
-   toast e recarregar a vista.
+   A porta do chat fica ABERTA por padrão (chatserver.py » "A PORTA ESTA ABERTA"). Trancada
+   (ALTIUMHUB_CHAT_TRANCA, que o app liga quando o hub vai para a rede), ela abre só com alguém
+   LOGADO NO NEXO HUB desta máquina — quem confere é o servidor (chatserver.py » _autoriza), a
+   página não manda credencial nenhuma. Até a 1.85.0 era a senha mestre do hub, guardada no
+   localStorage e mandada no cabeçalho X-Hub-Senha; ela saiu de vez na 1.86.0 ("tira a senha
+   mestre de vez"), e a que ainda estiver guardada neste navegador é apagada ao abrir. O painel
+   continua falando com /api/chat/* por conta própria (e não pelo io.post/io.stream do hub); o
+   `io` serve para o resto — projeto, tela, canvas, toast e recarregar a vista.
 
    Não existe "entrar com a conta Claude" aqui, e não é esquecimento: aquele login é do Claude
    Code e não tem porta pública para um app de terceiro. A CHAVE da Anthropic também não passa
@@ -725,7 +727,7 @@ function leEstado(bruto){
   };
 }
 
-/* Com quem eu estou falando. É a frase que a tela de entrada mostra depois da senha e que o
+/* Com quem eu estou falando. É a frase que a tela de entrada mostra depois de a porta abrir e que o
    painel repete em letra miúda ao lado da coleira. Servidor que não diz o motor não ganha
    frase inventada: devolve vazio, e o lugar dela simplesmente não aparece. */
 function rotuloMotor(est){
@@ -801,27 +803,20 @@ function retanguloDe(a, b, limite){
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
-   A CREDENCIAL E O CANO — o painel fala com /api/chat/* por conta própria
+   O CANO — o painel fala com /api/chat/* por conta própria
    ════════════════════════════════════════════════════════════════════════════
 
-   Por que não pelo `io.post`/`io.stream` do hub: quem tem a credencial é este painel. TODA
-   rota do chat exige a senha mestre (chatserver.py » _autoriza), a mesma senha que o
-   "Excluir projeto" já pedia (hubserver.py:489) — o chat gasta dinheiro E edita projeto, e
-   as duas juntas valem mais que o clique errado. O `io` continua servindo para o resto:
+   Por que não pelo `io.post`/`io.stream` do hub: o painel cuida sozinho do caminho até o
+   chatserver.py (o SSE do turno, o cancelar, a volta para a tela de entrada quando a tranca
+   recusa). Credencial nenhuma passa por aqui: com a tranca ligada, quem decide é o login do
+   Nexo Hub desta máquina, conferido pelo servidor. O `io` continua servindo para o resto:
    projeto, tela, canvas, toast e recarregar a vista.
 
-   A senha vai no CABEÇALHO X-Hub-Senha e em nenhum outro lugar. O servidor também a aceita
-   no corpo JSON, mas o cabeçalho é o que não corre risco de ser copiado para dentro de um
-   arquivo de conversa por descuido; a query string está fora de cogitação, é a única das
-   três que o log de acesso do servidor grava.
+   1.86.0: até aqui a senha mestre do hub ia no cabeçalho X-Hub-Senha e ficava guardada no
+   localStorage (CHAVE_SENHA_ANTIGA). Ela saiu de vez; a que ainda estiver guardada é apagada
+   na primeira abertura do painel (`criaSessao`).                                         */
 
-   Ela fica no localStorage deste navegador, e é uma troca declarada: qualquer script que já
-   rode nesta origem a alcança — mas quem já roda script nesta origem é o próprio hub, e
-   pedir a senha a cada recarregamento de aba é o caminho mais curto para ela acabar num
-   post-it colado no monitor. "Sair" apaga.                                                */
-
-const CAB_SENHA  = 'X-Hub-Senha';
-const CHAVE_SENHA = 'altiumhub.chat.senha';
+const CHAVE_SENHA_ANTIGA = 'altiumhub.chat.senha';
 const CHAVE_LARG  = 'altiumhub.chat.largura';
 /* a coleira escolhida fica por NAVEGADOR, como a largura do painel: quem trabalha solto o dia
    inteiro não quer reescolher a cada aba. O que NÃO é lembrado é a confirmação do modo solto —
@@ -876,29 +871,27 @@ function dadoDoBloco(bloco){
 function erroDe(j, status){
   const e = new Error((j && (j.erro || j.error)) || ('o servidor respondeu HTTP ' + status));
   e.status = status;
-  if (status === 403) e.senhaRuim = true;
+  if (status === 403 || status === 401) e.trancado = true;
   return e;
 }
 
-/* A sessão: a senha, o estado do servidor e os dois jeitos de falar com ele. */
+/* A sessão: o estado do servidor e os dois jeitos de falar com ele. Sem credencial (1.86.0):
+   com a tranca ligada, o servidor confere o login do Nexo Hub desta máquina. */
 function criaSessao(io){
   const S = {
     io: io || {},
-    senha: guardado(CHAVE_SENHA, '') || '',
     estado: null,
-    aoPerder: null,      /* o servidor recusou a senha no meio do caminho */
+    aoPerder: null,      /* a tranca recusou no meio do caminho (ninguém logado no Nexo Hub) */
   };
+  /* a senha mestre que um painel antigo guardou neste navegador: não vale mais nada, e não fica */
+  guarda(CHAVE_SENHA_ANTIGA, null);
 
   function cabecalho(){
-    const h = { 'Content-Type': 'application/json' };
-    if (S.senha) h[CAB_SENHA] = S.senha;
-    return h;
+    return { 'Content-Type': 'application/json' };
   }
 
-  async function chama(rota, corpo, senha){
-    const h = { 'Content-Type': 'application/json' };
-    if (senha) h[CAB_SENHA] = senha;
-    const r = await fetch(rota, { method: 'POST', headers: h,
+  async function chama(rota, corpo){
+    const r = await fetch(rota, { method: 'POST', headers: cabecalho(),
                                   body: JSON.stringify(corpo || {}) });
     let j = null;
     try { j = await r.json(); } catch (e) {}
@@ -906,24 +899,24 @@ function criaSessao(io){
     return j;
   }
 
-  /* Confere uma senha SEM mexer na sessão: é o que a tela de entrada chama, e ela não pode
+  /* Confere a porta SEM mexer na sessão: é o que a tela de entrada chama, e ela não pode
      disparar o `aoPerder` (voltar para a tela de entrada estando nela seria um laço). Nunca
      levanta — a tela de entrada precisa da frase, não da exceção. */
-  S.testa = async function (senha){
+  S.testa = async function (){
     try {
-      const j = await chama(R.estado, { projeto: '' }, senha);
+      const j = await chama(R.estado, { projeto: '' });
       return { ok: true, estado: j || {} };
     } catch (e){
-      return { ok: false, senhaRuim: !!e.senhaRuim, semRede: !e.status,
+      return { ok: false, trancado: !!e.trancado, semRede: !e.status,
                msg: e && e.message ? e.message : String(e) };
     }
   };
 
   S.post = async function (rota, corpo){
     try {
-      return await chama(rota, corpo, S.senha);
+      return await chama(rota, corpo);
     } catch (e){
-      if (e && e.senhaRuim && S.aoPerder) S.aoPerder(e);
+      if (e && e.trancado && S.aoPerder) S.aoPerder(e);
       throw e;
     }
   };
@@ -941,7 +934,7 @@ function criaSessao(io){
         let j = null;
         try { j = await r.json(); } catch (e) {}
         const e2 = erroDe(j, r.status);
-        if (e2.senhaRuim && S.aoPerder) S.aoPerder(e2);
+        if (e2.trancado && S.aoPerder) S.aoPerder(e2);
         throw e2;
       }
       const caixa = { resto: '' };
@@ -967,9 +960,7 @@ function criaSessao(io){
   };
 
   S.sai = function (){
-    S.senha = '';
     S.estado = null;
-    guarda(CHAVE_SENHA, null);
   };
 
   return S;
@@ -1015,8 +1006,9 @@ function marcaClaude(){
 /* ════════════════════════════════════════════════════════════════════════════
    A TELA DE ENTRADA
 
-   O que ela FAZ: pede a senha mestre do hub, e só. O que ela NÃO faz, de propósito: "entrar
-   com a conta Claude". Aquele login é do Claude Code e não tem porta pública para um app de
+   O que ela FAZ (1.86.0): diz que o chat deste hub está trancado e que ele abre com alguém
+   logado no Nexo Hub desta máquina, e confere de novo — sem campo de senha nenhum (a senha
+   mestre saiu de vez). O que ela NÃO faz, de propósito: "entrar com a conta Claude". Aquele login é do Claude Code e não tem porta pública para um app de
    terceiro — botão que finge fazer isso é pior do que botão nenhum, porque o usuário clica.
 
    O segundo passo NÃO PEDE MAIS CHAVE DE API, e não é só porque o campo não gravava: com o
@@ -1041,23 +1033,12 @@ function montaPorta(sessao, aoEntrar, recado){
   p1.style.paddingTop = '0';
   p1.append(el('p', null,
     'O operador edita projeto — e, dependendo da coleira, roda comando na máquina que serve ' +
-    'o hub. Por isso toda rota dele pede a senha mestre, a mesma do "Excluir projeto". ' +
-    'Depois de aceita, ela fica guardada neste navegador e vai em todo pedido; o botão Sair ' +
-    'apaga.'));
-
-  const campoz = el('div', 'hc-campoz');
-  const rot = el('label', null, 'senha mestre do hub');
-  rot.htmlFor = 'hc-senha';
-  const campo = el('input');
-  campo.type = 'password';
-  campo.id = 'hc-senha';
-  campo.autocomplete = 'current-password';
-  campo.placeholder = 'a senha do hub';
-  campoz.append(rot, campo);
-  p1.append(campoz);
+    'o hub. Neste hub o chat está trancado: ele só abre com alguém logado no Nexo Hub desta ' +
+    'máquina (o mesmo login do NexoEletric). Entre no Nexo Hub e confira de novo.'));
 
   const linha = el('div', 'hc-linha');
-  const btEntrar = el('button', 'hc-bt forte', 'Entrar');
+  const btEntrar = el('button', 'hc-bt forte', 'Conferir de novo');
+  btEntrar.title = 'pergunta de novo ao servidor se alguém está logado no Nexo Hub desta máquina';
   linha.append(btEntrar);
   p1.append(linha);
 
@@ -1083,15 +1064,15 @@ function montaPorta(sessao, aoEntrar, recado){
     ok.textContent  = bom ? (texto || '') : '';
   }
   function ocupado(sim){
-    campo.disabled = btEntrar.disabled = !!sim;
-    btEntrar.textContent = sim ? 'conferindo…' : 'Entrar';
+    btEntrar.disabled = !!sim;
+    btEntrar.textContent = sim ? 'conferindo…' : 'Conferir de novo';
   }
   function foca(){
-    try { campo.focus(); campo.select(); } catch (e) {}
+    try { btEntrar.focus(); } catch (e) {}
   }
 
   /* O SEGUNDO PASSO: quem está atrás.
-     Aparece DEPOIS da senha aceita, porque o /estado só responde a quem entrou. Ele existe
+     Aparece DEPOIS de a porta abrir, porque o /estado trancado só responde a quem está logado. Ele existe
      mesmo quando está tudo certo: a diferença entre conversar com o `claude` da máquina (as
      ferramentas do terminal, a assinatura, edição direta no disco) e conversar com a API
      paga (o operador.py, cartão de proposta, cobrança por token) muda o que se pode pedir —
@@ -1156,7 +1137,7 @@ function montaPorta(sessao, aoEntrar, recado){
     btVer.onclick = async () => {
       btVer.disabled = true;
       btVer.textContent = 'conferindo…';
-      const r = await sessao.testa(sessao.senha);
+      const r = await sessao.testa();
       btVer.disabled = false;
       btVer.textContent = 'Conferir de novo';
       if (r.ok){
@@ -1170,48 +1151,25 @@ function montaPorta(sessao, aoEntrar, recado){
     };
     btIr.onclick = () => aoEntrar();
 
-    const volta = el('button', 'hc-textobt', 'usar outra senha');
-    volta.onclick = () => {
-      sessao.sai();
-      p2.hidden = true;
-      p1.hidden = false;
-      campo.value = '';
-      diz('');
-      foca();
-    };
-    p2.append(volta);
   }
 
   async function entra(){
-    /* a senha NÃO é aparada: espaço na ponta é senha, e o servidor compara byte a byte
-       (hmac.compare_digest). Aparar aqui faria uma senha legítima ser recusada para sempre. */
-    const s = campo.value;
-    if (!s){ diz('escreva a senha mestre do hub'); foca(); return; }
     diz('');
     ocupado(true);
-    const r = await sessao.testa(s);
+    const r = await sessao.testa();
     ocupado(false);
     if (r.ok){
-      sessao.senha = s;
       sessao.estado = r.estado;
-      guarda(CHAVE_SENHA, s);
-      campo.value = '';
-      /* sempre o segundo passo, mesmo estando tudo certo: ele é onde a tela diz com quem o
-         usuário vai falar. Só custa um clique, e só na primeira vez deste navegador — quem
-         já entrou volta direto para a conversa (ver `monta`). */
+      /* o segundo passo: é onde a tela diz com quem o usuário vai falar */
       mostraMotor(leEstado(r.estado));
       return;
     }
-    /* o campo continua focado e com o texto selecionado: quem errou a senha vai digitar de
-       novo, e não procurar o campo com o mouse. */
-    diz(r.senhaRuim ? 'senha mestre incorreta.' : r.msg);
+    /* a frase é do servidor: ele sabe se a tranca recusou (ninguém logado) ou se foi outra coisa */
+    diz(r.msg);
     foca();
   }
 
   btEntrar.onclick = entra;
-  campo.addEventListener('keydown', e => {
-    if (e.key === 'Enter'){ e.preventDefault(); entra(); }
-  });
 
   if (recado) diz(recado, true);
 
@@ -1282,7 +1240,9 @@ function montaConversa(container, io, sessao, aoSair){
   const btLimpar = el('button', 'hc-bt', 'Limpar');
   btLimpar.title = 'esquece a conversa e zera o contador';
   const btSair = el('button', 'hc-bt', 'Sair');
-  btSair.title = 'apaga a senha mestre guardada neste navegador e volta para a tela de entrada';
+  btSair.title = 'fecha a conversa e volta para a tela de entrada';
+  /* 1.86.0: sem senha guardada não há do que "sair" — o login é o do Nexo Hub, e sai-se por ele */
+  btSair.hidden = true;
   dir.append(conta, selModelo, btLimpar, btSair);
   topo.append(dir);
 
@@ -1704,7 +1664,7 @@ function montaConversa(container, io, sessao, aoSair){
         try { if (ST.io.recarregarVista) ST.io.recarregarVista(); } catch (e) {}
         ST.msgs.push({ papel: 'usuario', texto: '[a proposta "' + titulo + '" foi aplicada]', anexos: [] });
       } catch (e){
-        if (e && e.senhaRuim) return;   /* a sessão já levou o usuário para a tela de entrada */
+        if (e && e.trancado) return;   /* a sessão já levou o usuário para a tela de entrada */
         btNao.disabled = false;
         btOk.disabled = !!razaoDeNao();
         nota.textContent = 'não aplicou: ' + (e && e.message ? e.message : e);
@@ -2206,7 +2166,7 @@ function montaConversa(container, io, sessao, aoSair){
       /* abortar é o que o Parar faz de propósito, e senha recusada já mandou o usuário para a
          tela de entrada: nenhum dos dois é "a conversa caiu", e dizer que caiu faria procurar
          defeito onde não há. */
-      const esperado = ST.cancelado || (e && (e.name === 'AbortError' || e.senhaRuim));
+      const esperado = ST.cancelado || (e && (e.name === 'AbortError' || e.trancado));
       if (!esperado && ST.vivo){
         const l = el('div', 'hc-fer hc-ruim');
         l.append(el('span', 'hc-pt', '!'));
@@ -2321,7 +2281,7 @@ function montaConversa(container, io, sessao, aoSair){
     } catch (e){
       /* senha recusada tem dono: a sessão já devolveu o usuário à tela de entrada, e pôr um
          aviso aqui seria escrever num painel que está saindo da tela. */
-      if (e && e.senhaRuim) return;
+      if (e && e.trancado) return;
       /* o chatserver ainda pode não estar registrado (deploy velho, ou o arquivo ainda não
          subiu). É diferente de "sem motor", e dizer qual dos dois é poupa meia hora. */
       ST.pronto = null;
@@ -2514,49 +2474,33 @@ function monta(container, io){
 
   function sai(){
     sessao.sai();
-    abrePorta('Você saiu — a senha foi apagada deste navegador.');
+    abrePorta('');
   }
 
-  /* A senha guardada pode ter deixado de valer (o hubserver subiu com outra). Quando isso
-     acontece NO MEIO de um pedido, o painel volta para a tela de entrada em vez de ficar
-     tentando: um chat que responde 403 calado parece um chat quebrado. */
-  sessao.aoPerder = () => {
+  /* A tranca pode recusar NO MEIO de um pedido (alguém saiu do Nexo Hub). O painel volta para
+     a tela de entrada em vez de ficar tentando: um chat que responde 403 calado parece um chat
+     quebrado. */
+  sessao.aoPerder = e => {
     if (porta) return;                       /* já está na tela de entrada */
     sessao.sai();
-    abrePorta('O servidor recusou a senha guardada — entre de novo.');
+    abrePorta((e && e.message) || 'O chat deste hub abre só com alguém logado no Nexo Hub — entre e confira de novo.');
   };
 
-  if (sessao.senha){
-    /* já entrou nesta máquina: confere calado, e só volta a pedir se o servidor RECUSAR.
-       Servidor mudo não manda ninguém digitar senha de novo — a conversa entra e o aviso de
-       "o servidor do chat não respondeu" aparece lá dentro, que é onde ele se conserta. */
-    const p = abrePorta('conferindo a senha guardada…', true);
-    sessao.testa(sessao.senha).then(r => {
+  /* Pergunta ao servidor ANTES: a porta aberta (o padrão) ou alguém logado no Nexo Hub com a
+     tranca ligada, e a conversa entra direto. A tranca recusou: a tela de entrada, com a frase do
+     servidor. Servidor mudo não prende ninguém na porta — a conversa entra e o aviso de "o
+     servidor do chat não respondeu" aparece lá dentro, que é onde ele se conserta. */
+  {
+    const p = abrePorta('conferindo o chat deste hub…', true);
+    sessao.testa().then(r => {
       if (porta !== p) return;               /* o usuário mexeu na tela enquanto isso */
       if (r.ok){
         sessao.estado = r.estado;
         abreChat();
-      } else if (r.senhaRuim){
-        sessao.sai();
-        abrePorta('A senha guardada não vale mais — entre de novo.');
+      } else if (r.trancado){
+        abrePorta(r.msg);
       } else {
         abreChat();
-      }
-    });
-  } else {
-    /* A PORTA PODE ESTAR ABERTA. Desde 2026-09-16 o dono da máquina pode deixar o chat sem
-       senha (chatserver.py » "A PORTA ESTA ABERTA"), e aí desenhar a tela de entrada seria
-       pedir uma senha que ninguém confere — a pior das telas: obrigatória e inútil.
-       Então perguntamos ao servidor ANTES, com senha vazia: se ele responder, entra direto.
-       Um servidor que exige senha recusa esse mesmo pedido, e aí a tela aparece como sempre. */
-    const p = abrePorta('vendo se este hub pede senha…', true);
-    sessao.testa('').then(r => {
-      if (porta !== p) return;               /* o usuário digitou algo enquanto isso */
-      if (r.ok && (r.estado || {}).exige_senha === false){
-        sessao.estado = r.estado;
-        abreChat();
-      } else {
-        abrePorta('');
       }
     });
   }
@@ -2854,6 +2798,6 @@ return { instala, monta, poeCss,
                  tokensImagem, retanguloDe, retanguloNaTela, kilo, bytes, moeda,
                  eventosDe, dadoDoBloco },
          MODELO_PADRAO, PRECO, LADO_MAX, TETO_IMG, ROTAS: R,
-         CHAVE_SENHA, CHAVE_LARG, CHAVE_MODO, CAB_SENHA };
+         CHAVE_SENHA_ANTIGA, CHAVE_LARG, CHAVE_MODO };
 })();
 if (typeof module === 'object' && module.exports) module.exports = HubChat;
