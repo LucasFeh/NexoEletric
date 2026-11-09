@@ -106,6 +106,9 @@ finally:
 
 # Exclusao de projeto: senha errada nao pode encostar na pasta, e senha certa MOVE
 # (nao apaga). Roda num workspace de mentira - ROOT e lido em tempo de chamada.
+# 1.84.0: o responsavel e o admin do Nexo Hub excluem pelo login (tests/test_equipe.py); aqui o Hub e o "antigo", sem
+# login (404), e vale a senha mestre de sempre -- o Hub desta maquina fica de fora
+H._equipe._provedor[0] = lambda: ('http', 404)
 tmp = tempfile.mkdtemp()
 alvo = os.path.join(tmp, 'Projects', 'ZZ_Teste')
 os.makedirs(alvo)

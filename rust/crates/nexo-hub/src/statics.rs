@@ -174,6 +174,18 @@ pub async fn api_save(State(est): State<Est>, Json(d): Json<serde_json::Value>) 
     if !full.parent().map(|d| d.is_dir()).unwrap_or(false) {
         return (StatusCode::NOT_FOUND, Json(json!({"ok": false, "error": "pasta inexistente"}))).into_response();
     }
+    // 1.84.0: o projeto tem dono (equipe.rs): quem nao e o responsavel, colaborador ou admin nao grava; e o que estava
+    // no disco vai para o historico do Python depois (quem fez e o que mudou)
+    let mut antes: Option<String> = None;
+    if ok_proj {
+        let pdir = full.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+        let modo = est.sessao.modo(&est.hub_cli).await;
+        if let Err(corpo) = crate::equipe::pode(&crate::equipe::le_equipe(&pdir), &modo) {
+            return (StatusCode::FORBIDDEN, Json(corpo)).into_response();
+        }
+        antes = std::fs::read_to_string(&full).ok().map(|t| t.replace("\r\n", "\n"));
+    }
+    let novo = content.clone();
     // gravacao atomica, seguindo o symlink (como o hubserver.py)
     let alvo = std::fs::canonicalize(&full).unwrap_or(full.clone());
     let tmp = PathBuf::from(format!("{}.tmp", full.display()));
@@ -185,9 +197,100 @@ pub async fn api_save(State(est): State<Est>, Json(d): Json<serde_json::Value>) 
     match r {
         Ok(Ok(())) => {
             est.index.esquece(parts.get(1).copied().unwrap_or(""));
+            if ok_proj && antes.as_deref() != Some(novo.replace("\r\n", "\n").as_str()) {
+                let (projeto, arquivo) = (parts[1].to_string(), parts[2].to_string());
+                let e = est.clone();
+                tokio::spawn(async move {
+                    let corpo = json!({"projeto": projeto, "arquivo": arquivo, "antes": antes, "origem": "app"});
+                    e.py.posta("/api/historico/registra", &corpo).await;
+                });
+            }
             Json(json!({"ok": true})).into_response()
         }
         Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": format!("falha ao gravar: {e}")}))).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e.to_string()}))).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! o /api/save do Rust contra um Nexo Hub de mentira: quem pode gravar no projeto (1.84.0)
+    use super::api_save;
+    use crate::{gate, index, live, mcp, patches, proxy, Config, Estado};
+    use axum::extract::State;
+    use axum::Json;
+    use serde_json::{json, Value};
+    use std::sync::{Arc, Mutex};
+
+    async fn hub_falso(resposta: Arc<Mutex<Option<Value>>>) -> String {
+        let app = axum::Router::new().route(
+            "/api/v1/sessao",
+            axum::routing::get(move || {
+                let r = resposta.clone();
+                async move {
+                    use axum::response::IntoResponse;
+                    match r.lock().unwrap().clone() {
+                        Some(v) => Json(v).into_response(),
+                        None => axum::http::StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            }),
+        );
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+        url
+    }
+
+    #[tokio::test]
+    async fn save_respeita_a_equipe() {
+        let root = std::env::temp_dir().join(format!("nexo-hub-equipe-{}", uuid::Uuid::new_v4()));
+        let pdir = root.join("Projects").join("P1");
+        std::fs::create_dir_all(&pdir).unwrap();
+        std::fs::write(pdir.join("changes.js"), "var changes = [\n];\n").unwrap();
+        std::fs::write(pdir.join("equipe.json"), json!({"formato": "nexoeletric-equipe-1",
+            "responsavel": {"id": "u-dono", "login": "dono", "nome": "Davi Dono"},
+            "colaboradores": [{"id": "u-colab", "login": "colab", "nome": "Carla"}]}).to_string()).unwrap();
+        let resposta = Arc::new(Mutex::new(None));
+        let url = hub_falso(resposta.clone()).await;
+        let cfg = Config { root: root.clone(), port: 0, host: [127, 0, 0, 1], python: None, overlay: root.clone(), nexobd: false, remendos: false };
+        let est = Arc::new(Estado {
+            live: live::Live::inicia(&root), index: index::Cache::default(), mcp: mcp::Mcp::default(),
+            py: proxy::Python::new(None, root.clone()), gate: gate::Gate::default(), patches: patches::Cache::default(),
+            sessao: crate::equipe::Sessao::default(), hub_cli: reqwest::Client::new(), cfg,
+        });
+        *est.sessao.url.lock().unwrap() = Some(url);
+        let grava = |txt: &str| json!({"path": "Projects/P1/changes.js", "content": txt});
+        let como = |id: &str, admin: bool| Some(json!({"ok": true, "logado": true, "usuario": {"id": id, "login": id, "nome": id, "admin": admin}}));
+        let mut n = 0;
+        for (sessao, esperado) in [
+            (como("u-fora", false), 403u16),
+            (Some(json!({"ok": true, "logado": false, "usuario": null})), 403),
+            (como("u-dono", false), 200),
+            (como("u-colab", false), 200),
+            (como("u-admin", true), 200),
+            (None, 200), // Hub antigo, sem login: liberado
+        ] {
+            *resposta.lock().unwrap() = sessao.clone();
+            est.sessao.esquece();
+            n += 1;
+            let txt = format!("var changes = [\n{{\"op\":\"via_add\",\"x\":{n},\"y\":1}},\n];\n");
+            let r = api_save(State(est.clone()), Json(grava(&txt))).await;
+            assert_eq!(r.status().as_u16(), esperado, "{sessao:?}");
+            let disco = std::fs::read_to_string(pdir.join("changes.js")).unwrap();
+            assert_eq!(disco == txt, esperado == 200, "{sessao:?}");
+            if esperado == 403 {
+                let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
+                let j: Value = serde_json::from_slice(&b).unwrap();
+                assert_eq!(j["codigo"], "sem_permissao");
+                assert!(j["error"].as_str().unwrap().contains("Davi Dono"));
+            }
+        }
+        // sem responsavel: qualquer logado
+        std::fs::remove_file(pdir.join("equipe.json")).unwrap();
+        *resposta.lock().unwrap() = como("u-fora", false);
+        est.sessao.esquece();
+        assert_eq!(api_save(State(est.clone()), Json(grava("var changes = [\n];\n"))).await.status().as_u16(), 200);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

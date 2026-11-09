@@ -8,7 +8,7 @@ de quem iniciou o projeto pra por no template".
 
 O trabalho do catalogo e do mcp/lib/catalogo.js (o MESMO motor do projeto_criar do MCP), rodado como
 `node mcp/lib/catalogo.js --cli`, com o Node que o envio a JLC usa (jlc.acha_node). O projeto nasce com uma folha
-A4 no template da casa (casa:A4_DiEletrons) e o carimbo preenchido nos parametros do projeto (cabecalho do
+A4 no template da casa (casa:A4_DiEletrons) e o quadro de titulo preenchido nos parametros do projeto (cabecalho do
 schematic.js): codigo da placa, arquivo SCH-DI.., nome, quem iniciou e a data.
 
 Rotas:
@@ -20,8 +20,9 @@ Rotas:
   GET  /api/projeto/novo/catalogo?codigo=      -> {ok, achou:{item, nome, cliente, modelo, ...}|null}
   GET  /api/projeto/novo/templates             -> {ok, padrao, templates:[{id, nome, w, h, estilo}]} (os da casa)
   POST /api/projeto/novo {nome, cliente?, vinculo?, sigla?, iniciador?, projeto?, template? ('' = sem template)}
-       O desenhista e o CARIMBO EM USO nesta maquina (tools/rotas/carimbos.py, 2026-11-05: "se voce iniciar um projeto,
-       seu nome fica como desenhista"); sem carimbo em uso vale o `iniciador` (a IA, os testes).
+       O desenhista e QUEM ESTA LOGADO no Nexo Hub (tools/rotas/equipe.py; 2026-11-05: "se voce iniciar um projeto, seu
+       nome fica como desenhista"), que tambem vira o responsavel pelo projeto (Projects/<p>/equipe.json); o `iniciador`
+       so vale com o Hub sem login (antigo). Ate a 1.83.0 era o carimbo em uso, que saiu.
        -> {ok, id, name, codigo, item, linha}: registra no catalogo e cria Projects/<projeto ou codigo>/
 """
 import json
@@ -206,17 +207,18 @@ def registra(app, root, h):
         data = request.get_json(silent=True) or {}
         nome = ' '.join(str(data.get('nome') or '').split())
         iniciador = ' '.join(str(data.get('iniciador') or '').split())
+        usuario = None
         try:
-            import carimbos
-            carimbo = carimbos.ativo(root)
+            import equipe as _eq
+            usuario = _eq.sessao(forcar=True)['usuario']
         except Exception:                  # noqa: BLE001
-            carimbo = None
-        if carimbo:
-            iniciador = carimbo['nome']
+            _eq = None
+        if usuario:
+            iniciador = usuario['nome']
         if not nome:
             return {'ok': False, 'error': 'falta o nome da placa'}, 400
         if not iniciador:
-            return {'ok': False, 'error': 'escolha o seu carimbo (menu da folha › Carimbo…): ele entra como desenhista'}, 400
+            return {'ok': False, 'error': 'entre no Nexo Hub: o seu nome (o do login) entra como desenhista'}, 400
         projeto = ' '.join(str(data.get('projeto') or '').split())
         # o template do esquema: o da casa por padrao; '' = folha A4 sem template
         tpls = templates_casa(root)
@@ -244,8 +246,8 @@ def registra(app, root, h):
                 projeto = '%s (%d)' % (codigo, n)
                 n += 1
         params = params_template(codigo, nome, iniciador, data.get('cliente') or '')
-        if carimbo:
-            params['Desenhista_carimbo'] = carimbo['id']
+        if usuario:
+            params['Desenhista_carimbo'] = usuario['login'] or usuario['id']     # o login, no campo de sempre
         d = os.path.join(root, 'Projects', projeto)
         try:
             os.makedirs(os.path.join(root, 'Projects'), exist_ok=True)
@@ -255,9 +257,13 @@ def registra(app, root, h):
             for a, txt in arqs.items():
                 with open(os.path.join(d, a), 'w', encoding='utf-8') as f:
                     f.write(txt)
+            if usuario and _eq is not None:
+                _eq.nova(d, usuario)           # quem criou e o responsavel pelo projeto
         except OSError as e:
             return {'ok': False, 'error': 'o codigo %s foi registrado no catalogo (item %s), mas a pasta do projeto nao '
                                           'foi criada: %s' % (codigo, r['item'], e), 'codigo': codigo}, 500
         h['build_index']()
+        if usuario and _eq is not None:
+            _eq.evento(d, 'equipe', ['%s criou o projeto (%s) e é o responsável' % (usuario['nome'], codigo)], usuario)
         return {'ok': True, 'id': h['proj_id'](projeto), 'name': projeto, 'codigo': codigo, 'item': r['item'],
                 'linha': r['linha'], 'params': params}

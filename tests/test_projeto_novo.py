@@ -21,6 +21,7 @@ from flask import Flask
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(RAIZ, 'tools', 'rotas'))
 import projeto_novo  # noqa: E402
+import equipe  # noqa: E402
 
 NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 
@@ -58,6 +59,9 @@ class Rotas(unittest.TestCase):
         shutil.copy(os.path.join(RAIZ, 'Libs', 'sch-templates-casa.js'), os.path.join(self.tmp, 'Libs', 'sch-templates-casa.js'))
         shutil.copy(os.path.join(RAIZ, 'mcp', 'lib', 'catalogo.js'), os.path.join(self.tmp, 'mcp', 'lib', 'catalogo.js'))
         self.indexado = []
+        # o Nexo Hub desta maquina fica de fora: sem nada, o Hub "antigo" (sem login, 404); self.logado = alguem logado
+        self.logado = None
+        equipe._provedor[0] = lambda: ({'ok': True, 'logado': True, 'usuario': self.logado} if self.logado else ('http', 404))
         app = Flask(__name__)
         projeto_novo.registra(app, self.tmp, {
             'nome_ok': lambda n: bool(n) and not re.search(r'[\\/:*?"<>|]', n) and not n.startswith('.') and not n.endswith('.'),
@@ -67,6 +71,7 @@ class Rotas(unittest.TestCase):
         self.c = app.test_client()
 
     def tearDown(self):
+        equipe._provedor[0] = None
         if self.env is None:
             os.environ.pop('NEXO_CATALOGO', None)
         else:
@@ -74,17 +79,16 @@ class Rotas(unittest.TestCase):
         os.environ.pop('NEXOELETRIC_NODE', None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_desenhista_e_o_carimbo_em_uso(self):
-        """o carimbo em uso nesta maquina (tools/rotas/carimbos.py) entra como desenhista, por cima do `iniciador`"""
-        import carimbos
-        carimbos._grava(self.tmp, {'format': 'nexoeletric-carimbos-1', 'carimbos': {
-            'luciano': {'id': 'luciano', 'nome': 'Luciano', 'tags': [], 'sal': '00', 'senha': 'x'}}})
-        carimbos._grava_ativo(self.tmp, 'luciano')
-        j = self.c.post('/api/projeto/novo', json={'nome': 'Placa Z', 'iniciador': 'Outro', 'template': ''}).get_json()
+    def test_desenhista_e_responsavel_e_quem_esta_logado(self):
+        """1.84.0: o desenhista e quem esta logado no Nexo Hub (por cima do carimbo e do `iniciador`), e ele vira o
+        responsavel pelo projeto (equipe.json)"""
+        self.logado = {'id': 'u7', 'login': 'romeu', 'nome': 'Romeu Yukio', 'admin': False, 'aprovador': False}
+        j = self.c.post('/api/projeto/novo', json={'nome': 'Placa Y', 'iniciador': 'Outro', 'template': ''}).get_json()
         self.assertTrue(j['ok'], j)
-        self.assertEqual(j['params']['Desenhista_DiEletrons'], 'Luciano')
-        self.assertEqual(j['params']['Desenhista_carimbo'], 'luciano')
-        self.assertEqual(j['params']['Data_desenho'], time.strftime('%d/%m/%y'))
+        self.assertEqual((j['params']['Desenhista_DiEletrons'], j['params']['Desenhista_carimbo']), ('Romeu Yukio', 'romeu'))
+        eq = equipe.le(os.path.join(self.tmp, 'Projects', j['name']))
+        self.assertEqual(eq['responsavel'], {'id': 'u7', 'login': 'romeu', 'nome': 'Romeu Yukio'})
+        self.assertEqual(eq['colaboradores'], [])
 
     def test_previa_e_criar(self):
         j = self.c.get('/api/projeto/novo/previa?nome=Placa%20medidora%20de%20nivel').get_json()

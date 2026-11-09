@@ -1,15 +1,15 @@
-/* Carimbos e aprovação (hub-carimbos.js): a edição salva no Esquema derruba a aprovação (a data do desenho fica: ela só
+/* Carimbos e aprovação (hub-aprovacao.js): a edição salva no Esquema derruba a aprovação (a data do desenho fica: ela só
    muda quando o projeto é criado ou assumido).
 
-   node tests/test-carimbos.js
+   node tests/test-aprovacao.js
 
-   O lado do servidor (assinatura, rotas) é o tests/test_carimbos.py. Aqui só o que a vista faz antes de gravar, contra o
+   O lado do servidor (assinatura, rotas) é o tests/test_aprovacao.py. Aqui só o que a vista faz antes de gravar, contra o
    serializador DE VERDADE (hub-core.js) — o texto que ele escreve é o que o servidor lê. */
 const assert = require('assert');
 global.HubSchTemplate = require('../hub-schtemplate.js');
-require('../hub-carimbos.js');
+require('../hub-aprovacao.js');
 const HubCore = require('../hub-core.js');
-const CB = globalThis.HubCarimbos;
+const CB = globalThis.HubAprovacao;
 
 let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
@@ -60,4 +60,4 @@ const APROVADO = 'Desenhista_DiEletrons=Lucas;Data_desenho=01/11/26;Verificador_
 }
 void HOJE;
 
-console.log('test-carimbos: ' + n + ' verificações ok');
+console.log('test-aprovacao: ' + n + ' verificações ok');

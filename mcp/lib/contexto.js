@@ -12,6 +12,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { ArquivoLinhas, lerVar, gravaAtomico } = require('./arquivo-linhas.js');
+const equipe = require('./equipe.js');
 
 class ErroMcp extends Error {
   constructor(msg, extra) { super(msg); this.extra = extra || null; }
@@ -333,7 +334,15 @@ class Contexto {
   grava(abs, texto, ferramenta) {
     const antes = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8') : null;
     if (antes === texto) return false;
+    /* 1.84.0: o projeto tem dono (lib/equipe.js): a IA ajuda quem está logado no Nexo Hub, e só grava onde essa pessoa
+       pode mexer; cada gravação vai para o histórico do projeto, marcada "pela IA" */
+    const onde = equipe.doProjeto(this, abs);
+    if (onde) {
+      const nao = equipe.recusa(onde.pdir);
+      if (nao) throw new ErroMcp(nao, { codigo: 'sem_permissao' });
+    }
     gravaAtomico(abs, texto);
+    if (onde) equipe.registraHistorico(this, onde, antes, ferramenta);
     const pilha = this.desfazer.get(abs) || [];
     pilha.push({ antes, depois: texto, quando: new Date().toISOString(), ferramenta: ferramenta || '' });
     if (pilha.length > 50) pilha.shift();

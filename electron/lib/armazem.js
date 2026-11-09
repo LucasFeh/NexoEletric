@@ -406,6 +406,22 @@ async function rodada({ ws, bundle, cliente, estado, log = () => {}, scripts = t
   return { scripts: rScripts, biblioteca, projetos, boms, chat };
 }
 
+/** o login de quem está logado no Nexo Hub ('' = ninguém, Hub antigo ou fora) */
+async function autorDoHub(url) {
+  try {
+    const r = await fetch(String(url || '').replace(/\/+$/, '') + '/api/v1/sessao', { headers: { 'X-App': APP }, signal: AbortSignal.timeout(3000) });
+    if (!r.ok) return '';
+    const j = await r.json();
+    return j && j.logado && j.usuario ? String(j.usuario.login || j.usuario.nome || '') : '';
+  } catch (_) { return ''; }
+}
+/** o cliente do Nexo Hub com o autor em toda revisão nova (quem chama já pode ter passado o dele) */
+function comAutor(cliente, autor) {
+  return Object.assign(Object.create(Object.getPrototypeOf(cliente)), cliente, {
+    novaRevisao: (id, c = {}) => cliente.novaRevisao(id, c.autor === undefined ? { ...c, autor } : c),
+  });
+}
+
 class Armazem {
   constructor({ log, bundle, python, versao } = {}) {
     this.log = log || console;
@@ -475,8 +491,13 @@ class Armazem {
     this.rodando = (async () => {
       try {
         const { cliente: c } = await modulos();
-        const cliente = c.criarCliente({ app: APP });
-        this.est.url = (await cliente.conexao()).url;
+        const base = c.criarCliente({ app: APP });
+        this.est.url = (await base.conexao()).url;
+        /* 1.84.0: as revisões que sobem levam o autor = o login de quem está logado no Nexo Hub (o motor pergunta;
+           sem login ou Hub antigo, fica sem autor como antes). O espelho é cópia do Hub e não muda: o cliente é que
+           acrescenta o autor em toda novaRevisao. */
+        const autor = await autorDoHub(this.est.url);
+        const cliente = autor ? comAutor(base, autor) : base;
         const log = (l) => this.log.info(`[nexobd] ${l}`);
         const r = await rodada({ ws, bundle: this.bundle, cliente, estado: this.estado, log, scripts: !this.scriptsFeitos, fonte: fonteEfetiva(this.bundle || ws, ws, fonteDoHub(this.hub)), versao: this.versao });
         if (r.scripts) this.scriptsFeitos = true;
@@ -559,5 +580,5 @@ class Armazem {
   }
 }
 
-module.exports = { Armazem, rodada, ligado, desligado, aceitaLib, aceitaFerramenta, ALVO_FERRAMENTAS, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_RENOMEAR, ARQ_ESTADO, ARQ_PCBLIB, renomearProjetos,
+module.exports = { autorDoHub, comAutor, Armazem, rodada, ligado, desligado, aceitaLib, aceitaFerramenta, ALVO_FERRAMENTAS, atualizarPcblib, SCRIPTS, ARQ_APAGAR, ARQ_RENOMEAR, ARQ_ESTADO, ARQ_PCBLIB, renomearProjetos,
   espelharBoms, publicarWebBom, fonteDoHub, fonteEfetiva, slugProjeto, SISTEMA_BOM, ALVO_WEB_BOM, ARQ_WEB_BOM, ALVO_CHAT };

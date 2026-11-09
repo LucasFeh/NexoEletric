@@ -126,7 +126,7 @@ module.exports = {
         nome: { type: 'string', description: 'nome da pasta do projeto (sem \\ / : * ? " < > |); com "produto", o padrão é o código da placa' },
         produto: { type: 'object', additionalProperties: false, description: 'a placa nova no catálogo da casa: registra e preenche o carimbo', properties: {
           nome: { type: 'string', description: 'nome da placa (vai em NOME no catálogo e no carimbo), ex.: "Placa adaptadora encoder linear"' },
-          iniciador: { type: 'string', description: 'quem iniciou o projeto (vai em DESEN. no carimbo) — pergunte ao usuário' },
+          iniciador: { type: 'string', description: 'quem iniciou o projeto (vai em DESEN. no carimbo). Com alguém logado no Nexo Hub, vale o nome do login (passe o nome dele); sem login, pergunte ao usuário' },
           cliente: { type: 'string', description: 'o cliente (CLIENTE no catálogo)' },
           descricao: { type: 'string', description: 'para que serve (VÍNCULO no catálogo)' },
           sigla: { type: 'string', description: 'a sigla do código; padrão P + as iniciais do nome (catalogo_previa mostra)' },
@@ -141,6 +141,9 @@ module.exports = {
         const hc = ctx.hc;
         a = Object.assign({}, a);
         if (!a.nome && !a.produto) throw new ErroMcp('informe "nome" (a pasta) ou "produto" (a placa nova da casa, que dá o código)');
+        /* 1.84.0: logado no Nexo Hub, o desenhista é o nome do login (por cima do que vier) */
+        const logado = require('../lib/equipe.js').usuario();
+        if (a.produto && logado) a.produto = Object.assign({}, a.produto, { iniciador: logado.nome });
         if (a.produto && (!String(a.produto.nome || '').trim() || !String(a.produto.iniciador || '').trim()))
           throw new ErroMcp('produto precisa de nome (da placa) e iniciador (quem iniciou o projeto — pergunte ao usuário)');
         if (a.nome) {
@@ -193,6 +196,8 @@ module.exports = {
         const s = hc.serializeSchematic(sch);
         if (!s.text) throw new ErroMcp('schematic inválido: ' + s.errors.map(e => e.msg).join('; '));
         fs.mkdirSync(dir, { recursive: false });
+        /* 1.84.0: quem está logado no Nexo Hub é o responsável pelo projeto novo (equipe.json) */
+        try { require('../lib/equipe.js').nova(dir); } catch (e) { ctx.log('equipe do projeto novo: ' + (e && e.message || e)); }
         const p = ctx.projeto(a.nome);
         ctx.grava(p.arq('schematic.js'), s.text, 'projeto_criar');
         ctx.grava(p.arq('annotations.js'), hc.serializeAnnotations([]).text, 'projeto_criar');

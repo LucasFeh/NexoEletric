@@ -37,6 +37,19 @@ impl Python {
         *self.porta.get_or_init(|| async { self.sobe().await }).await
     }
 
+    /// Um POST JSON a uma rota do hubserver.py (sobe o Python se preciso). Para o que o Rust avisa depois de fazer
+    /// (o historico do /api/save: equipe.rs). false = sem o Python ou ele recusou.
+    pub async fn posta(&self, caminho: &str, corpo: &serde_json::Value) -> bool {
+        let Some(porta) = self.porta().await else { return false };
+        match self.cli.post(format!("http://127.0.0.1:{porta}{caminho}")).json(corpo).timeout(Duration::from_secs(60)).send().await {
+            Ok(r) => r.status().is_success(),
+            Err(e) => {
+                eprintln!("[nexo-hub] -> python {caminho}: {e}");
+                false
+            }
+        }
+    }
+
     async fn sobe(&self) -> Option<u16> {
         let exe = self.exe.clone()?;
         if !exe.is_file() || !self.root.join("hubserver.py").is_file() {

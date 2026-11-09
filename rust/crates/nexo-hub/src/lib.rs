@@ -9,6 +9,7 @@
 //! O resto (Gerber, PDF, BOM, Odoo, laser, importar do Altium...) vai ao hubserver.py, que sobe em
 //! segundo plano so quando alguem pede uma rota dele -- a abertura nao espera o Python.
 
+mod equipe;
 mod gate;
 mod index;
 mod live;
@@ -48,6 +49,9 @@ pub struct Estado {
     pub py: proxy::Python,
     pub gate: gate::Gate,
     pub patches: patches::Cache,
+    /// quem esta logado no Nexo Hub (a equipe do projeto no /api/save; equipe.rs)
+    pub sessao: equipe::Sessao,
+    pub hub_cli: reqwest::Client,
 }
 
 pub type Est = Arc<Estado>;
@@ -98,6 +102,8 @@ pub async fn serve(cfg: Config) -> std::io::Result<(u16, tokio::task::JoinHandle
         py: proxy::Python::new(cfg.python.clone(), cfg.root.clone()),
         gate: gate::Gate::default(),
         patches: patches::Cache::default(),
+        sessao: equipe::Sessao::default(),
+        hub_cli: reqwest::Client::new(),
         cfg,
     });
     if est.cfg.nexobd {

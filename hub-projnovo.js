@@ -75,25 +75,23 @@ function abre(o) {
   }).catch(() => { /* sem servidor: fica a folha em branco */ });
   const iCli = campo('Cliente', false, inp('ex.: USIMINAS'));
   const iVin = campo('Descrição', false, inp('para que serve (vai na coluna VÍNCULO do catálogo)'));
-  /* O DESENHISTA É O SEU CARIMBO (2026-11-05: "se você iniciar um projeto, seu nome fica como desenhista"): o carimbo
-     em uso neste computador (hub-carimbos.js), e não um nome digitado. Sem carimbo em uso, o Escolher abre os carimbos. */
-  const CB = root.HubCarimbos;
+  /* O DESENHISTA É QUEM ESTÁ LOGADO (2026-11-05: "se você iniciar um projeto, seu nome fica como desenhista"; 1.84.0: o
+     login do Nexo Hub, que também vira o responsável pelo projeto). O servidor confere; aqui só mostra. */
+  const CB = root.HubAprovacao;
   const quem = el('div', 'pn-sig');
   const quemNome = el('span', 'pn-cod', '…');
-  const quemTroca = el('button', 'btn btn-ghost', 'Escolher…'); quemTroca.type = 'button';
+  const quemTroca = el('span', 'pn-info', 'o seu login do Nexo Hub');
   quem.append(quemNome, quemTroca);
   const lQuem = el('label'); lQuem.textContent = 'Desenhista'; lQuem.append(' ', el('b', null, '*'));
   g.append(lQuem, quem);
   const iQuem = { value: '' };
   const pintaQuem = () => {
-    const a = CB ? CB.estado().ativo : null;
+    const a = CB ? CB.estado().usuario : null;
     iQuem.value = a ? a.nome : (CB ? '' : lePref());
-    quemNome.textContent = a ? a.nome : (CB ? 'nenhum carimbo em uso' : (iQuem.value || '—'));
+    quemNome.textContent = a ? a.nome : (CB ? 'ninguém logado no Nexo Hub' : (iQuem.value || '—'));
     quemNome.style.color = a ? '' : 'var(--err)';
-    quemTroca.textContent = a ? 'Trocar…' : 'Escolher…';
     if (typeof confere === 'function') erro.textContent = mexeu ? confere() : (confere(), '');
   };
-  quemTroca.onclick = () => { if (CB) CB.abreGerenciador({}); };
   const desliga = CB ? CB.ouve(pintaQuem) : null;
   if (CB) CB.carrega();
   const iProj = campo('Nome do projeto', false, inp('o código'));
@@ -120,7 +118,7 @@ function abre(o) {
     let m = '';
     if (!n) m = 'falta o nome da placa';
     else if (n.replace(/\s+/g, ' ').length > 27) m = 'o nome tem ' + n.replace(/\s+/g, ' ').length + ' caracteres e o limite é 27: o que passar vai na descrição';
-    else if (!q) m = 'escolha o seu carimbo: ele entra como desenhista';
+    else if (!q) m = 'entre no Nexo Hub: o seu nome (o do login) entra como desenhista';
     else if (s && !/^[A-Z][A-Z0-9]{0,11}$/.test(s)) m = 'a sigla tem só letras e números, começando por letra';
     else if (p && nomeRuim(p)) m = 'nome do projeto: ' + nomeRuim(p);
     else if (p && o.existe && o.existe(p)) m = 'já existe um projeto com esse nome';

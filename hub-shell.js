@@ -398,10 +398,12 @@ body.eh-shell .tab[aria-selected="true"]::after {
       n.title = p.pending + ' mudança(s) no changes.js ainda não aplicada(s) no Altium';
       extras.push(n);
     }
-    // [Aprovado] / [Sem aprovação] (hub-carimbos.js): a aprovação do projeto, que cai a cada modificação
-    const aprov = window.HubCarimbos && !p.demo ? window.HubCarimbos.tagProjeto(p.name) : null;
+    // [Aprovado] / [Sem aprovação] (hub-aprovacao.js): a aprovação do projeto, que cai a cada modificação
+    const aprov = window.HubAprovacao && !p.demo ? window.HubAprovacao.tagProjeto(p.name) : null;
+    // meu / colaborador / somente leitura (hub-equipe.js, 1.84.0): a equipe do projeto pelo login do Nexo Hub
+    const eqTag = window.HubEquipe && !p.demo ? window.HubEquipe.tagArvore(p.name) : null;
     const r = linha(nivel, 'proj' + (eAtivo ? ' ativo' : '') + (p.demo ? ' demo' : ''),
-      [caret(aberto), icone(p.grupo ? 'pcb' : 'projeto'), el('span', 'nm', p.name), aprov, dot, ...extras]);
+      [caret(aberto), icone(p.grupo ? 'pcb' : 'projeto'), el('span', 'nm', p.name), eqTag, aprov, dot, ...extras]);
     arrastavel(r, p);
     r.title = p.name;
     r.querySelector('.car').addEventListener('click', (e) => {
@@ -590,11 +592,17 @@ body.eh-shell .tab[aria-selected="true"]::after {
         off: semServidor, titulo: 'a PCB volta a ser um projeto avulso na árvore',
       });
     }
+    // a equipe do projeto (hub-equipe.js, 1.84.0): o responsável, os colaboradores e o convite
+    if (window.HubEquipe) {
+      itemDeMenu(m, 'Equipe do projeto…', icone('projeto'), () => window.HubEquipe.abre(p.name), {
+        off: semServidor, titulo: 'quem mexe neste projeto: o responsável e os colaboradores convidados (pelo login do Nexo Hub)',
+      });
+    }
     itemDeMenu(m, 'Excluir projeto…', icone('lixo'), () => openDeleteDialog(p.id), {
       perigo: true,
       off: semServidor || typeof openDeleteDialog !== 'function',
       titulo: semServidor ? 'sem servidor não há o que excluir'
-        : 'pede a senha mestre; a pasta vai para Trash\\, na pasta de trabalho',
+        : 'o responsável ou o administrador exclui pelo login; os outros, com a senha mestre. A pasta vai para Trash\\, na pasta de trabalho',
     });
     document.body.append(m);
     // so da para medir no DOM; encosta nas bordas em vez de vazar
@@ -895,7 +903,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
       b.onclick = acao;
       tools.append(b);
     };
-    ferramenta('novoProj', 'Novo projeto — gera o código da placa no catálogo da casa e cria o projeto com o carimbo preenchido',
+    ferramenta('novoProj', 'Novo projeto — gera o código da placa no catálogo da casa e cria o projeto com o quadro de título preenchido',
       () => window.__hubNovoProjeto && window.__hubNovoProjeto());
     ferramenta('recarregar', 'Reindexar os projetos da pasta de trabalho', () => {
       if (typeof runAction === 'function') runAction('Rescan');

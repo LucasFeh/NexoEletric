@@ -214,7 +214,6 @@ Na vista Esquema, tudo da folha fica no **menu da folha** (canto de cima à esqu
 - as folhas;
 - formato e orientação;
 - o template;
-- o **Carimbo…** (os carimbos das pessoas: nome, senha e se é aprovador);
 - editar, criar e **remover** template.
 
 No template da casa (`casa:A4_DiEletrons`) o carimbo se preenche sozinho (desde a 1.75.0):
@@ -225,8 +224,19 @@ No template da casa (`casa:A4_DiEletrons`) o carimbo se preenche sozinho (desde 
   lê o catálogo de todos os produtos; gravados no cabeçalho `params`. Sem eles, o código da placa sai do nome do projeto
   (`PDCD-DI261939 (PTYPE)` → `PDCD-DI261939`). Os nomes antigos (`Desenho_linha_unica`, `Equipamento_linha_um`/`_dois`)
   ainda são lidos como os novos.
-- `Desenhista_DiEletrons` + `Data_desenho`: quem criou ou assumiu o projeto (carimbo em uso; Arquivo › Assumir projeto).
-- `Verificador_DiEletrons`, `Aprovador_DiEletrons`, `Data_verificacao`, `Data_aprovacao`, `Revisao`: o **Aprovar**.
+- `Desenhista_DiEletrons` + `Data_desenho`: quem criou ou assumiu o projeto (o login do Nexo Hub; Arquivo › Assumir
+  projeto). `Desenhista_carimbo` e `Aprovacao_carimbo` guardam o login (os nomes dos campos são os de antes).
+- `Verificador_DiEletrons`, `Aprovador_DiEletrons`, `Data_verificacao`, `Data_aprovacao`, `Revisao`: o **Aprovar** (só
+  quem o administrador marcou como aprovador no Nexo Hub).
+
+### Equipe do projeto e histórico (1.84.0)
+
+Cada projeto tem um responsável e colaboradores convidados (`Projects/<p>/equipe.json`, pelo login do Nexo Hub). Só o
+responsável, os colaboradores e os administradores gravam no projeto; para os outros, as ferramentas que gravam recusam
+("Só o responsável (…) e os colaboradores convidados mexem neste projeto") — diga isso ao usuário e não tente contornar.
+Projeto sem responsável: qualquer pessoa logada grava. Toda gravação da IA entra no histórico do projeto
+(`Projects/<p>/Historico/<id>.jsonl`) marcada "pela IA", em nome de quem está logado. Não edite `equipe.json` nem o
+`Historico/` à mão.
 Esses campos das pessoas, datas, revisão e códigos vêm SÓ do cabeçalho do projeto, pelo nome exato: a folha não os
 sobrescreve, e o `DrawnBy`/`CheckedBy`/`Revision` do Altium não os preenchem. Não os edite à mão no schematic.js.
 

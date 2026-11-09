@@ -5,13 +5,16 @@
    aquela revisão, que volta todo o projeto pro estado que estava naquela revisão; algo foi modificado, tem que aprovar
    a 2x, salva uma nova revisão REV.B e vai pro histórico também".
 
-   O servidor é o tools/rotas/carimbos.py (GET /api/revisoes, POST /api/revisoes/voltar): cada Aprovar guarda uma cópia
+   O servidor é o tools/rotas/aprovacao.py (GET /api/revisoes, POST /api/revisoes/voltar): cada Aprovar guarda uma cópia
    do projeto em Projects/<p>/Revisoes/REV.<x>/ e o resumo do que mudou desde a anterior. Aqui só a tela, dentro do
    painel do Histórico (hub.html » render 'hist' chama HubRevisoes.pinta): duas sub-abas, "Revisões" e "Linha do tempo"
-   (a lista de sempre, #histRows). */
+   (a lista de sempre, #histRows).
+   1.84.0: a primeira sub-aba é "Modificações" (hub-equipe.js » pintaModificacoes): cada gravação com a foto e o nome de
+   quem fez, quando e o que mudou (o histórico com autor do tools/rotas/equipe.py). As revisões mostram a foto e o nome de
+   quem aprovou; apagar uma revisão é do administrador do Nexo Hub (sem senha; só o Hub antigo, sem login, pede a mestre). */
 (function (root) {
 'use strict';
-const LS_ABA = 'nexoeletric.hist.aba';
+const LS_ABA = 'nexoeletric.hist.aba2';   /* 1.84.0: chave nova, para todo mundo cair em Modificações */
 const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
 const CSS = `
 .rv-abas{position:sticky; top:0; z-index:2; display:flex; gap:4px; padding:8px 12px; background:var(--bg, #111);
@@ -34,12 +37,14 @@ const CSS = `
 .rv-card button:hover{border-color:var(--hi, #3b82f6);}
 .rv-card button.rv-apagar:hover{color:var(--err, #f87171); border-color:var(--err, #f87171);}
 .rv-atual{font-size:11px; color:var(--ok, #4ade80); border:1px solid var(--ok, #4ade80); border-radius:9px; padding:0 7px;}
+.rv-card button:disabled{opacity:.45; cursor:default;}
+.rv-cab .rv-quem{display:flex; align-items:center; min-width:0;}
 `;
 function css(){
   if (document.getElementById('rv-css')) return;
   const s = el('style'); s.id = 'rv-css'; s.textContent = CSS; document.head.append(s);
 }
-function aba(){ try { return localStorage.getItem(LS_ABA) || 'revisoes'; } catch (_) { return 'revisoes'; } }
+function aba(){ try { return localStorage.getItem(LS_ABA) || 'modificacoes'; } catch (_) { return 'modificacoes'; } }
 function gravaAba(v){ try { localStorage.setItem(LS_ABA, v); } catch (_) { /* sem storage */ } }
 function toast(txt, tipo, ms){
   if (root.HubDialog && root.HubDialog.toast) return root.HubDialog.toast(txt, tipo || 'info', ms);
@@ -52,24 +57,32 @@ function pinta(pane, projeto){
   css();
   const scroll = pane.querySelector('.scroll') || pane;
   const linha = scroll.querySelector('#histRows');
-  let abas = scroll.querySelector('.rv-abas'), corpo = scroll.querySelector('.rv-corpo');
+  let abas = scroll.querySelector('.rv-abas'), corpo = scroll.querySelector('.rv-corpo'), mods = scroll.querySelector('.rv-mods');
   if (!abas){
     abas = el('div', 'rv-abas');
-    for (const [id, rot] of [['revisoes', 'Revisões'], ['linha', 'Linha do tempo']]){
+    for (const [id, rot] of [['modificacoes', 'Modificações'], ['revisoes', 'Revisões'], ['linha', 'Linha do tempo']]){
       const b = el('button', null, rot); b.type = 'button'; b.dataset.aba = id;
       b.addEventListener('click', () => { gravaAba(id); pinta(pane, abas.dataset.projeto); });
       abas.append(b);
     }
     corpo = el('div', 'rv-corpo');
+    mods = el('div', 'rv-mods');
     scroll.prepend(abas);
-    abas.after(corpo);
+    abas.after(mods, corpo);
   }
   abas.dataset.projeto = projeto;
-  const a = aba();
+  let a = aba();
+  if (a === 'modificacoes' && !(root.HubEquipe && root.HubEquipe.pintaModificacoes)) a = 'revisoes';
   for (const b of abas.querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.aba === a));
   if (linha) linha.hidden = a !== 'linha';
   corpo.hidden = a !== 'revisoes';
+  mods.hidden = a !== 'modificacoes';
   if (a === 'revisoes') carrega(corpo, projeto, pane);
+  if (a === 'modificacoes'){
+    if (mods.dataset.projeto !== projeto) mods.replaceChildren();
+    mods.dataset.projeto = projeto;
+    root.HubEquipe.pintaModificacoes(mods, projeto);
+  }
 }
 
 async function carrega(corpo, projeto, pane){
@@ -82,6 +95,10 @@ async function carrega(corpo, projeto, pane){
   if (!j || !j.ok){ corpo.replaceChildren(el('div', 'rv-vazio', 'as revisões não abriram: ' + ((j && j.error) || 'sem resposta'))); return; }
   const out = [];
   const at = j.atual || {};
+  const HE = root.HubEquipe;
+  const ses = HE ? await HE.sessao() : { modo:'legado', usuario:null };
+  if (n !== seq) return;
+  const admin = Boolean(ses.usuario && ses.usuario.admin), semLogin = ses.modo === 'legado' || ses.modo === 'fora';
   const agora = el('div', 'rv-card agora ' + (at.aprovado ? 'ok' : 'nao'));
   const cab = el('div', 'rv-cab');
   cab.append(el('span', 'rv-rev', 'Agora'), el('span', 'rv-quem', at.aprovado
@@ -96,16 +113,23 @@ async function carrega(corpo, projeto, pane){
   for (const r of j.revisoes || []){
     const c = el('div', 'rv-card');
     const h = el('div', 'rv-cab');
-    h.append(el('span', 'rv-rev', r.rev), el('span', 'rv-quem', (r.data || '') + ' · aprovada por ' + (r.aprovador || '—')
-      + ((r.quando || '').length > 10 ? ' às ' + r.quando.slice(11, 16) : '')));
+    const quando = (r.data || '') + ((r.quando || '').length > 10 ? ' às ' + r.quando.slice(11, 16) : '');
+    if (HE){
+      const q = el('span', 'rv-quem');
+      q.append(HE.cracha(r.usuario || { nome:r.aprovador || '—' }, { px:24, sub:'aprovou em ' + quando }));
+      h.append(el('span', 'rv-rev', r.rev), q);
+    } else h.append(el('span', 'rv-rev', r.rev), el('span', 'rv-quem', quando + ' · aprovada por ' + (r.aprovador || '—')));
     if (at.aprovado && at.rev === r.rev) h.append(el('span', 'rv-atual', 'é o projeto de agora'));
     const b = el('button', null, 'Voltar para esta revisão'); b.type = 'button';
     b.title = 'o projeto inteiro volta a ser o desta revisão (esquema, PCB e o resto da pasta)';
     b.addEventListener('click', () => volta(projeto, r.rev, () => pinta(pane, projeto)));
     h.append(b);
     const ap = el('button', 'rv-apagar', 'Apagar'); ap.type = 'button';
-    ap.title = 'tirar esta revisão do histórico (pede a senha mestre)';
-    ap.addEventListener('click', () => apaga(projeto, r.rev, at.aprovado && at.rev === r.rev, () => pinta(pane, projeto)));
+    ap.title = admin ? 'tirar esta revisão do histórico (você é administrador no Nexo Hub)'
+      : semLogin ? 'tirar esta revisão do histórico (pede a senha mestre: o Nexo Hub desta máquina não tem login)'
+      : 'só o administrador do Nexo Hub apaga revisões';
+    ap.disabled = !admin && !semLogin;
+    ap.addEventListener('click', () => apaga(projeto, r.rev, at.aprovado && at.rev === r.rev, () => pinta(pane, projeto), admin));
     h.append(ap);
     c.append(h, el('div', 'rv-vazio', r.rev === (j.revisoes[j.revisoes.length - 1] || {}).rev ? 'o que tinha nela:' : 'o que mudou desde a anterior:'));
     const ul = el('ul'); for (const m of r.resumo || []) ul.append(el('li', null, m)); c.append(ul);
@@ -115,7 +139,7 @@ async function carrega(corpo, projeto, pane){
 }
 
 async function volta(projeto, rev, depois){
-  const CB = root.HubCarimbos;
+  const CB = root.HubAprovacao;
   const ok = CB && CB.confirma
     ? await CB.confirma('Voltar para a ' + rev, 'O projeto ' + projeto + ' inteiro volta a ser o da ' + rev + ' (esquema, PCB e o resto da pasta), '
         + 'e fica aprovado de novo. O que mudou depois dela sai do projeto (o NexoBD guarda o histórico dos arquivos). '
@@ -134,9 +158,26 @@ async function volta(projeto, rev, depois){
 
 /* 2026-11-06: "no histórico de revisões também, quero poder apagar uma revisão" — pede a senha mestre; a revisão em
    que o projeto está aprovado, ao sair, leva a aprovação junto (o servidor limpa os campos do carimbo da folha) */
-async function apaga(projeto, rev, ehAtual, depois){
-  const CB = root.HubCarimbos;
-  if (!CB || !CB.pedeSenha){ toast('os carimbos não carregaram nesta página', 'err'); return; }
+async function apaga(projeto, rev, ehAtual, depois, admin){
+  const CB = root.HubAprovacao;
+  const texto = 'A ' + rev + ' sai do histórico do projeto ' + projeto + ' (a cópia dela também). '
+    + (ehAtual ? 'O projeto está aprovado nela: ele fica SEM aprovação e precisa ser aprovado de novo. ' : '')
+    + 'Os arquivos do projeto de agora não mudam.';
+  /* 1.84.0: o administrador apaga pelo login, sem senha */
+  if (admin){
+    const ok = CB && CB.confirma ? await CB.confirma('Apagar a ' + rev, texto, 'Apagar') : true;
+    if (!ok) return;
+    let j = null;
+    try {
+      j = await (await fetch('/api/revisoes/apagar', { method:'POST', headers:{ 'Content-Type':'application/json' },
+        body:JSON.stringify({ projeto, rev }) })).json();
+    } catch (e) { j = { ok:false, error:String(e && e.message || e) }; }
+    if (!j || !j.ok){ toast('não apagou: ' + ((j && j.error) || 'sem resposta'), 'err', 7000); return; }
+    toast(j.rev + ' apagada' + (j.aprovacaoTirada ? ' — o projeto ficou sem aprovação' : ''), 'ok', 5000);
+    if (depois) depois();
+    return;
+  }
+  if (!CB || !CB.pedeSenha){ toast('a aprovação não carregou nesta página', 'err'); return; }
   let j = null;
   const s = await CB.pedeSenha('Apagar a ' + rev, 'A ' + rev + ' sai do histórico do projeto ' + projeto + ' (a cópia dela também). '
       + (ehAtual ? 'O projeto está aprovado nela: ele fica SEM aprovação e precisa ser aprovado de novo. ' : '')

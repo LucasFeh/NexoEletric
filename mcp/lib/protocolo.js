@@ -13,6 +13,7 @@ const VERSOES = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const { ErroMcp } = require('./contexto.js');
 const skills = require('./skills.js');
 const gate = require('./gate-hub.js');
+const equipe = require('./equipe.js');
 
 const ERR = { PARSE: -32700, REQ: -32600, METODO: -32601, PARAMS: -32602, INTERNO: -32603 };
 
@@ -134,6 +135,8 @@ class Servidor {
     try {
       const semHub = await gate.recusa(f.nome, this.ctx);
       if (semHub) throw new ErroMcp(semHub, { semHub: true });
+      /* 1.84.0: quem está logado no Nexo Hub (a equipe do projeto e o autor no histórico): a gravação confere */
+      if (!gate.LIVRES.has(f.nome)) await equipe.sessao();
       const r = await f.executa(args, this.ctx, this);
       return resultado(r, this.versaoProtocolo);
     } catch (e) {

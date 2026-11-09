@@ -252,3 +252,29 @@ test('BOM: a página e a BOM de cada projeto vão para o NexoBD, que serve /bom/
   const r3 = await armazem.rodada({ ws: A, bundle: '', cliente, estado: eA, fonte, scripts: false });
   assert.deepEqual(r3.boms.atualizados, ['Outra']);
 });
+
+test('o autor das revisões (1.84.0): o login de quem está logado no Nexo Hub vai em toda novaRevisao', async () => {
+  const http = require('node:http');
+  let sessao = { ok: true, logado: true, usuario: { id: 'u1', login: 'romeu', nome: 'Romeu Yukio' } };
+  const srv = http.createServer((req, res) => {
+    if (req.url !== '/api/v1/sessao' || !sessao) { res.writeHead(404); res.end('{}'); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(sessao));
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    assert.strictEqual(await armazem.autorDoHub(url), 'romeu');
+    sessao = { ok: true, logado: false, usuario: null };
+    assert.strictEqual(await armazem.autorDoHub(url), '');
+    sessao = null;                                               // Hub antigo: 404
+    assert.strictEqual(await armazem.autorDoHub(url), '');
+    assert.strictEqual(await armazem.autorDoHub('http://127.0.0.1:1'), '');
+  } finally { srv.close(); }
+  const pedidos = [];
+  const cli = { novaRevisao: async (id, c) => { pedidos.push([id, c]); return { numero: 1 }; }, chave: async () => null };
+  const c2 = armazem.comAutor(cli, 'romeu');
+  await c2.novaRevisao('pj-1', { arquivos: {}, nota: 'NexoEletric' });
+  await c2.novaRevisao('pj-2', { arquivos: {}, autor: 'outro' });
+  assert.deepStrictEqual(pedidos.map(([id, c]) => [id, c.autor]), [['pj-1', 'romeu'], ['pj-2', 'outro']]);
+  assert.strictEqual(typeof c2.chave, 'function', 'o resto do cliente continua');
+});

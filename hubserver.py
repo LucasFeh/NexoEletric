@@ -45,8 +45,11 @@ ODOO_LISTA = 'odoo-lista.json'  # recibo do envio ao Odoo; muda sem o projeto mu
 # componentes fora do esquema da lista do Odoo (odoolista.EXTRAS): o modal grava a cada
 # quantidade mudada, e nenhuma aba precisa recarregar por isso -- a folha nao muda
 ODOO_EXTRAS = 'lista-extras.json'
-# + os carimbos (Libs/carimbos.json, tools/rotas/carimbos.py): criar um carimbo nao muda biblioteca nenhuma
+# + o Libs/carimbos.json dos carimbos de antes da 1.84.0 (ninguem mais le; o arquivo fica quieto no NexoBD)
 ESTADO_LOCAL = BOM_STATE_FILES + (ODOO_LISTA, ODOO_EXTRAS, 'carimbos.json')
+# + a equipe do projeto (Projects/<p>/equipe.json, tools/rotas/equipe.py; 1.84.0): convidar alguem nao muda o desenho, e as
+# paginas abertas leem a permissao de novo sozinhas (hub-equipe.js)
+ESTADO_LOCAL = ESTADO_LOCAL + ('equipe.json',)
 # a biblioteca de footprints do hub (Libs/pcblib-hub.js) e os STEP dela (Libs/3d-hub/): o editor de
 # footprint grava de dentro do Esquema e da PCB, e quem usa relê na hora de abrir (hub-fplib.js »
 # carrega). Vistos pelo vigia, gravar um footprint recarregaria a pagina onde o editor esta aberto.
@@ -63,8 +66,11 @@ PDF_DIR = 'PDF'
 # as fotos 3D da placa para o Odoo (MCP pcb_render_3d; odoolista.RENDER_DIR): fora do vigia tambem --
 # quem as tira e a propria vista PCB, e gravar recarregaria a pagina que acabou de fotografar
 RENDER_DIR = 'Renders'
-# as copias do projeto a cada aprovacao (tools/rotas/carimbos.py » grava_revisao): fora do vigia, como as saidas
+# as copias do projeto a cada aprovacao (tools/rotas/aprovacao.py » grava_revisao): fora do vigia, como as saidas
 REV_DIR = 'Revisoes'
+# o historico de modificacoes com autor (tools/rotas/equipe.py » registra, 1.84.0): cada gravacao acrescenta uma linha;
+# visto pelo vigia, todo Salvar recarregaria as paginas uma segunda vez
+HIST_DIR = 'Historico'
 
 app = Flask(__name__)
 _version = 0           # incrementa a cada mudanca detectada
@@ -150,7 +156,8 @@ def _snapshot():
                                if os.path.normcase(d) not in (os.path.normcase(GERBER_DIR),
                                                               os.path.normcase(PDF_DIR),
                                                               os.path.normcase(RENDER_DIR),
-                                                              os.path.normcase(REV_DIR))]
+                                                              os.path.normcase(REV_DIR),
+                                                              os.path.normcase(HIST_DIR))]
             for f in filenames:
                 # o .tmp da gravacao atomica junto: uma varredura que o pegasse no meio da
                 # escrita via um arquivo nascer e sumir, e isso tambem e "mudou"
@@ -349,6 +356,16 @@ SAVE_BASENAMES = ('changes.js', 'schematic.js', 'annotations.js', 'rules.js')
 SAVE_LIB_FILES = ('lib-subs.js', 'sch-templates-casa.js', 'pcblib-hub.js')
 
 
+# a equipe do projeto e o historico com autor (tools/rotas/equipe.py, 1.84.0); None = o modulo nao veio (o Salvar segue
+# como antes)
+try:
+    sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
+    import equipe as _equipe        # noqa: E402
+except Exception as _e:             # noqa: BLE001
+    _equipe = None
+    print('AVISO: equipe do projeto desligada (%s) — falta tools/rotas/equipe.py.' % _e)
+
+
 @app.route('/api/save', methods=['POST'])
 def api_save():
     data = request.get_json(silent=True)
@@ -366,6 +383,18 @@ def api_save():
     full = safe_join(ROOT, *parts)
     if full is None or not os.path.isdir(os.path.dirname(full)):
         return {'ok': False, 'error': 'pasta inexistente'}, 404
+    # 1.84.0: o projeto tem dono (tools/rotas/equipe.py): quem nao e o responsavel, colaborador ou admin nao grava; e cada
+    # gravacao entra no historico com quem fez e o que mudou
+    antes = None
+    if ok_proj and _equipe is not None:
+        recusa = _equipe.recusa_gravar(os.path.dirname(full))
+        if recusa:
+            return recusa, 403
+        try:
+            with open(full, encoding='utf-8', newline='') as f:
+                antes = f.read().replace('\r\n', '\n')
+        except OSError:
+            antes = None
     tmp = full + '.tmp'
     try:
         with open(tmp, 'w', encoding='utf-8', newline='\n') as f:
@@ -374,6 +403,12 @@ def api_save():
         os.replace(tmp, os.path.realpath(full))
     except OSError as e:
         return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
+    if ok_proj and _equipe is not None:
+        try:
+            _equipe.registra(os.path.dirname(full), parts[2], antes, str(data['content']).replace('\r\n', '\n'),
+                             origem='app', usuario=_equipe.sessao()['usuario'])
+        except Exception as e:          # noqa: BLE001 -- o historico nunca impede o Salvar
+            print('[historico] %s' % e, flush=True)
     return {'ok': True}
 
 
@@ -1167,12 +1202,16 @@ def api_project_delete(proj_id):
     """
     data = request.get_json(silent=True) or {}
     senha = data.get('password')
-    if not isinstance(senha, str) or not hmac.compare_digest(
-            senha.encode('utf-8'), MASTER_PASSWORD.encode('utf-8')):
-        return {'ok': False, 'error': 'senha mestre incorreta'}, 403
     if proj_id not in _PROJ_CACHE:
         build_index(ROOT)
     name = _PROJ_CACHE.get(proj_id)
+    # 1.84.0: o administrador ou o responsavel pelo projeto apaga pelo login (tools/rotas/equipe.py); quem nao e, e o
+    # Hub antigo sem login, continuam com a senha mestre
+    pelo_login = bool(name and _equipe is not None and os.path.isdir(os.path.join(ROOT, 'Projects', name))
+                      and _equipe.permissao(os.path.join(ROOT, 'Projects', name))['apagar'])
+    if not pelo_login and (not isinstance(senha, str) or not hmac.compare_digest(
+            senha.encode('utf-8'), MASTER_PASSWORD.encode('utf-8'))):
+        return {'ok': False, 'error': 'senha mestre incorreta', 'mestre': True}, 403
     if not name:
         return {'ok': False, 'error': 'projeto desconhecido'}, 404
     src = os.path.join(ROOT, 'Projects', name)
@@ -2056,15 +2095,25 @@ try:
 except Exception as _e:            # noqa: BLE001
     print('AVISO: componentes locais desligados (%s) — falta tools/rotas/componentes_locais.py.' % _e)
 
-# ─────────────────── carimbos e aprovacao do projeto (tools/rotas/carimbos.py) ───────────────────
-# /api/carimbos*: quem desenha e quem aprova (Libs/carimbos.json, no NexoBD); /api/aprovacao*: a aprovacao no
-# cabecalho do schematic.js, que cai sozinha quando o projeto muda. Apagar carimbo pede a senha mestre do hub.
+# ─────────────────── aprovacao do projeto e revisoes (tools/rotas/aprovacao.py) ───────────────────
+# /api/aprovacao*: a aprovacao no cabecalho do schematic.js (quem aprova e quem esta logado no Nexo Hub, com a marca de
+# aprovador), que cai sozinha quando o projeto muda; /api/revisoes*: a copia do projeto a cada aprovacao. Ate a 1.83.0 era
+# o tools/rotas/carimbos.py, com os carimbos (nome + senha); os carimbos sairam, o que eles faziam e do login.
 try:
     sys.path.insert(0, os.path.join(ROOT, 'tools', 'rotas'))
-    import carimbos as _carimbos   # noqa: E402
-    _carimbos.registra(app, ROOT, MASTER_PASSWORD)
+    import aprovacao as _aprovacao   # noqa: E402
+    _aprovacao.registra(app, ROOT, MASTER_PASSWORD)
 except Exception as _e:            # noqa: BLE001
-    print('AVISO: carimbos desligados (%s) — falta tools/rotas/carimbos.py.' % _e)
+    print('AVISO: aprovacao desligada (%s) — falta tools/rotas/aprovacao.py.' % _e)
+
+# ─────────────────── a equipe do projeto e o historico com autor (tools/rotas/equipe.py, 1.84.0) ───────────────────
+# /api/sessao*: quem esta logado no Nexo Hub (o servidor pergunta, nunca a pagina); /api/equipe*: o responsavel e os
+# colaboradores de cada projeto; /api/historico*: cada gravacao com quem fez e o que mudou
+if _equipe is not None:
+    try:
+        _equipe.registra_rotas(app, ROOT, {'desenhista': lambda d, u: _aprovacao.assume_desenhista(d, u)})
+    except Exception as _e:        # noqa: BLE001
+        print('AVISO: rotas da equipe desligadas (%s).' % _e)
 
 # ─────────────────── MCP: o canal da IA com a vista aberta (mcp/) ───────────────────
 # /api/mcp/{status,pedido,pedidos,resposta/<id>}: o servidor MCP (mcp/eletrichub-mcp.js) pede

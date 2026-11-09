@@ -4,6 +4,45 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.84.0 — 2026-11-09
+
+**Sem carimbo: quem desenha, quem aprova e quem mexe em cada projeto vêm do login do Nexo Hub. E o histórico diz
+quem mudou o quê.**
+- **O carimbo saiu.** Não existe mais cadastrar carimbo, senha de carimbo, carimbo em uso nem a janela de carimbos
+  (o "Carimbo…" do menu da folha saiu). O seu nome vem do login do Nexo Hub, e quem é **aprovador** (e
+  **administrador**) é o administrador que marca no Nexo Hub, em Configurações › Usuários. O que o carimbo fazia
+  continua, feito pelo usuário logado:
+  - **Novo projeto:** o desenhista é você (o nome do login, com a data); você vira o **responsável** pelo projeto.
+  - **Arquivo › Assumir projeto…:** você vira o desenhista (com a data de hoje) e o responsável. O administrador
+    assume qualquer projeto; os outros, só projeto sem responsável (o responsável passa o projeto pela Equipe).
+    Sem senha mestre.
+  - **Aprovar** (ao lado do Salvar, no Esquema): só para quem é aprovador no Nexo Hub e mexe no projeto. Aprovado, o
+    botão mostra a foto e o nome de quem aprovou; o quadro de título da folha e os PDFs levam o nome do login.
+  - **Apagar revisão** (Histórico › Revisões): o administrador, sem senha. **Excluir projeto**: o responsável ou o
+    administrador, sem senha (os outros continuam com a senha mestre).
+  - As aprovações antigas continuam valendo. O arquivo de carimbos que já existe fica quieto no NexoBD.
+- **Equipe do projeto** (Arquivo › Equipe do projeto…, ou botão direito no projeto): o responsável e os
+  colaboradores, com foto e nome. O responsável e o administrador **convidam** (escolhem da equipe do Nexo Hub, com
+  busca) e tiram colaboradores; o administrador troca o responsável; o colaborador pode sair. Projeto antigo sem
+  responsável: qualquer pessoa logada mexe e pode assumir.
+- **Quem não é da equipe abre o projeto só para leitura:** uma faixa avisa "Somente leitura — responsável <nome>.
+  Peça um convite.", o Salvar fica desligado e o autosave não grava. O servidor também recusa (o app, a janela Rust e
+  a IA pelo MCP). O administrador mexe em tudo sem convite. Na árvore de projetos, "meu", "colab." ou um cadeado.
+- **Histórico › Modificações** (a aba principal): cada gravação com a foto e o nome de quem fez, quando ("há 5 min")
+  e exatamente o que mudou — componente adicionado/removido/movido, valor 10k → 22k, footprint, rótulos de net,
+  fios; na PCB "2 trilhas na net GND adicionadas (Top)", "U1 movido para (30,48; 22,86) mm, girado para 90°", via
+  removida; regras e sinalizadores. O que a IA gravou leva o selo **pela IA**. O autosave da mesma pessoa no mesmo
+  arquivo em até 5 min vira uma linha só. Convites, aprovações e revisões também aparecem. As revisões mostram a foto
+  e o nome de quem aprovou.
+- As revisões que o NexoEletric sobe ao NexoBD levam o login de quem está logado como autor.
+- Por dentro: `tools/rotas/equipe.py` (o servidor pergunta ao Hub `GET /api/v1/sessao`; rotas `/api/sessao*`,
+  `/api/equipe*`, `/api/historico*`), `tools/rotas/aprovacao.py` (era o `carimbos.py`, sem as rotas `/api/carimbos*`),
+  `hub-equipe.js`, `hub-aprovacao.js` (era o `hub-carimbos.js`), `rust/crates/nexo-hub/src/equipe.rs` e
+  `mcp/lib/equipe.js`. A equipe mora em `Projects/<p>/equipe.json` e o histórico em `Projects/<p>/Historico/<id do
+  usuário>.jsonl` (um arquivo por pessoa, para duas máquinas gravando ao mesmo tempo não se perderem no NexoBD); os
+  campos `Desenhista_carimbo`/`Aprovacao_carimbo` do cabeçalho guardam o login. Precisa do Nexo Hub 2.26.0+ (Hub
+  antigo: edição liberada, aprovação recusada com "Atualize o Nexo Hub").
+
 ## 1.83.0 — 2026-11-09
 
 **Só funciona logado no Nexo Hub, com o login no canto superior direito.**

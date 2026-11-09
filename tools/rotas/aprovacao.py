@@ -1,76 +1,68 @@
 # -*- coding: utf-8 -*-
-"""Rotas /api/carimbos* e /api/aprovacao*: os carimbos da casa (quem desenha, quem aprova) e a aprovacao do projeto.
+"""Rotas /api/aprovacao* e /api/revisoes*: a aprovacao do projeto e as revisoes (ate a 1.83.0, tools/rotas/carimbos.py).
 
-Pedido do dono (2026-11-05): "no menu [da folha] tem carimbo, quero clicar ali e ter carimbos pre estabelecidos; voce salva
-um carimbo, ele fica com o nome que voce der, pra todo mundo, fica salvo no DB; quero dar TAG de aprovador; se a pessoa
-estiver com tag de aprovador ela pode aprovar o projeto [...] no menu de projeto fica uma TAG na frente do nome
-'CBM-DI251876 [Aprovado]' e no template vai o nome de quem aprovou; pra trocar de carimbo precisa a senha daquele carimbo;
-pra apagar o carimbo, a senha mestre do sistema". E logo depois: "enquanto nao tiver aprovado fica 'Sem aprovacao'; toda
-vez que tiver uma modificacao no projeto a tag de aprovado some [...] quem verifica tambem aprova, entao ja completa
-os dois campos no template ao mesmo tempo". E depois (o mesmo dia): "o carimbo carrega o nome de quem desenhou e quem
-aprova; se voce iniciar um projeto, seu nome fica como desenhista; o carimbo do projeto so pode ser trocado com a senha
-mestre: 'assumir projeto' troca o desenhista atual pelo seu, e a data do desenho e definida quando o projeto e criado
-ou assumido".
+Pedido do dono (2026-11-05): "se a pessoa [for] aprovador ela pode aprovar o projeto [...] no menu de projeto fica uma
+TAG na frente do nome 'CBM-DI251876 [Aprovado]' e no template vai o nome de quem aprovou [...] enquanto nao tiver
+aprovado fica 'Sem aprovacao'; toda vez que tiver uma modificacao no projeto a tag de aprovado some [...] quem verifica
+tambem aprova, entao ja completa os dois campos no template ao mesmo tempo".
+
+QUEM DESENHA E QUEM APROVA E O LOGIN DO NEXO HUB (1.84.0, pedido do dono em 2026-11-09: "nao precisa mais de carimbo,
+pelo login mesmo ja pega o nome, se ele e aprovador ou nao, quem decide isso e o admin no Nexo Hub"). O servidor pergunta
+ao Hub desta maquina quem esta logado (tools/rotas/equipe.py » sessao):
+  - Aprovar pede usuario.aprovador (marcado pelo administrador no Hub, Configuracoes › Usuarios) e que a pessoa possa
+    mexer no projeto (responsavel, colaborador, admin, ou projeto sem responsavel). Verificador/Aprovador = o nome dela.
+  - O desenhista e quem criou o projeto (tools/rotas/projeto_novo.py) ou quem o assumiu (POST /api/equipe/assumir, em
+    tools/rotas/equipe.py, que chama assume_desenhista daqui): Desenhista_DiEletrons, Desenhista_carimbo e o
+    Data_desenho, que so muda nessas duas horas.
+  - Apagar revisao e do administrador do Hub. So o Hub antigo (sem login) ainda aceita a senha mestre para isso;
+    aprovar, nele, fica recusado ("Atualize o Nexo Hub").
+  - Os campos *_carimbo do cabecalho (Desenhista_carimbo, Aprovacao_carimbo) guardam o LOGIN; o nome dos campos fica por
+    causa do template da folha, dos PDFs e das aprovacoes antigas. O sistema de carimbos de antes (nome + senha em
+    Libs/carimbos.json, o carimbo em uso em .altiumhub/carimbo-ativo.json, as rotas /api/carimbos*) SAIU: o arquivo
+    que ja existe fica quieto no NexoBD, ninguem mais le. As aprovacoes antigas continuam valendo (a assinatura).
 
 ONDE MORA
-  Libs/carimbos.json            os carimbos (nome, tags, senha com sal em PBKDF2). Libs/ e o item "Biblioteca do
-                                NexoEletric" no NexoBD (electron/lib/armazem.js): vale para todas as maquinas.
-  .altiumhub/carimbo-ativo.json o carimbo em uso NESTA maquina (nao viaja: cada computador tem o seu).
   schematic.js (cabecalho)      a aprovacao: os campos do template (Verificador_DiEletrons, Aprovador_DiEletrons,
                                 Data_verificacao, Data_aprovacao) e a ASSINATURA do que foi aprovado
                                 (Aprovacao_assinatura, Aprovacao_carimbo). Viaja junto com o esquema, num arquivo so.
 
-O DESENHISTA e quem criou o projeto (tools/rotas/projeto_novo.py usa o carimbo em uso) ou quem o ASSUMIU (POST
-/api/carimbos/assumir, com a senha mestre): Desenhista_DiEletrons, Desenhista_carimbo e o Data_desenho, que so muda
-nessas duas horas.
-
 AS REVISOES (2026-11-05: "a revisao e definida no momento em que aprova: o projeto esta na REV.A, o aprovador aprova
 1x, o projeto salva como REV.A no historico; vai ter uma aba Revisoes onde voce ve o que foi alterado e pode selecionar
 aquela revisao, que volta todo o projeto para o estado dela; algo foi modificado, tem que aprovar a 2x, salva REV.B").
-Cada aprovacao grava o campo Revisao do carimbo e uma COPIA do projeto em Projects/<p>/Revisoes/REV.<x>/ (os arquivos
+Cada aprovacao grava o campo Revisao do cabecalho e uma COPIA do projeto em Projects/<p>/Revisoes/REV.<x>/ (os arquivos
 da pasta do projeto, sem as subpastas e sem o estado local da bancada), com a linha dela em Revisoes/revisoes.json:
-quem aprovou, quando, a assinatura e o resumo do que mudou desde a revisao anterior. A pasta Revisoes/ viaja com o
-projeto para o NexoBD e fica fora do vigia do hub (como Gerber/ e PDF/). Voltar para uma revisao copia os arquivos
-dela de volta: o projeto fica identico ao aprovado, e com isso aprovado de novo.
+quem aprovou (o usuario, para a foto), quando, a assinatura e o resumo do que mudou desde a revisao anterior. A pasta
+Revisoes/ viaja com o projeto para o NexoBD e fica fora do vigia do hub (como Gerber/ e PDF/). Voltar para uma revisao
+copia os arquivos dela de volta: o projeto fica identico ao aprovado, e com isso aprovado de novo.
 
-A ASSINATURA e o sha256 do projeto como ele estava na aprovacao: schematic.js (sem a linha "generated" e sem os campos
-das pessoas e das datas no cabecalho), changes.js e board.js. Projeto aprovado = assinatura igual a de agora.
-Mudou qualquer um deles (o esquema salvo, a PCB editada, a IA mexeu): a tag volta a "Sem aprovacao" na hora, e passada
-a CARENCIA (o NexoBD pode estar trazendo os arquivos de outra maquina um de cada vez) os campos da aprovacao saem do
-cabecalho. A vista Esquema faz o mesmo ao salvar uma edicao (hub-carimbos.js » antesDeSalvar), sem esperar. Assumir o
-projeto nao mexe na aprovacao (nao muda o desenho).
+A ASSINATURA e o sha256 do projeto como ele estava na aprovacao: a impressao eletrica do schematic.js (componentes e
+ligacoes), os parametros do projeto, changes.js e board.js. Projeto aprovado = assinatura igual a de agora. Mudou
+qualquer um deles: a tag volta a "Sem aprovacao" na hora, e passada a CARENCIA (o NexoBD pode estar trazendo os arquivos
+de outra maquina um de cada vez) os campos da aprovacao saem do cabecalho. Assumir o projeto nao mexe na aprovacao.
 
 Rotas:
-  GET  /api/carimbos                       -> {ok, carimbos:[{id, nome, tags}], ativo:{id, nome, tags}|null}
-  POST /api/carimbos {nome, senha, tags?, mestre?}          cria (tag aprovador pede a senha mestre)
-  POST /api/carimbos/entrar {id, senha}                     passa a usar o carimbo nesta maquina
-  POST /api/carimbos/sair                                   nenhum carimbo nesta maquina
-  POST /api/carimbos/tags {id, tags, mestre}                troca as tags (senha mestre)
-  POST /api/carimbos/editar {id, senha|mestre, nome?, novaSenha?}  troca o nome e/ou a senha (senha atual ou mestre)
-  POST /api/carimbos/apagar {id, mestre}                    apaga (senha mestre)
-  POST /api/carimbos/assumir {projeto, mestre}              o carimbo em uso vira o desenhista do projeto (senha mestre)
-  GET  /api/aprovacao?projeto=             -> {ok, aprovado, por, data, carimbo, temEsquema}
+  GET  /api/aprovacao?projeto=             -> {ok, aprovado, por, data, carimbo (o login), usuario, temEsquema}
   GET  /api/aprovacoes                     -> {ok, projetos:{<nome>: {aprovado, por, data}}}
-  POST /api/aprovacao {projeto}            -> aprova com o carimbo ativo (tag aprovador) e grava a revisao: {ok, texto, params, rev, ...}
-  GET  /api/revisoes?projeto=              -> {ok, revisoes:[{rev, data, quando, aprovador, resumo}], atual:{rev, aprovado, mudancas}}
+  POST /api/aprovacao {projeto}            -> aprova como quem esta logado (aprovador) e grava a revisao: {ok, texto, params, rev, ...}
+  GET  /api/revisoes?projeto=              -> {ok, revisoes:[{rev, data, quando, aprovador, usuario, resumo}], atual:{rev, aprovado, mudancas}}
   POST /api/revisoes/voltar {projeto, rev} -> o projeto volta a ser o da revisao
-  POST /api/revisoes/apagar {projeto, rev, mestre} -> tira a revisao do historico (a de agora tira tambem a aprovacao)
+  POST /api/revisoes/apagar {projeto, rev, mestre?} -> tira a revisao do historico (a de agora tira tambem a aprovacao)
 """
 import hashlib
 import hmac
 import json
 import os
 import re
-import secrets
 import threading
 import time
 
 from flask import request
 
-ARQ = os.path.join('Libs', 'carimbos.json')
-ARQ_ATIVO = os.path.join('.altiumhub', 'carimbo-ativo.json')
-TAG_APROVADOR = 'aprovador'
-ITERACOES = 120000
+try:
+    import equipe as _eq           # tools/rotas/equipe.py: quem esta logado no Nexo Hub e a equipe do projeto
+except Exception:                  # noqa: BLE001
+    _eq = None
+
 CARENCIA = 120.0          # s: assinatura diferente por mais que isto = modificacao de verdade, limpa os campos
 
 # os campos que a aprovacao escreve no cabecalho (e que a assinatura nao cobre)
@@ -82,7 +74,9 @@ FORA_DA_ASSINATURA = set(CAMPOS_APROVACAO) | set(CAMPOS_DESENHISTA) | {'Revisao'
 PASTA_REV = 'Revisoes'
 ARQ_REV = 'revisoes.json'
 # o estado local da bancada e o que nao e projeto (hubserver.py » ESTADO_LOCAL): nao entra na copia da revisao
-FORA_DA_REVISAO = {'bom-vistos.json', 'bom-opts.json', 'odoo-lista.json', 'lista-extras.json'}
+FORA_DA_REVISAO = {'bom-vistos.json', 'bom-opts.json', 'odoo-lista.json', 'lista-extras.json',
+                   # a equipe (1.84.0): voltar uma revisao nao pode trazer de volta quem ja saiu do projeto
+                   'equipe.json'}
 ARQS_ASSINADOS = ('schematic.js', 'changes.js', 'board.js')
 
 _trava = threading.Lock()
@@ -90,80 +84,14 @@ _cache_hash = {}          # pasta -> (marca dos arquivos, assinatura)
 _desde = {}               # pasta -> quando a assinatura passou a nao bater
 
 
-# ─────────────────────────── carimbos ───────────────────────────
-def _hash_senha(senha, sal):
-    return hashlib.pbkdf2_hmac('sha256', senha.encode('utf-8'), bytes.fromhex(sal), ITERACOES).hex()
-
-
-def _le(root):
-    try:
-        with open(os.path.join(root, ARQ), encoding='utf-8') as f:
-            d = json.load(f)
-        if isinstance(d.get('carimbos'), dict):
-            return d
-    except (OSError, ValueError):
-        pass
-    return {'format': 'nexoeletric-carimbos-1', 'carimbos': {}}
-
-
-def _grava(root, d):
-    arq = os.path.join(root, ARQ)
-    os.makedirs(os.path.dirname(arq), exist_ok=True)
-    tmp = arq + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(d, f, ensure_ascii=False, indent=1, sort_keys=True)
-        f.write('\n')
-    os.replace(tmp, arq)
-
-
-def _publico(c):
-    return {'id': c['id'], 'nome': c['nome'], 'tags': list(c.get('tags') or [])}
-
-
-def _tags(v):
-    if isinstance(v, str):
-        v = v.split(',')
-    out = []
-    for t in v or []:
-        t = ' '.join(str(t).split()).lower()
-        if t and t not in out:
-            out.append(t)
-    return out
-
-
+# ─────────────────────────── o nome e a senha mestre ───────────────────────────
 def _nome(v):
-    """o nome vai para o carimbo da folha (campo K=V;K=V): sem ; nem | nem aspas-dois-pontos"""
+    """o nome vai para o cabecalho da folha (campo K=V;K=V): sem ; nem | nem aspas-dois-pontos"""
     return ' '.join(str(v or '').replace(';', ',').replace('|', '/').replace('":', '" :').split())
 
 
-def _ativo_id(root):
-    try:
-        with open(os.path.join(root, ARQ_ATIVO), encoding='utf-8') as f:
-            return json.load(f).get('id')
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
-def _grava_ativo(root, cid):
-    arq = os.path.join(root, ARQ_ATIVO)
-    if cid is None:
-        try:
-            os.remove(arq)
-        except OSError:
-            pass
-        return
-    os.makedirs(os.path.dirname(arq), exist_ok=True)
-    with open(arq, 'w', encoding='utf-8') as f:
-        json.dump({'id': cid, 'desde': time.strftime('%Y-%m-%dT%H:%M:%S')}, f)
-
-
-def ativo(root):
-    """o carimbo em uso nesta maquina (o registro de Libs/carimbos.json), ou None"""
-    cid = _ativo_id(root)
-    return _le(root)['carimbos'].get(cid) if cid else None
-
-
 def _mestre_ok(mestre, senha_mestre):
+    """so o Hub antigo (sem login) ainda pede a senha mestre, para apagar revisao"""
     return isinstance(mestre, str) and hmac.compare_digest(mestre.encode('utf-8'), senha_mestre.encode('utf-8'))
 
 
@@ -298,7 +226,7 @@ def impressoes_eletricas(arquivos):
             raise RuntimeError(r.get('erro') or p.stderr.decode('utf-8', 'replace')[-300:])
         hs = r.get('hashes') or {}
     except Exception as e:                 # noqa: BLE001
-        print('[carimbos] impressao eletrica: %s' % e, flush=True)
+        print('[aprovacao] impressao eletrica: %s' % e, flush=True)
         for a, _ in falta:
             out[a] = None
         return out
@@ -431,10 +359,47 @@ def limpa_aprovacao(texto):
     return troca_params(texto, fn)
 
 
-def params_desenhista(carimbo, data=None):
-    """os campos do desenhista no carimbo da folha: o nome do carimbo, o id dele e a data (hoje)"""
-    return {'Desenhista_DiEletrons': carimbo['nome'], 'Desenhista_carimbo': carimbo['id'],
+def params_desenhista(usuario, data=None):
+    """os campos do desenhista no cabecalho da folha: o nome, o login (no campo Desenhista_carimbo, o nome de sempre) e a
+    data (hoje)"""
+    return {'Desenhista_DiEletrons': _nome(usuario['nome']), 'Desenhista_carimbo': usuario.get('login') or usuario['id'],
             'Data_desenho': data or _hoje()}
+
+
+def assume_desenhista(pdir, usuario):
+    """quem assumiu o projeto vira o desenhista no carimbo da folha (com a data de hoje). -> {texto, params, ...} | {}"""
+    sch = os.path.join(pdir, 'schematic.js')
+    with _trava:
+        try:
+            with open(sch, encoding='utf-8', newline='') as f:
+                txt = f.read()
+        except OSError:
+            return {}
+        novo = troca_params(txt, lambda p: dict(p, **params_desenhista(usuario)))
+        if novo is None:
+            return {}
+        with open(sch, 'w', encoding='utf-8', newline='') as f:
+            f.write(novo)
+    return {'texto': novo, 'params': serializa_params(params_do_texto(novo)), 'desenhista': usuario['nome'],
+            'dataDesenho': _hoje()}
+
+
+def _quem_aprova():
+    """(usuario, None) ou (None, (corpo, status)): so quem e aprovador no Nexo Hub aprova"""
+    if _eq is None:
+        return None, ({'ok': False, 'error': 'o módulo da equipe (tools/rotas/equipe.py) não carregou'}, 500)
+    s = _eq.sessao(forcar=True)
+    if s['modo'] == 'legado':
+        return None, ({'ok': False, 'codigo': 'hub_antigo', 'error': _eq.MSG_LEGADO}, 403)
+    if s['modo'] == 'fora':
+        return None, ({'ok': False, 'codigo': 'sem_hub', 'error': _eq.MSG_FORA}, 503)
+    u = s['usuario']
+    if not u:
+        return None, ({'ok': False, 'codigo': 'sem_login', 'error': _eq.MSG_DESLOGADO}, 401)
+    if not u.get('aprovador'):
+        return None, ({'ok': False, 'codigo': 'nao_aprovador',
+                       'error': 'Só quem é aprovador no Nexo Hub aprova — o administrador marca em Configurações › Usuários'}, 403)
+    return u, None
 
 
 def confere(pdir, agora=None):
@@ -606,7 +571,7 @@ def resumo(antes, depois):
         for k in sorted(set(pa) | set(pd)):
             if k in FORA_DA_ASSINATURA or pa.get(k) == pd.get(k):
                 continue
-            out.append('carimbo, %s: %s → %s' % (k.replace('_DiEletrons', '').replace('_', ' '), pa.get(k) or '—', pd.get(k) or '—'))
+            out.append('folha, %s: %s → %s' % (k.replace('_DiEletrons', '').replace('_', ' '), pa.get(k) or '—', pd.get(k) or '—'))
     ga, gd = antes.get('changes.js'), depois.get('changes.js')
     if (ga or '') != (gd or ''):
         oa, od = _linhas_json(ga or ''), _linhas_json(gd or '')
@@ -625,8 +590,9 @@ def _lista(xs, n=25):
     return ', '.join(xs[:n]) + (' e mais %d' % (len(xs) - n) if len(xs) > n else '')
 
 
-def grava_revisao(pdir, rev, carimbo, ass):
-    """copia o projeto para Revisoes/REV.<rev>/ e acrescenta a linha no revisoes.json"""
+def grava_revisao(pdir, rev, usuario, ass):
+    """copia o projeto para Revisoes/REV.<rev>/ e acrescenta a linha no revisoes.json; `usuario` = quem aprovou
+    {id, login, nome} (vai inteiro na linha, para a foto)"""
     import shutil
     lst = revisoes(pdir)
     destino = os.path.join(pdir, PASTA_REV, 'REV.' + rev)
@@ -638,9 +604,10 @@ def grava_revisao(pdir, rev, carimbo, ass):
         shutil.copy2(os.path.join(pdir, n), os.path.join(destino, n))
     anterior = lst[-1] if lst else None
     antes = _le_arquivos(os.path.join(pdir, PASTA_REV, 'REV.' + anterior['rev'])) if anterior else None
-    linha = {'rev': rev, 'quando': time.strftime('%Y-%m-%dT%H:%M:%S'), 'data': _hoje(), 'aprovador': carimbo['nome'],
-             'carimbo': carimbo['id'], 'assinatura': ass, 'arquivos': arqs,
-             'resumo': resumo(antes, _le_arquivos(destino))}
+    linha = {'rev': rev, 'quando': time.strftime('%Y-%m-%dT%H:%M:%S'), 'data': _hoje(), 'aprovador': usuario['nome'],
+             'carimbo': usuario.get('login') or usuario['id'], 'assinatura': ass, 'arquivos': arqs,
+             'resumo': resumo(antes, _le_arquivos(destino)),
+             'usuario': {'id': usuario['id'], 'login': usuario.get('login', ''), 'nome': usuario['nome']}}
     lst = [x for x in lst if x.get('rev') != rev] + [linha]
     _grava_revisoes(pdir, lst)
     return linha
@@ -656,7 +623,7 @@ def volta_revisao(pdir, rev):
     feitos = []
     for n in linha.get('arquivos') or os.listdir(origem):
         src = os.path.join(origem, n)
-        if os.path.basename(n) != n or not os.path.isfile(src):
+        if os.path.basename(n) != n or not os.path.isfile(src) or n in FORA_DA_REVISAO:
             continue
         tmp = os.path.join(pdir, n + '.tmp')
         shutil.copy2(src, tmp)
@@ -694,149 +661,21 @@ def registra(app, root, senha_mestre):
     def corpo():
         return request.get_json(silent=True) or {}
 
-    @app.route('/api/carimbos')
-    def carimbos_lista():
-        d = _le(root)
-        lst = sorted((_publico(c) for c in d['carimbos'].values()), key=lambda c: c['nome'].lower())
-        a = ativo(root)
-        return {'ok': True, 'carimbos': lst, 'ativo': _publico(a) if a else None, 'tagAprovador': TAG_APROVADOR}
-
-    @app.route('/api/carimbos', methods=['POST'])
-    def carimbos_cria():
-        b = corpo()
-        nome = _nome(b.get('nome'))
-        senha = b.get('senha')
-        tags = _tags(b.get('tags'))
-        if not nome:
-            return {'ok': False, 'error': 'dê um nome ao carimbo'}, 400
-        if not isinstance(senha, str) or len(senha) < 1:
-            return {'ok': False, 'error': 'dê uma senha ao carimbo'}, 400
-        if TAG_APROVADOR in tags and not _mestre_ok(b.get('mestre'), senha_mestre):
-            return {'ok': False, 'error': 'a tag aprovador pede a senha mestre', 'mestre': True}, 403
-        with _trava:
-            d = _le(root)
-            if any(c['nome'].lower() == nome.lower() for c in d['carimbos'].values()):
-                return {'ok': False, 'error': 'já existe um carimbo com esse nome'}, 409
-            base = re.sub(r'[^a-z0-9]+', '-', nome.lower()).strip('-') or 'carimbo'
-            cid = base
-            while cid in d['carimbos']:
-                cid = base + '-' + secrets.token_hex(2)
-            sal = secrets.token_hex(16)
-            d['carimbos'][cid] = {'id': cid, 'nome': nome, 'tags': tags, 'sal': sal, 'senha': _hash_senha(senha, sal),
-                                  'criado': time.strftime('%Y-%m-%dT%H:%M:%S')}
-            _grava(root, d)
-        return {'ok': True, 'carimbo': _publico(d['carimbos'][cid])}
-
-    @app.route('/api/carimbos/entrar', methods=['POST'])
-    def carimbos_entrar():
-        b = corpo()
-        c = _le(root)['carimbos'].get(b.get('id'))
-        if not c:
-            return {'ok': False, 'error': 'carimbo não encontrado'}, 404
-        senha = b.get('senha')
-        if not isinstance(senha, str) or not hmac.compare_digest(_hash_senha(senha, c['sal']), c['senha']):
-            return {'ok': False, 'error': 'senha do carimbo incorreta'}, 403
-        _grava_ativo(root, c['id'])
-        return {'ok': True, 'ativo': _publico(c)}
-
-    @app.route('/api/carimbos/sair', methods=['POST'])
-    def carimbos_sair():
-        _grava_ativo(root, None)
-        return {'ok': True, 'ativo': None}
-
-    @app.route('/api/carimbos/tags', methods=['POST'])
-    def carimbos_tags():
-        b = corpo()
-        if not _mestre_ok(b.get('mestre'), senha_mestre):
-            return {'ok': False, 'error': 'senha mestre incorreta'}, 403
-        with _trava:
-            d = _le(root)
-            c = d['carimbos'].get(b.get('id'))
-            if not c:
-                return {'ok': False, 'error': 'carimbo não encontrado'}, 404
-            c['tags'] = _tags(b.get('tags'))
-            _grava(root, d)
-        return {'ok': True, 'carimbo': _publico(c)}
-
-    @app.route('/api/carimbos/editar', methods=['POST'])
-    def carimbos_editar():
-        """2026-11-06: o Editar do carimbo troca o nome e/ou a senha; pede a senha atual do carimbo (ou a mestre).
-        Os projetos que ja levam o nome antigo no carimbo da folha continuam como estao."""
-        b = corpo()
-        nome = _nome(b.get('nome')) if b.get('nome') is not None else None
-        nova = b.get('novaSenha')
-        if nome is not None and not nome:
-            return {'ok': False, 'error': 'dê um nome ao carimbo'}, 400
-        if nova is not None and (not isinstance(nova, str) or not nova):
-            return {'ok': False, 'error': 'a senha nova não pode ficar vazia'}, 400
-        with _trava:
-            d = _le(root)
-            c = d['carimbos'].get(b.get('id'))
-            if not c:
-                return {'ok': False, 'error': 'carimbo não encontrado'}, 404
-            senha = b.get('senha')
-            pela_senha = isinstance(senha, str) and senha and hmac.compare_digest(_hash_senha(senha, c['sal']), c['senha'])
-            if not pela_senha and not _mestre_ok(b.get('mestre'), senha_mestre):
-                return {'ok': False, 'error': 'senha atual do carimbo incorreta'}, 403
-            if nome and nome.lower() != c['nome'].lower() and any(
-                    o['nome'].lower() == nome.lower() for o in d['carimbos'].values() if o['id'] != c['id']):
-                return {'ok': False, 'error': 'já existe um carimbo com esse nome'}, 409
-            if nome:
-                c['nome'] = nome
-            if nova:
-                c['sal'] = secrets.token_hex(16)
-                c['senha'] = _hash_senha(nova, c['sal'])
-            c['editado'] = time.strftime('%Y-%m-%dT%H:%M:%S')
-            _grava(root, d)
-        return {'ok': True, 'carimbo': _publico(c)}
-
-    @app.route('/api/carimbos/apagar', methods=['POST'])
-    def carimbos_apagar():
-        b = corpo()
-        if not _mestre_ok(b.get('mestre'), senha_mestre):
-            return {'ok': False, 'error': 'senha mestre incorreta'}, 403
-        with _trava:
-            d = _le(root)
-            c = d['carimbos'].pop(b.get('id'), None)
-            if not c:
-                return {'ok': False, 'error': 'carimbo não encontrado'}, 404
-            _grava(root, d)
-        if _ativo_id(root) == c['id']:
-            _grava_ativo(root, None)
-        return {'ok': True}
-
-    @app.route('/api/carimbos/assumir', methods=['POST'])
-    def carimbos_assumir():
-        b = corpo()
-        d = pasta(b.get('projeto'))
-        if not d:
-            return {'ok': False, 'error': 'projeto desconhecido'}, 404
-        c = ativo(root)
-        if not c:
-            return {'ok': False, 'error': 'nenhum carimbo em uso neste computador'}, 403
-        if not _mestre_ok(b.get('mestre'), senha_mestre):
-            return {'ok': False, 'error': 'senha mestre incorreta'}, 403
-        sch = os.path.join(d, 'schematic.js')
-        with _trava:
-            try:
-                with open(sch, encoding='utf-8', newline='') as f:
-                    txt = f.read()
-            except OSError:
-                return {'ok': False, 'error': 'o projeto não tem schematic.js'}, 404
-            novo = troca_params(txt, lambda p: dict(p, **params_desenhista(c)))
-            if novo is None:
-                return {'ok': False, 'error': 'o schematic.js não está no formato que o hub grava'}, 409
-            with open(sch, 'w', encoding='utf-8', newline='') as f:
-                f.write(novo)
-        return dict(ok=True, texto=novo, params=serializa_params(params_do_texto(novo)), desenhista=c['nome'],
-                    dataDesenho=_hoje(), **estado_aprovacao(d))
+    def quem_aprovou(d, e):
+        """o usuario da ultima revisao, quando e a de agora (para a foto de quem aprovou)"""
+        if not e.get('aprovado'):
+            return None
+        rv = letra_da_revisao(e.get('rev'))
+        linha = next((x for x in reversed(revisoes(d)) if x.get('rev') == rv), None)
+        return (linha or {}).get('usuario')
 
     @app.route('/api/aprovacao')
     def aprovacao_estado():
         d = pasta(request.args.get('projeto'))
         if not d:
             return {'ok': False, 'error': 'projeto desconhecido'}, 404
-        return dict(ok=True, **confere(d))
+        e = confere(d)
+        return dict(ok=True, usuario=quem_aprovou(d, e), **e)
 
     @app.route('/api/aprovacoes')
     def aprovacoes():
@@ -857,11 +696,13 @@ def registra(app, root, senha_mestre):
         d = pasta(corpo().get('projeto'))
         if not d:
             return {'ok': False, 'error': 'projeto desconhecido'}, 404
-        c = ativo(root)
-        if not c:
-            return {'ok': False, 'error': 'nenhum carimbo em uso neste computador'}, 403
-        if TAG_APROVADOR not in (c.get('tags') or []):
-            return {'ok': False, 'error': 'o carimbo ' + c['nome'] + ' não tem a tag aprovador'}, 403
+        # 1.84.0: quem aprova e quem esta logado no Nexo Hub, com a marca de aprovador (nao mais o carimbo)
+        c, erro = _quem_aprova()
+        if erro:
+            return erro
+        recusa = _eq.recusa_gravar(d)
+        if recusa:
+            return recusa, 403
         sch = os.path.join(d, 'schematic.js')
         with _trava:
             try:
@@ -885,7 +726,7 @@ def registra(app, root, senha_mestre):
                 p['Aprovador_DiEletrons'] = c['nome']
                 p['Data_verificacao'] = hoje
                 p['Data_aprovacao'] = hoje
-                p['Aprovacao_carimbo'] = c['id']
+                p['Aprovacao_carimbo'] = c.get('login') or c['id']
                 p['Aprovacao_assinatura'] = ass
                 return p
             novo = troca_params(txt, fn)
@@ -898,10 +739,11 @@ def registra(app, root, senha_mestre):
                 with open(sch, 'w', encoding='utf-8', newline='') as f:
                     f.write(txt)
                 return {'ok': False, 'error': 'a aprovação não conferiu depois de gravada'}, 500
-            linha = grava_revisao(d, rev, c, ass)
+            linha = grava_revisao(d, rev, _eq.quem(c), ass)
         _desde.pop(d, None)
+        _eq.evento(d, 'aprovacao', ['%s aprovou o projeto: REV.%s' % (c['nome'], rev)], c)
         return dict(e, ok=True, texto=novo, params=serializa_params(params_do_texto(novo)), rev='REV.' + rev,
-                    resumo=linha['resumo'])
+                    resumo=linha['resumo'], usuario=_eq.quem(c))
 
     @app.route('/api/revisoes')
     def revisoes_lista():
@@ -929,8 +771,14 @@ def registra(app, root, senha_mestre):
         d = pasta(b.get('projeto'))
         if not d:
             return {'ok': False, 'error': 'projeto desconhecido'}, 404
-        if not _mestre_ok(b.get('mestre'), senha_mestre):
-            return {'ok': False, 'error': 'senha mestre incorreta'}, 403
+        # 1.84.0: o administrador do Nexo Hub apaga pelo login; a senha mestre so vale com o Hub sem login (antigo/fora)
+        s = _eq.sessao(forcar=True) if _eq is not None else {'modo': 'legado', 'usuario': None}
+        u = s['usuario']
+        if u and not u.get('admin'):
+            return {'ok': False, 'codigo': 'sem_permissao', 'error': 'Só o administrador do Nexo Hub apaga revisões'}, 403
+        if not u and (s['modo'] not in ('legado', 'fora') or not _mestre_ok(b.get('mestre'), senha_mestre)):
+            return {'ok': False, 'error': 'senha mestre incorreta' if s['modo'] in ('legado', 'fora') else _eq.MSG_DESLOGADO,
+                    'mestre': s['modo'] in ('legado', 'fora')}, 403
         rev = letra_da_revisao(b.get('rev'))
         tirou = False
         with _trava:
@@ -951,6 +799,8 @@ def registra(app, root, senha_mestre):
                 except OSError:
                     pass
         _desde.pop(d, None)
+        if _eq is not None:
+            _eq.evento(d, 'revisao', ['REV.%s apagada do histórico%s' % (rev, ' (o projeto ficou sem aprovação)' if tirou else '')], u)
         return dict(estado_aprovacao(d), ok=True, rev='REV.' + rev, aprovacaoTirada=tirou)
 
     @app.route('/api/revisoes/voltar', methods=['POST'])
@@ -960,9 +810,15 @@ def registra(app, root, senha_mestre):
         if not d:
             return {'ok': False, 'error': 'projeto desconhecido'}, 404
         rev = letra_da_revisao(b.get('rev'))
+        if _eq is not None:
+            recusa = _eq.recusa_gravar(d)
+            if recusa:
+                return recusa, 403
         with _trava:
             feitos = volta_revisao(d, rev)
         if feitos is None:
             return {'ok': False, 'error': 'a revisão %s não existe neste projeto' % b.get('rev')}, 404
         _desde.pop(d, None)
+        if _eq is not None:
+            _eq.evento(d, 'revisao', ['projeto voltou para a REV.%s' % rev], _eq.sessao()['usuario'])
         return dict(estado_aprovacao(d), ok=True, rev='REV.' + rev, arquivos=feitos)

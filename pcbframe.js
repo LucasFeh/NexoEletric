@@ -7568,6 +7568,8 @@ if (HubIO.canPost) (async () => {
 })();
 const SOBRESCREVER = { title:'Salvar', ok:'Sobrescrever', danger:true };
 async function falhaSalvar(err, nome, texto){
+  /* 1.84.0: o projeto e de outra equipe (hub-equipe.js): nada de "baixar o arquivo", so o aviso */
+  if (err && err.semPermissao){ HubDialog.toast(err.message, 'warn', 7000); return; }
   if (await HubDialog.confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?', { title:'Falha ao salvar', ok:'Baixar' }))
     HubIO.download(nome, texto);
 }

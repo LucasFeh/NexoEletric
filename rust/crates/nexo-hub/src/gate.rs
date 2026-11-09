@@ -19,7 +19,7 @@ pub struct Gate {
     st: Mutex<(Option<bool>, String, f64)>,
 }
 
-fn conexao() -> (String, String) {
+pub(crate) fn conexao() -> (String, String) {
     if let Ok(u) = std::env::var("NEXOHUB_URL") {
         if !u.is_empty() {
             return (u.trim_end_matches('/').to_string(), std::env::var("NEXOHUB_TOKEN").unwrap_or_default());

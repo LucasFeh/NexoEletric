@@ -4769,14 +4769,16 @@ const SCH_REL = 'Projects/' + SCH_P + '/schematic.js';
 /* as perguntas de seguranca dos dois escritores viram modal; o resultado, notificacao */
 const SOBRESCREVER = { title:'Salvar', ok:'Sobrescrever', danger:true };
 async function falhaSalvar(err, nome, texto){
+  /* 1.84.0: o projeto e de outra equipe (hub-equipe.js): nada de "baixar o arquivo", so o aviso */
+  if (err && err.semPermissao){ HubDialog.toast(err.message, 'warn', 7000); return; }
   if (await HubDialog.confirm('Salvar no servidor falhou: ' + err.message + '\nBaixar o arquivo em vez disso?',
       { title:'Falha ao salvar', ok:'Baixar' }))
     HubIO.download(nome, texto);
 }
 async function saveSchematic(){
   if (staleWorkspace && !(await HubDialog.confirm('O workspace mudou desde o carregamento — salvar vai sobrescrever o schematic.js do disco. Continuar?', SOBRESCREVER))) return null;
-  /* edição salva = modificação: a aprovação cai e a data do desenho vira a de hoje (hub-carimbos.js) */
-  if (schDirty && window.HubCarimbos && HubCarimbos.antesDeSalvar(schematic, schDiskSnapshot)){ cam.draw(); pintaMiniaturas(); }
+  /* edição salva = modificação: a aprovação cai e a data do desenho vira a de hoje (hub-aprovacao.js) */
+  if (schDirty && window.HubAprovacao && HubAprovacao.antesDeSalvar(schematic, schDiskSnapshot)){ cam.draw(); pintaMiniaturas(); }
   const out = HubCore.serializeSchematic(schematic);
   if (!out.text){ await HubDialog.alert(out.errors.map(e => e.msg).join('\n'), { title:'Esquema inválido' }); return null; }
   /* Texto sem uma letra dentro nao vai para o arquivo (ver serializeSchematic), e isso
@@ -4819,10 +4821,10 @@ if (window.HubCatalogo && HubIO.canPost) HubCatalogo.monta(document.querySelecto
   projeto: SCH_P, schematic: () => schematic,
   salva: async () => { const r = await saveSchematic(); if (r) HubDialog.toast(r.m, r.k); return Boolean(r); },
   mudou: () => { setSchDirty(true); cam.draw(); pintaMiniaturas(); renderProps(); } });
-/* O APROVAR ao lado do Salvar (hub-carimbos.js, 2026-11-05): com um carimbo aprovador em uso neste computador, aprova o
+/* O APROVAR ao lado do Salvar (hub-aprovacao.js, 2026-11-05): com um carimbo aprovador em uso neste computador, aprova o
    projeto (verificador e aprovador no carimbo). O servidor grava o cabecalho do schematic.js e devolve o texto: a aba
    adota o texto como o do disco, e o aviso de mudanca nao recarrega a folha. */
-if (window.HubCarimbos && HubIO.canPost) HubCarimbos.montaAprovar({
+if (window.HubAprovacao && HubIO.canPost) HubAprovacao.montaAprovar({
   projeto: SCH_P, ancora: $('btnSave'), sujo: () => schDirty, marcaSujo: () => setSchDirty(true), schematic: () => schematic,
   salva: async () => { const r = await saveSchematic(); if (r) HubDialog.toast(r.m, r.k); return Boolean(r); },
   gerenciador: {},

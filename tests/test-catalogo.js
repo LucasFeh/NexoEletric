@@ -123,6 +123,8 @@ const outros = C.lerZip(fs.readFileSync(ARQ)).filter(e => e.nome !== 'xl/workshe
   const PROJETOS = path.join(TMP, 'Projects');
   fs.mkdirSync(PROJETOS);
   const { montaServidor, servidorHttp } = require('../mcp/eletrichub-mcp.js');
+  /* 1.84.0: o Nexo Hub desta máquina fica de fora (logado, o desenhista seria o login): aqui o Hub "antigo", sem login */
+  require('../mcp/lib/equipe.js')._provedor(() => ({ status: 404 }));
   const srv = montaServidor({ root: path.join(__dirname, '..'), projetos: PROJETOS, log: () => {} });
   const h = servidorHttp(srv, { http: 0, host: '127.0.0.1' });
   await new Promise(ok => h.once('listening', ok));

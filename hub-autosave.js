@@ -38,6 +38,8 @@ function alterna() { const v = !ligado(); liga(v); return v; }
 
 function agenda(salva, ms) {
   if (!ligado()) return;
+  /* 1.84.0: o projeto em que a pessoa nao mexe (hub-equipe.js) abre somente leitura: o autosave nao grava nele */
+  if (typeof self !== 'undefined' && self.HubEquipe && self.HubEquipe.somenteLeitura && self.HubEquipe.somenteLeitura()) return;
   clearTimeout(timer);
   timer = setTimeout(() => roda(salva), ms != null ? ms : ESPERA);
 }

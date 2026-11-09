@@ -14,16 +14,26 @@ function download(filename, content){
   URL.revokeObjectURL(a.href);
 }
 
+/* 1.84.0: o projeto tem dono (hub-equipe.js): na vista de um projeto em que a pessoa nao mexe, o Salvar nem sai daqui;
+   e a recusa do servidor (403 sem_permissao) volta como um erro com semPermissao, para a vista avisar sem oferecer
+   "baixar o arquivo" */
+function semPermissao(msg){ const e = new Error(msg); e.semPermissao = true; return e; }
 async function saveFile(relPath, content){
   if (!canPost) { download(relPath.split('/').pop(), content); return { mode: 'download' }; }
+  const nao = root.HubEquipe && root.HubEquipe.bloqueia ? root.HubEquipe.bloqueia(relPath) : null;
+  if (nao) throw semPermissao(nao);
   const r = await fetch('/api/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: relPath, content })
   });
   if (!r.ok) {
-    let msg = 'HTTP ' + r.status;
-    try { const j = await r.json(); if (j && j.error) msg += ' — ' + j.error; } catch (e) {}
+    let msg = 'HTTP ' + r.status, j = null;
+    try { j = await r.json(); if (j && j.error) msg += ' — ' + j.error; } catch (e) {}
+    if (j && j.codigo === 'sem_permissao') {
+      if (root.HubEquipe && root.HubEquipe.recusado) root.HubEquipe.recusado(j);
+      throw semPermissao(j.error);
+    }
     throw new Error(msg);
   }
   return { mode: 'server' };

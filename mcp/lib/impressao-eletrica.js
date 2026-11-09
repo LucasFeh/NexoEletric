@@ -2,7 +2,7 @@
    layout, ele já gera uma revisão nova, eu não quero isso, só muda revisão no esquema se troca realmente componente ou
    altera algo relevante na ligação; já na PCB gera revisão de qualquer forma").
 
-   A aprovação (tools/rotas/carimbos.py » assinatura) assina, do schematic.js, só o que é elétrico:
+   A aprovação (tools/rotas/aprovacao.py » assinatura) assina, do schematic.js, só o que é elétrico:
      - os componentes: designador, parte, símbolo, footprint, comentário e os parâmetros que dizem QUAL é a peça
        (Value, MPN, OdooId, ValorId...). Fora: posição, rotação, espelho, folha, onde fica o texto do designador, e o
        que o almoxarifado atualiza sozinho (Estoque, Custo, Local, LocalId, Descricao);

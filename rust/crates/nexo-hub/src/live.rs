@@ -40,13 +40,15 @@ pub const LIVE_JS: &str = r#"/* hubserver: auto-reload via SSE (injetado; nao ex
 "#;
 
 // estado do BOM/Odoo ao lado do projeto e a biblioteca do editor de footprint: nao recarregam
-// + os carimbos (Libs/carimbos.json, tools/rotas/carimbos.py): criar um carimbo nao muda biblioteca nenhuma
-const ESTADO_LOCAL: [&str; 5] = ["bom-vistos.json", "bom-opts.json", "odoo-lista.json", "lista-extras.json", "carimbos.json"];
+// + o Libs/carimbos.json dos carimbos de antes da 1.84.0 (ninguem mais le; o arquivo fica quieto no NexoBD)
+// + a equipe do projeto (Projects/<p>/equipe.json, 1.84.0): convidar alguem nao muda o desenho
+const ESTADO_LOCAL: [&str; 6] = ["bom-vistos.json", "bom-opts.json", "odoo-lista.json", "lista-extras.json", "carimbos.json", "equipe.json"];
 const FP_HUB: &str = "pcblib-hub.js";
 const FP3D_PASTA: &str = "3d-hub";
 // renders: as fotos 3D da placa (Renders/, a vista PCB grava): recarregar mataria a vista que fotografou
-// + as revisoes (Projects/<p>/Revisoes/, a copia do projeto a cada aprovacao: tools/rotas/carimbos.py)
-const SAIDAS: [&str; 4] = ["gerber", "pdf", "renders", "revisoes"];
+// + as revisoes (Projects/<p>/Revisoes/, a copia do projeto a cada aprovacao: tools/rotas/aprovacao.py)
+// + o historico de modificacoes com autor (Projects/<p>/Historico/, 1.84.0): cada Salvar acrescenta uma linha
+const SAIDAS: [&str; 5] = ["gerber", "pdf", "renders", "revisoes", "historico"];
 
 pub struct Live {
     pub tx: watch::Sender<u64>,
@@ -149,5 +151,7 @@ mod tests {
             assert!(!conta(root, &root.join(p)), "{p} nao recarrega");
         }
         assert!(!conta(root, &root.join("Projects/P1/odoo-lista.json")));
+        assert!(!conta(root, &root.join("Projects/P1/equipe.json")));
+        assert!(!conta(root, &root.join("Projects/P1/Historico/u-1.jsonl")));
     }
 }

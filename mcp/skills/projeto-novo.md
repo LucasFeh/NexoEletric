@@ -30,7 +30,9 @@ No hub é o botão **Novo projeto** do painel Projetos (ou Arquivo › Novo proj
 
 1. **Pergunte ao usuário, antes de criar qualquer coisa:**
    - o **nome da placa** (ex.: "Placa adaptadora encoder linear");
-   - **quem iniciou o projeto**, que é obrigatório e vai no carimbo. Não invente nem use o nome do usuário do Windows;
+   - **quem iniciou o projeto**, que vai no quadro de título. Com alguém logado no Nexo Hub vale o nome do login (o
+     servidor põe sozinho, e essa pessoa vira a responsável pelo projeto); sem login, pergunte. Não invente nem use o
+     nome do usuário do Windows;
    - o **cliente** e **para que serve** a placa (uma linha). São opcionais, mas vão para o catálogo: pergunte.
 2. **`catalogo_previa {nome}`**: mostre ao usuário o código que vai sair (`codigo`) e o número (`proximo`). Ele pode
    pedir outra sigla: chame de novo com `sigla`.

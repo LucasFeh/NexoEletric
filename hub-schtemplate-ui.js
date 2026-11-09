@@ -147,18 +147,8 @@ function secao(a){
     b.append(document.createTextNode(rot)); b.disabled = Boolean(off);
     b.addEventListener('click', fn); box.append(b); return b;
   };
-  /* OS CARIMBOS DA CASA (2026-11-05, hub-carimbos.js): o "Carimbo…" abre os carimbos salvos no NexoBD (usar com a
-     senha, tag aprovador, apagar com a senha mestre); o nome do que está em uso vai no rótulo. Os campos do template
-     saíram em 2026-11-05: o carimbo da casa se preenche sozinho (folha, Definir projeto, carimbos e Aprovar). */
-  const CB = root.HubCarimbos;
-  const rotCarimbo = () => { const a = CB && CB.estado().ativo; return a ? 'Carimbo · ' + a.nome : 'Carimbo…'; };
-  const bCar = acao(rotCarimbo(), 'M2.5 9.5h11v4h-11z M4.5 9.5v-2h7v2 M8 7.5v-5 M6 2.5h4',
-       'os carimbos da casa: quem desenha e quem aprova (trocar de carimbo pede a senha dele)',
-       () => CB && CB.abreGerenciador({}), !CB);
-  if (CB){
-    const pintaCar = () => { if (!bCar.isConnected) return desliga(); bCar.lastChild.textContent = rotCarimbo(); };
-    const desliga = CB.ouve(pintaCar);
-  }
+  /* Os campos do quadro de título se preenchem sozinhos (folha, Definir projeto, login e Aprovar).
+     (o "Carimbo…" saiu na 1.84.0: quem desenha e quem aprova é o login do Nexo Hub, hub-aprovacao.js e hub-equipe.js) */
   acao(tpl && tpl.origem === 'casa' ? 'Editar template…' : 'Editar cópia…', 'M3 13l1-3.5 6.5-6.5 2.5 2.5-6.5 6.5z M9.5 4.5l2 2',
        'abrir o editor de template' + (tpl ? '' : ' (um novo, em branco)'), () => abreEditor());
   acao('Novo template…', 'M8 3v10M3 8h10', 'criar um template da casa em branco', () => abreEditor({ novo:true }));
