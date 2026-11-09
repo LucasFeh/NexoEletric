@@ -8,7 +8,11 @@
    A sessão é lida ANTES de cada ferramenta (protocolo.js » executa, assíncrono, cache de 2 s) e conferida na gravação
    (contexto.js » grava, que é síncrona). Depois de gravar, o histórico: a escrita vai ao servidor do app aberto nesta
    pasta (POST /api/historico/registra, com o conteúdo anterior e origem "ia"; o diff do que mudou mora lá). Sem o app
-   aberto, uma linha simples vai direto para Projects/<p>/Historico/<id>.jsonl ("<arquivo> alterado pela IA"). */
+   aberto, uma linha simples vai direto para Projects/<p>/Historico/<id>.jsonl ("<arquivo> alterado pela IA").
+
+   1.87.0: a função do usuário no Nexo Hub 2.27.0 ({funcao: admin|usuario|visualizador, visualizador}; Hub antigo, sem o
+   campo = usuário comum). A IA não edita pelo APENAS VISUALIZADOR: nenhuma gravação (projeto ou biblioteca) passa, e as
+   ferramentas que não são de leitura nem de saída (SAIDAS) recusam antes de rodar (protocolo.js » executa). */
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -20,9 +24,32 @@ const TIPOS = { 'schematic.js': 'esquema', 'changes.js': 'pcb', 'rules.js': 'reg
 let ultima = null;          // {quando, modo, usuario}
 let provedor = null;        // testes: () => resposta do /api/v1/sessao | {status: 404}
 
+const MSG_VISUALIZADOR = 'Seu usuário é apenas visualizador — peça ao administrador do Nexo Hub';
+/* o que não é leitura (f.leitura) mas o visualizador faz: abrir o app e a vista, consultar, exportar, mandar à JLC e ao
+   NexoCAD (o resto -- editar esquema, PCB, regras, biblioteca, criar/restaurar projeto -- é edição) */
+const SAIDAS = new Set(['app_abrir', 'vista_abrir', 'lote', 'hub_modulo_chamar', 'vista_comando', 'hub_recarregar_ferramentas',
+  'gerber_gerar', 'pdf_layout', 'pcb_render_3d', 'jlc_enviar', 'jlc_login', 'nexo_enviar_placa']);
+
+function funcao(u) {
+  if (!u) return 'usuario';
+  if (u.admin || u.funcao === 'admin') return 'admin';
+  if (u.visualizador === true || u.funcao === 'visualizador') return 'visualizador';
+  return 'usuario';
+}
 function publico(u) {
   if (!u || !u.id) return null;
-  return { id: String(u.id), login: String(u.login || ''), nome: String(u.nome || u.login || ''), admin: !!u.admin, aprovador: !!u.aprovador };
+  const f = funcao(u);
+  return { id: String(u.id), login: String(u.login || ''), nome: String(u.nome || u.login || ''), admin: f === 'admin',
+    aprovador: !!u.aprovador && f !== 'visualizador', visualizador: f === 'visualizador', funcao: f };
+}
+function ehVisualizador(s) {
+  s = s || ultima;
+  return !!(s && s.modo === 'login' && s.usuario && s.usuario.visualizador);
+}
+/* a ferramenta f, para quem está logado: null = roda; senão a mensagem de recusa (o visualizador só lê e exporta) */
+function recusaFerramenta(f, s) {
+  if (!ehVisualizador(s) || !f || f.leitura || SAIDAS.has(f.nome)) return null;
+  return `${MSG_VISUALIZADOR} (a IA não edita por você: "${f.nome}" muda o projeto ou a biblioteca)`;
 }
 
 async function sessao(forcar) {
@@ -53,6 +80,7 @@ function leEquipe(pdir) {
 /* null = pode gravar; senão a mensagem de recusa */
 function recusa(pdir, s) {
   s = s || ultima || { modo: 'fora', usuario: null };
+  if (ehVisualizador(s)) return MSG_VISUALIZADOR;
   const e = leEquipe(pdir);
   if (!e.responsavel || s.modo === 'legado' || s.modo === 'fora') return null;
   const u = s.usuario;
@@ -125,6 +153,6 @@ function nova(pdir) {
   return true;
 }
 
-module.exports = { sessao, recusa, doProjeto, registraHistorico, nova, leEquipe, TIPOS,
+module.exports = { sessao, recusa, recusaFerramenta, ehVisualizador, MSG_VISUALIZADOR, SAIDAS, doProjeto, registraHistorico, nova, leEquipe, TIPOS,
   usuario: () => (ultima && ultima.usuario) || null,
   _provedor: f => { provedor = f; ultima = null; }, _zera: () => { ultima = null; hubCache = null; } };

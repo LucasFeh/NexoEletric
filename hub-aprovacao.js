@@ -209,7 +209,8 @@ function montaAprovar(g){
     const u = est.usuario;
     if (!(u && u.aprovador)){ toast(b.title, 'warn', 7000); return; }
     if (root.HubEquipe && root.HubEquipe.somenteLeitura && root.HubEquipe.somenteLeitura()){
-      toast('somente leitura: só a equipe do projeto aprova (peça um convite ao responsável)', 'warn', 7000); return;
+      toast(root.HubEquipe.visualizador && root.HubEquipe.visualizador() ? 'somente leitura: ' + root.HubEquipe.MSG_VISUALIZADOR
+        : 'somente leitura: só a equipe do projeto aprova (peça um convite ao responsável)', 'warn', 7000); return;
     }
     const D = root.HubDialog;
     if (D && !(await D.confirm('Aprovar o projeto ' + g.projeto + ' como ' + u.nome + '?\nO quadro de título da folha recebe '

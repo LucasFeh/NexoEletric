@@ -160,6 +160,28 @@ def _quem_esta_logado():
     return (s or {}).get('usuario') if (s or {}).get('modo') == 'login' else None
 
 
+def _recusa_edicao(projeto):
+    """1.87.0: por que o chat NAO grava neste turno, ou '' -- o usuario e apenas visualizador no Nexo Hub, ou o projeto
+    aberto e de outra equipe e ele nao foi convidado (o somente leitura de tools/rotas/equipe.py). Nesses casos o chat
+    fica para consultar: o motor CLI roda em "So planejar" e o /aplicar recusa a proposta."""
+    try:
+        sys.path.insert(0, os.path.join(RAIZ, 'tools', 'rotas'))
+        import equipe as _eq                             # noqa: E402
+        s = _sessao[0]() if _sessao[0] is not None else _eq.sessao()
+        s = s if isinstance(s, dict) and s.get('modo') else {'modo': 'fora', 'usuario': None}
+        if s['modo'] == 'login' and _eq.eh_visualizador(s.get('usuario')):
+            return _eq.MSG_VISUALIZADOR
+        nome = _projeto_ok(projeto)
+        d = os.path.join(ROOT, 'Projects', nome) if nome else ''
+        if d and os.path.isdir(d):
+            p = _eq.permissao(d, s)
+            if not p['pode']:
+                return p.get('motivo') or 'somente leitura neste projeto'
+    except Exception:                                    # noqa: BLE001 -- sem o modulo da equipe, como antes
+        return ''
+    return ''
+
+
 # O PONTO NA FRENTE NÃO É ENFEITE, E NÃO SE "ARRUMA" ESTE NOME.
 # O hubserver serve a árvore inteira do workspace sem senha nenhuma (hubserver.py:143 ->
 # _serve), e _serve (hubserver.py:120-121) aborta 404 em QUALQUER segmento que comece com
@@ -1528,6 +1550,10 @@ def api_enviar():
         ident = _novo_id('c')
     projeto = (dados.get('projeto') or '').strip()
     tela = dados.get('tela') if isinstance(dados.get('tela'), dict) else {}
+    # 1.87.0: o visualizador (e quem nao foi convidado para o projeto aberto) usa o chat para consultar: o turno roda em
+    # "So planejar", seja qual for o modo escolhido no painel (a cerca recusa gravar e o Bash, por codigo)
+    if qual == 'cli' and modo != 'plan' and _recusa_edicao(projeto):
+        modo = 'plan'
 
     if qual == 'cli':
         modelo = _modelo_cli(dados.get('modelo'))
@@ -1682,6 +1708,9 @@ def api_aplicar():
                         'gravado. Abra o projeto de novo e peça a proposta outra vez.'
                         % (proposta.get('projeto') or '(nenhum)', aberto)}
 
+    nao = _recusa_edicao(aberto)            # 1.87.0: visualizador, ou projeto de outra equipe
+    if nao:
+        return {'ok': False, 'codigo': 'sem_permissao', 'erro': nao + ' — nada foi gravado.'}
     fora = OP.aplica(ROOT, proposta)
     if fora.get('ok'):
         ident = dados.get('conversa')

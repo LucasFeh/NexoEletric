@@ -5,6 +5,10 @@
 //! num projeto sem responsavel (Projects/<p>/equipe.json). Hub antigo (404, sem login) ou fora do ar: liberado (quem
 //! barra sem Hub e o portao, gate.rs). O resto -- convidar, o historico, o diff do que mudou -- e do Python: depois de
 //! gravar, o Rust manda o conteudo anterior para POST /api/historico/registra, e o diff fica num lugar so.
+//!
+//! 1.87.0: a funcao do usuario no Nexo Hub 2.27.0 (`funcao`: admin | usuario | visualizador; `visualizador`: bool). O
+//! APENAS VISUALIZADOR nao grava nada -- nem no projeto em que e o responsavel ou colaborador, nem na biblioteca
+//! (Libs/). Hub antigo, sem o campo: usuario comum.
 
 use serde_json::{json, Value};
 use std::path::Path;
@@ -15,8 +19,8 @@ const CACHE: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Modo {
-    /// alguem logado: (id, nome, admin)
-    Login { id: String, nome: String, admin: bool },
+    /// alguem logado: (id, nome, admin, visualizador)
+    Login { id: String, nome: String, admin: bool, visualizador: bool },
     Deslogado,
     /// Hub antigo, sem login (/api/v1/sessao responde 404)
     Legado,
@@ -61,11 +65,15 @@ impl Sessao {
 pub fn de_sessao(j: &Value) -> Modo {
     let u = &j["usuario"];
     match (j["logado"].as_bool(), u["id"].as_str()) {
-        (Some(true), Some(id)) if !id.is_empty() => Modo::Login {
-            id: id.to_string(),
-            nome: u["nome"].as_str().or(u["login"].as_str()).unwrap_or("").to_string(),
-            admin: u["admin"].as_bool().unwrap_or(false),
-        },
+        (Some(true), Some(id)) if !id.is_empty() => {
+            let admin = u["admin"].as_bool().unwrap_or(false) || u["funcao"].as_str() == Some("admin");
+            Modo::Login {
+                id: id.to_string(),
+                nome: u["nome"].as_str().or(u["login"].as_str()).unwrap_or("").to_string(),
+                admin,
+                visualizador: !admin && (u["visualizador"].as_bool() == Some(true) || u["funcao"].as_str() == Some("visualizador")),
+            }
+        }
         _ => Modo::Deslogado,
     }
 }
@@ -74,8 +82,21 @@ pub fn le_equipe(pdir: &Path) -> Value {
     std::fs::read_to_string(pdir.join("equipe.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
 }
 
+pub const MSG_VISUALIZADOR: &str = "Seu usuário é apenas visualizador — peça ao administrador do Nexo Hub";
+
+/// o visualizador (1.87.0): Err = o corpo da resposta 403; vale para o projeto e para a biblioteca (Libs/)
+pub fn recusa_visualizador(modo: &Modo) -> Result<(), Value> {
+    match modo {
+        Modo::Login { visualizador: true, .. } => Err(json!({
+            "ok": false, "codigo": "sem_permissao", "visualizador": true, "error": MSG_VISUALIZADOR,
+        })),
+        _ => Ok(()),
+    }
+}
+
 /// Ok = pode gravar; Err = o corpo da resposta 403
 pub fn pode(equipe: &Value, modo: &Modo) -> Result<(), Value> {
+    recusa_visualizador(modo)?;
     let resp = equipe.get("responsavel").filter(|r| r.get("id").and_then(|i| i.as_str()).is_some_and(|i| !i.is_empty()));
     let Some(resp) = resp else { return Ok(()) };
     let id_resp = resp["id"].as_str().unwrap_or("");
@@ -108,7 +129,35 @@ mod tests {
                "colaboradores": [{"id": "u-colab", "login": "colab", "nome": "Carla"}]})
     }
     fn login(id: &str, admin: bool) -> Modo {
-        Modo::Login { id: id.into(), nome: id.into(), admin }
+        Modo::Login { id: id.into(), nome: id.into(), admin, visualizador: false }
+    }
+    fn visualizador(id: &str) -> Modo {
+        Modo::Login { id: id.into(), nome: id.into(), admin: false, visualizador: true }
+    }
+
+    #[test]
+    fn o_visualizador_nao_grava_nem_no_seu() {
+        let e = eq();
+        for quem in ["u-dono", "u-colab", "u-fora"] {
+            let r = pode(&e, &visualizador(quem)).unwrap_err();
+            assert_eq!(r["codigo"], "sem_permissao");
+            assert_eq!(r["error"], MSG_VISUALIZADOR);
+        }
+        assert!(pode(&Value::Null, &visualizador("u-fora")).is_err(), "nem num projeto sem responsavel");
+        assert!(recusa_visualizador(&visualizador("u-x")).is_err());
+        assert!(recusa_visualizador(&login("u-x", false)).is_ok() && recusa_visualizador(&Modo::Legado).is_ok());
+        // o Hub 2.27.0: {funcao, visualizador}; o antigo, sem o campo, e usuario comum
+        let m = de_sessao(&json!({"logado": true, "usuario": {"id": "u9", "nome": "Vera", "funcao": "visualizador", "visualizador": true}}));
+        assert_eq!(m, visualizador_n("u9", "Vera"));
+        let m = de_sessao(&json!({"logado": true, "usuario": {"id": "u9", "nome": "Vera", "funcao": "visualizador"}}));
+        assert_eq!(m, visualizador_n("u9", "Vera"));
+        let m = de_sessao(&json!({"logado": true, "usuario": {"id": "u9", "nome": "Vera"}}));
+        assert_eq!(m, Modo::Login { id: "u9".into(), nome: "Vera".into(), admin: false, visualizador: false });
+        let m = de_sessao(&json!({"logado": true, "usuario": {"id": "u9", "nome": "Vera", "admin": true, "visualizador": true}}));
+        assert_eq!(m, Modo::Login { id: "u9".into(), nome: "Vera".into(), admin: true, visualizador: false }, "admin nunca e visualizador");
+    }
+    fn visualizador_n(id: &str, nome: &str) -> Modo {
+        Modo::Login { id: id.into(), nome: nome.into(), admin: false, visualizador: true }
     }
 
     #[test]
@@ -130,7 +179,7 @@ mod tests {
     #[test]
     fn le_a_sessao_do_hub() {
         let m = de_sessao(&json!({"ok": true, "logado": true, "usuario": {"id": "u1", "login": "ana", "nome": "Ana", "admin": true}}));
-        assert_eq!(m, Modo::Login { id: "u1".into(), nome: "Ana".into(), admin: true });
+        assert_eq!(m, Modo::Login { id: "u1".into(), nome: "Ana".into(), admin: true, visualizador: false });
         assert_eq!(de_sessao(&json!({"ok": true, "logado": false, "usuario": null})), Modo::Deslogado);
     }
 }

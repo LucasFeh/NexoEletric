@@ -63,6 +63,31 @@ const como = (id, admin) => ({ ok: true, logado: true, usuario: { id, login: id,
   assert.strictEqual(equipe.nova(novo), true);
   assert.strictEqual(JSON.parse(fs.readFileSync(path.join(novo, 'equipe.json'), 'utf8')).responsavel.nome, 'Nome u-novo');
 
+  // 1.87.0: o apenas visualizador (Nexo Hub 2.27.0) -- a IA não edita por ele, nem no projeto em que é o responsável,
+  // nem na biblioteca; as ferramentas de leitura e de saída (exportar, JLC) seguem
+  const vis = (id) => ({ ok: true, logado: true, usuario: { id, login: id, nome: 'Nome ' + id, admin: false, visualizador: true, funcao: 'visualizador' } });
+  const MSG = /apenas visualizador — peça ao administrador do Nexo Hub/;
+  const antesVis = fs.readFileSync(arq, 'utf8');
+  await assert.rejects(grava(vis('u-dono'), 7), e => MSG.test(e.message) && e.extra.codigo === 'sem_permissao');
+  assert.strictEqual(fs.readFileSync(arq, 'utf8'), antesVis, 'o visualizador não gravou');
+  assert.throws(() => ctx.grava(lib, '// y\n', 't'), e => MSG.test(e.message) && e.extra.codigo === 'sem_permissao');
+  assert.strictEqual(equipe.usuario().visualizador, true);
+  const ferr = {};
+  for (const f of fs.readdirSync(path.join(RAIZ, 'mcp', 'ferramentas'))) {
+    const m = require(path.join(RAIZ, 'mcp', 'ferramentas', f));
+    for (const t of [].concat(Array.isArray(m) ? m : (m.ferramentas || Object.values(m)))) if (t && t.nome) ferr[t.nome] = t;
+  }
+  for (const n of equipe.SAIDAS) assert.ok(ferr[n], 'a saída ' + n + ' existe');
+  for (const n of ['pcb_via', 'sch_adicionar', 'sym_salvar', 'fp_salvar', 'projeto_criar', 'projeto_abrir_altium', 'regras_definir', 'local_criar', 'sinal_criar', 'nexo_projeto_restaurar'])
+    assert.match(equipe.recusaFerramenta(ferr[n]) || '', MSG, n + ' é edição');
+  for (const n of ['gerber_gerar', 'pdf_layout', 'pcb_render_3d', 'jlc_enviar', 'vista_abrir', 'lote'])
+    assert.strictEqual(equipe.recusaFerramenta(ferr[n]), null, n + ' é saída');
+  const leituras = Object.values(ferr).filter(t => t.leitura);
+  assert.ok(leituras.length > 20 && leituras.every(t => equipe.recusaFerramenta(t) === null), 'as de leitura passam');
+  // o mesmo login, de volta a usuário comum no Hub (sem reiniciar): grava de novo; e o comum não tem ferramenta barrada
+  assert.strictEqual(await grava(como('u-dono'), 8), true);
+  assert.strictEqual(equipe.recusaFerramenta(ferr.pcb_via), null);
+
   fs.rmSync(TMP, { recursive: true, force: true });
-  console.log('ok: test-mcp-equipe (permissão, histórico pela IA, responsável do projeto novo)');
+  console.log('ok: test-mcp-equipe (permissão, histórico pela IA, responsável do projeto novo, visualizador)');
 })().catch(e => { console.error(e); fs.rmSync(TMP, { recursive: true, force: true }); process.exit(1); });

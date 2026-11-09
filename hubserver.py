@@ -365,6 +365,26 @@ except Exception as _e:             # noqa: BLE001
     print('AVISO: equipe do projeto desligada (%s) — falta tools/rotas/equipe.py.' % _e)
 
 
+def _recusa_projeto(pdir):
+    """1.87.0: mexer num projeto que ja existe (substituir pela importacao do Altium, renomear, mover de grupo) e da
+    equipe dele, como o Salvar. None = pode; senao o corpo 403"""
+    if _equipe is None or not os.path.isdir(pdir):
+        return None
+    return _equipe.recusa_gravar(pdir)
+
+
+def _responsavel_do_novo(pdir):
+    """1.87.0: quem cria o projeto (importar do Altium, PCB nova no grupo) vira o responsavel por ele, como no Novo
+    projeto (tools/rotas/projeto_novo.py) e no projeto_criar do MCP"""
+    if _equipe is None:
+        return
+    try:
+        if not os.path.exists(os.path.join(pdir, _equipe.ARQ)):
+            _equipe.nova(pdir, _equipe.sessao()['usuario'])
+    except Exception as e:          # noqa: BLE001 -- a equipe nunca impede de criar
+        print('[equipe] responsavel do projeto novo: %s' % e, flush=True)
+
+
 @app.route('/api/save', methods=['POST'])
 def api_save():
     data = request.get_json(silent=True)
@@ -524,6 +544,10 @@ def api_altium_abrir():
         if ja and not data.get('substituir'):
             return {'ok': False, 'existe': True, 'projeto': projeto,
                     'error': 'o projeto "%s" ja tem %s' % (projeto, ' e '.join(ja))}, 409
+        recusa = _recusa_projeto(pasta)          # 1.87.0: substituir o projeto de outro e editar
+        if recusa:
+            return recusa, 403
+        era_novo = not os.path.isdir(pasta)
         avisos = []
         resumo = {}
         texto = None
@@ -549,6 +573,8 @@ def api_altium_abrir():
                 return {'ok': False, 'error': 'falha ao gravar: %s' % e}, 500
         resumo['avisos'] = avisos
         resumo['faltam'] = [os.path.basename(x) for x in resumo.get('faltam') or []]
+        if era_novo and os.path.isdir(pasta):
+            _responsavel_do_novo(pasta)
         build_index(ROOT)
         return {'ok': True, 'projeto': projeto, 'resumo': resumo, 'esquema': texto is not None, 'placa': placa}
     finally:
@@ -1259,6 +1285,9 @@ def api_project_rename(proj_id):
     src = os.path.join(pdir, name)
     if not os.path.isdir(src):
         return {'ok': False, 'error': 'a pasta do projeto ja nao existe'}, 404
+    recusa = _recusa_projeto(src)               # 1.87.0: renomear o projeto de outro pede o convite
+    if recusa:
+        return recusa, 403
     so_caixa = novo.lower() == name.lower()     # "pcb1" -> "PCB1": a mesma pasta no Windows
     novo_id = _proj_id(novo)
     for outro in os.listdir(pdir):
@@ -1337,6 +1366,9 @@ def api_project_grupo(proj_id):
     d = os.path.join(ROOT, 'Projects', name) if name else ''
     if not d or not os.path.isdir(d):
         return {'ok': False, 'error': 'projeto desconhecido'}, 404
+    recusa = _recusa_projeto(d)                 # 1.87.0: mover o projeto de outro pede o convite
+    if recusa:
+        return recusa, 403
     try:
         _grava_grupo(d, grupo)
     except OSError as e:
@@ -1410,6 +1442,7 @@ def api_grupo_nova_pcb():
         _grava_grupo(d, grupo)
     except OSError as e:
         return {'ok': False, 'error': 'não deu para criar a pasta: %s' % e}, 500
+    _responsavel_do_novo(d)                     # 1.87.0: quem cria a PCB e o responsavel por ela
     build_index(ROOT)
     return {'ok': True, 'id': novo_id, 'name': nome, 'grupo': grupo}
 

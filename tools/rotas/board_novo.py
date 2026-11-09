@@ -148,6 +148,14 @@ def board_novo(raiz, dados):
             'caminho': 'Projects/%s/%s' % (proj, BOARD)}, 200
 
 
+def _equipe():
+    try:
+        import equipe
+        return equipe
+    except Exception:  # noqa: BLE001 -- sem o modulo da equipe a placa nova segue como antes
+        return None
+
+
 def registra(app, raiz_fn):
     """Liga a rota no Flask do hubserver. raiz_fn() devolve a raiz do workspace (o ROOT)."""
     from flask import request
@@ -158,7 +166,22 @@ def registra(app, raiz_fn):
             dados = request.get_json(silent=True)
         except Exception:  # RequestEntityTooLarge
             return {'ok': False, 'error': 'board.js grande demais'}, 413
-        return board_novo(raiz_fn(), dados)
+        # 1.87.0: a placa nova num projeto que ja existe e edicao (a equipe dele); a pasta nova nasce com quem criou de
+        # responsavel (tools/rotas/equipe.py)
+        eq = _equipe()
+        proj = dados.get('proj') if isinstance(dados, dict) else None
+        d = os.path.join(raiz_fn(), 'Projects', proj) if isinstance(proj, str) and proj and not nome_ruim(proj) else ''
+        if eq is not None and d and os.path.isdir(d):
+            recusa = eq.recusa_gravar(d)
+            if recusa:
+                return recusa, 403
+        r, st = board_novo(raiz_fn(), dados)
+        if eq is not None and st == 200 and r.get('criouPasta') and d:
+            try:
+                eq.nova(d, eq.sessao()['usuario'])
+            except Exception as e:  # noqa: BLE001 -- a equipe nunca impede a placa
+                print('[equipe] responsavel da placa nova: %s' % e, flush=True)
+        return r, st
 
     app.add_url_rule('/api/board-novo', 'api_board_novo', api_board_novo, methods=['POST'])
     return api_board_novo

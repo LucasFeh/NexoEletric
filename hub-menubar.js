@@ -38,7 +38,10 @@
     const P = temPonte();
     const file = [it('novaJanela', 'Ctrl+Shift+N')];
     /* o projeto novo com o código da placa no catálogo da casa (hub-projnovo.js, pelo hub-shell.js) */
-    if (typeof window.__hubNovoProjeto === 'function') file.unshift({ rot:'Novo projeto…', tecla:'', f:() => window.__hubNovoProjeto() });
+    /* 1.87.0: o apenas visualizador não cria nem importa projeto (hub-equipe.js; o servidor recusa também) */
+    const vis = window.HubEquipe && typeof window.HubEquipe.visualizador === 'function' && window.HubEquipe.visualizador();
+    const msgVis = vis ? window.HubEquipe.MSG_VISUALIZADOR : '';
+    if (typeof window.__hubNovoProjeto === 'function') file.unshift(Object.assign({ rot:'Novo projeto…', tecla:'', f:() => window.__hubNovoProjeto() }, vis ? { off:true, dica:msgVis } : {}));
     /* a equipe do projeto aberto (hub-equipe.js, 1.84.0): responsável, colaboradores e o convite; e o "Assumir projeto"
        pelo login (o administrador sempre; os outros, num projeto sem responsável) */
     if (typeof window.__hubEquipeProjeto === 'function') {
@@ -49,7 +52,7 @@
         { rot:'Equipe do projeto…', tecla:'', f:() => window.__hubEquipeProjeto() }, assumir);
     }
     /* o projeto do Altium (esquema e PCB) aberto direto no hub (hub-altiumabrir.js); arrastar o .PrjPcb tambem abre */
-    if (typeof window.__hubAbrirAltium === 'function') file.push({ rot:T('mb.abrirAltium'), tecla:'', f:() => window.__hubAbrirAltium() });
+    if (typeof window.__hubAbrirAltium === 'function') file.push(Object.assign({ rot:T('mb.abrirAltium'), tecla:'', f:() => window.__hubAbrirAltium() }, vis ? { off:true, dica:msgVis } : {}));
     if (P) file.push('-', it('abrirPasta'), it('nexobd'), it('nexoSync'));
     file.push('-', it('configHub'));
     if (P) file.push(it('configApp', 'Ctrl+,'));

@@ -567,6 +567,10 @@ body.eh-shell .tab[aria-selected="true"]::after {
   // Botao direito num projeto da arvore. Excluir usa o mesmo dialogo das Configuracoes do hub
   // (1.86.0: so o administrador do Nexo Hub ou o responsavel pelo projeto, conferido no servidor; a pasta
   // vai para Trash\, nao some), agora com o id do projeto clicado -- que pode nao ser o aberto.
+  /* 1.87.0: apenas visualizador (hub-equipe.js) -- não cria, renomeia, move nem exclui projeto; o servidor recusa também */
+  const vis = () => Boolean(window.HubEquipe && typeof window.HubEquipe.visualizador === 'function' && window.HubEquipe.visualizador());
+  const msgVis = () => (window.HubEquipe && window.HubEquipe.MSG_VISUALIZADOR) || 'apenas visualizador';
+  const barra = (acao) => Boolean(window.HubEquipe && typeof window.HubEquipe.barraVisualizador === 'function' && window.HubEquipe.barraVisualizador(acao));
   function menuDoProjeto(p, eAtivo, x, y) {
     fecharMenu();
     const m = el('div', 'eh-menu');
@@ -582,16 +586,16 @@ body.eh-shell .tab[aria-selected="true"]::after {
     m.append(el('div', 'hr'));
     const semServidor = typeof S !== 'undefined' && S.demoMode;
     itemDeMenu(m, 'Renomear projeto…', icone('editar'), () => renomearProjeto(p), {
-      off: semServidor,
-      titulo: semServidor ? 'sem servidor não há o que renomear' : 'troca o nome da pasta do projeto (e no NexoBD)',
+      off: semServidor || vis(),
+      titulo: semServidor ? 'sem servidor não há o que renomear' : vis() ? msgVis() : 'troca o nome da pasta do projeto (e no NexoBD)',
     });
     itemDeMenu(m, p.grupo ? 'Mover para outro projeto…' : 'Mover para um projeto multi-PCB…', icone('multipcb'), () => moverParaGrupo(p), {
-      off: semServidor,
-      titulo: 'junta esta PCB a um projeto com mais de uma PCB (existente ou novo); arrastar a PCB para o projeto faz o mesmo',
+      off: semServidor || vis(),
+      titulo: vis() ? msgVis() : 'junta esta PCB a um projeto com mais de uma PCB (existente ou novo); arrastar a PCB para o projeto faz o mesmo',
     });
     if (p.grupo) {
       itemDeMenu(m, 'Tirar do projeto "' + p.grupo + '"', icone('projeto'), () => poeNoGrupo(p, ''), {
-        off: semServidor, titulo: 'a PCB volta a ser um projeto avulso na árvore',
+        off: semServidor || vis(), titulo: vis() ? msgVis() : 'a PCB volta a ser um projeto avulso na árvore',
       });
     }
     // a equipe do projeto (hub-equipe.js, 1.84.0): o responsável, os colaboradores e o convite
@@ -740,6 +744,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
   }
 
   function renomearProjeto(p) {
+    if (barra('renomear o projeto')) return;
     const eAtivo = typeof proj === 'function' && proj() && proj().id === p.id;
     if (eAtivo && vistasSujas()) {
       toast('Salve antes as edições das vistas Esquema/PCB: elas gravam no projeto pelo nome', 'warn');
@@ -769,6 +774,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
   const nomesDeGrupo = () => Array.from(new Set((S.projects || []).map((x) => x.grupo).filter(Boolean)))
     .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base', numeric: true }));
   async function poeNoGrupo(p, grupo) {
+    if (barra('mover o projeto')) return;
     const j = await postar('/api/project/' + encodeURIComponent(p.id) + '/grupo', { grupo });
     if (!j.ok) { toast('não deu para mover ' + p.name + ': ' + j.error, 'err'); return; }
     if (grupo) gruposAbertos.add(grupo);
@@ -776,6 +782,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
     await releIndice();
   }
   function moverParaGrupo(p) {
+    if (barra('mover o projeto')) return;
     const outros = nomesDeGrupo().filter((g) => g !== p.grupo);
     dialogoNome({
       titulo: 'Mover para um projeto multi-PCB', atual: p.name + (p.grupo ? '   (hoje em ' + p.grupo + ')' : ''),
@@ -794,6 +801,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
   /* o Novo projeto (hub-projnovo.js): registra a placa no catálogo da casa e cria o projeto; o menu Arquivo
      (hub-menubar.js) chama pelo mesmo window.__hubNovoProjeto */
   window.__hubNovoProjeto = () => {
+    if (barra('criar projeto')) return;
     if (!window.HubProjNovo) { toast('Novo projeto: falta o hub-projnovo.js', 'err'); return; }
     window.HubProjNovo.abre({
       existe: (n) => (S.projects || []).some((x) => x.name.toLowerCase() === n.toLowerCase()),
@@ -805,6 +813,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
     });
   };
   function novaPcbNoGrupo(grupo) {
+    if (barra('criar PCB')) return;
     const n = (S.projects || []).filter((x) => x.grupo === grupo).length + 1;
     dialogoNome({
       titulo: 'Nova PCB em ' + grupo, valor: grupo + ' - PCB' + n, ok: 'Criar',
@@ -822,6 +831,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
     });
   }
   function renomearGrupo(grupo) {
+    if (barra('renomear o projeto')) return;
     dialogoNome({
       titulo: 'Renomear projeto multi-PCB', atual: grupo, valor: grupo, ok: 'Renomear',
       dica: 'Só o nome do projeto que agrupa as PCBs muda; cada PCB mantém o nome e a pasta dela.',
@@ -836,6 +846,7 @@ body.eh-shell .tab[aria-selected="true"]::after {
     });
   }
   async function desfazerGrupo(grupo) {
+    if (barra('desfazer o projeto multi-PCB')) return;
     const n = (S.projects || []).filter((x) => x.grupo === grupo).length;
     if (!(await confirmaNoHub('As ' + n + ' PCB(s) de "' + grupo + '" voltam a ser projetos avulsos na árvore. '
       + 'Nenhum arquivo é apagado.', { title: 'Desfazer o projeto multi-PCB', ok: 'Desfazer' }))) return;

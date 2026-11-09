@@ -177,6 +177,12 @@ pub async fn api_save(State(est): State<Est>, Json(d): Json<serde_json::Value>) 
     // 1.84.0: o projeto tem dono (equipe.rs): quem nao e o responsavel, colaborador ou admin nao grava; e o que estava
     // no disco vai para o historico do Python depois (quem fez e o que mudou)
     let mut antes: Option<String> = None;
+    // 1.87.0: o apenas visualizador nao grava a biblioteca (Libs/) -- o projeto, o equipe::pode recusa abaixo
+    if ok_lib {
+        if let Err(corpo) = crate::equipe::recusa_visualizador(&est.sessao.modo(&est.hub_cli).await) {
+            return (StatusCode::FORBIDDEN, Json(corpo)).into_response();
+        }
+    }
     if ok_proj {
         let pdir = full.parent().map(|d| d.to_path_buf()).unwrap_or_default();
         let modo = est.sessao.modo(&est.hub_cli).await;
@@ -269,6 +275,9 @@ mod tests {
             (como("u-dono", false), 200),
             (como("u-colab", false), 200),
             (como("u-admin", true), 200),
+            // 1.87.0: o visualizador nao grava nem no projeto em que e o responsavel
+            (Some(json!({"ok": true, "logado": true, "usuario": {"id": "u-dono", "login": "dono", "nome": "Davi Dono",
+                "admin": false, "visualizador": true, "funcao": "visualizador"}})), 403),
             (None, 200), // Hub antigo, sem login: liberado
         ] {
             *resposta.lock().unwrap() = sessao.clone();
@@ -283,7 +292,8 @@ mod tests {
                 let b = axum::body::to_bytes(r.into_body(), 1 << 20).await.unwrap();
                 let j: Value = serde_json::from_slice(&b).unwrap();
                 assert_eq!(j["codigo"], "sem_permissao");
-                assert!(j["error"].as_str().unwrap().contains("Davi Dono"));
+                let e = j["error"].as_str().unwrap();
+                assert!(e.contains("Davi Dono") || e.contains("apenas visualizador"), "{e}");
             }
         }
         // sem responsavel: qualquer logado
@@ -291,6 +301,16 @@ mod tests {
         *resposta.lock().unwrap() = como("u-fora", false);
         est.sessao.esquece();
         assert_eq!(api_save(State(est.clone()), Json(grava("var changes = [\n];\n"))).await.status().as_u16(), 200);
+        // 1.87.0: o visualizador nao grava a biblioteca (Libs/lib-subs.js); o usuario comum grava
+        std::fs::create_dir_all(root.join("Libs")).unwrap();
+        let lib = json!({"path": "Libs/lib-subs.js", "content": "var libSubs = {};\n"});
+        *resposta.lock().unwrap() = Some(json!({"ok": true, "logado": true, "usuario": {"id": "u-v", "nome": "Vera", "visualizador": true}}));
+        est.sessao.esquece();
+        assert_eq!(api_save(State(est.clone()), Json(lib.clone())).await.status().as_u16(), 403);
+        assert!(!root.join("Libs").join("lib-subs.js").exists());
+        *resposta.lock().unwrap() = como("u-fora", false);
+        est.sessao.esquece();
+        assert_eq!(api_save(State(est.clone()), Json(lib)).await.status().as_u16(), 200);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

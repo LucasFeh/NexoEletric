@@ -4760,6 +4760,7 @@ $('#pickerCatcher').onclick = () => { S.pickerOpen = false; renderHeader(); };
 /* Arquivo » Abrir documento do Altium (ou o arquivo solto na janela): converte no servidor e abre o projeto */
 window.__hubAbrirAltium = (arquivos) => {
   S.pickerOpen = false; renderHeader();
+  if (window.HubEquipe && HubEquipe.barraVisualizador && HubEquipe.barraVisualizador('importar projeto do Altium')) return;   /* 1.87.0 */
   if (typeof HubAltiumAbrir === 'undefined') return;
   return HubAltiumAbrir.abre({ arquivos: Array.isArray(arquivos) ? arquivos : undefined, aoAbrir: async (nome, r) => {
     const idx = await API.index(); S.projects = idx.projects; renderHeader();

@@ -137,6 +137,9 @@ class Servidor {
       if (semHub) throw new ErroMcp(semHub, { semHub: true });
       /* 1.84.0: quem está logado no Nexo Hub (a equipe do projeto e o autor no histórico): a gravação confere */
       if (!gate.LIVRES.has(f.nome)) await equipe.sessao();
+      /* 1.87.0: o apenas visualizador só lê e exporta (lib/equipe.js » SAIDAS): o resto recusa antes de rodar */
+      const naoVis = equipe.recusaFerramenta(f);
+      if (naoVis) throw new ErroMcp(naoVis, { codigo: 'sem_permissao', visualizador: true });
       const r = await f.executa(args, this.ctx, this);
       return resultado(r, this.versaoProtocolo);
     } catch (e) {

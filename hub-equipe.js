@@ -14,6 +14,13 @@
      HubEquipe.sessao() / ouve(fn)           quem está logado (o que o servidor vê: GET /api/sessao)
      HubEquipe.somenteLeitura() / bloqueia(relPath)   a vista (?p=) de um projeto em que a pessoa não mexe: a faixa no
                                              topo, o Salvar recusa na hora e o autosave não grava (hub-io.js, hub-autosave.js)
+   1.87.0 — a FUNÇÃO do usuário (o admin escolhe no Nexo Hub 2.27.0: Administrador / Usuário / Apenas visualizador). O
+   visualizador fica no somente leitura em todo projeto, mesmo no seu (o servidor decide: permissao.visualizador):
+     HubEquipe.visualizador()                quem está logado é apenas visualizador?
+     HubEquipe.barraVisualizador(acao)       true (e o aviso) se for: criar/importar/renomear/mover projeto
+     o selo "Visualizador" ao lado do crachá do Nexo Hub (a barra de menus) e no crachá do diálogo Equipe
+   A troca de função no Hub chega sem reiniciar: o Hub emite o evento de sessão (nexohub:sessao) e aqui se relê na hora
+   (/api/sessao?forcar=1); sem o evento, a árvore (8 s) e a vista (8 s) conferem sozinhas.
    Nada de alert/confirm/prompt: modal no tema e toast (HubDialog nas vistas; o toast do hub no hub). */
 (function (root) {
 'use strict';
@@ -58,6 +65,11 @@ const CSS = `
 .eq-chip.ok{border-color:var(--ok, #4ade80); color:var(--ok, #4ade80);}
 .eq-chip.adm{border-color:var(--warn, #d6a75a); color:var(--warn, #d6a75a);}
 .eq-chip.ia{border-color:var(--hi, #888); color:var(--hi, #ddd);}
+.eq-chip.vis{border-color:color-mix(in srgb, var(--warn, #d6a75a) 70%, transparent); color:var(--warn, #d6a75a);}
+.eq-selo{display:inline-flex; align-items:center; gap:4px; height:20px; margin-right:6px; padding:0 8px; border-radius:10px;
+  font:600 11px var(--font, "Segoe UI", sans-serif); color:var(--warn, #d6a75a); white-space:nowrap; cursor:default;
+  border:1px solid color-mix(in srgb, var(--warn, #d6a75a) 60%, transparent); background:color-mix(in srgb, var(--warn, #d6a75a) 10%, transparent);}
+.eq-selo svg{width:11px; height:11px; fill:none; stroke:currentColor; stroke-width:1.6;}
 .eq-tag{font-size:9.5px; font-weight:600; margin-left:5px; padding:0 5px; border-radius:7px; white-space:nowrap; flex:none;
   border:1px solid var(--line, #555); color:var(--text-3, #999); line-height:14px; display:inline-flex; align-items:center; gap:3px;}
 .eq-tag svg{width:9px; height:9px; fill:none; stroke:currentColor; stroke-width:1.6;}
@@ -113,23 +125,35 @@ let sesQuando = 0, sesPedido = null;
 const ouvintes = new Set();
 function ouve(fn) { ouvintes.add(fn); return () => ouvintes.delete(fn); }
 function avisa() { for (const fn of ouvintes) try { fn(ses); } catch (_) { /* um ouvinte quebrado não derruba os outros */ } }
+function poeSessao(modo, usuario) {
+  const antes = JSON.stringify([ses.modo, ses.usuario]);
+  ses = { modo, usuario: usuario || null, carregado: true };
+  sesQuando = Date.now();
+  if (JSON.stringify([ses.modo, ses.usuario]) !== antes) avisa();
+}
 function sessao(forcar) {
   if (!forcar && ses.carregado && Date.now() - sesQuando < 3000) return Promise.resolve(ses);
   if (!sesPedido) {
-    sesPedido = api('/api/sessao').then(j => {
-      const antes = JSON.stringify([ses.modo, ses.usuario]);
-      if (j.ok) ses = { modo: j.modo, usuario: j.usuario || null, carregado: true };
-      sesQuando = Date.now();
-      if (JSON.stringify([ses.modo, ses.usuario]) !== antes) avisa();
+    /* forcar === 'hub': o Hub avisou que o login ou a função mudou; o servidor pergunta de novo, sem o cache dele */
+    sesPedido = api('/api/sessao' + (forcar === 'hub' ? '?forcar=1' : '')).then(j => {
+      if (j.ok) poeSessao(j.modo, j.usuario); else sesQuando = Date.now();
       return ses;
     }).finally(() => { sesPedido = null; });
   }
   return sesPedido;
 }
-/* o login trocou no Nexo Hub (hub-nexohub-login.js, na janela de cima): todo mundo relê */
+/* 1.87.0: apenas visualizador (o Nexo Hub 2.27.0 diz; Hub antigo, sem o campo, é usuário comum) */
+const MSG_VIS = 'Seu usuário é apenas visualizador — peça ao administrador do Nexo Hub';
+function visualizador() { return Boolean(ses.modo === 'login' && ses.usuario && ses.usuario.visualizador); }
+function barraVisualizador(acao) {
+  if (!visualizador()) return false;
+  toast((acao ? 'Não dá para ' + acao + ': ' : '') + MSG_VIS, 'warn', 7000);
+  return true;
+}
+/* o login (ou a função) trocou no Nexo Hub (hub-nexohub-login.js, na janela de cima): todo mundo relê na hora */
 try {
   (window.top || window).addEventListener('nexohub:sessao', () => {
-    setTimeout(() => { sessao(true); equipes = null; leEquipes(); if (vista.projeto) confereVista(); }, 300);
+    setTimeout(() => { sessao('hub').then(() => { if (vista.projeto) confereVista(); }); equipes = null; leEquipes(); }, 300);
   });
 } catch (_) { /* outra origem */ }
 
@@ -177,6 +201,7 @@ function cracha(u, o) {
   c.append(t);
   if (o.tags && u) {
     if (u.admin) c.append(el('span', 'eq-chip adm', 'Administrador'));
+    if (u.visualizador) { const v = el('span', 'eq-chip vis', 'Visualizador'); v.title = 'apenas visualizador: vê, baixa e exporta, mas não edita (definido pelo administrador no Nexo Hub)'; c.append(v); }
     if (u.aprovador) c.append(el('span', 'eq-chip ok', 'Aprovador'));
   }
   return c;
@@ -228,6 +253,7 @@ function abre(projeto) {
     if (!st) { m.corpo.append(el('div', 'eq-vazio', 'carregando…')); return; }
     if (!st.ok) { m.corpo.append(el('div', 'eq-erro', 'a equipe não abriu: ' + (st.error || 'sem resposta'))); return; }
     const p = st.permissao || {}, eq = st.equipe || {}, eu = st.usuario;
+    if (p.visualizador) m.corpo.append(el('div', 'eq-erro', MSG_VIS + '. Você vê a equipe e o projeto, mas não mexe nele nem convida ninguém.'));
     if (st.modo === 'legado' || st.modo === 'fora')
       m.corpo.append(el('div', 'eq-erro', st.modo === 'legado' ? 'Atualize o Nexo Hub para 2.26.0+: a equipe do projeto vem do login dele.'
         : 'O Nexo Hub não respondeu: sem ele não dá para saber quem está logado.'));
@@ -257,7 +283,7 @@ function abre(projeto) {
     if (p.gerir) {
       if (escolhendo === 'convidar') m.corpo.append(seletor('convidar'));
       else m.corpo.append(Object.assign(botao('Convidar colaborador…', 'escolher alguém da equipe do Nexo Hub', () => { escolhendo = 'convidar'; pinta(); }), { style: 'align-self:flex-start' }));
-    } else if (eq.responsavel && p.papel !== 'admin') {
+    } else if (eq.responsavel && p.papel !== 'admin' && !p.visualizador) {
       m.corpo.append(el('div', 'eq-vazio', 'Só ' + eq.responsavel.nome + ' (o responsável) e os administradores convidam colaboradores.'));
     }
     m.corpo.append(erro);
@@ -286,7 +312,10 @@ function abre(projeto) {
       for (const u of l) {
         const lin = el('div', 'eq-lin');
         lin.append(Object.assign(cracha(u, { px: 26, sub: '@' + u.login, tags: true }), { className: 'eq-cr eq-quem' }));
-        lin.append(botao(modo === 'convidar' ? 'Convidar' : 'Tornar responsável', null, () => escolhe(modo, u), 'eq-forte'));
+        const b = botao(modo === 'convidar' ? 'Convidar' : 'Tornar responsável', null, () => escolhe(modo, u), 'eq-forte');
+        /* 1.87.0: o apenas visualizador não entra na equipe (o servidor recusa também) */
+        if (u.visualizador) { b.disabled = true; b.title = u.nome + ' é apenas visualizador no Nexo Hub: não edita projeto (o administrador muda a função no Hub)'; }
+        lin.append(b);
         lista.append(lin);
       }
     };
@@ -340,6 +369,7 @@ function podeAssumir(projeto) {
   const u = ses.usuario;
   if (!projeto) return { pode: false, dica: 'abra um projeto' };
   if (!u) return { pode: false, dica: ses.modo === 'legado' ? 'atualize o Nexo Hub para 2.26.0+' : 'entre no Nexo Hub' };
+  if (visualizador()) return { pode: false, dica: MSG_VIS };
   const e = equipes && equipes[projeto];
   if (e && e.papel === 'responsavel') return { pode: false, dica: 'você já é o responsável por este projeto' };
   if (u.admin || !e || !e.responsavel) return { pode: true, dica: '' };
@@ -361,6 +391,8 @@ async function leEquipes() {
   if (document.hidden) return;
   const j = await api('/api/equipes');
   if (!j.ok) return;
+  /* quem está logado vem junto: a troca de função no Hub aparece aqui mesmo sem o evento de sessão */
+  if (j.modo && window.top === window) poeSessao(j.modo, j.usuario);
   const s = JSON.stringify(j.projetos || {});
   equipes = j.projetos || {};
   if (s === assinatura) return;
@@ -373,6 +405,11 @@ function tagArvore(nome) {
   const e = equipes && equipes[nome];
   if (!e) return null;
   let t = null;
+  if (e.visualizador) {
+    t = el('span', 'eq-tag leitura'); t.innerHTML = LOCK; t.setAttribute('aria-label', 'somente leitura');
+    t.title = 'somente leitura: seu usuário é apenas visualizador' + (e.papel === 'responsavel' ? ' (você é o responsável por este projeto)' : e.papel === 'colaborador' ? ' (você é colaborador deste projeto)' : '') + '. Peça ao administrador do Nexo Hub.';
+    return t;
+  }
   if (e.papel === 'responsavel') { t = el('span', 'eq-tag meu', 'meu'); t.title = 'você é o responsável por este projeto'; }
   else if (e.papel === 'colaborador') { t = el('span', 'eq-tag colab', 'colab.'); t.title = 'você foi convidado por ' + ((e.responsavel || {}).nome || 'responsável') + ' para mexer neste projeto'; }
   else if (e.papel === 'leitura') { t = el('span', 'eq-tag leitura'); t.innerHTML = LOCK; t.setAttribute('aria-label', 'somente leitura'); t.title = 'somente leitura: o responsável é ' + ((e.responsavel || {}).nome || '—') + '. Peça um convite.'; }
@@ -389,9 +426,11 @@ async function confereVista() {
   if (!vista.projeto) return;
   const j = await api('/api/equipe?projeto=' + enc(vista.projeto));
   if (!j.ok) return;
+  if (j.modo) poeSessao(j.modo, j.usuario);     /* a função pode ter mudado no Hub sem o evento chegar aqui */
   vista.st = j;
   const pode = !(j.permissao && j.permissao.pode === false);
-  if (pode === vista.pode && (pode || vista.faixa)) return;
+  const vis = Boolean(j.permissao && j.permissao.visualizador);
+  if (pode === vista.pode && (pode || (vista.faixa && (vista.faixa.dataset.visualizador === '1') === vis))) return;
   vista.pode = pode;
   pintaFaixa();
 }
@@ -403,19 +442,27 @@ function pintaFaixa() {
     if (salvar && salvar.dataset.eqTitulo !== undefined) { salvar.disabled = false; salvar.title = salvar.dataset.eqTitulo; delete salvar.dataset.eqTitulo; }
     return;
   }
-  const resp = (vista.st && vista.st.permissao && vista.st.permissao.responsavel) || {};
+  const perm = (vista.st && vista.st.permissao) || {};
+  const resp = perm.responsavel || {};
   if (!vista.faixa) {
     vista.faixa = el('div', 'eq-faixa');
     vista.faixa.setAttribute('role', 'status');
     document.body.append(vista.faixa);
   }
   vista.faixa.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>';
-  const t = el('span'); t.append(el('b', null, 'Somente leitura'), ' — responsável ' + (resp.nome || '—') + '. Peça um convite.');
+  const t = el('span');
+  /* 1.87.0: o visualizador, mesmo no projeto dele: o motivo é a função, não o convite */
+  if (perm.visualizador) t.append(el('b', null, 'Somente leitura'), ' — seu usuário é apenas visualizador. Você vê, baixa, exporta e envia à JLC; editar, peça ao administrador do Nexo Hub.');
+  else t.append(el('b', null, 'Somente leitura'), ' — responsável ' + (resp.nome || '—') + '. Peça um convite.');
+  vista.faixa.dataset.visualizador = perm.visualizador ? '1' : '';
   vista.faixa.append(t, botao('Equipe…', 'ver quem mexe neste projeto', () => abre(vista.projeto)));
-  if (salvar && salvar.dataset.eqTitulo === undefined) { salvar.dataset.eqTitulo = salvar.title || ''; salvar.disabled = true; salvar.title = 'somente leitura: só a equipe do projeto salva'; }
+  if (salvar && salvar.dataset.eqTitulo === undefined) { salvar.dataset.eqTitulo = salvar.title || ''; salvar.disabled = true; }
+  if (salvar) salvar.title = perm.visualizador ? 'somente leitura: ' + MSG_VIS : 'somente leitura: só a equipe do projeto salva';
 }
 function somenteLeitura() { return Boolean(vista.projeto && !vista.pode); }
 function bloqueia(relPath) {
+  /* 1.87.0: o visualizador não grava nada, nem a biblioteca (Libs/) */
+  if (visualizador() || (vista.st && vista.st.permissao && vista.st.permissao.visualizador && !vista.pode)) return 'Somente leitura: ' + MSG_VIS + '.';
   if (!somenteLeitura()) return null;
   const partes = String(relPath || '').replace(/\\/g, '/').split('/').filter(Boolean);
   if (partes[0] !== 'Projects' || partes[1] !== vista.projeto) return null;
@@ -424,9 +471,10 @@ function bloqueia(relPath) {
 }
 /* o servidor recusou (o convite caiu enquanto a vista estava aberta): a vista vira somente leitura na hora */
 function recusado(j) {
+  if (j && j.visualizador) sessao(true);
   if (!vista.projeto) return;
   vista.pode = false;
-  vista.st = { permissao: { pode: false, responsavel: j && j.responsavel } };
+  vista.st = { permissao: { pode: false, responsavel: j && j.responsavel, visualizador: Boolean(j && j.visualizador) } };
   pintaFaixa();
   confereVista();
 }
@@ -514,6 +562,7 @@ function podeExcluir(projeto) {
   const e = equipes && equipes[projeto];
   if (e && typeof e.apagar === 'boolean') return { pode: e.apagar, dica: e.apagar ? '' : (e.motivoApagar || 'só o administrador ou o responsável pelo projeto exclui') };
   if (!ses.carregado || !equipes) return { pode: true, dica: '' };          /* ainda não sabe: o diálogo explica */
+  if (visualizador()) return { pode: false, dica: MSG_VIS };
   if (!u) return { pode: false, dica: ses.modo === 'legado' ? 'atualize o Nexo Hub para 2.26.0+' : 'entre no Nexo Hub: só o administrador ou o responsável pelo projeto exclui' };
   return { pode: Boolean(u.admin), dica: u.admin ? '' : 'só o administrador ou o responsável pelo projeto exclui' };
 }
@@ -521,13 +570,37 @@ function podeExcluir(projeto) {
 /* o "Equipe do projeto…" do menu Arquivo do hub (hub-menubar.js) e do clique direito na árvore (hub-shell.js) */
 function projetoAberto() { try { const p = typeof proj === 'function' ? proj() : null; return p ? p.name : ''; } catch (_) { return ''; } }   // eslint-disable-line no-undef
 
+/* ─── o selo "Visualizador" ao lado do crachá do Nexo Hub (a barra de menus do app; hub-nexohub-login.js) ─── */
+function pintaSelo() {
+  if (window.top !== window) return;
+  const lugar = document.getElementById('nexoHubConta');
+  let s = document.getElementById('eqSeloVis');
+  if (!visualizador()) { if (s) s.remove(); return; }
+  if (!lugar) return;
+  css();
+  if (!s) {
+    s = el('span', 'eq-selo'); s.id = 'eqSeloVis';
+    s.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8s2.3-4.5 6.5-4.5S14.5 8 14.5 8s-2.3 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>';
+    s.append('Visualizador');
+    s.title = 'Seu usuário é apenas visualizador: vê, baixa, exporta e envia à JLC, mas não edita esquema, PCB nem biblioteca. Quem muda a função é o administrador, no Nexo Hub.';
+    s.setAttribute('role', 'status');
+  }
+  if (s.parentNode !== lugar || lugar.firstChild !== s) lugar.prepend(s);
+}
+ouve(pintaSelo);
+
 root.HubEquipe = { abre, assumir: assumirProjeto, podeAssumir, podeExcluir, tagArvore, pintaModificacoes, cracha, avatar, sessao, ouve, somenteLeitura, bloqueia, recusado, confirma,
+                   visualizador, barraVisualizador, MSG_VISUALIZADOR: MSG_VIS,
                    haQuanto, _vista: () => vista.projeto, _confere: confereVista };
 if (window.top === window) {
   root.__hubEquipeProjeto = nome => abre(nome || projetoAberto());
   root.__hubEquipeAssumir = nome => assumirProjeto(nome || projetoAberto());
   root.__hubEquipePodeAssumir = nome => podeAssumir(nome || projetoAberto());
   setTimeout(leEquipes, 800);
+  /* o selo: o lugar do crachá nasce depois (hub-nexohub-login.js); e a árvore pode estar fechada (sem a consulta da
+     tagArvore), então a sessão também é conferida aqui, a cada 8 s */
+  setInterval(() => { if (!document.hidden) sessao(true).then(pintaSelo); else pintaSelo(); }, 8000);
+  setTimeout(pintaSelo, 1500);
 }
 iniciaVista();
 sessao();

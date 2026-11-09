@@ -340,6 +340,9 @@ class Contexto {
     if (onde) {
       const nao = equipe.recusa(onde.pdir);
       if (nao) throw new ErroMcp(nao, { codigo: 'sem_permissao' });
+    } else if (equipe.ehVisualizador()) {
+      /* 1.87.0: o apenas visualizador também não muda a biblioteca (Libs/) nem nada fora do projeto */
+      throw new ErroMcp(equipe.MSG_VISUALIZADOR, { codigo: 'sem_permissao', visualizador: true });
     }
     gravaAtomico(abs, texto);
     if (onde) equipe.registraHistorico(this, onde, antes, ferramenta);

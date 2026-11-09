@@ -22,6 +22,18 @@ A EQUIPE: Projects/<p>/equipe.json (viaja para o NexoBD com o projeto)
   Excluir o projeto (e apagar uma revisao dele) = admin || responsavel (1.86.0: a senha mestre saiu de vez). Projeto sem
   responsavel: so o admin (os outros assumem antes). Sem login (Hub antigo, Hub fora, ninguem logado): ninguem.
 
+A FUNCAO DO USUARIO (1.87.0; o admin escolhe no painel do Nexo Hub 2.27.0: Administrador / Usuario / Apenas visualizador).
+Pedido do dono (2026-11-09): "o administrador consegue designar funcoes aos usuarios [...] no painel do hub o
+administrador consegue designar para 'apenas visualizador'; esse visualizador nao consegue editar nada, mas consegue
+baixar, enviar pra jlc, tudo que nao for edicao de pcb nem esquema ela consegue fazer, igual quando os usuarios comuns
+nao tem acesso a interface".
+  O usuario do Hub traz {visualizador: bool, funcao: 'admin'|'usuario'|'visualizador'} (Hub antigo, sem o campo =
+  usuario comum). O VISUALIZADOR fica no somente leitura de quem nao foi convidado, mas em TODOS os projetos, inclusive
+  os em que ele e o responsavel ou colaborador: pode = False, sem gerir/assumir/apagar/aprovar. E alem do projeto, as
+  rotas que mudam a biblioteca, o catalogo ou criam/importam/renomeiam projetos (ROTAS_EDICAO) respondem 403
+  sem_permissao para ele (o before_request de registra_rotas). Baixar, exportar (Gerber, PDF, BOM, STEP), enviar a JLC,
+  sincronizar e o chat para consultar continuam livres -- para ele e para o comum nao convidado.
+
 O HISTORICO: Projects/<p>/Historico/<id do usuario>.jsonl, uma linha por modificacao:
   {id, quando, ate, usuario:{id, login, nome}|null, origem:"app"|"ia", arquivo, tipo, mudancas:[texto], gravacoes, ...}
   UM ARQUIVO POR PESSOA (e nao um historico.jsonl so, como pedia a especificacao): o espelho do NexoBD resolve um
@@ -32,7 +44,7 @@ O HISTORICO: Projects/<p>/Historico/<id do usuario>.jsonl, uma linha por modific
   dentro de JANELA s viram uma entrada so, com o diff do estado do inicio da janela ate o atual.
 
 Rotas:
-  GET  /api/sessao                       -> {ok, modo, usuario|null, hub}
+  GET  /api/sessao[?forcar=1]            -> {ok, modo, usuario|null, hub} (usuario.visualizador/funcao: 1.87.0)
   GET  /api/sessao/usuarios              -> {ok, usuarios:[...]} (a equipe ativa do Hub, para convidar)
   GET  /api/sessao/foto?id=&v=           -> a foto (pelo Hub; 404 sem foto)
   GET  /api/equipe?projeto=              -> {ok, equipe, permissao, usuario, modo}
@@ -66,6 +78,24 @@ TIPOS = {'schematic.js': 'esquema', 'changes.js': 'pcb', 'rules.js': 'regras', '
 MSG_LEGADO = 'Atualize o Nexo Hub para 2.26.0+: a aprovação e a equipe do projeto vêm do login dele'
 MSG_FORA = 'O Nexo Hub não respondeu: sem ele não dá para saber quem está logado'
 MSG_DESLOGADO = 'Entre no Nexo Hub: a aprovação e a equipe do projeto vêm do login'
+MSG_VISUALIZADOR = 'Seu usuário é apenas visualizador — peça ao administrador do Nexo Hub'
+FUNCOES = ('admin', 'usuario', 'visualizador')
+
+# 1.87.0: o que o visualizador nao faz fora do /api/save (POST). Fica de fora de proposito o que e saida ou consulta:
+# /api/gerber, /api/pdf, /api/render, /api/laser-open, /api/jlc/*, /api/lista/{previa,ensaio,envio,estado,config},
+# /api/bom/*, /api/sincronia/*, /api/nexo/placa (manda a placa ao NexoCAD), /api/chat/{enviar,conversa,anexo,estado},
+# /api/locais/desenhos (so desenha os simbolos/footprints), /api/mcp/*, /api/historico/registra (o Rust avisa depois de gravar; quem barra a gravacao e o proprio Rust),
+# /api/equipe/remover (sair da equipe; tirar os outros pede gerir, que o visualizador nao tem), /api/run e as
+# credenciais (/api/almox/config, /api/jlc/config).
+ROTAS_EDICAO = re.compile(r'^/api/(?:'
+                          r'save|fp3d|altium/abrir|board-novo|projeto/novo|catalogo/(?:registrar|editar)'
+                          r'|project/[^/]+/(?:delete|rename|grupo)|grupo/(?:renomear|nova-pcb)'
+                          r'|aprovacao|revisoes/(?:apagar|voltar)'
+                          r'|equipe/(?:convidar|responsavel|assumir)'
+                          r'|locais(?:/integrar|/[^/]+/(?:apagar|conferir))?|almox/sync|nexo/editar|lista/extras|chat/aplicar'
+                          r'|symbols/(?:save|save-almox|almox-aplicar|almox-excluir(?:/desfazer)?|almox-duplicados'
+                          r'|almox-fora|footprint|almox-footprint|lib|extract|mirror|almox-sync)'
+                          r')/?$')
 
 _trava = threading.Lock()
 _trava_hist = threading.Lock()
@@ -108,14 +138,32 @@ def _pede(caminho, cru=False):
         return 0, None, ''
 
 
+def funcao_de(u):
+    """'admin' | 'usuario' | 'visualizador' (1.87.0). O Hub 2.27.0 manda {funcao, visualizador}; o antigo, nenhum dos dois
+    (= usuario comum). Administrador nunca e visualizador."""
+    if not isinstance(u, dict):
+        return 'usuario'
+    if u.get('admin') or u.get('funcao') == 'admin':
+        return 'admin'
+    if u.get('visualizador') is True or u.get('funcao') == 'visualizador':
+        return 'visualizador'
+    return 'usuario'
+
+
+def eh_visualizador(u):
+    return funcao_de(u) == 'visualizador' if isinstance(u, dict) and u.get('id') else False
+
+
 def publico(u):
     """o usuario como os programas usam (sem e-mail nem nada que nao precise)"""
     if not isinstance(u, dict) or not u.get('id'):
         return None
     foto = u.get('foto') if isinstance(u.get('foto'), dict) else None
     nome = ' '.join(str(u.get('nome') or u.get('login') or '').split())
+    f = funcao_de(u)
     return {'id': str(u['id']), 'login': str(u.get('login') or ''), 'nome': nome,
-            'admin': bool(u.get('admin')), 'aprovador': bool(u.get('aprovador')),
+            'admin': f == 'admin', 'aprovador': bool(u.get('aprovador')) and f != 'visualizador',
+            'visualizador': f == 'visualizador', 'funcao': f,
             'iniciais': u.get('iniciais') or ''.join(p[0] for p in nome.split()[:2]).upper(),
             'foto': (foto.get('sha256') or '')[:12] if foto else None}
 
@@ -236,9 +284,13 @@ def permissao(pdir, s=None, eq=None):
            'trocarResponsavel': admin,
            'assumir': bool(u) and (not resp or (admin and resp['id'] != eu)),
            'apagar': admin or papel == 'responsavel',
-           'sair': papel == 'colaborador'}
+           'sair': papel == 'colaborador', 'visualizador': False}
     if papel == 'leitura':
         out['motivo'] = mensagem(resp)
+    # 1.87.0: o visualizador fica no somente leitura em todo projeto, mesmo no seu (o papel fica, para a tela mostrar)
+    if modo == 'login' and eh_visualizador(u):
+        out.update(pode=False, gerir=False, trocarResponsavel=False, assumir=False, apagar=False, visualizador=True,
+                   motivo=MSG_VISUALIZADOR)
     if not out['apagar']:
         out['motivoApagar'] = mensagem_apagar(modo, u, resp)
         out['motivoApagarRevisao'] = mensagem_apagar(modo, u, resp, revisao=True)
@@ -256,6 +308,8 @@ def mensagem_apagar(modo, u, resp, revisao=False):
         return MSG_FORA + ': só o administrador ou o responsável pelo projeto ' + faz
     if not u:
         return 'Entre no Nexo Hub: só o administrador ou o responsável pelo projeto ' + faz
+    if eh_visualizador(u):
+        return MSG_VISUALIZADOR
     if not resp:
         return ('Este projeto não tem responsável: só o administrador %s. '
                 'Assuma o projeto (Arquivo › Assumir projeto…) para poder %s' % (faz, fazer))
@@ -284,7 +338,23 @@ def recusa_gravar(pdir):
     p = permissao(pdir)
     if p['pode']:
         return None
-    return {'ok': False, 'codigo': 'sem_permissao', 'error': p['motivo'], 'responsavel': p['responsavel']}
+    return {'ok': False, 'codigo': 'sem_permissao', 'error': p['motivo'], 'responsavel': p['responsavel'],
+            'visualizador': p['visualizador']}
+
+
+def recusa_visualizador(s=None):
+    """None = quem esta logado nao e visualizador; senao o corpo da resposta 403 (1.87.0)"""
+    s = s or sessao()
+    if s.get('modo') == 'login' and eh_visualizador(s.get('usuario')):
+        return {'ok': False, 'codigo': 'sem_permissao', 'error': MSG_VISUALIZADOR, 'visualizador': True}
+    return None
+
+
+def recusa_rota(metodo, caminho, s=None):
+    """o before_request: None = segue; senao o corpo 403 (so POST de ROTAS_EDICAO, so para o visualizador)"""
+    if metodo != 'POST' or not ROTAS_EDICAO.match(caminho or ''):
+        return None
+    return recusa_visualizador(s)
 
 
 # ─────────────────────────── o que mudou: esquema ───────────────────────────
@@ -778,6 +848,14 @@ def registra_rotas(app, root, h=None):
     h = h or {}
     pdir_raiz = os.path.join(root, 'Projects')
 
+    # 1.87.0: o visualizador nao muda nada (projeto, biblioteca, catalogo), venha o pedido da tela, do Rust (que repassa
+    # o que nao e dele) ou de quem for
+    @app.before_request
+    def _barra_visualizador():
+        nao = recusa_rota(request.method, request.path)
+        if nao:
+            return nao, 403
+
     def pasta(nome):
         nome = str(nome or '')
         if not nome or nome != os.path.basename(nome) or nome in ('.', '..') or nome.startswith('.'):
@@ -805,7 +883,8 @@ def registra_rotas(app, root, h=None):
 
     @app.route('/api/sessao')
     def api_sessao():
-        s = sessao()
+        # ?forcar=1: a pagina ouviu do Hub que o login (ou a funcao) mudou e quer o de agora, sem o cache de CACHE s
+        s = sessao(forcar=request.args.get('forcar') == '1')
         return {'ok': True, 'modo': s['modo'], 'usuario': s['usuario'], 'hub': conexao()}
 
     @app.route('/api/sessao/usuarios')
@@ -847,7 +926,7 @@ def registra_rotas(app, root, h=None):
             if os.path.isdir(d) and not n.startswith('.'):
                 p = permissao(d, s)
                 out[n] = {'papel': p['papel'], 'pode': p['pode'], 'responsavel': p['responsavel'],
-                          'apagar': p['apagar'], 'motivoApagar': p.get('motivoApagar', '')}
+                          'apagar': p['apagar'], 'motivoApagar': p.get('motivoApagar', ''), 'visualizador': p['visualizador']}
         return {'ok': True, 'usuario': s['usuario'], 'modo': s['modo'], 'projetos': out}
 
     @app.route('/api/equipe/convidar', methods=['POST'])
@@ -870,6 +949,9 @@ def registra_rotas(app, root, h=None):
             alvo = next((u for u in lst if u['id'] == uid), None)
             if not alvo:
                 return {'ok': False, 'error': e2 or 'esse usuário não existe (ou está inativo) no Nexo Hub'}, 404
+            if alvo.get('visualizador'):
+                return {'ok': False, 'codigo': 'visualizador',
+                        'error': '%s é apenas visualizador no Nexo Hub: não entra na equipe (o administrador muda a função dele no Hub)' % alvo['nome']}, 409
             if eq['responsavel'] and eq['responsavel']['id'] == uid:
                 return {'ok': False, 'error': '%s já é o responsável pelo projeto' % alvo['nome']}, 409
             if any(c['id'] == uid for c in eq['colaboradores']):
@@ -929,6 +1011,9 @@ def registra_rotas(app, root, h=None):
         alvo = next((u for u in lst if u['id'] == uid), None)
         if not alvo:
             return {'ok': False, 'error': e2 or 'esse usuário não existe (ou está inativo) no Nexo Hub'}, 404
+        if alvo.get('visualizador'):
+            return {'ok': False, 'codigo': 'visualizador',
+                    'error': '%s é apenas visualizador no Nexo Hub: não pode ser o responsável' % alvo['nome']}, 409
         with _trava:
             eq = le(d)
             antigo = _vira_responsavel(d, s, alvo, eq)

@@ -4,6 +4,52 @@ Versões do app desktop (tags `vX.Y.Z` deste repositório). Cada versão carrega
 commit em que foi gerada; o commit aparece em **Ajuda › Sobre o NexoEletric**. Até a 1.8.1 o
 app se chamava EletricHUB.
 
+## 1.87.0 — 2026-11-09
+
+**A função do usuário vem do Nexo Hub: Administrador, Usuário ou Apenas visualizador. O visualizador vê, baixa, exporta
+e envia à JLC, mas não edita nada.** (Para o administrador escolher a função no painel é preciso o **Nexo Hub
+2.27.0**; com o Hub antigo todo mundo segue como usuário comum.)
+- **Usuário comum** (como já era desde a 1.84.0, conferido de novo): entra e edita os projetos de que participa — o
+  que ele criou (é o responsável) e aqueles para que foi convidado como colaborador —, apaga os próprios, e projeto de
+  outra pessoa só edita se for convidado. Quem cria vira o responsável também ao **importar do Altium** e ao criar uma
+  **PCB nova num projeto multi-PCB** ou uma placa nova numa pasta nova (antes só o Novo projeto e o MCP faziam isso). E
+  renomear ou mover de grupo o projeto de outra pessoa agora pede o convite, como salvar.
+- **Apenas visualizador:** fica no mesmo somente leitura do comum que não foi convidado, mas em **todos** os projetos,
+  inclusive os em que é o responsável ou colaborador.
+  - **Não pode:** salvar esquema, PCB, regras ou sinalizadores; mexer na biblioteca (símbolos, footprints, modelos 3D,
+    componentes locais, Almox, templates de folha, substituições); Definir projeto/catálogo; criar, importar,
+    renomear, mover, excluir ou assumir projeto; aprovar; apagar ou voltar revisão; convidar ou ser convidado/
+    responsável (quem já estava numa equipe continua aparecendo nela, mas não edita); mexer nos itens fora do esquema da
+    lista do Odoo.
+  - **Pode:** abrir e ver tudo, navegar, medir, 3D, Histórico (revisões e modificações), baixar e exportar (Gerber,
+    PDF, BOM, STEP, pick-and-place, laser), **Enviar pra JLC**, mandar a lista ao Odoo, mandar a placa ao NexoCAD,
+    sincronizar o projeto desatualizado e usar o chat **para consultar** (o turno roda em "Só planejar" e a IA não grava
+    nada por ele).
+  - Na tela: o selo **Visualizador** ao lado do crachá do Nexo Hub, a faixa "Somente leitura — seu usuário é apenas
+    visualizador…" na vista Esquema/PCB, o cadeado na árvore (com o motivo), o Salvar desligado, e os itens Novo
+    projeto, Abrir do Altium, Renomear, Mover, Excluir e Assumir desligados com o motivo "Seu usuário é apenas
+    visualizador — peça ao administrador do Nexo Hub".
+  - No servidor (o que vale de verdade): o `/api/save` do Python e o do Rust (projeto e `Libs/`) e todas as rotas de
+    edição (`tools/rotas/equipe.py » ROTAS_EDICAO`, um `before_request`) respondem 403 `sem_permissao` com o motivo; as
+    ferramentas do MCP que não são de leitura nem de saída recusam antes de rodar, e nenhuma gravação da IA passa.
+- **A troca de função vale na hora, sem reiniciar:** o Nexo Hub avisa os programas quando a lista de usuários muda (o
+  mesmo evento do login), e o NexoEletric relê quem está logado (`/api/sessao?forcar=1`): o selo, a faixa e o Salvar
+  mudam em segundos. Sem o evento, a árvore e a vista conferem sozinhas de 8 em 8 s, e o servidor nunca usa uma
+  sessão com mais de 2 s.
+- **O somente leitura não barra saída:** conferido um por um — Gerber (Salvar no projeto e Baixar), PDF, render,
+  BOM, laser, Enviar pra JLC, lista do Odoo, NexoCAD e a sincronia não passam pelo `/api/save` nem pela checagem da
+  equipe, para o visualizador e para o comum não convidado. O que mudou para o comum não convidado: o chat no projeto
+  de outra equipe também passa a ser só consulta (antes o modo de edição do chat gravava direto na pasta), e o
+  "Aplicar" de uma proposta do chat recusa.
+- Por dentro: `tools/rotas/equipe.py` (`funcao_de`, `eh_visualizador`, `publico` com `visualizador`/`funcao`,
+  `permissao.visualizador`, `recusa_visualizador`, `recusa_rota`, `ROTAS_EDICAO`, `/api/sessao?forcar=1`; convidar ou
+  tornar responsável um visualizador = 409), `hubserver.py` (responsável do projeto importado e da PCB nova;
+  renomear/mover pela equipe), `tools/rotas/board_novo.py`, `tools/chat/chatserver.py` (`_recusa_edicao`),
+  `rust/crates/nexo-hub/src/equipe.rs` e `statics.rs` (`Modo::Login.visualizador`, `recusa_visualizador`),
+  `mcp/lib/equipe.js` (`recusaFerramenta`, `SAIDAS`), `mcp/lib/contexto.js`, `mcp/lib/protocolo.js`, `hub-equipe.js`
+  (selo, faixa, `visualizador()`, `barraVisualizador()`), `hub-shell.js`, `hub-menubar.js`, `hub-aprovacao.js` e
+  `hub.html` (Abrir do Altium).
+
 ## 1.86.0 — 2026-11-09
 
 **A senha mestre saiu de vez: só o administrador ou o responsável exclui. E o projeto sem código mostra "PROJETO NÃO

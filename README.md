@@ -283,6 +283,13 @@ Casca única com:
     na 1.86.0. A pasta não é apagada: vai inteira para `Trash\<nome>-<data>` no mesmo
     workspace, some do hub na hora e volta arrastando de volta para `Projects\`. Sem
     servidor o botão fica desligado.
+    **Apenas visualizador** (1.87.0; o administrador escolhe a função no painel do Nexo Hub
+    2.27.0: Administrador / Usuário / Apenas visualizador): o usuário fica no somente leitura
+    em todo projeto, mesmo no seu — não salva esquema, PCB, regras, biblioteca nem catálogo,
+    não cria/importa/renomeia/exclui/assume projeto, não aprova e não entra em equipe; vê,
+    mede, abre o 3D e o histórico, baixa e exporta (Gerber, PDF, BOM, STEP), envia à JLC,
+    sincroniza e usa o chat só para consultar. O servidor barra (`tools/rotas/equipe.py` »
+    `ROTAS_EDICAO`, 403 `sem_permissao`), o `/api/save` do Rust e o MCP também.
   - **Layout** — quatro comboboxes. **Cor**: Escuro · Claro · Automático (automático
     segue o sistema e muda junto se o Windows mudar com o hub aberto). **Tema**:
     Grafite (o de sempre) · Papel · Altium · Placa. **Linguagem**: Português ou English.
